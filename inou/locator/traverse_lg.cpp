@@ -1538,18 +1538,18 @@ float Traverse_lg::get_matching_weight(const absl::flat_hash_set<Node_pin::Compa
 
   /* 5 points for a full match for this set part
      5 for ins and 5 for outs will make a 10 for complete IO match.*/
-  float mismatches = smallest.size() - matches ;
-  float matching_weight = 5 * (float((2 * matches) - mismatches) / float(synth_set.size() + orig_set.size()));
-  #ifdef FULL_RUN_FOR_EVAL_TESTING
-    fmt::print("{}, {}, ", matches, mismatches);
-  #endif
-  return matching_weight;
-  // float mismatches = synth_set.size() - matches ;
-  // if (mismatches<=0.0) mismatches=1;
-  // #ifdef BASIC_DBG
-  // fmt::print("\t\t\t\t (synth_set_size={}, orig_set_size={}) matches:{}, mismatches:{},returning:{}\n",  synth_set.size(), orig_set.size(),matches, mismatches,(matches/mismatches));
+  // float mismatches = smallest.size() - matches ;
+  // float matching_weight = 5 * (float((2 * matches) - mismatches) / float(synth_set.size() + orig_set.size()));
+  // #ifdef FULL_RUN_FOR_EVAL_TESTING
+  //   fmt::print("{}, {}, ", matches, mismatches);
   // #endif
-  // return (matches/mismatches);
+  // return matching_weight;
+  float mismatches = synth_set.size() - matches ;
+  if (mismatches<=0.0) mismatches=1;
+  #ifdef BASIC_DBG
+  fmt::print("\t\t\t\t (synth_set_size={}, orig_set_size={}) matches:{}, mismatches:{},returning:{}\n",  synth_set.size(), orig_set.size(),matches, mismatches,5*(matches/mismatches));
+  #endif
+  return 5*(matches/mismatches);
 }
 
 Traverse_lg::inverted_map_arr Traverse_lg::convert_set_to_sorted_array(const absl::flat_hash_set<Node_pin::Compact_flat>& np_set) const{
@@ -2081,7 +2081,7 @@ bool Traverse_lg::complete_io_match(bool flop_only) {
     }
   }
 
-  /*----------what if out completely match but in partially match?---------------------*/
+  /*----------what if OUT completely match but IN partially match?---------------------*/
   Traverse_lg::inverted_SetMap_of_sets out_big_set_Mos_orig;
   create_inverted_map(out_map_of_sets_orig, out_big_set_Mos_orig);
   for (auto it = out_map_of_sets_synth.begin(); it != out_map_of_sets_synth.end();) {
