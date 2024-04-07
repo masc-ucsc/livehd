@@ -64,18 +64,8 @@ void Traverse_lg::travers(Eprp_var& var) {
   p.print_total_named_dpins(orig_lg, true);
   
   p.start_time_of_algo = std::chrono::system_clock::now();
-  auto start = std::chrono::system_clock::now();
-  p.make_io_maps_boundary_only(orig_lg, p.inp_map_of_sets_orig, p.out_map_of_sets_orig, true);  // orig-boundary only
-  fmt::print("\n make_io_maps_boundary_only - orig done.\n");
-  auto end = std::chrono::system_clock::now();
-  std::chrono::duration<double> elapsed_seconds = end-start;
-  fmt::print("ELAPSED_SEC: {}s, FOR_FUNC: make_io_maps_boundary_only-originalLG\n", elapsed_seconds.count());
-#ifdef BASIC_DBG
-  fmt::print("1. p.make_io_maps_boundary_only(orig_lg, p.inp_map_of_sets_orig, p.out_map_of_sets_orig)//orig-boundary only\n");
-  p.print_everything();
-#endif
 
-  start = std::chrono::system_clock::now();
+  auto start = std::chrono::system_clock::now();
   p.netpin_to_origpin_default_match(orig_lg, synth_lg);  // know all the inputs and outputs match by name (known points.)
   fmt::print("\n netpin_to_origpin_default_match done.\n");
 #ifdef BASIC_DBG
@@ -83,15 +73,19 @@ void Traverse_lg::travers(Eprp_var& var) {
       "2. p.netpin_to_origpin_default_match(orig_lg, synth_lg);//know all the inputs and outputs match by name (known points.)\n");
   p.print_everything();
 #endif
-  end = std::chrono::system_clock::now();
-  elapsed_seconds = end-start;
+  auto end = std::chrono::system_clock::now();
+  std::chrono::duration<double> elapsed_seconds = end-start;
   fmt::print("ELAPSED_SEC: {}s, FOR_FUNC: netpin_to_origpin_default_match\n", elapsed_seconds.count());
 
   start = std::chrono::system_clock::now();
+  p.make_io_maps_boundary_only(orig_lg, p.inp_map_of_sets_orig, p.out_map_of_sets_orig, true);  // orig-boundary only
+  fmt::print("\n make_io_maps_boundary_only - orig done.\n");
+#ifdef BASIC_DBG
+  fmt::print("1. p.make_io_maps_boundary_only(orig_lg, p.inp_map_of_sets_orig, p.out_map_of_sets_orig)//orig-boundary only\n");
+  p.print_everything();
+#endif
+
   p.make_io_maps_boundary_only(synth_lg, p.inp_map_of_sets_synth, p.out_map_of_sets_synth, false);  // synth-boundary only + matching
-  end = std::chrono::system_clock::now();
-  elapsed_seconds = end-start;
-  fmt::print("ELAPSED_SEC: {}s, FOR_FUNC: make_io_maps_boundary_only-synth\n", elapsed_seconds.count());
   fmt::print("\n make_io_maps_boundary_only - synth done.\n");
 #ifdef BASIC_DBG
   fmt::print(
@@ -100,12 +94,11 @@ void Traverse_lg::travers(Eprp_var& var) {
   p.print_everything();
 #endif
 #ifndef FULL_RUN_FOR_EVAL
-  start = std::chrono::system_clock::now();
   p.remove_lib_loc_from_orig_lg(orig_lg);
+#endif
   end = std::chrono::system_clock::now();
   elapsed_seconds = end-start;
-  fmt::print("ELAPSED_SEC: {}s, FOR_FUNC: remove_lib_loc_from_orig_lg(orig_lg)\n", elapsed_seconds.count());
-#endif
+  fmt::print("ELAPSED_SEC: {}s, FOR_FUNC: complete_io_match-MakeiomapsBoundOnly\n", elapsed_seconds.count());
 
   p.do_travers(orig_lg, synth_lg, true);  // original LG (pre-syn LG)
   fmt::print("\n do_travers - orig done.\n");
@@ -250,9 +243,6 @@ void Traverse_lg::do_travers(Lgraph *orig_lg, Lgraph *synth_lg, bool is_orig_lg)
     auto start = std::chrono::system_clock::now();
     make_io_maps(synth_lg, inp_map_of_sets_synth, out_map_of_sets_synth, is_orig_lg);  // has in-place resolution as well.
     fmt::print("\n make_io_maps - synth done.\n");
-    auto end = std::chrono::system_clock::now();
-    std::chrono::duration<double> elapsed_seconds = end-start;
-    fmt::print("ELAPSED_SEC: {}s, FOR_FUNC: make_io_maps-synthLG\n", elapsed_seconds.count());
     #ifdef BASIC_DBG
     fmt::print("7.0. Printing before 1st set of resolution -- synth");
     print_everything();
@@ -286,14 +276,13 @@ void Traverse_lg::do_travers(Lgraph *orig_lg, Lgraph *synth_lg, bool is_orig_lg)
     */
     bool change_done=false;
     if (!crit_node_set.empty() && !flop_set_synth.empty()){
-      start = std::chrono::system_clock::now();
       //fmt::print("Before complete_io_match(flop only)"); print_SynthSet_sizes();
       change_done = complete_io_match(true);  // for flop only as matching flop first
       fmt::print("\n complete_io_match - synth - flop only (outside while) done.\n");
-      end = std::chrono::system_clock::now();
-      elapsed_seconds = end-start;
-      fmt::print("ELAPSED_SEC: {}s, FOR_FUNC: complete_io_match-flopsOnly-1stTime\n", elapsed_seconds.count());
     }
+    auto end = std::chrono::system_clock::now();
+    std::chrono::duration<double> elapsed_seconds = end-start;
+    fmt::print("ELAPSED_SEC: {}s, FOR_FUNC: complete_io_match-flopsOnly-1stTime\n", elapsed_seconds.count());
     if (crit_node_set.empty()) {
       /*all required matching done*/
       report_critical_matches_with_color();
@@ -309,17 +298,11 @@ void Traverse_lg::do_travers(Lgraph *orig_lg, Lgraph *synth_lg, bool is_orig_lg)
       make_io_maps(orig_lg, inp_map_of_sets_orig, out_map_of_sets_orig, true);
       /*resolution_of_synth_map_of_sets(inp_map_of_sets_synth); //if make_io_maps takes way less time, why not replace resolution_of_synth_map_of_sets with make_io_maps!
       resolution_of_synth_map_of_sets(out_map_of_sets_synth);*/
-      end = std::chrono::system_clock::now();
-      elapsed_seconds = end-start;
-      fmt::print("ELAPSED_SEC: {}s, FOR_FUNC: resolution_of_synth_map_of_sets-inWhile-flopOnly\n", elapsed_seconds.count());
 
-      start = std::chrono::system_clock::now();
-      //fmt::print("Before complete_io_match(flop only)"); print_SynthSet_sizes();
       change_done = complete_io_match(true);  // alters crit_node_set too
       end = std::chrono::system_clock::now();
       elapsed_seconds = end-start;
       fmt::print("ELAPSED_SEC: {}s, FOR_FUNC: complete_io_match-inWhile-flopOnly\n", elapsed_seconds.count());
-      fmt::print("\n complete_io_match - synth - flop only (inside while) done.\n");
 
 #ifdef BASIC_DBG
       fmt::print("Change done = {}\n", change_done);
@@ -330,24 +313,23 @@ void Traverse_lg::do_travers(Lgraph *orig_lg, Lgraph *synth_lg, bool is_orig_lg)
     print_everything();
 #endif
 
+    start = std::chrono::system_clock::now();
     if (!flop_set_synth.empty()) {
       if(change_done){
         make_io_maps(synth_lg, inp_map_of_sets_synth, out_map_of_sets_synth, is_orig_lg);
         make_io_maps(orig_lg, inp_map_of_sets_orig, out_map_of_sets_orig, true);
       }
-      start = std::chrono::system_clock::now();
       weighted_match_LoopLastOnly();  // crit_entries_only=f, loopLast_only=t
       // set_theory_match_loopLast_only();
-      end = std::chrono::system_clock::now();
-      elapsed_seconds = end-start;
-      fmt::print("ELAPSED_SEC: {}s, FOR_FUNC: weighted_match_LoopLastOnly\n", elapsed_seconds.count());
-      fmt::print("\n weighted_match_LoopLastOnly - synth done.\n");
 #ifdef BASIC_DBG
       fmt::print("9. Printing after flop weighted_match_LoopLastOnly matching!");
       print_everything();
 #endif
       //remove_resolved_from_orig_MoS();
     }
+    end = std::chrono::system_clock::now();
+    elapsed_seconds = end-start;
+    fmt::print("ELAPSED_SEC: {}s, FOR_FUNC: weighted_match_LoopLastOnly\n", elapsed_seconds.count());
 
     I(flop_set_synth.empty(), "\n\n\tCHECK: flops not resolved. Cannot move on to further matching\n\n");
     if(!flop_set_synth.empty()) {
@@ -366,19 +348,12 @@ void Traverse_lg::do_travers(Lgraph *orig_lg, Lgraph *synth_lg, bool is_orig_lg)
     make_io_maps(orig_lg, inp_map_of_sets_orig, out_map_of_sets_orig, true);
     /*resolution_of_synth_map_of_sets(inp_map_of_sets_synth);//if make_io_maps takes way less time, why not replace resolution_of_synth_map_of_sets with make_io_maps!
     resolution_of_synth_map_of_sets(out_map_of_sets_synth);*/
-    end = std::chrono::system_clock::now();
-    elapsed_seconds = end-start;
-    fmt::print("ELAPSED_SEC: {}s, FOR_FUNC: resolution_of_synth_map_of_sets-inLoopForCombo\n", elapsed_seconds.count());
 
     /* Since all flops are matched now, remove these from orig_mos*/
-    start = std::chrono::system_clock::now();
     for (const auto& origpin_cf: flop_set_orig) {
       inp_map_of_sets_orig.erase(origpin_cf);
       out_map_of_sets_orig.erase(origpin_cf);
     }
-    end = std::chrono::system_clock::now();
-    elapsed_seconds = end-start;
-    fmt::print("ELAPSED_SEC: {}s, FOR_FUNC: Removing all flops from origMoS\n", elapsed_seconds.count());
     #ifdef BASIC_DBG
     fmt::print("\n------after removing flops from inp_map_of_sets_orig and out_map_of_sets_orig-------------\n");
     print_everything();
@@ -387,7 +362,6 @@ void Traverse_lg::do_travers(Lgraph *orig_lg, Lgraph *synth_lg, bool is_orig_lg)
     //fmt::print("\n");
     #endif
 
-    start = std::chrono::system_clock::now();
     //fmt::print("Before complete_io_match(crit comb only)"); print_SynthSet_sizes();
     change_done = complete_io_match(false);  // alters crit_node_set too
     end = std::chrono::system_clock::now();
@@ -401,6 +375,8 @@ void Traverse_lg::do_travers(Lgraph *orig_lg, Lgraph *synth_lg, bool is_orig_lg)
     print_everything();
     #endif
 
+    #ifndef FULL_RUN_FOR_EVAL
+    start = std::chrono::system_clock::now();
     if(change_done) {
       make_io_maps(synth_lg, inp_map_of_sets_synth, out_map_of_sets_synth, is_orig_lg);
       make_io_maps(orig_lg, inp_map_of_sets_orig, out_map_of_sets_orig, true);
@@ -410,19 +386,16 @@ void Traverse_lg::do_travers(Lgraph *orig_lg, Lgraph *synth_lg, bool is_orig_lg)
       }
     }
 
-    #ifndef FULL_RUN_FOR_EVAL
     if (!crit_node_set.empty()) {  // exact combinational matching could not resolve all crit nodes
       // surrounding cell loc-similarity matching
-      start = std::chrono::system_clock::now();
       change_done = surrounding_cell_match();
-      end = std::chrono::system_clock::now();
-      elapsed_seconds = end-start;
-      fmt::print("ELAPSED_SEC: {}s, FOR_FUNC: surrounding_cell_match\n", elapsed_seconds.count());
-      fmt::print("\n surrounding_cell_match - synth done.\n");
       #ifdef BASIC_DBG
       fmt::print("Change done = {}\n", change_done);
       #endif
     }
+    end = std::chrono::system_clock::now();
+    elapsed_seconds = end-start;
+    fmt::print("ELAPSED_SEC: {}s, FOR_FUNC: surrounding_cell_match\n", elapsed_seconds.count());
     #endif
 #ifdef BASIC_DBG
     fmt::print("11. Printing after surrounding_cell matching!");
