@@ -335,6 +335,7 @@ void Traverse_lg::do_travers(Lgraph *orig_lg, Lgraph *synth_lg, bool is_orig_lg)
     if(!flop_set_synth.empty()) {
       fmt::print("\nBEWARE: {} FLOPS NOT RESOLVED? \n\n", flop_set_synth.size());
       print_set(flop_set_synth);
+      exit(1);
     }
     if (crit_node_set.empty()) {
       /*all required matching done*/
@@ -3060,9 +3061,9 @@ Traverse_lg::map_of_sets Traverse_lg::convert_io_MoS_to_node_MoS_LLonly(const ma
     #ifdef BASIC_DBG
     fmt::print("### working on node: "); get_node_pin_compact_flat_details(node_key);
     #endif
+    #ifndef FULL_RUN_FOR_EVAL
     if (node.is_type_loop_last() && (!node.is_type_sub()) ) {  // flop node should be matched with flop node only! else datatype mismatch!
       // we need flop nodes only in this case
-      // #ifndef FULL_RUN_FOR_EVAL
       if (node.has_loc()) {// also, nodes with valid LoC should be used for matching
         for (const auto& io_val : io_vals_set) {
 	  #ifdef BASIC_DBG
@@ -3074,12 +3075,18 @@ Traverse_lg::map_of_sets Traverse_lg::convert_io_MoS_to_node_MoS_LLonly(const ma
       #ifdef BASIC_DBG
       else {fmt::print("\t\t\t not processing this node (no loc in node)!\n");}
       #endif
-      // #else
-      // for (const auto& io_val: io_vals_set) {
-      //   node_map_of_set_LoopLastOnly[io_val].insert(node_key);
-      // }
-      // #endif
     } 
+    #else
+    if (node.is_type_loop_last() && node.has_loc() ) {  // flop node should be matched with flop node only! else datatype mismatch!
+      // we need flop nodes only in this case, also, nodes with valid LoC should be used for matching
+        for (const auto& io_val : io_vals_set) {
+	  #ifdef BASIC_DBG
+	  fmt::print("\t\t\t inserting node against: "); get_node_pin_compact_flat_details(io_val);
+	  #endif
+          node_map_of_set_LoopLastOnly[io_val].insert(node_key);
+        }
+    } 
+    #endif
     #ifdef BASIC_DBG
     else {
       fmt::print("\t\t\t not processing this node (not LL)!\n");
@@ -3088,7 +3095,7 @@ Traverse_lg::map_of_sets Traverse_lg::convert_io_MoS_to_node_MoS_LLonly(const ma
   }
 
 #ifdef BASIC_DBG
-  fmt::print("\n Printing node_map_of_set_LoopLastOnly \n");
+  fmt::print("\n Printing node_map_of_set_LoopLastOnly of size {} \n",node_map_of_set_LoopLastOnly.size());
   print_io_map(node_map_of_set_LoopLastOnly);
 	fmt::print("\n\n");
 #endif
