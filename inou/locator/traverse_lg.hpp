@@ -109,6 +109,7 @@ private:
   void create_inverted_map(map_of_sets& mapOfSets, inverted_ArrMap_of_sets& small_set_inv_map, inverted_SetMap_of_sets& big_set_map);
   void create_inverted_map(map_of_sets& mapOfSets, inverted_SetMap_of_sets& big_set_map);
   bool complete_io_match(bool flop_only);//returns true if any matching took place
+  bool complete_io_match_fullOnly();//returns true if any matching took place
   bool surrounding_cell_match();//returns true if any matching took place
   bool surrounding_cell_match_final();//matches any unmatched cell with resolved surrounding cells. returns T if unmatched still left.
   std::vector<Node_pin::Compact_flat> get_surrounding_pins(Node &node, Node_pin::Compact_flat main_node_dpin = Node_pin::Compact_flat(0,0,0)) const;
