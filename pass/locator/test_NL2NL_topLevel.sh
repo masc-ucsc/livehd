@@ -11,8 +11,8 @@ cwd=$(pwd)
 SRCLOCATION=${cwd}/pass/locator/tests
 
 # IMPORTANT: check these values before every run:
-DESTLOCATION=${SRCLOCATION}/dummy_WoFlopChange_28march2024
-COMB_ONLY=true
+DESTLOCATION=${SRCLOCATION}/dummy_test
+COMB_ONLY=false
 NOISE_PERCENTAGE=(0 20 40 60 80 90 95 100)
 
 export LIVEHD_THREADS=1
@@ -25,32 +25,32 @@ fi
 echo "import matplotlib.pyplot as plt" > ${DESTLOCATION}/nl2nl_acc_flop_plot_data.py
 echo "import matplotlib.pyplot as plt" > ${DESTLOCATION}/nl2nl_time_flop_plot_data.py
 
-for FILENAME in RocketTile_yosys_DT2 RocketTile_netlist_wired  #RocketTile_yosys_DT2 SingleCycleCPU_yosysFlat PipelinedCPU_yosysFlat_DT30p MaxPeriodFibonacciLFSR PipelinedCPU_netlist_wired SingleCycleCPU_netlist_wired RocketTile_netlist_wired RocketTile_netlist_p1_again
+for FILENAME in RocketTile_yosys_DT2 #RocketTile_yosys_DT2 SingleCycleCPU_yosysFlat PipelinedCPU_yosysFlat_DT30p MaxPeriodFibonacciLFSR PipelinedCPU_netlist_wired SingleCycleCPU_netlist_wired RocketTile_netlist_wired RocketTile_netlist_p1_again
 do
   if [ ${FILENAME} == "MaxPeriodFibonacciLFSR" ]
     then 
     rm -r lgdb/
     ./bazel-bin/main/lgshell "inou.liberty files:sky130.lib"
     MODULE_NAME=MaxPeriodFibonacciLFSR    
-    COMPLR=yosys
+    COMPLR=Yosys
   elif [ ${FILENAME} == "SingleCycleCPU_yosysFlat" ]
     then
     rm -r lgdb/ 
     ./bazel-bin/main/lgshell "inou.liberty files:sky130_fd_sc_hd__ff_100C_1v95.lib"
     MODULE_NAME=SingleCycleCPU 
-    COMPLR=yosys
+    COMPLR=Yosys
   elif [ ${FILENAME} == "PipelinedCPU_yosysFlat_DT30p" ]
     then
     rm -r lgdb/ 
     ./bazel-bin/main/lgshell "inou.liberty files:sky130_fd_sc_hd__ff_100C_1v95.lib"
     MODULE_NAME=PipelinedCPU  
-    COMPLR=yosys
+    COMPLR=Yosys
   elif [ ${FILENAME} == "RocketTile_yosys_DT2" ]
     then
     rm -r lgdb/
     ./bazel-bin/main/lgshell "inou.liberty files:sky130_fd_sc_hd__ff_100C_1v95.lib"
     MODULE_NAME=RocketTile
-    COMPLR=yosys
+    COMPLR=Yosys
   elif [ ${FILENAME} == "SingleCycleCPU_netlist_wired" ]
     then
     rm -r lgdb/ 
@@ -59,7 +59,7 @@ do
     inou.liberty files:saed32rvt_ff1p16vn40c.lib
     inou.liberty files:gtech_lib.lib"
     MODULE_NAME=SingleCycleCPU 
-    COMPLR=dc
+    COMPLR=DC
   elif [ ${FILENAME} == "PipelinedCPU_netlist_wired" ]
     then
     rm -r lgdb/ 
@@ -68,7 +68,7 @@ do
     inou.liberty files:saed32rvt_ff1p16vn40c.lib
     inou.liberty files:gtech_lib.lib"
     MODULE_NAME=PipelinedCPU  
-    COMPLR=dc
+    COMPLR=DC
   elif [ ${FILENAME} == "RocketTile_netlist_wired" ]
     then
     rm -r lgdb/
@@ -77,7 +77,7 @@ do
     inou.liberty files:saed32rvt_ff1p16vn40c.lib
     inou.liberty files:gtech_lib.lib"
     MODULE_NAME=RocketTile
-    COMPLR=dc
+    COMPLR=DC
   elif [ ${FILENAME} == "RocketTile_netlist_p1_again" ]
     then
     rm -r lgdb/
@@ -86,7 +86,7 @@ do
     inou.liberty files:saed32rvt_ff1p16vn40c.lib
     inou.liberty files:gtech_lib.lib"
     MODULE_NAME=RocketTile
-    COMPLR=dcUnflatten
+    COMPLR=DChierarchical
   fi
 
   printf "\ny${MODULE_NAME}${COMPLR} = [" >> ${DESTLOCATION}/nl2nl_acc_flop_plot_data.py
@@ -231,10 +231,10 @@ done
 
 echo "plt.xlabel('Noise (%)')" >> ${DESTLOCATION}/nl2nl_acc_flop_plot_data.py
 echo "plt.ylabel(' Accuracy (%)')" >> ${DESTLOCATION}/nl2nl_acc_flop_plot_data.py
-echo "plt.title('Accuracy graph for netlist to netlist analysis. ')" >> ${DESTLOCATION}/nl2nl_acc_flop_plot_data.py
+#echo "plt.title('Accuracy graph for netlist to netlist analysis. ')" >> ${DESTLOCATION}/nl2nl_acc_flop_plot_data.py
 echo "plt.xticks(range(0, 101, 10))" >> ${DESTLOCATION}/nl2nl_acc_flop_plot_data.py
-#echo "plt.yticks(range(10, 101, 10))" >>  ${DESTLOCATION}/nl2nl_acc_flop_plot_data.py
-echo "plt.legend()" >> ${DESTLOCATION}/nl2nl_acc_flop_plot_data.py
+echo "plt.yticks(range(0, 101, 10))" >>  ${DESTLOCATION}/nl2nl_acc_flop_plot_data.py
+echo "plt.legend(bbox_to_anchor=(0, 0), loc='lower left')" >> ${DESTLOCATION}/nl2nl_acc_flop_plot_data.py
 echo "# function to show the plot" >> ${DESTLOCATION}/nl2nl_acc_flop_plot_data.py
 echo "plt.savefig(\"${DESTLOCATION}/nl2nl_acc_flop_plot_data.pdf\", format=\"pdf\", bbox_inches=\"tight\")" >> ${DESTLOCATION}/nl2nl_acc_flop_plot_data.py
 echo "plt.savefig(\"${DESTLOCATION}/nl2nl_acc_flop_plot_data.svg\", format=\"svg\", bbox_inches=\"tight\")" >> ${DESTLOCATION}/nl2nl_acc_flop_plot_data.py
@@ -242,9 +242,9 @@ echo "plt.show()" >> ${DESTLOCATION}/nl2nl_acc_flop_plot_data.py
 
 echo "plt.xlabel(' Noise (%)')" >> ${DESTLOCATION}/nl2nl_time_flop_plot_data.py
 echo "plt.ylabel('Time (s)')" >> ${DESTLOCATION}/nl2nl_time_flop_plot_data.py
-echo "plt.title('Performance graph for netlist to netlist analysis.')" >> ${DESTLOCATION}/nl2nl_time_flop_plot_data.py
+#echo "plt.title('Performance graph for netlist to netlist analysis.')" >> ${DESTLOCATION}/nl2nl_time_flop_plot_data.py
 echo "plt.xticks(range(0, 101, 10))" >> ${DESTLOCATION}/nl2nl_time_flop_plot_data.py
-#echo "plt.yticks(range(10, 101, 10))" >>  ${DESTLOCATION}/nl2nl_time_flop_plot_data.py
+echo "plt.yticks(range(0, 101, 10))" >>  ${DESTLOCATION}/nl2nl_time_flop_plot_data.py
 echo "plt.legend()" >> ${DESTLOCATION}/nl2nl_time_flop_plot_data.py
 echo "# function to show the plot" >> ${DESTLOCATION}/nl2nl_time_flop_plot_data.py
 echo "plt.savefig(\"${DESTLOCATION}/nl2nl_time_flop_plot_data.pdf\", format=\"pdf\", bbox_inches=\"tight\")" >> ${DESTLOCATION}/nl2nl_time_flop_plot_data.py
