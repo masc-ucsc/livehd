@@ -8,6 +8,7 @@
 #include <fstream>
 #include <iostream>
 #include <set>
+#include <string>
 
 #include "absl/strings/match.h"
 #include "graph_library.hpp"
@@ -1720,8 +1721,8 @@ void Lgraph::dump(bool hier) {
 
   absl::flat_hash_map<int, int> color_count;
 
- //for (auto node : forward(hier)) {
- for (auto node : fast(hier)) {
+  // for (auto node : forward(hier)) {
+  for (auto node : fast(hier)) {
     if (node.has_color()) {
       ++color_count[node.get_color()];
     }
@@ -1763,7 +1764,6 @@ void Lgraph::dump(bool hier) {
   for (const auto &cit : color_count) {
     fmt::print("color:{} count:{}\n", cit.first, cit.second);
   }
-
 }
 
 void Lgraph::dump_down_nodes() {

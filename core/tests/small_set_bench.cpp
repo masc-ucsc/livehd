@@ -1,16 +1,15 @@
 
-#include <array>
-#include <vector>
 #include <algorithm>
+#include <array>
 #include <random>
+#include <vector>
 
-#include "benchmark/benchmark.h"
 #include "absl/container/flat_hash_set.h"
-#include "hash_set2.hpp" // emhash2
-#include "hash_set3.hpp" // emhash7
-#include "hash_set4.hpp" // emhash9
-#include "hash_set8.hpp" // emhash8
-
+#include "benchmark/benchmark.h"
+#include "hash_set2.hpp"  // emhash2
+#include "hash_set3.hpp"  // emhash7
+#include "hash_set4.hpp"  // emhash9
+#include "hash_set8.hpp"  // emhash8
 #include "iassert.hpp"
 
 // Zen2:
@@ -26,12 +25,11 @@
 //
 // emhash7 better always unless very large (10K) emhash9
 
-
-static constexpr int n=32;
+static constexpr int n = 4;
 #define TYPE_SEARCH uint16_t
 
 template <size_t Size>
-bool linear_erase_word(std::vector<TYPE_SEARCH> &arr , TYPE_SEARCH b) {
+bool linear_erase_word(std::vector<TYPE_SEARCH>& arr, TYPE_SEARCH b) {
   for (size_t i = 0u; i < Size; ++i) {
     if (arr[i] == b) {
       arr[i] = 0;
@@ -42,18 +40,19 @@ bool linear_erase_word(std::vector<TYPE_SEARCH> &arr , TYPE_SEARCH b) {
 }
 
 template <size_t Size>
-bool binary_erase_word(std::vector<TYPE_SEARCH> &arr , TYPE_SEARCH b) {
+bool binary_erase_word(std::vector<TYPE_SEARCH>& arr, TYPE_SEARCH b) {
   auto it = std::lower_bound(arr.begin(), arr.end(), b);
-  if (*it != b)
+  if (*it != b) {
     return false;
+  }
 
   auto len = std::distance(arr.end(), it);
-  if (len>0) {
-    auto pos   = std::distance(arr.begin(), it);
-    void *ptr  = &arr[pos];
-    void *ptr2 = &arr[pos+1];
+  if (len > 0) {
+    auto  pos  = std::distance(arr.begin(), it);
+    void* ptr  = &arr[pos];
+    void* ptr2 = &arr[pos + 1];
 
-    std::memmove(ptr, ptr2, sizeof(TYPE_SEARCH)*len);
+    std::memmove(ptr, ptr2, sizeof(TYPE_SEARCH) * len);
   }
 
   arr.pop_back();
@@ -62,7 +61,7 @@ bool binary_erase_word(std::vector<TYPE_SEARCH> &arr , TYPE_SEARCH b) {
 }
 
 template <size_t Size>
-bool linear_insert_word(std::vector<TYPE_SEARCH> &arr , TYPE_SEARCH b) {
+bool linear_insert_word(std::vector<TYPE_SEARCH>& arr, TYPE_SEARCH b) {
   for (size_t i = 0u; i < Size; ++i) {
     if (arr[i] == 0) {
       arr[i] = b;
@@ -73,13 +72,15 @@ bool linear_insert_word(std::vector<TYPE_SEARCH> &arr , TYPE_SEARCH b) {
 }
 
 template <size_t Size>
-bool binary_insert_word(std::vector<TYPE_SEARCH> &arr , TYPE_SEARCH b) {
+bool binary_insert_word(std::vector<TYPE_SEARCH>& arr, TYPE_SEARCH b) {
   auto it = std::lower_bound(arr.begin(), arr.end(), b);
-  if (it!=arr.end() && *it == b)
+  if (it != arr.end() && *it == b) {
     return true;
+  }
 
-  if (arr.size()>Size)
+  if (arr.size() > Size) {
     return false;
+  }
 
   arr.insert(it, b);
 
@@ -87,7 +88,6 @@ bool binary_insert_word(std::vector<TYPE_SEARCH> &arr , TYPE_SEARCH b) {
 }
 
 static void emhash2_set_insert(benchmark::State& state) {
-
   std::vector<TYPE_SEARCH> v;
 
   std::mt19937 gen(std::random_device{}());
@@ -111,8 +111,9 @@ static void emhash2_set_insert(benchmark::State& state) {
 
   for (auto _ : state) {
     auto set = std::make_unique<emhash2::HashSet<TYPE_SEARCH>>();
-    for(auto e:v)
+    for (auto e : v) {
       set->insert(e);
+    }
     benchmark::DoNotOptimize(set);
   }
 }
@@ -132,19 +133,20 @@ static void emhash2_set_erase(benchmark::State& state) {
   for (auto _ : state) {
     state.PauseTiming();
     auto set = std::make_unique<emhash2::HashSet<TYPE_SEARCH>>();
-    for(auto e:v)
+    for (auto e : v) {
       set->insert(e);
+    }
     state.ResumeTiming();
 
-    for(auto i=0;i<n;++i)
+    for (auto i = 0; i < n; ++i) {
       set->erase(v[i]);
+    }
 
     benchmark::DoNotOptimize(set);
   }
 }
 
 static void emhash9_set_insert(benchmark::State& state) {
-
   std::vector<TYPE_SEARCH> v;
 
   std::mt19937 gen(std::random_device{}());
@@ -168,8 +170,9 @@ static void emhash9_set_insert(benchmark::State& state) {
 
   for (auto _ : state) {
     auto set = std::make_unique<emhash9::HashSet<TYPE_SEARCH>>();
-    for(auto e:v)
+    for (auto e : v) {
       set->insert(e);
+    }
     benchmark::DoNotOptimize(set);
   }
 }
@@ -189,19 +192,20 @@ static void emhash9_set_erase(benchmark::State& state) {
   for (auto _ : state) {
     state.PauseTiming();
     auto set = std::make_unique<emhash9::HashSet<TYPE_SEARCH>>();
-    for(auto e:v)
+    for (auto e : v) {
       set->insert(e);
+    }
     state.ResumeTiming();
 
-    for(auto i=0;i<n;++i)
+    for (auto i = 0; i < n; ++i) {
       set->erase(v[i]);
+    }
 
     benchmark::DoNotOptimize(set);
   }
 }
 
 static void emhash7_set_insert(benchmark::State& state) {
-
   std::vector<TYPE_SEARCH> v;
 
   std::mt19937 gen(std::random_device{}());
@@ -225,8 +229,9 @@ static void emhash7_set_insert(benchmark::State& state) {
 
   for (auto _ : state) {
     auto set = std::make_unique<emhash7::HashSet<TYPE_SEARCH>>();
-    for(auto e:v)
+    for (auto e : v) {
       set->insert(e);
+    }
     benchmark::DoNotOptimize(set);
   }
 }
@@ -246,19 +251,20 @@ static void emhash7_set_erase(benchmark::State& state) {
   for (auto _ : state) {
     state.PauseTiming();
     auto set = std::make_unique<emhash7::HashSet<TYPE_SEARCH>>();
-    for(auto e:v)
+    for (auto e : v) {
       set->insert(e);
+    }
     state.ResumeTiming();
 
-    for(auto i=0;i<n;++i)
+    for (auto i = 0; i < n; ++i) {
       set->erase(v[i]);
+    }
 
     benchmark::DoNotOptimize(set);
   }
 }
 
 static void emhash8_set_insert(benchmark::State& state) {
-
   std::vector<TYPE_SEARCH> v;
 
   std::mt19937 gen(std::random_device{}());
@@ -282,8 +288,9 @@ static void emhash8_set_insert(benchmark::State& state) {
 
   for (auto _ : state) {
     auto set = std::make_unique<emhash8::HashSet<TYPE_SEARCH>>();
-    for(auto e:v)
+    for (auto e : v) {
       set->insert(e);
+    }
     benchmark::DoNotOptimize(set);
   }
 }
@@ -303,12 +310,14 @@ static void emhash8_set_erase(benchmark::State& state) {
   for (auto _ : state) {
     state.PauseTiming();
     auto set = std::make_unique<emhash8::HashSet<TYPE_SEARCH>>();
-    for(auto e:v)
+    for (auto e : v) {
       set->insert(e);
+    }
     state.ResumeTiming();
 
-    for(auto i=0;i<n;++i)
+    for (auto i = 0; i < n; ++i) {
       set->erase(v[i]);
+    }
 
     benchmark::DoNotOptimize(set);
   }
@@ -330,8 +339,9 @@ static void abseil_set_insert(benchmark::State& state) {
 
   for (auto _ : state) {
     auto set = std::make_unique<absl::flat_hash_set<TYPE_SEARCH>>();
-    for(auto e:v)
+    for (auto e : v) {
       set->insert(e);
+    }
 
     benchmark::DoNotOptimize(set);
   }
@@ -354,12 +364,14 @@ static void abseil_set_erase(benchmark::State& state) {
   for (auto _ : state) {
     state.PauseTiming();
     auto set = std::make_unique<absl::flat_hash_set<TYPE_SEARCH>>();
-    for(auto e:v)
+    for (auto e : v) {
       set->insert(e);
+    }
     state.ResumeTiming();
 
-    for(auto i=0;i<n;++i)
+    for (auto i = 0; i < n; ++i) {
       set->erase(v[i]);
+    }
 
     benchmark::DoNotOptimize(set);
   }
@@ -380,12 +392,13 @@ static void linear_erase(benchmark::State& state) {
   for (auto _ : state) {
     state.PauseTiming();
     std::vector<TYPE_SEARCH> v2;
-    for(auto i=0;i<n;++i)
+    for (auto i = 0; i < n; ++i) {
       v2.emplace_back(v[i]);
+    }
     state.ResumeTiming();
 
-    for(auto i=1;i<n;++i) {
-      auto x=linear_erase_word<n>(v2, v[i]);
+    for (auto i = 1; i < n; ++i) {
+      auto x = linear_erase_word<n>(v2, v[i]);
       I(x);
     }
 
@@ -406,9 +419,11 @@ static void linear_insert(benchmark::State& state) {
   }
 
   for (auto _ : state) {
-    std::vector<TYPE_SEARCH> v2(n,0);;
-    for(auto i=0;i<n;++i)
-      linear_insert_word<n>(v2,v[i]);
+    std::vector<TYPE_SEARCH> v2(n, 0);
+    ;
+    for (auto i = 0; i < n; ++i) {
+      linear_insert_word<n>(v2, v[i]);
+    }
 
     benchmark::DoNotOptimize(v2);
   }
@@ -456,14 +471,13 @@ static void binary_insert(benchmark::State& state) {
 
   for (auto _ : state) {
     std::vector<TYPE_SEARCH> v2;
-    for(auto i=0;i<n;++i)
-      binary_insert_word<n>(v2,v[i]);
+    for (auto i = 0; i < n; ++i) {
+      binary_insert_word<n>(v2, v[i]);
+    }
 
     benchmark::DoNotOptimize(v2);
   }
 }
-
-
 
 BENCHMARK(linear_insert);
 BENCHMARK(binary_insert);
@@ -474,7 +488,7 @@ BENCHMARK(emhash8_set_insert);
 BENCHMARK(emhash9_set_insert);
 
 BENCHMARK(linear_erase);
-//BENCHMARK(binary_erase);
+// BENCHMARK(binary_erase);
 BENCHMARK(abseil_set_erase);
 BENCHMARK(emhash2_set_erase);
 BENCHMARK(emhash7_set_erase);
