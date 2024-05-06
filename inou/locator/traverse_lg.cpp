@@ -277,20 +277,20 @@ void Traverse_lg::do_travers(Lgraph *orig_lg, Lgraph *synth_lg, bool is_orig_lg)
 
     /* full IO matches to be dealt first:*/
     bool change_done=false;
-    int trial = 0;
-    do {
-      ++trial;
-      
-      change_done=complete_io_match_fullOnly();
+    // int trial = 0;
+    // do {
+    //   ++trial;
+    //   
+    //   change_done=complete_io_match_fullOnly();
 
-      make_io_maps(synth_lg, inp_map_of_sets_synth, out_map_of_sets_synth, is_orig_lg);
-      make_io_maps(orig_lg, inp_map_of_sets_orig, out_map_of_sets_orig, true);
-      #ifdef BASIC_DBG
-	fmt::print("Printing after complete_io_match_fullOnly (did changes = {}).", change_done);
-	print_everything();
-      #endif
+    //   make_io_maps(synth_lg, inp_map_of_sets_synth, out_map_of_sets_synth, is_orig_lg);
+    //   make_io_maps(orig_lg, inp_map_of_sets_orig, out_map_of_sets_orig, true);
+    //   #ifdef BASIC_DBG
+    //     fmt::print("Printing after complete_io_match_fullOnly (did changes = {}).", change_done);
+    //     print_everything();
+    //   #endif
 
-    } while(trial < 4 && change_done  && !crit_node_set.empty());
+    // } while(trial < 4 && change_done  && !crit_node_set.empty());
     auto end = std::chrono::system_clock::now();
     std::chrono::duration<double> elapsed_seconds = end-start;
     fmt::print("ELAPSED_SEC: {}s, FOR_FUNC: complete_io_match_fullOnly\n", elapsed_seconds.count());
@@ -344,11 +344,23 @@ void Traverse_lg::do_travers(Lgraph *orig_lg, Lgraph *synth_lg, bool is_orig_lg)
       }
       weighted_match_LoopLastOnly();  // crit_entries_only=f, loopLast_only=t
       // set_theory_match_loopLast_only();
-#ifdef BASIC_DBG
+      #ifdef BASIC_DBG
       fmt::print("9. Printing after flop weighted_match_LoopLastOnly matching!");
       print_everything();
-#endif
+      #endif
       //remove_resolved_from_orig_MoS();
+    }
+    if (!flop_set_synth.empty()) { // to resolve and retry because some cells have 0 relevant nodes in 1st try.
+      #ifdef BASIC_DBG
+      fmt::print("----- Flops still not resolved? Try partial match again? :----------");
+      #endif
+      make_io_maps(synth_lg, inp_map_of_sets_synth, out_map_of_sets_synth, is_orig_lg);
+      make_io_maps(orig_lg, inp_map_of_sets_orig, out_map_of_sets_orig, true);
+      weighted_match_LoopLastOnly();  // crit_entries_only=f, loopLast_only=t
+      #ifdef BASIC_DBG
+      fmt::print("99. Printing after 2nd flop weighted_match_LoopLastOnly matching!");
+      print_everything();
+      #endif
     }
     end = std::chrono::system_clock::now();
     elapsed_seconds = end-start;
@@ -1351,7 +1363,9 @@ void Traverse_lg::netpin_to_origpin_default_match(Lgraph* orig_lg, Lgraph* synth
 		 //maybe the bus got converted to _#_ or _#  --> try by removing _#/_#_
 		 //or maybe (like in DC) ._ was converted to _n_ --> try by making "_n_" -> "__"
 	  int trial=1;
+          #ifdef BASIC_DBG
 	  bool not_found=true;
+          #endif
           do {
             #ifdef BASIC_DBG
             fmt::print("\t**  synth_node_dpin_wire {}  -(again)->  ", synth_node_dpin_wire);
@@ -1399,9 +1413,10 @@ void Traverse_lg::netpin_to_origpin_default_match(Lgraph* orig_lg, Lgraph* synth
               remove_from_crit_node_set(synth_node_dpin.get_compact_flat());
               out_map_of_sets_synth.erase(synth_node_dpin.get_compact_flat());
               inp_map_of_sets_synth.erase(synth_node_dpin.get_compact_flat());
-	      trial = 3; 
+	      trial = 3;
+	      #ifdef BASIC_DBG
 	      not_found=false;
-	      
+              #endif
 	    } else if (name2dpins.find(synth_node_dpin_wire) != name2dpins.end()) {//matches in name2dpins (if not in name2dpin)?
 	      auto iter2 = name2dpins.find(synth_node_dpin_wire);
               #ifdef BASIC_DBG
@@ -1435,15 +1450,19 @@ void Traverse_lg::netpin_to_origpin_default_match(Lgraph* orig_lg, Lgraph* synth
               out_map_of_sets_synth.erase(synth_node_dpin.get_compact_flat());
               inp_map_of_sets_synth.erase(synth_node_dpin.get_compact_flat());
 	      trial = 3 ;
+	      #ifdef BASIC_DBG
 	      not_found=false;
+              #endif
 	    }  
 	    ++trial;
 	  } while (trial < 3);
+          #ifdef BASIC_DBG
           if(not_found) {//still not matched with any!?
 	      fmt::print("\"\"\" {}\n", synth_node_dpin_wire);
 	      get_node_pin_compact_flat_details(synth_node_dpin.get_compact_flat());
 	      fmt::print("\"\"\"\n");
-	    }
+	  }
+          #endif
 
 	}
       }
@@ -3135,24 +3154,11 @@ void Traverse_lg::weighted_match_LoopLastOnly() {
   Traverse_lg::map_of_sets inp_map_of_node_sets_orig = convert_io_MoS_to_node_MoS_LLonly(inp_map_of_sets_orig);
 
   Traverse_lg::map_of_sets inp_map_of_sets_synth_LLonlly = obtain_MoS_LLonly(inp_map_of_sets_synth);
-  // for (auto it = inp_map_of_sets_synth.begin(); it != inp_map_of_sets_synth.end();) {
-  for (const auto& [synth_key, synth_set] : inp_map_of_sets_synth_LLonlly) {
-    // const auto &synth_key = it->first;
-    // const auto &synth_set = it->second;
-    /*const auto& synth_key = (inp_map_of_sets_synth.find(node_ll))->first;
-    const auto& synth_set = (inp_map_of_sets_synth.find(node_ll))->second;*/
 
-    /*if(loop_last_only):for only those keys that are is_type_loop_last
-      time complexity with loop_last_only will be num_of_flops-synth into num_of_flops-orig
-      otherwise, time complexity will be num_of_combi-synth into num_of_combi-orig*/
-    // auto node_s = Node_pin("lgdb", synth_key).get_node();
-    // if ( !node_s.is_type_loop_last() ) {
-    //   #ifdef BASIC_DBG
-    //     fmt::print("\t\t continuing due to datatype mismatch in loop_last_only (node is looplast:{})
-    //     \n",node_s.is_type_loop_last());
-    //   #endif
-    //   continue; //flop node should be matched with flop node only! else datatype mismatch!
-    // }
+  for (const auto& [synth_key, synth_set] : inp_map_of_sets_synth_LLonlly) {
+    #ifdef BASIC_DBG
+    fmt::print("\n **Working on: "); get_node_pin_compact_flat_details(synth_key);
+    #endif
 
     /* which orig_MoS entries do we need to match it with?
      * I want those flop nodes only which has atleast 1 input matching with this synth_set.
@@ -3164,7 +3170,7 @@ void Traverse_lg::weighted_match_LoopLastOnly() {
         relevant_orig_nodes.insert((orig_entry_it->second).begin(), (orig_entry_it->second).end());
       }
     }
-#ifdef BASIC_DBG
+    #ifdef BASIC_DBG
     fmt::print("\n relevant_orig_nodes = ");
     for (const auto& relevant_orig_node_cf : relevant_orig_nodes) {
       auto relevant_orig_node = Node_pin("lgdb", relevant_orig_node_cf);
@@ -3173,7 +3179,7 @@ void Traverse_lg::weighted_match_LoopLastOnly() {
                                                : ("n" + std::to_string(relevant_orig_node.get_node().get_nid())));
     }
     fmt::print("\n");
-#endif
+    #endif
 
     float                                       match_prev = 0.0;
     absl::flat_hash_set<Node_pin::Compact_flat> matched_node_pins;
@@ -3182,7 +3188,6 @@ void Traverse_lg::weighted_match_LoopLastOnly() {
                relevant_orig_nodes.size(),
                inp_map_of_sets_orig.size());
 #endif
-    // for(const auto &[ orig_key, orig_set ] : inp_map_of_sets_orig) {
     for (const auto& relevant_orig_node : relevant_orig_nodes) {
       auto orig_entry = inp_map_of_sets_orig.find(relevant_orig_node);
       auto orig_key   = orig_entry->first;
@@ -3234,11 +3239,11 @@ void Traverse_lg::weighted_match_LoopLastOnly() {
       mark_loop_stop.insert(matched_node_pins.begin(), matched_node_pins.end());
 #ifdef FOR_EVAL
       auto np_s = Node_pin("lgdb", synth_key);
-      fmt::print("Inserting in weighted_match_LoopLastOnly : {}(n{})  :::  ",
-                 np_s.has_name() ? np_s.get_name() : ("n" + std::to_string(np_s.get_node().get_nid())),std::to_string(np_s.get_node().get_nid()) );
+      fmt::print("Inserting in weighted_match_LoopLastOnly : {}(n{},lg={})  :::  ",
+                 np_s.has_name() ? np_s.get_name() : ("n" + std::to_string(np_s.get_node().get_nid())),std::to_string(np_s.get_node().get_nid()),  (np_s.get_node().get_class_lgraph())->get_name()  );
       for (auto np_o_set : matched_node_pins) {
         auto np_o = Node_pin("lgdb", np_o_set);
-        fmt::print("    {}({},{},{}) ", np_o.has_name() ? np_o.get_name() : ("n" + std::to_string(np_o.get_node().get_nid())), np_o.get_node().is_type_loop_last(), np_o.get_node().get_type_name(), np_o.get_node().has_name()?np_o.get_node().get_name():"" );
+        fmt::print("    {}({},{},{},lg={}) ", np_o.has_name() ? np_o.get_name() : ("n" + std::to_string(np_o.get_node().get_nid())), np_o.get_node().is_type_loop_last(), np_o.get_node().get_type_name(), np_o.get_node().has_name()?np_o.get_node().get_name():"" ,  (np_o.get_node().get_class_lgraph())->get_name()  );
       }
       fmt::print("\n");
 #endif
