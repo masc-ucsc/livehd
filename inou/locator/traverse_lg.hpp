@@ -15,6 +15,9 @@
 #include "cell.hpp"
 #include "lgraph.hpp"
 #include "node.hpp"
+#include "node_pin.hpp"
+#include "sub_node.hpp"
+#include "lgedgeiter.hpp"
 #include "pass.hpp"
 #include "absl/container/internal/raw_hash_set.h"
 #include <chrono>
@@ -34,6 +37,7 @@ public:
 private:
   std::string orig_lg_name;
   std::chrono::system_clock::time_point start_time_of_algo;
+  std::set<Lg_type_id> origLGID_set;
   int crossover_count;
   // std::string synth_lg_name;
   typedef absl::node_hash_map<Node::Compact_flat, std::pair<std::set<std::string>, std::set<std::string>>> setMap_nodeKey;
@@ -127,6 +131,7 @@ private:
   map_of_sets obtain_MoS_LLonly(const map_of_sets &io_map_of_sets);
   void print_set (const absl::flat_hash_set<Node_pin::Compact_flat> &set_of_dpins) const ;
   void print_everything() ;
+  bool out_sets_intersect(const absl::flat_hash_set<Node_pin::Compact_flat>& set1, const absl::flat_hash_set<Node_pin::Compact_flat>& set2) const;
   bool common_element_present(const absl::flat_hash_set<Node_pin::Compact_flat>& set1, const absl::flat_hash_set<Node_pin::Compact_flat>& set2) const ;
   float get_matching_weight(const absl::flat_hash_set<Node_pin::Compact_flat> &synth_set, const absl::flat_hash_set<Node_pin::Compact_flat> &orig_set) const;
   void print_SynthSet_sizes() const;
