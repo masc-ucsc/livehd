@@ -5,6 +5,13 @@ Open projects are potential MS thesis/projects. They are ranked from "most" to
 less "urgent". Each has a easy/medium/hard level. Easy should take a a bit over
 a quarter to implement, hard could take 2-3 quarters.
 
+## [medium] Alternative cprop with egg for LNAST
+
+Egg (https://dl.acm.org/doi/10.1145/3434304) allows to perform optimizations similar to cprop, but a bit cleaner more optimal.
+
+It would be interesting to have a another pass that operates over LNAST nodes
+and uses egg to perform optimizations.
+
 ## [medium] Verilog input (slang 2 LNAST)
 
 slang (https://github.com/MikePopoloski/slang) is an open source System Verilog parser/compiler.
