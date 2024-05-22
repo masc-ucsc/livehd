@@ -275,7 +275,7 @@ void Traverse_lg::do_travers(Lgraph *orig_lg, Lgraph *synth_lg, bool is_orig_lg)
     }
     */
 
-    /* full IO matches to be dealt first:*/
+    /* full IO matches (datatype INsensitive) to be dealt first:*/
     bool change_done=false;
     int trial = 0;
     do {
@@ -327,40 +327,30 @@ void Traverse_lg::do_travers(Lgraph *orig_lg, Lgraph *synth_lg, bool is_orig_lg)
       elapsed_seconds = end-start;
       fmt::print("ELAPSED_SEC: {}s, FOR_FUNC: complete_io_match-inWhile-flopOnly\n", elapsed_seconds.count());
 
-#ifdef BASIC_DBG
+      #ifdef BASIC_DBG
       fmt::print("Change done = {}\n", change_done);
-#endif
+      #endif
     }
-#ifdef BASIC_DBG
+    #ifdef BASIC_DBG
     fmt::print("6. Printing after all the flop resolution and matching!");
     print_everything();
-#endif
+    #endif
 
     start = std::chrono::system_clock::now();
-    if (!flop_set_synth.empty()) {
-      if(change_done){
+    for(auto perc_resolved: {75, 25, 0, -1}) {
+      if (!flop_set_synth.empty()) {
+
         make_io_maps(synth_lg, inp_map_of_sets_synth, out_map_of_sets_synth, is_orig_lg);
         make_io_maps(orig_lg, inp_map_of_sets_orig, out_map_of_sets_orig, true);
+
+        weighted_match_LoopLastOnly( perc_resolved);  // crit_entries_only=f, loopLast_only=t
+        
+        #ifdef BASIC_DBG
+        fmt::print("9. Printing after flop weighted_match_LoopLastOnly matching! with perc_resolved = {}%",perc_resolved);
+        print_everything();
+        #endif
+        
       }
-      weighted_match_LoopLastOnly();  // crit_entries_only=f, loopLast_only=t
-      // set_theory_match_loopLast_only();
-      #ifdef BASIC_DBG
-      fmt::print("9. Printing after flop weighted_match_LoopLastOnly matching!");
-      print_everything();
-      #endif
-      //remove_resolved_from_orig_MoS();
-    }
-    if (!flop_set_synth.empty()) { // to resolve and retry because some cells have 0 relevant nodes in 1st try.
-      #ifdef BASIC_DBG
-      fmt::print("----- Flops still not resolved? Try partial match again? :----------");
-      #endif
-      make_io_maps(synth_lg, inp_map_of_sets_synth, out_map_of_sets_synth, is_orig_lg);
-      make_io_maps(orig_lg, inp_map_of_sets_orig, out_map_of_sets_orig, true);
-      weighted_match_LoopLastOnly();  // crit_entries_only=f, loopLast_only=t
-      #ifdef BASIC_DBG
-      fmt::print("99. Printing after 2nd flop weighted_match_LoopLastOnly matching!");
-      print_everything();
-      #endif
     }
     end = std::chrono::system_clock::now();
     elapsed_seconds = end-start;
@@ -1203,7 +1193,7 @@ void Traverse_lg::netpin_to_origpin_default_match(Lgraph* orig_lg, Lgraph* synth
   for (const auto& original_node : orig_lg->fast(true)) {
     
     /*Save lgIDs of origLG for weighted match LL only*/
-    origLGID_set.insert((original_node.get_class_lgraph())->get_lgid());
+    origLGID_set.insert( (uint32_t)((original_node.get_class_lgraph())->get_lgid()) );
 
     if (original_node.is_type_sub() && original_node.get_type_sub_node().get_name() == "__fir_const") {
       continue;
@@ -3141,18 +3131,27 @@ Traverse_lg::map_of_sets Traverse_lg::convert_io_MoS_to_node_MoS_LLonly(const ma
   return node_map_of_set_LoopLastOnly;
 }
 
-Traverse_lg::map_of_sets Traverse_lg::obtain_MoS_LLonly(const map_of_sets& io_map_of_sets) {
+Traverse_lg::map_of_sets Traverse_lg::obtain_MoS_LLonly(const map_of_sets& io_map_of_sets, int perc_resolved) {
 #ifdef BASIC_DBG
   fmt::print("obtain_MoS_LLonly:  MoS with LoopLast only nodes.\n");
 #endif
 
   Traverse_lg::map_of_sets map_of_set_LoopLastOnly;
   for (const auto& [node_key, io_vals_set] : io_map_of_sets) {
-    /*if(loop_last_only):for only those keys that are is_type_loop_last*/
+    int min_origs_required = floor((float(perc_resolved)/100) * io_vals_set.size());
     auto node = Node_pin("lgdb", node_key).get_node();
-    if (node.is_type_loop_last()) {  // flop node should be matched with flop node only! else datatype mismatch!
-      // we need flop nodes only in this case
-      map_of_set_LoopLastOnly.insert({node_key, io_vals_set});
+    if (node.is_type_loop_last()) {  // flop should match against flop, else datatype mismatch! we need flop nodes only in this case
+      if (min_origs_required > 0) {
+        for (auto io_val: io_vals_set) {
+          auto synth_entry_lgid = (Node_pin("lgdb",io_val)).get_class_lgraph()->get_lgid();
+          if (origLGID_set.contains((uint32_t)synth_entry_lgid)) {
+            min_origs_required--;
+          }
+        }
+      }
+      if(min_origs_required==0 || perc_resolved==-1) {
+        map_of_set_LoopLastOnly.insert({node_key, io_vals_set});
+      }
     }
   }
 
@@ -3164,9 +3163,9 @@ Traverse_lg::map_of_sets Traverse_lg::obtain_MoS_LLonly(const map_of_sets& io_ma
   return map_of_set_LoopLastOnly;
 }
 
-void Traverse_lg::weighted_match_LoopLastOnly() {
+void Traverse_lg::weighted_match_LoopLastOnly(int perc_resolved) {
   #ifdef BASIC_DBG
-  fmt::print("In weighted_match_LoopLastOnly:\n\n");
+  fmt::print("In weighted_match_LoopLastOnly for perc_resolved {}:\n\n", perc_resolved);
   #endif
 
   const auto num_of_matches = net_to_orig_pin_match_map.size();
@@ -3176,11 +3175,11 @@ void Traverse_lg::weighted_match_LoopLastOnly() {
    * map : |input | <nodes (flop only)>    | */
   Traverse_lg::map_of_sets inp_map_of_node_sets_orig = convert_io_MoS_to_node_MoS_LLonly(inp_map_of_sets_orig);
 
-  Traverse_lg::map_of_sets inp_map_of_sets_synth_LLonlly = obtain_MoS_LLonly(inp_map_of_sets_synth);
+  Traverse_lg::map_of_sets inp_map_of_sets_synth_LLonlly = obtain_MoS_LLonly(inp_map_of_sets_synth, perc_resolved);
 
   for (const auto& [synth_key, synth_set] : inp_map_of_sets_synth_LLonlly) {
     #ifdef BASIC_DBG
-    fmt::print("\n **Working on: "); get_node_pin_compact_flat_details(synth_key);
+    fmt::print("\n **Working on (perc_res={}): ", perc_resolved); get_node_pin_compact_flat_details(synth_key);
     #endif
 
     /* which orig_MoS entries do we need to match it with?
@@ -3196,20 +3195,37 @@ void Traverse_lg::weighted_match_LoopLastOnly() {
     for (const auto& synth_in : synth_set) {
       auto orig_entry_it = inp_map_of_node_sets_orig.find(synth_in);
       if (orig_entry_it != inp_map_of_node_sets_orig.end()) {
+        #ifdef BASIC_DBG
+        fmt::print("\t\t\t Orig nodes with common INPUT found. \n");
+        #endif
         auto inp_intersecting_orig_nodes = orig_entry_it->second; //set of orig nodes
-	/* Now we know that 1 input is common for inp_intersecting_orig_nodes
-	 * need to know if the output of these nodes also intersect, then save these as relevant nodes.*/
-	for(const auto& orig_nod: inp_intersecting_orig_nodes){
-	  bool output_intersection_present = false;
-	  auto orig_node_outMoS_iter = inp_map_of_sets_orig.find(orig_nod);
-	  if (orig_node_outMoS_iter != inp_map_of_sets_orig.end()) {
-	    output_intersection_present = out_sets_intersect(orig_node_outMoS_iter->second, synth_out_set);
+        
+	if (perc_resolved == -1) {
+	  relevant_orig_nodes.insert(inp_intersecting_orig_nodes.begin(), inp_intersecting_orig_nodes.end());
+	} else {
+	  /* Now we know that 1 input is common for inp_intersecting_orig_nodes
+	   * need to know if the output of these nodes also intersect, then save these as relevant nodes.*/
+	  for(const auto& orig_nod: inp_intersecting_orig_nodes){
+            #ifdef BASIC_DBG
+            fmt::print("\t\t\t\t\t"); get_node_pin_compact_flat_details(orig_nod);
+            #endif
+	    bool output_intersection_present = false;
+	    auto orig_node_outMoS_iter = inp_map_of_sets_orig.find(orig_nod);
+	    if (orig_node_outMoS_iter != inp_map_of_sets_orig.end()) {
+	      output_intersection_present = out_sets_intersect(orig_node_outMoS_iter->second, synth_out_set);
+	    }
+	    if (output_intersection_present) {
+              #ifdef BASIC_DBG
+              fmt::print("\t\t\t Orig node have common OUTPUT too. \n");
+              #endif
+              //common output and input present
+	      relevant_orig_nodes.insert(orig_nod);
+	    }
+            #ifdef BASIC_DBG
+	    else { fmt::print("\t\t\t Orig node does NOT have common OUTPUT. \n"); }
+            #endif
 	  }
-	  if (output_intersection_present) {
-            //common output and input present
-	    relevant_orig_nodes.insert(orig_nod);
-	  }
-	}
+        }
       }
     }
 

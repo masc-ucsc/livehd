@@ -22,12 +22,13 @@
 #include "absl/container/internal/raw_hash_set.h"
 #include <chrono>
 #include <regex>
+#include <initializer_list>
 
 #define DE_DUP  // use set
 // #define BASIC_DBG
 // #define EXTENSIVE_DBG
 // #define FULL_RUN_FOR_EVAL_TESTING //to get the csv for matches, non matches etc during nl2nl
-// #define FULL_RUN_FOR_EVAL //if defined then every node is critical node
+#define FULL_RUN_FOR_EVAL //if defined then every node is critical node
    		          //possible to compare matching map for every node
                           // used in nl2nl match
 #define FOR_EVAL // used in orig-to-NL match (tells where matching happens)
@@ -37,7 +38,7 @@ public:
 private:
   std::string orig_lg_name;
   std::chrono::system_clock::time_point start_time_of_algo;
-  std::set<Lg_type_id> origLGID_set;
+  absl::flat_hash_set<uint32_t> origLGID_set;
   int crossover_count;
   // std::string synth_lg_name;
   typedef absl::node_hash_map<Node::Compact_flat, std::pair<std::set<std::string>, std::set<std::string>>> setMap_nodeKey;
@@ -62,7 +63,7 @@ private:
   setMap_pairKey                                                           cellIOMap_synth;
   bool                   set_theory_match(std::set<std::string> synth_set, const std::vector<Node::Compact_flat> &synth_val,
                                              setMap_pairKey &orig_map);
-  void weighted_match_LoopLastOnly() ;
+  void weighted_match_LoopLastOnly(int perc_resolved) ;
   void weighted_match() ;
   template <typename T>
   std::set<T> getUnion(const std::set<T> &a, const std::set<T> &b) {
@@ -128,7 +129,7 @@ private:
   /* If you are making io union for synth MoS for combinational matching, then why not make the union of only crit nodes' dpins from the synth MoS. We need not resolve other synth MoS entries and thus need not make union for them*/
   map_of_sets make_in_out_union(const map_of_sets &inp_map_of_sets, const  map_of_sets &out_map_of_sets, bool loop_last_only, bool union_of_crit_entries_only) const ;
   map_of_sets convert_io_MoS_to_node_MoS_LLonly(const map_of_sets &io_map_of_sets);
-  map_of_sets obtain_MoS_LLonly(const map_of_sets &io_map_of_sets);
+  map_of_sets obtain_MoS_LLonly(const map_of_sets &io_map_of_sets, int perc_resolved);
   void print_set (const absl::flat_hash_set<Node_pin::Compact_flat> &set_of_dpins) const ;
   void print_everything() ;
   bool out_sets_intersect(const absl::flat_hash_set<Node_pin::Compact_flat>& set1, const absl::flat_hash_set<Node_pin::Compact_flat>& set2) const;
