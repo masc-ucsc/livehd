@@ -3210,8 +3210,8 @@ void Traverse_lg::weighted_match_LoopLastOnly(int perc_resolved) {
             fmt::print("\t\t\t\t\t"); get_node_pin_compact_flat_details(orig_nod);
             #endif
 	    bool output_intersection_present = false;
-	    auto orig_node_outMoS_iter = inp_map_of_sets_orig.find(orig_nod);
-	    if (orig_node_outMoS_iter != inp_map_of_sets_orig.end()) {
+	    auto orig_node_outMoS_iter = out_map_of_sets_orig.find(orig_nod);
+	    if (orig_node_outMoS_iter != out_map_of_sets_orig.end()) {
 	      output_intersection_present = out_sets_intersect(orig_node_outMoS_iter->second, synth_out_set);
 	    }
 	    if (output_intersection_present) {
