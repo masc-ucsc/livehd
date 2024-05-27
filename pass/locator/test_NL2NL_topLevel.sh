@@ -11,7 +11,7 @@ cwd=$(pwd)
 SRCLOCATION=${cwd}/pass/locator/tests
 
 # IMPORTANT: check these values before every run:
-DESTLOCATION=${SRCLOCATION}/dummy_test
+DESTLOCATION=${SRCLOCATION}/dummy_15may
 COMB_ONLY=false
 NOISE_PERCENTAGE=(0 20 40 60 80 90 95 100)
 
@@ -233,7 +233,7 @@ echo "plt.xlabel('Noise (%)')" >> ${DESTLOCATION}/nl2nl_acc_flop_plot_data.py
 echo "plt.ylabel(' Accuracy (%)')" >> ${DESTLOCATION}/nl2nl_acc_flop_plot_data.py
 #echo "plt.title('Accuracy graph for netlist to netlist analysis. ')" >> ${DESTLOCATION}/nl2nl_acc_flop_plot_data.py
 echo "plt.xticks(range(0, 101, 10))" >> ${DESTLOCATION}/nl2nl_acc_flop_plot_data.py
-echo "plt.yticks(range(0, 101, 10))" >>  ${DESTLOCATION}/nl2nl_acc_flop_plot_data.py
+echo "plt.yticks(range(0, 111, 10))" >>  ${DESTLOCATION}/nl2nl_acc_flop_plot_data.py
 echo "plt.legend(bbox_to_anchor=(0, 0), loc='lower left')" >> ${DESTLOCATION}/nl2nl_acc_flop_plot_data.py
 echo "# function to show the plot" >> ${DESTLOCATION}/nl2nl_acc_flop_plot_data.py
 echo "plt.savefig(\"${DESTLOCATION}/nl2nl_acc_flop_plot_data.pdf\", format=\"pdf\", bbox_inches=\"tight\")" >> ${DESTLOCATION}/nl2nl_acc_flop_plot_data.py
