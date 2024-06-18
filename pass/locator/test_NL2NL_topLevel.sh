@@ -11,7 +11,7 @@ cwd=$(pwd)
 SRCLOCATION=${cwd}/pass/locator/tests
 
 # IMPORTANT: check these values before every run:
-DESTLOCATION=${SRCLOCATION}/dummy_15may
+DESTLOCATION=${SRCLOCATION}/dummy_23may_p1_fixed
 COMB_ONLY=false
 NOISE_PERCENTAGE=(0 20 40 60 80 90 95 100)
 
@@ -25,7 +25,7 @@ fi
 echo "import matplotlib.pyplot as plt" > ${DESTLOCATION}/nl2nl_acc_flop_plot_data.py
 echo "import matplotlib.pyplot as plt" > ${DESTLOCATION}/nl2nl_time_flop_plot_data.py
 
-for FILENAME in RocketTile_yosys_DT2 #RocketTile_yosys_DT2 SingleCycleCPU_yosysFlat PipelinedCPU_yosysFlat_DT30p MaxPeriodFibonacciLFSR PipelinedCPU_netlist_wired SingleCycleCPU_netlist_wired RocketTile_netlist_wired RocketTile_netlist_p1_again
+for FILENAME in RocketTile_netlist_p1_again #RocketTile_yosys_DT2 SingleCycleCPU_yosysFlat PipelinedCPU_yosysFlat_DT30p MaxPeriodFibonacciLFSR PipelinedCPU_netlist_wired SingleCycleCPU_netlist_wired RocketTile_netlist_wired RocketTile_netlist_p1_again
 do
   if [ ${FILENAME} == "MaxPeriodFibonacciLFSR" ]
     then 
@@ -155,7 +155,21 @@ do
       echo -e "\n Running for RocketTile_netlist_wired:"
     elif [ ${FILENAME} == "RocketTile_netlist_p1_again" ]; then
       echo -e "\n Running for RocketTile_netlist_p1_again:"
+
+      #do this for all hier files:
+      sed -i 's:module \(.[^ ]*\)(:module \1 (:g' ${DESTLOCATION}/${FILENAME}.v
+      readarray -t module_names < <(grep -E "module .[^ ]* |module .[^ ]*\(" ${DESTLOCATION}/${FILENAME}.v | awk '{print $2}')
+      for name in "${module_names[@]}"; do
+	  if [[ ! $name =~ _changedForEval$ ]]; then
+	    mod_name="${name}_changedForEval"
+	    sed -i "s/\b$name\b/$mod_name/g" ${DESTLOCATION}/${FILENAME}.v
+	  fi
+      done
+
     fi
+
+    #the DESTLOCATION/FILENAME should have all the module names changed
+
     ./bazel-bin/main/lgshell "
     inou.yosys.tolg top:${NEW_NL} files:${DESTLOCATION}/${FILENAME}.v |> pass.randomize_dpins srcLG:${NEW_NL} comb_only:${COMB_ONLY} noise_perc:${PERCENTAGE_CHANGE} 
     inou.yosys.tolg top:${ORIG_NL} files:${SRCLOCATION}/${FILENAME}.v
@@ -244,7 +258,7 @@ echo "plt.xlabel(' Noise (%)')" >> ${DESTLOCATION}/nl2nl_time_flop_plot_data.py
 echo "plt.ylabel('Time (s)')" >> ${DESTLOCATION}/nl2nl_time_flop_plot_data.py
 #echo "plt.title('Performance graph for netlist to netlist analysis.')" >> ${DESTLOCATION}/nl2nl_time_flop_plot_data.py
 echo "plt.xticks(range(0, 101, 10))" >> ${DESTLOCATION}/nl2nl_time_flop_plot_data.py
-echo "plt.yticks(range(0, 101, 10))" >>  ${DESTLOCATION}/nl2nl_time_flop_plot_data.py
+#echo "plt.yticks(range(0, 101, 10))" >>  ${DESTLOCATION}/nl2nl_time_flop_plot_data.py
 echo "plt.legend()" >> ${DESTLOCATION}/nl2nl_time_flop_plot_data.py
 echo "# function to show the plot" >> ${DESTLOCATION}/nl2nl_time_flop_plot_data.py
 echo "plt.savefig(\"${DESTLOCATION}/nl2nl_time_flop_plot_data.pdf\", format=\"pdf\", bbox_inches=\"tight\")" >> ${DESTLOCATION}/nl2nl_time_flop_plot_data.py

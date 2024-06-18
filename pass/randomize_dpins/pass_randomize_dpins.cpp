@@ -48,14 +48,28 @@ void Pass_randomize_dpins::annotate_lg(Lgraph *lg){
 
   for(const auto& node: lg->fast(true)){
     for (auto& dpin: node.out_connected_pins()) {
+      #ifdef FOR_DBG
+        fmt::print("Processing dpin:");
+	print_nodePinCF_details(dpin.get_compact_flat());
+      #endif
       if(std::find(random_selected_pins_vec.begin(), random_selected_pins_vec.end(),dpin.get_compact_flat())!=random_selected_pins_vec.end()){
-	if(!dpin.has_name()) {error("random_selected_pins_vec shouldn't have any unnamed pin");}
+	if(!dpin.has_name()) {
+	  #ifdef FOR_DBG
+	    fmt::print("Unnamed dpin in selected pins vec? \n");
+	  #endif
+	  error("random_selected_pins_vec shouldn't have any unnamed pin");
+	}
         auto new_dpin_name = absl::StrCat(dpin.get_name(),"_changedForEval");
-	#ifdef FOR_DBG
-	fmt::print("randomising:"); print_nodePinCF_details(dpin.get_compact_flat());//dpin.has_name()?dpin.get_name():"-NA-");
-	#endif
 	dpin.set_name(new_dpin_name);
+	#ifdef FOR_DBG
+	fmt::print("randomised: "); print_nodePinCF_details(dpin.get_compact_flat());
+	#endif
+      } 
+      #ifdef FOR_DBG
+      else {
+        fmt::print("Pin not in random_selected_pins_vec: "); print_nodePinCF_details(dpin.get_compact_flat());
       }
+      #endif
     }
   }
 
@@ -141,7 +155,7 @@ void Pass_randomize_dpins::collect_vectors_from_lg(Lgraph *lg, float noise_perc,
     random_selected_pins_vec = chooseMRandomElements(combNflop_pins_vec, num_of_dpins_to_change);
   }
   #ifdef FOR_DBG
-  fmt::print("total_dpins: {}, perc_change: {}, num_of_dpins_to_change : {}\n", total_dpins, perc_change, num_of_dpins_to_change);
+  fmt::print("total_dpins: {}, perc_change with {}: {}, num_of_dpins_to_change : {}\n", total_dpins, comb_only?"comb_only":"comb+flops" , perc_change, num_of_dpins_to_change);
   fmt::print("Printing random_selected_pins_vec: size:{}\n", random_selected_pins_vec.size()); print_vec(random_selected_pins_vec);
   #endif
 
