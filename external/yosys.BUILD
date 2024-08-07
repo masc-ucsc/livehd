@@ -229,6 +229,7 @@ cc_library(
         # "@dk_thrysoee_libedit//:pretend_to_be_gnu_readline_system",
         # "@edu_berkeley_abc//:abc-lib",
         "@abc",
+        #"@edu_berkeley_abc//:abc-lib",
         # "@org_sourceware_libffi//:libffi",
         #"@tk_tcl_tcl//:tcl",
     ],

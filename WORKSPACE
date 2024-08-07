@@ -24,17 +24,61 @@ http_archive(
     url = "https://github.com/masc-ucsc/bazel_rules_hdl/archive/4c634c7d2b026870ecbc2fb3c4d463b6bd5c2ceb.zip",
 )
 
+load("@rules_hdl//dependency_support:dependency_support.bzl", "dependency_support")
+dependency_support()
+load("@rules_hdl//:init.bzl", "init")
+init()
+
 # TODO: USE THIS NEW YOSYS INSTEAD OF BAZEL_RULES_HDL
-# http_archive(
-#   name = "at_clifford_yosys",
-#   urls = [
-#     "https://github.com/YosysHQ/yosys/archive/refs/tags/yosys-0.13.zip",
-#   ],
-#   sha256 = "8dcebc0257b4ef30916fbaacbe938c1f1dc20315bd7c97342048a8ee8a950215",
-#   strip_prefix = "yosys-yosys-0.13",
-#   build_file = "yosys.BUILD",
-#   patches = ["//external:yosys.patch"],
-# )
+new_git_repository(
+    name = "abc",
+    build_file = "abc.BUILD",  # relative to external path
+    commit = "362b2d9d08f4dbc8dfc751b68ddf7bd3f9c4ed54",  # April 6 2019
+    patches = ["//external:abc.patch"],
+    remote = "https://github.com/berkeley-abc/abc.git",
+    shallow_since = "1554534526 -1000",
+)
+
+http_archive(
+   name = "at_clifford_yosys2",
+   urls = [
+     "https://github.com/YosysHQ/yosys/archive/refs/tags/yosys-0.13.zip",
+   ],
+   sha256 = "8dcebc0257b4ef30916fbaacbe938c1f1dc20315bd7c97342048a8ee8a950215",
+   strip_prefix = "yosys-yosys-0.13",
+   build_file = "yosys.BUILD",
+   patches = ["//external:yosys.patch"],
+)
+
+http_archive(
+    name = "rules_m4",
+    sha256 = "c67fa9891bb19e9e6c1050003ba648d35383b8cb3c9572f397ad24040fb7f0eb",
+    urls = ["https://github.com/jmillikin/rules_m4/releases/download/v0.2/rules_m4-v0.2.tar.xz"],
+)
+
+load("@rules_m4//m4:m4.bzl", "m4_register_toolchains")
+
+m4_register_toolchains()
+
+http_archive(
+    name = "rules_flex",
+    sha256 = "f1685512937c2e33a7ebc4d5c6cf38ed282c2ce3b7a9c7c0b542db7e5db59d52",
+    urls = ["https://github.com/jmillikin/rules_flex/releases/download/v0.2/rules_flex-v0.2.tar.xz"],
+)
+
+load("@rules_flex//flex:flex.bzl", "flex_register_toolchains")
+
+flex_register_toolchains()
+
+http_archive(
+    name = "rules_bison",
+    sha256 = "6ee9b396f450ca9753c3283944f9a6015b61227f8386893fb59d593455141481",
+    urls = ["https://github.com/jmillikin/rules_bison/releases/download/v0.2/rules_bison-v0.2.tar.xz"],
+)
+
+load("@rules_bison//bison:bison.bzl", "bison_register_toolchains")
+
+bison_register_toolchains()
 
 # OLD: TO DELETE
 # new_git_repository(
@@ -45,13 +89,6 @@ http_archive(
 #    remote = "https://github.com/YosysHQ/yosys.git",
 #)
 
-load("@rules_hdl//dependency_support:dependency_support.bzl", "dependency_support")
-
-dependency_support()
-
-load("@rules_hdl//:init.bzl", "init")
-
-init()
 
 # mustache
 http_archive(
