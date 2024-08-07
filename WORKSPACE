@@ -24,6 +24,27 @@ http_archive(
     url = "https://github.com/masc-ucsc/bazel_rules_hdl/archive/4c634c7d2b026870ecbc2fb3c4d463b6bd5c2ceb.zip",
 )
 
+# TODO: USE THIS NEW YOSYS INSTEAD OF BAZEL_RULES_HDL
+# http_archive(
+#   name = "at_clifford_yosys",
+#   urls = [
+#     "https://github.com/YosysHQ/yosys/archive/refs/tags/yosys-0.13.zip",
+#   ],
+#   sha256 = "8dcebc0257b4ef30916fbaacbe938c1f1dc20315bd7c97342048a8ee8a950215",
+#   strip_prefix = "yosys-yosys-0.13",
+#   build_file = "yosys.BUILD",
+#   patches = ["//external:yosys.patch"],
+# )
+
+# OLD: TO DELETE
+# new_git_repository(
+#    name = "yosys",
+#    build_file = "yosys.BUILD",
+#    commit = "de79978372c1953e295fa262444cb0a28a246c5f",  # Sep 24, 2020
+#    patches = ["//external:yosys.patch"],
+#    remote = "https://github.com/YosysHQ/yosys.git",
+#)
+
 load("@rules_hdl//dependency_support:dependency_support.bzl", "dependency_support")
 
 dependency_support()
