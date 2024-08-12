@@ -1,0 +1,5 @@
+# This file is distributed under the BSD 3-Clause License. See LICENSE for details.
+#
+# Using bazel 7 or newer and pointing to https://registry.bazel.build/
+#
+
