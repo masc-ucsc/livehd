@@ -76,8 +76,9 @@ void def_init(const char *func) {
 int defrCountUnused(defrCallbackType_e e, void *v, defiUserData d) {
   DEF_INIT;
   int i;
-  if (defiDebug(23))
+  if (defiDebug(23)) {
     printf("Count %d, 0x%p, 0x%p\n", (int)e, v, d);
+  }
   i = (int)e;
   if (i <= 0 || i >= CBMAX) {
     return 1;
@@ -900,7 +901,7 @@ int defrRead(FILE *f, const char *fName, defiUserData uData, int case_sensitive)
     defData->PathObj.Init();
   }
 
-  status = defyyparse(defData);
+  status = ::yyparse(defData);
 
   return status;
 }
@@ -1562,21 +1563,26 @@ void defrDisableParserMsgs(int nMsg, int *msgs) {
   if (defContext.settings->nDDMsgs == 0) {
     defContext.settings->nDDMsgs      = nMsg;
     defContext.settings->disableDMsgs = (int *)malloc(sizeof(int) * nMsg);
-    for (i = 0; i < nMsg; i++) defContext.settings->disableDMsgs[i] = msgs[i];
+    for (i = 0; i < nMsg; i++) {
+      defContext.settings->disableDMsgs[i] = msgs[i];
+    }
   } else {  // add the list to the existing list
     // 1st check if the msgId is already on the list before adding it on
     tmp = (int *)malloc(sizeof(int) * (nMsg + defContext.settings->nDDMsgs));
-    for (i = 0; i < defContext.settings->nDDMsgs; i++)  // copy the existing to the new list
+    for (i = 0; i < defContext.settings->nDDMsgs; i++) {  // copy the existing to the new list
       tmp[i] = defContext.settings->disableDMsgs[i];
+    }
     free((int *)(defContext.settings->disableDMsgs));
     defContext.settings->disableDMsgs = tmp;  // set disableDMsgs to the new list
     for (i = 0; i < nMsg; i++) {              // merge the new list with the existing
       for (j = 0; j < defContext.settings->nDDMsgs; j++) {
-        if (defContext.settings->disableDMsgs[j] == msgs[i])
+        if (defContext.settings->disableDMsgs[j] == msgs[i]) {
           break;  // msgId already on the list
+        }
       }
-      if (j == defContext.settings->nDDMsgs)  // msgId not on the list, add it on
+      if (j == defContext.settings->nDDMsgs) {  // msgId not on the list, add it on
         defContext.settings->disableDMsgs[defContext.settings->nDDMsgs++] = msgs[i];
+      }
     }
   }
   return;
@@ -1586,8 +1592,9 @@ void defrEnableParserMsgs(int nMsg, int *msgs) {
   DEF_INIT;
   int i, j;
 
-  if (defContext.settings->nDDMsgs == 0)
+  if (defContext.settings->nDDMsgs == 0) {
     return;  // list is empty, nothing to remove
+  }
 
   for (i = 0; i < nMsg; i++) {  // loop through the given list
     for (j = 0; j < defContext.settings->nDDMsgs; j++) {
@@ -1602,8 +1609,9 @@ void defrEnableParserMsgs(int nMsg, int *msgs) {
     if (defContext.settings->disableDMsgs[i] == -1) {
       j = i + 1;
       while (j < defContext.settings->nDDMsgs) {
-        if (defContext.settings->disableDMsgs[j] != -1)
+        if (defContext.settings->disableDMsgs[j] != -1) {
           defContext.settings->disableDMsgs[i++] = defContext.settings->disableDMsgs[j++];
+        }
       }
       break;  // break out the for loop, the list should all moved
     }
@@ -1738,8 +1746,9 @@ void defrAddAlias(const char *key, const char *value, int marked) {
   len = strlen(value) + 1 + 1;  // 1 for the marked
   v1  = (char *)malloc(len);
   // strcpy(v1, value);
-  if (marked != 0)
+  if (marked != 0) {
     marked = 1;  // make sure only 1 digit
+  }
   sprintf(v1, "%d%s", marked, value);
 
   defData->def_alias_set[k1] = v1;

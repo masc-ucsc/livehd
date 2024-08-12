@@ -54,6 +54,14 @@ using namespace std;
 
 BEGIN_LEFDEF_PARSER_NAMESPACE
 
+/* #define yyparse defyyparse */
+/* #define yylex   defyylex */
+/* #define yyerror defyyerror */
+/* #define yylval  defyylval */
+/* #define yychar  defyychar */
+/* #define yydebug defyydebug */
+/* #define yynerrs defyynerrs */
+
 #include "def.tab.hpp"
 
 int defrData::defGetKeyword(const char *name, int *result) {
@@ -120,11 +128,12 @@ void defrData::reload_buffer() {
   }
 
   if (nb == 0) {
-    if (settings->ReadFunction)
+    if (settings->ReadFunction) {
       nb = (*settings->ReadFunction)(File, buffer, IN_BUF_SIZE);
-    else
+    } else {
       /* This is a normal file so just read some bytes. */
       nb = fread(buffer, 1, IN_BUF_SIZE, File);
+    }
   }
 
   if (nb <= 0) {
@@ -138,15 +147,18 @@ void defrData::reload_buffer() {
 int defrData::GETC() {
   // Remove '\r' symbols from Windows streams.
   for (;;) {
-    if (next > last)
+    if (next > last) {
       reload_buffer();
-    if (next == NULL)
+    }
+    if (next == NULL) {
       return EOF;
+    }
 
     int ch = *next++;
 
-    if (ch != '\r')
+    if (ch != '\r') {
       return ch;
+    }
   }
 }
 
@@ -165,8 +177,9 @@ void defrData::UNGETC(char ch) {
  */
 char *defrData::ringCopy(const char *string) {
   int len = strlen(string) + 1;
-  if (++(ringPlace) >= RING_SIZE)
+  if (++(ringPlace) >= RING_SIZE) {
     ringPlace = 0;
+  }
   if (len > ringSizes[ringPlace]) {
     free(ring[ringPlace]);
     ring[ringPlace]      = (char *)malloc(len);
@@ -178,16 +191,18 @@ char *defrData::ringCopy(const char *string) {
 
 int defrData::DefGetTokenFromStack(char *s) {
   const char *ch;         /* utility variable */
-  char *      prS = NULL; /* pointing to the previous char or s */
+  char       *prS = NULL; /* pointing to the previous char or s */
 
   while (input_level >= 0) {
-    for (ch = stack[input_level].c_str(); *ch != 0; ch++) /* skip white space */
-      if (*ch != ' ' && *ch != '\t' && (nl_token || *ch != '\n'))
+    for (ch = stack[input_level].c_str(); *ch != 0; ch++) { /* skip white space */
+      if (*ch != ' ' && *ch != '\t' && (nl_token || *ch != '\n')) {
         break;
+      }
+    }
     /* did we find anything?  If not, decrement level and try again */
-    if (*ch == 0)
+    if (*ch == 0) {
       input_level--;
-    else if (*ch == '\n') {
+    } else if (*ch == '\n') {
       *s++ = *ch;
       *s   = 0;
       return TRUE;
@@ -199,8 +214,9 @@ int defrData::DefGetTokenFromStack(char *s) {
           */
           if (*prS == '"') {
             *prS = '\0';
-          } else
+          } else {
             *s++ = '\0';
+          }
           stack[input_level] = ch;
 
           return TRUE;
@@ -265,22 +281,25 @@ int defrData::DefGetToken(char **buf, int *bufferSize) {
   ntokens++;
   defInvalidChar = 0;
 
-  if (input_level >= 0) {        /* if we are expanding an alias */
-    if (DefGetTokenFromStack(s)) /* try to get a token from it */
-      return TRUE;               /* if we get one, return it */
-  }                              /* but if not, continue */
+  if (input_level >= 0) {          /* if we are expanding an alias */
+    if (DefGetTokenFromStack(s)) { /* try to get a token from it */
+      return TRUE;                 /* if we get one, return it */
+    }
+  } /* but if not, continue */
 
   /* skip blanks and count lines */
   while ((ch = GETC()) != EOF) {
     if (ch == '\n') {
       print_lines(++nlines);
     }
-    if (ch != ' ' && ch != '\t' && (nl_token || ch != '\n'))
+    if (ch != ' ' && ch != '\t' && (nl_token || ch != '\n')) {
       break;
+    }
   }
 
-  if (ch == EOF)
+  if (ch == EOF) {
     return FALSE;
+  }
 
   if (ch == '\n') {
     *s = ch;
@@ -344,8 +363,9 @@ int defrData::DefGetToken(char **buf, int *bufferSize) {
         defInvalidChar = 1;
       }
 
-      if (ch == ' ' || ch == '\t' || ch == '\n' || ch == EOF)
+      if (ch == ' ' || ch == '\t' || ch == '\n' || ch == EOF) {
         break;
+      }
 
       *s = ch;
       IncCurPos(&s, buf, bufferSize);
@@ -360,8 +380,9 @@ int defrData::DefGetToken(char **buf, int *bufferSize) {
         defInvalidChar = 1;
       }
 
-      if (ch == ' ' || ch == '\t' || ch == '\n' || ch == EOF)
+      if (ch == ' ' || ch == '\t' || ch == '\n' || ch == EOF) {
         break;
+      }
 
       *s = (ch >= 'a' && ch <= 'z') ? (ch - 'a' + 'A') : ch;
       IncCurPos(&s, buf, bufferSize);
@@ -370,14 +391,17 @@ int defrData::DefGetToken(char **buf, int *bufferSize) {
 
   /* If we got this far, the last char was whitespace */
   *s = '\0';
-  if (ch != EOF) /* shouldn't ungetc an EOF */
+  if (ch != EOF) { /* shouldn't ungetc an EOF */
     UNGETC((char)ch);
+  }
   return TRUE;
 }
 
 /* creates an upper case copy of an array */
 void defrData::uc_array(char *source, char *dest) {
-  for (; *source != 0;) *dest++ = toupper(*source++);
+  for (; *source != 0;) {
+    *dest++ = toupper(*source++);
+  }
   *dest = 0;
 }
 
@@ -423,8 +447,9 @@ void defrData::StoreAlias() {
 
     uc_array(line, uc_line);          /* make upper case copy */
     p = strstr(uc_line, "&ENDALIAS"); /* look for END_ALIAS */
-    if (p != NULL)                    /* if we find it */
+    if (p != NULL) {                  /* if we find it */
       *(line + (p - uc_line)) = 0;    /* remove it from the line */
+    }
 
     so_far += line;
   }
@@ -483,7 +508,7 @@ int defrData::defyylex(YYSTYPE *pYylval) {
 int defrData::sublex(YYSTYPE *pYylval) {
   char   fc;
   double numVal;
-  char * outMsg;
+  char  *outMsg;
 
   pv_deftoken = (char *)realloc(pv_deftoken, deftokenLength);
   strcpy(pv_deftoken, deftoken);
@@ -517,8 +542,9 @@ int defrData::sublex(YYSTYPE *pYylval) {
             }
           }
         }
-        if (fc == EOF)
+        if (fc == EOF) {
           return 0;
+        }
         if (fc == '\n') {
           print_lines(++nlines);
           break;
@@ -530,14 +556,16 @@ int defrData::sublex(YYSTYPE *pYylval) {
       string alias;
       uc_array(deftoken, uc_token);
 
-      if (strcmp(uc_token, "&ALIAS") == 0)
+      if (strcmp(uc_token, "&ALIAS") == 0) {
         StoreAlias(); /* read and store the alias */
-      else if (defGetAlias(deftoken, alias))
+      } else if (defGetAlias(deftoken, alias)) {
         stack[++input_level] = alias;
-      else
+      } else {
         break; /* begins with &, but not an &alias defn. or use. */
-    } else
+      }
+    } else {
       break; /* does not begin with commentChar or '&' */
+    }
   }
 
   if (defInvalidChar) {
@@ -591,9 +619,9 @@ int defrData::sublex(YYSTYPE *pYylval) {
         numVal = pYylval->dval = strtod(deftoken, &ch);
         if (no_num < 0 && *ch == '\0') { /* did we use the whole string? */
           /* check if the integer has exceed the limit */
-          if ((numVal >= lVal) && (numVal <= rVal))
+          if ((numVal >= lVal) && (numVal <= rVal)) {
             return NUMBER; /* YES, it's really a number */
-          else {
+          } else {
             char *str = (char *)malloc(strlen(deftoken) + strlen(session->FileName) + 350);
             sprintf(str, "<Number has exceed the limit for an integer> in %s at line %s\n", session->FileName, lines2str(nlines));
             fflush(stdout);
@@ -611,11 +639,12 @@ int defrData::sublex(YYSTYPE *pYylval) {
       numVal = pYylval->dval = strtod(deftoken, &ch);
       if (no_num < 0 && *ch == '\0') { /* did we use the whole string? */
         /* check if the integer has exceed the limit */
-        if (real_num) /* this is for PROPERTYDEF with REAL */
+        if (real_num) { /* this is for PROPERTYDEF with REAL */
           return NUMBER;
-        if ((numVal >= lVal) && (numVal <= rVal))
+        }
+        if ((numVal >= lVal) && (numVal <= rVal)) {
           return NUMBER; /* YES, it's really a number */
-        else {
+        } else {
           char *str = (char *)malloc(strlen(deftoken) + strlen(session->FileName) + 350);
           sprintf(str, "<Number has exceed the limit for an integer> in %s at line %s\n", session->FileName, lines2str(nlines));
           fflush(stdout);
@@ -626,9 +655,9 @@ int defrData::sublex(YYSTYPE *pYylval) {
         }
       } else { /* failed integer conversion, try floating point */
         pYylval->dval = strtol(deftoken, &ch, 10);
-        if (no_num < 0 && *ch == '\0') /* did we use the whole string? */
+        if (no_num < 0 && *ch == '\0') { /* did we use the whole string? */
           return NUMBER;
-        else {
+        } else {
           pYylval->string = ringCopy(deftoken); /* NO, it's a string */
           return T_STRING;
         }
@@ -694,23 +723,32 @@ int defrData::sublex(YYSTYPE *pYylval) {
       uc_array(deftoken, uc_token);
 
       if (defGetKeyword(uc_token, &result)) {
-        if (K_N == result)
+        if (K_N == result) {
           return K_N;
-        if (K_W == result)
+        }
+        if (K_W == result) {
           return K_W;
-        if (K_S == result)
+        }
+        if (K_S == result) {
           return K_S;
-        if (K_E == result)
+        }
+        if (K_E == result) {
           return K_E;
-        if (K_FN == result)
+        }
+        if (K_FN == result) {
           return K_FN;
-        if (K_FW == result)
+        }
+        if (K_FW == result) {
           return K_FW;
-        if (K_FS == result)
+        }
+        if (K_FS == result) {
           return K_FS;
-        if (K_FE == result)
-          if (strcmp(deftoken, "FE") == 0)
+        }
+        if (K_FE == result) {
+          if (strcmp(deftoken, "FE") == 0) {
             return K_FE;
+          }
+        }
       }
     }
     pYylval->string = ringCopy(deftoken);
@@ -742,8 +780,9 @@ int defrData::sublex(YYSTYPE *pYylval) {
             break;
           }
 
-          if (c == ';' && (prev == ' ' || prev == '\t' || prev == '\n'))
+          if (c == ';' && (prev == ' ' || prev == '\t' || prev == '\n')) {
             break;
+          }
           if (c == '\n') {
             print_lines(++nlines);
           }
@@ -777,9 +816,9 @@ int defrData::sublex(YYSTYPE *pYylval) {
             History_text.push_back(cc);
             if (cc != ' ') {
               if (cc == '\"') { /* found a quote */
-                if (!begQuote)
+                if (!begQuote) {
                   begQuote = 1;
-                else if (notEmpTag) {
+                } else if (notEmpTag) {
                   foundTag = 1;
                   break; /* Found the quoted tag */
                 } else {
@@ -789,8 +828,9 @@ int defrData::sublex(YYSTYPE *pYylval) {
               } else if (!begQuote) { /* anything but a quote */
                 defError(6005, "The '\"' is missing within the tag. Specify the '\"' in the tag and then try again.");
                 break;
-              } else           /* anything but a quote and there */
+              } else {         /* anything but a quote and there */
                 notEmpTag = 1; /* is already a quote */
+              }
             }
           }
         }
@@ -809,10 +849,11 @@ int defrData::sublex(YYSTYPE *pYylval) {
             if (cc == '\n') {
               print_lines(++nlines);
             } else if (cc == '\"') {
-              if (!begQuote)
+              if (!begQuote) {
                 begQuote = 1;
-              else
+              } else {
                 begQuote = 0;
+              }
             }
 
             History_text.push_back(cc);
@@ -820,8 +861,9 @@ int defrData::sublex(YYSTYPE *pYylval) {
             int histTextSize = History_text.size();
 
             if (histTextSize >= 6 && memcmp(&History_text[histTextSize - 6], "ENDEXT", 6) == 0) {
-              if (begQuote)
+              if (begQuote) {
                 defError(6006, "The ending '\"' is missing in the tag. Specify the ending '\"' in the tag and then try again.");
+              }
               break;
             } else if (histTextSize >= 10 && memcmp(&History_text[histTextSize - 10], "END DESIGN", 10) == 0) {
               defError(6007, "The ENDEXT statement is missing in the DEF file. Include the statement and then try again.");
@@ -834,19 +876,23 @@ int defrData::sublex(YYSTYPE *pYylval) {
       }
       return result; /* YES, return its value */
     } else {         /* we don't have a keyword.  */
-      if (fc == '&')
+      if (fc == '&') {
         return amper_lookup(pYylval, deftoken);
+      }
       pYylval->string = ringCopy(deftoken); /* NO, it's a string */
       return T_STRING;
     }
   } else { /* it should be a punctuation character */
     if (deftoken[1] != '\0') {
-      if (strcmp(deftoken, ">=") == 0)
+      if (strcmp(deftoken, ">=") == 0) {
         return K_GE;
-      if (strcmp(deftoken, "<=") == 0)
+      }
+      if (strcmp(deftoken, "<=") == 0) {
         return K_LE;
-      if (strcmp(deftoken, "<>") == 0)
+      }
+      if (strcmp(deftoken, "<>") == 0) {
         return K_NE;
+      }
 
       defError(6017, "Odd punctuation found.");
       hasFatalError = 1;
@@ -868,12 +914,14 @@ int defrData::amper_lookup(YYSTYPE *pYylval, char *tkn) {
   /* &defines returns a T_STRING */
   if (defGetDefine(tkn, defValue)) {
     int value;
-    if (defGetKeyword(defValue.c_str(), &value))
+    if (defGetKeyword(defValue.c_str(), &value)) {
       return value;
-    if (defValue.c_str()[0] == '"')
+    }
+    if (defValue.c_str()[0] == '"') {
       pYylval->string = ringCopy(defValue.c_str() + 1);
-    else
+    } else {
       pYylval->string = ringCopy(defValue.c_str());
+    }
     return (defValue.c_str()[0] == '\"' ? QSTRING : T_STRING);
   }
   /* if none of the above, just return the deftoken. */
@@ -882,19 +930,22 @@ int defrData::amper_lookup(YYSTYPE *pYylval, char *tkn) {
 }
 
 void defrData::defError(int msgNum, const char *s) {
-  char *      str;
+  char       *str;
   const char *curToken = isgraph(deftoken[0]) ? deftoken : "<unprintable>";
   const char *pvToken  = isgraph(pv_deftoken[0]) ? pv_deftoken : "<unprintable>";
   int         len      = strlen(curToken) - 1;
   int         pvLen    = strlen(pvToken) - 1;
 
-  if (hasFatalError)
+  if (hasFatalError) {
     return;
-  if ((settings->totalDefMsgLimit > 0) && (defMsgPrinted >= settings->totalDefMsgLimit))
+  }
+  if ((settings->totalDefMsgLimit > 0) && (defMsgPrinted >= settings->totalDefMsgLimit)) {
     return;
+  }
   if (settings->MsgLimit[msgNum - 5000] > 0) {
-    if (msgLimit[msgNum - 5000] >= settings->MsgLimit[msgNum - 5000])
+    if (msgLimit[msgNum - 5000] >= settings->MsgLimit[msgNum - 5000]) {
       return; /* over the limit */
+    }
     msgLimit[msgNum - 5000] = msgLimit[msgNum - 5000] + 1;
   }
 
@@ -986,8 +1037,9 @@ void defrData::defInfo(int msgNum, const char *s) {
   int i;
 
   for (i = 0; i < settings->nDDMsgs; i++) { /* check if info has been disable */
-    if (settings->disableDMsgs[i] == msgNum)
+    if (settings->disableDMsgs[i] == msgNum) {
       return; /* don't print out any info since msg has been disabled */
+    }
   }
 
   if (settings->ContextWarningLogFunction) {
@@ -1031,8 +1083,9 @@ void defrData::defWarning(int msgNum, const char *s) {
   int i;
 
   for (i = 0; i < settings->nDDMsgs; i++) { /* check if warning has been disable */
-    if (settings->disableDMsgs[i] == msgNum)
+    if (settings->disableDMsgs[i] == msgNum) {
       return; /* don't print out any warning since msg has been disabled */
+    }
   }
 
   if (settings->ContextWarningLogFunction) {
@@ -1292,10 +1345,11 @@ void defrData::pathIsDone(int sh, int reset, int osNet, int *needCbk) {
       // else
       Subnet->addWirePath(&PathObj, reset, osNet, needCbk);
     } else {
-      if (sh)
+      if (sh) {
         Net.addShieldPath(&PathObj, reset, osNet, needCbk);
-      else
+      } else {
         Net.addWirePath(&PathObj, reset, osNet, needCbk);
+      }
     }
   } else if (callbacks->PathCbk) {
     // defrPath->reverseOrder();
