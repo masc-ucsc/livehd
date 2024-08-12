@@ -4,6 +4,7 @@ workspace(name = "livehd")
 
 load("@bazel_tools//tools/build_defs/repo:git.bzl", "new_git_repository")
 load("@bazel_tools//tools/build_defs/repo:http.bzl", "http_archive")
+load("@bazel_tools//tools/build_defs/repo:git.bzl", "git_repository")
 
 http_archive(
     name = "rules_foreign_cc",
@@ -17,17 +18,17 @@ load("@rules_foreign_cc//foreign_cc:repositories.bzl", "rules_foreign_cc_depende
 rules_foreign_cc_dependencies()
 
 # bazel_rules_hdl
-http_archive(
-    name = "rules_hdl",
-    sha256 = "9b3ef2d8e0603de6c689077b75b1fbfa42a24b1410423dd69271130586e2d8ee",
-    strip_prefix = "bazel_rules_hdl-4c634c7d2b026870ecbc2fb3c4d463b6bd5c2ceb",
-    url = "https://github.com/masc-ucsc/bazel_rules_hdl/archive/4c634c7d2b026870ecbc2fb3c4d463b6bd5c2ceb.zip",
-)
+#http_archive(
+#    name = "rules_hdl",
+#    sha256 = "9b3ef2d8e0603de6c689077b75b1fbfa42a24b1410423dd69271130586e2d8ee",
+#    strip_prefix = "bazel_rules_hdl-4c634c7d2b026870ecbc2fb3c4d463b6bd5c2ceb",
+#    url = "https://github.com/masc-ucsc/bazel_rules_hdl/archive/4c634c7d2b026870ecbc2fb3c4d463b6bd5c2ceb.zip",
+#)
 
-load("@rules_hdl//dependency_support:dependency_support.bzl", "dependency_support")
-dependency_support()
-load("@rules_hdl//:init.bzl", "init")
-init()
+#load("@rules_hdl//dependency_support:dependency_support.bzl", "dependency_support")
+#dependency_support()
+#load("@rules_hdl//:init.bzl", "init")
+#init()
 
 # TODO: USE THIS NEW YOSYS INSTEAD OF BAZEL_RULES_HDL
 new_git_repository(
@@ -355,10 +356,16 @@ load("@com_github_nelhage_rules_boost//:boost/boost.bzl", "boost_deps")
 
 # Abseil (bazel_rules_hdl provides com_google_absl)
 http_archive(
-    name = "com_google_absl2",
+    name = "com_google_absl",
     sha256 = "497ebdc3a4885d9209b9bd416e8c3f71e7a1fb8af249f6c2a80b7cbeefcd7e21",
     strip_prefix = "abseil-cpp-20230802.1",
     urls = ["https://github.com/abseil/abseil-cpp/archive/refs/tags/20230802.1.zip"],
+)
+
+git_repository(
+    name = "com_google_googletest",
+    remote = "https://github.com/google/googletest",
+    tag = "v1.15.2",
 )
 
 boost_deps()
