@@ -39,5 +39,6 @@ lgcheck*
 livehd_regression
 *.lnast.txt
 *.lnast.raw.txt
+*.lock
 pp*
 
