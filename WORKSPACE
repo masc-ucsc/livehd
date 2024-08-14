@@ -329,10 +329,10 @@ rules_proto_toolchains()
 http_archive(
     name = "mimalloc",
     build_file = "mimalloc.BUILD",
-    sha256 = "86281c918921c1007945a8a31e5ad6ae9af77e510abfec20d000dd05d15123c7",
-    strip_prefix = "mimalloc-2.1.2",
+    sha256 = "fa61cf01e3dd869b35275bfd8be95bfde77f0b65dfa7e34012c09a66e1ea463f",
+    strip_prefix = "mimalloc-2.1.7",
     urls = [
-        "https://github.com/microsoft/mimalloc/archive/refs/tags/v2.1.2.zip",
+        "https://github.com/microsoft/mimalloc/archive/refs/tags/v2.1.7.zip",
     ],
 )
 
