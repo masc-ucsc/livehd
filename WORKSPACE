@@ -357,9 +357,9 @@ load("@com_github_nelhage_rules_boost//:boost/boost.bzl", "boost_deps")
 # Abseil (bazel_rules_hdl provides com_google_absl)
 http_archive(
     name = "com_google_absl",
-    sha256 = "497ebdc3a4885d9209b9bd416e8c3f71e7a1fb8af249f6c2a80b7cbeefcd7e21",
-    strip_prefix = "abseil-cpp-20230802.1",
-    urls = ["https://github.com/abseil/abseil-cpp/archive/refs/tags/20230802.1.zip"],
+    sha256 = "823b207ce755bc0b6de01ab6599dc0a8533745ae925779f3617163760e2e1b74",
+    strip_prefix = "abseil-cpp-20230802.2",
+    urls = ["https://github.com/abseil/abseil-cpp/archive/refs/tags/20230802.2.zip"],
 )
 
 git_repository(
