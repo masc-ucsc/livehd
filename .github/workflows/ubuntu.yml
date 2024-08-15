@@ -16,7 +16,7 @@ jobs:
         uses: bazelbuild/setup-bazelisk@v2
 
       - name: Mount bazel cache
-        uses: actions/cache@v3
+        uses: actions/cache@v4
         with:
           path: "~/.cache/bazel"
           key: bazel-gcc
@@ -36,7 +36,7 @@ jobs:
         uses: bazelbuild/setup-bazelisk@v2
 
       - name: Mount bazel cache
-        uses: actions/cache@v3
+        uses: actions/cache@v4
         with:
           path: "~/.cache/bazel"
           key: bazel-cgcc
@@ -61,7 +61,7 @@ jobs:
         uses: bazelbuild/setup-bazelisk@v2
 
       - name: Mount bazel cache
-        uses: actions/cache@v3
+        uses: actions/cache@v4
         with:
           path: "~/.cache/bazel"
           key: bazel-clang
