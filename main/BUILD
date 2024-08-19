@@ -106,7 +106,7 @@ cc_test(
     ],
     deps = [
         ":tmt",
-        "@com_google_googletest//:gtest_main",
+        "@googletest//:gtest_main",
         "@iassert",
     ],
 )

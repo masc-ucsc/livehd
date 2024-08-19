@@ -25,7 +25,7 @@ cc_test(
     srcs = ["acyclic_test.cpp"],
     deps = [
         ":pass_label",
-        "@com_google_googletest//:gtest_main",
+        "@googletest//:gtest_main",
         "@fmt",
     ],
 )
@@ -35,7 +35,7 @@ cc_test(
     srcs = ["synth_test.cpp"],
     deps = [
         ":pass_label",
-        "@com_google_googletest//:gtest_main",
+        "@googletest//:gtest_main",
         "@fmt",
     ],
 )
@@ -46,7 +46,7 @@ cc_test(
     deps = [
         ":pass_label",
         "//third_party/viecut",
-        "@com_google_googletest//:gtest_main",
+        "@googletest//:gtest_main",
         "@fmt",
     ],
 )

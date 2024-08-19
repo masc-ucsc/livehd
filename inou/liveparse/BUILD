@@ -26,7 +26,7 @@ cc_test(
     #tags = [ "fixme", ],
     deps = [
         ":inou_liveparse",
-        "@com_google_googletest//:gtest_main",
+        "@googletest//:gtest_main",
     ],
 )
 

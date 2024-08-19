@@ -27,7 +27,7 @@ cc_test(
     srcs = ["lec_test1.cpp"],
     deps = [
         ":pass_lec",
-        "@com_google_googletest//:gtest_main",
+        "@googletest//:gtest_main",
     ],
 )
 

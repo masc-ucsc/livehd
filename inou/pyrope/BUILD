@@ -47,7 +47,7 @@ cc_binary(
     copts = COPTS,
     deps = [
         ":inou_pyrope",
-        "@com_google_googletest//:gtest_main",
+        "@googletest//:gtest_main",
     ],
 )
 
@@ -57,7 +57,7 @@ cc_binary(
     copts = COPTS,
     deps = [
         ":inou_pyrope",
-        "@com_google_googletest//:gtest_main",
+        "@googletest//:gtest_main",
     ],
 )
 
@@ -69,7 +69,7 @@ cc_test(
     ],
     deps = [
         ":inou_pyrope",
-        "@com_google_googletest//:gtest_main",
+        "@googletest//:gtest_main",
     ],
 )
 

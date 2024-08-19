@@ -35,6 +35,6 @@ cc_test(
     # tags = [ "fixme", ],
     deps = [
         ":pass_sample",
-        "@com_google_googletest//:gtest_main",
+        "@googletest//:gtest_main",
     ],
 )

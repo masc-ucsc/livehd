@@ -31,7 +31,7 @@ cc_test(
     ],
     deps = [
         ":archfp",
-        "@com_google_googletest//:gtest_main",
+        "@googletest//:gtest_main",
     ],
 )
 
@@ -43,7 +43,7 @@ cc_test(
     ],
     deps = [
         ":archfp",
-        "@com_google_googletest//:gtest_main",
+        "@googletest//:gtest_main",
     ],
 )
 

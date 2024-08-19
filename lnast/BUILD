@@ -20,7 +20,7 @@ cc_library(
     deps = [
         "//core",
         "//parser",
-        "@com_google_absl//absl/strings",
+        "@abseil-cpp//absl/strings",
         "@hif//hif",
     ],
 )
@@ -40,7 +40,7 @@ cc_test(
     srcs = ["tests/ast_test.cpp"],
     deps = [
         ":lnast",
-        "@com_google_googletest//:gtest_main",
+        "@googletest//:gtest_main",
     ],
 )
 
@@ -49,7 +49,7 @@ cc_test(
     srcs = ["tests/symbol_table_test.cpp"],
     deps = [
         ":lnast",
-        "@com_google_googletest//:gtest_main",
+        "@googletest//:gtest_main",
     ],
 )
 
@@ -58,7 +58,7 @@ cc_test(
     srcs = ["tests/ast_test2.cpp"],
     deps = [
         ":lnast",
-        "@com_google_googletest//:gtest_main",
+        "@googletest//:gtest_main",
     ],
 )
 
@@ -80,7 +80,7 @@ cc_test(
     tags = ["fixme"],
     deps = [
         ":lnast",
-        "@com_google_googletest//:gtest_main",
+        "@googletest//:gtest_main",
     ],
 )
 
@@ -89,7 +89,7 @@ cc_test(
     srcs = ["tests/lnast_bench.cpp"],
     deps = [
         ":lnast",
-        "@com_google_benchmark//:benchmark",
+        "@google_benchmark//:benchmark",
     ],
 )
 
@@ -118,7 +118,7 @@ cc_test(
     srcs = ["tests/lexer_test.cpp"],
     deps = [
         ":lnast",
-        "@com_google_googletest//:gtest_main",
+        "@googletest//:gtest_main",
     ],
 )
 
@@ -129,7 +129,7 @@ cc_test(
     data = glob(["tests/ln/*.ln"]),
     deps = [
         ":lnast",
-        "@com_google_googletest//:gtest_main",
+        "@googletest//:gtest_main",
     ],
 )
 
@@ -138,7 +138,7 @@ cc_binary(
     srcs = ["tests/bench.cpp"],
     deps = [
         ":lnast",
-        "@com_google_benchmark//:benchmark",
+        "@google_benchmark//:benchmark",
         "@hif//hif",
     ],
 )

@@ -17,7 +17,7 @@ cc_library(
         # "//eprp",
         "//core",
         "@hif//hif",
-        "@rapidjson//:headers",
+        "@rapidjson",
     ],
     alwayslink = True,
 )
@@ -29,7 +29,7 @@ cc_library(
     includes = ["."],
     deps = [
         ":lgraph",
-        "@com_google_googletest//:gtest_main",
+        "@googletest//:gtest_main",
     ],
 )
 
@@ -40,7 +40,7 @@ cc_test(
     includes = ["."],
     deps = [
         ":lgraph",
-        "@com_google_googletest//:gtest_main",
+        "@googletest//:gtest_main",
     ],
 )
 
@@ -66,7 +66,7 @@ cc_test(
     srcs = ["tests/lgraph_test.cpp"],
     deps = [
         ":lgraph",
-        "@com_google_googletest//:gtest_main",
+        "@googletest//:gtest_main",
     ],
 )
 
@@ -75,7 +75,7 @@ cc_test(
     srcs = ["tests/lgraph_each_test.cpp"],
     deps = [
         ":lgraph",
-        "@com_google_googletest//:gtest_main",
+        "@googletest//:gtest_main",
     ],
 )
 
@@ -84,7 +84,7 @@ cc_test(
     srcs = ["tests/node_test.cpp"],
     deps = [
         ":lgraph",
-        "@com_google_googletest//:gtest_main",
+        "@googletest//:gtest_main",
     ],
 )
 
@@ -113,7 +113,7 @@ cc_test(
     srcs = ["tests/edge_test.cpp"],
     deps = [
         ":lgraph",
-        "@com_google_googletest//:gtest_main",
+        "@googletest//:gtest_main",
     ],
 )
 
@@ -124,6 +124,6 @@ cc_test(
     deps = [
         ":lgraph",
         "@boost//:graph",
-        "@com_google_googletest//:gtest_main",
+        "@googletest//:gtest_main",
     ],
 )

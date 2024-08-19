@@ -25,6 +25,6 @@ cc_test(
     srcs = ["tests/eprp_test.cpp"],
     deps = [
         ":pass",
-        "@com_google_googletest//:gtest_main",
+        "@googletest//:gtest_main",
     ],
 )

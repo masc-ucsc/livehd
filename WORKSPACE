@@ -6,17 +6,6 @@ load("@bazel_tools//tools/build_defs/repo:git.bzl", "new_git_repository")
 load("@bazel_tools//tools/build_defs/repo:http.bzl", "http_archive")
 load("@bazel_tools//tools/build_defs/repo:git.bzl", "git_repository")
 
-http_archive(
-    name = "rules_foreign_cc",
-    sha256 = "5303e3363fe22cbd265c91fce228f84cf698ab0f98358ccf1d95fba227b308f6",
-    strip_prefix = "rules_foreign_cc-0.9.0",
-    url = "https://github.com/bazelbuild/rules_foreign_cc/archive/0.9.0.zip",
-)
-
-load("@rules_foreign_cc//foreign_cc:repositories.bzl", "rules_foreign_cc_dependencies")
-
-rules_foreign_cc_dependencies()
-
 # bazel_rules_hdl
 #http_archive(
 #    name = "rules_hdl",
@@ -51,51 +40,6 @@ http_archive(
    patches = ["//external:yosys.patch"],
 )
 
-#### M4/Flex/Bison
-http_archive(
-    name = "rules_m4",
-    sha256 = "10ce41f150ccfbfddc9d2394ee680eb984dc8a3dfea613afd013cfb22ea7445c",
-    urls = ["https://github.com/jmillikin/rules_m4/releases/download/v0.2.3/rules_m4-v0.2.3.tar.xz"],
-)
-
-load("@rules_m4//m4:m4.bzl", "m4_register_toolchains")
-
-m4_register_toolchains(version = "1.4.18")
-
-http_archive(
-    name = "rules_flex",
-    # Obtain the package checksum from the release page:
-    # https://github.com/jmillikin/rules_flex/releases/tag/v0.2.1
-    sha256 = "",
-    urls = ["https://github.com/jmillikin/rules_flex/releases/download/v0.2.1/rules_flex-v0.2.1.tar.xz"],
-)
-
-load("@rules_flex//flex:flex.bzl", "flex_register_toolchains")
-
-flex_register_toolchains(version = "2.6.4")
-
-http_archive(
-    name = "rules_bison",
-    # Obtain the package checksum from the release page:
-    # https://github.com/jmillikin/rules_bison/releases/tag/v0.2.2
-    sha256 = "",
-    urls = ["https://github.com/jmillikin/rules_bison/releases/download/v0.2.2/rules_bison-v0.2.2.tar.xz"],
-)
-
-load("@rules_bison//bison:bison.bzl", "bison_register_toolchains")
-
-bison_register_toolchains(version = "3.3.2")
-
-# OLD: TO DELETE
-# new_git_repository(
-#    name = "yosys",
-#    build_file = "yosys.BUILD",
-#    commit = "de79978372c1953e295fa262444cb0a28a246c5f",  # Sep 24, 2020
-#    patches = ["//external:yosys.patch"],
-#    remote = "https://github.com/YosysHQ/yosys.git",
-#)
-
-
 # mustache
 http_archive(
     name = "mustache",
@@ -105,14 +49,6 @@ http_archive(
     urls = [
         "https://github.com/kainjow/Mustache/archive/04277d5552c6e46bee41a946b7d175a660ea1b3d.zip",
     ],
-)
-
-# google benchmark
-http_archive(
-    name = "com_google_benchmark",
-    sha256 = "abfc22e33e3594d0edf8eaddaf4d84a2ffc491ad74b6a7edc6e7a608f690e691",
-    strip_prefix = "benchmark-1.8.3",
-    urls = ["https://github.com/google/benchmark/archive/refs/tags/v1.8.3.zip"],
 )
 
 # fmt
@@ -181,10 +117,10 @@ http_archive(
 # HIF
 http_archive(
     name = "hif",
-    # sha256 = "9eee32fcb0ec4bbe9ed945de55c7161e294e76958af2461c8544ea5c1e484d02",
-    strip_prefix = "hif-9fabf0ec6d8c5dc344fbd2114c99b41833463590",
+    sha256 = "bf4d0d5e06b100b616c35b8fc1601de482ea0dfc7b8f0f75763f9b9020076626",
+    strip_prefix = "hif-11b5dc3eda963fe5220345dac7fa2ccc68545182",
     urls = [
-        "https://github.com/masc-ucsc/hif/archive/9fabf0ec6d8c5dc344fbd2114c99b41833463590.zip",
+        "https://github.com/masc-ucsc/hif/archive/11b5dc3eda963fe5220345dac7fa2ccc68545182.zip",
     ],
 )
 
@@ -210,18 +146,6 @@ http_archive(
     strip_prefix = "boolector-13a8a06d561041cafcaf5458e404c1ec354b2841",
     urls = [
         "https://github.com/Boolector/boolector/archive/13a8a06d561041cafcaf5458e404c1ec354b2841.zip",
-    ],
-)
-
-# rapidjson
-# The last release is quite old. So top of tree
-http_archive(
-    name = "rapidjson",
-    build_file = "rapidjson.BUILD",
-    sha256 = "8ea39c59b37bfd1888b262daa75e70ccd2b60790f9f841d2f44b41df417f75b7",
-    strip_prefix = "rapidjson-a95e013b97ca6523f32da23f5095fcc9dd6067e5/include",
-    urls = [
-        "https://github.com/Tencent/rapidjson/archive/a95e013b97ca6523f32da23f5095fcc9dd6067e5.zip",
     ],
 )
 
@@ -325,17 +249,6 @@ rules_proto_toolchains()
 # rules_proto_dependencies()
 # rules_proto_toolchains()
 
-# mimalloc (only seems to work in Linux)
-http_archive(
-    name = "mimalloc",
-    build_file = "mimalloc.BUILD",
-    sha256 = "86281c918921c1007945a8a31e5ad6ae9af77e510abfec20d000dd05d15123c7",
-    strip_prefix = "mimalloc-2.1.2",
-    urls = [
-        "https://github.com/microsoft/mimalloc/archive/refs/tags/v2.1.2.zip",
-    ],
-)
-
 # Perfetto
 http_archive(
     name = "com_google_perfetto",
@@ -354,18 +267,5 @@ http_archive(
 
 load("@com_github_nelhage_rules_boost//:boost/boost.bzl", "boost_deps")
 
-# Abseil (bazel_rules_hdl provides com_google_absl)
-http_archive(
-    name = "com_google_absl",
-    sha256 = "497ebdc3a4885d9209b9bd416e8c3f71e7a1fb8af249f6c2a80b7cbeefcd7e21",
-    strip_prefix = "abseil-cpp-20230802.1",
-    urls = ["https://github.com/abseil/abseil-cpp/archive/refs/tags/20230802.1.zip"],
-)
-
-git_repository(
-    name = "com_google_googletest",
-    remote = "https://github.com/google/googletest",
-    tag = "v1.15.2",
-)
 
 boost_deps()

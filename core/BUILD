@@ -30,12 +30,12 @@ cc_library(
     visibility = ["//visibility:public"],
     deps = [
         "@boost//:multiprecision",
-        "@com_google_absl//absl/container:btree",
-        "@com_google_absl//absl/container:flat_hash_map",
-        "@com_google_absl//absl/container:flat_hash_set",
-        "@com_google_absl//absl/container:node_hash_map",
-        "@com_google_absl//absl/strings",
-        "@com_google_absl//absl/types:span",
+        "@abseil-cpp//absl/container:btree",
+        "@abseil-cpp//absl/container:flat_hash_map",
+        "@abseil-cpp//absl/container:flat_hash_set",
+        "@abseil-cpp//absl/container:node_hash_map",
+        "@abseil-cpp//absl/strings",
+        "@abseil-cpp//absl/types:span",
         "@fmt",
         "@iassert",
     ] + select({
@@ -56,7 +56,7 @@ cc_test(
     # tags = ["long1"], # Run only with long1 set of tests
     deps = [
         ":core",
-        "@com_google_googletest//:gtest_main",
+        "@googletest//:gtest_main",
     ],
 )
 
@@ -67,7 +67,7 @@ cc_test(
     ],
     deps = [
         ":core",
-        "@com_google_googletest//:gtest_main",
+        "@googletest//:gtest_main",
     ],
 )
 
@@ -78,7 +78,7 @@ cc_test(
     ],
     deps = [
         ":core",
-        "@com_google_googletest//:gtest_main",
+        "@googletest//:gtest_main",
     ],
 )
 
@@ -90,7 +90,7 @@ cc_test(
     tags = ["fixme"],
     deps = [
         ":core",
-        "@com_google_benchmark//:benchmark",
+        "@google_benchmark//:benchmark",
     ],
 )
 
@@ -101,8 +101,8 @@ cc_test(
     ],
     deps = [
         ":core",
-        "@com_google_absl//absl/container:flat_hash_set",
-        "@com_google_benchmark//:benchmark",
+        "@abseil-cpp//absl/container:flat_hash_set",
+        "@google_benchmark//:benchmark",
     ],
 )
 
@@ -114,7 +114,7 @@ cc_test(
     ],
     deps = [
         ":core",
-        "@com_google_benchmark//:benchmark",
+        "@google_benchmark//:benchmark",
     ],
 )
 
@@ -124,9 +124,9 @@ cc_test(
     deps = [
         ":core",
         "//simlib:headers",
-        "@com_google_absl//absl/container:flat_hash_map",
-        "@com_google_absl//absl/container:flat_hash_set",
-        "@com_google_googletest//:gtest_main",
+        "@abseil-cpp//absl/container:flat_hash_map",
+        "@abseil-cpp//absl/container:flat_hash_set",
+        "@googletest//:gtest_main",
     ],
 )
 
@@ -135,8 +135,8 @@ cc_test(
     srcs = ["tests/lconst_bench.cpp"],
     deps = [
         ":core",
-        "@com_google_absl//absl/container:flat_hash_map",
-        "@com_google_absl//absl/container:flat_hash_set",
-        "@com_google_benchmark//:benchmark",
+        "@abseil-cpp//absl/container:flat_hash_map",
+        "@abseil-cpp//absl/container:flat_hash_set",
+        "@google_benchmark//:benchmark",
     ],
 )

@@ -13,7 +13,7 @@ cc_binary(
         "//lgraph",
         "//lnast",
         "//pass/lnast_tolg:pass_lnast_tolg",
-        "@com_google_benchmark//:benchmark",
+        "@google_benchmark//:benchmark",
         "@hif//hif",
     ],
 )
