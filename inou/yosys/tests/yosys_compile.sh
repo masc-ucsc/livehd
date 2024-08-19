@@ -42,7 +42,7 @@ fail_list=""
 pass_list=""
 rm -rf tmp_yosys_mix
 mkdir -p tmp_yosys_mix
-cp inou/yosys/tests/cgen* tmp_yosys_mix
+#cp inou/yosys/tests/cgen* tmp_yosys_mix
 for full_input in ${inputs}
 do
   STARTTIME=$SECONDS
