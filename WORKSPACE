@@ -86,10 +86,10 @@ new_git_repository(
 http_archive(
     name = "tree-sitter",
     build_file = "tree-sitter.BUILD",
-    sha256 = "5f04d75f2b2b9424131e4b769c1e64f7a82bfcf930c79a87c118d251d44ef6e2",
-    strip_prefix = "tree-sitter-0.20.8",
+    sha256 = "e9f2772b12d4b12a0db5542ce72e8c85a34e397f2c3fd7b3fa08814f71fd35b3",
+    strip_prefix = "tree-sitter-0.23.0",
     urls = [
-        "https://github.com/tree-sitter/tree-sitter/archive/refs/tags/v0.20.8.zip",
+        "https://github.com/tree-sitter/tree-sitter/archive/refs/tags/v0.23.0.zip",
     ],
 )
 
