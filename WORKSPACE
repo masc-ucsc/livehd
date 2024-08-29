@@ -23,7 +23,7 @@ load("@bazel_tools//tools/build_defs/repo:git.bzl", "git_repository")
 new_git_repository(
     name = "abc",
     build_file = "abc.BUILD",  # relative to external path
-    commit = "362b2d9d08f4dbc8dfc751b68ddf7bd3f9c4ed54",  # April 6 2019
+    commit = "64ed5b81a493e285a64057a9db9ebad6867002bb",
     patches = ["//external:abc.patch"],
     remote = "https://github.com/berkeley-abc/abc.git",
     shallow_since = "1554534526 -1000",
@@ -137,27 +137,25 @@ http_archive(
 )
 
 # boolector
-# The last release is quite old. So top of tree
 http_archive(
     name = "boolector",
     build_file = "boolector.BUILD",
     patches = ["//external:boolector.patch"],
-    sha256 = "d955193f3b32f1a86646d744b8cb688d00d2e2c1c690d249b1041dc481315bbe",
-    strip_prefix = "boolector-13a8a06d561041cafcaf5458e404c1ec354b2841",
+    sha256 = "de4a91d4d271909aa0e1ca646105579cbdcd7676842f517237fc6238ca39aa79",
+    strip_prefix = "boolector-43dae91c1070e5e2633e036ebd75ffb13fe261e1",
     urls = [
-        "https://github.com/Boolector/boolector/archive/13a8a06d561041cafcaf5458e404c1ec354b2841.zip",
+        "https://github.com/Boolector/boolector/archive/43dae91c1070e5e2633e036ebd75ffb13fe261e1.zip",
     ],
 )
 
 # replxx
-# The last release is quite old. So top of tree
 http_archive(
     name = "replxx",
     build_file = "replxx.BUILD",
-    sha256 = "d8d6eca00efa464089c0240f1a898449938d3f00f53e12e1dd09c55b60e4fbb8",
-    strip_prefix = "replxx-5d04501f93a4fb7f0bb8b73b8f614bc986f9e25b",
+    sha256 = "e7829402f1f5ab379bd22f2a297da5fd6dc096aa9413d2039aa0a3659fd199b6",
+    strip_prefix = "replxx-73dad091de589d770874ce6dfd3c2adf442973de",
     urls = [
-        "https://github.com/ClickHouse/replxx/archive/5d04501f93a4fb7f0bb8b73b8f614bc986f9e25b.zip",
+        "https://github.com/ClickHouse/replxx/archive/73dad091de589d770874ce6dfd3c2adf442973de.zip",
     ],
 )
 
@@ -261,11 +259,10 @@ http_archive(
 # Boost
 http_archive(
     name = "com_github_nelhage_rules_boost",
-    strip_prefix = "rules_boost-4ab574f9a84b42b1809978114a4664184716f4bf",
-    url = "https://github.com/nelhage/rules_boost/archive/4ab574f9a84b42b1809978114a4664184716f4bf.tar.gz",
+    strip_prefix = "rules_boost-8fa193c4e21daaa2d46ff6b9c2b5a2de70b6caa1",
+    url = "https://github.com/nelhage/rules_boost/archive/8fa193c4e21daaa2d46ff6b9c2b5a2de70b6caa1.tar.gz",
 )
 
 load("@com_github_nelhage_rules_boost//:boost/boost.bzl", "boost_deps")
-
 
 boost_deps()
