@@ -3,22 +3,43 @@ index 162795b0..71ae42cf 100644
 --- src/aig/saig/saigGlaCba.c
 +++ src/aig/saig/saigGlaCba.c
 @@ -24,6 +24,7 @@
-
+ 
  ABC_NAMESPACE_IMPL_START
-
+ 
 +Vec_Int_t *Saig_ManCbaFilterInputs(Aig_Man_t *pAig, int iFirstFlopPi, Abc_Cex_t *pCex, int fVerbose);
-
+ 
  ////////////////////////////////////////////////////////////////////////
  ///                        DECLARATIONS                              ///
+diff --git src/base/wlc/wlc.c src/base/wlc/wlc.c
+index 0968b6ea..311d29d5 100644
+--- src/base/wlc/wlc.c
++++ src/base/wlc/wlc.c
+@@ -265,6 +265,8 @@ void Wlc_BlastMultiplierCnfTest( int nBits )
+     sat_solver_delete( pSat );
+ }
+ 
++extern void Wlc_BlastFullAdder( Gia_Man_t * pNew, int a, int b, int c, int * pc, int * ps );
++
+ /**Function*************************************************************
+ 
+   Synopsis    []
+@@ -278,7 +280,6 @@ void Wlc_BlastMultiplierCnfTest( int nBits )
+ ***********************************************************************/
+ Vec_Int_t * Wlc_ManGenAdderN( Gia_Man_t * p, int nLits, int * pLitsA, int * pLitsB, int Carry )
+ {
+-    extern void Wlc_BlastFullAdder( Gia_Man_t * pNew, int a, int b, int c, int * pc, int * ps );
+     Vec_Int_t * vRes = Vec_IntStart( nLits + 1 ); 
+     int i, * pRes = Vec_IntArray(vRes);
+     for ( i = 0; i < nLits; i++ )
 diff --git src/map/fpga/fpgaTruth.c src/map/fpga/fpgaTruth.c
 index 2965f9f6..5b0b5790 100644
 --- src/map/fpga/fpgaTruth.c
 +++ src/map/fpga/fpgaTruth.c
 @@ -17,6 +17,7 @@
  ***********************************************************************/
-
+ 
  #include "fpgaInt.h"
 +#include "bdd/cudd/cuddInt.h"
  #include "bdd/cudd/cudd.h"
-
+ 
  ABC_NAMESPACE_IMPL_START
