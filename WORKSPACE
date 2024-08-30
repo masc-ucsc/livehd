@@ -55,10 +55,12 @@ http_archive(
 http_archive(
     name = "fmt",
     build_file = "fmt.BUILD",
-    sha256 = "7aa4b58e361de10b8e5d7b6c18aebd98be1886ab3efe43e368527a75cd504ae4",
-    strip_prefix = "fmt-11.0.2",
+    sha256 = "3c2e73019178ad72b0614a3124f25de454b9ca3a1afe81d5447b8d3cbdb6d322",
+    #sha256 = "7aa4b58e361de10b8e5d7b6c18aebd98be1886ab3efe43e368527a75cd504ae4",
+    #strip_prefix = "fmt-11.0.2",
+    strip_prefix = "fmt-10.1.1",
     urls = [
-        "https://github.com/fmtlib/fmt/archive/refs/tags/11.0.2.zip",
+        "https://github.com/fmtlib/fmt/archive/refs/tags/10.1.1.zip",
     ],
 )
 
@@ -75,11 +77,13 @@ http_archive(
 )
 
 # tree-sitter-pyrope
-new_git_repository(
+http_archive(
     name = "tree-sitter-pyrope",
-    branch = "main",
     build_file = "tree-sitter-pyrope.BUILD",
-    remote = "https://github.com/masc-ucsc/tree-sitter-pyrope",
+    sha256 = "ab3fedce4c7ad2c5477c1ff302e1140a9dcb6733f64d676a4b4cf0770080261b",
+    strip_prefix = "tree-sitter-pyrope-b5ef0426123c774f01fdae0e77e80c6f0577212c",
+    urls = ["https://github.com/masc-ucsc/tree-sitter-pyrope/archive/b5ef0426123c774f01fdae0e77e80c6f0577212c.zip",
+    ],
 )
 
 # tree sitter

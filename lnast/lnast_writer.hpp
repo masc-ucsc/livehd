@@ -58,7 +58,11 @@ protected:
 
   template <typename... Args>
   void print(const fmt::text_style& ts, const Args&... args) {
-    os << fmt::format(has_file_output ? fmt::text_style() : ts, args...);
+    if (has_file_output) {
+      os << fmt::format("{}", args...);
+    } else {
+      os << fmt::format(ts, "{}", args...);
+    }
   }
 
   template <typename... Args>
@@ -69,7 +73,11 @@ protected:
   template <typename... Args>
   void print_line(const fmt::text_style& ts, const Args&... args) {
     os << fmt::format("{}", std::string(depth * 2, ' '));
-    os << fmt::format(has_file_output ? fmt::text_style() : ts, args...);
+    if (has_file_output) {
+      os << fmt::format("{}", args...);
+    } else {
+      os << fmt::format(ts, "{}", args...);
+    }
   }
 
   template <typename... Args>
