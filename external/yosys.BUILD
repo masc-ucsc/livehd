@@ -145,6 +145,10 @@ GENERATED_HEADERS = [
     "passes/pmgen/xilinx_dsp_pm.h",
     "passes/pmgen/xilinx_dsp48a_pm.h",
     "passes/pmgen/xilinx_srl_pm.h",
+    "passes/pmgen/microchip_dsp_CREG_pm.h",
+    "passes/pmgen/microchip_dsp_cascade_pm.h",
+    "passes/pmgen/microchip_dsp_pm.h",
+    "techlibs/quicklogic/ql_dsp_macc_pm.h",
 ]
 
 YOSYS_COPTS = [
@@ -154,7 +158,7 @@ YOSYS_COPTS = [
     "-w",
     "-Wno-implicit-fallthrough",
     "-Wno-vla",
-    "-std=c++11",
+    "-std=c++17",
 ]
 
 cc_library(
@@ -166,12 +170,21 @@ cc_library(
             "frontends/**/*.cc",
             "passes/**/*.cc",
             "techlibs/**/*.cc",
+            "libs/**/*.cc"
         ],
         exclude = [
             "kernel/driver.cc",
             "backends/protobuf/*.cc",
             "frontends/verific/*.cc",
+            "libs/dlfcn-win32/*.cc",
             "passes/techmap/filterlib.cc",
+            "libs/**/demo*.cc",
+            "libs/**/sample*.cc",
+            "libs/**/test*.cc",
+            "libs/ezsat/puzzle3d.cc",
+            "libs/subcircuit/scshell.cc",
+            "techlibs/quicklogic/testbench.cc",
+            "testsuite.cc",
         ],
     ) + [
         ":verilog_lexer_cpp",
@@ -189,6 +202,9 @@ cc_library(
             "kernel/*.h",
             "kernel/*.inc",
             "backends/**/*.h",
+            "libs/**/*.hh",  
+            "libs/**/*.h",  
+            "libs/**/*.hpp",
             "frontends/**/*.h",
             "passes/**/*.h",
             "techlibs/**/*.h",
@@ -423,8 +439,13 @@ genrule(
     srcs = [
         "passes/pmgen/ice40_dsp.pmg",
         "passes/pmgen/ice40_wrapcarry.pmg",
+        "passes/pmgen/microchip_dsp_cascade.pmg",
+        "passes/pmgen/microchip_dsp_CREG.pmg",
+        "passes/pmgen/microchip_dsp.pmg",
         "passes/pmgen/peepopt_muldiv.pmg",
-        "passes/pmgen/peepopt_shiftmul.pmg",
+        "passes/pmgen/peepopt_shiftmul_right.pmg",
+        "passes/pmgen/peepopt_shiftadd.pmg",
+        "passes/pmgen/peepopt_shiftmul_left.pmg",
         "passes/pmgen/xilinx_dsp48a.pmg",
         "passes/pmgen/xilinx_dsp_cascade.pmg",
         "passes/pmgen/xilinx_dsp_CREG.pmg",
@@ -436,6 +457,14 @@ genrule(
     tools = [
         ":pmgen",
     ],
+)
+
+genrule(
+    name = "ql_dsp_macc_pm_h",
+    srcs = ["techlibs/quicklogic/ql_dsp_macc.pmg"],
+    outs = ["techlibs/quicklogic/ql_dsp_macc_pm.h"],
+    cmd = "python3 $(location :pmgen) -o $(OUTS) -p ql_dsp_macc $(SRCS)",
+    tools = [":pmgen"],
 )
 
 [genrule(
@@ -452,6 +481,13 @@ genrule(
     "ice40_dsp",
     "ice40_wrapcarry",
     "test_pmgen",
+    "microchip_dsp_cascade",
+    "microchip_dsp_CREG",
+    "microchip_dsp",
+    "peepopt_muldiv",
+    "peepopt_shiftmul_left",
+    "peepopt_shiftadd",
+    "peepopt_shiftmul_right",
     "xilinx_dsp",
     "xilinx_dsp48a",
     "xilinx_dsp_CREG",

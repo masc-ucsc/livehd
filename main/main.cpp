@@ -375,7 +375,7 @@ int main(int argc, char** argv) {
   };
 
   // init the repl
-  Replxx rx;
+  Replxx rx(std::cin, std::cout, fileno(stdin), fileno(stdout), fileno(stderr));
   rx.install_window_change_handler();
 
   // words to be completed

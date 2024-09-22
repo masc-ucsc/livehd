@@ -6,20 +6,6 @@ load("@bazel_tools//tools/build_defs/repo:git.bzl", "new_git_repository")
 load("@bazel_tools//tools/build_defs/repo:http.bzl", "http_archive")
 load("@bazel_tools//tools/build_defs/repo:git.bzl", "git_repository")
 
-# bazel_rules_hdl
-#http_archive(
-#    name = "rules_hdl",
-#    sha256 = "9b3ef2d8e0603de6c689077b75b1fbfa42a24b1410423dd69271130586e2d8ee",
-#    strip_prefix = "bazel_rules_hdl-4c634c7d2b026870ecbc2fb3c4d463b6bd5c2ceb",
-#    url = "https://github.com/masc-ucsc/bazel_rules_hdl/archive/4c634c7d2b026870ecbc2fb3c4d463b6bd5c2ceb.zip",
-#)
-
-#load("@rules_hdl//dependency_support:dependency_support.bzl", "dependency_support")
-#dependency_support()
-#load("@rules_hdl//:init.bzl", "init")
-#init()
-
-# TODO: USE THIS NEW YOSYS INSTEAD OF BAZEL_RULES_HDL
 new_git_repository(
     name = "abc",
     build_file = "abc.BUILD",  # relative to external path
@@ -32,10 +18,10 @@ new_git_repository(
 http_archive(
    name = "at_clifford_yosys2",
    urls = [
-     "https://github.com/YosysHQ/yosys/archive/refs/tags/yosys-0.13.zip",
+     "https://github.com/YosysHQ/yosys/archive/refs/tags/yosys-0.44.zip",
    ],
-   sha256 = "8dcebc0257b4ef30916fbaacbe938c1f1dc20315bd7c97342048a8ee8a950215",
-   strip_prefix = "yosys-yosys-0.13",
+   sha256 = "39394043d3fee3d5c2a5f1a1e8626f61fee6f11121a5000af3a60a921609f69f",
+   strip_prefix = "yosys-yosys-0.44",
    build_file = "yosys.BUILD",
    patches = ["//external:yosys.patch"],
 )
@@ -156,13 +142,11 @@ http_archive(
 http_archive(
     name = "replxx",
     build_file = "replxx.BUILD",
-    sha256 = "e7829402f1f5ab379bd22f2a297da5fd6dc096aa9413d2039aa0a3659fd199b6",
-    #sha256 = "3e585888a9b78fe169453bb289c72a78c3a85e8b41cfd9ded8963f72bc193dd4",
-    strip_prefix = "replxx-73dad091de589d770874ce6dfd3c2adf442973de",
-    #strip_prefix = "replxx-711c18e7f4d951255aa8b0851e5a55d5a5fb0ddb",
+    sha256 = "96a6354d5f5e5afa2c3e7969647e847a7a9b989a78e21272c1915bb0b0edfdf0",
+    strip_prefix = "replxx-9f72931df8ce356d92bad6d267590a8b6e099358",
     urls = [
         #"https://github.com/ClickHouse/replxx/archive/711c18e7f4d951255aa8b0851e5a55d5a5fb0ddb.zip",
-        "https://github.com/ClickHouse/replxx/archive/73dad091de589d770874ce6dfd3c2adf442973de.zip",
+        "https://github.com/ClickHouse/replxx/archive/9f72931df8ce356d92bad6d267590a8b6e099358.zip",
 
     ],
 )
