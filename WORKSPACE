@@ -156,13 +156,13 @@ http_archive(
 http_archive(
     name = "replxx",
     build_file = "replxx.BUILD",
-    sha256 = "e7829402f1f5ab379bd22f2a297da5fd6dc096aa9413d2039aa0a3659fd199b6",
+    sha256 = "96a6354d5f5e5afa2c3e7969647e847a7a9b989a78e21272c1915bb0b0edfdf0",
     #sha256 = "3e585888a9b78fe169453bb289c72a78c3a85e8b41cfd9ded8963f72bc193dd4",
-    strip_prefix = "replxx-73dad091de589d770874ce6dfd3c2adf442973de",
+    strip_prefix = "replxx-9f72931df8ce356d92bad6d267590a8b6e099358",
     #strip_prefix = "replxx-711c18e7f4d951255aa8b0851e5a55d5a5fb0ddb",
     urls = [
         #"https://github.com/ClickHouse/replxx/archive/711c18e7f4d951255aa8b0851e5a55d5a5fb0ddb.zip",
-        "https://github.com/ClickHouse/replxx/archive/73dad091de589d770874ce6dfd3c2adf442973de.zip",
+        "https://github.com/ClickHouse/replxx/archive/9f72931df8ce356d92bad6d267590a8b6e099358.zip",
 
     ],
 )
