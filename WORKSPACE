@@ -199,9 +199,9 @@ http_archive(
 # Protobuf
 http_archive(
     name = "rules_proto_grpc",
-    sha256 = "9ba7299c5eb6ec45b6b9a0ceb9916d0ab96789ac8218269322f0124c0c0d24e2",
-    strip_prefix = "rules_proto_grpc-4.5.0",
-    urls = ["https://github.com/rules-proto-grpc/rules_proto_grpc/releases/download/4.5.0/rules_proto_grpc-4.5.0.tar.gz"],
+    sha256 = "38a51a3183dffa5323bbf07b7d5473fa1f06707cf59607888f36cb735ab39cd8",
+    strip_prefix = "rules_proto_grpc-5.0.1",
+    urls = ["https://github.com/rules-proto-grpc/rules_proto_grpc/releases/download/5.0.1/rules_proto_grpc-5.0.1.tar.gz"],
 )
 
 load("@rules_proto_grpc//:repositories.bzl", "rules_proto_grpc_repos", "rules_proto_grpc_toolchains")
