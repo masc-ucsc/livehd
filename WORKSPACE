@@ -76,10 +76,10 @@ http_archive(
 http_archive(
     name = "tree-sitter",
     build_file = "tree-sitter.BUILD",
-    sha256 = "e9f2772b12d4b12a0db5542ce72e8c85a34e397f2c3fd7b3fa08814f71fd35b3",
-    strip_prefix = "tree-sitter-0.23.0",
+    sha256 = "2bbcd5c0303d6a46fa822351848bf38b7c3cd59d7209d407df1c88e4a1958157",
+    strip_prefix = "tree-sitter-0.24.3",
     urls = [
-        "https://github.com/tree-sitter/tree-sitter/archive/refs/tags/v0.23.0.zip",
+        "https://github.com/tree-sitter/tree-sitter/archive/refs/tags/v0.24.3.zip",
     ],
 )
 
