@@ -16,7 +16,7 @@ bazel_dep(name = "rules_bison", version = "0.2.2")
 bazel_dep(name = "google_benchmark", version = "1.8.5")
 
 # rapidjson
-bazel_dep(name = "rapidjson", version = "1.1.0")
+bazel_dep(name = "rapidjson", version = "1.1.0.bcr.20241007")
 
 # mimalloc (only seems to work in Linux)
 bazel_dep(name = "mimalloc", version = "2.1.7-bcr.alpha.1")
