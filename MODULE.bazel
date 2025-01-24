@@ -22,7 +22,7 @@ bazel_dep(name = "rapidjson", version = "1.1.0")
 bazel_dep(name = "mimalloc", version = "2.1.7-bcr.alpha.1")
 
 # abseil
-bazel_dep(name = "abseil-cpp", version = "20240722.0")
+bazel_dep(name = "abseil-cpp", version = "20240722.1")
 
 # googletest
 bazel_dep(name = "googletest", version = "1.15.2")
