@@ -18,10 +18,10 @@ new_git_repository(
 http_archive(
    name = "at_clifford_yosys2",
    urls = [
-     "https://github.com/YosysHQ/yosys/archive/refs/tags/yosys-0.44.zip",
+     "https://github.com/YosysHQ/yosys/archive/refs/tags/v0.50.zip",
    ],
-   sha256 = "39394043d3fee3d5c2a5f1a1e8626f61fee6f11121a5000af3a60a921609f69f",
-   strip_prefix = "yosys-yosys-0.44",
+   sha256 = "7bc918cae2aeca4f80be0adc4fee55d3cdc245882d176f6f89e89f2d28125066",
+   strip_prefix = "yosys-0.50",
    build_file = "yosys.BUILD",
    patches = ["//external:yosys.patch"],
 )
