@@ -11,9 +11,9 @@ cwd=$(pwd)
 SRCLOCATION=${cwd}/pass/locator/tests
 
 # IMPORTANT: check these values before every run:
-DESTLOCATION=${SRCLOCATION}/dummy_23may_p1_fixed
+DESTLOCATION=${SRCLOCATION}/dummy_chisel_forNewScatterPlot
 COMB_ONLY=false
-NOISE_PERCENTAGE=(0 20 40 60 80 90 95 100)
+NOISE_PERCENTAGE=(0 70 80 90)    #(0 20 40 60 80 90 95 100)
 
 export LIVEHD_THREADS=1
 
@@ -25,7 +25,7 @@ fi
 echo "import matplotlib.pyplot as plt" > ${DESTLOCATION}/nl2nl_acc_flop_plot_data.py
 echo "import matplotlib.pyplot as plt" > ${DESTLOCATION}/nl2nl_time_flop_plot_data.py
 
-for FILENAME in RocketTile_netlist_p1_again #RocketTile_yosys_DT2 SingleCycleCPU_yosysFlat PipelinedCPU_yosysFlat_DT30p MaxPeriodFibonacciLFSR PipelinedCPU_netlist_wired SingleCycleCPU_netlist_wired RocketTile_netlist_wired RocketTile_netlist_p1_again
+for FILENAME in RocketTile_yosys_DT2 SingleCycleCPU_yosysFlat PipelinedCPU_yosysFlat_DT30p PipelinedCPU_netlist_wired SingleCycleCPU_netlist_wired RocketTile_netlist_wired RocketTile_netlist_p1_again  #RocketTile_yosys_DT2 SingleCycleCPU_yosysFlat PipelinedCPU_yosysFlat_DT30p MaxPeriodFibonacciLFSR PipelinedCPU_netlist_wired SingleCycleCPU_netlist_wired RocketTile_netlist_wired RocketTile_netlist_p1_again mac_yosys Ibtida_yosys Marmot_DC Marmot_yosys
 do
   if [ ${FILENAME} == "MaxPeriodFibonacciLFSR" ]
     then 
@@ -87,6 +87,33 @@ do
     inou.liberty files:gtech_lib.lib"
     MODULE_NAME=RocketTile
     COMPLR=DChierarchical
+  elif [ ${FILENAME} == "mac_yosys" ]
+    then
+    rm -r lgdb/ 
+    ./bazel-bin/main/lgshell "inou.liberty files:sky130_fd_sc_hd__ff_100C_1v95.lib"
+    MODULE_NAME=mac
+    COMPLR=Yosys
+  elif [ ${FILENAME} == "Ibtida_yosys" ]
+    then
+    rm -r lgdb/ 
+    ./bazel-bin/main/lgshell "inou.liberty files:sky130_fd_sc_hd__ff_100C_1v95.lib"
+    MODULE_NAME=Ibtida_top
+    COMPLR=Yosys
+  elif [ ${FILENAME} == "Marmot_yosys" ]
+    then
+    rm -r lgdb/
+    ./bazel-bin/main/lgshell "inou.liberty files:sky130_fd_sc_hd__ff_100C_1v95.lib"
+    MODULE_NAME=Marmot_yosys
+    COMPLR=Yosys
+  elif [ ${FILENAME} == "Marmot_DC" ]
+    then
+    rm -r lgdb/ 
+    ./bazel-bin/main/lgshell "inou.liberty files:saed32hvt_ff1p16vn40c.lib
+    inou.liberty files:saed32lvt_ff1p16vn40c.lib
+    inou.liberty files:saed32rvt_ff1p16vn40c.lib
+    inou.liberty files:gtech_lib.lib"
+    MODULE_NAME=Marmot_netlist
+    COMPLR=DC
   fi
 
   printf "\ny${MODULE_NAME}${COMPLR} = [" >> ${DESTLOCATION}/nl2nl_acc_flop_plot_data.py
@@ -104,6 +131,8 @@ do
 
     if [ ! -f "${SRCLOCATION}/${FILENAME}.v" ];
       then
+	echo "SRCLOCATION: ${SRCLOCATION}"
+	echo "FILENAME : ${FILENAME}"
         echo "Could not find ${SRCLOCATION}/${FILENAME}.v"
         exit 1
     fi
@@ -119,6 +148,18 @@ do
     elif [[ ${FILENAME} == *"Singl"* ]]
     then
       sed 's/module SingleCycleCPU/module SingleCycleCPU_changedForEval/g' ${SRCLOCATION}/${FILENAME}.v > ${DESTLOCATION}/${FILENAME}.v
+    elif [[ ${FILENAME} == *"mac"* ]]
+    then
+      sed 's/module mac/module mac_changedForEval/g' ${SRCLOCATION}/${FILENAME}.v > ${DESTLOCATION}/${FILENAME}.v
+    elif [[ ${FILENAME} == *"Ibtid"* ]]
+    then
+      sed 's/module Ibtida_top/module Ibtida_top_changedForEval/g' ${SRCLOCATION}/${FILENAME}.v > ${DESTLOCATION}/${FILENAME}.v
+    elif [[ ${FILENAME} == *"Marmot_D"* ]]
+    then
+      sed 's/module Marmot_netlist/module Marmot_netlist_changedForEval/g' ${SRCLOCATION}/${FILENAME}.v > ${DESTLOCATION}/${FILENAME}.v
+    elif [[ ${FILENAME} == *"Marmot_yos"* ]]
+    then
+      sed 's/module Marmot_yosys/module Marmot_yosys_changedForEval/g' ${SRCLOCATION}/${FILENAME}.v > ${DESTLOCATION}/${FILENAME}.v
     fi
 
     if [ ! -f "${DESTLOCATION}/${FILENAME}.v" ]; then
@@ -166,6 +207,24 @@ do
 	  fi
       done
 
+    elif [ ${FILENAME} == "mac_yosys" ]; then
+      echo -e "\n Running for mac_yosys:"
+    elif [ ${FILENAME} == "Ibtida_yosys" ]; then
+      echo -e "\n Running for Ibtida_yosys(Ibtida_top):"
+    elif [ ${FILENAME} == "Marmot_yosys" ]; then
+      echo -e "\n Running for Marmot_yosys:"
+    elif [ ${FILENAME} == "Marmot_DC" ]; then
+      echo -e "\n Running for Marmot_DC(Marmot_netlist:"
+
+      #do this for all hier files:
+      sed -i 's:module \(.[^ ]*\)(:module \1 (:g' ${DESTLOCATION}/${FILENAME}.v
+      readarray -t module_names < <(grep -E "module .[^ ]* |module .[^ ]*\(" ${DESTLOCATION}/${FILENAME}.v | awk '{print $2}')
+      for name in "${module_names[@]}"; do
+	  if [[ ! $name =~ _changedForEval$ ]]; then
+	    mod_name="${name}_changedForEval"
+	    sed -i "s/\b$name\b/$mod_name/g" ${DESTLOCATION}/${FILENAME}.v
+	  fi
+      done
     fi
 
     #the DESTLOCATION/FILENAME should have all the module names changed

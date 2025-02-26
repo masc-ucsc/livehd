@@ -213,7 +213,9 @@ void Traverse_lg::debug_function(Lgraph* lg) {
 void Traverse_lg::print_total_named_dpins(Lgraph* lg, bool is_orig_lg) const {
 
   unsigned int total_named_dpins=0;
-  int unnamed=0;
+  unsigned int named_loopLast_dpins=0;
+  unsigned int unnamed_loopLast_dpins=0;
+  unsigned int unnamed=0;
   /* graph IOs*/
   lg->each_graph_input([&total_named_dpins](const Node_pin non_h_dpin) {
     const auto& dpin = non_h_dpin.get_hierarchical();
@@ -227,11 +229,22 @@ void Traverse_lg::print_total_named_dpins(Lgraph* lg, bool is_orig_lg) const {
   /* fast pass*/
   for (const auto& node : lg->fast(true)) {
     for (const auto dpin : node.out_connected_pins()) {
-      if(dpin.has_name()) total_named_dpins++;
-      else unnamed++;
+      if(dpin.has_name()) {
+        total_named_dpins++;
+	if (node.is_type_loop_last()) {
+	  named_loopLast_dpins++;
+	}
+      }
+      else {
+       	unnamed++;
+	if (node.is_type_loop_last()) {
+	  unnamed_loopLast_dpins++;
+	}
+      }
     }
   }
-  fmt::print("total named dpins for {} are: {} and {} unnamed\n", is_orig_lg?"orig_lg":"synth_lg", total_named_dpins,unnamed);
+  fmt::print("total named dpins for {} are {} (with {} loopLasts) and {} unnamed (with {} loopLasts).\n", 
+		  is_orig_lg?"orig_lg":"synth_lg", total_named_dpins,named_loopLast_dpins,unnamed,unnamed_loopLast_dpins);
   
 }
 
@@ -361,6 +374,8 @@ void Traverse_lg::do_travers(Lgraph *orig_lg, Lgraph *synth_lg, bool is_orig_lg)
       fmt::print("\nBEWARE: {} FLOPS NOT RESOLVED? \n\n", flop_set_synth.size());
       print_set(flop_set_synth);
       exit(1);
+    } else {
+      fmt::print("AFTER_FUNC weighted_match_LoopLastOnly, all flops resolved!");
     }
     if (crit_node_set.empty()) {
       /*all required matching done*/
