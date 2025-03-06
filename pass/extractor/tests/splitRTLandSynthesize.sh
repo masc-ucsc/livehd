@@ -277,27 +277,77 @@ echo "~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~"
 
 }
 
-./clean_tests.sh
-create_selected_top_file
-split_into_modules
-synth_yosys
-calc_frequency_and_create_color_dot_json
-#now we need to lower the arrival time to improve frequency.
-#Which part of rtl does the nodes in above reported timing path belong to?
-run_synalign  
-#orig files are from liveparse/
-cd $test_dir
-comment_rtl
 
-echo `pwd`
+lgcheck(){
+
+# Move to livehd directory
+cd ~/livehd/
+ret_val=$?
+if [ $ret_val -ne 0 ]; then
+  echo "\n--------livehd folder not found. check the directory structure and make necessary changes.--------\n\n"
+  exit $ret_val
+fi
+
+
+inou/yosys/lgcheck --top
+
+}
+
+create_yaml_for_hagent() {
+	# Find all files ending with "_commented.v" and store in an array
+	files=($(find "${rtl_path}/liveparse/" -type f -name "*_commented.v"))
+
+	# Check if any files were found
+	if [ ${#files[@]} -eq 0 ]; then
+	    echo "No _commented.v files found in $rtl_path/liveparse"
+	    exit 1
+	fi
+
+	# Print the list of files
+	echo "~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~"
+	echo "yaml to be made for:"
+	for file in "${files[@]}"; do
+	    echo "$file"
+	done
+	echo "~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~"
+
+	# Iterate over each file and run generate_yaml.py
+	for file in "${files[@]}"; do
+	    base_name=$(basename "$file" "_commented.v")  # Extract module name
+	    output_file="${base_name}.yaml"  # Construct output file name
+	    echo "Creating yaml for $file -> $output_file"
+	    python3 ../create_yaml_for_hagent.py $file -m "openai/o3-mini-2025-01-31" -o ${rtl_path}/liveparse/$output_file
+	done
+
+
+
+}
+
+
+##call_hagent() {
+##}
+
+##./clean_tests.sh
+##create_selected_top_file
+##split_into_modules
+##synth_yosys
+##calc_frequency_and_create_color_dot_json
+###now we need to lower the arrival time to improve frequency.
+###Which part of rtl does the nodes in above reported timing path belong to?
+##run_synalign  
+###orig files are from liveparse/
+##cd $test_dir
+##comment_rtl
+##
+##echo `pwd`
 
 #now use AI to generate optimized versions of _commented.v files(modules)
-##call_hagent
+create_yaml_for_hagent
+##call_hagent to create _optimized.v as well as run lec check on _optimized and _commented versions
 
-#use LEC on _optimized and _commented version
-##lec_check
 
 #if lec fails, get another version from LLM and retry LEC until it passes.
+##write the chat command: "your solution fails LEC. try again."
 
 #if lec passes, stitch optimized version with all other modules and create a neww top and re run synth+timing to check if freq. improved!
 
