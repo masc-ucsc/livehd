@@ -4,7 +4,6 @@ workspace(name = "livehd")
 
 load("@bazel_tools//tools/build_defs/repo:git.bzl", "new_git_repository")
 load("@bazel_tools//tools/build_defs/repo:http.bzl", "http_archive")
-load("@bazel_tools//tools/build_defs/repo:git.bzl", "git_repository")
 
 new_git_repository(
     name = "abc",
@@ -73,15 +72,15 @@ http_archive(
 )
 
 # tree sitter
-http_archive(
-    name = "tree-sitter",
-    build_file = "tree-sitter.BUILD",
-    sha256 = "e9f2772b12d4b12a0db5542ce72e8c85a34e397f2c3fd7b3fa08814f71fd35b3",
-    strip_prefix = "tree-sitter-0.23.0",
-    urls = [
-        "https://github.com/tree-sitter/tree-sitter/archive/refs/tags/v0.23.0.zip",
-    ],
-)
+# http_archive(
+#     name = "tree-sitter",
+#     build_file = "tree-sitter.BUILD",
+#     sha256 = "e9f2772b12d4b12a0db5542ce72e8c85a34e397f2c3fd7b3fa08814f71fd35b3",
+#     strip_prefix = "tree-sitter-0.23.0",
+#     urls = [
+#         "https://github.com/tree-sitter/tree-sitter/archive/refs/tags/v0.23.0.zip",
+#     ],
+# )
 
 # nlohmann json
 http_archive(
@@ -107,10 +106,10 @@ http_archive(
 # HIF
 http_archive(
     name = "hif",
-    sha256 = "bf4d0d5e06b100b616c35b8fc1601de482ea0dfc7b8f0f75763f9b9020076626",
-    strip_prefix = "hif-11b5dc3eda963fe5220345dac7fa2ccc68545182",
+    sha256 = "b8103f11e679ae8e3dd700f0c41ed4191aa819c215256066a8ff0e531cb77a63",
+    strip_prefix = "hif-cf106676965e935aa2e46754e3e17a68a5367781",
     urls = [
-        "https://github.com/masc-ucsc/hif/archive/11b5dc3eda963fe5220345dac7fa2ccc68545182.zip",
+        "https://github.com/masc-ucsc/hif/archive/cf106676965e935aa2e46754e3e17a68a5367781.zip",
     ],
 )
 
@@ -197,24 +196,24 @@ http_archive(
 )
 
 # Protobuf
-http_archive(
-    name = "rules_proto_grpc",
-    sha256 = "9ba7299c5eb6ec45b6b9a0ceb9916d0ab96789ac8218269322f0124c0c0d24e2",
-    strip_prefix = "rules_proto_grpc-4.5.0",
-    urls = ["https://github.com/rules-proto-grpc/rules_proto_grpc/releases/download/4.5.0/rules_proto_grpc-4.5.0.tar.gz"],
-)
+# http_archive(
+#     name = "rules_proto_grpc",
+#     sha256 = "9ba7299c5eb6ec45b6b9a0ceb9916d0ab96789ac8218269322f0124c0c0d24e2",
+#     strip_prefix = "rules_proto_grpc-4.5.0",
+#     urls = ["https://github.com/rules-proto-grpc/rules_proto_grpc/releases/download/4.5.0/rules_proto_grpc-4.5.0.tar.gz"],
+# )
+#
+# load("@rules_proto_grpc//:repositories.bzl", "rules_proto_grpc_repos", "rules_proto_grpc_toolchains")
+#
+# rules_proto_grpc_toolchains()
+#
+# rules_proto_grpc_repos()
 
-load("@rules_proto_grpc//:repositories.bzl", "rules_proto_grpc_repos", "rules_proto_grpc_toolchains")
-
-rules_proto_grpc_toolchains()
-
-rules_proto_grpc_repos()
-
-load("@rules_proto//proto:repositories.bzl", "rules_proto_dependencies", "rules_proto_toolchains")
-
-rules_proto_dependencies()
-
-rules_proto_toolchains()
+# load("@rules_proto//proto:repositories.bzl", "rules_proto_dependencies", "rules_proto_toolchains")
+#
+# rules_proto_dependencies()
+#
+# rules_proto_toolchains()
 # http_archive(
 #     name = "rules_proto",
 #     sha256 = "fea00227e78467fc8ab6a17f7de26489b7dcb3b773659cf6d9906251e521cfe9",

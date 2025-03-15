@@ -9,7 +9,6 @@ cc_binary(
     copts = COPTS,
     deps = [
         "//core",
-        "//inou/firrtl:inou_firrtl_cpp",
         "//lgraph",
         "//lnast",
         "//pass/lnast_tolg:pass_lnast_tolg",
