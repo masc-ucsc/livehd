@@ -26,11 +26,12 @@
  */
 #include "tmt_test.hpp"
 
-#include <limits.h>
-#include <stdint.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+
+#include <climits>
+#include <cstdint>
 
 #define BUF_MAX   100
 #define PAR_MAX   8
