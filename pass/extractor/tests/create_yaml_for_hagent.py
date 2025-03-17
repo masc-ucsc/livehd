@@ -9,7 +9,7 @@ def block_scalar_representer(dumper, value):
     return dumper.represent_scalar('tag:yaml.org,2002:str', value, style='|')
 
 
-def generate_yaml(input_file, model_name_version, output_file):
+def generate_yaml(input_file, top_name, model_name_version, output_file):
     try:
 
         with open(input_file, "r") as f:
@@ -19,16 +19,16 @@ def generate_yaml(input_file, model_name_version, output_file):
 
         
         yaml_content = {
-            "replicate_code": {
-                "llm": {"model": model_name_version},
+            #"replicate_code": {
+            "llm": {"model": model_name_version},
+            "top_name": top_name,
             "replicate_code_prompt1": [
                 {
                     "role": "system", 
                     "content": "You are a super smart Verilog and timing expert."
                     "You have been tasked with improving the frequency of a verilog code."
                     "You provide a higher frequency code which passes LEC."
-                    "If you cannot improve frequency any further, return the text \"no change possible\"."
-                    "However, make sure that you only return the code that passes LEC."
+                    "Make sure that you only return the code that passes LEC."
                     "Take care that:"
                     "The semantics are  preserved exactly as in the original netlist (including word instantiation and sign‐extension)"
                     "while breaking a long combinational critical path."
@@ -36,19 +36,24 @@ def generate_yaml(input_file, model_name_version, output_file):
                  },
                 {
                     "role": "user", 
-                    "content": f"This is the current Verilog:\n```\n{code_content}\n```\n"
+                    "content": "This is the current Verilog:\n```\n{code_content}\n```\n"
                     "The above code has comments with the word CRITICAL providing hints on the where the critical path resides. These are likely statements or related statements that need to be optimized."
                     "Please do not change semantics, just split the always blocks in separate always blocks "
                     "and try to improve the performance when possible."
                 }
             ]
-            }
+            #}
         }
         
         if "o3" in model_name_version:
-            yaml_content["replicate_code"]["threshold"] = 40
+            #yaml_content["replicate_code"]["threshold"] = 40
+            yaml_content["threshold"] = 40
         elif "o4" in model_name_version:
-            yaml_content["replicate_code"]["temperature"] = 40
+            yaml_content["temperature"] = 40
+            #yaml_content["replicate_code"]["temperature"] = 40
+
+        yaml_content["code_content"]=code_content
+        #yaml_content["replicate_code"]["code_content"]=code_content
         
         with open(output_file, "w") as f:
             yaml.dump(yaml_content, f, default_flow_style=False, sort_keys=False, allow_unicode=True, default_style=None, indent=2)
@@ -72,11 +77,14 @@ if __name__ == "__main__":
     try:
         parser = argparse.ArgumentParser(description="Generate a YAML file from an input file and model name version.")
         parser.add_argument("input_file", help="Path to the input file containing code.")
+        parser.add_argument("top_name", help="top_name.")
         parser.add_argument("-m", "--model_name_version", required=True, help="Model name as string.")
         parser.add_argument("-o", "--output_file", required=True, help="Name of the output YAML file (as module name preferred).")
     
         args = parser.parse_args()
-        generate_yaml(args.input_file, args.model_name_version, args.output_file)
+        print("I GOT:")
+        print(f"{args.input_file}, {args.top_name}, {args.model_name_version}, {args.output_file}\n")
+        generate_yaml(args.input_file, args.top_name, args.model_name_version, args.output_file)
     except TypeError as e:
         print(f"Error: Invalid argument type passed to argparse: {e}")
         sys.exit(1)

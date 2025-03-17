@@ -18,7 +18,7 @@ test_dir=$(pwd)
 rtl_real_src_dir="${test_dir}/rtl_real_source"
 synth_dir="${test_dir}/nl_single"
 synalign_log_file="${test_dir}/extractor_alignment_tests/${top_name}_Synalign.log"
-
+original_arrival_time=0.00
 # which is the top module?
 if [[ "$PWD" == *"PipelineDino"* ]]; then
     top_name="PipelinedCPU"
@@ -32,6 +32,9 @@ fi
 rtl_path="${test_dir}/rtl_modules"
 rtl_selected_top_path="${test_dir}/rtl_single"
 rtl_selected_top_file="${rtl_selected_top_path}/${top_name}.v"
+rtl_opt_dir="${test_dir}/rtl_optimized"
+INPUT_YAMLS="/home/sgarg3/hagent/hagent/step/replicate_code/tests/input_yamls"
+GEN_YAMLS="/home/sgarg3/hagent/generated_yamls"
 
 #example of what this function does: top.v(rtl)--{yosys}-->rtl_single/pipelinedCPU.v(rtl)
 create_selected_top_file () {
@@ -186,7 +189,7 @@ fi
 # Extract the line with "slack" and get the corresponding value
 # -m 1 --> will select only the 1st occurence. otherwise all the slack values will be printed.
 arrival_time=$(grep -m 1 -oP '\s*-?\d+\.\d+\s+data arrival time' "$latest_report" | awk '{print $1}')
-
+original_arrival_time=arrival_time
 # Output the slack value
 echo "arrival_time: $arrival_time"
 
@@ -293,7 +296,16 @@ inou/yosys/lgcheck --top
 
 }
 
-create_yaml_for_hagent() {
+create_yaml_and_call_hagent() {
+
+	# Use sed to replace "module <top_name>_original" with "module <top_name>" in place
+	sed -i "s/module[[:space:]]\+${top_name}_original\>/module ${top_name}/" "$rtl_path/liveparse/${top_name}.v"
+	if [ -f "$rtl_path/liveparse/${top_name}_commented.v" ]; then
+		sed -i "s/module[[:space:]]\+${top_name}_original\>/module ${top_name}/" "$rtl_path/liveparse/${top_name}_commented.v"
+	fi
+	echo "NOTE: Reverted SynAlign renaming in $rtl_path/liveparse/${top_name}.v"
+
+
 	# Find all files ending with "_commented.v" and store in an array
 	files=($(find "${rtl_path}/liveparse/" -type f -name "*_commented.v"))
 
@@ -316,38 +328,168 @@ create_yaml_for_hagent() {
 	    base_name=$(basename "$file" "_commented.v")  # Extract module name
 	    output_file="${base_name}.yaml"  # Construct output file name
 	    echo "Creating yaml for $file -> $output_file"
-	    python3 ../create_yaml_for_hagent.py $file -m "openai/o3-mini-2025-01-31" -o ${rtl_path}/liveparse/$output_file
+	    python3 ../create_yaml_for_hagent.py $file $base_name -m "openai/o3-mini-2025-01-31" -o ${rtl_path}/liveparse/$output_file
+
+	    #now call hagent for each of these files.
+
+	    # Check and create input_yamls if it doesn't exist
+	    if [ ! -d "$INPUT_YAMLS" ]; then
+	            echo "Creating directory: $INPUT_YAMLS"
+	            mkdir -p "$INPUT_YAMLS"
+	    else
+	            echo "Directory already exists: $INPUT_YAMLS"
+	    fi
+	    
+	    # Check and create generated_yamls if it doesn't exist
+	    if [ ! -d "$GEN_YAMLS" ]; then
+	            echo "Creating directory: $GEN_YAMLS"
+	            mkdir -p "$GEN_YAMLS"
+	    else
+	            echo "Directory already exists: $GEN_YAMLS"
+	    fi
+	    
+	    #run hagent:
+	    cp ${rtl_path}/liveparse/$output_file ${INPUT_YAMLS}/$output_file 
+	    echo "Copying ${rtl_path}/liveparse/$output_file to ${INPUT_YAMLS}/$output_file"
+
+
+	    #go to hagent replicate_code directory
+	    cd ~/hagent/
+	    ret_val=$?
+	    if [ $ret_val -ne 0 ]; then
+	      echo "\n--------hagent folder not found. check the directory structure and make necessary changes.--------\n\n"
+	      exit $ret_val
+	    fi
+	    #rm res.log ; #rm replicate_code.log ; #poetry run python3 ./hagent/step/replicate_code/replicate_code.py -ogenerated_yamls/ALU.yaml ./hagent/step/replicate_code/tests/input_yamls/ALU.yaml |& tee res.log 
+	    poetry run python3 ./hagent/step/replicate_code/replicate_code.py -o${GEN_YAMLS}/${base_name}.yaml ${INPUT_YAMLS}/${base_name}.yaml 2>&1 | tee ${GEN_YAMLS}/${base_name}.log
+	    echo "writing to ${GEN_YAMLS}/${base_name}.log...."
+	    cd $test_dir 
+
 	done
 
+
+}
+
+synth_yosys_and_calc_new_freq() {
+
+	echo "~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~"
+	echo "          Synthesize optimized design: $top_name ...       "
+	echo "~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~"
+	## #Check if any file ending with "_optimized.v" is created using hagent:
+	## #if they are created then bring them (without _optimized.v) to rtl_optimized directory in the test dir
+	if [ ! -d "$rtl_opt_dir" ]; then
+	        mkdir -p "$rtl_opt_dir"
+	else
+	        rm -r $rtl_opt_dir/*
+	fi
+	#get all orig files for synth:
+	#files=$(find "${rtl_path}/liveparse" -type f -name "*.v" ! -name "*_optimized.v" ! -name "*_commented.v") # Find all .v files but exclude _optimized.v and _commented.v
+	find "$rtl_path/liveparse" -type f -name "*.v" ! -name "*_optimized.v" ! -name "*_commented.v" -exec cp {} "$rtl_opt_dir" \;
+	#get optimized file from GEN_YAMLS and use these optimized modules instead of original modules:
+	files=$(find "$GEN_YAMLS" -type f -name "*_optimized.v")
+	if [ -z "$files" ]; then
+		echo "No *_optimized.v files found in $GEN_YAMLS."
+	else
+		echo "$files" | while read -r file; do
+			new_name=$(basename "$file" | sed 's/_optimized//')
+			cp "$file" "$rtl_opt_dir/$new_name"
+			echo "Copied and renamed: $file -> $rtl_opt_dir/$new_name"
+		done
+	fi
+
+	#now we have all files to be synthesized in rtl_opt_dir
+	mkdir $rtl_opt_dir/synth_file
+	optimized_netlist="$rtl_opt_dir/synth_file/${top_name}_synth.v"
+	yosys -p "
+		read_verilog -sv -defer $rtl_opt_dir/*.v
+    		hierarchy -top $top_name;
+    		flatten $top_name;
+    		opt; 
+    		synth -top $top_name;
+    		dfflibmap -liberty $LIBERTY_FILE;
+    		printattrs;
+    		stat;
+    		abc -liberty $LIBERTY_FILE  -dff -keepff -g aig;
+    		stat;
+    		write_verilog $optimized_netlist;
+	" > synth_top.log
+	if [ $? -eq 0 ]; then
+	    echo "~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~"
+	    echo "          Synthesis using Yosys completed.          "
+	    echo "~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~"
+	else
+	    echo "~~~~~~~~~~~~~ ERROR: YOSYS synthesis failed!  ~~~~~~~~~~~"
+	    exit 1
+	fi
+
+
+	echo "~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~"
+	echo "          Find frequency using openSTA for $top_name ...       "
+	echo "~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~"
+	cd $test_dir
+	mkdir $rtl_opt_dir/timing
+	# Define variables
+	new_sta_tcl="$rtl_opt_dir/timing/run_sta.tcl"  # Replace with the actual SDC filename
+	
+	# Create the SDC file and write the required content
+	cat > "$new_sta_tcl" <<EOF
+	read_liberty $LIBERTY_FILE
+	set_units -time ns -capacitance pF -voltage V -current mA -resistance kOhm -distance um
+	set_operating_conditions ff_100C_1v95
+	read_verilog $optimized_netlist
+	link_design $top_name
+	read_sdc ${top_name}.sdc
+	report_checks -path_delay max > ${rtl_opt_dir}/timing/timing_report.rpt
+EOF
+	
+	echo "SDC file created: $new_sta_tcl"
+	
+	# Run OpenSTA
+	echo "source $new_sta_tcl" | ~/opensta/OpenSTA/app/sta
+	
+	# Find the latest timing report file
+	latest_report=$(ls ${rtl_opt_dir}/timing/timing_report.rpt 2>/dev/null | tail -n 1)
+	# Check if a file was found
+	if [ ! -n "$latest_report" ]; then
+	    echo "No timing report found."
+	    exit 1
+	fi
+	
+	# Extract the line with "slack" and get the corresponding value
+	arrival_time=$(grep -m 1 -oP '\s*-?\d+\.\d+\s+data arrival time' "$latest_report" | awk '{print $1}')
+	original_arrival_time=arrival_time
+	# Output the slack value
+	echo "new arrival_time: $arrival_time"
+	
+	improved_arrival_time_diff=$(echo "$original_arrival_time - $arrival_time" | bc)
+	echo "####################################################################"
+	echo "NOTE: improvement in arrival time: $improved_arrival_time_diff ns"
+	echo "####################################################################"
 
 
 }
 
 
-##call_hagent() {
-##}
+./clean_tests.sh
+create_selected_top_file
+split_into_modules
+synth_yosys
+calc_frequency_and_create_color_dot_json
+#now we need to lower the arrival time to improve frequency.
+#Which part of rtl does the nodes in above reported timing path belong to?
+run_synalign  
+#orig files are from liveparse/
+cd $test_dir
+comment_rtl
 
-##./clean_tests.sh
-##create_selected_top_file
-##split_into_modules
-##synth_yosys
-##calc_frequency_and_create_color_dot_json
-###now we need to lower the arrival time to improve frequency.
-###Which part of rtl does the nodes in above reported timing path belong to?
-##run_synalign  
-###orig files are from liveparse/
-##cd $test_dir
-##comment_rtl
-##
-##echo `pwd`
+echo `pwd`
 
 #now use AI to generate optimized versions of _commented.v files(modules)
-create_yaml_for_hagent
-##call_hagent to create _optimized.v as well as run lec check on _optimized and _commented versions
-
-
+create_yaml_and_call_hagent
+#call_hagent to create _optimized.v as well as run lec check on _optimized and _commented versions
 #if lec fails, get another version from LLM and retry LEC until it passes.
-##write the chat command: "your solution fails LEC. try again."
-
+#write the chat command: "your solution fails LEC. try again."
 #if lec passes, stitch optimized version with all other modules and create a neww top and re run synth+timing to check if freq. improved!
+
+synth_yosys_and_calc_new_freq
 
