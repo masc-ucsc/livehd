@@ -62,7 +62,6 @@ cc_library(
         "//pass/bitwidth:pass_bitwidth",
         "//pass/common:pass",
         "//pass/cprop:pass_cprop",
-        "//pass/fplan",
         "//pass/label:pass_label",
         "//pass/lec:pass_lec",
         "//pass/lnast_fromlg:pass_lnast_fromlg",

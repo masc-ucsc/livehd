@@ -138,12 +138,3 @@ cells.
   instance, and allows to adjust area per instance in some cases. The
   floorplanner could use this enhanced capability to track area.
 
-## pass/fplan
-
-* Many methods/variables use camelCase, it should be camel_case
-* "int" is used all over. Even for things that should be size_t (size of stuff)
-* node_tree is only used by pass/fplan. Move from core to pass/fplan
-* Lots of variable declarations c-style (early in the method, then assigned later. Use later on first assign)
-* Only classes can start with upper case (Name2Count -> name2count)
-* Classes should start uppercase. E.g: Ntype_area::dim
-

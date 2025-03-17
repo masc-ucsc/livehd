@@ -5,14 +5,12 @@
 #include "file_utils.hpp"
 #include "inou_lef_api.hpp"
 #include "meta_api.hpp"
-#include "pass_fplan.hpp"
 #include "thread_pool.hpp"
 #include "top_api.hpp"
 
 void setup_inou_pyrope();
 void setup_inou_yosys();
 void setup_inou_liveparse();
-void setup_pass_fplan();
 
 // add new setup function prototypes here
 
@@ -25,7 +23,6 @@ void Main_api::init() {
   setup_inou_pyrope();
   setup_inou_yosys();
   setup_inou_liveparse();
-  setup_pass_fplan();
 
   // FIXME beyond this point (to delete some of them)
 
