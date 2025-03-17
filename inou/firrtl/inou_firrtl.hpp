@@ -15,7 +15,7 @@
 #include "absl/container/flat_hash_set.h"
 #include "absl/container/node_hash_map.h"
 #include "firrtl.pb.h"
-#include "google/protobuf/util/time_util.h"
+// #include "google/protobuf/util/time_util.h"
 
 #pragma GCC diagnostic pop
 // LiveHD includes
@@ -25,7 +25,8 @@
 #include "lnast.hpp"
 #include "pass.hpp"
 
-using google::protobuf::util::TimeUtil;
+// using google::protobuf::util::TimeUtil;
+
 struct Global_module_info {
   absl::node_hash_map<std::string, absl::flat_hash_map<std::string, std::pair<uint16_t, bool>>>
                                                                      module2outputs;  // <hier_name, bits, sign>

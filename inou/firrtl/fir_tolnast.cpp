@@ -11,12 +11,12 @@
 
 #include "absl/strings/match.h"
 #include "firrtl.pb.h"
-#include "google/protobuf/util/time_util.h"
+// #include "google/protobuf/util/time_util.h"
 #include "inou_firrtl.hpp"
 #include "perf_tracing.hpp"
 #include "thread_pool.hpp"
 
-using google::protobuf::util::TimeUtil;
+// using google::protobuf::util::TimeUtil;
 
 /* For help understanding FIRRTL/Protobuf:
  * 1) Semantics regarding FIRRTL language:
@@ -246,9 +246,11 @@ uint16_t Inou_firrtl_module::get_vector_size(const Lnast& lnast, std::string_vie
   if (var2vec_size.find(vec_name) == var2vec_size.end()) {
     auto module_name = lnast.get_top_module_name();
 #ifndef NDEBUG
-    Pass::warn("Warning: the \"if\" statement below is to enable RocketTile LG generation. Remove the if block and use the assertion above it instead.\n");
+    Pass::warn(
+        "Warning: the \"if\" statement below is to enable RocketTile LG generation. Remove the if block and use the assertion "
+        "above it instead.\n");
 #endif
-    //I(Inou_firrtl::glob_info.module_var2vec_size.find(module_name) != Inou_firrtl::glob_info.module_var2vec_size.end());
+    // I(Inou_firrtl::glob_info.module_var2vec_size.find(module_name) != Inou_firrtl::glob_info.module_var2vec_size.end());
     if (Inou_firrtl::glob_info.module_var2vec_size.find(module_name) == Inou_firrtl::glob_info.module_var2vec_size.end()) {
       return 1;
     }
@@ -329,7 +331,7 @@ void Inou_firrtl_module::handle_register(Lnast& lnast, const firrtl::FirrtlPB_Ty
           = reg_bits > 0 ? true
                          : false;  // some chirrtl code don't have bits set on register, but must have bits set on init expression
       auto diff_type = type.type_case() != firrtl::FirrtlPB_Type::kUintType;
-      //setup_scalar_bits(lnast, absl::StrCat("#", id), reg_bits, parent_node, diff_type, stmt);
+      // setup_scalar_bits(lnast, absl::StrCat("#", id), reg_bits, parent_node, diff_type, stmt);
       setup_scalar_bits(lnast, id, reg_bits, parent_node, diff_type, stmt);
 
       setup_register_reset_init(lnast,
@@ -2276,7 +2278,7 @@ void Inou_firrtl_module::setup_register_q_pin(Lnast& lnast, Lnast_nid& parent_no
     fname                             = subtrngs[0];
   }
 
-  //auto flop_qpin_var = absl::StrCat("_#_", reg_name, "_q");
+  // auto flop_qpin_var = absl::StrCat("_#_", reg_name, "_q");
   auto flop_qpin_var = absl::StrCat("_#_", reg_name, "_q");
   auto idx_asg2      = lnast.add_child(parent_node, Lnast_node::create_assign("", 0, line_pos, col_pos, fname));
   lnast.add_child(idx_asg2, Lnast_node::create_ref(flop_qpin_var, 0, line_pos, col_pos, fname));
@@ -2299,8 +2301,8 @@ void Inou_firrtl_module::declare_register(Lnast& lnast, Lnast_nid& parent_node, 
     fname                             = subtrngs[0];
   }
 
-  auto idx_attget         = lnast.add_child(parent_node, Lnast_node::create_attr_get("", 0, line_pos, col_pos, fname));
-  //auto full_register_name = absl::StrCat("#", reg_name);
+  auto idx_attget = lnast.add_child(parent_node, Lnast_node::create_attr_get("", 0, line_pos, col_pos, fname));
+  // auto full_register_name = absl::StrCat("#", reg_name);
   auto full_register_name = reg_name;
   auto tmp_var_str        = create_tmp_var();
   lnast.add_child(idx_attget, Lnast_node::create_ref(tmp_var_str, 0, line_pos, col_pos, fname));
@@ -2346,7 +2348,7 @@ void Inou_firrtl_module::setup_register_reset_init(Lnast& lnast, Lnast_nid& pare
   }
 
   if (!value_node.is_invalid()) {
-    //create_tuple_add_from_str(lnast, parent_node, absl::StrCat("#", reg_raw_name, ".__reset_pin"), value_node, stmt);
+    // create_tuple_add_from_str(lnast, parent_node, absl::StrCat("#", reg_raw_name, ".__reset_pin"), value_node, stmt);
     create_tuple_add_from_str(lnast, parent_node, absl::StrCat(reg_raw_name, ".__reset_pin"), value_node, stmt);
   }
 
@@ -2363,7 +2365,7 @@ void Inou_firrtl_module::setup_register_reset_init(Lnast& lnast, Lnast_nid& pare
 
     if (!bits_set_done) {
       auto bits = inite.uint_literal().width().value();
-      //setup_scalar_bits(lnast, absl::StrCat("#", reg_raw_name), bits, parent_node, false, stmt);
+      // setup_scalar_bits(lnast, absl::StrCat("#", reg_raw_name), bits, parent_node, false, stmt);
       setup_scalar_bits(lnast, reg_raw_name, bits, parent_node, false, stmt);
     }
   } else if (inite_case == firrtl::FirrtlPB_Expression::kSintLiteral) {
@@ -2372,7 +2374,7 @@ void Inou_firrtl_module::setup_register_reset_init(Lnast& lnast, Lnast_nid& pare
 
     if (!bits_set_done) {
       auto bits = inite.uint_literal().width().value();
-      //setup_scalar_bits(lnast, absl::StrCat("#", reg_raw_name), bits, parent_node, true, stmt);
+      // setup_scalar_bits(lnast, absl::StrCat("#", reg_raw_name), bits, parent_node, true, stmt);
       setup_scalar_bits(lnast, reg_raw_name, bits, parent_node, true, stmt);
     }
   } else if (inite_case == firrtl::FirrtlPB_Expression::kReference) {
@@ -2390,7 +2392,7 @@ void Inou_firrtl_module::setup_register_reset_init(Lnast& lnast, Lnast_nid& pare
   }
 
   if (!initial_node.is_invalid()) {
-    //create_tuple_add_from_str(lnast, parent_node, absl::StrCat("#", reg_raw_name, ".__initial"), initial_node, stmt);
+    // create_tuple_add_from_str(lnast, parent_node, absl::StrCat("#", reg_raw_name, ".__initial"), initial_node, stmt);
     create_tuple_add_from_str(lnast, parent_node, absl::StrCat(reg_raw_name, ".__initial"), initial_node, stmt);
   }
 }
@@ -2795,7 +2797,7 @@ void Inou_firrtl_module::list_statement_info(Lnast& lnast, const firrtl::FirrtlP
       Pass::warn("Warning: commented \"I(false)\" to enable RocketTile LG generation.");
 #endif
       Pass::warn("Unknown statement type: {}, at line {} in file {}", (int)stmt.statement_case(), line_pos, fname);
-      //I(false);
+      // I(false);
       return;
   }
   // TODO: Attach source info into node creation (line #, col #).
