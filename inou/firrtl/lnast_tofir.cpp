@@ -1,6 +1,12 @@
 //  This file is distributed under the BSD 3-Clause License. See LICENSE for details.
 
+// Abseil has a shadow variable issue
+#pragma GCC diagnostic push               // Save the current diagnostic settings
+#pragma GCC diagnostic ignored "-Wshadow" // Disable shadow warnings
+
 #include <google/protobuf/message.h>
+
+#pragma GCC diagnostic pop                // Restore previous diagnostic settings
 
 #include <fstream>
 #include <iostream>
