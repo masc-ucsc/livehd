@@ -11,7 +11,8 @@
 # Run this script in test<testname> folder and you will get the rtl_modules/ there itself
 # this script uses inou.liveparse from livehd
 
-
+declare -a results_array #declaring array called results_array to capture the arrival time imrpovements in result_file 
+declare -a file_names_to_change # Declare an array to store file names
 
 LIBERTY_FILE="/home/sgarg3/livehd/sky130_fd_sc_hd__ff_100C_1v95.lib"
 test_dir=$(pwd)
@@ -97,7 +98,7 @@ if [ $ret_val -ne 0 ]; then
   exit $ret_val
 fi
 
-CXX=clang++-14 CC=clang-14 bazel build -c opt //...
+bazel build -c opt //...
 ret_val=$?
 if [ $ret_val -ne 0 ]; then
   echo "\n--------compilation failed!--------\n\n"
@@ -129,8 +130,8 @@ echo ""
 
 # Remove existing nl_single/ directory if it exists
 if [ -d $synth_dir ]; then
-    echo "$synth_dir already exists. Skipping synthesis using yosys!
-    If you want to re-run synthesis, delete the directory and retry."
+    echo "$synth_dir already exists. removing it..."
+    rm -r $synth_dir/*
 else
     mkdir $synth_dir
     echo "Created new $synth_dir directory."
@@ -165,6 +166,7 @@ fi
 
 #example of what this function does: nl_single/PipelinedCPU_synth.v (netlist) --openSTA---> timing_report*rpt formed with max delay path -----> color.json
 calc_frequency_and_create_color_dot_json () {
+	run_with_synalign=$1
 ##### STA on top module
 echo "~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~"
 echo "          Find frequency using openSTA for $top_name ...       "
@@ -189,19 +191,20 @@ fi
 # Extract the line with "slack" and get the corresponding value
 # -m 1 --> will select only the 1st occurence. otherwise all the slack values will be printed.
 arrival_time=$(grep -m 1 -oP '\s*-?\d+\.\d+\s+data arrival time' "$latest_report" | awk '{print $1}')
-original_arrival_time=arrival_time
+original_arrival_time=$arrival_time
 # Output the slack value
 echo "arrival_time: $arrival_time"
 
-
-echo "~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~"
-echo "          creating color.json for $top_name ...       "
-echo "~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~"
-
-python3 ../create_color_json.py $latest_report $top_name
-if [ $? -ne 0 ]; then
-	echo " ERROR: error in ../create_color_json.py"
-	exit 1
+if [ "$run_with_synalign" = "true" ]; then
+	echo "~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~"
+	echo "          creating color.json for $top_name ...       "
+	echo "~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~"
+	
+	python3 ../create_color_json.py $latest_report $top_name
+	if [ $? -ne 0 ]; then
+		echo " ERROR: error in ../create_color_json.py"
+		exit 1
+	fi
 fi
 
 }
@@ -224,7 +227,7 @@ echo "~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~"
 	  exit $ret_val
 	fi
 	
-	CXX=clang++-14 CC=clang-14 bazel build -c opt //...
+	bazel build -c opt //...
 	ret_val=$?
 	if [ $ret_val -ne 0 ]; then
 	  echo "\n--------compilation failed!--------\n\n"
@@ -265,11 +268,42 @@ echo "~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~"
 	fi
 }
 
+
 comment_rtl() {
-echo "~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~"
-echo "          commenting rtl using $synalign_log_file ...       "
-echo "~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~"
- python3 ../comment_rtl.py ${synalign_log_file}
+	run_with_synalign=$1
+	echo "~~~~~~ in comment_rtl function with synalign run as $run_with_synalign"
+if [ "$run_with_synalign" == "true" ]; then
+	echo "~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~"
+	echo "          commenting rtl using $synalign_log_file ...       "
+	echo "~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~"
+
+	# Capture JSON output and parse it
+        #file_names_to_change=($(python3 ../comment_rtl.py "${synalign_log_file}" | jq -r '.[]'))
+	mapfile -t file_names_to_change < <(python3 ../comment_rtl.py "${synalign_log_file}" | jq -r '.[]')
+	#python3 ../comment_rtl.py ${synalign_log_file}
+	
+	echo "~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~"
+	echo "          commented ${file_names_to_change[@]} rtl        "
+	echo "~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~"
+else
+	echo "~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~"
+	echo "creating commented files (echo "${file_names_to_change[@]}" ) ...       "
+	echo "~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~"
+
+	# Traverse over the list and rename files (need not put //CRITICAL in them)
+	for file in "${file_names_to_change[@]}"; do
+	    dir_name=$(dirname "$file")  # Extract directory path
+	    base_name=$(basename "$file" .v)  # Extract filename without extension
+	    new_name="${dir_name}/${base_name}_commented.v"  # Append _commented
+	
+	    # Rename the file
+	    cp "$file" "$new_name"
+	
+	    # Print status
+	    echo "copied: $file → $new_name"
+	done
+fi
+
 if [ $? -ne 0 ]; then
 	echo " ERROR: error in ../comment_rtl.py"
 	exit 1
@@ -281,29 +315,18 @@ echo "~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~"
 }
 
 
-lgcheck(){
-
-# Move to livehd directory
-cd ~/livehd/
-ret_val=$?
-if [ $ret_val -ne 0 ]; then
-  echo "\n--------livehd folder not found. check the directory structure and make necessary changes.--------\n\n"
-  exit $ret_val
-fi
-
-
-inou/yosys/lgcheck --top
-
-}
-
 create_yaml_and_call_hagent() {
 
-	# Use sed to replace "module <top_name>_original" with "module <top_name>" in place
-	sed -i "s/module[[:space:]]\+${top_name}_original\>/module ${top_name}/" "$rtl_path/liveparse/${top_name}.v"
-	if [ -f "$rtl_path/liveparse/${top_name}_commented.v" ]; then
-		sed -i "s/module[[:space:]]\+${top_name}_original\>/module ${top_name}/" "$rtl_path/liveparse/${top_name}_commented.v"
+	run_with_synalign=$1
+
+	if [ "$run_with_synalign" = "true" ]; then
+		# Use sed to replace "module <top_name>_original" with "module <top_name>" in place
+		sed -i "s/module[[:space:]]\+${top_name}_original\>/module ${top_name}/" "$rtl_path/liveparse/${top_name}.v"
+		if [ -f "$rtl_path/liveparse/${top_name}_commented.v" ]; then
+			sed -i "s/module[[:space:]]\+${top_name}_original\>/module ${top_name}/" "$rtl_path/liveparse/${top_name}_commented.v"
+		fi
+		echo "NOTE: Reverted SynAlign renaming in $rtl_path/liveparse/${top_name}.v"
 	fi
-	echo "NOTE: Reverted SynAlign renaming in $rtl_path/liveparse/${top_name}.v"
 
 
 	# Find all files ending with "_commented.v" and store in an array
@@ -328,7 +351,7 @@ create_yaml_and_call_hagent() {
 	    base_name=$(basename "$file" "_commented.v")  # Extract module name
 	    output_file="${base_name}.yaml"  # Construct output file name
 	    echo "Creating yaml for $file -> $output_file"
-	    python3 ../create_yaml_for_hagent.py $file $base_name -m "openai/o3-mini-2025-01-31" -o ${rtl_path}/liveparse/$output_file
+	    python3 ../create_yaml_for_hagent.py $file $base_name -c $run_with_synalign -m "openai/o3-mini-2025-01-31" -o ${rtl_path}/liveparse/$output_file
 
 	    #now call hagent for each of these files.
 
@@ -457,11 +480,11 @@ EOF
 	
 	# Extract the line with "slack" and get the corresponding value
 	arrival_time=$(grep -m 1 -oP '\s*-?\d+\.\d+\s+data arrival time' "$latest_report" | awk '{print $1}')
-	original_arrival_time=arrival_time
 	# Output the slack value
-	echo "new arrival_time: $arrival_time"
+	echo "new arrival_time: $arrival_time , original_arrival_time=$original_arrival_time"
 	
 	improved_arrival_time_diff=$(echo "$original_arrival_time - $arrival_time" | bc)
+	results_array+=($improved_arrival_time_diff)
 	echo "####################################################################"
 	echo "NOTE: improvement in arrival time: $improved_arrival_time_diff ns"
 	echo "####################################################################"
@@ -470,26 +493,54 @@ EOF
 }
 
 
-./clean_tests.sh
-create_selected_top_file
-split_into_modules
-synth_yosys
-calc_frequency_and_create_color_dot_json
-#now we need to lower the arrival time to improve frequency.
-#Which part of rtl does the nodes in above reported timing path belong to?
-run_synalign  
-#orig files are from liveparse/
-cd $test_dir
-comment_rtl
+run_all(){
+	run_with_synalign=$1
+	../clean_tests.sh
+	create_selected_top_file
+	split_into_modules
+	synth_yosys
+	calc_frequency_and_create_color_dot_json "$run_with_synalign"
+	#now we need to lower the arrival time to improve frequency.
+	#Which part of rtl does the nodes in above reported timing path belong to?
+	if [ "$run_with_synalign" = "true" ]; then
+		run_synalign  
+	fi
+	#orig files are from liveparse/
+	cd $test_dir
+	comment_rtl "$run_with_synalign"
+	echo `pwd`
+	
+	#now use AI to generate optimized versions of _commented.v files(modules)
+	create_yaml_and_call_hagent "$run_with_synalign"
+	#call_hagent to create _optimized.v as well as run lec check on _optimized and _commented versions
+	#if lec passes, stitch optimized version with all other modules and create a neww top and re run synth+timing to check if freq. improved!
+	
+	synth_yosys_and_calc_new_freq
 
-echo `pwd`
+}
 
-#now use AI to generate optimized versions of _commented.v files(modules)
-create_yaml_and_call_hagent
-#call_hagent to create _optimized.v as well as run lec check on _optimized and _commented versions
-#if lec fails, get another version from LLM and retry LEC until it passes.
-#write the chat command: "your solution fails LEC. try again."
-#if lec passes, stitch optimized version with all other modules and create a neww top and re run synth+timing to check if freq. improved!
 
-synth_yosys_and_calc_new_freq
+# File to collect results
+result_file="results.txt"
+echo "--------------" >> "$result_file"  # separator before new results
+echo "$top_name" >> "$result_file"
+
+#always run forst with Synalign so that in next (w/o SynAlign) run, then same files are taken for optimization
+for run_with_synalign in true false; do
+	results_array=()
+	run_all "$run_with_synalign" 
+	# if [ "$run_with_synalign" == "true" ]; then
+	# 	echo "With SynAlign" >> "$result_file"
+	# else
+	# 	echo "Without SynAlign" >> "$result_file"
+	# fi
+	echo "run_with_syn=$run_with_synalign, results_array=$(IFS=,; echo "${results_array[*]}")" >> "$result_file"  # Append to file
+done
+
+# Store the results as a comma-separated string
+#result_str=$(IFS=,; echo "${results_array[*]}")
+#echo "$result_str" >> "$result_file"
+
+# Display the results
+cat "$result_file"
 

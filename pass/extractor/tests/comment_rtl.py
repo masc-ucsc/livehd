@@ -1,6 +1,7 @@
 import re
 import os
 import sys
+import json
 
 """
 HOW TO RUN:
@@ -24,7 +25,7 @@ def extract_line_numbers_and_paths(log_file):
             break
     
     if start_index is None:
-        print("No relevant section found in the log file.")
+        print("No relevant section found in the log file.", file=sys.stderr)
         return {}
     
     file_line_map = {}
@@ -44,6 +45,7 @@ def modify_rtl_v(file_line_map):
     Modifies the specified files by appending "//CRITICAL" to the given line numbers.
     Saves the modified file as "_commented.v" in the same directory as the original file.
     """
+    file_names = []  # Initialize an empty list
     for rtl_file, line_numbers in file_line_map.items():
         try:
             with open(rtl_file, 'r') as f:
@@ -57,6 +59,7 @@ def modify_rtl_v(file_line_map):
             # Save the modified file as "_commented.v" in the same directory
             dir_path = os.path.dirname(rtl_file)
             new_file = os.path.join(dir_path, os.path.basename(rtl_file).replace(".v", "_commented.v"))
+            file_names.append(os.path.join(dir_path, os.path.basename(rtl_file)))
 
             # Delete the existing "_commented.v" file if it exists
             if os.path.exists(new_file):
@@ -64,26 +67,29 @@ def modify_rtl_v(file_line_map):
 
             with open(new_file, 'w') as f:
                 f.writelines(lines)
-            print(f"Saved modified file as {new_file} at lines: {sorted(line_numbers)}")
+            print(f"Saved modified file as {new_file} at lines: {sorted(line_numbers)}", file=sys.stderr)
         except FileNotFoundError:
-            print(f"File not found: {rtl_file}")
+            print(f"File not found: {rtl_file}", file=sys.stderr)
+            sys.exit(1)
         except Exception as e:
-            print(f"Error modifying {rtl_file}: {e}")
+            print(f"Error modifying {rtl_file}: {e}", file=sys.stderr)
+            sys.exit(1)
+    return file_names
 
 def main():
     """
     Main function to handle script execution. Takes log file as a command-line argument.
     """
     if len(sys.argv) != 2:
-        print("Usage: script.py <log_file>")
+        print("Usage: script.py <log_file>", file=sys.stderr)
         sys.exit(1)
     
     log_file = sys.argv[1]
     file_line_map = extract_line_numbers_and_paths(log_file)
     if file_line_map:
-        modify_rtl_v(file_line_map)
+        print(json.dumps(modify_rtl_v(file_line_map))) # Print JSON output (only this will be captured by Bash)
     else:
-        print("No modifications made to files.")
+        print("No modifications made to files.", file=sys.stderr)
 
 if __name__ == "__main__":
     main()
