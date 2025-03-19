@@ -54,10 +54,10 @@ http_archive(
     name = "slang",
     build_file = "slang.BUILD",
     patches = ["//external:slang.patch"],
-    sha256 = "eea4b20751fa6394647330518c9b0c46c8248fea984c91a8a8bfe01a8a04567e",
-    strip_prefix = "slang-458be618a58aa1896398eccc1ddf75b880afaab6",
+    sha256 = "aa8aa99b10cbff189438a9315a974ae7a822d4f2cedfbd78ebed9ac2a499cb72",
+    strip_prefix = "slang-389fab2ed8731f3beb3aa5c4cdb86cd2a27b07ee",
     urls = [
-        "https://github.com/MikePopoloski/slang/archive/458be618a58aa1896398eccc1ddf75b880afaab6.zip",
+        "https://github.com/MikePopoloski/slang/archive/389fab2ed8731f3beb3aa5c4cdb86cd2a27b07ee.zip",
     ],
 )
 
