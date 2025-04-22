@@ -120,7 +120,7 @@ static void scrup(TMT *vt, size_t r, size_t n) {
   n = MIN(n, vt->screen.nline - 1 - r);
 
   if (n) {
-    TMTLINE *buf[n];
+    TMTLINE *buf = (TMTLINE *)alloca(sizeof(TMTLINE) * n);
 
     memcpy(buf, vt->screen.lines + r, n * sizeof(TMTLINE *));
     memmove(vt->screen.lines + r, vt->screen.lines + r + n, (vt->screen.nline - n - r) * sizeof(TMTLINE *));
@@ -135,7 +135,7 @@ static void scrdn(TMT *vt, size_t r, size_t n) {
   n = MIN(n, vt->screen.nline - 1 - r);
 
   if (n) {
-    TMTLINE *buf[n];
+    TMTLINE *buf = (TMTLINE *)alloca(sizeof(TMTLINE) * n);
 
     memcpy(buf, vt->screen.lines + (vt->screen.nline - n), n * sizeof(TMTLINE *));
     memmove(vt->screen.lines + r + n, vt->screen.lines + r, (vt->screen.nline - n - r) * sizeof(TMTLINE *));
