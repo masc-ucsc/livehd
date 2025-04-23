@@ -93,16 +93,6 @@ http_archive(
     ],
 )
 
-# iassert
-http_archive(
-    name = "iassert",
-    sha256 = "c6bf66a76d5a1de57c45dba137c9b51ab3b4f3a31e5de9e3c3496d7d36a128f8",
-    strip_prefix = "iassert-5c18eb082262532f621a23023f092f4119a44968",
-    urls = [
-        "https://github.com/masc-ucsc/iassert/archive/5c18eb082262532f621a23023f092f4119a44968.zip",
-    ],
-)
-
 # HIF
 http_archive(
     name = "hif",
