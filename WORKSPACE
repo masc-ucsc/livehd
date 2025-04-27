@@ -174,17 +174,6 @@ http_archive(
     ],
 )
 
-# mockturtle
-http_archive(
-    name = "mockturtle",
-    build_file = "mockturtle.BUILD",
-    sha256 = "562579061863772362856258f2be0984b3c503a497fab8e093bbb10fa1a8ace0",
-    strip_prefix = "mockturtle-0.2",
-    urls = [
-        "https://github.com/lsils/mockturtle/archive/refs/tags/v0.2.zip",
-    ],
-)
-
 # Perfetto
 http_archive(
     name = "com_google_perfetto",

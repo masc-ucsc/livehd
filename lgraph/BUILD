@@ -104,7 +104,7 @@ cc_test(
     deps = [
         ":lgraph",
         ":tree_lgdb_test",
-        "@fmt",
+        "@fmt//:fmt",
     ],
 )
 

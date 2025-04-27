@@ -18,14 +18,14 @@
 #     ],
 # )
 
-# cc_test(
-#     name = "mock_test",
-#     srcs = ["mock_test.cpp"],
-#     deps = [
-#         "//core",
-#         "@mockturtle",
-#     ],
-# )
+cc_test(
+    name = "mock_test",
+    srcs = ["mock_test.cpp", "perf_tracing.hpp"],
+    deps = [
+        "//core",
+        "@mockturtle//:mockturtle",
+    ],
+)
 
 # sh_test(
 #     name = "mt_test.sh",

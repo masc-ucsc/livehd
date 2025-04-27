@@ -36,7 +36,7 @@ cc_library(
         "@abseil-cpp//absl/container:node_hash_map",
         "@abseil-cpp//absl/strings",
         "@abseil-cpp//absl/types:span",
-        "@fmt",
+        "@fmt//:fmt",
         "@iassert",
     ] + select({
         ":use_profiling": [

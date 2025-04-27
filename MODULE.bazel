@@ -4,6 +4,9 @@ module(
     version = "0.2.0",
 )
 
+bazel_dep(name = "bazel_skylib", version = "1.7.1")
+http_archive = use_repo_rule("@bazel_tools//tools/build_defs/repo:http.bzl", "http_archive")
+
 bazel_dep(name = "rules_cc", version = "0.1.1")
 bazel_dep(name = "rules_foreign_cc", version = "0.14.0")
 
@@ -22,6 +25,7 @@ bazel_dep(name = "rules_bison", version = "0.3.1")
 bazel_dep(name = "rapidjson", version = "1.1.0.bcr.20241007")
 bazel_dep(name = "mimalloc", version = "2.1.7-bcr.alpha.1")
 
+
 # iassert
 bazel_dep(name = "iassert", version = "0.1.0")
 
@@ -33,3 +37,40 @@ archive_override(
         "https://github.com/masc-ucsc/iassert/archive/c2136ed8809ec1addbc48eb836c58d5b895e3f2b.zip",
     ],
 )
+
+#### Mockturtle packages
+
+http_archive(
+    name = "mockturtle",
+    url = "https://github.com/lsils/mockturtle/archive/refs/heads/master.zip",
+    strip_prefix = "mockturtle-master",
+    build_file = "//external:mockturtle.BUILD",
+)
+
+http_archive(
+    name = "kitty",
+    url = "https://github.com/msoeken/kitty/archive/refs/heads/master.zip",
+    strip_prefix = "kitty-master",
+    build_file = "//external:kitty.BUILD",
+)
+
+http_archive(
+    name = "parallel_hashmap",
+    url = "https://github.com/greg7mdp/parallel-hashmap/archive/refs/heads/master.zip",
+    strip_prefix = "parallel-hashmap-master",
+    build_file = "//external:parallel_hashmap.BUILD",
+)
+
+# Mocktutle uses MODULE.bazel, so it needs the fmt here too
+http_archive(
+    name = "fmt2",
+    url = "https://github.com/fmtlib/fmt/archive/refs/heads/master.zip",
+    strip_prefix = "fmt-master",
+     # urls = [
+     #     "https://github.com/fmtlib/fmt/archive/refs/tags/10.1.1.zip",
+     # ],
+     # sha256 = "3c2e73019178ad72b0614a3124f25de454b9ca3a1afe81d5447b8d3cbdb6d322",
+     # strip_prefix = "fmt-10.1.1",
+    build_file = "//external:fmt2.BUILD",
+)
+
