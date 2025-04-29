@@ -61,6 +61,16 @@ cc_test(
 )
 
 cc_test(
+    name = "vcd_sample",
+    srcs = [
+        "tests/vcd_sample.cpp", "tests/vcd_sample.hpp"
+    ],
+    deps = [
+        ":core",
+    ],
+)
+
+cc_test(
     name = "hashset_test",
     srcs = [
         "tests/hashset_test.cpp",
