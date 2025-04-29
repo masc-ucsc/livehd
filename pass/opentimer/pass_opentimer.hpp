@@ -4,7 +4,7 @@
 #include "node_pin.hpp"
 #include "ot/timer/timer.hpp"
 #include "pass.hpp"
-#include "power_vcd.hpp"
+#include "vcd_power.hpp"
 
 class Pass_opentimer : public Pass {
 protected:
@@ -12,17 +12,17 @@ protected:
 
   ot::Timer timer;
 
-  int margin;  // % margin to mark nodes
+  int    margin;  // % margin to mark nodes
   double freq;
 
-  std::string odir;    // output directory power trace
-  float max_delay;     // slowest arrival time (delay) on the circuit
-  float margin_delay;  // time delay to mark any slower cell for criticality
+  std::string odir;          // output directory power trace
+  float       max_delay;     // slowest arrival time (delay) on the circuit
+  float       margin_delay;  // time delay to mark any slower cell for criticality
 
   std::vector<std::string> sdc_file_list;
   std::vector<std::string> spef_file_list;
   std::vector<std::string> vcd_file_list;
-  std::vector<Power_vcd>   vcd_list;
+  std::vector<Vcd_power>   vcd_list;
 
   static void liberty_open(Eprp_var &var);
   static void time_work(Eprp_var &var);

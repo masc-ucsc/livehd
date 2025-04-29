@@ -23,6 +23,9 @@ public:
   // Drive the parsing & callbacks.
   void process();
 
+  [[nodiscard]] const std::string& get_filename() const { return filename_; }
+  void                             set_timescale(double ts) { timescale_ = ts; }
+
 protected:
   // Called for every value change:
   //   bucket:   quantized time‐bucket (0..n_buckets_-1)
