@@ -8,6 +8,7 @@
 #include <vector>
 
 #include "absl/container/flat_hash_map.h"
+#include "absl/container/node_hash_map.h"
 
 // Base class: memory-map & parse a VCD file inline.  Derived classes must
 // implement on_value(hier_name, value) to process each sample.
@@ -36,12 +37,18 @@ protected:
   size_t      timestamp_;       // current timestamp during parse
   std::string filename_;
 
+  [[nodiscard]] const std::vector<std::string>& get_alias(std::string_view name) const;
+
+  // quantize the current timestamp into a bucket index
+  [[nodiscard]] size_t get_current_bucket() const;
+
 private:
-  int                                           map_fd_;
-  const char *                                  map_buffer_, *map_end_;
-  size_t                                        map_size_;
-  std::vector<std::string>                      scope_stack_;
-  absl::flat_hash_map<std::string, std::string> id2hier_;
+  int                                                        map_fd_;
+  const char *                                               map_buffer_, *map_end_;
+  size_t                                                     map_size_;
+  std::vector<std::string>                                   scope_stack_;
+  absl::flat_hash_map<std::string, std::string>              id2hier_;
+  absl::node_hash_map<std::string, std::vector<std::string>> alias_map_;
 
   bool find_max_time();
   void parse();
@@ -52,7 +59,4 @@ private:
   const char*                              parse_instruction(const char* ptr);
   const char*                              parse_timestamp(const char* ptr);
   const char*                              parse_sample(const char* ptr);
-
-  // quantize the current timestamp into a bucket index
-  [[nodiscard]] size_t get_current_bucket() const;
 };

@@ -9,13 +9,15 @@ Vcd_sample::~Vcd_sample() {
   fmt::print("=== sample parity results ===\n");
   for (auto& [sig, p] : parity_) {
     fmt::print("  {} : {}\n", sig, p);
+    for (const auto& n : get_alias(sig)) {
+      fmt::print("     : {}\n", n);
+    }
   }
 }
 
 void Vcd_sample::on_value(const std::string& hier_name, std::string_view val) {
-  fmt::print("ON:{}:{}:{}\n", timestamp_, hier_name, val);
   //  only for signals whose name begins with "foo,"
-  if (hier_name.rfind("foo,", 0) == 0) {
+  if (hier_name.find("uart") != std::string_view::npos) {
     // toggle parity
     parity_[hier_name] = !parity_[hier_name];
   }

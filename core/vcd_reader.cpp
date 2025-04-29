@@ -147,7 +147,12 @@ const char* Vcd_reader::parse_instruction(const char* ptr) {
       fullname.push_back(',');
     }
     fullname += std::string(sig);
-    id2hier_[std::string(id)] = std::move(fullname);
+    auto it = id2hier_.find(id);
+    if (it == id2hier_.end()) {
+      id2hier_[std::string(id)] = std::move(fullname);
+    } else {
+      alias_map_[it->second].emplace_back(std::move(fullname));
+    }
   } else if (std::strncmp(ptr, "timescale", 9) == 0) {
     ptr += 9;
     auto [p2, ts] = parse_word(ptr);
@@ -199,6 +204,17 @@ const char* Vcd_reader::parse_sample(const char* ptr) {
     on_value(it->second, value);
   }
   return ptr;
+}
+
+const std::vector<std::string>& Vcd_reader::get_alias(std::string_view name) const {
+  static std::vector<std::string> empty_map;
+
+  auto it = alias_map_.find(name);
+  if (it == alias_map_.end()) {
+    return empty_map;
+  }
+
+  return it->second;
 }
 
 void Vcd_reader::parse() {
