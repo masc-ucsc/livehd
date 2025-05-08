@@ -58,7 +58,7 @@ private:
 
   const char*                              skip_command(const char* ptr) const;
   const char*                              skip_word(const char* ptr) const;
-  std::pair<const char*, std::string_view> parse_word(const char* ptr) const;
+  std::pair<const char*, std::string_view> parse_word(const char* ptr) const noexcept;
   const char*                              parse_instruction(const char* ptr);
   const char*                              parse_timestamp(const char* ptr);
   const char*                              parse_sample(const char* ptr);

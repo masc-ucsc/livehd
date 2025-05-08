@@ -99,25 +99,39 @@ const char* Vcd_reader::skip_command(const char* ptr) const {
 }
 
 const char* Vcd_reader::skip_word(const char* ptr) const {
+#if 0
   while (ptr < map_end_ && std::isspace(*ptr)) {
     ++ptr;
   }
   while (ptr < map_end_ && !std::isspace(*ptr)) {
     ++ptr;
   }
+#else
+  size_t head = strspn(ptr, " \n");
+  ptr += head;
+
+  size_t len = strcspn(ptr, " \n");
+  ptr += len;
+#endif
+
   return ptr;
 }
 
-std::pair<const char*, std::string_view> Vcd_reader::parse_word(const char* ptr) const {
-  // return (after, word)
-  while (ptr < map_end_ && std::isspace(*ptr)) {
-    ++ptr;
-  }
-  const char* start = ptr;
-  while (ptr < map_end_ && !std::isspace(*ptr)) {
-    ++ptr;
-  }
-  return {ptr, std::string_view(start, ptr - start)};
+std::pair<const char*, std::string_view> Vcd_reader::parse_word(const char* ptr) const noexcept {
+  // Not allowed characters for spaces
+  assert(ptr[0] != '\r');
+  assert(ptr[0] != '\f');
+  assert(ptr[0] != '\t');
+
+  // skip leading whitespace
+  size_t head = strspn(ptr, " \n");
+  ptr += head;
+
+  // length of next token
+  size_t len = strcspn(ptr, " \n");
+  auto start = ptr;
+  ptr += len;
+  return { ptr, std::string_view(start, len) };
 }
 
 const char* Vcd_reader::parse_instruction(const char* ptr) {
