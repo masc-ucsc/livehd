@@ -86,10 +86,10 @@ http_archive(
 http_archive(
     name = "json",
     build_file = "json.BUILD",
-    sha256 = "95651d7d1fcf2e5c3163c3d37df6d6b3e9e5027299e6bd050d157322ceda9ac9",
-    strip_prefix = "json-3.11.2",
+    sha256 = "34660b5e9a407195d55e8da705ed26cc6d175ce5a6b1fb957e701fb4d5b04022",
+    strip_prefix = "json-3.12.0",
     urls = [
-        "https://github.com/nlohmann/json/archive/refs/tags/v3.11.2.zip",
+        "https://github.com/nlohmann/json/archive/refs/tags/v3.12.0.zip",
     ],
 )
 
