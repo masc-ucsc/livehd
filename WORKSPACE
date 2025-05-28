@@ -96,10 +96,10 @@ http_archive(
 # HIF
 http_archive(
     name = "hif",
-    sha256 = "9d65753cc06e02b7d8f795ed6f3286861879877f5928a793e1048f8b8433b9d7",
-    strip_prefix = "hif-9b731a9feeba0faa268fbc59b722f6f7ce5f387a",
+    sha256 = "de5988e3ad9b398dd7b9879ddb8b539d02f18d2ffe1f1cad35d07b9696d0b49d",
+    strip_prefix = "hif-2102c0507c89c9a37d9e4b7711e3c56994ea6725",
     urls = [
-        "https://github.com/masc-ucsc/hif/archive/9b731a9feeba0faa268fbc59b722f6f7ce5f387a.zip",
+        "https://github.com/masc-ucsc/hif/archive/2102c0507c89c9a37d9e4b7711e3c56994ea6725.zip",
     ],
 )
 
