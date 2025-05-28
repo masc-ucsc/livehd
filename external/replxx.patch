@@ -1,0 +1,15 @@
+--- src/terminal.cxx	2025-05-24 09:19:43.000000000 -0700
++++ src/terminal.cxx	2025-05-27 18:47:52.613845164 -0700
+@@ -633,11 +633,11 @@
+ 			}
+ 		}
+ 	}
+ #else
+ 	fd_set fdSet;
+-	int nfds( max( {_interrupt[0], _interrupt[1], _in_fd} ) + 1 );
++	int nfds( max(max( _interrupt[0], _interrupt[1]), _in_fd) + 1 );
+ 	while ( true ) {
+ 		FD_ZERO( &fdSet );
+ 		FD_SET( _in_fd, &fdSet );
+ 		FD_SET( _interrupt[0], &fdSet );
+ 		timeval tv{ timeout_ / 1000, static_cast<suseconds_t>( ( timeout_ % 1000 ) * 1000 ) };

@@ -158,7 +158,7 @@ YOSYS_COPTS = [
     "-w",
     "-Wno-implicit-fallthrough",
     "-Wno-vla",
-    "-std=c++17",
+    "-std=c++20",
 ]
 
 cc_library(

@@ -17,6 +17,7 @@ cc_library(
     copts = [
         "-w",
         "-g",
+        "-std=c++20"
 #        "-O2",
     ],  # disable turning warnings into errors for external lib
     includes = ["include"],  # Needed because some includes use <foo.h>

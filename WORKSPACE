@@ -134,12 +134,11 @@ http_archive(
 http_archive(
     name = "replxx",
     build_file = "replxx.BUILD",
+    patches = ["//external:replxx.patch"],
     sha256 = "3f97bc606c26778c6e88041afe5912f395308811476c4b3094c514665013bcd8",
     strip_prefix = "replxx-dea4b7c724a2ec41d078383ccf0ebeedfaebaeea",
     urls = [
-        #"https://github.com/ClickHouse/replxx/archive/711c18e7f4d951255aa8b0851e5a55d5a5fb0ddb.zip",
         "https://github.com/ClickHouse/replxx/archive/dea4b7c724a2ec41d078383ccf0ebeedfaebaeea.zip",
-
     ],
 )
 
