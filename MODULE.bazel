@@ -31,10 +31,10 @@ bazel_dep(name = "iassert", version = "0.1.0")
 
 archive_override(
     module_name = "iassert",
-    integrity = "sha256-lHlDknD8QsWKOVnXql7NIH6/C76SEOHRe0JlMPCwlrI=",
-    strip_prefix = "iassert-c2136ed8809ec1addbc48eb836c58d5b895e3f2b",
+    integrity = "sha256-Z9PIn1Fvbo8rE5RhStEvuRA0h39CcRK+536PzJKH/UU=",
+    strip_prefix = "iassert-db67db81bc7708fae78d1d667c9a085e5c0e123c",
     urls = [
-        "https://github.com/masc-ucsc/iassert/archive/c2136ed8809ec1addbc48eb836c58d5b895e3f2b.zip",
+        "https://github.com/masc-ucsc/iassert/archive/db67db81bc7708fae78d1d667c9a085e5c0e123c.zip",
     ],
 )
 
