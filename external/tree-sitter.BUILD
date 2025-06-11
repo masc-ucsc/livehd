@@ -5,7 +5,7 @@ load("@rules_cc//cc:defs.bzl", "cc_library")
 
 cc_library(
     name = "tree-sitter",
-    hdrs = glob(["lib/include/tree_sitter/*.h", "lib/src/unicode/*.h", "lib/src/*.h"]),
+    hdrs = glob(["lib/include/tree_sitter/*.h", "lib/src/portable/*.h", "lib/src/unicode/*.h", "lib/src/*.h"]),
     copts = [
         "-w",
         "-O2",

@@ -104,31 +104,31 @@ http_archive(
 )
 
 # cryptominisat
-http_archive(
-    name = "cryptominisat",
-    build_file = "cryptominisat.BUILD",
-    patches = ["//external:cryptominisat.patch"],
-#    sha256 = "e50eb9afc047c04922c2edd4fa6feb108563612b4e9d13154823d2d5bb005a56",
-#    strip_prefix = "cryptominisat-5.12.1",
-    sha256 = "e50eb9afc047c04922c2edd4fa6feb108563612b4e9d13154823d2d5bb005a56",
-    strip_prefix = "cryptominisat-5.12.1",
-    urls = [
-        "https://github.com/msoos/cryptominisat/archive/refs/tags/5.12.1.zip",
-#        "https://github.com/msoos/cryptominisat/archive/refs/tags/5.12.1.zip",
-    ],
-)
+# http_archive(
+#     name = "cryptominisat",
+#     build_file = "cryptominisat.BUILD",
+#     patches = ["//external:cryptominisat.patch"],
+# #    sha256 = "e50eb9afc047c04922c2edd4fa6feb108563612b4e9d13154823d2d5bb005a56",
+# #    strip_prefix = "cryptominisat-5.12.1",
+#     sha256 = "d699bc190e4fff837801763ea2bd4156ca1d74d3d3042a656a255d83e7e7cd5c",
+#     strip_prefix = "cryptominisat-release-5.13.0",
+#     urls = [
+# #        "https://github.com/msoos/cryptominisat/archive/refs/tags/5.12.1.zip",
+#         "https://github.com/msoos/cryptominisat/archive/refs/tags/release/5.13.0.zip",
+#     ],
+# )
 
 # boolector
-http_archive(
-    name = "boolector",
-    build_file = "boolector.BUILD",
-    patches = ["//external:boolector.patch"],
-    sha256 = "de4a91d4d271909aa0e1ca646105579cbdcd7676842f517237fc6238ca39aa79",
-    strip_prefix = "boolector-43dae91c1070e5e2633e036ebd75ffb13fe261e1",
-    urls = [
-        "https://github.com/Boolector/boolector/archive/43dae91c1070e5e2633e036ebd75ffb13fe261e1.zip",
-    ],
-)
+# http_archive(
+#     name = "boolector",
+#     build_file = "boolector.BUILD",
+#     patches = ["//external:boolector.patch"],
+#     sha256 = "de4a91d4d271909aa0e1ca646105579cbdcd7676842f517237fc6238ca39aa79",
+#     strip_prefix = "boolector-43dae91c1070e5e2633e036ebd75ffb13fe261e1",
+#     urls = [
+#         "https://github.com/Boolector/boolector/archive/43dae91c1070e5e2633e036ebd75ffb13fe261e1.zip",
+#     ],
+# )
 
 # replxx
 http_archive(
