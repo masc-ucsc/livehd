@@ -60,7 +60,7 @@ cc_test(
     ],
 )
 
-cc_test(
+cc_binary(
     name = "vcd_sample",
     srcs = [
         "tests/vcd_sample.cpp", "tests/vcd_sample.hpp"

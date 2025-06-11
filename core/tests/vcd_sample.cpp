@@ -30,4 +30,6 @@ int main() {
   }
   vs.process();
   // destructor prints parity summary
+
+  return 0;
 }
