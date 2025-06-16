@@ -48,24 +48,6 @@ jobs:
 
       - uses: codecov/codecov-action@v5
         with:
+          token: ${{ secrets.CODECOV_TOKEN }}
           directory: ./bazel-out/_coverage
-
-  clang-dbg:
-    name: clang tests everything
-    runs-on: ubuntu-latest
-    steps:
-      - name: Checkout repo
-        uses: actions/checkout@v4
-
-      - name: Install bazelisk
-        uses: bazelbuild/setup-bazelisk@v2
-
-      - name: Mount bazel cache
-        uses: actions/cache@v4
-        with:
-          path: "~/.cache/bazel"
-          key: bazel-clang
-
-      #      - run: sudo apt install -y build-essential
-      - run: CXX=clang++ CC=clang bazel test -c opt //...
 
