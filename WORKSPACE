@@ -8,7 +8,7 @@ load("@bazel_tools//tools/build_defs/repo:http.bzl", "http_archive")
 new_git_repository(
     name = "abc",
     build_file = "abc.BUILD",  # relative to external path
-    commit = "64ed5b81a493e285a64057a9db9ebad6867002bb",
+    commit = "beff7f1b340d6ad9ee5cb2e76b0821481f7313fb",
     patches = ["//external:abc.patch"],
     remote = "https://github.com/berkeley-abc/abc.git",
     shallow_since = "1554534526 -1000",
