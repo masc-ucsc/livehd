@@ -7,14 +7,7 @@ filegroup(
 
 cmake(
     name = "slang",
-    build_args = select({
-        "@platforms//os:macos": [
-            "--",
-            "-j 8",
-        ],
-        "//conditions:default": [
-        ],
-    }),
+    generate_args = ["-GNinja"],
     cache_entries = {
         "SLANG_INCLUDE_TESTS": "OFF",
         "SLANG_INCLUDE_TOOLS": "OFF",
