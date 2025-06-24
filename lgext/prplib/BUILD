@@ -7,7 +7,7 @@ cc_library(
         ["*.cpp"],
         exclude = ["*test*.cpp"],
     ),
-    hdrs = glob(["*.hpp"]),
+    # hdrs = glob(["*.hpp"]),
     copts = COPTS,
     includes = ["."],
     visibility = ["//visibility:public"],

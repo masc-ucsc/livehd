@@ -5,9 +5,5 @@ load("@rules_cc//cc:defs.bzl", "cc_library")
 cc_library(
     name = "headers",
     hdrs = ["mustache.hpp"],
-    copts = [
-        "-w",
-        "-O2",
-    ],
     visibility = ["//visibility:public"],
 )

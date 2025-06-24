@@ -8,6 +8,12 @@ filegroup(
     visibility = ["//visibility:public"],
 )
 
+filegroup(
+    name = "fmt_cmake",
+    srcs = glob(["CMakeLists.txt"]),
+    visibility = ["//visibility:public"],
+)
+
 cc_library(
     name = "fmt",
     hdrs = glob(["include/fmt/*.h"]) + glob(["src/*.cc"]),

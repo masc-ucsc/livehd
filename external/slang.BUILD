@@ -9,6 +9,7 @@ cmake(
     name = "slang",
     generate_args = ["-GNinja"],
     cache_entries = {
+        "FMT_CMAKE_PATH": "$(execpath @fmt//:fmt_cmake)",
         "SLANG_INCLUDE_TESTS": "OFF",
         "SLANG_INCLUDE_TOOLS": "OFF",
         "SLANG_INCLUDE_DOCS": "OFF",
@@ -33,6 +34,7 @@ cmake(
     visibility = ["//visibility:public"],
     data = [
         "@fmt//:all",
+        "@fmt//:fmt_cmake",
     ],
     deps = [
         "@fmt",
