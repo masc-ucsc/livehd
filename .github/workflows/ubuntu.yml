@@ -48,6 +48,7 @@ jobs:
 
       - uses: codecov/codecov-action@v5
         with:
+          slug: masc-ucsc/livehd
           token: ${{ secrets.CODECOV_TOKEN }}
           directory: ./bazel-out/_coverage
 
