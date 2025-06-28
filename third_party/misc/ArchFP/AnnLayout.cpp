@@ -1,5 +1,7 @@
 #include "AnnLayout.hpp"
 
+#include <format>
+#include <iostream>
 #include <cmath>
 #include <functional>
 
@@ -78,7 +80,7 @@ bool annLayout::layout(FPOptimization opt, double targetAR) {
     }
 
     if (comp->getX() == 0 && comp->getY() == 0) {
-      fmt::print("root object: {}\n", comp->getName());
+      std::cout << std::format("root object: {}\n", comp->getName());
       horiz.root_idx = i;
     }
   }

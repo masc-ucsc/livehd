@@ -10,8 +10,17 @@
 
 #include "structural.hpp"
 
+#include <format>
+#include <iostream>
+#include <format>
 #include <fstream>
+#include <format>
+#include <iostream>
+#include <format>
 #include <functional>
+#include <format>
+#include <iostream>
+#include <format>
 #include <queue>
 
 #include "lgedgeiter.hpp"
@@ -20,7 +29,7 @@ Live_structural::Live_structural(Stitch_pass_options &pack) {
   std::ifstream invariant_file(pack.boundaries_name);
 
   if (!invariant_file.good()) {
-    Pass::error(fmt::format("Error reading boundaries file {}", pack.boundaries_name));
+    Pass::error(std::format("Error reading boundaries file {}", pack.boundaries_name));
     return;
   }
 
@@ -30,7 +39,7 @@ Live_structural::Live_structural(Stitch_pass_options &pack) {
   original = Lgraph_open(pack.osynth_lgdb, boundaries->top);
 
   if (!original) {
-    Pass::error(fmt::format("I was not able to open original synthesized netlist {} in {}", boundaries->top, pack.osynth_lgdb));
+    Pass::error(std::format("I was not able to open original synthesized netlist {} in {}", boundaries->top, pack.osynth_lgdb));
   }
 }
 
@@ -77,7 +86,7 @@ void Live_structural::replace(Lgraph *nsynth) {
       // just add it to the end
       // FIXME: what happens if there is a loop?
       discovered.push(current_);
-      // fmt::print("pushing back {} due to no candidate equiv\n", current);
+      // std::cout << std::format("pushing back {} due to no candidate equiv\n", current);
       continue;
     }
 
@@ -111,5 +120,5 @@ void Live_structural::replace(Lgraph *nsynth) {
     count++;
   }
 
-  fmt::print("nomatch {}, match {}\n", no_match.size(), count);
+  std::cout << std::format("nomatch {}, match {}\n", no_match.size(), count);
 }

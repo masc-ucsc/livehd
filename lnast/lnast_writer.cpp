@@ -28,7 +28,7 @@ void Lnast_writer::write_nid(const Lnast_nid& nid) {
 void Lnast_writer::write_metadata() {
   print_line("/*\n");
   depth += 1;
-  print_line(fmt::fg(fmt::color::green), ":name: {}\n", lnast->get_top_module_name());
+  print_line(":name: {}\n", lnast->get_top_module_name());
   depth -= 1;
   print_line("*/\n");
 }
@@ -48,7 +48,7 @@ void Lnast_writer::write_lnast() {
 }
 
 void Lnast_writer::write_invalid() {
-  print(fmt::fg(fmt::color::red), "invalid");
+  print("invalid");
 }
 
 void Lnast_writer::write_top() {
@@ -74,7 +74,7 @@ void Lnast_writer::write_stmts() {
 }
 
 void Lnast_writer::write_if() {
-  print(fmt::fg(fmt::color::purple) | fmt::emphasis::bold, "if");
+  print("if");
   print(" (");
   move_to_child();
   write_lnast();
@@ -87,7 +87,7 @@ void Lnast_writer::write_if() {
   if (move_to_sibling()) {
     if (is_last_child()) {
       print(" ");
-      print(fmt::fg(fmt::color::purple) | fmt::emphasis::bold, "else");
+      print("else");
       print(" {{\n");
       ++depth;
       write_lnast();
@@ -96,7 +96,7 @@ void Lnast_writer::write_if() {
     } else {
       while (!is_last_child()) {
         print(" ");
-        print(fmt::fg(fmt::color::purple) | fmt::emphasis::bold, "elif");
+        print("elif");
         print(" (");
         write_lnast();
         move_to_sibling();
@@ -108,7 +108,7 @@ void Lnast_writer::write_if() {
         if (!move_to_sibling()) break;
         if (is_last_child()) {
           print(" ");
-          print(fmt::fg(fmt::color::purple) | fmt::emphasis::bold, "else");
+          print("else");
           print(" {{\n");
           ++depth;
           write_lnast();
@@ -177,7 +177,7 @@ void Lnast_writer::write_n_ary(std::string_view op) {
   move_to_child();
   write_lnast();
   print(" = ");
-  print(fmt::fg(fmt::color::teal) | fmt::emphasis::bold, op);
+  print(op);
   print("(");
   while (move_to_sibling()) {
     write_lnast();
@@ -221,17 +221,17 @@ void Lnast_writer::write_mask_xor()      { write_n_ary("mask_xor");      }
 
 void Lnast_writer::write_ref() {
   if (is_func_name) {
-    os << fmt::format("!{{{}}}", current_text());
+    os << std::format("!{{{}}}", current_text());
   } else {
-    os << fmt::format("%{{{}}}", current_text());
+    os << std::format("%{{{}}}", current_text());
   }
 }
 
 void Lnast_writer::write_const() {
   if (current_text().size() != 0 && isdigit(current_text()[0]))
-    print(fmt::fg(fmt::color::light_blue), "{}", current_text());
+    print("{}", current_text());
   else
-    print(fmt::fg(fmt::color::light_blue), "\"{}\"", current_text());
+    print("\"{}\"", current_text());
 }
 
 void Lnast_writer::write_range() { write_n_ary("range"); }
@@ -257,21 +257,21 @@ void Lnast_writer::write_type_spec() {
 void Lnast_writer::write_none_type() { print("#none"); }
 
 void Lnast_writer::write_prim_type_int(char sign) {
-  print(fmt::fg(fmt::color::gold), "#{}", sign);
+  print("#{}", sign);
   move_to_child();
   if (is_invalid()) {
-    print(fmt::fg(fmt::color::gold), "int");
+    print("int");
   } else if (is_last_child()) {
-    print(fmt::fg(fmt::color::gold), "(");
+    print("(");
     write_lnast();
-    print(fmt::fg(fmt::color::gold), ")");
+    print(")");
   } else {
-    print(fmt::fg(fmt::color::gold), "(");
+    print("(");
     write_lnast();
     print(", ");
     move_to_sibling();
     write_lnast();
-    print(fmt::fg(fmt::color::gold), ")");
+    print(")");
   }
   move_to_parent();
 }
@@ -279,14 +279,14 @@ void Lnast_writer::write_prim_type_int(char sign) {
 void Lnast_writer::write_prim_type_uint() { write_prim_type_int('u'); }
 void Lnast_writer::write_prim_type_sint() { write_prim_type_int('s'); }
 
-void Lnast_writer::write_prim_type_range()   { print(fmt::fg(fmt::color::gold), "#range"); }
-void Lnast_writer::write_prim_type_string()  { print(fmt::fg(fmt::color::gold), "#string"); }
-void Lnast_writer::write_prim_type_boolean() { print(fmt::fg(fmt::color::gold), "#boolean"); }
-void Lnast_writer::write_prim_type_type()    { print(fmt::fg(fmt::color::gold), "#type"); }
-void Lnast_writer::write_prim_type_ref()     { print(fmt::fg(fmt::color::gold), "#ref"); }
+void Lnast_writer::write_prim_type_range()   { print("#range"); }
+void Lnast_writer::write_prim_type_string()  { print("#string"); }
+void Lnast_writer::write_prim_type_boolean() { print("#boolean"); }
+void Lnast_writer::write_prim_type_type()    { print("#type"); }
+void Lnast_writer::write_prim_type_ref()     { print("#ref"); }
 
 void Lnast_writer::write_comp_type_tuple() {
-  print(fmt::fg(fmt::color::gold), "#tuple(");
+  print("#tuple(");
   move_to_child();
   ++depth;
   while (!is_invalid()) {
@@ -295,23 +295,23 @@ void Lnast_writer::write_comp_type_tuple() {
     move_to_sibling();
   }
   --depth;
-  print(fmt::fg(fmt::color::gold), ")");
+  print(")");
   move_to_parent();
 }
 
 void Lnast_writer::write_comp_type_array() {
-  print(fmt::fg(fmt::color::gold), "#array(");
+  print("#array(");
   move_to_child();
   write_lnast();
   print(", ");
   move_to_sibling();
   write_lnast();
-  print(fmt::fg(fmt::color::gold), ")");
+  print(")");
   move_to_parent();
 }
 
 void Lnast_writer::write_comp_type_mixin() {
-  print(fmt::fg(fmt::color::gold), "#mixin(");
+  print("#mixin(");
   move_to_child();
   ++depth;
   while (!is_invalid()) {
@@ -320,18 +320,18 @@ void Lnast_writer::write_comp_type_mixin() {
     move_to_sibling();
   }
   --depth;
-  print(fmt::fg(fmt::color::gold), ")");
+  print(")");
   move_to_parent();
 }
 
 void Lnast_writer::write_comp_type_lambda() {
-  print(fmt::fg(fmt::color::gold), "#lambda(");
+  print("#lambda(");
   move_to_child();
   write_lnast();
   print(", ");
   move_to_sibling();
   write_lnast();
-  print(fmt::fg(fmt::color::gold), ")");
+  print(")");
   move_to_parent();
 }
 
@@ -340,15 +340,15 @@ void Lnast_writer::write_comp_type_enum() {
 }
 
 void Lnast_writer::write_expr_type() {
-  print(fmt::fg(fmt::color::gold), "#expr(");
+  print("#expr(");
   move_to_child();
   write_lnast();
-  print(fmt::fg(fmt::color::gold), ")");
+  print(")");
   move_to_parent();
 }
 
 void Lnast_writer::write_unknown_type() {
-  print(fmt::fg(fmt::color::gold), "#unknown");
+  print("#unknown");
 }
 
 void Lnast_writer::write_tuple_concat() { }

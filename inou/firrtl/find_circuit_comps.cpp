@@ -9,7 +9,7 @@
  * can be found in the LNAST. If found, add to
  * Firrtl Module. */
 void Inou_firrtl::FindCircuitComps(Lnast &ln, firrtl::FirrtlPB_Module_UserModule *umod) {
-  fmt::print("FindCircuitComps\n");
+  std::cout << "FindCircuitComps\n";
   const auto stmts = ln.get_first_child(lh::Tree_index::root());
   for (const auto &lnidx : ln.children(stmts)) {
     SearchNode(ln, lnidx, umod);
@@ -268,7 +268,7 @@ void Inou_firrtl::CheckRefForComp(Lnast &ln, const Lnast_nid &ref_node, firrtl::
     if (ln.is_in_bw_table(name.substr(1))) {
       type = CreateTypeObject(ln.get_bitwidth(name.substr(1)));
     } else {
-      fmt::print("{}\n", name);
+      std::cout << std::format("{}\n", name);
       I(!(name.substr(0, 1) == "$"));  // Inputs HAVE to have bw
       type = CreateTypeObject(0);
     }

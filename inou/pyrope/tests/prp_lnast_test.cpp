@@ -16,7 +16,7 @@ int main(int argc, char **argv) {
   TRACE_EVENT("inou", "PYROPE_prp_lnast_convert");
   auto   lnast = converter.prp_ast_to_lnast("test");
 
-  fmt::print("AST to LNAST output:\n\n");
+  std::cout << "AST to LNAST output:\n\n";
 
   lnast->dump();
 

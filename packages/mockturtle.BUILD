@@ -6,7 +6,7 @@ cc_library(
     deps = [
         "@kitty//:kitty",
         "@parallel_hashmap//:parallel_hashmap",
-        "@fmt2//:fmt",
+        # "@fmt2//:fmt",
     ],
     defines = [
         "DISABLE_ABC",  # Disable ABC dependency

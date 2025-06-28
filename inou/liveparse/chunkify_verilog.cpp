@@ -10,6 +10,8 @@
 #include <sys/stat.h>
 #include <sys/types.h>
 
+#include <format>
+#include <iostream>
 #include <set>
 #include <string>
 
@@ -68,7 +70,7 @@ bool Chunkify_verilog::is_same_file(std::string_view module_name, std::string_vi
 
   char *memblock2 = (char *)mmap(NULL, sb.st_size, PROT_READ, MAP_PRIVATE, fd, 0);  // Read only mmap
   if (memblock2 == MAP_FAILED) {
-    Inou_liveparse::error(fmt::format("mmap failed?? for {}", module_name));
+    Inou_liveparse::error(std::format("mmap failed?? for {}", module_name));
     close(fd);
     return false;
   }
@@ -165,7 +167,7 @@ void Chunkify_verilog::elaborate() {
     bool endmodule_found = false;
     if (scan_is_token(Token_id_alnum)) {
       auto txt = scan_text();
-      // fmt::print("T:{}\n",txt);
+      // std::cout << std::format("T:{}\n",txt);
       if (txt == "module") {
         if (in_module) {
           throw scan_error(*this, "unexpected nested modules");

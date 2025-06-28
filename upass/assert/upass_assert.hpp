@@ -1,7 +1,7 @@
 //  This file is distributed under the BSD 3-Clause License. See LICENSE for details.
 #pragma once
 
-#include "fmt/format.h"
+#include <format>
 #include "lnast_ntype.hpp"
 #include "symbol_table.hpp"
 #include "upass_core.hpp"

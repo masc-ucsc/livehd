@@ -1,8 +1,7 @@
 
 #include "lnast_lexer.hpp"
 #include "gtest/gtest.h"
-#include "fmt/format.h"
-#include "fmt/printf.h"
+#include <format>
 
 #include <sstream>
 

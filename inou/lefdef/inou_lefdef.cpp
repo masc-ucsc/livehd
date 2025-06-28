@@ -38,7 +38,7 @@ void Inou_lefdef::to_lg(Eprp_var &var) {
 }
 
 std::vector<Lgraph *> Inou_lefdef::parse_def(std::string_view def_file) {
-  fmt::print("process {}\n", def_file);
+  std::cout << std::format("process {}\n", def_file);
 
   std::vector<Lgraph *> lgs;
 #if 1
@@ -46,7 +46,7 @@ std::vector<Lgraph *> Inou_lefdef::parse_def(std::string_view def_file) {
   // def_parsing(dinfo, def_file);
 
   for (auto &&io : dinfo.ios) {
-    fmt::print("io.name:{}\n", io.io_name);
+    std::cout << std::format("io.name:{}\n", io.io_name);
   }
 
 #else

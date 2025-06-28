@@ -2,6 +2,8 @@
 
 #include "node.hpp"
 
+#include <format>
+#include <iostream>
 #include <charconv>
 #include <string>
 
@@ -584,7 +586,7 @@ std::string Node::debug_name() const {
 #ifndef NDEBUG
   static uint16_t conta = 8192;
   if (conta++ == 0) {
-    fmt::print("WARNING: Node::debug_name should not be called during release (Slowww!)\n");
+    std::cout << std::format("WARNING: Node::debug_name should not be called during release (Slowww!)\n");
   }
 #endif
   if (nid == 0) {  // legal for invalid node/pins
@@ -715,33 +717,33 @@ bool Node::has_color() const {
 
 // LCOV_EXCL_START
 void Node::dump() const {
-  fmt::print("nid:{} type:{} lgraph:{} ", nid, get_type_name(), current_g->get_name());
+  std::cout << std::format("nid:{} type:{} lgraph:{} ", nid, get_type_name(), current_g->get_name());
   if (has_color()) {
-    fmt::print(" color:{} ", get_color());
+    std::cout << std::format(" color:{} ", get_color());
   }
-  fmt::print("is_type_loop_last:{} ", is_type_loop_last());
-  fmt::print("node_name:{} ", has_name() ? get_name() : "N.A");
+  std::cout << std::format("is_type_loop_last:{} ", is_type_loop_last());
+  std::cout << std::format("node_name:{} ", has_name() ? get_name() : "N.A");
   if (has_loc()) {
     auto [loc1, loc2] = get_loc();
-    fmt::print(" loc:[{},{}] ", loc1, loc2);
+    std::cout << std::format(" loc:[{},{}] ", loc1, loc2);
   }
-  fmt::print(" source:{} ", get_source());
+  std::cout << std::format(" source:{} ", get_source());
 
   if (get_type_op() == Ntype_op::LUT) {
-    fmt::print(" lut:{}\n", get_type_lut().to_pyrope());
+    std::cout << std::format(" lut:{}\n", get_type_lut().to_pyrope());
   } else if (get_type_op() == Ntype_op::Const) {
-    fmt::print(" const:{}\n", get_type_const().to_pyrope());
+    std::cout << std::format(" const:{}\n", get_type_const().to_pyrope());
   } else if (get_type_op() == Ntype_op::Sub) {
     Lg_type_id sub_lgid = current_g->get_type_sub(nid);
     auto       sub_name = top_g->get_library().get_name(sub_lgid);
-    fmt::print(" sub:{} (lgid:{}) (inst:{})\n", sub_name, sub_lgid, get_or_create_name());
+    std::cout << std::format(" sub:{} (lgid:{}) (inst:{})\n", sub_name, sub_lgid, get_or_create_name());
     I(!get_driver_pin_raw(0).is_invalid());  // 0 is always valid to allow generic pin for all outputs
   } else {
-    fmt::print("\n");
+    std::cout << std::format("\n");
   }
 
   for (const auto &edge : inp_edges()) {
-    fmt::print("  inp bits:{:<3} pid:{:<2} name:{:<30} <- nid:{:<5} pid:{:<2} name:{}\n",
+    std::cout << std::format("  inp bits:{:<3} pid:{:<2} name:{:<30} <- nid:{:<5} pid:{:<2} name:{}\n",
                edge.get_bits(),
                edge.sink.get_pid(),
                edge.sink.debug_name(),
@@ -750,7 +752,7 @@ void Node::dump() const {
                edge.driver.debug_name());
   }
   for (const auto &edge : out_edges()) {
-    fmt::print("  out bits:{:<3} pid:{:<2} name:{:<30} -> nid:{:<5} pid:{:<2} name:{} wname:{}\n",
+    std::cout << std::format("  out bits:{:<3} pid:{:<2} name:{:<30} -> nid:{:<5} pid:{:<2} name:{} wname:{}\n",
                edge.get_bits(),
                edge.driver.get_pid(),
                edge.driver.debug_name(),

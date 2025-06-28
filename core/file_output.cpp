@@ -6,9 +6,10 @@
 #include <sys/mman.h>
 #include <unistd.h>
 
+#include <iostream>
 #include <cerrno>
 
-#include "fmt/format.h"
+#include <format>
 #include "iassert.hpp"
 
 File_output::File_output(std::string_view fname) : filename(fname), sz(0), aborted(false) {}
@@ -21,7 +22,7 @@ File_output::~File_output() {
   //---------------------------------- OPEN
 
   int fd = ::open(filename.c_str(), O_RDWR | O_CREAT, 0644);
-  I(fd >= 0);  // throw std::runtime_error(fmt::format("could not create destination {} file (permissions?)", filename));
+  I(fd >= 0);  // throw std::runtime_error(std::format("could not create destination {} file (permissions?)", filename));
 
   size_t map_size = sz;
   map_size >>= 12;
@@ -32,7 +33,7 @@ File_output::~File_output() {
 
   void *base = ::mmap(0, map_size, PROT_READ | PROT_WRITE, MAP_SHARED, fd, 0);  // no superpages
   if (base == MAP_FAILED) {
-    fmt::print("mmap errno:{} for filename{}\n", strerror(errno), filename);
+    std::cout << std::format("mmap errno:{} for filename{}\n", strerror(errno), filename);
     I(false);
   }
 

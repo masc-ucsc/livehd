@@ -1,16 +1,17 @@
 // vcd_sample.cpp
 #include "vcd_sample.hpp"
 
-#include <fmt/format.h>
+#include <iostream>
+#include <format>
 
 Vcd_sample::Vcd_sample(size_t n_buckets) : Vcd_reader(n_buckets) {}
 
 Vcd_sample::~Vcd_sample() {
-  fmt::print("=== sample parity results ===\n");
+  std::cout << "=== sample parity results ===\n";
   for (auto& [sig, p] : parity_) {
-    fmt::print("  {} : {}\n", sig, p);
+    std::cout << std::format("  {} : {}\n", sig, p);
     for (const auto& n : get_alias(sig)) {
-      fmt::print("     : {}\n", n);
+      std::cout << std::format("     : {}\n", n);
     }
   }
 }

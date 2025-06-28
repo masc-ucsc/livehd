@@ -2,10 +2,7 @@
 #include <cstdlib>
 #include <iostream>
 
-#include "fmt/color.h"
-#include "fmt/core.h"
-#include "fmt/format.h"
-#include "fmt/printf.h"
+#include <format>
 #include "lnast.hpp"
 #include "semantic_check.hpp"
 
@@ -18,7 +15,7 @@ int main(void) {
     Lnast*         lnast = new Lnast();
     Semantic_check s;
 
-    fmt::print("\nAssign Operations Test\n\n");
+    std::cout << "\nAssign Operations Test\n\n";
 
     auto idx_root    = Lnast_node::create_top("top", line_num, pos1, pos2);
     auto node_stmts  = Lnast_node::create_stmts("stmts0", line_num, pos1, pos2);
@@ -36,14 +33,14 @@ int main(void) {
     // Warning: val
 
     s.do_check(lnast);
-    fmt::print("End of Assign Operations Test\n\n");
+    std::cout << "End of Assign Operations Test\n\n";
     delete lnast;
   }
   {
     Lnast*         lnast = new Lnast();
     Semantic_check s;
 
-    fmt::print("N-ary and U-nary Operations Test\n\n");
+    std::cout << "N-ary and U-nary Operations Test\n\n";
 
     auto idx_root   = Lnast_node::create_top("top", line_num, pos1, pos2);
     auto node_stmts = Lnast_node::create_stmts("stmts", line_num, pos1, pos2);
@@ -83,14 +80,14 @@ int main(void) {
     // Warning: total
 
     s.do_check(lnast);
-    fmt::print("End of N-ary and U-nary Operations Test\n\n");
+    std::cout << "End of N-ary and U-nary Operations Test\n\n";
     delete lnast;
   }
   {
     Lnast*         lnast = new Lnast();
     Semantic_check s;
 
-    fmt::print("If Operation Test\n\n");
+    std::cout << "If Operation Test\n\n";
 
     auto idx_root = Lnast_node::create_top("top", line_num, pos1, pos2);
     lnast->set_root(idx_root);
@@ -118,14 +115,14 @@ int main(void) {
     // No Warnings
 
     s.do_check(lnast);
-    fmt::print("End of If Operation Test\n\n");
+    std::cout << "End of If Operation Test\n\n";
     delete lnast;
   }
   {
     Lnast*         lnast = new Lnast();
     Semantic_check s;
 
-    fmt::print("If Operation (inefficient)\n\n");
+    std::cout << "If Operation (inefficient)\n\n";
 
     auto idx_root = Lnast_node::create_top("top", line_num, pos1, pos2);
     lnast->set_root(idx_root);
@@ -157,14 +154,14 @@ int main(void) {
     // Warning: c
 
     s.do_check(lnast);
-    fmt::print("End of If Operation (inefficient)\n\n");
+    std::cout << "End of If Operation (inefficient)\n\n";
     delete lnast;
   }
   {
     Lnast*         lnast = new Lnast();
     Semantic_check s;
 
-    fmt::print("If Operation (complex)\n\n");
+    std::cout << "If Operation (complex)\n\n";
 
     auto idx_root = Lnast_node::create_top("top", line_num, pos1, pos2);
     lnast->set_root(idx_root);
@@ -204,14 +201,14 @@ int main(void) {
     // Warning: b
 
     s.do_check(lnast);
-    fmt::print("End of If Operation (complex)\n\n");
+    std::cout << "End of If Operation (complex)\n\n";
     delete lnast;
   }
   {
     Lnast*         lnast = new Lnast();
     Semantic_check s;
 
-    fmt::print("For Loop Operation Test\n\n");
+    std::cout << "For Loop Operation Test\n\n";
 
     auto idx_root = Lnast_node::create_top("top", line_num, pos1, pos2);
     lnast->set_root(idx_root);
@@ -252,14 +249,14 @@ int main(void) {
     // Warning: ___range_begin, ___range_end
 
     s.do_check(lnast);
-    fmt::print("End of For Loop Operation Test\n\n");
+    std::cout << "End of For Loop Operation Test\n\n";
     delete lnast;
   }
   {
     Lnast*         lnast = new Lnast();
     Semantic_check s;
 
-    fmt::print("While Loop Operation Test\n\n");
+    std::cout << "While Loop Operation Test\n\n";
 
     auto idx_root = Lnast_node::create_top("top", line_num, pos1, pos2);
     lnast->set_root(idx_root);
@@ -281,14 +278,14 @@ int main(void) {
     // Warning: total
 
     s.do_check(lnast);
-    fmt::print("End of While Loop Operation Test\n\n");
+    std::cout << "End of While Loop Operation Test\n\n";
     delete lnast;
   }
   {
     Lnast*         lnast = new Lnast();
     Semantic_check s;
 
-    fmt::print("Func Def Operation Test\n\n");
+    std::cout << "Func Def Operation Test\n\n";
 
     auto idx_root = Lnast_node::create_top("top", line_num, pos1, pos2);
     lnast->set_root(idx_root);
@@ -315,14 +312,14 @@ int main(void) {
     // Warning: func_xor
 
     s.do_check(lnast);
-    fmt::print("End of Func Def Operation Test\n\n");
+    std::cout << "End of Func Def Operation Test\n\n";
     delete lnast;
   }
   {
     Lnast*         lnast = new Lnast();
     Semantic_check s;
 
-    fmt::print("Conditional Func Def Operation Test\n\n");
+    std::cout << "Conditional Func Def Operation Test\n\n";
 
     auto idx_root = Lnast_node::create_top("top", line_num, pos1, pos2);
     lnast->set_root(idx_root);
@@ -355,14 +352,14 @@ int main(void) {
     // Warning: func_xor
 
     s.do_check(lnast);
-    fmt::print("End of Conditional Func Def Operation Test\n\n");
+    std::cout << "End of Conditional Func Def Operation Test\n\n";
     delete lnast;
   }
   {
     Lnast*         lnast = new Lnast();
     Semantic_check s;
 
-    fmt::print("Implicit Func Call Operation Test\n\n");
+    std::cout << "Implicit Func Call Operation Test\n\n";
 
     auto idx_root = Lnast_node::create_top("top", line_num, pos1, pos2);
     lnast->set_root(idx_root);
@@ -414,14 +411,14 @@ int main(void) {
     // Warning: None
 
     s.do_check(lnast);
-    fmt::print("End of Implicit Func Call Operation Test\n\n");
+    std::cout << "End of Implicit Func Call Operation Test\n\n";
     delete lnast;
   }
   {
     Lnast*         lnast = new Lnast();
     Semantic_check s;
 
-    fmt::print("Explicit Func Call Operation Test\n\n");
+    std::cout << "Explicit Func Call Operation Test\n\n";
 
     auto idx_root = Lnast_node::create_top("top", line_num, pos1, pos2);
     lnast->set_root(idx_root);
@@ -472,14 +469,14 @@ int main(void) {
     // Warning: a, b
 
     s.do_check(lnast);
-    fmt::print("End of Implicit Func Call Operation Test\n\n");
+    std::cout << "End of Implicit Func Call Operation Test\n\n";
     delete lnast;
   }
   {
     Lnast*         lnast = new Lnast();
     Semantic_check s;
 
-    fmt::print("Tuple Operation Test\n\n");
+    std::cout << "Tuple Operation Test\n\n";
 
     auto idx_root = Lnast_node::create_top("top", line_num, pos1, pos2);
     lnast->set_root(idx_root);
@@ -503,14 +500,14 @@ int main(void) {
     // Warning: tup, foo, bar
 
     s.do_check(lnast);
-    fmt::print("End of Tuple Operation Test\n\n");
+    std::cout << "End of Tuple Operation Test\n\n";
     delete lnast;
   }
   {
     Lnast*         lnast = new Lnast();
     Semantic_check s;
 
-    fmt::print("Tuple Concat Operation\n\n");
+    std::cout << "Tuple Concat Operation\n\n";
 
     auto idx_root = Lnast_node::create_top("top", line_num, pos1, pos2);
     lnast->set_root(idx_root);
@@ -555,7 +552,7 @@ int main(void) {
     // Warning: foo, bar
 
     s.do_check(lnast);
-    fmt::print("End of Tuple Concat Operation\n\n");
+    std::cout << "End of Tuple Concat Operation\n\n";
 
     delete lnast;
   }
@@ -563,7 +560,7 @@ int main(void) {
     Lnast*         lnast = new Lnast();
     Semantic_check s;
 
-    fmt::print("Attribute Operation Test\n\n");
+    std::cout << "Attribute Operation Test\n\n";
 
     auto idx_root = Lnast_node::create_top("top", line_num, pos1, pos2);
     lnast->set_root(idx_root);
@@ -597,7 +594,7 @@ int main(void) {
     // Warning: bar
 
     s.do_check(lnast);
-    fmt::print("End of Attribute Operation Test\n\n");
+    std::cout << "End of Attribute Operation Test\n\n";
     delete lnast;
   }
 

@@ -27,7 +27,7 @@ public:
     while (!scan_is_end()) {
       auto line = scan_line();
       if (line != last_line) {
-        fmt::print("\n");
+        std::cout << "\n";
       }
       last_line = line;
 
@@ -84,11 +84,11 @@ public:
         bug_inserted = true;
         err_tracker::logger("Missing keyword \"assign\" in line {}.\nSuggestion: Insert the missing keyword \"assign\".", line);
       } else {
-        fmt::print("{}", ttxt);  // scan_text());
+        std::cout << std::format("{}", ttxt);  // scan_text());
       }
 
       if (scan_token_id() == Token_id_alnum) {
-        fmt::print(" ");
+        std::cout << " ";
       }
 
       scan_next();

@@ -2,11 +2,12 @@
 
 #include "graph_core.hpp"
 
+#include <iostream>
 #include <algorithm>
 #include <iterator>
 #include <string>
 
-#include "fmt/format.h"
+#include <format>
 #include "iassert.hpp"
 #include "likely.hpp"
 
@@ -241,7 +242,7 @@ void Graph_core::Master_entry::dump(uint32_t self_id) const {
   const auto [n_i, n_o] = get_num_local_edges();
 
   if (node_vertex) {
-    fmt::print("node:{} bits:{} n_inputs:{} n_outputs:{} next:{} over:{}\n",
+    std::cout << std::format("node:{} bits:{} n_inputs:{} n_outputs:{} next:{} over:{}\n",
                self_id,
                bits,
                n_i,
@@ -249,7 +250,7 @@ void Graph_core::Master_entry::dump(uint32_t self_id) const {
                next_pin_ptr,
                get_overflow_id());
   } else {
-    fmt::print("pin:{} pid:{} bits:{} n_inputs:{} n_outputs:{} next:{} over:{} node:{}\n",
+    std::cout << std::format("pin:{} pid:{} bits:{} n_inputs:{} n_outputs:{} next:{} over:{} node:{}\n",
                self_id,
                get_pid(),
                bits,
@@ -260,22 +261,22 @@ void Graph_core::Master_entry::dump(uint32_t self_id) const {
                ledge0_or_prev);
   }
 
-  fmt::print("  edges:");
+  std::cout << "  edges:";
   for (auto i = 0u; i < Num_sedges; ++i) {
     if (sedge[i]) {
-      fmt::print(" {}", self_id + sedge[i]);
+      std::cout << std::format(" {}", self_id + sedge[i]);
     }
   }
   if (node_vertex && sedge2_or_pid) {
-    fmt::print(" {}", self_id + sedge2_or_pid);
+    std::cout << std::format(" {}", self_id + sedge2_or_pid);
   }
   if (node_vertex && ledge0_or_prev) {
-    fmt::print(" {}", ledge0_or_prev);
+    std::cout << std::format(" {}", ledge0_or_prev);
   }
   if (!overflow_link && ledge1_or_overflow) {
-    fmt::print(" {}", ledge1_or_overflow);
+    std::cout << std::format(" {}", ledge1_or_overflow);
   }
-  fmt::print("\n");
+  std::cout << "\n";
 }
 
 void Graph_core::Master_entry::delete_node(uint32_t self_id, std::vector<Master_entry> &mtable) {
@@ -379,18 +380,18 @@ bool Graph_core::Overflow_entry::add_ledge(uint32_t id) {
 }
 
 void Graph_core::Overflow_entry::dump(uint32_t self_id) const {
-  fmt::print("  over:{} n_ledges:{} n_sedges:{}\n", self_id, n_ledges, n_sedges);
+  std::cout << std::format("  over:{} n_ledges:{} n_sedges:{}\n", self_id, n_ledges, n_sedges);
 
-  fmt::print("    sedges:");
+  std::cout << "    sedges:";
   for (auto i = 0u; i < n_sedges; ++i) {
-    fmt::print(" {:>8}", self_id + sedges[i]);
+    std::cout << std::format(" {:>8}", self_id + sedges[i]);
   }
-  fmt::print("\n");
-  fmt::print("    ledges:");
+  std::cout << "\n";
+  std::cout << "    ledges:";
   for (auto i = 0u; i < n_ledges; ++i) {
-    fmt::print(" {:>8}", ledges[i]);
+    std::cout << std::format(" {:>8}", ledges[i]);
   }
-  fmt::print("\n");
+  std::cout << "\n";
 }
 
 void Graph_core::dump(uint32_t id) const {

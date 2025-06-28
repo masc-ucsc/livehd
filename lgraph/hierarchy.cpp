@@ -151,9 +151,9 @@ void Hierarchy::dump() const {
   Lgraph *current_g;
   std::tie(hidx, current_g) = get_next(hidx);
   while (current_g != top) {
-    fmt::print("hier:{} lg:{}\n", hidx, current_g->get_name());
+    std::cout << std::format("hier:{} lg:{}\n", hidx, current_g->get_name());
     std::tie(hidx, current_g) = get_next(hidx);
   }
 
-  fmt::print("hier:{} lg:{}\n", hidx, top->get_name());
+  std::cout << std::format("hier:{} lg:{}\n", hidx, top->get_name());
 }

@@ -18,7 +18,7 @@ Pass_semantic::Pass_semantic(const Eprp_var &var) : Pass("pass.semantic", var) {
 
 void Pass_semantic::do_work(Lgraph *g) {
   (void)g;
-  fmt::print("future lgraph semantic check\n");
+  std::cout << "future lgraph semantic check\n";
 }
 
 void Pass_semantic::do_work(const std::shared_ptr<Lnast> &lnast) {

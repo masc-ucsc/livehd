@@ -1,5 +1,7 @@
 //  This file is distributed under the BSD 3-Clause License. See LICENSE for details.
 
+#include <format>
+#include <iostream>
 #include <set>
 
 #include "lgedgeiter.hpp"
@@ -32,7 +34,7 @@ void check_test_order(Lgraph *top) {
 
     auto it_node = test_order.find(node.get_compact());
     if (it_node == test_order.end()) {
-      fmt::print("ERROR: missing node:{}\n", node.debug_name());
+      std::cout << std::format("ERROR: missing node:{}\n", node.debug_name());
       I(false);
     }
 
@@ -49,7 +51,7 @@ void check_test_order(Lgraph *top) {
       max_input_pin = edge.driver;
     }
     if (max_input > it_node->second) {
-      fmt::print("ERROR: wrong order node:{} l:{} p:{} is earlier than pin:{} of node:{} l:{} p:{}\n",
+      std::cout << std::format("ERROR: wrong order node:{} l:{} p:{} is earlier than pin:{} of node:{} l:{} p:{}\n",
                  node.debug_name(),
                  node.get_hidx().level,
                  node.get_hidx().pos,
@@ -73,7 +75,7 @@ void do_fwd_traversal(Lgraph *lg, const std::string &name) {
     setup_test_order();
     for (auto node : lg->fast(true)) {
       I(!node.is_graph_io());
-      // fmt::print("fast visiting {} l:{} p:{}\n", node.debug_name(),node.get_hidx().level,node.get_hidx().pos);
+      // std::cout << std::format("fast visiting {} l:{} p:{}\n", node.debug_name(),node.get_hidx().level,node.get_hidx().pos);
       // node.dump();
       I(test_order.find(node.get_compact()) == test_order.end());
       test_order[node.get_compact()] = test_order_sequence++;
@@ -85,7 +87,7 @@ void do_fwd_traversal(Lgraph *lg, const std::string &name) {
     setup_test_order();
     for (auto node : lg->forward(true)) {
       I(!node.is_graph_io());
-      // fmt::print("fwd  visiting {} l:{} p:{}\n", node.debug_name(),node.get_hidx().level,node.get_hidx().pos);
+      // std::cout << std::format("fwd  visiting {} l:{} p:{}\n", node.debug_name(),node.get_hidx().level,node.get_hidx().pos);
       I(test_order.find(node.get_compact()) == test_order.end());
       test_order[node.get_compact()] = test_order_sequence++;
     }
@@ -216,7 +218,7 @@ bool fwd(int n) {
 
     setup_test_order();
 
-    fmt::print("FWD {}\n", gname);
+    std::cout << std::format("FWD {}\n", gname);
     do_fwd_traversal(g, "fwd" + std::to_string(i + 1));
 
     check_test_order(g);
@@ -235,10 +237,10 @@ bool bwd(int n) {
       return false;
 
     // g->dump();
-    // fmt::print("----------------------\n");
+    // std::cout << "----------------------\n";
     absl::flat_hash_set<Node::Compact> visited;
     for (auto node : g->backward()) {
-      // fmt::print(" bwd {}\n", node.debug_name());
+      // std::cout << std::format(" bwd {}\n", node.debug_name());
 
       visited.insert(node.get_compact());
 
@@ -247,7 +249,7 @@ bool bwd(int n) {
         for (auto &out : node.out_edges()) {
           if (!out.sink.get_node().is_type_loop_last() && out.sink.get_node().get_type_op() != Ntype_op::IO) {
             if (visited.find(out.sink.get_node().get_compact()) == visited.end()) {
-              fmt::print("bwd failed for lgraph node:{} bwd:{}\n", node.debug_name(), out.sink.get_node().debug_name());
+              std::cout << std::format("bwd failed for lgraph node:{} bwd:{}\n", node.debug_name(), out.sink.get_node().debug_name());
               I(false);
               return false;
             }
@@ -257,7 +259,7 @@ bool bwd(int n) {
     }
     visited.clear();
     for (auto node : g->backward(true)) {
-      // fmt::print(" bwd {}\n", node.debug_name());
+      // std::cout << std::format(" bwd {}\n", node.debug_name());
 
       visited.insert(node.get_compact());
 
@@ -266,7 +268,7 @@ bool bwd(int n) {
         for (auto &out : node.out_edges()) {
           if (!out.sink.get_node().is_type_loop_last() && out.sink.get_node().get_type_op() != Ntype_op::IO) {
             if (visited.find(out.sink.get_node().get_compact()) == visited.end()) {
-              fmt::print("bwd failed for lgraph node:{} bwd:{}\n", node.debug_name(), out.sink.get_node().debug_name());
+              std::cout << std::format("bwd failed for lgraph node:{} bwd:{}\n", node.debug_name(), out.sink.get_node().debug_name());
               I(false);
               return false;
             }
@@ -440,59 +442,59 @@ void simple(int num) {
   //        2o   2o       2o           2o
   */
 
-  g->add_edge(i1, t13.setup_sink_pin(fmt::format("i{}", (random() & 0xFF))));
-  g->add_edge(i2, t13.setup_sink_pin(fmt::format("i{}", (random() & 0xFF))));
+  g->add_edge(i1, t13.setup_sink_pin(std::format("i{}", (random() & 0xFF))));
+  g->add_edge(i2, t13.setup_sink_pin(std::format("i{}", (random() & 0xFF))));
 
-  g->add_edge(i3, t14.setup_sink_pin(fmt::format("i{}", (random() & 0xFF))));
-  g->add_edge(i4, t14.setup_sink_pin(fmt::format("i{}", (random() & 0xFF))));
-  g->add_edge(i4, t15.setup_sink_pin(fmt::format("i{}", (random() & 0xFF))));
+  g->add_edge(i3, t14.setup_sink_pin(std::format("i{}", (random() & 0xFF))));
+  g->add_edge(i4, t14.setup_sink_pin(std::format("i{}", (random() & 0xFF))));
+  g->add_edge(i4, t15.setup_sink_pin(std::format("i{}", (random() & 0xFF))));
 
-  g->add_edge(c9.setup_driver_pin(), t16.setup_sink_pin(fmt::format("i{}", (random() & 0xFF))));
-  g->add_edge(c10.setup_driver_pin(), t16.setup_sink_pin(fmt::format("i{}", (random() & 0xFF))));
-  g->add_edge(t23.setup_driver_pin(fmt::format("o{}", (random() & 0xFF))),
-              t16.setup_sink_pin(fmt::format("i{}", (random() & 0xFF))));
+  g->add_edge(c9.setup_driver_pin(), t16.setup_sink_pin(std::format("i{}", (random() & 0xFF))));
+  g->add_edge(c10.setup_driver_pin(), t16.setup_sink_pin(std::format("i{}", (random() & 0xFF))));
+  g->add_edge(t23.setup_driver_pin(std::format("o{}", (random() & 0xFF))),
+              t16.setup_sink_pin(std::format("i{}", (random() & 0xFF))));
 
-  g->add_edge(c11.setup_driver_pin(), t17.setup_sink_pin(fmt::format("i{}", (random() & 0xFF))));
+  g->add_edge(c11.setup_driver_pin(), t17.setup_sink_pin(std::format("i{}", (random() & 0xFF))));
   if (rand() & 1)
-    g->add_edge(c12.setup_driver_pin(), t17.setup_sink_pin(fmt::format("di{}", (random() & 0xFF))));
-  g->add_edge(c12.setup_driver_pin(), t17.setup_sink_pin(fmt::format("i{}", (random() & 0xFF))));
-  g->add_edge(c12.setup_driver_pin(), t18.setup_sink_pin(fmt::format("i{}", (random() & 0xFF))));
+    g->add_edge(c12.setup_driver_pin(), t17.setup_sink_pin(std::format("di{}", (random() & 0xFF))));
+  g->add_edge(c12.setup_driver_pin(), t17.setup_sink_pin(std::format("i{}", (random() & 0xFF))));
+  g->add_edge(c12.setup_driver_pin(), t18.setup_sink_pin(std::format("i{}", (random() & 0xFF))));
 
-  g->add_edge(t13.setup_driver_pin(fmt::format("o{}", +(random() & 0xFF))), o5);
-  g->add_edge(t13.setup_driver_pin(fmt::format("o{}", (random() & 0xFF))), o6);
+  g->add_edge(t13.setup_driver_pin(std::format("o{}", +(random() & 0xFF))), o5);
+  g->add_edge(t13.setup_driver_pin(std::format("o{}", (random() & 0xFF))), o6);
   if (rand() & 1)
-    g->add_edge(t14.setup_driver_pin(fmt::format("do{}", (random() & 0xFF))), o6);
-  g->add_edge(t14.setup_driver_pin(fmt::format("o{}", (random() & 0xFF))), o6);
-  g->add_edge(t14.setup_driver_pin(fmt::format("o{}", (random() & 0xFF))), o7);
+    g->add_edge(t14.setup_driver_pin(std::format("do{}", (random() & 0xFF))), o6);
+  g->add_edge(t14.setup_driver_pin(std::format("o{}", (random() & 0xFF))), o6);
+  g->add_edge(t14.setup_driver_pin(std::format("o{}", (random() & 0xFF))), o7);
 
-  g->add_edge(t17.setup_driver_pin(fmt::format("o{}", (random() & 0xFF))),
-              t20.setup_sink_pin(fmt::format("i{}", (random() & 0xFF))));
+  g->add_edge(t17.setup_driver_pin(std::format("o{}", (random() & 0xFF))),
+              t20.setup_sink_pin(std::format("i{}", (random() & 0xFF))));
   if (rand() & 1)
-    g->add_edge(t17.setup_driver_pin(fmt::format("do{}", (random() & 0xFF))),
-                t20.setup_sink_pin(fmt::format("i{}", (random() & 0xFF))));
-  g->add_edge(t17.setup_driver_pin(fmt::format("o{}", (random() & 0xFF))),
-              t19.setup_sink_pin(fmt::format("i{}", (random() & 0xFF))));
-  g->add_edge(t18.setup_driver_pin(fmt::format("o{}", (random() & 0xFF))),
-              t19.setup_sink_pin(fmt::format("i{}", (random() & 0xFF))));
-  g->add_edge(t18.setup_driver_pin(fmt::format("o{}", (random() & 0xFF))),
-              t21.setup_sink_pin(fmt::format("i{}", (random() & 0xFF))));
+    g->add_edge(t17.setup_driver_pin(std::format("do{}", (random() & 0xFF))),
+                t20.setup_sink_pin(std::format("i{}", (random() & 0xFF))));
+  g->add_edge(t17.setup_driver_pin(std::format("o{}", (random() & 0xFF))),
+              t19.setup_sink_pin(std::format("i{}", (random() & 0xFF))));
+  g->add_edge(t18.setup_driver_pin(std::format("o{}", (random() & 0xFF))),
+              t19.setup_sink_pin(std::format("i{}", (random() & 0xFF))));
+  g->add_edge(t18.setup_driver_pin(std::format("o{}", (random() & 0xFF))),
+              t21.setup_sink_pin(std::format("i{}", (random() & 0xFF))));
 
-  g->add_edge(t16.setup_driver_pin(fmt::format("o{}", (random() & 0xFF))), o8);
-  g->add_edge(t20.setup_driver_pin(fmt::format("o{}", (random() & 0xFF))), o8);
+  g->add_edge(t16.setup_driver_pin(std::format("o{}", (random() & 0xFF))), o8);
+  g->add_edge(t20.setup_driver_pin(std::format("o{}", (random() & 0xFF))), o8);
 
 #ifdef VERBOSE
   for (const auto &node : g->fast()) {
-    fmt::print("node:{}\n", node.debug_name());
-    fmt::print("  inp_edges");
+    std::cout << std::format("node:{}\n", node.debug_name());
+    std::cout << "  inp_edges";
     for (const auto &edge : node.inp_edges()) {
-      fmt::print("  {}", edge.driver.debug_name());
+      std::cout << std::format("  {}", edge.driver.debug_name());
     }
-    fmt::print("\n");
-    fmt::print("  out_edges");
+    std::cout << "\n";
+    std::cout << "  out_edges";
     for (const auto &edge : node.out_edges()) {
-      fmt::print("  {}", edge.sink.debug_name());
+      std::cout << std::format("  {}", edge.sink.debug_name());
     }
-    fmt::print("\n");
+    std::cout << "\n";
   }
 #endif
 
@@ -608,15 +610,15 @@ int main(int argc, char **argv) {
       niters = atoi(argv[3]);
     }
 
-    fmt::print("benchmarking path:{} name:{} niters:{}\n", argv[1], argv[2], niters);
+    std::cout << std::format("benchmarking path:{} name:{} niters:{}\n", argv[1], argv[2], niters);
     auto *lib = Graph_library::instance(argv[1]);
     if (lib == nullptr) {
-      fmt::print("could not open graph library {}\n", argv[1]);
+      std::cout << std::format("could not open graph library {}\n", argv[1]);
       exit(-3);
     }
     auto *lg = lib->open_lgraph(argv[2]);
     if (lg == nullptr) {
-      fmt::print("could not open lgraph {}\n", argv[2]);
+      std::cout << std::format("could not open lgraph {}\n", argv[2]);
       exit(-3);
     }
 
@@ -676,7 +678,7 @@ int main(int argc, char **argv) {
         ++n_loop_others;
       }
     }
-    fmt::print("loop breakers:{} others:{} max:{}\n", n_loop_breakers, n_loop_others, max_level);
+    std::cout << std::format("loop breakers:{} others:{} max:{}\n", n_loop_breakers, n_loop_others, max_level);
     std::vector<size_t> histogram;
     for (auto v : min_level) {
       if (v >= histogram.size())
@@ -685,7 +687,7 @@ int main(int argc, char **argv) {
       histogram[v]++;
     }
     for (auto i = 0u; i < histogram.size(); ++i) {
-      fmt::print("  {} has {}\n", i, histogram[i]);
+      std::cout << std::format("  {} has {}\n", i, histogram[i]);
     }
 #endif
 
@@ -697,7 +699,7 @@ int main(int argc, char **argv) {
 #ifdef ITER_REBUILD
     auto *lib = Graph_library::instance(argv[1]);
     if (lib==nullptr) {
-      fmt::print("ERROR: could not open graph_library {}\n", argv[1]);
+      std::cout << std::format("ERROR: could not open graph_library {}\n", argv[1]);
       exit(-3);
     }
     auto  *tlg = lib->create_lgraph("topo_sorted", "-");
@@ -820,7 +822,7 @@ int main(int argc, char **argv) {
           if (e.driver.is_graph_io())
             continue;
           if (!node.is_type_sub() && !e.driver.get_node().is_type_sub()) {
-            fmt::print("delayed\n");
+            std::cout << "delayed\n";
             node.dump();
             e.driver.get_node().dump();
             break;
@@ -835,7 +837,7 @@ int main(int argc, char **argv) {
 #endif
     }
 
-    fmt::print("total {}\n", total);
+    std::cout << std::format("total {}\n", total);
     return 0;
   }
 

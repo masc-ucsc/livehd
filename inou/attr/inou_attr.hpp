@@ -2,7 +2,7 @@
 #pragma once
 
 #include "absl/container/flat_hash_map.h"
-#include "fmt/format.h"
+#include <format>
 #include "lgedgeiter.hpp"
 #include "lgraph.hpp"
 #include "lgraphbase.hpp"

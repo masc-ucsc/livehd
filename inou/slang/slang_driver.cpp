@@ -7,7 +7,6 @@
 //------------------------------------------------------------------------------
 #include "slang/driver/Driver.h"
 
-#include <fmt/color.h>
 #include <fstream>
 #include <iostream>
 
@@ -107,12 +106,12 @@ int driverMain(int argc, TArgs argv, Slang_tree &slang_tree) {
 
         if (showHelp == true) {
             OS::print(
-                fmt::format("{}", driver.cmdLine.getHelpText("slang SystemVerilog compiler")));
+                std::format("{}", driver.cmdLine.getHelpText("slang SystemVerilog compiler")));
             return 0;
         }
 
         if (showVersion == true) {
-            OS::print(fmt::format("slang version {}.{}.{}+{}\n", VersionInfo::getMajor(),
+            OS::print(std::format("slang version {}.{}.{}+{}\n", VersionInfo::getMajor(),
                                   VersionInfo::getMinor(), VersionInfo::getPatch(),
                                   VersionInfo::getHash()));
             return 0;
@@ -124,7 +123,7 @@ int driverMain(int argc, TArgs argv, Slang_tree &slang_tree) {
         if (onlyParse.has_value() + onlyPreprocess.has_value() + onlyMacros.has_value() +
                 driver.options.onlyLint.has_value() >
             1) {
-            OS::printE(fg(driver.diagClient->errorColor), "error: ");
+            OS::printE("error: ");
             OS::printE("can only specify one of --preprocess, --macros-only, "
                        "--parse-only, --lint-only");
             return 3;
@@ -168,7 +167,7 @@ int driverMain(int argc, TArgs argv, Slang_tree &slang_tree) {
         }
         SLANG_CATCH(const std::exception& e) {
 #if __cpp_exceptions
-            OS::printE(fmt::format("internal compiler error: {}\n", e.what()));
+            OS::printE(std::format("internal compiler error: {}\n", e.what()));
 #endif
             return 4;
         }
@@ -182,7 +181,7 @@ int driverMain(int argc, TArgs argv, Slang_tree &slang_tree) {
             TimeTrace::write(file);
             if (!file.flush()) {
                 SLANG_THROW(std::runtime_error(
-                    fmt::format("Unable to write time trace to '{}'", *timeTrace)));
+                    std::format("Unable to write time trace to '{}'", *timeTrace)));
             }
         }
 
@@ -190,7 +189,7 @@ int driverMain(int argc, TArgs argv, Slang_tree &slang_tree) {
     }
     SLANG_CATCH(const std::exception& e) {
 #if __cpp_exceptions
-        OS::printE(fmt::format("{}\n", e.what()));
+        OS::printE(std::format("{}\n", e.what()));
 #endif
         return 6;
     }
@@ -201,7 +200,7 @@ void writeToFile(Stream& os, std::string_view fileName, String contents) {
     os.write(contents.data(), contents.size());
     os.flush();
     if (!os)
-        SLANG_THROW(std::runtime_error(fmt::format("Unable to write AST to '{}'", fileName)));
+        SLANG_THROW(std::runtime_error(std::format("Unable to write AST to '{}'", fileName)));
 }
 
 #if defined(_MSC_VER)

@@ -201,18 +201,18 @@ bool Symbol_table::has_bundle(std::string_view key) const {
 }
 
 void Symbol_table::dump() const {
-  fmt::print("Symbol_table::leave_scope func_id:{} scope:{}\n", stack.back().func_id, stack.back().scope);
+  std::cout << std::format("Symbol_table::leave_scope func_id:{} scope:{}\n", stack.back().func_id, stack.back().scope);
   if (stack.empty())
     return;
 
   for (auto var : stack.back().declared) {
-    fmt::print("var:{}\n", var);
+    std::cout << std::format("var:{}\n", var);
     auto it = stack.back().varmap.find(var);
     if (it != stack.back().varmap.end()) {
       if (it->second)
         it->second->dump();
       else
-        fmt::print("nullptr bundle\n");
+        std::cout << "nullptr bundle\n";
     }
   }
 }

@@ -227,9 +227,9 @@ public:
   /* LCOV_EXCL_START */
   void dump() {
     for (const auto e : full_map) {
-      fmt::print("name:{}\n", e.first);
+      std::cout << std::format("name:{}\n", e.first);
       for (const auto &s : e.second) {
-        fmt::print(" id:{} pos:{}\n", s.id, s.pos);
+        std::cout << std::format(" id:{} pos:{}\n", s.id, s.pos);
       }
     }
   }

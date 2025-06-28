@@ -2,6 +2,8 @@
 
 #include "bundle.hpp"
 
+#include <format>
+#include <iostream>
 #include <algorithm>
 
 #include "likely.hpp"
@@ -701,7 +703,7 @@ void Bundle::set(std::string_view key, const std::shared_ptr<Bundle const> &tup)
 void Bundle::set(std::string_view key, const Entry &&entry) {
   I(!key.empty());
 
-  //fmt::print("sz:{} {}\n", key_map.size(), key);
+  //std::cout << std::format("sz:{} {}\n", key_map.size(), key);
   //dump();
 
   std::string uncanonical_key{key};
@@ -778,7 +780,7 @@ void Bundle::set(std::string_view key, const Entry &&entry) {
       I(!is_attribute(lower));
       if (has_trivial(lower)) {
         dump();
-        fmt::print("OOPPPS (bundle is corrupted). Time to debug!!! {} {}\n", e.first, lower);
+        std::cout << std::format("OOPPPS (bundle is corrupted). Time to debug!!! {} {}\n", e.first, lower);
         exit(-3);
         return;
       }
@@ -1087,9 +1089,9 @@ bool Bundle::has_just_attributes() const {
 }
 
 void Bundle::dump() const {
-  fmt::print("bundle_name: {}{}\n", name, correct ? "" : " ISSUES");
+  std::cout << std::format("bundle_name: {}{}\n", name, correct ? "" : " ISSUES");
 
   for (const auto &it : key_map) {
-    fmt::print("  key:{} trivial:{} {}\n", it.first, it.second.trivial, it.second.immutable ? "let" : "mut");
+    std::cout << std::format("  key:{} trivial:{} {}\n", it.first, it.second.trivial, it.second.immutable ? "let" : "mut");
   }
 }

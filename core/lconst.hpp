@@ -214,10 +214,10 @@ public:
   const Number get_raw_num() const { return num; }  // FOR DEBUG ONLY
 };
 
-#include "fmt/format.h"
+#include <format>
 
 template <>
-struct fmt::formatter<Lconst> : formatter<string_view> {
+struct std::formatter<Lconst> : formatter<string_view> {
   // parse is inherited from formatter<string_view>.
   template <typename FormatContext>
   auto format(Lconst c, FormatContext &ctx) const {

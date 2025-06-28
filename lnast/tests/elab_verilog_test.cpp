@@ -8,6 +8,8 @@
 #include <sys/stat.h>
 #include <sys/types.h>
 
+#include <format>
+#include <iostream>
 #include <algorithm>
 #include <set>
 #include <string>
@@ -150,7 +152,7 @@ public:
           if (module_name.empty()) {
             throw scan_error(*this, "found endmodule without corresponding module");
           }
-          fmt::print("{}={}\n", token, module_name);
+          std::cout << std::format("{}={}\n", token, module_name);
           module_name = "";
         }
       } else if (scan_is_token(Token_id_comma) || scan_is_token(Token_id_semicolon) || scan_is_token(Token_id_cp)) {
@@ -159,9 +161,9 @@ public:
             auto label = scan_prev_text();
 
             if (last_input)
-              fmt::print("  inp {}\n", label);
+              std::cout << std::format("  inp {}\n", label);
             else
-              fmt::print("  out {}\n", label);
+              std::cout << std::format("  out {}\n", label);
           }
           last_input  = false;
           last_output = false;

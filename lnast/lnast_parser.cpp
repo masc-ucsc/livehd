@@ -21,14 +21,14 @@ std::shared_ptr<Lnast> Lnast_parser::parse_all() {
 }
 
 void Lnast_parser::parse_top() {
-  // fmt::print("parse_top\n");
+  // std::cout << "parse_top\n";
   lnast->set_root(Lnast_node::create_top());
 	tree_index.push(lh::Tree_index::root());
 	parse_stmts();
 }
 
 void Lnast_parser::parse_stmts() {
-  // fmt::print("parse_stmts\n");
+  // std::cout << "parse_stmts\n";
 	start_tree(Lnast_node::create_stmts());
   forward_token(); // '{'
   while (cur_kind() != Lnast_token::rbrace) {
@@ -39,7 +39,7 @@ void Lnast_parser::parse_stmts() {
 }
 
 void Lnast_parser::parse_stmt() {
-  // fmt::print("parse_stmt\n");
+  // std::cout << "parse_stmt\n";
   switch (cur_kind()) {
     case Lnast_token::id_var:
       return parse_var_stmt();
@@ -53,7 +53,7 @@ void Lnast_parser::parse_stmt() {
 }
 
 void Lnast_parser::parse_var_stmt() {
-  // fmt::print("parse_var_stmt\n");
+  // std::cout << "parse_var_stmt\n";
   auto lhs_node = Lnast_node::create_ref(cur_text());
   forward_token();
   switch (cur_kind()) {
@@ -177,7 +177,7 @@ void Lnast_parser::parse_var_stmt() {
 }
 
 void Lnast_parser::parse_list() {
-  // fmt::print("parse_list\n");
+  // std::cout << "parse_list\n";
   forward_token();
   while (cur_kind() != Lnast_token::rparen) {
     switch (cur_kind()) {
@@ -242,7 +242,7 @@ void Lnast_parser::parse_list() {
 }
 
 void Lnast_parser::parse_selects() {
-  // fmt::print("parse_selects\n");
+  // std::cout << "parse_selects\n";
   do {
     forward_token();       // '[' ->
     parse_prim();    // ref or const ->
@@ -263,7 +263,7 @@ void Lnast_parser::parse_attr() {
 }
 
 void Lnast_parser::parse_prim() {
-  // fmt::print("parse_prim\n");
+  // std::cout << "parse_prim\n";
   if (cur_kind() == Lnast_token::id_var || cur_kind() == Lnast_token::id_fun) {
     add_leaf(Lnast_node::create_ref(cur_text()));
   } else if (cur_kind() == Lnast_token::number) {
@@ -275,7 +275,7 @@ void Lnast_parser::parse_prim() {
 }
 
 void Lnast_parser::parse_type() {
-  // fmt::print("parse_type\n");
+  // std::cout << "parse_type\n";
   switch (cur_kind()) {
     case Lnast_token::ty_none:    add_leaf(Lnast_node::create_none_type());         forward_token(); break;
     case Lnast_token::ty_sint:    add_leaf(Lnast_node::create_prim_type_sint());    forward_token(); break;

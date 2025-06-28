@@ -1,6 +1,7 @@
 //  This file is distributed under the BSD 3-Clause License. See LICENSE for details.
 #pragma once
 
+#include <format>
 #include <iostream>
 #include <sstream>
 
@@ -174,36 +175,36 @@ protected:
   bool eligible_cell_op(const Node &cell) {
     switch (cell.get_type_op()) {
       // case GraphIO_Op:
-      //  //fmt::print("Node: GraphIO_Op");
+      //  //std::cout << "Node: GraphIO_Op";
       //  break;
       case Ntype_op::Not:
-        // fmt::print("Node: Not_Op\n");
+        // std::cout << "Node: Not_Op\n";
         break;
 #if 0
       case Pick_Op:
-        //fmt::print("Node: And_Op\n");
+        //std::cout << "Node: And_Op\n";
         break;
 #endif
       case Ntype_op::And:
-        // fmt::print("Node: And_Op\n");
+        // std::cout << "Node: And_Op\n";
         break;
       case Ntype_op::Or:
-        // fmt::print("Node: Or_Op\n");
+        // std::cout << "Node: Or_Op\n";
         break;
       case Ntype_op::Xor:
-        // fmt::print("Node: Xor_Op\n");
+        // std::cout << "Node: Xor_Op\n";
         break;
       case Ntype_op::EQ:
-        // fmt::print("Node: Equals_Op\n");
+        // std::cout << "Node: Equals_Op\n";
         break;
       case Ntype_op::LT:
-        // fmt::print("Node: LessThan_Op\n");
+        // std::cout << "Node: LessThan_Op\n";
         break;
       case Ntype_op::GT:
-        // fmt::print("Node: GreaterThan_Op\n");
+        // std::cout << "Node: GreaterThan_Op\n";
         break;
       case Ntype_op::SHL:
-        // fmt::print("Node: ShiftLeft_Op\n");
+        // std::cout << "Node: ShiftLeft_Op\n";
         // check if Node_Pin "B" is a constant or of small bit_width
         for (const auto &in_edge : cell.inp_edges()) {
           if (in_edge.sink.get_pid() == 1 && in_edge.get_bits() > BIT_WIDTH_THRESHOLD) {
@@ -212,7 +213,7 @@ protected:
         }
         break;
       case Ntype_op::SRA: {
-        // fmt::print("Node: ArithShiftRight_Op\n");
+        // std::cout << "Node: ArithShiftRight_Op\n";
         for (const auto &in_edge : cell.inp_edges()) {
           if (in_edge.sink.get_pid() == 1 && in_edge.get_bits() > BIT_WIDTH_THRESHOLD) {
             return false;
@@ -221,7 +222,7 @@ protected:
         break;
       }
       default:
-        // fmt::print("Node: Unknown\n");
+        // std::cout << "Node: Unknown\n";
         return false;
     }
     return true;

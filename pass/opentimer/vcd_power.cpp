@@ -1,10 +1,11 @@
 // vcd_power.cpp
 #include "vcd_power.hpp"
 
-#include <fmt/format.h>
-
 #include <cassert>
 #include <cstdio>
+#include <format>
+#include <iostream>
+#include <print>
 
 #include "absl/strings/str_cat.h"
 
@@ -52,7 +53,7 @@ void Vcd_power::compute(const std::string& out_dir) {
     auto  fname = absl::StrCat(out_dir, "/", filename_, "_", name, ".power.trace");
     FILE* f     = std::fopen(fname.c_str(), "w");
     if (!f) {
-      fmt::print("ERROR: cannot open {}\n", fname);
+      std::cerr << std::format("ERROR: cannot open {}\n", fname);
       continue;
     }
 
@@ -62,7 +63,8 @@ void Vcd_power::compute(const std::string& out_dir) {
     for (double p : power_trace) {
       t += dt;
       sum += p;
-      fmt::print(f, "{} {}\n", t, p);
+      auto str = std::format("{} {}\n", t, p);
+      fputs(str.c_str(), f);
     }
     std::fclose(f);
 

@@ -4,6 +4,8 @@
 
 #include <ctype.h>
 
+#include <format>
+#include <iostream>
 #include <algorithm>
 
 #include "perf_tracing.hpp"
@@ -253,7 +255,7 @@ void Eprp::elaborate() {
 
 void Eprp::process_ast_handler(const lh::Tree_index &self, const Ast_parser_node &node) {
   auto txt = scan_text(node.token_entry);
-  fmt::print("level:{} pos:{} te:{} rid:{} txt:{}\n", self.level, self.pos, (int)node.token_entry, (int)node.rule_id, txt);
+  std::cout << std::format("level:{} pos:{} te:{} rid:{} txt:{}\n", self.level, self.pos, (int)node.token_entry, (int)node.rule_id, txt);
 
   if (node.rule_id == Eprp_rule_cmd_or_reg) {
     std::string children_txt;
@@ -270,13 +272,13 @@ void Eprp::process_ast_handler(const lh::Tree_index &self, const Ast_parser_node
       }
     }
 
-    fmt::print("  children: {}\n", children_txt);
+    std::cout << std::format("  children: {}\n", children_txt);
   }
 }
 
 void Eprp::process_ast() {
   for (const auto &ti : ast->depth_preorder()) {
-    fmt::print("ti.level:{} ti.pos:{}\n", ti.level, ti.pos);
+    std::cout << std::format("ti.level:{} ti.pos:{}\n", ti.level, ti.pos);
   }
 
   ast->each_bottom_up_fast(std::bind(&Eprp::process_ast_handler, this, std::placeholders::_1, std::placeholders::_2));

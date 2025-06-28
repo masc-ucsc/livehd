@@ -2,6 +2,8 @@
 //
 // Created by birdeclipse on 5/23/18.
 
+#include <format>
+#include <iostream>
 #include <fstream>
 
 #include "lgraph.hpp"
@@ -37,7 +39,7 @@ void Pass_abc::write_src_info(const Lgraph *g, const index_offset &inp, std::ofs
       break;
     }
     default: {
-      fmt::print("not supported operator after mapped lgraph! {}\n", g->node_type_get(src_idx).get_name());
+      std::cout << std::format("not supported operator after mapped lgraph! {}\n", g->node_type_get(src_idx).get_name());
       break;
     }
   }

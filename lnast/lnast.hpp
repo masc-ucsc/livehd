@@ -1,6 +1,8 @@
 //  This file is distributed under the BSD 3-Clause License. See LICENSE for details.
 #pragma once
 
+#include <format>
+#include <iostream>
 #include <stack>
 
 #include "absl/container/node_hash_map.h"
@@ -192,25 +194,25 @@ public:
   void dump() const { dump(Lnast_nid::root()); }
 
   template <typename... Args>
-  static void info(fmt::format_string<Args...> format, Args &&...args) {
-    auto txt = fmt::format(format, std::forward<Args>(args)...);
-    fmt::print("info:{}\n", txt);
+  static void info(std::format_string<Args...> format, Args &&...args) {
+    auto txt = std::format(format, std::forward<Args>(args)...);
+    std::cout << std::format("info:{}\n", txt);
   }
   static void info(std::string_view txt) {
-    fmt::print("info:{}\n", txt);
+    std::cout << std::format("info:{}\n", txt);
   }
 
   class error : public std::runtime_error {
   public:
     template <typename... Args>
-    error(fmt::format_string<Args...> format, Args &&...args)
-    : std::runtime_error(fmt::format(format, std::forward<Args>(args)...)) {
-      fmt::print("error:lnast {}\n", what());
+    error(std::format_string<Args...> format, Args &&...args)
+    : std::runtime_error(std::format(format, std::forward<Args>(args)...)) {
+      std::cout << std::format("error:lnast {}\n", what());
       throw std::runtime_error(std::string(what()));
     }
     error(std::string_view txt)
     : std::runtime_error(std::string(txt)) {
-      fmt::print("error:lnast {}\n", what());
+      std::cout << std::format("error:lnast {}\n", what());
       throw std::runtime_error(std::string(what()));
     }
   };

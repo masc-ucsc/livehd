@@ -1,6 +1,8 @@
 //  This file is distributed under the BSD 3-Clause License. See LICENSE for details.
 
 
+#include <format>
+#include <iostream>
 #include <set>
 #include <vector>
 
@@ -73,12 +75,12 @@ TEST_F(Lgtuple_test, flat1) {
     names.emplace_back(name);
 
     if (names[i] == "not here1")
-      fmt::print("DEBUG {} got deleted by {}\n", names[1], names[i]);
+      std::cout << std::format("DEBUG {} got deleted by {}\n", names[1], names[i]);
 
     tup.add(name, dpin[i]);
     if (i > 0u) {
       if (!tup.has_dpin(names[1])) {
-        fmt::print("{} got deleted by [{}]\n", names[1], names[i]);
+        std::cout << std::format("{} got deleted by [{}]\n", names[1], names[i]);
       }
       EXPECT_TRUE(tup.has_dpin(names[1]));
     }

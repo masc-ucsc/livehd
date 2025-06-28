@@ -2,6 +2,8 @@
 
 #include "lnast_tolg.hpp"
 
+#include <format>
+#include <iostream>
 #include <cctype>
 
 #include "absl/strings/match.h"
@@ -94,7 +96,7 @@ void Lnast_tolg::process_ast_stmts(Lgraph *lg, const Lnast_nid &lnidx_stmts) {
       continue;
     } else {
       lnast->dump();
-      fmt::print("FIXME: implement op:{}\n", ntype.debug_name());
+      std::cout << std::format("FIXME: implement op:{}\n", ntype.debug_name());
       I(false);
       return;
     }
@@ -130,7 +132,7 @@ void Lnast_tolg::process_ast_phi_op(Lgraph *lg, const Lnast_nid &lnidx_phi) {
   const auto &tok        = lnast->get_token(lnidx_phi);
   phi_node.set_loc(tok.pos1, tok.pos2);
   phi_node.set_source(tok.fname);
-  // fmt::print("Hello!! {} {} {}",pos1, pos2, phi_node.get_nid()  );
+  // std::cout << std::format("Hello!! {} {} {}",pos1, pos2, phi_node.get_nid()  );
 
   auto lhs       = lnast->get_first_child(lnidx_phi);
   auto c1        = lnast->get_sibling_next(lhs);
@@ -1107,7 +1109,7 @@ Node Lnast_tolg::setup_node_opr_and_lhs(Lgraph *lg, const Lnast_nid &lnidx_opr, 
       const auto &tok2 = lnast->get_token(lnidx_opr);
       exit_node.set_loc(tok2.pos1, tok2.pos2);
       exit_node.set_source(tok2.fname);
-      // fmt::print("Hello2!! {} {} {}",tok2.pos1, tok2.pos2, exit_node.get_nid()  ); // here is the sum node location!!
+      // std::cout << std::format("Hello2!! {} {} {}",tok2.pos1, tok2.pos2, exit_node.get_nid()  ); // here is the sum node location!!
     }
   }
 
@@ -1558,12 +1560,12 @@ void Lnast_tolg::process_ast_func_def_op(Lgraph *lg, const Lnast_nid &lnidx) {
   auto        subg_module_name = absl::StrCat(module_name, ".", func_vname);
   Lnast_tolg  p(subg_module_name, path);
 
-  // fmt::print("============================= Sub-module: LNAST->Lgraph Start ({})
+  // std::cout << std::format("============================= Sub-module: LNAST->Lgraph Start ({})
   // ==============================================\n",
   //            subg_module_name);
 
   p.do_tolg(lnast, func_stmts);
-  // fmt::print("============================= Sub-module: LNAST->Lgraph End   ({})
+  // std::cout << std::format("============================= Sub-module: LNAST->Lgraph End   ({})
   // ==============================================\n",
   //            subg_module_name);
 
@@ -2011,8 +2013,8 @@ void Lnast_tolg::dfs_try_create_flattened_inp(Lgraph *lg, Node_pin &cur_node_spi
 }
 
 void Lnast_tolg::dump() const {
-  fmt::print("name2dpin:\n");
+  std::cout << "name2dpin:\n";
   for (auto &it : name2dpin) {
-    fmt::print("  name:{} dpin:{}\n", it.first, it.second.debug_name());
+    std::cout << std::format("  name:{} dpin:{}\n", it.first, it.second.debug_name());
   }
 }

@@ -22,6 +22,6 @@ void Live_pass_options::set(const std::string &key, const std::string &value) {
       set_val(key, value);
     }
   } catch (const std::invalid_argument &ia) {
-    Pass::error(fmt::format("Live_pass_options: key {} has an invalid argument", key));
+    Pass::error(std::format("Live_pass_options: key {} has an invalid argument", key));
   }
 }

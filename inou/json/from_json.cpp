@@ -39,16 +39,16 @@ void from_json(Lgraph *g, rapidjson::Document &document) {
       for (const auto &input_edge : nodes["inputs"].GetArray()) {
         assert(input_edge.IsObject());
         if (input_edge.HasMember("inp_in_pid")) {
-          fmt::print("DEBUG:: inp_in_pid {} \n", input_edge["inp_in_pid"].GetUint64());
+          std::cout << std::format("DEBUG:: inp_in_pid {} \n", input_edge["inp_in_pid"].GetUint64());
         }
         if (input_edge.HasMember("inp_nid")) {
-          fmt::print("DEBUG:: inp_nid {} \n", input_edge["inp_nid"].GetUint64());
+          std::cout << std::format("DEBUG:: inp_nid {} \n", input_edge["inp_nid"].GetUint64());
         }
         // if(input_edge.HasMember("inp_out_pid")) {
-        //  fmt::print("DEBUG:: inp_out_pid {} \n", input_edge["inp_out_pid"].GetUint64());
+        //  std::cout << std::format("DEBUG:: inp_out_pid {} \n", input_edge["inp_out_pid"].GetUint64());
         //}
         if (input_edge.HasMember("inp_dst_pid")) {
-          fmt::print("DEBUG:: inp_dst_pid {} \n", input_edge["inp_dst_pid"].GetUint64());
+          std::cout << std::format("DEBUG:: inp_dst_pid {} \n", input_edge["inp_dst_pid"].GetUint64());
         }
       }
     }
@@ -61,9 +61,9 @@ void from_json(Lgraph *g, rapidjson::Document &document) {
         if (op != Ntype_op::Invalid) {
           last_node.set_type(op);
         } else if (!op_txt.empty() && std::isdigit(op_txt[0])) {
-          fmt::print("DEBUG:: const op : {} \n", op_txt);
+          std::cout << std::format("DEBUG:: const op : {} \n", op_txt);
         } else {
-          fmt::print("DEBUG:: HOW TO GET HERE?? \n ");
+          std::cout << "DEBUG:: HOW TO GET HERE?? \n ";
         }
       } else {
         uint32_t val = nodes["op"].GetUint();
@@ -74,12 +74,12 @@ void from_json(Lgraph *g, rapidjson::Document &document) {
     }
 
     if (nodes.HasMember("input_name")) {
-      fmt::print("DEBUG:: input name is : {} \n", nodes["input_name"].GetString());
+      std::cout << std::format("DEBUG:: input name is : {} \n", nodes["input_name"].GetString());
       g->add_graph_input(nodes["input_name"].GetString(), 0, 0);  // FIXME: set original_pos and bits
     }
 
     if (nodes.HasMember("output_name")) {
-      fmt::print("DEBUG:: output name is : {} \n", nodes["output_name"].GetString());
+      std::cout << std::format("DEBUG:: output name is : {} \n", nodes["output_name"].GetString());
       g->add_graph_output(nodes["output_name"].GetString(), 0, 0);  // FIXME: must remember original_pos and set bits
     }
 

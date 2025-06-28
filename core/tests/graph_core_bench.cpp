@@ -1,5 +1,6 @@
 
-#include "fmt/format.h"
+#include <iostream>
+#include <format>
 #include "absl/container/flat_hash_set.h"
 #include "benchmark/benchmark.h"
 #include "hash_set8.hpp"
@@ -47,7 +48,7 @@ static void BM_create_flops_100K(benchmark::State& state) {
 
       gc.add_edge(last_id, dout_id);
 
-      //fmt::print("size:{}\n", gc.size_bytes());
+      //std::cout << std::format("size:{}\n", gc.size_bytes());
     }
   }
   state.counters["speed"] = benchmark::Counter(state.iterations() * state.range(0), benchmark::Counter::kIsRate);
@@ -100,7 +101,7 @@ static void BM_create_flops_100Kemhash(benchmark::State& state) {
 
       gc.add_edge(last_id, dout_id);
 
-      //fmt::print("size:{}\n", gc.size_bytes());
+      //std::cout << std::format("size:{}\n", gc.size_bytes());
     }
   }
   state.counters["speed"] = benchmark::Counter(state.iterations() * state.range(0), benchmark::Counter::kIsRate);
@@ -151,7 +152,7 @@ static void BM_create_flops_100Kabsl(benchmark::State& state) {
 
       gc.add_edge(last_id, dout_id);
 
-      //fmt::print("size:{}\n", gc.size_bytes());
+      //std::cout << std::format("size:{}\n", gc.size_bytes());
     }
   }
   state.counters["speed"] = benchmark::Counter(state.iterations() * state.range(0), benchmark::Counter::kIsRate);
@@ -173,7 +174,7 @@ static void BM_create_chain_100K(benchmark::State& state) {
         last_id = new_id;
       }
 
-      //fmt::print("size:{}\n", gc.size_bytes());
+      //std::cout << std::format("size:{}\n", gc.size_bytes());
       benchmark::DoNotOptimize(last_id);
     }
   }

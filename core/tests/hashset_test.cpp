@@ -1,5 +1,5 @@
 
-#include "fmt/format.h"
+#include <format>
 #include "gtest/gtest.h"
 
 #include "hashset.hpp"

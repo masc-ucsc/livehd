@@ -2,6 +2,8 @@
 
 #include "cprop.hpp"
 
+#include <format>
+#include <iostream>
 #include <cctype>
 #include <deque>
 #include <string>
@@ -73,9 +75,9 @@ void Cprop::collapse_forward_same_op(Node &node, XEdge_iterator &inp_edges_order
     }
 
     for (auto &inp : inp_edges_ordered) {
-      TRACE(fmt::print("cprop same_op pin:{} to pin:{}\n", inp.driver.debug_name(), out.sink.debug_name()));
+      TRACE(std::cout << std::format("cprop same_op pin:{} to pin:{}\n", inp.driver.debug_name(), out.sink.debug_name()));
       if (op == Ntype_op::Xor) {
-        // fmt::print("cprop xor pin:{} node.size:{} sink.size:{}\n",inp.driver.debug_name(), node.get_num_edges(),
+        // std::cout << std::format("cprop xor pin:{} node.size:{} sink.size:{}\n",inp.driver.debug_name(), node.get_num_edges(),
         // inp.driver.get_node().get_num_edges()); if (out.sink.is_connected(inp.driver)) {
         if (inp.driver.is_connected(out.sink)) {
           out.sink.del_driver(inp.driver);
@@ -83,7 +85,7 @@ void Cprop::collapse_forward_same_op(Node &node, XEdge_iterator &inp_edges_order
           out.sink.connect_driver(inp.driver);
         }
       } else if (op == Ntype_op::Or || op == Ntype_op::And) {
-        // fmt::print("cprop simplified forward or/and pin:{}\n",inp.driver.debug_name());
+        // std::cout << std::format("cprop simplified forward or/and pin:{}\n",inp.driver.debug_name());
         out.sink.connect_driver(inp.driver);
       } else {
         I(op != Ntype_op::Sum);  // handled at collapse_forward_sum
@@ -91,12 +93,12 @@ void Cprop::collapse_forward_same_op(Node &node, XEdge_iterator &inp_edges_order
       }
     }
 
-    TRACE(fmt::print("cprop same_op del_edge pin:{} to pin:{}\n", out.driver.debug_name(), out.sink.debug_name()));
+    TRACE(std::cout << std::format("cprop same_op del_edge pin:{} to pin:{}\n", out.driver.debug_name(), out.sink.debug_name()));
     out.del_edge();
   }
   if (all_done) {
     I(!node.has_outputs());
-    // fmt::print("cprop: 3 del node:{}\n", node.debug_name());
+    // std::cout << std::format("cprop: 3 del node:{}\n", node.debug_name());
     node.del_node();
   }
 }
@@ -117,7 +119,7 @@ void Cprop::collapse_forward_sum(Node &node, XEdge_iterator &inp_edges_ordered) 
 
     auto next_sum_node = out.sink.get_node();
     for (auto &inp : inp_edges_ordered) {
-      TRACE(fmt::print("cprop same_op pin:{} to pin:{}\n", inp.driver.debug_name(), out.sink.debug_name()));
+      TRACE(std::cout << std::format("cprop same_op pin:{} to pin:{}\n", inp.driver.debug_name(), out.sink.debug_name()));
       // auto sink_name = Ntype::get_sink_name(Ntype_op::Sum, inp.sink.get_pid()); //use get_pin_name or pin_raw
       // auto next_sum_spin = next_sum_node.setup_sink_pin(sink_name);  // Connect same PID
       //
@@ -133,7 +135,7 @@ void Cprop::collapse_forward_sum(Node &node, XEdge_iterator &inp_edges_ordered) 
         next_sum_node.setup_sink_pin("A").connect_driver(inp.driver);
       }
     }
-    TRACE(fmt::print("cprop same_op del_edge pin:{} to pin:{}\n", out.driver.debug_name(), out.sink.debug_name()));
+    TRACE(std::cout << std::format("cprop same_op del_edge pin:{} to pin:{}\n", out.driver.debug_name(), out.sink.debug_name()));
     out.del_edge();
   }
 
@@ -148,7 +150,7 @@ void Cprop::collapse_forward_always_pin0(Node &node, XEdge_iterator &inp_edges_o
 
   for (auto &out : node.out_edges()) {
     for (auto &inp : inp_edges_ordered) {
-      TRACE(fmt::print("cprop forward_always pin:{} to pin:{}\n", inp.driver.debug_name(), out.sink.debug_name()));
+      TRACE(std::cout << std::format("cprop forward_always pin:{} to pin:{}\n", inp.driver.debug_name(), out.sink.debug_name()));
       if (op == Ntype_op::Xor) {
         if (inp.driver.is_connected(out.sink)) {
           out.sink.del_driver(inp.driver);
@@ -161,7 +163,7 @@ void Cprop::collapse_forward_always_pin0(Node &node, XEdge_iterator &inp_edges_o
     }
   }
 
-  TRACE(fmt::print("cprop forward_always del_node node:{}\n", node.debug_name()));
+  TRACE(std::cout << std::format("cprop forward_always del_node node:{}\n", node.debug_name()));
   bwd_del_node(node);
 }
 
@@ -223,7 +225,7 @@ void Cprop::try_collapse_forward(Node &node, XEdge_iterator &inp_edges_ordered) 
   } else if (op == Ntype_op::Mux) {
     // If all the options are the same. Collapse forward
     if (inp_edges_ordered.size() <= 1) {
-      // fmt::print("cprop: 4 del node:{}\n", node.debug_name());
+      // std::cout << std::format("cprop: 4 del node:{}\n", node.debug_name());
       node.del_node();
       return;
     }
@@ -355,7 +357,7 @@ void Cprop::replace_part_inputs_const(Node &node, XEdge_iterator &inp_edges_orde
     } else {
       // res = val << (B.0, B.1, B.2)
       // res = (val <<B.0) | (val<<B.1) | (val<<B.2)
-      fmt::print("FIXME: OPT the inputs in B if they are constants\n");
+      std::cout << "FIXME: OPT the inputs in B if they are constants\n";
     }
   }
 }
@@ -422,7 +424,7 @@ void Cprop::replace_all_inputs_const(Node &node, XEdge_iterator &inp_edges_order
       }
     }
 
-    TRACE(fmt::print("cprop: add node:{} to {}\n", node.debug_name(), result.to_pyrope()));
+    TRACE(std::cout << std::format("cprop: add node:{} to {}\n", node.debug_name(), result.to_pyrope()));
 
     replace_node(node, result);
   } else if (op == Ntype_op::Or) {
@@ -432,7 +434,7 @@ void Cprop::replace_all_inputs_const(Node &node, XEdge_iterator &inp_edges_order
       result = result.or_op(c);
     }
 
-    TRACE(fmt::print("cprop: and node:{} to {}\n", node.debug_name(), result.to_pyrope()));
+    TRACE(std::cout << std::format("cprop: and node:{} to {}\n", node.debug_name(), result.to_pyrope()));
 
     replace_logic_node(node, result);
 
@@ -443,7 +445,7 @@ void Cprop::replace_all_inputs_const(Node &node, XEdge_iterator &inp_edges_order
       result = result.and_op(c);
     }
 
-    TRACE(fmt::print("cprop: and node:{} to {}\n", node.debug_name(), result.to_pyrope()));
+    TRACE(std::cout << std::format("cprop: and node:{} to {}\n", node.debug_name(), result.to_pyrope()));
 
     replace_node(node, result);
 
@@ -458,7 +460,7 @@ void Cprop::replace_all_inputs_const(Node &node, XEdge_iterator &inp_edges_order
 
     Lconst result(eq ? 1 : 0);
 
-    TRACE(fmt::print("cprop: eq node:{} to {}\n", node.debug_name(), result.to_pyrope()));
+    TRACE(std::cout << std::format("cprop: eq node:{} to {}\n", node.debug_name(), result.to_pyrope()));
 
     replace_node(node, result);
   } else if (op == Ntype_op::Mux) {
@@ -505,7 +507,7 @@ void Cprop::replace_all_inputs_const(Node &node, XEdge_iterator &inp_edges_order
     replace_node(node, result);
   } else {
 #ifndef NDEBUG
-    fmt::print("FIXME: cprop still does not copy prop node:{}\n", node.debug_name());
+    std::cout << std::format("FIXME: cprop still does not copy prop node:{}\n", node.debug_name());
 #endif
   }
 }
@@ -516,7 +518,7 @@ void Cprop::replace_node(Node &node, const Lconst &result) {
 
   for (auto &out : node.out_edges()) {
     if (dpin.get_bits() == out.driver.get_bits() || out.driver.get_bits() == 0) {
-      TRACE(fmt::print("cprop: const:{} to out.driver:{}\n", result.to_pyrope(), out.driver.debug_name()));
+      TRACE(std::cout << std::format("cprop: const:{} to out.driver:{}\n", result.to_pyrope(), out.driver.debug_name()));
       dpin.connect_sink(out.sink);
     } else {
       // create new const node to preserve bits
@@ -524,7 +526,7 @@ void Cprop::replace_node(Node &node, const Lconst &result) {
 
       auto dpin2 = node.create_const(result2).get_driver_pin();
 
-      TRACE(fmt::print("creating const:{} {}bits {}  from const:{} {}bits\n",
+      TRACE(std::cout << std::format("creating const:{} {}bits {}  from const:{} {}bits\n",
                        result2.to_pyrope(),
                        out.driver.get_bits(),
                        dpin2.get_bits(),
@@ -535,7 +537,7 @@ void Cprop::replace_node(Node &node, const Lconst &result) {
     }
   }
 
-  // fmt::print("cprop: 5 del node:{}\n", node.debug_name());
+  // std::cout << std::format("cprop: 5 del node:{}\n", node.debug_name());
   node.del_node();
 }
 
@@ -549,7 +551,7 @@ void Cprop::replace_logic_node(Node &node, const Lconst &result) {
     dpin_0.connect_sink(out.sink);
   }
 
-  // fmt::print("cprop: 6 del node:{}\n", node.debug_name());
+  // std::cout << std::format("cprop: 6 del node:{}\n", node.debug_name());
   node.del_node();
 }
 
@@ -595,7 +597,7 @@ void Cprop::try_connect_lgcpp(const Node &node) {
   }
 
 #ifndef NDEBUG
-  fmt::print("cprop subgraph:{} is not present, found lgcpp...\n", sub.get_name());
+  std::cout << std::format("cprop subgraph:{} is not present, found lgcpp...\n", sub.get_name());
 #endif
 
   std::shared_ptr<Lgtuple> inp;
@@ -607,10 +609,10 @@ void Cprop::try_connect_lgcpp(const Node &node) {
   }
 
 #ifndef NDEBUG
-  fmt::print("cprop subgraph:{} has out\n", sub.get_name());
+  std::cout << std::format("cprop subgraph:{} has out\n", sub.get_name());
   out->dump();
   for (auto dpin : node.out_connected_pins()) {
-    fmt::print("dpin:{} pid:{} testing...\n", dpin.debug_name(), dpin.get_pid());
+    std::cout << std::format("dpin:{} pid:{} testing...\n", dpin.debug_name(), dpin.get_pid());
   }
 #endif
 }
@@ -790,7 +792,7 @@ void Cprop::tuple_flop_mut(Node &node) {
   if (!din_tup->is_correct()) {
     I(tuple_issues);
     din_tup->dump();
-    fmt::print("flop:{} tuple:{} has issues (this may be OK with more iterations)\n", node.debug_name(), din_tup->get_name());
+    std::cout << std::format("flop:{} tuple:{} has issues (this may be OK with more iterations)\n", node.debug_name(), din_tup->get_name());
     return;
   }
 
@@ -1058,7 +1060,7 @@ void Cprop::tuple_subgraph(const Node &node) {
             tuple_issues = true;
           } else {
 #ifndef NDEBUG
-            fmt::print("found a memory {} with {} rd ports at ", node.debug_name(), n_rd_ports);
+            std::cout << std::format("found a memory {} with {} rd ports at ", node.debug_name(), n_rd_ports);
 #endif
 
             node.dump();
@@ -1066,11 +1068,11 @@ void Cprop::tuple_subgraph(const Node &node) {
 
             for (auto i = 0u; i < read_map.size(); ++i) {
               if (read_map[i]) {
-                // fmt::print(" {}", i);
+                // std::cout << std::format(" {}", i);
                 node_tup->add(std::to_string(i), node.setup_driver_pin_raw(i));
               }
             }
-            // fmt::print("\n");
+            // std::cout << "\n";
           }
         } else {
           node_tup->add(node.setup_driver_pin_raw(0));
@@ -1342,7 +1344,7 @@ bool Cprop::handle_runtime_index(Node &ori_tg, const Node &field_node, const std
 
   // node2tuple[mux_node.get_compact()] = parent_tup;
   tuple_mux_mut(mux_node);
-  // fmt::print("cprop: 7 del node:{}\n", ori_tg.debug_name());
+  // std::cout << std::format("cprop: 7 del node:{}\n", ori_tg.debug_name());
   ori_tg.del_node();
 
   return true;
@@ -1781,7 +1783,7 @@ void Cprop::reconnect_memory(Node &node, std::shared_ptr<Lgtuple const> tup) {
   reconnect_memory_port_const(node, "size", tup);
 
 #ifndef NDEBUG
-  fmt::print("MEMORY STATS:\n");
+  std::cout << "MEMORY STATS:\n";
   tup->dump();
   node.dump();
 #endif
@@ -1979,7 +1981,7 @@ void Cprop::reconnect_tuple_sub(Node &node) {
       node.setup_sink_pin(io_pins[pid].name).connect_driver(dpin);
     } else {
       // dpin = lg->add_graph_input(io_pins[pid].name, Port_invalid, 0);
-      // fmt::print("DEBUG7: graph input name {}\n", dpin.debug_name());
+      // std::cout << std::format("DEBUG7: graph input name {}\n", dpin.debug_name());
     }
     // I(dpin.is_driver());
     // node.setup_sink_pin(io_pins[pid].name).connect_driver(dpin);
@@ -2248,7 +2250,7 @@ bool Cprop::scalar_get_mask(Node &node) {
 
   auto dpin = try_find_single_driver_pin(a_node, range_begin);
   if (!dpin.is_invalid()) {
-    // fmt::print("HIT-----[{},{}]\n", range_begin, range_end);
+    // std::cout << std::format("HIT-----[{},{}]\n", range_begin, range_end);
     // node.dump();
     collapse_forward_for_pin(node, dpin);
     return true;
@@ -2266,7 +2268,7 @@ void Cprop::scalar_pass(Lgraph *lg, bool tup_pass_only) {
       tuple_found |= (op == Ntype_op::TupAdd || op == Ntype_op::TupGet);
       continue;
     }
-    // fmt::print("scalar node:{}\n", node.debug_name());
+    // std::cout << std::format("scalar node:{}\n", node.debug_name());
 
     //if (!tup_pass_only) { // this if starts for rockettile, comment for dino
     auto inp_edges_ordered = node.inp_edges_ordered();
@@ -2365,10 +2367,10 @@ void Cprop::tuple_pass(Lgraph *lg) {
   }
 
   for (auto iter = 0; iter < 6; ++iter) {
-    // fmt::print("DEBUG AAA iter:{}\n", iter);
+    // std::cout << std::format("DEBUG AAA iter:{}\n", iter);
     tuple_issues = iter == 0;  // First iter may not be correct if there are flops or subgraphs
     for (auto node : lg->forward(hier)) {
-      // fmt::print("DEBUG AAA-0 node:{}\n", node.debug_name());
+      // std::cout << std::format("DEBUG AAA-0 node:{}\n", node.debug_name());
       if (tuple_done.contains(node.get_compact())) {
         continue;
       }
@@ -2378,7 +2380,7 @@ void Cprop::tuple_pass(Lgraph *lg) {
         continue;
       }
 
-      // fmt::print("tuple  node:{}\n", node.debug_name());
+      // std::cout << std::format("tuple  node:{}\n", node.debug_name());
 
       I(op != Ntype_op::IO);  // no IOs in fwd iterator
 
@@ -2390,7 +2392,7 @@ void Cprop::tuple_pass(Lgraph *lg) {
         tuple_mux_mut(node);
       } else if (op == Ntype_op::Latch || op == Ntype_op::Fflop || op == Ntype_op::Memory) {
 #ifndef NDEBUG
-        fmt::print("cprop FIXME node:{} (similar to flop)\n", node.debug_name());
+        std::cout << std::format("cprop FIXME node:{} (similar to flop)\n", node.debug_name());
 #endif
       } else if (op == Ntype_op::SHL) {
         tuple_shl_mut(node);
@@ -2629,7 +2631,7 @@ void Cprop::bwd_del_node(Node &node) {
     potential_set.insert(e.driver.get_node().get_compact());
   }
 
-  // fmt::print("cprop: 1 del node:{}\n", node.debug_name());
+  // std::cout << std::format("cprop: 1 del node:{}\n", node.debug_name());
   node.del_node();
 
   while (!potential.empty()) {
@@ -2650,7 +2652,7 @@ void Cprop::bwd_del_node(Node &node) {
         potential.emplace_back(e.driver.get_node());
         potential_set.insert(d_node.get_compact());
       }
-      // fmt::print("cprop: 2 del node:{}\n", node.debug_name());
+      // std::cout << std::format("cprop: 2 del node:{}\n", node.debug_name());
       n.del_node();
     }
   }
@@ -2659,7 +2661,7 @@ void Cprop::bwd_del_node(Node &node) {
 void Cprop::dump_node2tuples() const {
   for (const auto &it : node2tuple) {
 #ifndef NDEBUG
-    fmt::print("node nid:{}\n", it.first.get_nid());
+    std::cout << std::format("node nid:{}\n", it.first.get_nid());
 #endif
     it.second->dump();
   }

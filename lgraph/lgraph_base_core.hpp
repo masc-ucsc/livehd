@@ -8,7 +8,7 @@
 
 #include "absl/strings/str_cat.h"
 #include "explicit_type.hpp"
-#include "fmt/format.h"
+#include <format>
 #include "graph_sizing.hpp"
 #include "iassert.hpp"
 #include "lconst.hpp"

@@ -4,6 +4,8 @@
 
 // FIXME: names are not to standard (no camel-case)
 
+#include <format>
+#include <iostream>
 #include <string>
 
 #include "options.hpp"
@@ -43,7 +45,7 @@ public:
   }
 
   void print_info() {
-    fmt::print("      nid is {}, pid is {}, input is {}\n", get_nid(), get_pid(), input);
+    std::cout << std::format("      nid is {}, pid is {}, input is {}\n", get_nid(), get_pid(), input);
     return;
   }
 };

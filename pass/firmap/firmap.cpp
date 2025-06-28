@@ -2,6 +2,8 @@
 
 #include "firmap.hpp"
 
+#include <format>
+#include <iostream>
 #include <algorithm>
 #include <cmath>
 #include <vector>
@@ -56,7 +58,7 @@ Lgraph *Firmap::do_firrtl_mapping(Lgraph *lg) {
 
   for (auto node : lg->fast()) {
     auto op = node.get_type_op();
-    /* fmt::print("Node Map {}\n", node.debug_name()); */
+    /* std::cout << std::format("Node Map {}\n", node.debug_name()); */
     if (op == Ntype_op::Sub) {
       auto subname = node.get_type_sub_node().get_name();
       if (subname.substr(0, 6) == "__fir_") {
@@ -72,7 +74,7 @@ Lgraph *Firmap::do_firrtl_mapping(Lgraph *lg) {
   // II. clone graph main body edges
   for (auto node : lg->fast()) {
     auto op = node.get_type_op();
-    // fmt::print("Edge Map {}\n", node.debug_name());
+    // std::cout << std::format("Edge Map {}\n", node.debug_name());
     if (op == Ntype_op::Sub && node.get_type_sub_node().get_name().substr(0, 10) == "__fir_xorr") {
       clone_edges_fir_xorr(node, pinmap, spinmap_xorr);
       continue;
@@ -874,7 +876,7 @@ void Firmap::map_node_fir_sub(Node &old_node, Lgraph *new_lg, PinMap &pinmap) {
 
   for (auto old_dpin : old_node.out_connected_pins()) {
     pinmap.insert_or_assign(old_dpin, new_node.setup_driver_pin());
-    /* fmt::print("    {} maps to {}\n", old_dpin.debug_name(), new_node.setup_driver_pin().debug_name()); */
+    /* std::cout << std::format("    {} maps to {}\n", old_dpin.debug_name(), new_node.setup_driver_pin().debug_name()); */
   }
 }
 

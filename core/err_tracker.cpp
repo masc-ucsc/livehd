@@ -11,7 +11,7 @@ void err_tracker::logger(std::string_view text) {
   if (logger_fd < 0) {
     logger_fd = open("logger_err.log", O_WRONLY | O_APPEND | O_CREAT, 0644);
     if (logger_fd < 0) {
-      fmt::print("ERROR: could not open logger_err.log file for logging [{}]\n", text);
+      std::cout << std::format("ERROR: could not open logger_err.log file for logging [{}]\n", text);
       exit(-3);
     }
   }

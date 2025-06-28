@@ -3,6 +3,8 @@
 
 #include <fcntl.h>
 
+#include <format>
+#include <iostream>
 #include <fstream>
 #include <regex>
 
@@ -66,9 +68,9 @@ void Graphviz::populate_lg_handle_xedge(const Node &node, const XEdge &out, std:
   auto dp_name = graphviz_legalize_name(out.driver.has_name() ? out.driver.get_name() : "unk");
 
   if (node.get_type_op() == Ntype_op::Const) {
-    data += fmt::format(" {} -> {} [ label = <{}b:({},{})> ];\n", dn_name, sn_name, dbits, dp_pid, sp_pid);
+    data += std::format(" {} -> {} [ label = <{}b:({},{})> ];\n", dn_name, sn_name, dbits, dp_pid, sp_pid);
   } else if (node.get_type_op() == Ntype_op::TupAdd) {
-    data += fmt::format(" {} -> {} [ label = <{}b:({},{}):<font color=\"#0000ff\">{}</font>> ];\n",
+    data += std::format(" {} -> {} [ label = <{}b:({},{}):<font color=\"#0000ff\">{}</font>> ];\n",
                         dn_name,
                         sn_name,
                         dbits,
@@ -76,7 +78,7 @@ void Graphviz::populate_lg_handle_xedge(const Node &node, const XEdge &out, std:
                         sp_pid,
                         dp_name);
   } else {
-    data += fmt::format(" {} -> {} [ label = <{}b:({},{}):{}> ];\n", dn_name, sn_name, dbits, dp_pid, sp_pid, dp_name);
+    data += std::format(" {} -> {} [ label = <{}b:({},{}):{}> ];\n", dn_name, sn_name, dbits, dp_pid, sp_pid, dp_name);
   }
 }
 
@@ -113,11 +115,11 @@ void Graphviz::do_hierarchy(Lgraph *lg) {
   absl::flat_hash_set<std::pair<std::string_view, std::string_view>> added;
 
   lg->each_hier_unique_sub_bottom_up([&added, &data](Lgraph *g) {
-    fmt::print("visiting node:{}\n", g->get_name());
+    std::cout << std::format("visiting node:{}\n", g->get_name());
 
     Node h_inp(g, Hierarchy::hierarchical_root(), Hardcoded_input_nid);
     for (auto e : h_inp.inp_edges()) {
-      fmt::print("edge from: {} to: {}\n", e.driver.get_class_lgraph()->get_name(), e.sink.get_class_lgraph()->get_name());
+      std::cout << std::format("edge from: {} to: {}\n", e.driver.get_class_lgraph()->get_name(), e.sink.get_class_lgraph()->get_name());
 
       auto p = std::pair(e.driver.get_class_lgraph()->get_name(), e.sink.get_class_lgraph()->get_name());
       if (p.first == p.second) {
@@ -128,14 +130,14 @@ void Graphviz::do_hierarchy(Lgraph *lg) {
       }
       added.insert(p);
 
-      data += fmt::format(" {} -> {};\n",
+      data += std::format(" {} -> {};\n",
                           graphviz_legalize_name(e.driver.get_class_lgraph()->get_name()),
                           graphviz_legalize_name(e.sink.get_class_lgraph()->get_name()));
     }
 
     Node h_out(g, Hierarchy::hierarchical_root(), Hardcoded_output_nid);
     for (auto e : h_out.out_edges()) {
-      fmt::print("edge from:{} to:{}\n", e.driver.get_class_lgraph()->get_name(), e.sink.get_class_lgraph()->get_name());
+      std::cout << std::format("edge from:{} to:{}\n", e.driver.get_class_lgraph()->get_name(), e.sink.get_class_lgraph()->get_name());
 
       auto p = std::pair(e.driver.get_class_lgraph()->get_name(), e.sink.get_class_lgraph()->get_name());
       if (p.first == p.second) {
@@ -146,7 +148,7 @@ void Graphviz::do_hierarchy(Lgraph *lg) {
       }
       added.insert(p);
 
-      data += fmt::format(" {} -> {};\n",
+      data += std::format(" {} -> {};\n",
                           graphviz_legalize_name(e.driver.get_class_lgraph()->get_name()),
                           graphviz_legalize_name(e.sink.get_class_lgraph()->get_name()));
     }
@@ -179,7 +181,7 @@ void Graphviz::create_color_map(Lgraph *lg) {
   for (auto e : color2id) {
     RGB color(static_cast<double>(e.second) / color2id.size());
     color2rgb[e.first] = color.to_s();
-    data += fmt::format(" c{} [ label = <{}> , style = \"filled\" , fillcolor = \"{}\" ];\n", e.second, e.first, color.to_s());
+    data += std::format(" c{} [ label = <{}> , style = \"filled\" , fillcolor = \"{}\" ];\n", e.second, e.first, color.to_s());
   }
 
   absl::flat_hash_set<uint64_t> edges;  // hackish graph
@@ -207,7 +209,7 @@ void Graphviz::create_color_map(Lgraph *lg) {
         continue;
       }
 
-      data += fmt::format(" c{} -> c{};\n", c, sc);
+      data += std::format(" c{} -> c{};\n", c, sc);
 
       edges.insert(edge);
     }
@@ -230,7 +232,7 @@ void Graphviz::do_from_lgraph(Lgraph *lg_parent, std::string_view dot_postfix) {
     }
 
     (void)node;
-    fmt::print("subgraph lgid:{}\n", lgid);
+    std::cout << std::format("subgraph lgid:{}\n", lgid);
     Lgraph *lg_child = lg_parent->ref_library()->open_lgraph(lgid);
     if (lg_child) {
       populate_lg_data(lg_child, dot_postfix);
@@ -263,9 +265,9 @@ void Graphviz::populate_lg_data(Lgraph *g, std::string_view dot_postfix) {
       }
     }
     if (node.get_type_op() == Ntype_op::Const) {
-      data += fmt::format(" {} [ {} label = <{}:{}> ];\n", gv_name, color, node_info, node.get_type_const().to_pyrope());
+      data += std::format(" {} [ {} label = <{}:{}> ];\n", gv_name, color, node_info, node.get_type_const().to_pyrope());
     } else {
-      data += fmt::format(" {} [ {} label = <{}> ];\n", gv_name, color, node_info);
+      data += std::format(" {} [ {} label = <{}> ];\n", gv_name, color, node_info);
     }
 
     for (const auto &out : node.out_edges()) {
@@ -275,7 +277,7 @@ void Graphviz::populate_lg_data(Lgraph *g, std::string_view dot_postfix) {
 
   g->each_graph_input([&](const Node_pin &pin) {
     auto io_name = graphviz_legalize_name(pin.get_pin_name());
-    data += fmt::format(" {} [ label = <{}> ];\n", io_name, io_name);  // pin.debug_name());
+    data += std::format(" {} [ label = <{}> ];\n", io_name, io_name);  // pin.debug_name());
 
     for (const auto &out : pin.out_edges()) {
       populate_lg_handle_xedge(pin.get_node(), out, data, verbose);
@@ -286,7 +288,7 @@ void Graphviz::populate_lg_data(Lgraph *g, std::string_view dot_postfix) {
   g->each_graph_output([&](const Node_pin &pin) {
     std::string_view dst_str = "virtual_dst_module";
     auto             dbits   = pin.get_bits();
-    data += fmt::format(" {} -> {} [ label = <{}b> ];\n", graphviz_legalize_name(pin.get_name()), dst_str, dbits);
+    data += std::format(" {} -> {} [ label = <{}b> ];\n", graphviz_legalize_name(pin.get_name()), dst_str, dbits);
     for (const auto &out : pin.out_edges()) {
       populate_lg_handle_xedge(pin.get_node(), out, data, verbose);
     }
@@ -308,17 +310,17 @@ void Graphviz::do_from_lnast(const std::shared_ptr<Lnast> &lnast, std::string_vi
 
     auto id = std::to_string(itr.level) + std::to_string(itr.pos);
     if (node_data.type.is_ref()) {
-      data += fmt::format(" {} [ label = <{}, {}<I><SUB><font color=\"#ff1020\">{}</font></SUB></I>> ];\n",
+      data += std::format(" {} [ label = <{}, {}<I><SUB><font color=\"#ff1020\">{}</font></SUB></I>> ];\n",
                           id,
                           node_data.type.debug_name(),
                           name,
                           subs);
 #if 0
     } else if (node_data.type.is_select()) {
-      data += fmt::format(" {} [label=<{}, {}>];\n", id, "selc", name);
+      data += std::format(" {} [label=<{}, {}>];\n", id, "selc", name);
 #endif
     } else {
-      data += fmt::format(" {} [ label = <{}, {}> ];\n", id, node_data.type.debug_name(), name);
+      data += std::format(" {} [ label = <{}, {}> ];\n", id, node_data.type.debug_name(), name);
     }
 
     if (node_data.type.is_top()) {
@@ -329,7 +331,7 @@ void Graphviz::do_from_lnast(const std::shared_ptr<Lnast> &lnast, std::string_vi
     auto p = lnast->get_parent(itr);
 
     auto parent_id = std::to_string(p.level) + std::to_string(p.pos);
-    data += fmt::format(" {} -> {};\n", parent_id, id);
+    data += std::format(" {} -> {};\n", parent_id, id);
   }
 
   data += "}\n";

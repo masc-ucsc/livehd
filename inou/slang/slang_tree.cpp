@@ -3,9 +3,10 @@
 
 #include "slang/driver/Driver.h"
 
+#include <iostream>
 #include <charconv>
 
-#include "fmt/format.h"
+#include <format>
 #include "iassert.hpp"
 #include "slang/ast/Definition.h"
 #include "slang/ast/ASTVisitor.h"
@@ -24,7 +25,7 @@ Slang_tree::Slang_tree() { parsed_lnasts.clear(); }
 void Slang_tree::process_root(const slang::ast::RootSymbol &root) {
   auto topInstances = root.topInstances;
   for (auto inst : topInstances) {
-    // fmt::print("slang_tree top:{}\n", inst->name);
+    // std::cout << std::format("slang_tree top:{}\n", inst->name);
 
     I(!has_lnast(inst->name));  // top level should not be already (may sub instances)
     auto ok = process_top_instance(*inst);
@@ -54,7 +55,7 @@ bool Slang_tree::process_top_instance(const slang::ast::InstanceSymbol &symbol) 
   // Instance bodies are all the same, so if we've visited this one
   // already don't bother doing it again.
   if (parsed_lnasts.contains(def.name)) {
-    fmt::print("slang_tree module:{} already parsed\n", def.name);
+    std::cout << std::format("slang_tree module:{} already parsed\n", def.name);
     return false;
   }
 
@@ -97,7 +98,7 @@ bool Slang_tree::process_top_instance(const slang::ast::InstanceSymbol &symbol) 
       if (type.hasFixedRange()) {
         auto range = type.getFixedRange();
         if (!range.isLittleEndian()) {
-          fmt::print("WARNING: {} is big endian, Flipping IO to handle. Careful about mix/match with modules\n", port.name);
+          std::cout << std::format("WARNING: {} is big endian, Flipping IO to handle. Careful about mix/match with modules\n", port.name);
         }
       }
       lnast_create_obj.vname2lname.emplace(var_name, var_name);
@@ -109,7 +110,7 @@ bool Slang_tree::process_top_instance(const slang::ast::InstanceSymbol &symbol) 
       const auto &port = p->as<slang::ast::InterfacePortSymbol>();
       (void)port;
 
-      fmt::print("port:{} FIXME\n", p->name);
+      std::cout << std::format("port:{} FIXME\n", p->name);
     } else {
       I(false);  // What other type?
     }
@@ -156,13 +157,13 @@ bool Slang_tree::process_top_instance(const slang::ast::InstanceSymbol &symbol) 
                   return false;
                 }
               } else {
-                fmt::print("TODO: handle kind {}\n", (int)bstmt->kind);
+                std::cout << std::format("TODO: handle kind {}\n", (int)bstmt->kind);
               }
             }
           }
 
         } else {
-          fmt::print("FIXME: missing sensitivity type\n");
+          std::cout << "FIXME: missing sensitivity type\n";
         }
       }
 #if 0
@@ -400,7 +401,7 @@ std::string Slang_tree::process_expression(const slang::ast::Expression &expr, b
         var = lnast_create_obj.create_bit_not_stmts(lnast_create_obj.create_bit_xor_stmts(lhs, rhs));
         break;
       default: {
-        fmt::print("FIXME unimplemented binary operator\n");
+        std::cout << "FIXME unimplemented binary operator\n";
         var = "fix_binary_op";
       }
     }
@@ -446,7 +447,7 @@ std::string Slang_tree::process_expression(const slang::ast::Expression &expr, b
         // case UnaryOperator::Postincrement:
         // case UnaryOperator::Postdecrement:
       default: {
-        fmt::print("FIXME unimplemented unary operator\n");
+        std::cout << "FIXME unimplemented unary operator\n";
       }
     }
   }
@@ -544,7 +545,7 @@ std::string Slang_tree::process_expression(const slang::ast::Expression &expr, b
     return lnast_create_obj.create_get_mask_stmts(sel_var, sel_mask);
   }
 
-  fmt::print("FIXME still unimplemented Expression kind\n");
+  std::cout << "FIXME still unimplemented Expression kind\n";
 
   return "FIXME_op";
 }

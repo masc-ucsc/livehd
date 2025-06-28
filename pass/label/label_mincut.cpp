@@ -113,12 +113,12 @@ void Label_mincut::lg_to_metis(Lgraph *g) {
   gather_neighs(g);
 
   std::ofstream out_file(base_path + metis_name);  // file create
-  out_file << fmt::format(" {} {} 0\n", num_nodes, num_edges);
+  out_file << std::format(" {} {} 0\n", num_nodes, num_edges);
 
   for (int i = 0; i < num_nodes; i++) {
     auto neighs = id2neighs[i];
     for (auto &it : neighs) {
-      out_file << fmt::format(" {}", it);
+      out_file << std::format(" {}", it);
     }
     out_file << "\n";
   }
@@ -205,7 +205,7 @@ void Label_mincut::viecut_cut(std::string inp_metis_path, std::string out_path) 
 void Label_mincut::viecut_label(std::string result_path) {
   struct stat buff;
   if (stat(result_path.c_str(), &buff) != 0) {
-    fmt::print("viecut result file, {}, does no exist inside {}\n", result_name, base_path);
+    std::cout << std::format("viecut result file, {}, does no exist inside {}\n", result_name, base_path);
     return;
   }
   std::ifstream in_file(result_path);
@@ -230,45 +230,45 @@ void Label_mincut::viecut_label(std::string result_path) {
  * Dumps all info about mincut label pass structures
  * * * * * * * * */
 void Label_mincut::dump(Lgraph *g) {
-  fmt::print("---- Label MinCut Dump ----\n");
-  fmt::print("Num Nodes: {}, Num Edges: {}\n", num_nodes, num_edges);
-  fmt::print("=== id2node ===\n");
+  std::cout << "---- Label MinCut Dump ----\n";
+  std::cout << std::format("Num Nodes: {}, Num Edges: {}\n", num_nodes, num_edges);
+  std::cout << "=== id2node ===\n";
   for (auto &it : id2node) {
     auto curr_id = it.first;
     Node tmp_n(g, it.second);
     auto curr_node = tmp_n.debug_name();
-    fmt::print("  ID: {}, Node: {}\n", curr_id, curr_node);
+    std::cout << std::format("  ID: {}, Node: {}\n", curr_id, curr_node);
   }
 
-  fmt::print("=== node2id ===\n");
+  std::cout << "=== node2id ===\n";
   for (auto &it : node2id) {
     auto curr_id = it.second;
     Node tmp_n(g, it.first);
     auto curr_node = tmp_n.debug_name();
-    fmt::print("  Node: {}, ID: {}\n", curr_id, curr_node);
+    std::cout << std::format("  Node: {}, ID: {}\n", curr_id, curr_node);
   }
 
-  fmt::print("=== id2neighs ===\n");
+  std::cout << "=== id2neighs ===\n";
   for (auto &it : id2neighs) {
     auto curr_id = it.first;
     Node tmp_n(g, id2node[curr_id]);
     auto curr_node = tmp_n.debug_name();
     auto neighbors = it.second;  // IntSet
-    fmt::print("  Node: {}, ID: {}\n", curr_node, curr_id);
+    std::cout << std::format("  Node: {}, ID: {}\n", curr_node, curr_id);
     for (auto &n : neighbors) {
-      fmt::print("  {}", n);
+      std::cout << std::format("  {}", n);
     }
-    fmt::print("\n");
+    std::cout << "\n";
   }
 
-  fmt::print("=== node2color ===\n");
+  std::cout << "=== node2color ===\n";
   for (auto &it : node2color) {
     Node tmp_n(g, it.first);
     auto curr_col = it.second;
-    fmt::print("  Node: {}, Color: {}\n", tmp_n.debug_name(), curr_col);
+    std::cout << std::format("  Node: {}, Color: {}\n", tmp_n.debug_name(), curr_col);
   }
 
-  fmt::print("---- fin ----\n");
+  std::cout << "---- fin ----\n";
 }
 
 /* * * * * * * * *

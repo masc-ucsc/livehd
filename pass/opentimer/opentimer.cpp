@@ -106,7 +106,7 @@ void Pass_opentimer::build_circuit(Lgraph *g) {  // Enhance this for build_circu
   g->each_graph_input([this, &pin_tracker](const Node_pin &pin) {
     std::string driver_name(pin.get_hierarchical().get_wire_name());  // OT needs std::string, not string_view support
 
-    // fmt::print("OT: top input:{} bits:{}\n", driver_name, pin.get_bits());
+    // std::cout << std::format("OT: top input:{} bits:{}\n", driver_name, pin.get_bits());
     timer.insert_primary_input(driver_name);
     timer.insert_net(driver_name);
     for (auto i = 1; i < pin.get_bits(); ++i) {
@@ -122,7 +122,7 @@ void Pass_opentimer::build_circuit(Lgraph *g) {  // Enhance this for build_circu
     if (!driver_dpin.is_invalid()) {                 // It could be disconnected
       std::string driver_name(pin.get_wire_name());  // OT needs std::string, not string_view support
 
-      // fmt::print("OT: top output:{} bits:{}\n", driver_name, pin.get_bits());
+      // std::cout << std::format("OT: top output:{} bits:{}\n", driver_name, pin.get_bits());
 
       timer.insert_primary_output(driver_name);
       timer.insert_net(driver_name);
@@ -282,7 +282,7 @@ void Pass_opentimer::build_circuit(Lgraph *g) {  // Enhance this for build_circu
           }
         }
       } else {
-        // fmt::print("OT: wname:{}\n", wname);
+        // std::cout << std::format("OT: wname:{}\n", wname);
         timer.insert_net(wname);
       }
     }
@@ -293,7 +293,7 @@ void Pass_opentimer::build_circuit(Lgraph *g) {  // Enhance this for build_circu
   pin_tracker.dump();
   for(auto &&it:overwrite_dpin2net) {
     auto dpin = Node_pin(g, it.first);
-    fmt::print("node:{} pin:{} goes to {}\n", dpin.get_node().get_or_create_name(), dpin.get_wire_name(), it.second);
+    std::cout << std::format("node:{} pin:{} goes to {}\n", dpin.get_node().get_or_create_name(), dpin.get_wire_name(), it.second);
   }
 #endif
 
@@ -371,19 +371,19 @@ void Pass_opentimer::compute_timing(Lgraph *g) {  // Expand this method to compu
 
 #if 0
   auto num_gates = timer.num_gates();
-  fmt::print("Number of gates {}\n", num_gates);
+  std::cout << std::format("Number of gates {}\n", num_gates);
 
   auto num_primary_inputs = timer.num_primary_inputs();
-  fmt::print("Number of primary inputs {}\n", num_primary_inputs);
+  std::cout << std::format("Number of primary inputs {}\n", num_primary_inputs);
 
   auto num_primary_outputs = timer.num_primary_outputs();
-  fmt::print("Number of primary outputs {}\n", num_primary_outputs);
+  std::cout << std::format("Number of primary outputs {}\n", num_primary_outputs);
 
   auto num_pins = timer.num_pins();
-  fmt::print("Number of pins {}\n", num_pins);
+  std::cout << std::format("Number of pins {}\n", num_pins);
 
   auto num_nets = timer.num_nets();
-  fmt::print("Number of nets {}\n", num_nets);
+  std::cout << std::format("Number of nets {}\n", num_nets);
 
   auto opt_path = timer.update_timing();
 
@@ -433,7 +433,7 @@ void Pass_opentimer::compute_timing(Lgraph *g) {  // Expand this method to compu
         dpin.set_delay(delay);
 
         // auto wire_name = get_driver_net_name(dpin);
-        // fmt::print(" pin {} {} wname:{}\n", pin_name, delay, wire_name);
+        // std::cout << std::format(" pin {} {} wname:{}\n", pin_name, delay, wire_name);
 
         if (delay > max_delay) {
           max_delay = delay;
@@ -448,9 +448,9 @@ void Pass_opentimer::compute_timing(Lgraph *g) {  // Expand this method to compu
   if (!max_pin.empty()) {
     if (margin) {
       margin_delay = (max_delay / 100.0) * (100 - margin);
-      fmt::print("slowest delay:{} pin:{} margin:{}% (margin_delay:{})\n", max_delay, max_pin, margin, margin_delay);
+      std::cout << std::format("slowest delay:{} pin:{} margin:{}% (margin_delay:{})\n", max_delay, max_pin, margin, margin_delay);
     } else {
-      fmt::print("slowest delay:{} pin:{} NO MARGIN selected\n", max_delay, max_pin);
+      std::cout << std::format("slowest delay:{} pin:{} NO MARGIN selected\n", max_delay, max_pin);
     }
   }
 }
@@ -479,7 +479,7 @@ void Pass_opentimer::compute_power(Lgraph *g) {  // Expand this method to comput
   for (auto &pvcd : vcd_list) {
     pvcd.set_timescale(timeunit);  // In case that VCD dump does not have it
   }
-  fmt::print("================================\n");
+  std::cout << "================================\n";
   for (const auto node : g->fast(true)) {
     auto op = node.get_type_op();
     if (op != Ntype_op::Sub) {
@@ -491,7 +491,7 @@ void Pass_opentimer::compute_power(Lgraph *g) {  // Expand this method to comput
     auto it2 = gates.find(instance_name);
     if (it2 == gates.end()) {
       node.dump();
-      fmt::print("WEIRD. Where is the gate? named {}\n", instance_name);
+      std::cout << std::format("WEIRD. Where is the gate? named {}\n", instance_name);
     }
 
     for (const auto *pin : it2->second.pins()) {
@@ -518,17 +518,17 @@ void Pass_opentimer::compute_power(Lgraph *g) {  // Expand this method to comput
         pvcd.add(pin_name, ipwr + cap);
       }
 
-      fmt::print("iname:{} pin:{} ipwr:{} cap:{}\n", instance_name, pin_name, ipwr, cap);
+      std::cout << std::format("iname:{} pin:{} ipwr:{} cap:{}\n", instance_name, pin_name, ipwr, cap);
     }
   }
 
-  fmt::print("================================\n");
+  std::cout << "================================\n";
   for (auto &pvcd : vcd_list) {
     pvcd.compute(odir);
-    fmt::print("AVG power:{} for {}\n", pvcd.get_power_average(), pvcd.get_filename());
+    std::cout << std::format("AVG power:{} for {}\n", pvcd.get_power_average(), pvcd.get_filename());
   }
 
-  fmt::print("TOTAL power:{} DYNAMIC power:{} INTERNAL power:{} W voltage:{} V freq={}MHz\n",
+  std::cout << std::format("TOTAL power:{} DYNAMIC power:{} INTERNAL power:{} W voltage:{} V freq={}MHz\n",
              total_cap + total_ipwr,
              total_cap,
              total_ipwr,
@@ -604,7 +604,7 @@ void Pass_opentimer::backpath_set_color(Node &node, int color) {
     return;  // Do no cross constants/flops/memories
   }
 
-  fmt::print("---------DEP\n");
+  std::cout << "---------DEP\n";
   back_node.dump();
 
   if (!back_node.has_color()) {
@@ -618,7 +618,7 @@ void Pass_opentimer::backpath_set_color(Node &node, int color) {
 
   back_node.set_color(color);
 
-  fmt::print("---------REC\n");
+  std::cout << "---------REC\n";
   back_node.dump();
   backpath_set_color(back_node, color);  // recursive (should not be too deep stop in flops)
 }

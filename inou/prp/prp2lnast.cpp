@@ -2,12 +2,12 @@
 
 #include "prp2lnast.hpp"
 
+#include <iostream>
 #include <fstream>
 #include <sstream>
 #include <string>
 
-#include "fmt/format.h"
-#include "fmt/printf.h"
+#include <format>
 #include "pass.hpp"
 #include "str_tools.hpp"
 
@@ -75,7 +75,7 @@ void Prp2lnast::dump_tree_sitter(TSTreeCursor *tc, int level) const {
     auto        num_children = ts_node_child_count(node);
     std::string node_type(ts_node_type(node));
 
-    fmt::print("{}{} {}\n", indent, node_type, num_children);
+    std::cout << std::format("{}{} {}\n", indent, node_type, num_children);
 
     if (num_children) {
       ts_tree_cursor_goto_first_child(tc);
@@ -88,7 +88,7 @@ void Prp2lnast::dump_tree_sitter(TSTreeCursor *tc, int level) const {
 }
 
 void Prp2lnast::dump() const {
-  fmt::print("tree-sitter-dump\n");
+  std::cout << "tree-sitter-dump\n";
 
   dump_tree_sitter();
 }
@@ -110,7 +110,7 @@ void Prp2lnast::process_description() {
     select_stack.pop();
     if (primary_node_stack.size()) {
       while (!primary_node_stack.empty()) {
-        fmt::print("residue - {}\n", primary_node_stack.top().token.get_text());
+        std::cout << std::format("residue - {}\n", primary_node_stack.top().token.get_text());
         primary_node_stack.pop();
       }
     }
@@ -129,7 +129,7 @@ void Prp2lnast::process_node(TSNode node) {
   }
   std::string node_type(ts_node_type(node));
 
-  fmt::print("-> {}\n", node_type);
+  std::cout << std::format("-> {}\n", node_type);
 
   if (node_type == "statement") {
     process_statement(node);
@@ -234,7 +234,7 @@ void Prp2lnast::process_scope_statement(TSNode node) {
 void Prp2lnast::process_stmt_list(TSNode node) {
   node = get_named_child(node);
   while (!ts_node_is_null(node)) {
-    fmt::print("{}\n", get_text(node));
+    std::cout << std::format("{}\n", get_text(node));
     process_node(node);
     node = get_named_sibling(node);
   }
@@ -245,7 +245,7 @@ void Prp2lnast::process_expression_statement(TSNode node) {
   process_node(node);
   // TODO: Consider expression statement as function return statement
   ret_node = primary_node_stack.top();
-  fmt::print("returned: {}\n", ret_node.token.get_text());
+  std::cout << std::format("returned: {}\n", ret_node.token.get_text());
   primary_node_stack.pop();
 }
 
@@ -322,7 +322,7 @@ void Prp2lnast::process_assignment_or_declaration(TSNode node) {
   auto onode = get_child(node, "operator");
   auto rnode = get_child(node, "rvalue");
 
-  fmt::print("-> assignment/declaration `{}` {} `{}`\n", get_text(lnode), get_text(onode), get_text(rnode));
+  std::cout << std::format("-> assignment/declaration `{}` {} `{}`\n", get_text(lnode), get_text(onode), get_text(rnode));
 
   // TODO: Handle different assign operators
   if (!ts_node_is_null(rnode)) {
@@ -371,7 +371,7 @@ void Prp2lnast::process_simple_assignment(TSNode node) {
     if (expr_state_stack.top() == Expression_state::Lvalue) {
       add_attr_set(lvalue, rvalue);
     } else {
-      fmt::fprintf(stderr, "Attribute set in right-hand-side assignment\n");
+      std::fprintf(stderr, "Attribute set in right-hand-side assignment\n");
     }
   } else {
     primary_node_stack.push(rvalue);
@@ -411,7 +411,7 @@ void Prp2lnast::process_type_specification(TSNode node) {
   attr_scope_stack.pop();
 
   if (!ts_node_is_null(attr_node)) {
-    fmt::print("attribute - `{}`\n", get_text(attr_node));
+    std::cout << std::format("attribute - `{}`\n", get_text(attr_node));
     attr_scope_stack.push(true);
     scope_node_stack.top().emplace_back(arg);
     process_node(get_child(get_child(attr_node, 1), 1));
@@ -517,7 +517,7 @@ void Prp2lnast::process_lvalue_list(TSNode node) {
   while (!ts_node_is_null(node)) {
     process_node(node);
     std::string node_type(ts_node_type(node));
-    fmt::print("Lvalue type - {}\n", node_type);
+    std::cout << std::format("Lvalue type - {}\n", node_type);
     if (node_type != "tuple") {
       // RHS
       Lnast_node rvalue;
@@ -540,8 +540,8 @@ void Prp2lnast::process_lvalue_list(TSNode node) {
         break;
       }
       if (select_stack.top().nodes.empty()) {
-        fmt::print("Rvalue node stack : {}\n", rvalue_node_stack.size());
-        fmt::print("Primary node stack : {}\n", primary_node_stack.size());
+        std::cout << std::format("Rvalue node stack : {}\n", rvalue_node_stack.size());
+        std::cout << std::format("Primary node stack : {}\n", primary_node_stack.size());
         auto assign_index = lnast->add_child(stmts_index, Lnast_node::create_assign());
         lnast->add_child(assign_index, primary_node_stack.top());
         lnast->add_child(assign_index, rvalue);
@@ -625,15 +625,15 @@ void Prp2lnast::process_rvalue_list(TSNode node) {
       }
     }
 
-    fmt::print("Tuple: {} = (", tuple_ref_node.token.get_text());
+    std::cout << std::format("Tuple: {} = (", tuple_ref_node.token.get_text());
     for (const auto &p : tuple_rvalue_stack.top()) {
       if (p.first.is_invalid()) {
-        fmt::print(" {}", p.second.token.get_text());
+        std::cout << std::format(" {}", p.second.token.get_text());
       } else {
-        fmt::print(" {} = {}", p.first.token.get_text(), p.second.token.get_text());
+        std::cout << std::format(" {} = {}", p.first.token.get_text(), p.second.token.get_text());
       }
     }
-    fmt::print(" )\n");
+    std::cout << " )\n";
 
     tuple_rvalue_stack.pop();
     primary_node_stack.push(tuple_ref_node);
@@ -674,7 +674,7 @@ void Prp2lnast::process_attribute_entry(TSNode node) {
 
 void Prp2lnast::process_attr_list(TSNode node) {
   node = get_named_child(node);
-  fmt::print("attr_list\n");
+  std::cout << "attr_list\n";
   while (!ts_node_is_null(node)) {
     process_node(node);
     if (primary_node_stack.size()) {
@@ -881,7 +881,7 @@ void Prp2lnast::process_binary_expression(TSNode node) {
   auto onode = get_child(node, "operator");
   auto rnode = get_child(node, "right");
 
-  fmt::print("`{}` {} `{}`\n", get_text(lnode), get_text(onode), get_text(rnode));
+  std::cout << std::format("`{}` {} `{}`\n", get_text(lnode), get_text(onode), get_text(rnode));
 
   auto       op = get_text(onode);
   Lnast_node lnast_node;
@@ -990,7 +990,7 @@ void Prp2lnast::process_unary_expression(TSNode node) {
   auto op_node  = get_child(node, "operator");
   auto arg_node = get_child(node, "argument");
 
-  fmt::print("{} `{}`\n", get_text(op_node), get_text(arg_node));
+  std::cout << std::format("{} `{}`\n", get_text(op_node), get_text(arg_node));
 
   auto       op = get_text(op_node);
   Lnast_node lnast_node;
@@ -1027,7 +1027,7 @@ void Prp2lnast::process_unary_expression(TSNode node) {
 }
 
 void Prp2lnast::process_dot_expression(TSNode node) {
-  fmt::print("-> dot_expression `{}`\n", get_text(node));
+  std::cout << std::format("-> dot_expression `{}`\n", get_text(node));
 
   node = get_named_child(node);
 
@@ -1039,7 +1039,7 @@ void Prp2lnast::process_dot_expression(TSNode node) {
 
   enter_scope(Expression_state::Const);
   while (!ts_node_is_null(node)) {
-    fmt::print("-> item `{}`\n", get_text(node));
+    std::cout << std::format("-> item `{}`\n", get_text(node));
     std::string node_type(ts_node_type(node));
     if (node_type == "tuple_sq") {
       select_stack.top().is_attribute = true;
@@ -1049,7 +1049,7 @@ void Prp2lnast::process_dot_expression(TSNode node) {
     } else {
       process_node(node);
     }
-    fmt::print("{} {}\n", select_stack.size(), primary_node_stack.top().token.get_text());
+    std::cout << std::format("{} {}\n", select_stack.size(), primary_node_stack.top().token.get_text());
     select_stack.top().nodes.emplace_back(primary_node_stack.top());
     primary_node_stack.pop();
     node = get_named_sibling(node);
@@ -1080,7 +1080,7 @@ void Prp2lnast::process_member_selection(TSNode node) {
   auto lnode = get_child(node, "argument");
   auto rnode = get_child(node, "select");
 
-  fmt::print("-> member_selection `{}` `{}`\n", get_text(lnode), get_text(rnode));
+  std::cout << std::format("-> member_selection `{}` `{}`\n", get_text(lnode), get_text(rnode));
 
   process_node(lnode);
   auto lhs = primary_node_stack.top();
@@ -1195,7 +1195,7 @@ void Prp2lnast::process_bit_selection(TSNode node) {
 
 void Prp2lnast::process_identifier(TSNode node) {
   auto name = get_text(node);
-  fmt::print("-> identifier `{}`\n", name);
+  std::cout << std::format("-> identifier `{}`\n", name);
   if (attr_scope_stack.top()) {
     primary_node_stack.push(Lnast_node::create_const(name));
   } else {
@@ -1213,7 +1213,7 @@ void Prp2lnast::process_identifier(TSNode node) {
           }
           ref_name_map[name] = directed_name;
         }
-        fmt::print("ref = {}\n", ref_name_map[name]);
+        std::cout << std::format("ref = {}\n", ref_name_map[name]);
         primary_node_stack.push(Lnast_node::create_ref(ref_name_map[name]));
         // FIXME: Temporary fix to avoid default initialize-to-zero strategy
         /*
@@ -1277,7 +1277,7 @@ inline TSNode Prp2lnast::get_child(const TSNode &node, const char *field) const 
 }
 
 inline void Prp2lnast::enter_scope(Expression_state expr_state) {
-  fmt::print("enter_scope({})\n", str(expr_state));
+  std::cout << std::format("enter_scope({})\n", str(expr_state));
   if (expr_state == Expression_state::Rvalue) {
     scope_node_stack.push({});
   }
@@ -1285,7 +1285,7 @@ inline void Prp2lnast::enter_scope(Expression_state expr_state) {
 }
 
 inline void Prp2lnast::leave_scope() {
-  fmt::print("leave_scope({})\n", str(expr_state_stack.top()));
+  std::cout << std::format("leave_scope({})\n", str(expr_state_stack.top()));
   if (expr_state_stack.top() == Expression_state::Rvalue) {
     scope_node_stack.pop();
   }

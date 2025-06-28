@@ -3,6 +3,8 @@
 
 #include <unistd.h>
 
+#include <format>
+#include <iostream>
 #include <cstring>
 #include <memory>
 #include <string>
@@ -263,38 +265,38 @@ bool Cpp_parser::set_convert_parameters(std::string_view key, std::string_view r
 }
 
 void Prp_parser::dump_maps() const {
-  fmt::print("printing the unsigned vector\n");
+  std::cout << "printing the unsigned vector\n";
   for (const auto &elem : unsigned_vars) {
-    fmt::print("var:{}\n", elem);
+    std::cout << std::format("var:{}\n", elem);
   }
 }
 void Prp_parser::call_dump_maps() const { Prp_parser::dump_maps(); }
 void Ver_parser::dump_maps() const {
-  fmt::print("printing the unsigned vector\n");
+  std::cout << "printing the unsigned vector\n";
   for (const auto &elem : unsigned_vars) {
-    fmt::print("var:{}\n", elem);
+    std::cout << std::format("var:{}\n", elem);
   }
 }
 void Ver_parser::call_dump_maps() const { Ver_parser::dump_maps(); }
 void Cpp_parser::dump_maps() const {
-  fmt::print("printing I/P bitwidth values:\n");
+  std::cout << "printing I/P bitwidth values:\n";
   for (const auto &elem : inp_bw) {
-    fmt::print("\tkey: {}, value: {}\n", elem.first, elem.second);
+    std::cout << std::format("\tkey: {}, value: {}\n", elem.first, elem.second);
   }
 
-  fmt::print("printing O/P bitwidth values:\n");
+  std::cout << "printing O/P bitwidth values:\n";
   for (const auto &elem : outp_bw) {
-    fmt::print("\tkey: {}, value: {}\n", elem.first, elem.second);
+    std::cout << std::format("\tkey: {}, value: {}\n", elem.first, elem.second);
   }
 
-  fmt::print("printing reg bitwidth values:\n");
+  std::cout << "printing reg bitwidth values:\n";
   for (const auto &elem : reg_bw) {
-    fmt::print("\tkey: {}, value: {}\n", elem.first, elem.second);
+    std::cout << std::format("\tkey: {}, value: {}\n", elem.first, elem.second);
   }
 
-  fmt::print("printing the unsigned vector\n");
+  std::cout << "printing the unsigned vector\n";
   for (const auto &elem : unsigned_vars) {
-    fmt::print("var:{}\n", elem);
+    std::cout << std::format("var:{}\n", elem);
   }
 }
 void Cpp_parser::call_dump_maps() const { Cpp_parser::dump_maps(); }

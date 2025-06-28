@@ -2,8 +2,17 @@
 
 #include "bitwidth.hpp"
 
+#include <format>
+#include <iostream>
+#include <format>
 #include <algorithm>
+#include <format>
+#include <iostream>
+#include <format>
 #include <cmath>
+#include <format>
+#include <iostream>
+#include <format>
 #include <vector>
 
 #include "absl/strings/match.h"
@@ -426,7 +435,7 @@ void Bitwidth::process_memory(Node &node) {
     }
 
 #ifndef NDEBUG
-    fmt::print("Memory {} has bits:{} (din bits:{}) and size:{} (addr size:{})\n",
+    std::cout << std::format("Memory {} has bits:{} (din bits:{}) and size:{} (addr size:{})\n",
                node.debug_name(),
                mem_bits,
                mem_din_bits,
@@ -1093,7 +1102,7 @@ void Bitwidth::process_attr_get(Node &node) {
     result = bw.get_min() >= 0 ? Lconst(bw.get_sbits() - 1) : Lconst(bw.get_sbits());
 
 #ifndef NDEBUG
-    fmt::print("min:{}, result:{}\n", bw.get_min().to_i(), result.to_i());
+    std::cout << std::format("min:{}, result:{}\n", bw.get_min().to_i(), result.to_i());
 #endif
 
   } else if (attr == Attr::Set_sbits) {
@@ -1343,9 +1352,9 @@ void Bitwidth::debug_unconstrained_msg(Node &node, Node_pin &dpin) {
 #if 0  // ENABLE ONLY FOR TRACING BW
 #ifndef NDEBUG
   if (dpin.has_name()) {
-    fmt::print("BW-> gate:{} has input pin:{} unconstrained (lg:{})\n", node.debug_name(), dpin.debug_name(), node.get_top_lgraph()->get_name());
+    std::cout << std::format("BW-> gate:{} has input pin:{} unconstrained (lg:{})\n", node.debug_name(), dpin.debug_name(), node.get_top_lgraph()->get_name());
   } else {
-    fmt::print("BW-> gate:{} has some inputs unconstrained (lg:{})\n", node.debug_name(), node.get_top_lgraph()->get_name());
+    std::cout << std::format("BW-> gate:{} has some inputs unconstrained (lg:{})\n", node.debug_name(), node.get_top_lgraph()->get_name());
   }
 #endif
 #endif
@@ -1471,7 +1480,7 @@ void Bitwidth::bw_pass(Lgraph *lg) {
         set_subgraph_boundary_bw(node);
       } else {
 #ifndef NDEBUG
-        fmt::print("FIXME: node:{} still not handled by bitwidth\n", node.debug_name());
+        std::cout << std::format("FIXME: node:{} still not handled by bitwidth\n", node.debug_name());
 #endif
       }
       if (node.is_invalid()) {
@@ -1592,7 +1601,7 @@ void Bitwidth::bw_pass(Lgraph *lg) {
         auto v = it->second.get_max();
         if (it->second.get_min() != v)
           continue;
-        fmt::print("could delete node:{} with value:{}\n",node.debug_name(), v.to_pyrope());
+        std::cout << std::format("could delete node:{} with value:{}\n",node.debug_name(), v.to_pyrope());
         auto data_dpin = node.create_const(v);
         for (auto e : dpin.out_edges()) {
           e.sink.connect_driver(data_dpin);
@@ -1628,15 +1637,15 @@ void Bitwidth::dump(Lgraph *lg) {
     for (auto dpin : node.out_connected_pins()) {
       auto it = bwmap.find(dpin.get_compact_class());
       if (it == bwmap.end()) {
-        fmt::print("node:{} {} UNKNOWN\n", node.debug_name(), dpin.get_pin_name());
+        std::cout << std::format("node:{} {} UNKNOWN\n", node.debug_name(), dpin.get_pin_name());
       } else if (it->second.is_always_positive()) {
-        fmt::print("node:{} {} pos  |", node.debug_name(), dpin.get_pin_name());
+        std::cout << std::format("node:{} {} pos  |", node.debug_name(), dpin.get_pin_name());
         it->second.dump();
       } else if (it->second.is_always_negative()) {
-        fmt::print("node:{} {} neg  |", node.debug_name(), dpin.get_pin_name());
+        std::cout << std::format("node:{} {} neg  |", node.debug_name(), dpin.get_pin_name());
         it->second.dump();
       } else {
-        fmt::print("node:{} {} both |", node.debug_name(), dpin.get_pin_name());
+        std::cout << std::format("node:{} {} both |", node.debug_name(), dpin.get_pin_name());
         it->second.dump();
       }
     }

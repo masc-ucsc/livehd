@@ -2,13 +2,15 @@
 
 #include "lnast.hpp"
 
+#include <format>
+#include <iostream>
 #include <string>
 
 #include "elab_scanner.hpp"
 #include "perf_tracing.hpp"
 
 void Lnast_node::dump() const {
-  fmt::print("{}, {}, {}\n", type.debug_name(), token.get_text(), subs);  // TODO: cleaner API to also dump token
+  std::cout << std::format("{}, {}, {}\n", type.debug_name(), token.get_text(), subs);  // TODO: cleaner API to also dump token
 }
 
 Lnast::~Lnast() {}
@@ -24,7 +26,7 @@ void Lnast::do_ssa_trans(const Lnast_nid &top_nid) {
       });
   Lnast_nid top_sts_nid;
   if (get_type(top_nid).is_func_def()) {
-    /* fmt::print("Step-0: Handle Inline Function Definition\n"); */
+    /* std::cout << "Step-0: Handle Inline Function Definition\n"; */
     auto c0     = get_first_child(top_nid);
     auto c1     = get_sibling_next(c0);
     top_sts_nid = get_sibling_next(c1);
@@ -41,23 +43,23 @@ void Lnast::do_ssa_trans(const Lnast_nid &top_nid) {
 
   Phi_rtable top_phi_resolve_table;
   phi_resolve_tables[top_sts_nid] = top_phi_resolve_table;
-  /* fmt::print("Step-1: Analyze LHS or RHS of Tuple Sel;  */
+  /* std::cout << std::format("Step-1: Analyze LHS or RHS of Tuple Sel;  */
   analyze_selc_lrhs(top_sts_nid);
 
-  /* fmt::print("Step-2: Tuple_Add/Tuple_Get Analysis\n"); */
+  /* std::cout << "Step-2: Tuple_Add/Tuple_Get Analysis\n"; */
   trans_tuple_opr(top_sts_nid);
 
-  /* fmt::print("Step-3: LHS SSA\n"); Insert DP-Assign Parent_nid\n");*/
+  /* std::cout << "Step-3: LHS SSA\n"; Insert DP-Assign Parent_nid\n");*/
   resolve_ssa_lhs_subs(top_sts_nid);
 
   // see Note I
-  /* fmt::print("Step-4: RHS SSA\n"); */
+  /* std::cout << "Step-4: RHS SSA\n"; */
   resolve_ssa_rhs_subs(top_sts_nid);
 
-  /* fmt::print("Step-5: Operator LHS Merge\n"); */
+  /* std::cout << "Step-5: Operator LHS Merge\n"; */
   opr_lhs_merge(top_sts_nid);
 
-  /* fmt::print("LNAST SSA Transformation Finished!\n"); */
+  /* std::cout << "LNAST SSA Transformation Finished!\n"; */
   // dump();
 }
 
@@ -1204,10 +1206,10 @@ void Lnast::dump(const Lnast_nid &root_nid) const {
     indent = indent.append(it.level * 4 + 4, ' ');
     //const auto &tok = get_token(root_nid);
     const auto &tok = node.token;
-    fmt::print("{:<3}-{:<3} {:<10} ", tok.pos1, tok.pos2, tok.fname);
+    std::cout << std::format("{:<3}-{:<3} {:<10} ", tok.pos1, tok.pos2, tok.fname);
 
     if (node.type.is_ref() && node.token.get_text().substr(0, 3) != "___") {  // only ref need/have ssa info, exclude tmp variable case
-      fmt::print("({:<1},{:<6}) {} {:<8}: {}___{}\n",
+      std::cout << std::format("({:<1},{:<6}) {} {:<8}: {}___{}\n",
                  it.level,
                  it.pos,
                  indent,
@@ -1215,7 +1217,7 @@ void Lnast::dump(const Lnast_nid &root_nid) const {
                  node.token.get_text(),
                  node.subs);
     } else {
-      fmt::print("({:<1},{:<6}) {} {:<8}: {}    \n", it.level, it.pos, indent, node.type.to_sv(), node.token.get_text());
+      std::cout << std::format("({:<1},{:<6}) {} {:<8}: {}    \n", it.level, it.pos, indent, node.type.to_sv(), node.token.get_text());
     }
   }
 }

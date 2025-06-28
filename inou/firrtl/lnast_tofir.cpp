@@ -8,6 +8,7 @@
 
 #pragma GCC diagnostic pop                // Restore previous diagnostic settings
 
+#include <format>
 #include <fstream>
 #include <iostream>
 
@@ -32,7 +33,7 @@ void Inou_firrtl::toFIRRTL(Eprp_var &var) {
   // fir_design.PrintDebugString();
   std::fstream output(absl::StrCat(top_msg->name(), ".pb"), std::ios::out | std::ios::trunc | std::ios::binary);
   if (!fir_design.SerializeToOstream(&output)) {
-    fmt::print("Failed to write firrtl design\n");
+    std::cout << "Failed to write firrtl design\n";
   }
   google::protobuf::ShutdownProtobufLibrary();
 }
@@ -132,7 +133,7 @@ void Inou_firrtl::process_ln_stmt(Lnast &ln, const Lnast_nid &lnidx, firrtl::Fir
     I(ln.get_name(lnidx) == "err_var_undefined");
     return;
   } else {
-    fmt::print("Error: node with token {} not yet supported\n", ln.get_name(lnidx));
+    std::cout << std::format("Error: node with token {} not yet supported\n", ln.get_name(lnidx));
     I(false);
     return;
   }
@@ -206,7 +207,7 @@ void Inou_firrtl::process_ln_stmt(Lnast &ln, const Lnast_nid &lnidx, firrtl::Fir
     I(ln.get_name(lnidx) == "err_var_undefined");
     return;
   } else {
-    fmt::print("Error: node with token {} not yet supported\n", ln.get_name(lnidx));
+    std::cout << std::format("Error: node with token {} not yet supported\n", ln.get_name(lnidx));
     I(false);
     return;
   }
@@ -537,7 +538,7 @@ void Inou_firrtl::handle_attr_assign(Lnast &ln, const Lnast_nid &lhs, const Lnas
       Pass::error("A latch is in your design, but latches are not supported in FIRRTL. Cannot translate.");
     }
   } else {
-    fmt::print("Error: compiler attribute \"{}\" found, but it is either incorrect or not supported yet.\n", attr_name);
+    std::cout << std::format("Error: compiler attribute \"{}\" found, but it is either incorrect or not supported yet.\n", attr_name);
   }
 }
 
@@ -660,7 +661,7 @@ void Inou_firrtl::handle_clock_attr(Lnast &ln, std::string_view var_name, const 
 void Inou_firrtl::handle_async_attr(Lnast &ln, std::string_view var_name, const Lnast_nid &rhs) {
   if (ln.get_name(rhs) == "true") {
     async_regs.insert(std::string(var_name.substr(1)));
-    fmt::print("Adding to async_regs: {}\n", var_name.substr(1));
+    std::cout << std::format("Adding to async_regs: {}\n", var_name.substr(1));
   }
 }
 
@@ -747,7 +748,7 @@ std::string_view Inou_firrtl::get_firrtl_name_format(Lnast &ln, const Lnast_nid 
   } else if (ntype.is_const()) {
     return ln.get_name(lnidx);
   }
-  fmt::print("{}\n", str);
+  std::cout << std::format("{}\n", str);
   I(false);  // When getting names, I would think we should only be checking those two node types.
   return "";
 }

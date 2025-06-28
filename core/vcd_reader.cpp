@@ -11,7 +11,7 @@
 #include <charconv>
 #include <cstring>
 
-#include "fmt/format.h"
+#include <format>
 
 #define VALUES "0123456789zZxXbU-"
 

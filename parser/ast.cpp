@@ -84,6 +84,6 @@ void Ast_parser::dump() const {
   for (const auto &index : depth_preorder()) {
     std::string indent(index.level, ' ');
     const auto &d = get_data(index);
-    fmt::print("{} l:{} p:{} rule_id:{}\n", indent.c_str(), index.level, index.pos, d.rule_id);
+    std::cout << std::format("{} l:{} p:{} rule_id:{}\n", indent.c_str(), index.level, index.pos, d.rule_id);
   }
 }

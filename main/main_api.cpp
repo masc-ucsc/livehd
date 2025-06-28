@@ -16,7 +16,7 @@ void setup_inou_liveparse();
 
 void Main_api::init() {
   for (const auto &it : Pass_plugin::get_registry()) {
-    // fmt::print("function:{}\n", it.first);
+    // std::cout << std::format("function:{}\n", it.first);
     it.second();
   }
 

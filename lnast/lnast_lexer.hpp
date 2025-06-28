@@ -3,9 +3,7 @@
 
 #include <cctype>
 #include <iostream>
-#include <fmt/format.h>
-#include <fmt/os.h>
-#include <fmt/color.h>
+#include <format>
 #include "absl/strings/str_cat.h"
 
 class Lnast_token {

@@ -92,19 +92,6 @@ http_archive(
     build_file = "//packages:parallel_hashmap.BUILD",
 )
 
-# Mocktutle uses MODULE.bazel, so it needs the fmt here too
-http_archive(
-    name = "fmt2",
-    url = "https://github.com/fmtlib/fmt/archive/refs/heads/master.zip",
-    strip_prefix = "fmt-master",
-     # urls = [
-     #     "https://github.com/fmtlib/fmt/archive/refs/tags/10.1.1.zip",
-     # ],
-     # sha256 = "3c2e73019178ad72b0614a3124f25de454b9ca3a1afe81d5447b8d3cbdb6d322",
-     # strip_prefix = "fmt-10.1.1",
-    build_file = "//packages:fmt2.BUILD",
-)
-
 # HIF
 http_archive(
     name = "hif",

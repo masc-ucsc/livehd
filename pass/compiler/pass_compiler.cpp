@@ -2,6 +2,9 @@
 
 #include "pass_compiler.hpp"
 
+#include <format>
+#include <iostream>
+#include <format>
 #include <cstddef>
 
 #include "absl/strings/str_split.h"
@@ -37,7 +40,7 @@ void Pass_compiler::compile(Eprp_var &var) {
   auto          only_tup_cprop = pc.check_option_cprop(var);
 
   Lcompiler compiler(path, odir, top, gviz);
-  fmt::print("top module_name is: {}\n", top);
+  std::cout << std::format("top module_name is: {}\n", top);
 
   if (var.lnasts.empty()) {
     auto files = pc.get_files(var);

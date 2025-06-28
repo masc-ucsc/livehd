@@ -1,5 +1,7 @@
 //  This file is distributed under the BSD 3-Clause License. See LICENSE for details.
 
+#include <format>
+#include <iostream>
 #include <string>
 #include <vector>
 
@@ -46,7 +48,7 @@ protected:
 
     tree.each_top_down_fast([&index_order](const lh::Tree_index &index, const Node_data &node) {
       (void)node;
-      // fmt::print(" level:{} pos:{} create_pos:{} fwd:{} bwd:{} leaf:{}\n", index.level, index.pos, node.create_pos, node.fwd_pos,
+      // std::cout << std::format(" level:{} pos:{} create_pos:{} fwd:{} bwd:{} leaf:{}\n", index.level, index.pos, node.create_pos, node.fwd_pos,
       // node.bwd_pos, node.leaf);
 
       if (index.level || index.pos)
@@ -110,7 +112,7 @@ protected:
       absl_fwd_pos[node.get_compact()] = data->fwd_pos;
       absl_bwd_pos[node.get_compact()] = data->bwd_pos;
 
-      // fmt::print("create {} class {}\n", hnode.debug_name(), hnode.get_class_lgraph()->get_name());
+      // std::cout << std::format("create {} class {}\n", hnode.debug_name(), hnode.get_class_lgraph()->get_name());
       node_order.emplace_back(node);
     }
 
@@ -155,8 +157,8 @@ protected:
       auto &curr_node = node_order[i];
       auto &prev_node = node_order[i - 1];
 
-      // fmt::print("prev   {} class {}\n", prev_node.debug_name(), prev_node.get_class_lgraph()->get_name());
-      // fmt::print("curr   {} class {}\n", curr_node.debug_name(), curr_node.get_class_lgraph()->get_name());
+      // std::cout << std::format("prev   {} class {}\n", prev_node.debug_name(), prev_node.get_class_lgraph()->get_name());
+      // std::cout << std::format("curr   {} class {}\n", curr_node.debug_name(), curr_node.get_class_lgraph()->get_name());
 
       Node_pin dpin;
       if (prev_node.get_type_op() == Ntype_op::Sum) {
@@ -300,7 +302,7 @@ protected:
 
       double leaf_ratio = (double)n_leafs / (1.0 + i);
 
-      // fmt::print("leaf_ratio:{} {} {}\n", leaf_ratio,n_leafs, i);
+      // std::cout << std::format("leaf_ratio:{} {} {}\n", leaf_ratio,n_leafs, i);
 
       if (leaf_ratio < leaf_ratio_goal && index.level) {  // Not to root
         tree.append_sibling(index, data);
@@ -353,7 +355,7 @@ protected:
       }
     }
 
-    fmt::print("Tree with {} nodes {} leafs and {} depth\n", size, n_leafs, max_level);
+    std::cout << std::format("Tree with {} nodes {} leafs and {} depth\n", size, n_leafs, max_level);
 
     EXPECT_TRUE(pos == (size + 1));  // Missing nodes??? (tree.hpp bug)
   }

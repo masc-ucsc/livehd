@@ -7,6 +7,7 @@
 #include <sys/stat.h>
 #include <sys/types.h>
 
+#include <format>
 #include <cctype>
 #include <iostream>
 #include <limits>
@@ -379,7 +380,7 @@ Elab_scanner::Elab_scanner() {
   setup_translate();
   max_errors   = 1;
 #ifndef NDEBUG
-  fmt::print("\n Warning: max_warnings changed from 1024 to 10240 to enable RocketTile LG generation.\n");
+  std::cout << "\n Warning: max_warnings changed from 1024 to 10240 to enable RocketTile LG generation.\n";
 #endif
   max_warnings = 0; // 0 disables max_warnings
   n_errors     = 0;
@@ -456,7 +457,7 @@ void Elab_scanner::parser_error_int(std::string_view text) const {
   // if (n_errors > max_errors) exit(-3);
 #ifndef NDEBUG
   // only for bazel debug mode, better swift gdb debug for developers
-  fmt::print("Pass::Error: {}\n", text);
+  std::cout << std::format("Pass::Error: {}\n", text);
   I(false, "Compiler pass error! debug with gdb");
 #endif
 }
@@ -472,7 +473,7 @@ void Elab_scanner::parser_warn_int(std::string_view text) const {
 void Elab_scanner::scan_raw_msg(std::string_view cat, std::string_view text, bool third) const {
   // err_tracker::logger( text);
   if (token_list.size() <= 1) {
-    fmt::print("{}:{}:{} {}: {}\n", filename, 0, 0, cat, text);
+    std::cout << std::format("{}:{}:{} {}: {}\n", filename, 0, 0, cat, text);
     return;
   }
 
@@ -513,8 +514,8 @@ void Elab_scanner::scan_raw_msg(std::string_view cat, std::string_view text, boo
   }
   col += xtra_col;
 
-  fmt::print("{}:{}:{} {}: ", filename, line, col, cat);
-  std::cout << text;  // NOTE: no fmt::print because it can contain {}
+  std::cout << std::format("{}:{}:{} {}: ", filename, line, col, cat);
+  std::cout << text;  // NOTE: no std::print because it can contain {}
 
   if (!is_newline(memblock[line_pos_start]))
     std::cout << std::endl;
@@ -522,7 +523,7 @@ void Elab_scanner::scan_raw_msg(std::string_view cat, std::string_view text, boo
   assert(line_pos_end > line_pos_start);
   std::cout << line_txt << "\n";
   // NOTE: line_pos_start points to the last return
-  // NOTE: no fmt::print because the text can contain {}
+  // NOTE: no std::print because the text can contain {}
 
   if (!third)
     return;
@@ -535,7 +536,7 @@ void Elab_scanner::scan_raw_msg(std::string_view cat, std::string_view text, boo
 
   std::string third_1(col, ' ');
   std::string third_2(len, '^');
-  fmt::print("{}{}\n", third_1 , third_2);
+  std::cout << std::format("{}{}\n", third_1 , third_2);
 }
 
 void Elab_scanner::dump_token() const {
@@ -544,5 +545,5 @@ void Elab_scanner::dump_token() const {
     pos = token_list.size();
 
   auto &t = token_list[pos];
-  fmt::print("tok:{} pos1:{}, pos2:{}, line:{} text:{}\n", t.tok, t.pos1, t.pos2, t.line, t.get_text());
+  std::cout << std::format("tok:{} pos1:{}, pos2:{}, line:{} text:{}\n", t.tok, t.pos1, t.pos2, t.line, t.get_text());
 }

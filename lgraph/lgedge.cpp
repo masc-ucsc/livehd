@@ -2,6 +2,8 @@
 
 #include "lgedge.hpp"
 
+#include <format>
+#include <iostream>
 #include <cassert>
 
 #include "iassert.hpp"
@@ -175,7 +177,7 @@ void Node_internal::del_output_int(const Edge_raw *out_edge) {
 
   if (pos != (Num_SEdges - out_pos)) {
     for (int i = pos - 1; i >= Num_SEdges - out_pos; i--) {
-      // fmt::print("copy from {} to {}\n",i,i+sz);
+      // std::cout << std::format("copy from {} to {}\n",i,i+sz);
       sedge[i + sz] = sedge[i];
     }
   }
@@ -209,7 +211,7 @@ void Node_internal::xxx(const Edge_raw *edge_raw) {
 
 // LCOV_EXCL_START
 void Node_internal::dump() const {
-  fmt::print("nid:{} pid:{} state:{} inp_pos:{} out_pos:{} root:{}\n",
+  std::cout << std::format("nid:{} pid:{} state:{} inp_pos:{} out_pos:{} root:{}\n",
              (int)nid,
              (int)dst_pid,
              (int)state,
@@ -219,7 +221,7 @@ void Node_internal::dump() const {
 
   const Edge_raw *out = get_output_begin();
   while (out != get_output_end()) {
-    fmt::print("  out idx:{} pid:{}\n", (int)out->get_idx(), (int)out->get_inp_pid());
+    std::cout << std::format("  out idx:{} pid:{}\n", (int)out->get_idx(), (int)out->get_inp_pid());
     if (out->is_snode()) {
       out++;
     } else {
@@ -229,7 +231,7 @@ void Node_internal::dump() const {
 
   out = get_input_begin();
   while (out != get_input_end()) {
-    fmt::print("  inp idx:{} pid:{}\n", (int)out->get_idx(), (int)out->get_inp_pid());
+    std::cout << std::format("  inp idx:{} pid:{}\n", (int)out->get_idx(), (int)out->get_inp_pid());
     if (out->is_snode()) {
       out++;
     } else {

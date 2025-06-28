@@ -26,7 +26,6 @@ cc_test(
     deps = [
         ":pass_label",
         "@googletest//:gtest_main",
-        "@fmt//:fmt",
     ],
 )
 
@@ -36,7 +35,6 @@ cc_test(
     deps = [
         ":pass_label",
         "@googletest//:gtest_main",
-        "@fmt//:fmt",
     ],
 )
 
@@ -47,6 +45,5 @@ cc_test(
         ":pass_label",
         "//third_party/viecut",
         "@googletest//:gtest_main",
-        "@fmt//:fmt",
     ],
 )

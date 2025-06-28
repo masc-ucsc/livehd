@@ -11,7 +11,7 @@
 #include "absl/container/flat_hash_map.h"
 #include "absl/container/flat_hash_set.h"
 #include "explicit_type.hpp"
-#include "fmt/format.h"
+#include <format>
 #include "iassert.hpp"
 
 using Token_id = uint8_t;
@@ -300,21 +300,21 @@ public:
   class scan_error : public std::runtime_error {
   public:
     template <typename... Args>
-    scan_error(const Elab_scanner &scanner, fmt::format_string<Args...> format, Args &&...args)
-    : std::runtime_error(fmt::format(format, std::forward<Args>(args)...)) {
+    scan_error(const Elab_scanner &scanner, std::format_string<Args...> format, Args &&...args)
+    : std::runtime_error(std::format(format, std::forward<Args>(args)...)) {
       scanner.scan_error_int(what());
     };
   };
 
   template <typename... Args>
-  void scan_warn(fmt::format_string<Args...> format, Args &&...args) const {
-    scan_warn_int(fmt::format(format, std::forward<Args>(args)...));
+  void scan_warn(std::format_string<Args...> format, Args &&...args) const {
+    scan_warn_int(std::format(format, std::forward<Args>(args)...));
   }
 
   class parser_error : public std::runtime_error {
   public:
     template <typename... Args>
-    parser_error(const Elab_scanner &scanner, fmt::format_string<Args...> format, Args &&...args) : std::runtime_error(fmt::format(format, args...)) {
+    parser_error(const Elab_scanner &scanner, std::format_string<Args...> format, Args &&...args) : std::runtime_error(std::format(format, args...)) {
       scanner.parser_error_int(what());
     };
     parser_error(const Elab_scanner &scanner, std::string_view txt) : std::runtime_error(std::string(txt)) {
@@ -323,16 +323,16 @@ public:
   };
 
   template <typename... Args>
-  void parser_warn(fmt::format_string<Args...> format, Args &&...args) const {
-    parser_warn_int(fmt::format(format, args...));
+  void parser_warn(std::format_string<Args...> format, Args &&...args) const {
+    parser_warn_int(std::format(format, args...));
   }
   void parser_warn(std::string_view txt) const {
     parser_warn_int(txt);
   }
 
   template <typename... Args>
-  void parser_info(fmt::format_string<Args...> format, Args &&...args) const {
-    parser_info_int(fmt::format(format, args...));
+  void parser_info(std::format_string<Args...> format, Args &&...args) const {
+    parser_info_int(std::format(format, args...));
   }
   void parser_info(std::string_view txt) const {
     parser_warn_int(txt);

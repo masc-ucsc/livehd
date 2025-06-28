@@ -1,9 +1,10 @@
 //  This file is distributed under the BSD 3-Clause License. See LICENSE for details.
 #pragma once
 
+#include <iostream>
 #include <cstdint>
 
-#include "fmt/format.h"
+#include <format>
 #include "lconst.hpp"
 
 class __attribute__((packed)) Firrtl_bits {
@@ -51,5 +52,5 @@ public:
 
   bool get_sign() const { return sign; };
 
-  void dump() const { fmt::print("{}{}b\n", sign ? "S" : "U", bits); }
+  void dump() const { std::cout << std::format("{}{}b\n", sign ? "S" : "U", bits); }
 };

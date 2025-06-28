@@ -2,6 +2,8 @@
 
 #include "inou_attr.hpp"
 
+#include <format>
+#include <iostream>
 #include <fstream>
 #include <string>
 
@@ -27,17 +29,17 @@ void Inou_attr::set_color_to_lg(Eprp_var &var) {
 
   auto filename = p.get_files(var);
   for (const auto &lg : var.lgs) {
-    // fmt::print("\n\n---> current module: {}\n\n", lg->get_name());
+    // std::cout << std::format("\n\n---> current module: {}\n\n", lg->get_name());
     p.read_json(filename, lg);
     p.color_lg(lg);
   }
 }
 
 void Inou_attr::read_json(const std::string &filename, Lgraph *lg) {
-  // fmt::print("{}", filename);
+  // std::cout << std::format("{}", filename);
   node2color.clear();
   const auto top_name = lg->get_name();
-  // fmt::print("{}", top_name);
+  // std::cout << std::format("{}", top_name);
   FILE *pFile = fopen(filename.c_str(), "rb");
   if (pFile == 0) {
     Pass::error("Could not open file {}", filename);
@@ -76,7 +78,7 @@ void Inou_attr::read_json(const std::string &filename, Lgraph *lg) {
         const auto &module_name     = module_entry["name"].GetString();
         std::string module_name_str = std::string(module_name);
         if (top_name == module_name_str) {
-          // fmt::print("Found module {} present in Json, in LG.\n", module_name_str);
+          // std::cout << std::format("Found module {} present in Json, in LG.\n", module_name_str);
           const rapidjson::Value &nodes = module_entry["node_colors"];
           I(nodes.IsObject());
           for (rapidjson::Value::ConstMemberIterator itr = nodes.MemberBegin(); itr != nodes.MemberEnd(); itr++) {
@@ -100,14 +102,14 @@ void Inou_attr::read_json(const std::string &filename, Lgraph *lg) {
 
 void Inou_attr::color_lg(Lgraph *lg) {
   // auto lg_name = lg->get_name();
-  // fmt::print("{}",lg_name);
+  // std::cout << std::format("{}",lg_name);
 
   // since map is formed with nodes and color, set_color to this lg using this map.
   for (auto node : lg->fast(true)) {
     const auto &iname = node.default_instance_name();
     if (node2color.find(iname) != node2color.end()) {
       node.set_color(node2color[iname]);
-      fmt::print("Set color {} to instance {} at nid {}.\n", node2color[iname], iname, node.get_nid());
+      std::cout << std::format("Set color {} to instance {} at nid {}.\n", node2color[iname], iname, node.get_nid());
     }
   }
 }

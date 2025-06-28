@@ -1,5 +1,6 @@
 //  This file is distributed under the BSD 3-Clause License. See LICENSE for details.
 
+#include <format>
 #include <chrono>
 #include <iostream>
 
@@ -55,7 +56,7 @@ void lgraph_counts(Lgraph* lg) {
       edges++;
     }
   }
-  fmt::print("Lgraph, nodes: {}, edges: {}\n", nodes, edges);
+  std::cout << std::format("Lgraph, nodes: {}, edges: {}\n", nodes, edges);
 }
 
 int traverse_lgraph_nodes(Lgraph* lg) {
@@ -92,21 +93,21 @@ int traverse_lgraph_out(Lgraph* lg) {
 }
 
 int main(int argc, char** argv) {
-  fmt::print("benchmark the graph\n");
+  std::cout << "benchmark the graph\n";
 
   Lgraph* lg;
   if (argc == 1) {
     lg = create_some_random_lgraph();
   } else if (argc == 3) {
-    fmt::print("benchmark the graph lgdb:{} name:{}\n", argv[1], argv[2]);
+    std::cout << std::format("benchmark the graph lgdb:{} name:{}\n", argv[1], argv[2]);
     auto *lib = Lgraph::instance(argv[1]);
     lg = lib->open_lgraph(argv[2]);
     if (lg==nullptr) {
-      fmt::print("could not open lgraph {}\n", argv[2]);
+      std::cout << std::format("could not open lgraph {}\n", argv[2]);
       exit(-3);
     }
   } else {
-    fmt::print("usage:\n\t{} <lgdb> <lg_name>\n", argv[0]);
+    std::cout << std::format("usage:\n\t{} <lgdb> <lg_name>\n", argv[0]);
     exit(-2);
   }
 
@@ -115,7 +116,7 @@ int main(int argc, char** argv) {
   lgraph_counts(lg);
 
   // 3. benchmark same traverse the graph in all the graphs
-  fmt::print("Benchmark LiveHD graph\n");
+  std::cout << "Benchmark LiveHD graph\n";
   int  iterations = 10000;
   auto start      = std::chrono::high_resolution_clock::now();
   auto stop       = std::chrono::high_resolution_clock::now();
@@ -123,34 +124,34 @@ int main(int argc, char** argv) {
   int  x          = 0;
   int  micros     = 1000000;
 
-  fmt::print("--------------------------Nodes--------------------\n");
+  std::cout << "--------------------------Nodes--------------------\n";
   start = std::chrono::high_resolution_clock::now();
   for (int i = 0; i < iterations; i++) {
     x += traverse_lgraph_nodes(lg);
   }
   stop     = std::chrono::high_resolution_clock::now();
   duration = std::chrono::duration_cast<std::chrono::microseconds>(stop - start);
-  fmt::print("Traverse Lgraph {} times took {}s\n", iterations, duration.count() / micros);
+  std::cout << std::format("Traverse Lgraph {} times took {}s\n", iterations, duration.count() / micros);
 
-  fmt::print("--------------------------Nodes+in--------------------\n");
+  std::cout << "--------------------------Nodes+in--------------------\n";
   start = std::chrono::high_resolution_clock::now();
   for (int i = 0; i < iterations; i++) {
     x += traverse_lgraph_in(lg);
   }
   stop     = std::chrono::high_resolution_clock::now();
   duration = std::chrono::duration_cast<std::chrono::microseconds>(stop - start);
-  fmt::print("Traverse Lgraph {} times took {}s\n", iterations, duration.count() / micros);
+  std::cout << std::format("Traverse Lgraph {} times took {}s\n", iterations, duration.count() / micros);
 
-  fmt::print("--------------------------Nodes+out--------------------\n");
+  std::cout << "--------------------------Nodes+out--------------------\n";
   start = std::chrono::high_resolution_clock::now();
   for (int i = 0; i < iterations; i++) {
     x += traverse_lgraph_out(lg);
   }
   stop     = std::chrono::high_resolution_clock::now();
   duration = std::chrono::duration_cast<std::chrono::microseconds>(stop - start);
-  fmt::print("Traverse Lgraph {} times took {}s\n", iterations, duration.count() / micros);
+  std::cout << std::format("Traverse Lgraph {} times took {}s\n", iterations, duration.count() / micros);
 
-  fmt::print("x:{} opt/check\n", x);
+  std::cout << std::format("x:{} opt/check\n", x);
 
   return 0;
 }

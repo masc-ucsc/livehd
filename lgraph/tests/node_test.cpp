@@ -1,5 +1,7 @@
 //  This file is distributed under the BSD 3-Clause License. See LICENSE for details.
 
+#include <format>
+#include <iostream>
 #include <string>
 #include <vector>
 
@@ -112,7 +114,7 @@ TEST_F(Setup_graphs_test, iterate_sub_graph) {
     for (const auto &out_edge : node.out_edges()) {
       auto dpin = out_edge.driver;
       auto spin = out_edge.sink;
-      fmt::print("name:{} pid:{} -> name:{} pid:{}\n", dpin.debug_name(), dpin.get_pid(), spin.debug_name(), spin.get_pid());
+      std::cout << std::format("name:{} pid:{} -> name:{} pid:{}\n", dpin.debug_name(), dpin.get_pid(), spin.debug_name(), spin.get_pid());
     }
   }
 

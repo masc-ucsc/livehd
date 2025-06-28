@@ -8,7 +8,7 @@ protected:
     auto host = var.get("host");
     auto port = var.get("port");
 
-    Main_api::warn(fmt::format("Still not implemented host:{} port:{}", host, port));
+    Main_api::warn(std::format("Still not implemented host:{} port:{}", host, port));
   }
 
   Cloud_api() {}

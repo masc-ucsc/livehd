@@ -9,7 +9,7 @@
 #include <sys/types.h>
 
 #include "elab_scanner.hpp"
-#include "fmt/format.h"
+#include <format>
 #include "gtest/gtest.h"
 
 class Test_scanner : public Elab_scanner {

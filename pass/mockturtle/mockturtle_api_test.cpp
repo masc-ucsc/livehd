@@ -1,3 +1,4 @@
+#include <format>
 #include <iostream>
 #include <mockturtle/algorithms/cleanup.hpp>
 #include <mockturtle/algorithms/collapse_mapped.hpp>
@@ -28,7 +29,7 @@ int main() {
   lut.create_po(o1);
   lut.foreach_node([&](auto const& n) {
     auto func = lut.node_function(n);
-    fmt::print("n{} func = {}\n", lut.node_to_index(n), kitty::to_hex(func));
+    std::cout << std::format("n{} func = {}\n", lut.node_to_index(n), kitty::to_hex(func));
   });
   write_bench(lut, std::cout);
 }

@@ -141,17 +141,17 @@ public:
   static void info_int(std::string_view text);
 
   template <typename... Args>
-  static void error(fmt::format_string<Args...> format, Args &&...args) {
-    error_int(fmt::format(format, std::forward<Args>(args)...));
+  static void error(std::format_string<Args...> format, Args &&...args) {
+    error_int(std::format(format, std::forward<Args>(args)...));
   }
 
   template <typename... Args>
-  static void warn(fmt::format_string<Args...> format, Args &&...args) {
-    warn_int(fmt::format(format, std::forward<Args>(args)...));
+  static void warn(std::format_string<Args...> format, Args &&...args) {
+    warn_int(std::format(format, std::forward<Args>(args)...));
   }
 
   template <typename... Args>
-  static void info(fmt::format_string<Args...> format, Args &&...args) {
-    info_int(fmt::format(format, std::forward<Args>(args)...));
+  static void info(std::format_string<Args...> format, Args &&...args) {
+    info_int(std::format(format, std::forward<Args>(args)...));
   }
 };

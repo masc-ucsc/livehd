@@ -18,7 +18,7 @@ void Stitch_pass_options::set(const std::string &key, const std::string &value) 
       else if (value == "Structural")
         method = Live_method::Structural;
       else {
-        Pass::error(fmt::format("Unrecognized option for stitch operation in incremental flow", value));
+        Pass::error(std::format("Unrecognized option for stitch operation in incremental flow", value));
       }
     } else if (is_opt(key, "diff")) {
       diff_file = value;
@@ -26,6 +26,6 @@ void Stitch_pass_options::set(const std::string &key, const std::string &value) 
       set_val(key, value);
     }
   } catch (const std::invalid_argument &ia) {
-    Pass::error(fmt::format("ERROR: key {} has an invalid argument {}", key));
+    Pass::error(std::format("ERROR: key {} has an invalid argument {}", key));
   }
 }

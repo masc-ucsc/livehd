@@ -1,6 +1,8 @@
 //  This file is distributed under the BSD 3-Clause License. See LICENSE for details.
 #pragma once
 
+#include <format>
+#include <iostream>
 #include <memory>
 #include <stack>
 #include <vector>
@@ -61,7 +63,7 @@ public:
   void write_node() {
 #ifndef NDEBUG
     wr.write_nid(current_nid);
-    fmt::print("\n");
+    std::cout << "\n";
 #endif
   }
 

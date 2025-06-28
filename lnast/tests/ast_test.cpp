@@ -1,7 +1,7 @@
 
 #include "ast.hpp"
 
-#include "fmt/format.h"
+#include <format>
 #include "gmock/gmock.h"
 #include "gtest/gtest.h"
 #include "str_tools.hpp"

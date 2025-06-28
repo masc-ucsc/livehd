@@ -83,7 +83,7 @@ static int recursion = 0;
 void Label_synth::collapse_merge(int dst) {
   if (recursion > 100) {
     // dump();
-    fmt::print("d:{}\n", dst);
+    std::cout << std::format("d:{}\n", dst);
   }
 
   if (collapse_set_min > dst) {
@@ -159,19 +159,19 @@ void Label_synth::merge_ids() {
 }
 
 void Label_synth::dump(Lgraph *g) const {
-  fmt::print("---- Label Synth dump ----\n");
-  fmt::print("=== flat_merges ===\n");
+  std::cout << "---- Label Synth dump ----\n";
+  std::cout << "=== flat_merges ===\n";
   for (auto &it : flat_merges) {
-    fmt::print("{} -> {}\n", it.first, it.second);
+    std::cout << std::format("{} -> {}\n", it.first, it.second);
   }
 
-  fmt::print("=== flat_node2id ===\n");
+  std::cout << "=== flat_node2id ===\n";
   for (auto &it : flat_node2id) {
     Node node(g, it.first);
-    fmt::print(":{} node:{}\n", it.second, node.debug_name());
+    std::cout << std::format(":{} node:{}\n", it.second, node.debug_name());
   }
 
-  fmt::print("---- fin ----\n");
+  std::cout << "---- fin ----\n";
 }
 
 void Label_synth::label(Lgraph *g) {

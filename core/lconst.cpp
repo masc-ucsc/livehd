@@ -1,12 +1,13 @@
 
 #include "lconst.hpp"
 
+#include <iostream>
 #include <string_view>
 
 #include "absl/strings/str_cat.h"
 #include "absl/types/span.h"
 #include "boost/multiprecision/cpp_int.hpp"
-#include "fmt/format.h"
+#include <format>
 #include "iassert.hpp"
 #include "likely.hpp"
 #include "lrand.hpp"
@@ -157,7 +158,7 @@ Lconst Lconst::from_binary(std::string_view txt, bool unsigned_result) {
         bin.append(1, '1');
       }
     } else {
-      throw std::runtime_error(fmt::format("ERROR: {} binary encoding could not use {}\n", txt, ch2));
+      throw std::runtime_error(std::format("ERROR: {} binary encoding could not use {}\n", txt, ch2));
     }
   }
 
@@ -237,7 +238,7 @@ Lconst Lconst::from_pyrope(std::string_view orig_txt) {
         ++skip_chars;
         sel_ch = txt[skip_chars];
         if (sel_ch != 'b') {
-          throw std::runtime_error(fmt::format("ERROR: {} unknown pyrope encoding only binary can be signed 0sb...\n", orig_txt));
+          throw std::runtime_error(std::format("ERROR: {} unknown pyrope encoding only binary can be signed 0sb...\n", orig_txt));
         }
         I(!unsigned_result);
       } else {
@@ -260,7 +261,7 @@ Lconst Lconst::from_pyrope(std::string_view orig_txt) {
         shift_mode = 3;
         ++skip_chars;
       } else {
-        throw std::runtime_error(fmt::format("ERROR: {} unknown pyrope encoding (leading {})\n", orig_txt, sel_ch));
+        throw std::runtime_error(std::format("ERROR: {} unknown pyrope encoding (leading {})\n", orig_txt, sel_ch));
       }
     }
   } else {
@@ -280,7 +281,7 @@ Lconst Lconst::from_pyrope(std::string_view orig_txt) {
       num |= orig_txt[i];
 
       if (orig_txt[i] == '\'' && !prev_escaped && i != 0) {
-        throw std::runtime_error(fmt::format("ERROR: {} malformed pyrope string. ' must be escaped\n", orig_txt));
+        throw std::runtime_error(std::format("ERROR: {} malformed pyrope string. ' must be escaped\n", orig_txt));
       }
 
       if (orig_txt[i] == '\\') {
@@ -307,7 +308,7 @@ Lconst Lconst::from_pyrope(std::string_view orig_txt) {
           continue;
         }
 
-        throw std::runtime_error(fmt::format("ERROR: {} encoding could not use {}\n", orig_txt, txt[i]));
+        throw std::runtime_error(std::format("ERROR: {} encoding could not use {}\n", orig_txt, txt[i]));
       }
     }
   } else if (shift_mode == 1) {  // 0b binary
@@ -329,7 +330,7 @@ Lconst Lconst::from_pyrope(std::string_view orig_txt) {
 
       auto v = char_to_val[(uint8_t)txt[i]];
       if (unlikely(v < 0)) {
-        throw std::runtime_error(fmt::format("ERROR: {} encoding could not use {}\n", orig_txt, txt[i]));
+        throw std::runtime_error(std::format("ERROR: {} encoding could not use {}\n", orig_txt, txt[i]));
       }
       if (first_digit < 0) {
         first_digit = v;
@@ -338,7 +339,7 @@ Lconst Lconst::from_pyrope(std::string_view orig_txt) {
       auto char_sa = char_to_bits[(uint8_t)txt[i]];
       if (unlikely(char_sa > shift_mode)) {
         throw std::runtime_error(
-            fmt::format("ERROR: {} invalid syntax for number {} bits needed for '{}'", orig_txt, char_sa, txt[i]));
+            std::format("ERROR: {} invalid syntax for number {} bits needed for '{}'", orig_txt, char_sa, txt[i]));
       }
       num = (num << shift_mode) | v;
     }
@@ -349,7 +350,7 @@ Lconst Lconst::from_pyrope(std::string_view orig_txt) {
   if (negative) {
     num = -num;
     /* if (unsigned_result && num<0) { */
-    /*   throw std::runtime_error(fmt::format("ERROR: {} negative value but it must be unsigned\n", orig_txt)); */
+    /*   throw std::runtime_error(std::format("ERROR: {} negative value but it must be unsigned\n", orig_txt)); */
     /* } */
   }
 
@@ -407,9 +408,9 @@ Lconst Lconst::unknown_negative(Bits_t nbits) {
 
 void Lconst::dump() const {
   if (explicit_str) {
-    fmt::print("str:{} bits:{}\n", to_string(), bits);
+    std::cout << std::format("str:{} bits:{}\n", to_string(), bits);
   } else {
-    fmt::print("num:{} bits:{}\n", num.str(), bits);
+    std::cout << std::format("num:{} bits:{}\n", num.str(), bits);
   }
 }
 
@@ -724,7 +725,7 @@ Lconst Lconst::get_mask_op(const Lconst &mask) const {
 Lconst Lconst::set_mask_op(const Lconst &mask, const Lconst &value) const {
   if (unlikely(mask.is_string())) {
     throw std::runtime_error(
-        fmt::format("ERROR: no string in mask get_bits({},{},{})", to_pyrope(), mask.to_pyrope(), value.to_pyrope()));
+        std::format("ERROR: no string in mask get_bits({},{},{})", to_pyrope(), mask.to_pyrope(), value.to_pyrope()));
   }
 
   if (mask == Lconst(0)) {
@@ -908,7 +909,7 @@ Lconst Lconst::concat_op(const Lconst &o) const {
 
 Lconst Lconst::mult_op(const Lconst &o) const {
   if (is_string() || o.is_string()) {
-    throw std::runtime_error(fmt::format("ERROR: {}*{} not allowed because one is a string\n", to_pyrope(), o.to_pyrope()));
+    throw std::runtime_error(std::format("ERROR: {}*{} not allowed because one is a string\n", to_pyrope(), o.to_pyrope()));
 
     return Lconst::unknown(0);
   }
@@ -930,7 +931,7 @@ Lconst Lconst::mult_op(const Lconst &o) const {
 
 Lconst Lconst::div_op(const Lconst &o) const {
   if (is_string() || o.is_string()) {
-    throw std::runtime_error(fmt::format("ERROR: {}/{} not allowed because one is a string\n", to_pyrope(), o.to_pyrope()));
+    throw std::runtime_error(std::format("ERROR: {}/{} not allowed because one is a string\n", to_pyrope(), o.to_pyrope()));
 
     return Lconst::unknown(0);
   }
@@ -968,7 +969,7 @@ Lconst Lconst::div_op(const Lconst &o) const {
 
 Lconst Lconst::sub_op(const Lconst &o) const {
   if (is_string() || o.is_string()) {
-    throw std::runtime_error(fmt::format("ERROR: {}-{} not allowed because one is a string\n", to_pyrope(), o.to_pyrope()));
+    throw std::runtime_error(std::format("ERROR: {}-{} not allowed because one is a string\n", to_pyrope(), o.to_pyrope()));
 
     return Lconst::unknown(0);
   }
@@ -1225,7 +1226,7 @@ std::string Lconst::to_field() const {
   if (v < 0) {
     ss << -v;
 
-    fmt::print("warning: strange negative {} field\n", ss.str());
+    std::cout << std::format("warning: strange negative {} field\n", ss.str());
     return absl::StrCat("-", ss.str());
   }
   ss << v;

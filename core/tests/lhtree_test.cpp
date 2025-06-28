@@ -3,7 +3,7 @@
 #include <atomic>
 #include <iostream>
 
-#include "fmt/format.h"
+#include <format>
 #include "gtest/gtest.h"
 
 #include "lhtree2.hpp"

@@ -2,6 +2,8 @@
 
 #include "pass_randomize_dpins.hpp"
 
+#include <format>
+#include <iostream>
 #include <utility>
 
 #include "perf_tracing.hpp"
@@ -46,32 +48,32 @@ void Pass_randomize_dpins::randomize(Eprp_var& var) {
 }
 
 void Pass_randomize_dpins::annotate_lg(Lgraph* lg) {
-  fmt::print("------{}\n", lg->get_name());
+  std::cout << std::format("------{}\n", lg->get_name());
 
   for (const auto& node : lg->fast(true)) {
     for (auto& dpin : node.out_connected_pins()) {
 #ifdef FOR_DBG
-      fmt::print("Processing dpin:");
+      std::cout << "Processing dpin:";
       print_nodePinCF_details(dpin.get_compact_flat());
 #endif
       if (std::find(random_selected_pins_vec.begin(), random_selected_pins_vec.end(), dpin.get_compact_flat())
           != random_selected_pins_vec.end()) {
         if (!dpin.has_name()) {
 #ifdef FOR_DBG
-          fmt::print("Unnamed dpin in selected pins vec? \n");
+          std::cout << "Unnamed dpin in selected pins vec? \n";
 #endif
           error("random_selected_pins_vec shouldn't have any unnamed pin");
         }
         auto new_dpin_name = absl::StrCat(dpin.get_name(), "_changedForEval");
         dpin.set_name(new_dpin_name);
 #ifdef FOR_DBG
-        fmt::print("randomised: ");
+        std::cout << "randomised: ";
         print_nodePinCF_details(dpin.get_compact_flat());
 #endif
       }
 #ifdef FOR_DBG
       else {
-        fmt::print("Pin not in random_selected_pins_vec: ");
+        std::cout << "Pin not in random_selected_pins_vec: ";
         print_nodePinCF_details(dpin.get_compact_flat());
       }
 #endif
@@ -87,10 +89,10 @@ void Pass_randomize_dpins::annotate_lg(Lgraph* lg) {
 
 void Pass_randomize_dpins::collect_vectors_from_lg(Lgraph* lg, float noise_perc, bool comb_only) {
 #ifdef FOR_DBG
-  fmt::print("\nnoise perc is: {}\n", noise_perc);
-  fmt::print("\nLG name  is: {}\n", lg->get_name());
-  fmt::print("\n comb_only: {}\n", comb_only);
-  fmt::print("Printing io_pins_vec:\n");
+  std::cout << std::format("\nnoise perc is: {}\n", noise_perc);
+  std::cout << std::format("\nLG name  is: {}\n", lg->get_name());
+  std::cout << std::format("\n comb_only: {}\n", comb_only);
+  std::cout << "Printing io_pins_vec:\n";
   print_vec(io_pins_vec);
 #endif
 
@@ -108,7 +110,7 @@ void Pass_randomize_dpins::collect_vectors_from_lg(Lgraph* lg, float noise_perc,
   });
 
 #ifdef FOR_DBG
-  fmt::print("Printing io_pins_vec: size:{}\n", io_pins_vec.size());
+  std::cout << std::format("Printing io_pins_vec: size:{}\n", io_pins_vec.size());
   print_vec(io_pins_vec);
 #endif
 
@@ -150,12 +152,12 @@ void Pass_randomize_dpins::collect_vectors_from_lg(Lgraph* lg, float noise_perc,
   }
 
 #ifdef FOR_DBG
-  fmt::print("total_nodes in fast pass: {}\n", node_count);
-  fmt::print("Printing comb_pins_vec: size:{}", comb_pins_vec.size());
+  std::cout << std::format("total_nodes in fast pass: {}\n", node_count);
+  std::cout << std::format("Printing comb_pins_vec: size:{}", comb_pins_vec.size());
   print_vec(comb_pins_vec);
-  fmt::print("Printing flop_pins_vec: size:{}", flop_pins_vec.size());
+  std::cout << std::format("Printing flop_pins_vec: size:{}", flop_pins_vec.size());
   print_vec(flop_pins_vec);
-  fmt::print("Printing combNflop_pins_vec: size:{}", combNflop_pins_vec.size());
+  std::cout << std::format("Printing combNflop_pins_vec: size:{}", combNflop_pins_vec.size());
   print_vec(combNflop_pins_vec);
 #endif
 
@@ -171,39 +173,39 @@ void Pass_randomize_dpins::collect_vectors_from_lg(Lgraph* lg, float noise_perc,
     random_selected_pins_vec = chooseMRandomElements(combNflop_pins_vec, num_of_dpins_to_change);
   }
 #ifdef FOR_DBG
-  fmt::print("total_dpins: {}, perc_change with {}: {}, num_of_dpins_to_change : {}\n",
+  std::cout << std::format("total_dpins: {}, perc_change with {}: {}, num_of_dpins_to_change : {}\n",
              total_dpins,
              comb_only ? "comb_only" : "comb+flops",
              perc_change,
              num_of_dpins_to_change);
-  fmt::print("Printing random_selected_pins_vec: size:{}\n", random_selected_pins_vec.size());
+  std::cout << std::format("Printing random_selected_pins_vec: size:{}\n", random_selected_pins_vec.size());
   print_vec(random_selected_pins_vec);
 #endif
 }
 
 void Pass_randomize_dpins::print_vec(std::vector<Node_pin::Compact_flat>& vec_to_print) const {
-  fmt::print("\n-SOV -v-v-v-v-v-v-v-v-v-v-v-v-\n");
+  std::cout << "\n-SOV -v-v-v-v-v-v-v-v-v-v-v-v-\n";
   for (auto np_cf : vec_to_print) {
     auto np = Node_pin("lgdb", np_cf);
     if (np.is_graph_io()) {
-      fmt::print("-IO node-\t");
+      std::cout << "-IO node-\t";
     }
-    fmt::print("nid:{} ({}) ", np.get_node().get_nid(), np.get_node().debug_name());
-    fmt::print(",pin:{}({}) are:: type:{}, lg:{}\n",
+    std::cout << std::format("nid:{} ({}) ", np.get_node().get_nid(), np.get_node().debug_name());
+    std::cout << std::format(",pin:{}({}) are:: type:{}, lg:{}\n",
                "p" + std::to_string(np.get_pid()),
                np.has_name() ? np.get_name() : ("p" + std::to_string(np.get_pid())),
                np.get_node().get_type_name(),
                (np.get_node().get_class_lgraph())->get_name());
   }
-  fmt::print("\n-EOV -v-v-v-v-v-v-v-v-v-v-v-v-\n");
+  std::cout << "\n-EOV -v-v-v-v-v-v-v-v-v-v-v-v-\n";
 }
 void Pass_randomize_dpins::print_nodePinCF_details(const Node_pin::Compact_flat& np_cf) const {
   auto np = Node_pin("lgdb", np_cf);
   if (np.is_graph_io()) {
-    fmt::print("-IO node-\t");
+    std::cout << "-IO node-\t";
   }
-  fmt::print("nid:{} ({}) ", np.get_node().get_nid(), np.get_node().debug_name());
-  fmt::print(",pin:{}({}) are:: type:{}, lg:{}\n",
+  std::cout << std::format("nid:{} ({}) ", np.get_node().get_nid(), np.get_node().debug_name());
+  std::cout << std::format(",pin:{}({}) are:: type:{}, lg:{}\n",
              "p" + std::to_string(np.get_pid()),
              np.has_name() ? np.get_name() : "N.A",
              np.get_node().get_type_name(),

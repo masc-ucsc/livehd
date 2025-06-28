@@ -2,6 +2,7 @@
 
 #pragma once
 
+#include <format>
 #include <functional>
 
 #include "pass.hpp"
@@ -13,11 +14,11 @@ public:
   static void warn(const std::string &msg) { Pass::eprp.parser_warn(msg); }
 
   template <typename... Args>
-  static void error(fmt::format_string<Args...> fmt, Args &&...args) {
+  static void error(std::format_string<Args...> fmt, Args &&...args) {
     throw Eprp::parser_error(Pass::eprp, fmt, std::forward<Args>(args)...);
   }
   template <typename... Args>
-  static void warn(fmt::format_string<Args...> fmt, Args &&...args) {
+  static void warn(std::format_string<Args...> fmt, Args &&...args) {
     Pass::eprp.parser_warn(fmt, std::forward<Args>(args)...);
   }
 

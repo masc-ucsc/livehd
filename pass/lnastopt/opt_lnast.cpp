@@ -97,7 +97,7 @@ void Opt_lnast::process_plus(const std::shared_ptr<Lnast> &ln, const Lnast_nid &
   bool first_child = true;
   for (auto child : ln->children(lnid)) {
     const auto &data = ln->get_data(child);
-    // fmt::print("plus:{} n_children:{}\n", data.type.debug_name(), n_children);
+    // std::cout << std::format("plus:{} n_children:{}\n", data.type.debug_name(), n_children);
 
     if (first_child) {
       first_child = false;
@@ -809,11 +809,11 @@ void Opt_lnast::process_tuple_set(const std::shared_ptr<Lnast> &ln, const Lnast_
         }
         if (var_bundle->is_ordered(var_field)) {  // CASE 3: foo[$runtime] OK (foo is ordered/array)
           ln->dump(lnid);
-          fmt::print("FIXME: handle non-const (array)\n");  // could become const with hier
+          std::cout << "FIXME: handle non-const (array)\n";  // could become const with hier
         } else {
           // CASE 4: foo[(1,'bar')] -- Not allowed in tuple_set/get (for the moment)
           ln->dump(lnid);
-          fmt::print("FIXME: handle non-array (it will be error unless hier solves it)\n");
+          std::cout << "FIXME: handle non-array (it will be error unless hier solves it)\n";
           return;
         }
       }
@@ -1039,7 +1039,7 @@ yy = (1,a=3)
 void Opt_lnast::process_todo(const std::shared_ptr<Lnast> &ln, const Lnast_nid &lnid) {
   auto &data = ln->get_data(lnid);
 
-  fmt::print("not handling lnast type:{} (TODO)\n", data.type.debug_name());
+  std::cout << std::format("not handling lnast type:{} (TODO)\n", data.type.debug_name());
 }
 
 void Opt_lnast::process_stmts(const std::shared_ptr<Lnast> &ln, const Lnast_nid &lnid) {
@@ -1105,7 +1105,7 @@ void Opt_lnast::reconstruct_stmts(const std::shared_ptr<Lnast> &ln, const Lnast_
       case Lnast_ntype::Lnast_ntype_int::Lnast_ntype_bit_not: {
         if (rhs_const.is_invalid()) {
           // Could not find a constant value, keep the same original node
-          fmt::print("FIXME: copy similar structure\n");
+          std::cout << "FIXME: copy similar structure\n";
         } else {
           ln2.create_assign_stmts(lhs_txt, rhs_const.to_pyrope());
         }

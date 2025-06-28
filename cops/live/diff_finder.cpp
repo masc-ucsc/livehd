@@ -4,6 +4,9 @@
 
 #include <stdlib.h>
 
+#include <format>
+#include <iostream>
+#include <format>
 #include <fstream>
 
 #include "absl/strings/substitute.h"
@@ -124,7 +127,7 @@ void Diff_finder::find_fwd_boundaries(Graph_Node &start_boundary, std::set<Graph
 
   fwd_visited.insert(start_boundary);
 
-  fmt::print("fwd bound {} {} {} {} {}\n",
+  std::cout << std::format("fwd bound {} {} {} {} {}\n",
              start_boundary.module->get_name(),
              start_boundary.idx,
              start_boundary.pid,
@@ -242,9 +245,9 @@ bool Diff_finder::compare_cone(const Graph_Node &start_boundary, const Graph_Nod
   Port_ID pid     = start_boundary.pid;
 
   if (current->get_wid(idx)) {
-    fmt::print("{} {} {} {} {} \n", start_boundary.module->get_name(), idx, pid, instance, current->get_node_wirename(idx));
+    std::cout << std::format("{} {} {} {} {} \n", start_boundary.module->get_name(), idx, pid, instance, current->get_node_wirename(idx));
   } else {
-    fmt::print("{} {} {} {} nowirename \n", start_boundary.module->get_name(), idx, pid, instance);
+    std::cout << std::format("{} {} {} {} nowirename \n", start_boundary.module->get_name(), idx, pid, instance);
   }
 
   Lgraph *current_original = original_boundary.module;
@@ -436,7 +439,7 @@ void Diff_finder::add_ios_up(Lgraph *module, const Node_pin &io_pin, Name2graph_
                                       hier_sep,
                                       module->get_node_wirename(io_pin.get_idx()));
         if (nparent->has_graph_input(wire_name)) {
-          fmt::print("input {} already exists in parent module {}\n", wire_name, nparent->get_name());
+          std::cout << std::format("input {} already exists in parent module {}\n", wire_name, nparent->get_name());
           return;
         }
         auto dpin = nparent->add_graph_input(wire_name, module->get_bits(io_pin), module->get_offset(io_pin));
@@ -453,7 +456,7 @@ void Diff_finder::add_ios_up(Lgraph *module, const Node_pin &io_pin, Name2graph_
                                       hier_sep,
                                       module->get_node_wirename(io_pin.get_idx()));
         if (nparent->has_graph_output(wire_name)) {
-          fmt::print("output {} already exists in parent module {}\n", wire_name, nparent->get_name());
+          std::cout << std::format("output {} already exists in parent module {}\n", wire_name, nparent->get_name());
           return;
         }
         auto spin = nparent->add_graph_output(wire_name, module->get_bits(io_pin), module->get_offset(io_pin));
@@ -484,7 +487,7 @@ void Diff_finder::generate_modules(std::set<Graph_Node> &different_nodes, const 
     if (name2graph.find(original->get_name()) == name2graph.end()) {
       auto name   = original->get_name();
       auto source = original->get_library().get_source(name);
-      fmt::print("creating graph for {}\n", name);
+      std::cout << std::format("creating graph for {}\n", name);
 
       I(name.substr(0, 6) != "Lgraph");
 
@@ -723,7 +726,7 @@ void Diff_finder::generate_modules(std::set<Graph_Node> &different_nodes, const 
         continue;
       }
       if (old2newidx[node.module].find(node.module->get_node(out.get_inp_pin()).get_nid()) == old2newidx[node.module].end()) {
-        fmt::print("module {}, from cell {}, to_cell {}, from_pin {}, to pin {}\n",
+        std::cout << std::format("module {}, from cell {}, to_cell {}, from_pin {}, to pin {}\n",
                    node.module->get_name(),
                    node.module->get_node(out.get_out_pin()).get_nid(),
                    node.module->get_node(out.get_inp_pin()).get_nid(),
@@ -767,7 +770,7 @@ void Diff_finder::generate_modules(std::set<Graph_Node> &different_nodes, const 
 
   // sync all graphs to disk
   for (auto &name_graph : name2graph) {
-    fmt::print("sync'ing graph {}\n", name_graph.first);
+    std::cout << std::format("sync'ing graph {}\n", name_graph.first);
     name_graph.second->sync();
   }
 }
@@ -781,14 +784,14 @@ void Diff_finder::generate_delta(const std::string &modified_lgdb, const std::st
   for(int id = 0; id < modified_library->Lgraph_count(); id++) {
     I(modified_library->get_graph(id));
     discovered_modules.insert(modified_library->get_graph(id));
-    fmt::print("discovered module {} \n", modified_library->get_graph(id)->get_name());
+    std::cout << std::format("discovered module {} \n", modified_library->get_graph(id)->get_name());
   }
 #else
   modified_library->each_type([&discovered_modules, modified_lgdb](Lg_type_id id, std::string_view name) {
     Lgraph *lg = Lgraph_open(modified_lgdb, name);
     I(lg);
     discovered_modules.insert(lg);
-    fmt::print("discovered module {} \n", name);
+    std::cout << std::format("discovered module {} \n", name);
   });
 #endif
 
@@ -796,7 +799,7 @@ void Diff_finder::generate_delta(const std::string &modified_lgdb, const std::st
     Lgraph *current = *(discovered_modules.begin());
     discovered_modules.erase(current);
 
-    fmt::print("current module {} \n", current->get_name());
+    std::cout << std::format("current module {} \n", current->get_name());
 
     for (auto &instance : boundaries->instance_collection[Invariant_boundaries::get_graphID(current)]) {
       for (auto &ridx : current->fast()) {
@@ -834,7 +837,7 @@ void Diff_finder::generate_delta(const std::string &modified_lgdb, const std::st
               if (diff) {
 #ifdef DEBUG
                 for (auto foo : cones[bound]) {
-                  fmt::print("    diff mod {} {}:{}\n", foo.module->get_name(), foo.idx, foo.pid);
+                  std::cout << std::format("    diff mod {} {}:{}\n", foo.module->get_name(), foo.idx, foo.pid);
                 }
 #endif
                 all_diff.insert(cones[bound].begin(), cones[bound].end());
@@ -873,7 +876,7 @@ void Diff_finder::generate_delta(const std::string &modified_lgdb, const std::st
 
 #ifdef DEBUG
   for (auto foo : all_diff) {
-    fmt::print("alldiff mod {}\n", foo.module->get_name());
+    std::cout << std::format("alldiff mod {}\n", foo.module->get_name());
   }
 #endif
   generate_modules(all_diff, out_lgdb);

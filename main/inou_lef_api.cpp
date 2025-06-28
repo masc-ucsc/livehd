@@ -15,7 +15,7 @@ void Inou_lef_api::tolg(Eprp_var &var) {
   std::vector<Lgraph *> lgs = inou.tolg();
 
   if (lgs.empty()) {
-    Main_api::warn(fmt::format("inou.lef.tolg could not create a {} lgraph in {} path", var.get("name"), var.get("path")));
+    Main_api::warn(std::format("inou.lef.tolg could not create a {} lgraph in {} path", var.get("name"), var.get("path")));
   } else {
     assert(lgs.size() == 1);  // lef  only generated one graph at a time
     var.add(lgs[0]);

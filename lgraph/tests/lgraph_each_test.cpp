@@ -1,5 +1,7 @@
 //  This file is distributed under the BSD 3-Clause License. See LICENSE for details.
 
+#include <format>
+#include <iostream>
 #include <string>
 #include <vector>
 
@@ -127,7 +129,7 @@ protected:
 
     static bool randomize = false;
 
-    fmt::print("lgraph_each random instance name {}\n", randomize ? "set" : "not set");
+    std::cout << std::format("lgraph_each random instance name {}\n", randomize ? "set" : "not set");
 
     add_child(top, c1, "ti1", randomize);
     add_child(top, c2, "ti2a", randomize);
@@ -185,7 +187,7 @@ TEST_F(Setup_graphs_test, each_local_sub) {
   absl::flat_hash_map<std::string, int> children2;
 
   for (auto &parent : lgs) {
-    fmt::print("checking parent:{}\n", parent->get_name());
+    std::cout << std::format("checking parent:{}\n", parent->get_name());
     parent->each_local_sub_fast([parent, &children2, this](Node &node, Lg_type_id lgid) {
       (void)lgid;
       Lgraph *child = parent->ref_library()->open_lgraph(node.get_type_sub());
@@ -198,7 +200,7 @@ TEST_F(Setup_graphs_test, each_local_sub) {
       if (node.has_name())
         iname = node.get_name();
 
-      fmt::print("parent:{} child:{} iname:{}\n", parent->get_name(), child->get_name(), iname);
+      std::cout << std::format("parent:{} child:{} iname:{}\n", parent->get_name(), child->get_name(), iname);
 
       EXPECT_TRUE(children.find(absl::StrCat(parent->get_name(), ":", child->get_name())) != children.end());
 
@@ -232,7 +234,7 @@ TEST_F(Setup_graphs_test, each_local_sub_twice) {
   absl::flat_hash_map<std::string, int> children2;
 
   for (auto &parent : lgs) {
-    fmt::print("checking parent:{}\n", parent->get_name());
+    std::cout << std::format("checking parent:{}\n", parent->get_name());
     parent->each_local_sub_fast([parent, &children2, this](Node &node, Lg_type_id lgid) {
       (void)lgid;
       Lgraph *child = parent->ref_library()->open_lgraph(node.get_type_sub());
@@ -248,7 +250,7 @@ TEST_F(Setup_graphs_test, each_local_sub_twice) {
       std::string iname("NONAME");
       if (node.has_name())
         iname = node.get_name();
-      fmt::print("parent:{} child:{} iname:{} id:{}\n", parent->get_name(), child->get_name(), iname, id);
+      std::cout << std::format("parent:{} child:{} iname:{} id:{}\n", parent->get_name(), child->get_name(), iname, id);
 
       if (children2.find(id) == children2.end())
         children2[id] = 1;
@@ -277,8 +279,8 @@ TEST_F(Setup_graphs_test, each_local_sub_twice) {
 
 TEST_F(Setup_graphs_test, hierarchy) {
   for (auto &parent : lgs) {
-    fmt::print("hierarchy for name:{} lgid:{}\n", parent->get_name(), parent->get_lgid());
-    parent->each_local_sub_fast([](Node &node, Lg_type_id lgid) { fmt::print("  {} {}\n", node.get_name(), lgid); });
+    std::cout << std::format("hierarchy for name:{} lgid:{}\n", parent->get_name(), parent->get_lgid());
+    parent->each_local_sub_fast([](Node &node, Lg_type_id lgid) { std::cout << std::format("  {} {}\n", node.get_name(), lgid); });
   }
 
   EXPECT_TRUE(true);
@@ -315,7 +317,7 @@ TEST_F(Setup_graphs_test, each_unique_hier_sub_parallel) {
 
   //to_pos[top->get_lgid()] = 0;
   top->each_hier_unique_sub_bottom_up([&to_pos, &all_lgs](Lgraph *lg) -> bool {
-    // fmt::print("adding name:{} lgid:{}\n", lg->get_name(), lg->get_lgid());
+    // std::cout << std::format("adding name:{} lgid:{}\n", lg->get_name(), lg->get_lgid());
 
     EXPECT_TRUE(to_pos.find(lg->get_lgid()) == to_pos.end());
 
@@ -331,7 +333,7 @@ TEST_F(Setup_graphs_test, each_unique_hier_sub_parallel) {
   // top->get_htree().dump();
 
   top->each_hier_unique_sub_bottom_up([&to_pos, &all_visited](Lgraph *lg) -> bool {
-    // fmt::print("1a.checking name:{} lgid:{}\n", lg->get_name(), lg->get_lgid());
+    // std::cout << std::format("1a.checking name:{} lgid:{}\n", lg->get_name(), lg->get_lgid());
     bool sure_leaf = lg->get_down_class_map().empty();
 
     I(to_pos.find(lg->get_lgid()) != to_pos.end());
@@ -342,7 +344,7 @@ TEST_F(Setup_graphs_test, each_unique_hier_sub_parallel) {
     EXPECT_EQ(all_visited[pos], 1);  // no double insertions
 
     lg->each_local_unique_sub_fast([&all_visited, &to_pos, &sure_leaf](Lgraph *sub_lg) -> bool {
-      // fmt::print("1b.checking name:{} lgid:{}\n", sub_lg->get_name(), sub_lg->get_lgid());
+      // std::cout << std::format("1b.checking name:{} lgid:{}\n", sub_lg->get_name(), sub_lg->get_lgid());
 
       EXPECT_FALSE(sure_leaf);  // A leaf should not have sub nodes
       I(to_pos.find(sub_lg->get_lgid()) != to_pos.end());
@@ -359,7 +361,7 @@ TEST_F(Setup_graphs_test, each_unique_hier_sub_parallel) {
   all_visited.clear();
   all_visited.resize(all_lgs.size());
   top->each_hier_unique_sub_bottom_up_parallel2([&to_pos, &all_visited](Lgraph *lg) -> bool {
-    // fmt::print("2a.checking name:{} lgid:{}\n", lg->get_name(), lg->get_lgid());
+    // std::cout << std::format("2a.checking name:{} lgid:{}\n", lg->get_name(), lg->get_lgid());
     bool sure_leaf = lg->get_down_class_map().empty();
 
     I(to_pos.find(lg->get_lgid()) != to_pos.end());
@@ -370,7 +372,7 @@ TEST_F(Setup_graphs_test, each_unique_hier_sub_parallel) {
     EXPECT_EQ(all_visited[pos], 1);  // no double insertions
 
     lg->each_local_unique_sub_fast([&all_visited, &to_pos, &sure_leaf](Lgraph *sub_lg) -> bool {
-      // fmt::print("2b.checking name:{} lgid:{}\n", sub_lg->get_name(), sub_lg->get_lgid());
+      // std::cout << std::format("2b.checking name:{} lgid:{}\n", sub_lg->get_name(), sub_lg->get_lgid());
 
       EXPECT_FALSE(sure_leaf);  // A leaf should not have sub nodes
       I(to_pos.find(sub_lg->get_lgid()) != to_pos.end());
@@ -378,7 +380,7 @@ TEST_F(Setup_graphs_test, each_unique_hier_sub_parallel) {
 
       if (sub_lg->is_empty()) {
         if (all_visited[pos] != 0) {
-          fmt::print("OOPS: checking name:{} lgid:{}\n", sub_lg->get_name(), sub_lg->get_lgid());
+          std::cout << std::format("OOPS: checking name:{} lgid:{}\n", sub_lg->get_name(), sub_lg->get_lgid());
           sub_lg->dump();
         }
 

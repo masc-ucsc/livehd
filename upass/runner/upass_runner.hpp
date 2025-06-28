@@ -1,6 +1,8 @@
 //  This file is distributed under the BSD 3-Clause License. See LICENSE for details.
 #pragma once
 
+#include <format>
+#include <iostream>
 #include <memory>
 
 #include "lnast.hpp"
@@ -14,10 +16,10 @@ public:
     auto upass_registry = upass::uPass_plugin::get_registry();
     for (const auto& name : upass_names) {
       if (upass_registry.count(name)) {
-        fmt::print("uPass - add {}\n", name);
+        std::cout << std::format("uPass - add {}\n", name);
         upasses.push_back(upass_registry[name](_lm));
       } else {
-        fmt::print("{} is not defined.\n", name);
+        std::cout << std::format("{} is not defined.\n", name);
       }
     }
   }

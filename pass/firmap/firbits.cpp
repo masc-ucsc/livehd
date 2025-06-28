@@ -1,5 +1,7 @@
 //  This file is distributed under the BSD 3-Clause License. See LICENSE for details.
 
+#include <format>
+#include <iostream>
 #include <algorithm>
 #include <cmath>
 #include <vector>
@@ -12,13 +14,13 @@
 
 void Firmap::dump() const {
   for (const auto &maps_it : fbmaps) {
-    fmt::print("processing lgraph:{}\n", maps_it.first->get_name());
+    std::cout << std::format("processing lgraph:{}\n", maps_it.first->get_name());
 
-    fmt::print("  fbmap:\n");
+    std::cout << "  fbmap:\n";
     for (const auto &it : maps_it.second) {
       Node_pin dpin(maps_it.first, it.first);
 
-      fmt::print("    pin:{} ", dpin.debug_name());
+      std::cout << std::format("    pin:{} ", dpin.debug_name());
       it.second.dump();
     }
   }
@@ -50,7 +52,7 @@ void Firmap::do_firbits_analysis(Lgraph *lg) {  // multi-threade
     }
 
 #ifndef NDEBUG
-    fmt::print("\nFIRBITS Iteration:{}\n", firbits_iters);
+    std::cout << std::format("\nFIRBITS Iteration:{}\n", firbits_iters);
 #endif
 
     firbits_wait_flop = false;
@@ -125,8 +127,8 @@ void Firmap::analysis_lg_flop(Node &node, FBMap &fbmap) {
     return;
   } else {
 #ifndef NDEBUG
-    fmt::print("    {} input driver {} not ready\n", node.debug_name(), d_dpin.debug_name());
-    fmt::print("    {} flop q_pin {} not ready\n", node.debug_name(), qpin.debug_name());
+    std::cout << std::format("    {} input driver {} not ready\n", node.debug_name(), d_dpin.debug_name());
+    std::cout << std::format("    {} flop q_pin {} not ready\n", node.debug_name(), qpin.debug_name());
 #endif
     firbits_issues = true;
     return;
@@ -185,9 +187,9 @@ void Firmap::analysis_lg_mux(Node &node, FBMap &fbmap) {
 
   if (no_one_ready) {
     node.dump();
-    fmt::print("          driver 1\n");
+    std::cout << "          driver 1\n";
     node.get_sink_pin_raw(1).get_driver_node().dump();
-    fmt::print("          driver 2\n");
+    std::cout << "          driver 2\n";
     node.get_sink_pin_raw(2).get_driver_node().dump();
 
     // should wait till at least one of the inputs is ready
@@ -287,7 +289,7 @@ void Firmap::analysis_lg_attr_set_dp_assign(Node &node_dp, FBMap &fbmap) {
     fb_lhs = it->second;
   } else {
 #ifndef NDEBUG
-    fmt::print("    {} input driver {} not ready\n", node_dp.debug_name(), dpin_lhs.debug_name());
+    std::cout << std::format("    {} input driver {} not ready\n", node_dp.debug_name(), dpin_lhs.debug_name());
 #endif
     firbits_issues = true;
     return;
@@ -299,7 +301,7 @@ void Firmap::analysis_lg_attr_set_dp_assign(Node &node_dp, FBMap &fbmap) {
     fb_rhs = it2->second;
   } else {
 #ifndef NDEBUG
-    fmt::print("    {} input driver {} not ready\n", node_dp.debug_name(), dpin_rhs.debug_name());
+    std::cout << std::format("    {} input driver {} not ready\n", node_dp.debug_name(), dpin_rhs.debug_name());
 #endif
     firbits_issues = true;
     return;
@@ -424,10 +426,10 @@ FBMap::iterator Firmap::get_fbits_from_hierarchy(XEdge &e) {
   if (it == hier_fbmap.end()) {
 #ifndef NDEBUG
     // hier_lg->dump();
-    fmt::print("----------------------\n");
-    fmt::print("DEBUG driver node dump\n");
+    std::cout << "----------------------\n";
+    std::cout << "DEBUG driver node dump\n";
     e.driver.get_node().dump();
-    fmt::print("DEBUG sink node dump\n");
+    std::cout << "DEBUG sink node dump\n";
     e.sink.get_node().dump();
     Pass::error("{} input driver {} not ready\n", e.sink.get_node().debug_name(), e.driver.debug_name());
 #endif

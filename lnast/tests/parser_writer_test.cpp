@@ -3,20 +3,20 @@
 #include "lnast_parser.hpp"
 #include "lnast_writer.hpp"
 
+#include <iostream>
 #include <filesystem>
 #include <fstream>
 #include <sstream>
 
 #include "gtest/gtest.h"
-#include "fmt/format.h"
-#include "fmt/printf.h"
+#include <format>
 
 class Lnast_parser_writer_test : public ::testing::Test {
 };
 
 TEST_F(Lnast_parser_writer_test, parse_then_write_eq) {
   for (const auto & entry : std::filesystem::directory_iterator("./lnast/tests/ln")) {
-    fmt::print("\nTest - {}\n", std::string{entry.path()});
+    std::cout << std::format("\nTest - {}\n", std::string{entry.path()});
 
     // Parser test
     std::ifstream fs;
@@ -24,7 +24,7 @@ TEST_F(Lnast_parser_writer_test, parse_then_write_eq) {
     Lnast_parser parser(fs);
     auto lnast = parser.parse_all();
 
-    fmt::print("\nlnast->dump():\n\n");
+    std::cout << "\nlnast->dump():\n\n";
     lnast->dump();
 
     // Writer test
@@ -50,7 +50,7 @@ TEST_F(Lnast_parser_writer_test, parse_then_write_eq) {
       }
     }
 
-    fmt::print("\n");
+    std::cout << "\n";
   }
 }
 

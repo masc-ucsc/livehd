@@ -68,7 +68,7 @@ void Inou_json::tolg(Eprp_var &var) {
     if (str_tools::ends_with(name, ".json")) {
       name = name.substr(0, name.size() - 5);  // remove .json
     } else {
-      error(fmt::format("inou.json.tolg unknown file extension {}, expected .json", name));
+      error(std::format("inou.json.tolg unknown file extension {}, expected .json", name));
       continue;
     }
 

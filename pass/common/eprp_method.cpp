@@ -2,7 +2,7 @@
 #include "eprp_method.hpp"
 
 #include "elab_scanner.hpp"
-#include "fmt/format.h"
+#include <format>
 
 Eprp_method::Eprp_method(std::string_view _name, std::string_view _help, const std::function<void(Eprp_var &var)> &_method)
     : name(_name), help(_help), method(_method){};
@@ -29,7 +29,7 @@ std::pair<bool, std::string> Eprp_method::check_labels(const Eprp_var &var) cons
     }
 
     if (!var.has_label(l.first)) {
-      std::string err_msg(fmt::format("method {} requires label {}:, but it is missing", name, l.first));
+      std::string err_msg(std::format("method {} requires label {}:, but it is missing", name, l.first));
       return std::make_pair(true, err_msg);
     }
   }
