@@ -1,7 +1,7 @@
 # livehd specific bazel options
 build --output_filter='^//(core|pass|inou)'
 #build --output_filter="^//"
-build --cxxopt="-std=c++20" --cxxopt="-fexceptions" --force_pic --build_tag_filters="-fixme"
+build --cxxopt="-std=c++23" --cxxopt="-fexceptions" --force_pic --build_tag_filters="-fixme"
 # test --cache_test_results=no
 
 # Use Clang
@@ -50,7 +50,7 @@ build:asan --copt -fno-omit-frame-pointer
 build:asan --cxxopt -fsanitize=address
 build:asan --cxxopt -DADDRESS_SANITIZER
 #build:asan --cxxopt -O1
-build:asan --cxxopt -std=c++20
+build:asan --cxxopt -std=c++23
 build:asan --cxxopt -g
 build:asan --cxxopt -fno-omit-frame-pointer
 build:asan --linkopt -fsanitize=address
@@ -70,7 +70,7 @@ build:tsan --cxxopt -DTHREAD_SANITIZER
 build:tsan --cxxopt -DDYNAMIC_ANNOTATIONS_ENABLED=1
 build:tsan --cxxopt -DDYNAMIC_ANNOTATIONS_EXTERNAL_IMPL=1
 build:tsan --cxxopt -g
-build:tsan --cxxopt -std=c++20
+build:tsan --cxxopt -std=c++23
 # build:tsan --copt -O1
 build:tsan --cxxopt -fno-omit-frame-pointer
 build:tsan --linkopt -fsanitize=thread
