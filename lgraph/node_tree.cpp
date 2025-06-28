@@ -2,8 +2,8 @@
 #include "node_tree.hpp"
 
 #include <format>
-#include <iostream>
 #include <functional>
+#include <iostream>
 
 #include "lgedgeiter.hpp"
 #include "lgraph.hpp"
@@ -36,12 +36,12 @@ Node_tree::Node_tree(Lgraph* root_arg)
       last_sib = tree_cidx;
 
       if (debug_verbose) {
-        std::cout << std::format("node {}: hidx:{}, tl:{}, tp:{}\n", cn.debug_name(), hidx, (int)tree_cidx.level, (int)tree_cidx.pos);
+        std::print("node {}: hidx:{}, tl:{}, tp:{}\n", cn.debug_name(), hidx, (int)tree_cidx.level, (int)tree_cidx.pos);
       }
 
       if (fn.is_type_sub_present()) {
         if (debug_verbose) {
-          std::cout << std::format("evaluating subnode {}\n", cn.debug_name());
+          std::print("evaluating subnode {}\n", cn.debug_name());
         }
 
         auto sub_hidx = ht->get_first_child(hidx);
@@ -51,13 +51,13 @@ Node_tree::Node_tree(Lgraph* root_arg)
           Lgraph* sub_lg = Lgraph_open(root->get_path(), cn.get_type_sub());
 
           if (debug_verbose) {
-            std::cout << std::format("testing l:{}, p:{} ({})\n", (int)sub_hidx.level, (int)sub_hidx.pos, sub_lg->get_name());
+            std::print("testing l:{}, p:{} ({})\n", (int)sub_hidx.level, (int)sub_hidx.pos, sub_lg->get_name());
           }
 
           if (ht->ref_lgraph(sub_hidx) == sub_lg && !hidx_used.contains(sub_hidx)) {
             found = true;
             if (debug_verbose) {
-              std::cout << std::format("found l:{}, p:{} ({}), recursing.\n", (int)sub_hidx.level, (int)sub_hidx.pos, sub_lg->get_name());
+              std::print("found l:{}, p:{} ({}), recursing.\n", (int)sub_hidx.level, (int)sub_hidx.pos, sub_lg->get_name());
             }
 
             hidx_used.emplace(sub_hidx);
@@ -77,7 +77,7 @@ Node_tree::Node_tree(Lgraph* root_arg)
     }
 
     if (debug_verbose) {
-      std::cout << std::format("done.\n");
+      std::print("done.\n");
     }
   };
 
@@ -101,6 +101,6 @@ void Node_tree::dump() const {
       }
     }
 
-    std::cout << std::format("{} name: {} loc: ({}, {}) livehd loc: ({})\n", indent, name, index.level, index.pos, id.get_hidx());
+    std::print("{} name: {} loc: ({}, {}) livehd loc: ({})\n", indent, name, index.level, index.pos, id.get_hidx());
   }
 }

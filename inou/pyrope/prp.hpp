@@ -38,25 +38,25 @@
 #define SCAN_IS_TOKENS(...) SCAN_IS_TOKENS_MACRO_CHOOSER(__VA_ARGS__)(__VA_ARGS__)
 
 #ifdef DEBUG_LN
-#define PRINT_DBG_LN(...) std::cout << std::format(__VA_ARGS__)
+#define PRINT_DBG_LN(...) std::print(__VA_ARGS__)
 #else
 #define PRINT_DBG_LN(...)
 #endif
 
 #ifdef DEBUG_AST
-#define PRINT_DBG_AST(...) std::cout << std::format(__VA_ARGS__)
+#define PRINT_DBG_AST(...) std::print(__VA_ARGS__)
 #else
 #define PRINT_DBG_AST(...)
 #endif
 
 #ifdef OUTPUT_AST
-#define PRINT_AST(...) std::cout << std::format(__VA_ARGS__)
+#define PRINT_AST(...) std::print(__VA_ARGS__)
 #else
 #define PRINT_AST(...)
 #endif
 
 #ifdef OUTPUT_LN
-#define PRINT_LN(...) std::cout << std::format(__VA_ARGS__)
+#define PRINT_LN(...) std::print(__VA_ARGS__)
 #else
 #define PRINT_LN(...)
 #endif
@@ -83,7 +83,7 @@
 
 #ifdef DEBUG_AST
 #define RULE_FAILED(...)                                                        \
-  std::cout << std::format(__VA_ARGS__);                                                      \
+  std::print(__VA_ARGS__);                                                      \
   rule_call_stack.pop_back();                                                   \
   print_rule_call_stack();                                                      \
   if (loc_list.size() > 0) {                                                    \
@@ -107,13 +107,13 @@
 
 #ifdef DEBUG_AST
 #define RULE_SUCCESS(message, rule)                                                                                     \
-  std::cout << std::format(message);                                                                                                  \
+  std::print(message);                                                                                                  \
   rule_call_stack.pop_back();                                                                                           \
   print_rule_call_stack();                                                                                              \
   debug_stat.rules_matched++;                                                                                           \
-  std::cout << std::format("Rule {} had a sub_cnt of {}.\n", rule_id_to_string(rule), sub_cnt);                                       \
+  std::print("Rule {} had a sub_cnt of {}.\n", rule_id_to_string(rule), sub_cnt);                                       \
   if (sub_cnt > 1) {                                                                                                    \
-    std::cout << std::format("Had a subtree of at least size two in rule {} it was of size {}.\n", rule_id_to_string(rule), sub_cnt); \
+    std::print("Had a subtree of at least size two in rule {} it was of size {}.\n", rule_id_to_string(rule), sub_cnt); \
     loc_list.push_front(std::make_tuple(0, 0));                                                                         \
     loc_list.push_back(std::make_tuple(rule, 0));                                                                       \
   }                                                                                                                     \

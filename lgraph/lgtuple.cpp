@@ -2,9 +2,9 @@
 
 #include "lgtuple.hpp"
 
+#include <algorithm>
 #include <format>
 #include <iostream>
-#include <algorithm>
 
 #include "absl/container/btree_map.h"
 #include "absl/container/flat_hash_map.h"
@@ -800,7 +800,7 @@ void Lgtuple::add(std::string_view key, const Node_pin &dpin) {
       I(!is_attribute(lower));
       if (has_dpin(lower)) {
         dump();
-        std::cout << std::format("OOPPPS (tuple is corrupted). Time to debug!!! {} {}\n", e.first, lower);
+        std::print("OOPPPS (tuple is corrupted). Time to debug!!! {} {}\n", e.first, lower);
         exit(-3);
         return;
       }
@@ -1416,7 +1416,7 @@ std::vector<Node::Compact> Lgtuple::make_mux(Node &mux_node, Node_pin &sel_dpin,
               continue;  // Do not create attr for flop config (handled in cprop directly)
             }
 
-            // std::cout << std::format("adding attr:{}\n", attr_it.first);
+            // std::print("adding attr:{}\n", attr_it.first);
             // attr_it.second.get_node().dump();
 
             auto attr_node = mux_node.create(Ntype_op::AttrSet);
@@ -1794,9 +1794,9 @@ bool Lgtuple::has_just_attributes() const {
 
 void Lgtuple::dump() const {
 #ifndef NDEBUG
-  std::cout << std::format("tuple_name:{} {}\n", name, correct ? "" : " ISSUES");
+  std::print("tuple_name:{} {}\n", name, correct ? "" : " ISSUES");
   for (const auto &it : key_map) {
-    std::cout << std::format("  key:{} dpin:{}\n", it.first, it.second.debug_name());
+    std::print("  key:{} dpin:{}\n", it.first, it.second.debug_name());
   }
 #endif
 }

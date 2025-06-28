@@ -7,7 +7,6 @@
 
 #include "absl/container/node_hash_map.h"
 #include "absl/strings/str_cat.h"
-
 #include "elab_scanner.hpp"
 #include "lhtree.hpp"
 #include "lnast_ntype.hpp"
@@ -19,25 +18,23 @@ using Selc_lrhs_table               = absl::flat_hash_map<Lnast_nid, std::pair<b
 using Tuple_var_1st_scope_ssa_table = absl::flat_hash_map<std::string, Lnast_nid>;                 // rtable = resolve_table
 
 // tricky old C macro to avoid redundant code from function overloadings
-#define CREATE_LNAST_NODE(type)                                                                                       \
-  static Lnast_node create_##type() { return Lnast_node(Lnast_ntype::create_##type(), State_token(0, 0, 0, 0, "")); } \
-  static Lnast_node create_##type(std::string_view str) {                                                             \
-    return Lnast_node(Lnast_ntype::create_##type(), State_token(0, 0, 0, 0, str));                                    \
-  }                                                                                                                   \
-  static Lnast_node create_##type(std::string_view str, uint32_t line_num) {                                          \
-    return Lnast_node(Lnast_ntype::create_##type(), State_token(0, 0, 0, line_num, str));                             \
-  }                                                                                                                   \
-  static Lnast_node create_##type(std::string_view str, uint32_t line_num, uint64_t pos1, uint64_t pos2) {            \
-    return Lnast_node(Lnast_ntype::create_##type(), State_token(0, pos1, pos2, line_num, str));                       \
-  }                                                                                                                   \
-  static Lnast_node create_##type(const State_token &new_token) { \
-    return Lnast_node(Lnast_ntype::create_##type(), new_token);  \
-  } \
-  static Lnast_node create_##type(std::string_view str, uint32_t line_num, uint64_t pos1, uint64_t pos2, std::string fname) { \
-    return Lnast_node(Lnast_ntype::create_##type(), State_token(0, pos1, pos2, line_num, str, fname));            \
-  }                           \
-  static Lnast_node create_##type(std::string_view str, uint64_t pos1, uint64_t pos2, std::string fname) { \
-    return Lnast_node(Lnast_ntype::create_##type(), State_token(0, pos1, pos2, 0, str, fname));            \
+#define CREATE_LNAST_NODE(type)                                                                                                 \
+  static Lnast_node create_##type() { return Lnast_node(Lnast_ntype::create_##type(), State_token(0, 0, 0, 0, "")); }           \
+  static Lnast_node create_##type(std::string_view str) {                                                                       \
+    return Lnast_node(Lnast_ntype::create_##type(), State_token(0, 0, 0, 0, str));                                              \
+  }                                                                                                                             \
+  static Lnast_node create_##type(std::string_view str, uint32_t line_num) {                                                    \
+    return Lnast_node(Lnast_ntype::create_##type(), State_token(0, 0, 0, line_num, str));                                       \
+  }                                                                                                                             \
+  static Lnast_node create_##type(std::string_view str, uint32_t line_num, uint64_t pos1, uint64_t pos2) {                      \
+    return Lnast_node(Lnast_ntype::create_##type(), State_token(0, pos1, pos2, line_num, str));                                 \
+  }                                                                                                                             \
+  static Lnast_node create_##type(const State_token &new_token) { return Lnast_node(Lnast_ntype::create_##type(), new_token); } \
+  static Lnast_node create_##type(std::string_view str, uint32_t line_num, uint64_t pos1, uint64_t pos2, std::string fname) {   \
+    return Lnast_node(Lnast_ntype::create_##type(), State_token(0, pos1, pos2, line_num, str, fname));                          \
+  }                                                                                                                             \
+  static Lnast_node create_##type(std::string_view str, uint64_t pos1, uint64_t pos2, std::string fname) {                      \
+    return Lnast_node(Lnast_ntype::create_##type(), State_token(0, pos1, pos2, 0, str, fname));                                 \
   }
 
 #define CREATE_LNAST_NODE_sv(type)                                                                           \
@@ -49,7 +46,7 @@ using Tuple_var_1st_scope_ssa_table = absl::flat_hash_map<std::string, Lnast_nid
   }                                                                                                          \
   static Lnast_node create_##type(std::string_view sview, uint32_t line_num, uint64_t pos1, uint64_t pos2) { \
     return Lnast_node(Lnast_ntype::create_##type(), State_token(0, pos1, pos2, line_num, sview));            \
-  } 
+  }
 
 struct Lnast_node {
   Lnast_ntype type;
@@ -77,10 +74,10 @@ struct Lnast_node {
 
 class Lnast : public lh::tree<Lnast_node> {
 private:
-  std::string top_module_name;
-  std::string source_filename;
-  Lnast_nid   undefined_var_nid;
-  uint32_t    tmp_var_cnt = 0;
+  std::string       top_module_name;
+  std::string       source_filename;
+  Lnast_nid         undefined_var_nid;
+  uint32_t          tmp_var_cnt      = 0;
   static inline int trace_module_cnt = 0;
 
   void      do_ssa_trans(const Lnast_nid &top_nid);
@@ -159,9 +156,7 @@ public:
   explicit Lnast(std::string_view _module_name, std::string_view _file_name)
       : top_module_name(_module_name), source_filename(_file_name) {}
 
-  void ssa_trans() { 
-    do_ssa_trans(lh::Tree_index::root()); 
-  };
+  void ssa_trans() { do_ssa_trans(lh::Tree_index::root()); };
 
   std::string_view get_top_module_name() const { return top_module_name; }
   std::string_view get_source() const { return source_filename; }
@@ -179,9 +174,10 @@ public:
   int16_t            get_subs(const Lnast_nid &nid) const { return get_data(nid).subs; }
   const State_token &get_token(const Lnast_nid &nid) const { return get_data(nid).token; }
   std::string        get_sname(const Lnast_nid &nid) const {  // sname = ssa name
-    auto s= get_subs(nid);
-    if (get_type(nid).is_const() || s==0)
+    auto s = get_subs(nid);
+    if (get_type(nid).is_const() || s == 0) {
       return std::string(get_name(nid));
+    }
     return absl::StrCat(get_name(nid), "|", s);
   }
 
@@ -196,23 +192,20 @@ public:
   template <typename... Args>
   static void info(std::format_string<Args...> format, Args &&...args) {
     auto txt = std::format(format, std::forward<Args>(args)...);
-    std::cout << std::format("info:{}\n", txt);
+    std::print("info:{}\n", txt);
   }
-  static void info(std::string_view txt) {
-    std::cout << std::format("info:{}\n", txt);
-  }
+  static void info(std::string_view txt) { std::print("info:{}\n", txt); }
 
   class error : public std::runtime_error {
   public:
     template <typename... Args>
     error(std::format_string<Args...> format, Args &&...args)
-    : std::runtime_error(std::format(format, std::forward<Args>(args)...)) {
-      std::cout << std::format("error:lnast {}\n", what());
+        : std::runtime_error(std::format(format, std::forward<Args>(args)...)) {
+      std::print("error:lnast {}\n", what());
       throw std::runtime_error(std::string(what()));
     }
-    error(std::string_view txt)
-    : std::runtime_error(std::string(txt)) {
-      std::cout << std::format("error:lnast {}\n", what());
+    error(std::string_view txt) : std::runtime_error(std::string(txt)) {
+      std::print("error:lnast {}\n", what());
       throw std::runtime_error(std::string(what()));
     }
   };

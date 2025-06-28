@@ -1,9 +1,8 @@
 //  This file is distributed under the BSD 3-Clause License. See LICENSE for details.
 #pragma once
 
-#include <format>
-
 #include <deque>
+#include <format>
 #include <iostream>
 #include <stack>
 
@@ -29,7 +28,6 @@ protected:
   void read_all_tokens() {
     do {
       token_array.push_back(lexer->lex_token());
-      // std::cout << std::format("{}\n", token_array.back().get_string());
     } while (token_array.back().get_kind() != Lnast_token::eof);
   }
 

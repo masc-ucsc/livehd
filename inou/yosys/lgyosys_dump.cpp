@@ -26,7 +26,7 @@ RTLIL::Wire *Lgyosys_dump::get_wire(const Node_pin &pin) {
     return cell_it->second;
   }
 
-  std::cout << std::format("trying to get wire for non existing driver pin {}\n", pin.debug_name());
+  std::print("trying to get wire for non existing driver pin {}\n", pin.debug_name());
   assert(pin.is_driver());
   assert(false);
 
@@ -37,7 +37,7 @@ RTLIL::Wire *Lgyosys_dump::add_wire(RTLIL::Module *mod, const Node_pin &pin) {
   assert(pin.is_driver());
   if (pin.has_name()) {
     auto name = absl::StrCat("\\", pin.get_name());
-    // std::cout << std::format("pin{} has name:{}\n", pin.debug_name(), name);
+    // std::print("pin{} has name:{}\n", pin.debug_name(), name);
     return mod->addWire(mod->uniquify(name), pin.get_bits());
   } else {
     return mod->addWire(next_id(pin.get_class_lgraph()), pin.get_bits());
@@ -139,7 +139,7 @@ void Lgyosys_dump::create_blackbox(const Sub_node &sub, RTLIL::Design *bdesign) 
     if (io_pin.is_invalid()) {
       continue;
     }
-    // std::cout << std::format("bbox:{} name:{}\n", sub.get_name(), io_pin.name);
+    // std::print("bbox:{} name:{}\n", sub.get_name(), io_pin.name);
     auto         name = absl::StrCat("\\", io_pin.name);
     RTLIL::Wire *wire = mod->addWire(mod->uniquify(name));  // , pin.get_bits());
     wire->port_id     = port_id++;
@@ -315,16 +315,16 @@ void Lgyosys_dump::create_subgraph(Lgraph *g, RTLIL::Module *mod, Node &node) {
 
   RTLIL::Cell *new_cell = mod->addCell(absl::StrCat("\\", node.get_or_create_name()), absl::StrCat("\\", sub.get_name()));
 
-  std::cout << std::format("inou_yosys instance_name:{}, subgraph->get_name():{}\n", node.get_name(), sub.get_name());
+  std::print("inou_yosys instance_name:{}, subgraph->get_name():{}\n", node.get_name(), sub.get_name());
   for (const auto &e : node.inp_edges_ordered()) {
     auto port_name = e.sink.get_type_sub_pin_name();
-    std::cout << std::format("input:{} pin:{}\n", port_name, e.driver.debug_name());
+    std::print("input:{} pin:{}\n", port_name, e.driver.debug_name());
     RTLIL::Wire *input = get_wire(e.driver);
     new_cell->setPort(absl::StrCat("\\", port_name), input);
   }
   for (const auto &dpin : node.out_connected_pins()) {
     auto port_name = dpin.get_type_sub_pin_name();
-    std::cout << std::format("output:{} pin:{}\n", port_name, dpin.debug_name());
+    std::print("output:{} pin:{}\n", port_name, dpin.debug_name());
     RTLIL::Wire *output = get_wire(dpin);
     new_cell->setPort(absl::StrCat("\\", port_name), output);
   }
@@ -395,7 +395,7 @@ void Lgyosys_dump::create_wires(Lgraph *g, RTLIL::Module *mod) {
       if (lc.get_bits() < 31 && lc.is_i()) {  // 32bit in yosys const
         mod->connect(new_wire, RTLIL::SigSpec(RTLIL::Const(lc.to_i(), new_wire->width)));
       } else {
-        // std::cout << std::format("add:{} prp:{}\n",lc.to_binary(), lc.to_pyrope());
+        // std::print("add:{} prp:{}\n",lc.to_binary(), lc.to_pyrope());
         mod->connect(new_wire, RTLIL::SigSpec(RTLIL::Const::from_string(lc.to_binary())));
       }
 

@@ -2,12 +2,12 @@
 
 #include "graph_core.hpp"
 
-#include <iostream>
 #include <algorithm>
+#include <format>
+#include <iostream>
 #include <iterator>
 #include <string>
 
-#include <format>
 #include "iassert.hpp"
 #include "likely.hpp"
 
@@ -242,7 +242,7 @@ void Graph_core::Master_entry::dump(uint32_t self_id) const {
   const auto [n_i, n_o] = get_num_local_edges();
 
   if (node_vertex) {
-    std::cout << std::format("node:{} bits:{} n_inputs:{} n_outputs:{} next:{} over:{}\n",
+    std::print("node:{} bits:{} n_inputs:{} n_outputs:{} next:{} over:{}\n",
                self_id,
                bits,
                n_i,
@@ -250,7 +250,7 @@ void Graph_core::Master_entry::dump(uint32_t self_id) const {
                next_pin_ptr,
                get_overflow_id());
   } else {
-    std::cout << std::format("pin:{} pid:{} bits:{} n_inputs:{} n_outputs:{} next:{} over:{} node:{}\n",
+    std::print("pin:{} pid:{} bits:{} n_inputs:{} n_outputs:{} next:{} over:{} node:{}\n",
                self_id,
                get_pid(),
                bits,
@@ -264,17 +264,17 @@ void Graph_core::Master_entry::dump(uint32_t self_id) const {
   std::cout << "  edges:";
   for (auto i = 0u; i < Num_sedges; ++i) {
     if (sedge[i]) {
-      std::cout << std::format(" {}", self_id + sedge[i]);
+      std::print(" {}", self_id + sedge[i]);
     }
   }
   if (node_vertex && sedge2_or_pid) {
-    std::cout << std::format(" {}", self_id + sedge2_or_pid);
+    std::print(" {}", self_id + sedge2_or_pid);
   }
   if (node_vertex && ledge0_or_prev) {
-    std::cout << std::format(" {}", ledge0_or_prev);
+    std::print(" {}", ledge0_or_prev);
   }
   if (!overflow_link && ledge1_or_overflow) {
-    std::cout << std::format(" {}", ledge1_or_overflow);
+    std::print(" {}", ledge1_or_overflow);
   }
   std::cout << "\n";
 }
@@ -380,16 +380,16 @@ bool Graph_core::Overflow_entry::add_ledge(uint32_t id) {
 }
 
 void Graph_core::Overflow_entry::dump(uint32_t self_id) const {
-  std::cout << std::format("  over:{} n_ledges:{} n_sedges:{}\n", self_id, n_ledges, n_sedges);
+  std::print("  over:{} n_ledges:{} n_sedges:{}\n", self_id, n_ledges, n_sedges);
 
   std::cout << "    sedges:";
   for (auto i = 0u; i < n_sedges; ++i) {
-    std::cout << std::format(" {:>8}", self_id + sedges[i]);
+    std::print(" {:>8}", self_id + sedges[i]);
   }
   std::cout << "\n";
   std::cout << "    ledges:";
   for (auto i = 0u; i < n_ledges; ++i) {
-    std::cout << std::format(" {:>8}", ledges[i]);
+    std::print(" {:>8}", ledges[i]);
   }
   std::cout << "\n";
 }

@@ -56,7 +56,7 @@ void lgraph_counts(Lgraph* lg) {
       edges++;
     }
   }
-  std::cout << std::format("Lgraph, nodes: {}, edges: {}\n", nodes, edges);
+  std::print("Lgraph, nodes: {}, edges: {}\n", nodes, edges);
 }
 
 int traverse_lgraph_nodes(Lgraph* lg) {
@@ -99,15 +99,15 @@ int main(int argc, char** argv) {
   if (argc == 1) {
     lg = create_some_random_lgraph();
   } else if (argc == 3) {
-    std::cout << std::format("benchmark the graph lgdb:{} name:{}\n", argv[1], argv[2]);
+    std::print("benchmark the graph lgdb:{} name:{}\n", argv[1], argv[2]);
     auto *lib = Lgraph::instance(argv[1]);
     lg = lib->open_lgraph(argv[2]);
     if (lg==nullptr) {
-      std::cout << std::format("could not open lgraph {}\n", argv[2]);
+      std::print("could not open lgraph {}\n", argv[2]);
       exit(-3);
     }
   } else {
-    std::cout << std::format("usage:\n\t{} <lgdb> <lg_name>\n", argv[0]);
+    std::print("usage:\n\t{} <lgdb> <lg_name>\n", argv[0]);
     exit(-2);
   }
 
@@ -131,7 +131,7 @@ int main(int argc, char** argv) {
   }
   stop     = std::chrono::high_resolution_clock::now();
   duration = std::chrono::duration_cast<std::chrono::microseconds>(stop - start);
-  std::cout << std::format("Traverse Lgraph {} times took {}s\n", iterations, duration.count() / micros);
+  std::print("Traverse Lgraph {} times took {}s\n", iterations, duration.count() / micros);
 
   std::cout << "--------------------------Nodes+in--------------------\n";
   start = std::chrono::high_resolution_clock::now();
@@ -140,7 +140,7 @@ int main(int argc, char** argv) {
   }
   stop     = std::chrono::high_resolution_clock::now();
   duration = std::chrono::duration_cast<std::chrono::microseconds>(stop - start);
-  std::cout << std::format("Traverse Lgraph {} times took {}s\n", iterations, duration.count() / micros);
+  std::print("Traverse Lgraph {} times took {}s\n", iterations, duration.count() / micros);
 
   std::cout << "--------------------------Nodes+out--------------------\n";
   start = std::chrono::high_resolution_clock::now();
@@ -149,9 +149,9 @@ int main(int argc, char** argv) {
   }
   stop     = std::chrono::high_resolution_clock::now();
   duration = std::chrono::duration_cast<std::chrono::microseconds>(stop - start);
-  std::cout << std::format("Traverse Lgraph {} times took {}s\n", iterations, duration.count() / micros);
+  std::print("Traverse Lgraph {} times took {}s\n", iterations, duration.count() / micros);
 
-  std::cout << std::format("x:{} opt/check\n", x);
+  std::print("x:{} opt/check\n", x);
 
   return 0;
 }

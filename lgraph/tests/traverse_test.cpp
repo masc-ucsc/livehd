@@ -45,7 +45,7 @@ protected:
 
     std::vector<std::string> fwd_order;
     for (size_t i = 0; i < full_fwd_order.size(); ++i) {
-      // std::cout << std::format("full_fwd_order: {}\n",full_fwd_order[i]);
+      // std::print("full_fwd_order: {}\n",full_fwd_order[i]);
       if (full_fwd_order[i].rfind("name:leaf") != std::string::npos)
         fwd_order.emplace_back(full_fwd_order[i]);
     }
@@ -64,12 +64,12 @@ protected:
       EXPECT_EQ(fwd_pos,absl_fwd_pos[node.get_compact()]);
       EXPECT_EQ(bwd_pos,absl_bwd_pos[node.get_compact()]);
 
-      std::cout << std::format("pos:{} fwd_pos:{}\n",pos, fwd_pos);
+      std::print("pos:{} fwd_pos:{}\n",pos, fwd_pos);
 #else
 #endif
       std::string txt
           = std::format("name:{} lg:{} debug:{}", node.get_name(), node.get_class_lgraph()->get_name(), node.debug_name());
-      // std::cout << std::format("iterator_order: {}\n",txt);
+      // std::print("iterator_order: {}\n",txt);
       iterator_order.push_back(txt);
 
       // EXPECT_EQ(fwd_pos,pos);
@@ -80,7 +80,7 @@ protected:
     EXPECT_EQ(iterator_order.size(), fwd_order.size());
 
     for (size_t i = 0; i < fwd_order.size(); ++i) {
-      // std::cout << std::format("iter:{}  vs expected:{}\n",iterator_order[i], fwd_order[i]);
+      // std::print("iter:{}  vs expected:{}\n",iterator_order[i], fwd_order[i]);
       EXPECT_EQ(iterator_order[i], fwd_order[i]);
     }
   }

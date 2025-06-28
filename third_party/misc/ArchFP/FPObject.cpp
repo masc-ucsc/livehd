@@ -81,7 +81,7 @@ unsigned int FPObject::findNode(Node_tree& tree, lh::Tree_index tidx, double cX,
         continue;
       }
 
-      // std::cout << std::format("assigning child subnode {} to parent hier ({}, {})\n", child->debug_name(), child->get_hidx().level,
+      // std::print("assigning child subnode {} to parent hier ({}, {})\n", child->debug_name(), child->get_hidx().level,
       // child->get_hidx().pos);
 
       // write placement information to subnode as well
@@ -114,7 +114,7 @@ unsigned int FPObject::outputLgraphLayout(Node_tree& tree, lh::Tree_index tidx, 
   while (child_idx != tree.invalid_index()) {
     Node* child = tree.ref_data(child_idx);
 
-    // std::cout << std::format("testing child node {} with parent hier ({}, {})\n", child->debug_name(), child->get_hidx().level,
+    // std::print("testing child node {} with parent hier ({}, {})\n", child->debug_name(), child->get_hidx().level,
     // child->get_hidx().pos);
     if (child->get_type_op() != getType() || child->has_place()) {
       child_idx = tree.get_sibling_next(child_idx);
@@ -123,7 +123,7 @@ unsigned int FPObject::outputLgraphLayout(Node_tree& tree, lh::Tree_index tidx, 
 
     found = true;
     if (verbose) {
-      std::cout << std::format("assigning child node {} to parent hier ({})\n",
+      std::print("assigning child node {} to parent hier ({})\n",
                  child->debug_name(),
                  child->get_hidx());
     }

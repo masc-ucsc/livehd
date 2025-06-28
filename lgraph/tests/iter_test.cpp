@@ -13,9 +13,9 @@
 
 bool failed = false;
 
-//#define VERBOSE
-//#define VERBOSE2
-//#define VERBOSE3
+// #define VERBOSE
+// #define VERBOSE2
+// #define VERBOSE3
 
 absl::flat_hash_map<Node::Compact, int> test_order;
 int                                     test_order_sequence;
@@ -26,15 +26,17 @@ void                                    setup_test_order() {
 
 void check_test_order(Lgraph *top) {
   for (auto node : top->fast(true)) {
-    if (node.is_type_sub_present())
+    if (node.is_type_sub_present()) {
       continue;
+    }
 
-    if (node.is_type_loop_last())
+    if (node.is_type_loop_last()) {
       continue;
+    }
 
     auto it_node = test_order.find(node.get_compact());
     if (it_node == test_order.end()) {
-      std::cout << std::format("ERROR: missing node:{}\n", node.debug_name());
+      std::print("ERROR: missing node:{}\n", node.debug_name());
       I(false);
     }
 
@@ -42,16 +44,18 @@ void check_test_order(Lgraph *top) {
     Node_pin max_input_pin;
     for (auto edge : node.inp_edges()) {
       auto it = test_order.find(edge.driver.get_node().get_compact());
-      if (it == test_order.end())
+      if (it == test_order.end()) {
         continue;
-      if (it->second < max_input)
+      }
+      if (it->second < max_input) {
         continue;
+      }
 
       max_input     = it->second;
       max_input_pin = edge.driver;
     }
     if (max_input > it_node->second) {
-      std::cout << std::format("ERROR: wrong order node:{} l:{} p:{} is earlier than pin:{} of node:{} l:{} p:{}\n",
+      std::print("ERROR: wrong order node:{} l:{} p:{} is earlier than pin:{} of node:{} l:{} p:{}\n",
                  node.debug_name(),
                  node.get_hidx().level,
                  node.get_hidx().pos,
@@ -75,7 +79,7 @@ void do_fwd_traversal(Lgraph *lg, const std::string &name) {
     setup_test_order();
     for (auto node : lg->fast(true)) {
       I(!node.is_graph_io());
-      // std::cout << std::format("fast visiting {} l:{} p:{}\n", node.debug_name(),node.get_hidx().level,node.get_hidx().pos);
+      // std::print("fast visiting {} l:{} p:{}\n", node.debug_name(),node.get_hidx().level,node.get_hidx().pos);
       // node.dump();
       I(test_order.find(node.get_compact()) == test_order.end());
       test_order[node.get_compact()] = test_order_sequence++;
@@ -87,7 +91,7 @@ void do_fwd_traversal(Lgraph *lg, const std::string &name) {
     setup_test_order();
     for (auto node : lg->forward(true)) {
       I(!node.is_graph_io());
-      // std::cout << std::format("fwd  visiting {} l:{} p:{}\n", node.debug_name(),node.get_hidx().level,node.get_hidx().pos);
+      // std::print("fwd  visiting {} l:{} p:{}\n", node.debug_name(),node.get_hidx().level,node.get_hidx().pos);
       I(test_order.find(node.get_compact()) == test_order.end());
       test_order[node.get_compact()] = test_order_sequence++;
     }
@@ -145,10 +149,12 @@ void generate_graphs(int n) {
       if (rand_r(&rseed) & 1) {
         auto d2 = rand_r(&rseed) % 3;
         auto s2 = rand_r(&rseed) % 6;
-        if (d1 != d2)
+        if (d1 != d2) {
           dpins.push_back(node.setup_driver_pin_raw(d2).get_compact());
-        if (s1 != s2)
+        }
+        if (s1 != s2) {
           spins.push_back(node.setup_sink_pin_raw(s2).get_compact());
+        }
       }
     }
 
@@ -166,10 +172,12 @@ void generate_graphs(int n) {
 
           Node_pin dpin(g, src);
           Node_pin spin(g, dst);
-          if (dpin.is_graph_output())
+          if (dpin.is_graph_output()) {
             continue;
-          if (spin.is_graph_input())
+          }
+          if (spin.is_graph_input()) {
             continue;
+          }
 
           bool allow_comb_looop = false;
           if (allow_comb_looop) {
@@ -177,27 +185,32 @@ void generate_graphs(int n) {
           }
 
           if (i & 1) {
-            if (spin.get_node().get_compact().get_nid() > dpin.get_node().get_compact().get_nid())
+            if (spin.get_node().get_compact().get_nid() > dpin.get_node().get_compact().get_nid()) {
               break;
+            }
           } else {
-            if (spin.get_node().get_compact().get_nid() < dpin.get_node().get_compact().get_nid())
+            if (spin.get_node().get_compact().get_nid() < dpin.get_node().get_compact().get_nid()) {
               break;
+            }
           }
         } while (true);
 
         counter++;
       } while (edges.find(std::make_pair(src, dst)) != edges.end() && counter < (SIZE_BASE * 10));
 
-      if (counter >= (SIZE_BASE * 10))
+      if (counter >= (SIZE_BASE * 10)) {
         break;
+      }
 
-      if (edges.find(std::make_pair(src, dst)) != edges.end())
+      if (edges.find(std::make_pair(src, dst)) != edges.end()) {
         break;
+      }
 
       Node_pin dpin(g, src);
       Node_pin spin(g, dst);
-      if (dpin.get_node() == spin.get_node())
+      if (dpin.get_node() == spin.get_node()) {
         continue;  // No self-loops
+      }
 
       edges.insert(std::make_pair(src, dst));
       I(!spin.is_connected(dpin));  // no edge
@@ -213,12 +226,13 @@ bool fwd(int n) {
   for (int i = 0; i < n; i++) {
     std::string gname = "test_" + std::to_string(i);
     Lgraph     *g     = lib->open_lgraph(gname);
-    if (g == nullptr)
+    if (g == nullptr) {
       return false;
+    }
 
     setup_test_order();
 
-    std::cout << std::format("FWD {}\n", gname);
+    std::print("FWD {}\n", gname);
     do_fwd_traversal(g, "fwd" + std::to_string(i + 1));
 
     check_test_order(g);
@@ -233,14 +247,15 @@ bool bwd(int n) {
   for (int i = 0; i < n; i++) {
     std::string gname = "test_" + std::to_string(i);
     Lgraph     *g     = lib->open_lgraph(gname);
-    if (g == nullptr)
+    if (g == nullptr) {
       return false;
+    }
 
     // g->dump();
     // std::cout << "----------------------\n";
     absl::flat_hash_set<Node::Compact> visited;
     for (auto node : g->backward()) {
-      // std::cout << std::format(" bwd {}\n", node.debug_name());
+      // std::print(" bwd {}\n", node.debug_name());
 
       visited.insert(node.get_compact());
 
@@ -249,7 +264,7 @@ bool bwd(int n) {
         for (auto &out : node.out_edges()) {
           if (!out.sink.get_node().is_type_loop_last() && out.sink.get_node().get_type_op() != Ntype_op::IO) {
             if (visited.find(out.sink.get_node().get_compact()) == visited.end()) {
-              std::cout << std::format("bwd failed for lgraph node:{} bwd:{}\n", node.debug_name(), out.sink.get_node().debug_name());
+              std::print("bwd failed for lgraph node:{} bwd:{}\n", node.debug_name(), out.sink.get_node().debug_name());
               I(false);
               return false;
             }
@@ -259,7 +274,7 @@ bool bwd(int n) {
     }
     visited.clear();
     for (auto node : g->backward(true)) {
-      // std::cout << std::format(" bwd {}\n", node.debug_name());
+      // std::print(" bwd {}\n", node.debug_name());
 
       visited.insert(node.get_compact());
 
@@ -268,7 +283,7 @@ bool bwd(int n) {
         for (auto &out : node.out_edges()) {
           if (!out.sink.get_node().is_type_loop_last() && out.sink.get_node().get_type_op() != Ntype_op::IO) {
             if (visited.find(out.sink.get_node().get_compact()) == visited.end()) {
-              std::cout << std::format("bwd failed for lgraph node:{} bwd:{}\n", node.debug_name(), out.sink.get_node().debug_name());
+              std::print("bwd failed for lgraph node:{} bwd:{}\n", node.debug_name(), out.sink.get_node().debug_name());
               I(false);
               return false;
             }
@@ -282,13 +297,15 @@ bool bwd(int n) {
 
 void simple_line() {
   std::string gname   = "top_0";
-  auto *lib = Graph_library::instance("lgdb_iter_test");
+  auto       *lib     = Graph_library::instance("lgdb_iter_test");
   Lgraph     *g0      = lib->create_lgraph("g0", "test");
   auto       &sfuture = g0->ref_library()->setup_sub("future", "test");
-  if (!sfuture.has_pin("fut_i"))
+  if (!sfuture.has_pin("fut_i")) {
     sfuture.add_input_pin("fut_i", 10);
-  if (!sfuture.has_pin("fut_o"))
+  }
+  if (!sfuture.has_pin("fut_o")) {
     sfuture.add_output_pin("fut_o", 11);
+  }
   g0->ref_library()->sync();
 
   Lgraph *s0 = lib->create_lgraph("s0", "test");
@@ -455,23 +472,26 @@ void simple(int num) {
               t16.setup_sink_pin(std::format("i{}", (random() & 0xFF))));
 
   g->add_edge(c11.setup_driver_pin(), t17.setup_sink_pin(std::format("i{}", (random() & 0xFF))));
-  if (rand() & 1)
+  if (rand() & 1) {
     g->add_edge(c12.setup_driver_pin(), t17.setup_sink_pin(std::format("di{}", (random() & 0xFF))));
+  }
   g->add_edge(c12.setup_driver_pin(), t17.setup_sink_pin(std::format("i{}", (random() & 0xFF))));
   g->add_edge(c12.setup_driver_pin(), t18.setup_sink_pin(std::format("i{}", (random() & 0xFF))));
 
   g->add_edge(t13.setup_driver_pin(std::format("o{}", +(random() & 0xFF))), o5);
   g->add_edge(t13.setup_driver_pin(std::format("o{}", (random() & 0xFF))), o6);
-  if (rand() & 1)
+  if (rand() & 1) {
     g->add_edge(t14.setup_driver_pin(std::format("do{}", (random() & 0xFF))), o6);
+  }
   g->add_edge(t14.setup_driver_pin(std::format("o{}", (random() & 0xFF))), o6);
   g->add_edge(t14.setup_driver_pin(std::format("o{}", (random() & 0xFF))), o7);
 
   g->add_edge(t17.setup_driver_pin(std::format("o{}", (random() & 0xFF))),
               t20.setup_sink_pin(std::format("i{}", (random() & 0xFF))));
-  if (rand() & 1)
+  if (rand() & 1) {
     g->add_edge(t17.setup_driver_pin(std::format("do{}", (random() & 0xFF))),
                 t20.setup_sink_pin(std::format("i{}", (random() & 0xFF))));
+  }
   g->add_edge(t17.setup_driver_pin(std::format("o{}", (random() & 0xFF))),
               t19.setup_sink_pin(std::format("i{}", (random() & 0xFF))));
   g->add_edge(t18.setup_driver_pin(std::format("o{}", (random() & 0xFF))),
@@ -484,15 +504,15 @@ void simple(int num) {
 
 #ifdef VERBOSE
   for (const auto &node : g->fast()) {
-    std::cout << std::format("node:{}\n", node.debug_name());
+    std::print("node:{}\n", node.debug_name());
     std::cout << "  inp_edges";
     for (const auto &edge : node.inp_edges()) {
-      std::cout << std::format("  {}", edge.driver.debug_name());
+      std::print("  {}", edge.driver.debug_name());
     }
     std::cout << "\n";
     std::cout << "  out_edges";
     for (const auto &edge : node.out_edges()) {
-      std::cout << std::format("  {}", edge.sink.debug_name());
+      std::print("  {}", edge.sink.debug_name());
     }
     std::cout << "\n";
   }
@@ -610,26 +630,26 @@ int main(int argc, char **argv) {
       niters = atoi(argv[3]);
     }
 
-    std::cout << std::format("benchmarking path:{} name:{} niters:{}\n", argv[1], argv[2], niters);
+    std::print("benchmarking path:{} name:{} niters:{}\n", argv[1], argv[2], niters);
     auto *lib = Graph_library::instance(argv[1]);
     if (lib == nullptr) {
-      std::cout << std::format("could not open graph library {}\n", argv[1]);
+      std::print("could not open graph library {}\n", argv[1]);
       exit(-3);
     }
     auto *lg = lib->open_lgraph(argv[2]);
     if (lg == nullptr) {
-      std::cout << std::format("could not open lgraph {}\n", argv[2]);
+      std::print("could not open lgraph {}\n", argv[2]);
       exit(-3);
     }
 
     TRACE_EVENT("core", "fwd.custom");
-    int    total = 0;
-//#define ITER_MMAP 1
+    int total = 0;
+// #define ITER_MMAP 1
 #define ITER_DIRECT 1
-    //#define ITER_THREAD 1
-    //#define ITER_VECTOR 1
-    //#define ITER_VECTOR_CHECK_ORDER 1
-    //#define ITER_TREE 1
+    // #define ITER_THREAD 1
+    // #define ITER_VECTOR 1
+    // #define ITER_VECTOR_CHECK_ORDER 1
+    // #define ITER_TREE 1
 
 #ifdef ITER_VECTOR
 
@@ -642,8 +662,9 @@ int main(int argc, char **argv) {
 
     size_t max_level = 0;
     for (auto node : lg->fast()) {
-      if (node.is_type_loop_last())
+      if (node.is_type_loop_last()) {
         continue;
+      }
 
       size_t level              = 0u;
       bool   all_input_breakers = true;
@@ -678,16 +699,17 @@ int main(int argc, char **argv) {
         ++n_loop_others;
       }
     }
-    std::cout << std::format("loop breakers:{} others:{} max:{}\n", n_loop_breakers, n_loop_others, max_level);
+    std::print("loop breakers:{} others:{} max:{}\n", n_loop_breakers, n_loop_others, max_level);
     std::vector<size_t> histogram;
     for (auto v : min_level) {
-      if (v >= histogram.size())
+      if (v >= histogram.size()) {
         histogram.resize(v + 1);
+      }
 
       histogram[v]++;
     }
     for (auto i = 0u; i < histogram.size(); ++i) {
-      std::cout << std::format("  {} has {}\n", i, histogram[i]);
+      std::print("  {} has {}\n", i, histogram[i]);
     }
 #endif
 
@@ -698,11 +720,11 @@ int main(int argc, char **argv) {
 #endif
 #ifdef ITER_REBUILD
     auto *lib = Graph_library::instance(argv[1]);
-    if (lib==nullptr) {
-      std::cout << std::format("ERROR: could not open graph_library {}\n", argv[1]);
+    if (lib == nullptr) {
+      std::print("ERROR: could not open graph_library {}\n", argv[1]);
       exit(-3);
     }
-    auto  *tlg = lib->create_lgraph("topo_sorted", "-");
+    auto *tlg = lib->create_lgraph("topo_sorted", "-");
 
     absl::flat_hash_map<Node::Compact_class, Node::Compact_class> lg2tlg;
     for (auto node : lg->forward()) {
@@ -712,15 +734,17 @@ int main(int argc, char **argv) {
 
       for (auto &e : node.inp_edges()) {
         auto it = lg2tlg.find(e.driver.get_node().get_compact_class());
-        if (it == lg2tlg.end())
+        if (it == lg2tlg.end()) {
           continue;
+        }
         auto tdpin = it->second.get_node(tlg).setup_driver_pin_raw(e.driver.get_pid());
         tnode.setup_sink_pin_raw(e.sink.get_pid()).connect_driver(tdpin);
       }
       for (auto &e : node.out_edges()) {
         auto it = lg2tlg.find(e.sink.get_node().get_compact_class());
-        if (it == lg2tlg.end())
+        if (it == lg2tlg.end()) {
           continue;
+        }
         auto tspin = it->second.get_node(tlg).setup_sink_pin_raw(e.sink.get_pid());
         tnode.setup_driver_pin_raw(e.driver.get_pid()).connect_sink(tspin);
       }
@@ -756,8 +780,9 @@ int main(int argc, char **argv) {
 #ifdef ITER_DIRECT
       for (auto node : lg->forward()) {
         auto op = node.get_type_op();
-        if (Ntype::is_multi_driver(op))
+        if (Ntype::is_multi_driver(op)) {
           total += 1;
+        }
       }
 #endif
 #ifdef ITER_THREAD
@@ -766,27 +791,31 @@ int main(int argc, char **argv) {
 
       while (true) {
         auto nid = it.get_next();
-        if (nid == 0)
+        if (nid == 0) {
           break;
+        }
         auto node = Node::Compact_class(nid).get_node(lg);
         auto op   = node.get_type_op();
-        if (Ntype::is_multi_driver(op))
+        if (Ntype::is_multi_driver(op)) {
           total += 1;
+        }
       }
 #endif
 #ifdef ITER_REBUILD
       for (auto node : tlg->fast()) {
         auto op = node.get_type_op();
-        if (Ntype::is_multi_driver(op))
+        if (Ntype::is_multi_driver(op)) {
           total += 1;
+        }
       }
 #endif
 #ifdef ITER_TREE
       for (const auto &it : fwd_order.depth_preorder()) {
         auto node = fwd_order.get_data(it).get_node(lg);
         auto op   = node.get_type_op();
-        if (Ntype::is_multi_driver(op))
+        if (Ntype::is_multi_driver(op)) {
           total += 1;
+        }
       }
 #endif
 #ifdef ITER_MMAP
@@ -794,12 +823,14 @@ int main(int argc, char **argv) {
       while (!cnode.is_invalid()) {
         auto node = cnode.get_node(lg);
         auto op   = node.get_type_op();
-        if (Ntype::is_multi_driver(op))
+        if (Ntype::is_multi_driver(op)) {
           total += 1;
+        }
 
         const auto &it = fwd_order.find(cnode);
-        if (it == fwd_order.end())
+        if (it == fwd_order.end()) {
           break;
+        }
         cnode = it->second;
       }
 #endif
@@ -810,8 +841,9 @@ int main(int argc, char **argv) {
 
       for (const auto &cnode : fwd_order) {
         auto node = cnode.get_node(lg);
-        if (node.is_invalid())
+        if (node.is_invalid()) {
           continue;
+        }
 
 #ifdef ITER_VECTOR_CHECK_ORDER
         visited.insert(cnode);
@@ -819,8 +851,9 @@ int main(int argc, char **argv) {
           if (visited.contains(e.driver.get_node().get_compact_class())) {
             continue;
           }
-          if (e.driver.is_graph_io())
+          if (e.driver.is_graph_io()) {
             continue;
+          }
           if (!node.is_type_sub() && !e.driver.get_node().is_type_sub()) {
             std::cout << "delayed\n";
             node.dump();
@@ -831,13 +864,14 @@ int main(int argc, char **argv) {
 #endif
 
         auto op = node.get_type_op();
-        if (Ntype::is_multi_driver(op))
+        if (Ntype::is_multi_driver(op)) {
           total += 1;
+        }
       }
 #endif
     }
 
-    std::cout << std::format("total {}\n", total);
+    std::print("total {}\n", total);
     return 0;
   }
 
@@ -847,8 +881,9 @@ int main(int argc, char **argv) {
 
   for (int i = 0; i < 40; i++) {
     simple(2);
-    if (failed)
+    if (failed) {
       return -3;
+    }
   }
 
   int n = 20;

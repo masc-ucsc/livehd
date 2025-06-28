@@ -115,11 +115,11 @@ void Graphviz::do_hierarchy(Lgraph *lg) {
   absl::flat_hash_set<std::pair<std::string_view, std::string_view>> added;
 
   lg->each_hier_unique_sub_bottom_up([&added, &data](Lgraph *g) {
-    std::cout << std::format("visiting node:{}\n", g->get_name());
+    std::print("visiting node:{}\n", g->get_name());
 
     Node h_inp(g, Hierarchy::hierarchical_root(), Hardcoded_input_nid);
     for (auto e : h_inp.inp_edges()) {
-      std::cout << std::format("edge from: {} to: {}\n", e.driver.get_class_lgraph()->get_name(), e.sink.get_class_lgraph()->get_name());
+      std::print("edge from: {} to: {}\n", e.driver.get_class_lgraph()->get_name(), e.sink.get_class_lgraph()->get_name());
 
       auto p = std::pair(e.driver.get_class_lgraph()->get_name(), e.sink.get_class_lgraph()->get_name());
       if (p.first == p.second) {
@@ -137,7 +137,7 @@ void Graphviz::do_hierarchy(Lgraph *lg) {
 
     Node h_out(g, Hierarchy::hierarchical_root(), Hardcoded_output_nid);
     for (auto e : h_out.out_edges()) {
-      std::cout << std::format("edge from:{} to:{}\n", e.driver.get_class_lgraph()->get_name(), e.sink.get_class_lgraph()->get_name());
+      std::print("edge from:{} to:{}\n", e.driver.get_class_lgraph()->get_name(), e.sink.get_class_lgraph()->get_name());
 
       auto p = std::pair(e.driver.get_class_lgraph()->get_name(), e.sink.get_class_lgraph()->get_name());
       if (p.first == p.second) {
@@ -232,7 +232,7 @@ void Graphviz::do_from_lgraph(Lgraph *lg_parent, std::string_view dot_postfix) {
     }
 
     (void)node;
-    std::cout << std::format("subgraph lgid:{}\n", lgid);
+    std::print("subgraph lgid:{}\n", lgid);
     Lgraph *lg_child = lg_parent->ref_library()->open_lgraph(lgid);
     if (lg_child) {
       populate_lg_data(lg_child, dot_postfix);

@@ -45,7 +45,7 @@ public:
   }
 
   void print_info() {
-    std::cout << std::format("      nid is {}, pid is {}, input is {}\n", get_nid(), get_pid(), input);
+    std::print("      nid is {}, pid is {}, input is {}\n", get_nid(), get_pid(), input);
     return;
   }
 };

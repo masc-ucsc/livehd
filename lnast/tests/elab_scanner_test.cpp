@@ -84,7 +84,7 @@ public:
         bug_inserted = true;
         err_tracker::logger("Missing keyword \"assign\" in line {}.\nSuggestion: Insert the missing keyword \"assign\".", line);
       } else {
-        std::cout << std::format("{}", ttxt);  // scan_text());
+        std::print("{}", ttxt);  // scan_text());
       }
 
       if (scan_token_id() == Token_id_alnum) {

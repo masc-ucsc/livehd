@@ -48,7 +48,7 @@ void Pass_randomize_dpins::randomize(Eprp_var& var) {
 }
 
 void Pass_randomize_dpins::annotate_lg(Lgraph* lg) {
-  std::cout << std::format("------{}\n", lg->get_name());
+  std::print("------{}\n", lg->get_name());
 
   for (const auto& node : lg->fast(true)) {
     for (auto& dpin : node.out_connected_pins()) {
@@ -89,9 +89,9 @@ void Pass_randomize_dpins::annotate_lg(Lgraph* lg) {
 
 void Pass_randomize_dpins::collect_vectors_from_lg(Lgraph* lg, float noise_perc, bool comb_only) {
 #ifdef FOR_DBG
-  std::cout << std::format("\nnoise perc is: {}\n", noise_perc);
-  std::cout << std::format("\nLG name  is: {}\n", lg->get_name());
-  std::cout << std::format("\n comb_only: {}\n", comb_only);
+  std::print("\nnoise perc is: {}\n", noise_perc);
+  std::print("\nLG name  is: {}\n", lg->get_name());
+  std::print("\n comb_only: {}\n", comb_only);
   std::cout << "Printing io_pins_vec:\n";
   print_vec(io_pins_vec);
 #endif
@@ -110,7 +110,7 @@ void Pass_randomize_dpins::collect_vectors_from_lg(Lgraph* lg, float noise_perc,
   });
 
 #ifdef FOR_DBG
-  std::cout << std::format("Printing io_pins_vec: size:{}\n", io_pins_vec.size());
+  std::print("Printing io_pins_vec: size:{}\n", io_pins_vec.size());
   print_vec(io_pins_vec);
 #endif
 
@@ -152,12 +152,12 @@ void Pass_randomize_dpins::collect_vectors_from_lg(Lgraph* lg, float noise_perc,
   }
 
 #ifdef FOR_DBG
-  std::cout << std::format("total_nodes in fast pass: {}\n", node_count);
-  std::cout << std::format("Printing comb_pins_vec: size:{}", comb_pins_vec.size());
+  std::print("total_nodes in fast pass: {}\n", node_count);
+  std::print("Printing comb_pins_vec: size:{}", comb_pins_vec.size());
   print_vec(comb_pins_vec);
-  std::cout << std::format("Printing flop_pins_vec: size:{}", flop_pins_vec.size());
+  std::print("Printing flop_pins_vec: size:{}", flop_pins_vec.size());
   print_vec(flop_pins_vec);
-  std::cout << std::format("Printing combNflop_pins_vec: size:{}", combNflop_pins_vec.size());
+  std::print("Printing combNflop_pins_vec: size:{}", combNflop_pins_vec.size());
   print_vec(combNflop_pins_vec);
 #endif
 
@@ -173,12 +173,12 @@ void Pass_randomize_dpins::collect_vectors_from_lg(Lgraph* lg, float noise_perc,
     random_selected_pins_vec = chooseMRandomElements(combNflop_pins_vec, num_of_dpins_to_change);
   }
 #ifdef FOR_DBG
-  std::cout << std::format("total_dpins: {}, perc_change with {}: {}, num_of_dpins_to_change : {}\n",
+  std::print("total_dpins: {}, perc_change with {}: {}, num_of_dpins_to_change : {}\n",
              total_dpins,
              comb_only ? "comb_only" : "comb+flops",
              perc_change,
              num_of_dpins_to_change);
-  std::cout << std::format("Printing random_selected_pins_vec: size:{}\n", random_selected_pins_vec.size());
+  std::print("Printing random_selected_pins_vec: size:{}\n", random_selected_pins_vec.size());
   print_vec(random_selected_pins_vec);
 #endif
 }
@@ -190,8 +190,8 @@ void Pass_randomize_dpins::print_vec(std::vector<Node_pin::Compact_flat>& vec_to
     if (np.is_graph_io()) {
       std::cout << "-IO node-\t";
     }
-    std::cout << std::format("nid:{} ({}) ", np.get_node().get_nid(), np.get_node().debug_name());
-    std::cout << std::format(",pin:{}({}) are:: type:{}, lg:{}\n",
+    std::print("nid:{} ({}) ", np.get_node().get_nid(), np.get_node().debug_name());
+    std::print(",pin:{}({}) are:: type:{}, lg:{}\n",
                "p" + std::to_string(np.get_pid()),
                np.has_name() ? np.get_name() : ("p" + std::to_string(np.get_pid())),
                np.get_node().get_type_name(),
@@ -204,8 +204,8 @@ void Pass_randomize_dpins::print_nodePinCF_details(const Node_pin::Compact_flat&
   if (np.is_graph_io()) {
     std::cout << "-IO node-\t";
   }
-  std::cout << std::format("nid:{} ({}) ", np.get_node().get_nid(), np.get_node().debug_name());
-  std::cout << std::format(",pin:{}({}) are:: type:{}, lg:{}\n",
+  std::print("nid:{} ({}) ", np.get_node().get_nid(), np.get_node().debug_name());
+  std::print(",pin:{}({}) are:: type:{}, lg:{}\n",
              "p" + std::to_string(np.get_pid()),
              np.has_name() ? np.get_name() : "N.A",
              np.get_node().get_type_name(),

@@ -52,5 +52,5 @@ public:
 
   bool get_sign() const { return sign; };
 
-  void dump() const { std::cout << std::format("{}{}b\n", sign ? "S" : "U", bits); }
+  void dump() const { std::print("{}{}b\n", sign ? "S" : "U", bits); }
 };

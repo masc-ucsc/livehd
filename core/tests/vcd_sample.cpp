@@ -9,9 +9,9 @@ Vcd_sample::Vcd_sample(size_t n_buckets) : Vcd_reader(n_buckets) {}
 Vcd_sample::~Vcd_sample() {
   std::cout << "=== sample parity results ===\n";
   for (auto& [sig, p] : parity_) {
-    std::cout << std::format("  {} : {}\n", sig, p);
+    std::print("  {} : {}\n", sig, p);
     for (const auto& n : get_alias(sig)) {
-      std::cout << std::format("     : {}\n", n);
+      std::print("     : {}\n", n);
     }
   }
 }

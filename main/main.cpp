@@ -8,9 +8,9 @@
 #include <unistd.h>
 
 #include <cctype>
+#include <format>
 #include <iomanip>
 #include <iostream>
-#include <format>
 #include <regex>
 #include <string>
 #include <utility>
@@ -26,12 +26,12 @@
 
 using Replxx = replxx::Replxx;
 
-void help(std::string_view cmd, std::string_view txt) { std::cout << std::format("{:20s} {}\n", cmd, txt); }
+void help(std::string_view cmd, std::string_view txt) { std::print("{:20s} {}\n", cmd, txt); }
 void help_labels(std::string_view cmd, std::string_view txt, bool required) {
   if (required) {
-    std::cout << std::format("  {:20s} {} (required)\n", cmd, txt);
+    std::print("  {:20s} {} (required)\n", cmd, txt);
   } else {
-    std::cout << std::format("  {:20s} {} (optional)\n", cmd, txt);
+    std::print("  {:20s} {} (optional)\n", cmd, txt);
   }
 }
 
@@ -131,7 +131,7 @@ Replxx::completions_t hook_shared(std::string const& context, int index, std::ve
       fields   = name_files;
       examples = &fields;
     } else if (label_files || label_output || label_path || label_odir) {
-      // std::cout << std::format("label[{}] full_filename[{}] path[{}] filename[{}] prefix[{}] add[{}]\n", label, full_filename, path, filename,
+      // std::print("label[{}] full_filename[{}] path[{}] filename[{}] prefix[{}] add[{}]\n", label, full_filename, path, filename,
       // prefix, prefix_add);
       DIR* dirp = opendir(path.c_str());
       if (dirp) {
@@ -142,10 +142,10 @@ Replxx::completions_t hook_shared(std::string const& context, int index, std::ve
           if (dp->d_type != DT_DIR && (label_path || label_odir)) {
             continue;
           }
-          // std::cout << std::format("preadding {}\n",dp->d_name);
+          // std::print("preadding {}\n",dp->d_name);
 
           if (strncasecmp(dp->d_name, filename.c_str(), filename.size()) == 0 || filename.empty()) {
-            // std::cout << std::format("adding {}\n",dp->d_name);
+            // std::print("adding {}\n",dp->d_name);
             struct stat sb;
 
             std::string dir_name{path + "/" + dp->d_name};
@@ -170,7 +170,7 @@ Replxx::completions_t hook_shared(std::string const& context, int index, std::ve
     if (pos != std::string::npos) {
       cmd = cmd.substr(0, pos);
     }
-    // std::cout << std::format("cmd[{}]\n", cmd);
+    // std::print("cmd[{}]\n", cmd);
     Main_api::get_labels(cmd, [&fields](std::string_view label, std::string_view txt, bool required) {
       (void)required;
       (void)txt;
@@ -192,11 +192,11 @@ Replxx::completions_t hook_shared(std::string const& context, int index, std::ve
   }
   std::string match = context.substr(last_match_start, last_match_end);
 
-  // std::cout << std::format("match[{}]\n", match);
+  // std::print("match[{}]\n", match);
   for (auto const& e : *examples) {
-    // std::cout << std::format("checking {} vs {}\n",e, match);
+    // std::print("checking {} vs {}\n",e, match);
     if (strncasecmp(match.c_str(), e.c_str(), match.size()) == 0) {
-      // std::cout << std::format("match {} match:{}\n", e, match);
+      // std::print("match {} match:{}\n", e, match);
       completions.emplace_back(e.c_str());
     }
   }
@@ -209,7 +209,7 @@ Replxx::completions_t hook_shared(std::string const& context, int index, std::ve
       if (comp.back() == ':') {
         continue;
       }
-      // std::cout << std::format("fprefix[{}] completion[{}]\n", fprefix, comp);
+      // std::print("fprefix[{}] completion[{}]\n", fprefix, comp);
       if (comp.size() > to_chop && to_chop > 0) {
         completion = Replxx::Completion(comp.substr(to_chop));
       }
@@ -315,7 +315,7 @@ int main(int argc, char** argv) {
   while ((c = getopt_long(argc, argv, "qvc:", longopts, &option_index)) != -1) {
     switch (c) {
       case 'q': option_quiet = true; break;
-      case 'v': std::cout << std::format("lgshell, version {}.{}", major_version, minor_version); return 0;
+      case 'v': std::print("lgshell, version {}.{}", major_version, minor_version); return 0;
       case 'c':
         if (cmd.empty()) {
           cmd.append(optarg);
@@ -339,7 +339,7 @@ int main(int argc, char** argv) {
   Main_api::init();
 
   if (!cmd.empty()) {
-    std::cout << std::format("livehd cmd {}\n", cmd);
+    std::print("livehd cmd {}\n", cmd);
     for (const auto line : absl::StrSplit(cmd, '\n')) {
       Main_api::parse_inline(line);
     }
@@ -465,7 +465,7 @@ int main(int argc, char** argv) {
       } while ((cinput == nullptr) && (errno == EAGAIN));
 
       if (cinput == nullptr) {
-        std::cout << std::format("errno:{}\n", errno);
+        std::print("errno:{}\n", errno);
         break;
       }
       if (cinput[0] == 0) {
@@ -560,14 +560,14 @@ int main(int argc, char** argv) {
       }
     } catch (const std::runtime_error& re) {
       err_tracker::logger("ERROR: {}", re.what());
-      std::cout << std::format("ERROR: {}", re.what());
+      std::print("ERROR: {}", re.what());
 #ifndef NDEBUG
       std::cout << " (std::runtime_error)";
 #endif
       std::cout << "\ncommand aborted...\n";
     } catch (const std::exception& ex) {
       err_tracker::logger("ERROR: {}", ex.what());
-      std::cout << std::format("ERROR: {}", ex.what());
+      std::print("ERROR: {}", ex.what());
 #ifndef NDEBUG
       std::cout << " (std::exception)";
 #endif

@@ -112,8 +112,9 @@ void Symbol_table::function_scope(std::string_view func_id, std::shared_ptr<Bund
   std::string_view scope = func_id;
   for (int i = stack.size() - 1; i >= 0; --i) {
     const auto &s = stack[i];
-    if (s.func_id != func_id)
+    if (s.func_id != func_id) {
       continue;
+    }
     I(s.scope.back() != '/');
     scope = absl::StrCat(s.scope, "/", func_id);
     break;
@@ -161,8 +162,9 @@ bool Symbol_table::has_trivial(std::string_view key) const {
   auto [var, field] = get_var_field(key);
 
   const auto it = stack.back().varmap.find(var);
-  if (it == stack.back().varmap.end())
+  if (it == stack.back().varmap.end()) {
     return false;
+  }
 
   return it->second->has_trivial(field);
 }
@@ -171,8 +173,9 @@ const Lconst &Symbol_table::get_trivial(std::string_view key) const {
   auto [var, field] = get_var_field(key);
 
   const auto it = stack.back().varmap.find(var);
-  if (it == stack.back().varmap.end())
+  if (it == stack.back().varmap.end()) {
     return invalid_lconst;
+  }
 
   return it->second->get_trivial(field);
 }
@@ -181,11 +184,13 @@ std::shared_ptr<Bundle> Symbol_table::get_bundle(std::string_view key) const {
   auto [var, field] = get_var_field(key);
 
   const auto it = stack.back().varmap.find(var);
-  if (it == stack.back().varmap.end())
+  if (it == stack.back().varmap.end()) {
     return nullptr;
+  }
 
-  if (var == key)
+  if (var == key) {
     return it->second;
+  }
 
   return it->second->get_bundle(field);
 }
@@ -194,25 +199,28 @@ bool Symbol_table::has_bundle(std::string_view key) const {
   auto [var, field] = get_var_field(key);
 
   const auto it = stack.back().varmap.find(var);
-  if (it == stack.back().varmap.end())
+  if (it == stack.back().varmap.end()) {
     return false;
+  }
 
   return var == key || it->second->has_bundle(field);
 }
 
 void Symbol_table::dump() const {
-  std::cout << std::format("Symbol_table::leave_scope func_id:{} scope:{}\n", stack.back().func_id, stack.back().scope);
-  if (stack.empty())
+  std::print("Symbol_table::leave_scope func_id:{} scope:{}\n", stack.back().func_id, stack.back().scope);
+  if (stack.empty()) {
     return;
+  }
 
   for (auto var : stack.back().declared) {
-    std::cout << std::format("var:{}\n", var);
+    std::print("var:{}\n", var);
     auto it = stack.back().varmap.find(var);
     if (it != stack.back().varmap.end()) {
-      if (it->second)
+      if (it->second) {
         it->second->dump();
-      else
+      } else {
         std::cout << "nullptr bundle\n";
+      }
     }
   }
 }

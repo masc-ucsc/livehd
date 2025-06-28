@@ -152,7 +152,7 @@ public:
           if (module_name.empty()) {
             throw scan_error(*this, "found endmodule without corresponding module");
           }
-          std::cout << std::format("{}={}\n", token, module_name);
+          std::print("{}={}\n", token, module_name);
           module_name = "";
         }
       } else if (scan_is_token(Token_id_comma) || scan_is_token(Token_id_semicolon) || scan_is_token(Token_id_cp)) {
@@ -161,9 +161,9 @@ public:
             auto label = scan_prev_text();
 
             if (last_input)
-              std::cout << std::format("  inp {}\n", label);
+              std::print("  inp {}\n", label);
             else
-              std::cout << std::format("  out {}\n", label);
+              std::print("  out {}\n", label);
           }
           last_input  = false;
           last_output = false;

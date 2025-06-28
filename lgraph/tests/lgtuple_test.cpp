@@ -75,12 +75,12 @@ TEST_F(Lgtuple_test, flat1) {
     names.emplace_back(name);
 
     if (names[i] == "not here1")
-      std::cout << std::format("DEBUG {} got deleted by {}\n", names[1], names[i]);
+      std::print("DEBUG {} got deleted by {}\n", names[1], names[i]);
 
     tup.add(name, dpin[i]);
     if (i > 0u) {
       if (!tup.has_dpin(names[1])) {
-        std::cout << std::format("{} got deleted by [{}]\n", names[1], names[i]);
+        std::print("{} got deleted by [{}]\n", names[1], names[i]);
       }
       EXPECT_TRUE(tup.has_dpin(names[1]));
     }

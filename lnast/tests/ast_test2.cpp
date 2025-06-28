@@ -47,7 +47,7 @@ public:
         case test_rule_statement: rule_name.assign("test_rule_statement"); break;
       }
       auto token_text = scan_text(node.token_entry);
-      std::cout << std::format("Rule name: {}, token text: {}\n", rule_name, token_text);
+      std::print("Rule name: {}, token text: {}\n", rule_name, token_text);
     }
   }
 };

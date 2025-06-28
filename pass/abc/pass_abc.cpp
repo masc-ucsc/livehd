@@ -131,13 +131,13 @@ void Pass_abc::find_latch_conn(const Lgraph *g) {
     graph_topology::topology_info topo;
     const Tech_cell              *tcell = g->get_tlibrary().get_const_cell(g->tmap_id_get(idx));
     if (opack.verbose) {
-      std::cout << std::format("\nLatch_Op_ID NodeID:{} has direct input from Node: \n", idx);
+      std::print("\nLatch_Op_ID NodeID:{} has direct input from Node: \n", idx);
     }
     std::string trig_pin = tcell->pin_name_exist("C") ? "C" : "E";
     for (const auto &input : g->inp_edges(idx)) {
       if (input.get_inp_pin().get_pid() == tcell->get_pin_id("D")) {
         if (opack.verbose) {
-          std::cout << std::format("{} pin input port ID {}", tcell->get_name(input.get_inp_pin().get_pid()), input.get_inp_pin().get_pid());
+          std::print("{} pin input port ID {}", tcell->get_name(input.get_inp_pin().get_pid()), input.get_inp_pin().get_pid());
         }
         int bit_index[2] = {0, 0};
         recursive_find(g, &input, topo, bit_index);
@@ -226,7 +226,7 @@ void Pass_abc::find_graphio_output_conn(const Lgraph *g) {
 void Pass_abc::find_sub_conn(const Lgraph *g) {
   for (const auto &idx : graph_info->subgraph_id) {
     if (opack.verbose) {
-      std::cout << std::format("\nSubGraph_Op NodeID:{} has direct input from Node: \n", idx);
+      std::print("\nSubGraph_Op NodeID:{} has direct input from Node: \n", idx);
     }
 
     absl::flat_hash_map<Port_ID, const Edge *>                  inp_edges;
@@ -239,7 +239,7 @@ void Pass_abc::find_sub_conn(const Lgraph *g) {
 
     for (const auto &input : inp_edges) {
       if (opack.verbose) {
-        std::cout << std::format("\n------------------------------------------------ \n", idx);
+        std::print("\n------------------------------------------------ \n", idx);
       }
       graph_topology::topology_info topo;
       auto                          node_idx = input.second->get_idx();
@@ -263,7 +263,7 @@ void Pass_abc::find_sub_conn(const Lgraph *g) {
 void Pass_abc::find_memory_conn(const Lgraph *g) {
   for (const auto &idx : graph_info->memory_id) {
     if (opack.verbose) {
-      std::cout << std::format("\nMemory_Op NodeID:{} has direct input from Node: \n", idx);
+      std::print("\nMemory_Op NodeID:{} has direct input from Node: \n", idx);
     }
 
     absl::flat_hash_map<Port_ID, const Edge *>                  inp_edges;
@@ -280,7 +280,7 @@ void Pass_abc::find_memory_conn(const Lgraph *g) {
     for (const auto &input : inp_edges) {
       Port_ID input_id = input.second->get_inp_pin().get_pid();
       if (opack.verbose) {
-        std::cout << std::format("\n-------------------{}---------------------- \n", input_id);
+        std::print("\n-------------------{}---------------------- \n", input_id);
       }
       graph_topology::topology_info topo;
       auto                          node_idx = input.second->get_idx();
@@ -348,7 +348,7 @@ void Pass_abc::recursive_find(const Lgraph *g, const Edge_raw *input, graph_topo
   Node_Type_Op this_node_type = g->get_node(this_idx).get_type_op();
   if (this_node_type == U32Const_Op) {
     if (opack.verbose) {
-      std::cout << std::format("\t U32Const_Op_NodeID:{},bit [{}:{}] portid : {} \n",
+      std::print("\t U32Const_Op_NodeID:{},bit [{}:{}] portid : {} \n",
                  input->get_idx(),
                  bit_addr[0],
                  bit_addr[1],
@@ -359,7 +359,7 @@ void Pass_abc::recursive_find(const Lgraph *g, const Edge_raw *input, graph_topo
     topo.push_back(info);
   } else if (this_node_type == StrConst_Op) {
     if (opack.verbose) {
-      std::cout << std::format("\t StrConst_Op_NodeID:{},bit [{}:{}]  portid : {} \n",
+      std::print("\t StrConst_Op_NodeID:{},bit [{}:{}]  portid : {} \n",
                  this_idx,
                  bit_addr[0],
                  bit_addr[1],
@@ -375,7 +375,7 @@ void Pass_abc::recursive_find(const Lgraph *g, const Edge_raw *input, graph_topo
       }
     } else {
       if (opack.verbose) {
-        std::cout << std::format("\t GraphIO_Op_NodeID:{},bit [{}:{}] portid : {} \n",
+        std::print("\t GraphIO_Op_NodeID:{},bit [{}:{}] portid : {} \n",
                    this_idx,
                    bit_addr[0],
                    bit_addr[1],
@@ -386,7 +386,7 @@ void Pass_abc::recursive_find(const Lgraph *g, const Edge_raw *input, graph_topo
     }
   } else if (this_node_type == Memory_Op) {
     if (opack.verbose) {
-      std::cout << std::format("\t Memory_Op:{},bit [{}:{}] portid : {} \n", this_idx, bit_addr[0], bit_addr[1], input->get_out_pin().get_pid());
+      std::print("\t Memory_Op:{},bit [{}:{}] portid : {} \n", this_idx, bit_addr[0], bit_addr[1], input->get_out_pin().get_pid());
     }
     index_offset info = {this_idx, input->get_out_pin().get_pid(), {bit_addr[0], bit_addr[1]}};
     topo.push_back(info);
@@ -398,7 +398,7 @@ void Pass_abc::recursive_find(const Lgraph *g, const Edge_raw *input, graph_topo
     }
   } else if (this_node_type == SubGraph_Op) {
     if (opack.verbose) {
-      std::cout << std::format("\t SubGraph_Op:{},bit [{}:{}] portid : {} \n",
+      std::print("\t SubGraph_Op:{},bit [{}:{}] portid : {} \n",
                  this_idx,
                  bit_addr[0],
                  bit_addr[1],
@@ -415,7 +415,7 @@ void Pass_abc::recursive_find(const Lgraph *g, const Edge_raw *input, graph_topo
     }
   } else if (this_node_type == TechMap_Op) {
     if (opack.verbose) {
-      std::cout << std::format("\t NodeID:{},bit [{}:{}] portid : {} \n", this_idx, 0, 0, input->get_out_pin().get_pid());
+      std::print("\t NodeID:{},bit [{}:{}] portid : {} \n", this_idx, 0, 0, input->get_out_pin().get_pid());
     }
 
     const Tech_cell *tcell      = g->get_tlibrary().get_const_cell(g->tmap_id_get(this_idx));

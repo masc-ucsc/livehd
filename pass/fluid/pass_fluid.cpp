@@ -25,8 +25,8 @@ Pass_fluid::Pass_fluid() : Pass("fluid") {}
 void Pass_fluid::find_join(Lgraph *g) {
   std::cout << "\n**Find Join: **\n";
   for (auto idx : g->forward()) {
-    std::cout << std::format("\n*****Visiting idx:{}\n", idx);
-    std::cout << std::format("{}\n", g->node_type_get(idx).get_name());
+    std::print("\n*****Visiting idx:{}\n", idx);
+    std::print("{}\n", g->node_type_get(idx).get_name());
     for (const auto &inp_edge : g->inp_edges(idx)) {
       Node_pin_P new_node_pin = inp_edge.get_out_pin();
       Index_ID   inp_idx      = new_node_pin.get_nid();
@@ -41,7 +41,7 @@ void Pass_fluid::find_join(Lgraph *g) {
           join_index_flop_map[idx].push_back(inp_idx);
         } else {
 #ifdef PRINT_INFO
-          std::cout << std::format("Found repetitive idx {}.\n", inp_idx);
+          std::print("Found repetitive idx {}.\n", inp_idx);
 #endif
         }
       } else if (join_index_has_flop_map[inp_idx]) {
@@ -52,7 +52,7 @@ void Pass_fluid::find_join(Lgraph *g) {
             join_index_flop_map[idx].push_back(flop_idx);
           } else {
 #ifdef PRINT_INFO
-            std::cout << std::format("Found repetitive idx {}.\n", flop_idx);
+            std::print("Found repetitive idx {}.\n", flop_idx);
 #endif
           }
         }
@@ -63,7 +63,7 @@ void Pass_fluid::find_join(Lgraph *g) {
       if (join_index_has_flop_map[idx]) {
         for (auto flop : join_index_flop_map[idx]) {
 #ifdef PRINT_INFO
-          std::cout << std::format("This flop joins flop: {}.\n", flop);
+          std::print("This flop joins flop: {}.\n", flop);
 #endif
         }
       } else {
@@ -77,8 +77,8 @@ void Pass_fluid::find_join(Lgraph *g) {
 void Pass_fluid::find_fork(Lgraph *g) {
   std::cout << "\n**Find Fork: **\n";
   for (auto idx : g->backward()) {
-    std::cout << std::format("\n*****Visiting idx:{}\n", idx);
-    std::cout << std::format("{}\n", g->node_type_get(idx).get_name());
+    std::print("\n*****Visiting idx:{}\n", idx);
+    std::print("{}\n", g->node_type_get(idx).get_name());
     for (const auto &out_edge : g->out_edges(idx)) {
       Node_pin_P new_node_pin = out_edge.get_inp_pin();
       Index_ID   out_idx      = new_node_pin.get_nid();
@@ -87,7 +87,7 @@ void Pass_fluid::find_fork(Lgraph *g) {
 #ifdef PRINT_INFO
         std::cout << "Has a flop as its output.\n";
         new_node_pin.print_info();
-        std::cout << std::format("The flop pid is {}\n", flop_pid);
+        std::print("The flop pid is {}\n", flop_pid);
 #endif
         if (flop_pid == 0) {
           std::cout << "This pin is a clk pin, ignore it.\n";
@@ -98,7 +98,7 @@ void Pass_fluid::find_fork(Lgraph *g) {
             fork_index_flop_map[idx].push_back(out_idx);
           } else {
 #ifdef PRINT_INFO
-            std::cout << std::format("Found repetitive idx {}.\n", out_idx);
+            std::print("Found repetitive idx {}.\n", out_idx);
 #endif
           }
         }
@@ -111,7 +111,7 @@ void Pass_fluid::find_fork(Lgraph *g) {
             fork_index_flop_map[idx].push_back(flop_idx);
           } else {
 #ifdef PRINT_INFO
-            std::cout << std::format("Found repetitive idx {}.\n", flop_idx);
+            std::print("Found repetitive idx {}.\n", flop_idx);
 #endif
           }
         }
@@ -123,7 +123,7 @@ void Pass_fluid::find_fork(Lgraph *g) {
       if (fork_index_has_flop_map[idx]) {
         for (auto flop : fork_index_flop_map[idx]) {
 #ifdef PRINT_INFO
-          std::cout << std::format("This flop forks flop: {}.\n", flop);
+          std::print("This flop forks flop: {}.\n", flop);
 #endif
         }
       } else {
@@ -145,7 +145,7 @@ void Pass_fluid::add_fork(Lgraph *g) {
   // TODO: ask how to add pid to IO
   // Port_ID vi_pid = vi_nid;
   Port_ID vi_pid = 0;
-  std::cout << std::format("the nid of vi is {}\n", vi_nid);
+  std::print("the nid of vi is {}\n", vi_nid);
   g->node_type_set(vi_nid, GraphIO_Op);
   g->add_graph_input(vi_name.c_str(), vi_nid);
   Node_pin global_vi(vi_nid, vi_pid, false);
@@ -156,7 +156,7 @@ void Pass_fluid::add_fork(Lgraph *g) {
   // TODO: ask how to add pid to IO
   //  Port_ID so_pid = so_nid;
   Port_ID so_pid = 0;
-  std::cout << std::format("the nid of so is {}\n", so_nid);
+  std::print("the nid of so is {}\n", so_nid);
   g->node_type_set(so_nid, GraphIO_Op);
   g->add_graph_input(so_name.c_str(), so_nid);
   Node_pin global_so(so_nid, so_pid, false);
@@ -167,7 +167,7 @@ void Pass_fluid::add_fork(Lgraph *g) {
   // TODO: ask how to add pid to IO
   //  Port_ID vo_pid = vo_nid;
   Port_ID vo_pid = 0;
-  std::cout << std::format("the nid of vo is {}\n", vo_nid);
+  std::print("the nid of vo is {}\n", vo_nid);
   g->node_type_set(vo_nid, GraphIO_Op);
   g->add_graph_output(vo_name.c_str(), vo_nid);
   Node_pin global_vo(vo_nid, vo_pid, true);
@@ -178,16 +178,16 @@ void Pass_fluid::add_fork(Lgraph *g) {
   // TODO: ask how to add pid to IO
   //  Port_ID si_pid = si_nid;
   Port_ID si_pid = 0;
-  std::cout << std::format("the nid of si is {}\n", si_nid);
+  std::print("the nid of si is {}\n", si_nid);
   g->node_type_set(si_nid, GraphIO_Op);
   g->add_graph_output(si_name.c_str(), si_nid);
   Node_pin global_si(si_nid, si_pid, true);
 
   for (auto idx : g->forward()) {
-    std::cout << std::format("\n*****Visiting idx:{}\n", idx);
-    std::cout << std::format("{}\n", g->node_type_get(idx).get_name());
+    std::print("\n*****Visiting idx:{}\n", idx);
+    std::print("{}\n", g->node_type_get(idx).get_name());
     for (const auto &out_edge : g->out_edges(idx)) {
-      std::cout << std::format("Printing edge from nid{} pid{} to nid{} pid{}.\n",
+      std::print("Printing edge from nid{} pid{} to nid{} pid{}.\n",
                  out_edge.get_self_nid(),
                  out_edge.get_out_pin().get_pid(),
                  out_edge.get_idx(),
@@ -229,7 +229,7 @@ void Pass_fluid::add_fork(Lgraph *g) {
         if (fork_index_flop_map[idx].size() >= 2) {
           bool join_after_fork = false;
           // Add Fork
-          std::cout << std::format("Add fork at idx={}.\n", idx);
+          std::print("Add fork at idx={}.\n", idx);
 
           Flop_Indx_Vec local_fork_index_flop_vec;
           local_fork_index_flop_vec = fork_index_flop_map[idx];
@@ -245,7 +245,7 @@ void Pass_fluid::add_fork(Lgraph *g) {
             if (join_index_flop_map[fork_nid].size() >= 2) {
               // add forked fflop
               join_after_fork = true;
-              std::cout << std::format("Join after fork detected at nid={} to nid={}.\n", idx, fork_nid);
+              std::print("Join after fork detected at nid={} to nid={}.\n", idx, fork_nid);
               forked_fflop_nid[i] = g->create_node().get_nid();
               g->node_type_set(forked_fflop_nid[i], FFlop_Op);
             }
@@ -254,7 +254,7 @@ void Pass_fluid::add_fork(Lgraph *g) {
           if (join_after_fork) {
             // replicate the logic from idx to forked fflops
             for (int i = 0; i < flop_count; i++) {
-              std::cout << std::format("replicate logic from {} to {}.\n", idx, forked_fflop_nid[i]);
+              std::print("replicate logic from {} to {}.\n", idx, forked_fflop_nid[i]);
               // this node should be replaced
               // Insert new edges
               for (const auto &out_edge : g->out_edges(idx)) {
@@ -269,7 +269,7 @@ void Pass_fluid::add_fork(Lgraph *g) {
               deleted = false;
               for (const auto &out_edge : g->out_edges(idx)) {
                 std::cout << "Printing out edge: \n";
-                std::cout << std::format("nid{} pid{} \n", out_edge.get_idx(), out_edge.get_inp_pin().get_pid());
+                std::print("nid{} pid{} \n", out_edge.get_idx(), out_edge.get_inp_pin().get_pid());
 
                 std::cout << "Deleting out edge: \n";
                 g->del_edge(out_edge);
@@ -286,7 +286,7 @@ void Pass_fluid::add_fork(Lgraph *g) {
           local_fork_index_flop_vec = fork_index_flop_map[idx];
 
           for (int i = 0; i < flop_count; i++) {
-            std::cout << std::format("Add #{} input to OR.\n", i);
+            std::print("Add #{} input to OR.\n", i);
             fork_nid = local_fork_index_flop_vec.back();
             local_fork_index_flop_vec.pop_back();
             Node_pin fork_np = Node_pin(fork_nid, ffsin, false);
@@ -318,7 +318,7 @@ void Pass_fluid::add_fork(Lgraph *g) {
           g->add_edge(vq_pin, and_inp);
           local_fork_index_flop_vec = fork_index_flop_map[idx];
           for (int i = 0; i < flop_count; i++) {
-            std::cout << std::format("Add #{} output to AND.\n", i);
+            std::print("Add #{} output to AND.\n", i);
             fork_nid = local_fork_index_flop_vec.back();
             local_fork_index_flop_vec.pop_back();
             // check if the output flop needs to join
@@ -354,11 +354,11 @@ void Pass_fluid::add_fork(Lgraph *g) {
 
   std::cout << "\n*****Second round.\n";
   for (auto idx : g->forward()) {
-    std::cout << std::format("\n*****Visiting idx:{}\n", idx);
-    std::cout << std::format("{}\n", g->node_type_get(idx).get_name());
+    std::print("\n*****Visiting idx:{}\n", idx);
+    std::print("{}\n", g->node_type_get(idx).get_name());
 
     for (const auto &out_edge : g->out_edges(idx)) {
-      std::cout << std::format("Printing edge from nid{} pid{} to nid{} pid{}.\n",
+      std::print("Printing edge from nid{} pid{} to nid{} pid{}.\n",
                  out_edge.get_self_nid(),
                  out_edge.get_out_pin().get_pid(),
                  out_edge.get_idx(),
@@ -368,8 +368,8 @@ void Pass_fluid::add_fork(Lgraph *g) {
 
   /*
   for(auto idx:g->backward()) {
-    std::cout << std::format("\n*****Visiting idx:{}\n",idx);
-    std::cout << std::format("{}\n", op_type_map[g->node_type_get(idx).op]);
+    std::print("\n*****Visiting idx:{}\n",idx);
+    std::print("{}\n", op_type_map[g->node_type_get(idx).op]);
   */
 }
 
@@ -383,7 +383,7 @@ void Pass_fluid::add_fork_deadlock(Lgraph *g) {
   // TODO: ask how to add pid to IO
   // Port_ID vi_pid = vi_nid;
   Port_ID vi_pid = 0;
-  std::cout << std::format("the nid of vi is {}\n", vi_nid);
+  std::print("the nid of vi is {}\n", vi_nid);
   g->node_type_set(vi_nid, GraphIO_Op);
   g->add_graph_input(vi_name.c_str(), vi_nid);
   Node_pin global_vi(vi_nid, vi_pid, false);
@@ -394,7 +394,7 @@ void Pass_fluid::add_fork_deadlock(Lgraph *g) {
   // TODO: ask how to add pid to IO
   //  Port_ID so_pid = so_nid;
   Port_ID so_pid = 0;
-  std::cout << std::format("the nid of so is {}\n", so_nid);
+  std::print("the nid of so is {}\n", so_nid);
   g->node_type_set(so_nid, GraphIO_Op);
   g->add_graph_input(so_name.c_str(), so_nid);
   Node_pin global_so(so_nid, so_pid, false);
@@ -405,7 +405,7 @@ void Pass_fluid::add_fork_deadlock(Lgraph *g) {
   // TODO: ask how to add pid to IO
   //  Port_ID vo_pid = vo_nid;
   Port_ID vo_pid = 0;
-  std::cout << std::format("the nid of vo is {}\n", vo_nid);
+  std::print("the nid of vo is {}\n", vo_nid);
   g->node_type_set(vo_nid, GraphIO_Op);
   g->add_graph_output(vo_name.c_str(), vo_nid);
   Node_pin global_vo(vo_nid, vo_pid, true);
@@ -416,16 +416,16 @@ void Pass_fluid::add_fork_deadlock(Lgraph *g) {
   // TODO: ask how to add pid to IO
   //  Port_ID si_pid = si_nid;
   Port_ID si_pid = 0;
-  std::cout << std::format("the nid of si is {}\n", si_nid);
+  std::print("the nid of si is {}\n", si_nid);
   g->node_type_set(si_nid, GraphIO_Op);
   g->add_graph_output(si_name.c_str(), si_nid);
   Node_pin global_si(si_nid, si_pid, true);
 
   for (auto idx : g->forward()) {
-    std::cout << std::format("\n*****Visiting idx:{}\n", idx);
-    std::cout << std::format("{}\n", g->node_type_get(idx).get_name());
+    std::print("\n*****Visiting idx:{}\n", idx);
+    std::print("{}\n", g->node_type_get(idx).get_name());
     for (const auto &out_edge : g->out_edges(idx)) {
-      std::cout << std::format("Printing edge from nid{} pid{} to nid{} pid{}.\n",
+      std::print("Printing edge from nid{} pid{} to nid{} pid{}.\n",
                  out_edge.get_self_nid(),
                  out_edge.get_out_pin().get_pid(),
                  out_edge.get_idx(),
@@ -463,7 +463,7 @@ void Pass_fluid::add_fork_deadlock(Lgraph *g) {
         Node_pin vq_pin(idx, ffvq, false);
         if (fork_index_flop_map[idx].size() >= 2) {
           // Add Fork
-          std::cout << std::format("Add fork at idx={}.\n", idx);
+          std::print("Add fork at idx={}.\n", idx);
 
           Flop_Indx_Vec local_fork_index_flop_vec;
           local_fork_index_flop_vec = fork_index_flop_map[idx];
@@ -474,7 +474,7 @@ void Pass_fluid::add_fork_deadlock(Lgraph *g) {
           Index_ID fork_nid;
           size_t   flop_count = fork_index_flop_map[idx].size();
           for (int i = 0; i < flop_count; i++) {
-            std::cout << std::format("Add #{} input to OR.\n", i);
+            std::print("Add #{} input to OR.\n", i);
             fork_nid = local_fork_index_flop_vec.back();
             local_fork_index_flop_vec.pop_back();
             Node_pin fork_np = Node_pin(fork_nid, ffsin, false);
@@ -499,7 +499,7 @@ void Pass_fluid::add_fork_deadlock(Lgraph *g) {
           g->add_edge(vq_pin, and_inp);
           local_fork_index_flop_vec = fork_index_flop_map[idx];
           for (int i = 0; i < flop_count; i++) {
-            std::cout << std::format("Add #{} output to AND.\n", i);
+            std::print("Add #{} output to AND.\n", i);
             fork_nid = local_fork_index_flop_vec.back();
             local_fork_index_flop_vec.pop_back();
             Node_pin fork_vin_np = Node_pin(fork_nid, ffvin, true);
@@ -523,11 +523,11 @@ void Pass_fluid::add_fork_deadlock(Lgraph *g) {
 
   std::cout << "\n*****Second round.\n";
   for (auto idx : g->forward()) {
-    std::cout << std::format("\n*****Visiting idx:{}\n", idx);
-    std::cout << std::format("{}\n", g->node_type_get(idx).get_name());
+    std::print("\n*****Visiting idx:{}\n", idx);
+    std::print("{}\n", g->node_type_get(idx).get_name());
 
     for (const auto &out_edge : g->out_edges(idx)) {
-      std::cout << std::format("Printing edge from nid{} pid{} to nid{} pid{}.\n",
+      std::print("Printing edge from nid{} pid{} to nid{} pid{}.\n",
                  out_edge.get_self_nid(),
                  out_edge.get_out_pin().get_pid(),
                  out_edge.get_idx(),
@@ -537,8 +537,8 @@ void Pass_fluid::add_fork_deadlock(Lgraph *g) {
 
   /*
   for(auto idx:g->backward()) {
-    std::cout << std::format("\n*****Visiting idx:{}\n",idx);
-    std::cout << std::format("{}\n", op_type_map[g->node_type_get(idx).op]);
+    std::print("\n*****Visiting idx:{}\n",idx);
+    std::print("{}\n", op_type_map[g->node_type_get(idx).op]);
   */
 }
 
@@ -554,8 +554,8 @@ void Pass_fluid::add_join(Lgraph *g) {}
 void Pass_fluid::add_join_deadlock(Lgraph *g) {
   std::cout << "\n**Add Join (possible dead lock): **\n";
   for (auto idx : g->forward()) {
-    std::cout << std::format("\n*****Visiting idx:{}\n", idx);
-    std::cout << std::format("{}\n", g->node_type_get(idx).get_name());
+    std::print("\n*****Visiting idx:{}\n", idx);
+    std::print("{}\n", g->node_type_get(idx).get_name());
     if (g->node_type_get(idx).op == FFlop_Op) {
       if (join_index_has_flop_map[idx]) {
         size_t flop_count = join_index_flop_map[idx].size();
@@ -565,7 +565,7 @@ void Pass_fluid::add_join_deadlock(Lgraph *g) {
             Node_pin_P new_node_pin = inp_edge.get_inp_pin();
             new_node_pin.print_info();
             Port_ID new_pid2= new_node_pin.get_pid();
-            std::cout << std::format("new_pid2 is {}.\n", new_pid2);
+            std::print("new_pid2 is {}.\n", new_pid2);
           */
           Flop_Indx_Vec local_join_index_flop_vec;
           local_join_index_flop_vec = join_index_flop_map[idx];
@@ -605,7 +605,7 @@ void Pass_fluid::add_join_deadlock(Lgraph *g) {
           }
 
           for (int i = 0; i < flop_count; i++) {
-            std::cout << std::format("Add #{} input to ANDtoVout.\n", i);
+            std::print("Add #{} input to ANDtoVout.\n", i);
             assert(local_join_index_flop_vec.size() > 0);
             flop_nid = local_join_index_flop_vec.back();
             local_join_index_flop_vec.pop_back();

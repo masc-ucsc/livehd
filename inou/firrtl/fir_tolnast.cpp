@@ -34,7 +34,7 @@ void Inou_firrtl::to_lnast(Eprp_var& var) {
     for (const auto& f_sv : absl::StrSplit(files, ',')) {
       std::string f(f_sv);
 
-      // std::cout << std::format("FILE: {}\n", f);
+      // std::print("FILE: {}\n", f);
       // firrtl::FirrtlPB firrtl_input;
 
       auto*        firrtl_input = new firrtl::FirrtlPB();
@@ -2403,9 +2403,9 @@ void Inou_firrtl_module::dump_var2flip(
   (void)module_var2flip;
 #ifndef NDEBUG
   for (auto& [var, set] : module_var2flip) {
-    std::cout << std::format("var:{} \n", var);
+    std::print("var:{} \n", var);
     for (auto& set_itr : set) {
-      std::cout << std::format("  hier_name:{:<20}, accu_flipped:{:<5}\n", set_itr.first, set_itr.second);
+      std::print("  hier_name:{:<20}, accu_flipped:{:<5}\n", set_itr.first, set_itr.second);
     }
   }
 #endif
@@ -2721,7 +2721,7 @@ void Inou_firrtl_module::list_statement_info(Lnast& lnast, const firrtl::FirrtlP
       bool is_rd_mport = mport2mem.find(tup_head_r) != mport2mem.end();
 
       if (is_rd_mport) {
-        // std::cout << std::format("DEBUG BBB handle rd_mport hier_name_l:{}, hier_name_r:{}\n", hier_name_l, hier_name_r);
+        // std::print("DEBUG BBB handle rd_mport hier_name_l:{}, hier_name_r:{}\n", hier_name_l, hier_name_r);
         initialize_rd_mport_from_usage(lnast, parent_node, tup_head_r, stmt);
         hier_name_l = name_prefix_modifier_flattener(hier_name_l, false);
         if (!absl::StrContains(hier_name_r, '.')) {
@@ -2734,7 +2734,7 @@ void Inou_firrtl_module::list_statement_info(Lnast& lnast, const firrtl::FirrtlP
         }
         return;
       } else if (is_wr_mport) {
-        // std::cout << std::format("DEBUG CCC handle wr_mport hier_name_l:{}, hier_name_r:{}\n", hier_name_l, hier_name_r);
+        // std::print("DEBUG CCC handle wr_mport hier_name_l:{}, hier_name_r:{}\n", hier_name_l, hier_name_r);
         initialize_wr_mport_from_usage(lnast, parent_node, tup_head_l, stmt);
         hier_name_r = name_prefix_modifier_flattener(hier_name_r, true);
         if (!absl::StrContains(hier_name_l, '.')) {
@@ -3033,7 +3033,7 @@ void Inou_firrtl_module::final_mem_interface_assign(Lnast& lnast, Lnast_nid& par
 // Create basis of LNAST tree. Set root to "top" and have "stmts" be top's child.
 void Inou_firrtl::user_module_to_lnast(Eprp_var& var, const firrtl::FirrtlPB_Module& fmodule, std::string_view file_name) {
 #ifndef NDEBUG
-  std::cout << std::format("Module (user): {}\n", fmodule.user_module().id());
+  std::print("Module (user): {}\n", fmodule.user_module().id());
 #endif
 
   Inou_firrtl_module firmod;
@@ -3067,7 +3067,7 @@ void Inou_firrtl::user_module_to_lnast(Eprp_var& var, const firrtl::FirrtlPB_Mod
 
 void Inou_firrtl::ext_module_to_lnast(Eprp_var& var, const firrtl::FirrtlPB_Module& fmodule, std::string_view file_name) {
 #ifndef NDEBUG
-  std::cout << std::format("Module (ext): {}\n", fmodule.external_module().id());
+  std::print("Module (ext): {}\n", fmodule.external_module().id());
 #endif
 
   Inou_firrtl_module                            firmod;

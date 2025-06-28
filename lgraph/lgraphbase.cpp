@@ -32,7 +32,7 @@ Lgraph_Base::~Lgraph_Base() {
 }
 
 Lgraph_Base::_init::_init() {
-  // std::cout << std::format("Lgraph_Base static init done\n");
+  // std::print("Lgraph_Base static init done\n");
   // Add here sequence of static initialization that may be needed
 }
 
@@ -227,31 +227,31 @@ void Lgraph_Base::print_stats() const {
   bytes += node_internal.size() * sizeof(Node_internal);
   auto n_edges = n_short_edges + n_long_edges;
 
-  std::cout << std::format("path:{} name:{}\n", path, name);
-  std::cout << std::format("  size:{} kbytes:{} bytes/node:{:.2f} bytes/edge:{:.2f} edges/master:{:.2f} deleted:{:.1f}%\n",
+  std::print("path:{} name:{}\n", path, name);
+  std::print("  size:{} kbytes:{} bytes/node:{:.2f} bytes/edge:{:.2f} edges/master:{:.2f} deleted:{:.1f}%\n",
              node_internal.size(),
              bytes / 1024,
              bytes / (1 + n_nodes),
              bytes / (1 + n_edges),
              (double)n_edges / (1 + n_master),
              100.0 * n_deleted / (1 + n_nodes + n_deleted + n_extra));
-  std::cout << std::format("  total master:{} root:{} node:{} extra:{} root/ratio:{:.2f} extra/ratio:{:.2f}\n",
+  std::print("  total master:{} root:{} node:{} extra:{} root/ratio:{:.2f} extra/ratio:{:.2f}\n",
              n_master,
              n_roots,
              n_nodes,
              n_extra,
              n_roots / (1.0 + n_nodes + n_extra + n_deleted),
              n_extra / (1.0 + n_nodes + n_extra + n_deleted));
-  std::cout << std::format("  total bytes/master:{:.2f} bytes/root:{:.2f} bytes/node:{:.2f} bytes/extra:{:.2f}\n",
+  std::print("  total bytes/master:{:.2f} bytes/root:{:.2f} bytes/node:{:.2f} bytes/extra:{:.2f}\n",
              bytes / n_master,
              bytes / n_roots,
              bytes / n_nodes,
              bytes / n_extra);
 
   bytes = node_internal.size() * sizeof(Node_internal) + 1;
-  std::cout << std::format("  edges bytes/root:{:.2f} bytes/node:{:.2f} bytes/extra:{:.2f}\n", bytes / n_roots, bytes / n_nodes, bytes / n_extra);
+  std::print("  edges bytes/root:{:.2f} bytes/node:{:.2f} bytes/extra:{:.2f}\n", bytes / n_roots, bytes / n_nodes, bytes / n_extra);
   bytes = n_nodes + 1;
-  std::cout << std::format("  edges short/node:{:.2f} long/node:{:.2f} short/ratio:{:.2f}\n",
+  std::print("  edges short/node:{:.2f} long/node:{:.2f} short/ratio:{:.2f}\n",
              n_short_edges / bytes,
              n_long_edges / bytes,
              (n_short_edges) / (1.0 + n_short_edges + n_long_edges));
@@ -299,7 +299,7 @@ Index_id Lgraph_Base::get_space_output_pin(const Index_id master_nid, const Inde
     total_1++;
     static int conta = 0;
     if (conta++ > 1000) {
-      std::cout << std::format("_1:{}/{} _2:{}/{} _3:{}/{} _4:{} _5:{} _6:{}\n",
+      std::print("_1:{}/{} _2:{}/{} _3:{}/{} _4:{} _5:{} _6:{}\n",
                  total_cycles_1,
                  total_1,
                  total_cycles_2,
@@ -611,13 +611,13 @@ void Lgraph_Base::add_edge_int(const Index_id dst_idx, const Port_ID inp_pid, In
   // node_internal.ref_unlock();
 }
 
-void Lgraph_Base::warn_int(std::string_view text) { std::cout << std::format("warning:{}\n", text); }
+void Lgraph_Base::warn_int(std::string_view text) { std::print("warning:{}\n", text); }
 
 void Lgraph_Base::error_int(std::string_view text) {
-  std::cout << std::format("error:{}\n", text);
+  std::print("error:{}\n", text);
   throw std::runtime_error(std::string(text));
 }
 
 void Lgraph_Base::info_int(std::string_view text) {
-  std::cout << std::format("info:{}\n", text);  // to be used by future warning/error reporting system
+  std::print("info:{}\n", text);  // to be used by future warning/error reporting system
 }

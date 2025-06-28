@@ -16,10 +16,10 @@ public:
     auto upass_registry = upass::uPass_plugin::get_registry();
     for (const auto& name : upass_names) {
       if (upass_registry.count(name)) {
-        std::cout << std::format("uPass - add {}\n", name);
+        std::print("uPass - add {}\n", name);
         upasses.push_back(upass_registry[name](_lm));
       } else {
-        std::cout << std::format("{} is not defined.\n", name);
+        std::print("{} is not defined.\n", name);
       }
     }
   }

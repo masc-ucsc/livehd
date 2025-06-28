@@ -37,7 +37,7 @@ void Lcompiler::prp_thread_ln2lg(const std::shared_ptr<Lnast> &ln) {
   }
   // auto tp = std::chrono::system_clock::now();
   // auto tp2 = std::chrono::system_clock::now();
-  // std::cout << std::format("Yo2 {}, mod_name:{}\n", (tp2-tp).count(), mod_name);
+  // std::print("Yo2 {}, mod_name:{}\n", (tp2-tp).count(), mod_name);
 }
 
 void Lcompiler::do_prp_local_cprop_bitwidth() {
@@ -64,15 +64,15 @@ void Lcompiler::do_prp_local_cprop_bitwidth() {
     Bitwidth bw(false, 11);
     Cprop    cp(false);
 
-    // std::cout << std::format("---------------- Copy-Propagation ({}) ------------------- (C-0)\n", lg_sub->get_name());
+    // std::print("---------------- Copy-Propagation ({}) ------------------- (C-0)\n", lg_sub->get_name());
     cp.do_trans(lg_sub);
     gviz == true ? gv.do_from_lgraph(lg_sub, "cprop-ed") : void();
 
-    // std::cout << std::format("---------------- Local Bitwidth-Inference ({}) ----------- (B-0)\n", lg_sub->get_name());
+    // std::print("---------------- Local Bitwidth-Inference ({}) ----------- (B-0)\n", lg_sub->get_name());
     bw.do_trans(lg_sub);
     gviz == true ? gv.do_from_lgraph(lg_sub, "bitwidth-ed") : void();
 
-    // std::cout << std::format("---------------- Copy-Propagation ({}) ------------------- (C-1)\n", lg_sub->get_name());
+    // std::print("---------------- Copy-Propagation ({}) ------------------- (C-1)\n", lg_sub->get_name());
 
     // FIXME: This is needed because bitwidth has OVERFLOW, and can not perform
     // all the constant propagation operations. Change to non-overflow (share
@@ -101,7 +101,7 @@ void Lcompiler::do_prp_global_bitwidth_inference() {
       if (lg->get_name() == top) {
         hit = true;
 
-        // std::cout << std::format("---------------- Global Bitwidth-Inference ({}) ----------------- (GB)\n", lg->get_name());
+        // std::print("---------------- Global Bitwidth-Inference ({}) ----------------- (GB)\n", lg->get_name());
         bw.do_trans(lg);
       }
       gviz == true ? gv.do_from_lgraph(lg, "") : void();
@@ -133,7 +133,7 @@ void Lcompiler::do_fir_lnast2lgraph(std::vector<std::shared_ptr<Lnast>> &lnasts)
 void Lcompiler::fir_thread_ln2lg(const std::shared_ptr<Lnast> &ln) {
   gviz == true ? gv.do_from_lnast(ln, "raw") : void();
 
-  // std::cout << std::format("-------- {:<28} ({:<30}) -------- (LN-0)\n", "Firrtl_Protobuf -> LNAST-SSA", absl::StrCat("__firrtl_",
+  // std::print("-------- {:<28} ({:<30}) -------- (LN-0)\n", "Firrtl_Protobuf -> LNAST-SSA", absl::StrCat("__firrtl_",
   // ln->get_top_module_name()));
   ln->ssa_trans();
   gviz == true ? gv.do_from_lnast(ln) : void();
@@ -142,7 +142,7 @@ void Lcompiler::fir_thread_ln2lg(const std::shared_ptr<Lnast> &ln) {
   // in the end, we should keep the original mod_name for the firrtl_op
   // mapped lgraph, so here I attached "__firrtl_" prefix for the firrtl_op_lgs
 
-  // std::cout << std::format("-------- {:<28} ({:<30}) -------- (LN-1)\n", "LNAST -> Lgraph", absl::StrCat("__firrtl_",
+  // std::print("-------- {:<28} ({:<30}) -------- (LN-1)\n", "LNAST -> Lgraph", absl::StrCat("__firrtl_",
   // ln->get_top_module_name()));
   auto mod_name = absl::StrCat("__firrtl_", ln->get_top_module_name());
   Lnast_tolg ln2lg(mod_name, path);
@@ -163,7 +163,7 @@ void Lcompiler::fir_thread_ln2lg(const std::shared_ptr<Lnast> &ln) {
   }
 
   // auto tp2 = std::chrono::system_clock::now();
-  // std::cout << std::format("Yo2 {}, mod_name:{}\n", (tp2-tp).count(), mod_name);
+  // std::print("Yo2 {}, mod_name:{}\n", (tp2-tp).count(), mod_name);
 }
 
 void Lcompiler::do_fir_cprop(bool tup_pass_only) {

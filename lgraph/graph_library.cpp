@@ -435,7 +435,7 @@ void Graph_library::reload_int() {
       attributes[id].version = version;
 
       sub_nodes[id]->from_json(lg_entry);
-      // std::cout << std::format("DEBUG21, sub_nodes size:{}, sub_nodes[{}]->get_lgid():{}, name:{}\n\n", sub_nodes.size(), id,
+      // std::print("DEBUG21, sub_nodes size:{}, sub_nodes[{}]->get_lgid():{}, name:{}\n\n", sub_nodes.size(), id,
       // sub_nodes[id]->get_lgid(), sub_nodes[id]->get_name());
 
       // NOTE: must use attributes to keep the string in memory
@@ -629,7 +629,7 @@ void Graph_library::expunge_int(std::string_view name) {
     std::string chop_name(de->d_name, match.size());
     if (chop_name == match) {
       std::string file = absl::StrCat(path, "/", de->d_name);
-      std::cout << std::format("deleting... {}\n", file);
+      std::print("deleting... {}\n", file);
       unlink(file.c_str());
     }
   }

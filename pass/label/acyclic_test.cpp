@@ -83,7 +83,7 @@ TEST_F(Label_acyclic_test, simple_graph_no_loop) {
   for (const auto &n : a_graph->forward(hier)) {
     ASSERT_EQ(0, static_cast<int>(n.get_color()));
 #ifdef DEBUG
-    std::cout << std::format("Node Name:{} , Node Color:{}\n", n.debug_name(), n.get_color());
+    std::print("Node Name:{} , Node Color:{}\n", n.debug_name(), n.get_color());
 #endif
   }
 }
@@ -178,7 +178,7 @@ TEST_F(Label_acyclic_test, simple_graph_loop) {
 
 #ifdef DEBUG
   for (const auto &n : b_graph->forward(hier)) {
-    std::cout << std::format("Node Name:{} , Node Color:{}\n", n.debug_name(), n.get_color());
+    std::print("Node Name:{} , Node Color:{}\n", n.debug_name(), n.get_color());
   }
 #endif
 
@@ -271,7 +271,7 @@ TEST_F(Label_acyclic_test, essent_test) {
 
 #ifdef DEBUG
   for (const auto &n : c_graph->forward(hier)) {
-    std::cout << std::format("Node Name:{} , Node Color:{}\n", n.debug_name(), n.get_color());
+    std::print("Node Name:{} , Node Color:{}\n", n.debug_name(), n.get_color());
   }
 #endif
 

@@ -123,12 +123,12 @@ void Semantic_check::print_out_of_scope_vars(Lnast *lnast) {
     std::sort(out_of_scope_vars.begin(), out_of_scope_vars.end());
     auto first_entry = out_of_scope_vars.begin();
     std::cout << "Out of Scope Variable Error:";
-    std::cout << std::format(": {}", *first_entry);
+    std::print(": {}", *first_entry);
     for (auto node_name : out_of_scope_vars) {
       if (node_name == *first_entry) {
         continue;
       }
-      std::cout << std::format(", {}", node_name);
+      std::print(", {}", node_name);
     }
     std::cout << " is/are not defined in the scope of definition\n";
   }
@@ -145,7 +145,7 @@ void Semantic_check::error_print_lnast_by_name(Lnast *lnast, std::string_view er
 
     std::string indent(2 * (it.level + 1), ' ');
 
-    std::cout << std::format("{} {} {:>20} : {}", it.level, indent, node.type.to_sv(), node.token.get_text());
+    std::print("{} {} {:>20} : {}", it.level, indent, node.type.to_sv(), node.token.get_text());
 
     if (node.token.get_text() == error_name && !printed) {
       std::cout << "    <==========\n";
@@ -168,7 +168,7 @@ void Semantic_check::error_print_lnast_by_type(Lnast *lnast, std::string_view er
 
     std::string indent(2 * (it.level + 1), ' ');
 
-    std::cout << std::format("{} {} {:>20} : {}", it.level, indent, node.type.to_sv(), node.token.get_text());
+    std::print("{} {} {:>20} : {}", it.level, indent, node.type.to_sv(), node.token.get_text());
 
     if (node.type.to_sv() == error_name && !printed) {
       std::cout << "    <==========\n";
@@ -192,7 +192,7 @@ void Semantic_check::error_print_lnast_var_warn(Lnast *lnast, std::vector<std::s
 
     std::string indent(2 * (it.level + 1), ' ');
 
-    std::cout << std::format("{} {} {:>20} : {}", it.level, indent, node.type.to_sv(), node.token.get_text());
+    std::print("{} {} {:>20} : {}", it.level, indent, node.type.to_sv(), node.token.get_text());
 
     if (error_names.size() != 0) {
       for (auto node_name = error_names.begin(); node_name != error_names.end(); *node_name++) {
@@ -251,12 +251,12 @@ void Semantic_check::resolve_read_write_lists(Lnast *lnast) {
     std::sort(error_reads.begin(), error_reads.end());
     auto first_entry = never_read.begin();
     std::cout << "Last-Write Variable Warning";
-    std::cout << std::format(": Last write(s) to '{}'", *first_entry);
+    std::print(": Last write(s) to '{}'", *first_entry);
     for (auto node_name : never_read) {
       if (node_name == *first_entry) {
         continue;
       }
-      std::cout << std::format(", '{}'", node_name);
+      std::print(", '{}'", node_name);
     }
     std::cout << " is/are never read\n";
   }
@@ -288,15 +288,15 @@ void Semantic_check::resolve_read_write_lists(Lnast *lnast) {
     // auto first_entry = perm_write_dict.begin();
     auto first_entry = error_names.begin();
     std::cout << "Never-Read Variable Warning";
-    // std::cout << std::format(": {}", first_entry->first);
-    std::cout << std::format(": {}", *first_entry);
+    // std::print(": {}", first_entry->first);
+    std::print(": {}", *first_entry);
     // for (auto node_name : perm_write_dict) {
     for (auto node_name : error_names) {
       if (node_name == *first_entry) {
         continue;
       }
-      // std::cout << std::format(", {}", node_name.first);
-      std::cout << std::format(", {}", node_name);
+      // std::print(", {}", node_name.first);
+      std::print(", {}", node_name);
     }
     std::cout << " were written but never read\n";
   }
@@ -311,12 +311,12 @@ void Semantic_check::resolve_read_write_lists(Lnast *lnast) {
     std::sort(error_outputs.begin(), error_outputs.end());
     auto first_entry = output_vars.begin();
     std::cout << "Output Variable Warning";
-    std::cout << std::format(": {}", *first_entry);
+    std::print(": {}", *first_entry);
     for (auto node_name : output_vars) {
       if (node_name == *first_entry) {
         continue;
       }
-      std::cout << std::format(", {}", node_name);
+      std::print(", {}", node_name);
     }
     std::cout << " should be written since declared in the function definition\n";
   }
@@ -378,12 +378,12 @@ void Semantic_check::resolve_lhs_rhs_lists(Lnast *lnast) {
   if (inefficient_LNAST.size() != 0) {
     auto first = inefficient_LNAST.begin();
     std::cout << "\nInefficient LNAST Warning";
-    std::cout << std::format(": {}", *first);
+    std::print(": {}", *first);
     for (auto name : inefficient_LNAST) {
       if (name == *first) {
         continue;
       }
-      std::cout << std::format(", {}", name);
+      std::print(", {}", name);
     }
     std::cout << " may be unnecessary\n";
   }
@@ -400,7 +400,7 @@ void Semantic_check::resolve_out_of_scope() {
         && write_dict.count(node.first) == 0 && !is_temp_var(node.first) && functions.count(node.first) == 0) {
       out_of_scope_vars.push_back(node.first);
     }
-    std::cout << std::format("Printing the read_dict:{}, {}\n", node.first, node.second);
+    std::print("Printing the read_dict:{}, {}\n", node.first, node.second);
   }
 }
 
@@ -539,14 +539,14 @@ void Semantic_check::check_tree_struct_ops(Lnast *lnast, const Lnast_nid &lnidx_
     error_print_lnast_by_type(lnast, node_type.to_sv());
     Pass::error("Tree Structure Operation Error: Not a Valid Node Type\n");
   }
-  // std::cout << std::format("Write Dict\n");
+  // std::print("Write Dict\n");
   // for (auto name : write_dict) {
-  //   std::cout << std::format("{} : {}\n", name.first, name.second);
+  //   std::print("{} : {}\n", name.first, name.second);
   // }
   // std::cout << "\n";
-  // std::cout << std::format("Read Dict\n");
+  // std::print("Read Dict\n");
   // for (auto name : read_dict) {
-  //   std::cout << std::format("{} : {}\n", name.first, name.second);
+  //   std::print("{} : {}\n", name.first, name.second);
   // }
   // std::cout << "\n";
   resolve_out_of_scope();
@@ -752,12 +752,12 @@ void Semantic_check::check_func_def(Lnast *lnast, const Lnast_nid &lnidx_opr, st
     std::sort(error_outputs.begin(), error_outputs.end());
     auto first_entry = output_vars.begin();
     std::cout << "Output Variable Warning";
-    std::cout << std::format(": {}", *first_entry);
+    std::print(": {}", *first_entry);
     for (auto node_name : output_vars) {
       if (node_name == *first_entry) {
         continue;
       }
-      std::cout << std::format(", {}", node_name);
+      std::print(", {}", node_name);
     }
     std::cout << " should be written since declared in the function definition\n";
   }
@@ -808,29 +808,29 @@ void Semantic_check::do_check(Lnast *lnast) {
       check_tree_struct_ops(lnast, stmt, ntype, stmt_name);
     }
   }
-  // std::cout << std::format("Write Dict\n");
+  // std::print("Write Dict\n");
   // for (auto name : write_dict) {
-  //   std::cout << std::format("{} : {}\n", lnast->get_name(name.first), name.second);
+  //   std::print("{} : {}\n", lnast->get_name(name.first), name.second);
   // }
   // std::cout << "\n";
-  // std::cout << std::format("Read Dict\n");
+  // std::print("Read Dict\n");
   // for (auto name : read_dict) {
-  //   std::cout << std::format("{} : {}\n", lnast->get_name(name.first), name.second);
+  //   std::print("{} : {}\n", lnast->get_name(name.first), name.second);
   // }
   // std::cout << "\n";
-  // std::cout << std::format("Output Vars\n");
+  // std::print("Output Vars\n");
   // for (auto name : output_vars) {
-  //   std::cout << std::format("{}\n", name);
+  //   std::print("{}\n", name);
   // }
   // std::cout << "\n";
-  // std::cout << std::format("LHS + RHS List\n");
+  // std::print("LHS + RHS List\n");
   // for (int i = 0; i < lhs_list.size(); i++) {
-  //   std::cout << std::format("{} : ", lnast->get_name(lhs_list[i]));
-  //   std::cout << std::format("[");
+  //   std::print("{} : ", lnast->get_name(lhs_list[i]));
+  //   std::print("[");
   //   for (int j = 0; j < rhs_list[i].size(); j++)  {
-  //     std::cout << std::format("{}, ", lnast->get_name(rhs_list[i][j]));
+  //     std::print("{}, ", lnast->get_name(rhs_list[i][j]));
   //   }
-  //   std::cout << std::format("]\n");
+  //   std::print("]\n");
   // }
   // std::cout << "\n";
   // Find Errors!
@@ -839,13 +839,13 @@ void Semantic_check::do_check(Lnast *lnast) {
     error_print_lnast_var_warn(lnast, out_of_scope_vars);
     std::sort(out_of_scope_vars.begin(), out_of_scope_vars.end());
     auto first_entry = out_of_scope_vars.begin();
-    std::cout << std::format("Out of Scope Variable Error");
-    std::cout << std::format(": {}", *first_entry);
+    std::print("Out of Scope Variable Error");
+    std::print(": {}", *first_entry);
     for (auto node_name : out_of_scope_vars) {
       if (node_name == *first_entry) {
         continue;
       }
-      std::cout << std::format(", {}", node_name);
+      std::print(", {}", node_name);
     }
     std::cout << " is/are not defined in the scope of definition\n";
   }

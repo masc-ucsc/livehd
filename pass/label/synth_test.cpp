@@ -80,7 +80,7 @@ TEST_F(Label_synth_test, test1) {
   for (const auto &n : a_graph->forward(hier)) {
     // ASSERT_EQ(0, static_cast<int>(n.get_color()));
 #ifdef DEBUG
-    std::cout << std::format("Node Name:{} , Node Color:{}\n", n.debug_name(), n.get_color());
+    std::print("Node Name:{} , Node Color:{}\n", n.debug_name(), n.get_color());
 #endif
   }
 }
@@ -166,7 +166,7 @@ TEST_F(Label_synth_test, test2) {
   for (const auto &n : b_graph->forward(hier)) {
     // ASSERT_EQ(expected[n.debug_name()], static_cast<int>(n.get_color()));
 #ifdef DEBUG
-    std::cout << std::format("Node Name:{} , Node Color:{}\n", n.debug_name(), n.get_color());
+    std::print("Node Name:{} , Node Color:{}\n", n.debug_name(), n.get_color());
 #endif
   }
 }
@@ -237,7 +237,7 @@ TEST_F(Label_synth_test, test3) {
 
   for (const auto &n : c_graph->forward(hier)) {
 #ifdef DEBUG
-    std::cout << std::format("Node Name:{} , Node Color:{}\n", n.debug_name(), n.get_color());
+    std::print("Node Name:{} , Node Color:{}\n", n.debug_name(), n.get_color());
 #endif
   }
 }

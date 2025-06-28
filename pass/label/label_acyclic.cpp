@@ -179,7 +179,7 @@ void Label_acyclic::gather_inou(Lgraph *g) {
     auto curr_id_nodes = it.second;
 
 #if G_DEBUG
-    std::cout << std::format("curr_id: {}\n", curr_id);
+    std::print("curr_id: {}\n", curr_id);
 #endif
 
     common_node1.clear();  // for id2out
@@ -243,22 +243,22 @@ void Label_acyclic::gather_inou(Lgraph *g) {
     std::cout << "common_node1:\n";
     for (auto &n : common_node1) {
       Node some_n(g, n);
-      std::cout << std::format("  {}\n", some_n.debug_name());
+      std::print("  {}\n", some_n.debug_name());
     }
 
     std::cout << "common_int1:\n";
     for (auto &n : common_int1) {
-      std::cout << std::format("  {}\n", n);
+      std::print("  {}\n", n);
     }
     std::cout << "common_node2:\n";
     for (auto &n : common_node2) {
       Node some_n(g, n);
-      std::cout << std::format("  {}\n", some_n.debug_name());
+      std::print("  {}\n", some_n.debug_name());
     }
 
     std::cout << "common_int2:\n";
     for (auto &n : common_int2) {
-      std::cout << std::format("  {}\n", n);
+      std::print("  {}\n", n);
     }
 #endif
 
@@ -333,7 +333,7 @@ void Label_acyclic::merge_partitions_same_parents() {
   while (keep_going) {
     // reset the flags and ids
 #if M_DEBUG
-    std::cout << std::format("Keep Going, current pivot:{}\n", *pivot);
+    std::print("Keep Going, current pivot:{}\n", *pivot);
 #endif
 
     merge_flag = false;
@@ -363,7 +363,7 @@ void Label_acyclic::merge_partitions_same_parents() {
 
     if (merge_flag) {
 #if M_DEBUG
-      std::cout << std::format("Merge Detected, {} -> {}\n", merge_from, merge_into);
+      std::print("Merge Detected, {} -> {}\n", merge_from, merge_into);
 #endif
       merge_op(merge_from, merge_into);
 
@@ -390,7 +390,7 @@ void Label_acyclic::merge_partitions_same_parents() {
       // No merge possible, check if pivot can be changed
       if ((pivot + 1) != pwi.end()) {
 #if M_DEBUG
-        std::cout << std::format("moving pivot old:{}, new:{}\n", *pivot, *(pivot + 1));
+        std::print("moving pivot old:{}, new:{}\n", *pivot, *(pivot + 1));
 #endif
         ++pivot;            // change pivot
         keep_going = true;  // keep scanning for merges
@@ -424,7 +424,7 @@ void Label_acyclic::merge_partitions_one_parent() {
 
   while (keep_going) {
 #if O_DEBUG
-    std::cout << std::format("Keep Going, current pivot:{}\n", *pivot);
+    std::print("Keep Going, current pivot:{}\n", *pivot);
 #endif
 
     // reset the flags and ids
@@ -436,9 +436,9 @@ void Label_acyclic::merge_partitions_one_parent() {
     // Iterate through pwi to check which are the same
     for (auto i = pwi.begin(); i != pwi.end(); ++i) {
 #if O_DEBUG
-      std::cout << std::format("id2incparts[{}]\n", *pivot);
+      std::print("id2incparts[{}]\n", *pivot);
       for (auto &o : id2incparts[*pivot]) {
-        std::cout << std::format("{}\n", o);
+        std::print("{}\n", o);
       }
 #endif
 
@@ -456,7 +456,7 @@ void Label_acyclic::merge_partitions_one_parent() {
 
     if (merge_flag) {
 #if O_DEBUG
-      std::cout << std::format("Merge Detected, {} -> {}\n", merge_from, merge_into);
+      std::print("Merge Detected, {} -> {}\n", merge_from, merge_into);
 #endif
       merge_op(merge_from, merge_into);
 
@@ -483,7 +483,7 @@ void Label_acyclic::merge_partitions_one_parent() {
       // No merge possible, check if pivot can be changed
       if ((pivot + 1) != pwi.end()) {
 #if O_DEBUG
-        std::cout << std::format("moving pivot old:{}, new:{}\n", *pivot, *(pivot + 1));
+        std::print("moving pivot old:{}, new:{}\n", *pivot, *(pivot + 1));
 #endif
         ++pivot;            // change pivot
         keep_going = true;  // keep scanning for merges
@@ -500,44 +500,44 @@ void Label_acyclic::dump(Lgraph *g) const {
   int node_tracker = 0;
 
   for (auto n : g->forward(hier)) {
-    std::cout << std::format("Node: {}", n.debug_name());
+    std::print("Node: {}", n.debug_name());
     if (n.has_color()) {
-      std::cout << std::format(", Node Color: {}\n", n.get_color());
+      std::print(", Node Color: {}\n", n.get_color());
     } else {
       std::cout << "\n";
     }
     node_tracker++;
   }
-  std::cout << std::format("Found {} nodes using g->forward(hier)\n", node_tracker);
+  std::print("Found {} nodes using g->forward(hier)\n", node_tracker);
 
   std::cout << "=== id2inc ===\n";
   for (auto &it : id2inc) {
-    std::cout << std::format("  Part ID: {}\n", it.first);
+    std::print("  Part ID: {}\n", it.first);
     for (auto &n : it.second) {
       Node node(g, n);
-      std::cout << std::format("    {}\n", node.debug_name());
+      std::print("    {}\n", node.debug_name());
     }
   }
 
   std::cout << "=== id2out ===\n";
   for (auto &it : id2out) {
-    std::cout << std::format("  Part ID: {}\n", it.first);
+    std::print("  Part ID: {}\n", it.first);
     for (auto &n : it.second) {
       Node node(g, n);
-      std::cout << std::format("    {}\n", node.debug_name());
+      std::print("    {}\n", node.debug_name());
     }
   }
 
   std::cout << "=== Roots ===\n";
   for (auto &it : roots) {
     Node n(g, it);
-    std::cout << std::format("    {}\n", n.debug_name());
+    std::print("    {}\n", n.debug_name());
   }
 
   std::cout << "=== node2id ===\n";
   for (auto &it : node2id) {
     Node n(g, it.first);
-    std::cout << std::format("    {}, ID: {}\n", n.debug_name(), it.second);
+    std::print("    {}, ID: {}\n", n.debug_name(), it.second);
   }
   std::cout << "---- fin ----\n";
 }
@@ -562,9 +562,9 @@ void Label_acyclic::label(Lgraph *g) {
 #if F_DEBUG
   for (auto n : g->forward(hier)) {
     if (node2id.find(n.get_compact()) != node2id.end()) {
-      std::cout << std::format("Found {} in node2id\n", n.debug_name());
+      std::print("Found {} in node2id\n", n.debug_name());
     } else {
-      std::cout << std::format("Not found {} in node2id\n", n.debug_name());
+      std::print("Not found {} in node2id\n", n.debug_name());
     }
   }
 #endif

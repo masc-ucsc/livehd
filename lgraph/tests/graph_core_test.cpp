@@ -99,7 +99,7 @@ TEST_F(Setup_graph_core, trivial_ops_insert1) {
   auto n = 0u;
   for (const auto &m : nodes) {
     gc.add_edge(m1, m);
-    // std::cout << std::format("ADDING {}\n",m);
+    // std::print("ADDING {}\n",m);
     // gc.dump(m1);
     ++n;
     EXPECT_EQ(gc.get_num_pin_outputs(m1), n);
@@ -113,7 +113,7 @@ TEST_F(Setup_graph_core, trivial_ops_insert1) {
     auto m = gc.create_node();
     gc.add_edge(m2, m);
     gc.add_edge(m, m3);
-    // std::cout << std::format("ADDING {}\n",m);
+    // std::print("ADDING {}\n",m);
     // gc.dump(m2);
     ++n;
     EXPECT_EQ(gc.get_num_pin_outputs(m2), i + 1);
@@ -245,14 +245,14 @@ TEST_F(Setup_graph_core, delete_edge) {
     if (do_sink || driver_nodes.empty()) {
       auto m = sink_nodes.back();
       sink_nodes.pop_back();
-      // std::cout << std::format("DELETING sink node:{}\n", m);
+      // std::print("DELETING sink node:{}\n", m);
       gc.del_edge(m1, m);
       // gc.dump(m1);
     } else {
       I(!driver_nodes.empty());
       auto m = driver_nodes.back();
       driver_nodes.pop_back();
-      // std::cout << std::format("DELETING driver node:{}\n", m);
+      // std::print("DELETING driver node:{}\n", m);
       gc.del_edge(m, m1);
       // gc.dump(m1);
     }

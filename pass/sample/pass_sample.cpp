@@ -80,7 +80,7 @@ void Pass_sample::do_wirecount(Lgraph *g, int indent) {
     space.append("  ");
   }
 
-  std::cout << std::format("{}module {} : inputs {} bits {} : outputs {} bits {} : nodes {} : submodules {} : wire {} bits {}\n",
+  std::print("{}module {} : inputs {} bits {} : outputs {} bits {} : nodes {} : submodules {} : wire {} bits {}\n",
              space,
              g->get_name(),
              i_num,
@@ -112,7 +112,7 @@ void Pass_sample::do_wirecount(Lgraph *g, int indent) {
           n_out++;
         }
       }
-      std::cout << std::format("{}  module {} BBOX : inputs {} outputs {}\n", space, sub_lg->get_name(), n_inp, n_out);
+      std::print("{}  module {} BBOX : inputs {} outputs {}\n", space, sub_lg->get_name(), n_inp, n_out);
 
       return;  // No blackboxes
     }
@@ -135,10 +135,10 @@ void Pass_sample::compute_histogram(Lgraph *g) {
   }
 
   for (auto &e : histogram) {
-    std::cout << std::format("{} {}\n", (int)e.first, e.second);
+    std::print("{} {}\n", (int)e.first, e.second);
   }
 
-  std::cout << std::format("Pass: cells {}\n", cells);
+  std::print("Pass: cells {}\n", cells);
 }
 
 void Pass_sample::compute_max_depth(Lgraph *g) {
@@ -155,11 +155,11 @@ void Pass_sample::compute_max_depth(Lgraph *g) {
         local_max = d + 1;
       }
     }
-    std::cout << std::format("{} {}\n", node.debug_name(), local_max);
+    std::print("{} {}\n", node.debug_name(), local_max);
     depth[node.get_compact()] = local_max;
   }
 
-  std::cout << std::format("Pass: max_depth {}\n", max_depth);
+  std::print("Pass: max_depth {}\n", max_depth);
 }
 
 void Pass_sample::annotate_placement(Lgraph *g) {
@@ -177,11 +177,11 @@ void Pass_sample::annotate_placement(Lgraph *g) {
 
   for (auto node : g->fast()) {
     const auto &place = node.get_place();
-    std::cout << std::format("1.cell {} placed at x:{}\n", node.get_or_create_name(), place.get_x());
+    std::print("1.cell {} placed at x:{}\n", node.get_or_create_name(), place.get_x());
   }
   for (auto node : g->forward()) {
     auto place = node.get_place();
-    std::cout << std::format("2.cell {} placed at x:{}\n", node.get_or_create_name(), place.get_x());
+    std::print("2.cell {} placed at x:{}\n", node.get_or_create_name(), place.get_x());
   }
 }
 

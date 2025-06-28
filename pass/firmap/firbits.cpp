@@ -14,13 +14,13 @@
 
 void Firmap::dump() const {
   for (const auto &maps_it : fbmaps) {
-    std::cout << std::format("processing lgraph:{}\n", maps_it.first->get_name());
+    std::print("processing lgraph:{}\n", maps_it.first->get_name());
 
     std::cout << "  fbmap:\n";
     for (const auto &it : maps_it.second) {
       Node_pin dpin(maps_it.first, it.first);
 
-      std::cout << std::format("    pin:{} ", dpin.debug_name());
+      std::print("    pin:{} ", dpin.debug_name());
       it.second.dump();
     }
   }
@@ -52,7 +52,7 @@ void Firmap::do_firbits_analysis(Lgraph *lg) {  // multi-threade
     }
 
 #ifndef NDEBUG
-    std::cout << std::format("\nFIRBITS Iteration:{}\n", firbits_iters);
+    std::print("\nFIRBITS Iteration:{}\n", firbits_iters);
 #endif
 
     firbits_wait_flop = false;
@@ -127,8 +127,8 @@ void Firmap::analysis_lg_flop(Node &node, FBMap &fbmap) {
     return;
   } else {
 #ifndef NDEBUG
-    std::cout << std::format("    {} input driver {} not ready\n", node.debug_name(), d_dpin.debug_name());
-    std::cout << std::format("    {} flop q_pin {} not ready\n", node.debug_name(), qpin.debug_name());
+    std::print("    {} input driver {} not ready\n", node.debug_name(), d_dpin.debug_name());
+    std::print("    {} flop q_pin {} not ready\n", node.debug_name(), qpin.debug_name());
 #endif
     firbits_issues = true;
     return;
@@ -289,7 +289,7 @@ void Firmap::analysis_lg_attr_set_dp_assign(Node &node_dp, FBMap &fbmap) {
     fb_lhs = it->second;
   } else {
 #ifndef NDEBUG
-    std::cout << std::format("    {} input driver {} not ready\n", node_dp.debug_name(), dpin_lhs.debug_name());
+    std::print("    {} input driver {} not ready\n", node_dp.debug_name(), dpin_lhs.debug_name());
 #endif
     firbits_issues = true;
     return;
@@ -301,7 +301,7 @@ void Firmap::analysis_lg_attr_set_dp_assign(Node &node_dp, FBMap &fbmap) {
     fb_rhs = it2->second;
   } else {
 #ifndef NDEBUG
-    std::cout << std::format("    {} input driver {} not ready\n", node_dp.debug_name(), dpin_rhs.debug_name());
+    std::print("    {} input driver {} not ready\n", node_dp.debug_name(), dpin_rhs.debug_name());
 #endif
     firbits_issues = true;
     return;

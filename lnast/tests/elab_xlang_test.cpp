@@ -94,12 +94,12 @@ public:
 
       if (scan_is_token(Xlanguage_id_if)) {
         n_ifs++;
-        std::cout << std::format("IF [{}]\n", scan_text());
+        std::print("IF [{}]\n", scan_text());
       }
 
       scan_next();
     }
-    std::cout << std::format("total tokens = {}\n", total);
+    std::print("total tokens = {}\n", total);
   }
 };
 

@@ -73,7 +73,7 @@ void Inou_yosys_api::set_script_yosys(const Eprp_var &var, bool do_read) {
     return;
   }
 
-  std::cout << std::format("path:{} script:{}\n", main_path, script_file);
+  std::print("path:{} script:{}\n", main_path, script_file);
 }
 
 void Inou_yosys_api::call_yosys(mustache::data &vars) {
@@ -103,7 +103,7 @@ void Inou_yosys_api::call_yosys(mustache::data &vars) {
 
     std::string cmd{c};  // yosys call needs std::string
 
-    std::cout << std::format("yosys cmd:{}\n", cmd);
+    std::print("yosys cmd:{}\n", cmd);
     try {
       Yosys::Pass::call(&design, cmd);
     } catch (...) {
@@ -125,7 +125,7 @@ void Inou_yosys_api::call_yosys(mustache::data &vars) {
   I(sz_check == yosys_cmd.size());
   close(fd);
 
-  std::cout << std::format("yosys {} synthesis cmd: {} using {}\n", filename, yosys, script_file);
+  std::print("yosys {} synthesis cmd: {} using {}\n", filename, yosys, script_file);
 
   int pid = fork();
   if (pid < 0) {

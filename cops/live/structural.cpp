@@ -11,16 +11,9 @@
 #include "structural.hpp"
 
 #include <format>
-#include <iostream>
-#include <format>
 #include <fstream>
-#include <format>
-#include <iostream>
-#include <format>
 #include <functional>
-#include <format>
 #include <iostream>
-#include <format>
 #include <queue>
 
 #include "lgedgeiter.hpp"
@@ -86,7 +79,7 @@ void Live_structural::replace(Lgraph *nsynth) {
       // just add it to the end
       // FIXME: what happens if there is a loop?
       discovered.push(current_);
-      // std::cout << std::format("pushing back {} due to no candidate equiv\n", current);
+      // std::print("pushing back {} due to no candidate equiv\n", current);
       continue;
     }
 
@@ -114,11 +107,12 @@ void Live_structural::replace(Lgraph *nsynth) {
   int                count = 0;
   std::set<Index_id> match;
   for (auto &equivs : candidate_equiv) {
-    if (no_match.find(equivs.first) != no_match.end())
+    if (no_match.find(equivs.first) != no_match.end()) {
       continue;
+    }
 
     count++;
   }
 
-  std::cout << std::format("nomatch {}, match {}\n", no_match.size(), count);
+  std::print("nomatch {}, match {}\n", no_match.size(), count);
 }

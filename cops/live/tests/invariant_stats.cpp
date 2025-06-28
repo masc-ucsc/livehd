@@ -1,7 +1,7 @@
 
 #include <format>
-#include <iostream>
 #include <fstream>
+#include <iostream>
 
 #include "invariant.hpp"
 #include "pass.hpp"
@@ -22,10 +22,10 @@ int main(int argc, char** argv) {
   Invariant_boundaries* bound = Invariant_boundaries::deserialize(ifs);
 
   std::cout << "\n\n#########################################################\n";
-  std::cout << std::format("stats on bounds: top {}, hier_sep {}\n\n", bound->top, bound->hierarchical_separator);
+  std::print("stats on bounds: top {}, hier_sep {}\n\n", bound->top, bound->hierarchical_separator);
   std::cout << "invar_cones\n";
   for (auto& cones : bound->invariant_cones) {
-    std::cout << std::format("id: {} count: {}\n", cones.first.first, cones.second.size());
+    std::print("id: {} count: {}\n", cones.first.first, cones.second.size());
   }
 
   ifs.close();

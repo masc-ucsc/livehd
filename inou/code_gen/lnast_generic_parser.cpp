@@ -3,9 +3,9 @@
 
 #include <unistd.h>
 
+#include <cstring>
 #include <format>
 #include <iostream>
-#include <cstring>
 #include <memory>
 #include <string>
 #include <string_view>
@@ -267,36 +267,36 @@ bool Cpp_parser::set_convert_parameters(std::string_view key, std::string_view r
 void Prp_parser::dump_maps() const {
   std::cout << "printing the unsigned vector\n";
   for (const auto &elem : unsigned_vars) {
-    std::cout << std::format("var:{}\n", elem);
+    std::print("var:{}\n", elem);
   }
 }
 void Prp_parser::call_dump_maps() const { Prp_parser::dump_maps(); }
 void Ver_parser::dump_maps() const {
   std::cout << "printing the unsigned vector\n";
   for (const auto &elem : unsigned_vars) {
-    std::cout << std::format("var:{}\n", elem);
+    std::print("var:{}\n", elem);
   }
 }
 void Ver_parser::call_dump_maps() const { Ver_parser::dump_maps(); }
 void Cpp_parser::dump_maps() const {
   std::cout << "printing I/P bitwidth values:\n";
   for (const auto &elem : inp_bw) {
-    std::cout << std::format("\tkey: {}, value: {}\n", elem.first, elem.second);
+    std::print("\tkey: {}, value: {}\n", elem.first, elem.second);
   }
 
   std::cout << "printing O/P bitwidth values:\n";
   for (const auto &elem : outp_bw) {
-    std::cout << std::format("\tkey: {}, value: {}\n", elem.first, elem.second);
+    std::print("\tkey: {}, value: {}\n", elem.first, elem.second);
   }
 
   std::cout << "printing reg bitwidth values:\n";
   for (const auto &elem : reg_bw) {
-    std::cout << std::format("\tkey: {}, value: {}\n", elem.first, elem.second);
+    std::print("\tkey: {}, value: {}\n", elem.first, elem.second);
   }
 
   std::cout << "printing the unsigned vector\n";
   for (const auto &elem : unsigned_vars) {
-    std::cout << std::format("var:{}\n", elem);
+    std::print("var:{}\n", elem);
   }
 }
 void Cpp_parser::call_dump_maps() const { Cpp_parser::dump_maps(); }

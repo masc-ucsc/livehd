@@ -250,7 +250,7 @@ void Lgraph::load(const std::shared_ptr<Hif_read> hif) {
     }
 
     if (dpin.is_invalid()) {
-      std::cout << std::format("undriven input {}<-{}", p.first.get_wire_name(), p.second);
+      std::print("undriven input {}<-{}", p.first.get_wire_name(), p.second);
     } else {
       p.first.connect_driver(dpin);
     }
@@ -1570,7 +1570,7 @@ Fast_edge_iterator Lgraph::fast(bool visit_sub) { return Fast_edge_iterator(this
 
 void Lgraph::save(std::string filename) {
 #ifndef NDEBUG
-  std::cout << std::format("lgraph save: {}, size: {}\n", name, node_internal.size());
+  std::print("lgraph save: {}, size: {}\n", name, node_internal.size());
 #endif
   if (filename == "") {
     filename = get_save_filename();
@@ -1705,13 +1705,13 @@ void Lgraph::save(std::string filename) {
 }
 
 void Lgraph::dump(bool hier) {
-  std::cout << std::format("lgraph name: {}, size: {}\n", name, node_internal.size());
+  std::print("lgraph name: {}, size: {}\n", name, node_internal.size());
 
   for (const auto &io_pin : get_self_sub_node().get_io_pins()) {
     if (io_pin.is_invalid()) {
       continue;
     }
-    std::cout << std::format("  lgraph io name: {}, port pos: {}, pid: {}, i/o: {}\n",
+    std::print("  lgraph io name: {}, port pos: {}, pid: {}, i/o: {}\n",
                io_pin.name,
                io_pin.graph_io_pos,
                get_self_sub_node().get_instance_pid(io_pin.name),
@@ -1757,19 +1757,19 @@ void Lgraph::dump(bool hier) {
 
   std::cout << "\n";
   each_local_unique_sub_fast([](Lgraph *sub_lg) -> bool {
-    std::cout << std::format("  sub lgraph name:{}\n", sub_lg->get_name());
+    std::print("  sub lgraph name:{}\n", sub_lg->get_name());
 
     return true;
   });
 
   for (const auto &cit : color_count) {
-    std::cout << std::format("color:{} count:{}\n", cit.first, cit.second);
+    std::print("color:{} count:{}\n", cit.first, cit.second);
   }
 }
 
 void Lgraph::dump_down_nodes() {
   for (auto &cnode : subid_map) {
-    std::cout << std::format(" sub:{}\n", cnode.first.get_node(this).debug_name());
+    std::print(" sub:{}\n", cnode.first.get_node(this).debug_name());
   }
 }
 

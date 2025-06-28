@@ -42,9 +42,9 @@ void Pass_firmap::trans(Eprp_var &var) {
   for (const auto &lg : var.lgs) {
     auto name{lg->get_name()};
     if (name.substr(0, 11) != "__firrtl_") {
-      std::cout << std::format("firmap skipping {}\n", name);
+      std::print("firmap skipping {}\n", name);
     }
-    std::cout << std::format("firmap {}\n", name);
+    std::print("firmap {}\n", name);
     fm.do_firbits_analysis(lg);
     auto new_lg = fm.do_firrtl_mapping(lg);
     lgs.emplace_back(new_lg);

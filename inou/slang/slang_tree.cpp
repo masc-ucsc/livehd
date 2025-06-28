@@ -25,7 +25,7 @@ Slang_tree::Slang_tree() { parsed_lnasts.clear(); }
 void Slang_tree::process_root(const slang::ast::RootSymbol &root) {
   auto topInstances = root.topInstances;
   for (auto inst : topInstances) {
-    // std::cout << std::format("slang_tree top:{}\n", inst->name);
+    // std::print("slang_tree top:{}\n", inst->name);
 
     I(!has_lnast(inst->name));  // top level should not be already (may sub instances)
     auto ok = process_top_instance(*inst);
@@ -55,7 +55,7 @@ bool Slang_tree::process_top_instance(const slang::ast::InstanceSymbol &symbol) 
   // Instance bodies are all the same, so if we've visited this one
   // already don't bother doing it again.
   if (parsed_lnasts.contains(def.name)) {
-    std::cout << std::format("slang_tree module:{} already parsed\n", def.name);
+    std::print("slang_tree module:{} already parsed\n", def.name);
     return false;
   }
 
@@ -98,7 +98,7 @@ bool Slang_tree::process_top_instance(const slang::ast::InstanceSymbol &symbol) 
       if (type.hasFixedRange()) {
         auto range = type.getFixedRange();
         if (!range.isLittleEndian()) {
-          std::cout << std::format("WARNING: {} is big endian, Flipping IO to handle. Careful about mix/match with modules\n", port.name);
+          std::print("WARNING: {} is big endian, Flipping IO to handle. Careful about mix/match with modules\n", port.name);
         }
       }
       lnast_create_obj.vname2lname.emplace(var_name, var_name);
@@ -110,7 +110,7 @@ bool Slang_tree::process_top_instance(const slang::ast::InstanceSymbol &symbol) 
       const auto &port = p->as<slang::ast::InterfacePortSymbol>();
       (void)port;
 
-      std::cout << std::format("port:{} FIXME\n", p->name);
+      std::print("port:{} FIXME\n", p->name);
     } else {
       I(false);  // What other type?
     }
@@ -157,7 +157,7 @@ bool Slang_tree::process_top_instance(const slang::ast::InstanceSymbol &symbol) 
                   return false;
                 }
               } else {
-                std::cout << std::format("TODO: handle kind {}\n", (int)bstmt->kind);
+                std::print("TODO: handle kind {}\n", (int)bstmt->kind);
               }
             }
           }

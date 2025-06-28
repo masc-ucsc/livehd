@@ -54,29 +54,29 @@ void Pass_locator::begin_pass(Eprp_var& var) {
     // const auto& leaf_child_check = ln->get_child(curr_index);
     bool all_are_leaves = true;
     for (const lh::Tree_index& it : ln->children(curr_index)) {
-      // std::cout << std::format("PARSING TO CHECK LEAVES:   {}:{}\n",ln->get_name(it), it.level );
+      // std::print("PARSING TO CHECK LEAVES:   {}:{}\n",ln->get_name(it), it.level );
       if (!(ln->is_leaf(it))) {
         all_are_leaves = false;
       }
     }
-    // std::cout << std::format("?????all children leaves????: {}\n", all_are_leaves);
+    // std::print("?????all children leaves????: {}\n", all_are_leaves);
     if (all_are_leaves) {  // ln->is_leaf(leaf_child_check))
       if (ln->get_type(curr_index).is_assign()) {
         // if assign was curr_index; process assign subtree:
         const auto& frst_child_indx = ln->get_first_child(curr_index);        // assign fisrt child
         const auto& sec_child_indx  = ln->get_sibling_next(frst_child_indx);  // assign sec child
         auto        it              = ref_hash_map.find(ln->get_name(sec_child_indx));
-        // std::cout << std::format("===it:{}\n",it->second);
-        // std::cout << std::format("it.frst.find _ :{}\n", !(is_temp_var(it->first)));
-        // std::cout << std::format("it.second.find ___ :{}\n", !(is_temp_var(it->second)));
+        // std::print("===it:{}\n",it->second);
+        // std::print("it.frst.find _ :{}\n", !(is_temp_var(it->first)));
+        // std::print("it.second.find ___ :{}\n", !(is_temp_var(it->second)));
         bool in_map = false;
         if (it != ref_hash_map.end()) {
           in_map = true;
         }
-        // std::cout << std::format("in_map:{}\n", in_map);
+        // std::print("in_map:{}\n", in_map);
         if (in_map && !(is_temp_var(it->second)) && !(is_temp_var(it->first))
             && (is_ssa(it->second) || is_ssa(it->first))) {  // sec child is ssa; do not attach this node!
-          // std::cout << std::format("****not adding {} and {}\n", ln->get_name(frst_child_indx), ln->get_name(sec_child_indx));
+          // std::print("****not adding {} and {}\n", ln->get_name(frst_child_indx), ln->get_name(sec_child_indx));
           curr_index       = ln->get_sibling_next(curr_index);
           curr_incremented = true;
         }

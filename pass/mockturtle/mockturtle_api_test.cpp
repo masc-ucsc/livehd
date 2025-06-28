@@ -29,7 +29,7 @@ int main() {
   lut.create_po(o1);
   lut.foreach_node([&](auto const& n) {
     auto func = lut.node_function(n);
-    std::cout << std::format("n{} func = {}\n", lut.node_to_index(n), kitty::to_hex(func));
+    std::print("n{} func = {}\n", lut.node_to_index(n), kitty::to_hex(func));
   });
   write_bench(lut, std::cout);
 }

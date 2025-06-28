@@ -28,7 +28,7 @@ void Inou_liberty::liberty_open(Eprp_var &var) {
   auto *library = Graph_library::instance(p.path);
 
   for (const auto f : absl::StrSplit(p.files, ',')) {
-    std::cout << std::format("reading liberty {}\n", f);
+    std::print("reading liberty {}\n", f);
 
     ot::Timer timer;
 

@@ -2,10 +2,9 @@
 
 #include "pass_compiler.hpp"
 
+#include <cstddef>
 #include <format>
 #include <iostream>
-#include <format>
-#include <cstddef>
 
 #include "absl/strings/str_split.h"
 #include "lcompiler.hpp"
@@ -32,15 +31,15 @@ void Pass_compiler::compile(Eprp_var &var) {
   // TRACE_EVENT("pass", "pass.compile");
 
   Pass_compiler pc(var);
-  auto          path       = pc.get_path(var);
-  auto          odir       = pc.get_odir(var);
-  auto          top        = pc.check_option_top(var);
-  auto          gviz       = pc.check_option_gviz(var);
-  auto          get_firrtl = pc.check_option_firrtl(var);
+  auto          path           = pc.get_path(var);
+  auto          odir           = pc.get_odir(var);
+  auto          top            = pc.check_option_top(var);
+  auto          gviz           = pc.check_option_gviz(var);
+  auto          get_firrtl     = pc.check_option_firrtl(var);
   auto          only_tup_cprop = pc.check_option_cprop(var);
 
   Lcompiler compiler(path, odir, top, gviz);
-  std::cout << std::format("top module_name is: {}\n", top);
+  std::print("top module_name is: {}\n", top);
 
   if (var.lnasts.empty()) {
     auto files = pc.get_files(var);
@@ -75,7 +74,7 @@ void Pass_compiler::pyrope_compilation(Eprp_var &var, Lcompiler &compiler) {
 void Pass_compiler::firrtl_compilation(Eprp_var &var, Lcompiler &compiler, bool &only_tup_cprop) {
   (void)only_tup_cprop;
   compiler.do_fir_lnast2lgraph(var.lnasts);
-	compiler.do_fir_cprop(only_tup_cprop);
+  compiler.do_fir_cprop(only_tup_cprop);
   if (!only_tup_cprop) {
     compiler.do_fir_firbits();
     compiler.do_fir_firmap_bitwidth();

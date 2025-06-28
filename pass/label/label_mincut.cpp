@@ -205,7 +205,7 @@ void Label_mincut::viecut_cut(std::string inp_metis_path, std::string out_path) 
 void Label_mincut::viecut_label(std::string result_path) {
   struct stat buff;
   if (stat(result_path.c_str(), &buff) != 0) {
-    std::cout << std::format("viecut result file, {}, does no exist inside {}\n", result_name, base_path);
+    std::print("viecut result file, {}, does no exist inside {}\n", result_name, base_path);
     return;
   }
   std::ifstream in_file(result_path);
@@ -231,13 +231,13 @@ void Label_mincut::viecut_label(std::string result_path) {
  * * * * * * * * */
 void Label_mincut::dump(Lgraph *g) {
   std::cout << "---- Label MinCut Dump ----\n";
-  std::cout << std::format("Num Nodes: {}, Num Edges: {}\n", num_nodes, num_edges);
+  std::print("Num Nodes: {}, Num Edges: {}\n", num_nodes, num_edges);
   std::cout << "=== id2node ===\n";
   for (auto &it : id2node) {
     auto curr_id = it.first;
     Node tmp_n(g, it.second);
     auto curr_node = tmp_n.debug_name();
-    std::cout << std::format("  ID: {}, Node: {}\n", curr_id, curr_node);
+    std::print("  ID: {}, Node: {}\n", curr_id, curr_node);
   }
 
   std::cout << "=== node2id ===\n";
@@ -245,7 +245,7 @@ void Label_mincut::dump(Lgraph *g) {
     auto curr_id = it.second;
     Node tmp_n(g, it.first);
     auto curr_node = tmp_n.debug_name();
-    std::cout << std::format("  Node: {}, ID: {}\n", curr_id, curr_node);
+    std::print("  Node: {}, ID: {}\n", curr_id, curr_node);
   }
 
   std::cout << "=== id2neighs ===\n";
@@ -254,9 +254,9 @@ void Label_mincut::dump(Lgraph *g) {
     Node tmp_n(g, id2node[curr_id]);
     auto curr_node = tmp_n.debug_name();
     auto neighbors = it.second;  // IntSet
-    std::cout << std::format("  Node: {}, ID: {}\n", curr_node, curr_id);
+    std::print("  Node: {}, ID: {}\n", curr_node, curr_id);
     for (auto &n : neighbors) {
-      std::cout << std::format("  {}", n);
+      std::print("  {}", n);
     }
     std::cout << "\n";
   }
@@ -265,7 +265,7 @@ void Label_mincut::dump(Lgraph *g) {
   for (auto &it : node2color) {
     Node tmp_n(g, it.first);
     auto curr_col = it.second;
-    std::cout << std::format("  Node: {}, Color: {}\n", tmp_n.debug_name(), curr_col);
+    std::print("  Node: {}, Color: {}\n", tmp_n.debug_name(), curr_col);
   }
 
   std::cout << "---- fin ----\n";

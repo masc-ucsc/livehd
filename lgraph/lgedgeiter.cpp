@@ -105,7 +105,7 @@ void Fwd_edge_iterator::Fwd_iter::topo_add_chain_down(const Node_pin &dst_pin) {
   auto down_pin = dst_pin.get_down_pin();
   I(down_pin.is_sink());  // fwd
 
-  // std::cout << std::format("topo       down node:{} down_pin:{}\n", down_pin.get_node().debug_name(), down_pin.debug_name());
+  // std::print("topo       down node:{} down_pin:{}\n", down_pin.get_node().debug_name(), down_pin.debug_name());
 
   for (auto &edge2 : down_pin.inp_edges()) {  // fwd
     I(edge2.sink.get_pid() == down_pin.get_pid());
@@ -121,7 +121,7 @@ void Fwd_edge_iterator::Fwd_iter::topo_add_chain_fwd(const Node_pin &dst_pin) {
   const auto dst_node = dst_pin.get_node();
   I(unvisited.count(dst_node.get_compact()));
 
-  // std::cout << std::format("1.trying {}\n", dst_node.debug_name());
+  // std::print("1.trying {}\n", dst_node.debug_name());
 
   if (visit_sub) {
     if (dst_node.is_type_sub_present()) {  // DOWN??
@@ -162,7 +162,7 @@ void Fwd_edge_iterator::Fwd_iter::fwd_get_from_linear_first(Lgraph *top) {
     auto next_node = *global_it;
     ++global_it;
 
-    // std::cout << std::format("1.linear_first {}\n", next_node.debug_name());
+    // std::print("1.linear_first {}\n", next_node.debug_name());
 
     if (next_node.is_type_loop_last() || !next_node.has_outputs()) {
       if (!visit_sub || next_node.is_type_sub_present()) {
@@ -194,7 +194,7 @@ void Fwd_edge_iterator::Fwd_iter::fwd_get_from_linear_first(Lgraph *top) {
         }
       }
     }
-    // std::cout << std::format("linear_first {}\n", next_node.debug_name());
+    // std::print("linear_first {}\n", next_node.debug_name());
 
     if (is_topo_sorted) {
       current_node.update(next_node);
@@ -223,7 +223,7 @@ void Fwd_edge_iterator::Fwd_iter::fwd_get_from_linear_last() {
     auto next_node = *global_it;
     ++global_it;
 
-    // std::cout << std::format("xxx {}\n", next_node.debug_name());
+    // std::print("xxx {}\n", next_node.debug_name());
 
     if (next_node.is_type_loop_last() || !next_node.has_outputs()) {
       if (visit_sub) { // && next_node.is_type_sub_present()) {
@@ -252,7 +252,7 @@ void Fwd_edge_iterator::Fwd_iter::fwd_get_from_pending(Lgraph *top) {
         continue;
       }
 
-      // std::cout << std::format("trying {}\n", node.debug_name());
+      // std::print("trying {}\n", node.debug_name());
 
       bool any_propagated = false;
       if (visit_sub && node.is_type_sub_present()) {
@@ -271,7 +271,7 @@ void Fwd_edge_iterator::Fwd_iter::fwd_get_from_pending(Lgraph *top) {
         if (!dpin_list.empty()) {         // Something got added, track potential combinational loops
           for (auto &dpin : dpin_list) {  // fwd
             if (unvisited.contains(dpin.get_node().get_compact())) {
-              // std::cout << std::format("calling for nid:{} type:{}\n", dpin.get_node().get_nid(),dpin.get_node().get_type_name());
+              // std::print("calling for nid:{} type:{}\n", dpin.get_node().get_nid(),dpin.get_node().get_type_name());
               // dpin.get_node().dump();
               topo_add_chain_fwd(dpin);
             }

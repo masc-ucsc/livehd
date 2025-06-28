@@ -39,7 +39,7 @@ void pass_submatch::work(Eprp_var &var) {
   }
 
   for (const auto &g : var.lgs) {
-    std::cout << std::format("finding subgraphs for graph {}...\n", g->get_name());
+    std::print("finding subgraphs for graph {}...\n", g->get_name());
     p.do_work(g);
   }
 }
@@ -192,9 +192,9 @@ void pass_submatch::find_mffc_group(Lgraph *g) {
     }
   }
 
-  std::cout << std::format("#MFFCs - {}\n", mffc_id);
+  std::print("#MFFCs - {}\n", mffc_id);
   for (auto &[id, info] : mffc_group) {
-    std::cout << std::format("Group #{} - {} x {}\n", id, info.tree_size, info.mffc_set.size());
+    std::print("Group #{} - {} x {}\n", id, info.tree_size, info.mffc_set.size());
   }
 }
 
@@ -222,7 +222,7 @@ void pass_submatch::find_subs(Lgraph *g) {
   });
   // FIXME: Backward iterator is not working
   // for (const auto &node : g->backward()) {
-  //  std::cout << std::format("node = {}\n", node.debug_name());
+  //  std::print("node = {}\n", node.debug_name());
   //   sorted_compact_nodes.emplace_back(node.get_compact());
   // }
 
@@ -348,7 +348,7 @@ void pass_submatch::find_subs(Lgraph *g) {
     if (best_score == 0) {
       break;
     }
-    std::cout << std::format("Candidate - D={} : {}\n", d_best, depth_hash2node[d_best][h_best].size());
+    std::print("Candidate - D={} : {}\n", d_best, depth_hash2node[d_best][h_best].size());
 
     // Step (2)
     absl::flat_hash_set<Node::Compact> root_set;
@@ -373,7 +373,7 @@ void pass_submatch::find_subs(Lgraph *g) {
           shared_node_set.insert(nc);
         }
         // for (int i = 0; i < depth; ++i) std::cout << " ";
-        // std::cout << std::format("{}\n", Node(g, nc).debug_name());
+        // std::print("{}\n", Node(g, nc).debug_name());
         for (auto e : Node(g, nc).inp_edges()) {
           traverse_tree(e.driver.get_node().get_compact(), depth + 1);
         }
@@ -384,9 +384,9 @@ void pass_submatch::find_subs(Lgraph *g) {
       }
     }
 
-    std::cout << std::format("#Nodes:         {}\n", sorted_compact_nodes.size());
-    std::cout << std::format("#Nodes covered: {}\n", global_node_set.size());
-    std::cout << std::format("#Nodes shared:  {}\n", shared_node_set.size());
+    std::print("#Nodes:         {}\n", sorted_compact_nodes.size());
+    std::print("#Nodes covered: {}\n", global_node_set.size());
+    std::print("#Nodes shared:  {}\n", shared_node_set.size());
 
     absl::flat_hash_map<Node::Compact, Node::Compact>                 leaf2root;
     absl::flat_hash_map<uint64_t, absl::flat_hash_set<Node::Compact>> hash2leaf;
@@ -403,7 +403,7 @@ void pass_submatch::find_subs(Lgraph *g) {
     }
 
     for (const auto &[hash, leaves] : hash2leaf) {
-      std::cout << std::format("Subtree: {} -> {}", hash, leaves.size());
+      std::print("Subtree: {} -> {}", hash, leaves.size());
       std::cout << "\n";
     }
 
@@ -412,7 +412,7 @@ void pass_submatch::find_subs(Lgraph *g) {
     //   if (vec.size() < 2) continue;
     //   std::cout << " >";
     //   for (const auto &rl : vec) {
-    //     std::cout << std::format("( {} -> {}({}) )", Node(g, rl.root).debug_name(), Node(g, rl.leaf).debug_name(), rl.depth);
+    //     std::print("( {} -> {}({}) )", Node(g, rl.root).debug_name(), Node(g, rl.leaf).debug_name(), rl.depth);
     //   }
     //   std::cout << "\n";
     // }

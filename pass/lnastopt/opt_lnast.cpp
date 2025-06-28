@@ -97,7 +97,7 @@ void Opt_lnast::process_plus(const std::shared_ptr<Lnast> &ln, const Lnast_nid &
   bool first_child = true;
   for (auto child : ln->children(lnid)) {
     const auto &data = ln->get_data(child);
-    // std::cout << std::format("plus:{} n_children:{}\n", data.type.debug_name(), n_children);
+    // std::print("plus:{} n_children:{}\n", data.type.debug_name(), n_children);
 
     if (first_child) {
       first_child = false;
@@ -1039,7 +1039,7 @@ yy = (1,a=3)
 void Opt_lnast::process_todo(const std::shared_ptr<Lnast> &ln, const Lnast_nid &lnid) {
   auto &data = ln->get_data(lnid);
 
-  std::cout << std::format("not handling lnast type:{} (TODO)\n", data.type.debug_name());
+  std::print("not handling lnast type:{} (TODO)\n", data.type.debug_name());
 }
 
 void Opt_lnast::process_stmts(const std::shared_ptr<Lnast> &ln, const Lnast_nid &lnid) {

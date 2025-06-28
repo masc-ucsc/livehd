@@ -1,13 +1,13 @@
 
 #include "lconst.hpp"
 
+#include <format>
 #include <iostream>
 #include <string_view>
 
 #include "absl/strings/str_cat.h"
 #include "absl/types/span.h"
 #include "boost/multiprecision/cpp_int.hpp"
-#include <format>
 #include "iassert.hpp"
 #include "likely.hpp"
 #include "lrand.hpp"
@@ -408,9 +408,9 @@ Lconst Lconst::unknown_negative(Bits_t nbits) {
 
 void Lconst::dump() const {
   if (explicit_str) {
-    std::cout << std::format("str:{} bits:{}\n", to_string(), bits);
+    std::print("str:{} bits:{}\n", to_string(), bits);
   } else {
-    std::cout << std::format("num:{} bits:{}\n", num.str(), bits);
+    std::print("num:{} bits:{}\n", num.str(), bits);
   }
 }
 
@@ -1226,7 +1226,7 @@ std::string Lconst::to_field() const {
   if (v < 0) {
     ss << -v;
 
-    std::cout << std::format("warning: strange negative {} field\n", ss.str());
+    std::print("warning: strange negative {} field\n", ss.str());
     return absl::StrCat("-", ss.str());
   }
   ss << v;

@@ -268,7 +268,7 @@ void Inou_firrtl::CheckRefForComp(Lnast &ln, const Lnast_nid &ref_node, firrtl::
     if (ln.is_in_bw_table(name.substr(1))) {
       type = CreateTypeObject(ln.get_bitwidth(name.substr(1)));
     } else {
-      std::cout << std::format("{}\n", name);
+      std::print("{}\n", name);
       I(!(name.substr(0, 1) == "$"));  // Inputs HAVE to have bw
       type = CreateTypeObject(0);
     }

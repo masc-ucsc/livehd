@@ -37,7 +37,7 @@ struct Test2 {
 #if 0
     {
       std::lock_guard<std::mutex> guard(lgs_mutex);
-      std::cout << std::format("1.inc:{}\n", v);
+      std::print("1.inc:{}\n", v);
     }
 #endif
     total += v;
@@ -46,7 +46,7 @@ struct Test2 {
 #if 0
     {
       std::lock_guard<std::mutex> guard(lgs_mutex);
-      std::cout << std::format("1.inc:{}\n", v);
+      std::print("1.inc:{}\n", v);
     }
 #endif
     total += v;
@@ -55,7 +55,7 @@ struct Test2 {
 #if 0
     {
       std::lock_guard<std::mutex> guard(lgs_mutex);
-      std::cout << std::format("1.spawner:{}\n", v);
+      std::print("1.spawner:{}\n", v);
     }
 #endif
     for (auto i = 0u; i < 3; i++) {
@@ -95,9 +95,9 @@ TEST_F(GTest1, mpmc_thread) {
     for (int i = 0; i < JOB_COUNT; ++i) {
       for (auto p = 0; p < 160; ++p) {
         auto v = prime_numbers[p];
-        // std::cout << std::format("2.spawner:{}\n", v);
+        // std::print("2.spawner:{}\n", v);
         for (auto j = 0; j < 3; ++j) {
-          // std::cout << std::format("2.inc:{}\n", v);
+          // std::print("2.inc:{}\n", v);
           total += v;
           total += v;
         }

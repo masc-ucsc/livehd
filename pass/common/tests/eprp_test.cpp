@@ -29,7 +29,7 @@ public:
     auto files = var.get("nofiles");
 
     for (const auto &v : absl::StrSplit(files, ',')) {
-      std::cout << std::format(" {}", v);
+      std::print(" {}", v);
     }
     std::cout << "\n";
 
@@ -48,7 +48,7 @@ public:
   static void foo(Eprp_var &var) {
     std::cout << "test1.foo";
     for (const auto &v : var.dict) {
-      std::cout << std::format(" {}:{}", v.first, v.second);
+      std::print(" {}:{}", v.first, v.second);
     }
     std::cout << " ::";
     I(var.lgs.empty());
@@ -65,7 +65,7 @@ public:
 
     EXPECT_NE(var.get("lgdb"), "");
 
-    std::cout << std::format("var.get = {}\n", var.get("nofield2"));
+    std::print("var.get = {}\n", var.get("nofield2"));
 
     EXPECT_EQ(var.get("nofield"), "");
 
@@ -82,7 +82,7 @@ public:
   static void bar(Eprp_var &var) {
     std::cout << "test1.foo";
     for (const auto &v : var.dict) {
-      std::cout << std::format(" {}:{}", v.first, v.second);
+      std::print(" {}:{}", v.first, v.second);
     }
     std::cout << " ::";
     I(var.lgs.empty());

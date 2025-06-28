@@ -5,10 +5,10 @@
 #include <ctype.h>
 
 #include <algorithm>
+#include <format>
 #include <iostream>
 
 #include "err_tracker.hpp"
-#include <format>
 inline void Prp::eat_comments() {
   while (scan_is_token(Token_id_comment)) {
     scan_next();
@@ -1862,7 +1862,7 @@ void Prp::elaborate() {
   /*
     int i = 0;
     while(!scan_is_end()){
-      std::cout << std::format("token {}: {}\n", i, scan_text());
+      std::print("token {}: {}\n", i, scan_text());
       scan_next();
       i++;
     }
@@ -1874,13 +1874,13 @@ void Prp::elaborate() {
   }
 
   if (failed) {
-    // std::cout << std::format("Parsing error line {}. Unexpected token [{}].\n",
+    // std::print("Parsing error line {}. Unexpected token [{}].\n",
     // get_token(term_token + base_token).line + 1,
     // scan_text(term_token + base_token));
     PRINT_DBG_AST("base token: {}, term token: {}\n", base_token, term_token);
     PRINT_DBG_AST("terminal token: {}\n", scan_text(term_token + base_token));
     ast_dump(lh::Tree_index::root());
-    std::cout << std::format("Parsing error line {}\n", get_token(term_token + base_token).line + 1);
+    std::print("Parsing error line {}\n", get_token(term_token + base_token).line + 1);
     err_tracker::logger("Parsing error line {}\n", get_token(term_token + base_token).line + 1);
     exit(1);
   }
@@ -1996,7 +1996,7 @@ void Prp::ast_dump(lh::Tree_index tree_idx) const {
     auto        token_text = scan_text(d.token_entry);
 
     std::string indent(index.level, ' ');
-    std::cout << std::format("{} l:{} p:{} rule_id:{}/{} txt:{}\n", indent, index.level, index.pos, d.rule_id, rule_name, token_text);
+    std::print("{} l:{} p:{} rule_id:{}/{} txt:{}\n", indent, index.level, index.pos, d.rule_id, rule_name, token_text);
   }
 }
 

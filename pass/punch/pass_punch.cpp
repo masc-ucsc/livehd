@@ -85,8 +85,8 @@ void Pass_punch::punch(LGraph *g, std::string_view src, std::string_view dst) {
   std::string src_h = this->src_hierarchy.get_hierarchy();
   std::string dst_h = this->dst_hierarchy.get_hierarchy();
 
-  std::cout << std::format("src_h = {}\n", src_h);
-  std::cout << std::format("dst_h = {}\n", dst_h);
+  std::print("src_h = {}\n", src_h);
+  std::print("dst_h = {}\n", dst_h);
 
   Lg_type_id src_lgid = this->src_hierarchy.get_lgid(src_h);
   Lg_type_id dst_lgid = this->dst_hierarchy.get_lgid(dst_h);
@@ -101,8 +101,8 @@ void Pass_punch::punch(LGraph *g, std::string_view src, std::string_view dst) {
     Pass::warn("pass.punch no dst found");
     return;
   }
-  std::cout << std::format("src_lgid:        {}\n", src_lgid);
-  std::cout << std::format("dst_lgid:        {}\n", dst_lgid);
+  std::print("src_lgid:        {}\n", src_lgid);
+  std::print("dst_lgid:        {}\n", dst_lgid);
 
   auto *src_g = LGraph::open(g->get_path(), src_lgid);
   if (src_g == 0) {
@@ -123,7 +123,7 @@ void Pass_punch::punch(LGraph *g, std::string_view src, std::string_view dst) {
   std::string_view target_wire_name = this->src_hierarchy.get_wire_name();
   std::string      output_wire_name = std::format("{}_punch", target_wire_name);
   this->add_output(src_g, target_wire_name, output_wire_name);
-  std::cout << std::format("{}\n", src_g->get_name());
+  std::print("{}\n", src_g->get_name());
 
   src_g->sync();
   g->sync();
@@ -169,7 +169,7 @@ void Pass_punch::add_output(LGraph *g, std::string_view wname, std::string_view 
       if (edge.driver.has_name()) {
         std::string_view this_wname = edge.driver.get_name();
         if (this_wname == wname) {
-          std::cout << std::format("wire found: {} {}\n", wname, output);
+          std::print("wire found: {} {}\n", wname, output);
           done   = true;
           dpin   = edge.driver;
           bits   = edge.get_bits();
@@ -208,7 +208,7 @@ bool Pass_punch::add_input(LGraph *g, std::string_view wname, std::string_view i
   if (g->has_wirename(input) || g->has_graph_input(input) || g->has_graph_output(input))
     return false;
 
-  std::cout << std::format("Adding input:{} lgraph:{}\n",input, g->get_name());
+  std::print("Adding input:{} lgraph:{}\n",input, g->get_name());
   auto wname_idx    = g->get_node_id(wname);
   auto wname_bits   = g->get_bits(wname_idx);
   auto wname_offset = g->get_offset(wname_idx);

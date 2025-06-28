@@ -50,7 +50,7 @@ void Eprp_var::add(std::string_view name, std::string_view value) {
     for (const auto &v : absl::StrSplit(value, ',')) {
       std::string v_str(v);
       if (access(v_str.c_str(), R_OK) == -1) {
-        std::cout << std::format("ERROR: file '{}' is not accessible (skipping)\n", v);
+        std::print("ERROR: file '{}' is not accessible (skipping)\n", v);
         throw std::runtime_error("not valid file");
       }
     }
@@ -59,7 +59,7 @@ void Eprp_var::add(std::string_view name, std::string_view value) {
     if (access(path.c_str(), R_OK) == -1) {
       mkdir(path.c_str(), 0755);
       if (access(path.c_str(), R_OK) == -1) {
-        std::cout << std::format("ERROR: path {} is not accessible (skipping)\n", path);
+        std::print("ERROR: path {} is not accessible (skipping)\n", path);
         throw std::runtime_error("not valid file");
       }
     }

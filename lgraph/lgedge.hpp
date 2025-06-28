@@ -1,10 +1,10 @@
 //  This file is distributed under the BSD 3-Clause License. See LICENSE for details.
 #pragma once
 
-#include <format>
-#include <iostream>
 #include <cstdint>
 #include <cstring>
+#include <format>
+#include <iostream>
 
 #include "cell.hpp"
 #include "lgraph_base_core.hpp"
@@ -70,13 +70,13 @@ struct __attribute__((packed)) SEdge_Internal {  // 3 bytes total
 
   bool set(Index_id _idx, Port_ID _inp_pid, bool _input) {
     if (_inp_pid > 7) {  // 3 bits
-      // std::cout << std::format("P:{}\n",_inp_pid);
+      // std::print("P:{}\n",_inp_pid);
       return false;
     }
     Index_id  abs_idx   = static_cast<SIndex_id>(get_page_idx());
     SIndex_id delta_idx = static_cast<SIndex_id>(_idx) - abs_idx;
     if (delta_idx >= ((1 << 18) - 1) || delta_idx < (-((1 << 18) - 1))) {
-      // std::cout << std::format("D:{}\n",delta_idx);
+      // std::print("D:{}\n",delta_idx);
       return false;
     }
     I(delta_idx);
@@ -160,7 +160,7 @@ public:
       a = s->ridx;
     }
 
-    std::cout << std::format("snode:{} page_idx:{} a:{} addr:{:x}", is_snode(), (int)get_page_idx(), (int)a, (uint64_t)this);
+    std::print("snode:{} page_idx:{} a:{} addr:{:x}", is_snode(), (int)get_page_idx(), (int)a, (uint64_t)this);
   }
 
   [[nodiscard]] bool is_page_align() const {

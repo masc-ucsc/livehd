@@ -80,7 +80,7 @@ bool annLayout::layout(FPOptimization opt, double targetAR) {
     }
 
     if (comp->getX() == 0 && comp->getY() == 0) {
-      std::cout << std::format("root object: {}\n", comp->getName());
+      std::print("root object: {}\n", comp->getName());
       horiz.root_idx = i;
     }
   }

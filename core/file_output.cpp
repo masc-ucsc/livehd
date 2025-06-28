@@ -6,10 +6,10 @@
 #include <sys/mman.h>
 #include <unistd.h>
 
-#include <iostream>
 #include <cerrno>
-
 #include <format>
+#include <iostream>
+
 #include "iassert.hpp"
 
 File_output::File_output(std::string_view fname) : filename(fname), sz(0), aborted(false) {}
@@ -33,7 +33,7 @@ File_output::~File_output() {
 
   void *base = ::mmap(0, map_size, PROT_READ | PROT_WRITE, MAP_SHARED, fd, 0);  // no superpages
   if (base == MAP_FAILED) {
-    std::cout << std::format("mmap errno:{} for filename{}\n", strerror(errno), filename);
+    std::print("mmap errno:{} for filename{}\n", strerror(errno), filename);
     I(false);
   }
 

@@ -7,8 +7,8 @@
 #include <sys/stat.h>
 #include <sys/types.h>
 
-#include <format>
 #include <cctype>
+#include <format>
 #include <iostream>
 #include <limits>
 #include <string>
@@ -148,8 +148,9 @@ void Elab_scanner::add_token(const Ref_token::Tracker &t) {
 void Elab_scanner::patch_pass(const absl::flat_hash_map<std::string, Token_id> &keywords) {
   for (size_t i = 0; i < token_list.size(); ++i) {
     auto &t = token_list[i];
-    if (t.tok != Token_id_alnum)
+    if (t.tok != Token_id_alnum) {
       continue;
+    }
 
     I(t.get_text().size() > 0);  // at least a character
 
@@ -161,8 +162,9 @@ void Elab_scanner::patch_pass(const absl::flat_hash_map<std::string, Token_id> &
 #ifndef NDEBUG
       // binary accepts ? as part of the numeric constant
       if (txt.size() > 2 && (txt[1] == 'b' || txt[1] == 'B')) {
-        if ((i + 1) < token_list.size())
+        if ((i + 1) < token_list.size()) {
           I(token_list[i + 1].tok != Token_id_qmark);
+        }
       }
 #endif
 
@@ -170,8 +172,9 @@ void Elab_scanner::patch_pass(const absl::flat_hash_map<std::string, Token_id> &
     }
 
     auto it = keywords.find(txt);
-    if (it == keywords.end())
+    if (it == keywords.end()) {
       continue;
+    }
 
     t.tok = it->second;
   }
@@ -217,7 +220,7 @@ void Elab_scanner::parse_setup() {
   }
 
   memblock_fd = -1;
-  filename = "inline";
+  filename    = "inline";
 
   token_list.clear();
 }
@@ -282,7 +285,9 @@ void Elab_scanner::parse_step() {
       if (!in_comment) {
         constexpr size_t len1 = std::char_traits<char>::length("synopsys ");
         size_t           npos = pos + 1;
-        while (memblock[npos] == ' ' && npos < memblock_size) npos++;
+        while (memblock[npos] == ' ' && npos < memblock_size) {
+          npos++;
+        }
         if ((npos + len1) < memblock_size) {
           if (strncmp(&memblock[npos], "synopsys ", len1) == 0) {
             t.tok = Token_id_synopsys;
@@ -325,14 +330,17 @@ void Elab_scanner::parse_step() {
       if (in_singleline_comment) {
         if (!is_newline(memblock[pos]) && (pos + 1) < memblock_size) {
           // TODO: Convert this to a word base (not byte based) skip
-          while (!is_newline(memblock[pos + 1]) && (pos + 3) < memblock_size) pos++;
+          while (!is_newline(memblock[pos + 1]) && (pos + 3) < memblock_size) {
+            pos++;
+          }
         }
       } else {
         if (!is_newline(memblock[pos]) && memblock[pos] != '*' && memblock[pos] != '/' && (pos + 3) < memblock_size) {
           // TODO: Convert this to a word base (not byte based) skip
           while (!is_newline(memblock[pos + 1]) && memblock[pos + 1] != '*' && memblock[pos + 1] != '/'
-                 && (pos + 3) < memblock_size)
+                 && (pos + 3) < memblock_size) {
             pos++;
+          }
         }
       }
 
@@ -378,11 +386,11 @@ void Elab_scanner::parse_step() {
 
 Elab_scanner::Elab_scanner() {
   setup_translate();
-  max_errors   = 1;
+  max_errors = 1;
 #ifndef NDEBUG
   std::cout << "\n Warning: max_warnings changed from 1024 to 10240 to enable RocketTile LG generation.\n";
 #endif
-  max_warnings = 0; // 0 disables max_warnings
+  max_warnings = 0;  // 0 disables max_warnings
   n_errors     = 0;
   n_warnings   = 0;
 
@@ -392,8 +400,9 @@ Elab_scanner::Elab_scanner() {
 }
 
 void Elab_scanner::unregister_memblock() {
-  if (memblock_fd == -1)
+  if (memblock_fd == -1) {
     return;
+  }
 
   int ok = munmap((void *)memblock, memblock_size);
   I(ok == 0);
@@ -407,8 +416,9 @@ void Elab_scanner::unregister_memblock() {
 Elab_scanner::~Elab_scanner() { unregister_memblock(); }
 
 bool Elab_scanner::scan_next() {
-  if (scanner_pos >= token_list.size())
+  if (scanner_pos >= token_list.size()) {
     return false;
+  }
 
   scanner_pos = scanner_pos + 1;
 
@@ -416,8 +426,9 @@ bool Elab_scanner::scan_next() {
 }
 
 bool Elab_scanner::scan_prev() {
-  if (scanner_pos <= 1)
+  if (scanner_pos <= 1) {
     return false;
+  }
 
   scanner_pos = scanner_pos - 1;
 
@@ -426,8 +437,9 @@ bool Elab_scanner::scan_prev() {
 
 uint32_t Elab_scanner::scan_line() const {
   size_t max_pos = scanner_pos;
-  if (max_pos >= token_list.size())
+  if (max_pos >= token_list.size()) {
     max_pos = token_list.size() - 1;
+  }
   return token_list[max_pos].line;
 }
 
@@ -441,8 +453,9 @@ void Elab_scanner::scan_warn_int(std::string_view text) const {
   err_tracker::logger(text);
   scan_raw_msg("warning", text, true);
   n_warnings++;
-  if (max_warnings && n_warnings > max_warnings)
+  if (max_warnings && n_warnings > max_warnings) {
     throw scan_error(*this, "too many warnings");
+  }
 }
 
 void Elab_scanner::parser_info_int(std::string_view text) const {
@@ -457,7 +470,7 @@ void Elab_scanner::parser_error_int(std::string_view text) const {
   // if (n_errors > max_errors) exit(-3);
 #ifndef NDEBUG
   // only for bazel debug mode, better swift gdb debug for developers
-  std::cout << std::format("Pass::Error: {}\n", text);
+  std::print("Pass::Error: {}\n", text);
   I(false, "Compiler pass error! debug with gdb");
 #endif
 }
@@ -466,20 +479,22 @@ void Elab_scanner::parser_warn_int(std::string_view text) const {
   err_tracker::logger(text);
   scan_raw_msg("warning", text, false);
   n_warnings++;
-  if (max_warnings && n_warnings > max_warnings)
+  if (max_warnings && n_warnings > max_warnings) {
     throw parser_error(*this, "too many warnings");
+  }
 }
 
 void Elab_scanner::scan_raw_msg(std::string_view cat, std::string_view text, bool third) const {
   // err_tracker::logger( text);
   if (token_list.size() <= 1) {
-    std::cout << std::format("{}:{}:{} {}: {}\n", filename, 0, 0, cat, text);
+    std::print("{}:{}:{} {}: {}\n", filename, 0, 0, cat, text);
     return;
   }
 
   size_t max_pos = scanner_pos;
-  if (max_pos >= token_list.size() || scanner_pos.value == 0)
+  if (max_pos >= token_list.size() || scanner_pos.value == 0) {
     max_pos = token_list.size() - 1;
+  }
 
   size_t line_pos_start = 0;
   for (auto i = token_list[max_pos].pos1; i > 0; i--) {
@@ -496,8 +511,8 @@ void Elab_scanner::scan_raw_msg(std::string_view cat, std::string_view text, boo
     }
   }
 
-  auto line  = scan_line();
-  size_t col = token_list[max_pos].pos1 - line_pos_start;
+  auto   line = scan_line();
+  size_t col  = token_list[max_pos].pos1 - line_pos_start;
   I(token_list[max_pos].pos1 >= line_pos_start);
 
   std::string line_txt;
@@ -506,27 +521,30 @@ void Elab_scanner::scan_raw_msg(std::string_view cat, std::string_view text, boo
   for (size_t i = 0; i < (line_pos_end - line_pos_start); i++) {
     if (memblock[line_pos_start + i] == '\t') {
       line_txt += "  ";  // 2 spaces
-      if (i <= col)
+      if (i <= col) {
         xtra_col++;
+      }
     } else {
       line_txt += memblock[line_pos_start + i];
     }
   }
   col += xtra_col;
 
-  std::cout << std::format("{}:{}:{} {}: ", filename, line, col, cat);
+  std::print("{}:{}:{} {}: ", filename, line, col, cat);
   std::cout << text;  // NOTE: no std::print because it can contain {}
 
-  if (!is_newline(memblock[line_pos_start]))
+  if (!is_newline(memblock[line_pos_start])) {
     std::cout << std::endl;
+  }
 
   assert(line_pos_end > line_pos_start);
   std::cout << line_txt << "\n";
   // NOTE: line_pos_start points to the last return
   // NOTE: no std::print because the text can contain {}
 
-  if (!third)
+  if (!third) {
     return;
+  }
 
   size_t len = token_list[max_pos].get_text().size();
   if ((token_list[max_pos].pos1 + len) > line_pos_end) {
@@ -536,14 +554,15 @@ void Elab_scanner::scan_raw_msg(std::string_view cat, std::string_view text, boo
 
   std::string third_1(col, ' ');
   std::string third_2(len, '^');
-  std::cout << std::format("{}{}\n", third_1 , third_2);
+  std::print("{}{}\n", third_1, third_2);
 }
 
 void Elab_scanner::dump_token() const {
   size_t pos = scanner_pos;
-  if (pos >= token_list.size())
+  if (pos >= token_list.size()) {
     pos = token_list.size();
+  }
 
   auto &t = token_list[pos];
-  std::cout << std::format("tok:{} pos1:{}, pos2:{}, line:{} text:{}\n", t.tok, t.pos1, t.pos2, t.line, t.get_text());
+  std::print("tok:{} pos1:{}, pos2:{}, line:{} text:{}\n", t.tok, t.pos1, t.pos2, t.line, t.get_text());
 }

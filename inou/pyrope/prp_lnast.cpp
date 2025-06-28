@@ -15,7 +15,7 @@ void Prp_lnast::dump(lh::Tree_index idx) const {
   for (const auto &index : ast->depth_preorder(idx)) {
     const auto &node = ast->get_data(index);
     std::string indent(index.level, ' ');
-    std::cout << std::format("{} l:{} p:{} rule = {}, token = {}\n",
+    std::print("{} l:{} p:{} rule = {}, token = {}\n",
                indent,
                index.level,
                index.pos,
@@ -1020,7 +1020,7 @@ Lnast_node Prp_lnast::eval_expression(lh::Tree_index idx_start_ast, lh::Tree_ind
           if (last_op_valid) {
             if (op_node_last.type.get_raw_ntype() == Lnast_ntype::Lnast_ntype_ref) {
               if (last_op_overload_name != op_node.token.get_text()) {
-                std::cout << std::format("Operator priority error in expression around line {}.\n", expr_line + 1);
+                std::print("Operator priority error in expression around line {}.\n", expr_line + 1);
                 exit(1);
               }
             } else {
@@ -1035,7 +1035,7 @@ Lnast_node Prp_lnast::eval_expression(lh::Tree_index idx_start_ast, lh::Tree_ind
                   bool op1_md = (op_node_last.type.get_raw_ntype() == Lnast_ntype::Lnast_ntype_mult
                                  || op_node_last.type.get_raw_ntype() == Lnast_ntype::Lnast_ntype_div);
                   if (!(op0_pm && op1_pm) && !(op0_pm && op1_md)) {
-                    std::cout << std::format("Operator priority error in expression around line {}.\n", expr_line + 1);
+                    std::print("Operator priority error in expression around line {}.\n", expr_line + 1);
                     exit(1);
                   }
                 }
@@ -1415,10 +1415,10 @@ Lnast_node Prp_lnast::eval_fcall_implicit(lh::Tree_index idx_start_ast, lh::Tree
   auto        idx_nxt_ast = idx_root;
 
   if (piped_node.type.get_raw_ntype() != Lnast_ntype::Lnast_ntype_invalid) {
-    std::cout << std::format("(implicit) The piped lnast node's text is {}\n", piped_node.token.get_text());
+    std::print("(implicit) The piped lnast node's text is {}\n", piped_node.token.get_text());
   }
   if (!idx_piped_val.is_invalid()) {
-    std::cout << std::format("(implicit) The piped index's token text is {}\n", scan_text(ast->get_data(idx_piped_val).token_entry));
+    std::print("(implicit) The piped index's token text is {}\n", scan_text(ast->get_data(idx_piped_val).token_entry));
   }
 
   if (root_rid == Prp_rule_assignment_expression) {
@@ -1895,7 +1895,7 @@ Lnast_node Prp_lnast::gen_operator(lh::Tree_index idx, uint8_t *skip_sibs) {
           *skip_sibs = 1;
           return Lnast_node::create_tuple_concat();
         }
-        // std::cout << std::format("HERE {}\n",get_token(ast->get_data(idx).token_entry).pos1);
+        // std::print("HERE {}\n",get_token(ast->get_data(idx).token_entry).pos1);
 
         return Lnast_node::create_plus(get_token(ast->get_data(idx).token_entry));
       case '-': return Lnast_node::create_minus();

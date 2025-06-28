@@ -70,13 +70,13 @@ void Traverse_lg::travers(Eprp_var& var) {
   p.netpin_to_origpin_default_match(orig_lg, synth_lg);  // know all the inputs and outputs match by name (known points.)
   std::cout << "\n netpin_to_origpin_default_match done.\n";
 #ifdef BASIC_DBG
-  std::cout << std::format(
+  std::print(
       "2. p.netpin_to_origpin_default_match(orig_lg, synth_lg);//know all the inputs and outputs match by name (known points.)\n");
   p.print_everything();
 #endif
   auto end = std::chrono::system_clock::now();
   std::chrono::duration<double> elapsed_seconds = end-start;
-  std::cout << std::format("ELAPSED_SEC: {}s, FOR_FUNC: netpin_to_origpin_default_match\n", elapsed_seconds.count());
+  std::print("ELAPSED_SEC: {}s, FOR_FUNC: netpin_to_origpin_default_match\n", elapsed_seconds.count());
 
   start = std::chrono::system_clock::now();
   p.make_io_maps_boundary_only(orig_lg, p.inp_map_of_sets_orig, p.out_map_of_sets_orig, true);  // orig-boundary only
@@ -89,7 +89,7 @@ void Traverse_lg::travers(Eprp_var& var) {
   p.make_io_maps_boundary_only(synth_lg, p.inp_map_of_sets_synth, p.out_map_of_sets_synth, false);  // synth-boundary only + matching
   std::cout << "\n make_io_maps_boundary_only - synth done.\n";
 #ifdef BASIC_DBG
-  std::cout << std::format(
+  std::print(
       "3. p.make_io_maps_boundary_only(synth_lg, p.inp_map_of_sets_synth, p.out_map_of_sets_synth);//synth-boundary only + "
       "matching\n");
   p.print_everything();
@@ -99,7 +99,7 @@ void Traverse_lg::travers(Eprp_var& var) {
 #endif
   end = std::chrono::system_clock::now();
   elapsed_seconds = end-start;
-  std::cout << std::format("ELAPSED_SEC: {}s, FOR_FUNC: complete_io_match-MakeiomapsBoundOnly\n", elapsed_seconds.count());
+  std::print("ELAPSED_SEC: {}s, FOR_FUNC: complete_io_match-MakeiomapsBoundOnly\n", elapsed_seconds.count());
 
   p.do_travers(orig_lg, synth_lg, true);  // original LG (pre-syn LG)
   std::cout << "\n do_travers - orig done.\n";
@@ -142,7 +142,7 @@ void Traverse_lg::debug_function(Lgraph* lg) {
   // std::cout << "---------------------------------------------------\n";
 
   lg->each_graph_input([this](const Node_pin dpin) {
-    std::cout << std::format("   {}({})\n", dpin.has_name() ? dpin.get_name() : (std::to_string(dpin.get_pid())), dpin.get_wire_name());
+    std::print("   {}({})\n", dpin.has_name() ? dpin.get_name() : (std::to_string(dpin.get_pid())), dpin.get_wire_name());
 
     auto hdpin = dpin.get_hierarchical();
     for(const auto sink_dpin: hdpin.out_sinks()){
@@ -152,7 +152,7 @@ void Traverse_lg::debug_function(Lgraph* lg) {
     }
   });
   lg->each_graph_output([this](const Node_pin dpin) {
-    std::cout << std::format("   {}({})\n", dpin.has_name() ? dpin.get_name() : (std::to_string(dpin.get_pid())), dpin.get_wire_name());
+    std::print("   {}({})\n", dpin.has_name() ? dpin.get_name() : (std::to_string(dpin.get_pid())), dpin.get_wire_name());
     auto hdpin = dpin.get_hierarchical();
     auto spin = hdpin.change_to_sink_from_graph_out_driver();
     for(const auto driver_dpin: spin.inp_drivers()){
@@ -163,13 +163,13 @@ void Traverse_lg::debug_function(Lgraph* lg) {
   std::cout << "--------graph IO done -------------------------------------------\n";
   for (const auto& node : lg->forward(true)) {
     if (node.has_outputs()) {
-      std::cout << std::format("{}(n{})({})\n", node.debug_name(), node.get_nid(), (node.get_class_lgraph())->get_name());
+      std::print("{}(n{})({})\n", node.debug_name(), node.get_nid(), (node.get_class_lgraph())->get_name());
       if (node.is_type_sub() && node.get_type_sub_node().get_name() == "__fir_const") {
         auto node_sub_name = node.get_type_sub_node().get_name();
-        std::cout << std::format("\t\t\t\t {}\n", node_sub_name);
+        std::print("\t\t\t\t {}\n", node_sub_name);
       }
       for (const auto dpin : node.out_connected_pins()) {
-        std::cout << std::format("\t {}({})", dpin.has_name() ? dpin.get_name() : (std::to_string(dpin.get_pid())), dpin.get_wire_name());
+        std::print("\t {}({})", dpin.has_name() ? dpin.get_name() : (std::to_string(dpin.get_pid())), dpin.get_wire_name());
 	get_node_pin_compact_flat_details(dpin.get_compact_flat());
       }
       std::cout << "\n";
@@ -187,13 +187,13 @@ void Traverse_lg::debug_function(Lgraph* lg) {
   std::cout << "\n--------------------fast:-------------------------------";
   for (const auto& node : lg->fast(true)) {
     if (node.has_outputs()) {
-      std::cout << std::format("{}(n{})({})\n", node.debug_name(), node.get_nid(), (node.get_class_lgraph())->get_name());
+      std::print("{}(n{})({})\n", node.debug_name(), node.get_nid(), (node.get_class_lgraph())->get_name());
       if (node.is_type_sub() && node.get_type_sub_node().get_name() == "__fir_const") {
         auto node_sub_name = node.get_type_sub_node().get_name();
-        std::cout << std::format("\t\t\t\t {}\n", node_sub_name);
+        std::print("\t\t\t\t {}\n", node_sub_name);
       }
       for (const auto dpin : node.out_connected_pins()) {
-        std::cout << std::format("\t {}({})", dpin.has_name() ? dpin.get_name() : (std::to_string(dpin.get_pid())), dpin.get_wire_name());
+        std::print("\t {}({})", dpin.has_name() ? dpin.get_name() : (std::to_string(dpin.get_pid())), dpin.get_wire_name());
 	get_node_pin_compact_flat_details(dpin.get_compact_flat());
       }
       std::cout << "\n";
@@ -244,7 +244,7 @@ void Traverse_lg::print_total_named_dpins(Lgraph* lg, bool is_orig_lg) const {
       }
     }
   }
-  std::cout << std::format("total named dpins for {} are {} (with {} loopLasts) and {} unnamed (with {} loopLasts).\n", 
+  std::print("total named dpins for {} are {} (with {} loopLasts) and {} unnamed (with {} loopLasts).\n", 
 		  is_orig_lg?"orig_lg":"synth_lg", total_named_dpins,named_loopLast_dpins,unnamed,unnamed_loopLast_dpins);
   
 }
@@ -266,7 +266,7 @@ void Traverse_lg::do_travers(Lgraph *orig_lg, Lgraph *synth_lg, bool is_orig_lg)
     // resolution_of_synth_map_of_sets(out_map_of_sets_synth);
     // end = std::chrono::system_clock::now();
     // elapsed_seconds = end-start;
-    // std::cout << std::format("ELAPSED_SEC: {}s, FOR_FUNC: resolution_of_synth_map_of_sets-after-make_io_mapsSynth\n", elapsed_seconds.count()); 
+    // std::print("ELAPSED_SEC: {}s, FOR_FUNC: resolution_of_synth_map_of_sets-after-make_io_mapsSynth\n", elapsed_seconds.count()); 
 #ifdef BASIC_DBG
     std::cout << "7. printing before matching starts (after 1st resolution) -- synth";
     print_everything();
@@ -277,7 +277,7 @@ void Traverse_lg::do_travers(Lgraph *orig_lg, Lgraph *synth_lg, bool is_orig_lg)
     for (const auto & [k,v_set]: inp_map_of_sets_synth) {
       for (const auto & v : v_set) {
         auto lg_name = Node_pin("lgdb", v).get_top_lgraph()->get_name();
-        std::cout << std::format("\n\n{}=={}\n\n",lg_name,orig_lg_name);
+        std::print("\n\n{}=={}\n\n",lg_name,orig_lg_name);
         I(lg_name.find("__firrtl_")!=std::string::npos,"\n\n inp-synth-set has some unresolved entry???\n\n ");
       }
     }
@@ -300,14 +300,14 @@ void Traverse_lg::do_travers(Lgraph *orig_lg, Lgraph *synth_lg, bool is_orig_lg)
       make_io_maps(synth_lg, inp_map_of_sets_synth, out_map_of_sets_synth, is_orig_lg);
       make_io_maps(orig_lg, inp_map_of_sets_orig, out_map_of_sets_orig, true);
       #ifdef BASIC_DBG
-        std::cout << std::format("Printing after complete_io_match_fullOnly (did changes = {}).", change_done);
+        std::print("Printing after complete_io_match_fullOnly (did changes = {}).", change_done);
         print_everything();
       #endif
 
     } while(trial < 4 && change_done  && !crit_node_set.empty());
     auto end = std::chrono::system_clock::now();
     std::chrono::duration<double> elapsed_seconds = end-start;
-    std::cout << std::format("ELAPSED_SEC: {}s, FOR_FUNC: complete_io_match_fullOnly\n", elapsed_seconds.count());
+    std::print("ELAPSED_SEC: {}s, FOR_FUNC: complete_io_match_fullOnly\n", elapsed_seconds.count());
 
 
     /* Flop only IO matches (full IO or half IO match) to be dealt now:*/
@@ -319,7 +319,7 @@ void Traverse_lg::do_travers(Lgraph *orig_lg, Lgraph *synth_lg, bool is_orig_lg)
     }
     end = std::chrono::system_clock::now();
     elapsed_seconds = end-start;
-    std::cout << std::format("ELAPSED_SEC: {}s, FOR_FUNC: complete_io_match-flopsOnly-1stTime\n", elapsed_seconds.count());
+    std::print("ELAPSED_SEC: {}s, FOR_FUNC: complete_io_match-flopsOnly-1stTime\n", elapsed_seconds.count());
     if (crit_node_set.empty()) {
       /*all required matching done*/
       report_critical_matches_with_color();
@@ -339,10 +339,10 @@ void Traverse_lg::do_travers(Lgraph *orig_lg, Lgraph *synth_lg, bool is_orig_lg)
       change_done = complete_io_match(true);  // alters crit_node_set too
       end = std::chrono::system_clock::now();
       elapsed_seconds = end-start;
-      std::cout << std::format("ELAPSED_SEC: {}s, FOR_FUNC: complete_io_match-inWhile-flopOnly\n", elapsed_seconds.count());
+      std::print("ELAPSED_SEC: {}s, FOR_FUNC: complete_io_match-inWhile-flopOnly\n", elapsed_seconds.count());
 
       #ifdef BASIC_DBG
-      std::cout << std::format("Change done = {}\n", change_done);
+      std::print("Change done = {}\n", change_done);
       #endif
     }
     #ifdef BASIC_DBG
@@ -360,7 +360,7 @@ void Traverse_lg::do_travers(Lgraph *orig_lg, Lgraph *synth_lg, bool is_orig_lg)
         weighted_match_LoopLastOnly( perc_resolved);  // crit_entries_only=f, loopLast_only=t
         
         #ifdef BASIC_DBG
-        std::cout << std::format("9. Printing after flop weighted_match_LoopLastOnly matching! with perc_resolved = {}%",perc_resolved);
+        std::print("9. Printing after flop weighted_match_LoopLastOnly matching! with perc_resolved = {}%",perc_resolved);
         print_everything();
         #endif
         
@@ -368,11 +368,11 @@ void Traverse_lg::do_travers(Lgraph *orig_lg, Lgraph *synth_lg, bool is_orig_lg)
     }
     end = std::chrono::system_clock::now();
     elapsed_seconds = end-start;
-    std::cout << std::format("ELAPSED_SEC: {}s, FOR_FUNC: weighted_match_LoopLastOnly\n", elapsed_seconds.count());
+    std::print("ELAPSED_SEC: {}s, FOR_FUNC: weighted_match_LoopLastOnly\n", elapsed_seconds.count());
 
     I(flop_set_synth.empty(), "\n\n\tCHECK: flops not resolved. Cannot move on to further matching\n\n");
     if(!flop_set_synth.empty()) {
-      std::cout << std::format("\nBEWARE: {} FLOPS NOT RESOLVED? \n\n", flop_set_synth.size());
+      std::print("\nBEWARE: {} FLOPS NOT RESOLVED? \n\n", flop_set_synth.size());
       print_set(flop_set_synth);
       exit(1);
     } else {
@@ -409,7 +409,7 @@ void Traverse_lg::do_travers(Lgraph *orig_lg, Lgraph *synth_lg, bool is_orig_lg)
     end = std::chrono::system_clock::now();
     elapsed_seconds = end-start;
     
-    std::cout << std::format("ELAPSED_SEC: {}s, FOR_FUNC: complete_io_match-combo\n", elapsed_seconds.count());
+    std::print("ELAPSED_SEC: {}s, FOR_FUNC: complete_io_match-combo\n", elapsed_seconds.count());
     std::cout << "\n complete_io_match - synth - combinational done.\n";
     //std::cout << "AFTER complete_io_match(crit comb only)"; print_SynthSet_sizes();
     #ifdef BASIC_DBG
@@ -432,12 +432,12 @@ void Traverse_lg::do_travers(Lgraph *orig_lg, Lgraph *synth_lg, bool is_orig_lg)
       // surrounding cell loc-similarity matching
       change_done = surrounding_cell_match();
       #ifdef BASIC_DBG
-      std::cout << std::format("Change done = {}\n", change_done);
+      std::print("Change done = {}\n", change_done);
       #endif
     }
     end = std::chrono::system_clock::now();
     elapsed_seconds = end-start;
-    std::cout << std::format("ELAPSED_SEC: {}s, FOR_FUNC: surrounding_cell_match\n", elapsed_seconds.count());
+    std::print("ELAPSED_SEC: {}s, FOR_FUNC: surrounding_cell_match\n", elapsed_seconds.count());
     #endif
 #ifdef BASIC_DBG
     std::cout << "11. Printing after surrounding_cell matching!";
@@ -449,7 +449,7 @@ void Traverse_lg::do_travers(Lgraph *orig_lg, Lgraph *synth_lg, bool is_orig_lg)
       do {
         unmatched_left = surrounding_cell_match_final();
         std::cout << "\n surrounding_cell_match_final - synth done.\n";
-        std::cout << std::format("unmatched left = {}\n", unmatched_left);
+        std::print("unmatched left = {}\n", unmatched_left);
         if(unmatched_left) {
   	  make_io_maps(lg, inp_map_of_sets_synth, out_map_of_sets_synth, is_orig_lg);
           /*resolution_of_synth_map_of_sets(inp_map_of_sets_synth);//if make_io_maps takes way less time, why not replace resolution_of_synth_map_of_sets with make_io_maps!
@@ -465,14 +465,14 @@ void Traverse_lg::do_travers(Lgraph *orig_lg, Lgraph *synth_lg, bool is_orig_lg)
       weighted_match();  // crit_entries_only=t, loopLast_only=f
       end = std::chrono::system_clock::now();
       elapsed_seconds = end-start;
-      std::cout << std::format("ELAPSED_SEC: {}s, FOR_FUNC: weighted_match\n", elapsed_seconds.count());
+      std::print("ELAPSED_SEC: {}s, FOR_FUNC: weighted_match\n", elapsed_seconds.count());
       std::cout << "\n weighted_match - synth (crit_entries_only) done.\n";
     }
 #endif
 
-    // std::cout << std::format("\n inp_map_of_sets_synth.size() =  {}\nout_map_of_sets_synth:\n", inp_map_of_sets_synth.size());
+    // std::print("\n inp_map_of_sets_synth.size() =  {}\nout_map_of_sets_synth:\n", inp_map_of_sets_synth.size());
     // print_io_map(out_map_of_sets_synth);
-    // std::cout << std::format("\n out_map_of_sets_synth.size() =  {}\n", out_map_of_sets_synth.size());
+    // std::print("\n out_map_of_sets_synth.size() =  {}\n", out_map_of_sets_synth.size());
     /*all required matching done*/
 #ifdef BASIC_DBG
     I(crit_node_set.empty(), "crit_node_set should have been empty by now!");
@@ -490,10 +490,10 @@ void Traverse_lg::do_travers(Lgraph *orig_lg, Lgraph *synth_lg, bool is_orig_lg)
     std::cout << "\n make_io_maps - orig done.\n";
     auto end = std::chrono::system_clock::now();
     std::chrono::duration<double> elapsed_seconds = end-start;
-    std::cout << std::format("ELAPSED_SEC: {}s, FOR_FUNC: make_io_maps-originalLG\n", elapsed_seconds.count());
+    std::print("ELAPSED_SEC: {}s, FOR_FUNC: make_io_maps-originalLG\n", elapsed_seconds.count());
 #ifdef BASIC_DBG
-    std::cout << std::format("\n inp_map_of_sets_orig.size() =  {}\nout_map_of_sets_orig:\n", inp_map_of_sets_orig.size());
-    std::cout << std::format("\n out_map_of_sets_orig.size() =  {}\n", out_map_of_sets_orig.size());
+    std::print("\n inp_map_of_sets_orig.size() =  {}\nout_map_of_sets_orig:\n", inp_map_of_sets_orig.size());
+    std::print("\n out_map_of_sets_orig.size() =  {}\n", out_map_of_sets_orig.size());
 #endif
     return;  // FIXME: for DBG; remove.
   }
@@ -520,7 +520,7 @@ void Traverse_lg::print_SynthSet_sizes() const {
     if(np_set.size()==1) one_sets_out++;
     if(np_set.size()==2) two_sets_out++;
     if(np_set.size()==3) three_sets_out++;
-    std::cout << std::format("{}, ", np_set.size());
+    std::print("{}, ", np_set.size());
   }
   std::cout << "\nset sizes for inp_map_of_sets_synth:\n";
   int numOfKeys_in = 0;
@@ -534,11 +534,11 @@ void Traverse_lg::print_SynthSet_sizes() const {
     if(np_set.size()==1) one_sets_in++;
     if(np_set.size()==2) two_sets_in++;
     if(np_set.size()==3) three_sets_in++;
-    std::cout << std::format("{}, ", np_set.size());
+    std::print("{}, ", np_set.size());
   }
   std::cout << "\n";
-  std::cout << std::format("{}, {}, {}, {} out of {}\n", zero_sets_out, one_sets_out, two_sets_out, three_sets_out, numOfKeys_out);
-  std::cout << std::format("{}, {}, {}, {} in of {}\n", zero_sets_in, one_sets_in, two_sets_in, three_sets_in, numOfKeys_in);
+  std::print("{}, {}, {}, {} out of {}\n", zero_sets_out, one_sets_out, two_sets_out, three_sets_out, numOfKeys_out);
+  std::print("{}, {}, {}, {} in of {}\n", zero_sets_in, one_sets_in, two_sets_in, three_sets_in, numOfKeys_in);
   std::cout << "\n";
 }
 
@@ -559,15 +559,15 @@ void Traverse_lg::make_io_maps(Lgraph* lg, map_of_sets& inp_map_of_sets, map_of_
     auto n = Node_pin("lgdb", node_pin_cf).get_node();
     auto p = Node_pin("lgdb", node_pin_cf);
     if (p.has_name()) {
-      std::cout << std::format("{},{} \t:: {} ", /*n.get_or_create_name(),*/ p.get_name(), p.get_pid(), std::to_string(color));
+      std::print("{},{} \t:: {} ", /*n.get_or_create_name(),*/ p.get_name(), p.get_pid(), std::to_string(color));
     } else {
-      std::cout << std::format("n{},{} \t:: {} ", /*n.get_or_create_name(),*/ n.get_nid(), p.get_pid(), std::to_string(color));
+      std::print("n{},{} \t:: {} ", /*n.get_or_create_name(),*/ n.get_nid(), p.get_pid(), std::to_string(color));
     }
     std::cout << "\n";
   }
   std::cout << "\n";
 
-  std::cout << std::format("9.1.0 Printing before fwd traversal! (with {} origLG) ",is_orig_lg);
+  std::print("9.1.0 Printing before fwd traversal! (with {} origLG) ",is_orig_lg);
   print_everything();
   #endif
 
@@ -575,7 +575,7 @@ void Traverse_lg::make_io_maps(Lgraph* lg, map_of_sets& inp_map_of_sets, map_of_
   traverse_order.clear();
   fwd_traversal_for_inp_map(lg, inp_map_of_sets, is_orig_lg);
 #ifdef BASIC_DBG
-  std::cout << std::format("9.1 Printing after fwd traversal! (with {} origLG) ",is_orig_lg);
+  std::print("9.1 Printing after fwd traversal! (with {} origLG) ",is_orig_lg);
   print_everything();
 #endif
 
@@ -621,7 +621,7 @@ void Traverse_lg::make_io_maps_boundary_only(Lgraph* lg, map_of_sets& inp_map_of
           crit_node_map[dpins.get_compact_flat()] = node.get_color();  // keep till end for color data
           if (net_to_orig_pin_match_map.find(dpins.get_compact_flat()) == net_to_orig_pin_match_map.end()) {
             #ifdef BASIC_DBG
-            std::cout << std::format("inserting in crit_node_set: {},n{},{}\n", dpins.has_name()?dpins.get_name():(std::to_string(dpins.get_pid())), dpins.get_node().get_nid(), dpins.get_node().get_class_lgraph()->get_name() );
+            std::print("inserting in crit_node_set: {},n{},{}\n", dpins.has_name()?dpins.get_name():(std::to_string(dpins.get_pid())), dpins.get_node().get_nid(), dpins.get_node().get_class_lgraph()->get_name() );
             #endif
             crit_node_set.insert(dpins.get_compact_flat());  // keep on deleting as matching takes place
                                                              // need not stor in set if already a matched entry
@@ -639,7 +639,7 @@ void Traverse_lg::make_io_maps_boundary_only(Lgraph* lg, map_of_sets& inp_map_of
 	  //std::cout << "Coloring node\n";
         if (net_to_orig_pin_match_map.find(cf) == net_to_orig_pin_match_map.end()) {
           #ifdef BASIC_DBG
-          std::cout << std::format("inserting in crit_node_set: {},n{},{}\n", dpins.has_name()?dpins.get_name():(std::to_string(dpins.get_pid())), dpins.get_node().get_nid(), dpins.get_node().get_class_lgraph()->get_name() );
+          std::print("inserting in crit_node_set: {},n{},{}\n", dpins.has_name()?dpins.get_name():(std::to_string(dpins.get_pid())), dpins.get_node().get_nid(), dpins.get_node().get_class_lgraph()->get_name() );
           #endif
           crit_node_set.insert(cf);  // keep on deleting as matching takes place
                                      // need not stor in set if already a matched entry
@@ -672,7 +672,7 @@ void Traverse_lg::make_io_maps_boundary_only(Lgraph* lg, map_of_sets& inp_map_of
     }
   });
 #ifdef BASIC_DBG
-  std::cout << std::format("\n:::: inp_map_of_sets.size() =  {}\n", inp_map_of_sets.size());
+  std::print("\n:::: inp_map_of_sets.size() =  {}\n", inp_map_of_sets.size());
   print_io_map(inp_map_of_sets);
 #endif
 
@@ -688,7 +688,7 @@ void Traverse_lg::make_io_maps_boundary_only(Lgraph* lg, map_of_sets& inp_map_of
           crit_node_map[dpins.get_compact_flat()] = node.get_color();
           if (net_to_orig_pin_match_map.find(dpins.get_compact_flat()) == net_to_orig_pin_match_map.end()) {
             #ifdef BASIC_DBG
-            std::cout << std::format("inserting in crit_node_set: {},n{},{}\n", dpins.has_name()?dpins.get_name():(std::to_string(dpins.get_pid())), dpins.get_node().get_nid(), dpins.get_node().get_class_lgraph()->get_name() );
+            std::print("inserting in crit_node_set: {},n{},{}\n", dpins.has_name()?dpins.get_name():(std::to_string(dpins.get_pid())), dpins.get_node().get_nid(), dpins.get_node().get_class_lgraph()->get_name() );
             #endif
             crit_node_set.insert(dpins.get_compact_flat());  // keep on deleting as matching takes place
                                                              // need not stor in set if already a matched entry
@@ -705,7 +705,7 @@ void Traverse_lg::make_io_maps_boundary_only(Lgraph* lg, map_of_sets& inp_map_of
 	  //std::cout << "Coloring node\n";
         if (net_to_orig_pin_match_map.find(dpins.get_compact_flat()) == net_to_orig_pin_match_map.end()) {
           #ifdef BASIC_DBG
-          std::cout << std::format("inserting in crit_node_set: {},n{},{}\n", dpins.has_name()?dpins.get_name():(std::to_string(dpins.get_pid())), dpins.get_node().get_nid(), dpins.get_node().get_class_lgraph()->get_name() );
+          std::print("inserting in crit_node_set: {},n{},{}\n", dpins.has_name()?dpins.get_name():(std::to_string(dpins.get_pid())), dpins.get_node().get_nid(), dpins.get_node().get_class_lgraph()->get_name() );
           #endif
           crit_node_set.insert(dpins.get_compact_flat());  // keep on deleting as matching takes place
                                                            // need not stor in set if already a matched entry
@@ -733,7 +733,7 @@ void Traverse_lg::make_io_maps_boundary_only(Lgraph* lg, map_of_sets& inp_map_of
     }
   });
 #ifdef BASIC_DBG
-  std::cout << std::format("\n:::: out_map_of_sets.size() =  {}\n", out_map_of_sets.size());
+  std::print("\n:::: out_map_of_sets.size() =  {}\n", out_map_of_sets.size());
   print_io_map(out_map_of_sets);
 #endif
   /*For synth, set values were replaced using net_to_orig_pin_match_map. Thus these synth map_of_sets can be matched with orig
@@ -757,10 +757,10 @@ void Traverse_lg::fast_pass_for_inputs(Lgraph* lg, map_of_sets& inp_map_of_sets,
   /*in fwd, flops are visited last. Thus this fast pass:
    * (Flops could be considered FIRST (Q pin) or LAST (din pin). In the forward iterator, flops are not marked as loop_first, only
    * constants are. This means that the flop is not visited first.) */
-  std::cout << std::format("\nIn fast pass for inputs for orig lg {} \n", is_orig_lg);
+  std::print("\nIn fast pass for inputs for orig lg {} \n", is_orig_lg);
   for (const auto& node : lg->fast(true)) {
     #ifdef BASIC_DBG
-    std::cout << std::format("main node: {}(n{})\n",node.get_type_name() ,node.get_nid());
+    std::print("main node: {}(n{})\n",node.get_type_name() ,node.get_nid());
     #endif
     if (!is_orig_lg) {
       /*capture the colored nodes*/
@@ -769,11 +769,11 @@ void Traverse_lg::fast_pass_for_inputs(Lgraph* lg, map_of_sets& inp_map_of_sets,
         for (const auto dpins : node.out_connected_pins()) {
           crit_node_map[dpins.get_compact_flat()] = node.get_color();
           #ifdef BASIC_DBG
-          std::cout << std::format("Inserting in crit_node_map: n{} , {}\n", node.get_nid(), node.get_color());
+          std::print("Inserting in crit_node_map: n{} , {}\n", node.get_nid(), node.get_color());
           #endif
           if (net_to_orig_pin_match_map.find(dpins.get_compact_flat()) == net_to_orig_pin_match_map.end()) {
             #ifdef BASIC_DBG
-            std::cout << std::format("inserting in crit_node_set: {},n{},{}\n", dpins.has_name()?dpins.get_name():(std::to_string(dpins.get_pid())), dpins.get_node().get_nid(), dpins.get_node().get_class_lgraph()->get_name() );
+            std::print("inserting in crit_node_set: {},n{},{}\n", dpins.has_name()?dpins.get_name():(std::to_string(dpins.get_pid())), dpins.get_node().get_nid(), dpins.get_node().get_class_lgraph()->get_name() );
             #endif
             crit_node_set.insert(dpins.get_compact_flat());  // keep on deleting as matching takes place
                                                              // need not stor in set if already a matched entry
@@ -790,11 +790,11 @@ void Traverse_lg::fast_pass_for_inputs(Lgraph* lg, map_of_sets& inp_map_of_sets,
           crit_node_map[dpins.get_compact_flat()] = 0;
 	  //std::cout << "Coloring node\n";get_node_pin_compact_flat_details(dpins.get_compact_flat());
           #ifdef BASIC_DBG
-          std::cout << std::format("Inserting in crit_node_map: n{} , 0\n", node.get_nid());
+          std::print("Inserting in crit_node_map: n{} , 0\n", node.get_nid());
           #endif
           if (net_to_orig_pin_match_map.find(dpins.get_compact_flat()) == net_to_orig_pin_match_map.end()) {
             #ifdef BASIC_DBG
-            std::cout << std::format("inserting in crit_node_set: {},n{},{}\n", dpins.has_name()?dpins.get_name():(std::to_string(dpins.get_pid())), dpins.get_node().get_nid(), dpins.get_node().get_class_lgraph()->get_name() );
+            std::print("inserting in crit_node_set: {},n{},{}\n", dpins.has_name()?dpins.get_name():(std::to_string(dpins.get_pid())), dpins.get_node().get_nid(), dpins.get_node().get_class_lgraph()->get_name() );
             #endif
             crit_node_set.insert(dpins.get_compact_flat());  // keep on deleting as matching takes place
                                                              // need not stor in set if already a matched entry
@@ -821,12 +821,12 @@ void Traverse_lg::fast_pass_for_inputs(Lgraph* lg, map_of_sets& inp_map_of_sets,
     }
     if (!node.is_type_loop_last() ) {
       #ifdef BASIC_DBG
-      std::cout << std::format("\t\t\t CONTINUING (node is not LL {}, or node is type sub {})... \n", !node.is_type_loop_last(), node.is_type_sub());
+      std::print("\t\t\t CONTINUING (node is not LL {}, or node is type sub {})... \n", !node.is_type_loop_last(), node.is_type_sub());
       #endif
       continue;               // process flops only in this lg->fast (sub type loopLast are not flops)
     } else if (is_orig_lg) {  // flops in orig_lg to be inserted in flop_set_orig
       #ifdef BASIC_DBG
-      std::cout << std::format("Inserting in flop_set_orig, dpins of node: {} \n", node.get_nid());
+      std::print("Inserting in flop_set_orig, dpins of node: {} \n", node.get_nid());
       #endif
       for (const auto dpins : node.out_connected_pins()) {
         flop_set_orig.insert(dpins.get_compact_flat());
@@ -843,7 +843,7 @@ void Traverse_lg::fast_pass_for_inputs(Lgraph* lg, map_of_sets& inp_map_of_sets,
 
       const auto self_set = inp_map_of_sets.find(node_dpin_cf);
       #ifdef BASIC_DBG
-      std::cout << std::format("\t Working on node's dpin: {},p{} (is LL?{}) \n", dpins.has_name()?dpins.get_name():std::to_string(dpins.get_pid()), std::to_string(dpins.get_pid()), is_loop_stop);
+      std::print("\t Working on node's dpin: {},p{} (is LL?{}) \n", dpins.has_name()?dpins.get_name():std::to_string(dpins.get_pid()), std::to_string(dpins.get_pid()), is_loop_stop);
       #endif
       for (auto e : node.out_edges()) {
         if (e.sink.get_node().is_type_loop_first()) {
@@ -860,25 +860,25 @@ void Traverse_lg::fast_pass_for_inputs(Lgraph* lg, map_of_sets& inp_map_of_sets,
           // }
           auto out_cf = out_cfs.get_compact_flat();
 	  #ifdef BASIC_DBG
-          std::cout << std::format("\t\t\t Child node's (n{})  dpin:{}\n",std::to_string(out_cfs.get_node().get_nid()), out_cfs.has_name()?out_cfs.get_name():std::to_string(out_cfs.get_pid()));
+          std::print("\t\t\t Child node's (n{})  dpin:{}\n",std::to_string(out_cfs.get_node().get_nid()), out_cfs.has_name()?out_cfs.get_name():std::to_string(out_cfs.get_pid()));
           #endif
           if (is_loop_stop) {
             if (!is_orig_lg && !(get_matching_map_val(dpins.get_compact_flat())).empty()) {
               auto match_val = get_matching_map_val(dpins.get_compact_flat());
               #ifdef BASIC_DBG
-              std::cout << std::format("\t\t\t\t\t inserting in inp_map_of_sets this \"child node's dpin\" = [some match_val]\n" );
+              std::print("\t\t\t\t\t inserting in inp_map_of_sets this \"child node's dpin\" = [some match_val]\n" );
               #endif
               inp_map_of_sets[out_cf].insert(match_val.begin(), match_val.end());  // resolution
             } else {
               #ifdef BASIC_DBG
-              std::cout << std::format("\t\t\t\t\t inserting in inp_map_of_sets this \"child node's dpin\" = [{}]\n",dpins.has_name()?dpins.get_name():std::to_string(dpins.get_pid()) );
+              std::print("\t\t\t\t\t inserting in inp_map_of_sets this \"child node's dpin\" = [{}]\n",dpins.has_name()?dpins.get_name():std::to_string(dpins.get_pid()) );
               #endif
               inp_map_of_sets[out_cf].insert(dpins.get_compact_flat());
             }
           } else {
             if (self_set != inp_map_of_sets.end()) {
               #ifdef BASIC_DBG
-              std::cout << std::format("\t\t\t\t\t inserting in inp_map_of_sets this \"child node's dpin\" = [self set]\n");
+              std::print("\t\t\t\t\t inserting in inp_map_of_sets this \"child node's dpin\" = [self set]\n");
               #endif
               inp_map_of_sets[out_cf].insert(self_set->second.begin(), self_set->second.end());
             }
@@ -907,7 +907,7 @@ void Traverse_lg::fast_pass_for_inputs(Lgraph* lg, map_of_sets& inp_map_of_sets,
 void Traverse_lg::fwd_traversal_for_inp_map(Lgraph* lg, map_of_sets& inp_map_of_sets, bool is_orig_lg) {
   #ifdef BASIC_DBG
   std::cout << "&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&\n";
-  std::cout << std::format("\t\tis_orig_lg: {}\n", is_orig_lg);
+  std::print("\t\tis_orig_lg: {}\n", is_orig_lg);
   #endif
   for (const auto& node : lg->forward(true)) {
     if (node.is_type_const() || (node.is_type_sub() && node.get_type_sub_node().get_name() == "__fir_const")) {
@@ -917,7 +917,7 @@ void Traverse_lg::fwd_traversal_for_inp_map(Lgraph* lg, map_of_sets& inp_map_of_
       traverse_order.emplace_back(node_dpins);  
       const auto node_dpin_cf = node_dpins.get_compact_flat();
       #ifdef BASIC_DBG
-      std::cout << std::format("node obtained from fwd traversal: n{},{} \n",
+      std::print("node obtained from fwd traversal: n{},{} \n",
                  node.get_nid(),
                  node_dpins.has_name() ? node_dpins.get_name() : std::to_string(node_dpins.get_pid()));
       #endif
@@ -925,7 +925,7 @@ void Traverse_lg::fwd_traversal_for_inp_map(Lgraph* lg, map_of_sets& inp_map_of_
           = node.is_type_loop_last() || node.is_type_loop_first() || (mark_loop_stop.find(node_dpin_cf) != mark_loop_stop.end());
 
       #ifdef BASIC_DBG
-      std::cout << std::format("\t\tnode is loop stop: LL?{}, LF?{}, MLS?{} \n", node.is_type_loop_last(), node.is_type_loop_first(), (mark_loop_stop.find(node_dpin_cf) != mark_loop_stop.end()) );
+      std::print("\t\tnode is loop stop: LL?{}, LF?{}, MLS?{} \n", node.is_type_loop_last(), node.is_type_loop_first(), (mark_loop_stop.find(node_dpin_cf) != mark_loop_stop.end()) );
       #endif
       const absl::flat_hash_set<Node_pin::Compact_flat>* self_set = nullptr;
       auto                                               it       = inp_map_of_sets.find(node_dpin_cf);
@@ -956,7 +956,7 @@ void Traverse_lg::fwd_traversal_for_inp_map(Lgraph* lg, map_of_sets& inp_map_of_
         // }
         for (const auto out_cfs : e.sink.get_node().out_connected_pins()) {
 #ifdef BASIC_DBG
-          std::cout << std::format("\tChild node's dpin:\t\t {}(n{})\n",
+          std::print("\tChild node's dpin:\t\t {}(n{})\n",
                      out_cfs.has_name() ? out_cfs.get_name() : std::to_string(out_cfs.get_pid()),
                      out_cfs.get_node().get_nid());
 #endif
@@ -965,25 +965,25 @@ void Traverse_lg::fwd_traversal_for_inp_map(Lgraph* lg, map_of_sets& inp_map_of_
             if (!is_orig_lg && !(get_matching_map_val(node_dpin_cf)).empty()) {
               auto match_val = get_matching_map_val(node_dpin_cf);
 #ifdef BASIC_DBG
-              std::cout << std::format("\t\t\tmatch_val is the I/P! K[n{}]::V[-match_val_value-]\n", out_cfs.get_node().get_nid());
+              std::print("\t\t\tmatch_val is the I/P! K[n{}]::V[-match_val_value-]\n", out_cfs.get_node().get_nid());
 #endif
               inp_map_of_sets[out_cf].insert(match_val.begin(), match_val.end());  // resolution
               /*} else if (self_set) { //this is a trial for accuracy (inserting the inputs of unresolved loop_stop instead of the
                 l9oops top itself) inp_map_of_sets[out_cf].insert(self_set->begin(), self_set->end()); #ifdef EXTENSIVE_DBG
-                  std::cout << std::format("\t\t\tSS is the I/P! K[n{}]::V[ss val]\n", out_cfs.get_node().get_nid());
+                  std::print("\t\t\tSS is the I/P! K[n{}]::V[ss val]\n", out_cfs.get_node().get_nid());
                 #endif
               */
             } else {
               inp_map_of_sets[out_cf].insert(node_dpin_cf);
 #ifdef BASIC_DBG
-              std::cout << std::format("\t\t\tnode itself is the I/P! K[n{}]::V[n{}]\n", out_cfs.get_node().get_nid(), node.get_nid());
+              std::print("\t\t\tnode itself is the I/P! K[n{}]::V[n{}]\n", out_cfs.get_node().get_nid(), node.get_nid());
 #endif
             }
           } else {
             if (self_set) {
               inp_map_of_sets[out_cf].insert(self_set->begin(), self_set->end());
 #ifdef BASIC_DBG
-              std::cout << std::format("\t\t\tSS is the I/P! K[n{}]::V[ss val]\n", out_cfs.get_node().get_nid());
+              std::print("\t\t\tSS is the I/P! K[n{}]::V[ss val]\n", out_cfs.get_node().get_nid());
 #endif
             }
 #ifdef BASIC_DBG
@@ -1004,7 +1004,7 @@ void Traverse_lg::fwd_traversal_for_inp_map(Lgraph* lg, map_of_sets& inp_map_of_
 void Traverse_lg::bwd_traversal_for_out_map(map_of_sets& out_map_of_sets, bool is_orig_lg) {
 #ifdef EXTENSIVE_DBG
   std::cout << "&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&\n";
-  std::cout << std::format("\t\tis_orig_lg: {}\n", is_orig_lg);
+  std::print("\t\tis_orig_lg: {}\n", is_orig_lg);
 #endif
   absl::flat_hash_set<Node::Compact_flat> traversed_nodes;
   for (std::vector<Node_pin>::const_reverse_iterator rit = traverse_order.rbegin(); rit != traverse_order.rend();
@@ -1016,7 +1016,7 @@ void Traverse_lg::bwd_traversal_for_out_map(map_of_sets& out_map_of_sets, bool i
     }
     traversed_nodes.insert(node.get_compact_flat());
 #ifdef BASIC_DBG
-    std::cout << std::format("node obtained from traverse_order: n{},{} \n", node.get_nid(), node_dpin.get_pid());
+    std::print("node obtained from traverse_order: n{},{} \n", node.get_nid(), node_dpin.get_pid());
 #endif
     bool is_loop_stop = node.is_type_loop_last() || node.is_type_loop_first()
                         || (mark_loop_stop.find(node_dpin.get_compact_flat()) != mark_loop_stop.end());
@@ -1039,7 +1039,7 @@ void Traverse_lg::bwd_traversal_for_out_map(map_of_sets& out_map_of_sets, bool i
 
     for (auto in_dpin : node.inp_drivers()) {
 #ifdef EXTENSIVE_DBG
-      std::cout << std::format("\tParent driver of the node:\t\t {}(n{})\n",
+      std::print("\tParent driver of the node:\t\t {}(n{})\n",
                  in_dpin.has_name() ? in_dpin.get_name() : std::to_string(in_dpin.get_pid()),
                  in_dpin.get_node().get_nid());
 #endif
@@ -1058,24 +1058,24 @@ void Traverse_lg::bwd_traversal_for_out_map(map_of_sets& out_map_of_sets, bool i
           auto match_val = get_matching_map_val(node_dpin.get_compact_flat());
           out_map_of_sets[inp_cf].insert(match_val.begin(), match_val.end());  // resolution
 #ifdef EXTENSIVE_DBG
-          std::cout << std::format("\t\t\tmatch_val is the O/P! K[n{}]::V[-match_val_value-]\n", in_dpin.get_node().get_nid());
+          std::print("\t\t\tmatch_val is the O/P! K[n{}]::V[-match_val_value-]\n", in_dpin.get_node().get_nid());
 #endif
           /*
           } else if (self_set) { //this is a trial for accuracy (inserting the inputs of unresolved loop_stop instead of the loops
-          top itself) out_map_of_sets[inp_cf].insert(self_set->begin(), self_set->end()); #ifdef EXTENSIVE_DBG std::cout << std::format("\t\t\tSS
+          top itself) out_map_of_sets[inp_cf].insert(self_set->begin(), self_set->end()); #ifdef EXTENSIVE_DBG std::print("\t\t\tSS
           is the O/P! K[n{}]::V[ss val]\n", in_dpin.get_node().get_nid()); #endif
           */
         } else {
           out_map_of_sets[inp_cf].insert(node_dpin.get_compact_flat());
 #ifdef EXTENSIVE_DBG
-          std::cout << std::format("\t\t\tnode itself is the O/P! K[n{}]::V[n{}]\n", in_dpin.get_node().get_nid(), node.get_nid());
+          std::print("\t\t\tnode itself is the O/P! K[n{}]::V[n{}]\n", in_dpin.get_node().get_nid(), node.get_nid());
 #endif
         }
       } else {
         if (self_set) {
           out_map_of_sets[inp_cf].insert(self_set->begin(), self_set->end());
 #ifdef EXTENSIVE_DBG
-          std::cout << std::format("\t\t\tSS is the O/P! K[n{}]::V[ss val]\n", in_dpin.get_node().get_nid());
+          std::print("\t\t\tSS is the O/P! K[n{}]::V[ss val]\n", in_dpin.get_node().get_nid());
 #endif
         }
       }
@@ -1144,7 +1144,7 @@ void Traverse_lg::netpin_to_origpin_default_match(Lgraph* orig_lg, Lgraph* synth
     auto orig_in_dpin_name       = dpin.get_name();
     name2dpin[orig_in_dpin_name] = dpin.get_compact_flat();
 #ifdef BASIC_DBG
-    std::cout << std::format("Inserting orig-in-dpin {} in name2dpin\n", orig_in_dpin_name);
+    std::print("Inserting orig-in-dpin {} in name2dpin\n", orig_in_dpin_name);
 #endif
   });
   synth_lg->each_graph_input([&name2dpin, this](const Node_pin& non_h_dpin) {
@@ -1155,7 +1155,7 @@ void Traverse_lg::netpin_to_origpin_default_match(Lgraph* orig_lg, Lgraph* synth
       mark_loop_stop.insert(dpin.get_compact_flat());
       mark_loop_stop.insert(name2dpin.find(synth_in_dpin_name)->second);
 #ifdef FOR_EVAL
-      std::cout << std::format("DEFAULT INSERTION OF: {}, {}\n",
+      std::print("DEFAULT INSERTION OF: {}, {}\n",
                  dpin.has_name() ? dpin.get_name() : std::to_string(dpin.get_pid()),
                  std::to_string(dpin.get_pid()));
 #endif
@@ -1163,7 +1163,7 @@ void Traverse_lg::netpin_to_origpin_default_match(Lgraph* orig_lg, Lgraph* synth
     }
 #ifdef BASIC_DBG
     else {
-      std::cout << std::format("NOT inserting {}, {}\n",
+      std::print("NOT inserting {}, {}\n",
                  dpin.has_name() ? dpin.get_name() : std::to_string(dpin.get_pid()),
                  std::to_string(dpin.get_pid()));
     }
@@ -1179,7 +1179,7 @@ void Traverse_lg::netpin_to_origpin_default_match(Lgraph* orig_lg, Lgraph* synth
     auto orig_out_dpin_name       = dpin.get_name();
     name2dpin[orig_out_dpin_name] = dpin.get_compact_flat();
 #ifdef BASIC_DBG
-    std::cout << std::format("Inserting orig-out-dpin {} in name2dpin\n", dpin.get_name());
+    std::print("Inserting orig-out-dpin {} in name2dpin\n", dpin.get_name());
 #endif
   });
   synth_lg->each_graph_output([&name2dpin, this](const Node_pin& non_h_dpin) {
@@ -1190,7 +1190,7 @@ void Traverse_lg::netpin_to_origpin_default_match(Lgraph* orig_lg, Lgraph* synth
       mark_loop_stop.insert(dpin.get_compact_flat());
       mark_loop_stop.insert(name2dpin.find(synth_out_dpin_name)->second);
 #ifdef FOR_EVAL
-      std::cout << std::format("DEFAULT INSERTION OF: {}, {}\n",
+      std::print("DEFAULT INSERTION OF: {}, {}\n",
                  dpin.has_name() ? dpin.get_name() : std::to_string(dpin.get_pid()),
                  std::to_string(dpin.get_pid()));
 #endif
@@ -1198,7 +1198,7 @@ void Traverse_lg::netpin_to_origpin_default_match(Lgraph* orig_lg, Lgraph* synth
     }
 #ifdef BASIC_DBG
     else {
-      std::cout << std::format("NOT inserting {}, {}\n",
+      std::print("NOT inserting {}, {}\n",
                  dpin.has_name() ? dpin.get_name() : std::to_string(dpin.get_pid()),
                  std::to_string(dpin.get_pid()));
     }
@@ -1217,7 +1217,7 @@ void Traverse_lg::netpin_to_origpin_default_match(Lgraph* orig_lg, Lgraph* synth
     for (const auto& original_node_dpin : original_node.out_connected_pins()) {
       if (original_node_dpin.has_name()) {
 #ifdef BASIC_DBG
-        std::cout << std::format("orig_node_dpin.wire: {} for pin: {} lg: {}\n",
+        std::print("orig_node_dpin.wire: {} for pin: {} lg: {}\n",
                    original_node_dpin.get_wire_name(),
                    original_node_dpin.get_name(),
                    (original_node.get_class_lgraph())->get_name());
@@ -1234,21 +1234,21 @@ void Traverse_lg::netpin_to_origpin_default_match(Lgraph* orig_lg, Lgraph* synth
           if (name2dpin_it != name2dpin.end()) {
             /* after removing SSA, pin in name2dpin, then remove from name2dpin and put here*/
             #ifdef BASIC_DBG
-              //std::cout << std::format("\t\t\t\t\terasing from name2dpin: {}", name2dpin_it->first);
-						  std::cout << std::format("\t\t\t\t\tputiing in name2dpins: {}", name2dpin_it->first);
+              //std::print("\t\t\t\t\terasing from name2dpin: {}", name2dpin_it->first);
+						  std::print("\t\t\t\t\tputiing in name2dpins: {}", name2dpin_it->first);
             #endif
             name2dpins[original_node_dpin_wire].insert(name2dpin_it->second);
             name2dpin.erase(name2dpin_it);
           }
           #ifdef BASIC_DBG
-            std::cout << std::format("\t\t\t inserting {} in name2dpinss.\n", original_node_dpin_wire);
+            std::print("\t\t\t inserting {} in name2dpinss.\n", original_node_dpin_wire);
           #endif
         } else {
           if (name2dpins.find(original_node_dpin_wire) != name2dpins.end()) {
             /* if entry already in name2dpins, then append to that only*/
             name2dpins[original_node_dpin_wire].insert(original_node_dpin.get_compact_flat());
             #ifdef BASIC_DBG
-            std::cout << std::format("\t\t\t inserting {} in name2dpinss.\n", original_node_dpin_wire);
+            std::print("\t\t\t inserting {} in name2dpinss.\n", original_node_dpin_wire);
             #endif
           } else if (name2dpin.find(original_node_dpin_wire) != name2dpin.end()) {
 						/* entry already in name2dpin. Instead of overwriting, move it to name2dpins*/
@@ -1258,12 +1258,12 @@ void Traverse_lg::netpin_to_origpin_default_match(Lgraph* orig_lg, Lgraph* synth
 						/* now write the new entry as well to name2dpins */
 						name2dpins[original_node_dpin_wire].insert(original_node_dpin.get_compact_flat());
             #ifdef BASIC_DBG
-					  	std::cout << std::format("\t\t\t moving {} to name2dpinss.\n", original_node_dpin_wire);
+					  	std::print("\t\t\t moving {} to name2dpinss.\n", original_node_dpin_wire);
             #endif
 					} else {
             name2dpin[original_node_dpin_wire] = original_node_dpin.get_compact_flat();
             #ifdef BASIC_DBG
-            std::cout << std::format("\t\t\t inserting {} in name2dpin.\n", original_node_dpin_wire);
+            std::print("\t\t\t inserting {} in name2dpin.\n", original_node_dpin_wire);
             #endif
           }
         }
@@ -1274,7 +1274,7 @@ void Traverse_lg::netpin_to_origpin_default_match(Lgraph* orig_lg, Lgraph* synth
   #ifdef BASIC_DBG
   std::cout << "\n LGIDs collected:\n";
   for (auto i : origLGID_set) {
-    std::cout << std::format("lgID: {}\n", i);
+    std::print("lgID: {}\n", i);
   }
   std::cout << "\n :LGIDs collected\n";
   print_name2dpin(name2dpin);
@@ -1292,7 +1292,7 @@ void Traverse_lg::netpin_to_origpin_default_match(Lgraph* orig_lg, Lgraph* synth
     for (const auto synth_node_dpin : synth_node.out_connected_pins()) {  // might be multi driver node
       if (synth_node_dpin.has_name()) {
 #ifdef BASIC_DBG
-        std::cout << std::format("synth_node_dpin_name: {}\n", synth_node_dpin.get_name());
+        std::print("synth_node_dpin_name: {}\n", synth_node_dpin.get_name());
 #endif
         /*see if the name matches to any in original LG.
          * if module gets instantiated in 2 places, find_driver_pin won't work with fast(true); as in who it points to - with same
@@ -1302,8 +1302,8 @@ void Traverse_lg::netpin_to_origpin_default_match(Lgraph* orig_lg, Lgraph* synth
          * */
         auto synth_node_dpin_wire = synth_node_dpin.get_wire_name();
 #ifdef BASIC_DBG
-        // std::cout << std::format("\t\tFinding dpin for orig_sub_lg_name {}\n", orig_sub_lg->get_name());
-        std::cout << std::format("\t**  synth_node_dpin_wire {}  -->  ", synth_node_dpin_wire);
+        // std::print("\t\tFinding dpin for orig_sub_lg_name {}\n", orig_sub_lg->get_name());
+        std::print("\t**  synth_node_dpin_wire {}  -->  ", synth_node_dpin_wire);
 #endif
         // auto orig_node_dpin = Node_pin::find_driver_pin( orig_sub_lg , synth_node_dpin_name);//orig LG with same name as that of
         // synth node
@@ -1316,14 +1316,14 @@ void Traverse_lg::netpin_to_origpin_default_match(Lgraph* orig_lg, Lgraph* synth
         }
         auto map_itt = name2dpin.find(synth_node_dpin_wire);
 #ifdef BASIC_DBG
-        std::cout << std::format(" {}  .**\n", synth_node_dpin_wire);
+        std::print(" {}  .**\n", synth_node_dpin_wire);
 #endif
         if (map_itt != name2dpin.end()) {
 #ifdef BASIC_DBG
           auto orig_node_dpin = Node_pin("lgdb", map_itt->second);
-          std::cout << std::format("\t\tFound orig_node_dpin {}\n",
+          std::print("\t\tFound orig_node_dpin {}\n",
                      orig_node_dpin.has_name() ? orig_node_dpin.get_name() : std::to_string(orig_node_dpin.get_pid()));
-          std::cout << std::format("\tDEFAULT INSERTION OF: {}, {}\n",
+          std::print("\tDEFAULT INSERTION OF: {}, {}\n",
                      synth_node_dpin.has_name() ? synth_node_dpin.get_name() : std::to_string(synth_node_dpin.get_pid()),
                      std::to_string(synth_node_dpin.get_pid()));
 #endif
@@ -1332,7 +1332,7 @@ void Traverse_lg::netpin_to_origpin_default_match(Lgraph* orig_lg, Lgraph* synth
           mark_loop_stop.insert(map_itt->second);
 #ifdef FOR_EVAL
           auto orig_node_dpin1 = Node_pin("lgdb", map_itt->second);
-          std::cout << std::format("Inserting in netpin_to_origpin_default_match : {}  :::  {}\n",
+          std::print("Inserting in netpin_to_origpin_default_match : {}  :::  {}\n",
                      synth_node_dpin.has_name() ? synth_node_dpin.get_name()
                                                 : ("n" + std::to_string(synth_node_dpin.get_node().get_nid())),
                      orig_node_dpin1.has_name() ? orig_node_dpin1.get_name()
@@ -1348,10 +1348,10 @@ void Traverse_lg::netpin_to_origpin_default_match(Lgraph* orig_lg, Lgraph* synth
           std::cout << "\t\tFound orig_node_dpin";
           for (const auto& orig_node_dpin_cf : map_itt_s->second) {
             auto orig_node_dpin = Node_pin("lgdb", orig_node_dpin_cf);
-            std::cout << std::format("  {}  ", orig_node_dpin.has_name() ? orig_node_dpin.get_name() : std::to_string(orig_node_dpin.get_pid()));
+            std::print("  {}  ", orig_node_dpin.has_name() ? orig_node_dpin.get_name() : std::to_string(orig_node_dpin.get_pid()));
           }
           std::cout << "\n";
-          std::cout << std::format("\tDEFAULT INSERTION OF: {}, {}\n",
+          std::print("\tDEFAULT INSERTION OF: {}, {}\n",
                      synth_node_dpin.has_name() ? synth_node_dpin.get_name() : std::to_string(synth_node_dpin.get_pid()),
                      std::to_string(synth_node_dpin.get_pid()));
           #endif
@@ -1360,12 +1360,12 @@ void Traverse_lg::netpin_to_origpin_default_match(Lgraph* orig_lg, Lgraph* synth
           mark_loop_stop.insert(synth_node_dpin.get_compact_flat());
           mark_loop_stop.insert((map_itt_s->second).begin(), (map_itt_s->second).end());
           #ifdef FOR_EVAL
-          std::cout << std::format("Inserting in netpin_to_origpin_default_match s : {} ::: ",
+          std::print("Inserting in netpin_to_origpin_default_match s : {} ::: ",
                      synth_node_dpin.has_name() ? synth_node_dpin.get_name()
                                                 : ("n" + std::to_string(synth_node_dpin.get_node().get_nid())));
           for (const auto& orig_node_dpin1_cf : (map_itt_s)->second) {
             auto orig_node_dpin1 = Node_pin("lgdb", orig_node_dpin1_cf);
-            std::cout << std::format("  {}  ",
+            std::print("  {}  ",
                        orig_node_dpin1.has_name() ? orig_node_dpin1.get_name()
                                                   : ("n" + std::to_string(orig_node_dpin1.get_node().get_nid())));
           }
@@ -1383,7 +1383,7 @@ void Traverse_lg::netpin_to_origpin_default_match(Lgraph* orig_lg, Lgraph* synth
           #endif
           do {
             #ifdef BASIC_DBG
-            std::cout << std::format("\t**  synth_node_dpin_wire {}  -(again)->  ", synth_node_dpin_wire);
+            std::print("\t**  synth_node_dpin_wire {}  -(again)->  ", synth_node_dpin_wire);
             #endif
             size_t pos = synth_node_dpin_wire.find("_n_");
 	    /*for _###_ --> remove it!*/
@@ -1401,16 +1401,16 @@ void Traverse_lg::netpin_to_origpin_default_match(Lgraph* orig_lg, Lgraph* synth
             }
 
             #ifdef BASIC_DBG
-              std::cout << std::format(" {}  .**\n", synth_node_dpin_wire);
+              std::print(" {}  .**\n", synth_node_dpin_wire);
             #endif
             auto iter1 = name2dpin.find(synth_node_dpin_wire);
 	            
 	    if (iter1 != name2dpin.end()) {//matches in name2dpin
               #ifdef BASIC_DBG
               auto orig_node_dpin = Node_pin("lgdb", iter1->second);
-              std::cout << std::format("\t\tFound orig_node_dpin {}\n",
+              std::print("\t\tFound orig_node_dpin {}\n",
                          orig_node_dpin.has_name() ? orig_node_dpin.get_name() : std::to_string(orig_node_dpin.get_pid()));
-              std::cout << std::format("\tDEFAULT INSERTION OF: {}, {}\n",
+              std::print("\tDEFAULT INSERTION OF: {}, {}\n",
                          synth_node_dpin.has_name() ? synth_node_dpin.get_name() : std::to_string(synth_node_dpin.get_pid()),
                          std::to_string(synth_node_dpin.get_pid()));
               #endif
@@ -1419,7 +1419,7 @@ void Traverse_lg::netpin_to_origpin_default_match(Lgraph* orig_lg, Lgraph* synth
               mark_loop_stop.insert(iter1->second);
               #ifdef FOR_EVAL
               auto orig_node_dpin1 = Node_pin("lgdb", iter1->second);
-              std::cout << std::format("Inserting in netpin_to_origpin_default_match : {}  :::  {}\n",
+              std::print("Inserting in netpin_to_origpin_default_match : {}  :::  {}\n",
                          synth_node_dpin.has_name() ? synth_node_dpin.get_name()
                                                     : ("n" + std::to_string(synth_node_dpin.get_node().get_nid())),
                          orig_node_dpin1.has_name() ? orig_node_dpin1.get_name()
@@ -1438,10 +1438,10 @@ void Traverse_lg::netpin_to_origpin_default_match(Lgraph* orig_lg, Lgraph* synth
               std::cout << "\t\tFound orig_node_dpin";
               for (const auto& orig_node_dpin_cf : iter2->second) {
                 auto orig_node_dpin = Node_pin("lgdb", orig_node_dpin_cf);
-                std::cout << std::format("  {}  ", orig_node_dpin.has_name() ? orig_node_dpin.get_name() : std::to_string(orig_node_dpin.get_pid()));
+                std::print("  {}  ", orig_node_dpin.has_name() ? orig_node_dpin.get_name() : std::to_string(orig_node_dpin.get_pid()));
               }
               std::cout << "\n";
-              std::cout << std::format("\tDEFAULT INSERTION OF: {}, {}\n",
+              std::print("\tDEFAULT INSERTION OF: {}, {}\n",
                          synth_node_dpin.has_name() ? synth_node_dpin.get_name() : std::to_string(synth_node_dpin.get_pid()),
                          std::to_string(synth_node_dpin.get_pid()));
               #endif
@@ -1450,12 +1450,12 @@ void Traverse_lg::netpin_to_origpin_default_match(Lgraph* orig_lg, Lgraph* synth
               mark_loop_stop.insert(synth_node_dpin.get_compact_flat());
               mark_loop_stop.insert((iter2->second).begin(), (iter2->second).end());
               #ifdef FOR_EVAL
-              std::cout << std::format("Inserting in netpin_to_origpin_default_match s : {} ::: ",
+              std::print("Inserting in netpin_to_origpin_default_match s : {} ::: ",
                          synth_node_dpin.has_name() ? synth_node_dpin.get_name()
                                                     : ("n" + std::to_string(synth_node_dpin.get_node().get_nid())));
               for (const auto& orig_node_dpin1_cf : (iter2)->second) {
                 auto orig_node_dpin1 = Node_pin("lgdb", orig_node_dpin1_cf);
-                std::cout << std::format("  {}  ",
+                std::print("  {}  ",
                            orig_node_dpin1.has_name() ? orig_node_dpin1.get_name()
                                                       : ("n" + std::to_string(orig_node_dpin1.get_node().get_nid())));
               }
@@ -1473,9 +1473,9 @@ void Traverse_lg::netpin_to_origpin_default_match(Lgraph* orig_lg, Lgraph* synth
 	  } while (trial < 3);
           #ifdef BASIC_DBG
           if(not_found) {//still not matched with any!?
-	      std::cout << std::format("\"\"\" {}\n", synth_node_dpin_wire);
+	      std::print("\"\"\" {}\n", synth_node_dpin_wire);
 	      get_node_pin_compact_flat_details(synth_node_dpin.get_compact_flat());
-	      std::cout << std::format("\"\"\"\n");
+	      std::print("\"\"\"\n");
 	  }
           #endif
 
@@ -1483,13 +1483,13 @@ void Traverse_lg::netpin_to_origpin_default_match(Lgraph* orig_lg, Lgraph* synth
       }
 #ifdef EXTENSIVE_DBG
       else {
-        std::cout << std::format("IN DEFAULT MATCH: dpin not named for {}\n", synth_node_dpin.get_wire_name());
+        std::print("IN DEFAULT MATCH: dpin not named for {}\n", synth_node_dpin.get_wire_name());
       }
 #endif
     }
   }
 
-  std::cout << std::format("num_of_matches: {}, IN_FUNC: netpin_to_origpin_default_match \n",net_to_orig_pin_match_map.size()-num_of_matches);
+  std::print("num_of_matches: {}, IN_FUNC: netpin_to_origpin_default_match \n",net_to_orig_pin_match_map.size()-num_of_matches);
 
   //remove_resolved_from_orig_MoS();
 }
@@ -1527,7 +1527,7 @@ void Traverse_lg::matching_pass_io_boundary_only(map_of_sets& map_of_sets_synth,
 #ifdef FOR_EVAL
         auto np_s = Node_pin("lgdb", it->first);
         auto np_o = Node_pin("lgdb", orig_np);
-        std::cout << std::format("Inserting in matching_pass_io_boundary_only: {}  :::  {}\n",
+        std::print("Inserting in matching_pass_io_boundary_only: {}  :::  {}\n",
                    np_s.has_name() ? np_s.get_name() : ("n" + std::to_string(np_s.get_node().get_nid())),
                    np_o.has_name() ? np_o.get_name() : ("n" + std::to_string(np_o.get_node().get_nid())));
 #endif
@@ -1543,7 +1543,7 @@ void Traverse_lg::matching_pass_io_boundary_only(map_of_sets& map_of_sets_synth,
     }
   }
 
-  std::cout << std::format("num_of_matches: {}, IN_FUNC: matching_pass_io_boundary_only \n",net_to_orig_pin_match_map.size()-num_of_matches);
+  std::print("num_of_matches: {}, IN_FUNC: matching_pass_io_boundary_only \n",net_to_orig_pin_match_map.size()-num_of_matches);
 
 }
 
@@ -1585,13 +1585,13 @@ float Traverse_lg::get_matching_weight(const absl::flat_hash_set<Node_pin::Compa
   // float mismatches = smallest.size() - matches ;
   // float matching_weight = 5 * (float((2 * matches) - mismatches) / float(synth_set.size() + orig_set.size()));
   // #ifdef FULL_RUN_FOR_EVAL_TESTING
-  //   std::cout << std::format("{}, {}, ", matches, mismatches);
+  //   std::print("{}, {}, ", matches, mismatches);
   // #endif
   // return matching_weight;
   float mismatches = synth_set.size() - matches ;
   if (mismatches<=0.0) mismatches=1;
   #ifdef BASIC_DBG
-  std::cout << std::format("\t\t\t\t (synth_set_size={}, orig_set_size={}) matches:{}, mismatches:{},returning:{}\n",  synth_set.size(), orig_set.size(),matches, mismatches,5*(matches/mismatches));
+  std::print("\t\t\t\t (synth_set_size={}, orig_set_size={}) matches:{}, mismatches:{},returning:{}\n",  synth_set.size(), orig_set.size(),matches, mismatches,5*(matches/mismatches));
   #endif
   return 5*(matches/mismatches);
 }
@@ -1637,7 +1637,7 @@ bool Traverse_lg::complete_io_match_fullOnly() {
   Traverse_lg::inverted_ArrMap_of_sets inp_invMoS_orig;
   Traverse_lg::inverted_SetMap_of_sets inp_big_set_Mos_orig;
   create_inverted_map(inp_map_of_sets_orig, inp_invMoS_orig, inp_big_set_Mos_orig);
-  std::cout << std::format("\nsize of inv map: {}, size of inp_big_set_Mos_orig: {}, instead of  inp_map_of_sets_orig: {} \n", inp_invMoS_orig.size(), inp_big_set_Mos_orig.size(), inp_map_of_sets_orig.size());
+  std::print("\nsize of inv map: {}, size of inp_big_set_Mos_orig: {}, instead of  inp_map_of_sets_orig: {} \n", inp_invMoS_orig.size(), inp_big_set_Mos_orig.size(), inp_map_of_sets_orig.size());
 
 #ifdef BASIC_DBG
   std::cout << "\n\n In complete_io_match_fullOnly : \n";
@@ -1649,7 +1649,7 @@ bool Traverse_lg::complete_io_match_fullOnly() {
     #ifdef BASIC_DBG
     auto n_s   = Node_pin("lgdb", it->first).get_node();
     auto p_s = Node_pin("lgdb", it->first);
-    std::cout << std::format("running for : {},n{}\n", p_s.has_name() ? p_s.get_name() : std::to_string(p_s.get_pid()), n_s.get_nid());
+    std::print("running for : {},n{}\n", p_s.has_name() ? p_s.get_name() : std::to_string(p_s.get_pid()), n_s.get_nid());
     #endif
 
     bool out_matched                    = false;  // FIXME: declaration can be shifted IN the following for loop?
@@ -1700,7 +1700,7 @@ bool Traverse_lg::complete_io_match_fullOnly() {
         else {  // outputs did not match
           auto p_o = Node_pin("lgdb", orig_in_np);
           auto o_s = Node_pin("lgdb", orig_in_np).get_node();
-          std::cout << std::format("\t\tMatch? : {},n{}\n",
+          std::print("\t\tMatch? : {},n{}\n",
                      p_o.has_name() ? p_o.get_name() : std::to_string(p_o.get_pid()),
                      std::to_string(o_s.get_nid()));
         }
@@ -1713,7 +1713,7 @@ bool Traverse_lg::complete_io_match_fullOnly() {
           #ifdef FOR_EVAL
           auto np_s = Node_pin("lgdb", it->first);
           auto np_o = Node_pin("lgdb", orig_in_np);
-          std::cout << std::format("Inserting in complete_io_match_fullOnly (small set) : n{},{}  :::  n{},{}\n",
+          std::print("Inserting in complete_io_match_fullOnly (small set) : n{},{}  :::  n{},{}\n",
                      np_s.get_node().get_nid(),
                      np_s.has_name() ? np_s.get_name() : ("n" + std::to_string(np_s.get_node().get_nid())),
                      np_o.get_node().get_nid(),
@@ -1767,7 +1767,7 @@ bool Traverse_lg::complete_io_match_fullOnly() {
         else {  // outputs did not match
           auto p_o = Node_pin("lgdb", orig_in_np);
           auto o_s = Node_pin("lgdb", orig_in_np).get_node();
-          std::cout << std::format("\t\tMatch? : {},n{}\n",
+          std::print("\t\tMatch? : {},n{}\n",
                      p_o.has_name() ? p_o.get_name() : std::to_string(p_o.get_pid()),
                      std::to_string(o_s.get_nid()));
         }
@@ -1782,7 +1782,7 @@ bool Traverse_lg::complete_io_match_fullOnly() {
           #ifdef FOR_EVAL
           auto np_s = Node_pin("lgdb", it->first);
           auto np_o = Node_pin("lgdb", orig_in_np);
-          std::cout << std::format("Inserting in complete_io_match_fullOnly large-set: n{},{}  :::  n{},{}\n",
+          std::print("Inserting in complete_io_match_fullOnly large-set: n{},{}  :::  n{},{}\n",
                      np_s.get_node().get_nid(),
                      np_s.has_name() ? np_s.get_name() : ("n" + std::to_string(np_s.get_node().get_nid())),
                      np_o.get_node().get_nid(),
@@ -1806,7 +1806,7 @@ bool Traverse_lg::complete_io_match_fullOnly() {
       it++;
     }
   }
-  std::cout << std::format("num_of_matches: {}, IN_FUNC: complete_io_match_fullOnly (full IN+OUT)\n",net_to_orig_pin_match_map.size()-num_of_matches);
+  std::print("num_of_matches: {}, IN_FUNC: complete_io_match_fullOnly (full IN+OUT)\n",net_to_orig_pin_match_map.size()-num_of_matches);
   return any_matching_done;
 }
 
@@ -1819,7 +1819,7 @@ bool Traverse_lg::complete_io_match(bool flop_only) {
   Traverse_lg::inverted_ArrMap_of_sets inp_invMoS_orig;
   Traverse_lg::inverted_SetMap_of_sets inp_big_set_Mos_orig;
   create_inverted_map(inp_map_of_sets_orig, inp_invMoS_orig, inp_big_set_Mos_orig);
-  std::cout << std::format("\nsize of inv map: {}, size of inp_big_set_Mos_orig: {}, instead of  inp_map_of_sets_orig: {} \n", inp_invMoS_orig.size(), inp_big_set_Mos_orig.size(), inp_map_of_sets_orig.size());
+  std::print("\nsize of inv map: {}, size of inp_big_set_Mos_orig: {}, instead of  inp_map_of_sets_orig: {} \n", inp_invMoS_orig.size(), inp_big_set_Mos_orig.size(), inp_map_of_sets_orig.size());
 
 #ifdef BASIC_DBG
   std::cout << "\n\n In complete_io_match : \n";
@@ -1831,7 +1831,7 @@ bool Traverse_lg::complete_io_match(bool flop_only) {
     auto n_s   = Node_pin("lgdb", it->first).get_node();
     #ifdef BASIC_DBG
     auto p_s = Node_pin("lgdb", it->first);
-    std::cout << std::format("running for : {},n{}\n", p_s.has_name() ? p_s.get_name() : std::to_string(p_s.get_pid()), n_s.get_nid());
+    std::print("running for : {},n{}\n", p_s.has_name() ? p_s.get_name() : std::to_string(p_s.get_pid()), n_s.get_nid());
     #endif
     if (flop_only) {
       if (!n_s.is_type_loop_last()) {
@@ -1912,7 +1912,7 @@ bool Traverse_lg::complete_io_match(bool flop_only) {
         else {  // outputs did not match
           auto p_o = Node_pin("lgdb", orig_in_np);
           auto o_s = Node_pin("lgdb", orig_in_np).get_node();
-          std::cout << std::format("\t\tMatch? : {},n{}\n",
+          std::print("\t\tMatch? : {},n{}\n",
                      p_o.has_name() ? p_o.get_name() : std::to_string(p_o.get_pid()),
                      std::to_string(o_s.get_nid()));
         }
@@ -1925,7 +1925,7 @@ bool Traverse_lg::complete_io_match(bool flop_only) {
           #ifdef FOR_EVAL
           auto np_s = Node_pin("lgdb", it->first);
           auto np_o = Node_pin("lgdb", orig_in_np);
-          std::cout << std::format("Inserting in complete_io_match (small set) : n{},{}  :::  n{},{}\n",
+          std::print("Inserting in complete_io_match (small set) : n{},{}  :::  n{},{}\n",
                      np_s.get_node().get_nid(),
                      np_s.has_name() ? np_s.get_name() : ("n" + std::to_string(np_s.get_node().get_nid())),
                      np_o.get_node().get_nid(),
@@ -1938,7 +1938,7 @@ bool Traverse_lg::complete_io_match(bool flop_only) {
           partial_out_match_map[matching_wt].insert(orig_in_np);
           #ifdef BASIC_DBG
           auto np_o = Node_pin("lgdb", orig_in_np);
-          std::cout << std::format("\t\t For matching_wt {}, inserting small-set: n{}({})\n",
+          std::print("\t\t For matching_wt {}, inserting small-set: n{}({})\n",
                      matching_wt,
                      np_o.get_node().get_nid(),
                      np_o.has_name() ? np_o.get_name() : ("n" + std::to_string(np_o.get_node().get_nid())));
@@ -2010,7 +2010,7 @@ bool Traverse_lg::complete_io_match(bool flop_only) {
         else {  // outputs did not match
           auto p_o = Node_pin("lgdb", orig_in_np);
           auto o_s = Node_pin("lgdb", orig_in_np).get_node();
-          std::cout << std::format("\t\tMatch? : {},n{}\n",
+          std::print("\t\tMatch? : {},n{}\n",
                      p_o.has_name() ? p_o.get_name() : std::to_string(p_o.get_pid()),
                      std::to_string(o_s.get_nid()));
         }
@@ -2025,7 +2025,7 @@ bool Traverse_lg::complete_io_match(bool flop_only) {
           #ifdef FOR_EVAL
           auto np_s = Node_pin("lgdb", it->first);
           auto np_o = Node_pin("lgdb", orig_in_np);
-          std::cout << std::format("Inserting in complete_io_match large-set: n{},{}  :::  n{},{}\n",
+          std::print("Inserting in complete_io_match large-set: n{},{}  :::  n{},{}\n",
                      np_s.get_node().get_nid(),
                      np_s.has_name() ? np_s.get_name() : ("n" + std::to_string(np_s.get_node().get_nid())),
                      np_o.get_node().get_nid(),
@@ -2038,7 +2038,7 @@ bool Traverse_lg::complete_io_match(bool flop_only) {
           partial_out_match_map[matching_wt].insert(orig_in_np);
           #ifdef BASIC_DBG
           auto np_o = Node_pin("lgdb", orig_in_np);
-          std::cout << std::format("\t\t For matching_wt {}, inserting (large-set) : n{}({})\n",
+          std::print("\t\t For matching_wt {}, inserting (large-set) : n{}({})\n",
                      matching_wt,
                      np_o.get_node().get_nid(),
                      np_o.has_name() ? np_o.get_name() : ("n" + std::to_string(np_o.get_node().get_nid())));
@@ -2066,22 +2066,22 @@ bool Traverse_lg::complete_io_match(bool flop_only) {
       #ifdef BASIC_DBG
       std::cout << "Partial_out_match_map:\n";
       for (auto [a, b] : partial_out_match_map) {
-        std::cout << std::format("{} ---- ", a);
+        std::print("{} ---- ", a);
         for (auto b_ : b) {
           auto b__ = Node_pin("lgdb", b_);
-          std::cout << std::format("\t {}, ", b__.has_name() ? b__.get_name() : ("n" + std::to_string(b__.get_node().get_nid())));
+          std::print("\t {}, ", b__.has_name() ? b__.get_name() : ("n" + std::to_string(b__.get_node().get_nid())));
         }
         std::cout << "\n";
       }
       #endif
       #ifdef FOR_EVAL
       auto np_s = Node_pin("lgdb", it->first);
-      std::cout << std::format("Inserting in complete_io_match (parttial output matched) : n{},{}  :::  ",
+      std::print("Inserting in complete_io_match (parttial output matched) : n{},{}  :::  ",
                  np_s.get_node().get_nid(),
                  np_s.has_name() ? np_s.get_name() : ("n" + std::to_string(np_s.get_node().get_nid())));
       for (auto xx : (partial_out_match_map.rbegin())->second) {
         auto np_o = Node_pin("lgdb", xx);
-        std::cout << std::format("n{},{}\t\t",
+        std::print("n{},{}\t\t",
                    np_o.get_node().get_nid(),
                    np_o.has_name() ? np_o.get_name() : ("n" + std::to_string(np_o.get_node().get_nid())));
       }
@@ -2114,7 +2114,7 @@ bool Traverse_lg::complete_io_match(bool flop_only) {
     auto n_s   = Node_pin("lgdb", it->first).get_node();
     #ifdef BASIC_DBG
     auto p_s = Node_pin("lgdb", it->first);
-    std::cout << std::format("running for : {},n{}\n", p_s.has_name() ? p_s.get_name() : std::to_string(p_s.get_pid()), n_s.get_nid());
+    std::print("running for : {},n{}\n", p_s.has_name() ? p_s.get_name() : std::to_string(p_s.get_pid()), n_s.get_nid());
     #endif
     if (flop_only) {
       if (!n_s.is_type_loop_last()) {
@@ -2192,7 +2192,7 @@ bool Traverse_lg::complete_io_match(bool flop_only) {
       else {  // inputs did not match
         auto p_o = Node_pin("lgdb", orig_out_np);
         auto o_s = Node_pin("lgdb", orig_out_np).get_node();
-        std::cout << std::format("\t\tMatch? : {},n{}\n",
+        std::print("\t\tMatch? : {},n{}\n",
                    p_o.has_name() ? p_o.get_name() : std::to_string(p_o.get_pid()),
                    std::to_string(o_s.get_nid()));
       }
@@ -2206,7 +2206,7 @@ bool Traverse_lg::complete_io_match(bool flop_only) {
         #ifdef FOR_EVAL
         auto np_s = Node_pin("lgdb", it->first);
         auto np_o = Node_pin("lgdb", orig_out_np);
-        std::cout << std::format("Inserting in complete_io_match large-set: n{},{}  :::  n{},{}\n",
+        std::print("Inserting in complete_io_match large-set: n{},{}  :::  n{},{}\n",
                    np_s.get_node().get_nid(),
                    np_s.has_name() ? np_s.get_name() : ("n" + std::to_string(np_s.get_node().get_nid())),
                    np_o.get_node().get_nid(),
@@ -2219,7 +2219,7 @@ bool Traverse_lg::complete_io_match(bool flop_only) {
         partial_in_match_map[matching_wt].insert(orig_out_np);
         #ifdef BASIC_DBG
         auto np_o = Node_pin("lgdb", orig_out_np);
-        std::cout << std::format("\t\t For matching_wt {}, inserting : n{}({})\n",
+        std::print("\t\t For matching_wt {}, inserting : n{}({})\n",
                    matching_wt,
                    np_o.get_node().get_nid(),
                    np_o.has_name() ? np_o.get_name() : ("n" + std::to_string(np_o.get_node().get_nid())));
@@ -2247,22 +2247,22 @@ bool Traverse_lg::complete_io_match(bool flop_only) {
       #ifdef BASIC_DBG
       std::cout << "partial_in_match_map:\n";
       for (auto [a, b] : partial_in_match_map) {
-        std::cout << std::format("{} ---- ", a);
+        std::print("{} ---- ", a);
         for (auto b_ : b) {
           auto b__ = Node_pin("lgdb", b_);
-          std::cout << std::format("\t {}, ", b__.has_name() ? b__.get_name() : ("n" + std::to_string(b__.get_node().get_nid())));
+          std::print("\t {}, ", b__.has_name() ? b__.get_name() : ("n" + std::to_string(b__.get_node().get_nid())));
         }
         std::cout << "\n";
       }
       #endif
       #ifdef FOR_EVAL
       auto np_s = Node_pin("lgdb", it->first);
-      std::cout << std::format("Inserting in complete_io_match (parttial input matched) : n{},{}  :::  ",
+      std::print("Inserting in complete_io_match (parttial input matched) : n{},{}  :::  ",
                  np_s.get_node().get_nid(),
                  np_s.has_name() ? np_s.get_name() : ("n" + std::to_string(np_s.get_node().get_nid())));
       for (auto xx : (partial_in_match_map.rbegin())->second) {
         auto np_o = Node_pin("lgdb", xx);
-        std::cout << std::format("n{},{}\t\t",
+        std::print("n{},{}\t\t",
                    np_o.get_node().get_nid(),
                    np_o.has_name() ? np_o.get_name() : ("n" + std::to_string(np_o.get_node().get_nid())));
       }
@@ -2281,8 +2281,8 @@ bool Traverse_lg::complete_io_match(bool flop_only) {
   }
 
 
-  std::cout << std::format("num_of_matches: {}, IN_FUNC: complete_io_match (full IN+OUT)\n",net_to_orig_pin_match_map.size()-num_of_matches-partial_out_in_complete);
-  std::cout << std::format("num_of_matches: {}, IN_FUNC: complete_io_match_partialOUTs \n",partial_out_in_complete);
+  std::print("num_of_matches: {}, IN_FUNC: complete_io_match (full IN+OUT)\n",net_to_orig_pin_match_map.size()-num_of_matches-partial_out_in_complete);
+  std::print("num_of_matches: {}, IN_FUNC: complete_io_match_partialOUTs \n",partial_out_in_complete);
   return any_matching_done;
 }
 
@@ -2295,7 +2295,7 @@ bool Traverse_lg::complete_io_match(bool flop_only) {
 //   Traverse_lg::inverted_ArrMap_of_sets inp_invMoS_orig;
 //   Traverse_lg::inverted_SetMap_of_sets inp_big_set_Mos_orig;
 //   create_inverted_map(inp_map_of_sets_orig, inp_invMoS_orig, inp_big_set_Mos_orig);
-//   std::cout << std::format("\nsize of inv map: {}, size of inp_big_set_Mos_orig: {}, instead of  inp_map_of_sets_orig: {} \n", inp_invMoS_orig.size(), inp_big_set_Mos_orig.size(), inp_map_of_sets_orig.size());
+//   std::print("\nsize of inv map: {}, size of inp_big_set_Mos_orig: {}, instead of  inp_map_of_sets_orig: {} \n", inp_invMoS_orig.size(), inp_big_set_Mos_orig.size(), inp_map_of_sets_orig.size());
 // 
 // #ifdef BASIC_DBG
 //   std::cout << "\n\n In complete_io_match : \n";
@@ -2307,7 +2307,7 @@ bool Traverse_lg::complete_io_match(bool flop_only) {
 //     auto n_s   = Node_pin("lgdb", it->first).get_node();
 //     #ifdef BASIC_DBG
 //     auto p_s = Node_pin("lgdb", it->first);
-//     std::cout << std::format("running for : {},n{}\n", p_s.has_name() ? p_s.get_name() : std::to_string(p_s.get_pid()), n_s.get_nid());
+//     std::print("running for : {},n{}\n", p_s.has_name() ? p_s.get_name() : std::to_string(p_s.get_pid()), n_s.get_nid());
 //     #endif
 //     if (flop_only) {
 //       if (!n_s.is_type_loop_last()) {
@@ -2388,7 +2388,7 @@ bool Traverse_lg::complete_io_match(bool flop_only) {
 //         else {  // outputs did not match
 //           auto p_o = Node_pin("lgdb", orig_in_np);
 //           auto o_s = Node_pin("lgdb", orig_in_np).get_node();
-//           std::cout << std::format("\t\tMatch? : {},n{}\n",
+//           std::print("\t\tMatch? : {},n{}\n",
 //                      p_o.has_name() ? p_o.get_name() : std::to_string(p_o.get_pid()),
 //                      std::to_string(o_s.get_nid()));
 //         }
@@ -2401,7 +2401,7 @@ bool Traverse_lg::complete_io_match(bool flop_only) {
 //           #ifdef FOR_EVAL
 //           auto np_s = Node_pin("lgdb", it->first);
 //           auto np_o = Node_pin("lgdb", orig_in_np);
-//           std::cout << std::format("Inserting in complete_io_match (small set) : n{},{}  :::  n{},{}\n",
+//           std::print("Inserting in complete_io_match (small set) : n{},{}  :::  n{},{}\n",
 //                      np_s.get_node().get_nid(),
 //                      np_s.has_name() ? np_s.get_name() : ("n" + std::to_string(np_s.get_node().get_nid())),
 //                      np_o.get_node().get_nid(),
@@ -2414,7 +2414,7 @@ bool Traverse_lg::complete_io_match(bool flop_only) {
 //           partial_out_match_map[matching_wt].insert(orig_in_np);
 //           #ifdef BASIC_DBG
 //           auto np_o = Node_pin("lgdb", orig_in_np);
-//           std::cout << std::format("\t\t For matching_wt {}, inserting small-set: n{}({})\n",
+//           std::print("\t\t For matching_wt {}, inserting small-set: n{}({})\n",
 //                      matching_wt,
 //                      np_o.get_node().get_nid(),
 //                      np_o.has_name() ? np_o.get_name() : ("n" + std::to_string(np_o.get_node().get_nid())));
@@ -2486,7 +2486,7 @@ bool Traverse_lg::complete_io_match(bool flop_only) {
 //         else {  // outputs did not match
 //           auto p_o = Node_pin("lgdb", orig_in_np);
 //           auto o_s = Node_pin("lgdb", orig_in_np).get_node();
-//           std::cout << std::format("\t\tMatch? : {},n{}\n",
+//           std::print("\t\tMatch? : {},n{}\n",
 //                      p_o.has_name() ? p_o.get_name() : std::to_string(p_o.get_pid()),
 //                      std::to_string(o_s.get_nid()));
 //         }
@@ -2501,7 +2501,7 @@ bool Traverse_lg::complete_io_match(bool flop_only) {
 //           #ifdef FOR_EVAL
 //           auto np_s = Node_pin("lgdb", it->first);
 //           auto np_o = Node_pin("lgdb", orig_in_np);
-//           std::cout << std::format("Inserting in complete_io_match large-set: n{},{}  :::  n{},{}\n",
+//           std::print("Inserting in complete_io_match large-set: n{},{}  :::  n{},{}\n",
 //                      np_s.get_node().get_nid(),
 //                      np_s.has_name() ? np_s.get_name() : ("n" + std::to_string(np_s.get_node().get_nid())),
 //                      np_o.get_node().get_nid(),
@@ -2514,7 +2514,7 @@ bool Traverse_lg::complete_io_match(bool flop_only) {
 //           partial_out_match_map[matching_wt].insert(orig_in_np);
 //           #ifdef BASIC_DBG
 //           auto np_o = Node_pin("lgdb", orig_in_np);
-//           std::cout << std::format("\t\t For matching_wt {}, inserting (large-set) : n{}({})\n",
+//           std::print("\t\t For matching_wt {}, inserting (large-set) : n{}({})\n",
 //                      matching_wt,
 //                      np_o.get_node().get_nid(),
 //                      np_o.has_name() ? np_o.get_name() : ("n" + std::to_string(np_o.get_node().get_nid())));
@@ -2542,22 +2542,22 @@ bool Traverse_lg::complete_io_match(bool flop_only) {
 //       #ifdef BASIC_DBG
 //       std::cout << "Partial_out_match_map:\n";
 //       for (auto [a, b] : partial_out_match_map) {
-//         std::cout << std::format("{} ---- ", a);
+//         std::print("{} ---- ", a);
 //         for (auto b_ : b) {
 //           auto b__ = Node_pin("lgdb", b_);
-//           std::cout << std::format("\t {}, ", b__.has_name() ? b__.get_name() : ("n" + std::to_string(b__.get_node().get_nid())));
+//           std::print("\t {}, ", b__.has_name() ? b__.get_name() : ("n" + std::to_string(b__.get_node().get_nid())));
 //         }
 //         std::cout << "\n";
 //       }
 //       #endif
 //       #ifdef FOR_EVAL
 //       auto np_s = Node_pin("lgdb", it->first);
-//       std::cout << std::format("Inserting in complete_io_match (parttial output matched) : n{},{}  :::  ",
+//       std::print("Inserting in complete_io_match (parttial output matched) : n{},{}  :::  ",
 //                  np_s.get_node().get_nid(),
 //                  np_s.has_name() ? np_s.get_name() : ("n" + std::to_string(np_s.get_node().get_nid())));
 //       for (auto xx : (partial_out_match_map.rbegin())->second) {
 //         auto np_o = Node_pin("lgdb", xx);
-//         std::cout << std::format("n{},{}\t\t",
+//         std::print("n{},{}\t\t",
 //                    np_o.get_node().get_nid(),
 //                    np_o.has_name() ? np_o.get_name() : ("n" + std::to_string(np_o.get_node().get_nid())));
 //       }
@@ -2574,8 +2574,8 @@ bool Traverse_lg::complete_io_match(bool flop_only) {
 //       it++;
 //     }
 //   }
-//   std::cout << std::format("num_of_matches: {}, IN_FUNC: complete_io_match (full IN+OUT)\n",net_to_orig_pin_match_map.size()-num_of_matches-partial_out_in_complete);
-//   std::cout << std::format("num_of_matches: {}, IN_FUNC: complete_io_match_partialOUTs \n",partial_out_in_complete);
+//   std::print("num_of_matches: {}, IN_FUNC: complete_io_match (full IN+OUT)\n",net_to_orig_pin_match_map.size()-num_of_matches-partial_out_in_complete);
+//   std::print("num_of_matches: {}, IN_FUNC: complete_io_match_partialOUTs \n",partial_out_in_complete);
 //   return any_matching_done;
 // }
 
@@ -2598,7 +2598,7 @@ bool Traverse_lg::surrounding_cell_match() {
     for (const auto& cc_s : connected_cells_synth_vec) {
 #ifdef BASIC_DBG
       auto p = Node_pin("lgdb", cc_s);                                                             // FIXME: for debug only
-      std::cout << std::format("  {}, {}, {}\n", p.get_node().get_or_create_name(), p.has_name(), p.get_pid());  // FOR DEBUG
+      std::print("  {}, {}, {}\n", p.get_node().get_or_create_name(), p.has_name(), p.get_pid());  // FOR DEBUG
 #endif
 
       if (net_to_orig_pin_match_map.find(cc_s) != net_to_orig_pin_match_map.end()) {  // connected_cell_synth is resolved.
@@ -2633,7 +2633,7 @@ bool Traverse_lg::surrounding_cell_match() {
                                               net_to_orig_pin_match_map[same_cc_s].end());
             } else {
 #ifdef BASIC_DBG
-              std::cout << std::format("$$ Reporting cell n{}.\n", n_s.get_nid());
+              std::print("$$ Reporting cell n{}.\n", n_s.get_nid());
 #endif
               orig_connected_cells_vec_formed
                   = false;  // if even 1 neighbor doesnt match, this will be false! so ALL have to be resolved.
@@ -2643,7 +2643,7 @@ bool Traverse_lg::surrounding_cell_match() {
 
         } else {
 #ifdef BASIC_DBG
-          std::cout << std::format("$$ Reporting cell n{} due to no same IO with the connected n{}.\n", n_s.get_nid(), p_n.get_nid());
+          std::print("$$ Reporting cell n{} due to no same IO with the connected n{}.\n", n_s.get_nid(), p_n.get_nid());
 #endif
           orig_connected_cells_vec_formed = false;
           cell_collapsed                  = false;
@@ -2658,11 +2658,11 @@ bool Traverse_lg::surrounding_cell_match() {
         net_to_orig_pin_match_map[it->first].insert(connected_cells_orig_set.begin(), connected_cells_orig_set.end());
 #ifdef FOR_EVAL
         auto np_s = Node_pin("lgdb", it->first);
-        std::cout << std::format("Inserting in surrounding_cell_match : {}  :::  ",
+        std::print("Inserting in surrounding_cell_match : {}  :::  ",
                    np_s.has_name() ? np_s.get_name() : ("n" + std::to_string(np_s.get_node().get_nid())));
         for (auto np_o_set : connected_cells_orig_set) {
           auto np_o = Node_pin("lgdb", np_o_set);
-          std::cout << std::format("    {} ", np_o.has_name() ? np_o.get_name() : ("n" + std::to_string(np_o.get_node().get_nid())));
+          std::print("    {} ", np_o.has_name() ? np_o.get_name() : ("n" + std::to_string(np_o.get_node().get_nid())));
         }
         std::cout << "\n";
 #endif
@@ -2672,11 +2672,11 @@ bool Traverse_lg::surrounding_cell_match() {
         if (cell_collapsed && !connected_same_cell.is_invalid()) {  // connected_same_cell present
           net_to_orig_pin_match_map[connected_same_cell].insert(connected_cells_orig_set.begin(), connected_cells_orig_set.end());
 #ifdef FOR_EVAL
-          std::cout << std::format("Inserting in surrounding_cell_match : {}  :::  ",
+          std::print("Inserting in surrounding_cell_match : {}  :::  ",
                      np_s.has_name() ? np_s.get_name() : ("n" + std::to_string(np_s.get_node().get_nid())));
           for (auto np_o_set : connected_cells_orig_set) {
             auto np_o = Node_pin("lgdb", np_o_set);
-            std::cout << std::format("    {} ", np_o.has_name() ? np_o.get_name() : ("n" + std::to_string(np_o.get_node().get_nid())));
+            std::print("    {} ", np_o.has_name() ? np_o.get_name() : ("n" + std::to_string(np_o.get_node().get_nid())));
           }
           std::cout << "\n";
 #endif
@@ -2686,7 +2686,7 @@ bool Traverse_lg::surrounding_cell_match() {
         it++;
       } else {
 #ifdef BASIC_DBG
-        std::cout << std::format("  $$ Reporting cell n{}.\n", n_s.get_nid());
+        std::print("  $$ Reporting cell n{}.\n", n_s.get_nid());
 #endif
         any_matching_done = false;
         it++;
@@ -2701,7 +2701,7 @@ bool Traverse_lg::surrounding_cell_match() {
     out_map_of_sets_synth.erase(val_to_erase);
     inp_map_of_sets_synth.erase(val_to_erase);
   }
-  std::cout << std::format("num_of_matches: {}, IN_FUNC: surrounding_cell_match \n",net_to_orig_pin_match_map.size()-num_of_matches);
+  std::print("num_of_matches: {}, IN_FUNC: surrounding_cell_match \n",net_to_orig_pin_match_map.size()-num_of_matches);
   //remove_resolved_from_orig_MoS();
   return any_matching_done;
 }
@@ -2726,11 +2726,11 @@ bool Traverse_lg::surrounding_cell_match_final() {
       net_to_orig_pin_match_map[it->first].insert(connected_cells_orig_set.begin(), connected_cells_orig_set.end());
 #ifdef FOR_EVAL
       auto np_s = Node_pin("lgdb", it->first);
-      std::cout << std::format("Inserting in surrounding_cell_match_final : {}  :::  ",
+      std::print("Inserting in surrounding_cell_match_final : {}  :::  ",
                  np_s.has_name() ? np_s.get_name() : ("n" + std::to_string(np_s.get_node().get_nid())));
       for (auto np_o_set : connected_cells_orig_set) {
         auto np_o = Node_pin("lgdb", np_o_set);
-        std::cout << std::format("    {} ", np_o.has_name() ? np_o.get_name() : ("n" + std::to_string(np_o.get_node().get_nid())));
+        std::print("    {} ", np_o.has_name() ? np_o.get_name() : ("n" + std::to_string(np_o.get_node().get_nid())));
       }
       std::cout << "\n";
 #endif
@@ -2764,11 +2764,11 @@ bool Traverse_lg::surrounding_cell_match_final() {
         net_to_orig_pin_match_map[it->first].insert(connected_cells_orig_set.begin(), connected_cells_orig_set.end());
 #ifdef FOR_EVAL
         auto np_s = Node_pin("lgdb", it->first);
-        std::cout << std::format("Inserting in surrounding_cell_match_final : {}  :::  ",
+        std::print("Inserting in surrounding_cell_match_final : {}  :::  ",
                    np_s.has_name() ? np_s.get_name() : ("n" + std::to_string(np_s.get_node().get_nid())));
         for (auto np_o_set : connected_cells_orig_set) {
           auto np_o = Node_pin("lgdb", np_o_set);
-          std::cout << std::format("    {} ", np_o.has_name() ? np_o.get_name() : ("n" + std::to_string(np_o.get_node().get_nid())));
+          std::print("    {} ", np_o.has_name() ? np_o.get_name() : ("n" + std::to_string(np_o.get_node().get_nid())));
         }
         std::cout << "\n";
 #endif
@@ -2782,7 +2782,7 @@ bool Traverse_lg::surrounding_cell_match_final() {
       }
     }
   }
-  std::cout << std::format("num_of_matches: {}, IN_FUNC: surrounding_cell_match_final \n",net_to_orig_pin_match_map.size()-num_of_matches);
+  std::print("num_of_matches: {}, IN_FUNC: surrounding_cell_match_final \n",net_to_orig_pin_match_map.size()-num_of_matches);
   return unmatched_left;
 }
 
@@ -2832,7 +2832,7 @@ std::vector<std::pair<uint64_t, uint64_t>> Traverse_lg::get_loc_vec(
       loc_vec.emplace_back(loc_val);
     } else {
 #ifdef BASIC_DBG  // inserted this ifdef to speed up and lessen log dump
-      std::cout << std::format("FIXME: No Location found for n{}.\n", n_o.get_nid());
+      std::print("FIXME: No Location found for n{}.\n", n_o.get_nid());
 #endif
     }
   }
@@ -2846,7 +2846,7 @@ void Traverse_lg::remove_from_crit_node_set(const Node_pin::Compact_flat& dpin_c
   if (crit_node_set.find(dpin_cf) != crit_node_set.end()) {
 #ifdef EXTENSIVE_DBG
     auto p = Node_pin("lgdb", dpin_cf);
-    std::cout << std::format("\t\tREMOVING FROM crit_node_set: {},n{},{}\n",
+    std::print("\t\tREMOVING FROM crit_node_set: {},n{},{}\n",
                p.has_name() ? p.get_name() : std::to_string(p.get_pid()),
                p.get_node().get_nid(), p.get_node().get_class_lgraph()->get_name());
 #endif
@@ -2855,7 +2855,7 @@ void Traverse_lg::remove_from_crit_node_set(const Node_pin::Compact_flat& dpin_c
 #ifdef EXTENSIVE_DBG
   else {
     auto p = Node_pin("lgdb", dpin_cf);
-    std::cout << std::format("\t\tNOT REMOVING FROM crit_node_set: {}, {}\n",
+    std::print("\t\tNOT REMOVING FROM crit_node_set: {}, {}\n",
                p.has_name() ? p.get_name() : std::to_string(p.get_pid()),
                std::to_string(p.get_pid()));
     std::cout << "\t crit_node_set: ";
@@ -2863,9 +2863,9 @@ void Traverse_lg::remove_from_crit_node_set(const Node_pin::Compact_flat& dpin_c
     std::cout << "\n";
     for (auto& pin_cf : crit_node_set) {
       auto p_ = Node_pin("lgdb", pin_cf);
-      // std::cout << std::format("\t COMPARING: {}, {} \t", p.has_name()?p.get_name():std::to_string(p.get_pid()),
+      // std::print("\t COMPARING: {}, {} \t", p.has_name()?p.get_name():std::to_string(p.get_pid()),
       // p_.has_name()?p_.get_name():std::to_string(p_.get_pid()));
-      std::cout << std::format("\t COMPARING {} {}: {}, {} \t",
+      std::print("\t COMPARING {} {}: {}, {} \t",
                  p.get_top_lgraph()->get_name(),
                  p_.get_top_lgraph()->get_name(),
                  p.get_wire_name(),
@@ -2886,12 +2886,12 @@ void Traverse_lg::get_node_pin_compact_flat_details(const Node_pin::Compact_flat
   if ( np.is_graph_io() ) { 
     std::cout << "-IO node-\t";
   }
-  std::cout << std::format("Details of node nid:{}", np.get_node().get_nid());
-  std::cout << std::format(",pin:{} are:: type:{}, lg:{}\n", np.has_name()?np.get_name():("p"+std::to_string(np.get_pid())), np.get_node().get_type_name(),  (np.get_node().get_class_lgraph())->get_name() );
+  std::print("Details of node nid:{}", np.get_node().get_nid());
+  std::print(",pin:{} are:: type:{}, lg:{}\n", np.has_name()?np.get_name():("p"+std::to_string(np.get_pid())), np.get_node().get_type_name(),  (np.get_node().get_class_lgraph())->get_name() );
 }
 
 void Traverse_lg::report_critical_matches_with_color() {
-	//std::cout << std::format("crit_node_map.size() = {}\n", crit_node_map.size());
+	//std::print("crit_node_map.size() = {}\n", crit_node_map.size());
 #ifdef BASIC_DBG
   std::cout << "\nmatching map:\n";
   print_io_map(net_to_orig_pin_match_map);
@@ -2900,7 +2900,7 @@ void Traverse_lg::report_critical_matches_with_color() {
   std::cout << "\nmatching map:\n";
   print_io_map(net_to_orig_pin_match_map);
 #endif
-  std::cout << std::format(
+  std::print(
       "\n\nReporting final critical resolved matches: \nsynth node and dpin     :- original node and dpin      -- color val -- "
       "source loc\n");
 #ifdef BASIC_DBG
@@ -2918,7 +2918,7 @@ void Traverse_lg::report_critical_matches_with_color() {
       auto orig_dpin = orig_pin.has_name() ? orig_pin.get_name() : ("p" + std::to_string(orig_pin.get_pid()));
       auto loc_start = orig_node.has_loc() ? (std::to_string(orig_node.get_loc().first)) : "xxx";
       auto loc_end   = orig_node.has_loc() ? (std::to_string(orig_node.get_loc().second)) : "xxx";
-      std::cout << std::format("{},{}       :-    n{},{}({},{},{})    --   {}   --  [{},{}]{}\n",
+      std::print("{},{}       :-    n{},{}({},{},{})    --   {}   --  [{},{}]{}\n",
                  synth_node,
                  synth_dpin,
                  orig_node.get_nid(),
@@ -2952,24 +2952,24 @@ void Traverse_lg::report_critical_matches_with_color() {
 
 #if 0
 	absl::flat_hash_set<Node> traversed_nodes = {};
-	std::cout << std::format("\ncolor 38 in synth LG is connected to color 37 in synth LG ? {}\n",is_combinationally_connected(from_node_synth, to_node_synth, traversed_nodes) );
+	std::print("\ncolor 38 in synth LG is connected to color 37 in synth LG ? {}\n",is_combinationally_connected(from_node_synth, to_node_synth, traversed_nodes) );
 	traversed_nodes.clear();
-  std::cout << std::format("\ncolor 38 in orig LG is connected to color 37 in orig LG ? {}\n\n",is_combinationally_connected(from_node_orig, to_node_orig, traversed_nodes) );
+  std::print("\ncolor 38 in orig LG is connected to color 37 in orig LG ? {}\n\n",is_combinationally_connected(from_node_orig, to_node_orig, traversed_nodes) );
 	traversed_nodes.clear();
-	std::cout << std::format("\ncolor 37 in orig LG is connected to color 38 in orig LG ? {}\n\n",is_combinationally_connected(to_node_orig, from_node_orig, traversed_nodes) );
+	std::print("\ncolor 37 in orig LG is connected to color 38 in orig LG ? {}\n\n",is_combinationally_connected(to_node_orig, from_node_orig, traversed_nodes) );
 	traversed_nodes.clear();
-  std::cout << std::format("\ncolor 37 in orig LG is connected to color 36 in orig LG ? {}\n\n",is_combinationally_connected(to_node_orig, orig_36, traversed_nodes) );
+  std::print("\ncolor 37 in orig LG is connected to color 36 in orig LG ? {}\n\n",is_combinationally_connected(to_node_orig, orig_36, traversed_nodes) );
 	traversed_nodes.clear();
-	std::cout << std::format("\ncolor 36 in orig LG is connected to color 35 in orig LG ? {}\n\n",is_combinationally_connected(orig_36, orig_35, traversed_nodes) );
+	std::print("\ncolor 36 in orig LG is connected to color 35 in orig LG ? {}\n\n",is_combinationally_connected(orig_36, orig_35, traversed_nodes) );
 	traversed_nodes.clear();
-	std::cout << std::format("\ncolor 35 in orig LG is connected to color 34 in orig LG ? {}\n\n",is_combinationally_connected(orig_35, orig_34, traversed_nodes) );
+	std::print("\ncolor 35 in orig LG is connected to color 34 in orig LG ? {}\n\n",is_combinationally_connected(orig_35, orig_34, traversed_nodes) );
 	traversed_nodes.clear();
-	std::cout << std::format("\ncolor 34 in orig LG is connected to color 33 in orig LG ? {}\n\n",is_combinationally_connected(orig_34, orig_33, traversed_nodes) );
+	std::print("\ncolor 34 in orig LG is connected to color 33 in orig LG ? {}\n\n",is_combinationally_connected(orig_34, orig_33, traversed_nodes) );
 #endif
-  std::cout << std::format("Crossovers in this design: {}\n", crossover_count);
+  std::print("Crossovers in this design: {}\n", crossover_count);
   auto end_time_of_algo = std::chrono::system_clock::now();
   std::chrono::duration<double> elapsed_seconds = end_time_of_algo-start_time_of_algo;
-  std::cout << std::format("TOTAL_TIME_OF_ALGO: {}s\n", elapsed_seconds.count());
+  std::print("TOTAL_TIME_OF_ALGO: {}s\n", elapsed_seconds.count());
   exit(0);
 }
 
@@ -2977,7 +2977,7 @@ void Traverse_lg::resolution_of_synth_map_of_sets(Traverse_lg::map_of_sets& synt
   std::cout << "\n In resolution_of_synth_map_of_sets:\n";
   for (auto& [synth_np, synth_set_np] : synth_map_of_set) {
     // auto xx = Node_pin("lgdb", synth_np).get_node().get_nid();
-    // std::cout << std::format("------{} ({})\n",xx, synth_set_np.size());
+    // std::print("------{} ({})\n",xx, synth_set_np.size());
     absl::flat_hash_set<Node_pin::Compact_flat> tmp_set;
     #ifdef BASIC_DBG
     std::cout << "Working on : "; get_node_pin_compact_flat_details(synth_np);
@@ -2999,7 +2999,7 @@ void Traverse_lg::resolution_of_synth_map_of_sets(Traverse_lg::map_of_sets& synt
       } else {
         #ifdef BASIC_DBG
         auto snv = Node_pin("lgdb", set_np_val);
-        std::cout << std::format("Tried finding {},n{},p{}({}) in mm \n",
+        std::print("Tried finding {},n{},p{}({}) in mm \n",
                    snv.has_name() ? snv.get_name() : ("n" + std::to_string(snv.get_node().get_nid())),
                    snv.get_node().get_nid(),
                    snv.get_pid(),
@@ -3034,9 +3034,9 @@ void Traverse_lg::print_everything() {
       auto n = Node_pin("lgdb", v).get_node();
       auto p = Node_pin("lgdb", v);
       if (p.has_name()) {
-        std::cout << std::format("{}\t ", p.get_name());
+        std::print("{}\t ", p.get_name());
       } else {
-        std::cout << std::format("n{}\t ", n.get_nid());
+        std::print("n{}\t ", n.get_nid());
       }
     }
   }
@@ -3139,7 +3139,7 @@ Traverse_lg::map_of_sets Traverse_lg::convert_io_MoS_to_node_MoS_LLonly(const ma
   }
 
 #ifdef BASIC_DBG
-  std::cout << std::format("\n Printing node_map_of_set_LoopLastOnly of size {} \n",node_map_of_set_LoopLastOnly.size());
+  std::print("\n Printing node_map_of_set_LoopLastOnly of size {} \n",node_map_of_set_LoopLastOnly.size());
   print_io_map(node_map_of_set_LoopLastOnly);
 	std::cout << "\n\n";
 #endif
@@ -3181,7 +3181,7 @@ Traverse_lg::map_of_sets Traverse_lg::obtain_MoS_LLonly(const map_of_sets& io_ma
 
 void Traverse_lg::weighted_match_LoopLastOnly(int perc_resolved) {
   #ifdef BASIC_DBG
-  std::cout << std::format("In weighted_match_LoopLastOnly for perc_resolved {}:\n\n", perc_resolved);
+  std::print("In weighted_match_LoopLastOnly for perc_resolved {}:\n\n", perc_resolved);
   #endif
 
   const auto num_of_matches = net_to_orig_pin_match_map.size();
@@ -3195,7 +3195,7 @@ void Traverse_lg::weighted_match_LoopLastOnly(int perc_resolved) {
 
   for (const auto& [synth_key, synth_set] : inp_map_of_sets_synth_LLonlly) {
     #ifdef BASIC_DBG
-    std::cout << std::format("\n **Working on (perc_res={}): ", perc_resolved); get_node_pin_compact_flat_details(synth_key);
+    std::print("\n **Working on (perc_res={}): ", perc_resolved); get_node_pin_compact_flat_details(synth_key);
     #endif
 
     /* which orig_MoS entries do we need to match it with?
@@ -3250,7 +3250,7 @@ void Traverse_lg::weighted_match_LoopLastOnly(int perc_resolved) {
     std::cout << "\n relevant_orig_nodes = ";
     for (const auto& relevant_orig_node_cf : relevant_orig_nodes) {
       auto relevant_orig_node = Node_pin("lgdb", relevant_orig_node_cf);
-      std::cout << std::format(" {}\t",
+      std::print(" {}\t",
                  relevant_orig_node.has_name() ? relevant_orig_node.get_name()
                                                : ("n" + std::to_string(relevant_orig_node.get_node().get_nid())));
     }
@@ -3260,7 +3260,7 @@ void Traverse_lg::weighted_match_LoopLastOnly(int perc_resolved) {
     float                                       match_prev = 0.0;
     absl::flat_hash_set<Node_pin::Compact_flat> matched_node_pins;
     #ifdef BASIC_DBG
-    std::cout << std::format("\nrelevant_orig_nodes.size() = {}, inp_map_of_sets_orig = {}\n",
+    std::print("\nrelevant_orig_nodes.size() = {}, inp_map_of_sets_orig = {}\n",
                relevant_orig_nodes.size(),
                inp_map_of_sets_orig.size());
     #endif
@@ -3275,7 +3275,7 @@ void Traverse_lg::weighted_match_LoopLastOnly(int perc_resolved) {
       // }
       #ifdef BASIC_DBG
         auto np_o = Node_pin("lgdb", orig_key);
-        std::cout << std::format("\t\t\t matching with: {}, n{}\n",np_o.has_name() ? np_o.get_name() : ("n" + std::to_string(np_o.get_node().get_nid())),np_o.get_node().get_nid() );
+        std::print("\t\t\t matching with: {}, n{}\n",np_o.has_name() ? np_o.get_name() : ("n" + std::to_string(np_o.get_node().get_nid())),np_o.get_node().get_nid() );
       #endif
       const auto& in_match  = get_matching_weight(synth_set, orig_set);
       auto        out_match = 0.0;
@@ -3296,16 +3296,16 @@ void Traverse_lg::weighted_match_LoopLastOnly(int perc_resolved) {
         matched_node_pins.insert(orig_key);
         match_prev = match_curr;
         #ifdef BASIC_DBG
-	std::cout << std::format("\t\t\t\t----Beter match found! match num: {} \n", match_curr);
+	std::print("\t\t\t\t----Beter match found! match num: {} \n", match_curr);
         #endif
       } else if (match_curr == match_prev) {
         matched_node_pins.insert(orig_key);
         #ifdef BASIC_DBG
-	std::cout << std::format("\t\t\t\t----SAME match found! match num: {} \n", match_curr);
+	std::print("\t\t\t\t----SAME match found! match num: {} \n", match_curr);
         #endif
       } 
       #ifdef BASIC_DBG
-      else { std::cout << std::format("\t\t\t\t----worse match found!match num: {} \n", match_curr);}
+      else { std::print("\t\t\t\t----worse match found!match num: {} \n", match_curr);}
       #endif
     }
 
@@ -3315,11 +3315,11 @@ void Traverse_lg::weighted_match_LoopLastOnly(int perc_resolved) {
       mark_loop_stop.insert(matched_node_pins.begin(), matched_node_pins.end());
 #ifdef FOR_EVAL
       auto np_s = Node_pin("lgdb", synth_key);
-      std::cout << std::format("Inserting in weighted_match_LoopLastOnly : {}(n{},lg={})  :::  ",
+      std::print("Inserting in weighted_match_LoopLastOnly : {}(n{},lg={})  :::  ",
                  np_s.has_name() ? np_s.get_name() : ("n" + std::to_string(np_s.get_node().get_nid())),std::to_string(np_s.get_node().get_nid()),  (np_s.get_node().get_class_lgraph())->get_name()  );
       for (auto np_o_set : matched_node_pins) {
         auto np_o = Node_pin("lgdb", np_o_set);
-        std::cout << std::format("    {}({},{},{},lg={}) ", np_o.has_name() ? np_o.get_name() : ("n" + std::to_string(np_o.get_node().get_nid())), np_o.get_node().is_type_loop_last(), np_o.get_node().get_type_name(), np_o.get_node().has_name()?np_o.get_node().get_name():"" ,  (np_o.get_node().get_class_lgraph())->get_name()  );
+        std::print("    {}({},{},{},lg={}) ", np_o.has_name() ? np_o.get_name() : ("n" + std::to_string(np_o.get_node().get_nid())), np_o.get_node().is_type_loop_last(), np_o.get_node().get_type_name(), np_o.get_node().has_name()?np_o.get_node().get_name():"" ,  (np_o.get_node().get_class_lgraph())->get_name()  );
       }
       std::cout << "\n";
 #endif
@@ -3336,7 +3336,7 @@ void Traverse_lg::weighted_match_LoopLastOnly(int perc_resolved) {
     //   it++;
     // }
   }
-  std::cout << std::format("num_of_matches: {}, IN_FUNC: weighted_match_LoopLastOnly \n",net_to_orig_pin_match_map.size()-num_of_matches);
+  std::print("num_of_matches: {}, IN_FUNC: weighted_match_LoopLastOnly \n",net_to_orig_pin_match_map.size()-num_of_matches);
 }
 
 void Traverse_lg::weighted_match() {  // only for the crit_node_entries remaining!
@@ -3350,7 +3350,7 @@ void Traverse_lg::weighted_match() {  // only for the crit_node_entries remainin
   for (const auto& synth_key : crit_node_set) {
     #ifdef BASIC_DBG
     auto synth_key_pin = Node_pin("lgdb", synth_key);
-    std::cout << std::format("\nsynth_key_pin name:{}, pid:{}\n", synth_key_pin.has_name()?synth_key_pin.get_name():("p"+std::to_string(synth_key_pin.get_pid())), std::to_string(synth_key_pin.get_pid()));
+    std::print("\nsynth_key_pin name:{}, pid:{}\n", synth_key_pin.has_name()?synth_key_pin.get_name():("p"+std::to_string(synth_key_pin.get_pid())), std::to_string(synth_key_pin.get_pid()));
     #endif
     I(inp_map_of_sets_synth.find(synth_key) != inp_map_of_sets_synth.end(), "\n synth_key NOT in inp_Map_of_sets_synth!! check!\n");
     const auto& synth_set = inp_map_of_sets_synth[synth_key];
@@ -3375,7 +3375,7 @@ void Traverse_lg::weighted_match() {  // only for the crit_node_entries remainin
       if( !((np_o.get_node()).has_loc()) ) {continue;}
       //#endif
       #ifdef BASIC_DBG
-      std::cout << std::format("\t\t\t matching with: {}, n{} ({})\n",np_o.has_name() ? np_o.get_name() : ("n" + std::to_string(np_o.get_node().get_nid())),np_o.get_node().get_nid(), np_o.get_node().get_type_name() );
+      std::print("\t\t\t matching with: {}, n{} ({})\n",np_o.has_name() ? np_o.get_name() : ("n" + std::to_string(np_o.get_node().get_nid())),np_o.get_node().get_nid(), np_o.get_node().get_type_name() );
       #endif
 
       #ifdef FULL_RUN_FOR_EVAL_TESTING
@@ -3383,7 +3383,7 @@ void Traverse_lg::weighted_match() {  // only for the crit_node_entries remainin
 	const auto& orig_node = Node_pin("lgdb",orig_key).get_node();
 	const auto& synth_node_name = synth_node.has_name() ? synth_node.get_name() : "N.A" ;
 	const auto& orig_node_name = orig_node.has_name() ? orig_node.get_name() : "N.A" ;
-	std::cout << std::format("{}, {}, ",synth_node_name, orig_node_name);
+	std::print("{}, {}, ",synth_node_name, orig_node_name);
       #endif
       float match_curr = 0.0;
       auto        out_match = 0.0;
@@ -3427,7 +3427,7 @@ void Traverse_lg::weighted_match() {  // only for the crit_node_entries remainin
       #endif
 
       #ifdef FULL_RUN_FOR_EVAL_TESTING
-        std::cout << std::format("{}, ",loop_detected);
+        std::print("{}, ",loop_detected);
       #endif
       
       if (match_curr > match_prev) {
@@ -3462,12 +3462,12 @@ void Traverse_lg::weighted_match() {  // only for the crit_node_entries remainin
       net_to_orig_pin_match_map[synth_key].insert(matched_node_pins.begin(), matched_node_pins.end());
 #ifdef FOR_EVAL
       auto np_s = Node_pin("lgdb", synth_key);
-      std::cout << std::format("Inserting in weighted_match : {} with wt {}  :::  ",
+      std::print("Inserting in weighted_match : {} with wt {}  :::  ",
                  np_s.has_name() ? np_s.get_name() : ("n" + std::to_string(np_s.get_node().get_nid())),
                  match_prev);
       for (auto np_o_set : matched_node_pins) {
         auto np_o = Node_pin("lgdb", np_o_set);
-        std::cout << std::format("    {} ", np_o.has_name() ? np_o.get_name() : ("n" + std::to_string(np_o.get_node().get_nid())));
+        std::print("    {} ", np_o.has_name() ? np_o.get_name() : ("n" + std::to_string(np_o.get_node().get_nid())));
       }
       std::cout << "\n";
 #endif
@@ -3481,7 +3481,7 @@ void Traverse_lg::weighted_match() {  // only for the crit_node_entries remainin
       // inp_map_of_sets_synth.erase(synth_key);
     } else if (!matched_node_pins.empty()) {
       auto np_s = Node_pin("lgdb", synth_key);
-      std::cout << std::format("\nReporting {} entry does not match with any orig_node.\n",
+      std::print("\nReporting {} entry does not match with any orig_node.\n",
                  np_s.has_name() ? np_s.get_name()
                                  : ("n" + std::to_string(np_s.get_node().get_nid())));  // If you want to check what was not matched
                                                                                         // with anything, this is the place.
@@ -3492,7 +3492,7 @@ void Traverse_lg::weighted_match() {  // only for the crit_node_entries remainin
   for (const auto& np : forced_match_vec) {
     remove_from_crit_node_set(np);
   }
-  std::cout << std::format("num_of_matches: {}, IN_FUNC: weighted_match \n",net_to_orig_pin_match_map.size()-num_of_matches);
+  std::print("num_of_matches: {}, IN_FUNC: weighted_match \n",net_to_orig_pin_match_map.size()-num_of_matches);
 }
 
 bool Traverse_lg::set_theory_match(Traverse_lg::map_of_sets& io_map_of_sets_synth, Traverse_lg::map_of_sets& io_map_of_sets_orig) {
@@ -3511,7 +3511,7 @@ bool Traverse_lg::set_theory_match(Traverse_lg::map_of_sets& io_map_of_sets_synt
 #ifdef BASIC_DBG
       auto synth_key_name = Node_pin("lgdb", synth_key);
       auto orig_key_name  = Node_pin("lgdb", orig_key);
-      std::cout << std::format(
+      std::print(
           "-- checking for synth key: {} VS. orig key: {} -- ",
           synth_key_name.has_name() ? synth_key_name.get_name() : ('n' + std::to_string(synth_key_name.get_node().get_nid())),
           orig_key_name.has_name() ? orig_key_name.get_name() : ('n' + std::to_string(orig_key_name.get_node().get_nid())));
@@ -3532,7 +3532,7 @@ bool Traverse_lg::set_theory_match(Traverse_lg::map_of_sets& io_map_of_sets_synt
         match_count    = matches;
         mismatch_count = mismatches;
 #ifdef BASIC_DBG
-        std::cout << std::format(" more matches (m:{}, mm:{}).\n", matches, mismatches);
+        std::print(" more matches (m:{}, mm:{}).\n", matches, mismatches);
 #endif
       } else if ((matches == match_count) && (mismatches < mismatch_count)) {
         matched_node_pins.clear();
@@ -3540,19 +3540,19 @@ bool Traverse_lg::set_theory_match(Traverse_lg::map_of_sets& io_map_of_sets_synt
         match_count    = matches;
         mismatch_count = mismatches;
 #ifdef BASIC_DBG
-        std::cout << std::format(" lesser mismatches (m:{}, mm:{}).\n", matches, mismatches);
+        std::print(" lesser mismatches (m:{}, mm:{}).\n", matches, mismatches);
 #endif
       } else if ((matches == match_count) && (mismatches == mismatch_count)) {  // matches and mismatches are same as prev.
                                                                                 // iteration
         matched_node_pins.insert(orig_key);
 #ifdef BASIC_DBG
-        std::cout << std::format(" same num of matches/mismatches (m:{}, mm:{}).\n", matches, mismatches);
+        std::print(" same num of matches/mismatches (m:{}, mm:{}).\n", matches, mismatches);
 #endif
       } else {
         counter++;
         (void)counter;
 #ifdef BASIC_DBG
-        std::cout << std::format(" counter incremented (m:{}, mm:{}). \n", matches, mismatches);
+        std::print(" counter incremented (m:{}, mm:{}). \n", matches, mismatches);
 #endif
       }
       counter_total++;
@@ -3561,14 +3561,14 @@ bool Traverse_lg::set_theory_match(Traverse_lg::map_of_sets& io_map_of_sets_synt
       if (synth_key_name.has_name()) {
         std::cout << "\t\t\t ss: \t\t\t ";
         for (auto ss : synth_set) {
-          std::cout << std::format(" {}, ",
+          std::print(" {}, ",
                      Node_pin("lgdb", ss).has_name() ? Node_pin("lgdb", ss).get_name()
                                                      : std::to_string(Node_pin("lgdb", ss).get_node().get_nid()));
         }
         std::cout << "\n";
         std::cout << "\t\t\t Os: \t\t\t ";
         for (auto os : orig_set) {
-          std::cout << std::format(" {}, ",
+          std::print(" {}, ",
                      Node_pin("lgdb", os).has_name() ? Node_pin("lgdb", os).get_name()
                                                      : std::to_string(Node_pin("lgdb", os).get_node().get_nid()));
         }
@@ -3578,16 +3578,16 @@ bool Traverse_lg::set_theory_match(Traverse_lg::map_of_sets& io_map_of_sets_synt
     }
     if (!matched_node_pins.empty()) {
 #ifdef BASIC_DBG
-      std::cout << std::format("1-- matches:{}, mism:{}, counter:{}, c_t:{}\n", match_count, mismatch_count, counter, counter_total);
+      std::print("1-- matches:{}, mism:{}, counter:{}, c_t:{}\n", match_count, mismatch_count, counter, counter_total);
 #endif
       net_to_orig_pin_match_map[synth_key].insert(matched_node_pins.begin(), matched_node_pins.end());
 #ifdef FOR_EVAL
       auto np_s = Node_pin("lgdb", synth_key);
-      std::cout << std::format("Inserting in set_theory_match : {}  :::  ",
+      std::print("Inserting in set_theory_match : {}  :::  ",
                  np_s.has_name() ? np_s.get_name() : ("n" + std::to_string(np_s.get_node().get_nid())));
       for (auto np_o_set : matched_node_pins) {
         auto np_o = Node_pin("lgdb", np_o_set);
-        std::cout << std::format("    {} ", np_o.has_name() ? np_o.get_name() : ("n" + std::to_string(np_o.get_node().get_nid())));
+        std::print("    {} ", np_o.has_name() ? np_o.get_name() : ("n" + std::to_string(np_o.get_node().get_nid())));
       }
       std::cout << "\n";
 #endif
@@ -3604,11 +3604,11 @@ bool Traverse_lg::set_theory_match(Traverse_lg::map_of_sets& io_map_of_sets_synt
     } else {
       it++;
 #ifdef BASIC_DBG
-      std::cout << std::format("2-- matches:{}, mism:{}, counter:{}, c_t:{}\n", match_count, mismatch_count, counter, counter_total);
+      std::print("2-- matches:{}, mism:{}, counter:{}, c_t:{}\n", match_count, mismatch_count, counter, counter_total);
 #endif
     }
   }
-  std::cout << std::format("num_of_matches: {}, IN_FUNC: set_theory_match \n",net_to_orig_pin_match_map.size()-num_of_matches);
+  std::print("num_of_matches: {}, IN_FUNC: set_theory_match \n",net_to_orig_pin_match_map.size()-num_of_matches);
   return some_matching_done;
 }
 
@@ -3663,14 +3663,14 @@ void Traverse_lg::path_traversal(const Node& start_node, const std::set<std::str
       get_input_node(s, nodes_in_set, nodes_io_set);
       get_output_node(s, nodes_out_set, nodes_io_set);
 
-      std::cout << std::format("\n -- Entering check_in_cellIOMap_synth( n{} ) with: --\n", this_node.get_nid());
+      std::print("\n -- Entering check_in_cellIOMap_synth( n{} ) with: --\n", this_node.get_nid());
       std::cout << "\t in_set:";
       for (const auto& i : nodes_in_set) {
-        std::cout << std::format("\t\t{}, ", i);
+        std::print("\t\t{}, ", i);
       }
       std::cout << "\n\t out_set:";
       for (const auto& i : nodes_out_set) {
-        std::cout << std::format("\t\t{}, ", i);
+        std::print("\t\t{}, ", i);
       }
       std::cout << "\n";
 
@@ -3687,7 +3687,7 @@ void Traverse_lg::path_traversal(const Node& start_node, const std::set<std::str
       cellIOMap_orig[std::make_pair(nodes_in_set, nodes_out_set)] = tmpVec;
 
       auto val = check_in_cellIOMap_synth(nodes_in_set, nodes_out_set, this_node);
-      std::cout << std::format("Found the match for n{} node?: {}", this_node.get_compact_flat().get_nid(), val);
+      std::print("Found the match for n{} node?: {}", this_node.get_compact_flat().get_nid(), val);
       // recursively go to this_node's sinks now (moving fwd in the path)
       path_traversal(this_node, synth_set, synth_val, cellIOMap_orig);
 
@@ -3783,7 +3783,7 @@ std::vector<std::string> Traverse_lg::get_map_val(
   std::vector<std::string> ret_vec;
   for (auto& [k, v] : find_in_map) {
     auto node_str = std::to_string(k.get_nid().value);
-    // std::cout << std::format("**{}, {}\n", node_str, key_str);
+    // std::print("**{}, {}\n", node_str, key_str);
     if (node_str == key_str) {
       for (auto v1 : v) {
         ret_vec.emplace_back(std::to_string(v1.get_nid().value));
@@ -3940,9 +3940,9 @@ void Traverse_lg::print_set(const absl::flat_hash_set<Node_pin::Compact_flat> &s
     auto n = Node_pin("lgdb", v).get_node();
     auto p = Node_pin("lgdb", v);
     if (p.has_name()) {
-      std::cout << std::format("\t {},{} ", p.get_name(), p.get_pid());
+      std::print("\t {},{} ", p.get_name(), p.get_pid());
     } else {
-      std::cout << std::format("\t n{},{} ", n.get_nid(), p.get_pid());
+      std::print("\t n{},{} ", n.get_nid(), p.get_pid());
     }
     get_node_pin_compact_flat_details(v);
   }
@@ -3951,17 +3951,17 @@ void Traverse_lg::print_name2dpin(const absl::flat_hash_map<std::string, Node_pi
   std::cout << "\n Printing name2dpin \n";
   for (const auto& [str, node_pin_cf] : name2dpin) {
     auto p = Node_pin("lgdb", node_pin_cf);
-    std::cout << std::format("\t\t {} -:- {},n{}\n", str, p.get_wire_name(), p.get_node().get_nid());
+    std::print("\t\t {} -:- {},n{}\n", str, p.get_wire_name(), p.get_node().get_nid());
   }
 }
 void Traverse_lg::print_name2dpins(
     const absl::flat_hash_map<std::string, absl::flat_hash_set<Node_pin::Compact_flat>>& name2dpins) const {
   std::cout << "\n Printing name2dpins \n";
   for (const auto& [str, node_pin_cfs] : name2dpins) {
-    std::cout << std::format("\t\t {} -:- ", str);
+    std::print("\t\t {} -:- ", str);
     for (const auto& node_pin_cf : node_pin_cfs) {
       auto p = Node_pin("lgdb", node_pin_cf);
-      std::cout << std::format(" {},n{}\t\t", p.get_wire_name(), p.get_node().get_nid());
+      std::print(" {},n{}\t\t", p.get_wire_name(), p.get_node().get_nid());
     }
     std::cout << "\n";
   }
@@ -3972,17 +3972,17 @@ void Traverse_lg::print_io_map(const Traverse_lg::map_of_sets& the_map_of_sets) 
 #ifndef FULL_RUN_FOR_EVAL
     auto n = Node_pin("lgdb", node_pin_cf).get_node();
     if (p.has_name()) {
-      std::cout << std::format("{},n{},{}({}) \t::: ",
+      std::print("{},n{},{}({}) \t::: ",
                  /*n.get_or_create_name(),*/ p.get_name(),
                  n.get_nid(),
                  p.get_pid(),
                  p.get_top_lgraph()->get_name());
     } else {
-      std::cout << std::format("n{},{}({}) \t::: ", /*n.get_or_create_name(),*/ n.get_nid(), p.get_pid(), p.get_top_lgraph()->get_name());
+      std::print("n{},{}({}) \t::: ", /*n.get_or_create_name(),*/ n.get_nid(), p.get_pid(), p.get_top_lgraph()->get_name());
     }
 #else
     if (p.has_name()) {
-      std::cout << std::format("{} ::: ", p.get_name());
+      std::print("{} ::: ", p.get_name());
     }
 #endif
     for (const auto& pin_cf : set_pins_cf) {
@@ -3990,17 +3990,17 @@ void Traverse_lg::print_io_map(const Traverse_lg::map_of_sets& the_map_of_sets) 
 #ifndef FULL_RUN_FOR_EVAL
       auto n_s = Node_pin("lgdb", pin_cf).get_node();
       if (pin.has_name()) {
-        std::cout << std::format("{},n{},{}({}) \t",
+        std::print("{},n{},{}({}) \t",
                    /* n_s.get_or_create_name(),*/ pin.get_name(),
                    n_s.get_nid(),
                    pin.get_pid(),
                    pin.get_top_lgraph()->get_name());
       } else {
-        std::cout << std::format("n{},{}({}) \t", /* n_s.get_or_create_name(),*/ n_s.get_nid(), pin.get_pid(), pin.get_top_lgraph()->get_name());
+        std::print("n{},{}({}) \t", /* n_s.get_or_create_name(),*/ n_s.get_nid(), pin.get_pid(), pin.get_top_lgraph()->get_name());
       }
 #else
       if (pin.has_name()) {
-        std::cout << std::format("{} ", pin.get_name());
+        std::print("{} ", pin.get_name());
       }
 #endif
     }
@@ -4011,22 +4011,22 @@ void Traverse_lg::print_io_map(const Traverse_lg::map_of_sets& the_map_of_sets) 
 void Traverse_lg::print_IOtoNodeMap_synth(const absl::node_hash_map<std::set<std::string>, setMap_pairKey>& mapInMap) {
   for (const auto& [ioval, inMap] : mapInMap) {
     for (const auto& ip : ioval) {
-      std::cout << std::format("{}\t", ip);
+      std::print("{}\t", ip);
     }
     std::cout << "\n";
 
     for (const auto& [ioPair, n_list] : inMap) {
       std::cout << "\t\t\t\t";
       for (const auto& ip : ioPair.first) {
-        std::cout << std::format("{}\t", ip);
+        std::print("{}\t", ip);
       }
       std::cout << "||| \t";
       for (const auto& op : ioPair.second) {
-        std::cout << std::format("{}\t", op);
+        std::print("{}\t", op);
       }
       std::cout << "::: \t";
       for (const auto& n : n_list) {
-        std::cout << std::format("{}\t", n.get_nid());
+        std::print("{}\t", n.get_nid());
       }
       std::cout << "\n";
     }
@@ -4037,15 +4037,15 @@ void Traverse_lg::print_IOtoNodeMap_synth(const absl::node_hash_map<std::set<std
 void Traverse_lg::print_MapOf_SetPairAndVec(const setMap_pairKey& MapOf_SetPairAndVec) {
   for (const auto& [iov, fn] : MapOf_SetPairAndVec) {
     for (const auto& ip : iov.first) {
-      std::cout << std::format("{}\t", ip);
+      std::print("{}\t", ip);
     }
     std::cout << "||| \t";
     for (const auto& op : iov.second) {
-      std::cout << std::format("{}\t", op);
+      std::print("{}\t", op);
     }
     std::cout << "::: \t";
     for (const auto& op : fn) {
-      std::cout << std::format("n{}\t", op.get_nid());
+      std::print("n{}\t", op.get_nid());
     }
     std::cout << "\n\n";
   }
