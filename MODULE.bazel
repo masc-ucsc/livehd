@@ -9,7 +9,7 @@ bazel_dep(name = "rules_python", version = "1.5.0-rc4")
 #python = use_extension("@rules_python//python/extensions:python.bzl", "python")
 #python.toolchain(python_version = "3.11")
 
-bazel_dep(name = "bazel_skylib", version = "1.7.1")
+bazel_dep(name = "bazel_skylib", version = "1.8.0")
 http_archive = use_repo_rule("@bazel_tools//tools/build_defs/repo:http.bzl", "http_archive")
 new_git_repository = use_repo_rule("@bazel_tools//tools/build_defs/repo:git.bzl", "new_git_repository")
 
