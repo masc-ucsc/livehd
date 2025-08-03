@@ -29,8 +29,9 @@ void Invariant_finder::get_topology() {
 
     for (auto &idx : current->fast()) {
       // filter out primitives, we're only interested in user defined modules
-      if (current->node_type_get(idx).op != SubGraph_Op)
+      if (current->node_type_get(idx).op != SubGraph_Op) {
         continue;
+      }
 
       Lgraph *subgraph = Lgraph_open(current->get_path(), current->subgraph_id_get(idx));
       I(subgraph);
@@ -96,8 +97,9 @@ void Invariant_finder::propagate_until_boundary(Index_id nid, uint32_t bit_selec
     // in cases like join/pick we only propagate to a specific bit
     absl::flat_hash_set<uint32_t> bit_selections;
     int propagate = resolve_bit(synth_graph, nid, bit_selection, edge.get_inp_pin().get_pid(), bit_selections);
-    if (propagate == -1)
+    if (propagate == -1) {
       continue;
+    }
 
     for (uint32_t t_bit_selection : bit_selections) {
       Index_id driver_cell = synth_graph->get_node(edge.get_out_pin()).get_nid();
@@ -145,13 +147,15 @@ void Invariant_finder::propagate_until_boundary(Index_id nid, uint32_t bit_selec
 }
 
 void Invariant_finder::clear_cache(const Node_bit &entry) {
-  if (partial_endpoints.find(entry) == partial_endpoints.end() || stack.get_bit(entry.first))
+  if (partial_endpoints.find(entry) == partial_endpoints.end() || stack.get_bit(entry.first)) {
     return;
+  }
 
   for (auto &oedge : synth_graph->out_edges(entry.first)) {
     for (uint32_t bit = 0; bit < synth_graph->get_bits(oedge.get_out_pin()); bit++) {
-      if (cached.find(std::make_pair(oedge.get_idx(), bit)) == cached.end())
+      if (cached.find(std::make_pair(oedge.get_idx(), bit)) == cached.end()) {
         return;
+      }
     }
   }
   partial_endpoints[entry].clear();
@@ -170,10 +174,11 @@ void Invariant_finder::find_invariant_boundaries() {
   absl::flat_hash_map<Net_ID, Index_id> invariant_boundaries;
   for (auto &_inst : boundaries.instance_type_map) {
     Instance_name inst = _inst.first;
-    if (inst == "##TOP##")
+    if (inst == "##TOP##") {
       inst = "";
-    else
+    } else {
       inst = inst + boundaries.hierarchical_separator;
+    }
 
     Lgraph *lg = Invariant_boundaries::get_graph(_inst.second, path);
     I(lg);
@@ -181,8 +186,9 @@ void Invariant_finder::find_invariant_boundaries() {
     for (auto &nid : lg->forward()) {
       // FIXME: when testing with synopsys, bit gets merged into name, we need to
       // take that into account here.
-      if (lg->get_wid(nid) == 0)
+      if (lg->get_wid(nid) == 0) {
         continue;
+      }
 
       auto net_name = lg->get_node_wirename(nid);
 

@@ -73,8 +73,9 @@ void defiComponentMaskShiftLayer::Destroy() {
 
 void defiComponentMaskShiftLayer::addMaskShiftLayer(const char* layer) {
   int len = strlen(layer) + 1;
-  if (numLayers_ == layersAllocated_)
+  if (numLayers_ == layersAllocated_) {
     bumpLayers(numLayers_ * 2);
+  }
   layers_[numLayers_] = (char*)malloc(len);
   strcpy(layers_[numLayers_], defData->DEFCASE(layer));
   (numLayers_)++;
@@ -168,16 +169,21 @@ void defiComponent::Destroy() {
   free(maxLayer_);
   free((char*)(nets_));
   netsAllocated_ = 0;  // avoid freeing again later
-  if (source_)
+  if (source_) {
     free(source_);
-  if (foreignName_)
+  }
+  if (foreignName_) {
     free(foreignName_);
-  if (generateName_)
+  }
+  if (generateName_) {
     free(generateName_);
-  if (macroName_)
+  }
+  if (macroName_) {
     free(macroName_);
-  if (netsAllocated_)
+  }
+  if (netsAllocated_) {
     free((char*)(nets_));
+  }
   free((char*)(maskShift_));
   free((char*)(names_));
   free((char*)(values_));
@@ -196,12 +202,14 @@ void defiComponent::IdAndName(const char* id, const char* name) {
 
   clear();
 
-  if ((len = strlen(id) + 1) > idSize_)
+  if ((len = strlen(id) + 1) > idSize_) {
     bumpId(len);
+  }
   strcpy(id_, defData->DEFCASE(id));
 
-  if ((len = strlen(name) + 1) > nameSize_)
+  if ((len = strlen(name) + 1) > nameSize_) {
     bumpName(len);
+  }
   strcpy(name_, defData->DEFCASE(name));
 }
 
@@ -245,8 +253,9 @@ void defiComponent::setGenerate(const char* newName, const char* macroName) {
   int len = strlen(newName) + 1;
 
   if (generateNameSize_ < len) {
-    if (generateName_)
+    if (generateName_) {
       free(generateName_);
+    }
     generateName_     = (char*)malloc(len);
     generateNameSize_ = len;
   }
@@ -254,8 +263,9 @@ void defiComponent::setGenerate(const char* newName, const char* macroName) {
 
   len = strlen(macroName) + 1;
   if (macroNameSize_ < len) {
-    if (macroName_)
+    if (macroName_) {
       free(macroName_);
+    }
     macroName_     = (char*)malloc(len);
     macroNameSize_ = len;
   }
@@ -273,8 +283,9 @@ void defiComponent::setSource(const char* name) {
 void defiComponent::setRegionName(const char* name) {
   int len;
 
-  if ((len = strlen(name) + 1) > regionNameSize_)
+  if ((len = strlen(name) + 1) > regionNameSize_) {
     bumpRegionName(len);
+  }
   strcpy(regionName_, defData->DEFCASE(name));
   hasRegionName_ = 1;
 }
@@ -282,8 +293,9 @@ void defiComponent::setRegionName(const char* name) {
 void defiComponent::setEEQ(const char* name) {
   int len;
 
-  if ((len = strlen(name) + 1) > EEQSize_)
+  if ((len = strlen(name) + 1) > EEQSize_) {
     bumpEEQ(len);
+  }
   strcpy(EEQ_, defData->DEFCASE(name));
   hasEEQ_ = 1;
 }
@@ -345,23 +357,27 @@ void defiComponent::setRouteHalo(int haloDist, const char* minLayer, const char*
   int len;
 
   haloDist_ = haloDist;
-  if ((len = strlen(minLayer) + 1) > minLayerSize_)
+  if ((len = strlen(minLayer) + 1) > minLayerSize_) {
     bumpMinLayer(len);
+  }
   strcpy(minLayer_, defData->DEFCASE(minLayer));
-  if ((len = strlen(maxLayer) + 1) > maxLayerSize_)
+  if ((len = strlen(maxLayer) + 1) > maxLayerSize_) {
     bumpMaxLayer(len);
+  }
   strcpy(maxLayer_, defData->DEFCASE(maxLayer));
 }
 
 void defiComponent::changeIdAndName(const char* id, const char* name) {
   int len;
 
-  if ((len = strlen(id) + 1) > idSize_)
+  if ((len = strlen(id) + 1) > idSize_) {
     bumpId(len);
+  }
   strcpy(id_, defData->DEFCASE(id));
 
-  if ((len = strlen(name) + 1) > nameSize_)
+  if ((len = strlen(name) + 1) > nameSize_) {
     bumpName(len);
+  }
   strcpy(name_, defData->DEFCASE(name));
 }
 
@@ -396,48 +412,54 @@ void defiComponent::regionBounds(int* size, int** xl, int** yl, int** xh, int** 
 }
 
 void defiComponent::bumpId(int size) {
-  if (id_)
+  if (id_) {
     free(id_);
+  }
   id_     = (char*)malloc(size);
   idSize_ = size;
   *(id_)  = '\0';
 }
 
 void defiComponent::bumpName(int size) {
-  if (name_)
+  if (name_) {
     free(name_);
+  }
   name_     = (char*)malloc(size);
   nameSize_ = size;
   *(name_)  = '\0';
 }
 
 void defiComponent::bumpRegionName(int size) {
-  if (regionName_)
+  if (regionName_) {
     free(regionName_);
+  }
   regionName_     = (char*)malloc(size);
   regionNameSize_ = size;
   *(regionName_)  = '\0';
 }
 
 void defiComponent::bumpEEQ(int size) {
-  if (EEQ_)
+  if (EEQ_) {
     free(EEQ_);
+  }
   EEQ_     = (char*)malloc(size);
   EEQSize_ = size;
   *(EEQ_)  = '\0';
 }
 
 void defiComponent::bumpMinLayer(int size) {
-  if (minLayer_)
+  if (minLayer_) {
     free(minLayer_);
+  }
   minLayer_     = (char*)malloc(size);
   minLayerSize_ = size;
   *(minLayer_)  = '\0';
 }
 
 void defiComponent::bumpMaxLayer(int size) {
-  if (maxLayer_)
+  if (maxLayer_) {
     free(maxLayer_);
+  }
   maxLayer_     = (char*)malloc(size);
   maxLayerSize_ = size;
   *(maxLayer_)  = '\0';
@@ -446,20 +468,27 @@ void defiComponent::bumpMaxLayer(int size) {
 void defiComponent::clear() {
   int i;
 
-  if (id_)
+  if (id_) {
     *(id_) = '\0';
-  if (name_)
+  }
+  if (name_) {
     *(name_) = '\0';
-  if (regionName_)
+  }
+  if (regionName_) {
     *(regionName_) = '\0';
-  if (foreignName_)
+  }
+  if (foreignName_) {
     *(foreignName_) = '\0';
-  if (EEQ_)
+  }
+  if (EEQ_) {
     *(EEQ_) = '\0';
-  if (minLayer_)
+  }
+  if (minLayer_) {
     *(minLayer_) = '\0';
-  if (maxLayer_)
+  }
+  if (maxLayer_) {
     *(maxLayer_) = '\0';
+  }
   Fori_           = 0;
   status_         = 0;
   hasRegionName_  = 0;
@@ -474,8 +503,9 @@ void defiComponent::clear() {
   maskShift_     = 0;
   maskShiftSize_ = 0;
   weight_        = 0;
-  if (source_)
+  if (source_) {
     free(source_);
+  }
   for (i = 0; i < numNets_; i++) {
     free(nets_[i]);
   }
@@ -547,7 +577,9 @@ void defiComponent::print(FILE* fout) const {
     int *xl, *yl, *xh, *yh;
     int  j;
     regionBounds(&size, &xl, &yl, &xh, &yh);
-    for (j = 0; j < size; j++) fprintf(fout, "  Region bounds %d,%d %d,%d\n", xl[j], yl[j], xh[j], yh[j]);
+    for (j = 0; j < size; j++) {
+      fprintf(fout, "  Region bounds %d,%d %d,%d\n", xl[j], yl[j], xh[j], yh[j]);
+    }
   }
   if (hasNets()) {
     int i;
@@ -745,8 +777,9 @@ void defiComponent::addNumProperty(const char* name, const double d, const char*
 
 void defiComponent::addNet(const char* net) {
   int len = strlen(net) + 1;
-  if (numNets_ == netsAllocated_)
+  if (numNets_ == netsAllocated_) {
     bumpNets(numNets_ * 2);
+  }
   nets_[numNets_] = (char*)malloc(len);
   strcpy(nets_[numNets_], defData->DEFCASE(net));
   (numNets_)++;
@@ -771,8 +804,9 @@ const char* defiComponent::net(int index) const {
 }
 
 void defiComponent::bumpForeignName(int size) {
-  if (foreignName_)
+  if (foreignName_) {
     free(foreignName_);
+  }
   foreignName_     = (char*)malloc(sizeof(char) * size);
   foreignNameSize_ = size;
   *(foreignName_)  = '\0';
@@ -781,10 +815,12 @@ void defiComponent::bumpForeignName(int size) {
 void defiComponent::setForeignName(const char* name) {
   int len;
 
-  if (hasForeignName())
+  if (hasForeignName()) {
     defiError(1, 0, "Multiple define of '+ FOREIGN' in COMPONENT is not supported.\n", defData);
-  if ((len = strlen(name) + 1) > foreignNameSize_)
+  }
+  if ((len = strlen(name) + 1) > foreignNameSize_) {
     bumpForeignName(len);
+  }
   strcpy(foreignName_, defData->DEFCASE(name));
   hasForeignName_ = 1;
 }

@@ -40,8 +40,9 @@ void advance_clock(Vshift_barrelfast_sleft *top, int nclocks = 1) {
 #endif
 
   global_time++;
-  if (Verilated::gotFinish() || global_time >= MAX_TIME)
+  if (Verilated::gotFinish() || global_time >= MAX_TIME) {
     do_terminate();
+  }
 }
 
 int main(int argc, char **argv, char **env) {

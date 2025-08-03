@@ -2,9 +2,9 @@
 
 #include "lgedgeiter.hpp"
 
+#include <cassert>
 #include <format>
 #include <iostream>
-#include <cassert>
 
 #include "lgedge.hpp"
 #include "lgraph.hpp"
@@ -226,7 +226,7 @@ void Fwd_edge_iterator::Fwd_iter::fwd_get_from_linear_last() {
     // std::print("xxx {}\n", next_node.debug_name());
 
     if (next_node.is_type_loop_last() || !next_node.has_outputs()) {
-      if (visit_sub) { // && next_node.is_type_sub_present()) {
+      if (visit_sub) {  // && next_node.is_type_sub_present()) {
         continue;
       }
       current_node.update(next_node);

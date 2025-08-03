@@ -48,8 +48,9 @@ void advance_clock(Vkogg_stone_32 *top, int nclocks = 1) {
 #endif
 
       global_time++;
-      if (Verilated::gotFinish() || global_time >= MAX_TIME)
+      if (Verilated::gotFinish() || global_time >= MAX_TIME) {
         do_terminate();
+      }
     }
   }
 }

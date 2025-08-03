@@ -1,13 +1,13 @@
 //  This file is distributed under the BSD 3-Clause License. See LICENSE for details.
 
+#include "thread_pool.hpp"
+
 #include <atomic>
+#include <format>
 #include <iostream>
 
-#include <format>
-#include "gtest/gtest.h"
-
-#include "thread_pool.hpp"
 #include "concurrentqueue.hpp"
+#include "gtest/gtest.h"
 #include "mpmc.hpp"
 #include "spmc.hpp"
 
@@ -154,7 +154,7 @@ TEST_F(GTest1, bench) {
       queue.enqueue(i);
       auto a = queue.dequeue();
       EXPECT_TRUE(a);
-      EXPECT_EQ(*a,i);
+      EXPECT_EQ(*a, i);
     }
   }
   {

@@ -3,8 +3,8 @@
 // Created by birdeclipse on 5/23/18.
 
 #include <format>
-#include <iostream>
 #include <fstream>
+#include <iostream>
 
 #include "lgraph.hpp"
 #include "pass_abc.hpp"

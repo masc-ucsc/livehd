@@ -34,7 +34,7 @@ protected:
 
   void SetUp() override {
     auto lib = Graph_library::instance("lgdb_edge_test");
-    g = lib->create_lgraph("test0", "test");
+    g        = lib->create_lgraph("test0", "test");
 
     n1 = g->create_node_sub("n1");  // creates n1
     n2 = g->create_node_sub("n2");  // creates n2
@@ -122,17 +122,19 @@ protected:
     }
 
     Node_pin dpin;
-    if (rbool.any())
+    if (rbool.any()) {
       dpin = n1.setup_driver_pin(pname);
-    else
+    } else {
       dpin = n1.get_driver_pin(pname);
+    }
     EXPECT_TRUE(dpin.is_driver());
     EXPECT_TRUE(!dpin.is_sink());
 
-    if (rbool.any())
+    if (rbool.any()) {
       EXPECT_EQ(dpin.get_compact(), it->second.get_compact());
-    else
+    } else {
       EXPECT_EQ(dpin, it->second);
+    }
 
     return dpin;
   }
@@ -154,10 +156,11 @@ protected:
     EXPECT_TRUE(!spin.is_driver());
     EXPECT_TRUE(spin.is_sink());
 
-    if (rbool.any())
+    if (rbool.any()) {
       EXPECT_EQ(spin.get_compact(), it->second.get_compact());
-    else
+    } else {
       EXPECT_EQ(spin, it->second);
+    }
 
     return spin;
   }
@@ -215,10 +218,12 @@ TEST_F(Edge_test, random_insert) {
   for (int i = 0; i < 2000; ++i) {
     Node_pin d;
     Node_pin s;
-    if (rbool.any())
+    if (rbool.any()) {
       d = add_n1_setup_driver_pin("driver_pin" + std::to_string(rint.max(i + 10)));
-    if (rbool.any())
+    }
+    if (rbool.any()) {
       s = add_n2_setup_sink_pin("sink_pin" + std::to_string(rint.max(i + 10)));
+    }
     if (rbool.any() && !d.is_invalid() && !s.is_invalid()) {
       add_edge(d, s);
     }
@@ -284,10 +289,12 @@ TEST_F(Edge_test, overflow_delete) {
   for (int i = 0; i < 6000; ++i) {
     Node_pin d;
     Node_pin s;
-    if (rbool.any())
+    if (rbool.any()) {
       d = add_n1_setup_driver_pin("driver_pin" + std::to_string(i));
-    if (rbool.any())
+    }
+    if (rbool.any()) {
       s = add_n2_setup_sink_pin("sink_pin" + std::to_string(i));
+    }
     if (rbool.any() && !d.is_invalid() && !s.is_invalid()) {
       add_edge(d, s1.setup_sink_pin("A"));
       add_edge(s1.setup_driver_pin(), s);
@@ -326,10 +333,12 @@ TEST_F(Edge_test, overflow_delete_node) {
   for (int i = 0; i < 2000; ++i) {
     Node_pin d;
     Node_pin s;
-    if (rbool.any())
+    if (rbool.any()) {
       d = add_n1_setup_driver_pin("driver_pin" + std::to_string(i));
-    if (rbool.any())
+    }
+    if (rbool.any()) {
       s = add_n2_setup_sink_pin("sink_pin" + std::to_string(i));
+    }
     if (rbool.any() && !d.is_invalid() && !s.is_invalid()) {
       add_edge(d, s1.setup_sink_pin("A"));
       add_edge(s1.setup_driver_pin(), s);
@@ -353,10 +362,12 @@ TEST_F(Edge_test, overflow_delete_del_edge_bench) {
   for (int i = 0; i < 2000; ++i) {
     Node_pin d;
     Node_pin s;
-    if (rbool.any())
+    if (rbool.any()) {
       d = add_n1_setup_driver_pin("driver_pin" + std::to_string(i));
-    if (rbool.any())
+    }
+    if (rbool.any()) {
       s = add_n2_setup_sink_pin("sink_pin" + std::to_string(i));
+    }
     if (rbool.any() && !d.is_invalid() && !s.is_invalid()) {
       add_edge(d, s1.setup_sink_pin("A"));
       add_edge(s1.setup_driver_pin(), s);
@@ -393,10 +404,12 @@ TEST_F(Edge_test, overflow_delete_del_node_bench) {
   for (int i = 0; i < 2000; ++i) {
     Node_pin d;
     Node_pin s;
-    if (rbool.any())
+    if (rbool.any()) {
       d = add_n1_setup_driver_pin("driver_pin" + std::to_string(i));
-    if (rbool.any())
+    }
+    if (rbool.any()) {
       s = add_n2_setup_sink_pin("sink_pin" + std::to_string(i));
+    }
     if (rbool.any() && !d.is_invalid() && !s.is_invalid()) {
       add_edge(d, s1.setup_sink_pin("A"));
       add_edge(s1.setup_driver_pin(), s);
@@ -417,8 +430,8 @@ TEST_F(Edge_test, overflow_delete_del_node_bench) {
 }
 
 TEST_F(Edge_test, trivial_delete2) {
-  auto lib = Graph_library::instance("lgdb_edge_test");
-  Lgraph *g2 = lib->create_lgraph("test22", "test");
+  auto    lib = Graph_library::instance("lgdb_edge_test");
+  Lgraph *g2  = lib->create_lgraph("test22", "test");
 
   auto nn1 = g2->create_node_sub("n1");
   auto nn2 = g2->create_node_sub("n2");
@@ -481,8 +494,8 @@ TEST_F(Edge_test, trivial_delete2) {
 }
 
 TEST_F(Edge_test, trivial_delete3) {
-  auto lib = Graph_library::instance("lgdb_edge_test");
-  Lgraph *g2 = lib->create_lgraph("test3", "test");
+  auto    lib = Graph_library::instance("lgdb_edge_test");
+  Lgraph *g2  = lib->create_lgraph("test3", "test");
 
   auto nn1 = g2->create_node_sub("n1");
   auto nn2 = g2->create_node_sub("n2");
@@ -508,12 +521,15 @@ TEST_F(Edge_test, trivial_delete3) {
   bool found_c  = false;
   bool found    = false;
   for (auto node : g2->fast()) {
-    if (node.get_compact_class() == nn2.get_compact_class())
+    if (node.get_compact_class() == nn2.get_compact_class()) {
       found_cp = true;
-    if (node.get_compact() == nn2.get_compact())
+    }
+    if (node.get_compact() == nn2.get_compact()) {
       found_c = true;
-    if (node == nn2)
+    }
+    if (node == nn2) {
       found = true;
+    }
   }
   EXPECT_TRUE(found_cp);
   EXPECT_TRUE(found_c);
@@ -523,12 +539,15 @@ TEST_F(Edge_test, trivial_delete3) {
   found_c  = false;
   found    = false;
   for (auto node : g2->fast(true)) {
-    if (node.get_compact_class() == nn2.get_compact_class())
+    if (node.get_compact_class() == nn2.get_compact_class()) {
       found_cp = true;
-    if (node.get_compact() == nn2.get_compact())
+    }
+    if (node.get_compact() == nn2.get_compact()) {
       found_c = true;
-    if (node == nn2)
+    }
+    if (node == nn2) {
       found = true;
+    }
   }
   EXPECT_TRUE(found_cp);
   EXPECT_TRUE(found_c);

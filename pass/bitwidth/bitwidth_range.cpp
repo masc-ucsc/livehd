@@ -2,8 +2,9 @@
 
 #include "bitwidth_range.hpp"
 
-#include <iostream>
 #include <format>
+#include <iostream>
+
 #include "iassert.hpp"
 #include "likely.hpp"
 

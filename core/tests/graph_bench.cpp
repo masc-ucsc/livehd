@@ -1,7 +1,7 @@
 //  This file is distributed under the BSD 3-Clause License. See LICENSE for details.
 
-#include <format>
 #include <chrono>
+#include <format>
 #include <iostream>
 
 #include "absl/container/flat_hash_map.h"
@@ -9,7 +9,7 @@
 #include "lgraph.hpp"
 
 Lgraph* create_some_random_lgraph() {
-  auto *lib = Graph_library::instance("lgdb_bench");
+  auto* lib = Graph_library::instance("lgdb_bench");
   auto* lg  = lib->create_lgraph("random", "-");
 
   I(false);
@@ -100,9 +100,9 @@ int main(int argc, char** argv) {
     lg = create_some_random_lgraph();
   } else if (argc == 3) {
     std::print("benchmark the graph lgdb:{} name:{}\n", argv[1], argv[2]);
-    auto *lib = Lgraph::instance(argv[1]);
-    lg = lib->open_lgraph(argv[2]);
-    if (lg==nullptr) {
+    auto* lib = Lgraph::instance(argv[1]);
+    lg        = lib->open_lgraph(argv[2]);
+    if (lg == nullptr) {
       std::print("could not open lgraph {}\n", argv[2]);
       exit(-3);
     }

@@ -311,8 +311,9 @@ void defwSetUnusedCallbacks(defwVoidCbkFnType func) {
   int i;
 
   for (i = 0; i < MAXCBS; i++) {
-    if (defwCallbacksSeq[i] == 0)
+    if (defwCallbacksSeq[i] == 0) {
       defwCallbacksSeq[i] = (defwVoidCbkFnType)func;
+    }
   }
 }
 
@@ -321,8 +322,9 @@ static int defwUnusedCount[100];
 
 int defwCountFunc(defwCallbackType_e e, defiUserData d) {
   int i = (int)e;
-  if (defiDebug(23))
+  if (defiDebug(23)) {
     printf("count %d 0x%x\n", (int)e, d);
+  }
   if (i >= 0 && i < 100) {
     defwUnusedCount[i] += 1;
     return 0;
@@ -334,7 +336,9 @@ void defwSetRegisterUnusedCallbacks() {
   int i;
   defwRegisterUnused = 1;
   defwSetUnusedCallbacks(defwCountFunc);
-  for (i = 0; i < 100; i++) defwUnusedCount[i] = 0;
+  for (i = 0; i < 100; i++) {
+    defwUnusedCount[i] = 0;
+  }
 }
 
 void defwPrintUnusedCallbacks(FILE* f) {
@@ -350,8 +354,9 @@ void defwPrintUnusedCallbacks(FILE* f) {
 
   for (i = 0; i < 100; i++) {
     if (defwUnusedCount[i]) {
-      if (first)
+      if (first) {
         fprintf(f, "DEF items that were present but ignored because of no callback:\n");
+      }
       first = 0;
       switch ((defwCallbackType_e)i) {
         case defwVersionCbkType: fprintf(f, "Version"); break;

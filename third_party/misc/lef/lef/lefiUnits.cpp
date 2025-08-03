@@ -77,8 +77,9 @@ void lefiUnits::setDatabase(const char *name, double num) {
 }
 
 void lefiUnits::clear() {
-  if (databaseName_)
+  if (databaseName_) {
     lefFree(databaseName_);
+  }
   hasTime_        = 0;
   hasCapacitance_ = 0;
   hasResistance_  = 0;
@@ -161,22 +162,30 @@ double lefiUnits::frequency() const { return frequency_; }
 
 void lefiUnits::print(FILE *f) const {
   fprintf(f, "Units:\n");
-  if (hasTime())
+  if (hasTime()) {
     fprintf(f, "  %g nanoseconds\n", time());
-  if (hasCapacitance())
+  }
+  if (hasCapacitance()) {
     fprintf(f, "  %g picofarads\n", capacitance());
-  if (hasResistance())
+  }
+  if (hasResistance()) {
     fprintf(f, "  %g ohms\n", resistance());
-  if (hasPower())
+  }
+  if (hasPower()) {
     fprintf(f, "  %g milliwatts\n", power());
-  if (hasCurrent())
+  }
+  if (hasCurrent()) {
     fprintf(f, "  %g milliamps\n", current());
-  if (hasVoltage())
+  }
+  if (hasVoltage()) {
     fprintf(f, "  %g volts\n", voltage());
-  if (hasFrequency())
+  }
+  if (hasFrequency()) {
     fprintf(f, "  %g frequency\n", frequency());
-  if (hasDatabase())
+  }
+  if (hasDatabase()) {
     fprintf(f, "  %s %g\n", databaseName(), databaseNumber());
+  }
 }
 
 END_LEFDEF_PARSER_NAMESPACE

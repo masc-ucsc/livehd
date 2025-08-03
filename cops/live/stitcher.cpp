@@ -101,8 +101,9 @@ void Live_stitcher::stitch(Lgraph *nsynth, const std::set<Net_ID> &diffs) {
         } else {
           // invariant boundary
           auto name = nsynth->get_node_wirename(idx);
-          if (!original->has_wirename(name))
+          if (!original->has_wirename(name)) {
             continue;
+          }
           Index_id oidx = original->get_node_id(name);
           for (auto &edge : original->out_edges(oidx)) {
             Node_pin dpin = original->get_node(nsynth2originalid[idx]).setup_driver_pin(edge.get_out_pin().get_pid());

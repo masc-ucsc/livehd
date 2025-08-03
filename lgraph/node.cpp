@@ -2,9 +2,9 @@
 
 #include "node.hpp"
 
+#include <charconv>
 #include <format>
 #include <iostream>
-#include <charconv>
 #include <string>
 
 #include "lgedgeiter.hpp"

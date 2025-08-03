@@ -30,8 +30,9 @@ short log2i(uint32_t n) {
   uint32_t m = 1;
   uint32_t i = 0;
 
-  if (n == 1)
+  if (n == 1) {
     return 0;
+  }
 
   n = roundUpPower2(n);
   // assume integer power of 2

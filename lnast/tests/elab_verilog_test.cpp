@@ -8,9 +8,9 @@
 #include <sys/stat.h>
 #include <sys/types.h>
 
+#include <algorithm>
 #include <format>
 #include <iostream>
-#include <algorithm>
 #include <set>
 #include <string>
 
@@ -160,10 +160,11 @@ public:
           if (scan_is_prev_token(Token_id_alnum)) {
             auto label = scan_prev_text();
 
-            if (last_input)
+            if (last_input) {
               std::print("  inp {}\n", label);
-            else
+            } else {
               std::print("  out {}\n", label);
+            }
           }
           last_input  = false;
           last_output = false;

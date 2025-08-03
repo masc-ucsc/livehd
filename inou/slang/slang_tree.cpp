@@ -1,24 +1,23 @@
 
 #include "slang_tree.hpp"
 
-#include "slang/driver/Driver.h"
-
-#include <iostream>
 #include <charconv>
-
 #include <format>
-#include "iassert.hpp"
-#include "slang/ast/Definition.h"
-#include "slang/ast/ASTVisitor.h"
-#include "slang/ast/ASTSerializer.h"
-#include "slang/util/SmallVector.h"
-//#include "slang/symbols/InstanceSymbols.h"
-//#include "slang/symbols/PortSymbols.h"
-//#include "slang/syntax/SyntaxPrinter.h"
-//#include "slang/syntax/SyntaxTree.h"
-//#include "slang/types/Type.h"
+#include <iostream>
 
-//#define LNAST_NODE_POS 1
+#include "iassert.hpp"
+#include "slang/ast/ASTSerializer.h"
+#include "slang/ast/ASTVisitor.h"
+#include "slang/ast/Definition.h"
+#include "slang/driver/Driver.h"
+#include "slang/util/SmallVector.h"
+// #include "slang/symbols/InstanceSymbols.h"
+// #include "slang/symbols/PortSymbols.h"
+// #include "slang/syntax/SyntaxPrinter.h"
+// #include "slang/syntax/SyntaxTree.h"
+// #include "slang/types/Type.h"
+
+// #define LNAST_NODE_POS 1
 
 Slang_tree::Slang_tree() { parsed_lnasts.clear(); }
 
@@ -453,7 +452,7 @@ std::string Slang_tree::process_expression(const slang::ast::Expression &expr, b
   }
 
   if (expr.kind == slang::ast::ExpressionKind::Conversion) {
-    const auto        &conv    = expr.as<slang::ast::ConversionExpression>();
+    const auto             &conv    = expr.as<slang::ast::ConversionExpression>();
     const slang::ast::Type *to_type = conv.type;
 
     auto res = process_expression(conv.operand(), last_value);  // NOTHING TO DO? (the dp_assign handles it?)

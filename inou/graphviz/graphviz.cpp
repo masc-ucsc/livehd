@@ -4,8 +4,8 @@
 #include <fcntl.h>
 
 #include <format>
-#include <iostream>
 #include <fstream>
+#include <iostream>
 #include <regex>
 
 #include "RGB.hpp"

@@ -1,9 +1,9 @@
 #include "AnnLayout.hpp"
 
-#include <format>
-#include <iostream>
 #include <cmath>
+#include <format>
 #include <functional>
+#include <iostream>
 
 #include "BagLayout.hpp"
 #include "GridLayout.hpp"
@@ -19,9 +19,7 @@ void annLayout::addComponent(FPObject* comp, int count) {
   FPContainer::addComponent(comp, count);
 }
 
-bool annLayout::insert_obj(size_t idx) {
-  return true;
-}
+bool annLayout::insert_obj(size_t idx) { return true; }
 
 bool annLayout::layout(FPOptimization opt, double targetAR) {
   (void)opt;

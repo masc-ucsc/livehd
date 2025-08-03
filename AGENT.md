@@ -135,7 +135,7 @@ LiveHD aims to be:
 
 - The codebase is actively developed with semantic versioning 0.x (API changes expected)
 - Uses BSD 3-Clause License
-- Supports multiple HDLs: Verilog, Pyrope, SystemVerilog, CHISEL
+- Supports multiple HDLs: Verilog, Pyrope, SystemVerilog
 - Designed for fast incremental compilation ("live" development)
 - Comprehensive CI with logic equivalence checking (LEC)
 - LNAST expansion for tuples and macros is still under development

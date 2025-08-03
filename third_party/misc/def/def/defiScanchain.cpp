@@ -46,10 +46,12 @@ void defiOrdered::clear() {
   int i;
   for (i = 0; i < num_; i++) {
     free((char*)(inst_[i]));
-    if (in_[i])
+    if (in_[i]) {
       free((char*)(in_[i]));
-    if (out_[i])
+    }
+    if (out_[i]) {
       free((char*)(out_[i]));
+    }
   }
   num_ = 0;
 }
@@ -102,8 +104,9 @@ void defiOrdered::bump() {
 }
 
 void defiOrdered::addOrdered(const char* inst) {
-  if (num_ == allocated_)
+  if (num_ == allocated_) {
     bump();
+  }
   inst_[num_] = (char*)malloc(strlen(inst) + 1);
   strcpy(inst_[num_], defData->DEFCASE(inst));
   in_[num_]   = 0;
@@ -175,28 +178,36 @@ void defiScanchain::clear() {
   numOrdered_ = 0;
 
   for (i = 0; i < numFloating_; i++) {
-    if (floatIn_[i])
+    if (floatIn_[i]) {
       free(floatIn_[i]);
-    if (floatOut_[i])
+    }
+    if (floatOut_[i]) {
       free(floatOut_[i]);
+    }
     free(floatInst_[i]);
     floatInst_[i] = 0;
     floatBits_[i] = -1;
   }
   numFloating_ = 0;
 
-  if (stopInst_)
+  if (stopInst_) {
     free(stopInst_);
-  if (stopPin_)
+  }
+  if (stopPin_) {
     free(stopPin_);
-  if (startInst_)
+  }
+  if (startInst_) {
     free(startInst_);
-  if (startPin_)
+  }
+  if (startPin_) {
     free(startPin_);
-  if (commonInPin_)
+  }
+  if (commonInPin_) {
     free(commonInPin_);
-  if (commonOutPin_)
+  }
+  if (commonOutPin_) {
     free(commonOutPin_);
+  }
 
   stopInst_     = 0;
   stopPin_      = 0;
@@ -207,8 +218,9 @@ void defiScanchain::clear() {
   commonInPin_  = 0;
   commonOutPin_ = 0;
   hasPartition_ = 0;
-  if (partName_)
+  if (partName_) {
     free((char*)(partName_));
+  }
   partName_ = 0;
   maxBits_  = -1;
 }
@@ -330,12 +342,13 @@ void defiScanchain::addOrderedList() {
 
 void defiScanchain::setStart(const char* inst, const char* pin) {
   int len;
-  if (startInst_)
+  if (startInst_) {
     defiError(0,
               6150,
               "ERROR (DEFPARS-6150): The START statement in the SCANCHAINS has defined more than one time in the SCANCHAINS "
               "statement.\nUpdate the DEF file to only one START statement and then try again.",
               defData);
+  }
   len        = strlen(inst) + 1;
   startInst_ = (char*)malloc(len);
   strcpy(startInst_, defData->DEFCASE(inst));
@@ -347,12 +360,13 @@ void defiScanchain::setStart(const char* inst, const char* pin) {
 
 void defiScanchain::setStop(const char* inst, const char* pin) {
   int len;
-  if (stopInst_)
+  if (stopInst_) {
     defiError(0,
               6151,
               "ERROR (DEFPARS-6151): The STOP statment in the SCANCHAINS has defined more than one time in the SCANCHAINS "
               "statement.\nUpdate the DEF file to only one STOP statement and then try again.",
               defData);
+  }
   len       = strlen(inst) + 1;
   stopInst_ = (char*)malloc(len);
   strcpy(stopInst_, defData->DEFCASE(inst));
@@ -364,8 +378,9 @@ void defiScanchain::setStop(const char* inst, const char* pin) {
 
 // 5.4.1
 void defiScanchain::setPartition(const char* partName, int maxBits) {
-  if (partName_)
+  if (partName_) {
     free(partName_);
+  }
   partName_ = (char*)malloc(strlen(partName) + 1);
   strcpy(partName_, defData->DEFCASE(partName));
   maxBits_      = maxBits;
@@ -393,17 +408,21 @@ const char* defiScanchain::partitionName() const { return partName_; }
 int defiScanchain::partitionMaxBits() const { return maxBits_; }
 
 void defiScanchain::start(char** inst, char** pin) const {
-  if (inst)
+  if (inst) {
     *inst = startInst_;
-  if (pin)
+  }
+  if (pin) {
     *pin = startPin_;
+  }
 }
 
 void defiScanchain::stop(char** inst, char** pin) const {
-  if (inst)
+  if (inst) {
     *inst = stopInst_;
-  if (pin)
+  }
+  if (pin) {
     *pin = stopPin_;
+  }
 }
 
 int defiScanchain::numOrderedLists() const { return numOrdered_; }
@@ -498,11 +517,13 @@ void defiScanchain::print(FILE* f) const {
     }
   }
 
-  if (hasCommonInPin())
+  if (hasCommonInPin()) {
     fprintf(f, "  common in pin %s\n", commonInPin());
+  }
 
-  if (hasCommonOutPin())
+  if (hasCommonOutPin()) {
     fprintf(f, "  common out pin %s\n", commonOutPin());
+  }
 }
 
 END_LEFDEF_PARSER_NAMESPACE

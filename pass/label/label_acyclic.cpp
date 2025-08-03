@@ -159,8 +159,8 @@ void Label_acyclic::grow_partitions(Lgraph *g) {
           node_preds.push_back(pot_predc);
         }
       }  // END of inp_edge iteration for loop
-    }    // END of node_preds clearing while loop
-  }      // END of root iteration for loop
+    }  // END of node_preds clearing while loop
+  }  // END of root iteration for loop
 }
 
 /* * * * * * *

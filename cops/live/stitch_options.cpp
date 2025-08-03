@@ -13,11 +13,11 @@ void Stitch_pass_options::set(const std::string &key, const std::string &value) 
     } else if (is_opt(key, "boundaries")) {
       boundaries_name = value;
     } else if (is_opt(key, "methods")) {
-      if (value == "LiveSynth")
+      if (value == "LiveSynth") {
         method = Live_method::LiveSynth;
-      else if (value == "Structural")
+      } else if (value == "Structural") {
         method = Live_method::Structural;
-      else {
+      } else {
         Pass::error(std::format("Unrecognized option for stitch operation in incremental flow", value));
       }
     } else if (is_opt(key, "diff")) {

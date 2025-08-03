@@ -4,9 +4,9 @@
 
 #include <ctype.h>
 
+#include <algorithm>
 #include <format>
 #include <iostream>
-#include <algorithm>
 
 #include "perf_tracing.hpp"
 

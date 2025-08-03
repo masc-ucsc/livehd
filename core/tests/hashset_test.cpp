@@ -1,14 +1,14 @@
 
-#include <format>
-#include "gtest/gtest.h"
-
 #include "hashset.hpp"
+
+#include <format>
+
+#include "gtest/gtest.h"
 
 class GTest1 : public ::testing::Test {
 protected:
   void SetUp() override {}
 };
-
 
 TEST_F(GTest1, trivial) {
   Hashset h1;
@@ -32,4 +32,3 @@ TEST_F(GTest1, trivial) {
   EXPECT_EQ(h1.get_value(), h2.get_value());
   EXPECT_NE(h1.get_value(), h3.get_value());
 }
-

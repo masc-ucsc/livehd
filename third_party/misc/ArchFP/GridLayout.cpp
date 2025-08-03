@@ -18,9 +18,10 @@ bool gridLayout::layout(FPOptimization opt, double targetAR) {
   double tarea   = totalArea();
   double theight = sqrt(tarea / abs(targetAR));
   double twidth  = tarea / theight;
-  if (verbose)
+  if (verbose) {
     std::cout << "Begin Grid Layout for " << getName() << ", TargetAR=" << targetAR << " My area=" << tarea
               << " Implied W=" << twidth << " H=" << theight << "\n";
+  }
 
   FPObject* obj   = getComponent(0);
   int       total = obj->getCount();
@@ -51,8 +52,9 @@ bool gridLayout::layout(FPOptimization opt, double targetAR) {
   width  = compWidth * xCount;
   height = compHeight * yCount;
   area   = width * height;
-  if (verbose)
+  if (verbose) {
     std::cout << "At End Grid Layout, TargetAR=" << targetAR << " actualAR=" << width / height << "\n";
+  }
 
   return correct;
 }
@@ -63,12 +65,12 @@ void gridLayout::outputHotSpotLayout(std::ostream& o, double startX, double star
     return;
   }
 
-  FPObject*   obj = getComponent(0);
-  auto compWidth       = obj->getWidth();
-  auto compHeight      = obj->getHeight();
+  FPObject* obj        = getComponent(0);
+  auto      compWidth  = obj->getWidth();
+  auto      compHeight = obj->getHeight();
 
-  int     compCount = xCount * yCount;
-  auto    GridName  = getUniqueName();
+  int  compCount = xCount * yCount;
+  auto GridName  = getUniqueName();
   o << "# " << GridName << " stats: X=" << calcX(startX) << ", Y=" << calcY(startY) << ", W=" << width << ", H=" << height
     << ", area=" << area << "mm²\n";
   o << "# start " << GridName << " " << Ntype::get_name(getType()) << " grid " << compCount << " " << xCount << " " << yCount
@@ -90,9 +92,9 @@ unsigned int gridLayout::outputLGraphLayout(Node_tree& tree, lh::Tree_index tidx
     throw std::invalid_argument("Attempt to output a grid with other than one component.\n");
   }
 
-  FPObject*   obj = getComponent(0);
-  auto compWidth       = obj->getWidth();
-  auto compHeight      = obj->getHeight();
+  FPObject* obj        = getComponent(0);
+  auto      compWidth  = obj->getWidth();
+  auto      compHeight = obj->getHeight();
 
   int compNum = 1;
 

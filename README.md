@@ -13,7 +13,7 @@
 LiveHD is a "compiler" infrastructure for hardware design optimized for
 synthesis and simulation. The goals is to enable a more productive flow where
 the ASIC/FPGA designer can work with multiple hardware description languages
-like CHISEL, Pyrope, or Verilog.
+like Pyrope or Verilog. In the past, it supported CHISEL, but the code is deprecated.
 
 
 ## Goal

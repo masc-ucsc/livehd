@@ -16,16 +16,18 @@ FPContainer::~FPContainer() {
   // cout << "deleting container.\n";
   for (auto item : items) {
     int newCount = item->decRefCount();
-    if (newCount == 0)
+    if (newCount == 0) {
       delete item;
+    }
   }
 }
 
 // To properly handle refCount, we will only allow one method to actually add (or remove) items from the item list.
 
 void FPContainer::addComponentAtIndex(FPObject* comp, int index) {
-  if (index < 0 || index > (int)items.size())
+  if (index < 0 || index > (int)items.size()) {
     throw std::invalid_argument("Attempt to add item to Container at illegal index.");
+  }
 
   const int oldsize = items.size();
   items.resize(items.size() + 1);
@@ -42,8 +44,9 @@ void FPContainer::addComponentAtIndex(FPObject* comp, int index) {
 }
 
 FPObject* FPContainer::removeComponentAtIndex(int index) {
-  if (index < 0 || index >= (int)items.size())
+  if (index < 0 || index >= (int)items.size()) {
     throw std::invalid_argument("Attempt to add item to Container at illegal index.");
+  }
   FPObject* comp = items[index];
   // Now fill in the hole.
   for (int i = index; i < (int)items.size() - 1; i++) {
@@ -82,7 +85,8 @@ FPObject* FPContainer::addComponentCluster(Ntype_op type, int count, double area
   return wrapComp;
 }
 
-FPObject* FPContainer::addComponentCluster(std::string_view name, int count, double area, double maxAspectRatio, double minAspectRatio) {
+FPObject* FPContainer::addComponentCluster(std::string_view name, int count, double area, double maxAspectRatio,
+                                           double minAspectRatio) {
   // First generate a dummy component with the correct information.
   dummyComponent* comp = new dummyComponent(std::string(name));
   // We first need to create a wrapper for the component.
@@ -143,16 +147,18 @@ unsigned int FPContainer::outputLgraphLayout(Node_tree& tree, lh::Tree_index tid
 
 void FPContainer::pushMirrorContext(double startX, double startY) {
   if (xMirror) {
-    if (xMirrorDepth == maxMirrorDepth)
+    if (xMirrorDepth == maxMirrorDepth) {
       throw std::out_of_range("X Mirror Depth exceeds maximum allowed.");
+    }
     xReflect             = !xReflect;
     xLeft[xMirrorDepth]  = startX + x;
     xRight[xMirrorDepth] = startX + x + width;
     xMirrorDepth += 1;
   }
   if (yMirror) {
-    if (xMirrorDepth == maxMirrorDepth)
+    if (xMirrorDepth == maxMirrorDepth) {
       throw std::out_of_range("Y Mirror Depth exceeds maximum allowed.");
+    }
     yReflect              = !yReflect;
     yBottom[yMirrorDepth] = startY + y;
     yTop[yMirrorDepth]    = startY + y + height;

@@ -22,10 +22,11 @@ void Invariant_boundaries::serialize(Invariant_boundaries* ib, std::ostream& ofs
   for (auto& c : ib->instance_collection) {
     ofs << c.first << " " << c.second.size() << std::endl;
     for (auto& d : c.second) {
-      if (d != "")
+      if (d != "") {
         ofs << d << std::endl;
-      else
+      } else {
         ofs << "##TOP##" << std::endl;
+      }
     }
   }
 
@@ -80,10 +81,11 @@ Invariant_boundaries* Invariant_boundaries::deserialize(std::istream& ifs) {
     ifs >> tmp1 >> size2;
     for (int j = 0; j < size2; j++) {
       ifs >> tmp2;
-      if (tmp2 == "##TOP##")
+      if (tmp2 == "##TOP##") {
         ib->instance_collection[tmp1].insert(tmp2);
-      else
+      } else {
         ib->instance_collection[tmp1].insert("");
+      }
     }
   }
 

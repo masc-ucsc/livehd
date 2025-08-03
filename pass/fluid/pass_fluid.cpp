@@ -338,7 +338,7 @@ void Pass_fluid::add_fork(Lgraph *g) {
           }
           flop_to_vq_map[idx]  = and_nid;
           flop_to_sin_map[idx] = or_nid;
-        }       // end of if (fork_index_flop_map[idx].size() >= 2)
+        }  // end of if (fork_index_flop_map[idx].size() >= 2)
         else {  // only one out fflop; no need to fork, just connect
           Index_ID fork_nid    = fork_index_flop_map[idx].back();
           Node_pin fork_sin_np = Node_pin(fork_nid, ffsin, false);
@@ -349,7 +349,7 @@ void Pass_fluid::add_fork(Lgraph *g) {
           flop_to_sin_map[idx] = idx;
         }
       }  // end of if (fork_index_has_flop_map[idx])
-    }    // end of if == Flop
+    }  // end of if == Flop
   }
 
   std::cout << "\n*****Second round.\n";
@@ -507,7 +507,7 @@ void Pass_fluid::add_fork_deadlock(Lgraph *g) {
           }
           flop_to_vq_map[idx]  = and_nid;
           flop_to_sin_map[idx] = or_nid;
-        }       // end of if (fork_index_flop_map[idx].size() >= 2)
+        }  // end of if (fork_index_flop_map[idx].size() >= 2)
         else {  // only one out fflop; no need to fork, just connect
           Index_ID fork_nid    = fork_index_flop_map[idx].back();
           Node_pin fork_sin_np = Node_pin(fork_nid, ffsin, false);
@@ -518,7 +518,7 @@ void Pass_fluid::add_fork_deadlock(Lgraph *g) {
           flop_to_sin_map[idx] = idx;
         }
       }  // end of if (fork_index_has_flop_map[idx])
-    }    // end of if == Flop
+    }  // end of if == Flop
   }
 
   std::cout << "\n*****Second round.\n";

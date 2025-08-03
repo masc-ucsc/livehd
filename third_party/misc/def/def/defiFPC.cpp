@@ -62,8 +62,9 @@ defiFPC::~defiFPC() { Destroy(); }
 void defiFPC::Destroy() {
   clear();
 
-  if (name_)
+  if (name_) {
     free(name_);
+  }
   name_       = 0;
   nameLength_ = 0;
 
@@ -83,8 +84,9 @@ void defiFPC::clear() {
   corner_    = 0;
 
   for (i = 0; i < namesUsed_; i++) {
-    if (names_[i])
+    if (names_[i]) {
       free(names_[i]);
+    }
   }
   namesUsed_ = 0;
 }
@@ -95,23 +97,25 @@ void defiFPC::setName(const char* name, const char* direction) {
   clear();
 
   if (len > nameLength_) {
-    if (name_)
+    if (name_) {
       free(name_);
+    }
     nameLength_ = len;
     name_       = (char*)malloc(len);
   }
   strcpy(name_, defData->DEFCASE(name));
 
-  if (*direction == 'H')
+  if (*direction == 'H') {
     direction_ = 'H';
-  else if (*direction == 'V')
+  } else if (*direction == 'V') {
     direction_ = 'V';
-  else
+  } else {
     defiError(0,
               6030,
               "ERROR (DEFPARS-6030): Invalid direction specified with FPC name. The valid direction is either 'H' or 'V'. Specify "
               "a valid value and then try again.",
               defData);
+  }
 }
 
 void defiFPC::print(FILE* f) const { fprintf(f, "FPC '%s'\n", name_); }
@@ -154,12 +158,15 @@ void defiFPC::getPart(int index, int* corner, int* typ, char** name) const {
   if (index >= 0 && index <= namesUsed_) {
     // 4 for bottom left  0 for topright
     // 2 for row   0 for comps
-    if (corner)
+    if (corner) {
       *corner = (int)((rowOrComp_[index] & 4) ? 'B' : 'T');
-    if (typ)
+    }
+    if (typ) {
       *typ = (int)((rowOrComp_[index] & 2) ? 'R' : 'C');
-    if (name)
+    }
+    if (name) {
       *name = names_[index];
+    }
   }
 }
 
@@ -181,10 +188,12 @@ void defiFPC::addItem(char item, const char* name) {
       newN[i] = names_[i];
       newR[i] = rowOrComp_[i];
     }
-    if (names_)
+    if (names_) {
       free((char*)(names_));
-    if (rowOrComp_)
+    }
+    if (rowOrComp_) {
       free(rowOrComp_);
+    }
     names_     = newN;
     rowOrComp_ = newR;
   }

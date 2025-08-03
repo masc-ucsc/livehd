@@ -1425,7 +1425,9 @@ std::vector<Node::Compact> Lgtuple::make_mux(Node &mux_node, Node_pin &sel_dpin,
               auto key_dpin = dpin.create_const(Lconst::from_string(attr)).setup_driver_pin();
               attr_node.setup_sink_pin("field").connect_driver(key_dpin);
             }
-            { attr_node.setup_sink_pin("value").connect_driver(attr_it.second); }
+            {
+              attr_node.setup_sink_pin("value").connect_driver(attr_it.second);
+            }
             attr_node.setup_sink_pin("parent").connect_driver(dpin);
             dpin = attr_node.setup_driver_pin("Y");
           }
@@ -1611,7 +1613,9 @@ std::shared_ptr<Lgtuple> Lgtuple::make_flop(Node &flop) const {
       auto key_dpin = flop_node.create_const(Lconst::from_string(get_last_level(attr))).setup_driver_pin();
       attr_node.setup_sink_pin("field").connect_driver(key_dpin);
     }
-    { attr_node.setup_sink_pin("value").connect_driver(e.second); }
+    {
+      attr_node.setup_sink_pin("value").connect_driver(e.second);
+    }
     auto flop_din_driver = flop_din.get_driver_pin();
     if (flop_din_driver.is_invalid()) {
       // Disconnected flop?

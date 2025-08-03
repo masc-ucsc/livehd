@@ -2,8 +2,9 @@
 
 #include "prp_lnast.hpp"
 
-#include <iostream>
 #include <format>
+#include <iostream>
+
 #include "pass.hpp"
 
 Prp_lnast::Prp_lnast() {
@@ -1815,7 +1816,7 @@ Lnast_node Prp_lnast::eval_fluid_ref(lh::Tree_index idx_start_ast, lh::Tree_inde
     }
   }
 #else
-  auto retnode      = get_lnast_temp_ref();
+  auto retnode = get_lnast_temp_ref();
 #endif
 
   return retnode;
@@ -1914,8 +1915,8 @@ Lnast_node Prp_lnast::gen_operator(lh::Tree_index idx, uint8_t *skip_sibs) {
 }
 
 void Prp_lnast::generate_priority_map() {
-  priority_map[Lnast_ntype::Lnast_ntype_log_and]  = 3;
-  priority_map[Lnast_ntype::Lnast_ntype_log_or]   = 3;
+  priority_map[Lnast_ntype::Lnast_ntype_log_and]      = 3;
+  priority_map[Lnast_ntype::Lnast_ntype_log_or]       = 3;
   priority_map[Lnast_ntype::Lnast_ntype_gt]           = 2;
   priority_map[Lnast_ntype::Lnast_ntype_lt]           = 2;
   priority_map[Lnast_ntype::Lnast_ntype_ge]           = 2;

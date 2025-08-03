@@ -1,10 +1,10 @@
 //  This file is distributed under the BSD 3-Clause License. See LICENSE for details.
 
-#include <iostream>
 #include <cstdio>
+#include <format>
+#include <iostream>
 
 #include "ast.hpp"
-#include <format>
 #include "gtest/gtest.h"
 
 class Test_scanner : public Elab_scanner {

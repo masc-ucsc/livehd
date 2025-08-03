@@ -2,12 +2,12 @@
 
 #include "prp2lnast.hpp"
 
-#include <iostream>
+#include <format>
 #include <fstream>
+#include <iostream>
 #include <sstream>
 #include <string>
 
-#include <format>
 #include "pass.hpp"
 #include "str_tools.hpp"
 

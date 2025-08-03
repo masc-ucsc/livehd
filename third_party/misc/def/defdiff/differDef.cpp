@@ -49,7 +49,7 @@
 #include <unistd.h>
 extern char VersionIdent[];
 #else
-char* VersionIdent = "N/A";
+char *VersionIdent = "N/A";
 #endif /* not WIN32 */
 #include "defrReader.hpp"
 #include "diffDefRW.hpp"
@@ -74,7 +74,7 @@ int main(int argc, char **argv) {
   if (argc != 9) {  // If pass in from lefdefdiff, argc is
     diffUsage();    // always 9: defdiff file1 file2 out1 out2
     return (1);     // ignorePinExtra ignoreRowName ignoreViaName
-  }                 // newSegCmp
+  }  // newSegCmp
 
   fileName1 = argv[1];
   fileName2 = argv[2];
@@ -86,11 +86,13 @@ int main(int argc, char **argv) {
 
   // def files
   printf("Reading file: %s\n", fileName1);
-  if (diffDefReadFile(fileName1, defOut1, argv[5], argv[6], argv[7], argv[8]) != 0)
+  if (diffDefReadFile(fileName1, defOut1, argv[5], argv[6], argv[7], argv[8]) != 0) {
     return (1);
+  }
   printf("Reading file: %s\n", fileName2);
-  if (diffDefReadFile(fileName2, defOut2, argv[5], argv[6], argv[7], argv[8]) != 0)
+  if (diffDefReadFile(fileName2, defOut2, argv[5], argv[6], argv[7], argv[8]) != 0) {
     return (1);
+  }
 
   return (0);
 }

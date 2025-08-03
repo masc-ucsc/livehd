@@ -8,8 +8,9 @@
 #include <sys/stat.h>
 #include <sys/types.h>
 
-#include "elab_scanner.hpp"
 #include <format>
+
+#include "elab_scanner.hpp"
 #include "gtest/gtest.h"
 
 class Test_scanner : public Elab_scanner {

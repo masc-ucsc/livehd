@@ -4,9 +4,9 @@
 
 #include <algorithm>
 #include <cctype>
+#include <format>
 #include <iostream>
 
-#include <format>
 #include "lnast_ntype.hpp"
 #include "pass.hpp"
 #include "prp_lnast.hpp"

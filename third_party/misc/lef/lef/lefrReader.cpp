@@ -92,16 +92,19 @@ double convert_name2num(const char *versionName) {
   }
   major = atof(majorNm);
   minor = atof(minorNm);
-  if (subMinorNm)
+  if (subMinorNm) {
     subMinor = atof(subMinorNm);
+  }
 
   version = major;
 
-  if (minor > 0)
+  if (minor > 0) {
     version = major + minor / 10;
+  }
 
-  if (subMinor > 0)
+  if (subMinor > 0) {
     version = version + subMinor / 1000;
+  }
 
   lefFree(versionNm);
 
@@ -149,8 +152,9 @@ bool validateMaskNumber(int num) {
 // User control warning to be printed by the parser
 void lefrDisableParserMsgs(int nMsg, int *msgs) {
   LEF_INIT;
-  if (nMsg <= 0)
+  if (nMsg <= 0) {
     return;
+  }
 
   for (int i = 0; i < nMsg; i++) {
     lefSettings->disableMsg(msgs[i]);
@@ -278,137 +282,199 @@ void lefrSetUnusedCallbacks(lefrVoidCbkFnType func) {
   // the given function.
   LEF_INIT;
 
-  if (lefCallbacks->ArrayBeginCbk == 0)
+  if (lefCallbacks->ArrayBeginCbk == 0) {
     lefCallbacks->ArrayBeginCbk = (lefrStringCbkFnType)func;
-  if (lefCallbacks->ArrayCbk == 0)
+  }
+  if (lefCallbacks->ArrayCbk == 0) {
     lefCallbacks->ArrayCbk = (lefrArrayCbkFnType)func;
-  if (lefCallbacks->ArrayEndCbk == 0)
+  }
+  if (lefCallbacks->ArrayEndCbk == 0) {
     lefCallbacks->ArrayEndCbk = (lefrStringCbkFnType)func;
-  if (lefCallbacks->DividerCharCbk == 0)
+  }
+  if (lefCallbacks->DividerCharCbk == 0) {
     lefCallbacks->DividerCharCbk = (lefrStringCbkFnType)func;
-  if (lefCallbacks->BusBitCharsCbk == 0)
+  }
+  if (lefCallbacks->BusBitCharsCbk == 0) {
     lefCallbacks->BusBitCharsCbk = (lefrStringCbkFnType)func;
-  if (lefCallbacks->CaseSensitiveCbk == 0)
+  }
+  if (lefCallbacks->CaseSensitiveCbk == 0) {
     lefCallbacks->CaseSensitiveCbk = (lefrIntegerCbkFnType)func;
-  if (lefCallbacks->NoWireExtensionCbk == 0)
+  }
+  if (lefCallbacks->NoWireExtensionCbk == 0) {
     lefCallbacks->NoWireExtensionCbk = (lefrStringCbkFnType)func;
-  if (lefCallbacks->CorrectionTableCbk == 0)
+  }
+  if (lefCallbacks->CorrectionTableCbk == 0) {
     lefCallbacks->CorrectionTableCbk = (lefrCorrectionTableCbkFnType)func;
-  if (lefCallbacks->DielectricCbk == 0)
+  }
+  if (lefCallbacks->DielectricCbk == 0) {
     lefCallbacks->DielectricCbk = (lefrDoubleCbkFnType)func;
-  if (lefCallbacks->EdgeRateScaleFactorCbk == 0)
+  }
+  if (lefCallbacks->EdgeRateScaleFactorCbk == 0) {
     lefCallbacks->EdgeRateScaleFactorCbk = (lefrDoubleCbkFnType)func;
-  if (lefCallbacks->EdgeRateThreshold1Cbk == 0)
+  }
+  if (lefCallbacks->EdgeRateThreshold1Cbk == 0) {
     lefCallbacks->EdgeRateThreshold1Cbk = (lefrDoubleCbkFnType)func;
-  if (lefCallbacks->EdgeRateThreshold2Cbk == 0)
+  }
+  if (lefCallbacks->EdgeRateThreshold2Cbk == 0) {
     lefCallbacks->EdgeRateThreshold2Cbk = (lefrDoubleCbkFnType)func;
-  if (lefCallbacks->IRDropBeginCbk == 0)
+  }
+  if (lefCallbacks->IRDropBeginCbk == 0) {
     lefCallbacks->IRDropBeginCbk = (lefrVoidCbkFnType)func;
-  if (lefCallbacks->IRDropCbk == 0)
+  }
+  if (lefCallbacks->IRDropCbk == 0) {
     lefCallbacks->IRDropCbk = (lefrIRDropCbkFnType)func;
-  if (lefCallbacks->IRDropEndCbk == 0)
+  }
+  if (lefCallbacks->IRDropEndCbk == 0) {
     lefCallbacks->IRDropEndCbk = (lefrVoidCbkFnType)func;
-  if (lefCallbacks->LayerCbk == 0)
+  }
+  if (lefCallbacks->LayerCbk == 0) {
     lefCallbacks->LayerCbk = (lefrLayerCbkFnType)func;
-  if (lefCallbacks->LibraryEndCbk == 0)
+  }
+  if (lefCallbacks->LibraryEndCbk == 0) {
     lefCallbacks->LibraryEndCbk = (lefrVoidCbkFnType)func;
-  if (lefCallbacks->MacroBeginCbk == 0)
+  }
+  if (lefCallbacks->MacroBeginCbk == 0) {
     lefCallbacks->MacroBeginCbk = (lefrStringCbkFnType)func;
-  if (lefCallbacks->MacroCbk == 0)
+  }
+  if (lefCallbacks->MacroCbk == 0) {
     lefCallbacks->MacroCbk = (lefrMacroCbkFnType)func;
-  if (lefCallbacks->MacroClassTypeCbk == 0)
+  }
+  if (lefCallbacks->MacroClassTypeCbk == 0) {
     lefCallbacks->MacroClassTypeCbk = (lefrStringCbkFnType)func;
-  if (lefCallbacks->MacroOriginCbk == 0)
+  }
+  if (lefCallbacks->MacroOriginCbk == 0) {
     lefCallbacks->MacroOriginCbk = (lefrMacroNumCbkFnType)func;
-  if (lefCallbacks->MacroSiteCbk == 0)
+  }
+  if (lefCallbacks->MacroSiteCbk == 0) {
     lefCallbacks->MacroSiteCbk = (lefrMacroSiteCbkFnType)func;
-  if (lefCallbacks->MacroForeignCbk == 0)
+  }
+  if (lefCallbacks->MacroForeignCbk == 0) {
     lefCallbacks->MacroForeignCbk = (lefrMacroForeignCbkFnType)func;
-  if (lefCallbacks->MacroSizeCbk == 0)
+  }
+  if (lefCallbacks->MacroSizeCbk == 0) {
     lefCallbacks->MacroSizeCbk = (lefrMacroNumCbkFnType)func;
-  if (lefCallbacks->MacroFixedMaskCbk == 0)
+  }
+  if (lefCallbacks->MacroFixedMaskCbk == 0) {
     lefCallbacks->MacroFixedMaskCbk = (lefrIntegerCbkFnType)func;
-  if (lefCallbacks->TimingCbk == 0)
+  }
+  if (lefCallbacks->TimingCbk == 0) {
     lefCallbacks->TimingCbk = (lefrTimingCbkFnType)func;
-  if (lefCallbacks->MinFeatureCbk == 0)
+  }
+  if (lefCallbacks->MinFeatureCbk == 0) {
     lefCallbacks->MinFeatureCbk = (lefrMinFeatureCbkFnType)func;
-  if (lefCallbacks->NoiseMarginCbk == 0)
+  }
+  if (lefCallbacks->NoiseMarginCbk == 0) {
     lefCallbacks->NoiseMarginCbk = (lefrNoiseMarginCbkFnType)func;
-  if (lefCallbacks->NoiseTableCbk == 0)
+  }
+  if (lefCallbacks->NoiseTableCbk == 0) {
     lefCallbacks->NoiseTableCbk = (lefrNoiseTableCbkFnType)func;
-  if (lefCallbacks->NonDefaultCbk == 0)
+  }
+  if (lefCallbacks->NonDefaultCbk == 0) {
     lefCallbacks->NonDefaultCbk = (lefrNonDefaultCbkFnType)func;
-  if (lefCallbacks->ObstructionCbk == 0)
+  }
+  if (lefCallbacks->ObstructionCbk == 0) {
     lefCallbacks->ObstructionCbk = (lefrObstructionCbkFnType)func;
-  if (lefCallbacks->PinCbk == 0)
+  }
+  if (lefCallbacks->PinCbk == 0) {
     lefCallbacks->PinCbk = (lefrPinCbkFnType)func;
-  if (lefCallbacks->PropBeginCbk == 0)
+  }
+  if (lefCallbacks->PropBeginCbk == 0) {
     lefCallbacks->PropBeginCbk = (lefrVoidCbkFnType)func;
-  if (lefCallbacks->PropCbk == 0)
+  }
+  if (lefCallbacks->PropCbk == 0) {
     lefCallbacks->PropCbk = (lefrPropCbkFnType)func;
-  if (lefCallbacks->PropEndCbk == 0)
+  }
+  if (lefCallbacks->PropEndCbk == 0) {
     lefCallbacks->PropEndCbk = (lefrVoidCbkFnType)func;
-  if (lefCallbacks->SiteCbk == 0)
+  }
+  if (lefCallbacks->SiteCbk == 0) {
     lefCallbacks->SiteCbk = (lefrSiteCbkFnType)func;
-  if (lefCallbacks->SpacingBeginCbk == 0)
+  }
+  if (lefCallbacks->SpacingBeginCbk == 0) {
     lefCallbacks->SpacingBeginCbk = (lefrVoidCbkFnType)func;
-  if (lefCallbacks->SpacingCbk == 0)
+  }
+  if (lefCallbacks->SpacingCbk == 0) {
     lefCallbacks->SpacingCbk = (lefrSpacingCbkFnType)func;
-  if (lefCallbacks->SpacingEndCbk == 0)
+  }
+  if (lefCallbacks->SpacingEndCbk == 0) {
     lefCallbacks->SpacingEndCbk = (lefrVoidCbkFnType)func;
-  if (lefCallbacks->UnitsCbk == 0)
+  }
+  if (lefCallbacks->UnitsCbk == 0) {
     lefCallbacks->UnitsCbk = (lefrUnitsCbkFnType)func;
+  }
   if ((lefCallbacks->VersionCbk == 0) && (lefCallbacks->VersionStrCbk == 0)) {
     // both version callbacks weren't set, if either one is set, it is ok
     lefCallbacks->VersionCbk    = (lefrDoubleCbkFnType)func;
     lefCallbacks->VersionStrCbk = (lefrStringCbkFnType)func;
   }
-  if (lefCallbacks->ViaCbk == 0)
+  if (lefCallbacks->ViaCbk == 0) {
     lefCallbacks->ViaCbk = (lefrViaCbkFnType)func;
-  if (lefCallbacks->ViaRuleCbk == 0)
+  }
+  if (lefCallbacks->ViaRuleCbk == 0) {
     lefCallbacks->ViaRuleCbk = (lefrViaRuleCbkFnType)func;
-  if (lefCallbacks->InputAntennaCbk == 0)
+  }
+  if (lefCallbacks->InputAntennaCbk == 0) {
     lefCallbacks->InputAntennaCbk = (lefrDoubleCbkFnType)func;
-  if (lefCallbacks->OutputAntennaCbk == 0)
+  }
+  if (lefCallbacks->OutputAntennaCbk == 0) {
     lefCallbacks->OutputAntennaCbk = (lefrDoubleCbkFnType)func;
-  if (lefCallbacks->InoutAntennaCbk == 0)
+  }
+  if (lefCallbacks->InoutAntennaCbk == 0) {
     lefCallbacks->InoutAntennaCbk = (lefrDoubleCbkFnType)func;
+  }
 
   // NEW CALLBACK - Add a line here for each new callback routine
-  if (lefCallbacks->AntennaInputCbk == 0)
+  if (lefCallbacks->AntennaInputCbk == 0) {
     lefCallbacks->AntennaInputCbk = (lefrDoubleCbkFnType)func;
-  if (lefCallbacks->AntennaInoutCbk == 0)
+  }
+  if (lefCallbacks->AntennaInoutCbk == 0) {
     lefCallbacks->AntennaInoutCbk = (lefrDoubleCbkFnType)func;
-  if (lefCallbacks->AntennaOutputCbk == 0)
+  }
+  if (lefCallbacks->AntennaOutputCbk == 0) {
     lefCallbacks->AntennaOutputCbk = (lefrDoubleCbkFnType)func;
-  if (lefCallbacks->ManufacturingCbk == 0)
+  }
+  if (lefCallbacks->ManufacturingCbk == 0) {
     lefCallbacks->ManufacturingCbk = (lefrDoubleCbkFnType)func;
-  if (lefCallbacks->UseMinSpacingCbk == 0)
+  }
+  if (lefCallbacks->UseMinSpacingCbk == 0) {
     lefCallbacks->UseMinSpacingCbk = (lefrUseMinSpacingCbkFnType)func;
-  if (lefCallbacks->ClearanceMeasureCbk == 0)
+  }
+  if (lefCallbacks->ClearanceMeasureCbk == 0) {
     lefCallbacks->ClearanceMeasureCbk = (lefrStringCbkFnType)func;
-  if (lefCallbacks->MacroClassTypeCbk == 0)
+  }
+  if (lefCallbacks->MacroClassTypeCbk == 0) {
     lefCallbacks->MacroClassTypeCbk = (lefrStringCbkFnType)func;
-  if (lefCallbacks->MacroOriginCbk == 0)
+  }
+  if (lefCallbacks->MacroOriginCbk == 0) {
     lefCallbacks->MacroOriginCbk = (lefrMacroNumCbkFnType)func;
-  if (lefCallbacks->MacroSiteCbk == 0)
+  }
+  if (lefCallbacks->MacroSiteCbk == 0) {
     lefCallbacks->MacroSiteCbk = (lefrMacroSiteCbkFnType)func;
-  if (lefCallbacks->MacroForeignCbk == 0)
+  }
+  if (lefCallbacks->MacroForeignCbk == 0) {
     lefCallbacks->MacroForeignCbk = (lefrMacroForeignCbkFnType)func;
-  if (lefCallbacks->MacroSizeCbk == 0)
+  }
+  if (lefCallbacks->MacroSizeCbk == 0) {
     lefCallbacks->MacroSizeCbk = (lefrMacroNumCbkFnType)func;
-  if (lefCallbacks->MacroFixedMaskCbk == 0)
+  }
+  if (lefCallbacks->MacroFixedMaskCbk == 0) {
     lefCallbacks->MacroFixedMaskCbk = (lefrIntegerCbkFnType)func;
-  if (lefCallbacks->MacroEndCbk == 0)
+  }
+  if (lefCallbacks->MacroEndCbk == 0) {
     lefCallbacks->MacroEndCbk = (lefrStringCbkFnType)func;
-  if (lefCallbacks->MaxStackViaCbk == 0)
+  }
+  if (lefCallbacks->MaxStackViaCbk == 0) {
     lefCallbacks->MaxStackViaCbk = (lefrMaxStackViaCbkFnType)func;
-  if (lefCallbacks->ExtensionCbk == 0)
+  }
+  if (lefCallbacks->ExtensionCbk == 0) {
     lefCallbacks->ExtensionCbk = (lefrStringCbkFnType)func;
-  if (lefCallbacks->DensityCbk == 0)
+  }
+  if (lefCallbacks->DensityCbk == 0) {
     lefCallbacks->DensityCbk = (lefrDensityCbkFnType)func;
-  if (lefCallbacks->FixedMaskCbk == 0)
+  }
+  if (lefCallbacks->FixedMaskCbk == 0) {
     lefCallbacks->FixedMaskCbk = (lefrIntegerCbkFnType)func;
+  }
 }
 
 // These count up the number of times an unset callback is called...
@@ -417,8 +483,9 @@ static int lefrUnusedCount[NOCBK];
 int lefrCountFunc(lefrCallbackType_e e, void *v, lefiUserData d) {
   LEF_INIT;
   int i = (int)e;
-  if (lefiDebug(23))
+  if (lefiDebug(23)) {
     printf("count %d 0x%p 0x%p\n", (int)e, v, d);
+  }
   if (i >= 0 && i < NOCBK) {
     lefrUnusedCount[i] += 1;
     return 0;
@@ -431,7 +498,9 @@ void lefrSetRegisterUnusedCallbacks() {
   int i;
   lefSettings->RegisterUnused = 1;
   lefrSetUnusedCallbacks(lefrCountFunc);
-  for (i = 0; i < NOCBK; i++) lefrUnusedCount[i] = 0;
+  for (i = 0; i < NOCBK; i++) {
+    lefrUnusedCount[i] = 0;
+  }
 }
 
 void lefrPrintUnusedCallbacks(FILE *f) {
@@ -531,10 +600,11 @@ void lefrPrintUnusedCallbacks(FILE *f) {
         case lefrFixedMaskCbkType: fprintf(f, "FixedMask"); break;
         default: fprintf(f, "BOGUS ENTRY"); break;
       }
-      if (trueCB)
+      if (trueCB) {
         fprintf(f, " %d\n", lefrUnusedCount[i]);
-      else
+      } else {
         trueCB = 1;
+      }
     }
   }
 }

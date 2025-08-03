@@ -1,8 +1,8 @@
 
 #include <cstdlib>
+#include <format>
 #include <iostream>
 
-#include <format>
 #include "lnast.hpp"
 #include "semantic_check.hpp"
 
@@ -229,7 +229,6 @@ int main(void) {
     auto idx_stmts1 = lnast->add_child(idx_for, Lnast_node::create_stmts("stmts1", line_num, pos1, pos2));
     lnast->add_child(idx_for, Lnast_node::create_ref("i", line_num, pos1, pos2));
     lnast->add_child(idx_for, Lnast_node::create_ref("___b", line_num, pos1, pos2));
-
 
     auto idx_minus = lnast->add_child(idx_stmts1, Lnast_node::create_minus("minus", line_num, pos1, pos2));
     lnast->add_child(idx_minus, Lnast_node::create_ref("___g", line_num, pos1, pos2));

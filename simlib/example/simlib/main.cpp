@@ -1,7 +1,7 @@
 //  This file is distributed under the BSD 3-Clause License. See LICENSE for details.
 #include "livesim_types.hpp"
 #include "simlib_checkpoint.hpp"
-//#include "sample_stage.hpp"
+// #include "sample_stage.hpp"
 #include "add1.hpp"
 
 int main(int argc, char **argv) {

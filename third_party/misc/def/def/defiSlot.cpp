@@ -83,8 +83,9 @@ void defiSlot::clearPoly() {
 }
 
 void defiSlot::Destroy() {
-  if (layerName_)
+  if (layerName_) {
     free(layerName_);
+  }
   free((char*)(xl_));
   free((char*)(yl_));
   free((char*)(xh_));
@@ -95,8 +96,9 @@ void defiSlot::Destroy() {
   xh_             = 0;
   yh_             = 0;
   clearPoly();
-  if (polygons_)
+  if (polygons_) {
     free((char*)(polygons_));
+  }
   polygons_ = 0;
   clear();
 }
@@ -104,8 +106,9 @@ void defiSlot::Destroy() {
 void defiSlot::setLayer(const char* name) {
   int len = strlen(name) + 1;
   if (layerNameLength_ < len) {
-    if (layerName_)
+    if (layerName_) {
       free(layerName_);
+    }
     layerName_       = (char*)malloc(len);
     layerNameLength_ = len;
   }
@@ -153,9 +156,12 @@ void defiSlot::addPolygon(defiGeometries* geom) {
     struct defiPoints** poly;
     polysAllocated_ = (polysAllocated_ == 0) ? 2 : polysAllocated_ * 2;
     poly            = (struct defiPoints**)malloc(sizeof(struct defiPoints*) * polysAllocated_);
-    for (i = 0; i < numPolys_; i++) poly[i] = polygons_[i];
-    if (polygons_)
+    for (i = 0; i < numPolys_; i++) {
+      poly[i] = polygons_[i];
+    }
+    if (polygons_) {
       free((char*)(polygons_));
+    }
     polygons_ = poly;
   }
   p            = (struct defiPoints*)malloc(sizeof(struct defiPoints));
@@ -237,16 +243,15 @@ int defiSlot::yh(int index) const {
 int defiSlot::numPolygons() const { return numPolys_; }
 
 // 5.6
-struct defiPoints defiSlot::getPolygon(int index) const {
-  return *(polygons_[index]);
-}
+struct defiPoints defiSlot::getPolygon(int index) const { return *(polygons_[index]); }
 
 void defiSlot::print(FILE* f) const {
   int               i, j;
   struct defiPoints points;
 
-  if (hasLayer())
+  if (hasLayer()) {
     fprintf(f, "- LAYER %s\n", layerName());
+  }
 
   for (i = 0; i < numRectangles(); i++) {
     fprintf(f, "   RECT %d %d %d %d\n", xl(i), yl(i), xh(i), yh(i));
@@ -255,7 +260,9 @@ void defiSlot::print(FILE* f) const {
   for (i = 0; i < numPolygons(); i++) {
     fprintf(f, "   POLYGON ");
     points = getPolygon(i);
-    for (j = 0; j < points.numPoints; j++) fprintf(f, "%d %d ", points.x[j], points.y[j]);
+    for (j = 0; j < points.numPoints; j++) {
+      fprintf(f, "%d %d ", points.x[j], points.y[j]);
+    }
     fprintf(f, "\n");
   }
   fprintf(f, "\n");

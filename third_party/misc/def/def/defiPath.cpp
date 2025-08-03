@@ -98,8 +98,9 @@ void defiPath::clear() {
 }
 
 void defiPath::Destroy() {
-  if (keys_)
+  if (keys_) {
     free((char*)(keys_));
+  }
   keys_ = NULL;
   if (data_) {
     clear();
@@ -167,71 +168,81 @@ int defiPath::prev() const {
 }
 
 int defiPath::getTaper() const {
-  if (keys_[*(pointer_)] != 'T')
+  if (keys_[*(pointer_)] != 'T') {
     return 0;
+  }
   return 1;
 }
 
 const char* defiPath::getTaperRule() const {
-  if (keys_[*(pointer_)] != 'R')
+  if (keys_[*(pointer_)] != 'R') {
     return 0;
+  }
   return (char*)(data_[*(pointer_)]);
 }
 
 const char* defiPath::getLayer() const {
-  if (keys_[*(pointer_)] != 'L')
+  if (keys_[*(pointer_)] != 'L') {
     return 0;
+  }
   return (char*)(data_[*(pointer_)]);
 }
 
 const char* defiPath::getVia() const {
-  if (keys_[*(pointer_)] != 'V')
+  if (keys_[*(pointer_)] != 'V') {
     return 0;
+  }
   return (char*)(data_[*(pointer_)]);
 }
 
 const char* defiPath::getShape() const {
-  if (keys_[*(pointer_)] != 'S')
+  if (keys_[*(pointer_)] != 'S') {
     return 0;
+  }
   return (char*)(data_[*(pointer_)]);
 }
 
 int defiPath::getStyle() const {
   int* style;
-  if (keys_[*(pointer_)] != 'Y')
+  if (keys_[*(pointer_)] != 'Y') {
     return 0;
+  }
   style = (int*)(data_[*(pointer_)]);
   return *style;
 }
 
 int defiPath::getWidth() const {
   int* wptr;
-  if (keys_[*(pointer_)] != 'W')
+  if (keys_[*(pointer_)] != 'W') {
     return 0;
+  }
   wptr = (int*)(data_[*(pointer_)]);
   return *wptr;
 }
 
 int defiPath::getViaRotation() const {
   int* wptr;
-  if (keys_[*(pointer_)] != 'O')
+  if (keys_[*(pointer_)] != 'O') {
     return 0;
+  }
   wptr = (int*)(data_[*(pointer_)]);
   return *wptr;
 }
 
 int defiPath::getMask() const {
   int* wptr;
-  if (keys_[*(pointer_)] != 'M')
+  if (keys_[*(pointer_)] != 'M') {
     return 0;
+  }
   wptr = (int*)(data_[*(pointer_)]);
   return *wptr;
 }
 
 int defiPath::getViaBottomMask() const {
   int* wptr;
-  if (keys_[*(pointer_)] != 'C')
+  if (keys_[*(pointer_)] != 'C') {
     return 0;
+  }
   wptr = (int*)(data_[*(pointer_)]);
 
   int viaMask = *wptr;
@@ -241,8 +252,9 @@ int defiPath::getViaBottomMask() const {
 
 int defiPath::getViaCutMask() const {
   int* wptr;
-  if (keys_[*(pointer_)] != 'C')
+  if (keys_[*(pointer_)] != 'C') {
     return 0;
+  }
   wptr = (int*)(data_[*(pointer_)]);
 
   int viaMask = *wptr;
@@ -252,8 +264,9 @@ int defiPath::getViaCutMask() const {
 
 int defiPath::getViaTopMask() const {
   int* wptr;
-  if (keys_[*(pointer_)] != 'C')
+  if (keys_[*(pointer_)] != 'C') {
     return 0;
+  }
   wptr = (int*)(data_[*(pointer_)]);
 
   int viaMask = *wptr;
@@ -263,15 +276,17 @@ int defiPath::getViaTopMask() const {
 
 const char* defiPath::getViaRotationStr() const {
   int* wptr;
-  if (keys_[*(pointer_)] != 'O')
+  if (keys_[*(pointer_)] != 'O') {
     return 0;
+  }
   wptr = (int*)(data_[*(pointer_)]);
   return defiOrientStr(*wptr);
 }
 
 void defiPath::getViaRect(int* deltaX1, int* deltaY1, int* deltaX2, int* deltaY2) const {
-  if (keys_[*(pointer_)] != 'E')
+  if (keys_[*(pointer_)] != 'E') {
     return;
+  }
   *deltaX1 = ((struct defiViaRect*)(data_[*(pointer_)]))->deltaX1;
   *deltaY1 = ((struct defiViaRect*)(data_[*(pointer_)]))->deltaY1;
   *deltaX2 = ((struct defiViaRect*)(data_[*(pointer_)]))->deltaX2;
@@ -279,8 +294,9 @@ void defiPath::getViaRect(int* deltaX1, int* deltaY1, int* deltaX2, int* deltaY2
 }
 
 void defiPath::getViaData(int* numX, int* numY, int* stepX, int* stepY) const {
-  if (keys_[*(pointer_)] != 'D')
+  if (keys_[*(pointer_)] != 'D') {
     return;
+  }
   *numX  = ((struct defiViaData*)(data_[*(pointer_)]))->numX;
   *numY  = ((struct defiViaData*)(data_[*(pointer_)]))->numY;
   *stepX = ((struct defiViaData*)(data_[*(pointer_)]))->stepX;
@@ -288,31 +304,35 @@ void defiPath::getViaData(int* numX, int* numY, int* stepX, int* stepY) const {
 }
 
 void defiPath::getFlushPoint(int* x, int* y, int* ext) const {
-  if (keys_[*(pointer_)] != 'F')
+  if (keys_[*(pointer_)] != 'F') {
     return;
+  }
   *x   = ((struct defiPnt*)(data_[*(pointer_)]))->x;
   *y   = ((struct defiPnt*)(data_[*(pointer_)]))->y;
   *ext = ((struct defiPnt*)(data_[*(pointer_)]))->ext;
 }
 
 void defiPath::getVirtualPoint(int* x, int* y) const {
-  if (keys_[*(pointer_)] != 'U')
+  if (keys_[*(pointer_)] != 'U') {
     return;
+  }
   *x = ((struct defiPnt*)(data_[*(pointer_)]))->x;
   *y = ((struct defiPnt*)(data_[*(pointer_)]))->y;
 }
 
 void defiPath::getPoint(int* x, int* y) const {
-  if (keys_[*(pointer_)] != 'P')
+  if (keys_[*(pointer_)] != 'P') {
     return;
+  }
   *x = ((struct defiPnt*)(data_[*(pointer_)]))->x;
   *y = ((struct defiPnt*)(data_[*(pointer_)]))->y;
 }
 
 void defiPath::addWidth(int w) {
   int* wValue;
-  if (numUsed_ == numAllocated_)
+  if (numUsed_ == numAllocated_) {
     bumpSize(numAllocated_ * 2);
+  }
   wValue          = (int*)malloc(sizeof(int));
   *wValue         = w;
   keys_[numUsed_] = 'W';
@@ -322,8 +342,9 @@ void defiPath::addWidth(int w) {
 
 void defiPath::addVia(const char* l) {
   int len = strlen(l) + 1;
-  if (numUsed_ == numAllocated_)
+  if (numUsed_ == numAllocated_) {
     bumpSize(numAllocated_ * 2);
+  }
   keys_[numUsed_] = 'V';
   data_[numUsed_] = malloc(len);
   strcpy((char*)(data_[numUsed_]), defData->DEFCASE(l));
@@ -332,8 +353,9 @@ void defiPath::addVia(const char* l) {
 
 void defiPath::addViaRotation(int o) {
   int* orient;
-  if (numUsed_ == numAllocated_)
+  if (numUsed_ == numAllocated_) {
     bumpSize(numAllocated_ * 2);
+  }
   orient          = (int*)malloc(sizeof(int));
   *orient         = o;
   keys_[numUsed_] = 'O';
@@ -342,8 +364,9 @@ void defiPath::addViaRotation(int o) {
 }
 
 void defiPath::addViaRect(int deltaX1, int deltaY1, int deltaX2, int deltaY2) {
-  if (numUsed_ == numAllocated_)
+  if (numUsed_ == numAllocated_) {
     bumpSize(numAllocated_ * 2);
+  }
   keys_[numUsed_]                                   = 'E';  // RECT
   data_[numUsed_]                                   = malloc(sizeof(struct defiViaRect));
   ((struct defiViaRect*)(data_[numUsed_]))->deltaX1 = deltaX1;
@@ -354,8 +377,9 @@ void defiPath::addViaRect(int deltaX1, int deltaY1, int deltaX2, int deltaY2) {
 }
 
 void defiPath::addViaData(int numX, int numY, int stepX, int stepY) {
-  if (numUsed_ == numAllocated_)
+  if (numUsed_ == numAllocated_) {
     bumpSize(numAllocated_ * 2);
+  }
   keys_[numUsed_]                                 = 'D';
   data_[numUsed_]                                 = malloc(sizeof(struct defiViaData));
   ((struct defiViaData*)(data_[numUsed_]))->numX  = numX;
@@ -367,8 +391,9 @@ void defiPath::addViaData(int numX, int numY, int stepX, int stepY) {
 
 void defiPath::addLayer(const char* l) {
   int len = strlen(l) + 1;
-  if (numUsed_ == numAllocated_)
+  if (numUsed_ == numAllocated_) {
     bumpSize(numAllocated_ * 2);
+  }
   keys_[numUsed_] = 'L';
   data_[numUsed_] = malloc(len);
   strcpy((char*)(data_[numUsed_]), defData->DEFCASE(l));
@@ -377,8 +402,9 @@ void defiPath::addLayer(const char* l) {
 
 void defiPath::addTaperRule(const char* l) {
   int len = strlen(l) + 1;
-  if (numUsed_ == numAllocated_)
+  if (numUsed_ == numAllocated_) {
     bumpSize(numAllocated_ * 2);
+  }
   keys_[numUsed_] = 'R';
   data_[numUsed_] = malloc(len);
   strcpy((char*)(data_[numUsed_]), defData->DEFCASE(l));
@@ -386,8 +412,9 @@ void defiPath::addTaperRule(const char* l) {
 }
 
 void defiPath::addPoint(int x, int y) {
-  if (numUsed_ == numAllocated_)
+  if (numUsed_ == numAllocated_) {
     bumpSize(numAllocated_ * 2);
+  }
   keys_[numUsed_]                         = 'P';
   data_[numUsed_]                         = malloc(sizeof(struct defiPnt));
   ((struct defiPnt*)(data_[numUsed_]))->x = x;
@@ -397,8 +424,9 @@ void defiPath::addPoint(int x, int y) {
 
 void defiPath::addMask(int colorMask) {
   int* mask;
-  if (numUsed_ == numAllocated_)
+  if (numUsed_ == numAllocated_) {
     bumpSize(numAllocated_ * 2);
+  }
   mask            = (int*)malloc(sizeof(int));
   *mask           = colorMask;
   keys_[numUsed_] = 'M';  // Mask for points
@@ -408,8 +436,9 @@ void defiPath::addMask(int colorMask) {
 
 void defiPath::addViaMask(int colorMask) {
   int* mask;
-  if (numUsed_ == numAllocated_)
+  if (numUsed_ == numAllocated_) {
     bumpSize(numAllocated_ * 2);
+  }
   mask            = (int*)malloc(sizeof(int));
   *mask           = colorMask;
   keys_[numUsed_] = 'C';  // viaMask
@@ -418,8 +447,9 @@ void defiPath::addViaMask(int colorMask) {
 }
 
 void defiPath::addFlushPoint(int x, int y, int ext) {
-  if (numUsed_ == numAllocated_)
+  if (numUsed_ == numAllocated_) {
     bumpSize(numAllocated_ * 2);
+  }
   keys_[numUsed_]                           = 'F';
   data_[numUsed_]                           = malloc(sizeof(struct defiPnt));
   ((struct defiPnt*)(data_[numUsed_]))->x   = x;
@@ -429,8 +459,9 @@ void defiPath::addFlushPoint(int x, int y, int ext) {
 }
 
 void defiPath::addVirtualPoint(int x, int y) {
-  if (numUsed_ == numAllocated_)
+  if (numUsed_ == numAllocated_) {
     bumpSize(numAllocated_ * 2);
+  }
   keys_[numUsed_]                         = 'U';
   data_[numUsed_]                         = malloc(sizeof(struct defiPnt));
   ((struct defiPnt*)(data_[numUsed_]))->x = x;
@@ -439,8 +470,9 @@ void defiPath::addVirtualPoint(int x, int y) {
 }
 
 void defiPath::setTaper() {
-  if (numUsed_ == numAllocated_)
+  if (numUsed_ == numAllocated_) {
     bumpSize(numAllocated_ * 2);
+  }
   keys_[numUsed_] = 'T';
   data_[numUsed_] = 0;
   (numUsed_)++;
@@ -448,8 +480,9 @@ void defiPath::setTaper() {
 
 void defiPath::addShape(const char* l) {
   int len = strlen(l) + 1;
-  if (numUsed_ == numAllocated_)
+  if (numUsed_ == numAllocated_) {
     bumpSize(numAllocated_ * 2);
+  }
   keys_[numUsed_] = 'S';
   data_[numUsed_] = malloc(len);
   strcpy((char*)(data_[numUsed_]), defData->DEFCASE(l));
@@ -458,8 +491,9 @@ void defiPath::addShape(const char* l) {
 
 void defiPath::addStyle(int s) {
   int* style;
-  if (numUsed_ == numAllocated_)
+  if (numUsed_ == numAllocated_) {
     bumpSize(numAllocated_ * 2);
+  }
   style           = (int*)malloc(sizeof(int));
   *style          = s;
   keys_[numUsed_] = 'Y';
@@ -470,8 +504,9 @@ void defiPath::addStyle(int s) {
 void defiPath::print(FILE* fout) const {
   int  i;
   int* wptr;
-  if (fout == 0)
+  if (fout == 0) {
     fout = stdout;
+  }
   fprintf(fout, "Path:\n");
   for (i = 0; i < numUsed_; i++) {
     if (keys_[i] == 'L') {
@@ -531,10 +566,12 @@ void defiPath::bumpSize(int size) {
     newData[i] = data_[i];
   }
 
-  if (keys_)
+  if (keys_) {
     free((char*)(keys_));
-  if (data_)
+  }
+  if (data_) {
     free((char*)(data_));
+  }
 
   keys_         = newKeys;
   data_         = newData;

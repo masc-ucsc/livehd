@@ -41,8 +41,9 @@ protected:
       // std::print(" level:{} pos:{} create_pos:{} fwd:{} bwd:{} leaf:{}\n", index.level, index.pos, node.create_pos, node.fwd_pos,
       // node.bwd_pos, node.leaf);
 
-      if (index.level || index.pos)
+      if (index.level || index.pos) {
         index_order.emplace_back(index);
+      }
     });
 
     auto *lib = Graph_library::instance("lgdb_hier_test");
@@ -141,10 +142,11 @@ protected:
       Node_pin spin;
       if (curr_node.get_type_op() == Ntype_op::Sum) {
         I(curr_data.leaf);
-        if (rbool.any())
+        if (rbool.any()) {
           spin = curr_node.setup_sink_pin("A");
-        else
+        } else {
           spin = curr_node.setup_sink_pin("B");
+        }
       } else {
         Lgraph *curr_lg = lib->open_lgraph(curr_data.name);
         I(curr_node.get_class_lgraph() != curr_lg);
@@ -175,14 +177,16 @@ protected:
       (void)lgid;
       Lgraph *lg = lib->open_lgraph(name);
       I(lg);
-      if (lg->is_empty())
+      if (lg->is_empty()) {
         return;
+      }
 
       int  sz = 0;
       Node last_node;
       for (auto node : lg->fast()) {
-        if (node.is_type_io())
+        if (node.is_type_io()) {
           continue;
+        }
         last_node = node;
         sz++;
       }
@@ -190,16 +194,18 @@ protected:
         auto dpin = lg->get_graph_input("i0");
 
         for (auto e : dpin.get_node().out_edges()) {
-          if (e.sink.is_graph_io())
+          if (e.sink.is_graph_io()) {
             return;
+          }
         }
 
         auto spin = lg->get_graph_output("o0");
         spin.connect_driver(dpin);
       } else if (sz == 1) {
         for (auto e : last_node.out_edges()) {
-          if (e.sink.is_graph_io())
+          if (e.sink.is_graph_io()) {
             return;
+          }
         }
 
         auto     spin = lg->get_graph_output("o0");
@@ -263,12 +269,14 @@ protected:
         n_leafs++;
       } else {
         // index.pos = tree.get_tree_width(index.level)-1; // Add child at the end
-        if (!tree.is_leaf(index))
+        if (!tree.is_leaf(index)) {
           n_leafs++;
+        }
 
         tree.add_child(index, data);
-        if ((index.level + 1) == max_level && max_level < max_depth)
+        if ((index.level + 1) == max_level && max_level < max_depth) {
           max_level++;
+        }
         I(max_level <= max_depth);
       }
     }
@@ -296,8 +304,9 @@ protected:
         lh::Tree_index insert_point(rint.max(max_level), rint.max(tree.get_tree_width(max_level)));
         lh::Tree_index copy_point(rint.max(max_level), rint.max(tree.get_tree_width(max_level)));
 
-        if (tree.is_child_of(copy_point, insert_point))  // No recursion insert
+        if (tree.is_child_of(copy_point, insert_point)) {  // No recursion insert
           continue;
+        }
 
 #if 0
         HERE! Create a "copy" and "move" in the tree.hpp

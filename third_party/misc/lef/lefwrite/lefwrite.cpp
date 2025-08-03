@@ -61,7 +61,7 @@ int main(int argc, char **argv) {
   double *xl;
   double *yl;
   double *wthn, *spng;
-  int *   aspc;
+  int    *aspc;
   int     encrypt = 0;
 
 #ifdef WIN32
@@ -2092,8 +2092,9 @@ int main(int argc, char **argv) {
   CHECK_STATUS(status);
 
   lineNum = lefwCurrentLineNumber();
-  if (lineNum == 0)
+  if (lineNum == 0) {
     fprintf(stderr, "ERROR: Nothing has been written!!!\n");
+  }
 
   fclose(fout);
 

@@ -189,8 +189,9 @@ void defiVia::setup(const char* name) {
     name_       = (char*)realloc(name_, len);
   }
   strcpy(name_, defData->DEFCASE(name));
-  if (pattern_)
+  if (pattern_) {
     *(pattern_) = 0;
+  }
   if (layers_) {
     for (i = 0; i < numLayers_; i++) {
       free(layers_[i]);
@@ -222,39 +223,57 @@ void defiVia::addLayer(const char* layer, int xl, int yl, int xh, int yh, int co
     layersLength_ = layersLength_ ? 2 * layersLength_ : 8;
 
     newl = (char**)malloc(layersLength_ * sizeof(char*));
-    for (i = 0; i < numLayers_; i++) newl[i] = layers_[i];
-    if (layers_)
+    for (i = 0; i < numLayers_; i++) {
+      newl[i] = layers_[i];
+    }
+    if (layers_) {
       free((char*)(layers_));
+    }
     layers_ = newl;
 
     ints = (int*)malloc(layersLength_ * sizeof(int));
-    for (i = 0; i < numLayers_; i++) ints[i] = xl_[i];
-    if (xl_)
+    for (i = 0; i < numLayers_; i++) {
+      ints[i] = xl_[i];
+    }
+    if (xl_) {
       free((char*)(xl_));
+    }
     xl_ = ints;
 
     ints = (int*)malloc(layersLength_ * sizeof(int));
-    for (i = 0; i < numLayers_; i++) ints[i] = yl_[i];
-    if (yl_)
+    for (i = 0; i < numLayers_; i++) {
+      ints[i] = yl_[i];
+    }
+    if (yl_) {
       free((char*)(yl_));
+    }
     yl_ = ints;
 
     ints = (int*)malloc(layersLength_ * sizeof(int));
-    for (i = 0; i < numLayers_; i++) ints[i] = xh_[i];
-    if (xh_)
+    for (i = 0; i < numLayers_; i++) {
+      ints[i] = xh_[i];
+    }
+    if (xh_) {
       free((char*)(xh_));
+    }
     xh_ = ints;
 
     ints = (int*)malloc(layersLength_ * sizeof(int));
-    for (i = 0; i < numLayers_; i++) ints[i] = yh_[i];
-    if (yh_)
+    for (i = 0; i < numLayers_; i++) {
+      ints[i] = yh_[i];
+    }
+    if (yh_) {
       free((char*)(yh_));
+    }
     yh_ = ints;
 
     ints = (int*)malloc(layersLength_ * sizeof(int));
-    for (i = 0; i < numLayers_; i++) ints[i] = rectMask_[i];
-    if (rectMask_)
+    for (i = 0; i < numLayers_; i++) {
+      ints[i] = rectMask_[i];
+    }
+    if (rectMask_) {
       free((char*)(rectMask_));
+    }
     rectMask_ = ints;
   }
 
@@ -289,12 +308,15 @@ void defiVia::addPolygon(const char* layer, defiGeometries* geom, int colorMask)
       poly[i]  = polygons_[i];
       masks[i] = polyMask_[i];
     }
-    if (polygons_)
+    if (polygons_) {
       free((char*)(polygons_));
-    if (polygonNames_)
+    }
+    if (polygonNames_) {
       free((char*)(polygonNames_));
-    if (polyMask_)
+    }
+    if (polyMask_) {
       free((char*)(polyMask_));
+    }
     polygonNames_ = newn;
     polygons_     = poly;
     polyMask_     = masks;
@@ -320,8 +342,9 @@ void defiVia::addViaRule(char* viaRuleName, int xSize, int ySize, char* botLayer
 
   len = strlen(viaRuleName) + 1;
   if (len > viaRuleLength_) {
-    if (viaRule_)
+    if (viaRule_) {
       free(viaRule_);
+    }
     viaRule_ = (char*)malloc(strlen(viaRuleName) + 1);
   }
   strcpy(viaRule_, defData->DEFCASE(viaRuleName));
@@ -329,24 +352,27 @@ void defiVia::addViaRule(char* viaRuleName, int xSize, int ySize, char* botLayer
   ySize_ = ySize;
   len    = strlen(botLayer) + 1;
   if (len > botLayerLength_) {
-    if (botLayer_)
+    if (botLayer_) {
       free(botLayer_);
+    }
     botLayer_       = (char*)malloc(strlen(botLayer) + 1);
     botLayerLength_ = len;
   }
   strcpy(botLayer_, defData->DEFCASE(botLayer));
   len = strlen(cutLayer) + 1;
   if (len > cutLayerLength_) {
-    if (cutLayer_)
+    if (cutLayer_) {
       free(cutLayer_);
+    }
     cutLayer_       = (char*)malloc(strlen(cutLayer) + 1);
     cutLayerLength_ = len;
   }
   strcpy(cutLayer_, defData->DEFCASE(cutLayer));
   len = strlen(topLayer) + 1;
   if (len > topLayerLength_) {
-    if (topLayer_)
+    if (topLayer_) {
       free(topLayer_);
+    }
     topLayer_       = (char*)malloc(strlen(topLayer) + 1);
     topLayerLength_ = len;
   }
@@ -382,8 +408,9 @@ void defiVia::addCutPattern(char* cutPattern) {
 
   len = strlen(cutPattern) + 1;
   if (len > cutPatternLength_) {
-    if (cutPattern_)
+    if (cutPattern_) {
       free(cutPattern_);
+    }
     cutPattern_       = (char*)malloc(strlen(cutPattern) + 1);
     cutPatternLength_ = len;
   }
@@ -417,16 +444,21 @@ int defiVia::polyMask(int index) const {
 
 void defiVia::layer(int index, char** layer, int* xl, int* yl, int* xh, int* yh) const {
   if (index >= 0 && index < numLayers_) {
-    if (layer)
+    if (layer) {
       *layer = layers_[index];
-    if (xl)
+    }
+    if (xl) {
       *xl = xl_[index];
-    if (yl)
+    }
+    if (yl) {
       *yl = yl_[index];
-    if (xh)
+    }
+    if (xh) {
       *xh = xh_[index];
-    if (yh)
+    }
+    if (yh) {
       *yh = yh_[index];
+    }
   }
 }
 
@@ -448,9 +480,7 @@ const char* defiVia::polygonName(int index) const {
   return polygonNames_[index];
 }
 
-struct defiPoints defiVia::getPolygon(int index) const {
-  return *(polygons_[index]);
-}
+struct defiPoints defiVia::getPolygon(int index) const { return *(polygons_[index]); }
 
 int defiVia::hasViaRule() const { return hasViaRule_; }
 
@@ -471,10 +501,11 @@ void defiVia::viaRule(char** viaRuleName, int* xSize, int* ySize, char** botLaye
 }
 
 int defiVia::hasRowCol() const {
-  if (rows_)
+  if (rows_) {
     return rows_;
-  else
+  } else {
     return cols_;
+  }
 }
 
 void defiVia::rowCol(int* numCutRows, int* numCutCols) const {
@@ -483,10 +514,11 @@ void defiVia::rowCol(int* numCutRows, int* numCutCols) const {
 }
 
 int defiVia::hasOrigin() const {
-  if (xOffset_)
+  if (xOffset_) {
     return xOffset_;
-  else
+  } else {
     return yOffset_;
+  }
 }
 
 void defiVia::origin(int* xOffset, int* yOffset) const {
@@ -495,14 +527,15 @@ void defiVia::origin(int* xOffset, int* yOffset) const {
 }
 
 int defiVia::hasOffset() const {
-  if (xBotOffset_)
+  if (xBotOffset_) {
     return xBotOffset_;
-  else if (yBotOffset_)
+  } else if (yBotOffset_) {
     return yBotOffset_;
-  else if (xTopOffset_)
+  } else if (xTopOffset_) {
     return xTopOffset_;
-  else
+  } else {
     return yTopOffset_;
+  }
 }
 
 void defiVia::offset(int* xBotOffset, int* yBotOffset, int* xTopOffset, int* yTopOffset) const {
@@ -543,8 +576,9 @@ void defiVia::print(FILE* f) const {
 
   fprintf(f, "via '%s'\n", name());
 
-  if (hasPattern())
+  if (hasPattern()) {
     fprintf(f, "  pattern '%s'\n", pattern());
+  }
 
   for (i = 0; i < numLayers(); i++) {
     layer(i, &c, &xl, &yl, &xh, &yh);
@@ -570,8 +604,9 @@ void defiVia::print(FILE* f) const {
       offset(&xbo, &ybo, &xto, &yto);
       fprintf(f, "    offset %d %d %d %d\n", xbo, ybo, xto, yto);
     }
-    if (hasCutPattern())
+    if (hasCutPattern()) {
       fprintf(f, "    pattern '%s'\n", cutPattern());
+    }
   }
 }
 END_LEFDEF_PARSER_NAMESPACE

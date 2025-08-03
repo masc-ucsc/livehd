@@ -3,8 +3,8 @@
 #include "pass_opentimer.hpp"
 
 #include <format>
-#include <iostream>
 #include <fstream>
+#include <iostream>
 #include <string>
 
 #include "lgedgeiter.hpp"

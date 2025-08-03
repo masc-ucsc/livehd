@@ -14,8 +14,9 @@ bagLayout::bagLayout(unsigned int rsize) : FPContainer(rsize) {
 
 bool bagLayout::layout(FPOptimization opt, double targetAR) {
   // If we are locked, don't layout.
-  if (locked)
+  if (locked) {
     return true;
+  }
 
   // Calculate our area, and the implied target width and height.
   area             = totalArea();
@@ -63,8 +64,9 @@ bool bagLayout::layout(FPOptimization opt, double targetAR) {
       nextY += compHeight;
     }
 
-    if (verbose)
+    if (verbose) {
       std::cout << " remWidth=" << remWidth << " remHeight=" << remHeight << " AR=" << AR << "\n";
+    }
   }
 
   recalcSize();
@@ -103,7 +105,8 @@ void bagLayout::outputHotSpotLayout(std::ostream& o, double startX, double start
     FPObject* obj = getComponent(i);
     obj->outputHotSpotLayout(o, x + startX, y + startY);
   }
-  if (itemCount != 1)
+  if (itemCount != 1) {
     o << "# end " << groupName << "\n";
+  }
   popMirrorContext();
 }

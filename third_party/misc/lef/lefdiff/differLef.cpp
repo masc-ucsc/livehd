@@ -49,7 +49,7 @@
 #include <unistd.h>
 extern char VersionIdent[];
 #else
-char* VersionIdent = "N/A";
+char *VersionIdent = "N/A";
 #endif /* not WIN32 */
 #include "diffLefRW.hpp"
 #include "lefrReader.hpp"
@@ -85,12 +85,14 @@ int main(int argc, char **argv) {
 
   // just read in the 1st file to memory
   printf("Reading file: %s\n", fileName1);
-  if (diffLefReadFile(fileName1, lefOut1) != 0)
+  if (diffLefReadFile(fileName1, lefOut1) != 0) {
     return (1);
+  }
   // read and compare with the 1st file in memory
   printf("Reading file: %s\n", fileName2);
-  if (diffLefReadFile(fileName2, lefOut2) != 0)
+  if (diffLefReadFile(fileName2, lefOut2) != 0) {
     return (1);
+  }
 
   return (0);
 }

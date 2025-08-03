@@ -316,9 +316,7 @@ c->c = MIN(c->c, s->ncol - 1);
     A;                                    \
     return true;                          \
   }
-#define DO(S, C, A) \
-  ON(               \
-      S, C, consumearg(vt); if (!vt->ignored) { A; } fixcursor(vt); resetparser(vt););
+#define DO(S, C, A) ON(S, C, consumearg(vt); if (!vt->ignored) { A; } fixcursor(vt); resetparser(vt););
 
 static bool handlechar(TMT *vt, char i) {
   COMMON_VARS;

@@ -2,9 +2,9 @@
 
 #include "node_pin.hpp"
 
+#include <cstdint>
 #include <format>
 #include <iostream>
-#include <cstdint>
 
 #include "lgraph.hpp"
 #include "lgtuple.hpp"

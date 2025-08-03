@@ -112,4 +112,3 @@ void Lcompiler::do_prp_global_bitwidth_inference() {
     }
   }
 }
-

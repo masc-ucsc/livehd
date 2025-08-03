@@ -2,10 +2,10 @@
 #include <strings.h>
 #include <unistd.h>
 
+#include <format>
 #include <iostream>
 #include <vector>
 
-#include <format>
 #include "gmock/gmock.h"
 #include "gtest/gtest.h"
 #include "label_mincut.hpp"

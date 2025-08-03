@@ -49,11 +49,11 @@ public:
       } else if (!bug_inserted && tid == Token_id_cbr && r_0_to_99.any() == 93) {
         bug_inserted = true;
         err_tracker::logger("Missing closing bracket \"]\" in line {}.\nSuggestion: Insert the missing closing bracket \"]\".",
-                                line);
+                            line);
       } else if (!bug_inserted && tid == Token_id_obr && r_0_to_99.any() == 91) {
         bug_inserted = true;
         err_tracker::logger("Missing opening bracket \"[\" in line {}.\nSuggestion: Insert the missing opening bracket \"(\".",
-                                line);
+                            line);
       } else if (!bug_inserted && tid == Token_id_colon && r_0_to_99.any() == 58) {
         bug_inserted = true;
         err_tracker::logger("Missing colon \":\" in line {}.\nSuggestion: Insert the missing colon \":\".", line);
@@ -62,8 +62,7 @@ public:
         err_tracker::logger("Missing comma \",\" in line {}.\nSuggestion: Insert the missing comma \",\".", line);
       } else if (!bug_inserted && tid == Token_id_plus && r_0_to_99.any() == 43) {
         bug_inserted = true;
-        err_tracker::logger("Missing plus operator \"+\" in line {}.\nSuggestion: Insert the missing plus operator \"+\".",
-                                line);
+        err_tracker::logger("Missing plus operator \"+\" in line {}.\nSuggestion: Insert the missing plus operator \"+\".", line);
       } else if (!bug_inserted && tid == Token_id_eq && r_0_to_99.any() == 61) {
         bug_inserted = true;
         err_tracker::logger("Missing assign sign \"=\" in line {}.\nSuggestion: Insert the missing assign sign \"=\".", line);
@@ -73,7 +72,7 @@ public:
       } else if (!bug_inserted && tid == Token_id_alnum && ttxt == "endmodule" && r_0_to_99.any() == 97) {
         bug_inserted = true;
         err_tracker::logger("Missing keyword \"endmodule\" in line {}.\nSuggestion: Insert the missing keyword \"endmodule\".",
-                                line);
+                            line);
       } else if (!bug_inserted && tid == Token_id_alnum && ttxt == "input" && r_0_to_99.any() == 96) {
         bug_inserted = true;
         err_tracker::logger("Missing keyword \"input\" in line {}.\nSuggestion: Insert the missing keyword \"input\".", line);

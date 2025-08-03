@@ -1,8 +1,8 @@
 // vcd_sample.cpp
 #include "vcd_sample.hpp"
 
-#include <iostream>
 #include <format>
+#include <iostream>
 
 Vcd_sample::Vcd_sample(size_t n_buckets) : Vcd_reader(n_buckets) {}
 

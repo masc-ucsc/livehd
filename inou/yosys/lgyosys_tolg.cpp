@@ -959,7 +959,7 @@ static void dump_partially_assigned() {
         i += width;
         continue;
       }
-      //I(!dpin.is_invalid());
+      // I(!dpin.is_invalid());
 
       std::print("   [{}:{}] name:{}\n", i, i + width - 1, dpin.debug_name());
 
@@ -1316,8 +1316,10 @@ static void process_partially_assigned_other(Lgraph *g) {
       if (dpin.is_invalid()) {
         std::print("OOPSY! 2nd: {}\n", dpin.debug_name());
       }
-      //I(!dpin.is_invalid());
-      if(!dpin.is_invalid()) connect_partial_dpin(g, or_node, i, width, dpin);
+      // I(!dpin.is_invalid());
+      if (!dpin.is_invalid()) {
+        connect_partial_dpin(g, or_node, i, width, dpin);
+      }
 
       i += width;
     }

@@ -1,10 +1,11 @@
 
+#include <format>
+#include <iostream>
+
 #include "absl/base/dynamic_annotations.h"
 #include "absl/base/macros.h"
 #include "absl/strings/numbers.h"
 #include "absl/strings/str_split.h"
-#include <iostream>
-#include <format>
 #include "gtest/gtest.h"
 
 // Fake lgraph class for testing

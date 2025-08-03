@@ -1466,13 +1466,11 @@ void Lnast_tolg::process_ast_attr_get_op(Lgraph *lg, const Lnast_nid &lnidx_aget
   }
 }
 
-
 void Lnast_tolg::process_ast_func_call_op(Lgraph *lg, const Lnast_nid &lnidx_fc) {
   auto c0_fc         = lnast->get_first_child(lnidx_fc);
   auto func_name_ori = lnast->get_vname(lnast->get_sibling_next(c0_fc));
   auto cn_fc         = lnast->get_last_child(lnidx_fc);
   auto cn_fc_sname   = lnast->get_sname(cn_fc);
-
 
   std::string func_name;
   auto        cond2 = func_name_ori.substr(0, 2) == "__";

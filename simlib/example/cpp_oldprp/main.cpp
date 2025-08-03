@@ -9,7 +9,7 @@
 #include "Sample_Stage2.h"
 #include "Sample_Stage3.h"
 
-//#define USE_PTHREAD_BARRIER 1
+// #define USE_PTHREAD_BARRIER 1
 
 void usage(const char *name) {
   fprintf(stderr, "Usage:\n");
@@ -94,8 +94,9 @@ void *worker(void *arg) {
     while (barrier1 != nthreads) {
       ;
     }
-    if (id == 0)
+    if (id == 0) {
       AtomicSub(&barrier2, nthreads);
+    }
 #endif
 
     for (uint32_t i = 0; i < size; i++) {
@@ -109,8 +110,9 @@ void *worker(void *arg) {
     while (barrier2 != nthreads) {
       ;
     }
-    if (id == 0)
+    if (id == 0) {
       AtomicSub(&barrier1, nthreads);
+    }
 #endif
   }
 
@@ -127,8 +129,9 @@ void *worker(void *arg) {
     while (barrier1 != nthreads) {
       ;
     }
-    if (id == 0)
+    if (id == 0) {
       AtomicSub(&barrier2, nthreads);
+    }
 #endif
 
     for (uint32_t i = 0; i < size; i++) {
@@ -142,8 +145,9 @@ void *worker(void *arg) {
     while (barrier2 != nthreads) {
       ;
     }
-    if (id == 0)
+    if (id == 0) {
       AtomicSub(&barrier1, nthreads);
+    }
 #endif
   }
 

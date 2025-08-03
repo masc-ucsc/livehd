@@ -10,7 +10,6 @@
 #include <cctype>
 #include <charconv>
 #include <cstring>
-
 #include <format>
 
 #define VALUES "0123456789zZxXbU-"
@@ -128,10 +127,10 @@ std::pair<const char*, std::string_view> Vcd_reader::parse_word(const char* ptr)
   ptr += head;
 
   // length of next token
-  size_t len = strcspn(ptr, " \n");
-  auto start = ptr;
+  size_t len   = strcspn(ptr, " \n");
+  auto   start = ptr;
   ptr += len;
-  return { ptr, std::string_view(start, len) };
+  return {ptr, std::string_view(start, len)};
 }
 
 const char* Vcd_reader::parse_instruction(const char* ptr) {

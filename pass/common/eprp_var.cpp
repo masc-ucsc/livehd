@@ -1,9 +1,9 @@
 
 #include "eprp_var.hpp"
 
+#include <algorithm>
 #include <format>
 #include <iostream>
-#include <algorithm>
 #include <iterator>
 #include <memory>
 #include <utility>

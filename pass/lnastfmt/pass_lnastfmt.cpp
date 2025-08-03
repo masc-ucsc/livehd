@@ -189,14 +189,10 @@ void Pass_lnastfmt::process_node(Lnast* ln, const lh::Tree_index& it) {
   if (node_data.type.is_assign() || node_data.type.is_dp_assign()) {
     auto frst_child_indx = ln->get_first_child(it);
     I(ln->get_type(frst_child_indx).debug_name() == "ref", "unexpected node found! not ref!?");
-    std::print("first child type and data: {}, {}\n",
-                             ln->get_type(frst_child_indx).debug_name(),
-                             ln->get_name(frst_child_indx));
+    std::print("first child type and data: {}, {}\n", ln->get_type(frst_child_indx).debug_name(), ln->get_name(frst_child_indx));
 
     auto sec_child_indx = ln->get_sibling_next(frst_child_indx);
-    std::print("sec child type and data: {}, {}\n",
-                             ln->get_type(sec_child_indx).debug_name(),
-                             ln->get_name(sec_child_indx));
+    std::print("sec child type and data: {}, {}\n", ln->get_type(sec_child_indx).debug_name(), ln->get_name(sec_child_indx));
 
     I(ln->get_sibling_next(sec_child_indx).is_invalid(), "This assign node has more than 2 children??");
 

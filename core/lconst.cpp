@@ -1356,7 +1356,6 @@ size_t Lconst::popcount() const {
   return popcount;
 }
 
-
 int64_t Lconst::to_i() const {
   I(is_i());
   return static_cast<long int>(num);

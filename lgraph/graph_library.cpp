@@ -9,8 +9,8 @@
 #include <cassert>
 #include <climits>
 #include <cstdlib>
-#include <fstream>
 #include <format>
+#include <fstream>
 #include <iostream>
 #include <memory>
 #include <regex>

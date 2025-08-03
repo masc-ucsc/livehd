@@ -59,8 +59,9 @@ void defiSite::Init() {
 void defiSite::Destroy() { free(siteName_); }
 
 void defiSite::clear() {
-  if (siteName_)
+  if (siteName_) {
     *siteName_ = '\0';
+  }
   x_num_  = 0.0;
   y_num_  = 0.0;
   x_step_ = 0.0;
@@ -72,9 +73,12 @@ void defiSite::setName(const char* name) {
   int   len  = 1;
   char* from = (char*)name;
   clear();
-  while (*from++) len++;
-  if (nameSize_ < len)
+  while (*from++) {
+    len++;
+  }
+  if (nameSize_ < len) {
     bumpName(len);
+  }
   strcpy(siteName_, defData->DEFCASE(name));
 }
 
@@ -194,9 +198,7 @@ int defiBox::xh() const { return xh_; }
 
 int defiBox::yh() const { return yh_; }
 
-struct defiPoints defiBox::getPoint() const {
-  return *(points_);
-}
+struct defiPoints defiBox::getPoint() const { return *(points_); }
 
 void defiBox::print(FILE* f) const { fprintf(f, "Box %d,%d %d %d\n", xl(), yl(), xh(), yh()); }
 

@@ -7,7 +7,6 @@
 
 #include "gmock/gmock.h"
 #include "gtest/gtest.h"
-
 #include "lgedgeiter.hpp"
 #include "lgraph.hpp"
 #include "lhtree.hpp"
@@ -27,8 +26,9 @@ protected:
     full_fwd_order.resize(absl_fwd_pos.size());
 
     for (auto &node : node_order) {
-      if (node.is_type_io())
+      if (node.is_type_io()) {
         continue;
+      }
       const auto &fwd_pos = Fwd_pos_attr::ref(lg_root)->get(node.get_compact());
       I(fwd_pos <= full_fwd_order.size());
       I(full_fwd_order[fwd_pos - 1].empty());
@@ -46,8 +46,9 @@ protected:
     std::vector<std::string> fwd_order;
     for (size_t i = 0; i < full_fwd_order.size(); ++i) {
       // std::print("full_fwd_order: {}\n",full_fwd_order[i]);
-      if (full_fwd_order[i].rfind("name:leaf") != std::string::npos)
+      if (full_fwd_order[i].rfind("name:leaf") != std::string::npos) {
         fwd_order.emplace_back(full_fwd_order[i]);
+      }
     }
 
     pos = 1;
