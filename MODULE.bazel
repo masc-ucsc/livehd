@@ -23,7 +23,7 @@ bazel_dep(name = "rules_proto_grpc_cpp", version = "5.5.0")
 bazel_dep(name = "rules_proto", version = "7.1.0")
 bazel_dep(name = "protobuf", version = "31.1")
 
-bazel_dep(name = "boost.multiprecision", version = "1.87.0")
+bazel_dep(name = "boost.multiprecision", version = "1.88.0.bcr.1")
 #### M4/Flex/Bison
 bazel_dep(name = "rules_m4", version = "0.3")
 bazel_dep(name = "rules_flex", version = "0.4")
