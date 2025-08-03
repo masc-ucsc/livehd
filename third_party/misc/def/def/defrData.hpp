@@ -57,10 +57,10 @@ typedef std::map<std::string, std::string, defCompareStrings> defDefineMap;
 typedef union {
   double          dval;
   int             integer;
-  char *          string;
+  char           *string;
   int             keyword;  // really just a nop
   struct defpoint pt;
-  defTOKEN *      tk;
+  defTOKEN       *tk;
 } YYSTYPE;
 
 #define YYSTYPE_IS_DECLARED
@@ -77,10 +77,10 @@ public:
   int        GETC();
 
   void               UNGETC(char ch);
-  char *             ringCopy(const char *string);
+  char              *ringCopy(const char *string);
   int                DefGetTokenFromStack(char *s);
   inline void        print_lines(long long lines);
-  const char *       lines2str(long long lines);
+  const char        *lines2str(long long lines);
   static inline void IncCurPos(char **curPos, char **buffer, int *bufferSize);
   int                DefGetToken(char **buffer, int *bufferSize);
   static void        uc_array(char *source, char *dest);
@@ -109,20 +109,20 @@ public:
 
   inline static const char *defkywd(int num);
 
-  FILE *    defrLog;
+  FILE     *defrLog;
   char      defPropDefType;  // save the current type of the property
-  char *    ch;
-  char *    defMsg;
-  char *    deftoken;
-  char *    uc_token;
-  char *    last;
-  char *    magic;
-  char *    next;
-  char *    pv_deftoken;
-  char *    rowName;     // to hold the rowName for message
-  char *    shieldName;  // to hold the shieldNetName
-  char *    shiftBuf;
-  char *    warningMsg;
+  char     *ch;
+  char     *defMsg;
+  char     *deftoken;
+  char     *uc_token;
+  char     *last;
+  char     *magic;
+  char     *next;
+  char     *pv_deftoken;
+  char     *rowName;     // to hold the rowName for message
+  char     *shieldName;  // to hold the shieldNetName
+  char     *shiftBuf;
+  char     *warningMsg;
   double    save_x;
   double    save_y;
   double    lVal;
@@ -211,9 +211,9 @@ public:
   defAliasMap       def_alias_set;
   defDefineMap      def_defines_set;
 
-  char * specialWire_routeStatus;
-  char * specialWire_routeStatusName;
-  char * specialWire_shapeType;
+  char  *specialWire_routeStatus;
+  char  *specialWire_routeStatusName;
+  char  *specialWire_shapeType;
   double VersionNum;
   double xStep;
   double yStep;
@@ -257,14 +257,14 @@ public:
   defiSubnet *Subnet;
   int         msgLimit[DEF_MSGS];
   char        buffer[IN_BUF_SIZE];
-  char *      ring[RING_SIZE];
+  char       *ring[RING_SIZE];
   int         ringSizes[RING_SIZE];
   std::string stack[20]; /* the stack itself */
 
   YYSTYPE              yylval;
   const defrCallbacks *callbacks;
-  const defrSettings * settings;
-  defrSession *        session;
+  const defrSettings  *settings;
+  defrSession         *session;
   char                 lineBuffer[MSG_SIZE];
 
   FILE *File;
@@ -274,12 +274,12 @@ class defrContext {
 public:
   defrContext(int ownConf = 0);
 
-  defrSettings * settings;
+  defrSettings  *settings;
   defrCallbacks *callbacks;
-  defrSession *  session;
-  defrData *     data;
+  defrSession   *session;
+  defrData      *data;
   int            ownConfig;
-  const char *   init_call_func;
+  const char    *init_call_func;
 };
 
 int defrData::checkErrors() {

@@ -33,7 +33,9 @@ private:
 
 public:
   constexpr UInt() : words_{} {
-    for (int i = 0; i < n_; ++i) words_[i] = 0;
+    for (int i = 0; i < n_; ++i) {
+      words_[i] = 0;
+    }
   }
 
   template <word_t... Limbs>
@@ -59,9 +61,9 @@ public:
     int input_bits = 4 * initial.length();
     int last_start = initial.length();
     for (int word = 0; word < n_; word++) {
-      if (word * kWordSize >= input_bits)
+      if (word * kWordSize >= input_bits) {
         words_[word] = 0;
-      else {
+      } else {
         int word_start           = std::max(static_cast<int>(initial.length()) - 16 * (word + 1), 0);
         int word_len             = std::min(16, last_start - word_start);
         last_start               = word_start;
@@ -73,7 +75,9 @@ public:
 
   // NOTE: reads words right to left so literal appears to be concatted
   constexpr UInt(std::array<word_t, n_> raw_input_reversed) {
-    for (int i = 0; i < n_; i++) words_[i] = raw_input_reversed[n_ - i - 1];
+    for (int i = 0; i < n_; i++) {
+      words_[i] = raw_input_reversed[n_ - i - 1];
+    }
     mask_top_unused();
   }
 
@@ -81,10 +85,11 @@ public:
   constexpr explicit UInt(const UInt<other_w> &other) {
     static_assert(other_w <= w_, "Can't copy construct from wider UInt");
     for (int word = 0; word < n_; word++) {
-      if (word < UInt<other_w>::NW)
+      if (word < UInt<other_w>::NW) {
         words_[word] = other.words_[word];
-      else
+      } else {
         words_[word] = 0;
+      }
     }
   }
 
@@ -92,17 +97,19 @@ public:
   constexpr UInt<w_> operator=(const UInt<other_w> &other) {
     if constexpr (other_w < w_) {
       for (int word = 0; word < other_w; word++) {
-        if (word < UInt<other_w>::NW)
+        if (word < UInt<other_w>::NW) {
           words_[word] = other.words_[word];
-        else
+        } else {
           words_[word] = 0;
+        }
       }
     } else {
       for (int word = 0; word < n_; word++) {
-        if (word < UInt<other_w>::NW)
+        if (word < UInt<other_w>::NW) {
           words_[word] = other.words_[word];
-        else
+        } else {
           words_[word] = 0;
+        }
       }
     }
     return *this;
@@ -140,8 +147,9 @@ public:
     const int          offset = other_w % kWordSize;
     for (int i = 0; i < n_; i++) {
       to_return.words_[word_index(other_w) + i] |= static_cast<uint64_t>(words_[i]) << cap(offset);
-      if ((offset != 0) && (i + 1 < to_return.NW - word_index(other_w)))
+      if ((offset != 0) && (i + 1 < to_return.NW - word_index(other_w))) {
         to_return.words_[word_index(other_w) + i + 1] |= static_cast<uint64_t>(words_[i]) >> cap(kWordSize - offset);
+      }
     }
     return to_return;
   }
@@ -163,8 +171,9 @@ public:
     }
     if constexpr (kWordSize * max_n == max_bits) {
       // propagate to next word in needed
-      if (result.words_[max_n - 1] < words_[max_n - 1])
+      if (result.words_[max_n - 1] < words_[max_n - 1]) {
         result.words_[word_index(w_ + 1)] = 1;
+      }
     }
     return result;
   }
@@ -208,8 +217,9 @@ public:
           result.words_[i + j] = static_cast<uint64_t>(t);
           k                    = t >> std::numeric_limits<uint64_t>::digits;
         }
-        if ((j + n_) < result_n)
+        if ((j + n_) < result_n) {
           result.words_[j + n_] = k;
+        }
       }
 
       return result;
@@ -233,8 +243,9 @@ public:
         result.words_[i + j] = (upper_sum << 32) | lower(lower_sum);
         carry                = upper(upper_sum) + upper(prod_lu) + upper(prod_ul) + prod_uu;
       }
-      if ((i + n_) < result.NW)
+      if ((i + n_) < result.NW) {
         result.words_[i + n_] += carry;
+      }
     }
     return result;
   }
@@ -392,8 +403,9 @@ public:
     uint64_t bits_down = dshamt % kWordSize;
     for (uint64_t i = word_down; i < n_; i++) {
       result.words_[i - word_down] = words_[i] >> bits_down;
-      if ((bits_down != 0) && (i < n_ - 1))
+      if ((bits_down != 0) && (i < n_ - 1)) {
         result.words_[i - word_down] |= words_[i + 1] << cap(kWordSize - bits_down);
+      }
     }
     return result;
   }
@@ -406,8 +418,9 @@ public:
     uint64_t                      bits_up = dshamt % kWordSize;
     for (uint64_t i = 0; i < n_; i++) {
       result.words_[i + word_up] |= words_[i] << bits_up;
-      if ((bits_up != 0) && (dshamt + w_ > kWordSize) && (i + word_up + 1 < result.NW))
+      if ((bits_up != 0) && (dshamt + w_ > kWordSize) && (i + word_up + 1 < result.NW)) {
         result.words_[i + word_up + 1] = words_[i] >> cap(kWordSize - bits_up);
+      }
     }
     return result;
   }
@@ -421,8 +434,9 @@ public:
     uint64_t bits_up = dshamt % kWordSize;
     for (uint64_t i = 0; i + word_up < n_; i++) {
       result.words_[i + word_up] |= words_[i] << bits_up;
-      if ((bits_up != 0) && (w_ > kWordSize) && (i + word_up + 1 < n_))
+      if ((bits_up != 0) && (w_ > kWordSize) && (i + word_up + 1 < n_)) {
         result.words_[i + word_up + 1] = words_[i] >> cap(kWordSize - bits_up);
+      }
     }
     result.mask_top_unused();
     return result;
@@ -430,20 +444,24 @@ public:
 
   constexpr UInt<1> operator<=(const UInt<w_> &other) const {
     for (int i = n_ - 1; i >= 0; i--) {
-      if (words_[i] < other.words_[i])
+      if (words_[i] < other.words_[i]) {
         return UInt<1>(1);
-      if (words_[i] > other.words_[i])
+      }
+      if (words_[i] > other.words_[i]) {
         return UInt<1>(0);
+      }
     }
     return UInt<1>(1);
   }
 
   UInt<1> operator>=(const UInt<w_> &other) const {
     for (int i = n_ - 1; i >= 0; i--) {
-      if (words_[i] > other.words_[i])
+      if (words_[i] > other.words_[i]) {
         return UInt<1>(1);
-      if (words_[i] < other.words_[i])
+      }
+      if (words_[i] < other.words_[i]) {
         return UInt<1>(0);
+      }
     }
     return UInt<1>(1);
   }
@@ -457,18 +475,21 @@ public:
   constexpr UInt<1> operator==(const UInt<other_w> &other) const {
     constexpr auto min_words = cmin(n_, other_n);
     for (int i = 0; i < min_words; ++i) {
-      if (words_[i] != other.words_[i])
+      if (words_[i] != other.words_[i]) {
         return UInt<1>(0);
+      }
     }
     if constexpr (n_ < other_n) {
       for (int i = min_words; i < other_n; ++i) {
-        if (other.words_[i])
+        if (other.words_[i]) {
           return UInt<1>(0);
+        }
       }
     } else if constexpr (n_ > other_n) {
       for (int i = min_words; i < other_n; ++i) {
-        if (words_[i])
+        if (words_[i]) {
           return UInt<1>(0);
+        }
       }
     }
     return UInt<1>(1);
@@ -522,8 +543,9 @@ public:
       bool        non_zero_found = false;
       for (int i = 64; i > 0; i = i - 4) {
         auto x = v >> i;
-        if (!non_zero_found && x == 0)
+        if (!non_zero_found && x == 0) {
           continue;
+        }
         non_zero_found = true;
         result.append(nibble_to_str[x & 0xF]);
       }
@@ -613,10 +635,13 @@ public:
 
   constexpr size_t bit_length() const {
     size_t L = n_;
-    while (L > 0 && words_[L - 1] == 0) --L;
+    while (L > 0 && words_[L - 1] == 0) {
+      --L;
+    }
 
-    if (L == 0)
+    if (L == 0) {
       return 0;
+    }
 
     size_t bitlen = L * std::numeric_limits<word_t>::digits;
     auto   msb    = words_[L - 1];
@@ -633,11 +658,15 @@ protected:
   friend class uint_wrapper_t;
 
   void raw_copy_in(const uint64_t *src) {
-    for (int word = 0; word < n_; word++) words_[word] = *src++;
+    for (int word = 0; word < n_; word++) {
+      words_[word] = *src++;
+    }
   }
 
   void raw_copy_out(uint64_t *dst) const {
-    for (int word = 0; word < n_; word++) *dst++ = words_[word];
+    for (int word = 0; word < n_; word++) {
+      *dst++ = words_[word];
+    }
   }
 
 private:
@@ -718,8 +747,9 @@ private:
     constexpr int     bits_down = lo % kWordSize;
     for (int i = 0; i < result.NW; i++) {
       result.words_[i] = words_[i + word_down] >> bits_down;
-      if ((bits_down != 0) && (i + word_down + 1 < n_))
+      if ((bits_down != 0) && (i + word_down + 1 < n_)) {
         result.words_[i] |= words_[i + word_down + 1] << cap(kWordSize - bits_down);
+      }
     }
     return result;
   }
@@ -734,8 +764,9 @@ private:
     constexpr int     bits_down = lo % kWordSize;
     for (int i = 0; i < result.NW; i++) {
       result.words_[i] = words_[i + word_down] >> bits_down;
-      if ((bits_down != 0) && (i + word_down + 1 < n_))
+      if ((bits_down != 0) && (i + word_down + 1 < n_)) {
         result.words_[i] |= words_[i + word_down + 1] << cap(kWordSize - bits_down);
+      }
     }
     return result;
   }
@@ -800,14 +831,15 @@ constexpr auto operator"" _uint() {
 
   for (std::size_t i = start_pos; i < seq.size(); ++i) {
     uint64_t v = 0;
-    if (seq[i] >= 'A' && seq[i] <= 'Z')
+    if (seq[i] >= 'A' && seq[i] <= 'Z') {
       v = 10 + seq[i] - 'A';
-    else if (seq[i] >= 'a' && seq[i] <= 'z')
+    } else if (seq[i] >= 'a' && seq[i] <= 'z') {
       v = 10 + seq[i] - 'a';
-    else if (seq[i] >= '0' && seq[i] <= '9')
+    } else if (seq[i] >= '0' && seq[i] <= '9') {
       v = seq[i] - '0';
-    else
+    } else {
       continue;
+    }
     value = value * scale;
     value = value + UInt<max_bits>(v);
   }

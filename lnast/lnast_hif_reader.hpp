@@ -2,6 +2,7 @@
 #pragma once
 
 #include <string>
+
 #include "hif/hif_read.hpp"
 #include "lhtree.hpp"
 #include "lnast.hpp"
@@ -39,7 +40,7 @@ protected:
     // NOTE: Skip first header (HIF version & tool name/version)
     rd->next_stmt();
     auto stmt = rd->get_current_stmt();
-    for (const auto &te : stmt.attr) {
+    for (const auto& te : stmt.attr) {
       if (te.lhs == "module_name") {
         lnast->set_top_module_name(te.rhs);
       }
@@ -47,19 +48,19 @@ protected:
   }
 
   void process_hif_stmt() {
-    cur_stmt = rd->get_current_stmt();
-    uint64_t pos1 = 0;
-    uint64_t pos2 = 0;
+    cur_stmt          = rd->get_current_stmt();
+    uint64_t    pos1  = 0;
+    uint64_t    pos2  = 0;
     std::string fname = "";
 
-    for (const auto& te: cur_stmt.attr) {
-      if(te.lhs == "loc1") {
+    for (const auto& te : cur_stmt.attr) {
+      if (te.lhs == "loc1") {
         pos1 = te.get_rhs_int64();
       }
-      if(te.lhs == "loc2") {
+      if (te.lhs == "loc2") {
         pos2 = te.get_rhs_int64();
       }
-      if(te.lhs == "file") {
+      if (te.lhs == "file") {
         fname = te.get_rhs_string();
       }
     }

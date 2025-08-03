@@ -1,9 +1,8 @@
 //  This file is distributed under the BSD 3-Clause License. See LICENSE for details.
 #pragma once
 
-#include <format>
-
 #include <filesystem>
+#include <format>
 #include <iostream>
 
 class err_tracker {

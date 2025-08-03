@@ -1,8 +1,8 @@
 
 #pragma once
 
-#include <vector>
 #include <memory>
+#include <vector>
 
 // clang-format off
 #include "slang/ast/ASTVisitor.h"

@@ -2,9 +2,8 @@
 #pragma once
 
 #include <cstddef>
-#include <string>
-
 #include <format>
+#include <string>
 
 // #include "absl/hash/hash.h"
 

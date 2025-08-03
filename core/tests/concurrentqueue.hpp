@@ -134,7 +134,7 @@ template <>
 struct thread_id_converter<thread_id_t> {
   typedef thread_id_size<sizeof(thread_id_t)>::numeric_t thread_id_numeric_size_t;
 #ifndef __APPLE__
-  typedef std::size_t                                    thread_id_hash_t;
+  typedef std::size_t thread_id_hash_t;
 #else
   typedef thread_id_numeric_size_t thread_id_hash_t;
 #endif
@@ -253,7 +253,7 @@ inline thread_id_t thread_id() {
     && (!defined(__GNUC__) || __GNUC__ > 4 || (__GNUC__ == 4 && __GNUC_MINOR__ >= 8))      \
     && (!defined(__APPLE__) || !TARGET_OS_IPHONE) && !defined(__arm__) && !defined(_M_ARM) && !defined(__aarch64__)
 // Assume `thread_local` is fully supported in all other C++11 compilers/platforms
-//#define MOODYCAMEL_CPP11_THREAD_LOCAL_SUPPORTED    // always disabled for now since several users report having problems with it
+// #define MOODYCAMEL_CPP11_THREAD_LOCAL_SUPPORTED    // always disabled for now since several users report having problems with it
 // on
 #endif
 #endif
@@ -1716,7 +1716,7 @@ private:
         , isExplicit(isExplicit_)
         , parent(parent_) {}
 
-    virtual ~ProducerBase(){};
+    virtual ~ProducerBase() {};
 
     template <typename U>
     inline bool dequeue(U& element) {
@@ -2963,9 +2963,10 @@ private:
       auto   prev         = blockIndex.load(std::memory_order_relaxed);
       size_t prevCapacity = prev == nullptr ? 0 : prev->capacity;
       auto   entryCount   = prev == nullptr ? nextBlockIndexCapacity : prevCapacity;
-      auto   raw          = static_cast<char*>((Traits::malloc)(
-          sizeof(BlockIndexHeader) + std::alignment_of<BlockIndexEntry>::value - 1 + sizeof(BlockIndexEntry) * entryCount
-          + std::alignment_of<BlockIndexEntry*>::value - 1 + sizeof(BlockIndexEntry*) * nextBlockIndexCapacity));
+      auto   raw
+          = static_cast<char*>((Traits::malloc)(sizeof(BlockIndexHeader) + std::alignment_of<BlockIndexEntry>::value - 1
+                                                + sizeof(BlockIndexEntry) * entryCount + std::alignment_of<BlockIndexEntry*>::value
+                                                - 1 + sizeof(BlockIndexEntry*) * nextBlockIndexCapacity));
       if (raw == nullptr) {
         return false;
       }
@@ -3579,12 +3580,14 @@ private:
 
   template <typename TAlign>
   static inline void* aligned_malloc(size_t size) {
-    if (std::alignment_of<TAlign>::value <= std::alignment_of<details::max_align_t>::value)
+    if (std::alignment_of<TAlign>::value <= std::alignment_of<details::max_align_t>::value) {
       return (Traits::malloc)(size);
+    }
     size_t alignment = std::alignment_of<TAlign>::value;
     void*  raw       = (Traits::malloc)(size + alignment - 1 + sizeof(void*));
-    if (!raw)
+    if (!raw) {
       return nullptr;
+    }
     char* ptr                            = details::align_for<TAlign>(reinterpret_cast<char*>(raw) + sizeof(void*));
     *(reinterpret_cast<void**>(ptr) - 1) = raw;
     return ptr;
@@ -3592,8 +3595,9 @@ private:
 
   template <typename TAlign>
   static inline void aligned_free(void* ptr) {
-    if (std::alignment_of<TAlign>::value <= std::alignment_of<details::max_align_t>::value)
+    if (std::alignment_of<TAlign>::value <= std::alignment_of<details::max_align_t>::value) {
       return (Traits::free)(ptr);
+    }
     (Traits::free)(ptr ? *(reinterpret_cast<void**>(ptr) - 1) : nullptr);
   }
 
@@ -3601,10 +3605,13 @@ private:
   static inline U* create_array(size_t count) {
     assert(count > 0);
     U* p = static_cast<U*>(aligned_malloc<U>(sizeof(U) * count));
-    if (p == nullptr)
+    if (p == nullptr) {
       return nullptr;
+    }
 
-    for (size_t i = 0; i != count; ++i) new (p + i) U();
+    for (size_t i = 0; i != count; ++i) {
+      new (p + i) U();
+    }
     return p;
   }
 
@@ -3612,7 +3619,9 @@ private:
   static inline void destroy_array(U* p, size_t count) {
     if (p != nullptr) {
       assert(count > 0);
-      for (size_t i = count; i != 0;) (p + --i)->~U();
+      for (size_t i = count; i != 0;) {
+        (p + --i)->~U();
+      }
     }
     aligned_free<U>(p);
   }
@@ -3631,8 +3640,9 @@ private:
 
   template <typename U>
   static inline void destroy(U* p) {
-    if (p != nullptr)
+    if (p != nullptr) {
       p->~U();
+    }
     aligned_free<U>(p);
   }
 

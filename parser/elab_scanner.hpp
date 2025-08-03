@@ -5,13 +5,13 @@
 
 #include <cassert>
 #include <cstdint>
+#include <format>
 #include <string>
 #include <vector>
 
 #include "absl/container/flat_hash_map.h"
 #include "absl/container/flat_hash_set.h"
 #include "explicit_type.hpp"
-#include <format>
 #include "iassert.hpp"
 
 using Token_id = uint8_t;
@@ -112,11 +112,11 @@ public:
 
   constexpr Ref_token() : text(""), tok(Token_id_nop), pos1(0), pos2(0), line(0), fname("") {}
   Ref_token(Token_id _tok, uint64_t _pos1, uint64_t _pos2, uint32_t _line, std::string_view _text, std::string _fname) {
-    tok  = _tok;
-    pos1 = _pos1;
-    pos2 = _pos2;
-    line = _line;
-    text = _text;
+    tok   = _tok;
+    pos1  = _pos1;
+    pos2  = _pos2;
+    line  = _line;
+    text  = _text;
     fname = _fname;
   }
   Ref_token(const Tracker &t, const char *memblock) {
@@ -141,10 +141,10 @@ public:
     text = std::string_view(text.data(), text.size() + t2.size());
   }
 
-  Token_id tok;   // Token (identifier, if, while...)
-  uint64_t pos1;  // start position in original memblock for debugging
-  uint64_t pos2;  // end position in original memblock for debugging
-  uint32_t line;  // line of code
+  Token_id         tok;   // Token (identifier, if, while...)
+  uint64_t         pos1;  // start position in original memblock for debugging
+  uint64_t         pos2;  // end position in original memblock for debugging
+  uint32_t         line;  // line of code
   std::string_view fname;
   std::string_view get_text() const { return text; }
 };
@@ -155,26 +155,26 @@ protected:
 
 public:
   struct Tracker {
-    Token_id tok;      // Token (identifier, if, while...)
-    uint64_t pos1;     // start position in original memblock
-    uint64_t pos2;     // end position in original memblock (pos2 NOT included. pos1==pos2 -> empty)
-    uint32_t line;     // line of code
-    //std::string fname; // source file name
-    constexpr Tracker() : tok(Token_id_nop), pos1(0), pos2(0), line(0)/*, fname(0)*/ {}
+    Token_id tok;   // Token (identifier, if, while...)
+    uint64_t pos1;  // start position in original memblock
+    uint64_t pos2;  // end position in original memblock (pos2 NOT included. pos1==pos2 -> empty)
+    uint32_t line;  // line of code
+    // std::string fname; // source file name
+    constexpr Tracker() : tok(Token_id_nop), pos1(0), pos2(0), line(0) /*, fname(0)*/ {}
 
     void reset(Token_id _tok, uint64_t _pos1, uint32_t _line) {
-      tok   = _tok;
-      pos1  = _pos1;
-      pos2  = _pos1;
-      line  = _line;
-     // fname = "";
+      tok  = _tok;
+      pos1 = _pos1;
+      pos2 = _pos1;
+      line = _line;
+      // fname = "";
     }
     void clear(uint64_t _pos1, uint32_t _line) {
-      tok   = Token_id_nop;
-      pos1  = _pos1;
-      pos2  = _pos1;
-      line  = _line;
-     // fname = "";
+      tok  = Token_id_nop;
+      pos1 = _pos1;
+      pos2 = _pos1;
+      line = _line;
+      // fname = "";
     }
 
     void adjust_token_size(uint64_t end_pos) {
@@ -183,38 +183,38 @@ public:
     }
   };
 
-  State_token() : text(""),tok(Token_id_nop), pos1(0), pos2(0), line(0), fname("") {}
+  State_token() : text(""), tok(Token_id_nop), pos1(0), pos2(0), line(0), fname("") {}
   State_token(Token_id _tok, uint64_t _pos1, uint64_t _pos2, uint32_t _line, std::string_view _text) {
-    tok  = _tok;
-    pos1 = _pos1;
-    pos2 = _pos2;
-    line = _line;
-    text = _text;
-		fname = "";
+    tok   = _tok;
+    pos1  = _pos1;
+    pos2  = _pos2;
+    line  = _line;
+    text  = _text;
+    fname = "";
   }
-  State_token(uint64_t _pos1, uint64_t _pos2, std::string _fname) : tok(Token_id_nop){
-    pos1 = _pos1;
-    pos2 = _pos2;
-    line = 0;
-    text = "";
+  State_token(uint64_t _pos1, uint64_t _pos2, std::string _fname) : tok(Token_id_nop) {
+    pos1  = _pos1;
+    pos2  = _pos2;
+    line  = 0;
+    text  = "";
     fname = _fname;
   }
   State_token(Token_id _tok, uint64_t _pos1, uint64_t _pos2, uint32_t _line, std::string_view _text, std::string _fname) {
-    tok  = _tok;
-    pos1 = _pos1;
-    pos2 = _pos2;
-    line = _line;
-    text = _text;
-		fname = _fname;
+    tok   = _tok;
+    pos1  = _pos1;
+    pos2  = _pos2;
+    line  = _line;
+    text  = _text;
+    fname = _fname;
   }
-  //State_token(const Ref_token &r) : text(r.get_text()), tok(r.tok), pos1(r.pos1), pos2(r.pos2), line(r.line) {}
+  // State_token(const Ref_token &r) : text(r.get_text()), tok(r.tok), pos1(r.pos1), pos2(r.pos2), line(r.line) {}
   State_token(const Ref_token &r) : text(r.get_text()), tok(r.tok), pos1(r.pos1), pos2(r.pos2), line(r.line), fname(r.fname) {}
 
-  Token_id tok;      // Token (identifier, if, while...)
-  uint64_t pos1;     // start position in original memblock for debugging
-  uint64_t pos2;     // end position in original memblock for debugging
-  uint32_t line;     // line of code
-  std::string fname; // source file name
+  Token_id    tok;    // Token (identifier, if, while...)
+  uint64_t    pos1;   // start position in original memblock for debugging
+  uint64_t    pos2;   // end position in original memblock for debugging
+  uint32_t    line;   // line of code
+  std::string fname;  // source file name
 
   std::string_view get_text() const { return text; }
 };
@@ -282,7 +282,8 @@ protected:
     return std::string_view(memblock, memblock_size);
   }
   std::string_view get_filename() const {
-    I(memblock_fd != -1 || filename == "inline");;
+    I(memblock_fd != -1 || filename == "inline");
+    ;
     return filename;
   }
   bool is_parse_inline() const { return memblock_fd == -1; }
@@ -301,7 +302,7 @@ public:
   public:
     template <typename... Args>
     scan_error(const Elab_scanner &scanner, std::format_string<Args...> format, Args &&...args)
-    : std::runtime_error(std::format(format, std::forward<Args>(args)...)) {
+        : std::runtime_error(std::format(format, std::forward<Args>(args)...)) {
       scanner.scan_error_int(what());
     };
   };
@@ -314,7 +315,8 @@ public:
   class parser_error : public std::runtime_error {
   public:
     template <typename... Args>
-    parser_error(const Elab_scanner &scanner, std::format_string<Args...> format, Args &&...args) : std::runtime_error(std::format(format, args...)) {
+    parser_error(const Elab_scanner &scanner, std::format_string<Args...> format, Args &&...args)
+        : std::runtime_error(std::format(format, args...)) {
       scanner.parser_error_int(what());
     };
     parser_error(const Elab_scanner &scanner, std::string_view txt) : std::runtime_error(std::string(txt)) {
@@ -326,17 +328,13 @@ public:
   void parser_warn(std::format_string<Args...> format, Args &&...args) const {
     parser_warn_int(std::format(format, args...));
   }
-  void parser_warn(std::string_view txt) const {
-    parser_warn_int(txt);
-  }
+  void parser_warn(std::string_view txt) const { parser_warn_int(txt); }
 
   template <typename... Args>
   void parser_info(std::format_string<Args...> format, Args &&...args) const {
     parser_info_int(std::format(format, args...));
   }
-  void parser_info(std::string_view txt) const {
-    parser_warn_int(txt);
-  }
+  void parser_info(std::string_view txt) const { parser_warn_int(txt); }
 
   bool scan_next();
   bool scan_prev();
@@ -347,8 +345,9 @@ public:
   bool scan_is_end() const { return scanner_pos >= token_list.size(); }
 
   bool scan_is_token(Token_id tok) const {
-    if (scanner_pos < token_list.size())
+    if (scanner_pos < token_list.size()) {
       return token_list[scanner_pos].tok == tok;
+    }
     return false;
   }
 
@@ -366,32 +365,36 @@ public:
 
   std::string_view scan_prev_text() const {
     size_t p = scanner_pos - 1;
-    if (scanner_pos <= 0)
+    if (scanner_pos <= 0) {
       p = 0;
+    }
     return token_list[p].get_text();
   }
 
   std::string_view scan_next_text() const {
     size_t p = scanner_pos + 1;
-    if (p >= token_list.size())
+    if (p >= token_list.size()) {
       p = token_list.size() - 1;
+    }
     return token_list[p].get_text();
   }
 
   bool scan_next_is_token(Token_id tok) const {
     size_t p = scanner_pos + 1;
-    if (p >= token_list.size())
+    if (p >= token_list.size()) {
       return false;
+    }
     return token_list[p].tok == tok;
   }
 
   std::string_view scan_peep_text(int offset) const {
     I(offset != 0);
     size_t p = scanner_pos + offset;
-    if (p >= token_list.size())
+    if (p >= token_list.size()) {
       p = token_list.size() - 1;
-    else if (offset > static_cast<int>(scanner_pos))
+    } else if (offset > static_cast<int>(scanner_pos)) {
       p = 0;
+    }
     return token_list[p].get_text();
   }
 
@@ -406,24 +409,27 @@ public:
   size_t get_token_pos() const { return token_list[scan_token_entry()].pos1; }
 
   bool scan_is_prev_token(Token_id tok) const {
-    if (scanner_pos == 0)
+    if (scanner_pos == 0) {
       return false;
+    }
     I(scanner_pos < token_list.size());
     return token_list[scanner_pos - 1].tok == tok;
   }
   bool scan_is_next_token(int pos, Token_id tok) const {
-    if ((scanner_pos + pos) >= token_list.size())
+    if ((scanner_pos + pos) >= token_list.size()) {
       return false;
+    }
     return token_list[scanner_pos + pos].tok == tok;
   }
 
   bool scan_peep_is_token(Token_id tok, int offset) const {
     I(offset != 0);
     size_t p = scanner_pos + offset;
-    if (p >= token_list.size())
+    if (p >= token_list.size()) {
       p = token_list.size() - 1;
-    else if (offset > static_cast<int>(scanner_pos))
+    } else if (offset > static_cast<int>(scanner_pos)) {
       p = 0;
+    }
     return token_list[p].tok == tok;
     ;
   }
@@ -455,8 +461,9 @@ public:
 
   Ref_token scan_get_token(int offset = 0) const {
     size_t p = scanner_pos + offset;
-    if (p >= token_list.size())
+    if (p >= token_list.size()) {
       p = token_list.size() - 1;
+    }
 
     // comment out by Sheng
     // else if (offset > static_cast<int>(scanner_pos))

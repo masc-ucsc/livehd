@@ -2,7 +2,6 @@
 #pragma once
 
 #include <format>
-
 #include <fstream>
 #include <ostream>
 #include <stack>
@@ -54,19 +53,15 @@ protected:
 
   bool is_last_child() { return lnast->is_last_child(current_nid); }
 
-  void print(std::string_view text) {
-    os << text;
-  }
-  
+  void print(std::string_view text) { os << text; }
+
   template <typename... Args>
   void print(std::format_string<Args...> fmt, Args&&... args) {
     os << std::format(fmt, std::forward<Args>(args)...);
   }
 
-  void print_line(std::string_view text) {
-    os << std::string(depth * 2, ' ') << text;
-  }
-  
+  void print_line(std::string_view text) { os << std::string(depth * 2, ' ') << text; }
+
   template <typename... Args>
   void print_line(std::format_string<Args...> fmt, Args&&... args) {
     os << std::format("{}", std::string(depth * 2, ' '));

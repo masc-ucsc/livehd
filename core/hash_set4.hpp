@@ -69,7 +69,7 @@ static uint32_t CTZ(size_t n) {
 #if defined(__x86_64__) || defined(_WIN32) || (__BYTE_ORDER__ && __BYTE_ORDER__ == __ORDER_LITTLE_ENDIAN__)
 
 #elif __BIG_ENDIAN__ || (__BYTE_ORDER__ && __BYTE_ORDER__ == __ORDER_BIG_ENDIAN__)
-  n              = __builtin_bswap64(n);
+  n = __builtin_bswap64(n);
 #else
   static uint32_t endianness = 0x12345678;
   const auto      is_big     = *(const char*)&endianness == 0x12;

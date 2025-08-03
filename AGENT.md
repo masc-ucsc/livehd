@@ -11,7 +11,8 @@ LiveHD uses Bazel as its build system. The main workspace is defined in `MODULE.
 - **Build all targets**: `bazel build //...`
 - **Run tests**: `bazel test //...` or use `./scripts/run-test.sh`
 - **Build main executable**: `bazel build //main:lgshell`
-- **Run LiveHD shell**: `bazel run //main:lgshell`
+- **Run LiveHD shell**: `./bazel-bin/main/lgshell`
+- Formatted with `clang-format` for all the C++ files
 
 ### Test Categories
 
@@ -70,12 +71,6 @@ LiveHD is a hardware compiler infrastructure with several key components designe
 
 ## Development Workflow
 
-### Environment Variables
-
-- `LIVEHD_SRC`: Source directory (defaults to `${HOME}/livehd`)
-- `LIVEHD_BUILD_MODE`: Build mode (`fastbuild`, `opt`, `dbg`)
-- `LIVEHD_COMPILER`: Compiler choice (`g++`, `clang++`, etc.)
-
 ### Testing
 
 The test suite is comprehensive and includes both unit tests and integration tests. Tests are tagged:
@@ -107,7 +102,6 @@ Key traversal options for graph analysis:
 
 - **Bazel**: Build system
 - **Abseil**: C++ utilities
-- **Protobuf**: Serialization
 - **GoogleTest**: Testing framework
 - **Yosys**: Synthesis backend
 - **ABC**: Logic optimization
@@ -134,7 +128,6 @@ LiveHD aims to be:
 ## Notes
 
 - The codebase is actively developed with semantic versioning 0.x (API changes expected)
-- Uses BSD 3-Clause License
 - Supports multiple HDLs: Verilog, Pyrope, SystemVerilog
 - Designed for fast incremental compilation ("live" development)
 - Comprehensive CI with logic equivalence checking (LEC)

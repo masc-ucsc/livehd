@@ -72,7 +72,7 @@ public:
     Compact(const Hierarchy_index _hidx, Index_id _idx, bool _sink) : hidx(_hidx), idx(_idx), sink(_sink) {
       I(!Hierarchy::is_invalid(hidx));
     };
-    Compact() : idx(0), sink(0){};
+    Compact() : idx(0), sink(0) {};
     Compact &operator=(const Compact &obj) {
       I(this != &obj);
       hidx = obj.hidx;
@@ -117,8 +117,8 @@ public:
     // constexpr operator size_t() const { I(0); return idx|(sink<<31); }
 
     Compact_flat(const Compact_flat &obj) = default;
-    constexpr Compact_flat(const Lg_type_id _lgid, Index_id _idx, bool _sink) : lgid(_lgid), idx(_idx), sink(_sink){};
-    constexpr Compact_flat() : lgid(0), idx(0), sink(0){};
+    constexpr Compact_flat(const Lg_type_id _lgid, Index_id _idx, bool _sink) : lgid(_lgid), idx(_idx), sink(_sink) {};
+    constexpr Compact_flat() : lgid(0), idx(0), sink(0) {};
 
     Compact_flat &operator=(const Compact_flat &obj) {
       I(this != &obj);
@@ -166,7 +166,7 @@ public:
 
     Compact_driver(const Compact_driver &obj) = default;
     Compact_driver(const Hierarchy_index _hidx, Index_id _idx) : hidx(_hidx), idx(_idx) { I(!Hierarchy::is_invalid(hidx)); };
-    Compact_driver() : idx(0){};
+    Compact_driver() : idx(0) {};
     Compact_driver &operator=(const Compact_driver &obj) {
       I(this != &obj);
       hidx = obj.hidx;

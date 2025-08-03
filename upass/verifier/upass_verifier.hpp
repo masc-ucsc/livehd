@@ -2,6 +2,7 @@
 #pragma once
 
 #include <format>
+
 #include "lnast_ntype.hpp"
 #include "upass_core.hpp"
 

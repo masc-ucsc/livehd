@@ -57,10 +57,9 @@ public:
 
   bool constexpr is_nary_op() const {
     return (val == Lnast_ntype_bit_and) || (val == Lnast_ntype_bit_or) || (val == Lnast_ntype_bit_xor)
-           || (val == Lnast_ntype_log_and) || (val == Lnast_ntype_log_or) || (val == Lnast_ntype_plus)
-           || (val == Lnast_ntype_minus) || (val == Lnast_ntype_mult) || (val == Lnast_ntype_is) || (val == Lnast_ntype_eq)
-           || (val == Lnast_ntype_ne) || (val == Lnast_ntype_lt) || (val == Lnast_ntype_le) || (val == Lnast_ntype_gt)
-           || (val == Lnast_ntype_ge);
+           || (val == Lnast_ntype_log_and) || (val == Lnast_ntype_log_or) || (val == Lnast_ntype_plus) || (val == Lnast_ntype_minus)
+           || (val == Lnast_ntype_mult) || (val == Lnast_ntype_is) || (val == Lnast_ntype_eq) || (val == Lnast_ntype_ne)
+           || (val == Lnast_ntype_lt) || (val == Lnast_ntype_le) || (val == Lnast_ntype_gt) || (val == Lnast_ntype_ge);
   }
 
   // basic_op have 1 to 1 translation between LNAST and Lgraph

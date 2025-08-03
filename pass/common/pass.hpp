@@ -1,6 +1,7 @@
 //  This file is distributed under the BSD 3-Clause License. See LICENSE for details.
 #pragma once
 
+#include <format>
 #include <functional>
 #include <map>
 #include <string>
@@ -8,7 +9,6 @@
 #include "absl/strings/str_split.h"
 #include "eprp.hpp"
 #include "err_tracker.hpp"
-#include <format>
 #include "graph_library.hpp"
 #include "iassert.hpp"
 

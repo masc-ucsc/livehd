@@ -1,8 +1,9 @@
 //  This file is distributed under the BSD 3-Clause License. See LICENSE for details.
 #pragma once
 
-#include "absl/container/flat_hash_map.h"
 #include <format>
+
+#include "absl/container/flat_hash_map.h"
 #include "lgedgeiter.hpp"
 #include "lgraph.hpp"
 #include "lgraphbase.hpp"

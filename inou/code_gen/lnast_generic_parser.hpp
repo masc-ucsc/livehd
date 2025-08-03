@@ -15,7 +15,7 @@ class Prp_parser : public Code_gen_all_lang {
   absl::flat_hash_set<std::string> unsigned_vars;
 
 public:
-  Prp_parser(){};
+  Prp_parser() {};
   std::string stmt_sep() const final;
   std::string get_lang_type() const final;
   std::string debug_name_lang(Lnast_ntype node_type) const final;
@@ -57,7 +57,7 @@ class Cpp_parser : public Code_gen_all_lang {
   absl::flat_hash_set<std::string> unsigned_vars;
 
 public:
-  Cpp_parser(){};
+  Cpp_parser() {};
   std::string stmt_sep() const final;
   std::string get_lang_type() const final;
   std::string debug_name_lang(Lnast_ntype node_type) const final;
@@ -98,7 +98,7 @@ class Ver_parser : public Code_gen_all_lang {
   absl::flat_hash_set<std::string> unsigned_vars;
 
 public:
-  Ver_parser(){};
+  Ver_parser() {};
   std::string stmt_sep() const final;
   std::string get_lang_type() const final;
   std::string debug_name_lang(Lnast_ntype node_type) const final;

@@ -23,7 +23,6 @@ private:
   std::string top;
   const bool  gviz;
 
-
   Graphviz gv;
 
   void setup_maps();
@@ -39,7 +38,6 @@ public:
   void do_prp_local_cprop_bitwidth();
   void do_prp_global_bitwidth_inference();
   void prp_thread_ln2lg(const std::shared_ptr<Lnast> &lnast);
-
 
   std::string_view             get_top() const { return top; };
   const std::vector<Lgraph *> &get_lgraphs() const { return lgs; }

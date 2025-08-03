@@ -62,8 +62,9 @@ public:
   static Lgraph *get_graph(Graph_ID id, const std::string &lgdb) { return Lgraph_open(lgdb, id); }
 
   bool is_invariant_boundary(Net_ID net) const {
-    if (net.first == 0)
+    if (net.first == 0) {
       return false;
+    }
 
     return invariant_cones.find(net) != invariant_cones.end();
   }

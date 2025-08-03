@@ -90,7 +90,7 @@
     PRINT_DBG_AST("tokens_consumed: {}.\n", tokens_consumed - starting_tokens); \
     print_loc_list(loc_list);                                                   \
   } else {                                                                      \
-    std::cout << "No problem; loc_list had nothing in it.\n";                    \
+    std::cout << "No problem; loc_list had nothing in it.\n";                   \
   }                                                                             \
   go_back(tokens_consumed - starting_tokens);                                   \
   cur_line = starting_line;                                                     \

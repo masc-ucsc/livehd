@@ -1,7 +1,7 @@
 #pragma once
 
-#include "node_tree.hpp"
 #include "floorplan.hpp"
+#include "node_tree.hpp"
 
 // This is a wrapper class for MV5 components that wish to be included in a floorplan.
 // If we wanted to use multiple inheritance, we chould use this as a mix-in.
@@ -41,15 +41,15 @@ public:
   int decRefCount() { return refCount -= 1; }
 
   // Allow anyone to get the values of things.
-  virtual double      getX() const { return x; }
-  virtual double      getY() const { return y; }
-  virtual double      getWidth() const { return width; }
-  virtual double      getHeight() const { return height; }
-  virtual double      getArea() const { return area; }
+  virtual double           getX() const { return x; }
+  virtual double           getY() const { return y; }
+  virtual double           getWidth() const { return width; }
+  virtual double           getHeight() const { return height; }
+  virtual double           getArea() const { return area; }
   virtual std::string_view getName() const { return name; }
-  virtual Ntype_op    getType() const { return type; }
-  virtual int         getCount() const { return count; }
-  std::string         getUniqueName() const;
+  virtual Ntype_op         getType() const { return type; }
+  virtual int              getCount() const { return count; }
+  std::string              getUniqueName() const;
 
   virtual double totalArea() { return area * count; }
 

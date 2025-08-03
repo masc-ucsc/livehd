@@ -16,7 +16,7 @@ protected:
   bool             check_option_gviz(Eprp_var &var);
   std::string_view check_option_top(Eprp_var &var);
 
-  static void      pyrope_compilation(Eprp_var &var, Lcompiler &compiler);
+  static void pyrope_compilation(Eprp_var &var, Lcompiler &compiler);
 
 public:
   explicit Pass_compiler(const Eprp_var &var);

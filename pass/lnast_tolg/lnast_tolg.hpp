@@ -128,6 +128,5 @@ protected:
   bool is_hier_inp_bits_set(const Lnast_nid &lnidx_ta);
   bool is_tuple_struct_ta(const Lnast_nid &lnidx_ta);
 
-
   void dump() const;  // debug debugging
 };

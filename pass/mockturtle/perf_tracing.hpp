@@ -2,17 +2,14 @@
 
 #include <string>
 
-#define TRACE_EVENT( category, name, lambda ) lambda( perfetto::EventContext() )
+#define TRACE_EVENT(category, name, lambda) lambda(perfetto::EventContext())
 
-namespace perfetto
-{
-struct EventContext
-{
-  struct Event
-  {
-    void set_name( const std::string& name ) {}
+namespace perfetto {
+struct EventContext {
+  struct Event {
+    void set_name(const std::string& name) {}
   };
   Event* event() { return &evt; }
-  Event evt;
+  Event  evt;
 };
-} // namespace perfetto
+}  // namespace perfetto
