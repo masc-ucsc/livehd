@@ -8,7 +8,6 @@
 #include "bitwidth.hpp"
 #include "bitwidth_range.hpp"
 #include "cprop.hpp"
-#include "firmap.hpp"
 #include "inou_graphviz.hpp"
 #include "lgedgeiter.hpp"
 #include "lgraph.hpp"
@@ -24,10 +23,6 @@ private:
   std::string top;
   const bool  gviz;
 
-  // firrtl only tables
-  absl::node_hash_map<Lgraph *, FBMap>   fbmaps;         // Lg_type_id -> fbmap
-  absl::node_hash_map<Lgraph *, PinMap>  pinmaps;        // Lg_type_id -> pinmap
-  absl::node_hash_map<Lgraph *, XorrMap> spinmaps_xorr;  // Lg_type_id -> spinmaps
 
   Graphviz gv;
 
@@ -45,12 +40,6 @@ public:
   void do_prp_global_bitwidth_inference();
   void prp_thread_ln2lg(const std::shared_ptr<Lnast> &lnast);
 
-  void do_fir_lnast2lgraph(std::vector<std::shared_ptr<Lnast>> &);
-  void do_fir_cprop(bool tup_pass_only = false);
-  void do_fir_firbits();
-  void do_fir_firmap_bitwidth();
-  void fir_thread_cprop(Lgraph *lg);
-  void fir_thread_ln2lg(const std::shared_ptr<Lnast> &lnast);
 
   std::string_view             get_top() const { return top; };
   const std::vector<Lgraph *> &get_lgraphs() const { return lgs; }

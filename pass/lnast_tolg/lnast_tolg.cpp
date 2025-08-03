@@ -1466,34 +1466,6 @@ void Lnast_tolg::process_ast_attr_get_op(Lgraph *lg, const Lnast_nid &lnidx_aget
   }
 }
 
-void Lnast_tolg::process_firrtl_op_connection(Lgraph *lg, const Lnast_nid &lnidx_fc) {
-  Node fc_node;
-  int  i = 0;
-  for (const auto &child : lnast->children(lnidx_fc)) {
-    if (i == 0) {  // lhs
-      ++i;
-      continue;
-    }
-    if (i == 1) {  // func_name
-      auto fir_func_name = lnast->get_vname(child);
-      fc_node            = setup_node_opr_and_lhs(lg, lnidx_fc, fir_func_name);
-      ++i;
-      continue;
-    }
-
-    // TODO: If the connection changes to Ntype cell, we can do:
-    // out = __div(4,3)  should work too
-    auto ref_dpin = setup_ref_node_dpin(lg, child);
-    I(!ref_dpin.is_invalid());
-    switch (i) {
-      case 2: ref_dpin.connect_sink(fc_node.setup_sink_pin("e1")); break;
-      case 3: ref_dpin.connect_sink(fc_node.setup_sink_pin("e2")); break;
-      case 4: ref_dpin.connect_sink(fc_node.setup_sink_pin("e3")); break;
-      default: I(false, "firrtl_primitive_op should have 3 input edges at most!");
-    }
-    i++;
-  }
-}
 
 void Lnast_tolg::process_ast_func_call_op(Lgraph *lg, const Lnast_nid &lnidx_fc) {
   auto c0_fc         = lnast->get_first_child(lnidx_fc);
@@ -1501,16 +1473,11 @@ void Lnast_tolg::process_ast_func_call_op(Lgraph *lg, const Lnast_nid &lnidx_fc)
   auto cn_fc         = lnast->get_last_child(lnidx_fc);
   auto cn_fc_sname   = lnast->get_sname(cn_fc);
 
-  if (func_name_ori.substr(0, 6) == "__fir_") {  // TODO: Can we do this generic, not FIRRTL specific?
-    process_firrtl_op_connection(lg, lnidx_fc);
-    return;
-  }
 
   std::string func_name;
-  auto        cond1 = module_name.substr(0, 9) == "__firrtl_";
   auto        cond2 = func_name_ori.substr(0, 2) == "__";
   auto        cond3 = !inlined_func_names.contains(func_name_ori);
-  if (cond1 || cond2 || cond3) {
+  if (cond2 || cond3) {
     func_name = func_name_ori;
   } else {
     func_name = absl::StrCat(module_name, ".", func_name_ori);
@@ -1709,10 +1676,7 @@ void Lnast_tolg::setup_lgraph_ios_and_final_var_name(Lgraph *lg) {
     auto ntype = node.get_type_op();
 
     if (ntype == Ntype_op::Sub) {
-      // TODO: can we rid of this to make it more generic?/out
-      if (node.get_type_sub_node().get_name().substr(0, 9) == "__firrtl_") {
-        continue;
-      }
+      // Skip non-FIRRTL function nodes (since FIRRTL is removed, skip all Sub nodes that don't match expected pattern)
       if (node.get_type_sub_node().get_name().substr(0, 6) != "__fir_") {
         continue;
       }

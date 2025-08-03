@@ -11,7 +11,6 @@ cc_library(
     includes = ["."],
     visibility = ["//visibility:public"],
     deps = [
-        "//inou/firrtl:inou_firrtl_cpp",
         "//pass/common:pass",
     ],
     alwayslink = True,

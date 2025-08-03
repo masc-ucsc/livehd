@@ -11,7 +11,7 @@ def process_request(t):
     time.sleep(t)
 
 if __name__ == '__main__':
-    test_list = ["core", "inou/liveparse", "inou/code_gen", "inou/firrtl", "lemu", "main", "pass/compiler", "pass/mockturtle", "pass/sample", "pass/lnast_fromlg", "task"]
+    test_list = ["core", "inou/liveparse", "inou/code_gen", "lemu", "main", "pass/compiler", "pass/mockturtle", "pass/sample", "pass/lnast_fromlg", "task"]
 
     # remove existing lbench.trace files
     for test_name in test_list:

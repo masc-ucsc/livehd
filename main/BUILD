@@ -16,6 +16,7 @@ cc_binary(
         #        ":use_tcmalloc": "@com_google_tcmalloc//tcmalloc",
         "//conditions:default": "@bazel_tools//tools/cpp:malloc",
     }),
+    linkopts = ["-lz"],
     visibility = ["//visibility:public"],
     deps = [
         ":main",
@@ -46,7 +47,6 @@ cc_library(
         "//inou/code_gen:inou_code_gen",
         "//inou/attr:inou_attr",
         "//inou/locator:traverse_lg",
-        "//inou/firrtl:inou_firrtl_cpp",
         "//inou/graphviz:inou_graphviz",
         "//inou/json:inou_json",
         "//inou/lefdef:inou_lefdef",

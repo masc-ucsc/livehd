@@ -16,9 +16,9 @@ export CC=gcc
 
 # Run only tests that create lbench.trace
 # When a new trace is added, it should be added to TEST_LIST.
-#TEST_LIST='core inou/liveparse inou/firrtl lemu main pass/compiler pass/mockturtle pass/sample pass/lnast_fromlg task'
+#TEST_LIST='core inou/liveparse lemu main pass/compiler pass/mockturtle pass/sample pass/lnast_fromlg task'
 # Here we exclude core and main tests because the tests take long time
-TEST_LIST='inou/liveparse inou/firrtl lemu pass/compiler pass/mockturtle pass/sample pass/lnast_fromlg task'
+TEST_LIST='inou/liveparse lemu pass/compiler pass/mockturtle pass/sample pass/lnast_fromlg task'
 for TEST in $TEST_LIST
 do
   echo $TEST

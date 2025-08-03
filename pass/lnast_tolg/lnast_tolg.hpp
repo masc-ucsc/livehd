@@ -128,8 +128,6 @@ protected:
   bool is_hier_inp_bits_set(const Lnast_nid &lnidx_ta);
   bool is_tuple_struct_ta(const Lnast_nid &lnidx_ta);
 
-  // firrtl related
-  void process_firrtl_op_connection(Lgraph *lg, const Lnast_nid &lnidx_fc);
 
   void dump() const;  // debug debugging
 };

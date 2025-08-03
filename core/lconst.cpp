@@ -1356,34 +1356,6 @@ size_t Lconst::popcount() const {
   return popcount;
 }
 
-std::string Lconst::to_firrtl() const {
-  // Note->hunter: FIRRTL-Proto requires the string output here is a decimal
-  // value (no 0x or 0d allowed. Only #).  Also means it can't have 'x' or 'z'.
-
-  Number v;
-  if (explicit_str) {
-    if (is_string()) {
-      return to_string();
-    }
-
-    v = to_known_rand().get_num();
-  } else {
-    v = get_num();
-  }
-  std::stringstream ss;
-
-  if (v < 0) {
-    ss << -v;
-  } else {
-    ss << v;
-  }
-
-  if (is_negative()) {
-    return absl::StrCat("-", ss.str());
-  }
-
-  return ss.str();
-}
 
 int64_t Lconst::to_i() const {
   I(is_i());

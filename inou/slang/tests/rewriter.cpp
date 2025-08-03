@@ -8,6 +8,7 @@
 //------------------------------------------------------------------------------
 
 #include <cstdio>
+#include <cstdlib>
 #if defined(_WIN32)
 #    include <fcntl.h>
 #    include <io.h>

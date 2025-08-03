@@ -858,7 +858,7 @@ void Pass_lnast_fromlg::attach_flop_node(Lnast& lnast, Lnast_nid& parent_node, c
     auto asg_pol = lnast.add_child(parent_node, Lnast_node::create_assign());
     lnast.add_child(asg_pol, Lnast_node::create_ref(temp_var_name));
     if (pola_pin.get_node().get_type_op() == Ntype_op::Const) {
-      if (pola_pin.get_node().get_type_const().to_firrtl() == "1") {
+      if (pola_pin.get_node().get_type_const().to_i() == 1) {
         lnast.add_child(asg_pol, Lnast_node::create_const("true"));
       } else {
         lnast.add_child(asg_pol, Lnast_node::create_const("false"));

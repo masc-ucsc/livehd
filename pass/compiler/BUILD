@@ -15,7 +15,6 @@ cc_library(
         "//pass/bitwidth:pass_bitwidth",
         "//pass/common:pass",
         "//pass/cprop:pass_cprop",
-        "//pass/firmap:pass_firmap",
         "//pass/lnast_tolg:pass_lnast_tolg",
     ],
     alwayslink = True,
@@ -63,12 +62,10 @@ cc_library(
     "tuple_empty_attr",
     "if2",
     "scalar_reg_out_pre_declare",
-    "firrtl_tail2",
     "hier_tuple_nested_if3",
     "hier_tuple_nested_if5",
     "hier_tuple_nested_if6",
     "hier_tuple_nested_if7",
-    "firrtl_tail",
     "nested_if",
     "counter_nested_if",
     # "tuple_reg", incorrect lgraph creation with a weird dp_assign 0 in value (no way to constrain)
@@ -85,8 +82,6 @@ cc_library(
     "hier_tuple_nested_if2",
     "struct_flop",
     "hier_tuple_nested_if4",
-    "firrtl_gcd_3bits",
-    "firrtl_tail3",
     "connect_through2",
     "direct_io_assign",
     "bw_overflow",
@@ -96,133 +91,11 @@ cc_library(
     "top",
 ]]
 
-# High Level FIRRTL
-[sh_test(
-    name = "firrtl_compile-%s" % t,
-    srcs = ["tests/firrtl_compile.sh"],
-    args = ["$(location //inou/firrtl:tests/proto/%s.hi.pb)" % t],
-    data = [
-        "//inou/firrtl:tests/proto/%s.hi.pb" % t,
-        "//inou/firrtl:tests/verilog_gld/%s.gld.v" % t,
-        "//inou/firrtl:post_io_renaming.py",
-        "//main:lgshell",
-    ],
-    tags = [
-        "firrtl_compile",
-        "firrtl_compile-hi",
-    ],
-    deps = [
-        "//inou/yosys:scripts",
-    ],
-) for t in [
-    "Test1",
-    "VecSearch",
-    "VecShiftRegister",
-    "BundleConnect",
-    "SingleEvenFilter",
-    "Xor6Thread2",
-    "XorSelfThread1",
-    "Mux4",
-    "Life",
-    "Cell_alone",
-    "LFSR16",
-    "LogShifter",
-    "Test2",
-    "Accumulator",
-    "Coverage",
-    "TrivialAdd",
-    "VendingMachineSwitch",
-    "VendingMachine",
-    "Trivial",
-    "Tail",
-    "TrivialArith",
-    "Shifts",
-    "Darken",
-    "HiLoMultiplier",
-    "AddNot",
-    "GCD_3bits",
-    "Test3",
-    "Register",
-    "RegisterSimple",
-    "Parity",
-    "ResetShiftRegister",
-    "SimpleALU",
-    "ByteSelector",
-    "MaxN",
-    "Max2",
-    "Flop",
-    "EnableShiftRegister",
-    "Decrementer",
-    "Counter",
-    "RegXor",
-    "PlusAnd",
-]]
-
-# CHIRRTL extension
-[sh_test(
-    name = "firrtl_compile-%s" % t,
-    srcs = ["tests/firrtl_compile.sh"],
-    args = ["$(location //inou/firrtl:tests/proto/%s.ch.pb)" % t],
-    data = [
-        "//inou/firrtl:tests/proto/%s.ch.pb" % t,
-        "//inou/firrtl:tests/verilog_gld/%s.gld.v" % t,
-        "//inou/firrtl:post_io_renaming.py",
-        "//main:lgshell",
-    ],
-    tags = [
-        "firrtl_compile",
-        "firrtl_compile-ch",
-    ],
-    deps = [
-        "//inou/yosys:scripts",
-    ],
-) for t in [
-    "Mul",
-    "IntXbar",
-    "SimpleClockGroupSource",
-    "FixedClockBroadcast",
-    "ClockGroupAggregator",
-    "IntSyncSyncCrossingSink",
-    "Adder4",
-    "AMOALU",
-    "Top",
-    "Arbiter_10",
-    "FlipSimple2",
-    "NotAnd",
-    "BreakpointUnit",
-    "DebugCustomXbar",
-    "RenameMapTableSimpleF5",
-    "MaxPeriodFibonacciLFSR",
-    "BranchMaskGenerationLogic",
-    "BasicDispatcher",
-    "FMADecoder",
-    "UOPCodeFPUDecoder",
-    "UOPCodeFDivDecoder",
-    "CompareRecFN",
-    "RegisterReadDecode",
-    "RenameBusyTable",
-    "RoundAnyRawFNToRecFN",
-    "INToRecFN",
-    "ForwardingAgeLogic",
-    "PMPChecker_1",
-    "HellaCacheArbiter",
-    "NullLocalBranchPredictorBank",
-    "RegisterFile",
-    "StageReg",
-    "HazardUnitBP",
-    "Adder",
-    "AlwaysNotTakenPredictor",
-    "Control",
-    "ALUControl",
-    "ImmediateGenerator",
-    "ForwardingUnit",
-]]
 
 sh_test(
     name = "regression_compile",
     srcs = ["tests/regression_compile.sh"],
     data = [
-        "//inou/firrtl:firrtl_tests",
         "//inou/pyrope:pyrope_tests",
         "//main:lgshell",
     ],
@@ -232,76 +105,6 @@ sh_test(
     ],
 )
 
-# note: patterns with tag of "firrtl_compile_compiles" are either compiles or long LEC time
-[sh_test(
-    name = "firrtl_compile_compiles-%s" % t,
-    srcs = ["tests/firrtl_compile_compiles.sh"],
-    args = ["$(location //inou/firrtl:tests/proto/%s.ch.pb)" % t],
-    data = [
-        "//inou/firrtl:tests/proto/%s.ch.pb" % t,
-        "//inou/firrtl:post_io_renaming.py",
-        "//main:lgshell",
-    ],
-    tags = [
-        "firrtl_compile",
-    ],
-    deps = [
-        "//inou/yosys:scripts",
-    ],
-) for t in [
-    "FetchBuffer",  # LEC-? (long)
-    "BranchDecode",  # LEC-x (1st priority)
-    "BoomRAS",  # LEC-x (1st priority, no bits set on some mux!?)
-    "RVCExpander_2",  # LEC-o
-    "BoomProbeUnit",  # LEC-? (long)
-    "BoomIOMSHR",  # LEC-? (long)
-    "FMADecoder_1",  # LEC-o
-    "Mul54",  # LEC-?
-    "PipelinedMultiplier",  # LEC-o
-    "RecFNToIN",  # LEC-o
-    "PredRenameStage",  # LEC-o
-    "RenameMapTable",  # LEC-x
-    "RenameFreeList",  # LEC-x
-    "IssueUnitCollapsing",  # LEC-?
-    "NBDTLB",  # LEC-x (all leave pass!?)
-    "NullPrefetcher",  # LEC-x (FIXME: previous passing, talk to Jose on is_fir_invalid constant string)
-    "BoomDuplicatedDataArray",
-    "FPUFMAPipe_1",
-    "MulAddRecFNPipe_1",
-    "MulAddRecFNToRaw_postMul_1",
-    "DivSqrtRecF64",
-    "DivSqrtRecF64_mulAddZ31",
-    "FPU",
-    "FPUUnit",
-    "FDivSqrtUnit",
-    "MulDiv",
-    "IssueSlot_1",
-    "CSRFile",
-    "RegisterFileSynthesizable",
-    "ALUUnit",
-    "FPToInt",
-    "DecodeUnit",
-    "DivUnit",
-    "MulAddRecFNToRaw_preMul",
-    "DivSqrtRecF64ToRaw_mulAddZ31",
-    "MemAddrCalcUnit",
-    "PipelinedMulUnit",
-    "RecFNToRecFN",
-    "RegisterRead",
-    "ALUExeUnit",  # ?LEC
-    "IntToFP",  # !LEC
-    "IntToFPUnit",  #  LEC
-    "FPToFP",  #  LEC
-    "Smem",
-    "SmemStruct",
-    "MaskedSmem",
-    "MaskedSmemStruct",
-    "NextPC",
-    "ALU",
-    "DCombinMemPort",
-    "ICombinMemPort",
-    "DualPortedCombinMemory",  # LEC-o: memory can't and don't need LEC
-]]
 
 # FIXME:
 # issue#1: memory

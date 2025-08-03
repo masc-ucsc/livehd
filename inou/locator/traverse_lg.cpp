@@ -271,23 +271,6 @@ void Traverse_lg::do_travers(Lgraph *orig_lg, Lgraph *synth_lg, bool is_orig_lg)
     std::cout << "7. printing before matching starts (after 1st resolution) -- synth";
     print_everything();
 #endif
-    /* everything in sets of synth_MoS must have been resolved to some orig lg reference.
-       If not then need to know and debug.
-       Hence this assertion:
-    for (const auto & [k,v_set]: inp_map_of_sets_synth) {
-      for (const auto & v : v_set) {
-        auto lg_name = Node_pin("lgdb", v).get_top_lgraph()->get_name();
-        std::print("\n\n{}=={}\n\n",lg_name,orig_lg_name);
-        I(lg_name.find("__firrtl_")!=std::string::npos,"\n\n inp-synth-set has some unresolved entry???\n\n ");
-      }
-    }
-    for (const auto & [k,v_set]: out_map_of_sets_synth) {
-      for (const auto & v : v_set) {
-        auto lg_name = Node_pin("lgdb", v).get_top_lgraph()->get_name();
-        I(lg_name.find("__firrtl_")!=std::string::npos,"\n\n out-synth-set has some unresolved entry???\n\n ");
-      }
-    }
-    */
 
     /* full IO matches (datatype INsensitive) to be dealt first:*/
     bool change_done=false;
