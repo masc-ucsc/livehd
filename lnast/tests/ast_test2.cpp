@@ -3,6 +3,7 @@
 #include <cstdio>
 #include <format>
 #include <iostream>
+#include <print>
 
 #include "ast.hpp"
 #include "gtest/gtest.h"

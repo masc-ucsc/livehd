@@ -4,6 +4,7 @@
 #include <format>
 #include <iostream>
 #include <memory>
+#include <print>
 
 #include "lnast.hpp"
 #include "lnast_manager.hpp"

@@ -3,6 +3,7 @@
 
 #include <format>
 #include <iostream>
+#include <print>
 #include <stack>
 
 #include "absl/container/node_hash_map.h"

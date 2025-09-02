@@ -10,6 +10,8 @@
 #include <sys/stat.h>
 #include <sys/types.h>
 
+#include <print>
+
 #include "err_tracker.hpp"
 #include "lrand.hpp"
 

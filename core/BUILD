@@ -18,7 +18,7 @@ cc_library(
         ],
     ),
     hdrs = glob(["*.hpp"]),
-    copts = COPTS,
+    copts = ["-std=c++23"] + COPTS,
     defines = select({
         ":use_profiling": [
             "LIVEHD_PROFILING=1",

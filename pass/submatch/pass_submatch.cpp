@@ -258,17 +258,18 @@ void pass_submatch::find_subs(Lgraph *g) {
       uint64_t n = static_cast<uint64_t>(node.get_type_op());
       h          = lh::waterhash(&n, 4, h & 0xFFFF);
       if (depth == 0) {
-        node2depth_hash[node.get_compact()] = {h};
-      } else {
-        node2depth_hash[node.get_compact()].emplace_back(h);
+        node2depth_hash[node.get_compact()].clear();
       }
+      node2depth_hash[node.get_compact()].emplace_back(h);
+
       if (depth_hash2node.size() <= depth) {
         depth_hash2node.emplace_back(absl::flat_hash_map<uint64_t, std::vector<Node::Compact>>());
       }
       if (depth_hash2node[depth].count(h)) {
         depth_hash2node[depth][h].emplace_back(node.get_compact());
       } else {
-        depth_hash2node[depth][h] = {node.get_compact()};
+        depth_hash2node[depth][h].clear();
+        depth_hash2node[depth][h].emplace_back(node.get_compact());
       }
     }
   }

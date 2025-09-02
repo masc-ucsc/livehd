@@ -7,6 +7,7 @@
 #include <algorithm>
 #include <format>
 #include <iostream>
+#include <print>
 
 #include "err_tracker.hpp"
 inline void Prp::eat_comments() {

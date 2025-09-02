@@ -1,6 +1,7 @@
 
 #include "lconst.hpp"
 
+#include <print>
 #include <cassert>
 #include <format>
 #include <functional>

@@ -2,6 +2,8 @@
 
 #include "ast.hpp"
 
+#include <print>
+
 Ast_parser::Ast_parser(std::string_view _buffer, Rule_id top_rule) : buffer(_buffer) {
   set_root(Ast_parser_node(top_rule, 0));
   add_track_parent(lh::Tree_index::root());

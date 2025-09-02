@@ -2,6 +2,16 @@
 build --output_filter='^//(core|pass|inou)'
 #build --output_filter="^//"
 build --cxxopt="-std=c++23" --cxxopt="-fexceptions" --force_pic --build_tag_filters="-fixme"
+# Force C++23 to override toolchain defaults completely
+build --action_env=BAZEL_CXXOPTS="-std=c++23"
+
+# Custom debug configuration with C++23 (use --config=debug instead of -c dbg)
+build:debug --copt="-g"
+build:debug --copt="-std=c++23"
+build:debug --cxxopt="-g"
+build:debug --cxxopt="-std=c++23"
+build:debug --strip=never
+
 # test --cache_test_results=no
 
 # Use Clang

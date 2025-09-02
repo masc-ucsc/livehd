@@ -6,6 +6,9 @@
 #include <sys/mman.h>
 #include <unistd.h>
 
+#include <string.h>
+
+#include <print>
 #include <cerrno>
 #include <format>
 #include <iostream>
@@ -33,7 +36,7 @@ File_output::~File_output() {
 
   void *base = ::mmap(0, map_size, PROT_READ | PROT_WRITE, MAP_SHARED, fd, 0);  // no superpages
   if (base == MAP_FAILED) {
-    std::print("mmap errno:{} for filename{}\n", strerror(errno), filename);
+    std::println("mmap errno:{} for filename{}\n", strerrorname_np(errno), filename);
     I(false);
   }
 

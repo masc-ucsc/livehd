@@ -4,6 +4,7 @@
 
 #include <format>
 #include <iostream>
+#include <print>
 
 #include "iassert.hpp"
 #include "likely.hpp"

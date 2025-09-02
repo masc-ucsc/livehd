@@ -1,6 +1,7 @@
 // vcd_sample.cpp
 #include "vcd_sample.hpp"
 
+#include <print>
 #include <format>
 #include <iostream>
 

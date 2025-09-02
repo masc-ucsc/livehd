@@ -2,6 +2,8 @@
 
 #include "sub_node.hpp"
 
+#include <print>
+
 void Sub_node::copy_from(std::string_view new_name, Lg_type_id new_lgid, const Sub_node &sub) {
   name                   = new_name;
   lgid                   = new_lgid;

@@ -5,13 +5,15 @@
 #include <fcntl.h>
 #include <unistd.h>
 
+#include <print>
+
 #include "iassert.hpp"
 
 void err_tracker::logger(std::string_view text) {
   if (logger_fd < 0) {
     logger_fd = open("logger_err.log", O_WRONLY | O_APPEND | O_CREAT, 0644);
     if (logger_fd < 0) {
-      std::print("ERROR: could not open logger_err.log file for logging [{}]\n", text);
+      std::println("ERROR: could not open logger_err.log file for logging [{}]", text);
       exit(-3);
     }
   }

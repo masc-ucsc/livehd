@@ -3,7 +3,6 @@ so that -Werror can be used without worrying about warnings in external packages
 """
 
 COPTS = [
-    "-std=c++23",
     "-Wall",
     "-Wextra",
     "-Werror",

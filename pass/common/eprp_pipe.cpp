@@ -2,6 +2,8 @@
 
 #include "eprp_pipe.hpp"
 
+#include <print>
+
 #include "eprp.hpp"
 #include "perf_tracing.hpp"
 

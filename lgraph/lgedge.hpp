@@ -5,6 +5,7 @@
 #include <cstring>
 #include <format>
 #include <iostream>
+#include <print>
 
 #include "cell.hpp"
 #include "lgraph_base_core.hpp"
