@@ -19,7 +19,10 @@ jobs:
         uses: actions/cache@v4
         with:
           path: "~/.cache/bazel"
-          key: bazel-gcc
+          key: bazel-gcc-${{ runner.os }}-${{ hashFiles('.bazelrc', '.bazelversion', 'WORKSPACE*', 'MODULE.bazel') }}
+          restore-keys: |
+            bazel-gcc-${{ runner.os }}-
+            bazel-gcc-
 
       #      - run: sudo apt install -y build-essential
       - run: bazel test -c dbg -s //...
@@ -39,7 +42,10 @@ jobs:
         uses: actions/cache@v4
         with:
           path: "~/.cache/bazel"
-          key: bazel-cgcc
+          key: bazel-coverage-${{ runner.os }}-${{ hashFiles('.bazelrc', '.bazelversion', 'WORKSPACE*', 'MODULE.bazel') }}
+          restore-keys: |
+            bazel-coverage-${{ runner.os }}-
+            bazel-coverage-
 
       - name: Print the list of targets
         run: bazel query --output label_kind //...
