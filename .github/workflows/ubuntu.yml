@@ -7,7 +7,7 @@ on:
 jobs:
   test-opt:
     name: Build everything
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-22.04
     steps:
       - name: Checkout repo
         uses: actions/checkout@v5
@@ -27,7 +27,7 @@ jobs:
 
   coverage:
     name: Gather coverage metrics
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-22.04
 
     steps:
       - name: Checkout repo
