@@ -1,13 +1,13 @@
 
 #include "lconst.hpp"
 
-#include <print>
 #include <cassert>
 #include <format>
 #include <functional>
 #include <iomanip>
 #include <iostream>
 #include <iterator>
+#include <print>
 #include <vector>
 
 #include "absl/container/flat_hash_map.h"
