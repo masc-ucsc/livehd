@@ -1,0 +1,7 @@
+# third_party/mockturtle.BUILD
+cc_library(
+    name = "mockturtle",
+    hdrs = glob(["include/**/*.hpp"]),
+    includes = ["include"],
+    visibility = ["//visibility:public"],
+)

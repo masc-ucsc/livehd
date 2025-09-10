@@ -1,0 +1,133 @@
+name: Linux CI
+
+on:
+  push:
+    branches:
+    - master
+  pull_request:
+    branches:
+    - master
+
+jobs:
+  build-gcc9:
+    runs-on: ubuntu-latest
+    name: GNU GCC 9
+    
+    steps:
+    - uses: actions/checkout@v1
+      with:
+        submodules: true
+    - name: Build mockturtle
+      run: |
+        mkdir build
+        cd build
+        cmake -DCMAKE_CXX_COMPILER=g++-9 -DMOCKTURTLE_TEST=ON ..
+        make run_tests
+    - name: Run tests
+      run: |
+        cd build
+        ./test/run_tests "~[quality]"
+  build-gcc10:
+    runs-on: ubuntu-latest
+    name: GNU GCC 10
+    
+    steps:
+    - uses: actions/checkout@v1
+      with:
+        submodules: true
+    - name: Build mockturtle
+      run: |
+        mkdir build
+        cd build
+        cmake -DCMAKE_CXX_COMPILER=g++-10 -DMOCKTURTLE_TEST=ON ..
+        make run_tests
+    - name: Run tests
+      run: |
+        cd build
+        ./test/run_tests "~[quality]"
+  build-gcc10-cpp20:
+    runs-on: ubuntu-latest
+    name: GNU GCC 10 (c++20)
+
+    steps:
+    - uses: actions/checkout@v1
+      with:
+        submodules: true
+    - name: Build mockturtle
+      run: |
+        mkdir build
+        cd build
+        cmake -DMOCKTURTLE_CXX_STANDARD=20 -DCMAKE_CXX_COMPILER=g++-10 -DMOCKTURTLE_TEST=ON ..
+        make run_tests
+    - name: Run tests
+      run: |
+        cd build
+        ./test/run_tests "~[quality]"
+  build-gcc12:
+    runs-on: ubuntu-latest
+    name: GNU GCC 12
+    
+    steps:
+    - uses: actions/checkout@v1
+      with:
+        submodules: true
+    - name: Build mockturtle
+      run: |
+        mkdir build
+        cd build
+        cmake -DCMAKE_CXX_COMPILER=g++-12 -DMOCKTURTLE_TEST=ON ..
+        make run_tests
+    - name: Run tests
+      run: |
+        cd build
+        ./test/run_tests "~[quality]"
+  build-clang11:
+    runs-on: ubuntu-20.04
+    name: Clang 11
+    
+    steps:
+    - uses: actions/checkout@v1
+      with:
+        submodules: true
+    - name: Build mockturtle
+      run: |
+        mkdir build
+        cd build
+        cmake -DCMAKE_CXX_COMPILER=clang++-11 -DMOCKTURTLE_TEST=ON ..
+        make run_tests
+    - name: Run tests
+      run: |
+        cd build
+        ./test/run_tests "~[quality]"
+  build-clang12:
+    runs-on: ubuntu-latest
+    name: Clang 12
+    
+    steps:
+    - uses: actions/checkout@v1
+      with:
+        submodules: true
+    - name: Build mockturtle
+      run: |
+        mkdir build
+        cd build
+        cmake -DCMAKE_CXX_COMPILER=clang++-12 -DMOCKTURTLE_TEST=ON ..
+        make run_tests
+    - name: Run tests
+      run: |
+        cd build
+        ./test/run_tests "~[quality]"
+  compile-gcc9:
+    runs-on: ubuntu-latest
+    name: Compile everything (GCC 9)
+    
+    steps:
+    - uses: actions/checkout@v1
+      with:
+        submodules: true
+    - name: Build mockturtle
+      run: |
+        mkdir build
+        cd build
+        cmake -DCMAKE_CXX_COMPILER=g++-9 -DMOCKTURTLE_EXAMPLES=ON -DMOCKTURTLE_EXPERIMENTS=ON -DMOCKTURTLE_TEST=ON ..
+        make

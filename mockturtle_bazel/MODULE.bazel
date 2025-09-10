@@ -1,0 +1,9 @@
+module(
+    name = "mockturtle_bazel",
+    version = "0.0.1",
+)
+
+bazel_dep(name = "rules_cc", version = "0.0.8")
+
+root_dependencies = use_extension("@rules_cc//cc:extensions.bzl", "root_dependencies")
+use_repo(root_dependencies)

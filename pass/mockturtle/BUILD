@@ -39,3 +39,21 @@
 #         "//inou/yosys:scripts",
 #     ],
 # )
+
+##August 18 _2025
+load("//tools:copt_default.bzl", "COPTS")
+
+cc_library(
+    name = "pass_mockturtle",
+    srcs = ["pass_mockturtle.cpp"],
+    hdrs = ["pass_mockturtle.hpp"],
+    copts = COPTS + ["-std=c++20"],
+    includes = ["."],
+    visibility = ["//visibility:public"],
+    deps = [
+        "//pass/common:pass",
+        "@mockturtle",
+    ],
+)
+
+

@@ -1,0 +1,2 @@
+/usr/bin/ar qc liblibabcsat.a CMakeFiles/libabcsat.dir/AbcGlucose.cpp.o CMakeFiles/libabcsat.dir/Glucose.cpp.o CMakeFiles/libabcsat.dir/SimpSolver.cpp.o CMakeFiles/libabcsat.dir/satSolver.cpp.o CMakeFiles/libabcsat.dir/satStore.cpp.o
+/usr/bin/ranlib liblibabcsat.a

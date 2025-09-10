@@ -1,0 +1,2 @@
+/usr/bin/ar qc liblibabcesop.a CMakeFiles/libabcesop.dir/exor.cpp.o CMakeFiles/libabcesop.dir/exorBits.cpp.o CMakeFiles/libabcesop.dir/exorCubes.cpp.o CMakeFiles/libabcesop.dir/exorLink.cpp.o CMakeFiles/libabcesop.dir/exorList.cpp.o CMakeFiles/libabcesop.dir/exorUtil.cpp.o
+/usr/bin/ranlib liblibabcesop.a

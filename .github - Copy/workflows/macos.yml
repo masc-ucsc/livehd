@@ -1,0 +1,101 @@
+name: MacOS CI
+
+on:
+  push:
+    branches:
+    - master
+  pull_request:
+    branches:
+    - master
+
+jobs:
+  build-gcc10:
+    name: GNU GCC 10
+    runs-on: macOS-11
+
+    steps:
+    - uses: actions/checkout@v1
+      with:
+        submodules: true
+    - name: Build mockturtle
+      run: |
+        mkdir build
+        cd build
+        cmake -DCMAKE_CXX_COMPILER=$(which g++-10) -DMOCKTURTLE_TEST=ON ..
+        make run_tests
+    - name: Run tests
+      run: |
+        cd build
+        ./test/run_tests "~[quality]"
+  build-gcc11:
+    name: GNU GCC 11
+    runs-on: macOS-latest
+
+    steps:
+    - uses: actions/checkout@v1
+      with:
+        submodules: true
+    - name: Build mockturtle
+      run: |
+        mkdir build
+        cd build
+        cmake -DCMAKE_CXX_COMPILER=$(which g++-11) -DMOCKTURTLE_TEST=ON ..
+        make run_tests
+    - name: Run tests
+      run: |
+        cd build
+        ./test/run_tests "~[quality]"
+  build-gcc12:
+    name: GNU GCC 12
+    runs-on: macOS-latest
+
+    steps:
+    - uses: actions/checkout@v1
+      with:
+        submodules: true
+    - name: Build mockturtle
+      run: |
+        mkdir build
+        cd build
+        cmake -DCMAKE_CXX_COMPILER=$(which g++-12) -DMOCKTURTLE_TEST=ON ..
+        make run_tests
+    - name: Run tests
+      run: |
+        cd build
+        ./test/run_tests "~[quality]"
+  build-clang14:
+    name: Clang 14
+    runs-on: macOS-latest
+
+    steps:
+    - uses: actions/checkout@v1
+      with:
+        submodules: true
+    - name: Build mockturtle
+      run: |
+        mkdir build
+        cd build
+        cmake -DCMAKE_CXX_COMPILER=/usr/bin/clang++ -DMOCKTURTLE_TEST=ON ..
+        make run_tests
+    - name: Run tests
+      run: |
+        cd build
+        ./test/run_tests "~[quality]"
+  build-clang15:
+    name: Clang 15
+    runs-on: macOS-latest
+
+    steps:
+    - uses: actions/checkout@v1
+      with:
+        submodules: true
+    - name: Build mockturtle
+      run: |
+        mkdir build
+        cd build
+        cmake -DCMAKE_CXX_COMPILER=$(brew --prefix llvm@15)/bin/clang++ -DMOCKTURTLE_TEST=ON ..
+        make run_tests
+    - name: Run tests
+      run: |
+        cd build
+        ./test/run_tests "~[quality]"

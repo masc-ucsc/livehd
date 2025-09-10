@@ -1,0 +1,34 @@
+Performing C++ SOURCE FILE Test HAS_WNO_gnu-anonymous-struct failed with the following output:
+Change Dir: /home/roshan/LiveHD/mockturtle/build_cpp20/CMakeFiles/CMakeTmp
+
+Run Build Command(s):/usr/bin/gmake -f Makefile cmTC_9b7cc/fast && /usr/bin/gmake  -f CMakeFiles/cmTC_9b7cc.dir/build.make CMakeFiles/cmTC_9b7cc.dir/build
+gmake[1]: Entering directory '/home/roshan/LiveHD/mockturtle/build_cpp20/CMakeFiles/CMakeTmp'
+Building CXX object CMakeFiles/cmTC_9b7cc.dir/src.cxx.o
+/usr/bin/c++   -DHAS_WNO_gnu-anonymous-struct -Wno-gnu-anonymous-struct -std=gnu++20 -o CMakeFiles/cmTC_9b7cc.dir/src.cxx.o -c /home/roshan/LiveHD/mockturtle/build_cpp20/CMakeFiles/CMakeTmp/src.cxx
+<command-line>: warning: ISO C++11 requires whitespace after the macro name
+cc1plus: note: unrecognized command-line option '-Wno-gnu-anonymous-struct' may have been intended to silence earlier diagnostics
+Linking CXX executable cmTC_9b7cc
+/usr/bin/cmake -E cmake_link_script CMakeFiles/cmTC_9b7cc.dir/link.txt --verbose=1
+/usr/bin/c++ CMakeFiles/cmTC_9b7cc.dir/src.cxx.o -o cmTC_9b7cc 
+gmake[1]: Leaving directory '/home/roshan/LiveHD/mockturtle/build_cpp20/CMakeFiles/CMakeTmp'
+
+
+Source file was:
+int main() { return 0; }
+Performing C++ SOURCE FILE Test HAS_WNO_nested-anon-types failed with the following output:
+Change Dir: /home/roshan/LiveHD/mockturtle/build_cpp20/CMakeFiles/CMakeTmp
+
+Run Build Command(s):/usr/bin/gmake -f Makefile cmTC_b6c29/fast && /usr/bin/gmake  -f CMakeFiles/cmTC_b6c29.dir/build.make CMakeFiles/cmTC_b6c29.dir/build
+gmake[1]: Entering directory '/home/roshan/LiveHD/mockturtle/build_cpp20/CMakeFiles/CMakeTmp'
+Building CXX object CMakeFiles/cmTC_b6c29.dir/src.cxx.o
+/usr/bin/c++   -DHAS_WNO_nested-anon-types -Wno-nested-anon-types -std=gnu++20 -o CMakeFiles/cmTC_b6c29.dir/src.cxx.o -c /home/roshan/LiveHD/mockturtle/build_cpp20/CMakeFiles/CMakeTmp/src.cxx
+<command-line>: warning: ISO C++11 requires whitespace after the macro name
+cc1plus: note: unrecognized command-line option '-Wno-nested-anon-types' may have been intended to silence earlier diagnostics
+Linking CXX executable cmTC_b6c29
+/usr/bin/cmake -E cmake_link_script CMakeFiles/cmTC_b6c29.dir/link.txt --verbose=1
+/usr/bin/c++ CMakeFiles/cmTC_b6c29.dir/src.cxx.o -o cmTC_b6c29 
+gmake[1]: Leaving directory '/home/roshan/LiveHD/mockturtle/build_cpp20/CMakeFiles/CMakeTmp'
+
+
+Source file was:
+int main() { return 0; }
