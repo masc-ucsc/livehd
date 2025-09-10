@@ -1,8 +1,9 @@
 //  This file is distributed under the BSD 3-Clause License. See LICENSE for details.
 
+#include "prp.hpp"
+
 #include <cstdio>
 
-#include "prp.hpp"
 #include "perf_tracing.hpp"
 
 int main(int argc, char **argv) {

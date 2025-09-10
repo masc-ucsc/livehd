@@ -235,11 +235,13 @@ void defrData::defiError(int check, int msgNum, const char *mess) {
   /* check is 1 if the caller function has checked totalMsgLimit, etc. */
 
   if (!check) {
-    if ((settings->totalDefMsgLimit > 0) && (defMsgPrinted >= settings->totalDefMsgLimit))
+    if ((settings->totalDefMsgLimit > 0) && (defMsgPrinted >= settings->totalDefMsgLimit)) {
       return;
+    }
     if (settings->MsgLimit[msgNum - 5000] > 0) {
-      if (msgLimit[msgNum - 5000] >= settings->MsgLimit[msgNum - 5000])
+      if (msgLimit[msgNum - 5000] >= settings->MsgLimit[msgNum - 5000]) {
         return; /*over the limit*/
+      }
       msgLimit[msgNum - 5000] = msgLimit[msgNum - 5000] + 1;
     }
     defMsgPrinted++;
@@ -388,26 +390,30 @@ double defrData::convert_defname2num(char *versionName) {
   }
   major = atof(majorNm);
   minor = atof(minorNm);
-  if (subMinorNm)
+  if (subMinorNm) {
     subMinor = atof(subMinorNm);
+  }
 
   version = major;
 
-  if (minor > 0)
+  if (minor > 0) {
     version = major + minor / 10;
+  }
 
-  if (subMinor > 0)
+  if (subMinor > 0) {
     version = version + subMinor / 1000;
+  }
 
   free(versionNm);
   return version;
 }
 
 int defrData::numIsInt(char *volt) {
-  if (strchr(volt, '.'))  // a floating point
+  if (strchr(volt, '.')) {  // a floating point
     return 0;
-  else
+  } else {
     return 1;
+  }
 }
 
 int defrData::defValidNum(int values) {

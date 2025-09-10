@@ -65,8 +65,9 @@ void defiIOTiming::Init() {
   hasCapacitance_  = 0;
   hasDriveCell_    = 0;
   hasFrom_         = 0;
-  if (pin_)
+  if (pin_) {
     free(pin_);
+  }
   pin_       = 0;
   pinLength_ = 0;
 
@@ -87,28 +88,33 @@ void defiIOTiming::Init() {
 defiIOTiming::~defiIOTiming() { Destroy(); }
 
 void defiIOTiming::Destroy() {
-  if (inst_)
+  if (inst_) {
     free(inst_);
+  }
   inst_       = 0;
   instLength_ = 0;
 
-  if (pin_)
+  if (pin_) {
     free(pin_);
+  }
   pin_       = 0;
   pinLength_ = 0;
 
-  if (from_)
+  if (from_) {
     free(from_);
+  }
   from_       = 0;
   fromLength_ = 0;
 
-  if (to_)
+  if (to_) {
     free(to_);
+  }
   to_       = 0;
   toLength_ = 0;
 
-  if (driveCell_)
+  if (driveCell_) {
     free(driveCell_);
+  }
   driveCell_       = 0;
   driveCellLength_ = 0;
 
@@ -144,8 +150,9 @@ void defiIOTiming::setName(const char* inst, const char* pin) {
 
   len = strlen(inst) + 1;
   if (len > instLength_) {
-    if (inst_)
+    if (inst_) {
       free(inst_);
+    }
     instLength_ = len;
     inst_       = (char*)malloc(len);
   }
@@ -153,8 +160,9 @@ void defiIOTiming::setName(const char* inst, const char* pin) {
 
   len = strlen(pin) + 1;
   if (len > pinLength_) {
-    if (pin_)
+    if (pin_) {
       free(pin_);
+    }
     pinLength_ = len;
     pin_       = (char*)malloc(len);
   }
@@ -164,32 +172,41 @@ void defiIOTiming::setName(const char* inst, const char* pin) {
 void defiIOTiming::print(FILE* f) const {
   fprintf(f, "IOTiming '%s' '%s'\n", inst_, pin_);
 
-  if (hasSlewRise())
+  if (hasSlewRise()) {
     fprintf(f, "  Slew rise  %5.2f %5.2f\n", slewRiseMin(), slewRiseMax());
+  }
 
-  if (hasSlewFall())
+  if (hasSlewFall()) {
     fprintf(f, "  Slew fall  %5.2f %5.2f\n", slewFallMin(), slewFallMax());
+  }
 
-  if (hasVariableRise())
+  if (hasVariableRise()) {
     fprintf(f, "  variable rise  %5.2f %5.2f\n", variableRiseMin(), variableRiseMax());
+  }
 
-  if (hasVariableFall())
+  if (hasVariableFall()) {
     fprintf(f, "  variable fall  %5.2f %5.2f\n", variableFallMin(), variableFallMax());
+  }
 
-  if (hasCapacitance())
+  if (hasCapacitance()) {
     fprintf(f, "  capacitance %5.2f\n", capacitance());
+  }
 
-  if (hasDriveCell())
+  if (hasDriveCell()) {
     fprintf(f, "  drive cell '%s'\n", driveCell());
+  }
 
-  if (hasFrom())
+  if (hasFrom()) {
     fprintf(f, "  from pin '%s'\n", from());
+  }
 
-  if (hasTo())
+  if (hasTo()) {
     fprintf(f, "  to pin '%s'\n", to());
+  }
 
-  if (hasParallel())
+  if (hasParallel()) {
     fprintf(f, "  parallel %5.2f\n", parallel());
+  }
 }
 
 void defiIOTiming::setVariable(const char* riseFall, double min, double max) {
@@ -241,8 +258,9 @@ void defiIOTiming::setDriveCell(const char* name) {
   int len = strlen(name) + 1;
 
   if (driveCellLength_ < len) {
-    if (driveCell_)
+    if (driveCell_) {
       free(driveCell_);
+    }
     driveCell_       = (char*)malloc(len);
     driveCellLength_ = len;
   }
@@ -255,8 +273,9 @@ void defiIOTiming::setFrom(const char* name) {
   int len = strlen(name) + 1;
 
   if (fromLength_ < len) {
-    if (from_)
+    if (from_) {
       free(from_);
+    }
     from_       = (char*)malloc(len);
     fromLength_ = len;
   }
@@ -269,8 +288,9 @@ void defiIOTiming::setTo(const char* name) {
   int len = strlen(name) + 1;
 
   if (toLength_ < len) {
-    if (to_)
+    if (to_) {
       free(to_);
+    }
     to_       = (char*)malloc(len);
     toLength_ = len;
   }

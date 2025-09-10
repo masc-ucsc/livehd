@@ -6,22 +6,21 @@
 #include <fcntl.h>
 #include <sys/stat.h>
 
+#include <cassert>
 #include <climits>
 #include <cstdlib>
+#include <format>
+#include <fstream>
+#include <iostream>
 #include <memory>
+#include <regex>
+#include <set>
 
 #ifdef __APPLE__
 #include <copyfile.h>
 #else
 #include <sys/sendfile.h>
 #endif
-
-#include <cassert>
-#include <fstream>
-#include <regex>
-#include <set>
-
-#include "fmt/format.h"
 #include "lgraph.hpp"
 #include "rapidjson/document.h"
 #include "rapidjson/error/en.h"
@@ -436,7 +435,7 @@ void Graph_library::reload_int() {
       attributes[id].version = version;
 
       sub_nodes[id]->from_json(lg_entry);
-      // fmt::print("DEBUG21, sub_nodes size:{}, sub_nodes[{}]->get_lgid():{}, name:{}\n\n", sub_nodes.size(), id,
+      // std::print("DEBUG21, sub_nodes size:{}, sub_nodes[{}]->get_lgid():{}, name:{}\n\n", sub_nodes.size(), id,
       // sub_nodes[id]->get_lgid(), sub_nodes[id]->get_name());
 
       // NOTE: must use attributes to keep the string in memory
@@ -630,7 +629,7 @@ void Graph_library::expunge_int(std::string_view name) {
     std::string chop_name(de->d_name, match.size());
     if (chop_name == match) {
       std::string file = absl::StrCat(path, "/", de->d_name);
-      fmt::print("deleting... {}\n", file);
+      std::print("deleting... {}\n", file);
       unlink(file.c_str());
     }
   }

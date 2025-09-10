@@ -2,6 +2,8 @@
 
 #include "pass_sample.hpp"
 
+#include <format>
+#include <iostream>
 #include <string>
 
 #include "cell.hpp"
@@ -78,7 +80,7 @@ void Pass_sample::do_wirecount(Lgraph *g, int indent) {
     space.append("  ");
   }
 
-  fmt::print("{}module {} : inputs {} bits {} : outputs {} bits {} : nodes {} : submodules {} : wire {} bits {}\n",
+  std::print("{}module {} : inputs {} bits {} : outputs {} bits {} : nodes {} : submodules {} : wire {} bits {}\n",
              space,
              g->get_name(),
              i_num,
@@ -110,7 +112,7 @@ void Pass_sample::do_wirecount(Lgraph *g, int indent) {
           n_out++;
         }
       }
-      fmt::print("{}  module {} BBOX : inputs {} outputs {}\n", space, sub_lg->get_name(), n_inp, n_out);
+      std::print("{}  module {} BBOX : inputs {} outputs {}\n", space, sub_lg->get_name(), n_inp, n_out);
 
       return;  // No blackboxes
     }
@@ -133,10 +135,10 @@ void Pass_sample::compute_histogram(Lgraph *g) {
   }
 
   for (auto &e : histogram) {
-    fmt::print("{} {}\n", (int)e.first, e.second);
+    std::print("{} {}\n", (int)e.first, e.second);
   }
 
-  fmt::print("Pass: cells {}\n", cells);
+  std::print("Pass: cells {}\n", cells);
 }
 
 void Pass_sample::compute_max_depth(Lgraph *g) {
@@ -153,11 +155,11 @@ void Pass_sample::compute_max_depth(Lgraph *g) {
         local_max = d + 1;
       }
     }
-    fmt::print("{} {}\n", node.debug_name(), local_max);
+    std::print("{} {}\n", node.debug_name(), local_max);
     depth[node.get_compact()] = local_max;
   }
 
-  fmt::print("Pass: max_depth {}\n", max_depth);
+  std::print("Pass: max_depth {}\n", max_depth);
 }
 
 void Pass_sample::annotate_placement(Lgraph *g) {
@@ -175,11 +177,11 @@ void Pass_sample::annotate_placement(Lgraph *g) {
 
   for (auto node : g->fast()) {
     const auto &place = node.get_place();
-    fmt::print("1.cell {} placed at x:{}\n", node.get_or_create_name(), place.get_x());
+    std::print("1.cell {} placed at x:{}\n", node.get_or_create_name(), place.get_x());
   }
   for (auto node : g->forward()) {
     auto place = node.get_place();
-    fmt::print("2.cell {} placed at x:{}\n", node.get_or_create_name(), place.get_x());
+    std::print("2.cell {} placed at x:{}\n", node.get_or_create_name(), place.get_x());
   }
 }
 
@@ -188,7 +190,7 @@ void Pass_sample::create_sample_graph(Lgraph *g) {
 
   auto *lg = g->ref_library()->create_lgraph("pass_sample", "-");
 
-  fmt::print("Creating new sample Lgraph...\n");
+  std::cout << "Creating new sample Lgraph...\n";
   auto graph_inp_a = lg->add_graph_input("g_inp_a", 0, 4);  // First io in module, 4 bits
   auto graph_inp_b = lg->add_graph_input("g_inp_b", 1, 1);  // Module position 1, 1 bit
   auto graph_out   = lg->add_graph_output("g_out", 2, 3);   // Module possition 2, 3 bits
@@ -207,5 +209,5 @@ void Pass_sample::create_sample_graph(Lgraph *g) {
   lg->add_edge(graph_inp_b, b_sink);
   lg->add_edge(shr_out_drv, graph_out);
 
-  fmt::print("Finished.\n");
+  std::cout << "Finished.\n";
 }

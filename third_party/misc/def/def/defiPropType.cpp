@@ -58,10 +58,12 @@ void defiPropType::Clear() {
 
 void defiPropType::Destroy() {
   Clear();
-  if (propNames_)
+  if (propNames_) {
     free(propNames_);
-  if (propTypes_)
+  }
+  if (propTypes_) {
     free(propTypes_);
+  }
 }
 
 defiPropType::~defiPropType() { Destroy(); }
@@ -69,8 +71,9 @@ defiPropType::~defiPropType() { Destroy(); }
 void defiPropType::setPropType(const char* name, const char type) {
   int len;
 
-  if (numProperties_ == propertiesAllocated_)
+  if (numProperties_ == propertiesAllocated_) {
     bumpProps();
+  }
   len                        = strlen(name) + 1;
   propNames_[numProperties_] = (char*)malloc(len);
   strcpy(propNames_[numProperties_], name);
@@ -108,12 +111,14 @@ const char defiPropType::propType(char* name) const {
   int i;
 
   // Name is NULL, error
-  if (!name)
+  if (!name) {
     return ('N');
+  }
 
   for (i = 0; i < numProperties_; i++) {
-    if (strcmp(name, propNames_[i]) == 0)
+    if (strcmp(name, propNames_[i]) == 0) {
       return (propTypes_[i]);  // found the prop name
+    }
   }
   return ('N');  // Can't found the name
 }

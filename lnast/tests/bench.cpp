@@ -6,11 +6,10 @@
 #include <string>
 
 #include "benchmark/benchmark.h"
-
-#include "lnast/lnast_writer.hpp"
-#include "lnast/lnast_parser.hpp"
-#include "lnast/lnast_hif_writer.hpp"
 #include "lnast/lnast_hif_reader.hpp"
+#include "lnast/lnast_hif_writer.hpp"
+#include "lnast/lnast_parser.hpp"
+#include "lnast/lnast_writer.hpp"
 
 std::shared_ptr<Lnast> read_ln(std::string filename) {
   std::ifstream fs;

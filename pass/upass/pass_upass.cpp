@@ -17,28 +17,27 @@ void Pass_upass::setup() {
 }
 
 Pass_upass::Pass_upass(const Eprp_var &var) : Pass("pass.upass", var) {
-
   auto verifier_txt = var.get("verifier");
-  bool do_verifier = verifier_txt != "false" && verifier_txt != "0";
+  bool do_verifier  = verifier_txt != "false" && verifier_txt != "0";
 
   auto assert_txt = var.get("assert");
-  bool do_assert = assert_txt != "false" && assert_txt != "0";
+  bool do_assert  = assert_txt != "false" && assert_txt != "0";
 
-  auto constp_txt = var.get("constprop");
+  auto constp_txt   = var.get("constprop");
   bool do_constprop = constp_txt != "false" && constp_txt != "0";
 
-  if (do_verifier) { // 1st and last pass
+  if (do_verifier) {  // 1st and last pass
     upass_order.emplace_back("verifier");
   }
 
   if (do_constprop) {
     upass_order.emplace_back("constprop");
   }
-  if (do_assert) { // last before codegen
+  if (do_assert) {  // last before codegen
     upass_order.emplace_back("assert");
   }
 
-  if (do_verifier) { // 1st and last pass
+  if (do_verifier) {  // 1st and last pass
     upass_order.emplace_back("verifier");
   }
 
@@ -48,7 +47,6 @@ Pass_upass::Pass_upass(const Eprp_var &var) : Pass("pass.upass", var) {
 }
 
 void Pass_upass::work(Eprp_var &var) {
-
   Pass_upass up(var);
 
   for (const auto &ln : var.lnasts) {

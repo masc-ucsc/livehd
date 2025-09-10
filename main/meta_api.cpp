@@ -2,6 +2,8 @@
 
 #include "meta_api.hpp"
 
+#include <format>
+#include <iostream>
 #include <regex>
 #include <string>
 
@@ -116,7 +118,7 @@ void Meta_api::match(Eprp_var &var) {
       auto *lg = library->open_lgraph(name);
       if (lg) {
         if (lg->is_empty()) {
-          fmt::print("lgraph.match lgraph {} is empty\n", name);
+          std::print("lgraph.match lgraph {} is empty\n", name);
         }
         lgs.push_back(lg);
       }
@@ -138,67 +140,67 @@ void Meta_api::stats(Eprp_var &var) {
 }
 
 void Meta_api::dump(Eprp_var &var) {
-  fmt::print("dump labels:\n");
+  std::print("dump labels:\n");
   for (const auto &l : var.dict) {
-    fmt::print("  {}:{}\n", l.first, l.second);
+    std::print("  {}:{}\n", l.first, l.second);
   }
-  fmt::print("dump lgraphs:\n");
+  std::print("dump lgraphs:\n");
   for (const auto &l : var.lgs) {
-    fmt::print("  {}/{}\n", l->get_path(), l->get_name());
+    std::print("  {}/{}\n", l->get_path(), l->get_name());
   }
-  fmt::print("dump lnast:\n");
+  std::print("dump lnast:\n");
   for (const auto &l : var.lnasts) {
-    fmt::print("  {}\n", l->get_top_module_name());
+    std::print("  {}\n", l->get_top_module_name());
   }
 }
 
 void Meta_api::liberty(Eprp_var &var) {
   auto files = var.get("files");
   auto path  = var.get("path");
-  fmt::print("lgraph.liberty path:{} ", path);
+  std::print("lgraph.liberty path:{} ", path);
   for (const auto &f : absl::StrSplit(files, ',')) {
     I(!files.empty());
-    fmt::print("file:{} ", f);
+    std::print("file:{} ", f);
   }
-  fmt::print(" (FIXME!, NOT IMPLEMENTED)\n");
+  std::print(" (FIXME!, NOT IMPLEMENTED)\n");
 }
 
 void Meta_api::sdc(Eprp_var &var) {
   auto files = var.get("files");
   auto path  = var.get("path");
-  fmt::print("lgraph.sdc path:{} ", path);
+  std::print("lgraph.sdc path:{} ", path);
   for (const auto &f : absl::StrSplit(files, ',')) {
     I(!files.empty());
-    fmt::print("file:{} ", f);
+    std::print("file:{} ", f);
   }
-  fmt::print(" (FIXME!, NOT IMPLEMENTED)\n");
+  std::print(" (FIXME!, NOT IMPLEMENTED)\n");
 }
 
 void Meta_api::spef(Eprp_var &var) {
   auto files = var.get("files");
   auto path  = var.get("path");
-  fmt::print("lgraph.spef path:{} ", path);
+  std::print("lgraph.spef path:{} ", path);
   for (const auto &f : absl::StrSplit(files, ',')) {
     I(!files.empty());
-    fmt::print("file:{} ", f);
+    std::print("file:{} ", f);
   }
-  fmt::print(" (FIXME!, NOT IMPLEMENTED)\n");
+  std::print(" (FIXME!, NOT IMPLEMENTED)\n");
 }
 
 void Meta_api::lgdump(Eprp_var &var) {
   // auto odir = var.get("odir");
   auto hier = var.get("hier") == "true" ? true : false;
-  fmt::print("lgraph.dump lgraphs:\n");
+  std::print("lgraph.dump lgraphs:\n");
   for (const auto &l : var.lgs) {
-    fmt::print("  {}/{}\n", l->get_path(), l->get_name());
+    std::print("  {}/{}\n", l->get_path(), l->get_name());
     l->dump(hier);
   }
 }
 
 void Meta_api::lnastdump(Eprp_var &var) {
-  fmt::print("lnast.dump lnast:\n");
+  std::print("lnast.dump lnast:\n");
   for (const auto &l : var.lnasts) {
-    fmt::print("  {}\n", l->get_top_module_name());
+    std::print("  {}\n", l->get_top_module_name());
     l->dump();
   }
 }

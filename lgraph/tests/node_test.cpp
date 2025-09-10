@@ -1,5 +1,7 @@
 //  This file is distributed under the BSD 3-Clause License. See LICENSE for details.
 
+#include <format>
+#include <iostream>
 #include <string>
 #include <vector>
 
@@ -112,7 +114,7 @@ TEST_F(Setup_graphs_test, iterate_sub_graph) {
     for (const auto &out_edge : node.out_edges()) {
       auto dpin = out_edge.driver;
       auto spin = out_edge.sink;
-      fmt::print("name:{} pid:{} -> name:{} pid:{}\n", dpin.debug_name(), dpin.get_pid(), spin.debug_name(), spin.get_pid());
+      std::print("name:{} pid:{} -> name:{} pid:{}\n", dpin.debug_name(), dpin.get_pid(), spin.debug_name(), spin.get_pid());
     }
   }
 
@@ -150,10 +152,11 @@ TEST_F(Setup_graphs_test, annotated) {
 
       EXPECT_EQ(dpin.get_node().get_place().get_x(), 0);
       EXPECT_EQ(dpin.get_node().get_place().get_y(), 0);
-      if (dpin.has_name() && dpin.get_name() == "b")
+      if (dpin.has_name() && dpin.get_name() == "b") {
         EXPECT_EQ(dpin.get_offset(), 3);
-      else
+      } else {
         EXPECT_EQ(dpin.get_offset(), 0);
+      }
     }
   }
 

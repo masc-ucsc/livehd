@@ -1,5 +1,7 @@
 
+#include <format>
 #include <fstream>
+#include <iostream>
 
 #include "invariant.hpp"
 #include "pass.hpp"
@@ -13,17 +15,17 @@ int main(int argc, char** argv) {
 
   std::ifstream ifs(bounds_name);
   if (!ifs.good()) {
-    Pass::error(fmt::format("there was an issue opening the file {}", bounds_name));
+    Pass::error(std::format("there was an issue opening the file {}", bounds_name));
     exit(2);
   }
 
   Invariant_boundaries* bound = Invariant_boundaries::deserialize(ifs);
 
-  fmt::print("\n\n#########################################################\n");
-  fmt::print("stats on bounds: top {}, hier_sep {}\n\n", bound->top, bound->hierarchical_separator);
-  fmt::print("invar_cones\n");
+  std::cout << "\n\n#########################################################\n";
+  std::print("stats on bounds: top {}, hier_sep {}\n\n", bound->top, bound->hierarchical_separator);
+  std::cout << "invar_cones\n";
   for (auto& cones : bound->invariant_cones) {
-    fmt::print("id: {} count: {}\n", cones.first.first, cones.second.size());
+    std::print("id: {} count: {}\n", cones.first.first, cones.second.size());
   }
 
   ifs.close();

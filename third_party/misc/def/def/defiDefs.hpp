@@ -90,7 +90,7 @@ struct deftoken {
 #define MAX(x, y) ((x) > (y) ? (x) : (y))
 #endif
 
-#define ROUND(x) ((x) >= 0 ? (int)((x) + 0.5) : (int)((x)-0.5))
+#define ROUND(x) ((x) >= 0 ? (int)((x) + 0.5) : (int)((x) - 0.5))
 
 // defTOKEN *TokenFromRect();
 

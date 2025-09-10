@@ -1,10 +1,7 @@
 //  This file is distributed under the BSD 3-Clause License. See LICENSE for details.
 #pragma once
 
-#include <fmt/color.h>
-#include <fmt/format.h>
-#include <fmt/os.h>
-
+#include <format>
 #include <fstream>
 #include <ostream>
 #include <stack>
@@ -56,34 +53,19 @@ protected:
 
   bool is_last_child() { return lnast->is_last_child(current_nid); }
 
-  template <typename... Args>
-  void print(const fmt::text_style& ts, const Args&... args) {
-    if (has_file_output) {
-      os << fmt::format("{}", args...);
-    } else {
-      os << fmt::format(ts, "{}", args...);
-    }
-  }
+  void print(std::string_view text) { os << text; }
 
   template <typename... Args>
-  void print(fmt::format_string<Args...> fmt, Args&&... args) {
-    os << fmt::format(fmt, args...);
+  void print(std::format_string<Args...> fmt, Args&&... args) {
+    os << std::format(fmt, std::forward<Args>(args)...);
   }
 
-  template <typename... Args>
-  void print_line(const fmt::text_style& ts, const Args&... args) {
-    os << fmt::format("{}", std::string(depth * 2, ' '));
-    if (has_file_output) {
-      os << fmt::format("{}", args...);
-    } else {
-      os << fmt::format(ts, "{}", args...);
-    }
-  }
+  void print_line(std::string_view text) { os << std::string(depth * 2, ' ') << text; }
 
   template <typename... Args>
-  void print_line(fmt::format_string<Args...> fmt, Args&&... args) {
-    os << fmt::format("{}", std::string(depth * 2, ' '));
-    os << fmt::format(fmt, args...);
+  void print_line(std::format_string<Args...> fmt, Args&&... args) {
+    os << std::format("{}", std::string(depth * 2, ' '));
+    os << std::format(fmt, std::forward<Args>(args)...);
   }
 
   void write_metadata();

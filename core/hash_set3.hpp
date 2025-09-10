@@ -71,11 +71,11 @@
 #elif EMH_HASH
 #define hash_main_bucket(key)    (uint32_t)(_hasher(key) & _main_mask)
 #define hash_coll_bucket(key)    ((hash_inter(key) & _coll_mask) + _mains_buckets)
-#define next_coll_bucket(bucket) ((bucket)&_coll_mask) + _mains_buckets
+#define next_coll_bucket(bucket) ((bucket) & _coll_mask) + _mains_buckets
 #else
 #define hash_main_bucket(key)    (uint32_t)(hash_inter(key) & _main_mask)
 #define hash_coll_bucket(key)    ((_hasher(key) & _coll_mask) + _mains_buckets)
-#define next_coll_bucket(bucket) ((bucket)&_coll_mask) + _mains_buckets
+#define next_coll_bucket(bucket) ((bucket) & _coll_mask) + _mains_buckets
 #endif
 
 #if EMH_CACHE_LINE_SIZE < 32

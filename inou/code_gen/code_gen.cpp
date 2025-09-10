@@ -8,6 +8,8 @@
 // #endif
 #include <algorithm>
 #include <cassert>
+#include <format>
+#include <iostream>
 #include <memory>
 #include <string>
 #include <string_view>
@@ -44,7 +46,7 @@ void Code_gen::generate() {
   constexpr auto root_index = lh::Tree_index::root();
 
   const auto& node_data = lnast->get_data(root_index);
-  fmt::print("\n\nprocessing LNAST tree\n\n");
+  std::cout << "\n\nprocessing LNAST tree\n\n";
 
   auto fname         = lnast->get_top_module_name();
   auto main_filename = get_fname(fname, odir);
@@ -52,15 +54,15 @@ void Code_gen::generate() {
   buffer_to_print = std::make_shared<File_output>(main_filename);
 
   if (node_data.type.is_top()) {
-    fmt::print("\nprocessing LNAST tree root text: {} ", node_data.token.get_text());
-    fmt::print("processing root->child");
+    std::print("\nprocessing LNAST tree root text: {} ", node_data.token.get_text());
+    std::cout << "processing root->child";
     indendation = lnast_to->indent_final_system();
 
     do_stmts(lnast->get_child(root_index));
   } else if (node_data.type.is_invalid()) {
-    fmt::print("INVALID NODE!");
+    std::cout << "INVALID NODE!";
   } else {
-    fmt::print("UNKNOWN NODE TYPE!");
+    std::cout << "UNKNOWN NODE TYPE!";
   }
 
   auto lang_type = lnast_to->get_lang_type();  // which lang is it? prp/cpp/verilog
@@ -69,16 +71,16 @@ void Code_gen::generate() {
   // for debugging purposes only:
   lnast_to->call_dump_maps();
   for (auto const& [key, val] : ref_map) {
-    fmt::print("For map key: {}, val is: {}\n", key, val);
+    std::print("For map key: {}, val is: {}\n", key, val);
   }
 
-  fmt::print("lnast_to_{}_parser path:{} \n", lang_type, path);
+  std::print("lnast_to_{}_parser path:{} \n", lang_type, path);
 
   // header file:
   auto basename_s = absl::StrCat(modname, ".", lnast_to->supporting_ftype());  // header filename w/o the odir
   lnast_to->set_supporting_fstart(basename_s);
   lnast_to->set_supp_buffer_to_print(modname);
-  //  fmt::print("{}\n", lnast_to->supporting_fend(basename_s));
+  //  std::print("{}\n", lnast_to->supporting_fend(basename_s));
 
   // main file:
   auto basename = absl::StrCat(modname, ".", lang_type);
@@ -86,8 +88,8 @@ void Code_gen::generate() {
   lnast_to->set_main_fstart(basename, basename_s);
   lnast_to->set_final_print(modname, buffer_to_print);
   // main code segment
-  // fmt::print("{}\n", buffer_to_print);
-  fmt::print("<<EOF\n");
+  // std::print("{}\n", buffer_to_print);
+  std::cout << "<<EOF\n";
 
   // for odir part:
   // lnast_to->result_in_odir(fname, odir, buffer_to_print);
@@ -101,7 +103,7 @@ std::string Code_gen::get_fname(std::string_view fname, std::string_view outdir)
 // and all other nodes are checked in this
 //
 void Code_gen::do_stmts(const lh::Tree_index& stmt_node_index) {
-  fmt::print("node:stmts\n");
+  std::cout << "node:stmts\n";
   if (lnast->is_leaf(stmt_node_index)) {
     return;
   }  // check if no child node present
@@ -111,7 +113,7 @@ void Code_gen::do_stmts(const lh::Tree_index& stmt_node_index) {
   while (curr_index != lnast->invalid_index()) {
     const auto& curr_node_type = lnast->get_type(curr_index);
     auto        curlvl         = curr_index.level;
-    fmt::print("Processing stmt child {}:{} at level {} \n",
+    std::print("Processing stmt child {}:{} at level {} \n",
                lnast->get_name(curr_index),
                lnast->get_type(curr_index).debug_name(),
                curlvl);
@@ -149,7 +151,7 @@ void Code_gen::do_stmts(const lh::Tree_index& stmt_node_index) {
     } else if (curr_node_type.is_primitive_op()) {
       do_op(curr_index, "op");
     } else {
-      fmt::print("WARNING, unhandled case\n");
+      std::cout << "WARNING, unhandled case\n";
     }
 
     curr_index = lnast->get_sibling_next(curr_index);
@@ -159,14 +161,14 @@ void Code_gen::do_stmts(const lh::Tree_index& stmt_node_index) {
 //-------------------------------------------------------------------------------------
 /*
 void Code_gen::invalid_node() {
-  fmt::print("INVALID NODE TYPE FOUND!");
+  std::cout << "INVALID NODE TYPE FOUND!";
   exit(1);
 }
 */
 //-------------------------------------------------------------------------------------
 // Process the assign node:
 void Code_gen::do_assign(const lh::Tree_index& assign_node_index, std::vector<std::string>& hier_tup_vec, bool hier_tup_assign) {
-  fmt::print("node:assign: {}:{}\n", lnast->get_name(assign_node_index), lnast->get_type(assign_node_index).debug_name());
+  std::print("node:assign: {}:{}\n", lnast->get_name(assign_node_index), lnast->get_type(assign_node_index).debug_name());
   auto                     curr_index = lnast->get_first_child(assign_node_index);
   std::vector<std::string> assign_str_vect;
 
@@ -174,7 +176,7 @@ void Code_gen::do_assign(const lh::Tree_index& assign_node_index, std::vector<st
     assert(!(lnast->get_type(curr_index)).is_invalid());
     // const auto& curr_node_data = lnast->get_data(curr_index);
     auto curlvl = curr_index.level;
-    fmt::print("Processing assign child {} at level {} \n", lnast->get_name(curr_index), curlvl);
+    std::print("Processing assign child {} at level {} \n", lnast->get_name(curr_index), curlvl);
     assign_str_vect.emplace_back(lnast->get_name(curr_index));
     curr_index = lnast->get_sibling_next(curr_index);
   }  // data of all the child nodes of assign are in assign_str_vect
@@ -212,7 +214,7 @@ void Code_gen::do_assign(const lh::Tree_index& assign_node_index, std::vector<st
       if (!ref_map_inst_res.second) {     // this means an equivalent key already exists.
         // so append to main buffer:  key value, assign op, ref value
         if (hier_tup_assign) {
-          // fmt::print("hier_tup_assign is {} for hier_tup_vec: {}", hier_tup_assign, hier_tup_vec);
+          // std::print("hier_tup_assign is {} for hier_tup_vec: {}", hier_tup_assign, hier_tup_vec);
           // hier_tup_vec.push_back("str");
           if (has_DblUndrScor(lnast_to->ref_name_str(key_sec))) {
             //   assign:
@@ -296,7 +298,7 @@ void Code_gen::do_assign(const lh::Tree_index& assign_node_index, std::vector<st
 // Process the while node:
 // pattern: while -> cond , stmts
 void Code_gen::do_while(const lh::Tree_index& while_node_index) {
-  fmt::print("node:while\n");
+  std::cout << "node:while\n";
   buffer_to_print->append(indent(), "while");
   lnast_to->add_to_buff_vec_for_cpp(indent());
   lnast_to->add_to_buff_vec_for_cpp("while");
@@ -329,7 +331,7 @@ void Code_gen::do_while(const lh::Tree_index& while_node_index) {
 // example: for i in 0..3 {//stmts}
 // 0..3 is resolved as ___a as tuple already.
 void Code_gen::do_for(const lh::Tree_index& for_node_index) {
-  fmt::print("node:for\n");
+  std::cout << "node:for\n";
   buffer_to_print->append(indent(), "for");
   lnast_to->add_to_buff_vec_for_cpp(absl::StrCat(indent(), "for"));
 
@@ -377,7 +379,7 @@ void Code_gen::do_for(const lh::Tree_index& for_node_index) {
 // 3                           ref : $valid
 // 3                           ref : %out
 void Code_gen::do_func_def(const lh::Tree_index& func_def_node_index) {
-  fmt::print("node:func_def\n");
+  std::cout << "node:func_def\n";
   auto curr_index = lnast->get_first_child(func_def_node_index);
   auto func_name  = lnast->get_name(curr_index);
 
@@ -431,7 +433,7 @@ void Code_gen::do_func_def(const lh::Tree_index& func_def_node_index) {
 // or it is like ___x -> value of ___x must be resolved and "when <reolved ___x>" must be printed
 // or it is just the variable which must be printed as is
 std::string Code_gen::resolve_func_cond(const lh::Tree_index& func_cond_index) {
-  fmt::print("node:function cond\n");
+  std::cout << "node:function cond\n";
 
   std::string ref(lnast->get_name(func_cond_index));
   if (is_temp_var(ref)) {
@@ -453,7 +455,7 @@ std::string Code_gen::resolve_func_cond(const lh::Tree_index& func_cond_index) {
 // arguments are "___x"
 // refer to: https://masc.soe.ucsc.edu/lnast-doc/?coffescript#explicit-function-argument-assignment
 void Code_gen::do_func_call(const lh::Tree_index& func_call_node_index) {
-  fmt::print("node:func_call\n");
+  std::cout << "node:func_call\n";
   auto curr_index = lnast->get_first_child(func_call_node_index);
   // const auto& curr_node_data = lnast->get_data(func_cond_index);//returns the entire node contents.
   std::string lhs(lnast->get_name(curr_index));
@@ -463,13 +465,13 @@ void Code_gen::do_func_call(const lh::Tree_index& func_call_node_index) {
       lhs = map_it->second;
     }
   }
-  fmt::print("func_call 1st child: {}\n", lhs);
+  std::print("func_call 1st child: {}\n", lhs);
   buffer_to_print->append(indent());
   lnast_to->add_to_buff_vec_for_cpp(indent());
 
   curr_index    = lnast->get_sibling_next(curr_index);
   auto funcname = lnast->get_name(curr_index);
-  fmt::print("func_call 2nd child: {}\n", funcname);
+  std::print("func_call 2nd child: {}\n", funcname);
 
   curr_index = lnast->get_sibling_next(curr_index);
   std::string ref(lnast->get_name(curr_index));
@@ -479,7 +481,7 @@ void Code_gen::do_func_call(const lh::Tree_index& func_call_node_index) {
       ref = map_it->second;
     }
   }
-  fmt::print("func_call 3rd child: {}\n", ref);
+  std::print("func_call 3rd child: {}\n", ref);
 
   if (is_temp_var(lhs)) {  //|| !op_is_unary) {
     ref_map.insert(std::pair<std::string, std::string>(lhs, absl::StrCat(funcname, lnast_to->ref_name_str(ref))));
@@ -497,7 +499,7 @@ void Code_gen::do_func_call(const lh::Tree_index& func_call_node_index) {
 //   cond (like ___a)
 //   stmts
 void Code_gen::do_if(const lh::Tree_index& if_node_index) {
-  fmt::print("node:if\n");
+  std::cout << "node:if\n";
   auto curr_index = lnast->get_first_child(if_node_index);
   int  node_num   = 0;
 
@@ -507,7 +509,7 @@ void Code_gen::do_if(const lh::Tree_index& if_node_index) {
     node_num++;
     const auto& curr_node_type = lnast->get_type(curr_index);
     auto        curlvl         = curr_index.level;  // for debugging message printing purposes only
-    fmt::print("Processing if child {} at level {} \n", lnast->get_name(curr_index), curlvl);
+    std::print("Processing if child {} at level {} \n", lnast->get_name(curr_index), curlvl);
 
     if (node_num > 2) {
       if (curr_node_type.is_ref() || curr_node_type.is_const()) {
@@ -540,7 +542,7 @@ void Code_gen::do_if(const lh::Tree_index& if_node_index) {
         do_stmts(curr_index);
         indendation--;
       } else {
-        fmt::print("ERROR:\n\t\t------CHECK THE NODE TYPE IN THIS IF -----!!\n");
+        std::cout << "ERROR:\n\t\t------CHECK THE NODE TYPE IN THIS IF -----!!\n";
       }
     }
 
@@ -556,7 +558,7 @@ void Code_gen::do_if(const lh::Tree_index& if_node_index) {
 //-------------------------------------------------------------------------------------
 // Process the if-cond node:
 void Code_gen::do_cond(const lh::Tree_index& cond_node_index) {
-  fmt::print("node:cond\n");
+  std::cout << "node:cond\n";
   // const auto& curr_node_data = lnast->get_data(cond_node_index);
   std::string ref(lnast->get_name(cond_node_index));
   auto        map_it = ref_map.find(ref);
@@ -571,7 +573,7 @@ void Code_gen::do_cond(const lh::Tree_index& cond_node_index) {
 //-------------------------------------------------------------------------------------
 // Process the operator (like and,or,etc.) node:
 void Code_gen::do_op(const lh::Tree_index& op_node_index, std::string_view op_type) {
-  fmt::print("node:{}: {}:{}\n", op_type, lnast->get_name(op_node_index), lnast->get_type(op_node_index).debug_name());
+  std::print("node:{}: {}:{}\n", op_type, lnast->get_name(op_node_index), lnast->get_type(op_node_index).debug_name());
   auto                     curr_index = lnast->get_first_child(op_node_index);
   std::vector<std::string> op_str_vect;
 
@@ -580,7 +582,7 @@ void Code_gen::do_op(const lh::Tree_index& op_node_index, std::string_view op_ty
     // const auto& curr_node_data = lnast->get_data(curr_index);
     auto curlvl = curr_index.level;  // for debugging message printing purposes only
     auto curpos = curr_index.pos;
-    fmt::print("Processing op child {} at level {} pos {}\n", lnast->get_name(curr_index), curlvl, curpos);
+    std::print("Processing op child {} at level {} pos {}\n", lnast->get_name(curr_index), curlvl, curpos);
     // if it is shl subtree and it is doing left shift by 1 then do not store the "1"
     if (lnast->get_type(op_node_index).is_shl()
         && (curpos == lnast->get_sibling_next(lnast->get_first_child(op_node_index)).pos) /*we are on 2nd child*/
@@ -636,11 +638,11 @@ void Code_gen::do_op(const lh::Tree_index& op_node_index, std::string_view op_ty
     if (std::find(const_vect.begin(), const_vect.end(), ref) != const_vect.end()) {
       ref_is_const = true;
       if (lnast_to->is_unsigned(op_str_vect[i - 1])) {
-        fmt::print("\nNow, op str vect i-1 is {} and ref is {}\n", op_str_vect[i - 1], ref);
+        std::print("\nNow, op str vect i-1 is {} and ref is {}\n", op_str_vect[i - 1], ref);
 
         auto bw_num = Lconst::from_pyrope(ref);  //(int)log2(ref)+1;
 
-        fmt::print("{}\n", bw_num.get_bits());
+        std::print("{}\n", bw_num.get_bits());
         ref = absl::StrCat("UInt<", bw_num.get_bits(), ">(", ref, ")");
       }
     }
@@ -677,7 +679,7 @@ void Code_gen::do_op(const lh::Tree_index& op_node_index, std::string_view op_ty
 // Another possible pattern: tposs --> ref,___L5        ref,___L7
 // this means $a is unsigned
 void Code_gen::do_tposs(const lh::Tree_index& tposs_node_index) {
-  fmt::print("node:op: {}:{}\n", lnast->get_name(tposs_node_index), lnast->get_type(tposs_node_index).debug_name());
+  std::print("node:op: {}:{}\n", lnast->get_name(tposs_node_index), lnast->get_type(tposs_node_index).debug_name());
 
   auto        first_child_index = lnast->get_first_child(tposs_node_index);
   auto        first_child       = lnast->get_name(first_child_index);
@@ -700,14 +702,14 @@ void Code_gen::do_tposs(const lh::Tree_index& tposs_node_index) {
 // processing set_mask operator
 
 void Code_gen::do_set_mask(const lh::Tree_index& smask_node_index) {
-  fmt::print("node:set_mask\n");
+  std::cout << "node:set_mask\n";
 
   auto                     curr_index = lnast->get_first_child(smask_node_index);
   std::vector<std::string> smask_str_vect;
   while (curr_index != lnast->invalid_index()) {
     assert(!(lnast->get_type(curr_index)).is_invalid());
     auto curlvl = curr_index.level;
-    fmt::print("Processing gmask child {}:{} at level {} \n",
+    std::print("Processing gmask child {}:{} at level {} \n",
                lnast->get_name(curr_index),
                lnast->get_type(curr_index).debug_name(),
                curlvl);
@@ -750,14 +752,14 @@ void Code_gen::do_set_mask(const lh::Tree_index& smask_node_index) {
 // or equivalently
 // tup_add: {ref:___L0, const: 0} ; get mask: { ref: ___L1 , ref: x , ref: ___L0 }
 void Code_gen::do_get_mask(const lh::Tree_index& gmask_node_index) {
-  fmt::print("node:get_mask\n");
+  std::cout << "node:get_mask\n";
 
   auto                     curr_index = lnast->get_first_child(gmask_node_index);
   std::vector<std::string> gmask_str_vect;
   while (curr_index != lnast->invalid_index()) {
     assert(!(lnast->get_type(curr_index)).is_invalid());
     auto curlvl = curr_index.level;
-    fmt::print("Processing gmask child {}:{} at level {} \n",
+    std::print("Processing gmask child {}:{} at level {} \n",
                lnast->get_name(curr_index),
                lnast->get_type(curr_index).debug_name(),
                curlvl);
@@ -796,14 +798,14 @@ void Code_gen::do_get_mask(const lh::Tree_index& gmask_node_index) {
 // processing dot operator
 // best testing case: cfg/tests/ring.prp
 void Code_gen::do_dot(const lh::Tree_index& dot_node_index, std::string_view select_type) {
-  fmt::print("node:dot\n");
+  std::cout << "node:dot\n";
 
   auto                     curr_index = lnast->get_first_child(dot_node_index);
   std::vector<std::string> dot_str_vect;
   while (curr_index != lnast->invalid_index()) {
     assert(!(lnast->get_type(curr_index)).is_invalid());
     auto curlvl = curr_index.level;
-    fmt::print("Processing dot child {}:{} at level {} \n",
+    std::print("Processing dot child {}:{} at level {} \n",
                lnast->get_name(curr_index),
                lnast->get_type(curr_index).debug_name(),
                curlvl);
@@ -883,14 +885,14 @@ void Code_gen::do_dot(const lh::Tree_index& dot_node_index, std::string_view sel
 // Process the select node:
 // ref LNAST subtree: select,""  ->  ref,"___l" , ref,"A" , const,"0"
 void Code_gen::do_select(const lh::Tree_index& select_node_index, std::string_view select_type) {
-  fmt::print("node:select\n");
+  std::cout << "node:select\n";
   auto                     curr_index = lnast->get_first_child(select_node_index);
   std::vector<std::string> sel_str_vect;
   bool                     lastIsRef = false;
   while (curr_index != lnast->invalid_index()) {
     assert(!(lnast->get_type(curr_index)).is_invalid());
     auto curlvl = curr_index.level;
-    fmt::print("Processing {} child {}:{} at level {} \n",
+    std::print("Processing {} child {}:{} at level {} \n",
                select_type,
                lnast->get_name(curr_index),
                lnast->get_type(curr_index).debug_name(),
@@ -948,7 +950,7 @@ void Code_gen::do_select(const lh::Tree_index& select_node_index, std::string_vi
     if (is_temp_var(key)) {
       ref_map.insert(std::pair<std::string, std::string>(key, value));
     } else {
-      fmt::print("ERROR:\n\t\t------CHECK THE NODE TYPE IN THIS TUPLE_GET -----!!\n");
+      std::cout << "ERROR:\n\t\t------CHECK THE NODE TYPE IN THIS TUPLE_GET -----!!\n";
     }
 
   } else if (select_type == "tuple_add") {
@@ -983,7 +985,7 @@ void Code_gen::do_select(const lh::Tree_index& select_node_index, std::string_vi
         // std::string value = absl::StrCat(sel_str_vect[1], "[", ref, "]");
         ref_map.insert(std::pair<std::string, std::string>(key, value));
       } else {
-        // fmt::print("ERROR:\n\t\t------CHECK THE NODE TYPE IN THIS {} -----!!\n", select_type);
+        // std::print("ERROR:\n\t\t------CHECK THE NODE TYPE IN THIS {} -----!!\n", select_type);
         do_dot(select_node_index, select_type);  // FIXME: you can pass sel_str_vec here so that do_dot does not calc it again!
       }
     }
@@ -1021,7 +1023,7 @@ void Code_gen::do_select(const lh::Tree_index& select_node_index, std::string_vi
     if (is_temp_var(key)) {
       ref_map.insert(std::pair(key, value));
     } else {
-      fmt::print("ERROR:\n\t\t------CHECK THE NODE TYPE IN THIS {} -----!!\n", select_type);
+      std::print("ERROR:\n\t\t------CHECK THE NODE TYPE IN THIS {} -----!!\n", select_type);
       do_dot(select_node_index, select_type);
     }
   } else {
@@ -1032,13 +1034,13 @@ void Code_gen::do_select(const lh::Tree_index& select_node_index, std::string_vi
 //-------------------------------------------------------------------------------------
 // processing tuple
 void Code_gen::do_tuple(const lh::Tree_index& tuple_node_index) {
-  fmt::print("node:tuple\n");
+  std::cout << "node:tuple\n";
 
   // Process the first child-node in key and move to the next node:
   auto curr_index = lnast->get_first_child(tuple_node_index);
   auto key        = lnast->get_name(curr_index);
-  fmt::print("processing tuple's 1st child {}\n", key);
-  fmt::print("same index value from lnast data stack: {}\n", lnast->get_data(curr_index).token.get_text());
+  std::print("processing tuple's 1st child {}\n", key);
+  std::print("same index value from lnast data stack: {}\n", lnast->get_data(curr_index).token.get_text());
 
   // Process remaining nodes/sub-trees:
   curr_index = lnast->get_sibling_next(curr_index);
@@ -1057,7 +1059,7 @@ void Code_gen::do_tuple(const lh::Tree_index& tuple_node_index) {
           ref = map_it->second;
         }
       }
-      fmt::print("tuple's next leaf child: {}\n", ref);
+      std::print("tuple's next leaf child: {}\n", ref);
       if (lnast->get_type(curr_index).is_const()) {
         tuple_value = absl::StrCat(tuple_value, "\"", lnast_to->ref_name_str(ref), "\"", lnast_to->tuple_stmt_sep());
       } else {
@@ -1081,11 +1083,11 @@ void Code_gen::do_tuple(const lh::Tree_index& tuple_node_index) {
   }  // to cater to scenario like: out = () :in ring.prp
 
   // insert to map:
-  fmt::print("final tuple value for the above key: {}\n", tuple_value);
+  std::print("final tuple value for the above key: {}\n", tuple_value);
   if (is_temp_var(key)) {
     ref_map.insert(std::pair<std::string, std::string>(key, tuple_value));
   } else {
-    fmt::print("key: {}\n tuple_value:{}\n", key, tuple_value);
+    std::print("key: {}\n tuple_value:{}\n", key, tuple_value);
     buffer_to_print->append(key, " saved as ", tuple_value, "\n");
     lnast_to->add_to_buff_vec_for_cpp(absl::StrCat(key, " saved as ", tuple_value, "\n"));
     // this should never be possible
@@ -1133,7 +1135,7 @@ std::string Code_gen::resolve_tuple_assign(const lh::Tree_index& tuple_assign_in
         } else {
           ref = map_it->second;
         }
-        // fmt::print("map_it find: {} | {}\n", map_it->first, ref);
+        // std::print("map_it find: {} | {}\n", map_it->first, ref);
       } else if (is_number(ref)) {
         ref = process_number(ref);
       }

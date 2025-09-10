@@ -1,6 +1,7 @@
 //  This file is distributed under the BSD 3-Clause License. See LICENSE for details.
 
 #include "prp_lnast.hpp"
+
 #include "perf_tracing.hpp"
 
 int main(int argc, char **argv) {
@@ -14,9 +15,9 @@ int main(int argc, char **argv) {
   converter.parse_file(argv[1]);
 
   TRACE_EVENT("inou", "PYROPE_prp_lnast_convert");
-  auto   lnast = converter.prp_ast_to_lnast("test");
+  auto lnast = converter.prp_ast_to_lnast("test");
 
-  fmt::print("AST to LNAST output:\n\n");
+  std::cout << "AST to LNAST output:\n\n";
 
   lnast->dump();
 

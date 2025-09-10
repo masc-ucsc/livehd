@@ -1,6 +1,6 @@
 clang
-%cpp -std=c++17
-%hpp -std=c++17
+%cpp -std=c++23
+%hpp -std=c++23
 -Icore
 -Imain
 -Ielab

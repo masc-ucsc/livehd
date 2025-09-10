@@ -2,13 +2,13 @@
 #pragma once
 
 #include <cstdint>
+#include <format>
 #include <limits>
 #include <string>
 #include <string_view>
 
 #include "absl/strings/str_cat.h"
 #include "explicit_type.hpp"
-#include "fmt/format.h"
 #include "graph_sizing.hpp"
 #include "iassert.hpp"
 #include "lconst.hpp"

@@ -49,8 +49,9 @@ void advance_clock(Vadd_rca *top, int nclocks = 1) {
 #endif
 
       global_time++;
-      if (Verilated::gotFinish() || global_time >= MAX_TIME)
+      if (Verilated::gotFinish() || global_time >= MAX_TIME) {
         do_terminate();
+      }
     }
   }
 }
@@ -93,8 +94,9 @@ int main(int argc, char **argv, char **env) {
     uint64_t upper_a     = (top_a >> 1);
     uint64_t upper_b     = (top_b >> 1);
     uint64_t shifted_sum = upper_a + upper_b;
-    if (lower_sum == 2)
+    if (lower_sum == 2) {
       shifted_sum++;
+    }
     if (top_carry == (shifted_sum >> 63) && top_a + top_b == top_sum) {
       printf("PASSED\n");
     } else {

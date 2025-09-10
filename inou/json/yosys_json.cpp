@@ -127,13 +127,12 @@ void Module::ToJson(const JsonComposer* jcm) const {
     unique_nets[itr->second] = itr->first;
   }
 
-  auto writeNetNames = BatchWriter{
-      &unique_nets,
-      [](NetMapItemT const* nam_wire, JsonElement* model, const JsonComposer* json) {
-        JsonElement nested_net[] = {{"hide_name", "1"}, {"bits", (nam_wire->first) ? nam_wire->first->get_bits() : 0}, {}};
-        model[0][nam_wire->second.c_str()] = nested_net;
-        json->Write(model);
-      }};
+  auto writeNetNames = BatchWriter{&unique_nets, [](NetMapItemT const* nam_wire, JsonElement* model, const JsonComposer* json) {
+                                     JsonElement nested_net[]
+                                         = {{"hide_name", "1"}, {"bits", (nam_wire->first) ? nam_wire->first->get_bits() : 0}, {}};
+                                     model[0][nam_wire->second.c_str()] = nested_net;
+                                     json->Write(model);
+                                   }};
 
   JsonElement model[] = {{"ports", VectorAsObject{ports}}, {"cells", VectorAsObject{&cells}}, {"netnames", &writeNetNames}, {}};
   jcm->Write(model);

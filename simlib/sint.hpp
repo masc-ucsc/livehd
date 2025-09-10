@@ -16,10 +16,11 @@ public:
   SInt() : ui(0) {}
 
   SInt(int64_t i) : ui(i) {
-    if (w_ > kWordSize)
+    if (w_ > kWordSize) {
       sign_extend(kWordSize - 1);
-    else
+    } else {
       sign_extend();
+    }
   }
 
   SInt(std::string initial) : ui(initial) { sign_extend(); }
@@ -234,15 +235,17 @@ public:
     // if (ui.NW == 1)
     //   return as_single_word() <= other.as_single_word();
     if (negative()) {
-      if (other.negative())
+      if (other.negative()) {
         return ui >= other.ui;
-      else
+      } else {
         return UInt<1>(1);
+      }
     } else {
-      if (other.negative())
+      if (other.negative()) {
         return UInt<1>(0);
-      else
+      } else {
         return ui <= other.ui;
+      }
     }
   }
 
@@ -250,15 +253,17 @@ public:
     // if (ui.NW == 1)
     //   return as_single_word() >= other.as_single_word();
     if (negative()) {
-      if (other.negative())
+      if (other.negative()) {
         return ui <= other.ui;
-      else
+      } else {
         return UInt<1>(0);
+      }
     } else {
-      if (other.negative())
+      if (other.negative()) {
         return UInt<1>(1);
-      else
+      } else {
         return ui >= other.ui;
+      }
     }
   }
 

@@ -671,7 +671,7 @@ void Cgen_verilog::process_simple_node(std::shared_ptr<File_output> fout, Node &
     }
   }
 
-  // fmt::print("node:{} expr:{}\n",node.debug_name(), final_expr);
+  // std::print("node:{} expr:{}\n",node.debug_name(), final_expr);
   if (final_expr.empty()) {
     Pass::info("likely issue in node:{} that has no compute value", node.debug_name());
     final_expr = "'hx";

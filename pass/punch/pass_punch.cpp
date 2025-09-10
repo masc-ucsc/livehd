@@ -56,7 +56,7 @@ void Pass_punch::punch(LGraph *g, std::string_view src, std::string_view dst) {
   /////////////////////////////////////
   // find the level of common hierarchy between src and dst
   /////////////////////////////////////
-  fmt::print("Searching for common hierarchy...\n");
+  std::cout << "Searching for common hierarchy...\n";
   bool     common_hier_found = true;
   uint16_t common_hier_depth = 0;
   if (this->src_hierarchy.get_module_name() != this->dst_hierarchy.get_module_name()) {
@@ -76,17 +76,17 @@ void Pass_punch::punch(LGraph *g, std::string_view src, std::string_view dst) {
     Pass::error("pass.punch could not find common hierarchy");
     return;
   }
-  fmt::print("Common hierarchy found...\n\n");
+  std::cout << "Common hierarchy found...\n\n";
 
   /////////////////////////////////////
   // get subgraph ids
   /////////////////////////////////////
-  fmt::print("Trying to get subgraphs of source and destination...\n");
+  std::cout << "Trying to get subgraphs of source and destination...\n";
   std::string src_h = this->src_hierarchy.get_hierarchy();
   std::string dst_h = this->dst_hierarchy.get_hierarchy();
 
-  fmt::print("src_h = {}\n", src_h);
-  fmt::print("dst_h = {}\n", dst_h);
+  std::print("src_h = {}\n", src_h);
+  std::print("dst_h = {}\n", dst_h);
 
   Lg_type_id src_lgid = this->src_hierarchy.get_lgid(src_h);
   Lg_type_id dst_lgid = this->dst_hierarchy.get_lgid(dst_h);
@@ -101,8 +101,8 @@ void Pass_punch::punch(LGraph *g, std::string_view src, std::string_view dst) {
     Pass::warn("pass.punch no dst found");
     return;
   }
-  fmt::print("src_lgid:        {}\n", src_lgid);
-  fmt::print("dst_lgid:        {}\n", dst_lgid);
+  std::print("src_lgid:        {}\n", src_lgid);
+  std::print("dst_lgid:        {}\n", dst_lgid);
 
   auto *src_g = LGraph::open(g->get_path(), src_lgid);
   if (src_g == 0) {
@@ -121,9 +121,9 @@ void Pass_punch::punch(LGraph *g, std::string_view src, std::string_view dst) {
   /////////////////////////////////////
   // add output port to the inner-most module to get the wire out
   std::string_view target_wire_name = this->src_hierarchy.get_wire_name();
-  std::string      output_wire_name = fmt::format("{}_punch", target_wire_name);
+  std::string      output_wire_name = std::format("{}_punch", target_wire_name);
   this->add_output(src_g, target_wire_name, output_wire_name);
-  fmt::print("{}\n", src_g->get_name());
+  std::print("{}\n", src_g->get_name());
 
   src_g->sync();
   g->sync();
@@ -138,7 +138,7 @@ void Pass_punch::punch(LGraph *g, std::string_view src, std::string_view dst) {
       LGraph* current_g = LGraph::open(g->get_path(), current_lgid);
 
       //
-      std::string current_name = fmt::format("out_{}_{}", output_wire_name, current_depth);
+      std::string current_name = std::format("out_{}_{}", output_wire_name, current_depth);
       auto sub_g_id = current_g->get_node_from_instance_name(this->src_hierarchy.get_instance(current_depth));
       auto sub_g_node = current_g->get_node(sub_g_id);
       auto pin = sub_g_node.setup_driver_pin(output_wire_name);
@@ -169,7 +169,7 @@ void Pass_punch::add_output(LGraph *g, std::string_view wname, std::string_view 
       if (edge.driver.has_name()) {
         std::string_view this_wname = edge.driver.get_name();
         if (this_wname == wname) {
-          fmt::print("wire found: {} {}\n", wname, output);
+          std::print("wire found: {} {}\n", wname, output);
           done   = true;
           dpin   = edge.driver;
           bits   = edge.get_bits();
@@ -208,7 +208,7 @@ bool Pass_punch::add_input(LGraph *g, std::string_view wname, std::string_view i
   if (g->has_wirename(input) || g->has_graph_input(input) || g->has_graph_output(input))
     return false;
 
-  fmt::print("Adding input:{} lgraph:{}\n",input, g->get_name());
+  std::print("Adding input:{} lgraph:{}\n",input, g->get_name());
   auto wname_idx    = g->get_node_id(wname);
   auto wname_bits   = g->get_bits(wname_idx);
   auto wname_offset = g->get_offset(wname_idx);

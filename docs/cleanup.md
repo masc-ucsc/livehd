@@ -102,8 +102,6 @@ Option 2 may be fine, but option 1 should be the same
 
 ### pass.compile
 
-- In FIRRTL no need to set firrtl:true. If input is a proto, it is firrtl
-- In FIRRTL no need to set the top always. If no top set, treat a proto as a top by itself
 
 ### lgshell
 

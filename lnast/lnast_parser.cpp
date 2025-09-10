@@ -21,16 +21,16 @@ std::shared_ptr<Lnast> Lnast_parser::parse_all() {
 }
 
 void Lnast_parser::parse_top() {
-  // fmt::print("parse_top\n");
+  // std::cout << "parse_top\n";
   lnast->set_root(Lnast_node::create_top());
-	tree_index.push(lh::Tree_index::root());
-	parse_stmts();
+  tree_index.push(lh::Tree_index::root());
+  parse_stmts();
 }
 
 void Lnast_parser::parse_stmts() {
-  // fmt::print("parse_stmts\n");
-	start_tree(Lnast_node::create_stmts());
-  forward_token(); // '{'
+  // std::cout << "parse_stmts\n";
+  start_tree(Lnast_node::create_stmts());
+  forward_token();  // '{'
   while (cur_kind() != Lnast_token::rbrace) {
     parse_stmt();
   }
@@ -39,21 +39,17 @@ void Lnast_parser::parse_stmts() {
 }
 
 void Lnast_parser::parse_stmt() {
-  // fmt::print("parse_stmt\n");
+  // std::cout << "parse_stmt\n";
   switch (cur_kind()) {
-    case Lnast_token::id_var:
-      return parse_var_stmt();
-    case Lnast_token::id_fun:
-      return parse_fun_stmt();
-    case Lnast_token::kw_if:
-      return parse_if_stmt();
-    default:
-      error();
+    case Lnast_token::id_var: return parse_var_stmt();
+    case Lnast_token::id_fun: return parse_fun_stmt();
+    case Lnast_token::kw_if: return parse_if_stmt();
+    default: error();
   }
 }
 
 void Lnast_parser::parse_var_stmt() {
-  // fmt::print("parse_var_stmt\n");
+  // std::cout << "parse_var_stmt\n";
   auto lhs_node = Lnast_node::create_ref(cur_text());
   forward_token();
   switch (cur_kind()) {
@@ -125,18 +121,17 @@ void Lnast_parser::parse_var_stmt() {
           }
           break;
         }
-#define TOKEN_FN(NAME, SPELLING)               \
-        case Lnast_token::fn_##NAME: {             \
-          start_tree(Lnast_node::create_##NAME()); \
-          add_leaf(lhs_node);                      \
-          forward_token();                         \
-          parse_list();                            \
-          end_tree();                              \
-          break;                                   \
-        }
+#define TOKEN_FN(NAME, SPELLING)             \
+  case Lnast_token::fn_##NAME: {             \
+    start_tree(Lnast_node::create_##NAME()); \
+    add_leaf(lhs_node);                      \
+    forward_token();                         \
+    parse_list();                            \
+    end_tree();                              \
+    break;                                   \
+  }
 #include "lnast_tokens.def"
-        default:
-          error();
+        default: error();
       }
       break;
     }
@@ -145,8 +140,10 @@ void Lnast_parser::parse_var_stmt() {
       start_tree(Lnast_node::create_tuple_set());
       add_leaf(lhs_node);
       parse_selects();
-      if (cur_kind() != Lnast_token::equal) { error(); }
-      forward_token(); // '='
+      if (cur_kind() != Lnast_token::equal) {
+        error();
+      }
+      forward_token();  // '='
       parse_prim();
       end_tree();
       break;
@@ -155,7 +152,9 @@ void Lnast_parser::parse_var_stmt() {
       start_tree(Lnast_node::create_attr_set());
       add_leaf(lhs_node);
       parse_dot_selects();
-      if (cur_kind() != Lnast_token::equal) { error(); }
+      if (cur_kind() != Lnast_token::equal) {
+        error();
+      }
       forward_token();
       parse_prim();
       end_tree();
@@ -171,13 +170,12 @@ void Lnast_parser::parse_var_stmt() {
       break;
     }
 
-    default:
-      error();
+    default: error();
   }
 }
 
 void Lnast_parser::parse_list() {
-  // fmt::print("parse_list\n");
+  // std::cout << "parse_list\n";
   forward_token();
   while (cur_kind() != Lnast_token::rparen) {
     switch (cur_kind()) {
@@ -186,9 +184,9 @@ void Lnast_parser::parse_list() {
         continue;
       }
       case Lnast_token::id_var: {
-        auto name = cur_text();
+        auto name      = cur_text();
         bool has_value = false;
-        bool has_type = false;
+        bool has_type  = false;
         forward_token();
         if (cur_kind() == Lnast_token::equal) {
           has_value = true;
@@ -242,28 +240,28 @@ void Lnast_parser::parse_list() {
 }
 
 void Lnast_parser::parse_selects() {
-  // fmt::print("parse_selects\n");
+  // std::cout << "parse_selects\n";
   do {
-    forward_token();       // '[' ->
-    parse_prim();    // ref or const ->
-    forward_token();       // ']' ->
+    forward_token();  // '[' ->
+    parse_prim();     // ref or const ->
+    forward_token();  // ']' ->
   } while (cur_kind() == Lnast_token::lbrack);
 }
 
 void Lnast_parser::parse_dot_selects() {
   do {
-    forward_token(); // '.'
+    forward_token();  // '.'
     parse_prim();
   } while (cur_kind() == Lnast_token::dot);
 }
 
 void Lnast_parser::parse_attr() {
-  forward_token(); // '.'
+  forward_token();  // '.'
   parse_prim();
 }
 
 void Lnast_parser::parse_prim() {
-  // fmt::print("parse_prim\n");
+  // std::cout << "parse_prim\n";
   if (cur_kind() == Lnast_token::id_var || cur_kind() == Lnast_token::id_fun) {
     add_leaf(Lnast_node::create_ref(cur_text()));
   } else if (cur_kind() == Lnast_token::number) {
@@ -275,17 +273,44 @@ void Lnast_parser::parse_prim() {
 }
 
 void Lnast_parser::parse_type() {
-  // fmt::print("parse_type\n");
+  // std::cout << "parse_type\n";
   switch (cur_kind()) {
-    case Lnast_token::ty_none:    add_leaf(Lnast_node::create_none_type());         forward_token(); break;
-    case Lnast_token::ty_sint:    add_leaf(Lnast_node::create_prim_type_sint());    forward_token(); break;
-    case Lnast_token::ty_uint:    add_leaf(Lnast_node::create_prim_type_uint());    forward_token(); break;
-    case Lnast_token::ty_range:   add_leaf(Lnast_node::create_prim_type_range());   forward_token(); break;
-    case Lnast_token::ty_string:  add_leaf(Lnast_node::create_prim_type_string());  forward_token(); break;
-    case Lnast_token::ty_boolean: add_leaf(Lnast_node::create_prim_type_boolean()); forward_token(); break;
-    case Lnast_token::ty_type:    add_leaf(Lnast_node::create_prim_type_type());    forward_token(); break;
-    case Lnast_token::ty_ref:     add_leaf(Lnast_node::create_prim_type_ref());     forward_token(); break;
-    case Lnast_token::ty_unknown: add_leaf(Lnast_node::create_unknown_type());      forward_token(); break;
+    case Lnast_token::ty_none:
+      add_leaf(Lnast_node::create_none_type());
+      forward_token();
+      break;
+    case Lnast_token::ty_sint:
+      add_leaf(Lnast_node::create_prim_type_sint());
+      forward_token();
+      break;
+    case Lnast_token::ty_uint:
+      add_leaf(Lnast_node::create_prim_type_uint());
+      forward_token();
+      break;
+    case Lnast_token::ty_range:
+      add_leaf(Lnast_node::create_prim_type_range());
+      forward_token();
+      break;
+    case Lnast_token::ty_string:
+      add_leaf(Lnast_node::create_prim_type_string());
+      forward_token();
+      break;
+    case Lnast_token::ty_boolean:
+      add_leaf(Lnast_node::create_prim_type_boolean());
+      forward_token();
+      break;
+    case Lnast_token::ty_type:
+      add_leaf(Lnast_node::create_prim_type_type());
+      forward_token();
+      break;
+    case Lnast_token::ty_ref:
+      add_leaf(Lnast_node::create_prim_type_ref());
+      forward_token();
+      break;
+    case Lnast_token::ty_unknown:
+      add_leaf(Lnast_node::create_unknown_type());
+      forward_token();
+      break;
     case Lnast_token::ty_s: {
       start_tree(Lnast_node::create_prim_type_sint());
       forward_token();
@@ -310,13 +335,19 @@ void Lnast_parser::parse_type() {
     case Lnast_token::ty_array: {
       start_tree(Lnast_node::create_comp_type_array());
       forward_token();
-      if (cur_kind() != Lnast_token::lparen) { error(); }
+      if (cur_kind() != Lnast_token::lparen) {
+        error();
+      }
       forward_token();
       parse_type();
-      if (cur_kind() != Lnast_token::comma) { error(); }
+      if (cur_kind() != Lnast_token::comma) {
+        error();
+      }
       forward_token();
       parse_prim();
-      if (cur_kind() != Lnast_token::rparen) { error(); }
+      if (cur_kind() != Lnast_token::rparen) {
+        error();
+      }
       end_tree();
       forward_token();
       break;
@@ -342,8 +373,7 @@ void Lnast_parser::parse_type() {
       end_tree();
       break;
     }
-    default:
-      error();
+    default: error();
   }
 }
 
@@ -369,10 +399,14 @@ void Lnast_parser::parse_fun_stmt() {
 void Lnast_parser::parse_if_stmt() {
   start_tree(Lnast_node::create_if());
   forward_token();
-  if (cur_kind() != Lnast_token::lparen) { error(); }
+  if (cur_kind() != Lnast_token::lparen) {
+    error();
+  }
   forward_token();
   parse_prim();
-  if (cur_kind() != Lnast_token::rparen) { error(); }
+  if (cur_kind() != Lnast_token::rparen) {
+    error();
+  }
   forward_token();
   parse_stmts();
   // TODO: Add `else if` and `else` branch

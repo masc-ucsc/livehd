@@ -1,8 +1,9 @@
 //  This file is distributed under the BSD 3-Clause License. See LICENSE for details.
 
 #include <cstdio>
+#include <format>
+#include <iostream>
 
-#include "fmt/format.h"
 #include "gtest/gtest.h"
 #include "prp.hpp"
 
@@ -25,10 +26,10 @@ public:
       }
 
       if (failed) {
-        fmt::print("\nParsing FAILED!\n");
+        std::cout << "\nParsing FAILED!\n";
         return;
       } else {
-        fmt::print("\nParsing SUCCESSFUL!\n");
+        std::cout << "\nParsing SUCCESSFUL!\n";
       }
 
       // build the ast
@@ -44,7 +45,7 @@ public:
           tree_traversal_tokens.push_back(token_text);
         }
         tree_traversal_rules.emplace_back(rule_id_to_string(node.rule_id));
-        fmt::print("Rule name: {}, Token text: {}, Tree level: {}\n",
+        std::print("Rule name: {}, Token text: {}, Tree level: {}\n",
                    tree_traversal_rules.back(),
                    scan_text(node.token_entry),
                    it.level);

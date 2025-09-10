@@ -1,6 +1,6 @@
 #include "AnnLayout.hpp"
 #include "helpers.hpp"
-//#include "gmock/gmock.h"
+// #include "gmock/gmock.h"
 #include "gtest/gtest.h"
 
 class ann_test : public ::testing::Test {
@@ -38,7 +38,7 @@ TEST_F(ann_test, bad_ar_test) {
   chip->addComponentCluster("C2", 1, 4, 50., 49.);
   chip->addComponentCluster("C3", 1, 2, 4., 1.);
 
-  bool success = chip->layout(AspectRatio, 1.0); // not possible because of insane C2 AR
+  bool success = chip->layout(AspectRatio, 1.0);  // not possible because of insane C2 AR
 
   EXPECT_FALSE(success);
 }

@@ -1,1 +1,0 @@
-../../../pass/compiler/tests/firrtl_compile.sh

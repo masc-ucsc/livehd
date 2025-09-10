@@ -1,19 +1,16 @@
 
-#include "lnast_lexer.hpp"
-#include "gtest/gtest.h"
-#include "fmt/format.h"
-#include "fmt/printf.h"
-
+#include <format>
 #include <sstream>
+
+#include "gtest/gtest.h"
+#include "lnast_lexer.hpp"
 
 class Lnast_lexer_test : public ::testing::Test {
 protected:
-  std::stringstream ss;
+  std::stringstream            ss;
   std::unique_ptr<Lnast_lexer> lexer;
 
-  void TearDown() override {
-    lexer = nullptr;
-  }
+  void TearDown() override { lexer = nullptr; }
 
   void start() {
     ss.str("");
@@ -63,14 +60,14 @@ TEST_F(Lnast_lexer_test, mixed) {
   check("comma");
   check("number, 0");
   check("rparen");
-  
+
   check("id_var, a");
   check("lbrack");
   check("number, 0");
   check("rbrack");
   check("equal");
   check("id_var, b");
-  
+
   check("id_var, c");
   check("equal");
   check("fn_plus");
@@ -93,12 +90,9 @@ TEST_F(Lnast_lexer_test, mixed) {
 TEST_F(Lnast_lexer_test, token_mapping) {
   start();
 
-#define SS(TEXT) \
-  ss << #TEXT << " ";
-#define SS_TY(TEXT) \
-  ss << "#" << #TEXT << " ";
-#define SS_PN(TEXT) \
-  ss << TEXT << " ";
+#define SS(TEXT)                 ss << #TEXT << " ";
+#define SS_TY(TEXT)              ss << "#" << #TEXT << " ";
+#define SS_PN(TEXT)              ss << TEXT << " ";
 #define TOKEN_PN(NAME, SPELLING) SS_PN(SPELLING)
 #define TOKEN_KW(SPELLING)       SS(SPELLING)
 #define TOKEN_TY(SPELLING)       SS_TY(SPELLING)
@@ -108,8 +102,7 @@ TEST_F(Lnast_lexer_test, token_mapping) {
 #undef SS_TY
 #undef SS_PN
 
-#define CHECK(TEXT) \
-  check(#TEXT);
+#define CHECK(TEXT)              check(#TEXT);
 #define TOKEN_PN(NAME, SPELLING) CHECK(NAME)
 #define TOKEN_KW(SPELLING)       CHECK(kw_##SPELLING)
 #define TOKEN_TY(SPELLING)       CHECK(ty_##SPELLING)

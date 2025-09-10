@@ -10,7 +10,7 @@ Live_stitcher::Live_stitcher(Stitch_pass_options &pack) {
   std::ifstream invariant_file(pack.boundaries_name);
 
   if (!invariant_file.good()) {
-    Pass::error(fmt::format("Live_stitcher: Error reading boundaries file {}", pack.boundaries_name));
+    Pass::error(std::format("Live_stitcher: Error reading boundaries file {}", pack.boundaries_name));
     return;
   }
 
@@ -20,7 +20,7 @@ Live_stitcher::Live_stitcher(Stitch_pass_options &pack) {
   original = Lgraph_open(pack.osynth_lgdb, boundaries->top);
 
   if (!original) {
-    Pass::error(fmt::format("Live_stitcher: I was not able to open original synthesized netlist {} in {}",
+    Pass::error(std::format("Live_stitcher: I was not able to open original synthesized netlist {} in {}",
                             boundaries->top,
                             pack.osynth_lgdb));
   }
@@ -101,8 +101,9 @@ void Live_stitcher::stitch(Lgraph *nsynth, const std::set<Net_ID> &diffs) {
         } else {
           // invariant boundary
           auto name = nsynth->get_node_wirename(idx);
-          if (!original->has_wirename(name))
+          if (!original->has_wirename(name)) {
             continue;
+          }
           Index_id oidx = original->get_node_id(name);
           for (auto &edge : original->out_edges(oidx)) {
             Node_pin dpin = original->get_node(nsynth2originalid[idx]).setup_driver_pin(edge.get_out_pin().get_pid());

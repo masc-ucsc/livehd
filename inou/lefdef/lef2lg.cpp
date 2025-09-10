@@ -91,7 +91,7 @@ int lef_pin_cb(lefrCallbackType_e c, lefiPin *fpin, lefiUserData ud) {  // fpin 
         tmp_phy.yh = rect->yh;
       }
     }  // end inner for
-  }    // end outer for
+  }  // end outer for
 
   // pin ports parsing end
   return 0;

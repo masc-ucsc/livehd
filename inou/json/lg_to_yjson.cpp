@@ -9,6 +9,7 @@ Author: Farzaneh Rabiei, GitHub: https://github.com/rabieifk
 #include <sys/stat.h>
 #include <sys/types.h>
 
+#include <format>
 #include <fstream>
 #include <iostream>
 #include <map>
@@ -279,7 +280,7 @@ void LGtoYJson::import_module(Lgraph* lg) {
     }
 
     if (cell_type == NULL) {
-      fmt::print("Cell type not found!\n");
+      std::cout << "Cell type not found!\n";
       continue;
     }
     auto new_cell = newModule->add_cell(cell_type);

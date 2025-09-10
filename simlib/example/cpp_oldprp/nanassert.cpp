@@ -69,8 +69,9 @@ void NoGCCMSG(const char *format, ...) {
 void NoGCCGMSG(int32_t g, const char *format, ...) {
   va_list ap;
 
-  if (!g)
+  if (!g) {
     return;
+  }
 
   va_start(ap, format);
   vfprintf(ASSERTSTREAM, format, ap);
@@ -85,8 +86,7 @@ void NoGCCGMSG(int32_t g, const char *format, ...) {
 
 /* defined in nanassert.h */
 #else
-void nanassertTRACE(const char *envvar, const char *format, ...) { /* Nothing */
-}
+void nanassertTRACE(const char *envvar, const char *format, ...) { /* Nothing */ }
 #endif /* __GNUC__ */
 #else  /* SAFE */
 
@@ -103,11 +103,13 @@ bool cachedGetenv(const char *envvar) {
     if (getenv(envvar)) {
       (*trace)[envvar] = true;
       return true;
-    } else
+    } else {
       (*trace)[envvar] = false;
+    }
   } else {
-    if ((*pos).second)
+    if ((*pos).second) {
       return true;
+    }
   }
   return false;
 }
@@ -119,15 +121,17 @@ void nanassertTRACE(const char *envvar, const char *format, ...) {
   va_list        ap;
 
   if (doTrace == -1) {
-    if (getenv("TRACE"))
+    if (getenv("TRACE")) {
       doTrace = atoi(getenv("TRACE"));
-    if (doTrace < 0)
+    }
+    if (doTrace < 0) {
       doTrace = 0;
-    else {
-      if (doTrace == 1)
+    } else {
+      if (doTrace == 1) {
         MSG("nanassert::Activating TRACE selectivelly");
-      else
+      } else {
         MSG("nanassert::Activating all the TRACEs");
+      }
     }
 #ifdef __cplusplus
     // new allocation because the object never should be destroyed
@@ -143,8 +147,9 @@ void nanassertTRACE(const char *envvar, const char *format, ...) {
 #else
     found = getenv(envvar) ? 1 : 0;
 #endif
-    if (!found)
+    if (!found) {
       return;
+    }
   }
 
   fprintf(ASSERTSTREAM, "TRACE:%s", envvar);

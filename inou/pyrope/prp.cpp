@@ -5,10 +5,11 @@
 #include <ctype.h>
 
 #include <algorithm>
+#include <format>
 #include <iostream>
+#include <print>
 
 #include "err_tracker.hpp"
-#include "fmt/format.h"
 inline void Prp::eat_comments() {
   while (scan_is_token(Token_id_comment)) {
     scan_next();
@@ -1518,7 +1519,7 @@ uint8_t Prp::rule_additive_expression(std::list<std::tuple<Rule_id, Token_entry>
 }
 
 uint8_t Prp::rule_bitwise_expression(std::list<std::tuple<Rule_id, Token_entry>> &pass_list) {
-  fmt::print("BITWISE EXPRESSION RULE CURRENTLY UNUSED. THERE IS A BUG. EXITING...\n");
+  std::cout << "BITWISE EXPRESSION RULE CURRENTLY UNUSED. THERE IS A BUG. EXITING...\n";
   exit(1);
   INIT_FUNCTION("rule_bitwise_expression.");
 
@@ -1862,7 +1863,7 @@ void Prp::elaborate() {
   /*
     int i = 0;
     while(!scan_is_end()){
-      fmt::print("token {}: {}\n", i, scan_text());
+      std::print("token {}: {}\n", i, scan_text());
       scan_next();
       i++;
     }
@@ -1874,13 +1875,13 @@ void Prp::elaborate() {
   }
 
   if (failed) {
-    // fmt::print("Parsing error line {}. Unexpected token [{}].\n",
+    // std::print("Parsing error line {}. Unexpected token [{}].\n",
     // get_token(term_token + base_token).line + 1,
     // scan_text(term_token + base_token));
     PRINT_DBG_AST("base token: {}, term token: {}\n", base_token, term_token);
     PRINT_DBG_AST("terminal token: {}\n", scan_text(term_token + base_token));
     ast_dump(lh::Tree_index::root());
-    fmt::print("Parsing error line {}\n", get_token(term_token + base_token).line + 1);
+    std::print("Parsing error line {}\n", get_token(term_token + base_token).line + 1);
     err_tracker::logger("Parsing error line {}\n", get_token(term_token + base_token).line + 1);
     exit(1);
   }
@@ -1904,14 +1905,14 @@ void Prp::elaborate() {
   PRINT_DBG_AST("\nSTATISTICS\n\n");
 
   // finally, write the statistics
-  PRINT_DBG_AST(fmt::format("Number of rules called: {}\n", debug_stat.rules_called));
-  PRINT_DBG_AST(fmt::format("Number of rules matched: {}\n", debug_stat.rules_matched));
-  PRINT_DBG_AST(fmt::format("Number of rules failed: {}\n", debug_stat.rules_failed));
-  PRINT_DBG_AST(fmt::format("Number of tokens consumed: {}\n", debug_stat.tokens_consumed));
-  PRINT_DBG_AST(fmt::format("Number of tokens unconsumed: {}\n", debug_stat.tokens_unconsumed));
-  PRINT_DBG_AST(fmt::format("Number of ast->up() calls: {}\n", debug_stat.ast_up_calls));
-  PRINT_DBG_AST(fmt::format("Number of ast->down() calls: {}\n", debug_stat.ast_down_calls));
-  PRINT_DBG_AST(fmt::format("Number of ast_add() calls: {}\n", debug_stat.ast_add_calls));
+  PRINT_DBG_AST(std::format("Number of rules called: {}\n", debug_stat.rules_called));
+  PRINT_DBG_AST(std::format("Number of rules matched: {}\n", debug_stat.rules_matched));
+  PRINT_DBG_AST(std::format("Number of rules failed: {}\n", debug_stat.rules_failed));
+  PRINT_DBG_AST(std::format("Number of tokens consumed: {}\n", debug_stat.tokens_consumed));
+  PRINT_DBG_AST(std::format("Number of tokens unconsumed: {}\n", debug_stat.tokens_unconsumed));
+  PRINT_DBG_AST(std::format("Number of ast->up() calls: {}\n", debug_stat.ast_up_calls));
+  PRINT_DBG_AST(std::format("Number of ast->down() calls: {}\n", debug_stat.ast_down_calls));
+  PRINT_DBG_AST(std::format("Number of ast_add() calls: {}\n", debug_stat.ast_add_calls));
 }
 
 void Prp::gen_ws_map() {
@@ -1996,7 +1997,7 @@ void Prp::ast_dump(lh::Tree_index tree_idx) const {
     auto        token_text = scan_text(d.token_entry);
 
     std::string indent(index.level, ' ');
-    fmt::print("{} l:{} p:{} rule_id:{}/{} txt:{}\n", indent, index.level, index.pos, d.rule_id, rule_name, token_text);
+    std::print("{} l:{} p:{} rule_id:{}/{} txt:{}\n", indent, index.level, index.pos, d.rule_id, rule_name, token_text);
   }
 }
 
@@ -2283,7 +2284,7 @@ std::string Prp::rule_id_to_string(Rule_id rid) {
     case Prp_rule_overload_notation: return "Overload notation";
     case Prp_rule_overload_name: return "Overload name";
     case Prp_rule_function_pipe: return "Function pipe";
-    default: return fmt::format("{}", rid);
+    default: return std::format("{}", rid);
   }
 }
 

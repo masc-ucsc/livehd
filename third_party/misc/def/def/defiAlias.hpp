@@ -53,7 +53,7 @@ public:
 protected:
   defAliasIterator *iterator;
   int               first;
-  defrData *        defData;
+  defrData         *defData;
 };
 
 END_LEFDEF_PARSER_NAMESPACE

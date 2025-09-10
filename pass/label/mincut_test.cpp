@@ -2,10 +2,10 @@
 #include <strings.h>
 #include <unistd.h>
 
+#include <format>
 #include <iostream>
 #include <vector>
 
-#include "fmt/format.h"
 #include "gmock/gmock.h"
 #include "gtest/gtest.h"
 #include "label_mincut.hpp"
@@ -84,7 +84,7 @@ TEST_F(Label_mincut_test, test1) {
   for (const auto &n : a_graph->forward(hier)) {
     // ASSERT_EQ(0, static_cast<int>(n.get_color()));
 #ifdef DEBUG
-    fmt::print("Node Name:{} , Node Color:{}\n", n.debug_name(), n.get_color());
+    std::print("Node Name:{} , Node Color:{}\n", n.debug_name(), n.get_color());
 #endif
   }
 }
@@ -172,7 +172,7 @@ TEST_F(Label_mincut_test, test2) {
   for (const auto &n : b_graph->forward(hier)) {
     // ASSERT_EQ(expected[n.debug_name()], static_cast<int>(n.get_color()));
 #ifdef DEBUG
-    fmt::print("Node Name:{} , Node Color:{}\n", n.debug_name(), n.get_color());
+    std::print("Node Name:{} , Node Color:{}\n", n.debug_name(), n.get_color());
 #endif
   }
 }
@@ -244,7 +244,7 @@ TEST_F(Label_mincut_test, test3) {
   for (const auto &n : c_graph->forward(hier)) {
     // ASSERT_EQ(expected[n.debug_name()], static_cast<int>(n.get_color()));
 #ifdef DEBUG
-    fmt::print("Node Name:{} , Node Color:{}\n", n.debug_name(), n.get_color());
+    std::print("Node Name:{} , Node Color:{}\n", n.debug_name(), n.get_color());
 #endif
   }
 }

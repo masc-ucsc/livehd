@@ -5,10 +5,10 @@ load("//tools:copt_default.bzl", "COPTS")
 
 cc_library(
     name = "upass_verifier",
-    srcs = glob(
-        ["*.cpp"],
-        exclude = ["*test*.cpp"],
-    ),
+    # srcs = glob(
+    #     ["*.cpp"],
+    #     exclude = ["*test*.cpp"],
+    # ),
     hdrs = glob(["*.hpp"]),
     copts = COPTS,
     includes = ["."],

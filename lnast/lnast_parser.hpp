@@ -1,11 +1,8 @@
 //  This file is distributed under the BSD 3-Clause License. See LICENSE for details.
 #pragma once
 
-#include <fmt/color.h>
-#include <fmt/format.h>
-#include <fmt/os.h>
-
 #include <deque>
+#include <format>
 #include <iostream>
 #include <stack>
 
@@ -31,7 +28,6 @@ protected:
   void read_all_tokens() {
     do {
       token_array.push_back(lexer->lex_token());
-      // fmt::print("{}\n", token_array.back().get_string());
     } while (token_array.back().get_kind() != Lnast_token::eof);
   }
 
@@ -56,7 +52,7 @@ protected:
 
   void error() {
     // TODO: Populate error handling/diagnostic code
-    fmt::print("ERROR!\n");
+    std::cout << "ERROR!\n";
     forward_token();
   }
 

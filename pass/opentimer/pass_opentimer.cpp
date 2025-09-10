@@ -2,7 +2,9 @@
 
 #include "pass_opentimer.hpp"
 
+#include <format>
 #include <fstream>
+#include <iostream>
 #include <string>
 
 #include "lgedgeiter.hpp"
@@ -31,7 +33,7 @@ Pass_opentimer::Pass_opentimer(const Eprp_var &var) : Pass("pass.opentimer", var
 
   for (const auto f : absl::StrSplit(files, ',')) {
     if (str_tools::ends_with(f, ".lib")) {
-      fmt::print("opentimer using liberty file '{}'\n", f);
+      std::print("opentimer using liberty file '{}'\n", f);
       if (n_lib_read == 0) {
         timer.read_celllib(f);
       } else {

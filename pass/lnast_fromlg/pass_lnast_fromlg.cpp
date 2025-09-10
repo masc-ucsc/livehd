@@ -2,6 +2,8 @@
 
 #include "pass_lnast_fromlg.hpp"
 
+#include <format>
+#include <iostream>
 #include <queue>
 #include <stack>
 #include <string>
@@ -53,7 +55,7 @@ void Pass_lnast_fromlg::do_trans(Lgraph* lg, Eprp_var& var, std::string_view mod
   auto idx_stmts = lnast->add_child(lh::Tree_index::root(), Lnast_node::create_stmts());
 
   handle_io(lg, idx_stmts, *lnast);
-  // fmt::print("PRINTING the from_lg_bw_table:");
+  // std::cout << "PRINTING the from_lg_bw_table:";
   // lnast->print_bitwidth_table();
   initial_tree_coloring(lg);
 
@@ -412,9 +414,9 @@ void Pass_lnast_fromlg::attach_binaryop_node(Lnast& lnast, Lnast_nid& parent_nod
   bool     pid0_used = false;
   bool     pid1_used = false;
   Node_pin pid0_pin, pid1_pin;
-  // fmt::print("{}\n", pin.get_node().debug_name());
+  // std::print("{}\n", pin.get_node().debug_name());
   for (const auto& dpin : pin.get_node().out_connected_pins()) {
-    // fmt::print("{}\n", dpin.get_pid());
+    // std::print("{}\n", dpin.get_pid());
     if (dpin.get_pid() == 0) {
       pid0_used = true;
       pid0_pin  = dpin;
@@ -434,7 +436,7 @@ void Pass_lnast_fromlg::attach_binaryop_node(Lnast& lnast, Lnast_nid& parent_nod
     switch (pid0_pin.get_node().get_type_op()) {
       case Ntype_op::And:
         bop_node = lnast.add_child(parent_node, Lnast_node::create_bit_and());
-        break;  // fmt::print("\t{}\n", pid0_pin.get_node().debug_name()); break;
+        break;  // std::print("\t{}\n", pid0_pin.get_node().debug_name()); break;
       case Ntype_op::Or: bop_node = lnast.add_child(parent_node, Lnast_node::create_bit_or()); break;
       case Ntype_op::Xor: bop_node = lnast.add_child(parent_node, Lnast_node::create_bit_xor()); break;
       case Ntype_op::Ror: bop_node = lnast.add_child(parent_node, Lnast_node::create_log_or()); break;
@@ -856,7 +858,7 @@ void Pass_lnast_fromlg::attach_flop_node(Lnast& lnast, Lnast_nid& parent_node, c
     auto asg_pol = lnast.add_child(parent_node, Lnast_node::create_assign());
     lnast.add_child(asg_pol, Lnast_node::create_ref(temp_var_name));
     if (pola_pin.get_node().get_type_op() == Ntype_op::Const) {
-      if (pola_pin.get_node().get_type_const().to_firrtl() == "1") {
+      if (pola_pin.get_node().get_type_const().to_i() == 1) {
         lnast.add_child(asg_pol, Lnast_node::create_const("true"));
       } else {
         lnast.add_child(asg_pol, Lnast_node::create_const("false"));
@@ -953,8 +955,8 @@ void Pass_lnast_fromlg::attach_latch_node(Lnast& lnast, Lnast_nid& parent_node, 
 }
 
 void Pass_lnast_fromlg::attach_subgraph_node(Lnast& lnast, Lnast_nid& parent_node, const Node_pin& pin) {
-  auto node4pin = pin.get_node();
-  const auto& sub = node4pin.get_type_sub_node();
+  auto        node4pin = pin.get_node();
+  const auto& sub      = node4pin.get_type_sub_node();
 
   // Create tuple names for submodule IO.
   std::string out_tup_name;
@@ -964,11 +966,11 @@ void Pass_lnast_fromlg::attach_subgraph_node(Lnast& lnast, Lnast_nid& parent_nod
     // MAYBE//dpin_set_map_name(pin, create_temp_var());
     out_tup_name = dpin_get_name(pin);
   } else {
-    fmt::print("\npin.get_node().get_name() is: {} \n", pin.get_node().get_name());
+    std::print("\npin.get_node().get_name() is: {} \n", pin.get_node().get_name());
     out_tup_name = str_tools::get_str_before_first(pin.get_node().get_name(), ':');
   }
   auto inp_tup_name = create_temp_var();
-  // fmt::print("instance_name:{}, \n subgraph->get_name():{}\n", pin.get_node().get_name(), sub.get_name());
+  // std::print("instance_name:{}, \n subgraph->get_name():{}\n", pin.get_node().get_name(), sub.get_name());
 
   // Create + instantiate input tuple.
   auto args_idx = lnast.add_child(parent_node, Lnast_node::create_tuple_add());

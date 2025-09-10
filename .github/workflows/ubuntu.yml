@@ -7,65 +7,50 @@ on:
 jobs:
   test-opt:
     name: Build everything
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     steps:
       - name: Checkout repo
-        uses: actions/checkout@v4
+        uses: actions/checkout@v5
 
-      - name: Install bazelisk
-        uses: bazelbuild/setup-bazelisk@v2
 
       - name: Mount bazel cache
-        uses: actions/cache@v4
+        uses: actions/cache@v4.2.4
         with:
           path: "~/.cache/bazel"
-          key: bazel-gcc
+          key: bazel-gcc-${{ runner.os }}-${{ hashFiles('.bazelrc', '.bazelversion', 'WORKSPACE*', 'MODULE.bazel') }}
+          restore-keys: |
+            bazel-gcc-${{ runner.os }}-
+            bazel-gcc-
 
       #      - run: sudo apt install -y build-essential
       - run: bazel test -c dbg -s //...
 
   coverage:
     name: Gather coverage metrics
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
 
     steps:
       - name: Checkout repo
-        uses: actions/checkout@v4
+        uses: actions/checkout@v5
 
-      - name: Install bazelisk
-        uses: bazelbuild/setup-bazelisk@v2
 
       - name: Mount bazel cache
-        uses: actions/cache@v4
+        uses: actions/cache@v4.2.4
         with:
           path: "~/.cache/bazel"
-          key: bazel-cgcc
+          key: bazel-coverage-${{ runner.os }}-${{ hashFiles('.bazelrc', '.bazelversion', 'WORKSPACE*', 'MODULE.bazel') }}
+          restore-keys: |
+            bazel-coverage-${{ runner.os }}-
+            bazel-coverage-
 
       - name: Print the list of targets
         run: bazel query --output label_kind //...
 
       - run: bazel coverage --instrument_test_targets --collect_code_coverage --test_tag_filters=-fixme --combined_report=lcov --test_output=all //...
 
-      - uses: codecov/codecov-action@v3
+      - uses: codecov/codecov-action@v5
         with:
+          slug: masc-ucsc/livehd
+          token: ${{ secrets.CODECOV_TOKEN }}
           directory: ./bazel-out/_coverage
-
-  clang-dbg:
-    name: clang tests everything
-    runs-on: ubuntu-latest
-    steps:
-      - name: Checkout repo
-        uses: actions/checkout@v4
-
-      - name: Install bazelisk
-        uses: bazelbuild/setup-bazelisk@v2
-
-      - name: Mount bazel cache
-        uses: actions/cache@v4
-        with:
-          path: "~/.cache/bazel"
-          key: bazel-clang
-
-      #      - run: sudo apt install -y build-essential
-      - run: CXX=clang++ CC=clang bazel test -c opt //...
 

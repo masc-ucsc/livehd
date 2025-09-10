@@ -63,7 +63,7 @@ public:
 
   public:
     constexpr Compact(Hierarchy_index _hidx, Index_id _nid) : hidx(_hidx), nid(_nid) { assert(nid); };
-    constexpr Compact() : nid(0){};
+    constexpr Compact() : nid(0) {};
 
     [[nodiscard]] constexpr Index_id get_nid() const { return nid; }  // Mostly for debugging or to know order
 
@@ -106,7 +106,7 @@ public:
   public:
     Compact_flat(const Compact_flat &obj) : lgid(obj.lgid), nid(obj.nid) {}
     constexpr Compact_flat(const Lg_type_id &_lgid, Index_id _nid) : lgid(_lgid.value), nid(_nid) { assert(nid); };
-    constexpr Compact_flat() : nid(0){};
+    constexpr Compact_flat() : nid(0) {};
 
     [[nodiscard]] constexpr Index_id get_nid() const { return nid; }  // Mostly for debugging or to know order
 
@@ -141,9 +141,9 @@ public:
 
   public:
     // constexpr operator size_t() const { return nid; }
-    constexpr Compact_class() : nid(0){};  // needed for lgthree which allocates empty data
+    constexpr Compact_class() : nid(0) {};  // needed for lgthree which allocates empty data
 
-    constexpr Compact_class(const Index_id &_nid) : nid(_nid){};
+    constexpr Compact_class(const Index_id &_nid) : nid(_nid) {};
 
     Node get_node(Lgraph *lg) const { return {lg, *this}; }
 

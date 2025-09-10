@@ -26,11 +26,11 @@ public:
   bstar(const bstar& other) = delete;  // avoid, very slow
   bstar(size_t rsize) : nodes(), cont() { nodes.reserve(rsize); }
 
-  int root_idx = -1; // bottom left element in floorplan
+  int root_idx = -1;  // bottom left element in floorplan
 
   // first element is root
-  std::vector<bnode> nodes;
-  std::vector<FPObject*> cont; // would use ref, but need to add and remove elements directly (ref_wrapper?)
+  std::vector<bnode>     nodes;
+  std::vector<FPObject*> cont;  // would use ref, but need to add and remove elements directly (ref_wrapper?)
 
 private:
 };
@@ -45,14 +45,14 @@ private:
   bstar vert;   // vertical B*-tree
 
   // basic insert/delete methods used by perturbation methods
-  bool insert_obj(size_t idx); // insert a module into the B* layout, returns false if insertion is impossible
-  void delete_obj(size_t idx); // delete a module
+  bool insert_obj(size_t idx);  // insert a module into the B* layout, returns false if insertion is impossible
+  void delete_obj(size_t idx);  // delete a module
 
   // perturbation methods used by SA algorithm, returns false if operation is impossible
-  bool rotate(FPObject* obj); // rotate a module 90 degrees
-  bool move(FPObject* obj); // move a module somewhere else
-  bool swap(FPObject* obj1, FPObject* obj2); // swap two modules
-  bool moveExt(FPObject* obj); // move a module to the outside of the floorplan
+  bool rotate(FPObject* obj);                 // rotate a module 90 degrees
+  bool move(FPObject* obj);                   // move a module somewhere else
+  bool swap(FPObject* obj1, FPObject* obj2);  // swap two modules
+  bool moveExt(FPObject* obj);                // move a module to the outside of the floorplan
 
 public:
   annLayout(unsigned int rsize);

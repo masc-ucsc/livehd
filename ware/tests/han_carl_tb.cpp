@@ -49,8 +49,9 @@ void advance_clock(Vhan_carl *top, int nclocks = 1) {
 #endif
 
       global_time++;
-      if (Verilated::gotFinish() || global_time >= MAX_TIME)
+      if (Verilated::gotFinish() || global_time >= MAX_TIME) {
         do_terminate();
+      }
     }
   }
 }

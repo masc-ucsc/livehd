@@ -25,6 +25,6 @@ void Invariant_find_options::set(const std::string &key, const std::string &valu
       set_val(key, value);
     }
   } catch (const std::invalid_argument &ia) {
-    Pass::error(fmt::format("key {} has an invalid argument", key));
+    Pass::error(std::format("key {} has an invalid argument", key));
   }
 }

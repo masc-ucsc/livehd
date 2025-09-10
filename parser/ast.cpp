@@ -2,6 +2,8 @@
 
 #include "ast.hpp"
 
+#include <print>
+
 Ast_parser::Ast_parser(std::string_view _buffer, Rule_id top_rule) : buffer(_buffer) {
   set_root(Ast_parser_node(top_rule, 0));
   add_track_parent(lh::Tree_index::root());
@@ -84,6 +86,6 @@ void Ast_parser::dump() const {
   for (const auto &index : depth_preorder()) {
     std::string indent(index.level, ' ');
     const auto &d = get_data(index);
-    fmt::print("{} l:{} p:{} rule_id:{}\n", indent.c_str(), index.level, index.pos, d.rule_id);
+    std::print("{} l:{} p:{} rule_id:{}\n", indent.c_str(), index.level, index.pos, d.rule_id);
   }
 }

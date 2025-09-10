@@ -2,6 +2,8 @@
 
 #include "pass_submatch.hpp"
 
+#include <format>
+#include <iostream>
 #include <queue>
 #include <string>
 
@@ -37,7 +39,7 @@ void pass_submatch::work(Eprp_var &var) {
   }
 
   for (const auto &g : var.lgs) {
-    fmt::print("finding subgraphs for graph {}...\n", g->get_name());
+    std::print("finding subgraphs for graph {}...\n", g->get_name());
     p.do_work(g);
   }
 }
@@ -69,7 +71,7 @@ uint64_t pass_submatch::hash_node(Node n) {
 uint32_t pass_submatch::group_score(uint32_t group_size, uint32_t num_nodes) { return group_size * group_size * num_nodes; }
 
 void pass_submatch::find_mffc_group(Lgraph *g) {
-  fmt::print("0 - Find MFFCs\n");
+  std::cout << "0 - Find MFFCs\n";
 
   uint32_t mffc_id        = 0;
   uint32_t max_mffc_depth = 0;
@@ -190,15 +192,15 @@ void pass_submatch::find_mffc_group(Lgraph *g) {
     }
   }
 
-  fmt::print("#MFFCs - {}\n", mffc_id);
+  std::print("#MFFCs - {}\n", mffc_id);
   for (auto &[id, info] : mffc_group) {
-    fmt::print("Group #{} - {} x {}\n", id, info.tree_size, info.mffc_set.size());
+    std::print("Group #{} - {} x {}\n", id, info.tree_size, info.mffc_set.size());
   }
 }
 
 void pass_submatch::find_subs(Lgraph *g) {
   // Topological Sort
-  fmt::print("1 - Topological Sort\n");
+  std::cout << "1 - Topological Sort\n";
   std::vector<Node::Compact>         sorted_compact_nodes;
   absl::flat_hash_set<Node::Compact> visited;
   std::queue<Node::Compact>          node_queue;
@@ -220,7 +222,7 @@ void pass_submatch::find_subs(Lgraph *g) {
   });
   // FIXME: Backward iterator is not working
   // for (const auto &node : g->backward()) {
-  //  fmt::print("node = {}\n", node.debug_name());
+  //  std::print("node = {}\n", node.debug_name());
   //   sorted_compact_nodes.emplace_back(node.get_compact());
   // }
 
@@ -230,7 +232,7 @@ void pass_submatch::find_subs(Lgraph *g) {
   // (1) Node <-> (Depth, Hash) Map  : Query node for hash
   // (2) Depth - (Hash <-> Node) Map : Query equivalence trees with given depths
   // Time/Space Complexity = O(V x DEPTH)
-  fmt::print("2 - Construct Depth Map\n");
+  std::cout << "2 - Construct Depth Map\n";
   absl::flat_hash_map<Node::Compact, std::vector<uint64_t>>              node2depth_hash;
   std::vector<absl::flat_hash_map<uint64_t, std::vector<Node::Compact>>> depth_hash2node;
   for (const auto &compact_node : sorted_compact_nodes) {
@@ -256,24 +258,25 @@ void pass_submatch::find_subs(Lgraph *g) {
       uint64_t n = static_cast<uint64_t>(node.get_type_op());
       h          = lh::waterhash(&n, 4, h & 0xFFFF);
       if (depth == 0) {
-        node2depth_hash[node.get_compact()] = {h};
-      } else {
-        node2depth_hash[node.get_compact()].emplace_back(h);
+        node2depth_hash[node.get_compact()].clear();
       }
+      node2depth_hash[node.get_compact()].emplace_back(h);
+
       if (depth_hash2node.size() <= depth) {
         depth_hash2node.emplace_back(absl::flat_hash_map<uint64_t, std::vector<Node::Compact>>());
       }
       if (depth_hash2node[depth].count(h)) {
         depth_hash2node[depth][h].emplace_back(node.get_compact());
       } else {
-        depth_hash2node[depth][h] = {node.get_compact()};
+        depth_hash2node[depth][h].clear();
+        depth_hash2node[depth][h].emplace_back(node.get_compact());
       }
     }
   }
 
   // Construct Node -> (Height,(Root Node,Hash)) Map
   // Time/Space Complexity = O(V x DEPTH)
-  fmt::print("3 - Construct Height Map\n");
+  std::cout << "3 - Construct Height Map\n";
   struct Root_hash {
     Node::Compact root;
     uint64_t      hash;
@@ -326,7 +329,7 @@ void pass_submatch::find_subs(Lgraph *g) {
   // (2) Add matching subtrees while traversing the primary candidate trees
   // (3) Commit matching trees
   // (4) Mark nodes in matching trees as "used"
-  fmt::print("4 - Iterative Matching\n");
+  std::cout << "4 - Iterative Matching\n";
   const int MAX_ITER = 1;
   for (size_t iter = 0; iter < MAX_ITER; ++iter) {
     // Step (1)
@@ -346,7 +349,7 @@ void pass_submatch::find_subs(Lgraph *g) {
     if (best_score == 0) {
       break;
     }
-    fmt::print("Candidate - D={} : {}\n", d_best, depth_hash2node[d_best][h_best].size());
+    std::print("Candidate - D={} : {}\n", d_best, depth_hash2node[d_best][h_best].size());
 
     // Step (2)
     absl::flat_hash_set<Node::Compact> root_set;
@@ -370,8 +373,8 @@ void pass_submatch::find_subs(Lgraph *g) {
         if (global_node_set.count(nc)) {
           shared_node_set.insert(nc);
         }
-        // for (int i = 0; i < depth; ++i) fmt::print(" ");
-        // fmt::print("{}\n", Node(g, nc).debug_name());
+        // for (int i = 0; i < depth; ++i) std::cout << " ";
+        // std::print("{}\n", Node(g, nc).debug_name());
         for (auto e : Node(g, nc).inp_edges()) {
           traverse_tree(e.driver.get_node().get_compact(), depth + 1);
         }
@@ -382,9 +385,9 @@ void pass_submatch::find_subs(Lgraph *g) {
       }
     }
 
-    fmt::print("#Nodes:         {}\n", sorted_compact_nodes.size());
-    fmt::print("#Nodes covered: {}\n", global_node_set.size());
-    fmt::print("#Nodes shared:  {}\n", shared_node_set.size());
+    std::print("#Nodes:         {}\n", sorted_compact_nodes.size());
+    std::print("#Nodes covered: {}\n", global_node_set.size());
+    std::print("#Nodes shared:  {}\n", shared_node_set.size());
 
     absl::flat_hash_map<Node::Compact, Node::Compact>                 leaf2root;
     absl::flat_hash_map<uint64_t, absl::flat_hash_set<Node::Compact>> hash2leaf;
@@ -401,18 +404,18 @@ void pass_submatch::find_subs(Lgraph *g) {
     }
 
     for (const auto &[hash, leaves] : hash2leaf) {
-      fmt::print("Subtree: {} -> {}", hash, leaves.size());
-      fmt::print("\n");
+      std::print("Subtree: {} -> {}", hash, leaves.size());
+      std::cout << "\n";
     }
 
-    // fmt::print("\nMatched Subtrees\n");
+    // std::cout << "\nMatched Subtrees\n";
     // for (const auto &[hash, vec] : hash2root_leaf) {
     //   if (vec.size() < 2) continue;
-    //   fmt::print(" >");
+    //   std::cout << " >";
     //   for (const auto &rl : vec) {
-    //     fmt::print("( {} -> {}({}) )", Node(g, rl.root).debug_name(), Node(g, rl.leaf).debug_name(), rl.depth);
+    //     std::print("( {} -> {}({}) )", Node(g, rl.root).debug_name(), Node(g, rl.leaf).debug_name(), rl.depth);
     //   }
-    //   fmt::print("\n");
+    //   std::cout << "\n";
     // }
   }
 }

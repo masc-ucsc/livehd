@@ -28,8 +28,9 @@ protected:
   Setup_lgraph() : rand_pos(1, Port_invalid - 1), rand_bits(1, Bits_max) {}
 
   void randomly_delete_one_io(Lgraph *lg) {
-    if (posused.empty())
+    if (posused.empty()) {
       return;
+    }
 
     auto it = name2pos.begin();
     std::advance(it, rand_size.max(posused.size()));
@@ -43,10 +44,11 @@ protected:
       pin = lg->get_graph_input(name);
     } else {
       EXPECT_TRUE(lg->has_graph_output(name));
-      if (rbool.any())
+      if (rbool.any()) {
         pin = lg->get_graph_output_driver_pin(name);
-      else
+      } else {
         pin = lg->get_graph_output(name);
+      }
     }
 
     // FIXME: we should get this working both ways (hier and non_hier)

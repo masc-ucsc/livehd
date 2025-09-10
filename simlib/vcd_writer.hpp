@@ -176,14 +176,16 @@ public:
 
   // Suspend dumping to VCD file
   void dump_off(TimeStamp current) {
-    if (dumping && !registering && vars_prevs.size())
+    if (dumping && !registering && vars_prevs.size()) {
       dump_off_int(current);
+    }
     dumping = false;
   }
   // Resume dumping to VCD file
   void dump_on(TimeStamp current) {
-    if (!dumping && !registering && vars_prevs.size())
+    if (!dumping && !registering && vars_prevs.size()) {
       fprintf(ofile, "#%d", current);
+    }
     dump_values("$dumpon");
     dumping = true;
   }
@@ -192,20 +194,24 @@ public:
   // If the VCD header has not already been written, calling `flush()` will force
   // the header to be written thus disallowing any further variable registrations.
   void flush(const TimeStamp *current = NULL) {
-    if (closed)
+    if (closed) {
       throw VCDPhaseException{"Cannot flush() after close()"};
-    if (registering)
+    }
+    if (registering) {
       finalize_registration();
-    if (current != NULL && *current > timestamp)
+    }
+    if (current != NULL && *current > timestamp) {
       fprintf(ofile, "#%d", *current);
+    }
     fflush(ofile);
   }
   // Close VCD writer. Any buffered VCD data is flushed to the output file.
   // After `close()`, NO variable registration or value changes will be accepted.
   // Note, the output file-stream will be closed in destructor of `VCDWriter`
   void close(const TimeStamp *final = NULL) {
-    if (closed)
+    if (closed) {
       return;
+    }
     flush(final);
     closed = true;
   }
@@ -216,8 +222,9 @@ public:
   void set_scope_default_type(ScopeType new_type) { scope_def_type = new_type; }
 
   void set_scope_sep(const std::string &_scope_sep) {
-    if (scope_sep.size() == 0 || scope_sep == _scope_sep)
+    if (scope_sep.size() == 0 || scope_sep == _scope_sep) {
       return;
+    }
     scope_sep = _scope_sep;
   }
   //! get VCD Variable (if it is registered var() != NULL)

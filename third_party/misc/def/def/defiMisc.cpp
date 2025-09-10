@@ -69,8 +69,9 @@ void defiGeometries::startList(int x, int y) {
     x_               = (int*)malloc(sizeof(int) * 16);
     y_               = (int*)malloc(sizeof(int) * 16);
     numPoints_       = 0;
-  } else  // reset the numPoints to 0
+  } else {  // reset the numPoints to 0
     numPoints_ = 0;
+  }
   addToList(x, y);
 }
 
@@ -179,7 +180,5 @@ void defiStyles::setPolygon(defiGeometries* geom) {
 
 int defiStyles::style() const { return styleNum_; }
 
-struct defiPoints defiStyles::getPolygon() const {
-  return *(polygon_);
-}
+struct defiPoints defiStyles::getPolygon() const { return *(polygon_); }
 END_LEFDEF_PARSER_NAMESPACE

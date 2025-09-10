@@ -12,9 +12,9 @@
 
 class Code_gen_all_lang {
 public:
-  Code_gen_all_lang(){};
+  Code_gen_all_lang() {};
 
-  virtual ~Code_gen_all_lang(){};
+  virtual ~Code_gen_all_lang() {};
 
   virtual std::string stmt_sep() const                             = 0;
   virtual std::string get_lang_type() const                        = 0;

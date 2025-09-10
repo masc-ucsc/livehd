@@ -3,6 +3,8 @@
 #include "bundle.hpp"
 
 #include <algorithm>
+#include <format>
+#include <iostream>
 
 #include "likely.hpp"
 #include "lnast.hpp"
@@ -121,8 +123,9 @@ std::tuple<bool, bool, size_t> Bundle::match_int(std::string_view a, std::string
       if (std::isdigit(b[b_last_section])) {
         bool m;
         std::tie(m, a_pos, b_pos) = match_int_advance(a, b, a_last_section, b_last_section);
-        if (!m)
+        if (!m) {
           return std::make_tuple(false, false, b_last_section);
+        }
       } else {
         I(a[a_pos] == ':');
         ++a_pos;  // skip first
@@ -141,8 +144,9 @@ std::tuple<bool, bool, size_t> Bundle::match_int(std::string_view a, std::string
       if (std::isdigit(a[a_last_section])) {
         bool m;
         std::tie(m, b_pos, a_pos) = match_int_advance(b, a, b_last_section, a_last_section);  // swap order
-        if (!m)
+        if (!m) {
           return std::make_tuple(false, false, b_last_section);
+        }
       } else {
         I(b[b_pos] == ':');
         ++b_pos;  // skip first
@@ -168,17 +172,20 @@ std::tuple<bool, bool, size_t> Bundle::match_int(std::string_view a, std::string
   bool a_match = (a_pos >= a.size()) && (b_pos >= b.size() || b[b_pos] == '.');
   bool b_match = (b_pos >= b.size()) && (a_pos >= a.size() || a[a_pos] == '.');
 
-  if (b.size() > b_pos && b[b_pos] == '.')
+  if (b.size() > b_pos && b[b_pos] == '.') {
     ++b_pos;
-  if (a.size() > a_pos && a[a_pos] == '.')
+  }
+  if (a.size() > a_pos && a[a_pos] == '.') {
     ++a_pos;
+  }
 
   return std::make_tuple(a_match, b_match, b_pos);
 }
 
 std::string Bundle::append_field(std::string_view a, std::string_view b) {
-  if (a.empty())
+  if (a.empty()) {
     return std::string(b);
+  }
 
   return absl::StrCat(a, ".", b);
 }
@@ -323,15 +330,18 @@ std::tuple<std::string, std::string> Bundle::learn_fix_int(std::string_view a, s
 }
 
 bool Bundle::match(std::string_view a, std::string_view b) {
-  if (a == b)
+  if (a == b) {
     return true;
+  }
   if (a.empty()) {
-    if (b == "0" || (b.size() > 3 && b.substr(0, 3) == ":0:"))
+    if (b == "0" || (b.size() > 3 && b.substr(0, 3) == ":0:")) {
       return true;
+    }
   }
   if (b.empty()) {
-    if (a == "0" || (a.size() > 3 && a.substr(0, 3) == ":0:"))
+    if (a == "0" || (a.size() > 3 && a.substr(0, 3) == ":0:")) {
       return true;
+    }
   }
 
   auto [m1, m2, x] = match_int(a, b);
@@ -342,8 +352,9 @@ bool Bundle::match(std::string_view a, std::string_view b) {
 size_t Bundle::match_first_partial(std::string_view a, std::string_view b) {
   auto [m1, m2, x] = match_int(a, b);
   (void)m2;
-  if (m1)
+  if (m1) {
     return x;  // a reached the end in match
+  }
   return 0;
 }
 
@@ -400,8 +411,9 @@ void Bundle::del_int(std::string_view key) {
       new_map.emplace_back(std::move(e));
       continue;
     }
-    if (e_pos >= e.first.size())
+    if (e_pos >= e.first.size()) {
       continue;  // full match?
+    }
 
     I(e.first[e_pos] != '.');  // not . included
 
@@ -416,8 +428,9 @@ void Bundle::del_int(std::string_view key) {
 }
 
 int Bundle::get_first_level_pos(std::string_view key) {
-  if (key.empty())
+  if (key.empty()) {
     return -1;
+  }
 
   auto skip = 0u;
 
@@ -434,8 +447,9 @@ int Bundle::get_first_level_pos(std::string_view key) {
 
 std::string_view Bundle::get_first_level(std::string_view key) {
   auto dot_pos = key.find('.');
-  if (dot_pos == std::string::npos)
+  if (dot_pos == std::string::npos) {
     return key;
+  }
 
   return key.substr(0, dot_pos);
 }
@@ -443,14 +457,16 @@ std::string_view Bundle::get_first_level(std::string_view key) {
 std::string_view Bundle::get_first_level_name(std::string_view key) {
   auto dot_pos = key.find('.');
   if (key.size() > 0 && key.front() != ':') {
-    if (dot_pos == std::string::npos)
+    if (dot_pos == std::string::npos) {
       return key;
+    }
     return key.substr(0, dot_pos);
   }
 
   auto n = key.substr(1).find(':');
-  if (dot_pos == std::string::npos)
+  if (dot_pos == std::string::npos) {
     return key.substr(1 + 1 + n);
+  }
   return key.substr(1 + 1 + n, dot_pos - 1 - 1 - n);
 }
 
@@ -467,16 +483,18 @@ std::string_view Bundle::get_canonical_name(std::string_view key) {
     break;
   }
 
-  if (key2 == "0")
+  if (key2 == "0") {
     key2 = "";
+  }
 
   return key2;
 }
 
 std::string_view Bundle::get_last_level(std::string_view key) {
   auto n = key.rfind('.');
-  if (n == std::string::npos)
+  if (n == std::string::npos) {
     return key;
+  }
 
   I(n != 0);  // name can not start with a .
   return key.substr(n + 1);
@@ -497,8 +515,9 @@ std::pair<int, std::string_view> Bundle::convert_key_to_io(std::string_view key)
   if (key[skip] == '$' || key[skip] == '%') {
     ++skip;
   }
-  if (key[skip] == '.')
+  if (key[skip] == '.') {
     ++skip;
+  }
 
   if (key[skip] != ':') {
     return std::pair(-1, key.substr(skip));
@@ -527,8 +546,9 @@ std::string_view Bundle::get_all_but_first_level(std::string_view key) {
     return key.substr(n + 1);
   }
 
-  if (key.front() == '$' || key.front() == '%' || key.front() == '#')
+  if (key.front() == '$' || key.front() == '%' || key.front() == '#') {
     return key.substr(1);
+  }
 
   return std::string_view("");  // empty if no dot left
 }
@@ -544,8 +564,9 @@ std::string Bundle::learn_fix(std::string_view key_sv) {
 
 const Bundle::Entry &Bundle::get_entry(std::string_view key) const {
   for (const auto &e : key_map) {
-    if (match(e.first, key))
+    if (match(e.first, key)) {
       return e.second;
+    }
   }
 
   static Entry invalid(true, invalid_lconst);
@@ -556,22 +577,25 @@ const Bundle::Entry &Bundle::get_entry(std::string_view key) const {
 const Lconst &Bundle::get_trivial() const {
   int pos = -1;
   for (auto i = 0u; i < key_map.size(); ++i) {
-    if (is_attribute(key_map[i].first))
+    if (is_attribute(key_map[i].first)) {
       continue;
+    }
     I(pos < 0);  // only scalars, so trivial can not be defined already
     pos = i;
   }
 
-  if (pos < 0)
+  if (pos < 0) {
     return invalid_lconst;
+  }
 
   return key_map[pos].second.trivial;
 }
 
 bool Bundle::has_trivial(std::string_view key) const {
   for (const auto &e : key_map) {
-    if (match(e.first, key))
+    if (match(e.first, key)) {
       return true;
+    }
   }
   return false;
 }
@@ -585,8 +609,9 @@ bool Bundle::has_bundle(std::string_view key) const {
 
   for (const auto &e : key_map) {
     auto e_pos = match_first_partial(key, e.first);
-    if (e_pos == 0)
+    if (e_pos == 0) {
       continue;
+    }
 
     return true;
   }
@@ -605,8 +630,9 @@ std::shared_ptr<Bundle> Bundle::get_bundle(std::string_view key) const {
 
   for (const auto &e : key_map) {
     auto e_pos = match_first_partial(key, e.first);
-    if (e_pos == 0)
+    if (e_pos == 0) {
       continue;
+    }
     GI(e_pos < e.first.size(), e.first[e_pos] != '.');  // . not included
 
     if (!tup) {
@@ -629,8 +655,9 @@ std::shared_ptr<Bundle> Bundle::get_bundle(std::string_view key) const {
     }
   }
 
-  if (!is_correct())
+  if (!is_correct()) {
     tup->set_issue();
+  }
 
   return tup;
 }
@@ -655,8 +682,9 @@ std::shared_ptr<Bundle> Bundle::get_bundle(const std::shared_ptr<Bundle const> &
     ++pos;
   }
 
-  if (!tup->is_correct())
+  if (!tup->is_correct()) {
     ret_tup->set_issue();
+  }
 
   return ret_tup;
 }
@@ -681,10 +709,11 @@ void Bundle::set(std::string_view key, const std::shared_ptr<Bundle const> &tup)
     std::string_view key2;
     // Remove 0. from tup if tup is scalar
     if (tup_scalar && e.first.front() == '0' && (e.first.size() == 1 || e.first[1] == '.')) {
-      if (e.first.size() == 1)
+      if (e.first.size() == 1) {
         key2 = "";  // remove "0"
-      else
+      } else {
         key2 = e.first.substr(2);  // remove "0."
+      }
     } else {
       key2 = e.first;
     }
@@ -700,9 +729,6 @@ void Bundle::set(std::string_view key, const std::shared_ptr<Bundle const> &tup)
 
 void Bundle::set(std::string_view key, const Entry &&entry) {
   I(!key.empty());
-
-  //fmt::print("sz:{} {}\n", key_map.size(), key);
-  //dump();
 
   std::string uncanonical_key{key};
   bool        pending_adjust = false;
@@ -747,15 +773,17 @@ void Bundle::set(std::string_view key, const Entry &&entry) {
         lpart = get_last_level(e.first);
       }
 
-      if (fpart.size() >= key_part.size())
+      if (fpart.size() >= key_part.size()) {
         continue;
+      }
 
       // NOTE: full match foo.bar == foo not foo.bar == foo match
       if (key_part[fpart.size()] == '.' && fpart == key_part.substr(0, fpart.size())) {
-        if (lpart.empty())
+        if (lpart.empty()) {
           e.first = absl::StrCat(fpart, ".0");
-        else
+        } else {
           e.first = absl::StrCat(fpart, ".0.", lpart);
+        }
         if (e.first == fixed_key) {
           e.second = entry;
           return;
@@ -778,7 +806,7 @@ void Bundle::set(std::string_view key, const Entry &&entry) {
       I(!is_attribute(lower));
       if (has_trivial(lower)) {
         dump();
-        fmt::print("OOPPPS (bundle is corrupted). Time to debug!!! {} {}\n", e.first, lower);
+        std::print("OOPPPS (bundle is corrupted). Time to debug!!! {} {}\n", e.first, lower);
         exit(-3);
         return;
       }
@@ -823,8 +851,9 @@ bool Bundle::concat(const std::shared_ptr<Bundle const> &tup) {
         Lnast::info("can not concat bundle pin to bundle unordered {} field {}", get_name(), e.first);
         return false;
       }
-      if (x > max_pos)
+      if (x > max_pos) {
         max_pos = x;
+      }
     }
     for (const auto &e : delayed_numbers) {
       auto        x = str_tools::to_i(e.first);
@@ -840,18 +869,21 @@ bool Bundle::concat(const std::shared_ptr<Bundle const> &tup) {
 Lconst Bundle::flatten() const {
   // a_dpin = (tup[0]|(tup[1]<<tup[0].__sbits)|(tup[2]<<(tup[0..1].__sbits)|.....)
 
-  if (!is_correct())
+  if (!is_correct()) {
     return invalid_lconst;
+  }
 
   std::stable_sort(key_map.begin(), key_map.end(), bundle_sort);
 
   Lconst result;
   for (const auto &e : key_map) {
-    if (is_attribute(e.first))
+    if (is_attribute(e.first)) {
       continue;
+    }
 
-    if (e.second.trivial.is_invalid())
+    if (e.second.trivial.is_invalid()) {
       return e.second.trivial;
+    }
 
     auto v = e.second.trivial << result.get_bits();
     result = result.or_op(v.get_mask_op());
@@ -870,8 +902,9 @@ std::shared_ptr<Bundle> Bundle::create_assign(const std::shared_ptr<Bundle const
 }
 
 std::shared_ptr<Bundle> Bundle::create_assign(const Lconst &rhs_trivial) const {
-  if (rhs_trivial.is_invalid())
+  if (rhs_trivial.is_invalid()) {
     return nullptr;
+  }
 
   I(false);
   I(is_correct());
@@ -981,8 +1014,9 @@ bool Bundle::concat(const Lconst &trivial) {
       Lnast::info("can not concat trivial:{} to bundle unordered {} field {}", trivial, get_name(), e.first);
       return false;
     }
-    if (x > max_pos)
+    if (x > max_pos) {
       max_pos = x;
+    }
   }
 
   std::string new_key(std::to_string(max_pos + 1));
@@ -995,10 +1029,12 @@ bool Bundle::concat(const Lconst &trivial) {
 bool Bundle::is_scalar() const {
   auto conta = 0;
   for (const auto &e : key_map) {
-    if (is_attribute(e.first))
+    if (is_attribute(e.first)) {
       continue;
-    if (conta > 0)
+    }
+    if (conta > 0) {
       return false;
+    }
     ++conta;
   }
   return true;
@@ -1009,27 +1045,32 @@ bool Bundle::is_ordered(std::string_view key) const {
     auto             e_pos = 0u;
     std::string_view field;
     if (key.empty()) {
-      if (is_root_attribute(e.first))
+      if (is_root_attribute(e.first)) {
         continue;  // attributes do not affect order
+      }
 
       field = e.first;
     } else {
       e_pos = match_first_partial(key, e.first);
-      if (e_pos == 0)
+      if (e_pos == 0) {
         continue;
+      }
 
-      if (e_pos >= e.first.size())
+      if (e_pos >= e.first.size()) {
         continue;  // there was no match, so still ordered
+      }
 
-      if (is_attribute(e.first))
+      if (is_attribute(e.first)) {
         continue;  // attributes do not affect order
+      }
 
       field = e.first.substr(e_pos);
     }
 
     auto pos = get_first_level_pos(field);
-    if (pos < 0)
+    if (pos < 0) {
       return false;  // OOPS, not ordered entry. This is not OK
+    }
   }
 
   return true;
@@ -1045,8 +1086,9 @@ std::string_view Bundle::get_scalar_name() const {
     } else {
       s = e.first;
     }
-    if (!sname.empty() && sname != s)
+    if (!sname.empty() && sname != s) {
       return "";
+    }
     sname = s;
   }
 
@@ -1062,12 +1104,14 @@ bool Bundle::is_trivial_scalar() const {
     if (is_attribute(field)) {
       field = get_all_but_last_level(field);
     } else {
-      if (conta > 0)
+      if (conta > 0) {
         return false;
+      }
       ++conta;
     }
-    if (field == "0")
+    if (field == "0") {
       continue;
+    }
 
     return false;
   }
@@ -1087,9 +1131,9 @@ bool Bundle::has_just_attributes() const {
 }
 
 void Bundle::dump() const {
-  fmt::print("bundle_name: {}{}\n", name, correct ? "" : " ISSUES");
+  std::print("bundle_name: {}{}\n", name, correct ? "" : " ISSUES");
 
   for (const auto &it : key_map) {
-    fmt::print("  key:{} trivial:{} {}\n", it.first, it.second.trivial, it.second.immutable ? "let" : "mut");
+    std::print("  key:{} trivial:{} {}\n", it.first, it.second.trivial, it.second.immutable ? "let" : "mut");
   }
 }

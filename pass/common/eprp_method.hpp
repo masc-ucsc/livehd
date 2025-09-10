@@ -10,7 +10,7 @@ private:
 protected:
   struct Label_attr {
     Label_attr(std::string_view _help, bool _required, std::string_view _value)
-        : help(_help), default_value(_value), required(_required){};
+        : help(_help), default_value(_value), required(_required) {};
     const std::string help;
     const std::string default_value;
     const bool        required;

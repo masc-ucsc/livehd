@@ -68,8 +68,9 @@ void defiAssertion::clear() {
   int                    i;
   struct defiAssertPath* s;
 
-  if (netName_)
+  if (netName_) {
     *(netName_) = '\0';
+  }
   isSum_        = 0;
   isDiff_       = 0;
   isAssertion_  = 0;
@@ -108,12 +109,13 @@ void defiAssertion::setWiredlogicMode() { isWiredlogic_ = 1; }
 
 void defiAssertion::setWiredlogic(const char* name, double dist) {
   int len = strlen(name) + 1;
-  if (isDelay_)
+  if (isDelay_) {
     defiError(0,
               6201,
               "ERROR (DEFPARS-6201): Unable to process the DEF file. Both WIREDLOGIC and DELAY statements are defined in "
               "constraint/assertion.\nUpdate the DEF file to define either a WIREDLOGIC or DELAY statement only.",
               defData);
+  }
   isWiredlogic_ = 1;
   if (netNameLength_ < len) {
     free(netName_);
@@ -125,34 +127,37 @@ void defiAssertion::setWiredlogic(const char* name, double dist) {
 }
 
 void defiAssertion::setDelay() {
-  if (isWiredlogic_)
+  if (isWiredlogic_) {
     defiError(0,
               6201,
               "ERROR (DEFPARS-6201): Unable to process the DEF file. Both WIREDLOGIC and DELAY statements are defined in "
               "constraint/assertion.\nUpdate the DEF file to define either a WIREDLOGIC or DELAY statement only.",
               defData);
+  }
   isDelay_ = 1;
 }
 
 void defiAssertion::setSum() {
-  if (isDiff_)
+  if (isDiff_) {
     defiError(0,
               6202,
               "ERROR (DEPPARS-6202): Unable to process the DEF file. Both SUM and DIFF statements are defined in "
               "constraint/assertion.\nUpdate the DEF file to define either a SUM or DIFF statement only.",
               defData);
+  }
   isSum_ = 1;
 }
 
 void defiAssertion::unsetSum() { isSum_ = 0; }
 
 void defiAssertion::setDiff() {
-  if (isSum_)
+  if (isSum_) {
     defiError(0,
               6202,
               "ERROR (DEPPARS-6202): Unable to process the DEF file. Both SUM and DIFF statements are defined in "
               "constraint/assertion.\nUpdate the DEF file to define either a SUM or DIFF statement only.",
               defData);
+  }
   isDiff_ = 1;
 }
 
@@ -242,21 +247,26 @@ void defiAssertion::path(int index, char** fromInst, char** fromPin, char** toIn
 
   if (index >= 0 && index < numItems_ && itemTypes_[index] == 'p') {
     ap = (struct defiAssertPath*)(items_[index]);
-    if (fromInst)
+    if (fromInst) {
       *fromInst = ap->fromInst_;
-    if (fromPin)
+    }
+    if (fromPin) {
       *fromPin = ap->fromPin_;
-    if (toInst)
+    }
+    if (toInst) {
       *toInst = ap->toInst_;
-    if (toPin)
+    }
+    if (toPin) {
       *toPin = ap->toPin_;
+    }
   }
 }
 
 void defiAssertion::net(int index, char** netName) const {
   if (index >= 0 && index < numItems_ && itemTypes_[index] == 'n') {
-    if (netName)
+    if (netName) {
       *netName = (char*)(items_[index]);
+    }
   }
 }
 
@@ -299,8 +309,9 @@ void defiAssertion::addNet(const char* name) {
   }
 
   // make sure there is space in the array
-  if (numItems_ >= numItemsAllocated_)
+  if (numItems_ >= numItemsAllocated_) {
     bumpItems();
+  }
 
   // place it
   i             = numItems_;
@@ -333,8 +344,9 @@ void defiAssertion::addPath(const char* fromInst, const char* fromPin, const cha
   strcpy(s->toPin_, defData->DEFCASE(toPin));
 
   // make sure there is space in the array
-  if (numItems_ >= numItemsAllocated_)
+  if (numItems_ >= numItemsAllocated_) {
     bumpItems();
+  }
 
   // place it
   i             = numItems_;

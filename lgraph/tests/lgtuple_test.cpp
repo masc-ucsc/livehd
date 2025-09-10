@@ -1,13 +1,14 @@
 //  This file is distributed under the BSD 3-Clause License. See LICENSE for details.
 
+#include "lgtuple.hpp"
 
+#include <format>
+#include <iostream>
 #include <set>
 #include <vector>
 
 #include "gmock/gmock.h"
 #include "gtest/gtest.h"
-
-#include "lgtuple.hpp"
 #include "lgraph.hpp"
 #include "lrand.hpp"
 
@@ -17,8 +18,8 @@ protected:
   std::set<std::string> name_set;
 
   void SetUp() override {
-    auto *lib = Graph_library::instance("lgdb_lgtest");
-    auto* lg = lib->create_lgraph("constants", "-");
+    auto* lib = Graph_library::instance("lgdb_lgtest");
+    auto* lg  = lib->create_lgraph("constants", "-");
 
     for (int i = 0; i < 100; ++i) {
       dpin.emplace_back(lg->create_node_const(i).get_driver_pin());
@@ -73,12 +74,12 @@ TEST_F(Lgtuple_test, flat1) {
     names.emplace_back(name);
 
     if (names[i] == "not here1")
-      fmt::print("DEBUG {} got deleted by {}\n", names[1], names[i]);
+      std::print("DEBUG {} got deleted by {}\n", names[1], names[i]);
 
     tup.add(name, dpin[i]);
     if (i > 0u) {
       if (!tup.has_dpin(names[1])) {
-        fmt::print("{} got deleted by [{}]\n", names[1], names[i]);
+        std::print("{} got deleted by [{}]\n", names[1], names[i]);
       }
       EXPECT_TRUE(tup.has_dpin(names[1]));
     }

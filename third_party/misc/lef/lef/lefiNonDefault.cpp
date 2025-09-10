@@ -172,10 +172,12 @@ void lefiNonDefault::Destroy() {
   lefFree((char *)(values_));
   lefFree((char *)(dvalues_));
   lefFree((char *)(types_));
-  if (allocatedUseVias_)
+  if (allocatedUseVias_) {
     lefFree((char *)(useViaName_));
-  if (allocatedUseViaRules_)
+  }
+  if (allocatedUseViaRules_) {
     lefFree((char *)(useViaRuleName_));
+  }
   if (allocatedMinCuts_) {
     lefFree((char *)(cutLayerName_));
     lefFree((char *)(numCuts_));
@@ -190,7 +192,7 @@ lefiNonDefault::~lefiNonDefault() { Destroy(); }
 void lefiNonDefault::clear() {
   int          i;
   lefiSpacing *sr;
-  lefiVia *    vr;
+  lefiVia     *vr;
 
   for (i = 0; i < numProps_; i++) {
     lefFree(names_[i]);
@@ -238,10 +240,11 @@ void lefiNonDefault::addViaRule(lefiVia *v) {
     int       i;
     lefiVia **nv;
 
-    if (allocatedVias_ == 0)
+    if (allocatedVias_ == 0) {
       allocatedVias_ = 2;
-    else
+    } else {
       allocatedVias_ *= 2;
+    }
     nv = (lefiVia **)lefMalloc(sizeof(lefiVia *) * allocatedVias_);
     for (i = 0; i < numVias_; i++) {
       nv[i] = viaRules_[i];
@@ -257,10 +260,11 @@ void lefiNonDefault::addSpacingRule(lefiSpacing *s) {
     int           i;
     lefiSpacing **ns;
 
-    if (allocatedSpacing_ == 0)
+    if (allocatedSpacing_ == 0) {
       allocatedSpacing_ = 2;
-    else
+    } else {
       allocatedSpacing_ *= 2;
+    }
     ns = (lefiSpacing **)lefMalloc(sizeof(lefiSpacing *) * allocatedSpacing_);
     for (i = 0; i < numSpacing_; i++) {
       ns[i] = spacingRules_[i];
@@ -308,7 +312,7 @@ void lefiNonDefault::addLayer(const char *name) {
   int len = strlen(name) + 1;
   if (numLayers_ == layersAllocated_) {
     int     i;
-    char ** newl;
+    char  **newl;
     double *neww;
     double *newd;
     double *news;
@@ -316,18 +320,19 @@ void lefiNonDefault::addLayer(const char *name) {
     double *newc;
     double *newr;
     double *newec;
-    char *  newhw;
-    char *  newhd;
-    char *  newhs;
-    char *  newhe;
-    char *  newhc;
-    char *  newhr;
-    char *  newhec;
+    char   *newhw;
+    char   *newhd;
+    char   *newhs;
+    char   *newhe;
+    char   *newhc;
+    char   *newhr;
+    char   *newhec;
 
-    if (layersAllocated_ == 0)
+    if (layersAllocated_ == 0) {
       layersAllocated_ = 2;
-    else
+    } else {
       layersAllocated_ *= 2;
+    }
     newl   = (char **)lefMalloc(sizeof(char *) * layersAllocated_);
     newe   = (double *)lefMalloc(sizeof(double) * layersAllocated_);
     neww   = (double *)lefMalloc(sizeof(double) * layersAllocated_);
@@ -452,16 +457,18 @@ void lefiNonDefault::addUseVia(const char *name) {
     int    i;
     char **vn;
 
-    if (allocatedUseVias_ == 0)
+    if (allocatedUseVias_ == 0) {
       allocatedUseVias_ = 2;
-    else
+    } else {
       allocatedUseVias_ *= 2;
+    }
     vn = (char **)lefMalloc(sizeof(char *) * allocatedUseVias_);
     for (i = 0; i < numUseVias_; i++) {
       vn[i] = useViaName_[i];
     }
-    if (numUseVias_)
+    if (numUseVias_) {
       lefFree((char *)(useViaName_));
+    }
     useViaName_ = vn;
   }
   useViaName_[numUseVias_] = (char *)lefMalloc(strlen(name) + 1);
@@ -474,16 +481,18 @@ void lefiNonDefault::addUseViaRule(const char *name) {
     int    i;
     char **vn;
 
-    if (allocatedUseViaRules_ == 0)
+    if (allocatedUseViaRules_ == 0) {
       allocatedUseViaRules_ = 2;
-    else
+    } else {
       allocatedUseViaRules_ *= 2;
+    }
     vn = (char **)lefMalloc(sizeof(char *) * allocatedUseViaRules_);
     for (i = 0; i < numUseViaRules_; i++) {
       vn[i] = useViaRuleName_[i];
     }
-    if (numUseViaRules_)
+    if (numUseViaRules_) {
       lefFree((char *)(useViaRuleName_));
+    }
     useViaRuleName_ = vn;
   }
   useViaRuleName_[numUseViaRules_] = (char *)lefMalloc(strlen(name) + 1);
@@ -495,12 +504,13 @@ void lefiNonDefault::addMinCuts(const char *name, int numCuts) {
   if (numMinCuts_ == allocatedMinCuts_) {
     int    i;
     char **cn;
-    int *  nc;
+    int   *nc;
 
-    if (allocatedMinCuts_ == 0)
+    if (allocatedMinCuts_ == 0) {
       allocatedMinCuts_ = 2;
-    else
+    } else {
       allocatedMinCuts_ *= 2;
+    }
     cn = (char **)lefMalloc(sizeof(char *) * allocatedMinCuts_);
     nc = (int *)lefMalloc(sizeof(int) * allocatedMinCuts_);
     for (i = 0; i < numMinCuts_; i++) {
@@ -828,27 +838,34 @@ int lefiNonDefault::numCuts(int index) const {
 void lefiNonDefault::print(FILE *f) {
   int          i;
   lefiSpacing *s;
-  lefiVia *    v;
+  lefiVia     *v;
 
   fprintf(f, "Nondefault rule %s\n", name());
   fprintf(f, "%d layers   %d vias   %d spacing rules\n", numLayers(), numVias(), numSpacingRules());
 
   for (i = 0; i < numLayers(); i++) {
     fprintf(f, "  Layer %s\n", layerName(i));
-    if (hasLayerWidth(i))
+    if (hasLayerWidth(i)) {
       fprintf(f, "    WIDTH %g\n", layerWidth(i));
-    if (hasLayerDiagWidth(i))
+    }
+    if (hasLayerDiagWidth(i)) {
       fprintf(f, "    DIAGWIDTH %g\n", layerDiagWidth(i));
-    if (hasLayerSpacing(i))
+    }
+    if (hasLayerSpacing(i)) {
       fprintf(f, "    SPACING %g\n", layerSpacing(i));
-    if (hasLayerWireExtension(i))
+    }
+    if (hasLayerWireExtension(i)) {
       fprintf(f, "    WIREEXTENSION %g", layerWireExtension(i));
-    if (hasLayerResistance(i))
+    }
+    if (hasLayerResistance(i)) {
       fprintf(f, "    RESISTANCE RPERSQ %g\n", layerResistance(i));
-    if (hasLayerCapacitance(i))
+    }
+    if (hasLayerCapacitance(i)) {
       fprintf(f, "    CAPACITANCE CPERSQDIST %g\n", layerCapacitance(i));
-    if (hasLayerEdgeCap(i))
+    }
+    if (hasLayerEdgeCap(i)) {
       fprintf(f, "    EDGECAPACITANCE %g\n", layerEdgeCap(i));
+    }
   }
 
   for (i = 0; i < numVias(); i++) {
@@ -870,15 +887,16 @@ void lefiNonDefault::addProp(const char *name, const char *value, const char typ
     int     i;
     int     max;
     int     lim = numProps_;
-    char ** nn;
-    char ** nv;
+    char  **nn;
+    char  **nv;
     double *nD;
-    char *  nt;
+    char   *nt;
 
-    if (propsAllocated_ == 0)
+    if (propsAllocated_ == 0) {
       max = propsAllocated_ = 2;
-    else
+    } else {
       max = propsAllocated_ *= 2;
+    }
     nn = (char **)lefMalloc(sizeof(char *) * max);
     nv = (char **)lefMalloc(sizeof(char *) * max);
     nD = (double *)lefMalloc(sizeof(double) * max);
@@ -914,15 +932,16 @@ void lefiNonDefault::addNumProp(const char *name, const double d, const char *va
     int     i;
     int     max;
     int     lim = numProps_;
-    char ** nn;
-    char ** nv;
+    char  **nn;
+    char  **nv;
     double *nD;
-    char *  nt;
+    char   *nt;
 
-    if (propsAllocated_ == 0)
+    if (propsAllocated_ == 0) {
       max = propsAllocated_ = 2;
-    else
+    } else {
       max = propsAllocated_ *= 2;
+    }
     nn = (char **)lefMalloc(sizeof(char *) * max);
     nv = (char **)lefMalloc(sizeof(char *) * max);
     nD = (double *)lefMalloc(sizeof(double) * max);

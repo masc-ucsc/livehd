@@ -27,10 +27,11 @@ std::string format(const char *fmt, ...) {
     }
 
     size_t size;
-    if (res < 0)
+    if (res < 0) {
       size = v.size() * 2;
-    else
+    } else {
       size = static_cast<size_t>(res) + 1;
+    }
 
     v.clear();
     v.resize(size);
@@ -60,7 +61,9 @@ void replace_new_lines(std::string &str, const std::string &sub) {
     if (str[j] == '\n' || str[j] == '\r') {
       if (!nl)  // new_lines may be 2-chars length
       {
-        for (auto c : sub) str[k++] = c;
+        for (auto c : sub) {
+          str[k++] = c;
+        }
       }
       nl = !nl;
     } else {

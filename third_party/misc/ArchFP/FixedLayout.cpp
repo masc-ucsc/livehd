@@ -24,8 +24,9 @@ fixedLayout::fixedLayout(const char* filename, double scalingFactor) : bagLayout
   // cout << "In read of fixedLayout\n";
   while (true) {
     char first = in.peek();
-    if (in.eof() || in.bad() || in.fail())
+    if (in.eof() || in.bad() || in.fail()) {
       break;
+    }
     if (first == '\n') {
       in.get();
       continue;
@@ -36,17 +37,19 @@ fixedLayout::fixedLayout(const char* filename, double scalingFactor) : bagLayout
       while (!in.eof()) {
         getChar = in.get();
         // cout << getChar;
-        if (getChar == '\n')
+        if (getChar == '\n') {
           break;
+        }
       }
       continue;
     }
     // Now we should have a real line.
     std::string name;
-    if (in.peek() == ' ')
+    if (in.peek() == ' ') {
       name = "";
-    else
+    } else {
       in >> name;
+    }
     // cout << "name is'" << name << "'\n";
     double x, y, width, height;
     in >> width >> height >> x >> y;

@@ -8,6 +8,9 @@
 #include <sys/stat.h>
 #include <sys/types.h>
 
+#include <format>
+#include <iostream>
+#include <print>
 #include <string>
 
 #include "absl/container/flat_hash_map.h"
@@ -92,12 +95,12 @@ public:
 
       if (scan_is_token(Xlanguage_id_if)) {
         n_ifs++;
-        fmt::print("IF [{}]\n", scan_text());
+        std::print("IF [{}]\n", scan_text());
       }
 
       scan_next();
     }
-    fmt::print("total tokens = {}\n", total);
+    std::print("total tokens = {}\n", total);
   }
 };
 

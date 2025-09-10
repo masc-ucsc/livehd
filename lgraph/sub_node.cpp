@@ -2,6 +2,8 @@
 
 #include "sub_node.hpp"
 
+#include <print>
+
 void Sub_node::copy_from(std::string_view new_name, Lg_type_id new_lgid, const Sub_node &sub) {
   name                   = new_name;
   lgid                   = new_lgid;
@@ -132,7 +134,7 @@ void Sub_node::from_json(const rapidjson::Value &entry) {
 
 /* LCOV_EXCL_START */
 void Sub_node::dump() const {
-  fmt::print("lgid:{} name:{} #iopins:{}\n", (int)lgid, name, io_pins.size());
+  std::print("lgid:{} name:{} #iopins:{}\n", (int)lgid, name, io_pins.size());
 
   int pos = 0;
   for (const auto &pin : io_pins) {
@@ -151,7 +153,7 @@ void Sub_node::dump() const {
       dir = "ERROR";
     }
 
-    fmt::print(" pin:{} name:{} pos:{} dir:{}\n", pos, pin.name, pin.graph_io_pos, dir);
+    std::print(" pin:{} name:{} pos:{} dir:{}\n", pos, pin.name, pin.graph_io_pos, dir);
     pos++;
   }
 }

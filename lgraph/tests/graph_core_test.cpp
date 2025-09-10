@@ -2,20 +2,20 @@
 
 #include "graph_core.hpp"
 
+#include <format>
+#include <iostream>
 #include <random>
 #include <string>
 #include <vector>
 
 #include "boost/graph/adjacency_list.hpp"
 #include "boost/graph/graph_utility.hpp"
-
 #include "gmock/gmock.h"
+#include "graph_library.hpp"
 #include "gtest/gtest.h"
-
+#include "lgraph.hpp"
 #include "lrand.hpp"
 #include "perf_tracing.hpp"
-#include "graph_library.hpp"
-#include "lgraph.hpp"
 
 class Setup_graph_core : public ::testing::Test {
 protected:
@@ -97,7 +97,7 @@ TEST_F(Setup_graph_core, trivial_ops_insert1) {
   auto n = 0u;
   for (const auto &m : nodes) {
     gc.add_edge(m1, m);
-    // fmt::print("ADDING {}\n",m);
+    // std::print("ADDING {}\n",m);
     // gc.dump(m1);
     ++n;
     EXPECT_EQ(gc.get_num_pin_outputs(m1), n);
@@ -111,7 +111,7 @@ TEST_F(Setup_graph_core, trivial_ops_insert1) {
     auto m = gc.create_node();
     gc.add_edge(m2, m);
     gc.add_edge(m, m3);
-    // fmt::print("ADDING {}\n",m);
+    // std::print("ADDING {}\n",m);
     // gc.dump(m2);
     ++n;
     EXPECT_EQ(gc.get_num_pin_outputs(m2), i + 1);
@@ -235,22 +235,23 @@ TEST_F(Setup_graph_core, delete_edge) {
   // gc.dump(m1);
 
   while (true) {
-    if (sink_nodes.empty() && driver_nodes.empty())
+    if (sink_nodes.empty() && driver_nodes.empty()) {
       break;
+    }
 
     auto do_sink = rbool.any() && !sink_nodes.empty();
 
     if (do_sink || driver_nodes.empty()) {
       auto m = sink_nodes.back();
       sink_nodes.pop_back();
-      // fmt::print("DELETING sink node:{}\n", m);
+      // std::print("DELETING sink node:{}\n", m);
       gc.del_edge(m1, m);
       // gc.dump(m1);
     } else {
       I(!driver_nodes.empty());
       auto m = driver_nodes.back();
       driver_nodes.pop_back();
-      // fmt::print("DELETING driver node:{}\n", m);
+      // std::print("DELETING driver node:{}\n", m);
       gc.del_edge(m, m1);
       // gc.dump(m1);
     }
@@ -263,7 +264,6 @@ TEST_F(Setup_graph_core, delete_edge) {
 }
 
 TEST_F(Setup_graph_core, fully_connected_gc) {
-
   constexpr std::size_t num_nodes = 1024;
 
   std::vector<uint32_t> nodes;
@@ -278,16 +278,16 @@ TEST_F(Setup_graph_core, fully_connected_gc) {
     EXPECT_EQ(gc.get_num_pin_outputs(nodes[i]), 0);
     for (size_t j = 0u; j < i; ++j) {
       gc.add_edge(nodes[j], nodes[i]);
-      EXPECT_EQ(gc.get_num_pin_inputs(nodes[i]),  j+1);
-      EXPECT_EQ(gc.get_num_pin_outputs(nodes[i]), 0  );
-      EXPECT_EQ(gc.get_num_pin_inputs(nodes[j]),  j);
-      EXPECT_EQ(gc.get_num_pin_outputs(nodes[j]), i-j  );
+      EXPECT_EQ(gc.get_num_pin_inputs(nodes[i]), j + 1);
+      EXPECT_EQ(gc.get_num_pin_outputs(nodes[i]), 0);
+      EXPECT_EQ(gc.get_num_pin_inputs(nodes[j]), j);
+      EXPECT_EQ(gc.get_num_pin_outputs(nodes[j]), i - j);
     }
   }
 
   for (auto i = 0u; i < num_nodes; ++i) {
-    EXPECT_EQ(gc.get_num_pin_outputs(nodes[i]), num_nodes-1-i);
-    for (size_t j = i+1; j < num_nodes; ++j) {
+    EXPECT_EQ(gc.get_num_pin_outputs(nodes[i]), num_nodes - 1 - i);
+    for (size_t j = i + 1; j < num_nodes; ++j) {
       gc.del_edge(nodes[i], nodes[j]);
     }
     EXPECT_EQ(gc.get_num_pin_inputs(nodes[i]), 0);
@@ -296,7 +296,6 @@ TEST_F(Setup_graph_core, fully_connected_gc) {
 }
 
 TEST_F(Setup_graph_core, fully_connected_boost) {
-
   constexpr std::size_t num_nodes = 1024;
 
   std::vector<uint32_t> nodes;
@@ -309,20 +308,20 @@ TEST_F(Setup_graph_core, fully_connected_boost) {
   for (size_t i = 0u; i < num_nodes; ++i) {
     nodes[i] = boost::add_vertex(g);
 
-    EXPECT_EQ(boost::in_degree(nodes[i], g), 0 );
-    EXPECT_EQ(boost::out_degree(nodes[i], g), 0 );
+    EXPECT_EQ(boost::in_degree(nodes[i], g), 0);
+    EXPECT_EQ(boost::out_degree(nodes[i], g), 0);
     for (size_t j = 0u; j < i; ++j) {
       boost::add_edge(nodes[j], nodes[i], g);
-      EXPECT_EQ(boost::in_degree(nodes[i], g), j+1 );
-      EXPECT_EQ(boost::out_degree(nodes[i], g), 0 );
-      EXPECT_EQ(boost::in_degree(nodes[j], g), j );
-      EXPECT_EQ(boost::out_degree(nodes[j], g), i-j );
+      EXPECT_EQ(boost::in_degree(nodes[i], g), j + 1);
+      EXPECT_EQ(boost::out_degree(nodes[i], g), 0);
+      EXPECT_EQ(boost::in_degree(nodes[j], g), j);
+      EXPECT_EQ(boost::out_degree(nodes[j], g), i - j);
     }
   }
 
   for (auto i = 0u; i < num_nodes; ++i) {
-    EXPECT_EQ(boost::out_degree(nodes[i], g), num_nodes-1-i);
-    for (size_t j = i+1; j < num_nodes; ++j) {
+    EXPECT_EQ(boost::out_degree(nodes[i], g), num_nodes - 1 - i);
+    for (size_t j = i + 1; j < num_nodes; ++j) {
       boost::remove_edge(nodes[i], nodes[j], g);
     }
     EXPECT_EQ(boost::out_degree(nodes[i], g), 0);
@@ -331,7 +330,6 @@ TEST_F(Setup_graph_core, fully_connected_boost) {
 }
 
 TEST_F(Setup_graph_core, fully_connected_del_node) {
-
   constexpr std::size_t num_nodes = 1024;
 
   std::vector<uint32_t> nodes;
@@ -349,15 +347,15 @@ TEST_F(Setup_graph_core, fully_connected_del_node) {
     EXPECT_EQ(gc.get_num_pin_outputs(nodes[i]), 0);
     for (size_t j = 0u; j < i; ++j) {
       gc.add_edge(nodes[j], nodes[i]);
-      EXPECT_EQ(gc.get_num_pin_inputs(nodes[i]),  j+1);
-      EXPECT_EQ(gc.get_num_pin_outputs(nodes[i]), 0  );
-      EXPECT_EQ(gc.get_num_pin_inputs(nodes[j]),  j);
-      EXPECT_EQ(gc.get_num_pin_outputs(nodes[j]), i-j  );
+      EXPECT_EQ(gc.get_num_pin_inputs(nodes[i]), j + 1);
+      EXPECT_EQ(gc.get_num_pin_outputs(nodes[i]), 0);
+      EXPECT_EQ(gc.get_num_pin_inputs(nodes[j]), j);
+      EXPECT_EQ(gc.get_num_pin_outputs(nodes[j]), i - j);
     }
   }
 
   for (auto i = 0u; i < num_nodes; ++i) {
-    EXPECT_EQ(gc.get_num_pin_outputs(nodes[i]), num_nodes-1-i);
+    EXPECT_EQ(gc.get_num_pin_outputs(nodes[i]), num_nodes - 1 - i);
     gc.del_node(nodes[i]);
     EXPECT_EQ(gc.get_num_pin_outputs(nodes[i]), 0);
     EXPECT_EQ(gc.get_num_pin_inputs(nodes[i]), 0);
@@ -367,7 +365,7 @@ TEST_F(Setup_graph_core, fully_connected_del_node) {
 // For benchmarking
 #define BENCH_SIZE 1'000'000u
 // FOR testing (not benchmarking)
-//#define BENCH_SIZE 100'000u
+// #define BENCH_SIZE 100'000u
 
 TEST_F(Setup_graph_core, bench_boost) {
   for (auto sz = 100u; sz < BENCH_SIZE; sz = sz * 10) {  // test1

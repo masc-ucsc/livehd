@@ -3,10 +3,8 @@
 #include "upass_runner.hpp"
 
 void uPass_runner::process_lnast() {
-#define PROCESS_BLOCK(NAME)             \
-  case Lnast_ntype::Lnast_ntype_##NAME: \
-    process_##NAME();                   \
-    break;
+#define PROCESS_BLOCK(NAME) \
+  case Lnast_ntype::Lnast_ntype_##NAME: process_##NAME(); break;
 
 #define PROCESS_NODE(NAME)              \
   case Lnast_ntype::Lnast_ntype_##NAME: \

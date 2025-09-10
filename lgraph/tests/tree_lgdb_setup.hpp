@@ -1,5 +1,7 @@
 //  This file is distributed under the BSD 3-Clause License. See LICENSE for details.
 
+#include <format>
+#include <iostream>
 #include <string>
 #include <vector>
 
@@ -46,11 +48,12 @@ protected:
 
     tree.each_top_down_fast([&index_order](const lh::Tree_index &index, const Node_data &node) {
       (void)node;
-      // fmt::print(" level:{} pos:{} create_pos:{} fwd:{} bwd:{} leaf:{}\n", index.level, index.pos, node.create_pos, node.fwd_pos,
+      // std::print(" level:{} pos:{} create_pos:{} fwd:{} bwd:{} leaf:{}\n", index.level, index.pos, node.create_pos, node.fwd_pos,
       // node.bwd_pos, node.leaf);
 
-      if (index.level || index.pos)
+      if (index.level || index.pos) {
         index_order.emplace_back(index);
+      }
     });
 
     lg_root = lib->create_lgraph("node_l0p0", "node_l0p0");
@@ -81,8 +84,8 @@ protected:
       if (data->leaf && rbool.any()) {
         node = parent_lg->create_node(Ntype_op::Sum, 10);
       } else {
-        node          = parent_lg->create_node_sub(data->name);
-        auto *sub_lg  = lib->create_lgraph(data->name, data->name);
+        node         = parent_lg->create_node_sub(data->name);
+        auto *sub_lg = lib->create_lgraph(data->name, data->name);
         I(sub_lg);
         I(node.get_class_lgraph() == parent_lg);
         I(node.get_type_sub() == sub_lg->get_lgid());
@@ -110,7 +113,7 @@ protected:
       absl_fwd_pos[node.get_compact()] = data->fwd_pos;
       absl_bwd_pos[node.get_compact()] = data->bwd_pos;
 
-      // fmt::print("create {} class {}\n", hnode.debug_name(), hnode.get_class_lgraph()->get_name());
+      // std::print("create {} class {}\n", hnode.debug_name(), hnode.get_class_lgraph()->get_name());
       node_order.emplace_back(node);
     }
 
@@ -137,10 +140,11 @@ protected:
     {
       auto dpin = lg_root->get_graph_input("i0");
       if (node_order[0].is_type(Ntype_op::Sum)) {
-        if (rbool.any())
+        if (rbool.any()) {
           node_order[0].setup_sink_pin("A").connect_driver(dpin);
-        else
+        } else {
           node_order[0].setup_sink_pin("B").connect_driver(dpin);
+        }
       } else {
         node_order[0].get_sink_pin("i0").connect_driver(dpin);
       }
@@ -155,8 +159,8 @@ protected:
       auto &curr_node = node_order[i];
       auto &prev_node = node_order[i - 1];
 
-      // fmt::print("prev   {} class {}\n", prev_node.debug_name(), prev_node.get_class_lgraph()->get_name());
-      // fmt::print("curr   {} class {}\n", curr_node.debug_name(), curr_node.get_class_lgraph()->get_name());
+      // std::print("prev   {} class {}\n", prev_node.debug_name(), prev_node.get_class_lgraph()->get_name());
+      // std::print("curr   {} class {}\n", curr_node.debug_name(), curr_node.get_class_lgraph()->get_name());
 
       Node_pin dpin;
       if (prev_node.get_type_op() == Ntype_op::Sum) {
@@ -174,10 +178,11 @@ protected:
       Node_pin spin;
       if (curr_node.get_type_op() == Ntype_op::Sum) {
         I(curr_data.leaf);
-        if (rbool.any())
+        if (rbool.any()) {
           spin = curr_node.setup_sink_pin("A");
-        else
+        } else {
           spin = curr_node.setup_sink_pin("B");
+        }
       } else {
         Lgraph *curr_lg = lib->open_lgraph(curr_data.name);
         I(curr_node.get_class_lgraph() != curr_lg);
@@ -222,16 +227,18 @@ protected:
         auto dpin = lg->get_graph_input("i0");
 
         for (auto e : dpin.get_node().out_edges()) {
-          if (e.sink.is_graph_io())
+          if (e.sink.is_graph_io()) {
             return;
+          }
         }
 
         auto spin = lg->get_graph_output("o0");
         spin.connect_driver(dpin);
       } else if (sz == 1) {
         for (auto e : last_node.out_edges()) {
-          if (e.sink.is_graph_io())
+          if (e.sink.is_graph_io()) {
             return;
+          }
         }
 
         auto     spin = lg->get_graph_output("o0");
@@ -300,20 +307,22 @@ protected:
 
       double leaf_ratio = (double)n_leafs / (1.0 + i);
 
-      // fmt::print("leaf_ratio:{} {} {}\n", leaf_ratio,n_leafs, i);
+      // std::print("leaf_ratio:{} {} {}\n", leaf_ratio,n_leafs, i);
 
       if (leaf_ratio < leaf_ratio_goal && index.level) {  // Not to root
         tree.append_sibling(index, data);
         n_leafs++;
       } else {
         // index.pos = tree.get_tree_width(index.level)-1; // Add child at the end
-        if (!tree.is_leaf(index))
+        if (!tree.is_leaf(index)) {
           n_leafs++;
+        }
 
         auto cindex = tree.add_child(index, data);
         I(cindex.level == index.level + 1);
-        if (index.level == max_level && max_level < max_depth)
+        if (index.level == max_level && max_level < max_depth) {
           max_level++;
+        }
         I(max_level <= max_depth);
       }
     }
@@ -341,8 +350,9 @@ protected:
         lh::Tree_index insert_point(rint.max(max_level), rint.max(tree.get_tree_width(max_level)));
         lh::Tree_index copy_point(rint.max(max_level), rint.max(tree.get_tree_width(max_level)));
 
-        if (tree.is_child_of(copy_point, insert_point))  // No recursion insert
+        if (tree.is_child_of(copy_point, insert_point)) {  // No recursion insert
           continue;
+        }
 
 #if 0
         HERE! Create a "copy" and "move" in the tree.hpp
@@ -353,7 +363,7 @@ protected:
       }
     }
 
-    fmt::print("Tree with {} nodes {} leafs and {} depth\n", size, n_leafs, max_level);
+    std::print("Tree with {} nodes {} leafs and {} depth\n", size, n_leafs, max_level);
 
     EXPECT_TRUE(pos == (size + 1));  // Missing nodes??? (tree.hpp bug)
   }

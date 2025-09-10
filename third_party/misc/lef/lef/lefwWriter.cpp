@@ -205,7 +205,7 @@ typedef void (*LEFI_WARNING_LOG_FUNCTION)(const char *);
 LEFI_LOG_FUNCTION         lefwErrorLogFunction;
 LEFI_WARNING_LOG_FUNCTION lefwWarningLogFunction;
 
-FILE *        lefwFile = 0;                              // File to write to.
+FILE         *lefwFile = 0;                              // File to write to.
 int           lefwSynArray[MAXSYN];                      // array of syntax
 int           lefwLines                  = 0;            // number of lines written
 int           lefwState                  = LEFW_UNINIT;  // Current state of writer
@@ -478,7 +478,9 @@ int lefwInit(FILE *f) {
   lefwState   = LEFW_UNINIT;  // Current state of writer
   lefwDidInit = 0;            // required section
 
-  for (i = 0; i < MAXSYN; i++) lefwSynArray[i] = 0;
+  for (i = 0; i < MAXSYN; i++) {
+    lefwSynArray[i] = 0;
+  }
 
   lefwDidInit = 1;
   lefwState   = LEFW_INIT;
@@ -507,7 +509,9 @@ int lefwInitCbk(FILE *f) {
   lefwState   = LEFW_UNINIT;  // Current state of writer
   lefwDidInit = 0;            // required section
 
-  for (i = 0; i < MAXSYN; i++) lefwSynArray[i] = 0;
+  for (i = 0; i < MAXSYN; i++) {
+    lefwSynArray[i] = 0;
+  }
 
   lefwDidInit    = 1;
   lefwState      = LEFW_INIT;
@@ -535,38 +539,47 @@ int lefwEncrypt() {
 // This function needs to be called if lefwEncrypt is called
 // It will clear the encrypted buffer
 int lefwCloseEncrypt() {
-  if (lefwWriteEncrypt)
+  if (lefwWriteEncrypt) {
     encClearBuf(lefwFile);
+  }
   return LEFW_OK;
 }
 
 int lefwNewLine() {
-  if (!lefwFile)
+  if (!lefwFile) {
     return LEFW_BAD_ORDER;
-  if (lefwWriteEncrypt)
+  }
+  if (lefwWriteEncrypt) {
     encPrint(lefwFile, (char *)"\n");
-  else
+  } else {
     fprintf(lefwFile, "\n");
+  }
   return LEFW_OK;
 }
 
 int lefwVersion(int vers1, int vers2) {
-  if (!lefwFile)
+  if (!lefwFile) {
     return LEFW_UNINITIALIZED;
-  if (!lefwDidInit)
+  }
+  if (!lefwDidInit) {
     return LEFW_BAD_ORDER;
-  if (lefwState != LEFW_INIT && lefwState < LEFW_END)
+  }
+  if (lefwState != LEFW_INIT && lefwState < LEFW_END) {
     return LEFW_BAD_ORDER;  // not of the ENDs
-  if (lefwSynArray[LEFW_VERSION])
+  }
+  if (lefwSynArray[LEFW_VERSION]) {
     return LEFW_ALREADY_DEFINED;
-  if (lefwWriteEncrypt)
+  }
+  if (lefwWriteEncrypt) {
     encPrint(lefwFile, (char *)"VERSION %d.%d ;\n", vers1, vers2);
-  else
+  } else {
     fprintf(lefwFile, "VERSION %d.%d ;\n", vers1, vers2);
-  if (vers2 >= 10)
+  }
+  if (vers2 >= 10) {
     versionNum = vers1 + (vers2 / 100.0);
-  else
+  } else {
     versionNum = vers1 + (vers2 / 10.0);
+  }
   lefwSynArray[LEFW_VERSION] = 1;
   lefwLines++;
   return LEFW_OK;
@@ -574,22 +587,29 @@ int lefwVersion(int vers1, int vers2) {
 
 int lefwCaseSensitive(const char *caseSensitive) {
   lefwObsoleteNum = LEFW_CASESENSITIVE;
-  if (!lefwFile)
+  if (!lefwFile) {
     return LEFW_UNINITIALIZED;
-  if (!lefwDidInit)
+  }
+  if (!lefwDidInit) {
     return LEFW_BAD_ORDER;
-  if (lefwState != LEFW_INIT && lefwState < LEFW_END)
+  }
+  if (lefwState != LEFW_INIT && lefwState < LEFW_END) {
     return LEFW_BAD_ORDER;  // not of the ENDs
-  if (versionNum >= 5.6)
+  }
+  if (versionNum >= 5.6) {
     return LEFW_OBSOLETE;
-  if (lefwSynArray[LEFW_CASESENSITIVE])
+  }
+  if (lefwSynArray[LEFW_CASESENSITIVE]) {
     return LEFW_ALREADY_DEFINED;
-  if (strcmp(caseSensitive, "ON") && strcmp(caseSensitive, "OFF"))
+  }
+  if (strcmp(caseSensitive, "ON") && strcmp(caseSensitive, "OFF")) {
     return LEFW_BAD_DATA;  // has to be either ON or OFF
-  if (lefwWriteEncrypt)
+  }
+  if (lefwWriteEncrypt) {
     encPrint(lefwFile, (char *)"NAMESCASESENSITIVE %s ;\n", caseSensitive);
-  else
+  } else {
     fprintf(lefwFile, "NAMESCASESENSITIVE %s ;\n", caseSensitive);
+  }
   lefwSynArray[LEFW_CASESENSITIVE] = 1;
   lefwLines++;
   return LEFW_OK;
@@ -597,22 +617,29 @@ int lefwCaseSensitive(const char *caseSensitive) {
 
 int lefwNoWireExtensionAtPin(const char *noWireExt) {
   lefwObsoleteNum = LEFW_NOWIREEXTATPIN;
-  if (!lefwFile)
+  if (!lefwFile) {
     return LEFW_UNINITIALIZED;
-  if (!lefwDidInit)
+  }
+  if (!lefwDidInit) {
     return LEFW_BAD_ORDER;
-  if (lefwState != LEFW_INIT && lefwState < LEFW_END)
+  }
+  if (lefwState != LEFW_INIT && lefwState < LEFW_END) {
     return LEFW_BAD_ORDER;  // not of the ENDs
-  if (versionNum >= 5.6)
+  }
+  if (versionNum >= 5.6) {
     return LEFW_OBSOLETE;
-  if (lefwSynArray[LEFW_NOWIREEXTATPIN])
+  }
+  if (lefwSynArray[LEFW_NOWIREEXTATPIN]) {
     return LEFW_ALREADY_DEFINED;
-  if (strcmp(noWireExt, "ON") && strcmp(noWireExt, "OFF"))
+  }
+  if (strcmp(noWireExt, "ON") && strcmp(noWireExt, "OFF")) {
     return LEFW_BAD_DATA;  // has to be either ON or OFF
-  if (lefwWriteEncrypt)
+  }
+  if (lefwWriteEncrypt) {
     encPrint(lefwFile, (char *)"NOWIREEXTENSIONATPIN %s ;\n", noWireExt);
-  else
+  } else {
     fprintf(lefwFile, "NOWIREEXTENSIONATPIN %s ;\n", noWireExt);
+  }
   lefwSynArray[LEFW_NOWIREEXTATPIN] = 1;
   lefwLines++;
   return LEFW_OK;
@@ -620,20 +647,26 @@ int lefwNoWireExtensionAtPin(const char *noWireExt) {
 
 int lefwMinfeature(double minFeatureX, double minFeatureY) {
   lefwObsoleteNum = LEFW_MINFEATURE;
-  if (!lefwFile)
+  if (!lefwFile) {
     return LEFW_UNINITIALIZED;
-  if (!lefwDidInit)
+  }
+  if (!lefwDidInit) {
     return LEFW_BAD_ORDER;
-  if (lefwState != LEFW_INIT && lefwState < LEFW_END)
+  }
+  if (lefwState != LEFW_INIT && lefwState < LEFW_END) {
     return LEFW_BAD_ORDER;
-  if (versionNum >= 5.4)
+  }
+  if (versionNum >= 5.4) {
     return LEFW_OBSOLETE;
-  if (lefwSynArray[LEFW_MINFEATURE])
+  }
+  if (lefwSynArray[LEFW_MINFEATURE]) {
     return LEFW_ALREADY_DEFINED;
-  if (lefwWriteEncrypt)
+  }
+  if (lefwWriteEncrypt) {
     encPrint(lefwFile, (char *)"MINFEATURE %.11g %.11g ;\n", minFeatureX, minFeatureY);
-  else
+  } else {
     fprintf(lefwFile, "MINFEATURE %.11g %.11g ;\n", minFeatureX, minFeatureY);
+  }
   lefwSynArray[LEFW_MINFEATURE] = 1;
   lefwLines++;
   return LEFW_OK;
@@ -641,39 +674,50 @@ int lefwMinfeature(double minFeatureX, double minFeatureY) {
 
 int lefwDielectric(double dielectric) {
   lefwObsoleteNum = LEFW_DIELECTRIC;
-  if (!lefwFile)
+  if (!lefwFile) {
     return LEFW_UNINITIALIZED;
-  if (!lefwDidInit)
+  }
+  if (!lefwDidInit) {
     return LEFW_BAD_ORDER;
-  if (lefwState != LEFW_INIT && lefwState < LEFW_END)
+  }
+  if (lefwState != LEFW_INIT && lefwState < LEFW_END) {
     return LEFW_BAD_ORDER;  // not of the ENDs
-  if (versionNum >= 5.4)
+  }
+  if (versionNum >= 5.4) {
     return LEFW_OBSOLETE;
-  if (lefwSynArray[LEFW_DIELECTRIC])
+  }
+  if (lefwSynArray[LEFW_DIELECTRIC]) {
     return LEFW_ALREADY_DEFINED;
-  if (lefwWriteEncrypt)
+  }
+  if (lefwWriteEncrypt) {
     encPrint(lefwFile, (char *)"DIELECTRIC %.11g ;\n", dielectric);
-  else
+  } else {
     fprintf(lefwFile, "DIELECTRIC %.11g ;\n", dielectric);
+  }
   lefwSynArray[LEFW_DIELECTRIC] = 1;
   lefwLines++;
   return LEFW_OK;
 }
 
 int lefwBusBitChars(const char *busBitChars) {
-  if (!lefwFile)
+  if (!lefwFile) {
     return LEFW_UNINITIALIZED;
-  if (!lefwDidInit)
+  }
+  if (!lefwDidInit) {
     return LEFW_BAD_ORDER;
-  if (lefwState != LEFW_INIT && lefwState < LEFW_END)
+  }
+  if (lefwState != LEFW_INIT && lefwState < LEFW_END) {
     return LEFW_BAD_ORDER;  // not of the ENDs
-  if (lefwSynArray[LEFW_BUSBITCHARS])
+  }
+  if (lefwSynArray[LEFW_BUSBITCHARS]) {
     return LEFW_ALREADY_DEFINED;
+  }
   if (busBitChars && busBitChars != 0 && *busBitChars != 0) {
-    if (lefwWriteEncrypt)
+    if (lefwWriteEncrypt) {
       encPrint(lefwFile, (char *)"BUSBITCHARS \"%s\" ;\n", busBitChars);
-    else
+    } else {
       fprintf(lefwFile, "BUSBITCHARS \"%s\" ;\n", busBitChars);
+    }
   }
   lefwLines++;
   lefwSynArray[LEFW_BUSBITCHARS] = 1;
@@ -681,19 +725,24 @@ int lefwBusBitChars(const char *busBitChars) {
 }
 
 int lefwDividerChar(const char *dividerChar) {
-  if (!lefwFile)
+  if (!lefwFile) {
     return LEFW_UNINITIALIZED;
-  if (!lefwDidInit)
+  }
+  if (!lefwDidInit) {
     return LEFW_BAD_ORDER;
-  if (lefwState != LEFW_INIT && lefwState < LEFW_END)
+  }
+  if (lefwState != LEFW_INIT && lefwState < LEFW_END) {
     return LEFW_BAD_ORDER;  // not of the ENDs
-  if (lefwSynArray[LEFW_DIVIDERCHAR])
+  }
+  if (lefwSynArray[LEFW_DIVIDERCHAR]) {
     return LEFW_ALREADY_DEFINED;
+  }
   if (dividerChar && dividerChar != 0 && *dividerChar != 0) {
-    if (lefwWriteEncrypt)
+    if (lefwWriteEncrypt) {
       encPrint(lefwFile, (char *)"DIVIDERCHAR \"%s\" ;\n", dividerChar);
-    else
+    } else {
       fprintf(lefwFile, "DIVIDERCHAR \"%s\" ;\n", dividerChar);
+    }
   }
   lefwLines++;
   lefwSynArray[LEFW_DIVIDERCHAR] = 1;
@@ -702,40 +751,51 @@ int lefwDividerChar(const char *dividerChar) {
 
 int lefwManufacturingGrid(double grid) {
   lefw54Num = LEFW_MANUFACTURINGGRID;
-  if (!lefwFile)
+  if (!lefwFile) {
     return LEFW_UNINITIALIZED;
-  if (!lefwDidInit)
+  }
+  if (!lefwDidInit) {
     return LEFW_BAD_ORDER;
-  if (lefwState != LEFW_INIT && lefwState < LEFW_END)
+  }
+  if (lefwState != LEFW_INIT && lefwState < LEFW_END) {
     return LEFW_BAD_ORDER;  // not of the ENDs
-  if (lefwSynArray[LEFW_MANUFACTURINGGRID])
+  }
+  if (lefwSynArray[LEFW_MANUFACTURINGGRID]) {
     return LEFW_ALREADY_DEFINED;
-  if (versionNum < 5.4)
+  }
+  if (versionNum < 5.4) {
     return LEFW_WRONG_VERSION;
-  if (lefwWriteEncrypt)
+  }
+  if (lefwWriteEncrypt) {
     encPrint(lefwFile, (char *)"MANUFACTURINGGRID %.11g ;\n", grid);
-  else
+  } else {
     fprintf(lefwFile, "MANUFACTURINGGRID %.11g ;\n", grid);
+  }
   lefwLines++;
   lefwSynArray[LEFW_MANUFACTURINGGRID] = 1;
   return LEFW_OK;
 }
 
 int lefwFixedMask() {
-  if (!lefwFile)
+  if (!lefwFile) {
     return LEFW_UNINITIALIZED;
-  if (!lefwDidInit)
+  }
+  if (!lefwDidInit) {
     return LEFW_BAD_ORDER;
-  if (lefwState != LEFW_INIT && lefwState < LEFW_END)
+  }
+  if (lefwState != LEFW_INIT && lefwState < LEFW_END) {
     return LEFW_BAD_ORDER;  // not of the ENDs
+  }
 
-  if (versionNum < 5.8)
+  if (versionNum < 5.8) {
     return LEFW_WRONG_VERSION;
+  }
 
-  if (lefwWriteEncrypt)
+  if (lefwWriteEncrypt) {
     encPrint(lefwFile, (char *)"FIXEDMASK ;\n");
-  else
+  } else {
     fprintf(lefwFile, "FIXEDMASK ;\n");
+  }
 
   lefwLines++;
   lefwSynArray[LEFW_FIXEDMASK] = 1;
@@ -745,26 +805,34 @@ int lefwFixedMask() {
 int lefwUseMinSpacing(const char *type, const char *onOff) {
   lefwObsoleteNum = LEFW_USEMINSPACING;
   lefw54Num       = LEFW_USEMINSPACING;
-  if (!lefwFile)
+  if (!lefwFile) {
     return LEFW_UNINITIALIZED;
-  if (!lefwDidInit)
+  }
+  if (!lefwDidInit) {
     return LEFW_BAD_ORDER;
-  if (lefwState != LEFW_INIT && lefwState < LEFW_END)
+  }
+  if (lefwState != LEFW_INIT && lefwState < LEFW_END) {
     return LEFW_BAD_ORDER;  // not of the ENDs
+  }
   // Can define more than once
   // if (lefwSynArray[LEFW_USEMINSPACING]) return LEFW_ALREADY_DEFINED;
-  if (!type || (strcmp(type, "OBS") && strcmp(type, "PIN")))
+  if (!type || (strcmp(type, "OBS") && strcmp(type, "PIN"))) {
     return LEFW_BAD_DATA;  // has to be OBS or PIN
-  if ((strcmp(type, "PIN") == 0) && (versionNum >= 5.6))
+  }
+  if ((strcmp(type, "PIN") == 0) && (versionNum >= 5.6)) {
     return LEFW_OBSOLETE;
-  if (!onOff || (strcmp(onOff, "ON") && strcmp(onOff, "OFF")))
+  }
+  if (!onOff || (strcmp(onOff, "ON") && strcmp(onOff, "OFF"))) {
     return LEFW_BAD_DATA;  // has to be ON or OFF
-  if (versionNum < 5.4)
+  }
+  if (versionNum < 5.4) {
     return LEFW_WRONG_VERSION;
-  if (lefwWriteEncrypt)
+  }
+  if (lefwWriteEncrypt) {
     encPrint(lefwFile, (char *)"USEMINSPACING %s %s ;\n", type, onOff);
-  else
+  } else {
     fprintf(lefwFile, "USEMINSPACING %s %s ;\n", type, onOff);
+  }
   lefwLines++;
   // lefwSynArray[LEFW_USEMINSPACING] = 1;
   return LEFW_OK;
@@ -772,39 +840,50 @@ int lefwUseMinSpacing(const char *type, const char *onOff) {
 
 int lefwClearanceMeasure(const char *type) {
   lefw54Num = LEFW_CLEARANCEMEASURE;
-  if (!lefwFile)
+  if (!lefwFile) {
     return LEFW_UNINITIALIZED;
-  if (!lefwDidInit)
+  }
+  if (!lefwDidInit) {
     return LEFW_BAD_ORDER;
-  if (lefwState != LEFW_INIT && lefwState < LEFW_END)
+  }
+  if (lefwState != LEFW_INIT && lefwState < LEFW_END) {
     return LEFW_BAD_ORDER;  // not of the ENDs
-  if (lefwSynArray[LEFW_CLEARANCEMEASURE])
+  }
+  if (lefwSynArray[LEFW_CLEARANCEMEASURE]) {
     return LEFW_ALREADY_DEFINED;
-  if (!type || (strcmp(type, "MAXXY") && strcmp(type, "EUCLIDEAN")))
+  }
+  if (!type || (strcmp(type, "MAXXY") && strcmp(type, "EUCLIDEAN"))) {
     return LEFW_BAD_DATA;  // has to be MAXXY or EUCLIDEAN
-  if (versionNum < 5.4)
+  }
+  if (versionNum < 5.4) {
     return LEFW_WRONG_VERSION;
-  if (lefwWriteEncrypt)
+  }
+  if (lefwWriteEncrypt) {
     encPrint(lefwFile, (char *)"CLEARANCEMEASURE %s ;\n", type);
-  else
+  } else {
     fprintf(lefwFile, "CLEARANCEMEASURE %s ;\n", type);
+  }
   lefwLines++;
   lefwSynArray[LEFW_CLEARANCEMEASURE] = 1;
   return LEFW_OK;
 }
 
 int lefwStartUnits() {
-  if (!lefwFile)
+  if (!lefwFile) {
     return LEFW_UNINITIALIZED;
-  if (!lefwDidInit)
+  }
+  if (!lefwDidInit) {
     return LEFW_BAD_ORDER;
-  if (lefwSynArray[LEFW_UNITS_START])
+  }
+  if (lefwSynArray[LEFW_UNITS_START]) {
     return LEFW_ALREADY_DEFINED;
+  }
 
-  if (lefwWriteEncrypt)
+  if (lefwWriteEncrypt) {
     encPrint(lefwFile, (char *)"UNITS\n");
-  else
+  } else {
     fprintf(lefwFile, "UNITS\n");
+  }
   lefwLines++;
   lefwSynArray[LEFW_UNITS_START] = 1;
   lefwState                      = LEFW_UNITS_START;
@@ -820,46 +899,54 @@ int lefwUnits(double time,         // optional
               double database      // optional
 ) {
   int databaseVal;
-  if (!lefwFile)
+  if (!lefwFile) {
     return LEFW_UNINITIALIZED;
-  if (lefwState != LEFW_UNITS_START && lefwState != LEFW_UNITS)
+  }
+  if (lefwState != LEFW_UNITS_START && lefwState != LEFW_UNITS) {
     return LEFW_BAD_ORDER;
+  }
 
   if (time) {
-    if (lefwWriteEncrypt)
+    if (lefwWriteEncrypt) {
       encPrint(lefwFile, (char *)"   TIME NANOSECONDS %.11g ;\n", time);
-    else
+    } else {
       fprintf(lefwFile, "   TIME NANOSECONDS %.11g ;\n", time);
+    }
   }
   if (capacitance) {
-    if (lefwWriteEncrypt)
+    if (lefwWriteEncrypt) {
       encPrint(lefwFile, (char *)"   CAPACITANCE PICOFARADS %.11g ;\n", capacitance);
-    else
+    } else {
       fprintf(lefwFile, "   CAPACITANCE PICOFARADS %.11g ;\n", capacitance);
+    }
   }
   if (resistance) {
-    if (lefwWriteEncrypt)
+    if (lefwWriteEncrypt) {
       encPrint(lefwFile, (char *)"   RESISTANCE OHMS %.11g ;\n", resistance);
-    else
+    } else {
       fprintf(lefwFile, "   RESISTANCE OHMS %.11g ;\n", resistance);
+    }
   }
   if (power) {
-    if (lefwWriteEncrypt)
+    if (lefwWriteEncrypt) {
       encPrint(lefwFile, (char *)"   POWER MILLIWATTS %.11g ;\n", power);
-    else
+    } else {
       fprintf(lefwFile, "   POWER MILLIWATTS %.11g ;\n", power);
+    }
   }
   if (current) {
-    if (lefwWriteEncrypt)
+    if (lefwWriteEncrypt) {
       encPrint(lefwFile, (char *)"   CURRENT MILLIAMPS %.11g ;\n", current);
-    else
+    } else {
       fprintf(lefwFile, "   CURRENT MILLIAMPS %.11g ;\n", current);
+    }
   }
   if (voltage) {
-    if (lefwWriteEncrypt)
+    if (lefwWriteEncrypt) {
       encPrint(lefwFile, (char *)"   VOLTAGE VOLTS %.11g ;\n", voltage);
-    else
+    } else {
       fprintf(lefwFile, "   VOLTAGE VOLTS %.11g ;\n", voltage);
+    }
   }
   if (database) {
     databaseVal = (int)database;
@@ -870,10 +957,11 @@ int lefwUnits(double time,         // optional
       case 2000:
       case 10000:
       case 20000:
-        if (lefwWriteEncrypt)
+        if (lefwWriteEncrypt) {
           encPrint(lefwFile, (char *)"   DATABASE MICRONS %d ;\n", database);
-        else
+        } else {
           fprintf(lefwFile, "   DATABASE MICRONS %d ;\n", databaseVal);
+        }
         break;
       default: return LEFW_BAD_DATA;
     }
@@ -885,54 +973,67 @@ int lefwUnits(double time,         // optional
 
 int lefwUnitsFrequency(double frequency) {  // required since only by itself
 
-  if (!lefwFile)
+  if (!lefwFile) {
     return LEFW_UNINITIALIZED;
-  if (lefwState != LEFW_UNITS_START && lefwState != LEFW_UNITS)
+  }
+  if (lefwState != LEFW_UNITS_START && lefwState != LEFW_UNITS) {
     return LEFW_BAD_ORDER;
-  if (!frequency)
+  }
+  if (!frequency) {
     return LEFW_BAD_DATA;
+  }
 
-  if (lefwWriteEncrypt)
+  if (lefwWriteEncrypt) {
     encPrint(lefwFile, (char *)"   FREQUENCY MEGAHERTZ %.11g ;\n", frequency);
-  else
+  } else {
     fprintf(lefwFile, "   FREQUENCY MEGAHERTZ %.11g ;\n", frequency);
+  }
 
   lefwState = LEFW_UNITS;
   return LEFW_OK;
 }
 
 int lefwEndUnits() {
-  if (!lefwFile)
+  if (!lefwFile) {
     return LEFW_UNINITIALIZED;
-  if (lefwState != LEFW_UNITS_START && lefwState != LEFW_UNITS)
+  }
+  if (lefwState != LEFW_UNITS_START && lefwState != LEFW_UNITS) {
     return LEFW_BAD_ORDER;
+  }
 
-  if (lefwWriteEncrypt)
+  if (lefwWriteEncrypt) {
     encPrint(lefwFile, (char *)"END UNITS\n\n");
-  else
+  } else {
     fprintf(lefwFile, "END UNITS\n\n");
+  }
   lefwLines++;
   lefwState = LEFW_UNITS_END;
   return LEFW_OK;
 }
 
 int lefwStartLayer(const char *layerName, const char *type) {
-  if (!lefwFile)
+  if (!lefwFile) {
     return LEFW_UNINITIALIZED;
-  if (!lefwDidInit)
+  }
+  if (!lefwDidInit) {
     return LEFW_BAD_ORDER;
-  if (lefwState == LEFW_LAYER_START || lefwState == LEFW_LAYER)
+  }
+  if (lefwState == LEFW_LAYER_START || lefwState == LEFW_LAYER) {
     return LEFW_BAD_ORDER;
-  if (lefwState != LEFW_INIT && lefwState < LEFW_END)
+  }
+  if (lefwState != LEFW_INIT && lefwState < LEFW_END) {
     return LEFW_BAD_ORDER;  // not of the ENDs
-  if (lefwIsMaxviastack)
+  }
+  if (lefwIsMaxviastack) {
     return LEFW_BAD_ORDER;  // Layer after maximum stacked-via
-  if (strcmp(type, "CUT") == 0)
+  }
+  if (strcmp(type, "CUT") == 0) {
     lefwIsCut = 1;
-  else if (strcmp(type, "IMPLANT") == 0)  // IMPLANT is 5.5 syntax
+  } else if (strcmp(type, "IMPLANT") == 0) {  // IMPLANT is 5.5 syntax
     lefwIsImplant = 1;
-  else if (strcmp(type, "MASTERSLICE") && strcmp(type, "OVERLAP") && strcmp(type, "IMPLANT"))  // IMPLANT is 5.5 syntax
+  } else if (strcmp(type, "MASTERSLICE") && strcmp(type, "OVERLAP") && strcmp(type, "IMPLANT")) {  // IMPLANT is 5.5 syntax
     return LEFW_BAD_DATA;  // type is CUT, MASTERSLICE or OVERLAP only
+  }
   if (lefwWriteEncrypt) {
     encPrint(lefwFile, (char *)"LAYER %s\n", layerName);
     encPrint(lefwFile, (char *)"   TYPE %s ;\n", type);
@@ -948,14 +1049,18 @@ int lefwStartLayer(const char *layerName, const char *type) {
 
 // 5.7
 int lefwLayerCutSpacing(double spacing) {
-  if (!lefwFile)
+  if (!lefwFile) {
     return LEFW_UNINITIALIZED;
-  if (lefwState != LEFW_LAYER_START && lefwState != LEFW_LAYER)
+  }
+  if (lefwState != LEFW_LAYER_START && lefwState != LEFW_LAYER) {
     return LEFW_BAD_ORDER;
-  if (lefwIsLayerCutSpacing)
+  }
+  if (lefwIsLayerCutSpacing) {
     return LEFW_BAD_ORDER;
-  if ((!lefwIsCut) && (!lefwIsImplant))
+  }
+  if ((!lefwIsCut) && (!lefwIsImplant)) {
     return LEFW_BAD_DATA;
+  }
   // only cut & implant call this func
   if (spacing) {
     if (lefwWriteEncrypt) {
@@ -963,8 +1068,9 @@ int lefwLayerCutSpacing(double spacing) {
     } else {
       fprintf(lefwFile, "   SPACING %.11g", spacing);
     }
-  } else
+  } else {
     return LEFW_BAD_ORDER;
+  }
 
   lefwLines++;
   lefwState             = LEFW_LAYER;
@@ -974,13 +1080,15 @@ int lefwLayerCutSpacing(double spacing) {
 
 // 5.7
 int lefwLayerCutSpacingCenterToCenter() {
-  if (!lefwIsLayerCutSpacing)
+  if (!lefwIsLayerCutSpacing) {
     return LEFW_BAD_ORDER;  // has to be after
+  }
   // lefwLayerCutSpacing is called
-  if (lefwWriteEncrypt)
+  if (lefwWriteEncrypt) {
     encPrint(lefwFile, (char *)"\n     CENTERTOCENTER");
-  else
+  } else {
     fprintf(lefwFile, "\n     CENTERTOCENTER");
+  }
   lefwLines++;
 
   lefwState = LEFW_LAYER;
@@ -989,13 +1097,15 @@ int lefwLayerCutSpacingCenterToCenter() {
 
 // 5.7
 int lefwLayerCutSpacingSameNet() {
-  if (!lefwIsLayerCutSpacing)
+  if (!lefwIsLayerCutSpacing) {
     return LEFW_BAD_ORDER;  // has to be after
+  }
   // lefwLayerCutSpacing is called
-  if (lefwWriteEncrypt)
+  if (lefwWriteEncrypt) {
     encPrint(lefwFile, (char *)"\n     SAMENET");
-  else
+  } else {
     fprintf(lefwFile, "\n     SAMENET");
+  }
   lefwLines++;
 
   lefwState = LEFW_LAYER;
@@ -1005,17 +1115,20 @@ int lefwLayerCutSpacingSameNet() {
 // 5.7
 int lefwLayerCutSpacingLayer(const char *name2,
                              int         stack) {  // optional
-  if (!lefwIsLayerCutSpacing)
+  if (!lefwIsLayerCutSpacing) {
     return LEFW_BAD_ORDER;  // has to be after
+  }
   // lefwLayerCutSpacing is called
   if (lefwWriteEncrypt) {
     encPrint(lefwFile, (char *)"\n     LAYER %s", name2);
-    if (stack)
+    if (stack) {
       encPrint(lefwFile, (char *)" STACK");
+    }
   } else {
     fprintf(lefwFile, "\n     LAYER %s", name2);
-    if (stack)
+    if (stack) {
       fprintf(lefwFile, " STACK");
+    }
   }
 
   lefwLines++;
@@ -1027,22 +1140,27 @@ int lefwLayerCutSpacingLayer(const char *name2,
 int lefwLayerCutSpacingAdjacent(int    viaCuts,  // either 2, 3 or 4, optional
                                 double distance,
                                 int    except) {  // optional
-  if (!lefwIsLayerCutSpacing)
+  if (!lefwIsLayerCutSpacing) {
     return LEFW_BAD_ORDER;  // has to be after
+  }
   // lefwLayerCutSpacing is called
   if (lefwWriteEncrypt) {
-    if (viaCuts < 2 && viaCuts > 4)
+    if (viaCuts < 2 && viaCuts > 4) {
       return LEFW_BAD_DATA;
+    }
     encPrint(lefwFile, (char *)"\n     ADJACENTCUTS %d WITHIN %.11g", viaCuts, distance);
-    if (except)
+    if (except) {
       encPrint(lefwFile, (char *)" EXCEPTSAMEPGNET");
+    }
 
   } else {
-    if (viaCuts < 2 && viaCuts > 4)
+    if (viaCuts < 2 && viaCuts > 4) {
       return LEFW_BAD_DATA;
+    }
     fprintf(lefwFile, "\n     ADJACENTCUTS %d WITHIN %.11g", viaCuts, distance);
-    if (except)
+    if (except) {
       fprintf(lefwFile, " EXCEPTSAMEPGNET");
+    }
   }
 
   lefwLines++;
@@ -1052,8 +1170,9 @@ int lefwLayerCutSpacingAdjacent(int    viaCuts,  // either 2, 3 or 4, optional
 
 // 5.7
 int lefwLayerCutSpacingParallel() {
-  if (!lefwIsLayerCutSpacing)
+  if (!lefwIsLayerCutSpacing) {
     return LEFW_BAD_ORDER;  // has to be after
+  }
   // lefwLayerCutSpacing is called
   if (lefwWriteEncrypt) {
     encPrint(lefwFile, (char *)"\n     PARALLELOVERLAP");
@@ -1068,8 +1187,9 @@ int lefwLayerCutSpacingParallel() {
 
 // 5.7
 int lefwLayerCutSpacingArea(double cutArea) {
-  if (!lefwIsLayerCutSpacing)
+  if (!lefwIsLayerCutSpacing) {
     return LEFW_BAD_ORDER;  // has to be after
+  }
   // lefwLayerCutSpacing is called
   if (lefwWriteEncrypt) {
     encPrint(lefwFile, (char *)"\n     AREA %.11g", cutArea);
@@ -1084,8 +1204,9 @@ int lefwLayerCutSpacingArea(double cutArea) {
 
 // 5.7
 int lefwLayerCutSpacingEnd() {
-  if (!lefwIsLayerCutSpacing)
+  if (!lefwIsLayerCutSpacing) {
     return LEFW_BAD_ORDER;  // has to be after
+  }
   // lefwLayerCutSpacing is called
   if (lefwWriteEncrypt) {
     encPrint(lefwFile, (char *)" ;\n");
@@ -1100,10 +1221,12 @@ int lefwLayerCutSpacingEnd() {
 }
 
 int lefwLayerMask(int colorMask) {
-  if (!lefwFile)
+  if (!lefwFile) {
     return LEFW_UNINITIALIZED;
-  if (lefwState != LEFW_LAYER_START && lefwState != LEFW_LAYER && lefwState != LEFW_LAYERROUTING_START)
+  }
+  if (lefwState != LEFW_LAYER_START && lefwState != LEFW_LAYER && lefwState != LEFW_LAYERROUTING_START) {
     return LEFW_BAD_ORDER;
+  }
 
   if (versionNum < 5.8) {
     return LEFW_WRONG_VERSION;
@@ -1113,10 +1236,11 @@ int lefwLayerMask(int colorMask) {
     return LEFW_BAD_DATA;
   }
 
-  if (lefwWriteEncrypt)
+  if (lefwWriteEncrypt) {
     encPrint(lefwFile, (char *)"   MASK %d ;\n", colorMask);
-  else
+  } else {
     fprintf(lefwFile, "   MASK %d ;\n", colorMask);
+  }
 
   lefwLines++;
 
@@ -1126,16 +1250,20 @@ int lefwLayerMask(int colorMask) {
 }
 
 int lefwLayerWidth(double minWidth) {
-  if (!lefwFile)
+  if (!lefwFile) {
     return LEFW_UNINITIALIZED;
-  if (lefwState != LEFW_LAYER_START && lefwState != LEFW_LAYER)
+  }
+  if (lefwState != LEFW_LAYER_START && lefwState != LEFW_LAYER) {
     return LEFW_BAD_ORDER;
-  if ((!lefwIsImplant) && (!lefwIsCut))
+  }
+  if ((!lefwIsImplant) && (!lefwIsCut)) {
     return LEFW_BAD_DATA;
-  if (lefwWriteEncrypt)
+  }
+  if (lefwWriteEncrypt) {
     encPrint(lefwFile, (char *)"   WIDTH %.11g ;\n", minWidth);
-  else
+  } else {
     fprintf(lefwFile, "   WIDTH %.11g ;\n", minWidth);
+  }
 
   lefwLines++;
   lefwState = LEFW_LAYER;
@@ -1146,14 +1274,18 @@ int lefwLayerWidth(double minWidth) {
 int lefwLayerCutSpacingTableOrtho(int numSpacing, double *cutWithins, double *orthoSpacings) {
   int i;
 
-  if (!lefwFile)
+  if (!lefwFile) {
     return LEFW_UNINITIALIZED;
-  if (lefwState != LEFW_LAYER_START && lefwState != LEFW_LAYER)
+  }
+  if (lefwState != LEFW_LAYER_START && lefwState != LEFW_LAYER) {
     return LEFW_BAD_ORDER;
-  if (!lefwIsCut)
+  }
+  if (!lefwIsCut) {
     return LEFW_BAD_DATA;  // only cut calls this func
-  if (lefwIsMaxviastack)
+  }
+  if (lefwIsMaxviastack) {
     return LEFW_BAD_ORDER;  // Layer after maximum stacked-via
+  }
   if (numSpacing) {
     if (lefwWriteEncrypt) {
       encPrint(lefwFile, (char *)"   SPACINGTABLE ORTHOGONAL");
@@ -1182,21 +1314,27 @@ int lefwLayerArraySpacing(int longArray, double viaWidth, double cutSpacing, int
                           double *arraySpacings) {
   int i;
 
-  if (!lefwFile)
+  if (!lefwFile) {
     return LEFW_UNINITIALIZED;
-  if (lefwState != LEFW_LAYER_START && lefwState != LEFW_LAYER)
+  }
+  if (lefwState != LEFW_LAYER_START && lefwState != LEFW_LAYER) {
     return LEFW_BAD_ORDER;
-  if (!lefwIsCut)
+  }
+  if (!lefwIsCut) {
     return LEFW_BAD_DATA;  // only cut calls this func
-  if (lefwIsMaxviastack)
+  }
+  if (lefwIsMaxviastack) {
     return LEFW_BAD_ORDER;  // Layer after maximum stacked-via
+  }
   if (cutSpacing) {
     if (lefwWriteEncrypt) {
       encPrint(lefwFile, (char *)"   ARRAYSPACING ");
-      if (longArray)
+      if (longArray) {
         encPrint(lefwFile, (char *)"LONGARRAY ");
-      if (viaWidth)
+      }
+      if (viaWidth) {
         encPrint(lefwFile, (char *)"WIDTH %.11g ", viaWidth);
+      }
       encPrint(lefwFile, (char *)"CUTSPACING %.11g ", cutSpacing);
       for (i = 0; i < numArrayCut; i++) {
         encPrint(lefwFile, (char *)"ARRAYCUTS %d SPACING %.11g ", *arrayCuts++, *arraySpacings++);
@@ -1204,10 +1342,12 @@ int lefwLayerArraySpacing(int longArray, double viaWidth, double cutSpacing, int
       encPrint(lefwFile, (char *)" ;\n");
     } else {
       fprintf(lefwFile, "  ARRAYSPACING ");
-      if (longArray)
+      if (longArray) {
         fprintf(lefwFile, "LONGARRAY ");
-      if (viaWidth)
+      }
+      if (viaWidth) {
         fprintf(lefwFile, "WIDTH %.11g ", viaWidth);
+      }
       fprintf(lefwFile, "CUTSPACING %.11g ", cutSpacing);
       for (i = 0; i < numArrayCut; i++) {
         fprintf(lefwFile, "ARRAYCUTS %d SPACING %.11g ", *arrayCuts++, *arraySpacings++);
@@ -1222,14 +1362,18 @@ int lefwLayerArraySpacing(int longArray, double viaWidth, double cutSpacing, int
 
 int lefwLayerEnclosure(const char *location, double overhang1, double overhang2,
                        double width) {  // optional
-  if (!lefwFile)
+  if (!lefwFile) {
     return LEFW_UNINITIALIZED;
-  if (lefwState != LEFW_LAYER_START && lefwState != LEFW_LAYER)
+  }
+  if (lefwState != LEFW_LAYER_START && lefwState != LEFW_LAYER) {
     return LEFW_BAD_ORDER;
-  if (!lefwIsCut)
+  }
+  if (!lefwIsCut) {
     return LEFW_BAD_DATA;  // only cut calls this func
-  if (lefwIsMaxviastack)
+  }
+  if (lefwIsMaxviastack) {
     return LEFW_BAD_ORDER;  // Layer after maximum stacked-via
+  }
   if (lefwWriteEncrypt) {
     encPrint(lefwFile, (char *)"   ENCLOSURE ");
     if (location && (*location != 0)) {
@@ -1240,8 +1384,9 @@ int lefwLayerEnclosure(const char *location, double overhang1, double overhang2,
       encPrint(lefwFile, (char *)"%s ", location);
     }
     encPrint(lefwFile, (char *)"%.11g %.11g ", overhang1, overhang2);
-    if (width)
+    if (width) {
       encPrint(lefwFile, (char *)"WIDTH %.11g ", width);
+    }
     encPrint(lefwFile, (char *)";\n");
   } else {
     fprintf(lefwFile, "   ENCLOSURE ");
@@ -1253,8 +1398,9 @@ int lefwLayerEnclosure(const char *location, double overhang1, double overhang2,
       fprintf(lefwFile, "%s ", location);
     }
     fprintf(lefwFile, "%.11g %.11g ", overhang1, overhang2);
-    if (width)
+    if (width) {
       fprintf(lefwFile, "WIDTH %.11g ", width);
+    }
     fprintf(lefwFile, ";\n");
   }
   lefwLines++;
@@ -1266,14 +1412,18 @@ int lefwLayerEnclosure(const char *location, double overhang1, double overhang2,
 int lefwLayerEnclosureWidth(const char *location, double overhang1, double overhang2,
                             double width,        // optional
                             double cutWithin) {  // optional
-  if (!lefwFile)
+  if (!lefwFile) {
     return LEFW_UNINITIALIZED;
-  if (lefwState != LEFW_LAYER_START && lefwState != LEFW_LAYER)
+  }
+  if (lefwState != LEFW_LAYER_START && lefwState != LEFW_LAYER) {
     return LEFW_BAD_ORDER;
-  if (!lefwIsCut)
+  }
+  if (!lefwIsCut) {
     return LEFW_BAD_DATA;  // only cut calls this func
-  if (lefwIsMaxviastack)
+  }
+  if (lefwIsMaxviastack) {
     return LEFW_BAD_ORDER;  // Layer after maximum stacked-via
+  }
   if (lefwWriteEncrypt) {
     encPrint(lefwFile, (char *)"   ENCLOSURE ");
     if (location && (*location != 0)) {
@@ -1286,8 +1436,9 @@ int lefwLayerEnclosureWidth(const char *location, double overhang1, double overh
     encPrint(lefwFile, (char *)"%.11g %.11g ", overhang1, overhang2);
     if (width) {
       encPrint(lefwFile, (char *)"WIDTH %.11g ", width);
-      if (cutWithin)
+      if (cutWithin) {
         encPrint(lefwFile, (char *)"EXCEPTEXTRACUT %.11g ", cutWithin);
+      }
     }
     encPrint(lefwFile, (char *)";\n");
   } else {
@@ -1302,8 +1453,9 @@ int lefwLayerEnclosureWidth(const char *location, double overhang1, double overh
     fprintf(lefwFile, "%.11g %.11g ", overhang1, overhang2);
     if (width) {
       fprintf(lefwFile, "WIDTH %.11g ", width);
-      if (cutWithin)
+      if (cutWithin) {
         fprintf(lefwFile, "EXCEPTEXTRACUT %.11g ", cutWithin);
+      }
     }
     fprintf(lefwFile, ";\n");
   }
@@ -1315,14 +1467,18 @@ int lefwLayerEnclosureWidth(const char *location, double overhang1, double overh
 // 5.7
 int lefwLayerEnclosureLength(const char *location, double overhang1, double overhang2,
                              double minLength) {  // optional
-  if (!lefwFile)
+  if (!lefwFile) {
     return LEFW_UNINITIALIZED;
-  if (lefwState != LEFW_LAYER_START && lefwState != LEFW_LAYER)
+  }
+  if (lefwState != LEFW_LAYER_START && lefwState != LEFW_LAYER) {
     return LEFW_BAD_ORDER;
-  if (!lefwIsCut)
+  }
+  if (!lefwIsCut) {
     return LEFW_BAD_DATA;  // only cut calls this func
-  if (lefwIsMaxviastack)
+  }
+  if (lefwIsMaxviastack) {
     return LEFW_BAD_ORDER;  // Layer after maximum stacked-via
+  }
   if (lefwWriteEncrypt) {
     encPrint(lefwFile, (char *)"   ENCLOSURE ");
     if (location && (*location != 0)) {
@@ -1333,8 +1489,9 @@ int lefwLayerEnclosureLength(const char *location, double overhang1, double over
       encPrint(lefwFile, (char *)"%s ", location);
     }
     encPrint(lefwFile, (char *)"%.11g %.11g ", overhang1, overhang2);
-    if (minLength)
+    if (minLength) {
       encPrint(lefwFile, (char *)"LENGTH %.11g ", minLength);
+    }
     encPrint(lefwFile, (char *)";\n");
   } else {
     fprintf(lefwFile, "   ENCLOSURE ");
@@ -1346,8 +1503,9 @@ int lefwLayerEnclosureLength(const char *location, double overhang1, double over
       fprintf(lefwFile, "%s ", location);
     }
     fprintf(lefwFile, "%.11g %.11g ", overhang1, overhang2);
-    if (minLength)
+    if (minLength) {
       fprintf(lefwFile, "LENGTH %.11g ", minLength);
+    }
     fprintf(lefwFile, ";\n");
   }
   lefwLines++;
@@ -1357,14 +1515,18 @@ int lefwLayerEnclosureLength(const char *location, double overhang1, double over
 
 int lefwLayerPreferEnclosure(const char *location, double overhang1, double overhang2,
                              double width) {  // optional
-  if (!lefwFile)
+  if (!lefwFile) {
     return LEFW_UNINITIALIZED;
-  if (lefwState != LEFW_LAYER_START && lefwState != LEFW_LAYER)
+  }
+  if (lefwState != LEFW_LAYER_START && lefwState != LEFW_LAYER) {
     return LEFW_BAD_ORDER;
-  if (!lefwIsCut)
+  }
+  if (!lefwIsCut) {
     return LEFW_BAD_DATA;  // only cut calls this func
-  if (lefwIsMaxviastack)
+  }
+  if (lefwIsMaxviastack) {
     return LEFW_BAD_ORDER;  // Layer after maximum stacked-via
+  }
   if (lefwWriteEncrypt) {
     encPrint(lefwFile, (char *)"   PREFERENCLOSURE ");
     if (location && (*location != 0)) {
@@ -1375,8 +1537,9 @@ int lefwLayerPreferEnclosure(const char *location, double overhang1, double over
       encPrint(lefwFile, (char *)"%s ", location);
     }
     encPrint(lefwFile, (char *)"%.11g %.11g ", overhang1, overhang2);
-    if (width)
+    if (width) {
       encPrint(lefwFile, (char *)"WIDTH %.11g ", width);
+    }
     encPrint(lefwFile, (char *)";\n");
   } else {
     fprintf(lefwFile, "   PREFERENCLOSURE ");
@@ -1388,8 +1551,9 @@ int lefwLayerPreferEnclosure(const char *location, double overhang1, double over
       fprintf(lefwFile, "%s ", location);
     }
     fprintf(lefwFile, "%.11g %.11g ", overhang1, overhang2);
-    if (width)
+    if (width) {
       fprintf(lefwFile, "WIDTH %.11g ", width);
+    }
     fprintf(lefwFile, ";\n");
   }
   lefwLines++;
@@ -1398,32 +1562,40 @@ int lefwLayerPreferEnclosure(const char *location, double overhang1, double over
 }
 
 int lefwLayerResistancePerCut(double resistance) {
-  if (!lefwFile)
+  if (!lefwFile) {
     return LEFW_UNINITIALIZED;
-  if (lefwState != LEFW_LAYER_START && lefwState != LEFW_LAYER)
+  }
+  if (lefwState != LEFW_LAYER_START && lefwState != LEFW_LAYER) {
     return LEFW_BAD_ORDER;
-  if (!lefwIsCut)
+  }
+  if (!lefwIsCut) {
     return LEFW_BAD_DATA;  // only cut calls this func
-  if (lefwIsMaxviastack)
+  }
+  if (lefwIsMaxviastack) {
     return LEFW_BAD_ORDER;  // Layer after maximum stacked-via
-  if (lefwWriteEncrypt)
+  }
+  if (lefwWriteEncrypt) {
     encPrint(lefwFile, (char *)"   RESISTANCEPERCUT %.11g ;\n", resistance);
-  else
+  } else {
     fprintf(lefwFile, "   RESISTANCEPERCUT %.11g ;\n", resistance);
+  }
   lefwLines++;
   lefwState = LEFW_LAYER;
   return LEFW_OK;
 }
 
 int lefwEndLayer(const char *layerName) {
-  if (!lefwFile)
+  if (!lefwFile) {
     return LEFW_UNINITIALIZED;
-  if (lefwState != LEFW_LAYER_START && lefwState != LEFW_LAYER)
+  }
+  if (lefwState != LEFW_LAYER_START && lefwState != LEFW_LAYER) {
     return LEFW_BAD_ORDER;
-  if (lefwWriteEncrypt)
+  }
+  if (lefwWriteEncrypt) {
     encPrint(lefwFile, (char *)"END %s\n\n", layerName);
-  else
+  } else {
     fprintf(lefwFile, "END %s\n\n", layerName);
+  }
 
   lefwLines++;
   lefwState     = LEFW_LAYER_END;
@@ -1433,14 +1605,18 @@ int lefwEndLayer(const char *layerName) {
 }
 
 int lefwStartLayerRouting(const char *layerName) {
-  if (!lefwFile)
+  if (!lefwFile) {
     return LEFW_UNINITIALIZED;
-  if (!lefwDidInit)
+  }
+  if (!lefwDidInit) {
     return LEFW_BAD_ORDER;
-  if (lefwState == LEFW_LAYERROUTING_START || lefwState == LEFW_LAYERROUTING)
+  }
+  if (lefwState == LEFW_LAYERROUTING_START || lefwState == LEFW_LAYERROUTING) {
     return LEFW_BAD_ORDER;
-  if (lefwState != LEFW_INIT && lefwState < LEFW_END)
+  }
+  if (lefwState != LEFW_INIT && lefwState < LEFW_END) {
     return LEFW_BAD_ORDER;  // not of the ENDs
+  }
   if (lefwWriteEncrypt) {
     encPrint(lefwFile, (char *)"LAYER %s\n", layerName);
     encPrint(lefwFile, (char *)"   TYPE ROUTING ;\n");
@@ -1458,21 +1634,26 @@ int lefwStartLayerRouting(const char *layerName) {
 }
 
 int lefwLayerRouting(const char *direction, double width) {
-  if (!lefwFile)
+  if (!lefwFile) {
     return LEFW_UNINITIALIZED;
-  if (lefwState != LEFW_LAYERROUTING_START && lefwState != LEFW_LAYERROUTING)
+  }
+  if (lefwState != LEFW_LAYERROUTING_START && lefwState != LEFW_LAYERROUTING) {
     return LEFW_BAD_ORDER;
-  if (!lefwIsRouting)
+  }
+  if (!lefwIsRouting) {
     return LEFW_BAD_DATA;  // only routing calls this func
+  }
   // this routine should call only once per layer routing
-  if (lefwSynArray[LEFW_LAYERROUTING])
+  if (lefwSynArray[LEFW_LAYERROUTING]) {
     return LEFW_ALREADY_DEFINED;
+  }
   if (prtSemiColon) {
     // the previous statement hasn't written the ; yet
-    if (lefwWriteEncrypt)
+    if (lefwWriteEncrypt) {
       encPrint(lefwFile, (char *)";\n");
-    else
+    } else {
       fprintf(lefwFile, ";\n");
+    }
     prtSemiColon = 0;
   }
   if (lefwWriteEncrypt) {
@@ -1509,240 +1690,290 @@ int lefwLayerRouting(const char *direction, double width) {
 }
 
 int lefwLayerRoutingPitch(double pitch) {
-  if (!lefwFile)
+  if (!lefwFile) {
     return LEFW_UNINITIALIZED;
-  if (lefwState != LEFW_LAYERROUTING_START && lefwState != LEFW_LAYERROUTING)
+  }
+  if (lefwState != LEFW_LAYERROUTING_START && lefwState != LEFW_LAYERROUTING) {
     return LEFW_BAD_ORDER;
-  if (!lefwIsRouting)
+  }
+  if (!lefwIsRouting) {
     return LEFW_BAD_DATA;  // only routing calls this func
+  }
   if (prtSemiColon) {
     // the previous statement hasn't written the ; yet
-    if (lefwWriteEncrypt)
+    if (lefwWriteEncrypt) {
       encPrint(lefwFile, (char *)";\n");
-    else
+    } else {
       fprintf(lefwFile, ";\n");
+    }
     prtSemiColon = 0;
   }
   // this routine should call only once per layer routing
   // it is required for SE only, other is optional
-  if (lefwWriteEncrypt)
+  if (lefwWriteEncrypt) {
     encPrint(lefwFile, (char *)"   PITCH %.11g ;\n", pitch);
-  else
+  } else {
     fprintf(lefwFile, "   PITCH %.11g ;\n", pitch);
+  }
   lefwLines++;
   return LEFW_OK;
 }
 
 int lefwLayerRoutingPitchXYDistance(double xDistance, double yDistance) {
-  if (!lefwFile)
+  if (!lefwFile) {
     return LEFW_UNINITIALIZED;
-  if (lefwState != LEFW_LAYERROUTING_START && lefwState != LEFW_LAYERROUTING)
+  }
+  if (lefwState != LEFW_LAYERROUTING_START && lefwState != LEFW_LAYERROUTING) {
     return LEFW_BAD_ORDER;
-  if (!lefwIsRouting)
+  }
+  if (!lefwIsRouting) {
     return LEFW_BAD_DATA;  // only routing calls this func
+  }
   if (prtSemiColon) {
     // the previous statement hasn't written the ; yet
-    if (lefwWriteEncrypt)
+    if (lefwWriteEncrypt) {
       encPrint(lefwFile, (char *)";\n");
-    else
+    } else {
       fprintf(lefwFile, ";\n");
+    }
     prtSemiColon = 0;
   }
   // this routine should call only once per layer routing
-  if (lefwWriteEncrypt)
+  if (lefwWriteEncrypt) {
     encPrint(lefwFile, (char *)"   PITCH %.11g %.11g ;\n", xDistance, yDistance);
-  else
+  } else {
     fprintf(lefwFile, "   PITCH %.11g %.11g ;\n", xDistance, yDistance);
+  }
   lefwLines++;
   return LEFW_OK;
 }
 
 int lefwLayerRoutingOffset(double offset) {
-  if (!lefwFile)
+  if (!lefwFile) {
     return LEFW_UNINITIALIZED;
-  if (lefwState != LEFW_LAYERROUTING_START && lefwState != LEFW_LAYERROUTING)
+  }
+  if (lefwState != LEFW_LAYERROUTING_START && lefwState != LEFW_LAYERROUTING) {
     return LEFW_BAD_ORDER;
-  if (!lefwIsRouting)
+  }
+  if (!lefwIsRouting) {
     return LEFW_BAD_DATA;  // only routing calls this func
+  }
   if (prtSemiColon) {
     // the previous statement hasn't written the ; yet
-    if (lefwWriteEncrypt)
+    if (lefwWriteEncrypt) {
       encPrint(lefwFile, (char *)";\n");
-    else
+    } else {
       fprintf(lefwFile, ";\n");
+    }
     prtSemiColon = 0;
   }
-  if (lefwWriteEncrypt)
+  if (lefwWriteEncrypt) {
     encPrint(lefwFile, (char *)"   OFFSET %.11g ;\n", offset);
-  else
+  } else {
     fprintf(lefwFile, "   OFFSET %.11g ;\n", offset);
+  }
   lefwLines++;
   return LEFW_OK;
 }
 
 int lefwLayerRoutingOffsetXYDistance(double xDistance, double yDistance) {
-  if (!lefwFile)
+  if (!lefwFile) {
     return LEFW_UNINITIALIZED;
-  if (lefwState != LEFW_LAYERROUTING_START && lefwState != LEFW_LAYERROUTING)
+  }
+  if (lefwState != LEFW_LAYERROUTING_START && lefwState != LEFW_LAYERROUTING) {
     return LEFW_BAD_ORDER;
-  if (!lefwIsRouting)
+  }
+  if (!lefwIsRouting) {
     return LEFW_BAD_DATA;  // only routing calls this func
+  }
   if (prtSemiColon) {
     // the previous statement hasn't written the ; yet
-    if (lefwWriteEncrypt)
+    if (lefwWriteEncrypt) {
       encPrint(lefwFile, (char *)";\n");
-    else
+    } else {
       fprintf(lefwFile, ";\n");
+    }
     prtSemiColon = 0;
   }
-  if (lefwWriteEncrypt)
+  if (lefwWriteEncrypt) {
     encPrint(lefwFile, (char *)"   OFFSET %.11g %.11g ;\n", xDistance, yDistance);
-  else
+  } else {
     fprintf(lefwFile, "   OFFSET %.11g %.11g ;\n", xDistance, yDistance);
+  }
   lefwLines++;
   return LEFW_OK;
 }
 
 int lefwLayerRoutingDiagPitch(double distance) {
-  if (!lefwFile)
+  if (!lefwFile) {
     return LEFW_UNINITIALIZED;
-  if (lefwState != LEFW_LAYERROUTING_START && lefwState != LEFW_LAYERROUTING)
+  }
+  if (lefwState != LEFW_LAYERROUTING_START && lefwState != LEFW_LAYERROUTING) {
     return LEFW_BAD_ORDER;
-  if (!lefwIsRouting)
+  }
+  if (!lefwIsRouting) {
     return LEFW_BAD_DATA;  // only routing calls this func
+  }
   if (prtSemiColon) {
     // the previous statement hasn't written the ; yet
-    if (lefwWriteEncrypt)
+    if (lefwWriteEncrypt) {
       encPrint(lefwFile, (char *)";\n");
-    else
+    } else {
       fprintf(lefwFile, ";\n");
+    }
     prtSemiColon = 0;
   }
-  if (lefwWriteEncrypt)
+  if (lefwWriteEncrypt) {
     encPrint(lefwFile, (char *)"   DIAGPITCH %.11g ;\n", distance);
-  else
+  } else {
     fprintf(lefwFile, "   DIAGPITCH %.11g ;\n", distance);
+  }
   lefwLines++;
   return LEFW_OK;
 }
 
 int lefwLayerRoutingDiagPitchXYDistance(double xDistance, double yDistance) {
-  if (!lefwFile)
+  if (!lefwFile) {
     return LEFW_UNINITIALIZED;
-  if (lefwState != LEFW_LAYERROUTING_START && lefwState != LEFW_LAYERROUTING)
+  }
+  if (lefwState != LEFW_LAYERROUTING_START && lefwState != LEFW_LAYERROUTING) {
     return LEFW_BAD_ORDER;
-  if (!lefwIsRouting)
+  }
+  if (!lefwIsRouting) {
     return LEFW_BAD_DATA;  // only routing calls this func
+  }
   if (prtSemiColon) {
     // the previous statement hasn't written the ; yet
-    if (lefwWriteEncrypt)
+    if (lefwWriteEncrypt) {
       encPrint(lefwFile, (char *)";\n");
-    else
+    } else {
       fprintf(lefwFile, ";\n");
+    }
     prtSemiColon = 0;
   }
-  if (lefwWriteEncrypt)
+  if (lefwWriteEncrypt) {
     encPrint(lefwFile, (char *)"   DIAGPITCH %.11g %.11g ;\n", xDistance, yDistance);
-  else
+  } else {
     fprintf(lefwFile, "   DIAGPITCH %.11g %.11g ;\n", xDistance, yDistance);
+  }
   lefwLines++;
   return LEFW_OK;
 }
 
 int lefwLayerRoutingDiagWidth(double diagWidth) {
-  if (!lefwFile)
+  if (!lefwFile) {
     return LEFW_UNINITIALIZED;
-  if (lefwState != LEFW_LAYERROUTING_START && lefwState != LEFW_LAYERROUTING)
+  }
+  if (lefwState != LEFW_LAYERROUTING_START && lefwState != LEFW_LAYERROUTING) {
     return LEFW_BAD_ORDER;
-  if (!lefwIsRouting)
+  }
+  if (!lefwIsRouting) {
     return LEFW_BAD_DATA;  // only routing calls this func
+  }
   if (prtSemiColon) {
     // the previous statement hasn't written the ; yet
-    if (lefwWriteEncrypt)
+    if (lefwWriteEncrypt) {
       encPrint(lefwFile, (char *)";\n");
-    else
+    } else {
       fprintf(lefwFile, ";\n");
+    }
     prtSemiColon = 0;
   }
   // this routine should call only once per layer routing
   // it is required for SE only, other is optional
-  if (lefwWriteEncrypt)
+  if (lefwWriteEncrypt) {
     encPrint(lefwFile, (char *)"   DIAGWIDTH %.11g ;\n", diagWidth);
-  else
+  } else {
     fprintf(lefwFile, "   DIAGWIDTH %.11g ;\n", diagWidth);
+  }
   lefwLines++;
   return LEFW_OK;
 }
 
 int lefwLayerRoutingDiagSpacing(double diagSpacing) {
-  if (!lefwFile)
+  if (!lefwFile) {
     return LEFW_UNINITIALIZED;
-  if (lefwState != LEFW_LAYERROUTING_START && lefwState != LEFW_LAYERROUTING)
+  }
+  if (lefwState != LEFW_LAYERROUTING_START && lefwState != LEFW_LAYERROUTING) {
     return LEFW_BAD_ORDER;
-  if (!lefwIsRouting)
+  }
+  if (!lefwIsRouting) {
     return LEFW_BAD_DATA;  // only routing calls this func
+  }
   if (prtSemiColon) {
     // the previous statement hasn't written the ; yet
-    if (lefwWriteEncrypt)
+    if (lefwWriteEncrypt) {
       encPrint(lefwFile, (char *)";\n");
-    else
+    } else {
       fprintf(lefwFile, ";\n");
+    }
     prtSemiColon = 0;
   }
   // this routine should call only once per layer routing
   // it is required for SE only, other is optional
-  if (lefwWriteEncrypt)
+  if (lefwWriteEncrypt) {
     encPrint(lefwFile, (char *)"   DIAGSPACING %.11g ;\n", diagSpacing);
-  else
+  } else {
     fprintf(lefwFile, "   DIAGSPACING %.11g ;\n", diagSpacing);
+  }
   lefwLines++;
   return LEFW_OK;
 }
 
 int lefwLayerRoutingDiagMinEdgeLength(double diagLength) {
-  if (!lefwFile)
+  if (!lefwFile) {
     return LEFW_UNINITIALIZED;
-  if (lefwState != LEFW_LAYERROUTING_START && lefwState != LEFW_LAYERROUTING)
+  }
+  if (lefwState != LEFW_LAYERROUTING_START && lefwState != LEFW_LAYERROUTING) {
     return LEFW_BAD_ORDER;
-  if (!lefwIsRouting)
+  }
+  if (!lefwIsRouting) {
     return LEFW_BAD_DATA;  // only routing calls this func
+  }
   if (prtSemiColon) {
     // the previous statement hasn't written the ; yet
-    if (lefwWriteEncrypt)
+    if (lefwWriteEncrypt) {
       encPrint(lefwFile, (char *)";\n");
-    else
+    } else {
       fprintf(lefwFile, ";\n");
+    }
     prtSemiColon = 0;
   }
   // this routine should call only once per layer routing
   // it is required for SE only, other is optional
-  if (lefwWriteEncrypt)
+  if (lefwWriteEncrypt) {
     encPrint(lefwFile, (char *)"   DIAGMINEDGELENGTH %.11g ;\n", diagLength);
-  else
+  } else {
     fprintf(lefwFile, "   DIAGMINEDGELENGTH %.11g ;\n", diagLength);
+  }
   lefwLines++;
   return LEFW_OK;
 }
 
 int lefwLayerRoutingArea(double area) {
-  if (!lefwFile)
+  if (!lefwFile) {
     return LEFW_UNINITIALIZED;
-  if (lefwState != LEFW_LAYERROUTING_START && lefwState != LEFW_LAYERROUTING)
+  }
+  if (lefwState != LEFW_LAYERROUTING_START && lefwState != LEFW_LAYERROUTING) {
     return LEFW_BAD_ORDER;
-  if (!lefwIsRouting)
+  }
+  if (!lefwIsRouting) {
     return LEFW_BAD_DATA;  // only routing calls this func
+  }
   if (prtSemiColon) {
     // the previous statement hasn't written the ; yet
-    if (lefwWriteEncrypt)
+    if (lefwWriteEncrypt) {
       encPrint(lefwFile, (char *)";\n");
-    else
+    } else {
       fprintf(lefwFile, ";\n");
+    }
     prtSemiColon = 0;
   }
-  if (lefwWriteEncrypt)
+  if (lefwWriteEncrypt) {
     encPrint(lefwFile, (char *)"   AREA %.11g ;\n", area);
-  else
+  } else {
     fprintf(lefwFile, "   AREA %.11g ;\n", area);
+  }
   lefwLines++;
   return LEFW_OK;
 }
@@ -1750,27 +1981,35 @@ int lefwLayerRoutingArea(double area) {
 int lefwLayerRoutingMinsize(int numRect, double *minWidth, double *minLength) {
   int i;
 
-  if (!lefwFile)
+  if (!lefwFile) {
     return LEFW_UNINITIALIZED;
-  if (lefwState != LEFW_LAYERROUTING_START && lefwState != LEFW_LAYERROUTING)
+  }
+  if (lefwState != LEFW_LAYERROUTING_START && lefwState != LEFW_LAYERROUTING) {
     return LEFW_BAD_ORDER;
-  if (!lefwIsRouting)
+  }
+  if (!lefwIsRouting) {
     return LEFW_BAD_DATA;  // only routing calls this func
+  }
   if (prtSemiColon) {
     // the previous statement hasn't written the ; yet
-    if (lefwWriteEncrypt)
+    if (lefwWriteEncrypt) {
       encPrint(lefwFile, (char *)";\n");
-    else
+    } else {
       fprintf(lefwFile, ";\n");
+    }
     prtSemiColon = 0;
   }
   if (lefwWriteEncrypt) {
     encPrint(lefwFile, (char *)"   MINSIZE ");
-    for (i = 0; i < numRect; i++) encPrint(lefwFile, (char *)"%.11g %.11g ", minWidth[i], minLength[i]);
+    for (i = 0; i < numRect; i++) {
+      encPrint(lefwFile, (char *)"%.11g %.11g ", minWidth[i], minLength[i]);
+    }
     encPrint(lefwFile, (char *)";\n");
   } else {
     fprintf(lefwFile, "   MINSIZE ");
-    for (i = 0; i < numRect; i++) fprintf(lefwFile, "%.11g %.11g ", minWidth[i], minLength[i]);
+    for (i = 0; i < numRect; i++) {
+      fprintf(lefwFile, "%.11g %.11g ", minWidth[i], minLength[i]);
+    }
     fprintf(lefwFile, ";\n");
   }
   lefwLines++;
@@ -1778,24 +2017,29 @@ int lefwLayerRoutingMinsize(int numRect, double *minWidth, double *minLength) {
 }
 
 int lefwLayerRoutingMinimumcut(double numCuts, double minWidth) {
-  if (!lefwFile)
+  if (!lefwFile) {
     return LEFW_UNINITIALIZED;
-  if (lefwState != LEFW_LAYERROUTING_START && lefwState != LEFW_LAYERROUTING)
+  }
+  if (lefwState != LEFW_LAYERROUTING_START && lefwState != LEFW_LAYERROUTING) {
     return LEFW_BAD_ORDER;
-  if (!lefwIsRouting)
+  }
+  if (!lefwIsRouting) {
     return LEFW_BAD_DATA;  // only routing calls this func
+  }
   if (prtSemiColon) {
     // the previous statement hasn't written the ; yet
-    if (lefwWriteEncrypt)
+    if (lefwWriteEncrypt) {
       encPrint(lefwFile, (char *)";\n");
-    else
+    } else {
       fprintf(lefwFile, ";\n");
+    }
     prtSemiColon = 0;
   }
-  if (lefwWriteEncrypt)
+  if (lefwWriteEncrypt) {
     encPrint(lefwFile, (char *)"   MINIMUMCUT %.11g WIDTH %.11g ", numCuts, minWidth);
-  else
+  } else {
     fprintf(lefwFile, "   MINIMUMCUT %.11g WIDTH %.11g ", numCuts, minWidth);
+  }
   lefwLines++;
   prtSemiColon            = 1;
   lefwIsRoutingMinCut     = 1;
@@ -1806,24 +2050,29 @@ int lefwLayerRoutingMinimumcut(double numCuts, double minWidth) {
 
 // 5.7
 int lefwLayerRoutingMinimumcutWithin(double numCuts, double minWidth, double cutDistance) {
-  if (!lefwFile)
+  if (!lefwFile) {
     return LEFW_UNINITIALIZED;
-  if (lefwState != LEFW_LAYERROUTING_START && lefwState != LEFW_LAYERROUTING)
+  }
+  if (lefwState != LEFW_LAYERROUTING_START && lefwState != LEFW_LAYERROUTING) {
     return LEFW_BAD_ORDER;
-  if (!lefwIsRouting)
+  }
+  if (!lefwIsRouting) {
     return LEFW_BAD_DATA;  // only routing calls this func
+  }
   if (prtSemiColon) {
     // the previous statement hasn't written the ; yet
-    if (lefwWriteEncrypt)
+    if (lefwWriteEncrypt) {
       encPrint(lefwFile, (char *)";\n");
-    else
+    } else {
       fprintf(lefwFile, ";\n");
+    }
     prtSemiColon = 0;
   }
-  if (lefwWriteEncrypt)
+  if (lefwWriteEncrypt) {
     encPrint(lefwFile, (char *)"   MINIMUMCUT %.11g WIDTH %.11g WITHIN %.11g ", numCuts, minWidth, cutDistance);
-  else
+  } else {
     fprintf(lefwFile, "   MINIMUMCUT %.11g WIDTH %.11g WITHIN %.11g ", numCuts, minWidth, cutDistance);
+  }
   lefwLines++;
   prtSemiColon            = 1;
   lefwIsRoutingMinCut     = 1;
@@ -1833,62 +2082,75 @@ int lefwLayerRoutingMinimumcutWithin(double numCuts, double minWidth, double cut
 }
 
 int lefwLayerRoutingMinimumcutConnections(const char *direction) {
-  if (!lefwFile)
+  if (!lefwFile) {
     return LEFW_UNINITIALIZED;
-  if (!lefwIsRoutingMinCut || lefwIsRoutingMinCutDist)
+  }
+  if (!lefwIsRoutingMinCut || lefwIsRoutingMinCutDist) {
     return LEFW_BAD_ORDER;
+  }
   // lefwLayerRoutingMinimumcut has not being called or
   // lefwLayerRoutingMinimumcutConnections has already called
-  if (lefwWriteEncrypt)
+  if (lefwWriteEncrypt) {
     encPrint(lefwFile, (char *)"\n     %s ", direction);
-  else
+  } else {
     fprintf(lefwFile, "\n     %s ", direction);
+  }
   lefwLines++;
   prtSemiColon            = 1;
   lefwIsRoutingMinCutDist = 1;
-  if (lefwIsRoutingMinCutLen)  // both distance & length within has defined
+  if (lefwIsRoutingMinCutLen) {  // both distance & length within has defined
     lefwIsRoutingMinCut = 0;
+  }
   return LEFW_OK;
 }
 
 int lefwLayerRoutingMinimumcutLengthWithin(double length, double distance) {
-  if (!lefwFile)
+  if (!lefwFile) {
     return LEFW_UNINITIALIZED;
-  if (!lefwIsRoutingMinCut || lefwIsRoutingMinCutLen)
+  }
+  if (!lefwIsRoutingMinCut || lefwIsRoutingMinCutLen) {
     return LEFW_BAD_ORDER;
+  }
   // lefwLayerRoutingMinimumcut has not being called or
   // lefwLayerRoutingMinimumcutLengthWithin has already called
-  if (lefwWriteEncrypt)
+  if (lefwWriteEncrypt) {
     encPrint(lefwFile, (char *)"     LENGTH %.11g WITHIN %.11g ", length, distance);
-  else
+  } else {
     fprintf(lefwFile, "     LENGTH %.11g WITHIN %.11g ", length, distance);
+  }
   lefwLines++;
   prtSemiColon           = 1;
   lefwIsRoutingMinCutLen = 1;
-  if (lefwIsRoutingMinCutDist)  // both distance & length within has defined
+  if (lefwIsRoutingMinCutDist) {  // both distance & length within has defined
     lefwIsRoutingMinCut = 0;
+  }
   return LEFW_OK;
 }
 
 int lefwLayerRoutingSpacing(double spacing) {
-  if (!lefwFile)
+  if (!lefwFile) {
     return LEFW_UNINITIALIZED;
-  if (lefwState != LEFW_LAYERROUTING_START && lefwState != LEFW_LAYERROUTING)
+  }
+  if (lefwState != LEFW_LAYERROUTING_START && lefwState != LEFW_LAYERROUTING) {
     return LEFW_BAD_ORDER;
-  if (!lefwIsRouting)
+  }
+  if (!lefwIsRouting) {
     return LEFW_BAD_DATA;  // only routing calls this func
+  }
   if (prtSemiColon) {
     // the previous statement hasn't written the ; yet
-    if (lefwWriteEncrypt)
+    if (lefwWriteEncrypt) {
       encPrint(lefwFile, (char *)";\n");
-    else
+    } else {
       fprintf(lefwFile, ";\n");
+    }
     prtSemiColon = 0;
   }
-  if (lefwWriteEncrypt)
+  if (lefwWriteEncrypt) {
     encPrint(lefwFile, (char *)"   SPACING %.11g ", spacing);
-  else
+  } else {
     fprintf(lefwFile, "   SPACING %.11g ", spacing);
+  }
   lefwLines++;
   lefwHasLayerRoutingRange   = 0;  // initialization
   lefwHasLayerRoutingSpacing = 1;  // initialization
@@ -1899,18 +2161,23 @@ int lefwLayerRoutingSpacing(double spacing) {
 }
 
 int lefwLayerRoutingSpacingRange(double leftRange, double rightRange) {
-  if (!lefwFile)
+  if (!lefwFile) {
     return LEFW_UNINITIALIZED;
-  if (lefwState != LEFW_LAYERROUTING_START && lefwState != LEFW_LAYERROUTING)
+  }
+  if (lefwState != LEFW_LAYERROUTING_START && lefwState != LEFW_LAYERROUTING) {
     return LEFW_BAD_ORDER;
-  if (!lefwIsRouting)
+  }
+  if (!lefwIsRouting) {
     return LEFW_BAD_DATA;  // only routing calls this func
-  if (!lefwHasLayerRoutingSpacing)
+  }
+  if (!lefwHasLayerRoutingSpacing) {
     return LEFW_BAD_DATA;
-  if (lefwWriteEncrypt)
+  }
+  if (lefwWriteEncrypt) {
     encPrint(lefwFile, (char *)"RANGE %.11g %.11g ", leftRange, rightRange);
-  else
+  } else {
     fprintf(lefwFile, "RANGE %.11g %.11g ", leftRange, rightRange);
+  }
   lefwHasLayerRoutingRange = 1;  // initialization
   lefwLines++;
   prtNewLine   = 1;
@@ -1919,22 +2186,26 @@ int lefwLayerRoutingSpacingRange(double leftRange, double rightRange) {
 }
 
 int lefwLayerRoutingSpacingRangeUseLengthThreshold() {
-  if (!lefwFile)
+  if (!lefwFile) {
     return LEFW_UNINITIALIZED;
-  if (lefwState != LEFW_LAYERROUTING_START && lefwState != LEFW_LAYERROUTING)
+  }
+  if (lefwState != LEFW_LAYERROUTING_START && lefwState != LEFW_LAYERROUTING) {
     return LEFW_BAD_ORDER;
-  if (!lefwIsRouting)
+  }
+  if (!lefwIsRouting) {
     return LEFW_BAD_DATA;  // only routing calls this func
+  }
   if (!lefwHasLayerRoutingRange) {
     // This routine can be called only if range are non zero
     fprintf(lefwFile, "ERROR (LEFWRIT-4003): lefwLayerRoutingSpacingUseLengthThreshold cannot be called if\n");
     fprintf(lefwFile, "       lefwLayerRoutingSpacingRange has not been called.\n");
     return LEFW_BAD_DATA;
   }
-  if (lefwWriteEncrypt)
+  if (lefwWriteEncrypt) {
     encPrint(lefwFile, (char *)"\n     USELENGTHTHRESHOLD ");
-  else
+  } else {
     fprintf(lefwFile, "\n     USELENGTHTHRESHOLD ");
+  }
   prtSemiColon             = 1;
   prtNewLine               = 1;
   lefwHasLayerRoutingRange = 0;  // reset to 0
@@ -1943,12 +2214,15 @@ int lefwLayerRoutingSpacingRangeUseLengthThreshold() {
 }
 
 int lefwLayerRoutingSpacingRangeInfluence(double infValue, double subMinWidth, double subMaxWidth) {
-  if (!lefwFile)
+  if (!lefwFile) {
     return LEFW_UNINITIALIZED;
-  if (lefwState != LEFW_LAYERROUTING_START && lefwState != LEFW_LAYERROUTING)
+  }
+  if (lefwState != LEFW_LAYERROUTING_START && lefwState != LEFW_LAYERROUTING) {
     return LEFW_BAD_ORDER;
-  if (!lefwIsRouting)
+  }
+  if (!lefwIsRouting) {
     return LEFW_BAD_DATA;  // only routing calls this func
+  }
   if (!lefwHasLayerRoutingRange) {
     // This routine can be called only if range are non zero
     fprintf(lefwFile, "ERROR (LEFWRIT-4004): lefwLayerRoutingSpacingInfluence cannot be called if\n");
@@ -1957,12 +2231,14 @@ int lefwLayerRoutingSpacingRangeInfluence(double infValue, double subMinWidth, d
   }
   if (lefwWriteEncrypt) {
     encPrint(lefwFile, (char *)"\n     INFLUENCE %.11g ", infValue);
-    if (subMinWidth || subMaxWidth)
+    if (subMinWidth || subMaxWidth) {
       encPrint(lefwFile, (char *)"RANGE %.11g %.11g ", subMinWidth, subMaxWidth);
+    }
   } else {
     fprintf(lefwFile, "\n     INFLUENCE %.11g ", infValue);
-    if (subMinWidth || subMaxWidth)
+    if (subMinWidth || subMaxWidth) {
       fprintf(lefwFile, (char *)"RANGE %.11g %.11g ", subMinWidth, subMaxWidth);
+    }
   }
   prtNewLine               = 1;
   prtSemiColon             = 1;
@@ -1971,12 +2247,15 @@ int lefwLayerRoutingSpacingRangeInfluence(double infValue, double subMinWidth, d
 }
 
 int lefwLayerRoutingSpacingRangeRange(double minWidth, double maxWidth) {
-  if (!lefwFile)
+  if (!lefwFile) {
     return LEFW_UNINITIALIZED;
-  if (lefwState != LEFW_LAYERROUTING_START && lefwState != LEFW_LAYERROUTING)
+  }
+  if (lefwState != LEFW_LAYERROUTING_START && lefwState != LEFW_LAYERROUTING) {
     return LEFW_BAD_ORDER;
-  if (!lefwIsRouting)
+  }
+  if (!lefwIsRouting) {
     return LEFW_BAD_DATA;  // only routing calls this func
+  }
   if (!lefwHasLayerRoutingRange) {
     // This routine can be called only if range are non zero
     fprintf(lefwFile, "ERROR (LEFWRIT-4005): lefwLayerRoutingSpacingInfluence cannot be called if\n");
@@ -1995,14 +2274,18 @@ int lefwLayerRoutingSpacingRangeRange(double minWidth, double maxWidth) {
 }
 
 int lefwLayerRoutingSpacingLengthThreshold(double lengthValue, double minWidth, double maxWidth) {
-  if (!lefwFile)
+  if (!lefwFile) {
     return LEFW_UNINITIALIZED;
-  if (lefwState != LEFW_LAYERROUTING_START && lefwState != LEFW_LAYERROUTING)
+  }
+  if (lefwState != LEFW_LAYERROUTING_START && lefwState != LEFW_LAYERROUTING) {
     return LEFW_BAD_ORDER;
-  if (!lefwIsRouting)
+  }
+  if (!lefwIsRouting) {
     return LEFW_BAD_DATA;  // only routing calls this func
-  if (!lefwHasLayerRoutingSpacing)
+  }
+  if (!lefwHasLayerRoutingSpacing) {
     return LEFW_BAD_DATA;
+  }
   if (lefwWriteEncrypt) {
     encPrint(lefwFile, (char *)"   LENGTHTHRESHOLD %.11g ", lengthValue);
     if (minWidth || maxWidth) {
@@ -2020,24 +2303,30 @@ int lefwLayerRoutingSpacingLengthThreshold(double lengthValue, double minWidth, 
 
 // 5.7
 int lefwLayerRoutingSpacingSameNet(int PGOnly) {
-  if (!lefwFile)
+  if (!lefwFile) {
     return LEFW_UNINITIALIZED;
-  if (lefwState != LEFW_LAYERROUTING_START && lefwState != LEFW_LAYERROUTING)
+  }
+  if (lefwState != LEFW_LAYERROUTING_START && lefwState != LEFW_LAYERROUTING) {
     return LEFW_BAD_ORDER;
-  if (!lefwIsRouting)
+  }
+  if (!lefwIsRouting) {
     return LEFW_BAD_DATA;  // only routing calls this func
-  if (!lefwHasLayerRoutingSpacing)
+  }
+  if (!lefwHasLayerRoutingSpacing) {
     return LEFW_BAD_DATA;
+  }
   if (lefwWriteEncrypt) {
-    if (PGOnly)
+    if (PGOnly) {
       encPrint(lefwFile, (char *)"   SAMENET PGONLY ");
-    else
+    } else {
       encPrint(lefwFile, (char *)"   SAMENET ");
+    }
   } else {
-    if (PGOnly)
+    if (PGOnly) {
       fprintf(lefwFile, "   SAMENET PGONLY ");
-    else
+    } else {
       fprintf(lefwFile, "   SAMENET ");
+    }
   }
   prtSemiColon = 1;
   return LEFW_OK;
@@ -2045,26 +2334,32 @@ int lefwLayerRoutingSpacingSameNet(int PGOnly) {
 
 // 5.7
 int lefwLayerRoutingSpacingEndOfLine(double eolWidth, double eolWithin) {
-  if (!lefwFile)
+  if (!lefwFile) {
     return LEFW_UNINITIALIZED;
-  if (lefwState != LEFW_LAYERROUTING_START && lefwState != LEFW_LAYERROUTING)
+  }
+  if (lefwState != LEFW_LAYERROUTING_START && lefwState != LEFW_LAYERROUTING) {
     return LEFW_BAD_ORDER;
-  if (!lefwIsRouting)
+  }
+  if (!lefwIsRouting) {
     return LEFW_BAD_DATA;  // only routing calls this func
-  if (lefwHasLayerRoutingEol)
+  }
+  if (lefwHasLayerRoutingEol) {
     return LEFW_BAD_DATA;  // already defined in Spacing
+  }
   if (prtSemiColon) {
     // the previous statement hasn't written the ; yet
-    if (lefwWriteEncrypt)
+    if (lefwWriteEncrypt) {
       encPrint(lefwFile, (char *)";\n");
-    else
+    } else {
       fprintf(lefwFile, ";\n");
+    }
     prtSemiColon = 0;
   }
-  if (lefwWriteEncrypt)
+  if (lefwWriteEncrypt) {
     encPrint(lefwFile, (char *)"   ENDOFLINE %.11g WITHIN %.11g ", eolWidth, eolWithin);
-  else
+  } else {
     fprintf(lefwFile, "   ENDOFLINE %.11g WITHIN %.11g ", eolWidth, eolWithin);
+  }
   lefwLines++;
   lefwHasLayerRoutingEol = 1;
   prtSemiColon           = 1;
@@ -2073,18 +2368,21 @@ int lefwLayerRoutingSpacingEndOfLine(double eolWidth, double eolWithin) {
 
 // 5.7
 int lefwLayerRoutingSpacingEOLParallel(double parSpace, double parWithin, int twoEdges) {
-  if (!lefwHasLayerRoutingEol)
+  if (!lefwHasLayerRoutingEol) {
     return LEFW_BAD_DATA;  // EndOfLine in not defined
+  }
   if (lefwWriteEncrypt) {
-    if (twoEdges)
+    if (twoEdges) {
       encPrint(lefwFile, (char *)"PARALLELEDGE %.11g WITHIN %.11g TWOEDGES ;\n", parSpace, parWithin);
-    else
+    } else {
       encPrint(lefwFile, (char *)"PARALLELEDGE %.11g WITHIN %.11g ;\n", parSpace, parWithin);
+    }
   } else {
-    if (twoEdges)
+    if (twoEdges) {
       fprintf(lefwFile, "PARALLELEDGE %.11g WITHIN %.11g TWOEDGES ;\n", parSpace, parWithin);
-    else
+    } else {
       fprintf(lefwFile, "PARALLELEDGE %.11g WITHIN %.11g ;\n", parSpace, parWithin);
+    }
   }
   lefwLines++;
   lefwHasLayerRoutingEol = 0;
@@ -2094,332 +2392,404 @@ int lefwLayerRoutingSpacingEOLParallel(double parSpace, double parWithin, int tw
 
 // 5.7
 int lefwLayerRoutingSpacingNotchLength(double minNLength) {
-  if (!lefwFile)
+  if (!lefwFile) {
     return LEFW_UNINITIALIZED;
-  if (lefwState != LEFW_LAYERROUTING_START && lefwState != LEFW_LAYERROUTING)
+  }
+  if (lefwState != LEFW_LAYERROUTING_START && lefwState != LEFW_LAYERROUTING) {
     return LEFW_BAD_ORDER;
-  if (!lefwIsRouting)
+  }
+  if (!lefwIsRouting) {
     return LEFW_BAD_DATA;  // only routing calls this func
+  }
   if (prtSemiColon) {
     // the previous statement hasn't written the ; yet
-    if (lefwWriteEncrypt)
+    if (lefwWriteEncrypt) {
       encPrint(lefwFile, (char *)";\n");
-    else
+    } else {
       fprintf(lefwFile, ";\n");
+    }
     prtSemiColon = 0;
   }
-  if (lefwWriteEncrypt)
+  if (lefwWriteEncrypt) {
     encPrint(lefwFile, (char *)"   NOTCHLENGTH %.11g ;\n", minNLength);
-  else
+  } else {
     fprintf(lefwFile, "   NOTCHLENGTH %.11g ;\n", minNLength);
+  }
   lefwLines++;
   return LEFW_OK;
 }
 
 // 5.7
 int lefwLayerRoutingSpacingEndOfNotchWidth(double eonWidth, double minNSpacing, double minNLength) {
-  if (!lefwFile)
+  if (!lefwFile) {
     return LEFW_UNINITIALIZED;
-  if (lefwState != LEFW_LAYERROUTING_START && lefwState != LEFW_LAYERROUTING)
+  }
+  if (lefwState != LEFW_LAYERROUTING_START && lefwState != LEFW_LAYERROUTING) {
     return LEFW_BAD_ORDER;
-  if (!lefwIsRouting)
+  }
+  if (!lefwIsRouting) {
     return LEFW_BAD_DATA;  // only routing calls this func
+  }
   if (prtSemiColon) {
     // the previous statement hasn't written the ; yet
-    if (lefwWriteEncrypt)
+    if (lefwWriteEncrypt) {
       encPrint(lefwFile, (char *)";\n");
-    else
+    } else {
       fprintf(lefwFile, ";\n");
+    }
     prtSemiColon = 0;
   }
-  if (lefwWriteEncrypt)
+  if (lefwWriteEncrypt) {
     encPrint(lefwFile,
              (char *)"   ENDOFNOTCHWIDTH %.11g NOTCHSPACING %.11g NOTCHLENGTH %.11g ;\n",
              eonWidth,
              minNSpacing,
              minNLength);
-  else
+  } else {
     fprintf(lefwFile, "    ENDOFNOTCHWIDTH %.11g NOTCHSPACING %.11g NOTCHLENGTH %.11g ;\n", eonWidth, minNSpacing, minNLength);
+  }
   lefwLines++;
   return LEFW_OK;
 }
 
 int lefwLayerRoutingWireExtension(double wireExtension) {
-  if (!lefwFile)
+  if (!lefwFile) {
     return LEFW_UNINITIALIZED;
-  if (lefwState != LEFW_LAYERROUTING_START && lefwState != LEFW_LAYERROUTING)
+  }
+  if (lefwState != LEFW_LAYERROUTING_START && lefwState != LEFW_LAYERROUTING) {
     return LEFW_BAD_ORDER;
-  if (!lefwIsRouting)
+  }
+  if (!lefwIsRouting) {
     return LEFW_BAD_DATA;  // only routing calls this func
+  }
   if (prtSemiColon) {
     // the previous statement hasn't written the ; yet
-    if (lefwWriteEncrypt)
+    if (lefwWriteEncrypt) {
       encPrint(lefwFile, (char *)";\n");
-    else
+    } else {
       fprintf(lefwFile, ";\n");
+    }
     prtSemiColon = 0;
   }
-  if (lefwWriteEncrypt)
+  if (lefwWriteEncrypt) {
     encPrint(lefwFile, (char *)"   WIREEXTENSION %.11g ;\n", wireExtension);
-  else
+  } else {
     fprintf(lefwFile, "   WIREEXTENSION %.11g ;\n", wireExtension);
+  }
   lefwLines++;
   return LEFW_OK;
 }
 
 int lefwLayerRoutingResistance(const char *resistance) {
-  if (!lefwFile)
+  if (!lefwFile) {
     return LEFW_UNINITIALIZED;
-  if (lefwState != LEFW_LAYERROUTING_START && lefwState != LEFW_LAYERROUTING)
+  }
+  if (lefwState != LEFW_LAYERROUTING_START && lefwState != LEFW_LAYERROUTING) {
     return LEFW_BAD_ORDER;
-  if (!lefwIsRouting)
+  }
+  if (!lefwIsRouting) {
     return LEFW_BAD_DATA;  // only routing calls this func
-  if (!resistance || resistance == 0 || *resistance == 0)
+  }
+  if (!resistance || resistance == 0 || *resistance == 0) {
     return LEFW_BAD_DATA;
+  }
   if (prtSemiColon) {
     // the previous statement hasn't written the ; yet
-    if (lefwWriteEncrypt)
+    if (lefwWriteEncrypt) {
       encPrint(lefwFile, (char *)";\n");
-    else
+    } else {
       fprintf(lefwFile, ";\n");
+    }
     prtSemiColon = 0;
   }
-  if (lefwWriteEncrypt)
+  if (lefwWriteEncrypt) {
     encPrint(lefwFile, (char *)"   RESISTANCE RPERSQ %s ;\n", resistance);
-  else
+  } else {
     fprintf(lefwFile, "   RESISTANCE RPERSQ %s ;\n", resistance);
+  }
   lefwLines++;
   return LEFW_OK;
 }
 
 int lefwLayerRoutingCapacitance(const char *capacitance) {
-  if (!lefwFile)
+  if (!lefwFile) {
     return LEFW_UNINITIALIZED;
-  if (lefwState != LEFW_LAYERROUTING_START && lefwState != LEFW_LAYERROUTING)
+  }
+  if (lefwState != LEFW_LAYERROUTING_START && lefwState != LEFW_LAYERROUTING) {
     return LEFW_BAD_ORDER;
-  if (!lefwIsRouting)
+  }
+  if (!lefwIsRouting) {
     return LEFW_BAD_DATA;  // only routing calls this func
+  }
   if (prtSemiColon) {
     // the previous statement hasn't written the ; yet
-    if (lefwWriteEncrypt)
+    if (lefwWriteEncrypt) {
       encPrint(lefwFile, (char *)";\n");
-    else
+    } else {
       fprintf(lefwFile, ";\n");
+    }
     prtSemiColon = 0;
   }
-  if (!capacitance || capacitance == 0 || *capacitance == 0)
+  if (!capacitance || capacitance == 0 || *capacitance == 0) {
     return LEFW_BAD_DATA;
-  if (lefwWriteEncrypt)
+  }
+  if (lefwWriteEncrypt) {
     encPrint(lefwFile, (char *)"   CAPACITANCE CPERSQDIST %s ;\n", capacitance);
-  else
+  } else {
     fprintf(lefwFile, "   CAPACITANCE CPERSQDIST %s ;\n", capacitance);
+  }
   lefwLines++;
   return LEFW_OK;
 }
 
 int lefwLayerRoutingHeight(double height) {
-  if (!lefwFile)
+  if (!lefwFile) {
     return LEFW_UNINITIALIZED;
-  if (lefwState != LEFW_LAYERROUTING_START && lefwState != LEFW_LAYERROUTING)
+  }
+  if (lefwState != LEFW_LAYERROUTING_START && lefwState != LEFW_LAYERROUTING) {
     return LEFW_BAD_ORDER;
-  if (!lefwIsRouting)
+  }
+  if (!lefwIsRouting) {
     return LEFW_BAD_DATA;  // only routing calls this func
+  }
   if (prtSemiColon) {
     // the previous statement hasn't written the ; yet
-    if (lefwWriteEncrypt)
+    if (lefwWriteEncrypt) {
       encPrint(lefwFile, (char *)";\n");
-    else
+    } else {
       fprintf(lefwFile, ";\n");
+    }
     prtSemiColon = 0;
   }
-  if (lefwWriteEncrypt)
+  if (lefwWriteEncrypt) {
     encPrint(lefwFile, (char *)"   HEIGHT %.11g ;\n", height);
-  else
+  } else {
     fprintf(lefwFile, "   HEIGHT %.11g ;\n", height);
+  }
   lefwLines++;
   return LEFW_OK;
 }
 
 int lefwLayerRoutingThickness(double thickness) {
-  if (!lefwFile)
+  if (!lefwFile) {
     return LEFW_UNINITIALIZED;
-  if (lefwState != LEFW_LAYERROUTING_START && lefwState != LEFW_LAYERROUTING)
+  }
+  if (lefwState != LEFW_LAYERROUTING_START && lefwState != LEFW_LAYERROUTING) {
     return LEFW_BAD_ORDER;
-  if (!lefwIsRouting)
+  }
+  if (!lefwIsRouting) {
     return LEFW_BAD_DATA;  // only routing calls this func
+  }
   if (prtSemiColon) {
     // the previous statement hasn't written the ; yet
-    if (lefwWriteEncrypt)
+    if (lefwWriteEncrypt) {
       encPrint(lefwFile, (char *)";\n");
-    else
+    } else {
       fprintf(lefwFile, ";\n");
+    }
     prtSemiColon = 0;
   }
-  if (lefwWriteEncrypt)
+  if (lefwWriteEncrypt) {
     encPrint(lefwFile, (char *)"   THICKNESS %.11g ;\n", thickness);
-  else
+  } else {
     fprintf(lefwFile, "   THICKNESS %.11g ;\n", thickness);
+  }
   lefwLines++;
   return LEFW_OK;
 }
 
 int lefwLayerRoutingShrinkage(double shrinkage) {
-  if (!lefwFile)
+  if (!lefwFile) {
     return LEFW_UNINITIALIZED;
-  if (lefwState != LEFW_LAYERROUTING_START && lefwState != LEFW_LAYERROUTING)
+  }
+  if (lefwState != LEFW_LAYERROUTING_START && lefwState != LEFW_LAYERROUTING) {
     return LEFW_BAD_ORDER;
-  if (!lefwIsRouting)
+  }
+  if (!lefwIsRouting) {
     return LEFW_BAD_DATA;  // only routing calls this func
+  }
   if (prtSemiColon) {
     // the previous statement hasn't written the ; yet
-    if (lefwWriteEncrypt)
+    if (lefwWriteEncrypt) {
       encPrint(lefwFile, (char *)";\n");
-    else
+    } else {
       fprintf(lefwFile, ";\n");
+    }
     prtSemiColon = 0;
   }
-  if (lefwWriteEncrypt)
+  if (lefwWriteEncrypt) {
     encPrint(lefwFile, (char *)"   SHRINKAGE %.11g ;\n", shrinkage);
-  else
+  } else {
     fprintf(lefwFile, "   SHRINKAGE %.11g ;\n", shrinkage);
+  }
   lefwLines++;
   return LEFW_OK;
 }
 
 int lefwLayerRoutingCapMultiplier(double capMultiplier) {
-  if (!lefwFile)
+  if (!lefwFile) {
     return LEFW_UNINITIALIZED;
-  if (lefwState != LEFW_LAYERROUTING_START && lefwState != LEFW_LAYERROUTING)
+  }
+  if (lefwState != LEFW_LAYERROUTING_START && lefwState != LEFW_LAYERROUTING) {
     return LEFW_BAD_ORDER;
-  if (!lefwIsRouting)
+  }
+  if (!lefwIsRouting) {
     return LEFW_BAD_DATA;  // only routing calls this func
+  }
   if (prtSemiColon) {
     // the previous statement hasn't written the ; yet
-    if (lefwWriteEncrypt)
+    if (lefwWriteEncrypt) {
       encPrint(lefwFile, (char *)";\n");
-    else
+    } else {
       fprintf(lefwFile, ";\n");
+    }
     prtSemiColon = 0;
   }
-  if (lefwWriteEncrypt)
+  if (lefwWriteEncrypt) {
     encPrint(lefwFile, (char *)"   CAPMULTIPLIER %.11g ;\n", capMultiplier);
-  else
+  } else {
     fprintf(lefwFile, "   CAPMULTIPLIER %.11g ;\n", capMultiplier);
+  }
   lefwLines++;
   return LEFW_OK;
 }
 
 int lefwLayerRoutingEdgeCap(double edgeCap) {
-  if (!lefwFile)
+  if (!lefwFile) {
     return LEFW_UNINITIALIZED;
-  if (lefwState != LEFW_LAYERROUTING_START && lefwState != LEFW_LAYERROUTING)
+  }
+  if (lefwState != LEFW_LAYERROUTING_START && lefwState != LEFW_LAYERROUTING) {
     return LEFW_BAD_ORDER;
-  if (!lefwIsRouting)
+  }
+  if (!lefwIsRouting) {
     return LEFW_BAD_DATA;  // only routing calls this func
+  }
   if (prtSemiColon) {
     // the previous statement hasn't written the ; yet
-    if (lefwWriteEncrypt)
+    if (lefwWriteEncrypt) {
       encPrint(lefwFile, (char *)";\n");
-    else
+    } else {
       fprintf(lefwFile, ";\n");
+    }
     prtSemiColon = 0;
   }
-  if (lefwWriteEncrypt)
+  if (lefwWriteEncrypt) {
     encPrint(lefwFile, (char *)"   EDGECAPACITANCE %.11g ;\n", edgeCap);
-  else
+  } else {
     fprintf(lefwFile, "   EDGECAPACITANCE %.11g ;\n", edgeCap);
+  }
   lefwLines++;
   return LEFW_OK;
 }
 
 int lefwLayerRoutingAntennaArea(double antennaArea) {
-  if (!lefwFile)
+  if (!lefwFile) {
     return LEFW_UNINITIALIZED;
-  if (lefwState != LEFW_LAYERROUTING_START && lefwState != LEFW_LAYERROUTING)
+  }
+  if (lefwState != LEFW_LAYERROUTING_START && lefwState != LEFW_LAYERROUTING) {
     return LEFW_BAD_ORDER;
-  if (!lefwIsRouting)
+  }
+  if (!lefwIsRouting) {
     return LEFW_BAD_DATA;  // only routing calls this func
+  }
   if (prtSemiColon) {
     // the previous statement hasn't written the ; yet
-    if (lefwWriteEncrypt)
+    if (lefwWriteEncrypt) {
       encPrint(lefwFile, (char *)";\n");
-    else
+    } else {
       fprintf(lefwFile, ";\n");
+    }
     prtSemiColon = 0;
   }
-  if (lefwWriteEncrypt)
+  if (lefwWriteEncrypt) {
     encPrint(lefwFile, (char *)"   ANTENNAAREAFACTOR %.11g ;\n", antennaArea);
-  else
+  } else {
     fprintf(lefwFile, "   ANTENNAAREAFACTOR %.11g ;\n", antennaArea);
+  }
   lefwLines++;
   return LEFW_OK;
 }
 
 int lefwLayerRoutingAntennaLength(double antennaLength) {
-  if (!lefwFile)
+  if (!lefwFile) {
     return LEFW_UNINITIALIZED;
-  if (lefwState != LEFW_LAYERROUTING_START && lefwState != LEFW_LAYERROUTING)
+  }
+  if (lefwState != LEFW_LAYERROUTING_START && lefwState != LEFW_LAYERROUTING) {
     return LEFW_BAD_ORDER;
-  if (!lefwIsRouting)
+  }
+  if (!lefwIsRouting) {
     return LEFW_BAD_DATA;  // only routing calls this func
+  }
   if (prtSemiColon) {
     // the previous statement hasn't written the ; yet
-    if (lefwWriteEncrypt)
+    if (lefwWriteEncrypt) {
       encPrint(lefwFile, (char *)";\n");
-    else
+    } else {
       fprintf(lefwFile, ";\n");
+    }
     prtSemiColon = 0;
   }
-  if (lefwWriteEncrypt)
+  if (lefwWriteEncrypt) {
     encPrint(lefwFile, (char *)"   ANTENNALENGTHFACTOR %.11g ;\n", antennaLength);
-  else
+  } else {
     fprintf(lefwFile, "   ANTENNALENGTHFACTOR %.11g ;\n", antennaLength);
+  }
   lefwLines++;
   return LEFW_OK;
 }
 
 int lefwLayerRoutingMaxwidth(double width) {
-  if (!lefwFile)
+  if (!lefwFile) {
     return LEFW_UNINITIALIZED;
-  if (lefwState != LEFW_LAYERROUTING_START && lefwState != LEFW_LAYERROUTING)
+  }
+  if (lefwState != LEFW_LAYERROUTING_START && lefwState != LEFW_LAYERROUTING) {
     return LEFW_BAD_ORDER;
-  if (!lefwIsRouting)
+  }
+  if (!lefwIsRouting) {
     return LEFW_BAD_DATA;  // only routing calls this func
+  }
   if (prtSemiColon) {
     // the previous statement hasn't written the ; yet
-    if (lefwWriteEncrypt)
+    if (lefwWriteEncrypt) {
       encPrint(lefwFile, (char *)";\n");
-    else
+    } else {
       fprintf(lefwFile, ";\n");
+    }
     prtSemiColon = 0;
   }
-  if (lefwWriteEncrypt)
+  if (lefwWriteEncrypt) {
     encPrint(lefwFile, (char *)"   MAXWIDTH %.11g ;\n", width);
-  else
+  } else {
     fprintf(lefwFile, "   MAXWIDTH %.11g ;\n", width);
+  }
   lefwLines++;
   return LEFW_OK;
 }
 
 int lefwLayerRoutingMinwidth(double width) {
-  if (!lefwFile)
+  if (!lefwFile) {
     return LEFW_UNINITIALIZED;
-  if (lefwState != LEFW_LAYERROUTING_START && lefwState != LEFW_LAYERROUTING)
+  }
+  if (lefwState != LEFW_LAYERROUTING_START && lefwState != LEFW_LAYERROUTING) {
     return LEFW_BAD_ORDER;
-  if (!lefwIsRouting)
+  }
+  if (!lefwIsRouting) {
     return LEFW_BAD_DATA;  // only routing calls this func
+  }
   if (prtSemiColon) {
     // the previous statement hasn't written the ; yet
-    if (lefwWriteEncrypt)
+    if (lefwWriteEncrypt) {
       encPrint(lefwFile, (char *)";\n");
-    else
+    } else {
       fprintf(lefwFile, ";\n");
+    }
     prtSemiColon = 0;
   }
-  if (lefwWriteEncrypt)
+  if (lefwWriteEncrypt) {
     encPrint(lefwFile, (char *)"   MINWIDTH %.11g ;\n", width);
-  else
+  } else {
     fprintf(lefwFile, "   MINWIDTH %.11g ;\n", width);
+  }
   lefwLines++;
   return LEFW_OK;
 }
@@ -2427,32 +2797,38 @@ int lefwLayerRoutingMinwidth(double width) {
 int lefwLayerRoutingMinenclosedarea(int numMinenclosed, double *area, double *width) {
   int i;
 
-  if (!lefwFile)
+  if (!lefwFile) {
     return LEFW_UNINITIALIZED;
-  if (lefwState != LEFW_LAYERROUTING_START && lefwState != LEFW_LAYERROUTING)
+  }
+  if (lefwState != LEFW_LAYERROUTING_START && lefwState != LEFW_LAYERROUTING) {
     return LEFW_BAD_ORDER;
-  if (!lefwIsRouting)
+  }
+  if (!lefwIsRouting) {
     return LEFW_BAD_DATA;  // only routing calls this func
+  }
   if (prtSemiColon) {
     // the previous statement hasn't written the ; yet
-    if (lefwWriteEncrypt)
+    if (lefwWriteEncrypt) {
       encPrint(lefwFile, (char *)";\n");
-    else
+    } else {
       fprintf(lefwFile, ";\n");
+    }
     prtSemiColon = 0;
   }
   if (lefwWriteEncrypt) {
     for (i = 0; i < numMinenclosed; i++) {
       encPrint(lefwFile, (char *)"   MINENCLOSEDAREA %.11g ", area[i]);
-      if (width[i] != 0)
+      if (width[i] != 0) {
         encPrint(lefwFile, (char *)"WIDTH %.11g ", width[i]);
+      }
       encPrint(lefwFile, (char *)";\n");
     }
   } else {
     for (i = 0; i < numMinenclosed; i++) {
       fprintf(lefwFile, "   MINENCLOSEDAREA %.11g ", area[i]);
-      if (width[i] != 0)
+      if (width[i] != 0) {
         fprintf(lefwFile, "WIDTH %.11g ", width[i]);
+      }
       fprintf(lefwFile, ";\n");
     }
   }
@@ -2461,139 +2837,169 @@ int lefwLayerRoutingMinenclosedarea(int numMinenclosed, double *area, double *wi
 }
 
 int lefwLayerRoutingMinstep(double distance) {
-  if (!lefwFile)
+  if (!lefwFile) {
     return LEFW_UNINITIALIZED;
-  if (lefwState != LEFW_LAYERROUTING_START && lefwState != LEFW_LAYERROUTING)
+  }
+  if (lefwState != LEFW_LAYERROUTING_START && lefwState != LEFW_LAYERROUTING) {
     return LEFW_BAD_ORDER;
-  if (!lefwIsRouting)
+  }
+  if (!lefwIsRouting) {
     return LEFW_BAD_DATA;  // only routing calls this func
+  }
   if (prtSemiColon) {
     // the previous statement hasn't written the ; yet
-    if (lefwWriteEncrypt)
+    if (lefwWriteEncrypt) {
       encPrint(lefwFile, (char *)";\n");
-    else
+    } else {
       fprintf(lefwFile, ";\n");
+    }
     prtSemiColon = 0;
   }
-  if (lefwWriteEncrypt)
+  if (lefwWriteEncrypt) {
     encPrint(lefwFile, (char *)"   MINSTEP %.11g ;\n", distance);
-  else
+  } else {
     fprintf(lefwFile, "   MINSTEP %.11g ;\n", distance);
+  }
   lefwLines++;
   return LEFW_OK;
 }
 
 int lefwLayerRoutingMinstepWithOptions(double distance, const char *rule, double maxLength) {
-  if (!lefwFile)
+  if (!lefwFile) {
     return LEFW_UNINITIALIZED;
-  if (lefwState != LEFW_LAYERROUTING_START && lefwState != LEFW_LAYERROUTING)
+  }
+  if (lefwState != LEFW_LAYERROUTING_START && lefwState != LEFW_LAYERROUTING) {
     return LEFW_BAD_ORDER;
-  if (!lefwIsRouting)
+  }
+  if (!lefwIsRouting) {
     return LEFW_BAD_DATA;  // only routing calls this func
+  }
   if (prtSemiColon) {
     // the previous statement hasn't written the ; yet
-    if (lefwWriteEncrypt)
+    if (lefwWriteEncrypt) {
       encPrint(lefwFile, (char *)";\n");
-    else
+    } else {
       fprintf(lefwFile, ";\n");
+    }
     prtSemiColon = 0;
   }
-  if (lefwWriteEncrypt)
+  if (lefwWriteEncrypt) {
     encPrint(lefwFile, (char *)"   MINSTEP %.11g ", distance);
-  else
+  } else {
     fprintf(lefwFile, "   MINSTEP %.11g ", distance);
+  }
   if (rule && ((strcmp(rule, "INSIDECORNER") == 0) || (strcmp(rule, "OUTSIDECORNER") == 0) || (strcmp(rule, "STEP") == 0))) {
-    if (lefwWriteEncrypt)
+    if (lefwWriteEncrypt) {
       encPrint(lefwFile, (char *)"%s ", rule);
-    else
+    } else {
       fprintf(lefwFile, "%s ", rule);
+    }
   }
   if (maxLength) {
-    if (lefwWriteEncrypt)
+    if (lefwWriteEncrypt) {
       encPrint(lefwFile, (char *)"LENGTHSUM %.11g ", maxLength);
-    else
+    } else {
       fprintf(lefwFile, "LENGTHSUM %.11g ", maxLength);
+    }
   }
-  if (lefwWriteEncrypt)
+  if (lefwWriteEncrypt) {
     encPrint(lefwFile, (char *)";\n");
-  else
+  } else {
     fprintf(lefwFile, ";\n");
+  }
   lefwLines++;
   return LEFW_OK;
 }
 
 // 5.7
 int lefwLayerRoutingMinstepMaxEdges(double distance, double maxEdges) {
-  if (!lefwFile)
+  if (!lefwFile) {
     return LEFW_UNINITIALIZED;
-  if (lefwState != LEFW_LAYERROUTING_START && lefwState != LEFW_LAYERROUTING)
+  }
+  if (lefwState != LEFW_LAYERROUTING_START && lefwState != LEFW_LAYERROUTING) {
     return LEFW_BAD_ORDER;
-  if (!lefwIsRouting)
+  }
+  if (!lefwIsRouting) {
     return LEFW_BAD_DATA;  // only routing calls this func
+  }
   if (prtSemiColon) {
     // the previous statement hasn't written the ; yet
-    if (lefwWriteEncrypt)
+    if (lefwWriteEncrypt) {
       encPrint(lefwFile, (char *)";\n");
-    else
+    } else {
       fprintf(lefwFile, ";\n");
+    }
     prtSemiColon = 0;
   }
-  if (lefwWriteEncrypt)
+  if (lefwWriteEncrypt) {
     encPrint(lefwFile, (char *)"   MINSTEP %.11g MAXEDGES %.11g ;\n", distance, maxEdges);
-  else
+  } else {
     fprintf(lefwFile, "   MINSTEP %.11g MAXEDGES %.11g ;\n", distance, maxEdges);
+  }
   lefwLines++;
   return LEFW_OK;
 }
 
 int lefwLayerRoutingProtrusion(double width1, double length, double width2) {
-  if (!lefwFile)
+  if (!lefwFile) {
     return LEFW_UNINITIALIZED;
-  if (lefwState != LEFW_LAYERROUTING_START && lefwState != LEFW_LAYERROUTING)
+  }
+  if (lefwState != LEFW_LAYERROUTING_START && lefwState != LEFW_LAYERROUTING) {
     return LEFW_BAD_ORDER;
-  if (!lefwIsRouting)
+  }
+  if (!lefwIsRouting) {
     return LEFW_BAD_DATA;  // only routing calls this func
+  }
   if (prtSemiColon) {
     // the previous statement hasn't written the ; yet
-    if (lefwWriteEncrypt)
+    if (lefwWriteEncrypt) {
       encPrint(lefwFile, (char *)";\n");
-    else
+    } else {
       fprintf(lefwFile, ";\n");
+    }
     prtSemiColon = 0;
   }
-  if (lefwWriteEncrypt)
+  if (lefwWriteEncrypt) {
     encPrint(lefwFile, (char *)"   PROTRUSIONWIDTH %.11g LENGTH %.11g WIDTH %.11g ;\n", width1, length, width2);
-  else
+  } else {
     fprintf(lefwFile, "   PROTRUSIONWIDTH %.11g LENGTH %.11g WIDTH %.11g ;\n", width1, length, width2);
+  }
   lefwLines++;
   return LEFW_OK;
 }
 
 int lefwLayerRoutingStartSpacingtableParallel(int numLength, double *length) {
   int i;
-  if (!lefwFile)
+  if (!lefwFile) {
     return LEFW_UNINITIALIZED;
-  if (lefwState != LEFW_LAYERROUTING_START && lefwState != LEFW_LAYERROUTING)
+  }
+  if (lefwState != LEFW_LAYERROUTING_START && lefwState != LEFW_LAYERROUTING) {
     return LEFW_BAD_ORDER;
+  }
   if (!lefwIsRoutingReqData) {
     return LEFW_BAD_ORDER;
   }
   if (prtSemiColon) {
     // the previous statement hasn't written the ; yet
-    if (lefwWriteEncrypt)
+    if (lefwWriteEncrypt) {
       encPrint(lefwFile, (char *)";\n");
-    else
+    } else {
       fprintf(lefwFile, ";\n");
+    }
     prtSemiColon = 0;
   }
   if (lefwWriteEncrypt) {
     encPrint(lefwFile, (char *)"   SPACINGTABLE\n");
     encPrint(lefwFile, (char *)"     PARALLELRUNLENGTH");
-    for (i = 0; i < numLength; i++) encPrint(lefwFile, (char *)" %.11g", length[i]);
+    for (i = 0; i < numLength; i++) {
+      encPrint(lefwFile, (char *)" %.11g", length[i]);
+    }
   } else {
     fprintf(lefwFile, "   SPACINGTABLE\n");
     fprintf(lefwFile, "     PARALLELRUNLENGTH");
-    for (i = 0; i < numLength; i++) fprintf(lefwFile, " %.11g", length[i]);
+    for (i = 0; i < numLength; i++) {
+      fprintf(lefwFile, " %.11g", length[i]);
+    }
   }
   lefwState = LEFW_LAYERROUTING_SP_START;
   lefwLines += 2;
@@ -2602,16 +3008,22 @@ int lefwLayerRoutingStartSpacingtableParallel(int numLength, double *length) {
 
 int lefwLayerRoutingSpacingtableParallelWidth(double width, int numSpacing, double *spacing) {
   int i;
-  if (!lefwFile)
+  if (!lefwFile) {
     return LEFW_UNINITIALIZED;
-  if (lefwState != LEFW_LAYERROUTING_SP_START && lefwState != LEFW_LAYERROUTINGWIDTH)
+  }
+  if (lefwState != LEFW_LAYERROUTING_SP_START && lefwState != LEFW_LAYERROUTINGWIDTH) {
     return LEFW_BAD_ORDER;
+  }
   if (lefwWriteEncrypt) {
     encPrint(lefwFile, (char *)"\n       WIDTH %.11g", width);
-    for (i = 0; i < numSpacing; i++) encPrint(lefwFile, (char *)" %.11g", spacing[i]);
+    for (i = 0; i < numSpacing; i++) {
+      encPrint(lefwFile, (char *)" %.11g", spacing[i]);
+    }
   } else {
     fprintf(lefwFile, "\n       WIDTH %.11g", width);
-    for (i = 0; i < numSpacing; i++) fprintf(lefwFile, " %.11g", spacing[i]);
+    for (i = 0; i < numSpacing; i++) {
+      fprintf(lefwFile, " %.11g", spacing[i]);
+    }
   }
   lefwState = LEFW_LAYERROUTINGWIDTH;
   lefwLines++;
@@ -2619,10 +3031,12 @@ int lefwLayerRoutingSpacingtableParallelWidth(double width, int numSpacing, doub
 }
 
 int lefwLayerRoutingStartSpacingtableInfluence() {
-  if (!lefwFile)
+  if (!lefwFile) {
     return LEFW_UNINITIALIZED;
-  if (lefwState != LEFW_LAYERROUTING_START && lefwState != LEFW_LAYERROUTING)
+  }
+  if (lefwState != LEFW_LAYERROUTING_START && lefwState != LEFW_LAYERROUTING) {
     return LEFW_BAD_ORDER;
+  }
   if (!lefwIsRoutingReqData) {
     return LEFW_BAD_ORDER;
   }
@@ -2639,23 +3053,28 @@ int lefwLayerRoutingStartSpacingtableInfluence() {
 }
 
 int lefwLayerRoutingSpacingInfluenceWidth(double width, double distance, double spacing) {
-  if (!lefwFile)
+  if (!lefwFile) {
     return LEFW_UNINITIALIZED;
-  if (lefwState != LEFW_LAYERROUTINGWIDTH)
+  }
+  if (lefwState != LEFW_LAYERROUTINGWIDTH) {
     return LEFW_BAD_ORDER;
-  if (lefwWriteEncrypt)
+  }
+  if (lefwWriteEncrypt) {
     encPrint(lefwFile, (char *)"\n       WIDTH %.11g WITHIN %.11%.11gSPACING %.11g", width, distance, spacing);
-  else
+  } else {
     fprintf(lefwFile, "\n       WIDTH %.11g WITHIN %.11g SPACING %.11g", width, distance, spacing);
+  }
   lefwLines++;
   return LEFW_OK;
 }
 
 int lefwLayerRoutingStartSpacingtableTwoWidths() {
-  if (!lefwFile)
+  if (!lefwFile) {
     return LEFW_UNINITIALIZED;
-  if (lefwState != LEFW_LAYERROUTING_START && lefwState != LEFW_LAYERROUTING)
+  }
+  if (lefwState != LEFW_LAYERROUTING_START && lefwState != LEFW_LAYERROUTING) {
     return LEFW_BAD_ORDER;
+  }
   if (!lefwIsRoutingReqData) {
     return LEFW_BAD_ORDER;
   }
@@ -2673,20 +3092,28 @@ int lefwLayerRoutingStartSpacingtableTwoWidths() {
 
 int lefwLayerRoutingSpacingtableTwoWidthsWidth(double width, double runLength, int numSpacing, double *spacing) {
   int i;
-  if (!lefwFile)
+  if (!lefwFile) {
     return LEFW_UNINITIALIZED;
-  if (lefwState != LEFW_LAYERROUTING_SP_START && lefwState != LEFW_LAYERROUTINGWIDTH)
+  }
+  if (lefwState != LEFW_LAYERROUTING_SP_START && lefwState != LEFW_LAYERROUTINGWIDTH) {
     return LEFW_BAD_ORDER;
+  }
   if (lefwWriteEncrypt) {
     encPrint(lefwFile, (char *)"\n       WIDTH %.11g", width);
-    if (runLength)
+    if (runLength) {
       encPrint(lefwFile, (char *)" PRL %.11g", runLength);
-    for (i = 0; i < numSpacing; i++) encPrint(lefwFile, (char *)" %.11g", spacing[i]);
+    }
+    for (i = 0; i < numSpacing; i++) {
+      encPrint(lefwFile, (char *)" %.11g", spacing[i]);
+    }
   } else {
     fprintf(lefwFile, "\n       WIDTH %.11g", width);
-    if (runLength)
+    if (runLength) {
       fprintf(lefwFile, " PRL %.11g", runLength);
-    for (i = 0; i < numSpacing; i++) fprintf(lefwFile, " %.11g", spacing[i]);
+    }
+    for (i = 0; i < numSpacing; i++) {
+      fprintf(lefwFile, " %.11g", spacing[i]);
+    }
   }
   lefwState = LEFW_LAYERROUTINGWIDTH;
   lefwLines++;
@@ -2694,14 +3121,17 @@ int lefwLayerRoutingSpacingtableTwoWidthsWidth(double width, double runLength, i
 }
 
 int lefwLayerRoutineEndSpacingtable() {
-  if (!lefwFile)
+  if (!lefwFile) {
     return LEFW_UNINITIALIZED;
-  if (lefwState != LEFW_LAYERROUTINGWIDTH)
+  }
+  if (lefwState != LEFW_LAYERROUTINGWIDTH) {
     return LEFW_BAD_ORDER;
-  if (lefwWriteEncrypt)
+  }
+  if (lefwWriteEncrypt) {
     encPrint(lefwFile, (char *)" ;\n");
-  else
+  } else {
     fprintf(lefwFile, " ;\n");
+  }
 
   lefwLines++;
   lefwState = LEFW_LAYERROUTING;
@@ -2709,25 +3139,29 @@ int lefwLayerRoutineEndSpacingtable() {
 }
 
 int lefwEndLayerRouting(const char *layerName) {
-  if (!lefwFile)
+  if (!lefwFile) {
     return LEFW_UNINITIALIZED;
-  if (lefwState != LEFW_LAYERROUTING_START && lefwState != LEFW_LAYERROUTING)
+  }
+  if (lefwState != LEFW_LAYERROUTING_START && lefwState != LEFW_LAYERROUTING) {
     return LEFW_BAD_ORDER;
+  }
   if (!lefwIsRoutingReqData) {
     return LEFW_BAD_ORDER;
   }
   if (prtSemiColon) {
     // the previous statement hasn't written the ; yet
-    if (lefwWriteEncrypt)
+    if (lefwWriteEncrypt) {
       encPrint(lefwFile, (char *)";\n");
-    else
+    } else {
       fprintf(lefwFile, ";\n");
+    }
     prtSemiColon = 0;
   }
-  if (lefwWriteEncrypt)
+  if (lefwWriteEncrypt) {
     encPrint(lefwFile, (char *)"END %s\n\n", layerName);
-  else
+  } else {
     fprintf(lefwFile, "END %s\n\n", layerName);
+  }
 
   lefwLines++;
   lefwSynArray[LEFW_LAYERROUTING] = 0;
@@ -2737,19 +3171,23 @@ int lefwEndLayerRouting(const char *layerName) {
 }
 
 int lefwLayerACCurrentDensity(const char *type, double value) {
-  if (!lefwFile)
+  if (!lefwFile) {
     return LEFW_UNINITIALIZED;
+  }
   if (lefwState != LEFW_LAYERROUTING_START && lefwState != LEFW_LAYERROUTING && lefwState != LEFW_LAYER_START
-      && lefwState != LEFW_LAYER)
+      && lefwState != LEFW_LAYER) {
     return LEFW_BAD_ORDER;
-  if (strcmp(type, "PEAK") && strcmp(type, "AVERAGE") && strcmp(type, "RMS"))
+  }
+  if (strcmp(type, "PEAK") && strcmp(type, "AVERAGE") && strcmp(type, "RMS")) {
     return LEFW_BAD_DATA;  // type is PEAK, AVERAGE & RMS only
+  }
   if (lefwWriteEncrypt) {
     encPrint(lefwFile, (char *)"   ACCURRENTDENSITY %s", type);
     lefwLines++;
     lefwTableLen = 5;
-    if (value)
+    if (value) {
       encPrint(lefwFile, (char *)" %.11g ;\n", value);
+    }
     // that's it for accurrentdensity
     else {
       encPrint(lefwFile, (char *)"\n");
@@ -2761,9 +3199,9 @@ int lefwLayerACCurrentDensity(const char *type, double value) {
     fprintf(lefwFile, "   ACCURRENTDENSITY %s", type);
     lefwLines++;
     lefwTableLen = 5;
-    if (value)
+    if (value) {
       fprintf(lefwFile, " %.11g ;\n", value);  // that's it for accurrentdensity
-    else {
+    } else {
       fprintf(lefwFile, "\n");   //  expect to have frequency & tableentries
       lefwOldState = lefwState;  // save the previous state
       lefwState    = LEFW_LAYERACCURRENT;
@@ -2775,13 +3213,16 @@ int lefwLayerACCurrentDensity(const char *type, double value) {
 int lefwLayerACFrequency(int numFrequency, double *frequency) {
   int i;
 
-  if (!lefwFile)
+  if (!lefwFile) {
     return LEFW_UNINITIALIZED;
-  if (lefwState != LEFW_LAYERACCURRENT)
+  }
+  if (lefwState != LEFW_LAYERACCURRENT) {
     return LEFW_BAD_ORDER;
+  }
 
-  if (numFrequency <= 0)
+  if (numFrequency <= 0) {
     return LEFW_BAD_DATA;  // frequency are required
+  }
 
   if (lefwWriteEncrypt) {
     encPrint(lefwFile, (char *)"      FREQUENCY ");
@@ -2804,13 +3245,16 @@ int lefwLayerACFrequency(int numFrequency, double *frequency) {
 int lefwLayerACWidth(int numWidths, double *widths) {
   int i;
 
-  if (!lefwFile)
+  if (!lefwFile) {
     return LEFW_UNINITIALIZED;
-  if (lefwState != LEFW_LAYERACCURRENT)
+  }
+  if (lefwState != LEFW_LAYERACCURRENT) {
     return LEFW_BAD_ORDER;
+  }
 
-  if (numWidths <= 0)
+  if (numWidths <= 0) {
     return LEFW_OK;  // width is optional
+  }
 
   if (lefwWriteEncrypt) {
     encPrint(lefwFile, (char *)"      WIDTH ");
@@ -2834,13 +3278,16 @@ int lefwLayerACWidth(int numWidths, double *widths) {
 int lefwLayerACCutarea(int numCutareas, double *cutareas) {
   int i;
 
-  if (!lefwFile)
+  if (!lefwFile) {
     return LEFW_UNINITIALIZED;
-  if (lefwState != LEFW_LAYERACCURRENT)
+  }
+  if (lefwState != LEFW_LAYERACCURRENT) {
     return LEFW_BAD_ORDER;
+  }
 
-  if (numCutareas <= 0)
+  if (numCutareas <= 0) {
     return LEFW_OK;  // cutarea is optional
+  }
 
   if (lefwWriteEncrypt) {
     encPrint(lefwFile, (char *)"      CUTAREA ");
@@ -2865,13 +3312,16 @@ int lefwLayerACTableEntries(int numEntries, double *entries) {
   int i;
   int j = 0;
 
-  if (!lefwFile)
+  if (!lefwFile) {
     return LEFW_UNINITIALIZED;
-  if (lefwState != LEFW_LAYERACCURRENT)
+  }
+  if (lefwState != LEFW_LAYERACCURRENT) {
     return LEFW_BAD_ORDER;
+  }
 
-  if (numEntries <= 0)
+  if (numEntries <= 0) {
     return LEFW_BAD_DATA;  // tableEntries are required
+  }
 
   if (lefwWriteEncrypt) {
     encPrint(lefwFile, (char *)"      TABLEENTRIES\n        ");
@@ -2901,19 +3351,23 @@ int lefwLayerACTableEntries(int numEntries, double *entries) {
 }
 
 int lefwLayerDCCurrentDensity(const char *type, double value) {
-  if (!lefwFile)
+  if (!lefwFile) {
     return LEFW_UNINITIALIZED;
+  }
   if (lefwState != LEFW_LAYERROUTING_START && lefwState != LEFW_LAYERROUTING && lefwState != LEFW_LAYER_START
-      && lefwState != LEFW_LAYER)
+      && lefwState != LEFW_LAYER) {
     return LEFW_BAD_ORDER;
-  if (strcmp(type, "AVERAGE"))
+  }
+  if (strcmp(type, "AVERAGE")) {
     return LEFW_BAD_DATA;  // type is AVERAGE
+  }
   if (lefwWriteEncrypt) {
     encPrint(lefwFile, (char *)"   DCCURRENTDENSITY %s", type);
     lefwLines++;
     lefwTableLen = 5;
-    if (value)
+    if (value) {
       encPrint(lefwFile, (char *)" %.11g ;\n", value);
+    }
     // that's it for accurrentdensity
     else {
       encPrint(lefwFile, (char *)"\n");
@@ -2925,9 +3379,9 @@ int lefwLayerDCCurrentDensity(const char *type, double value) {
     fprintf(lefwFile, "   DCCURRENTDENSITY %s", type);
     lefwLines++;
     lefwTableLen = 5;
-    if (value)
+    if (value) {
       fprintf(lefwFile, " %.11g ;\n", value);  // that's it for accurrentdensity
-    else {
+    } else {
       fprintf(lefwFile, "\n");   // expect to have frequency & tableentries
       lefwOldState = lefwState;  // save the previous state
       lefwState    = LEFW_LAYERDCCURRENT;
@@ -2939,18 +3393,22 @@ int lefwLayerDCCurrentDensity(const char *type, double value) {
 int lefwLayerDCWidth(int numWidths, double *widths) {
   int i;
 
-  if (!lefwFile)
+  if (!lefwFile) {
     return LEFW_UNINITIALIZED;
-  if (lefwState != LEFW_LAYERDCCURRENT)
+  }
+  if (lefwState != LEFW_LAYERDCCURRENT) {
     return LEFW_BAD_ORDER;
+  }
 
   // width is allowed in Layer routing only
   if (lefwOldState != LEFW_LAYER_START && lefwOldState != LEFW_LAYER && lefwOldState != LEFW_LAYERROUTING_START
-      && lefwOldState != LEFW_LAYERROUTING)
+      && lefwOldState != LEFW_LAYERROUTING) {
     return LEFW_BAD_DATA;
+  }
 
-  if (numWidths <= 0)
+  if (numWidths <= 0) {
     return LEFW_BAD_DATA;  // width is required
+  }
 
   if (lefwWriteEncrypt) {
     encPrint(lefwFile, (char *)"      WIDTH ");
@@ -2974,18 +3432,22 @@ int lefwLayerDCWidth(int numWidths, double *widths) {
 int lefwLayerDCCutarea(int numCutareas, double *cutareas) {
   int i;
 
-  if (!lefwFile)
+  if (!lefwFile) {
     return LEFW_UNINITIALIZED;
-  if (lefwState != LEFW_LAYERDCCURRENT)
+  }
+  if (lefwState != LEFW_LAYERDCCURRENT) {
     return LEFW_BAD_ORDER;
+  }
 
   // cutarea is allowed in Layer non-routing only
   if (lefwOldState != LEFW_LAYER_START && lefwOldState != LEFW_LAYER && lefwOldState != LEFW_LAYERROUTING_START
-      && lefwOldState != LEFW_LAYERROUTING)
+      && lefwOldState != LEFW_LAYERROUTING) {
     return LEFW_BAD_DATA;
+  }
 
-  if (numCutareas <= 0)
+  if (numCutareas <= 0) {
     return LEFW_BAD_DATA;  // cutarea is required
+  }
 
   if (lefwWriteEncrypt) {
     encPrint(lefwFile, (char *)"      CUTAREA ");
@@ -3010,13 +3472,16 @@ int lefwLayerDCTableEntries(int numEntries, double *entries) {
   int i;
   int j = 0;
 
-  if (!lefwFile)
+  if (!lefwFile) {
     return LEFW_UNINITIALIZED;
-  if (lefwState != LEFW_LAYERDCCURRENT)
+  }
+  if (lefwState != LEFW_LAYERDCCURRENT) {
     return LEFW_BAD_ORDER;
+  }
 
-  if (numEntries <= 0)
+  if (numEntries <= 0) {
     return LEFW_BAD_DATA;  // tableEntries are required
+  }
 
   if (lefwWriteEncrypt) {
     encPrint(lefwFile, (char *)"      TABLEENTRIES\n        ");
@@ -3047,60 +3512,75 @@ int lefwLayerDCTableEntries(int numEntries, double *entries) {
 
 int lefwLayerAntennaModel(const char *oxide) {
   lefw54Num = LEFW_ANTENNAMODEL;
-  if (!lefwFile)
+  if (!lefwFile) {
     return LEFW_UNINITIALIZED;
+  }
   if (lefwState != LEFW_LAYERROUTING_START && lefwState != LEFW_LAYERROUTING && lefwState != LEFW_LAYER_START
-      && lefwState != LEFW_LAYER)
+      && lefwState != LEFW_LAYER) {
     return LEFW_BAD_ORDER;
+  }
   // only routing or cut calls this func
-  if (!lefwIsRouting && !lefwIsCut)
+  if (!lefwIsRouting && !lefwIsCut) {
     return LEFW_BAD_DATA;
-  if (versionNum < 5.4)
+  }
+  if (versionNum < 5.4) {
     return LEFW_WRONG_VERSION;
-  if (lefwWriteEncrypt)
+  }
+  if (lefwWriteEncrypt) {
     encPrint(lefwFile, (char *)"   ANTENNAMODEL %s ;\n", oxide);
-  else
+  } else {
     fprintf(lefwFile, "   ANTENNAMODEL %s ;\n", oxide);
+  }
   lefwLines++;
   return LEFW_OK;
 }
 
 int lefwLayerAntennaAreaRatio(double value) {
   lefw54Num = LEFW_ANTENNAAREARATIO;
-  if (!lefwFile)
+  if (!lefwFile) {
     return LEFW_UNINITIALIZED;
+  }
   if (lefwState != LEFW_LAYERROUTING_START && lefwState != LEFW_LAYERROUTING && lefwState != LEFW_LAYER_START
-      && lefwState != LEFW_LAYER)
+      && lefwState != LEFW_LAYER) {
     return LEFW_BAD_ORDER;
+  }
   // only routing or cut calls this func
-  if (!lefwIsRouting && !lefwIsCut)
+  if (!lefwIsRouting && !lefwIsCut) {
     return LEFW_BAD_DATA;
-  if (versionNum < 5.4)
+  }
+  if (versionNum < 5.4) {
     return LEFW_WRONG_VERSION;
-  if (lefwWriteEncrypt)
+  }
+  if (lefwWriteEncrypt) {
     encPrint(lefwFile, (char *)"   ANTENNAAREARATIO %.11g ;\n", value);
-  else
+  } else {
     fprintf(lefwFile, "   ANTENNAAREARATIO %.11g ;\n", value);
+  }
   lefwLines++;
   return LEFW_OK;
 }
 
 int lefwLayerAntennaDiffAreaRatio(double value) {
   lefw54Num = LEFW_ANTENNADIFFAREARATIO;
-  if (!lefwFile)
+  if (!lefwFile) {
     return LEFW_UNINITIALIZED;
+  }
   if (lefwState != LEFW_LAYERROUTING_START && lefwState != LEFW_LAYERROUTING && lefwState != LEFW_LAYER_START
-      && lefwState != LEFW_LAYER)
+      && lefwState != LEFW_LAYER) {
     return LEFW_BAD_ORDER;
+  }
   // only routing or cut calls this func
-  if (!lefwIsRouting && !lefwIsCut)
+  if (!lefwIsRouting && !lefwIsCut) {
     return LEFW_BAD_DATA;
-  if (versionNum < 5.4)
+  }
+  if (versionNum < 5.4) {
     return LEFW_WRONG_VERSION;
-  if (lefwWriteEncrypt)
+  }
+  if (lefwWriteEncrypt) {
     encPrint(lefwFile, (char *)"   ANTENNADIFFAREARATIO %.11g ;\n", value);
-  else
+  } else {
     fprintf(lefwFile, "   ANTENNADIFFAREARATIO %.11g ;\n", value);
+  }
   lefwLines++;
   return LEFW_OK;
 }
@@ -3109,23 +3589,31 @@ int lefwLayerAntennaDiffAreaRatioPwl(int numPwls, double *diffusions, double *ra
   int i;
 
   lefw54Num = LEFW_ANTENNADIFFAREARATIOPWL;
-  if (!lefwFile)
+  if (!lefwFile) {
     return LEFW_UNINITIALIZED;
+  }
   if (lefwState != LEFW_LAYERROUTING_START && lefwState != LEFW_LAYERROUTING && lefwState != LEFW_LAYER_START
-      && lefwState != LEFW_LAYER)
+      && lefwState != LEFW_LAYER) {
     return LEFW_BAD_ORDER;
+  }
   // only routing or cut calls this func
-  if (!lefwIsRouting && !lefwIsCut)
+  if (!lefwIsRouting && !lefwIsCut) {
     return LEFW_BAD_DATA;
-  if (versionNum < 5.4)
+  }
+  if (versionNum < 5.4) {
     return LEFW_WRONG_VERSION;
+  }
   if (lefwWriteEncrypt) {
     encPrint(lefwFile, (char *)"   ANTENNADIFFAREARATIO PWL ( ");
-    for (i = 0; i < numPwls; i++) encPrint(lefwFile, (char *)"( %.11g %.11g ) ", *diffusions++, *ratios++);
+    for (i = 0; i < numPwls; i++) {
+      encPrint(lefwFile, (char *)"( %.11g %.11g ) ", *diffusions++, *ratios++);
+    }
     encPrint(lefwFile, (char *)") ;\n");
   } else {
     fprintf(lefwFile, "   ANTENNADIFFAREARATIO PWL ( ");
-    for (i = 0; i < numPwls; i++) fprintf(lefwFile, "( %.11g %.11g ) ", *diffusions++, *ratios++);
+    for (i = 0; i < numPwls; i++) {
+      fprintf(lefwFile, "( %.11g %.11g ) ", *diffusions++, *ratios++);
+    }
     fprintf(lefwFile, ") ;\n");
   }
   lefwLines++;
@@ -3134,40 +3622,50 @@ int lefwLayerAntennaDiffAreaRatioPwl(int numPwls, double *diffusions, double *ra
 
 int lefwLayerAntennaCumAreaRatio(double value) {
   lefw54Num = LEFW_ANTENNACUMAREARATIO;
-  if (!lefwFile)
+  if (!lefwFile) {
     return LEFW_UNINITIALIZED;
+  }
   if (lefwState != LEFW_LAYERROUTING_START && lefwState != LEFW_LAYERROUTING && lefwState != LEFW_LAYER_START
-      && lefwState != LEFW_LAYER)
+      && lefwState != LEFW_LAYER) {
     return LEFW_BAD_ORDER;
+  }
   // only routing or cut calls this func
-  if (!lefwIsRouting && !lefwIsCut)
+  if (!lefwIsRouting && !lefwIsCut) {
     return LEFW_BAD_DATA;
-  if (versionNum < 5.4)
+  }
+  if (versionNum < 5.4) {
     return LEFW_WRONG_VERSION;
-  if (lefwWriteEncrypt)
+  }
+  if (lefwWriteEncrypt) {
     encPrint(lefwFile, (char *)"   ANTENNACUMAREARATIO %.11g ;\n", value);
-  else
+  } else {
     fprintf(lefwFile, "   ANTENNACUMAREARATIO %.11g ;\n", value);
+  }
   lefwLines++;
   return LEFW_OK;
 }
 
 int lefwLayerAntennaCumDiffAreaRatio(double value) {
   lefw54Num = LEFW_ANTENNACUMDIFFAREARATIO;
-  if (!lefwFile)
+  if (!lefwFile) {
     return LEFW_UNINITIALIZED;
+  }
   if (lefwState != LEFW_LAYERROUTING_START && lefwState != LEFW_LAYERROUTING && lefwState != LEFW_LAYER_START
-      && lefwState != LEFW_LAYER)
+      && lefwState != LEFW_LAYER) {
     return LEFW_BAD_ORDER;
+  }
   // only routing or cut calls this func
-  if (!lefwIsRouting && !lefwIsCut)
+  if (!lefwIsRouting && !lefwIsCut) {
     return LEFW_BAD_DATA;
-  if (versionNum < 5.4)
+  }
+  if (versionNum < 5.4) {
     return LEFW_WRONG_VERSION;
-  if (lefwWriteEncrypt)
+  }
+  if (lefwWriteEncrypt) {
     encPrint(lefwFile, (char *)"   ANTENNACUMDIFFAREARATIO %.11g ;\n", value);
-  else
+  } else {
     fprintf(lefwFile, "   ANTENNACUMDIFFAREARATIO %.11g ;\n", value);
+  }
   lefwLines++;
   return LEFW_OK;
 }
@@ -3176,23 +3674,31 @@ int lefwLayerAntennaCumDiffAreaRatioPwl(int numPwls, double *diffusions, double 
   int i;
 
   lefw54Num = LEFW_ANTENNACUMDIFFAREARATIOPWL;
-  if (!lefwFile)
+  if (!lefwFile) {
     return LEFW_UNINITIALIZED;
+  }
   if (lefwState != LEFW_LAYERROUTING_START && lefwState != LEFW_LAYERROUTING && lefwState != LEFW_LAYER_START
-      && lefwState != LEFW_LAYER)
+      && lefwState != LEFW_LAYER) {
     return LEFW_BAD_ORDER;
+  }
   // only routing or cut calls this func
-  if (!lefwIsRouting && !lefwIsCut)
+  if (!lefwIsRouting && !lefwIsCut) {
     return LEFW_BAD_DATA;
-  if (versionNum < 5.4)
+  }
+  if (versionNum < 5.4) {
     return LEFW_WRONG_VERSION;
+  }
   if (lefwWriteEncrypt) {
     encPrint(lefwFile, (char *)"   ANTENNACUMDIFFAREARATIO PWL ( ");
-    for (i = 0; i < numPwls; i++) encPrint(lefwFile, (char *)"( %.11g %.11g ) ", *diffusions++, *ratios++);
+    for (i = 0; i < numPwls; i++) {
+      encPrint(lefwFile, (char *)"( %.11g %.11g ) ", *diffusions++, *ratios++);
+    }
     encPrint(lefwFile, (char *)") ;\n");
   } else {
     fprintf(lefwFile, "   ANTENNACUMDIFFAREARATIO PWL ( ");
-    for (i = 0; i < numPwls; i++) fprintf(lefwFile, "( %.11g %.11g ) ", *diffusions++, *ratios++);
+    for (i = 0; i < numPwls; i++) {
+      fprintf(lefwFile, "( %.11g %.11g ) ", *diffusions++, *ratios++);
+    }
     fprintf(lefwFile, ") ;\n");
   }
   lefwLines++;
@@ -3201,25 +3707,31 @@ int lefwLayerAntennaCumDiffAreaRatioPwl(int numPwls, double *diffusions, double 
 
 int lefwLayerAntennaAreaFactor(double value, const char *diffUseOnly) {
   lefw54Num = LEFW_ANTENNAAREAFACTOR;
-  if (!lefwFile)
+  if (!lefwFile) {
     return LEFW_UNINITIALIZED;
+  }
   if (lefwState != LEFW_LAYERROUTING_START && lefwState != LEFW_LAYERROUTING && lefwState != LEFW_LAYER_START
-      && lefwState != LEFW_LAYER)
+      && lefwState != LEFW_LAYER) {
     return LEFW_BAD_ORDER;
+  }
   // only routing or cut calls this func
-  if (!lefwIsRouting && !lefwIsCut)
+  if (!lefwIsRouting && !lefwIsCut) {
     return LEFW_BAD_DATA;
-  if ((versionNum < 5.4) && (diffUseOnly && strcmp(diffUseOnly, "DIFFUSEONLY") == 0))
+  }
+  if ((versionNum < 5.4) && (diffUseOnly && strcmp(diffUseOnly, "DIFFUSEONLY") == 0)) {
     return LEFW_WRONG_VERSION;
+  }
   if (lefwWriteEncrypt) {
     encPrint(lefwFile, (char *)"   ANTENNAAREAFACTOR %.11g ", value);
-    if (diffUseOnly && strcmp(diffUseOnly, "DIFFUSEONLY") == 0)
+    if (diffUseOnly && strcmp(diffUseOnly, "DIFFUSEONLY") == 0) {
       encPrint(lefwFile, (char *)"   DIFFUSEONLY ");
+    }
     encPrint(lefwFile, (char *)";\n");
   } else {
     fprintf(lefwFile, "   ANTENNAAREAFACTOR %.11g ", value);
-    if (diffUseOnly && strcmp(diffUseOnly, "DIFFUSEONLY") == 0)
+    if (diffUseOnly && strcmp(diffUseOnly, "DIFFUSEONLY") == 0) {
       fprintf(lefwFile, "DIFFUSEONLY ");
+    }
     fprintf(lefwFile, ";\n");
   }
   lefwLines++;
@@ -3228,38 +3740,48 @@ int lefwLayerAntennaAreaFactor(double value, const char *diffUseOnly) {
 
 int lefwLayerAntennaSideAreaRatio(double value) {
   lefw54Num = LEFW_ANTENNASIDEAREARATIO;
-  if (!lefwFile)
+  if (!lefwFile) {
     return LEFW_UNINITIALIZED;
-  if (lefwState != LEFW_LAYERROUTING_START && lefwState != LEFW_LAYERROUTING)
+  }
+  if (lefwState != LEFW_LAYERROUTING_START && lefwState != LEFW_LAYERROUTING) {
     return LEFW_BAD_ORDER;
+  }
   // only routing calls this func
-  if (!lefwIsRouting)
+  if (!lefwIsRouting) {
     return LEFW_BAD_DATA;
-  if (versionNum < 5.4)
+  }
+  if (versionNum < 5.4) {
     return LEFW_WRONG_VERSION;
-  if (lefwWriteEncrypt)
+  }
+  if (lefwWriteEncrypt) {
     encPrint(lefwFile, (char *)"   ANTENNASIDEAREARATIO %.11g ;\n", value);
-  else
+  } else {
     fprintf(lefwFile, "   ANTENNASIDEAREARATIO %.11g ;\n", value);
+  }
   lefwLines++;
   return LEFW_OK;
 }
 
 int lefwLayerAntennaDiffSideAreaRatio(double value) {
   lefw54Num = LEFW_ANTENNADIFFSIDEAREARATIO;
-  if (!lefwFile)
+  if (!lefwFile) {
     return LEFW_UNINITIALIZED;
-  if (lefwState != LEFW_LAYERROUTING_START && lefwState != LEFW_LAYERROUTING)
+  }
+  if (lefwState != LEFW_LAYERROUTING_START && lefwState != LEFW_LAYERROUTING) {
     return LEFW_BAD_ORDER;
+  }
   // only routing calls this func
-  if (!lefwIsRouting)
+  if (!lefwIsRouting) {
     return LEFW_BAD_DATA;
-  if (versionNum < 5.4)
+  }
+  if (versionNum < 5.4) {
     return LEFW_WRONG_VERSION;
-  if (lefwWriteEncrypt)
+  }
+  if (lefwWriteEncrypt) {
     encPrint(lefwFile, (char *)"   ANTENNADIFFSIDEAREARATIO %.11g ;\n", value);
-  else
+  } else {
     fprintf(lefwFile, "   ANTENNADIFFSIDEAREARATIO %.11g ;\n", value);
+  }
   lefwLines++;
   return LEFW_OK;
 }
@@ -3268,22 +3790,30 @@ int lefwLayerAntennaDiffSideAreaRatioPwl(int numPwls, double *diffusions, double
   int i;
 
   lefw54Num = LEFW_ANTENNADIFFSIDEAREARATIOPWL;
-  if (!lefwFile)
+  if (!lefwFile) {
     return LEFW_UNINITIALIZED;
-  if (lefwState != LEFW_LAYERROUTING_START && lefwState != LEFW_LAYERROUTING)
+  }
+  if (lefwState != LEFW_LAYERROUTING_START && lefwState != LEFW_LAYERROUTING) {
     return LEFW_BAD_ORDER;
+  }
   // only routing or cut calls this func
-  if (!lefwIsRouting)
+  if (!lefwIsRouting) {
     return LEFW_BAD_DATA;
-  if (versionNum < 5.4)
+  }
+  if (versionNum < 5.4) {
     return LEFW_WRONG_VERSION;
+  }
   if (lefwWriteEncrypt) {
     encPrint(lefwFile, (char *)"   ANTENNADIFFSIDEAREARATIO PWL ( ");
-    for (i = 0; i < numPwls; i++) encPrint(lefwFile, (char *)"( %.11g %.11g ) ", *diffusions++, *ratios++);
+    for (i = 0; i < numPwls; i++) {
+      encPrint(lefwFile, (char *)"( %.11g %.11g ) ", *diffusions++, *ratios++);
+    }
     encPrint(lefwFile, (char *)") ;\n");
   } else {
     fprintf(lefwFile, "   ANTENNADIFFSIDEAREARATIO PWL ( ");
-    for (i = 0; i < numPwls; i++) fprintf(lefwFile, "( %.11g %.11g ) ", *diffusions++, *ratios++);
+    for (i = 0; i < numPwls; i++) {
+      fprintf(lefwFile, "( %.11g %.11g ) ", *diffusions++, *ratios++);
+    }
     fprintf(lefwFile, ") ;\n");
   }
   lefwLines++;
@@ -3292,19 +3822,24 @@ int lefwLayerAntennaDiffSideAreaRatioPwl(int numPwls, double *diffusions, double
 
 int lefwLayerAntennaCumSideAreaRatio(double value) {
   lefw54Num = LEFW_ANTENNACUMSIDEAREARATIO;
-  if (!lefwFile)
+  if (!lefwFile) {
     return LEFW_UNINITIALIZED;
-  if (lefwState != LEFW_LAYERROUTING_START && lefwState != LEFW_LAYERROUTING)
+  }
+  if (lefwState != LEFW_LAYERROUTING_START && lefwState != LEFW_LAYERROUTING) {
     return LEFW_BAD_ORDER;
+  }
   // only routing calls this func
-  if (!lefwIsRouting)
+  if (!lefwIsRouting) {
     return LEFW_BAD_DATA;
-  if (versionNum < 5.4)
+  }
+  if (versionNum < 5.4) {
     return LEFW_WRONG_VERSION;
-  if (lefwWriteEncrypt)
+  }
+  if (lefwWriteEncrypt) {
     encPrint(lefwFile, (char *)"   ANTENNACUMSIDEAREARATIO %.11g ;\n", value);
-  else
+  } else {
     fprintf(lefwFile, "   ANTENNACUMSIDEAREARATIO %.11g ;\n", value);
+  }
   lefwLines++;
   return LEFW_OK;
 }
@@ -3314,17 +3849,21 @@ int lefwLayerAntennaCumSideAreaRatio(double value) {
 // the header
 int lefwLayerAntennaCumDiffSideAreaRatio(double value) {
   lefw54Num = LEFW_ANTENNACUMDIFFSIDEAREARATIO;
-  if (!lefwFile)
+  if (!lefwFile) {
     return LEFW_UNINITIALIZED;
-  if (lefwState != LEFW_LAYERROUTING_START && lefwState != LEFW_LAYERROUTING)
+  }
+  if (lefwState != LEFW_LAYERROUTING_START && lefwState != LEFW_LAYERROUTING) {
     return LEFW_BAD_ORDER;
+  }
   // only routing calls this func
-  if (!lefwIsRouting)
+  if (!lefwIsRouting) {
     return LEFW_BAD_DATA;
-  if (lefwWriteEncrypt)
+  }
+  if (lefwWriteEncrypt) {
     encPrint(lefwFile, (char *)"   ANTENNACUMDIFFSIDEAREARATIO %.11g ;\n", value);
-  else
+  } else {
     fprintf(lefwFile, "   ANTENNACUMDIFFSIDEAREARATIO %.11g ;\n", value);
+  }
   lefwLines++;
   return LEFW_OK;
 }
@@ -3333,22 +3872,30 @@ int lefwLayerAntennaCumDiffSideAreaRatioPwl(int numPwls, double *diffusions, dou
   int i;
 
   lefw54Num = LEFW_ANTENNACUMDIFFSIDEAREARATIOPWL;
-  if (!lefwFile)
+  if (!lefwFile) {
     return LEFW_UNINITIALIZED;
-  if (lefwState != LEFW_LAYERROUTING_START && lefwState != LEFW_LAYERROUTING)
+  }
+  if (lefwState != LEFW_LAYERROUTING_START && lefwState != LEFW_LAYERROUTING) {
     return LEFW_BAD_ORDER;
+  }
   // only routing or cut calls this func
-  if (!lefwIsRouting)
+  if (!lefwIsRouting) {
     return LEFW_BAD_DATA;
-  if (versionNum < 5.4)
+  }
+  if (versionNum < 5.4) {
     return LEFW_WRONG_VERSION;
+  }
   if (lefwWriteEncrypt) {
     encPrint(lefwFile, (char *)"   ANTENNACUMDIFFSIDEAREARATIO PWL ( ");
-    for (i = 0; i < numPwls; i++) encPrint(lefwFile, (char *)"( %.11g %.11g ) ", *diffusions++, *ratios++);
+    for (i = 0; i < numPwls; i++) {
+      encPrint(lefwFile, (char *)"( %.11g %.11g ) ", *diffusions++, *ratios++);
+    }
     encPrint(lefwFile, (char *)") ;\n");
   } else {
     fprintf(lefwFile, "   ANTENNACUMDIFFSIDEAREARATIO PWL ( ");
-    for (i = 0; i < numPwls; i++) fprintf(lefwFile, "( %.11g %.11g ) ", *diffusions++, *ratios++);
+    for (i = 0; i < numPwls; i++) {
+      fprintf(lefwFile, "( %.11g %.11g ) ", *diffusions++, *ratios++);
+    }
     fprintf(lefwFile, ") ;\n");
   }
   lefwLines++;
@@ -3357,24 +3904,30 @@ int lefwLayerAntennaCumDiffSideAreaRatioPwl(int numPwls, double *diffusions, dou
 
 int lefwLayerAntennaSideAreaFactor(double value, const char *diffUseOnly) {
   lefw54Num = LEFW_ANTENNASIDEAREAFACTOR;
-  if (!lefwFile)
+  if (!lefwFile) {
     return LEFW_UNINITIALIZED;
-  if (lefwState != LEFW_LAYERROUTING_START && lefwState != LEFW_LAYERROUTING)
+  }
+  if (lefwState != LEFW_LAYERROUTING_START && lefwState != LEFW_LAYERROUTING) {
     return LEFW_BAD_ORDER;
+  }
   // only routing calls this func
-  if (!lefwIsRouting)
+  if (!lefwIsRouting) {
     return LEFW_BAD_DATA;
-  if ((versionNum < 5.4) && (diffUseOnly && strcmp(diffUseOnly, "DIFFUSEONLY") == 0))
+  }
+  if ((versionNum < 5.4) && (diffUseOnly && strcmp(diffUseOnly, "DIFFUSEONLY") == 0)) {
     return LEFW_WRONG_VERSION;
+  }
   if (lefwWriteEncrypt) {
     encPrint(lefwFile, (char *)"   ANTENNASIDEAREAFACTOR %.11g ", value);
-    if (diffUseOnly && strcmp(diffUseOnly, "DIFFUSEONLY") == 0)
+    if (diffUseOnly && strcmp(diffUseOnly, "DIFFUSEONLY") == 0) {
       encPrint(lefwFile, (char *)"   DIFFUSEONLY ");
+    }
     encPrint(lefwFile, (char *)";\n");
   } else {
     fprintf(lefwFile, "   ANTENNASIDEAREAFACTOR %.11g ", value);
-    if (diffUseOnly && strcmp(diffUseOnly, "DIFFUSEONLY") == 0)
+    if (diffUseOnly && strcmp(diffUseOnly, "DIFFUSEONLY") == 0) {
       fprintf(lefwFile, "DIFFUSEONLY ");
+    }
     fprintf(lefwFile, ";\n");
   }
   lefwLines++;
@@ -3383,21 +3936,24 @@ int lefwLayerAntennaSideAreaFactor(double value, const char *diffUseOnly) {
 
 // 5.7
 int lefwLayerAntennaCumRoutingPlusCut() {
-  if (!lefwFile)
+  if (!lefwFile) {
     return LEFW_UNINITIALIZED;
+  }
   if (lefwState != LEFW_LAYERROUTING_START && lefwState != LEFW_LAYERROUTING && lefwState != LEFW_LAYER_START
-      && lefwState != LEFW_LAYER)
+      && lefwState != LEFW_LAYER) {
     return LEFW_BAD_ORDER;
-  if (!lefwIsRouting && !lefwIsCut)
+  }
+  if (!lefwIsRouting && !lefwIsCut) {
     return LEFW_BAD_DATA;
+  }
   /* WANDA
     if ((versionNum < 5.4) &&
         (diffUseOnly && strcmp(diffUseOnly, "DIFFUSEONLY") == 0))
        return LEFW_WRONG_VERSION;
   */
-  if (lefwWriteEncrypt)
+  if (lefwWriteEncrypt) {
     encPrint(lefwFile, (char *)"   ANTENNACUMROUTINGPLUSCUT ;\n");
-  else {
+  } else {
     fprintf(lefwFile, "   ANTENNACUMROUTINGPLUSCUT ;\n");
   }
   lefwLines++;
@@ -3406,21 +3962,24 @@ int lefwLayerAntennaCumRoutingPlusCut() {
 
 // 5.7
 int lefwLayerAntennaGatePlusDiff(double plusDiffFactor) {
-  if (!lefwFile)
+  if (!lefwFile) {
     return LEFW_UNINITIALIZED;
+  }
   if (lefwState != LEFW_LAYERROUTING_START && lefwState != LEFW_LAYERROUTING && lefwState != LEFW_LAYER_START
-      && lefwState != LEFW_LAYER)
+      && lefwState != LEFW_LAYER) {
     return LEFW_BAD_ORDER;
-  if (!lefwIsRouting && !lefwIsCut)
+  }
+  if (!lefwIsRouting && !lefwIsCut) {
     return LEFW_BAD_DATA;
+  }
   /* WANDA
     if ((versionNum < 5.4) &&
         (diffUseOnly && strcmp(diffUseOnly, "DIFFUSEONLY") == 0))
        return LEFW_WRONG_VERSION;
   */
-  if (lefwWriteEncrypt)
+  if (lefwWriteEncrypt) {
     encPrint(lefwFile, (char *)"   ANTENNAGATEPLUSDIFF %.11g ;\n", plusDiffFactor);
-  else {
+  } else {
     fprintf(lefwFile, "   ANTENNAGATEPLUSDIFF %.11g ;\n", plusDiffFactor);
   }
   lefwLines++;
@@ -3429,21 +3988,24 @@ int lefwLayerAntennaGatePlusDiff(double plusDiffFactor) {
 
 // 5.7
 int lefwLayerAntennaAreaMinusDiff(double minusDiffFactor) {
-  if (!lefwFile)
+  if (!lefwFile) {
     return LEFW_UNINITIALIZED;
+  }
   if (lefwState != LEFW_LAYERROUTING_START && lefwState != LEFW_LAYERROUTING && lefwState != LEFW_LAYER_START
-      && lefwState != LEFW_LAYER)
+      && lefwState != LEFW_LAYER) {
     return LEFW_BAD_ORDER;
-  if (!lefwIsRouting && !lefwIsCut)
+  }
+  if (!lefwIsRouting && !lefwIsCut) {
     return LEFW_BAD_DATA;
+  }
   /* WANDA
     if ((versionNum < 5.4) &&
         (diffUseOnly && strcmp(diffUseOnly, "DIFFUSEONLY") == 0))
        return LEFW_WRONG_VERSION;
   */
-  if (lefwWriteEncrypt)
+  if (lefwWriteEncrypt) {
     encPrint(lefwFile, (char *)"   ANTENNAAREAMINUSDIFF %.11g ;\n", minusDiffFactor);
-  else {
+  } else {
     fprintf(lefwFile, "   ANTENNAAREAMINUSDIFF %.11g ;\n", minusDiffFactor);
   }
   lefwLines++;
@@ -3454,26 +4016,34 @@ int lefwLayerAntennaAreaMinusDiff(double minusDiffFactor) {
 int lefwLayerAntennaAreaDiffReducePwl(int numPwls, double *diffAreas, double *metalDiffFactors) {
   int i;
 
-  if (!lefwFile)
+  if (!lefwFile) {
     return LEFW_UNINITIALIZED;
+  }
   if (lefwState != LEFW_LAYERROUTING_START && lefwState != LEFW_LAYERROUTING && lefwState != LEFW_LAYER_START
-      && lefwState != LEFW_LAYER)
+      && lefwState != LEFW_LAYER) {
     return LEFW_BAD_ORDER;
-  if (!lefwIsRouting && !lefwIsCut)
+  }
+  if (!lefwIsRouting && !lefwIsCut) {
     return LEFW_BAD_DATA;
+  }
   /* WANDA
     if (versionNum < 5.4)
        return LEFW_WRONG_VERSION;
   */
-  if (numPwls < 2)
+  if (numPwls < 2) {
     return LEFW_BAD_DATA;
+  }
   if (lefwWriteEncrypt) {
     encPrint(lefwFile, (char *)"   ANTENNAAREADIFFREDUCEPWL ( ");
-    for (i = 0; i < numPwls; i++) encPrint(lefwFile, (char *)"( %.11g %.11g ) ", *diffAreas++, *metalDiffFactors++);
+    for (i = 0; i < numPwls; i++) {
+      encPrint(lefwFile, (char *)"( %.11g %.11g ) ", *diffAreas++, *metalDiffFactors++);
+    }
     encPrint(lefwFile, (char *)") ;\n");
   } else {
     fprintf(lefwFile, "   ANTENNAAREADIFFREDUCEPWL ( ");
-    for (i = 0; i < numPwls; i++) fprintf(lefwFile, "( %.11g %.11g ) ", *diffAreas++, *metalDiffFactors++);
+    for (i = 0; i < numPwls; i++) {
+      fprintf(lefwFile, "( %.11g %.11g ) ", *diffAreas++, *metalDiffFactors++);
+    }
     fprintf(lefwFile, ") ;\n");
   }
   lefwLines++;
@@ -3482,114 +4052,140 @@ int lefwLayerAntennaAreaDiffReducePwl(int numPwls, double *diffAreas, double *me
 
 int lefwMinimumDensity(double minDensity) {
   lefw54Num = LEFW_MINIMUMDENSITY;
-  if (!lefwFile)
+  if (!lefwFile) {
     return LEFW_UNINITIALIZED;
-  if (versionNum < 5.4)
+  }
+  if (versionNum < 5.4) {
     return LEFW_WRONG_VERSION;
-  if (lefwWriteEncrypt)
+  }
+  if (lefwWriteEncrypt) {
     encPrint(lefwFile, (char *)"   MINIMUMDENSITY %.11g ;\n", minDensity);
-  else
+  } else {
     fprintf(lefwFile, "   MINIMUMDENSITY %.11g ;\n", minDensity);
+  }
   lefwLines++;
   return LEFW_OK;
 }
 
 int lefwMaximumDensity(double maxDensity) {
   lefw54Num = LEFW_MAXIMUMDENSITY;
-  if (!lefwFile)
+  if (!lefwFile) {
     return LEFW_UNINITIALIZED;
-  if (versionNum < 5.4)
+  }
+  if (versionNum < 5.4) {
     return LEFW_WRONG_VERSION;
-  if (lefwWriteEncrypt)
+  }
+  if (lefwWriteEncrypt) {
     encPrint(lefwFile, (char *)"   MAXIMUMDENSITY %.11g ;\n", maxDensity);
-  else
+  } else {
     fprintf(lefwFile, "   MAXIMUMDENSITY %.11g ;\n", maxDensity);
+  }
   lefwLines++;
   return LEFW_OK;
 }
 
 int lefwDensityCheckWindow(double checkWindowLength, double checkWindowWidth) {
   lefw54Num = LEFW_DENSITYCHECKWINDOW;
-  if (!lefwFile)
+  if (!lefwFile) {
     return LEFW_UNINITIALIZED;
-  if (versionNum < 5.4)
+  }
+  if (versionNum < 5.4) {
     return LEFW_WRONG_VERSION;
-  if (lefwWriteEncrypt)
+  }
+  if (lefwWriteEncrypt) {
     encPrint(lefwFile, (char *)"   DENSITYCHECKWINDOW %.11g %.11g ;\n", checkWindowLength, checkWindowWidth);
-  else
+  } else {
     fprintf(lefwFile, "   DENSITYCHECKWINDOW %.11g %.11g ;\n", checkWindowLength, checkWindowWidth);
+  }
   lefwLines++;
   return LEFW_OK;
 }
 
 int lefwDensityCheckStep(double checkStepValue) {
   lefw54Num = LEFW_DENSITYCHECKSTEP;
-  if (!lefwFile)
+  if (!lefwFile) {
     return LEFW_UNINITIALIZED;
-  if (versionNum < 5.4)
+  }
+  if (versionNum < 5.4) {
     return LEFW_WRONG_VERSION;
-  if (lefwWriteEncrypt)
+  }
+  if (lefwWriteEncrypt) {
     encPrint(lefwFile, (char *)"   DENSITYCHECKSTEP %.11g ;\n", checkStepValue);
-  else
+  } else {
     fprintf(lefwFile, "   DENSITYCHECKSTEP %.11g ;\n", checkStepValue);
+  }
   lefwLines++;
   return LEFW_OK;
 }
 
 int lefwFillActiveSpacing(double fillToActiveSpacing) {
   lefw54Num = LEFW_FILLACTIVESPACING;
-  if (!lefwFile)
+  if (!lefwFile) {
     return LEFW_UNINITIALIZED;
-  if (versionNum < 5.4)
+  }
+  if (versionNum < 5.4) {
     return LEFW_WRONG_VERSION;
-  if (lefwWriteEncrypt)
+  }
+  if (lefwWriteEncrypt) {
     encPrint(lefwFile, (char *)"   FILLACTIVESPACING %.11g ;\n", fillToActiveSpacing);
-  else
+  } else {
     fprintf(lefwFile, "   FILLACTIVESPACING %.11g ;\n", fillToActiveSpacing);
+  }
   lefwLines++;
   return LEFW_OK;
 }
 
 int lefwMaxviastack(int value, const char *bottomLayer, const char *topLayer) {
-  if (!lefwFile)
+  if (!lefwFile) {
     return LEFW_UNINITIALIZED;
-  if (!lefwDidInit)
+  }
+  if (!lefwDidInit) {
     return LEFW_BAD_ORDER;
-  if (lefwIsMaxviastack)
+  }
+  if (lefwIsMaxviastack) {
     return LEFW_BAD_ORDER;
+  }
   if (lefwWriteEncrypt) {
     encPrint(lefwFile, (char *)"MAXVIASTACK %d ", value);
-    if (bottomLayer)
+    if (bottomLayer) {
       encPrint(lefwFile, (char *)"RANGE %s %s ;\n", bottomLayer, topLayer);
-    else
+    } else {
       encPrint(lefwFile, (char *)";\n");
+    }
   } else {
     fprintf(lefwFile, "MAXVIASTACK %d ", value);
-    if (bottomLayer)
+    if (bottomLayer) {
       fprintf(lefwFile, "RANGE %s %s ;\n", bottomLayer, topLayer);
-    else
+    } else {
       fprintf(lefwFile, ";\n");
+    }
   }
   lefwLines++;
   return LEFW_OK;
 }
 
 int lefwStartPropDef() {
-  if (!lefwFile)
+  if (!lefwFile) {
     return LEFW_UNINITIALIZED;
-  if (!lefwDidInit)
+  }
+  if (!lefwDidInit) {
     return LEFW_BAD_ORDER;
-  if (lefwSynArray[LEFW_PROPERTYDEF_START])
+  }
+  if (lefwSynArray[LEFW_PROPERTYDEF_START]) {
     return LEFW_ALREADY_DEFINED;
+  }
   lefwSynArray[LEFW_ANTENNASIZE] = 1;
-  if (lefwState == LEFW_PROPERTYDEF_START || lefwState == LEFW_PROPERTYDEF)
+  if (lefwState == LEFW_PROPERTYDEF_START || lefwState == LEFW_PROPERTYDEF) {
     return LEFW_BAD_ORDER;
-  if (lefwState != LEFW_INIT && lefwState < LEFW_END)
+  }
+  if (lefwState != LEFW_INIT && lefwState < LEFW_END) {
     return LEFW_BAD_ORDER;  // not of the ENDs
-  if (lefwWriteEncrypt)
+  }
+  if (lefwWriteEncrypt) {
     encPrint(lefwFile, (char *)"PROPERTYDEFINITIONS\n");
-  else
+  } else {
     fprintf(lefwFile, "PROPERTYDEFINITIONS\n");
+  }
 
   lefwLines++;
   lefwState                            = LEFW_PROPERTYDEF_START;
@@ -3601,36 +4197,44 @@ int lefwIntPropDef(const char *objType, const char *propName, double leftRange,
                    double rightRange,  // optional
                    int    propValue    // optional
 ) {
-  if (!lefwFile)
+  if (!lefwFile) {
     return LEFW_UNINITIALIZED;
-  if (lefwState != LEFW_PROPERTYDEF_START && lefwState != LEFW_PROPERTYDEF)
+  }
+  if (lefwState != LEFW_PROPERTYDEF_START && lefwState != LEFW_PROPERTYDEF) {
     return LEFW_BAD_ORDER;
+  }
   /*
     if ((! objType && ! *objType) || (! propName && ! *propName))
   */
-  if (((objType == 0) || (*objType == 0)) || ((propName == 0) || (*propName == 0)))
+  if (((objType == 0) || (*objType == 0)) || ((propName == 0) || (*propName == 0))) {
     return LEFW_BAD_DATA;
+  }
 
   if (strcmp(objType, "LIBRARY") && strcmp(objType, "VIA") && strcmp(objType, "MACRO") && strcmp(objType, "PIN")
-      && strcmp(objType, "LAYER") && strcmp(objType, "NONDEFAULTRULE") && strcmp(objType, "VIARULE"))
+      && strcmp(objType, "LAYER") && strcmp(objType, "NONDEFAULTRULE") && strcmp(objType, "VIARULE")) {
     return LEFW_BAD_DATA;
+  }
 
   if (lefwWriteEncrypt) {
     encPrint(lefwFile, (char *)"   %s %s INTEGER ", objType, propName);
-    if (leftRange || rightRange)
+    if (leftRange || rightRange) {
       encPrint(lefwFile, (char *)"RANGE %.11g %.11g ", leftRange, rightRange);
+    }
 
-    if (propValue)
+    if (propValue) {
       encPrint(lefwFile, (char *)"%d ", propValue);
+    }
 
     encPrint(lefwFile, (char *)";\n");
   } else {
     fprintf(lefwFile, "   %s %s INTEGER ", objType, propName);
-    if (leftRange || rightRange)
+    if (leftRange || rightRange) {
       fprintf(lefwFile, "RANGE %.11g %.11g ", leftRange, rightRange);
+    }
 
-    if (propValue)
+    if (propValue) {
       fprintf(lefwFile, "%d ", propValue);
+    }
 
     fprintf(lefwFile, ";\n");
   }
@@ -3644,33 +4248,41 @@ int lefwRealPropDef(const char *objType, const char *propName, double leftRange,
                     double rightRange,  // optional
                     double propValue    // optional
 ) {
-  if (!lefwFile)
+  if (!lefwFile) {
     return LEFW_UNINITIALIZED;
-  if (lefwState != LEFW_PROPERTYDEF_START && lefwState != LEFW_PROPERTYDEF)
+  }
+  if (lefwState != LEFW_PROPERTYDEF_START && lefwState != LEFW_PROPERTYDEF) {
     return LEFW_BAD_ORDER;
-  if (((objType == 0) || (*objType == 0)) || ((propName == 0) || (*propName == 0)))  // require
+  }
+  if (((objType == 0) || (*objType == 0)) || ((propName == 0) || (*propName == 0))) {  // require
     return LEFW_BAD_DATA;
+  }
 
   if (strcmp(objType, "LIBRARY") && strcmp(objType, "VIA") && strcmp(objType, "MACRO") && strcmp(objType, "PIN")
-      && strcmp(objType, "LAYER") && strcmp(objType, "NONDEFAULTRULE") && strcmp(objType, "VIARULE"))
+      && strcmp(objType, "LAYER") && strcmp(objType, "NONDEFAULTRULE") && strcmp(objType, "VIARULE")) {
     return LEFW_BAD_DATA;
+  }
 
   if (lefwWriteEncrypt) {
     encPrint(lefwFile, (char *)"   %s %s REAL ", objType, propName);
-    if (leftRange || rightRange)
+    if (leftRange || rightRange) {
       encPrint(lefwFile, (char *)"RANGE %.11g %.11g ", leftRange, rightRange);
+    }
 
-    if (propValue)
+    if (propValue) {
       encPrint(lefwFile, (char *)"%.11g ", propValue);
+    }
 
     encPrint(lefwFile, (char *)";\n");
   } else {
     fprintf(lefwFile, "   %s %s REAL ", objType, propName);
-    if (leftRange || rightRange)
+    if (leftRange || rightRange) {
       fprintf(lefwFile, "RANGE %.11g %.11g ", leftRange, rightRange);
+    }
 
-    if (propValue)
+    if (propValue) {
       fprintf(lefwFile, "%.11g ", propValue);
+    }
 
     fprintf(lefwFile, ";\n");
   }
@@ -3684,33 +4296,41 @@ int lefwStringPropDef(const char *objType, const char *propName, double leftRang
                       double      rightRange,  // optional
                       const char *propValue    // optional
 ) {
-  if (!lefwFile)
+  if (!lefwFile) {
     return LEFW_UNINITIALIZED;
-  if (lefwState != LEFW_PROPERTYDEF_START && lefwState != LEFW_PROPERTYDEF)
+  }
+  if (lefwState != LEFW_PROPERTYDEF_START && lefwState != LEFW_PROPERTYDEF) {
     return LEFW_BAD_ORDER;
-  if (((objType == 0) || (*objType == 0)) || ((propName == 0) || (*propName == 0)))
+  }
+  if (((objType == 0) || (*objType == 0)) || ((propName == 0) || (*propName == 0))) {
     return LEFW_BAD_DATA;
+  }
 
   if (strcmp(objType, "LIBRARY") && strcmp(objType, "VIA") && strcmp(objType, "MACRO") && strcmp(objType, "PIN")
-      && strcmp(objType, "LAYER") && strcmp(objType, "NONDEFAULTRULE") && strcmp(objType, "VIARULE"))
+      && strcmp(objType, "LAYER") && strcmp(objType, "NONDEFAULTRULE") && strcmp(objType, "VIARULE")) {
     return LEFW_BAD_DATA;
+  }
 
   if (lefwWriteEncrypt) {
     encPrint(lefwFile, (char *)"   %s %s STRING ", objType, propName);
-    if (leftRange || rightRange)
+    if (leftRange || rightRange) {
       encPrint(lefwFile, (char *)"RANGE %.11g %.11g ", leftRange, rightRange);
+    }
 
-    if (propValue)
+    if (propValue) {
       encPrint(lefwFile, (char *)"\"%s\" ", propValue);  // string, set quotes
+    }
 
     encPrint(lefwFile, (char *)";\n");
   } else {
     fprintf(lefwFile, "   %s %s STRING ", objType, propName);
-    if (leftRange || rightRange)
+    if (leftRange || rightRange) {
       fprintf(lefwFile, "RANGE %.11g %.11g ", leftRange, rightRange);
+    }
 
-    if (propValue)
+    if (propValue) {
       fprintf(lefwFile, "\"%s\" ", propValue);  // string, set quotes
+    }
 
     fprintf(lefwFile, ";\n");
   }
@@ -3721,29 +4341,35 @@ int lefwStringPropDef(const char *objType, const char *propName, double leftRang
 }
 
 int lefwEndPropDef() {
-  if (!lefwFile)
+  if (!lefwFile) {
     return LEFW_UNINITIALIZED;
-  if (lefwState != LEFW_PROPERTYDEF_START && lefwState != LEFW_PROPERTYDEF)
+  }
+  if (lefwState != LEFW_PROPERTYDEF_START && lefwState != LEFW_PROPERTYDEF) {
     return LEFW_BAD_ORDER;
+  }
 
-  if (lefwWriteEncrypt)
+  if (lefwWriteEncrypt) {
     encPrint(lefwFile, (char *)"END PROPERTYDEFINITIONS\n\n");
-  else
+  } else {
     fprintf(lefwFile, "END PROPERTYDEFINITIONS\n\n");
+  }
   lefwLines++;
   lefwState = LEFW_PROPERTYDEF_END;
   return LEFW_OK;
 }
 
 int lefwEnd() {
-  if (!lefwFile)
+  if (!lefwFile) {
     return 1;
-  if (!lefwDidInit)
+  }
+  if (!lefwDidInit) {
     return LEFW_BAD_ORDER;
-  if (lefwWriteEncrypt)
+  }
+  if (lefwWriteEncrypt) {
     encPrint(lefwFile, (char *)"END LIBRARY\n");
-  else
+  } else {
     fprintf(lefwFile, "END LIBRARY\n");
+  }
   lefwLines++;
   // lefwFile = 0;
   lefwState = LEFW_DONE;
@@ -3752,24 +4378,30 @@ int lefwEnd() {
 
 int lefwStartVia(const char *viaName,
                  const char *isDefault) {  // optional
-  if (!lefwFile)
+  if (!lefwFile) {
     return LEFW_UNINITIALIZED;
-  if (!lefwDidInit)
+  }
+  if (!lefwDidInit) {
     return LEFW_BAD_ORDER;
-  if (lefwState == LEFW_VIA_START || lefwState == LEFW_VIA)
+  }
+  if (lefwState == LEFW_VIA_START || lefwState == LEFW_VIA) {
     return LEFW_BAD_ORDER;
-  if (lefwState != LEFW_INIT && lefwState < LEFW_END && (!lefwIsNonDefaultRule))  // via defined in nondefaultrule
-    return LEFW_BAD_ORDER;                                                        // not of the ENDs
+  }
+  if (lefwState != LEFW_INIT && lefwState < LEFW_END && (!lefwIsNonDefaultRule)) {  // via defined in nondefaultrule
+    return LEFW_BAD_ORDER;                                                          // not of the ENDs
+  }
 
   if (lefwWriteEncrypt) {
     encPrint(lefwFile, (char *)"VIA %s ", viaName);
-    if (isDefault && strcmp(isDefault, "DEFAULT") == 0)
+    if (isDefault && strcmp(isDefault, "DEFAULT") == 0) {
       encPrint(lefwFile, (char *)"DEFAULT");
+    }
     encPrint(lefwFile, (char *)"\n");
   } else {
     fprintf(lefwFile, "VIA %s ", viaName);
-    if (isDefault && strcmp(isDefault, "DEFAULT") == 0)
+    if (isDefault && strcmp(isDefault, "DEFAULT") == 0) {
       fprintf(lefwFile, "DEFAULT");
+    }
     fprintf(lefwFile, "\n");
   }
   lefwLines++;
@@ -3783,16 +4415,20 @@ int lefwStartVia(const char *viaName,
 
 int lefwViaTopofstackonly() {
   lefwObsoleteNum = LEFW_VIATOPOFSTACKONLY;
-  if (!lefwFile)
+  if (!lefwFile) {
     return LEFW_UNINITIALIZED;
-  if (lefwState != LEFW_VIA_START && lefwState != LEFW_VIA)
+  }
+  if (lefwState != LEFW_VIA_START && lefwState != LEFW_VIA) {
     return LEFW_BAD_ORDER;
-  if (versionNum >= 5.6)
+  }
+  if (versionNum >= 5.6) {
     return LEFW_OBSOLETE;
-  if (lefwWriteEncrypt)
+  }
+  if (lefwWriteEncrypt) {
     encPrint(lefwFile, (char *)"   TOPOFSTACKONLY\n");
-  else
+  } else {
     fprintf(lefwFile, "   TOPOFSTACKONLY\n");
+  }
   lefwLines++;
   return LEFW_OK;
 }
@@ -3802,19 +4438,23 @@ int lefwViaForeign(const char *foreignName,
                    double      yl,  // optional
                    int         orient) {    // optional
   lefwObsoleteNum = LEFW_VIAFOREIGN;
-  if (!lefwFile)
+  if (!lefwFile) {
     return LEFW_UNINITIALIZED;
-  if (lefwState != LEFW_VIA_START && lefwState != LEFW_VIA)
+  }
+  if (lefwState != LEFW_VIA_START && lefwState != LEFW_VIA) {
     return LEFW_BAD_ORDER;
-  if (versionNum >= 5.6)
+  }
+  if (versionNum >= 5.6) {
     return LEFW_OBSOLETE;
+  }
 
   if (lefwWriteEncrypt) {
     encPrint(lefwFile, (char *)"   FOREIGN %s ", foreignName);
     if (xl || yl) {
       encPrint(lefwFile, (char *)"%.11g %.11g ", xl, yl);
-      if (orient >= 0 && orient <= 7)
+      if (orient >= 0 && orient <= 7) {
         encPrint(lefwFile, (char *)"%s ", lefwOrient(orient));
+      }
     } else if (orient > 0 && orient <= 7) {  // assume user has 0 0 for pt
       encPrint(lefwFile, (char *)"%.11g %.11g ", xl, yl);
       encPrint(lefwFile, (char *)"%s ", lefwOrient(orient));
@@ -3824,8 +4464,9 @@ int lefwViaForeign(const char *foreignName,
     fprintf(lefwFile, "   FOREIGN %s ", foreignName);
     if (xl || yl) {
       fprintf(lefwFile, "%.11g %.11g ", xl, yl);
-      if (orient >= 0 && orient <= 7)
+      if (orient >= 0 && orient <= 7) {
         fprintf(lefwFile, "%s ", lefwOrient(orient));
+      }
     } else if (orient > 0 && orient <= 7) {  // assume user has 0 0 for pt
       fprintf(lefwFile, "%.11g %.11g ", xl, yl);
       fprintf(lefwFile, "%s ", lefwOrient(orient));
@@ -3843,19 +4484,23 @@ int lefwViaForeignStr(const char *foreignName,
                       double      yl,        // optional
                       const char *orient) {  // optional
   lefwObsoleteNum = LEFW_VIAFOREIGN;
-  if (!lefwFile)
+  if (!lefwFile) {
     return LEFW_UNINITIALIZED;
-  if (lefwState != LEFW_VIA_START && lefwState != LEFW_VIA)
+  }
+  if (lefwState != LEFW_VIA_START && lefwState != LEFW_VIA) {
     return LEFW_BAD_ORDER;
-  if (versionNum >= 5.6)
+  }
+  if (versionNum >= 5.6) {
     return LEFW_OBSOLETE;
+  }
 
   if (lefwWriteEncrypt) {
     encPrint(lefwFile, (char *)"   FOREIGN %s ", foreignName);
     if (xl || yl) {
       encPrint(lefwFile, (char *)"%.11g %.11g ", xl, yl);
-      if (orient && *orient != '\0')
+      if (orient && *orient != '\0') {
         encPrint(lefwFile, (char *)"%s ", orient);
+      }
     } else if (orient && *orient != '\0') {  // assume user has 0 0 for pt
       encPrint(lefwFile, (char *)"%.11g %.11g ", xl, yl);
       encPrint(lefwFile, (char *)"%s ", orient);
@@ -3865,8 +4510,9 @@ int lefwViaForeignStr(const char *foreignName,
     fprintf(lefwFile, "   FOREIGN %s ", foreignName);
     if (xl || yl) {
       fprintf(lefwFile, "%.11g %.11g ", xl, yl);
-      if (orient && *orient != '\0')
+      if (orient && *orient != '\0') {
         fprintf(lefwFile, "%s ", orient);
+      }
     } else if (orient && *orient != '\0') {  // assume user has 0 0 for pt
       fprintf(lefwFile, "%.11g %.11g ", xl, yl);
       fprintf(lefwFile, "%s ", orient);
@@ -3880,18 +4526,22 @@ int lefwViaForeignStr(const char *foreignName,
 }
 
 int lefwViaResistance(double resistance) {
-  if (!lefwFile)
+  if (!lefwFile) {
     return LEFW_UNINITIALIZED;
-  if (lefwState != LEFW_VIA_START && lefwState != LEFW_VIA)
+  }
+  if (lefwState != LEFW_VIA_START && lefwState != LEFW_VIA) {
     return LEFW_BAD_ORDER;
+  }
 
-  if (lefwViaHasVal)
+  if (lefwViaHasVal) {
     return LEFW_ALREADY_DEFINED;  // either Resistance or
+  }
   // ViaRule has defined
-  if (lefwWriteEncrypt)
+  if (lefwWriteEncrypt) {
     encPrint(lefwFile, (char *)"   RESISTANCE %.11g ;\n", resistance);
-  else
+  } else {
     fprintf(lefwFile, "   RESISTANCE %.11g ;\n", resistance);
+  }
 
   lefwLines++;
   lefwState     = LEFW_VIA;
@@ -3900,15 +4550,18 @@ int lefwViaResistance(double resistance) {
 }
 
 int lefwViaLayer(const char *layerName) {
-  if (!lefwFile)
+  if (!lefwFile) {
     return LEFW_UNINITIALIZED;
-  if (lefwState != LEFW_VIA_START && lefwState != LEFW_VIA)
+  }
+  if (lefwState != LEFW_VIA_START && lefwState != LEFW_VIA) {
     return LEFW_BAD_ORDER;
+  }
 
-  if (lefwWriteEncrypt)
+  if (lefwWriteEncrypt) {
     encPrint(lefwFile, (char *)"   LAYER %s ;\n", layerName);
-  else
+  } else {
     fprintf(lefwFile, "   LAYER %s ;\n", layerName);
+  }
 
   lefwLines++;
   lefwState    = LEFW_VIA;
@@ -3917,12 +4570,15 @@ int lefwViaLayer(const char *layerName) {
 }
 
 int lefwViaLayerRect(double x1l, double y1l, double x2l, double y2l, int mask) {
-  if (!lefwFile)
+  if (!lefwFile) {
     return LEFW_UNINITIALIZED;
-  if (lefwState != LEFW_VIA_START && lefwState != LEFW_VIA)
+  }
+  if (lefwState != LEFW_VIA_START && lefwState != LEFW_VIA) {
     return LEFW_BAD_ORDER;
-  if (!lefwDidLayer)
+  }
+  if (!lefwDidLayer) {
     return LEFW_BAD_ORDER;
+  }
 
   if (mask && versionNum < 5.8) {
     return LEFW_WRONG_VERSION;
@@ -3955,14 +4611,18 @@ int lefwViaLayerPolygon(int num_polys, double *xl, double *yl, int mask) {
   int i;
   int polyCount;
 
-  if (!lefwFile)
+  if (!lefwFile) {
     return LEFW_UNINITIALIZED;
-  if (lefwState != LEFW_VIA_START && lefwState != LEFW_VIA)
+  }
+  if (lefwState != LEFW_VIA_START && lefwState != LEFW_VIA) {
     return LEFW_BAD_ORDER;
-  if (!lefwDidLayer)
+  }
+  if (!lefwDidLayer) {
     return LEFW_BAD_ORDER;
-  if (num_polys < 4)
+  }
+  if (num_polys < 4) {
     return LEFW_BAD_DATA;
+  }
 
   if (mask && versionNum < 5.8) {
     return LEFW_WRONG_VERSION;
@@ -3980,14 +4640,15 @@ int lefwViaLayerPolygon(int num_polys, double *xl, double *yl, int mask) {
     }
     polyCount = 0;
     for (i = 0; i < num_polys; i++) {
-      if (i == 0)
+      if (i == 0) {
         encPrint(lefwFile, (char *)"%.11g %.11g ", *xl++, *yl++);
-      else {
+      } else {
         if ((i % 5) == 0) {
           encPrint(lefwFile, (char *)"\n              %.11g %.11g", *xl++, *yl++);
           lefwLines++;
-        } else
+        } else {
           encPrint(lefwFile, (char *)"%.11g %.11g ", *xl++, *yl++);
+        }
       }
     }
     encPrint(lefwFile, (char *)" ;\n");
@@ -3999,14 +4660,15 @@ int lefwViaLayerPolygon(int num_polys, double *xl, double *yl, int mask) {
     }
     polyCount = 0;
     for (i = 0; i < num_polys; i++) {
-      if (i == 0)
+      if (i == 0) {
         fprintf(lefwFile, "%.11g %.11g", *xl++, *yl++);
-      else {
+      } else {
         if ((i % 5) == 0) {
           fprintf(lefwFile, "\n              %.11g %.11g", *xl++, *yl++);
           lefwLines++;
-        } else
+        } else {
           fprintf(lefwFile, "%.11g %.11g ", *xl++, *yl++);
+        }
       }
     }
     fprintf(lefwFile, " ;\n");
@@ -4019,13 +4681,16 @@ int lefwViaLayerPolygon(int num_polys, double *xl, double *yl, int mask) {
 int lefwViaViarule(const char *viaRuleName, double xCutSize, double yCutSize, const char *botMetalLayer, const char *cutLayer,
                    const char *topMetalLayer, double xCutSpacing, double yCutSpacing, double xBotEnc, double yBotEnc,
                    double xTopEnc, double yTopEnc) {
-  if (!lefwFile)
+  if (!lefwFile) {
     return LEFW_UNINITIALIZED;
-  if (lefwState != LEFW_VIA_START && lefwState != LEFW_VIA)
+  }
+  if (lefwState != LEFW_VIA_START && lefwState != LEFW_VIA) {
     return LEFW_BAD_ORDER;
+  }
 
-  if (lefwViaHasVal)
+  if (lefwViaHasVal) {
     return LEFW_ALREADY_DEFINED;  // either Resistance or
+  }
   // ViaRule has defined
   if (lefwWriteEncrypt) {
     encPrint(lefwFile, (char *)"   VIARULE %s ;\n", viaRuleName);
@@ -4047,59 +4712,71 @@ int lefwViaViarule(const char *viaRuleName, double xCutSize, double yCutSize, co
 }
 
 int lefwViaViaruleRowCol(int numCutRows, int numCutCols) {
-  if (!lefwFile)
+  if (!lefwFile) {
     return LEFW_UNINITIALIZED;
-  if (lefwState != LEFW_VIAVIARULE)
+  }
+  if (lefwState != LEFW_VIAVIARULE) {
     return LEFW_BAD_ORDER;
+  }
 
-  if (lefwWriteEncrypt)
+  if (lefwWriteEncrypt) {
     encPrint(lefwFile, (char *)"     ROWCOL %d %d ;\n", numCutRows, numCutCols);
-  else
+  } else {
     fprintf(lefwFile, "     ROWCOL %d %d ;\n", numCutRows, numCutCols);
+  }
 
   lefwLines++;
   return LEFW_OK;
 }
 
 int lefwViaViaruleOrigin(double xOffset, double yOffset) {
-  if (!lefwFile)
+  if (!lefwFile) {
     return LEFW_UNINITIALIZED;
-  if (lefwState != LEFW_VIAVIARULE)
+  }
+  if (lefwState != LEFW_VIAVIARULE) {
     return LEFW_BAD_ORDER;
+  }
 
-  if (lefwWriteEncrypt)
+  if (lefwWriteEncrypt) {
     encPrint(lefwFile, (char *)"     ORIGIN %.11g %.11g ;\n", xOffset, yOffset);
-  else
+  } else {
     fprintf(lefwFile, "     ORIGIN %.11g %.11g ;\n", xOffset, yOffset);
+  }
 
   lefwLines++;
   return LEFW_OK;
 }
 
 int lefwViaViaruleOffset(double xBotOffset, double yBotOffset, double xTopOffset, double yTopOffset) {
-  if (!lefwFile)
+  if (!lefwFile) {
     return LEFW_UNINITIALIZED;
-  if (lefwState != LEFW_VIAVIARULE)
+  }
+  if (lefwState != LEFW_VIAVIARULE) {
     return LEFW_BAD_ORDER;
+  }
 
-  if (lefwWriteEncrypt)
+  if (lefwWriteEncrypt) {
     encPrint(lefwFile, (char *)"     OFFSET %.11g %.11g %.11g %.11g ;\n", xBotOffset, yBotOffset, xTopOffset, yTopOffset);
-  else
+  } else {
     fprintf(lefwFile, "     OFFSET %.11g %.11g %.11g %.11g ;\n", xBotOffset, yBotOffset, xTopOffset, yTopOffset);
+  }
   lefwLines++;
   return LEFW_OK;
 }
 
 int lefwViaViarulePattern(const char *cutPattern) {
-  if (!lefwFile)
+  if (!lefwFile) {
     return LEFW_UNINITIALIZED;
-  if (lefwState != LEFW_VIAVIARULE)
+  }
+  if (lefwState != LEFW_VIAVIARULE) {
     return LEFW_BAD_ORDER;
+  }
 
-  if (lefwWriteEncrypt)
+  if (lefwWriteEncrypt) {
     encPrint(lefwFile, (char *)"     PATTERN %s ;\n", cutPattern);
-  else
+  } else {
     fprintf(lefwFile, "     PATTERN %s ;\n", cutPattern);
+  }
   lefwLines++;
   return LEFW_OK;
 }
@@ -4108,13 +4785,15 @@ int lefwStringProperty(const char *propName, const char *propValue) {
   if ((lefwState != LEFW_VIA) && (lefwState != LEFW_LAYER) && (lefwState != LEFW_VIARULE) && (lefwState != LEFW_MACRO_START)
       && (lefwState != LEFW_MACRO) && (lefwState != LEFW_VIA_START) && (lefwState != LEFW_VIARULE_START)
       && (lefwState != LEFW_LAYER_START) && (lefwState != LEFW_BEGINEXT) && (lefwState != LEFW_VIAVIARULE)
-      && (lefwState != LEFW_LAYERROUTING_START) && (lefwState != LEFW_LAYERROUTING))
+      && (lefwState != LEFW_LAYERROUTING_START) && (lefwState != LEFW_LAYERROUTING)) {
     return LEFW_BAD_ORDER;
+  }
 
-  if (lefwWriteEncrypt)
+  if (lefwWriteEncrypt) {
     encPrint(lefwFile, (char *)"   PROPERTY %s \"%s\" ;\n", propName, propValue);
-  else
+  } else {
     fprintf(lefwFile, "   PROPERTY %s \"%s\" ;\n", propName, propValue);
+  }
   lefwLines++;
   return LEFW_OK;
 }
@@ -4122,13 +4801,15 @@ int lefwStringProperty(const char *propName, const char *propValue) {
 int lefwRealProperty(const char *propName, double propValue) {
   if ((lefwState != LEFW_VIA) && (lefwState != LEFW_LAYER) && (lefwState != LEFW_VIARULE) && (lefwState != LEFW_MACRO_START)
       && (lefwState != LEFW_MACRO) && (lefwState != LEFW_VIA_START) && (lefwState != LEFW_VIARULE_START)
-      && (lefwState != LEFW_LAYER_START) && (lefwState != LEFW_BEGINEXT) && (lefwState != LEFW_VIAVIARULE))
+      && (lefwState != LEFW_LAYER_START) && (lefwState != LEFW_BEGINEXT) && (lefwState != LEFW_VIAVIARULE)) {
     return LEFW_BAD_ORDER;
+  }
 
-  if (lefwWriteEncrypt)
+  if (lefwWriteEncrypt) {
     encPrint(lefwFile, (char *)"   PROPERTY %s %.11g ;\n", propName, propValue);
-  else
+  } else {
     fprintf(lefwFile, "   PROPERTY %s %.11g ;\n", propName, propValue);
+  }
   lefwLines++;
   return LEFW_OK;
 }
@@ -4136,26 +4817,31 @@ int lefwRealProperty(const char *propName, double propValue) {
 int lefwIntProperty(const char *propName, int propValue) {
   if ((lefwState != LEFW_VIA) && (lefwState != LEFW_LAYER) && (lefwState != LEFW_VIARULE) && (lefwState != LEFW_MACRO_START)
       && (lefwState != LEFW_MACRO) && (lefwState != LEFW_VIA_START) && (lefwState != LEFW_VIARULE_START)
-      && (lefwState != LEFW_LAYER_START) && (lefwState != LEFW_BEGINEXT) && (lefwState != LEFW_VIAVIARULE))
+      && (lefwState != LEFW_LAYER_START) && (lefwState != LEFW_BEGINEXT) && (lefwState != LEFW_VIAVIARULE)) {
     return LEFW_BAD_ORDER;
+  }
 
-  if (lefwWriteEncrypt)
+  if (lefwWriteEncrypt) {
     encPrint(lefwFile, (char *)"   PROPERTY %s %d ;\n", propName, propValue);
-  else
+  } else {
     fprintf(lefwFile, "   PROPERTY %s %d ;\n", propName, propValue);
+  }
   lefwLines++;
   return LEFW_OK;
 }
 
 int lefwEndVia(const char *viaName) {
-  if (!lefwFile)
+  if (!lefwFile) {
     return LEFW_UNINITIALIZED;
-  if (lefwState != LEFW_VIA_START && lefwState != LEFW_VIA && lefwState != LEFW_VIAVIARULE)
+  }
+  if (lefwState != LEFW_VIA_START && lefwState != LEFW_VIA && lefwState != LEFW_VIAVIARULE) {
     return LEFW_BAD_ORDER;
-  if (lefwWriteEncrypt)
+  }
+  if (lefwWriteEncrypt) {
     encPrint(lefwFile, (char *)"END %s\n\n", viaName);
-  else
+  } else {
     fprintf(lefwFile, "END %s\n\n", viaName);
+  }
 
   lefwLines++;
   lefwState    = LEFW_VIA_END;
@@ -4167,22 +4853,27 @@ int lefwEndVia(const char *viaName) {
 int lefwViaRulePrtLayer(const char *layerName, const char *direction, double minWidth, double maxWidth, double overhang,
                         double metalOverhang) {
   lefwObsoleteNum = LEFW_VIARULEGENERATE;
-  if (!layerName || layerName == 0 || *layerName == 0)
+  if (!layerName || layerName == 0 || *layerName == 0) {
     return LEFW_BAD_DATA;
-  if (lefwWriteEncrypt)
+  }
+  if (lefwWriteEncrypt) {
     encPrint(lefwFile, (char *)"   LAYER %s ;\n", layerName);
-  else
+  } else {
     fprintf(lefwFile, "   LAYER %s ;\n", layerName);
-  if (direction && strcmp(direction, "HORIZONTAL") && strcmp(direction, "VERTICAL"))
+  }
+  if (direction && strcmp(direction, "HORIZONTAL") && strcmp(direction, "VERTICAL")) {
     return LEFW_BAD_DATA;
-  if (versionNum >= 5.6 && (direction || overhang || metalOverhang))
+  }
+  if (versionNum >= 5.6 && (direction || overhang || metalOverhang)) {
     return LEFW_OBSOLETE;
+  }
   if (lefwWriteEncrypt) {
     if (direction) {
       encPrint(lefwFile, (char *)"      DIRECTION %s ;\n", direction);
       lefwLines = lefwLines + 2;
-    } else
+    } else {
       lefwLines++;
+    }
     if (minWidth || maxWidth) {
       encPrint(lefwFile, (char *)"      WIDTH %.11g TO %.11g ;\n", minWidth, maxWidth);
       lefwLines++;
@@ -4199,8 +4890,9 @@ int lefwViaRulePrtLayer(const char *layerName, const char *direction, double min
     if (direction) {
       fprintf(lefwFile, "      DIRECTION %s ;\n", direction);
       lefwLines = lefwLines + 2;
-    } else
+    } else {
       lefwLines++;
+    }
     if (minWidth || maxWidth) {
       fprintf(lefwFile, "      WIDTH %.11g TO %.11g ;\n", minWidth, maxWidth);
       lefwLines++;
@@ -4218,21 +4910,27 @@ int lefwViaRulePrtLayer(const char *layerName, const char *direction, double min
 }
 
 int lefwStartViaRule(const char *viaRuleName) {
-  if (!lefwFile)
+  if (!lefwFile) {
     return LEFW_UNINITIALIZED;
-  if (!lefwDidInit)
+  }
+  if (!lefwDidInit) {
     return LEFW_BAD_ORDER;
-  if (lefwState == LEFW_VIARULE_START || lefwState == LEFW_VIARULE)
+  }
+  if (lefwState == LEFW_VIARULE_START || lefwState == LEFW_VIARULE) {
     return LEFW_BAD_ORDER;
-  if (lefwState != LEFW_INIT && lefwState < LEFW_END)
+  }
+  if (lefwState != LEFW_INIT && lefwState < LEFW_END) {
     return LEFW_BAD_ORDER;  // not of the ENDs
+  }
 
-  if (!viaRuleName || viaRuleName == 0 || *viaRuleName == 0)
+  if (!viaRuleName || viaRuleName == 0 || *viaRuleName == 0) {
     return LEFW_BAD_DATA;
-  if (lefwWriteEncrypt)
+  }
+  if (lefwWriteEncrypt) {
     encPrint(lefwFile, (char *)"VIARULE %s\n", viaRuleName);
-  else
+  } else {
     fprintf(lefwFile, "VIARULE %s\n", viaRuleName);
+  }
   lefwLines++;
 
   lefwSynArray[LEFW_VIARULE_START] = 1;
@@ -4248,49 +4946,63 @@ int lefwViaRuleLayer(const char *layerName, const char *direction, double minWid
                      double metalOverhang) {  // optional
   int status;
 
-  if (!lefwFile)
+  if (!lefwFile) {
     return LEFW_UNINITIALIZED;
-  if (!lefwDidInit)
+  }
+  if (!lefwDidInit) {
     return LEFW_BAD_ORDER;
-  if (lefwState != LEFW_VIARULE_START && lefwState != LEFW_VIARULE)
+  }
+  if (lefwState != LEFW_VIARULE_START && lefwState != LEFW_VIARULE) {
     return LEFW_BAD_ORDER;
-  if (lefwNumViaRuleLayers >= 2)
+  }
+  if (lefwNumViaRuleLayers >= 2) {
     return LEFW_BAD_ORDER;
-  if ((status = lefwViaRulePrtLayer(layerName, direction, minWidth, maxWidth, overhang, metalOverhang)) != LEFW_OK)
+  }
+  if ((status = lefwViaRulePrtLayer(layerName, direction, minWidth, maxWidth, overhang, metalOverhang)) != LEFW_OK) {
     return status;
+  }
   lefwNumViaRuleLayers++;
   lefwState = LEFW_VIARULE;
   return LEFW_OK;
 }
 
 int lefwViaRuleVia(const char *viaName) {
-  if (!lefwFile)
+  if (!lefwFile) {
     return LEFW_UNINITIALIZED;
-  if (!lefwDidInit)
+  }
+  if (!lefwDidInit) {
     return LEFW_BAD_ORDER;
-  if (lefwState != LEFW_VIARULE)
+  }
+  if (lefwState != LEFW_VIARULE) {
     return LEFW_BAD_ORDER;
-  if (lefwNumViaRuleLayers != 2)  // this routine has to be after two layers
-    return LEFW_BAD_ORDER;        // be written
-  if (!viaName || !*viaName)      // viaName is required
+  }
+  if (lefwNumViaRuleLayers != 2) {  // this routine has to be after two layers
+    return LEFW_BAD_ORDER;          // be written
+  }
+  if (!viaName || !*viaName) {  // viaName is required
     return LEFW_BAD_DATA;
-  if (lefwWriteEncrypt)
+  }
+  if (lefwWriteEncrypt) {
     encPrint(lefwFile, (char *)"      VIA %s ;\n", viaName);
-  else
+  } else {
     fprintf(lefwFile, "      VIA %s ;\n", viaName);
+  }
   lefwLines++;
   return LEFW_OK;
 }
 
 int lefwEndViaRule(const char *viaRuleName) {
-  if (!lefwFile)
+  if (!lefwFile) {
     return LEFW_UNINITIALIZED;
-  if (lefwState != LEFW_VIARULE_START && lefwState != LEFW_VIARULE)
+  }
+  if (lefwState != LEFW_VIARULE_START && lefwState != LEFW_VIARULE) {
     return LEFW_BAD_ORDER;
-  if (lefwWriteEncrypt)
+  }
+  if (lefwWriteEncrypt) {
     encPrint(lefwFile, (char *)"END %s\n\n", viaRuleName);
-  else
+  } else {
     fprintf(lefwFile, "END %s\n\n", viaRuleName);
+  }
 
   lefwLines++;
   lefwState            = LEFW_VIARULE_END;
@@ -4300,21 +5012,27 @@ int lefwEndViaRule(const char *viaRuleName) {
 }
 
 int lefwStartViaRuleGen(const char *viaRuleName) {
-  if (!lefwFile)
+  if (!lefwFile) {
     return LEFW_UNINITIALIZED;
-  if (!lefwDidInit)
+  }
+  if (!lefwDidInit) {
     return LEFW_BAD_ORDER;
-  if (lefwState == LEFW_VIARULEGEN_START || lefwState == LEFW_VIARULEGEN)
+  }
+  if (lefwState == LEFW_VIARULEGEN_START || lefwState == LEFW_VIARULEGEN) {
     return LEFW_BAD_ORDER;
-  if (lefwState != LEFW_INIT && lefwState < LEFW_END)
+  }
+  if (lefwState != LEFW_INIT && lefwState < LEFW_END) {
     return LEFW_BAD_ORDER;  // not of the ENDs
+  }
 
-  if (!viaRuleName || viaRuleName == 0 || *viaRuleName == 0)
+  if (!viaRuleName || viaRuleName == 0 || *viaRuleName == 0) {
     return LEFW_BAD_DATA;
-  if (lefwWriteEncrypt)
+  }
+  if (lefwWriteEncrypt) {
     encPrint(lefwFile, (char *)"VIARULE %s GENERATE", viaRuleName);
-  else
+  } else {
     fprintf(lefwFile, "VIARULE %s GENERATE", viaRuleName);
+  }
   lefwLines++;
 
   lefwSynArray[LEFW_VIARULEGEN_START] = 1;
@@ -4325,16 +5043,20 @@ int lefwStartViaRuleGen(const char *viaRuleName) {
 }
 
 int lefwViaRuleGenDefault() {
-  if (!lefwFile)
+  if (!lefwFile) {
     return LEFW_UNINITIALIZED;
-  if (!lefwDidInit)
+  }
+  if (!lefwDidInit) {
     return LEFW_BAD_ORDER;
-  if (lefwState != LEFW_VIARULEGEN_START && lefwState != LEFW_VIARULEGEN)
+  }
+  if (lefwState != LEFW_VIARULEGEN_START && lefwState != LEFW_VIARULEGEN) {
     return LEFW_BAD_ORDER;
-  if (lefwWriteEncrypt)
+  }
+  if (lefwWriteEncrypt) {
     encPrint(lefwFile, (char *)" DEFAULT");
-  else
+  } else {
     fprintf(lefwFile, " DEFAULT");
+  }
   return LEFW_OK;
 }
 
@@ -4344,20 +5066,26 @@ int lefwViaRuleGenLayer(const char *layerName, const char *direction, double min
                         double metalOverhang) {  // optional
   int status;
 
-  if (!lefwFile)
+  if (!lefwFile) {
     return LEFW_UNINITIALIZED;
-  if (!lefwDidInit)
+  }
+  if (!lefwDidInit) {
     return LEFW_BAD_ORDER;
-  if (lefwState != LEFW_VIARULEGEN_START && lefwState != LEFW_VIARULEGEN)
+  }
+  if (lefwState != LEFW_VIARULEGEN_START && lefwState != LEFW_VIARULEGEN) {
     return LEFW_BAD_ORDER;
-  if (lefwNumViaRuleLayers >= 2)
+  }
+  if (lefwNumViaRuleLayers >= 2) {
     return LEFW_BAD_ORDER;
-  if (lefwWriteEncrypt)                // add a new line since, lefwViaRuleGen
+  }
+  if (lefwWriteEncrypt) {              // add a new line since, lefwViaRuleGen
     encPrint(lefwFile, (char *)"\n");  // & lefwViaRuleGenDefault do not
-  else
+  } else {
     fprintf(lefwFile, "\n");
-  if ((status = lefwViaRulePrtLayer(layerName, direction, minWidth, maxWidth, overhang, metalOverhang)) != LEFW_OK)
+  }
+  if ((status = lefwViaRulePrtLayer(layerName, direction, minWidth, maxWidth, overhang, metalOverhang)) != LEFW_OK) {
     return status;
+  }
   lefwNumViaRuleLayers++;
   lefwState = LEFW_VIARULEGEN;
   return LEFW_OK;
@@ -4366,21 +5094,27 @@ int lefwViaRuleGenLayer(const char *layerName, const char *direction, double min
 int lefwViaRuleGenLayerEnclosure(const char *layerName, double overhang1, double overhang2, double minWidth,
                                  double maxWidth) {  // optional
 
-  if (!lefwFile)
+  if (!lefwFile) {
     return LEFW_UNINITIALIZED;
-  if (!lefwDidInit)
+  }
+  if (!lefwDidInit) {
     return LEFW_BAD_ORDER;
-  if (lefwState != LEFW_VIARULEGEN_START && lefwState != LEFW_VIARULEGEN)
+  }
+  if (lefwState != LEFW_VIARULEGEN_START && lefwState != LEFW_VIARULEGEN) {
     return LEFW_BAD_ORDER;
-  if (lefwNumViaRuleLayers >= 2)
+  }
+  if (lefwNumViaRuleLayers >= 2) {
     return LEFW_BAD_ORDER;
+  }
 
-  if (!layerName || layerName == 0 || *layerName == 0)
+  if (!layerName || layerName == 0 || *layerName == 0) {
     return LEFW_BAD_DATA;
-  if (lefwWriteEncrypt)
+  }
+  if (lefwWriteEncrypt) {
     encPrint(lefwFile, (char *)"\n   LAYER %s ;\n", layerName);
-  else
+  } else {
     fprintf(lefwFile, "\n   LAYER %s ;\n", layerName);
+  }
   if (lefwWriteEncrypt) {
     encPrint(lefwFile, (char *)"      ENCLOSURE %.11g %.11g ;\n", overhang1, overhang2);
     lefwLines = lefwLines + 2;
@@ -4405,16 +5139,21 @@ int lefwViaRuleGenLayerEnclosure(const char *layerName, double overhang1, double
 int lefwViaRuleGenLayer3(const char *layerName, double xl, double yl, double xh, double yh, double xSpacing, double ySpacing,
                          double resistance) {  // optional
 
-  if (!lefwFile)
+  if (!lefwFile) {
     return LEFW_UNINITIALIZED;
-  if (!lefwDidInit)
+  }
+  if (!lefwDidInit) {
     return LEFW_BAD_ORDER;
-  if (lefwState != LEFW_VIARULEGEN)
+  }
+  if (lefwState != LEFW_VIARULEGEN) {
     return LEFW_BAD_ORDER;
-  if (lefwNumViaRuleLayers != 2)  // this routine has to be after two layers
-    return LEFW_BAD_ORDER;        // be written
-  if (!layerName || layerName == 0 || *layerName == 0)
+  }
+  if (lefwNumViaRuleLayers != 2) {  // this routine has to be after two layers
+    return LEFW_BAD_ORDER;          // be written
+  }
+  if (!layerName || layerName == 0 || *layerName == 0) {
     return LEFW_BAD_DATA;
+  }
   if (lefwWriteEncrypt) {
     encPrint(lefwFile, (char *)"   LAYER %s ;\n", layerName);
     encPrint(lefwFile, (char *)"      RECT %.11g %.11g %.11g %.11g ;\n", xl, yl, xh, yh);
@@ -4437,14 +5176,17 @@ int lefwViaRuleGenLayer3(const char *layerName, double xl, double yl, double xh,
 }
 
 int lefwEndViaRuleGen(const char *viaRuleName) {
-  if (!lefwFile)
+  if (!lefwFile) {
     return LEFW_UNINITIALIZED;
-  if (lefwState != LEFW_VIARULEGEN_START && lefwState != LEFW_VIARULEGEN)
+  }
+  if (lefwState != LEFW_VIARULEGEN_START && lefwState != LEFW_VIARULEGEN) {
     return LEFW_BAD_ORDER;
-  if (lefwWriteEncrypt)
+  }
+  if (lefwWriteEncrypt) {
     encPrint(lefwFile, (char *)"END %s\n\n", viaRuleName);
-  else
+  } else {
     fprintf(lefwFile, "END %s\n\n", viaRuleName);
+  }
 
   lefwLines++;
   lefwState            = LEFW_VIARULEGEN_END;
@@ -4454,21 +5196,27 @@ int lefwEndViaRuleGen(const char *viaRuleName) {
 }
 
 int lefwStartNonDefaultRule(const char *ruleName) {
-  if (!lefwFile)
+  if (!lefwFile) {
     return LEFW_UNINITIALIZED;
-  if (!lefwDidInit)
+  }
+  if (!lefwDidInit) {
     return LEFW_BAD_ORDER;
-  if (lefwState == LEFW_NONDEFAULTRULE_START || lefwState == LEFW_NONDEFAULTRULE)
+  }
+  if (lefwState == LEFW_NONDEFAULTRULE_START || lefwState == LEFW_NONDEFAULTRULE) {
     return LEFW_BAD_ORDER;
-  if (lefwState != LEFW_INIT && lefwState < LEFW_END)
+  }
+  if (lefwState != LEFW_INIT && lefwState < LEFW_END) {
     return LEFW_BAD_ORDER;  // not of the ENDs
+  }
 
-  if (!ruleName || ruleName == 0 || *ruleName == 0)
+  if (!ruleName || ruleName == 0 || *ruleName == 0) {
     return LEFW_BAD_DATA;
-  if (lefwWriteEncrypt)
+  }
+  if (lefwWriteEncrypt) {
     encPrint(lefwFile, (char *)"NONDEFAULTRULE %s\n", ruleName);
-  else
+  } else {
     fprintf(lefwFile, "NONDEFAULTRULE %s\n", ruleName);
+  }
   lefwLines++;
 
   lefwSynArray[LEFW_NONDEFAULTRULE_START] = 1;
@@ -4479,37 +5227,46 @@ int lefwStartNonDefaultRule(const char *ruleName) {
 }
 
 int lefwNonDefaultRuleHardspacing() {
-  if (!lefwFile)
+  if (!lefwFile) {
     return LEFW_UNINITIALIZED;
-  if (!lefwDidInit)
+  }
+  if (!lefwDidInit) {
     return LEFW_BAD_ORDER;
-  if (lefwState != LEFW_NONDEFAULTRULE_START && lefwState != LEFW_NONDEFAULTRULE)
+  }
+  if (lefwState != LEFW_NONDEFAULTRULE_START && lefwState != LEFW_NONDEFAULTRULE) {
     return LEFW_BAD_ORDER;
-  if (lefwWriteEncrypt)
+  }
+  if (lefwWriteEncrypt) {
     encPrint(lefwFile, (char *)"   HARDSPACING ;\n");
-  else
+  } else {
     fprintf(lefwFile, "   HARDSPACING ;\n");
+  }
   return LEFW_OK;
 }
 
 int lefwNonDefaultRuleStartVia(const char *viaName, const char *isDefault) {
-  if (!lefwFile)
+  if (!lefwFile) {
     return LEFW_UNINITIALIZED;
-  if (!lefwDidInit)
+  }
+  if (!lefwDidInit) {
     return LEFW_BAD_ORDER;
+  }
   if (lefwState == LEFW_VIA_START || lefwState == LEFW_VIA
-      || (lefwState != LEFW_NONDEFAULTRULE_START && lefwState != LEFW_NONDEFAULTRULE))
+      || (lefwState != LEFW_NONDEFAULTRULE_START && lefwState != LEFW_NONDEFAULTRULE)) {
     return LEFW_BAD_ORDER;
+  }
 
   if (lefwWriteEncrypt) {
     encPrint(lefwFile, (char *)"   VIA %s ", viaName);
-    if (isDefault && strcmp(isDefault, "DEFAULT") == 0)
+    if (isDefault && strcmp(isDefault, "DEFAULT") == 0) {
       encPrint(lefwFile, (char *)"DEFAULT");
+    }
     encPrint(lefwFile, (char *)"\n");
   } else {
     fprintf(lefwFile, "   VIA %s ", viaName);
-    if (isDefault && strcmp(isDefault, "DEFAULT") == 0)
+    if (isDefault && strcmp(isDefault, "DEFAULT") == 0) {
       fprintf(lefwFile, "DEFAULT");
+    }
     fprintf(lefwFile, "\n");
   }
   lefwLines++;
@@ -4522,14 +5279,17 @@ int lefwNonDefaultRuleStartVia(const char *viaName, const char *isDefault) {
 }
 
 int lefwNonDefaultRuleEndVia(const char *viaName) {
-  if (!lefwFile)
+  if (!lefwFile) {
     return LEFW_UNINITIALIZED;
-  if (lefwState != LEFW_VIA_START && lefwState != LEFW_VIA)
+  }
+  if (lefwState != LEFW_VIA_START && lefwState != LEFW_VIA) {
     return LEFW_BAD_ORDER;
-  if (lefwWriteEncrypt)
+  }
+  if (lefwWriteEncrypt) {
     encPrint(lefwFile, (char *)"   END %s\n\n", viaName);
-  else
+  } else {
     fprintf(lefwFile, "   END %s\n\n", viaName);
+  }
 
   lefwLines++;
   lefwState    = LEFW_NONDEFAULTRULE;
@@ -4538,60 +5298,77 @@ int lefwNonDefaultRuleEndVia(const char *viaName) {
 }
 
 int lefwNonDefaultRuleUseVia(const char *viaName) {
-  if (!lefwFile)
+  if (!lefwFile) {
     return LEFW_UNINITIALIZED;
-  if (!lefwDidInit)
+  }
+  if (!lefwDidInit) {
     return LEFW_BAD_ORDER;
-  if (lefwState != LEFW_NONDEFAULTRULE_START && lefwState != LEFW_NONDEFAULTRULE)
+  }
+  if (lefwState != LEFW_NONDEFAULTRULE_START && lefwState != LEFW_NONDEFAULTRULE) {
     return LEFW_BAD_ORDER;
-  if (lefwWriteEncrypt)
+  }
+  if (lefwWriteEncrypt) {
     encPrint(lefwFile, (char *)"   USEVIA %s ;\n", viaName);
-  else
+  } else {
     fprintf(lefwFile, "   USEVIA %s ;\n", viaName);
+  }
   return LEFW_OK;
 }
 
 int lefwNonDefaultRuleUseViaRule(const char *viaRuleName) {
-  if (!lefwFile)
+  if (!lefwFile) {
     return LEFW_UNINITIALIZED;
-  if (!lefwDidInit)
+  }
+  if (!lefwDidInit) {
     return LEFW_BAD_ORDER;
-  if (lefwState != LEFW_NONDEFAULTRULE_START && lefwState != LEFW_NONDEFAULTRULE)
+  }
+  if (lefwState != LEFW_NONDEFAULTRULE_START && lefwState != LEFW_NONDEFAULTRULE) {
     return LEFW_BAD_ORDER;
-  if (lefwWriteEncrypt)
+  }
+  if (lefwWriteEncrypt) {
     encPrint(lefwFile, (char *)"   USEVIARULE %s ;\n", viaRuleName);
-  else
+  } else {
     fprintf(lefwFile, "   USEVIARULE %s ;\n", viaRuleName);
+  }
   return LEFW_OK;
 }
 
 int lefwNonDefaultRuleMinCuts(const char *layerName, int numCuts) {
-  if (!lefwFile)
+  if (!lefwFile) {
     return LEFW_UNINITIALIZED;
-  if (!lefwDidInit)
+  }
+  if (!lefwDidInit) {
     return LEFW_BAD_ORDER;
-  if (lefwState != LEFW_NONDEFAULTRULE_START && lefwState != LEFW_NONDEFAULTRULE)
+  }
+  if (lefwState != LEFW_NONDEFAULTRULE_START && lefwState != LEFW_NONDEFAULTRULE) {
     return LEFW_BAD_ORDER;
-  if (lefwWriteEncrypt)
+  }
+  if (lefwWriteEncrypt) {
     encPrint(lefwFile, (char *)"   MINCUTS %s %d ;\n", layerName, numCuts);
-  else
+  } else {
     fprintf(lefwFile, "   MINCUTS %s %d ;\n", layerName, numCuts);
+  }
   return LEFW_OK;
 }
 
 int lefwNonDefaultRuleLayer(const char *routingLayerName, double width, double minSpacing, double wireExtension, double resist,
                             double capacitance, double edgeCap) {
   lefwObsoleteNum = LEFW_NONDEFAULTRULELAYER;
-  if (!lefwFile)
+  if (!lefwFile) {
     return LEFW_UNINITIALIZED;
-  if (!lefwDidInit)
+  }
+  if (!lefwDidInit) {
     return LEFW_BAD_ORDER;
-  if (lefwState != LEFW_NONDEFAULTRULE_START && lefwState != LEFW_NONDEFAULTRULE)
+  }
+  if (lefwState != LEFW_NONDEFAULTRULE_START && lefwState != LEFW_NONDEFAULTRULE) {
     return LEFW_BAD_ORDER;
-  if (!routingLayerName || routingLayerName == 0 || *routingLayerName == 0)
+  }
+  if (!routingLayerName || routingLayerName == 0 || *routingLayerName == 0) {
     return LEFW_BAD_DATA;
-  if (versionNum >= 5.6 && (resist || capacitance || edgeCap))
+  }
+  if (versionNum >= 5.6 && (resist || capacitance || edgeCap)) {
     return LEFW_OBSOLETE;
+  }
   if (lefwWriteEncrypt) {
     encPrint(lefwFile, (char *)"   LAYER %s\n", routingLayerName);
     encPrint(lefwFile, (char *)"      WIDTH %.11g ;\n", width);
@@ -4643,16 +5420,19 @@ int lefwNonDefaultRuleLayer(const char *routingLayerName, double width, double m
 }
 
 int lefwEndNonDefaultRule(const char *ruleName) {
-  if (!lefwFile)
+  if (!lefwFile) {
     return LEFW_UNINITIALIZED;
+  }
   if (lefwState != LEFW_NONDEFAULTRULE_START && lefwState != LEFW_NONDEFAULTRULE && lefwState != LEFW_VIA_END
-      && lefwState != LEFW_SPACING_END)
+      && lefwState != LEFW_SPACING_END) {
     return LEFW_BAD_ORDER;
+  }
   // can be right after a via or spacing defined in nondefaultrule
-  if (lefwWriteEncrypt)
+  if (lefwWriteEncrypt) {
     encPrint(lefwFile, (char *)"END %s\n\n", ruleName);
-  else
+  } else {
     fprintf(lefwFile, "END %s\n\n", ruleName);
+  }
 
   lefwLines++;
   lefwState            = LEFW_NONDEFAULTRULE_END;
@@ -4663,18 +5443,23 @@ int lefwEndNonDefaultRule(const char *ruleName) {
 
 int lefwStartSpacing() {
   lefwObsoleteNum = LEFW_SPACING;
-  if (!lefwFile)
+  if (!lefwFile) {
     return LEFW_UNINITIALIZED;
-  if (!lefwDidInit)
+  }
+  if (!lefwDidInit) {
     return LEFW_BAD_ORDER;
-  if (lefwState == LEFW_SPACING_START || lefwState == LEFW_SPACING)
+  }
+  if (lefwState == LEFW_SPACING_START || lefwState == LEFW_SPACING) {
     return LEFW_BAD_ORDER;
-  if (lefwState != LEFW_INIT && lefwState < LEFW_END && (!lefwIsNonDefaultRule))  // spacing defined in nondefaultrule
-    return LEFW_BAD_ORDER;                                                        // not of the ENDs
-  if (lefwWriteEncrypt)
+  }
+  if (lefwState != LEFW_INIT && lefwState < LEFW_END && (!lefwIsNonDefaultRule)) {  // spacing defined in nondefaultrule
+    return LEFW_BAD_ORDER;                                                          // not of the ENDs
+  }
+  if (lefwWriteEncrypt) {
     encPrint(lefwFile, (char *)"SPACING\n");
-  else
+  } else {
     fprintf(lefwFile, "SPACING\n");
+  }
 
   lefwLines++;
   lefwState = LEFW_SPACING_START;
@@ -4684,23 +5469,29 @@ int lefwStartSpacing() {
 int lefwSpacing(const char *layerName1, const char *layerName2, double minSpace,
                 const char *stack) {  // optioanl
   lefwObsoleteNum = LEFW_SPACING;
-  if (!lefwFile)
+  if (!lefwFile) {
     return LEFW_UNINITIALIZED;
-  if (lefwState != LEFW_SPACING_START && lefwState != LEFW_SPACING)
+  }
+  if (lefwState != LEFW_SPACING_START && lefwState != LEFW_SPACING) {
     return LEFW_BAD_ORDER;
-  if (!layerName1 || layerName1 == 0 || *layerName1 == 0)
+  }
+  if (!layerName1 || layerName1 == 0 || *layerName1 == 0) {
     return LEFW_BAD_DATA;
-  if (!layerName2 || layerName2 == 0 || *layerName2 == 0)
+  }
+  if (!layerName2 || layerName2 == 0 || *layerName2 == 0) {
     return LEFW_BAD_DATA;
+  }
   if (lefwWriteEncrypt) {
     encPrint(lefwFile, (char *)"   SAMENET %s %s %.11g ", layerName1, layerName2, minSpace);
-    if (stack && strcmp(stack, "STACK") == 0)
+    if (stack && strcmp(stack, "STACK") == 0) {
       encPrint(lefwFile, (char *)"STACK ");
+    }
     encPrint(lefwFile, (char *)";\n");
   } else {
     fprintf(lefwFile, "   SAMENET %s %s %.11g ", layerName1, layerName2, minSpace);
-    if (stack && strcmp(stack, "STACK") == 0)
+    if (stack && strcmp(stack, "STACK") == 0) {
       fprintf(lefwFile, "STACK ");
+    }
     fprintf(lefwFile, ";\n");
   }
 
@@ -4710,14 +5501,17 @@ int lefwSpacing(const char *layerName1, const char *layerName2, double minSpace,
 }
 
 int lefwEndSpacing() {
-  if (!lefwFile)
+  if (!lefwFile) {
     return LEFW_UNINITIALIZED;
-  if (lefwState != LEFW_SPACING_START && lefwState != LEFW_SPACING)
+  }
+  if (lefwState != LEFW_SPACING_START && lefwState != LEFW_SPACING) {
     return LEFW_BAD_ORDER;
-  if (lefwWriteEncrypt)
+  }
+  if (lefwWriteEncrypt) {
     encPrint(lefwFile, (char *)"END SPACING\n\n");
-  else
+  } else {
     fprintf(lefwFile, "END SPACING\n\n");
+  }
 
   lefwLines++;
   lefwState = LEFW_SPACING_END;
@@ -4726,102 +5520,133 @@ int lefwEndSpacing() {
 
 int lefwUniversalNoiseMargin(double high, double low) {
   lefwObsoleteNum = LEFW_NOISEMARGIN;
-  if (!lefwFile)
+  if (!lefwFile) {
     return LEFW_UNINITIALIZED;
-  if (!lefwDidInit)
+  }
+  if (!lefwDidInit) {
     return LEFW_BAD_ORDER;
-  if (lefwState != LEFW_INIT && lefwState < LEFW_END)
+  }
+  if (lefwState != LEFW_INIT && lefwState < LEFW_END) {
     return LEFW_BAD_ORDER;  // not of the ENDs
-  if (lefwSynArray[LEFW_NOISEMARGIN])
+  }
+  if (lefwSynArray[LEFW_NOISEMARGIN]) {
     return LEFW_ALREADY_DEFINED;
-  if (versionNum >= 5.4)
+  }
+  if (versionNum >= 5.4) {
     return LEFW_OBSOLETE;
-  if (lefwWriteEncrypt)
+  }
+  if (lefwWriteEncrypt) {
     encPrint(lefwFile, (char *)"UNIVERSALNOISEMARGIN %.11g %.11g ;\n", high, low);
-  else
+  } else {
     fprintf(lefwFile, "UNIVERSALNOISEMARGIN %.11g %.11g ;\n", high, low);
+  }
   lefwSynArray[LEFW_NOISEMARGIN] = 1;
   return LEFW_OK;
 }
 
 int lefwEdgeRateThreshold1(double num) {
   lefwObsoleteNum = LEFW_THRESHOLD1;
-  if (!lefwFile)
+  if (!lefwFile) {
     return LEFW_UNINITIALIZED;
-  if (!lefwDidInit)
+  }
+  if (!lefwDidInit) {
     return LEFW_BAD_ORDER;
-  if (lefwState != LEFW_INIT && lefwState < LEFW_END)
+  }
+  if (lefwState != LEFW_INIT && lefwState < LEFW_END) {
     return LEFW_BAD_ORDER;  // not of the ENDs
-  if (lefwSynArray[LEFW_THRESHOLD1])
+  }
+  if (lefwSynArray[LEFW_THRESHOLD1]) {
     return LEFW_ALREADY_DEFINED;
-  if (versionNum >= 5.4)
+  }
+  if (versionNum >= 5.4) {
     return LEFW_OBSOLETE;
-  if (lefwWriteEncrypt)
+  }
+  if (lefwWriteEncrypt) {
     encPrint(lefwFile, (char *)"EDGERATETHRESHOLD1 %.11g ;\n", num);
-  else
+  } else {
     fprintf(lefwFile, "EDGERATETHRESHOLD1 %.11g ;\n", num);
+  }
   lefwSynArray[LEFW_THRESHOLD1] = 1;
   return LEFW_OK;
 }
 
 int lefwEdgeRateThreshold2(double num) {
   lefwObsoleteNum = LEFW_THRESHOLD2;
-  if (!lefwFile)
+  if (!lefwFile) {
     return LEFW_UNINITIALIZED;
-  if (!lefwDidInit)
+  }
+  if (!lefwDidInit) {
     return LEFW_BAD_ORDER;
-  if (lefwState != LEFW_INIT && lefwState < LEFW_END)
+  }
+  if (lefwState != LEFW_INIT && lefwState < LEFW_END) {
     return LEFW_BAD_ORDER;  // not of the ENDs
-  if (lefwSynArray[LEFW_THRESHOLD2])
+  }
+  if (lefwSynArray[LEFW_THRESHOLD2]) {
     return LEFW_ALREADY_DEFINED;
-  if (versionNum >= 5.4)
+  }
+  if (versionNum >= 5.4) {
     return LEFW_OBSOLETE;
-  if (lefwWriteEncrypt)
+  }
+  if (lefwWriteEncrypt) {
     encPrint(lefwFile, (char *)"EDGERATETHRESHOLD2 %.11g ;\n", num);
-  else
+  } else {
     fprintf(lefwFile, "EDGERATETHRESHOLD2 %.11g ;\n", num);
+  }
   lefwSynArray[LEFW_THRESHOLD2] = 1;
   return LEFW_OK;
 }
 
 int lefwEdgeRateScaleFactor(double num) {
   lefwObsoleteNum = LEFW_SCALEFACTOR;
-  if (!lefwFile)
+  if (!lefwFile) {
     return LEFW_UNINITIALIZED;
-  if (!lefwDidInit)
+  }
+  if (!lefwDidInit) {
     return LEFW_BAD_ORDER;
-  if (lefwState != LEFW_INIT && lefwState < LEFW_END)
+  }
+  if (lefwState != LEFW_INIT && lefwState < LEFW_END) {
     return LEFW_BAD_ORDER;  // not of the ENDs
-  if (lefwSynArray[LEFW_SCALEFACTOR])
+  }
+  if (lefwSynArray[LEFW_SCALEFACTOR]) {
     return LEFW_ALREADY_DEFINED;
-  if (versionNum >= 5.4)
+  }
+  if (versionNum >= 5.4) {
     return LEFW_OBSOLETE;
-  if (lefwWriteEncrypt)
+  }
+  if (lefwWriteEncrypt) {
     encPrint(lefwFile, (char *)"EDGERATESCALEFACTOR %.11g ;\n", num);
-  else
+  } else {
     fprintf(lefwFile, "EDGERATESCALEFACTOR %.11g ;\n", num);
+  }
   lefwSynArray[LEFW_SCALEFACTOR] = 1;
   return LEFW_OK;
 }
 
 int lefwStartNoiseTable(int num) {
   lefwObsoleteNum = LEFW_NOISETABLE_START;
-  if (!lefwFile)
+  if (!lefwFile) {
     return LEFW_UNINITIALIZED;
-  if (!lefwDidInit)
+  }
+  if (!lefwDidInit) {
     return LEFW_BAD_ORDER;
-  if (lefwState == LEFW_NOISETABLE_START || lefwState == LEFW_NOISETABLE)
+  }
+  if (lefwState == LEFW_NOISETABLE_START || lefwState == LEFW_NOISETABLE) {
     return LEFW_BAD_ORDER;
-  if (lefwState != LEFW_INIT && lefwState < LEFW_END)
+  }
+  if (lefwState != LEFW_INIT && lefwState < LEFW_END) {
     return LEFW_BAD_ORDER;  // not of the ENDs
-  if (lefwSynArray[LEFW_NOISETABLE_START])
+  }
+  if (lefwSynArray[LEFW_NOISETABLE_START]) {
     return LEFW_ALREADY_DEFINED;
-  if (versionNum >= 5.4)
+  }
+  if (versionNum >= 5.4) {
     return LEFW_OBSOLETE;
-  if (lefwWriteEncrypt)
+  }
+  if (lefwWriteEncrypt) {
     encPrint(lefwFile, (char *)"NOISETABLE %d ;\n", num);
-  else
+  } else {
     fprintf(lefwFile, "NOISETABLE %d ;\n", num);
+  }
 
   lefwLines++;
   lefwState                           = LEFW_NOISETABLE_START;
@@ -4834,22 +5659,27 @@ int lefwStartNoiseTable(int num) {
 // for both noisetable and correctiontable
 // Obsolete in 5.4
 int lefwEdgeRate(double num) {
-  if (!lefwFile)
+  if (!lefwFile) {
     return LEFW_UNINITIALIZED;
-  if (!lefwDidInit)
+  }
+  if (!lefwDidInit) {
     return LEFW_BAD_ORDER;
-  if (!lefwIsNoiseTable && !lefwIsCorrectTable)
+  }
+  if (!lefwIsNoiseTable && !lefwIsCorrectTable) {
     return LEFW_BAD_ORDER;
-  if (lefwWriteEncrypt)
+  }
+  if (lefwWriteEncrypt) {
     encPrint(lefwFile, (char *)"   EDGERATE %.11g ;\n", num);
-  else
+  } else {
     fprintf(lefwFile, "   EDGERATE %.11g ;\n", num);
+  }
 
   lefwLines++;
-  if (lefwState == LEFW_NOISETABLE_START)
+  if (lefwState == LEFW_NOISETABLE_START) {
     lefwState = LEFW_NOISETABLE;
-  else if (lefwState == LEFW_CORRECTTABLE_START)
+  } else if (lefwState == LEFW_CORRECTTABLE_START) {
     lefwState = LEFW_CORRECTTABLE;
+  }
   lefwIsEdgerate  = 1;
   lefwIsOutResist = 0;
   return LEFW_OK;
@@ -4859,17 +5689,22 @@ int lefwEdgeRate(double num) {
 int lefwOutputResistance(int numResists, double *resistance) {
   int i;
 
-  if (!lefwFile)
+  if (!lefwFile) {
     return LEFW_UNINITIALIZED;
-  if (!lefwDidInit)
+  }
+  if (!lefwDidInit) {
     return LEFW_BAD_ORDER;
-  if (!lefwIsEdgerate)
+  }
+  if (!lefwIsEdgerate) {
     return LEFW_BAD_ORDER;
-  if (lefwIsOutResist)
+  }
+  if (lefwIsOutResist) {
     return LEFW_BAD_ORDER;
+  }
 
-  if (numResists <= 0)
+  if (numResists <= 0) {
     return LEFW_OK;
+  }
 
   if (lefwWriteEncrypt) {
     encPrint(lefwFile, (char *)"   OUTPUTRESISTANCE ");
@@ -4894,34 +5729,41 @@ int lefwOutputResistance(int numResists, double *resistance) {
 int lefwVictims(int length, int numNoises, double *noises) {
   int i;
 
-  if (!lefwFile)
+  if (!lefwFile) {
     return LEFW_UNINITIALIZED;
-  if (!lefwDidInit)
+  }
+  if (!lefwDidInit) {
     return LEFW_BAD_ORDER;
-  if (!lefwIsOutResist)
+  }
+  if (!lefwIsOutResist) {
     return LEFW_BAD_ORDER;
+  }
 
   if (lefwWriteEncrypt) {
     encPrint(lefwFile, (char *)"      VICTIMLENGTH %d ;\n", length);
-    if (numNoises <= 0)
+    if (numNoises <= 0) {
       return LEFW_BAD_DATA;  // noises are required
+    }
     for (i = 0; i < numNoises; i++) {
-      if (lefwIsNoiseTable)
+      if (lefwIsNoiseTable) {
         encPrint(lefwFile, (char *)"      VICTIMNOISE ");
-      else
+      } else {
         encPrint(lefwFile, (char *)"      CORRECTIONFACTOR ");
+      }
       encPrint(lefwFile, (char *)"%.11g ", *noises++);
     }
     encPrint(lefwFile, (char *)";\n");
   } else {
     fprintf(lefwFile, "      VICTIMLENGTH %d ;\n", length);
-    if (numNoises <= 0)
+    if (numNoises <= 0) {
       return LEFW_BAD_DATA;  // noises are required
+    }
     for (i = 0; i < numNoises; i++) {
-      if (lefwIsNoiseTable)
+      if (lefwIsNoiseTable) {
         fprintf(lefwFile, "      VICTIMNOISE ");
-      else
+      } else {
         fprintf(lefwFile, "      CORRECTIONFACTOR ");
+      }
       fprintf(lefwFile, "%.11g ", *noises++);
     }
     fprintf(lefwFile, ";\n");
@@ -4933,14 +5775,17 @@ int lefwVictims(int length, int numNoises, double *noises) {
 
 // Obsolete in 5.4
 int lefwEndNoiseTable() {
-  if (!lefwFile)
+  if (!lefwFile) {
     return LEFW_UNINITIALIZED;
-  if (lefwState != LEFW_NOISETABLE_START && lefwState != LEFW_NOISETABLE)
+  }
+  if (lefwState != LEFW_NOISETABLE_START && lefwState != LEFW_NOISETABLE) {
     return LEFW_BAD_ORDER;
-  if (lefwWriteEncrypt)
+  }
+  if (lefwWriteEncrypt) {
     encPrint(lefwFile, (char *)"END NOISETABLE\n\n");
-  else
+  } else {
     fprintf(lefwFile, "END NOISETABLE\n\n");
+  }
   lefwLines++;
 
   lefwState        = LEFW_NOISETABLE_END;
@@ -4951,22 +5796,29 @@ int lefwEndNoiseTable() {
 
 int lefwStartCorrectTable(int num) {
   lefwObsoleteNum = LEFW_CORRECTTABLE_START;
-  if (!lefwFile)
+  if (!lefwFile) {
     return LEFW_UNINITIALIZED;
-  if (!lefwDidInit)
+  }
+  if (!lefwDidInit) {
     return LEFW_BAD_ORDER;
-  if (lefwState == LEFW_CORRECTTABLE_START || lefwState == LEFW_CORRECTTABLE)
+  }
+  if (lefwState == LEFW_CORRECTTABLE_START || lefwState == LEFW_CORRECTTABLE) {
     return LEFW_BAD_ORDER;
-  if (lefwState != LEFW_INIT && lefwState < LEFW_END)
+  }
+  if (lefwState != LEFW_INIT && lefwState < LEFW_END) {
     return LEFW_BAD_ORDER;  // not of the ENDs
-  if (versionNum >= 5.4)
+  }
+  if (versionNum >= 5.4) {
     return LEFW_OBSOLETE;
-  if (lefwSynArray[LEFW_CORRECTTABLE_START])
+  }
+  if (lefwSynArray[LEFW_CORRECTTABLE_START]) {
     return LEFW_ALREADY_DEFINED;
-  if (lefwWriteEncrypt)
+  }
+  if (lefwWriteEncrypt) {
     encPrint(lefwFile, (char *)"CORRECTIONTABLE %d ;\n", num);
-  else
+  } else {
     fprintf(lefwFile, "CORRECTIONTABLE %d ;\n", num);
+  }
 
   lefwLines++;
   lefwState                             = LEFW_CORRECTTABLE_START;
@@ -4978,14 +5830,17 @@ int lefwStartCorrectTable(int num) {
 
 // Obsolete in 5.4
 int lefwEndCorrectTable() {
-  if (!lefwFile)
+  if (!lefwFile) {
     return LEFW_UNINITIALIZED;
-  if (lefwState != LEFW_CORRECTTABLE_START && lefwState != LEFW_CORRECTTABLE)
+  }
+  if (lefwState != LEFW_CORRECTTABLE_START && lefwState != LEFW_CORRECTTABLE) {
     return LEFW_BAD_ORDER;
-  if (lefwWriteEncrypt)
+  }
+  if (lefwWriteEncrypt) {
     encPrint(lefwFile, (char *)"END CORRECTIONTABLE\n\n");
-  else
+  } else {
     fprintf(lefwFile, "END CORRECTIONTABLE\n\n");
+  }
   lefwLines++;
 
   lefwState        = LEFW_CORRECTTABLE_END;
@@ -4994,18 +5849,23 @@ int lefwEndCorrectTable() {
 }
 
 int lefwMinFeature(double x, double y) {
-  if (!lefwFile)
+  if (!lefwFile) {
     return LEFW_UNINITIALIZED;
-  if (!lefwDidInit)
+  }
+  if (!lefwDidInit) {
     return LEFW_BAD_ORDER;
-  if (lefwState != LEFW_INIT && lefwState < LEFW_END)
+  }
+  if (lefwState != LEFW_INIT && lefwState < LEFW_END) {
     return LEFW_BAD_ORDER;  // not of the ENDs
-  if (lefwSynArray[LEFW_MINFEATURE])
+  }
+  if (lefwSynArray[LEFW_MINFEATURE]) {
     return LEFW_ALREADY_DEFINED;
-  if (lefwWriteEncrypt)
+  }
+  if (lefwWriteEncrypt) {
     encPrint(lefwFile, (char *)"MINFEATURE %.11g %.11g ;\n", x, y);
-  else
+  } else {
     fprintf(lefwFile, "MINFEATURE %.11g %.11g ;\n", x, y);
+  }
   lefwSynArray[LEFW_MINFEATURE] = 1;
   return LEFW_OK;
 }
@@ -5025,22 +5885,29 @@ int lefwMinFeature(double x, double y) {
 
 int lefwStartIrdrop() {
   lefwObsoleteNum = LEFW_IRDROP_START;
-  if (!lefwFile)
+  if (!lefwFile) {
     return LEFW_UNINITIALIZED;
-  if (!lefwDidInit)
+  }
+  if (!lefwDidInit) {
     return LEFW_BAD_ORDER;
-  if (lefwState == LEFW_IRDROP_START || lefwState == LEFW_IRDROP)
+  }
+  if (lefwState == LEFW_IRDROP_START || lefwState == LEFW_IRDROP) {
     return LEFW_BAD_ORDER;
-  if (versionNum >= 5.4)
+  }
+  if (versionNum >= 5.4) {
     return LEFW_OBSOLETE;
-  if (lefwState != LEFW_INIT && lefwState < LEFW_END)
+  }
+  if (lefwState != LEFW_INIT && lefwState < LEFW_END) {
     return LEFW_BAD_ORDER;  // not of the ENDs
-  if (lefwSynArray[LEFW_IRDROP_START])
+  }
+  if (lefwSynArray[LEFW_IRDROP_START]) {
     return LEFW_ALREADY_DEFINED;
-  if (lefwWriteEncrypt)
+  }
+  if (lefwWriteEncrypt) {
     encPrint(lefwFile, (char *)"IRDROP\n");
-  else
+  } else {
     fprintf(lefwFile, "IRDROP\n");
+  }
 
   lefwLines++;
   lefwState                       = LEFW_IRDROP_START;
@@ -5050,18 +5917,23 @@ int lefwStartIrdrop() {
 
 // Obsolete in 5.4
 int lefwIrdropTable(const char *tableName, const char *currentsNvolts) {
-  if (!lefwFile)
+  if (!lefwFile) {
     return LEFW_UNINITIALIZED;
-  if (lefwState != LEFW_IRDROP_START && lefwState != LEFW_IRDROP)
+  }
+  if (lefwState != LEFW_IRDROP_START && lefwState != LEFW_IRDROP) {
     return LEFW_BAD_ORDER;
-  if (!tableName || tableName == 0 || *tableName == 0)
+  }
+  if (!tableName || tableName == 0 || *tableName == 0) {
     return LEFW_BAD_DATA;
-  if (!currentsNvolts || currentsNvolts == 0 || *currentsNvolts == 0)
+  }
+  if (!currentsNvolts || currentsNvolts == 0 || *currentsNvolts == 0) {
     return LEFW_BAD_DATA;
-  if (lefwWriteEncrypt)
+  }
+  if (lefwWriteEncrypt) {
     encPrint(lefwFile, (char *)"   TABLE %s %s ;\n", tableName, currentsNvolts);
-  else
+  } else {
     fprintf(lefwFile, "   TABLE %s %s ;\n", tableName, currentsNvolts);
+  }
   lefwLines++;
 
   lefwState = LEFW_IRDROP;
@@ -5070,14 +5942,17 @@ int lefwIrdropTable(const char *tableName, const char *currentsNvolts) {
 
 // Obsolete in 5.4
 int lefwEndIrdrop() {
-  if (!lefwFile)
+  if (!lefwFile) {
     return LEFW_UNINITIALIZED;
-  if (lefwState != LEFW_IRDROP_START && lefwState != LEFW_IRDROP)
+  }
+  if (lefwState != LEFW_IRDROP_START && lefwState != LEFW_IRDROP) {
     return LEFW_BAD_ORDER;
-  if (lefwWriteEncrypt)
+  }
+  if (lefwWriteEncrypt) {
     encPrint(lefwFile, (char *)"END IRDROP\n\n");
-  else
+  } else {
     fprintf(lefwFile, "END IRDROP\n\n");
+  }
   lefwLines++;
 
   lefwState = LEFW_IRDROP_END;
@@ -5085,32 +5960,41 @@ int lefwEndIrdrop() {
 }
 
 int lefwSite(const char *siteName, const char *classType, const char *symmetry, double width, double height) {
-  if (!lefwFile)
+  if (!lefwFile) {
     return LEFW_UNINITIALIZED;
-  if (!lefwDidInit)
+  }
+  if (!lefwDidInit) {
     return LEFW_BAD_ORDER;
-  if (lefwState == LEFW_SITE)
+  }
+  if (lefwState == LEFW_SITE) {
     return LEFW_BAD_ORDER;
-  if (lefwState != LEFW_INIT && lefwState < LEFW_END)
+  }
+  if (lefwState != LEFW_INIT && lefwState < LEFW_END) {
     return LEFW_BAD_ORDER;  // not of the ENDs
-  if (!siteName || siteName == 0 || *siteName == 0)
+  }
+  if (!siteName || siteName == 0 || *siteName == 0) {
     return LEFW_BAD_DATA;
+  }
   if (lefwWriteEncrypt) {
     encPrint(lefwFile, (char *)"SITE %s\n", siteName);
-    if (classType && strcmp(classType, "PAD") && strcmp(classType, "CORE"))
+    if (classType && strcmp(classType, "PAD") && strcmp(classType, "CORE")) {
       return LEFW_BAD_DATA;
+    }
     encPrint(lefwFile, (char *)"   CLASS %s ;\n", classType);
-    if (symmetry)
+    if (symmetry) {
       encPrint(lefwFile, (char *)"   SYMMETRY %s ;\n", symmetry);
+    }
     encPrint(lefwFile, (char *)"   SIZE %.11g BY %.11g ;\n", width, height);
     // encPrint(lefwFile, (char*)"END %s\n\n", siteName);
   } else {
     fprintf(lefwFile, "SITE %s\n", siteName);
-    if (classType && strcmp(classType, "PAD") && strcmp(classType, "CORE"))
+    if (classType && strcmp(classType, "PAD") && strcmp(classType, "CORE")) {
       return LEFW_BAD_DATA;
+    }
     fprintf(lefwFile, "   CLASS %s ;\n", classType);
-    if (symmetry)
+    if (symmetry) {
       fprintf(lefwFile, "   SYMMETRY %s ;\n", symmetry);
+    }
     fprintf(lefwFile, "   SIZE %.11g BY %.11g ;\n", width, height);
     // a separate function call, lefwEndSite
     // fprintf(lefwFile, "END %s\n\n", siteName);
@@ -5123,48 +6007,60 @@ int lefwSite(const char *siteName, const char *classType, const char *symmetry, 
 }
 
 int lefwSiteRowPattern(const char *siteName, int orient) {
-  if (!lefwFile)
+  if (!lefwFile) {
     return LEFW_UNINITIALIZED;
-  if (lefwState != LEFW_SITE)
+  }
+  if (lefwState != LEFW_SITE) {
     return LEFW_BAD_ORDER;
-  if (!siteName || siteName == 0 || *siteName == 0)
+  }
+  if (!siteName || siteName == 0 || *siteName == 0) {
     return LEFW_BAD_DATA;
-  if (lefwWriteEncrypt)
+  }
+  if (lefwWriteEncrypt) {
     encPrint(lefwFile, (char *)"   ROWPATTERN %s %s ;\n", siteName, lefwOrient(orient));
-  else
+  } else {
     fprintf(lefwFile, "   ROWPATTERN %s %s ;\n", siteName, lefwOrient(orient));
+  }
   lefwLines++;
   lefwState = LEFW_SITE;
   return LEFW_OK;
 }
 
 int lefwSiteRowPatternStr(const char *siteName, const char *orient) {
-  if (!lefwFile)
+  if (!lefwFile) {
     return LEFW_UNINITIALIZED;
-  if (lefwState != LEFW_SITE)
+  }
+  if (lefwState != LEFW_SITE) {
     return LEFW_BAD_ORDER;
-  if (!siteName || siteName == 0 || *siteName == 0)
+  }
+  if (!siteName || siteName == 0 || *siteName == 0) {
     return LEFW_BAD_DATA;
-  if (!orient || orient == 0 || *orient == 0)
+  }
+  if (!orient || orient == 0 || *orient == 0) {
     return LEFW_BAD_DATA;
-  if (lefwWriteEncrypt)
+  }
+  if (lefwWriteEncrypt) {
     encPrint(lefwFile, (char *)"   ROWPATTERN %s %s ;\n", siteName, orient);
-  else
+  } else {
     fprintf(lefwFile, "   ROWPATTERN %s %s ;\n", siteName, orient);
+  }
   lefwLines++;
   lefwState = LEFW_SITE;
   return LEFW_OK;
 }
 
 int lefwEndSite(const char *siteName) {
-  if (!lefwFile)
+  if (!lefwFile) {
     return LEFW_UNINITIALIZED;
-  if (lefwState != LEFW_SITE)
+  }
+  if (lefwState != LEFW_SITE) {
     return LEFW_BAD_ORDER;
-  if (lefwWriteEncrypt)
+  }
+  if (lefwWriteEncrypt) {
     encPrint(lefwFile, (char *)"END %s\n\n", siteName);
-  else
+  } else {
     fprintf(lefwFile, "END %s\n\n", siteName);
+  }
 
   lefwLines++;
   lefwState = LEFW_SITE_END;
@@ -5172,20 +6068,26 @@ int lefwEndSite(const char *siteName) {
 }
 
 int lefwStartArray(const char *arrayName) {
-  if (!lefwFile)
+  if (!lefwFile) {
     return LEFW_UNINITIALIZED;
-  if (!lefwDidInit)
+  }
+  if (!lefwDidInit) {
     return LEFW_BAD_ORDER;
-  if (lefwState == LEFW_ARRAY_START || lefwState == LEFW_ARRAY)
+  }
+  if (lefwState == LEFW_ARRAY_START || lefwState == LEFW_ARRAY) {
     return LEFW_BAD_ORDER;
-  if (lefwState != LEFW_INIT && lefwState < LEFW_END)
+  }
+  if (lefwState != LEFW_INIT && lefwState < LEFW_END) {
     return LEFW_BAD_ORDER;  // not of the ENDs
-  if (!arrayName || arrayName == 0 || *arrayName == 0)
+  }
+  if (!arrayName || arrayName == 0 || *arrayName == 0) {
     return LEFW_BAD_DATA;
-  if (lefwWriteEncrypt)
+  }
+  if (lefwWriteEncrypt) {
     encPrint(lefwFile, (char *)"ARRAY %s\n", arrayName);
-  else
+  } else {
     fprintf(lefwFile, "ARRAY %s\n", arrayName);
+  }
 
   lefwLines++;
   lefwState                      = LEFW_ARRAY_START;
@@ -5197,13 +6099,16 @@ int lefwStartArray(const char *arrayName) {
 
 int lefwArraySite(const char *name, double origX, double origY, int orient, double numX, double numY, double spaceX,
                   double spaceY) {
-  if (!lefwFile)
+  if (!lefwFile) {
     return LEFW_UNINITIALIZED;
-  if (lefwState != LEFW_ARRAY_START && lefwState != LEFW_ARRAY)
+  }
+  if (lefwState != LEFW_ARRAY_START && lefwState != LEFW_ARRAY) {
     return LEFW_BAD_ORDER;
-  if (!name || name == 0 || *name == 0)
+  }
+  if (!name || name == 0 || *name == 0) {
     return LEFW_BAD_DATA;
-  if (lefwWriteEncrypt)
+  }
+  if (lefwWriteEncrypt) {
     encPrint(lefwFile,
              (char *)"   SITE %s %.11g %.11g %s DO %.11g BY %.11g STEP %.11g %.11g ;\n",
              name,
@@ -5214,7 +6119,7 @@ int lefwArraySite(const char *name, double origX, double origY, int orient, doub
              numY,
              spaceX,
              spaceY);
-  else
+  } else {
     fprintf(lefwFile,
             "   SITE %s %.11g %.11g %s DO %.11g BY %.11g STEP %.11g %.11g ;\n",
             name,
@@ -5225,6 +6130,7 @@ int lefwArraySite(const char *name, double origX, double origY, int orient, doub
             numY,
             spaceX,
             spaceY);
+  }
 
   lefwLines++;
   lefwHasArrayReq = 1;
@@ -5235,13 +6141,16 @@ int lefwArraySite(const char *name, double origX, double origY, int orient, doub
 
 int lefwArraySiteStr(const char *name, double origX, double origY, const char *orient, double numX, double numY, double spaceX,
                      double spaceY) {
-  if (!lefwFile)
+  if (!lefwFile) {
     return LEFW_UNINITIALIZED;
-  if (lefwState != LEFW_ARRAY_START && lefwState != LEFW_ARRAY)
+  }
+  if (lefwState != LEFW_ARRAY_START && lefwState != LEFW_ARRAY) {
     return LEFW_BAD_ORDER;
-  if (!name || name == 0 || *name == 0)
+  }
+  if (!name || name == 0 || *name == 0) {
     return LEFW_BAD_DATA;
-  if (lefwWriteEncrypt)
+  }
+  if (lefwWriteEncrypt) {
     encPrint(lefwFile,
              (char *)"   SITE %s %.11g %.11g %s DO %.11g BY %.11g STEP %.11g %.11g ;\n",
              name,
@@ -5252,7 +6161,7 @@ int lefwArraySiteStr(const char *name, double origX, double origY, const char *o
              numY,
              spaceX,
              spaceY);
-  else
+  } else {
     fprintf(lefwFile,
             "   SITE %s %.11g %.11g %s DO %.11g BY %.11g STEP %.11g %.11g ;\n",
             name,
@@ -5263,6 +6172,7 @@ int lefwArraySiteStr(const char *name, double origX, double origY, const char *o
             numY,
             spaceX,
             spaceY);
+  }
 
   lefwLines++;
   lefwHasArrayReq = 1;
@@ -5273,13 +6183,16 @@ int lefwArraySiteStr(const char *name, double origX, double origY, const char *o
 
 int lefwArrayCanplace(const char *name, double origX, double origY, int orient, double numX, double numY, double spaceX,
                       double spaceY) {
-  if (!lefwFile)
+  if (!lefwFile) {
     return LEFW_UNINITIALIZED;
-  if (lefwState != LEFW_ARRAY_START && lefwState != LEFW_ARRAY)
+  }
+  if (lefwState != LEFW_ARRAY_START && lefwState != LEFW_ARRAY) {
     return LEFW_BAD_ORDER;
-  if (!name || name == 0 || *name == 0)
+  }
+  if (!name || name == 0 || *name == 0) {
     return LEFW_BAD_DATA;
-  if (lefwWriteEncrypt)
+  }
+  if (lefwWriteEncrypt) {
     encPrint(lefwFile,
              (char *)"   CANPLACE %s %.11g %.11g %s DO %.11g BY %.11g STEP %.11g %.11g ;\n",
              name,
@@ -5290,7 +6203,7 @@ int lefwArrayCanplace(const char *name, double origX, double origY, int orient, 
              numY,
              spaceX,
              spaceY);
-  else
+  } else {
     fprintf(lefwFile,
             "   CANPLACE %s %.11g %.11g %s DO %.11g BY %.11g STEP %.11g %.11g ;\n",
             name,
@@ -5301,6 +6214,7 @@ int lefwArrayCanplace(const char *name, double origX, double origY, int orient, 
             numY,
             spaceX,
             spaceY);
+  }
 
   lefwLines++;
   lefwHasArrayReq = 1;
@@ -5311,13 +6225,16 @@ int lefwArrayCanplace(const char *name, double origX, double origY, int orient, 
 
 int lefwArrayCanplaceStr(const char *name, double origX, double origY, const char *orient, double numX, double numY, double spaceX,
                          double spaceY) {
-  if (!lefwFile)
+  if (!lefwFile) {
     return LEFW_UNINITIALIZED;
-  if (lefwState != LEFW_ARRAY_START && lefwState != LEFW_ARRAY)
+  }
+  if (lefwState != LEFW_ARRAY_START && lefwState != LEFW_ARRAY) {
     return LEFW_BAD_ORDER;
-  if (!name || name == 0 || *name == 0)
+  }
+  if (!name || name == 0 || *name == 0) {
     return LEFW_BAD_DATA;
-  if (lefwWriteEncrypt)
+  }
+  if (lefwWriteEncrypt) {
     encPrint(lefwFile,
              (char *)"   CANPLACE %s %.11g %.11g %s DO %.11g BY %.11g STEP %.11g %.11g ;\n",
              name,
@@ -5328,7 +6245,7 @@ int lefwArrayCanplaceStr(const char *name, double origX, double origY, const cha
              numY,
              spaceX,
              spaceY);
-  else
+  } else {
     fprintf(lefwFile,
             "   CANPLACE %s %.11g %.11g %s DO %.11g BY %.11g STEP %.11g %.11g ;\n",
             name,
@@ -5339,6 +6256,7 @@ int lefwArrayCanplaceStr(const char *name, double origX, double origY, const cha
             numY,
             spaceX,
             spaceY);
+  }
 
   lefwLines++;
   lefwHasArrayReq = 1;
@@ -5349,13 +6267,16 @@ int lefwArrayCanplaceStr(const char *name, double origX, double origY, const cha
 
 int lefwArrayCannotoccupy(const char *name, double origX, double origY, int orient, double numX, double numY, double spaceX,
                           double spaceY) {
-  if (!lefwFile)
+  if (!lefwFile) {
     return LEFW_UNINITIALIZED;
-  if (lefwState != LEFW_ARRAY_START && lefwState != LEFW_ARRAY)
+  }
+  if (lefwState != LEFW_ARRAY_START && lefwState != LEFW_ARRAY) {
     return LEFW_BAD_ORDER;
-  if (!name || name == 0 || *name == 0)
+  }
+  if (!name || name == 0 || *name == 0) {
     return LEFW_BAD_DATA;
-  if (lefwWriteEncrypt)
+  }
+  if (lefwWriteEncrypt) {
     encPrint(lefwFile,
              (char *)"   CANNOTOCCUPY %s %.11g %.11g %s DO %.11g BY %.11g STEP %.11g %.11g ;\n",
              name,
@@ -5366,7 +6287,7 @@ int lefwArrayCannotoccupy(const char *name, double origX, double origY, int orie
              numY,
              spaceX,
              spaceY);
-  else
+  } else {
     fprintf(lefwFile,
             "   CANNOTOCCUPY %s %.11g %.11g %s DO %.11g BY %.11g STEP %.11g %.11g ;\n",
             name,
@@ -5377,6 +6298,7 @@ int lefwArrayCannotoccupy(const char *name, double origX, double origY, int orie
             numY,
             spaceX,
             spaceY);
+  }
 
   lefwLines++;
   lefwHasArrayReq = 1;
@@ -5387,13 +6309,16 @@ int lefwArrayCannotoccupy(const char *name, double origX, double origY, int orie
 
 int lefwArrayCannotoccupyStr(const char *name, double origX, double origY, const char *orient, double numX, double numY,
                              double spaceX, double spaceY) {
-  if (!lefwFile)
+  if (!lefwFile) {
     return LEFW_UNINITIALIZED;
-  if (lefwState != LEFW_ARRAY_START && lefwState != LEFW_ARRAY)
+  }
+  if (lefwState != LEFW_ARRAY_START && lefwState != LEFW_ARRAY) {
     return LEFW_BAD_ORDER;
-  if (!name || name == 0 || *name == 0)
+  }
+  if (!name || name == 0 || *name == 0) {
     return LEFW_BAD_DATA;
-  if (lefwWriteEncrypt)
+  }
+  if (lefwWriteEncrypt) {
     encPrint(lefwFile,
              (char *)"   CANNOTOCCUPY %s %.11g %.11g %s DO %.11g BY %.11g STEP %.11g %.11g ;\n",
              name,
@@ -5404,7 +6329,7 @@ int lefwArrayCannotoccupyStr(const char *name, double origX, double origY, const
              numY,
              spaceX,
              spaceY);
-  else
+  } else {
     fprintf(lefwFile,
             "   CANNOTOCCUPY %s %.11g %.11g %s DO %.11g BY %.11g STEP %.11g %.11g ;\n",
             name,
@@ -5415,6 +6340,7 @@ int lefwArrayCannotoccupyStr(const char *name, double origX, double origY, const
             numY,
             spaceX,
             spaceY);
+  }
 
   lefwLines++;
   lefwHasArrayReq = 1;
@@ -5424,20 +6350,26 @@ int lefwArrayCannotoccupyStr(const char *name, double origX, double origY, const
 }
 
 int lefwArrayTracks(const char *xy, double start, int numTracks, double space, const char *layers) {
-  if (!lefwFile)
+  if (!lefwFile) {
     return LEFW_UNINITIALIZED;
-  if (lefwState != LEFW_ARRAY_START && lefwState != LEFW_ARRAY)
+  }
+  if (lefwState != LEFW_ARRAY_START && lefwState != LEFW_ARRAY) {
     return LEFW_BAD_ORDER;
-  if (!xy || xy == 0 || *xy == 0)
+  }
+  if (!xy || xy == 0 || *xy == 0) {
     return LEFW_BAD_DATA;
-  if (strcmp(xy, "X") && strcmp(xy, "Y"))
+  }
+  if (strcmp(xy, "X") && strcmp(xy, "Y")) {
     return LEFW_BAD_DATA;
-  if (!layers || layers == 0 || *layers == 0)
+  }
+  if (!layers || layers == 0 || *layers == 0) {
     return LEFW_BAD_DATA;
-  if (lefwWriteEncrypt)
+  }
+  if (lefwWriteEncrypt) {
     encPrint(lefwFile, (char *)"   TRACKS %s %.11g DO %d STEP %.11g LAYER %s ;\n", xy, start, numTracks, space, layers);
-  else
+  } else {
     fprintf(lefwFile, "   TRACKS %s %.11g DO %d STEP %.11g LAYER %s ;\n", xy, start, numTracks, space, layers);
+  }
 
   lefwLines++;
   lefwHasArrayReq = 1;
@@ -5447,18 +6379,23 @@ int lefwArrayTracks(const char *xy, double start, int numTracks, double space, c
 }
 
 int lefwStartArrayFloorplan(const char *name) {
-  if (!lefwFile)
+  if (!lefwFile) {
     return LEFW_UNINITIALIZED;
-  if (lefwState != LEFW_ARRAY_START && lefwState != LEFW_ARRAY)
+  }
+  if (lefwState != LEFW_ARRAY_START && lefwState != LEFW_ARRAY) {
     return LEFW_BAD_ORDER;
-  if (lefwIsArrayFloorp)
+  }
+  if (lefwIsArrayFloorp) {
     return LEFW_BAD_ORDER;
-  if (!name || name == 0 || *name == 0)
+  }
+  if (!name || name == 0 || *name == 0) {
     return LEFW_BAD_DATA;
-  if (lefwWriteEncrypt)
+  }
+  if (lefwWriteEncrypt) {
     encPrint(lefwFile, (char *)"   FLOORPLAN %s\n", name);
-  else
+  } else {
     fprintf(lefwFile, "   FLOORPLAN %s\n", name);
+  }
 
   lefwLines++;
   lefwHasArrayReq   = 1;
@@ -5468,13 +6405,16 @@ int lefwStartArrayFloorplan(const char *name) {
 
 int lefwArrayFloorplan(const char *site, const char *name, double origX, double origY, int orient, int numX, int numY,
                        double spaceX, double spaceY) {
-  if (!lefwFile)
+  if (!lefwFile) {
     return LEFW_UNINITIALIZED;
-  if (!lefwIsArrayFloorp)
+  }
+  if (!lefwIsArrayFloorp) {
     return LEFW_BAD_ORDER;
-  if (site && strcmp(site, "CANPLACE") && strcmp(site, "CANNOTOCCUPY"))
+  }
+  if (site && strcmp(site, "CANPLACE") && strcmp(site, "CANNOTOCCUPY")) {
     return LEFW_BAD_DATA;
-  if (lefwWriteEncrypt)
+  }
+  if (lefwWriteEncrypt) {
     encPrint(lefwFile,
              (char *)"      %s %s %.11g %.11g %s DO %d BY %d STEP %.11g %.11g ;\n",
              site,
@@ -5486,7 +6426,7 @@ int lefwArrayFloorplan(const char *site, const char *name, double origX, double 
              numY,
              spaceX,
              spaceY);
-  else
+  } else {
     fprintf(lefwFile,
             "      %s %s %.11g %.11g %s DO %d BY %d STEP %.11g %.11g ;\n",
             site,
@@ -5498,19 +6438,23 @@ int lefwArrayFloorplan(const char *site, const char *name, double origX, double 
             numY,
             spaceX,
             spaceY);
+  }
   lefwLines++;
   return LEFW_OK;
 }
 
 int lefwArrayFloorplanStr(const char *site, const char *name, double origX, double origY, const char *orient, int numX, int numY,
                           double spaceX, double spaceY) {
-  if (!lefwFile)
+  if (!lefwFile) {
     return LEFW_UNINITIALIZED;
-  if (!lefwIsArrayFloorp)
+  }
+  if (!lefwIsArrayFloorp) {
     return LEFW_BAD_ORDER;
-  if (site && strcmp(site, "CANPLACE") && strcmp(site, "CANNOTOCCUPY"))
+  }
+  if (site && strcmp(site, "CANPLACE") && strcmp(site, "CANNOTOCCUPY")) {
     return LEFW_BAD_DATA;
-  if (lefwWriteEncrypt)
+  }
+  if (lefwWriteEncrypt) {
     encPrint(lefwFile,
              (char *)"      %s %s %.11g %.11g %s DO %d BY %d STEP %.11g %.11g ;\n",
              site,
@@ -5522,7 +6466,7 @@ int lefwArrayFloorplanStr(const char *site, const char *name, double origX, doub
              numY,
              spaceX,
              spaceY);
-  else
+  } else {
     fprintf(lefwFile,
             "      %s %s %.11g %.11g %s DO %d BY %d STEP %.11g %.11g ;\n",
             site,
@@ -5534,21 +6478,26 @@ int lefwArrayFloorplanStr(const char *site, const char *name, double origX, doub
             numY,
             spaceX,
             spaceY);
+  }
   lefwLines++;
   return LEFW_OK;
 }
 
 int lefwEndArrayFloorplan(const char *name) {
-  if (!lefwFile)
+  if (!lefwFile) {
     return LEFW_UNINITIALIZED;
-  if (!lefwIsArrayFloorp)
+  }
+  if (!lefwIsArrayFloorp) {
     return LEFW_BAD_ORDER;
-  if (!name || name == 0 || *name == 0)
+  }
+  if (!name || name == 0 || *name == 0) {
     return LEFW_BAD_DATA;
-  if (lefwWriteEncrypt)
+  }
+  if (lefwWriteEncrypt) {
     encPrint(lefwFile, (char *)"   END %s\n\n", name);
-  else
+  } else {
     fprintf(lefwFile, "   END %s\n\n", name);
+  }
 
   lefwLines++;
   lefwIsArrayFloorp = 0;
@@ -5556,18 +6505,23 @@ int lefwEndArrayFloorplan(const char *name) {
 }
 
 int lefwArrayGcellgrid(const char *xy, double startXY, int colRows, double spaceXY) {
-  if (!lefwFile)
+  if (!lefwFile) {
     return LEFW_UNINITIALIZED;
-  if (lefwState != LEFW_ARRAY_START && lefwState != LEFW_ARRAY)
+  }
+  if (lefwState != LEFW_ARRAY_START && lefwState != LEFW_ARRAY) {
     return LEFW_BAD_ORDER;
-  if (!xy || xy == 0 || *xy == 0)
+  }
+  if (!xy || xy == 0 || *xy == 0) {
     return LEFW_BAD_DATA;
-  if (strcmp(xy, "X") && strcmp(xy, "Y"))
+  }
+  if (strcmp(xy, "X") && strcmp(xy, "Y")) {
     return LEFW_BAD_DATA;
-  if (lefwWriteEncrypt)
+  }
+  if (lefwWriteEncrypt) {
     encPrint(lefwFile, (char *)"   GCELLGRID %s %.11g DO %d STEP %.11g ;\n", xy, startXY, colRows, spaceXY);
-  else
+  } else {
     fprintf(lefwFile, "   GCELLGRID %s %.11g DO %d STEP %.11g ;\n", xy, startXY, colRows, spaceXY);
+  }
 
   lefwLines++;
   lefwHasArrayReq = 1;
@@ -5577,16 +6531,20 @@ int lefwArrayGcellgrid(const char *xy, double startXY, int colRows, double space
 }
 
 int lefwStartArrayDefaultCap(int size) {
-  if (!lefwFile)
+  if (!lefwFile) {
     return LEFW_UNINITIALIZED;
-  if (lefwState != LEFW_ARRAY_START && lefwState != LEFW_ARRAY)
+  }
+  if (lefwState != LEFW_ARRAY_START && lefwState != LEFW_ARRAY) {
     return LEFW_BAD_ORDER;
-  if (lefwIsArrayDef)
+  }
+  if (lefwIsArrayDef) {
     return LEFW_BAD_ORDER;
-  if (lefwWriteEncrypt)
+  }
+  if (lefwWriteEncrypt) {
     encPrint(lefwFile, (char *)"   DEFAULTCAP %d\n", size);
-  else
+  } else {
     fprintf(lefwFile, "   DEFAULTCAP %d\n", size);
+  }
 
   lefwLines++;
   lefwIsArrayDef = 1;
@@ -5594,27 +6552,33 @@ int lefwStartArrayDefaultCap(int size) {
 }
 
 int lefwArrayDefaultCap(double numPins, double cap) {
-  if (!lefwFile)
+  if (!lefwFile) {
     return LEFW_UNINITIALIZED;
-  if (!lefwIsArrayDef)
+  }
+  if (!lefwIsArrayDef) {
     return LEFW_BAD_ORDER;
-  if (lefwWriteEncrypt)
+  }
+  if (lefwWriteEncrypt) {
     encPrint(lefwFile, (char *)"      MINPINS %.11g WIRECAP %.11g ;\n", numPins, cap);
-  else
+  } else {
     fprintf(lefwFile, "      MINPINS %.11g WIRECAP %.11g ;\n", numPins, cap);
+  }
   lefwLines++;
   return LEFW_OK;
 }
 
 int lefwEndArrayDefaultCap() {
-  if (!lefwFile)
+  if (!lefwFile) {
     return LEFW_UNINITIALIZED;
-  if (!lefwIsArrayDef)
+  }
+  if (!lefwIsArrayDef) {
     return LEFW_BAD_ORDER;
-  if (lefwWriteEncrypt)
+  }
+  if (lefwWriteEncrypt) {
     encPrint(lefwFile, (char *)"   END DEFAULTCAP\n\n");
-  else
+  } else {
     fprintf(lefwFile, "   END DEFAULTCAP\n\n");
+  }
 
   lefwLines++;
   lefwIsArrayDef = 0;
@@ -5622,18 +6586,23 @@ int lefwEndArrayDefaultCap() {
 }
 
 int lefwEndArray(const char *arrayName) {
-  if (!lefwFile)
+  if (!lefwFile) {
     return LEFW_UNINITIALIZED;
-  if (lefwState != LEFW_ARRAY_START && lefwState != LEFW_ARRAY)
+  }
+  if (lefwState != LEFW_ARRAY_START && lefwState != LEFW_ARRAY) {
     return LEFW_BAD_ORDER;
-  if (!arrayName || arrayName == 0 || *arrayName == 0)
+  }
+  if (!arrayName || arrayName == 0 || *arrayName == 0) {
     return LEFW_BAD_DATA;
-  if (lefwIsFloorp || lefwIsArrayDef)
+  }
+  if (lefwIsFloorp || lefwIsArrayDef) {
     return LEFW_BAD_ORDER;
-  if (lefwWriteEncrypt)
+  }
+  if (lefwWriteEncrypt) {
     encPrint(lefwFile, (char *)"END %s\n\n", arrayName);
-  else
+  } else {
     fprintf(lefwFile, "END %s\n\n", arrayName);
+  }
 
   lefwLines++;
   lefwState = LEFW_ARRAY_END;
@@ -5641,16 +6610,20 @@ int lefwEndArray(const char *arrayName) {
 }
 
 int lefwStartMacro(const char *macroName) {
-  if (!lefwFile)
+  if (!lefwFile) {
     return LEFW_UNINITIALIZED;
-  if (lefwState == LEFW_MACRO_START || lefwState == LEFW_MACRO)
+  }
+  if (lefwState == LEFW_MACRO_START || lefwState == LEFW_MACRO) {
     return LEFW_BAD_ORDER;
-  if (!macroName || macroName == 0 || *macroName == 0)
+  }
+  if (!macroName || macroName == 0 || *macroName == 0) {
     return LEFW_BAD_DATA;
-  if (lefwWriteEncrypt)
+  }
+  if (lefwWriteEncrypt) {
     encPrint(lefwFile, (char *)"MACRO %s\n", macroName);
-  else
+  } else {
     fprintf(lefwFile, "MACRO %s\n", macroName);
+  }
 
   lefwLines++;
   lefwState          = LEFW_MACRO_START;
@@ -5662,100 +6635,126 @@ int lefwStartMacro(const char *macroName) {
 }
 
 int lefwMacroClass(const char *value1, const char *value2) {
-  if (!lefwFile)
+  if (!lefwFile) {
     return LEFW_UNINITIALIZED;
-  if (!lefwDidInit)
+  }
+  if (!lefwDidInit) {
     return LEFW_BAD_ORDER;
-  if (lefwState != LEFW_MACRO_START && lefwState != LEFW_MACRO)
+  }
+  if (lefwState != LEFW_MACRO_START && lefwState != LEFW_MACRO) {
     return LEFW_BAD_ORDER;
-  if (!value1 || value1 == 0 || *value1 == 0)
+  }
+  if (!value1 || value1 == 0 || *value1 == 0) {
     return LEFW_BAD_DATA;
+  }
   if (lefwWriteEncrypt) {
-    if (strcmp(value1, "RING") == 0)
+    if (strcmp(value1, "RING") == 0) {
       encPrint(lefwFile, (char *)"   CLASS %s ;\n", value1);
-    else if (strcmp(value1, "BLOCK") == 0) {
+    } else if (strcmp(value1, "BLOCK") == 0) {
       if (value2) {
-        if (strcmp(value2, "BLACKBOX") && strcmp(value2, "SOFT"))
+        if (strcmp(value2, "BLACKBOX") && strcmp(value2, "SOFT")) {
           return LEFW_BAD_DATA;
+        }
         encPrint(lefwFile, (char *)"   CLASS %s %s ;\n", value1, value2);
-      } else
+      } else {
         encPrint(lefwFile, (char *)"   CLASS %s ;\n", value1);
+      }
     } else if (strcmp(value1, "COVER") == 0) {
       if (value2) {
-        if (strcmp(value2, "BUMP"))
+        if (strcmp(value2, "BUMP")) {
           return LEFW_BAD_DATA;
+        }
         encPrint(lefwFile, (char *)"   CLASS %s %s ;\n", value1, value2);
-      } else
+      } else {
         encPrint(lefwFile, (char *)"   CLASS %s ;\n", value1);
+      }
     } else if (strcmp(value1, "PAD") == 0) {
       if (value2) {
         if (strcmp(value2, "INPUT") && strcmp(value2, "OUTPUT") && strcmp(value2, "INOUT") && strcmp(value2, "POWER")
-            && strcmp(value2, "SPACER") && strcmp(value2, "AREAIO"))
+            && strcmp(value2, "SPACER") && strcmp(value2, "AREAIO")) {
           return LEFW_BAD_DATA;
+        }
         encPrint(lefwFile, (char *)"   CLASS %s %s ;\n", value1, value2);
-      } else
+      } else {
         encPrint(lefwFile, (char *)"   CLASS %s ;\n", value1);
+      }
     } else if (strcmp(value1, "CORE") == 0) {
       if (value2) {
         if (strcmp(value2, "FEEDTHRU") && strcmp(value2, "TIEHIGH") && strcmp(value2, "TIELOW") && strcmp(value2, "SPACER")
-            && strcmp(value2, "ANTENNACELL") && strcmp(value2, "WELLTAP"))
+            && strcmp(value2, "ANTENNACELL") && strcmp(value2, "WELLTAP")) {
           return LEFW_BAD_DATA;
+        }
         encPrint(lefwFile, (char *)"   CLASS %s %s ;\n", value1, value2);
-      } else
+      } else {
         encPrint(lefwFile, (char *)"   CLASS %s ;\n", value1);
+      }
     } else if (strcmp(value1, "ENDCAP") == 0) {
       if (value2) {
         if (strcmp(value2, "PRE") && strcmp(value2, "POST") && strcmp(value2, "TOPLEFT") && strcmp(value2, "TOPRIGHT")
-            && strcmp(value2, "BOTTOMLEFT") && strcmp(value2, "BOTTOMRIGHT"))
+            && strcmp(value2, "BOTTOMLEFT") && strcmp(value2, "BOTTOMRIGHT")) {
           return LEFW_BAD_DATA;
+        }
         encPrint(lefwFile, (char *)"   CLASS %s %s ;\n", value1, value2);
-      } else
+      } else {
         return LEFW_BAD_DATA;  // require 2nd value
-    } else
+      }
+    } else {
       return LEFW_BAD_DATA;
+    }
   } else {
-    if (strcmp(value1, "RING") == 0)
+    if (strcmp(value1, "RING") == 0) {
       fprintf(lefwFile, "   CLASS %s ;\n", value1);
-    else if (strcmp(value1, "BLOCK") == 0) {
+    } else if (strcmp(value1, "BLOCK") == 0) {
       if (value2) {
-        if (strcmp(value2, "BLACKBOX") && strcmp(value2, "SOFT"))
+        if (strcmp(value2, "BLACKBOX") && strcmp(value2, "SOFT")) {
           return LEFW_BAD_DATA;
+        }
         fprintf(lefwFile, "   CLASS %s %s ;\n", value1, value2);
-      } else
+      } else {
         fprintf(lefwFile, "   CLASS %s ;\n", value1);
+      }
     } else if (strcmp(value1, "COVER") == 0) {
       if (value2) {
-        if (strcmp(value2, "BUMP"))
+        if (strcmp(value2, "BUMP")) {
           return LEFW_BAD_DATA;
+        }
         fprintf(lefwFile, "   CLASS %s %s ;\n", value1, value2);
-      } else
+      } else {
         fprintf(lefwFile, "   CLASS %s ;\n", value1);
+      }
     } else if (strcmp(value1, "PAD") == 0) {
       if (value2) {
         if (strcmp(value2, "INPUT") && strcmp(value2, "OUTPUT") && strcmp(value2, "INOUT") && strcmp(value2, "POWER")
-            && strcmp(value2, "SPACER") && strcmp(value2, "AREAIO"))
+            && strcmp(value2, "SPACER") && strcmp(value2, "AREAIO")) {
           return LEFW_BAD_DATA;
+        }
         fprintf(lefwFile, "   CLASS %s %s ;\n", value1, value2);
-      } else
+      } else {
         fprintf(lefwFile, "   CLASS %s ;\n", value1);
+      }
     } else if (strcmp(value1, "CORE") == 0) {
       if (value2) {
         if (strcmp(value2, "FEEDTHRU") && strcmp(value2, "TIEHIGH") && strcmp(value2, "TIELOW") && strcmp(value2, "SPACER")
-            && strcmp(value2, "ANTENNACELL") && strcmp(value2, "WELLTAP"))
+            && strcmp(value2, "ANTENNACELL") && strcmp(value2, "WELLTAP")) {
           return LEFW_BAD_DATA;
+        }
         fprintf(lefwFile, "   CLASS %s %s ;\n", value1, value2);
-      } else
+      } else {
         fprintf(lefwFile, "   CLASS %s ;\n", value1);
+      }
     } else if (strcmp(value1, "ENDCAP") == 0) {
       if (value2) {
         if (strcmp(value2, "PRE") && strcmp(value2, "POST") && strcmp(value2, "TOPLEFT") && strcmp(value2, "TOPRIGHT")
-            && strcmp(value2, "BOTTOMLEFT") && strcmp(value2, "BOTTOMRIGHT"))
+            && strcmp(value2, "BOTTOMLEFT") && strcmp(value2, "BOTTOMRIGHT")) {
           return LEFW_BAD_DATA;
+        }
         fprintf(lefwFile, "   CLASS %s %s ;\n", value1, value2);
-      } else
+      } else {
         return LEFW_BAD_DATA;  // require 2nd value
-    } else
+      }
+    } else {
       return LEFW_BAD_DATA;
+    }
   }
 
   lefwLines++;
@@ -5793,23 +6792,30 @@ int lefwMacroFixedMask() {
 
 int lefwMacroSource(const char *value1) {
   lefwObsoleteNum = LEFW_MACRO_SOURCE;
-  if (!lefwFile)
+  if (!lefwFile) {
     return LEFW_UNINITIALIZED;
-  if (!lefwDidInit)
+  }
+  if (!lefwDidInit) {
     return LEFW_BAD_ORDER;
-  if (lefwState != LEFW_MACRO_START && lefwState != LEFW_MACRO)
+  }
+  if (lefwState != LEFW_MACRO_START && lefwState != LEFW_MACRO) {
     return LEFW_BAD_ORDER;
-  if (versionNum >= 5.6)
+  }
+  if (versionNum >= 5.6) {
     return LEFW_OBSOLETE;
-  if (!value1 || value1 == 0 || *value1 == 0)
+  }
+  if (!value1 || value1 == 0 || *value1 == 0) {
     return LEFW_BAD_DATA;
-  if (strcmp(value1, "USER") == 0 || strcmp(value1, "GENERATE") == 0 || strcmp(value1, "BLOCK") == 0)
-    if (lefwWriteEncrypt)
+  }
+  if (strcmp(value1, "USER") == 0 || strcmp(value1, "GENERATE") == 0 || strcmp(value1, "BLOCK") == 0) {
+    if (lefwWriteEncrypt) {
       encPrint(lefwFile, (char *)"   SOURCE %s ;\n", value1);
-    else
+    } else {
       fprintf(lefwFile, "   SOURCE %s ;\n", value1);
-  else
+    }
+  } else {
     return LEFW_BAD_DATA;
+  }
 
   lefwLines++;
   lefwState = LEFW_MACRO;
@@ -5818,20 +6824,25 @@ int lefwMacroSource(const char *value1) {
 
 int lefwMacroForeign(const char *name, double xl, double yl,
                      int orient) {  // optional
-  if (!lefwFile)
+  if (!lefwFile) {
     return LEFW_UNINITIALIZED;
-  if (!lefwDidInit)
+  }
+  if (!lefwDidInit) {
     return LEFW_BAD_ORDER;
-  if (lefwState != LEFW_MACRO_START && lefwState != LEFW_MACRO)
+  }
+  if (lefwState != LEFW_MACRO_START && lefwState != LEFW_MACRO) {
     return LEFW_BAD_ORDER;
-  if (!name || name == 0 || *name == 0)
+  }
+  if (!name || name == 0 || *name == 0) {
     return LEFW_BAD_DATA;
+  }
   if (lefwWriteEncrypt) {
     encPrint(lefwFile, (char *)"   FOREIGN %s ", name);
     if (xl || yl) {
       encPrint(lefwFile, (char *)"%.11g %.11g ", xl, yl);
-      if (orient >= 0 && orient <= 7)
+      if (orient >= 0 && orient <= 7) {
         encPrint(lefwFile, (char *)"%s ", lefwOrient(orient));
+      }
     } else if (orient > 0 && orient <= 7) {  // assume user has 0, 0 pt
       encPrint(lefwFile, (char *)"%.11g %.11g ", xl, yl);
       encPrint(lefwFile, (char *)"%s ", lefwOrient(orient));
@@ -5841,8 +6852,9 @@ int lefwMacroForeign(const char *name, double xl, double yl,
     fprintf(lefwFile, "   FOREIGN %s ", name);
     if (xl || yl) {
       fprintf(lefwFile, "%.11g %.11g ", xl, yl);
-      if (orient >= 0 && orient <= 7)
+      if (orient >= 0 && orient <= 7) {
         fprintf(lefwFile, "%s ", lefwOrient(orient));
+      }
     } else if (orient > 0 && orient <= 7) {  // assume user has 0, 0 pt
       fprintf(lefwFile, "%.11g %.11g ", xl, yl);
       fprintf(lefwFile, "%s ", lefwOrient(orient));
@@ -5857,20 +6869,25 @@ int lefwMacroForeign(const char *name, double xl, double yl,
 
 int lefwMacroForeignStr(const char *name, double xl, double yl,
                         const char *orient) {  // optional
-  if (!lefwFile)
+  if (!lefwFile) {
     return LEFW_UNINITIALIZED;
-  if (!lefwDidInit)
+  }
+  if (!lefwDidInit) {
     return LEFW_BAD_ORDER;
-  if (lefwState != LEFW_MACRO_START && lefwState != LEFW_MACRO)
+  }
+  if (lefwState != LEFW_MACRO_START && lefwState != LEFW_MACRO) {
     return LEFW_BAD_ORDER;
-  if (!name || name == 0 || *name == 0)
+  }
+  if (!name || name == 0 || *name == 0) {
     return LEFW_BAD_DATA;
+  }
   if (lefwWriteEncrypt) {
     encPrint(lefwFile, (char *)"   FOREIGN %s ", name);
     if (xl || yl) {
       encPrint(lefwFile, (char *)"%.11g %.11g ", xl, yl);
-      if (orient && *orient != '\0')
+      if (orient && *orient != '\0') {
         encPrint(lefwFile, (char *)"%s ", orient);
+      }
     } else if (orient && *orient != '\0') {  // assume user has 0, 0 pt
       encPrint(lefwFile, (char *)"%.11g %.11g ", xl, yl);
       encPrint(lefwFile, (char *)"%s ", orient);
@@ -5880,8 +6897,9 @@ int lefwMacroForeignStr(const char *name, double xl, double yl,
     fprintf(lefwFile, "   FOREIGN %s ", name);
     if (xl || yl) {
       fprintf(lefwFile, "%.11g %.11g ", xl, yl);
-      if (orient && *orient != '\0')
+      if (orient && *orient != '\0') {
         fprintf(lefwFile, "%s ", orient);
+      }
     } else if (orient && *orient != '\0') {  // assume user has 0, 0 pt
       fprintf(lefwFile, "%.11g %.11g ", xl, yl);
       fprintf(lefwFile, "%s ", orient);
@@ -5896,16 +6914,20 @@ int lefwMacroForeignStr(const char *name, double xl, double yl,
 
 int lefwMacroOrigin(double xl,
                     double yl) {  // optional
-  if (!lefwFile)
+  if (!lefwFile) {
     return LEFW_UNINITIALIZED;
-  if (!lefwDidInit)
+  }
+  if (!lefwDidInit) {
     return LEFW_BAD_ORDER;
-  if (lefwState != LEFW_MACRO_START && lefwState != LEFW_MACRO)
+  }
+  if (lefwState != LEFW_MACRO_START && lefwState != LEFW_MACRO) {
     return LEFW_BAD_ORDER;
-  if (lefwWriteEncrypt)
+  }
+  if (lefwWriteEncrypt) {
     encPrint(lefwFile, (char *)"   ORIGIN %.11g %.11g ;\n", xl, yl);
-  else
+  } else {
     fprintf(lefwFile, "   ORIGIN %.11g %.11g ;\n", xl, yl);
+  }
 
   lefwLines++;
   lefwState = LEFW_MACRO;
@@ -5913,18 +6935,23 @@ int lefwMacroOrigin(double xl,
 }
 
 int lefwMacroEEQ(const char *macroName) {
-  if (!lefwFile)
+  if (!lefwFile) {
     return LEFW_UNINITIALIZED;
-  if (!lefwDidInit)
+  }
+  if (!lefwDidInit) {
     return LEFW_BAD_ORDER;
-  if (lefwState != LEFW_MACRO_START && lefwState != LEFW_MACRO)
+  }
+  if (lefwState != LEFW_MACRO_START && lefwState != LEFW_MACRO) {
     return LEFW_BAD_ORDER;
-  if (!macroName || macroName == 0 || *macroName == 0)
+  }
+  if (!macroName || macroName == 0 || *macroName == 0) {
     return LEFW_BAD_DATA;
-  if (lefwWriteEncrypt)
+  }
+  if (lefwWriteEncrypt) {
     encPrint(lefwFile, (char *)"   EEQ %s ;\n", macroName);
-  else
+  } else {
     fprintf(lefwFile, "   EEQ %s ;\n", macroName);
+  }
 
   lefwLines++;
   lefwState = LEFW_MACRO;
@@ -5933,20 +6960,26 @@ int lefwMacroEEQ(const char *macroName) {
 
 int lefwMacroLEQ(const char *macroName) {
   lefwObsoleteNum = LEFW_MACRO_LEQ;
-  if (!lefwFile)
+  if (!lefwFile) {
     return LEFW_UNINITIALIZED;
-  if (!lefwDidInit)
+  }
+  if (!lefwDidInit) {
     return LEFW_BAD_ORDER;
-  if (lefwState != LEFW_MACRO_START && lefwState != LEFW_MACRO)
+  }
+  if (lefwState != LEFW_MACRO_START && lefwState != LEFW_MACRO) {
     return LEFW_BAD_ORDER;
-  if (versionNum >= 5.6)
+  }
+  if (versionNum >= 5.6) {
     return LEFW_OBSOLETE;
-  if (!macroName || macroName == 0 || *macroName == 0)
+  }
+  if (!macroName || macroName == 0 || *macroName == 0) {
     return LEFW_BAD_DATA;
-  if (lefwWriteEncrypt)
+  }
+  if (lefwWriteEncrypt) {
     encPrint(lefwFile, (char *)"   LEQ %s ;\n", macroName);
-  else
+  } else {
     fprintf(lefwFile, "   LEQ %s ;\n", macroName);
+  }
 
   lefwLines++;
   lefwState = LEFW_MACRO;
@@ -5954,16 +6987,20 @@ int lefwMacroLEQ(const char *macroName) {
 }
 
 int lefwMacroSize(double width, double height) {
-  if (!lefwFile)
+  if (!lefwFile) {
     return LEFW_UNINITIALIZED;
-  if (!lefwDidInit)
+  }
+  if (!lefwDidInit) {
     return LEFW_BAD_ORDER;
-  if (lefwState != LEFW_MACRO_START && lefwState != LEFW_MACRO)
+  }
+  if (lefwState != LEFW_MACRO_START && lefwState != LEFW_MACRO) {
     return LEFW_BAD_ORDER;
-  if (lefwWriteEncrypt)
+  }
+  if (lefwWriteEncrypt) {
     encPrint(lefwFile, (char *)"   SIZE %.11g BY %.11g ;\n", width, height);
-  else
+  } else {
     fprintf(lefwFile, "   SIZE %.11g BY %.11g ;\n", width, height);
+  }
 
   lefwLines++;
   lefwState = LEFW_MACRO;
@@ -5971,18 +7008,23 @@ int lefwMacroSize(double width, double height) {
 }
 
 int lefwMacroSymmetry(const char *symmetry) {
-  if (!lefwFile)
+  if (!lefwFile) {
     return LEFW_UNINITIALIZED;
-  if (!lefwDidInit)
+  }
+  if (!lefwDidInit) {
     return LEFW_BAD_ORDER;
-  if (lefwState != LEFW_MACRO_START && lefwState != LEFW_MACRO)
+  }
+  if (lefwState != LEFW_MACRO_START && lefwState != LEFW_MACRO) {
     return LEFW_BAD_ORDER;
-  if (!symmetry || symmetry == 0 || *symmetry == 0)
+  }
+  if (!symmetry || symmetry == 0 || *symmetry == 0) {
     return LEFW_BAD_DATA;
-  if (lefwWriteEncrypt)
+  }
+  if (lefwWriteEncrypt) {
     encPrint(lefwFile, (char *)"   SYMMETRY %s ;\n", symmetry);
-  else
+  } else {
     fprintf(lefwFile, "   SYMMETRY %s ;\n", symmetry);
+  }
 
   lefwLines++;
   lefwState = LEFW_MACRO;
@@ -5990,18 +7032,23 @@ int lefwMacroSymmetry(const char *symmetry) {
 }
 
 int lefwMacroSite(const char *siteName) {
-  if (!lefwFile)
+  if (!lefwFile) {
     return LEFW_UNINITIALIZED;
-  if (!lefwDidInit)
+  }
+  if (!lefwDidInit) {
     return LEFW_BAD_ORDER;
-  if (lefwState != LEFW_MACRO_START && lefwState != LEFW_MACRO)
+  }
+  if (lefwState != LEFW_MACRO_START && lefwState != LEFW_MACRO) {
     return LEFW_BAD_ORDER;
-  if (!siteName || siteName == 0 || *siteName == 0)
+  }
+  if (!siteName || siteName == 0 || *siteName == 0) {
     return LEFW_BAD_DATA;
-  if (lefwWriteEncrypt)
+  }
+  if (lefwWriteEncrypt) {
     encPrint(lefwFile, (char *)"   SITE %s ;\n", siteName);
-  else
+  } else {
     fprintf(lefwFile, "   SITE %s ;\n", siteName);
+  }
 
   lefwLines++;
   lefwState = LEFW_MACRO;
@@ -6010,28 +7057,34 @@ int lefwMacroSite(const char *siteName) {
 
 int lefwMacroSitePattern(const char *name, double origX, double origY, int orient, int numX, int numY, double spaceX,
                          double spaceY) {
-  if (!lefwFile)
+  if (!lefwFile) {
     return LEFW_UNINITIALIZED;
-  if (!lefwDidInit)
+  }
+  if (!lefwDidInit) {
     return LEFW_BAD_ORDER;
-  if (lefwState != LEFW_MACRO_START && lefwState != LEFW_MACRO)
+  }
+  if (lefwState != LEFW_MACRO_START && lefwState != LEFW_MACRO) {
     return LEFW_BAD_ORDER;
-  if (!name || name == 0 || *name == 0)
+  }
+  if (!name || name == 0 || *name == 0) {
     return LEFW_BAD_DATA;
+  }
   if (lefwWriteEncrypt) {
     encPrint(lefwFile, (char *)"   SITE %s ", name);
     if (origX || origY || (orient != 1)) {
       encPrint(lefwFile, (char *)"%.11g %.11g %s ", origX, origY, lefwOrient(orient));
-      if (numX || numY || spaceX || spaceY)
+      if (numX || numY || spaceX || spaceY) {
         encPrint(lefwFile, (char *)"DO %d BY %d STEP %.11g %.11g ", numX, numY, spaceX, spaceY);
+      }
     }
     encPrint(lefwFile, (char *)";\n");
   } else {
     fprintf(lefwFile, "   SITE %s ", name);
     if (origX || origY || (orient != 1)) {
       fprintf(lefwFile, "%.11g %.11g %s ", origX, origY, lefwOrient(orient));
-      if (numX || numY || spaceX || spaceY)
+      if (numX || numY || spaceX || spaceY) {
         fprintf(lefwFile, "DO %d BY %d STEP %.11g %.11g ", numX, numY, spaceX, spaceY);
+      }
     }
     fprintf(lefwFile, ";\n");
   }
@@ -6043,28 +7096,34 @@ int lefwMacroSitePattern(const char *name, double origX, double origY, int orien
 
 int lefwMacroSitePatternStr(const char *name, double origX, double origY, const char *orient, int numX, int numY, double spaceX,
                             double spaceY) {
-  if (!lefwFile)
+  if (!lefwFile) {
     return LEFW_UNINITIALIZED;
-  if (!lefwDidInit)
+  }
+  if (!lefwDidInit) {
     return LEFW_BAD_ORDER;
-  if (lefwState != LEFW_MACRO_START && lefwState != LEFW_MACRO)
+  }
+  if (lefwState != LEFW_MACRO_START && lefwState != LEFW_MACRO) {
     return LEFW_BAD_ORDER;
-  if (!name || name == 0 || *name == 0)
+  }
+  if (!name || name == 0 || *name == 0) {
     return LEFW_BAD_DATA;
+  }
   if (lefwWriteEncrypt) {
     encPrint(lefwFile, (char *)"   SITE %s ", name);
     if (origX || origY || orient) {
       encPrint(lefwFile, (char *)"%.11g %.11g %s ", origX, origY, orient);
-      if (numX || numY || spaceX || spaceY)
+      if (numX || numY || spaceX || spaceY) {
         encPrint(lefwFile, (char *)"DO %d BY %d STEP %.11g %.11g ", numX, numY, spaceX, spaceY);
+      }
     }
     encPrint(lefwFile, (char *)";\n");
   } else {
     fprintf(lefwFile, "   SITE %s ", name);
     if (origX || origY || orient) {
       fprintf(lefwFile, "%.11g %.11g %s ", origX, origY, orient);
-      if (numX || numY || spaceX || spaceY)
+      if (numX || numY || spaceX || spaceY) {
         fprintf(lefwFile, "DO %d BY %d STEP %.11g %.11g ", numX, numY, spaceX, spaceY);
+      }
     }
     fprintf(lefwFile, ";\n");
   }
@@ -6076,18 +7135,23 @@ int lefwMacroSitePatternStr(const char *name, double origX, double origY, const 
 
 int lefwMacroPower(double power) {
   lefwObsoleteNum = LEFW_MACRO_POWER;
-  if (!lefwFile)
+  if (!lefwFile) {
     return LEFW_UNINITIALIZED;
-  if (!lefwDidInit)
+  }
+  if (!lefwDidInit) {
     return LEFW_BAD_ORDER;
-  if (lefwState != LEFW_MACRO_START && lefwState != LEFW_MACRO)
+  }
+  if (lefwState != LEFW_MACRO_START && lefwState != LEFW_MACRO) {
     return LEFW_BAD_ORDER;
-  if (versionNum >= 5.4)
+  }
+  if (versionNum >= 5.4) {
     return LEFW_OBSOLETE;
-  if (lefwWriteEncrypt)
+  }
+  if (lefwWriteEncrypt) {
     encPrint(lefwFile, (char *)"   POWER %.11g ;\n", power);
-  else
+  } else {
     fprintf(lefwFile, "   POWER %.11g ;\n", power);
+  }
 
   lefwLines++;
   lefwState = LEFW_MACRO;
@@ -6095,16 +7159,20 @@ int lefwMacroPower(double power) {
 }
 
 int lefwEndMacro(const char *macroName) {
-  if (!lefwFile)
+  if (!lefwFile) {
     return LEFW_UNINITIALIZED;
-  if (lefwState != LEFW_MACRO_START && lefwState != LEFW_MACRO)
+  }
+  if (lefwState != LEFW_MACRO_START && lefwState != LEFW_MACRO) {
     return LEFW_BAD_ORDER;
-  if (!macroName || macroName == 0 || *macroName == 0)
+  }
+  if (!macroName || macroName == 0 || *macroName == 0) {
     return LEFW_BAD_DATA;
-  if (lefwWriteEncrypt)
+  }
+  if (lefwWriteEncrypt) {
     encPrint(lefwFile, (char *)"END %s\n\n", macroName);
-  else
+  } else {
     fprintf(lefwFile, "END %s\n\n", macroName);
+  }
 
   lefwLines++;
   lefwState = LEFW_MACRO_END;
@@ -6112,18 +7180,23 @@ int lefwEndMacro(const char *macroName) {
 }
 
 int lefwStartMacroDensity(const char *layerName) {
-  if (!lefwFile)
+  if (!lefwFile) {
     return LEFW_UNINITIALIZED;
-  if (lefwState != LEFW_MACRO_START && lefwState != LEFW_MACRO)
+  }
+  if (lefwState != LEFW_MACRO_START && lefwState != LEFW_MACRO) {
     return LEFW_BAD_ORDER;
-  if (lefwIsMacroDensity)
+  }
+  if (lefwIsMacroDensity) {
     return LEFW_BAD_ORDER;
-  if (!layerName || layerName == 0 || *layerName == 0)
+  }
+  if (!layerName || layerName == 0 || *layerName == 0) {
     return LEFW_BAD_DATA;
-  if (lefwWriteEncrypt)
+  }
+  if (lefwWriteEncrypt) {
     encPrint(lefwFile, (char *)"   DENSITY %s\n", layerName);
-  else
+  } else {
     fprintf(lefwFile, "   DENSITY %s\n", layerName);
+  }
 
   lefwState          = LEFW_MACRO;
   lefwIsMacroDensity = 1;
@@ -6132,28 +7205,34 @@ int lefwStartMacroDensity(const char *layerName) {
 }
 
 int lefwMacroDensityLayerRect(double x1, double y1, double x2, double y2, double densityValue) {
-  if (!lefwFile)
+  if (!lefwFile) {
     return LEFW_UNINITIALIZED;
-  if (!lefwDidInit)
+  }
+  if (!lefwDidInit) {
     return LEFW_BAD_ORDER;
-  if (!lefwIsMacroDensity)
+  }
+  if (!lefwIsMacroDensity) {
     return LEFW_BAD_ORDER;
-  if (lefwWriteEncrypt)
+  }
+  if (lefwWriteEncrypt) {
     encPrint(lefwFile, (char *)"      RECT %.11g %.11g %.11g %.11g %.11g ;\n", x1, y1, x2, y2, densityValue);
-  else
+  } else {
     fprintf(lefwFile, "      RECT %.11g %.11g %.11g %.11g %.11g ;\n", x1, y1, x2, y2, densityValue);
+  }
   lefwLines++;
   lefwState = LEFW_MACRO;
   return LEFW_OK;
 }
 
 int lefwEndMacroDensity() {
-  if (!lefwIsMacroDensity)
+  if (!lefwIsMacroDensity) {
     return LEFW_BAD_ORDER;
-  if (lefwWriteEncrypt)
+  }
+  if (lefwWriteEncrypt) {
     encPrint(lefwFile, (char *)"   END\n\n");
-  else
+  } else {
     fprintf(lefwFile, "   END\n\n");
+  }
 
   lefwLines++;
   lefwIsMacroDensity = 0;
@@ -6161,18 +7240,23 @@ int lefwEndMacroDensity() {
 }
 
 int lefwStartMacroPin(const char *pinName) {
-  if (!lefwFile)
+  if (!lefwFile) {
     return LEFW_UNINITIALIZED;
-  if (lefwState != LEFW_MACRO_START && lefwState != LEFW_MACRO)
+  }
+  if (lefwState != LEFW_MACRO_START && lefwState != LEFW_MACRO) {
     return LEFW_BAD_ORDER;
-  if (lefwIsMacroPin)
+  }
+  if (lefwIsMacroPin) {
     return LEFW_BAD_ORDER;
-  if (!pinName || pinName == 0 || *pinName == 0)
+  }
+  if (!pinName || pinName == 0 || *pinName == 0) {
     return LEFW_BAD_DATA;
-  if (lefwWriteEncrypt)
+  }
+  if (lefwWriteEncrypt) {
     encPrint(lefwFile, (char *)"   PIN %s\n", pinName);
-  else
+  } else {
     fprintf(lefwFile, "   PIN %s\n", pinName);
+  }
 
   lefwIsMacroPin     = 1;
   lefwIsMacroPinPort = 0;  // port within macropin
@@ -6184,18 +7268,23 @@ int lefwStartMacroPin(const char *pinName) {
 }
 
 int lefwMacroPinTaperRule(const char *ruleName) {  // opitonal
-  if (!lefwFile)
+  if (!lefwFile) {
     return LEFW_UNINITIALIZED;
-  if (!lefwDidInit)
+  }
+  if (!lefwDidInit) {
     return LEFW_BAD_ORDER;
-  if (!lefwIsMacroPin)
+  }
+  if (!lefwIsMacroPin) {
     return LEFW_BAD_ORDER;
-  if (!ruleName || ruleName == 0 || *ruleName == 0)
+  }
+  if (!ruleName || ruleName == 0 || *ruleName == 0) {
     return LEFW_BAD_DATA;
-  if (lefwWriteEncrypt)
+  }
+  if (lefwWriteEncrypt) {
     encPrint(lefwFile, (char *)"      TAPERRULE %s ;\n", ruleName);
-  else
+  } else {
     fprintf(lefwFile, "      TAPERRULE %s ;\n", ruleName);
+  }
 
   lefwLines++;
   lefwState = LEFW_MACRO;
@@ -6205,22 +7294,28 @@ int lefwMacroPinTaperRule(const char *ruleName) {  // opitonal
 int lefwMacroPinForeign(const char *name, double xl, double yl,
                         int orient) {  // optional
   lefwObsoleteNum = LEFW_MACRO_PINFOREIGN;
-  if (!lefwFile)
+  if (!lefwFile) {
     return LEFW_UNINITIALIZED;
-  if (!lefwDidInit)
+  }
+  if (!lefwDidInit) {
     return LEFW_BAD_ORDER;
-  if (!lefwIsMacroPin)
+  }
+  if (!lefwIsMacroPin) {
     return LEFW_BAD_ORDER;
-  if (versionNum >= 5.6)
+  }
+  if (versionNum >= 5.6) {
     return LEFW_OBSOLETE;
-  if (!name || name == 0 || *name == 0)
+  }
+  if (!name || name == 0 || *name == 0) {
     return LEFW_BAD_DATA;
+  }
   if (lefwWriteEncrypt) {
     encPrint(lefwFile, (char *)"      FOREIGN %s ", name);
     if (xl || yl) {
       encPrint(lefwFile, (char *)"STRUCTURE %.11g %.11g ", xl, yl);
-      if (orient >= 0 && orient <= 7)
+      if (orient >= 0 && orient <= 7) {
         encPrint(lefwFile, (char *)"%s ", lefwOrient(orient));
+      }
     } else if (orient > 0 && orient <= 7) {  // assume user has 0 0 for pt
       encPrint(lefwFile, (char *)"STRUCTURE %.11g %.11g ", xl, yl);
       encPrint(lefwFile, (char *)"%s ", lefwOrient(orient));
@@ -6230,8 +7325,9 @@ int lefwMacroPinForeign(const char *name, double xl, double yl,
     fprintf(lefwFile, "      FOREIGN %s ", name);
     if (xl || yl) {
       fprintf(lefwFile, "STRUCTURE %.11g %.11g ", xl, yl);
-      if (orient >= 0 && orient <= 7)
+      if (orient >= 0 && orient <= 7) {
         fprintf(lefwFile, "%s ", lefwOrient(orient));
+      }
     } else if (orient > 0 && orient <= 7) {  // assume user has 0 0 for pt
       fprintf(lefwFile, "STRUCTURE %.11g %.11g ", xl, yl);
       fprintf(lefwFile, "%s ", lefwOrient(orient));
@@ -6248,22 +7344,28 @@ int lefwMacroPinForeignStr(const char *name, double xl,
                            double      yl,        // optional
                            const char *orient) {  // optional
   lefwObsoleteNum = LEFW_MACRO_PINFOREIGN;
-  if (!lefwFile)
+  if (!lefwFile) {
     return LEFW_UNINITIALIZED;
-  if (!lefwDidInit)
+  }
+  if (!lefwDidInit) {
     return LEFW_BAD_ORDER;
-  if (!lefwIsMacroPin)
+  }
+  if (!lefwIsMacroPin) {
     return LEFW_BAD_ORDER;
-  if (versionNum >= 5.6)
+  }
+  if (versionNum >= 5.6) {
     return LEFW_OBSOLETE;
-  if (!name || name == 0 || *name == 0)
+  }
+  if (!name || name == 0 || *name == 0) {
     return LEFW_BAD_DATA;
+  }
   if (lefwWriteEncrypt) {
     encPrint(lefwFile, (char *)"      FOREIGN %s ", name);
     if (xl || yl) {
       encPrint(lefwFile, (char *)"STRUCTURE %.11g %.11g ", xl, yl);
-      if (orient && *orient != '\0')
+      if (orient && *orient != '\0') {
         encPrint(lefwFile, (char *)"%s ", orient);
+      }
     } else if (orient && *orient != '\0') {  // assume user has 0 0 for pt
       encPrint(lefwFile, (char *)"STRUCTURE %.11g %.11g ", xl, yl);
       encPrint(lefwFile, (char *)"%s ", orient);
@@ -6273,8 +7375,9 @@ int lefwMacroPinForeignStr(const char *name, double xl,
     fprintf(lefwFile, "      FOREIGN %s ", name);
     if (xl || yl) {
       fprintf(lefwFile, "STRUCTURE %.11g %.11g ", xl, yl);
-      if (orient && *orient != '\0')
+      if (orient && *orient != '\0') {
         fprintf(lefwFile, "%s ", orient);
+      }
     } else if (orient && *orient != '\0') {  // assume user has 0 0 for pt
       fprintf(lefwFile, "STRUCTURE %.11g %.11g ", xl, yl);
       fprintf(lefwFile, "%s ", orient);
@@ -6289,20 +7392,26 @@ int lefwMacroPinForeignStr(const char *name, double xl,
 
 int lefwMacroPinLEQ(const char *pinName) {
   lefwObsoleteNum = LEFW_MACRO_PINLEQ;
-  if (!lefwFile)
+  if (!lefwFile) {
     return LEFW_UNINITIALIZED;
-  if (!lefwDidInit)
+  }
+  if (!lefwDidInit) {
     return LEFW_BAD_ORDER;
-  if (!lefwIsMacroPin)
+  }
+  if (!lefwIsMacroPin) {
     return LEFW_BAD_ORDER;
-  if (versionNum >= 5.6)
+  }
+  if (versionNum >= 5.6) {
     return LEFW_OBSOLETE;
-  if (!pinName || pinName == 0 || *pinName == 0)
+  }
+  if (!pinName || pinName == 0 || *pinName == 0) {
     return LEFW_BAD_DATA;
-  if (lefwWriteEncrypt)
+  }
+  if (lefwWriteEncrypt) {
     encPrint(lefwFile, (char *)"      LEQ %s ;\n", pinName);
-  else
+  } else {
     fprintf(lefwFile, "      LEQ %s ;\n", pinName);
+  }
 
   lefwLines++;
   lefwState = LEFW_MACRO;
@@ -6310,18 +7419,23 @@ int lefwMacroPinLEQ(const char *pinName) {
 }
 
 int lefwMacroPinDirection(const char *direction) {
-  if (!lefwFile)
+  if (!lefwFile) {
     return LEFW_UNINITIALIZED;
-  if (!lefwDidInit)
+  }
+  if (!lefwDidInit) {
     return LEFW_BAD_ORDER;
-  if (!lefwIsMacroPin)
+  }
+  if (!lefwIsMacroPin) {
     return LEFW_BAD_ORDER;
-  if (!direction || direction == 0 || *direction == 0)
+  }
+  if (!direction || direction == 0 || *direction == 0) {
     return LEFW_BAD_DATA;
-  if (lefwWriteEncrypt)
+  }
+  if (lefwWriteEncrypt) {
     encPrint(lefwFile, (char *)"      DIRECTION %s ;\n", direction);
-  else
+  } else {
     fprintf(lefwFile, "      DIRECTION %s ;\n", direction);
+  }
 
   lefwLines++;
   lefwState = LEFW_MACRO;
@@ -6329,18 +7443,23 @@ int lefwMacroPinDirection(const char *direction) {
 }
 
 int lefwMacroPinUse(const char *use) {
-  if (!lefwFile)
+  if (!lefwFile) {
     return LEFW_UNINITIALIZED;
-  if (!lefwDidInit)
+  }
+  if (!lefwDidInit) {
     return LEFW_BAD_ORDER;
-  if (!lefwIsMacroPin)
+  }
+  if (!lefwIsMacroPin) {
     return LEFW_BAD_ORDER;
-  if (!use || use == 0 || *use == 0)
+  }
+  if (!use || use == 0 || *use == 0) {
     return LEFW_BAD_DATA;
-  if (lefwWriteEncrypt)
+  }
+  if (lefwWriteEncrypt) {
     encPrint(lefwFile, (char *)"      USE %s ;\n", use);
-  else
+  } else {
     fprintf(lefwFile, "      USE %s ;\n", use);
+  }
 
   lefwLines++;
   lefwState = LEFW_MACRO;
@@ -6348,22 +7467,27 @@ int lefwMacroPinUse(const char *use) {
 }
 
 int lefwMacroPinShape(const char *name) {
-  if (!lefwFile)
+  if (!lefwFile) {
     return LEFW_UNINITIALIZED;
-  if (!lefwDidInit)
+  }
+  if (!lefwDidInit) {
     return LEFW_BAD_ORDER;
-  if (!lefwIsMacroPin)
+  }
+  if (!lefwIsMacroPin) {
     return LEFW_BAD_ORDER;
+  }
   if (lefwWriteEncrypt) {
-    if (!name || name == 0 || *name == 0)
+    if (!name || name == 0 || *name == 0) {
       encPrint(lefwFile, (char *)"      SHAPE ;\n");
-    else
+    } else {
       encPrint(lefwFile, (char *)"      SHAPE %s ;\n", name);
+    }
   } else {
-    if (!name || name == 0 || *name == 0)
+    if (!name || name == 0 || *name == 0) {
       fprintf(lefwFile, "      SHAPE ;\n");
-    else
+    } else {
       fprintf(lefwFile, "      SHAPE %s ;\n", name);
+    }
   }
 
   lefwLines++;
@@ -6372,18 +7496,23 @@ int lefwMacroPinShape(const char *name) {
 }
 
 int lefwMacroPinMustjoin(const char *name) {
-  if (!lefwFile)
+  if (!lefwFile) {
     return LEFW_UNINITIALIZED;
-  if (!lefwDidInit)
+  }
+  if (!lefwDidInit) {
     return LEFW_BAD_ORDER;
-  if (!lefwIsMacroPin)
+  }
+  if (!lefwIsMacroPin) {
     return LEFW_BAD_ORDER;
-  if (!name || name == 0 || *name == 0)
+  }
+  if (!name || name == 0 || *name == 0) {
     return LEFW_BAD_DATA;
-  if (lefwWriteEncrypt)
+  }
+  if (lefwWriteEncrypt) {
     encPrint(lefwFile, (char *)"      MUSTJOIN %s ;\n", name);
-  else
+  } else {
     fprintf(lefwFile, "      MUSTJOIN %s ;\n", name);
+  }
 
   lefwLines++;
   lefwState = LEFW_MACRO;
@@ -6391,18 +7520,23 @@ int lefwMacroPinMustjoin(const char *name) {
 }
 
 int lefwMacroPinNetExpr(const char *name) {
-  if (!lefwFile)
+  if (!lefwFile) {
     return LEFW_UNINITIALIZED;
-  if (!lefwDidInit)
+  }
+  if (!lefwDidInit) {
     return LEFW_BAD_ORDER;
-  if (!lefwIsMacroPin)
+  }
+  if (!lefwIsMacroPin) {
     return LEFW_BAD_ORDER;
-  if (!name || name == 0 || *name == 0)
+  }
+  if (!name || name == 0 || *name == 0) {
     return LEFW_BAD_DATA;
-  if (lefwWriteEncrypt)
+  }
+  if (lefwWriteEncrypt) {
     encPrint(lefwFile, (char *)"      NETEXPR \"%s\" ;\n", name);
-  else
+  } else {
     fprintf(lefwFile, "      NETEXPR \"%s\" ;\n", name);
+  }
 
   lefwLines++;
   lefwState = LEFW_MACRO;
@@ -6410,18 +7544,23 @@ int lefwMacroPinNetExpr(const char *name) {
 }
 
 int lefwMacroPinSupplySensitivity(const char *pinName) {
-  if (!lefwFile)
+  if (!lefwFile) {
     return LEFW_UNINITIALIZED;
-  if (!lefwDidInit)
+  }
+  if (!lefwDidInit) {
     return LEFW_BAD_ORDER;
-  if (!lefwIsMacroPin)
+  }
+  if (!lefwIsMacroPin) {
     return LEFW_BAD_ORDER;
-  if (!pinName || pinName == 0 || *pinName == 0)
+  }
+  if (!pinName || pinName == 0 || *pinName == 0) {
     return LEFW_BAD_DATA;
-  if (lefwWriteEncrypt)
+  }
+  if (lefwWriteEncrypt) {
     encPrint(lefwFile, (char *)"      SUPPLYSENSITIVITY %s ;\n", pinName);
-  else
+  } else {
     fprintf(lefwFile, "      SUPPLYSENSITIVITY %s ;\n", pinName);
+  }
 
   lefwLines++;
   lefwState = LEFW_MACRO;
@@ -6429,18 +7568,23 @@ int lefwMacroPinSupplySensitivity(const char *pinName) {
 }
 
 int lefwMacroPinGroundSensitivity(const char *pinName) {
-  if (!lefwFile)
+  if (!lefwFile) {
     return LEFW_UNINITIALIZED;
-  if (!lefwDidInit)
+  }
+  if (!lefwDidInit) {
     return LEFW_BAD_ORDER;
-  if (!lefwIsMacroPin)
+  }
+  if (!lefwIsMacroPin) {
     return LEFW_BAD_ORDER;
-  if (!pinName || pinName == 0 || *pinName == 0)
+  }
+  if (!pinName || pinName == 0 || *pinName == 0) {
     return LEFW_BAD_DATA;
-  if (lefwWriteEncrypt)
+  }
+  if (lefwWriteEncrypt) {
     encPrint(lefwFile, (char *)"      GROUNDSENSITIVITY %s ;\n", pinName);
-  else
+  } else {
     fprintf(lefwFile, "      GROUNDSENSITIVITY %s ;\n", pinName);
+  }
 
   lefwLines++;
   lefwState = LEFW_MACRO;
@@ -6449,18 +7593,23 @@ int lefwMacroPinGroundSensitivity(const char *pinName) {
 
 int lefwMacroPinOutputnoisemargin(int high, int low) {
   lefwObsoleteNum = LEFW_MACRO_OUTPUTNOISEMARGIN;
-  if (!lefwFile)
+  if (!lefwFile) {
     return LEFW_UNINITIALIZED;
-  if (!lefwDidInit)
+  }
+  if (!lefwDidInit) {
     return LEFW_BAD_ORDER;
-  if (!lefwIsMacroPin)
+  }
+  if (!lefwIsMacroPin) {
     return LEFW_BAD_ORDER;
-  if (versionNum >= 5.4)
+  }
+  if (versionNum >= 5.4) {
     return LEFW_OBSOLETE;
-  if (lefwWriteEncrypt)
+  }
+  if (lefwWriteEncrypt) {
     encPrint(lefwFile, (char *)"      OUTPUTNOISEMARGIN %d %d ;\n", high, low);
-  else
+  } else {
     fprintf(lefwFile, "      OUTPUTNOISEMARGIN %d %d ;\n", high, low);
+  }
 
   lefwLines++;
   lefwState = LEFW_MACRO;
@@ -6469,18 +7618,23 @@ int lefwMacroPinOutputnoisemargin(int high, int low) {
 
 int lefwMacroPinOutputresistance(int high, int low) {
   lefwObsoleteNum = LEFW_MACRO_OUTPUTRESISTANCE;
-  if (!lefwFile)
+  if (!lefwFile) {
     return LEFW_UNINITIALIZED;
-  if (!lefwDidInit)
+  }
+  if (!lefwDidInit) {
     return LEFW_BAD_ORDER;
-  if (!lefwIsMacroPin)
+  }
+  if (!lefwIsMacroPin) {
     return LEFW_BAD_ORDER;
-  if (versionNum >= 5.4)
+  }
+  if (versionNum >= 5.4) {
     return LEFW_OBSOLETE;
-  if (lefwWriteEncrypt)
+  }
+  if (lefwWriteEncrypt) {
     encPrint(lefwFile, (char *)"      OUTPUTRESISTANCE %d %d ;\n", high, low);
-  else
+  } else {
     fprintf(lefwFile, "      OUTPUTRESISTANCE %d %d ;\n", high, low);
+  }
 
   lefwLines++;
   lefwState = LEFW_MACRO;
@@ -6489,18 +7643,23 @@ int lefwMacroPinOutputresistance(int high, int low) {
 
 int lefwMacroPinInputnoisemargin(int high, int low) {
   lefwObsoleteNum = LEFW_MACRO_INPUTNOISEMARGIN;
-  if (!lefwFile)
+  if (!lefwFile) {
     return LEFW_UNINITIALIZED;
-  if (!lefwDidInit)
+  }
+  if (!lefwDidInit) {
     return LEFW_BAD_ORDER;
-  if (!lefwIsMacroPin)
+  }
+  if (!lefwIsMacroPin) {
     return LEFW_BAD_ORDER;
-  if (versionNum >= 5.4)
+  }
+  if (versionNum >= 5.4) {
     return LEFW_OBSOLETE;
-  if (lefwWriteEncrypt)
+  }
+  if (lefwWriteEncrypt) {
     encPrint(lefwFile, (char *)"      INPUTNOISEMARGIN %d %d ;\n", high, low);
-  else
+  } else {
     fprintf(lefwFile, "      INPUTNOISEMARGIN %d %d ;\n", high, low);
+  }
 
   lefwLines++;
   lefwState = LEFW_MACRO;
@@ -6509,18 +7668,23 @@ int lefwMacroPinInputnoisemargin(int high, int low) {
 
 int lefwMacroPinPower(double power) {
   lefwObsoleteNum = LEFW_MACRO_POWER;
-  if (!lefwFile)
+  if (!lefwFile) {
     return LEFW_UNINITIALIZED;
-  if (!lefwDidInit)
+  }
+  if (!lefwDidInit) {
     return LEFW_BAD_ORDER;
-  if (!lefwIsMacroPin)
+  }
+  if (!lefwIsMacroPin) {
     return LEFW_BAD_ORDER;
-  if (versionNum >= 5.4)
+  }
+  if (versionNum >= 5.4) {
     return LEFW_OBSOLETE;
-  if (lefwWriteEncrypt)
+  }
+  if (lefwWriteEncrypt) {
     encPrint(lefwFile, (char *)"      POWER %.11g ;\n", power);
-  else
+  } else {
     fprintf(lefwFile, "      POWER %.11g ;\n", power);
+  }
 
   lefwLines++;
   lefwState = LEFW_MACRO;
@@ -6529,18 +7693,23 @@ int lefwMacroPinPower(double power) {
 
 int lefwMacroPinLeakage(double leakage) {
   lefwObsoleteNum = LEFW_MACRO_LEAKAGE;
-  if (!lefwFile)
+  if (!lefwFile) {
     return LEFW_UNINITIALIZED;
-  if (!lefwDidInit)
+  }
+  if (!lefwDidInit) {
     return LEFW_BAD_ORDER;
-  if (!lefwIsMacroPin)
+  }
+  if (!lefwIsMacroPin) {
     return LEFW_BAD_ORDER;
-  if (versionNum >= 5.4)
+  }
+  if (versionNum >= 5.4) {
     return LEFW_OBSOLETE;
-  if (lefwWriteEncrypt)
+  }
+  if (lefwWriteEncrypt) {
     encPrint(lefwFile, (char *)"      LEAKAGE %.11g ;\n", leakage);
-  else
+  } else {
     fprintf(lefwFile, "      LEAKAGE %.11g ;\n", leakage);
+  }
 
   lefwLines++;
   lefwState = LEFW_MACRO;
@@ -6549,18 +7718,23 @@ int lefwMacroPinLeakage(double leakage) {
 
 int lefwMacroPinCapacitance(double capacitance) {
   lefwObsoleteNum = LEFW_MACRO_CAPACITANCE;
-  if (!lefwFile)
+  if (!lefwFile) {
     return LEFW_UNINITIALIZED;
-  if (!lefwDidInit)
+  }
+  if (!lefwDidInit) {
     return LEFW_BAD_ORDER;
-  if (!lefwIsMacroPin)
+  }
+  if (!lefwIsMacroPin) {
     return LEFW_BAD_ORDER;
-  if (versionNum >= 5.4)
+  }
+  if (versionNum >= 5.4) {
     return LEFW_OBSOLETE;
-  if (lefwWriteEncrypt)
+  }
+  if (lefwWriteEncrypt) {
     encPrint(lefwFile, (char *)"      CAPACITANCE %.11g ;\n", capacitance);
-  else
+  } else {
     fprintf(lefwFile, "      CAPACITANCE %.11g ;\n", capacitance);
+  }
 
   lefwLines++;
   lefwState = LEFW_MACRO;
@@ -6569,18 +7743,23 @@ int lefwMacroPinCapacitance(double capacitance) {
 
 int lefwMacroPinResistance(double resistance) {
   lefwObsoleteNum = LEFW_MACRO_RESISTANCE;
-  if (!lefwFile)
+  if (!lefwFile) {
     return LEFW_UNINITIALIZED;
-  if (!lefwDidInit)
+  }
+  if (!lefwDidInit) {
     return LEFW_BAD_ORDER;
-  if (!lefwIsMacroPin)
+  }
+  if (!lefwIsMacroPin) {
     return LEFW_BAD_ORDER;
-  if (versionNum >= 5.4)
+  }
+  if (versionNum >= 5.4) {
     return LEFW_OBSOLETE;
-  if (lefwWriteEncrypt)
+  }
+  if (lefwWriteEncrypt) {
     encPrint(lefwFile, (char *)"      RESISTANCE %.11g ;\n", resistance);
-  else
+  } else {
     fprintf(lefwFile, "      RESISTANCE %.11g ;\n", resistance);
+  }
 
   lefwLines++;
   lefwState = LEFW_MACRO;
@@ -6589,18 +7768,23 @@ int lefwMacroPinResistance(double resistance) {
 
 int lefwMacroPinPulldownres(double resistance) {
   lefwObsoleteNum = LEFW_MACRO_PULLDOWNRES;
-  if (!lefwFile)
+  if (!lefwFile) {
     return LEFW_UNINITIALIZED;
-  if (!lefwDidInit)
+  }
+  if (!lefwDidInit) {
     return LEFW_BAD_ORDER;
-  if (!lefwIsMacroPin)
+  }
+  if (!lefwIsMacroPin) {
     return LEFW_BAD_ORDER;
-  if (versionNum >= 5.4)
+  }
+  if (versionNum >= 5.4) {
     return LEFW_OBSOLETE;
-  if (lefwWriteEncrypt)
+  }
+  if (lefwWriteEncrypt) {
     encPrint(lefwFile, (char *)"      PULLDOWNRES %.11g ;\n", resistance);
-  else
+  } else {
     fprintf(lefwFile, "      PULLDOWNRES %.11g ;\n", resistance);
+  }
 
   lefwLines++;
   lefwState = LEFW_MACRO;
@@ -6609,18 +7793,23 @@ int lefwMacroPinPulldownres(double resistance) {
 
 int lefwMacroPinTieoffr(double resistance) {
   lefwObsoleteNum = LEFW_MACRO_TIEOFFR;
-  if (!lefwFile)
+  if (!lefwFile) {
     return LEFW_UNINITIALIZED;
-  if (!lefwDidInit)
+  }
+  if (!lefwDidInit) {
     return LEFW_BAD_ORDER;
-  if (!lefwIsMacroPin)
+  }
+  if (!lefwIsMacroPin) {
     return LEFW_BAD_ORDER;
-  if (versionNum >= 5.4)
+  }
+  if (versionNum >= 5.4) {
     return LEFW_OBSOLETE;
-  if (lefwWriteEncrypt)
+  }
+  if (lefwWriteEncrypt) {
     encPrint(lefwFile, (char *)"      TIEOFFR %.11g ;\n", resistance);
-  else
+  } else {
     fprintf(lefwFile, "      TIEOFFR %.11g ;\n", resistance);
+  }
 
   lefwLines++;
   lefwState = LEFW_MACRO;
@@ -6629,18 +7818,23 @@ int lefwMacroPinTieoffr(double resistance) {
 
 int lefwMacroPinVHI(double voltage) {
   lefwObsoleteNum = LEFW_MACRO_VHI;
-  if (!lefwFile)
+  if (!lefwFile) {
     return LEFW_UNINITIALIZED;
-  if (!lefwDidInit)
+  }
+  if (!lefwDidInit) {
     return LEFW_BAD_ORDER;
-  if (!lefwIsMacroPin)
+  }
+  if (!lefwIsMacroPin) {
     return LEFW_BAD_ORDER;
-  if (versionNum >= 5.4)
+  }
+  if (versionNum >= 5.4) {
     return LEFW_OBSOLETE;
-  if (lefwWriteEncrypt)
+  }
+  if (lefwWriteEncrypt) {
     encPrint(lefwFile, (char *)"      VHI %.11g ;\n", voltage);
-  else
+  } else {
     fprintf(lefwFile, "      VHI %.11g ;\n", voltage);
+  }
 
   lefwLines++;
   lefwState = LEFW_MACRO;
@@ -6649,18 +7843,23 @@ int lefwMacroPinVHI(double voltage) {
 
 int lefwMacroPinVLO(double voltage) {
   lefwObsoleteNum = LEFW_MACRO_VLO;
-  if (!lefwFile)
+  if (!lefwFile) {
     return LEFW_UNINITIALIZED;
-  if (!lefwDidInit)
+  }
+  if (!lefwDidInit) {
     return LEFW_BAD_ORDER;
-  if (!lefwIsMacroPin)
+  }
+  if (!lefwIsMacroPin) {
     return LEFW_BAD_ORDER;
-  if (versionNum >= 5.4)
+  }
+  if (versionNum >= 5.4) {
     return LEFW_OBSOLETE;
-  if (lefwWriteEncrypt)
+  }
+  if (lefwWriteEncrypt) {
     encPrint(lefwFile, (char *)"      VLO %.11g ;\n", voltage);
-  else
+  } else {
     fprintf(lefwFile, "      VLO %.11g ;\n", voltage);
+  }
 
   lefwLines++;
   lefwState = LEFW_MACRO;
@@ -6669,18 +7868,23 @@ int lefwMacroPinVLO(double voltage) {
 
 int lefwMacroPinRisevoltagethreshold(double voltage) {
   lefwObsoleteNum = LEFW_MACRO_RISEVOLTAGETHRESHOLD;
-  if (!lefwFile)
+  if (!lefwFile) {
     return LEFW_UNINITIALIZED;
-  if (!lefwDidInit)
+  }
+  if (!lefwDidInit) {
     return LEFW_BAD_ORDER;
-  if (!lefwIsMacroPin)
+  }
+  if (!lefwIsMacroPin) {
     return LEFW_BAD_ORDER;
-  if (versionNum >= 5.4)
+  }
+  if (versionNum >= 5.4) {
     return LEFW_OBSOLETE;
-  if (lefwWriteEncrypt)
+  }
+  if (lefwWriteEncrypt) {
     encPrint(lefwFile, (char *)"      RISEVOLTAGETHRESHOLD %.11g ;\n", voltage);
-  else
+  } else {
     fprintf(lefwFile, "      RISEVOLTAGETHRESHOLD %.11g ;\n", voltage);
+  }
 
   lefwLines++;
   lefwState = LEFW_MACRO;
@@ -6689,18 +7893,23 @@ int lefwMacroPinRisevoltagethreshold(double voltage) {
 
 int lefwMacroPinFallvoltagethreshold(double voltage) {
   lefwObsoleteNum = LEFW_MACRO_FALLVOLTAGETHRESHOLD;
-  if (!lefwFile)
+  if (!lefwFile) {
     return LEFW_UNINITIALIZED;
-  if (!lefwDidInit)
+  }
+  if (!lefwDidInit) {
     return LEFW_BAD_ORDER;
-  if (!lefwIsMacroPin)
+  }
+  if (!lefwIsMacroPin) {
     return LEFW_BAD_ORDER;
-  if (versionNum >= 5.4)
+  }
+  if (versionNum >= 5.4) {
     return LEFW_OBSOLETE;
-  if (lefwWriteEncrypt)
+  }
+  if (lefwWriteEncrypt) {
     encPrint(lefwFile, (char *)"      FALLVOLTAGETHRESHOLD %.11g ;\n", voltage);
-  else
+  } else {
     fprintf(lefwFile, "      FALLVOLTAGETHRESHOLD %.11g ;\n", voltage);
+  }
 
   lefwLines++;
   lefwState = LEFW_MACRO;
@@ -6709,18 +7918,23 @@ int lefwMacroPinFallvoltagethreshold(double voltage) {
 
 int lefwMacroPinRisethresh(double capacitance) {
   lefwObsoleteNum = LEFW_MACRO_RISETHRESH;
-  if (!lefwFile)
+  if (!lefwFile) {
     return LEFW_UNINITIALIZED;
-  if (!lefwDidInit)
+  }
+  if (!lefwDidInit) {
     return LEFW_BAD_ORDER;
-  if (!lefwIsMacroPin)
+  }
+  if (!lefwIsMacroPin) {
     return LEFW_BAD_ORDER;
-  if (versionNum >= 5.4)
+  }
+  if (versionNum >= 5.4) {
     return LEFW_OBSOLETE;
-  if (lefwWriteEncrypt)
+  }
+  if (lefwWriteEncrypt) {
     encPrint(lefwFile, (char *)"      RISETHRESH %.11g ;\n", capacitance);
-  else
+  } else {
     fprintf(lefwFile, "      RISETHRESH %.11g ;\n", capacitance);
+  }
 
   lefwLines++;
   lefwState = LEFW_MACRO;
@@ -6729,18 +7943,23 @@ int lefwMacroPinRisethresh(double capacitance) {
 
 int lefwMacroPinFallthresh(double capacitance) {
   lefwObsoleteNum = LEFW_MACRO_FALLTHRESH;
-  if (!lefwFile)
+  if (!lefwFile) {
     return LEFW_UNINITIALIZED;
-  if (!lefwDidInit)
+  }
+  if (!lefwDidInit) {
     return LEFW_BAD_ORDER;
-  if (!lefwIsMacroPin)
+  }
+  if (!lefwIsMacroPin) {
     return LEFW_BAD_ORDER;
-  if (versionNum >= 5.4)
+  }
+  if (versionNum >= 5.4) {
     return LEFW_OBSOLETE;
-  if (lefwWriteEncrypt)
+  }
+  if (lefwWriteEncrypt) {
     encPrint(lefwFile, (char *)"      FALLTHRESH %.11g ;\n", capacitance);
-  else
+  } else {
     fprintf(lefwFile, "      FALLTHRESH %.11g ;\n", capacitance);
+  }
 
   lefwLines++;
   lefwState = LEFW_MACRO;
@@ -6749,18 +7968,23 @@ int lefwMacroPinFallthresh(double capacitance) {
 
 int lefwMacroPinRisesatcur(double current) {
   lefwObsoleteNum = LEFW_MACRO_RISESATCUR;
-  if (!lefwFile)
+  if (!lefwFile) {
     return LEFW_UNINITIALIZED;
-  if (!lefwDidInit)
+  }
+  if (!lefwDidInit) {
     return LEFW_BAD_ORDER;
-  if (!lefwIsMacroPin)
+  }
+  if (!lefwIsMacroPin) {
     return LEFW_BAD_ORDER;
-  if (versionNum >= 5.4)
+  }
+  if (versionNum >= 5.4) {
     return LEFW_OBSOLETE;
-  if (lefwWriteEncrypt)
+  }
+  if (lefwWriteEncrypt) {
     encPrint(lefwFile, (char *)"      RISESATCUR %.11g ;\n", current);
-  else
+  } else {
     fprintf(lefwFile, "      RISESATCUR %.11g ;\n", current);
+  }
 
   lefwLines++;
   lefwState = LEFW_MACRO;
@@ -6769,18 +7993,23 @@ int lefwMacroPinRisesatcur(double current) {
 
 int lefwMacroPinFallsatcur(double current) {
   lefwObsoleteNum = LEFW_MACRO_FALLSATCUR;
-  if (!lefwFile)
+  if (!lefwFile) {
     return LEFW_UNINITIALIZED;
-  if (!lefwDidInit)
+  }
+  if (!lefwDidInit) {
     return LEFW_BAD_ORDER;
-  if (!lefwIsMacroPin)
+  }
+  if (!lefwIsMacroPin) {
     return LEFW_BAD_ORDER;
-  if (versionNum >= 5.4)
+  }
+  if (versionNum >= 5.4) {
     return LEFW_OBSOLETE;
-  if (lefwWriteEncrypt)
+  }
+  if (lefwWriteEncrypt) {
     encPrint(lefwFile, (char *)"      FALLSATCUR %.11g ;\n", current);
-  else
+  } else {
     fprintf(lefwFile, "      FALLSATCUR %.11g ;\n", current);
+  }
 
   lefwLines++;
   lefwState = LEFW_MACRO;
@@ -6789,22 +8018,29 @@ int lefwMacroPinFallsatcur(double current) {
 
 int lefwMacroPinCurrentsource(const char *name) {
   lefwObsoleteNum = LEFW_MACRO_FALLCURRENTSOURCE;
-  if (!lefwFile)
+  if (!lefwFile) {
     return LEFW_UNINITIALIZED;
-  if (!lefwDidInit)
+  }
+  if (!lefwDidInit) {
     return LEFW_BAD_ORDER;
-  if (!lefwIsMacroPin)
+  }
+  if (!lefwIsMacroPin) {
     return LEFW_BAD_ORDER;
-  if (!name || name == 0 || *name == 0)
+  }
+  if (!name || name == 0 || *name == 0) {
     return LEFW_BAD_DATA;
-  if (versionNum >= 5.4)
+  }
+  if (versionNum >= 5.4) {
     return LEFW_OBSOLETE;
-  if (strcmp(name, "ACTIVE") && strcmp(name, "RESISTIVE"))
+  }
+  if (strcmp(name, "ACTIVE") && strcmp(name, "RESISTIVE")) {
     return LEFW_BAD_DATA;
-  if (lefwWriteEncrypt)
+  }
+  if (lefwWriteEncrypt) {
     encPrint(lefwFile, (char *)"      CURRENTSOURCE %s ;\n", name);
-  else
+  } else {
     fprintf(lefwFile, "      CURRENTSOURCE %s ;\n", name);
+  }
 
   lefwLines++;
   lefwState = LEFW_MACRO;
@@ -6813,22 +8049,29 @@ int lefwMacroPinCurrentsource(const char *name) {
 
 int lefwMacroPinIV_Tables(const char *lowName, const char *highName) {
   lefwObsoleteNum = LEFW_MACRO_IV_TABLES;
-  if (!lefwFile)
+  if (!lefwFile) {
     return LEFW_UNINITIALIZED;
-  if (!lefwDidInit)
+  }
+  if (!lefwDidInit) {
     return LEFW_BAD_ORDER;
-  if (!lefwIsMacroPin)
+  }
+  if (!lefwIsMacroPin) {
     return LEFW_BAD_ORDER;
-  if (versionNum >= 5.4)
+  }
+  if (versionNum >= 5.4) {
     return LEFW_OBSOLETE;
-  if (!lowName || lowName == 0 || *lowName == 0)
+  }
+  if (!lowName || lowName == 0 || *lowName == 0) {
     return LEFW_BAD_DATA;
-  if (!highName || highName == 0 || *highName == 0)
+  }
+  if (!highName || highName == 0 || *highName == 0) {
     return LEFW_BAD_DATA;
-  if (lefwWriteEncrypt)
+  }
+  if (lefwWriteEncrypt) {
     encPrint(lefwFile, (char *)"      IV_TABLES %s %s ;\n", lowName, highName);
-  else
+  } else {
     fprintf(lefwFile, "      IV_TABLES %s %s ;\n", lowName, highName);
+  }
 
   lefwLines++;
   lefwState = LEFW_MACRO;
@@ -6836,23 +8079,29 @@ int lefwMacroPinIV_Tables(const char *lowName, const char *highName) {
 }
 
 int lefwMacroPinAntennasize(double value, const char *layerName) {
-  if (!lefwFile)
+  if (!lefwFile) {
     return LEFW_UNINITIALIZED;
-  if (!lefwDidInit)
+  }
+  if (!lefwDidInit) {
     return LEFW_BAD_ORDER;
-  if (!lefwIsMacroPin)
+  }
+  if (!lefwIsMacroPin) {
     return LEFW_BAD_ORDER;
-  if (lefwAntenna54)
+  }
+  if (lefwAntenna54) {
     return LEFW_MIX_VERSION_DATA;
+  }
   if (lefwWriteEncrypt) {
     encPrint(lefwFile, (char *)"      ANTENNASIZE %.11g ", value);
-    if (layerName)
+    if (layerName) {
       encPrint(lefwFile, (char *)"LAYER %s ", layerName);
+    }
     encPrint(lefwFile, (char *)";\n");
   } else {
     fprintf(lefwFile, "      ANTENNASIZE %.11g ", value);
-    if (layerName)
+    if (layerName) {
       fprintf(lefwFile, "LAYER %s ", layerName);
+    }
     fprintf(lefwFile, ";\n");
   }
 
@@ -6863,21 +8112,26 @@ int lefwMacroPinAntennasize(double value, const char *layerName) {
 }
 
 int lefwMacroPinAntennaMetalArea(double value, const char *layerName) {
-  if (!lefwFile)
+  if (!lefwFile) {
     return LEFW_UNINITIALIZED;
-  if (!lefwDidInit)
+  }
+  if (!lefwDidInit) {
     return LEFW_BAD_ORDER;
-  if (!lefwIsMacroPin)
+  }
+  if (!lefwIsMacroPin) {
     return LEFW_BAD_ORDER;
+  }
   if (lefwWriteEncrypt) {
     encPrint(lefwFile, (char *)"      ANTENNAMETALAREA %.11g ", value);
-    if (layerName)
+    if (layerName) {
       encPrint(lefwFile, (char *)"LAYER %s ", layerName);
+    }
     encPrint(lefwFile, (char *)";\n");
   } else {
     fprintf(lefwFile, "      ANTENNAMETALAREA %.11g ", value);
-    if (layerName)
+    if (layerName) {
       fprintf(lefwFile, "LAYER %s ", layerName);
+    }
     fprintf(lefwFile, ";\n");
   }
 
@@ -6887,23 +8141,29 @@ int lefwMacroPinAntennaMetalArea(double value, const char *layerName) {
 }
 
 int lefwMacroPinAntennaMetalLength(double value, const char *layerName) {
-  if (!lefwFile)
+  if (!lefwFile) {
     return LEFW_UNINITIALIZED;
-  if (!lefwDidInit)
+  }
+  if (!lefwDidInit) {
     return LEFW_BAD_ORDER;
-  if (!lefwIsMacroPin)
+  }
+  if (!lefwIsMacroPin) {
     return LEFW_BAD_ORDER;
-  if (lefwAntenna54)
+  }
+  if (lefwAntenna54) {
     return LEFW_MIX_VERSION_DATA;
+  }
   if (lefwWriteEncrypt) {
     encPrint(lefwFile, (char *)"      ANTENNAMETALLENGTH %.11g ", value);
-    if (layerName)
+    if (layerName) {
       encPrint(lefwFile, (char *)"LAYER %s ", layerName);
+    }
     encPrint(lefwFile, (char *)";\n");
   } else {
     fprintf(lefwFile, "      ANTENNAMETALLENGTH %.11g ", value);
-    if (layerName)
+    if (layerName) {
       fprintf(lefwFile, "LAYER %s ", layerName);
+    }
     fprintf(lefwFile, ";\n");
   }
 
@@ -6915,25 +8175,32 @@ int lefwMacroPinAntennaMetalLength(double value, const char *layerName) {
 
 int lefwMacroPinAntennaPartialMetalArea(double value, const char *layerName) {
   lefw54Num = LEFW_ANTENNAPARTIALMETALAREA;
-  if (!lefwFile)
+  if (!lefwFile) {
     return LEFW_UNINITIALIZED;
-  if (!lefwDidInit)
+  }
+  if (!lefwDidInit) {
     return LEFW_BAD_ORDER;
-  if (!lefwIsMacroPin)
+  }
+  if (!lefwIsMacroPin) {
     return LEFW_BAD_ORDER;
-  if (versionNum < 5.4)
+  }
+  if (versionNum < 5.4) {
     return LEFW_WRONG_VERSION;
-  if (lefwAntenna53)
+  }
+  if (lefwAntenna53) {
     return LEFW_MIX_VERSION_DATA;
+  }
   if (lefwWriteEncrypt) {
     encPrint(lefwFile, (char *)"      ANTENNAPARTIALMETALAREA %.11g ", value);
-    if (layerName)
+    if (layerName) {
       encPrint(lefwFile, (char *)"LAYER %s ", layerName);
+    }
     encPrint(lefwFile, (char *)";\n");
   } else {
     fprintf(lefwFile, "      ANTENNAPARTIALMETALAREA %.11g ", value);
-    if (layerName)
+    if (layerName) {
       fprintf(lefwFile, "LAYER %s ", layerName);
+    }
     fprintf(lefwFile, ";\n");
   }
 
@@ -6945,25 +8212,32 @@ int lefwMacroPinAntennaPartialMetalArea(double value, const char *layerName) {
 
 int lefwMacroPinAntennaPartialMetalSideArea(double value, const char *layerName) {
   lefw54Num = LEFW_ANTENNAPARTIALMETALSIDEAREA;
-  if (!lefwFile)
+  if (!lefwFile) {
     return LEFW_UNINITIALIZED;
-  if (!lefwDidInit)
+  }
+  if (!lefwDidInit) {
     return LEFW_BAD_ORDER;
-  if (!lefwIsMacroPin)
+  }
+  if (!lefwIsMacroPin) {
     return LEFW_BAD_ORDER;
-  if (versionNum < 5.4)
+  }
+  if (versionNum < 5.4) {
     return LEFW_WRONG_VERSION;
-  if (lefwAntenna53)
+  }
+  if (lefwAntenna53) {
     return LEFW_MIX_VERSION_DATA;
+  }
   if (lefwWriteEncrypt) {
     encPrint(lefwFile, (char *)"      ANTENNAPARTIALMETALSIDEAREA %.11g ", value);
-    if (layerName)
+    if (layerName) {
       encPrint(lefwFile, (char *)"LAYER %s ", layerName);
+    }
     encPrint(lefwFile, (char *)";\n");
   } else {
     fprintf(lefwFile, "      ANTENNAPARTIALMETALSIDEAREA %.11g ", value);
-    if (layerName)
+    if (layerName) {
       fprintf(lefwFile, "LAYER %s ", layerName);
+    }
     fprintf(lefwFile, ";\n");
   }
 
@@ -6975,25 +8249,32 @@ int lefwMacroPinAntennaPartialMetalSideArea(double value, const char *layerName)
 
 int lefwMacroPinAntennaPartialCutArea(double value, const char *layerName) {
   lefw54Num = LEFW_ANTENNAPARTIALCUTAREA;
-  if (!lefwFile)
+  if (!lefwFile) {
     return LEFW_UNINITIALIZED;
-  if (!lefwDidInit)
+  }
+  if (!lefwDidInit) {
     return LEFW_BAD_ORDER;
-  if (!lefwIsMacroPin)
+  }
+  if (!lefwIsMacroPin) {
     return LEFW_BAD_ORDER;
-  if (versionNum < 5.4)
+  }
+  if (versionNum < 5.4) {
     return LEFW_WRONG_VERSION;
-  if (lefwAntenna53)
+  }
+  if (lefwAntenna53) {
     return LEFW_MIX_VERSION_DATA;
+  }
   if (lefwWriteEncrypt) {
     encPrint(lefwFile, (char *)"      ANTENNAPARTIALCUTAREA %.11g ", value);
-    if (layerName)
+    if (layerName) {
       encPrint(lefwFile, (char *)"LAYER %s ", layerName);
+    }
     encPrint(lefwFile, (char *)";\n");
   } else {
     fprintf(lefwFile, "      ANTENNAPARTIALCUTAREA %.11g ", value);
-    if (layerName)
+    if (layerName) {
       fprintf(lefwFile, "LAYER %s ", layerName);
+    }
     fprintf(lefwFile, ";\n");
   }
 
@@ -7005,25 +8286,32 @@ int lefwMacroPinAntennaPartialCutArea(double value, const char *layerName) {
 
 int lefwMacroPinAntennaDiffArea(double value, const char *layerName) {
   lefw54Num = LEFW_ANTENNADIFFAREA;
-  if (!lefwFile)
+  if (!lefwFile) {
     return LEFW_UNINITIALIZED;
-  if (!lefwDidInit)
+  }
+  if (!lefwDidInit) {
     return LEFW_BAD_ORDER;
-  if (!lefwIsMacroPin)
+  }
+  if (!lefwIsMacroPin) {
     return LEFW_BAD_ORDER;
-  if (versionNum < 5.4)
+  }
+  if (versionNum < 5.4) {
     return LEFW_WRONG_VERSION;
-  if (lefwAntenna53)
+  }
+  if (lefwAntenna53) {
     return LEFW_MIX_VERSION_DATA;
+  }
   if (lefwWriteEncrypt) {
     encPrint(lefwFile, (char *)"      ANTENNADIFFAREA %.11g ", value);
-    if (layerName)
+    if (layerName) {
       encPrint(lefwFile, (char *)"LAYER %s ", layerName);
+    }
     encPrint(lefwFile, (char *)";\n");
   } else {
     fprintf(lefwFile, "      ANTENNADIFFAREA %.11g ", value);
-    if (layerName)
+    if (layerName) {
       fprintf(lefwFile, "LAYER %s ", layerName);
+    }
     fprintf(lefwFile, ";\n");
   }
 
@@ -7035,16 +8323,21 @@ int lefwMacroPinAntennaDiffArea(double value, const char *layerName) {
 
 int lefwMacroPinAntennaModel(const char *oxide) {
   lefw54Num = LEFW_ANTENNAGATEAREA;
-  if (!lefwFile)
+  if (!lefwFile) {
     return LEFW_UNINITIALIZED;
-  if (!lefwDidInit)
+  }
+  if (!lefwDidInit) {
     return LEFW_BAD_ORDER;
-  if (!lefwIsMacroPin)
+  }
+  if (!lefwIsMacroPin) {
     return LEFW_BAD_ORDER;
-  if (versionNum < 5.4)
+  }
+  if (versionNum < 5.4) {
     return LEFW_WRONG_VERSION;
-  if (lefwAntenna53)
+  }
+  if (lefwAntenna53) {
     return LEFW_MIX_VERSION_DATA;
+  }
   if (lefwWriteEncrypt) {
     encPrint(lefwFile, (char *)"      ANTENNAMODEL %s ;\n", oxide);
   } else {
@@ -7059,25 +8352,32 @@ int lefwMacroPinAntennaModel(const char *oxide) {
 
 int lefwMacroPinAntennaGateArea(double value, const char *layerName) {
   lefw54Num = LEFW_ANTENNAGATEAREA;
-  if (!lefwFile)
+  if (!lefwFile) {
     return LEFW_UNINITIALIZED;
-  if (!lefwDidInit)
+  }
+  if (!lefwDidInit) {
     return LEFW_BAD_ORDER;
-  if (!lefwIsMacroPin)
+  }
+  if (!lefwIsMacroPin) {
     return LEFW_BAD_ORDER;
-  if (versionNum < 5.4)
+  }
+  if (versionNum < 5.4) {
     return LEFW_WRONG_VERSION;
-  if (lefwAntenna53)
+  }
+  if (lefwAntenna53) {
     return LEFW_MIX_VERSION_DATA;
+  }
   if (lefwWriteEncrypt) {
     encPrint(lefwFile, (char *)"      ANTENNAGATEAREA %.11g ", value);
-    if (layerName)
+    if (layerName) {
       encPrint(lefwFile, (char *)"LAYER %s ", layerName);
+    }
     encPrint(lefwFile, (char *)";\n");
   } else {
     fprintf(lefwFile, "      ANTENNAGATEAREA %.11g ", value);
-    if (layerName)
+    if (layerName) {
       fprintf(lefwFile, "LAYER %s ", layerName);
+    }
     fprintf(lefwFile, ";\n");
   }
 
@@ -7089,28 +8389,36 @@ int lefwMacroPinAntennaGateArea(double value, const char *layerName) {
 
 int lefwMacroPinAntennaMaxAreaCar(double value, const char *layerName) {
   lefw54Num = LEFW_ANTENNAMAXAREACAR;
-  if (!lefwFile)
+  if (!lefwFile) {
     return LEFW_UNINITIALIZED;
-  if (!lefwDidInit)
+  }
+  if (!lefwDidInit) {
     return LEFW_BAD_ORDER;
-  if (!lefwIsMacroPin)
+  }
+  if (!lefwIsMacroPin) {
     return LEFW_BAD_ORDER;
-  if (lefwAMaxAreaCar)
+  }
+  if (lefwAMaxAreaCar) {
     return LEFW_BAD_DATA;  // ANTENNAMAXAREACAR has defined
+  }
   // more than once
-  if (versionNum < 5.4)
+  if (versionNum < 5.4) {
     return LEFW_WRONG_VERSION;
-  if (lefwAntenna53)
+  }
+  if (lefwAntenna53) {
     return LEFW_MIX_VERSION_DATA;
+  }
   if (lefwWriteEncrypt) {
     encPrint(lefwFile, (char *)"      ANTENNAMAXAREACAR %.11g ", value);
-    if (layerName)
+    if (layerName) {
       encPrint(lefwFile, (char *)"LAYER %s ", layerName);
+    }
     encPrint(lefwFile, (char *)";\n");
   } else {
     fprintf(lefwFile, "      ANTENNAMAXAREACAR %.11g ", value);
-    if (layerName)
+    if (layerName) {
       fprintf(lefwFile, "LAYER %s ", layerName);
+    }
     fprintf(lefwFile, ";\n");
   }
 
@@ -7122,28 +8430,36 @@ int lefwMacroPinAntennaMaxAreaCar(double value, const char *layerName) {
 
 int lefwMacroPinAntennaMaxSideAreaCar(double value, const char *layerName) {
   lefw54Num = LEFW_ANTENNAMAXSIDEAREACAR;
-  if (!lefwFile)
+  if (!lefwFile) {
     return LEFW_UNINITIALIZED;
-  if (!lefwDidInit)
+  }
+  if (!lefwDidInit) {
     return LEFW_BAD_ORDER;
-  if (!lefwIsMacroPin)
+  }
+  if (!lefwIsMacroPin) {
     return LEFW_BAD_ORDER;
-  if (lefwAMaxSideAreaCar)
+  }
+  if (lefwAMaxSideAreaCar) {
     return LEFW_BAD_DATA;  // ANTENNAMAXSIDEAREACAR has
+  }
   // defined more than once
-  if (versionNum < 5.4)
+  if (versionNum < 5.4) {
     return LEFW_WRONG_VERSION;
-  if (lefwAntenna53)
+  }
+  if (lefwAntenna53) {
     return LEFW_MIX_VERSION_DATA;
+  }
   if (lefwWriteEncrypt) {
     encPrint(lefwFile, (char *)"      ANTENNAMAXSIDEAREACAR %.11g ", value);
-    if (layerName)
+    if (layerName) {
       encPrint(lefwFile, (char *)"LAYER %s ", layerName);
+    }
     encPrint(lefwFile, (char *)";\n");
   } else {
     fprintf(lefwFile, "      ANTENNAMAXSIDEAREACAR %.11g ", value);
-    if (layerName)
+    if (layerName) {
       fprintf(lefwFile, "LAYER %s ", layerName);
+    }
     fprintf(lefwFile, ";\n");
   }
 
@@ -7155,28 +8471,36 @@ int lefwMacroPinAntennaMaxSideAreaCar(double value, const char *layerName) {
 
 int lefwMacroPinAntennaMaxCutCar(double value, const char *layerName) {
   lefw54Num = LEFW_ANTENNAMAXCUTCAR;
-  if (!lefwFile)
+  if (!lefwFile) {
     return LEFW_UNINITIALIZED;
-  if (!lefwDidInit)
+  }
+  if (!lefwDidInit) {
     return LEFW_BAD_ORDER;
-  if (!lefwIsMacroPin)
+  }
+  if (!lefwIsMacroPin) {
     return LEFW_BAD_ORDER;
-  if (lefwAMaxCutCar)
+  }
+  if (lefwAMaxCutCar) {
     return LEFW_BAD_DATA;  // ANTENNAMAXCUTCAR has
+  }
   // defined more than once
-  if (versionNum < 5.4)
+  if (versionNum < 5.4) {
     return LEFW_WRONG_VERSION;
-  if (lefwAntenna53)
+  }
+  if (lefwAntenna53) {
     return LEFW_MIX_VERSION_DATA;
+  }
   if (lefwWriteEncrypt) {
     encPrint(lefwFile, (char *)"      ANTENNAMAXCUTCAR %.11g ", value);
-    if (layerName)
+    if (layerName) {
       encPrint(lefwFile, (char *)"LAYER %s ", layerName);
+    }
     encPrint(lefwFile, (char *)";\n");
   } else {
     fprintf(lefwFile, "      ANTENNAMAXCUTCAR %.11g ", value);
-    if (layerName)
+    if (layerName) {
       fprintf(lefwFile, "LAYER %s ", layerName);
+    }
     fprintf(lefwFile, ";\n");
   }
 
@@ -7187,14 +8511,17 @@ int lefwMacroPinAntennaMaxCutCar(double value, const char *layerName) {
 }
 
 int lefwEndMacroPin(const char *pinName) {
-  if (!lefwIsMacroPin)
+  if (!lefwIsMacroPin) {
     return LEFW_BAD_ORDER;
-  if (!pinName || pinName == 0 || *pinName == 0)
+  }
+  if (!pinName || pinName == 0 || *pinName == 0) {
     return LEFW_BAD_DATA;
-  if (lefwWriteEncrypt)
+  }
+  if (lefwWriteEncrypt) {
     encPrint(lefwFile, (char *)"   END %s\n\n", pinName);
-  else
+  } else {
     fprintf(lefwFile, "   END %s\n\n", pinName);
+  }
 
   lefwLines++;
   lefwIsMacroPin = 0;
@@ -7203,26 +8530,33 @@ int lefwEndMacroPin(const char *pinName) {
 
 int lefwStartMacroPinPort(const char *classType) {  // optional
 
-  if (!lefwFile)
+  if (!lefwFile) {
     return LEFW_UNINITIALIZED;
-  if (!lefwDidInit)
+  }
+  if (!lefwDidInit) {
     return LEFW_BAD_ORDER;
-  if (!lefwIsMacroPin)
+  }
+  if (!lefwIsMacroPin) {
     return LEFW_BAD_ORDER;
+  }
   if (lefwWriteEncrypt) {
     if (classType) {
-      if (strcmp(classType, "NONE") && strcmp(classType, "CORE"))
+      if (strcmp(classType, "NONE") && strcmp(classType, "CORE")) {
         return LEFW_BAD_DATA;
+      }
       encPrint(lefwFile, (char *)"      PORT CLASS %s ;\n", classType);
-    } else
+    } else {
       encPrint(lefwFile, (char *)"      PORT \n");
+    }
   } else {
     if (classType) {
-      if (strcmp(classType, "NONE") && strcmp(classType, "CORE") && strcmp(classType, "BUMP"))
+      if (strcmp(classType, "NONE") && strcmp(classType, "CORE") && strcmp(classType, "BUMP")) {
         return LEFW_BAD_DATA;
+      }
       fprintf(lefwFile, "      PORT CLASS %s ;\n", classType);
-    } else
+    } else {
       fprintf(lefwFile, "      PORT \n");
+    }
   }
 
   lefwLines++;
@@ -7234,25 +8568,32 @@ int lefwStartMacroPinPort(const char *classType) {  // optional
 }
 
 int lefwMacroPinPortLayer(const char *layerName, double spacing) {
-  if (!lefwFile)
+  if (!lefwFile) {
     return LEFW_UNINITIALIZED;
-  if (!lefwDidInit)
+  }
+  if (!lefwDidInit) {
     return LEFW_BAD_ORDER;
-  if (!lefwIsMacroPinPort)
+  }
+  if (!lefwIsMacroPinPort) {
     return LEFW_BAD_ORDER;
-  if (!layerName || layerName == 0 || *layerName == 0)
+  }
+  if (!layerName || layerName == 0 || *layerName == 0) {
     return LEFW_BAD_DATA;
-  if (lefwWidthVal)
+  }
+  if (lefwWidthVal) {
     return LEFW_BAD_DATA;
+  }
   if (lefwWriteEncrypt) {
     encPrint(lefwFile, (char *)"         LAYER %s ", layerName);
-    if (spacing)
+    if (spacing) {
       encPrint(lefwFile, (char *)"SPACING %.11g ", spacing);
+    }
     encPrint(lefwFile, (char *)";\n ");
   } else {
     fprintf(lefwFile, "         LAYER %s ", layerName);
-    if (spacing)
+    if (spacing) {
       fprintf(lefwFile, "SPACING %.11g ", spacing);
+    }
     fprintf(lefwFile, ";\n ");
   }
   lefwLines++;
@@ -7263,27 +8604,35 @@ int lefwMacroPinPortLayer(const char *layerName, double spacing) {
 
 int lefwMacroPinPortDesignRuleWidth(const char *layerName, double width) {
   lefw54Num = LEFW_DESIGNRULEWIDTH;
-  if (!lefwFile)
+  if (!lefwFile) {
     return LEFW_UNINITIALIZED;
-  if (!lefwDidInit)
+  }
+  if (!lefwDidInit) {
     return LEFW_BAD_ORDER;
-  if (!lefwIsMacroPinPort)
+  }
+  if (!lefwIsMacroPinPort) {
     return LEFW_BAD_ORDER;
-  if (!layerName || layerName == 0 || *layerName == 0)
+  }
+  if (!layerName || layerName == 0 || *layerName == 0) {
     return LEFW_BAD_DATA;
-  if (lefwSpacingVal)
+  }
+  if (lefwSpacingVal) {
     return LEFW_BAD_DATA;
-  if (versionNum < 5.4)
+  }
+  if (versionNum < 5.4) {
     return LEFW_WRONG_VERSION;
+  }
   if (lefwWriteEncrypt) {
     encPrint(lefwFile, (char *)"         LAYER %s ", layerName);
-    if (width)
+    if (width) {
       encPrint(lefwFile, (char *)"DESIGNRULEWIDTH %.11g ", width);
+    }
     encPrint(lefwFile, (char *)";\n ");
   } else {
     fprintf(lefwFile, "         LAYER %s ", layerName);
-    if (width)
+    if (width) {
       fprintf(lefwFile, "DESIGNRULEWIDTH %.11g ", width);
+    }
     fprintf(lefwFile, ";\n ");
   }
   lefwLines++;
@@ -7293,16 +8642,20 @@ int lefwMacroPinPortDesignRuleWidth(const char *layerName, double width) {
 }
 
 int lefwMacroPinPortLayerWidth(double width) {
-  if (!lefwFile)
+  if (!lefwFile) {
     return LEFW_UNINITIALIZED;
-  if (!lefwDidInit)
+  }
+  if (!lefwDidInit) {
     return LEFW_BAD_ORDER;
-  if (!lefwIsMacroPinPortLayer)
+  }
+  if (!lefwIsMacroPinPortLayer) {
     return LEFW_BAD_ORDER;
-  if (lefwWriteEncrypt)
+  }
+  if (lefwWriteEncrypt) {
     encPrint(lefwFile, (char *)"         WIDTH %.11g ;\n", width);
-  else
+  } else {
     fprintf(lefwFile, "         WIDTH %.11g ;\n", width);
+  }
   lefwLines++;
   lefwIsMacroPinPortLayer = 1;
   return LEFW_OK;
@@ -7315,12 +8668,15 @@ int lefwMacroPinPortLayerPath(int num_paths, double *xl, double *yl, int numX,
                               int    mask) {     // optional
   int i, numItem;
 
-  if (!lefwFile)
+  if (!lefwFile) {
     return LEFW_UNINITIALIZED;
-  if (!lefwDidInit)
+  }
+  if (!lefwDidInit) {
     return LEFW_BAD_ORDER;
-  if (!lefwIsMacroPinPortLayer)
+  }
+  if (!lefwIsMacroPinPortLayer) {
     return LEFW_BAD_ORDER;
+  }
   if (mask && versionNum < 5.8) {
     return LEFW_WRONG_VERSION;
   }
@@ -7337,10 +8693,11 @@ int lefwMacroPinPortLayerPath(int num_paths, double *xl, double *yl, int numX,
         encPrint(lefwFile, (char *)"         PATH ITERATE ");
       }
       for (i = 0; i < num_paths; i++) {
-        if (i == 0)
+        if (i == 0) {
           encPrint(lefwFile, (char *)"%.11g %.11g\n", xl[i], yl[i]);
-        else
+        } else {
           encPrint(lefwFile, (char *)"           %.11g %.11g\n", xl[i], yl[i]);
+        }
         lefwLines++;
       }
       encPrint(lefwFile, (char *)"           DO %d BY %d STEP %.11g %.11g ", numX, numY, spaceX, spaceY);
@@ -7357,8 +8714,9 @@ int lefwMacroPinPortLayerPath(int num_paths, double *xl, double *yl, int numX,
           encPrint(lefwFile, (char *)"           %.11g %.11g ", xl[i], yl[i]);
           numItem = 0;
           lefwLines++;
-        } else
+        } else {
           encPrint(lefwFile, (char *)"%.11g %.11g ", xl[i], yl[i]);
+        }
         numItem++;
       }
     }
@@ -7371,10 +8729,11 @@ int lefwMacroPinPortLayerPath(int num_paths, double *xl, double *yl, int numX,
         fprintf(lefwFile, "         PATH ITERATE ");
       }
       for (i = 0; i < num_paths; i++) {
-        if (i == 0)
+        if (i == 0) {
           fprintf(lefwFile, "%.11g %.11g\n", xl[i], yl[i]);
-        else
+        } else {
           fprintf(lefwFile, "           %.11g %.11g\n", xl[i], yl[i]);
+        }
         lefwLines++;
       }
       fprintf(lefwFile, "           DO %d BY %d STEP %.11g %.11g ", numX, numY, spaceX, spaceY);
@@ -7391,8 +8750,9 @@ int lefwMacroPinPortLayerPath(int num_paths, double *xl, double *yl, int numX,
           fprintf(lefwFile, "           %.11g %.11g ", xl[i], yl[i]);
           numItem = 0;
           lefwLines++;
-        } else
+        } else {
           fprintf(lefwFile, "%.11g %.11g ", xl[i], yl[i]);
+        }
         numItem++;
       }
     }
@@ -7408,12 +8768,15 @@ int lefwMacroPinPortLayerRect(double xl1, double yl1, double xl2, double yl2, in
                               double spaceX,
                               double spaceY,  // optional
                               int    mask) {     // optional
-  if (!lefwFile)
+  if (!lefwFile) {
     return LEFW_UNINITIALIZED;
-  if (!lefwDidInit)
+  }
+  if (!lefwDidInit) {
     return LEFW_BAD_ORDER;
-  if (!lefwIsMacroPinPortLayer)
+  }
+  if (!lefwIsMacroPinPortLayer) {
     return LEFW_BAD_ORDER;
+  }
   if (mask && versionNum < 5.8) {
     return LEFW_WRONG_VERSION;
   }
@@ -7467,14 +8830,18 @@ int lefwMacroPinPortLayerPolygon(int num_polys, double *xl, double *yl, int numX
                                  int    mask) {     // optional
   int i;
 
-  if (!lefwFile)
+  if (!lefwFile) {
     return LEFW_UNINITIALIZED;
-  if (!lefwDidInit)
+  }
+  if (!lefwDidInit) {
     return LEFW_BAD_ORDER;
-  if (!lefwIsMacroPinPortLayer)
+  }
+  if (!lefwIsMacroPinPortLayer) {
     return LEFW_BAD_ORDER;
-  if (num_polys < 4)
+  }
+  if (num_polys < 4) {
     return LEFW_BAD_DATA;  // at least 4 points
+  }
   if (mask && versionNum < 5.8) {
     return LEFW_WRONG_VERSION;
   }
@@ -7491,10 +8858,11 @@ int lefwMacroPinPortLayerPolygon(int num_polys, double *xl, double *yl, int numX
         encPrint(lefwFile, (char *)"            POLYGON ITERATE ");
       }
       for (i = 0; i < num_polys; i++) {
-        if (i == 0)
+        if (i == 0) {
           encPrint(lefwFile, (char *)"%.11g %.11g\n", *xl++, *yl++);
-        else
+        } else {
           encPrint(lefwFile, (char *)"               %.11g %.11g\n", *xl++, *yl++);
+        }
         lefwLines++;
       }
       encPrint(lefwFile, (char *)"               DO %d BY %d STEP %.11g %.11g ;\n", numX, numY, spaceX, spaceY);
@@ -7505,10 +8873,11 @@ int lefwMacroPinPortLayerPolygon(int num_polys, double *xl, double *yl, int numX
         encPrint(lefwFile, (char *)"            POLYGON ");
       }
       for (i = 0; i < num_polys; i++) {
-        if (i == 0)
+        if (i == 0) {
           encPrint(lefwFile, (char *)"%.11g %.11g", *xl++, *yl++);
-        else
+        } else {
           encPrint(lefwFile, (char *)"\n               %.11g %.11g", *xl++, *yl++);
+        }
         lefwLines++;
       }
       encPrint(lefwFile, (char *)" ;\n");
@@ -7521,10 +8890,11 @@ int lefwMacroPinPortLayerPolygon(int num_polys, double *xl, double *yl, int numX
         fprintf(lefwFile, "            POLYGON ITERATE ");
       }
       for (i = 0; i < num_polys; i++) {
-        if (i == 0)
+        if (i == 0) {
           fprintf(lefwFile, "%.11g %.11g\n", *xl++, *yl++);
-        else
+        } else {
           fprintf(lefwFile, "               %.11g %.11g\n", *xl++, *yl++);
+        }
         lefwLines++;
       }
       fprintf(lefwFile, "               DO %d BY %d STEP %.11g %.11g ;\n", numX, numY, spaceX, spaceY);
@@ -7535,10 +8905,11 @@ int lefwMacroPinPortLayerPolygon(int num_polys, double *xl, double *yl, int numX
         fprintf(lefwFile, "            POLYGON ");
       }
       for (i = 0; i < num_polys; i++) {
-        if (i == 0)
+        if (i == 0) {
           fprintf(lefwFile, "%.11g %.11g", *xl++, *yl++);
-        else
+        } else {
           fprintf(lefwFile, "\n               %.11g %.11g", *xl++, *yl++);
+        }
         lefwLines++;
       }
       fprintf(lefwFile, " ;\n");
@@ -7554,14 +8925,18 @@ int lefwMacroPinPortVia(double xl, double yl, const char *viaName, int numX,
                         double spaceX,
                         double spaceY,  // optional
                         int    mask) {     // optional
-  if (!lefwFile)
+  if (!lefwFile) {
     return LEFW_UNINITIALIZED;
-  if (!lefwDidInit)
+  }
+  if (!lefwDidInit) {
     return LEFW_BAD_ORDER;
-  if (!lefwIsMacroPinPort)
+  }
+  if (!lefwIsMacroPinPort) {
     return LEFW_BAD_ORDER;
-  if (!viaName || viaName == 0 || *viaName == 0)
+  }
+  if (!viaName || viaName == 0 || *viaName == 0) {
     return LEFW_BAD_DATA;
+  }
   if (mask && versionNum < 5.8) {
     return LEFW_WRONG_VERSION;
   }
@@ -7578,8 +8953,9 @@ int lefwMacroPinPortVia(double xl, double yl, const char *viaName, int numX,
         encPrint(lefwFile, (char *)"            VIA ITERATE %.11g %.11g %s ", xl, yl, viaName);
       }
       encPrint(lefwFile, (char *)"DO %d BY %d STEP %.11g %.11g ", numX, numY, spaceX, spaceY);
-    } else
+    } else {
       encPrint(lefwFile, (char *)"            VIA %.11g %.11g %s ", xl, yl, viaName);
+    }
     encPrint(lefwFile, (char *)";\n");
   } else {
     if (numX || numY || spaceX || spaceY) {
@@ -7604,12 +8980,14 @@ int lefwMacroPinPortVia(double xl, double yl, const char *viaName, int numX,
 }
 
 int lefwEndMacroPinPort() {
-  if (!lefwIsMacroPinPort)
+  if (!lefwIsMacroPinPort) {
     return LEFW_BAD_ORDER;
-  if (lefwWriteEncrypt)
+  }
+  if (lefwWriteEncrypt) {
     encPrint(lefwFile, (char *)"      END\n");
-  else
+  } else {
     fprintf(lefwFile, "      END\n");
+  }
 
   lefwLines++;
   lefwIsMacroPinPort = 0;
@@ -7617,16 +8995,20 @@ int lefwEndMacroPinPort() {
 }
 
 int lefwStartMacroObs() {
-  if (!lefwFile)
+  if (!lefwFile) {
     return LEFW_UNINITIALIZED;
-  if (lefwState != LEFW_MACRO_START && lefwState != LEFW_MACRO)
+  }
+  if (lefwState != LEFW_MACRO_START && lefwState != LEFW_MACRO) {
     return LEFW_BAD_ORDER;
-  if (lefwIsMacroObs)
+  }
+  if (lefwIsMacroObs) {
     return LEFW_BAD_ORDER;
-  if (lefwWriteEncrypt)
+  }
+  if (lefwWriteEncrypt) {
     encPrint(lefwFile, (char *)"   OBS\n");
-  else
+  } else {
     fprintf(lefwFile, "   OBS\n");
+  }
 
   lefwIsMacroObs = 1;
   lefwSpacingVal = 0;
@@ -7636,25 +9018,32 @@ int lefwStartMacroObs() {
 }
 
 int lefwMacroObsLayer(const char *layerName, double spacing) {
-  if (!lefwFile)
+  if (!lefwFile) {
     return LEFW_UNINITIALIZED;
-  if (!lefwDidInit)
+  }
+  if (!lefwDidInit) {
     return LEFW_BAD_ORDER;
-  if (!lefwIsMacroObs)
+  }
+  if (!lefwIsMacroObs) {
     return LEFW_BAD_ORDER;
-  if (!layerName || layerName == 0 || *layerName == 0)
+  }
+  if (!layerName || layerName == 0 || *layerName == 0) {
     return LEFW_BAD_DATA;
-  if (lefwWidthVal)
+  }
+  if (lefwWidthVal) {
     return LEFW_BAD_DATA;
+  }
   if (lefwWriteEncrypt) {
     encPrint(lefwFile, (char *)"      LAYER %s ", layerName);
-    if (spacing)
+    if (spacing) {
       encPrint(lefwFile, (char *)"SPACING %.11g ", spacing);
+    }
     encPrint(lefwFile, (char *)";\n");
   } else {
     fprintf(lefwFile, "      LAYER %s ", layerName);
-    if (spacing)
+    if (spacing) {
       fprintf(lefwFile, "SPACING %.11g ", spacing);
+    }
     fprintf(lefwFile, ";\n");
   }
   lefwLines++;
@@ -7665,27 +9054,35 @@ int lefwMacroObsLayer(const char *layerName, double spacing) {
 
 int lefwMacroObsDesignRuleWidth(const char *layerName, double width) {
   lefw54Num = LEFW_DESIGNRULEWIDTH;
-  if (!lefwFile)
+  if (!lefwFile) {
     return LEFW_UNINITIALIZED;
-  if (!lefwDidInit)
+  }
+  if (!lefwDidInit) {
     return LEFW_BAD_ORDER;
-  if (!lefwIsMacroObs)
+  }
+  if (!lefwIsMacroObs) {
     return LEFW_BAD_ORDER;
-  if (!layerName || layerName == 0 || *layerName == 0)
+  }
+  if (!layerName || layerName == 0 || *layerName == 0) {
     return LEFW_BAD_DATA;
-  if (lefwSpacingVal)
+  }
+  if (lefwSpacingVal) {
     return LEFW_BAD_DATA;
-  if (versionNum < 5.4)
+  }
+  if (versionNum < 5.4) {
     return LEFW_WRONG_VERSION;
+  }
   if (lefwWriteEncrypt) {
     encPrint(lefwFile, (char *)"      LAYER %s ", layerName);
-    if (width)
+    if (width) {
       encPrint(lefwFile, (char *)"DESIGNRULEWIDTH %.11g ", width);
+    }
     encPrint(lefwFile, (char *)";\n");
   } else {
     fprintf(lefwFile, "      LAYER %s ", layerName);
-    if (width)
+    if (width) {
       fprintf(lefwFile, "DESIGNRULEWIDTH %.11g ", width);
+    }
     fprintf(lefwFile, ";\n");
   }
   lefwLines++;
@@ -7696,22 +9093,29 @@ int lefwMacroObsDesignRuleWidth(const char *layerName, double width) {
 
 int lefwMacroExceptPGNet(const char *layerName) {
   lefw54Num = LEFW_DESIGNRULEWIDTH;
-  if (!lefwFile)
+  if (!lefwFile) {
     return LEFW_UNINITIALIZED;
-  if (!lefwDidInit)
+  }
+  if (!lefwDidInit) {
     return LEFW_BAD_ORDER;
-  if (!lefwIsMacroObs)
+  }
+  if (!lefwIsMacroObs) {
     return LEFW_BAD_ORDER;
-  if (!layerName || layerName == 0 || *layerName == 0)
+  }
+  if (!layerName || layerName == 0 || *layerName == 0) {
     return LEFW_BAD_DATA;
-  if (lefwSpacingVal)
+  }
+  if (lefwSpacingVal) {
     return LEFW_BAD_DATA;
-  if (versionNum < 5.4)
+  }
+  if (versionNum < 5.4) {
     return LEFW_WRONG_VERSION;
-  if (lefwWriteEncrypt)
+  }
+  if (lefwWriteEncrypt) {
     encPrint(lefwFile, (char *)"      LAYER %s EXCEPTPGNET ;\n", layerName);
-  else
+  } else {
     fprintf(lefwFile, "      LAYER %s EXCEPTPGNET ;\n", layerName);
+  }
   lefwLines++;
   lefwIsMacroObsLayer = 1;
   lefwWidthVal        = 1;
@@ -7719,16 +9123,20 @@ int lefwMacroExceptPGNet(const char *layerName) {
 }
 
 int lefwMacroObsLayerWidth(double width) {
-  if (!lefwFile)
+  if (!lefwFile) {
     return LEFW_UNINITIALIZED;
-  if (!lefwDidInit)
+  }
+  if (!lefwDidInit) {
     return LEFW_BAD_ORDER;
-  if (!lefwIsMacroObsLayer)
+  }
+  if (!lefwIsMacroObsLayer) {
     return LEFW_BAD_ORDER;
-  if (lefwWriteEncrypt)
+  }
+  if (lefwWriteEncrypt) {
     encPrint(lefwFile, (char *)"      WIDTH %.11g ;\n", width);
-  else
+  } else {
     fprintf(lefwFile, "      WIDTH %.11g ;\n", width);
+  }
   lefwLines++;
   lefwIsMacroObsLayer = 1;
   return LEFW_OK;
@@ -7741,12 +9149,15 @@ int lefwMacroObsLayerPath(int num_paths, double *xl, double *yl, int numX,
                           int    mask) {     // optional
   int i, numItem;
 
-  if (!lefwFile)
+  if (!lefwFile) {
     return LEFW_UNINITIALIZED;
-  if (!lefwDidInit)
+  }
+  if (!lefwDidInit) {
     return LEFW_BAD_ORDER;
-  if (!lefwIsMacroObsLayer)
+  }
+  if (!lefwIsMacroObsLayer) {
     return LEFW_BAD_ORDER;
+  }
   if (mask && versionNum < 5.8) {
     return LEFW_WRONG_VERSION;
   }
@@ -7763,10 +9174,11 @@ int lefwMacroObsLayerPath(int num_paths, double *xl, double *yl, int numX,
         encPrint(lefwFile, (char *)"         PATH ITERATE ");
       }
       for (i = 0; i < num_paths; i++) {
-        if (i == 0)
+        if (i == 0) {
           encPrint(lefwFile, (char *)"%.11g %.11g\n", *xl++, *yl++);
-        else
+        } else {
           encPrint(lefwFile, (char *)"            %.11g %.11g\n", *xl++, *yl++);
+        }
         lefwLines++;
       }
       encPrint(lefwFile, (char *)"           DO %d BY %d STEP %.11g %.11g ", numX, numY, spaceX, spaceY);
@@ -7783,8 +9195,9 @@ int lefwMacroObsLayerPath(int num_paths, double *xl, double *yl, int numX,
           encPrint(lefwFile, (char *)"         %.11g %.11g ", xl[i], yl[i]);
           numItem = 0;
           lefwLines++;
-        } else
+        } else {
           encPrint(lefwFile, (char *)"%.11g %.11g ", xl[i], yl[i]);
+        }
         numItem++;
       }
     }
@@ -7797,10 +9210,11 @@ int lefwMacroObsLayerPath(int num_paths, double *xl, double *yl, int numX,
         fprintf(lefwFile, "         PATH ITERATE ");
       }
       for (i = 0; i < num_paths; i++) {
-        if (i == 0)
+        if (i == 0) {
           fprintf(lefwFile, "%.11g %.11g\n", *xl++, *yl++);
-        else
+        } else {
           fprintf(lefwFile, "            %.11g %.11g\n", *xl++, *yl++);
+        }
         lefwLines++;
       }
       fprintf(lefwFile, "           DO %d BY %d STEP %.11g %.11g ", numX, numY, spaceX, spaceY);
@@ -7817,8 +9231,9 @@ int lefwMacroObsLayerPath(int num_paths, double *xl, double *yl, int numX,
           fprintf(lefwFile, "         %.11g %.11g ", xl[i], yl[i]);
           numItem = 0;
           lefwLines++;
-        } else
+        } else {
           fprintf(lefwFile, "%.11g %.11g ", xl[i], yl[i]);
+        }
         numItem++;
       }
     }
@@ -7834,12 +9249,15 @@ int lefwMacroObsLayerRect(double xl1, double yl1, double xl2, double yl2, int nu
                           double spaceX,
                           double spaceY,  // optional
                           int    mask) {     // optional
-  if (!lefwFile)
+  if (!lefwFile) {
     return LEFW_UNINITIALIZED;
-  if (!lefwDidInit)
+  }
+  if (!lefwDidInit) {
     return LEFW_BAD_ORDER;
-  if (!lefwIsMacroObsLayer)
+  }
+  if (!lefwIsMacroObsLayer) {
     return LEFW_BAD_ORDER;
+  }
   if (mask && versionNum < 5.8) {
     return LEFW_WRONG_VERSION;
   }
@@ -7893,14 +9311,18 @@ int lefwMacroObsLayerPolygon(int num_polys, double *xl, double *yl, int numX,
                              int    mask) {     // optional
   int i;
 
-  if (!lefwFile)
+  if (!lefwFile) {
     return LEFW_UNINITIALIZED;
-  if (!lefwDidInit)
+  }
+  if (!lefwDidInit) {
     return LEFW_BAD_ORDER;
-  if (!lefwIsMacroObsLayer)
+  }
+  if (!lefwIsMacroObsLayer) {
     return LEFW_BAD_ORDER;
-  if (num_polys < 4)
+  }
+  if (num_polys < 4) {
     return LEFW_BAD_DATA;  // at least 4 points
+  }
   if (mask && versionNum < 5.8) {
     return LEFW_WRONG_VERSION;
   }
@@ -7917,10 +9339,11 @@ int lefwMacroObsLayerPolygon(int num_polys, double *xl, double *yl, int numX,
         encPrint(lefwFile, (char *)"         POLYGON ITERATE ");
       }
       for (i = 0; i < num_polys; i++) {
-        if (i == 0)
+        if (i == 0) {
           encPrint(lefwFile, (char *)"%.11g %.11g\n", *xl++, *yl++);
-        else
+        } else {
           encPrint(lefwFile, (char *)"           %.11g %.11g\n", *xl++, *yl++);
+        }
         lefwLines++;
       }
       encPrint(lefwFile, (char *)"           DO %d BY %d STEP %.11g %.11g ;", numX, numY, spaceX, spaceY);
@@ -7931,10 +9354,11 @@ int lefwMacroObsLayerPolygon(int num_polys, double *xl, double *yl, int numX,
         encPrint(lefwFile, (char *)"         POLYGON ");
       }
       for (i = 0; i < num_polys; i++) {
-        if (i == 0)
+        if (i == 0) {
           encPrint(lefwFile, (char *)"%.11g %.11g", *xl++, *yl++);
-        else
+        } else {
           encPrint(lefwFile, (char *)"\n           %.11g %.11g", *xl++, *yl++);
+        }
         lefwLines++;
       }
       encPrint(lefwFile, (char *)" ;\n");
@@ -7947,10 +9371,11 @@ int lefwMacroObsLayerPolygon(int num_polys, double *xl, double *yl, int numX,
         fprintf(lefwFile, "         POLYGON ITERATE ");
       }
       for (i = 0; i < num_polys; i++) {
-        if (i == 0)
+        if (i == 0) {
           fprintf(lefwFile, "%.11g %.11g\n", *xl++, *yl++);
-        else
+        } else {
           fprintf(lefwFile, "           %.11g %.11g\n", *xl++, *yl++);
+        }
         lefwLines++;
       }
       fprintf(lefwFile, "           DO %d BY %d STEP %.11g %.11g ;", numX, numY, spaceX, spaceY);
@@ -7961,10 +9386,11 @@ int lefwMacroObsLayerPolygon(int num_polys, double *xl, double *yl, int numX,
         fprintf(lefwFile, "         POLYGON ");
       }
       for (i = 0; i < num_polys; i++) {
-        if (i == 0)
+        if (i == 0) {
           fprintf(lefwFile, "%.11g %.11g", *xl++, *yl++);
-        else
+        } else {
           fprintf(lefwFile, "\n           %.11g %.11g", *xl++, *yl++);
+        }
         lefwLines++;
       }
       fprintf(lefwFile, " ;\n");
@@ -7980,14 +9406,18 @@ int lefwMacroObsVia(double xl, double yl, const char *viaName, int numX,
                     double spaceX,
                     double spaceY,  // optional
                     int    mask) {     // optional
-  if (!lefwFile)
+  if (!lefwFile) {
     return LEFW_UNINITIALIZED;
-  if (!lefwDidInit)
+  }
+  if (!lefwDidInit) {
     return LEFW_BAD_ORDER;
-  if (!lefwIsMacroObs)
+  }
+  if (!lefwIsMacroObs) {
     return LEFW_BAD_ORDER;
-  if (!viaName || viaName == 0 || *viaName == 0)
+  }
+  if (!viaName || viaName == 0 || *viaName == 0) {
     return LEFW_BAD_DATA;
+  }
   if (mask && versionNum < 5.8) {
     return LEFW_WRONG_VERSION;
   }
@@ -8036,12 +9466,14 @@ int lefwMacroObsVia(double xl, double yl, const char *viaName, int numX,
 }
 
 int lefwEndMacroObs() {
-  if (!lefwIsMacroObs)
+  if (!lefwIsMacroObs) {
     return LEFW_BAD_ORDER;
-  if (lefwWriteEncrypt)
+  }
+  if (lefwWriteEncrypt) {
     encPrint(lefwFile, (char *)"   END\n");
-  else
+  } else {
     fprintf(lefwFile, "   END\n");
+  }
 
   lefwLines++;
   lefwIsMacroObs = 0;
@@ -8050,20 +9482,26 @@ int lefwEndMacroObs() {
 
 int lefwStartMacroTiming() {
   lefwObsoleteNum = LEFW_MACRO_TIMING;
-  if (!lefwFile)
+  if (!lefwFile) {
     return LEFW_UNINITIALIZED;
-  if (!lefwDidInit)
+  }
+  if (!lefwDidInit) {
     return LEFW_BAD_ORDER;
-  if (lefwState != LEFW_MACRO_START && lefwState != LEFW_MACRO)
+  }
+  if (lefwState != LEFW_MACRO_START && lefwState != LEFW_MACRO) {
     return LEFW_BAD_ORDER;
-  if (lefwIsMacroTiming)
+  }
+  if (lefwIsMacroTiming) {
     return LEFW_BAD_ORDER;
-  if (versionNum >= 5.4)
+  }
+  if (versionNum >= 5.4) {
     return LEFW_OBSOLETE;
-  if (lefwWriteEncrypt)
+  }
+  if (lefwWriteEncrypt) {
     encPrint(lefwFile, (char *)"   TIMING\n");
-  else
+  } else {
     fprintf(lefwFile, "   TIMING\n");
+  }
 
   lefwIsMacroTiming      = 1;
   lefwIsMacroTimingModel = 0;
@@ -8073,24 +9511,29 @@ int lefwStartMacroTiming() {
 
 // Obsolete in 5.4
 int lefwMacroTimingPin(const char *fromPin, const char *toPin) {
-  if (!lefwFile)
+  if (!lefwFile) {
     return LEFW_UNINITIALIZED;
-  if (!lefwDidInit)
+  }
+  if (!lefwDidInit) {
     return LEFW_BAD_ORDER;
-  if (!lefwIsMacroTiming)
+  }
+  if (!lefwIsMacroTiming) {
     return LEFW_BAD_ORDER;
+  }
   if (fromPin) {
-    if (lefwWriteEncrypt)
+    if (lefwWriteEncrypt) {
       encPrint(lefwFile, (char *)"      FROMPIN %s ;\n", fromPin);
-    else
+    } else {
       fprintf(lefwFile, "      FROMPIN %s ;\n", fromPin);
+    }
     lefwLines++;
   }
   if (toPin) {
-    if (lefwWriteEncrypt)
+    if (lefwWriteEncrypt) {
       encPrint(lefwFile, (char *)"      TOPIN %s ;\n", toPin);
-    else
+    } else {
       fprintf(lefwFile, "      TOPIN %s ;\n", toPin);
+    }
     lefwLines++;
   }
   return LEFW_OK;
@@ -8105,31 +9548,39 @@ int lefwMacroTimingIntrinsic(const char *riseFall, double min, double max, doubl
                              double slewT2Max,  // optional
                              double slewT3,     // optional
                              double varMin, double varMax) {
-  if (!lefwFile)
+  if (!lefwFile) {
     return LEFW_UNINITIALIZED;
-  if (!lefwDidInit)
+  }
+  if (!lefwDidInit) {
     return LEFW_BAD_ORDER;
-  if (!lefwIsMacroTiming)
+  }
+  if (!lefwIsMacroTiming) {
     return LEFW_BAD_ORDER;
-  if (strcmp(riseFall, "RISE") && strcmp(riseFall, "FALL"))
+  }
+  if (strcmp(riseFall, "RISE") && strcmp(riseFall, "FALL")) {
     return LEFW_BAD_DATA;
+  }
   if (lefwWriteEncrypt) {
     encPrint(lefwFile, (char *)"      %s INTRINSIC %.11g %.11g ", riseFall, min, max);
     if (slewT1 || slewT1Min || slewT1Max || slewT2) {
       encPrint(lefwFile, (char *)"%.11g %.11g %.11g %.11g ", slewT1, slewT1Min, slewT1Max, slewT2);
-      if (slewT2Min || slewT2Max || slewT3)
+      if (slewT2Min || slewT2Max || slewT3) {
         encPrint(lefwFile, (char *)"%.11g %.11g %.11g \n", slewT2Min, slewT2Max, slewT3);
-    } else if (slewT2Min || slewT2Max || slewT3)
+      }
+    } else if (slewT2Min || slewT2Max || slewT3) {
       return LEFW_BAD_DATA;  // slewT2Min... has to be inside of slewT1...
+    }
     encPrint(lefwFile, (char *)"         VARIABLE %.11g %.11g ;\n", varMin, varMax);
   } else {
     fprintf(lefwFile, "      %s INTRINSIC %.11g %.11g ", riseFall, min, max);
     if (slewT1 || slewT1Min || slewT1Max || slewT2) {
       fprintf(lefwFile, "%.11g %.11g %.11g %.11g ", slewT1, slewT1Min, slewT1Max, slewT2);
-      if (slewT2Min || slewT2Max || slewT3)
+      if (slewT2Min || slewT2Max || slewT3) {
         fprintf(lefwFile, "%.11g %.11g %.11g \n", slewT2Min, slewT2Max, slewT3);
-    } else if (slewT2Min || slewT2Max || slewT3)
+      }
+    } else if (slewT2Min || slewT2Max || slewT3) {
       return LEFW_BAD_DATA;  // slewT2Min... has to be inside of slewT1...
+    }
     fprintf(lefwFile, "         VARIABLE %.11g %.11g ;\n", varMin, varMax);
   }
   lefwLines++;
@@ -8138,158 +9589,197 @@ int lefwMacroTimingIntrinsic(const char *riseFall, double min, double max, doubl
 
 // Obsolete in 5.4
 int lefwMacroTimingRisers(double min, double max) {
-  if (!lefwFile)
+  if (!lefwFile) {
     return LEFW_UNINITIALIZED;
-  if (!lefwDidInit)
+  }
+  if (!lefwDidInit) {
     return LEFW_BAD_ORDER;
-  if (!lefwIsMacroTiming)
+  }
+  if (!lefwIsMacroTiming) {
     return LEFW_BAD_ORDER;
-  if (lefwWriteEncrypt)
+  }
+  if (lefwWriteEncrypt) {
     encPrint(lefwFile, (char *)"      RISERS %.11g %.11g ;\n", min, max);
-  else
+  } else {
     fprintf(lefwFile, "      RISERS %.11g %.11g ;\n", min, max);
+  }
   lefwLines++;
   return LEFW_OK;
 }
 
 // Obsolete in 5.4
 int lefwMacroTimingFallrs(double min, double max) {
-  if (!lefwFile)
+  if (!lefwFile) {
     return LEFW_UNINITIALIZED;
-  if (!lefwDidInit)
+  }
+  if (!lefwDidInit) {
     return LEFW_BAD_ORDER;
-  if (!lefwIsMacroTiming)
+  }
+  if (!lefwIsMacroTiming) {
     return LEFW_BAD_ORDER;
-  if (lefwWriteEncrypt)
+  }
+  if (lefwWriteEncrypt) {
     encPrint(lefwFile, (char *)"      FALLRS %.11g %.11g ;\n", min, max);
-  else
+  } else {
     fprintf(lefwFile, "      FALLRS %.11g %.11g ;\n", min, max);
+  }
   lefwLines++;
   return LEFW_OK;
 }
 
 // Obsolete in 5.4
 int lefwMacroTimingRisecs(double min, double max) {
-  if (!lefwFile)
+  if (!lefwFile) {
     return LEFW_UNINITIALIZED;
-  if (!lefwDidInit)
+  }
+  if (!lefwDidInit) {
     return LEFW_BAD_ORDER;
-  if (!lefwIsMacroTiming)
+  }
+  if (!lefwIsMacroTiming) {
     return LEFW_BAD_ORDER;
-  if (lefwWriteEncrypt)
+  }
+  if (lefwWriteEncrypt) {
     encPrint(lefwFile, (char *)"      RISECS %.11g %.11g ;\n", min, max);
-  else
+  } else {
     fprintf(lefwFile, "      RISECS %.11g %.11g ;\n", min, max);
+  }
   lefwLines++;
   return LEFW_OK;
 }
 
 // Obsolete in 5.4
 int lefwMacroTimingFallcs(double min, double max) {
-  if (!lefwFile)
+  if (!lefwFile) {
     return LEFW_UNINITIALIZED;
-  if (!lefwDidInit)
+  }
+  if (!lefwDidInit) {
     return LEFW_BAD_ORDER;
-  if (!lefwIsMacroTiming)
+  }
+  if (!lefwIsMacroTiming) {
     return LEFW_BAD_ORDER;
-  if (lefwWriteEncrypt)
+  }
+  if (lefwWriteEncrypt) {
     encPrint(lefwFile, (char *)"      FALLCS %.11g %.11g ;\n", min, max);
-  else
+  } else {
     fprintf(lefwFile, "      FALLCS %.11g %.11g ;\n", min, max);
+  }
   lefwLines++;
   return LEFW_OK;
 }
 
 // Obsolete in 5.4
 int lefwMacroTimingRisesatt1(double min, double max) {
-  if (!lefwFile)
+  if (!lefwFile) {
     return LEFW_UNINITIALIZED;
-  if (!lefwDidInit)
+  }
+  if (!lefwDidInit) {
     return LEFW_BAD_ORDER;
-  if (!lefwIsMacroTiming)
+  }
+  if (!lefwIsMacroTiming) {
     return LEFW_BAD_ORDER;
-  if (lefwWriteEncrypt)
+  }
+  if (lefwWriteEncrypt) {
     encPrint(lefwFile, (char *)"      RISESATT1 %.11g %.11g ;\n", min, max);
-  else
+  } else {
     fprintf(lefwFile, "      RISESATT1 %.11g %.11g ;\n", min, max);
+  }
   lefwLines++;
   return LEFW_OK;
 }
 
 // Obsolete in 5.4
 int lefwMacroTimingFallsatt1(double min, double max) {
-  if (!lefwFile)
+  if (!lefwFile) {
     return LEFW_UNINITIALIZED;
-  if (!lefwDidInit)
+  }
+  if (!lefwDidInit) {
     return LEFW_BAD_ORDER;
-  if (!lefwIsMacroTiming)
+  }
+  if (!lefwIsMacroTiming) {
     return LEFW_BAD_ORDER;
-  if (lefwWriteEncrypt)
+  }
+  if (lefwWriteEncrypt) {
     encPrint(lefwFile, (char *)"      FALLSATT1 %.11g %.11g ;\n", min, max);
-  else
+  } else {
     fprintf(lefwFile, "      FALLSATT1 %.11g %.11g ;\n", min, max);
+  }
   lefwLines++;
   return LEFW_OK;
 }
 
 // Obsolete in 5.4
 int lefwMacroTimingRiset0(double min, double max) {
-  if (!lefwFile)
+  if (!lefwFile) {
     return LEFW_UNINITIALIZED;
-  if (!lefwDidInit)
+  }
+  if (!lefwDidInit) {
     return LEFW_BAD_ORDER;
-  if (!lefwIsMacroTiming)
+  }
+  if (!lefwIsMacroTiming) {
     return LEFW_BAD_ORDER;
-  if (lefwWriteEncrypt)
+  }
+  if (lefwWriteEncrypt) {
     encPrint(lefwFile, (char *)"      RISET0 %.11g %.11g ;\n", min, max);
-  else
+  } else {
     fprintf(lefwFile, "      RISET0 %.11g %.11g ;\n", min, max);
+  }
   lefwLines++;
   return LEFW_OK;
 }
 
 // Obsolete in 5.4
 int lefwMacroTimingFallt0(double min, double max) {
-  if (!lefwFile)
+  if (!lefwFile) {
     return LEFW_UNINITIALIZED;
-  if (!lefwDidInit)
+  }
+  if (!lefwDidInit) {
     return LEFW_BAD_ORDER;
-  if (!lefwIsMacroTiming)
+  }
+  if (!lefwIsMacroTiming) {
     return LEFW_BAD_ORDER;
-  if (lefwWriteEncrypt)
+  }
+  if (lefwWriteEncrypt) {
     encPrint(lefwFile, (char *)"      FALLT0 %.11g %.11g ;\n", min, max);
-  else
+  } else {
     fprintf(lefwFile, "      FALLT0 %.11g %.11g ;\n", min, max);
+  }
   lefwLines++;
   return LEFW_OK;
 }
 
 // Obsolete in 5.4
 int lefwMacroTimingUnateness(const char *unateness) {
-  if (!lefwFile)
+  if (!lefwFile) {
     return LEFW_UNINITIALIZED;
-  if (!lefwDidInit)
+  }
+  if (!lefwDidInit) {
     return LEFW_BAD_ORDER;
-  if (!lefwIsMacroTiming)
+  }
+  if (!lefwIsMacroTiming) {
     return LEFW_BAD_ORDER;
-  if (strcmp(unateness, "INVERT") && strcmp(unateness, "NONINVERT") && strcmp(unateness, "NONUNATE"))
+  }
+  if (strcmp(unateness, "INVERT") && strcmp(unateness, "NONINVERT") && strcmp(unateness, "NONUNATE")) {
     return LEFW_BAD_DATA;
-  if (lefwWriteEncrypt)
+  }
+  if (lefwWriteEncrypt) {
     encPrint(lefwFile, (char *)"      UNATENESS %s ; \n", unateness);
-  else
+  } else {
     fprintf(lefwFile, "      UNATENESS %s ; \n", unateness);
+  }
   lefwLines++;
   return LEFW_OK;
 }
 
 // Obsolete in 5.4
 int lefwEndMacroTiming() {
-  if (!lefwIsMacroTiming)
+  if (!lefwIsMacroTiming) {
     return LEFW_BAD_ORDER;
-  if (lefwWriteEncrypt)
+  }
+  if (lefwWriteEncrypt) {
     encPrint(lefwFile, (char *)"   END TIMING\n\n");
-  else
+  } else {
     fprintf(lefwFile, "   END TIMING\n\n");
+  }
 
   lefwLines++;
   lefwIsMacroTiming = 0;
@@ -8297,20 +9787,26 @@ int lefwEndMacroTiming() {
 }
 
 int lefwAntenna(const char *type, double value) {
-  if (!lefwFile)
+  if (!lefwFile) {
     return LEFW_UNINITIALIZED;
-  if (!lefwDidInit)
+  }
+  if (!lefwDidInit) {
     return LEFW_BAD_ORDER;
-  if (lefwState != LEFW_INIT && lefwState < LEFW_END)
+  }
+  if (lefwState != LEFW_INIT && lefwState < LEFW_END) {
     return LEFW_BAD_ORDER;  // not of the ENDs
-  if (!type || type == 0 || *type == 0)
+  }
+  if (!type || type == 0 || *type == 0) {
     return LEFW_BAD_DATA;
-  if (strcmp(type, "INPUTPINANTENNASIZE") && strcmp(type, "OUTPUTPINANTENNASIZE") && strcmp(type, "INOUTPINANTENNASIZE"))
+  }
+  if (strcmp(type, "INPUTPINANTENNASIZE") && strcmp(type, "OUTPUTPINANTENNASIZE") && strcmp(type, "INOUTPINANTENNASIZE")) {
     return LEFW_BAD_DATA;
-  if (lefwWriteEncrypt)
+  }
+  if (lefwWriteEncrypt) {
     encPrint(lefwFile, (char *)"%s %.11g ;\n", type, value);
-  else
+  } else {
     fprintf(lefwFile, "%s %.11g ;\n", type, value);
+  }
 
   lefwLines++;
   lefwSynArray[LEFW_ANTENNASIZE] = 1;
@@ -8319,20 +9815,26 @@ int lefwAntenna(const char *type, double value) {
 
 int lefwAntennaInputGateArea(double inputGateArea) {
   lefw54Num = LEFW_ANTENNAINPUTGATEAREA;
-  if (!lefwFile)
+  if (!lefwFile) {
     return LEFW_UNINITIALIZED;
-  if (!lefwDidInit)
+  }
+  if (!lefwDidInit) {
     return LEFW_BAD_ORDER;
-  if (lefwState != LEFW_INIT && lefwState < LEFW_END)
+  }
+  if (lefwState != LEFW_INIT && lefwState < LEFW_END) {
     return LEFW_BAD_ORDER;  // not of the ENDs
-  if (lefwSynArray[LEFW_ANTENNAINPUTGATEAREA])
+  }
+  if (lefwSynArray[LEFW_ANTENNAINPUTGATEAREA]) {
     return LEFW_ALREADY_DEFINED;
-  if (versionNum < 5.4)
+  }
+  if (versionNum < 5.4) {
     return LEFW_WRONG_VERSION;
-  if (lefwWriteEncrypt)
+  }
+  if (lefwWriteEncrypt) {
     encPrint(lefwFile, (char *)"ANTENNAINPUTGATEAREA %.11g ;\n", inputGateArea);
-  else
+  } else {
     fprintf(lefwFile, "ANTENNAINPUTGATEAREA %.11g ;\n", inputGateArea);
+  }
   lefwLines++;
   lefwSynArray[LEFW_ANTENNAINPUTGATEAREA] = 1;
   return LEFW_OK;
@@ -8340,20 +9842,26 @@ int lefwAntennaInputGateArea(double inputGateArea) {
 
 int lefwAntennaInOutDiffArea(double inOutDiffArea) {
   lefw54Num = LEFW_ANTENNAINOUTDIFFAREA;
-  if (!lefwFile)
+  if (!lefwFile) {
     return LEFW_UNINITIALIZED;
-  if (!lefwDidInit)
+  }
+  if (!lefwDidInit) {
     return LEFW_BAD_ORDER;
-  if (lefwState != LEFW_INIT && lefwState < LEFW_END)
+  }
+  if (lefwState != LEFW_INIT && lefwState < LEFW_END) {
     return LEFW_BAD_ORDER;  // not of the ENDs
-  if (lefwSynArray[LEFW_ANTENNAINOUTDIFFAREA])
+  }
+  if (lefwSynArray[LEFW_ANTENNAINOUTDIFFAREA]) {
     return LEFW_ALREADY_DEFINED;
-  if (versionNum < 5.4)
+  }
+  if (versionNum < 5.4) {
     return LEFW_WRONG_VERSION;
-  if (lefwWriteEncrypt)
+  }
+  if (lefwWriteEncrypt) {
     encPrint(lefwFile, (char *)"ANTENNAINOUTDIFFAREA %.11g ;\n", inOutDiffArea);
-  else
+  } else {
     fprintf(lefwFile, "ANTENNAINOUTDIFFAREA %.11g ;\n", inOutDiffArea);
+  }
   lefwLines++;
   lefwSynArray[LEFW_ANTENNAINOUTDIFFAREA] = 1;
   return LEFW_OK;
@@ -8361,39 +9869,51 @@ int lefwAntennaInOutDiffArea(double inOutDiffArea) {
 
 int lefwAntennaOutputDiffArea(double outputDiffArea) {
   lefw54Num = LEFW_ANTENNAOUTPUTDIFFAREA;
-  if (!lefwFile)
+  if (!lefwFile) {
     return LEFW_UNINITIALIZED;
-  if (!lefwDidInit)
+  }
+  if (!lefwDidInit) {
     return LEFW_BAD_ORDER;
-  if (lefwState != LEFW_INIT && lefwState < LEFW_END)
+  }
+  if (lefwState != LEFW_INIT && lefwState < LEFW_END) {
     return LEFW_BAD_ORDER;  // not of the ENDs
-  if (lefwSynArray[LEFW_ANTENNAOUTPUTDIFFAREA])
+  }
+  if (lefwSynArray[LEFW_ANTENNAOUTPUTDIFFAREA]) {
     return LEFW_ALREADY_DEFINED;
-  if (versionNum < 5.4)
+  }
+  if (versionNum < 5.4) {
     return LEFW_WRONG_VERSION;
-  if (lefwWriteEncrypt)
+  }
+  if (lefwWriteEncrypt) {
     encPrint(lefwFile, (char *)"ANTENNAOUTPUTDIFFAREA %.11g ;\n", outputDiffArea);
-  else
+  } else {
     fprintf(lefwFile, "ANTENNAOUTPUTDIFFAREA %.11g ;\n", outputDiffArea);
+  }
   lefwLines++;
   lefwSynArray[LEFW_ANTENNAOUTPUTDIFFAREA] = 1;
   return LEFW_OK;
 }
 
 int lefwStartBeginext(const char *name) {
-  if (!lefwFile)
+  if (!lefwFile) {
     return LEFW_UNINITIALIZED;
-  if (!lefwDidInit)
+  }
+  if (!lefwDidInit) {
     return LEFW_BAD_ORDER;
-  if (lefwState == LEFW_BEGINEXT_START || lefwState == LEFW_BEGINEXT)
+  }
+  if (lefwState == LEFW_BEGINEXT_START || lefwState == LEFW_BEGINEXT) {
     return LEFW_BAD_ORDER;
-  if (!name || name == 0 || *name == 0)
+  }
+  if (!name || name == 0 || *name == 0) {
     return LEFW_BAD_DATA;
-  if (lefwWriteEncrypt)
+  }
+  if (lefwWriteEncrypt) {
     encPrint(lefwFile, (char *)"BEGINEXT \"%s\"", name);
+  }
   // \n will be added later
-  else
+  else {
     fprintf(lefwFile, "BEGINEXT \"%s\"", name);
+  }
 
   lefwState = LEFW_BEGINEXT_START;
   lefwLines++;
@@ -8401,18 +9921,23 @@ int lefwStartBeginext(const char *name) {
 }
 
 int lefwBeginextCreator(const char *creatorName) {
-  if (!lefwFile)
+  if (!lefwFile) {
     return LEFW_UNINITIALIZED;
-  if (!lefwDidInit)
+  }
+  if (!lefwDidInit) {
     return LEFW_BAD_ORDER;
-  if (lefwState != LEFW_BEGINEXT_START && lefwState != LEFW_BEGINEXT)
+  }
+  if (lefwState != LEFW_BEGINEXT_START && lefwState != LEFW_BEGINEXT) {
     return LEFW_BAD_ORDER;
-  if (!creatorName || creatorName == 0 || *creatorName == 0)
+  }
+  if (!creatorName || creatorName == 0 || *creatorName == 0) {
     return LEFW_BAD_DATA;
-  if (lefwWriteEncrypt)
+  }
+  if (lefwWriteEncrypt) {
     encPrint(lefwFile, (char *)"\n   CREATOR \"%s\"", creatorName);
-  else
+  } else {
     fprintf(lefwFile, "\n   CREATOR \"%s\"", creatorName);
+  }
 
   lefwState = LEFW_BEGINEXT;
   lefwLines++;
@@ -8421,22 +9946,26 @@ int lefwBeginextCreator(const char *creatorName) {
 
 int lefwBeginextDate() {
   time_t todayTime;
-  char * rettime;
+  char  *rettime;
 
-  if (!lefwFile)
+  if (!lefwFile) {
     return LEFW_UNINITIALIZED;
-  if (!lefwDidInit)
+  }
+  if (!lefwDidInit) {
     return LEFW_BAD_ORDER;
-  if (lefwState != LEFW_BEGINEXT_START && lefwState != LEFW_BEGINEXT)
+  }
+  if (lefwState != LEFW_BEGINEXT_START && lefwState != LEFW_BEGINEXT) {
     return LEFW_BAD_ORDER;
+  }
 
   todayTime                    = time(NULL);         // time in UTC
   rettime                      = ctime(&todayTime);  // convert to string
   rettime[strlen(rettime) - 1] = '\0';               // replace \n with \0
-  if (lefwWriteEncrypt)
+  if (lefwWriteEncrypt) {
     encPrint(lefwFile, (char *)"\n   DATE \"%s\"", rettime);
-  else
+  } else {
     fprintf(lefwFile, "\n   DATE \"%s\"", rettime);
+  }
 
   lefwState = LEFW_BEGINEXT;
   lefwLines++;
@@ -8444,16 +9973,20 @@ int lefwBeginextDate() {
 }
 
 int lefwBeginextRevision(int vers1, int vers2) {
-  if (!lefwFile)
+  if (!lefwFile) {
     return LEFW_UNINITIALIZED;
-  if (!lefwDidInit)
+  }
+  if (!lefwDidInit) {
     return LEFW_BAD_ORDER;
-  if (lefwState != LEFW_BEGINEXT_START && lefwState != LEFW_BEGINEXT)
+  }
+  if (lefwState != LEFW_BEGINEXT_START && lefwState != LEFW_BEGINEXT) {
     return LEFW_BAD_ORDER;
-  if (lefwWriteEncrypt)
+  }
+  if (lefwWriteEncrypt) {
     encPrint(lefwFile, (char *)"\n   REVISION %d.%d", vers1, vers2);
-  else
+  } else {
     fprintf(lefwFile, "\n   REVISION %d.%d", vers1, vers2);
+  }
 
   lefwState = LEFW_BEGINEXT;
   lefwLines++;
@@ -8461,16 +9994,20 @@ int lefwBeginextRevision(int vers1, int vers2) {
 }
 
 int lefwBeginextSyntax(const char *title, const char *string) {
-  if (!lefwFile)
+  if (!lefwFile) {
     return LEFW_UNINITIALIZED;
-  if (!lefwDidInit)
+  }
+  if (!lefwDidInit) {
     return LEFW_BAD_ORDER;
-  if (lefwState != LEFW_BEGINEXT_START && lefwState != LEFW_BEGINEXT)
+  }
+  if (lefwState != LEFW_BEGINEXT_START && lefwState != LEFW_BEGINEXT) {
     return LEFW_BAD_ORDER;
-  if (lefwWriteEncrypt)
+  }
+  if (lefwWriteEncrypt) {
     encPrint(lefwFile, (char *)"\n   - %s %s", title, string);
-  else
+  } else {
     fprintf(lefwFile, "\n   - %s %s", title, string);
+  }
 
   lefwState = LEFW_BEGINEXT;
   lefwLines++;
@@ -8478,16 +10015,20 @@ int lefwBeginextSyntax(const char *title, const char *string) {
 }
 
 int lefwEndBeginext() {
-  if (!lefwFile)
+  if (!lefwFile) {
     return LEFW_UNINITIALIZED;
-  if (!lefwDidInit)
+  }
+  if (!lefwDidInit) {
     return LEFW_BAD_ORDER;
-  if (lefwState != LEFW_BEGINEXT_START && lefwState != LEFW_BEGINEXT)
+  }
+  if (lefwState != LEFW_BEGINEXT_START && lefwState != LEFW_BEGINEXT) {
     return LEFW_BAD_ORDER;
-  if (lefwWriteEncrypt)
+  }
+  if (lefwWriteEncrypt) {
     encPrint(lefwFile, (char *)";\nENDEXT\n\n");
-  else
+  } else {
     fprintf(lefwFile, ";\nENDEXT\n\n");
+  }
 
   lefwState = LEFW_BEGINEXT_END;
   lefwLines++;
@@ -8499,73 +10040,85 @@ int lefwCurrentLineNumber() { return lefwLines; }
 void lefwPrintError(int status) {
   switch (status) {
     case LEFW_OK:
-      if (lefwWriteEncrypt)
+      if (lefwWriteEncrypt) {
         encPrint(lefwFile, (char *)"No Error.\n");
-      else
+      } else {
         fprintf(lefwFile, "No Error.\n");
+      }
       break;
     case LEFW_UNINITIALIZED:
-      if (lefwWriteEncrypt)
+      if (lefwWriteEncrypt) {
         encPrint(lefwFile, (char *)"Need to call lefwInit first.\n");
-      else
+      } else {
         fprintf(lefwFile, "Need to call lefwInit first.\n");
+      }
       break;
     case LEFW_BAD_ORDER:
-      if (lefwWriteEncrypt)
+      if (lefwWriteEncrypt) {
         encPrint(lefwFile, (char *)"Incorrect order of data.\n");
-      else
+      } else {
         fprintf(lefwFile, "Incorrect order of data.\n");
+      }
       break;
     case LEFW_BAD_DATA:
-      if (lefwWriteEncrypt)
+      if (lefwWriteEncrypt) {
         encPrint(lefwFile, (char *)"Invalid data.\n");
-      else
+      } else {
         fprintf(lefwFile, "Invalid data.\n");
+      }
       break;
     case LEFW_ALREADY_DEFINED:
-      if (lefwWriteEncrypt)
+      if (lefwWriteEncrypt) {
         encPrint(lefwFile, (char *)"Section is allowed to define only once.\n");
-      else
+      } else {
         fprintf(lefwFile, "Section is allowed to define only once.\n");
+      }
       break;
     case LEFW_WRONG_VERSION:
-      if (lefwWriteEncrypt)
+      if (lefwWriteEncrypt) {
         encPrint(lefwFile, (char *)"Version number is set before 5.4, API: %s is for 5.4.\n", lefwStateStr[lefw54Num]);
-      else
+      } else {
         fprintf(lefwFile, "Version number is set before 5.4, but 5.4, API: %s is for 5.4.\n", lefwStateStr[lefw54Num]);
+      }
       break;
     case LEFW_MIX_VERSION_DATA:
-      if (lefwWriteEncrypt)
+      if (lefwWriteEncrypt) {
         encPrint(lefwFile, (char *)"You have made both 5.4 & pre 5.4 Antenna API called, which is invalid.\n");
+      }
 
-      else
+      else {
         fprintf(lefwFile, "You have made both 5.4 & pre 5.4 Antenna API called, which is invalid.\n");
+      }
       break;
     case LEFW_OBSOLETE:
-      if (lefwWriteEncrypt)
+      if (lefwWriteEncrypt) {
         encPrint(lefwFile, (char *)"%s is no longer valid in %g.\n", lefwStateStr[lefwObsoleteNum], versionNum);
+      }
 
-      else
+      else {
         fprintf(lefwFile, "%s is no longer valid in %g.\n", lefwStateStr[lefwObsoleteNum], versionNum);
+      }
   }
   return;
 }
 
 void lefwAddComment(const char *comment) {
   if (comment) {
-    if (lefwWriteEncrypt)
+    if (lefwWriteEncrypt) {
       encPrint(lefwFile, (char *)"# %s\n", comment);
-    else
+    } else {
       fprintf(lefwFile, "# %s\n", comment);
+    }
   }
   return;
 }
 
 void lefwAddIndent() {
-  if (lefwWriteEncrypt)
+  if (lefwWriteEncrypt) {
     encPrint(lefwFile, (char *)"   ");
-  else
+  } else {
     fprintf(lefwFile, "   ");
+  }
   return;
 }
 

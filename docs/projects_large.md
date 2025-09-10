@@ -25,7 +25,6 @@ Main features:
 * Focus on synthesizable verilog. It has to support packages, structs, and interfaces but not need
 to handle classes.
 * Key benchmarks to handle are (in order):
-    * CHISEL generated verilog. Mostly firesim (https://fires.im/) generated for rocket and BOOM
     * Titan23 (http://www.eecg.utoronto.ca/~kmurray/titan.html).
     * Anubis (https://github.com/masc-ucsc/anubis)
 * Regression set
@@ -48,9 +47,9 @@ generation. Pyrope and Javascript code generation do not need bitwidth are are
 the easier to fix. Pyrope may be the easiest because it does not need any support
 code like jops or sops.
 
-## [medium] LNAST to C++ 
+## [medium] LNAST to C++
 
-Dependence: 
+Dependence:
  OPT1: LNAST bitwidth and sops
  OPT2: dops
 
@@ -105,10 +104,9 @@ in a browser client as the program executes/edits the code.
 
 The LNAST javascript does not need the LNAST bitwidth like LNAST to C++ and
 LNAST to Verilog, it should be able to work with just generated LNAST from
-passes like inou.prp/inou.verilog (not inou.chisel because it needs translation
-steps)
+passes like inou.prp/inou.verilog
 
-## [medium] LNAST to  Verilog 
+## [medium] LNAST to  Verilog
 
 Dependence: LNAST bitwidth
 
@@ -203,12 +201,10 @@ to create some small but useful tools around hif. Some projects:
 
 Dependency: inou.cgen.pyrope and LNAST bitwidth
 
-This pass is needed to create less verbose CHISEL and Pyrope code generation. 
+This pass is needed to create less verbose Pyrope code generation.
 
 The LGraph can have bitwidth information for each dpin. This is needed for
-Verilog code generation, but not needed for Pyrope or CHISEL.  CHISEL can
-perform local bitwidth inference and Pyrope can perform global bitwidth
-inference.
+Verilog code generation, but not needed for Pyrope.
 
 A new pass should remove redundant bitwidth information. The information is
 redundant because the pass/bitwidth can regenerate it if there is enough
@@ -217,9 +213,8 @@ global bitwidth. The information left should be enough for the bitwidth pass to
 regenerate it.
 
 * Local bitwidth: It is possible to leave the bitwidth information in many
-places and it will have the same results, but for CHISEL the inputs should be
-sized. The storage (memories/flops) should have bitwidth when can not be
-inferred from the inputs.
+places and it will have the same results. The storage (memories/flops) should
+have bitwidth when can not be inferred from the inputs.
 
 * Global bitwidth: Pyrope bitwidth inference goes across the call hierarchy.
 This means that a module could have no bitwidth information at all. We start
@@ -241,16 +236,15 @@ lhd new prp:my_new_package  # equiv to cargo new
 lhd test                # equiv to cargo test
 lhd build               # equiv to cargo build
 lhd run                 # equiv to cargo build
-lhd run --bin top       # similar to cargo, but pick top             
+lhd run --bin top       # similar to cargo, but pick top
 lhd bench --bench xxx   # similar to cargo
 ...
 ```
 
-A difference from cargo is that cargo reads just rust. lhd reads verilog,
-pyrope, CHISEL. This means that some passes like "lhd new" must specify the
+A difference from cargo is that cargo reads just rust. lhd reads verilog and
+pyrope. This means that some passes like "lhd new" must specify the
 languages to generate.
 
-CHISEL may need a build.bst to generate the chirrtl pb needed by livehd.
 
 The lhd.toml is somewhat similar to cargo. The package fields could be the
 same, the version and dependance (relative or github). For the moment, there is
@@ -264,9 +258,9 @@ copied there and compiled.  Since LiveHD allows hierarchies, we can use two
 subpackages with different versions. E.g: we can have a rocket version 1.1 in
 top and a package (controller) can depend on rocket 1.0 (this should be fine).
 
-* Allow to have pyrope/verilog/chisel libraries (adder, multipler, corex....) as packages
+* Allow to have pyrope/verilog libraries (adder, multipler, corex....) as packages
 * Allow to specify a specific library/packages with SemVer
-* It would be neat if it can generate bazel scripts to run tests, compile 
+* It would be neat if it can generate bazel scripts to run tests, compile
 * It should allow to specify versions on software and toolchains
 
 There lhd.toml specifies sources, tests, dependences....
@@ -292,7 +286,7 @@ https://github.com/olofk/edalize
 Things that lhd is not:
 
 * It is not a build/make/bazel alternative. It tracks repos, but it has a
-  "toolchain" to decide/select how to run the tools. 
+  "toolchain" to decide/select how to run the tools.
 
 * It does not have tons of options. The options are in toolchains that can be
   configured (not in the lhd.toml that should be quite minimal). The default is
@@ -399,7 +393,7 @@ some blocks. It uses a placer and AI, but the code is quite messy. Namely:
 
 The idea would be something more automatic. E.g:
 
-> lgraph.open X |> pass.compiler |> pass.synth |> pass.circuit_training 
+> lgraph.open X |> pass.compiler |> pass.synth |> pass.circuit_training
 
 
 It would be good if the project is tested also with FPGAs and check with something like nextpnr/vivado

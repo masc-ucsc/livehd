@@ -79,9 +79,8 @@ public:
   [[nodiscard]] std::string to_binary() const;
   [[nodiscard]] std::string to_verilog() const;
   [[nodiscard]] std::string to_pyrope() const;
-  [[nodiscard]] std::string to_firrtl() const;
 
-  // TODO for from_verilog from_firrtl ...
+  // TODO for from_verilog ...
   static Lconst from_pyrope(std::string_view txt);
   static Lconst from_binary(std::string_view txt, bool unsigned_result);
   static Lconst from_string(std::string_view txt);
@@ -214,10 +213,10 @@ public:
   const Number get_raw_num() const { return num; }  // FOR DEBUG ONLY
 };
 
-#include "fmt/format.h"
+#include <format>
 
 template <>
-struct fmt::formatter<Lconst> : formatter<string_view> {
+struct std::formatter<Lconst> : formatter<string_view> {
   // parse is inherited from formatter<string_view>.
   template <typename FormatContext>
   auto format(Lconst c, FormatContext &ctx) const {

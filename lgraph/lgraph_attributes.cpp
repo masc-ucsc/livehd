@@ -155,6 +155,6 @@ void Lgraph_attributes::set_type_const(Index_id nid, int64_t value) { set_type_c
 
 void Lgraph_attributes::dump_source_map() const {
   for (const auto &it : node_source_map) {
-    fmt::print("n:{} src:{}\n", it.first.get_nid(), it.second);
+    std::print("n:{} src:{}\n", it.first.get_nid(), it.second);
   }
 }

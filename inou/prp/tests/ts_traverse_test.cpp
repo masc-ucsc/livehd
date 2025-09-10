@@ -1,21 +1,23 @@
 
-#include "tree_sitter/api.h"
-#include <iostream>
-#include <sstream>
 #include <stdio.h>
 #include <string.h>
+
+#include <iostream>
+#include <sstream>
 #include <string>
+
+#include "tree_sitter/api.h"
 
 extern "C" TSLanguage *tree_sitter_pyrope();
 
-#include <iostream>
-#include <vector>
-#include <string>
 #include <filesystem>
 #include <fstream>
+#include <iostream>
+#include <string>
+#include <vector>
 
 std::string read_whole_file(const std::string &filename) {
-  auto ss = std::ostringstream{};
+  auto          ss = std::ostringstream{};
   std::ifstream file(filename);
   ss << file.rdbuf();
 
@@ -23,8 +25,7 @@ std::string read_whole_file(const std::string &filename) {
 }
 
 int main(int argc, const char **argv) {
-
-  if (argc!=2) {
+  if (argc != 2) {
     std::cerr << "usage:\n";
     std::cerr << "\t" << argv[0] << " prp_file\n";
     exit(-3);
@@ -36,8 +37,7 @@ int main(int argc, const char **argv) {
 
   ts_parser_set_language(parser, tree_sitter_pyrope());
 
-    TSTree *tst_tree = ts_parser_parse_string(parser, NULL, prp_file.data(), prp_file.size());
-
+  TSTree *tst_tree = ts_parser_parse_string(parser, NULL, prp_file.data(), prp_file.size());
 
   std::cout << "Code reprinted:" << std::endl;
 
@@ -58,8 +58,8 @@ int main(int argc, const char **argv) {
     }
 
     if (num_children == 0) {
-      auto start = ts_node_start_byte(current_node);
-      auto end = ts_node_end_byte(current_node);
+      auto start  = ts_node_start_byte(current_node);
+      auto end    = ts_node_end_byte(current_node);
       auto length = end - start;
 
       std::string current_code = prp_file.substr(start, length);
@@ -76,4 +76,7 @@ int main(int argc, const char **argv) {
 }
 
 // command line to compile:
-//  g++ -std=c++17 -I ./tree-sitter-verilog/node_modules/tree-sitter/vendor/tree-sitter/lib/include/ -I ./tree-sitter-verilog/node_modules/tree-sitter/vendor/tree-sitter/lib/src/ tokenizer.cpp ./tree-sitter-verilog/build/Release/obj.target/tree_sitter_verilog_binding/src/parser.o ./tree-sitter-verilog/node_modules/tree-sitter/build/Release/tree_sitter.a
+//  g++ -std=c++17 -I ./tree-sitter-verilog/node_modules/tree-sitter/vendor/tree-sitter/lib/include/ -I
+//  ./tree-sitter-verilog/node_modules/tree-sitter/vendor/tree-sitter/lib/src/ tokenizer.cpp
+//  ./tree-sitter-verilog/build/Release/obj.target/tree_sitter_verilog_binding/src/parser.o
+//  ./tree-sitter-verilog/node_modules/tree-sitter/build/Release/tree_sitter.a

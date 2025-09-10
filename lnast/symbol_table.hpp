@@ -55,8 +55,9 @@ private:
   static std::pair<std::string_view, std::string_view> get_var_field(std::string_view key) {
     auto var   = Bundle::get_first_level(key);
     auto field = Bundle::get_all_but_first_level(key);
-    if (field.empty())
+    if (field.empty()) {
       field = "0";
+    }
 
     return std::make_pair(var, field);
   }

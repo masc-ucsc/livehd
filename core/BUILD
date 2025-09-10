@@ -18,7 +18,7 @@ cc_library(
         ],
     ),
     hdrs = glob(["*.hpp"]),
-    copts = COPTS,
+    copts = ["-std=c++23"] + COPTS,
     defines = select({
         ":use_profiling": [
             "LIVEHD_PROFILING=1",
@@ -29,14 +29,13 @@ cc_library(
     linkopts = ["-lpthread"],
     visibility = ["//visibility:public"],
     deps = [
-        "@boost//:multiprecision",
+        "@boost.multiprecision",
         "@abseil-cpp//absl/container:btree",
         "@abseil-cpp//absl/container:flat_hash_map",
         "@abseil-cpp//absl/container:flat_hash_set",
         "@abseil-cpp//absl/container:node_hash_map",
         "@abseil-cpp//absl/strings",
         "@abseil-cpp//absl/types:span",
-        "@fmt",
         "@iassert",
     ] + select({
         ":use_profiling": [
@@ -57,6 +56,16 @@ cc_test(
     deps = [
         ":core",
         "@googletest//:gtest_main",
+    ],
+)
+
+cc_binary(
+    name = "vcd_sample",
+    srcs = [
+        "tests/vcd_sample.cpp", "tests/vcd_sample.hpp"
+    ],
+    deps = [
+        ":core",
     ],
 )
 

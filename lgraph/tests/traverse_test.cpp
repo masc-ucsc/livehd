@@ -1,11 +1,12 @@
 //  This file is distributed under the BSD 3-Clause License. See LICENSE for details.
 
+#include <format>
+#include <iostream>
 #include <string>
 #include <vector>
 
 #include "gmock/gmock.h"
 #include "gtest/gtest.h"
-
 #include "lgedgeiter.hpp"
 #include "lgraph.hpp"
 #include "lhtree.hpp"
@@ -25,15 +26,16 @@ protected:
     full_fwd_order.resize(absl_fwd_pos.size());
 
     for (auto &node : node_order) {
-      if (node.is_type_io())
+      if (node.is_type_io()) {
         continue;
+      }
       const auto &fwd_pos = Fwd_pos_attr::ref(lg_root)->get(node.get_compact());
       I(fwd_pos <= full_fwd_order.size());
       I(full_fwd_order[fwd_pos - 1].empty());
       I(fwd_pos > 0);
 
       std::string txt
-          = fmt::format("name:{} lg:{} debug:{}", node.get_name(), node.get_class_lgraph()->get_name(), node.debug_name());
+          = std::format("name:{} lg:{} debug:{}", node.get_name(), node.get_class_lgraph()->get_name(), node.debug_name());
       full_fwd_order[fwd_pos - 1] = txt;
       pos++;
     }
@@ -43,9 +45,10 @@ protected:
 
     std::vector<std::string> fwd_order;
     for (size_t i = 0; i < full_fwd_order.size(); ++i) {
-      // fmt::print("full_fwd_order: {}\n",full_fwd_order[i]);
-      if (full_fwd_order[i].rfind("name:leaf") != std::string::npos)
+      // std::print("full_fwd_order: {}\n",full_fwd_order[i]);
+      if (full_fwd_order[i].rfind("name:leaf") != std::string::npos) {
         fwd_order.emplace_back(full_fwd_order[i]);
+      }
     }
 
     pos = 1;
@@ -62,12 +65,12 @@ protected:
       EXPECT_EQ(fwd_pos,absl_fwd_pos[node.get_compact()]);
       EXPECT_EQ(bwd_pos,absl_bwd_pos[node.get_compact()]);
 
-      fmt::print("pos:{} fwd_pos:{}\n",pos, fwd_pos);
+      std::print("pos:{} fwd_pos:{}\n",pos, fwd_pos);
 #else
 #endif
       std::string txt
-          = fmt::format("name:{} lg:{} debug:{}", node.get_name(), node.get_class_lgraph()->get_name(), node.debug_name());
-      // fmt::print("iterator_order: {}\n",txt);
+          = std::format("name:{} lg:{} debug:{}", node.get_name(), node.get_class_lgraph()->get_name(), node.debug_name());
+      // std::print("iterator_order: {}\n",txt);
       iterator_order.push_back(txt);
 
       // EXPECT_EQ(fwd_pos,pos);
@@ -78,7 +81,7 @@ protected:
     EXPECT_EQ(iterator_order.size(), fwd_order.size());
 
     for (size_t i = 0; i < fwd_order.size(); ++i) {
-      // fmt::print("iter:{}  vs expected:{}\n",iterator_order[i], fwd_order[i]);
+      // std::print("iter:{}  vs expected:{}\n",iterator_order[i], fwd_order[i]);
       EXPECT_EQ(iterator_order[i], fwd_order[i]);
     }
   }

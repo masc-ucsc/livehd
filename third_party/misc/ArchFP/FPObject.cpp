@@ -34,8 +34,9 @@ void FPObject::outputHotSpotLayout(std::ostream& o, double startX, double startY
 }
 
 std::string FPObject::getUniqueName() const {
-  if (name == " " || name == "")
+  if (name == " " || name == "") {
     return name;
+  }
 
   return absl::StrCat(name, std::to_string(Name2Count(name)));
 }
@@ -43,15 +44,17 @@ std::string FPObject::getUniqueName() const {
 double FPObject::calcX(double startX) const {
   if (xReflect) {
     return xLeft[xMirrorDepth - 1] - (startX + x - xRight[xMirrorDepth - 1] + width);
-  } else
+  } else {
     return startX + x;
+  }
 }
 
 double FPObject::calcY(double startY) const {
   if (yReflect) {
     return yTop[yMirrorDepth - 1] - (startY + y - yBottom[yMirrorDepth - 1] + height);
-  } else
+  } else {
     return startY + y;
+  }
 }
 
 unsigned int FPObject::findNode(Node_tree& tree, lh::Tree_index tidx, double cX, double cY) {
@@ -81,7 +84,7 @@ unsigned int FPObject::findNode(Node_tree& tree, lh::Tree_index tidx, double cX,
         continue;
       }
 
-      // fmt::print("assigning child subnode {} to parent hier ({}, {})\n", child->debug_name(), child->get_hidx().level,
+      // std::print("assigning child subnode {} to parent hier ({}, {})\n", child->debug_name(), child->get_hidx().level,
       // child->get_hidx().pos);
 
       // write placement information to subnode as well
@@ -114,7 +117,7 @@ unsigned int FPObject::outputLgraphLayout(Node_tree& tree, lh::Tree_index tidx, 
   while (child_idx != tree.invalid_index()) {
     Node* child = tree.ref_data(child_idx);
 
-    // fmt::print("testing child node {} with parent hier ({}, {})\n", child->debug_name(), child->get_hidx().level,
+    // std::print("testing child node {} with parent hier ({}, {})\n", child->debug_name(), child->get_hidx().level,
     // child->get_hidx().pos);
     if (child->get_type_op() != getType() || child->has_place()) {
       child_idx = tree.get_sibling_next(child_idx);
@@ -123,9 +126,7 @@ unsigned int FPObject::outputLgraphLayout(Node_tree& tree, lh::Tree_index tidx, 
 
     found = true;
     if (verbose) {
-      fmt::print("assigning child node {} to parent hier ({})\n",
-                 child->debug_name(),
-                 child->get_hidx());
+      std::print("assigning child node {} to parent hier ({})\n", child->debug_name(), child->get_hidx());
     }
 
     Ann_place p(calcX(startX), calcY(startY), getWidth(), getHeight());

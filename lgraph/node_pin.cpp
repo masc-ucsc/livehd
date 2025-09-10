@@ -3,6 +3,8 @@
 #include "node_pin.hpp"
 
 #include <cstdint>
+#include <format>
+#include <iostream>
 
 #include "lgraph.hpp"
 #include "lgtuple.hpp"
@@ -383,7 +385,7 @@ std::string Node_pin::debug_name() const {
 #ifndef NDEBUG
   static uint16_t conta = 8192;
   if (conta++ == 0) {
-    fmt::print("WARNING: Node_pin::debug_name should not be called during release (Slowww!)\n");
+    std::cout << "WARNING: Node_pin::debug_name should not be called during release (Slowww!)\n";
   }
 #endif
   if (idx == 0) {  // legal for invalid node/pins

@@ -287,7 +287,7 @@ public:
   Tree_level level;
   Tree_pos   pos;
 
-  constexpr Tree_index() : level(-1), pos(-1){};
+  constexpr Tree_index() : level(-1), pos(-1) {};
   constexpr Tree_index(Tree_level l, Tree_pos i) : level(l), pos(i) {}
   constexpr Tree_index(const Tree_index &ti) : level(ti.level), pos(ti.pos) {}
 

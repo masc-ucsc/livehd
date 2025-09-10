@@ -2,10 +2,9 @@
 #pragma once
 
 #include <cctype>
+#include <format>
 #include <iostream>
-#include <fmt/format.h>
-#include <fmt/os.h>
-#include <fmt/color.h>
+
 #include "absl/strings/str_cat.h"
 
 class Lnast_token {
@@ -27,12 +26,12 @@ public:
 
   std::string get_string() {
     switch (kind) {
-#define KIND_STR(KIND)              \
-      case Kind::KIND:              \
-        if (text.empty())           \
-          return #KIND;             \
-        else                        \
-          return #KIND ", " + text;
+#define KIND_STR(KIND) \
+  case Kind::KIND:     \
+    if (text.empty())  \
+      return #KIND;    \
+    else               \
+      return #KIND ", " + text;
 #define TOKEN_MK(NAME)           KIND_STR(NAME)
 #define TOKEN_PN(NAME, SPELLING) KIND_STR(NAME)
 #define TOKEN_LT(NAME)           KIND_STR(NAME)
@@ -48,21 +47,19 @@ public:
 
   bool is_ty() {
     switch (kind) {
-#define TOKEN_TY(SPELLING)      \
-      case Kind::ty_##SPELLING: \
-        return true;
+#define TOKEN_TY(SPELLING) \
+  case Kind::ty_##SPELLING: return true;
 #include "lnast_tokens.def"
-      default:
-        return false;
+      default: return false;
     }
     return false;
   }
 
   std::string_view get_text() { return text; }
-  Kind get_kind() { return kind; }
+  Kind             get_kind() { return kind; }
 
 private:
-  Kind kind;
+  Kind        kind;
   std::string text;
 };
 
@@ -74,19 +71,15 @@ public:
 protected:
   std::istream& is;
 
-  int get_char();
+  int  get_char();
   void put_char(char);
-  
-  Lnast_token form_token(Lnast_token::Kind kind, std::string_view str) {
-    return Lnast_token(kind, str);
-  }
 
-  Lnast_token form_token(Lnast_token::Kind kind) {
-    return Lnast_token(kind, "");
-  }
+  Lnast_token form_token(Lnast_token::Kind kind, std::string_view str) { return Lnast_token(kind, str); }
+
+  Lnast_token form_token(Lnast_token::Kind kind) { return Lnast_token(kind, ""); }
 
   void lex_comment();
-  
+
   Lnast_token lex_identifier(char);
   Lnast_token lex_type();
   Lnast_token lex_keyword_or_function_or_identifier(char);

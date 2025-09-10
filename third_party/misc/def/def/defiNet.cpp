@@ -88,8 +88,9 @@ defiSubnet::~defiSubnet() { Destroy(); }
 
 void defiSubnet::setName(const char* name) {
   int len = strlen(name) + 1;
-  if (len > nameSize_)
+  if (len > nameSize_) {
     bumpName(len);
+  }
   strcpy(name_, defData->DEFCASE(name));
 }
 
@@ -107,8 +108,9 @@ void defiSubnet::addMustPin(const char* instance, const char* pin, int syn) {
 void defiSubnet::addPin(const char* instance, const char* pin, int syn) {
   int len;
 
-  if (numPins_ == pinsAllocated_)
+  if (numPins_ == pinsAllocated_) {
     bumpPins(pinsAllocated_ * 2);
+  }
 
   len                  = strlen(instance) + 1;
   instances_[numPins_] = (char*)malloc(len);
@@ -169,8 +171,9 @@ void defiSubnet::addPath(defiPath* p, int reset, int netOsnet, int* needCbk) {
 
   paths_[numPaths_++] = new defiPath(p);
 
-  if (numPaths_ == pathsAllocated_)
+  if (numPaths_ == pathsAllocated_) {
     *needCbk = 1;  // pre-warn the parser it needs to realloc next time
+  }
 }
 
 void defiSubnet::addWire(const char* type) {
@@ -183,8 +186,9 @@ void defiSubnet::addWire(const char* type) {
     for (i = 0; i < numWires_; i++) {
       array[i] = wires_[i];
     }
-    if (wires_)
+    if (wires_) {
       free((char*)(wires_));
+    }
     wires_ = array;
   }
   wire = wires_[numWires_] = new defiWire(defData);
@@ -193,15 +197,16 @@ void defiSubnet::addWire(const char* type) {
 }
 
 void defiSubnet::addWirePath(defiPath* p, int reset, int netOsnet, int* needCbk) {
-  if (numWires_ > 0)
+  if (numWires_ > 0) {
     wires_[numWires_ - 1]->addPath(p, reset, netOsnet, needCbk);
-  else
+  } else {
     // Something screw up, can't be both be zero.
     defiError(0,
               6080,
               "ERROR (DEFPARS-6080): An internal error has occurred. The index number for the SUBNET wires array is less then or "
               "equal to 0.\nContact Cadence Customer Support with this error information.",
               defData);
+  }
 }
 
 const char* defiSubnet::name() const { return name_; }
@@ -213,26 +218,30 @@ const char* defiSubnet::nonDefaultRule() const { return nonDefaultRule_; }
 int defiSubnet::numConnections() const { return numPins_; }
 
 const char* defiSubnet::instance(int index) const {
-  if (index >= 0 && index < numPins_)
+  if (index >= 0 && index < numPins_) {
     return instances_[index];
+  }
   return 0;
 }
 
 const char* defiSubnet::pin(int index) const {
-  if (index >= 0 && index < numPins_)
+  if (index >= 0 && index < numPins_) {
     return pins_[index];
+  }
   return 0;
 }
 
 int defiSubnet::pinIsMustJoin(int index) const {
-  if (index >= 0 && index < numPins_)
+  if (index >= 0 && index < numPins_) {
     return (int)(musts_[index]);
+  }
   return 0;
 }
 
 int defiSubnet::pinIsSynthesized(int index) const {
-  if (index >= 0 && index < numPins_)
+  if (index >= 0 && index < numPins_) {
     return (int)(synthesized_[index]);
+  }
   return 0;
 }
 
@@ -246,8 +255,9 @@ int defiSubnet::isRouted() const { return (int)(isRouted_); }
 int defiSubnet::isCover() const { return (int)(isCover_); }
 
 void defiSubnet::bumpName(long long size) {
-  if (name_)
+  if (name_) {
     free(name_);
+  }
   name_     = (char*)malloc(size);
   nameSize_ = size;
   name_[0]  = '\0';
@@ -335,8 +345,9 @@ void defiSubnet::print(FILE* f) const {
   fprintf(f, " subnet '%s'", name_);
   fprintf(f, "\n");
 
-  if (hasNonDefaultRule())
+  if (hasNonDefaultRule()) {
     fprintf(f, "  nondefault rule %s\n", nonDefaultRule());
+  }
 
   if (numConnections()) {
     fprintf(f, "  Pins:\n");
@@ -365,28 +376,32 @@ void defiSubnet::print(FILE* f) const {
 int defiSubnet::numWires() const { return numWires_; }
 
 defiWire* defiSubnet::wire(int index) {
-  if (index >= 0 && index < numWires_)
+  if (index >= 0 && index < numWires_) {
     return wires_[index];
+  }
   return 0;
 }
 
 const defiWire* defiSubnet::wire(int index) const {
-  if (index >= 0 && index < numWires_)
+  if (index >= 0 && index < numWires_) {
     return wires_[index];
+  }
   return 0;
 }
 
 // WMD -- this will be removed after the next release
 defiPath* defiSubnet::path(int index) {
-  if (index >= 0 && index < numPaths_)
+  if (index >= 0 && index < numPaths_) {
     return paths_[index];
+  }
   return 0;
 }
 
 // WMD -- this will be removed after the next release
 const defiPath* defiSubnet::path(int index) const {
-  if (index >= 0 && index < numPaths_)
+  if (index >= 0 && index < numPaths_) {
     return paths_[index];
+  }
   return 0;
 }
 
@@ -398,7 +413,9 @@ void defiSubnet::bumpPaths(long long size) {
   long long  i;
   defiPath** newPaths = new defiPath*[size];
 
-  for (i = 0; i < numPaths_; i++) newPaths[i] = paths_[i];
+  for (i = 0; i < numPaths_; i++) {
+    newPaths[i] = paths_[i];
+  }
 
   pathsAllocated_ = size;
 
@@ -429,8 +446,9 @@ defiVpin::~defiVpin() { Destroy(); }
 
 void defiVpin::Destroy() {
   free(name_);
-  if (layer_)
+  if (layer_) {
     free(layer_);
+  }
 }
 
 void defiVpin::setBounds(int xl, int yl, int xh, int yh) {
@@ -529,8 +547,9 @@ void defiShield::addPath(defiPath* p, int reset, int netOsnet, int* needCbk) {
     }
   }
   paths_[numPaths_++] = new defiPath(p);
-  if (numPaths_ == pathsAllocated_)
+  if (numPaths_ == pathsAllocated_) {
     *needCbk = 1;  // pre-warn the parser it needs to realloc next time
+  }
 }
 
 void defiShield::clear() {
@@ -559,7 +578,9 @@ void defiShield::bumpPaths(long long size) {
 
   defiPath** newPaths = new defiPath*[size];
 
-  for (i = 0; i < numPaths_; i++) newPaths[i] = paths_[i];
+  for (i = 0; i < numPaths_; i++) {
+    newPaths[i] = paths_[i];
+  }
 
   pathsAllocated_ = size;
 
@@ -573,14 +594,16 @@ int defiShield::numPaths() const { return numPaths_; }
 const char* defiShield::shieldName() const { return name_; }
 
 defiPath* defiShield::path(int index) {
-  if (index >= 0 && index < numPaths_)
+  if (index >= 0 && index < numPaths_) {
     return paths_[index];
+  }
   return 0;
 }
 
 const defiPath* defiShield::path(int index) const {
-  if (index >= 0 && index < numPaths_)
+  if (index >= 0 && index < numPaths_) {
     return paths_[index];
+  }
   return 0;
 }
 
@@ -601,8 +624,9 @@ void defiWire::Init(const char* type, const char* wireShieldName) {
   if (wireShieldName) {
     wireShieldName_ = (char*)malloc(strlen(wireShieldName) + 1);
     strcpy(wireShieldName_, wireShieldName);
-  } else
+  } else {
     wireShieldName_ = 0;
+  }
   numPaths_       = 0;
   pathsAllocated_ = 0;
   paths_          = 0;
@@ -643,8 +667,9 @@ void defiWire::addPath(defiPath* p, int reset, int netOsnet, int* needCbk) {
 
   paths_[numPaths_++] = new defiPath(p);
 
-  if (numPaths_ == pathsAllocated_)
+  if (numPaths_ == pathsAllocated_) {
     *needCbk = 1;  // pre-warn the parser it needs to realloc next time
+  }
 }
 
 void defiWire::clear() {
@@ -676,7 +701,9 @@ void defiWire::bumpPaths(long long size) {
   long long  i;
   defiPath** newPaths = new defiPath*[size];
 
-  for (i = 0; i < numPaths_; i++) newPaths[i] = paths_[i];
+  for (i = 0; i < numPaths_; i++) {
+    newPaths[i] = paths_[i];
+  }
 
   pathsAllocated_ = size;
   delete[] paths_;
@@ -690,14 +717,16 @@ const char* defiWire::wireType() const { return type_; }
 const char* defiWire::wireShieldNetName() const { return wireShieldName_; }
 
 defiPath* defiWire::path(int index) {
-  if (index >= 0 && index < numPaths_)
+  if (index >= 0 && index < numPaths_) {
     return paths_[index];
+  }
   return 0;
 }
 
 const defiPath* defiWire::path(int index) const {
-  if (index >= 0 && index < numPaths_)
+  if (index >= 0 && index < numPaths_) {
     return paths_[index];
+  }
   return 0;
 }
 
@@ -800,30 +829,42 @@ void defiNet::Destroy() {
   free((char*)(propDValues_));
   free((char*)(propTypes_));
   free((char*)(subnets_));
-  if (source_)
+  if (source_) {
     free(source_);
-  if (pattern_)
+  }
+  if (pattern_) {
     free(pattern_);
-  if (shieldNet_)
+  }
+  if (shieldNet_) {
     free(shieldNet_);
-  if (original_)
+  }
+  if (original_) {
     free(original_);
-  if (use_)
+  }
+  if (use_) {
     free(use_);
-  if (nonDefaultRule_)
+  }
+  if (nonDefaultRule_) {
     free(nonDefaultRule_);
-  if (wlayers_)
+  }
+  if (wlayers_) {
     free((char*)(wlayers_));
-  if (slayers_)
+  }
+  if (slayers_) {
     free((char*)(slayers_));
-  if (sdist_)
+  }
+  if (sdist_) {
     free((char*)(sdist_));
-  if (wdist_)
+  }
+  if (wdist_) {
     free((char*)(wdist_));
-  if (sleft_)
+  }
+  if (sleft_) {
     free((char*)(sleft_));
-  if (sright_)
+  }
+  if (sright_) {
     free((char*)(sright_));
+  }
 }
 
 defiNet::~defiNet() { Destroy(); }
@@ -831,8 +872,9 @@ defiNet::~defiNet() { Destroy(); }
 void defiNet::setName(const char* name) {
   int len = strlen(name) + 1;
   clear();
-  if (len > nameSize_)
+  if (len > nameSize_) {
     bumpName(len);
+  }
   strcpy(name_, defData->DEFCASE(name));
 }
 
@@ -845,8 +887,9 @@ void defiNet::addMustPin(const char* instance, const char* pin, int syn) {
 void defiNet::addPin(const char* instance, const char* pin, int syn) {
   int len;
 
-  if (numPins_ == pinsAllocated_)
+  if (numPins_ == pinsAllocated_) {
     bumpPins(pinsAllocated_ * 2);
+  }
 
   len                  = strlen(instance) + 1;
   instances_[numPins_] = (char*)malloc(len);
@@ -870,8 +913,9 @@ void defiNet::setWeight(int w) {
 void defiNet::addProp(const char* name, const char* value, const char type) {
   int len;
 
-  if (numProps_ == propsAllocated_)
+  if (numProps_ == propsAllocated_) {
     bumpProps(propsAllocated_ * 2);
+  }
 
   len                   = strlen(name) + 1;
   propNames_[numProps_] = (char*)malloc(len);
@@ -890,8 +934,9 @@ void defiNet::addProp(const char* name, const char* value, const char type) {
 void defiNet::addNumProp(const char* name, const double d, const char* value, const char type) {
   int len;
 
-  if (numProps_ == propsAllocated_)
+  if (numProps_ == propsAllocated_) {
     bumpProps(propsAllocated_ * 2);
+  }
 
   len                   = strlen(name) + 1;
   propNames_[numProps_] = (char*)malloc(len);
@@ -908,8 +953,9 @@ void defiNet::addNumProp(const char* name, const double d, const char* value, co
 }
 
 void defiNet::addSubnet(defiSubnet* subnet) {
-  if (numSubnets_ >= subnetsAllocated_)
+  if (numSubnets_ >= subnetsAllocated_) {
     bumpSubnets(subnetsAllocated_ * 2);
+  }
 
   subnets_[numSubnets_++] = subnet;
 }
@@ -934,9 +980,12 @@ void defiNet::addWire(const char* type, const char* wireShieldName) {
     int        i;
     wiresAllocated_ = wiresAllocated_ ? wiresAllocated_ * 2 : 2;
     array           = (defiWire**)malloc(sizeof(defiWire*) * wiresAllocated_);
-    for (i = 0; i < numWires_; i++) array[i] = wires_[i];
-    if (wires_)
+    for (i = 0; i < numWires_; i++) {
+      array[i] = wires_[i];
+    }
+    if (wires_) {
       free((char*)(wires_));
+    }
     wires_ = array;
   }
   wire = wires_[numWires_] = new defiWire(defData);
@@ -945,15 +994,16 @@ void defiNet::addWire(const char* type, const char* wireShieldName) {
 }
 
 void defiNet::addWirePath(defiPath* p, int reset, int netOsnet, int* needCbk) {
-  if (numWires_ > 0)
+  if (numWires_ > 0) {
     wires_[numWires_ - 1]->addPath(p, reset, netOsnet, needCbk);
-  else
+  } else {
     // Something screw up, can't be both be zero.
     defiError(0,
               6081,
               "ERROR (DEFPARS-6081): An internal error has occurred. The index number for the NET PATH wires array is less then or "
               "equal to 0.\nContact Cadence Customer Support with this error information.",
               defData);
+  }
 }
 
 void defiNet::addShield(const char* name) {
@@ -963,9 +1013,12 @@ void defiNet::addShield(const char* name) {
     int          i;
     shieldsAllocated_ = shieldsAllocated_ ? shieldsAllocated_ * 2 : 2;
     array             = (defiShield**)malloc(sizeof(defiShield*) * shieldsAllocated_);
-    for (i = 0; i < numShields_; i++) array[i] = shields_[i];
-    if (shields_)
+    for (i = 0; i < numShields_; i++) {
+      array[i] = shields_[i];
+    }
+    if (shields_) {
       free((char*)(shields_));
+    }
     shields_ = array;
   }
   shield = shields_[numShields_] = new defiShield(defData);
@@ -982,17 +1035,18 @@ void defiNet::addShieldPath(defiPath* p, int reset, int netOsnet, int* needCbk) 
   // numShields_ or numNoShields will be non-zero
   // in this method.  Whichever is non-zero will be the current
   // working list
-  if (numShields_ > 0)
+  if (numShields_ > 0) {
     shields_[numShields_ - 1]->addPath(p, reset, netOsnet, needCbk);
-  else if (numNoShields_ > 0)
+  } else if (numNoShields_ > 0) {
     shields_[numNoShields_ - 1]->addPath(p, reset, netOsnet, needCbk);
-  else
+  } else {
     // Something screw up, can't be both be zero.
     defiError(0,
               6082,
               "ERROR (DEFPARS-6082): An internal error has occurred. The index number for the NET SHIELDPATH wires array is less "
               "then or equal to 0.\nContact Cadence Customer Support with this error information.",
               defData);
+  }
 }
 
 void defiNet::addNoShield(const char* name) {
@@ -1002,9 +1056,12 @@ void defiNet::addNoShield(const char* name) {
     int          i;
     shieldsAllocated_ = shieldsAllocated_ ? shieldsAllocated_ * 2 : 2;
     array             = (defiShield**)malloc(sizeof(defiShield*) * shieldsAllocated_);
-    for (i = 0; i < numNoShields_; i++) array[i] = shields_[i];
-    if (shields_)
+    for (i = 0; i < numNoShields_; i++) {
+      array[i] = shields_[i];
+    }
+    if (shields_) {
       free((char*)(shields_));
+    }
     shields_ = array;
   }
   shield = shields_[numNoShields_] = new defiShield(defData);
@@ -1016,10 +1073,11 @@ void defiNet::addShieldNet(const char* name) {
   int len;
 
   if (numShieldNet_ == shieldNetsAllocated_) {
-    if (shieldNetsAllocated_ == 0)
+    if (shieldNetsAllocated_ == 0) {
       bumpShieldNets(2);
-    else
+    } else {
       bumpShieldNets(shieldNetsAllocated_ * 2);
+    }
   }
 
   len                       = strlen(name) + 1;
@@ -1030,8 +1088,9 @@ void defiNet::addShieldNet(const char* name) {
 
 void defiNet::changeNetName(const char* name) {
   int len = strlen(name) + 1;
-  if (len > nameSize_)
+  if (len > nameSize_) {
     bumpName(len);
+  }
   strcpy(name_, defData->DEFCASE(name));
 }
 
@@ -1049,8 +1108,9 @@ void defiNet::changeInstance(const char* instance, int index) {
   }
 
   len = strlen(instance) + 1;
-  if (instances_[index])
+  if (instances_[index]) {
     free((char*)(instances_[index]));
+  }
   instances_[index] = (char*)malloc(len);
   strcpy(instances_[index], defData->DEFCASE(instance));
   return;
@@ -1070,8 +1130,9 @@ void defiNet::changePin(const char* pin, int index) {
   }
 
   len = strlen(pin) + 1;
-  if (pins_[index])
+  if (pins_[index]) {
     free((char*)(pins_[index]));
+  }
   pins_[index] = (char*)malloc(len);
   strcpy(pins_[index], defData->DEFCASE(pin));
   return;
@@ -1088,38 +1149,44 @@ int defiNet::hasProps() const { return numProps_ ? 1 : 0; }
 int defiNet::hasWeight() const { return (int)(hasWeight_); }
 
 const char* defiNet::propName(int index) const {
-  if (index >= 0 && index < numProps_)
+  if (index >= 0 && index < numProps_) {
     return propNames_[index];
+  }
   return 0;
 }
 
 const char* defiNet::propValue(int index) const {
-  if (index >= 0 && index < numProps_)
+  if (index >= 0 && index < numProps_) {
     return propValues_[index];
+  }
   return 0;
 }
 
 double defiNet::propNumber(int index) const {
-  if (index >= 0 && index < numProps_)
+  if (index >= 0 && index < numProps_) {
     return propDValues_[index];
+  }
   return 0;
 }
 
 const char defiNet::propType(int index) const {
-  if (index >= 0 && index < numProps_)
+  if (index >= 0 && index < numProps_) {
     return propTypes_[index];
+  }
   return 0;
 }
 
 int defiNet::propIsNumber(int index) const {
-  if (index >= 0 && index < numProps_)
+  if (index >= 0 && index < numProps_) {
     return propDValues_[index] ? 1 : 0;
+  }
   return 0;
 }
 
 int defiNet::propIsString(int index) const {
-  if (index >= 0 && index < numProps_)
+  if (index >= 0 && index < numProps_) {
     return propDValues_[index] ? 0 : 1;
+  }
   return 0;
 }
 
@@ -1128,26 +1195,30 @@ int defiNet::numConnections() const { return numPins_; }
 int defiNet::numShieldNets() const { return numShieldNet_; }
 
 const char* defiNet::instance(int index) const {
-  if (index >= 0 && index < numPins_)
+  if (index >= 0 && index < numPins_) {
     return instances_[index];
+  }
   return 0;
 }
 
 const char* defiNet::pin(int index) const {
-  if (index >= 0 && index < numPins_)
+  if (index >= 0 && index < numPins_) {
     return pins_[index];
+  }
   return 0;
 }
 
 int defiNet::pinIsMustJoin(int index) const {
-  if (index >= 0 && index < numPins_)
+  if (index >= 0 && index < numPins_) {
     return (int)(musts_[index]);
+  }
   return 0;
 }
 
 int defiNet::pinIsSynthesized(int index) const {
-  if (index >= 0 && index < numPins_)
+  if (index >= 0 && index < numPins_) {
     return (int)(synthesized_[index]);
+  }
   return 0;
 }
 
@@ -1156,14 +1227,16 @@ int defiNet::hasSubnets() const { return numSubnets_ ? 1 : 0; }
 int defiNet::numSubnets() const { return numSubnets_; }
 
 defiSubnet* defiNet::subnet(int index) {
-  if (index >= 0 && index < numSubnets_)
+  if (index >= 0 && index < numSubnets_) {
     return subnets_[index];
+  }
   return 0;
 }
 
 const defiSubnet* defiNet::subnet(int index) const {
-  if (index >= 0 && index < numSubnets_)
+  if (index >= 0 && index < numSubnets_) {
     return subnets_[index];
+  }
   return 0;
 }
 
@@ -1220,38 +1293,49 @@ void defiNet::print(FILE* f) const {
   fprintf(f, "Net '%s'", name_);
   fprintf(f, "\n");
 
-  if (hasWeight())
+  if (hasWeight()) {
     fprintf(f, "  weight=%d\n", weight());
+  }
 
-  if (hasFixedbump())
+  if (hasFixedbump()) {
     fprintf(f, "  fixedbump\n");
+  }
 
-  if (hasFrequency())
+  if (hasFrequency()) {
     fprintf(f, "  frequency=%f\n", frequency());
+  }
 
-  if (hasCap())
+  if (hasCap()) {
     fprintf(f, "  cap=%f\n", cap());
+  }
 
-  if (hasSource())
+  if (hasSource()) {
     fprintf(f, "  source='%s'\n", source());
+  }
 
-  if (hasPattern())
+  if (hasPattern()) {
     fprintf(f, "  pattern='%s'\n", pattern());
+  }
 
-  if (hasOriginal())
+  if (hasOriginal()) {
     fprintf(f, "  original='%s'\n", original());
+  }
 
-  if (hasUse())
+  if (hasUse()) {
     fprintf(f, "  use='%s'\n", use());
+  }
 
-  if (hasNonDefaultRule())
+  if (hasNonDefaultRule()) {
     fprintf(f, "  nonDefaultRule='%s'\n", nonDefaultRule());
+  }
 
-  if (hasXTalk())
+  if (hasXTalk()) {
     fprintf(f, "  xtalk=%d\n", XTalk());
+  }
 
-  if (hasStyle())
+  if (hasStyle()) {
     fprintf(f, "  style='%d'\n", style());
+  }
 
   if (hasProps()) {
     fprintf(f, " Props:\n");
@@ -1301,8 +1385,9 @@ void defiNet::print(FILE* f) const {
             if (newLayer == 0) {
               fprintf(f, "%s ", p->getLayer());
               newLayer = 1;
-            } else
+            } else {
               fprintf(f, "NEW %s ", p->getLayer());
+            }
             break;
           case DEFIPATH_VIA: fprintf(f, "%s\n", p->getVia()); break;
           case DEFIPATH_VIAROTATION: fprintf(f, "%d\n", p->getViaRotation()); break;
@@ -1331,8 +1416,9 @@ void defiNet::print(FILE* f) const {
 }
 
 void defiNet::bumpName(long long size) {
-  if (name_)
+  if (name_) {
     free(name_);
+  }
   name_     = (char*)malloc(size);
   nameSize_ = size;
   name_[0]  = '\0';
@@ -1455,8 +1541,9 @@ void defiNet::clear() {
   }
   numSubnets_ = 0;
 
-  if (name_)
+  if (name_) {
     name_[0] = '\0';
+  }
 
   // WMD -- this will be removed by the next release
   if (paths_) {
@@ -1523,23 +1610,30 @@ void defiNet::clear() {
     numNoShields_     = 0;
     shieldsAllocated_ = 0;
   }
-  if (shields_)
+  if (shields_) {
     free((char*)(shields_));
+  }
 
   shields_ = 0;
 
   if (numWidths_) {
-    for (i = 0; i < numWidths_; i++) free(wlayers_[i]);
+    for (i = 0; i < numWidths_; i++) {
+      free(wlayers_[i]);
+    }
     numWidths_ = 0;
   }
 
   if (numSpacing_) {
-    for (i = 0; i < numSpacing_; i++) free(slayers_[i]);
+    for (i = 0; i < numSpacing_; i++) {
+      free(slayers_[i]);
+    }
     numSpacing_ = 0;
   }
 
   if (numShieldNet_) {
-    for (i = 0; i < numShieldNet_; i++) free(shieldNet_[i]);
+    for (i = 0; i < numShieldNet_; i++) {
+      free(shieldNet_[i]);
+    }
     numShieldNet_ = 0;
   }
 
@@ -1768,8 +1862,9 @@ int defiNet::hasNonDefaultRule() const { return nonDefaultRule_ ? 1 : 0; }
 
 void defiNet::setSource(const char* typ) {
   int len;
-  if (source_)
+  if (source_) {
     free(source_);
+  }
   len     = strlen(typ) + 1;
   source_ = (char*)malloc(len);
   strcpy(source_, defData->DEFCASE(typ));
@@ -1784,8 +1879,9 @@ void defiNet::setFrequency(double frequency) {
 
 void defiNet::setOriginal(const char* typ) {
   int len;
-  if (original_)
+  if (original_) {
     free(original_);
+  }
   len       = strlen(typ) + 1;
   original_ = (char*)malloc(len);
   strcpy(original_, defData->DEFCASE(typ));
@@ -1793,8 +1889,9 @@ void defiNet::setOriginal(const char* typ) {
 
 void defiNet::setPattern(const char* typ) {
   int len;
-  if (pattern_)
+  if (pattern_) {
     free(pattern_);
+  }
   len      = strlen(typ) + 1;
   pattern_ = (char*)malloc(len);
   strcpy(pattern_, defData->DEFCASE(typ));
@@ -1807,8 +1904,9 @@ void defiNet::setCap(double w) {
 
 void defiNet::setUse(const char* typ) {
   int len;
-  if (use_)
+  if (use_) {
     free(use_);
+  }
   len  = strlen(typ) + 1;
   use_ = (char*)malloc(len);
   strcpy(use_, defData->DEFCASE(typ));
@@ -1818,8 +1916,9 @@ void defiNet::setStyle(int style) { style_ = style; }
 
 void defiNet::setNonDefaultRule(const char* typ) {
   int len;
-  if (nonDefaultRule_)
+  if (nonDefaultRule_) {
     free(nonDefaultRule_);
+  }
   len             = strlen(typ) + 1;
   nonDefaultRule_ = (char*)malloc(len);
   strcpy(nonDefaultRule_, defData->DEFCASE(typ));
@@ -1849,7 +1948,9 @@ void defiNet::bumpPaths(long long size) {
 
   defiPath** newPaths = new defiPath*[size];
 
-  for (i = 0; i < numPaths_; i++) newPaths[i] = paths_[i];
+  for (i = 0; i < numPaths_; i++) {
+    newPaths[i] = paths_[i];
+  }
 
   delete[] paths_;
   pathsAllocated_ = size;
@@ -1861,28 +1962,32 @@ int defiNet::numPaths() const { return numPaths_; }
 
 // WMD -- this will be removed by the next release
 defiPath* defiNet::path(int index) {
-  if (index >= 0 && index < numPaths_)
+  if (index >= 0 && index < numPaths_) {
     return paths_[index];
+  }
   return 0;
 }
 
 const defiPath* defiNet::path(int index) const {
-  if (index >= 0 && index < numPaths_)
+  if (index >= 0 && index < numPaths_) {
     return paths_[index];
+  }
   return 0;
 }
 
 int defiNet::numWires() const { return numWires_; }
 
 defiWire* defiNet::wire(int index) {
-  if (index >= 0 && index < numWires_)
+  if (index >= 0 && index < numWires_) {
     return wires_[index];
+  }
   return 0;
 }
 
 const defiWire* defiNet::wire(int index) const {
-  if (index >= 0 && index < numWires_)
+  if (index >= 0 && index < numWires_) {
     return wires_[index];
+  }
   return 0;
 }
 
@@ -1904,28 +2009,32 @@ void defiNet::bumpShieldNets(long long size) {
 int defiNet::numShields() const { return numShields_; }
 
 defiShield* defiNet::shield(int index) {
-  if (index >= 0 && index < numShields_)
+  if (index >= 0 && index < numShields_) {
     return shields_[index];
+  }
   return 0;
 }
 
 const defiShield* defiNet::shield(int index) const {
-  if (index >= 0 && index < numShields_)
+  if (index >= 0 && index < numShields_) {
     return shields_[index];
+  }
   return 0;
 }
 
 int defiNet::numNoShields() const { return numNoShields_; }
 
 defiShield* defiNet::noShield(int index) {
-  if (index >= 0 && index < numNoShields_)
+  if (index >= 0 && index < numNoShields_) {
     return shields_[index];
+  }
   return 0;
 }
 
 const defiShield* defiNet::noShield(int index) const {
-  if (index >= 0 && index < numNoShields_)
+  if (index >= 0 && index < numNoShields_) {
     return shields_[index];
+  }
   return 0;
 }
 
@@ -1952,9 +2061,12 @@ void defiNet::addVpin(const char* name) {
     int        i;
     vpinsAllocated_ = vpinsAllocated_ ? vpinsAllocated_ * 2 : 2;
     array           = (defiVpin**)malloc(sizeof(defiVpin*) * vpinsAllocated_);
-    for (i = 0; i < numVpins_; i++) array[i] = vpins_[i];
-    if (vpins_)
+    for (i = 0; i < numVpins_; i++) {
+      array[i] = vpins_[i];
+    }
+    if (vpins_) {
       free((char*)(vpins_));
+    }
     vpins_ = array;
   }
   vp = vpins_[numVpins_] = new defiVpin(defData);
@@ -1982,36 +2094,44 @@ void defiNet::addVpinBounds(int xl, int yl, int xh, int yh) {
 int defiNet::numVpins() const { return numVpins_; }
 
 defiVpin* defiNet::vpin(int index) {
-  if (index < 0 || index >= numVpins_)
+  if (index < 0 || index >= numVpins_) {
     return 0;
+  }
   return vpins_[index];
 }
 
 const defiVpin* defiNet::vpin(int index) const {
-  if (index < 0 || index >= numVpins_)
+  if (index < 0 || index >= numVpins_) {
     return 0;
+  }
   return vpins_[index];
 }
 
 void defiNet::spacingRule(int index, char** layer, double* dist, double* left, double* right) const {
   if (index >= 0 && index < numSpacing_) {
-    if (layer)
+    if (layer) {
       *layer = slayers_[index];
-    if (dist)
+    }
+    if (dist) {
       *dist = sdist_[index];
-    if (left)
+    }
+    if (left) {
       *left = sleft_[index];
-    if (right)
+    }
+    if (right) {
       *right = sright_[index];
+    }
   }
 }
 
 void defiNet::widthRule(int index, char** layer, double* dist) const {
   if (index >= 0 && index < numWidths_) {
-    if (layer)
+    if (layer) {
       *layer = wlayers_[index];
-    if (dist)
+    }
+    if (dist) {
       *dist = wdist_[index];
+    }
   }
 }
 
@@ -2124,18 +2244,24 @@ void defiNet::addPolygon(const char* layerName, defiGeometries* geom, int* needC
       newST[i]  = polyShapeTypes_[i];
       newRSN[i] = polyRouteStatusShieldNames_[i];
     }
-    if (polygons_)
+    if (polygons_) {
       free((char*)(polygons_));
-    if (polygonNames_)
+    }
+    if (polygonNames_) {
       free((char*)(polygonNames_));
-    if (polyMasks_)
+    }
+    if (polyMasks_) {
       free((char*)(polyMasks_));
-    if (polyRouteStatus_)
+    }
+    if (polyRouteStatus_) {
       free((char*)(polyRouteStatus_));
-    if (polyShapeTypes_)
+    }
+    if (polyShapeTypes_) {
       free((char*)(polyShapeTypes_));
-    if (polyRouteStatusShieldNames_)
+    }
+    if (polyRouteStatusShieldNames_) {
       free((char*)(polyRouteStatusShieldNames_));
+    }
     polygonNames_               = newn;
     polygons_                   = poly;
     polyMasks_                  = maskn;
@@ -2159,8 +2285,9 @@ void defiNet::addPolygon(const char* layerName, defiGeometries* geom, int* needC
   polyMasks_[numPolys_] = colorMask;
   polygons_[numPolys_]  = p;
   numPolys_ += 1;
-  if (numPolys_ == 1000)  // Want to invoke the partial callback if set
+  if (numPolys_ == 1000) {  // Want to invoke the partial callback if set
     *needCbk = 1;
+  }
 }
 
 // 5.6
@@ -2238,9 +2365,7 @@ int defiNet::polyMask(int index) const {
 }
 
 // 5.6
-struct defiPoints defiNet::getPolygon(int index) const {
-  return *(polygons_[index]);
-}
+struct defiPoints defiNet::getPolygon(int index) const { return *(polygons_[index]); }
 
 // 5.6
 void defiNet::addRect(const char* layerName, int xl, int yl, int xh, int yh, int* needCbk, int colorMask, const char* routeStatus,
@@ -2282,14 +2407,18 @@ void defiNet::addRect(const char* layerName, int xl, int yl, int xh, int yh, int
       newST[i]   = rectShapeTypes_[i];
       newRSN[i]  = rectRouteStatusShieldNames_[i];
     }
-    if (rectNames_)
+    if (rectNames_) {
       free((char*)(rectNames_));
-    if (rectRouteStatus_)
+    }
+    if (rectRouteStatus_) {
       free((char*)(rectRouteStatus_));
-    if (rectShapeTypes_)
+    }
+    if (rectShapeTypes_) {
       free((char*)(rectShapeTypes_));
-    if (rectRouteStatusShieldNames_)
+    }
+    if (rectRouteStatusShieldNames_) {
       free((char*)(rectRouteStatusShieldNames_));
+    }
     if (xl_) {
       free((char*)(xl_));
       free((char*)(yl_));
@@ -2317,8 +2446,9 @@ void defiNet::addRect(const char* layerName, int xl, int yl, int xh, int yh, int
   rectShapeTypes_[numRects_]             = strdup(shapeType);
   rectRouteStatusShieldNames_[numRects_] = strdup(routeStatusName);
   numRects_ += 1;
-  if (numRects_ == 1000)  // Want to invoke the partial callback if set
+  if (numRects_ == 1000) {  // Want to invoke the partial callback if set
     *needCbk = 1;
+  }
 }
 
 // 5.6
@@ -2488,20 +2618,27 @@ void defiNet::addPts(const char* viaName, int o, defiGeometries* geom, int* need
       orientn[i] = viaOrients_[i];
       maskn[i]   = viaMasks_[i];
     }
-    if (viaPts_)
+    if (viaPts_) {
       free((char*)(viaPts_));
-    if (viaNames_)
+    }
+    if (viaNames_) {
       free((char*)(viaNames_));
-    if (viaOrients_)
+    }
+    if (viaOrients_) {
       free((char*)(viaOrients_));
-    if (viaMasks_)
+    }
+    if (viaMasks_) {
       free((char*)(viaMasks_));
-    if (viaRouteStatus_)
+    }
+    if (viaRouteStatus_) {
       free((char*)(viaRouteStatus_));
-    if (viaShapeTypes_)
+    }
+    if (viaShapeTypes_) {
       free((char*)(viaShapeTypes_));
-    if (viaRouteStatusShieldNames_)
+    }
+    if (viaRouteStatusShieldNames_) {
       free((char*)(viaRouteStatusShieldNames_));
+    }
 
     viaPts_                    = pts;
     viaNames_                  = newn;
@@ -2528,8 +2665,9 @@ void defiNet::addPts(const char* viaName, int o, defiGeometries* geom, int* need
   }
   viaPts_[numPts_] = p;
   numPts_ += 1;
-  if (numPts_ == 1000)  // Want to invoke the partial callback if set
+  if (numPts_ == 1000) {  // Want to invoke the partial callback if set
     *needCbk = 1;
+  }
 }
 
 int defiNet::numViaSpecs() const { return numPts_; }
@@ -2664,9 +2802,7 @@ const int defiNet::bottomMaskNum(int index) const {
   return viaMasks_[index] % 10;
 }
 
-struct defiPoints defiNet::getViaPts(int index) const {
-  return *(viaPts_[index]);
-}
+struct defiPoints defiNet::getViaPts(int index) const { return *(viaPts_[index]); }
 
 void defiNet::clearVia() {
   if (viaNames_) {

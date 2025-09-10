@@ -33,8 +33,9 @@ bool geogLayout::layoutHelper(double remWidth, double remHeight, double curX, do
                               FPObject** centerItems, int centerItemsCount) {
   int itemCount = getComponentCount();
   // Check for the end of the recursion.
-  if (itemCount == 0 && centerItemsCount == 0)
+  if (itemCount == 0 && centerItemsCount == 0) {
     return true;
+  }
 
   // Check if it time to layout the center items.
   // For now we will just stick them in a bag layout, and then use all remaining area to lay it out.
@@ -54,8 +55,9 @@ bool geogLayout::layoutHelper(double remWidth, double remHeight, double curX, do
       BL->addComponent(item, item->getCount() / gcd);
     }
 
-    if (verbose)
+    if (verbose) {
       std::cout << "Laying out Center items.  Count=" << centerItemsCount << " GCD=" << gcd << "\n";
+    }
 
     // Use all remaining area.
     double       targetAR = remWidth / remHeight;
@@ -70,8 +72,9 @@ bool geogLayout::layoutHelper(double remWidth, double remHeight, double curX, do
     FPLayout->setHint(Center);
     bool correct = FPLayout->layout(AreaWirelength, targetAR);
     assert(FPLayout->valid());
-    if (verbose)
+    if (verbose) {
       std::cout << "Laying out Center item(s).  Current x and y are(" << curX << "," << curY << ")\n";
+    }
     FPLayout->setLocation(curX, curY);
     // Put the layout on the stack.
     // DO we really need to do this????
@@ -110,13 +113,15 @@ bool geogLayout::layoutHelper(double remWidth, double remHeight, double curX, do
       if (compHint == LeftRight || compHint == LeftRightMirror || compHint == LeftRight180) {
         BL1->setHint(Left);
         BL2->setHint(Right);
-        if (compHint == LeftRightMirror)
+        if (compHint == LeftRightMirror) {
           BL2->xMirror = true;
+        }
       } else if (compHint == TopBottom || compHint == TopBottomMirror || compHint == TopBottom180) {
         BL1->setHint(Top);
         BL2->setHint(Bottom);
-        if (compHint == TopBottomMirror)
+        if (compHint == TopBottomMirror) {
           BL2->yMirror = true;
+        }
       }
       if (compHint == TopBottom180 || compHint == LeftRight180) {
         BL2->xMirror = true;
@@ -124,10 +129,11 @@ bool geogLayout::layoutHelper(double remWidth, double remHeight, double curX, do
       }
       comp = BL1;
       addComponentToFront(BL2);
-    } else if (compHint == LeftRight || compHint == LeftRightMirror || compHint == LeftRight180)
+    } else if (compHint == LeftRight || compHint == LeftRightMirror || compHint == LeftRight180) {
       comp->setHint(Left);
-    else
+    } else {
       comp->setHint(Top);
+    }
     compHint = comp->getHint();
   }
 
@@ -142,8 +148,9 @@ bool geogLayout::layoutHelper(double remWidth, double remHeight, double curX, do
     double totalArea = comp->totalArea();
     assert(totalArea > 0);
 
-    if (verbose)
+    if (verbose) {
       std::cout << "In geog for " << comp->getName() << ", total component area=" << totalArea << "\n";
+    }
 
     // TODO: adding components in this way assumes everything will fit and lays out components with insane aspect ratios.
     double targetWidth, targetHeight;
@@ -158,14 +165,18 @@ bool geogLayout::layoutHelper(double remWidth, double remHeight, double curX, do
       targetHeight = totalArea / targetWidth;
     }
 
-    if (compHint == Left)
+    if (compHint == Left) {
       newX += targetWidth;
-    if (compHint == Right)
+    }
+    if (compHint == Right) {
       curX = curX + (remWidth - targetWidth);
-    if (compHint == Top)
+    }
+    if (compHint == Top) {
       curY = curY + (remHeight - targetHeight);
-    if (compHint == Bottom)
+    }
+    if (compHint == Bottom) {
       newY += targetHeight;
+    }
 
     double    targetAR = targetWidth / targetHeight;
     FPObject* FPLayout = comp;
@@ -180,10 +191,11 @@ bool geogLayout::layoutHelper(double remWidth, double remHeight, double curX, do
     FPLayout->setLocation(curX, curY);
     // Put the layout on the stack.
     layoutStack[curDepth] = FPLayout;
-    if (compHint == Left || compHint == Right)
+    if (compHint == Left || compHint == Right) {
       remWidth -= FPLayout->getWidth();
-    else if (compHint == Top || compHint == Bottom)
+    } else if (compHint == Top || compHint == Bottom) {
       remHeight -= FPLayout->getHeight();
+    }
     layoutHelper(remWidth, remHeight, newX, newY, layoutStack, curDepth + 1, centerItems, centerItemsCount);
   } else if (compHint != Center) {
     std::cerr << "Hint is not any of the recognized hints.  Hint=" << compHint << "\n";
@@ -204,17 +216,22 @@ bool geogLayout::layout(const FPOptimization opt, const double targetAR) {
   int        itemCount    = getComponentCount();
   int        maxArraySize = itemCount * 2;
   FPObject** layoutStack  = new FPObject*[maxArraySize];
-  for (int i = 0; i < maxArraySize; i++) layoutStack[i] = 0;
+  for (int i = 0; i < maxArraySize; i++) {
+    layoutStack[i] = 0;
+  }
   FPObject** centerItems = new FPObject*[itemCount];
-  for (int i = 0; i < itemCount; i++) centerItems[i] = 0;
+  for (int i = 0; i < itemCount; i++) {
+    centerItems[i] = 0;
+  }
 
   // Calculate the total area, and the implied target width and height.
   area             = totalArea();
   double remHeight = sqrt(area / abs(targetAR));
   double remWidth  = area / remHeight;
 
-  if (verbose)
+  if (verbose) {
     std::cout << "In geogLayout for " << getName() << ".  A=" << area << " W=" << remWidth << " H=" << remHeight << "\n";
+  }
 
   // Now do the real work.
   bool correct = layoutHelper(remWidth, remHeight, 0, 0, layoutStack, 0, centerItems, 0);
@@ -223,8 +240,9 @@ bool geogLayout::layout(const FPOptimization opt, const double targetAR) {
   if (getComponentCount() != 0) {
     std::cerr << "Non empty item list after recursive layout in geographic layout.\n";
     std::cerr << "Remaining Component count=" << getComponentCount() << "\n";
-    for (auto i = 0u; i < getComponentCount(); i++)
+    for (auto i = 0u; i < getComponentCount(); i++) {
       std::cerr << "Component " << i << " is of type " << getComponent(i)->getName() << "\n";
+    }
     throw std::runtime_error("non-empty item list!");
   }
 
@@ -234,8 +252,9 @@ bool geogLayout::layout(const FPOptimization opt, const double targetAR) {
   height = 0;
   for (int i = 0; i < maxArraySize; i++) {
     FPObject* comp = layoutStack[i];
-    if (!comp)
+    if (!comp) {
       break;
+    }
     FPContainer::addComponent(comp);
     width  = std::max(width, comp->getX() + comp->getWidth());
     height = std::max(height, comp->getY() + comp->getHeight());

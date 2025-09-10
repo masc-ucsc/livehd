@@ -74,10 +74,12 @@ defiRow::~defiRow() { Destroy(); }
 
 void defiRow::Destroy() {
   clear();
-  if (name_)
+  if (name_) {
     free(name_);
-  if (macro_)
+  }
+  if (macro_) {
     free(macro_);
+  }
   free((char*)(propNames_));
   free((char*)(propValues_));
   free((char*)(propDValues_));
@@ -102,8 +104,9 @@ void defiRow::setup(const char* name, const char* macro, double x, double y, int
   clear();
 
   if (len > nameLength_) {
-    if (name_)
+    if (name_) {
       free(name_);
+    }
     nameLength_ = len;
     name_       = (char*)malloc(len);
   }
@@ -111,8 +114,9 @@ void defiRow::setup(const char* name, const char* macro, double x, double y, int
 
   len = strlen(macro) + 1;
   if (len > macroLength_) {
-    if (macro_)
+    if (macro_) {
       free(macro_);
+    }
     macroLength_ = len;
     macro_       = (char*)malloc(len);
   }
@@ -359,13 +363,16 @@ defiTrack::~defiTrack() { Destroy(); }
 void defiTrack::Destroy() {
   int i;
 
-  if (macro_)
+  if (macro_) {
     free(macro_);
+  }
 
   if (layers_) {
-    for (i = 0; i < numLayers_; i++)
-      if (layers_[i])
+    for (i = 0; i < numLayers_; i++) {
+      if (layers_[i]) {
         free(layers_[i]);
+      }
+    }
     free((char*)(layers_));
   }
 }
@@ -375,19 +382,21 @@ void defiTrack::setup(const char* macro) {
   int len = strlen(macro) + 1;
 
   if (len > macroLength_) {
-    if (macro_)
+    if (macro_) {
       free(macro_);
+    }
     macroLength_ = len;
     macro_       = (char*)malloc(len);
   }
   strcpy(macro_, defData->DEFCASE(macro));
 
   if (layers_) {
-    for (i = 0; i < numLayers_; i++)
+    for (i = 0; i < numLayers_; i++) {
       if (layers_[i]) {
         free(layers_[i]);
         layers_[i] = 0;
       }
+    }
   }
   numLayers_ = 0;
   x_         = 0.0;
@@ -413,9 +422,12 @@ void defiTrack::addLayer(const char* layer) {
     char** newl;
     layersLength_ = layersLength_ ? 2 * layersLength_ : 8;
     newl          = (char**)malloc(layersLength_ * sizeof(char*));
-    for (i = 0; i < numLayers_; i++) newl[i] = layers_[i];
-    if (layers_)
+    for (i = 0; i < numLayers_; i++) {
+      newl[i] = layers_[i];
+    }
+    if (layers_) {
       free((char*)(layers_));
+    }
     layers_ = newl;
   }
 
@@ -485,15 +497,17 @@ void defiGcellGrid::Init() {
 defiGcellGrid::~defiGcellGrid() { Destroy(); }
 
 void defiGcellGrid::Destroy() {
-  if (macro_)
+  if (macro_) {
     free(macro_);
+  }
 }
 
 void defiGcellGrid::setup(const char* macro, int x, int xNum, double xStep) {
   int len = strlen(macro) + 1;
   if (len > macroLength_) {
-    if (macro_)
+    if (macro_) {
       free(macro_);
+    }
     macroLength_ = len;
     macro_       = (char*)malloc(len);
   }

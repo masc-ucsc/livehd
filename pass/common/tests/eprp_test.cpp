@@ -1,9 +1,11 @@
 
+#include <format>
+#include <iostream>
+
 #include "absl/base/dynamic_annotations.h"
 #include "absl/base/macros.h"
 #include "absl/strings/numbers.h"
 #include "absl/strings/str_split.h"
-#include "fmt/format.h"
 #include "gtest/gtest.h"
 
 // Fake lgraph class for testing
@@ -28,9 +30,9 @@ public:
     auto files = var.get("nofiles");
 
     for (const auto &v : absl::StrSplit(files, ',')) {
-      fmt::print(" {}", v);
+      std::print(" {}", v);
     }
-    fmt::print("\n");
+    std::cout << "\n";
 
     std::vector<std::string> svector;
     for (const auto s : absl::StrSplit(files, ',')) {
@@ -45,13 +47,13 @@ public:
   }
 
   static void foo(Eprp_var &var) {
-    fmt::print("test1.foo");
+    std::cout << "test1.foo";
     for (const auto &v : var.dict) {
-      fmt::print(" {}:{}", v.first, v.second);
+      std::print(" {}:{}", v.first, v.second);
     }
-    fmt::print(" ::");
+    std::cout << " ::";
     I(var.lgs.empty());
-    fmt::print("\n");
+    std::cout << "\n";
 
     var.add("test1_foo", "field1");
     EXPECT_EQ(var.get("test1_foo"), "field1");
@@ -64,7 +66,7 @@ public:
 
     EXPECT_NE(var.get("lgdb"), "");
 
-    fmt::print("var.get = {}\n", var.get("nofield2"));
+    std::print("var.get = {}\n", var.get("nofield2"));
 
     EXPECT_EQ(var.get("nofield"), "");
 
@@ -72,20 +74,20 @@ public:
   }
   static void pass(Eprp_var &var) {
     (void)var;
-    fmt::print("pass called\n");
+    std::cout << "pass called\n";
   }
 };
 
 class test2 {
 public:
   static void bar(Eprp_var &var) {
-    fmt::print("test1.foo");
+    std::cout << "test1.foo";
     for (const auto &v : var.dict) {
-      fmt::print(" {}:{}", v.first, v.second);
+      std::print(" {}:{}", v.first, v.second);
     }
-    fmt::print(" ::");
+    std::cout << " ::";
     I(var.lgs.empty());
-    fmt::print("\n");
+    std::cout << "\n";
 
     var.add("test2_bar", "field2");
     var.add(new Lgraph());

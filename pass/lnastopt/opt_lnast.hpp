@@ -45,8 +45,8 @@ protected:
   void hierarchy_info_int(std::string_view msg);
 
   template <typename... Args>
-  void hierarchy_info(fmt::format_string<Args...> format, Args&&... args) {
-    auto txt(fmt::format(format, std::forward<Args>(args)...));
+  void hierarchy_info(std::format_string<Args...> format, Args&&... args) {
+    auto txt(std::format(format, std::forward<Args>(args)...));
     hierarchy_info_int(txt);
   }
 

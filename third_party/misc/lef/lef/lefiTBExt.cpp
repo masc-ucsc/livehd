@@ -102,8 +102,9 @@ int lefiValidUser() {
     j += (int)tagName[i];
   }
 
-  if (atoi(tagNum) == j)
+  if (atoi(tagNum) == j) {
     return (1);
+  }
   return (0);
 }
 
@@ -114,8 +115,9 @@ int lefiValidUser() {
 char *lefiUser() {
   char *tmpUser = tagName;
   tmpUser       = tmpUser + 8;
-  if (strncmp(tmpUser, "     ", 5) == 0)
+  if (strncmp(tmpUser, "     ", 5) == 0) {
     return ((char *)"Cadence Design Systems");
+  }
   return (tmpUser);
 }
 

@@ -54,29 +54,28 @@ public:
     next_checkpoint_ncycles = 1000000000;
     last_checkpoint_sec     = 0.0;
     advance_reset(reset_ncycles);
-    //#ifdef SIMLIB_TRACE
-    //    top.add_signature(signature);
-    //#endif
+    // #ifdef SIMLIB_TRACE
+    //     top.add_signature(signature);
+    // #endif
   };
 #else
-  Simlib_checkpoint(std::string_view _name, uint64_t _reset_ncycles = 10000)
-      : name(_name), top(0), reset_ncycles(_reset_ncycles) {
+  Simlib_checkpoint(std::string_view _name, uint64_t _reset_ncycles = 10000) : name(_name), top(0), reset_ncycles(_reset_ncycles) {
     ncycles                 = 0;
     checkpoint_ncycles      = -1;  // Disable checkpoint by default
     next_checkpoint_ncycles = 1000000000;
     last_checkpoint_sec     = 0.0;
     advance_reset(reset_ncycles);
-    //#ifdef SIMLIB_TRACE
-    //    top.add_signature(signature);
-    //#endif
+    // #ifdef SIMLIB_TRACE
+    //     top.add_signature(signature);
+    // #endif
   };
 #endif
 
   ~Simlib_checkpoint() {
     std::string ext;
-    I(false); // FIXME: get syscall to get number of secs/cycles
-    int usecs=1;
-    double      speed = static_cast<double>(ncycles) / usecs;
+    I(false);  // FIXME: get syscall to get number of secs/cycles
+    int    usecs = 1;
+    double speed = static_cast<double>(ncycles) / usecs;
     if (speed > 1e6) {
       speed /= 1e6;
       ext = "MHz";
@@ -90,13 +89,15 @@ public:
   }
 
   void set_checkpoint_cycles(int n) {  // main.cpp:9
-    if (path.empty())
+    if (path.empty()) {
       n = 1000000000;
+    }
     // n=10000
     n >>= 10;  // n is divided by 2pow10//n=9
     n <<= 10;  // new n is multiplied by 2pow10//n=2916
-    if (n < 1024)
+    if (n < 1024) {
       n = 1024;
+    }
     checkpoint_ncycles = n;  // checkpoint_ncycles=-1->9216//2ndRun:2048
     // next_checkpoint_ncycles=1000000000
     next_checkpoint_ncycles = ncycles + checkpoint_ncycles;  // 19216//2ndRun:31264
@@ -226,8 +227,9 @@ public:
   void save_intermediate_checkpoint(uint64_t n = 1) {
     do {
       int step = n;
-      if (step > next_checkpoint_ncycles)
+      if (step > next_checkpoint_ncycles) {
         step = next_checkpoint_ncycles;
+      }
 
       n -= step;  // SG: if step==n then this line will make n=0 thus making the possibility of n>0 unlikely.
       next_checkpoint_ncycles -= step;
@@ -310,12 +312,12 @@ public:
   void handle_checkpoint() {
 #ifdef SIMLIB_TRACE
     I(false);
-    int usecs = 1;
+    int  usecs      = 1;
     auto delta_secs = usecs - last_checkpoint_sec;  // delta_secs is of type double
-    if (delta_secs > 0.1)
+    if (delta_secs > 0.1) {
       save_checkpoint();
-    else {
-      I(false); // get_usecs
+    } else {
+      I(false);  // get_usecs
 
       last_checkpoint_sec = usecs;
     }
@@ -337,8 +339,9 @@ public:
   void advance_clock(uint64_t n = 1) {
     do {
       int step = n;
-      if (step > next_checkpoint_ncycles)
+      if (step > next_checkpoint_ncycles) {
         step = next_checkpoint_ncycles;
+      }
 
       n -= step;  // SG: if step==n then this line will make n=0 thus making the possibility of n>0 unlikely.
       next_checkpoint_ncycles -= step;
@@ -349,19 +352,21 @@ public:
         vcd::advance_to_posedge();
         top.vcd_posedge();
         vcd::advance_to_comb();
-        if (i <= 1000)
+        if (i <= 1000) {
           top.vcd_comb(0001, 0001);
-        else if (i < 10000)
+        } else if (i < 10000) {
           top.vcd_comb(0010, 0001);
-        else
+        } else {
           top.vcd_comb(0010, 0010);
+        }
         vcd::advance_to_negedge();
         top.vcd_negedge();
 #else
-        if (i < 10000)
+        if (i < 10000) {
           top.cycle(1, 0);
-        else
+        } else {
           top.cycle(0, 0);
+        }
 #endif
       }
       ncycles += step;

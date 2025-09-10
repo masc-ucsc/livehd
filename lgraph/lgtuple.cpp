@@ -3,6 +3,8 @@
 #include "lgtuple.hpp"
 
 #include <algorithm>
+#include <format>
+#include <iostream>
 
 #include "absl/container/btree_map.h"
 #include "absl/container/flat_hash_map.h"
@@ -798,7 +800,7 @@ void Lgtuple::add(std::string_view key, const Node_pin &dpin) {
       I(!is_attribute(lower));
       if (has_dpin(lower)) {
         dump();
-        fmt::print("OOPPPS (tuple is corrupted). Time to debug!!! {} {}\n", e.first, lower);
+        std::print("OOPPPS (tuple is corrupted). Time to debug!!! {} {}\n", e.first, lower);
         exit(-3);
         return;
       }
@@ -1414,7 +1416,7 @@ std::vector<Node::Compact> Lgtuple::make_mux(Node &mux_node, Node_pin &sel_dpin,
               continue;  // Do not create attr for flop config (handled in cprop directly)
             }
 
-            // fmt::print("adding attr:{}\n", attr_it.first);
+            // std::print("adding attr:{}\n", attr_it.first);
             // attr_it.second.get_node().dump();
 
             auto attr_node = mux_node.create(Ntype_op::AttrSet);
@@ -1423,7 +1425,9 @@ std::vector<Node::Compact> Lgtuple::make_mux(Node &mux_node, Node_pin &sel_dpin,
               auto key_dpin = dpin.create_const(Lconst::from_string(attr)).setup_driver_pin();
               attr_node.setup_sink_pin("field").connect_driver(key_dpin);
             }
-            { attr_node.setup_sink_pin("value").connect_driver(attr_it.second); }
+            {
+              attr_node.setup_sink_pin("value").connect_driver(attr_it.second);
+            }
             attr_node.setup_sink_pin("parent").connect_driver(dpin);
             dpin = attr_node.setup_driver_pin("Y");
           }
@@ -1609,7 +1613,9 @@ std::shared_ptr<Lgtuple> Lgtuple::make_flop(Node &flop) const {
       auto key_dpin = flop_node.create_const(Lconst::from_string(get_last_level(attr))).setup_driver_pin();
       attr_node.setup_sink_pin("field").connect_driver(key_dpin);
     }
-    { attr_node.setup_sink_pin("value").connect_driver(e.second); }
+    {
+      attr_node.setup_sink_pin("value").connect_driver(e.second);
+    }
     auto flop_din_driver = flop_din.get_driver_pin();
     if (flop_din_driver.is_invalid()) {
       // Disconnected flop?
@@ -1792,9 +1798,9 @@ bool Lgtuple::has_just_attributes() const {
 
 void Lgtuple::dump() const {
 #ifndef NDEBUG
-  fmt::print("tuple_name:{} {}\n", name, correct ? "" : " ISSUES");
+  std::print("tuple_name:{} {}\n", name, correct ? "" : " ISSUES");
   for (const auto &it : key_map) {
-    fmt::print("  key:{} dpin:{}\n", it.first, it.second.debug_name());
+    std::print("  key:{} dpin:{}\n", it.first, it.second.debug_name());
   }
 #endif
 }

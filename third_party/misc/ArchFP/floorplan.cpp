@@ -1,8 +1,8 @@
 #include "floorplan.hpp"
 
 #include "absl/container/flat_hash_map.h"
-#include "lgedgeiter.hpp"
 #include "helpers.hpp"
+#include "lgedgeiter.hpp"
 
 bool   xReflect = false;
 double xLeft[maxMirrorDepth];

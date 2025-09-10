@@ -3,10 +3,11 @@
 #include "pass_lnast_read.hpp"
 
 #include <filesystem>
+#include <format>
 #include <fstream>
+#include <iostream>
 
 #include "absl/strings/str_split.h"
-#include "fmt/printf.h"
 #include "lnast_parser.hpp"
 
 static Pass_plugin sample("lnast.read", Pass_lnast_read::setup);
@@ -33,7 +34,7 @@ void Pass_lnast_read::do_work(Eprp_var& var) {
   if (var.has_label("dir")) {
     for (const auto& entry : std::filesystem::directory_iterator(var.get("dir"))) {
       auto file = entry.path();
-      fmt::print("lnast_read : {}\n", std::string{file});
+      std::print("lnast_read : {}\n", std::string{file});
       std::ifstream fs;
       fs.open(std::string(file));
       Lnast_parser parser(fs);

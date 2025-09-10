@@ -1,9 +1,11 @@
 //  This file is distributed under the BSD 3-Clause License. See LICENSE for details.
 
 #include <cstdio>
+#include <format>
+#include <iostream>
+#include <print>
 
 #include "ast.hpp"
-#include "fmt/format.h"
 #include "gtest/gtest.h"
 
 class Test_scanner : public Elab_scanner {
@@ -46,7 +48,7 @@ public:
         case test_rule_statement: rule_name.assign("test_rule_statement"); break;
       }
       auto token_text = scan_text(node.token_entry);
-      fmt::print("Rule name: {}, token text: {}\n", rule_name, token_text);
+      std::print("Rule name: {}, token text: {}\n", rule_name, token_text);
     }
   }
 };

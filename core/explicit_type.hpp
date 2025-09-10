@@ -2,9 +2,8 @@
 #pragma once
 
 #include <cstddef>
+#include <format>
 #include <string>
-
-#include "fmt/format.h"
 
 // #include "absl/hash/hash.h"
 
@@ -32,7 +31,7 @@ struct Explicit_type {
 };
 
 template <typename T, typename Meaning, T inv_val>
-struct fmt::formatter<Explicit_type<T, Meaning, inv_val>> : fmt::formatter<std::string> {
+struct std::formatter<Explicit_type<T, Meaning, inv_val>> : std::formatter<std::string> {
   // parse is inherited from formatter<string_view>.
 
   auto format(Explicit_type<T, Meaning, inv_val> t, format_context& ctx) const {

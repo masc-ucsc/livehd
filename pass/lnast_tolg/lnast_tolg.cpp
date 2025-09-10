@@ -3,6 +3,8 @@
 #include "lnast_tolg.hpp"
 
 #include <cctype>
+#include <format>
+#include <iostream>
 
 #include "absl/strings/match.h"
 #include "cprop.hpp"
@@ -94,7 +96,7 @@ void Lnast_tolg::process_ast_stmts(Lgraph *lg, const Lnast_nid &lnidx_stmts) {
       continue;
     } else {
       lnast->dump();
-      fmt::print("FIXME: implement op:{}\n", ntype.debug_name());
+      std::print("FIXME: implement op:{}\n", ntype.debug_name());
       I(false);
       return;
     }
@@ -130,7 +132,7 @@ void Lnast_tolg::process_ast_phi_op(Lgraph *lg, const Lnast_nid &lnidx_phi) {
   const auto &tok        = lnast->get_token(lnidx_phi);
   phi_node.set_loc(tok.pos1, tok.pos2);
   phi_node.set_source(tok.fname);
-  // fmt::print("Hello!! {} {} {}",pos1, pos2, phi_node.get_nid()  );
+  // std::print("Hello!! {} {} {}",pos1, pos2, phi_node.get_nid()  );
 
   auto lhs       = lnast->get_first_child(lnidx_phi);
   auto c1        = lnast->get_sibling_next(lhs);
@@ -365,7 +367,6 @@ Node Lnast_tolg::process_ast_assign_op(Lgraph *lg, const Lnast_nid &lnidx_assign
 }
 
 void Lnast_tolg::process_ast_dp_assign_op(Lgraph *lg, const Lnast_nid &lnidx_dp_assign) {
-
   auto c0_dp       = lnast->get_first_child(lnidx_dp_assign);
   auto lhs_dp      = lnast->get_sibling_next(c0_dp);
   auto rhs_dp      = lnast->get_sibling_next(lhs_dp);
@@ -680,7 +681,7 @@ void Lnast_tolg::process_hier_inp_bits_set(Lgraph *lg, const Lnast_nid &lnidx_ta
       const auto &c0_ta = child;
       I(is_input(lnast->get_vname(c0_ta)));
       std::tie(io_pos, full_inp_hier_name) = Lgtuple::convert_key_to_io(lnast->get_vname(c0_ta));
-      root_inp_sname  = Lgtuple::convert_key_to_io(lnast->get_sname(c0_ta)).second;
+      root_inp_sname                       = Lgtuple::convert_key_to_io(lnast->get_sname(c0_ta)).second;
 
     } else if (lnast->get_vname(child) != "__ubits" && lnast->get_vname(child) != "__sbits") {
       I(child != lnast->get_last_child(lnidx_ta));
@@ -724,10 +725,10 @@ void Lnast_tolg::process_hier_inp_bits_set(Lgraph *lg, const Lnast_nid &lnidx_ta
       af_dpin.connect_sink(af_spin);
 
       av_dpin.connect(av_spin);
-      auto aset_dpin                = aset_node.setup_driver_pin();
+      auto aset_dpin            = aset_node.setup_driver_pin();
       name2dpin[root_inp_sname] = aset_dpin;
-      create_inp_ta4runtime_idx(lg, aset_dpin, root_inp_sname); // full_inp_hier_name);
-      break;  // no need to iterate to last child
+      create_inp_ta4runtime_idx(lg, aset_dpin, root_inp_sname);  // full_inp_hier_name);
+      break;                                                     // no need to iterate to last child
     }
   }
 }
@@ -1021,10 +1022,11 @@ Node_pin Lnast_tolg::setup_ta_ref_previous_ssa(std::string_view ref_vname, int16
   }
 
   std::string chain_tail_name;
-  if (subs>1)
+  if (subs > 1) {
     chain_tail_name = absl::StrCat(ref_vname, "|", subs - 1);  // try to concatenate after the TA(ssa-1)
-  else
+  } else {
     chain_tail_name = ref_vname;
+  }
 
   I(name2dpin.find(chain_tail_name) != name2dpin.end());
   I(name2dpin[chain_tail_name].get_name() == chain_tail_name);
@@ -1059,7 +1061,7 @@ Node Lnast_tolg::setup_node_opr_and_lhs(Lgraph *lg, const Lnast_nid &lnidx_opr, 
     if (op == Ntype_op::Invalid) {
       exit_node = lg->create_node_sub(fir_func_name);
     } else {
-      exit_node        = lg->create_node(op);
+      exit_node = lg->create_node(op);
     }
     const auto &tok1 = lnast->get_token(lnidx_opr);
     exit_node.set_loc(tok1.pos1, tok1.pos2);
@@ -1107,7 +1109,7 @@ Node Lnast_tolg::setup_node_opr_and_lhs(Lgraph *lg, const Lnast_nid &lnidx_opr, 
       const auto &tok2 = lnast->get_token(lnidx_opr);
       exit_node.set_loc(tok2.pos1, tok2.pos2);
       exit_node.set_source(tok2.fname);
-      // fmt::print("Hello2!! {} {} {}",tok2.pos1, tok2.pos2, exit_node.get_nid()  ); // here is the sum node location!!
+      // std::print("Hello2!! {} {} {}",tok2.pos1, tok2.pos2, exit_node.get_nid()  ); // here is the sum node location!!
     }
   }
 
@@ -1212,7 +1214,7 @@ Node_pin Lnast_tolg::setup_ref_node_dpin(Lgraph *lg, const Lnast_nid &lnidx_opd,
     ;
   } else if (is_input(name)) {
     // later the node_type should change to TupGet and connected to $
-    //if (name2din.find(name)!= name2dpin.end()) {
+    // if (name2din.find(name)!= name2dpin.end()) {
     node_dpin = lg->create_node(Ntype_op::Or).setup_driver_pin();
     // node_dpin.set_loc(std::make_pair( (lnast->get_token(lnidx_opd)).pos1 , (lnast->get_token(lnidx_opd)).pos2 ) );
     node_dpin.set_name(name);
@@ -1330,12 +1332,13 @@ void Lnast_tolg::process_ast_attr_set_op(Lgraph *lg, const Lnast_nid &lnidx_aset
     // Get the variable name with SSA/input
     auto vn_spin = aset_node.setup_sink_pin("parent");  // variable name
 
-    auto aset_ancestor_subs = lnast->get_data(name_aset).subs - 1;
+    auto        aset_ancestor_subs = lnast->get_data(name_aset).subs - 1;
     std::string aset_ancestor_name;
-    if (aset_ancestor_subs>0)
+    if (aset_ancestor_subs > 0) {
       aset_ancestor_name = absl::StrCat(vname, "|", aset_ancestor_subs);
-    else
+    } else {
       aset_ancestor_name = vname;
+    }
 
     Node_pin vn_dpin;
     if (is_input(name)) {
@@ -1360,12 +1363,13 @@ void Lnast_tolg::process_ast_attr_set_op(Lgraph *lg, const Lnast_nid &lnidx_aset
       auto        value_nossa = lnast->get_vname(val_aset);
       auto        value_subs  = lnast->get_data(val_aset).subs - 1;
       std::string value_name;
-      if (value_subs>0)
+      if (value_subs > 0) {
         value_name = absl::StrCat(value_nossa, "|", value_subs);
-      else
+      } else {
         value_name = value_nossa;
+      }
 
-      const auto &it          = name2dpin.find(value_name);
+      const auto &it = name2dpin.find(value_name);
       if (it != name2dpin.end()) {
         val_dpin = it->second;
       }
@@ -1462,51 +1466,16 @@ void Lnast_tolg::process_ast_attr_get_op(Lgraph *lg, const Lnast_nid &lnidx_aget
   }
 }
 
-void Lnast_tolg::process_firrtl_op_connection(Lgraph *lg, const Lnast_nid &lnidx_fc) {
-  Node fc_node;
-  int  i = 0;
-  for (const auto &child : lnast->children(lnidx_fc)) {
-    if (i == 0) {  // lhs
-      ++i;
-      continue;
-    }
-    if (i == 1) {  // func_name
-      auto fir_func_name = lnast->get_vname(child);
-      fc_node            = setup_node_opr_and_lhs(lg, lnidx_fc, fir_func_name);
-      ++i;
-      continue;
-    }
-
-    // TODO: If the connection changes to Ntype cell, we can do:
-    // out = __div(4,3)  should work too
-    auto ref_dpin = setup_ref_node_dpin(lg, child);
-    I(!ref_dpin.is_invalid());
-    switch (i) {
-      case 2: ref_dpin.connect_sink(fc_node.setup_sink_pin("e1")); break;
-      case 3: ref_dpin.connect_sink(fc_node.setup_sink_pin("e2")); break;
-      case 4: ref_dpin.connect_sink(fc_node.setup_sink_pin("e3")); break;
-      default: I(false, "firrtl_primitive_op should have 3 input edges at most!");
-    }
-    i++;
-  }
-}
-
 void Lnast_tolg::process_ast_func_call_op(Lgraph *lg, const Lnast_nid &lnidx_fc) {
   auto c0_fc         = lnast->get_first_child(lnidx_fc);
   auto func_name_ori = lnast->get_vname(lnast->get_sibling_next(c0_fc));
   auto cn_fc         = lnast->get_last_child(lnidx_fc);
   auto cn_fc_sname   = lnast->get_sname(cn_fc);
 
-  if (func_name_ori.substr(0, 6) == "__fir_") {  // TODO: Can we do this generic, not FIRRTL specific?
-    process_firrtl_op_connection(lg, lnidx_fc);
-    return;
-  }
-
   std::string func_name;
-  auto        cond1 = module_name.substr(0, 9) == "__firrtl_";
   auto        cond2 = func_name_ori.substr(0, 2) == "__";
   auto        cond3 = !inlined_func_names.contains(func_name_ori);
-  if (cond1 || cond2 || cond3) {
+  if (cond2 || cond3) {
     func_name = func_name_ori;
   } else {
     func_name = absl::StrCat(module_name, ".", func_name_ori);
@@ -1558,12 +1527,12 @@ void Lnast_tolg::process_ast_func_def_op(Lgraph *lg, const Lnast_nid &lnidx) {
   auto        subg_module_name = absl::StrCat(module_name, ".", func_vname);
   Lnast_tolg  p(subg_module_name, path);
 
-  // fmt::print("============================= Sub-module: LNAST->Lgraph Start ({})
+  // std::print("============================= Sub-module: LNAST->Lgraph Start ({})
   // ==============================================\n",
   //            subg_module_name);
 
   p.do_tolg(lnast, func_stmts);
-  // fmt::print("============================= Sub-module: LNAST->Lgraph End   ({})
+  // std::print("============================= Sub-module: LNAST->Lgraph End   ({})
   // ==============================================\n",
   //            subg_module_name);
 
@@ -1618,23 +1587,23 @@ void Lnast_tolg::setup_lnast_to_lgraph_primitive_type_mapping() {
   primitive_type_lnast2lg[Lnast_ntype::Lnast_ntype_log_not] = Ntype_op::Not;
   primitive_type_lnast2lg[Lnast_ntype::Lnast_ntype_log_or]  = Ntype_op::Ror;
 
-  primitive_type_lnast2lg[Lnast_ntype::Lnast_ntype_red_or]    = Ntype_op::Ror;
+  primitive_type_lnast2lg[Lnast_ntype::Lnast_ntype_red_or] = Ntype_op::Ror;
   // No direct primive translate for red_and/red_xor
 
-  primitive_type_lnast2lg[Lnast_ntype::Lnast_ntype_assign]    = Ntype_op::Or;
-  primitive_type_lnast2lg[Lnast_ntype::Lnast_ntype_bit_and]   = Ntype_op::And;
-  primitive_type_lnast2lg[Lnast_ntype::Lnast_ntype_bit_or]    = Ntype_op::Or;
-  primitive_type_lnast2lg[Lnast_ntype::Lnast_ntype_bit_not]   = Ntype_op::Not;
-  primitive_type_lnast2lg[Lnast_ntype::Lnast_ntype_bit_xor]   = Ntype_op::Xor;
-  primitive_type_lnast2lg[Lnast_ntype::Lnast_ntype_plus]      = Ntype_op::Sum;
-  primitive_type_lnast2lg[Lnast_ntype::Lnast_ntype_minus]     = Ntype_op::Sum;
-  primitive_type_lnast2lg[Lnast_ntype::Lnast_ntype_mult]      = Ntype_op::Mult;
-  primitive_type_lnast2lg[Lnast_ntype::Lnast_ntype_div]       = Ntype_op::Div;
-  primitive_type_lnast2lg[Lnast_ntype::Lnast_ntype_eq]        = Ntype_op::EQ;
-  primitive_type_lnast2lg[Lnast_ntype::Lnast_ntype_lt]        = Ntype_op::LT;
-  primitive_type_lnast2lg[Lnast_ntype::Lnast_ntype_gt]        = Ntype_op::GT;
-  primitive_type_lnast2lg[Lnast_ntype::Lnast_ntype_sra]       = Ntype_op::SRA;
-  primitive_type_lnast2lg[Lnast_ntype::Lnast_ntype_shl]       = Ntype_op::SHL;
+  primitive_type_lnast2lg[Lnast_ntype::Lnast_ntype_assign]  = Ntype_op::Or;
+  primitive_type_lnast2lg[Lnast_ntype::Lnast_ntype_bit_and] = Ntype_op::And;
+  primitive_type_lnast2lg[Lnast_ntype::Lnast_ntype_bit_or]  = Ntype_op::Or;
+  primitive_type_lnast2lg[Lnast_ntype::Lnast_ntype_bit_not] = Ntype_op::Not;
+  primitive_type_lnast2lg[Lnast_ntype::Lnast_ntype_bit_xor] = Ntype_op::Xor;
+  primitive_type_lnast2lg[Lnast_ntype::Lnast_ntype_plus]    = Ntype_op::Sum;
+  primitive_type_lnast2lg[Lnast_ntype::Lnast_ntype_minus]   = Ntype_op::Sum;
+  primitive_type_lnast2lg[Lnast_ntype::Lnast_ntype_mult]    = Ntype_op::Mult;
+  primitive_type_lnast2lg[Lnast_ntype::Lnast_ntype_div]     = Ntype_op::Div;
+  primitive_type_lnast2lg[Lnast_ntype::Lnast_ntype_eq]      = Ntype_op::EQ;
+  primitive_type_lnast2lg[Lnast_ntype::Lnast_ntype_lt]      = Ntype_op::LT;
+  primitive_type_lnast2lg[Lnast_ntype::Lnast_ntype_gt]      = Ntype_op::GT;
+  primitive_type_lnast2lg[Lnast_ntype::Lnast_ntype_sra]     = Ntype_op::SRA;
+  primitive_type_lnast2lg[Lnast_ntype::Lnast_ntype_shl]     = Ntype_op::SHL;
 
   primitive_type_lnast2lg[Lnast_ntype::Lnast_ntype_get_mask] = Ntype_op::Get_mask;
   primitive_type_lnast2lg[Lnast_ntype::Lnast_ntype_set_mask] = Ntype_op::Set_mask;
@@ -1705,10 +1674,7 @@ void Lnast_tolg::setup_lgraph_ios_and_final_var_name(Lgraph *lg) {
     auto ntype = node.get_type_op();
 
     if (ntype == Ntype_op::Sub) {
-      // TODO: can we rid of this to make it more generic?/out
-      if (node.get_type_sub_node().get_name().substr(0, 9) == "__firrtl_") {
-        continue;
-      }
+      // Skip non-FIRRTL function nodes (since FIRRTL is removed, skip all Sub nodes that don't match expected pattern)
       if (node.get_type_sub_node().get_name().substr(0, 6) != "__fir_") {
         continue;
       }
@@ -2011,8 +1977,8 @@ void Lnast_tolg::dfs_try_create_flattened_inp(Lgraph *lg, Node_pin &cur_node_spi
 }
 
 void Lnast_tolg::dump() const {
-  fmt::print("name2dpin:\n");
+  std::cout << "name2dpin:\n";
   for (auto &it : name2dpin) {
-    fmt::print("  name:{} dpin:{}\n", it.first, it.second.debug_name());
+    std::print("  name:{} dpin:{}\n", it.first, it.second.debug_name());
   }
 }

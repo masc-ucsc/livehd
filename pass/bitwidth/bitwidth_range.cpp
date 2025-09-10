@@ -2,7 +2,10 @@
 
 #include "bitwidth_range.hpp"
 
-#include "fmt/format.h"
+#include <format>
+#include <iostream>
+#include <print>
+
 #include "iassert.hpp"
 #include "likely.hpp"
 
@@ -61,7 +64,7 @@ void Bitwidth_range::set_range(const Lconst &min_val, const Lconst &max_val) {
       max = max_val.get_bits();
     }
 
-    // fmt::print("min:{} max:{} min_val:{} max_val:{}\n", (int)min, (int)max, min_val.to_pyrope(), max_val.to_pyrope());
+    // std::print("min:{} max:{} min_val:{} max_val:{}\n", (int)min, (int)max, min_val.to_pyrope(), max_val.to_pyrope());
     I(min == 0 || min <= max || max == 0);
   }
 }
@@ -183,5 +186,5 @@ Bits_t Bitwidth_range::get_sbits() const {
 
 void Bitwidth_range::dump() const {
   //(max, min, sbis, overflow)
-  fmt::print("({}, {}, {}b) {}\n", max, min, get_sbits(), overflow ? "overflow" : "");
+  std::print("({}, {}, {}b) {}\n", max, min, get_sbits(), overflow ? "overflow" : "");
 }

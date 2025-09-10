@@ -13,8 +13,9 @@ dummyComponent::dummyComponent(Ntype_op typeArg) {
 
 dummyComponent::dummyComponent(const std::string& nameArg) {
   type = Ntype::get_op(nameArg);
-  if (type == Ntype_op::Invalid)
+  if (type == Ntype_op::Invalid) {
     type = Ntype_op::Sub;
+  }
   name = nameArg;
 }
 
@@ -46,8 +47,9 @@ FPCompWrapper::~FPCompWrapper() { delete component; }
 
 double FPCompWrapper::ARInRange(double AR) {
   double maxAR = getMaxAR();
-  if ((AR < 1 && maxAR > 1) || (AR > 1 && maxAR < 1))
+  if ((AR < 1 && maxAR > 1) || (AR > 1 && maxAR < 1)) {
     flip();
+  }
   maxAR         = getMaxAR();
   double minAR  = getMinAR();
   double retval = AR;
@@ -61,8 +63,9 @@ double FPCompWrapper::ARInRange(double AR) {
   retval = std::max(retval, minAR);
   retval = std::min(retval, maxAR);
 
-  if (verbose)
+  if (verbose) {
     std::cout << "Target AR=" << AR << " minAR=" << minAR << " maxAR=" << maxAR << " returnAR=" << retval << "\n";
+  }
 
   return retval;
 }

@@ -20,10 +20,14 @@ optimization.
 The following code snippet reads an AIG from an Aiger file, enumerates all cuts
 and prints them for each node.
 
+LiveHD is a "compiler" infrastructure for hardware design optimized for
+synthesis and simulation. The goals is to enable a more productive flow where
+the ASIC/FPGA designer can work with multiple hardware description languages
+like Pyrope or Verilog. In the past, it supported CHISEL, but the code is deprecated.
+
 ```c++
 #include <mockturtle/mockturtle.hpp>
 #include <lorina/aiger.hpp>
-
 mockturtle::aig_network aig;
 auto const result = lorina::read_aiger( "file.aig", mockturtle::aiger_reader( aig ) );
 assert( result == lorina::return_code::success );

@@ -4,12 +4,9 @@
 
 #include <algorithm>
 #include <cctype>
+#include <format>
 #include <iostream>
 
-#include "fmt/color.h"
-#include "fmt/core.h"
-#include "fmt/format.h"
-#include "fmt/printf.h"
 #include "lnast_ntype.hpp"
 #include "pass.hpp"
 #include "prp_lnast.hpp"
@@ -125,15 +122,15 @@ void Semantic_check::print_out_of_scope_vars(Lnast *lnast) {
     error_print_lnast_var_warn(lnast, out_of_scope_vars);
     std::sort(out_of_scope_vars.begin(), out_of_scope_vars.end());
     auto first_entry = out_of_scope_vars.begin();
-    fmt::print(fmt::fg(fmt::color::blue), "Out of Scope Variable Error:");
-    fmt::print(": {}", *first_entry);
+    std::cout << "Out of Scope Variable Error:";
+    std::print(": {}", *first_entry);
     for (auto node_name : out_of_scope_vars) {
       if (node_name == *first_entry) {
         continue;
       }
-      fmt::print(", {}", node_name);
+      std::print(", {}", node_name);
     }
-    fmt::print(" is/are not defined in the scope of definition\n");
+    std::cout << " is/are not defined in the scope of definition\n";
   }
 }
 
@@ -141,46 +138,46 @@ void Semantic_check::error_print_lnast_by_name(Lnast *lnast, std::string_view er
   // Print LNAST and indicate error based Node's Text Name
   Prp_lnast converter;
   bool      printed = false;
-  fmt::print("\n");
+  std::cout << "\n";
 
   for (const auto &it : lnast->depth_preorder()) {
     auto node = lnast->get_data(it);
 
     std::string indent(2 * (it.level + 1), ' ');
 
-    fmt::print("{} {} {:>20} : {}", it.level, indent, node.type.to_sv(), node.token.get_text());
+    std::print("{} {} {:>20} : {}", it.level, indent, node.type.to_sv(), node.token.get_text());
 
     if (node.token.get_text() == error_name && !printed) {
-      fmt::print(fmt::fg(fmt::color::red), "    <==========\n");
+      std::cout << "    <==========\n";
       printed = true;
     } else {
-      fmt::print("\n");
+      std::cout << "\n";
     }
   }
-  fmt::print("\n");
+  std::cout << "\n";
 }
 
 void Semantic_check::error_print_lnast_by_type(Lnast *lnast, std::string_view error_name) {
   // Print LNAST and indicate error based Node's Type
   Prp_lnast converter;
   bool      printed = false;
-  fmt::print("\n");
+  std::cout << "\n";
 
   for (const auto &it : lnast->depth_preorder()) {
     const auto &node = lnast->get_data(it);
 
     std::string indent(2 * (it.level + 1), ' ');
 
-    fmt::print("{} {} {:>20} : {}", it.level, indent, node.type.to_sv(), node.token.get_text());
+    std::print("{} {} {:>20} : {}", it.level, indent, node.type.to_sv(), node.token.get_text());
 
     if (node.type.to_sv() == error_name && !printed) {
-      fmt::print(fmt::fg(fmt::color::red), "    <==========\n");
+      std::cout << "    <==========\n";
       printed = true;
     } else {
-      fmt::print("\n");
+      std::cout << "\n";
     }
   }
-  fmt::print("\n");
+  std::cout << "\n";
 }
 
 void Semantic_check::error_print_lnast_var_warn(Lnast *lnast, std::vector<std::string> error_names) {
@@ -188,33 +185,33 @@ void Semantic_check::error_print_lnast_var_warn(Lnast *lnast, std::vector<std::s
   // Print LNAST and indicate error based a vector of variable warnings
   Prp_lnast converter;
   bool      printed = false;
-  fmt::print("\n");
+  std::cout << "\n";
 
   for (const auto &it : lnast->depth_preorder()) {
     auto node = lnast->get_data(it);
 
     std::string indent(2 * (it.level + 1), ' ');
 
-    fmt::print("{} {} {:>20} : {}", it.level, indent, node.type.to_sv(), node.token.get_text());
+    std::print("{} {} {:>20} : {}", it.level, indent, node.type.to_sv(), node.token.get_text());
 
     if (error_names.size() != 0) {
       for (auto node_name = error_names.begin(); node_name != error_names.end(); *node_name++) {
         if (*node_name == node.token.get_text()) {
-          fmt::print(fmt::fg(fmt::color::red), "    <==========\n");
+          std::cout << "    <==========\n";
           error_names.erase(node_name);
           printed = true;
           break;
         }
       }
       if (!printed) {
-        fmt::print("\n");
+        std::cout << "\n";
       }
       printed = false;
     } else {
-      fmt::print("\n");
+      std::cout << "\n";
     }
   }
-  fmt::print("\n");
+  std::cout << "\n";
 }
 
 void Semantic_check::resolve_read_write_lists(Lnast *lnast) {
@@ -253,15 +250,15 @@ void Semantic_check::resolve_read_write_lists(Lnast *lnast) {
     error_print_lnast_var_warn(lnast, error_reads);
     std::sort(error_reads.begin(), error_reads.end());
     auto first_entry = never_read.begin();
-    fmt::print(fmt::fg(fmt::color::blue), "Last-Write Variable Warning");
-    fmt::print(": Last write(s) to '{}'", *first_entry);
+    std::cout << "Last-Write Variable Warning";
+    std::print(": Last write(s) to '{}'", *first_entry);
     for (auto node_name : never_read) {
       if (node_name == *first_entry) {
         continue;
       }
-      fmt::print(", '{}'", node_name);
+      std::print(", '{}'", node_name);
     }
-    fmt::print(" is/are never read\n");
+    std::cout << " is/are never read\n";
   }
   // Check also to look for output variables are not written to that should be written to
   for (auto node_name : perm_write_dict) {
@@ -290,18 +287,18 @@ void Semantic_check::resolve_read_write_lists(Lnast *lnast) {
     std::sort(error_names.begin(), error_names.end());
     // auto first_entry = perm_write_dict.begin();
     auto first_entry = error_names.begin();
-    fmt::print(fmt::fg(fmt::color::blue), "Never-Read Variable Warning");
-    // fmt::print(": {}", first_entry->first);
-    fmt::print(": {}", *first_entry);
+    std::cout << "Never-Read Variable Warning";
+    // std::print(": {}", first_entry->first);
+    std::print(": {}", *first_entry);
     // for (auto node_name : perm_write_dict) {
     for (auto node_name : error_names) {
       if (node_name == *first_entry) {
         continue;
       }
-      // fmt::print(", {}", node_name.first);
-      fmt::print(", {}", node_name);
+      // std::print(", {}", node_name.first);
+      std::print(", {}", node_name);
     }
-    fmt::print(" were written but never read\n");
+    std::cout << " were written but never read\n";
   }
 
   // Output Variable Warning
@@ -313,15 +310,15 @@ void Semantic_check::resolve_read_write_lists(Lnast *lnast) {
     error_print_lnast_var_warn(lnast, error_outputs);
     std::sort(error_outputs.begin(), error_outputs.end());
     auto first_entry = output_vars.begin();
-    fmt::print(fmt::fg(fmt::color::blue), "Output Variable Warning");
-    fmt::print(": {}", *first_entry);
+    std::cout << "Output Variable Warning";
+    std::print(": {}", *first_entry);
     for (auto node_name : output_vars) {
       if (node_name == *first_entry) {
         continue;
       }
-      fmt::print(", {}", node_name);
+      std::print(", {}", node_name);
     }
-    fmt::print(" should be written since declared in the function definition\n");
+    std::cout << " should be written since declared in the function definition\n";
   }
 }
 
@@ -380,15 +377,15 @@ void Semantic_check::resolve_lhs_rhs_lists(Lnast *lnast) {
   }
   if (inefficient_LNAST.size() != 0) {
     auto first = inefficient_LNAST.begin();
-    fmt::print(fmt::fg(fmt::color::blue), "\nInefficient LNAST Warning");
-    fmt::print(": {}", *first);
+    std::cout << "\nInefficient LNAST Warning";
+    std::print(": {}", *first);
     for (auto name : inefficient_LNAST) {
       if (name == *first) {
         continue;
       }
-      fmt::print(", {}", name);
+      std::print(", {}", name);
     }
-    fmt::print(" may be unnecessary\n");
+    std::cout << " may be unnecessary\n";
   }
 }
 
@@ -403,7 +400,7 @@ void Semantic_check::resolve_out_of_scope() {
         && write_dict.count(node.first) == 0 && !is_temp_var(node.first) && functions.count(node.first) == 0) {
       out_of_scope_vars.push_back(node.first);
     }
-    fmt::print("Printing the read_dict:{}, {}\n", node.first, node.second);
+    std::print("Printing the read_dict:{}, {}\n", node.first, node.second);
   }
 }
 
@@ -542,16 +539,16 @@ void Semantic_check::check_tree_struct_ops(Lnast *lnast, const Lnast_nid &lnidx_
     error_print_lnast_by_type(lnast, node_type.to_sv());
     Pass::error("Tree Structure Operation Error: Not a Valid Node Type\n");
   }
-  // fmt::print("Write Dict\n");
+  // std::print("Write Dict\n");
   // for (auto name : write_dict) {
-  //   fmt::print("{} : {}\n", name.first, name.second);
+  //   std::print("{} : {}\n", name.first, name.second);
   // }
-  // fmt::print("\n");
-  // fmt::print("Read Dict\n");
+  // std::cout << "\n";
+  // std::print("Read Dict\n");
   // for (auto name : read_dict) {
-  //   fmt::print("{} : {}\n", name.first, name.second);
+  //   std::print("{} : {}\n", name.first, name.second);
   // }
-  // fmt::print("\n");
+  // std::cout << "\n";
   resolve_out_of_scope();
   out_of_scope_stack.push_back(write_dict);
   out_of_scope_stack.push_back(read_dict);
@@ -754,15 +751,15 @@ void Semantic_check::check_func_def(Lnast *lnast, const Lnast_nid &lnidx_opr, st
     error_print_lnast_var_warn(lnast, error_outputs);
     std::sort(error_outputs.begin(), error_outputs.end());
     auto first_entry = output_vars.begin();
-    fmt::print(fmt::fg(fmt::color::blue), "Output Variable Warning");
-    fmt::print(": {}", *first_entry);
+    std::cout << "Output Variable Warning";
+    std::print(": {}", *first_entry);
     for (auto node_name : output_vars) {
       if (node_name == *first_entry) {
         continue;
       }
-      fmt::print(", {}", node_name);
+      std::print(", {}", node_name);
     }
-    fmt::print(" should be written since declared in the function definition\n");
+    std::cout << " should be written since declared in the function definition\n";
   }
 }
 
@@ -811,48 +808,48 @@ void Semantic_check::do_check(Lnast *lnast) {
       check_tree_struct_ops(lnast, stmt, ntype, stmt_name);
     }
   }
-  // fmt::print("Write Dict\n");
+  // std::print("Write Dict\n");
   // for (auto name : write_dict) {
-  //   fmt::print("{} : {}\n", lnast->get_name(name.first), name.second);
+  //   std::print("{} : {}\n", lnast->get_name(name.first), name.second);
   // }
-  // fmt::print("\n");
-  // fmt::print("Read Dict\n");
+  // std::cout << "\n";
+  // std::print("Read Dict\n");
   // for (auto name : read_dict) {
-  //   fmt::print("{} : {}\n", lnast->get_name(name.first), name.second);
+  //   std::print("{} : {}\n", lnast->get_name(name.first), name.second);
   // }
-  // fmt::print("\n");
-  // fmt::print("Output Vars\n");
+  // std::cout << "\n";
+  // std::print("Output Vars\n");
   // for (auto name : output_vars) {
-  //   fmt::print("{}\n", name);
+  //   std::print("{}\n", name);
   // }
-  // fmt::print("\n");
-  // fmt::print("LHS + RHS List\n");
+  // std::cout << "\n";
+  // std::print("LHS + RHS List\n");
   // for (int i = 0; i < lhs_list.size(); i++) {
-  //   fmt::print("{} : ", lnast->get_name(lhs_list[i]));
-  //   fmt::print("[");
+  //   std::print("{} : ", lnast->get_name(lhs_list[i]));
+  //   std::print("[");
   //   for (int j = 0; j < rhs_list[i].size(); j++)  {
-  //     fmt::print("{}, ", lnast->get_name(rhs_list[i][j]));
+  //     std::print("{}, ", lnast->get_name(rhs_list[i][j]));
   //   }
-  //   fmt::print("]\n");
+  //   std::print("]\n");
   // }
-  // fmt::print("\n");
+  // std::cout << "\n";
   // Find Errors!
   resolve_out_of_scope();
   if (out_of_scope_vars.size() != 0) {
     error_print_lnast_var_warn(lnast, out_of_scope_vars);
     std::sort(out_of_scope_vars.begin(), out_of_scope_vars.end());
     auto first_entry = out_of_scope_vars.begin();
-    fmt::print(fmt::fg(fmt::color::red), "Out of Scope Variable Error");
-    fmt::print(": {}", *first_entry);
+    std::print("Out of Scope Variable Error");
+    std::print(": {}", *first_entry);
     for (auto node_name : out_of_scope_vars) {
       if (node_name == *first_entry) {
         continue;
       }
-      fmt::print(", {}", node_name);
+      std::print(", {}", node_name);
     }
-    fmt::print(" is/are not defined in the scope of definition\n");
+    std::cout << " is/are not defined in the scope of definition\n";
   }
   resolve_read_write_lists(lnast);
   resolve_lhs_rhs_lists(lnast);
-  fmt::print("\n");
+  std::cout << "\n";
 }

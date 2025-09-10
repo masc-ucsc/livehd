@@ -1,7 +1,10 @@
 #include "AnnLayout.hpp"
 
 #include <cmath>
+#include <format>
 #include <functional>
+#include <iostream>
+#include <print>
 
 #include "BagLayout.hpp"
 #include "GridLayout.hpp"
@@ -17,9 +20,7 @@ void annLayout::addComponent(FPObject* comp, int count) {
   FPContainer::addComponent(comp, count);
 }
 
-bool annLayout::insert_obj(size_t idx) {
-  return true;
-}
+bool annLayout::insert_obj(size_t idx) { return true; }
 
 bool annLayout::layout(FPOptimization opt, double targetAR) {
   (void)opt;
@@ -78,7 +79,7 @@ bool annLayout::layout(FPOptimization opt, double targetAR) {
     }
 
     if (comp->getX() == 0 && comp->getY() == 0) {
-      fmt::print("root object: {}\n", comp->getName());
+      std::print("root object: {}\n", comp->getName());
       horiz.root_idx = i;
     }
   }

@@ -37,7 +37,7 @@ static bool primesInitialized = false;
 // Indicate we are now initialized.
 
 bool *Primes::candidateArray = new bool[candidateArrayLen];
-int * Primes::primeArray     = new int[primeArrayLen];
+int  *Primes::primeArray     = new int[primeArrayLen];
 
 int Primes::currMaxPrimeInx = 0;
 int Primes::currPrimeInx    = 0;
@@ -50,7 +50,9 @@ int Primes::currMaxPrime    = 0;        // Start out with a dummy first prime.
 void Primes::initPrimes() {
   candidateArray[0] = false;
   candidateArray[1] = false;
-  for (int i = 2; i < candidateArrayLen; i++) candidateArray[i] = true;
+  for (int i = 2; i < candidateArrayLen; i++) {
+    candidateArray[i] = true;
+  }
 }
 
 // This is the lazy generator.
@@ -58,11 +60,12 @@ void Primes::initPrimes() {
 int Primes::findNextPrime() {
   // Look for the next prime in candidate array.
   int nextPrime = primeError;
-  for (int i = currMaxPrime + 1; i < candidateArrayLen; i++)
+  for (int i = currMaxPrime + 1; i < candidateArrayLen; i++) {
     if (candidateArray[i]) {
       nextPrime = i;
       break;
     }
+  }
   // If we couldn't find any additional primes within size of candidate array.  Set maxPrime and return.
   if (nextPrime == primeError) {
     // Perhaps we should also release the candidate array, as we will no longer need it.
@@ -74,7 +77,9 @@ int Primes::findNextPrime() {
   // TODO.	Should we wait until the next one?
   //			This way we will always clear out one more than needed.
   //			But if we do this later, we will need to unroll this loop for 2 into the initialization code.
-  for (int i = nextPrime * 2; i < candidateArrayLen; i += nextPrime) candidateArray[i] = false;
+  for (int i = nextPrime * 2; i < candidateArrayLen; i += nextPrime) {
+    candidateArray[i] = false;
+  }
   // Remember we found a new high prime.
   primeArray[currMaxPrimeInx++] = nextPrime;
   currMaxPrime                  = nextPrime;
@@ -83,8 +88,9 @@ int Primes::findNextPrime() {
 
 // These next two usually just go through the prime array unless a larger prime than currently known is needed.
 void Primes::resetPrimes() {
-  if (!primesInitialized)
+  if (!primesInitialized) {
     initPrimes();
+  }
   currPrimeInx = 0;
 }
 
@@ -95,8 +101,9 @@ int Primes::getNextPrime() {
     return findNextPrime();
   }
   // Otherwise, just pull the next prime out of the cache of found primes.
-  else
+  else {
     return primeArray[currPrimeInx++];
+  }
 }
 
 primeFactorization::primeFactorization(int num) {
@@ -117,8 +124,9 @@ primeFactorization::primeFactorization(int num) {
   Primes::resetPrimes();
   while ((p = Primes::getNextPrime()) <= sqrtnum) {
     // If we are at the last one, break.
-    if (p == Primes::primeError)
+    if (p == Primes::primeError) {
       break;
+    }
     int count = 0;
   tryAgain:
     // See if there is (another) factor of the current prime.
@@ -127,17 +135,20 @@ primeFactorization::primeFactorization(int num) {
       posnum = posnum / p;
       goto tryAgain;
     }
-    if (count > 0)
+    if (count > 0) {
       addFactor(p, count);
+    }
     // Get out of the loop early if we have found the entire factorization.
-    if (posnum == 1)
+    if (posnum == 1) {
       break;
+    }
   }
 
   // We may need to add a final factor that was greater than our max prime.
   // We will also get here if num is prime.
-  if (posnum != 1)
+  if (posnum != 1) {
     addFactor(posnum, 1);
+  }
 }
 
 primeFactorization::~primeFactorization() { delete[] factorization; }
@@ -147,7 +158,9 @@ primeFactorization::~primeFactorization() { delete[] factorization; }
 // Ergo, multiplying together all of the factors in the array will recreate the original number.
 int primeFactorization::countFactors() const {
   int factorCount = 0;
-  for (int i = 0; i < currMaxFactor; i++) factorCount += factorization[i].Exp();
+  for (int i = 0; i < currMaxFactor; i++) {
+    factorCount += factorization[i].Exp();
+  }
   return factorCount;
 }
 
@@ -156,7 +169,9 @@ void primeFactorization::expandFactors(int *factors) const {
   int factorInx = 0;
   for (int i = 0; i < currMaxFactor; i++) {
     primeFactor pf = factorization[i];
-    for (int j = 0; j < pf.Exp(); j++) factors[factorInx++] = pf.Prime();
+    for (int j = 0; j < pf.Exp(); j++) {
+      factors[factorInx++] = pf.Prime();
+    }
   }
 }
 
@@ -166,8 +181,9 @@ void primeFactorization::printFactors(ostream &o) const {
     primeFactor pf = factorization[i];
     for (int j = 0; j < pf.Exp(); j++) {
       // We already printed out the first factor.
-      if (i == 0 and j == 0)
+      if (i == 0 and j == 0) {
         continue;
+      }
       o << "*" << pf.Prime();
     }
   }
@@ -181,8 +197,9 @@ void primeFactorization::printFactors(ostream &o) const {
 void incrementBoolArray(bool *arr, int len) {
   for (int i = 0; i < len; i++) {
     arr[i] = !arr[i];
-    if (arr[i])
+    if (arr[i]) {
       break;
+    }
   }
 }
 
@@ -206,7 +223,9 @@ int balanceFactors(int composite, double targetRatio) {
   // Allocate an array of booleans to dictate which factor combination we are about to try.
   // Initializing to false is the equivalent of "zero".
   bool *boolArr = new bool[len];
-  for (int i = 0; i < len; i++) boolArr[i] = false;
+  for (int i = 0; i < len; i++) {
+    boolArr[i] = false;
+  }
 
   bool   flip  = (targetRatio < 1);
   double ratio = flip ? 1 / targetRatio : targetRatio;
@@ -221,15 +240,17 @@ int balanceFactors(int composite, double targetRatio) {
     int f1 = 1;
     int f2 = 1;
     for (int j = 0; j < len; j++) {
-      if (boolArr[j])
+      if (boolArr[j]) {
         f1 *= factArray[j];
-      else
+      } else {
         f2 *= factArray[j];
+      }
     }
     incrementBoolArray(boolArr, len);
     double newRatio = ((double)f1) / f2;
-    if (newRatio < 1)
+    if (newRatio < 1) {
       continue;
+    }
 
     // Is this better than best so far?
     double newMetric = (newRatio > ratio) ? newRatio / ratio : ratio / newRatio;

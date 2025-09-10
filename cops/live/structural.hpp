@@ -26,11 +26,13 @@ private:
   const Invariant_boundaries *boundaries;
 
   Index_id get_candidate(Index_id newid, Lgraph *nsynth) {
-    if (nsynth->get_wid(newid) == 0)
+    if (nsynth->get_wid(newid) == 0) {
       return 0;
+    }
     auto name = nsynth->get_node_wirename(newid);
-    if (!original->has_wirename(name))
+    if (!original->has_wirename(name)) {
       return 0;
+    }
 
     return original->get_node_id(name);
   }

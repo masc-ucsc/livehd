@@ -1,6 +1,7 @@
 //  This file is distributed under the BSD 3-Clause License. See LICENSE for details.
 #pragma once
 
+#include <format>
 #include <functional>
 #include <map>
 #include <string>
@@ -8,7 +9,6 @@
 #include "absl/strings/str_split.h"
 #include "eprp.hpp"
 #include "err_tracker.hpp"
-#include "fmt/format.h"
 #include "graph_library.hpp"
 #include "iassert.hpp"
 
@@ -51,23 +51,23 @@ public:
   }
 
   template <typename... Args>
-  static void error(fmt::format_string<Args...> format, Args &&...args) {
-    auto tmp = fmt::format(format, std::forward<Args>(args)...);
+  static void error(std::format_string<Args...> format, Args &&...args) {
+    auto tmp = std::format(format, std::forward<Args>(args)...);
     err_tracker::logger(tmp);
     error(tmp);
   }
 
   template <typename... Args>
-  static void warn(fmt::format_string<Args...> format, Args &&...args) {
-    auto tmp = fmt::format(format, std::forward<Args>(args)...);
+  static void warn(std::format_string<Args...> format, Args &&...args) {
+    auto tmp = std::format(format, std::forward<Args>(args)...);
     err_tracker::logger(tmp);
     eprp.parser_warn(tmp);
   }
 
   template <typename... Args>
-  static void info(fmt::format_string<Args...> format, Args &&...args) {
+  static void info(std::format_string<Args...> format, Args &&...args) {
 #ifndef NDEBUG
-    auto tmp = fmt::format(format, std::forward<Args>(args)...);
+    auto tmp = std::format(format, std::forward<Args>(args)...);
     err_tracker::logger(tmp);
     eprp.parser_info(tmp);
 #else
