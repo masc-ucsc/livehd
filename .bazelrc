@@ -4,6 +4,15 @@ build --output_filter='^//(core|pass|inou)'
 build --cxxopt="-std=c++23" --cxxopt="-fexceptions" --force_pic --build_tag_filters="-fixme"
 # Force C++23 to override toolchain defaults completely
 build --action_env=BAZEL_CXXOPTS="-std=c++23"
+# Set minimum macOS version to support C++23 features (requires 13.3+)
+# Only applies to macOS builds, ignored on other platforms
+build:macos --linkopt="-mmacosx-version-min=13.3"
+build:macos --copt="-mmacosx-version-min=13.3"
+build:macos --cxxopt="-mmacosx-version-min=13.3"
+
+# Auto-detect and apply macOS config when building on Darwin
+build --enable_platform_specific_config
+build:darwin --config=macos
 
 # Custom debug configuration with C++23 (use --config=debug instead of -c dbg)
 build:debug --copt="-g"
