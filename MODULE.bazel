@@ -27,7 +27,7 @@ bazel_dep(name = "rules_m4", version = "0.3")
 bazel_dep(name = "rules_flex", version = "0.4")
 bazel_dep(name = "rules_bison", version = "0.4")
 
-bazel_dep(name = "rapidjson", version = "1.1.0.bcr.20241007")
+bazel_dep(name = "rapidjson", version = "1.1.0.bcr.20250205")
 bazel_dep(name = "mimalloc", version = "2.2.4")
 
 
