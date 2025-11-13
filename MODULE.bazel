@@ -126,10 +126,11 @@ http_archive(
     name = "opentimer",
     build_file = "//packages:opentimer.BUILD",
     patches = ["//packages:opentimer.patch"],
-    sha256 = "fb848b9608f9c1cbfe565b040cb4c0778a2ab82acd193c59476d376601791181",
-    strip_prefix = "OpenTimer-52056da3d4971322841abbe975e5a22a4e4bf491",
+    sha256 = "c6cf50ece9e49016e2f3cbf9adf43d65b9886cf637e27361bf0b7f9f8ed8144d",
+    strip_prefix = "OpenTimer-def974f189616f97f5c0ff68265fd0f8ed9c22bd",
     urls = [
-        "https://github.com/masc-ucsc/OpenTimer/archive/52056da3d4971322841abbe975e5a22a4e4bf491.zip",
+        "https://github.com/masc-ucsc/OpenTimer/archive/def974f189616f97f5c0ff68265fd0f8ed9c22bd.zip",
+      #  "https://github.com/masc-ucsc/OpenTimer/archive/52056da3d4971322841abbe975e5a22a4e4bf491.zip",
     ],
 )
 

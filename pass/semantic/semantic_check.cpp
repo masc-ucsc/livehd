@@ -195,7 +195,7 @@ void Semantic_check::error_print_lnast_var_warn(Lnast *lnast, std::vector<std::s
     std::print("{} {} {:>20} : {}", it.level, indent, node.type.to_sv(), node.token.get_text());
 
     if (error_names.size() != 0) {
-      for (auto node_name = error_names.begin(); node_name != error_names.end(); *node_name++) {
+      for (auto node_name = error_names.begin(); node_name != error_names.end(); node_name++) {
         if (*node_name == node.token.get_text()) {
           std::cout << "    <==========\n";
           error_names.erase(node_name);

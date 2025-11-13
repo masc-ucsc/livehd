@@ -1,9 +1,9 @@
 # livehd specific bazel options
 build --output_filter='^//(core|pass|inou)'
-#build --output_filter="^//"
+build --repo_env=BAZEL_CONLYOPTS="-std=gnu17"
 build --cxxopt="-std=c++23" --cxxopt="-fexceptions" --force_pic --build_tag_filters="-fixme"
-# Force C++23 to override toolchain defaults completely
 build --action_env=BAZEL_CXXOPTS="-std=c++23"
+
 # Set minimum macOS version to support C++23 features (requires 13.3+)
 # Only applies to macOS builds, ignored on other platforms
 build:macos --linkopt="-mmacosx-version-min=13.3"
@@ -15,6 +15,7 @@ build --enable_platform_specific_config
 build:darwin --config=macos
 
 # Custom debug configuration with C++23 (use --config=debug instead of -c dbg)
+build:debug --repo_env=BAZEL_CONLYOPTS="-std=gnu17"
 build:debug --copt="-g"
 build:debug --copt="-std=c++23"
 build:debug --cxxopt="-g"
