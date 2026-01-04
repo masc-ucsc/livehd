@@ -6,8 +6,8 @@ module pref_op
   input   gk,
   input   pk,
 
-  output  go,
-  output  po
+  output  logic go,
+  output  logic po
 );
 
 always @(*) begin
@@ -16,4 +16,3 @@ always @(*) begin
 end
 
 endmodule
-

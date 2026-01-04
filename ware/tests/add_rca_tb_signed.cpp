@@ -1,4 +1,5 @@
-//  This file is distributed under the BSD 3-Clause License. See LICENSE for details.
+//  This file is distributed under the BSD 3-Clause License. See LICENSE for
+//  details.
 
 #include <stdint.h>
 #include <time.h>
@@ -7,18 +8,23 @@
 
 #include "Vadd_rca_signed.h"
 #include "verilated.h"
-#include "verilated_vcd_c.h"
+// #include "verilated_vcd_c.h"
 
-#define MAX_TIME  2000
+#define MAX_TIME 2000
 #define NUM_TESTS 4
 
-vluint64_t     global_time = 0;
-VerilatedVcdC *tfp         = 0;
+vluint64_t global_time = 0;
 
 uint64_t top_a;
 uint64_t top_b;
 uint64_t top_sum;
-uint8_t  top_carry;
+uint8_t top_carry;
+
+#ifdef TRACE
+#include "verilated_fst_c.h"
+
+VerilatedFstC *tfp = 0;
+#endif
 
 void do_terminate() {
 #ifdef TRACE
@@ -65,17 +71,19 @@ int main(int argc, char **argv, char **env) {
   // init top verilog instance
   Vadd_rca_signed *top = new Vadd_rca_signed;
 
-  uint64_t val_a[NUM_TESTS] = {(uint64_t)~0, 0, 0xAAAAAAAAAAAAAAAA, (uint64_t)1 << 63};
+  uint64_t val_a[NUM_TESTS] = {(uint64_t)~0, 0, 0xAAAAAAAAAAAAAAAA,
+                               (uint64_t)1 << 63};
 
-  uint64_t val_b[NUM_TESTS] = {(uint64_t)~0, 0, 0xAAAAAAAAAAAAAAAA, (uint64_t)1 << 63};
+  uint64_t val_b[NUM_TESTS] = {(uint64_t)~0, 0, 0xAAAAAAAAAAAAAAAA,
+                               (uint64_t)1 << 63};
 
 #ifdef TRACE
   // init trace dump
   Verilated::traceEverOn(true);
-  tfp = new VerilatedVcdC;
+  tfp = new VerilatedFstC;
 
   top->trace(tfp, 99);
-  tfp->open("output.vcd");
+  tfp->open("wave.fst");
 #endif
 
   // initialize simulation inputs
@@ -85,17 +93,18 @@ int main(int argc, char **argv, char **env) {
 
     advance_clock(top, 1);
 
-    top_sum   = top->sum;
+    top_sum = top->sum;
     top_carry = top->carry;
 
     uint8_t sign_a = !!(top_a >> 63);
     uint8_t sign_b = !!(top_b >> 63);
     // evaluate correctness
     printf("Test %d: ", i);
-    uint64_t lower_a      = (top_a & ~(1 << 63));
-    uint64_t lower_b      = (top_b & ~(1 << 63));
+    uint64_t lower_a = (top_a & ~(1 << 63));
+    uint64_t lower_b = (top_b & ~(1 << 63));
     uint64_t unsigned_sum = lower_a + lower_b;
-    printf("A_sign is %d, B_sign is %d, Sum_sign is %d\n", sign_a, sign_b, (unsigned_sum >> 63));
+    printf("A_sign is %d, B_sign is %d, Sum_sign is %d\n", sign_a, sign_b,
+           (unsigned_sum >> 63));
     int8_t our_carry = !!(sign_a == sign_b && sign_a != (unsigned_sum >> 63));
     if (top_carry == our_carry && top_a + top_b == top_sum) {
       printf("PASSED\n");
@@ -103,15 +112,10 @@ int main(int argc, char **argv, char **env) {
       printf("FAILED\n");
     }
     printf("With values:\n");
-    printf(
-        "A = %lld, B = %lld, Expected Carry = %s, Actual Carry = %s"
-        ", Expected Sum = %lld, Actual Sum = %lld\n",
-        top_a,
-        top_b,
-        our_carry ? "TRUE" : "FALSE",
-        top_carry ? "TRUE" : "FALSE",
-        (top_a + top_b),
-        top_sum);
+    printf("A = %lld, B = %lld, Expected Carry = %s, Actual Carry = %s"
+           ", Expected Sum = %lld, Actual Sum = %lld\n",
+           top_a, top_b, our_carry ? "TRUE" : "FALSE",
+           top_carry ? "TRUE" : "FALSE", (top_a + top_b), top_sum);
   }
   do_terminate;
 }

@@ -12,86 +12,48 @@ module mult_booth
 );
 
 
-reg [2:0]                 c[N-1:0];
-reg [Bits:0]              p[N-1:0];
-reg [2*Bits-1:0]          sp[N-1:0];
-reg [2*Bits-1:0]          prod;
-reg [Bits-1:0]              inv_a;
-reg [Bits:0]               temp_reg_iter;
+reg [2:0]        c[N-1:0];
+reg [Bits:0]     p[N-1:0];
+reg [2*Bits-1:0] sp[N-1:0];
+reg [2*Bits-1:0] prod;
+reg [Bits-1:0]   inv_a;
 
-genvar i,k;
-assign inv_a = ~a + 1; //2's compliment
+integer i;
 
-always@(*) begin
-  c[0] = {b[1],b[0],1'b0};
-  for(i=1; i<N; i++)
-  begin
-    c[i] = {b[2*i+1],b[2*i],b[2*i-1]};
+always @(*) begin
+  inv_a = ~a + 1'b1; // 2's complement
+
+  c[0] = {b[1], b[0], 1'b0};
+  for (i = 1; i < N; i = i + 1) begin
+    c[i] = {b[2*i+1], b[2*i], b[2*i-1]};
   end
 
-  for(i=0; i<N; i++)
-  begin
-    case(c[i])
-      3'b001:
-      begin
-        p[i] = {a[Bits-1],a}; // 1
-      end
-      3'b010:
-      begin
-        p[i] = {a[Bits-1],a}; // 1
-      end
-      3'b011:
-        begin
-          p[i] = {a,1'b0}; // 2
-        end
-      3'b100:
-        begin
-          p[i] = {inv_a,1'b0}; // -2
-        end
-      3'b101:
-        begin
-          p[i] = {inv_a[Bits-1],inv_a}; // -1
-        end
-      3'b110:
-        begin
-          p[i] = {inv_a[Bits-1],inv_a}; // -1
-        end
-      default: p[i] = 0; // 0
+  for (i = 0; i < N; i = i + 1) begin
+    case (c[i])
+      3'b001: p[i] = {a[Bits-1], a};         // 1
+      3'b010: p[i] = {a[Bits-1], a};         // 1
+      3'b011: p[i] = {a, 1'b0};              // 2
+      3'b100: p[i] = {inv_a, 1'b0};          // -2
+      3'b101: p[i] = {inv_a[Bits-1], inv_a}; // -1
+      3'b110: p[i] = {inv_a[Bits-1], inv_a}; // -1
+      default: p[i] = { (Bits+1){1'b0} };    // 0
     endcase
 
-    // Sign extension of partial products
-    assign temp_reg_iter = p[i];
-    if (temp_reg_iter[Bits] == 0)
-      assign sp[i] = {63'b0,p[i]};
+    // Sign-extend to 2*Bits, then shift by 2*i.
+    if (p[i][Bits] == 1'b0)
+      sp[i] = {{(Bits-1){1'b0}}, p[i]};
     else
-      assign sp[i] = {(~63'b0),p[i]};
+      sp[i] = {{(Bits-1){1'b1}}, p[i]};
 
-    // Shifting partial products by 2 bits
-    for(k=0;k<i;k++)
-    begin
-      assign sp[i] = sp[i]<<2;
-    end
+    sp[i] = sp[i] << (2*i);
   end
 
-  assign prod = sp[0];
-  for(i=1; i<N; i++)
-  begin
-    assign prod = prod + sp[i];
+  prod = sp[0];
+  for (i = 1; i < N; i = i + 1) begin
+    prod = prod + sp[i];
   end
 end
 
 assign ans = prod;
 
 endmodule
-
-
-
-
-
-
-
-
-
-
-
-

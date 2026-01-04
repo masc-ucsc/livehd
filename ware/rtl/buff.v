@@ -7,9 +7,7 @@ module buff
   output D
 );
 
-always @(*) begin
-  C = A;
-  D = B;
-end
+assign C = A;
+assign D = B;
 
 endmodule

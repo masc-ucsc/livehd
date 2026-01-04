@@ -1,60 +1,66 @@
 
 all: run
 
+
+VERILATOR_FLAGS=-Wall --cc
+
+VERILATOR_FLAGS+=--trace-fst --trace-struct
+VERILATOR_FLAGS+=--coverage
+
 add_rca:
-	verilator -sv +incdir+rtl --Wall --cc --trace --top-module add_rca ./rtl/add_rca.v ./rtl/full_adder.v --exe tests/add_rca_tb.cpp -CFLAGS "-DTRACE=1 -std=c++14"
+	verilator -sv +incdir+rtl ${VERILATOR_FLAGS} --top-module add_rca ./rtl/add_rca.v ./rtl/full_adder.v --exe tests/add_rca_tb.cpp -CFLAGS "-DTRACE=1 -std=c++14"
 	make -C obj_dir/ -f Vadd_rca.mk Vadd_rca
 
 add_rca_signed:
-	verilator -sv +incdir+rtl --Wall --cc --trace --top-module add_rca_signed ./rtl/add_rca_signed.v ./rtl/full_adder.v --exe tests/add_rca_tb_signed.cpp -CFLAGS "-DTRACE=1 -std=c++14"
+	verilator -sv +incdir+rtl ${VERILATOR_FLAGS} --top-module add_rca_signed ./rtl/add_rca_signed.v ./rtl/full_adder.v --exe tests/add_rca_tb_signed.cpp -CFLAGS "-DTRACE=1 -std=c++14"
 	make -C obj_dir/ -f Vadd_rca_signed.mk Vadd_rca_signed
 
 shift_barrelfast_sleft:
-	verilator -sv +incdir+rtl --Wall --cc --trace --top-module shift_barrelfast_sleft ./rtl/shift_barrelfast_sleft.v --exe tests/shift_barrelfast_sleft_tb.cpp -CFLAGS "-DTRACE=1 -std=c++14"
+	verilator -sv +incdir+rtl ${VERILATOR_FLAGS} --top-module shift_barrelfast_sleft ./rtl/shift_barrelfast_sleft.v --exe tests/shift_barrelfast_sleft_tb.cpp -CFLAGS "-DTRACE=1 -std=c++14"
 	make -C obj_dir/ -f Vshift_barrelfast_sleft.mk Vshift_barrelfast_sleft
 
 shift_barrelfast_sright:
-	verilator -sv +incdir+rtl --Wall --cc --trace --top-module shift_barrelfast_sright ./rtl/shift_barrelfast_sright.v --exe tests/shift_barrelfast_sright_tb.cpp -CFLAGS "-DTRACE=1 -std=c++14"
+	verilator -sv +incdir+rtl ${VERILATOR_FLAGS} --top-module shift_barrelfast_sright ./rtl/shift_barrelfast_sright.v --exe tests/shift_barrelfast_sright_tb.cpp -CFLAGS "-DTRACE=1 -std=c++14"
 	make -C obj_dir/ -f Vshift_barrelfast_sright.mk Vshift_barrelfast_sright
 
 shift_barrelfast_rright:
-	verilator -sv +incdir+rtl --Wall --cc --trace --top-module shift_barrelfast_rright ./rtl/shift_barrelfast_rright.v --exe tests/shift_barrelfast_rright_tb.cpp -CFLAGS "-DTRACE=1 -std=c++14"
+	verilator -sv +incdir+rtl ${VERILATOR_FLAGS} --top-module shift_barrelfast_rright ./rtl/shift_barrelfast_rright.v --exe tests/shift_barrelfast_rright_tb.cpp -CFLAGS "-DTRACE=1 -std=c++14"
 	make -C obj_dir/ -f Vshift_barrelfast_rright.mk Vshift_barrelfast_rright
 
 shift_barrelfast_rleft:
-	verilator -sv +incdir+rtl --Wall --cc --trace --top-module shift_barrelfast_rleft ./rtl/shift_barrelfast_rleft.v --exe tests/shift_barrelfast_rleft_tb.cpp -CFLAGS "-DTRACE=1 -std=c++14"
+	verilator -sv +incdir+rtl ${VERILATOR_FLAGS} --top-module shift_barrelfast_rleft ./rtl/shift_barrelfast_rleft.v --exe tests/shift_barrelfast_rleft_tb.cpp -CFLAGS "-DTRACE=1 -std=c++14"
 	make -C obj_dir/ -f Vshift_barrelfast_rleft.mk Vshift_barrelfast_rleft
 
 mult_booth:
-	verilator -sv +incdir+rtl --Wall --cc --trace --top-module mult_booth ./rtl/mult_booth.v --exe tests/mult_booth_tb.cpp -CFLAGS "-DTRACE=1 -std=c++14"
+	verilator -sv +incdir+rtl ${VERILATOR_FLAGS} --top-module mult_booth ./rtl/mult_booth.v --exe tests/mult_booth_tb.cpp -CFLAGS "-DTRACE=1 -std=c++14"
 	make -C obj_dir/ -f Vmult_booth.mk Vmult_booth
 
 add_csa:
-	verilator -sv +incdir+rtl --Wall --cc --trace --top-module add_csa ./rtl/add_csa.v ./rtl/add_rca.v ./rtl/full_adder.v --exe tests/add_csa_tb.cpp -CFLAGS "-DTRACE=1 -std=c++14"
+	verilator -sv +incdir+rtl ${VERILATOR_FLAGS} --top-module add_csa ./rtl/add_csa.v ./rtl/add_rca.v ./rtl/full_adder.v --exe tests/add_csa_tb.cpp -CFLAGS "-DTRACE=1 -std=c++14"
 	make -C obj_dir/ -f Vadd_csa.mk Vadd_csa
 
 kogg_stone:
-	verilator -sv +incdir+rtl --Wall --cc --trace --top-module kogg_stone ./rtl/kogg_stone.v ./rtl/pref_op.v ./rtl/diamond.v ./rtl/square_op.v --exe tests/kogg_stone_tb.cpp -CFLAGS "-DTRACE=1 -std=c++14"
+	verilator -sv +incdir+rtl ${VERILATOR_FLAGS} --top-module kogg_stone ./rtl/kogg_stone.v ./rtl/pref_op.v ./rtl/diamond.v ./rtl/square_op.v --exe tests/kogg_stone_tb.cpp -CFLAGS "-DTRACE=1 -std=c++14"
 	make -C obj_dir/ -f Vkogg_stone.mk Vkogg_stone
 
 kogg_stone_32:
-	verilator -sv +incdir+rtl --Wall --cc --trace --top-module kogg_stone_32 ./rtl/kogg_stone_32.v ./rtl/pref_op.v ./rtl/diamond.v ./rtl/square_op.v --exe tests/kogg_stone_32_tb.cpp -CFLAGS "-DTRACE=1 -std=c++14"
+	verilator -sv +incdir+rtl ${VERILATOR_FLAGS} --top-module kogg_stone_32 ./rtl/kogg_stone_32.v ./rtl/pref_op.v ./rtl/diamond.v ./rtl/square_op.v --exe tests/kogg_stone_32_tb.cpp -CFLAGS "-DTRACE=1 -std=c++14"
 	make -C obj_dir/ -f Vkogg_stone_32.mk Vkogg_stone_32
 
 kogg_stone_64:
-	verilator -sv +incdir+rtl --Wall --cc --trace --top-module kogg_stone_64 ./rtl/kogg_stone_64.v ./rtl/pref_op.v ./rtl/diamond.v ./rtl/square_op.v --exe tests/kogg_stone_64_tb.cpp -CFLAGS "-DTRACE=1 -std=c++14"
+	verilator -sv +incdir+rtl ${VERILATOR_FLAGS} --top-module kogg_stone_64 ./rtl/kogg_stone_64.v ./rtl/pref_op.v ./rtl/diamond.v ./rtl/square_op.v --exe tests/kogg_stone_64_tb.cpp -CFLAGS "-DTRACE=1 -std=c++14"
 	make -C obj_dir/ -f Vkogg_stone_64.mk Vkogg_stone_64
 
 kogg_stone_8:
-	verilator -sv +incdir+rtl --Wall --cc --trace --top-module kogg_stone_8 ./rtl/kogg_stone_8.v ./rtl/pref_op.v ./rtl/diamond.v ./rtl/square_op.v --exe tests/kogg_stone_8_tb.cpp -CFLAGS "-DTRACE=1 -std=c++14"
+	verilator -sv +incdir+rtl ${VERILATOR_FLAGS} --top-module kogg_stone_8 ./rtl/kogg_stone_8.v ./rtl/pref_op.v ./rtl/diamond.v ./rtl/square_op.v --exe tests/kogg_stone_8_tb.cpp -CFLAGS "-DTRACE=1 -std=c++14"
 	make -C obj_dir/ -f Vkogg_stone_8.mk Vkogg_stone_8
 
 han_carl:
-	verilator -sv +incdir+rtl --Wall --cc --trace --top-module han_carl ./rtl/han_carl.v ./rtl/pref_op.v ./rtl/diamond.v ./rtl/square_op.v --exe tests/han_carl_tb.cpp -CFLAGS "-DTRACE=1 -std=c++14"
+	verilator -sv +incdir+rtl ${VERILATOR_FLAGS} --top-module han_carl ./rtl/han_carl.v ./rtl/pref_op.v ./rtl/diamond.v ./rtl/square_op.v --exe tests/han_carl_tb.cpp -CFLAGS "-DTRACE=1 -std=c++14"
 	make -C obj_dir/ -f Vhan_carl.mk Vhan_carl
 
 cgen_mem:
-	verilator -sv +incdir+rtl --Wall --cc --trace --top-module cgen_driver ./tests/cgen_driver.v ./rtl/cgen_memory_1rd_1wr.v --exe tests/cgen_memory_1rd_1wr.cpp -CFLAGS "-DTRACE=1 -std=c++14"
+	verilator -sv +incdir+rtl ${VERILATOR_FLAGS} --top-module cgen_driver ./tests/cgen_driver.v ./rtl/cgen_memory_1rd_1wr.v --exe tests/cgen_memory_1rd_1wr.cpp -CFLAGS "-DTRACE=1 -std=c++14"
 	make -C obj_dir/ -f Vcgen_driver.mk Vcgen_driver
 
 run1: add_rca
@@ -102,4 +108,4 @@ run14: cgen_mem
 run: run1 run2 run3 run4 run5 run6 run7 run9 run10 run11 run12 run13 run14
 
 clean:
-	rm -rf obj_dir output.vcd a.out
+	rm -rf obj_dir output.vcd a.out wave.fst

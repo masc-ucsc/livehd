@@ -8,11 +8,8 @@ module square_op
   output  Hi
 );
 
-always @(*) begin
-  Pi = Ai ^ Bi;
-  Gi = Ai & Bi;
-  Hi = Ai ^ Bi;
-end
+assign Pi = Ai ^ Bi;
+assign Gi = Ai & Bi;
+assign Hi = Ai ^ Bi;
 
 endmodule
-

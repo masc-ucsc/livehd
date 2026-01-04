@@ -3,12 +3,9 @@ module diamond
   input   Hi,
   input   Ci,
 
-  output   Si
+  output  Si
 );
 
-always @(*) begin
-  Si = Hi ^ Ci;
-end
+assign Si = Hi ^ Ci;
 
 endmodule
-

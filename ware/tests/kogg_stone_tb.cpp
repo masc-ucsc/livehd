@@ -7,13 +7,16 @@
 
 #include "Vkogg_stone.h"
 #include "verilated.h"
-#include "verilated_vcd_c.h"
+
+#ifdef TRACE
+#include "verilated_fst_c.h"
+VerilatedFstC *tfp = 0;
+#endif
 
 #define MAX_TIME  2000
 #define NUM_TESTS 4
 
-vluint64_t     global_time = 0;
-VerilatedVcdC *tfp         = 0;
+vluint64_t global_time = 0;
 
 uint16_t top_a;
 uint16_t top_b;
@@ -72,10 +75,10 @@ int main(int argc, char **argv, char **env) {
 #ifdef TRACE
   // init trace dump
   Verilated::traceEverOn(true);
-  tfp = new VerilatedVcdC;
+  tfp = new VerilatedFstC;
 
   top->trace(tfp, 99);
-  tfp->open("output.vcd");
+  tfp->open("wave.fst");
 #endif
 
   // initialize simulation inputs

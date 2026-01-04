@@ -1,42 +1,47 @@
 //  This file is distributed under the BSD 3-Clause License. See LICENSE for details.
 
+#include <cmath>
 #include <stdint.h>
 #include <string.h>
+#include <string>
 #include <time.h>
 
 #include <list>
 
 #include "Vmult_booth.h"
 #include "verilated.h"
-#include "verilated_vcd_c.h"
+
+#ifdef TRACE
+#include "verilated_fst_c.h"
+VerilatedFstC *tfp = 0;
+#endif
 
 #define MAX_TIME  2000
 #define NUM_TESTS 11
 
-vluint64_t     global_time = 0;
-VerilatedVcdC *tfp         = 0;
+vluint64_t global_time = 0;
 
 int64_t  top_a;
 int64_t  top_b;
 __int128 top_ans;
 
 // please just use the binary print, this doesn't always work
-string to_string_int128(__int128 var) {
-  string str       = string("");
+std::string to_string_int128(__int128 var) {
+  std::string str  = std::string("");
   int    loop_size = 39;
   for (int i = 0; i < loop_size; i++) {
     __int128 temp = var / ((__int128)pow(10, loop_size - i - 1));
-    str += to_string((uint64_t)(temp % ((__int128)10)));
+    str += std::to_string((uint64_t)(temp % ((__int128)10)));
   }
   return str;
 }
 
 // please use this
-string to_string_int128_binary(__int128 var) {
-  string   str      = string("");
+std::string to_string_int128_binary(__int128 var) {
+  std::string str   = std::string("");
   __int128 bit_mask = 1;
   for (int i = 0; i < 128; i++) {
-    str = to_string((uint64_t)((var & ((__int128)(bit_mask << ((__int128)i)))) == 0 ? 0 : 1)) + str;
+    str = std::to_string((uint64_t)((var & ((__int128)(bit_mask << ((__int128)i)))) == 0 ? 0 : 1)) + str;
   }
   return str;
 }
@@ -93,10 +98,10 @@ int main(int argc, char **argv, char **env) {
 #ifdef TRACE
   // init trace dump
   Verilated::traceEverOn(true);
-  tfp = new VerilatedVcdC;
+  tfp = new VerilatedFstC;
 
   top->trace(tfp, 99);
-  tfp->open("output.vcd");
+  tfp->open("wave.fst");
 #endif
 
   // initialize simulation inputs
