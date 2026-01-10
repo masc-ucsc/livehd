@@ -355,7 +355,7 @@ static Node_pin create_pick_concat_dpin(Lgraph *g, const RTLIL::SigSpec &ss, boo
   std::vector<Node_pin> inp_pins;
   I(ss.chunks().size() != 0);
 
-  const auto chunk_list = ss.chunks();
+  const std::vector<RTLIL::SigChunk> chunk_list(ss.chunks().begin(), ss.chunks().end());
   for (auto i = 0u; i < chunk_list.size(); ++i) {
     const auto &chunk       = chunk_list[i];
     bool        signed_last = ((i + 1) == chunk_list.size()) && is_signed;
@@ -640,7 +640,7 @@ static Node resolve_memory(Lgraph *g, RTLIL::Cell *cell) {
 }
 
 static bool is_black_box_output(const RTLIL::Cell *cell, const RTLIL::IdString &port_name) {
-  const RTLIL::Wire *wire = cell->getPort(port_name).chunks()[0].wire;
+  const RTLIL::Wire *wire = cell->getPort(port_name).chunks().at(0).wire;
 
   // constant
   if (!wire) {
@@ -671,7 +671,7 @@ static bool is_black_box_output(const RTLIL::Cell *cell, const RTLIL::IdString &
 }
 
 static bool is_black_box_input(const RTLIL::Cell *cell, const RTLIL::IdString &port_name) {
-  const RTLIL::Wire *wire = cell->getPort(port_name).chunks()[0].wire;
+  const RTLIL::Wire *wire = cell->getPort(port_name).chunks().at(0).wire;
 
   // constant
   if (!wire) {
@@ -730,7 +730,7 @@ static void process_cell_drivers_intialization(RTLIL::Module *mod, Lgraph *g) {
     }
 
     for (const auto &conn : cell->connections()) {
-      if (conn.second.chunks().empty()) {
+      if (conn.second.empty()) {
         continue;  // Some cells may have no connected IOs (LogPerfHelper in Xiangshan)
       }
 
@@ -759,7 +759,7 @@ static void process_cell_drivers_intialization(RTLIL::Module *mod, Lgraph *g) {
                   is_input = true;
                 }
                 // WARNING: Not always if (wire->port_output) is_output = true;
-                if (driven_signals.count(wire->hash()) != 0) {
+                if (driven_signals.count(wire->hashidx_) != 0) {
                   is_input = true;
                 }
               }
@@ -805,7 +805,7 @@ static void process_cell_drivers_intialization(RTLIL::Module *mod, Lgraph *g) {
                   continue;
                 }
                 // WARNING: Not always if (wire->port_output) { is_output = true; }
-                if (driven_signals.count(wire->hash()) != 0) {
+                if (driven_signals.count(wire->hashidx_) != 0) {
                   is_input = true;
                 }
                 // WARNING: If not in drive_signal, it is not guaranteed to be a is_output. The problem is shown in sky130_trivial
@@ -1227,7 +1227,7 @@ static uint32_t get_input_size(const RTLIL::Cell *cell) {
     }
 
     const RTLIL::SigSpec ss = conn.second;
-    if (ss.chunks().size() > max_input) {
+    if (static_cast<uint32_t>(ss.chunks().size()) > max_input) {
       max_input = ss.size();
     }
   }
@@ -1856,7 +1856,7 @@ static void process_cells(RTLIL::Module *mod, Lgraph *g) {
       exit_node.set_type(Ntype_op::Flop, get_output_size(cell));
 
       if (cell->hasPort(ID::Q)) {
-        const RTLIL::Wire *wire = cell->getPort(ID::Q).chunks()[0].wire;
+        const RTLIL::Wire *wire = cell->getPort(ID::Q).chunks().at(0).wire;
         if (wire) {
           std::string wname(&wire->name.c_str()[1]);
           exit_node.setup_driver_pin().set_name(wname);
@@ -2665,7 +2665,7 @@ struct Yosys2lg_Pass : public Yosys::Pass {
               continue;
             }
             // std::print("Assignment to {}\n", lhs_wire->name.c_str());
-            driven_signals.insert(lhs_wire->hash());
+            driven_signals.insert(lhs_wire->hashidx_);
           }
         }
 

@@ -14,6 +14,9 @@
 
 #include "file_utils.hpp"
 #include "inou_yosys_api.hpp"
+#ifdef I
+#undef I
+#endif
 #include "kernel/yosys.h"
 #include "lgraph.hpp"
 #include "mustache.hpp"

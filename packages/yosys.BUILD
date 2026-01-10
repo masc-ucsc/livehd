@@ -68,36 +68,9 @@ genrule(
         "frontends/verilog/verilog_parser.tab.cc",
         "frontends/verilog/verilog_parser.tab.hh",
     ],
-    cmd = "M4=$(M4) $(BISON) --defines=$(location frontends/verilog/verilog_parser.tab.hh) --output-file=$(location frontends/verilog/verilog_parser.tab.cc) $<",
+    cmd = "M4=$(M4) bison --defines=$(location frontends/verilog/verilog_parser.tab.hh) --output-file=$(location frontends/verilog/verilog_parser.tab.cc) $<",
     # "--name-prefix=xxx",
     toolchains = [
-        "@rules_bison//bison:current_bison_toolchain",
-        "@rules_m4//m4:current_m4_toolchain",
-    ],
-)
-
-genrule(
-    name = "rtlil_lexer_cpp",
-    srcs = ["frontends/rtlil/rtlil_lexer.l"],
-    outs = ["rtlil_lexer.cpp"],
-    cmd = "M4=$(M4) $(FLEX) --outfile=$@ $<",
-    toolchains = [
-        "@rules_flex//flex:current_flex_toolchain",
-        "@rules_m4//m4:current_m4_toolchain",
-    ],
-)
-
-genrule(
-    name = "rtlil_parser",
-    srcs = ["frontends/rtlil/rtlil_parser.y"],
-    outs = [
-        "frontends/rtlil/rtlil_parser.tab.cc",
-        "frontends/rtlil/rtlil_parser.tab.hh",
-    ],
-    cmd = "M4=$(M4) $(BISON) --defines=$(location frontends/rtlil/rtlil_parser.tab.hh) --output-file=$(location frontends/rtlil/rtlil_parser.tab.cc) $<",
-    # "--name-prefix=xxx",
-    toolchains = [
-        "@rules_bison//bison:current_bison_toolchain",
         "@rules_m4//m4:current_m4_toolchain",
     ],
 )
@@ -136,18 +109,18 @@ genrule(
 )
 
 GENERATED_HEADERS = [
-    "passes/pmgen/ice40_dsp_pm.h",
-    "passes/pmgen/ice40_wrapcarry_pm.h",
+    "techlibs/ice40/ice40_dsp_pm.h",
+    "techlibs/ice40/ice40_wrapcarry_pm.h",
     "passes/pmgen/test_pmgen_pm.h",
-    "passes/pmgen/peepopt_pm.h",
-    "passes/pmgen/xilinx_dsp_cascade_pm.h",
-    "passes/pmgen/xilinx_dsp_CREG_pm.h",
-    "passes/pmgen/xilinx_dsp_pm.h",
-    "passes/pmgen/xilinx_dsp48a_pm.h",
-    "passes/pmgen/xilinx_srl_pm.h",
-    "passes/pmgen/microchip_dsp_CREG_pm.h",
-    "passes/pmgen/microchip_dsp_cascade_pm.h",
-    "passes/pmgen/microchip_dsp_pm.h",
+    "passes/opt/peepopt_pm.h",
+    "techlibs/xilinx/xilinx_dsp_cascade_pm.h",
+    "techlibs/xilinx/xilinx_dsp_CREG_pm.h",
+    "techlibs/xilinx/xilinx_dsp_pm.h",
+    "techlibs/xilinx/xilinx_dsp48a_pm.h",
+    "techlibs/xilinx/xilinx_srl_pm.h",
+    "techlibs/microchip/microchip_dsp_CREG_pm.h",
+    "techlibs/microchip/microchip_dsp_cascade_pm.h",
+    "techlibs/microchip/microchip_dsp_pm.h",
     "techlibs/quicklogic/ql_dsp_macc_pm.h",
 ]
 
@@ -189,13 +162,20 @@ cc_library(
     ) + [
         ":verilog_lexer_cpp",
         ":verilog_parser",
-        ":rtlil_lexer_cpp",
-        ":rtlil_parser",
         #":ilang_lexer",
         #":ilang_parser",
         "passes/techmap/techmap.inc",
         "techlibs/common/simcells_help.inc",
         "techlibs/common/simlib_help.inc",
+        ":peepopt_pm_h",
+        ":test_pmgen_pm_h",
+        ":ql_dsp_macc_pm_h",
+    ] + [
+        ":ice40_%s_pm_h" % pm for pm in ["dsp", "wrapcarry"]
+    ] + [
+        ":xilinx_%s_pm_h" % pm for pm in ["dsp", "dsp48a", "dsp_CREG", "dsp_cascade", "srl"]
+    ] + [
+        ":microchip_%s_pm_h" % pm for pm in ["dsp", "dsp_CREG", "dsp_cascade"]
     ],
     hdrs = glob(
         [
@@ -207,7 +187,7 @@ cc_library(
             "libs/**/*.hpp",
             "frontends/**/*.h",
             "passes/**/*.h",
-            #"techlibs/**/*.h",
+            "techlibs/**/*.h",
         ],
         exclude = [
             "backends/protobuf/*.h",
@@ -437,27 +417,50 @@ py_binary(
 genrule(
     name = "peepopt_pm_h",
     srcs = [
-        "passes/pmgen/ice40_dsp.pmg",
-        "passes/pmgen/ice40_wrapcarry.pmg",
-        "passes/pmgen/microchip_dsp_cascade.pmg",
-        "passes/pmgen/microchip_dsp_CREG.pmg",
-        "passes/pmgen/microchip_dsp.pmg",
-        "passes/pmgen/peepopt_muldiv.pmg",
-        "passes/pmgen/peepopt_shiftmul_right.pmg",
-        "passes/pmgen/peepopt_shiftadd.pmg",
-        "passes/pmgen/peepopt_shiftmul_left.pmg",
-        "passes/pmgen/xilinx_dsp48a.pmg",
-        "passes/pmgen/xilinx_dsp_cascade.pmg",
-        "passes/pmgen/xilinx_dsp_CREG.pmg",
-        "passes/pmgen/xilinx_dsp.pmg",
-        "passes/pmgen/xilinx_srl.pmg",
+        "passes/opt/peepopt_muldiv.pmg",
+        "passes/opt/peepopt_muldiv_c.pmg",
+        "passes/opt/peepopt_shiftmul_right.pmg",
+        "passes/opt/peepopt_shiftadd.pmg",
+        "passes/opt/peepopt_shiftmul_left.pmg",
+        "passes/opt/peepopt_formal_clockgateff.pmg",
     ],
-    outs = ["passes/pmgen/peepopt_pm.h"],
+    outs = ["passes/opt/peepopt_pm.h"],
+    # Note: pmgen.py expects the pattern name via -p (peepopt) and list of files
     cmd = "python3 $(location :pmgen) -o $(OUTS) -p peepopt $(SRCS)",
-    tools = [
-        ":pmgen",
-    ],
+    tools = [":pmgen"],
 )
+
+genrule(
+    name = "test_pmgen_pm_h",
+    srcs = ["passes/pmgen/test_pmgen.pmg"],
+    outs = ["passes/pmgen/test_pmgen_pm.h"],
+    cmd = "python3 $(location :pmgen) -o $(OUTS) -p test_pmgen $(SRCS)",
+    tools = [":pmgen"],
+)
+
+[genrule(
+    name = "ice40_%s_pm_h" % pm,
+    srcs = ["techlibs/ice40/ice40_%s.pmg" % pm],
+    outs = ["techlibs/ice40/ice40_%s_pm.h" % pm],
+    cmd = "python3 $(location :pmgen) -o $(OUTS) -p ice40_%s $(SRCS)" % pm,
+    tools = [":pmgen"],
+) for pm in ["dsp", "wrapcarry"]]
+
+[genrule(
+    name = "xilinx_%s_pm_h" % pm,
+    srcs = ["techlibs/xilinx/xilinx_%s.pmg" % pm],
+    outs = ["techlibs/xilinx/xilinx_%s_pm.h" % pm],
+    cmd = "python3 $(location :pmgen) -o $(OUTS) -p xilinx_%s $(SRCS)" % pm,
+    tools = [":pmgen"],
+) for pm in ["dsp", "dsp48a", "dsp_CREG", "dsp_cascade", "srl"]]
+
+[genrule(
+    name = "microchip_%s_pm_h" % pm,
+    srcs = ["techlibs/microchip/microchip_%s.pmg" % pm],
+    outs = ["techlibs/microchip/microchip_%s_pm.h" % pm],
+    cmd = "python3 $(location :pmgen) -o $(OUTS) -p microchip_%s $(SRCS)" % pm,
+    tools = [":pmgen"],
+) for pm in ["dsp", "dsp_CREG", "dsp_cascade"]]
 
 genrule(
     name = "ql_dsp_macc_pm_h",
@@ -467,30 +470,3 @@ genrule(
     tools = [":pmgen"],
 )
 
-[genrule(
-    name = "%s_pm_h" % pm,
-    srcs = [
-        "passes/pmgen/%s.pmg" % pm,
-    ],
-    outs = ["passes/pmgen/%s_pm.h" % pm],
-    cmd = "python3 $(location :pmgen) -o $(OUTS) -p %s $(SRCS)" % pm,
-    tools = [
-        ":pmgen",
-    ],
-) for pm in [
-    "ice40_dsp",
-    "ice40_wrapcarry",
-    "test_pmgen",
-    "microchip_dsp_cascade",
-    "microchip_dsp_CREG",
-    "microchip_dsp",
-    "peepopt_muldiv",
-    "peepopt_shiftmul_left",
-    "peepopt_shiftadd",
-    "peepopt_shiftmul_right",
-    "xilinx_dsp",
-    "xilinx_dsp48a",
-    "xilinx_dsp_CREG",
-    "xilinx_dsp_cascade",
-    "xilinx_srl",
-]]
