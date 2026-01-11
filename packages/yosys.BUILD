@@ -196,7 +196,7 @@ cc_library(
     copts = YOSYS_COPTS,
     defines = [
         "_YOSYS_",
-        # "YOSYS_ENABLE_PLUGINS",
+        "YOSYS_ENABLE_PLUGINS",
         # "YOSYS_ENABLE_READLINE",
         "YOSYS_ENABLE_GLOB",
         #"YOSYS_ENABLE_TCL",
@@ -229,6 +229,7 @@ cc_library(
         # "@org_sourceware_libffi//:libffi",
         #"@tk_tcl_tcl//:tcl",
     ],
+    linkopts = ["-ldl", "-lffi"],
     alwayslink = True,
 )
 

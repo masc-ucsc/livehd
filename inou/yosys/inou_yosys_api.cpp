@@ -223,6 +223,7 @@ void Inou_yosys_api::do_tolg(Eprp_var &var) {
   const auto techmap{var.get("techmap")};
   const auto abc{var.get("abc")};
   const auto top{var.get("top")};
+  const auto frontend{var.get("frontend")};
   // const auto lib{var.get("liberty")};
 
   mustache::data vars;
@@ -234,6 +235,18 @@ void Inou_yosys_api::do_tolg(Eprp_var &var) {
   }
 
   vars.set("filelist", filelist);
+
+  // Set frontend type
+  if (frontend == "slang") {
+    vars.set("use_slang", mustache::data::type::bool_true);
+    vars.set("use_verilog", mustache::data::type::bool_false);
+  } else if (frontend.empty() || frontend == "verilog") {
+    vars.set("use_slang", mustache::data::type::bool_false);
+    vars.set("use_verilog", mustache::data::type::bool_true);
+  } else {
+    error("unrecognized frontend {} option. Either verilog or slang", frontend);
+    return;
+  }
 
   if (!top.empty()) {
     vars.set("hierarchy", mustache::data::type::bool_true);
@@ -320,6 +333,7 @@ void Inou_yosys_api::setup() {
   Eprp_method m1("inou.yosys.tolg", "read verilog using yosys to lgraph", &Inou_yosys_api::tolg);
   m1.add_label_required("files", "verilog files to process (comma separated)");
   m1.add_label_optional("path", "path to build the lgraph[s]", "lgdb");
+  m1.add_label_optional("frontend", "frontend to use: verilog or slang", "verilog");
   m1.add_label_optional("techmap", "Either full or alumac techmap or none from yosys. Cannot be used with liberty", "");
   m1.add_label_optional("liberty", "Liberty file for technology mapping. Cannot be used with techmap, will call abc for tmap", "");
   m1.add_label_optional("abc", "run ABC inside yosys before loading lgraph", "false");

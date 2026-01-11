@@ -1,5 +1,10 @@
 # default yosys2lg script inou_yosys_read.ys
 #
+{{#use_slang}}
+# Load slang plugin for SystemVerilog support
+plugin -i slang
+{{/use_slang}}
+
 {{#liberty_tmap}}
 read_liberty {{liberty_file}}
 {{/liberty_tmap}}
@@ -7,7 +12,12 @@ read_liberty {{liberty_file}}
 verilog_defines -DSYNTHESIS=1
 
 {{#filelist}}
+{{#use_verilog}}
 read_verilog -sv -nomeminit {{input}}
+{{/use_verilog}}
+{{#use_slang}}
+read_slang {{input}}
+{{/use_slang}}
 {{/filelist}}
 
 # single file, no hierarchy needed
