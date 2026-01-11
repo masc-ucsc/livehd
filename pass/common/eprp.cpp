@@ -16,12 +16,12 @@ void Eprp::eat_comments() {
   }
 }
 
-// rule_path = (\. | alnum | / | "asdad.." | \,)+
+// rule_path = (\. | alnum | / | "asdad.." | \, | -)+
 std::pair<bool, std::string> Eprp::rule_path() {
   assert(!scan_is_end());
 
   if (!(scan_is_token(Token_id_dot) || scan_is_token(Token_id_alnum) || scan_is_token(Token_id_string)
-        || scan_is_token(Token_id_div))) {
+        || scan_is_token(Token_id_div) || scan_is_token(Token_id_minus))) {
     return std::make_pair(false, "");
   }
 
@@ -42,7 +42,7 @@ std::pair<bool, std::string> Eprp::rule_path() {
     }
 
   } while (scan_is_token(Token_id_dot) || scan_is_token(Token_id_alnum) || scan_is_token(Token_id_string)
-           || scan_is_token(Token_id_comma) || scan_is_token(Token_id_div));
+           || scan_is_token(Token_id_comma) || scan_is_token(Token_id_div) || scan_is_token(Token_id_minus));
 
   return std::make_pair(true, path);
 }
