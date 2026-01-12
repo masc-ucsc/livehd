@@ -8,7 +8,6 @@
 #include "iassert.hpp"
 #include "slang/ast/ASTSerializer.h"
 #include "slang/ast/ASTVisitor.h"
-#include "slang/ast/Definition.h"
 #include "slang/driver/Driver.h"
 #include "slang/util/SmallVector.h"
 // #include "slang/symbols/InstanceSymbols.h"

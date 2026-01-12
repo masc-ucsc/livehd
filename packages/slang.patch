@@ -1,8 +1,8 @@
 diff --git CMakeLists.txt CMakeLists.txt
-index 81752e02..33886ba0 100644
+index 42290c2..ed5cb6f 100644
 --- CMakeLists.txt
 +++ CMakeLists.txt
-@@ -162,7 +162,9 @@ else()
+@@ -210,7 +210,9 @@ else()
    message(STATUS "Build STATIC library as: ${SLANG_LIB_NAME}")
  endif()
 
@@ -12,42 +12,28 @@ index 81752e02..33886ba0 100644
 +add_subdirectory("${FMT_ROOT_DIR}" fmt EXCLUDE_FROM_ALL)
  add_subdirectory(source)
 
- if(SLANG_INCLUDE_TOOLS)
-diff --git source/ast/Compilation.cpp source/ast/Compilation.cpp
-index b1dc4c50..4cac5fdd 100644
---- source/ast/Compilation.cpp
-+++ source/ast/Compilation.cpp
-@@ -24,6 +24,8 @@
- #include "slang/text/SourceManager.h"
- #include "slang/util/TimeTrace.h"
+ if(SLANG_INCLUDE_TESTS)
+diff --git source/CMakeLists.txt source/CMakeLists.txt
+index 6f3bb58..59ac3e7 100644
+--- source/CMakeLists.txt
++++ source/CMakeLists.txt
+@@ -143,7 +143,10 @@ target_include_directories(
+   PUBLIC "$<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/../external/>")
 
-+#include <atomic>
-+
- using namespace slang::parsing;
+ # Link libraries
+-target_link_libraries(slang_slang PUBLIC fmt::fmt Boost::headers)
++target_link_libraries(slang_slang PUBLIC fmt::fmt)
++if(DEFINED ENV{EXT_BUILD_DEPS})
++  target_include_directories(slang_slang SYSTEM PUBLIC "$ENV{EXT_BUILD_DEPS}/include")
++endif()
 
- namespace slang::ast::builtins {
-@@ -159,13 +161,17 @@ Compilation::Compilation(const Bag& options) :
-     // Register the built-in gate types.
-     builtins::registerGateTypes(*this);
-
--    // Set a default handler for printing types and symbol paths, for convenience.
--    DiagnosticEngine::setDefaultFormatter<const Type*>(std::make_unique<TypeArgFormatter>());
--    TextDiagnosticClient::setDefaultSymbolPathCB([](const Symbol& sym) {
--        std::string str;
--        sym.getHierarchicalPath(str);
--        return str;
--    });
-+    static std::atomic<int> only_one=0;
-+    auto only_one_counter = ++only_one;
-+    if (only_one_counter==1) {
-+        // Set a default handler for printing types and symbol paths, for convenience.
-+        DiagnosticEngine::setDefaultFormatter<const Type*>(std::make_unique<TypeArgFormatter>());
-+        TextDiagnosticClient::setDefaultSymbolPathCB([](const Symbol& sym) {
-+            std::string str;
-+            sym.getHierarchicalPath(str);
-+            return str;
-+        });
-+    }
-
-     // Reset systemId counters that may have been changed due to creation of types
-     // in the std package.
+ if(SLANG_USE_THREADS)
+   find_package(Threads REQUIRED)
+@@ -226,4 +229,7 @@ if(SLANG_INCLUDE_INSTALL)
+     FILES ${CMAKE_CURRENT_BINARY_DIR}/slang/slang_export.h
+     DESTINATION ${CMAKE_INSTALL_INCLUDEDIR}/slang/
+     COMPONENT slang_Development)
++  install(FILES ../external/expected.hpp
++    DESTINATION ${CMAKE_INSTALL_INCLUDEDIR}
++    COMPONENT slang_Development)
+ endif()

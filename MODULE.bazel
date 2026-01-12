@@ -22,6 +22,7 @@ bazel_dep(name = "googletest", version = "1.17.0.bcr.2")
 
 # FAILS: bazel_dep(name = "boost.multiprecision", version = "1.88.0.bcr.1")
 bazel_dep(name = "boost.multiprecision", version = "1.89.0.bcr.1")
+bazel_dep(name = "boost.unordered", version = "1.89.0.bcr.1")
 #### M4/Flex/Bison
 bazel_dep(name = "rules_m4", version = "0.3")
 bazel_dep(name = "rules_flex", version = "0.4")
@@ -60,10 +61,10 @@ http_archive(
     name = "slang",
     build_file = "//packages:slang.BUILD",
     patches = ["//packages:slang.patch"],
-    sha256 = "eea4b20751fa6394647330518c9b0c46c8248fea984c91a8a8bfe01a8a04567e",
-    strip_prefix = "slang-458be618a58aa1896398eccc1ddf75b880afaab6",
+    sha256 = "4b6f9e83852d8958f9f6a3ee15d068240650a3860c4a3f13a226a19904b2d309",
+    strip_prefix = "slang-master",
     urls = [
-        "https://github.com/MikePopoloski/slang/archive/458be618a58aa1896398eccc1ddf75b880afaab6.zip",
+        "https://github.com/MikePopoloski/slang/archive/master.zip",
     ],
 )
 

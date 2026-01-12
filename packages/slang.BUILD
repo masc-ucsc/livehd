@@ -38,5 +38,7 @@ cmake(
     ],
     deps = [
         "@fmt",
+        "@boost.unordered",
+        "@boost.multiprecision",
     ]
 )

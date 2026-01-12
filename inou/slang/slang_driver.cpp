@@ -13,10 +13,11 @@
 #include "slang/ast/symbols/CompilationUnitSymbols.h"
 #include "slang/diagnostics/TextDiagnosticClient.h"
 #include "slang/driver/Driver.h"
+#include "slang/analysis/AnalysisManager.h"
 #include "slang/syntax/SyntaxTree.h"
 #include "slang/text/Json.h"
 #include "slang/util/TimeTrace.h"
-#include "slang/util/Version.h"
+#include "slang/util/VersionInfo.h"
 #include "slang_tree.hpp"
 
 using namespace slang;
@@ -80,7 +81,7 @@ int driverMain(int argc, TArgs argv, Slang_tree& slang_tree) {
                        astJsonFile,
                        "Dump the compiled AST in JSON format to the specified file, or '-' for stdout",
                        "<file>",
-                       /* isFileName */ true);
+                       CommandLineFlags::FilePath);
 
     std::vector<std::string> astJsonScopes;
     driver.cmdLine.add("--ast-json-scope",
@@ -118,7 +119,7 @@ int driverMain(int argc, TArgs argv, Slang_tree& slang_tree) {
       return 2;
     }
 
-    if (onlyParse.has_value() + onlyPreprocess.has_value() + onlyMacros.has_value() + driver.options.onlyLint.has_value() > 1) {
+    if (onlyParse.has_value() + onlyPreprocess.has_value() + onlyMacros.has_value() + driver.options.lintMode() > 1) {
       OS::printE("error: ");
       OS::printE(
           "can only specify one of --preprocess, --macros-only, "
@@ -148,7 +149,11 @@ int driverMain(int argc, TArgs argv, Slang_tree& slang_tree) {
         {
           TimeTraceScope timeScope("elaboration"sv, ""sv);
           auto           compilation = driver.createCompilation();
-          ok &= driver.reportCompilation(*compilation, quiet == true);
+
+          driver.reportCompilation(*compilation, quiet == true);
+          driver.runAnalysis(*compilation);
+          ok &= driver.reportDiagnostics(quiet == true);
+
           if (astJsonFile) {
             printJson(*compilation, *astJsonFile, astJsonScopes);
           }

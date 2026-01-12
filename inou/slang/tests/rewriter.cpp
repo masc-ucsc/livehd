@@ -45,7 +45,14 @@ int main(int argc, char** argv) {
       return 1;
     }
 
-    auto tree = SyntaxTree::fromFile(argv[1]);
+    auto treeOrError = SyntaxTree::fromFile(argv[1]);
+    if (!treeOrError) {
+      fprintf(stderr, "Failed to load file: %s - %s\n", argv[1],
+              treeOrError.error().second.data());
+      return 1;
+    }
+
+    auto tree = *treeOrError;
     printf("%s", SyntaxPrinter::printFile(*tree).c_str());
     return 0;
   }
