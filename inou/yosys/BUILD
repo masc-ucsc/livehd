@@ -20,6 +20,7 @@ cc_library(
         "@at_clifford_yosys2//:kernel",
         "@at_clifford_yosys2//:version",
         "@mustache//:headers",
+        "@yosys_slang//:slang.so"
     ],
     alwayslink = True,
 )

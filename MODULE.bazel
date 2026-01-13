@@ -166,6 +166,17 @@ new_git_repository(
 )
 
 http_archive(
+   name = "yosys_slang",
+   urls = [
+     "https://github.com/povik/yosys-slang/archive/7cdd147a6dd14e8f57cd321df8be377c04c9b31f.zip"
+   ],
+   sha256 = "e3cde284d2465b5c435ad4ce897c58eb08ca607b5549e4fca255f566f372bcf3",
+   strip_prefix = "yosys-slang-7cdd147a6dd14e8f57cd321df8be377c04c9b31f",
+   build_file = "//packages:yosys_slang.BUILD",
+   patches = ["//packages:yosys_slang.patch"],
+)
+
+http_archive(
    name = "at_clifford_yosys2",
    urls = [
      "https://github.com/YosysHQ/yosys/archive/refs/tags/v0.60.zip",

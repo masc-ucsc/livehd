@@ -135,6 +135,37 @@ YOSYS_COPTS = [
 ]
 
 cc_library(
+    name = "kernel_include",
+    hdrs = glob(
+        [
+            "kernel/*.h",
+            "kernel/*.inc",
+            "backends/**/*.h",
+            "libs/**/*.hh",
+            "libs/**/*.h",
+            "libs/**/*.hpp",
+            "frontends/**/*.h",
+            "passes/**/*.h",
+            "techlibs/**/*.h",
+        ],
+        exclude = [
+            "backends/protobuf/*.h",
+        ],
+    ) + GENERATED_HEADERS,
+    visibility = ["//visibility:public"],
+    defines = [
+        "_YOSYS_",
+        "YOSYS_ENABLE_PLUGINS",
+        # "YOSYS_ENABLE_READLINE",
+        "YOSYS_ENABLE_GLOB",
+        #"YOSYS_ENABLE_TCL",
+        "YOSYS_ENABLE_ABC",
+        "YOSYS_ENABLE_COVER",
+        'ABCEXTERNAL=\\"abc\\"',
+    ],
+)
+
+cc_library(
     name = "kernel",
     srcs = glob(
         [
@@ -177,34 +208,8 @@ cc_library(
     ] + [
         ":microchip_%s_pm_h" % pm for pm in ["dsp", "dsp_CREG", "dsp_cascade"]
     ],
-    hdrs = glob(
-        [
-            "kernel/*.h",
-            "kernel/*.inc",
-            "backends/**/*.h",
-            "libs/**/*.hh",
-            "libs/**/*.h",
-            "libs/**/*.hpp",
-            "frontends/**/*.h",
-            "passes/**/*.h",
-            "techlibs/**/*.h",
-        ],
-        exclude = [
-            "backends/protobuf/*.h",
-        ],
-    ) + GENERATED_HEADERS,
-    copts = YOSYS_COPTS,
-    defines = [
-        "_YOSYS_",
-        "YOSYS_ENABLE_PLUGINS",
-        # "YOSYS_ENABLE_READLINE",
-        "YOSYS_ENABLE_GLOB",
-        #"YOSYS_ENABLE_TCL",
-        "YOSYS_ENABLE_ABC",
-        "YOSYS_ENABLE_COVER",
-        'ABCEXTERNAL=\\"abc\\"',
-    ],
     #features = ["-use_header_modules"],
+    copts = YOSYS_COPTS,
     includes = [
         ".",
         "backends/ilang",
@@ -216,6 +221,7 @@ cc_library(
     ],
     visibility = ["//visibility:public"],
     deps = [
+        ":kernel_include",
         ":bigint",
         ":ezsat",
         ":json11",
@@ -470,4 +476,3 @@ genrule(
     cmd = "python3 $(location :pmgen) -o $(OUTS) -p ql_dsp_macc $(SRCS)",
     tools = [":pmgen"],
 )
-
