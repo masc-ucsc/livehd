@@ -1,0 +1,8 @@
+diff -bBdNrw -U5 '--exclude=*.orig' '--exclude=.git' '--exclude=.svn' '--exclude=esesc.xcode' '--exclude=build' '--exclude=CVS' '--exclude=CVSmain' '--exclude=cscope.files' '--exclude=cscope.out' '--exclude=ChangeLog' ../yosys-slang2/src/version.h src/version.h
+--- src/version.h
++++ src/version.h
+@@ -0,0 +1,4 @@
++#pragma once
++
++#define YOSYS_SLANG_REVISION "7cdd147a6dd14e8f57cd321df8be377c04c9b31f"
++#define SLANG_REVISION "f316723be57953fdeddc26650e6acab46a686be3"
