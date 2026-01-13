@@ -51,7 +51,7 @@ cc_binary(
     copts = COPTS,
     features = ["-use_header_modules"],
     visibility = ["//visibility:public"],
-    linkopts = ["-lz"],
+    linkopts = ["-lz", "-rdynamic"],
     deps = [
         ":lgyosys",
     ],
