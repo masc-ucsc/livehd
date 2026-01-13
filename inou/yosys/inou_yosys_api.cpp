@@ -215,8 +215,10 @@ void Inou_yosys_api::tolg(Eprp_var &var) {
 }
 
 void Inou_yosys_api::do_tolg(Eprp_var &var) {
-  if (files.empty()) {
-    error("files can not be empty");
+  const auto filelist_file{var.get("filelist_file")};
+
+  if (files.empty() && filelist_file.empty()) {
+    error("at least one of files or filelist_file must be provided");
     return;
   }
 
@@ -229,17 +231,51 @@ void Inou_yosys_api::do_tolg(Eprp_var &var) {
   mustache::data vars;
   vars.set("path", path);
 
+  // Set slang plugin path (assume users always install slang.so in LiveHD using Bazel)
+  std::array<char, PATH_MAX> cwd;
+  if (getcwd(cwd.data(), cwd.size()) != nullptr) {
+    vars.set("slang_plugin_path", absl::StrCat(cwd.data(), "/bazel-bin/external/+_repo_rules+yosys_slang/slang.so"));
+  } else {
+    error("Could not get current working directory for slang plugin path");
+    return;
+  }
+
+  // For verilog frontend
   mustache::data filelist{mustache::data::type::list};
   for (const auto &f : absl::StrSplit(files, ',')) {
     filelist << mustache::data{"input", std::string(f)};
   }
 
+  // Build space-separated files list for slang
+  std::string files_str;
+  for (const auto &f : absl::StrSplit(files, ',')) {
+    if (!f.empty()) {
+      if (!files_str.empty()) {
+        files_str += " ";
+      }
+      files_str += std::string(f);
+    }
+  }
   vars.set("filelist", filelist);
+
+  // Set a list of files as well as the filelist/manifest file for `read_lang`
+  if (!files_str.empty()) vars.set("files_str", files_str);
+  if (!filelist_file.empty()) vars.set("filelist_file_str", absl::StrCat("-f ", filelist_file));
 
   // Set frontend type
   if (frontend == "slang") {
     vars.set("use_slang", mustache::data::type::bool_true);
     vars.set("use_verilog", mustache::data::type::bool_false);
+
+    const auto slang_flags{var.get("slang_flags")};
+    if (!slang_flags.empty()) {
+      std::string flags_str;
+      for (const auto &f : absl::StrSplit(slang_flags, ',')) {
+        if (!flags_str.empty()) flags_str += " ";
+        flags_str += std::string(f);
+      }
+      vars.set("slang_flags", flags_str);
+    }
   } else if (frontend.empty() || frontend == "verilog") {
     vars.set("use_slang", mustache::data::type::bool_false);
     vars.set("use_verilog", mustache::data::type::bool_true);
@@ -252,6 +288,7 @@ void Inou_yosys_api::do_tolg(Eprp_var &var) {
     vars.set("hierarchy", mustache::data::type::bool_true);
     if (top != "-auto-top") {
       vars.set("top", absl::StrCat("-top ", top));
+      vars.set("slang_top", absl::StrCat("--top ", top));  // For read_slang
     } else {
       vars.set("top", std::string(top));
     }
@@ -331,9 +368,11 @@ void Inou_yosys_api::fromlg(Eprp_var &var) {
 
 void Inou_yosys_api::setup() {
   Eprp_method m1("inou.yosys.tolg", "read verilog using yosys to lgraph", &Inou_yosys_api::tolg);
-  m1.add_label_required("files", "verilog files to process (comma separated)");
+  m1.add_label_optional("files", "verilog files to process (comma separated)");
+  m1.add_label_optional("filelist_file", "path to filelist file (.f/.F) containing additional source files for read_slang", "");
   m1.add_label_optional("path", "path to build the lgraph[s]", "lgdb");
   m1.add_label_optional("frontend", "frontend to use: verilog or slang", "verilog");
+  m1.add_label_optional("slang_flags", "comma-separated flags for read_slang command", "");
   m1.add_label_optional("techmap", "Either full or alumac techmap or none from yosys. Cannot be used with liberty", "");
   m1.add_label_optional("liberty", "Liberty file for technology mapping. Cannot be used with techmap, will call abc for tmap", "");
   m1.add_label_optional("abc", "run ABC inside yosys before loading lgraph", "false");
