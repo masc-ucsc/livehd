@@ -30,9 +30,7 @@ proc
 opt_expr
 opt_merge
 pmuxtree
-memory_dff
-memory_share
-memory_collect
+memory
 
 #flatten
 
