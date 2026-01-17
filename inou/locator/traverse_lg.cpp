@@ -1365,7 +1365,7 @@ void Traverse_lg::netpin_to_origpin_default_match(Lgraph* orig_lg, Lgraph* synth
 #endif
         if (map_itt != name2dpin.end()) {
 #ifdef BASIC_DBG
-          auto orig_node_dpin = Node_pin("lgdb", map_itt->second);
+          auto orig_node_dpin = Node_pin(orig_lg->get_path(), map_itt->second);
           std::print("\t\tFound orig_node_dpin {}\n",
                      orig_node_dpin.has_name() ? orig_node_dpin.get_name() : std::to_string(orig_node_dpin.get_pid()));
           std::print("\tDEFAULT INSERTION OF: {}, {}\n",
@@ -1376,7 +1376,7 @@ void Traverse_lg::netpin_to_origpin_default_match(Lgraph* orig_lg, Lgraph* synth
           mark_loop_stop.insert(synth_node_dpin.get_compact_flat());
           mark_loop_stop.insert(map_itt->second);
 #ifdef FOR_EVAL
-          auto orig_node_dpin1 = Node_pin("lgdb", map_itt->second);
+          auto orig_node_dpin1 = Node_pin(orig_lg->get_path(), map_itt->second);
           std::print("Inserting in netpin_to_origpin_default_match : {}  :::  {}\n",
                      synth_node_dpin.has_name() ? synth_node_dpin.get_name()
                                                 : ("n" + std::to_string(synth_node_dpin.get_node().get_nid())),
@@ -1392,7 +1392,7 @@ void Traverse_lg::netpin_to_origpin_default_match(Lgraph* orig_lg, Lgraph* synth
 #ifdef BASIC_DBG
           std::cout << "\t\tFound orig_node_dpin";
           for (const auto& orig_node_dpin_cf : map_itt_s->second) {
-            auto orig_node_dpin = Node_pin("lgdb", orig_node_dpin_cf);
+            auto orig_node_dpin = Node_pin(orig_lg->get_path(), orig_node_dpin_cf);
             std::print("  {}  ", orig_node_dpin.has_name() ? orig_node_dpin.get_name() : std::to_string(orig_node_dpin.get_pid()));
           }
           std::cout << "\n";
@@ -1409,7 +1409,7 @@ void Traverse_lg::netpin_to_origpin_default_match(Lgraph* orig_lg, Lgraph* synth
                      synth_node_dpin.has_name() ? synth_node_dpin.get_name()
                                                 : ("n" + std::to_string(synth_node_dpin.get_node().get_nid())));
           for (const auto& orig_node_dpin1_cf : (map_itt_s)->second) {
-            auto orig_node_dpin1 = Node_pin("lgdb", orig_node_dpin1_cf);
+            auto orig_node_dpin1 = Node_pin(orig_lg->get_path(), orig_node_dpin1_cf);
             std::print("  {}  ",
                        orig_node_dpin1.has_name() ? orig_node_dpin1.get_name()
                                                   : ("n" + std::to_string(orig_node_dpin1.get_node().get_nid())));
