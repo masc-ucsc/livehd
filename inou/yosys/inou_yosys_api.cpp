@@ -232,13 +232,8 @@ void Inou_yosys_api::do_tolg(Eprp_var &var) {
   vars.set("path", path);
 
   // Set slang plugin path (assume users always install slang.so in LiveHD using Bazel)
-  std::array<char, PATH_MAX> cwd;
-  if (getcwd(cwd.data(), cwd.size()) != nullptr) {
-    vars.set("slang_plugin_path", absl::StrCat(cwd.data(), "/bazel-bin/external/+_repo_rules+yosys_slang/slang.so"));
-  } else {
-    error("Could not get current working directory for slang plugin path");
-    return;
-  }
+  auto exe_path = file_utils::get_exe_path();
+  vars.set("slang_plugin_path", absl::StrCat(exe_path, "/../external/+_repo_rules+yosys_slang/slang.so"));
 
   // For verilog frontend
   mustache::data filelist{mustache::data::type::list};
@@ -284,16 +279,24 @@ void Inou_yosys_api::do_tolg(Eprp_var &var) {
     return;
   }
 
+  const auto elab_top{var.get("elab_top")};
+
   if (!top.empty()) {
     vars.set("hierarchy", mustache::data::type::bool_true);
     if (top != "-auto-top") {
       vars.set("top", absl::StrCat("-top ", top));
-      vars.set("slang_top", absl::StrCat("--top ", top));  // For read_slang
     } else {
       vars.set("top", std::string(top));
     }
   } else {
     vars.set("hierarchy", mustache::data::type::bool_false);
+  }
+
+  // Set slang_top for read_slang: use elab_top if provided, otherwise use top
+  if (!elab_top.empty()) {
+    vars.set("slang_top", absl::StrCat("--top ", elab_top));
+  } else if (!top.empty() && top != "-auto-top") {
+    vars.set("slang_top", absl::StrCat("--top ", top));
   }
 
   if (!techmap.empty()) {
@@ -378,7 +381,8 @@ void Inou_yosys_api::setup() {
   m1.add_label_optional("abc", "run ABC inside yosys before loading lgraph", "false");
   m1.add_label_optional("script", "alternative custom inou_yosys_read.ys command");
   m1.add_label_optional("yosys", "path for yosys command", "");
-  m1.add_label_optional("top", "define top module, will call yosys hierarchy pass (-auto-top allowed)");
+  m1.add_label_required("top", "define top module for synthesis, will call yosys hierarchy pass (-auto-top allowed)");
+  m1.add_label_optional("elab_top", "define top module for elaboration (read_slang). If not provided, uses 'top' value");
 
   register_inou("yosys", m1);
 
