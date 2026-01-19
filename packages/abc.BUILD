@@ -101,8 +101,9 @@ cc_library(
                    "src/sat/bsat2/*.cpp",
                ],
            ),
-    hdrs = glob(["src/**/**/*.h"]) + glob([
+    hdrs = glob(["src/**/**/*.h", "src/**/**/*.hpp"]) + glob([
         "src/**/**/*Unfold2.c",
+        "src/sat/kissat/sort.c"
     ]),
     copts = [
         "-w",
