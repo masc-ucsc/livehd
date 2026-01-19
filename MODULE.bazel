@@ -31,6 +31,9 @@ bazel_dep(name = "rules_bison", version = "0.4")
 bazel_dep(name = "rapidjson", version = "1.1.0.bcr.20250205")
 bazel_dep(name = "mimalloc", version = "2.2.4")
 
+bazel_dep(name = "libffi", version = "3.4.7.bcr.3")
+#bazel_dep(name = "bison", version = "3.8.2")
+#bazel_dep(name = "flex", version = "2.6.4")
 
 # iassert
 bazel_dep(name = "iassert", version = "0.1.0")
@@ -61,7 +64,8 @@ http_archive(
     name = "slang",
     build_file = "//packages:slang.BUILD",
     patches = ["//packages:slang.patch"],
-    sha256 = "4b6f9e83852d8958f9f6a3ee15d068240650a3860c4a3f13a226a19904b2d309",
+    # sha256 = "4b6f9e83852d8958f9f6a3ee15d068240650a3860c4a3f13a226a19904b2d309",
+    sha256 = "8f04e0673fa5722d1fd7f8beed93b6ebb64226e6ce72f76f1d559549746a4380",
     strip_prefix = "slang-master",
     urls = [
         "https://github.com/MikePopoloski/slang/archive/master.zip",

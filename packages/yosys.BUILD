@@ -18,6 +18,7 @@
 
 load("@rules_cc//cc:defs.bzl", "cc_binary", "cc_library", "cc_test")
 load("@rules_python//python:defs.bzl", "py_binary")
+load("@livehd//packages:yosys_utils.bzl", "yosys_bison", "yosys_flex")
 
 licenses(["restricted"])
 
@@ -50,19 +51,51 @@ genrule(
     ),
 )
 
+# yosys_flex(
+#     name = "verilog_lexer_gen",
+#     srcs = ["frontends/verilog/verilog_lexer.l"],
+#     outs = ["frontends/verilog/verilog_lexer.cc"],
+#     args = [
+#         "-o",
+#         "$(execpath frontends/verilog/verilog_lexer.cc)",
+#         "$(execpath frontends/verilog/verilog_lexer.l)",
+#     ],
+#     flex = "@flex",
+# )
+
 genrule(
-    name = "verilog_lexer_cpp",
+    name = "verilog_lexer_gen",
     srcs = ["frontends/verilog/verilog_lexer.l"],
     outs = ["verilog_lexer.cpp"],
-    cmd = "M4=$(M4) $(FLEX) --outfile=$@ $<",
+    cmd = "M4=$(M4) flex --outfile=$@ $<",
     toolchains = [
-        "@rules_flex//flex:current_flex_toolchain",
+        #"@rules_flex//flex:current_flex_toolchain",
         "@rules_m4//m4:current_m4_toolchain",
     ],
 )
 
+# yosys_bison(
+#     name = "verilog_parser_gen",
+#     srcs = ["frontends/verilog/verilog_parser.y"],
+#     outs = [
+#         "frontends/verilog/verilog_parser.tab.cc",
+#         "frontends/verilog/verilog_parser.tab.hh",
+#     ],
+#     args = [
+#         "-o",
+#         "$(execpath frontends/verilog/verilog_parser.tab.cc)",
+#         "-d",
+#         "-r",
+#         "all",
+#         "-b",
+#         "verilog_parser",
+#         "$(execpath frontends/verilog/verilog_parser.y)",
+#     ],
+#     bison = "@bison",
+# )
+
 genrule(
-    name = "verilog_parser",
+    name = "verilog_parser_gen",
     srcs = ["frontends/verilog/verilog_parser.y"],
     outs = [
         "frontends/verilog/verilog_parser.tab.cc",
@@ -191,8 +224,8 @@ cc_library(
             "testsuite.cc",
         ],
     ) + [
-        ":verilog_lexer_cpp",
-        ":verilog_parser",
+        ":verilog_lexer_gen",
+        ":verilog_parser_gen",
         #":ilang_lexer",
         #":ilang_parser",
         "passes/techmap/techmap.inc",
@@ -232,10 +265,10 @@ cc_library(
         # "@edu_berkeley_abc//:abc-lib",
         "@abc",
         #"@edu_berkeley_abc//:abc-lib",
-        # "@org_sourceware_libffi//:libffi",
+        "@libffi//:libffi",
         #"@tk_tcl_tcl//:tcl",
     ],
-    linkopts = ["-ldl", "-lffi"],
+    linkopts = ["-ldl"],
     alwayslink = True,
 )
 
