@@ -1851,6 +1851,7 @@ static void process_cells(RTLIL::Module *mod, Lgraph *g) {
     } else if (std::strncmp(cell->type.c_str(), "$dff", 4) == 0 || std::strncmp(cell->type.c_str(), "$dffe", 5) == 0
                || std::strncmp(cell->type.c_str(), "$dffsr", 6) == 0 || std::strncmp(cell->type.c_str(), "$adff", 5) == 0
                || std::strncmp(cell->type.c_str(), "$adffe", 6) == 0 || std::strncmp(cell->type.c_str(), "$adffsr", 7) == 0
+               || std::strncmp(cell->type.c_str(), "$aldff", 6) == 0
                || std::strncmp(cell->type.c_str(), "$sdff", 5) == 0 || std::strncmp(cell->type.c_str(), "$sdffe", 6) == 0
                || std::strncmp(cell->type.c_str(), "$sdffsr", 7) == 0) {
       exit_node.set_type(Ntype_op::Flop, get_output_size(cell));
@@ -1917,6 +1918,23 @@ static void process_cells(RTLIL::Module *mod, Lgraph *g) {
             exit_node.setup_sink_pin("initial").connect_driver(get_dpin(g, cell, ID::ARST_VALUE));
           }
         }
+      } else if (cell->hasPort(ID::ALOAD)) {
+        // Handle $aldff: D-type flip-flops with asynchronous load
+        // ALOAD is the async load enable, AD is the async load data (a port, not a constant like ARST_VALUE)
+        if (cell->hasParam(ID::ALOAD_POLARITY)) {
+          if (cell->getParam(ID::ALOAD_POLARITY).as_bool()) {
+            exit_node.setup_sink_pin("negreset").connect_driver(g->create_node_const(0));
+          } else {
+            exit_node.setup_sink_pin("negreset").connect_driver(g->create_node_const(1));
+          }
+        }
+
+        exit_node.setup_sink_pin("reset_pin").connect_driver(get_dpin(g, cell, ID::ALOAD));
+
+        // AD is the async load data port (unlike ARST_VALUE, which is a parameter)
+        if (cell->hasPort(ID::AD)) {
+          exit_node.setup_sink_pin("initial").connect_driver(get_dpin(g, cell, ID::AD));
+        }
       }
 
       I(!cell->hasParam(ID::SET));  // FIXME: active low not supported in LG (add mux before sflop)
@@ -1933,7 +1951,7 @@ static void process_cells(RTLIL::Module *mod, Lgraph *g) {
         }
       }
       if (std::strncmp(cell->type.c_str(), "$adff", 5) == 0 || std::strncmp(cell->type.c_str(), "$adffe", 6) == 0
-          || std::strncmp(cell->type.c_str(), "$adffsr", 7) == 0) {
+          || std::strncmp(cell->type.c_str(), "$adffsr", 7) == 0 || std::strncmp(cell->type.c_str(), "$aldff", 6) == 0) {
         exit_node.setup_sink_pin("async").connect_driver(g->create_node_const(1));
       }
 
