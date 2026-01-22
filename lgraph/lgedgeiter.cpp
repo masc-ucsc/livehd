@@ -244,7 +244,7 @@ void Fwd_edge_iterator::Fwd_iter::fwd_get_from_pending(Lgraph *top) {
         pending_stack.pop_back();
         continue;
       }
-      I(!node.is_type_flop());
+      GI(!visit_sub, !node.is_type_flop());
 
       if (unlikely(!node.get_class_lgraph()->is_valid_node(node.get_nid()))) {
         // The iterator can delete nodes
@@ -317,7 +317,7 @@ void Fwd_edge_iterator::Fwd_iter::fwd_get_from_pending(Lgraph *top) {
 
     I(!(*global_it).is_graph_io());  // NOTE: should we propagate IO for going up?
     if (unvisited.count((*global_it).get_compact())) {
-      I(!(*global_it).is_type_flop());
+      GI(!visit_sub, !(*global_it).is_type_flop());
       pending_stack.push_back(*global_it);
       for (auto &dpin : (*global_it).inp_drivers()) {  // fwd
         if (unvisited.contains(dpin.get_node().get_compact())) {
