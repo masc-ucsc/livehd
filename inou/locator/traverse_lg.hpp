@@ -37,6 +37,8 @@ class Traverse_lg : public Pass {
 public:
 private:
   std::string                           orig_lg_name;
+  std::string                           orig_lg_path;
+  std::string                           synth_lg_path;
   std::chrono::system_clock::time_point start_time_of_algo;
   absl::flat_hash_set<uint32_t>         origLGID_set;
   int                                   crossover_count;
@@ -125,7 +127,7 @@ private:
   std::vector<std::pair<uint64_t, uint64_t>> get_loc_vec(
       absl::flat_hash_set<Node_pin::Compact_flat> &orig_node_pin_vec) const;  // FIXME: should have fnmae as well?
   void remove_from_crit_node_set(const Node_pin::Compact_flat &dpin_cf);
-  void get_node_pin_compact_flat_details(const Node_pin::Compact_flat &np_cf) const;
+  void get_node_pin_compact_flat_details(const Node_pin::Compact_flat &np_cf, std::string_view lg_path) const;
   void report_critical_matches_with_color();
   void resolution_of_synth_map_of_sets(map_of_sets &synth_map_of_set);
   void set_theory_match_loopLast_only();
@@ -137,7 +139,7 @@ private:
                                 bool union_of_crit_entries_only) const;
   map_of_sets convert_io_MoS_to_node_MoS_LLonly(const map_of_sets &io_map_of_sets);
   map_of_sets obtain_MoS_LLonly(const map_of_sets &io_map_of_sets, int perc_resolved);
-  void        print_set(const absl::flat_hash_set<Node_pin::Compact_flat> &set_of_dpins) const;
+  void        print_set(const absl::flat_hash_set<Node_pin::Compact_flat> &set_of_dpins, std::string_view lg_path) const;
   void        print_everything();
   bool        out_sets_intersect(const absl::flat_hash_set<Node_pin::Compact_flat> &set1,
                                  const absl::flat_hash_set<Node_pin::Compact_flat> &set2) const;
