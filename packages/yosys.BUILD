@@ -67,7 +67,11 @@ genrule(
     name = "verilog_lexer_gen",
     srcs = ["frontends/verilog/verilog_lexer.l"],
     outs = ["verilog_lexer.cpp"],
-    cmd = "M4=$(M4) flex --outfile=$@ $<",
+    cmd = "M4=$(M4) flex --outfile=$@.tmp $< && " +
+        "if [ \"$$(uname)\" = \"Darwin\" ]; then " +
+        "sed -e 's/int yyFlexLexer::LexerInput( char\\* buf, int/size_t yyFlexLexer::LexerInput( char* buf, size_t/' " +
+        "-e 's/void yyFlexLexer::LexerOutput( const char\\* buf, int size/void yyFlexLexer::LexerOutput( const char* buf, size_t size/' " +
+        "$@.tmp > $@; else cp $@.tmp $@; fi && rm $@.tmp",
     toolchains = [
         #"@rules_flex//flex:current_flex_toolchain",
         "@rules_m4//m4:current_m4_toolchain",

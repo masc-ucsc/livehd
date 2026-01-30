@@ -14,6 +14,7 @@ http_archive = use_repo_rule("@bazel_tools//tools/build_defs/repo:http.bzl", "ht
 new_git_repository = use_repo_rule("@bazel_tools//tools/build_defs/repo:git.bzl", "new_git_repository")
 
 bazel_dep(name = "rules_cc", version = "0.2.16")
+bazel_dep(name = "platforms", version = "0.0.10")
 bazel_dep(name = "rules_foreign_cc", version = "0.15.1")
 
 bazel_dep(name = "abseil-cpp", version = "20250814.1") # version = "20240722.1")
@@ -187,7 +188,7 @@ http_archive(
    sha256 = "cd2b29bbd3c92e0cdc4df37af3c7b17b965b6ebdb9079377d7e32fdefb4dcd3b",
    strip_prefix = "yosys-0.60",
    build_file = "//packages:yosys.BUILD",
-   patches = ["//packages:yosys.patch"],
+   patches = ["//packages:yosys.patch", "//packages:yosys_lexer.patch"],
 )
 
 # mustache

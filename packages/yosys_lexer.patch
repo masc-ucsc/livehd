@@ -1,0 +1,16 @@
+--- frontends/verilog/verilog_lexer.h	2026-01-30 12:00:00.000000000 -0800
++++ frontends/verilog/verilog_lexer.h	2026-01-30 12:00:00.000000000 -0800
+@@ -35,8 +35,12 @@
+ 	private:
+ 		std::shared_ptr<std::string> current_filename;
+ 		std::vector<std::shared_ptr<std::string>> fn_stack;
+ 		std::vector<int> ln_stack;
+-		int LexerInput(char* buf, int max_size) override {
++#ifdef __APPLE__
++		size_t LexerInput(char* buf, size_t max_size) override {
++#else
++		int LexerInput(char* buf, int max_size) override {
++#endif
+ 			return readsome(*extra->lexin, buf, max_size);
+ 		}
+ 	};

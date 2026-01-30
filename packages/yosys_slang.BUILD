@@ -11,10 +11,13 @@ cc_binary(
     visibility = ["//visibility:public"],
     deps = [ ":yosys_slang" ],
     linkshared = True,
-    linkopts = [
-      "-Wl,-z,lazy",     # opposite of -z now
-      "-Wl,-z,norelro",  # opposite of -z relro
-    ],
+    linkopts = select({
+        "@platforms//os:macos": ["-Wl,-undefined,dynamic_lookup"],
+        "//conditions:default": [
+            "-Wl,-z,lazy",     # opposite of -z now
+            "-Wl,-z,norelro",  # opposite of -z relro
+        ],
+    }),
     features = ["-hardening"],
     #features = ["pic"],
 )

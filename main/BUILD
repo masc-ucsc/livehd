@@ -16,10 +16,10 @@ cc_binary(
         #        ":use_tcmalloc": "@com_google_tcmalloc//tcmalloc",
         "//conditions:default": "@bazel_tools//tools/cpp:malloc",
     }),
-    linkopts = [
-        "-Wl,--export-dynamic",
-        "-lz",
-    ],
+    linkopts = select({
+        "@platforms//os:macos": ["-lz"],
+        "//conditions:default": ["-Wl,--export-dynamic", "-lz"],
+    }),
     visibility = ["//visibility:public"],
     deps = [
         ":main",
