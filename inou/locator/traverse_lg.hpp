@@ -31,7 +31,7 @@
 // #define FULL_RUN_FOR_EVAL //if defined then every node is critical node
 // possible to compare matching map for every node
 // used in nl2nl match
-#define FOR_EVAL  // used in orig-to-NL match (tells where matching happens)
+//#define FOR_EVAL  // used in orig-to-NL match (tells where matching happens)
 
 class Traverse_lg : public Pass {
 public:
