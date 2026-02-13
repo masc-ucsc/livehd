@@ -1601,9 +1601,17 @@ bool Traverse_lg::out_sets_intersect(const absl::flat_hash_set<Node_pin::Compact
     return true;
   }
 
-  for (const auto& np : set1) {
-    if (set2.contains(np)) {
-      return true;
+  if (set1.size() < set2.size())  {
+    for (const auto& np : set1) {
+      if (set2.contains(np)) {
+        return true;
+      }
+    }
+  }else{
+    for (const auto& np : set2) {
+      if (set1.contains(np)) {
+        return true;
+      }
     }
   }
   return false;

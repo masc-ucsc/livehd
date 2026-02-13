@@ -14,7 +14,7 @@ http_archive = use_repo_rule("@bazel_tools//tools/build_defs/repo:http.bzl", "ht
 new_git_repository = use_repo_rule("@bazel_tools//tools/build_defs/repo:git.bzl", "new_git_repository")
 
 bazel_dep(name = "rules_cc", version = "0.2.16")
-bazel_dep(name = "rules_shell", version = "0.4.0")
+bazel_dep(name = "rules_shell", version = "0.6.1")
 bazel_dep(name = "platforms", version = "1.0.0")
 bazel_dep(name = "rules_foreign_cc", version = "0.15.1")
 
@@ -132,10 +132,10 @@ http_archive(
     name = "opentimer",
     build_file = "//packages:opentimer.BUILD",
     patches = ["//packages:opentimer.patch"],
-    sha256 = "85d1b896cc70484ef5834448a23100b6618810c23b975228478d59ad6bead797",
-    strip_prefix = "OpenTimer-e099498afa798198ea9a88312735d89d7a4e0cd7",
+    sha256 = "52791ebff1a4d18d1bb55da5328cf201c41736e278d5f1a4ce0f7410de128b6f",
+    strip_prefix = "OpenTimer-5e0d5bba4b9d5725c932a7b42815f7231813b6a5",
     urls = [
-        "https://github.com/masc-ucsc/OpenTimer/archive/e099498afa798198ea9a88312735d89d7a4e0cd7.zip",
+        "https://github.com/masc-ucsc/OpenTimer/archive/5e0d5bba4b9d5725c932a7b42815f7231813b6a5.zip",
     ],
 )
 

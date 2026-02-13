@@ -140,11 +140,13 @@ class unit_flow {
         ++relabelCtr;
         assert(active(v));
 
+#ifndef NDEBUG
         for (EdgeID e : m_fg->edges_of(v)) {
             assert(m_fg->getEdgeFlow(v, e) == m_fg->getEdgeCapacity(v, e) ||
                    m_height[v] <= m_height[m_fg->getEdgeTarget(v, e)] ||
                    m_fg->getEdgeCapacity(v, e) == 0);
         }
+#endif
         ++m_height[v];
         if (m_height[v] < m_max_height) {
             Q.push(std::make_pair(m_height[v], v));
