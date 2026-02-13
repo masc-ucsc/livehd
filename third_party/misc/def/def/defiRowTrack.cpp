@@ -263,7 +263,7 @@ double defiRow::propNumber(int index) const {
   return propDValues_[index];
 }
 
-const char defiRow::propType(int index) const {
+char defiRow::propType(int index) const {
   char msg[160];
   if (index < 0 || index >= numProps_) {
     sprintf(msg,

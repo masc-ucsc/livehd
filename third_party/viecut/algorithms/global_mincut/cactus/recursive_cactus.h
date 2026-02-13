@@ -83,9 +83,9 @@ class recursive_cactus {
     * is significantly faster than building the cactus completely
     */
     mutableGraphPtr decrementalRebuild(mutableGraphPtr graph,
-                                       NodeID s, EdgeWeight mincut,
+                                       NodeID s, EdgeWeight mc,
                                        size_t fpid) {
-        setMincut(mincut);
+        setMincut(mc);
         strongly_connected_components scc;
         auto [v, num_comp, blocksizes] = scc.strong_components(graph, fpid);
         auto STCactus = findSTCactus(v, graph, s, num_comp);
@@ -265,12 +265,12 @@ class recursive_cactus {
                 if (contained[n] != blocksize) {
                     EdgeWeight to_contracted = 0;
                     for (EdgeID e : G->edges_of(n)) {
-                        NodeID t = G->getEdgeTarget(n, e);
+                        NodeID tgt_node = G->getEdgeTarget(n, e);
                         EdgeWeight wgt = G->getEdgeWeight(n, e);
-                        if (contained[t] == blocksize) {
+                        if (contained[tgt_node] == blocksize) {
                             to_contracted += wgt;
-                        } else if (contained[n] < contained[t]) {
-                            graph->new_edge(contained[n], contained[t], wgt);
+                        } else if (contained[n] < contained[tgt_node]) {
+                            graph->new_edge(contained[n], contained[tgt_node], wgt);
                         }
                     }
 
@@ -340,9 +340,9 @@ class recursive_cactus {
         }
         for (NodeID n : G->nodes()) {
             for (EdgeID e : G->edges_of(n)) {
-                NodeID t = G->getEdgeTarget(n, e);
+                NodeID tgt_node = G->getEdgeTarget(n, e);
                 EdgeWeight wgt = G->getEdgeWeight(n, e);
-                int ctr = v[t];
+                int ctr = v[tgt_node];
                 if (v[n] > ctr) {
                     EdgeID e_ctr = ctr - (ctr > v[n]);
                     auto wgt_ctr = wgt + contract->getEdgeWeight(v[n], e_ctr);
@@ -370,8 +370,8 @@ class recursive_cactus {
         std::vector<NodeID> rev_node_mapping(contract->number_of_nodes());
         stcactus->setContainedVertices(0, contract->containedVertices(s));
         node_mapping[s] = 0;
-        for (NodeID v : stcactus->containedVertices(0)) {
-            stcactus->setCurrentPosition(v, 0);
+        for (NodeID vtx : stcactus->containedVertices(0)) {
+            stcactus->setCurrentPosition(vtx, 0);
         }
         for (NodeID n = 1; n < num_vertices; ++n) {
             NodeID next = pq.deleteMax();
@@ -387,8 +387,8 @@ class recursive_cactus {
             rev_node_mapping[n] = next;
             stcactus->setContainedVertices(
                 n, contract->containedVertices(next));
-            for (NodeID v : stcactus->containedVertices(n)) {
-                stcactus->setCurrentPosition(v, n);
+            for (NodeID vtx : stcactus->containedVertices(n)) {
+                stcactus->setCurrentPosition(vtx, n);
             }
         }
         stcactus->finish_construction();
@@ -422,8 +422,8 @@ class recursive_cactus {
             if (curr_cycle.size() > 0) {
                 A.emplace_back();
                 order.emplace_back(true);
-                for (size_t v = i - curr_cycle.size(); v < i; ++v) {
-                    A.back().emplace_back(v);
+                for (size_t vi = i - curr_cycle.size(); vi < i; ++vi) {
+                    A.back().emplace_back(vi);
                 }
             } else {
                 i++;
@@ -436,8 +436,8 @@ class recursive_cactus {
         NodeID previous = 0;
         size_t a_index = 0, b_index = 0;
         VIECUT_ASSERT_EQ(order.size(), A.size() + B.size());
-        for (size_t i = 0; i < (A.size() + B.size() - 1); ++i) {
-            if (order[i]) {
+        for (size_t idx = 0; idx < (A.size() + B.size() - 1); ++idx) {
+            if (order[idx]) {
                 // make cycle
                 for (size_t j = 0; j < A[a_index].size(); ++j) {
                     if (j > 0) {
@@ -450,7 +450,7 @@ class recursive_cactus {
                     if (j == A[a_index].size() - 1) {
                         // last vertex, connect with next cycle or ordered vtx
                         NodeID next;
-                        if (order[i + 1] == true) {
+                        if (order[idx + 1] == true) {
                             next = stcactus->new_empty_node();
                         } else {
                             next = B[b_index];
@@ -464,7 +464,7 @@ class recursive_cactus {
                 a_index++;
             } else {
                 // make ordered vtx
-                if (!order[i + 1]) {
+                if (!order[idx + 1]) {
                     stcactus->new_edge_order(B[b_index],
                                              B[b_index + 1], mincut);
                 }
@@ -511,7 +511,7 @@ class recursive_cactus {
             }
         }
 
-        NodeID t = UNDEFINED_NODE;
+        NodeID tgt_node = UNDEFINED_NODE;
         EdgeID e = UNDEFINED_EDGE;
         NodeWeight max_ngbr = 0;
         for (EdgeID edge : G->edges_of(s)) {
@@ -519,15 +519,15 @@ class recursive_cactus {
             if (G->getUnweightedNodeDegree(ngbr) > max_ngbr &&
                 !G->isEmpty(ngbr)) {
                 max_ngbr = G->getUnweightedNodeDegree(ngbr);
-                t = ngbr;
+                tgt_node = ngbr;
                 e = edge;
             }
         }
 
-        if (t == UNDEFINED_NODE) {
+        if (tgt_node == UNDEFINED_NODE) {
             return findFlowEdge(G);
         } else {
-            return std::make_tuple(s, e, t);
+            return std::make_tuple(s, e, tgt_node);
         }
     }
 
@@ -544,7 +544,7 @@ class recursive_cactus {
             }
         }
 
-        NodeID t = UNDEFINED_NODE;
+        NodeID tgt_node = UNDEFINED_NODE;
         EdgeID e = UNDEFINED_EDGE;
         NodeWeight max_ngbr = 0;
         for (EdgeID edge : G->edges_of(s)) {
@@ -552,15 +552,15 @@ class recursive_cactus {
             if (G->getWeightedNodeDegree(ngbr) > max_ngbr &&
                 !G->isEmpty(ngbr)) {
                 max_ngbr = G->getWeightedNodeDegree(ngbr);
-                t = ngbr;
+                tgt_node = ngbr;
                 e = edge;
             }
         }
 
-        if (t == UNDEFINED_NODE) {
+        if (tgt_node == UNDEFINED_NODE) {
             return findFlowEdge(G);
         } else {
-            return std::make_tuple(s, e, t);
+            return std::make_tuple(s, e, tgt_node);
         }
     }
 

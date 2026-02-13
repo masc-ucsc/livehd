@@ -11,10 +11,9 @@ genrule(
         "lef.tab.cpp",
         "lef.tab.hpp",
     ],
-    cmd = "M4=$(M4) $(BISON) --defines=$(location lef.tab.hpp) --output-file=$(location lef.tab.cpp) $<",
+    cmd = "M4=$(M4) bison --defines=$(location lef.tab.hpp) --output-file=$(location lef.tab.cpp) $<",
     # "--name-prefix=xxx",
     toolchains = [
-        "@rules_bison//bison:current_bison_toolchain",
         "@rules_m4//m4:current_m4_toolchain",
     ],
 )

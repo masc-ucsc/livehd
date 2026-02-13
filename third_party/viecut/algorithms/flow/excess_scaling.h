@@ -57,7 +57,6 @@ class excess_scaling {
             flowsrc[i] = (m_delta_src[i] + m_mu - 1) / m_mu;
         }
         while (m_mu > 4) {
-            size_t discard = 0;
             unit_flow uf;
             uf.init(*m_fg, flowsrc, m_U, m_max_height, 2);
             uf.run();
@@ -74,7 +73,6 @@ class excess_scaling {
                 }
 
                 if (uf.excess(n) > 0) {
-                    discard += uf.excess(n);
                     m_delta_src[n] = m_delta_src[n] - uf.excess(n);
                     flowsrc[n] = m_delta_src[n] / m_mu;
                 }

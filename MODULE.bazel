@@ -14,6 +14,7 @@ http_archive = use_repo_rule("@bazel_tools//tools/build_defs/repo:http.bzl", "ht
 new_git_repository = use_repo_rule("@bazel_tools//tools/build_defs/repo:git.bzl", "new_git_repository")
 
 bazel_dep(name = "rules_cc", version = "0.2.16")
+bazel_dep(name = "rules_shell", version = "0.4.0")
 bazel_dep(name = "platforms", version = "1.0.0")
 bazel_dep(name = "rules_foreign_cc", version = "0.15.1")
 
@@ -41,10 +42,10 @@ bazel_dep(name = "iassert", version = "0.1.0")
 
 archive_override(
     module_name = "iassert",
-    integrity = "sha256-GdjSfgaWIpWVYAlkMWtMos7/bSWCAlL935YHPGKzgd4=",
-    strip_prefix = "iassert-e1502380a05429558ba2009d1224843c30a46350",
+    integrity = "sha256-sMOp2bzYfLhVMYfFoliGIXKHAi3bZpTVTSD+2oXjMp8=",
+    strip_prefix = "iassert-0460fbd8405a96b3615be425df9066eba835fcf0",
     urls = [
-        "https://github.com/masc-ucsc/iassert/archive/e1502380a05429558ba2009d1224843c30a46350.zip",
+        "https://github.com/masc-ucsc/iassert/archive/0460fbd8405a96b3615be425df9066eba835fcf0.zip",
     ],
 )
 
@@ -98,10 +99,10 @@ http_archive(
 # HIF
 http_archive(
     name = "hif",
-    sha256 = "de5988e3ad9b398dd7b9879ddb8b539d02f18d2ffe1f1cad35d07b9696d0b49d",
-    strip_prefix = "hif-2102c0507c89c9a37d9e4b7711e3c56994ea6725",
+    sha256 = "af0da75b1489997356b24cfbab81741a2c50ed299f63a110226c28e55397db15",
+    strip_prefix = "hif-7652008ccb33e765d6bad7370e524fd62eb78e2f",
     urls = [
-        "https://github.com/masc-ucsc/hif/archive/2102c0507c89c9a37d9e4b7711e3c56994ea6725.zip",
+        "https://github.com/masc-ucsc/hif/archive/7652008ccb33e765d6bad7370e524fd62eb78e2f.zip",
     ],
 )
 
@@ -131,11 +132,10 @@ http_archive(
     name = "opentimer",
     build_file = "//packages:opentimer.BUILD",
     patches = ["//packages:opentimer.patch"],
-    sha256 = "c6cf50ece9e49016e2f3cbf9adf43d65b9886cf637e27361bf0b7f9f8ed8144d",
-    strip_prefix = "OpenTimer-def974f189616f97f5c0ff68265fd0f8ed9c22bd",
+    sha256 = "85d1b896cc70484ef5834448a23100b6618810c23b975228478d59ad6bead797",
+    strip_prefix = "OpenTimer-e099498afa798198ea9a88312735d89d7a4e0cd7",
     urls = [
-        "https://github.com/masc-ucsc/OpenTimer/archive/def974f189616f97f5c0ff68265fd0f8ed9c22bd.zip",
-      #  "https://github.com/masc-ucsc/OpenTimer/archive/52056da3d4971322841abbe975e5a22a4e4bf491.zip",
+        "https://github.com/masc-ucsc/OpenTimer/archive/e099498afa798198ea9a88312735d89d7a4e0cd7.zip",
     ],
 )
 

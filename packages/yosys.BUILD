@@ -73,7 +73,6 @@ genrule(
         "-e 's/void yyFlexLexer::LexerOutput( const char\\* buf, int size/void yyFlexLexer::LexerOutput( const char* buf, size_t size/' " +
         "$@.tmp > $@; else cp $@.tmp $@; fi && rm $@.tmp",
     toolchains = [
-        #"@rules_flex//flex:current_flex_toolchain",
         "@rules_m4//m4:current_m4_toolchain",
     ],
 )

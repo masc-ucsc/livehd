@@ -35,8 +35,6 @@ class label_propagation {
         timer t;
         std::vector<NodeID> cluster_id(G->number_of_nodes());
         std::vector<NodeID> permutation(G->number_of_nodes());
-        bool timing = configuration::getConfig()->verbose;
-
         // use this vector to store connection strengths to blocks.
         // in order to only reset elements
         // that are actually written in we store (in second)

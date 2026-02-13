@@ -90,12 +90,12 @@ class ks_minimum_cut : public minimum_cut {
 
         EdgeID num_edges = G->number_of_edges();
 
-        std::mt19937_64 m_mt(iteration);
+        std::mt19937_64 local_mt(iteration);
 
         size_t reduced = 0;
 
         while (reduced < n_reduce) {
-            EdgeWeight e_rand = m_mt() % num_edges;
+            EdgeWeight e_rand = local_mt() % num_edges;
             NodeID src = G->getEdgeSource(e_rand);
             NodeID tgt = G->getEdgeTarget(e_rand);
             if (uf->Union(src, tgt))
@@ -129,10 +129,10 @@ class ks_minimum_cut : public minimum_cut {
         EdgeWeight num_edges = wgt;
 
         size_t contracted = 0;
-        std::mt19937_64 m_mt(iteration);
+        std::mt19937_64 local_mt(iteration);
 
         while (contracted < n_reduce) {
-            EdgeWeight e_rand = m_mt() % num_edges;
+            EdgeWeight e_rand = local_mt() % num_edges;
 
             auto edge =
                 std::lower_bound(prefixsum.begin(), prefixsum.end(), e_rand,

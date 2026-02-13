@@ -290,7 +290,7 @@ double defiRegion::propNumber(int index) const {
   return propDValues_[index];
 }
 
-const char defiRegion::propType(int index) const {
+char defiRegion::propType(int index) const {
   char msg[160];
   if (index < 0 || index >= numProps_) {
     sprintf(msg,

@@ -52,8 +52,6 @@ class stoer_wagner_minimum_cut {
 
         visited[current_node] = true;
 
-        size_t num_inserts = 0, num_deletes = 0;
-
         for (uint64_t i = 0; i < size - 2; ++i) {
             assert(uf.Find(current_node) == current_node);
 
@@ -64,13 +62,11 @@ class stoer_wagner_minimum_cut {
                     if (gain > 0) {
                         pq.increaseKey(tgt, gain + G.getEdgeWeight(e));
                     } else {
-                        num_inserts++;
                         assert(G.getEdgeWeight(e) > 0);
                         pq.insert(tgt, G.getEdgeWeight(e));
                     }
                 }
             }
-            num_deletes++;
             current_node = pq.deleteMax();
 
             assert(uf.Find(current_node) == current_node);
@@ -84,7 +80,6 @@ class stoer_wagner_minimum_cut {
                 if (gain > 0) {
                     pq.increaseKey(tgt, gain + G.getEdgeWeight(e));
                 } else {
-                    num_inserts++;
                     assert(G.getEdgeWeight(e) > 0);
                     pq.insert(tgt, G.getEdgeWeight(e));
                 }

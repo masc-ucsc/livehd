@@ -204,19 +204,10 @@ class minimum_cut_helpers {
                 printLogs(b);
             } else {
                 std::sort(b.begin(), b.end());
-                bool verbose = configuration::getConfig()->verbose;
-                NodeID id0 = b.end() - std::upper_bound(b.begin(), b.end(), 0);
-                NodeID id1 = b.end() - std::upper_bound(b.begin(), b.end(), 1);
             }
         }
     }
 
-    static void printLogs(const std::vector<NodeID>& b) {
-        NodeID empty = std::lower_bound(b.begin(), b.end(), 1) - b.begin();
-        NodeID id1 = b.end() - std::upper_bound(b.begin(), b.end(), 1);
-        NodeID id10 = b.end() - std::upper_bound(b.begin(), b.end(), 9);
-        NodeID id100 = b.end() - std::upper_bound(b.begin(), b.end(), 99);
-        NodeID id1000 = b.end() - std::upper_bound(b.begin(), b.end(), 999);
-        NodeID id10000 = b.end() - std::upper_bound(b.begin(), b.end(), 9999);
+    static void printLogs(const std::vector<NodeID>& /* b */) {
     }
 };

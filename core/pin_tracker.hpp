@@ -38,8 +38,8 @@ public:
 
     auto pairs = mask.get_mask_range_pairs();
     for (const auto &p : pairs) {
-      auto start = p.first;
-      auto end   = p.first + p.second;  // [start,end)
+      auto start = static_cast<size_t>(p.first);
+      auto end   = static_cast<size_t>(p.first + p.second);  // [start,end)
       auto pos   = start;
       if (end > it->second.size()) {
         end = it->second.size();
@@ -60,11 +60,11 @@ public:
       pv.resize(v_pv.size(), {Zero_pin, -1});
     }
 
-    auto pick_v_pos = 0;
+    size_t pick_v_pos = 0;
     auto pairs      = mask.get_mask_range_pairs();
     for (const auto &p : pairs) {
-      auto start = p.first;
-      auto end   = p.first + p.second;  // [start,end)
+      auto start = static_cast<size_t>(p.first);
+      auto end   = static_cast<size_t>(p.first + p.second);  // [start,end)
       auto pos   = start;
 
       if (pv.size() <= end) {
@@ -87,10 +87,16 @@ public:
   }
 
   void add_shl(Pin dst_pin, Pin a_pin, Bits_t a_sbits, Lconst amount) {
-    auto &pv = full_map[dst_pin];
-    pv.resize(a_sbits + amount.to_i(), {Zero_pin, -1});
+    const auto amount_i = amount.to_i();
+    I(amount_i >= 0);
 
-    for (auto i = 0; i < amount.to_i(); ++i) {
+    const auto amount_u = static_cast<size_t>(amount_i);
+    const auto a_sbits_u = static_cast<size_t>(a_sbits);
+
+    auto &pv = full_map[dst_pin];
+    pv.resize(a_sbits_u + amount_u, {Zero_pin, -1});
+
+    for (size_t i = 0; i < amount_u; ++i) {
       pv[i].id  = Zero_pin;
       pv[i].pos = 0;
     }
@@ -101,23 +107,29 @@ public:
       it = full_map.find(a_pin);
     }
 
-    for (auto i = 0; i < a_sbits; ++i) {
+    for (size_t i = 0; i < a_sbits_u; ++i) {
       if (i >= it->second.size()) {
-        pv[amount.to_i() + i].id  = it->second.back().id;
-        pv[amount.to_i() + i].pos = it->second.back().pos;
+        pv[amount_u + i].id  = it->second.back().id;
+        pv[amount_u + i].pos = it->second.back().pos;
       } else {
-        pv[amount.to_i() + i].id  = it->second[i].id;
-        pv[amount.to_i() + i].pos = it->second[i].pos;
+        pv[amount_u + i].id  = it->second[i].id;
+        pv[amount_u + i].pos = it->second[i].pos;
       }
     }
   }
 
   void add_sra(Pin dst_pin, Pin a_pin, Bits_t a_sbits, Lconst amount) {
     I(a_sbits > 0);
-    I(amount.to_i() >= 0);
+    const auto amount_i = amount.to_i();
+    I(amount_i >= 0);
+
+    const auto amount_u = static_cast<size_t>(amount_i);
+    const auto a_sbits_u = static_cast<size_t>(a_sbits);
+    I(a_sbits_u >= amount_u);
 
     auto &pv = full_map[dst_pin];
-    pv.resize(a_sbits - amount.to_i(), {Zero_pin, -1});
+    const auto out_bits = a_sbits_u - amount_u;
+    pv.resize(out_bits, {Zero_pin, -1});
 
     auto it = full_map.find(a_pin);
     if (it == full_map.end()) {
@@ -125,7 +137,7 @@ public:
       it = full_map.find(a_pin);
     }
 
-    for (auto i = 0; i < a_sbits - amount.to_i(); ++i) {
+    for (size_t i = 0; i < out_bits; ++i) {
       if (i >= it->second.size()) {
         pv[i].id  = it->second.back().id;
         pv[i].pos = it->second.back().pos;
@@ -138,10 +150,13 @@ public:
 
   void add_sext(Pin dst_pin, Pin a_pin, Bits_t a_sbits, Lconst amount) {
     I(a_sbits > 0);
-    I(amount.to_i() >= 0);
+    const auto amount_i = amount.to_i();
+    I(amount_i >= 0);
+
+    const auto amount_u = static_cast<size_t>(amount_i);
 
     auto &pv = full_map[dst_pin];
-    pv.resize(amount.to_i(), {Zero_pin, -1});
+    pv.resize(amount_u, {Zero_pin, -1});
 
     auto it = full_map.find(a_pin);
     if (it == full_map.end()) {
@@ -149,7 +164,7 @@ public:
       it = full_map.find(a_pin);
     }
 
-    for (auto i = 0; i < amount.to_i(); ++i) {
+    for (size_t i = 0; i < amount_u; ++i) {
       if (i >= it->second.size()) {
         pv[i].id  = it->second.back().id;
         pv[i].pos = it->second.back().pos;
@@ -172,7 +187,7 @@ public:
       pv.resize(it->second.size(), {Zero_pin, 0});
     }
 
-    for (auto i = 0; i < it->second.size(); ++i) {
+    for (size_t i = 0; i < it->second.size(); ++i) {
       if (it->second[i].id == Zero_pin && it->second[i].pos == 0) {
         continue;  // Nothing to do in this bit
       }
@@ -191,7 +206,9 @@ public:
     auto &pv = full_map[dst_pin];
     it       = full_map.find(a_pin);  // WARNING: insert could destroy iterator
 
-    auto max_bits = a_mask.get_mask_range().second;
+    auto max_bits_i = a_mask.get_mask_range().second;
+    I(max_bits_i >= 0);
+    auto max_bits = static_cast<size_t>(max_bits_i);
     if (it->second.size() < max_bits) {
       max_bits = it->second.size();
     }
@@ -200,11 +217,11 @@ public:
       pv.resize(max_bits, {Zero_pin, 0});
     }
 
-    for (auto i = 0; i < max_bits; ++i) {
+    for (size_t i = 0; i < max_bits; ++i) {
       if (it->second[i].id == Zero_pin && it->second[i].pos == 0) {
         continue;  // Nothing to do in this bit
       }
-      if (!a_mask.bit_test(i)) {
+      if (!a_mask.bit_test(static_cast<Bits_t>(i))) {
         continue;
       }
       if (pv[i].id == Zero_pin && pv[i].pos == 0) {

@@ -940,7 +940,7 @@ void tree<X>::adjust_to_level(Tree_level level) {
 
 template <typename X>
 tree<X>::tree(std::string_view _path, std::string_view _map_name)
-    : mmap_path(_path.empty() ? "." : _path), mmap_name{std::string(_path) + std::string("/") + std::string(_map_name)} {
+    : mmap_name{std::string(_path) + std::string("/") + std::string(_map_name)}, mmap_path(_path.empty() ? "." : _path) {
   if (mmap_path != ".") {
     struct stat sb;
     if (stat(mmap_path.c_str(), &sb) != 0 || !S_ISDIR(sb.st_mode)) {

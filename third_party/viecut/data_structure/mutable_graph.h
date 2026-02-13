@@ -554,8 +554,8 @@ class mutable_graph {
 
         // remap all reverse edges of vertex that was now moved to 'target'
         for (EdgeID ed : edges_of(target)) {
-            RevEdge e = vertices[target][ed];
-            vertices[e.target][e.reverse_edge].target = target;
+            RevEdge re = vertices[target][ed];
+            vertices[re.target][re.reverse_edge].target = target;
         }
 
         return target;
@@ -643,8 +643,8 @@ class mutable_graph {
 
         // remap all reverse edges of vertex that was now moved to 'target'
         for (EdgeID ed : edges_of(target)) {
-            RevEdge e = vertices[target][ed];
-            vertices[e.target][e.reverse_edge].target = target;
+            RevEdge re = vertices[target][ed];
+            vertices[re.target][re.reverse_edge].target = target;
         }
 
         // delete edge of 'node' to 'target', remap reverse

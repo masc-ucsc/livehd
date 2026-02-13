@@ -314,7 +314,7 @@ public:
   const char* propName(int index) const;
   const char* propValue(int index) const;
   double      propNum(int index) const;
-  const char  propType(int index) const;
+  char  propType(int index) const;
   int         propIsNumber(int index) const;
   int         propIsString(int index) const;
 
@@ -556,7 +556,7 @@ public:
   const char* propName(int index) const;
   const char* propValue(int index) const;
   double      propNum(int index) const;
-  const char  propType(int index) const;
+  char  propType(int index) const;
   int         propIsNumber(int index) const;
   int         propIsString(int index) const;
 

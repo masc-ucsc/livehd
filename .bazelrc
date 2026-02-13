@@ -3,6 +3,7 @@ build --output_filter='^//(core|pass|inou)'
 build --repo_env=BAZEL_CONLYOPTS="-std=gnu17"
 build --cxxopt="-std=c++23" --cxxopt="-fexceptions" --force_pic --build_tag_filters="-fixme"
 build --action_env=BAZEL_CXXOPTS="-std=c++23"
+build --action_env=PATH
 
 # Set minimum macOS version to support C++23 features (requires 13.3+)
 # Only applies to macOS builds, ignored on other platforms

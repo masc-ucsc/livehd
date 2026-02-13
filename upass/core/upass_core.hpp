@@ -16,6 +16,7 @@ namespace upass {
 struct uPass {
 public:
   uPass(std::shared_ptr<Lnast_manager>& _lm) : lm(_lm) {}
+  virtual ~uPass() = default;
 
 #define PROCESS_NODE(NAME) \
   virtual void process_##NAME() {}

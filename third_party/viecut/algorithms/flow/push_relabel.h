@@ -384,8 +384,6 @@ class push_relabel {
         init(G, sources, curr_source);
         global_relabeling<true>(sources, curr_source);
 
-        double initialTime = t.elapsed();
-
         int work_todo = WORK_NODE_TO_EDGES * G->number_of_nodes()
                         + G->number_of_edges();
 
@@ -399,10 +397,6 @@ class push_relabel {
 
             if constexpr (limited) {
                 if (m_limitreached) {
-                    double timeAll = t.elapsed();
-                    size_t depthPR =
-                        configuration::getConfig()->depthOfPartialRelabeling;
-
                     return std::make_pair(limit, std::vector<NodeID> { });
                 }
             }
@@ -427,10 +421,6 @@ class push_relabel {
         if (compute_source_set) {
             source_set = computeSourceSet(sources, curr_source);
         }
-
-        double timeAll = t.elapsed();
-
-        size_t depthPR = configuration::getConfig()->depthOfPartialRelabeling;
 
         return std::make_pair(total_flow, source_set);
     }

@@ -19,6 +19,7 @@ public:
     nid_stack   = {};
     current_nid = Lnast_nid::root();
   }
+  virtual ~Lnast_manager() = default;
   Lnast_manager() = delete;
 
   auto get_top_module_name() { return lnast->get_top_module_name(); }

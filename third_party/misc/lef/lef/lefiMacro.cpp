@@ -1900,7 +1900,7 @@ double lefiPin::propNum(int index) const {
   return propNums_[index];
 }
 
-const char lefiPin::propType(int index) const {
+char lefiPin::propType(int index) const {
   char msg[160];
   if (index < 0 || index >= numProperties_) {
     sprintf(msg,
@@ -2477,7 +2477,7 @@ double lefiMacro::propNum(int index) const {
   return propNums_[index];
 }
 
-const char lefiMacro::propType(int index) const {
+char lefiMacro::propType(int index) const {
   char msg[160];
   if (index < 0 || index >= numProperties_) {
     sprintf(msg,

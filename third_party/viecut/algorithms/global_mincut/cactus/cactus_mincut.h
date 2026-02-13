@@ -104,9 +104,9 @@ class cactus_mincut : public minimum_cut {
                 if (current_graph->get_first_invalid_edge(n) - e == 1) {
                     if ((current_graph->getEdgeWeight(n, e) == mincut)
                         && uf.n() > 1) {
-                        NodeID t = current_graph->getEdgeTarget(n, e);
-                        uf.Union(n, t);
-                        guaranteed_edges.back().emplace_back(n, t);
+                        NodeID tgt = current_graph->getEdgeTarget(n, e);
+                        uf.Union(n, tgt);
+                        guaranteed_edges.back().emplace_back(n, tgt);
                     }
                 }
             }

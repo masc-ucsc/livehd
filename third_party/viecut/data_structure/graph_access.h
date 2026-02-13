@@ -73,12 +73,12 @@ class basicGraph {
             return 0;
     }
 
-    inline EdgeID get_first_edge(const NodeID& node) {
-        return m_nodes[node].firstEdge;
+    inline EdgeID get_first_edge(const NodeID& n) {
+        return m_nodes[n].firstEdge;
     }
 
-    inline EdgeID get_first_invalid_edge(const NodeID& node) {
-        return m_nodes[node + 1].firstEdge;
+    inline EdgeID get_first_invalid_edge(const NodeID& n) {
+        return m_nodes[n + 1].firstEdge;
     }
 
     // construction of the graph
