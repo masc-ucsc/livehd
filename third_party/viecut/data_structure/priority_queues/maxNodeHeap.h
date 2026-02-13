@@ -63,7 +63,7 @@ class maxNodeHeap : public priority_queue_interface {
  public:
     struct Data {
         NodeID node;
-        explicit Data(NodeID node) : node(node) { }
+        explicit Data(NodeID node_id) : node(node_id) { }
     };
 
     typedef QElement<Data> PQElement;

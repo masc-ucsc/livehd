@@ -27,13 +27,16 @@
 struct terminal {
     terminal() { }
 
-    terminal(NodeID position, NodeID original_id)
-        : position(position), original_id(original_id), invalid_flow(true) { }
+    terminal(NodeID position_id, NodeID original_id_value)
+        : position(position_id),
+          original_id(original_id_value),
+          invalid_flow(true) { }
 
-    terminal(NodeID position, NodeID original_id, bool invalid_flow)
-        : position(position),
-          original_id(original_id),
-          invalid_flow(invalid_flow) { }
+    terminal(NodeID position_id, NodeID original_id_value,
+             bool invalid_flow_value)
+        : position(position_id),
+          original_id(original_id_value),
+          invalid_flow(invalid_flow_value) { }
 
     NodeID position;
     NodeID original_id;
@@ -61,7 +64,7 @@ struct multicut_problem {
     multicut_problem(mutableGraphPtr G,
                      std::vector<terminal> term,
                      std::vector<std::shared_ptr<std::vector<NodeID> > >
-                     mappings,
+                     node_mappings,
                      FlowType lower,
                      FlowType upper,
                      EdgeWeight deleted,
@@ -69,7 +72,7 @@ struct multicut_problem {
                      std::unordered_set<NodeID> finished_bp)
         : graph(G),
           terminals(term),
-          mappings(mappings),
+          mappings(node_mappings),
           lower_bound(lower),
           upper_bound(upper),
           deleted_weight(deleted),

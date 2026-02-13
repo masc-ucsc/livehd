@@ -26,13 +26,13 @@ struct rEdge {
     FlowType flow;
     EdgeID   reverse_edge_index;
 
-    rEdge(NodeID source, NodeID target, FlowType capacity,
-          FlowType flow, EdgeID reverse_edge_index) {
-        this->source = source;
-        this->target = target;
-        this->capacity = capacity;
-        this->flow = flow;
-        this->reverse_edge_index = reverse_edge_index;
+    rEdge(NodeID source_id, NodeID target_id, FlowType capacity_value,
+          FlowType flow_value, EdgeID reverse_edge_idx) {
+        this->source = source_id;
+        this->target = target_id;
+        this->capacity = capacity_value;
+        this->flow = flow_value;
+        this->reverse_edge_index = reverse_edge_idx;
     }
 };
 

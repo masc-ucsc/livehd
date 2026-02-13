@@ -15,7 +15,7 @@ cc_library(
         ],
     ),
     hdrs = glob(["*.hpp"]),
-    copts = COPTS,
+    copts = COPTS + ["-Wno-shadow"],
     visibility = ["//visibility:public"],
     deps = [
         "//pass/common:pass",
@@ -50,7 +50,7 @@ cc_binary(
     srcs = [
         "yosys_driver.cpp",
     ],
-    copts = COPTS,
+    copts = COPTS + ["-Wno-shadow"],
     features = ["-use_header_modules"],
     visibility = ["//visibility:public"],
     linkopts = ["-lz", "-rdynamic"],

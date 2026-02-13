@@ -49,8 +49,8 @@ template <class GraphPtr>
 class recursive_cactus {
  public:
     recursive_cactus() { }
-    explicit recursive_cactus(EdgeWeight mincut)
-        : mincut(mincut), problem_id(random_functions::next()) { }
+    explicit recursive_cactus(EdgeWeight mincut_value)
+        : mincut(mincut_value), problem_id(random_functions::next()) { }
     ~recursive_cactus() { }
 
     static constexpr bool debug = false;

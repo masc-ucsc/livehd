@@ -165,6 +165,7 @@ YOSYS_COPTS = [
     "-DYOSYS_DATDIR='\"third_party/yosys\"'",
     "-fexceptions",
     "-w",
+    "-Wno-shadow",
     "-Wno-implicit-fallthrough",
     "-Wno-vla",
     "-std=c++20",

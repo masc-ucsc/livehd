@@ -24,7 +24,7 @@
 
 class heavy_edges {
  public:
-    explicit heavy_edges(EdgeWeight mincut) : mincut(mincut) { }
+    explicit heavy_edges(EdgeWeight mincut_value) : mincut(mincut_value) { }
 
     std::vector<std::tuple<NodeID, std::vector<NodeID> > > removeHeavyEdges(
         mutableGraphPtr G) {

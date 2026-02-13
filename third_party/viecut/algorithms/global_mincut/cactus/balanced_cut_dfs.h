@@ -27,15 +27,15 @@ class balanced_cut_dfs {
     static constexpr bool debug = false;
 
     balanced_cut_dfs() = delete;
-    balanced_cut_dfs(GraphPtr original_graph,
-                     mutableGraphPtr G, EdgeWeight mincut)
-        : original_graph(original_graph),
-          G(G),
-          mincut(mincut),
-          status(G->n(), UNDISCOVERED),
-          subtree_weight(G->n(), UNDEFINED_EDGE),
-          parent(G->n(), UNDEFINED_NODE),
-          outgoing_cycles(G->n()) { }
+    balanced_cut_dfs(GraphPtr original_graph_ptr,
+                     mutableGraphPtr graph_ptr, EdgeWeight mincut_value)
+        : original_graph(original_graph_ptr),
+          G(graph_ptr),
+          mincut(mincut_value),
+          status(graph_ptr->n(), UNDISCOVERED),
+          subtree_weight(graph_ptr->n(), UNDEFINED_EDGE),
+          parent(graph_ptr->n(), UNDEFINED_NODE),
+          outgoing_cycles(graph_ptr->n()) { }
 
     std::tuple<NodeID, EdgeID, NodeID, EdgeID, bool> runDFS() {
         start_vertex = random_functions::nextInt(0, G->n() - 1);
