@@ -10,6 +10,7 @@
 void Eprp_pipe::add_command(const Eprp_method &method, const Eprp_var &var) { steps.emplace_back(method, var); }
 
 void Pipe_step::run(Eprp_var &last_cmd_var) {
+  last_cmd_var.set_stage_labels(var_fields.dict);
   last_cmd_var.add(var_fields);
 
   for (const auto &label : m.labels) {

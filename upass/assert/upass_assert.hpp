@@ -31,4 +31,4 @@ protected:
   }
 };
 
-static upass::uPass_plugin plugin_assert("assert", upass::uPass_wrapper<uPass_assert>::get_upass);
+static upass::uPass_plugin plugin_assert("assert", upass::uPass_wrapper<uPass_assert>::get_upass, {"constprop"});
