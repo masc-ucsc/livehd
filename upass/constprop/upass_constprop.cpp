@@ -20,10 +20,22 @@ void uPass_constprop::process_assign() {
 
   if (is_type(Lnast_ntype::Lnast_ntype_ref)) {
     auto rhs_bundle = current_bundle();
-    st.set(lhs_text, rhs_bundle);
+    bool changed = true;
+    if (st.has_bundle(lhs_text)) {
+      changed = st.get_bundle(lhs_text) != rhs_bundle;
+    }
+    if (changed && st.set(lhs_text, rhs_bundle)) {
+      mark_changed();
+    }
   } else {
     auto rhs_value = current_pyrope_value();
-    st.set(lhs_text, rhs_value);
+    bool changed = true;
+    if (st.has_trivial(lhs_text)) {
+      changed = st.get_trivial(lhs_text) != rhs_value;
+    }
+    if (changed && st.set(lhs_text, rhs_value)) {
+      mark_changed();
+    }
   }
 
   move_to_parent();
@@ -39,7 +51,13 @@ void uPass_constprop::process_nary(F op) {
   while (move_to_sibling()) {
     op(r, current_prim_value());
   }
-  st.set(var, r);
+  bool changed = true;
+  if (st.has_trivial(var)) {
+    changed = st.get_trivial(var) != r;
+  }
+  if (changed && st.set(var, r)) {
+    mark_changed();
+  }
 
   move_to_parent();
 }
@@ -54,7 +72,13 @@ void uPass_constprop::process_binary(F op) {
   move_to_sibling();
   Lconst n2 = current_prim_value();
   Lconst r  = op(n1, n2);
-  st.set(var, r);
+  bool changed = true;
+  if (st.has_trivial(var)) {
+    changed = st.get_trivial(var) != r;
+  }
+  if (changed && st.set(var, r)) {
+    mark_changed();
+  }
 
   move_to_parent();
 }
@@ -67,7 +91,13 @@ void uPass_constprop::process_unary(F op) {
   move_to_sibling();
   Lconst r = current_prim_value();
   op(r);
-  st.set(var, r);
+  bool changed = true;
+  if (st.has_trivial(var)) {
+    changed = st.get_trivial(var) != r;
+  }
+  if (changed && st.set(var, r)) {
+    mark_changed();
+  }
 
   move_to_parent();
 }

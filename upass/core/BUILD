@@ -18,3 +18,16 @@ cc_library(
     ],
     alwayslink = True,
 )
+
+cc_test(
+    name = "upass_shared_fold_parity_test",
+    srcs = ["upass_shared_fold_parity_test.cpp"],
+    copts = COPTS,
+    deps = [
+        "//core",
+        ":upass",
+        "//lgraph",
+        "//lnast",
+        "@googletest//:gtest_main",
+    ],
+)
