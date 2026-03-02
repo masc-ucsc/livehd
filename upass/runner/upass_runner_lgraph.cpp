@@ -381,8 +381,9 @@ std::vector<std::string> uPass_runner_lgraph::changed_passes() const {
 }
 
 void uPass_runner_lgraph::execute_passes() {
-  auto is_guarded_fold = [](const std::string &name) {
-    return name == "fold_tag" || name == "fold_sum_const" || name == "fold_sub_const";
+  // fold_tag and fold_sum_const are gated by the general "all-inputs-const" scan.
+  auto is_general_guarded_fold = [](const std::string &name) {
+    return name == "fold_tag" || name == "fold_sum_const";
   };
 
   std::optional<upass::Shared_decision_report> decide_cache;
@@ -404,13 +405,23 @@ void uPass_runner_lgraph::execute_passes() {
       continue;
     }
 
-    if (is_guarded_fold(entry.name)) {
+    if (is_general_guarded_fold(entry.name)) {
       const auto rep = get_decision();
       if (!rep.has_fold_candidates) {
         std::print("uPass(lgraph) - skip {} (no fold candidates)\n", entry.name);
         continue;
       }
     }
+
+    // fold_sub_const uses its own sub-pattern guard: it can fold a-0 and a-a
+    // which have non-const inputs and would be missed by the general candidate count.
+    if (entry.name == "fold_sub_const") {
+      if (!gm || gm->count_sub_candidates() == 0) {
+        std::print("uPass(lgraph) - skip fold_sub_const (no fold candidates)\n");
+        continue;
+      }
+    }
+
     entry.pass->run_once();
   }
 }
