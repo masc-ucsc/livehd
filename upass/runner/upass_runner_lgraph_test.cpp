@@ -780,9 +780,10 @@ TEST(UpassRunnerLgraph, FoldSubConstSubZero) {
   auto gm = std::make_shared<upass::Lgraph_manager>(lg);
 
   // Dry-run: Sum node must survive untouched.
+  // deleted_nodes counts would-be deletions (consistent with other fold passes).
   const auto dry = gm->fold_sub_const(false, true);
   EXPECT_EQ(dry.sub_zero_simplified, 1U);
-  EXPECT_EQ(dry.deleted_nodes, 0U);
+  EXPECT_EQ(dry.deleted_nodes, 1U);
   std::size_t sum_count = 0;
   for (const auto &n : lg->fast()) {
     if (n.get_type_op() == Ntype_op::Sum) ++sum_count;
@@ -820,9 +821,10 @@ TEST(UpassRunnerLgraph, FoldSubConstSubSelf) {
   auto gm = std::make_shared<upass::Lgraph_manager>(lg);
 
   // Dry-run: Sum node must survive; one self-cancellation reported.
+  // deleted_nodes counts would-be deletions (consistent with other fold passes).
   const auto dry = gm->fold_sub_const(false, true);
   EXPECT_EQ(dry.sub_self_simplified, 1U);
-  EXPECT_EQ(dry.deleted_nodes, 0U);
+  EXPECT_EQ(dry.deleted_nodes, 1U);
   std::size_t sum_count = 0;
   for (const auto &n : lg->fast()) {
     if (n.get_type_op() == Ntype_op::Sum) ++sum_count;
@@ -868,9 +870,10 @@ TEST(UpassRunnerLgraph, FoldSubConstConstSub) {
   auto gm = std::make_shared<upass::Lgraph_manager>(lg);
 
   // Dry-run: Sum survives; one const-sub reported.
+  // deleted_nodes counts would-be deletions (consistent with other fold passes).
   const auto dry = gm->fold_sub_const(false, true);
   EXPECT_EQ(dry.const_sub_folded, 1U);
-  EXPECT_EQ(dry.deleted_nodes, 0U);
+  EXPECT_EQ(dry.deleted_nodes, 1U);
   std::size_t sum_count = 0;
   for (const auto &n : lg->fast()) {
     if (n.get_type_op() == Ntype_op::Sum) ++sum_count;

@@ -254,6 +254,59 @@ public:
     return summary;
   }
 
+  // Counts Sum nodes that have a foldable subtraction pattern:
+  //   • B-port input is const(0)      → a - 0  (neutral element)
+  //   • A and B share the same driver → a - a  (self-cancellation)
+  //   • Both A and B are constants    → c1 - c2 (constant fold)
+  // Used as the guard predicate for fold_sub_const.
+  std::size_t count_sub_candidates() const {
+    if (lg == nullptr) {
+      return 0;
+    }
+
+    static constexpr Port_ID k_port_b = 1;
+    std::size_t              count    = 0;
+
+    for (const auto &node : lg->fast()) {
+      if (node.get_type_op() != Ntype_op::Sum) {
+        continue;
+      }
+
+      std::vector<XEdge> a_ins, b_ins;
+      for (const auto &inp : node.inp_edges()) {
+        if (inp.sink.get_pid() == k_port_b) {
+          b_ins.emplace_back(inp);
+        } else {
+          a_ins.emplace_back(inp);
+        }
+      }
+
+      if (a_ins.size() != 1 || b_ins.size() != 1) {
+        continue;
+      }
+
+      const auto &a_drv = a_ins[0].driver;
+      const auto &b_drv = b_ins[0].driver;
+
+      // a - 0
+      if (b_drv.is_type(Ntype_op::Const) && b_drv.get_type_const() == 0) {
+        ++count;
+        continue;
+      }
+      // a - a
+      if (a_drv.get_compact_class_driver() == b_drv.get_compact_class_driver()) {
+        ++count;
+        continue;
+      }
+      // c1 - c2
+      if (a_drv.is_type(Ntype_op::Const) && b_drv.is_type(Ntype_op::Const)) {
+        ++count;
+      }
+    }
+
+    return count;
+  }
+
   Fold_tag_summary tag_fold_candidates(int color = 7, bool visit_sub = false) const {
     Fold_tag_summary summary;
     if (lg == nullptr) {
