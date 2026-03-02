@@ -109,3 +109,11 @@ std::string_view Eprp_var::get(std::string_view name, std::string_view default_v
   }
   return elem->second;
 }
+
+std::string_view Eprp_var::get_stage(std::string_view name, std::string_view default_value) const {
+  const auto &elem = stage_dict.find(name);
+  if (elem == stage_dict.end()) {
+    return default_value;
+  }
+  return elem->second;
+}

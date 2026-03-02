@@ -1,8 +1,11 @@
 //  This file is distributed under the BSD 3-Clause License. See LICENSE for details.
 #pragma once
 
+#include <functional>
+#include <map>
 #include <memory>
 #include <stack>
+#include <string>
 #include <vector>
 
 #include "lnast.hpp"
@@ -17,6 +20,9 @@ struct uPass {
 public:
   uPass(std::shared_ptr<Lnast_manager>& _lm) : lm(_lm) {}
   virtual ~uPass() = default;
+
+  void begin_iteration() { changed = false; }
+  bool has_changed() const { return changed; }
 
 #define PROCESS_NODE(NAME) \
   virtual void process_##NAME() {}
@@ -78,6 +84,7 @@ public:
 
 protected:
   std::shared_ptr<Lnast_manager>& lm;
+  bool                            changed{false};
 
   void move_to_nid(const Lnast_nid& nid) { lm->move_to_nid(nid); }
   auto current_text() const { return lm->current_text(); }
@@ -89,6 +96,7 @@ protected:
   bool is_invalid() const { return lm->is_invalid(); }
   bool is_last_child() const { return lm->is_last_child(); }
   void write_node() { lm->write_node(); }
+  void mark_changed() { changed = true; }
 
   template <class... Lnast_ntype_int>
   bool is_type(Lnast_ntype_int... ty) const {
@@ -116,18 +124,22 @@ public:
 class uPass_plugin {
 public:
   using Setup_fn  = std::function<std::shared_ptr<uPass>(std::shared_ptr<Lnast_manager>&)>;
-  using Map_setup = std::map<std::string, Setup_fn>;
+  struct Setup_entry {
+    Setup_fn                  setup_fn;
+    std::vector<std::string>  depends_on;
+  };
+  using Map_setup = std::map<std::string, Setup_entry>;
 
 protected:
   static inline Map_setup registry;
 
 public:
-  uPass_plugin(const std::string& name, Setup_fn setup_fn) {
+  uPass_plugin(const std::string& name, Setup_fn setup_fn, std::vector<std::string> depends_on = {}) {
     if (registry.find(name) != registry.end()) {
       upass::error("uPass_plugin: {} is already registered\n", name);
       return;
     }
-    registry[name] = setup_fn;
+    registry[name] = Setup_entry{.setup_fn = std::move(setup_fn), .depends_on = std::move(depends_on)};
   }
 
   static const Map_setup& get_registry() { return registry; }
