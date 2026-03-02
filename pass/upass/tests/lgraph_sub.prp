@@ -1,0 +1,10 @@
+// Test fixture for fold_sub_const patterns.
+// Each expression should be folded by the LGraph subtraction fold pass.
+//
+//   a = 5 - 0   → neutral-element fold  → 5
+//   b = 3 - 3   → self-cancellation fold → 0
+//   c = 7 - 2   → constant-sub fold     → 5
+
+a = 5 - 0
+b = 3 - 3
+c = 7 - 2

@@ -253,6 +253,15 @@ sh_test(
     ],
 )
 
+sh_test(
+    name = "upass_lgraph_sub_fold_test.sh",
+    srcs = ["tests/upass_lgraph_sub_fold_test.sh"],
+    data = [
+        ":tests/lgraph_sub.prp",
+        "//main:lgshell",
+    ],
+)
+
 test_suite(
     name = "upass_smoke_suite",
     tests = [
@@ -281,6 +290,7 @@ test_suite(
         ":upass_cross_ir_pipeline_test.sh",
         ":upass_cross_ir_inherit_false_test.sh",
         ":upass_lgraph_shift_div_fold_test.sh",
+        ":upass_lgraph_sub_fold_test.sh",
         ":upass_unknown_and_maxiters_test.sh",
     ],
 )

@@ -157,6 +157,37 @@ private:
   bool dry_run;
 };
 
+struct Lgraph_pass_fold_sub_const final : public upass::uPass_lgraph {
+  using upass::uPass_lgraph::uPass_lgraph;
+  explicit Lgraph_pass_fold_sub_const(std::shared_ptr<upass::Lgraph_manager> &gm, bool _dry_run = false)
+      : upass::uPass_lgraph(gm), dry_run(_dry_run) {}
+
+  void run_once() override {
+    if (!gm || !gm->ref_lgraph()) {
+      std::print("uPass(lgraph) - no graph available\n");
+      return;
+    }
+    const auto s     = gm->fold_sub_const(false, dry_run);
+    const auto total = s.sub_zero_simplified + s.sub_self_simplified + s.const_sub_folded;
+    std::print(
+        "uPass(lgraph) - sub_folded:{} sub_zero:{} sub_self:{} const_sub:{} rewired:{} new_consts:{} deleted:{} dry_run:{}\n",
+        total,
+        s.sub_zero_simplified,
+        s.sub_self_simplified,
+        s.const_sub_folded,
+        s.rewired_edges,
+        s.new_const_nodes,
+        s.deleted_nodes,
+        dry_run ? "true" : "false");
+    if (!dry_run && total > 0) {
+      mark_changed();
+    }
+  }
+
+private:
+  bool dry_run;
+};
+
 struct Lgraph_pass_noop_shared final : public upass::uPass_lgraph {
   using upass::uPass_lgraph::uPass_lgraph;
 
@@ -221,6 +252,10 @@ static upass::uPass_lgraph_plugin plugin_lgraph_fold_shift_div(
     "fold_shift_div",
     upass::uPass_lgraph_wrapper<Lgraph_pass_fold_shift_div>::get_upass,
     {"fold_scan"});
+static upass::uPass_lgraph_plugin plugin_lgraph_fold_sub_const(
+    "fold_sub_const",
+    upass::uPass_lgraph_wrapper<Lgraph_pass_fold_sub_const>::get_upass,
+    {"fold_scan"});
 static upass::uPass_lgraph_plugin plugin_lgraph_noop_shared(
     "noop_shared",
     upass::uPass_lgraph_wrapper<Lgraph_pass_noop_shared>::get_upass);
@@ -273,6 +308,10 @@ uPass_runner_lgraph::uPass_runner_lgraph(
     }
     if (name == "fold_shift_div") {
       upasses.emplace_back(Pass_entry{.name = name, .pass = std::make_unique<Lgraph_pass_fold_shift_div>(gm, dry_run)});
+      continue;
+    }
+    if (name == "fold_sub_const") {
+      upasses.emplace_back(Pass_entry{.name = name, .pass = std::make_unique<Lgraph_pass_fold_sub_const>(gm, dry_run)});
       continue;
     }
     upasses.emplace_back(Pass_entry{.name = name, .pass = it->second.setup_fn(gm)});
@@ -343,7 +382,7 @@ std::vector<std::string> uPass_runner_lgraph::changed_passes() const {
 
 void uPass_runner_lgraph::execute_passes() {
   auto is_guarded_fold = [](const std::string &name) {
-    return name == "fold_tag" || name == "fold_sum_const";
+    return name == "fold_tag" || name == "fold_sum_const" || name == "fold_sub_const";
   };
 
   std::optional<upass::Shared_decision_report> decide_cache;

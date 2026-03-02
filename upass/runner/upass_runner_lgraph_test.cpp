@@ -752,4 +752,177 @@ TEST(UpassRunnerLgraph, GuardSkipsFoldSumConstWhenNoCandidates) {
   EXPECT_EQ(sum_count, 1U);
 }
 
+// ─────────────────────────────────────────────────────────────────────────────
+// fold_sub_const tests
+// Pattern legend (LGraph Sum port semantics):
+//   setup_sink_pin_raw(0) → port A  (positive / addend)
+//   setup_sink_pin_raw(1) → port B  (negative / subtrahend)
+// ─────────────────────────────────────────────────────────────────────────────
+
+// a - 0 → a   (neutral element: subtracting zero leaves the addend unchanged)
+TEST(UpassRunnerLgraph, FoldSubConstSubZero) {
+  constexpr std::string_view kDbPath = "lgdb_upass_lgraph_fold_sub_zero";
+  file_utils::clean_dir(kDbPath);
+  auto *lib = Graph_library::instance(kDbPath);
+  ASSERT_NE(lib, nullptr);
+  auto *lg = lib->create_lgraph("top", "upass_lgraph_fold_sub_zero");
+  ASSERT_NE(lg, nullptr);
+
+  auto in_a = lg->add_graph_input("a", 1, 8);
+  auto out0  = lg->add_graph_output("o_sub_zero", 2, 8);
+  auto c0    = lg->create_node_const(0);
+  auto s0    = lg->create_node(Ntype_op::Sum);
+  // a - 0:  A=in_a, B=const(0)
+  lg->add_edge(in_a, s0.setup_sink_pin_raw(0));
+  lg->add_edge(c0.get_driver_pin(), s0.setup_sink_pin_raw(1));
+  lg->add_edge(s0.setup_driver_pin(), out0);
+
+  auto gm = std::make_shared<upass::Lgraph_manager>(lg);
+
+  // Dry-run: Sum node must survive untouched.
+  const auto dry = gm->fold_sub_const(false, true);
+  EXPECT_EQ(dry.sub_zero_simplified, 1U);
+  EXPECT_EQ(dry.deleted_nodes, 0U);
+  std::size_t sum_count = 0;
+  for (const auto &n : lg->fast()) {
+    if (n.get_type_op() == Ntype_op::Sum) ++sum_count;
+  }
+  EXPECT_EQ(sum_count, 1U);
+
+  // Live run: Sum node must be eliminated; output must be wired directly to in_a.
+  uPass_runner_lgraph runner(gm, {"fold_sub_const"});
+  runner.run(2);
+
+  sum_count = 0;
+  for (const auto &n : lg->fast()) {
+    if (n.get_type_op() == Ntype_op::Sum) ++sum_count;
+  }
+  EXPECT_EQ(sum_count, 0U);
+}
+
+// a - a → 0   (self-cancellation)
+TEST(UpassRunnerLgraph, FoldSubConstSubSelf) {
+  constexpr std::string_view kDbPath = "lgdb_upass_lgraph_fold_sub_self";
+  file_utils::clean_dir(kDbPath);
+  auto *lib = Graph_library::instance(kDbPath);
+  ASSERT_NE(lib, nullptr);
+  auto *lg = lib->create_lgraph("top", "upass_lgraph_fold_sub_self");
+  ASSERT_NE(lg, nullptr);
+
+  auto in_a = lg->add_graph_input("a", 1, 8);
+  auto out0  = lg->add_graph_output("o_sub_self", 2, 8);
+  auto s0    = lg->create_node(Ntype_op::Sum);
+  // a - a:  A=in_a, B=in_a  (same driver on both ports)
+  lg->add_edge(in_a, s0.setup_sink_pin_raw(0));
+  lg->add_edge(in_a, s0.setup_sink_pin_raw(1));
+  lg->add_edge(s0.setup_driver_pin(), out0);
+
+  auto gm = std::make_shared<upass::Lgraph_manager>(lg);
+
+  // Dry-run: Sum node must survive; one self-cancellation reported.
+  const auto dry = gm->fold_sub_const(false, true);
+  EXPECT_EQ(dry.sub_self_simplified, 1U);
+  EXPECT_EQ(dry.deleted_nodes, 0U);
+  std::size_t sum_count = 0;
+  for (const auto &n : lg->fast()) {
+    if (n.get_type_op() == Ntype_op::Sum) ++sum_count;
+  }
+  EXPECT_EQ(sum_count, 1U);
+
+  // Live run: Sum is replaced by const(0).
+  uPass_runner_lgraph runner(gm, {"fold_sub_const"});
+  runner.run(2);
+
+  sum_count = 0;
+  for (const auto &n : lg->fast()) {
+    if (n.get_type_op() == Ntype_op::Sum) ++sum_count;
+  }
+  EXPECT_EQ(sum_count, 0U);
+
+  // Output driver must now be a Const node with value 0.
+  auto out_dpin = lg->get_graph_output("o_sub_self").get_driver_pin();
+  EXPECT_EQ(out_dpin.get_type_op(), Ntype_op::Const);
+  EXPECT_EQ(out_dpin.get_type_const().to_i(), 0);
+}
+
+// c1 - c2 → (c1 - c2)   (fully-constant subtraction)
+TEST(UpassRunnerLgraph, FoldSubConstConstSub) {
+  constexpr std::string_view kDbPath = "lgdb_upass_lgraph_fold_const_sub";
+  file_utils::clean_dir(kDbPath);
+  auto *lib = Graph_library::instance(kDbPath);
+  ASSERT_NE(lib, nullptr);
+  auto *lg = lib->create_lgraph("top", "upass_lgraph_fold_const_sub");
+  ASSERT_NE(lg, nullptr);
+
+  auto out0 = lg->add_graph_output("o_const_sub", 2, 8);
+  auto c7   = lg->create_node_const(7);
+  auto c2   = lg->create_node_const(2);
+  auto s0   = lg->create_node(Ntype_op::Sum);
+  // 7 - 2:  A=const(7), B=const(2)  → expected result = 5
+  lg->add_edge(c7.get_driver_pin(), s0.setup_sink_pin_raw(0));
+  lg->add_edge(c2.get_driver_pin(), s0.setup_sink_pin_raw(1));
+  auto s0_out = s0.setup_driver_pin();
+  s0_out.set_bits(8);
+  lg->add_edge(s0_out, out0);
+
+  auto gm = std::make_shared<upass::Lgraph_manager>(lg);
+
+  // Dry-run: Sum survives; one const-sub reported.
+  const auto dry = gm->fold_sub_const(false, true);
+  EXPECT_EQ(dry.const_sub_folded, 1U);
+  EXPECT_EQ(dry.deleted_nodes, 0U);
+  std::size_t sum_count = 0;
+  for (const auto &n : lg->fast()) {
+    if (n.get_type_op() == Ntype_op::Sum) ++sum_count;
+  }
+  EXPECT_EQ(sum_count, 1U);
+
+  // Live run: Sum replaced by const(5).
+  uPass_runner_lgraph runner(gm, {"fold_sub_const"});
+  runner.run(3);
+
+  sum_count = 0;
+  for (const auto &n : lg->fast()) {
+    if (n.get_type_op() == Ntype_op::Sum) ++sum_count;
+  }
+  EXPECT_EQ(sum_count, 0U);
+
+  auto out_dpin = lg->get_graph_output("o_const_sub").get_driver_pin();
+  EXPECT_EQ(out_dpin.get_type_op(), Ntype_op::Const);
+  EXPECT_EQ(out_dpin.get_type_const().to_i(), 5);
+}
+
+// Guard: fold_sub_const is skipped when there are no fold candidates (non-const inputs)
+TEST(UpassRunnerLgraph, FoldSubConstGuardSkipsWhenNoCandidates) {
+  constexpr std::string_view kDbPath = "lgdb_upass_lgraph_fold_sub_guard";
+  file_utils::clean_dir(kDbPath);
+  auto *lib = Graph_library::instance(kDbPath);
+  ASSERT_NE(lib, nullptr);
+  auto *lg = lib->create_lgraph("top", "upass_lgraph_fold_sub_guard");
+  ASSERT_NE(lg, nullptr);
+
+  // Two signal inputs — no constants, so nothing is foldable.
+  auto in_a = lg->add_graph_input("a", 1, 8);
+  auto in_b = lg->add_graph_input("b", 2, 8);
+  auto out0  = lg->add_graph_output("o", 3, 8);
+  auto s0    = lg->create_node(Ntype_op::Sum);
+  lg->add_edge(in_a, s0.setup_sink_pin_raw(0));
+  lg->add_edge(in_b, s0.setup_sink_pin_raw(1));
+  lg->add_edge(s0.setup_driver_pin(), out0);
+
+  auto gm = std::make_shared<upass::Lgraph_manager>(lg);
+  uPass_runner_lgraph runner(gm, {"fold_sub_const"});
+
+  testing::internal::CaptureStdout();
+  runner.run(1);
+  auto out_str = testing::internal::GetCapturedStdout();
+  EXPECT_NE(out_str.find("uPass(lgraph) - skip fold_sub_const (no fold candidates)"), std::string::npos);
+
+  std::size_t sum_count = 0;
+  for (const auto &n : lg->fast()) {
+    if (n.get_type_op() == Ntype_op::Sum) ++sum_count;
+  }
+  EXPECT_EQ(sum_count, 1U);  // Sum survives — nothing folded.
+}
+
 }  // namespace
