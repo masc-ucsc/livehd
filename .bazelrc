@@ -10,6 +10,9 @@ build --action_env=PATH
 build:macos --linkopt="-mmacosx-version-min=13.3"
 build:macos --copt="-mmacosx-version-min=13.3"
 build:macos --cxxopt="-mmacosx-version-min=13.3"
+# Homebrew installs bison as keg-only (not on default PATH); Yosys needs bison 3.6+.
+# Prepend the Homebrew bison path so genrules find the correct version.
+build:macos --action_env=PATH=/opt/homebrew/opt/bison/bin:/opt/homebrew/bin:/usr/local/bin:/usr/bin:/bin:/usr/sbin:/sbin
 
 # Auto-detect and apply macOS config when building on Darwin
 build --enable_platform_specific_config
@@ -103,3 +106,6 @@ build:ubsan --copt -fno-omit-frame-pointer
 build:ubsan --linkopt -fsanitize=undefined
 build:ubsan --linkopt -lubsan
 build:ubsan --action_env=UBSAN_OPTIONS=halt_on_error=1:print_stacktrace=1
+
+# Machine-local overrides (not committed)
+try-import %workspace%/.bazelrc.local
