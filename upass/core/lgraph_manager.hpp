@@ -52,6 +52,14 @@ public:
     std::size_t deleted_nodes{0};
   };
 
+  // Summary for constant-multiplication folding on Mult nodes.
+  struct Fold_mult_const_summary {
+    std::size_t const_mult_folded{0};  // c1 * c2 → (c1*c2)
+    std::size_t rewired_edges{0};
+    std::size_t new_const_nodes{0};
+    std::size_t deleted_nodes{0};
+  };
+
   // Summary for subtraction-specific folds on Sum nodes that have both A (addend)
   // and B (subtrahend) inputs.
   struct Fold_sub_summary {
@@ -397,6 +405,70 @@ public:
       }
       ++summary.folded_nodes;
       ++summary.deleted_nodes;
+    }
+
+    return summary;
+  }
+
+  // Folds Mult nodes where both inputs are compile-time constants: c1 * c2 → (c1*c2).
+  // The neutral-element cases (n*0→0, n*1→n) are already handled by fold_neutral_const;
+  // this pass handles the remaining fully-constant multiplications.
+  Fold_mult_const_summary fold_mult_const(bool visit_sub = false, bool dry_run = false) const {
+    Fold_mult_const_summary summary;
+    if (lg == nullptr) {
+      return summary;
+    }
+
+    std::vector<Node> candidates;
+    for (const auto &node : lg->fast(visit_sub)) {
+      if (node.get_type_op() == Ntype_op::Mult) {
+        candidates.emplace_back(node);
+      }
+    }
+
+    for (auto &node : candidates) {
+      auto node_out = node.setup_driver_pin();
+      std::vector<XEdge> inputs;
+      for (const auto &inp : node.inp_edges()) {
+        inputs.emplace_back(inp);
+      }
+      if (inputs.size() != 2) {
+        continue;
+      }
+      if (!inputs[0].driver.is_type(Ntype_op::Const) || !inputs[1].driver.is_type(Ntype_op::Const)) {
+        continue;
+      }
+
+      const auto c0 = inputs[0].driver.get_type_const();
+      const auto c1 = inputs[1].driver.get_type_const();
+      if (!c0.is_i() || !c1.is_i()) {
+        continue;
+      }
+
+      const auto result = Lconst(c0.to_i() * c1.to_i());
+
+      std::vector<Node_pin> sinks;
+      for (const auto &out : node.out_edges()) {
+        sinks.emplace_back(out.sink);
+      }
+
+      ++summary.new_const_nodes;
+      if (!dry_run) {
+        auto new_c = lg->create_node_const(result);
+        auto dpin  = new_c.setup_driver_pin();
+        dpin.set_size(node_out);
+        for (const auto &sink : sinks) {
+          dpin.connect_sink(sink);
+          ++summary.rewired_edges;
+        }
+      } else {
+        summary.rewired_edges += sinks.size();
+      }
+      ++summary.const_mult_folded;
+      ++summary.deleted_nodes;
+      if (!dry_run) {
+        node.del_node();
+      }
     }
 
     return summary;

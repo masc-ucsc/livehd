@@ -928,4 +928,138 @@ TEST(UpassRunnerLgraph, FoldSubConstGuardSkipsWhenNoCandidates) {
   EXPECT_EQ(sum_count, 1U);  // Sum survives — nothing folded.
 }
 
+// ─────────────────────────────────────────────────────────────────────────────
+// fold_mult_const tests
+// ─────────────────────────────────────────────────────────────────────────────
+
+// c1 * c2 → (c1 * c2)   (fully-constant multiplication)
+TEST(UpassRunnerLgraph, FoldMultConstConstMult) {
+  constexpr std::string_view kDbPath = "lgdb_upass_lgraph_fold_const_mult";
+  file_utils::clean_dir(kDbPath);
+  auto *lib = Graph_library::instance(kDbPath);
+  ASSERT_NE(lib, nullptr);
+  auto *lg = lib->create_lgraph("top", "upass_lgraph_fold_const_mult");
+  ASSERT_NE(lg, nullptr);
+
+  auto out0 = lg->add_graph_output("o_const_mult", 2, 8);
+  auto c3   = lg->create_node_const(3);
+  auto c4   = lg->create_node_const(4);
+  auto m0   = lg->create_node(Ntype_op::Mult);
+  // 3 * 4 = 12  (Mult: both operands connect to pin 0 — it is a multi-input node)
+  lg->add_edge(c3.get_driver_pin(), m0.setup_sink_pin_raw(0));
+  lg->add_edge(c4.get_driver_pin(), m0.setup_sink_pin_raw(0));
+  auto m0_out = m0.setup_driver_pin();
+  m0_out.set_bits(8);
+  lg->add_edge(m0_out, out0);
+
+  auto gm = std::make_shared<upass::Lgraph_manager>(lg);
+
+  // Dry-run: Mult survives; one const-mult reported, deleted_nodes counts would-be deletion.
+  const auto dry = gm->fold_mult_const(false, true);
+  EXPECT_EQ(dry.const_mult_folded, 1U);
+  EXPECT_EQ(dry.deleted_nodes, 1U);
+  std::size_t mult_count = 0;
+  for (const auto &n : lg->fast()) {
+    if (n.get_type_op() == Ntype_op::Mult) ++mult_count;
+  }
+  EXPECT_EQ(mult_count, 1U);
+
+  // Live run: Mult replaced by const(12).
+  uPass_runner_lgraph runner(gm, {"fold_mult_const"});
+  runner.run(3);
+
+  mult_count = 0;
+  for (const auto &n : lg->fast()) {
+    if (n.get_type_op() == Ntype_op::Mult) ++mult_count;
+  }
+  EXPECT_EQ(mult_count, 0U);
+
+  auto out_dpin = lg->get_graph_output("o_const_mult").get_driver_pin();
+  EXPECT_EQ(out_dpin.get_type_op(), Ntype_op::Const);
+  EXPECT_EQ(out_dpin.get_type_const().to_i(), 12);
+}
+
+// Guard: fold_mult_const is skipped when there are no all-const Mult candidates.
+TEST(UpassRunnerLgraph, FoldMultConstGuardSkipsWhenNoCandidates) {
+  constexpr std::string_view kDbPath = "lgdb_upass_lgraph_fold_mult_guard";
+  file_utils::clean_dir(kDbPath);
+  auto *lib = Graph_library::instance(kDbPath);
+  ASSERT_NE(lib, nullptr);
+  auto *lg = lib->create_lgraph("top", "upass_lgraph_fold_mult_guard");
+  ASSERT_NE(lg, nullptr);
+
+  // One signal input, one const — not all-const, so guard should skip.
+  auto in_a = lg->add_graph_input("a", 1, 8);
+  auto out0  = lg->add_graph_output("o", 2, 8);
+  auto c3    = lg->create_node_const(3);
+  auto m0    = lg->create_node(Ntype_op::Mult);
+  lg->add_edge(in_a, m0.setup_sink_pin_raw(0));
+  lg->add_edge(c3.get_driver_pin(), m0.setup_sink_pin_raw(0));  // Mult: all inputs on pin 0
+  lg->add_edge(m0.setup_driver_pin(), out0);
+
+  auto gm = std::make_shared<upass::Lgraph_manager>(lg);
+  uPass_runner_lgraph runner(gm, {"fold_mult_const"});
+
+  testing::internal::CaptureStdout();
+  runner.run(1);
+  auto out_str = testing::internal::GetCapturedStdout();
+  EXPECT_NE(out_str.find("uPass(lgraph) - skip fold_mult_const (no fold candidates)"), std::string::npos);
+
+  std::size_t mult_count = 0;
+  for (const auto &n : lg->fast()) {
+    if (n.get_type_op() == Ntype_op::Mult) ++mult_count;
+  }
+  EXPECT_EQ(mult_count, 1U);  // Mult survives — nothing folded.
+}
+
+// Two const-mult nodes in one graph — both should be folded in one iteration.
+TEST(UpassRunnerLgraph, FoldMultConstMultipleNodes) {
+  constexpr std::string_view kDbPath = "lgdb_upass_lgraph_fold_mult_multi";
+  file_utils::clean_dir(kDbPath);
+  auto *lib = Graph_library::instance(kDbPath);
+  ASSERT_NE(lib, nullptr);
+  auto *lg = lib->create_lgraph("top", "upass_lgraph_fold_mult_multi");
+  ASSERT_NE(lg, nullptr);
+
+  // 2 * 5 = 10
+  auto out1 = lg->add_graph_output("o1", 1, 8);
+  auto c2   = lg->create_node_const(2);
+  auto c5   = lg->create_node_const(5);
+  auto m1   = lg->create_node(Ntype_op::Mult);
+  lg->add_edge(c2.get_driver_pin(), m1.setup_sink_pin_raw(0));
+  lg->add_edge(c5.get_driver_pin(), m1.setup_sink_pin_raw(0));  // Mult: all inputs on pin 0
+  auto m1_out = m1.setup_driver_pin();
+  m1_out.set_bits(8);
+  lg->add_edge(m1_out, out1);
+
+  // 6 * 7 = 42
+  auto out2 = lg->add_graph_output("o2", 2, 8);
+  auto c6   = lg->create_node_const(6);
+  auto c7   = lg->create_node_const(7);
+  auto m2   = lg->create_node(Ntype_op::Mult);
+  lg->add_edge(c6.get_driver_pin(), m2.setup_sink_pin_raw(0));
+  lg->add_edge(c7.get_driver_pin(), m2.setup_sink_pin_raw(0));  // Mult: all inputs on pin 0
+  auto m2_out = m2.setup_driver_pin();
+  m2_out.set_bits(8);
+  lg->add_edge(m2_out, out2);
+
+  auto gm = std::make_shared<upass::Lgraph_manager>(lg);
+  uPass_runner_lgraph runner(gm, {"fold_mult_const"});
+  runner.run(3);
+
+  std::size_t mult_count = 0;
+  for (const auto &n : lg->fast()) {
+    if (n.get_type_op() == Ntype_op::Mult) ++mult_count;
+  }
+  EXPECT_EQ(mult_count, 0U);
+
+  auto d1 = lg->get_graph_output("o1").get_driver_pin();
+  EXPECT_EQ(d1.get_type_op(), Ntype_op::Const);
+  EXPECT_EQ(d1.get_type_const().to_i(), 10);
+
+  auto d2 = lg->get_graph_output("o2").get_driver_pin();
+  EXPECT_EQ(d2.get_type_op(), Ntype_op::Const);
+  EXPECT_EQ(d2.get_type_const().to_i(), 42);
+}
+
 }  // namespace
