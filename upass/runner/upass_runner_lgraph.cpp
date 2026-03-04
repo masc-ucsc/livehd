@@ -215,6 +215,31 @@ private:
   bool dry_run;
 };
 
+struct Lgraph_pass_dce final : public upass::uPass_lgraph {
+  using upass::uPass_lgraph::uPass_lgraph;
+  explicit Lgraph_pass_dce(std::shared_ptr<upass::Lgraph_manager> &gm, bool _dry_run = false)
+      : upass::uPass_lgraph(gm), dry_run(_dry_run) {}
+
+  void run_once() override {
+    if (!gm || !gm->ref_lgraph()) {
+      std::print("uPass(lgraph) - no graph available\n");
+      return;
+    }
+    const auto s = gm->fold_dce(false, dry_run);
+    std::print(
+        "uPass(lgraph) - dce_removed:{} edges_freed:{} dry_run:{}\n",
+        s.dead_nodes_removed,
+        s.edges_freed,
+        dry_run ? "true" : "false");
+    if (!dry_run && s.dead_nodes_removed > 0) {
+      mark_changed();
+    }
+  }
+
+private:
+  bool dry_run;
+};
+
 struct Lgraph_pass_noop_shared final : public upass::uPass_lgraph {
   using upass::uPass_lgraph::uPass_lgraph;
 
@@ -287,6 +312,9 @@ static upass::uPass_lgraph_plugin plugin_lgraph_fold_mult_const(
     "fold_mult_const",
     upass::uPass_lgraph_wrapper<Lgraph_pass_fold_mult_const>::get_upass,
     {"fold_scan"});
+static upass::uPass_lgraph_plugin plugin_lgraph_dce(
+    "dce",
+    upass::uPass_lgraph_wrapper<Lgraph_pass_dce>::get_upass);  // no deps — fully standalone
 static upass::uPass_lgraph_plugin plugin_lgraph_noop_shared(
     "noop_shared",
     upass::uPass_lgraph_wrapper<Lgraph_pass_noop_shared>::get_upass);
@@ -347,6 +375,10 @@ uPass_runner_lgraph::uPass_runner_lgraph(
     }
     if (name == "fold_mult_const") {
       upasses.emplace_back(Pass_entry{.name = name, .pass = std::make_unique<Lgraph_pass_fold_mult_const>(gm, dry_run)});
+      continue;
+    }
+    if (name == "dce") {
+      upasses.emplace_back(Pass_entry{.name = name, .pass = std::make_unique<Lgraph_pass_dce>(gm, dry_run)});
       continue;
     }
     upasses.emplace_back(Pass_entry{.name = name, .pass = it->second.setup_fn(gm)});

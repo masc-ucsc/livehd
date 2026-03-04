@@ -71,6 +71,14 @@ public:
     std::size_t deleted_nodes{0};
   };
 
+  // Summary for dead-code elimination.
+  // A node is dead if it has no output consumers (out_edges is empty) and is
+  // not a graph IO node or a CompileErr marker.
+  struct Fold_dce_summary {
+    std::size_t dead_nodes_removed{0};
+    std::size_t edges_freed{0};  // input edges disconnected when dead nodes are deleted
+  };
+
   explicit Lgraph_manager(Lgraph *graph) : lg(graph) {}
 
   std::string_view kind() const override { return "lgraph"; }
@@ -965,6 +973,58 @@ public:
         node.del_node();
       }
       ++summary.deleted_nodes;
+    }
+
+    return summary;
+  }
+
+  // Removes nodes with no output consumers (dead-code elimination).
+  //
+  // A node is eligible for removal if:
+  //   • It is not a graph IO node (nid 1 = input, nid 2 = output).
+  //   • Its type is not CompileErr (error markers must be preserved).
+  //   • It has no out_edges (its driver pin feeds nothing).
+  //
+  // Runs one sweep per call; the fixed-point runner repeats until convergence
+  // so that transitive dead chains (A → B where B is dead) are fully pruned.
+  Fold_dce_summary fold_dce(bool visit_sub = false, bool dry_run = false) const {
+    Fold_dce_summary summary;
+    if (lg == nullptr) {
+      return summary;
+    }
+
+    // --- Collect dead nodes (must NOT delete during fast() iteration) ---
+    std::vector<Node> dead_nodes;
+    for (const auto &node : lg->fast(visit_sub)) {
+      if (node.is_type_io()) {
+        continue;  // never delete graph input / output nodes
+      }
+      if (node.get_type_op() == Ntype_op::CompileErr) {
+        continue;  // preserve error markers
+      }
+
+      bool has_consumers = false;
+      for (const auto &out : node.out_edges()) {
+        (void)out;
+        has_consumers = true;
+        break;
+      }
+      if (!has_consumers) {
+        dead_nodes.emplace_back(node);
+      }
+    }
+
+    // --- Delete collected dead nodes ---
+    for (auto &node : dead_nodes) {
+      // Count input edges that will be freed when this node is deleted.
+      for (const auto &inp : node.inp_edges()) {
+        (void)inp;
+        ++summary.edges_freed;
+      }
+      ++summary.dead_nodes_removed;
+      if (!dry_run) {
+        node.del_node();  // removes the node and all its connected edges
+      }
     }
 
     return summary;

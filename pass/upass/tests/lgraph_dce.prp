@@ -1,0 +1,5 @@
+// Pyrope fixture for the DCE smoke test.
+// After fold_mult_const turns each Mult into a Const, the two original Const
+// inputs to each Mult become unreachable — DCE removes them.
+a = 3 * 4    // Mult(3,4) → const(12); then const(3) & const(4) are dead
+b = 2 * 5    // Mult(2,5) → const(10); then const(2) & const(5) are dead
