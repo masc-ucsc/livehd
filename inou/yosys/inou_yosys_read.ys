@@ -10,15 +10,15 @@ read_liberty {{liberty_file}}
 
 verilog_defines -DSYNTHESIS=1
 
-{{#filelist}}
 {{#use_verilog}}
+{{#filelist}}
 read_verilog -sv -nomeminit {{input}}
+{{/filelist}}
 {{/use_verilog}}
 
 {{#use_slang}}
 read_slang {{slang_top}} {{slang_flags}} {{files_str}} {{filelist_file_str}}
 {{/use_slang}}
-{{/filelist}}
 
 # single file, no hierarchy needed
 {{#hierarchy}}

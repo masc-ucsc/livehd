@@ -217,7 +217,8 @@ void Inou_yosys_api::tolg(Eprp_var &var) {
 void Inou_yosys_api::do_tolg(Eprp_var &var) {
   const auto filelist_file{var.get("filelist_file")};
 
-  if (files.empty() && filelist_file.empty()) {
+  const bool has_files = !files.empty() && files != "/INVALID";
+  if (!has_files && filelist_file.empty()) {
     error("at least one of files or filelist_file must be provided");
     return;
   }
@@ -232,30 +233,55 @@ void Inou_yosys_api::do_tolg(Eprp_var &var) {
   vars.set("path", path);
 
   // Set slang plugin path (assume users always install slang.so in LiveHD using Bazel)
-  auto exe_path = file_utils::get_exe_path();
-  vars.set("slang_plugin_path", absl::StrCat(exe_path, "/../external/+_repo_rules+yosys_slang/slang.so"));
+  auto        exe_path         = file_utils::get_exe_path();
+  std::string slang_plugin_path;
+  for (const auto &candidate :
+       {absl::StrCat(exe_path, "/../external/+_repo_rules+yosys_slang/slang.so"),
+        absl::StrCat(exe_path, "/lgshell.runfiles/+http_archive+yosys_slang/slang.so")}) {
+    if (access(candidate.c_str(), R_OK) != -1) {
+      slang_plugin_path = candidate;
+      break;
+    }
+  }
+  if (slang_plugin_path.empty()) {
+    error("internal error: slang.so could not be found (tried paths relative to exe_path:{})", exe_path);
+    return;
+  }
+  vars.set("slang_plugin_path", slang_plugin_path);
 
   // For verilog frontend
   mustache::data filelist{mustache::data::type::list};
-  for (const auto &f : absl::StrSplit(files, ',')) {
-    filelist << mustache::data{"input", std::string(f)};
+  if (has_files) {
+    for (const auto &f : absl::StrSplit(files, ',')) {
+      if (!f.empty()) {
+        filelist << mustache::data{"input", std::string(f)};
+      }
+    }
   }
 
   // Build space-separated files list for slang
   std::string files_str;
-  for (const auto &f : absl::StrSplit(files, ',')) {
-    if (!f.empty()) {
-      if (!files_str.empty()) {
-        files_str += " ";
+  if (has_files) {
+    for (const auto &f : absl::StrSplit(files, ',')) {
+      if (!f.empty()) {
+        if (!files_str.empty()) {
+          files_str += " ";
+        }
+        files_str += std::string(f);
       }
-      files_str += std::string(f);
     }
   }
   vars.set("filelist", filelist);
 
   // Set a list of files as well as the filelist/manifest file for `read_lang`
-  if (!files_str.empty()) vars.set("files_str", files_str);
-  if (!filelist_file.empty()) vars.set("filelist_file_str", absl::StrCat("-f ", filelist_file));
+  vars.set("files_str", files_str);
+  if (!filelist_file.empty()) {
+    if (filelist_file.size() >= 2 && filelist_file[0] == '-' && (filelist_file[1] == 'f' || filelist_file[1] == 'F')) {
+      vars.set("filelist_file_str", std::string(filelist_file));
+    } else {
+      vars.set("filelist_file_str", absl::StrCat("-f ", filelist_file));
+    }
+  }
 
   // Set frontend type
   if (frontend == "slang") {
@@ -266,7 +292,9 @@ void Inou_yosys_api::do_tolg(Eprp_var &var) {
     if (!slang_flags.empty()) {
       std::string flags_str;
       for (const auto &f : absl::StrSplit(slang_flags, ',')) {
-        if (!flags_str.empty()) flags_str += " ";
+        if (!flags_str.empty()) {
+          flags_str += " ";
+        }
         flags_str += std::string(f);
       }
       vars.set("slang_flags", flags_str);

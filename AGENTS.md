@@ -125,6 +125,12 @@ LiveHD aims to be:
 - **Friendly**: Improved error reporting and user experience
 - **Trustworthy**: Comprehensive CI, random testing, logic equivalence checks (LEC)
 
+## Compiler Warnings Policy
+
+- When fixing compiler warnings or errors, **always patch the source code locally** rather than adding `-Wno-*` flags or other warning suppression options to the compiler settings.
+- Do not modify `copts`, `cxxopts`, or similar compiler flag lists in BUILD files to suppress warnings. Instead, fix the underlying code issue that causes the warning.
+- **Exception**: External dependencies pulled in via `MODULE.bazel` are not under our control. For those, it is acceptable to adjust compiler warning flags or add `copts` to suppress warnings since we cannot modify the upstream source code.
+
 ## Notes
 
 - The codebase is actively developed with semantic versioning 0.x (API changes expected)

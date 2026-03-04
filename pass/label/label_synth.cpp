@@ -6,6 +6,7 @@
 #include "pass.hpp"
 
 Label_synth::Label_synth(bool _verbose, bool _hier, std::string_view alg) : verbose(_verbose), hier(_hier) {
+  synth = true;
   if (alg == "pipe") {
     synth = false;
   } else if (alg == "synth") {
@@ -35,10 +36,10 @@ void Label_synth::mark_ids(Lgraph *g) {
 #if 1
   // Do we cluster inputs? (FIXME: option)
   g->each_graph_input([&](const Node_pin &pin) {
-    auto id = get_free_id();
     for (const auto &e : pin.out_edges()) {
       auto node = e.sink.get_node();
       if (!node.is_type_loop_last()) {
+        auto id = get_free_id();
         set_id(node, id);
       }
     }
