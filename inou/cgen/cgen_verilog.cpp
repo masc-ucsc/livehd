@@ -806,7 +806,10 @@ void Cgen_verilog::create_outputs(std::shared_ptr<File_output> fout, Lgraph *lg)
     auto name = get_scaped_name(dpin.get_name());
 
     auto out_dpin = spin.get_driver_pin();
-    fout->append("  ", name, " = ", get_expression(out_dpin), ";\n");
+    auto expr = get_expression(out_dpin);
+    if (name != expr) {
+      fout->append("  ", name, " = ", expr, ";\n");
+    }
   });
 
   for (auto node : lg->fast()) {

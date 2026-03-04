@@ -19,50 +19,70 @@ CELLLIB=""
 OPT_TOP=""
 GOLD=""
 GATE=""
-while true ; do
-    case "$1" in
-        -r|--reference)
-          case "$2" in
-              "") shift 2 ;;
-              *) GOLD=$2 ; shift 2 ;;
-          esac ;;
-        -i|--implementation)
-          case "$2" in
-              "") shift 2 ;;
-              *) GATE=$2 ; shift 2 ;;
-          esac ;;
-        -l|--cell_library)
-          case "$2" in
-              "") shift 2 ;;
-              *) CELLLIB=$2 ; shift 2 ;;
-          esac ;;
-        --yosys)
-          case "$2" in
-              "") shift 2 ;;
-              *) YOSYS=$2 ; shift 2 ;;
-          esac ;;
-        --top)
-          case "$2" in
-              "") shift 2 ;;
-              *) OPT_TOP=$2 ; shift 2 ;;
-          esac ;;
-        "") break ;;
-        *)
-          argument=$1
-          if [ ${argument:0:1} == "-" ]; then
-            echo "Option $1 not recognized!"
-            exit 1
-          else
-            if [ "${GOLD}" == "" ]; then
-              GOLD=$1
-              shift 1
-            else
-              GATE=$1
-              shift 1
-            fi
-          fi
-          ;;
+while true; do
+  case "$1" in
+  -r | --reference)
+    case "$2" in
+    "") shift 2 ;;
+    *)
+      GOLD=$2
+      shift 2
+      ;;
     esac
+    ;;
+  -i | --implementation)
+    case "$2" in
+    "") shift 2 ;;
+    *)
+      GATE=$2
+      shift 2
+      ;;
+    esac
+    ;;
+  -l | --cell_library)
+    case "$2" in
+    "") shift 2 ;;
+    *)
+      CELLLIB=$2
+      shift 2
+      ;;
+    esac
+    ;;
+  --yosys)
+    case "$2" in
+    "") shift 2 ;;
+    *)
+      YOSYS=$2
+      shift 2
+      ;;
+    esac
+    ;;
+  --top)
+    case "$2" in
+    "") shift 2 ;;
+    *)
+      OPT_TOP=$2
+      shift 2
+      ;;
+    esac
+    ;;
+  "") break ;;
+  *)
+    argument=$1
+    if [ ${argument:0:1} == "-" ]; then
+      echo "Option $1 not recognized!"
+      exit 1
+    else
+      if [ "${GOLD}" == "" ]; then
+        GOLD=$1
+        shift 1
+      else
+        GATE=$1
+        shift 1
+      fi
+    fi
+    ;;
+  esac
 done
 
 if [ ! -f "${GATE}" ]; then
@@ -120,7 +140,7 @@ if [ -x "${FM_SHELL}" ]; then
     analyze_points -all >> \"fm_${fm_top}_error.log\"
   }
   exit
-  " > fm_script_${fm_top}.tcl
+  " >fm_script_${fm_top}.tcl
 
   ${FM_SHELL} -64bit -f fm_script_${fm_top}.tcl | grep "Verification SUCCEEDED"
   if [ $? -eq 0 ]; then
@@ -150,7 +170,7 @@ if [ "${CELLLIB}" != "" ]; then
     echo "cell library ${CELLLIB} not found"
     exit 1
   fi
- # lib="read_verilog -sv ${CELLLIB}"
+  # lib="read_verilog -sv ${CELLLIB}"
   lib="read_liberty ${CELLLIB}"
 fi
 
@@ -167,7 +187,7 @@ yosys_equiv="equiv_simple;"
 yosys_equiv_extra="${yosys_simple}; equiv_induct -seq 4;"
 
 ${YOSYS} -p "${yosys_read}; ${yosys_prep}; ${yosys_equiv}; write_verilog trace1.v ; equiv_status -assert" \
-    2> /dev/null | tee lgcheck1.log | grep "Equivalence successfully proven!"
+  2>/dev/null | tee lgcheck1.log | grep "Equivalence successfully proven!"
 
 if [ $? -eq 0 ]; then
   echo "1.Successfully matched ${GATE} with ${GOLD} top:${OPT_TOP}"
@@ -175,21 +195,20 @@ if [ $? -eq 0 ]; then
 fi
 
 #${YOSYS} -p " read_verilog -sv ${GOLD}; hierarchy ${TOP_STR}; opt ; prep; memory; rename -top gold; design -stash gold;
-              #read_verilog -sv ${GATE}; hierarchy ${TOP_STR}; opt ; prep; memory; rename -top gate; design -stash gate;
-              #design -copy-from gold -as gold gold
-              #design -copy-from gate -as gate gate
+#read_verilog -sv ${GATE}; hierarchy ${TOP_STR}; opt ; prep; memory; rename -top gate; design -stash gate;
+#design -copy-from gold -as gold gold
+#design -copy-from gate -as gate gate
 #
-              #miter -equiv -make_assert -make_outcmp -flatten gold gate equiv
-              #hierarchy -top equiv
-              #sat -prove-asserts -tempinduct -timeout 30 -ignore_unknown_cells -verify -set-init-undef equiv" \
+#miter -equiv -make_assert -make_outcmp -flatten gold gate equiv
+#hierarchy -top equiv
+#sat -prove-asserts -tempinduct -timeout 30 -ignore_unknown_cells -verify -set-init-undef equiv" \
 #    2> /dev/null | grep "Equivalence successfully proven!"
 #if [ $? -eq 0 ]; then
 #  echo "Successfully matched ${GATE} with ${GOLD} top:${OPT_TOP}"
 #  exit 0
 #fi
 
-if grep -q reset ${GOLD}
-then
+if grep -q reset ${GOLD}; then
   RESET_STMT="-set in_reset 1 -set-at 2 in_reset 0"
 else
   RESET_STMT=""
@@ -203,9 +222,9 @@ ${YOSYS} -p " read_verilog -sv ${GOLD}; hierarchy ${TOP_STR}; proc; opt; flatten
               miter -equiv -flatten -make_outputs -ignore_gold_x gold gate miter
               hierarchy -top miter
               write_verilog trace2.v
-              sat -tempinduct -prove trigger 0 ${RESET_STMT} -set-init-undef -enable_undef -set-def-inputs -ignore_unknown_cells -show-ports miter
+              sat -tempinduct-def -timeout 90 -prove trigger 0 ${RESET_STMT} -set-init-zero -ignore_unknown_cells -show-ports miter
               " \
-    2> lgcheck2.err | tee lgcheck2.log | grep "proven: SUCC"
+  2>lgcheck2.err | tee lgcheck2.log | grep "proven: SUCC"
 if [ $? -eq 0 ]; then
   echo "2.Successfully matched ${GATE} with ${GOLD} top:${OPT_TOP}"
   exit 0
@@ -214,7 +233,7 @@ fi
 #${YOSYS} -p "${yosys_read};
 #    proc; memory -nomap; opt_expr -full; opt -purge; opt -purge;
 #    opt_reduce -full; opt_expr -mux_undef; opt_reduce; opt_merge; opt_clean -purge;
-#    ${yosys_prep}; opt -purge; proc; opt -purge; ${yosys_equiv}; equiv_status -assert" 
+#    ${yosys_prep}; opt -purge; proc; opt -purge; ${yosys_equiv}; equiv_status -assert"
 #
 #if [ $? -eq 0 ]; then
 #  echo "3.Successfully matched ${GATE} with ${GOLD} top:${OPT_TOP}"
@@ -225,7 +244,7 @@ ${YOSYS} -p "${yosys_read};
     memory -nomap; opt_expr -full; opt -purge; proc; opt -purge;
     opt_reduce -full; opt_expr -mux_undef; opt_reduce; opt_merge; opt_clean -purge; techmap -map +/adff2dff.v;
     ${yosys_prep}; opt -purge; proc; opt -purge; ${yosys_equiv_extra}; equiv_status -assert" \
-    2>/dev/null | tee lgcheck4.log | grep "Equivalence successfully proven!"
+  2>/dev/null | tee lgcheck4.log | grep "Equivalence successfully proven!"
 
 if [ $? -eq 0 ]; then
   echo "4.Successfully matched ${GATE} with ${GOLD} top:${OPT_TOP}"
