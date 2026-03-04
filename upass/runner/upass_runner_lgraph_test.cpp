@@ -1062,4 +1062,135 @@ TEST(UpassRunnerLgraph, FoldMultConstMultipleNodes) {
   EXPECT_EQ(d2.get_type_const().to_i(), 42);
 }
 
+// ─────────────────────────────────────────────────────────────────────────────
+// dce (dead-code elimination) tests
+// ─────────────────────────────────────────────────────────────────────────────
+
+// A Const node that feeds nothing → DCE removes it.
+TEST(UpassRunnerLgraph, DceRemovesOrphanConst) {
+  constexpr std::string_view kDbPath = "lgdb_upass_lgraph_dce_orphan";
+  file_utils::clean_dir(kDbPath);
+  auto *lib = Graph_library::instance(kDbPath);
+  ASSERT_NE(lib, nullptr);
+  auto *lg = lib->create_lgraph("top", "upass_lgraph_dce_orphan");
+  ASSERT_NE(lg, nullptr);
+
+  // Create a const(99) that is not connected to any output.
+  lg->create_node_const(99);
+
+  auto gm = std::make_shared<upass::Lgraph_manager>(lg);
+
+  // Dry-run: orphan reported but survives.
+  const auto dry = gm->fold_dce(false, true);
+  EXPECT_EQ(dry.dead_nodes_removed, 1U);
+  EXPECT_EQ(dry.edges_freed, 0U);  // orphan has no inputs
+  std::size_t const_count = 0;
+  for (const auto &n : lg->fast()) {
+    if (n.get_type_op() == Ntype_op::Const) ++const_count;
+  }
+  EXPECT_EQ(const_count, 1U);  // survived dry-run
+
+  // Live run: orphan is deleted.
+  uPass_runner_lgraph runner(gm, {"dce"});
+  runner.run(2);
+
+  const_count = 0;
+  for (const auto &n : lg->fast()) {
+    if (n.get_type_op() == Ntype_op::Const) ++const_count;
+  }
+  EXPECT_EQ(const_count, 0U);
+}
+
+// After fold_mult_const, the two Const inputs to the folded Mult become orphans.
+// Running dce after fold_mult_const removes them.
+TEST(UpassRunnerLgraph, DceConvergesAfterFoldMult) {
+  constexpr std::string_view kDbPath = "lgdb_upass_lgraph_dce_after_fold";
+  file_utils::clean_dir(kDbPath);
+  auto *lib = Graph_library::instance(kDbPath);
+  ASSERT_NE(lib, nullptr);
+  auto *lg = lib->create_lgraph("top", "upass_lgraph_dce_after_fold");
+  ASSERT_NE(lg, nullptr);
+
+  // 3 * 4 = 12, connected to a graph output.
+  auto out0 = lg->add_graph_output("o", 2, 8);
+  auto c3   = lg->create_node_const(3);
+  auto c4   = lg->create_node_const(4);
+  auto m0   = lg->create_node(Ntype_op::Mult);
+  lg->add_edge(c3.get_driver_pin(), m0.setup_sink_pin_raw(0));
+  lg->add_edge(c4.get_driver_pin(), m0.setup_sink_pin_raw(0));
+  auto m0_out = m0.setup_driver_pin();
+  m0_out.set_bits(8);
+  lg->add_edge(m0_out, out0);
+
+  auto gm = std::make_shared<upass::Lgraph_manager>(lg);
+
+  // Run fold_mult_const then dce in one pipeline.
+  uPass_runner_lgraph runner(gm, {"fold_mult_const", "dce"});
+  runner.run(5);
+
+  // After folding and DCE:
+  //   const(3) and const(4) are orphaned → removed by dce
+  //   const(12) feeds the graph output → kept
+  std::size_t const_count = 0;
+  for (const auto &n : lg->fast()) {
+    if (n.get_type_op() == Ntype_op::Const) ++const_count;
+  }
+  EXPECT_EQ(const_count, 1U);  // only const(12) survives
+
+  auto out_dpin = lg->get_graph_output("o").get_driver_pin();
+  EXPECT_EQ(out_dpin.get_type_op(), Ntype_op::Const);
+  EXPECT_EQ(out_dpin.get_type_const().to_i(), 12);
+}
+
+// A clean graph (all nodes feed the output) → DCE makes no change.
+TEST(UpassRunnerLgraph, DceCleanGraphNoOp) {
+  constexpr std::string_view kDbPath = "lgdb_upass_lgraph_dce_clean";
+  file_utils::clean_dir(kDbPath);
+  auto *lib = Graph_library::instance(kDbPath);
+  ASSERT_NE(lib, nullptr);
+  auto *lg = lib->create_lgraph("top", "upass_lgraph_dce_clean");
+  ASSERT_NE(lg, nullptr);
+
+  // const(7) → graph output — everything is live.
+  auto out0 = lg->add_graph_output("o", 2, 8);
+  auto c7   = lg->create_node_const(7);
+  lg->add_edge(c7.get_driver_pin(), out0);
+
+  auto gm = std::make_shared<upass::Lgraph_manager>(lg);
+
+  const auto result = gm->fold_dce(false, false);
+  EXPECT_EQ(result.dead_nodes_removed, 0U);
+  EXPECT_EQ(result.edges_freed, 0U);
+}
+
+// Transitive dead chain: A → B (dead), after B is removed A becomes dead.
+// The fixed-point runner removes both in two iterations.
+TEST(UpassRunnerLgraph, DceTransitiveChain) {
+  constexpr std::string_view kDbPath = "lgdb_upass_lgraph_dce_chain";
+  file_utils::clean_dir(kDbPath);
+  auto *lib = Graph_library::instance(kDbPath);
+  ASSERT_NE(lib, nullptr);
+  auto *lg = lib->create_lgraph("top", "upass_lgraph_dce_chain");
+  ASSERT_NE(lg, nullptr);
+
+  // const(5) → Sum (two inputs: const(5) + const(5)), Sum has no output.
+  auto c5  = lg->create_node_const(5);
+  auto s0  = lg->create_node(Ntype_op::Sum);
+  lg->add_edge(c5.get_driver_pin(), s0.setup_sink_pin_raw(0));
+  lg->add_edge(c5.get_driver_pin(), s0.setup_sink_pin_raw(0));
+  // s0 is NOT connected to any output → dead
+  // c5 feeds s0, so c5 is live in iteration 1; becomes dead after s0 is removed.
+
+  auto gm = std::make_shared<upass::Lgraph_manager>(lg);
+  uPass_runner_lgraph runner(gm, {"dce"});
+  runner.run(5);
+
+  // After convergence, both c5 and s0 must be gone.
+  std::size_t node_count = 0;
+  for (const auto &n : lg->fast()) {
+    if (!n.is_type_io()) ++node_count;
+  }
+  EXPECT_EQ(node_count, 0U);
+}
+
 }  // namespace
