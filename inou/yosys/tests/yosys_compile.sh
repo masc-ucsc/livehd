@@ -126,7 +126,7 @@ do
   $(cat tmp_yosys/*.v >tmp_yosys_mix/all_${base}.v)
 
   if [[ $input =~ "nocheck_" ]]; then
-    LC=$(wc -l tmp_yosys_mix/all_${base}.v | cut -d" " -f1)
+    LC=$(wc -l < tmp_yosys_mix/all_${base}.v | tr -d ' ')
     echo "Skipping check for $base LC:"$LC
     if [[ $LC -lt 2 ]]; then
       echo "FAIL: Generated verilog file tmp_yosys_mix/all_${base}.v is too small"

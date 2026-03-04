@@ -566,18 +566,13 @@ static Node resolve_memory(Lgraph *g, RTLIL::Cell *cell) {
   set_loc(node, cell->get_src_attribute());
 
   uint32_t rdports = cell->getParam(ID::RD_PORTS).as_int();
-  (void)rdports;
+  uint32_t wrports = cell->getParam(ID::WR_PORTS).as_int();
 
   uint32_t bits = cell->getParam(ID::WIDTH).as_int();
-  (void)bits;
-
-#if 1
-  std::cout << "Memory pending\n";
-#else
 
   for (uint32_t rdport = 0; rdport < rdports; rdport++) {
     RTLIL::SigSpec ss   = cell->getPort("\\RD_DATA").extract(rdport * bits, bits);
-    auto           dpin = node.setup_driver_pin(rdport);
+    auto           dpin = node.setup_driver_pin_raw(wrports + rdport);
     dpin.set_bits(bits);
 
     uint32_t offset = 0;
@@ -592,7 +587,7 @@ static Node resolve_memory(Lgraph *g, RTLIL::Cell *cell) {
       if (chunk.width == wire->width) {
         if (wire2pin.find(wire) != wire2pin.end()) {
           const auto &or_dpin = wire2pin[wire];
-          if (or_dpin.has_graph_output()) {
+          if (or_dpin.is_graph_output()) {
             g->add_edge(dpin, or_dpin.change_to_sink_from_graph_out_driver());
           } else {
             auto or_node = or_dpin.get_node();
@@ -609,7 +604,7 @@ static Node resolve_memory(Lgraph *g, RTLIL::Cell *cell) {
           set_bits_wirename(dpin, wire);
         } else {
           // output port drives multiple wires
-          Node_pin pick_pin = create_pick_operator(dpin, offset, chunk.width);
+          Node_pin pick_pin = create_pick_operator(dpin, offset, chunk.width, false);
           wire2pin[wire]    = pick_pin;
           set_bits_wirename(pick_pin, wire);
         }
@@ -625,7 +620,7 @@ static Node resolve_memory(Lgraph *g, RTLIL::Cell *cell) {
         }
         dpin.set_bits(ss.size());
 
-        auto &src_pin = create_pick_operator(dpin, offset, chunk.width);
+        auto src_pin = create_pick_operator(dpin, offset, chunk.width, false);
         offset += chunk.width;
         for (int i = 0; i < chunk.width; i++) {
           I((size_t)(chunk.offset + i) < partially_assigned[wire].size());
@@ -634,7 +629,6 @@ static Node resolve_memory(Lgraph *g, RTLIL::Cell *cell) {
       }
     }
   }
-#endif
 
   return node;
 }
@@ -704,7 +698,7 @@ static bool is_black_box_input(const RTLIL::Cell *cell, const RTLIL::IdString &p
 
 static void process_cell_drivers_intialization(RTLIL::Module *mod, Lgraph *g) {
   for (auto cell : mod->cells()) {
-    if (cell->type == "$mem") {
+    if (cell->type == "$mem" || cell->type == "$mem_v2") {
       cell2node[cell] = resolve_memory(g, cell);
       continue;
     }
@@ -2307,163 +2301,59 @@ static void process_cells(RTLIL::Module *mod, Lgraph *g) {
       exit_node.setup_sink_pin("a").connect_driver(get_dpin(g, cell, ID::A));
       exit_node.setup_sink_pin("B").connect_driver(get_dpin(g, cell, ID::B));
 
-    } else if (std::strncmp(cell->type.c_str(), "$mem", 4) == 0) {
+    } else if (cell->type == "$mem" || cell->type == "$mem_v2") {
       exit_node.set_type(Ntype_op::Memory);
 
       // int parameters
       uint32_t width = cell->getParam(ID::WIDTH).as_int();
-      (void)width;
 
       uint32_t depth  = cell->getParam(ID::SIZE).as_int();
-      uint32_t offset = cell->getParam(ID::OFFSET).as_int();
-      (void)offset;
 
       auto abits = cell->getParam(ID::ABITS).as_int();
-      (void)abits;
 
       auto rdports = cell->getParam(ID::RD_PORTS).as_int();
       auto wrports = cell->getParam(ID::WR_PORTS).as_int();
 
       // string parameters
-      auto transp = cell->getParam(ID::RD_TRANSPARENCY_MASK).as_int();
-      // auto rd_clkp = cell->getParam(ID::RD_CLK_POLARITY).as_int();
+      auto transp = cell->hasParam(ID::RD_TRANSPARENCY_MASK) ? cell->getParam(ID::RD_TRANSPARENCY_MASK).as_int() : 0;
       auto rd_clke = cell->getParam(ID::RD_CLK_ENABLE).as_int();
       auto wr_clkp = cell->getParam(ID::WR_CLK_POLARITY).as_int();
-      // auto wr_clke = cell->getParam(ID::WR_CLK_ENABLE).as_int();
 
       std::string name(&cell->getParam(ID::MEMID).decode_string().c_str()[1]);
 
       std::print("name:{} depth:{} wrports:{} rdports:{}\n", name, depth, wrports, rdports);
 
       exit_node.setup_sink_pin("bits").connect_driver(g->create_node_const(width));
-      exit_node.setup_sink_pin("clock_pin").connect_driver(get_dpin(g, cell, ID::WR_CLK));
       exit_node.setup_sink_pin("fwd").connect_driver(g->create_node_const(transp));
       exit_node.setup_sink_pin("posclk").connect_driver(g->create_node_const(wr_clkp));
       exit_node.setup_sink_pin("type").connect_driver(g->create_node_const(rd_clke));
       exit_node.setup_sink_pin("wensize").connect_driver(g->create_node_const(width));
       exit_node.setup_sink_pin("size").connect_driver(g->create_node_const(depth));
 
+      // Write ports
       for (int i = 0; i < wrports; i++) {
         auto port_n = i * 11;
-        exit_node.setup_sink_pin_raw(10 + port_n).connect_driver(g->create_node_const(0));
-        exit_node.setup_sink_pin_raw(3 + port_n).connect_driver(get_dpin(g, cell, ID::WR_DATA));
-        exit_node.setup_sink_pin_raw(4 + port_n).connect_driver(get_dpin(g, cell, ID::WR_EN));
-        exit_node.setup_sink_pin_raw(0 + port_n).connect_driver(get_dpin(g, cell, ID::WR_ADDR));
+        exit_node.setup_sink_pin_raw(10 + port_n).connect_driver(g->create_node_const(0));  // write
+        exit_node.setup_sink_pin_raw(3 + port_n).connect_driver(
+            create_pick_concat_dpin(g, cell->getPort(ID::WR_DATA).extract(i * width, width), false));
+        exit_node.setup_sink_pin_raw(4 + port_n).connect_driver(
+            create_pick_concat_dpin(g, cell->getPort(ID::WR_EN).extract(i * width, width), false));
+        exit_node.setup_sink_pin_raw(0 + port_n).connect_driver(
+            create_pick_concat_dpin(g, cell->getPort(ID::WR_ADDR).extract(i * abits, abits), false));
+        exit_node.setup_sink_pin_raw(2 + port_n).connect_driver(
+            create_pick_concat_dpin(g, cell->getPort(ID::WR_CLK).extract(i, 1), false));
       }
-      for (int i = wrports; i < (wrports + rdports); i++) {
-        auto port_n = i * 11;
-        exit_node.setup_sink_pin_raw(10 + port_n).connect_driver(g->create_node_const(1));
-        exit_node.setup_sink_pin_raw(4 + port_n).connect_driver(get_dpin(g, cell, ID::RD_EN));
-        exit_node.setup_sink_pin_raw(0 + port_n).connect_driver(get_dpin(g, cell, ID::RD_ADDR));
+      // Read ports
+      for (int i = 0; i < rdports; i++) {
+        auto port_n = (wrports + i) * 11;
+        exit_node.setup_sink_pin_raw(10 + port_n).connect_driver(g->create_node_const(1));  // read
+        exit_node.setup_sink_pin_raw(4 + port_n).connect_driver(
+            create_pick_concat_dpin(g, cell->getPort(ID::RD_EN).extract(i, 1), false));
+        exit_node.setup_sink_pin_raw(0 + port_n).connect_driver(
+            create_pick_concat_dpin(g, cell->getPort(ID::RD_ADDR).extract(i * abits, abits), false));
+        exit_node.setup_sink_pin_raw(2 + port_n).connect_driver(
+            create_pick_concat_dpin(g, cell->getPort(ID::RD_CLK).extract(i, 1), false));
       }
-#if 1
-      std::cout << "FIXME: memory still pending in yosys\n";
-#else
-
-      connect_constant(g, depth, exit_node, LgRAPH_MEMOP_SIZE);
-      connect_constant(g, offset, exit_node, LgRAPH_MEMOP_OFFSET);
-      connect_constant(g, abits, exit_node, LgRAPH_MEMOP_ABITS);
-      connect_constant(g, wrports, exit_node, LgRAPH_MEMOP_WRPORT);
-      connect_constant(g, rdports, exit_node, LgRAPH_MEMOP_RDPORT);
-
-      // lgraph has reversed convention compared to yosys.
-      int rd_clk_enabled  = 0;
-      int rd_clk_polarity = 0;
-      for (int i = 0; i < rd_clkp.size(); i++) {
-        if (rd_clke[i] != RTLIL::S1) {
-          continue;
-        }
-
-        if (rd_clkp[i] == RTLIL::S1) {
-          if (rd_clk_enabled) {
-            I(rd_clk_polarity);  // All the read ports are equal
-          }
-          rd_clk_enabled  = 1;
-          rd_clk_polarity = 1;
-        } else if (rd_clkp[i] == RTLIL::S0) {
-          if (rd_clk_enabled) {
-            I(!rd_clk_polarity);  // All the read ports are equal
-          }
-          rd_clk_enabled  = 1;
-          rd_clk_polarity = 0;
-        }
-      }
-      if (rd_clk_enabled) {
-        // If there is a rd_clk, all should have rd_clk
-        for (int i = 0; i < rd_clkp.size(); i++) {
-          if (rd_clke[i] == RTLIL::S1) {
-            continue;
-          }
-
-          log("oops rd_port:%d does not need clk cell %s\n", i, cell->type.c_str());
-        }
-      }
-      int wr_clk_enabled  = 0;
-      int wr_clk_polarity = 0;
-      for (int i = 0; i < wr_clkp.size(); i++) {
-        if (wr_clke[i] != RTLIL::S1) {
-          continue;
-        }
-        if (wr_clkp[i] == RTLIL::S1) {
-          if (wr_clk_enabled) {
-            I(wr_clk_polarity);  // All the read ports are equal
-          }
-          wr_clk_enabled  = 1;
-          wr_clk_polarity = 1;
-        } else if (wr_clkp[i] == RTLIL::S0) {
-          if (wr_clk_enabled) {
-            I(!wr_clk_polarity);  // All the read ports are equal
-          }
-          wr_clk_enabled  = 1;
-          wr_clk_polarity = 0;
-        }
-      }
-      rd_clk_polarity = rd_clk_polarity ? 0 : 1;  // polarity flipped in lgraph vs yosys
-      wr_clk_polarity = wr_clk_polarity ? 0 : 1;  // polarity flipped in lgraph vs yosys
-
-      if (rd_clk_enabled) {
-        connect_constant(g, rd_clk_polarity, exit_node, LgRAPH_MEMOP_RDCLKPOL);
-      }
-      if (wr_clk_enabled) {
-        connect_constant(g, wr_clk_polarity, exit_node, LgRAPH_MEMOP_WRCLKPOL);
-      }
-
-      connect_constant(g, transp.as_int(), exit_node, LgRAPH_MEMOP_RDTRAN);
-
-      // TODO: get a test case to patch
-      if (cell->hasParam(ID::INIT)) {
-        I(cell->getParam(ID::INIT).as_string()[0] == 'x');
-      }
-
-      clock = cell->getPort("\\RD_CLK")[0].wire;
-      if (clock == nullptr) {
-        clock = cell->getPort("\\WR_CLK")[0].wire;
-      }
-      if (clock == nullptr) {
-        log_error("No clock found for memory.\n");
-      }
-
-      exit_node.set_name(name);
-
-    } else if (g->get_library().get_lgid(&cell->type.c_str()[1])) {
-      // external graph reference
-      auto sub_lgid = g->get_library().get_lgid(&cell->type.c_str()[1]);
-      I(sub_lgid);
-      log("module name original was %s\n", cell->type.c_str());
-
-      entry_node.set_type_sub(sub_lgid);
-
-      std::string inst_name = cell->name.str().substr(1);
-      if (!inst_name.empty()) {
-        entry_node.set_name(inst_name);
-      }
-#ifndef NDEBUG
-      else {
-        std::print("yosys2lg got empty inst_name for cell type {}\n", cell->type.c_str());
-      }
-#endif
-
-#endif
 
       // DO NOT MERGE THE BELLOW WITH THE OTHER ANDs, NOTs, DFFs
       //--------------------------------------------------------------
