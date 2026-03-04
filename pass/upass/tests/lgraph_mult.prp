@@ -1,0 +1,6 @@
+// Pyrope fixture for fold_mult_const smoke test.
+// Each assignment involves a constant multiplication that upass should fold
+// into a single constant node.
+a = 3 * 4    // → 12
+b = 2 * 5    // → 10
+c = 6 * 7    // → 42
