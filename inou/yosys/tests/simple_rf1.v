@@ -1,7 +1,7 @@
 
 module simple_rf1
     (input                    clk
-     ,input [7-1:0]           waddr0
+     ,input [4-1:0]           waddr0
      ,input                   we0
      ,input [13-1:0]          din0
      ,input [4-1:0]           raddr0
@@ -31,4 +31,3 @@ module simple_rf1
    end
 
 endmodule
-
