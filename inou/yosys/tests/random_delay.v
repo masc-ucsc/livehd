@@ -90,6 +90,7 @@ module random_delay (
 endmodule
 
 
+`ifdef RUN_TEST_TOO
 module tb_flopped_adder_clear_ones;
 
   logic clk;
@@ -130,3 +131,4 @@ module tb_flopped_adder_clear_ones;
   end
 
 endmodule
+`endif
