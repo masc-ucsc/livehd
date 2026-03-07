@@ -260,20 +260,15 @@ if [[ "${LGCHECK_BMC_STEPS}" =~ ^[0-9]+$ ]] && [ "${LGCHECK_BMC_STEPS}" -gt 0 ];
     bmc_sat_cmds+="sat -seq ${t} -set-init-zero -set-def-inputs -set-at ${t} trigger 1 -show-ports miter; "
   done
 
-  TOP_STR_BMC="-auto-top"
-  if [ "${OPT_TOP}" != "" ]; then
-    TOP_STR_BMC="-top $OPT_TOP"
-  fi
-
-  ${YOSYS} -q -p "read_verilog -sv ${GOLD}; hierarchy ${TOP_STR_BMC}; proc; memory; opt; flatten ; rename -top gold; prep -top gold ; design -stash gold;
-                  read_verilog -sv ${GATE}; hierarchy ${TOP_STR_BMC}; proc; memory; opt; flatten ; rename -top gate; prep -top gate ; design -stash gate;
+  ${YOSYS} -q -p "read_verilog -sv ${GOLD}; hierarchy ${TOP_STR}; proc; memory; opt; flatten ; rename -top gold; prep -top gold ; design -stash gold;
+                  read_verilog -sv ${GATE}; hierarchy ${TOP_STR}; proc; memory; opt; flatten ; rename -top gate; prep -top gate ; design -stash gate;
                   design -copy-from gold -as gold gold
                   design -copy-from gate -as gate gate
                   miter -equiv -flatten -make_outputs gold gate miter
                   hierarchy -top miter
                   ${bmc_sat_cmds}
                   " \
-    2>/dev/null >lgcheck_bmc.log
+    2>lgcheck_bmc.err >lgcheck_bmc.log
 
   if grep -q "SAT solving finished - model found:" lgcheck_bmc.log; then
     echo "WARN: bounded check found a mismatch within ${LGCHECK_BMC_STEPS} steps (see lgcheck_bmc.log)."
@@ -281,7 +276,7 @@ if [[ "${LGCHECK_BMC_STEPS}" =~ ^[0-9]+$ ]] && [ "${LGCHECK_BMC_STEPS}" -gt 0 ];
     exit 1
   fi
 
-  echo "BMC.Successfully matched ${GATE} with ${GOLD} within ${LGCHECK_BMC_STEPS} steps top:${OPT_TOP}"
+  echo "BMC.Successfully matched ${GATE} with ${GOLD} within ${LGCHECK_BMC_STEPS} steps top:${fm_top}"
   exit 0
 fi
 
