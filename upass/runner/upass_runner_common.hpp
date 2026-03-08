@@ -2,12 +2,77 @@
 #pragma once
 
 #include <cstddef>
+#include <format>
+#include <functional>
 #include <print>
 #include <string>
 #include <string_view>
+#include <unordered_map>
 #include <vector>
 
 namespace upass {
+
+// resolve_order_impl — DFS topological sort shared by both LNAST and LGraph
+// runners.  Works with any plugin registry whose value type exposes a
+// `depends_on` field (std::vector<std::string>).
+//
+// Intentionally does NOT call upass::error() (which throws) because dependency
+// resolution happens at construction time; errors are reported gracefully
+// through the *error_msg out-parameter so the caller can set
+// configuration_error = true and defer the report to run().
+template <typename Registry>
+inline std::vector<std::string> resolve_order_impl(const Registry            &registry,
+                                                   const std::vector<std::string> &requested_names,
+                                                   std::string_view               tag,
+                                                   std::string                   *error_msg) {
+  enum class Mark { kUnseen, kVisiting, kDone };
+  std::unordered_map<std::string, Mark> marks;
+  std::vector<std::string>              ordered;
+
+  std::function<bool(const std::string &)> dfs = [&](const std::string &name) -> bool {
+    const auto it = registry.find(name);
+    if (it == registry.end()) {
+      std::print("{} is not defined.\n", name);
+      if (error_msg && error_msg->empty()) {
+        *error_msg = std::format("unknown pass '{}'", name);
+      }
+      return false;
+    }
+
+    const auto mit = marks.find(name);
+    if (mit != marks.end()) {
+      if (mit->second == Mark::kVisiting) {
+        std::print(stderr, "{} dependency cycle detected at {}\n", tag, name);
+        if (error_msg && error_msg->empty()) {
+          *error_msg = std::format("dependency cycle detected at '{}'", name);
+        }
+        return false;
+      }
+      return mit->second == Mark::kDone;
+    }
+
+    marks.emplace(name, Mark::kVisiting);
+    for (const auto &dep : it->second.depends_on) {
+      if (!dfs(dep)) {
+        std::print(stderr, "{} dependency chain for {} is invalid\n", tag, name);
+        if (error_msg && error_msg->empty()) {
+          *error_msg = std::format("dependency chain for '{}' is invalid", name);
+        }
+        marks[name] = Mark::kDone;
+        return false;
+      }
+    }
+    marks[name] = Mark::kDone;
+    ordered.emplace_back(name);
+    return true;
+  };
+
+  for (const auto &name : requested_names) {
+    dfs(name);
+  }
+
+  return ordered;
+}
 
 class Runner_fixed_point {
 public:

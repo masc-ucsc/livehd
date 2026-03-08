@@ -1020,6 +1020,7 @@ template <typename X>
 bool tree<X>::delete_subtree(const Tree_index &child) {
   auto  parent        = get_parent(child);
   auto *parent_lc_pos = ref_last_child_pos(parent);
+  (void)parent_lc_pos;  // reserved for future last-child pointer fixup
 
   if (child.is_root()) {
     // std::cout << "DELETED: subtree at level " << child.level << ", pos " << child.pos << std::endl;

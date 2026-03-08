@@ -24,9 +24,9 @@ TEST(UpassSharedFoldParity, FoldSumConstAcrossLnastAndLgraph) {
   auto lm         = std::make_shared<upass::Lnast_manager>(ln);
   auto lnast_rep  = upass::run_fold_sum_const_shared(*lm, "test-lnast", false);
   EXPECT_EQ(lnast_rep.folded_nodes, 1U);
-  EXPECT_EQ(lnast_rep.rewired_edges, 0U);
-  EXPECT_EQ(lnast_rep.new_const_nodes, 0U);
-  EXPECT_EQ(lnast_rep.deleted_nodes, 0U);
+  EXPECT_EQ(lnast_rep.rewired_edges, 0U);    // LNAST uses tree structure, no edge rewiring
+  EXPECT_EQ(lnast_rep.new_const_nodes, 1U);  // node repurposed as Const
+  EXPECT_EQ(lnast_rep.deleted_nodes, 1U);    // original operator logically deleted
   EXPECT_TRUE(ln->get_type(pl).is_const());
   EXPECT_EQ(ln->get_data(pl).token.get_text(), "5");
 
@@ -75,9 +75,9 @@ TEST(UpassSharedFoldParity, FoldSumConstDryRunNoMutation) {
   auto lnast_rep = upass::run_fold_sum_const_shared(*lm, "test-lnast", true);
   EXPECT_EQ(lnast_rep.folded_nodes, 1U);
   EXPECT_EQ(lnast_rep.rewired_edges, 0U);
-  EXPECT_EQ(lnast_rep.new_const_nodes, 0U);
-  EXPECT_EQ(lnast_rep.deleted_nodes, 0U);
-  EXPECT_TRUE(ln->get_type(pl).is_plus());
+  EXPECT_EQ(lnast_rep.new_const_nodes, 1U);  // estimate_replace_with_const runs even in dry_run
+  EXPECT_EQ(lnast_rep.deleted_nodes, 1U);    // ditto — replace_with_const is NOT called
+  EXPECT_TRUE(ln->get_type(pl).is_plus());    // node NOT mutated in dry_run
 
   constexpr std::string_view kDbPath = "lgdb_upass_shared_fold_parity_dry_run";
   file_utils::clean_dir(kDbPath);

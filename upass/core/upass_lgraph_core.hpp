@@ -30,15 +30,31 @@ protected:
   void mark_changed() { changed = true; }
 };
 
+// Wrapper for passes that do NOT support dry_run.  The bool parameter is
+// accepted but silently ignored so all plugins share the same Setup_fn type.
 template <class T>
 struct uPass_lgraph_wrapper {
 public:
-  static std::shared_ptr<uPass_lgraph> get_upass(std::shared_ptr<Lgraph_manager> &gm) { return std::make_unique<T>(gm); }
+  static std::shared_ptr<uPass_lgraph> get_upass(std::shared_ptr<Lgraph_manager> &gm, bool /*dry_run*/ = false) {
+    return std::make_unique<T>(gm);
+  }
+};
+
+// Wrapper for passes that accept a dry_run flag in their constructor.
+// Use this for fold passes (fold_sum_const, fold_neutral, fold_shift_div,
+// fold_sub_const, fold_mult_const) so the runner can pass the flag through
+// the plugin registry rather than special-casing by name.
+template <class T>
+struct uPass_lgraph_dry_wrapper {
+public:
+  static std::shared_ptr<uPass_lgraph> get_upass(std::shared_ptr<Lgraph_manager> &gm, bool dry_run = false) {
+    return std::make_unique<T>(gm, dry_run);
+  }
 };
 
 class uPass_lgraph_plugin {
 public:
-  using Setup_fn = std::function<std::shared_ptr<uPass_lgraph>(std::shared_ptr<Lgraph_manager> &)>;
+  using Setup_fn = std::function<std::shared_ptr<uPass_lgraph>(std::shared_ptr<Lgraph_manager> &, bool)>;
 
   struct Setup_entry {
     Setup_fn                 setup_fn;

@@ -267,25 +267,27 @@ static upass::uPass_lgraph_plugin plugin_lgraph_fold_tag(
     "fold_tag",
     upass::uPass_lgraph_wrapper<Lgraph_pass_fold_tag>::get_upass,
     {"fold_scan"});
+// Fold passes use uPass_lgraph_dry_wrapper so that the runner can forward the
+// dry_run flag through the plugin registry without name-based special-casing.
 static upass::uPass_lgraph_plugin plugin_lgraph_fold_sum_const(
     "fold_sum_const",
-    upass::uPass_lgraph_wrapper<Lgraph_pass_fold_sum_const>::get_upass,
+    upass::uPass_lgraph_dry_wrapper<Lgraph_pass_fold_sum_const>::get_upass,
     {"fold_scan"});
 static upass::uPass_lgraph_plugin plugin_lgraph_fold_neutral(
     "fold_neutral",
-    upass::uPass_lgraph_wrapper<Lgraph_pass_fold_neutral>::get_upass,
+    upass::uPass_lgraph_dry_wrapper<Lgraph_pass_fold_neutral>::get_upass,
     {"fold_scan"});
 static upass::uPass_lgraph_plugin plugin_lgraph_fold_shift_div(
     "fold_shift_div",
-    upass::uPass_lgraph_wrapper<Lgraph_pass_fold_shift_div>::get_upass,
+    upass::uPass_lgraph_dry_wrapper<Lgraph_pass_fold_shift_div>::get_upass,
     {"fold_scan"});
 static upass::uPass_lgraph_plugin plugin_lgraph_fold_sub_const(
     "fold_sub_const",
-    upass::uPass_lgraph_wrapper<Lgraph_pass_fold_sub_const>::get_upass,
+    upass::uPass_lgraph_dry_wrapper<Lgraph_pass_fold_sub_const>::get_upass,
     {"fold_scan"});
 static upass::uPass_lgraph_plugin plugin_lgraph_fold_mult_const(
     "fold_mult_const",
-    upass::uPass_lgraph_wrapper<Lgraph_pass_fold_mult_const>::get_upass,
+    upass::uPass_lgraph_dry_wrapper<Lgraph_pass_fold_mult_const>::get_upass,
     {"fold_scan"});
 static upass::uPass_lgraph_plugin plugin_lgraph_noop_shared(
     "noop_shared",
@@ -329,80 +331,14 @@ uPass_runner_lgraph::uPass_runner_lgraph(
     }
 
     std::print("uPass(lgraph) - add {}\n", name);
-    if (name == "fold_sum_const") {
-      upasses.emplace_back(Pass_entry{.name = name, .pass = std::make_unique<Lgraph_pass_fold_sum_const>(gm, dry_run)});
-      continue;
-    }
-    if (name == "fold_neutral") {
-      upasses.emplace_back(Pass_entry{.name = name, .pass = std::make_unique<Lgraph_pass_fold_neutral>(gm, dry_run)});
-      continue;
-    }
-    if (name == "fold_shift_div") {
-      upasses.emplace_back(Pass_entry{.name = name, .pass = std::make_unique<Lgraph_pass_fold_shift_div>(gm, dry_run)});
-      continue;
-    }
-    if (name == "fold_sub_const") {
-      upasses.emplace_back(Pass_entry{.name = name, .pass = std::make_unique<Lgraph_pass_fold_sub_const>(gm, dry_run)});
-      continue;
-    }
-    if (name == "fold_mult_const") {
-      upasses.emplace_back(Pass_entry{.name = name, .pass = std::make_unique<Lgraph_pass_fold_mult_const>(gm, dry_run)});
-      continue;
-    }
-    upasses.emplace_back(Pass_entry{.name = name, .pass = it->second.setup_fn(gm)});
+    // setup_fn now accepts (gm, dry_run); non-dry-run passes ignore the bool.
+    upasses.emplace_back(Pass_entry{.name = name, .pass = it->second.setup_fn(gm, dry_run)});
   }
 }
 
 std::vector<std::string> uPass_runner_lgraph::resolve_order(const std::vector<std::string> &requested_names, std::string *error_msg) const {
-  const auto &registry = upass::uPass_lgraph_plugin::get_registry();
-
-  enum class Mark { kUnseen, kVisiting, kDone };
-  std::unordered_map<std::string, Mark> marks;
-  std::vector<std::string>              ordered;
-
-  std::function<bool(const std::string &)> dfs = [&](const std::string &name) {
-    const auto it = registry.find(name);
-    if (it == registry.end()) {
-      std::print("{} is not defined.\n", name);
-      if (error_msg && error_msg->empty()) {
-        *error_msg = std::format("unknown pass '{}'", name);
-      }
-      return false;
-    }
-
-    const auto mit = marks.find(name);
-    if (mit != marks.end()) {
-      if (mit->second == Mark::kVisiting) {
-        upass::error("uPass(lgraph) dependency cycle detected at {}\n", name);
-        if (error_msg && error_msg->empty()) {
-          *error_msg = std::format("dependency cycle detected at '{}'", name);
-        }
-        return false;
-      }
-      return mit->second == Mark::kDone;
-    }
-
-    marks.emplace(name, Mark::kVisiting);
-    for (const auto &dep : it->second.depends_on) {
-      if (!dfs(dep)) {
-        upass::error("uPass(lgraph) dependency chain for {} is invalid\n", name);
-        if (error_msg && error_msg->empty()) {
-          *error_msg = std::format("dependency chain for '{}' is invalid", name);
-        }
-        marks[name] = Mark::kDone;
-        return false;
-      }
-    }
-    marks[name] = Mark::kDone;
-    ordered.emplace_back(name);
-    return true;
-  };
-
-  for (const auto &name : requested_names) {
-    dfs(name);
-  }
-
-  return ordered;
+  return upass::resolve_order_impl(upass::uPass_lgraph_plugin::get_registry(),
+                                   requested_names, "uPass(lgraph)", error_msg);
 }
 
 std::vector<std::string> uPass_runner_lgraph::changed_passes() const {

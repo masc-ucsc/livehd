@@ -147,13 +147,22 @@ public:
     }
     return value;
   }
+  // LNAST replacement is an in-place overwrite of the operator node: the node
+  // itself becomes the Const (1 logical deletion of the old op, 1 new const).
+  // Child operands are pruned immediately via delete_subtree so node_count()
+  // stays accurate.  No explicit edges are rewired (LNAST uses tree structure,
+  // not explicit edge lists), so rewired_edges stays 0.
   Replace_effect estimate_replace_with_const(Node_id node) const override {
     if (decode_nid(node).is_invalid()) {
       return {};
     }
-    // LNAST currently rewrites in place for shared const replacement.
-    return {};
+    return Replace_effect{
+        .rewired_edges   = 0,  // tree-structure, no explicit edge rewiring
+        .new_const_nodes = 1,  // the node is repurposed as a Const
+        .deleted_nodes   = 1,  // the original operator is logically gone
+    };
   }
+
   bool replace_with_const(Node_id node, std::int64_t value) override {
     const auto nid = decode_nid(node);
     if (nid.is_invalid()) {
@@ -161,12 +170,27 @@ public:
     }
 
     if (auto cur = const_value(node); cur && *cur == value) {
-      return false;
+      return false;  // already the target constant — nothing to do
     }
 
-    // Keep subtree structure intact for now; shared transform passes will own any
-    // operand cleanup when they start mutating LNAST through this API.
+    // Collect children before rewriting so we can prune them afterward.
+    // (Collecting up-front avoids any concern about sibling-link state
+    // during deletion.)
+    std::vector<Lnast_nid> children;
+    for (auto child = lnast->get_child(nid); !child.is_invalid();
+         child = lnast->get_sibling_next(child)) {
+      children.push_back(child);
+    }
+
+    // Overwrite the operator node in-place to become a Const.
     lnast->set_data(nid, Lnast_node::create_const(value));
+
+    // Prune the now-orphaned operand subtrees so node_count() stays accurate
+    // and traversals don't visit dead nodes.
+    for (const auto &child : children) {
+      lnast->delete_subtree(child);
+    }
+
     return true;
   }
 

@@ -4,6 +4,7 @@
 
 #include <algorithm>
 #include <functional>
+#include <stdexcept>
 #include <string>
 #include <unordered_map>
 #include <vector>
@@ -89,55 +90,8 @@ uPass_runner::uPass_runner(std::shared_ptr<upass::Lnast_manager>& _lm, const std
 }
 
 std::vector<std::string> uPass_runner::resolve_order(const std::vector<std::string>& requested_names, std::string *error_msg) const {
-  const auto& upass_registry = upass::uPass_plugin::get_registry();
-
-  enum class Mark { kUnseen, kVisiting, kDone };
-  std::unordered_map<std::string, Mark> marks;
-  std::vector<std::string>               ordered;
-
-  std::function<bool(const std::string&)> dfs = [&](const std::string& name) {
-    const auto it = upass_registry.find(name);
-    if (it == upass_registry.end()) {
-      std::print("{} is not defined.\n", name);
-      if (error_msg && error_msg->empty()) {
-        *error_msg = std::format("unknown pass '{}'", name);
-      }
-      return false;
-    }
-
-    const auto mit = marks.find(name);
-    if (mit != marks.end()) {
-      if (mit->second == Mark::kVisiting) {
-        upass::error("uPass dependency cycle detected at {}\n", name);
-        if (error_msg && error_msg->empty()) {
-          *error_msg = std::format("dependency cycle detected at '{}'", name);
-        }
-        return false;
-      }
-      return mit->second == Mark::kDone;
-    }
-
-    marks.emplace(name, Mark::kVisiting);
-    for (const auto& dep : it->second.depends_on) {
-      if (!dfs(dep)) {
-        upass::error("uPass dependency chain for {} is invalid\n", name);
-        if (error_msg && error_msg->empty()) {
-          *error_msg = std::format("dependency chain for '{}' is invalid", name);
-        }
-        marks[name] = Mark::kDone;
-        return false;
-      }
-    }
-    marks[name] = Mark::kDone;
-    ordered.emplace_back(name);
-    return true;
-  };
-
-  for (const auto& name : requested_names) {
-    dfs(name);
-  }
-
-  return ordered;
+  return upass::resolve_order_impl(upass::uPass_plugin::get_registry(),
+                                   requested_names, "uPass", error_msg);
 }
 
 std::vector<std::string> uPass_runner::changed_passes() const {
@@ -177,12 +131,19 @@ void uPass_runner::process_lnast() {
 #define PROCESS_BLOCK(NAME) \
   case Lnast_ntype::Lnast_ntype_##NAME: process_##NAME(); break;
 
-#define PROCESS_NODE(NAME)              \
-  case Lnast_ntype::Lnast_ntype_##NAME: \
-    write_node();                       \
-    for (const auto& entry : upasses) { \
-      entry.pass->process_##NAME();     \
-    }                                   \
+// Each pass is invoked in a try-catch so that a single malformed node (e.g.
+// caught by the verifier) is reported but does not abort traversal of the
+// rest of the tree.  All bad nodes are surfaced rather than just the first.
+#define PROCESS_NODE(NAME)                                                 \
+  case Lnast_ntype::Lnast_ntype_##NAME:                                   \
+    write_node();                                                          \
+    for (const auto &entry : upasses) {                                   \
+      try {                                                                \
+        entry.pass->process_##NAME();                                     \
+      } catch (const std::runtime_error &_e) {                           \
+        std::print(stderr, "uPass [{}] node error: {}", entry.name, _e.what()); \
+      }                                                                    \
+    }                                                                      \
     break;
 
   switch (get_raw_ntype()) {
