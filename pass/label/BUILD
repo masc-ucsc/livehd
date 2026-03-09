@@ -39,6 +39,15 @@ cc_test(
 )
 
 cc_test(
+    name = "path_test",
+    srcs = ["path_test.cpp"],
+    deps = [
+        ":pass_label",
+        "@googletest//:gtest_main",
+    ],
+)
+
+cc_test(
     name = "mincut_test",
     srcs = ["mincut_test.cpp"],
     deps = [

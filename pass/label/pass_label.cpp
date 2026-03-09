@@ -5,6 +5,7 @@
 #include "file_utils.hpp"
 #include "label_acyclic.hpp"
 #include "label_mincut.hpp"
+#include "label_path.hpp"
 #include "label_synth.hpp"
 
 static Pass_plugin sample("pass_label", Pass_label::setup);
@@ -47,6 +48,11 @@ void Pass_label::setup() {
   m3.add_label_optional("merge", "enables merging of acyclic partitions", "false");
   m3.add_label_optional("verbose", "verbose statistics and information", "false");
   register_pass(m3);
+
+  Eprp_method m4("pass.label.path", "Label nodes adjacent to flops/registers with matching colors", &Pass_label::label_path);
+  m4.add_label_optional("hier", "hierarchical traversal/labeling", "false");
+  m4.add_label_optional("verbose", "verbose statistics and information", "false");
+  register_pass(m4);
 }
 
 void Pass_label::label_mincut(Eprp_var &var) {
@@ -92,6 +98,16 @@ void Pass_label::label_acyclic(Eprp_var &var) {
   }
 
   Label_acyclic p(pp.verbose, pp.hier, cutoff, merge_en);
+
+  for (const auto &l : var.lgs) {
+    p.label(l);
+  }
+}
+
+void Pass_label::label_path(Eprp_var &var) {
+  Pass_label pp(var);
+
+  Label_path p(pp.verbose, pp.hier);
 
   for (const auto &l : var.lgs) {
     p.label(l);
