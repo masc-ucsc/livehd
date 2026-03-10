@@ -243,7 +243,7 @@ void Cprop::replace_part_inputs_const(Node &node, XEdge_iterator &inp_edges_orde
   auto op = node.get_type_op();
   if (op == Ntype_op::Mux) {
     auto s_node = inp_edges_ordered[0].driver.get_node();
-    if (!s_node.is_type_const()) {
+    if (!s_node.is_type_const() || s_node.get_type_const().has_unknowns()) {
       return;
     }
 
@@ -392,7 +392,7 @@ void Cprop::replace_all_inputs_const(Node &node, XEdge_iterator &inp_edges_order
     }
 
     replace_node(node, result);
-  } else if (op == Ntype_op::Get_mask) {
+  } else if (false && op == Ntype_op::Get_mask) {
     Lconst val       = node.get_sink_pin("a").get_driver_node().get_type_const();
     auto   mask_spin = node.get_sink_pin("mask");
     if (mask_spin.is_connected()) {

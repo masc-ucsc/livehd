@@ -612,6 +612,7 @@ static Node resolve_memory(Lgraph *g, RTLIL::Cell *cell) {
       } else {
         if (partially_assigned.find(wire) == partially_assigned.end()) {
           partially_assigned[wire].resize(wire->width);
+          partially_assigned_bits[wire].resize(wire->width);
 
           I(wire2pin.find(wire) == wire2pin.end());
           auto node = g->create_node(Ntype_op::Or, wire->width);

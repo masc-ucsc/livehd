@@ -132,7 +132,7 @@ Index_id Lgraph_Base::create_node_space(const Index_id last_idx, const Port_ID d
     // Nove stuff to idx2, legal
 
     node_internal[idx2].assimilate_edges(&node_internal[last_idx]);
-    I(node_internal[last_idx].has_next_space());
+    I(node_internal[last_idx].has_next_space()); // OOPS! There is a weird BUG in corner cases (new hhds should fix it)
 
     I(node_internal[last_idx].get_master_root_nid() == master_nid);
     I(node_internal[idx2].get_master_root_nid() == master_nid);
