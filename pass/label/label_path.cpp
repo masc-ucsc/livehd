@@ -6,6 +6,15 @@
 
 #include "cell.hpp"
 
+// Check if a driver pin has a real wname (not a temporary _nXXX name)
+static bool has_real_wname(const Node_pin &dpin) {
+  if (!dpin.has_name()) {
+    return false;
+  }
+  auto wn = dpin.get_wire_name();
+  return !wn.empty() && wn[0] != '_';
+}
+
 // Returns true if color was newly added, false if already present
 static bool add_color(std::vector<int> &colors, int color) {
   if (std::find(colors.begin(), colors.end(), color) != colors.end()) {
@@ -31,7 +40,7 @@ void Label_path::propagate_fwd(const Node &node, int color) {
     // Check if this successor has a wname on any output edge (stop point)
     bool has_wname = false;
     for (const auto &oe : succ.out_edges()) {
-      if (oe.driver.has_name()) {
+      if (has_real_wname(oe.driver)) {
         has_wname = true;
         break;
       }
@@ -61,7 +70,7 @@ void Label_path::propagate_bwd(const Node &node, int color) {
     // Check if this predecessor has a wname on any output edge (stop point)
     bool has_wname = false;
     for (const auto &oe : pred.out_edges()) {
-      if (oe.driver.has_name()) {
+      if (has_real_wname(oe.driver)) {
         has_wname = true;
         break;
       }
@@ -134,7 +143,7 @@ void Label_path::dump(Lgraph *g) const {
       // Collect wnames from output edges
       for (const auto &e : node.out_edges()) {
         auto wn = e.driver.get_wire_name();
-        if (!wn.empty()) {
+        if (!wn.empty() && wn[0] != '_') {
           color2wnames[color].insert(wn);
         }
       }

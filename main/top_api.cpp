@@ -10,6 +10,8 @@
 #include <regex>
 #include <string>
 
+#include "lgraph.hpp"
+
 void Top_api::files(Eprp_var &var) {
   std::string src_path(var.get("src_path"));
   std::string match(var.get("match"));
@@ -66,6 +68,42 @@ void Top_api::files(Eprp_var &var) {
   }
 }
 
+void Top_api::filter(Eprp_var &var) {
+  auto match = var.get("match");
+
+  if (match.empty()) {
+    var.lgs.clear();
+    var.lnasts.clear();
+    return;
+  }
+
+  try {
+    std::string       match_str{match};
+    const std::regex  match_regex{match_str};
+
+    Eprp_var::Eprp_lgs filtered_lgs;
+    for (auto *lg : var.lgs) {
+      std::string name{lg->get_name()};
+      if (std::regex_search(name, match_regex)) {
+        filtered_lgs.push_back(lg);
+      }
+    }
+    var.lgs = std::move(filtered_lgs);
+
+    Eprp_var::Eprp_lnasts filtered_lnasts;
+    for (const auto &ln : var.lnasts) {
+      std::string name{ln->get_top_module_name()};
+      if (std::regex_search(name, match_regex)) {
+        filtered_lnasts.push_back(ln);
+      }
+    }
+    var.lnasts = std::move(filtered_lnasts);
+
+  } catch (const std::regex_error &e) {
+    Main_api::error("invalid match:{} regex for filter command", match);
+  }
+}
+
 void Top_api::setup(Eprp &eprp) {
   // Alphabetical order sorted to avoid undeterminism in different file orders
   Eprp_method m1("files", "match file names in alphabetical order. Like `ls {src_path} | grep -E {match} | sort`", &Top_api::files);
@@ -74,4 +112,10 @@ void Top_api::setup(Eprp &eprp) {
   m1.add_label_optional("filter", "quoted string of regex to filter out or remove from match.");
 
   eprp.register_method(m1);
+
+  //---------------------
+  Eprp_method m2("filter", "filter lgraphs/lnasts by name regex. If no match is provided, nothing passes through", &Top_api::filter);
+  m2.add_label_optional("match", "quoted string of regex to match against lgraph/lnast names");
+
+  eprp.register_method(m2);
 }
