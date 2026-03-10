@@ -52,6 +52,7 @@ void Pass_label::setup() {
   Eprp_method m4("pass.label.path", "Label nodes adjacent to flops/registers with matching colors", &Pass_label::label_path);
   m4.add_label_optional("hier", "hierarchical traversal/labeling", "false");
   m4.add_label_optional("verbose", "verbose statistics and information", "false");
+  m4.add_label_optional("instance", "seed from the node named exactly this instance and only propagate forward", "");
   register_pass(m4);
 }
 
@@ -106,8 +107,9 @@ void Pass_label::label_acyclic(Eprp_var &var) {
 
 void Pass_label::label_path(Eprp_var &var) {
   Pass_label pp(var);
+  auto       instance_txt = var.get("instance");
 
-  Label_path p(pp.verbose, pp.hier);
+  Label_path p(pp.verbose, pp.hier, instance_txt);
 
   for (const auto &l : var.lgs) {
     p.label(l);

@@ -24,12 +24,18 @@ module sky130_rca(clk, sel, a, b, result);
   input [3:0] a;
   input [3:0] b;
   input clk;
+  input sel;
   output [3:0] result;
   wire \result_next[0] ;
   wire \result_next[1] ;
   wire \result_next[2] ;
   wire \result_next[3] ;
-  input sel;
+
+  wire _tmp_;
+
+
+  assign \result_next[3]  = _tmp_;
+
   sky130_fd_sc_hs__clkinv_1 _20_ (
     .A(a[1]),
     .Y(_00_)
@@ -160,7 +166,7 @@ module sky130_rca(clk, sel, a, b, result);
   sky130_fd_sc_hs__nand2_1 _42_ (
     .A(_18_),
     .B(_19_),
-    .Y(\result_next[3] )
+    .Y(_tmp_)
   );
   sky130_fd_sc_hs__xor2_1 _43_ (
     .A(a[0]),

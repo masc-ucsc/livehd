@@ -117,6 +117,103 @@ TEST_F(Label_path_test, independent_flops) {
   EXPECT_NE(c1, c2);
 }
 
+// Test: instance mode only propagates forward through _instance* named nodes
+TEST_F(Label_path_test, instance_forward_only) {
+  auto   *lib = Graph_library::instance("lgdb_path_test");
+  Lgraph *g   = lib->create_lgraph("instance_forward_only", "-");
+  ASSERT_NE(g, nullptr);
+
+  Label_path labeler(true, false, "foo");
+
+  auto inp = g->add_graph_input("inp", 1, 10);
+  auto out = g->add_graph_output("out", 3, 10);
+
+  auto src     = g->create_node(Ntype_op::And);
+  auto src_inp = src.setup_sink_pin(std::string_view("A"));
+  auto src_out = src.setup_driver_pin(std::string_view("Y"));
+
+  auto seed     = g->create_node(Ntype_op::Or);
+  auto seed_inp = seed.setup_sink_pin(std::string_view("A"));
+  auto seed_out = seed.setup_driver_pin(std::string_view("Y"));
+  seed.set_name("foo");
+
+  auto mid1     = g->create_node(Ntype_op::Xor);
+  auto mid1_inp = mid1.setup_sink_pin(std::string_view("A"));
+  auto mid1_out = mid1.setup_driver_pin(std::string_view("Y"));
+  mid1.set_name("_foo_stage0");
+
+  auto mid2     = g->create_node(Ntype_op::Sum);
+  auto mid2_inp = mid2.setup_sink_pin(std::string_view("A"));
+  auto mid2_out = mid2.setup_driver_pin(std::string_view("Y"));
+
+  auto stop     = g->create_node(Ntype_op::Not);
+  auto stop_inp = stop.setup_sink_pin();
+  auto stop_out = stop.setup_driver_pin(std::string_view("Y"));
+  stop.set_name("bar");
+
+  g->add_edge(inp, src_inp, 10);
+  g->add_edge(src_out, seed_inp, 10);
+  g->add_edge(seed_out, mid1_inp, 10);
+  g->add_edge(mid1_out, mid2_inp, 10);
+  g->add_edge(mid2_out, stop_inp, 10);
+  g->add_edge(stop_out, out, 10);
+
+  labeler.label(g);
+
+  auto seed_color = seed.get_color();
+  EXPECT_NE(0, seed_color);
+  EXPECT_FALSE(src.has_color());
+  EXPECT_EQ(seed_color, mid1.get_color());
+  EXPECT_EQ(seed_color, mid2.get_color());
+  EXPECT_EQ(seed_color, stop.get_color());
+}
+
+TEST_F(Label_path_test, instance_multiple_seeds_get_different_colors) {
+  auto   *lib = Graph_library::instance("lgdb_path_test");
+  Lgraph *g   = lib->create_lgraph("instance_multiple_seeds_get_different_colors", "-");
+  ASSERT_NE(g, nullptr);
+
+  Label_path labeler(true, false, "foo,bb");
+
+  auto foo_seed     = g->create_node(Ntype_op::Or);
+  auto foo_seed_out = foo_seed.setup_driver_pin(std::string_view("Y"));
+  foo_seed.set_name("foo");
+
+  auto foo_mid     = g->create_node(Ntype_op::Xor);
+  auto foo_mid_inp = foo_mid.setup_sink_pin(std::string_view("A"));
+  foo_mid.setup_driver_pin(std::string_view("Y"));
+  foo_mid.set_name("_foo_stage0");
+
+  auto bb_seed     = g->create_node(Ntype_op::And);
+  auto bb_seed_out = bb_seed.setup_driver_pin(std::string_view("Y"));
+  bb_seed.set_name("bb");
+
+  auto bb_mid     = g->create_node(Ntype_op::Sum);
+  auto bb_mid_inp = bb_mid.setup_sink_pin(std::string_view("A"));
+  auto bb_mid_out = bb_mid.setup_driver_pin(std::string_view("Y"));
+  bb_mid.set_name("_bb_stage0");
+
+  auto bb_stop     = g->create_node(Ntype_op::Not);
+  auto bb_stop_inp = bb_stop.setup_sink_pin();
+  bb_stop.set_name("after_bb");
+
+  g->add_edge(foo_seed_out, foo_mid_inp, 10);
+  g->add_edge(bb_seed_out, bb_mid_inp, 10);
+  g->add_edge(bb_mid_out, bb_stop_inp, 10);
+
+  labeler.label(g);
+
+  auto foo_color = foo_seed.get_color();
+  auto bb_color  = bb_seed.get_color();
+
+  EXPECT_NE(0, foo_color);
+  EXPECT_NE(0, bb_color);
+  EXPECT_NE(foo_color, bb_color);
+  EXPECT_EQ(foo_color, foo_mid.get_color());
+  EXPECT_EQ(bb_color, bb_mid.get_color());
+  EXPECT_EQ(bb_color, bb_stop.get_color());
+}
+
 int main(int argc, char **argv) {
   ::testing::InitGoogleTest(&argc, argv);
   return RUN_ALL_TESTS();

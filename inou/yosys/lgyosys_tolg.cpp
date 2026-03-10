@@ -104,6 +104,7 @@ static void look_for_wire(Lgraph *g, const RTLIL::Wire *wire) {
     pending_outputs.emplace_back(wire);
     if (wire->name.c_str()[0] != '$') {
       std::string wname(&wire->name.c_str()[1]);
+      // std::print("reset_name dpin:{} to {}\n", dpin.debug_name(), wname);
       dpin.set_name(wname);
     }
 #endif
@@ -860,8 +861,13 @@ static void process_cell_drivers_intialization(RTLIL::Module *mod, Lgraph *g) {
           continue;
         }
 
-        // std::print("dpin:{} bits:{} wire:{} offset:{}\n", driver_pin.debug_name(), driver_pin.get_bits(), wire->name.str(),
-        // offset);
+        // std::print("YYY dpin:{} bits:{} wire:{} offset:{} chun:{} wire:{}\n",
+        //            driver_pin.debug_name(),
+        //            driver_pin.get_bits(),
+        //            wire->name.str(),
+        //            offset,
+        //            chunk.width,
+        //            wire->width);
 
         if (chunk.width == wire->width) {
           if (chunk.width == ss.size()) {
@@ -889,20 +895,20 @@ static void process_cell_drivers_intialization(RTLIL::Module *mod, Lgraph *g) {
             auto n2 = g->create_node(Ntype_op::Or, wire->width).get_non_hierarchical();
             set_loc(n2, wire->get_src_attribute());
 
-            if (wire2pin.find(wire) != wire2pin.end()) {
-              auto dpin = wire2pin[wire];
-              std::print("partial wire {} from module {} cell type {} (switching to partial node:{})\n",
-                         wire->name.c_str(),
-                         mod->name.c_str(),
-                         cell->type.c_str(),
-                         dpin.get_node().debug_name());
-            }
+            // if (wire2pin.find(wire) != wire2pin.end()) {
+            // auto dpin = wire2pin[wire];
+            //  std::print("partial wire {} from module {} cell type {} (switching to partial node:{})\n",
+            //             wire->name.c_str(),
+            //             mod->name.c_str(),
+            //             cell->type.c_str(),
+            //             dpin.get_node().debug_name());
+            //}
             auto n2_dpin = n2.setup_driver_pin();
             if (wire->name.c_str()[0] != '$') {
               std::string wname(&wire->name.c_str()[1]);
               n2_dpin.set_name(wname);
             }
-            wire2pin[wire] = n2.setup_driver_pin();
+            wire2pin[wire] = n2_dpin;  // .setup_driver_pin();
           }
 
 #if 0
@@ -911,7 +917,7 @@ static void process_cell_drivers_intialization(RTLIL::Module *mod, Lgraph *g) {
                      wire->name.str(),
                      chunk.offset,
                      chunk.offset + chunk.width - 1,
-		     offset);
+                     offset);
 #endif
           auto src_pin = create_pick_operator(driver_pin, offset, chunk.width, wire->is_signed);
           offset += chunk.width;
@@ -938,7 +944,7 @@ static void process_cell_drivers_intialization(RTLIL::Module *mod, Lgraph *g) {
 static void dump_partially_assigned() {
   for (auto it : partially_assigned) {
     const auto *wire = it.first;
-    std::print("wire:{} width:{}\n", wire->name.str(), wire->width);
+    // std::print("wire:{} width:{}\n", wire->name.str(), wire->width);
 
     int i = 0;
     while (i < (int)it.second.size()) {
@@ -956,7 +962,11 @@ static void dump_partially_assigned() {
       }
       // I(!dpin.is_invalid());
 
-      std::print("   [{}:{}] name:{}\n", i, i + width - 1, dpin.debug_name());
+      // std::print("   [{}:{}] name:{} wname:{}\n",
+      //            i,
+      //            i + width - 1,
+      //            dpin.debug_name(),
+      //            dpin.has_name() ? dpin.get_name() : "noname");
 
 #ifndef NDEBUG
       for (int j = i + 1; j < i + width; ++j) {
@@ -1007,70 +1017,187 @@ static void process_assigns(RTLIL::Module *mod, Lgraph *g) {
           I(dpin.get_bits() == lhs_wire->width);
         }
 #endif
-        auto     ss   = rhs.extract(lchunk.offset, lchunk.width);
+        auto ss = rhs.extract(lchunk.offset, lchunk.width);
+
+        // Get the LHS name (wname) and check if it is a temp name (starts with _)
+        std::string lhs_name;
+        bool        lhs_is_temp     = true;
+        bool        lhs_is_internal = (lhs_wire->name.c_str()[0] == '$');
+        if (!lhs_is_internal) {
+          lhs_name    = std::string(&lhs_wire->name.c_str()[1]);
+          lhs_is_temp = (!lhs_name.empty() && lhs_name[0] == '_');
+        }
+
+        // Get the RHS wire name and check if it is meaningful
+        std::string        rhs_name;
+        bool               rhs_is_temp     = true;
+        bool               rhs_is_internal = true;
+        const RTLIL::Wire *rhs_wire        = (ss.size() == 1) ? ss[0].wire : nullptr;
+        if (rhs_wire && rhs_wire->name.c_str()[0] != '$') {
+          rhs_name        = std::string(&rhs_wire->name.c_str()[1]);
+          rhs_is_internal = false;
+          rhs_is_temp     = (!rhs_name.empty() && rhs_name[0] == '_');
+        }
+
+        // Determine the best name to preserve (prefer non-temp names)
+        std::string best_name;
+        if (!lhs_is_internal && !lhs_is_temp) {
+          best_name = lhs_name;
+        } else if (!rhs_is_internal && !rhs_is_temp) {
+          best_name = rhs_name;
+        } else if (!lhs_is_internal) {
+          best_name = lhs_name;
+        }
+
+        // std::print("DBG assign lhs:{} rhs:{} lhs_temp:{} rhs_temp:{} lhs_int:{} rhs_int:{} best:{}\n",
+        //            lhs_wire->name.c_str(),
+        //            rhs_wire ? rhs_wire->name.c_str() : "multi/const",
+        //            lhs_is_temp, rhs_is_temp, lhs_is_internal, rhs_is_internal,
+        //            best_name.empty() ? "(none)" : best_name);
+
+        // Fast path: if wire2pin[lhs_wire] already has a cell output from
+        // cell init (Yosys resolved the wire), just rename the pin to the
+        // best name. No need to create placeholders or OR nodes.
+        if (!best_name.empty() && !lhs_wire->port_output) {
+          auto lhs_it = wire2pin.find(lhs_wire);
+          if (lhs_it != wire2pin.end()) {
+            auto &prev_pin       = lhs_it->second;
+            bool  is_placeholder = prev_pin.get_node().is_type(Ntype_op::Or) && !prev_pin.get_node().has_inputs();
+            // std::print("DBG  fast_path: lhs in wire2pin, is_placeholder:{} node_type:{} has_name:{} name:{}\n",
+            //            is_placeholder,
+            //            prev_pin.get_node().debug_name(),
+            //            prev_pin.has_name(),
+            //            prev_pin.has_name() ? std::string(prev_pin.get_name()) : "(none)");
+            if (!is_placeholder) {
+              // prev_pin is a real cell output (not a placeholder)
+              if (!prev_pin.has_name() || prev_pin.get_name()[0] == '_') {
+                // std::print("DBG  fast_path: RENAME {} -> {}\n",
+                //            prev_pin.has_name() ? std::string(prev_pin.get_name()) : "(none)", best_name);
+                prev_pin.set_name(best_name);
+              } else if (prev_pin.get_name() != best_name && best_name[0] != '_') {
+                // std::print("DBG  fast_path: OR node for both names {} and {}\n",
+                //            std::string(prev_pin.get_name()), best_name);
+                auto or_node = prev_pin.get_node().create(Ntype_op::Or);
+                auto or_dpin = or_node.setup_driver_pin();
+                or_dpin.set_bits(lhs_wire->width);
+                or_dpin.set_name(best_name);
+                or_node.connect_sink(prev_pin);
+                wire2pin[lhs_wire] = or_dpin;
+              } else {
+                // std::print("DBG  fast_path: no change needed (name:{} best:{})\n",
+                //            std::string(prev_pin.get_name()), best_name);
+              }
+              // wire2pin[lhs_wire] is already correct for future consumers
+              global_lhs_pos += lhs_wire->width;
+              continue;
+            }
+            // } else {
+            //   std::print("DBG  fast_path: lhs NOT in wire2pin\n");
+          }
+          // } else {
+          //   std::print("DBG  fast_path: SKIPPED (best_name empty:{} port_output:{})\n",
+          //              best_name.empty(), (bool)lhs_wire->port_output);
+        }
+
+        // Normal path: wire2pin[lhs_wire] does not have a cell output yet
+        // std::print("DBG  normal_path: creating dpin from RHS\n");
         Node_pin dpin = create_pick_concat_dpin(g, ss, lhs_wire->is_signed);
-        if (lhs_wire->name.c_str()[0] != '$') {
-          std::string wname(&lhs_wire->name.c_str()[1]);
-          bool        rhs_adjusted_name = false;
-          if (!lhs_wire->port_output && ss.size() == 1) {
-            auto it = wire2pin.find(ss[0].wire);
+
+        // For multi-chunk RHS with a meaningful LHS name, rename each RHS
+        // chunk's temp wire pin to lhs_name[bit_offset]. This handles the
+        // case where Yosys merges per-bit assigns into one bus connection.
+        if (!best_name.empty() && !rhs_wire && ss.size() > 1) {
+          const std::vector<RTLIL::SigChunk> chunks(ss.chunks().begin(), ss.chunks().end());
+          // std::print("DBG  multi-chunk: best_name:{} num_chunks:{} ss_bits:{}\n",
+          //            best_name, chunks.size(), ss.size());
+          int bit_offset = 0;
+          for (const auto &chunk : chunks) {
+            if (chunk.wire) {
+              auto it     = wire2pin.find(chunk.wire);
+              bool in_w2p = (it != wire2pin.end());
+              // std::print("DBG  multi-chunk: bit:{} wire:{} width:{} in_wire2pin:{}\n",
+              //            bit_offset, chunk.wire->name.c_str(), chunk.width, in_w2p);
+              if (in_w2p) {
+                auto       &chunk_pin = it->second;
+                std::string bit_name;
+                if (chunk.width == 1) {
+                  bit_name = absl::StrCat(best_name, "[", bit_offset, "]");
+                } else {
+                  bit_name = absl::StrCat(best_name, "[", bit_offset + chunk.width - 1, ":", bit_offset, "]");
+                }
+                if (!chunk_pin.has_name() || chunk_pin.get_name()[0] == '_') {
+                  // No name or temp name — just rename
+                  chunk_pin.set_name(bit_name);
+                } else if (chunk_pin.get_name() != bit_name) {
+                  // Pin already has a meaningful name — add OR node to preserve both
+                  auto or_node = chunk_pin.get_node().create(Ntype_op::Or);
+                  auto or_dpin = or_node.setup_driver_pin();
+                  or_dpin.set_bits(chunk.width);
+                  or_dpin.set_name(bit_name);
+                  or_node.connect_sink(chunk_pin);
+                  wire2pin[chunk.wire] = or_dpin;
+                }
+              }
+              // } else {
+              //   std::print("DBG  multi-chunk: bit:{} CONST width:{}\n", bit_offset, chunk.width);
+            }
+            bit_offset += chunk.width;
+          }
+          // } else if (!best_name.empty() && !rhs_wire) {
+          //   std::print("DBG  multi-chunk: SKIPPED ss.size()={}\n", ss.size());
+        }
+
+        if (!lhs_is_internal) {
+          bool rhs_adjusted_name = false;
+          if (!lhs_wire->port_output && rhs_wire) {
+            auto it = wire2pin.find(rhs_wire);
             if (it != wire2pin.end()) {
               auto &rhs_dpin = it->second;
-              if (!rhs_dpin.has_name()) {
-                rhs_dpin.set_name(wname);
+              // std::print("DBG  normal: rhs_wire in wire2pin, has_name:{} name:{}\n",
+              //            rhs_dpin.has_name(),
+              //            rhs_dpin.has_name() ? std::string(rhs_dpin.get_name()) : "(none)");
+              if (!rhs_dpin.has_name() || rhs_dpin.get_name()[0] == '_') {
+                auto set_name = best_name.empty() ? lhs_name : best_name;
+                // std::print("DBG  normal: rhs_adjusted_name -> set {} on rhs_dpin\n", set_name);
+                rhs_dpin.set_name(set_name);
                 rhs_adjusted_name = true;
-                std::print("1.which pin to assign {} dpin:{}\n", wname, rhs_dpin.get_wire_name());
               }
+              // } else {
+              //   std::print("DBG  normal: rhs_wire NOT in wire2pin\n");
             }
           }
-          if (!rhs_adjusted_name) {
-            if (!dpin.has_name()) {
-              dpin.set_name(wname);
-            } else if (dpin.get_name() != wname) {
-              // std::print("which pin to assign {} dpin:{}\n", wname, dpin.get_wire_name());
+          if (!rhs_adjusted_name && !best_name.empty()) {
+            if (!dpin.has_name() || dpin.get_name()[0] == '_') {
+              // std::print("DBG  normal: set best_name {} on dpin\n", best_name);
+              dpin.set_name(best_name);
+            } else if (dpin.get_name() != best_name && best_name[0] != '_') {
+              // std::print("DBG  normal: OR node dpin:{} best:{}\n", std::string(dpin.get_name()), best_name);
               auto or_node = dpin.get_node().create(Ntype_op::Or);
               auto or_dpin = or_node.setup_driver_pin();
               or_dpin.set_bits(lhs_wire->width);
-              or_dpin.set_name(wname);
+              or_dpin.set_name(best_name);
               or_node.connect_sink(dpin);
-
-              // or_node.dump();
-              // dpin.get_node().dump();
               dpin = or_dpin;
+              // } else {
+              //   std::print("DBG  normal: no name change (dpin:{} best:{})\n",
+              //              std::string(dpin.get_name()), best_name);
             }
+            // } else {
+            // std::print("DBG  normal: skip name (rhs_adjusted:{} best_empty:{})\n",
+            //            rhs_adjusted_name, best_name.empty());
           }
         }
-        // std::print("XXX pin to assign {} dpin:{}\n", lhs_wire->name.c_str(), dpin.get_wire_name());
         if (wire2pin.find(lhs_wire) != wire2pin.end()) {
-          auto prev_dpin = wire2pin[lhs_wire];
-#ifndef NDEBUG
-          if (lhs_wire->port_output) {
-            auto it = std::find(pending_outputs.begin(), pending_outputs.end(), lhs_wire);
-            I(it != pending_outputs.end());
-          }
-          if (wire2pin.find(lhs_wire) != wire2pin.end()) {
-            auto dpin2 = wire2pin[lhs_wire];
-            I(!dpin2.get_node().has_inputs());
-            /* Previous assertion fails sometimes because Yosys creates this weird Verilog:
-                  always @(posedge clock) begin
-                      topdown_stages_0_reasons_35 <= _001475_;
-                  end
-                  always @(posedge reset) begin
-                      topdown_stages_0_reasons_35 <= _001475_;
-                  end
-            */
-
-            I(dpin2.get_bits() == lhs_wire->width);
-          }
-#endif
-          if (true || prev_dpin.has_outputs()) {  // OOPS, got used out of order (lack of topo here)
-            I(prev_dpin.get_node().is_type(Ntype_op::Or));
-            I(!prev_dpin.get_node().has_inputs());
+          auto prev_dpin      = wire2pin[lhs_wire];
+          bool is_placeholder = prev_dpin.get_node().is_type(Ntype_op::Or) && !prev_dpin.get_node().has_inputs();
+          // std::print("DBG  wire2pin update: lhs found, is_placeholder:{}\n", is_placeholder);
+          if (is_placeholder) {
             append_to_or_node(g, prev_dpin.get_node(), dpin, 0);
           } else {
             wire2pin[lhs_wire] = dpin;
           }
         } else {
+          // std::print("DBG  wire2pin update: lhs NOT found, setting\n");
           wire2pin[lhs_wire] = dpin;
         }
 
@@ -1294,7 +1421,7 @@ static void connect_partial_dpin(Lgraph *g, Node &or_node, uint32_t or_offset, B
 static void process_partially_assigned_other(Lgraph *g) {
   for (const auto &it : partially_assigned) {
     const RTLIL::Wire *wire = it.first;
-    std::print(" wire:{} width:{}\n", wire->name.str(), wire->width);
+    // std::print(" wire:{} width:{}\n", wire->name.str(), wire->width);
     I(it.second.size() == it.first->width);  // every bit set (maye be same dpin)
 
     auto or_dpin = get_partial_dpin(g, wire);
@@ -1846,9 +1973,8 @@ static void process_cells(RTLIL::Module *mod, Lgraph *g) {
     } else if (std::strncmp(cell->type.c_str(), "$dff", 4) == 0 || std::strncmp(cell->type.c_str(), "$dffe", 5) == 0
                || std::strncmp(cell->type.c_str(), "$dffsr", 6) == 0 || std::strncmp(cell->type.c_str(), "$adff", 5) == 0
                || std::strncmp(cell->type.c_str(), "$adffe", 6) == 0 || std::strncmp(cell->type.c_str(), "$adffsr", 7) == 0
-               || std::strncmp(cell->type.c_str(), "$aldff", 6) == 0
-               || std::strncmp(cell->type.c_str(), "$sdff", 5) == 0 || std::strncmp(cell->type.c_str(), "$sdffe", 6) == 0
-               || std::strncmp(cell->type.c_str(), "$sdffsr", 7) == 0) {
+               || std::strncmp(cell->type.c_str(), "$aldff", 6) == 0 || std::strncmp(cell->type.c_str(), "$sdff", 5) == 0
+               || std::strncmp(cell->type.c_str(), "$sdffe", 6) == 0 || std::strncmp(cell->type.c_str(), "$sdffsr", 7) == 0) {
       exit_node.set_type(Ntype_op::Flop, get_output_size(cell));
 
       if (cell->hasPort(ID::Q)) {
@@ -2308,7 +2434,7 @@ static void process_cells(RTLIL::Module *mod, Lgraph *g) {
       // int parameters
       uint32_t width = cell->getParam(ID::WIDTH).as_int();
 
-      uint32_t depth  = cell->getParam(ID::SIZE).as_int();
+      uint32_t depth = cell->getParam(ID::SIZE).as_int();
 
       auto abits = cell->getParam(ID::ABITS).as_int();
 
@@ -2316,13 +2442,13 @@ static void process_cells(RTLIL::Module *mod, Lgraph *g) {
       auto wrports = cell->getParam(ID::WR_PORTS).as_int();
 
       // string parameters
-      auto transp = cell->hasParam(ID::RD_TRANSPARENCY_MASK) ? cell->getParam(ID::RD_TRANSPARENCY_MASK).as_int() : 0;
+      auto transp  = cell->hasParam(ID::RD_TRANSPARENCY_MASK) ? cell->getParam(ID::RD_TRANSPARENCY_MASK).as_int() : 0;
       auto rd_clke = cell->getParam(ID::RD_CLK_ENABLE).as_int();
       auto wr_clkp = cell->getParam(ID::WR_CLK_POLARITY).as_int();
 
       std::string name(&cell->getParam(ID::MEMID).decode_string().c_str()[1]);
 
-      std::print("name:{} depth:{} wrports:{} rdports:{}\n", name, depth, wrports, rdports);
+      // std::print("name:{} depth:{} wrports:{} rdports:{}\n", name, depth, wrports, rdports);
 
       exit_node.setup_sink_pin("bits").connect_driver(g->create_node_const(width));
       exit_node.setup_sink_pin("fwd").connect_driver(g->create_node_const(transp));
@@ -2335,25 +2461,25 @@ static void process_cells(RTLIL::Module *mod, Lgraph *g) {
       for (int i = 0; i < wrports; i++) {
         auto port_n = i * 11;
         exit_node.setup_sink_pin_raw(10 + port_n).connect_driver(g->create_node_const(0));  // write
-        exit_node.setup_sink_pin_raw(3 + port_n).connect_driver(
-            create_pick_concat_dpin(g, cell->getPort(ID::WR_DATA).extract(i * width, width), false));
-        exit_node.setup_sink_pin_raw(4 + port_n).connect_driver(
-            create_pick_concat_dpin(g, cell->getPort(ID::WR_EN).extract(i * width, width), false));
-        exit_node.setup_sink_pin_raw(0 + port_n).connect_driver(
-            create_pick_concat_dpin(g, cell->getPort(ID::WR_ADDR).extract(i * abits, abits), false));
-        exit_node.setup_sink_pin_raw(2 + port_n).connect_driver(
-            create_pick_concat_dpin(g, cell->getPort(ID::WR_CLK).extract(i, 1), false));
+        exit_node.setup_sink_pin_raw(3 + port_n)
+            .connect_driver(create_pick_concat_dpin(g, cell->getPort(ID::WR_DATA).extract(i * width, width), false));
+        exit_node.setup_sink_pin_raw(4 + port_n)
+            .connect_driver(create_pick_concat_dpin(g, cell->getPort(ID::WR_EN).extract(i * width, width), false));
+        exit_node.setup_sink_pin_raw(0 + port_n)
+            .connect_driver(create_pick_concat_dpin(g, cell->getPort(ID::WR_ADDR).extract(i * abits, abits), false));
+        exit_node.setup_sink_pin_raw(2 + port_n)
+            .connect_driver(create_pick_concat_dpin(g, cell->getPort(ID::WR_CLK).extract(i, 1), false));
       }
       // Read ports
       for (int i = 0; i < rdports; i++) {
         auto port_n = (wrports + i) * 11;
         exit_node.setup_sink_pin_raw(10 + port_n).connect_driver(g->create_node_const(1));  // read
-        exit_node.setup_sink_pin_raw(4 + port_n).connect_driver(
-            create_pick_concat_dpin(g, cell->getPort(ID::RD_EN).extract(i, 1), false));
-        exit_node.setup_sink_pin_raw(0 + port_n).connect_driver(
-            create_pick_concat_dpin(g, cell->getPort(ID::RD_ADDR).extract(i * abits, abits), false));
-        exit_node.setup_sink_pin_raw(2 + port_n).connect_driver(
-            create_pick_concat_dpin(g, cell->getPort(ID::RD_CLK).extract(i, 1), false));
+        exit_node.setup_sink_pin_raw(4 + port_n)
+            .connect_driver(create_pick_concat_dpin(g, cell->getPort(ID::RD_EN).extract(i, 1), false));
+        exit_node.setup_sink_pin_raw(0 + port_n)
+            .connect_driver(create_pick_concat_dpin(g, cell->getPort(ID::RD_ADDR).extract(i * abits, abits), false));
+        exit_node.setup_sink_pin_raw(2 + port_n)
+            .connect_driver(create_pick_concat_dpin(g, cell->getPort(ID::RD_CLK).extract(i, 1), false));
       }
 
       // DO NOT MERGE THE BELLOW WITH THE OTHER ANDs, NOTs, DFFs
@@ -2433,6 +2559,16 @@ static void process_cells(RTLIL::Module *mod, Lgraph *g) {
           }
 
           if (sub.is_output(name)) {
+            for (auto &chunk : conn.second.chunks()) {
+              const RTLIL::Wire *wire = chunk.wire;
+              if (wire) {
+                // std::print("sub {} pinname:{} wname:{} hashidx:{}\n",
+                //            exit_node.has_name() ? exit_node.get_name() : "XX",
+                //            name,
+                //            &wire->name.c_str()[1],
+                //            wire->hashidx_);
+              }
+            }
             continue;
           }
           if (!sub.is_input(name)) {
@@ -2550,7 +2686,7 @@ struct Yosys2lg_Pass : public Yosys::Pass {
       if (design->selected_module(it.first)) {
         std::string mod_name(&(mod->name.c_str()[1]));
 #ifndef NDEBUG
-        std::print("inou.yosys.tolg module:{}\n", mod_name);
+        // std::print("inou.yosys.tolg module:{}\n", mod_name);
 #endif
 
         driven_signals.clear();
@@ -2573,8 +2709,21 @@ struct Yosys2lg_Pass : public Yosys::Pass {
             if (lchunk.width == 0) {
               continue;
             }
-            // std::print("Assignment to {}\n", lhs_wire->name.c_str());
+
             driven_signals.insert(lhs_wire->hashidx_);
+#if 0
+            const RTLIL::SigSpec rhs = conn.second;
+            for (auto &rchunk : rhs.chunks()) {
+              const RTLIL::Wire *rhs_wire = rchunk.wire;
+              if (rhs_wire) {
+                // std::print("Assignment to {} l.hashidx:{} from {} r.hahsidx{}\n",
+                //            lhs_wire->name.c_str(),
+                //            lhs_wire->hashidx_,
+                //            rhs_wire->name.c_str(),
+                //            rhs_wire->hashidx_);
+              }
+            }
+#endif
           }
         }
 

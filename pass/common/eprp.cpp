@@ -35,6 +35,21 @@ std::pair<bool, std::string> Eprp::rule_path() {
     if (!ok) {
       break;
     }
+
+    // Handle // in file paths: the scanner treats // as a line comment,
+    // but in path context it's a valid path separator (e.g., /path/to//file).
+    // Include the comment text as part of the path instead of discarding it.
+    if (scan_is_token(Token_id_comment) && !scan_is_end()) {
+      auto comment_text = scan_text();
+      if (comment_text.size() > 2 && comment_text[0] == '/' && comment_text[1] == '/' && !std::isspace(comment_text[2])) {
+        path = path.append(comment_text);
+        ast->add(Eprp_rule_path, scan_token_entry());
+        ok = scan_next();
+        if (!ok) {
+          break;
+        }
+      }
+    }
     eat_comments();
 
     if (scan_is_next_token(1, Token_id_colon)) {

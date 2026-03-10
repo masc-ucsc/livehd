@@ -1,0 +1,91 @@
+#!/usr/bin/env bash
+
+set -euo pipefail
+
+usage() {
+  echo "usage: $0 <instance-netlist-colors> <orig-source-colors> [instance-name]" >&2
+  echo "example: $0 pp.netlist.colors pp.source.colors _35031_" >&2
+  exit 1
+}
+
+if [[ $# -lt 2 || $# -gt 3 ]]; then
+  usage
+fi
+
+instance_trace=$1
+path_trace=$2
+instance_name=${3-}
+
+if [[ ! -f ${instance_trace} ]]; then
+  echo "missing file: ${instance_trace}" >&2
+  exit 1
+fi
+
+if [[ ! -f ${path_trace} ]]; then
+  echo "missing file: ${path_trace}" >&2
+  exit 1
+fi
+
+awk -F':' -v instance_name="${instance_name}" '
+  function trim(text) {
+    gsub(/^[[:space:]]+|[[:space:]]+$/, "", text)
+    return text
+  }
+
+  function emit_name(name,  bit, base) {
+    name = trim(name)
+    if (name == "") {
+      return
+    }
+
+    if (match(name, /\[[0-9]+\]$/)) {
+      bit  = substr(name, RSTART + 1, RLENGTH - 2)
+      base = substr(name, 1, RSTART - 1)
+      print name
+      print base "." bit
+      print base
+      return
+    }
+
+    if (match(name, /\[[0-9]+:[0-9]+\]$/)) {
+      base = substr(name, 1, RSTART - 1)
+      print base
+      return
+    }
+
+    print name
+  }
+
+  BEGIN {
+    OFS = "\n"
+  }
+
+  /^:/ {
+    if (trim($3) != "instance") {
+      next
+    }
+
+    if (instance_name != "" && trim($4) != instance_name) {
+      next
+    }
+
+    names = $6
+    n = split(names, arr, /[[:space:]]+/)
+    for (i = 1; i <= n; ++i) {
+      emit_name(arr[i])
+    }
+  }
+' "${instance_trace}" | sort -u | while IFS= read -r signal; do
+  awk -F':' -v signal="${signal}" '
+    /^:/ {
+      names = ""
+      for (i = 5; i <= NF; ++i) {
+        names = names (i == 5 ? "" : ":") $i
+      }
+
+      if (index(names, signal)) {
+        print $4
+      }
+    }
+  ' "${path_trace}" | sed -e 's/ /\n/g' | awk 'NF && $0 != "-"' | sort -u
+done | sort -u
