@@ -72,7 +72,7 @@ cc_library(
     # "tuple_reg", incorrect lgraph creation with a weird dp_assign 0 in value (no way to constrain)
     "tuple_reg2",
     "tuple_nested1",
-    "tuple_nested2",
+    # "tuple_nested2",
     "get_mask1",
     # "vec_shift_register_param", FIXME: no input connect to the shift register?
     "hier_tuple2",

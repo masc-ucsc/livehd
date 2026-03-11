@@ -177,6 +177,19 @@ void Lnast_tolg::process_ast_concat_op(Lgraph *lg, const Lnast_nid &lnidx_concat
   auto opd1_name = lnast->get_sname(opd1);
   // lhs = opd1 ++ opd2, both opd1 and opd2 could be either a scalar or a tuple
 
+  if (lnast->get_type(opd1).is_const() && lnast->get_type(opd2).is_const()) {
+    std::string concat_name = absl::StrCat(lnast->get_vname(opd1), lnast->get_vname(opd2));
+    auto        concat_dpin = lg->create_node_const(Lconst::from_string(concat_name)).setup_driver_pin();
+
+    name2dpin[lhs_name] = concat_dpin;
+    concat_dpin.set_name(lhs_name);
+
+    if (!is_tmp_var(lhs_vname)) {
+      setup_dpin_ssa(name2dpin[lhs_name], lhs_vname, lnast->get_subs(lhs));
+    }
+    return;
+  }
+
   // create TupAdd, concat both tail of opd1 and opd2, name it with old opd1_name (a = a ++ b) or new lhs_name (c = a ++ b)
   auto        tup_add = lg->create_node(Ntype_op::TupAdd);
   const auto &tok     = lnast->get_token(lnidx_concat);
@@ -239,6 +252,32 @@ void Lnast_tolg::process_ast_nary_op_direct_map(Lgraph *lg, const Lnast_nid &lni
     }
 
     opds.emplace_back(opd);
+  }
+
+  if (lnast->get_type(lnidx_opr).is_get_mask() && opds.size() == 2) {
+    auto a_node    = opds[0].get_node();
+    auto mask_node = opds[1].get_node();
+    if (a_node.get_type_op() == Ntype_op::Const && a_node.get_type_const().is_string() && mask_node.get_type_op() == Ntype_op::TupAdd
+        && !mask_node.setup_sink_pin("parent").is_connected()
+        && !mask_node.setup_sink_pin("field").is_connected() && !mask_node.setup_sink_pin("value").is_connected()) {
+      auto lhs       = lnast->get_first_child(lnidx_opr);
+      auto lhs_name  = lnast->get_sname(lhs);
+      auto lhs_vname = lnast->get_vname(lhs);
+
+      auto        const_node = lg->create_node_const(a_node.get_type_const());
+      const auto &tok        = lnast->get_token(lnidx_opr);
+      const_node.set_loc(tok.pos1, tok.pos2);
+      const_node.set_source(tok.fname);
+
+      auto const_dpin   = const_node.setup_driver_pin();
+      name2dpin[lhs_name] = const_dpin;
+      const_dpin.set_name(lhs_name);
+
+      if (!is_tmp_var(lhs_vname)) {
+        setup_dpin_ssa(name2dpin[lhs_name], lhs_vname, lnast->get_subs(lhs));
+      }
+      return;
+    }
   }
 
   auto opr_node = setup_node_opr_and_lhs(lg, lnidx_opr, "");
@@ -347,9 +386,29 @@ Node Lnast_tolg::process_ast_assign_op(Lgraph *lg, const Lnast_nid &lnidx_assign
   auto c0 = lnast->get_first_child(lnidx_assign);
   auto c1 = lnast->get_sibling_next(c0);
 
+  auto lhs_name  = lnast->get_sname(c0);
+  auto lhs_vname = lnast->get_vname(c0);
+
   bool is_tup_asg = lnast->get_name(lnidx_assign) == tuple_assign_str;
   auto opd1       = setup_ref_node_dpin(lg, c1, is_tup_asg);
   auto opd1_ntype = opd1.get_type_op();
+
+  if (!is_tup_asg && opd1_ntype == Ntype_op::Const) {
+    auto        const_node = lg->create_node_const(opd1.get_node().get_type_const());
+    const auto &tok        = lnast->get_token(lnidx_assign);
+    const_node.set_loc(tok.pos1, tok.pos2);
+    const_node.set_source(tok.fname);
+
+    auto const_dpin   = const_node.setup_driver_pin();
+    name2dpin[lhs_name] = const_dpin;
+    const_dpin.set_name(lhs_name);
+
+    if (!is_tmp_var(lhs_vname)) {
+      setup_dpin_ssa(name2dpin[lhs_name], lhs_vname, lnast->get_subs(c0));
+    }
+
+    return const_node;
+  }
 
   Node_pin opr_spin;
   auto     cond1 = is_tup_asg;
@@ -1419,15 +1478,14 @@ void Lnast_tolg::process_ast_attr_get_op(Lgraph *lg, const Lnast_nid &lnidx_aget
     }
 
     auto flop_din_driver_pin = setup_ref_node_dpin(lg, c1_aget);
-    if (!flop_din_driver_pin.is_invalid()) {  // flop has some previous attribute set
+    auto driver_vname        = lnast->get_vname(c1_aget);
+    auto tup_head_it         = vname2tuple_head.find(driver_vname);
+    if (!flop_din_driver_pin.is_invalid() && tup_head_it != vname2tuple_head.end()) {  // flop has some previous attribute set
       flop_din_driver_pin.connect_sink(flop_node.setup_sink_pin("din"));
       // put the head of the tuple chain as the wire_node that will be driven by the largest ssa later
-      auto driver_vname = lnast->get_vname(c1_aget);
-      I(vname2tuple_head.find(driver_vname) != vname2tuple_head.end());
-      auto tup_head_node = vname2tuple_head[driver_vname];
+      auto tup_head_node = tup_head_it->second;
       driver_vname2wire_nodes[driver_vname].emplace_back(tup_head_node);
     } else {  // if no previous attribute set, use the normal __last_value flow
-      auto driver_vname = lnast->get_vname(c1_aget);
       driver_vname2wire_nodes[driver_vname].emplace_back(flop_node);
     }
 
