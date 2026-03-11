@@ -33,6 +33,28 @@ static std::string sanitize_dump_token(std::string_view text) {
   return out;
 }
 
+static std::string_view get_bus_base_name(std::string_view text) {
+  if (text.empty() || text.back() != ']') {
+    return {};
+  }
+
+  auto pos = text.rfind('[');
+  if (pos == std::string_view::npos || pos == 0) {
+    return {};
+  }
+
+  return text.substr(0, pos);
+}
+
+static std::string canonicalize_wire_name(std::string_view wname, const absl::flat_hash_set<std::string>& memory_names) {
+  auto base = get_bus_base_name(wname);
+  if (!base.empty() && memory_names.contains(std::string(base))) {
+    return std::string(base);
+  }
+
+  return std::string(wname);
+}
+
 std::vector<std::string> Label_path::parse_instance_names(std::string_view instance_csv) {
   std::vector<std::string> names;
 
@@ -67,7 +89,7 @@ bool Label_path::should_stop_fwd(const Node& node, int color) const {
   }
 
   auto prefix = absl::StrCat("_", it->second);
-  return node.get_name().rfind(prefix, 0) != 0;
+  return !std::string_view(node.get_name()).starts_with(prefix);
 }
 
 void Label_path::propagate_fwd(const Node& node, int color) {
@@ -197,6 +219,13 @@ void Label_path::dump(Lgraph* g) const {
   absl::flat_hash_map<int, absl::flat_hash_set<std::string>> color2wnames;
   absl::flat_hash_map<int, absl::flat_hash_set<std::string>> color2sources;
   absl::flat_hash_map<int, absl::flat_hash_set<std::string>> color2nodenames;
+  absl::flat_hash_set<std::string>                           memory_names;
+
+  for (auto node : g->fast(hier)) {
+    if (node.is_type(Ntype_op::Memory) && node.has_name()) {
+      memory_names.insert(node.get_name());
+    }
+  }
 
   // Collect all colors
   absl::flat_hash_set<int> all_colors;
@@ -219,7 +248,7 @@ void Label_path::dump(Lgraph* g) const {
       for (const auto& e : node.out_edges()) {
         auto wn = e.driver.get_wire_name();
         if (!wn.empty() && wn[0] != '_') {
-          color2wnames[color].insert(wn);
+          color2wnames[color].insert(canonicalize_wire_name(wn, memory_names));
         }
       }
 
