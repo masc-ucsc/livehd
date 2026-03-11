@@ -26,7 +26,7 @@ if [[ ! -f ${path_trace} ]]; then
   exit 1
 fi
 
-awk -F':' -v instance_name="${instance_name}" '
+awk -F',' -v instance_name="${instance_name}" '
   function trim(text) {
     gsub(/^[[:space:]]+|[[:space:]]+$/, "", text)
     return text
@@ -60,31 +60,29 @@ awk -F':' -v instance_name="${instance_name}" '
     OFS = "\n"
   }
 
-  /^:/ {
-    if (trim($3) != "instance") {
+  NF >= 4 {
+    if (instance_name != "" && trim($2) != instance_name) {
       next
     }
 
-    if (instance_name != "" && trim($4) != instance_name) {
-      next
-    }
-
-    names = $6
+    names = $4
     n = split(names, arr, /[[:space:]]+/)
     for (i = 1; i <= n; ++i) {
       emit_name(arr[i])
     }
   }
 ' "${instance_trace}" | sort -u | while IFS= read -r signal; do
-  awk -F':' -v signal="${signal}" '
-    /^:/ {
-      names = ""
-      for (i = 5; i <= NF; ++i) {
-        names = names (i == 5 ? "" : ":") $i
-      }
+  awk -F',' -v signal="${signal}" '
+    function trim(text) {
+      gsub(/^[[:space:]]+|[[:space:]]+$/, "", text)
+      return text
+    }
 
-      if (index(names, signal)) {
-        print $4
+    NF >= 4 {
+      instance_names = trim($2)
+      wire_names     = trim($4)
+      if (index(wire_names, signal) || index(instance_names, signal)) {
+        print trim($3)
       }
     }
   ' "${path_trace}" | sed -e 's/ /\n/g' | awk 'NF && $0 != "-"' | sort -u

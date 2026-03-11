@@ -27,6 +27,12 @@ static bool add_color(std::vector<int>& colors, int color) {
   return true;
 }
 
+static std::string sanitize_dump_token(std::string_view text) {
+  std::string out(text);
+  std::replace(out.begin(), out.end(), ',', '.');
+  return out;
+}
+
 std::vector<std::string> Label_path::parse_instance_names(std::string_view instance_csv) {
   std::vector<std::string> names;
 
@@ -190,6 +196,7 @@ void Label_path::dump(Lgraph* g) const {
   absl::flat_hash_map<int, std::string>                      dump_color2instance;
   absl::flat_hash_map<int, absl::flat_hash_set<std::string>> color2wnames;
   absl::flat_hash_map<int, absl::flat_hash_set<std::string>> color2sources;
+  absl::flat_hash_map<int, absl::flat_hash_set<std::string>> color2nodenames;
 
   // Collect all colors
   absl::flat_hash_set<int> all_colors;
@@ -202,6 +209,10 @@ void Label_path::dump(Lgraph* g) const {
       auto iit = color2instance.find(color);
       if (iit != color2instance.end()) {
         dump_color2instance.insert_or_assign(color, iit->second);
+      }
+
+      if (node.has_name()) {
+        color2nodenames[color].insert(node.get_name());
       }
 
       // Collect wnames from output edges
@@ -221,27 +232,34 @@ void Label_path::dump(Lgraph* g) const {
   }
 
   for (auto color : all_colors) {
-    std::print(":{}", color);
-
-    std::print(" :");
+    std::print("{}", color);
+    std::print(" ,");
     auto iit = dump_color2instance.find(color);
     if (iit != dump_color2instance.end()) {
-      std::print(" instance:{}", iit->second);
+      std::print(" {}", sanitize_dump_token(iit->second));
     }
 
-    std::print(" :");
+    std::print(" ,");
     auto sit = color2sources.find(color);
     if (sit != color2sources.end()) {
       for (auto& src : sit->second) {
-        std::print(" {}", src);
+        std::print(" {}", sanitize_dump_token(src));
       }
     }
 
-    std::print(" :");
+    std::print(" ,");
     auto wit = color2wnames.find(color);
     if (wit != color2wnames.end()) {
       for (auto& wn : wit->second) {
-        std::print(" {}", wn);
+        std::print(" {}", sanitize_dump_token(wn));
+      }
+    }
+
+    std::print(" ,");
+    auto nit = color2nodenames.find(color);
+    if (nit != color2nodenames.end()) {
+      for (auto& nname : nit->second) {
+        std::print(" {}", sanitize_dump_token(nname));
       }
     }
 
