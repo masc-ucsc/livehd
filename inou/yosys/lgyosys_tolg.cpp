@@ -565,6 +565,10 @@ static Node_pin get_partial_dpin(Lgraph* g, const RTLIL::Wire* wire) {
 static Node resolve_memory(Lgraph* g, RTLIL::Cell* cell) {
   auto node = g->create_node(Ntype_op::Memory).get_non_hierarchical();
   set_loc(node, cell->get_src_attribute());
+  std::string inst_name{cell->name.str()};
+  if (!inst_name.empty()) {
+    node.set_name(inst_name[0] == '\\' ? inst_name.substr(1) : inst_name);
+  }
 
   uint32_t rdports = cell->getParam(ID::RD_PORTS).as_int();
   uint32_t wrports = cell->getParam(ID::WR_PORTS).as_int();
