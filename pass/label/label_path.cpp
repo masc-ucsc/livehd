@@ -9,13 +9,24 @@
 #include "absl/strings/str_split.h"
 #include "cell.hpp"
 
-// Check if a driver pin has a real wname (not a temporary _nXXX name)
+// Wire names like clk/clock/rst/reset are global signals shared across many
+// flops.  Treating them as boundaries creates false aliases, so skip them.
+static bool is_special_wire_name(std::string_view wn) {
+  if (wn.empty()) {
+    return false;
+  }
+  std::string lower(wn);
+  std::transform(lower.begin(), lower.end(), lower.begin(), [](unsigned char c) { return std::tolower(c); });
+  return lower.starts_with("clk") || lower.starts_with("clock") || lower.starts_with("rst") || lower.starts_with("reset");
+}
+
+// Check if a driver pin has a real wname (not a temporary _nXXX name and not a special signal)
 static bool has_real_wname(const Node_pin& dpin) {
   if (!dpin.has_name()) {
     return false;
   }
   auto wn = dpin.get_wire_name();
-  return !wn.empty() && wn[0] != '_';
+  return !wn.empty() && wn[0] != '_' && !is_special_wire_name(wn);
 }
 
 // Returns true if color was newly added, false if already present
@@ -79,9 +90,9 @@ bool Label_path::should_stop_fwd(const Node& node, int color) const {
     return false;
   }
 
-  // if (!node.has_name()) {
-  //   return false;
-  // }
+  if (!node.has_name()) {
+    return false;
+  }
 
   auto it = color2instance.find(color);
   if (it == color2instance.end()) {
@@ -147,6 +158,7 @@ void Label_path::label(Lgraph* g) {
   last_free_id = 0;
   node2colors.clear();
   color2instance.clear();
+  instance2color.clear();
 
   if (!instance_names.empty()) {
     absl::flat_hash_set<std::string_view> instance_set;
@@ -165,6 +177,7 @@ void Label_path::label(Lgraph* g) {
         colors.push_back(color);
       }
       color2instance.insert_or_assign(color, node.get_name());
+      instance2color.insert_or_assign(node.get_name(), color);
 
       propagate_fwd(node, color);
     }
@@ -244,28 +257,32 @@ void Label_path::dump(Lgraph* g) const {
         color2nodenames[color].insert(node.get_name());
       }
 
-      // Collect wnames from output edges
+      // Collect wnames from output edges (skip special signals like clk/reset)
       for (const auto& e : node.out_edges()) {
         auto wn = e.driver.get_wire_name();
-        if (!wn.empty() && wn[0] != '_') {
+        if (!wn.empty() && wn[0] != '_' && !is_special_wire_name(wn)) {
           color2wnames[color].insert(canonicalize_wire_name(wn, memory_names));
         }
       }
 
-      // Collect source files
+      // Collect source files (with location for flops)
       auto src = node.get_source();
       if (!src.empty()) {
-        color2sources[color].insert(src);
+        if (node.is_type_loop_last() && node.has_loc()) {
+          auto [loc1, loc2] = node.get_loc();
+          color2sources[color].insert(absl::StrCat(src, ":", loc1, "-", loc2));
+        } else {
+          color2sources[color].insert(src);
+        }
       }
     }
   }
 
-  for (auto color : all_colors) {
+  auto dump_color_entry = [&](int color, std::string_view inst_name) {
     std::print("{}", color);
     std::print(" ,");
-    auto iit = dump_color2instance.find(color);
-    if (iit != dump_color2instance.end()) {
-      std::print(" {}", sanitize_dump_token(iit->second));
+    if (!inst_name.empty()) {
+      std::print(" {}", sanitize_dump_token(inst_name));
     }
 
     std::print(" ,");
@@ -293,6 +310,23 @@ void Label_path::dump(Lgraph* g) const {
     }
 
     std::print("\n");
+  };
+
+  if (!instance_names.empty()) {
+    // Dump one entry per instance name (even if they share the same color)
+    for (const auto& iname : instance_names) {
+      auto it = instance2color.find(iname);
+      if (it == instance2color.end()) {
+        continue;
+      }
+      dump_color_entry(it->second, iname);
+    }
+  } else {
+    for (auto color : all_colors) {
+      auto        iit       = dump_color2instance.find(color);
+      std::string inst_name = (iit != dump_color2instance.end()) ? iit->second : std::string{};
+      dump_color_entry(color, inst_name);
+    }
   }
 
   std::cout << "---- fin ----\n";

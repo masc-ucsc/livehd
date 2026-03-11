@@ -20,6 +20,7 @@ private:
 
   absl::flat_hash_map<Node::Compact, std::vector<int>> node2colors;
   absl::flat_hash_map<int, std::string>                color2instance;
+  absl::flat_hash_map<std::string, int>                instance2color;
 
   int get_free_id() { return ++last_free_id; }
 
