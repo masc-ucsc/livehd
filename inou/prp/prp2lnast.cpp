@@ -171,6 +171,10 @@ void Prp2lnast::process_node(TSNode node) {
     process_function_call_statement(node);
   } else if (node_type == "simple_function_call") {
     process_simple_function_call(node);
+  } else if (node_type == "lambda") {
+    // lambda has: field('func_type', fun_tok|proc_tok), function_definition
+    // Skip func_type (child 0) and process function_definition (child 1)
+    process_node(get_child(node, 1));
   } else if (node_type == "function_definition") {
     process_function_definition(node);
   } else if (node_type == "type_specification") {
