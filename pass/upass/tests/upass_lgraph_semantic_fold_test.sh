@@ -3,7 +3,7 @@
 set -eu
 
 LGSHELL="${TEST_SRCDIR}/${TEST_WORKSPACE}/main/lgshell"
-PRP_FILE="${TEST_SRCDIR}/${TEST_WORKSPACE}/inou/pyrope/tests/sum2.prp"
+PRP_FILE="${TEST_SRCDIR}/${TEST_WORKSPACE}/pass/upass/tests/lgraph_sum_const.prp"
 OUT_FILE="${TEST_TMPDIR}/upass_lgraph_semantic_fold.out"
 
 printf 'inou.pyrope files:%s |> pass.lnast_tolg |> pass.upass ir:lgraph order:fold_sum_const max_iters:3\nquit\n' "${PRP_FILE}" \

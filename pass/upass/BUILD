@@ -158,7 +158,7 @@ sh_test(
     name = "upass_lgraph_mutation_test.sh",
     srcs = ["tests/upass_lgraph_mutation_test.sh"],
     data = [
-        "//inou/pyrope:pyrope_tests",
+        ":tests/lgraph_sum_const.prp",
         "//main:lgshell",
     ],
 )
@@ -185,7 +185,7 @@ sh_test(
     name = "upass_lgraph_semantic_fold_test.sh",
     srcs = ["tests/upass_lgraph_semantic_fold_test.sh"],
     data = [
-        "//inou/pyrope:pyrope_tests",
+        ":tests/lgraph_sum_const.prp",
         "//main:lgshell",
     ],
 )
