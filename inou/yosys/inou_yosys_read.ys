@@ -25,6 +25,9 @@ read_slang {{slang_top}} {{slang_flags}} {{files_str}} {{filelist_file_str}}
 hierarchy {{top}}
 {{/hierarchy}}
 
+flatten
+chformal -remove
+
 proc
 #opt -fast
 opt_expr
@@ -51,11 +54,15 @@ techmap
 abc
 {{/abc_in_yosys}}
 
+{{#rename_top}}
+rename {{rename_from}} {{rename_top}}
+{{/rename_top}}
+
 {{#techmap_alumacc}}
 maccmap -unmap
 {{/techmap_alumacc}}
 
-write_rtlil pp.il
-write_verilog pp.v
+write_rtlil pp-mem.il
+#write_verilog pp.v
 yosys2lg -path {{path}}
 

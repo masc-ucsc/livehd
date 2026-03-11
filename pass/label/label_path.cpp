@@ -79,9 +79,9 @@ bool Label_path::should_stop_fwd(const Node& node, int color) const {
     return false;
   }
 
-  if (!node.has_name()) {
-    return false;
-  }
+  // if (!node.has_name()) {
+  //   return false;
+  // }
 
   auto it = color2instance.find(color);
   if (it == color2instance.end()) {

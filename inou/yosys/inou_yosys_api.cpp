@@ -273,7 +273,7 @@ void Inou_yosys_api::do_tolg(Eprp_var& var) {
   vars.set("filelist", filelist);
 
   // Set a list of files as well as the filelist/manifest file for `read_lang`
-  vars.set("files_str", files_str);
+  if (!files_str.empty()) vars.set("files_str", files_str);
   if (!filelist_file.empty()) {
     if (filelist_file.size() >= 2 && filelist_file[0] == '-' && (filelist_file[1] == 'f' || filelist_file[1] == 'F')) {
       vars.set("filelist_file_str", std::string(filelist_file));
@@ -334,6 +334,14 @@ void Inou_yosys_api::do_tolg(Eprp_var& var) {
     } else {
       error("unrecognized techmap {} option. Either full or alumacc", techmap);
       return;
+    }
+  }
+
+  const auto rename_top{var.get("rename_top")};
+  if (!rename_top.empty()) {
+    vars.set("rename_top", std::string(rename_top));
+    if (!top.empty() && top != "-auto-top") {
+      vars.set("rename_from", std::string(top));
     }
   }
 
@@ -410,6 +418,7 @@ void Inou_yosys_api::setup() {
   m1.add_label_optional("yosys", "path for yosys command", "");
   m1.add_label_required("top", "define top module for synthesis, will call yosys hierarchy pass (-auto-top allowed)");
   m1.add_label_optional("elab_top", "define top module for elaboration (read_slang). If not provided, uses 'top' value");
+  m1.add_label_optional("rename_top", "rename the top module to the given name after synthesis");
 
   register_inou("yosys", m1);
 

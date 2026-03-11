@@ -945,6 +945,7 @@ static void process_cell_drivers_intialization(RTLIL::Module* mod, Lgraph* g) {
   }
 }
 
+#ifndef NDEBUG
 static void dump_partially_assigned() {
   for (auto it : partially_assigned) {
     const auto* wire = it.first;
@@ -982,6 +983,7 @@ static void dump_partially_assigned() {
     }
   }
 }
+#endif
 
 static void process_assigns(RTLIL::Module* mod, Lgraph* g) {
   for (const auto& conn : mod->connections()) {
@@ -1422,10 +1424,12 @@ static void connect_partial_dpin(Lgraph* g, Node& or_node, uint32_t or_offset, B
   }
 }
 
-static void process_partially_assigned_other(Lgraph* g) {
-  for (const auto& it : partially_assigned) {
-    const RTLIL::Wire* wire = it.first;
-    // std::print(" wire:{} width:{}\n", wire->name.str(), wire->width);
+static void process_partially_assigned_other(Lgraph *g) {
+  for (const auto &it : partially_assigned) {
+    const RTLIL::Wire *wire = it.first;
+#ifndef NDEBUG
+    std::print(" wire:{} width:{}\n", wire->name.str(), wire->width);
+#endif
     I(it.second.size() == it.first->width);  // every bit set (maye be same dpin)
 
     auto or_dpin = get_partial_dpin(g, wire);
@@ -1440,7 +1444,9 @@ static void process_partially_assigned_other(Lgraph* g) {
       }
       const auto& dpin = it.second[i];
       if (dpin.is_invalid()) {
+#ifndef NDEBUG
         std::print("OOPSY! 2nd: {}\n", dpin.debug_name());
+#endif
       }
       // I(!dpin.is_invalid());
       if (!dpin.is_invalid()) {
@@ -1595,8 +1601,10 @@ static void connect_comparator(Node& exit_node, const RTLIL::Cell* cell) {
   }
 }
 
-static void process_partially_assigned(Lgraph* g) {
+static void process_partially_assigned(Lgraph *g) {
+#ifndef NDEBUG
   dump_partially_assigned();
+#endif
 
   process_partially_assigned_other(g);
   process_partially_assigned_self_chains(g);

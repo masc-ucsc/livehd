@@ -71,19 +71,51 @@ awk -F',' -v instance_name="${instance_name}" '
       emit_name(arr[i])
     }
   }
-' "${instance_trace}" | sort -u | while IFS= read -r signal; do
-  awk -F',' -v signal="${signal}" '
-    function trim(text) {
-      gsub(/^[[:space:]]+|[[:space:]]+$/, "", text)
-      return text
+' "${instance_trace}" | sort -u | awk -F',' '
+  function trim(text) {
+    gsub(/^[[:space:]]+|[[:space:]]+$/, "", text)
+    return text
+  }
+
+  function strip_bus(name,  base) {
+    if (match(name, /\[[0-9]+\]$/)) {
+      base = substr(name, 1, RSTART - 1)
+      return base
+    }
+    return ""
+  }
+
+  # First file (stdin): load signals into a hash set
+  NR == FNR {
+    s = trim($0)
+    if (s != "") sigs[s] = 1
+    next
+  }
+
+  # Second file (path_trace): match tokens against signals
+  NF >= 4 {
+    # Check instance name (field 2)
+    t = trim($2)
+    if (t in sigs) { print trim($3); next }
+
+    # Check wire names (field 4) - space-separated tokens
+    n = split($4, arr, /[[:space:]]+/)
+    for (i = 1; i <= n; i++) {
+      t = trim(arr[i])
+      if (t in sigs) { print trim($3); next }
+      b = strip_bus(t)
+      if (b != "" && b in sigs) { print trim($3); next }
     }
 
-    NF >= 4 {
-      instance_names = trim($2)
-      wire_names     = trim($4)
-      if (index(wire_names, signal) || index(instance_names, signal)) {
-        print trim($3)
+    # Check node/instance names (field 5) - space-separated tokens
+    if (NF >= 5) {
+      n = split($5, arr, /[[:space:]]+/)
+      for (i = 1; i <= n; i++) {
+        t = trim(arr[i])
+        if (t in sigs) { print trim($3); next }
+        b = strip_bus(t)
+        if (b != "" && b in sigs) { print trim($3); next }
       }
     }
-  ' "${path_trace}" | sed -e 's/ /\n/g' | awk 'NF && $0 != "-"' | sort -u
-done | sort -u
+  }
+' - "${path_trace}" | sed -e 's/ /\n/g' | awk 'NF && $0 != "-"' | sort -u
