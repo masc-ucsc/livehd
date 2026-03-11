@@ -291,19 +291,19 @@ unsing Tree_index = uint32_t;
 class Tree2 {
 protected:
 public:
-  Tree_index get_last_child(const Tree_index &parent_index) const;
+  Tree_index get_last_child(const Tree_index& parent_index) const;
 
   size_t max_size() const;
 
-  bool is_last_child(const Tree_index &self_index) const;
+  bool is_last_child(const Tree_index& self_index) const;
 
-  bool is_first_child(const Tree_index &self_index) const;
+  bool is_first_child(const Tree_index& self_index) const;
 
-  Tree_index get_first_child(const Tree_index &parent_index) const;
+  Tree_index get_first_child(const Tree_index& parent_index) const;
 
-  Tree_index get_sibling_next(const Tree_index &sibling) const;
+  Tree_index get_sibling_next(const Tree_index& sibling) const;
 
-  Tree_index get_sibling_prev(const Tree_index &sibling) const;
+  Tree_index get_sibling_prev(const Tree_index& sibling) const;
 
 #if 0
   class Tree_depth_preorder_iterator {
@@ -421,18 +421,18 @@ public:
   [[nodiscard]] bool empty() const;
 
   // WARNING: can not return Tree_index & because future additions can move the pointer (vector realloc)
-  Tree_index add_child(const Tree_index &parent, const X &data);
-  Tree_index append_sibling(const Tree_index &sibling, const X &data);
-  Tree_index insert_next_sibling(const Tree_index &sibling, const X &data);
+  Tree_index add_child(const Tree_index& parent, const X& data);
+  Tree_index append_sibling(const Tree_index& sibling, const X& data);
+  Tree_index insert_next_sibling(const Tree_index& sibling, const X& data);
 
-  Tree_index get_depth_preorder_next(const Tree_index &child) const;
-  Tree_index get_depth_postorder_next(const Tree_index &child) const;
+  Tree_index get_depth_preorder_next(const Tree_index& child) const;
+  Tree_index get_depth_postorder_next(const Tree_index& child) const;
 
-  Tree_index get_parent(const Tree_index &index) const;
+  Tree_index get_parent(const Tree_index& index) const;
 
   static constexpr Tree_index invalid_index() { return Tree_index(-1, -1); }
 
-  Tree_index get_child(const Tree_index &start_index) const;
+  Tree_index get_child(const Tree_index& start_index) const;
 
 #if 0
   void each_bottom_up_fast(std::function<void(const Tree_index &self, const X &)> fn) const;
@@ -460,9 +460,9 @@ public:
   }
 #endif
 
-  bool is_leaf(const Tree_index &index) const;
-  bool is_root(const Tree_index &index) const;
-  bool has_single_child(const Tree_index &index) const;
+  bool is_leaf(const Tree_index& index) const;
+  bool is_root(const Tree_index& index) const;
+  bool has_single_child(const Tree_index& index) const;
 
   /* LCOV_EXCL_START */
   void dump() const;

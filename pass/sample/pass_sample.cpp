@@ -23,43 +23,43 @@ void Pass_sample::setup() {
   register_pass(m2);
 }
 
-Pass_sample::Pass_sample(const Eprp_var &var) : Pass("pass.sample", var) {}
+Pass_sample::Pass_sample(const Eprp_var& var) : Pass("pass.sample", var) {}
 
-void Pass_sample::do_work(Lgraph *g) {
+void Pass_sample::do_work(Lgraph* g) {
   compute_histogram(g);
   compute_max_depth(g);
   // annotate_placement(g);
   create_sample_graph(g);
 }
 
-void Pass_sample::work(Eprp_var &var) {
+void Pass_sample::work(Eprp_var& var) {
   Pass_sample p(var);
 
-  for (const auto &g : var.lgs) {
+  for (const auto& g : var.lgs) {
     p.do_work(g);
   }
 }
 
-void Pass_sample::wirecount(Eprp_var &var) {
+void Pass_sample::wirecount(Eprp_var& var) {
   TRACE_EVENT("pass", "SAMPLE_wirecount");
   Pass_sample p(var);
 
-  for (const auto &g : var.lgs) {
+  for (const auto& g : var.lgs) {
     p.do_wirecount(g, 0);
   }
 }
 
-void Pass_sample::do_wirecount(Lgraph *g, int indent) {
+void Pass_sample::do_wirecount(Lgraph* g, int indent) {
   int i_num  = 0;
   int i_bits = 0;
-  g->each_graph_input([&i_num, &i_bits](const Node_pin &pin) {
+  g->each_graph_input([&i_num, &i_bits](const Node_pin& pin) {
     i_num++;
     i_bits += pin.get_bits();
   });
 
   int o_num  = 0;
   int o_bits = 0;
-  g->each_graph_output([&o_num, &o_bits](const Node_pin &pin) {
+  g->each_graph_output([&o_num, &o_bits](const Node_pin& pin) {
     o_num++;
     o_bits += pin.get_bits();
   });
@@ -69,7 +69,7 @@ void Pass_sample::do_wirecount(Lgraph *g, int indent) {
   int n_nodes     = 0;
   for (auto node : g->fast()) {
     n_nodes++;
-    for (const auto &edge : node.out_edges()) {
+    for (const auto& edge : node.out_edges()) {
       n_wire++;
       n_wire_bits += edge.driver.get_bits();
     }
@@ -92,12 +92,12 @@ void Pass_sample::do_wirecount(Lgraph *g, int indent) {
              n_wire,
              n_wire_bits);
 
-  g->each_local_sub_fast([this, indent, space](Node &node, Lg_type_id lgid) {
+  g->each_local_sub_fast([this, indent, space](Node& node, Lg_type_id lgid) {
     (void)node;
 
-    auto *lib = Graph_library::instance(path);
+    auto* lib = Graph_library::instance(path);
 
-    Lgraph *sub_lg = lib->open_lgraph(Lg_type_id(lgid));
+    Lgraph* sub_lg = lib->open_lgraph(Lg_type_id(lgid));
     if (!sub_lg) {
       return;
     }
@@ -105,7 +105,7 @@ void Pass_sample::do_wirecount(Lgraph *g, int indent) {
     if (sub_lg->is_empty()) {
       int n_inp = 0;
       int n_out = 0;
-      for (const auto &io_pin : sub_lg->get_self_sub_node().get_io_pins()) {
+      for (const auto& io_pin : sub_lg->get_self_sub_node().get_io_pins()) {
         if (io_pin.is_input()) {
           n_inp++;
         } else if (io_pin.is_output()) {
@@ -121,35 +121,35 @@ void Pass_sample::do_wirecount(Lgraph *g, int indent) {
   });
 }
 
-void Pass_sample::compute_histogram(Lgraph *g) {
+void Pass_sample::compute_histogram(Lgraph* g) {
   TRACE_EVENT("pass", "SAMPLE_compute_histogram");
 
   std::map<Ntype_op, int> histogram;
 
   int cells = 0;
-  for (const auto &node : g->forward()) {
+  for (const auto& node : g->forward()) {
     cells++;
     auto type = node.get_type_op();
 
     histogram[type]++;
   }
 
-  for (auto &e : histogram) {
+  for (auto& e : histogram) {
     std::print("{} {}\n", (int)e.first, e.second);
   }
 
   std::print("Pass: cells {}\n", cells);
 }
 
-void Pass_sample::compute_max_depth(Lgraph *g) {
+void Pass_sample::compute_max_depth(Lgraph* g) {
   TRACE_EVENT("pass", "SAMPLE_max_depth");
 
   absl::flat_hash_map<Node::Compact, int> depth;
 
   int max_depth = 0;
-  for (const auto &node : g->forward()) {
+  for (const auto& node : g->forward()) {
     int local_max = 0;
-    for (const auto &edge : node.inp_edges()) {
+    for (const auto& edge : node.inp_edges()) {
       int d = depth[edge.driver.get_node().get_compact()];
       if (local_max <= d) {
         local_max = d + 1;
@@ -162,7 +162,7 @@ void Pass_sample::compute_max_depth(Lgraph *g) {
   std::print("Pass: max_depth {}\n", max_depth);
 }
 
-void Pass_sample::annotate_placement(Lgraph *g) {
+void Pass_sample::annotate_placement(Lgraph* g) {
   TRACE_EVENT("pass", "SAMPLE_replace_inline");
 
   int x_pos = 0;
@@ -176,7 +176,7 @@ void Pass_sample::annotate_placement(Lgraph *g) {
   }
 
   for (auto node : g->fast()) {
-    const auto &place = node.get_place();
+    const auto& place = node.get_place();
     std::print("1.cell {} placed at x:{}\n", node.get_or_create_name(), place.get_x());
   }
   for (auto node : g->forward()) {
@@ -185,10 +185,10 @@ void Pass_sample::annotate_placement(Lgraph *g) {
   }
 }
 
-void Pass_sample::create_sample_graph(Lgraph *g) {
+void Pass_sample::create_sample_graph(Lgraph* g) {
   // auto lg_path = g->get_path();
 
-  auto *lg = g->ref_library()->create_lgraph("pass_sample", "-");
+  auto* lg = g->ref_library()->create_lgraph("pass_sample", "-");
 
   std::cout << "Creating new sample Lgraph...\n";
   auto graph_inp_a = lg->add_graph_input("g_inp_a", 0, 4);  // First io in module, 4 bits

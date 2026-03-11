@@ -59,7 +59,7 @@ void Fast_edge_iterator::Fast_iter::go_next() {
   hidx = Hierarchy::non_hierarchical();  // invalidate hidx
 }
 
-Fast_edge_iterator::Fast_iter &Fast_edge_iterator::Fast_iter::operator++() {
+Fast_edge_iterator::Fast_iter& Fast_edge_iterator::Fast_iter::operator++() {
   go_next();
 
   return *this;
@@ -92,13 +92,13 @@ Flow_base_iterator::Flow_base_iterator(bool _visit_sub)
   linear_last_phase  = false;
 }
 
-Flow_base_iterator::Flow_base_iterator(Lgraph *lg, bool _visit_sub)
+Flow_base_iterator::Flow_base_iterator(Lgraph* lg, bool _visit_sub)
     : global_it(lg->fast(_visit_sub).begin()), visit_sub(_visit_sub) {
   linear_first_phase = true;
   linear_last_phase  = false;
 }
 
-void Fwd_edge_iterator::Fwd_iter::topo_add_chain_down(const Node_pin &dst_pin) {
+void Fwd_edge_iterator::Fwd_iter::topo_add_chain_down(const Node_pin& dst_pin) {
   I(dst_pin.is_hierarchical());
   I(dst_pin.get_node().is_type_sub_present());
 
@@ -107,7 +107,7 @@ void Fwd_edge_iterator::Fwd_iter::topo_add_chain_down(const Node_pin &dst_pin) {
 
   // std::print("topo       down node:{} down_pin:{}\n", down_pin.get_node().debug_name(), down_pin.debug_name());
 
-  for (auto &edge2 : down_pin.inp_edges()) {  // fwd
+  for (auto& edge2 : down_pin.inp_edges()) {  // fwd
     I(edge2.sink.get_pid() == down_pin.get_pid());
     if (!unvisited.count(edge2.driver.get_node().get_compact())) {
       continue;
@@ -117,7 +117,7 @@ void Fwd_edge_iterator::Fwd_iter::topo_add_chain_down(const Node_pin &dst_pin) {
   }
 }
 
-void Fwd_edge_iterator::Fwd_iter::topo_add_chain_fwd(const Node_pin &dst_pin) {
+void Fwd_edge_iterator::Fwd_iter::topo_add_chain_fwd(const Node_pin& dst_pin) {
   const auto dst_node = dst_pin.get_node();
   I(unvisited.count(dst_node.get_compact()));
 
@@ -136,7 +136,7 @@ void Fwd_edge_iterator::Fwd_iter::topo_add_chain_fwd(const Node_pin &dst_pin) {
 
         I(up_pin.is_sink());  // fwd
 
-        for (auto &edge2 : up_pin.inp_edges()) {  // fwd
+        for (auto& edge2 : up_pin.inp_edges()) {  // fwd
           I(edge2.sink.get_pid() == up_pin.get_pid());
           if (!unvisited.count(edge2.driver.get_node().get_compact())) {
             continue;
@@ -152,7 +152,7 @@ void Fwd_edge_iterator::Fwd_iter::topo_add_chain_fwd(const Node_pin &dst_pin) {
   pending_stack.push_back(dst_node);
 }
 
-void Fwd_edge_iterator::Fwd_iter::fwd_get_from_linear_first(Lgraph *top) {
+void Fwd_edge_iterator::Fwd_iter::fwd_get_from_linear_first(Lgraph* top) {
   I(linear_first_phase);
 
   current_node.invalidate();
@@ -173,7 +173,7 @@ void Fwd_edge_iterator::Fwd_iter::fwd_get_from_linear_first(Lgraph *top) {
     bool is_topo_sorted = true;
     if (!next_node.is_type_loop_first()) {  // NOTE: !next_node.has_inputs() may be nicer but a bit slower
 
-      for (const auto &edge : next_node.inp_edges()) {  // NOTE: possible to have a "inp_edges_forward" iterator 1/2 nodes on avg
+      for (const auto& edge : next_node.inp_edges()) {  // NOTE: possible to have a "inp_edges_forward" iterator 1/2 nodes on avg
         auto driver_node = edge.driver.get_node();
 
         if (driver_node.is_graph_input()) {
@@ -235,7 +235,7 @@ void Fwd_edge_iterator::Fwd_iter::fwd_get_from_linear_last() {
   }
 }
 
-void Fwd_edge_iterator::Fwd_iter::fwd_get_from_pending(Lgraph *top) {
+void Fwd_edge_iterator::Fwd_iter::fwd_get_from_pending(Lgraph* top) {
   do {
     while (!pending_stack.empty()) {
       auto node = pending_stack.back();
@@ -256,7 +256,7 @@ void Fwd_edge_iterator::Fwd_iter::fwd_get_from_pending(Lgraph *top) {
 
       bool any_propagated = false;
       if (visit_sub && node.is_type_sub_present()) {
-        for (auto &pin : node.out_connected_pins()) {  // fwd
+        for (auto& pin : node.out_connected_pins()) {  // fwd
           topo_add_chain_down(pin);
           any_propagated = true;
         }
@@ -269,7 +269,7 @@ void Fwd_edge_iterator::Fwd_iter::fwd_get_from_pending(Lgraph *top) {
         auto dpin_list = node.inp_drivers();
 
         if (!dpin_list.empty()) {         // Something got added, track potential combinational loops
-          for (auto &dpin : dpin_list) {  // fwd
+          for (auto& dpin : dpin_list) {  // fwd
             if (unvisited.contains(dpin.get_node().get_compact())) {
               // std::print("calling for nid:{} type:{}\n", dpin.get_node().get_nid(),dpin.get_node().get_type_name());
               // dpin.get_node().dump();
@@ -319,7 +319,7 @@ void Fwd_edge_iterator::Fwd_iter::fwd_get_from_pending(Lgraph *top) {
     if (unvisited.count((*global_it).get_compact())) {
       GI(!visit_sub, !(*global_it).is_type_flop());
       pending_stack.push_back(*global_it);
-      for (auto &dpin : (*global_it).inp_drivers()) {  // fwd
+      for (auto& dpin : (*global_it).inp_drivers()) {  // fwd
         if (unvisited.contains(dpin.get_node().get_compact())) {
           topo_add_chain_fwd(dpin);
         }
@@ -331,13 +331,13 @@ void Fwd_edge_iterator::Fwd_iter::fwd_get_from_pending(Lgraph *top) {
   } while (true);
 }
 
-void Fwd_edge_iterator::Fwd_iter::fwd_first(Lgraph *lg) {
+void Fwd_edge_iterator::Fwd_iter::fwd_first(Lgraph* lg) {
   I(!lg->is_empty());
   I(current_node.is_invalid());
   I(linear_first_phase);
 
   if (visit_sub) {
-    lg->each_graph_output([this](Node_pin &out_dpin) {
+    lg->each_graph_output([this](Node_pin& out_dpin) {
       auto dpin = out_dpin.change_to_sink_from_graph_out_driver().get_driver_pin();
       I(!dpin.is_hierarchical());
       if (dpin.is_type_sub() && dpin.get_node().is_type_sub_present()) {
@@ -361,7 +361,7 @@ void Fwd_edge_iterator::Fwd_iter::fwd_first(Lgraph *lg) {
 }
 
 void Fwd_edge_iterator::Fwd_iter::fwd_next() {
-  auto *top_g2 = current_node.get_top_lgraph();
+  auto* top_g2 = current_node.get_top_lgraph();
   if (linear_first_phase) {
     fwd_get_from_linear_first(top_g2);
     GI(current_node.is_invalid(), !linear_first_phase);
@@ -383,7 +383,7 @@ void Fwd_edge_iterator::Fwd_iter::fwd_next() {
   fwd_get_from_linear_last();
 }
 
-void Bwd_edge_iterator::Bwd_iter::bwd_first(Lgraph *lg) {
+void Bwd_edge_iterator::Bwd_iter::bwd_first(Lgraph* lg) {
   (void)lg;
   I(pending_stack.empty());
   I(unvisited.empty());

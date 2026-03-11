@@ -14,29 +14,29 @@ void Pass_semantic::setup() {
   register_pass(m1);
 }
 
-Pass_semantic::Pass_semantic(const Eprp_var &var) : Pass("pass.semantic", var) {}
+Pass_semantic::Pass_semantic(const Eprp_var& var) : Pass("pass.semantic", var) {}
 
-void Pass_semantic::do_work(Lgraph *g) {
+void Pass_semantic::do_work(Lgraph* g) {
   (void)g;
   std::cout << "future lgraph semantic check\n";
 }
 
-void Pass_semantic::do_work(const std::shared_ptr<Lnast> &lnast) {
+void Pass_semantic::do_work(const std::shared_ptr<Lnast>& lnast) {
   Semantic_check p;
 
   p.do_check(lnast.get());
 }
 
-void Pass_semantic::work(Eprp_var &var) {
+void Pass_semantic::work(Eprp_var& var) {
   TRACE_EVENT("pass", "semantic");
 
   Pass_semantic p(var);
 
-  for (const auto &g : var.lgs) {
+  for (const auto& g : var.lgs) {
     p.do_work(g);
   }
 
-  for (const auto &l : var.lnasts) {
+  for (const auto& l : var.lnasts) {
     p.do_work(l);
   }
 }

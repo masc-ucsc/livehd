@@ -25,9 +25,9 @@ void Inou_json::setup() {
   register_inou("json", m2);
 }
 
-Inou_json::Inou_json(const Eprp_var &var) : Pass("inou.json", var) {}
+Inou_json::Inou_json(const Eprp_var& var) : Pass("inou.json", var) {}
 
-void Inou_json::fromlg(Eprp_var &var) {
+void Inou_json::fromlg(Eprp_var& var) {
   Inou_json p(var);
 
   auto odir = var.get("odir");
@@ -40,7 +40,7 @@ void Inou_json::fromlg(Eprp_var &var) {
   conv.to_json(var);
 }
 
-void Inou_json::tolg(Eprp_var &var) {
+void Inou_json::tolg(Eprp_var& var) {
   auto files = var.get("files");
   if (files.empty()) {
     error("inou.json.tolg: no files provided");
@@ -56,14 +56,14 @@ void Inou_json::tolg(Eprp_var &var) {
     return;
   }
 
-  std::vector<Lgraph *> lgs;
+  std::vector<Lgraph*> lgs;
 
-  auto *lib = Graph_library::instance(lgdb);
+  auto* lib = Graph_library::instance(lgdb);
   if (lib == nullptr) {
     error("inou.json.tolg: could not open graph_library lgdb:{} path", lgdb);
   }
 
-  for (const auto &f : absl::StrSplit(files, ',')) {
+  for (const auto& f : absl::StrSplit(files, ',')) {
     auto name = str_tools::get_str_after_last_if_exists(f, '/');
     if (str_tools::ends_with(name, ".json")) {
       name = name.substr(0, name.size() - 5);  // remove .json
@@ -72,13 +72,13 @@ void Inou_json::tolg(Eprp_var &var) {
       continue;
     }
 
-    FILE *pFile = fopen(std::string(f).c_str(), "rb");
+    FILE* pFile = fopen(std::string(f).c_str(), "rb");
     if (pFile == 0) {
       Pass::error("Inou_json::tolg could not open {} file", f);
       continue;
     }
 
-    Lgraph *lg = lib->create_lgraph(name, f);
+    Lgraph* lg = lib->create_lgraph(name, f);
 
     char                      buffer[65536];
     rapidjson::FileReadStream is(pFile, buffer, sizeof(buffer));

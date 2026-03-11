@@ -23,7 +23,7 @@ public:
       , diff_file("diff")
       , method(Live_method::LiveSynth) {}
 
-  void set(const std::string &key, const std::string &value) final;
+  void set(const std::string& key, const std::string& value) final;
 };
 
 #endif

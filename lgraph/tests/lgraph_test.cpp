@@ -27,7 +27,7 @@ protected:
 
   Setup_lgraph() : rand_pos(1, Port_invalid - 1), rand_bits(1, Bits_max) {}
 
-  void randomly_delete_one_io(Lgraph *lg) {
+  void randomly_delete_one_io(Lgraph* lg) {
     if (posused.empty()) {
       return;
     }
@@ -64,7 +64,7 @@ protected:
     name2bits.erase(name);
   }
 
-  void add_input(Lgraph *lg, const std::string &name_std) {
+  void add_input(Lgraph* lg, const std::string& name_std) {
     std::string name{name_std};
 
     EXPECT_FALSE(lg->has_graph_output(name));
@@ -97,7 +97,7 @@ protected:
     EXPECT_TRUE(lg->has_graph_input(name));
   }
 
-  void add_output(Lgraph *lg, const std::string &name_std) {
+  void add_output(Lgraph* lg, const std::string& name_std) {
     std::string name{name_std};
 
     EXPECT_FALSE(lg->has_graph_output(name));
@@ -133,16 +133,16 @@ protected:
     // Graph_library::sync_all();
   }
 
-  void check_ios(Lgraph *lg) {
-    auto &sub_node = lg->get_self_sub_node();
+  void check_ios(Lgraph* lg) {
+    auto& sub_node = lg->get_self_sub_node();
 
-    for (const auto &it : name2pos) {
+    for (const auto& it : name2pos) {
       if (posinput.count(it.second)) {
         EXPECT_TRUE(lg->has_graph_input(it.first));
 
         auto        dpin    = lg->get_graph_input(it.first);
-        const auto &io_pin1 = sub_node.get_io_pin_from_instance_pid(dpin.get_pid());
-        const auto &io_pin2 = sub_node.get_graph_input_io_pin(it.first);
+        const auto& io_pin1 = sub_node.get_io_pin_from_instance_pid(dpin.get_pid());
+        const auto& io_pin2 = sub_node.get_graph_input_io_pin(it.first);
 
         EXPECT_EQ(io_pin1.name, io_pin2.name);
         EXPECT_EQ(io_pin1.dir, io_pin2.dir);
@@ -153,8 +153,8 @@ protected:
         EXPECT_TRUE(lg->has_graph_output(it.first));
 
         auto        dpin    = lg->get_graph_output_driver_pin(it.first);
-        const auto &io_pin1 = sub_node.get_io_pin_from_instance_pid(dpin.get_pid());
-        const auto &io_pin2 = sub_node.get_graph_output_io_pin(it.first);
+        const auto& io_pin1 = sub_node.get_io_pin_from_instance_pid(dpin.get_pid());
+        const auto& io_pin2 = sub_node.get_graph_output_io_pin(it.first);
 
         EXPECT_EQ(io_pin1.name, io_pin2.name);
         EXPECT_EQ(io_pin1.dir, io_pin2.dir);
@@ -164,14 +164,14 @@ protected:
       }
     }
 
-    lg->each_graph_input([&sub_node, this](Node_pin &dpin) {
-      const auto &io = sub_node.get_io_pin_from_instance_pid(dpin.get_pid());
+    lg->each_graph_input([&sub_node, this](Node_pin& dpin) {
+      const auto& io = sub_node.get_io_pin_from_instance_pid(dpin.get_pid());
       EXPECT_EQ(posused.count(io.graph_io_pos), 1);
       EXPECT_EQ(posinput.count(io.graph_io_pos), 1);
     });
 
-    lg->each_graph_output([&sub_node, this](Node_pin &dpin) {
-      const auto &io = sub_node.get_io_pin_from_instance_pid(dpin.get_pid());
+    lg->each_graph_output([&sub_node, this](Node_pin& dpin) {
+      const auto& io = sub_node.get_io_pin_from_instance_pid(dpin.get_pid());
       EXPECT_EQ(posused.count(io.graph_io_pos), 1);
       EXPECT_EQ(posinput.count(io.graph_io_pos), 0);
     });
@@ -185,9 +185,9 @@ TEST_F(Setup_lgraph, add_remove_inputs) {
 
   file_utils::clean_dir(lgdb);
 
-  auto *lib = Graph_library::instance(lgdb);
+  auto* lib = Graph_library::instance(lgdb);
 
-  Lgraph *lg1 = lib->create_lgraph("lg1", "file1.xxx");
+  Lgraph* lg1 = lib->create_lgraph("lg1", "file1.xxx");
 
   check_ios(lg1);
 
@@ -214,7 +214,7 @@ TEST_F(Setup_lgraph, add_remove_inputs) {
   EXPECT_EQ(conta, 0);  // everything should be deleted
 
   conta = 0;
-  lg1->each_sorted_graph_io([&conta](Node_pin &pin, Port_ID pid) {
+  lg1->each_sorted_graph_io([&conta](Node_pin& pin, Port_ID pid) {
     (void)pin;
     (void)pid;
     ++conta;
@@ -241,7 +241,7 @@ TEST_F(Setup_lgraph, add_remove_inputs) {
   }
 
   conta = 0;
-  lg1->each_sorted_graph_io([&conta](Node_pin &pin, Port_ID pid) {
+  lg1->each_sorted_graph_io([&conta](Node_pin& pin, Port_ID pid) {
     (void)pin;
     (void)pid;
     ++conta;

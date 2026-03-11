@@ -49,7 +49,7 @@ bool Symbol_table::set(std::string_view key, std::shared_ptr<Bundle> bundle) {
   return true;
 }
 
-bool Symbol_table::set(std::string_view key, const Lconst &trivial) {
+bool Symbol_table::set(std::string_view key, const Lconst& trivial) {
   auto [var, field] = get_var_field(key);
 
   const auto it = stack.back().varmap.find(var);
@@ -68,7 +68,7 @@ bool Symbol_table::set(std::string_view key, const Lconst &trivial) {
   return true;
 }
 
-bool Symbol_table::mut(std::string_view key, const Lconst &trivial) {
+bool Symbol_table::mut(std::string_view key, const Lconst& trivial) {
   auto [var, field] = get_var_field(key);
 
   const auto it = stack.back().varmap.find(var);
@@ -111,7 +111,7 @@ void Symbol_table::always_scope() {
 void Symbol_table::function_scope(std::string_view func_id, std::shared_ptr<Bundle> inp_bundle) {
   std::string_view scope = func_id;
   for (int i = stack.size() - 1; i >= 0; --i) {
-    const auto &s = stack[i];
+    const auto& s = stack[i];
     if (s.func_id != func_id) {
       continue;
     }
@@ -169,7 +169,7 @@ bool Symbol_table::has_trivial(std::string_view key) const {
   return it->second->has_trivial(field);
 }
 
-const Lconst &Symbol_table::get_trivial(std::string_view key) const {
+const Lconst& Symbol_table::get_trivial(std::string_view key) const {
   auto [var, field] = get_var_field(key);
 
   const auto it = stack.back().varmap.find(var);

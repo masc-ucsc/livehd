@@ -41,7 +41,7 @@ protected:
 
   Lconst(bool str, Bits_t d, Number n) : explicit_str(str), bits(d), num(n) { assert(d < Bits_max); }
 
-  static Bits_t calc_num_bits(const Number &num) {
+  static Bits_t calc_num_bits(const Number& num) {
     if (num == 0) {
       return 0;
     }
@@ -55,10 +55,10 @@ protected:
   }
   Bits_t calc_num_bits() const { return calc_num_bits(num); }
 
-  const Number &get_num() const { return num; }
-  void          adjust(const Lconst &o);
+  const Number& get_num() const { return num; }
+  void          adjust(const Lconst& o);
 
-  static std::pair<std::string, std::string> match_binary(const Lconst &l, const Lconst &r);
+  static std::pair<std::string, std::string> match_binary(const Lconst& l, const Lconst& r);
 
   [[nodiscard]] static std::string to_string(Number num);
   [[nodiscard]] std::string        to_string() const {  // use to_pyrope, to_verilog not the to_str directly
@@ -70,7 +70,7 @@ public:
   using Container = std::string;
 
   explicit Lconst(absl::Span<unsigned char> v);
-  explicit Lconst(const Number &v);
+  explicit Lconst(const Number& v);
   Lconst(int64_t v);  // not explicit to allow easy Lconst(x) < 0 operations
 
   Lconst();
@@ -111,22 +111,22 @@ public:
 
   [[nodiscard]] Lconst sext_op(Bits_t bits) const;
   [[nodiscard]] Lconst get_mask_op() const;
-  [[nodiscard]] Lconst get_mask_op(const Lconst &pos) const;
-  [[nodiscard]] Lconst set_mask_op(const Lconst &pos, const Lconst &val) const;
-  [[nodiscard]] Lconst add_op(const Lconst &o) const;
-  [[nodiscard]] Lconst mult_op(const Lconst &o) const;
-  [[nodiscard]] Lconst div_op(const Lconst &o) const;
-  [[nodiscard]] Lconst sub_op(const Lconst &o) const;
+  [[nodiscard]] Lconst get_mask_op(const Lconst& pos) const;
+  [[nodiscard]] Lconst set_mask_op(const Lconst& pos, const Lconst& val) const;
+  [[nodiscard]] Lconst add_op(const Lconst& o) const;
+  [[nodiscard]] Lconst mult_op(const Lconst& o) const;
+  [[nodiscard]] Lconst div_op(const Lconst& o) const;
+  [[nodiscard]] Lconst sub_op(const Lconst& o) const;
   [[nodiscard]] Lconst lsh_op(Bits_t amount) const;
   [[nodiscard]] Lconst rsh_op(Bits_t amount) const;
-  [[nodiscard]] Lconst ror_op(const Lconst &o) const;
-  [[nodiscard]] Lconst or_op(const Lconst &o) const;
-  [[nodiscard]] Lconst and_op(const Lconst &o) const;
+  [[nodiscard]] Lconst ror_op(const Lconst& o) const;
+  [[nodiscard]] Lconst or_op(const Lconst& o) const;
+  [[nodiscard]] Lconst and_op(const Lconst& o) const;
   [[nodiscard]] Lconst not_op() const;  // bitwise not
   [[nodiscard]] Lconst neg_op() const;  // change sign
-  [[nodiscard]] Lconst concat_op(const Lconst &o) const;
+  [[nodiscard]] Lconst concat_op(const Lconst& o) const;
 
-  [[nodiscard]] Lconst eq_op(const Lconst &o) const;
+  [[nodiscard]] Lconst eq_op(const Lconst& o) const;
 
   [[nodiscard]] Lconst adjust_bits(Bits_t amount) const;
 
@@ -179,16 +179,16 @@ public:
   [[nodiscard]] int64_t to_i() const;                                         // must fit in int or exception raised
 
   // Operator list
-  [[nodiscard]] const Lconst operator+(const Lconst &other) const { return add_op(other); }
+  [[nodiscard]] const Lconst operator+(const Lconst& other) const { return add_op(other); }
   [[nodiscard]] const Lconst operator+(int64_t other) const { return add_op(Lconst(other)); }
 
-  [[nodiscard]] const Lconst operator-(const Lconst &other) const { return sub_op(other); }
+  [[nodiscard]] const Lconst operator-(const Lconst& other) const { return sub_op(other); }
   [[nodiscard]] const Lconst operator-(int64_t other) const { return sub_op(Lconst(other)); }
 
-  [[nodiscard]] const Lconst operator<<(const Lconst &other) const { return lsh_op(other.to_i()); }
+  [[nodiscard]] const Lconst operator<<(const Lconst& other) const { return lsh_op(other.to_i()); }
   [[nodiscard]] const Lconst operator<<(Bits_t other) const { return lsh_op(other); }
 
-  [[nodiscard]] const Lconst operator|(const Lconst &other) const { return or_op(other); }
+  [[nodiscard]] const Lconst operator|(const Lconst& other) const { return or_op(other); }
   [[nodiscard]] const Lconst operator|(int64_t other) const { return or_op(Lconst(other)); }
 
 #if 0
@@ -199,16 +199,16 @@ public:
   }
 #endif
 
-  bool operator==(const Lconst &other) const { return get_num() == other.get_num() && bits == other.bits; }
-  bool operator!=(const Lconst &other) const { return get_num() != other.get_num() || bits != other.bits; }
+  bool operator==(const Lconst& other) const { return get_num() == other.get_num() && bits == other.bits; }
+  bool operator!=(const Lconst& other) const { return get_num() != other.get_num() || bits != other.bits; }
 
   bool operator==(int other) const { return get_num() == other && !is_string(); }
   bool operator!=(int other) const { return get_num() != other || is_string(); }
 
-  bool operator<(const Lconst &other) const { return num < other.num; }
-  bool operator<=(const Lconst &other) const { return num <= other.num; }
-  bool operator>(const Lconst &other) const { return num > other.num; }
-  bool operator>=(const Lconst &other) const { return num >= other.num; }
+  bool operator<(const Lconst& other) const { return num < other.num; }
+  bool operator<=(const Lconst& other) const { return num <= other.num; }
+  bool operator>(const Lconst& other) const { return num > other.num; }
+  bool operator>=(const Lconst& other) const { return num >= other.num; }
 
   const Number get_raw_num() const { return num; }  // FOR DEBUG ONLY
 };
@@ -219,7 +219,7 @@ template <>
 struct std::formatter<Lconst> : formatter<string_view> {
   // parse is inherited from formatter<string_view>.
   template <typename FormatContext>
-  auto format(Lconst c, FormatContext &ctx) const {
+  auto format(Lconst c, FormatContext& ctx) const {
     return formatter<string_view>::format(c.to_pyrope(), ctx);
   }
 };

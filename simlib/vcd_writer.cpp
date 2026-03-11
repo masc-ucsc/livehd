@@ -22,11 +22,11 @@ struct VCDHeader {
   TimeScaleUnit timescale_unit;
   std::string   kw_values[kws];
 
-  VCDHeader()                  = delete;
-  VCDHeader(VCDHeader &&)      = default;
-  VCDHeader(const VCDHeader &) = delete;
-  VCDHeader(TimeScale _timescale_quan, TimeScaleUnit _timescale_unit, const std::string &date, const std::string &comment,
-            const std::string &version)
+  VCDHeader()                 = delete;
+  VCDHeader(VCDHeader&&)      = default;
+  VCDHeader(const VCDHeader&) = delete;
+  VCDHeader(TimeScale _timescale_quan, TimeScaleUnit _timescale_unit, const std::string& date, const std::string& comment,
+            const std::string& version)
       : timescale_quan{_timescale_quan}, timescale_unit{_timescale_unit}, kw_values{timescale(), date, comment, version} {}
 
   std::string timescale() const {
@@ -36,8 +36,8 @@ struct VCDHeader {
 };
 
 // -----------------------------
-HeadPtr makeVCDHeader(TimeScale timescale_quan, TimeScaleUnit timescale_unit, const std::string &date, const std::string &comment,
-                      const std::string &version) {
+HeadPtr makeVCDHeader(TimeScale timescale_quan, TimeScaleUnit timescale_unit, const std::string& date, const std::string& comment,
+                      const std::string& version) {
   return HeadPtr{new VCDHeader(timescale_quan, timescale_unit, date, comment, version)};
 }
 
@@ -45,7 +45,7 @@ HeadPtr makeVCDHeader(TimeScale timescale_quan, TimeScaleUnit timescale_unit, co
 const std::string VCDHeader::kwnames[VCDHeader::kws] = {"$timescale", "$date", "$comment", "$version"};
 
 // -----------------------------
-void VCDHeaderDeleter::operator()(VCDHeader *p) { delete p; }
+void VCDHeaderDeleter::operator()(VCDHeader* p) { delete p; }
 
 // -----------------------------
 struct VCDScope {
@@ -53,21 +53,21 @@ struct VCDScope {
   ScopeType         type;
   std::list<VarPtr> vars;
 
-  VCDScope(const std::string &_name, ScopeType _type) : name(_name), type(_type) {}
+  VCDScope(const std::string& _name, ScopeType _type) : name(_name), type(_type) {}
 };
 
 // -----------------------------
-bool ScopePtrHash::operator()(const ScopePtr &l, const ScopePtr &r) const { return (l->name < r->name); }
+bool ScopePtrHash::operator()(const ScopePtr& l, const ScopePtr& r) const { return (l->name < r->name); }
 
 // -----------------------------
 // VCD variable details needed to call :meth:`VCDWriter.change()`.
 class VCDVariable {
-  VCDVariable()                    = delete;
-  VCDVariable(VCDVariable &&)      = default;
-  VCDVariable(const VCDVariable &) = delete;
+  VCDVariable()                   = delete;
+  VCDVariable(VCDVariable&&)      = default;
+  VCDVariable(const VCDVariable&) = delete;
 
 protected:
-  VCDVariable(const std::string &name, VariableType type, unsigned size, ScopePtr scope, unsigned next_var_id);
+  VCDVariable(const std::string& name, VariableType type, unsigned size, ScopePtr scope, unsigned next_var_id);
 
   std::string  name;   // human-readable name
   VariableType type;   // VCD variable type, one of `VariableTypes`
@@ -111,11 +111,11 @@ const std::string VCDVariable::var_types[] = {"wire",
                                               "wor"};
 
 // -----------------------------
-size_t VarPtrHash::operator()(const VarPtr &p) const {
+size_t VarPtrHash::operator()(const VarPtr& p) const {
   std::hash<std::string> h;
   return (h(p->name) ^ (h(p->scope->name) << 1));
 }
-bool VarPtrEqual::operator()(const VarPtr &a, const VarPtr &b) const {
+bool VarPtrEqual::operator()(const VarPtr& a, const VarPtr& b) const {
   return (a->name == b->name) && (a->scope->name == b->scope->name);
 }
 
@@ -123,7 +123,7 @@ bool VarPtrEqual::operator()(const VarPtr &a, const VarPtr &b) const {
 // One-bit VCD scalar is a 4-state variable and thus may have one of
 // `VCDValues`. An empty *value* is the same as `VCDValues::UNDEF`
 struct VCDScalarVariable : public VCDVariable {
-  VCDScalarVariable(const std::string &_name, VariableType _type, unsigned _size, ScopePtr _scope, unsigned next_var_id)
+  VCDScalarVariable(const std::string& _name, VariableType _type, unsigned _size, ScopePtr _scope, unsigned next_var_id)
       : VCDVariable(_name, _type, _size, _scope, next_var_id) {}
 };
 
@@ -131,7 +131,7 @@ struct VCDScalarVariable : public VCDVariable {
 // String variable as known by GTKWave. Any `string` (character-chain)
 // can be displayed as a change.This type is only supported by GTKWave.
 struct VCDStringVariable : public VCDVariable {
-  VCDStringVariable(const std::string &_name, VariableType _type, unsigned _size, ScopePtr _scope, unsigned next_var_id)
+  VCDStringVariable(const std::string& _name, VariableType _type, unsigned _size, ScopePtr _scope, unsigned next_var_id)
       : VCDVariable(_name, _type, _size, _scope, next_var_id) {}
 };
 
@@ -139,7 +139,7 @@ struct VCDStringVariable : public VCDVariable {
 // Real (IEEE-754 double-precision floating point) variable. Values must
 // be numeric and can't be `VCDValues::UNDEF` or `VCDValues::HIGHV` states
 struct VCDRealVariable : public VCDVariable {
-  VCDRealVariable(const std::string &_name, VariableType _type, unsigned _size, ScopePtr _scope, unsigned next_var_id)
+  VCDRealVariable(const std::string& _name, VariableType _type, unsigned _size, ScopePtr _scope, unsigned next_var_id)
       : VCDVariable(_name, _type, _size, _scope, next_var_id) {}
 };
 
@@ -147,23 +147,23 @@ struct VCDRealVariable : public VCDVariable {
 // Bit vector variable type for the various non-scalar and non-real
 // variable types, including integer, register, wire, etc.
 struct VCDVectorVariable : public VCDVariable {
-  VCDVectorVariable(const std::string &_name, VariableType _type, unsigned _size, ScopePtr _scope, unsigned next_var_id)
+  VCDVectorVariable(const std::string& _name, VariableType _type, unsigned _size, ScopePtr _scope, unsigned next_var_id)
       : VCDVariable(_name, _type, _size, _scope, next_var_id) {}
 };
 
 // -----------------------------
 struct VarSearch {
   VCDScope          vcdscope = {"", ScopeType::module};
-  ScopePtr          ptrscope = {&vcdscope, [](VCDScope *) {}};
+  ScopePtr          ptrscope = {&vcdscope, [](VCDScope*) {}};
   VCDScalarVariable vcd_var  = {"", VCDWriter::var_def_type, 0, ptrscope, 0};
-  VarPtr            ptr_var  = {&vcd_var, [](VCDScalarVariable *) {}};
+  VarPtr            ptr_var  = {&vcd_var, [](VCDScalarVariable*) {}};
 
   VarSearch() = delete;
   VarSearch(ScopeType _scope_def_type) : vcdscope("", _scope_def_type) {}
 };
 
 // -----------------------------
-VCDWriter::VCDWriter(const std::string &_filename, HeadPtr &&_header, unsigned init_timestamp)
+VCDWriter::VCDWriter(const std::string& _filename, HeadPtr&& _header, unsigned init_timestamp)
     : timestamp(init_timestamp)
     , header((_header) ? std::move(_header) : makeVCDHeader())
     , filename(_filename)
@@ -185,8 +185,8 @@ VCDWriter::VCDWriter(const std::string &_filename, HeadPtr &&_header, unsigned i
 }
 
 // -----------------------------
-VarPtr VCDWriter::register_var(const std::string &scope, const std::string &name, VariableType type, unsigned size,
-                               const VarValue &init, bool duplicatenames_check) {
+VarPtr VCDWriter::register_var(const std::string& scope, const std::string& name, VariableType type, unsigned size,
+                               const VarValue& init, bool duplicatenames_check) {
   VarPtr pvar;
   if (closed) {
     throw VCDPhaseException{"Cannot register after close()"};
@@ -277,8 +277,8 @@ VarPtr VCDWriter::register_var(const std::string &scope, const std::string &name
 }
 
 // -----------------------------
-VarPtr VCDWriter::register_passed_var(const std::string &scope, const std::string &name, VariableType type, unsigned size,
-                                      const VarValue &init, bool duplicatenames_check) {
+VarPtr VCDWriter::register_passed_var(const std::string& scope, const std::string& name, VariableType type, unsigned size,
+                                      const VarValue& init, bool duplicatenames_check) {
   const std::string parentname = scope.substr(0, scope.find_last_of(scope_sep));
   /*for unique ident::
    *if (scope has scope_sep)
@@ -316,7 +316,7 @@ VarPtr VCDWriter::register_passed_var(const std::string &scope, const std::strin
     }
   }
 
-  for (auto &randm : (**parentscope).vars) {
+  for (auto& randm : (**parentscope).vars) {
     if (name == randm->name) {
       unique_var_id = stoul(randm->ident, 0, 16);
     }
@@ -385,7 +385,7 @@ VarPtr VCDWriter::register_passed_var(const std::string &scope, const std::strin
   return pvar;
 }
 // -----------------------------
-bool VCDWriter::change(const VarPtr &var, const VarValue &value, bool reg) {
+bool VCDWriter::change(const VarPtr& var, const VarValue& value, bool reg) {
   if (global_timestamp < timestamp) {
     throw VCDPhaseException{utils::format("Out of order value change var '%s'", var->name.c_str())};
   } else if (closed) {
@@ -438,12 +438,12 @@ bool VCDWriter::change(const VarPtr &var, const VarValue &value, bool reg) {
 }
 
 // -----------------------------
-bool VCDWriter::change(const std::string &scope, const std::string &name, const VarValue &value) {
+bool VCDWriter::change(const std::string& scope, const std::string& name, const VarValue& value) {
   return change(var(scope, name), value, false);
 }
 
 // -----------------------------
-VarPtr VCDWriter::var(const std::string &scope, const std::string &name) const {
+VarPtr VCDWriter::var(const std::string& scope, const std::string& name) const {
   //!!! speed optimisation !!!
   // ScopePtr pscope = std::make_shared<VCDScope>(scope, scope_def_type);
   // auto itscope = scopes.find(pscope);
@@ -460,7 +460,7 @@ VarPtr VCDWriter::var(const std::string &scope, const std::string &name) const {
   return *it_var;
 }
 
-void VCDWriter::set_scope_type(std::string &scope, ScopeType scopetype) {
+void VCDWriter::set_scope_type(std::string& scope, ScopeType scopetype) {
   ScopePtr pscope = std::make_shared<VCDScope>(scope, scope_def_type);
   auto     it     = scopes.find(pscope);
   if (it == scopes.end()) {
@@ -473,9 +473,9 @@ void VCDWriter::set_scope_type(std::string &scope, ScopeType scopetype) {
 void VCDWriter::dump_off_int(TimeStamp _timestamp) {
   fprintf(ofile, "#%d\n", _timestamp);
   fprintf(ofile, "$dumpoff\n");
-  for (const auto &p : vars_prevs) {
-    const char *ident = p.first->ident.c_str();
-    const char *value = p.second.c_str();
+  for (const auto& p : vars_prevs) {
+    const char* ident = p.first->ident.c_str();
+    const char* value = p.second.c_str();
 
     if (value[0] == 'r') {
     }  // real variables cannot have "z" or "x" state
@@ -491,12 +491,12 @@ void VCDWriter::dump_off_int(TimeStamp _timestamp) {
   fprintf(ofile, "$end\n");
 }
 
-void VCDWriter::dump_values(const std::string &keyword) {
+void VCDWriter::dump_values(const std::string& keyword) {
   fprintf(ofile, "%s\n", keyword.c_str());
   // TODO : events should be excluded
-  for (const auto &p : vars_prevs) {
-    const char *ident = p.first->ident.c_str();
-    const char *value = p.second.c_str();
+  for (const auto& p : vars_prevs) {
+    const char* ident = p.first->ident.c_str();
+    const char* value = p.second.c_str();
     if (p.second.size() != 1) {
       fprintf(ofile, "%s %s\n", value, ident);
     } else {
@@ -507,7 +507,7 @@ void VCDWriter::dump_values(const std::string &keyword) {
   fprintf(ofile, "$end\n");
 }
 
-void VCDWriter::scope_declaration(const std::string &scope, size_t sub_beg, size_t sub_end) {
+void VCDWriter::scope_declaration(const std::string& scope, size_t sub_beg, size_t sub_end) {
   const std::string SCOPEtypeS[] = {"begin", "fork", "function", "module", "task"};
   auto              scopename    = scope.substr(sub_beg, sub_end - sub_beg);
   auto              scopetype    = SCOPEtypeS[int(scope_def_type)].c_str();
@@ -528,9 +528,9 @@ void VCDWriter::write_header() {
   // nested scope
   size_t      n = 0, n_prev = 0;
   std::string scope_prev = "";
-  for (auto &s : scopes)  // sorted
+  for (auto& s : scopes)  // sorted
   {
-    const std::string &scope = s->name;
+    const std::string& scope = s->name;
     // scope print close
     if (scope_prev.size()) {
       n_prev = 0;
@@ -567,7 +567,7 @@ void VCDWriter::write_header() {
     scope_declaration(scope, n_prev);
 
     // dump variable declartion
-    for (const auto &var : s->vars) {
+    for (const auto& var : s->vars) {
       fprintf(ofile, "%s\n", var->declartion().c_str());
     }
 
@@ -604,7 +604,7 @@ void VCDWriter::finalize_registration() {
 }
 
 // -----------------------------
-VCDVariable::VCDVariable(const std::string &_name, VariableType _type, unsigned _size, ScopePtr _scope, unsigned next_var_id)
+VCDVariable::VCDVariable(const std::string& _name, VariableType _type, unsigned _size, ScopePtr _scope, unsigned next_var_id)
     : name(_name), type(_type), size(_size), scope(_scope) {
   std::stringstream ss;
   ss << std::hex << next_var_id;
@@ -621,9 +621,9 @@ std::string VCDVariable::declartion() const {
 //------------------------------
 // class initializer {
 // public:
-VCDWriter *initialize_vcd_writer() {
+VCDWriter* initialize_vcd_writer() {
   // = clock();
-  const char *var = getenv("SIMLIB_DUMPDIR");
+  const char* var = getenv("SIMLIB_DUMPDIR");
   std::string dump_file{"SIMLIB_VCD.vcd"};
   if (var) {
     std::string dir{var};

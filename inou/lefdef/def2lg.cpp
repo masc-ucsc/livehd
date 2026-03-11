@@ -11,16 +11,16 @@
 #include "inou_def.hpp"
 #include "perf_tracing.hpp"
 
-int def_net_cb(defrCallbackType_e type, defiNet *fnet, defiUserData ud) {
+int def_net_cb(defrCallbackType_e type, defiNet* fnet, defiUserData ud) {
   (void)type;
 
-  Def_info &dinfo = *((Def_info *)ud);
+  Def_info& dinfo = *((Def_info*)ud);
   dinfo.nets.resize(dinfo.nets.size() + 1);
-  Def_net &tmp_net = dinfo.nets.back();
+  Def_net& tmp_net = dinfo.nets.back();
   tmp_net.name     = fnet->name();
   tmp_net.conns.resize(fnet->numConnections());
   for (int i = 0; i < fnet->numConnections(); i++) {
-    Def_conn &tmp_conn  = tmp_net.conns[i];
+    Def_conn& tmp_conn  = tmp_net.conns[i];
     tmp_conn.pin_name   = fnet->pin(i);
     tmp_conn.compo_name = fnet->instance(i);
   }
@@ -32,11 +32,11 @@ int def_net_cb(defrCallbackType_e type, defiNet *fnet, defiUserData ud) {
   return 0;
 }
 
-int def_component_cb(defrCallbackType_e type, defiComponent *fcompo, defiUserData ud) {
+int def_component_cb(defrCallbackType_e type, defiComponent* fcompo, defiUserData ud) {
   (void)type;
-  Def_info &dinfo = *((Def_info *)ud);
+  Def_info& dinfo = *((Def_info*)ud);
   dinfo.compos.resize(dinfo.compos.size() + 1);
-  Def_component &tmp_compo = dinfo.compos.back();
+  Def_component& tmp_compo = dinfo.compos.back();
 
   tmp_compo.name        = fcompo->id();
   tmp_compo.macro_name  = fcompo->name();
@@ -56,11 +56,11 @@ int def_component_cb(defrCallbackType_e type, defiComponent *fcompo, defiUserDat
   return 0;
 }
 
-int def_io_cb(defrCallbackType_e type, defiPin *fpin, defiUserData ud) {
+int def_io_cb(defrCallbackType_e type, defiPin* fpin, defiUserData ud) {
   (void)type;
-  Def_info &dinfo = *((Def_info *)ud);
+  Def_info& dinfo = *((Def_info*)ud);
   dinfo.ios.resize(dinfo.ios.size() + 1);
-  Def_io &tmp_io = dinfo.ios.back();
+  Def_io& tmp_io = dinfo.ios.back();
 
   tmp_io.io_name  = fpin->pinName();
   tmp_io.net_name = fpin->netName();
@@ -87,11 +87,11 @@ int def_io_cb(defrCallbackType_e type, defiPin *fpin, defiUserData ud) {
   return 0;
 }
 
-int def_track_cb(defrCallbackType_e type, defiTrack *ftrack, defiUserData ud) {
+int def_track_cb(defrCallbackType_e type, defiTrack* ftrack, defiUserData ud) {
   (void)type;
-  Def_info &dinfo = *((Def_info *)ud);
+  Def_info& dinfo = *((Def_info*)ud);
   dinfo.tracks.resize(dinfo.tracks.size() + 1);
-  Def_track &tmp_track = dinfo.tracks.back();
+  Def_track& tmp_track = dinfo.tracks.back();
 
   tmp_track.direction  = ftrack->macro();
   tmp_track.location   = ftrack->x();
@@ -108,19 +108,19 @@ int def_track_cb(defrCallbackType_e type, defiTrack *ftrack, defiUserData ud) {
   return 0;
 }
 
-int def_design_cb(defrCallbackType_e type, const char *string, defiUserData ud) {
+int def_design_cb(defrCallbackType_e type, const char* string, defiUserData ud) {
   (void)type;
 
-  Def_info &dinfo = *((Def_info *)ud);
+  Def_info& dinfo = *((Def_info*)ud);
   dinfo.mod_name  = string;
   return 0;
 }
 
-int def_row_cb(defrCallbackType_e type, defiRow *frow, defiUserData ud) {
+int def_row_cb(defrCallbackType_e type, defiRow* frow, defiUserData ud) {
   (void)type;
-  Def_info &dinfo = *((Def_info *)ud);
+  Def_info& dinfo = *((Def_info*)ud);
   dinfo.rows.resize(dinfo.rows.size() + 1);
-  Def_row &tmp_row = dinfo.rows.back();
+  Def_row& tmp_row = dinfo.rows.back();
 
   tmp_row.name   = frow->name();
   tmp_row.site   = frow->macro();
@@ -139,11 +139,11 @@ int def_row_cb(defrCallbackType_e type, defiRow *frow, defiUserData ud) {
   return 0;
 }
 
-void def_parsing(Def_info &dinfo, std::string_view def_file_name) {
+void def_parsing(Def_info& dinfo, std::string_view def_file_name) {
   std::string def_file{def_file_name};
   defrInit();  // initialize the reader, This routine must be called first
 
-  FILE *fin = fopen(def_file.c_str(), "r");
+  FILE* fin = fopen(def_file.c_str(), "r");
   if (fin == NULL) {
     Pass::error("def_parsing: could not open def input file {}", def_file_name);
     return;
@@ -159,6 +159,6 @@ void def_parsing(Def_info &dinfo, std::string_view def_file_name) {
 
   // Def_info object is your userData, pass pointer of it into defrRead(), and it will return as a argument in your user-defined
   // callback routine
-  defrRead(fin, def_file.c_str(), (void *)&dinfo, 1);
+  defrRead(fin, def_file.c_str(), (void*)&dinfo, 1);
   fclose(fin);
 }

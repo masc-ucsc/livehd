@@ -13,13 +13,13 @@
 
 // #define NO_BOTTOM_UP_PARALLEL 1
 
-void Lgraph::each_sorted_graph_io(const std::function<void(Node_pin &pin, Port_ID pos)> &f1, bool hierarchical) {
+void Lgraph::each_sorted_graph_io(const std::function<void(Node_pin& pin, Port_ID pos)>& f1, bool hierarchical) {
   if (node_internal.size() < Hardcoded_output_nid) {
     return;
   }
 
   struct Pair_type {
-    Pair_type(Lgraph *lg, Hierarchy_index hidx, Index_id idx, Port_ID pid, Port_ID _pos)
+    Pair_type(Lgraph* lg, Hierarchy_index hidx, Index_id idx, Port_ID pid, Port_ID _pos)
         : dpin(lg, lg, hidx, idx, pid, false), pos(_pos) {}
     Node_pin dpin;
     Port_ID  pos;
@@ -28,7 +28,7 @@ void Lgraph::each_sorted_graph_io(const std::function<void(Node_pin &pin, Port_I
 
   auto hidx = hierarchical ? Hierarchy::hierarchical_root() : Hierarchy::non_hierarchical();
 
-  for (const auto &io_pin : get_self_sub_node().get_io_pins()) {
+  for (const auto& io_pin : get_self_sub_node().get_io_pins()) {
     if (io_pin.is_invalid()) {
       continue;
     }
@@ -48,7 +48,7 @@ void Lgraph::each_sorted_graph_io(const std::function<void(Node_pin &pin, Port_I
     }
   }
 
-  std::sort(pin_pair.begin(), pin_pair.end(), [](const Pair_type &a, const Pair_type &b) -> bool {
+  std::sort(pin_pair.begin(), pin_pair.end(), [](const Pair_type& a, const Pair_type& b) -> bool {
     if (a.pos == Port_invalid && b.pos == Port_invalid) {
       if (a.dpin.is_graph_input() && b.dpin.is_graph_output()) {
         return true;
@@ -85,12 +85,12 @@ void Lgraph::each_sorted_graph_io(const std::function<void(Node_pin &pin, Port_I
     return a.pos < b.pos;
   });
 
-  for (auto &pp : pin_pair) {
+  for (auto& pp : pin_pair) {
     f1(pp.dpin, pp.pos);
   }
 }
 
-void Lgraph::each_pin(const Node_pin &dpin, const std::function<bool(Index_id idx)> &f1) const {
+void Lgraph::each_pin(const Node_pin& dpin, const std::function<bool(Index_id idx)>& f1) const {
   Index_id first_idx2 = dpin.get_root_idx();
   Index_id idx2       = first_idx2;
 
@@ -120,14 +120,14 @@ void Lgraph::each_pin(const Node_pin &dpin, const std::function<bool(Index_id id
   }
 }
 
-void Lgraph::each_graph_input(const std::function<void(Node_pin &pin)> &f1, bool hierarchical) {
+void Lgraph::each_graph_input(const std::function<void(Node_pin& pin)>& f1, bool hierarchical) {
   if (node_internal.size() < Hardcoded_output_nid) {
     return;
   }
 
   auto hidx = hierarchical ? Hierarchy::hierarchical_root() : Hierarchy::non_hierarchical();
 
-  for (const auto &io_pin : get_self_sub_node().get_io_pins()) {
+  for (const auto& io_pin : get_self_sub_node().get_io_pins()) {
     if (io_pin.is_input()) {
       Port_ID pid = get_self_sub_node().get_instance_pid(io_pin.name);
       auto    idx = find_idx_from_pid(Hardcoded_input_nid, pid);
@@ -141,14 +141,14 @@ void Lgraph::each_graph_input(const std::function<void(Node_pin &pin)> &f1, bool
   }
 }
 
-void Lgraph::each_graph_output(const std::function<void(Node_pin &pin)> &f1, bool hierarchical) {
+void Lgraph::each_graph_output(const std::function<void(Node_pin& pin)>& f1, bool hierarchical) {
   if (node_internal.size() < Hardcoded_output_nid) {
     return;
   }
 
   auto hidx = hierarchical ? Hierarchy::hierarchical_root() : Hierarchy::non_hierarchical();
 
-  for (const auto &io_pin : get_self_sub_node().get_io_pins()) {
+  for (const auto& io_pin : get_self_sub_node().get_io_pins()) {
     if (io_pin.is_output()) {
       Port_ID pid = get_self_sub_node().get_instance_pid(io_pin.name);
       auto    idx = find_idx_from_pid(Hardcoded_output_nid, pid);
@@ -162,8 +162,8 @@ void Lgraph::each_graph_output(const std::function<void(Node_pin &pin)> &f1, boo
   }
 }
 
-void Lgraph::each_local_sub_fast_direct(const std::function<bool(Node &, Lg_type_id)> &fn) {
-  for (const auto &e : get_down_nodes_map()) {
+void Lgraph::each_local_sub_fast_direct(const std::function<bool(Node&, Lg_type_id)>& fn) {
+  for (const auto& e : get_down_nodes_map()) {
     Index_id cid = e.first.nid;
     I(cid);
 
@@ -176,9 +176,9 @@ void Lgraph::each_local_sub_fast_direct(const std::function<bool(Node &, Lg_type
   }
 }
 
-void Lgraph::each_local_unique_sub_fast(const std::function<bool(Lgraph *sub_lg)> &fn) {
+void Lgraph::each_local_unique_sub_fast(const std::function<bool(Lgraph* sub_lg)>& fn) {
   std::set<Lg_type_id> visited;
-  for (const auto &e : get_down_nodes_map()) {
+  for (const auto& e : get_down_nodes_map()) {
     Index_id cid = e.first.nid;
     I(cid);
 
@@ -188,7 +188,7 @@ void Lgraph::each_local_unique_sub_fast(const std::function<bool(Lgraph *sub_lg)
 
     visited.insert(e.second);
 
-    auto *sub_lg = ref_library()->open_lgraph(e.second);
+    auto* sub_lg = ref_library()->open_lgraph(e.second);
     if (sub_lg == nullptr || sub_lg->is_empty()) {
       continue;
     }
@@ -200,14 +200,14 @@ void Lgraph::each_local_unique_sub_fast(const std::function<bool(Lgraph *sub_lg)
   }
 }
 
-void Lgraph::each_hier_unique_sub_bottom_up_int(std::set<Lg_type_id> &visited, const std::function<void(Lgraph *lg_sub)> &fn) {
-  for (const auto &ent : get_down_class_map()) {
+void Lgraph::each_hier_unique_sub_bottom_up_int(std::set<Lg_type_id>& visited, const std::function<void(Lgraph* lg_sub)>& fn) {
+  for (const auto& ent : get_down_class_map()) {
     if (visited.find(ent.first) != visited.end()) {
       continue;
     }
     visited.insert(ent.first);
 
-    auto *down_lg = ref_library()->open_lgraph(Lg_type_id(ent.first));
+    auto* down_lg = ref_library()->open_lgraph(Lg_type_id(ent.first));
     if (down_lg == nullptr || down_lg->is_empty()) {
       continue;
     }
@@ -216,14 +216,14 @@ void Lgraph::each_hier_unique_sub_bottom_up_int(std::set<Lg_type_id> &visited, c
   }
 }
 
-void Lgraph::each_hier_unique_sub_bottom_up(const std::function<void(Lgraph *lg_sub)> &fn) {
+void Lgraph::each_hier_unique_sub_bottom_up(const std::function<void(Lgraph* lg_sub)>& fn) {
   std::set<Lg_type_id> visited;
   each_hier_unique_sub_bottom_up_int(visited, fn);
   fn(this);  // itself
 }
 
-void Lgraph::bottom_up_visit_wrap(const std::function<void(Lgraph *lg_sub)> *fn, Pending_map *pending_map,
-                                  const Parent_map_type *parent_map) {
+void Lgraph::bottom_up_visit_wrap(const std::function<void(Lgraph* lg_sub)>* fn, Pending_map* pending_map,
+                                  const Parent_map_type* parent_map) {
   (*fn)(this);
 
   const auto it = parent_map->find(this);
@@ -231,11 +231,11 @@ void Lgraph::bottom_up_visit_wrap(const std::function<void(Lgraph *lg_sub)> *fn,
     return;
   }
 
-  for (auto *parent_lg : it->second) {
+  for (auto* parent_lg : it->second) {
     auto it2 = pending_map->find(parent_lg);
     I(it2 != pending_map->end());
     // WARNING: NASTY cast to atomic because map does not allow to have an atomic as 2nd entry
-    int n_pending = atomic_fetch_sub_explicit((std::atomic<int> *)(&it2->second), 1, std::memory_order_relaxed);
+    int n_pending = atomic_fetch_sub_explicit((std::atomic<int>*)(&it2->second), 1, std::memory_order_relaxed);
     if (n_pending == 1) {
       I(it2->second == 0);
 #ifdef NO_BOTTOM_UP_PARALLEL
@@ -247,11 +247,11 @@ void Lgraph::bottom_up_visit_wrap(const std::function<void(Lgraph *lg_sub)> *fn,
   }
 }
 
-void Lgraph::bottom_up_visit_step(Pending_map &pending_map, Parent_map_type &parent_map, absl::flat_hash_set<Lgraph *> &leafs_set,
-                                  std::vector<Lgraph *> &leafs) {
+void Lgraph::bottom_up_visit_step(Pending_map& pending_map, Parent_map_type& parent_map, absl::flat_hash_set<Lgraph*>& leafs_set,
+                                  std::vector<Lgraph*>& leafs) {
   bool leaf = true;
-  for (const auto &ent : get_down_class_map()) {
-    auto *down_lg = ref_library()->open_lgraph(Lg_type_id(ent.first));
+  for (const auto& ent : get_down_class_map()) {
+    auto* down_lg = ref_library()->open_lgraph(Lg_type_id(ent.first));
     if (down_lg != nullptr && !down_lg->is_empty()) {
       leaf = false;
       parent_map[down_lg].emplace_back(this);
@@ -268,17 +268,17 @@ void Lgraph::bottom_up_visit_step(Pending_map &pending_map, Parent_map_type &par
   }
 }
 
-void Lgraph::each_hier_unique_sub_bottom_up_parallel2(const std::function<void(Lgraph *lg_sub)> &fn) {
+void Lgraph::each_hier_unique_sub_bottom_up_parallel2(const std::function<void(Lgraph* lg_sub)>& fn) {
   Pending_map     pending_map;
   Parent_map_type parent_map;
 
-  absl::flat_hash_set<Lgraph *> leafs_set;
-  std::vector<Lgraph *>         leafs;
+  absl::flat_hash_set<Lgraph*> leafs_set;
+  std::vector<Lgraph*>         leafs;
 
   bottom_up_visit_step(pending_map, parent_map, leafs_set, leafs);  // single-thread
 
   if (!leafs.empty()) {
-    for (auto *lg : leafs) {
+    for (auto* lg : leafs) {
 #ifdef NO_BOTTOM_UP_PARALLEL
       lg->bottom_up_visit_wrap(&fn, &pending_map, &parent_map);
 #else

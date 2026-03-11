@@ -132,7 +132,7 @@ bool Graph_core::Master_entry::delete_edge(uint32_t self_id, uint32_t other_id, 
   return false;
 }
 
-std::pair<Graph_core_overflow *, uint32_t> Graph_core::allocate_overflow() {
+std::pair<Graph_core_overflow*, uint32_t> Graph_core::allocate_overflow() {
   uint32_t oid;
   if (free_overflow_id == 0) {
     oid = table.size();
@@ -140,16 +140,16 @@ std::pair<Graph_core_overflow *, uint32_t> Graph_core::allocate_overflow() {
     table.emplace_back();
   }
 
-  Graph_core_free_overflow *free_ent = (Graph_core_free_overflow *)&table[oid];
+  Graph_core_free_overflow* free_ent = (Graph_core_free_overflow*)&table[oid];
 
   free_overflow_id = free_ent->next_ptr;
-  auto *ov         = free_ent->ref_overflow();
+  auto* ov         = free_ent->ref_overflow();
   ov->clear();
   return std::pair(ov, oid);
 }
 
 void Graph_core::add_edge_int(uint32_t self_id, uint32_t other_id) {
-  Graph_core_free &ent = table[self_id];
+  Graph_core_free& ent = table[self_id];
 
   if (ent.is_node()) {
     bool ok = ent.ref_node()->add_edge(self_id, other_id);
@@ -227,7 +227,7 @@ std::pair<size_t, size_t> Graph_core::get_num_pin_edges(uint32_t id) const {
 
   auto over_id = table[id].get_overflow_id();
   if (over_id) {
-    auto *over_ptr      = ref_overflow(over_id);
+    auto* over_ptr      = ref_overflow(over_id);
     auto [l_inp, l_out] = over_ptr->get_num_local_edges();
     t_inp += l_inp;
     t_out += l_out;
@@ -279,7 +279,7 @@ void Graph_core::Master_entry::dump(uint32_t self_id) const {
   std::cout << "\n";
 }
 
-void Graph_core::Master_entry::delete_node(uint32_t self_id, std::vector<Master_entry> &mtable) {
+void Graph_core::Master_entry::delete_node(uint32_t self_id, std::vector<Master_entry>& mtable) {
   for (auto i = 0u; i < Num_sedges; ++i) {
     if (sedge[i] == 0) {
       continue;

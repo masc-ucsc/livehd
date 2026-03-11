@@ -9,9 +9,9 @@ private:
   bool gioc;
 
 protected:
-  static void optimize(Eprp_var &var);
+  static void optimize(Eprp_var& var);
 
 public:
-  Pass_cprop(const Eprp_var &var);
+  Pass_cprop(const Eprp_var& var);
   static void setup();
 };

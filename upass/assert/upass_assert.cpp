@@ -4,7 +4,7 @@
 
 #include "lnast_ntype.hpp"
 
-uPass_assert::uPass_assert(std::shared_ptr<upass::Lnast_manager> &_lm) : uPass(_lm) {}
+uPass_assert::uPass_assert(std::shared_ptr<upass::Lnast_manager>& _lm) : uPass(_lm) {}
 
 void uPass_assert::process_func_call() {
   move_to_child();

@@ -10,7 +10,7 @@
 
 static Pass_plugin sample("inou_lefdef", Inou_lefdef::setup);
 
-Inou_lefdef::Inou_lefdef(const Eprp_var &var) : Pass("inou.lefdef", var) { lgdb = var.get("lgdb"); }
+Inou_lefdef::Inou_lefdef(const Eprp_var& var) : Pass("inou.lefdef", var) { lgdb = var.get("lgdb"); }
 
 void Inou_lefdef::setup() {
   Eprp_method m1("inou.lefdef", "read lef/def to lgraph", &Inou_lefdef::to_lg);
@@ -18,15 +18,15 @@ void Inou_lefdef::setup() {
   register_inou("lefdef", m1);
 }
 
-void Inou_lefdef::to_lg(Eprp_var &var) {
+void Inou_lefdef::to_lg(Eprp_var& var) {
   TRACE_EVENT("inou", "lefdef");
 
-  std::vector<Lgraph *> lgs;
+  std::vector<Lgraph*> lgs;
 
   auto files = var.get("files");
 
   Inou_lefdef pp(var);
-  for (const auto &f : absl::StrSplit(files, ',')) {
+  for (const auto& f : absl::StrSplit(files, ',')) {
     if (str_tools::ends_with(f, ".def")) {
       auto new_lgs = pp.parse_def(f);
       lgs.insert(lgs.end(), new_lgs.begin(), new_lgs.end());
@@ -37,23 +37,23 @@ void Inou_lefdef::to_lg(Eprp_var &var) {
   }
 }
 
-std::vector<Lgraph *> Inou_lefdef::parse_def(std::string_view def_file) {
+std::vector<Lgraph*> Inou_lefdef::parse_def(std::string_view def_file) {
   std::print("process {}\n", def_file);
 
-  std::vector<Lgraph *> lgs;
+  std::vector<Lgraph*> lgs;
 #if 1
   Def_info dinfo;
   // def_parsing(dinfo, def_file);
 
-  for (auto &&io : dinfo.ios) {
+  for (auto&& io : dinfo.ios) {
     std::print("io.name:{}\n", io.io_name);
   }
 
 #else
   // clear since loading from def
-  auto *g = Lgraph_create(opack.lgdb_path, dinfo.mod_name, opack.def_file);
+  auto* g = Lgraph_create(opack.lgdb_path, dinfo.mod_name, opack.def_file);
 
-  const Tech_library &tlib            = g->get_tlibrary();
+  const Tech_library& tlib            = g->get_tlibrary();
   const int           cell_types_size = tlib.get_cell_types_size();
 
   std::unordered_map<std::string, Node> ht_comp2node;
@@ -103,7 +103,7 @@ std::vector<Lgraph *> Inou_lefdef::parse_def(std::string_view def_file) {
     for (auto iter_conn = iter_net->conns.begin(); iter_conn != iter_net->conns.end();
          ++iter_conn) {                      // determine src nid/pid and dst nids/pids
       if (iter_conn->compo_name == "PIN") {  // compo type is an io pin
-        const Tech_cell *cell_type = tlib.get_const_cell((uint16_t)cf_node.get_type_tmap_id());
+        const Tech_cell* cell_type = tlib.get_const_cell((uint16_t)cf_node.get_type_tmap_id());
         Port_ID          pid       = cell_type->get_pin_id(iter_conn->pin_name);
         if (cell_type->is_output(iter_conn->pin_name)) {
           src_node = cf_node;
@@ -114,7 +114,7 @@ std::vector<Lgraph *> Inou_lefdef::parse_def(std::string_view def_file) {
         }
       } else {  // compo type is not an io pin, i.e. regular cell
         Node             compo_node = ht_comp2node[iter_conn->compo_name];
-        const Tech_cell *cell_type  = tlib.get_const_cell((uint16_t)compo_node.get_type_tmap_id());
+        const Tech_cell* cell_type  = tlib.get_const_cell((uint16_t)compo_node.get_type_tmap_id());
         Port_ID          pid        = cell_type->get_pin_id(iter_conn->pin_name);
 
         if (cell_type->is_output(iter_conn->pin_name)) {

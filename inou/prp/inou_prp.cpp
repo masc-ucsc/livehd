@@ -18,15 +18,15 @@ void Inou_prp::setup() {
   register_pass(m1);
 }
 
-Inou_prp::Inou_prp(const Eprp_var &var) : Pass("inou.prp", var) {}
+Inou_prp::Inou_prp(const Eprp_var& var) : Pass("inou.prp", var) {}
 
-void Inou_prp::parse_to_lnast(Eprp_var &var) {
+void Inou_prp::parse_to_lnast(Eprp_var& var) {
   TRACE_EVENT("inou", "PRP_parse_to_lnast");
 
   Inou_prp p(var);
   bool     parse_only = (var.get("parse_only") == "true");
 
-  for (const auto &f : absl::StrSplit(p.files, ',')) {
+  for (const auto& f : absl::StrSplit(p.files, ',')) {
     auto basename       = str_tools::get_str_after_last_if_exists(f, '/');
     auto basename_noext = str_tools::get_str_before_first(basename, '.');
 

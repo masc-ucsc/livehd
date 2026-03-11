@@ -4,9 +4,9 @@
 
 class Top_api {
 protected:
-  static void files(Eprp_var &var);
-  static void filter(Eprp_var &var);
+  static void files(Eprp_var& var);
+  static void filter(Eprp_var& var);
 
 public:
-  static void setup(Eprp &eprp);
+  static void setup(Eprp& eprp);
 };

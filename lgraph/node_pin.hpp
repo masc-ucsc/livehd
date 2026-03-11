@@ -26,14 +26,14 @@ protected:
   friend class Bwd_edge_iterator;
   friend class Edge_raw;
 
-  Lgraph         *top_g;
-  Lgraph         *current_g;
+  Lgraph*         top_g;
+  Lgraph*         current_g;
   Hierarchy_index hidx;
   Index_id        idx;
   Port_ID         pid;
   bool            sink;
 
-  constexpr Node_pin(Lgraph *_g, Lgraph *_c_g, Hierarchy_index _hidx, Index_id _idx, Port_ID _pid, bool _sink)
+  constexpr Node_pin(Lgraph* _g, Lgraph* _c_g, Hierarchy_index _hidx, Index_id _idx, Port_ID _pid, bool _sink)
       : top_g(_g), current_g(_c_g), hidx(_hidx), idx(_idx), pid(_pid), sink(_sink) {
     I(_g);
     // Could be IDX=0 for invalid
@@ -68,12 +68,12 @@ public:
   public:
     // constexpr operator size_t() const { I(0); return idx|(sink<<31); }
 
-    Compact(const Compact &obj) = default;
+    Compact(const Compact& obj) = default;
     Compact(const Hierarchy_index _hidx, Index_id _idx, bool _sink) : hidx(_hidx), idx(_idx), sink(_sink) {
       I(!Hierarchy::is_invalid(hidx));
     };
     Compact() : idx(0), sink(0) {};
-    Compact &operator=(const Compact &obj) {
+    Compact& operator=(const Compact& obj) {
       I(this != &obj);
       hidx = obj.hidx;
       idx  = obj.idx;
@@ -84,14 +84,14 @@ public:
 
     [[nodiscard]] constexpr bool is_invalid() const { return idx == 0u; }
 
-    [[nodiscard]] constexpr bool operator==(const Compact &other) const {
+    [[nodiscard]] constexpr bool operator==(const Compact& other) const {
       return idx == other.idx && sink == other.sink
              && (hidx == other.hidx || Hierarchy::is_invalid(hidx) || Hierarchy::is_invalid(other.hidx));
     }
-    [[nodiscard]] constexpr bool operator!=(const Compact &other) const { return !(*this == other); }
+    [[nodiscard]] constexpr bool operator!=(const Compact& other) const { return !(*this == other); }
 
     template <typename H>
-    friend H AbslHashValue(H h, const Compact &s) {
+    friend H AbslHashValue(H h, const Compact& s) {
       return H::combine(std::move(h), s.hidx, s.idx, s.sink);
     };
 
@@ -116,11 +116,11 @@ public:
   public:
     // constexpr operator size_t() const { I(0); return idx|(sink<<31); }
 
-    Compact_flat(const Compact_flat &obj) = default;
+    Compact_flat(const Compact_flat& obj) = default;
     constexpr Compact_flat(const Lg_type_id _lgid, Index_id _idx, bool _sink) : lgid(_lgid), idx(_idx), sink(_sink) {};
     constexpr Compact_flat() : lgid(0), idx(0), sink(0) {};
 
-    Compact_flat &operator=(const Compact_flat &obj) {
+    Compact_flat& operator=(const Compact_flat& obj) {
       I(this != &obj);
       lgid = obj.lgid;
       idx  = obj.idx;
@@ -131,16 +131,16 @@ public:
 
     [[nodiscard]] constexpr bool is_invalid() const { return idx == 0u; }
 
-    [[nodiscard]] constexpr bool operator==(const Compact_flat &other) const {
+    [[nodiscard]] constexpr bool operator==(const Compact_flat& other) const {
       return idx == other.idx && sink == other.sink && (lgid == other.lgid || lgid == 0u || other.lgid == 0u);
     }
-    [[nodiscard]] constexpr bool operator!=(const Compact_flat &other) const { return !(*this == other); }
-    [[nodiscard]] constexpr bool operator<(const Compact_flat &other) const {
+    [[nodiscard]] constexpr bool operator!=(const Compact_flat& other) const { return !(*this == other); }
+    [[nodiscard]] constexpr bool operator<(const Compact_flat& other) const {
       return idx < other.idx || (idx == other.idx && lgid < other.lgid);
     }
 
     template <typename H>
-    friend H AbslHashValue(H h, const Compact_flat &s) {
+    friend H AbslHashValue(H h, const Compact_flat& s) {
       return H::combine(std::move(h), s.lgid, s.idx, s.sink);
     };
     [[nodiscard]] uint64_t get_hash() const { return lh::woothash64(this, sizeof(Compact_flat)); }
@@ -164,10 +164,10 @@ public:
   public:
     // constexpr operator size_t() const { I(0); return idx|(sink<<31); }
 
-    Compact_driver(const Compact_driver &obj) = default;
+    Compact_driver(const Compact_driver& obj) = default;
     Compact_driver(const Hierarchy_index _hidx, Index_id _idx) : hidx(_hidx), idx(_idx) { I(!Hierarchy::is_invalid(hidx)); };
     Compact_driver() : idx(0) {};
-    Compact_driver &operator=(const Compact_driver &obj) {
+    Compact_driver& operator=(const Compact_driver& obj) {
       I(this != &obj);
       hidx = obj.hidx;
       idx  = obj.idx;
@@ -177,13 +177,13 @@ public:
 
     [[nodiscard]] constexpr bool is_invalid() const { return idx == 0u; }
 
-    [[nodiscard]] constexpr bool operator==(const Compact_driver &other) const {
+    [[nodiscard]] constexpr bool operator==(const Compact_driver& other) const {
       return idx == other.idx && (hidx == other.hidx || Hierarchy::is_invalid(hidx) || Hierarchy::is_invalid(other.hidx));
     }
-    [[nodiscard]] constexpr bool operator!=(const Compact_driver &other) const { return !(*this == other); }
+    [[nodiscard]] constexpr bool operator!=(const Compact_driver& other) const { return !(*this == other); }
 
     template <typename H>
-    friend H AbslHashValue(H h, const Compact_driver &s) {
+    friend H AbslHashValue(H h, const Compact_driver& s) {
       return H::combine(std::move(h), s.hidx, s.idx);
     };
     [[nodiscard]] uint64_t get_hash() const { return lh::woothash64(this, sizeof(Compact_driver)); }
@@ -208,10 +208,10 @@ public:
   public:
     // constexpr operator size_t() const { I(0); return idx|(sink<<31); }
 
-    Compact_class(const Compact_class &obj) = default;
+    Compact_class(const Compact_class& obj) = default;
     Compact_class(Index_id _idx, bool _sink) : idx(_idx), sink(_sink) {}
     Compact_class() : idx(0), sink(0) {}
-    Compact_class &operator=(const Compact_class &obj) {
+    Compact_class& operator=(const Compact_class& obj) {
       I(this != &obj);
       idx  = obj.idx;
       sink = obj.sink;
@@ -221,11 +221,11 @@ public:
 
     [[nodiscard]] constexpr bool is_invalid() const { return idx == 0; }
 
-    constexpr bool operator==(const Compact_class &other) const { return idx == other.idx && sink == other.sink; }
-    constexpr bool operator!=(const Compact_class &other) const { return !(*this == other); }
+    constexpr bool operator==(const Compact_class& other) const { return idx == other.idx && sink == other.sink; }
+    constexpr bool operator!=(const Compact_class& other) const { return !(*this == other); }
 
     template <typename H>
-    friend H AbslHashValue(H h, const Compact_class &s) {
+    friend H AbslHashValue(H h, const Compact_class& s) {
       return H::combine(std::move(h), s.idx, s.sink);
     }
     [[nodiscard]] uint64_t get_hash() const { return lh::woothash64(this, sizeof(Compact_class)); }
@@ -248,10 +248,10 @@ public:
   public:
     // constexpr operator size_t() const { I(0); return idx|(sink<<31); }
 
-    Compact_class_driver(const Compact_class_driver &obj) = default;
+    Compact_class_driver(const Compact_class_driver& obj) = default;
     Compact_class_driver(Index_id _idx) : idx(_idx) {}
     Compact_class_driver() : idx(0) {}
-    Compact_class_driver &operator=(const Compact_class_driver &obj) {
+    Compact_class_driver& operator=(const Compact_class_driver& obj) {
       I(this != &obj);
       idx = obj.idx;
 
@@ -260,29 +260,29 @@ public:
 
     [[nodiscard]] constexpr bool is_invalid() const { return idx == 0u; }
 
-    [[nodiscard]] constexpr bool operator==(const Compact_class_driver &other) const { return idx == other.idx; }
-    [[nodiscard]] constexpr bool operator!=(const Compact_class_driver &other) const { return !(*this == other); }
+    [[nodiscard]] constexpr bool operator==(const Compact_class_driver& other) const { return idx == other.idx; }
+    [[nodiscard]] constexpr bool operator!=(const Compact_class_driver& other) const { return !(*this == other); }
 
     template <typename H>
-    friend H AbslHashValue(H h, const Compact_class_driver &s) {
+    friend H AbslHashValue(H h, const Compact_class_driver& s) {
       return H::combine(std::move(h), s.idx);
     }
     [[nodiscard]] uint64_t get_hash() const { return lh::woothash64(this, sizeof(Compact_class_driver)); }
   };
 
   template <typename H>
-  friend H AbslHashValue(H h, const Node_pin &s) {
+  friend H AbslHashValue(H h, const Node_pin& s) {
     return H::combine(std::move(h), s.hidx, (int)s.idx, s.sink);  // Ignore lgraph pointer in hash
   };
 
   constexpr Node_pin() : top_g(nullptr), current_g(nullptr), hidx(-1), idx(0), pid(0), sink(false) {}
   // rest can not be constexpr (find pid)
-  Node_pin(Lgraph *_g, const Compact &comp);
-  Node_pin(std::string_view path, const Compact_flat &comp);
-  Node_pin(Lgraph *_g, const Compact_driver &comp);
-  Node_pin(Lgraph *_g, const Compact_class &comp);
-  Node_pin(Lgraph *_g, Hierarchy_index hidx, const Compact_class &comp);
-  Node_pin(Lgraph *_g, const Compact_class_driver &comp);
+  Node_pin(Lgraph* _g, const Compact& comp);
+  Node_pin(std::string_view path, const Compact_flat& comp);
+  Node_pin(Lgraph* _g, const Compact_driver& comp);
+  Node_pin(Lgraph* _g, const Compact_class& comp);
+  Node_pin(Lgraph* _g, Hierarchy_index hidx, const Compact_class& comp);
+  Node_pin(Lgraph* _g, const Compact_class_driver& comp);
 
   // No constexpr (get_root_idx)
 
@@ -305,9 +305,9 @@ public:
     return {get_root_idx()};
   }
 
-  [[nodiscard]] Lgraph         *get_top_lgraph() const { return top_g; };
-  [[nodiscard]] Lgraph         *get_class_lgraph() const { return current_g; };
-  [[nodiscard]] Lgraph         *get_lg() const { return current_g; };
+  [[nodiscard]] Lgraph*         get_top_lgraph() const { return top_g; };
+  [[nodiscard]] Lgraph*         get_class_lgraph() const { return current_g; };
+  [[nodiscard]] Lgraph*         get_lg() const { return current_g; };
   [[nodiscard]] Hierarchy_index get_hidx() const { return hidx; };
 
   [[nodiscard]] constexpr Port_ID get_pid() const { return pid; }
@@ -357,9 +357,9 @@ public:
   [[nodiscard]] Node_pin_iterator inp_drivers() const;
   [[nodiscard]] Node_pin_iterator out_sinks() const;
 
-  void del_driver(Node_pin &dst);
-  void del_sink(Node_pin &dst);
-  void del(Node_pin &dst) {
+  void del_driver(Node_pin& dst);
+  void del_sink(Node_pin& dst);
+  void del(Node_pin& dst) {
     if (dst.is_sink()) {
       I(is_driver());
       del_sink(dst);
@@ -372,13 +372,13 @@ public:
 
   [[nodiscard]] Node create(Ntype_op op) const;  // create a new node, keep same hierarchy
   //[[nodiscard]] Node create(Ntype_op op, std::pair<uint64_t, uint64_t> loc, std::string fname) const ;
-  [[nodiscard]] Node create_const(const Lconst &value) const;  // create a new node, keep same hierarchy
+  [[nodiscard]] Node create_const(const Lconst& value) const;  // create a new node, keep same hierarchy
 
-  void connect_sink(const Node_pin &dst) const;
-  void connect_sink(const Node &dst) const;
-  void connect_driver(const Node_pin &dst) const;
-  void connect_driver(const Node &dst) const;
-  void connect(const Node_pin &dst) const {
+  void connect_sink(const Node_pin& dst) const;
+  void connect_sink(const Node& dst) const;
+  void connect_driver(const Node_pin& dst) const;
+  void connect_driver(const Node& dst) const;
+  void connect(const Node_pin& dst) const {
     if (dst.is_sink() && is_driver()) {
       return connect_sink(dst);
     }
@@ -396,14 +396,14 @@ public:
   [[nodiscard]] Node_pin       get_non_hierarchical() const;
   [[nodiscard]] Node_pin       get_hierarchical() const;
 
-  [[nodiscard]] bool operator==(const Node_pin &other) const {
+  [[nodiscard]] bool operator==(const Node_pin& other) const {
     GI(idx == 0, Hierarchy::is_invalid(hidx));
     GI(other.idx == 0, Hierarchy::is_invalid(other.hidx));
     // GI(idx && other.idx, top_g == other.top_g);
     return get_root_idx() == other.get_root_idx() && sink == other.sink
            && (hidx == other.hidx || Hierarchy::is_invalid(hidx) || Hierarchy::is_invalid(other.hidx));
   }
-  [[nodiscard]] bool operator!=(const Node_pin &other) const { return !(*this == other); }
+  [[nodiscard]] bool operator!=(const Node_pin& other) const { return !(*this == other); }
 
   void nuke();  // Delete all the edges, and attributes of this node_pin
 
@@ -417,7 +417,7 @@ public:
   void                          del_name();
   [[nodiscard]] std::string     get_name() const;
   [[nodiscard]] bool            has_name() const;
-  [[nodiscard]] static Node_pin find_driver_pin(Lgraph *top, std::string_view wname);
+  [[nodiscard]] static Node_pin find_driver_pin(Lgraph* top, std::string_view wname);
   [[nodiscard]] std::string     get_pin_name() const;
 
   void                set_delay(float val);
@@ -425,7 +425,7 @@ public:
   [[nodiscard]] float get_delay() const;
   [[nodiscard]] bool  has_delay() const;
 
-  void set_size(const Node_pin &dpin);  // set size and sign
+  void set_size(const Node_pin& dpin);  // set size and sign
 
   [[nodiscard]] Bits_t get_bits() const;
   void                 set_bits(Bits_t bits);
@@ -440,7 +440,7 @@ public:
   [[nodiscard]] Bits_t get_offset() const;
 
   [[nodiscard]] bool is_connected() const;
-  [[nodiscard]] bool is_connected(const Node_pin &pin) const;
+  [[nodiscard]] bool is_connected(const Node_pin& pin) const;
 
   // END ATTRIBUTE ACCESSORS
   [[nodiscard]] XEdge_iterator out_edges() const;

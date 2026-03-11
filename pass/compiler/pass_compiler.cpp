@@ -23,9 +23,9 @@ void Pass_compiler::setup() {
   register_pass(m1);
 }
 
-Pass_compiler::Pass_compiler(const Eprp_var &var) : Pass("pass.compiler", var) {}
+Pass_compiler::Pass_compiler(const Eprp_var& var) : Pass("pass.compiler", var) {}
 
-void Pass_compiler::compile(Eprp_var &var) {
+void Pass_compiler::compile(Eprp_var& var) {
   // TRACE_EVENT("pass", "pass.compile");
 
   Pass_compiler pc(var);
@@ -55,13 +55,13 @@ void Pass_compiler::compile(Eprp_var &var) {
   var.add(lgs);
 }
 
-void Pass_compiler::pyrope_compilation(Eprp_var &var, Lcompiler &compiler) {
+void Pass_compiler::pyrope_compilation(Eprp_var& var, Lcompiler& compiler) {
   compiler.do_prp_lnast2lgraph(var.lnasts);
   compiler.do_prp_local_cprop_bitwidth();
   // compiler.do_prp_global_bitwidth_inference();
 }
 
-bool Pass_compiler::check_option_gviz(Eprp_var &var) {
+bool Pass_compiler::check_option_gviz(Eprp_var& var) {
   bool gviz_en;
   if (var.has_label("gviz")) {
     auto gv = var.get("gviz");
@@ -72,7 +72,7 @@ bool Pass_compiler::check_option_gviz(Eprp_var &var) {
   return gviz_en;
 }
 
-std::string_view Pass_compiler::check_option_top(Eprp_var &var) {
+std::string_view Pass_compiler::check_option_top(Eprp_var& var) {
   if (var.has_label("top")) {
     return var.get("top");
   }

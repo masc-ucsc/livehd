@@ -5,12 +5,12 @@
 
 class Pass_semantic : public Pass {
 protected:
-  void do_work(Lgraph *g);
-  void do_work(const std::shared_ptr<Lnast> &lnast);
+  void do_work(Lgraph* g);
+  void do_work(const std::shared_ptr<Lnast>& lnast);
 
 public:
   static void setup();
-  static void work(Eprp_var &var);
+  static void work(Eprp_var& var);
 
-  Pass_semantic(const Eprp_var &var);
+  Pass_semantic(const Eprp_var& var);
 };

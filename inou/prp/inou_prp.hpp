@@ -7,13 +7,13 @@ class Inou_prp : public Pass {
 protected:
   void to_lgraph(std::string_view file);
 
-  void do_work(const Lgraph *g);
+  void do_work(const Lgraph* g);
 
   // eprp callbacks
-  static void parse_to_lnast(Eprp_var &var);
+  static void parse_to_lnast(Eprp_var& var);
 
 public:
-  Inou_prp(const Eprp_var &var);
+  Inou_prp(const Eprp_var& var);
 
   static void setup();
 };

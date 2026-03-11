@@ -20,7 +20,7 @@ static bool inline compare_less(char c1, char c2) {
   return (c1 == '_' || c1 < c2) && c2 != '_';
 }
 
-static bool tuple_sort(const std::pair<std::string, Node_pin> &lhs, const std::pair<std::string, Node_pin> &rhs) {
+static bool tuple_sort(const std::pair<std::string, Node_pin>& lhs, const std::pair<std::string, Node_pin>& rhs) {
   auto l     = 0u;
   auto l_end = lhs.first.size();
   auto r     = 0u;
@@ -365,7 +365,7 @@ bool Lgtuple::match_either_partial(std::string_view a, std::string_view b) {
   return m1 || m2;  // either reached the end it match_int
 }
 
-void Lgtuple::add_int(std::string_view key, const std::shared_ptr<Lgtuple const> &tup) {
+void Lgtuple::add_int(std::string_view key, const std::shared_ptr<Lgtuple const>& tup) {
   I(!key.empty());
   if (tup->is_scalar()) {
     I(!has_dpin(key));  // It was deleted before
@@ -374,7 +374,7 @@ void Lgtuple::add_int(std::string_view key, const std::shared_ptr<Lgtuple const>
   }
 
   bool root = is_root_attribute(key);
-  for (auto &ent : tup->key_map) {
+  for (auto& ent : tup->key_map) {
     if (root) {
       key_map.emplace_back(absl::StrCat(ent.first, ".", key), ent.second);
     } else {
@@ -383,7 +383,7 @@ void Lgtuple::add_int(std::string_view key, const std::shared_ptr<Lgtuple const>
   }
 }
 
-void Lgtuple::reconnect_flop_if_needed(Node &flop, std::string_view flop_name, Node_pin &dpin) {
+void Lgtuple::reconnect_flop_if_needed(Node& flop, std::string_view flop_name, Node_pin& dpin) {
   flop.setup_driver_pin().reset_name(std::string(flop_name));
 
   auto s_din = flop.setup_sink_pin("din");
@@ -517,15 +517,15 @@ std::string_view Lgtuple::get_all_but_first_level(std::string_view key) {
 std::string Lgtuple::learn_fix(std::string_view a) {
   std::string key{a};
 
-  for (auto &e : key_map) {
+  for (auto& e : key_map) {
     std::tie(key, e.first) = learn_fix_int(key, e.first);
   }
 
   return key;
 }
 
-const Node_pin &Lgtuple::get_dpin(std::string_view key) const {
-  for (auto &e : key_map) {
+const Node_pin& Lgtuple::get_dpin(std::string_view key) const {
+  for (auto& e : key_map) {
     if (match(e.first, key)) {
       return e.second;
     }
@@ -534,7 +534,7 @@ const Node_pin &Lgtuple::get_dpin(std::string_view key) const {
   return invalid_dpin;
 }
 
-const Node_pin &Lgtuple::get_dpin() const {
+const Node_pin& Lgtuple::get_dpin() const {
   int pos = -1;
   for (auto i = 0u; i < key_map.size(); ++i) {
     if (is_attribute(key_map[i].first)) {
@@ -552,7 +552,7 @@ const Node_pin &Lgtuple::get_dpin() const {
 }
 
 bool Lgtuple::has_dpin(std::string_view key) const {
-  for (auto &e : key_map) {
+  for (auto& e : key_map) {
     if (match(e.first, key)) {
       return true;
     }
@@ -569,7 +569,7 @@ std::shared_ptr<Lgtuple> Lgtuple::get_sub_tuple(std::string_view key) const {
 
   std::shared_ptr<Lgtuple> tup;
 
-  for (auto &e : key_map) {
+  for (auto& e : key_map) {
     std::string_view entry(e.first);
     auto             e_pos = match_first_partial(key, entry);
     if (e_pos == 0) {
@@ -604,12 +604,12 @@ std::shared_ptr<Lgtuple> Lgtuple::get_sub_tuple(std::string_view key) const {
   return tup;
 }
 
-std::shared_ptr<Lgtuple> Lgtuple::get_sub_tuple(const std::shared_ptr<Lgtuple const> &tup) const {
+std::shared_ptr<Lgtuple> Lgtuple::get_sub_tuple(const std::shared_ptr<Lgtuple const>& tup) const {
   // create a dpin or subtuple with the selected fields
   std::shared_ptr<Lgtuple> ret_tup;
 
   int pos = 0;
-  for (const auto &e : tup->key_map) {
+  for (const auto& e : tup->key_map) {
     std::string e_name{e.first};
     (void)e_name;
     auto e_node = e.second.get_node();
@@ -658,7 +658,7 @@ void Lgtuple::del(std::string_view key) {
 
   bool is_attr_key = is_root_attribute(key);
 
-  for (auto &e : key_map) {
+  for (auto& e : key_map) {
     std::string entry{e.first};
     if (entry.empty()) {
       if (is_attr_key) {
@@ -688,7 +688,7 @@ void Lgtuple::del(std::string_view key) {
   key_map.swap(new_map);
 }
 
-void Lgtuple::add(std::string_view key, const std::shared_ptr<Lgtuple const> &tup) {
+void Lgtuple::add(std::string_view key, const std::shared_ptr<Lgtuple const>& tup) {
   I(!key.empty());
 
   correct = correct && tup->correct;
@@ -699,7 +699,7 @@ void Lgtuple::add(std::string_view key, const std::shared_ptr<Lgtuple const> &tu
 
   bool tup_scalar = tup->is_scalar();
 
-  for (const auto &e : tup->key_map) {
+  for (const auto& e : tup->key_map) {
     std::string key2;
     // Remove 0. from tup if tup is scalar
     if (tup_scalar && e.first.front() == '0' && (e.first.size() == 1 || e.first[1] == '.')) {
@@ -721,7 +721,7 @@ void Lgtuple::add(std::string_view key, const std::shared_ptr<Lgtuple const> &tu
   }
 }
 
-void Lgtuple::add(std::string_view key, const Node_pin &dpin) {
+void Lgtuple::add(std::string_view key, const Node_pin& dpin) {
   I(!key.empty());
 
   std::string uncanonical_key{key};
@@ -759,7 +759,7 @@ void Lgtuple::add(std::string_view key, const Node_pin &dpin) {
     if (is_attribute(fixed_key)) {
       key_part = get_all_but_last_level(fixed_key);
     }
-    for (auto &e : key_map) {
+    for (auto& e : key_map) {
       std::string fpart{e.first};
       std::string lpart;
       if (is_attribute(e.first)) {
@@ -791,7 +791,7 @@ void Lgtuple::add(std::string_view key, const Node_pin &dpin) {
   key_map.emplace_back(fixed_key, dpin);
 
 #ifdef DEBUG_SLOW
-  for (const auto &e : key_map) {
+  for (const auto& e : key_map) {
     auto lower = get_all_but_last_level(e.first);
     if (is_attribute(e.first)) {
       lower = get_all_but_last_level(lower);
@@ -810,12 +810,12 @@ void Lgtuple::add(std::string_view key, const Node_pin &dpin) {
 #endif
 }
 
-bool Lgtuple::concat(const std::shared_ptr<Lgtuple const> &tup) {
+bool Lgtuple::concat(const std::shared_ptr<Lgtuple const>& tup) {
   bool ok = true;
 
   std::vector<std::pair<std::string, Node_pin>> delayed_numbers;
 
-  for (auto &it : tup->key_map) {
+  for (auto& it : tup->key_map) {
     if (has_dpin(it.first)) {
       if (std::isdigit(it.first.front()) && is_single_level(it.first)) {
         delayed_numbers.emplace_back(it.first, it.second);
@@ -834,7 +834,7 @@ bool Lgtuple::concat(const std::shared_ptr<Lgtuple const> &tup) {
 
   if (delayed_numbers.size()) {
     auto max_pos = 0;
-    for (const auto &e : key_map) {
+    for (const auto& e : key_map) {
       int x = 0;
       if (str_tools::is_i(e.first)) {
         x = str_tools::to_i(e.first);
@@ -849,7 +849,7 @@ bool Lgtuple::concat(const std::shared_ptr<Lgtuple const> &tup) {
         max_pos = x;
       }
     }
-    for (const auto &e : delayed_numbers) {
+    for (const auto& e : delayed_numbers) {
       auto        x = str_tools::to_i(e.first);
       std::string new_key(std::to_string(x + max_pos + 1));
 
@@ -860,8 +860,8 @@ bool Lgtuple::concat(const std::shared_ptr<Lgtuple const> &tup) {
   return ok;
 }
 
-std::pair<Node, Node_pin> Lgtuple::flatten_field(Node &result_node, Node_pin &dpin, Node_pin &start_bit_dpin, Node_pin &sbits_dpin,
-                                                 Node_pin &ubits_dpin) {
+std::pair<Node, Node_pin> Lgtuple::flatten_field(Node& result_node, Node_pin& dpin, Node_pin& start_bit_dpin, Node_pin& sbits_dpin,
+                                                 Node_pin& ubits_dpin) {
   // returns mask_dpin for given dpin
   //
   // mask = (1<<(dpin.get_bits())-1)<<start_bit_dpin
@@ -958,7 +958,7 @@ Node_pin Lgtuple::flatten() const {
 
   std::stable_sort(key_map.begin(), key_map.end(), tuple_sort);  // mutable (no semantic check. Just faster to process)
 
-  for (auto &e : key_map) {
+  for (auto& e : key_map) {
     if (is_attribute(e.first)) {
       continue;
     }
@@ -981,7 +981,7 @@ Node_pin Lgtuple::flatten() const {
   if (all_const) {
     Lconst result;
     Bits_t accu_bits = 0;
-    for (auto &e : key_map) {
+    for (auto& e : key_map) {
       if (is_attribute(e.first)) {
         continue;
       }
@@ -1001,7 +1001,7 @@ Node_pin Lgtuple::flatten() const {
   Node_pin sbits_dpin;
   Node_pin ubits_dpin;
 
-  for (auto &e : key_map) {
+  for (auto& e : key_map) {
     if (is_attribute(e.first)) {
       auto attr_txt = get_last_level(e.first);
       if (attr_txt == "__sbits") {
@@ -1045,7 +1045,7 @@ Node_pin Lgtuple::flatten() const {
   return result_node.setup_driver_pin();
 }
 
-std::shared_ptr<Lgtuple> Lgtuple::create_assign(const std::shared_ptr<Lgtuple const> &rhs_tup) const {
+std::shared_ptr<Lgtuple> Lgtuple::create_assign(const std::shared_ptr<Lgtuple const>& rhs_tup) const {
   (void)rhs_tup;
 
   dump();
@@ -1057,8 +1057,8 @@ std::shared_ptr<Lgtuple> Lgtuple::create_assign(const std::shared_ptr<Lgtuple co
   return new_tup;
 }
 
-bool Lgtuple::add_pending(Node &node, std::vector<std::pair<std::string, Node_pin>> &pending_entries, std::string_view entry_txt,
-                          const Node_pin &ubits_dpin, const Node_pin &sbits_dpin) {
+bool Lgtuple::add_pending(Node& node, std::vector<std::pair<std::string, Node_pin>>& pending_entries, std::string_view entry_txt,
+                          const Node_pin& ubits_dpin, const Node_pin& sbits_dpin) {
   I(!entry_txt.empty());
 
   if (!sbits_dpin.is_invalid()) {
@@ -1078,7 +1078,7 @@ bool Lgtuple::add_pending(Node &node, std::vector<std::pair<std::string, Node_pi
   return true;
 }
 
-std::shared_ptr<Lgtuple> Lgtuple::create_assign(const Node_pin &rhs_dpin) const {
+std::shared_ptr<Lgtuple> Lgtuple::create_assign(const Node_pin& rhs_dpin) const {
   I(is_correct());
 
   std::stable_sort(key_map.begin(), key_map.end(), tuple_sort);
@@ -1096,7 +1096,7 @@ std::shared_ptr<Lgtuple> Lgtuple::create_assign(const Node_pin &rhs_dpin) const 
     std::string non_attr_field;
 
     for (auto i = 0u; i < key_map.size(); ++i) {
-      const auto &e = key_map[i];
+      const auto& e = key_map[i];
       if (is_attribute(e.first)) {
         auto attr_txt = get_last_level(e.first);
         if (attr_txt == "__sbits") {
@@ -1189,7 +1189,7 @@ std::shared_ptr<Lgtuple> Lgtuple::create_assign(const Node_pin &rhs_dpin) const 
   Node_pin current_rhs_dpin = rhs_dpin;
 
   for (auto i = 0u; i < pending_entries.size(); ++i) {
-    auto &e = pending_entries[i];
+    auto& e = pending_entries[i];
 
     auto sext_node = rhs_node.create(Ntype_op::Sext);  // sext(rhs, bits)
     sext_node.setup_sink_pin("a").connect_driver(current_rhs_dpin);
@@ -1212,14 +1212,14 @@ std::shared_ptr<Lgtuple> Lgtuple::create_assign(const Node_pin &rhs_dpin) const 
   return tup;
 }
 
-const Lgtuple::Key_map_type &Lgtuple::get_sort_map() const {
+const Lgtuple::Key_map_type& Lgtuple::get_sort_map() const {
   std::stable_sort(key_map.begin(), key_map.end(), tuple_sort);  // mutable (no semantic check. Just faster to process)
   return key_map;
 }
 
-bool Lgtuple::concat(const Node_pin &dpin) {
+bool Lgtuple::concat(const Node_pin& dpin) {
   auto max_pos = 0;
-  for (const auto &e : key_map) {
+  for (const auto& e : key_map) {
     int x = 0;
     if (str_tools::is_i(e.first)) {
       x = str_tools::to_i(e.first);
@@ -1242,7 +1242,7 @@ bool Lgtuple::concat(const Node_pin &dpin) {
   return true;
 }
 
-std::tuple<std::shared_ptr<Lgtuple>, bool> Lgtuple::get_mux_tup(const std::vector<std::shared_ptr<Lgtuple const>> &tup_list) {
+std::tuple<std::shared_ptr<Lgtuple>, bool> Lgtuple::get_mux_tup(const std::vector<std::shared_ptr<Lgtuple const>>& tup_list) {
   I(tup_list.size() > 1);  // nothing to merge?
 
   // 1st
@@ -1256,12 +1256,12 @@ std::tuple<std::shared_ptr<Lgtuple>, bool> Lgtuple::get_mux_tup(const std::vecto
   // sorted to be deterministic
   absl::btree_map<std::string, Node_pin> key_entries;
   bool                                   first_iter = true;
-  for (const auto &tup : tup_list) {
+  for (const auto& tup : tup_list) {
     if (!tup->is_correct()) {
       fixing_tup->set_issue();
     }
 
-    for (const auto &e : tup->get_map()) {
+    for (const auto& e : tup->get_map()) {
       std::string key{e.first};
       auto        it = key_entries.find(key);
       if (it == key_entries.end()) {
@@ -1279,11 +1279,11 @@ std::tuple<std::shared_ptr<Lgtuple>, bool> Lgtuple::get_mux_tup(const std::vecto
     first_iter = false;
   }
 
-  for (const auto &it : key_entries) {
+  for (const auto& it : key_entries) {
     bool        found = false;
     std::string key{it.first};
 
-    for (auto &e : fixing_tup->key_map) {
+    for (auto& e : fixing_tup->key_map) {
       std::tie(key, e.first) = learn_fix_int(key, e.first);
       if (key == e.first) {
         e.first = key;                // Put new expanded name
@@ -1315,12 +1315,12 @@ std::tuple<std::shared_ptr<Lgtuple>, bool> Lgtuple::get_mux_tup(const std::vecto
 
   std::stable_sort(fixing_tup->key_map.begin(), fixing_tup->key_map.end(), tuple_sort);
 
-  for (const auto &e : fixing_tup->get_map()) {
+  for (const auto& e : fixing_tup->get_map()) {
     if (is_attribute(e.first)) {
       continue;  // Attributes can not from different paths
     }
 
-    for (const auto &tup : tup_list) {
+    for (const auto& tup : tup_list) {
       if (!tup->has_dpin(e.first)) {
         return std::tuple{fixing_tup, true};  // No need to connect (still pending iterations)
       }
@@ -1334,8 +1334,8 @@ std::tuple<std::shared_ptr<Lgtuple>, bool> Lgtuple::get_mux_tup(const std::vecto
   return std::tuple{fixing_tup, false};
 }
 
-std::vector<Node::Compact> Lgtuple::make_mux(Node &mux_node, Node_pin &sel_dpin,
-                                             const std::vector<std::shared_ptr<Lgtuple const>> &tup_list) {
+std::vector<Node::Compact> Lgtuple::make_mux(Node& mux_node, Node_pin& sel_dpin,
+                                             const std::vector<std::shared_ptr<Lgtuple const>>& tup_list) {
   I(is_correct());
 
   //  2nd
@@ -1346,7 +1346,7 @@ std::vector<Node::Compact> Lgtuple::make_mux(Node &mux_node, Node_pin &sel_dpin,
   std::vector<Node_pin> mux_input_dpins;
   mux_input_dpins.resize(tup_list.size() + 1);  // +1 for sel
   auto n_inputs = 0u;
-  for (auto &e : mux_node.inp_edges()) {
+  for (auto& e : mux_node.inp_edges()) {
     auto pid = e.sink.get_pid();
     I(pid < mux_input_dpins.size());
     mux_input_dpins[pid] = e.driver;
@@ -1355,7 +1355,7 @@ std::vector<Node::Compact> Lgtuple::make_mux(Node &mux_node, Node_pin &sel_dpin,
 
   if (n_inputs < mux_input_dpins.size()) {
     Node_pin error_dpin;
-    for (auto &e : mux_input_dpins) {
+    for (auto& e : mux_input_dpins) {
       if (!e.is_invalid()) {
         continue;
       }
@@ -1370,7 +1370,7 @@ std::vector<Node::Compact> Lgtuple::make_mux(Node &mux_node, Node_pin &sel_dpin,
   std::vector<Node::Compact> mux_list;
 
   bool mux_node_reused = false;
-  for (auto &e : key_map) {
+  for (auto& e : key_map) {
     if (!e.second.is_invalid()) {  // No need to create mux
       continue;
     }
@@ -1384,7 +1384,7 @@ std::vector<Node::Compact> Lgtuple::make_mux(Node &mux_node, Node_pin &sel_dpin,
       node = mux_node.create(Ntype_op::Mux);
       node.setup_sink_pin_raw(0).connect_driver(sel_dpin);
     } else {
-      for (auto &spin : mux_node.inp_connected_pins()) {
+      for (auto& spin : mux_node.inp_connected_pins()) {
         // deprecated:
         // if (spin.get_pid())  // keep sel
         //   spin.del();
@@ -1411,7 +1411,7 @@ std::vector<Node::Compact> Lgtuple::make_mux(Node &mux_node, Node_pin &sel_dpin,
         if (dpin.is_graph_io() || dpin.get_type_op() == Ntype_op::Sub) {
           // NOTE: all the pins but the IOs should have the constraints already.
           // This Attr could be set always but slower and redundant
-          for (auto &attr_it : tup_list[i]->get_level_attributes(e.first)) {
+          for (auto& attr_it : tup_list[i]->get_level_attributes(e.first)) {
             if (Ntype::has_sink(Ntype_op::Flop, std::string(attr_it.first.substr(2)))) {
               continue;  // Do not create attr for flop config (handled in cprop directly)
             }
@@ -1453,7 +1453,7 @@ std::vector<Node::Compact> Lgtuple::make_mux(Node &mux_node, Node_pin &sel_dpin,
   return mux_list;
 }
 
-std::tuple<std::string, bool> Lgtuple::get_flop_name(const Node &flop) const {
+std::tuple<std::string, bool> Lgtuple::get_flop_name(const Node& flop) const {
   bool        first_flop = true;
   std::string flop_root_name;
   if (flop.get_driver_pin().has_name()) {
@@ -1473,7 +1473,7 @@ std::tuple<std::string, bool> Lgtuple::get_flop_name(const Node &flop) const {
   return std::tuple(flop_root_name, first_flop);
 }
 
-std::tuple<std::shared_ptr<Lgtuple>, bool> Lgtuple::get_flop_tup(Node &flop) const {
+std::tuple<std::shared_ptr<Lgtuple>, bool> Lgtuple::get_flop_tup(Node& flop) const {
   I(flop.is_type(Ntype_op::Flop));
 
   auto [flop_root_name, first_flop] = get_flop_name(flop);
@@ -1486,9 +1486,9 @@ std::tuple<std::shared_ptr<Lgtuple>, bool> Lgtuple::get_flop_tup(Node &flop) con
     pending_iterations = true;
   }
 
-  auto *lg = flop.get_class_lgraph();
+  auto* lg = flop.get_class_lgraph();
 
-  for (auto &e : key_map) {
+  for (auto& e : key_map) {
     if (e.second.is_invalid()) {
       pending_iterations = true;
     }
@@ -1537,7 +1537,7 @@ std::pair<std::string_view, std::string> Lgtuple::get_flop_attr_name(std::string
   return std::pair(attr, new_flop_name);
 }
 
-std::shared_ptr<Lgtuple> Lgtuple::make_flop(Node &flop) const {
+std::shared_ptr<Lgtuple> Lgtuple::make_flop(Node& flop) const {
   I(is_correct());
 
   auto [flop_root_name, first_flop] = get_flop_name(flop);
@@ -1547,12 +1547,12 @@ std::shared_ptr<Lgtuple> Lgtuple::make_flop(Node &flop) const {
 
   std::stable_sort(key_map.begin(), key_map.end(), tuple_sort);  // mutable (no semantic check. Just faster to process)
 
-  auto *lg = flop.get_class_lgraph();
+  auto* lg = flop.get_class_lgraph();
 
   std::vector<Node>                             all_flops;
   std::vector<std::pair<std::string, Node_pin>> multi_flop_attrs;
 
-  for (auto &e : key_map) {
+  for (auto& e : key_map) {
     auto [attr, new_flop_name] = get_flop_attr_name(flop_root_name, e.first);
     auto flop_dpin             = Node_pin::find_driver_pin(lg, new_flop_name);
 
@@ -1635,14 +1635,14 @@ std::shared_ptr<Lgtuple> Lgtuple::make_flop(Node &flop) const {
                    tuple_sort);  // mutable (no semantic check. Just faster to process)
 
   // or here
-  for (auto &it : multi_flop_attrs) {
+  for (auto& it : multi_flop_attrs) {
     auto root = get_all_but_last_level(it.first);
     auto attr = get_last_level(it.first);
     I(is_root_attribute(attr));
     attr = attr.substr(2);  // remove __
 
     int i = 0;
-    for (auto &node : all_flops) {
+    for (auto& node : all_flops) {
       if (!root.empty()) {
         auto n = node.get_driver_pin().get_name();
         if (n.substr(0, root.size()) != root) {
@@ -1685,7 +1685,7 @@ std::vector<std::pair<std::string, Node_pin>> Lgtuple::get_level_attributes(std:
   std::vector<std::pair<std::string, Node_pin>> v;
 
   if (key.empty() || is_scalar()) {
-    for (const auto &e : key_map) {
+    for (const auto& e : key_map) {
       if (!is_attribute(e.first)) {
         continue;
       }
@@ -1695,7 +1695,7 @@ std::vector<std::pair<std::string, Node_pin>> Lgtuple::get_level_attributes(std:
     return v;
   }
 
-  for (const auto &e : key_map) {
+  for (const auto& e : key_map) {
     std::string entry{e.first};
     auto        e_pos = match_first_partial(key, entry);
     if (e_pos == 0 || e_pos >= entry.size()) {
@@ -1716,7 +1716,7 @@ std::vector<std::pair<std::string, Node_pin>> Lgtuple::get_level_attributes(std:
 
 bool Lgtuple::is_scalar() const {
   auto conta = 0;
-  for (const auto &e : key_map) {
+  for (const auto& e : key_map) {
     if (is_attribute(e.first)) {
       continue;
     }
@@ -1729,7 +1729,7 @@ bool Lgtuple::is_scalar() const {
 }
 
 bool Lgtuple::is_ordered() const {
-  for (const auto &e : key_map) {
+  for (const auto& e : key_map) {
     if (is_root_attribute(e.first)) {
       continue;
     }
@@ -1745,7 +1745,7 @@ bool Lgtuple::is_ordered() const {
 std::string_view Lgtuple::get_scalar_name() const {
   std::string_view sname;
 
-  for (const auto &e : key_map) {
+  for (const auto& e : key_map) {
     std::string_view s;
     if (is_attribute(e.first)) {
       s = get_all_but_last_level(e.first);
@@ -1764,7 +1764,7 @@ std::string_view Lgtuple::get_scalar_name() const {
 bool Lgtuple::is_trivial_scalar() const {
   auto conta = 0;
 
-  for (const auto &e : key_map) {
+  for (const auto& e : key_map) {
     std::string field{e.first};
 
     if (is_attribute(field)) {
@@ -1786,7 +1786,7 @@ bool Lgtuple::is_trivial_scalar() const {
 }
 
 bool Lgtuple::has_just_attributes() const {
-  for (const auto &e : key_map) {
+  for (const auto& e : key_map) {
     if (is_attribute(e.first)) {
       continue;
     }
@@ -1799,7 +1799,7 @@ bool Lgtuple::has_just_attributes() const {
 void Lgtuple::dump() const {
 #ifndef NDEBUG
   std::print("tuple_name:{} {}\n", name, correct ? "" : " ISSUES");
-  for (const auto &it : key_map) {
+  for (const auto& it : key_map) {
     std::print("  key:{} dpin:{}\n", it.first, it.second.debug_name());
   }
 #endif

@@ -28,7 +28,7 @@ void Pass_opentimer::setup() {
   register_pass(m2);
 }
 
-Pass_opentimer::Pass_opentimer(const Eprp_var &var) : Pass("pass.opentimer", var) {
+Pass_opentimer::Pass_opentimer(const Eprp_var& var) : Pass("pass.opentimer", var) {
   auto n_lib_read = 0;
 
   for (const auto f : absl::StrSplit(files, ',')) {

@@ -14,14 +14,14 @@ void Pass_lnastopt::setup() {
   register_pass(m1);
 }
 
-Pass_lnastopt::Pass_lnastopt(const Eprp_var &var) : Pass("pass.lnastopt", var) {}
+Pass_lnastopt::Pass_lnastopt(const Eprp_var& var) : Pass("pass.lnastopt", var) {}
 
-void Pass_lnastopt::work(Eprp_var &var) {
+void Pass_lnastopt::work(Eprp_var& var) {
   Opt_lnast p(var);
 
   Eprp_var::Eprp_lnasts lnlist;
 
-  for (const auto &ln : var.lnasts) {
+  for (const auto& ln : var.lnasts) {
     p.opt(ln);
     Lnast_create ln2;
     ln2.new_lnast("ln2");

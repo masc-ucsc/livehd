@@ -23,7 +23,7 @@ public:
 
   Node_pin_P() : Node_pin(-1, -1, false) {}
 
-  bool operator<(const Node_pin &rhs) const {
+  bool operator<(const Node_pin& rhs) const {
     if (this->get_nid() < rhs.get_nid()) {
       return 1;
     } else if (this->get_nid() > rhs.get_nid()) {
@@ -36,7 +36,7 @@ public:
       }
     }
   }
-  bool operator==(const Node_pin &rhs) const {
+  bool operator==(const Node_pin& rhs) const {
     if (this->get_nid() != rhs.get_nid()) {
       return 0;
     } else {  // equal nid
@@ -86,15 +86,15 @@ public:
   Port_ID ffvq   = 1;
   Port_ID ffsin  = 2;
 
-  void find_join(Lgraph *g);
-  void find_fork(Lgraph *g);
-  void add_fork_deadlock(Lgraph *g);
-  void add_fork(Lgraph *g);
-  void add_join_deadlock(Lgraph *g);
-  void add_join(Lgraph *g);
-  void result_graph(Lgraph *g);
-  void transform(Lgraph *orig) final;
-  void traverse(Lgraph *g, int round);
+  void find_join(Lgraph* g);
+  void find_fork(Lgraph* g);
+  void add_fork_deadlock(Lgraph* g);
+  void add_fork(Lgraph* g);
+  void add_join_deadlock(Lgraph* g);
+  void add_join(Lgraph* g);
+  void result_graph(Lgraph* g);
+  void transform(Lgraph* orig) final;
+  void traverse(Lgraph* g, int round);
 };
 
 #endif

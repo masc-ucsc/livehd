@@ -12,30 +12,30 @@
 #include "absl/strings/str_split.h"
 #include "graph_library.hpp"
 
-void Eprp_var::add(const Eprp_dict &_dict) {
-  for (const auto &var : _dict) {
+void Eprp_var::add(const Eprp_dict& _dict) {
+  for (const auto& var : _dict) {
     add(var.first, var.second);
   }
 }
 
-void Eprp_var::add(const Eprp_lgs &_lgs) {
-  for (const auto &lg : _lgs) {
+void Eprp_var::add(const Eprp_lgs& _lgs) {
+  for (const auto& lg : _lgs) {
     add(lg);
   }
 }
 
-void Eprp_var::add(Eprp_lnasts &_lns) {
-  for (const auto &ln : _lns) {
+void Eprp_var::add(Eprp_lnasts& _lns) {
+  for (const auto& ln : _lns) {
     lnasts.emplace_back(ln);
   }
 }
 
-void Eprp_var::add(const Eprp_var &_var) {
+void Eprp_var::add(const Eprp_var& _var) {
   add(_var.lgs);
   add(_var.dict);
 }
 
-void Eprp_var::add(Lgraph *lg) {
+void Eprp_var::add(Lgraph* lg) {
   if (std::find(lgs.begin(), lgs.end(), lg) == lgs.end()) {
     lgs.push_back(lg);
   }
@@ -43,11 +43,11 @@ void Eprp_var::add(Lgraph *lg) {
 
 void Eprp_var::add(std::unique_ptr<Lnast> lnast) { lnasts.emplace_back(std::move(lnast)); }
 
-void Eprp_var::add(const std::shared_ptr<Lnast> &lnast) { lnasts.emplace_back(lnast); }
+void Eprp_var::add(const std::shared_ptr<Lnast>& lnast) { lnasts.emplace_back(lnast); }
 
 void Eprp_var::add(std::string_view name, std::string_view value) {
   if (name == "files") {
-    for (const auto &v : absl::StrSplit(value, ',')) {
+    for (const auto& v : absl::StrSplit(value, ',')) {
       std::string v_str(v);
       if (access(v_str.c_str(), R_OK) == -1) {
         std::print("ERROR: file '{}' is not accessible (skipping)\n", v);
@@ -66,19 +66,19 @@ void Eprp_var::add(std::string_view name, std::string_view value) {
 
     // WARNING: THis is needed because the global_instance is NOT lock
     // protected (the path must be set/created before the threads span)
-    auto *ptr = Graph_library::instance(path);
+    auto* ptr = Graph_library::instance(path);
     I(ptr);
   }
 
   dict[name] = value;
 }
 
-void Eprp_var::replace(const Eprp_var::Eprp_lnasts &lns) {
+void Eprp_var::replace(const Eprp_var::Eprp_lnasts& lns) {
   lnasts.clear();
   lnasts = lns;
 }
 
-void Eprp_var::replace(const std::shared_ptr<Lnast> &lnast_old, std::shared_ptr<Lnast> &lnast_new) {
+void Eprp_var::replace(const std::shared_ptr<Lnast>& lnast_old, std::shared_ptr<Lnast>& lnast_new) {
   // lnast_old.swap(lnast_new);
 
   auto itr = std::find(lnasts.begin(), lnasts.end(), lnast_old);
@@ -103,7 +103,7 @@ void Eprp_var::delete_label(std::string_view name) {
 }
 
 std::string_view Eprp_var::get(std::string_view name, std::string_view default_value) const {
-  const auto &elem = dict.find(name);
+  const auto& elem = dict.find(name);
   if (elem == dict.end()) {
     return default_value;
   }
@@ -111,7 +111,7 @@ std::string_view Eprp_var::get(std::string_view name, std::string_view default_v
 }
 
 std::string_view Eprp_var::get_stage(std::string_view name, std::string_view default_value) const {
-  const auto &elem = stage_dict.find(name);
+  const auto& elem = stage_dict.find(name);
   if (elem == stage_dict.end()) {
     return default_value;
   }

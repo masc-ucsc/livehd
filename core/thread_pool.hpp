@@ -28,7 +28,7 @@
 //
 
 template <typename Func, typename... Args>
-static auto forward_as_lambda(Func &&func, Args &&...args) {
+static auto forward_as_lambda(Func&& func, Args&&... args) {
   //  -> std::enable_if_t<std::is_void_v<std::result_of<Func>::type>, int> {
   return [f = std::forward<decltype(func)>(func), args = std::make_tuple(std::forward<Args>(args)...)]() mutable {
     return std::apply(std::move(f), std::move(args));
@@ -41,7 +41,7 @@ static auto forward_as_lambda(Func &&func, Args &&...args) {
 }
 
 template <class Func, class T, class... Args>
-inline auto forward_as_lambda2(Func &&func, T &&first, Args &&...args) {
+inline auto forward_as_lambda2(Func&& func, T&& first, Args&&... args) {
   return [f    = std::forward<decltype(func)>(func),
           tt   = std::forward<decltype(first)>(first),
           args = std::make_tuple(std::forward<Args>(args)...)]() mutable {
@@ -113,7 +113,7 @@ class Thread_pool {
     return [] {};  // Nothing to do
   }
 
-  void add_(const std::function<void(void)> &job) {
+  void add_(const std::function<void(void)>& job) {
     if (env_threads == 1) {
       job();
       return;
@@ -197,7 +197,7 @@ public:
 
     job_available_var.notify_all();
 
-    for (auto &x : threads) {
+    for (auto& x : threads) {
       if (x.joinable()) {
         x.join();
       }
@@ -208,9 +208,9 @@ public:
 
   inline unsigned size() const { return thread_count; }
 
-  template <typename Func, typename... Args, std::enable_if_t<std::is_invocable_v<Func &&, Args &&...>, int> = 0>
+  template <typename Func, typename... Args, std::enable_if_t<std::is_invocable_v<Func&&, Args&&...>, int> = 0>
   // template <typename Func, typename... Args, std::enable_if_t<std::is_void_v<Func>, int> = 0>
-  void add(Func &&func, Args &&...args) {
+  void add(Func&& func, Args&&... args) {
     return add_(forward_as_lambda(std::forward<decltype(func)>(func), std::forward<decltype(args)>(args)...));
   }
 #if 0

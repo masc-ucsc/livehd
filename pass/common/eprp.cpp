@@ -63,7 +63,7 @@ std::pair<bool, std::string> Eprp::rule_path() {
 }
 
 // rule_label_path = label path
-bool Eprp::rule_label_path(std::string_view cmd_line, Eprp_var &next_var) {
+bool Eprp::rule_label_path(std::string_view cmd_line, Eprp_var& next_var) {
   if (!(scan_is_token(Token_id_alnum) && scan_is_next_token(1, Token_id_colon))) {
     return false;
   }
@@ -268,7 +268,7 @@ void Eprp::elaborate() {
   pipe.run();
 }
 
-void Eprp::process_ast_handler(const lh::Tree_index &self, const Ast_parser_node &node) {
+void Eprp::process_ast_handler(const lh::Tree_index& self, const Ast_parser_node& node) {
   auto txt = scan_text(node.token_entry);
   std::print("level:{} pos:{} te:{} rid:{} txt:{}\n", self.level, self.pos, (int)node.token_entry, (int)node.rule_id, txt);
 
@@ -278,7 +278,7 @@ void Eprp::process_ast_handler(const lh::Tree_index &self, const Ast_parser_node
     // HERE: Children should iterate FAST, over all the children recursively
     // HERE: Move this iterate over children as a handle_command
 
-    for (const auto &ti : ast->children(self)) {
+    for (const auto& ti : ast->children(self)) {
       auto txt2 = scan_text(ast->get_data(ti).token_entry);
       if (ast->get_data(ti).rule_id == Eprp_rule_label_path) {
         absl::StrAppend(&children_txt, " ", txt2, ":");
@@ -292,15 +292,15 @@ void Eprp::process_ast_handler(const lh::Tree_index &self, const Ast_parser_node
 }
 
 void Eprp::process_ast() {
-  for (const auto &ti : ast->depth_preorder()) {
+  for (const auto& ti : ast->depth_preorder()) {
     std::print("ti.level:{} ti.pos:{}\n", ti.level, ti.pos);
   }
 
   ast->each_bottom_up_fast(std::bind(&Eprp::process_ast_handler, this, std::placeholders::_1, std::placeholders::_2));
 }
 
-void Eprp::run_cmd(std::string_view cmd, const Eprp_var &cmd_var_fields) {
-  const auto &it = methods.find(std::string(cmd));
+void Eprp::run_cmd(std::string_view cmd, const Eprp_var& cmd_var_fields) {
+  const auto& it = methods.find(std::string(cmd));
   if (it == methods.end()) {
     throw parser_error(*this, "method {} not registered", cmd);
   }
@@ -317,20 +317,20 @@ std::string_view Eprp::get_command_help(std::string_view cmd) const {
   return it->second.help;
 }
 
-void Eprp::get_commands(const std::function<void(std::string_view, std::string_view)> &fn) const {
-  for (const auto &v : methods) {
+void Eprp::get_commands(const std::function<void(std::string_view, std::string_view)>& fn) const {
+  for (const auto& v : methods) {
     fn(v.first, v.second.help);
   }
 }
 
 void Eprp::get_labels(std::string_view                                                              cmd,
-                      const std::function<void(std::string_view, std::string_view, bool required)> &fn) const {
-  const auto &it = methods.find(std::string(cmd));
+                      const std::function<void(std::string_view, std::string_view, bool required)>& fn) const {
+  const auto& it = methods.find(std::string(cmd));
   if (it == methods.end()) {
     return;
   }
 
-  for (const auto &v : it->second.labels) {
+  for (const auto& v : it->second.labels) {
     fn(v.first, v.second.help, v.second.required);
   }
 }

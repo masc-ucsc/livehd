@@ -24,7 +24,7 @@ Lconst Bitwidth_range::to_lconst(bool overflow, int64_t val) {
   return Lconst::get_neg_mask_value(-(val + 1));  // Lconst(0) - (Lconst(1).lsh_op(-val));
 }
 
-Bitwidth_range::Bitwidth_range(const Lconst &val) {
+Bitwidth_range::Bitwidth_range(const Lconst& val) {
   if (val.is_i()) {
     overflow = false;
     max      = val.to_i();
@@ -45,7 +45,7 @@ Bitwidth_range::Bitwidth_range(const Lconst &val) {
   }
 }
 
-void Bitwidth_range::set_range(const Lconst &min_val, const Lconst &max_val) {
+void Bitwidth_range::set_range(const Lconst& min_val, const Lconst& max_val) {
   I(max_val >= min_val);
 
   if (max_val.is_i() && min_val.is_i()) {
@@ -69,9 +69,9 @@ void Bitwidth_range::set_range(const Lconst &min_val, const Lconst &max_val) {
   }
 }
 
-Bitwidth_range::Bitwidth_range(const Lconst &min_val, const Lconst &max_val) { set_range(min_val, max_val); }
+Bitwidth_range::Bitwidth_range(const Lconst& min_val, const Lconst& max_val) { set_range(min_val, max_val); }
 
-void Bitwidth_range::set_narrower_range(const Bitwidth_range &bw) {
+void Bitwidth_range::set_narrower_range(const Bitwidth_range& bw) {
   if (likely(!bw.is_overflow() && !is_overflow())) {
     max = std::min(max, bw.max);
     min = std::max(min, bw.min);
@@ -94,7 +94,7 @@ void Bitwidth_range::set_narrower_range(const Bitwidth_range &bw) {
   set_range(l_min, l_max);
 }
 
-void Bitwidth_range::set_wider_range(const Bitwidth_range &bw) {
+void Bitwidth_range::set_wider_range(const Bitwidth_range& bw) {
   if (likely(!bw.is_overflow() && !is_overflow())) {
     max = std::max(max, bw.max);
     min = std::min(min, bw.min);

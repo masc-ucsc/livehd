@@ -19,7 +19,7 @@ void Pass_bitwidth::setup() {
   register_pass(m1);
 }
 
-Pass_bitwidth::Pass_bitwidth(const Eprp_var &var) : Pass("pass.bitwidth", var) {
+Pass_bitwidth::Pass_bitwidth(const Eprp_var& var) : Pass("pass.bitwidth", var) {
   auto miters   = var.get("max_iterations");
   auto hier_txt = var.get("hier");
 
@@ -42,13 +42,13 @@ Pass_bitwidth::Pass_bitwidth(const Eprp_var &var) : Pass("pass.bitwidth", var) {
   }
 }
 
-void Pass_bitwidth::trans(Eprp_var &var) {
+void Pass_bitwidth::trans(Eprp_var& var) {
   Pass_bitwidth p(var);
 
   Bitwidth bw(p.hier, p.max_iterations);
 
-  std::vector<const Lgraph *> lgs;
-  for (const auto &lg : var.lgs) {
+  std::vector<const Lgraph*> lgs;
+  for (const auto& lg : var.lgs) {
     bw.do_trans(lg);
   }
 }

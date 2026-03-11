@@ -104,12 +104,12 @@ public:
   }
 };
 
-int main(int argc, char **argv) {
+int main(int argc, char** argv) {
   Xlanguage_scanner scanner;
   if (argc == 2) {
     scanner.parse_file(argv[1]);
   } else {
-    const char *txt
+    const char* txt
         = "a = 3\n"
           "if a==3 {\n"
           "  I(3)\n"

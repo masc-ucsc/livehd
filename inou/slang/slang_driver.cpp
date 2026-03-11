@@ -9,11 +9,11 @@
 #include <iostream>
 #include <iterator>
 
+#include "slang/analysis/AnalysisManager.h"
 #include "slang/ast/ASTSerializer.h"
 #include "slang/ast/symbols/CompilationUnitSymbols.h"
 #include "slang/diagnostics/TextDiagnosticClient.h"
 #include "slang/driver/Driver.h"
-#include "slang/analysis/AnalysisManager.h"
 #include "slang/syntax/SyntaxTree.h"
 #include "slang/text/Json.h"
 #include "slang/util/TimeTrace.h"

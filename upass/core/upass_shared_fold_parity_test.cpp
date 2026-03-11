@@ -6,8 +6,8 @@
 #include "file_utils.hpp"
 #include "gtest/gtest.h"
 #include "lgraph.hpp"
-#include "lnast.hpp"
 #include "lgraph_manager.hpp"
+#include "lnast.hpp"
 #include "lnast_manager.hpp"
 #include "upass_shared.hpp"
 
@@ -21,8 +21,8 @@ TEST(UpassSharedFoldParity, FoldSumConstAcrossLnastAndLgraph) {
   ln->add_child(pl, Lnast_node::create_const(2));
   ln->add_child(pl, Lnast_node::create_const(3));
 
-  auto lm         = std::make_shared<upass::Lnast_manager>(ln);
-  auto lnast_rep  = upass::run_fold_sum_const_shared(*lm, "test-lnast", false);
+  auto lm        = std::make_shared<upass::Lnast_manager>(ln);
+  auto lnast_rep = upass::run_fold_sum_const_shared(*lm, "test-lnast", false);
   EXPECT_EQ(lnast_rep.folded_nodes, 1U);
   EXPECT_EQ(lnast_rep.rewired_edges, 0U);
   EXPECT_EQ(lnast_rep.new_const_nodes, 0U);
@@ -32,9 +32,9 @@ TEST(UpassSharedFoldParity, FoldSumConstAcrossLnastAndLgraph) {
 
   constexpr std::string_view kDbPath = "lgdb_upass_shared_fold_parity";
   file_utils::clean_dir(kDbPath);
-  auto *                     lib     = Graph_library::instance(kDbPath);
+  auto* lib = Graph_library::instance(kDbPath);
   ASSERT_NE(lib, nullptr);
-  auto *lg = lib->create_lgraph("top", "upass_shared_fold_parity");
+  auto* lg = lib->create_lgraph("top", "upass_shared_fold_parity");
   ASSERT_NE(lg, nullptr);
 
   auto c0 = lg->create_node_const(2);
@@ -52,7 +52,7 @@ TEST(UpassSharedFoldParity, FoldSumConstAcrossLnastAndLgraph) {
 
   std::size_t sum_count   = 0;
   std::size_t const_count = 0;
-  for (const auto &n : lg->fast()) {
+  for (const auto& n : lg->fast()) {
     if (n.get_type_op() == Ntype_op::Sum) {
       ++sum_count;
     } else if (n.get_type_op() == Ntype_op::Const) {
@@ -81,9 +81,9 @@ TEST(UpassSharedFoldParity, FoldSumConstDryRunNoMutation) {
 
   constexpr std::string_view kDbPath = "lgdb_upass_shared_fold_parity_dry_run";
   file_utils::clean_dir(kDbPath);
-  auto *                     lib     = Graph_library::instance(kDbPath);
+  auto* lib = Graph_library::instance(kDbPath);
   ASSERT_NE(lib, nullptr);
-  auto *lg = lib->create_lgraph("top", "upass_shared_fold_parity_dry_run");
+  auto* lg = lib->create_lgraph("top", "upass_shared_fold_parity_dry_run");
   ASSERT_NE(lg, nullptr);
 
   auto c0 = lg->create_node_const(2);
@@ -100,7 +100,7 @@ TEST(UpassSharedFoldParity, FoldSumConstDryRunNoMutation) {
   EXPECT_EQ(lgraph_rep.deleted_nodes, 1U);
 
   std::size_t sum_count = 0;
-  for (const auto &n : lg->fast()) {
+  for (const auto& n : lg->fast()) {
     if (n.get_type_op() == Ntype_op::Sum) {
       ++sum_count;
     }

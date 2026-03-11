@@ -20,7 +20,7 @@ protected:
   struct Node_data {
     Node_data() : cnode(0) {}
     int                 create_pos;
-    Lgraph             *lg;
+    Lgraph*             lg;
     Hierarchy_index     hidx;
     Node::Compact_class cnode;
     int                 fwd_pos;
@@ -31,7 +31,7 @@ protected:
 
   lh::tree<Node_data> tree;
   std::vector<Node>   node_order;
-  Lgraph             *lg_root;
+  Lgraph*             lg_root;
 
   absl::flat_hash_map<Node::Compact, uint64_t> absl_fwd_pos;
   absl::flat_hash_map<Node::Compact, uint64_t> absl_bwd_pos;
@@ -39,14 +39,14 @@ protected:
   static constexpr char fwd_name[] = "fwd_pos";
   static constexpr char bwd_name[] = "bwd_pos";
 
-  void map_tree_to_lgraph(const std::string &test_name) {
+  void map_tree_to_lgraph(const std::string& test_name) {
     TRACE_EVENT("core", nullptr, [&test_name](perfetto::EventContext ctx) {
       ctx.event()->set_name(test_name + "_map_tree_to_lgraph");
     });
 
     std::vector<lh::Tree_index> index_order;
 
-    tree.each_top_down_fast([&index_order](const lh::Tree_index &index, const Node_data &node) {
+    tree.each_top_down_fast([&index_order](const lh::Tree_index& index, const Node_data& node) {
       (void)node;
       // std::print(" level:{} pos:{} create_pos:{} fwd:{} bwd:{} leaf:{}\n", index.level, index.pos, node.create_pos, node.fwd_pos,
       // node.bwd_pos, node.leaf);
@@ -68,24 +68,24 @@ protected:
     Lrand<int>  rint;
     Lrand<bool> rbool;
 
-    auto *lib = Graph_library::instance("lgdb_hierarchy_test");
+    auto* lib = Graph_library::instance("lgdb_hierarchy_test");
 
-    for (const auto &index : index_order) {
-      auto *data = tree.ref_data(index);
+    for (const auto& index : index_order) {
+      auto* data = tree.ref_data(index);
 
       I(index.level || index.pos);  // skip root
 
       auto        parent_index = tree.get_parent(index);
-      const auto &parent_data  = tree.get_data(parent_index);
+      const auto& parent_data  = tree.get_data(parent_index);
 
-      Lgraph *parent_lg = lib->open_lgraph(parent_data.name);
+      Lgraph* parent_lg = lib->open_lgraph(parent_data.name);
       I(parent_lg);
       Node node;
       if (data->leaf && rbool.any()) {
         node = parent_lg->create_node(Ntype_op::Sum, 10);
       } else {
         node         = parent_lg->create_node_sub(data->name);
-        auto *sub_lg = lib->create_lgraph(data->name, data->name);
+        auto* sub_lg = lib->create_lgraph(data->name, data->name);
         I(sub_lg);
         I(node.get_class_lgraph() == parent_lg);
         I(node.get_type_sub() == sub_lg->get_lgid());
@@ -118,8 +118,8 @@ protected:
     }
 
     // Populated hidx
-    for (const auto &index : tree.depth_preorder()) {
-      auto *data = tree.ref_data(index);
+    for (const auto& index : tree.depth_preorder()) {
+      auto* data = tree.ref_data(index);
       data->lg   = nullptr;
       data->hidx.invalidate();
       if (index.level <= 1) {
@@ -129,7 +129,7 @@ protected:
       }
 
       const auto parent_index = tree.get_parent(index);
-      auto      &parent_data  = tree.get_data(parent_index);
+      auto&      parent_data  = tree.get_data(parent_index);
 
       Node parent_node(lg_root, parent_data.hidx, parent_data.cnode);
       data->hidx = parent_node.hierarchy_go_down();
@@ -151,13 +151,13 @@ protected:
     }
 
     for (size_t i = 1; i < node_order.size(); ++i) {
-      const auto &curr_index = index_order[i];
-      const auto &prev_index = index_order[i - 1];
-      const auto &curr_data  = tree.get_data(curr_index);
-      const auto &prev_data  = tree.get_data(prev_index);
+      const auto& curr_index = index_order[i];
+      const auto& prev_index = index_order[i - 1];
+      const auto& curr_data  = tree.get_data(curr_index);
+      const auto& prev_data  = tree.get_data(prev_index);
 
-      auto &curr_node = node_order[i];
-      auto &prev_node = node_order[i - 1];
+      auto& curr_node = node_order[i];
+      auto& prev_node = node_order[i - 1];
 
       // std::print("prev   {} class {}\n", prev_node.debug_name(), prev_node.get_class_lgraph()->get_name());
       // std::print("curr   {} class {}\n", curr_node.debug_name(), curr_node.get_class_lgraph()->get_name());
@@ -167,7 +167,7 @@ protected:
         I(prev_data.leaf);
         dpin = prev_node.setup_driver_pin();
       } else {
-        Lgraph *prev_lg = lib->open_lgraph(prev_data.name);
+        Lgraph* prev_lg = lib->open_lgraph(prev_data.name);
         I(prev_node.get_class_lgraph() != prev_lg);
         auto d_pid = prev_node.get_type_sub_node().get_instance_pid("o0");
         dpin       = prev_node.setup_driver_pin("o0");
@@ -184,7 +184,7 @@ protected:
           spin = curr_node.setup_sink_pin("B");
         }
       } else {
-        Lgraph *curr_lg = lib->open_lgraph(curr_data.name);
+        Lgraph* curr_lg = lib->open_lgraph(curr_data.name);
         I(curr_node.get_class_lgraph() != curr_lg);
         auto s_pid = curr_node.get_type_sub_node().get_instance_pid("i0");
         spin       = curr_node.setup_sink_pin("i0");
@@ -213,7 +213,7 @@ protected:
 
     lib->each_sub([this, lib](Lg_type_id lgid, std::string_view name) {
       (void)lgid;
-      auto *lg = lib->open_lgraph(name);
+      auto* lg = lib->open_lgraph(name);
       I(lg);
 
       int  sz = 0;
@@ -257,7 +257,7 @@ protected:
     });
 
     auto conta = 0u;
-    for (const auto &node : node_order) {
+    for (const auto& node : node_order) {
       if (node.is_type_sub()) {
         if (conta != (node_order.size() - 1)) {  // LAST NODE
           auto d_pid   = node.get_type_sub_node().get_instance_pid("o0");
@@ -330,7 +330,7 @@ protected:
     int pos = 0;
     n_leafs = 0;
     for (auto index : tree.depth_preorder()) {
-      auto *data    = tree.ref_data(index);
+      auto* data    = tree.ref_data(index);
       data->fwd_pos = pos;
       data->bwd_pos = size - pos;
       data->leaf    = tree.is_leaf(index);

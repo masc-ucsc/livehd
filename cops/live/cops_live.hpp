@@ -11,9 +11,9 @@ public:
 
   void setup() final;
 
-  static void invariant_finder(Eprp_var &var);
-  static void diff_finder(Eprp_var &var);
-  static void netlist_merge(Eprp_var &var);
+  static void invariant_finder(Eprp_var& var);
+  static void diff_finder(Eprp_var& var);
+  static void netlist_merge(Eprp_var& var);
 };
 
 #endif

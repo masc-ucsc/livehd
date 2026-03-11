@@ -17,28 +17,28 @@ void Pass_lnast_tolg::setup() {
   register_pass(m2);
 }
 
-Pass_lnast_tolg::Pass_lnast_tolg(const Eprp_var &var) : Pass("pass.lnast_tolg", var) {}
+Pass_lnast_tolg::Pass_lnast_tolg(const Eprp_var& var) : Pass("pass.lnast_tolg", var) {}
 
-void Pass_lnast_tolg::dbg_lnast_ssa(Eprp_var &var) {
-  for (const auto &lnast : var.lnasts) {
+void Pass_lnast_tolg::dbg_lnast_ssa(Eprp_var& var) {
+  for (const auto& lnast : var.lnasts) {
     lnast->ssa_trans();
   }
 }
 
-void Pass_lnast_tolg::tolg(Eprp_var &var) {
+void Pass_lnast_tolg::tolg(Eprp_var& var) {
   TRACE_EVENT("pass", "lnast_tolg.ssa");
 
   Pass_lnast_tolg p(var);
   auto            path = p.get_path(var);
 
-  for (const auto &lnast : var.lnasts) {
+  for (const auto& lnast : var.lnasts) {
     lnast->ssa_trans();
   }
 
   TRACE_EVENT("pass", "lnast_tolg.tolg");
 
-  std::vector<Lgraph *> lgs;
-  for (const auto &ln : var.lnasts) {
+  std::vector<Lgraph*> lgs;
+  for (const auto& ln : var.lnasts) {
     // auto       module_name = absl::StrCat("__firrtl_", ln->get_top_module_name());
     auto       module_name = ln->get_top_module_name();
     const auto top_stmts   = ln->get_first_child(lh::Tree_index::root());

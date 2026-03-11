@@ -25,11 +25,11 @@ protected:
     std::vector<std::string> full_fwd_order;
     full_fwd_order.resize(absl_fwd_pos.size());
 
-    for (auto &node : node_order) {
+    for (auto& node : node_order) {
       if (node.is_type_io()) {
         continue;
       }
-      const auto &fwd_pos = Fwd_pos_attr::ref(lg_root)->get(node.get_compact());
+      const auto& fwd_pos = Fwd_pos_attr::ref(lg_root)->get(node.get_compact());
       I(fwd_pos <= full_fwd_order.size());
       I(full_fwd_order[fwd_pos - 1].empty());
       I(fwd_pos > 0);
@@ -100,9 +100,9 @@ TEST_F(Setup_traverse, check_attributes) {
 
   I(lg_root);
 
-  for (auto &node : node_order) {
-    const auto &fwd_pos = Fwd_pos_attr::ref(lg_root)->get(node.get_compact());
-    const auto &bwd_pos = Bwd_pos_attr::ref(lg_root)->get(node.get_compact());
+  for (auto& node : node_order) {
+    const auto& fwd_pos = Fwd_pos_attr::ref(lg_root)->get(node.get_compact());
+    const auto& bwd_pos = Bwd_pos_attr::ref(lg_root)->get(node.get_compact());
 
     EXPECT_NE(absl_fwd_pos.find(node.get_compact()), absl_fwd_pos.end());
     EXPECT_NE(absl_bwd_pos.find(node.get_compact()), absl_bwd_pos.end());

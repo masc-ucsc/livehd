@@ -18,7 +18,7 @@
 
 #include "lgedgeiter.hpp"
 
-Live_structural::Live_structural(Stitch_pass_options &pack) {
+Live_structural::Live_structural(Stitch_pass_options& pack) {
   std::ifstream invariant_file(pack.boundaries_name);
 
   if (!invariant_file.good()) {
@@ -36,10 +36,10 @@ Live_structural::Live_structural(Stitch_pass_options &pack) {
   }
 }
 
-Node_pin Live_structural::get_inp_edge(Lgraph *current, Index_id nid, Port_ID pid) {
+Node_pin Live_structural::get_inp_edge(Lgraph* current, Index_id nid, Port_ID pid) {
   Node_pin candidate;
   bool     found = false;
-  for (auto &inp : current->inp_edges(nid)) {
+  for (auto& inp : current->inp_edges(nid)) {
     if (inp.get_inp_pin().get_pid()) {
       I(!found);
       candidate = inp.get_inp_pin();
@@ -50,14 +50,14 @@ Node_pin Live_structural::get_inp_edge(Lgraph *current, Index_id nid, Port_ID pi
 }
 
 // void Live_structural::replace(Lgraph* nsynth, std::set<Net_ID>& diffs) {
-void Live_structural::replace(Lgraph *nsynth) {
+void Live_structural::replace(Lgraph* nsynth) {
   std::map<Index_id, Index_id> candidate_equiv;
   std::set<Index_id>           no_match;
   std::set<Index_id>           visited;
 
   std::set<Index_id>                                                      outputs;
   std::priority_queue<queue_element, std::vector<queue_element>, Compare> discovered;
-  for (auto &idx : nsynth->fast()) {
+  for (auto& idx : nsynth->fast()) {
     if (nsynth->is_graph_output(idx)) {
       outputs.insert(idx);
       discovered.push(queue_element(idx, 0));
@@ -85,9 +85,9 @@ void Live_structural::replace(Lgraph *nsynth) {
 
     Index_id candidate_current = candidate_equiv[current];
 
-    for (auto &pred : nsynth->inp_edges(current)) {
+    for (auto& pred : nsynth->inp_edges(current)) {
       discovered.push(queue_element(pred.get_inp_pin().get_pid(), current_.priority + 1));
-      for (auto &orig_pred : original->inp_edges(candidate_current)) {
+      for (auto& orig_pred : original->inp_edges(candidate_current)) {
         if (orig_pred.get_inp_pin().get_pid() == pred.get_inp_pin().get_pid()) {
           if (candidate_equiv.find(pred.get_out_pin().get_idx()) == candidate_equiv.end()) {
             candidate_equiv[pred.get_out_pin().get_idx()] = orig_pred.get_out_pin().get_idx();
@@ -106,7 +106,7 @@ void Live_structural::replace(Lgraph *nsynth) {
 
   int                count = 0;
   std::set<Index_id> match;
-  for (auto &equivs : candidate_equiv) {
+  for (auto& equivs : candidate_equiv) {
     if (no_match.find(equivs.first) != no_match.end()) {
       continue;
     }

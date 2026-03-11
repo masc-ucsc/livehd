@@ -11,18 +11,18 @@ public:
   enum class Code_gen_type { Type_verilog, Type_prp, Type_cfg, Type_cpp };
 
 private:
-  Lgraph *lg;
+  Lgraph* lg;
 
   void to_xxx(Code_gen_type code_gen_type, std::shared_ptr<Lnast> lnast);
 
   // callback entry points
-  static void to_verilog(Eprp_var &var);
-  static void to_prp(Eprp_var &var);
-  static void to_cfg(Eprp_var &var);
-  static void to_cpp(Eprp_var &var);
+  static void to_verilog(Eprp_var& var);
+  static void to_prp(Eprp_var& var);
+  static void to_cfg(Eprp_var& var);
+  static void to_cpp(Eprp_var& var);
 
 public:
-  Inou_code_gen(const Eprp_var &var);
+  Inou_code_gen(const Eprp_var& var);
 
   static void setup();
 };

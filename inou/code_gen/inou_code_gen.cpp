@@ -16,7 +16,7 @@
 // void setup_inou_code_gen() { Inou_code_gen::setup(); }
 static Pass_plugin sample("Inou_code_gen", Inou_code_gen::setup);
 
-Inou_code_gen::Inou_code_gen(const Eprp_var &var) : Pass("inou_code_gen", var) { lg = 0; }
+Inou_code_gen::Inou_code_gen(const Eprp_var& var) : Pass("inou_code_gen", var) { lg = 0; }
 
 void Inou_code_gen::setup() {
   Eprp_method m3("inou.code_gen.verilog", "lnast -> generate verilog", &Inou_code_gen::to_verilog);
@@ -39,30 +39,30 @@ void Inou_code_gen::to_xxx(Code_gen_type code_gen_type, std::shared_ptr<Lnast> l
   lnast_to->generate();
 }
 
-void Inou_code_gen::to_verilog(Eprp_var &var) {
+void Inou_code_gen::to_verilog(Eprp_var& var) {
   Inou_code_gen p(var);
-  for (const auto &l : var.lnasts) {
+  for (const auto& l : var.lnasts) {
     p.to_xxx(Code_gen_type::Type_verilog, l);
   }
 }
 
-void Inou_code_gen::to_prp(Eprp_var &var) {
+void Inou_code_gen::to_prp(Eprp_var& var) {
   Inou_code_gen p(var);
-  for (const auto &l : var.lnasts) {
+  for (const auto& l : var.lnasts) {
     p.to_xxx(Code_gen_type::Type_prp, l);
   }
 }
 
-void Inou_code_gen::to_cfg(Eprp_var &var) {
+void Inou_code_gen::to_cfg(Eprp_var& var) {
   Inou_code_gen p(var);
-  for (const auto &l : var.lnasts) {
+  for (const auto& l : var.lnasts) {
     p.to_xxx(Code_gen_type::Type_cfg, l);
   }
 }
 
-void Inou_code_gen::to_cpp(Eprp_var &var) {
+void Inou_code_gen::to_cpp(Eprp_var& var) {
   Inou_code_gen p(var);
-  for (const auto &l : var.lnasts) {
+  for (const auto& l : var.lnasts) {
     p.to_xxx(Code_gen_type::Type_cpp, l);
   }
 }

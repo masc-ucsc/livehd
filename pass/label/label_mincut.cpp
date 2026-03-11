@@ -34,7 +34,7 @@ Label_mincut::Label_mincut(bool _v, bool _h, int _i, int _s, std::string_view _a
 /* * * * * * * * *
  * This function will populate id2node and node2id
  * * * * * * * * */
-void Label_mincut::gather_ids(Lgraph *g) {
+void Label_mincut::gather_ids(Lgraph* g) {
   node_id = 0;                       // ensure reset
   for (auto n : g->forward(hier)) {  // forward iteration for order
     if (n.get_type_op() == Ntype_op::IO) {
@@ -53,8 +53,8 @@ void Label_mincut::gather_ids(Lgraph *g) {
 /* * * * * * * * *
  * This function will populate id2neighs
  * * * * * * * * */
-void Label_mincut::gather_neighs(Lgraph *g) {
-  for (auto &it : id2node) {
+void Label_mincut::gather_neighs(Lgraph* g) {
+  for (auto& it : id2node) {
     auto curr_id   = it.first;
     auto curr_node = it.second;
 
@@ -64,7 +64,7 @@ void Label_mincut::gather_neighs(Lgraph *g) {
       continue;
     }
     // gather the sinks
-    for (auto &e : tmp_n.out_edges()) {
+    for (auto& e : tmp_n.out_edges()) {
       auto spin        = e.sink;
       auto dpin        = e.driver;
       auto snode       = spin.get_node();
@@ -84,7 +84,7 @@ void Label_mincut::gather_neighs(Lgraph *g) {
     }
 
     // gather the drivers
-    for (auto &e : tmp_n.inp_edges()) {
+    for (auto& e : tmp_n.inp_edges()) {
       auto spin        = e.sink;
       auto dpin        = e.driver;
       auto snode       = spin.get_node();
@@ -108,7 +108,7 @@ void Label_mincut::gather_neighs(Lgraph *g) {
  * This function generates a metis graph file from Lgraph
  *   creates metis graph file with at base_path + metis_name
  * * * * * * * * */
-void Label_mincut::lg_to_metis(Lgraph *g) {
+void Label_mincut::lg_to_metis(Lgraph* g) {
   gather_ids(g);
   gather_neighs(g);
 
@@ -117,7 +117,7 @@ void Label_mincut::lg_to_metis(Lgraph *g) {
 
   for (int i = 0; i < num_nodes; i++) {
     auto neighs = id2neighs[i];
-    for (auto &it : neighs) {
+    for (auto& it : neighs) {
       out_file << std::format(" {}", it);
     }
     out_file << "\n";
@@ -229,11 +229,11 @@ void Label_mincut::viecut_label(std::string result_path) {
 /* * * * * * * * *
  * Dumps all info about mincut label pass structures
  * * * * * * * * */
-void Label_mincut::dump(Lgraph *g) {
+void Label_mincut::dump(Lgraph* g) {
   std::cout << "---- Label MinCut Dump ----\n";
   std::print("Num Nodes: {}, Num Edges: {}\n", num_nodes, num_edges);
   std::cout << "=== id2node ===\n";
-  for (auto &it : id2node) {
+  for (auto& it : id2node) {
     auto curr_id = it.first;
     Node tmp_n(g, it.second);
     auto curr_node = tmp_n.debug_name();
@@ -241,7 +241,7 @@ void Label_mincut::dump(Lgraph *g) {
   }
 
   std::cout << "=== node2id ===\n";
-  for (auto &it : node2id) {
+  for (auto& it : node2id) {
     auto curr_id = it.second;
     Node tmp_n(g, it.first);
     auto curr_node = tmp_n.debug_name();
@@ -249,20 +249,20 @@ void Label_mincut::dump(Lgraph *g) {
   }
 
   std::cout << "=== id2neighs ===\n";
-  for (auto &it : id2neighs) {
+  for (auto& it : id2neighs) {
     auto curr_id = it.first;
     Node tmp_n(g, id2node[curr_id]);
     auto curr_node = tmp_n.debug_name();
     auto neighbors = it.second;  // IntSet
     std::print("  Node: {}, ID: {}\n", curr_node, curr_id);
-    for (auto &n : neighbors) {
+    for (auto& n : neighbors) {
       std::print("  {}", n);
     }
     std::cout << "\n";
   }
 
   std::cout << "=== node2color ===\n";
-  for (auto &it : node2color) {
+  for (auto& it : node2color) {
     Node tmp_n(g, it.first);
     auto curr_col = it.second;
     std::print("  Node: {}, Color: {}\n", tmp_n.debug_name(), curr_col);
@@ -274,9 +274,9 @@ void Label_mincut::dump(Lgraph *g) {
 /* * * * * * * * *
  * Where the actual labeling happens
  * * * * * * * * */
-void Label_mincut::label(Lgraph *g) {
+void Label_mincut::label(Lgraph* g) {
   if (hier) {
-    g->each_hier_unique_sub_bottom_up([](Lgraph *lg) { lg->ref_node_color_map()->clear(); });
+    g->each_hier_unique_sub_bottom_up([](Lgraph* lg) { lg->ref_node_color_map()->clear(); });
   }
   g->ref_node_color_map()->clear();
 

@@ -4,7 +4,7 @@
 
 #include <print>
 
-void Sub_node::copy_from(std::string_view new_name, Lg_type_id new_lgid, const Sub_node &sub) {
+void Sub_node::copy_from(std::string_view new_name, Lg_type_id new_lgid, const Sub_node& sub) {
   name                   = new_name;
   lgid                   = new_lgid;
   io_pins                = sub.io_pins;
@@ -12,7 +12,7 @@ void Sub_node::copy_from(std::string_view new_name, Lg_type_id new_lgid, const S
   graph_pos2instance_pid = sub.graph_pos2instance_pid;
 }
 
-void Sub_node::to_json(rapidjson::PrettyWriter<rapidjson::StringBuffer> &writer) const {
+void Sub_node::to_json(rapidjson::PrettyWriter<rapidjson::StringBuffer>& writer) const {
   writer.Key("lgid");
   writer.Uint64(lgid);
 
@@ -28,7 +28,7 @@ void Sub_node::to_json(rapidjson::PrettyWriter<rapidjson::StringBuffer> &writer)
   writer.Key("io_pins");
   writer.StartArray();
   int pos = 0;
-  for (const auto &pin : io_pins) {
+  for (const auto& pin : io_pins) {
     if (pos == 0) {
       pos++;
       continue;
@@ -66,7 +66,7 @@ void Sub_node::to_json(rapidjson::PrettyWriter<rapidjson::StringBuffer> &writer)
   writer.EndArray();
 }
 
-void Sub_node::from_json(const rapidjson::Value &entry) {
+void Sub_node::from_json(const rapidjson::Value& entry) {
   I(entry.HasMember("lgid"));
   I(entry.HasMember("name"));
   I(entry["name"].IsString());
@@ -80,9 +80,9 @@ void Sub_node::from_json(const rapidjson::Value &entry) {
 
   io_pins.resize(1);  // No id ZERO
 
-  const rapidjson::Value &io_pins_array = entry["io_pins"];
+  const rapidjson::Value& io_pins_array = entry["io_pins"];
   I(io_pins_array.IsArray());
-  for (const auto &io_pin : io_pins_array.GetArray()) {
+  for (const auto& io_pin : io_pins_array.GetArray()) {
     I(io_pin.IsObject());
 
     I(io_pin.HasMember("name"));
@@ -137,7 +137,7 @@ void Sub_node::dump() const {
   std::print("lgid:{} name:{} #iopins:{}\n", (int)lgid, name, io_pins.size());
 
   int pos = 0;
-  for (const auto &pin : io_pins) {
+  for (const auto& pin : io_pins) {
     if (pos == 0) {
       pos++;
       continue;
@@ -169,7 +169,7 @@ std::vector<Sub_node::IO_pin> Sub_node::get_sorted_io_pins() const {
   }
 
   // Sort based on port_id first, then name
-  std::sort(sort_io.begin(), sort_io.end(), [](const IO_pin &a, const IO_pin &b) {
+  std::sort(sort_io.begin(), sort_io.end(), [](const IO_pin& a, const IO_pin& b) {
     if (a.graph_io_pos == Port_invalid && b.graph_io_pos == Port_invalid) {
       return a.name < b.name;
     }
@@ -216,7 +216,7 @@ void Sub_node::populate_graph_pos() {
   }
 
   Port_ID pos = 0;
-  for (auto &sorted_pin : get_sorted_io_pins()) {
+  for (auto& sorted_pin : get_sorted_io_pins()) {
     pos++;
     if (sorted_pin.graph_io_pos != pos) {
       map_graph_pos(sorted_pin.name, sorted_pin.dir, pos);

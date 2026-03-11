@@ -16,7 +16,7 @@ public:
   Pin_tracker(Pin zero_pin) : Zero_pin(zero_pin) {}
 
   void add_input(Pin wname, Bits_t bits) {
-    auto &pv = full_map[wname];
+    auto& pv = full_map[wname];
     I(pv.empty());  // Why to double insert inputs??
 
     pv.resize(bits, {Zero_pin, -1});
@@ -27,7 +27,7 @@ public:
   }
 
   void add_get_mask(Pin dst_pin, Pin a_pin, Bits_t a_sbits, Lconst mask) {
-    auto &pv = full_map[dst_pin];
+    auto& pv = full_map[dst_pin];
     pv.clear();
 
     auto it = full_map.find(a_pin);
@@ -37,7 +37,7 @@ public:
     }
 
     auto pairs = mask.get_mask_range_pairs();
-    for (const auto &p : pairs) {
+    for (const auto& p : pairs) {
       auto start = static_cast<size_t>(p.first);
       auto end   = static_cast<size_t>(p.first + p.second);  // [start,end)
       auto pos   = start;
@@ -61,8 +61,8 @@ public:
     }
 
     size_t pick_v_pos = 0;
-    auto pairs      = mask.get_mask_range_pairs();
-    for (const auto &p : pairs) {
+    auto   pairs      = mask.get_mask_range_pairs();
+    for (const auto& p : pairs) {
       auto start = static_cast<size_t>(p.first);
       auto end   = static_cast<size_t>(p.first + p.second);  // [start,end)
       auto pos   = start;
@@ -90,10 +90,10 @@ public:
     const auto amount_i = amount.to_i();
     I(amount_i >= 0);
 
-    const auto amount_u = static_cast<size_t>(amount_i);
+    const auto amount_u  = static_cast<size_t>(amount_i);
     const auto a_sbits_u = static_cast<size_t>(a_sbits);
 
-    auto &pv = full_map[dst_pin];
+    auto& pv = full_map[dst_pin];
     pv.resize(a_sbits_u + amount_u, {Zero_pin, -1});
 
     for (size_t i = 0; i < amount_u; ++i) {
@@ -123,11 +123,11 @@ public:
     const auto amount_i = amount.to_i();
     I(amount_i >= 0);
 
-    const auto amount_u = static_cast<size_t>(amount_i);
+    const auto amount_u  = static_cast<size_t>(amount_i);
     const auto a_sbits_u = static_cast<size_t>(a_sbits);
     I(a_sbits_u >= amount_u);
 
-    auto &pv = full_map[dst_pin];
+    auto&      pv       = full_map[dst_pin];
     const auto out_bits = a_sbits_u - amount_u;
     pv.resize(out_bits, {Zero_pin, -1});
 
@@ -155,7 +155,7 @@ public:
 
     const auto amount_u = static_cast<size_t>(amount_i);
 
-    auto &pv = full_map[dst_pin];
+    auto& pv = full_map[dst_pin];
     pv.resize(amount_u, {Zero_pin, -1});
 
     auto it = full_map.find(a_pin);
@@ -180,7 +180,7 @@ public:
     if (it == full_map.end()) {
       return;
     }
-    auto &pv = full_map[dst_pin];
+    auto& pv = full_map[dst_pin];
     it       = full_map.find(a_pin);  // WARNING: insert could destroy iterator
 
     if (pv.size() < it->second.size()) {
@@ -203,7 +203,7 @@ public:
     if (it == full_map.end()) {
       return;
     }
-    auto &pv = full_map[dst_pin];
+    auto& pv = full_map[dst_pin];
     it       = full_map.find(a_pin);  // WARNING: insert could destroy iterator
 
     auto max_bits_i = a_mask.get_mask_range().second;
@@ -232,7 +232,7 @@ public:
     }
   }
 
-  const Pin_vector &get_pin_vector(Pin dst_pin) const {
+  const Pin_vector& get_pin_vector(Pin dst_pin) const {
     const auto it = full_map.find(dst_pin);
     if (it == full_map.end()) {
       static Pin_vector empty;
@@ -245,7 +245,7 @@ public:
   void dump() {
     for (const auto e : full_map) {
       std::print("name:{}\n", e.first);
-      for (const auto &s : e.second) {
+      for (const auto& s : e.second) {
         std::print(" id:{} pos:{}\n", s.id, s.pos);
       }
     }
@@ -263,7 +263,7 @@ protected:
 
     a_pv.resize(a_sbits, {Zero_pin, -1});
     Bits_t pos = 0;
-    for (auto &e : a_pv) {
+    for (auto& e : a_pv) {
       e.id  = a_name;
       e.pos = pos;
       ++pos;
@@ -272,7 +272,7 @@ protected:
     return a_pv;
   }
 
-  static void clean_excess_pv(Pin_vector &pv) {
+  static void clean_excess_pv(Pin_vector& pv) {
     auto   rit  = pv.rbegin();
     size_t ndel = 0;
     while (rit != pv.rend()) {

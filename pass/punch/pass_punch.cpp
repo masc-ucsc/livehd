@@ -8,7 +8,7 @@
 
 static Pass_plugin sample("pass_punch", Pass_punch::setup);
 
-Pass_punch::Pass_punch(const Eprp_var &var) : Pass("pass.punch", var) {}
+Pass_punch::Pass_punch(const Eprp_var& var) : Pass("pass.punch", var) {}
 
 void Pass_punch::setup() {
   Eprp_method m1("pass.punch", "punch wires between modules", &Pass_punch::work);
@@ -20,12 +20,12 @@ void Pass_punch::setup() {
 }
 
 #if 1
-void Pass_punch::work(Eprp_var &var) {
+void Pass_punch::work(Eprp_var& var) {
   (void)var;
   I(false);  // FIXME:
 }
 #else
-Pass_punch::Pass_punch(LGraph *top, std::string_view _src, std::string_view _dst) : Pass("punch") {
+Pass_punch::Pass_punch(LGraph* top, std::string_view _src, std::string_view _dst) : Pass("punch") {
   uint16_t ok_src = src_hierarchy.set_hierarchy(top, _src);
   uint16_t ok_dst = dst_hierarchy.set_hierarchy(top, _dst);
 
@@ -40,7 +40,7 @@ Pass_punch::Pass_punch(LGraph *top, std::string_view _src, std::string_view _dst
   }
 }
 
-void Pass_punch::work(Eprp_var &var) {
+void Pass_punch::work(Eprp_var& var) {
   auto src = var.get("src");
   auto dst = var.get("dst");
 
@@ -50,7 +50,7 @@ void Pass_punch::work(Eprp_var &var) {
   }
 }
 
-void Pass_punch::punch(LGraph *g, std::string_view src, std::string_view dst) {
+void Pass_punch::punch(LGraph* g, std::string_view src, std::string_view dst) {
   TRACE_EVENT("pass", "punch");
 
   /////////////////////////////////////
@@ -104,13 +104,13 @@ void Pass_punch::punch(LGraph *g, std::string_view src, std::string_view dst) {
   std::print("src_lgid:        {}\n", src_lgid);
   std::print("dst_lgid:        {}\n", dst_lgid);
 
-  auto *src_g = LGraph::open(g->get_path(), src_lgid);
+  auto* src_g = LGraph::open(g->get_path(), src_lgid);
   if (src_g == 0) {
     Pass::error("pass.punch could not open path:{} lgid:{} src:{}", g->get_path(), src_lgid, this->src_hierarchy.get_hierarchy());
     return;
   }
 
-  auto *dst_g = LGraph::open(g->get_path(), dst_lgid);
+  auto* dst_g = LGraph::open(g->get_path(), dst_lgid);
   if (dst_g == 0) {
     Pass::error("pass.punch could not open path:{} lgid:{} dst:{}", g->get_path(), dst_lgid, this->dst_hierarchy.get_hierarchy());
     return;
@@ -147,7 +147,7 @@ void Pass_punch::punch(LGraph *g, std::string_view src, std::string_view dst) {
       break;
     }*/
 }
-void Pass_punch::add_output(LGraph *g, std::string_view wname, std::string_view output) {
+void Pass_punch::add_output(LGraph* g, std::string_view wname, std::string_view output) {
   I(g);
   I(!wname.empty());
   I(!output.empty());
@@ -158,14 +158,14 @@ void Pass_punch::add_output(LGraph *g, std::string_view wname, std::string_view 
   Node_pin dpin;
   uint32_t bits;
   uint32_t offset;
-  for (const auto &nid : g->forward()) {
+  for (const auto& nid : g->forward()) {
     if (done) {
       break;
     }
 
     auto node = Node(g, 0, Node::Compact(nid));
 
-    for (const auto &edge : node.inp_edges()) {
+    for (const auto& edge : node.inp_edges()) {
       if (edge.driver.has_name()) {
         std::string_view this_wname = edge.driver.get_name();
         if (this_wname == wname) {

@@ -20,7 +20,7 @@
 
 Slang_tree::Slang_tree() { parsed_lnasts.clear(); }
 
-void Slang_tree::process_root(const slang::ast::RootSymbol &root) {
+void Slang_tree::process_root(const slang::ast::RootSymbol& root) {
   auto topInstances = root.topInstances;
   for (auto inst : topInstances) {
     // std::print("slang_tree top:{}\n", inst->name);
@@ -36,7 +36,7 @@ void Slang_tree::process_root(const slang::ast::RootSymbol &root) {
 std::vector<std::shared_ptr<Lnast>> Slang_tree::pick_lnast() {
   std::vector<std::shared_ptr<Lnast>> v;
 
-  for (auto &l : parsed_lnasts) {
+  for (auto& l : parsed_lnasts) {
     if (l.second) {  // do not push null ptr
       v.emplace_back(l.second);
     }
@@ -47,8 +47,8 @@ std::vector<std::shared_ptr<Lnast>> Slang_tree::pick_lnast() {
   return v;
 }
 
-bool Slang_tree::process_top_instance(const slang::ast::InstanceSymbol &symbol) {
-  const auto &def = symbol.getDefinition();
+bool Slang_tree::process_top_instance(const slang::ast::InstanceSymbol& symbol) {
+  const auto& def = symbol.getDefinition();
 
   // Instance bodies are all the same, so if we've visited this one
   // already don't bother doing it again.
@@ -69,9 +69,9 @@ bool Slang_tree::process_top_instance(const slang::ast::InstanceSymbol &symbol) 
 #ifdef LNAST_NODE_POS
   auto decl_pos = 0u;
 #endif
-  for (const auto &p : symbol.body.getPortList()) {
+  for (const auto& p : symbol.body.getPortList()) {
     if (p->kind == slang::ast::SymbolKind::Port) {
-      const auto &port = p->as<slang::ast::PortSymbol>();
+      const auto& port = p->as<slang::ast::PortSymbol>();
 
       // I(port.defaultValue == nullptr);  // give me a case to DEBUG
 
@@ -92,7 +92,7 @@ bool Slang_tree::process_top_instance(const slang::ast::InstanceSymbol &symbol) 
         lnast_create_obj.vname2lname.emplace(port.name, var_name);
       }
 
-      const auto &type = port.getType();
+      const auto& type = port.getType();
       if (type.hasFixedRange()) {
         auto range = type.getFixedRange();
         if (!range.isLittleEndian()) {
@@ -105,7 +105,7 @@ bool Slang_tree::process_top_instance(const slang::ast::InstanceSymbol &symbol) 
       ++decl_pos;
 #endif
     } else if (p->kind == slang::ast::SymbolKind::InterfacePort) {
-      const auto &port = p->as<slang::ast::InterfacePortSymbol>();
+      const auto& port = p->as<slang::ast::InterfacePortSymbol>();
       (void)port;
 
       std::print("port:{} FIXME\n", p->name);
@@ -114,41 +114,41 @@ bool Slang_tree::process_top_instance(const slang::ast::InstanceSymbol &symbol) 
     }
   }
 
-  for (const auto &member : symbol.body.members()) {
+  for (const auto& member : symbol.body.members()) {
     if (member.kind == slang::ast::SymbolKind::Port) {
       // already done
     } else if (member.kind == slang::ast::SymbolKind::Net) {
-      const auto &ns   = member.as<slang::ast::NetSymbol>();
-      auto       *expr = ns.getInitializer();
+      const auto& ns   = member.as<slang::ast::NetSymbol>();
+      auto*       expr = ns.getInitializer();
       if (expr) {
         // std::string lhs_var = lnast_create_obj.get_lnast_name(member.name);
         lnast_create_obj.create_assign_stmts(member.name, process_expression(*expr, true));  // get last value for assigns
       }
     } else if (member.kind == slang::ast::SymbolKind::ContinuousAssign) {
-      const auto &ca = member.as<slang::ast::ContinuousAssignSymbol>();
-      const auto &as = ca.getAssignment();
+      const auto& ca = member.as<slang::ast::ContinuousAssignSymbol>();
+      const auto& as = ca.getAssignment();
       bool        ok = process(as.as<slang::ast::AssignmentExpression>());
       if (!ok) {
         lnast_create_obj.lnast = nullptr;
         return false;
       }
     } else if (member.kind == slang::ast::SymbolKind::ProceduralBlock) {
-      const auto &pbs = member.as<slang::ast::ProceduralBlockSymbol>();
+      const auto& pbs = member.as<slang::ast::ProceduralBlockSymbol>();
 
       if (pbs.procedureKind == slang::ast::ProceduralBlockKind::Always) {
-        const auto &stmt = pbs.getBody();
+        const auto& stmt = pbs.getBody();
 
         if (stmt.kind == slang::ast::StatementKind::Timed) {
           Pass::info("always with sensitivity list at {} pos:{}, assuming always_comb",
                      member.location.buffer().getId(),
                      member.location.offset());
-          const auto &timed = stmt.as<slang::ast::TimedStatement>();
+          const auto& timed = stmt.as<slang::ast::TimedStatement>();
           if (timed.stmt.kind == slang::ast::StatementKind::Block) {
-            const auto &block = timed.stmt.as<slang::ast::BlockStatement>();
+            const auto& block = timed.stmt.as<slang::ast::BlockStatement>();
             I(block.body.kind == slang::ast::StatementKind::List);
-            for (const auto &bstmt : block.body.as<slang::ast::StatementList>().list) {
+            for (const auto& bstmt : block.body.as<slang::ast::StatementList>().list) {
               if (bstmt->kind == slang::ast::StatementKind::ExpressionStatement) {
-                const auto &expr = bstmt->as<slang::ast::ExpressionStatement>().expr;
+                const auto& expr = bstmt->as<slang::ast::ExpressionStatement>().expr;
                 bool        ok   = process(expr.as<slang::ast::AssignmentExpression>());
                 if (!ok) {
                   lnast_create_obj.lnast = nullptr;
@@ -276,7 +276,7 @@ bool Slang_tree::process_top_instance(const slang::ast::InstanceSymbol &symbol) 
   return true;
 }
 
-void Slang_tree::process_lhs(const slang::ast::Expression &lhs, const std::string &rhs_var, bool last_value) {
+void Slang_tree::process_lhs(const slang::ast::Expression& lhs, const std::string& rhs_var, bool last_value) {
   std::string var_name;
   bool        dest_var_sign;
   int         dest_var_bits;
@@ -285,29 +285,29 @@ void Slang_tree::process_lhs(const slang::ast::Expression &lhs, const std::strin
   std::string dest_min_bit;
 
   if (lhs.kind == slang::ast::ExpressionKind::NamedValue) {
-    const auto &var = lhs.as<slang::ast::NamedValueExpression>();
+    const auto& var = lhs.as<slang::ast::NamedValueExpression>();
     var_name        = lnast_create_obj.get_lnast_lhs_name(var.symbol.name);
     dest_var_sign   = var.type->isSigned();
     dest_var_bits   = var.type->getBitWidth();
     I(!var.type->isStruct());  // FIXME: structs
   } else if (lhs.kind == slang::ast::ExpressionKind::ElementSelect) {
-    const auto &es = lhs.as<slang::ast::ElementSelectExpression>();
+    const auto& es = lhs.as<slang::ast::ElementSelectExpression>();
     I(es.value().kind == slang::ast::ExpressionKind::NamedValue);
 
     dest_max_bit = process_expression(es.selector(), last_value);
     dest_min_bit = dest_max_bit;
 
-    const auto &var = es.value().as<slang::ast::NamedValueExpression>();
+    const auto& var = es.value().as<slang::ast::NamedValueExpression>();
     var_name        = lnast_create_obj.get_lnast_lhs_name(var.symbol.name);
 
     dest_var_sign = false;
     dest_var_bits = 1;
   } else {
     I(lhs.kind == slang::ast::ExpressionKind::RangeSelect);
-    const auto &rs = lhs.as<slang::ast::RangeSelectExpression>();
+    const auto& rs = lhs.as<slang::ast::RangeSelectExpression>();
     I(rs.value().kind == slang::ast::ExpressionKind::NamedValue);
 
-    const auto &var = rs.value().as<slang::ast::NamedValueExpression>();
+    const auto& var = rs.value().as<slang::ast::NamedValueExpression>();
     var_name        = lnast_create_obj.get_lnast_lhs_name(var.symbol.name);
     dest_var_sign   = var.type->isSigned();
     dest_var_bits   = var.type->getBitWidth();
@@ -346,24 +346,24 @@ void Slang_tree::process_lhs(const slang::ast::Expression &lhs, const std::strin
   }
 }
 
-bool Slang_tree::process(const slang::ast::AssignmentExpression &expr) {
+bool Slang_tree::process(const slang::ast::AssignmentExpression& expr) {
   auto rhs_var = process_expression(expr.right(), true);
 
-  const auto &lhs = expr.left();
+  const auto& lhs = expr.left();
 
   process_lhs(lhs, rhs_var, true);
 
   return true;
 }
 
-std::string Slang_tree::process_expression(const slang::ast::Expression &expr, bool last_value) {
+std::string Slang_tree::process_expression(const slang::ast::Expression& expr, bool last_value) {
   if (expr.kind == slang::ast::ExpressionKind::NamedValue) {
-    const auto &nv = expr.as<slang::ast::NamedValueExpression>();
+    const auto& nv = expr.as<slang::ast::NamedValueExpression>();
     return lnast_create_obj.get_lnast_name(nv.symbol.name, last_value);
   }
 
   if (expr.kind == slang::ast::ExpressionKind::IntegerLiteral) {
-    const auto &il    = expr.as<slang::ast::IntegerLiteral>();
+    const auto& il    = expr.as<slang::ast::IntegerLiteral>();
     auto        svint = il.getValue();
 
     if (svint.hasUnknown()) {  // unknowns in binary
@@ -381,7 +381,7 @@ std::string Slang_tree::process_expression(const slang::ast::Expression &expr, b
   }
 
   if (expr.kind == slang::ast::ExpressionKind::BinaryOp) {
-    const auto &op  = expr.as<slang::ast::BinaryExpression>();
+    const auto& op  = expr.as<slang::ast::BinaryExpression>();
     auto        lhs = process_expression(op.left(), last_value);
     auto        rhs = process_expression(op.right(), last_value);
 
@@ -414,7 +414,7 @@ std::string Slang_tree::process_expression(const slang::ast::Expression &expr, b
   }
 
   if (expr.kind == slang::ast::ExpressionKind::UnaryOp) {
-    const auto &op = expr.as<slang::ast::UnaryExpression>();
+    const auto& op = expr.as<slang::ast::UnaryExpression>();
 
     if (op.op == slang::ast::UnaryOperator::BitwiseAnd) {
       return process_mask_and(op, last_value);
@@ -451,12 +451,12 @@ std::string Slang_tree::process_expression(const slang::ast::Expression &expr, b
   }
 
   if (expr.kind == slang::ast::ExpressionKind::Conversion) {
-    const auto             &conv    = expr.as<slang::ast::ConversionExpression>();
-    const slang::ast::Type *to_type = conv.type;
+    const auto&             conv    = expr.as<slang::ast::ConversionExpression>();
+    const slang::ast::Type* to_type = conv.type;
 
     auto res = process_expression(conv.operand(), last_value);  // NOTHING TO DO? (the dp_assign handles it?)
 
-    const slang::ast::Type *from_type = conv.operand().type;
+    const slang::ast::Type* from_type = conv.operand().type;
 
     if (to_type->isSigned() == from_type->isSigned() && to_type->getBitWidth() >= from_type->getBitWidth()) {
       return res;  // no need to add mask if expanding
@@ -494,13 +494,13 @@ std::string Slang_tree::process_expression(const slang::ast::Expression &expr, b
   }
 
   if (expr.kind == slang::ast::ExpressionKind::Concatenation) {
-    const auto &concat = expr.as<slang::ast::ConcatenationExpression>();
+    const auto& concat = expr.as<slang::ast::ConcatenationExpression>();
 
     auto offset = 0u;
 
     std::vector<std::string> adjusted_fields;
 
-    for (const auto &e : concat.operands()) {
+    for (const auto& e : concat.operands()) {
       auto bits = e->type->getBitWidth();
 
       auto res_var = process_expression(*e, last_value);
@@ -517,10 +517,10 @@ std::string Slang_tree::process_expression(const slang::ast::Expression &expr, b
   }
 
   if (expr.kind == slang::ast::ExpressionKind::ElementSelect) {
-    const auto &es = expr.as<slang::ast::ElementSelectExpression>();
+    const auto& es = expr.as<slang::ast::ElementSelectExpression>();
     I(es.value().kind == slang::ast::ExpressionKind::NamedValue);
 
-    const auto &var = es.value().as<slang::ast::NamedValueExpression>();
+    const auto& var = es.value().as<slang::ast::NamedValueExpression>();
 
     auto sel_var  = lnast_create_obj.get_lnast_name(var.symbol.name, last_value);
     auto sel_bit  = process_expression(es.selector(), last_value);
@@ -530,10 +530,10 @@ std::string Slang_tree::process_expression(const slang::ast::Expression &expr, b
   }
 
   if (expr.kind == slang::ast::ExpressionKind::RangeSelect) {
-    const auto &es = expr.as<slang::ast::RangeSelectExpression>();
+    const auto& es = expr.as<slang::ast::RangeSelectExpression>();
     I(es.value().kind == slang::ast::ExpressionKind::NamedValue);
 
-    const auto &var = es.value().as<slang::ast::NamedValueExpression>();
+    const auto& var = es.value().as<slang::ast::NamedValueExpression>();
 
     auto sel_var = lnast_create_obj.get_lnast_name(var.symbol.name, last_value);
     auto max_bit = process_expression(es.left(), last_value);
@@ -548,11 +548,11 @@ std::string Slang_tree::process_expression(const slang::ast::Expression &expr, b
   return "FIXME_op";
 }
 
-std::string Slang_tree::process_mask_and(const slang::ast::UnaryExpression &uexpr, bool last_value) {
+std::string Slang_tree::process_mask_and(const slang::ast::UnaryExpression& uexpr, bool last_value) {
   // reduce and does not have a direct mapping in Lgraph
   // And(Not(Ror(Not(inp))), inp.MSB)
 
-  const auto &op      = uexpr.operand();
+  const auto& op      = uexpr.operand();
   auto        msb_pos = op.type->getBitWidth() - 1;
 
   auto inp = process_expression(op, last_value);
@@ -564,8 +564,8 @@ std::string Slang_tree::process_mask_and(const slang::ast::UnaryExpression &uexp
       lnast_create_obj.create_sra_stmts(inp, std::to_string(msb_pos)));  // No need pick (reduce is 1 bit)
 }
 
-std::string Slang_tree::process_mask_xor(const slang::ast::UnaryExpression &uexpr, bool last_value) {
-  const auto &op = uexpr.operand();
+std::string Slang_tree::process_mask_xor(const slang::ast::UnaryExpression& uexpr, bool last_value) {
+  const auto& op = uexpr.operand();
 
   auto inp = process_expression(op, last_value);
 

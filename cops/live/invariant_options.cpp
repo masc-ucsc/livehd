@@ -4,7 +4,7 @@
 
 #include "pass.hpp"
 
-void Invariant_find_options::set(const std::string &key, const std::string &value) {
+void Invariant_find_options::set(const std::string& key, const std::string& value) {
   try {
     if (is_opt(key, "top")) {
       top = value;
@@ -24,7 +24,7 @@ void Invariant_find_options::set(const std::string &key, const std::string &valu
     } else {
       set_val(key, value);
     }
-  } catch (const std::invalid_argument &ia) {
+  } catch (const std::invalid_argument& ia) {
     Pass::error(std::format("key {} has an invalid argument", key));
   }
 }

@@ -5,10 +5,10 @@
 
 class Inou_liberty : public Pass {
 protected:
-  static void liberty_open(Eprp_var &var);
+  static void liberty_open(Eprp_var& var);
 
 public:
-  Inou_liberty(const Eprp_var &var);
+  Inou_liberty(const Eprp_var& var);
 
   static void setup();
 };

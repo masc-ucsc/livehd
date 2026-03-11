@@ -35,18 +35,18 @@ protected:
   };
   Pass_abc_options opack;
 
-  static Abc_Frame_t *pAbc;
+  static Abc_Frame_t* pAbc;
 
   const std::string cmd_mapping;
   const std::string cmd_readlib;
   const std::string cmd_synthesis;
 
-  static void tmap(Eprp_var &var);
-  static void optimize(Eprp_var &var);
+  static void tmap(Eprp_var& var);
+  static void optimize(Eprp_var& var);
 
-  Lgraph *regen(const Lgraph *lg);
-  void    trans(Lgraph *lg);
-  void    dump_blif(const Lgraph *g, const std::string &filename);
+  Lgraph* regen(const Lgraph* lg);
+  void    trans(Lgraph* lg);
+  void    dump_blif(const Lgraph* g, const std::string& filename);
 
 public:
   // customize a hash function for absl::flat_hash_map
@@ -55,23 +55,23 @@ public:
   };
 
   struct Abc_primary_input {
-    Abc_Obj_t *PI;     // PI node
-    Abc_Obj_t *PIOut;  // Fanout of this node type: nets
+    Abc_Obj_t* PI;     // PI node
+    Abc_Obj_t* PIOut;  // Fanout of this node type: nets
   };
 
   struct Abc_primary_output {
-    Abc_Obj_t *PO;     // PI node
-    Abc_Obj_t *POOut;  // Fanout of this node type: nets
+    Abc_Obj_t* PO;     // PI node
+    Abc_Obj_t* POOut;  // Fanout of this node type: nets
   };
 
   struct Abc_latch {
-    Abc_Obj_t *pLatchInput;   // Node itself is the fanin
-    Abc_Obj_t *pLatchOutput;  // Fanout of this node type: nets
+    Abc_Obj_t* pLatchInput;   // Node itself is the fanin
+    Abc_Obj_t* pLatchOutput;  // Fanout of this node type: nets
   };
 
   struct Abc_comb {
-    Abc_Obj_t *pNodeInput;   // Node it self is the fanin
-    Abc_Obj_t *pNodeOutput;  // Fanout of this node type: nets
+    Abc_Obj_t* pNodeInput;   // Node it self is the fanin
+    Abc_Obj_t* pNodeOutput;  // Fanout of this node type: nets
   };
 
   struct index_offset {
@@ -79,11 +79,11 @@ public:
     Port_ID  pid;
     int      offset[2];
 
-    inline bool operator==(const index_offset &rhs) const {
+    inline bool operator==(const index_offset& rhs) const {
       return ((idx == rhs.idx) && (pid == rhs.pid) && (offset[0] == rhs.offset[0]));
     }
 
-    inline bool operator<(const index_offset &rhs) const {
+    inline bool operator<(const index_offset& rhs) const {
       if (idx < rhs.idx) {
         return true;
       } else if (idx == rhs.idx) {
@@ -99,7 +99,7 @@ public:
       }
     }
 
-    inline bool operator()(const index_offset &lhs, const index_offset &rhs) const {
+    inline bool operator()(const index_offset& lhs, const index_offset& rhs) const {
       if (lhs.idx < rhs.idx) {
         return true;
       } else if (lhs.idx == rhs.idx) {
@@ -128,7 +128,7 @@ public:
              || (driver == other.driver && offset == other.offset && width != other.width);
     }
     template <typename H>
-    friend H AbslHashValue(H h, const Pick_ID &s) {
+    friend H AbslHashValue(H h, const Pick_ID& s) {
       return H::combine(std::move(h), s.driver, s.offset, s.width);
     };
   };
@@ -144,10 +144,10 @@ public:
     using block_conn    = absl::flat_hash_map<uint64_t, absl::flat_hash_map<Port_ID, topology_info>, IndexID_Hash>;
     using idremap       = absl::flat_hash_map<uint64_t, uint64_t>;
     using pidremap      = absl::flat_hash_map<uint64_t, absl::flat_hash_map<Port_ID, uint64_t>>;
-    using ptr2id        = absl::flat_hash_map<Abc_Obj_t *, uint64_t>;
+    using ptr2id        = absl::flat_hash_map<Abc_Obj_t*, uint64_t>;
     using id2pid        = absl::flat_hash_map<uint64_t, Port_ID, IndexID_Hash>;
     using value_size    = std::pair<uint32_t, uint32_t>;
-    using record        = absl::flat_hash_map<std::string, Abc_Obj_t *>;
+    using record        = absl::flat_hash_map<std::string, Abc_Obj_t*>;
 
     using picks2pin   = absl::flat_hash_map<Pick_ID, Node_pin>;
     using po_group    = std::map<index_offset, Abc_primary_output>;
@@ -199,11 +199,11 @@ public:
   virtual ~Pass_abc();
 
 private:
-  graph_topology *graph_info;
+  graph_topology* graph_info;
 
-  bool setup_techmap(const Lgraph *g);
+  bool setup_techmap(const Lgraph* g);
 
-  bool is_latch(const Tech_cell *tcell) const {
+  bool is_latch(const Tech_cell* tcell) const {
     std::string_view cell_name = tcell->get_name();
     std::string_view flop      = "FF";
     std::string_view latch     = "LATCH";
@@ -219,76 +219,76 @@ private:
     graph_info = new graph_topology;
   }
 
-  void find_cell_conn(const Lgraph *g);
-  void find_latch_conn(const Lgraph *g);
-  void find_combinational_conn(const Lgraph *g);
-  void find_graphio_output_conn(const Lgraph *g);
-  void find_subgraph_conn(const Lgraph *g);
-  void find_memory_conn(const Lgraph *g);
+  void find_cell_conn(const Lgraph* g);
+  void find_latch_conn(const Lgraph* g);
+  void find_combinational_conn(const Lgraph* g);
+  void find_graphio_output_conn(const Lgraph* g);
+  void find_subgraph_conn(const Lgraph* g);
+  void find_memory_conn(const Lgraph* g);
 
-  void recursive_find(const Lgraph *g, const Edge_raw *input, graph_topology::topology_info &pid, int bit_addr[2]);
+  void recursive_find(const Lgraph* g, const Edge_raw* input, graph_topology::topology_info& pid, int bit_addr[2]);
 
-  Abc_Obj_t *gen_const_from_lgraph(const Lgraph *g, index_offset key, Abc_Ntk_t *pAig);
+  Abc_Obj_t* gen_const_from_lgraph(const Lgraph* g, index_offset key, Abc_Ntk_t* pAig);
 
-  void gen_latch_from_lgraph(const Lgraph *g, Abc_Ntk_t *pAig);
+  void gen_latch_from_lgraph(const Lgraph* g, Abc_Ntk_t* pAig);
 
-  void gen_primary_io_from_lgraph(const Lgraph *g, Abc_Ntk_t *pAig);
+  void gen_primary_io_from_lgraph(const Lgraph* g, Abc_Ntk_t* pAig);
 
-  void gen_comb_cell_from_lgraph(const Lgraph *g, Abc_Ntk_t *pAig);
+  void gen_comb_cell_from_lgraph(const Lgraph* g, Abc_Ntk_t* pAig);
 
-  Abc_Obj_t *gen_pseudo_subgraph_input(const index_offset &inp, Abc_Ntk_t *pAig);
+  Abc_Obj_t* gen_pseudo_subgraph_input(const index_offset& inp, Abc_Ntk_t* pAig);
 
-  Abc_Obj_t *gen_pseudo_memory_input(const index_offset &inp, Abc_Ntk_t *pAig);
+  Abc_Obj_t* gen_pseudo_memory_input(const index_offset& inp, Abc_Ntk_t* pAig);
 
-  void conn_latch(const Lgraph *g, Abc_Ntk_t *pAig);
+  void conn_latch(const Lgraph* g, Abc_Ntk_t* pAig);
 
-  void conn_combinational_cell(const Lgraph *g, Abc_Ntk_t *pAig);
+  void conn_combinational_cell(const Lgraph* g, Abc_Ntk_t* pAig);
 
-  void conn_primary_output(const Lgraph *g, Abc_Ntk_t *pAig);
+  void conn_primary_output(const Lgraph* g, Abc_Ntk_t* pAig);
 
-  void conn_reset(const Lgraph *g, Abc_Ntk_t *pAig);
+  void conn_reset(const Lgraph* g, Abc_Ntk_t* pAig);
 
-  void conn_clock(const Lgraph *g, Abc_Ntk_t *pAig);
+  void conn_clock(const Lgraph* g, Abc_Ntk_t* pAig);
 
-  void conn_subgraph(const Lgraph *g, Abc_Ntk_t *pAig);
+  void conn_subgraph(const Lgraph* g, Abc_Ntk_t* pAig);
 
-  void conn_memory(const Lgraph *g, Abc_Ntk_t *pAig);
+  void conn_memory(const Lgraph* g, Abc_Ntk_t* pAig);
 
-  void gen_netList(const Lgraph *g, Abc_Ntk_t *pAig);
+  void gen_netList(const Lgraph* g, Abc_Ntk_t* pAig);
 
-  Abc_Ntk_t *to_abc(const Lgraph *g);
+  Abc_Ntk_t* to_abc(const Lgraph* g);
 
-  void from_abc(Lgraph *new_graph, const Lgraph *old_graph, Abc_Ntk_t *pNtk);
+  void from_abc(Lgraph* new_graph, const Lgraph* old_graph, Abc_Ntk_t* pNtk);
 
-  void gen_latch_from_abc(Lgraph *new_graph, const Lgraph *old_graph, Abc_Ntk_t *pNtk);
+  void gen_latch_from_abc(Lgraph* new_graph, const Lgraph* old_graph, Abc_Ntk_t* pNtk);
 
-  void gen_primary_io_from_abc(Lgraph *new_graph, const Lgraph *old_graph, Abc_Ntk_t *pNtk);
+  void gen_primary_io_from_abc(Lgraph* new_graph, const Lgraph* old_graph, Abc_Ntk_t* pNtk);
 
-  void gen_comb_cell_from_abc(Lgraph *new_graph, const Lgraph *old_graph, Abc_Ntk_t *pNtk);
+  void gen_comb_cell_from_abc(Lgraph* new_graph, const Lgraph* old_graph, Abc_Ntk_t* pNtk);
 
-  void gen_subgraph_from_abc(Lgraph *new_graph, const Lgraph *old_graph, Abc_Ntk_t *pNtk);
+  void gen_subgraph_from_abc(Lgraph* new_graph, const Lgraph* old_graph, Abc_Ntk_t* pNtk);
 
-  void gen_memory_from_abc(Lgraph *new_graph, const Lgraph *old_graph, Abc_Ntk_t *pNtk);
+  void gen_memory_from_abc(Lgraph* new_graph, const Lgraph* old_graph, Abc_Ntk_t* pNtk);
 
-  Node_pin create_pick_operator(Lgraph *g, const Node_pin &driver, int offset, int width);
+  Node_pin create_pick_operator(Lgraph* g, const Node_pin& driver, int offset, int width);
 
-  void connect_constant(Lgraph *g, uint32_t value, uint32_t size, const Node_pin &dst);
+  void connect_constant(Lgraph* g, uint32_t value, uint32_t size, const Node_pin& dst);
 
-  void conn_latch(Lgraph *new_graph, const Lgraph *old_graph, Abc_Ntk_t *pNtk);
+  void conn_latch(Lgraph* new_graph, const Lgraph* old_graph, Abc_Ntk_t* pNtk);
 
-  void conn_primary_output(Lgraph *new_graph, const Lgraph *old_graph, Abc_Ntk_t *pNtk);
+  void conn_primary_output(Lgraph* new_graph, const Lgraph* old_graph, Abc_Ntk_t* pNtk);
 
-  void conn_combinational_cell(Lgraph *new_graph, const Lgraph *old_graph, Abc_Ntk_t *pNtk);
+  void conn_combinational_cell(Lgraph* new_graph, const Lgraph* old_graph, Abc_Ntk_t* pNtk);
 
-  void gen_module(const Lgraph *g, std::ofstream &fs);
+  void gen_module(const Lgraph* g, std::ofstream& fs);
 
-  void gen_io_conn(const Lgraph *g, std::ofstream &fs);
+  void gen_io_conn(const Lgraph* g, std::ofstream& fs);
 
-  void gen_cell_conn(const Lgraph *g, std::ofstream &fs);
+  void gen_cell_conn(const Lgraph* g, std::ofstream& fs);
 
-  void gen_latch_conn(const Lgraph *g, std::ofstream &fs);
+  void gen_latch_conn(const Lgraph* g, std::ofstream& fs);
 
-  void write_src_info(const Lgraph *g, const Pass_abc::index_offset &inp, std::ofstream &fs);
+  void write_src_info(const Lgraph* g, const Pass_abc::index_offset& inp, std::ofstream& fs);
 
-  void gen_generic_lib(const std::string &buffer) const;
+  void gen_generic_lib(const std::string& buffer) const;
 };

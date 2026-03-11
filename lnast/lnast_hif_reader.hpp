@@ -69,7 +69,7 @@ protected:
       return;
     }
     auto           n = Lnast_node(Lnast_ntype(static_cast<Lnast_ntype::Lnast_ntype_int>(cur_stmt.type & 0x00FF)),
-                        State_token(0, pos1, pos2, 0, cur_stmt.instance, fname));
+                                  State_token(0, pos1, pos2, 0, cur_stmt.instance, fname));
     lh::Tree_index i;
     if (is_top) {
       lnast->set_root(n);

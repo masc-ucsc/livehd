@@ -10,8 +10,8 @@
 #include <unordered_map>
 #include <vector>
 
-#include "lgraph.hpp"
 #include "lgedgeiter.hpp"
+#include "lgraph.hpp"
 #include "upass_runner_common.hpp"
 #include "upass_shared.hpp"
 
@@ -27,7 +27,7 @@ struct Lgraph_pass_visit final : public upass::uPass_lgraph {
     }
 
     std::size_t visited = 0;
-    for (const auto &node : gm->ref_lgraph()->fast()) {
+    for (const auto& node : gm->ref_lgraph()->fast()) {
       std::print("uPass(lgraph) - visit {}\n", node.get_type_name());
       ++visited;
     }
@@ -70,7 +70,7 @@ struct Lgraph_pass_fold_tag final : public upass::uPass_lgraph {
 
 struct Lgraph_pass_fold_sum_const final : public upass::uPass_lgraph {
   using upass::uPass_lgraph::uPass_lgraph;
-  explicit Lgraph_pass_fold_sum_const(std::shared_ptr<upass::Lgraph_manager> &gm, bool _dry_run = false)
+  explicit Lgraph_pass_fold_sum_const(std::shared_ptr<upass::Lgraph_manager>& gm, bool _dry_run = false)
       : upass::uPass_lgraph(gm), dry_run(_dry_run) {}
 
   void run_once() override {
@@ -78,8 +78,8 @@ struct Lgraph_pass_fold_sum_const final : public upass::uPass_lgraph {
       std::print("uPass(lgraph) - no graph available\n");
       return;
     }
-    auto &      adapter = static_cast<upass::IR_adapter &>(*gm);
-    const auto  s       = upass::run_fold_sum_const_shared(adapter, "uPass(lgraph)", dry_run);
+    auto&      adapter = static_cast<upass::IR_adapter&>(*gm);
+    const auto s       = upass::run_fold_sum_const_shared(adapter, "uPass(lgraph)", dry_run);
     std::print("uPass(lgraph) - sum_const_folded:{} rewired:{} new_consts:{} deleted:{} dry_run:{}\n",
                s.folded_nodes,
                s.rewired_edges,
@@ -97,7 +97,7 @@ private:
 
 struct Lgraph_pass_fold_neutral final : public upass::uPass_lgraph {
   using upass::uPass_lgraph::uPass_lgraph;
-  explicit Lgraph_pass_fold_neutral(std::shared_ptr<upass::Lgraph_manager> &gm, bool _dry_run = false)
+  explicit Lgraph_pass_fold_neutral(std::shared_ptr<upass::Lgraph_manager>& gm, bool _dry_run = false)
       : upass::uPass_lgraph(gm), dry_run(_dry_run) {}
 
   void run_once() override {
@@ -105,17 +105,19 @@ struct Lgraph_pass_fold_neutral final : public upass::uPass_lgraph {
       std::print("uPass(lgraph) - no graph available\n");
       return;
     }
-    const auto s = gm->fold_neutral_const(false, dry_run);
+    const auto s     = gm->fold_neutral_const(false, dry_run);
     const auto total = s.simplified_to_driver + s.simplified_to_const_zero + s.simplified_to_const_one;
-    std::print("uPass(lgraph) - neutral_simplified:{} to_driver:{} to_const0:{} to_const1:{} rewired:{} new_consts:{} deleted:{} dry_run:{}\n",
-               total,
-               s.simplified_to_driver,
-               s.simplified_to_const_zero,
-               s.simplified_to_const_one,
-               s.rewired_edges,
-               s.new_const_nodes,
-               s.deleted_nodes,
-               dry_run ? "true" : "false");
+    std::print(
+        "uPass(lgraph) - neutral_simplified:{} to_driver:{} to_const0:{} to_const1:{} rewired:{} new_consts:{} deleted:{} "
+        "dry_run:{}\n",
+        total,
+        s.simplified_to_driver,
+        s.simplified_to_const_zero,
+        s.simplified_to_const_one,
+        s.rewired_edges,
+        s.new_const_nodes,
+        s.deleted_nodes,
+        dry_run ? "true" : "false");
     if (!dry_run && total > 0) {
       mark_changed();
     }
@@ -127,7 +129,7 @@ private:
 
 struct Lgraph_pass_fold_shift_div final : public upass::uPass_lgraph {
   using upass::uPass_lgraph::uPass_lgraph;
-  explicit Lgraph_pass_fold_shift_div(std::shared_ptr<upass::Lgraph_manager> &gm, bool _dry_run = false)
+  explicit Lgraph_pass_fold_shift_div(std::shared_ptr<upass::Lgraph_manager>& gm, bool _dry_run = false)
       : upass::uPass_lgraph(gm), dry_run(_dry_run) {}
 
   void run_once() override {
@@ -136,18 +138,20 @@ struct Lgraph_pass_fold_shift_div final : public upass::uPass_lgraph {
       return;
     }
     const auto s = gm->fold_shift_div_const(false, dry_run);
-    const auto total = s.simplified_to_driver + s.simplified_to_const_zero + s.simplified_to_const_one
-                       + s.simplified_to_const_other;
-    std::print("uPass(lgraph) - shiftdiv_simplified:{} to_driver:{} to_const0:{} to_const1:{} to_const_other:{} rewired:{} new_consts:{} deleted:{} dry_run:{}\n",
-               total,
-               s.simplified_to_driver,
-               s.simplified_to_const_zero,
-               s.simplified_to_const_one,
-               s.simplified_to_const_other,
-               s.rewired_edges,
-               s.new_const_nodes,
-               s.deleted_nodes,
-               dry_run ? "true" : "false");
+    const auto total
+        = s.simplified_to_driver + s.simplified_to_const_zero + s.simplified_to_const_one + s.simplified_to_const_other;
+    std::print(
+        "uPass(lgraph) - shiftdiv_simplified:{} to_driver:{} to_const0:{} to_const1:{} to_const_other:{} rewired:{} new_consts:{} "
+        "deleted:{} dry_run:{}\n",
+        total,
+        s.simplified_to_driver,
+        s.simplified_to_const_zero,
+        s.simplified_to_const_one,
+        s.simplified_to_const_other,
+        s.rewired_edges,
+        s.new_const_nodes,
+        s.deleted_nodes,
+        dry_run ? "true" : "false");
     if (!dry_run && total > 0) {
       mark_changed();
     }
@@ -159,7 +163,7 @@ private:
 
 struct Lgraph_pass_fold_sub_const final : public upass::uPass_lgraph {
   using upass::uPass_lgraph::uPass_lgraph;
-  explicit Lgraph_pass_fold_sub_const(std::shared_ptr<upass::Lgraph_manager> &gm, bool _dry_run = false)
+  explicit Lgraph_pass_fold_sub_const(std::shared_ptr<upass::Lgraph_manager>& gm, bool _dry_run = false)
       : upass::uPass_lgraph(gm), dry_run(_dry_run) {}
 
   void run_once() override {
@@ -190,7 +194,7 @@ private:
 
 struct Lgraph_pass_fold_mult_const final : public upass::uPass_lgraph {
   using upass::uPass_lgraph::uPass_lgraph;
-  explicit Lgraph_pass_fold_mult_const(std::shared_ptr<upass::Lgraph_manager> &gm, bool _dry_run = false)
+  explicit Lgraph_pass_fold_mult_const(std::shared_ptr<upass::Lgraph_manager>& gm, bool _dry_run = false)
       : upass::uPass_lgraph(gm), dry_run(_dry_run) {}
 
   void run_once() override {
@@ -199,13 +203,12 @@ struct Lgraph_pass_fold_mult_const final : public upass::uPass_lgraph {
       return;
     }
     const auto s = gm->fold_mult_const(false, dry_run);
-    std::print(
-        "uPass(lgraph) - mult_folded:{} rewired:{} new_consts:{} deleted:{} dry_run:{}\n",
-        s.const_mult_folded,
-        s.rewired_edges,
-        s.new_const_nodes,
-        s.deleted_nodes,
-        dry_run ? "true" : "false");
+    std::print("uPass(lgraph) - mult_folded:{} rewired:{} new_consts:{} deleted:{} dry_run:{}\n",
+               s.const_mult_folded,
+               s.rewired_edges,
+               s.new_const_nodes,
+               s.deleted_nodes,
+               dry_run ? "true" : "false");
     if (!dry_run && s.const_mult_folded > 0) {
       mark_changed();
     }
@@ -217,7 +220,7 @@ private:
 
 struct Lgraph_pass_dce final : public upass::uPass_lgraph {
   using upass::uPass_lgraph::uPass_lgraph;
-  explicit Lgraph_pass_dce(std::shared_ptr<upass::Lgraph_manager> &gm, bool _dry_run = false)
+  explicit Lgraph_pass_dce(std::shared_ptr<upass::Lgraph_manager>& gm, bool _dry_run = false)
       : upass::uPass_lgraph(gm), dry_run(_dry_run) {}
 
   void run_once() override {
@@ -226,11 +229,10 @@ struct Lgraph_pass_dce final : public upass::uPass_lgraph {
       return;
     }
     const auto s = gm->fold_dce(false, dry_run);
-    std::print(
-        "uPass(lgraph) - dce_removed:{} edges_freed:{} dry_run:{}\n",
-        s.dead_nodes_removed,
-        s.edges_freed,
-        dry_run ? "true" : "false");
+    std::print("uPass(lgraph) - dce_removed:{} edges_freed:{} dry_run:{}\n",
+               s.dead_nodes_removed,
+               s.edges_freed,
+               dry_run ? "true" : "false");
     if (!dry_run && s.dead_nodes_removed > 0) {
       mark_changed();
     }
@@ -284,50 +286,38 @@ struct Lgraph_pass_decide_shared final : public upass::uPass_lgraph {
 };
 
 static upass::uPass_lgraph_plugin plugin_lgraph_visit("visit", upass::uPass_lgraph_wrapper<Lgraph_pass_visit>::get_upass);
-static upass::uPass_lgraph_plugin plugin_lgraph_fold_scan(
-    "fold_scan",
-    upass::uPass_lgraph_wrapper<Lgraph_pass_fold_scan>::get_upass,
-    {"visit"});
-static upass::uPass_lgraph_plugin plugin_lgraph_fold_tag(
-    "fold_tag",
-    upass::uPass_lgraph_wrapper<Lgraph_pass_fold_tag>::get_upass,
-    {"fold_scan"});
-static upass::uPass_lgraph_plugin plugin_lgraph_fold_sum_const(
-    "fold_sum_const",
-    upass::uPass_lgraph_wrapper<Lgraph_pass_fold_sum_const>::get_upass,
-    {"fold_scan"});
-static upass::uPass_lgraph_plugin plugin_lgraph_fold_neutral(
-    "fold_neutral",
-    upass::uPass_lgraph_wrapper<Lgraph_pass_fold_neutral>::get_upass,
-    {"fold_scan"});
-static upass::uPass_lgraph_plugin plugin_lgraph_fold_shift_div(
-    "fold_shift_div",
-    upass::uPass_lgraph_wrapper<Lgraph_pass_fold_shift_div>::get_upass,
-    {"fold_scan"});
-static upass::uPass_lgraph_plugin plugin_lgraph_fold_sub_const(
-    "fold_sub_const",
-    upass::uPass_lgraph_wrapper<Lgraph_pass_fold_sub_const>::get_upass,
-    {"fold_scan"});
-static upass::uPass_lgraph_plugin plugin_lgraph_fold_mult_const(
-    "fold_mult_const",
-    upass::uPass_lgraph_wrapper<Lgraph_pass_fold_mult_const>::get_upass,
-    {"fold_scan"});
+static upass::uPass_lgraph_plugin plugin_lgraph_fold_scan("fold_scan",
+                                                          upass::uPass_lgraph_wrapper<Lgraph_pass_fold_scan>::get_upass, {"visit"});
+static upass::uPass_lgraph_plugin plugin_lgraph_fold_tag("fold_tag", upass::uPass_lgraph_wrapper<Lgraph_pass_fold_tag>::get_upass,
+                                                         {"fold_scan"});
+static upass::uPass_lgraph_plugin plugin_lgraph_fold_sum_const("fold_sum_const",
+                                                               upass::uPass_lgraph_wrapper<Lgraph_pass_fold_sum_const>::get_upass,
+                                                               {"fold_scan"});
+static upass::uPass_lgraph_plugin plugin_lgraph_fold_neutral("fold_neutral",
+                                                             upass::uPass_lgraph_wrapper<Lgraph_pass_fold_neutral>::get_upass,
+                                                             {"fold_scan"});
+static upass::uPass_lgraph_plugin plugin_lgraph_fold_shift_div("fold_shift_div",
+                                                               upass::uPass_lgraph_wrapper<Lgraph_pass_fold_shift_div>::get_upass,
+                                                               {"fold_scan"});
+static upass::uPass_lgraph_plugin plugin_lgraph_fold_sub_const("fold_sub_const",
+                                                               upass::uPass_lgraph_wrapper<Lgraph_pass_fold_sub_const>::get_upass,
+                                                               {"fold_scan"});
+static upass::uPass_lgraph_plugin plugin_lgraph_fold_mult_const("fold_mult_const",
+                                                                upass::uPass_lgraph_wrapper<Lgraph_pass_fold_mult_const>::get_upass,
+                                                                {"fold_scan"});
 static upass::uPass_lgraph_plugin plugin_lgraph_dce(
     "dce",
     upass::uPass_lgraph_wrapper<Lgraph_pass_dce>::get_upass);  // no deps — fully standalone
-static upass::uPass_lgraph_plugin plugin_lgraph_noop_shared(
-    "noop_shared",
-    upass::uPass_lgraph_wrapper<Lgraph_pass_noop_shared>::get_upass);
-static upass::uPass_lgraph_plugin plugin_lgraph_scan_shared(
-    "scan_shared",
-    upass::uPass_lgraph_wrapper<Lgraph_pass_scan_shared>::get_upass);
-static upass::uPass_lgraph_plugin plugin_lgraph_decide_shared(
-    "decide_shared",
-    upass::uPass_lgraph_wrapper<Lgraph_pass_decide_shared>::get_upass);
+static upass::uPass_lgraph_plugin plugin_lgraph_noop_shared("noop_shared",
+                                                            upass::uPass_lgraph_wrapper<Lgraph_pass_noop_shared>::get_upass);
+static upass::uPass_lgraph_plugin plugin_lgraph_scan_shared("scan_shared",
+                                                            upass::uPass_lgraph_wrapper<Lgraph_pass_scan_shared>::get_upass);
+static upass::uPass_lgraph_plugin plugin_lgraph_decide_shared("decide_shared",
+                                                              upass::uPass_lgraph_wrapper<Lgraph_pass_decide_shared>::get_upass);
 }  // namespace
 
-uPass_runner_lgraph::uPass_runner_lgraph(
-    std::shared_ptr<upass::Lgraph_manager> _gm, const std::vector<std::string> &upass_names, bool _dry_run)
+uPass_runner_lgraph::uPass_runner_lgraph(std::shared_ptr<upass::Lgraph_manager> _gm, const std::vector<std::string>& upass_names,
+                                         bool _dry_run)
     : gm(std::move(_gm)), dry_run(_dry_run) {
   auto requested = upass_names;
   if (requested.empty()) {
@@ -342,14 +332,14 @@ uPass_runner_lgraph::uPass_runner_lgraph(
   }
   if (!resolved.empty()) {
     std::print("uPass(lgraph) - resolved order:");
-    for (const auto &name : resolved) {
+    for (const auto& name : resolved) {
       std::print(" {}", name);
     }
     std::print("\n");
   }
 
-  const auto &registry = upass::uPass_lgraph_plugin::get_registry();
-  for (const auto &name : resolved) {
+  const auto& registry = upass::uPass_lgraph_plugin::get_registry();
+  for (const auto& name : resolved) {
     const auto it = registry.find(name);
     if (it == registry.end()) {
       std::print("{} is not defined.\n", name);
@@ -385,14 +375,15 @@ uPass_runner_lgraph::uPass_runner_lgraph(
   }
 }
 
-std::vector<std::string> uPass_runner_lgraph::resolve_order(const std::vector<std::string> &requested_names, std::string *error_msg) const {
-  const auto &registry = upass::uPass_lgraph_plugin::get_registry();
+std::vector<std::string> uPass_runner_lgraph::resolve_order(const std::vector<std::string>& requested_names,
+                                                            std::string*                    error_msg) const {
+  const auto& registry = upass::uPass_lgraph_plugin::get_registry();
 
   enum class Mark { kUnseen, kVisiting, kDone };
   std::unordered_map<std::string, Mark> marks;
   std::vector<std::string>              ordered;
 
-  std::function<bool(const std::string &)> dfs = [&](const std::string &name) {
+  std::function<bool(const std::string&)> dfs = [&](const std::string& name) {
     const auto it = registry.find(name);
     if (it == registry.end()) {
       std::print("{} is not defined.\n", name);
@@ -415,7 +406,7 @@ std::vector<std::string> uPass_runner_lgraph::resolve_order(const std::vector<st
     }
 
     marks.emplace(name, Mark::kVisiting);
-    for (const auto &dep : it->second.depends_on) {
+    for (const auto& dep : it->second.depends_on) {
       if (!dfs(dep)) {
         upass::error("uPass(lgraph) dependency chain for {} is invalid\n", name);
         if (error_msg && error_msg->empty()) {
@@ -430,7 +421,7 @@ std::vector<std::string> uPass_runner_lgraph::resolve_order(const std::vector<st
     return true;
   };
 
-  for (const auto &name : requested_names) {
+  for (const auto& name : requested_names) {
     dfs(name);
   }
 
@@ -439,7 +430,7 @@ std::vector<std::string> uPass_runner_lgraph::resolve_order(const std::vector<st
 
 std::vector<std::string> uPass_runner_lgraph::changed_passes() const {
   std::vector<std::string> changed;
-  for (const auto &entry : upasses) {
+  for (const auto& entry : upasses) {
     if (entry.pass->has_changed()) {
       changed.emplace_back(entry.name);
     }
@@ -450,12 +441,11 @@ std::vector<std::string> uPass_runner_lgraph::changed_passes() const {
 void uPass_runner_lgraph::execute_passes() {
   // fold_tag, fold_sum_const, and fold_mult_const are gated by the general
   // "all-inputs-const" scan (they only fire when every input is a constant).
-  auto is_general_guarded_fold = [](const std::string &name) {
-    return name == "fold_tag" || name == "fold_sum_const" || name == "fold_mult_const";
-  };
+  auto is_general_guarded_fold
+      = [](const std::string& name) { return name == "fold_tag" || name == "fold_sum_const" || name == "fold_mult_const"; };
 
   std::optional<upass::Shared_decision_report> decide_cache;
-  auto get_decision = [&]() -> upass::Shared_decision_report {
+  auto                                         get_decision = [&]() -> upass::Shared_decision_report {
     if (!decide_cache.has_value()) {
       if (!gm) {
         decide_cache = upass::Shared_decision_report{};
@@ -466,7 +456,7 @@ void uPass_runner_lgraph::execute_passes() {
     return *decide_cache;
   };
 
-  for (auto &entry : upasses) {
+  for (auto& entry : upasses) {
     if (entry.name == "decide_shared") {
       (void)get_decision();
       entry.pass->run_once();
@@ -514,14 +504,14 @@ void uPass_runner_lgraph::run(std::size_t max_iters) {
       "uPass(lgraph)",
       max_iters,
       [this]() {
-        for (auto &entry : upasses) {
+        for (auto& entry : upasses) {
           entry.pass->begin_iteration();
         }
       },
       [this]() {
         execute_passes();
         last_visited_count = collect_type_names().size();
-        last_scan_summary = gm->scan_fold_candidates();
+        last_scan_summary  = gm->scan_fold_candidates();
       },
       [this]() { return changed_passes(); });
 }
@@ -533,7 +523,7 @@ std::size_t uPass_runner_lgraph::visit_fast(bool visit_sub) const {
   }
 
   std::size_t visited = 0;
-  for (const auto &node : gm->ref_lgraph()->fast(visit_sub)) {
+  for (const auto& node : gm->ref_lgraph()->fast(visit_sub)) {
     std::print("uPass(lgraph) - visit {}\n", node.get_type_name());
     ++visited;
   }
@@ -547,7 +537,7 @@ std::vector<std::string> uPass_runner_lgraph::collect_type_names(bool visit_sub)
     return type_names;
   }
 
-  for (const auto &node : gm->ref_lgraph()->fast(visit_sub)) {
+  for (const auto& node : gm->ref_lgraph()->fast(visit_sub)) {
     type_names.emplace_back(node.get_type_name());
   }
 

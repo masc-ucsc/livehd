@@ -43,7 +43,7 @@ protected:
 
   // rules that produce an RHS expression
   Lnast_node eval_expression(lh::Tree_index idx_start_ast, lh::Tree_index idx_start_ln);
-  Lnast_node eval_tuple(const lh::Tree_index &idx_start_ast, const lh::Tree_index &idx_start_ln,
+  Lnast_node eval_tuple(const lh::Tree_index& idx_start_ast, const lh::Tree_index& idx_start_ln,
                         lh::Tree_index idx_pre_tuple_vals  = lh::Tree_index(-1, -1),
                         lh::Tree_index idx_post_tuple_vals = lh::Tree_index(-1, -1));
   Lnast_node eval_for_in_notation(lh::Tree_index idx_start_ast, lh::Tree_index idx_start_ln);
@@ -55,15 +55,15 @@ protected:
                                  lh::Tree_index idx_piped_val = lh::Tree_index(-1, -1), Lnast_node piped_node = Lnast_node(),
                                  Lnast_node name_node = Lnast_node());
   Lnast_node eval_tuple_dot_notation(lh::Tree_index idx_start_ast, lh::Tree_index idx_start_ln);
-  Lnast_node eval_bit_selection_notation(lh::Tree_index idx_start_ast, const Lnast_node &lhs_node);
+  Lnast_node eval_bit_selection_notation(lh::Tree_index idx_start_ast, const Lnast_node& lhs_node);
   Lnast_node eval_fluid_ref(lh::Tree_index idx_start_ast, lh::Tree_index idx_start_ln);
   Lnast_node eval_scope_declaration(lh::Tree_index idx_start_ast, lh::Tree_index idx_start_ln, Lnast_node name_node = Lnast_node());
   Lnast_node eval_sub_expression(lh::Tree_index idx_start_ast, Lnast_node operator_node);
 
-  void       add_tuple_nodes(lh::Tree_index idx_start_ln, std::vector<std::array<Lnast_node, 3>> &tuple_nodes);
-  Lnast_node evaluate_all_tuple_nodes(const lh::Tree_index &idx_start_ast, const lh::Tree_index &idx_start_ln);
+  void       add_tuple_nodes(lh::Tree_index idx_start_ln, std::vector<std::array<Lnast_node, 3>>& tuple_nodes);
+  Lnast_node evaluate_all_tuple_nodes(const lh::Tree_index& idx_start_ast, const lh::Tree_index& idx_start_ln);
 
-  Lnast_node        gen_operator(lh::Tree_index idx, uint8_t *skip_sibs);
+  Lnast_node        gen_operator(lh::Tree_index idx, uint8_t* skip_sibs);
   inline bool       is_expr(lh::Tree_index idx);
   inline bool       is_expr_with_operators(lh::Tree_index idx);
   inline uint8_t    maybe_child_expr(lh::Tree_index idx);

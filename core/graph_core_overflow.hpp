@@ -24,7 +24,7 @@ public:
       int64_t s    = other_id - self_id;
       bool    fits = s > std::numeric_limits<int16_t>::min() && s < std::numeric_limits<int16_t>::max();
       if (fits) {
-        for (auto &ent : sedge) {
+        for (auto& ent : sedge) {
           if (ent != 0) {
             continue;
           }
@@ -36,7 +36,7 @@ public:
         return false;
       }
     }
-    for (auto &ent : ledge) {
+    for (auto& ent : ledge) {
       if (ent != 0) {
         continue;
       }
@@ -52,7 +52,7 @@ public:
     int64_t s    = other_id - self_id;
     bool    fits = s > std::numeric_limits<int16_t>::min() && s < std::numeric_limits<int16_t>::max();
     if (fits) {
-      for (auto &ent : sedge) {
+      for (auto& ent : sedge) {
         if (ent != static_cast<int16_t>(s)) {
           continue;
         }
@@ -62,7 +62,7 @@ public:
         return true;
       }
     }
-    for (auto &ent : ledge) {
+    for (auto& ent : ledge) {
       if (ent != other_id) {
         continue;
       }
@@ -96,7 +96,7 @@ public:
       return *lit;
     }
 
-    iterator &operator++() {
+    iterator& operator++() {
       while (sit != sit_end) {
         ++sit;
         if (*sit != 0) {
@@ -119,8 +119,8 @@ public:
       return tmp;
     }
 
-    [[nodiscard]] bool operator==(const iterator &rhs) const { return sit == rhs.sit && lit == rhs.lit; }
-    [[nodiscard]] bool operator!=(const iterator &rhs) const { return !(*this == rhs); }
+    [[nodiscard]] bool operator==(const iterator& rhs) const { return sit == rhs.sit && lit == rhs.lit; }
+    [[nodiscard]] bool operator!=(const iterator& rhs) const { return !(*this == rhs); }
 
     [[nodiscard]] sit_type get_sit() const { return sit; }
     [[nodiscard]] lit_type get_lit() const { return lit; }

@@ -46,13 +46,13 @@
 #define INESC        ((vt)->state)
 
 #define COMMON_VARS           \
-  TMTSCREEN *s = &vt->screen; \
-  TMTPOINT  *c = &vt->curs;   \
-  TMTLINE   *l = CLINE(vt);   \
-  TMTCHAR   *t = vt->tabs->chars
+  TMTSCREEN* s = &vt->screen; \
+  TMTPOINT*  c = &vt->curs;   \
+  TMTLINE*   l = CLINE(vt);   \
+  TMTCHAR*   t = vt->tabs->chars
 
 #define HANDLER(name)         \
-  static void name(TMT *vt) { \
+  static void name(TMT* vt) { \
     COMMON_VARS;
 
 enum State { S_NUL, S_ESC, S_ARG };
@@ -63,11 +63,11 @@ struct TMT {
 
   bool      dirty, acs, ignored;
   TMTSCREEN screen;
-  TMTLINE  *tabs;
+  TMTLINE*  tabs;
 
   TMTCALLBACK    cb;
-  void          *p;
-  const wchar_t *acschars;
+  void*          p;
+  const wchar_t* acschars;
 
   mbstate_t ms;
   size_t    nmb;
@@ -80,9 +80,9 @@ struct TMT {
 };
 
 static TMTATTRS defattrs = {false, false, false, false, false, false, TMT_COLOR_DEFAULT, TMT_COLOR_DEFAULT};
-static void     writecharatcurs(TMT *vt, wchar_t w);
+static void     writecharatcurs(TMT* vt, wchar_t w);
 
-static wchar_t tacs(const TMT *vt, unsigned char c) {
+static wchar_t tacs(const TMT* vt, unsigned char c) {
   /* The terminfo alternate character set for ANSI. */
   static unsigned char map[]
       = {0020U, 0021U, 0030U, 0031U, 0333U, 0004U, 0261U, 0370U, 0361U, 0260U, 0331U, 0277U, 0332U, 0300U, 0305U, 0176U,
@@ -95,14 +95,14 @@ static wchar_t tacs(const TMT *vt, unsigned char c) {
   return (wchar_t)c;
 }
 
-static void dirtylines(TMT *vt, size_t s, size_t e) {
+static void dirtylines(TMT* vt, size_t s, size_t e) {
   vt->dirty = true;
   for (size_t i = s; i < e; i++) {
     vt->screen.lines[i]->dirty = true;
   }
 }
 
-static void clearline(TMT *vt, TMTLINE *l, size_t s, size_t e) {
+static void clearline(TMT* vt, TMTLINE* l, size_t s, size_t e) {
   vt->dirty = l->dirty = true;
   for (size_t i = s; i < e && i < vt->screen.ncol; i++) {
     l->chars[i].a = defattrs;
@@ -110,36 +110,36 @@ static void clearline(TMT *vt, TMTLINE *l, size_t s, size_t e) {
   }
 }
 
-static void clearlines(TMT *vt, size_t r, size_t n) {
+static void clearlines(TMT* vt, size_t r, size_t n) {
   for (size_t i = r; i < r + n && i < vt->screen.nline; i++) {
     clearline(vt, vt->screen.lines[i], 0, vt->screen.ncol);
   }
 }
 
-static void scrup(TMT *vt, size_t r, size_t n) {
+static void scrup(TMT* vt, size_t r, size_t n) {
   n = MIN(n, vt->screen.nline - 1 - r);
 
   if (n) {
-    TMTLINE *buf = (TMTLINE *)alloca(sizeof(TMTLINE) * n);
+    TMTLINE* buf = (TMTLINE*)alloca(sizeof(TMTLINE) * n);
 
-    memcpy(buf, vt->screen.lines + r, n * sizeof(TMTLINE *));
-    memmove(vt->screen.lines + r, vt->screen.lines + r + n, (vt->screen.nline - n - r) * sizeof(TMTLINE *));
-    memcpy(vt->screen.lines + (vt->screen.nline - n), buf, n * sizeof(TMTLINE *));
+    memcpy(buf, vt->screen.lines + r, n * sizeof(TMTLINE*));
+    memmove(vt->screen.lines + r, vt->screen.lines + r + n, (vt->screen.nline - n - r) * sizeof(TMTLINE*));
+    memcpy(vt->screen.lines + (vt->screen.nline - n), buf, n * sizeof(TMTLINE*));
 
     clearlines(vt, vt->screen.nline - n, n);
     dirtylines(vt, r, vt->screen.nline);
   }
 }
 
-static void scrdn(TMT *vt, size_t r, size_t n) {
+static void scrdn(TMT* vt, size_t r, size_t n) {
   n = MIN(n, vt->screen.nline - 1 - r);
 
   if (n) {
-    TMTLINE *buf = (TMTLINE *)alloca(sizeof(TMTLINE) * n);
+    TMTLINE* buf = (TMTLINE*)alloca(sizeof(TMTLINE) * n);
 
-    memcpy(buf, vt->screen.lines + (vt->screen.nline - n), n * sizeof(TMTLINE *));
-    memmove(vt->screen.lines + r + n, vt->screen.lines + r, (vt->screen.nline - n - r) * sizeof(TMTLINE *));
-    memcpy(vt->screen.lines + r, buf, n * sizeof(TMTLINE *));
+    memcpy(buf, vt->screen.lines + (vt->screen.nline - n), n * sizeof(TMTLINE*));
+    memmove(vt->screen.lines + r + n, vt->screen.lines + r, (vt->screen.nline - n - r) * sizeof(TMTLINE*));
+    memcpy(vt->screen.lines + r, buf, n * sizeof(TMTLINE*));
 
     clearlines(vt, r, n);
     dirtylines(vt, r, vt->screen.nline);
@@ -275,7 +275,7 @@ HANDLER(dsr)
 
 char r[BUF_MAX + 1] = {0};
 snprintf(r, BUF_MAX, "\033[%zd;%zdR", c->r + 1, c->c + 1);
-CB(vt, TMT_MSG_ANSWER, (const char *)r);
+CB(vt, TMT_MSG_ANSWER, (const char*)r);
 }
 
 HANDLER(resetparser)
@@ -318,7 +318,7 @@ c->c = MIN(c->c, s->ncol - 1);
   }
 #define DO(S, C, A) ON(S, C, consumearg(vt); if (!vt->ignored) { A; } fixcursor(vt); resetparser(vt););
 
-static bool handlechar(TMT *vt, char i) {
+static bool handlechar(TMT* vt, char i) {
   COMMON_VARS;
 
   char cs[] = {i, 0};
@@ -374,7 +374,7 @@ static bool handlechar(TMT *vt, char i) {
   return resetparser(vt), false;
 }
 
-static void notify(TMT *vt, bool update, bool moved) {
+static void notify(TMT* vt, bool update, bool moved) {
   if (update) {
     CB(vt, TMT_MSG_UPDATE, &vt->screen);
   }
@@ -383,8 +383,8 @@ static void notify(TMT *vt, bool update, bool moved) {
   }
 }
 
-static TMTLINE *allocline(TMT *vt, TMTLINE *o, size_t n, size_t pc) {
-  TMTLINE *l = (TMTLINE *)realloc(o, sizeof(TMTLINE) + n * sizeof(TMTCHAR));
+static TMTLINE* allocline(TMT* vt, TMTLINE* o, size_t n, size_t pc) {
+  TMTLINE* l = (TMTLINE*)realloc(o, sizeof(TMTLINE) + n * sizeof(TMTCHAR));
   if (!l) {
     return NULL;
   }
@@ -393,7 +393,7 @@ static TMTLINE *allocline(TMT *vt, TMTLINE *o, size_t n, size_t pc) {
   return l;
 }
 
-static void freelines(TMT *vt, size_t s, size_t n, bool screen) {
+static void freelines(TMT* vt, size_t s, size_t n, bool screen) {
   for (size_t i = s; vt->screen.lines && i < s + n; i++) {
     free(vt->screen.lines[i]);
     vt->screen.lines[i] = NULL;
@@ -403,8 +403,8 @@ static void freelines(TMT *vt, size_t s, size_t n, bool screen) {
   }
 }
 
-TMT *tmt_open(size_t nline, size_t ncol, TMTCALLBACK cb, void *p, const wchar_t *acs) {
-  TMT *vt = (TMT *)calloc(1, sizeof(TMT));
+TMT* tmt_open(size_t nline, size_t ncol, TMTCALLBACK cb, void* p, const wchar_t* acs) {
+  TMT* vt = (TMT*)calloc(1, sizeof(TMT));
   if (!nline || !ncol || !vt) {
     free(vt);
     return NULL;
@@ -422,13 +422,13 @@ TMT *tmt_open(size_t nline, size_t ncol, TMTCALLBACK cb, void *p, const wchar_t 
   return vt;
 }
 
-void tmt_close(TMT *vt) {
+void tmt_close(TMT* vt) {
   free(vt->tabs);
   freelines(vt, 0, vt->screen.nline, true);
   free(vt);
 }
 
-bool tmt_resize(TMT *vt, size_t nline, size_t ncol) {
+bool tmt_resize(TMT* vt, size_t nline, size_t ncol) {
   if (nline < 2 || ncol < 2) {
     return false;
   }
@@ -436,7 +436,7 @@ bool tmt_resize(TMT *vt, size_t nline, size_t ncol) {
     freelines(vt, nline, vt->screen.nline - nline, false);
   }
 
-  TMTLINE **l = (TMTLINE **)realloc(vt->screen.lines, nline * sizeof(TMTLINE *));
+  TMTLINE** l = (TMTLINE**)realloc(vt->screen.lines, nline * sizeof(TMTLINE*));
   if (!l) {
     return false;
   }
@@ -445,7 +445,7 @@ bool tmt_resize(TMT *vt, size_t nline, size_t ncol) {
   vt->screen.lines = l;
   vt->screen.ncol  = ncol;
   for (size_t i = 0; i < nline; i++) {
-    TMTLINE *nl = NULL;
+    TMTLINE* nl = NULL;
     if (i >= vt->screen.nline) {
       nl = vt->screen.lines[i] = allocline(vt, NULL, ncol, 0);
     } else {
@@ -476,7 +476,7 @@ bool tmt_resize(TMT *vt, size_t nline, size_t ncol) {
   return true;
 }
 
-static void writecharatcurs(TMT *vt, wchar_t w) {
+static void writecharatcurs(TMT* vt, wchar_t w) {
   COMMON_VARS;
   (void)l;
   (void)t;
@@ -508,19 +508,19 @@ static void writecharatcurs(TMT *vt, wchar_t w) {
   }
 }
 
-static inline size_t testmbchar(TMT *vt) {
+static inline size_t testmbchar(TMT* vt) {
   mbstate_t ts = vt->ms;
   return vt->nmb ? mbrtowc(NULL, vt->mb, vt->nmb, &ts) : (size_t)-2;
 }
 
-static inline wchar_t getmbchar(TMT *vt) {
+static inline wchar_t getmbchar(TMT* vt) {
   wchar_t c = 0;
   size_t  n = mbrtowc(&c, vt->mb, vt->nmb, &vt->ms);
   vt->nmb   = 0;
   return (n == (size_t)-1 || n == (size_t)-2) ? TMT_INVALID_CHAR : c;
 }
 
-void tmt_write(TMT *vt, const char *s, size_t n) {
+void tmt_write(TMT* vt, const char* s, size_t n) {
   TMTPOINT oc = vt->curs;
   n           = n ? n : strlen(s);
 
@@ -546,17 +546,17 @@ void tmt_write(TMT *vt, const char *s, size_t n) {
   notify(vt, vt->dirty, memcmp(&oc, &vt->curs, sizeof(oc)) != 0);
 }
 
-const TMTSCREEN *tmt_screen(const TMT *vt) { return &vt->screen; }
+const TMTSCREEN* tmt_screen(const TMT* vt) { return &vt->screen; }
 
-const TMTPOINT *tmt_cursor(const TMT *vt) { return &vt->curs; }
+const TMTPOINT* tmt_cursor(const TMT* vt) { return &vt->curs; }
 
-void tmt_clean(TMT *vt) {
+void tmt_clean(TMT* vt) {
   for (size_t i = 0; i < vt->screen.nline; i++) {
     vt->dirty = vt->screen.lines[i]->dirty = false;
   }
 }
 
-void tmt_reset(TMT *vt) {
+void tmt_reset(TMT* vt) {
   vt->curs.r = vt->curs.c = vt->oldcurs.r = vt->oldcurs.c = vt->acs = (bool)0;
   resetparser(vt);
   vt->attrs = vt->oldattrs = defattrs;

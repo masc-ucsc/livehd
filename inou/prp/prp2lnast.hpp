@@ -13,7 +13,7 @@ class Prp2lnast {
 protected:
   // TS Parsing
   std::string prp_file;
-  TSParser   *parser;
+  TSParser*   parser;
   TSNode      ts_root_node;
 
   // AST States
@@ -151,13 +151,13 @@ protected:
   std::string str(Expression_state);
 
   // TS API Helpers
-  std::string_view get_text(const TSNode &node) const;
-  inline TSNode    get_child(const TSNode &, const char *) const;
-  inline TSNode    get_child(const TSNode &, unsigned int) const;
-  inline TSNode    get_child(const TSNode &) const;
-  inline TSNode    get_sibling(const TSNode &) const;
-  inline TSNode    get_named_child(const TSNode &) const;
-  inline TSNode    get_named_sibling(const TSNode &) const;
+  std::string_view get_text(const TSNode& node) const;
+  inline TSNode    get_child(const TSNode&, const char*) const;
+  inline TSNode    get_child(const TSNode&, unsigned int) const;
+  inline TSNode    get_child(const TSNode&) const;
+  inline TSNode    get_sibling(const TSNode&) const;
+  inline TSNode    get_named_child(const TSNode&) const;
+  inline TSNode    get_named_sibling(const TSNode&) const;
 
 public:
   Prp2lnast(std::string_view filename, std::string_view module_name, bool parse_only);
@@ -166,6 +166,6 @@ public:
 
   std::unique_ptr<Lnast> get_lnast() { return std::move(lnast); }
   void                   dump_tree_sitter() const;
-  void                   dump_tree_sitter(TSTreeCursor *tc, int level) const;
+  void                   dump_tree_sitter(TSTreeCursor* tc, int level) const;
   void                   dump() const;
 };

@@ -8,7 +8,7 @@
 #include "lgraph.hpp"
 #include "pass/fluid/pass_fluid.hpp"
 
-int main(int argc, const char **argv) {
+int main(int argc, const char** argv) {
   LGBench b;
 
   Options::setup(argc, argv);
@@ -18,7 +18,7 @@ int main(int argc, const char **argv) {
 
   Options::setup_lock();
 
-  std::vector<Lgraph *> lgs = inou.generate();
+  std::vector<Lgraph*> lgs = inou.generate();
   b.sample("setup");
 
   for (auto g : lgs) {

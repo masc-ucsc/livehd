@@ -9,8 +9,8 @@
 
 class Invariant_finder {
 private:
-  Lgraph              *elab_graph;
-  Lgraph              *synth_graph;
+  Lgraph*              elab_graph;
+  Lgraph*              synth_graph;
   Invariant_boundaries boundaries;
 
   bool          processed;
@@ -32,22 +32,22 @@ private:
   void find_invariant_boundaries();
 
   void propagate_until_boundary(Index_id nid, uint32_t bit_selection);
-  void clear_cache(const Node_bit &entry);
+  void clear_cache(const Node_bit& entry);
 
 public:
-  Invariant_finder(Lgraph *elab, Lgraph *synth, const std::string &hier_sep = ".") : boundaries(hier_sep) {
+  Invariant_finder(Lgraph* elab, Lgraph* synth, const std::string& hier_sep = ".") : boundaries(hier_sep) {
     processed   = false;
     elab_graph  = elab;
     synth_graph = synth;
   }
 
-  Invariant_finder(const Invariant_find_options &pack) : boundaries(pack.hierarchical_separator) {
+  Invariant_finder(const Invariant_find_options& pack) : boundaries(pack.hierarchical_separator) {
     processed   = false;
     elab_graph  = Lgraph_open(pack.elab_lgdb, pack.top);
     synth_graph = Lgraph_open(pack.synth_lgdb, pack.top);
   }
 
-  const Invariant_boundaries &get_boundaries() {
+  const Invariant_boundaries& get_boundaries() {
     if (!processed) {
       find_invariant_boundaries();
     }

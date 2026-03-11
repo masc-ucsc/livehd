@@ -35,7 +35,7 @@ std::string Lnast_create::get_lnast_name(std::string_view vname, bool last_value
 }
 
 std::string_view Lnast_create::get_lnast_lhs_name(std::string_view vname) {
-  const auto &it = vname2lname.find(vname);
+  const auto& it = vname2lname.find(vname);
   if (it == vname2lname.end()) {
     // vname2lname.emplace(vname,vname);
     return vname;
@@ -242,7 +242,7 @@ std::string Lnast_create::create_bit_and_stmts(std::string_view a_var, std::stri
   return res_var;
 }
 
-std::string Lnast_create::create_bit_or_stmts(const std::vector<std::string> &var) {
+std::string Lnast_create::create_bit_or_stmts(const std::vector<std::string>& var) {
   std::string res_var;
   Lnast_nid   lid;
 
@@ -378,7 +378,7 @@ void Lnast_create::create_assign_stmts(std::string_view lhs_var, std::string_vie
 
       std::string io_declare;
 
-      for (const auto &f : absl::StrSplit(lhs_var, '.')) {
+      for (const auto& f : absl::StrSplit(lhs_var, '.')) {
         if (f == "$" || f == "%") {
           io_declare = f;
           continue;
@@ -422,7 +422,7 @@ void Lnast_create::create_declare_bits_stmts(std::string_view a_var, bool is_sig
   bool        first = true;
   std::string io_declare;
 
-  for (const auto &f : absl::StrSplit(a_var, '.')) {
+  for (const auto& f : absl::StrSplit(a_var, '.')) {
     if (first) {
       first = false;
       if (f == "$" || f == "%") {
@@ -460,13 +460,13 @@ void Lnast_create::create_func_call(std::string_view out_tup, std::string_view f
   lnast->add_child(idx_dot, Lnast_node::create_ref(inp_tup));
 }
 
-void Lnast_create::create_named_tuple(std::string_view lhs_var, const std::vector<std::pair<std::string, std::string>> &rhs) {
+void Lnast_create::create_named_tuple(std::string_view lhs_var, const std::vector<std::pair<std::string, std::string>>& rhs) {
 #ifdef LNASTOP_DONE
   auto idx_dot = lnast->add_child(idx_stmts, Lnast_node::create_tuple_add());
 
   lnast->add_child(idx_dot, Lnast_node::create_ref(lhs_var));
 
-  for (const auto &it : rhs) {
+  for (const auto& it : rhs) {
     auto idx_assign = lnast->add_child(idx_dot, Lnast_node::create_assign());
     lnast->add_child(idx_assign, Lnast_node::create_ref(it.first));
     if (str_tools::is_string(it.second)) {
@@ -479,7 +479,7 @@ void Lnast_create::create_named_tuple(std::string_view lhs_var, const std::vecto
 
   std::vector<std::pair<std::string, std::string>> tup_expanded_rhs;
 
-  for (const auto &it : rhs) {
+  for (const auto& it : rhs) {
     if (!str_tools::is_string(it.second) || Bundle::is_single_level(it.second)) {
       tup_expanded_rhs.emplace_back(std::make_pair(it.first, it.second));
       continue;
@@ -492,7 +492,7 @@ void Lnast_create::create_named_tuple(std::string_view lhs_var, const std::vecto
 
   lnast->add_child(idx_dot, Lnast_node::create_ref(lhs_var));
 
-  for (const auto &it : tup_expanded_rhs) {
+  for (const auto& it : tup_expanded_rhs) {
     auto idx_assign = lnast->add_child(idx_dot, Lnast_node::create_assign());
     lnast->add_child(idx_assign, Lnast_node::create_ref(it.first));
     if (str_tools::is_string(it.second)) {
@@ -534,7 +534,7 @@ std::string Lnast_create::create_tuple_get(std::string_view var) {
   lnast->add_child(idx_dot, Lnast_node::create_ref(res_var));
   bool first = true;
 
-  for (const auto &f : absl::StrSplit(var, '.')) {
+  for (const auto& f : absl::StrSplit(var, '.')) {
     if (first) {
       first = false;
       lnast->add_child(idx_dot, Lnast_node::create_ref(f));
@@ -557,7 +557,7 @@ std::string Lnast_create::create_tuple_get(std::string_view tup_var, std::string
 #ifdef LNASTOP_DONE
   lnast->add_child(idx_dot, Lnast_node::create_const(field_var));
 #else
-  for (const auto &f : absl::StrSplit(field_var, '.')) {
+  for (const auto& f : absl::StrSplit(field_var, '.')) {
     lnast->add_child(idx_dot, Lnast_node::create_const(f));
   }
 #endif

@@ -10,11 +10,11 @@ private:
   bool verbose;
 
 protected:
-  static void from(Eprp_var &var);
-  static void hierarchy(Eprp_var &var);
+  static void from(Eprp_var& var);
+  static void hierarchy(Eprp_var& var);
 
 public:
-  Inou_graphviz(const Eprp_var &var);
+  Inou_graphviz(const Eprp_var& var);
 
   static void setup();
 };

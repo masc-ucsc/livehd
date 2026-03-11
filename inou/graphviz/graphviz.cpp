@@ -17,7 +17,7 @@ Graphviz::Graphviz(bool _bits, bool _verbose, std::string_view _odir) : verbose(
   (void)_bits;
 }
 
-void Graphviz::save_graph(std::string_view name, std::string_view dot_postfix, const std::string &data) {
+void Graphviz::save_graph(std::string_view name, std::string_view dot_postfix, const std::string& data) {
   auto file = absl::StrCat(odir, "/", name);
 
   if (dot_postfix == "") {
@@ -40,7 +40,7 @@ void Graphviz::save_graph(std::string_view name, std::string_view dot_postfix, c
   close(fd);
 }
 
-void Graphviz::populate_lg_handle_xedge(const Node &node, const XEdge &out, std::string &data, bool verbose) {
+void Graphviz::populate_lg_handle_xedge(const Node& node, const XEdge& out, std::string& data, bool verbose) {
   std::string dp_pid, sp_pid;
   if (verbose) {
     dp_pid = graphviz_legalize_name(out.driver.get_pin_name());
@@ -107,14 +107,14 @@ std::string Graphviz::graphviz_legalize_name(std::string_view name) {
   return legal;
 }
 
-void Graphviz::do_hierarchy(Lgraph *lg) {
+void Graphviz::do_hierarchy(Lgraph* lg) {
   // include a font name to get graph to render properly with kgraphviewer
   std::string data = "digraph {\n node [fontname = \"Source Code Pro\"];\n";
 
   // WARNING: string_view is fine because lgraph keep the std::string and it is unique per lgraph
   absl::flat_hash_set<std::pair<std::string_view, std::string_view>> added;
 
-  lg->each_hier_unique_sub_bottom_up([&added, &data](Lgraph *g) {
+  lg->each_hier_unique_sub_bottom_up([&added, &data](Lgraph* g) {
     std::print("visiting node:{}\n", g->get_name());
 
     Node h_inp(g, Hierarchy::hierarchical_root(), Hardcoded_input_nid);
@@ -159,7 +159,7 @@ void Graphviz::do_hierarchy(Lgraph *lg) {
   save_graph(lg->get_name(), ".hier", data);
 }
 
-void Graphviz::create_color_map(Lgraph *lg) {
+void Graphviz::create_color_map(Lgraph* lg) {
   absl::flat_hash_map<int, size_t> color2id;
 
   for (auto node : lg->fast()) {
@@ -220,12 +220,12 @@ void Graphviz::create_color_map(Lgraph *lg) {
   save_graph(lg->get_name(), "color_map", data);
 }
 
-void Graphviz::do_from_lgraph(Lgraph *lg_parent, std::string_view dot_postfix) {
+void Graphviz::do_from_lgraph(Lgraph* lg_parent, std::string_view dot_postfix) {
   create_color_map(lg_parent);
 
   populate_lg_data(lg_parent, dot_postfix);
 
-  lg_parent->each_local_sub_fast([&, this](Node &node, Lg_type_id lgid) {
+  lg_parent->each_local_sub_fast([&, this](Node& node, Lg_type_id lgid) {
     // no need to populate firrtl_op_subgraph, it's just tmap cells.
     if (node.get_type_sub_node().get_name().substr(0, 5) == "__fir") {
       return;
@@ -233,14 +233,14 @@ void Graphviz::do_from_lgraph(Lgraph *lg_parent, std::string_view dot_postfix) {
 
     (void)node;
     std::print("subgraph lgid:{}\n", lgid);
-    Lgraph *lg_child = lg_parent->ref_library()->open_lgraph(lgid);
+    Lgraph* lg_child = lg_parent->ref_library()->open_lgraph(lgid);
     if (lg_child) {
       populate_lg_data(lg_child, dot_postfix);
     }
   });
 }
 
-void Graphviz::populate_lg_data(Lgraph *g, std::string_view dot_postfix) {
+void Graphviz::populate_lg_data(Lgraph* g, std::string_view dot_postfix) {
   std::string data = "digraph {\n";
 
   for (auto node : g->fast(false)) {
@@ -270,26 +270,26 @@ void Graphviz::populate_lg_data(Lgraph *g, std::string_view dot_postfix) {
       data += std::format(" {} [ {} label = <{}> ];\n", gv_name, color, node_info);
     }
 
-    for (const auto &out : node.out_edges()) {
+    for (const auto& out : node.out_edges()) {
       populate_lg_handle_xedge(node, out, data, verbose);
     }
   }
 
-  g->each_graph_input([&](const Node_pin &pin) {
+  g->each_graph_input([&](const Node_pin& pin) {
     auto io_name = graphviz_legalize_name(pin.get_pin_name());
     data += std::format(" {} [ label = <{}> ];\n", io_name, io_name);  // pin.debug_name());
 
-    for (const auto &out : pin.out_edges()) {
+    for (const auto& out : pin.out_edges()) {
       populate_lg_handle_xedge(pin.get_node(), out, data, verbose);
     }
   });
 
   // we need this to show outputs bits in graphviz
-  g->each_graph_output([&](const Node_pin &pin) {
+  g->each_graph_output([&](const Node_pin& pin) {
     std::string_view dst_str = "virtual_dst_module";
     auto             dbits   = pin.get_bits();
     data += std::format(" {} -> {} [ label = <{}b> ];\n", graphviz_legalize_name(pin.get_name()), dst_str, dbits);
-    for (const auto &out : pin.out_edges()) {
+    for (const auto& out : pin.out_edges()) {
       populate_lg_handle_xedge(pin.get_node(), out, data, verbose);
     }
   });
@@ -299,10 +299,10 @@ void Graphviz::populate_lg_data(Lgraph *g, std::string_view dot_postfix) {
   save_graph(g->get_name(), dot_postfix, data);
 }
 
-void Graphviz::do_from_lnast(const std::shared_ptr<Lnast> &lnast, std::string_view dot_postfix) {
+void Graphviz::do_from_lnast(const std::shared_ptr<Lnast>& lnast, std::string_view dot_postfix) {
   std::string data = "digraph {\n";
 
-  for (const auto &itr : lnast->depth_preorder()) {
+  for (const auto& itr : lnast->depth_preorder()) {
     auto node_data = lnast->get_data(itr);
 
     auto subs = node_data.subs;

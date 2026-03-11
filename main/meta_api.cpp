@@ -13,19 +13,19 @@
 #include "main_api.hpp"
 #include "thread_pool.hpp"
 
-void Meta_api::open(Eprp_var &var) {
+void Meta_api::open(Eprp_var& var) {
   auto path = var.get("path");
   auto name = var.get("name");
   auto hier = var.get("hier");
   assert(!name.empty());
 
-  auto *lib = Graph_library::instance(path);
+  auto* lib = Graph_library::instance(path);
   if (lib == nullptr) {
     Main_api::error("could not open graph library path {}", path);
     return;
   }
 
-  Lgraph *lg = lib->open_lgraph(name);
+  Lgraph* lg = lib->open_lgraph(name);
 
   if (lg == nullptr) {
     Main_api::warn("lgraph.open could not find {} lgraph in {} path", name, path);
@@ -34,23 +34,23 @@ void Meta_api::open(Eprp_var &var) {
       Main_api::warn("lgraph.open lgraph {} is empty!", name);
     }
     if (hier != "false" && hier != "0") {
-      lg->each_hier_unique_sub_bottom_up([&var](Lgraph *g) { var.add(g); });
+      lg->each_hier_unique_sub_bottom_up([&var](Lgraph* g) { var.add(g); });
     }
     var.add(lg);
   }
 }
 
-void Meta_api::save(Eprp_var &var) {
+void Meta_api::save(Eprp_var& var) {
   auto hier = var.get("hier");
 
-  absl::flat_hash_set<Lgraph *> saved;
+  absl::flat_hash_set<Lgraph*> saved;
 
-  for (Lgraph *lg : var.lgs) {
+  for (Lgraph* lg : var.lgs) {
     if (lg->is_empty()) {
       file_utils::clean_dir(lg->get_save_filename());
     } else {
       if (hier != "false" && hier != "0") {
-        lg->each_hier_unique_sub_bottom_up([&saved](Lgraph *g) {
+        lg->each_hier_unique_sub_bottom_up([&saved](Lgraph* g) {
           if (saved.insert(g).second) {
             thread_pool.add([g]() -> void { g->save(); });
           }
@@ -66,17 +66,17 @@ void Meta_api::save(Eprp_var &var) {
   Graph_library::sync_all();  // nice but not needed
 }
 
-void Meta_api::create(Eprp_var &var) {
+void Meta_api::create(Eprp_var& var) {
   auto path = var.get("path");
   auto name = var.get("name");
   assert(!name.empty());
 
-  auto *lib = Graph_library::instance(path);
+  auto* lib = Graph_library::instance(path);
   if (lib == nullptr) {
     Main_api::error("lgraph.create could not graph_library in {} path", path);
     return;
   }
-  Lgraph *lg = lib->open_lgraph(name);
+  Lgraph* lg = lib->open_lgraph(name);
   if (lg == nullptr) {
     Main_api::error("lgraph.create could not open {} lgraph in {} path", name, path);
     return;
@@ -85,44 +85,44 @@ void Meta_api::create(Eprp_var &var) {
   var.add(lg);
 }
 
-void Meta_api::rename(Eprp_var &var) {
+void Meta_api::rename(Eprp_var& var) {
   auto path = var.get("path");
   auto name = var.get("name");
   auto dest = var.get("dest");
   assert(!name.empty());
 
-  auto *glibrary = Graph_library::instance(path);
+  auto* glibrary = Graph_library::instance(path);
   glibrary->rename_name(name, dest);
 }
 
-void Meta_api::copy(Eprp_var &var) {
+void Meta_api::copy(Eprp_var& var) {
   auto path = var.get("path");
   auto name = var.get("name");
   auto dest = var.get("dest");
   assert(!name.empty());
 
-  auto *glibrary = Graph_library::instance(path);
+  auto* glibrary = Graph_library::instance(path);
 
   glibrary->copy_lgraph(name, dest);
 }
 
-void Meta_api::match(Eprp_var &var) {
+void Meta_api::match(Eprp_var& var) {
   auto path  = var.get("path");
   auto match = var.get("match");
 
-  auto *library = Graph_library::instance(path);
+  auto* library = Graph_library::instance(path);
   if (library == nullptr) {
     Main_api::warn("lgraph.match could not open {} path", path);
     return;
   }
 
-  std::vector<Lgraph *> lgs;
+  std::vector<Lgraph*> lgs;
 
   try {
     library->each_sub(match, [&lgs, library](Lg_type_id lgid, std::string_view name) {
       (void)lgid;
 
-      auto *lg = library->open_lgraph(name);
+      auto* lg = library->open_lgraph(name);
       if (lg) {
         if (lg->is_empty()) {
           std::print("lgraph.match lgraph {} is empty\n", name);
@@ -130,89 +130,89 @@ void Meta_api::match(Eprp_var &var) {
         lgs.push_back(lg);
       }
     });
-  } catch (const std::regex_error &e) {
+  } catch (const std::regex_error& e) {
     Main_api::error("invalid match:{} regex. It is a FULL regex unlike bash. To test, try: `ls path | grep -E \"match\"`", match);
   }
 
-  for (Lgraph *lg : lgs) {
+  for (Lgraph* lg : lgs) {
     var.add(lg);
   }
 }
 
-void Meta_api::stats(Eprp_var &var) {
-  for (const auto &lg : var.lgs) {
+void Meta_api::stats(Eprp_var& var) {
+  for (const auto& lg : var.lgs) {
     assert(lg);
     lg->print_stats();
   }
 }
 
-void Meta_api::dump(Eprp_var &var) {
+void Meta_api::dump(Eprp_var& var) {
   std::print("dump labels:\n");
-  for (const auto &l : var.dict) {
+  for (const auto& l : var.dict) {
     std::print("  {}:{}\n", l.first, l.second);
   }
   std::print("dump lgraphs:\n");
-  for (const auto &l : var.lgs) {
+  for (const auto& l : var.lgs) {
     std::print("  {}/{}\n", l->get_path(), l->get_name());
   }
   std::print("dump lnast:\n");
-  for (const auto &l : var.lnasts) {
+  for (const auto& l : var.lnasts) {
     std::print("  {}\n", l->get_top_module_name());
   }
 }
 
-void Meta_api::liberty(Eprp_var &var) {
+void Meta_api::liberty(Eprp_var& var) {
   auto files = var.get("files");
   auto path  = var.get("path");
   std::print("lgraph.liberty path:{} ", path);
-  for (const auto &f : absl::StrSplit(files, ',')) {
+  for (const auto& f : absl::StrSplit(files, ',')) {
     I(!files.empty());
     std::print("file:{} ", f);
   }
   std::print(" (FIXME!, NOT IMPLEMENTED)\n");
 }
 
-void Meta_api::sdc(Eprp_var &var) {
+void Meta_api::sdc(Eprp_var& var) {
   auto files = var.get("files");
   auto path  = var.get("path");
   std::print("lgraph.sdc path:{} ", path);
-  for (const auto &f : absl::StrSplit(files, ',')) {
+  for (const auto& f : absl::StrSplit(files, ',')) {
     I(!files.empty());
     std::print("file:{} ", f);
   }
   std::print(" (FIXME!, NOT IMPLEMENTED)\n");
 }
 
-void Meta_api::spef(Eprp_var &var) {
+void Meta_api::spef(Eprp_var& var) {
   auto files = var.get("files");
   auto path  = var.get("path");
   std::print("lgraph.spef path:{} ", path);
-  for (const auto &f : absl::StrSplit(files, ',')) {
+  for (const auto& f : absl::StrSplit(files, ',')) {
     I(!files.empty());
     std::print("file:{} ", f);
   }
   std::print(" (FIXME!, NOT IMPLEMENTED)\n");
 }
 
-void Meta_api::lgdump(Eprp_var &var) {
+void Meta_api::lgdump(Eprp_var& var) {
   // auto odir = var.get("odir");
   auto hier = var.get("hier") == "true" ? true : false;
   std::print("lgraph.dump lgraphs:\n");
-  for (const auto &l : var.lgs) {
+  for (const auto& l : var.lgs) {
     std::print("  {}/{}\n", l->get_path(), l->get_name());
     l->dump(hier);
   }
 }
 
-void Meta_api::lnastdump(Eprp_var &var) {
+void Meta_api::lnastdump(Eprp_var& var) {
   std::print("lnast.dump lnast:\n");
-  for (const auto &l : var.lnasts) {
+  for (const auto& l : var.lnasts) {
     std::print("  {}\n", l->get_top_module_name());
     l->dump();
   }
 }
 
-void Meta_api::setup(Eprp &eprp) {
+void Meta_api::setup(Eprp& eprp) {
   Eprp_method m1("lgraph.open", "open an lgraph if it exists", &Meta_api::open);
   m1.add_label_optional("path", "lgraph path", "lgdb");
   m1.add_label_required("name", "lgraph name");

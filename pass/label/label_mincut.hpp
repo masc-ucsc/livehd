@@ -38,15 +38,15 @@ private:
   absl::flat_hash_map<int, IntSet>        id2neighs;   // <VieCut id, VieCut id of Neighbors>
   absl::flat_hash_map<Node::Compact, int> node2color;  // <Node, corresponding color>
 
-  void gather_ids(Lgraph *g);
-  void gather_neighs(Lgraph *g);
+  void gather_ids(Lgraph* g);
+  void gather_neighs(Lgraph* g);
 
-  void lg_to_metis(Lgraph *g);
+  void lg_to_metis(Lgraph* g);
   void viecut_cut(std::string inp_metis_path, std::string out_path);
   void viecut_label(std::string result_path);
 
 public:
-  void label(Lgraph *g);
+  void label(Lgraph* g);
   Label_mincut(bool _v, bool _h, int _i, int _s, std::string_view _a);
-  void dump(Lgraph *g);
+  void dump(Lgraph* g);
 };

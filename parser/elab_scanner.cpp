@@ -63,7 +63,7 @@ void Elab_scanner::setup_translate() {
   translate['\\'] = Token_id_backslash;
 }
 
-void Elab_scanner::add_token(const Ref_token::Tracker &t) {
+void Elab_scanner::add_token(const Ref_token::Tracker& t) {
   if (t.tok == Token_id_nop) {
     token_list_spaced = true;
     I(!trying_merge);
@@ -79,7 +79,7 @@ void Elab_scanner::add_token(const Ref_token::Tracker &t) {
   }
 
   trying_merge        = false;
-  Ref_token &last_tok = token_list.back();
+  Ref_token& last_tok = token_list.back();
 
   if (last_tok.tok == Token_id_or && t.tok == Token_id_gt) {
     token_list.back().fuse_token(Token_id_pipe, '>');
@@ -146,16 +146,16 @@ void Elab_scanner::add_token(const Ref_token::Tracker &t) {
   token_list.emplace_back(t, memblock);
 }
 
-void Elab_scanner::patch_pass(const absl::flat_hash_map<std::string, Token_id> &keywords) {
+void Elab_scanner::patch_pass(const absl::flat_hash_map<std::string, Token_id>& keywords) {
   for (size_t i = 0; i < token_list.size(); ++i) {
-    auto &t = token_list[i];
+    auto& t = token_list[i];
     if (t.tok != Token_id_alnum) {
       continue;
     }
 
     I(t.get_text().size() > 0);  // at least a character
 
-    const auto &txt = t.get_text();
+    const auto& txt = t.get_text();
 
     if (isdigit(txt[0])) {
       t.tok = Token_id_num;
@@ -204,7 +204,7 @@ void Elab_scanner::parse_setup(std::string_view fname) {
     throw parser_error(*this, "file {} seems empty. Nothing to parse", filename);
   }
 
-  char *b = (char *)mmap(NULL, sb.st_size, PROT_WRITE, MAP_PRIVATE, memblock_fd, 0);
+  char* b = (char*)mmap(NULL, sb.st_size, PROT_WRITE, MAP_PRIVATE, memblock_fd, 0);
   if (b == MAP_FAILED) {
     throw parser_error(*this, "parse mmap failed for file {} with size {}", filename, sb.st_size);
   }
@@ -405,7 +405,7 @@ void Elab_scanner::unregister_memblock() {
     return;
   }
 
-  int ok = munmap((void *)memblock, memblock_size);
+  int ok = munmap((void*)memblock, memblock_size);
   I(ok == 0);
   close(memblock_fd);
 
@@ -564,6 +564,6 @@ void Elab_scanner::dump_token() const {
     pos = token_list.size();
   }
 
-  auto &t = token_list[pos];
+  auto& t = token_list[pos];
   std::print("tok:{} pos1:{}, pos2:{}, line:{} text:{}\n", t.tok, t.pos1, t.pos2, t.line, t.get_text());
 }

@@ -89,13 +89,13 @@ private:
 public:
   Sub_node() { expunge(); }
 
-  Sub_node(const Sub_node &s)           = default;
-  Sub_node &operator=(const Sub_node &) = delete;
+  Sub_node(const Sub_node& s)          = default;
+  Sub_node& operator=(const Sub_node&) = delete;
 
-  void copy_from(std::string_view new_name, Lg_type_id new_lgid, const Sub_node &sub);
+  void copy_from(std::string_view new_name, Lg_type_id new_lgid, const Sub_node& sub);
 
-  void to_json(rapidjson::PrettyWriter<rapidjson::StringBuffer> &writer) const;
-  void from_json(const rapidjson::Value &entry);
+  void to_json(rapidjson::PrettyWriter<rapidjson::StringBuffer>& writer) const;
+  void from_json(const rapidjson::Value& entry);
 
   void reset_pins() {
     clear_io_pins();
@@ -270,12 +270,12 @@ public:
     return graph_pos2instance_pid[graph_pos];
   }
 
-  [[nodiscard]] const IO_pin &get_io_pin_from_graph_pos(Port_ID graph_pos) const {
+  [[nodiscard]] const IO_pin& get_io_pin_from_graph_pos(Port_ID graph_pos) const {
     I(has_graph_pos_pin(graph_pos));
     return io_pins[graph_pos2instance_pid[graph_pos]];
   }
 
-  [[nodiscard]] const IO_pin &get_io_pin_from_instance_pid(Port_ID instance_pid) const {
+  [[nodiscard]] const IO_pin& get_io_pin_from_instance_pid(Port_ID instance_pid) const {
     if (instance_pid >= io_pins.size()) {
       return io_pins[0];  // invalid PID
     }
@@ -299,14 +299,14 @@ public:
     io_pins[instance_pid].bits = bits;
   }
 
-  [[nodiscard]] const IO_pin &get_pin(std::string_view io_name) const {
+  [[nodiscard]] const IO_pin& get_pin(std::string_view io_name) const {
     I(has_pin(io_name));
     auto instance_pid = name2id.at(io_name);
     I(io_pins[instance_pid].name == io_name);
     return io_pins[instance_pid];
   }
 
-  [[nodiscard]] const IO_pin &get_graph_output_io_pin(std::string_view io_name) const {
+  [[nodiscard]] const IO_pin& get_graph_output_io_pin(std::string_view io_name) const {
     I(has_pin(io_name));
     auto instance_pid = name2id.at(io_name);
     I(io_pins[instance_pid].name == io_name);
@@ -314,7 +314,7 @@ public:
     return io_pins[instance_pid];
   }
 
-  [[nodiscard]] const IO_pin &get_graph_input_io_pin(std::string_view io_name) const {
+  [[nodiscard]] const IO_pin& get_graph_input_io_pin(std::string_view io_name) const {
     I(has_pin(io_name));
     auto instance_pid = name2id.at(io_name);
     I(io_pins[instance_pid].name == io_name);
@@ -405,11 +405,11 @@ public:
   }
 #endif
 
-  [[nodiscard]] const std::vector<std::pair<const IO_pin *, Port_ID>> get_output_pins() const {
+  [[nodiscard]] const std::vector<std::pair<const IO_pin*, Port_ID>> get_output_pins() const {
     I(io_pins.size() >= 1);
-    std::vector<std::pair<const IO_pin *, Port_ID>> v;
-    Port_ID                                         i = 0;
-    for (const auto &e : io_pins) {
+    std::vector<std::pair<const IO_pin*, Port_ID>> v;
+    Port_ID                                        i = 0;
+    for (const auto& e : io_pins) {
       if (e.is_output()) {
         v.emplace_back(&e, i);
       }
@@ -418,11 +418,11 @@ public:
     return v;
   }
 
-  [[nodiscard]] const std::vector<std::pair<const IO_pin *, Port_ID>> get_input_pins() const {
+  [[nodiscard]] const std::vector<std::pair<const IO_pin*, Port_ID>> get_input_pins() const {
     I(io_pins.size() >= 1);
-    std::vector<std::pair<const IO_pin *, Port_ID>> v;
-    Port_ID                                         i = 0;
-    for (const auto &e : io_pins) {
+    std::vector<std::pair<const IO_pin*, Port_ID>> v;
+    Port_ID                                        i = 0;
+    for (const auto& e : io_pins) {
       if (e.is_input()) {
         v.emplace_back(&e, i);
       }

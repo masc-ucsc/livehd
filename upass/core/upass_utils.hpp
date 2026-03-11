@@ -8,7 +8,7 @@
 namespace upass {
 
 template <typename... Args>
-void error(std::format_string<Args...> format, Args &&...args) {
+void error(std::format_string<Args...> format, Args&&... args) {
   std::print(format, std::forward<Args>(args)...);
 }
 

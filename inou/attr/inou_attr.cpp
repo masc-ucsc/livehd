@@ -20,27 +20,27 @@ void Inou_attr::setup() {
   register_inou("attr", m2);
 }
 
-Inou_attr::Inou_attr(const Eprp_var &var) : Pass("inou.attr", var) {}
+Inou_attr::Inou_attr(const Eprp_var& var) : Pass("inou.attr", var) {}
 
-void Inou_attr::set_color_to_lg(Eprp_var &var) {
+void Inou_attr::set_color_to_lg(Eprp_var& var) {
   Inou_attr p(var);
 
   TRACE_EVENT("inou", "ATTR_set_color");
 
   auto filename = p.get_files(var);
-  for (const auto &lg : var.lgs) {
+  for (const auto& lg : var.lgs) {
     // std::print("\n\n---> current module: {}\n\n", lg->get_name());
     p.read_json(filename, lg);
     p.color_lg(lg);
   }
 }
 
-void Inou_attr::read_json(const std::string &filename, Lgraph *lg) {
+void Inou_attr::read_json(const std::string& filename, Lgraph* lg) {
   // std::print("{}", filename);
   node2color.clear();
   const auto top_name = lg->get_name();
   // std::print("{}", top_name);
-  FILE *pFile = fopen(filename.c_str(), "rb");
+  FILE* pFile = fopen(filename.c_str(), "rb");
   if (pFile == 0) {
     Pass::error("Could not open file {}", filename);
     return;
@@ -60,32 +60,32 @@ void Inou_attr::read_json(const std::string &filename, Lgraph *lg) {
   }
   I(document.IsArray());
   for (rapidjson::SizeType i = 0; i < document.Size(); i++) {  // because doc is array//this loop iterates over all class_entries
-    const rapidjson::Value &class_entries = document[i];
+    const rapidjson::Value& class_entries = document[i];
     I(class_entries.HasMember("class"));
-    const auto &class_val     = class_entries["class"].GetString();
+    const auto& class_val     = class_entries["class"].GetString();
     std::string class_val_str = std::string(class_val);
     if (class_val_str == "livehd.lgraph.color") {
       I(class_entries.HasMember("modules"));
       // iterate over modules to get each module and its nodes
-      const rapidjson::Value &modules = class_entries["modules"];
+      const rapidjson::Value& modules = class_entries["modules"];
       I(modules.IsArray());
       for (rapidjson::SizeType j = 0; j < modules.Size(); j++) {
         // iterate through modules
-        const rapidjson::Value &module_entry = modules[j];
+        const rapidjson::Value& module_entry = modules[j];
         I(module_entry.HasMember("name"));
         I(module_entry.HasMember("node_colors"));
 
-        const auto &module_name     = module_entry["name"].GetString();
+        const auto& module_name     = module_entry["name"].GetString();
         std::string module_name_str = std::string(module_name);
         if (top_name == module_name_str) {
           // std::print("Found module {} present in Json, in LG.\n", module_name_str);
-          const rapidjson::Value &nodes = module_entry["node_colors"];
+          const rapidjson::Value& nodes = module_entry["node_colors"];
           I(nodes.IsObject());
           for (rapidjson::Value::ConstMemberIterator itr = nodes.MemberBegin(); itr != nodes.MemberEnd(); itr++) {
             // iterate through nodes
-            const auto &nodeName     = itr->name.GetString();  // make object value
+            const auto& nodeName     = itr->name.GetString();  // make object value
             std::string nodeName_str = std::string(nodeName);
-            const auto &colorVal     = itr->value.GetDouble();
+            const auto& colorVal     = itr->value.GetDouble();
             node2color.insert({nodeName_str, colorVal});
           }
         } else {
@@ -100,13 +100,13 @@ void Inou_attr::read_json(const std::string &filename, Lgraph *lg) {
   fclose(pFile);
 }
 
-void Inou_attr::color_lg(Lgraph *lg) {
+void Inou_attr::color_lg(Lgraph* lg) {
   // auto lg_name = lg->get_name();
   // std::print("{}",lg_name);
 
   // since map is formed with nodes and color, set_color to this lg using this map.
   for (auto node : lg->fast(true)) {
-    const auto &iname = node.default_instance_name();
+    const auto& iname = node.default_instance_name();
     if (node2color.find(iname) != node2color.end()) {
       node.set_color(node2color[iname]);
       std::print("Set color {} to instance {} at nid {}.\n", node2color[iname], iname, node.get_nid());
@@ -114,7 +114,7 @@ void Inou_attr::color_lg(Lgraph *lg) {
   }
 }
 
-void Inou_attr::get_color_from_lg(Eprp_var &var) {
+void Inou_attr::get_color_from_lg(Eprp_var& var) {
   Inou_attr p(var);
 
   TRACE_EVENT("inou", "ATTR_get_color");
@@ -128,7 +128,7 @@ void Inou_attr::get_color_from_lg(Eprp_var &var) {
   writer.Key("modules");
   writer.StartArray();
 
-  for (const auto &lg : var.lgs) {
+  for (const auto& lg : var.lgs) {
     writer.StartObject();
     writer.Key("name");
     auto        top_name     = lg->get_name();
@@ -139,8 +139,8 @@ void Inou_attr::get_color_from_lg(Eprp_var &var) {
     writer.StartObject();
     for (auto node : lg->fast(true)) {
       if (node.has_color()) {
-        const auto &color_val = node.get_color();
-        const auto &iname     = node.default_instance_name();
+        const auto& color_val = node.get_color();
+        const auto& iname     = node.default_instance_name();
         std::string iname_str = {iname.begin(), iname.end()};
         // dump this to the file with filename.
         writer.Key(iname_str.c_str());

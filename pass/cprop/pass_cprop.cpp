@@ -14,7 +14,7 @@ void Pass_cprop::setup() {
   register_pass(m1);
 }
 
-Pass_cprop::Pass_cprop(const Eprp_var &var) : Pass("pass.cprop", var) {
+Pass_cprop::Pass_cprop(const Eprp_var& var) : Pass("pass.cprop", var) {
   auto hier_txt = var.get("hier");
   auto gioc_txt = var.get("gioc");
 
@@ -33,11 +33,11 @@ Pass_cprop::Pass_cprop(const Eprp_var &var) : Pass("pass.cprop", var) {
   (void)gioc;  // not used now
 }
 
-void Pass_cprop::optimize(Eprp_var &var) {
+void Pass_cprop::optimize(Eprp_var& var) {
   Pass_cprop pcp(var);
   Cprop      cp(pcp.hier);
 
-  for (auto &lg : var.lgs) {
+  for (auto& lg : var.lgs) {
     if (lg->is_empty()) {
       continue;
     }

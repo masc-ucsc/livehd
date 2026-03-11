@@ -42,7 +42,7 @@ struct LG2Yosys_Pass : public Yosys::Pass {
     log("\n");
   }
 
-  virtual void execute(std::vector<std::string> args, RTLIL::Design *design) {
+  virtual void execute(std::vector<std::string> args, RTLIL::Design* design) {
     log_header(design, "Executing lg2yosys pass (convert from lgraph to yosys).\n");
 
     // parse options
@@ -74,10 +74,10 @@ struct LG2Yosys_Pass : public Yosys::Pass {
 
     TRACE_EVENT("inou", "yosys_fromlg");
 
-    std::vector<Lgraph *> lgs;
+    std::vector<Lgraph*> lgs;
     if (single_graph_mode) {
-      auto *lib = Graph_library::instance(path);
-      auto *lg  = lib->open_lgraph(name);
+      auto* lib = Graph_library::instance(path);
+      auto* lg  = lib->open_lgraph(name);
       if (lg == nullptr) {
         log_error("could not open graph %s in path %s\n.", name.c_str(), path.c_str());
       } else {
@@ -93,11 +93,11 @@ struct LG2Yosys_Pass : public Yosys::Pass {
       log("converting all graphs in path %s.\n", path.c_str());
     }
 
-    std::set<Lgraph *> generated;
-    Lgyosys_dump       dumper(design, hierarchy);
+    std::set<Lgraph*> generated;
+    Lgyosys_dump      dumper(design, hierarchy);
 
     dumper.fromlg(lgs);
-    for (auto *g : lgs) {
+    for (auto* g : lgs) {
       generated.insert(g);
     }
   }

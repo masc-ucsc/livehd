@@ -109,7 +109,7 @@ Lconst::Lconst(int64_t v) {
   bits         = calc_num_bits();
 }
 
-Lconst::Lconst(const Number &v) {
+Lconst::Lconst(const Number& v) {
   explicit_str = false;
   num          = v;
   bits         = calc_num_bits();
@@ -415,12 +415,12 @@ void Lconst::dump() const {
   }
 }
 
-void Lconst::adjust(const Lconst &o) {
+void Lconst::adjust(const Lconst& o) {
   explicit_str = o.explicit_str && (bits == 0 || explicit_str);
   bits         = calc_num_bits(num);
 }
 
-std::pair<std::string, std::string> Lconst::match_binary(const Lconst &l, const Lconst &r) {
+std::pair<std::string, std::string> Lconst::match_binary(const Lconst& l, const Lconst& r) {
   auto l_str = l.to_binary();
   auto r_str = r.to_binary();
   if (l_str.size() != r_str.size()) {
@@ -654,7 +654,7 @@ Lconst Lconst::get_mask_op() const {
   return Lconst(false, calc_num_bits(res_num), res_num);
 }
 
-Lconst Lconst::get_mask_op(const Lconst &mask) const {
+Lconst Lconst::get_mask_op(const Lconst& mask) const {
   if (mask == Lconst(-1)) {
     return get_mask_op();  // faster logic for common case
   }
@@ -723,7 +723,7 @@ Lconst Lconst::get_mask_op(const Lconst &mask) const {
 //
 // set_mask(foo ^ (rand & bar_mask), bar_mask, get_mask(foo, bar_mask)) == foo
 
-Lconst Lconst::set_mask_op(const Lconst &mask, const Lconst &value) const {
+Lconst Lconst::set_mask_op(const Lconst& mask, const Lconst& value) const {
   if (unlikely(mask.is_string())) {
     throw std::runtime_error(
         std::format("ERROR: no string in mask get_bits({},{},{})", to_pyrope(), mask.to_pyrope(), value.to_pyrope()));
@@ -801,7 +801,7 @@ Lconst Lconst::set_mask_op(const Lconst &mask, const Lconst &value) const {
   return Lconst(false, calc_num_bits(res_num), res_num);
 }
 
-Lconst Lconst::add_op(const Lconst &o) const {
+Lconst Lconst::add_op(const Lconst& o) const {
   if (unlikely(is_string() || o.is_string())) {
     return invalid();
   }
@@ -880,7 +880,7 @@ Lconst Lconst::add_op(const Lconst &o) const {
   return res;
 }
 
-Lconst Lconst::concat_op(const Lconst &o) const {
+Lconst Lconst::concat_op(const Lconst& o) const {
   if (unlikely(is_string() || o.is_string())) {
     std::string str;
     std::string o_str;
@@ -908,7 +908,7 @@ Lconst Lconst::concat_op(const Lconst &o) const {
   return Lconst(false, calc_num_bits(res_num), res_num);
 }
 
-Lconst Lconst::mult_op(const Lconst &o) const {
+Lconst Lconst::mult_op(const Lconst& o) const {
   if (is_string() || o.is_string()) {
     throw std::runtime_error(std::format("ERROR: {}*{} not allowed because one is a string\n", to_pyrope(), o.to_pyrope()));
 
@@ -930,7 +930,7 @@ Lconst Lconst::mult_op(const Lconst &o) const {
   return res;
 }
 
-Lconst Lconst::div_op(const Lconst &o) const {
+Lconst Lconst::div_op(const Lconst& o) const {
   if (is_string() || o.is_string()) {
     throw std::runtime_error(std::format("ERROR: {}/{} not allowed because one is a string\n", to_pyrope(), o.to_pyrope()));
 
@@ -968,7 +968,7 @@ Lconst Lconst::div_op(const Lconst &o) const {
   return res;
 }
 
-Lconst Lconst::sub_op(const Lconst &o) const {
+Lconst Lconst::sub_op(const Lconst& o) const {
   if (is_string() || o.is_string()) {
     throw std::runtime_error(std::format("ERROR: {}-{} not allowed because one is a string\n", to_pyrope(), o.to_pyrope()));
 
@@ -1028,13 +1028,13 @@ Lconst Lconst::rsh_op(Bits_t amount) const {
   return Lconst(is_string(), calc_num_bits(res_num), res_num);
 }
 
-Lconst Lconst::ror_op(const Lconst &o) const {
+Lconst Lconst::ror_op(const Lconst& o) const {
   Number res_num = (num != 0 || o != 0) ? 1 : 0;
 
   return Lconst(false, 1, res_num);
 }
 
-Lconst Lconst::or_op(const Lconst &o) const {
+Lconst Lconst::or_op(const Lconst& o) const {
   if (unlikely(has_unknowns() || o.has_unknowns())) {
     bool signed_result = is_negative() || o.is_negative();
 
@@ -1072,7 +1072,7 @@ Lconst Lconst::not_op() const {
   if (unlikely(has_unknowns())) {
     bool unsigned_result = is_negative();  // toggle sign
     auto result          = to_binary();
-    for (auto &ch : result) {
+    for (auto& ch : result) {
       if (ch == '0') {
         ch = '1';
       } else if (ch == '1') {
@@ -1104,7 +1104,7 @@ Lconst Lconst::neg_op() const {
   return Lconst(false, calc_num_bits(res_num), res_num);
 }
 
-Lconst Lconst::and_op(const Lconst &o) const {
+Lconst Lconst::and_op(const Lconst& o) const {
   if (unlikely(has_unknowns() || o.has_unknowns())) {
     auto [l_str, r_str] = match_binary(*this, o);
 
@@ -1136,7 +1136,7 @@ Lconst Lconst::and_op(const Lconst &o) const {
   return res;
 }
 
-Lconst Lconst::eq_op(const Lconst &o) const {
+Lconst Lconst::eq_op(const Lconst& o) const {
   if (unlikely(is_string() && o.is_string())) {
     return to_string() == o.to_string() ? Lconst(-1) : Lconst(0);
   }

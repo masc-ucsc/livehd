@@ -8,8 +8,8 @@
 #include <vector>
 
 #include "ir_adapter.hpp"
-#include "lgraph.hpp"
 #include "lgedgeiter.hpp"
+#include "lgraph.hpp"
 
 namespace upass {
 
@@ -79,7 +79,7 @@ public:
     std::size_t edges_freed{0};  // input edges disconnected when dead nodes are deleted
   };
 
-  explicit Lgraph_manager(Lgraph *graph) : lg(graph) {}
+  explicit Lgraph_manager(Lgraph* graph) : lg(graph) {}
 
   std::string_view kind() const override { return "lgraph"; }
   std::size_t      node_count() const override {
@@ -87,37 +87,37 @@ public:
       return 0;
     }
     std::size_t count = 0;
-    for (const auto &node : lg->fast()) {
+    for (const auto& node : lg->fast()) {
       (void)node;
       ++count;
     }
     return count;
   }
-  std::size_t      const_count() const override {
+  std::size_t const_count() const override {
     if (lg == nullptr) {
       return 0;
     }
     std::size_t count = 0;
-    for (const auto &node : lg->fast()) {
+    for (const auto& node : lg->fast()) {
       if (node.get_type_op() == Ntype_op::Const) {
         ++count;
       }
     }
     return count;
   }
-  std::size_t      arithmetic_count() const override {
+  std::size_t arithmetic_count() const override {
     if (lg == nullptr) {
       return 0;
     }
     std::size_t count = 0;
-    for (const auto &node : lg->fast()) {
+    for (const auto& node : lg->fast()) {
       if (is_foldable_op(node.get_type_op())) {
         ++count;
       }
     }
     return count;
   }
-  std::size_t      fold_candidate_count() const override { return scan_fold_candidates().fold_candidate_nodes; }
+  std::size_t          fold_candidate_count() const override { return scan_fold_candidates().fold_candidate_nodes; }
   std::vector<Node_id> list_nodes() const override {
     std::vector<Node_id> nodes;
     if (lg == nullptr) {
@@ -125,7 +125,7 @@ public:
     }
 
     nodes.reserve(node_count());
-    for (const auto &node : lg->fast()) {
+    for (const auto& node : lg->fast()) {
       nodes.emplace_back(static_cast<Node_id>(node.get_nid()));
     }
     return nodes;
@@ -156,7 +156,7 @@ public:
       return inps;
     }
 
-    for (const auto &inp : node.inp_edges()) {
+    for (const auto& inp : node.inp_edges()) {
       inps.emplace_back(static_cast<Node_id>(inp.driver.get_node().get_nid()));
     }
     return inps;
@@ -191,7 +191,7 @@ public:
       return effect;
     }
 
-    for (const auto &out : node.out_edges()) {
+    for (const auto& out : node.out_edges()) {
       (void)out;
       ++effect.rewired_edges;
     }
@@ -214,23 +214,23 @@ public:
       return true;
     }
 
-    auto                 node_out = node.setup_driver_pin();
+    auto                  node_out = node.setup_driver_pin();
     std::vector<Node_pin> sinks;
-    for (const auto &out : node.out_edges()) {
+    for (const auto& out : node.out_edges()) {
       sinks.emplace_back(out.sink);
     }
 
     auto new_c = lg->create_node_const(value);
     auto dpin  = new_c.setup_driver_pin();
     dpin.set_size(node_out);
-    for (const auto &sink : sinks) {
+    for (const auto& sink : sinks) {
       dpin.connect_sink(sink);
     }
     node.del_node();
     return true;
   }
 
-  Lgraph *ref_lgraph() const { return lg; }
+  Lgraph* ref_lgraph() const { return lg; }
 
   Fold_scan_summary scan_fold_candidates(bool visit_sub = false) const {
     Fold_scan_summary summary;
@@ -238,7 +238,7 @@ public:
       return summary;
     }
 
-    for (const auto &node : lg->fast(visit_sub)) {
+    for (const auto& node : lg->fast(visit_sub)) {
       ++summary.visited_nodes;
 
       auto op = node.get_type_op();
@@ -254,7 +254,7 @@ public:
 
       std::size_t input_count = 0;
       bool        all_const   = true;
-      for (const auto &inp : node.inp_edges()) {
+      for (const auto& inp : node.inp_edges()) {
         ++input_count;
         if (!inp.driver.is_type(Ntype_op::Const)) {
           all_const = false;
@@ -283,13 +283,13 @@ public:
     static constexpr Port_ID k_port_b = 1;
     std::size_t              count    = 0;
 
-    for (const auto &node : lg->fast()) {
+    for (const auto& node : lg->fast()) {
       if (node.get_type_op() != Ntype_op::Sum) {
         continue;
       }
 
       std::vector<XEdge> a_ins, b_ins;
-      for (const auto &inp : node.inp_edges()) {
+      for (const auto& inp : node.inp_edges()) {
         if (inp.sink.get_pid() == k_port_b) {
           b_ins.emplace_back(inp);
         } else {
@@ -301,8 +301,8 @@ public:
         continue;
       }
 
-      const auto &a_drv = a_ins[0].driver;
-      const auto &b_drv = b_ins[0].driver;
+      const auto& a_drv = a_ins[0].driver;
+      const auto& b_drv = b_ins[0].driver;
 
       // a - 0
       if (b_drv.is_type(Ntype_op::Const) && b_drv.get_type_const() == 0) {
@@ -337,7 +337,7 @@ public:
 
       std::size_t input_count = 0;
       bool        all_const   = true;
-      for (const auto &inp : node.inp_edges()) {
+      for (const auto& inp : node.inp_edges()) {
         ++input_count;
         if (!inp.driver.is_type(Ntype_op::Const)) {
           all_const = false;
@@ -365,16 +365,16 @@ public:
     }
 
     std::vector<Node> candidates;
-    for (const auto &node : lg->fast(visit_sub)) {
+    for (const auto& node : lg->fast(visit_sub)) {
       if (node.get_type_op() == Ntype_op::Sum) {
         candidates.emplace_back(node);
       }
     }
 
-    for (auto &node : candidates) {
-      auto node_out = node.setup_driver_pin();
+    for (auto& node : candidates) {
+      auto               node_out = node.setup_driver_pin();
       std::vector<XEdge> inputs;
-      for (const auto &inp : node.inp_edges()) {
+      for (const auto& inp : node.inp_edges()) {
         inputs.emplace_back(inp);
       }
       if (inputs.size() != 2) {
@@ -391,7 +391,7 @@ public:
       }
 
       std::vector<Node_pin> sinks;
-      for (const auto &out : node.out_edges()) {
+      for (const auto& out : node.out_edges()) {
         sinks.emplace_back(out.sink);
       }
 
@@ -400,7 +400,7 @@ public:
         auto new_c = lg->create_node_const(c0 + c1);
         auto dpin  = new_c.setup_driver_pin();
         dpin.set_size(node_out);
-        for (const auto &sink : sinks) {
+        for (const auto& sink : sinks) {
           dpin.connect_sink(sink);
           ++summary.rewired_edges;
         }
@@ -428,16 +428,16 @@ public:
     }
 
     std::vector<Node> candidates;
-    for (const auto &node : lg->fast(visit_sub)) {
+    for (const auto& node : lg->fast(visit_sub)) {
       if (node.get_type_op() == Ntype_op::Mult) {
         candidates.emplace_back(node);
       }
     }
 
-    for (auto &node : candidates) {
-      auto node_out = node.setup_driver_pin();
+    for (auto& node : candidates) {
+      auto               node_out = node.setup_driver_pin();
       std::vector<XEdge> inputs;
-      for (const auto &inp : node.inp_edges()) {
+      for (const auto& inp : node.inp_edges()) {
         inputs.emplace_back(inp);
       }
       if (inputs.size() != 2) {
@@ -456,7 +456,7 @@ public:
       const auto result = Lconst(c0.to_i() * c1.to_i());
 
       std::vector<Node_pin> sinks;
-      for (const auto &out : node.out_edges()) {
+      for (const auto& out : node.out_edges()) {
         sinks.emplace_back(out.sink);
       }
 
@@ -465,7 +465,7 @@ public:
         auto new_c = lg->create_node_const(result);
         auto dpin  = new_c.setup_driver_pin();
         dpin.set_size(node_out);
-        for (const auto &sink : sinks) {
+        for (const auto& sink : sinks) {
           dpin.connect_sink(sink);
           ++summary.rewired_edges;
         }
@@ -489,17 +489,17 @@ public:
     }
 
     std::vector<Node> candidates;
-    for (const auto &node : lg->fast(visit_sub)) {
+    for (const auto& node : lg->fast(visit_sub)) {
       auto op = node.get_type_op();
       if (op == Ntype_op::Sum || op == Ntype_op::Or || op == Ntype_op::Xor || op == Ntype_op::And || op == Ntype_op::Mult) {
         candidates.emplace_back(node);
       }
     }
 
-    for (auto &node : candidates) {
-      auto node_out = node.setup_driver_pin();
+    for (auto& node : candidates) {
+      auto               node_out = node.setup_driver_pin();
       std::vector<XEdge> inputs;
-      for (const auto &inp : node.inp_edges()) {
+      for (const auto& inp : node.inp_edges()) {
         inputs.emplace_back(inp);
       }
       if (inputs.size() != 2) {
@@ -507,13 +507,13 @@ public:
       }
 
       std::vector<Node_pin> sinks;
-      for (const auto &out : node.out_edges()) {
+      for (const auto& out : node.out_edges()) {
         sinks.emplace_back(out.sink);
       }
 
-      bool rewritten = false;
+      bool       rewritten            = false;
       const auto other_driver_is_1bit = [&](int const_pos) {
-        const auto &other = inputs[1 - const_pos].driver;
+        const auto& other = inputs[1 - const_pos].driver;
         return other.get_bits() == 1;
       };
 
@@ -531,7 +531,7 @@ public:
             auto c0   = lg->create_node_const(0);
             auto dpin = c0.setup_driver_pin();
             dpin.set_size(node_out);
-            for (const auto &sink : sinks) {
+            for (const auto& sink : sinks) {
               dpin.connect_sink(sink);
               ++summary.rewired_edges;
             }
@@ -541,9 +541,9 @@ public:
           ++summary.simplified_to_const_zero;
           rewritten = true;
         } else {
-          const auto &driver_keep = inputs[1 - const_zero_pos].driver;
+          const auto& driver_keep = inputs[1 - const_zero_pos].driver;
           if (!dry_run) {
-            for (const auto &sink : sinks) {
+            for (const auto& sink : sinks) {
               driver_keep.connect_sink(sink);
               ++summary.rewired_edges;
             }
@@ -569,7 +569,7 @@ public:
             auto c0   = lg->create_node_const(0);
             auto dpin = c0.setup_driver_pin();
             dpin.set_size(node_out);
-            for (const auto &sink : sinks) {
+            for (const auto& sink : sinks) {
               dpin.connect_sink(sink);
               ++summary.rewired_edges;
             }
@@ -590,9 +590,9 @@ public:
           }
         }
         if (const_one_pos >= 0) {
-          const auto &driver_keep = inputs[1 - const_one_pos].driver;
+          const auto& driver_keep = inputs[1 - const_one_pos].driver;
           if (!dry_run) {
-            for (const auto &sink : sinks) {
+            for (const auto& sink : sinks) {
               driver_keep.connect_sink(sink);
               ++summary.rewired_edges;
             }
@@ -613,9 +613,9 @@ public:
           }
         }
         if (const_one_pos >= 0 && other_driver_is_1bit(const_one_pos)) {
-          const auto &driver_keep = inputs[1 - const_one_pos].driver;
+          const auto& driver_keep = inputs[1 - const_one_pos].driver;
           if (!dry_run) {
-            for (const auto &sink : sinks) {
+            for (const auto& sink : sinks) {
               driver_keep.connect_sink(sink);
               ++summary.rewired_edges;
             }
@@ -630,9 +630,9 @@ public:
       if (!rewritten && node.get_type_op() == Ntype_op::And) {
         bool same_driver = inputs[0].driver.get_compact_class_driver() == inputs[1].driver.get_compact_class_driver();
         if (same_driver) {
-          const auto &driver_keep = inputs[0].driver;
+          const auto& driver_keep = inputs[0].driver;
           if (!dry_run) {
-            for (const auto &sink : sinks) {
+            for (const auto& sink : sinks) {
               driver_keep.connect_sink(sink);
               ++summary.rewired_edges;
             }
@@ -659,7 +659,7 @@ public:
               auto c1   = lg->create_node_const(1);
               auto dpin = c1.setup_driver_pin();
               dpin.set_size(node_out);
-              for (const auto &sink : sinks) {
+              for (const auto& sink : sinks) {
                 dpin.connect_sink(sink);
                 ++summary.rewired_edges;
               }
@@ -676,9 +676,9 @@ public:
         bool same_driver = inputs[0].driver.get_compact_class_driver() == inputs[1].driver.get_compact_class_driver();
         if (same_driver) {
           if (node.get_type_op() == Ntype_op::Or) {
-            const auto &driver_keep = inputs[0].driver;
+            const auto& driver_keep = inputs[0].driver;
             if (!dry_run) {
-              for (const auto &sink : sinks) {
+              for (const auto& sink : sinks) {
                 driver_keep.connect_sink(sink);
                 ++summary.rewired_edges;
               }
@@ -692,7 +692,7 @@ public:
               auto c0   = lg->create_node_const(0);
               auto dpin = c0.setup_driver_pin();
               dpin.set_size(node_out);
-              for (const auto &sink : sinks) {
+              for (const auto& sink : sinks) {
                 dpin.connect_sink(sink);
                 ++summary.rewired_edges;
               }
@@ -724,28 +724,28 @@ public:
     }
 
     std::vector<Node> candidates;
-    for (const auto &node : lg->fast(visit_sub)) {
+    for (const auto& node : lg->fast(visit_sub)) {
       auto op = node.get_type_op();
       if (op == Ntype_op::Div || op == Ntype_op::SHL || op == Ntype_op::SRA) {
         candidates.emplace_back(node);
       }
     }
 
-    for (auto &node : candidates) {
-      auto node_out = node.setup_driver_pin();
+    for (auto& node : candidates) {
+      auto               node_out = node.setup_driver_pin();
       std::vector<XEdge> inputs;
-      for (const auto &inp : node.inp_edges()) {
+      for (const auto& inp : node.inp_edges()) {
         inputs.emplace_back(inp);
       }
       if (inputs.size() != 2) {
         continue;
       }
 
-      const auto &lhs = inputs[0].driver;
-      const auto &rhs = inputs[1].driver;
+      const auto& lhs = inputs[0].driver;
+      const auto& rhs = inputs[1].driver;
 
       std::vector<Node_pin> sinks;
-      for (const auto &out : node.out_edges()) {
+      for (const auto& out : node.out_edges()) {
         sinks.emplace_back(out.sink);
       }
 
@@ -757,7 +757,7 @@ public:
           // Do not rewrite x/0
         } else {
           if (!dry_run) {
-            for (const auto &sink : sinks) {
+            for (const auto& sink : sinks) {
               lhs.connect_sink(sink);
               ++summary.rewired_edges;
             }
@@ -771,7 +771,7 @@ public:
 
       if (!rewritten && node.get_type_op() == Ntype_op::Div && rhs.is_type(Ntype_op::Const) && rhs.get_type_const() == 1) {
         if (!dry_run) {
-          for (const auto &sink : sinks) {
+          for (const auto& sink : sinks) {
             lhs.connect_sink(sink);
             ++summary.rewired_edges;
           }
@@ -789,7 +789,7 @@ public:
           auto c0   = lg->create_node_const(0);
           auto dpin = c0.setup_driver_pin();
           dpin.set_size(node_out);
-          for (const auto &sink : sinks) {
+          for (const auto& sink : sinks) {
             dpin.connect_sink(sink);
             ++summary.rewired_edges;
           }
@@ -807,7 +807,7 @@ public:
           auto c1   = lg->create_node_const(1);
           auto dpin = c1.setup_driver_pin();
           dpin.set_size(node_out);
-          for (const auto &sink : sinks) {
+          for (const auto& sink : sinks) {
             dpin.connect_sink(sink);
             ++summary.rewired_edges;
           }
@@ -829,7 +829,7 @@ public:
             auto cnew = lg->create_node_const(c_res);
             auto dpin = cnew.setup_driver_pin();
             dpin.set_size(node_out);
-            for (const auto &sink : sinks) {
+            for (const auto& sink : sinks) {
               dpin.connect_sink(sink);
               ++summary.rewired_edges;
             }
@@ -876,17 +876,17 @@ public:
     static constexpr Port_ID k_port_b = 1;
 
     std::vector<Node> candidates;
-    for (const auto &node : lg->fast(visit_sub)) {
+    for (const auto& node : lg->fast(visit_sub)) {
       if (node.get_type_op() == Ntype_op::Sum) {
         candidates.emplace_back(node);
       }
     }
 
-    for (auto &node : candidates) {
+    for (auto& node : candidates) {
       auto node_out = node.setup_driver_pin();
 
       std::vector<XEdge> a_inputs, b_inputs;
-      for (const auto &inp : node.inp_edges()) {
+      for (const auto& inp : node.inp_edges()) {
         if (inp.sink.get_pid() == k_port_b) {
           b_inputs.emplace_back(inp);
         } else {
@@ -900,11 +900,11 @@ public:
         continue;
       }
 
-      const auto &a_drv = a_inputs[0].driver;
-      const auto &b_drv = b_inputs[0].driver;
+      const auto& a_drv = a_inputs[0].driver;
+      const auto& b_drv = b_inputs[0].driver;
 
       std::vector<Node_pin> sinks;
-      for (const auto &out : node.out_edges()) {
+      for (const auto& out : node.out_edges()) {
         sinks.emplace_back(out.sink);
       }
 
@@ -913,7 +913,7 @@ public:
       // Case 1: a - 0 → a  (B input is the constant zero)
       if (b_drv.is_type(Ntype_op::Const) && b_drv.get_type_const() == 0) {
         if (!dry_run) {
-          for (const auto &sink : sinks) {
+          for (const auto& sink : sinks) {
             a_drv.connect_sink(sink);
             ++summary.rewired_edges;
           }
@@ -925,14 +925,13 @@ public:
       }
 
       // Case 2: a - a → 0  (same driver feeds both A and B)
-      if (!rewritten
-          && a_drv.get_compact_class_driver() == b_drv.get_compact_class_driver()) {
+      if (!rewritten && a_drv.get_compact_class_driver() == b_drv.get_compact_class_driver()) {
         ++summary.new_const_nodes;
         if (!dry_run) {
           auto c0   = lg->create_node_const(0);
           auto dpin = c0.setup_driver_pin();
           dpin.set_size(node_out);
-          for (const auto &sink : sinks) {
+          for (const auto& sink : sinks) {
             dpin.connect_sink(sink);
             ++summary.rewired_edges;
           }
@@ -954,7 +953,7 @@ public:
             auto cnew = lg->create_node_const(result);
             auto dpin = cnew.setup_driver_pin();
             dpin.set_size(node_out);
-            for (const auto &sink : sinks) {
+            for (const auto& sink : sinks) {
               dpin.connect_sink(sink);
               ++summary.rewired_edges;
             }
@@ -995,7 +994,7 @@ public:
 
     // --- Collect dead nodes (must NOT delete during fast() iteration) ---
     std::vector<Node> dead_nodes;
-    for (const auto &node : lg->fast(visit_sub)) {
+    for (const auto& node : lg->fast(visit_sub)) {
       if (node.is_type_io()) {
         continue;  // never delete graph input / output nodes
       }
@@ -1004,7 +1003,7 @@ public:
       }
 
       bool has_consumers = false;
-      for (const auto &out : node.out_edges()) {
+      for (const auto& out : node.out_edges()) {
         (void)out;
         has_consumers = true;
         break;
@@ -1015,9 +1014,9 @@ public:
     }
 
     // --- Delete collected dead nodes ---
-    for (auto &node : dead_nodes) {
+    for (auto& node : dead_nodes) {
       // Count input edges that will be freed when this node is deleted.
-      for (const auto &inp : node.inp_edges()) {
+      for (const auto& inp : node.inp_edges()) {
         (void)inp;
         ++summary.edges_freed;
       }
@@ -1058,7 +1057,7 @@ private:
     }
   }
 
-  Lgraph *lg;
+  Lgraph* lg;
 };
 
 }  // namespace upass

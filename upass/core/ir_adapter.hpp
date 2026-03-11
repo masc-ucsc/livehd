@@ -21,20 +21,20 @@ public:
   virtual ~IR_adapter() = default;
 
   // High-level IR identity for runner/scheduler decisions.
-  virtual std::string_view kind() const = 0;
-  virtual std::size_t      node_count() const = 0;
-  virtual std::size_t      const_count() const = 0;
-  virtual std::size_t      arithmetic_count() const = 0;
+  virtual std::string_view kind() const                 = 0;
+  virtual std::size_t      node_count() const           = 0;
+  virtual std::size_t      const_count() const          = 0;
+  virtual std::size_t      arithmetic_count() const     = 0;
   virtual std::size_t      fold_candidate_count() const = 0;
 
   // Minimal shared node-view API for cross-IR pass logic.
-  virtual std::vector<Node_id>       list_nodes() const = 0;
-  virtual std::string_view           op_name(Node_id node) const = 0;
-  virtual std::vector<Node_id>       inputs(Node_id node) const = 0;
-  virtual bool                       is_const(Node_id node) const = 0;
-  virtual std::optional<std::int64_t> const_value(Node_id node) const = 0;
-  virtual Replace_effect             estimate_replace_with_const(Node_id node) const = 0;
-  virtual bool                       replace_with_const(Node_id node, std::int64_t value) = 0;
+  virtual std::vector<Node_id>        list_nodes() const                                   = 0;
+  virtual std::string_view            op_name(Node_id node) const                          = 0;
+  virtual std::vector<Node_id>        inputs(Node_id node) const                           = 0;
+  virtual bool                        is_const(Node_id node) const                         = 0;
+  virtual std::optional<std::int64_t> const_value(Node_id node) const                      = 0;
+  virtual Replace_effect              estimate_replace_with_const(Node_id node) const      = 0;
+  virtual bool                        replace_with_const(Node_id node, std::int64_t value) = 0;
 };
 
 }  // namespace upass

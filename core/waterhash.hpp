@@ -20,24 +20,24 @@ static inline constexpr uint64_t _watermum(const uint64_t A, const uint64_t B) {
   return r - (r >> 32);
 }
 
-static inline uint64_t _waterr08(const uint8_t *p) {
+static inline uint64_t _waterr08(const uint8_t* p) {
   uint8_t v = 0;
   memcpy(&v, p, 1);
   return v;
 }
-static inline uint64_t _waterr16(const uint8_t *p) {
+static inline uint64_t _waterr16(const uint8_t* p) {
   uint16_t v = 0;
   memcpy(&v, p, 2);
   return v;
 }
-static inline uint64_t _waterr32(const uint8_t *p) {
+static inline uint64_t _waterr32(const uint8_t* p) {
   uint32_t v = 0;
   memcpy(&v, p, 4);
   return v;
 }
 
-static inline constexpr uint32_t waterhash(const void *key, uint32_t len, uint64_t seed) {
-  const uint8_t *p = (const uint8_t *)key;
+static inline constexpr uint32_t waterhash(const void* key, uint32_t len, uint64_t seed) {
+  const uint8_t* p = (const uint8_t*)key;
   for (uint32_t i = 0; i + 16 <= len; i += 16, p += 16) {
     seed = _watermum(_watermum(_waterr32(p) ^ _waterp1, _waterr32(p + 4) ^ _waterp2) + seed,
                      _watermum(_waterr32(p + 8) ^ _waterp3, _waterr32(p + 12) ^ _waterp4));

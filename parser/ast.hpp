@@ -23,7 +23,7 @@ protected:
 
   std::vector<lh::Tree_index> last_added;
 
-  void add_track_parent(const lh::Tree_index &index);
+  void add_track_parent(const lh::Tree_index& index);
 
 public:
   Ast_parser(std::string_view buffer, Rule_id top_rule);

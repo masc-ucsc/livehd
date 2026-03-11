@@ -33,7 +33,7 @@ Cgen_verilog::Cgen_verilog(bool _verbose, std::string_view _odir) : verbose(_ver
   }
 }
 
-std::string Cgen_verilog::get_wire_or_const(const Node_pin &dpin) const {
+std::string Cgen_verilog::get_wire_or_const(const Node_pin& dpin) const {
   auto var_it = pin2var.find(dpin.get_compact_class());
   if (var_it != pin2var.end()) {
     return var_it->second;
@@ -79,7 +79,7 @@ std::string Cgen_verilog::get_append_to_name(std::string_view name, std::string_
   return absl::StrCat(ext, name);
 }
 
-std::string Cgen_verilog::get_expression(const Node_pin &dpin) const {
+std::string Cgen_verilog::get_expression(const Node_pin& dpin) const {
   auto var_it = pin2var.find(dpin.get_compact_class());
   if (var_it != pin2var.end()) {
     return var_it->second;
@@ -94,7 +94,7 @@ std::string Cgen_verilog::get_expression(const Node_pin &dpin) const {
   return expr_it->second.var;
 }
 
-std::string Cgen_verilog::add_expression(std::string_view txt_seq, std::string_view txt_op, Node_pin &dpin) const {
+std::string Cgen_verilog::add_expression(std::string_view txt_seq, std::string_view txt_op, Node_pin& dpin) const {
   auto expr = get_expression(dpin);
 
   if (txt_seq.empty()) {
@@ -104,7 +104,7 @@ std::string Cgen_verilog::add_expression(std::string_view txt_seq, std::string_v
   return absl::StrCat(txt_seq, " ", txt_op, " ", expr);
 }
 
-void Cgen_verilog::process_flop(std::shared_ptr<File_output> fout, Node &node) {
+void Cgen_verilog::process_flop(std::shared_ptr<File_output> fout, Node& node) {
   auto dpin_d = node.get_sink_pin("din").get_driver_pin();
   auto dpin_q = node.get_driver_pin();
 
@@ -118,7 +118,7 @@ void Cgen_verilog::process_flop(std::shared_ptr<File_output> fout, Node &node) {
   }
 }
 
-void Cgen_verilog::process_memory(std::shared_ptr<File_output> fout, Node &node) {
+void Cgen_verilog::process_memory(std::shared_ptr<File_output> fout, Node& node) {
   auto iname = get_scaped_name(node.default_instance_name());
 
   int n_rd_ports = 0;
@@ -209,8 +209,8 @@ void Cgen_verilog::process_memory(std::shared_ptr<File_output> fout, Node &node)
     bool     single_clock    = true;
     Node_pin base_clock_dpin = port_vector[0].clock;
     {
-      for (auto &p : port_vector) {
-        auto &dpin = p.clock;
+      for (auto& p : port_vector) {
+        auto& dpin = p.clock;
         if (dpin.is_invalid()) {
           dpin = base_clock_dpin;
           continue;
@@ -264,7 +264,7 @@ void Cgen_verilog::process_memory(std::shared_ptr<File_output> fout, Node &node)
     {
       auto n_rd_pos = 0;
       auto n_wr_pos = 0;
-      for (auto &p : port_vector) {
+      for (auto& p : port_vector) {
         if (p.rdport) {
           if (p.addr.is_invalid() || p.enable.is_invalid() || p.clock.is_invalid()) {
             node.dump();
@@ -277,7 +277,7 @@ void Cgen_verilog::process_memory(std::shared_ptr<File_output> fout, Node &node)
           if (!single_clock) {
             fout->append("  ,.rd_clock_", std::to_string(n_rd_pos), "(", get_wire_or_const(p.clock), ")\n");
           }
-          for (auto &dpin2 : node.out_connected_pins()) {
+          for (auto& dpin2 : node.out_connected_pins()) {
             auto name2 = get_scaped_name(dpin2.get_wire_name());
             fout->append("  ,.rd_dout_", std::to_string(n_rd_pos), "(", name2, ")\n");
           }
@@ -324,7 +324,7 @@ void Cgen_verilog::process_memory(std::shared_ptr<File_output> fout, Node &node)
 
     {
       // ARRAY has forwarding, so writes first
-      for (auto &p : port_vector) {
+      for (auto& p : port_vector) {
         if (p.rdport) {
           continue;
         }
@@ -347,7 +347,7 @@ void Cgen_verilog::process_memory(std::shared_ptr<File_output> fout, Node &node)
       }
 
       auto n_pos = 0;
-      for (auto &p : port_vector) {
+      for (auto& p : port_vector) {
         if (!p.rdport) {
           ++n_pos;
           continue;
@@ -376,7 +376,7 @@ void Cgen_verilog::process_memory(std::shared_ptr<File_output> fout, Node &node)
   }
 }
 
-void Cgen_verilog::process_mux(std::shared_ptr<File_output> fout, Node &node) {
+void Cgen_verilog::process_mux(std::shared_ptr<File_output> fout, Node& node) {
   auto ordered_inp = node.inp_edges_ordered();
   I(ordered_inp.size() > 2);  // at least 0 + 1 + 2
 
@@ -409,7 +409,7 @@ void Cgen_verilog::process_mux(std::shared_ptr<File_output> fout, Node &node) {
   }
 }
 
-void Cgen_verilog::process_simple_node(std::shared_ptr<File_output> fout, Node &node) {
+void Cgen_verilog::process_simple_node(std::shared_ptr<File_output> fout, Node& node) {
   auto dpin = node.get_driver_pin();
   auto op   = node.get_type_op();
   I(!Ntype::is_multi_driver(op));
@@ -600,7 +600,7 @@ void Cgen_verilog::process_simple_node(std::shared_ptr<File_output> fout, Node &
   } else if (op == Ntype_op::LT || op == Ntype_op::GT) {
     std::vector<std::string> lhs;
     std::vector<std::string> rhs;
-    for (const auto &e : node.inp_edges()) {
+    for (const auto& e : node.inp_edges()) {
       if (e.sink.get_pin_name() == "A") {
         lhs.emplace_back(get_expression(e.driver));
       } else {
@@ -613,8 +613,8 @@ void Cgen_verilog::process_simple_node(std::shared_ptr<File_output> fout, Node &
     } else {
       cmp = " < ";
     }
-    for (const auto &l : lhs) {
-      for (const auto &r : rhs) {
+    for (const auto& l : lhs) {
+      for (const auto& r : rhs) {
         if (final_expr.empty()) {
           final_expr = absl::StrCat(l, cmp, r);
         } else {
@@ -626,7 +626,7 @@ void Cgen_verilog::process_simple_node(std::shared_ptr<File_output> fout, Node &
     auto        val_expr = get_expression(node.get_sink_pin("a").get_driver_pin());
     std::string onehot;
     bool        first = true;
-    for (auto &amt_dpin : node.get_sink_pin("B").inp_drivers()) {
+    for (auto& amt_dpin : node.get_sink_pin("B").inp_drivers()) {
       auto amt_expr = get_expression(amt_dpin);
       onehot        = absl::StrCat(onehot, first ? "(" : " | (", val_expr, " << ", amt_expr, ")");
       first         = false;
@@ -689,9 +689,9 @@ void Cgen_verilog::process_simple_node(std::shared_ptr<File_output> fout, Node &
   }
 }
 
-void Cgen_verilog::create_module_io(std::shared_ptr<File_output> fout, Lgraph *lg) {
+void Cgen_verilog::create_module_io(std::shared_ptr<File_output> fout, Lgraph* lg) {
   bool first_arg = true;
-  lg->each_sorted_graph_io([&](const Node_pin &pin, Port_ID pos) {
+  lg->each_sorted_graph_io([&](const Node_pin& pin, Port_ID pos) {
     (void)pos;
 
     if (!first_arg) {
@@ -722,7 +722,7 @@ void Cgen_verilog::create_module_io(std::shared_ptr<File_output> fout, Lgraph *l
   fout->append(");\n");
 }
 
-void Cgen_verilog::create_memories(std::shared_ptr<File_output> fout, Lgraph *lg) {
+void Cgen_verilog::create_memories(std::shared_ptr<File_output> fout, Lgraph* lg) {
   for (auto node : lg->fast()) {
     auto op = node.get_type_op();
     if (op != Ntype_op::Memory) {
@@ -733,17 +733,17 @@ void Cgen_verilog::create_memories(std::shared_ptr<File_output> fout, Lgraph *lg
   }
 }
 
-void Cgen_verilog::create_subs(std::shared_ptr<File_output> fout, Lgraph *lg) {
-  lg->each_local_sub_fast([this, fout](Node &node, Lg_type_id lgid) {
+void Cgen_verilog::create_subs(std::shared_ptr<File_output> fout, Lgraph* lg) {
+  lg->each_local_sub_fast([this, fout](Node& node, Lg_type_id lgid) {
     (void)lgid;
 
     auto        iname = get_scaped_name(node.default_instance_name());
-    const auto &sub   = node.get_type_sub_node();
+    const auto& sub   = node.get_type_sub_node();
 
     fout->append(get_scaped_name(sub.get_name()), " ", iname, "(\n");
 
     bool first_entry = true;
-    for (auto &io_pin : sub.get_sorted_io_pins()) {
+    for (auto& io_pin : sub.get_sorted_io_pins()) {
       Node_pin dpin;
       if (io_pin.is_input()) {
         auto spin = node.get_sink_pin(io_pin.name);
@@ -764,7 +764,7 @@ void Cgen_verilog::create_subs(std::shared_ptr<File_output> fout, Lgraph *lg) {
   });
 }
 
-void Cgen_verilog::create_combinational(std::shared_ptr<File_output> fout, Lgraph *lg) {
+void Cgen_verilog::create_combinational(std::shared_ptr<File_output> fout, Lgraph* lg) {
   fout->append("always_comb begin\n");
 
   for (auto node : lg->forward()) {
@@ -795,9 +795,9 @@ void Cgen_verilog::create_combinational(std::shared_ptr<File_output> fout, Lgrap
   fout->append("end\n");
 }
 
-void Cgen_verilog::create_outputs(std::shared_ptr<File_output> fout, Lgraph *lg) {
+void Cgen_verilog::create_outputs(std::shared_ptr<File_output> fout, Lgraph* lg) {
   fout->append("always_comb begin\n");
-  lg->each_graph_output([&](const Node_pin &dpin) {
+  lg->each_graph_output([&](const Node_pin& dpin) {
     auto spin = dpin.change_to_sink_from_graph_out_driver();
     if (!spin.is_connected()) {
       return;
@@ -806,7 +806,7 @@ void Cgen_verilog::create_outputs(std::shared_ptr<File_output> fout, Lgraph *lg)
     auto name = get_scaped_name(dpin.get_name());
 
     auto out_dpin = spin.get_driver_pin();
-    auto expr = get_expression(out_dpin);
+    auto expr     = get_expression(out_dpin);
     if (name != expr) {
       fout->append("  ", name, " = ", expr, ";\n");
     }
@@ -820,7 +820,7 @@ void Cgen_verilog::create_outputs(std::shared_ptr<File_output> fout, Lgraph *lg)
   fout->append("end\n");
 }
 
-void Cgen_verilog::create_registers(std::shared_ptr<File_output> fout, Lgraph *lg) {
+void Cgen_verilog::create_registers(std::shared_ptr<File_output> fout, Lgraph* lg) {
   for (auto node : lg->fast()) {
     if (!node.is_type_flop()) {
       continue;
@@ -897,7 +897,7 @@ void Cgen_verilog::create_registers(std::shared_ptr<File_output> fout, Lgraph *l
   }
 }
 
-void Cgen_verilog::add_to_pin2var(std::shared_ptr<File_output> fout, Node_pin &dpin, std::string_view name, bool out_unsigned) {
+void Cgen_verilog::add_to_pin2var(std::shared_ptr<File_output> fout, Node_pin& dpin, std::string_view name, bool out_unsigned) {
   if (dpin.is_type_const()) {
     return;  // No point for constants
   }
@@ -945,7 +945,7 @@ void Cgen_verilog::add_to_pin2var(std::shared_ptr<File_output> fout, Node_pin &d
   }
 }
 
-void Cgen_verilog::create_locals(std::shared_ptr<File_output> fout, Lgraph *lg) {
+void Cgen_verilog::create_locals(std::shared_ptr<File_output> fout, Lgraph* lg) {
   // IDEA: This pass can create "sub-blocks in lg". Two blocks can process in
   // parallel, if there is not backward edge crossing blocks. Edges that read
   // pin2var are OK, edges that go to pin2expr (future passes) are not OK.
@@ -955,11 +955,11 @@ void Cgen_verilog::create_locals(std::shared_ptr<File_output> fout, Lgraph *lg) 
 
     if (Ntype::is_multi_driver(op)) {
       if (op == Ntype_op::Sub || op == Ntype_op::Memory) {
-        for (auto &e : node.inp_edges()) {
+        for (auto& e : node.inp_edges()) {
           auto name2 = get_scaped_name(e.driver.get_wire_name());
           add_to_pin2var(fout, e.driver, name2, e.driver.is_unsign());
         }
-        for (auto &dpin2 : node.out_connected_pins()) {
+        for (auto& dpin2 : node.out_connected_pins()) {
           auto name2 = get_scaped_name(dpin2.get_wire_name());
           add_to_pin2var(fout, dpin2, name2, dpin2.is_unsign());
         }
@@ -1053,7 +1053,7 @@ void Cgen_verilog::create_locals(std::shared_ptr<File_output> fout, Lgraph *lg) 
   }
 }
 
-void Cgen_verilog::do_from_lgraph(Lgraph *lg) {
+void Cgen_verilog::do_from_lgraph(Lgraph* lg) {
   // TRACE_EVENT("cgen", perfetto::DynamicString(lg->get_name()));
   // note: tricks to make perfetto display different color on sub-modules
   TRACE_EVENT("pass", nullptr, [&lg](perfetto::EventContext ctx) {

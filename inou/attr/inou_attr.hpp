@@ -23,8 +23,8 @@ public:
   float       color_val;
 
   SubGraph_color() = default;
-  void from_json(const rapidjson::Value &entry);
-  void to_json(rapidjson::PrettyWriter<rapidjson::StringBuffer> &writer) const;
+  void from_json(const rapidjson::Value& entry);
+  void to_json(rapidjson::PrettyWriter<rapidjson::StringBuffer>& writer) const;
 };
 
 class Inou_attr : public Pass {
@@ -32,13 +32,13 @@ private:
   absl::flat_hash_map<std::string, double> node2color;
 
 protected:
-  static void set_color_to_lg(Eprp_var &var);
-  static void get_color_from_lg(Eprp_var &var);
+  static void set_color_to_lg(Eprp_var& var);
+  static void get_color_from_lg(Eprp_var& var);
 
-  void read_json(const std::string &filename, Lgraph *lg);
-  void color_lg(Lgraph *lg);
+  void read_json(const std::string& filename, Lgraph* lg);
+  void color_lg(Lgraph* lg);
 
 public:
-  Inou_attr(const Eprp_var &var);
+  Inou_attr(const Eprp_var& var);
   static void setup();
 };

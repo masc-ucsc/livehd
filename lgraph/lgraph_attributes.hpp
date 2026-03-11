@@ -19,55 +19,55 @@
 class Lgraph_attributes : virtual public Lgraph_Base {
 public:
   Lgraph_attributes() = delete;
-  explicit Lgraph_attributes(std::string_view path, std::string_view name, Lg_type_id _lgid, Graph_library *_lib) noexcept;
+  explicit Lgraph_attributes(std::string_view path, std::string_view name, Lg_type_id _lgid, Graph_library* _lib) noexcept;
 
   using Node_down_map = absl::flat_hash_map<Node::Compact_class, Lg_type_id>;
-  [[nodiscard]] const Node_down_map &get_down_nodes_map() const { return subid_map; };
+  [[nodiscard]] const Node_down_map& get_down_nodes_map() const { return subid_map; };
   // read only, no ref
 
   using Down_class_map = absl::flat_hash_map<Lg_id_t, int>;
-  [[nodiscard]] const Down_class_map &get_down_class_map() const { return down_class_map; };
+  [[nodiscard]] const Down_class_map& get_down_class_map() const { return down_class_map; };
   // read only, no ref
 
   using Node_pin_offset_map = absl::flat_hash_map<Node_pin::Compact_class_driver, Bits_t>;
-  [[nodiscard]] const Node_pin_offset_map &get_node_pin_offset_map() const { return node_pin_offset_map; };
-  [[nodiscard]] Node_pin_offset_map       *ref_node_pin_offset_map() { return &node_pin_offset_map; };
+  [[nodiscard]] const Node_pin_offset_map& get_node_pin_offset_map() const { return node_pin_offset_map; };
+  [[nodiscard]] Node_pin_offset_map*       ref_node_pin_offset_map() { return &node_pin_offset_map; };
 
   using Node_pin_name_map  = absl::flat_hash_map<Node_pin::Compact_class_driver, std::string>;
   using Node_pin_name_rmap = absl::flat_hash_map<std::string, Node_pin::Compact_class_driver>;
-  [[nodiscard]] const Node_pin_name_map &get_node_pin_name_map() const { return node_pin_name_map; };
-  [[nodiscard]] Node_pin_name_map       *ref_node_pin_name_map() { return &node_pin_name_map; };
+  [[nodiscard]] const Node_pin_name_map& get_node_pin_name_map() const { return node_pin_name_map; };
+  [[nodiscard]] Node_pin_name_map*       ref_node_pin_name_map() { return &node_pin_name_map; };
 
-  [[nodiscard]] const Node_pin_name_rmap &get_node_pin_name_rmap() const { return node_pin_name_rmap; };
-  [[nodiscard]] Node_pin_name_rmap       *ref_node_pin_name_rmap() { return &node_pin_name_rmap; };
+  [[nodiscard]] const Node_pin_name_rmap& get_node_pin_name_rmap() const { return node_pin_name_rmap; };
+  [[nodiscard]] Node_pin_name_rmap*       ref_node_pin_name_rmap() { return &node_pin_name_rmap; };
 
   using Node_pin_delay_map = absl::flat_hash_map<Node_pin::Compact_driver, float>;
-  [[nodiscard]] const Node_pin_delay_map &get_node_pin_delay_map() const { return node_pin_delay_map; };
-  [[nodiscard]] Node_pin_delay_map       *ref_node_pin_delay_map() { return &node_pin_delay_map; };
+  [[nodiscard]] const Node_pin_delay_map& get_node_pin_delay_map() const { return node_pin_delay_map; };
+  [[nodiscard]] Node_pin_delay_map*       ref_node_pin_delay_map() { return &node_pin_delay_map; };
 
   using Node_pin_unsigned_map = absl::flat_hash_set<Node_pin::Compact_driver>;
-  [[nodiscard]] const Node_pin_unsigned_map &get_node_pin_unsigned_map() const { return node_pin_unsigned_map; };
-  [[nodiscard]] Node_pin_unsigned_map       *ref_node_pin_unsigned_map() { return &node_pin_unsigned_map; };
+  [[nodiscard]] const Node_pin_unsigned_map& get_node_pin_unsigned_map() const { return node_pin_unsigned_map; };
+  [[nodiscard]] Node_pin_unsigned_map*       ref_node_pin_unsigned_map() { return &node_pin_unsigned_map; };
 
   using Node_name_map = absl::flat_hash_map<Node::Compact_class, std::string>;
-  [[nodiscard]] const Node_name_map &get_node_name_map() const { return node_name_map; };
-  [[nodiscard]] Node_name_map       *ref_node_name_map() { return &node_name_map; };
+  [[nodiscard]] const Node_name_map& get_node_name_map() const { return node_name_map; };
+  [[nodiscard]] Node_name_map*       ref_node_name_map() { return &node_name_map; };
 
   using Node_color_map = absl::flat_hash_map<Node::Compact_class, int>;
-  [[nodiscard]] const Node_color_map &get_node_color_map() const { return node_color_map; };
-  [[nodiscard]] Node_color_map       *ref_node_color_map() { return &node_color_map; };
+  [[nodiscard]] const Node_color_map& get_node_color_map() const { return node_color_map; };
+  [[nodiscard]] Node_color_map*       ref_node_color_map() { return &node_color_map; };
 
   using Node_place_map = absl::flat_hash_map<Node::Compact, Ann_place>;
-  [[nodiscard]] const Node_place_map &get_node_place_map() const { return node_place_map; };
-  [[nodiscard]] Node_place_map       *ref_node_place_map() { return &node_place_map; };
+  [[nodiscard]] const Node_place_map& get_node_place_map() const { return node_place_map; };
+  [[nodiscard]] Node_place_map*       ref_node_place_map() { return &node_place_map; };
 
   using Node_loc_map = absl::flat_hash_map<Node::Compact_class, std::pair<uint64_t, uint64_t>>;  // pos1 and pos2 from LN
-  [[nodiscard]] const Node_loc_map &get_node_loc_map() const { return node_loc_map; };
-  [[nodiscard]] Node_loc_map       *ref_node_loc_map() { return &node_loc_map; };
+  [[nodiscard]] const Node_loc_map& get_node_loc_map() const { return node_loc_map; };
+  [[nodiscard]] Node_loc_map*       ref_node_loc_map() { return &node_loc_map; };
 
   using Node_source_map = absl::flat_hash_map<Node::Compact_class, std::string>;  // source file name from LN
-  [[nodiscard]] const Node_source_map &get_node_source_map() const { return node_source_map; };
-  [[nodiscard]] Node_source_map       *ref_node_source_map() { return &node_source_map; };
+  [[nodiscard]] const Node_source_map& get_node_source_map() const { return node_source_map; };
+  [[nodiscard]] Node_source_map*       ref_node_source_map() { return &node_source_map; };
 
   void dump_source_map() const;
 
@@ -105,15 +105,15 @@ protected:
   void                     set_type_sub(Index_id nid, Lg_type_id subgraphid);
   [[nodiscard]] Lg_type_id get_type_sub(Index_id nid) const;
 
-  [[nodiscard]] const Sub_node &get_type_sub_node(Index_id nid) const;
-  [[nodiscard]] const Sub_node &get_type_sub_node(std::string_view sub_name) const;
-  [[nodiscard]] Sub_node       *ref_type_sub_node(Index_id nid);
-  [[nodiscard]] Sub_node       *ref_type_sub_node(std::string_view sub_name);
+  [[nodiscard]] const Sub_node& get_type_sub_node(Index_id nid) const;
+  [[nodiscard]] const Sub_node& get_type_sub_node(std::string_view sub_name) const;
+  [[nodiscard]] Sub_node*       ref_type_sub_node(Index_id nid);
+  [[nodiscard]] Sub_node*       ref_type_sub_node(std::string_view sub_name);
 
-  void                 set_type_lut(Index_id nid, const Lconst &lutid);
+  void                 set_type_lut(Index_id nid, const Lconst& lutid);
   [[nodiscard]] Lconst get_type_lut(Index_id nid) const;
 
-  void set_type_const(Index_id nid, const Lconst &value);
+  void set_type_const(Index_id nid, const Lconst& value);
   void set_type_const(Index_id nid, std::string_view value);
   void set_type_const(Index_id nid, int64_t value);
 

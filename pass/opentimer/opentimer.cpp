@@ -10,12 +10,12 @@
 #undef has_member
 #include "perf_tracing.hpp"
 
-void Pass_opentimer::time_work(Eprp_var &var) {
+void Pass_opentimer::time_work(Eprp_var& var) {
   Pass_opentimer pass(var);
 
   TRACE_EVENT("pass", "OPENTIMER_work");
 
-  for (const auto &g : var.lgs) {
+  for (const auto& g : var.lgs) {
     pass.build_circuit(g);  // Task2: Traverse the lgraph and build the equivalent circuit (No dependencies) | Status: 50% done
     pass.read_sdc_spef();
     pass.compute_timing(g);  // Task4: Compute Timing | Status: 100% done
@@ -23,13 +23,13 @@ void Pass_opentimer::time_work(Eprp_var &var) {
   }
 }
 
-void Pass_opentimer::power_work(Eprp_var &var) {
+void Pass_opentimer::power_work(Eprp_var& var) {
   Pass_opentimer pass(var);
 
   TRACE_EVENT("pass", "OPENTIMER_work");
 
   // FIXME: build_circuit can overlap with read_vcd (thread_pool task)
-  for (const auto &g : var.lgs) {
+  for (const auto& g : var.lgs) {
     pass.build_circuit(g);
     pass.read_sdc_spef();
     pass.read_vcd();
@@ -38,7 +38,7 @@ void Pass_opentimer::power_work(Eprp_var &var) {
 }
 
 // TODO: The IO pins have a separate name. Can we avoid this just for them?
-std::string Pass_opentimer::get_driver_net_name(const Node_pin &dpin) const {
+std::string Pass_opentimer::get_driver_net_name(const Node_pin& dpin) const {
   auto it = overwrite_dpin2net.find(dpin.get_compact_driver());
   if (it != overwrite_dpin2net.end()) {
     return it->second;
@@ -51,7 +51,7 @@ void Pass_opentimer::read_vcd() {
   vcd_list.resize(vcd_file_list.size());
 
   for (auto i = 0u; i < vcd_file_list.size(); ++i) {
-    const auto &f = vcd_file_list[i];
+    const auto& f = vcd_file_list[i];
 
     bool ok = vcd_list[i].open(f);  // FIXME: multithread?
     if (!ok) {
@@ -63,15 +63,15 @@ void Pass_opentimer::read_vcd() {
 
 // SDC and SPEF must be read after the circuit is created
 void Pass_opentimer::read_sdc_spef() {
-  for (const auto &f : sdc_file_list) {
+  for (const auto& f : sdc_file_list) {
     read_sdc(f);
   }
-  for (const auto &f : spef_file_list) {
+  for (const auto& f : spef_file_list) {
     timer.read_spef(f);
   }
 }
 
-void Pass_opentimer::set_input_delays(const std::string &pname) {
+void Pass_opentimer::set_input_delays(const std::string& pname) {
   timer.set_at(pname, ot::MIN, ot::FALL, 0.0);
   timer.set_at(pname, ot::MIN, ot::RISE, 0.0);
   timer.set_at(pname, ot::MAX, ot::FALL, 0.0);
@@ -83,14 +83,14 @@ void Pass_opentimer::set_input_delays(const std::string &pname) {
   timer.set_slew(pname, ot::MIN, ot::RISE, 0.0);
 }
 
-void Pass_opentimer::set_output_delays(const std::string &pname) {
+void Pass_opentimer::set_output_delays(const std::string& pname) {
   timer.set_rat(pname, ot::MIN, ot::FALL, 0.0);
   timer.set_rat(pname, ot::MIN, ot::RISE, 0.0);
   timer.set_rat(pname, ot::MAX, ot::FALL, 0.0);
   timer.set_rat(pname, ot::MAX, ot::RISE, 0.0);
 }
 
-void Pass_opentimer::build_circuit(Lgraph *g) {  // Enhance this for build_circuit
+void Pass_opentimer::build_circuit(Lgraph* g) {  // Enhance this for build_circuit
   TRACE_EVENT("pass", "OPENTIMER_build_circuit");
 
   overwrite_dpin2net.clear();
@@ -103,7 +103,7 @@ void Pass_opentimer::build_circuit(Lgraph *g) {  // Enhance this for build_circu
   overwrite_dpin2net.insert_or_assign(zero_dpin.get_compact_driver(), zero_dpin.get_wire_name());
 #endif
 
-  g->each_graph_input([this, &pin_tracker](const Node_pin &pin) {
+  g->each_graph_input([this, &pin_tracker](const Node_pin& pin) {
     std::string driver_name(pin.get_hierarchical().get_wire_name());  // OT needs std::string, not string_view support
 
     // std::print("OT: top input:{} bits:{}\n", driver_name, pin.get_bits());
@@ -117,7 +117,7 @@ void Pass_opentimer::build_circuit(Lgraph *g) {  // Enhance this for build_circu
     pin_tracker.add_input(driver_name, pin.get_bits());
   });
 
-  g->each_graph_output([this](const Node_pin &pin) {
+  g->each_graph_output([this](const Node_pin& pin) {
     auto driver_dpin = pin.change_to_sink_from_graph_out_driver().get_driver_pin().get_hierarchical();
     if (!driver_dpin.is_invalid()) {                 // It could be disconnected
       std::string driver_name(pin.get_wire_name());  // OT needs std::string, not string_view support
@@ -257,7 +257,7 @@ void Pass_opentimer::build_circuit(Lgraph *g) {  // Enhance this for build_circu
     }
 
     // setup driver pins and nets
-    for (const auto &dpin : node.out_connected_pins()) {
+    for (const auto& dpin : node.out_connected_pins()) {
       I(dpin.is_hierarchical());
       if (dpin.is_graph_io()) {
         I(!root_track);
@@ -266,7 +266,7 @@ void Pass_opentimer::build_circuit(Lgraph *g) {  // Enhance this for build_circu
       auto wname = dpin.get_wire_name();
 
       if (root_track) {
-        const auto &pv = pin_tracker.get_pin_vector(wname);
+        const auto& pv = pin_tracker.get_pin_vector(wname);
 
         if (pv.size() == 1) {  // single bit tracking result
           auto dpin_cd = dpin.get_compact_driver();
@@ -315,21 +315,21 @@ void Pass_opentimer::build_circuit(Lgraph *g) {  // Enhance this for build_circu
       return;
     }
 
-    auto       &sub_node      = node.get_type_sub_node();
+    auto&       sub_node      = node.get_type_sub_node();
     auto        instance_name = node.get_or_create_name();
     std::string type_name{sub_node.get_name()};  // OT needs std::string
 
     timer.insert_gate(instance_name, type_name);
 
     // setup driver pins and nets
-    for (const auto &dpin : node.out_connected_pins()) {
+    for (const auto& dpin : node.out_connected_pins()) {
       auto pin_name  = absl::StrCat(instance_name, ":", dpin.get_pin_name());
       auto wire_name = get_driver_net_name(dpin);
       timer.connect_pin(pin_name, wire_name);
     }
 
     // connect input pins
-    for (const auto &e : node.inp_edges()) {
+    for (const auto& e : node.inp_edges()) {
       // Any input with multiple bits should connect with a get_mask (no busses allowed)
       // 2bits because a signal can be signed case
       I(!(e.driver.is_graph_input() && e.driver.get_bits() > 2));
@@ -343,7 +343,7 @@ void Pass_opentimer::build_circuit(Lgraph *g) {  // Enhance this for build_circu
   }
 
   // Set all the inputs/outputs to zero by default
-  g->each_graph_input([this](Node_pin &dpin) {
+  g->each_graph_input([this](Node_pin& dpin) {
     auto pname = dpin.get_name();
 
     set_input_delays(pname);
@@ -353,7 +353,7 @@ void Pass_opentimer::build_circuit(Lgraph *g) {  // Enhance this for build_circu
     }
   });
 
-  g->each_graph_output([this](Node_pin &dpin) {
+  g->each_graph_output([this](Node_pin& dpin) {
     auto pname = dpin.get_name();
 
     set_output_delays(pname);
@@ -364,7 +364,7 @@ void Pass_opentimer::build_circuit(Lgraph *g) {  // Enhance this for build_circu
   });
 }
 
-void Pass_opentimer::compute_timing(Lgraph *g) {  // Expand this method to compute timing information
+void Pass_opentimer::compute_timing(Lgraph* g) {  // Expand this method to compute timing information
   TRACE_EVENT("pass", "OPENTIMER_compute_timing");
 
   timer.update_timing();
@@ -396,7 +396,7 @@ void Pass_opentimer::compute_timing(Lgraph *g) {  // Expand this method to compu
   max_delay = 0;
   std::string max_pin;
 
-  const auto &pins = timer.pins();
+  const auto& pins = timer.pins();
 
   for (const auto node : g->fast(true)) {
     auto op = node.get_type_op();
@@ -404,14 +404,14 @@ void Pass_opentimer::compute_timing(Lgraph *g) {  // Expand this method to compu
       continue;
     }
 
-    auto       &sub_node      = node.get_type_sub_node();
+    auto&       sub_node      = node.get_type_sub_node();
     auto        instance_name = node.get_or_create_name();
     std::string type_name{sub_node.get_name()};  // OT needs std::string
 
     // timer.insert_gate(instance_name, type_name);
 
     // setup driver pins and nets
-    for (auto &dpin : node.out_connected_pins()) {
+    for (auto& dpin : node.out_connected_pins()) {
       auto pin_name = absl::StrCat(instance_name, ":", dpin.get_pin_name());
 
       auto it = pins.find(pin_name);
@@ -455,12 +455,12 @@ void Pass_opentimer::compute_timing(Lgraph *g) {  // Expand this method to compu
   }
 }
 
-void Pass_opentimer::compute_power(Lgraph *g) {  // Expand this method to compute timing information
+void Pass_opentimer::compute_power(Lgraph* g) {  // Expand this method to compute timing information
   TRACE_EVENT("pass", "OPENTIMER_compute_power");
 
   timer.update_timing();
 
-  const auto &gates = timer.gates();
+  const auto& gates = timer.gates();
 
   double total_cap  = 0;
   double total_ipwr = 0;
@@ -476,7 +476,7 @@ void Pass_opentimer::compute_power(Lgraph *g) {  // Expand this method to comput
   double     timeunit   = timer.time_unit()->value();
   double     power_unit = timer.power_unit()->value();
 
-  for (auto &pvcd : vcd_list) {
+  for (auto& pvcd : vcd_list) {
     pvcd.set_timescale(timeunit);  // In case that VCD dump does not have it
   }
   std::cout << "================================\n";
@@ -494,7 +494,7 @@ void Pass_opentimer::compute_power(Lgraph *g) {  // Expand this method to comput
       std::print("WEIRD. Where is the gate? named {}\n", instance_name);
     }
 
-    for (const auto *pin : it2->second.pins()) {
+    for (const auto* pin : it2->second.pins()) {
       auto [cap, ipwr] = pin->power();
 
       // cap / 2 because only charge consumes dynamic power
@@ -512,7 +512,7 @@ void Pass_opentimer::compute_power(Lgraph *g) {  // Expand this method to comput
       I(last_comma_pos != std::string::npos);
       pin_name[last_comma_pos] = ',';
 
-      for (auto &pvcd : vcd_list) {
+      for (auto& pvcd : vcd_list) {
         // pvcd.add(pin_name, ipwr );
         // pvcd.add(pin_name, cap);
         pvcd.add(pin_name, ipwr + cap);
@@ -523,7 +523,7 @@ void Pass_opentimer::compute_power(Lgraph *g) {  // Expand this method to comput
   }
 
   std::cout << "================================\n";
-  for (auto &pvcd : vcd_list) {
+  for (auto& pvcd : vcd_list) {
     pvcd.compute(odir);
     std::print("AVG power:{} for {}\n", pvcd.get_power_average(), pvcd.get_filename());
   }
@@ -536,7 +536,7 @@ void Pass_opentimer::compute_power(Lgraph *g) {  // Expand this method to comput
              freq / 1e6);
 }
 
-void Pass_opentimer::populate_table(Lgraph *lg) {
+void Pass_opentimer::populate_table(Lgraph* lg) {
   TRACE_EVENT("pass", "OPENTIMER_populate_table");
 
   if (margin_delay <= 0 || max_delay <= 0) {
@@ -546,7 +546,7 @@ void Pass_opentimer::populate_table(Lgraph *lg) {
   lg->ref_node_color_map()->clear();  // Delete all the colors
 
   for (auto node : lg->fast(true)) {
-    for (auto &dpin : node.out_connected_pins()) {
+    for (auto& dpin : node.out_connected_pins()) {
       if (!dpin.has_delay()) {
         continue;
       }
@@ -571,13 +571,13 @@ void Pass_opentimer::populate_table(Lgraph *lg) {
   }
 }
 
-void Pass_opentimer::backpath_set_color(Node &node, int color) {
+void Pass_opentimer::backpath_set_color(Node& node, int color) {
   I(node.get_color() == color);
 
   // Find inp_edge with highest delay
   Node_pin dpin;
   float    dpin_delay = 0;
-  for (auto &e : node.inp_edges()) {
+  for (auto& e : node.inp_edges()) {
     if (!e.driver.has_delay()) {
       continue;
     }

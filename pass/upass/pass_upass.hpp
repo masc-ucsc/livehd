@@ -16,9 +16,9 @@ protected:
   bool                     inherit_labels{true};
 
 public:
-  static void work(Eprp_var &var);
+  static void work(Eprp_var& var);
 
-  Pass_upass(const Eprp_var &var);
+  Pass_upass(const Eprp_var& var);
 
   static void setup();
 };

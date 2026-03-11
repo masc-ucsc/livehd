@@ -17,7 +17,7 @@ bool Semantic_check::is_temp_var(std::string_view node_name) { return node_name.
 
 bool Semantic_check::is_a_number(std::string_view node_name) { return str_tools::is_i(node_name); }
 
-bool Semantic_check::in_map(const FlatHashMap &dict, std::string_view node_name) {
+bool Semantic_check::in_map(const FlatHashMap& dict, std::string_view node_name) {
   auto it = dict.find(node_name);
   return it != dict.end();
 }
@@ -40,7 +40,7 @@ bool Semantic_check::in_output_vars(std::string_view node_name) {
   return false;
 }
 
-std::string Semantic_check::in_lhs_list(Lnast *lnast, int index) {
+std::string Semantic_check::in_lhs_list(Lnast* lnast, int index) {
   int lhs_index = 0;
   for (auto name : lhs_list) {
     lhs_index++;
@@ -51,9 +51,9 @@ std::string Semantic_check::in_lhs_list(Lnast *lnast, int index) {
   return "";
 }
 
-int Semantic_check::in_rhs_list(Lnast *lnast, std::string_view node_name, int op_start_index = 0) {
+int Semantic_check::in_rhs_list(Lnast* lnast, std::string_view node_name, int op_start_index = 0) {
   int index = 0;
-  for (const auto &node : rhs_list) {
+  for (const auto& node : rhs_list) {
     if (index < op_start_index) {
       index++;
       continue;
@@ -87,7 +87,7 @@ void Semantic_check::add_to_output_vars(std::string_view node_name) {
   }
 }
 
-void Semantic_check::add_to_write_list(Lnast *lnast, std::string_view node_name, std::string_view stmt_name) {
+void Semantic_check::add_to_write_list(Lnast* lnast, std::string_view node_name, std::string_view stmt_name) {
   if (node_name[0] == '%') {
     add_to_output_vars(node_name);
   }
@@ -117,7 +117,7 @@ void Semantic_check::add_to_read_list(std::string_view node_name, std::string_vi
   }
 }
 
-void Semantic_check::print_out_of_scope_vars(Lnast *lnast) {
+void Semantic_check::print_out_of_scope_vars(Lnast* lnast) {
   if (out_of_scope_vars.size() != 0) {
     error_print_lnast_var_warn(lnast, out_of_scope_vars);
     std::sort(out_of_scope_vars.begin(), out_of_scope_vars.end());
@@ -134,13 +134,13 @@ void Semantic_check::print_out_of_scope_vars(Lnast *lnast) {
   }
 }
 
-void Semantic_check::error_print_lnast_by_name(Lnast *lnast, std::string_view error_name) {
+void Semantic_check::error_print_lnast_by_name(Lnast* lnast, std::string_view error_name) {
   // Print LNAST and indicate error based Node's Text Name
   Prp_lnast converter;
   bool      printed = false;
   std::cout << "\n";
 
-  for (const auto &it : lnast->depth_preorder()) {
+  for (const auto& it : lnast->depth_preorder()) {
     auto node = lnast->get_data(it);
 
     std::string indent(2 * (it.level + 1), ' ');
@@ -157,14 +157,14 @@ void Semantic_check::error_print_lnast_by_name(Lnast *lnast, std::string_view er
   std::cout << "\n";
 }
 
-void Semantic_check::error_print_lnast_by_type(Lnast *lnast, std::string_view error_name) {
+void Semantic_check::error_print_lnast_by_type(Lnast* lnast, std::string_view error_name) {
   // Print LNAST and indicate error based Node's Type
   Prp_lnast converter;
   bool      printed = false;
   std::cout << "\n";
 
-  for (const auto &it : lnast->depth_preorder()) {
-    const auto &node = lnast->get_data(it);
+  for (const auto& it : lnast->depth_preorder()) {
+    const auto& node = lnast->get_data(it);
 
     std::string indent(2 * (it.level + 1), ' ');
 
@@ -180,14 +180,14 @@ void Semantic_check::error_print_lnast_by_type(Lnast *lnast, std::string_view er
   std::cout << "\n";
 }
 
-void Semantic_check::error_print_lnast_var_warn(Lnast *lnast, std::vector<std::string> error_names) {
+void Semantic_check::error_print_lnast_var_warn(Lnast* lnast, std::vector<std::string> error_names) {
   std::sort(error_names.begin(), error_names.end());
   // Print LNAST and indicate error based a vector of variable warnings
   Prp_lnast converter;
   bool      printed = false;
   std::cout << "\n";
 
-  for (const auto &it : lnast->depth_preorder()) {
+  for (const auto& it : lnast->depth_preorder()) {
     auto node = lnast->get_data(it);
 
     std::string indent(2 * (it.level + 1), ' ');
@@ -214,9 +214,9 @@ void Semantic_check::error_print_lnast_var_warn(Lnast *lnast, std::vector<std::s
   std::cout << "\n";
 }
 
-void Semantic_check::resolve_read_write_lists(Lnast *lnast) {
+void Semantic_check::resolve_read_write_lists(Lnast* lnast) {
   int rhs_index = 0;
-  for (const auto &group : rhs_list) {
+  for (const auto& group : rhs_list) {
     for (auto node_name : group) {
       std::string read_node_name(lnast->get_name(node_name));
       if (is_temp_var(read_node_name)) {
@@ -322,7 +322,7 @@ void Semantic_check::resolve_read_write_lists(Lnast *lnast) {
   }
 }
 
-void Semantic_check::resolve_lhs_rhs_lists(Lnast *lnast) {
+void Semantic_check::resolve_lhs_rhs_lists(Lnast* lnast) {
   // Check for variables are considered unnecessary causing an inefficient LNAST
   for (auto lhs_node : lhs_list) {
     std::string_view lhs_name = lnast->get_name(lhs_node);
@@ -404,7 +404,7 @@ void Semantic_check::resolve_out_of_scope() {
   }
 }
 
-void Semantic_check::check_primitive_ops(Lnast *lnast, const Lnast_nid &lnidx_opr, const Lnast_ntype node_type,
+void Semantic_check::check_primitive_ops(Lnast* lnast, const Lnast_nid& lnidx_opr, const Lnast_ntype node_type,
                                          std::string_view stmt_name) {
   if (!lnast->has_single_child(lnidx_opr)) {
     // Vector for add_to_rhs_list()
@@ -435,7 +435,7 @@ void Semantic_check::check_primitive_ops(Lnast *lnast, const Lnast_nid &lnidx_op
 
     } else if (node_type.is_tuple_concat()) {
       int num_of_ref = 0;
-      for (const auto &lnidx_opr_child : lnast->children(lnidx_opr)) {
+      for (const auto& lnidx_opr_child : lnast->children(lnidx_opr)) {
         const auto node_type_child = lnast->get_data(lnidx_opr_child).type;
 
         if (lnast->get_first_child(lnidx_opr) == lnidx_opr_child) {
@@ -484,7 +484,7 @@ void Semantic_check::check_primitive_ops(Lnast *lnast, const Lnast_nid &lnidx_op
       }
 #endif
     } else if (node_type.is_nary_op()) {
-      for (const auto &lnidx_opr_child : lnast->children(lnidx_opr)) {
+      for (const auto& lnidx_opr_child : lnast->children(lnidx_opr)) {
         const auto node_type_child = lnast->get_data(lnidx_opr_child).type;
 
         if (lnidx_opr_child == lnast->get_first_child(lnidx_opr)) {
@@ -517,7 +517,7 @@ void Semantic_check::check_primitive_ops(Lnast *lnast, const Lnast_nid &lnidx_op
   }
 }
 
-void Semantic_check::check_tree_struct_ops(Lnast *lnast, const Lnast_nid &lnidx_opr, const Lnast_ntype node_type,
+void Semantic_check::check_tree_struct_ops(Lnast* lnast, const Lnast_nid& lnidx_opr, const Lnast_ntype node_type,
                                            std::string_view stmt_name) {
   in_scope_stack.push_back(write_dict);
   in_scope_stack.push_back(read_dict);
@@ -560,13 +560,13 @@ void Semantic_check::check_tree_struct_ops(Lnast *lnast, const Lnast_nid &lnidx_
   in_scope_stack.pop_back();
 }
 
-void Semantic_check::check_if_op(Lnast *lnast, const Lnast_nid &lnidx_opr, std::string_view stmt_name) {
-  for (const auto &lnidx_opr_child : lnast->children(lnidx_opr)) {
+void Semantic_check::check_if_op(Lnast* lnast, const Lnast_nid& lnidx_opr, std::string_view stmt_name) {
+  for (const auto& lnidx_opr_child : lnast->children(lnidx_opr)) {
     const auto ntype_child = lnast->get_data(lnidx_opr_child).type;
 
     if (ntype_child.is_stmts()) {
       auto new_stmt_name = lnast->get_name(lnidx_opr_child);
-      for (const auto &lnidx_opr_child_child : lnast->children(lnidx_opr_child)) {
+      for (const auto& lnidx_opr_child_child : lnast->children(lnidx_opr_child)) {
         const auto ntype_child_child = lnast->get_data(lnidx_opr_child_child).type;
 
         if (ntype_child_child.is_primitive_op()) {
@@ -585,17 +585,17 @@ void Semantic_check::check_if_op(Lnast *lnast, const Lnast_nid &lnidx_opr, std::
   }
 }
 
-void Semantic_check::check_for_op(Lnast *lnast, const Lnast_nid &lnidx_opr, std::string_view stmt_name) {
+void Semantic_check::check_for_op(Lnast* lnast, const Lnast_nid& lnidx_opr, std::string_view stmt_name) {
   bool stmts      = false;
   bool it_name    = false;
   int  num_of_ref = 0;
-  for (const auto &lnidx_opr_child : lnast->children(lnidx_opr)) {
+  for (const auto& lnidx_opr_child : lnast->children(lnidx_opr)) {
     const auto ntype_child = lnast->get_data(lnidx_opr_child).type;
 
     if (ntype_child.is_stmts()) {
       stmts = true;
       // Iterate through statements
-      for (const auto &lnidx_opr_child_child : lnast->children(lnidx_opr_child)) {
+      for (const auto& lnidx_opr_child_child : lnast->children(lnidx_opr_child)) {
         const auto ntype_child_child = lnast->get_data(lnidx_opr_child_child).type;
         if (ntype_child_child.is_primitive_op()) {
           check_primitive_ops(lnast, lnidx_opr_child_child, ntype_child_child, lnast->get_name(lnidx_opr_child));
@@ -627,10 +627,10 @@ void Semantic_check::check_for_op(Lnast *lnast, const Lnast_nid &lnidx_opr, std:
   }
 }
 
-void Semantic_check::check_while_op(Lnast *lnast, const Lnast_nid &lnidx_opr, std::string_view stmt_name) {
+void Semantic_check::check_while_op(Lnast* lnast, const Lnast_nid& lnidx_opr, std::string_view stmt_name) {
   bool cond = false;
   bool stmt = false;
-  for (const auto &lnidx_opr_child : lnast->children(lnidx_opr)) {
+  for (const auto& lnidx_opr_child : lnast->children(lnidx_opr)) {
     const auto ntype_child = lnast->get_data(lnidx_opr_child).type;
 
     if (ntype_child.is_ref() || ntype_child.is_const()) {
@@ -639,7 +639,7 @@ void Semantic_check::check_while_op(Lnast *lnast, const Lnast_nid &lnidx_opr, st
     } else if (ntype_child.is_stmts()) {
       stmt = true;
       // Iterate through statements
-      for (const auto &lnidx_opr_child_child : lnast->children(lnidx_opr_child)) {
+      for (const auto& lnidx_opr_child_child : lnast->children(lnidx_opr_child)) {
         const auto ntype_child_child = lnast->get_data(lnidx_opr_child_child).type;
         if (ntype_child_child.is_primitive_op()) {
           check_primitive_ops(lnast, lnidx_opr_child_child, ntype_child_child, lnast->get_name(lnidx_opr_child));
@@ -663,12 +663,12 @@ void Semantic_check::check_while_op(Lnast *lnast, const Lnast_nid &lnidx_opr, st
   }
 }
 
-void Semantic_check::check_func_def(Lnast *lnast, const Lnast_nid &lnidx_opr, std::string_view stmt_name) {
+void Semantic_check::check_func_def(Lnast* lnast, const Lnast_nid& lnidx_opr, std::string_view stmt_name) {
   int  num_of_refs = 0;
   bool cond        = false;
   bool stmts       = false;
   // Iterate through children of func def node
-  for (const auto &lnidx_opr_child : lnast->children(lnidx_opr)) {
+  for (const auto& lnidx_opr_child : lnast->children(lnidx_opr)) {
     const auto ntype_child = lnast->get_data(lnidx_opr_child).type;
 
     // First child is the func_name
@@ -685,7 +685,7 @@ void Semantic_check::check_func_def(Lnast *lnast, const Lnast_nid &lnidx_opr, st
         stmts         = true;
         new_stmt_name = lnast->get_name(lnidx_opr_child);
       }
-      for (const auto &lnidx_opr_child_child : lnast->children(lnidx_opr_child)) {
+      for (const auto& lnidx_opr_child_child : lnast->children(lnidx_opr_child)) {
         const auto ntype_child_child = lnast->get_data(lnidx_opr_child_child).type;
         if (ntype_child_child.is_primitive_op()) {
           check_primitive_ops(lnast, lnidx_opr_child_child, ntype_child_child, new_stmt_name);
@@ -763,10 +763,10 @@ void Semantic_check::check_func_def(Lnast *lnast, const Lnast_nid &lnidx_opr, st
   }
 }
 
-void Semantic_check::check_func_call(Lnast *lnast, const Lnast_nid &lnidx_opr, std::string_view stmt_name) {
+void Semantic_check::check_func_call(Lnast* lnast, const Lnast_nid& lnidx_opr, std::string_view stmt_name) {
   int num_of_refs = 0;
   // Iterate through children of func call node
-  for (const auto &lnidx_opr_child : lnast->children(lnidx_opr)) {
+  for (const auto& lnidx_opr_child : lnast->children(lnidx_opr)) {
     const auto ntype_child = lnast->get_data(lnidx_opr_child).type;
 
     // First child hold the name of the func call
@@ -792,11 +792,11 @@ void Semantic_check::check_func_call(Lnast *lnast, const Lnast_nid &lnidx_opr, s
 }
 
 // NOTE: Test does only consider tuple and tuple concat operations
-void Semantic_check::do_check(Lnast *lnast) {
+void Semantic_check::do_check(Lnast* lnast) {
   // Get Lnast Root
   const auto stmts = lnast->get_first_child(lh::Tree_index::root());
   // Iterate through Lnast top statements
-  for (const auto &stmt : lnast->children(stmts)) {
+  for (const auto& stmt : lnast->children(stmts)) {
     const auto ntype     = lnast->get_data(stmt).type;
     const auto stmt_name = lnast->get_name(stmts);
 

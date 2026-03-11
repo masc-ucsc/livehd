@@ -17,18 +17,18 @@ unsigned int rseed = 123;
 
 class Setup_graphs_test : public ::testing::Test {
 protected:
-  Lgraph *top  = 0;
-  Lgraph *c1   = 0;  // Child 1
-  Lgraph *c3   = 0;  // Child 2
-  Lgraph *c2   = 0;  // Child 3
-  Lgraph *gc11 = 0;  // Grand Child from 1, 1st
-  Lgraph *gc31 = 0;  // Grand child from 3, 1st
-  Lgraph *gc32 = 0;  // Grand child from 3, 2nd
-  Lgraph *top2 = 0;
+  Lgraph* top  = 0;
+  Lgraph* c1   = 0;  // Child 1
+  Lgraph* c3   = 0;  // Child 2
+  Lgraph* c2   = 0;  // Child 3
+  Lgraph* gc11 = 0;  // Grand Child from 1, 1st
+  Lgraph* gc31 = 0;  // Grand child from 3, 1st
+  Lgraph* gc32 = 0;  // Grand child from 3, 2nd
+  Lgraph* top2 = 0;
 
   absl::flat_hash_map<std::string, int> children;
 
-  void add_child(Lgraph *parent, Lgraph *child, std::string_view iname, bool randomize) {
+  void add_child(Lgraph* parent, Lgraph* child, std::string_view iname, bool randomize) {
     Node node;
 
     if (child) {
@@ -46,11 +46,11 @@ protected:
 
       node = parent->create_node_sub(iname);
 
-      auto       *sub        = node.ref_type_sub_node();
-      const auto &parent_sub = parent->get_self_sub_node();
+      auto*       sub        = node.ref_type_sub_node();
+      const auto& parent_sub = parent->get_self_sub_node();
 
       // Match parent names in tmap
-      for (const auto &io_pin : parent_sub.get_io_pins()) {
+      for (const auto& io_pin : parent_sub.get_io_pins()) {
         if (io_pin.dir == Sub_node::Direction::Input) {
           if (!sub->has_pin(io_pin.name)) {
             sub->add_input_pin(io_pin.name);
@@ -80,7 +80,7 @@ protected:
     }
   }
 
-  void add_io(Lgraph *g) {
+  void add_io(Lgraph* g) {
     int inps = rand_r(&rseed) % 4;  // 0..3 inputs
     int pos  = 0;
     for (int j = 0; j < inps; j++) {
@@ -95,10 +95,10 @@ protected:
     }
   }
 
-  std::vector<Lgraph *> lgs;
+  std::vector<Lgraph*> lgs;
 
   void SetUp() override {
-    auto *lib = Graph_library::instance("lgdb_lg_each");
+    auto* lib = Graph_library::instance("lgdb_lg_each");
     top       = lib->create_lgraph("top", "nosource");
     ASSERT_NE(top, nullptr);
     c1 = lib->create_lgraph("c1", "nosource");
@@ -125,7 +125,7 @@ protected:
     lgs.push_back(gc32);
     lgs.push_back(top2);
 
-    for (auto &lg : lgs) {
+    for (auto& lg : lgs) {
       add_io(lg);
     }
 
@@ -159,7 +159,7 @@ protected:
       std::string lg_name{"lg_name"};
       lg_name += std::to_string(i);
 
-      auto *lg = lib->create_lgraph(lg_name, "nosource");
+      auto* lg = lib->create_lgraph(lg_name, "nosource");
       add_io(lg);
 
       for (int j = rnd_cells.any(); j > 0; --j) {
@@ -169,7 +169,7 @@ protected:
 
       for (int j = 0; j < 2; ++j) {
         std::string i_name(lg_name + "_" + std::to_string(j));
-        auto       *parent_lg = lgs[rnd.any()];
+        auto*       parent_lg = lgs[rnd.any()];
         add_child(parent_lg, lg, i_name, randomize);
       }
     }
@@ -178,7 +178,7 @@ protected:
   }
 
   void TearDown() override {
-    for (auto *lg : lgs) {
+    for (auto* lg : lgs) {
       delete lg;
     }
     lgs.clear();
@@ -188,11 +188,11 @@ protected:
 TEST_F(Setup_graphs_test, each_local_sub) {
   absl::flat_hash_map<std::string, int> children2;
 
-  for (auto &parent : lgs) {
+  for (auto& parent : lgs) {
     std::print("checking parent:{}\n", parent->get_name());
-    parent->each_local_sub_fast([parent, &children2, this](Node &node, Lg_type_id lgid) {
+    parent->each_local_sub_fast([parent, &children2, this](Node& node, Lg_type_id lgid) {
       (void)lgid;
-      Lgraph *child = parent->ref_library()->open_lgraph(node.get_type_sub());
+      Lgraph* child = parent->ref_library()->open_lgraph(node.get_type_sub());
       if (child == nullptr) {
         return;
       }
@@ -217,7 +217,7 @@ TEST_F(Setup_graphs_test, each_local_sub) {
     });
   }
 
-  for (const auto &c : children) {
+  for (const auto& c : children) {
     if (str_tools::contains(c.first, "tmap")) {
       EXPECT_EQ(c.second, 1);
     } else if (str_tools::contains(c.first, "cell")) {
@@ -226,7 +226,7 @@ TEST_F(Setup_graphs_test, each_local_sub) {
       EXPECT_EQ(c.second, children2[c.first]);
     }
   }
-  for (const auto &c : children2) {
+  for (const auto& c : children2) {
     if (str_tools::contains(c.first, "tmap")) {
       EXPECT_EQ(c.second, 1);
     } else if (str_tools::contains(c.first, "cell")) {
@@ -240,11 +240,11 @@ TEST_F(Setup_graphs_test, each_local_sub) {
 TEST_F(Setup_graphs_test, each_local_sub_twice) {
   absl::flat_hash_map<std::string, int> children2;
 
-  for (auto &parent : lgs) {
+  for (auto& parent : lgs) {
     std::print("checking parent:{}\n", parent->get_name());
-    parent->each_local_sub_fast([parent, &children2, this](Node &node, Lg_type_id lgid) {
+    parent->each_local_sub_fast([parent, &children2, this](Node& node, Lg_type_id lgid) {
       (void)lgid;
-      Lgraph *child = parent->ref_library()->open_lgraph(node.get_type_sub());
+      Lgraph* child = parent->ref_library()->open_lgraph(node.get_type_sub());
       if (child == nullptr) {
         return;
       }
@@ -269,7 +269,7 @@ TEST_F(Setup_graphs_test, each_local_sub_twice) {
     });
   }
 
-  for (auto &c : children) {
+  for (auto& c : children) {
     if (str_tools::contains(c.first, "tmap")) {
       EXPECT_EQ(c.second, 1);
     } else if (str_tools::contains(c.first, "cell")) {
@@ -278,7 +278,7 @@ TEST_F(Setup_graphs_test, each_local_sub_twice) {
       EXPECT_EQ(c.second, children2[c.first]);
     }
   }
-  for (auto &c : children2) {
+  for (auto& c : children2) {
     if (str_tools::contains(c.first, "tmap")) {
       EXPECT_EQ(c.second, 1);
     } else if (str_tools::contains(c.first, "cell")) {
@@ -290,17 +290,17 @@ TEST_F(Setup_graphs_test, each_local_sub_twice) {
 }
 
 TEST_F(Setup_graphs_test, hierarchy) {
-  for (auto &parent : lgs) {
+  for (auto& parent : lgs) {
     std::print("hierarchy for name:{} lgid:{}\n", parent->get_name(), parent->get_lgid());
-    parent->each_local_sub_fast([](Node &node, Lg_type_id lgid) { std::print("  {} {}\n", node.get_name(), lgid); });
+    parent->each_local_sub_fast([](Node& node, Lg_type_id lgid) { std::print("  {} {}\n", node.get_name(), lgid); });
   }
 
   EXPECT_TRUE(true);
 }
 
 TEST_F(Setup_graphs_test, No_each_input) {
-  for (auto &parent : lgs) {
-    parent->each_graph_input([](const Node_pin &pin) {
+  for (auto& parent : lgs) {
+    parent->each_graph_input([](const Node_pin& pin) {
       EXPECT_TRUE(pin.is_graph_input());
       EXPECT_TRUE(!pin.is_graph_output());
       EXPECT_FALSE(pin.get_node().has_inputs());
@@ -311,8 +311,8 @@ TEST_F(Setup_graphs_test, No_each_input) {
 }
 
 TEST_F(Setup_graphs_test, No_each_output) {
-  for (auto &parent : lgs) {
-    parent->each_graph_output([](const Node_pin &pin) {
+  for (auto& parent : lgs) {
+    parent->each_graph_output([](const Node_pin& pin) {
       EXPECT_TRUE(!pin.is_graph_input());
       EXPECT_TRUE(pin.is_graph_output());
       EXPECT_FALSE(pin.get_node().has_outputs());
@@ -325,10 +325,10 @@ TEST_F(Setup_graphs_test, No_each_output) {
 TEST_F(Setup_graphs_test, each_unique_hier_sub_parallel) {
   std::map<Lg_type_id, int> to_pos;
 
-  std::vector<Lgraph *> all_lgs;
+  std::vector<Lgraph*> all_lgs;
 
   // to_pos[top->get_lgid()] = 0;
-  top->each_hier_unique_sub_bottom_up([&to_pos, &all_lgs](Lgraph *lg) -> bool {
+  top->each_hier_unique_sub_bottom_up([&to_pos, &all_lgs](Lgraph* lg) -> bool {
     // std::print("adding name:{} lgid:{}\n", lg->get_name(), lg->get_lgid());
 
     EXPECT_TRUE(to_pos.find(lg->get_lgid()) == to_pos.end());
@@ -344,7 +344,7 @@ TEST_F(Setup_graphs_test, each_unique_hier_sub_parallel) {
 
   // top->get_htree().dump();
 
-  top->each_hier_unique_sub_bottom_up([&to_pos, &all_visited](Lgraph *lg) -> bool {
+  top->each_hier_unique_sub_bottom_up([&to_pos, &all_visited](Lgraph* lg) -> bool {
     // std::print("1a.checking name:{} lgid:{}\n", lg->get_name(), lg->get_lgid());
     bool sure_leaf = lg->get_down_class_map().empty();
 
@@ -355,7 +355,7 @@ TEST_F(Setup_graphs_test, each_unique_hier_sub_parallel) {
     all_visited[pos] = 1;
     EXPECT_EQ(all_visited[pos], 1);  // no double insertions
 
-    lg->each_local_unique_sub_fast([&all_visited, &to_pos, &sure_leaf](Lgraph *sub_lg) -> bool {
+    lg->each_local_unique_sub_fast([&all_visited, &to_pos, &sure_leaf](Lgraph* sub_lg) -> bool {
       // std::print("1b.checking name:{} lgid:{}\n", sub_lg->get_name(), sub_lg->get_lgid());
 
       EXPECT_FALSE(sure_leaf);  // A leaf should not have sub nodes
@@ -372,7 +372,7 @@ TEST_F(Setup_graphs_test, each_unique_hier_sub_parallel) {
 
   all_visited.clear();
   all_visited.resize(all_lgs.size());
-  top->each_hier_unique_sub_bottom_up_parallel2([&to_pos, &all_visited](Lgraph *lg) -> bool {
+  top->each_hier_unique_sub_bottom_up_parallel2([&to_pos, &all_visited](Lgraph* lg) -> bool {
     // std::print("2a.checking name:{} lgid:{}\n", lg->get_name(), lg->get_lgid());
     bool sure_leaf = lg->get_down_class_map().empty();
 
@@ -383,7 +383,7 @@ TEST_F(Setup_graphs_test, each_unique_hier_sub_parallel) {
     all_visited[pos] = 1;
     EXPECT_EQ(all_visited[pos], 1);  // no double insertions
 
-    lg->each_local_unique_sub_fast([&all_visited, &to_pos, &sure_leaf](Lgraph *sub_lg) -> bool {
+    lg->each_local_unique_sub_fast([&all_visited, &to_pos, &sure_leaf](Lgraph* sub_lg) -> bool {
       // std::print("2b.checking name:{} lgid:{}\n", sub_lg->get_name(), sub_lg->get_lgid());
 
       EXPECT_FALSE(sure_leaf);  // A leaf should not have sub nodes

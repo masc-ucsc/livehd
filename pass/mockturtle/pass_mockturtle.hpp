@@ -46,7 +46,7 @@ template <typename sig>
 struct Comparator_input_signal {
   bool                     is_signed;
   std::vector<sig>         signals;
-  Comparator_input_signal &operator=(const Comparator_input_signal &obj) {
+  Comparator_input_signal& operator=(const Comparator_input_signal& obj) {
     I(this != &obj);  // Do not assign object to itself. works but wasteful
     is_signed = obj.is_signed;
     signals   = obj.signals;
@@ -62,7 +62,7 @@ struct Comparator_input_signal<mockturtle::mig_network::signal> {
 
 class Pass_mockturtle : public Pass {
 protected:
-  static void work(Eprp_var &var);
+  static void work(Eprp_var& var);
 
   std::vector<XEdge> bdinp_edges, bdout_edges;  // boundary_input/output_edges
   // absl::flat_hash_set<XEdge> bdinp_edges, bdout_edges;//boundary_input/output_edges
@@ -80,70 +80,69 @@ protected:
   absl::flat_hash_map<std::pair<unsigned int, mockturtle::klut_network::signal>,
                       std::vector<std::pair<mockturtle::klut_network::node, Port_ID>>>
        gid_pi2sink_node_lg_pid;
-  bool lg_partition(Lgraph *);
-  void create_mockturtle_network(Lgraph *);
+  bool lg_partition(Lgraph*);
+  void create_mockturtle_network(Lgraph*);
   void convert_mockturtle_to_KLUT();
-  void create_lutified_lgraph(Lgraph *);
+  void create_lutified_lgraph(Lgraph*);
 
-  void connect_complemented_signal(Lgraph *, Node_pin &, Node_pin &, const mockturtle::klut_network &,
-                                   const mockturtle::klut_network::signal &);
-
-  template <typename sig_type, typename ntk_type>
-  void setup_input_signals(const unsigned int &, const XEdge &, std::vector<sig_type> &, ntk_type &);
+  void connect_complemented_signal(Lgraph*, Node_pin&, Node_pin&, const mockturtle::klut_network&,
+                                   const mockturtle::klut_network::signal&);
 
   template <typename sig_type, typename ntk_type>
-  void setup_output_signals(const unsigned int &, const XEdge &, std::vector<sig_type> &, ntk_type &);
+  void setup_input_signals(const unsigned int&, const XEdge&, std::vector<sig_type>&, ntk_type&);
+
+  template <typename sig_type, typename ntk_type>
+  void setup_output_signals(const unsigned int&, const XEdge&, std::vector<sig_type>&, ntk_type&);
 
   template <typename signal>
-  void split_input_signal(const std::vector<signal> &, std::vector<std::vector<signal>> &);
+  void split_input_signal(const std::vector<signal>&, std::vector<std::vector<signal>>&);
 
   template <typename sig_type, typename ntk_type>
-  void convert_signed_to_unsigned(const Comparator_input_signal<sig_type> &, Comparator_input_signal<sig_type> &, ntk_type &);
+  void convert_signed_to_unsigned(const Comparator_input_signal<sig_type>&, Comparator_input_signal<sig_type>&, ntk_type&);
 
   template <typename sig_type, typename ntk_type>
-  void complement_to_SMR(std::vector<sig_type> const &, std::vector<sig_type> &, ntk_type &);
+  void complement_to_SMR(std::vector<sig_type> const&, std::vector<sig_type>&, ntk_type&);
 
   template <typename sig_type, typename ntk_type>
-  void shift_op(const std::vector<sig_type> &, const bool &, const bool &, const long unsigned int &, std::vector<sig_type> &,
-                ntk_type &);
+  void shift_op(const std::vector<sig_type>&, const bool&, const bool&, const long unsigned int&, std::vector<sig_type>&,
+                ntk_type&);
 
   template <typename sig_type, typename ntk_type>
-  void create_n_bit_k_input_mux(std::vector<std::vector<sig_type>> const &, std::vector<sig_type> const &, std::vector<sig_type> &,
-                                ntk_type &);
+  void create_n_bit_k_input_mux(std::vector<std::vector<sig_type>> const&, std::vector<sig_type> const&, std::vector<sig_type>&,
+                                ntk_type&);
 
   template <typename sig_type, typename ntk_type>
-  sig_type is_equal_op(const Comparator_input_signal<sig_type> &, const Comparator_input_signal<sig_type> &, ntk_type &);
+  sig_type is_equal_op(const Comparator_input_signal<sig_type>&, const Comparator_input_signal<sig_type>&, ntk_type&);
 
   template <typename sig_type, typename ntk_type>
-  sig_type compare_op(const Comparator_input_signal<sig_type> &, const Comparator_input_signal<sig_type> &, const bool &,
-                      const bool &, ntk_type &);
+  sig_type compare_op(const Comparator_input_signal<sig_type>&, const Comparator_input_signal<sig_type>&, const bool&, const bool&,
+                      ntk_type&);
 
   template <typename sig_type, typename ntk_type>
-  void match_bit_width_by_sign_extension(const Comparator_input_signal<sig_type> &, const Comparator_input_signal<sig_type> &,
-                                         Comparator_input_signal<sig_type> &, Comparator_input_signal<sig_type> &, ntk_type &);
+  void match_bit_width_by_sign_extension(const Comparator_input_signal<sig_type>&, const Comparator_input_signal<sig_type>&,
+                                         Comparator_input_signal<sig_type>&, Comparator_input_signal<sig_type>&, ntk_type&);
 
   template <typename sig_type, typename ntk_type>
-  void mapping_logic_cell_lg2mt(sig_type (ntk_type::*)(std::vector<sig_type> const &), ntk_type &, const Node &,
-                                const unsigned int &);
+  void mapping_logic_cell_lg2mt(sig_type (ntk_type::*)(std::vector<sig_type> const&), ntk_type&, const Node&, const unsigned int&);
 
   template <typename ntk_type>
-  void mapping_comparison_cell_lg2mt(const bool &, const bool &, ntk_type &, const Node &, const unsigned int &);
+  void mapping_comparison_cell_lg2mt(const bool&, const bool&, ntk_type&, const Node&, const unsigned int&);
 
   template <typename ntk_type>
-  void mapping_shift_cell_lg2mt(const bool &, const bool &, ntk_type &, const Node &, const unsigned int &);
+  void mapping_shift_cell_lg2mt(const bool&, const bool&, ntk_type&, const Node&, const unsigned int&);
 
   template <typename ntk_type>
-  void mapping_dynamic_shift_cell_lg2mt(const bool &, ntk_type &, const Node &, const unsigned int &);
+  void mapping_dynamic_shift_cell_lg2mt(const bool&, ntk_type&, const Node&, const unsigned int&);
 
   template <typename signal, typename ntk>
-  void create_half_adder(const signal &x, const signal &y, signal &s, signal &c, ntk &net) {
+  void create_half_adder(const signal& x, const signal& y, signal& s, signal& c, ntk& net) {
     s = net.create_xor(x, y);
     c = net.create_and(x, y);
   }
 
   template <typename ntk>
-  void create_full_adder(const typename ntk::signal &a, const typename ntk::signal &b, const typename ntk::signal &c_in,
-                         typename ntk::signal &s, typename ntk::signal &c_out, ntk &net) {
+  void create_full_adder(const typename ntk::signal& a, const typename ntk::signal& b, const typename ntk::signal& c_in,
+                         typename ntk::signal& s, typename ntk::signal& c_out, ntk& net) {
     typename ntk::signal a_xor_b       = net.create_xor(a, b);
     typename ntk::signal a_and_b       = net.create_and(a, b);
     typename ntk::signal axorb_and_cin = net.create_and(a_xor_b, c_in);
@@ -152,17 +151,17 @@ protected:
   }
 
   template <typename signal, typename ntk>
-  signal create_lt(const signal &x, const signal &y, ntk &net) {
+  signal create_lt(const signal& x, const signal& y, ntk& net) {
     return net.create_lt(x, y);
   }
 
   template <typename signal, typename ntk>
-  signal create_gt(const signal &x, const signal &y, ntk &net) {
+  signal create_gt(const signal& x, const signal& y, ntk& net) {
     // return net.create_gt(y, x);
     return net.create_lt(y, x);
   }
 
-  void converting_uint32_to_signed_SMR(const uint32_t &in, uint32_t &out, bool &is_neg) {
+  void converting_uint32_to_signed_SMR(const uint32_t& in, uint32_t& out, bool& is_neg) {
     if (((1ULL << 31) & in) != 0) {
       out    = (~in) + 1;
       is_neg = true;
@@ -172,7 +171,7 @@ protected:
     }
   }
 
-  bool eligible_cell_op(const Node &cell) {
+  bool eligible_cell_op(const Node& cell) {
     switch (cell.get_type_op()) {
       // case GraphIO_Op:
       //  //std::cout << "Node: GraphIO_Op";
@@ -206,7 +205,7 @@ protected:
       case Ntype_op::SHL:
         // std::cout << "Node: ShiftLeft_Op\n";
         // check if Node_Pin "B" is a constant or of small bit_width
-        for (const auto &in_edge : cell.inp_edges()) {
+        for (const auto& in_edge : cell.inp_edges()) {
           if (in_edge.sink.get_pid() == 1 && in_edge.get_bits() > BIT_WIDTH_THRESHOLD) {
             return false;
           }
@@ -214,7 +213,7 @@ protected:
         break;
       case Ntype_op::SRA: {
         // std::cout << "Node: ArithShiftRight_Op\n";
-        for (const auto &in_edge : cell.inp_edges()) {
+        for (const auto& in_edge : cell.inp_edges()) {
           if (in_edge.sink.get_pid() == 1 && in_edge.get_bits() > BIT_WIDTH_THRESHOLD) {
             return false;
           }
@@ -228,10 +227,10 @@ protected:
     return true;
   }
 
-  void do_work(Lgraph *g);
+  void do_work(Lgraph* g);
 
 public:
-  Pass_mockturtle(const Eprp_var &var) : Pass("pass.mockturtle", var) {};
+  Pass_mockturtle(const Eprp_var& var) : Pass("pass.mockturtle", var) {};
 
   static void setup();
 };

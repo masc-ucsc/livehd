@@ -48,7 +48,7 @@ struct Tech_pin {
   float   yh;  // height
   uint8_t layer_id;
 
-  bool overlap(const Tech_pin &o) const {
+  bool overlap(const Tech_pin& o) const {
     if (layer_id != o.layer_id) {
       return false;
     }

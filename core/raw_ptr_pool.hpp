@@ -20,7 +20,7 @@ public:
     }
   }
 
-  void *get_ptr() {
+  void* get_ptr() {
     auto raw_retval = _pointer_queue.dequeue();
     if (!raw_retval) {
       return malloc(size);
@@ -28,7 +28,7 @@ public:
     return *raw_retval;
   }
 
-  void release_ptr(void *to_release) {
+  void release_ptr(void* to_release) {
     bool fits = _pointer_queue.enqueue(to_release);
     if (fits) {
       return;
@@ -37,5 +37,5 @@ public:
   }
 
 private:
-  spsc256<void *> _pointer_queue;
+  spsc256<void*> _pointer_queue;
 };

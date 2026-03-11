@@ -1601,13 +1601,13 @@ bool Traverse_lg::out_sets_intersect(const absl::flat_hash_set<Node_pin::Compact
     return true;
   }
 
-  if (set1.size() < set2.size())  {
+  if (set1.size() < set2.size()) {
     for (const auto& np : set1) {
       if (set2.contains(np)) {
         return true;
       }
     }
-  }else{
+  } else {
     for (const auto& np : set2) {
       if (set1.contains(np)) {
         return true;
@@ -3940,9 +3940,9 @@ void Traverse_lg::get_input_node(const Node_pin& node_pin, std::set<std::string>
       }
       // return Node::Compact_flat();
     } else {
-      bool        isFlop = (node.is_type_flop()
+      bool isFlop = (node.is_type_flop()
                      || (node.is_type_sub() ? ((std::string(node.get_type_sub_node().get_name())).find("_df") != std::string::npos)
-                                                   : false));
+                                            : false));
       std::string temp_str(isFlop ? "flop"
                                   : (node.is_type_sub() ? (std::string(node.get_type_sub_node().get_name()))
                                                         : node.get_type_name()));  // if it is a flop, write "flop" else evaluate
@@ -3993,9 +3993,9 @@ void Traverse_lg::get_output_node(const Node_pin& node_pin, std::set<std::string
       out_set.insert(node_pin.get_pin_name());
       io_set.insert(node_pin.get_pin_name());
     } else {
-      bool        isFlop = (node.is_type_flop()
+      bool isFlop = (node.is_type_flop()
                      || (node.is_type_sub() ? ((std::string(node.get_type_sub_node().get_name())).find("_df") != std::string::npos)
-                                                   : false));
+                                            : false));
       std::string temp_str(isFlop ? "flop"
                                   : (node.is_type_sub() ? (std::string(node.get_type_sub_node().get_name()))
                                                         : node.get_type_name()));  // if it is a flop, write "flop" else evaluate

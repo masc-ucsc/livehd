@@ -119,7 +119,7 @@ public:
     text  = _text;
     fname = _fname;
   }
-  Ref_token(const Tracker &t, const char *memblock) {
+  Ref_token(const Tracker& t, const char* memblock) {
     tok  = t.tok;
     pos1 = t.pos1;
     pos2 = t.pos2;
@@ -208,7 +208,7 @@ public:
     fname = _fname;
   }
   // State_token(const Ref_token &r) : text(r.get_text()), tok(r.tok), pos1(r.pos1), pos2(r.pos2), line(r.line) {}
-  State_token(const Ref_token &r) : text(r.get_text()), tok(r.tok), pos1(r.pos1), pos2(r.pos2), line(r.line), fname(r.fname) {}
+  State_token(const Ref_token& r) : text(r.get_text()), tok(r.tok), pos1(r.pos1), pos2(r.pos2), line(r.line), fname(r.fname) {}
 
   Token_id    tok;    // Token (identifier, if, while...)
   uint64_t    pos1;   // start position in original memblock for debugging
@@ -228,7 +228,7 @@ protected:
 
   std::string filename;
 
-  const char *memblock;
+  const char* memblock;
   size_t      memblock_size;
   int         memblock_fd;
   void        unregister_memblock();
@@ -236,17 +236,17 @@ protected:
   struct Translate_item {
     Translate_item() : tok(Token_id_nop), try_merge(false) {}
     Translate_item(Token_id t, bool tm = false) : tok(t), try_merge(tm) {}
-    Translate_item(const Translate_item &t) : tok(t.tok), try_merge(t.try_merge) {}
-    Translate_item(const Token_id &other_tok) : tok(other_tok), try_merge(false) {}
+    Translate_item(const Translate_item& t) : tok(t.tok), try_merge(t.try_merge) {}
+    Translate_item(const Token_id& other_tok) : tok(other_tok), try_merge(false) {}
 #if 1
-    Translate_item &operator=(const Translate_item &other) {
-      *const_cast<Token_id *>(&tok)   = other.tok;
-      *const_cast<bool *>(&try_merge) = other.try_merge;
+    Translate_item& operator=(const Translate_item& other) {
+      *const_cast<Token_id*>(&tok)   = other.tok;
+      *const_cast<bool*>(&try_merge) = other.try_merge;
       return *this;
     }
-    Translate_item &operator=(const Token_id &other_tok) {
-      *const_cast<Token_id *>(&tok)   = other_tok;
-      *const_cast<bool *>(&try_merge) = false;
+    Translate_item& operator=(const Token_id& other_tok) {
+      *const_cast<Token_id*>(&tok)   = other_tok;
+      *const_cast<bool*>(&try_merge) = false;
       return *this;
     }
 #endif
@@ -268,7 +268,7 @@ protected:
 
   void setup_translate();
 
-  void add_token(const Ref_token::Tracker &t);
+  void add_token(const Ref_token::Tracker& t);
 
   void scan_raw_msg(std::string_view cat, std::string_view text, bool third) const;
 
@@ -301,37 +301,37 @@ public:
   class scan_error : public std::runtime_error {
   public:
     template <typename... Args>
-    scan_error(const Elab_scanner &scanner, std::format_string<Args...> format, Args &&...args)
+    scan_error(const Elab_scanner& scanner, std::format_string<Args...> format, Args&&... args)
         : std::runtime_error(std::format(format, std::forward<Args>(args)...)) {
       scanner.scan_error_int(what());
     };
   };
 
   template <typename... Args>
-  void scan_warn(std::format_string<Args...> format, Args &&...args) const {
+  void scan_warn(std::format_string<Args...> format, Args&&... args) const {
     scan_warn_int(std::format(format, std::forward<Args>(args)...));
   }
 
   class parser_error : public std::runtime_error {
   public:
     template <typename... Args>
-    parser_error(const Elab_scanner &scanner, std::format_string<Args...> format, Args &&...args)
+    parser_error(const Elab_scanner& scanner, std::format_string<Args...> format, Args&&... args)
         : std::runtime_error(std::format(format, args...)) {
       scanner.parser_error_int(what());
     };
-    parser_error(const Elab_scanner &scanner, std::string_view txt) : std::runtime_error(std::string(txt)) {
+    parser_error(const Elab_scanner& scanner, std::string_view txt) : std::runtime_error(std::string(txt)) {
       scanner.parser_error_int(what());
     };
   };
 
   template <typename... Args>
-  void parser_warn(std::format_string<Args...> format, Args &&...args) const {
+  void parser_warn(std::format_string<Args...> format, Args&&... args) const {
     parser_warn_int(std::format(format, args...));
   }
   void parser_warn(std::string_view txt) const { parser_warn_int(txt); }
 
   template <typename... Args>
-  void parser_info(std::format_string<Args...> format, Args &&...args) const {
+  void parser_info(std::format_string<Args...> format, Args&&... args) const {
     parser_info_int(std::format(format, args...));
   }
   void parser_info(std::string_view txt) const { parser_warn_int(txt); }
@@ -434,7 +434,7 @@ public:
     ;
   }
 
-  void patch_pass(const absl::flat_hash_map<std::string, Token_id> &keywords);
+  void patch_pass(const absl::flat_hash_map<std::string, Token_id>& keywords);
 
   void patch_pass() {
     absl::flat_hash_map<std::string, Token_id> no_keywords;
@@ -471,5 +471,5 @@ public:
     return token_list[p];
   }
 
-  const Ref_token &get_token(Token_entry entry) { return token_list[entry]; }
+  const Ref_token& get_token(Token_entry entry) { return token_list[entry]; }
 };

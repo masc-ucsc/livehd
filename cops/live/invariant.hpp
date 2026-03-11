@@ -18,7 +18,7 @@ typedef std::string                      Graph_ID;
 typedef std::string                      Instance_name;
 
 struct Net_ID_hash {
-  size_t operator()(const std::pair<WireName_ID, uint32_t> &obj) const {
+  size_t operator()(const std::pair<WireName_ID, uint32_t>& obj) const {
     size_t v = obj.first;
     v <<= 16;
     v ^= obj.second;
@@ -49,17 +49,17 @@ public:
 
   Invariant_boundaries() {}
 
-  Invariant_boundaries(const std::string &hier_sep) : hierarchical_separator(hier_sep) {}
+  Invariant_boundaries(const std::string& hier_sep) : hierarchical_separator(hier_sep) {}
 
-  static void                  serialize(Invariant_boundaries *ib, std::ostream &ofs);
-  static Invariant_boundaries *deserialize(std::istream &ifs);
+  static void                  serialize(Invariant_boundaries* ib, std::ostream& ofs);
+  static Invariant_boundaries* deserialize(std::istream& ifs);
 
-  static Graph_ID get_graphID(Lgraph *g) {
+  static Graph_ID get_graphID(Lgraph* g) {
     return std::string(
         g->get_name());  // FIXME: It would be better to use string_view, BUT, Lgraph can delete/add Lgraphs names (can it???)
   }
 
-  static Lgraph *get_graph(Graph_ID id, const std::string &lgdb) { return Lgraph_open(lgdb, id); }
+  static Lgraph* get_graph(Graph_ID id, const std::string& lgdb) { return Lgraph_open(lgdb, id); }
 
   bool is_invariant_boundary(Net_ID net) const {
     if (net.first == 0) {

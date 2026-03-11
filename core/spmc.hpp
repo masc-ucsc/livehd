@@ -21,7 +21,7 @@ public:
   spmc256() : tail(0), head(0) {}
   virtual ~spmc256() {}
 
-  Type *getTailRef() { return &array[tail]; }
+  Type* getTailRef() { return &array[tail]; }
 
   int size() const {  // WARNING: NOT ATOMIC. Can give WEIRD RESULTS
     if (tail > head) {
@@ -31,7 +31,7 @@ public:
     }
   }
 
-  bool enqueue(const Type &item_) {
+  bool enqueue(const Type& item_) {
     // Not thread safe to insert (sp)
     if (full()) {
       return false;

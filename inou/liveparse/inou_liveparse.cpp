@@ -16,9 +16,9 @@ void Inou_liveparse::setup() {
   register_inou("liveparse", m1);
 }
 
-Inou_liveparse::Inou_liveparse(const Eprp_var &var) : Pass("inou.liveparse", var) {}
+Inou_liveparse::Inou_liveparse(const Eprp_var& var) : Pass("inou.liveparse", var) {}
 
-void Inou_liveparse::do_tolg(Eprp_var &var) {
+void Inou_liveparse::do_tolg(Eprp_var& var) {
   bool incremental_mode = false;
 
   if (var.has_label("incr")) {
@@ -30,7 +30,7 @@ void Inou_liveparse::do_tolg(Eprp_var &var) {
 
   Chunkify_verilog chunker_v(path, incremental_mode);
 
-  for (const auto &f : absl::StrSplit(files, ',')) {
+  for (const auto& f : absl::StrSplit(files, ',')) {
     if (str_tools::ends_with(f, ".v") || str_tools::ends_with(f, ".sv")) {
       chunker_v.parse_file(f);
     } else if (str_tools::ends_with(f, ".prp")) {
@@ -43,7 +43,7 @@ void Inou_liveparse::do_tolg(Eprp_var &var) {
   }
 
   std::string files2;
-  for (const auto &f : chunker_v.get_generated_files()) {
+  for (const auto& f : chunker_v.get_generated_files()) {
     if (files2.empty()) {
       files2 = f;
     } else {
@@ -58,7 +58,7 @@ void Inou_liveparse::do_tolg(Eprp_var &var) {
   }
 }
 
-void Inou_liveparse::tolg(Eprp_var &var) {
+void Inou_liveparse::tolg(Eprp_var& var) {
   Inou_liveparse lp(var);
 
   lp.do_tolg(var);

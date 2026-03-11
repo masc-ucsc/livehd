@@ -25,16 +25,16 @@ private:
   absl::flat_hash_map<int, int>           flat_merges;
 
   int  get_free_id();
-  void set_id(const Node &node, int id);
+  void set_id(const Node& node, int id);
   void collapse_merge(int dst);
 
-  void mark_ids(Lgraph *g);
+  void mark_ids(Lgraph* g);
   void merge_ids();
 
 public:
-  void label(Lgraph *g);
+  void label(Lgraph* g);
 
   Label_synth(bool _verbose, bool _hier, std::string_view alg);
 
-  void dump(Lgraph *g) const;
+  void dump(Lgraph* g) const;
 };

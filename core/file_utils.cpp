@@ -44,7 +44,7 @@ std::string file_utils::get_exe_path() {
   return str;
 }
 
-static int rm_file(const char *pathname, const struct stat *sbuf, int type, struct FTW *ftwb) {
+static int rm_file(const char* pathname, const struct stat* sbuf, int type, struct FTW* ftwb) {
   (void)sbuf;
   (void)type;
   (void)ftwb;
@@ -52,7 +52,7 @@ static int rm_file(const char *pathname, const struct stat *sbuf, int type, stru
   return 0;
 }
 
-static void clean_dir_thread(char *path) {
+static void clean_dir_thread(char* path) {
   nftw(path, rm_file, 10, FTW_DEPTH | FTW_MOUNT | FTW_PHYS);
   free(path);
 }
@@ -64,7 +64,7 @@ void file_utils::clean_dir(std::string_view dir) {
 
   const std::string path(dir);
 
-  DIR *dirp = opendir(path.c_str());
+  DIR* dirp = opendir(path.c_str());
   if (dirp == nullptr) {
     mkdir(path.c_str(), 0755);
     return;
@@ -73,7 +73,7 @@ void file_utils::clean_dir(std::string_view dir) {
 
   // Rename, and allow a slow thread to delete it
   char  dtemp[] = "deleting_dir.XXXXXX";
-  char *dtemp2  = strdup(mkdtemp(dtemp));
+  char* dtemp2  = strdup(mkdtemp(dtemp));
   rename(path.c_str(), dtemp2);
 
   mkdir(path.c_str(), 0755);  // Create clean directory again

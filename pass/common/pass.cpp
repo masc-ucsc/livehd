@@ -8,12 +8,12 @@
 
 // Eprp Pass::eprp;
 
-std::string Pass::get_files(const Eprp_var &var) const {
+std::string Pass::get_files(const Eprp_var& var) const {
   std::string _files;
   if (var.has_label("files")) {
     _files = var.get("files");
 
-    for (const auto &f : absl::StrSplit(_files, ',')) {
+    for (const auto& f : absl::StrSplit(_files, ',')) {
       std::string fname(f);
       if (access(fname.c_str(), F_OK) == -1) {
         _files = "/INVALID";
@@ -27,7 +27,7 @@ std::string Pass::get_files(const Eprp_var &var) const {
   return _files;  // eg.: returns "inou/cfg/tests/nested_if.prp"
 }
 
-std::string Pass::get_path(const Eprp_var &var) const {
+std::string Pass::get_path(const Eprp_var& var) const {
   std::string _path;
 
   if (var.has_label("path")) {
@@ -43,7 +43,7 @@ std::string Pass::get_path(const Eprp_var &var) const {
   return _path;
 }
 
-std::string Pass::get_odir(const Eprp_var &var) const {
+std::string Pass::get_odir(const Eprp_var& var) const {
   std::string _odir;
 
   if (var.has_label("odir")) {
@@ -59,10 +59,10 @@ std::string Pass::get_odir(const Eprp_var &var) const {
   return _odir;
 }
 
-Pass::Pass(std::string_view _pass_name, const Eprp_var &var)
+Pass::Pass(std::string_view _pass_name, const Eprp_var& var)
     : pass_name(_pass_name), files(get_files(var)), path(get_path(var)), odir(get_odir(var)) {}
 
-void Pass::register_pass(Eprp_method &method) {
+void Pass::register_pass(Eprp_method& method) {
   eprp.register_method(method);
 
   // All the passses should start with pass.*
@@ -71,7 +71,7 @@ void Pass::register_pass(Eprp_method &method) {
          || method.get_name().substr(0, 7) == "lgraph.");
 }
 
-void Pass::register_inou(std::string_view pname, Eprp_method &method) {
+void Pass::register_inou(std::string_view pname, Eprp_method& method) {
   // All the inou should start with inou.*
 
   if (method.get_name() == absl::StrCat("inou.", pname, ".tolg")) {

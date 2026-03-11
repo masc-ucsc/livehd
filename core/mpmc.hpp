@@ -46,7 +46,7 @@ public:
       : _size(size)
       ,
       //_buffer(reinterpret_cast<node_t *>(aligned_alloc(128,sizeof(node_t)*(_size + 1)))), // page align needed for muslc (alpine)
-      _buffer(reinterpret_cast<node_t *>(
+      _buffer(reinterpret_cast<node_t*>(
           std::aligned_alloc(8 * alignof(std::max_align_t), ((((sizeof(node_t) * (_size))) >> 12) | 1) << 12)))
       ,  // page align needed for muslc (alpine)
       _mask(size - 1)
@@ -64,13 +64,13 @@ public:
 
   ~mpmc() { std::free(_buffer); }
 
-  bool enqueue(const T &data) {
+  bool enqueue(const T& data) {
     // _head_seq only wraps at MAX(_head_seq) instead we use a mask to convert the sequence to an array index
     // this is why the ring buffer must be a size which is a power of 2. this also allows the sequence to double as a ticket/lock.
     size_t head_seq = _head_seq.load(std::memory_order_relaxed);
 
     for (;;) {
-      node_t  *node     = &_buffer[head_seq & _mask];
+      node_t*  node     = &_buffer[head_seq & _mask];
       size_t   node_seq = node->seq.load(std::memory_order_acquire);
       intptr_t dif      = (intptr_t)node_seq - (intptr_t)head_seq;
 
@@ -96,7 +96,7 @@ public:
     size_t tail_seq = _tail_seq.load(std::memory_order_relaxed);
 
     for (;;) {
-      node_t  *node     = &_buffer[tail_seq & _mask];
+      node_t*  node     = &_buffer[tail_seq & _mask];
       size_t   node_seq = node->seq.load(std::memory_order_acquire);
       intptr_t dif      = (intptr_t)node_seq - (intptr_t)(tail_seq + 1);
 
@@ -130,7 +130,7 @@ private:
 
   // Mostly read only data
   const size_t     _size;
-  node_t *const    _buffer;
+  node_t* const    _buffer;
   const size_t     _mask;
   cache_line_pad_t _pad1;
   // Mostly enqueue thread call
@@ -140,8 +140,8 @@ private:
   std::atomic<size_t> _tail_seq;
   cache_line_pad_t    _pad3;
 
-  mpmc(const mpmc &) {}
-  void operator=(const mpmc &) {}
+  mpmc(const mpmc&) {}
+  void operator=(const mpmc&) {}
 };
 
 #endif

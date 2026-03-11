@@ -52,14 +52,14 @@ public:
 
   Bitwidth_range() : max(0), min(0), overflow(false) {}
 
-  Bitwidth_range(const Bitwidth_range &i) {
+  Bitwidth_range(const Bitwidth_range& i) {
     max = i.max;
     min = i.min;
 
     overflow = i.overflow;
   };
 
-  constexpr Bitwidth_range &operator=(const Bitwidth_range &r) {
+  constexpr Bitwidth_range& operator=(const Bitwidth_range& r) {
     max      = r.max;
     min      = r.min;
     overflow = r.overflow;
@@ -67,8 +67,8 @@ public:
     return *this;
   }
 
-  Bitwidth_range(const Lconst &value);
-  Bitwidth_range(const Lconst &min_val, const Lconst &max_val);
+  Bitwidth_range(const Lconst& value);
+  Bitwidth_range(const Lconst& min_val, const Lconst& max_val);
 
   Bitwidth_range(const int64_t min_val, const int64_t max_val) {
     I(min_val <= max_val);
@@ -77,13 +77,13 @@ public:
     overflow = false;
   }
 
-  void set_narrower_range(const Bitwidth_range &bw);
-  void set_narrower_range(const Lconst &min_val, const Lconst &max_val) { set_narrower_range(Bitwidth_range(min_val, max_val)); }
+  void set_narrower_range(const Bitwidth_range& bw);
+  void set_narrower_range(const Lconst& min_val, const Lconst& max_val) { set_narrower_range(Bitwidth_range(min_val, max_val)); }
 
-  void set_wider_range(const Bitwidth_range &bw);
-  void set_wider_range(const Lconst &min_val, const Lconst &max_val) { set_wider_range(Bitwidth_range(min_val, max_val)); }
+  void set_wider_range(const Bitwidth_range& bw);
+  void set_wider_range(const Lconst& min_val, const Lconst& max_val) { set_wider_range(Bitwidth_range(min_val, max_val)); }
 
-  void set_range(const Lconst &min_val, const Lconst &max_val);
+  void set_range(const Lconst& min_val, const Lconst& max_val);
 
   bool   is_overflow() const { return overflow; };
   void   set_sbits_range(Bits_t size);

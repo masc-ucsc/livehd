@@ -23,7 +23,7 @@ bool Label_acyclic::node_set_cmp(NodeSet a, NodeSet b) const {
   if (a.size() != b.size()) {
     return false;
   }
-  for (auto &n : a) {
+  for (auto& n : a) {
     if (!(b.contains(n))) {
       return false;
     }
@@ -38,7 +38,7 @@ bool Label_acyclic::int_set_cmp(IntSet a, IntSet b) const {
   if (a.size() != b.size()) {
     return false;
   }
-  for (auto &n : a) {
+  for (auto& n : a) {
     if (!(b.contains(n))) {
       return false;
     }
@@ -49,7 +49,7 @@ bool Label_acyclic::int_set_cmp(IntSet a, IntSet b) const {
 /* * * * * * *
  Re-writes tgt with contents of ref if they differ, for NodeSet
  * * * * * * */
-void Label_acyclic::node_set_write(NodeSet &tgt, NodeSet &ref) {
+void Label_acyclic::node_set_write(NodeSet& tgt, NodeSet& ref) {
   if (!(node_set_cmp(tgt, ref))) {
     tgt.clear();
     tgt = ref;
@@ -59,7 +59,7 @@ void Label_acyclic::node_set_write(NodeSet &tgt, NodeSet &ref) {
 /* * * * * * *
  Re-writes tgt with contents of ref if they differ, for IntSet
  * * * * * * */
-void Label_acyclic::int_set_write(IntSet &tgt, IntSet &ref) {
+void Label_acyclic::int_set_write(IntSet& tgt, IntSet& ref) {
   if (!(int_set_cmp(tgt, ref))) {
     tgt.clear();
     tgt = ref;
@@ -69,9 +69,9 @@ void Label_acyclic::int_set_write(IntSet &tgt, IntSet &ref) {
 /* * * * * * *
  Loops through an lgraph and grabs all nodes that are potential partition roots
  * * * * * * */
-void Label_acyclic::gather_roots(Lgraph *g) {
+void Label_acyclic::gather_roots(Lgraph* g) {
   // Iterating through outputs of the graphs (0 out edges), all are potential roots
-  g->each_graph_output([&](const Node_pin &pin) {
+  g->each_graph_output([&](const Node_pin& pin) {
     if (pin.get_node().get_type_op() != Ntype_op::Const) {
       const auto nodec = (pin.get_node()).get_compact();  // Node compact flat
       roots.insert(nodec);                                // Saving roots
@@ -83,7 +83,7 @@ void Label_acyclic::gather_roots(Lgraph *g) {
 
   // Adding potential roots to the root list
   bool add_root = false;
-  for (const auto &n : g->forward(hier)) {
+  for (const auto& n : g->forward(hier)) {
     if (n.get_type_op() == Ntype_op::Const) {
       continue;
     }
@@ -93,7 +93,7 @@ void Label_acyclic::gather_roots(Lgraph *g) {
       add_root = true;
     } else if (n.get_num_out_edges() == 1) {
       // If the sink of the one out edge IS an io, add_root
-      for (const auto &oe : n.out_edges()) {
+      for (const auto& oe : n.out_edges()) {
         auto sink_node_op = oe.sink.get_node().get_type_op();
         if (sink_node_op == Ntype_op::IO) {  // IO check
           add_root = true;
@@ -116,13 +116,13 @@ void Label_acyclic::gather_roots(Lgraph *g) {
  Runs through all the potential roots
  tries to grow each partition as much as possible
  * * * * * * */
-void Label_acyclic::grow_partitions(Lgraph *g) {
+void Label_acyclic::grow_partitions(Lgraph* g) {
   // Iterating through all the potential roots
   if (roots.empty()) {
     return;
   }
 
-  for (auto &n : roots) {
+  for (auto& n : roots) {
     if (!node_preds.empty()) {
       node_preds.clear();
     }
@@ -141,7 +141,7 @@ void Label_acyclic::grow_partitions(Lgraph *g) {
         continue;
       }
 
-      for (auto &ie : temp_n.inp_edges()) {
+      for (auto& ie : temp_n.inp_edges()) {
         auto pot_pred = ie.driver.get_node();
 
         if (pot_pred.get_type_op() == Ntype_op::Const) {
@@ -168,13 +168,13 @@ void Label_acyclic::grow_partitions(Lgraph *g) {
  Gather all the ins and outs of those nodes
  Then, use this info to populate/overwrite id2inc, id2out, id2incparts, id2outparts
  * * * * * * */
-void Label_acyclic::gather_inou(Lgraph *g) {
+void Label_acyclic::gather_inou(Lgraph* g) {
   IntSet  common_int1;   // use wherever an IntSet is needed
   IntSet  common_int2;   // use wherever an IntSet is needed
   NodeSet common_node1;  // use wherever an NodeSet is needed
   NodeSet common_node2;  // use wherever an NodeSet is needed
 
-  for (auto &it : id2nodes) {
+  for (auto& it : id2nodes) {
     auto curr_id       = it.first;
     auto curr_id_nodes = it.second;
 
@@ -187,14 +187,14 @@ void Label_acyclic::gather_inou(Lgraph *g) {
     common_int1.clear();   // for id2outparts
     common_int2.clear();   // for id2incparts
 
-    for (auto &n : curr_id_nodes) {
+    for (auto& n : curr_id_nodes) {
       Node tmp_n(g, n);
 
       if (tmp_n.get_type_op() == Ntype_op::Const) {
         continue;
       }
       // gather the sinks for id2out and id2outparts
-      for (auto &e : tmp_n.out_edges()) {
+      for (auto& e : tmp_n.out_edges()) {
         auto spin        = e.sink;
         auto dpin        = e.driver;
         auto snode       = spin.get_node();
@@ -214,7 +214,7 @@ void Label_acyclic::gather_inou(Lgraph *g) {
       }
 
       // gather the drivers, put in id2inc and id2incparts
-      for (auto &e : tmp_n.inp_edges()) {
+      for (auto& e : tmp_n.inp_edges()) {
         auto spin        = e.sink;
         auto dpin        = e.driver;
         auto snode       = spin.get_node();
@@ -241,23 +241,23 @@ void Label_acyclic::gather_inou(Lgraph *g) {
 
 #if G_DEBUG
     std::cout << "common_node1:\n";
-    for (auto &n : common_node1) {
+    for (auto& n : common_node1) {
       Node some_n(g, n);
       std::print("  {}\n", some_n.debug_name());
     }
 
     std::cout << "common_int1:\n";
-    for (auto &n : common_int1) {
+    for (auto& n : common_int1) {
       std::print("  {}\n", n);
     }
     std::cout << "common_node2:\n";
-    for (auto &n : common_node2) {
+    for (auto& n : common_node2) {
       Node some_n(g, n);
       std::print("  {}\n", some_n.debug_name());
     }
 
     std::cout << "common_int2:\n";
-    for (auto &n : common_int2) {
+    for (auto& n : common_int2) {
       std::print("  {}\n", n);
     }
 #endif
@@ -270,7 +270,7 @@ void Label_acyclic::gather_inou(Lgraph *g) {
  * * * * * * */
 void Label_acyclic::merge_op(int merge_from, int merge_into) {
   // Alter node2id->Replace all merge_from ids with merge_into
-  for (auto &it : node2id) {
+  for (auto& it : node2id) {
     if (it.second == merge_from) {
       node2id[it.first] = merge_into;
     }
@@ -437,7 +437,7 @@ void Label_acyclic::merge_partitions_one_parent() {
     for (auto i = pwi.begin(); i != pwi.end(); ++i) {
 #if O_DEBUG
       std::print("id2incparts[{}]\n", *pivot);
-      for (auto &o : id2incparts[*pivot]) {
+      for (auto& o : id2incparts[*pivot]) {
         std::print("{}\n", o);
       }
 #endif
@@ -446,7 +446,7 @@ void Label_acyclic::merge_partitions_one_parent() {
         merge_flag = true;
         keep_going = true;
         merge_into = *pivot;
-        for (auto &o : id2incparts[*pivot]) {
+        for (auto& o : id2incparts[*pivot]) {
           merge_from = o;
           break;
         }
@@ -493,7 +493,7 @@ void Label_acyclic::merge_partitions_one_parent() {
 }
 
 // dump()
-void Label_acyclic::dump(Lgraph *g) const {
+void Label_acyclic::dump(Lgraph* g) const {
   std::cout << "---- Label_acyclic dump ----\n";
 
   // Internal Nodes printing
@@ -511,40 +511,40 @@ void Label_acyclic::dump(Lgraph *g) const {
   std::print("Found {} nodes using g->forward(hier)\n", node_tracker);
 
   std::cout << "=== id2inc ===\n";
-  for (auto &it : id2inc) {
+  for (auto& it : id2inc) {
     std::print("  Part ID: {}\n", it.first);
-    for (auto &n : it.second) {
+    for (auto& n : it.second) {
       Node node(g, n);
       std::print("    {}\n", node.debug_name());
     }
   }
 
   std::cout << "=== id2out ===\n";
-  for (auto &it : id2out) {
+  for (auto& it : id2out) {
     std::print("  Part ID: {}\n", it.first);
-    for (auto &n : it.second) {
+    for (auto& n : it.second) {
       Node node(g, n);
       std::print("    {}\n", node.debug_name());
     }
   }
 
   std::cout << "=== Roots ===\n";
-  for (auto &it : roots) {
+  for (auto& it : roots) {
     Node n(g, it);
     std::print("    {}\n", n.debug_name());
   }
 
   std::cout << "=== node2id ===\n";
-  for (auto &it : node2id) {
+  for (auto& it : node2id) {
     Node n(g, it.first);
     std::print("    {}, ID: {}\n", n.debug_name(), it.second);
   }
   std::cout << "---- fin ----\n";
 }
 
-void Label_acyclic::label(Lgraph *g) {
+void Label_acyclic::label(Lgraph* g) {
   if (hier) {
-    g->each_hier_unique_sub_bottom_up([](Lgraph *lg) { lg->ref_node_color_map()->clear(); });
+    g->each_hier_unique_sub_bottom_up([](Lgraph* lg) { lg->ref_node_color_map()->clear(); });
   }
   g->ref_node_color_map()->clear();
 

@@ -77,7 +77,7 @@ struct DefaultPolicy8 {
 
 template <typename KeyT, typename HashT = std::hash<KeyT>, typename EqT = std::equal_to<KeyT>,
           typename Allocator = std::allocator<KeyT>,  // never used
-          typename Policy    = DefaultPolicy8>           // never used
+          typename Policy    = DefaultPolicy8>        // never used
 class HashSet {
 #ifndef EMH_DEFAULT_LOAD_FACTOR
   constexpr static float EMH_DEFAULT_LOAD_FACTOR = 0.80f;
@@ -1682,9 +1682,8 @@ private:
 #endif
   }
 
-  template <typename UType,
-            typename std::enable_if<!std::is_integral<UType>::value && !std::is_same<UType, std::string>::value, uint32_t>::type
-            = 0>
+  template <typename UType, typename std::enable_if<!std::is_integral<UType>::value && !std::is_same<UType, std::string>::value,
+                                                    uint32_t>::type = 0>
   inline uint64_t hash_key(const UType& key) const {
     return _hasher(key);
   }

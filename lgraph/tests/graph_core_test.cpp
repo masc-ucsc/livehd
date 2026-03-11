@@ -95,7 +95,7 @@ TEST_F(Setup_graph_core, trivial_ops_insert1) {
   std::shuffle(nodes.begin(), nodes.end(), std::knuth_b());
 
   auto n = 0u;
-  for (const auto &m : nodes) {
+  for (const auto& m : nodes) {
     gc.add_edge(m1, m);
     // std::print("ADDING {}\n",m);
     // gc.dump(m1);
@@ -216,7 +216,7 @@ TEST_F(Setup_graph_core, delete_edge) {
 
   std::vector<uint32_t> sink_nodes;
   std::vector<uint32_t> driver_nodes;
-  for (const auto &m : nodes) {
+  for (const auto& m : nodes) {
     if (rbool.any()) {
       sink_nodes.emplace_back(m);
       gc.add_edge(m1, m);
@@ -413,7 +413,7 @@ TEST_F(Setup_graph_core, bench_boost) {
 
     EXPECT_EQ(boost::out_degree(m1, g), sz);
 
-    for (const auto &m : nodes) {
+    for (const auto& m : nodes) {
       boost::remove_edge(m1, m, g);
     }
 
@@ -483,7 +483,7 @@ TEST_F(Setup_graph_core, bench_gc) {
 
     EXPECT_EQ(gc.get_num_pin_outputs(m1), sz);
 
-    for (const auto &m : nodes) {
+    for (const auto& m : nodes) {
       gc.del_edge(m1, m);
     }
 
@@ -515,14 +515,14 @@ TEST_F(Setup_graph_core, bench_lgraph) {
   // This is to show the full Lgraph overhead (it should be close to Graph_core
   // once it replaced node_internal)
 
-  auto *lib = Graph_library::instance("lgdb_graph_core");
+  auto* lib = Graph_library::instance("lgdb_graph_core");
 
   for (auto sz = 100u; sz < BENCH_SIZE; sz = sz * 10) {
     TRACE_EVENT("core", nullptr, [sz](perfetto::EventContext ctx) {
       ctx.event()->set_name("test1_lg_insert_" + std::to_string(sz));
     });
 
-    auto *lg = lib->create_lgraph("lg_test1", "test");
+    auto* lg = lib->create_lgraph("lg_test1", "test");
 
     auto m1 = lg->create_node(Ntype_op::CompileErr);  // CompileErr to allow arbitrary edges without checks
     auto p1 = m1.get_driver_pin();
@@ -541,7 +541,7 @@ TEST_F(Setup_graph_core, bench_lgraph) {
       ctx.event()->set_name("test2_lg_delete_" + std::to_string(sz));
     });
 
-    auto *lg = lib->create_lgraph("lg_test1", "test");
+    auto* lg = lib->create_lgraph("lg_test1", "test");
 
     auto m1 = lg->create_node(Ntype_op::CompileErr);  // CompileErr to allow arbitrary edges without checks
     auto p1 = m1.get_driver_pin();
@@ -556,7 +556,7 @@ TEST_F(Setup_graph_core, bench_lgraph) {
 
     EXPECT_EQ(m1.get_num_out_edges(), sz);
 
-    for (auto &p : pins) {
+    for (auto& p : pins) {
       p1.del(p);
     }
 
@@ -568,7 +568,7 @@ TEST_F(Setup_graph_core, bench_lgraph) {
       ctx.event()->set_name("test2_lg_chain_" + std::to_string(sz));
     });
 
-    auto *lg = lib->create_lgraph("lg_test2", "test");
+    auto* lg = lib->create_lgraph("lg_test2", "test");
 
     auto m1 = lg->create_node(Ntype_op::CompileErr);  // CompileErr to allow arbitrary edges without checks
     auto p1 = m1.get_driver_pin();

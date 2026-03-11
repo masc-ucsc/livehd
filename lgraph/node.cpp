@@ -10,7 +10,7 @@
 #include "lgedgeiter.hpp"
 #include "lgraph.hpp"
 
-void Node::invalidate(Lgraph *_g) {
+void Node::invalidate(Lgraph* _g) {
   top_g     = _g;
   current_g = _g;
   hidx      = -1;
@@ -43,14 +43,14 @@ void Node::update(Hierarchy_index _hidx) {
   I(current_g->is_valid_node(nid));
 }
 
-void Node::update(const Node &node) {
+void Node::update(const Node& node) {
   top_g     = node.top_g;
   current_g = node.current_g;
   hidx      = node.hidx;
   nid       = node.nid;
 }
 
-void Node::update(Lgraph *_g, const Node::Compact &comp) {
+void Node::update(Lgraph* _g, const Node::Compact& comp) {
   I(comp.nid);
   I(_g);
 
@@ -69,7 +69,7 @@ void Node::update(Lgraph *_g, const Node::Compact &comp) {
   I(current_g->is_valid_node(nid));
 }
 
-void Node::update(const Node::Compact &comp) {
+void Node::update(const Node::Compact& comp) {
   I(!Hierarchy::is_invalid(comp.hidx));
   I(comp.nid);
   I(top_g);
@@ -84,7 +84,7 @@ void Node::update(const Node::Compact &comp) {
   I(current_g->is_valid_node(nid));
 }
 
-Node::Node(Lgraph *_g, Hierarchy_index _hidx, const Compact_class &comp) : top_g(_g), hidx(_hidx), nid(comp.nid) {
+Node::Node(Lgraph* _g, Hierarchy_index _hidx, const Compact_class& comp) : top_g(_g), hidx(_hidx), nid(comp.nid) {
   I(nid);
   I(top_g);
   current_g = top_g->ref_htree()->ref_lgraph(hidx);
@@ -93,9 +93,9 @@ Node::Node(Lgraph *_g, Hierarchy_index _hidx, const Compact_class &comp) : top_g
   // I(top_g->get_hierarchy_class_lgid(hidx) == current_g->get_lgid());
 }
 
-Node::Node(Lgraph *_g, const Compact_flat &comp) : hidx(Hierarchy::non_hierarchical()), nid(comp.nid) {
+Node::Node(Lgraph* _g, const Compact_flat& comp) : hidx(Hierarchy::non_hierarchical()), nid(comp.nid) {
   I(nid);
-  auto *lib = _g->ref_library();
+  auto* lib = _g->ref_library();
   top_g     = lib->try_ref_lgraph(Lg_type_id(comp.lgid));
   I(top_g);
   current_g = top_g;
@@ -104,9 +104,9 @@ Node::Node(Lgraph *_g, const Compact_flat &comp) : hidx(Hierarchy::non_hierarchi
   I(current_g->is_valid_node(nid));
 }
 
-Node::Node(std::string_view path, const Compact_flat &comp) : hidx(Hierarchy::non_hierarchical()), nid(comp.nid) {
+Node::Node(std::string_view path, const Compact_flat& comp) : hidx(Hierarchy::non_hierarchical()), nid(comp.nid) {
   I(nid);
-  auto *lib = Graph_library::instance(path);
+  auto* lib = Graph_library::instance(path);
   top_g     = lib->try_ref_lgraph(Lg_type_id(comp.lgid));
   I(top_g);
   current_g = top_g;
@@ -120,7 +120,7 @@ Node::Compact_flat Node::get_compact_flat() const {
   return {current_g->get_lgid(), nid};
 }
 
-Graph_library *Node::ref_library() const { return current_g->ref_library(); }
+Graph_library* Node::ref_library() const { return current_g->ref_library(); }
 
 Node_pin Node::get_driver_pin_raw(Port_ID pid) const {
   // I(!is_type_sub());  // Do not setup subs by PID, use name. IF your really need it, use setup_driver_pin_raw
@@ -159,7 +159,7 @@ Node_pin Node::get_driver_pin_slow(std::string_view pname) const {
   Lg_type_id sub_lgid = current_g->get_type_sub(nid);
   I(current_g->get_library().exists(sub_lgid));  // Must be a valid lgid
 
-  const auto &sub = current_g->get_library().get_sub(sub_lgid);
+  const auto& sub = current_g->get_library().get_sub(sub_lgid);
   I(sub.has_pin(pname));
   I(sub.is_output(pname));
 
@@ -177,7 +177,7 @@ Node_pin Node::get_sink_pin_slow(std::string_view pname) const {
   Lg_type_id sub_lgid = current_g->get_type_sub(nid);
   I(current_g->get_library().exists(sub_lgid));  // Must be a valid lgid
 
-  const auto &sub = current_g->get_library().get_sub(sub_lgid);
+  const auto& sub = current_g->get_library().get_sub(sub_lgid);
   I(sub.has_pin(pname));
   I(sub.is_input(pname));
 
@@ -195,7 +195,7 @@ Node_pin Node::setup_driver_pin_slow(std::string_view name) const {
   Lg_type_id sub_lgid = current_g->get_type_sub(nid);
   I(current_g->get_library().exists(sub_lgid));  // Must be a valid lgid
 
-  const auto &sub = current_g->get_library().get_sub(sub_lgid);
+  const auto& sub = current_g->get_library().get_sub(sub_lgid);
   I(sub.has_pin(name));  // maybe you forgot an add_graph_input/output in the sub?
   I(sub.is_output(name));
 
@@ -219,7 +219,7 @@ bool Node::is_sink_connected(std::string_view pname) const {
 
   Lg_type_id sub_lgid = current_g->get_type_sub(nid);
 
-  const auto &sub = current_g->get_library().get_sub(sub_lgid);
+  const auto& sub = current_g->get_library().get_sub(sub_lgid);
   if (!sub.has_pin(pname) || !sub.is_input(pname)) {
     return false;
   }
@@ -250,7 +250,7 @@ bool Node::is_driver_connected(std::string_view pname) const {
 
   Lg_type_id sub_lgid = current_g->get_type_sub(nid);
 
-  const auto &sub = current_g->get_library().get_sub(sub_lgid);
+  const auto& sub = current_g->get_library().get_sub(sub_lgid);
   if (!sub.has_pin(pname) || sub.is_input(pname)) {
     return false;
   }
@@ -275,7 +275,7 @@ Node_pin Node::setup_sink_pin_slow(std::string_view name) {
   Lg_type_id sub_lgid = current_g->get_type_sub(nid);
   I(current_g->get_library().exists(sub_lgid));  // Must be a valid lgid
 
-  const auto &sub = current_g->get_library().get_sub(sub_lgid);
+  const auto& sub = current_g->get_library().get_sub(sub_lgid);
   I(sub.has_pin(name));  // maybe you forgot an add_graph_input/output in the sub?
   if (sub.is_output(name)) {
     return {};
@@ -313,7 +313,7 @@ Node_pin Node::setup_sink_pin_raw(Port_ID pid) {
 #ifndef NDEBUG
   if (is_type_sub()) {
     Lg_type_id  sub_lgid = current_g->get_type_sub(nid);
-    const auto &sub      = current_g->get_library().get_sub(sub_lgid);
+    const auto& sub      = current_g->get_library().get_sub(sub_lgid);
     I(sub.has_instance_pin(pid));
   } else {
     I(Ntype::has_sink(get_type_op(), pid));
@@ -342,7 +342,7 @@ Node_pin Node::setup_driver_pin_raw(Port_ID pid) const {
 #ifndef NDEBUG
   if (is_type_sub()) {
     Lg_type_id  sub_lgid = current_g->get_type_sub(nid);
-    const auto &sub      = current_g->get_library().get_sub(sub_lgid);
+    const auto& sub      = current_g->get_library().get_sub(sub_lgid);
     if (pid != 0 && sub.get_name().substr(0, 2) != "__") {  // Do no check to pid for __NAME
       I(sub.has_instance_pin(pid));
       I(sub.is_output_from_instance_pid(pid), "ERROR: An input can not be a driver pin");
@@ -444,11 +444,11 @@ Node Node::get_up_node() const {
 }
 
 void Node::set_type_sub(Lg_type_id subid) { current_g->set_type_sub(nid, subid); }
-void Node::set_type_const(const Lconst &val) { current_g->set_type_const(nid, val); }
+void Node::set_type_const(const Lconst& val) { current_g->set_type_const(nid, val); }
 
 Lg_type_id Node::get_type_sub() const { return current_g->get_type_sub(nid); }
 
-Lgraph *Node::ref_type_sub_lgraph() const {
+Lgraph* Node::ref_type_sub_lgraph() const {
   auto lgid = current_g->get_type_sub(nid);
   return top_g->ref_library()->open_lgraph(lgid);
 }
@@ -458,17 +458,17 @@ bool Node::is_type_sub_present() const {
     return false;
   }
 
-  auto *sub_lg = ref_type_sub_lgraph();
+  auto* sub_lg = ref_type_sub_lgraph();
   return sub_lg != nullptr;
 }
 
-void Node::set_type_lut(const Lconst &lutid) { current_g->set_type_lut(nid, lutid); }
+void Node::set_type_lut(const Lconst& lutid) { current_g->set_type_lut(nid, lutid); }
 
 Lconst Node::get_type_lut() const { return current_g->get_type_lut(nid); }
 
-const Sub_node &Node::get_type_sub_node() const { return current_g->get_type_sub_node(nid); }
+const Sub_node& Node::get_type_sub_node() const { return current_g->get_type_sub_node(nid); }
 
-Sub_node *Node::ref_type_sub_node() const { return current_g->ref_type_sub_node(nid); }
+Sub_node* Node::ref_type_sub_node() const { return current_g->ref_type_sub_node(nid); }
 
 Lconst Node::get_type_const() const { return current_g->get_type_const(nid); }
 
@@ -526,7 +526,7 @@ Node Node::create(Ntype_op op, std::pair<uint64_t, uint64_t> loc, std::string fn
   return node;
 }
 
-Node Node::create_const(const Lconst &value) const {
+Node Node::create_const(const Lconst& value) const {
   auto node  = current_g->create_node_const(value);
   node.top_g = top_g;
   node.hidx  = hidx;
@@ -564,7 +564,7 @@ std::string_view Node::get_hier_name() const {
 std::string Node::get_or_create_name() const {
   auto root_name = get_hier_name();
 
-  auto      *ref = current_g->ref_node_name_map();
+  auto*      ref = current_g->ref_node_name_map();
   const auto it  = ref->find(get_compact_class());
   if (it != ref->end()) {
     return absl::StrCat(root_name, ",", it->second);
@@ -575,7 +575,7 @@ std::string Node::get_or_create_name() const {
 }
 
 std::string Node::get_name() const {
-  const auto &ptr = current_g->get_node_name_map();
+  const auto& ptr = current_g->get_node_name_map();
   auto        it  = ptr.find(get_compact_class());
   I(it != ptr.end());
 
@@ -594,7 +594,7 @@ std::string Node::debug_name() const {
   }
   I(current_g);
 
-  auto       *ref = current_g->ref_node_name_map();
+  auto*       ref = current_g->ref_node_name_map();
   std::string name;
   const auto  it = ref->find(get_compact_class());
   if (it != ref->end()) {
@@ -617,10 +617,10 @@ std::string Node::debug_name() const {
 
 bool Node::has_name() const { return current_g->get_node_name_map().contains(get_compact_class()); }
 
-void Node::set_place(const Ann_place &p) { top_g->ref_node_place_map()->insert_or_assign(get_compact(), p); }
+void Node::set_place(const Ann_place& p) { top_g->ref_node_place_map()->insert_or_assign(get_compact(), p); }
 
 const Ann_place Node::get_place() const {
-  const auto &ptr = top_g->get_node_place_map();
+  const auto& ptr = top_g->get_node_place_map();
   const auto  it  = ptr.find(get_compact());
   I(it != ptr.end());
   return it->second;
@@ -637,12 +637,12 @@ void Node::set_loc(uint64_t pos1, uint64_t pos2) {
   if (pos1 == 0 && pos2 == 0) {
     return;
   }
-  const auto &pos = std::make_pair(pos1, pos2);
+  const auto& pos = std::make_pair(pos1, pos2);
   current_g->ref_node_loc_map()->insert_or_assign(get_compact_class(), pos);
 }
 
 void Node::set_loc1(uint64_t pos1) {
-  auto *ptr = current_g->ref_node_loc_map();
+  auto* ptr = current_g->ref_node_loc_map();
   auto  it  = ptr->find(get_compact_class());
 
   if (it == ptr->end()) {
@@ -653,7 +653,7 @@ void Node::set_loc1(uint64_t pos1) {
 }
 
 void Node::set_loc2(uint64_t pos2) {
-  auto *ptr = current_g->ref_node_loc_map();
+  auto* ptr = current_g->ref_node_loc_map();
   auto  it  = ptr->find(get_compact_class());
 
   if (it == ptr->end()) {
@@ -664,7 +664,7 @@ void Node::set_loc2(uint64_t pos2) {
 }
 
 const std::pair<uint64_t, uint64_t> Node::get_loc() const {
-  const auto &ptr = current_g->get_node_loc_map();
+  const auto& ptr = current_g->get_node_loc_map();
   const auto  it  = ptr.find(get_compact_class());
   I(it != ptr.end());
   return it->second;
@@ -683,7 +683,7 @@ void Node::set_source(std::string_view fname) {
 }
 
 std::string Node::get_source() const {
-  const auto &ptr = current_g->get_node_source_map();
+  const auto& ptr = current_g->get_node_source_map();
   const auto  it  = ptr.find(get_compact_class());
   if (it == ptr.end()) {
     return std::string(current_g->get_source());
@@ -703,14 +703,14 @@ void Node::del_color() { current_g->ref_node_color_map()->erase(get_compact_clas
 void Node::set_color(int new_color) { current_g->ref_node_color_map()->insert_or_assign(get_compact_class(), new_color); }
 
 int Node::get_color() const {
-  const auto &ptr = current_g->get_node_color_map();
+  const auto& ptr = current_g->get_node_color_map();
   const auto  it  = ptr.find(get_compact_class());
   I(it != ptr.end());
   return it->second;
 }
 
 bool Node::has_color() const {
-  const auto &ptr = current_g->get_node_color_map();
+  const auto& ptr = current_g->get_node_color_map();
   const auto  it  = ptr.find(get_compact_class());
   return it != ptr.end();
 }
@@ -742,7 +742,7 @@ void Node::dump() const {
     std::print("\n");
   }
 
-  for (const auto &edge : inp_edges()) {
+  for (const auto& edge : inp_edges()) {
     std::print("  inp bits:{:<3} pid:{:<2} name:{:<30} <- nid:{:<5} pid:{:<2} name:{}\n",
                edge.get_bits(),
                edge.sink.get_pid(),
@@ -751,7 +751,7 @@ void Node::dump() const {
                edge.driver.get_pid(),
                edge.driver.debug_name());
   }
-  for (const auto &edge : out_edges()) {
+  for (const auto& edge : out_edges()) {
     std::print("  out bits:{:<3} pid:{:<2} name:{:<30} -> nid:{:<5} pid:{:<2} name:{} wname:{}\n",
                edge.get_bits(),
                edge.driver.get_pid(),

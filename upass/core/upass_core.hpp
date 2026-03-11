@@ -123,10 +123,10 @@ public:
 
 class uPass_plugin {
 public:
-  using Setup_fn  = std::function<std::shared_ptr<uPass>(std::shared_ptr<Lnast_manager>&)>;
+  using Setup_fn = std::function<std::shared_ptr<uPass>(std::shared_ptr<Lnast_manager>&)>;
   struct Setup_entry {
-    Setup_fn                  setup_fn;
-    std::vector<std::string>  depends_on;
+    Setup_fn                 setup_fn;
+    std::vector<std::string> depends_on;
   };
   using Map_setup = std::map<std::string, Setup_entry>;
 

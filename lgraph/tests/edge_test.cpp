@@ -12,11 +12,11 @@
 
 class Edge_test : public ::testing::Test {
 protected:
-  Lgraph   *g;
+  Lgraph*   g;
   Node      n1;
   Node      n2;
-  Sub_node *n1_sub;
-  Sub_node *n2_sub;
+  Sub_node* n1_sub;
+  Sub_node* n2_sub;
 
   Lrand<bool> rbool;
   Lrand<int>  rint;
@@ -108,8 +108,8 @@ protected:
 #endif
   }
 
-  Node_pin add_n1_setup_driver_pin(const std::string &pname) {
-    const auto &it = track_n1_out_connected_pins.find(pname);
+  Node_pin add_n1_setup_driver_pin(const std::string& pname) {
+    const auto& it = track_n1_out_connected_pins.find(pname);
     if (it == track_n1_out_connected_pins.end()) {
       EXPECT_FALSE(n1_sub->has_pin(pname));
 
@@ -139,8 +139,8 @@ protected:
     return dpin;
   }
 
-  Node_pin add_n2_setup_sink_pin(const std::string &pname) {
-    const auto &it = track_n2_inp_connected_pins.find(pname);
+  Node_pin add_n2_setup_sink_pin(const std::string& pname) {
+    const auto& it = track_n2_inp_connected_pins.find(pname);
     if (it == track_n2_inp_connected_pins.end()) {
       EXPECT_FALSE(n2_sub->has_pin(pname));
       auto instance_pid = n2_sub->add_input_pin(pname, get_free_n2_graph_pos());
@@ -166,27 +166,27 @@ protected:
   }
 
   void check_edges() {
-    for (const auto &e : n1.inp_edges()) {
+    for (const auto& e : n1.inp_edges()) {
       (void)e;
       EXPECT_TRUE(false);
     }
-    for (const auto &e : n2.out_edges()) {
+    for (const auto& e : n2.out_edges()) {
       (void)e;
       EXPECT_TRUE(false);
     }
 
-    for (const auto &e : n1.out_edges()) {
+    for (const auto& e : n1.out_edges()) {
       auto it = track_edge_count.find(e.get_compact());
       EXPECT_TRUE(it != track_edge_count.end());
     }
 
-    for (const auto &e : n2.inp_edges()) {
+    for (const auto& e : n2.inp_edges()) {
       auto it = track_edge_count.find(e.get_compact());
       EXPECT_TRUE(it != track_edge_count.end());
     }
   }
 
-  void add_edge(const Node_pin &dpin, const Node_pin &spin) {
+  void add_edge(const Node_pin& dpin, const Node_pin& spin) {
     XEdge edge(dpin, spin);
     auto  it = track_edge_count.find(edge.get_compact());
     if (spin.is_connected(dpin)) {
@@ -230,12 +230,12 @@ TEST_F(Edge_test, random_insert) {
   }
 
   int conta = 0;
-  for (auto &out : n1.out_edges()) {
+  for (auto& out : n1.out_edges()) {
     conta++;
     (void)out;
   }
   EXPECT_EQ(conta, track_edge_count.size());
-  for (auto &out : n2.out_edges()) {
+  for (auto& out : n2.out_edges()) {
     I(false);
     (void)out;  // just to silence the warning
   }
@@ -253,7 +253,7 @@ TEST_F(Edge_test, trivial_delete) {
   EXPECT_EQ(n2.out_edges().size(), 0);
   EXPECT_EQ(n2.inp_edges().size(), 1);
 
-  for (auto &inp : n2.inp_edges()) {
+  for (auto& inp : n2.inp_edges()) {
     inp.del_edge();
   }
 
@@ -302,13 +302,13 @@ TEST_F(Edge_test, overflow_delete) {
   }
 
   std::vector<XEdge::Compact> all_edges;
-  for (auto &b : track_edge_count) {
+  for (auto& b : track_edge_count) {
     all_edges.push_back(b.first);
   }
 
   std::shuffle(all_edges.begin(), all_edges.end(), std::knuth_b());
 
-  for (auto &e : all_edges) {
+  for (auto& e : all_edges) {
     XEdge edge(g, e);
 
     edge.del_edge();
@@ -375,7 +375,7 @@ TEST_F(Edge_test, overflow_delete_del_edge_bench) {
   }
 
   std::vector<XEdge::Compact> all_edges;
-  for (auto &b : track_edge_count) {
+  for (auto& b : track_edge_count) {
     all_edges.push_back(b.first);
   }
 
@@ -384,7 +384,7 @@ TEST_F(Edge_test, overflow_delete_del_edge_bench) {
   {
     TRACE_EVENT("core", "EDGE_overflow_delete_del_edge");
 
-    for (auto &e : all_edges) {
+    for (auto& e : all_edges) {
       XEdge edge(g, e);
       edge.del_edge();
     }
@@ -431,13 +431,13 @@ TEST_F(Edge_test, overflow_delete_del_node_bench) {
 
 TEST_F(Edge_test, trivial_delete2) {
   auto    lib = Graph_library::instance("lgdb_edge_test");
-  Lgraph *g2  = lib->create_lgraph("test22", "test");
+  Lgraph* g2  = lib->create_lgraph("test22", "test");
 
   auto nn1 = g2->create_node_sub("n1");
   auto nn2 = g2->create_node_sub("n2");
 
-  auto *sub1 = g2->ref_library()->ref_sub("n1");
-  auto *sub2 = g2->ref_library()->ref_sub("n2");
+  auto* sub1 = g2->ref_library()->ref_sub("n1");
+  auto* sub2 = g2->ref_library()->ref_sub("n2");
   sub1->add_output_pin(" quite a long name with % spaces both ends ", Port_invalid);
   sub2->add_input_pin(" uff this is bad too% ", Port_invalid);
 
@@ -483,7 +483,7 @@ TEST_F(Edge_test, trivial_delete2) {
   EXPECT_EQ(nn2.get_num_out_edges(), 0);
   EXPECT_EQ(nn2.get_num_edges(), 1);
 
-  for (auto &out : nn1.out_edges()) {
+  for (auto& out : nn1.out_edges()) {
     out.del_edge();
   }
 
@@ -495,22 +495,22 @@ TEST_F(Edge_test, trivial_delete2) {
 
 TEST_F(Edge_test, trivial_delete3) {
   auto    lib = Graph_library::instance("lgdb_edge_test");
-  Lgraph *g2  = lib->create_lgraph("test3", "test");
+  Lgraph* g2  = lib->create_lgraph("test3", "test");
 
   auto nn1 = g2->create_node_sub("n1");
   auto nn2 = g2->create_node_sub("n2");
 
   g2->ref_library()->sync_all();
 
-  auto *sub1 = g2->ref_library()->ref_sub("n1");
-  auto *sub2 = g2->ref_library()->ref_sub("n2");
+  auto* sub1 = g2->ref_library()->ref_sub("n1");
+  auto* sub2 = g2->ref_library()->ref_sub("n2");
   sub1->add_output_pin(" another % $ # long name ", Port_invalid);
   sub2->add_input_pin("foo", Port_invalid);
 
   nn1.setup_driver_pin(" another % $ # long name ");
   g2->add_edge(nn1.get_driver_pin(" another % $ # long name "), nn2.setup_sink_pin("foo"));
 
-  for (auto &inp : nn2.inp_edges()) {
+  for (auto& inp : nn2.inp_edges()) {
     inp.del_edge();
   }
 

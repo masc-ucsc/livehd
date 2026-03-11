@@ -61,7 +61,7 @@ static upass::uPass_plugin plugin_decide_shared("decide_shared", upass::uPass_wr
 
 uPass_runner::uPass_runner(std::shared_ptr<upass::Lnast_manager>& _lm, const std::vector<std::string>& upass_names)
     : uPass_struct(_lm) {
-  auto upass_registry = upass::uPass_plugin::get_registry();
+  auto        upass_registry = upass::uPass_plugin::get_registry();
   std::string order_error;
   auto        resolved = resolve_order(upass_names, &order_error);
   if (!order_error.empty()) {
@@ -70,7 +70,7 @@ uPass_runner::uPass_runner(std::shared_ptr<upass::Lnast_manager>& _lm, const std
   }
   if (!resolved.empty()) {
     std::print("uPass - resolved order:");
-    for (const auto &name : resolved) {
+    for (const auto& name : resolved) {
       std::print(" {}", name);
     }
     std::print("\n");
@@ -88,12 +88,13 @@ uPass_runner::uPass_runner(std::shared_ptr<upass::Lnast_manager>& _lm, const std
   }
 }
 
-std::vector<std::string> uPass_runner::resolve_order(const std::vector<std::string>& requested_names, std::string *error_msg) const {
+std::vector<std::string> uPass_runner::resolve_order(const std::vector<std::string>& requested_names,
+                                                     std::string*                    error_msg) const {
   const auto& upass_registry = upass::uPass_plugin::get_registry();
 
   enum class Mark { kUnseen, kVisiting, kDone };
   std::unordered_map<std::string, Mark> marks;
-  std::vector<std::string>               ordered;
+  std::vector<std::string>              ordered;
 
   std::function<bool(const std::string&)> dfs = [&](const std::string& name) {
     const auto it = upass_registry.find(name);
@@ -142,7 +143,7 @@ std::vector<std::string> uPass_runner::resolve_order(const std::vector<std::stri
 
 std::vector<std::string> uPass_runner::changed_passes() const {
   std::vector<std::string> changed;
-  for (const auto &entry : upasses) {
+  for (const auto& entry : upasses) {
     if (entry.pass->has_changed()) {
       changed.emplace_back(entry.name);
     }
@@ -165,7 +166,7 @@ void uPass_runner::run(std::size_t max_iters) {
       "uPass",
       max_iters,
       [this]() {
-        for (auto &entry : upasses) {
+        for (auto& entry : upasses) {
           entry.pass->begin_iteration();
         }
       },

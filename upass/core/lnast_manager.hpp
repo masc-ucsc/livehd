@@ -10,9 +10,9 @@
 #include <stack>
 #include <vector>
 
+#include "ir_adapter.hpp"
 #include "lnast.hpp"
 #include "lnast_writer.hpp"
-#include "ir_adapter.hpp"
 #include "upass_utils.hpp"
 
 namespace upass {
@@ -24,21 +24,21 @@ public:
     current_nid = Lnast_nid::root();
   }
   virtual ~Lnast_manager() = default;
-  Lnast_manager() = delete;
+  Lnast_manager()          = delete;
 
   std::string_view kind() const override { return "lnast"; }
   std::size_t      node_count() const override {
     std::size_t count = 0;
-    for (const auto &nid : lnast->depth_preorder(Lnast_nid::root())) {
+    for (const auto& nid : lnast->depth_preorder(Lnast_nid::root())) {
       if (!nid.is_invalid()) {
         ++count;
       }
     }
     return count;
   }
-  std::size_t      const_count() const override {
+  std::size_t const_count() const override {
     std::size_t count = 0;
-    for (const auto &nid : lnast->depth_preorder(Lnast_nid::root())) {
+    for (const auto& nid : lnast->depth_preorder(Lnast_nid::root())) {
       if (nid.is_invalid()) {
         continue;
       }
@@ -48,9 +48,9 @@ public:
     }
     return count;
   }
-  std::size_t      arithmetic_count() const override {
+  std::size_t arithmetic_count() const override {
     std::size_t count = 0;
-    for (const auto &nid : lnast->depth_preorder(Lnast_nid::root())) {
+    for (const auto& nid : lnast->depth_preorder(Lnast_nid::root())) {
       if (nid.is_invalid()) {
         continue;
       }
@@ -78,14 +78,14 @@ public:
     }
     return count;
   }
-  std::size_t      fold_candidate_count() const override {
+  std::size_t fold_candidate_count() const override {
     // LNAST-side shared heuristic: treat arithmetic/comparison ops as fold candidates.
     return arithmetic_count();
   }
   std::vector<Node_id> list_nodes() const override {
     std::vector<Node_id> nodes;
     nodes.reserve(node_count());
-    for (const auto &nid : lnast->depth_preorder(Lnast_nid::root())) {
+    for (const auto& nid : lnast->depth_preorder(Lnast_nid::root())) {
       if (!nid.is_invalid()) {
         nodes.emplace_back(encode_nid(nid));
       }
@@ -139,8 +139,8 @@ public:
     }
     const auto text = lnast->get_data(decode_nid(node)).token.get_text();
     int64_t    value{0};
-    auto      *begin = text.data();
-    auto      *end   = text.data() + text.size();
+    auto*      begin = text.data();
+    auto*      end   = text.data() + text.size();
     auto       res   = std::from_chars(begin, end, value);
     if (res.ec != std::errc() || res.ptr != end) {
       return std::nullopt;
@@ -217,7 +217,7 @@ public:
   }
 
 protected:
-  static Node_id encode_nid(const Lnast_nid &nid) {
+  static Node_id encode_nid(const Lnast_nid& nid) {
     const auto level = static_cast<std::uint32_t>(nid.level);
     const auto pos   = static_cast<std::uint32_t>(nid.pos);
     return (static_cast<Node_id>(level) << 32) | static_cast<Node_id>(pos);

@@ -14,9 +14,9 @@ protected:
   int         max_iterations;
   bool        must_perform_backward;
   bool        hier;
-  static void trans(Eprp_var &var);
+  static void trans(Eprp_var& var);
 
 public:
-  explicit Pass_bitwidth(const Eprp_var &var);
+  explicit Pass_bitwidth(const Eprp_var& var);
   static void setup();
 };

@@ -98,7 +98,7 @@ public:
   }
 };
 
-int main(int argc, char **argv) {
+int main(int argc, char** argv) {
   if (argc != 2) {
     fprintf(stderr, "Usage:\n\t%s cfg\n", argv[0]);
     exit(-3);

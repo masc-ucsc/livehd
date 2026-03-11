@@ -24,7 +24,7 @@ public:
     }
   }
 
-  const Token_list &get_token_list() const { return token_list; }
+  const Token_list& get_token_list() const { return token_list; }
 };
 
 class Elab_test : public ::testing::Test {

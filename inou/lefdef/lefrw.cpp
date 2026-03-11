@@ -54,7 +54,7 @@
 
 char  defaultName[128];
 char  defaultOut[128];
-FILE *fout;
+FILE* fout;
 int   printing       = 0;  // Printing the output.
 int   parse65nm      = 0;
 int   parseLef58Type = 0;
@@ -72,21 +72,21 @@ void checkType(lefrCallbackType_e c) {
   }
 }
 
-char *orientStr(int orient) {
+char* orientStr(int orient) {
   switch (orient) {
-    case 0: return ((char *)"N");
-    case 1: return ((char *)"W");
-    case 2: return ((char *)"S");
-    case 3: return ((char *)"E");
-    case 4: return ((char *)"FN");
-    case 5: return ((char *)"FW");
-    case 6: return ((char *)"FS");
-    case 7: return ((char *)"FE");
+    case 0: return ((char*)"N");
+    case 1: return ((char*)"W");
+    case 2: return ((char*)"S");
+    case 3: return ((char*)"E");
+    case 4: return ((char*)"FN");
+    case 5: return ((char*)"FW");
+    case 6: return ((char*)"FS");
+    case 7: return ((char*)"FE");
   };
-  return ((char *)"BOGUS");
+  return ((char*)"BOGUS");
 }
 
-void lefVia(lefiVia *via) {
+void lefVia(lefiVia* via) {
   int i, j;
 
   lefrSetCaseSensitivity(1);
@@ -213,7 +213,7 @@ void lefVia(lefiVia *via) {
   return;
 }
 
-void lefSpacing(lefiSpacing *spacing) {
+void lefSpacing(lefiSpacing* spacing) {
   fprintf(fout,
           "  SAMENET %s %s %g ",
           spacing->lefiSpacing::name1(),
@@ -226,7 +226,7 @@ void lefSpacing(lefiSpacing *spacing) {
   return;
 }
 
-void lefViaRuleLayer(lefiViaRuleLayer *vLayer) {
+void lefViaRuleLayer(lefiViaRuleLayer* vLayer) {
   fprintf(fout, "  LAYER %s ;\n", vLayer->lefiViaRuleLayer::name());
   if (vLayer->lefiViaRuleLayer::hasDirection()) {
     if (vLayer->lefiViaRuleLayer::isHorizontal()) {
@@ -268,17 +268,17 @@ void lefViaRuleLayer(lefiViaRuleLayer *vLayer) {
   return;
 }
 
-void prtGeometry(lefiGeometries *geometry) {
+void prtGeometry(lefiGeometries* geometry) {
   int                  numItems = geometry->lefiGeometries::numItems();
   int                  i, j;
-  lefiGeomPath        *path;
-  lefiGeomPathIter    *pathIter;
-  lefiGeomRect        *rect;
-  lefiGeomRectIter    *rectIter;
-  lefiGeomPolygon     *polygon;
-  lefiGeomPolygonIter *polygonIter;
-  lefiGeomVia         *via;
-  lefiGeomViaIter     *viaIter;
+  lefiGeomPath*        path;
+  lefiGeomPathIter*    pathIter;
+  lefiGeomRect*        rect;
+  lefiGeomRectIter*    rectIter;
+  lefiGeomPolygon*     polygon;
+  lefiGeomPolygonIter* polygonIter;
+  lefiGeomVia*         via;
+  lefiGeomViaIter*     viaIter;
 
   for (i = 0; i < numItems; i++) {
     switch (geometry->lefiGeometries::itemType(i)) {
@@ -425,7 +425,7 @@ int antennaCB(lefrCallbackType_e c, double value, lefiUserData) {
   return 0;
 }
 
-int arrayBeginCB(lefrCallbackType_e c, const char *name, lefiUserData) {
+int arrayBeginCB(lefrCallbackType_e c, const char* name, lefiUserData) {
   int status;
 
   checkType(c);
@@ -438,11 +438,11 @@ int arrayBeginCB(lefrCallbackType_e c, const char *name, lefiUserData) {
   return 0;
 }
 
-int arrayCB(lefrCallbackType_e c, lefiArray *a, lefiUserData) {
+int arrayCB(lefrCallbackType_e c, lefiArray* a, lefiUserData) {
   int               status, i, j, defCaps;
-  lefiSitePattern  *pattern;
-  lefiTrackPattern *track;
-  lefiGcellPattern *gcell;
+  lefiSitePattern*  pattern;
+  lefiTrackPattern* track;
+  lefiGcellPattern* gcell;
 
   checkType(c);
   // if ((long)ud != userData) dataError();
@@ -451,13 +451,13 @@ int arrayCB(lefrCallbackType_e c, lefiArray *a, lefiUserData) {
     for (i = 0; i < a->lefiArray::numSitePattern(); i++) {
       pattern = a->lefiArray::sitePattern(i);
       status  = lefwArraySite(pattern->lefiSitePattern::name(),
-                             pattern->lefiSitePattern::x(),
-                             pattern->lefiSitePattern::y(),
-                             pattern->lefiSitePattern::orient(),
-                             pattern->lefiSitePattern::xStart(),
-                             pattern->lefiSitePattern::yStart(),
-                             pattern->lefiSitePattern::xStep(),
-                             pattern->lefiSitePattern::yStep());
+                              pattern->lefiSitePattern::x(),
+                              pattern->lefiSitePattern::y(),
+                              pattern->lefiSitePattern::orient(),
+                              pattern->lefiSitePattern::xStart(),
+                              pattern->lefiSitePattern::yStart(),
+                              pattern->lefiSitePattern::xStep(),
+                              pattern->lefiSitePattern::yStep());
       if (status != LEFW_OK) {
         dataError();
       }
@@ -467,13 +467,13 @@ int arrayCB(lefrCallbackType_e c, lefiArray *a, lefiUserData) {
     for (i = 0; i < a->lefiArray::numCanPlace(); i++) {
       pattern = a->lefiArray::canPlace(i);
       status  = lefwArrayCanplace(pattern->lefiSitePattern::name(),
-                                 pattern->lefiSitePattern::x(),
-                                 pattern->lefiSitePattern::y(),
-                                 pattern->lefiSitePattern::orient(),
-                                 pattern->lefiSitePattern::xStart(),
-                                 pattern->lefiSitePattern::yStart(),
-                                 pattern->lefiSitePattern::xStep(),
-                                 pattern->lefiSitePattern::yStep());
+                                  pattern->lefiSitePattern::x(),
+                                  pattern->lefiSitePattern::y(),
+                                  pattern->lefiSitePattern::orient(),
+                                  pattern->lefiSitePattern::xStart(),
+                                  pattern->lefiSitePattern::yStart(),
+                                  pattern->lefiSitePattern::xStep(),
+                                  pattern->lefiSitePattern::yStep());
       if (status != LEFW_OK) {
         dataError();
       }
@@ -483,13 +483,13 @@ int arrayCB(lefrCallbackType_e c, lefiArray *a, lefiUserData) {
     for (i = 0; i < a->lefiArray::numCannotOccupy(); i++) {
       pattern = a->lefiArray::cannotOccupy(i);
       status  = lefwArrayCannotoccupy(pattern->lefiSitePattern::name(),
-                                     pattern->lefiSitePattern::x(),
-                                     pattern->lefiSitePattern::y(),
-                                     pattern->lefiSitePattern::orient(),
-                                     pattern->lefiSitePattern::xStart(),
-                                     pattern->lefiSitePattern::yStart(),
-                                     pattern->lefiSitePattern::xStep(),
-                                     pattern->lefiSitePattern::yStep());
+                                      pattern->lefiSitePattern::x(),
+                                      pattern->lefiSitePattern::y(),
+                                      pattern->lefiSitePattern::orient(),
+                                      pattern->lefiSitePattern::xStart(),
+                                      pattern->lefiSitePattern::yStart(),
+                                      pattern->lefiSitePattern::xStep(),
+                                      pattern->lefiSitePattern::yStep());
       if (status != LEFW_OK) {
         dataError();
       }
@@ -536,14 +536,14 @@ int arrayCB(lefrCallbackType_e c, lefiArray *a, lefiUserData) {
       for (j = 0; j < a->lefiArray::numSites(i); j++) {
         pattern = a->lefiArray::site(i, j);
         status  = lefwArrayFloorplan(a->lefiArray::siteType(i, j),
-                                    pattern->lefiSitePattern::name(),
-                                    pattern->lefiSitePattern::x(),
-                                    pattern->lefiSitePattern::y(),
-                                    pattern->lefiSitePattern::orient(),
-                                    (int)pattern->lefiSitePattern::xStart(),
-                                    (int)pattern->lefiSitePattern::yStart(),
-                                    pattern->lefiSitePattern::xStep(),
-                                    pattern->lefiSitePattern::yStep());
+                                     pattern->lefiSitePattern::name(),
+                                     pattern->lefiSitePattern::x(),
+                                     pattern->lefiSitePattern::y(),
+                                     pattern->lefiSitePattern::orient(),
+                                     (int)pattern->lefiSitePattern::xStart(),
+                                     (int)pattern->lefiSitePattern::yStart(),
+                                     pattern->lefiSitePattern::xStep(),
+                                     pattern->lefiSitePattern::yStep());
         if (status != LEFW_OK) {
           dataError();
         }
@@ -575,7 +575,7 @@ int arrayCB(lefrCallbackType_e c, lefiArray *a, lefiUserData) {
   return 0;
 }
 
-int arrayEndCB(lefrCallbackType_e c, const char *name, lefiUserData) {
+int arrayEndCB(lefrCallbackType_e c, const char* name, lefiUserData) {
   int status;
 
   checkType(c);
@@ -588,7 +588,7 @@ int arrayEndCB(lefrCallbackType_e c, const char *name, lefiUserData) {
   return 0;
 }
 
-int busBitCharsCB(lefrCallbackType_e c, const char *busBit, lefiUserData) {
+int busBitCharsCB(lefrCallbackType_e c, const char* busBit, lefiUserData) {
   int status;
 
   checkType(c);
@@ -622,7 +622,7 @@ int fixedMaskCB(lefrCallbackType_e c, int fixedMask, lefiUserData) {
   return 0;
 }
 
-int clearanceCB(lefrCallbackType_e c, const char *name, lefiUserData) {
+int clearanceCB(lefrCallbackType_e c, const char* name, lefiUserData) {
   checkType(c);
   // if ((long)ud != userData) dataError();
 
@@ -630,7 +630,7 @@ int clearanceCB(lefrCallbackType_e c, const char *name, lefiUserData) {
   return 0;
 }
 
-int dividerCB(lefrCallbackType_e c, const char *name, lefiUserData) {
+int dividerCB(lefrCallbackType_e c, const char* name, lefiUserData) {
   checkType(c);
   // if ((long)ud != userData) dataError();
 
@@ -638,7 +638,7 @@ int dividerCB(lefrCallbackType_e c, const char *name, lefiUserData) {
   return 0;
 }
 
-int noWireExtCB(lefrCallbackType_e c, const char *name, lefiUserData) {
+int noWireExtCB(lefrCallbackType_e c, const char* name, lefiUserData) {
   checkType(c);
   // if ((long)ud != userData) dataError();
 
@@ -646,7 +646,7 @@ int noWireExtCB(lefrCallbackType_e c, const char *name, lefiUserData) {
   return 0;
 }
 
-int noiseMarCB(lefrCallbackType_e c, lefiNoiseMargin *, lefiUserData) {
+int noiseMarCB(lefrCallbackType_e c, lefiNoiseMargin*, lefiUserData) {
   checkType(c);
   // if ((long)ud != userData) dataError();
   return 0;
@@ -676,14 +676,14 @@ int edgeScaleCB(lefrCallbackType_e c, double name, lefiUserData) {
   return 0;
 }
 
-int noiseTableCB(lefrCallbackType_e c, lefiNoiseTable *, lefiUserData) {
+int noiseTableCB(lefrCallbackType_e c, lefiNoiseTable*, lefiUserData) {
   checkType(c);
   // if ((long)ud != userData) dataError();
 
   return 0;
 }
 
-int correctionCB(lefrCallbackType_e c, lefiCorrectionTable *, lefiUserData) {
+int correctionCB(lefrCallbackType_e c, lefiCorrectionTable*, lefiUserData) {
   checkType(c);
   // if ((long)ud != userData) dataError();
 
@@ -698,14 +698,14 @@ int dielectricCB(lefrCallbackType_e c, double dielectric, lefiUserData) {
   return 0;
 }
 
-int irdropBeginCB(lefrCallbackType_e c, void *, lefiUserData) {
+int irdropBeginCB(lefrCallbackType_e c, void*, lefiUserData) {
   checkType(c);
   // if ((long)ud != userData) dataError();
   fprintf(fout, "IRDROP\n");
   return 0;
 }
 
-int irdropCB(lefrCallbackType_e c, lefiIRDrop *irdrop, lefiUserData) {
+int irdropCB(lefrCallbackType_e c, lefiIRDrop* irdrop, lefiUserData) {
   int i;
   checkType(c);
   // if ((long)ud != userData) dataError();
@@ -717,27 +717,27 @@ int irdropCB(lefrCallbackType_e c, lefiIRDrop *irdrop, lefiUserData) {
   return 0;
 }
 
-int irdropEndCB(lefrCallbackType_e c, void *, lefiUserData) {
+int irdropEndCB(lefrCallbackType_e c, void*, lefiUserData) {
   checkType(c);
   // if ((long)ud != userData) dataError();
   fprintf(fout, "END IRDROP\n");
   return 0;
 }
 
-int layerCB(lefrCallbackType_e c, lefiLayer *layer, lefiUserData) {
+int layerCB(lefrCallbackType_e c, lefiLayer* layer, lefiUserData) {
   int               i, j, k;
   int               numPoints, propNum;
-  double           *widths, *current;
-  lefiLayerDensity *density;
-  lefiAntennaPWL   *pwl;
-  lefiSpacingTable *spTable;
-  lefiInfluence    *influence;
-  lefiParallel     *parallel;
-  lefiTwoWidths    *twoWidths;
+  double *          widths, *current;
+  lefiLayerDensity* density;
+  lefiAntennaPWL*   pwl;
+  lefiSpacingTable* spTable;
+  lefiInfluence*    influence;
+  lefiParallel*     parallel;
+  lefiTwoWidths*    twoWidths;
   char              pType;
   int               numMinCut, numMinenclosed;
-  lefiAntennaModel *aModel;
-  lefiOrthogonal   *ortho;
+  lefiAntennaModel* aModel;
+  lefiOrthogonal*   ortho;
 
   checkType(c);
   // if ((long)ud != userData) dataError();
@@ -1335,7 +1335,7 @@ int layerCB(lefrCallbackType_e c, lefiLayer *layer, lefiUserData) {
   return 0;
 }
 
-int macroBeginCB(lefrCallbackType_e c, const char *macroName, lefiUserData) {
+int macroBeginCB(lefrCallbackType_e c, const char* macroName, lefiUserData) {
   checkType(c);
   // if ((long)ud != userData) dataError();
   fprintf(fout, "MACRO %s\n", macroName);
@@ -1348,7 +1348,7 @@ int macroFixedMaskCB(lefrCallbackType_e c, int, lefiUserData) {
   return 0;
 }
 
-int macroClassTypeCB(lefrCallbackType_e c, const char *macroClassType, lefiUserData) {
+int macroClassTypeCB(lefrCallbackType_e c, const char* macroClassType, lefiUserData) {
   checkType(c);
   // if ((long)ud != userData) dataError();
   fprintf(fout, "MACRO CLASS %s\n", macroClassType);
@@ -1369,8 +1369,8 @@ int macroSizeCB(lefrCallbackType_e c, lefiNum, lefiUserData) {
   return 0;
 }
 
-int macroCB(lefrCallbackType_e c, lefiMacro *macro, lefiUserData) {
-  lefiSitePattern *pattern;
+int macroCB(lefrCallbackType_e c, lefiMacro* macro, lefiUserData) {
+  lefiSitePattern* pattern;
   int              propNum, i, hasPrtSym = 0;
 
   checkType(c);
@@ -1488,7 +1488,7 @@ int macroCB(lefrCallbackType_e c, lefiMacro *macro, lefiUserData) {
   return 0;
 }
 
-int macroEndCB(lefrCallbackType_e c, const char *macroName, lefiUserData) {
+int macroEndCB(lefrCallbackType_e c, const char* macroName, lefiUserData) {
   checkType(c);
   // if ((long)ud != userData) dataError();
   fprintf(fout, "END %s\n", macroName);
@@ -1502,7 +1502,7 @@ int manufacturingCB(lefrCallbackType_e c, double num, lefiUserData) {
   return 0;
 }
 
-int maxStackViaCB(lefrCallbackType_e c, lefiMaxStackVia *maxStack, lefiUserData) {
+int maxStackViaCB(lefrCallbackType_e c, lefiMaxStackVia* maxStack, lefiUserData) {
   checkType(c);
   // if ((long)ud != userData) dataError();
   fprintf(fout, "MAXVIASTACK %d ", maxStack->lefiMaxStackVia::maxStackVia());
@@ -1516,17 +1516,17 @@ int maxStackViaCB(lefrCallbackType_e c, lefiMaxStackVia *maxStack, lefiUserData)
   return 0;
 }
 
-int minFeatureCB(lefrCallbackType_e c, lefiMinFeature *min, lefiUserData) {
+int minFeatureCB(lefrCallbackType_e c, lefiMinFeature* min, lefiUserData) {
   checkType(c);
   // if ((long)ud != userData) dataError();
   fprintf(fout, "MINFEATURE %g %g ;\n", min->lefiMinFeature::one(), min->lefiMinFeature::two());
   return 0;
 }
 
-int nonDefaultCB(lefrCallbackType_e c, lefiNonDefault *def, lefiUserData) {
+int nonDefaultCB(lefrCallbackType_e c, lefiNonDefault* def, lefiUserData) {
   int          i;
-  lefiVia     *via;
-  lefiSpacing *spacing;
+  lefiVia*     via;
+  lefiSpacing* spacing;
 
   checkType(c);
   // if ((long)ud != userData) dataError();
@@ -1613,8 +1613,8 @@ int nonDefaultCB(lefrCallbackType_e c, lefiNonDefault *def, lefiUserData) {
   return 0;
 }
 
-int obstructionCB(lefrCallbackType_e c, lefiObstruction *obs, lefiUserData) {
-  lefiGeometries *geometry;
+int obstructionCB(lefrCallbackType_e c, lefiObstruction* obs, lefiUserData) {
+  lefiGeometries* geometry;
 
   checkType(c);
   // if ((long)ud != userData) dataError();
@@ -1625,10 +1625,10 @@ int obstructionCB(lefrCallbackType_e c, lefiObstruction *obs, lefiUserData) {
   return 0;
 }
 
-int pinCB(lefrCallbackType_e c, lefiPin *pin, lefiUserData) {
+int pinCB(lefrCallbackType_e c, lefiPin* pin, lefiUserData) {
   int                  numPorts, i, j;
-  lefiGeometries      *geometry;
-  lefiPinAntennaModel *aModel;
+  lefiGeometries*      geometry;
+  lefiPinAntennaModel* aModel;
 
   checkType(c);
   // if ((long)ud != userData) dataError();
@@ -1891,7 +1891,7 @@ int pinCB(lefrCallbackType_e c, lefiPin *pin, lefiUserData) {
   return 0;
 }
 
-int densityCB(lefrCallbackType_e c, lefiDensity *density, lefiUserData) {
+int densityCB(lefrCallbackType_e c, lefiDensity* density, lefiUserData) {
   struct lefiGeomRect rect;
 
   checkType(c);
@@ -1909,14 +1909,14 @@ int densityCB(lefrCallbackType_e c, lefiDensity *density, lefiUserData) {
   return 0;
 }
 
-int propDefBeginCB(lefrCallbackType_e c, void *, lefiUserData) {
+int propDefBeginCB(lefrCallbackType_e c, void*, lefiUserData) {
   checkType(c);
   // if ((long)ud != userData) dataError();
   fprintf(fout, "PROPERTYDEFINITIONS\n");
   return 0;
 }
 
-int propDefCB(lefrCallbackType_e c, lefiProp *prop, lefiUserData) {
+int propDefCB(lefrCallbackType_e c, lefiProp* prop, lefiUserData) {
   checkType(c);
   // if ((long)ud != userData) dataError();
   fprintf(fout, " %s %s", prop->lefiProp::propType(), prop->lefiProp::propName());
@@ -1938,14 +1938,14 @@ int propDefCB(lefrCallbackType_e c, lefiProp *prop, lefiUserData) {
   return 0;
 }
 
-int propDefEndCB(lefrCallbackType_e c, void *, lefiUserData) {
+int propDefEndCB(lefrCallbackType_e c, void*, lefiUserData) {
   checkType(c);
   // if ((long)ud != userData) dataError();
   fprintf(fout, "END PROPERTYDEFINITIONS\n");
   return 0;
 }
 
-int siteCB(lefrCallbackType_e c, lefiSite *site, lefiUserData) {
+int siteCB(lefrCallbackType_e c, lefiSite* site, lefiUserData) {
   int hasPrtSym = 0;
   int i;
 
@@ -1994,28 +1994,28 @@ int siteCB(lefrCallbackType_e c, lefiSite *site, lefiUserData) {
   return 0;
 }
 
-int spacingBeginCB(lefrCallbackType_e c, void *, lefiUserData) {
+int spacingBeginCB(lefrCallbackType_e c, void*, lefiUserData) {
   checkType(c);
   // if ((long)ud != userData) dataError();
   fprintf(fout, "SPACING\n");
   return 0;
 }
 
-int spacingCB(lefrCallbackType_e c, lefiSpacing *spacing, lefiUserData) {
+int spacingCB(lefrCallbackType_e c, lefiSpacing* spacing, lefiUserData) {
   checkType(c);
   // if ((long)ud != userData) dataError();
   lefSpacing(spacing);
   return 0;
 }
 
-int spacingEndCB(lefrCallbackType_e c, void *, lefiUserData) {
+int spacingEndCB(lefrCallbackType_e c, void*, lefiUserData) {
   checkType(c);
   // if ((long)ud != userData) dataError();
   fprintf(fout, "END SPACING\n");
   return 0;
 }
 
-int timingCB(lefrCallbackType_e c, lefiTiming *timing, lefiUserData) {
+int timingCB(lefrCallbackType_e c, lefiTiming* timing, lefiUserData) {
   int i;
   checkType(c);
   // if ((long)ud != userData) dataError();
@@ -2103,7 +2103,7 @@ int timingCB(lefrCallbackType_e c, lefiTiming *timing, lefiUserData) {
   return 0;
 }
 
-int unitsCB(lefrCallbackType_e c, lefiUnits *unit, lefiUserData) {
+int unitsCB(lefrCallbackType_e c, lefiUnits* unit, lefiUserData) {
   checkType(c);
   // if ((long)ud != userData) dataError();
   fprintf(fout, "UNITS\n");
@@ -2132,7 +2132,7 @@ int unitsCB(lefrCallbackType_e c, lefiUnits *unit, lefiUserData) {
   return 0;
 }
 
-int useMinSpacingCB(lefrCallbackType_e c, lefiUseMinSpacing *spacing, lefiUserData) {
+int useMinSpacingCB(lefrCallbackType_e c, lefiUseMinSpacing* spacing, lefiUserData) {
   checkType(c);
   // if ((long)ud != userData) dataError();
   fprintf(fout, "USEMINSPACING %s ", spacing->lefiUseMinSpacing::name());
@@ -2151,23 +2151,23 @@ int versionCB(lefrCallbackType_e c, double num, lefiUserData) {
   return 0;
 }
 
-int versionStrCB(lefrCallbackType_e c, const char *versionName, lefiUserData) {
+int versionStrCB(lefrCallbackType_e c, const char* versionName, lefiUserData) {
   checkType(c);
   // if ((long)ud != userData) dataError();
   fprintf(fout, "VERSION %s ;\n", versionName);
   return 0;
 }
 
-int viaCB(lefrCallbackType_e c, lefiVia *via, lefiUserData) {
+int viaCB(lefrCallbackType_e c, lefiVia* via, lefiUserData) {
   checkType(c);
   // if ((long)ud != userData) dataError();
   lefVia(via);
   return 0;
 }
 
-int viaRuleCB(lefrCallbackType_e c, lefiViaRule *viaRule, lefiUserData) {
+int viaRuleCB(lefrCallbackType_e c, lefiViaRule* viaRule, lefiUserData) {
   int               numLayers, numVias, i;
-  lefiViaRuleLayer *vLayer;
+  lefiViaRuleLayer* vLayer;
 
   checkType(c);
   // if ((long)ud != userData) dataError();
@@ -2220,7 +2220,7 @@ int viaRuleCB(lefrCallbackType_e c, lefiViaRule *viaRule, lefiUserData) {
   return 0;
 }
 
-int extensionCB(lefrCallbackType_e c, const char *extsn, lefiUserData) {
+int extensionCB(lefrCallbackType_e c, const char* extsn, lefiUserData) {
   checkType(c);
   // lefrSetCaseSensitivity(0);
   // if ((long)ud != userData) dataError();
@@ -2229,22 +2229,22 @@ int extensionCB(lefrCallbackType_e c, const char *extsn, lefiUserData) {
   return 0;
 }
 
-int doneCB(lefrCallbackType_e c, void *, lefiUserData) {
+int doneCB(lefrCallbackType_e c, void*, lefiUserData) {
   checkType(c);
   // if ((long)ud != userData) dataError();
   fprintf(fout, "END LIBRARY\n");
   return 0;
 }
 
-void errorCB(const char *msg) { printf("%s : %s\n", (const char *)lefrGetUserData(), msg); }
+void errorCB(const char* msg) { printf("%s : %s\n", (const char*)lefrGetUserData(), msg); }
 
-void warningCB(const char *msg) { printf("%s : %s\n", (const char *)lefrGetUserData(), msg); }
+void warningCB(const char* msg) { printf("%s : %s\n", (const char*)lefrGetUserData(), msg); }
 
-void *mallocCB(int size) { return malloc(size); }
+void* mallocCB(int size) { return malloc(size); }
 
-void *reallocCB(void *name, int size) { return realloc(name, size); }
+void* reallocCB(void* name, int size) { return realloc(name, size); }
 
-void freeCB(void *name) {
+void freeCB(void* name) {
   free(name);
   return;
 }
@@ -2254,12 +2254,12 @@ void lineNumberCB(int lineNo) {
   return;
 }
 
-void printWarning(const char *str) { fprintf(stderr, "%s\n", str); }
+void printWarning(const char* str) { fprintf(stderr, "%s\n", str); }
 
-int main(int argc, char **argv) {
-  char *inFile[100];
-  char *outFile;
-  FILE *f;
+int main(int argc, char** argv) {
+  char* inFile[100];
+  char* outFile;
+  FILE* f;
   int   noCalls = 0;
   //  long start_mem;
   int         num;
@@ -2268,9 +2268,9 @@ int main(int argc, char **argv) {
   int         numInFile = 0;
   int         fileCt    = 0;
   int         relax     = 0;
-  const char *version   = "N/A";
+  const char* version   = "N/A";
   int         setVer    = 0;
-  char       *userData;
+  char*       userData;
   int         msgCb      = 0;
   int         test1      = 0;
   int         test2      = 0;
@@ -2426,7 +2426,7 @@ int main(int argc, char **argv) {
     lefrSetTimingCbk(timingCB);
     lefrSetUnitsCbk(unitsCB);
     lefrSetUseMinSpacingCbk(useMinSpacingCB);
-    lefrSetUserData((void *)3);
+    lefrSetUserData((void*)3);
     if (!retStr) {
       lefrSetVersionCbk(versionCB);
     } else {
@@ -2526,7 +2526,7 @@ int main(int argc, char **argv) {
         return 1;
       }
 
-      lefrRead(f, inFile[fileCt], (void *)userData);
+      lefrRead(f, inFile[fileCt], (void*)userData);
 
       // if (res)
       //   fprintf(stderr, "Reader returns bad status.\n", inFile[fileCt]);
@@ -2559,11 +2559,11 @@ int main(int argc, char **argv) {
         dMsgs[0] = 2007;
         dMsgs[1] = 2008;
         dMsgs[2] = 2009;
-        lefrDisableParserMsgs(3, (int *)dMsgs);
+        lefrDisableParserMsgs(3, (int*)dMsgs);
       } else if (idx == 1) {  // msgs 2007 & 2005, 2011 did not print because
         fprintf(stderr, "\nPass 1: Enable 2007\n");
         dMsgs[0] = 2007;  // lefrUnsetLayerCbk() was called
-        lefrEnableParserMsgs(1, (int *)dMsgs);
+        lefrEnableParserMsgs(1, (int*)dMsgs);
       } else if (idx == 2) {  // nothing were printed
         fprintf(stderr, "\nPass 2: Disable all\n");
         lefrDisableAllMsgs();
@@ -2588,7 +2588,7 @@ int main(int argc, char **argv) {
         return 1;
       }
 
-      lefrRead(f, inFile[fileCt], (void *)userData);
+      lefrRead(f, inFile[fileCt], (void*)userData);
 
       // if (res)
       //   fprintf(stderr, "Reader returns bad status.\n", inFile[fileCt]);
@@ -2623,7 +2623,7 @@ int main(int argc, char **argv) {
         lefrSetLimitPerMsg(10000, 10000);
       }
 
-      lefrRead(f, inFile[fileCt], (void *)userData);
+      lefrRead(f, inFile[fileCt], (void*)userData);
 
       if (ccr1709089) {
         // CCR 1709089 test.

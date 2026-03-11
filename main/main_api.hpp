@@ -10,19 +10,19 @@
 class Main_api {
 protected:
 public:
-  static void error(const std::string &msg) { throw Eprp::parser_error(Pass::eprp, msg); }
-  static void warn(const std::string &msg) { Pass::eprp.parser_warn(msg); }
+  static void error(const std::string& msg) { throw Eprp::parser_error(Pass::eprp, msg); }
+  static void warn(const std::string& msg) { Pass::eprp.parser_warn(msg); }
 
   template <typename... Args>
-  static void error(std::format_string<Args...> fmt, Args &&...args) {
+  static void error(std::format_string<Args...> fmt, Args&&... args) {
     throw Eprp::parser_error(Pass::eprp, fmt, std::forward<Args>(args)...);
   }
   template <typename... Args>
-  static void warn(std::format_string<Args...> fmt, Args &&...args) {
+  static void warn(std::format_string<Args...> fmt, Args&&... args) {
     Pass::eprp.parser_warn(fmt, std::forward<Args>(args)...);
   }
 
-  static void setup(const std::function<void(Eprp &)> &fn) { fn(Pass::eprp); }
+  static void setup(const std::function<void(Eprp&)>& fn) { fn(Pass::eprp); }
 
   static void parse_inline(std::string_view line);
 

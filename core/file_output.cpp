@@ -26,7 +26,7 @@ static std::string strerror_threadsafe(int err) {
 
 #if defined(__GLIBC__) && defined(_GNU_SOURCE)
   // GNU variant: returns char* (may point to static storage or buf)
-  char *msg = ::strerror_r(err, buf, sizeof(buf));
+  char* msg = ::strerror_r(err, buf, sizeof(buf));
   if (msg && *msg) {
     return std::string(msg);
   }
@@ -59,7 +59,7 @@ File_output::~File_output() {
   auto ok = ftruncate(fd, map_size);
   I(ok == 0);
 
-  void *base = ::mmap(0, map_size, PROT_READ | PROT_WRITE, MAP_SHARED, fd, 0);  // no superpages
+  void* base = ::mmap(0, map_size, PROT_READ | PROT_WRITE, MAP_SHARED, fd, 0);  // no superpages
   if (base == MAP_FAILED) {
     std::println("mmap errno:{} for filename{}\n", strerror_threadsafe(errno), filename);
     I(false);
@@ -67,11 +67,11 @@ File_output::~File_output() {
 
   //---------------------------------- SAVE
 
-  char *ptr = static_cast<char *>(base);
-  for (const auto &e : sequence) {
+  char* ptr = static_cast<char*>(base);
+  for (const auto& e : sequence) {
     memcpy(ptr, e.data(), e.size());
     ptr += e.size();
-    I(static_cast<size_t>(ptr - static_cast<char *>(base)) <= sz);
+    I(static_cast<size_t>(ptr - static_cast<char*>(base)) <= sz);
   }
 
   //---------------------------------- CLOSE

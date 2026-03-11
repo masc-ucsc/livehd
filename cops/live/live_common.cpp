@@ -3,7 +3,7 @@
 
 namespace Live {
 
-int resolve_bit(Lgraph *graph, Index_id idx, uint32_t current_bit, Port_ID pin, absl::flat_hash_set<uint32_t> &bits) {
+int resolve_bit(Lgraph* graph, Index_id idx, uint32_t current_bit, Port_ID pin, absl::flat_hash_set<uint32_t>& bits) {
   if (graph->node_type_get(idx).op == Pick_Op) {
     I(graph->get_bits(graph->get_node(idx).get_driver_pin()) >= current_bit);
     if (pin != 0) {
@@ -11,7 +11,7 @@ int resolve_bit(Lgraph *graph, Index_id idx, uint32_t current_bit, Port_ID pin, 
     }
     Node_pin picked;
     Node_pin offset;
-    for (auto &c : graph->inp_edges(idx)) {
+    for (auto& c : graph->inp_edges(idx)) {
       if (c.get_inp_pin().get_pid() == 0) {
         picked = c.get_out_pin();
       } else if (c.get_inp_pin().get_pid() == 1) {
@@ -26,12 +26,12 @@ int resolve_bit(Lgraph *graph, Index_id idx, uint32_t current_bit, Port_ID pin, 
     return 0;
   } else if (graph->node_type_get(idx).op == Join_Op) {
     std::map<Index_id, uint32_t> port_size;
-    for (auto &c : graph->inp_edges(idx)) {
+    for (auto& c : graph->inp_edges(idx)) {
       port_size[c.get_inp_pin().get_pid()] = graph->get_bits(c.get_out_pin());
     }
     uint32_t offset = 0;
     int      last   = -1;
-    for (auto &ps : port_size) {
+    for (auto& ps : port_size) {
       I(last + 1 == (int)ps.first);  // need to traverse in order
       last = ps.first;
       if (offset + ps.second > current_bit) {
@@ -60,7 +60,7 @@ int resolve_bit(Lgraph *graph, Index_id idx, uint32_t current_bit, Port_ID pin, 
     int      const_shift   = -1;
     Index_id relevant_port = 0;
 
-    for (auto &c : graph->inp_edges(idx)) {
+    for (auto& c : graph->inp_edges(idx)) {
       if (c.get_inp_pin().get_pid() == 1 && graph->node_type_get(c.get_idx()).op == U32Const_Op) {
         const_shift = graph->node_value_get(c.get_idx());
       }
@@ -87,7 +87,7 @@ int resolve_bit(Lgraph *graph, Index_id idx, uint32_t current_bit, Port_ID pin, 
     int      const_shift   = -1;
     Index_id relevant_port = 0;
 
-    for (auto &c : graph->inp_edges(idx)) {
+    for (auto& c : graph->inp_edges(idx)) {
       if (c.get_inp_pin().get_pid() == 1 && graph->node_type_get(c.get_idx()).op == U32Const_Op) {
         const_shift = graph->node_value_get(c.get_idx());
       }
@@ -116,7 +116,7 @@ int resolve_bit(Lgraph *graph, Index_id idx, uint32_t current_bit, Port_ID pin, 
              || graph->node_type_get(idx).op == LessThan_Op || graph->node_type_get(idx).op == TechMap_Op) {
     Index_id relevant_port = 0;
 
-    for (auto &c : graph->inp_edges(idx)) {
+    for (auto& c : graph->inp_edges(idx)) {
       if (c.get_inp_pin().get_pid() == pin) {
         relevant_port = c.get_idx();
         break;
@@ -133,13 +133,13 @@ int resolve_bit(Lgraph *graph, Index_id idx, uint32_t current_bit, Port_ID pin, 
 
 // resolves which bits are dependencies of the current bit based on node type
 // when propagating backwards
-int resolve_bit_fwd(Lgraph *graph, Index_id idx, uint32_t current_bit, Port_ID pin, absl::flat_hash_set<uint32_t> &bits) {
+int resolve_bit_fwd(Lgraph* graph, Index_id idx, uint32_t current_bit, Port_ID pin, absl::flat_hash_set<uint32_t>& bits) {
   if (graph->node_type_get(idx).op == Pick_Op) {
     if (pin != 0) {
       return -1;  // do not propagate through this pid
     }
     Index_id picked = 0, offset = 0;
-    for (auto &c : graph->inp_edges(idx)) {
+    for (auto& c : graph->inp_edges(idx)) {
       if (c.get_inp_pin().get_pid() == 0) {
         picked = c.get_out_pin().get_idx();
       } else if (c.get_inp_pin().get_pid() == 1) {
@@ -158,7 +158,7 @@ int resolve_bit_fwd(Lgraph *graph, Index_id idx, uint32_t current_bit, Port_ID p
     return 0;  // graph->node_value_get(offset) + current_bit;
   } else if (graph->node_type_get(idx).op == Join_Op) {
     std::map<Index_id, uint32_t> port_size;
-    for (auto &c : graph->inp_edges(idx)) {
+    for (auto& c : graph->inp_edges(idx)) {
       if (c.get_inp_pin().get_pid() >= pin) {
         continue;
       }
@@ -166,7 +166,7 @@ int resolve_bit_fwd(Lgraph *graph, Index_id idx, uint32_t current_bit, Port_ID p
     }
     uint32_t offset = 0;
     int      last   = -1;
-    for (auto &ps : port_size) {
+    for (auto& ps : port_size) {
       I(last + 1 == static_cast<int>(ps.first));  // need to traverse in order
       last = ps.first;
       offset += ps.second;
@@ -195,7 +195,7 @@ int resolve_bit_fwd(Lgraph *graph, Index_id idx, uint32_t current_bit, Port_ID p
     int  const_shift = -1;
     bool sign        = false;
 
-    for (auto &c : graph->inp_edges(idx)) {
+    for (auto& c : graph->inp_edges(idx)) {
       if (c.get_inp_pin().get_pid() == 1 && graph->node_type_get(c.get_idx()).op == U32Const_Op) {
         const_shift = graph->node_value_get(c.get_idx());
       } else if (c.get_inp_pin().get_pid() == 2) {
@@ -226,7 +226,7 @@ int resolve_bit_fwd(Lgraph *graph, Index_id idx, uint32_t current_bit, Port_ID p
 
     int const_shift = -1;
 
-    for (auto &c : graph->inp_edges(idx)) {
+    for (auto& c : graph->inp_edges(idx)) {
       if (c.get_inp_pin().get_pid() == 1 && graph->node_type_get(c.get_idx()).op == U32Const_Op) {
         const_shift = graph->node_value_get(c.get_idx());
       }

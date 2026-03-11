@@ -6,13 +6,13 @@
 
 class Inou_liveparse : public Pass {
 protected:
-  void do_tolg(Eprp_var &var);
+  void do_tolg(Eprp_var& var);
 
   // eprp callbacks
-  static void tolg(Eprp_var &var);
+  static void tolg(Eprp_var& var);
 
 public:
-  Inou_liveparse(const Eprp_var &var);
+  Inou_liveparse(const Eprp_var& var);
 
   static void setup();
 };

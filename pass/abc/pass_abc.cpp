@@ -12,7 +12,7 @@
 #include "abc_cell.hpp"
 #include "lgraph.hpp"
 
-Abc_Frame_t *Pass_abc::pAbc = 0;
+Abc_Frame_t* Pass_abc::pAbc = 0;
 
 void setup_pass_abc() {
   Pass_abc p;
@@ -20,17 +20,17 @@ void setup_pass_abc() {
   p.setup();
 }
 
-void Pass_abc::tmap(Eprp_var &var) {
+void Pass_abc::tmap(Eprp_var& var) {
   Pass_abc pass;
 
   pass.opack.verbose = var.get("verbose") == "true";
 
-  for (const auto &l : var.lgs) {
+  for (const auto& l : var.lgs) {
     pass.trans(l);
   }
 }
 
-void Pass_abc::optimize(Eprp_var &var) {
+void Pass_abc::optimize(Eprp_var& var) {
   Pass_abc pass;
 
   pass.opack.liberty_file = var.get("liberty_file");
@@ -38,8 +38,8 @@ void Pass_abc::optimize(Eprp_var &var) {
   pass.opack.odir         = var.get("odir");
   pass.opack.verbose      = var.get("verbose") == "true";
 
-  for (const auto &l : var.lgs) {
-    Lgraph *lg = pass.regen(l);
+  for (const auto& l : var.lgs) {
+    Lgraph* lg = pass.regen(l);
     var.add(lg);
   }
 }
@@ -71,11 +71,11 @@ Pass_abc::Pass_abc()
 
 Pass_abc::~Pass_abc() { delete graph_info; }
 
-void Pass_abc::trans(Lgraph *lg) {
+void Pass_abc::trans(Lgraph* lg) {
   lg->sync();  // sync because Tech Library is loaded
 }
 
-Lgraph *Pass_abc::regen(const Lgraph *lg) {
+Lgraph* Pass_abc::regen(const Lgraph* lg) {
   if (!setup_techmap(lg)) {
     Pass::error("pass_abc.regen: supports techmap graphs only");
     return 0;
@@ -83,7 +83,7 @@ Lgraph *Pass_abc::regen(const Lgraph *lg) {
 
   find_cell_conn(lg);
   std::string source{lg->get_library().get_source(lg->get_lgid())};
-  Lgraph     *mapped = lg->ref_library()->create_lgraph(absl::StrCat(lg->get_name(), "_mapped"), source);
+  Lgraph*     mapped = lg->ref_library()->create_lgraph(absl::StrCat(lg->get_name(), "_mapped"), source);
   from_abc(mapped, lg, to_abc(lg));
   mapped->sync();
   if (opack.verbose) {
@@ -98,7 +98,7 @@ Lgraph *Pass_abc::regen(const Lgraph *lg) {
   return mapped;
 }
 
-static std::string get_clock_name(const Lgraph *g, Index_ID clk_idx) {
+static std::string get_clock_name(const Lgraph* g, Index_ID clk_idx) {
   std::string clock_name;
 
   if (g->has_graph_input(clk_idx)) {
@@ -126,15 +126,15 @@ static std::string get_clock_name(const Lgraph *g, Index_ID clk_idx) {
  * 							block_conn memory_conn;
  ***********************************************************************/
 
-void Pass_abc::find_latch_conn(const Lgraph *g) {
-  for (const auto &idx : graph_info->latch_id) {
+void Pass_abc::find_latch_conn(const Lgraph* g) {
+  for (const auto& idx : graph_info->latch_id) {
     graph_topology::topology_info topo;
-    const Tech_cell              *tcell = g->get_tlibrary().get_const_cell(g->tmap_id_get(idx));
+    const Tech_cell*              tcell = g->get_tlibrary().get_const_cell(g->tmap_id_get(idx));
     if (opack.verbose) {
       std::print("\nLatch_Op_ID NodeID:{} has direct input from Node: \n", idx);
     }
     std::string trig_pin = tcell->pin_name_exist("C") ? "C" : "E";
-    for (const auto &input : g->inp_edges(idx)) {
+    for (const auto& input : g->inp_edges(idx)) {
       if (input.get_inp_pin().get_pid() == tcell->get_pin_id("D")) {
         if (opack.verbose) {
           std::print("{} pin input port ID {}", tcell->get_name(input.get_inp_pin().get_pid()), input.get_inp_pin().get_pid());
@@ -183,18 +183,18 @@ void Pass_abc::find_latch_conn(const Lgraph *g) {
   }
 }
 
-void Pass_abc::find_combinational_conn(const Lgraph *g) {
-  for (const auto &idx : graph_info->combinational_id) {
-    std::map<Port_ID, const Edge *> inp_edges;  // NOTE: recursive_find needs ordered inp_pids (sorting at the end is not enough)
-    graph_topology::topology_info   topo;
+void Pass_abc::find_combinational_conn(const Lgraph* g) {
+  for (const auto& idx : graph_info->combinational_id) {
+    std::map<Port_ID, const Edge*> inp_edges;  // NOTE: recursive_find needs ordered inp_pids (sorting at the end is not enough)
+    graph_topology::topology_info  topo;
 
-    for (const auto &input : g->inp_edges(idx)) {
+    for (const auto& input : g->inp_edges(idx)) {
       assert(inp_edges.find(input.get_inp_pin().get_pid()) == inp_edges.end());
 
       inp_edges[input.get_inp_pin().get_pid()] = &input;
     }
 
-    for (const auto &[inp_pid, edge] : inp_edges) {
+    for (const auto& [inp_pid, edge] : inp_edges) {
       int bit_index[2] = {0, 0};  // changed withing recursive find
       recursive_find(g, edge, topo, bit_index);
     }
@@ -204,14 +204,14 @@ void Pass_abc::find_combinational_conn(const Lgraph *g) {
   }
 }
 
-void Pass_abc::find_graphio_output_conn(const Lgraph *g) {
-  for (const auto &idx : graph_info->graphio_output_id) {
+void Pass_abc::find_graphio_output_conn(const Lgraph* g) {
+  for (const auto& idx : graph_info->graphio_output_id) {
     graph_topology::topology_info topo;
 
     auto width = g->get_bits(idx);
     auto index = 0;
 
-    for (const auto &input : g->inp_edges(idx)) {
+    for (const auto& input : g->inp_edges(idx)) {
       for (index = 0; index < width; index++) {
         int bit_index[2] = {index, index};
         recursive_find(g, &input, topo, bit_index);
@@ -223,21 +223,21 @@ void Pass_abc::find_graphio_output_conn(const Lgraph *g) {
   }
 }
 
-void Pass_abc::find_sub_conn(const Lgraph *g) {
-  for (const auto &idx : graph_info->subgraph_id) {
+void Pass_abc::find_sub_conn(const Lgraph* g) {
+  for (const auto& idx : graph_info->subgraph_id) {
     if (opack.verbose) {
       std::print("\nSubGraph_Op NodeID:{} has direct input from Node: \n", idx);
     }
 
-    absl::flat_hash_map<Port_ID, const Edge *>                  inp_edges;
+    absl::flat_hash_map<Port_ID, const Edge*>                   inp_edges;
     absl::flat_hash_map<Port_ID, graph_topology::topology_info> subgraph_pid;
 
-    for (const auto &input : g->inp_edges(idx)) {
+    for (const auto& input : g->inp_edges(idx)) {
       Port_ID inp_id    = input.get_inp_pin().get_pid();
       inp_edges[inp_id] = &input;
     }
 
-    for (const auto &input : inp_edges) {
+    for (const auto& input : inp_edges) {
       if (opack.verbose) {
         std::print("\n------------------------------------------------ \n", idx);
       }
@@ -260,16 +260,16 @@ void Pass_abc::find_sub_conn(const Lgraph *g) {
   }
 }
 
-void Pass_abc::find_memory_conn(const Lgraph *g) {
-  for (const auto &idx : graph_info->memory_id) {
+void Pass_abc::find_memory_conn(const Lgraph* g) {
+  for (const auto& idx : graph_info->memory_id) {
     if (opack.verbose) {
       std::print("\nMemory_Op NodeID:{} has direct input from Node: \n", idx);
     }
 
-    absl::flat_hash_map<Port_ID, const Edge *>                  inp_edges;
+    absl::flat_hash_map<Port_ID, const Edge*>                   inp_edges;
     absl::flat_hash_map<Port_ID, graph_topology::topology_info> memory_pid;
 
-    for (const auto &input : g->inp_edges(idx)) {
+    for (const auto& input : g->inp_edges(idx)) {
       Port_ID inp_id = input.get_inp_pin().get_pid();
       if (inp_id >= LgRAPH_MEMOP_CLK) {
         inp_edges[inp_id] = &input;
@@ -277,7 +277,7 @@ void Pass_abc::find_memory_conn(const Lgraph *g) {
         continue;
       }
     }
-    for (const auto &input : inp_edges) {
+    for (const auto& input : inp_edges) {
       Port_ID input_id = input.second->get_inp_pin().get_pid();
       if (opack.verbose) {
         std::print("\n-------------------{}---------------------- \n", input_id);
@@ -310,7 +310,7 @@ void Pass_abc::find_memory_conn(const Lgraph *g) {
   }
 }
 
-void Pass_abc::find_cell_conn(const Lgraph *g) {
+void Pass_abc::find_cell_conn(const Lgraph* g) {
 #ifndef NDEBUG
   std::cout << "\n******************************************************************\n";
   std::cout << "Begin Computing Netlist Topology Based On Lgraph\n";
@@ -343,7 +343,7 @@ void Pass_abc::find_cell_conn(const Lgraph *g) {
  * 						FIXME: More Join & Pick Node means (a way to reduce ?)
  * 						"deeper" traverse depth and recursion
  ***********************************************************************/
-void Pass_abc::recursive_find(const Lgraph *g, const Edge_raw *input, graph_topology::topology_info &topo, int bit_addr[2]) {
+void Pass_abc::recursive_find(const Lgraph* g, const Edge_raw* input, graph_topology::topology_info& topo, int bit_addr[2]) {
   Index_ID     this_idx       = input->get_idx();
   Node_Type_Op this_node_type = g->get_node(this_idx).get_type_op();
   if (this_node_type == U32Const_Op) {
@@ -370,7 +370,7 @@ void Pass_abc::recursive_find(const Lgraph *g, const Edge_raw *input, graph_topo
     topo.push_back(info);
   } else if (this_node_type == GraphIO_Op) {
     if (g->has_graph_output(this_idx)) {
-      for (const auto &pre_inp : g->inp_edges(this_idx)) {
+      for (const auto& pre_inp : g->inp_edges(this_idx)) {
         recursive_find(g, &pre_inp, topo, bit_addr);
       }
     } else {
@@ -418,10 +418,10 @@ void Pass_abc::recursive_find(const Lgraph *g, const Edge_raw *input, graph_topo
       std::print("\t NodeID:{},bit [{}:{}] portid : {} \n", this_idx, 0, 0, input->get_out_pin().get_pid());
     }
 
-    const Tech_cell *tcell      = g->get_tlibrary().get_const_cell(g->tmap_id_get(this_idx));
+    const Tech_cell* tcell      = g->get_tlibrary().get_const_cell(g->tmap_id_get(this_idx));
     auto             tcell_name = tcell->get_name();
     if (tcell_name == "$_BUF_") {
-      for (const auto &pre_inp : g->inp_edges(this_idx)) {
+      for (const auto& pre_inp : g->inp_edges(this_idx)) {
         recursive_find(g, &pre_inp, topo, bit_addr);
       }
     } else {
@@ -429,11 +429,11 @@ void Pass_abc::recursive_find(const Lgraph *g, const Edge_raw *input, graph_topo
       topo.push_back(info);
     }
   } else if (this_node_type == Join_Op) {
-    int                       width      = 0;
-    int                       width_pre  = 0;
-    uint32_t                  Join_width = g->get_bits(this_idx);
-    std::vector<const Edge *> Join(Join_width);
-    for (const auto &pre_inp : g->inp_edges(this_idx)) {
+    int                      width      = 0;
+    int                      width_pre  = 0;
+    uint32_t                 Join_width = g->get_bits(this_idx);
+    std::vector<const Edge*> Join(Join_width);
+    for (const auto& pre_inp : g->inp_edges(this_idx)) {
       Join[pre_inp.get_inp_pin().get_pid()] = &pre_inp;
     }
     for (Port_ID i = 0; i < Join_width; i++) {
@@ -455,7 +455,7 @@ void Pass_abc::recursive_find(const Lgraph *g, const Edge_raw *input, graph_topo
     auto lower [[maybe_unused]] = 0;
     auto offset                 = 0;
     auto pick_width             = g->get_bits(this_idx);
-    for (const auto &pre_inp : g->inp_edges(this_idx)) {
+    for (const auto& pre_inp : g->inp_edges(this_idx)) {
       switch (pre_inp.get_inp_pin().get_pid()) {
         case 0: {
           width = g->get_bits(pre_inp.get_idx());
@@ -473,7 +473,7 @@ void Pass_abc::recursive_find(const Lgraph *g, const Edge_raw *input, graph_topo
     lower = offset;
     assert(bit_addr[1] - bit_addr[0] + 1 <= width);
     assert(upper - lower + 1 <= width);
-    for (const auto &pre_inp : g->inp_edges(this_idx)) {
+    for (const auto& pre_inp : g->inp_edges(this_idx)) {
       if (pre_inp.get_inp_pin().get_pid() == 0) {
         bit_addr[0] += lower;
         bit_addr[1] += lower;
@@ -493,13 +493,13 @@ void Pass_abc::recursive_find(const Lgraph *g, const Edge_raw *input, graph_topo
  * description: iterate the lgraph to see it is a valid graph to pass abc
  *
  ***********************************************************************/
-bool Pass_abc::setup_techmap(const Lgraph *g) {
+bool Pass_abc::setup_techmap(const Lgraph* g) {
   bool is_valid_input = true;
 
-  for (const auto &idx : g->fast()) {
+  for (const auto& idx : g->fast()) {
     switch (g->get_node(idx).get_type_op()) {
       case TechMap_Op: {
-        const Tech_cell *tcell = g->get_tlibrary().get_const_cell(g->tmap_id_get(idx));
+        const Tech_cell* tcell = g->get_tlibrary().get_const_cell(g->tmap_id_get(idx));
         if (is_latch(tcell)) {
           graph_info->latch_id.push_back(idx);
         } else {
@@ -514,7 +514,7 @@ bool Pass_abc::setup_techmap(const Lgraph *g) {
         auto width [[maybe_unused]] = 0;
         auto offset                 = 0;
         auto pick_width             = g->get_bits(idx);
-        for (const auto &c : g->inp_edges(idx)) {
+        for (const auto& c : g->inp_edges(idx)) {
           switch (c.get_inp_pin().get_pid()) {
             case 0: {
               width = c.get_bits();
@@ -544,10 +544,10 @@ bool Pass_abc::setup_techmap(const Lgraph *g) {
            * 	2. MUST NOT be the fanin of U32Const_Op | StrConst_Op node (undefined behavior!!)
            * 	3. The width of GraphIO_Op nodes MUST Match (it should traverse through a Pick_OP!!)
            **********************************************************************************************/
-          for (const auto &out : g->out_edges(idx)) {
+          for (const auto& out : g->out_edges(idx)) {
             switch (g->get_node(out.get_out_pin()).get_type_op()) {
               case TechMap_Op: {
-                const auto *tcell     = g->get_tlibrary().get_const_cell(g->tmap_id_get(out.get_idx()));
+                const auto* tcell     = g->get_tlibrary().get_const_cell(g->tmap_id_get(out.get_idx()));
                 auto        cell_name = tcell->get_name();
                 Pass::error("nodeID:{} type:Join_Op has output to idx:{} cell_name: {}; mismatch in data width!",
                             idx,
@@ -622,13 +622,13 @@ bool Pass_abc::setup_techmap(const Lgraph *g) {
  *
  * description: feed to abc for comb synthesis and mapping
  ***********************************************************************/
-Abc_Ntk_t *Pass_abc::to_abc(const Lgraph *g) {
+Abc_Ntk_t* Pass_abc::to_abc(const Lgraph* g) {
   Abc_Start();
 
   if (pAbc == 0) {
     pAbc = Abc_FrameGetGlobalFrame();
   }
-  Abc_Ntk_t *pAig = Abc_NtkAlloc(ABC_NTK_NETLIST, ABC_FUNC_AIG, 1);
+  Abc_Ntk_t* pAig = Abc_NtkAlloc(ABC_NTK_NETLIST, ABC_FUNC_AIG, 1);
 
   pAig->pName = Extra_UtilStrsav(std::string(g->get_name()).c_str());
 
@@ -640,7 +640,7 @@ Abc_Ntk_t *Pass_abc::to_abc(const Lgraph *g) {
     exit(-4);
   }
 
-  Abc_Ntk_t *pTemp = pAig;
+  Abc_Ntk_t* pTemp = pAig;
   pAig             = Abc_NtkToLogic(pTemp);
   Abc_FrameClearVerifStatus(pAbc);
   Abc_FrameSetCurrentNetwork(pAbc, pAig);
@@ -655,7 +655,7 @@ Abc_Ntk_t *Pass_abc::to_abc(const Lgraph *g) {
     Cmd_CommandExecute(pAbc, cmd_readlib.c_str());
   }
 
-  const std::string &path_name = opack.odir;
+  const std::string& path_name = opack.odir;
   struct stat        output_status;
   stat(path_name.c_str(), &output_status);
 
@@ -683,7 +683,7 @@ Abc_Ntk_t *Pass_abc::to_abc(const Lgraph *g) {
 
   assert(pAbc != nullptr);
 
-  Abc_Ntk_t *pNtkMapped = nullptr;
+  Abc_Ntk_t* pNtkMapped = nullptr;
   pNtkMapped            = Abc_NtkToNetlist(Abc_FrameReadNtk(pAbc));
   if (pNtkMapped == nullptr) {
     Pass::error("pass_abc.to_abc: converting to netlist has failed");
@@ -708,7 +708,7 @@ Abc_Ntk_t *Pass_abc::to_abc(const Lgraph *g) {
  *
  * description: build the netlist
  ***********************************************************************/
-void Pass_abc::gen_netList(const Lgraph *g, Abc_Ntk_t *pAig) {
+void Pass_abc::gen_netList(const Lgraph* g, Abc_Ntk_t* pAig) {
   gen_primary_io_from_lgraph(g, pAig);
   gen_latch_from_lgraph(g, pAig);
   gen_comb_cell_from_lgraph(g, pAig);
@@ -732,25 +732,25 @@ void Pass_abc::gen_netList(const Lgraph *g, Abc_Ntk_t *pAig) {
  *
  * description: connect all generated subgraph signal
  ***********************************************************************/
-void Pass_abc::conn_memory(const Lgraph *g, Abc_Ntk_t *pAig) {
-  for (const auto &idx : graph_info->memory_id) {
+void Pass_abc::conn_memory(const Lgraph* g, Abc_Ntk_t* pAig) {
+  for (const auto& idx : graph_info->memory_id) {
     auto inp_info = graph_info->memory_conn[idx];
-    for (const auto &src : inp_info) {
+    for (const auto& src : inp_info) {
       Port_ID offset = 0;
-      for (const auto &inp : src.second) {
-        Abc_Obj_t   *pseduo_memory_output = nullptr;
+      for (const auto& inp : src.second) {
+        Abc_Obj_t*   pseduo_memory_output = nullptr;
         Index_ID     src_idx              = inp.idx;
         int          src_bits             = inp.offset[0];
         index_offset rhs                  = {src_idx, 0, {src_bits, src_bits}};
         Node_Type_Op this_node_type       = g->get_node(src_idx).get_type_op();
 
         if (this_node_type == TechMap_Op) {
-          const Tech_cell *tcell = g->get_tlibrary().get_const_cell(g->tmap_id_get(src_idx));
+          const Tech_cell* tcell = g->get_tlibrary().get_const_cell(g->tmap_id_get(src_idx));
           pseduo_memory_output   = Abc_NtkCreatePo(pAig);
           if (is_latch(tcell)) {
-            Abc_Obj_t *pbuf  = Abc_NtkCreateNode(pAig);
-            pbuf->pData      = Hop_IthVar((Hop_Man_t *)pAig->pManFunc, 0);
-            Abc_Obj_t *pwire = Abc_NtkCreateNet(pAig);
+            Abc_Obj_t* pbuf  = Abc_NtkCreateNode(pAig);
+            pbuf->pData      = Hop_IthVar((Hop_Man_t*)pAig->pManFunc, 0);
+            Abc_Obj_t* pwire = Abc_NtkCreateNet(pAig);
             Abc_ObjAddFanin(pbuf, graph_info->sequential_cell[src_idx].pLatchOutput);
             Abc_ObjAddFanin(pwire, pbuf);
 
@@ -762,9 +762,9 @@ void Pass_abc::conn_memory(const Lgraph *g, Abc_Ntk_t *pAig) {
           assert(g->has_graph_input(src_idx));
           pseduo_memory_output = Abc_NtkCreatePo(pAig);
 
-          Abc_Obj_t *pbuf  = Abc_NtkCreateNode(pAig);
-          pbuf->pData      = Hop_IthVar((Hop_Man_t *)pAig->pManFunc, 0);
-          Abc_Obj_t *pwire = Abc_NtkCreateNet(pAig);
+          Abc_Obj_t* pbuf  = Abc_NtkCreateNode(pAig);
+          pbuf->pData      = Hop_IthVar((Hop_Man_t*)pAig->pManFunc, 0);
+          Abc_Obj_t* pwire = Abc_NtkCreateNet(pAig);
           Abc_ObjAddFanin(pbuf, graph_info->primary_input[rhs].PIOut);
           Abc_ObjAddFanin(pwire, pbuf);
           Abc_ObjAddFanin(pseduo_memory_output, pwire);
@@ -803,25 +803,25 @@ void Pass_abc::conn_memory(const Lgraph *g, Abc_Ntk_t *pAig) {
  *
  * description: connect all generated subgraph signal
  ***********************************************************************/
-void Pass_abc::conn_sub(const Lgraph *g, Abc_Ntk_t *pAig) {
-  for (const auto &idx : graph_info->subgraph_id) {
+void Pass_abc::conn_sub(const Lgraph* g, Abc_Ntk_t* pAig) {
+  for (const auto& idx : graph_info->subgraph_id) {
     auto inp_info = graph_info->subgraph_conn[idx];
-    for (const auto &src : inp_info) {
+    for (const auto& src : inp_info) {
       Port_ID offset = 0;
-      for (const auto &inp : src.second) {
-        Abc_Obj_t   *pseduo_sub_output = nullptr;
+      for (const auto& inp : src.second) {
+        Abc_Obj_t*   pseduo_sub_output = nullptr;
         Index_ID     src_idx           = inp.idx;
         int          src_bits          = inp.offset[0];
         index_offset rhs               = {src_idx, 0, {src_bits, src_bits}};
         Node_Type_Op this_node_type    = g->get_node(src_idx).get_type_op();
 
         if (this_node_type == TechMap_Op) {
-          const Tech_cell *tcell = g->get_tlibrary().get_const_cell(g->tmap_id_get(src_idx));
+          const Tech_cell* tcell = g->get_tlibrary().get_const_cell(g->tmap_id_get(src_idx));
           pseduo_sub_output      = Abc_NtkCreatePo(pAig);
           if (is_latch(tcell)) {
-            Abc_Obj_t *pbuf  = Abc_NtkCreateNode(pAig);
-            pbuf->pData      = Hop_IthVar((Hop_Man_t *)pAig->pManFunc, 0);
-            Abc_Obj_t *pwire = Abc_NtkCreateNet(pAig);
+            Abc_Obj_t* pbuf  = Abc_NtkCreateNode(pAig);
+            pbuf->pData      = Hop_IthVar((Hop_Man_t*)pAig->pManFunc, 0);
+            Abc_Obj_t* pwire = Abc_NtkCreateNet(pAig);
             Abc_ObjAddFanin(pbuf, graph_info->sequential_cell[src_idx].pLatchOutput);
             Abc_ObjAddFanin(pwire, pbuf);
 
@@ -835,9 +835,9 @@ void Pass_abc::conn_sub(const Lgraph *g, Abc_Ntk_t *pAig) {
           assert(g->has_graph_input(src_idx));
           pseduo_sub_output = Abc_NtkCreatePo(pAig);
 
-          Abc_Obj_t *pbuf  = Abc_NtkCreateNode(pAig);
-          pbuf->pData      = Hop_IthVar((Hop_Man_t *)pAig->pManFunc, 0);
-          Abc_Obj_t *pwire = Abc_NtkCreateNet(pAig);
+          Abc_Obj_t* pbuf  = Abc_NtkCreateNode(pAig);
+          pbuf->pData      = Hop_IthVar((Hop_Man_t*)pAig->pManFunc, 0);
+          Abc_Obj_t* pwire = Abc_NtkCreateNet(pAig);
           Abc_ObjAddFanin(pbuf, graph_info->primary_input[rhs].PIOut);
           Abc_ObjAddFanin(pwire, pbuf);
           Abc_ObjAddFanin(pseduo_sub_output, pwire);
@@ -886,8 +886,8 @@ void Pass_abc::conn_sub(const Lgraph *g, Abc_Ntk_t *pAig) {
  *
  * description: create Latch nodes from Lgraph
  ***********************************************************************/
-void Pass_abc::gen_latch_from_lgraph(const Lgraph *g, Abc_Ntk_t *pAig) {
-  for (const auto &idx : graph_info->latch_id) {
+void Pass_abc::gen_latch_from_lgraph(const Lgraph* g, Abc_Ntk_t* pAig) {
+  for (const auto& idx : graph_info->latch_id) {
     Abc_Obj_t *pLatch, *pLatchInput, *pLatchOutput;
     pLatch       = Abc_NtkCreateLatch(pAig);
     pLatchInput  = Abc_NtkCreateBi(pAig);
@@ -895,11 +895,11 @@ void Pass_abc::gen_latch_from_lgraph(const Lgraph *g, Abc_Ntk_t *pAig) {
     Abc_LatchSetInitDc(pLatch);
     Abc_ObjAddFanin(pLatch, pLatchInput);
     Abc_ObjAddFanin(pLatchOutput, pLatch);
-    Abc_Obj_t *pNet;
+    Abc_Obj_t* pNet;
     pNet = Abc_NtkCreateNet(pAig);
     Abc_ObjAddFanin(pNet, pLatchOutput);
 
-    for (const auto &output : g->out_edges(idx)) {
+    for (const auto& output : g->out_edges(idx)) {
       // Latch is CI/CO
       if (g->get_node_wirename(idx) != nullptr) {
         std::string namebuffer = std::format("{}_%r", g->get_node_wirename(idx));
@@ -913,7 +913,7 @@ void Pass_abc::gen_latch_from_lgraph(const Lgraph *g, Abc_Ntk_t *pAig) {
           break;
         }
       } else if (g->get_node(output.get_out_pin()).get_type_op() == Pick_Op) {
-        for (const auto &next_out : g->out_edges(output.get_idx())) {
+        for (const auto& next_out : g->out_edges(output.get_idx())) {
           if (g->get_node_wirename(next_out.get_idx()) != nullptr) {
             std::string namebuffer = std::format("{}_%r", g->get_node_wirename(next_out.get_idx()));
             Abc_object_assign_name(pNet, namebuffer);
@@ -947,16 +947,16 @@ void Pass_abc::gen_latch_from_lgraph(const Lgraph *g, Abc_Ntk_t *pAig) {
  *
  * description: create Primary Input & output node from Lgraph
  ***********************************************************************/
-void Pass_abc::gen_primary_io_from_lgraph(const Lgraph *g, Abc_Ntk_t *pAig) {
-  Abc_Obj_t *pObj;
+void Pass_abc::gen_primary_io_from_lgraph(const Lgraph* g, Abc_Ntk_t* pAig) {
+  Abc_Obj_t* pObj;
 
-  for (const auto &idx : graph_info->graphio_output_id) {
+  for (const auto& idx : graph_info->graphio_output_id) {
     int width = g->get_bits(idx);
     if (width > 1) {
       for (int i = 0; i < width; i++) {
-        Abc_Obj_t *pbuf  = Abc_NtkCreateNode(pAig);
-        pbuf->pData      = Hop_IthVar((Hop_Man_t *)pAig->pManFunc, 0);
-        Abc_Obj_t *pwire = Abc_NtkCreateNet(pAig);
+        Abc_Obj_t* pbuf  = Abc_NtkCreateNode(pAig);
+        pbuf->pData      = Hop_IthVar((Hop_Man_t*)pAig->pManFunc, 0);
+        Abc_Obj_t* pwire = Abc_NtkCreateNet(pAig);
         Abc_ObjAddFanin(pwire, pbuf);
 
         std::string namebuffer = std::format("{}[{}]", g->get_node_wirename(idx), i);
@@ -969,9 +969,9 @@ void Pass_abc::gen_primary_io_from_lgraph(const Lgraph *g, Abc_Ntk_t *pAig) {
         graph_info->primary_output[key]       = new_primary_output;
       }
     } else {
-      Abc_Obj_t *pbuf  = Abc_NtkCreateNode(pAig);
-      pbuf->pData      = Hop_IthVar((Hop_Man_t *)pAig->pManFunc, 0);
-      Abc_Obj_t *pwire = Abc_NtkCreateNet(pAig);
+      Abc_Obj_t* pbuf  = Abc_NtkCreateNode(pAig);
+      pbuf->pData      = Hop_IthVar((Hop_Man_t*)pAig->pManFunc, 0);
+      Abc_Obj_t* pwire = Abc_NtkCreateNet(pAig);
       Abc_ObjAddFanin(pwire, pbuf);
 
       std::string namebuffer(g->get_node_wirename(idx));
@@ -985,21 +985,21 @@ void Pass_abc::gen_primary_io_from_lgraph(const Lgraph *g, Abc_Ntk_t *pAig) {
     }
   }
 
-  for (const auto &idx : graph_info->graphio_input_id) {
+  for (const auto& idx : graph_info->graphio_input_id) {
     int width = g->get_bits(idx);
     if (width > 1) {
       for (int i = 0; i < width; i++) {
         pObj            = Abc_NtkCreatePi(pAig);
-        Abc_Obj_t *pNet = Abc_NtkCreateNet(pAig);
+        Abc_Obj_t* pNet = Abc_NtkCreateNet(pAig);
 
         std::string namebuffer = std::format("{}[{}]", g->get_node_wirename(idx), i);
 
         Abc_object_assign_name(pNet, namebuffer);
         Abc_ObjAddFanin(pNet, pObj);
-        Abc_Obj_t *pbuf = Abc_NtkCreateNode(pAig);
-        pbuf->pData     = Hop_IthVar((Hop_Man_t *)pAig->pManFunc, 0);
+        Abc_Obj_t* pbuf = Abc_NtkCreateNode(pAig);
+        pbuf->pData     = Hop_IthVar((Hop_Man_t*)pAig->pManFunc, 0);
         Abc_ObjAddFanin(pbuf, pNet);
-        Abc_Obj_t *pwire = Abc_NtkCreateNet(pAig);
+        Abc_Obj_t* pwire = Abc_NtkCreateNet(pAig);
         Abc_ObjAddFanin(pwire, pbuf);
         index_offset      key               = {idx, 0, {i, i}};
         Abc_primary_input new_primary_input = {pObj, pwire};
@@ -1007,16 +1007,16 @@ void Pass_abc::gen_primary_io_from_lgraph(const Lgraph *g, Abc_Ntk_t *pAig) {
       }
     } else {
       pObj            = Abc_NtkCreatePi(pAig);
-      Abc_Obj_t *pNet = Abc_NtkCreateNet(pAig);
+      Abc_Obj_t* pNet = Abc_NtkCreateNet(pAig);
 
       std::string namebuffer(g->get_node_wirename(idx));
 
       Abc_object_assign_name(pNet, namebuffer);
       Abc_ObjAddFanin(pNet, pObj);
-      Abc_Obj_t *pbuf = Abc_NtkCreateNode(pAig);
-      pbuf->pData     = Hop_IthVar((Hop_Man_t *)pAig->pManFunc, 0);
+      Abc_Obj_t* pbuf = Abc_NtkCreateNode(pAig);
+      pbuf->pData     = Hop_IthVar((Hop_Man_t*)pAig->pManFunc, 0);
       Abc_ObjAddFanin(pbuf, pNet);
-      Abc_Obj_t *pwire = Abc_NtkCreateNet(pAig);
+      Abc_Obj_t* pwire = Abc_NtkCreateNet(pAig);
       Abc_ObjAddFanin(pwire, pbuf);
       index_offset      key               = {idx, 0, {0, 0}};
       Abc_primary_input new_primary_input = {pObj, pwire};
@@ -1035,9 +1035,9 @@ void Pass_abc::gen_primary_io_from_lgraph(const Lgraph *g, Abc_Ntk_t *pAig) {
  *
  * description: create All combinational cell from Lgraph
  ***********************************************************************/
-void Pass_abc::gen_comb_cell_from_lgraph(const Lgraph *g, Abc_Ntk_t *pAig) {
-  for (const auto &idx : graph_info->combinational_id) {
-    const Tech_cell *tcell = g->get_tlibrary().get_const_cell(g->tmap_id_get(idx));
+void Pass_abc::gen_comb_cell_from_lgraph(const Lgraph* g, Abc_Ntk_t* pAig) {
+  for (const auto& idx : graph_info->combinational_id) {
+    const Tech_cell* tcell = g->get_tlibrary().get_const_cell(g->tmap_id_get(idx));
 
     if (tcell->get_name() == "$_NOT_") {
       graph_info->combinational_cell[idx] = Lgraph_CreateNot(pAig);
@@ -1092,18 +1092,18 @@ void Pass_abc::gen_comb_cell_from_lgraph(const Lgraph *g, Abc_Ntk_t *pAig) {
  * 							"key.bits" of the U32Const_Op/StrConst_Op
  * 							and return the node fanout net
  ***********************************************************************/
-Abc_Obj_t *Pass_abc::gen_const_from_lgraph(const Lgraph *g, index_offset key, Abc_Ntk_t *pAig) {
-  Abc_Obj_t *pObj = nullptr;
-  Abc_Obj_t *pNet = nullptr;
+Abc_Obj_t* Pass_abc::gen_const_from_lgraph(const Lgraph* g, index_offset key, Abc_Ntk_t* pAig) {
+  Abc_Obj_t* pObj = nullptr;
+  Abc_Obj_t* pNet = nullptr;
 
   if (g->get_node(key.idx).get_type_op() == U32Const_Op) {
     int value   = g->node_value_get(key.idx);
     int bit     = 0;
     bit         = (value >> key.offset[0]) & 1;
     pObj        = Abc_NtkCreateNode(pAig);
-    pObj->pData = Hop_ManConst1((Hop_Man_t *)pAig->pManFunc);
+    pObj->pData = Hop_ManConst1((Hop_Man_t*)pAig->pManFunc);
     if (bit == 0) {
-      pObj->pData = Hop_Not((Hop_Obj_t *)pObj->pData);
+      pObj->pData = Hop_Not((Hop_Obj_t*)pObj->pData);
     }
     pNet = Abc_NtkCreateNet(pAig);
     Abc_ObjAddFanin(pNet, pObj);
@@ -1113,7 +1113,7 @@ Abc_Obj_t *Pass_abc::gen_const_from_lgraph(const Lgraph *g, index_offset key, Ab
   if (g->get_node(key.idx).get_type_op() == StrConst_Op) {
     auto value  = g->node_const_value_get(key.idx);
     pObj        = Abc_NtkCreateNode(pAig);
-    pObj->pData = Hop_ManConst1((Hop_Man_t *)pAig->pManFunc);
+    pObj->pData = Hop_ManConst1((Hop_Man_t*)pAig->pManFunc);
 
     bool bit;
     if (value[value.length() - key.offset[0] - 1] == '1') {
@@ -1130,7 +1130,7 @@ Abc_Obj_t *Pass_abc::gen_const_from_lgraph(const Lgraph *g, index_offset key, Ab
     }
 
     if (!bit) {
-      pObj->pData = Hop_Not((Hop_Obj_t *)pObj->pData);
+      pObj->pData = Hop_Not((Hop_Obj_t*)pObj->pData);
     }
     pNet = Abc_NtkCreateNet(pAig);
     Abc_ObjAddFanin(pNet, pObj);
@@ -1150,37 +1150,37 @@ Abc_Obj_t *Pass_abc::gen_const_from_lgraph(const Lgraph *g, index_offset key, Ab
  *
  * description: create a pseduo_input net for subgraph & memory
  ***********************************************************************/
-Abc_Obj_t *Pass_abc::gen_pseudo_sub_input(const index_offset &inp, Abc_Ntk_t *pAig) {
+Abc_Obj_t* Pass_abc::gen_pseudo_sub_input(const index_offset& inp, Abc_Ntk_t* pAig) {
   if (graph_info->pseduo_record.end() == graph_info->pseduo_record.find(graph_info->subgraph_generated_output_wire[inp])) {
-    Abc_Obj_t *pseudo_sub_input = Abc_NtkCreatePi(pAig);
-    Abc_Obj_t *pNet             = Abc_NtkCreateNet(pAig);
+    Abc_Obj_t* pseudo_sub_input = Abc_NtkCreatePi(pAig);
+    Abc_Obj_t* pNet             = Abc_NtkCreateNet(pAig);
 
     Abc_object_assign_name(pNet, graph_info->subgraph_generated_output_wire[inp]);
 
     Abc_ObjAddFanin(pNet, pseudo_sub_input);
     graph_info->pseduo_record[graph_info->subgraph_generated_output_wire[inp]] = pNet;
   }
-  Abc_Obj_t *pbuf  = Abc_NtkCreateNode(pAig);
-  pbuf->pData      = Hop_IthVar((Hop_Man_t *)pAig->pManFunc, 0);
-  Abc_Obj_t *pwire = Abc_NtkCreateNet(pAig);
+  Abc_Obj_t* pbuf  = Abc_NtkCreateNode(pAig);
+  pbuf->pData      = Hop_IthVar((Hop_Man_t*)pAig->pManFunc, 0);
+  Abc_Obj_t* pwire = Abc_NtkCreateNet(pAig);
   Abc_ObjAddFanin(pbuf, graph_info->pseduo_record[graph_info->subgraph_generated_output_wire[inp]]);
   Abc_ObjAddFanin(pwire, pbuf);
   return pwire;
 }
 
-Abc_Obj_t *Pass_abc::gen_pseudo_memory_input(const index_offset &inp, Abc_Ntk_t *pAig) {
+Abc_Obj_t* Pass_abc::gen_pseudo_memory_input(const index_offset& inp, Abc_Ntk_t* pAig) {
   if (graph_info->pseduo_record.find(graph_info->memory_generated_output_wire[inp]) == graph_info->pseduo_record.end()) {
-    Abc_Obj_t *pseudo_memory_input = Abc_NtkCreatePi(pAig);
-    Abc_Obj_t *pNet                = Abc_NtkCreateNet(pAig);
+    Abc_Obj_t* pseudo_memory_input = Abc_NtkCreatePi(pAig);
+    Abc_Obj_t* pNet                = Abc_NtkCreateNet(pAig);
 
     Abc_object_assign_name(pNet, graph_info->memory_generated_output_wire[inp]);
 
     Abc_ObjAddFanin(pNet, pseudo_memory_input);
     graph_info->pseduo_record[graph_info->memory_generated_output_wire[inp]] = pNet;
   }
-  Abc_Obj_t *pbuf  = Abc_NtkCreateNode(pAig);
-  pbuf->pData      = Hop_IthVar((Hop_Man_t *)pAig->pManFunc, 0);
-  Abc_Obj_t *pwire = Abc_NtkCreateNet(pAig);
+  Abc_Obj_t* pbuf  = Abc_NtkCreateNode(pAig);
+  pbuf->pData      = Hop_IthVar((Hop_Man_t*)pAig->pManFunc, 0);
+  Abc_Obj_t* pwire = Abc_NtkCreateNet(pAig);
   Abc_ObjAddFanin(pbuf, graph_info->pseduo_record[graph_info->memory_generated_output_wire[inp]]);
   Abc_ObjAddFanin(pwire, pbuf);
   return pwire;
@@ -1196,17 +1196,17 @@ Abc_Obj_t *Pass_abc::gen_pseudo_memory_input(const index_offset &inp, Abc_Ntk_t 
  *
  * description: connect all the combinational cell based on computed topology
  ***********************************************************************/
-void Pass_abc::conn_combinational_cell(const Lgraph *g, Abc_Ntk_t *pAig) {
-  for (const auto &idx : graph_info->combinational_id) {
+void Pass_abc::conn_combinational_cell(const Lgraph* g, Abc_Ntk_t* pAig) {
+  for (const auto& idx : graph_info->combinational_id) {
     auto src = graph_info->comb_conn[idx];
-    for (const auto &inp : src) {
+    for (const auto& inp : src) {
       Index_ID     src_idx        = inp.idx;
       int          src_bits       = inp.offset[0];
       index_offset rhs            = {src_idx, 0, {src_bits, src_bits}};
       Node_Type_Op this_node_type = g->get_node(src_idx).get_type_op();
 
       if (this_node_type == TechMap_Op) {
-        const Tech_cell *tcell = g->get_tlibrary().get_const_cell(g->tmap_id_get(src_idx));
+        const Tech_cell* tcell = g->get_tlibrary().get_const_cell(g->tmap_id_get(src_idx));
         if (is_latch(tcell)) {
           Abc_ObjAddFanin(graph_info->combinational_cell[idx].pNodeInput, graph_info->sequential_cell.at(inp.idx).pLatchOutput);
         } else {
@@ -1219,8 +1219,8 @@ void Pass_abc::conn_combinational_cell(const Lgraph *g, Abc_Ntk_t *pAig) {
         Abc_ObjAddFanin(graph_info->combinational_cell[idx].pNodeInput, gen_const_from_lgraph(g, rhs, pAig));
       } else if (this_node_type == Memory_Op) {
         if (graph_info->pseduo_record.find(graph_info->memory_generated_output_wire[inp]) == graph_info->pseduo_record.end()) {
-          Abc_Obj_t *pseudo_memory_input = Abc_NtkCreatePi(pAig);
-          Abc_Obj_t *pNet                = Abc_NtkCreateNet(pAig);
+          Abc_Obj_t* pseudo_memory_input = Abc_NtkCreatePi(pAig);
+          Abc_Obj_t* pNet                = Abc_NtkCreateNet(pAig);
 
           Abc_object_assign_name(pNet, graph_info->memory_generated_output_wire[inp]);
 
@@ -1231,8 +1231,8 @@ void Pass_abc::conn_combinational_cell(const Lgraph *g, Abc_Ntk_t *pAig) {
                         graph_info->pseduo_record[graph_info->memory_generated_output_wire[inp]]);
       } else if (this_node_type == SubGraph_Op) {
         if (graph_info->pseduo_record.find(graph_info->subgraph_generated_output_wire[inp]) == graph_info->pseduo_record.end()) {
-          Abc_Obj_t *pseudo_sub_input = Abc_NtkCreatePi(pAig);
-          Abc_Obj_t *pNet             = Abc_NtkCreateNet(pAig);
+          Abc_Obj_t* pseudo_sub_input = Abc_NtkCreatePi(pAig);
+          Abc_Obj_t* pNet             = Abc_NtkCreateNet(pAig);
 
           Abc_object_assign_name(pNet, graph_info->subgraph_generated_output_wire[inp]);
 
@@ -1258,17 +1258,17 @@ void Pass_abc::conn_combinational_cell(const Lgraph *g, Abc_Ntk_t *pAig) {
  *
  * description: connect all the sequential cell based on computed topology
  ***********************************************************************/
-void Pass_abc::conn_latch(const Lgraph *g, Abc_Ntk_t *pAig) {
-  for (const auto &idx : graph_info->latch_id) {
+void Pass_abc::conn_latch(const Lgraph* g, Abc_Ntk_t* pAig) {
+  for (const auto& idx : graph_info->latch_id) {
     auto src = graph_info->latch_conn[idx];
-    for (const auto &inp : src) {
+    for (const auto& inp : src) {
       Index_ID     src_idx        = inp.idx;
       int          src_bits       = inp.offset[0];
       index_offset rhs            = {src_idx, 0, {src_bits, src_bits}};
       Node_Type_Op this_node_type = g->get_node(src_idx).get_type_op();
 
       if (this_node_type == TechMap_Op) {
-        const Tech_cell *tcell = g->get_tlibrary().get_const_cell(g->tmap_id_get(src_idx));
+        const Tech_cell* tcell = g->get_tlibrary().get_const_cell(g->tmap_id_get(src_idx));
         if (is_latch(tcell)) {
           Abc_ObjAddFanin(graph_info->sequential_cell[idx].pLatchInput, graph_info->sequential_cell[inp.idx].pLatchOutput);
         } else {
@@ -1281,8 +1281,8 @@ void Pass_abc::conn_latch(const Lgraph *g, Abc_Ntk_t *pAig) {
         Abc_ObjAddFanin(graph_info->sequential_cell[idx].pLatchInput, gen_const_from_lgraph(g, rhs, pAig));
       } else if (this_node_type == Memory_Op) {
         if (graph_info->pseduo_record.find(graph_info->memory_generated_output_wire[inp]) == graph_info->pseduo_record.end()) {
-          Abc_Obj_t *pseudo_memory_input = Abc_NtkCreatePi(pAig);
-          Abc_Obj_t *pNet                = Abc_NtkCreateNet(pAig);
+          Abc_Obj_t* pseudo_memory_input = Abc_NtkCreatePi(pAig);
+          Abc_Obj_t* pNet                = Abc_NtkCreateNet(pAig);
 
           Abc_object_assign_name(pNet, graph_info->memory_generated_output_wire[inp]);
 
@@ -1293,8 +1293,8 @@ void Pass_abc::conn_latch(const Lgraph *g, Abc_Ntk_t *pAig) {
                         graph_info->pseduo_record[graph_info->memory_generated_output_wire[inp]]);
       } else if (this_node_type == SubGraph_Op) {
         if (graph_info->pseduo_record.find(graph_info->subgraph_generated_output_wire[inp]) == graph_info->pseduo_record.end()) {
-          Abc_Obj_t *pseudo_sub_input = Abc_NtkCreatePi(pAig);
-          Abc_Obj_t *pNet             = Abc_NtkCreateNet(pAig);
+          Abc_Obj_t* pseudo_sub_input = Abc_NtkCreatePi(pAig);
+          Abc_Obj_t* pNet             = Abc_NtkCreateNet(pAig);
 
           Abc_object_assign_name(pNet, graph_info->subgraph_generated_output_wire[inp]);
 
@@ -1320,11 +1320,11 @@ void Pass_abc::conn_latch(const Lgraph *g, Abc_Ntk_t *pAig) {
  *
  * description: connect all the primary output based on computed topology
  ***********************************************************************/
-void Pass_abc::conn_primary_output(const Lgraph *g, Abc_Ntk_t *pAig) {
-  for (const auto &idx : graph_info->graphio_output_id) {
+void Pass_abc::conn_primary_output(const Lgraph* g, Abc_Ntk_t* pAig) {
+  for (const auto& idx : graph_info->graphio_output_id) {
     auto src       = graph_info->primary_output_conn[idx];
     int  bit_index = 0;
-    for (const auto &inp : src) {
+    for (const auto& inp : src) {
       Index_ID     src_idx        = inp.idx;
       int          src_bits       = inp.offset[0];
       index_offset lhs            = {idx, 0, {bit_index, bit_index}};
@@ -1332,11 +1332,11 @@ void Pass_abc::conn_primary_output(const Lgraph *g, Abc_Ntk_t *pAig) {
       Node_Type_Op this_node_type = g->get_node(src_idx).get_type_op();
 
       if (this_node_type == TechMap_Op) {
-        const Tech_cell *tcell = g->get_tlibrary().get_const_cell(g->tmap_id_get(src_idx));
+        const Tech_cell* tcell = g->get_tlibrary().get_const_cell(g->tmap_id_get(src_idx));
         if (is_latch(tcell)) {
-          Abc_Obj_t *pbuf = Abc_NtkCreateNode(pAig);
-          pbuf->pData     = Hop_IthVar((Hop_Man_t *)pAig->pManFunc, 0);
-          Abc_Obj_t *pNet = Abc_NtkCreateNet(pAig);
+          Abc_Obj_t* pbuf = Abc_NtkCreateNode(pAig);
+          pbuf->pData     = Hop_IthVar((Hop_Man_t*)pAig->pManFunc, 0);
+          Abc_Obj_t* pNet = Abc_NtkCreateNet(pAig);
           Abc_ObjAddFanin(pbuf, graph_info->sequential_cell[src_idx].pLatchOutput);
           Abc_ObjAddFanin(pNet, pbuf);
           Abc_ObjAddFanin(graph_info->primary_output[lhs].PO, pNet);
@@ -1370,15 +1370,15 @@ void Pass_abc::conn_primary_output(const Lgraph *g, Abc_Ntk_t *pAig) {
  *
  * description: connect all generated reset signal
  ***********************************************************************/
-void Pass_abc::conn_reset(const Lgraph *g, Abc_Ntk_t *pAig) {
-  for (const auto &rg : graph_info->reset_group_map) {
+void Pass_abc::conn_reset(const Lgraph* g, Abc_Ntk_t* pAig) {
+  for (const auto& rg : graph_info->reset_group_map) {
     std::string reset_name = rg.first;
     // check if this reset is the graph IO otherwise create it
     Index_ID idx = graph_info->reset_id[reset_name];
     if (!g->has_graph_input(idx)) {
-      Abc_Obj_t *generated_reset = Abc_NtkCreatePo(pAig);  // create generated reset here
+      Abc_Obj_t* generated_reset = Abc_NtkCreatePo(pAig);  // create generated reset here
       assert((g->get_node(idx).get_type_op() == TechMap_Op));
-      const Tech_cell *tcell = g->get_tlibrary().get_const_cell(g->tmap_id_get(idx));
+      const Tech_cell* tcell = g->get_tlibrary().get_const_cell(g->tmap_id_get(idx));
       if (is_latch(tcell)) {
         Abc_ObjAddFanin(generated_reset, graph_info->sequential_cell[idx].pLatchOutput);
       } else {
@@ -1400,15 +1400,15 @@ void Pass_abc::conn_reset(const Lgraph *g, Abc_Ntk_t *pAig) {
  *
  * description: connect all generated clock signal
  ***********************************************************************/
-void Pass_abc::conn_clock(const Lgraph *g, Abc_Ntk_t *pAig) {
-  for (const auto &sg : graph_info->skew_group_map) {
+void Pass_abc::conn_clock(const Lgraph* g, Abc_Ntk_t* pAig) {
+  for (const auto& sg : graph_info->skew_group_map) {
     std::string clock_name = sg.first;
     // check if this clock is the graph IO otherwise create it
     Index_ID idx = graph_info->clock_id[clock_name];
     if (!g->has_graph_input(idx)) {
-      Abc_Obj_t *generated_clock = Abc_NtkCreatePo(pAig);  // create generated clock signal
+      Abc_Obj_t* generated_clock = Abc_NtkCreatePo(pAig);  // create generated clock signal
       assert((g->get_node(idx).get_type_op() == TechMap_Op));
-      const Tech_cell *tcell = g->get_tlibrary().get_const_cell(g->tmap_id_get(idx));
+      const Tech_cell* tcell = g->get_tlibrary().get_const_cell(g->tmap_id_get(idx));
       if (is_latch(tcell)) {
         Abc_ObjAddFanin(generated_clock, graph_info->sequential_cell[idx].pLatchOutput);
       } else {
@@ -1420,8 +1420,8 @@ void Pass_abc::conn_clock(const Lgraph *g, Abc_Ntk_t *pAig) {
   }
 }
 
-void Pass_abc::gen_generic_lib(const std::string &buffer) const {
-  FILE *f = fopen(buffer.c_str(), "wt");
+void Pass_abc::gen_generic_lib(const std::string& buffer) const {
+  FILE* f = fopen(buffer.c_str(), "wt");
   if (f == NULL) {
     Pass::error("Opening {} for writing failed: {}", buffer.c_str(), strerror(errno));
   }

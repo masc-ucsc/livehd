@@ -12,13 +12,13 @@ static_assert(sizeof(Node_pin::Compact_class) == 4, "Node_pin::Compact_class inv
 static_assert(sizeof(Node::Compact) == 8, "Node::Compact invalid asize");
 static_assert(sizeof(Node::Compact_class) == 4, "Node::Compact_class invalid asize");
 
-XEdge::XEdge(Lgraph *g, const Compact &c)
+XEdge::XEdge(Lgraph* g, const Compact& c)
     : driver(g, Node_pin::Compact_class(c.driver_idx, false)), sink(g, Node_pin::Compact_class(c.sink_idx, true)) {
   I(sink.is_sink());
   I(driver.is_driver());
 }
 
-XEdge::XEdge(const Node_pin &src_, const Node_pin &dst_) : driver(src_), sink(dst_) {
+XEdge::XEdge(const Node_pin& src_, const Node_pin& dst_) : driver(src_), sink(dst_) {
   I(sink.is_sink());
   I(driver.is_driver());
 
@@ -31,7 +31,7 @@ void XEdge::del_edge() {
   driver.get_class_lgraph()->del_edge(driver, sink);
 }
 
-void XEdge::del_edge(Node_pin &dpin, Node_pin &spin) {
+void XEdge::del_edge(Node_pin& dpin, Node_pin& spin) {
   I(dpin.get_class_lgraph() == spin.get_class_lgraph());
 
   I(dpin.is_driver());

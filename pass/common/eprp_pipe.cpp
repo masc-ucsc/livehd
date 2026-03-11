@@ -7,13 +7,13 @@
 #include "eprp.hpp"
 #include "perf_tracing.hpp"
 
-void Eprp_pipe::add_command(const Eprp_method &method, const Eprp_var &var) { steps.emplace_back(method, var); }
+void Eprp_pipe::add_command(const Eprp_method& method, const Eprp_var& var) { steps.emplace_back(method, var); }
 
-void Pipe_step::run(Eprp_var &last_cmd_var) {
+void Pipe_step::run(Eprp_var& last_cmd_var) {
   last_cmd_var.set_stage_labels(var_fields.dict);
   last_cmd_var.add(var_fields);
 
-  for (const auto &label : m.labels) {
+  for (const auto& label : m.labels) {
     if (!label.second.default_value.empty() && !last_cmd_var.has_label(label.first)) {
       last_cmd_var.add(label.first, label.second.default_value);
     }

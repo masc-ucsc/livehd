@@ -10,7 +10,7 @@
 
 class Lgcpp_plugin {
 public:
-  using Comptime_fn = std::function<void(Lgraph *lg, const std::shared_ptr<Lgtuple> inp, std::shared_ptr<Lgtuple> out)>;
+  using Comptime_fn = std::function<void(Lgraph* lg, const std::shared_ptr<Lgtuple> inp, std::shared_ptr<Lgtuple> out)>;
   using Map_setup   = absl::flat_hash_map<std::string, Comptime_fn>;
 
 protected:
@@ -26,5 +26,5 @@ public:
     registry[name] = fn;
   }
 
-  static const Map_setup &get_registry() { return registry; }
+  static const Map_setup& get_registry() { return registry; }
 };

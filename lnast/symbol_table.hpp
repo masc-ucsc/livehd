@@ -33,20 +33,20 @@ public:
   bool var(std::string_view key);
 
   bool mut(std::string_view key, std::shared_ptr<Bundle> bundle);
-  bool mut(std::string_view key, const Lconst &trivial);
+  bool mut(std::string_view key, const Lconst& trivial);
 
   bool set(std::string_view key, std::shared_ptr<Bundle> bundle);
-  bool set(std::string_view key, const Lconst &trivial);
+  bool set(std::string_view key, const Lconst& trivial);
 
   bool let(std::string_view key, std::shared_ptr<Bundle> bundle);
-  bool let(std::string_view key, const Lconst &trivial);
+  bool let(std::string_view key, const Lconst& trivial);
 
   bool has_trivial(std::string_view key) const;
   bool has_bundle(std::string_view key) const;
   bool has_known(std::string_view key) const { return has_trivial(key) || has_bundle(key); }
 
   // Lconst can be 0sb? or 123 or string or bool or nil or runtime (0sb? and runtime?)
-  const Lconst           &get_trivial(std::string_view key) const;
+  const Lconst&           get_trivial(std::string_view key) const;
   std::shared_ptr<Bundle> get_bundle(std::string_view key) const;
 
   void dump() const;

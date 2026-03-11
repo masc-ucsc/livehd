@@ -20,11 +20,11 @@ void setup_cops_live() {
   p.setup();
 }
 
-void Cops_live::invariant_finder(Eprp_var &var) {
+void Cops_live::invariant_finder(Eprp_var& var) {
   LGBench b("cops.live.inv_finder");
 
   Invariant_find_options pack;
-  for (const auto &l : var.dict) {
+  for (const auto& l : var.dict) {
     pack.set(l.first, l.second);
   }
 
@@ -40,11 +40,11 @@ void Cops_live::invariant_finder(Eprp_var &var) {
   b.sample("cops.live.inv_finder.output");
 }
 
-void Cops_live::diff_finder(Eprp_var &var) {
+void Cops_live::diff_finder(Eprp_var& var) {
   LGBench b("cops.live.diff");
 
   Live_pass_options pack;
-  for (const auto &l : var.dict) {
+  for (const auto& l : var.dict) {
     pack.set(l.first, l.second);
   }
 
@@ -57,7 +57,7 @@ void Cops_live::diff_finder(Eprp_var &var) {
   b.sample("cops.live.diff.find_diffs");
 
   std::ofstream of(pack.diff_file);
-  for (auto &diff_ : diffs) {
+  for (auto& diff_ : diffs) {
     of << diff_.first << "\t" << diff_.second << std::endl;
   }
   of.close();
@@ -65,11 +65,11 @@ void Cops_live::diff_finder(Eprp_var &var) {
   b.sample("cops.live.diff.write_diff");
 }
 
-void Cops_live::netlist_merge(Eprp_var &var) {
+void Cops_live::netlist_merge(Eprp_var& var) {
   LGBench b("cops.live.stitch");
 
   Stitch_pass_options pack;
-  for (const auto &l : var.dict) {
+  for (const auto& l : var.dict) {
     pack.set(l.first, l.second);
   }
 

@@ -9,13 +9,13 @@ protected:
   bool verbose;
   bool hier;
 
-  static void label_synth(Eprp_var &var);
-  static void label_mincut(Eprp_var &var);
-  static void label_acyclic(Eprp_var &var);
-  static void label_path(Eprp_var &var);
+  static void label_synth(Eprp_var& var);
+  static void label_mincut(Eprp_var& var);
+  static void label_acyclic(Eprp_var& var);
+  static void label_path(Eprp_var& var);
 
 public:
-  Pass_label(const Eprp_var &var);
+  Pass_label(const Eprp_var& var);
 
   static void setup();
 };

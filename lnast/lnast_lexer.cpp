@@ -4,7 +4,7 @@
 
 #include <string>
 
-Lnast_lexer::Lnast_lexer(std::istream &_is) : is(_is) {}
+Lnast_lexer::Lnast_lexer(std::istream& _is) : is(_is) {}
 
 int Lnast_lexer::get_char() { return is.get(); }
 

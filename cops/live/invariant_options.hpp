@@ -27,7 +27,7 @@ public:
 do_cluster(false), cluster_dir("")*/
   {}
 
-  void set(const std::string &key, const std::string &value) final;
+  void set(const std::string& key, const std::string& value) final;
 };
 
 #endif

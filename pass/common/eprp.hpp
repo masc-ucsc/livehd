@@ -37,7 +37,7 @@ protected:
   std::pair<bool, std::string> rule_path();
   std::pair<bool, std::string> rule_cmd_line();
 
-  bool rule_label_path(std::string_view cmd_line, Eprp_var &next_var);
+  bool rule_label_path(std::string_view cmd_line, Eprp_var& next_var);
 
   bool rule_reg(bool first);
   bool rule_cmd_full();
@@ -45,25 +45,25 @@ protected:
   bool rule_cmd_or_reg(bool first);
   bool rule_top();
 
-  void process_ast_handler(const lh::Tree_index &self, const Ast_parser_node &node);
+  void process_ast_handler(const lh::Tree_index& self, const Ast_parser_node& node);
   void process_ast();
 
 public:
   Eprp();
 
-  void register_method(const Eprp_method &method) {
+  void register_method(const Eprp_method& method) {
     assert(methods.find(std::string(method.get_name())) == methods.end());
     methods.insert({std::string(method.get_name()), method});
   }
 
   bool has_method(std::string_view cmd) const { return methods.find(std::string(cmd)) != methods.end(); }
 
-  void run_cmd(std::string_view cmd, const Eprp_var &cmd_var_fields);
+  void run_cmd(std::string_view cmd, const Eprp_var& cmd_var_fields);
 
-  bool readline(const char *line);
+  bool readline(const char* line);
 
   std::string_view get_command_help(std::string_view cmd) const;
 
-  void get_commands(const std::function<void(std::string_view, std::string_view)> &fn) const;
-  void get_labels(std::string_view cmd, const std::function<void(std::string_view, std::string_view, bool required)> &fn) const;
+  void get_commands(const std::function<void(std::string_view, std::string_view)>& fn) const;
+  void get_labels(std::string_view cmd, const std::function<void(std::string_view, std::string_view, bool required)>& fn) const;
 };

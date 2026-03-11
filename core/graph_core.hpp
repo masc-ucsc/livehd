@@ -202,15 +202,15 @@ protected:
 
     Graph_core_free() { bzero(this, sizeof(Graph_core_free)); }
 
-    [[nodiscard]] Graph_core_node *ref_node() {
+    [[nodiscard]] Graph_core_node* ref_node() {
       next_ptr              = 0;
-      Graph_core_node *node = (Graph_core_node *)(data);
+      Graph_core_node* node = (Graph_core_node*)(data);
       node->clear();
       return node;
     }
-    [[nodiscard]] Graph_core_pin *ref_pin() {
+    [[nodiscard]] Graph_core_pin* ref_pin() {
       next_ptr            = 0;
-      Graph_core_pin *pin = (Graph_core_pin *)(data);
+      Graph_core_pin* pin = (Graph_core_pin*)(data);
       pin->clear();
       return pin;
     }
@@ -228,29 +228,29 @@ protected:
 
     Graph_core_free_overflow() { bzero(this, sizeof(Graph_core_free_overflow)); }
 
-    std::pair<Graph_core_node *, Graph_core_free *> ref_node() {
+    std::pair<Graph_core_node*, Graph_core_free*> ref_node() {
       next_ptr              = 0;
-      Graph_core_node *node = (Graph_core_node *)(data);
+      Graph_core_node* node = (Graph_core_node*)(data);
       node->clear();
 
-      Graph_core_free *f = (Graph_core_free *)&data[16];
+      Graph_core_free* f = (Graph_core_free*)&data[16];
 
       return std::pair(node, f);
     }
 
-    std::pair<Graph_core_pin *, Graph_core_free *> ref_pin() {
+    std::pair<Graph_core_pin*, Graph_core_free*> ref_pin() {
       next_ptr            = 0;
-      Graph_core_pin *pin = (Graph_core_pin *)(data);
+      Graph_core_pin* pin = (Graph_core_pin*)(data);
       pin->clear();
 
-      Graph_core_free *f = (Graph_core_free *)&data[16];
+      Graph_core_free* f = (Graph_core_free*)&data[16];
 
       return std::pair(pin, f);
     }
 
-    Graph_core_overflow *ref_overflow() {
+    Graph_core_overflow* ref_overflow() {
       next_ptr                = 0;
-      Graph_core_overflow *ov = (Graph_core_overflow *)(data);
+      Graph_core_overflow* ov = (Graph_core_overflow*)(data);
       ov->clear();
       return ov;
     }
@@ -262,24 +262,24 @@ protected:
   uint32_t free_master_id;
   uint32_t free_overflow_id;
 
-  std::pair<Graph_core_overflow *, uint32_t> allocate_overflow();
+  std::pair<Graph_core_overflow*, uint32_t> allocate_overflow();
 
   void add_edge_int(uint32_t self_id, uint32_t other_id, bool out);
   void del_edge_int(uint32_t self_id, uint32_t other_id, bool out);
 
-  Overflow_entry *ref_overflow(uint32_t id) {
+  Overflow_entry* ref_overflow(uint32_t id) {
 #if 0
     I((id + 1) < table.size());  // overflow uses 2 entries in table
     I(table[id].overflow_vertex);
 #endif
 
-    return (Overflow_entry *)&table[id];
+    return (Overflow_entry*)&table[id];
   }
-  const Overflow_entry *ref_overflow(uint32_t id) const {
+  const Overflow_entry* ref_overflow(uint32_t id) const {
     I((id + 1) < table.size());  // overflow uses 2 entries in table
     I(table[id].overflow_vertex);
 
-    return (const Overflow_entry *)&table[id];
+    return (const Overflow_entry*)&table[id];
   }
 };
 
@@ -295,9 +295,9 @@ class Graph_core_iterator {
 public:
   using MapType = std::map<uint32_t, uint32_t>;
 
-  void push_back(const uint32_t &value) { vec.push_back(value); }
+  void push_back(const uint32_t& value) { vec.push_back(value); }
 
-  void insert(uint32_t key, const uint32_t &value) { mp.insert({key, value}); }
+  void insert(uint32_t key, const uint32_t& value) { mp.insert({key, value}); }
 
   // Iterator class definition
   class iterator {
@@ -305,8 +305,8 @@ public:
     using iterator_category = std::input_iterator_tag;
     using difference_type   = std::ptrdiff_t;
     using value_type        = uint32_t;
-    using pointer           = uint32_t *;
-    using reference         = uint32_t &;
+    using pointer           = uint32_t*;
+    using reference         = uint32_t&;
 
     iterator(typename std::vector<uint32_t>::iterator vec_it, typename std::vector<uint32_t>::iterator vec_end,
              typename MapType::iterator map_it)
@@ -316,7 +316,7 @@ public:
 
     pointer operator->() const { return vec_it != vec_end ? &(*vec_it) : &(map_it->second); }
 
-    iterator &operator++() {
+    iterator& operator++() {
       if (vec_it != vec_end) {
         ++vec_it;
       } else {
@@ -331,9 +331,9 @@ public:
       return tmp;
     }
 
-    bool operator==(const iterator &rhs) const { return vec_it == rhs.vec_it && map_it == rhs.map_it; }
+    bool operator==(const iterator& rhs) const { return vec_it == rhs.vec_it && map_it == rhs.map_it; }
 
-    bool operator!=(const iterator &rhs) const { return !(*this == rhs); }
+    bool operator!=(const iterator& rhs) const { return !(*this == rhs); }
 
   private:
     typename std::vector<uint32_t>::iterator vec_it;
@@ -347,8 +347,8 @@ public:
     using iterator_category = std::input_iterator_tag;
     using difference_type   = std::ptrdiff_t;
     using value_type        = uint32_t;
-    using pointer           = const uint32_t *;
-    using reference         = const uint32_t &;
+    using pointer           = const uint32_t*;
+    using reference         = const uint32_t&;
 
     const_iterator(typename std::vector<uint32_t>::const_iterator vec_it, typename std::vector<uint32_t>::const_iterator vec_end,
                    typename MapType::const_iterator map_it)
@@ -358,7 +358,7 @@ public:
 
     pointer operator->() const { return vec_it != vec_end ? &(*vec_it) : &(map_it->second); }
 
-    const_iterator &operator++() {
+    const_iterator& operator++() {
       if (vec_it != vec_end) {
         ++vec_it;
       } else {
@@ -373,9 +373,9 @@ public:
       return tmp;
     }
 
-    bool operator==(const const_iterator &rhs) const { return vec_it == rhs.vec_it && map_it == rhs.map_it; }
+    bool operator==(const const_iterator& rhs) const { return vec_it == rhs.vec_it && map_it == rhs.map_it; }
 
-    bool operator!=(const const_iterator &rhs) const { return !(*this == rhs); }
+    bool operator!=(const const_iterator& rhs) const { return !(*this == rhs); }
 
   private:
     typename std::vector<uint32_t>::const_iterator vec_it;

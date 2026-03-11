@@ -10,10 +10,10 @@
 class Bundle : std::enable_shared_from_this<Bundle> {
 public:
   struct Entry {
-    Entry(const Entry &ent) : immutable(ent.immutable), trivial(ent.trivial) {}
+    Entry(const Entry& ent) : immutable(ent.immutable), trivial(ent.trivial) {}
     Entry() : immutable(false), trivial(Lconst::invalid()) {}
-    Entry(bool i, const Lconst &t) : immutable(i), trivial(t) {}
-    Entry &operator=(const Entry &ent) {
+    Entry(bool i, const Lconst& t) : immutable(i), trivial(t) {}
+    Entry& operator=(const Entry& ent) {
       immutable = ent.immutable;
       trivial   = ent.trivial;
       return *this;
@@ -65,46 +65,46 @@ public:
 
   std::string learn_fix(std::string_view key);
 
-  const Entry  &get_entry(std::string_view key) const;
-  const Lconst &get_trivial(std::string_view key) const { return get_entry(key).trivial; }
-  const Lconst &get_trivial() const;
+  const Entry&  get_entry(std::string_view key) const;
+  const Lconst& get_trivial(std::string_view key) const { return get_entry(key).trivial; }
+  const Lconst& get_trivial() const;
 
   bool                    has_bundle(std::string_view key) const;
   std::shared_ptr<Bundle> get_bundle(std::string_view key) const;
-  std::shared_ptr<Bundle> get_bundle(const std::shared_ptr<Bundle const> &tup) const;
+  std::shared_ptr<Bundle> get_bundle(const std::shared_ptr<Bundle const>& tup) const;
 
   // set a trivial/sub tuple. If already existed anything, it is deleted (not attributes)
 
-  void set(std::string_view key, const std::shared_ptr<Bundle const> &tup);
-  void set(std::string_view key, const Entry &&entry);
-  void set(std::string_view key, const Entry &entry) { set(key, Entry(entry)); }
+  void set(std::string_view key, const std::shared_ptr<Bundle const>& tup);
+  void set(std::string_view key, const Entry&& entry);
+  void set(std::string_view key, const Entry& entry) { set(key, Entry(entry)); }
 
-  void set(std::string_view key, const Lconst &trivial) { set(key, Entry(false, trivial)); }
-  void let(std::string_view key, const Lconst &trivial) {
+  void set(std::string_view key, const Lconst& trivial) { set(key, Entry(false, trivial)); }
+  void let(std::string_view key, const Lconst& trivial) {
     I(!immutable);  // FIXME: use llog library
     set(key, Entry(true, trivial));
   }
-  void mut(std::string_view key, const Lconst &trivial) {
+  void mut(std::string_view key, const Lconst& trivial) {
     I(!immutable);  // FIXME: use llog library
     set(key, Entry(false, trivial));
   }
-  void var(std::string_view key, const Lconst &trivial) {
+  void var(std::string_view key, const Lconst& trivial) {
     I(!immutable);  // FIXME: use llog library
     set(key, Entry(false, trivial));
   }
 
-  void set(const Lconst &trivial) {  // clear everything that is not 0.__attr. set 0
+  void set(const Lconst& trivial) {  // clear everything that is not 0.__attr. set 0
     return set("0", trivial);
   }
 
-  bool concat(const std::shared_ptr<Bundle const> &tup2);
-  bool concat(const Lconst &trivial);
+  bool concat(const std::shared_ptr<Bundle const>& tup2);
+  bool concat(const Lconst& trivial);
 
-  std::shared_ptr<Bundle> create_assign(const std::shared_ptr<Bundle const> &tup) const;
-  std::shared_ptr<Bundle> create_assign(const Lconst &lconst) const;
+  std::shared_ptr<Bundle> create_assign(const std::shared_ptr<Bundle const>& tup) const;
+  std::shared_ptr<Bundle> create_assign(const Lconst& lconst) const;
 
-  const Key_map_type &get_map() const { return key_map; }
-  const Key_map_type &get_sort_map() const;
+  const Key_map_type& get_map() const { return key_map; }
+  const Key_map_type& get_sort_map() const;
   Lconst              flatten() const;
 
   std::string_view get_scalar_name() const;  // empty if not scalar

@@ -7,7 +7,7 @@
 
 static Pass_plugin sample("inou_graphviz", Inou_graphviz::setup);
 
-Inou_graphviz::Inou_graphviz(const Eprp_var &var) : Pass("inou.graphviz", var) {
+Inou_graphviz::Inou_graphviz(const Eprp_var& var) : Pass("inou.graphviz", var) {
   if (var.has_label("bits")) {
     auto b = var.get("bits");
     bits   = b != "false" && b != "0";
@@ -30,24 +30,24 @@ void Inou_graphviz::setup() {
   register_inou("graphviz", m2);
 }
 
-void Inou_graphviz::from(Eprp_var &var) {
+void Inou_graphviz::from(Eprp_var& var) {
   Inou_graphviz pp(var);
 
   Graphviz p(pp.bits, pp.verbose, pp.get_odir(var));
 
-  for (const auto &l : var.lgs) {
+  for (const auto& l : var.lgs) {
     p.do_from_lgraph(l);
   }
-  for (const auto &l : var.lnasts) {
+  for (const auto& l : var.lnasts) {
     p.do_from_lnast(l);
   }
 }
 
-void Inou_graphviz::hierarchy(Eprp_var &var) {
+void Inou_graphviz::hierarchy(Eprp_var& var) {
   Inou_graphviz pp(var);
   Graphviz      p(pp.bits, pp.verbose, pp.get_odir(var));
 
-  for (const auto &l : var.lgs) {
+  for (const auto& l : var.lgs) {
     p.do_hierarchy(l);
   }
 }

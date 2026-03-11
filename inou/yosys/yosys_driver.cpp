@@ -48,9 +48,9 @@
 #if !defined(_WIN32) || defined(__MINGW32__)
 #include <unistd.h>
 #else
-char *optarg;
+char* optarg;
 int   optind = 1, optcur = 1;
-int   getopt(int argc, char **argv, const char *optstring) {
+int   getopt(int argc, char** argv, const char* optstring) {
   if (optind >= argc || argv[optind][0] != '-') {
     return -1;
   }
@@ -89,12 +89,12 @@ USING_YOSYS_NAMESPACE
 #include <sys/stat.h>
 #include <sys/types.h>
 
-extern "C" int         main(int, char **);
-extern "C" void        run(const char *);
-extern "C" const char *errmsg();
-extern "C" const char *prompt();
+extern "C" int         main(int, char**);
+extern "C" void        run(const char*);
+extern "C" const char* errmsg();
+extern "C" const char* prompt();
 
-int main(int argc, char **argv) {
+int main(int argc, char** argv) {
   EM_ASM(if (ENVIRONMENT_IS_NODE) {
     FS.mkdir('/hostcwd');
     FS.mount(NODEFS, {root : '.'}, '/hostcwd');
@@ -119,7 +119,7 @@ int main(int argc, char **argv) {
   }
 }
 
-void run(const char *command) {
+void run(const char* command) {
   int selSize = GetSize(yosys_get_design()->selection_stack);
   try {
     log_last_error = "Internal error (see JavaScript console for details)";
@@ -133,10 +133,10 @@ void run(const char *command) {
   }
 }
 
-const char *errmsg() { return log_last_error.c_str(); }
+const char* errmsg() { return log_last_error.c_str(); }
 
-const char *prompt() {
-  const char *p = create_prompt(yosys_get_design(), 0);
+const char* prompt() {
+  const char* p = create_prompt(yosys_get_design(), 0);
   while (*p == '\n') {
     p++;
   }
@@ -153,9 +153,9 @@ std::string yosys_history_file;
 #if defined(__wasm)
 extern "C" {
 // FIXME: WASI does not currently support exceptions.
-void *__cxa_allocate_exception(size_t thrown_size) throw() { return malloc(thrown_size); }
+void* __cxa_allocate_exception(size_t thrown_size) throw() { return malloc(thrown_size); }
 bool  __cxa_uncaught_exception() throw();
-void  __cxa_throw(void *thrown_exception, struct std::type_info *tinfo, void (*dest)(void *)) { std::terminate(); }
+void  __cxa_throw(void* thrown_exception, struct std::type_info* tinfo, void (*dest)(void*)) { std::terminate(); }
 }
 #endif
 
@@ -176,7 +176,7 @@ void yosys_atexit() {
 
   clear_history();
 #if defined(YOSYS_ENABLE_READLINE)
-  HIST_ENTRY **hist_list = history_list();
+  HIST_ENTRY** hist_list = history_list();
   if (hist_list != NULL) {
     free(hist_list);
   }
@@ -184,7 +184,7 @@ void yosys_atexit() {
 #endif
 }
 
-int main(int argc, char **argv) {
+int main(int argc, char** argv) {
   std::string              frontend_command = "auto";
   std::string              backend_command  = "auto";
   std::vector<std::string> vlog_defines;
@@ -459,13 +459,13 @@ int main(int argc, char **argv) {
 #endif
   log_error_atexit = yosys_atexit;
 
-  for (auto &fn : plugin_filenames) {
+  for (auto& fn : plugin_filenames) {
     load_plugin(fn, {});
   }
 
   if (!vlog_defines.empty()) {
     std::string vdef_cmd = "read -define";
-    for (const auto &vdef : vlog_defines) {
+    for (const auto& vdef : vlog_defines) {
       vdef_cmd += " " + vdef;
     }
     run_pass(vdef_cmd);
@@ -495,7 +495,7 @@ int main(int argc, char **argv) {
     }
   }
 
-  for (auto &passes_command : passes_commands) {
+  for (auto& passes_command : passes_commands) {
     run_pass(passes_command);
   }
 
@@ -514,17 +514,17 @@ int main(int argc, char **argv) {
   }
 
   if (!depsfile.empty()) {
-    FILE *f = fopen(depsfile.c_str(), "wt");
+    FILE* f = fopen(depsfile.c_str(), "wt");
     if (f == nullptr) {
       log_error("Can't open dependencies file for writing: %s\n", strerror(errno));
     }
     bool first = true;
-    for (const auto &fn : yosys_output_files) {
+    for (const auto& fn : yosys_output_files) {
       fprintf(f, "%s%s", first ? "" : " ", escape_filename_spaces(fn).c_str());
       first = false;
     }
     fprintf(f, ":");
-    for (const auto &fn : yosys_input_files) {
+    for (const auto& fn : yosys_input_files) {
       if (yosys_output_files.count(fn) == 0) {
         fprintf(f, " %s", escape_filename_spaces(fn).c_str());
       }
@@ -594,7 +594,7 @@ int main(int argc, char **argv) {
     int64_t                                     total_ns = 0;
     std::set<tuple<int64_t, int, std::string> > timedat;
 
-    for (auto &it : pass_register) {
+    for (auto& it : pass_register) {
       if (it.second->call_counter) {
         total_ns += it.second->runtime_ns + 1;
         timedat.insert(make_tuple(it.second->runtime_ns + 1, it.second->call_counter, it.first));
@@ -632,7 +632,7 @@ int main(int argc, char **argv) {
 #if defined(YOSYS_ENABLE_COVER) && (defined(__linux__) || defined(__FreeBSD__))
   if (getenv("YOSYS_COVER_DIR") || getenv("YOSYS_COVER_FILE")) {
     string filename;
-    FILE  *f;
+    FILE*  f;
 
     if (getenv("YOSYS_COVER_DIR")) {
       filename = stringf("%s/yosys_cover_%d_XXXXXX.txt", getenv("YOSYS_COVER_DIR"), getpid());
@@ -649,7 +649,7 @@ int main(int argc, char **argv) {
 
     log("<writing coverage file \"%s\">\n", filename.c_str());
 
-    for (auto &it : get_coverage_data()) {
+    for (auto& it : get_coverage_data()) {
       fprintf(f, "%-60s %10d %s\n", it.second.first.c_str(), it.second.second, it.first.c_str());
     }
 

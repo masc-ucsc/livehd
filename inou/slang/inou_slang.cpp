@@ -13,7 +13,7 @@
 
 // clang-format on
 
-extern int slang_main(int argc, char **argv, Slang_tree &tree);  // in slang_driver.cpp
+extern int slang_main(int argc, char** argv, Slang_tree& tree);  // in slang_driver.cpp
 
 static Pass_plugin sample("inou.verilog", Inou_slang::setup);
 
@@ -28,13 +28,13 @@ void Inou_slang::setup() {
   register_pass(m1);
 }
 
-Inou_slang::Inou_slang(const Eprp_var &var) : Pass("pass.lec", var) {}
+Inou_slang::Inou_slang(const Eprp_var& var) : Pass("pass.lec", var) {}
 
-void Inou_slang::work(Eprp_var &var) {
+void Inou_slang::work(Eprp_var& var) {
   TRACE_EVENT("verilog", "verilog_tolnast");
   Inou_slang p(var);
 
-  std::vector<char *> argv;
+  std::vector<char*> argv;
 
   argv.push_back(strdup("lgshell"));
 
@@ -73,7 +73,7 @@ void Inou_slang::work(Eprp_var &var) {
 
   std::vector<std::string> file_list = absl::StrSplit(p.files, ',');
 
-  for (const auto &fname : file_list) {
+  for (const auto& fname : file_list) {
     thread_pool.add([fname, &var, &argv, &var_add_mutex]() -> void {
       // std::lock_guard<std::mutex> guard(var_add_mutex); // FIXME: slang multithread fails
 
@@ -85,9 +85,9 @@ void Inou_slang::work(Eprp_var &var) {
 
       Slang_tree tree;
 
-      std::vector<char *> argv_final{argv};
+      std::vector<char*> argv_final{argv};
 
-      char *ptr_fname = strdup(fname.c_str());
+      char* ptr_fname = strdup(fname.c_str());
 
       argv_final.emplace_back(ptr_fname);
       argv_final.emplace_back(nullptr);
@@ -96,7 +96,7 @@ void Inou_slang::work(Eprp_var &var) {
 
       {
         std::lock_guard<std::mutex> guard(var_add_mutex);  // FIXME: slang
-        for (auto &ln : tree.pick_lnast()) {
+        for (auto& ln : tree.pick_lnast()) {
           var.add(ln);
         }
       }
@@ -106,7 +106,7 @@ void Inou_slang::work(Eprp_var &var) {
   }
   thread_pool.wait_all();
 
-  for (char *ptr : argv) {
+  for (char* ptr : argv) {
     if (ptr) {
       free(ptr);
     }

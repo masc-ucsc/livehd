@@ -11,7 +11,7 @@ Ast_parser::Ast_parser(std::string_view _buffer, Rule_id top_rule) : buffer(_buf
   level = 0;
 }
 
-void Ast_parser::add_track_parent(const lh::Tree_index &index) {
+void Ast_parser::add_track_parent(const lh::Tree_index& index) {
   for (int i = last_added.size(); i < index.level + 1; ++i) {
     last_added.emplace_back(-1, -1);
   }
@@ -28,7 +28,7 @@ void Ast_parser::up(Rule_id rid_up) {
 
   if (down_added == level) {
     // Child was added, nothing to do now
-    auto *data = ref_data(last_added[level]);
+    auto* data = ref_data(last_added[level]);
     if (!data->rule_id) {
       data->rule_id = rid_up;
     }
@@ -83,9 +83,9 @@ void Ast_parser::add(Rule_id rule_id, Token_entry te) {
 }
 
 void Ast_parser::dump() const {
-  for (const auto &index : depth_preorder()) {
+  for (const auto& index : depth_preorder()) {
     std::string indent(index.level, ' ');
-    const auto &d = get_data(index);
+    const auto& d = get_data(index);
     std::print("{} l:{} p:{} rule_id:{}\n", indent.c_str(), index.level, index.pos, d.rule_id);
   }
 }

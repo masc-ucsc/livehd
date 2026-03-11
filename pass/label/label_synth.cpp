@@ -18,7 +18,7 @@ Label_synth::Label_synth(bool _verbose, bool _hier, std::string_view alg) : verb
 
 int Label_synth::get_free_id() { return last_free_id++; }
 
-void Label_synth::set_id(const Node &node, int id) {
+void Label_synth::set_id(const Node& node, int id) {
   auto [it, inserted] = flat_node2id.insert({node.get_compact(), id});
   if (inserted || id == it->second) {
     return;
@@ -32,11 +32,11 @@ void Label_synth::set_id(const Node &node, int id) {
   }
 }
 
-void Label_synth::mark_ids(Lgraph *g) {
+void Label_synth::mark_ids(Lgraph* g) {
 #if 1
   // Do we cluster inputs? (FIXME: option)
-  g->each_graph_input([&](const Node_pin &pin) {
-    for (const auto &e : pin.out_edges()) {
+  g->each_graph_input([&](const Node_pin& pin) {
+    for (const auto& e : pin.out_edges()) {
       auto node = e.sink.get_node();
       if (!node.is_type_loop_last()) {
         auto id = get_free_id();
@@ -73,7 +73,7 @@ void Label_synth::mark_ids(Lgraph *g) {
       id = it->second;
     }
 
-    for (const auto &e : node.out_edges()) {
+    for (const auto& e : node.out_edges()) {
       set_id(e.sink.get_node(), id);
     }
   }
@@ -114,7 +114,7 @@ void Label_synth::merge_ids() {
     bool updated;
     do {
       updated = false;
-      for (auto &it : flat_merges) {
+      for (auto& it : flat_merges) {
         collapse_set.clear();
         collapse_set.insert(it.second);
         collapse_set_min = it.second;
@@ -129,7 +129,7 @@ void Label_synth::merge_ids() {
   }
 
   // 2nd relabel
-  for (auto &it : flat_node2id) {
+  for (auto& it : flat_node2id) {
     auto it2 = flat_merges.find(it.second);
     if (it2 == flat_merges.end()) {
       continue;
@@ -139,7 +139,7 @@ void Label_synth::merge_ids() {
   }
 
 #ifndef NDEBUG
-  for (auto &it : flat_node2id) {
+  for (auto& it : flat_node2id) {
     auto it2 = flat_merges.find(it.second);
     if (it2 == flat_merges.end()) {
       continue;
@@ -159,15 +159,15 @@ void Label_synth::merge_ids() {
 #endif
 }
 
-void Label_synth::dump(Lgraph *g) const {
+void Label_synth::dump(Lgraph* g) const {
   std::cout << "---- Label Synth dump ----\n";
   std::cout << "=== flat_merges ===\n";
-  for (auto &it : flat_merges) {
+  for (auto& it : flat_merges) {
     std::print("{} -> {}\n", it.first, it.second);
   }
 
   std::cout << "=== flat_node2id ===\n";
-  for (auto &it : flat_node2id) {
+  for (auto& it : flat_node2id) {
     Node node(g, it.first);
     std::print(":{} node:{}\n", it.second, node.debug_name());
   }
@@ -175,14 +175,14 @@ void Label_synth::dump(Lgraph *g) const {
   std::cout << "---- fin ----\n";
 }
 
-void Label_synth::label(Lgraph *g) {
+void Label_synth::label(Lgraph* g) {
   last_free_id = 1;
 
   mark_ids(g);
   merge_ids();
 
   if (hier) {
-    g->each_hier_unique_sub_bottom_up([](Lgraph *lg) { lg->ref_node_color_map()->clear(); });
+    g->each_hier_unique_sub_bottom_up([](Lgraph* lg) { lg->ref_node_color_map()->clear(); });
   }
   g->ref_node_color_map()->clear();
 

@@ -16,11 +16,11 @@
   SeeAlso     []
 
 ***********************************************************************/
-Pass_abc::Abc_comb LGraph_CreateNot(Abc_Ntk_t *pAig) {
-  Abc_Obj_t *pObj = nullptr;
+Pass_abc::Abc_comb LGraph_CreateNot(Abc_Ntk_t* pAig) {
+  Abc_Obj_t* pObj = nullptr;
   pObj            = Abc_NtkCreateNode(pAig);
-  pObj->pData     = Hop_Not(Hop_IthVar((Hop_Man_t *)pAig->pManFunc, 0));
-  Abc_Obj_t *pNet = Abc_NtkCreateNet(pAig);
+  pObj->pData     = Hop_Not(Hop_IthVar((Hop_Man_t*)pAig->pManFunc, 0));
+  Abc_Obj_t* pNet = Abc_NtkCreateNet(pAig);
   Abc_ObjAddFanin(pNet, pObj);
   Pass_abc::Abc_comb TEMP = {pObj, pNet};
   return TEMP;
@@ -37,11 +37,11 @@ Pass_abc::Abc_comb LGraph_CreateNot(Abc_Ntk_t *pAig) {
   SeeAlso     []
 
 ***********************************************************************/
-Pass_abc::Abc_comb LGraph_CreateAnd(Abc_Ntk_t *pAig) {
-  Abc_Obj_t *pObj = nullptr;
+Pass_abc::Abc_comb LGraph_CreateAnd(Abc_Ntk_t* pAig) {
+  Abc_Obj_t* pObj = nullptr;
   pObj            = Abc_NtkCreateNode(pAig);
-  pObj->pData     = Hop_CreateAnd((Hop_Man_t *)pAig->pManFunc, 2);
-  Abc_Obj_t *pNet = Abc_NtkCreateNet(pAig);
+  pObj->pData     = Hop_CreateAnd((Hop_Man_t*)pAig->pManFunc, 2);
+  Abc_Obj_t* pNet = Abc_NtkCreateNet(pAig);
   Abc_ObjAddFanin(pNet, pObj);
   Pass_abc::Abc_comb TEMP = {pObj, pNet};
   return TEMP;
@@ -58,11 +58,11 @@ Pass_abc::Abc_comb LGraph_CreateAnd(Abc_Ntk_t *pAig) {
   SeeAlso     []
 
 ***********************************************************************/
-Pass_abc::Abc_comb LGraph_CreateOr(Abc_Ntk_t *pAig) {
-  Abc_Obj_t *pObj = nullptr;
+Pass_abc::Abc_comb LGraph_CreateOr(Abc_Ntk_t* pAig) {
+  Abc_Obj_t* pObj = nullptr;
   pObj            = Abc_NtkCreateNode(pAig);
-  pObj->pData     = Hop_CreateOr((Hop_Man_t *)pAig->pManFunc, 2);
-  Abc_Obj_t *pNet = Abc_NtkCreateNet(pAig);
+  pObj->pData     = Hop_CreateOr((Hop_Man_t*)pAig->pManFunc, 2);
+  Abc_Obj_t* pNet = Abc_NtkCreateNet(pAig);
   Abc_ObjAddFanin(pNet, pObj);
   Pass_abc::Abc_comb TEMP = {pObj, pNet};
   return TEMP;
@@ -79,11 +79,11 @@ Pass_abc::Abc_comb LGraph_CreateOr(Abc_Ntk_t *pAig) {
   SeeAlso     []
 
 ***********************************************************************/
-Pass_abc::Abc_comb LGraph_CreateXor(Abc_Ntk_t *pAig) {
-  Abc_Obj_t *pObj = nullptr;
+Pass_abc::Abc_comb LGraph_CreateXor(Abc_Ntk_t* pAig) {
+  Abc_Obj_t* pObj = nullptr;
   pObj            = Abc_NtkCreateNode(pAig);
-  pObj->pData     = Hop_CreateExor((Hop_Man_t *)pAig->pManFunc, 2);
-  Abc_Obj_t *pNet = Abc_NtkCreateNet(pAig);
+  pObj->pData     = Hop_CreateExor((Hop_Man_t*)pAig->pManFunc, 2);
+  Abc_Obj_t* pNet = Abc_NtkCreateNet(pAig);
   Abc_ObjAddFanin(pNet, pObj);
   Pass_abc::Abc_comb TEMP = {pObj, pNet};
   return TEMP;
@@ -100,13 +100,13 @@ Pass_abc::Abc_comb LGraph_CreateXor(Abc_Ntk_t *pAig) {
   SeeAlso     []
 
 ***********************************************************************/
-Pass_abc::Abc_comb LGraph_CreateNand(Abc_Ntk_t *pAig) {
-  Abc_Obj_t *pObj = nullptr;
+Pass_abc::Abc_comb LGraph_CreateNand(Abc_Ntk_t* pAig) {
+  Abc_Obj_t* pObj = nullptr;
   pObj            = Abc_NtkCreateNode(pAig);
-  pObj->pData     = Hop_CreateAnd((Hop_Man_t *)pAig->pManFunc, 2);
+  pObj->pData     = Hop_CreateAnd((Hop_Man_t*)pAig->pManFunc, 2);
   assert(pObj->pData);
-  pObj->pData     = Hop_Not((Hop_Obj_t *)pObj->pData);
-  Abc_Obj_t *pNet = Abc_NtkCreateNet(pAig);
+  pObj->pData     = Hop_Not((Hop_Obj_t*)pObj->pData);
+  Abc_Obj_t* pNet = Abc_NtkCreateNet(pAig);
   Abc_ObjAddFanin(pNet, pObj);
   Pass_abc::Abc_comb TEMP = {pObj, pNet};
   return TEMP;
@@ -123,13 +123,13 @@ Pass_abc::Abc_comb LGraph_CreateNand(Abc_Ntk_t *pAig) {
   SeeAlso     []
 
 ***********************************************************************/
-Pass_abc::Abc_comb LGraph_CreateNor(Abc_Ntk_t *pAig) {
-  Abc_Obj_t *pObj = nullptr;
+Pass_abc::Abc_comb LGraph_CreateNor(Abc_Ntk_t* pAig) {
+  Abc_Obj_t* pObj = nullptr;
   pObj            = Abc_NtkCreateNode(pAig);
-  pObj->pData     = Hop_CreateOr((Hop_Man_t *)pAig->pManFunc, 2);
+  pObj->pData     = Hop_CreateOr((Hop_Man_t*)pAig->pManFunc, 2);
   assert(pObj->pData);
-  pObj->pData     = Hop_Not((Hop_Obj_t *)pObj->pData);
-  Abc_Obj_t *pNet = Abc_NtkCreateNet(pAig);
+  pObj->pData     = Hop_Not((Hop_Obj_t*)pObj->pData);
+  Abc_Obj_t* pNet = Abc_NtkCreateNet(pAig);
   Abc_ObjAddFanin(pNet, pObj);
   Pass_abc::Abc_comb TEMP = {pObj, pNet};
   return TEMP;
@@ -146,13 +146,13 @@ Pass_abc::Abc_comb LGraph_CreateNor(Abc_Ntk_t *pAig) {
   SeeAlso     []
 
 ***********************************************************************/
-Pass_abc::Abc_comb LGraph_CreateXnor(Abc_Ntk_t *pAig) {
-  Abc_Obj_t *pObj = nullptr;
+Pass_abc::Abc_comb LGraph_CreateXnor(Abc_Ntk_t* pAig) {
+  Abc_Obj_t* pObj = nullptr;
   pObj            = Abc_NtkCreateNode(pAig);
-  pObj->pData     = Hop_CreateExor((Hop_Man_t *)pAig->pManFunc, 2);
+  pObj->pData     = Hop_CreateExor((Hop_Man_t*)pAig->pManFunc, 2);
   assert(pObj->pData);
-  pObj->pData     = Hop_Not((Hop_Obj_t *)pObj->pData);
-  Abc_Obj_t *pNet = Abc_NtkCreateNet(pAig);
+  pObj->pData     = Hop_Not((Hop_Obj_t*)pObj->pData);
+  Abc_Obj_t* pNet = Abc_NtkCreateNet(pAig);
   Abc_ObjAddFanin(pNet, pObj);
   Pass_abc::Abc_comb TEMP = {pObj, pNet};
   return TEMP;
@@ -169,16 +169,16 @@ Pass_abc::Abc_comb LGraph_CreateXnor(Abc_Ntk_t *pAig) {
   SeeAlso     []
 
 ***********************************************************************/
-Pass_abc::Abc_comb LGraph_CreateAndnot(Abc_Ntk_t *pAig) {
+Pass_abc::Abc_comb LGraph_CreateAndnot(Abc_Ntk_t* pAig) {
   // assign Y = A & (~B);
-  Abc_Obj_t *pObj = nullptr;
+  Abc_Obj_t* pObj = nullptr;
   pObj            = Abc_NtkCreateNode(pAig);
-  pObj->pData     = Hop_CreateAnd((Hop_Man_t *)pAig->pManFunc, 2);
+  pObj->pData     = Hop_CreateAnd((Hop_Man_t*)pAig->pManFunc, 2);
   assert(pObj->pData);
-  pObj->pData     = Hop_And((Hop_Man_t *)pAig->pManFunc,
-                        Hop_IthVar((Hop_Man_t *)pAig->pManFunc, 0),
-                        Hop_Not(Hop_IthVar((Hop_Man_t *)pAig->pManFunc, 1)));
-  Abc_Obj_t *pNet = Abc_NtkCreateNet(pAig);
+  pObj->pData     = Hop_And((Hop_Man_t*)pAig->pManFunc,
+                            Hop_IthVar((Hop_Man_t*)pAig->pManFunc, 0),
+                            Hop_Not(Hop_IthVar((Hop_Man_t*)pAig->pManFunc, 1)));
+  Abc_Obj_t* pNet = Abc_NtkCreateNet(pAig);
   Abc_ObjAddFanin(pNet, pObj);
   Pass_abc::Abc_comb TEMP = {pObj, pNet};
   return TEMP;
@@ -195,16 +195,16 @@ Pass_abc::Abc_comb LGraph_CreateAndnot(Abc_Ntk_t *pAig) {
   SeeAlso     []
 
 ***********************************************************************/
-Pass_abc::Abc_comb LGraph_CreateOrnot(Abc_Ntk_t *pAig) {
+Pass_abc::Abc_comb LGraph_CreateOrnot(Abc_Ntk_t* pAig) {
   // assign Y = A | (~B);
-  Abc_Obj_t *pObj = nullptr;
+  Abc_Obj_t* pObj = nullptr;
   pObj            = Abc_NtkCreateNode(pAig);
-  pObj->pData     = Hop_CreateOr((Hop_Man_t *)pAig->pManFunc, 2);
+  pObj->pData     = Hop_CreateOr((Hop_Man_t*)pAig->pManFunc, 2);
   assert(pObj->pData);
-  pObj->pData     = Hop_Or((Hop_Man_t *)pAig->pManFunc,
-                       Hop_IthVar((Hop_Man_t *)pAig->pManFunc, 0),
-                       Hop_Not(Hop_IthVar((Hop_Man_t *)pAig->pManFunc, 1)));
-  Abc_Obj_t *pNet = Abc_NtkCreateNet(pAig);
+  pObj->pData     = Hop_Or((Hop_Man_t*)pAig->pManFunc,
+                           Hop_IthVar((Hop_Man_t*)pAig->pManFunc, 0),
+                           Hop_Not(Hop_IthVar((Hop_Man_t*)pAig->pManFunc, 1)));
+  Abc_Obj_t* pNet = Abc_NtkCreateNet(pAig);
   Abc_ObjAddFanin(pNet, pObj);
   Pass_abc::Abc_comb TEMP = {pObj, pNet};
   return TEMP;
@@ -221,18 +221,18 @@ Pass_abc::Abc_comb LGraph_CreateOrnot(Abc_Ntk_t *pAig) {
   SeeAlso     []
 
 ***********************************************************************/
-Pass_abc::Abc_comb LGraph_CreateAoi3(Abc_Ntk_t *pAig) {
+Pass_abc::Abc_comb LGraph_CreateAoi3(Abc_Ntk_t* pAig) {
   // assign Y = ~((A & B) | C);
-  Abc_Obj_t *pObj = nullptr;
+  Abc_Obj_t* pObj = nullptr;
   pObj            = Abc_NtkCreateNode(pAig);
-  pObj->pData     = Hop_CreateOr((Hop_Man_t *)pAig->pManFunc, 3);
+  pObj->pData     = Hop_CreateOr((Hop_Man_t*)pAig->pManFunc, 3);
   assert(pObj->pData);
   pObj->pData = Hop_Or(
-      (Hop_Man_t *)pAig->pManFunc,
-      Hop_And((Hop_Man_t *)pAig->pManFunc, Hop_IthVar((Hop_Man_t *)pAig->pManFunc, 0), Hop_IthVar((Hop_Man_t *)pAig->pManFunc, 1)),
-      Hop_IthVar((Hop_Man_t *)pAig->pManFunc, 2));
-  pObj->pData     = Hop_Not((Hop_Obj_t *)pObj->pData);
-  Abc_Obj_t *pNet = Abc_NtkCreateNet(pAig);
+      (Hop_Man_t*)pAig->pManFunc,
+      Hop_And((Hop_Man_t*)pAig->pManFunc, Hop_IthVar((Hop_Man_t*)pAig->pManFunc, 0), Hop_IthVar((Hop_Man_t*)pAig->pManFunc, 1)),
+      Hop_IthVar((Hop_Man_t*)pAig->pManFunc, 2));
+  pObj->pData     = Hop_Not((Hop_Obj_t*)pObj->pData);
+  Abc_Obj_t* pNet = Abc_NtkCreateNet(pAig);
   Abc_ObjAddFanin(pNet, pObj);
   Pass_abc::Abc_comb TEMP = {pObj, pNet};
   return TEMP;
@@ -249,18 +249,18 @@ Pass_abc::Abc_comb LGraph_CreateAoi3(Abc_Ntk_t *pAig) {
   SeeAlso     []
 
 ***********************************************************************/
-Pass_abc::Abc_comb LGraph_CreateOai3(Abc_Ntk_t *pAig) {
+Pass_abc::Abc_comb LGraph_CreateOai3(Abc_Ntk_t* pAig) {
   // assign Y = ~((A | B) & C);
-  Abc_Obj_t *pObj = nullptr;
+  Abc_Obj_t* pObj = nullptr;
   pObj            = Abc_NtkCreateNode(pAig);
-  pObj->pData     = Hop_CreateAnd((Hop_Man_t *)pAig->pManFunc, 3);
+  pObj->pData     = Hop_CreateAnd((Hop_Man_t*)pAig->pManFunc, 3);
   assert(pObj->pData);
   pObj->pData = Hop_And(
-      (Hop_Man_t *)pAig->pManFunc,
-      Hop_Or((Hop_Man_t *)pAig->pManFunc, Hop_IthVar((Hop_Man_t *)pAig->pManFunc, 0), Hop_IthVar((Hop_Man_t *)pAig->pManFunc, 1)),
-      Hop_IthVar((Hop_Man_t *)pAig->pManFunc, 2));
-  pObj->pData     = Hop_Not((Hop_Obj_t *)pObj->pData);
-  Abc_Obj_t *pNet = Abc_NtkCreateNet(pAig);
+      (Hop_Man_t*)pAig->pManFunc,
+      Hop_Or((Hop_Man_t*)pAig->pManFunc, Hop_IthVar((Hop_Man_t*)pAig->pManFunc, 0), Hop_IthVar((Hop_Man_t*)pAig->pManFunc, 1)),
+      Hop_IthVar((Hop_Man_t*)pAig->pManFunc, 2));
+  pObj->pData     = Hop_Not((Hop_Obj_t*)pObj->pData);
+  Abc_Obj_t* pNet = Abc_NtkCreateNet(pAig);
   Abc_ObjAddFanin(pNet, pObj);
   Pass_abc::Abc_comb TEMP = {pObj, pNet};
   return TEMP;
@@ -277,18 +277,18 @@ Pass_abc::Abc_comb LGraph_CreateOai3(Abc_Ntk_t *pAig) {
   SeeAlso     []
 
 ***********************************************************************/
-Pass_abc::Abc_comb LGraph_CreateAoi4(Abc_Ntk_t *pAig) {
+Pass_abc::Abc_comb LGraph_CreateAoi4(Abc_Ntk_t* pAig) {
   // assign Y = ~((A & B) | (C & D));
-  Abc_Obj_t *pObj = nullptr;
+  Abc_Obj_t* pObj = nullptr;
   pObj            = Abc_NtkCreateNode(pAig);
-  pObj->pData     = Hop_CreateOr((Hop_Man_t *)pAig->pManFunc, 4);
+  pObj->pData     = Hop_CreateOr((Hop_Man_t*)pAig->pManFunc, 4);
   assert(pObj->pData);
   pObj->pData = Hop_Or(
-      (Hop_Man_t *)pAig->pManFunc,
-      Hop_And((Hop_Man_t *)pAig->pManFunc, Hop_IthVar((Hop_Man_t *)pAig->pManFunc, 0), Hop_IthVar((Hop_Man_t *)pAig->pManFunc, 1)),
-      Hop_And((Hop_Man_t *)pAig->pManFunc, Hop_IthVar((Hop_Man_t *)pAig->pManFunc, 2), Hop_IthVar((Hop_Man_t *)pAig->pManFunc, 3)));
-  pObj->pData     = Hop_Not((Hop_Obj_t *)pObj->pData);
-  Abc_Obj_t *pNet = Abc_NtkCreateNet(pAig);
+      (Hop_Man_t*)pAig->pManFunc,
+      Hop_And((Hop_Man_t*)pAig->pManFunc, Hop_IthVar((Hop_Man_t*)pAig->pManFunc, 0), Hop_IthVar((Hop_Man_t*)pAig->pManFunc, 1)),
+      Hop_And((Hop_Man_t*)pAig->pManFunc, Hop_IthVar((Hop_Man_t*)pAig->pManFunc, 2), Hop_IthVar((Hop_Man_t*)pAig->pManFunc, 3)));
+  pObj->pData     = Hop_Not((Hop_Obj_t*)pObj->pData);
+  Abc_Obj_t* pNet = Abc_NtkCreateNet(pAig);
   Abc_ObjAddFanin(pNet, pObj);
   Pass_abc::Abc_comb TEMP = {pObj, pNet};
   return TEMP;
@@ -305,18 +305,18 @@ Pass_abc::Abc_comb LGraph_CreateAoi4(Abc_Ntk_t *pAig) {
   SeeAlso     []
 
 ***********************************************************************/
-Pass_abc::Abc_comb LGraph_CreateOai4(Abc_Ntk_t *pAig) {
+Pass_abc::Abc_comb LGraph_CreateOai4(Abc_Ntk_t* pAig) {
   // assign Y = ~((A | B) & (C | D));
-  Abc_Obj_t *pObj = nullptr;
+  Abc_Obj_t* pObj = nullptr;
   pObj            = Abc_NtkCreateNode(pAig);
-  pObj->pData     = Hop_CreateAnd((Hop_Man_t *)pAig->pManFunc, 4);
+  pObj->pData     = Hop_CreateAnd((Hop_Man_t*)pAig->pManFunc, 4);
   assert(pObj->pData);
   pObj->pData = Hop_And(
-      (Hop_Man_t *)pAig->pManFunc,
-      Hop_Or((Hop_Man_t *)pAig->pManFunc, Hop_IthVar((Hop_Man_t *)pAig->pManFunc, 0), Hop_IthVar((Hop_Man_t *)pAig->pManFunc, 1)),
-      Hop_Or((Hop_Man_t *)pAig->pManFunc, Hop_IthVar((Hop_Man_t *)pAig->pManFunc, 2), Hop_IthVar((Hop_Man_t *)pAig->pManFunc, 3)));
-  pObj->pData     = Hop_Not((Hop_Obj_t *)pObj->pData);
-  Abc_Obj_t *pNet = Abc_NtkCreateNet(pAig);
+      (Hop_Man_t*)pAig->pManFunc,
+      Hop_Or((Hop_Man_t*)pAig->pManFunc, Hop_IthVar((Hop_Man_t*)pAig->pManFunc, 0), Hop_IthVar((Hop_Man_t*)pAig->pManFunc, 1)),
+      Hop_Or((Hop_Man_t*)pAig->pManFunc, Hop_IthVar((Hop_Man_t*)pAig->pManFunc, 2), Hop_IthVar((Hop_Man_t*)pAig->pManFunc, 3)));
+  pObj->pData     = Hop_Not((Hop_Obj_t*)pObj->pData);
+  Abc_Obj_t* pNet = Abc_NtkCreateNet(pAig);
   Abc_ObjAddFanin(pNet, pObj);
   Pass_abc::Abc_comb TEMP = {pObj, pNet};
   return TEMP;
@@ -333,24 +333,24 @@ Pass_abc::Abc_comb LGraph_CreateOai4(Abc_Ntk_t *pAig) {
   SeeAlso     []
 
 ***********************************************************************/
-Pass_abc::Abc_comb LGraph_CreateMUX(Abc_Ntk_t *pAig) {
-  Abc_Obj_t *pObj = nullptr;
+Pass_abc::Abc_comb LGraph_CreateMUX(Abc_Ntk_t* pAig) {
+  Abc_Obj_t* pObj = nullptr;
   pObj            = Abc_NtkCreateNode(pAig);
-  pObj->pData     = Hop_CreateOr((Hop_Man_t *)pAig->pManFunc, 3);
+  pObj->pData     = Hop_CreateOr((Hop_Man_t*)pAig->pManFunc, 3);
   assert(pObj->pData);
   pObj->pData = Hop_Or(
-      (Hop_Man_t *)pAig->pManFunc,
-      Hop_And((Hop_Man_t *)pAig->pManFunc,
-              Hop_IthVar((Hop_Man_t *)pAig->pManFunc, 0),
-              Hop_Not(Hop_IthVar((Hop_Man_t *)pAig->pManFunc, 2))),
-      Hop_And((Hop_Man_t *)pAig->pManFunc, Hop_IthVar((Hop_Man_t *)pAig->pManFunc, 1), Hop_IthVar((Hop_Man_t *)pAig->pManFunc, 2)));
-  Abc_Obj_t *pNet = Abc_NtkCreateNet(pAig);
+      (Hop_Man_t*)pAig->pManFunc,
+      Hop_And((Hop_Man_t*)pAig->pManFunc,
+              Hop_IthVar((Hop_Man_t*)pAig->pManFunc, 0),
+              Hop_Not(Hop_IthVar((Hop_Man_t*)pAig->pManFunc, 2))),
+      Hop_And((Hop_Man_t*)pAig->pManFunc, Hop_IthVar((Hop_Man_t*)pAig->pManFunc, 1), Hop_IthVar((Hop_Man_t*)pAig->pManFunc, 2)));
+  Abc_Obj_t* pNet = Abc_NtkCreateNet(pAig);
   Abc_ObjAddFanin(pNet, pObj);
   Pass_abc::Abc_comb TEMP = {pObj, pNet};
   return TEMP;
 }
 
-void Abc_object_assign_name(Abc_Obj_t *obj, const std::string name) {
+void Abc_object_assign_name(Abc_Obj_t* obj, const std::string name) {
   // NOTE: nasty const_cast because ABC does not have const in the C API
-  Abc_ObjAssignName(obj, const_cast<char *>(name.c_str()), nullptr);
+  Abc_ObjAssignName(obj, const_cast<char*>(name.c_str()), nullptr);
 }

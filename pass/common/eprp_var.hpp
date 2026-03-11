@@ -19,9 +19,9 @@
 
 struct eprp_casecmp_str {
   struct nocase_compare {
-    bool operator()(const unsigned char &c1, const unsigned char &c2) const { return std::tolower(c1) < std::tolower(c2); }
+    bool operator()(const unsigned char& c1, const unsigned char& c2) const { return std::tolower(c1) < std::tolower(c2); }
   };
-  bool operator()(const std::string &s1, const std::string &s2) const {
+  bool operator()(const std::string& s1, const std::string& s2) const {
     return std::lexicographical_compare(s1.begin(), s1.end(), s2.begin(), s2.end(), nocase_compare());
   }
 };
@@ -31,7 +31,7 @@ class Lgraph;
 class Eprp_var {
 public:
   using Eprp_dict   = absl::flat_hash_map<std::string, std::string>;
-  using Eprp_lgs    = std::vector<Lgraph *>;
+  using Eprp_lgs    = std::vector<Lgraph*>;
   using Eprp_lnasts = std::vector<std::shared_ptr<Lnast> >;
 
   Eprp_dict   dict;
@@ -46,23 +46,23 @@ public:
     lnasts.clear();
   }
 
-  Eprp_var(const Eprp_dict &_dict) : dict(_dict) {}
-  Eprp_var(const Eprp_lgs &_lgs) : lgs(_lgs) {}
+  Eprp_var(const Eprp_dict& _dict) : dict(_dict) {}
+  Eprp_var(const Eprp_lgs& _lgs) : lgs(_lgs) {}
 
-  void add(const Eprp_dict &_dict);
-  void add(const Eprp_lgs &_lgs);
-  void add(const Eprp_var &_var);
-  void add(Eprp_lnasts &_var);
+  void add(const Eprp_dict& _dict);
+  void add(const Eprp_lgs& _lgs);
+  void add(const Eprp_var& _var);
+  void add(Eprp_lnasts& _var);
 
-  void add(Lgraph *lg);
-  void add(std::unique_ptr<Lnast> lnast);
-  void add(const std::shared_ptr<Lnast> &lnast);
-  void add(std::string_view name, std::string_view value);
-  void set_stage_labels(const Eprp_dict &_dict) { stage_dict = _dict; }
-  [[nodiscard]] bool has_stage_label(std::string_view name) const { return stage_dict.find(name) != stage_dict.end(); }
+  void                           add(Lgraph* lg);
+  void                           add(std::unique_ptr<Lnast> lnast);
+  void                           add(const std::shared_ptr<Lnast>& lnast);
+  void                           add(std::string_view name, std::string_view value);
+  void                           set_stage_labels(const Eprp_dict& _dict) { stage_dict = _dict; }
+  [[nodiscard]] bool             has_stage_label(std::string_view name) const { return stage_dict.find(name) != stage_dict.end(); }
   [[nodiscard]] std::string_view get_stage(std::string_view name, std::string_view default_value = "") const;
-  void replace(const Eprp_var::Eprp_lnasts &lns);
-  void replace(const std::shared_ptr<Lnast> &lnast_old, std::shared_ptr<Lnast> &lnast_new);
+  void                           replace(const Eprp_var::Eprp_lnasts& lns);
+  void                           replace(const std::shared_ptr<Lnast>& lnast_old, std::shared_ptr<Lnast>& lnast_new);
 
   void delete_label(std::string_view name);
 

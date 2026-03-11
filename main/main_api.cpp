@@ -15,7 +15,7 @@ void setup_inou_liveparse();
 // add new setup function prototypes here
 
 void Main_api::init() {
-  for (const auto &it : Pass_plugin::get_registry()) {
+  for (const auto& it : Pass_plugin::get_registry()) {
     // std::print("function:{}\n", it.first);
     it.second();
   }

@@ -46,8 +46,8 @@ char defaultName[64];
 char defaultOut[64];
 
 // Global variables
-FILE         *fout;
-void         *userData;
+FILE*         fout;
+void*         userData;
 int           numObjs;
 int           isSumSet;    // to keep track if within SUM
 int           isProp = 0;  // for PROPERTYDEFINITIONS
@@ -61,9 +61,9 @@ static int    testDebugPrint = 0;  // test for ccr1488696
 
 // TX_DIR:TRANSLATION ON
 
-void myLogFunction(const char *errMsg) { fprintf(fout, "ERROR: found error: %s\n", errMsg); }
+void myLogFunction(const char* errMsg) { fprintf(fout, "ERROR: found error: %s\n", errMsg); }
 
-void myWarningLogFunction(const char *errMsg) { fprintf(fout, "WARNING: found error: %s\n", errMsg); }
+void myWarningLogFunction(const char* errMsg) { fprintf(fout, "WARNING: found error: %s\n", errMsg); }
 
 void dataError() { fprintf(fout, "ERROR: returned user data is not correct!\n"); }
 
@@ -75,7 +75,7 @@ void checkType(defrCallbackType_e c) {
   }
 }
 
-int done(defrCallbackType_e c, void *, defiUserData ud) {
+int done(defrCallbackType_e c, void*, defiUserData ud) {
   checkType(c);
   if (ud != userData) {
     dataError();
@@ -84,7 +84,7 @@ int done(defrCallbackType_e c, void *, defiUserData ud) {
   return 0;
 }
 
-int endfunc(defrCallbackType_e c, void *, defiUserData ud) {
+int endfunc(defrCallbackType_e c, void*, defiUserData ud) {
   checkType(c);
   if (ud != userData) {
     dataError();
@@ -92,21 +92,21 @@ int endfunc(defrCallbackType_e c, void *, defiUserData ud) {
   return 0;
 }
 
-char *orientStr(int orient) {
+char* orientStr(int orient) {
   switch (orient) {
-    case 0: return ((char *)"N");
-    case 1: return ((char *)"W");
-    case 2: return ((char *)"S");
-    case 3: return ((char *)"E");
-    case 4: return ((char *)"FN");
-    case 5: return ((char *)"FW");
-    case 6: return ((char *)"FS");
-    case 7: return ((char *)"FE");
+    case 0: return ((char*)"N");
+    case 1: return ((char*)"W");
+    case 2: return ((char*)"S");
+    case 3: return ((char*)"E");
+    case 4: return ((char*)"FN");
+    case 5: return ((char*)"FW");
+    case 6: return ((char*)"FS");
+    case 7: return ((char*)"FE");
   };
-  return ((char *)"BOGUS");
+  return ((char*)"BOGUS");
 }
 
-int compMSL(defrCallbackType_e c, defiComponentMaskShiftLayer *co, defiUserData ud) {
+int compMSL(defrCallbackType_e c, defiComponentMaskShiftLayer* co, defiUserData ud) {
   int i;
 
   checkType(c);
@@ -126,7 +126,7 @@ int compMSL(defrCallbackType_e c, defiComponentMaskShiftLayer *co, defiUserData 
   return 0;
 }
 
-int compf(defrCallbackType_e c, defiComponent *co, defiUserData ud) {
+int compf(defrCallbackType_e c, defiComponent* co, defiUserData ud) {
   if (testDebugPrint) {
     co->print(fout);
   } else {
@@ -243,7 +243,7 @@ int compf(defrCallbackType_e c, defiComponent *co, defiUserData ud) {
   return 0;
 }
 
-int netpath(defrCallbackType_e, defiNet *, defiUserData) {
+int netpath(defrCallbackType_e, defiNet*, defiUserData) {
   fprintf(fout, "\n");
 
   fprintf(fout, "Callback of partial path for net\n");
@@ -251,7 +251,7 @@ int netpath(defrCallbackType_e, defiNet *, defiUserData) {
   return 0;
 }
 
-int netNamef(defrCallbackType_e c, const char *netName, defiUserData ud) {
+int netNamef(defrCallbackType_e c, const char* netName, defiUserData ud) {
   checkType(c);
   if (ud != userData) {
     dataError();
@@ -260,7 +260,7 @@ int netNamef(defrCallbackType_e c, const char *netName, defiUserData ud) {
   return 0;
 }
 
-int subnetNamef(defrCallbackType_e c, const char *subnetName, defiUserData ud) {
+int subnetNamef(defrCallbackType_e c, const char* subnetName, defiUserData ud) {
   checkType(c);
   if (ud != userData) {
     dataError();
@@ -271,7 +271,7 @@ int subnetNamef(defrCallbackType_e c, const char *subnetName, defiUserData ud) {
   return 0;
 }
 
-int nondefRulef(defrCallbackType_e c, const char *ruleName, defiUserData ud) {
+int nondefRulef(defrCallbackType_e c, const char* ruleName, defiUserData ud) {
   checkType(c);
   if (ud != userData) {
     dataError();
@@ -282,15 +282,15 @@ int nondefRulef(defrCallbackType_e c, const char *ruleName, defiUserData ud) {
   return 0;
 }
 
-int netf(defrCallbackType_e c, defiNet *net, defiUserData ud) {
+int netf(defrCallbackType_e c, defiNet* net, defiUserData ud) {
   // For net and special net.
   int         i, j, k, w, x, y, z, count, newLayer;
-  defiPath   *p;
-  defiSubnet *s;
+  defiPath*   p;
+  defiSubnet* s;
   int         path;
-  defiVpin   *vpin;
+  defiVpin*   vpin;
   // defiShield *noShield;
-  defiWire *wire;
+  defiWire* wire;
 
   checkType(c);
   if (ud != userData) {
@@ -581,15 +581,15 @@ int netf(defrCallbackType_e c, defiNet *net, defiUserData ud) {
   return 0;
 }
 
-int snetpath(defrCallbackType_e c, defiNet *ppath, defiUserData ud) {
+int snetpath(defrCallbackType_e c, defiNet* ppath, defiUserData ud) {
   int         i, j, x, y, z, count, newLayer;
-  char       *layerName;
+  char*       layerName;
   double      dist, left, right;
-  defiPath   *p;
-  defiSubnet *s;
+  defiPath*   p;
+  defiSubnet* s;
   int         path;
-  defiShield *shield;
-  defiWire   *wire;
+  defiShield* shield;
+  defiWire*   wire;
   int         numX, numY, stepX, stepY;
 
   if (c != defrSNetPartialPathCbkType) {
@@ -853,12 +853,12 @@ int snetpath(defrCallbackType_e c, defiNet *ppath, defiUserData ud) {
   return 0;
 }
 
-int snetwire(defrCallbackType_e c, defiNet *ppath, defiUserData ud) {
+int snetwire(defrCallbackType_e c, defiNet* ppath, defiUserData ud) {
   int         i, j, x, y, z, count = 0, newLayer;
-  defiPath   *p;
+  defiPath*   p;
   int         path;
-  defiWire   *wire;
-  defiShield *shield;
+  defiWire*   wire;
+  defiShield* shield;
   int         numX, numY, stepX, stepY;
 
   if (c != defrSNetWireCbkType) {
@@ -1014,16 +1014,16 @@ int snetwire(defrCallbackType_e c, defiNet *ppath, defiUserData ud) {
   return 0;
 }
 
-int snetf(defrCallbackType_e c, defiNet *net, defiUserData ud) {
+int snetf(defrCallbackType_e c, defiNet* net, defiUserData ud) {
   // For net and special net.
   int         i, j, x, y, z, count, newLayer;
-  char       *layerName;
+  char*       layerName;
   double      dist, left, right;
-  defiPath   *p;
-  defiSubnet *s;
+  defiPath*   p;
+  defiSubnet* s;
   int         path;
-  defiShield *shield;
-  defiWire   *wire;
+  defiShield* shield;
+  defiWire*   wire;
   int         numX, numY, stepX, stepY;
 
   checkType(c);
@@ -1357,7 +1357,7 @@ int snetf(defrCallbackType_e c, defiNet *net, defiUserData ud) {
   return 0;
 }
 
-int ndr(defrCallbackType_e c, defiNonDefault *nd, defiUserData ud) {
+int ndr(defrCallbackType_e c, defiNonDefault* nd, defiUserData ud) {
   // For nondefaultrule
   int i;
 
@@ -1412,7 +1412,7 @@ int ndr(defrCallbackType_e c, defiNonDefault *nd, defiUserData ud) {
   return 0;
 }
 
-int tname(defrCallbackType_e c, const char *string, defiUserData ud) {
+int tname(defrCallbackType_e c, const char* string, defiUserData ud) {
   checkType(c);
   if (ud != userData) {
     dataError();
@@ -1421,7 +1421,7 @@ int tname(defrCallbackType_e c, const char *string, defiUserData ud) {
   return 0;
 }
 
-int dname(defrCallbackType_e c, const char *string, defiUserData ud) {
+int dname(defrCallbackType_e c, const char* string, defiUserData ud) {
   checkType(c);
   if (ud != userData) {
     dataError();
@@ -1431,10 +1431,10 @@ int dname(defrCallbackType_e c, const char *string, defiUserData ud) {
   return 0;
 }
 
-char *address(const char *in) { return ((char *)in); }
+char* address(const char* in) { return ((char*)in); }
 
 int cs(defrCallbackType_e c, int num, defiUserData ud) {
-  char *name;
+  char* name;
 
   checkType(c);
 
@@ -1483,9 +1483,9 @@ int constraintst(defrCallbackType_e c, int num, defiUserData ud) {
   return 0;
 }
 
-void operand(defrCallbackType_e c, defiAssertion *a, int ind) {
+void operand(defrCallbackType_e c, defiAssertion* a, int ind) {
   int   i, first = 1;
-  char *netName;
+  char* netName;
   char *fromInst, *fromPin, *toInst, *toPin;
 
   if (a->isSum()) {
@@ -1529,7 +1529,7 @@ void operand(defrCallbackType_e c, defiAssertion *a, int ind) {
   }
 }
 
-int constraint(defrCallbackType_e c, defiAssertion *a, defiUserData ud) {
+int constraint(defrCallbackType_e c, defiAssertion* a, defiUserData ud) {
   // Handles both constraints and assertions
 
   checkType(c);
@@ -1575,7 +1575,7 @@ int constraint(defrCallbackType_e c, defiAssertion *a, defiUserData ud) {
   return 0;
 }
 
-int propstart(defrCallbackType_e c, void *, defiUserData) {
+int propstart(defrCallbackType_e c, void*, defiUserData) {
   checkType(c);
   fprintf(fout, "\nPROPERTYDEFINITIONS\n");
   isProp = 1;
@@ -1583,7 +1583,7 @@ int propstart(defrCallbackType_e c, void *, defiUserData) {
   return 0;
 }
 
-int prop(defrCallbackType_e c, defiProp *p, defiUserData ud) {
+int prop(defrCallbackType_e c, defiProp* p, defiUserData ud) {
   checkType(c);
   if (ud != userData) {
     dataError();
@@ -1633,7 +1633,7 @@ int prop(defrCallbackType_e c, defiProp *p, defiUserData ud) {
   return 0;
 }
 
-int propend(defrCallbackType_e c, void *, defiUserData) {
+int propend(defrCallbackType_e c, void*, defiUserData) {
   checkType(c);
   if (isProp) {
     fprintf(fout, "END PROPERTYDEFINITIONS\n\n");
@@ -1643,7 +1643,7 @@ int propend(defrCallbackType_e c, void *, defiUserData) {
   return 0;
 }
 
-int hist(defrCallbackType_e c, const char *h, defiUserData ud) {
+int hist(defrCallbackType_e c, const char* h, defiUserData ud) {
   checkType(c);
   defrSetCaseSensitivity(0);
   if (ud != userData) {
@@ -1654,7 +1654,7 @@ int hist(defrCallbackType_e c, const char *h, defiUserData ud) {
   return 0;
 }
 
-int an(defrCallbackType_e c, const char *h, defiUserData ud) {
+int an(defrCallbackType_e c, const char* h, defiUserData ud) {
   checkType(c);
   if (ud != userData) {
     dataError();
@@ -1663,7 +1663,7 @@ int an(defrCallbackType_e c, const char *h, defiUserData ud) {
   return 0;
 }
 
-int fn(defrCallbackType_e c, const char *h, defiUserData ud) {
+int fn(defrCallbackType_e c, const char* h, defiUserData ud) {
   checkType(c);
   if (ud != userData) {
     dataError();
@@ -1672,7 +1672,7 @@ int fn(defrCallbackType_e c, const char *h, defiUserData ud) {
   return 0;
 }
 
-int bbn(defrCallbackType_e c, const char *h, defiUserData ud) {
+int bbn(defrCallbackType_e c, const char* h, defiUserData ud) {
   checkType(c);
   if (ud != userData) {
     dataError();
@@ -1695,7 +1695,7 @@ int vers(defrCallbackType_e c, double d, defiUserData ud) {
   return 0;
 }
 
-int versStr(defrCallbackType_e c, const char *versionName, defiUserData ud) {
+int versStr(defrCallbackType_e c, const char* versionName, defiUserData ud) {
   checkType(c);
   if (ud != userData) {
     dataError();
@@ -1726,38 +1726,38 @@ int casesens(defrCallbackType_e c, int d, defiUserData ud) {
   return 0;
 }
 
-int cls(defrCallbackType_e c, void *cl, defiUserData ud) {
-  defiSite                    *site;  // Site and Canplace and CannotOccupy
-  defiBox                     *box;   // DieArea and
-  defiPinCap                  *pc;
-  defiPin                     *pin;
+int cls(defrCallbackType_e c, void* cl, defiUserData ud) {
+  defiSite*                    site;  // Site and Canplace and CannotOccupy
+  defiBox*                     box;   // DieArea and
+  defiPinCap*                  pc;
+  defiPin*                     pin;
   int                          i, j, k;
-  defiRow                     *row;
-  defiTrack                   *track;
-  defiGcellGrid               *gcg;
-  defiVia                     *via;
-  defiRegion                  *re;
-  defiGroup                   *group;
-  defiComponentMaskShiftLayer *maskShiftLayer = NULL;
-  defiScanchain               *sc;
-  defiIOTiming                *iot;
-  defiFPC                     *fpc;
-  defiTimingDisable           *td;
-  defiPartition               *part;
-  defiPinProp                 *pprop;
-  defiBlockage                *block;
-  defiSlot                    *slots;
-  defiFill                    *fills;
-  defiStyles                  *styles;
+  defiRow*                     row;
+  defiTrack*                   track;
+  defiGcellGrid*               gcg;
+  defiVia*                     via;
+  defiRegion*                  re;
+  defiGroup*                   group;
+  defiComponentMaskShiftLayer* maskShiftLayer = NULL;
+  defiScanchain*               sc;
+  defiIOTiming*                iot;
+  defiFPC*                     fpc;
+  defiTimingDisable*           td;
+  defiPartition*               part;
+  defiPinProp*                 pprop;
+  defiBlockage*                block;
+  defiSlot*                    slots;
+  defiFill*                    fills;
+  defiStyles*                  styles;
   int                          xl, yl, xh, yh;
-  char                        *name, *a1, *b1;
-  char                       **inst, **inPin, **outPin;
-  int                         *bits;
+  char *                       name, *a1, *b1;
+  char **                      inst, **inPin, **outPin;
+  int*                         bits;
   int                          size;
   int                          corner, typ;
-  const char                  *itemT;
+  const char*                  itemT;
   char                         dir;
-  defiPinAntennaModel         *aModel;
+  defiPinAntennaModel*         aModel;
   struct defiPoints            points;
 
   checkType(c);
@@ -1766,22 +1766,22 @@ int cls(defrCallbackType_e c, void *cl, defiUserData ud) {
   }
   switch (c) {
     case defrSiteCbkType:
-      site = (defiSite *)cl;
+      site = (defiSite*)cl;
       fprintf(fout, "SITE %s %g %g %s ", site->name(), site->x_orig(), site->y_orig(), orientStr(site->orient()));
       fprintf(fout, "DO %g BY %g STEP %g %g ;\n", site->x_num(), site->y_num(), site->x_step(), site->y_step());
       break;
     case defrCanplaceCbkType:
-      site = (defiSite *)cl;
+      site = (defiSite*)cl;
       fprintf(fout, "CANPLACE %s %g %g %s ", site->name(), site->x_orig(), site->y_orig(), orientStr(site->orient()));
       fprintf(fout, "DO %g BY %g STEP %g %g ;\n", site->x_num(), site->y_num(), site->x_step(), site->y_step());
       break;
     case defrCannotOccupyCbkType:
-      site = (defiSite *)cl;
+      site = (defiSite*)cl;
       fprintf(fout, "CANNOTOCCUPY %s %g %g %s ", site->name(), site->x_orig(), site->y_orig(), orientStr(site->orient()));
       fprintf(fout, "DO %g BY %g STEP %g %g ;\n", site->x_num(), site->y_num(), site->x_step(), site->y_step());
       break;
     case defrDieAreaCbkType:
-      box = (defiBox *)cl;
+      box = (defiBox*)cl;
       fprintf(fout, "DIEAREA %d %d %d %d ;\n", box->xl(), box->yl(), box->xh(), box->yh());
       fprintf(fout, "DIEAREA ");
       points = box->getPoint();
@@ -1791,7 +1791,7 @@ int cls(defrCallbackType_e c, void *cl, defiUserData ud) {
       fprintf(fout, ";\n");
       break;
     case defrPinCapCbkType:
-      pc = (defiPinCap *)cl;
+      pc = (defiPinCap*)cl;
       if (testDebugPrint) {
         pc->print(fout);
       } else {
@@ -1803,7 +1803,7 @@ int cls(defrCallbackType_e c, void *cl, defiUserData ud) {
       }
       break;
     case defrPinCbkType:
-      pin = (defiPin *)cl;
+      pin = (defiPin*)cl;
       if (testDebugPrint) {
         pin->print(fout);
       } else {
@@ -1874,7 +1874,7 @@ int cls(defrCallbackType_e c, void *cl, defiUserData ud) {
         }
         if (pin->hasPort()) {
           struct defiPoints points;
-          defiPinPort      *port;
+          defiPinPort*      port;
           for (j = 0; j < pin->numPorts(); j++) {
             port = pin->pinPort(j);
             fprintf(fout, "\n  + PORT");
@@ -2050,7 +2050,7 @@ int cls(defrCallbackType_e c, void *cl, defiUserData ud) {
       numObjs = i;
       break;
     case defrRowCbkType:
-      row = (defiRow *)cl;
+      row = (defiRow*)cl;
       fprintf(fout,
               "ROW %s %s %g %g %s ",
               ignoreRowNames ? "XXX" : row->name(),
@@ -2083,7 +2083,7 @@ int cls(defrCallbackType_e c, void *cl, defiUserData ud) {
       }
       break;
     case defrTrackCbkType:
-      track = (defiTrack *)cl;
+      track = (defiTrack*)cl;
       if (track->firstTrackMask()) {
         if (track->sameMask()) {
           fprintf(fout,
@@ -2111,11 +2111,11 @@ int cls(defrCallbackType_e c, void *cl, defiUserData ud) {
       fprintf(fout, ";\n");
       break;
     case defrGcellGridCbkType:
-      gcg = (defiGcellGrid *)cl;
+      gcg = (defiGcellGrid*)cl;
       fprintf(fout, "GCELLGRID %s %d DO %d STEP %g ;\n", gcg->macro(), gcg->x(), gcg->xNum(), gcg->xStep());
       break;
     case defrViaCbkType:
-      via = (defiVia *)cl;
+      via = (defiVia*)cl;
       if (testDebugPrint) {
         via->print(fout);
       } else {
@@ -2184,7 +2184,7 @@ int cls(defrCallbackType_e c, void *cl, defiUserData ud) {
       }
       break;
     case defrRegionCbkType:
-      re = (defiRegion *)cl;
+      re = (defiRegion*)cl;
       fprintf(fout, "- %s ", re->name());
       for (i = 0; i < re->numRectangles(); i++) {
         fprintf(fout, "%d %d %d %d \n", re->xl(i), re->yl(i), re->xh(i), re->yh(i));
@@ -2211,13 +2211,13 @@ int cls(defrCallbackType_e c, void *cl, defiUserData ud) {
       }
       break;
     case defrGroupNameCbkType:
-      if ((char *)cl) {
-        fprintf(fout, "- %s", (char *)cl);
+      if ((char*)cl) {
+        fprintf(fout, "- %s", (char*)cl);
       }
       break;
     case defrGroupMemberCbkType:
-      if ((char *)cl) {
-        fprintf(fout, " %s", (char *)cl);
+      if ((char*)cl) {
+        fprintf(fout, " %s", (char*)cl);
       }
       break;
     case defrComponentMaskShiftLayerCbkType:
@@ -2229,7 +2229,7 @@ int cls(defrCallbackType_e c, void *cl, defiUserData ud) {
       fprintf(fout, ";\n");
       break;
     case defrGroupCbkType:
-      group = (defiGroup *)cl;
+      group = (defiGroup*)cl;
       if (group->hasMaxX() | group->hasMaxY() | group->hasPerim()) {
         fprintf(fout, "\n  + SOFT ");
         if (group->hasPerim()) {
@@ -2272,7 +2272,7 @@ int cls(defrCallbackType_e c, void *cl, defiUserData ud) {
       }
       break;
     case defrScanchainCbkType:
-      sc = (defiScanchain *)cl;
+      sc = (defiScanchain*)cl;
       fprintf(fout, "- %s\n", sc->name());
       if (sc->hasStart()) {
         sc->start(&a1, &b1);
@@ -2347,7 +2347,7 @@ int cls(defrCallbackType_e c, void *cl, defiUserData ud) {
       }
       break;
     case defrIOTimingCbkType:
-      iot = (defiIOTiming *)cl;
+      iot = (defiIOTiming*)cl;
       fprintf(fout, "- ( %s %s )\n", iot->inst(), iot->pin());
       if (iot->hasSlewRise()) {
         fprintf(fout, "  + RISE SLEWRATE %g %g\n", iot->slewRiseMin(), iot->slewRiseMax());
@@ -2384,7 +2384,7 @@ int cls(defrCallbackType_e c, void *cl, defiUserData ud) {
       }
       break;
     case defrFPCCbkType:
-      fpc = (defiFPC *)cl;
+      fpc = (defiFPC*)cl;
       fprintf(fout, "- %s ", fpc->name());
       if (fpc->isVertical()) {
         fprintf(fout, "VERTICAL ");
@@ -2424,7 +2424,7 @@ int cls(defrCallbackType_e c, void *cl, defiUserData ud) {
       }
       break;
     case defrTimingDisableCbkType:
-      td = (defiTimingDisable *)cl;
+      td = (defiTimingDisable*)cl;
       if (td->hasFromTo()) {
         fprintf(fout, "- FROMPIN %s %s %s %s", td->fromInst(), td->fromPin(), td->toInst(), td->toPin());
       }
@@ -2440,7 +2440,7 @@ int cls(defrCallbackType_e c, void *cl, defiUserData ud) {
       fprintf(fout, ";\n");
       break;
     case defrPartitionCbkType:
-      part = (defiPartition *)cl;
+      part = (defiPartition*)cl;
       fprintf(fout, "- %s ", part->name());
       if (part->isSetupRise() | part->isSetupFall() | part->isHoldRise() | part->isHoldFall()) {
         // has turnoff
@@ -2500,7 +2500,7 @@ int cls(defrCallbackType_e c, void *cl, defiUserData ud) {
       break;
 
     case defrPinPropCbkType:
-      pprop = (defiPinProp *)cl;
+      pprop = (defiPinProp*)cl;
       if (pprop->isPin()) {
         fprintf(fout, "- PIN %s ", pprop->pinName());
       } else {
@@ -2526,7 +2526,7 @@ int cls(defrCallbackType_e c, void *cl, defiUserData ud) {
       }
       break;
     case defrBlockageCbkType:
-      block = (defiBlockage *)cl;
+      block = (defiBlockage*)cl;
       if (testDebugPrint) {
         block->print(fout);
       } else {
@@ -2592,7 +2592,7 @@ int cls(defrCallbackType_e c, void *cl, defiUserData ud) {
       }
       break;
     case defrSlotCbkType:
-      slots = (defiSlot *)cl;
+      slots = (defiSlot*)cl;
       if (slots->hasLayer()) {
         fprintf(fout, "- LAYER %s\n", slots->layerName());
       }
@@ -2615,7 +2615,7 @@ int cls(defrCallbackType_e c, void *cl, defiUserData ud) {
       }
       break;
     case defrFillCbkType:
-      fills = (defiFill *)cl;
+      fills = (defiFill*)cl;
       if (testDebugPrint) {
         fills->print(fout);
       } else {
@@ -2669,7 +2669,7 @@ int cls(defrCallbackType_e c, void *cl, defiUserData ud) {
       break;
     case defrStylesCbkType:
       struct defiPoints points;
-      styles = (defiStyles *)cl;
+      styles = (defiStyles*)cl;
       fprintf(fout, "- STYLE %d ", styles->style());
       points = styles->getPolygon();
       for (j = 0; j < points.numPoints; j++) {
@@ -2687,7 +2687,7 @@ int cls(defrCallbackType_e c, void *cl, defiUserData ud) {
   return 0;
 }
 
-int dn(defrCallbackType_e c, const char *h, defiUserData ud) {
+int dn(defrCallbackType_e c, const char* h, defiUserData ud) {
   checkType(c);
   if (ud != userData) {
     dataError();
@@ -2696,8 +2696,8 @@ int dn(defrCallbackType_e c, const char *h, defiUserData ud) {
   return 0;
 }
 
-int ext(defrCallbackType_e t, const char *c, defiUserData ud) {
-  char *name;
+int ext(defrCallbackType_e t, const char* c, defiUserData ud) {
+  char* name;
 
   checkType(t);
   if (ud != userData) {
@@ -2720,7 +2720,7 @@ int ext(defrCallbackType_e t, const char *c, defiUserData ud) {
   return 0;
 }
 
-int extension(defrCallbackType_e c, const char *extsn, defiUserData ud) {
+int extension(defrCallbackType_e c, const char* extsn, defiUserData ud) {
   checkType(c);
   if (ud != userData) {
     dataError();
@@ -2729,11 +2729,11 @@ int extension(defrCallbackType_e c, const char *extsn, defiUserData ud) {
   return 0;
 }
 
-void *mallocCB(size_t size) { return malloc(size); }
+void* mallocCB(size_t size) { return malloc(size); }
 
-void *reallocCB(void *name, size_t size) { return realloc(name, size); }
+void* reallocCB(void* name, size_t size) { return realloc(name, size); }
 
-void freeCB(void *name) {
+void freeCB(void* name) {
   free(name);
   return;
 }
@@ -2761,18 +2761,18 @@ void lineNumberCB(long long lineNo) {
 #endif
 }
 
-int unUsedCB(defrCallbackType_e, void *, defiUserData) {
+int unUsedCB(defrCallbackType_e, void*, defiUserData) {
   fprintf(fout, "This callback is not used.\n");
   return 0;
 }
 
-void printWarning(const char *str) { fprintf(stderr, "%s\n", str); }
+void printWarning(const char* str) { fprintf(stderr, "%s\n", str); }
 
-int main(int argc, char **argv) {
+int main(int argc, char** argv) {
   int   num = 99;
-  char *inFile[6];
-  char *outFile;
-  FILE *f;
+  char* inFile[6];
+  char* outFile;
+  FILE* f;
   int   res;
   int   noCalls = 0;
   //  long start_mem;
@@ -2797,7 +2797,7 @@ int main(int argc, char **argv) {
   inFile[0] = defaultName;
   outFile   = defaultOut;
   fout      = stdout;
-  userData  = (void *)0x01020304;
+  userData  = (void*)0x01020304;
   argc--;
   argv++;
 
@@ -2890,7 +2890,7 @@ int main(int argc, char **argv) {
   if (noCalls == 0) {
     defrSetWarningLogFunction(printWarning);
 
-    defrSetUserData((void *)3);
+    defrSetUserData((void*)3);
     defrSetDesignCbk(dname);
     defrSetTechnologyCbk(tname);
     defrSetExtensionCbk(extension);
@@ -3094,10 +3094,10 @@ int main(int argc, char **argv) {
       if (fileCt == 0) {
         dMsgs[0] = 7010;
         dMsgs[1] = 7016;
-        defrDisableParserMsgs(2, (int *)dMsgs);
+        defrDisableParserMsgs(2, (int*)dMsgs);
       } else if (fileCt == 1) {
         dMsgs[0] = 7016;
-        defrEnableParserMsgs(1, (int *)dMsgs);
+        defrEnableParserMsgs(1, (int*)dMsgs);
       } else {
         defrEnableAllMsgs();
       }
@@ -3142,7 +3142,7 @@ int main(int argc, char **argv) {
       defrAddAlias("alias1", "aliasValue1", 1);
 
       defiAlias_itr aliasStore;
-      const char   *alias1Value = NULL;
+      const char*   alias1Value = NULL;
 
       while (aliasStore.Next()) {
         if (strcmp(aliasStore.Key(), "alias1") == 0) {

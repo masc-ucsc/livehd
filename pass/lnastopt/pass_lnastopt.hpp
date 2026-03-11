@@ -7,9 +7,9 @@
 class Pass_lnastopt : public Pass {
 protected:
 public:
-  static void work(Eprp_var &var);
+  static void work(Eprp_var& var);
 
-  Pass_lnastopt(const Eprp_var &var);
+  Pass_lnastopt(const Eprp_var& var);
 
   static void setup();
 };

@@ -1,19 +1,19 @@
 //  This file is distributed under the BSD 3-Clause License. See LICENSE for details.
 
-#include <cmath>
 #include <stdint.h>
 #include <string.h>
-#include <string>
 #include <time.h>
 
+#include <cmath>
 #include <list>
+#include <string>
 
 #include "Vmult_booth.h"
 #include "verilated.h"
 
 #ifdef TRACE
 #include "verilated_fst_c.h"
-VerilatedFstC *tfp = 0;
+VerilatedFstC* tfp = 0;
 #endif
 
 #define MAX_TIME  2000
@@ -27,8 +27,8 @@ __int128 top_ans;
 
 // please just use the binary print, this doesn't always work
 std::string to_string_int128(__int128 var) {
-  std::string str  = std::string("");
-  int    loop_size = 39;
+  std::string str       = std::string("");
+  int         loop_size = 39;
   for (int i = 0; i < loop_size; i++) {
     __int128 temp = var / ((__int128)pow(10, loop_size - i - 1));
     str += std::to_string((uint64_t)(temp % ((__int128)10)));
@@ -38,8 +38,8 @@ std::string to_string_int128(__int128 var) {
 
 // please use this
 std::string to_string_int128_binary(__int128 var) {
-  std::string str   = std::string("");
-  __int128 bit_mask = 1;
+  std::string str      = std::string("");
+  __int128    bit_mask = 1;
   for (int i = 0; i < 128; i++) {
     str = std::to_string((uint64_t)((var & ((__int128)(bit_mask << ((__int128)i)))) == 0 ? 0 : 1)) + str;
   }
@@ -59,7 +59,7 @@ void do_terminate() {
   exit(0);
 }
 
-void advance_clock(Vmult_booth *top, int nclocks = 1) {
+void advance_clock(Vmult_booth* top, int nclocks = 1) {
   for (int i = 0; i < nclocks; i++) {
     for (int clk = 0; clk < 2; clk++) {
       top->eval();
@@ -82,14 +82,14 @@ void advance_clock(Vmult_booth *top, int nclocks = 1) {
   }
 }
 
-int main(int argc, char **argv, char **env) {
+int main(int argc, char** argv, char** env) {
   int sim_seed = time(0);
   srand(sim_seed);
   printf("random seed was %d\n", sim_seed);
 
   Verilated::commandArgs(argc, argv);
   // init top verilog instance
-  Vmult_booth *top = new Vmult_booth;
+  Vmult_booth* top = new Vmult_booth;
 
   uint64_t val_a[NUM_TESTS] = {(uint64_t)~0, 0, 0xAAAAAAAAAAAAAAAA, (uint64_t)1 << 63, 2, 3, 8, 16, 32, 64, 1};
 

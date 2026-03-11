@@ -15,16 +15,16 @@ unsigned int rseed = 123;
 
 class Setup_graphs_test : public ::testing::Test {
 protected:
-  Lgraph *top = 0;
-  Lgraph *c1  = 0;
-  Lgraph *c2  = 0;
+  Lgraph* top = 0;
+  Lgraph* c1  = 0;
+  Lgraph* c2  = 0;
 
   absl::flat_hash_map<std::string, int> children;
 
-  std::vector<Lgraph *> lgs;
+  std::vector<Lgraph*> lgs;
 
   void SetUp() override {
-    auto *lib = Graph_library::instance("lgdb_node_test");
+    auto* lib = Graph_library::instance("lgdb_node_test");
     I(lib);
 
     top = lib->create_lgraph("top", "nosource");
@@ -110,8 +110,8 @@ protected:
 };
 
 TEST_F(Setup_graphs_test, iterate_sub_graph) {
-  for (const auto &node : top->forward()) {
-    for (const auto &out_edge : node.out_edges()) {
+  for (const auto& node : top->forward()) {
+    for (const auto& out_edge : node.out_edges()) {
       auto dpin = out_edge.driver;
       auto spin = out_edge.sink;
       std::print("name:{} pid:{} -> name:{} pid:{}\n", dpin.debug_name(), dpin.get_pid(), spin.debug_name(), spin.get_pid());
@@ -122,7 +122,7 @@ TEST_F(Setup_graphs_test, iterate_sub_graph) {
 }
 
 TEST_F(Setup_graphs_test, annotate1a) {
-  for (const auto &node : top->forward()) {
+  for (const auto& node : top->forward()) {
     EXPECT_FALSE(node.has_place());
     // EXPECT_DEATH({ node.get_place().get_x(); }, "Assertion.*failed");  // get_place for something not set, triggers failure
   }
@@ -136,14 +136,14 @@ TEST_F(Setup_graphs_test, annotate1b) {
     EXPECT_EQ(node.get_place().get_x(), 0);
     EXPECT_TRUE(node.has_place());
   }
-  for (const auto &node : top->forward()) {
+  for (const auto& node : top->forward()) {
     EXPECT_EQ(node.get_place().get_x(), 0);  // Now, OK, ref passes referene or allocates
   }
 }
 
 TEST_F(Setup_graphs_test, annotated) {
-  for (const auto &node : top->forward()) {
-    for (const auto &out_edge : node.out_edges()) {
+  for (const auto& node : top->forward()) {
+    for (const auto& out_edge : node.out_edges()) {
       auto dpin = out_edge.driver;
       if (!dpin.get_node().has_place()) {
         Ann_place p;
@@ -194,8 +194,8 @@ TEST_F(Setup_graphs_test, annotate2) {
   absl::flat_hash_map<Node_pin::Compact_class, int> my_map2;
 
   int total = 0;
-  for (const auto &node : top->forward()) {
-    for (const auto &e : node.out_edges()) {
+  for (const auto& node : top->forward()) {
+    for (const auto& e : node.out_edges()) {
       my_map2[e.driver.get_compact_class()] = total;
       total++;
     }
@@ -205,7 +205,7 @@ TEST_F(Setup_graphs_test, annotate2) {
   used.clear();
   used.resize(total);
 
-  for (const auto &it : my_map2) {
+  for (const auto& it : my_map2) {
     auto dpin = Node_pin(top, it.first);
     EXPECT_TRUE(dpin.is_driver());
     EXPECT_FALSE(used[it.second]);
@@ -217,8 +217,8 @@ TEST_F(Setup_graphs_test, annotate2_hier) {
   absl::flat_hash_map<Node_pin::Compact, int> my_map2;
 
   int total = 0;
-  for (const auto &node : top->forward(true)) {
-    for (const auto &e : node.out_edges()) {
+  for (const auto& node : top->forward(true)) {
+    for (const auto& e : node.out_edges()) {
       my_map2[e.driver.get_compact()] = total;
       total++;
     }
@@ -228,7 +228,7 @@ TEST_F(Setup_graphs_test, annotate2_hier) {
   used.clear();
   used.resize(total);
 
-  for (const auto &it : my_map2) {
+  for (const auto& it : my_map2) {
     auto dpin = Node_pin(top, it.first);
     EXPECT_TRUE(dpin.is_driver());
     EXPECT_FALSE(used[it.second]);

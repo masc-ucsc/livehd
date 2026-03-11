@@ -26,8 +26,8 @@ TEST_F(Setup_hierarchy, shallow_tree) {
   populate_tree(rseed, 4, 100, 0.5, true);
   map_tree_to_lgraph(rseed);
 
-  for (const auto &index : tree.breadth_first()) {
-    const auto &data = tree.get_data(index);
+  for (const auto& index : tree.breadth_first()) {
+    const auto& data = tree.get_data(index);
 
     if (index.level == 0) {
       continue;
@@ -41,7 +41,7 @@ TEST_F(Setup_hierarchy, shallow_tree) {
     }
 
     auto        parent_index = tree.get_parent(index);
-    const auto &parent_data  = tree.get_data(parent_index);
+    const auto& parent_data  = tree.get_data(parent_index);
     Node        parent_node(lg_root, parent_data.hidx, parent_data.cnode);
 
     EXPECT_EQ(data.hidx, node.get_hidx());

@@ -112,22 +112,22 @@ struct TMTSCREEN {
   size_t nline;
   size_t ncol;
 
-  TMTLINE **lines;
+  TMTLINE** lines;
 };
 
 /**** CALLBACK SUPPORT */
 typedef enum { TMT_MSG_MOVED, TMT_MSG_UPDATE, TMT_MSG_ANSWER, TMT_MSG_BELL, TMT_MSG_CURSOR } tmt_msg_t;
 
-typedef void (*TMTCALLBACK)(tmt_msg_t m, struct TMT *v, const void *r, void *p);
+typedef void (*TMTCALLBACK)(tmt_msg_t m, struct TMT* v, const void* r, void* p);
 
 /**** PUBLIC FUNCTIONS */
-TMT             *tmt_open(size_t nline, size_t ncol, TMTCALLBACK cb, void *p, const wchar_t *acs);
-void             tmt_close(TMT *vt);
-bool             tmt_resize(TMT *vt, size_t nline, size_t ncol);
-void             tmt_write(TMT *vt, const char *s, size_t n);
-const TMTSCREEN *tmt_screen(const TMT *vt);
-const TMTPOINT  *tmt_cursor(const TMT *vt);
-void             tmt_clean(TMT *vt);
-void             tmt_reset(TMT *vt);
+TMT*             tmt_open(size_t nline, size_t ncol, TMTCALLBACK cb, void* p, const wchar_t* acs);
+void             tmt_close(TMT* vt);
+bool             tmt_resize(TMT* vt, size_t nline, size_t ncol);
+void             tmt_write(TMT* vt, const char* s, size_t n);
+const TMTSCREEN* tmt_screen(const TMT* vt);
+const TMTPOINT*  tmt_cursor(const TMT* vt);
+void             tmt_clean(TMT* vt);
+void             tmt_reset(TMT* vt);
 
 #endif

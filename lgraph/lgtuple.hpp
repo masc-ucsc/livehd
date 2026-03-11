@@ -43,15 +43,15 @@ protected:
   static size_t match_first_partial(std::string_view a, std::string_view b);
   static bool   match_either_partial(std::string_view a, std::string_view b);
 
-  void        add_int(std::string_view key, const std::shared_ptr<Lgtuple const> &tup);
-  static void reconnect_flop_if_needed(Node &flop, std::string_view flop_name, Node_pin &dpin);
+  void        add_int(std::string_view key, const std::shared_ptr<Lgtuple const>& tup);
+  static void reconnect_flop_if_needed(Node& flop, std::string_view flop_name, Node_pin& dpin);
 
-  std::tuple<std::string, bool> get_flop_name(const Node &flop) const;
+  std::tuple<std::string, bool> get_flop_name(const Node& flop) const;
 
-  static bool add_pending(Node &node, std::vector<std::pair<std::string, Node_pin>> &pending_entries, std::string_view entry_txt,
-                          const Node_pin &ubits_dpin, const Node_pin &sbits_dpin);
-  static std::pair<Node, Node_pin> flatten_field(Node &result_node, Node_pin &dpin, Node_pin &start_bit_dpin, Node_pin &sbits_dpin,
-                                                 Node_pin &ubits_dpin);
+  static bool add_pending(Node& node, std::vector<std::pair<std::string, Node_pin>>& pending_entries, std::string_view entry_txt,
+                          const Node_pin& ubits_dpin, const Node_pin& sbits_dpin);
+  static std::pair<Node, Node_pin> flatten_field(Node& result_node, Node_pin& dpin, Node_pin& start_bit_dpin, Node_pin& sbits_dpin,
+                                                 Node_pin& ubits_dpin);
 
 public:
   Lgtuple(std::string_view _name) : name(_name), correct(true) {}
@@ -62,13 +62,13 @@ public:
 
   std::string_view get_name() const { return name; }
 
-  static std::tuple<std::shared_ptr<Lgtuple>, bool> get_mux_tup(const std::vector<std::shared_ptr<Lgtuple const>> &tup_list);
-  std::vector<Node::Compact>                        make_mux(Node &mux_node, Node_pin &sel_dpin,
-                                                             const std::vector<std::shared_ptr<Lgtuple const>> &tup_list);
+  static std::tuple<std::shared_ptr<Lgtuple>, bool> get_mux_tup(const std::vector<std::shared_ptr<Lgtuple const>>& tup_list);
+  std::vector<Node::Compact>                        make_mux(Node& mux_node, Node_pin& sel_dpin,
+                                                             const std::vector<std::shared_ptr<Lgtuple const>>& tup_list);
 
-  std::tuple<std::shared_ptr<Lgtuple>, bool>      get_flop_tup(Node &flop) const;
+  std::tuple<std::shared_ptr<Lgtuple>, bool>      get_flop_tup(Node& flop) const;
   static std::pair<std::string_view, std::string> get_flop_attr_name(std::string_view flop_root_name, std::string_view cname);
-  std::shared_ptr<Lgtuple>                        make_flop(Node &flop) const;
+  std::shared_ptr<Lgtuple>                        make_flop(Node& flop) const;
 
   bool is_correct() const { return correct; }
   void set_issue() const { correct = false; }
@@ -129,35 +129,35 @@ public:
   std::string learn_fix(std::string_view key);
 
   // return const Node_pin ref. WARNING: no pointer stability if add/del fields
-  const Node_pin &get_dpin(std::string_view key) const;
-  const Node_pin &get_dpin() const;
+  const Node_pin& get_dpin(std::string_view key) const;
+  const Node_pin& get_dpin() const;
 
   std::shared_ptr<Lgtuple> get_sub_tuple(std::string_view key) const;
-  std::shared_ptr<Lgtuple> get_sub_tuple(const std::shared_ptr<Lgtuple const> &tup) const;
+  std::shared_ptr<Lgtuple> get_sub_tuple(const std::shared_ptr<Lgtuple const>& tup) const;
 
   void del(std::string_view key);
 
   // set a dpin/sub tuple. If already existed anything, it is deleted (not attributes)
 
-  void add(std::string_view key, const std::shared_ptr<Lgtuple const> &tup);
-  void add(std::string_view key, const Node_pin &dpin);
+  void add(std::string_view key, const std::shared_ptr<Lgtuple const>& tup);
+  void add(std::string_view key, const Node_pin& dpin);
 
-  void add(const Node_pin &dpin) {
+  void add(const Node_pin& dpin) {
     // clear everything that is not 0.__attr. Add 0
     return add("0", dpin);
   }
 
-  bool                     concat(const std::shared_ptr<Lgtuple const> &tup2);
-  bool                     concat(const Node_pin &dpin);
+  bool                     concat(const std::shared_ptr<Lgtuple const>& tup2);
+  bool                     concat(const Node_pin& dpin);
   Node_pin                 flatten() const;
-  std::shared_ptr<Lgtuple> create_assign(const std::shared_ptr<Lgtuple const> &tup) const;
-  std::shared_ptr<Lgtuple> create_assign(const Node_pin &dpin) const;
+  std::shared_ptr<Lgtuple> create_assign(const std::shared_ptr<Lgtuple const>& tup) const;
+  std::shared_ptr<Lgtuple> create_assign(const Node_pin& dpin) const;
 
   /// Get all the attributes (__bits) in the same tuple level
   std::vector<std::pair<std::string, Node_pin>> get_level_attributes(std::string_view key) const;
 
-  const Key_map_type &get_map() const { return key_map; }
-  const Key_map_type &get_sort_map() const;
+  const Key_map_type& get_map() const { return key_map; }
+  const Key_map_type& get_sort_map() const;
 
   std::string_view get_scalar_name() const;  // empty if not scalar
 

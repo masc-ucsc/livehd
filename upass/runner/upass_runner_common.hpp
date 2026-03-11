@@ -31,7 +31,7 @@ public:
       std::vector<std::string> changed = changed_names();
       if (!changed.empty()) {
         std::print("{} - iteration {} changed:", tag, iter);
-        for (const auto &name : changed) {
+        for (const auto& name : changed) {
           std::print(" {}", name);
         }
         std::print("\n");

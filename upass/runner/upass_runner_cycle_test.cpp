@@ -24,26 +24,18 @@ struct Test_missing_dep : public upass::uPass {
   using uPass::uPass;
 };
 
-static upass::uPass_plugin plugin_cycle_a(
-    "__upass_cycle_a",
-    upass::uPass_wrapper<Test_cycle_a>::get_upass,
-    {"__upass_cycle_b"});
+static upass::uPass_plugin plugin_cycle_a("__upass_cycle_a", upass::uPass_wrapper<Test_cycle_a>::get_upass, {"__upass_cycle_b"});
 
-static upass::uPass_plugin plugin_cycle_b(
-    "__upass_cycle_b",
-    upass::uPass_wrapper<Test_cycle_b>::get_upass,
-    {"__upass_cycle_a"});
+static upass::uPass_plugin plugin_cycle_b("__upass_cycle_b", upass::uPass_wrapper<Test_cycle_b>::get_upass, {"__upass_cycle_a"});
 
-static upass::uPass_plugin plugin_missing_dep(
-    "__upass_missing_dep",
-    upass::uPass_wrapper<Test_missing_dep>::get_upass,
-    {"__upass_dep_not_defined"});
+static upass::uPass_plugin plugin_missing_dep("__upass_missing_dep", upass::uPass_wrapper<Test_missing_dep>::get_upass,
+                                              {"__upass_dep_not_defined"});
 
 class Exposed_runner : public uPass_runner {
 public:
-  Exposed_runner(std::shared_ptr<upass::Lnast_manager> &lm, const std::vector<std::string> &names) : uPass_runner(lm, names) {}
+  Exposed_runner(std::shared_ptr<upass::Lnast_manager>& lm, const std::vector<std::string>& names) : uPass_runner(lm, names) {}
 
-  std::vector<std::string> expose_resolve(const std::vector<std::string> &names) const { return resolve_order(names); }
+  std::vector<std::string> expose_resolve(const std::vector<std::string>& names) const { return resolve_order(names); }
 };
 
 std::shared_ptr<upass::Lnast_manager> make_lm() {
@@ -54,7 +46,7 @@ std::shared_ptr<upass::Lnast_manager> make_lm() {
 }  // namespace
 
 TEST(UpassRunnerResolve, DetectCycle) {
-  auto lm = make_lm();
+  auto           lm = make_lm();
   Exposed_runner runner(lm, {});
 
   auto ordered = runner.expose_resolve({"__upass_cycle_a"});
@@ -62,7 +54,7 @@ TEST(UpassRunnerResolve, DetectCycle) {
 }
 
 TEST(UpassRunnerResolve, DetectMissingDependency) {
-  auto lm = make_lm();
+  auto           lm = make_lm();
   Exposed_runner runner(lm, {});
 
   auto ordered = runner.expose_resolve({"__upass_missing_dep"});
@@ -70,7 +62,7 @@ TEST(UpassRunnerResolve, DetectMissingDependency) {
 }
 
 TEST(UpassRunnerResolve, SharedNoopResolvesAndRuns) {
-  auto lm = make_lm();
+  auto           lm = make_lm();
   Exposed_runner runner(lm, {"noop_shared"});
 
   auto ordered = runner.expose_resolve({"noop_shared"});
@@ -80,7 +72,7 @@ TEST(UpassRunnerResolve, SharedNoopResolvesAndRuns) {
 }
 
 TEST(UpassRunnerResolve, SharedScanResolves) {
-  auto lm = make_lm();
+  auto           lm = make_lm();
   Exposed_runner runner(lm, {"scan_shared"});
 
   auto ordered = runner.expose_resolve({"scan_shared"});
@@ -90,7 +82,7 @@ TEST(UpassRunnerResolve, SharedScanResolves) {
 }
 
 TEST(UpassRunnerResolve, SharedDecideResolves) {
-  auto lm = make_lm();
+  auto           lm = make_lm();
   Exposed_runner runner(lm, {"decide_shared"});
 
   auto ordered = runner.expose_resolve({"decide_shared"});

@@ -23,16 +23,16 @@ protected:
   const std::string path;
   const std::string odir;
 
-  [[nodiscard]] std::string get_files(const Eprp_var &var) const;
-  [[nodiscard]] std::string get_path(const Eprp_var &var) const;
-  [[nodiscard]] std::string get_odir(const Eprp_var &var) const;
+  [[nodiscard]] std::string get_files(const Eprp_var& var) const;
+  [[nodiscard]] std::string get_path(const Eprp_var& var) const;
+  [[nodiscard]] std::string get_odir(const Eprp_var& var) const;
 
-  static void register_pass(Eprp_method &method);
-  static void register_inou(std::string_view pname, Eprp_method &method);
+  static void register_pass(Eprp_method& method);
+  static void register_inou(std::string_view pname, Eprp_method& method);
 
   [[nodiscard]] bool setup_directory(std::string_view dir) const;
 
-  Pass(std::string_view _pass_name, const Eprp_var &var);
+  Pass(std::string_view _pass_name, const Eprp_var& var);
 
 public:
   static inline Eprp eprp;
@@ -51,21 +51,21 @@ public:
   }
 
   template <typename... Args>
-  static void error(std::format_string<Args...> format, Args &&...args) {
+  static void error(std::format_string<Args...> format, Args&&... args) {
     auto tmp = std::format(format, std::forward<Args>(args)...);
     err_tracker::logger(tmp);
     error(tmp);
   }
 
   template <typename... Args>
-  static void warn(std::format_string<Args...> format, Args &&...args) {
+  static void warn(std::format_string<Args...> format, Args&&... args) {
     auto tmp = std::format(format, std::forward<Args>(args)...);
     err_tracker::logger(tmp);
     eprp.parser_warn(tmp);
   }
 
   template <typename... Args>
-  static void info(std::format_string<Args...> format, Args &&...args) {
+  static void info(std::format_string<Args...> format, Args&&... args) {
 #ifndef NDEBUG
     auto tmp = std::format(format, std::forward<Args>(args)...);
     err_tracker::logger(tmp);
@@ -89,7 +89,7 @@ protected:
   static inline Map_setup registry;
 
 public:
-  Pass_plugin(const std::string &name, const Setup_fn &setup_fn) {
+  Pass_plugin(const std::string& name, const Setup_fn& setup_fn) {
     if (registry.find(name) != registry.end()) {
       Pass::error("Pass_plugin: {} is already registered", name);
       return;
@@ -97,5 +97,5 @@ public:
     registry[name] = setup_fn;
   }
 
-  static const Map_setup &get_registry() { return registry; }
+  static const Map_setup& get_registry() { return registry; }
 };

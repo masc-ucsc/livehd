@@ -15,7 +15,7 @@
 // Checks internal invalid insertions. Worth only if the node_internal is patched
 // #define DEBUG_SLOW
 
-Lgraph_Base::Lgraph_Base(std::string_view _path, std::string_view _name, Lg_type_id _lgid, Graph_library *_lib) noexcept
+Lgraph_Base::Lgraph_Base(std::string_view _path, std::string_view _name, Lg_type_id _lgid, Graph_library* _lib) noexcept
     : Lgraph_base_core(_path, _name, _lgid)
     // , node_internal(path.to_s(), absl::StrCat("lg_", std::to_string(_lgid), "_nodes"))
     , library(_lib) {}
@@ -49,10 +49,10 @@ void Lgraph_Base::emplace_back() {
   node_internal.emplace_back(xx);
 
   Index_id nid = node_internal.size() - 1;
-  auto    *ptr = &node_internal[nid];
+  auto*    ptr = &node_internal[nid];
 
   if (unlikely(ptr->is_page_align())) {
-    auto *page = (Node_internal_Page *)ptr;
+    auto* page = (Node_internal_Page*)ptr;
 
     page->set_page(nid);
 
@@ -89,12 +89,12 @@ Index_id Lgraph_Base::create_node_space(const Index_id last_idx, const Port_ID d
   I(node_internal[master_nid].is_master_root());
   I(node_internal[last_idx].get_master_root_nid() == master_nid);
 
-  auto *nidx2 = &node_internal[idx2];
+  auto* nidx2 = &node_internal[idx2];
   nidx2->set_dst_pid(dst_pid);
 
   if (root_idx) {
     // There there are already 3 nodes, place after root (faster to find space in future checks)
-    auto *root_ptr = &node_internal[root_idx];
+    auto* root_ptr = &node_internal[root_idx];
     if (!root_ptr->is_last_state()) {
       auto root_next_idx = root_ptr->get_next();
 
@@ -132,7 +132,7 @@ Index_id Lgraph_Base::create_node_space(const Index_id last_idx, const Port_ID d
     // Nove stuff to idx2, legal
 
     node_internal[idx2].assimilate_edges(&node_internal[last_idx]);
-    I(node_internal[last_idx].has_next_space()); // OOPS! There is a weird BUG in corner cases (new hhds should fix it)
+    I(node_internal[last_idx].has_next_space());  // OOPS! There is a weird BUG in corner cases (new hhds should fix it)
 
     I(node_internal[last_idx].get_master_root_nid() == master_nid);
     I(node_internal[idx2].get_master_root_nid() == master_nid);
@@ -291,7 +291,7 @@ Index_id Lgraph_Base::get_space_output_pin(const Index_id master_nid, const Inde
 
   // node_internal.ref_lock();
 
-  const auto *ptr = &node_internal[start_nid];
+  const auto* ptr = &node_internal[start_nid];
   if (ptr->get_dst_pid() == dst_pid && ptr->has_space_long()) {
 #ifdef PERF_OUTPUT_PIN
     auto end = get_cycles();
@@ -416,7 +416,7 @@ Index_id Lgraph_Base::setup_idx_from_pid(const Index_id nid, const Port_ID pid) 
   return root_idx;
 }
 
-Index_id Lgraph_Base::get_space_output_pin(const Index_id start_nid, const Port_ID dst_pid, Index_id &root_idx) {
+Index_id Lgraph_Base::get_space_output_pin(const Index_id start_nid, const Port_ID dst_pid, Index_id& root_idx) {
   // node_internal.ref_lock();
 
   I(node_internal[start_nid].is_root());
@@ -485,7 +485,7 @@ void Lgraph_Base::add_edge_int(const Index_id dst_idx, const Port_ID inp_pid, In
 
     int o = node_internal[idx].next_free_output_pos();
 
-    auto *sedge = (SEdge_Internal *)&(node_internal[idx].sedge[o]);
+    auto* sedge = (SEdge_Internal*)&(node_internal[idx].sedge[o]);
     bool  sused = sedge->set(dst_idx, inp_pid, false);
 
     if (sused) {
@@ -495,7 +495,7 @@ void Lgraph_Base::add_edge_int(const Index_id dst_idx, const Port_ID inp_pid, In
       if (node_internal[idx].has_space_long()) {
         o--;
 
-        auto *ledge = (LEdge_Internal *)&(node_internal[idx].sedge[o]);
+        auto* ledge = (LEdge_Internal*)&(node_internal[idx].sedge[o]);
         ledge->set(dst_idx, inp_pid, false);
 
         node_internal[idx].inc_outputs(true);
@@ -524,7 +524,7 @@ void Lgraph_Base::add_edge_int(const Index_id dst_idx, const Port_ID inp_pid, In
 
     int o = node_internal[idx].next_free_output_pos();
 
-    auto *sedge = (SEdge_Internal *)&(node_internal[idx].sedge[o]);
+    auto* sedge = (SEdge_Internal*)&(node_internal[idx].sedge[o]);
     bool  sused = sedge->set(dst_idx, inp_pid, false);
 
     if (sused) {
@@ -533,7 +533,7 @@ void Lgraph_Base::add_edge_int(const Index_id dst_idx, const Port_ID inp_pid, In
       o--;
       I(node_internal[idx].has_space_long());
 
-      auto *ledge = (LEdge_Internal *)&(node_internal[idx].sedge[o]);
+      auto* ledge = (LEdge_Internal*)&(node_internal[idx].sedge[o]);
       ledge->set(dst_idx, inp_pid, false);
 
       node_internal[idx].inc_outputs(true);  // WARNING: Before next_free_output_pos to reserve space (decreasing insert)
@@ -556,7 +556,7 @@ void Lgraph_Base::add_edge_int(const Index_id dst_idx, const Port_ID inp_pid, In
 
     int i = node_internal[idx].next_free_input_pos();
 
-    auto *sedge = (SEdge_Internal *)&(node_internal[idx].sedge[i]);
+    auto* sedge = (SEdge_Internal*)&(node_internal[idx].sedge[i]);
     bool  sused = sedge->set(src_idx, dst_pid, true);
 
     if (sused) {
@@ -564,7 +564,7 @@ void Lgraph_Base::add_edge_int(const Index_id dst_idx, const Port_ID inp_pid, In
       inp_done = true;
     } else {
       if (node_internal[idx].has_space_long()) {
-        auto *ledge = (LEdge_Internal *)&(node_internal[idx].sedge[i]);
+        auto* ledge = (LEdge_Internal*)&(node_internal[idx].sedge[i]);
         ledge->set(src_idx, dst_pid, true);
 
         node_internal[idx].inc_inputs(true);  // WARNING: after next_free_input_pos (increasing insert)
@@ -586,7 +586,7 @@ void Lgraph_Base::add_edge_int(const Index_id dst_idx, const Port_ID inp_pid, In
     I(inp_root_nid != 0);
     int i = node_internal[idx].next_free_input_pos();
 
-    auto *sedge = (SEdge_Internal *)&(node_internal[idx].sedge[i]);
+    auto* sedge = (SEdge_Internal*)&(node_internal[idx].sedge[i]);
     bool  sused = sedge->set(src_idx, dst_pid, true);
 
     if (sused) {
@@ -594,7 +594,7 @@ void Lgraph_Base::add_edge_int(const Index_id dst_idx, const Port_ID inp_pid, In
     } else {
       I(node_internal[idx].has_space_long());
 
-      auto *ledge = (LEdge_Internal *)&(node_internal[idx].sedge[i]);
+      auto* ledge = (LEdge_Internal*)&(node_internal[idx].sedge[i]);
       ledge->set(src_idx, dst_pid, true);
 
       node_internal[idx].inc_inputs(true);  // WARNING: after next_free_input_pos (increasing insert)

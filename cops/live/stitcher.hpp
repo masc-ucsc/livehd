@@ -7,21 +7,21 @@
 
 class Live_stitcher {
 private:
-  Lgraph *original;
+  Lgraph* original;
 
-  Invariant_boundaries *boundaries;
+  Invariant_boundaries* boundaries;
 
 public:
-  Live_stitcher(Lgraph *original, Invariant_boundaries *boundaries) : original(original), boundaries(boundaries) {}
+  Live_stitcher(Lgraph* original, Invariant_boundaries* boundaries) : original(original), boundaries(boundaries) {}
 
-  Live_stitcher(Stitch_pass_options &pack);
+  Live_stitcher(Stitch_pass_options& pack);
 
-  void stitch(const std::string &nsynth, const std::set<Net_ID> &diffs) {
-    Lgraph *synth = Lgraph_open(nsynth, boundaries->top);
+  void stitch(const std::string& nsynth, const std::set<Net_ID>& diffs) {
+    Lgraph* synth = Lgraph_open(nsynth, boundaries->top);
     stitch(synth, diffs);
   }
 
-  void stitch(Lgraph *nsynth, const std::set<Net_ID> &diffs);
+  void stitch(Lgraph* nsynth, const std::set<Net_ID>& diffs);
 };
 
 #endif

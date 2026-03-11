@@ -2064,8 +2064,8 @@ private:
       Block* firstAllocatedBlock = nullptr;
 
       // Figure out how many blocks we'll need to allocate, and do so
-      size_t blockBaseDiff = ((startTailIndex + count - 1) & ~static_cast<index_t>(BLOCK_SIZE - 1))
-                             - ((startTailIndex - 1) & ~static_cast<index_t>(BLOCK_SIZE - 1));
+      size_t  blockBaseDiff    = ((startTailIndex + count - 1) & ~static_cast<index_t>(BLOCK_SIZE - 1))
+                                 - ((startTailIndex - 1) & ~static_cast<index_t>(BLOCK_SIZE - 1));
       index_t currentTailIndex = (startTailIndex - 1) & ~static_cast<index_t>(BLOCK_SIZE - 1);
       if (blockBaseDiff > 0) {
         // Allocate as many blocks as possible from ahead
@@ -2637,8 +2637,8 @@ private:
       auto    endBlock            = this->tailBlock;
 
       // Figure out how many blocks we'll need to allocate, and do so
-      size_t blockBaseDiff = ((startTailIndex + count - 1) & ~static_cast<index_t>(BLOCK_SIZE - 1))
-                             - ((startTailIndex - 1) & ~static_cast<index_t>(BLOCK_SIZE - 1));
+      size_t  blockBaseDiff    = ((startTailIndex + count - 1) & ~static_cast<index_t>(BLOCK_SIZE - 1))
+                                 - ((startTailIndex - 1) & ~static_cast<index_t>(BLOCK_SIZE - 1));
       index_t currentTailIndex = (startTailIndex - 1) & ~static_cast<index_t>(BLOCK_SIZE - 1);
       if (blockBaseDiff > 0) {
 #ifdef MCDBGQ_NOLOCKFREE_IMPLICITPRODBLOCKINDEX

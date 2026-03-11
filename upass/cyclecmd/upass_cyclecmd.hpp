@@ -13,12 +13,8 @@ public:
   using uPass::uPass;
 };
 
-static upass::uPass_plugin cyclecmd_a(
-    "__upass_cycle_cmd_a",
-    upass::uPass_wrapper<uPass_cyclecmd_a>::get_upass,
-    {"__upass_cycle_cmd_b"});
+static upass::uPass_plugin cyclecmd_a("__upass_cycle_cmd_a", upass::uPass_wrapper<uPass_cyclecmd_a>::get_upass,
+                                      {"__upass_cycle_cmd_b"});
 
-static upass::uPass_plugin cyclecmd_b(
-    "__upass_cycle_cmd_b",
-    upass::uPass_wrapper<uPass_cyclecmd_b>::get_upass,
-    {"__upass_cycle_cmd_a"});
+static upass::uPass_plugin cyclecmd_b("__upass_cycle_cmd_b", upass::uPass_wrapper<uPass_cyclecmd_b>::get_upass,
+                                      {"__upass_cycle_cmd_a"});

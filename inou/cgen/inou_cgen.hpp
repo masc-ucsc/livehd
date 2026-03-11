@@ -9,10 +9,10 @@ private:
   std::string odir;
 
 protected:
-  static void to_cgen_verilog(Eprp_var &var);
+  static void to_cgen_verilog(Eprp_var& var);
 
 public:
-  Inou_cgen(const Eprp_var &var);
+  Inou_cgen(const Eprp_var& var);
 
   static void setup();
 };

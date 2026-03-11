@@ -1,5 +1,7 @@
 //  This file is distributed under the BSD 3-Clause License. See LICENSE for details.
 
+#include "upass_runner_lgraph.hpp"
+
 #include <memory>
 #include <string>
 #include <string_view>
@@ -11,7 +13,6 @@
 #include "lgraph.hpp"
 #include "lgraph_manager.hpp"
 #include "upass_lgraph_core.hpp"
-#include "upass_runner_lgraph.hpp"
 
 namespace {
 
@@ -27,37 +28,34 @@ struct Test_lgraph_missing_dep : public upass::uPass_lgraph {
   using upass::uPass_lgraph::uPass_lgraph;
 };
 
-static upass::uPass_lgraph_plugin plugin_lgraph_cycle_a(
-    "__upass_lgraph_cycle_a",
-    upass::uPass_lgraph_wrapper<Test_lgraph_cycle_a>::get_upass,
-    {"__upass_lgraph_cycle_b"});
+static upass::uPass_lgraph_plugin plugin_lgraph_cycle_a("__upass_lgraph_cycle_a",
+                                                        upass::uPass_lgraph_wrapper<Test_lgraph_cycle_a>::get_upass,
+                                                        {"__upass_lgraph_cycle_b"});
 
-static upass::uPass_lgraph_plugin plugin_lgraph_cycle_b(
-    "__upass_lgraph_cycle_b",
-    upass::uPass_lgraph_wrapper<Test_lgraph_cycle_b>::get_upass,
-    {"__upass_lgraph_cycle_a"});
+static upass::uPass_lgraph_plugin plugin_lgraph_cycle_b("__upass_lgraph_cycle_b",
+                                                        upass::uPass_lgraph_wrapper<Test_lgraph_cycle_b>::get_upass,
+                                                        {"__upass_lgraph_cycle_a"});
 
-static upass::uPass_lgraph_plugin plugin_lgraph_missing_dep(
-    "__upass_lgraph_missing_dep",
-    upass::uPass_lgraph_wrapper<Test_lgraph_missing_dep>::get_upass,
-    {"__upass_lgraph_dep_not_defined"});
+static upass::uPass_lgraph_plugin plugin_lgraph_missing_dep("__upass_lgraph_missing_dep",
+                                                            upass::uPass_lgraph_wrapper<Test_lgraph_missing_dep>::get_upass,
+                                                            {"__upass_lgraph_dep_not_defined"});
 
 class Exposed_runner_lgraph : public uPass_runner_lgraph {
 public:
-  Exposed_runner_lgraph(std::shared_ptr<upass::Lgraph_manager> gm, const std::vector<std::string> &names = {})
+  Exposed_runner_lgraph(std::shared_ptr<upass::Lgraph_manager> gm, const std::vector<std::string>& names = {})
       : uPass_runner_lgraph(std::move(gm), names) {}
 
-  std::vector<std::string> expose_resolve(const std::vector<std::string> &names) const { return resolve_order(names); }
+  std::vector<std::string> expose_resolve(const std::vector<std::string>& names) const { return resolve_order(names); }
 };
 
 TEST(UpassRunnerLgraph, VisitsFastNodesAndCollectsTypes) {
   constexpr std::string_view kDbPath = "lgdb_upass_runner_lgraph_test";
 
   file_utils::clean_dir(kDbPath);
-  auto *lib = Graph_library::instance(kDbPath);
+  auto* lib = Graph_library::instance(kDbPath);
   ASSERT_NE(lib, nullptr);
 
-  auto *lg = lib->create_lgraph("top", "upass_runner_lgraph_test");
+  auto* lg = lib->create_lgraph("top", "upass_runner_lgraph_test");
   ASSERT_NE(lg, nullptr);
 
   auto c0 = lg->create_node_const(7);
@@ -105,43 +103,43 @@ TEST(UpassRunnerLgraph, VisitsFastNodesAndCollectsTypes) {
 TEST(UpassRunnerLgraphResolve, DetectCycle) {
   constexpr std::string_view kDbPath = "lgdb_upass_runner_lgraph_cycle";
   file_utils::clean_dir(kDbPath);
-  auto *lib = Graph_library::instance(kDbPath);
+  auto* lib = Graph_library::instance(kDbPath);
   ASSERT_NE(lib, nullptr);
-  auto *lg = lib->create_lgraph("top", "upass_runner_lgraph_cycle");
+  auto* lg = lib->create_lgraph("top", "upass_runner_lgraph_cycle");
   ASSERT_NE(lg, nullptr);
 
-  auto gm = std::make_shared<upass::Lgraph_manager>(lg);
+  auto                  gm = std::make_shared<upass::Lgraph_manager>(lg);
   Exposed_runner_lgraph runner(gm, {});
-  auto                 ordered = runner.expose_resolve({"__upass_lgraph_cycle_a"});
+  auto                  ordered = runner.expose_resolve({"__upass_lgraph_cycle_a"});
   EXPECT_TRUE(ordered.empty());
 }
 
 TEST(UpassRunnerLgraphResolve, DetectMissingDependency) {
   constexpr std::string_view kDbPath = "lgdb_upass_runner_lgraph_missing";
   file_utils::clean_dir(kDbPath);
-  auto *lib = Graph_library::instance(kDbPath);
+  auto* lib = Graph_library::instance(kDbPath);
   ASSERT_NE(lib, nullptr);
-  auto *lg = lib->create_lgraph("top", "upass_runner_lgraph_missing");
+  auto* lg = lib->create_lgraph("top", "upass_runner_lgraph_missing");
   ASSERT_NE(lg, nullptr);
 
-  auto gm = std::make_shared<upass::Lgraph_manager>(lg);
+  auto                  gm = std::make_shared<upass::Lgraph_manager>(lg);
   Exposed_runner_lgraph runner(gm, {});
-  auto                 ordered = runner.expose_resolve({"__upass_lgraph_missing_dep"});
+  auto                  ordered = runner.expose_resolve({"__upass_lgraph_missing_dep"});
   EXPECT_TRUE(ordered.empty());
 }
 
 TEST(UpassRunnerLgraphResolve, SharedNoopResolvesAndRuns) {
   constexpr std::string_view kDbPath = "lgdb_upass_runner_lgraph_shared_noop";
   file_utils::clean_dir(kDbPath);
-  auto *lib = Graph_library::instance(kDbPath);
+  auto* lib = Graph_library::instance(kDbPath);
   ASSERT_NE(lib, nullptr);
-  auto *lg = lib->create_lgraph("top", "upass_runner_lgraph_shared_noop");
+  auto* lg = lib->create_lgraph("top", "upass_runner_lgraph_shared_noop");
   ASSERT_NE(lg, nullptr);
   (void)lg->create_node_const(1);
 
-  auto gm = std::make_shared<upass::Lgraph_manager>(lg);
+  auto                  gm = std::make_shared<upass::Lgraph_manager>(lg);
   Exposed_runner_lgraph runner(gm, {"noop_shared"});
-  auto                 ordered = runner.expose_resolve({"noop_shared"});
+  auto                  ordered = runner.expose_resolve({"noop_shared"});
   ASSERT_EQ(ordered.size(), 1U);
   EXPECT_EQ(ordered[0], "noop_shared");
   EXPECT_FALSE(runner.has_configuration_error());
@@ -151,9 +149,9 @@ TEST(UpassRunnerLgraphResolve, SharedNoopResolvesAndRuns) {
 TEST(UpassRunnerLgraphResolve, SharedDecideResolvesAndRuns) {
   constexpr std::string_view kDbPath = "lgdb_upass_runner_lgraph_shared_decide";
   file_utils::clean_dir(kDbPath);
-  auto *lib = Graph_library::instance(kDbPath);
+  auto* lib = Graph_library::instance(kDbPath);
   ASSERT_NE(lib, nullptr);
-  auto *lg = lib->create_lgraph("top", "upass_runner_lgraph_shared_decide");
+  auto* lg = lib->create_lgraph("top", "upass_runner_lgraph_shared_decide");
   ASSERT_NE(lg, nullptr);
   auto c0 = lg->create_node_const(3);
   auto c1 = lg->create_node_const(5);
@@ -161,9 +159,9 @@ TEST(UpassRunnerLgraphResolve, SharedDecideResolvesAndRuns) {
   lg->add_edge(c0.get_driver_pin(), s0.setup_sink_pin_raw(0));
   lg->add_edge(c1.get_driver_pin(), s0.setup_sink_pin_raw(1));
 
-  auto gm = std::make_shared<upass::Lgraph_manager>(lg);
+  auto                  gm = std::make_shared<upass::Lgraph_manager>(lg);
   Exposed_runner_lgraph runner(gm, {"decide_shared"});
-  auto                 ordered = runner.expose_resolve({"decide_shared"});
+  auto                  ordered = runner.expose_resolve({"decide_shared"});
   ASSERT_EQ(ordered.size(), 1U);
   EXPECT_EQ(ordered[0], "decide_shared");
   EXPECT_FALSE(runner.has_configuration_error());
@@ -173,9 +171,9 @@ TEST(UpassRunnerLgraphResolve, SharedDecideResolvesAndRuns) {
 TEST(UpassRunnerLgraph, FoldSumConstMutation) {
   constexpr std::string_view kDbPath = "lgdb_upass_runner_lgraph_fold_sum_const";
   file_utils::clean_dir(kDbPath);
-  auto *lib = Graph_library::instance(kDbPath);
+  auto* lib = Graph_library::instance(kDbPath);
   ASSERT_NE(lib, nullptr);
-  auto *lg = lib->create_lgraph("top", "upass_runner_lgraph_fold_sum_const");
+  auto* lg = lib->create_lgraph("top", "upass_runner_lgraph_fold_sum_const");
   ASSERT_NE(lg, nullptr);
 
   auto c0   = lg->create_node_const(5);
@@ -199,7 +197,7 @@ TEST(UpassRunnerLgraph, FoldSumConstMutation) {
   lg->add_edge(s0_out, out0);
   lg->add_edge(s1_out, out1);
 
-  auto gm = std::make_shared<upass::Lgraph_manager>(lg);
+  auto                gm = std::make_shared<upass::Lgraph_manager>(lg);
   uPass_runner_lgraph runner(gm, {"fold_sum_const"});
   auto                ss = gm->fold_sum_const();
   EXPECT_EQ(ss.folded_nodes, 2U);
@@ -212,12 +210,12 @@ TEST(UpassRunnerLgraph, FoldSumConstMutation) {
   ASSERT_NE(lib, nullptr);
   lg = lib->create_lgraph("top", "upass_runner_lgraph_fold_sum_const");
   ASSERT_NE(lg, nullptr);
-  c0   = lg->create_node_const(5);
-  c1   = lg->create_node_const(8);
-  s0   = lg->create_node(Ntype_op::Sum);
-  s1   = lg->create_node(Ntype_op::Sum);
-  out0 = lg->add_graph_output("o_sum0", 2, 9);
-  out1 = lg->add_graph_output("o_sum1", 3, 13);
+  c0     = lg->create_node_const(5);
+  c1     = lg->create_node_const(8);
+  s0     = lg->create_node(Ntype_op::Sum);
+  s1     = lg->create_node(Ntype_op::Sum);
+  out0   = lg->add_graph_output("o_sum0", 2, 9);
+  out1   = lg->add_graph_output("o_sum1", 3, 13);
   s0_out = s0.setup_driver_pin();
   s1_out = s1.setup_driver_pin();
   s0_out.set_bits(9);
@@ -245,7 +243,7 @@ TEST(UpassRunnerLgraph, FoldSumConstMutation) {
 
   std::size_t sum_count   = 0;
   std::size_t const_count = 0;
-  for (const auto &n : lg->fast()) {
+  for (const auto& n : lg->fast()) {
     if (n.get_type_op() == Ntype_op::Sum) {
       ++sum_count;
     } else if (n.get_type_op() == Ntype_op::Const) {
@@ -260,9 +258,9 @@ TEST(UpassRunnerLgraph, FoldSumConstMutation) {
 TEST(UpassRunnerLgraph, FoldNeutralMutation) {
   constexpr std::string_view kDbPath = "lgdb_upass_runner_lgraph_fold_neutral";
   file_utils::clean_dir(kDbPath);
-  auto *lib = Graph_library::instance(kDbPath);
+  auto* lib = Graph_library::instance(kDbPath);
   ASSERT_NE(lib, nullptr);
-  auto *lg = lib->create_lgraph("top", "upass_runner_lgraph_fold_neutral");
+  auto* lg = lib->create_lgraph("top", "upass_runner_lgraph_fold_neutral");
   ASSERT_NE(lg, nullptr);
 
   auto in_a = lg->add_graph_input("a", 1, 8);
@@ -366,28 +364,28 @@ TEST(UpassRunnerLgraph, FoldNeutralMutation) {
   ASSERT_NE(lib, nullptr);
   lg = lib->create_lgraph("top", "upass_runner_lgraph_fold_neutral");
   ASSERT_NE(lg, nullptr);
-  in_a = lg->add_graph_input("a", 1, 8);
-  in_b = lg->add_graph_input("b", 9, 1);
-  out0 = lg->add_graph_output("o_sum", 2, 8);
-  out1 = lg->add_graph_output("o_and", 3, 8);
-  out2 = lg->add_graph_output("o_mul", 4, 8);
-  out3 = lg->add_graph_output("o_or", 5, 8);
-  out4 = lg->add_graph_output("o_xor", 6, 8);
-  out5 = lg->add_graph_output("o_mul0", 7, 8);
-  out6 = lg->add_graph_output("o_and_id", 8, 8);
-  out7 = lg->add_graph_output("o_and1", 10, 1);
-  out8 = lg->add_graph_output("o_or1", 11, 1);
-  c0   = lg->create_node_const(0);
-  c1   = lg->create_node_const(1);
-  s0   = lg->create_node(Ntype_op::Sum);
-  a0   = lg->create_node(Ntype_op::And);
-  m0   = lg->create_node(Ntype_op::Mult);
-  o0   = lg->create_node(Ntype_op::Or);
-  x0   = lg->create_node(Ntype_op::Xor);
-  m1   = lg->create_node(Ntype_op::Mult);
-  a1   = lg->create_node(Ntype_op::And);
-  a2   = lg->create_node(Ntype_op::And);
-  o1   = lg->create_node(Ntype_op::Or);
+  in_a   = lg->add_graph_input("a", 1, 8);
+  in_b   = lg->add_graph_input("b", 9, 1);
+  out0   = lg->add_graph_output("o_sum", 2, 8);
+  out1   = lg->add_graph_output("o_and", 3, 8);
+  out2   = lg->add_graph_output("o_mul", 4, 8);
+  out3   = lg->add_graph_output("o_or", 5, 8);
+  out4   = lg->add_graph_output("o_xor", 6, 8);
+  out5   = lg->add_graph_output("o_mul0", 7, 8);
+  out6   = lg->add_graph_output("o_and_id", 8, 8);
+  out7   = lg->add_graph_output("o_and1", 10, 1);
+  out8   = lg->add_graph_output("o_or1", 11, 1);
+  c0     = lg->create_node_const(0);
+  c1     = lg->create_node_const(1);
+  s0     = lg->create_node(Ntype_op::Sum);
+  a0     = lg->create_node(Ntype_op::And);
+  m0     = lg->create_node(Ntype_op::Mult);
+  o0     = lg->create_node(Ntype_op::Or);
+  x0     = lg->create_node(Ntype_op::Xor);
+  m1     = lg->create_node(Ntype_op::Mult);
+  a1     = lg->create_node(Ntype_op::And);
+  a2     = lg->create_node(Ntype_op::And);
+  o1     = lg->create_node(Ntype_op::Or);
   s0_out = s0.setup_driver_pin();
   a0_out = a0.setup_driver_pin();
   m0_out = m0.setup_driver_pin();
@@ -466,7 +464,7 @@ TEST(UpassRunnerLgraph, FoldNeutralMutation) {
   std::size_t mul_count = 0;
   std::size_t or_count  = 0;
   std::size_t xor_count = 0;
-  for (const auto &n : lg->fast()) {
+  for (const auto& n : lg->fast()) {
     if (n.get_type_op() == Ntype_op::Sum) {
       ++sum_count;
     } else if (n.get_type_op() == Ntype_op::And) {
@@ -486,7 +484,7 @@ TEST(UpassRunnerLgraph, FoldNeutralMutation) {
   EXPECT_EQ(xor_count, 0U);
 
   std::size_t const_count = 0;
-  for (const auto &n : lg->fast()) {
+  for (const auto& n : lg->fast()) {
     if (n.get_type_op() == Ntype_op::Const) {
       ++const_count;
     }
@@ -497,9 +495,9 @@ TEST(UpassRunnerLgraph, FoldNeutralMutation) {
 TEST(UpassRunnerLgraph, FoldShiftDivMutation) {
   constexpr std::string_view kDbPath = "lgdb_upass_runner_lgraph_fold_shift_div";
   file_utils::clean_dir(kDbPath);
-  auto *lib = Graph_library::instance(kDbPath);
+  auto* lib = Graph_library::instance(kDbPath);
   ASSERT_NE(lib, nullptr);
-  auto *lg = lib->create_lgraph("top", "upass_runner_lgraph_fold_shift_div");
+  auto* lg = lib->create_lgraph("top", "upass_runner_lgraph_fold_shift_div");
   ASSERT_NE(lg, nullptr);
 
   auto in_a = lg->add_graph_input("a", 1, 8);
@@ -675,7 +673,7 @@ TEST(UpassRunnerLgraph, FoldShiftDivMutation) {
   std::size_t div_count = 0;
   std::size_t shl_count = 0;
   std::size_t sra_count = 0;
-  for (const auto &n : lg->fast()) {
+  for (const auto& n : lg->fast()) {
     if (n.get_type_op() == Ntype_op::Div) {
       ++div_count;
     } else if (n.get_type_op() == Ntype_op::SHL) {
@@ -692,9 +690,9 @@ TEST(UpassRunnerLgraph, FoldShiftDivMutation) {
 TEST(UpassRunnerLgraph, FoldShiftDivDryRunNoMutation) {
   constexpr std::string_view kDbPath = "lgdb_upass_runner_lgraph_fold_shift_div_dry";
   file_utils::clean_dir(kDbPath);
-  auto *lib = Graph_library::instance(kDbPath);
+  auto* lib = Graph_library::instance(kDbPath);
   ASSERT_NE(lib, nullptr);
-  auto *lg = lib->create_lgraph("top", "upass_runner_lgraph_fold_shift_div_dry");
+  auto* lg = lib->create_lgraph("top", "upass_runner_lgraph_fold_shift_div_dry");
   ASSERT_NE(lg, nullptr);
 
   auto in_a = lg->add_graph_input("a", 1, 8);
@@ -706,12 +704,12 @@ TEST(UpassRunnerLgraph, FoldShiftDivDryRunNoMutation) {
   lg->add_edge(c1.get_driver_pin(), d0.setup_sink_pin_raw(1));
   lg->add_edge(d0.setup_driver_pin(), out0);
 
-  auto gm = std::make_shared<upass::Lgraph_manager>(lg);
+  auto                gm = std::make_shared<upass::Lgraph_manager>(lg);
   uPass_runner_lgraph runner(gm, {"fold_shift_div"}, true);
   runner.run(3);
 
   std::size_t div_count = 0;
-  for (const auto &n : lg->fast()) {
+  for (const auto& n : lg->fast()) {
     if (n.get_type_op() == Ntype_op::Div) {
       ++div_count;
     }
@@ -722,9 +720,9 @@ TEST(UpassRunnerLgraph, FoldShiftDivDryRunNoMutation) {
 TEST(UpassRunnerLgraph, GuardSkipsFoldSumConstWhenNoCandidates) {
   constexpr std::string_view kDbPath = "lgdb_upass_runner_lgraph_guard_skip";
   file_utils::clean_dir(kDbPath);
-  auto *lib = Graph_library::instance(kDbPath);
+  auto* lib = Graph_library::instance(kDbPath);
   ASSERT_NE(lib, nullptr);
-  auto *lg = lib->create_lgraph("top", "upass_runner_lgraph_guard_skip");
+  auto* lg = lib->create_lgraph("top", "upass_runner_lgraph_guard_skip");
   ASSERT_NE(lg, nullptr);
 
   auto in_a = lg->add_graph_input("a", 1, 8);
@@ -735,7 +733,7 @@ TEST(UpassRunnerLgraph, GuardSkipsFoldSumConstWhenNoCandidates) {
   lg->add_edge(in_b, s0.setup_sink_pin_raw(1));
   lg->add_edge(s0.setup_driver_pin(), out0);
 
-  auto gm = std::make_shared<upass::Lgraph_manager>(lg);
+  auto                gm = std::make_shared<upass::Lgraph_manager>(lg);
   uPass_runner_lgraph runner(gm, {"fold_sum_const"});
 
   testing::internal::CaptureStdout();
@@ -744,7 +742,7 @@ TEST(UpassRunnerLgraph, GuardSkipsFoldSumConstWhenNoCandidates) {
   EXPECT_NE(out.find("uPass(lgraph) - skip fold_sum_const (no fold candidates)"), std::string::npos);
 
   std::size_t sum_count = 0;
-  for (const auto &n : lg->fast()) {
+  for (const auto& n : lg->fast()) {
     if (n.get_type_op() == Ntype_op::Sum) {
       ++sum_count;
     }
@@ -763,15 +761,15 @@ TEST(UpassRunnerLgraph, GuardSkipsFoldSumConstWhenNoCandidates) {
 TEST(UpassRunnerLgraph, FoldSubConstSubZero) {
   constexpr std::string_view kDbPath = "lgdb_upass_lgraph_fold_sub_zero";
   file_utils::clean_dir(kDbPath);
-  auto *lib = Graph_library::instance(kDbPath);
+  auto* lib = Graph_library::instance(kDbPath);
   ASSERT_NE(lib, nullptr);
-  auto *lg = lib->create_lgraph("top", "upass_lgraph_fold_sub_zero");
+  auto* lg = lib->create_lgraph("top", "upass_lgraph_fold_sub_zero");
   ASSERT_NE(lg, nullptr);
 
   auto in_a = lg->add_graph_input("a", 1, 8);
-  auto out0  = lg->add_graph_output("o_sub_zero", 2, 8);
-  auto c0    = lg->create_node_const(0);
-  auto s0    = lg->create_node(Ntype_op::Sum);
+  auto out0 = lg->add_graph_output("o_sub_zero", 2, 8);
+  auto c0   = lg->create_node_const(0);
+  auto s0   = lg->create_node(Ntype_op::Sum);
   // a - 0:  A=in_a, B=const(0)
   lg->add_edge(in_a, s0.setup_sink_pin_raw(0));
   lg->add_edge(c0.get_driver_pin(), s0.setup_sink_pin_raw(1));
@@ -785,8 +783,10 @@ TEST(UpassRunnerLgraph, FoldSubConstSubZero) {
   EXPECT_EQ(dry.sub_zero_simplified, 1U);
   EXPECT_EQ(dry.deleted_nodes, 1U);
   std::size_t sum_count = 0;
-  for (const auto &n : lg->fast()) {
-    if (n.get_type_op() == Ntype_op::Sum) ++sum_count;
+  for (const auto& n : lg->fast()) {
+    if (n.get_type_op() == Ntype_op::Sum) {
+      ++sum_count;
+    }
   }
   EXPECT_EQ(sum_count, 1U);
 
@@ -795,8 +795,10 @@ TEST(UpassRunnerLgraph, FoldSubConstSubZero) {
   runner.run(2);
 
   sum_count = 0;
-  for (const auto &n : lg->fast()) {
-    if (n.get_type_op() == Ntype_op::Sum) ++sum_count;
+  for (const auto& n : lg->fast()) {
+    if (n.get_type_op() == Ntype_op::Sum) {
+      ++sum_count;
+    }
   }
   EXPECT_EQ(sum_count, 0U);
 }
@@ -805,14 +807,14 @@ TEST(UpassRunnerLgraph, FoldSubConstSubZero) {
 TEST(UpassRunnerLgraph, FoldSubConstSubSelf) {
   constexpr std::string_view kDbPath = "lgdb_upass_lgraph_fold_sub_self";
   file_utils::clean_dir(kDbPath);
-  auto *lib = Graph_library::instance(kDbPath);
+  auto* lib = Graph_library::instance(kDbPath);
   ASSERT_NE(lib, nullptr);
-  auto *lg = lib->create_lgraph("top", "upass_lgraph_fold_sub_self");
+  auto* lg = lib->create_lgraph("top", "upass_lgraph_fold_sub_self");
   ASSERT_NE(lg, nullptr);
 
   auto in_a = lg->add_graph_input("a", 1, 8);
-  auto out0  = lg->add_graph_output("o_sub_self", 2, 8);
-  auto s0    = lg->create_node(Ntype_op::Sum);
+  auto out0 = lg->add_graph_output("o_sub_self", 2, 8);
+  auto s0   = lg->create_node(Ntype_op::Sum);
   // a - a:  A=in_a, B=in_a  (same driver on both ports)
   lg->add_edge(in_a, s0.setup_sink_pin_raw(0));
   lg->add_edge(in_a, s0.setup_sink_pin_raw(1));
@@ -826,8 +828,10 @@ TEST(UpassRunnerLgraph, FoldSubConstSubSelf) {
   EXPECT_EQ(dry.sub_self_simplified, 1U);
   EXPECT_EQ(dry.deleted_nodes, 1U);
   std::size_t sum_count = 0;
-  for (const auto &n : lg->fast()) {
-    if (n.get_type_op() == Ntype_op::Sum) ++sum_count;
+  for (const auto& n : lg->fast()) {
+    if (n.get_type_op() == Ntype_op::Sum) {
+      ++sum_count;
+    }
   }
   EXPECT_EQ(sum_count, 1U);
 
@@ -836,8 +840,10 @@ TEST(UpassRunnerLgraph, FoldSubConstSubSelf) {
   runner.run(2);
 
   sum_count = 0;
-  for (const auto &n : lg->fast()) {
-    if (n.get_type_op() == Ntype_op::Sum) ++sum_count;
+  for (const auto& n : lg->fast()) {
+    if (n.get_type_op() == Ntype_op::Sum) {
+      ++sum_count;
+    }
   }
   EXPECT_EQ(sum_count, 0U);
 
@@ -851,9 +857,9 @@ TEST(UpassRunnerLgraph, FoldSubConstSubSelf) {
 TEST(UpassRunnerLgraph, FoldSubConstConstSub) {
   constexpr std::string_view kDbPath = "lgdb_upass_lgraph_fold_const_sub";
   file_utils::clean_dir(kDbPath);
-  auto *lib = Graph_library::instance(kDbPath);
+  auto* lib = Graph_library::instance(kDbPath);
   ASSERT_NE(lib, nullptr);
-  auto *lg = lib->create_lgraph("top", "upass_lgraph_fold_const_sub");
+  auto* lg = lib->create_lgraph("top", "upass_lgraph_fold_const_sub");
   ASSERT_NE(lg, nullptr);
 
   auto out0 = lg->add_graph_output("o_const_sub", 2, 8);
@@ -875,8 +881,10 @@ TEST(UpassRunnerLgraph, FoldSubConstConstSub) {
   EXPECT_EQ(dry.const_sub_folded, 1U);
   EXPECT_EQ(dry.deleted_nodes, 1U);
   std::size_t sum_count = 0;
-  for (const auto &n : lg->fast()) {
-    if (n.get_type_op() == Ntype_op::Sum) ++sum_count;
+  for (const auto& n : lg->fast()) {
+    if (n.get_type_op() == Ntype_op::Sum) {
+      ++sum_count;
+    }
   }
   EXPECT_EQ(sum_count, 1U);
 
@@ -885,8 +893,10 @@ TEST(UpassRunnerLgraph, FoldSubConstConstSub) {
   runner.run(3);
 
   sum_count = 0;
-  for (const auto &n : lg->fast()) {
-    if (n.get_type_op() == Ntype_op::Sum) ++sum_count;
+  for (const auto& n : lg->fast()) {
+    if (n.get_type_op() == Ntype_op::Sum) {
+      ++sum_count;
+    }
   }
   EXPECT_EQ(sum_count, 0U);
 
@@ -899,21 +909,21 @@ TEST(UpassRunnerLgraph, FoldSubConstConstSub) {
 TEST(UpassRunnerLgraph, FoldSubConstGuardSkipsWhenNoCandidates) {
   constexpr std::string_view kDbPath = "lgdb_upass_lgraph_fold_sub_guard";
   file_utils::clean_dir(kDbPath);
-  auto *lib = Graph_library::instance(kDbPath);
+  auto* lib = Graph_library::instance(kDbPath);
   ASSERT_NE(lib, nullptr);
-  auto *lg = lib->create_lgraph("top", "upass_lgraph_fold_sub_guard");
+  auto* lg = lib->create_lgraph("top", "upass_lgraph_fold_sub_guard");
   ASSERT_NE(lg, nullptr);
 
   // Two signal inputs — no constants, so nothing is foldable.
   auto in_a = lg->add_graph_input("a", 1, 8);
   auto in_b = lg->add_graph_input("b", 2, 8);
-  auto out0  = lg->add_graph_output("o", 3, 8);
-  auto s0    = lg->create_node(Ntype_op::Sum);
+  auto out0 = lg->add_graph_output("o", 3, 8);
+  auto s0   = lg->create_node(Ntype_op::Sum);
   lg->add_edge(in_a, s0.setup_sink_pin_raw(0));
   lg->add_edge(in_b, s0.setup_sink_pin_raw(1));
   lg->add_edge(s0.setup_driver_pin(), out0);
 
-  auto gm = std::make_shared<upass::Lgraph_manager>(lg);
+  auto                gm = std::make_shared<upass::Lgraph_manager>(lg);
   uPass_runner_lgraph runner(gm, {"fold_sub_const"});
 
   testing::internal::CaptureStdout();
@@ -922,8 +932,10 @@ TEST(UpassRunnerLgraph, FoldSubConstGuardSkipsWhenNoCandidates) {
   EXPECT_NE(out_str.find("uPass(lgraph) - skip fold_sub_const (no fold candidates)"), std::string::npos);
 
   std::size_t sum_count = 0;
-  for (const auto &n : lg->fast()) {
-    if (n.get_type_op() == Ntype_op::Sum) ++sum_count;
+  for (const auto& n : lg->fast()) {
+    if (n.get_type_op() == Ntype_op::Sum) {
+      ++sum_count;
+    }
   }
   EXPECT_EQ(sum_count, 1U);  // Sum survives — nothing folded.
 }
@@ -936,9 +948,9 @@ TEST(UpassRunnerLgraph, FoldSubConstGuardSkipsWhenNoCandidates) {
 TEST(UpassRunnerLgraph, FoldMultConstConstMult) {
   constexpr std::string_view kDbPath = "lgdb_upass_lgraph_fold_const_mult";
   file_utils::clean_dir(kDbPath);
-  auto *lib = Graph_library::instance(kDbPath);
+  auto* lib = Graph_library::instance(kDbPath);
   ASSERT_NE(lib, nullptr);
-  auto *lg = lib->create_lgraph("top", "upass_lgraph_fold_const_mult");
+  auto* lg = lib->create_lgraph("top", "upass_lgraph_fold_const_mult");
   ASSERT_NE(lg, nullptr);
 
   auto out0 = lg->add_graph_output("o_const_mult", 2, 8);
@@ -959,8 +971,10 @@ TEST(UpassRunnerLgraph, FoldMultConstConstMult) {
   EXPECT_EQ(dry.const_mult_folded, 1U);
   EXPECT_EQ(dry.deleted_nodes, 1U);
   std::size_t mult_count = 0;
-  for (const auto &n : lg->fast()) {
-    if (n.get_type_op() == Ntype_op::Mult) ++mult_count;
+  for (const auto& n : lg->fast()) {
+    if (n.get_type_op() == Ntype_op::Mult) {
+      ++mult_count;
+    }
   }
   EXPECT_EQ(mult_count, 1U);
 
@@ -969,8 +983,10 @@ TEST(UpassRunnerLgraph, FoldMultConstConstMult) {
   runner.run(3);
 
   mult_count = 0;
-  for (const auto &n : lg->fast()) {
-    if (n.get_type_op() == Ntype_op::Mult) ++mult_count;
+  for (const auto& n : lg->fast()) {
+    if (n.get_type_op() == Ntype_op::Mult) {
+      ++mult_count;
+    }
   }
   EXPECT_EQ(mult_count, 0U);
 
@@ -983,21 +999,21 @@ TEST(UpassRunnerLgraph, FoldMultConstConstMult) {
 TEST(UpassRunnerLgraph, FoldMultConstGuardSkipsWhenNoCandidates) {
   constexpr std::string_view kDbPath = "lgdb_upass_lgraph_fold_mult_guard";
   file_utils::clean_dir(kDbPath);
-  auto *lib = Graph_library::instance(kDbPath);
+  auto* lib = Graph_library::instance(kDbPath);
   ASSERT_NE(lib, nullptr);
-  auto *lg = lib->create_lgraph("top", "upass_lgraph_fold_mult_guard");
+  auto* lg = lib->create_lgraph("top", "upass_lgraph_fold_mult_guard");
   ASSERT_NE(lg, nullptr);
 
   // One signal input, one const — not all-const, so guard should skip.
   auto in_a = lg->add_graph_input("a", 1, 8);
-  auto out0  = lg->add_graph_output("o", 2, 8);
-  auto c3    = lg->create_node_const(3);
-  auto m0    = lg->create_node(Ntype_op::Mult);
+  auto out0 = lg->add_graph_output("o", 2, 8);
+  auto c3   = lg->create_node_const(3);
+  auto m0   = lg->create_node(Ntype_op::Mult);
   lg->add_edge(in_a, m0.setup_sink_pin_raw(0));
   lg->add_edge(c3.get_driver_pin(), m0.setup_sink_pin_raw(0));  // Mult: all inputs on pin 0
   lg->add_edge(m0.setup_driver_pin(), out0);
 
-  auto gm = std::make_shared<upass::Lgraph_manager>(lg);
+  auto                gm = std::make_shared<upass::Lgraph_manager>(lg);
   uPass_runner_lgraph runner(gm, {"fold_mult_const"});
 
   testing::internal::CaptureStdout();
@@ -1006,8 +1022,10 @@ TEST(UpassRunnerLgraph, FoldMultConstGuardSkipsWhenNoCandidates) {
   EXPECT_NE(out_str.find("uPass(lgraph) - skip fold_mult_const (no fold candidates)"), std::string::npos);
 
   std::size_t mult_count = 0;
-  for (const auto &n : lg->fast()) {
-    if (n.get_type_op() == Ntype_op::Mult) ++mult_count;
+  for (const auto& n : lg->fast()) {
+    if (n.get_type_op() == Ntype_op::Mult) {
+      ++mult_count;
+    }
   }
   EXPECT_EQ(mult_count, 1U);  // Mult survives — nothing folded.
 }
@@ -1016,9 +1034,9 @@ TEST(UpassRunnerLgraph, FoldMultConstGuardSkipsWhenNoCandidates) {
 TEST(UpassRunnerLgraph, FoldMultConstMultipleNodes) {
   constexpr std::string_view kDbPath = "lgdb_upass_lgraph_fold_mult_multi";
   file_utils::clean_dir(kDbPath);
-  auto *lib = Graph_library::instance(kDbPath);
+  auto* lib = Graph_library::instance(kDbPath);
   ASSERT_NE(lib, nullptr);
-  auto *lg = lib->create_lgraph("top", "upass_lgraph_fold_mult_multi");
+  auto* lg = lib->create_lgraph("top", "upass_lgraph_fold_mult_multi");
   ASSERT_NE(lg, nullptr);
 
   // 2 * 5 = 10
@@ -1043,13 +1061,15 @@ TEST(UpassRunnerLgraph, FoldMultConstMultipleNodes) {
   m2_out.set_bits(8);
   lg->add_edge(m2_out, out2);
 
-  auto gm = std::make_shared<upass::Lgraph_manager>(lg);
+  auto                gm = std::make_shared<upass::Lgraph_manager>(lg);
   uPass_runner_lgraph runner(gm, {"fold_mult_const"});
   runner.run(3);
 
   std::size_t mult_count = 0;
-  for (const auto &n : lg->fast()) {
-    if (n.get_type_op() == Ntype_op::Mult) ++mult_count;
+  for (const auto& n : lg->fast()) {
+    if (n.get_type_op() == Ntype_op::Mult) {
+      ++mult_count;
+    }
   }
   EXPECT_EQ(mult_count, 0U);
 
@@ -1070,9 +1090,9 @@ TEST(UpassRunnerLgraph, FoldMultConstMultipleNodes) {
 TEST(UpassRunnerLgraph, DceRemovesOrphanConst) {
   constexpr std::string_view kDbPath = "lgdb_upass_lgraph_dce_orphan";
   file_utils::clean_dir(kDbPath);
-  auto *lib = Graph_library::instance(kDbPath);
+  auto* lib = Graph_library::instance(kDbPath);
   ASSERT_NE(lib, nullptr);
-  auto *lg = lib->create_lgraph("top", "upass_lgraph_dce_orphan");
+  auto* lg = lib->create_lgraph("top", "upass_lgraph_dce_orphan");
   ASSERT_NE(lg, nullptr);
 
   // Create a const(99) that is not connected to any output.
@@ -1085,8 +1105,10 @@ TEST(UpassRunnerLgraph, DceRemovesOrphanConst) {
   EXPECT_EQ(dry.dead_nodes_removed, 1U);
   EXPECT_EQ(dry.edges_freed, 0U);  // orphan has no inputs
   std::size_t const_count = 0;
-  for (const auto &n : lg->fast()) {
-    if (n.get_type_op() == Ntype_op::Const) ++const_count;
+  for (const auto& n : lg->fast()) {
+    if (n.get_type_op() == Ntype_op::Const) {
+      ++const_count;
+    }
   }
   EXPECT_EQ(const_count, 1U);  // survived dry-run
 
@@ -1095,8 +1117,10 @@ TEST(UpassRunnerLgraph, DceRemovesOrphanConst) {
   runner.run(2);
 
   const_count = 0;
-  for (const auto &n : lg->fast()) {
-    if (n.get_type_op() == Ntype_op::Const) ++const_count;
+  for (const auto& n : lg->fast()) {
+    if (n.get_type_op() == Ntype_op::Const) {
+      ++const_count;
+    }
   }
   EXPECT_EQ(const_count, 0U);
 }
@@ -1106,9 +1130,9 @@ TEST(UpassRunnerLgraph, DceRemovesOrphanConst) {
 TEST(UpassRunnerLgraph, DceConvergesAfterFoldMult) {
   constexpr std::string_view kDbPath = "lgdb_upass_lgraph_dce_after_fold";
   file_utils::clean_dir(kDbPath);
-  auto *lib = Graph_library::instance(kDbPath);
+  auto* lib = Graph_library::instance(kDbPath);
   ASSERT_NE(lib, nullptr);
-  auto *lg = lib->create_lgraph("top", "upass_lgraph_dce_after_fold");
+  auto* lg = lib->create_lgraph("top", "upass_lgraph_dce_after_fold");
   ASSERT_NE(lg, nullptr);
 
   // 3 * 4 = 12, connected to a graph output.
@@ -1132,8 +1156,10 @@ TEST(UpassRunnerLgraph, DceConvergesAfterFoldMult) {
   //   const(3) and const(4) are orphaned → removed by dce
   //   const(12) feeds the graph output → kept
   std::size_t const_count = 0;
-  for (const auto &n : lg->fast()) {
-    if (n.get_type_op() == Ntype_op::Const) ++const_count;
+  for (const auto& n : lg->fast()) {
+    if (n.get_type_op() == Ntype_op::Const) {
+      ++const_count;
+    }
   }
   EXPECT_EQ(const_count, 1U);  // only const(12) survives
 
@@ -1146,9 +1172,9 @@ TEST(UpassRunnerLgraph, DceConvergesAfterFoldMult) {
 TEST(UpassRunnerLgraph, DceCleanGraphNoOp) {
   constexpr std::string_view kDbPath = "lgdb_upass_lgraph_dce_clean";
   file_utils::clean_dir(kDbPath);
-  auto *lib = Graph_library::instance(kDbPath);
+  auto* lib = Graph_library::instance(kDbPath);
   ASSERT_NE(lib, nullptr);
-  auto *lg = lib->create_lgraph("top", "upass_lgraph_dce_clean");
+  auto* lg = lib->create_lgraph("top", "upass_lgraph_dce_clean");
   ASSERT_NE(lg, nullptr);
 
   // const(7) → graph output — everything is live.
@@ -1168,27 +1194,29 @@ TEST(UpassRunnerLgraph, DceCleanGraphNoOp) {
 TEST(UpassRunnerLgraph, DceTransitiveChain) {
   constexpr std::string_view kDbPath = "lgdb_upass_lgraph_dce_chain";
   file_utils::clean_dir(kDbPath);
-  auto *lib = Graph_library::instance(kDbPath);
+  auto* lib = Graph_library::instance(kDbPath);
   ASSERT_NE(lib, nullptr);
-  auto *lg = lib->create_lgraph("top", "upass_lgraph_dce_chain");
+  auto* lg = lib->create_lgraph("top", "upass_lgraph_dce_chain");
   ASSERT_NE(lg, nullptr);
 
   // const(5) → Sum (two inputs: const(5) + const(5)), Sum has no output.
-  auto c5  = lg->create_node_const(5);
-  auto s0  = lg->create_node(Ntype_op::Sum);
+  auto c5 = lg->create_node_const(5);
+  auto s0 = lg->create_node(Ntype_op::Sum);
   lg->add_edge(c5.get_driver_pin(), s0.setup_sink_pin_raw(0));
   lg->add_edge(c5.get_driver_pin(), s0.setup_sink_pin_raw(0));
   // s0 is NOT connected to any output → dead
   // c5 feeds s0, so c5 is live in iteration 1; becomes dead after s0 is removed.
 
-  auto gm = std::make_shared<upass::Lgraph_manager>(lg);
+  auto                gm = std::make_shared<upass::Lgraph_manager>(lg);
   uPass_runner_lgraph runner(gm, {"dce"});
   runner.run(5);
 
   // After convergence, both c5 and s0 must be gone.
   std::size_t node_count = 0;
-  for (const auto &n : lg->fast()) {
-    if (!n.is_type_io()) ++node_count;
+  for (const auto& n : lg->fast()) {
+    if (!n.is_type_io()) {
+      ++node_count;
+    }
   }
   EXPECT_EQ(node_count, 0U);
 }

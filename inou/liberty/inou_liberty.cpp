@@ -18,14 +18,14 @@ void Inou_liberty::setup() {
   register_pass(m2);
 }
 
-Inou_liberty::Inou_liberty(const Eprp_var &var) : Pass("pass.opentimer", var) {}
+Inou_liberty::Inou_liberty(const Eprp_var& var) : Pass("pass.opentimer", var) {}
 
-void Inou_liberty::liberty_open(Eprp_var &var) {
+void Inou_liberty::liberty_open(Eprp_var& var) {
   TRACE_EVENT("inou", "INOUT_liberty");
 
   Inou_liberty p(var);
 
-  auto *library = Graph_library::instance(p.path);
+  auto* library = Graph_library::instance(p.path);
 
   for (const auto f : absl::StrSplit(p.files, ',')) {
     std::print("reading liberty {}\n", f);
@@ -36,13 +36,13 @@ void Inou_liberty::liberty_open(Eprp_var &var) {
 
     timer.update_timing();
 
-    const auto &cl = timer.celllib(ot::MAX);
-    for (const auto &it : cl->cells) {
-      auto *sub = library->ref_or_create_sub(it.first);
+    const auto& cl = timer.celllib(ot::MAX);
+    for (const auto& it : cl->cells) {
+      auto* sub = library->ref_or_create_sub(it.first);
       sub->reset_pins();
 
       bool has_clock = false;
-      for (const auto &pin : it.second.cellpins) {
+      for (const auto& pin : it.second.cellpins) {
         if (pin.second.is_clock && *pin.second.is_clock) {
           sub->set_loop_last();
           has_clock = true;

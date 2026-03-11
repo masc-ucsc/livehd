@@ -12,17 +12,17 @@ protected:
   Hierarchy_index src_hierarchy;  // FIXME: _index does not include information about the pin or internal node
   Hierarchy_index dst_hierarchy;
 
-  static void work(Eprp_var &var);
+  static void work(Eprp_var& var);
 
 public:
-  Pass_punch(const Eprp_var &var);
+  Pass_punch(const Eprp_var& var);
   static void setup();
 
-  void punch(Lgraph *top, std::string_view src, std::string_view dst);
+  void punch(Lgraph* top, std::string_view src, std::string_view dst);
 
-  void add_output(Lgraph *g, std::string_view wname, std::string_view output);
-  void add_output(Lgraph *g, Node_pin dpin, std::string output);
+  void add_output(Lgraph* g, std::string_view wname, std::string_view output);
+  void add_output(Lgraph* g, Node_pin dpin, std::string output);
 
-  bool add_input(Lgraph *g, std::string_view wire, std::string_view input);
-  bool add_dest_instance(Lgraph *g, std::string_view type, std::string_view instance, std::string_view wire);
+  bool add_input(Lgraph* g, std::string_view wire, std::string_view input);
+  bool add_dest_instance(Lgraph* g, std::string_view type, std::string_view instance, std::string_view wire);
 };

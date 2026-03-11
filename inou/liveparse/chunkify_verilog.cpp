@@ -68,7 +68,7 @@ bool Chunkify_verilog::is_same_file(std::string_view module_name, std::string_vi
     return false;
   }
 
-  char *memblock2 = (char *)mmap(NULL, sb.st_size, PROT_READ, MAP_PRIVATE, fd, 0);  // Read only mmap
+  char* memblock2 = (char*)mmap(NULL, sb.st_size, PROT_READ, MAP_PRIVATE, fd, 0);  // Read only mmap
   if (memblock2 == MAP_FAILED) {
     Inou_liveparse::error(std::format("mmap failed?? for {}", module_name));
     close(fd);
@@ -119,7 +119,7 @@ void Chunkify_verilog::write_file(std::string_view fname, std::string_view text)
   close(fd);
 }
 
-void Chunkify_verilog::add_io(Sub_node *sub, bool input, std::string_view io_name, Port_ID pos) {
+void Chunkify_verilog::add_io(Sub_node* sub, bool input, std::string_view io_name, Port_ID pos) {
   I(sub);
 
   auto dir = input ? Sub_node::Direction::Input : Sub_node::Direction::Output;
@@ -159,7 +159,7 @@ void Chunkify_verilog::elaborate() {
 
   in_module_text.reserve(get_memblock().size());
 
-  Sub_node *sub = nullptr;
+  Sub_node* sub = nullptr;
 
   int inside_task_function = 0;
 

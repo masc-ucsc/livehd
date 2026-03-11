@@ -10,7 +10,7 @@
 #include "cell.hpp"
 
 // Check if a driver pin has a real wname (not a temporary _nXXX name)
-static bool has_real_wname(const Node_pin &dpin) {
+static bool has_real_wname(const Node_pin& dpin) {
   if (!dpin.has_name()) {
     return false;
   }
@@ -19,7 +19,7 @@ static bool has_real_wname(const Node_pin &dpin) {
 }
 
 // Returns true if color was newly added, false if already present
-static bool add_color(std::vector<int> &colors, int color) {
+static bool add_color(std::vector<int>& colors, int color) {
   if (std::find(colors.begin(), colors.end(), color) != colors.end()) {
     return false;
   }
@@ -41,9 +41,9 @@ std::vector<std::string> Label_path::parse_instance_names(std::string_view insta
   return names;
 }
 
-bool Label_path::should_stop_fwd(const Node &node, int color) const {
+bool Label_path::should_stop_fwd(const Node& node, int color) const {
   if (instance_names.empty()) {
-    for (const auto &oe : node.out_edges()) {
+    for (const auto& oe : node.out_edges()) {
       if (has_real_wname(oe.driver)) {
         return true;
       }
@@ -64,8 +64,8 @@ bool Label_path::should_stop_fwd(const Node &node, int color) const {
   return node.get_name().rfind(prefix, 0) != 0;
 }
 
-void Label_path::propagate_fwd(const Node &node, int color) {
-  for (const auto &e : node.out_edges()) {
+void Label_path::propagate_fwd(const Node& node, int color) {
+  for (const auto& e : node.out_edges()) {
     auto succ = e.sink.get_node();
     if (succ.is_type_loop_last()) {
       // Back-to-back flop: share color
@@ -85,8 +85,8 @@ void Label_path::propagate_fwd(const Node &node, int color) {
   }
 }
 
-void Label_path::propagate_bwd(const Node &node, int color) {
-  for (const auto &e : node.inp_edges()) {
+void Label_path::propagate_bwd(const Node& node, int color) {
+  for (const auto& e : node.inp_edges()) {
     auto pred = e.driver.get_node();
     if (pred.is_type_loop_last()) {
       // Back-to-back flop: share color
@@ -100,7 +100,7 @@ void Label_path::propagate_bwd(const Node &node, int color) {
 
     // Check if this predecessor has a wname on any output edge (stop point)
     bool has_wname = false;
-    for (const auto &oe : pred.out_edges()) {
+    for (const auto& oe : pred.out_edges()) {
       if (has_real_wname(oe.driver)) {
         has_wname = true;
         break;
@@ -115,14 +115,14 @@ void Label_path::propagate_bwd(const Node &node, int color) {
   }
 }
 
-void Label_path::label(Lgraph *g) {
+void Label_path::label(Lgraph* g) {
   last_free_id = 0;
   node2colors.clear();
   color2instance.clear();
 
   if (!instance_names.empty()) {
     absl::flat_hash_set<std::string_view> instance_set;
-    for (const auto &name : instance_names) {
+    for (const auto& name : instance_names) {
       instance_set.insert(name);
     }
 
@@ -131,7 +131,7 @@ void Label_path::label(Lgraph *g) {
         continue;
       }
 
-      auto &colors = node2colors[node.get_compact()];
+      auto& colors = node2colors[node.get_compact()];
       int   color  = colors.empty() ? get_free_id() : colors.front();
       if (colors.empty()) {
         colors.push_back(color);
@@ -151,7 +151,7 @@ void Label_path::label(Lgraph *g) {
       auto nc = node.get_compact();
 
       int   color;
-      auto &colors = node2colors[nc];
+      auto& colors = node2colors[nc];
       if (colors.empty()) {
         color = get_free_id();
         colors.push_back(color);
@@ -166,7 +166,7 @@ void Label_path::label(Lgraph *g) {
 
   // Apply colors to the graph (pick first color since API supports one)
   if (hier) {
-    g->each_hier_unique_sub_bottom_up([](Lgraph *lg) { lg->ref_node_color_map()->clear(); });
+    g->each_hier_unique_sub_bottom_up([](Lgraph* lg) { lg->ref_node_color_map()->clear(); });
   }
   g->ref_node_color_map()->clear();
 
@@ -184,17 +184,17 @@ void Label_path::label(Lgraph *g) {
   }
 }
 
-void Label_path::dump(Lgraph *g) const {
+void Label_path::dump(Lgraph* g) const {
   std::cout << "---- Label Path dump ----\n";
 
-  absl::flat_hash_map<int, std::string>                  dump_color2instance;
+  absl::flat_hash_map<int, std::string>                      dump_color2instance;
   absl::flat_hash_map<int, absl::flat_hash_set<std::string>> color2wnames;
   absl::flat_hash_map<int, absl::flat_hash_set<std::string>> color2sources;
 
   // Collect all colors
   absl::flat_hash_set<int> all_colors;
 
-  for (auto &[nc, colors] : node2colors) {
+  for (auto& [nc, colors] : node2colors) {
     Node node(g, nc);
 
     for (auto color : colors) {
@@ -205,7 +205,7 @@ void Label_path::dump(Lgraph *g) const {
       }
 
       // Collect wnames from output edges
-      for (const auto &e : node.out_edges()) {
+      for (const auto& e : node.out_edges()) {
         auto wn = e.driver.get_wire_name();
         if (!wn.empty() && wn[0] != '_') {
           color2wnames[color].insert(wn);
@@ -232,7 +232,7 @@ void Label_path::dump(Lgraph *g) const {
     std::print(" :");
     auto sit = color2sources.find(color);
     if (sit != color2sources.end()) {
-      for (auto &src : sit->second) {
+      for (auto& src : sit->second) {
         std::print(" {}", src);
       }
     }
@@ -240,7 +240,7 @@ void Label_path::dump(Lgraph *g) const {
     std::print(" :");
     auto wit = color2wnames.find(color);
     if (wit != color2wnames.end()) {
-      for (auto &wn : wit->second) {
+      for (auto& wn : wit->second) {
         std::print(" {}", wn);
       }
     }

@@ -12,7 +12,7 @@
 namespace vcd {
 namespace utils {
 // -----------------------------
-std::string format(const char *fmt, ...) {
+std::string format(const char* fmt, ...) {
   va_list args;
   va_start(args, fmt);
   std::vector<char> v(1024);
@@ -44,7 +44,7 @@ std::string now() {
   time_t rawtime;
   time(&rawtime);
 
-  struct tm *timeinfo = localtime(&rawtime);
+  struct tm* timeinfo = localtime(&rawtime);
 
   char buffer[128];
   strftime(buffer, sizeof(buffer), "%Y-%m-%d %H:%M:%S", timeinfo);
@@ -53,7 +53,7 @@ std::string now() {
 }
 
 // -----------------------------
-void replace_new_lines(std::string &str, const std::string &sub) {
+void replace_new_lines(std::string& str, const std::string& sub) {
   bool nl = false;
   int  k  = 0;
 

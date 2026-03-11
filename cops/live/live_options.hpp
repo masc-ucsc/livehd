@@ -25,7 +25,7 @@ public:
       , delta_lgdb("delta-lgdb")
       , diff_file("diff") {}
 
-  void set(const std::string &key, const std::string &value) final;
+  void set(const std::string& key, const std::string& value) final;
 };
 
 #endif

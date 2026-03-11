@@ -871,8 +871,8 @@ TEST_F(Lconst_test, used_bits) {
   std::print("b used bits:{}\n", b.bit_length());
 
   uint64_t v        = 0x10;
-  auto     uint_ptr = reinterpret_cast<UInt<8> *>(&v);
-  auto    &u        = *uint_ptr;
+  auto     uint_ptr = reinterpret_cast<UInt<8>*>(&v);
+  auto&    u        = *uint_ptr;
   std::print("u used bits:{}\n", u.bit_length());
 }
 

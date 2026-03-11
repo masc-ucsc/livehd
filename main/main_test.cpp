@@ -41,7 +41,7 @@ protected:
     }
 
     if (child == 0) {
-      const char *lgshell = "main/lgshell";
+      const char* lgshell = "main/lgshell";
       if (access(lgshell, X_OK) == -1) {
         lgshell = "bazel-bin/main/lgshell";
         if (access(lgshell, X_OK) == -1) {
@@ -104,10 +104,10 @@ protected:
 
     {
       std::string line2;
-      TMT        *vt = tmt_open(24, 80, nullptr, NULL, NULL);
+      TMT*        vt = tmt_open(24, 80, nullptr, NULL, NULL);
       tmt_write(vt, line.c_str(), line.size());
 
-      const TMTSCREEN *s = tmt_screen(vt);
+      const TMTSCREEN* s = tmt_screen(vt);
       for (size_t r = 0; r < s->nline; r++) {
         if (s->lines[r]->dirty) {
           for (size_t c = 0; c < s->ncol; c++) {

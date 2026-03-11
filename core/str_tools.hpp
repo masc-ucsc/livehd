@@ -151,8 +151,8 @@ namespace str_tools {
     return false;  // end is larger
   }
 
-  const auto *base_en   = end.data();
-  const auto *base_self = str.data() + str.size() - end.size();
+  const auto* base_en   = end.data();
+  const auto* base_self = str.data() + str.size() - end.size();
   return memcmp(base_self, base_en, end.size()) == 0;
 }
 

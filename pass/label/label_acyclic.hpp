@@ -42,19 +42,19 @@ private:
 
   bool node_set_cmp(NodeSet a, NodeSet b) const;
   bool int_set_cmp(IntSet a, IntSet b) const;
-  void node_set_write(NodeSet &tgt, NodeSet &ref);
-  void int_set_write(IntSet &tgt, IntSet &ref);
+  void node_set_write(NodeSet& tgt, NodeSet& ref);
+  void int_set_write(IntSet& tgt, IntSet& ref);
 
-  void gather_roots(Lgraph *g);
-  void grow_partitions(Lgraph *g);
-  void gather_inou(Lgraph *g);
+  void gather_roots(Lgraph* g);
+  void grow_partitions(Lgraph* g);
+  void gather_inou(Lgraph* g);
 
   void merge_op(int merge_from, int merge_into);
   void merge_partitions_same_parents();
   void merge_partitions_one_parent();
 
 public:
-  void label(Lgraph *g);
+  void label(Lgraph* g);
   Label_acyclic(bool _v, bool _h, uint8_t _c, bool _m);
-  void dump(Lgraph *g) const;
+  void dump(Lgraph* g) const;
 };

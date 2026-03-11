@@ -26,11 +26,11 @@ struct Shared_fold_sum_const_report {
   std::size_t deleted_nodes{0};
 };
 
-inline void run_noop_shared(const IR_adapter &adapter, std::string_view tag) {
+inline void run_noop_shared(const IR_adapter& adapter, std::string_view tag) {
   std::print("{} - shared noop on {}\n", tag, adapter.kind());
 }
 
-inline Shared_scan_report run_scan_shared(const IR_adapter &adapter, std::string_view tag) {
+inline Shared_scan_report run_scan_shared(const IR_adapter& adapter, std::string_view tag) {
   Shared_scan_report report{
       .node_count       = adapter.node_count(),
       .const_count      = adapter.const_count(),
@@ -45,14 +45,14 @@ inline Shared_scan_report run_scan_shared(const IR_adapter &adapter, std::string
   return report;
 }
 
-inline Shared_decision_report compute_decide_shared(const IR_adapter &adapter) {
+inline Shared_decision_report compute_decide_shared(const IR_adapter& adapter) {
   return Shared_decision_report{
       .fold_candidate_count = adapter.fold_candidate_count(),
       .has_fold_candidates  = adapter.fold_candidate_count() > 0,
   };
 }
 
-inline Shared_decision_report run_decide_shared(const IR_adapter &adapter, std::string_view tag) {
+inline Shared_decision_report run_decide_shared(const IR_adapter& adapter, std::string_view tag) {
   const auto report = compute_decide_shared(adapter);
   std::print("{} - shared decide on {} fold_candidates:{} has_fold_candidates:{}\n",
              tag,
@@ -62,9 +62,9 @@ inline Shared_decision_report run_decide_shared(const IR_adapter &adapter, std::
   return report;
 }
 
-inline Shared_fold_sum_const_report run_fold_sum_const_shared(IR_adapter &adapter, std::string_view tag, bool dry_run = false) {
+inline Shared_fold_sum_const_report run_fold_sum_const_shared(IR_adapter& adapter, std::string_view tag, bool dry_run = false) {
   Shared_fold_sum_const_report report;
-  const auto                  nodes = adapter.list_nodes();
+  const auto                   nodes = adapter.list_nodes();
   for (const auto node : nodes) {
     if (adapter.op_name(node) != "sum") {
       continue;

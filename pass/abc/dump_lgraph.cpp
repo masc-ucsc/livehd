@@ -7,7 +7,7 @@
 #include "lgraph.hpp"
 #include "pass_abc.hpp"
 
-void Pass_abc::from_abc(Lgraph *new_graph, const Lgraph *old_graph, Abc_Ntk_t *pNtk) {
+void Pass_abc::from_abc(Lgraph* new_graph, const Lgraph* old_graph, Abc_Ntk_t* pNtk) {
   if (!Abc_NtkIsAigNetlist(pNtk) && !Abc_NtkIsMappedNetlist(pNtk)) {
     Pass::error("Io_WriteVerilog(): Can produce Verilog for mapped or AIG netlists only.");
     return;
@@ -24,7 +24,7 @@ void Pass_abc::from_abc(Lgraph *new_graph, const Lgraph *old_graph, Abc_Ntk_t *p
   conn_combinational_cell(new_graph, old_graph, pNtk);
 }
 
-void Pass_abc::gen_primary_io_from_abc(Lgraph *new_graph, const Lgraph *old_graph, Abc_Ntk_t *pNtk) {
+void Pass_abc::gen_primary_io_from_abc(Lgraph* new_graph, const Lgraph* old_graph, Abc_Ntk_t* pNtk) {
   assert(old_graph);
   Abc_Obj_t *pTerm = nullptr, *pNet = nullptr;
   int        i = 0;
@@ -69,19 +69,19 @@ void Pass_abc::gen_primary_io_from_abc(Lgraph *new_graph, const Lgraph *old_grap
   }
 }
 
-void Pass_abc::gen_comb_cell_from_abc(Lgraph *new_graph, const Lgraph *old_graph, Abc_Ntk_t *pNtk) {
+void Pass_abc::gen_comb_cell_from_abc(Lgraph* new_graph, const Lgraph* old_graph, Abc_Ntk_t* pNtk) {
   assert(old_graph);
-  const Tech_library &tlib  = new_graph->get_tlibrary();
-  const Tech_cell    *tcell = nullptr;
-  Abc_Obj_t          *pObj  = nullptr;
+  const Tech_library& tlib  = new_graph->get_tlibrary();
+  const Tech_cell*    tcell = nullptr;
+  Abc_Obj_t*          pObj  = nullptr;
   int                 i, k = 0;
   Index_ID            cell_idx = 0;
 
   if (Abc_NtkHasMapping(pNtk)) {
     Abc_NtkForEachNode(pNtk, pObj, k) {
       bool       constnode = false;
-      auto      *pGate     = (Mio_Gate_t *)pObj->pData;
-      Mio_Pin_t *pGatePin;
+      auto*      pGate     = (Mio_Gate_t*)pObj->pData;
+      Mio_Pin_t* pGatePin;
 
       std::string gate_name(Mio_GateReadName(pGate));
 
@@ -151,12 +151,12 @@ void Pass_abc::gen_comb_cell_from_abc(Lgraph *new_graph, const Lgraph *old_graph
   }
 }
 
-void Pass_abc::gen_latch_from_abc(Lgraph *new_graph, const Lgraph *old_graph, Abc_Ntk_t *pNtk) {
+void Pass_abc::gen_latch_from_abc(Lgraph* new_graph, const Lgraph* old_graph, Abc_Ntk_t* pNtk) {
   assert(old_graph);
-  Abc_Obj_t *pLatch = nullptr;
+  Abc_Obj_t* pLatch = nullptr;
   int        i      = 0;
   Abc_NtkForEachLatch(pNtk, pLatch, i) {
-    Abc_Obj_t  *pNet = Abc_ObjFanout0(Abc_ObjFanout0(pLatch));
+    Abc_Obj_t*  pNet = Abc_ObjFanout0(Abc_ObjFanout0(pLatch));
     std::string latch_name(Abc_ObjName(pNet));
     Index_ID    cell_idx = new_graph->create_node().get_nid();
     new_graph->set_bits(cell_idx, 1);
@@ -168,9 +168,9 @@ void Pass_abc::gen_latch_from_abc(Lgraph *new_graph, const Lgraph *old_graph, Ab
   }
 }
 
-void Pass_abc::gen_memory_from_abc(Lgraph *new_graph, const Lgraph *old_graph, Abc_Ntk_t *pNtk) {
+void Pass_abc::gen_memory_from_abc(Lgraph* new_graph, const Lgraph* old_graph, Abc_Ntk_t* pNtk) {
   assert(old_graph);
-  for (const auto &idx : graph_info->memory_id) {
+  for (const auto& idx : graph_info->memory_id) {
     Index_ID new_memory_idx       = new_graph->create_node().get_nid();
     graph_info->memory_remap[idx] = new_memory_idx;
     new_graph->node_type_set(new_memory_idx, Memory_Op);
@@ -179,8 +179,8 @@ void Pass_abc::gen_memory_from_abc(Lgraph *new_graph, const Lgraph *old_graph, A
 
   Abc_Obj_t *pTerm = nullptr, *pNet = nullptr;
 
-  std::map<index_offset, Abc_Obj_t *> memory_input_map;
-  int                                 i = 0;
+  std::map<index_offset, Abc_Obj_t*> memory_input_map;
+  int                                i = 0;
   Abc_NtkForEachPo(pNtk, pTerm, i) {
     pNet = Abc_ObjFanin0(pTerm);
     std::string output_name(((Abc_ObjName(pNet))));
@@ -207,7 +207,7 @@ void Pass_abc::gen_memory_from_abc(Lgraph *new_graph, const Lgraph *old_graph, A
     }
   }
 
-  std::map<index_offset, Abc_Obj_t *> memory_output_map;
+  std::map<index_offset, Abc_Obj_t*> memory_output_map;
   Abc_NtkForEachPi(pNtk, pTerm, i) {
     pNet = Abc_ObjFanout0(pTerm);
     std::string input_name(((Abc_ObjName(pNet))));
@@ -226,10 +226,10 @@ void Pass_abc::gen_memory_from_abc(Lgraph *new_graph, const Lgraph *old_graph, A
     }
   }
 
-  for (const auto &old_idx : graph_info->memory_id) {
+  for (const auto& old_idx : graph_info->memory_id) {
     Index_ID new_memory_idx = graph_info->memory_remap[old_idx];
 
-    for (const auto &input : old_graph->inp_edges(old_idx)) {
+    for (const auto& input : old_graph->inp_edges(old_idx)) {
       Port_ID old_inp_pid = input.get_inp_pin().get_pid();
       if (old_inp_pid < LgRAPH_MEMOP_CLK) {
         auto node_idx = input.get_idx();
@@ -241,12 +241,12 @@ void Pass_abc::gen_memory_from_abc(Lgraph *new_graph, const Lgraph *old_graph, A
         auto spin = new_graph->get_node(new_memory_idx).setup_sink_pin(old_inp_pid);
         connect_constant(new_graph, val, width, spin);
       } else if (old_inp_pid == LgRAPH_MEMOP_CLK) {
-        for (const auto &sg : graph_info->skew_group_map) {
+        for (const auto& sg : graph_info->skew_group_map) {
           if (sg.second.find(old_idx) != sg.second.end()) {
             std::string ck_name = sg.first;
             auto        dpin    = new_graph->get_node(graph_info->ck_remap[ck_name])
-                            .setup_driver_pin(graph_info->cell_out_pid[graph_info->ck_remap[ck_name]]++);
-            auto spin = new_graph->get_node(new_memory_idx).setup_sink_pin(LgRAPH_MEMOP_CLK);
+                                      .setup_driver_pin(graph_info->cell_out_pid[graph_info->ck_remap[ck_name]]++);
+            auto        spin    = new_graph->get_node(new_memory_idx).setup_sink_pin(LgRAPH_MEMOP_CLK);
             new_graph->add_edge(dpin, spin);
           }
         }
@@ -265,7 +265,7 @@ void Pass_abc::gen_memory_from_abc(Lgraph *new_graph, const Lgraph *old_graph, A
 
         for (size_t offset = 0; offset < inp_info.size(); ++offset) {
           index_offset info = {new_memory_idx, old_inp_pid, {static_cast<int>(offset), static_cast<int>(offset)}};
-          auto        *pObj = memory_input_map[info];
+          auto*        pObj = memory_input_map[info];
 
           auto dpin = new_graph->get_node(graph_info->cell2id[pObj])
                           .setup_driver_pin(graph_info->cell_out_pid[graph_info->cell2id[pObj]]++);
@@ -275,7 +275,7 @@ void Pass_abc::gen_memory_from_abc(Lgraph *new_graph, const Lgraph *old_graph, A
       }
     }
 
-    for (const auto &out : old_graph->out_edges(old_idx)) {
+    for (const auto& out : old_graph->out_edges(old_idx)) {
       auto     out_pid  = out.get_out_pin().get_pid();
       auto     width    = out.get_bits();
       Node_pin pick_pin = create_pick_operator(new_graph, new_graph->get_node(new_memory_idx).setup_driver_pin(out_pid), 0, width);
@@ -293,21 +293,21 @@ void Pass_abc::gen_memory_from_abc(Lgraph *new_graph, const Lgraph *old_graph, A
   }
 }
 
-void Pass_abc::gen_sub_from_abc(Lgraph *new_graph, const Lgraph *old_graph, Abc_Ntk_t *pNtk) {
+void Pass_abc::gen_sub_from_abc(Lgraph* new_graph, const Lgraph* old_graph, Abc_Ntk_t* pNtk) {
   assert(old_graph);
-  for (const auto &idx : graph_info->subgraph_id) {
+  for (const auto& idx : graph_info->subgraph_id) {
     std::string subgraph_name(old_graph->get_library().get_name(old_graph->subgraph_id_get(idx)));
     Index_ID    new_sub_idx         = new_graph->create_node().get_nid();
     graph_info->subgraph_remap[idx] = new_sub_idx;
     new_graph->node_type_set(new_sub_idx, SubGraph_Op);
     new_graph->set_node_instance_name(new_sub_idx, old_graph->get_node_instancename(idx));
 
-    Lgraph *sub_graph = old_graph->ref_library()->open(subgraph_name);
+    Lgraph* sub_graph = old_graph->ref_library()->open(subgraph_name);
     new_graph->node_subgraph_set(new_sub_idx, sub_graph->get_lgid());
   }
   Abc_Obj_t *pTerm = nullptr, *pNet = nullptr;
 
-  std::map<index_offset, Abc_Obj_t *> subgraph_input_map;
+  std::map<index_offset, Abc_Obj_t*> subgraph_input_map;
 
   int i = 0;
   Abc_NtkForEachPo(pNtk, pTerm, i) {
@@ -327,7 +327,7 @@ void Pass_abc::gen_sub_from_abc(Lgraph *new_graph, const Lgraph *old_graph, Abc_
     }
   }
 
-  std::map<index_offset, Abc_Obj_t *> subgraph_output_map;
+  std::map<index_offset, Abc_Obj_t*> subgraph_output_map;
   Abc_NtkForEachPi(pNtk, pTerm, i) {
     pNet = Abc_ObjFanout0(pTerm);
     std::string input_name(((Abc_ObjName(pNet))));
@@ -346,9 +346,9 @@ void Pass_abc::gen_sub_from_abc(Lgraph *new_graph, const Lgraph *old_graph, Abc_
     }
   }
 
-  for (const auto &old_idx : graph_info->subgraph_id) {
+  for (const auto& old_idx : graph_info->subgraph_id) {
     Index_ID new_sub_idx = graph_info->subgraph_remap[old_idx];
-    for (const auto &input : old_graph->inp_edges(old_idx)) {
+    for (const auto& input : old_graph->inp_edges(old_idx)) {
       Port_ID old_inp_pid = input.get_inp_pin().get_pid();
       auto    inp_info    = graph_info->subgraph_conn[old_idx][old_inp_pid];
 
@@ -360,7 +360,7 @@ void Pass_abc::gen_sub_from_abc(Lgraph *new_graph, const Lgraph *old_graph, Abc_
 
       for (size_t offset = 0; offset < inp_info.size(); ++offset) {
         index_offset info = {new_sub_idx, old_inp_pid, {static_cast<int>(offset), static_cast<int>(offset)}};
-        auto        *pObj = subgraph_input_map[info];
+        auto*        pObj = subgraph_input_map[info];
 
         auto dpin = new_graph->get_node(graph_info->cell2id[pObj])
                         .setup_driver_pin(graph_info->cell_out_pid[graph_info->cell2id[pObj]]++);
@@ -368,7 +368,7 @@ void Pass_abc::gen_sub_from_abc(Lgraph *new_graph, const Lgraph *old_graph, Abc_
         new_graph->add_edge(dpin, spin);
       }
     }
-    for (const auto &out : old_graph->out_edges(old_idx)) {
+    for (const auto& out : old_graph->out_edges(old_idx)) {
       auto out_pid   = out.get_out_pin().get_pid();
       auto width     = old_graph->get_bits(out.get_out_pin());
       auto pick_pin  = create_pick_operator(new_graph, new_graph->get_node(new_sub_idx).setup_driver_pin(out_pid), 0, width);
@@ -383,25 +383,25 @@ void Pass_abc::gen_sub_from_abc(Lgraph *new_graph, const Lgraph *old_graph, Abc_
   }
 }
 
-void Pass_abc::conn_latch(Lgraph *new_graph, const Lgraph *old_graph, Abc_Ntk_t *pNtk) {
-  Abc_Obj_t *pLatch = nullptr;
+void Pass_abc::conn_latch(Lgraph* new_graph, const Lgraph* old_graph, Abc_Ntk_t* pNtk) {
+  Abc_Obj_t* pLatch = nullptr;
   int        i      = 0;
   Abc_NtkForEachLatch(pNtk, pLatch, i) {
     Index_ID         latch_new_idx = graph_info->cell2id[Abc_ObjFanout0(Abc_ObjFanout0(pLatch))];
-    const Tech_cell *tcell         = new_graph->get_tlibrary().get_const_cell(new_graph->tmap_id_get(latch_new_idx));
+    const Tech_cell* tcell         = new_graph->get_tlibrary().get_const_cell(new_graph->tmap_id_get(latch_new_idx));
     std::string      trig_pin      = tcell->pin_name_exist("C") ? "C" : "E";
-    Abc_Obj_t       *pNode         = Abc_ObjFanin0(Abc_ObjFanin0(pLatch));
+    Abc_Obj_t*       pNode         = Abc_ObjFanin0(Abc_ObjFanin0(pLatch));
 
     auto dpin
         = new_graph->get_node(graph_info->cell2id[pNode]).setup_driver_pin(graph_info->cell_out_pid[graph_info->cell2id[pNode]]++);
     auto spin = new_graph->get_node(latch_new_idx).setup_sink_pin(tcell->get_pin_id("D"));
     new_graph->add_edge(dpin, spin);
 
-    Abc_Obj_t  *pNet = Abc_ObjFanout0(Abc_ObjFanout0(pLatch));
+    Abc_Obj_t*  pNet = Abc_ObjFanout0(Abc_ObjFanout0(pLatch));
     std::string latch_name(Abc_ObjName(pNet));
     std::string flop_name(latch_name);
     Index_ID    latch_old_idx = graph_info->latchname2id[flop_name];
-    for (const auto &sg : graph_info->skew_group_map) {
+    for (const auto& sg : graph_info->skew_group_map) {
       if (sg.second.find(latch_old_idx) != sg.second.end()) {
         std::string ck_name = sg.first;
         if (new_graph->has_graph_input(ck_name)) {
@@ -417,12 +417,12 @@ void Pass_abc::conn_latch(Lgraph *new_graph, const Lgraph *old_graph, Abc_Ntk_t 
         }
       }
     }
-    for (const auto &rg : graph_info->reset_group_map) {
+    for (const auto& rg : graph_info->reset_group_map) {
       if (rg.second.find(latch_old_idx) != rg.second.end()) {
         std::string rst_name = rg.first;
         auto        dpin     = new_graph->get_node(graph_info->rst_remap[rst_name])
-                        .setup_driver_pin(graph_info->cell_out_pid[graph_info->rst_remap[rst_name]]++);
-        auto spin = new_graph->get_node(latch_new_idx).setup_sink_pin(tcell->get_pin_id("R"));
+                                   .setup_driver_pin(graph_info->cell_out_pid[graph_info->rst_remap[rst_name]]++);
+        auto        spin     = new_graph->get_node(latch_new_idx).setup_sink_pin(tcell->get_pin_id("R"));
         new_graph->add_edge(dpin, spin);
       }
     }
@@ -439,11 +439,11 @@ void Pass_abc::conn_latch(Lgraph *new_graph, const Lgraph *old_graph, Abc_Ntk_t 
   }
 }
 
-void Pass_abc::conn_primary_output(Lgraph *new_graph, const Lgraph *old_graph, Abc_Ntk_t *pNtk) {
-  Abc_Obj_t *pTerm = nullptr;
+void Pass_abc::conn_primary_output(Lgraph* new_graph, const Lgraph* old_graph, Abc_Ntk_t* pNtk) {
+  Abc_Obj_t* pTerm = nullptr;
   int        i     = 0;
   Abc_NtkForEachPo(pNtk, pTerm, i) {
-    Abc_Obj_t  *pNet = Abc_ObjFanin0(pTerm);
+    Abc_Obj_t*  pNet = Abc_ObjFanin0(pTerm);
     std::string output_name(Abc_ObjName(pNet));
 
     if (output_name[0] == '%' && output_name[output_name.size() - 1] == '%') {
@@ -461,17 +461,17 @@ void Pass_abc::conn_primary_output(Lgraph *new_graph, const Lgraph *old_graph, A
   }
 }
 
-void Pass_abc::conn_combinational_cell(Lgraph *new_graph, const Lgraph *old_graph, Abc_Ntk_t *pNtk) {
-  Abc_Obj_t *pObj = nullptr;
+void Pass_abc::conn_combinational_cell(Lgraph* new_graph, const Lgraph* old_graph, Abc_Ntk_t* pNtk) {
+  Abc_Obj_t* pObj = nullptr;
   int        k    = 0;
   Abc_NtkForEachNode(pNtk, pObj, k) {
     int         i;
-    Mio_Gate_t *pGate = (Mio_Gate_t *)pObj->pData;
-    Mio_Pin_t  *pGatePin;
+    Mio_Gate_t* pGate = (Mio_Gate_t*)pObj->pData;
+    Mio_Pin_t*  pGatePin;
     Port_ID     inpid = 0;
     for (pGatePin = Mio_GateReadPins(pGate), i = 0; pGatePin; pGatePin = Mio_PinReadNext(pGatePin), i++) {
       // std::string fanin_pin_name((Mio_PinReadName(pGatePin)));
-      Abc_Obj_t *pNet = Abc_ObjFanin(pObj, i);
+      Abc_Obj_t* pNet = Abc_ObjFanin(pObj, i);
       auto       dpin
           = new_graph->get_node(graph_info->cell2id[pNet]).setup_driver_pin(graph_info->cell_out_pid[graph_info->cell2id[pNet]]++);
       auto spin = new_graph->get_node(graph_info->cell2id[Abc_ObjFanout0(pObj)])
@@ -481,12 +481,12 @@ void Pass_abc::conn_combinational_cell(Lgraph *new_graph, const Lgraph *old_grap
   }
 }
 
-void Pass_abc::connect_constant(Lgraph *g, uint32_t value, uint32_t size, const Node_pin &spin) {
+void Pass_abc::connect_constant(Lgraph* g, uint32_t value, uint32_t size, const Node_pin& spin) {
   auto node = g->create_node_u32(value, size);
   g->add_edge(node.get_driver_pin(), spin);
 }
 
-Node_pin Pass_abc::create_pick_operator(Lgraph *g, const Node_pin &driver, int offset, int width) {
+Node_pin Pass_abc::create_pick_operator(Lgraph* g, const Node_pin& driver, int offset, int width) {
   if (offset == 0 && g->get_bits(driver) == width) {
     return driver;
   }

@@ -4,7 +4,7 @@
 
 #include "pass.hpp"
 
-void Stitch_pass_options::set(const std::string &key, const std::string &value) {
+void Stitch_pass_options::set(const std::string& key, const std::string& value) {
   try {
     if (is_opt(key, "osynth")) {
       osynth_lgdb = value;
@@ -25,7 +25,7 @@ void Stitch_pass_options::set(const std::string &key, const std::string &value) 
     } else {
       set_val(key, value);
     }
-  } catch (const std::invalid_argument &ia) {
+  } catch (const std::invalid_argument& ia) {
     Pass::error(std::format("ERROR: key {} has an invalid argument {}", key));
   }
 }

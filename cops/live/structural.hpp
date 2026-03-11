@@ -13,7 +13,7 @@ public:
   uint32_t priority;
   queue_element(Index_id id, uint32_t pri) : id(id), priority(pri) {}
 
-  bool operator<(const queue_element &b) { return priority < b.priority; }
+  bool operator<(const queue_element& b) { return priority < b.priority; }
 };
 
 struct Compare {
@@ -22,10 +22,10 @@ struct Compare {
 
 class Live_structural {
 private:
-  const Lgraph               *original;
-  const Invariant_boundaries *boundaries;
+  const Lgraph*               original;
+  const Invariant_boundaries* boundaries;
 
-  Index_id get_candidate(Index_id newid, Lgraph *nsynth) {
+  Index_id get_candidate(Index_id newid, Lgraph* nsynth) {
     if (nsynth->get_wid(newid) == 0) {
       return 0;
     }
@@ -37,22 +37,22 @@ private:
     return original->get_node_id(name);
   }
 
-  Node_pin get_inp_edge(Lgraph *current, Index_id nid, Port_ID pid);
+  Node_pin get_inp_edge(Lgraph* current, Index_id nid, Port_ID pid);
 
 public:
-  Live_structural(Lgraph *original, Invariant_boundaries *boundaries)
+  Live_structural(Lgraph* original, Invariant_boundaries* boundaries)
       :  // original(original), boundaries(boundaries) {
       original(original) {
     I(boundaries);
   }
 
-  Live_structural(Stitch_pass_options &pack);
+  Live_structural(Stitch_pass_options& pack);
 
   // void replace(Lgraph* nsynth, std::set<Net_ID>& diffs);
-  void replace(Lgraph *nsynth);
+  void replace(Lgraph* nsynth);
 
-  void replace(const std::string &nsynth) {
-    Lgraph *synth = Lgraph_open(nsynth, boundaries->top);
+  void replace(const std::string& nsynth) {
+    Lgraph* synth = Lgraph_open(nsynth, boundaries->top);
     replace(synth);
   }
 };

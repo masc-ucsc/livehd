@@ -9,7 +9,7 @@ namespace Live {
 
 class Graph_Node {  // FIXME: remove an use Node_pin (same info)
 public:
-  Lgraph     *module;
+  Lgraph*     module;
   Index_id    idx;
   uint32_t    bit;
   std::string instance;
@@ -17,12 +17,12 @@ public:
   // for primitives, it doesn't matter since most have a single output
   Port_ID pid;
 
-  Graph_Node(Lgraph *module, Index_id idx, uint32_t bit, const std::string &instance, Port_ID pid)
+  Graph_Node(Lgraph* module, Index_id idx, uint32_t bit, const std::string& instance, Port_ID pid)
       : module(module), idx(idx), bit(bit), instance(instance), pid(pid) {}
 
   Graph_Node() {}
 
-  bool operator<(const Graph_Node &rhs) const {
+  bool operator<(const Graph_Node& rhs) const {
     return (module < rhs.module) || (module == rhs.module && idx < rhs.idx)
            || (module == rhs.module && idx == rhs.idx && pid < rhs.pid)
            || (module == rhs.module && idx == rhs.idx && pid == rhs.pid && bit < rhs.bit)
@@ -32,9 +32,9 @@ public:
 
 // resolves which bits are dependencies of the current bit based on node type
 // when propagating backwards
-int resolve_bit(Lgraph *graph, Index_id idx, uint32_t current_bit, Port_ID pin, absl::flat_hash_set<uint32_t> &bits);
+int resolve_bit(Lgraph* graph, Index_id idx, uint32_t current_bit, Port_ID pin, absl::flat_hash_set<uint32_t>& bits);
 
 // resolves which bits are dependencies of the current bit based on node type
 // when propagating backwards
-int resolve_bit_fwd(Lgraph *graph, Index_id idx, uint32_t current_bit, Port_ID pin, absl::flat_hash_set<uint32_t> &bits);
+int resolve_bit_fwd(Lgraph* graph, Index_id idx, uint32_t current_bit, Port_ID pin, absl::flat_hash_set<uint32_t>& bits);
 }  // namespace Live

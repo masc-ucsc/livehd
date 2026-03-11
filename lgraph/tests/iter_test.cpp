@@ -24,7 +24,7 @@ void                                    setup_test_order() {
   test_order_sequence = 1;
 }
 
-void check_test_order(Lgraph *top) {
+void check_test_order(Lgraph* top) {
   for (auto node : top->fast(true)) {
     if (node.is_type_sub_present()) {
       continue;
@@ -72,7 +72,7 @@ void check_test_order(Lgraph *top) {
 }
 
 // performs Topological Sort on a given DAG
-void do_fwd_traversal(Lgraph *lg, const std::string &name) {
+void do_fwd_traversal(Lgraph* lg, const std::string& name) {
   {
     TRACE_EVENT("core", nullptr, [&name](perfetto::EventContext ctx) { ctx.event()->set_name("ITER_" + name + "_fast"); });
 
@@ -103,11 +103,11 @@ void do_fwd_traversal(Lgraph *lg, const std::string &name) {
 void generate_graphs(int n) {
   unsigned int rseed = 123;
 
-  auto *lib = Graph_library::instance("lgdb_iter_test");
+  auto* lib = Graph_library::instance("lgdb_iter_test");
 
   for (int i = 0; i < n; i++) {
     std::string                    gname = "test_" + std::to_string(i);
-    Lgraph                        *g     = lib->create_lgraph(gname, "test");
+    Lgraph*                        g     = lib->create_lgraph(gname, "test");
     std::vector<Node_pin::Compact> spins;
     std::vector<Node_pin::Compact> dpins;
 
@@ -221,11 +221,11 @@ void generate_graphs(int n) {
 }
 
 bool fwd(int n) {
-  auto *lib = Graph_library::instance("lgdb_iter_test");
+  auto* lib = Graph_library::instance("lgdb_iter_test");
 
   for (int i = 0; i < n; i++) {
     std::string gname = "test_" + std::to_string(i);
-    Lgraph     *g     = lib->open_lgraph(gname);
+    Lgraph*     g     = lib->open_lgraph(gname);
     if (g == nullptr) {
       return false;
     }
@@ -242,11 +242,11 @@ bool fwd(int n) {
 }
 
 bool bwd(int n) {
-  auto *lib = Graph_library::instance("lgdb_iter_test");
+  auto* lib = Graph_library::instance("lgdb_iter_test");
 
   for (int i = 0; i < n; i++) {
     std::string gname = "test_" + std::to_string(i);
-    Lgraph     *g     = lib->open_lgraph(gname);
+    Lgraph*     g     = lib->open_lgraph(gname);
     if (g == nullptr) {
       return false;
     }
@@ -261,7 +261,7 @@ bool bwd(int n) {
 
       if (!node.is_type_loop_last() && node.get_type_op() != Ntype_op::IO) {
         // check if all incoming edges were visited
-        for (auto &out : node.out_edges()) {
+        for (auto& out : node.out_edges()) {
           if (!out.sink.get_node().is_type_loop_last() && out.sink.get_node().get_type_op() != Ntype_op::IO) {
             if (visited.find(out.sink.get_node().get_compact()) == visited.end()) {
               std::print("bwd failed for lgraph node:{} bwd:{}\n", node.debug_name(), out.sink.get_node().debug_name());
@@ -280,7 +280,7 @@ bool bwd(int n) {
 
       if (!node.is_type_loop_last() && node.get_type_op() != Ntype_op::IO) {
         // check if all incoming edges were visited
-        for (auto &out : node.out_edges()) {
+        for (auto& out : node.out_edges()) {
           if (!out.sink.get_node().is_type_loop_last() && out.sink.get_node().get_type_op() != Ntype_op::IO) {
             if (visited.find(out.sink.get_node().get_compact()) == visited.end()) {
               std::print("bwd failed for lgraph node:{} bwd:{}\n", node.debug_name(), out.sink.get_node().debug_name());
@@ -297,9 +297,9 @@ bool bwd(int n) {
 
 void simple_line() {
   std::string gname   = "top_0";
-  auto       *lib     = Graph_library::instance("lgdb_iter_test");
-  Lgraph     *g0      = lib->create_lgraph("g0", "test");
-  auto       &sfuture = g0->ref_library()->setup_sub("future", "test");
+  auto*       lib     = Graph_library::instance("lgdb_iter_test");
+  Lgraph*     g0      = lib->create_lgraph("g0", "test");
+  auto&       sfuture = g0->ref_library()->setup_sub("future", "test");
   if (!sfuture.has_pin("fut_i")) {
     sfuture.add_input_pin("fut_i", 10);
   }
@@ -308,9 +308,9 @@ void simple_line() {
   }
   g0->ref_library()->sync();
 
-  Lgraph *s0 = lib->create_lgraph("s0", "test");
-  Lgraph *s1 = lib->create_lgraph("s1", "test");
-  Lgraph *s2 = lib->create_lgraph("s2", "test");
+  Lgraph* s0 = lib->create_lgraph("s0", "test");
+  Lgraph* s1 = lib->create_lgraph("s1", "test");
+  Lgraph* s2 = lib->create_lgraph("s2", "test");
 
   auto g0_i_pin = g0->add_graph_input("g0_i", 1, 0);
   auto g0_o_pin = g0->add_graph_output("g0_o", 2, 0);
@@ -375,9 +375,9 @@ void simple_line() {
 
 void simple(int num) {
   std::string gname = "simple_iter";
-  auto       *lib   = Graph_library::instance("lgdb_iter_test");
-  Lgraph     *g     = lib->create_lgraph(gname, "test");
-  Lgraph     *sub_g = lib->create_lgraph("sub", "test");
+  auto*       lib   = Graph_library::instance("lgdb_iter_test");
+  Lgraph*     g     = lib->create_lgraph(gname, "test");
+  Lgraph*     sub_g = lib->create_lgraph("sub", "test");
 
   for (int i = 0; i < 256; i++) {
     // Disconnected IOs from 1000-1512
@@ -503,15 +503,15 @@ void simple(int num) {
   g->add_edge(t20.setup_driver_pin(std::format("o{}", (random() & 0xFF))), o8);
 
 #ifdef VERBOSE
-  for (const auto &node : g->fast()) {
+  for (const auto& node : g->fast()) {
     std::print("node:{}\n", node.debug_name());
     std::cout << "  inp_edges";
-    for (const auto &edge : node.inp_edges()) {
+    for (const auto& edge : node.inp_edges()) {
       std::print("  {}", edge.driver.debug_name());
     }
     std::cout << "\n";
     std::cout << "  out_edges";
-    for (const auto &edge : node.out_edges()) {
+    for (const auto& edge : node.out_edges()) {
       std::print("  {}", edge.sink.debug_name());
     }
     std::cout << "\n";
@@ -623,7 +623,7 @@ public:
 };
 #endif
 
-int main(int argc, char **argv) {
+int main(int argc, char** argv) {
   if (argc == 3 || argc == 4) {
     int niters = 30;
     if (argc == 4) {
@@ -631,12 +631,12 @@ int main(int argc, char **argv) {
     }
 
     std::print("benchmarking path:{} name:{} niters:{}\n", argv[1], argv[2], niters);
-    auto *lib = Graph_library::instance(argv[1]);
+    auto* lib = Graph_library::instance(argv[1]);
     if (lib == nullptr) {
       std::print("could not open graph library {}\n", argv[1]);
       exit(-3);
     }
-    auto *lg = lib->open_lgraph(argv[2]);
+    auto* lg = lib->open_lgraph(argv[2]);
     if (lg == nullptr) {
       std::print("could not open lgraph {}\n", argv[2]);
       exit(-3);
@@ -668,7 +668,7 @@ int main(int argc, char **argv) {
 
       size_t level              = 0u;
       bool   all_input_breakers = true;
-      for (const auto &dpin : node.inp_drivers()) {
+      for (const auto& dpin : node.inp_drivers()) {
         auto d_node = dpin.get_node();
 
         if (d_node.is_type_loop_last() || dpin.is_graph_input()) {
@@ -682,7 +682,7 @@ int main(int argc, char **argv) {
       }
       if (!all_input_breakers) {
         ++level;
-        for (const auto &e : node.out_edges()) {
+        for (const auto& e : node.out_edges()) {
           auto pos       = e.sink.get_node_nid();
           auto l         = std::max(min_level[pos], level + 1);
           min_level[pos] = l;
@@ -719,12 +719,12 @@ int main(int argc, char **argv) {
     }
 #endif
 #ifdef ITER_REBUILD
-    auto *lib = Graph_library::instance(argv[1]);
+    auto* lib = Graph_library::instance(argv[1]);
     if (lib == nullptr) {
       std::print("ERROR: could not open graph_library {}\n", argv[1]);
       exit(-3);
     }
-    auto *tlg = lib->create_lgraph("topo_sorted", "-");
+    auto* tlg = lib->create_lgraph("topo_sorted", "-");
 
     absl::flat_hash_map<Node::Compact_class, Node::Compact_class> lg2tlg;
     for (auto node : lg->forward()) {
@@ -732,7 +732,7 @@ int main(int argc, char **argv) {
 
       lg2tlg.emplace(node.get_compact_class(), tnode.get_compact_class());
 
-      for (auto &e : node.inp_edges()) {
+      for (auto& e : node.inp_edges()) {
         auto it = lg2tlg.find(e.driver.get_node().get_compact_class());
         if (it == lg2tlg.end()) {
           continue;
@@ -740,7 +740,7 @@ int main(int argc, char **argv) {
         auto tdpin = it->second.get_node(tlg).setup_driver_pin_raw(e.driver.get_pid());
         tnode.setup_sink_pin_raw(e.sink.get_pid()).connect_driver(tdpin);
       }
-      for (auto &e : node.out_edges()) {
+      for (auto& e : node.out_edges()) {
         auto it = lg2tlg.find(e.sink.get_node().get_compact_class());
         if (it == lg2tlg.end()) {
           continue;
@@ -810,7 +810,7 @@ int main(int argc, char **argv) {
       }
 #endif
 #ifdef ITER_TREE
-      for (const auto &it : fwd_order.depth_preorder()) {
+      for (const auto& it : fwd_order.depth_preorder()) {
         auto node = fwd_order.get_data(it).get_node(lg);
         auto op   = node.get_type_op();
         if (Ntype::is_multi_driver(op)) {
@@ -827,7 +827,7 @@ int main(int argc, char **argv) {
           total += 1;
         }
 
-        const auto &it = fwd_order.find(cnode);
+        const auto& it = fwd_order.find(cnode);
         if (it == fwd_order.end()) {
           break;
         }
@@ -839,7 +839,7 @@ int main(int argc, char **argv) {
       absl::flat_hash_set<Node::Compact_class> visited;
 #endif
 
-      for (const auto &cnode : fwd_order) {
+      for (const auto& cnode : fwd_order) {
         auto node = cnode.get_node(lg);
         if (node.is_invalid()) {
           continue;
@@ -847,7 +847,7 @@ int main(int argc, char **argv) {
 
 #ifdef ITER_VECTOR_CHECK_ORDER
         visited.insert(cnode);
-        for (const auto &e : node.inp_edges()) {
+        for (const auto& e : node.inp_edges()) {
           if (visited.contains(e.driver.get_node().get_compact_class())) {
             continue;
           }

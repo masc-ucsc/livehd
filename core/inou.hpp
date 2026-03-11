@@ -12,11 +12,11 @@ protected:
 public:
   Inou() {}
 
-  virtual std::vector<Lgraph *> tolg() = 0;
+  virtual std::vector<Lgraph*> tolg() = 0;
   // Output modules like to verilog target
-  virtual void fromlg(std::vector<Lgraph *> &out) = 0;
+  virtual void fromlg(std::vector<Lgraph*>& out) = 0;
   // Set the options/arguments for the pass
-  virtual void set(const std::string &key, const std::string &value) = 0;
+  virtual void set(const std::string& key, const std::string& value) = 0;
 };
 
 #endif

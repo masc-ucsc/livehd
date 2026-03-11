@@ -1282,9 +1282,8 @@ private:
 #endif
   }
 
-  template <typename UType,
-            typename std::enable_if<!std::is_integral<UType>::value && !std::is_same<UType, std::string>::value, size_type>::type
-            = 0>
+  template <typename UType, typename std::enable_if<!std::is_integral<UType>::value && !std::is_same<UType, std::string>::value,
+                                                    size_type>::type = 0>
   inline size_type hash_bucket(const UType& key) const {
 #ifdef EMH_INT_HASH
     return (_hasher(key) * KC) & _mask;

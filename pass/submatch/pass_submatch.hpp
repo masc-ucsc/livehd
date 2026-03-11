@@ -14,16 +14,16 @@ protected:
 
   inline uint32_t group_score(uint32_t group_size, uint32_t num_nodes);
 
-  void find_mffc_group(Lgraph *g);
+  void find_mffc_group(Lgraph* g);
 
-  void find_subs(Lgraph *g);
+  void find_subs(Lgraph* g);
 
-  void do_work(Lgraph *g);
+  void do_work(Lgraph* g);
 
 public:
-  static void work(Eprp_var &var);
+  static void work(Eprp_var& var);
 
-  pass_submatch(const Eprp_var &var);
+  pass_submatch(const Eprp_var& var);
 
   static void setup();
 };

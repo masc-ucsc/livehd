@@ -23,12 +23,12 @@ private:
 protected:
   is::aligned_vector<Node_internal, 4096> node_internal;
 
-  Graph_library *library;
+  Graph_library* library;
 
   absl::flat_hash_map<uint32_t, uint32_t> idx_insert_cache;
 
   Index_id create_node_space(const Index_id idx, const Port_ID dst_pid, const Index_id master_nid, const Index_id root_nid);
-  Index_id get_space_output_pin(const Index_id idx, const Port_ID dst_pid, Index_id &root_nid);
+  Index_id get_space_output_pin(const Index_id idx, const Port_ID dst_pid, Index_id& root_nid);
   Index_id get_space_output_pin(const Index_id master_nid, const Index_id idx, const Port_ID dst_pid, const Index_id root_nid);
   // Index_id         get_space_input_pin(const Index_id master_nid, const Index_id idx, bool large = false);
   Index_id create_node_int();
@@ -64,9 +64,9 @@ protected:
 public:
   Lgraph_Base() = delete;
 
-  Lgraph_Base(const Lgraph_Base &) = delete;
+  Lgraph_Base(const Lgraph_Base&) = delete;
 
-  explicit Lgraph_Base(std::string_view _path, std::string_view _name, Lg_type_id _lgid, Graph_library *_lib) noexcept;
+  explicit Lgraph_Base(std::string_view _path, std::string_view _name, Lg_type_id _lgid, Graph_library* _lib) noexcept;
   virtual ~Lgraph_Base();
 
   virtual void clear();
@@ -89,7 +89,7 @@ public:
     }
 
     // node_internal.ref_lock();
-    const auto *ref = &node_internal[nid];
+    const auto* ref = &node_internal[nid];
     auto        ret = ref->is_valid() && ref->is_master_root();
     // node_internal.ref_unlock();
 
@@ -102,7 +102,7 @@ public:
     }
 
     // node_internal.ref_lock();
-    const auto *ref = &node_internal[idx];
+    const auto* ref = &node_internal[idx];
     auto        ret = ref->is_valid() && ref->is_root();
     // node_internal.ref_unlock();
 
@@ -118,7 +118,7 @@ public:
     I(static_cast<Index_id>(node_internal.size()) > idx);
 
     // node_internal.ref_lock();
-    const auto *ref = &node_internal[idx];
+    const auto* ref = &node_internal[idx];
     auto        ret = ref->is_root();
     // node_internal.ref_unlock();
 
@@ -133,25 +133,25 @@ public:
     _init();
   } _static_initializer;
 
-  [[nodiscard]] const Graph_library &get_library() const { return *library; }
-  [[nodiscard]] Graph_library       *ref_library() const { return library; }
+  [[nodiscard]] const Graph_library& get_library() const { return *library; }
+  [[nodiscard]] Graph_library*       ref_library() const { return library; }
 
   static void error_int(std::string_view text);
   static void warn_int(std::string_view text);
   static void info_int(std::string_view text);
 
   template <typename... Args>
-  static void error(std::format_string<Args...> format, Args &&...args) {
+  static void error(std::format_string<Args...> format, Args&&... args) {
     error_int(std::format(format, std::forward<Args>(args)...));
   }
 
   template <typename... Args>
-  static void warn(std::format_string<Args...> format, Args &&...args) {
+  static void warn(std::format_string<Args...> format, Args&&... args) {
     warn_int(std::format(format, std::forward<Args>(args)...));
   }
 
   template <typename... Args>
-  static void info(std::format_string<Args...> format, Args &&...args) {
+  static void info(std::format_string<Args...> format, Args&&... args) {
     info_int(std::format(format, std::forward<Args>(args)...));
   }
 };

@@ -6,7 +6,7 @@
 #include "lnast.hpp"
 #include "lnast_lexer.hpp"
 
-Lnast_parser::Lnast_parser(std::istream &_is) : is(_is) {}
+Lnast_parser::Lnast_parser(std::istream& _is) : is(_is) {}
 
 std::shared_ptr<Lnast> Lnast_parser::parse_all() {
   lnast = std::make_unique<Lnast>();

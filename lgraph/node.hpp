@@ -18,8 +18,8 @@ using Node_iterator = std::vector<Node>;
 
 class Node {
 protected:
-  Lgraph         *top_g{nullptr};
-  mutable Lgraph *current_g{nullptr};
+  Lgraph*         top_g{nullptr};
+  mutable Lgraph* current_g{nullptr};
   Hierarchy_index hidx{-1};
   Index_id        nid{0};
 
@@ -33,14 +33,14 @@ protected:
   friend class Bwd_edge_iterator;
   friend class Hierarchy;
 
-  constexpr Node(Lgraph *_g, Lgraph *_c_g, Hierarchy_index _hidx, Index_id _nid)
+  constexpr Node(Lgraph* _g, Lgraph* _c_g, Hierarchy_index _hidx, Index_id _nid)
       : top_g(_g), current_g(_c_g), hidx(_hidx), nid(_nid) {
     assert(nid);
     assert(top_g);
     assert(current_g);
   }
 
-  void invalidate(Lgraph *_g);
+  void invalidate(Lgraph* _g);
   void invalidate();
   void update(Index_id _nid) { nid = _nid; }
   void update(Hierarchy_index _hidx, Index_id _nid);
@@ -73,17 +73,17 @@ public:
     }
 
     // Can not be constexpr find current_g
-    Node get_node(Lgraph *lg) const { return {lg, *this}; }
+    Node get_node(Lgraph* lg) const { return {lg, *this}; }
 
     [[nodiscard]] constexpr bool is_invalid() const { return nid == 0u; }
 
-    constexpr bool operator==(const Compact &other) const {
+    constexpr bool operator==(const Compact& other) const {
       return nid == other.nid && (hidx == other.hidx || Hierarchy::is_invalid(hidx) || Hierarchy::is_invalid(other.hidx));
     }
-    constexpr bool operator!=(const Compact &other) const { return !(*this == other); }
+    constexpr bool operator!=(const Compact& other) const { return !(*this == other); }
 
     template <typename H>
-    friend H AbslHashValue(H h, const Compact &s) {
+    friend H AbslHashValue(H h, const Compact& s) {
       return H::combine(std::move(h), s.hidx, s.nid);
     };
   };
@@ -104,8 +104,8 @@ public:
     friend class Bwd_edge_iterator;
 
   public:
-    Compact_flat(const Compact_flat &obj) : lgid(obj.lgid), nid(obj.nid) {}
-    constexpr Compact_flat(const Lg_type_id &_lgid, Index_id _nid) : lgid(_lgid.value), nid(_nid) { assert(nid); };
+    Compact_flat(const Compact_flat& obj) : lgid(obj.lgid), nid(obj.nid) {}
+    constexpr Compact_flat(const Lg_type_id& _lgid, Index_id _nid) : lgid(_lgid.value), nid(_nid) { assert(nid); };
     constexpr Compact_flat() : nid(0) {};
 
     [[nodiscard]] constexpr Index_id get_nid() const { return nid; }  // Mostly for debugging or to know order
@@ -115,11 +115,11 @@ public:
 
     [[nodiscard]] constexpr bool is_invalid() const { return nid == 0u; }
 
-    constexpr bool operator==(const Compact_flat &other) const { return nid == other.nid && lgid == other.lgid; }
-    constexpr bool operator!=(const Compact_flat &other) const { return !(*this == other); }
+    constexpr bool operator==(const Compact_flat& other) const { return nid == other.nid && lgid == other.lgid; }
+    constexpr bool operator!=(const Compact_flat& other) const { return !(*this == other); }
 
     template <typename H>
-    friend H AbslHashValue(H h, const Compact_flat &s) {
+    friend H AbslHashValue(H h, const Compact_flat& s) {
       return H::combine(std::move(h), s.lgid, s.nid);
     };
   };
@@ -143,18 +143,18 @@ public:
     // constexpr operator size_t() const { return nid; }
     constexpr Compact_class() : nid(0) {};  // needed for lgthree which allocates empty data
 
-    constexpr Compact_class(const Index_id &_nid) : nid(_nid) {};
+    constexpr Compact_class(const Index_id& _nid) : nid(_nid) {};
 
-    Node get_node(Lgraph *lg) const { return {lg, *this}; }
+    Node get_node(Lgraph* lg) const { return {lg, *this}; }
 
     [[nodiscard]] constexpr Index_id get_nid() const { return nid; }
     [[nodiscard]] constexpr bool     is_invalid() const { return nid == 0u; }
 
-    constexpr bool operator==(const Compact_class &other) const { return nid == other.nid; }
-    constexpr bool operator!=(const Compact_class &other) const { return nid != other.nid; }
+    constexpr bool operator==(const Compact_class& other) const { return nid == other.nid; }
+    constexpr bool operator!=(const Compact_class& other) const { return nid != other.nid; }
 
     template <typename H>
-    friend H AbslHashValue(H h, const Compact_class &s) {
+    friend H AbslHashValue(H h, const Compact_class& s) {
       return H::combine(std::move(h), s.nid);
     };
   };
@@ -162,22 +162,22 @@ public:
   void update(Hierarchy_index _hidx);
 
   template <typename H>
-  friend H AbslHashValue(H h, const Node &s) {
+  friend H AbslHashValue(H h, const Node& s) {
     return H::combine(std::move(h), (int)s.hidx, (int)s.nid);  // Ignore lgraph pointer in hash
   };
 
   // NOTE: No operator<() needed for std::set std::map to avoid their use. Use flat_map_set for speed
-  void update(Lgraph *_g, const Node::Compact &comp);
-  void update(const Node::Compact &comp);
-  void update(const Node &node);
+  void update(Lgraph* _g, const Node::Compact& comp);
+  void update(const Node::Compact& comp);
+  void update(const Node& node);
 
   constexpr Node() = default;
 
-  Node(Lgraph *_g, const Compact &comp) { update(_g, comp); }
-  Node(std::string_view path, const Compact_flat &comp);
-  Node(Lgraph *_g, const Compact_flat &comp);
-  Node(Lgraph *_g, Hierarchy_index _hidx, const Compact_class &comp);
-  constexpr Node(Lgraph *_g, const Compact_class &comp) : top_g(_g), hidx(Hierarchy::non_hierarchical()), nid(comp.nid) {
+  Node(Lgraph* _g, const Compact& comp) { update(_g, comp); }
+  Node(std::string_view path, const Compact_flat& comp);
+  Node(Lgraph* _g, const Compact_flat& comp);
+  Node(Lgraph* _g, Hierarchy_index _hidx, const Compact_class& comp);
+  constexpr Node(Lgraph* _g, const Compact_class& comp) : top_g(_g), hidx(Hierarchy::non_hierarchical()), nid(comp.nid) {
     I(nid);
     I(top_g);
 
@@ -203,10 +203,10 @@ public:
     return {nid};
   }
 
-  Lgraph        *get_top_lgraph() const { return top_g; }
-  Lgraph        *get_class_lgraph() const { return current_g; }
-  Lgraph        *get_lg() const { return current_g; }  // To handle hierarchical API
-  Graph_library *ref_library() const;
+  Lgraph*        get_top_lgraph() const { return top_g; }
+  Lgraph*        get_class_lgraph() const { return current_g; }
+  Lgraph*        get_lg() const { return current_g; }  // To handle hierarchical API
+  Graph_library* ref_library() const;
 
   Index_id        get_nid() const { return nid; }
   Hierarchy_index get_hidx() const { return hidx; }
@@ -280,16 +280,16 @@ public:
   constexpr bool is_hierarchical() const { return !Hierarchy::is_invalid(hidx); }
   Node           get_non_hierarchical() const;
 
-  constexpr bool operator==(const Node &other) const {
+  constexpr bool operator==(const Node& other) const {
     GI(nid == 0, Hierarchy::is_invalid(hidx));
     GI(other.nid == 0, Hierarchy::is_invalid(other.hidx));
     GI(nid && other.nid, top_g == other.top_g);
 
     return nid == other.nid && (hidx == other.hidx || Hierarchy::is_invalid(hidx) || Hierarchy::is_invalid(other.hidx));
   }
-  constexpr bool operator!=(const Node &other) const { return !(*this == other); }
+  constexpr bool operator!=(const Node& other) const { return !(*this == other); }
 
-  void   set_type_lut(const Lconst &lutid);
+  void   set_type_lut(const Lconst& lutid);
   Lconst get_type_lut() const;
 
   std::string_view get_type_name() const;
@@ -315,20 +315,20 @@ public:
   bool            is_root() const;
 
   void            set_type_sub(Lg_type_id subid);
-  void            set_type_const(const Lconst &val);
+  void            set_type_const(const Lconst& val);
   Lg_type_id      get_type_sub() const;
-  const Sub_node &get_type_sub_node() const;
-  Sub_node       *ref_type_sub_node() const;
-  Lgraph         *ref_type_sub_lgraph() const;  // Slower than other get_type_sub
+  const Sub_node& get_type_sub_node() const;
+  Sub_node*       ref_type_sub_node() const;
+  Lgraph*         ref_type_sub_lgraph() const;  // Slower than other get_type_sub
   bool            is_type_sub_present() const;
 
   Lconst get_type_const() const;
 
-  void connect_sink(const Node &n2) const { setup_sink_pin().connect_driver(n2.setup_driver_pin()); }
-  void connect_driver(const Node &n2) const { setup_driver_pin().connect_sink(n2.setup_sink_pin()); }
+  void connect_sink(const Node& n2) const { setup_sink_pin().connect_driver(n2.setup_driver_pin()); }
+  void connect_driver(const Node& n2) const { setup_driver_pin().connect_sink(n2.setup_sink_pin()); }
 
-  void connect_sink(const Node_pin &dpin) const { setup_sink_pin().connect_driver(dpin); }
-  void connect_driver(const Node_pin &spin) const { setup_driver_pin().connect_sink(spin); }
+  void connect_sink(const Node_pin& dpin) const { setup_sink_pin().connect_driver(dpin); }
+  void connect_driver(const Node_pin& spin) const { setup_driver_pin().connect_sink(spin); }
 
   void nuke();  // Delete all the pins, edges, and attributes of this node
 
@@ -358,7 +358,7 @@ public:
 
   Node create(Ntype_op op) const;                                                        // create a new node, keep same hierarchy
   Node create(Ntype_op op, std::pair<uint64_t, uint64_t> loc, std::string fname) const;  // create a new node, keep same hierarchy
-  Node create_const(const Lconst &value) const;                                          // create a new node, keep same hierarchy
+  Node create_const(const Lconst& value) const;                                          // create a new node, keep same hierarchy
 
   // BEGIN ATTRIBUTE ACCESSORS
   std::string debug_name() const;
@@ -371,7 +371,7 @@ public:
   std::string                    get_or_create_name() const;
   bool                           has_name() const;
 
-  void            set_place(const Ann_place &p);
+  void            set_place(const Ann_place& p);
   const Ann_place get_place() const;
   bool            has_place() const;
 

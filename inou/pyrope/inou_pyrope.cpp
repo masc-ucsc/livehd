@@ -18,9 +18,9 @@ void Inou_pyrope::setup() {
   register_pass(m1);
 }
 
-Inou_pyrope::Inou_pyrope(const Eprp_var &var) : Pass("inou.pyrope", var) {}
+Inou_pyrope::Inou_pyrope(const Eprp_var& var) : Pass("inou.pyrope", var) {}
 
-void Inou_pyrope::parse_to_lnast(Eprp_var &var) {
+void Inou_pyrope::parse_to_lnast(Eprp_var& var) {
   TRACE_EVENT("pyrope", perfetto::DynamicString{"pyrope_tolnast"});
   Inou_pyrope p(var);
 

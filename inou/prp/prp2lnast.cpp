@@ -11,7 +11,7 @@
 #include "pass.hpp"
 #include "str_tools.hpp"
 
-extern "C" TSLanguage *tree_sitter_pyrope();
+extern "C" TSLanguage* tree_sitter_pyrope();
 
 Prp2lnast::Prp2lnast(std::string_view filename, std::string_view module_name, bool parse_only = false) {
   lnast = std::make_unique<Lnast>(module_name);
@@ -29,7 +29,7 @@ Prp2lnast::Prp2lnast(std::string_view filename, std::string_view module_name, bo
   parser = ts_parser_new();
   ts_parser_set_language(parser, tree_sitter_pyrope());
 
-  TSTree *tst_tree = ts_parser_parse_string(parser, NULL, prp_file.data(), prp_file.size());
+  TSTree* tst_tree = ts_parser_parse_string(parser, NULL, prp_file.data(), prp_file.size());
   ts_root_node     = ts_tree_root_node(tst_tree);
 
   dump();
@@ -49,7 +49,7 @@ Prp2lnast::Prp2lnast(std::string_view filename, std::string_view module_name, bo
 
 Prp2lnast::~Prp2lnast() { ts_parser_delete(parser); }
 
-std::string_view Prp2lnast::get_text(const TSNode &node) const {
+std::string_view Prp2lnast::get_text(const TSNode& node) const {
   auto start  = ts_node_start_byte(node);
   auto end    = ts_node_end_byte(node);
   auto length = end - start;
@@ -66,7 +66,7 @@ void Prp2lnast::dump_tree_sitter() const {
   ts_tree_cursor_delete(&tc);
 }
 
-void Prp2lnast::dump_tree_sitter(TSTreeCursor *tc, int level) const {
+void Prp2lnast::dump_tree_sitter(TSTreeCursor* tc, int level) const {
   auto indent = std::string(level * 2, ' ');
 
   bool go_next = true;
@@ -619,7 +619,7 @@ void Prp2lnast::process_rvalue_list(TSNode node) {
 
     auto tuple_add_index = lnast->add_child(stmts_index, Lnast_node::create_tuple_add());
     lnast->add_child(tuple_add_index, tuple_ref_node);
-    for (const auto &p : tuple_rvalue_stack.top()) {
+    for (const auto& p : tuple_rvalue_stack.top()) {
       if (p.first.is_invalid()) {
         lnast->add_child(tuple_add_index, p.second);
       } else {
@@ -630,7 +630,7 @@ void Prp2lnast::process_rvalue_list(TSNode node) {
     }
 
     std::print("Tuple: {} = (", tuple_ref_node.token.get_text());
-    for (const auto &p : tuple_rvalue_stack.top()) {
+    for (const auto& p : tuple_rvalue_stack.top()) {
       if (p.first.is_invalid()) {
         std::print(" {}", p.second.token.get_text());
       } else {
@@ -1242,7 +1242,7 @@ void Prp2lnast::process_constant(TSNode node) {
 
 void Prp2lnast::add_attr_set(const Lnast_node key, const Lnast_node value) {
   auto attr_set_index = lnast->add_child(stmts_index, Lnast_node::create_attr_set());
-  for (const auto &node : scope_node_stack.top()) {
+  for (const auto& node : scope_node_stack.top()) {
     lnast->add_child(attr_set_index, node);
   }
   lnast->add_child(attr_set_index, key);
@@ -1253,7 +1253,7 @@ Lnast_node Prp2lnast::add_attr_get(const Lnast_node key) {
   auto attr_get_index = lnast->add_child(stmts_index, Lnast_node::create_attr_get());
   auto tmp_ref_node   = get_tmp_ref();
   lnast->add_child(attr_get_index, tmp_ref_node);
-  for (const auto &node : scope_node_stack.top()) {
+  for (const auto& node : scope_node_stack.top()) {
     lnast->add_child(attr_get_index, node);
   }
   lnast->add_child(attr_get_index, key);
@@ -1264,7 +1264,7 @@ void Prp2lnast::add_attr_check(const Lnast_node key) {
   auto attr_get_index = lnast->add_child(stmts_index, Lnast_node::create_attr_get());
   auto tmp_ref_node   = get_tmp_ref();
   lnast->add_child(attr_get_index, tmp_ref_node);
-  for (const auto &node : scope_node_stack.top()) {
+  for (const auto& node : scope_node_stack.top()) {
     lnast->add_child(attr_get_index, node);
   }
   lnast->add_child(attr_get_index, key);
@@ -1276,7 +1276,7 @@ inline std::string Prp2lnast::get_tmp_name() { return absl::StrCat("___t", tmp_r
 
 inline Lnast_node Prp2lnast::get_tmp_ref() { return Lnast_node::create_ref(get_tmp_name()); }
 
-inline TSNode Prp2lnast::get_child(const TSNode &node, const char *field) const {
+inline TSNode Prp2lnast::get_child(const TSNode& node, const char* field) const {
   return ts_node_child_by_field_name(node, field, std::char_traits<char>::length(field));
 }
 
@@ -1308,12 +1308,12 @@ inline std::string Prp2lnast::str(Expression_state state) {
   return "invalid";
 }
 
-inline TSNode Prp2lnast::get_child(const TSNode &node, unsigned int index) const { return ts_node_child(node, index); }
+inline TSNode Prp2lnast::get_child(const TSNode& node, unsigned int index) const { return ts_node_child(node, index); }
 
-inline TSNode Prp2lnast::get_child(const TSNode &node) const { return ts_node_child(node, 0); }
+inline TSNode Prp2lnast::get_child(const TSNode& node) const { return ts_node_child(node, 0); }
 
-inline TSNode Prp2lnast::get_sibling(const TSNode &node) const { return ts_node_next_sibling(node); }
+inline TSNode Prp2lnast::get_sibling(const TSNode& node) const { return ts_node_next_sibling(node); }
 
-inline TSNode Prp2lnast::get_named_child(const TSNode &node) const { return ts_node_named_child(node, 0); }
+inline TSNode Prp2lnast::get_named_child(const TSNode& node) const { return ts_node_named_child(node, 0); }
 
-inline TSNode Prp2lnast::get_named_sibling(const TSNode &node) const { return ts_node_next_named_sibling(node); }
+inline TSNode Prp2lnast::get_named_sibling(const TSNode& node) const { return ts_node_next_named_sibling(node); }

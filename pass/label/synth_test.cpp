@@ -29,8 +29,8 @@ public:
 
 #if TEST1
 TEST_F(Label_synth_test, test1) {
-  auto   *lib     = Graph_library::instance("lgdb");
-  Lgraph *a_graph = lib->create_lgraph("a_graph", "-");
+  auto*   lib     = Graph_library::instance("lgdb");
+  Lgraph* a_graph = lib->create_lgraph("a_graph", "-");
   ASSERT_NE(a_graph, nullptr);
 
   auto        verbose = false;
@@ -77,7 +77,7 @@ TEST_F(Label_synth_test, test1) {
   a_graph->add_edge(mux_node_out_Y, graph_out_Y, 10);  // Mux output -> overall output
                                                        //
   labeler.label(a_graph);
-  for (const auto &n : a_graph->forward(hier)) {
+  for (const auto& n : a_graph->forward(hier)) {
     // ASSERT_EQ(0, static_cast<int>(n.get_color()));
 #ifdef DEBUG
     std::print("Node Name:{} , Node Color:{}\n", n.debug_name(), n.get_color());
@@ -88,8 +88,8 @@ TEST_F(Label_synth_test, test1) {
 
 #if TEST2
 TEST_F(Label_synth_test, test2) {
-  auto   *lib     = Graph_library::instance("lgdb");
-  Lgraph *b_graph = lib->create_lgraph("b_graph", "-");
+  auto*   lib     = Graph_library::instance("lgdb");
+  Lgraph* b_graph = lib->create_lgraph("b_graph", "-");
   ASSERT_NE(b_graph, nullptr);
 
   auto        verbose = false;
@@ -163,7 +163,7 @@ TEST_F(Label_synth_test, test2) {
   b_graph->add_edge(mux_node_out_Y, graph_out_Y, 10);  // Mux output -> overall output
 
   labeler.label(b_graph);
-  for (const auto &n : b_graph->forward(hier)) {
+  for (const auto& n : b_graph->forward(hier)) {
     // ASSERT_EQ(expected[n.debug_name()], static_cast<int>(n.get_color()));
 #ifdef DEBUG
     std::print("Node Name:{} , Node Color:{}\n", n.debug_name(), n.get_color());
@@ -174,8 +174,8 @@ TEST_F(Label_synth_test, test2) {
 
 #if TEST3
 TEST_F(Label_synth_test, test3) {
-  auto   *lib     = Graph_library::instance("lgdb");
-  Lgraph *c_graph = lib->create_lgraph("c_graph", "-");
+  auto*   lib     = Graph_library::instance("lgdb");
+  Lgraph* c_graph = lib->create_lgraph("c_graph", "-");
   ASSERT_NE(c_graph, nullptr);
 
   auto        verbose = false;
@@ -235,7 +235,7 @@ TEST_F(Label_synth_test, test3) {
 
   std::cout << "swagg\n";
 
-  for (const auto &n : c_graph->forward(hier)) {
+  for (const auto& n : c_graph->forward(hier)) {
 #ifdef DEBUG
     std::print("Node Name:{} , Node Color:{}\n", n.debug_name(), n.get_color());
 #endif
@@ -244,10 +244,10 @@ TEST_F(Label_synth_test, test3) {
 #endif
 
 #ifdef RUN
-int main(int argc, char **argv) {
+int main(int argc, char** argv) {
   ::testing::InitGoogleTest(&argc, argv);
   return RUN_ALL_TESTS();
 }
 #else
-int main(int argc, char **argv) { return 0; }
+int main(int argc, char** argv) { return 0; }
 #endif

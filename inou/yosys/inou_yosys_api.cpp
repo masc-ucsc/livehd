@@ -31,9 +31,9 @@ void setup_inou_yosys() {
   Inou_yosys_api::setup();
 }
 
-Inou_yosys_api::Inou_yosys_api(Eprp_var &var, bool do_read) : Pass("inou.yosys", var) { set_script_yosys(var, do_read); }
+Inou_yosys_api::Inou_yosys_api(Eprp_var& var, bool do_read) : Pass("inou.yosys", var) { set_script_yosys(var, do_read); }
 
-void Inou_yosys_api::set_script_yosys(const Eprp_var &var, bool do_read) {
+void Inou_yosys_api::set_script_yosys(const Eprp_var& var, bool do_read) {
   auto script = var.get("script");
 
   auto main_path = file_utils::get_exe_path();
@@ -60,7 +60,7 @@ void Inou_yosys_api::set_script_yosys(const Eprp_var &var, bool do_read) {
       do_read_str = "inou_yosys_write.ys";
     }
 
-    for (const auto &e : alt_paths) {
+    for (const auto& e : alt_paths) {
       auto test = main_path + e + do_read_str;
       if (access(test.c_str(), R_OK) != -1) {
         script_file = test;
@@ -79,7 +79,7 @@ void Inou_yosys_api::set_script_yosys(const Eprp_var &var, bool do_read) {
   std::print("path:{} script:{}\n", main_path, script_file);
 }
 
-void Inou_yosys_api::call_yosys(mustache::data &vars) {
+void Inou_yosys_api::call_yosys(mustache::data& vars) {
   std::ifstream inFile;
   inFile.open(std::string(script_file));
   if (!inFile.good()) {
@@ -90,7 +90,7 @@ void Inou_yosys_api::call_yosys(mustache::data &vars) {
   strStream << inFile.rdbuf();  // read the whole file
 
   mustache::mustache tmpl(strStream.str());
-  tmpl.set_custom_escape([](const std::string &s) { return s; });  // No HTML escape
+  tmpl.set_custom_escape([](const std::string& s) { return s; });  // No HTML escape
 
   const std::string yosys_all_cmds = tmpl.render(vars);
 
@@ -98,7 +98,7 @@ void Inou_yosys_api::call_yosys(mustache::data &vars) {
 
   auto cmd_list = absl::StrSplit(yosys_all_cmds, '\n');
 
-  for (const auto &c : cmd_list) {
+  for (const auto& c : cmd_list) {
     auto x = std::find_if(c.begin(), c.end(), [](char ch) { return std::isalnum(ch); });
     if (x == c.end()) {
       continue;  // skip empty (or just space lines)
@@ -208,13 +208,13 @@ void Inou_yosys_api::call_yosys(mustache::data &vars) {
 #endif
 }
 
-void Inou_yosys_api::tolg(Eprp_var &var) {
+void Inou_yosys_api::tolg(Eprp_var& var) {
   Inou_yosys_api p(var, true);
 
   p.do_tolg(var);
 }
 
-void Inou_yosys_api::do_tolg(Eprp_var &var) {
+void Inou_yosys_api::do_tolg(Eprp_var& var) {
   const auto filelist_file{var.get("filelist_file")};
 
   const bool has_files = !files.empty() && files != "/INVALID";
@@ -233,11 +233,10 @@ void Inou_yosys_api::do_tolg(Eprp_var &var) {
   vars.set("path", path);
 
   // Set slang plugin path (assume users always install slang.so in LiveHD using Bazel)
-  auto        exe_path         = file_utils::get_exe_path();
+  auto        exe_path = file_utils::get_exe_path();
   std::string slang_plugin_path;
-  for (const auto &candidate :
-       {absl::StrCat(exe_path, "/../external/+_repo_rules+yosys_slang/slang.so"),
-        absl::StrCat(exe_path, "/lgshell.runfiles/+http_archive+yosys_slang/slang.so")}) {
+  for (const auto& candidate : {absl::StrCat(exe_path, "/../external/+_repo_rules+yosys_slang/slang.so"),
+                                absl::StrCat(exe_path, "/lgshell.runfiles/+http_archive+yosys_slang/slang.so")}) {
     if (access(candidate.c_str(), R_OK) != -1) {
       slang_plugin_path = candidate;
       break;
@@ -252,7 +251,7 @@ void Inou_yosys_api::do_tolg(Eprp_var &var) {
   // For verilog frontend
   mustache::data filelist{mustache::data::type::list};
   if (has_files) {
-    for (const auto &f : absl::StrSplit(files, ',')) {
+    for (const auto& f : absl::StrSplit(files, ',')) {
       if (!f.empty()) {
         filelist << mustache::data{"input", std::string(f)};
       }
@@ -262,7 +261,7 @@ void Inou_yosys_api::do_tolg(Eprp_var &var) {
   // Build space-separated files list for slang
   std::string files_str;
   if (has_files) {
-    for (const auto &f : absl::StrSplit(files, ',')) {
+    for (const auto& f : absl::StrSplit(files, ',')) {
       if (!f.empty()) {
         if (!files_str.empty()) {
           files_str += " ";
@@ -291,7 +290,7 @@ void Inou_yosys_api::do_tolg(Eprp_var &var) {
     const auto slang_flags{var.get("slang_flags")};
     if (!slang_flags.empty()) {
       std::string flags_str;
-      for (const auto &f : absl::StrSplit(slang_flags, ',')) {
+      for (const auto& f : absl::StrSplit(slang_flags, ',')) {
         if (!flags_str.empty()) {
           flags_str += " ";
         }
@@ -346,7 +345,7 @@ void Inou_yosys_api::do_tolg(Eprp_var &var) {
     error("unrecognized abc {} option. Either true or false", techmap);
   }
 
-  auto *gl = Graph_library::instance(path);
+  auto* gl = Graph_library::instance(path);
 
   uint32_t max_version = gl->get_max_version();
 
@@ -354,11 +353,11 @@ void Inou_yosys_api::do_tolg(Eprp_var &var) {
 
   call_yosys(vars);
 
-  std::vector<Lgraph *> lgs;
+  std::vector<Lgraph*> lgs;
   gl->each_sub([&lgs, gl, max_version](Lg_type_id id, std::string_view name) {
     (void)name;
     if (gl->get_version(id) > max_version) {
-      Lgraph *lg = gl->try_ref_lgraph(id);  // no need to push black-boxes
+      Lgraph* lg = gl->try_ref_lgraph(id);  // no need to push black-boxes
       if (lg) {
         lgs.push_back(lg);
       }
@@ -371,12 +370,12 @@ void Inou_yosys_api::do_tolg(Eprp_var &var) {
   var.add(lgs);
 }
 
-void Inou_yosys_api::fromlg(Eprp_var &var) {
+void Inou_yosys_api::fromlg(Eprp_var& var) {
   Inou_yosys_api p(var, false);
 
   Yosys::yosys_setup();
 
-  for (auto &lg : var.lgs) {
+  for (auto& lg : var.lgs) {
     mustache::data vars;
 
     vars.set("path", p.path);

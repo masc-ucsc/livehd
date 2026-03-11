@@ -14,7 +14,7 @@ public:
   static void sot_logger(std::string_view text);
 
   template <typename... Args>
-  static void logger(std::format_string<Args...> format, Args &&...args) {
+  static void logger(std::format_string<Args...> format, Args&&... args) {
     logger(std::format(format, std::forward<Args>(args)...));
   }
 };

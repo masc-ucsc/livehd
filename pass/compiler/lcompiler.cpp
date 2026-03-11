@@ -7,32 +7,32 @@
 Lcompiler::Lcompiler(std::string_view _path, std::string_view _odir, std::string_view _top, bool _gviz)
     : path(_path), odir(_odir), top(_top), gviz(_gviz), gv(true, false, _odir) {}
 
-void Lcompiler::do_prp_lnast2lgraph(const std::vector<std::shared_ptr<Lnast>> &lnasts) {
+void Lcompiler::do_prp_lnast2lgraph(const std::vector<std::shared_ptr<Lnast>>& lnasts) {
   TRACE_EVENT("pass", "lnast_ssa + lnast_tolg");
-  for (const auto &ln : lnasts) {
+  for (const auto& ln : lnasts) {
     thread_pool.add(&Lcompiler::prp_thread_ln2lg, this, ln);
   }
   thread_pool.wait_all();
 }
 
-void Lcompiler::prp_thread_ln2lg(const std::shared_ptr<Lnast> &ln) {
+void Lcompiler::prp_thread_ln2lg(const std::shared_ptr<Lnast>& ln) {
   gviz == true ? gv.do_from_lnast(ln, "raw") : void();
   ln->ssa_trans();
   gviz == true ? gv.do_from_lnast(ln) : void();
 
-  auto mod_name = ln->get_top_module_name();
+  auto       mod_name = ln->get_top_module_name();
   Lnast_tolg ln2lg(mod_name, path);
   const auto top_stmts = ln->get_first_child(lh::Tree_index::root());
-  auto local_lgs = ln2lg.do_tolg(ln, top_stmts);
+  auto       local_lgs = ln2lg.do_tolg(ln, top_stmts);
 
   if (gviz) {
-    for (const auto &lg : local_lgs) {
+    for (const auto& lg : local_lgs) {
       gv.do_from_lgraph(lg, "raw");
     }
   }
 
   std::lock_guard<std::mutex> guard(lgs_mutex);  // guarding Lcompiler::lgs
-  for (auto *lg : local_lgs) {
+  for (auto* lg : local_lgs) {
     lgs.emplace_back(lg);
   }
   // auto tp = std::chrono::system_clock::now();
@@ -44,7 +44,7 @@ void Lcompiler::do_prp_local_cprop_bitwidth() {
   TRACE_EVENT("pass", "cprop + bitwidth");
 
   I(lgs.size());
-  auto *top_lg = lgs[0];
+  auto* top_lg = lgs[0];
   if (!top.empty()) {
     top_lg = nullptr;
     for (auto lg2 : lgs) {
@@ -60,7 +60,7 @@ void Lcompiler::do_prp_local_cprop_bitwidth() {
     }
   }
 
-  top_lg->each_hier_unique_sub_bottom_up_parallel2([this](Lgraph *lg_sub) {
+  top_lg->each_hier_unique_sub_bottom_up_parallel2([this](Lgraph* lg_sub) {
     Bitwidth bw(false, 11);
     Cprop    cp(false);
 
@@ -91,12 +91,12 @@ void Lcompiler::do_prp_global_bitwidth_inference() {
   // todo: when move to the new compressed bottom-up tree paralellism, you don't need to specify top
   if (top.empty()) {  // top will be specified only if it is a hierarchical design
     // I(lgs.size() == 1);
-    for (auto &lg : lgs) {
+    for (auto& lg : lgs) {
       bw.do_trans(lg);
       gviz == true ? gv.do_from_lgraph(lg, "") : void();
     }
   } else {
-    for (auto &lg : lgs) {
+    for (auto& lg : lgs) {
       ++lgcnt;
       if (lg->get_name() == top) {
         hit = true;

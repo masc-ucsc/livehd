@@ -16,7 +16,7 @@ inline void Prp::eat_comments() {
   }
 }
 
-uint8_t Prp::rule_start(std::list<std::tuple<Rule_id, Token_entry>> &pass_list) {
+uint8_t Prp::rule_start(std::list<std::tuple<Rule_id, Token_entry>>& pass_list) {
   INIT_FUNCTION("rule_start.");
 
   eat_comments();
@@ -35,7 +35,7 @@ uint8_t Prp::rule_start(std::list<std::tuple<Rule_id, Token_entry>> &pass_list) 
   RULE_SUCCESS("Matched rule_start.\n", Prp_rule_start);
 }
 
-uint8_t Prp::rule_code_blocks(std::list<std::tuple<Rule_id, Token_entry>> &pass_list) {
+uint8_t Prp::rule_code_blocks(std::list<std::tuple<Rule_id, Token_entry>>& pass_list) {
   INIT_FUNCTION("rule_code_blocks.");
 
   if (!CHECK_RULE(&Prp::rule_code_block_int)) {
@@ -62,7 +62,7 @@ uint8_t Prp::rule_code_blocks(std::list<std::tuple<Rule_id, Token_entry>> &pass_
   RULE_SUCCESS("Matched rule_code_blocks.\n", Prp_rule_code_blocks);
 }
 
-uint8_t Prp::rule_code_block_int(std::list<std::tuple<Rule_id, Token_entry>> &pass_list) {
+uint8_t Prp::rule_code_block_int(std::list<std::tuple<Rule_id, Token_entry>>& pass_list) {
   INIT_FUNCTION("rule_code_block_int.");
 
   check_lb();
@@ -97,7 +97,7 @@ uint8_t Prp::rule_code_block_int(std::list<std::tuple<Rule_id, Token_entry>> &pa
   RULE_FAILED("Failed rule_code_block_int.\n");
 }
 
-uint8_t Prp::rule_if_statement(std::list<std::tuple<Rule_id, Token_entry>> &pass_list) {
+uint8_t Prp::rule_if_statement(std::list<std::tuple<Rule_id, Token_entry>>& pass_list) {
   INIT_FUNCTION("rule_if_statement.");
 
   // optional
@@ -140,7 +140,7 @@ uint8_t Prp::rule_if_statement(std::list<std::tuple<Rule_id, Token_entry>> &pass
   RULE_SUCCESS("Matched rule_if_statement (with condition).\n", Prp_rule_if_statement);
 }
 
-uint8_t Prp::rule_for_statement(std::list<std::tuple<Rule_id, Token_entry>> &pass_list) {
+uint8_t Prp::rule_for_statement(std::list<std::tuple<Rule_id, Token_entry>>& pass_list) {
   INIT_FUNCTION("rule_for_statement.");
 
   if (!SCAN_IS_TOKEN(Pyrope_id_for)) {
@@ -161,7 +161,7 @@ uint8_t Prp::rule_for_statement(std::list<std::tuple<Rule_id, Token_entry>> &pas
 }
 
 // NOTE: modified from PEGjs grammar: range notation now allowed.
-uint8_t Prp::rule_for_in_notation(std::list<std::tuple<Rule_id, Token_entry>> &pass_list) {
+uint8_t Prp::rule_for_in_notation(std::list<std::tuple<Rule_id, Token_entry>>& pass_list) {
   INIT_FUNCTION("rule_in_notation.");
 
   if (!CHECK_RULE(&Prp::rule_identifier)) {
@@ -179,7 +179,7 @@ uint8_t Prp::rule_for_in_notation(std::list<std::tuple<Rule_id, Token_entry>> &p
   RULE_SUCCESS("Matched rule_in_notation.\n", Prp_rule_for_in_notation);
 }
 
-uint8_t Prp::rule_for_index(std::list<std::tuple<Rule_id, Token_entry>> &pass_list) {
+uint8_t Prp::rule_for_index(std::list<std::tuple<Rule_id, Token_entry>>& pass_list) {
   INIT_FUNCTION("rule_for_index.");
 
   if (!CHECK_RULE(&Prp::rule_for_in_notation)) {
@@ -210,7 +210,7 @@ uint8_t Prp::rule_for_index(std::list<std::tuple<Rule_id, Token_entry>> &pass_li
   RULE_SUCCESS("Matched rule_for_index.\n", Prp_rule_for_index);
 }
 
-uint8_t Prp::rule_else_statement(std::list<std::tuple<Rule_id, Token_entry>> &pass_list) {
+uint8_t Prp::rule_else_statement(std::list<std::tuple<Rule_id, Token_entry>>& pass_list) {
   INIT_FUNCTION("rule_else_statement.");
 
   // option 1
@@ -248,7 +248,7 @@ uint8_t Prp::rule_else_statement(std::list<std::tuple<Rule_id, Token_entry>> &pa
   RULE_SUCCESS("Matched rule_else_statement.\n", Prp_rule_else_statement);
 }
 
-uint8_t Prp::rule_while_statement(std::list<std::tuple<Rule_id, Token_entry>> &pass_list) {
+uint8_t Prp::rule_while_statement(std::list<std::tuple<Rule_id, Token_entry>>& pass_list) {
   INIT_FUNCTION("rule_while_statement.");
 
   if (!SCAN_IS_TOKEN(Pyrope_id_while)) {
@@ -268,7 +268,7 @@ uint8_t Prp::rule_while_statement(std::list<std::tuple<Rule_id, Token_entry>> &p
   RULE_SUCCESS("Failed rule_while_statement; couldn't find a while token.\n", Prp_rule_while_statement);
 }
 
-uint8_t Prp::rule_try_statement(std::list<std::tuple<Rule_id, Token_entry>> &pass_list) {
+uint8_t Prp::rule_try_statement(std::list<std::tuple<Rule_id, Token_entry>>& pass_list) {
   INIT_FUNCTION("rule_try_statement.");
 
   if (!SCAN_IS_TOKEN(Pyrope_id_try, Prp_rule_try_statement)) {
@@ -324,7 +324,7 @@ uint8_t Prp::rule_negation_statement(std::list<std::tuple<Rule_id, Token_entry>>
   RULE_SUCCESS("Matched rule_logical_expression.\n", Prp_rule_negation_statement);
 }*/
 
-uint8_t Prp::rule_empty_scope_colon(std::list<std::tuple<Rule_id, Token_entry>> &pass_list) {
+uint8_t Prp::rule_empty_scope_colon(std::list<std::tuple<Rule_id, Token_entry>>& pass_list) {
   INIT_FUNCTION("rule_empty_scope_colon.");
 
   check_ws();
@@ -345,7 +345,7 @@ uint8_t Prp::rule_empty_scope_colon(std::list<std::tuple<Rule_id, Token_entry>> 
   RULE_SUCCESS("Matched rule_empty_scope_colon.\n", Prp_rule_empty_scope_colon);
 }
 
-uint8_t Prp::rule_scope_else(std::list<std::tuple<Rule_id, Token_entry>> &pass_list) {
+uint8_t Prp::rule_scope_else(std::list<std::tuple<Rule_id, Token_entry>>& pass_list) {
   INIT_FUNCTION("rule_scope_else.");
 
   if (!SCAN_IS_TOKEN(Pyrope_id_else, Prp_rule_scope_else)) {
@@ -369,7 +369,7 @@ uint8_t Prp::rule_scope_else(std::list<std::tuple<Rule_id, Token_entry>> &pass_l
 }
 
 // WARNING: this rule was modified to look more like block_body
-uint8_t Prp::rule_scope_body(std::list<std::tuple<Rule_id, Token_entry>> &pass_list) {
+uint8_t Prp::rule_scope_body(std::list<std::tuple<Rule_id, Token_entry>>& pass_list) {
   INIT_FUNCTION("rule_scope_body.");
 
   // option 1 and 2 - logical expression inside only or just a closing brace
@@ -408,7 +408,7 @@ uint8_t Prp::rule_scope_body(std::list<std::tuple<Rule_id, Token_entry>> &pass_l
   RULE_SUCCESS("Matched rule_scope_body (option 3).\n", Prp_rule_scope_body);
 }
 
-uint8_t Prp::rule_scope(std::list<std::tuple<Rule_id, Token_entry>> &pass_list) {
+uint8_t Prp::rule_scope(std::list<std::tuple<Rule_id, Token_entry>>& pass_list) {
   INIT_FUNCTION("rule_scope.");
 
   if (SCAN_IS_TOKEN(Token_id_or, Prp_rule_scope)) {
@@ -426,7 +426,7 @@ uint8_t Prp::rule_scope(std::list<std::tuple<Rule_id, Token_entry>> &pass_list) 
   RULE_FAILED("Failed rule_scope; generic.\n");
 }
 
-uint8_t Prp::rule_scope_condition(std::list<std::tuple<Rule_id, Token_entry>> &pass_list) {
+uint8_t Prp::rule_scope_condition(std::list<std::tuple<Rule_id, Token_entry>>& pass_list) {
   INIT_FUNCTION("rule_scope_condition.");
   (void)starting_line;
   (void)starting_pos;
@@ -438,7 +438,7 @@ uint8_t Prp::rule_scope_condition(std::list<std::tuple<Rule_id, Token_entry>> &p
   RULE_SUCCESS("Matched rule_scope_condition.\n", Prp_rule_scope_condition);
 }
 
-uint8_t Prp::rule_scope_colon(std::list<std::tuple<Rule_id, Token_entry>> &pass_list) {
+uint8_t Prp::rule_scope_colon(std::list<std::tuple<Rule_id, Token_entry>>& pass_list) {
   INIT_FUNCTION("rule_scope_colon.");
 
   check_ws();
@@ -465,7 +465,7 @@ uint8_t Prp::rule_scope_colon(std::list<std::tuple<Rule_id, Token_entry>> &pass_
   RULE_SUCCESS("Matched rule_scope_colon.\n", Prp_rule_scope_colon);
 }
 
-uint8_t Prp::rule_scope_argument(std::list<std::tuple<Rule_id, Token_entry>> &pass_list) {
+uint8_t Prp::rule_scope_argument(std::list<std::tuple<Rule_id, Token_entry>>& pass_list) {
   INIT_FUNCTION("rule_scope_argument.");
   if (!CHECK_RULE(&Prp::rule_fcall_arg_notation)) {
     RULE_FAILED("Failed rule_scope_argument; couldn't find an fcall_arg_notation.\n");
@@ -494,7 +494,7 @@ uint8_t Prp::rule_scope_argument(std::list<std::tuple<Rule_id, Token_entry>> &pa
   RULE_SUCCESS("Matched rule_punch_format.\n", Prp_rule_punch_format);
 }*/
 
-uint8_t Prp::rule_scope_declaration(std::list<std::tuple<Rule_id, Token_entry>> &pass_list) {
+uint8_t Prp::rule_scope_declaration(std::list<std::tuple<Rule_id, Token_entry>>& pass_list) {
   INIT_FUNCTION("rule_scope_declaration.");
 
   if (!CHECK_RULE(&Prp::rule_scope)) {
@@ -525,7 +525,7 @@ uint8_t Prp::rule_scope_declaration(std::list<std::tuple<Rule_id, Token_entry>> 
   RULE_SUCCESS("Matched rule_scope_declaration.\n", Prp_rule_scope_declaration);
 }
 
-uint8_t Prp::rule_punch_rhs(std::list<std::tuple<Rule_id, Token_entry>> &pass_list) {
+uint8_t Prp::rule_punch_rhs(std::list<std::tuple<Rule_id, Token_entry>>& pass_list) {
   INIT_FUNCTION("rule_punch_rhs.");
 
   if (!SCAN_IS_TOKEN(Token_id_div)) {
@@ -572,7 +572,7 @@ uint8_t Prp::rule_punch_rhs(std::list<std::tuple<Rule_id, Token_entry>> &pass_li
   RULE_SUCCESS("Matched rule_punch_rhs.\n", Prp_rule_punch_rhs);
 }
 
-uint8_t Prp::rule_function_pipe(std::list<std::tuple<Rule_id, Token_entry>> &pass_list) {
+uint8_t Prp::rule_function_pipe(std::list<std::tuple<Rule_id, Token_entry>>& pass_list) {
   INIT_FUNCTION("rule_function_pipe.");
 
   check_ws();
@@ -612,7 +612,7 @@ uint8_t Prp::rule_function_pipe(std::list<std::tuple<Rule_id, Token_entry>> &pas
   RULE_SUCCESS("Matched rule_function_pipe.\n", Prp_rule_function_pipe);
 }
 
-uint8_t Prp::rule_fcall_explicit(std::list<std::tuple<Rule_id, Token_entry>> &pass_list) {
+uint8_t Prp::rule_fcall_explicit(std::list<std::tuple<Rule_id, Token_entry>>& pass_list) {
   INIT_FUNCTION("rule_fcall_explicit.");
 
   INIT_PSEUDO_FAIL();
@@ -660,7 +660,7 @@ uint8_t Prp::rule_fcall_explicit(std::list<std::tuple<Rule_id, Token_entry>> &pa
   RULE_SUCCESS("Matched rule_fcall_explicit", Prp_rule_fcall_explicit);
 }
 
-uint8_t Prp::rule_fcall_arg_notation(std::list<std::tuple<Rule_id, Token_entry>> &pass_list) {
+uint8_t Prp::rule_fcall_arg_notation(std::list<std::tuple<Rule_id, Token_entry>>& pass_list) {
   INIT_FUNCTION("rule_fcall_arg_notation.");
 
   if (!SCAN_IS_TOKEN(Token_id_op, Prp_rule_fcall_arg_notation)) {
@@ -704,7 +704,7 @@ uint8_t Prp::rule_fcall_arg_notation(std::list<std::tuple<Rule_id, Token_entry>>
   RULE_SUCCESS("Matched rule_fcall_arg_notation.\n", Prp_rule_fcall_arg_notation);
 }
 
-uint8_t Prp::rule_fcall_implicit_start(std::list<std::tuple<Rule_id, Token_entry>> &pass_list) {
+uint8_t Prp::rule_fcall_implicit_start(std::list<std::tuple<Rule_id, Token_entry>>& pass_list) {
   INIT_FUNCTION("rule_fcall_implicit_start.");
 
   // option 1
@@ -759,7 +759,7 @@ uint8_t Prp::rule_fcall_implicit_start(std::list<std::tuple<Rule_id, Token_entry
   RULE_SUCCESS("Matched rule_fcall_implicit.\n", Prp_rule_fcall_implicit);
 }
 
-uint8_t Prp::rule_fcall_implicit(std::list<std::tuple<Rule_id, Token_entry>> &pass_list) {
+uint8_t Prp::rule_fcall_implicit(std::list<std::tuple<Rule_id, Token_entry>>& pass_list) {
   INIT_FUNCTION("rule_fcall_implicit.");
 
   if (CHECK_RULE(&Prp::rule_constant)) {
@@ -797,7 +797,7 @@ uint8_t Prp::rule_fcall_implicit(std::list<std::tuple<Rule_id, Token_entry>> &pa
   RULE_SUCCESS("Matched rule_fcall_implicit.\n", Prp_rule_fcall_implicit);
 }
 
-uint8_t Prp::rule_not_in_implicit(std::list<std::tuple<Rule_id, Token_entry>> &pass_list) {
+uint8_t Prp::rule_not_in_implicit(std::list<std::tuple<Rule_id, Token_entry>>& pass_list) {
   INIT_FUNCTION("rule_not_in_implicit");
 
   if (SCAN_IS_TOKEN(Token_id_colon)) {
@@ -869,7 +869,7 @@ uint8_t Prp::rule_not_in_implicit(std::list<std::tuple<Rule_id, Token_entry>> &p
   RULE_FAILED("Failed rule_not_in_implicit.\n");
 }
 
-uint8_t Prp::rule_assignment_expression(std::list<std::tuple<Rule_id, Token_entry>> &pass_list) {
+uint8_t Prp::rule_assignment_expression(std::list<std::tuple<Rule_id, Token_entry>>& pass_list) {
   INIT_FUNCTION("rule_assignment_expression.");
 
   if (CHECK_RULE(&Prp::rule_constant)) {
@@ -905,7 +905,7 @@ uint8_t Prp::rule_assignment_expression(std::list<std::tuple<Rule_id, Token_entr
   RULE_SUCCESS("Matched rule_assignment_expression.\n", Prp_rule_assignment_expression);
 }
 
-uint8_t Prp::rule_return_statement(std::list<std::tuple<Rule_id, Token_entry>> &pass_list) {
+uint8_t Prp::rule_return_statement(std::list<std::tuple<Rule_id, Token_entry>>& pass_list) {
   INIT_FUNCTION("rule_return_statement.");
 
   if (!SCAN_IS_TOKEN(Pyrope_id_return)) {
@@ -931,7 +931,7 @@ uint8_t Prp::rule_return_statement(std::list<std::tuple<Rule_id, Token_entry>> &
   RULE_SUCCESS("Matched rule_compile_check_statement.\n", Prp_rule_compile_check_statement);
 }*/
 
-uint8_t Prp::rule_block_body(std::list<std::tuple<Rule_id, Token_entry>> &pass_list) {
+uint8_t Prp::rule_block_body(std::list<std::tuple<Rule_id, Token_entry>>& pass_list) {
   INIT_FUNCTION("rule_block_body.\n");
 
   // optional
@@ -947,7 +947,7 @@ uint8_t Prp::rule_block_body(std::list<std::tuple<Rule_id, Token_entry>> &pass_l
   RULE_SUCCESS("Matched rule_block_body.\n", Prp_rule_block_body);
 }
 
-uint8_t Prp::rule_lhs_expression(std::list<std::tuple<Rule_id, Token_entry>> &pass_list) {
+uint8_t Prp::rule_lhs_expression(std::list<std::tuple<Rule_id, Token_entry>>& pass_list) {
   INIT_FUNCTION("rule_lhs_expression.");
 
   if (SCAN_IS_TOKEN(Token_id_backslash)) {
@@ -964,7 +964,7 @@ uint8_t Prp::rule_lhs_expression(std::list<std::tuple<Rule_id, Token_entry>> &pa
   RULE_SUCCESS("Matched rule_lhs_expression.\n", Prp_rule_lhs_expression);
 }
 
-uint8_t Prp::rule_tuple_notation(std::list<std::tuple<Rule_id, Token_entry>> &pass_list) {
+uint8_t Prp::rule_tuple_notation(std::list<std::tuple<Rule_id, Token_entry>>& pass_list) {
   INIT_FUNCTION("rule_tuple_notation.");
 
   // options 1 and 2
@@ -1025,7 +1025,7 @@ uint8_t Prp::rule_tuple_notation(std::list<std::tuple<Rule_id, Token_entry>> &pa
   RULE_SUCCESS("Matched rule_tuple_notation; fourth option.\n", Prp_rule_tuple_notation);
 }
 
-uint8_t Prp::rule_range_notation(std::list<std::tuple<Rule_id, Token_entry>> &pass_list) {
+uint8_t Prp::rule_range_notation(std::list<std::tuple<Rule_id, Token_entry>>& pass_list) {
   INIT_FUNCTION("rule_range_notation.");
 
   // optional
@@ -1046,7 +1046,7 @@ uint8_t Prp::rule_range_notation(std::list<std::tuple<Rule_id, Token_entry>> &pa
   RULE_SUCCESS("Matched rule_range_notation.\n", Prp_rule_range_notation);
 }
 
-uint8_t Prp::rule_bit_selection_notation(std::list<std::tuple<Rule_id, Token_entry>> &pass_list) {
+uint8_t Prp::rule_bit_selection_notation(std::list<std::tuple<Rule_id, Token_entry>>& pass_list) {
   INIT_FUNCTION("rule_bit_selection_notation.");
 
   if (!CHECK_RULE(&Prp::rule_tuple_dot_notation)) {
@@ -1059,7 +1059,7 @@ uint8_t Prp::rule_bit_selection_notation(std::list<std::tuple<Rule_id, Token_ent
   RULE_SUCCESS("Matched rule_bit_selection_notation.\n", Prp_rule_bit_selection_notation);
 }
 
-uint8_t Prp::rule_tuple_dot_notation(std::list<std::tuple<Rule_id, Token_entry>> &pass_list) {
+uint8_t Prp::rule_tuple_dot_notation(std::list<std::tuple<Rule_id, Token_entry>>& pass_list) {
   INIT_FUNCTION("rule_tuple_dot_notation.");
 
   if (!CHECK_RULE(&Prp::rule_tuple_array_notation)) {
@@ -1072,7 +1072,7 @@ uint8_t Prp::rule_tuple_dot_notation(std::list<std::tuple<Rule_id, Token_entry>>
   RULE_SUCCESS("Matched rule_tuple_dot_notation.\n", Prp_rule_tuple_dot_notation);
 }
 
-uint8_t Prp::rule_tuple_dot_dot(std::list<std::tuple<Rule_id, Token_entry>> &pass_list) {
+uint8_t Prp::rule_tuple_dot_dot(std::list<std::tuple<Rule_id, Token_entry>>& pass_list) {
   INIT_FUNCTION("rule_tuple_dot_dot.");
   (void)starting_line;
   (void)starting_pos;
@@ -1100,7 +1100,7 @@ uint8_t Prp::rule_tuple_dot_dot(std::list<std::tuple<Rule_id, Token_entry>> &pas
   RULE_SUCCESS("Matched rule_tuple_dot_dot\n", Prp_rule_tuple_dot_dot);
 }
 
-uint8_t Prp::rule_tuple_array_notation(std::list<std::tuple<Rule_id, Token_entry>> &pass_list) {
+uint8_t Prp::rule_tuple_array_notation(std::list<std::tuple<Rule_id, Token_entry>>& pass_list) {
   INIT_FUNCTION("rule_tuple_array_notation.");
 
   if (!CHECK_RULE(&Prp::rule_lhs_var_name)) {
@@ -1113,7 +1113,7 @@ uint8_t Prp::rule_tuple_array_notation(std::list<std::tuple<Rule_id, Token_entry
   RULE_SUCCESS("Matched rule_tuple_array_notation.\n", Prp_rule_tuple_array_notation);
 }
 
-uint8_t Prp::rule_lhs_var_name(std::list<std::tuple<Rule_id, Token_entry>> &pass_list) {
+uint8_t Prp::rule_lhs_var_name(std::list<std::tuple<Rule_id, Token_entry>>& pass_list) {
   INIT_FUNCTION("rule_lhs_var_name.");
 
   if (!(CHECK_RULE(&Prp::rule_identifier) || CHECK_RULE(&Prp::rule_constant))) {
@@ -1123,7 +1123,7 @@ uint8_t Prp::rule_lhs_var_name(std::list<std::tuple<Rule_id, Token_entry>> &pass
   RULE_SUCCESS("Matched rule_lhs_var_name.\n", Prp_rule_lhs_var_name);
 }
 
-uint8_t Prp::rule_tuple_array_bracket(std::list<std::tuple<Rule_id, Token_entry>> &pass_list) {
+uint8_t Prp::rule_tuple_array_bracket(std::list<std::tuple<Rule_id, Token_entry>>& pass_list) {
   INIT_FUNCTION("rule_tuple_array_bracket.");
   (void)starting_line;
   (void)starting_pos;
@@ -1151,7 +1151,7 @@ uint8_t Prp::rule_tuple_array_bracket(std::list<std::tuple<Rule_id, Token_entry>
   RULE_SUCCESS("Matched rule_tuple_array_bracket.\n", Prp_rule_tuple_array_bracket);
 }
 
-uint8_t Prp::rule_identifier(std::list<std::tuple<Rule_id, Token_entry>> &pass_list) {
+uint8_t Prp::rule_identifier(std::list<std::tuple<Rule_id, Token_entry>>& pass_list) {
   INIT_FUNCTION("rule_identifier.");
 
   if (CHECK_RULE(&Prp::rule_keyword)) {
@@ -1192,7 +1192,7 @@ uint8_t Prp::rule_identifier(std::list<std::tuple<Rule_id, Token_entry>> &pass_l
 }
 
 // some rules want there to not be a constant; in this case, we don't want AST changes or tokens consumed if the rule is matched.
-uint8_t Prp::rule_constant(std::list<std::tuple<Rule_id, Token_entry>> &pass_list) {
+uint8_t Prp::rule_constant(std::list<std::tuple<Rule_id, Token_entry>>& pass_list) {
   INIT_FUNCTION("rule_constant");
 
   // option 1 - numerical constant
@@ -1214,7 +1214,7 @@ uint8_t Prp::rule_constant(std::list<std::tuple<Rule_id, Token_entry>> &pass_lis
   RULE_FAILED("Failed rule_constant.\n", Prp_rule_constant);
 }
 
-uint8_t Prp::rule_numerical_constant(std::list<std::tuple<Rule_id, Token_entry>> &pass_list) {
+uint8_t Prp::rule_numerical_constant(std::list<std::tuple<Rule_id, Token_entry>>& pass_list) {
   INIT_FUNCTION("rule_numerical_constant.");
 
   SCAN_IS_TOKEN(Token_id_minus, Prp_rule_numerical_constant);
@@ -1227,7 +1227,7 @@ uint8_t Prp::rule_numerical_constant(std::list<std::tuple<Rule_id, Token_entry>>
 }
 
 // TODO: add support for single tick strings
-uint8_t Prp::rule_string_constant(std::list<std::tuple<Rule_id, Token_entry>> &pass_list) {
+uint8_t Prp::rule_string_constant(std::list<std::tuple<Rule_id, Token_entry>>& pass_list) {
   INIT_FUNCTION("rule_string_constant.");
 
   // option 1: double " string
@@ -1260,7 +1260,7 @@ uint8_t Prp::rule_string_constant(std::list<std::tuple<Rule_id, Token_entry>> &p
   RULE_SUCCESS("Matched rule_string_constant.\n", Prp_rule_string_constant);
 }
 
-uint8_t Prp::rule_assignment_operator(std::list<std::tuple<Rule_id, Token_entry>> &pass_list) {
+uint8_t Prp::rule_assignment_operator(std::list<std::tuple<Rule_id, Token_entry>>& pass_list) {
   INIT_FUNCTION("rule_assignment_operator.");
 
 #ifdef DEBUG_AST
@@ -1324,7 +1324,7 @@ uint8_t Prp::rule_assignment_operator(std::list<std::tuple<Rule_id, Token_entry>
   RULE_FAILED("Failed rule_assignment_operator; couldn't find any of the operators.\n");
 }
 
-uint8_t Prp::rule_tuple_by_notation(std::list<std::tuple<Rule_id, Token_entry>> &pass_list) {
+uint8_t Prp::rule_tuple_by_notation(std::list<std::tuple<Rule_id, Token_entry>>& pass_list) {
   INIT_FUNCTION("rule_tuple_by_notation.");
 
   if (!SCAN_IS_TOKEN(Pyrope_id_by)) {
@@ -1337,7 +1337,7 @@ uint8_t Prp::rule_tuple_by_notation(std::list<std::tuple<Rule_id, Token_entry>> 
   RULE_SUCCESS("Matched rule_tuple_by_notation.\n", Prp_rule_tuple_by_notation);
 }
 
-uint8_t Prp::rule_bit_selection_bracket(std::list<std::tuple<Rule_id, Token_entry>> &pass_list) {
+uint8_t Prp::rule_bit_selection_bracket(std::list<std::tuple<Rule_id, Token_entry>>& pass_list) {
   INIT_FUNCTION("rule_bit_selection_bracket.");
   (void)starting_line;
   (void)starting_pos;
@@ -1362,7 +1362,7 @@ uint8_t Prp::rule_bit_selection_bracket(std::list<std::tuple<Rule_id, Token_entr
   RULE_SUCCESS("Matched rule_bit_selection_bracket.\n", Prp_rule_bit_selection_bracket);
 }
 
-uint8_t Prp::rule_logical_expression(std::list<std::tuple<Rule_id, Token_entry>> &pass_list) {
+uint8_t Prp::rule_logical_expression(std::list<std::tuple<Rule_id, Token_entry>>& pass_list) {
   INIT_FUNCTION("rule_logical_expression.");
 
   if (!CHECK_RULE(&Prp::rule_relational_expression)) {
@@ -1400,7 +1400,7 @@ uint8_t Prp::rule_logical_expression(std::list<std::tuple<Rule_id, Token_entry>>
   RULE_SUCCESS("Matched rule_logical_expression.\n", Prp_rule_logical_expression);
 }
 
-uint8_t Prp::rule_relational_expression(std::list<std::tuple<Rule_id, Token_entry>> &pass_list) {
+uint8_t Prp::rule_relational_expression(std::list<std::tuple<Rule_id, Token_entry>>& pass_list) {
   INIT_FUNCTION("rule_relational_expression.");
 
   if (!CHECK_RULE(&Prp::rule_additive_expression)) {
@@ -1437,7 +1437,7 @@ uint8_t Prp::rule_relational_expression(std::list<std::tuple<Rule_id, Token_entr
   RULE_SUCCESS("Matched rule_relational_expression.\n", Prp_rule_relational_expression);
 }
 
-uint8_t Prp::rule_additive_expression(std::list<std::tuple<Rule_id, Token_entry>> &pass_list) {
+uint8_t Prp::rule_additive_expression(std::list<std::tuple<Rule_id, Token_entry>>& pass_list) {
   INIT_FUNCTION("rule_additive_expression.");
 
   if (!CHECK_RULE(&Prp::rule_unary_expression)) {
@@ -1518,7 +1518,7 @@ uint8_t Prp::rule_additive_expression(std::list<std::tuple<Rule_id, Token_entry>
   RULE_SUCCESS("Matched rule_additive_expression.\n", Prp_rule_additive_expression);
 }
 
-uint8_t Prp::rule_bitwise_expression(std::list<std::tuple<Rule_id, Token_entry>> &pass_list) {
+uint8_t Prp::rule_bitwise_expression(std::list<std::tuple<Rule_id, Token_entry>>& pass_list) {
   std::cout << "BITWISE EXPRESSION RULE CURRENTLY UNUSED. THERE IS A BUG. EXITING...\n";
   exit(1);
   INIT_FUNCTION("rule_bitwise_expression.");
@@ -1557,7 +1557,7 @@ uint8_t Prp::rule_bitwise_expression(std::list<std::tuple<Rule_id, Token_entry>>
   RULE_SUCCESS("Matched rule_bitwise_expression.\n", Prp_rule_bitwise_expression);
 }
 
-uint8_t Prp::rule_multiplicative_expression(std::list<std::tuple<Rule_id, Token_entry>> &pass_list) {
+uint8_t Prp::rule_multiplicative_expression(std::list<std::tuple<Rule_id, Token_entry>>& pass_list) {
   INIT_FUNCTION("rule_multiplicative_expression.");
 
   if (!CHECK_RULE(&Prp::rule_unary_expression)) {
@@ -1594,7 +1594,7 @@ uint8_t Prp::rule_multiplicative_expression(std::list<std::tuple<Rule_id, Token_
   RULE_SUCCESS("Matched rule_multiplicative_expression.\n", Prp_rule_multiplicative_expression);
 }
 
-uint8_t Prp::rule_unary_expression(std::list<std::tuple<Rule_id, Token_entry>> &pass_list) {
+uint8_t Prp::rule_unary_expression(std::list<std::tuple<Rule_id, Token_entry>>& pass_list) {
   INIT_FUNCTION("rule_unary_expression.");
 
   // option 1
@@ -1611,7 +1611,7 @@ uint8_t Prp::rule_unary_expression(std::list<std::tuple<Rule_id, Token_entry>> &
   RULE_SUCCESS("Matched rule_unary_expression, option 2.\n", Prp_rule_unary_expression);
 }
 
-uint8_t Prp::rule_factor(std::list<std::tuple<Rule_id, Token_entry>> &pass_list) {
+uint8_t Prp::rule_factor(std::list<std::tuple<Rule_id, Token_entry>>& pass_list) {
   INIT_FUNCTION("rule_factor.");
 
   // option 1
@@ -1644,7 +1644,7 @@ uint8_t Prp::rule_factor(std::list<std::tuple<Rule_id, Token_entry>> &pass_list)
   RULE_SUCCESS("Matched rule_factor; option 2.\n", Prp_rule_factor);
 }
 
-uint8_t Prp::rule_overload_notation(std::list<std::tuple<Rule_id, Token_entry>> &pass_list) {
+uint8_t Prp::rule_overload_notation(std::list<std::tuple<Rule_id, Token_entry>>& pass_list) {
   INIT_FUNCTION("rule_overload_notation.");
 
   if (!SCAN_IS_TOKEN(Token_id_dot, Prp_rule_overload_notation)) {
@@ -1667,7 +1667,7 @@ uint8_t Prp::rule_overload_notation(std::list<std::tuple<Rule_id, Token_entry>> 
 }
 
 // WARNING: not sure how this behaves when we aren't explicitly looking for a line terminator
-uint8_t Prp::rule_overload_name(std::list<std::tuple<Rule_id, Token_entry>> &pass_list) {
+uint8_t Prp::rule_overload_name(std::list<std::tuple<Rule_id, Token_entry>>& pass_list) {
   INIT_FUNCTION("rule_overload_name.");
 
   if (!CHECK_RULE(&Prp::rule_overload_exception)) {
@@ -1705,7 +1705,7 @@ uint8_t Prp::rule_overload_name(std::list<std::tuple<Rule_id, Token_entry>> &pas
   RULE_SUCCESS("Matched rule_overload_name.\n", Prp_rule_overload_name);
 }
 
-uint8_t Prp::rule_overload_exception(std::list<std::tuple<Rule_id, Token_entry>> &pass_list) {
+uint8_t Prp::rule_overload_exception(std::list<std::tuple<Rule_id, Token_entry>>& pass_list) {
   INIT_FUNCTION("rule_overload_exception.\n");
 
   Token_id toks[] = {Token_id_dot,
@@ -1733,7 +1733,7 @@ uint8_t Prp::rule_overload_exception(std::list<std::tuple<Rule_id, Token_entry>>
   RULE_FAILED("Failed rule_overload_exception; couldn't find an excepting character.\n");
 }
 
-uint8_t Prp::rule_rhs_expression(std::list<std::tuple<Rule_id, Token_entry>> &pass_list) {
+uint8_t Prp::rule_rhs_expression(std::list<std::tuple<Rule_id, Token_entry>>& pass_list) {
   INIT_FUNCTION("rule_rhs_expression.");
 
   if (!(CHECK_RULE(&Prp::rule_fcall_explicit) || CHECK_RULE(&Prp::rule_lhs_expression)
@@ -1744,7 +1744,7 @@ uint8_t Prp::rule_rhs_expression(std::list<std::tuple<Rule_id, Token_entry>> &pa
   RULE_SUCCESS("Matched rule_rhs_expression.\n", Prp_rule_rhs_expression);
 }
 
-uint8_t Prp::rule_keyword(std::list<std::tuple<Rule_id, Token_entry>> &pass_list) {
+uint8_t Prp::rule_keyword(std::list<std::tuple<Rule_id, Token_entry>>& pass_list) {
   INIT_FUNCTION("rule_keyword");
 
   Token_id toks[] = {Pyrope_id_TRUE,
@@ -1978,7 +1978,7 @@ bool Prp::go_back(uint64_t num_tok) {
 }
 
 void Prp::ast_handler() {
-  for (const auto &it : ast->depth_preorder()) {
+  for (const auto& it : ast->depth_preorder()) {
     auto node       = ast->get_data(it);
     auto rule_name  = rule_id_to_string(node.rule_id);
     auto token_text = scan_text(node.token_entry);
@@ -1991,8 +1991,8 @@ void Prp::ast_handler() {
 }
 
 void Prp::ast_dump(lh::Tree_index tree_idx) const {
-  for (const auto &index : ast->depth_preorder(tree_idx)) {
-    const auto &d          = ast->get_data(index);
+  for (const auto& index : ast->depth_preorder(tree_idx)) {
+    const auto& d          = ast->get_data(index);
     auto        rule_name  = rule_id_to_string(d.rule_id);
     auto        token_text = scan_text(d.token_entry);
 
@@ -2001,7 +2001,7 @@ void Prp::ast_dump(lh::Tree_index tree_idx) const {
   }
 }
 
-void Prp::ast_builder(std::list<std::tuple<Rule_id, Token_entry>> &passed_list) {
+void Prp::ast_builder(std::list<std::tuple<Rule_id, Token_entry>>& passed_list) {
   for (auto ast_op : passed_list) {
     auto rule_id = std::get<0>(ast_op);
     if (rule_id == 0) {
@@ -2022,8 +2022,8 @@ void Prp::ast_builder(std::list<std::tuple<Rule_id, Token_entry>> &passed_list) 
   }
 }
 
-uint8_t Prp::check_function(uint8_t (Prp::*rule)(std::list<std::tuple<Rule_id, Token_entry>> &), uint64_t *sub_cnt,
-                            std::list<std::tuple<Rule_id, Token_entry>> &loc_list) {
+uint8_t Prp::check_function(uint8_t (Prp::*rule)(std::list<std::tuple<Rule_id, Token_entry>>&), uint64_t* sub_cnt,
+                            std::list<std::tuple<Rule_id, Token_entry>>& loc_list) {
   PRINT_DBG_AST("Called check_function.\n");
 
   uint64_t starting_size = loc_list.size();
@@ -2040,7 +2040,7 @@ uint8_t Prp::check_function(uint8_t (Prp::*rule)(std::list<std::tuple<Rule_id, T
   return ret;
 }
 
-bool Prp::chk_and_consume(Token_id tok, Rule_id rid, uint64_t *sub_cnt, std::list<std::tuple<Rule_id, Token_entry>> &loc_list) {
+bool Prp::chk_and_consume(Token_id tok, Rule_id rid, uint64_t* sub_cnt, std::list<std::tuple<Rule_id, Token_entry>>& loc_list) {
   // PRINT_DBG_AST("Checking  token {} from rule {}.\n", scan_text(scan_token_entry()), rule_id_to_string(rid));
   if (tok != TOKEN_ID_ANY) {
     if (!scan_is_token(tok)) {
@@ -2130,8 +2130,8 @@ bool Prp::chk_and_consume(Token_id tok, Rule_id rid, uint64_t *sub_cnt, std::lis
   return false;
 }
 
-bool Prp::chk_and_consume_options(Token_id *toks, uint8_t tok_cnt, Rule_id rid, uint64_t *sub_cnt,
-                                  std::list<std::tuple<Rule_id, Token_entry>> &loc_list) {
+bool Prp::chk_and_consume_options(Token_id* toks, uint8_t tok_cnt, Rule_id rid, uint64_t* sub_cnt,
+                                  std::list<std::tuple<Rule_id, Token_entry>>& loc_list) {
   PRINT_DBG_AST("Checking many tokens from rule {}.\n", rule_id_to_string(rid));
   bool found = false;
   int  i;
@@ -2289,7 +2289,7 @@ std::string Prp::rule_id_to_string(Rule_id rid) {
 }
 
 #ifdef DEBUG_AST
-inline void Prp::print_loc_list(std::list<std::tuple<Rule_id, Token_entry>> &loc_list) {
+inline void Prp::print_loc_list(std::list<std::tuple<Rule_id, Token_entry>>& loc_list) {
   int i = 0;
   for (auto it = loc_list.begin(); it != loc_list.end(); it++) {
     PRINT_DBG_AST("loc_list[{}]:rule: {} token: {}.\n", i++, rule_id_to_string(std::get<0>(*it)), scan_text(std::get<1>(*it)));

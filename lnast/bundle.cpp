@@ -18,8 +18,8 @@ static bool inline compare_less(char c1, char c2) {
   return (c1 == '_' || c1 < c2) && c2 != '_';
 }
 
-static bool bundle_sort(const std::pair<const std::string &, Bundle::Entry> &lhs,
-                        const std::pair<const std::string &, Bundle::Entry> &rhs) {
+static bool bundle_sort(const std::pair<const std::string&, Bundle::Entry>& lhs,
+                        const std::pair<const std::string&, Bundle::Entry>& rhs) {
   auto l     = 0u;
   auto l_end = lhs.first.size();
   auto r     = 0u;
@@ -373,7 +373,7 @@ void Bundle::add_int(std::string_view key, const std::shared_ptr<Bundle const> t
   }
 
   bool root = is_root_attribute(key);
-  for (const auto &ent : tup->key_map) {
+  for (const auto& ent : tup->key_map) {
     if (root) {
       key_map.emplace_back(absl::StrCat(ent.first, ".", key), ent.second);
     } else {
@@ -398,7 +398,7 @@ void Bundle::del_int(std::string_view key) {
 
   bool is_attr_key = is_root_attribute(key);
 
-  for (const auto &e : key_map) {
+  for (const auto& e : key_map) {
     if (e.first.empty()) {
       if (is_attr_key) {
         new_map.emplace_back(std::move(e));
@@ -555,15 +555,15 @@ std::string_view Bundle::get_all_but_first_level(std::string_view key) {
 
 std::string Bundle::learn_fix(std::string_view key_sv) {
   std::string key(key_sv);
-  for (auto &e : key_map) {
+  for (auto& e : key_map) {
     std::tie(key, e.first) = learn_fix_int(key, e.first);
   }
 
   return key;
 }
 
-const Bundle::Entry &Bundle::get_entry(std::string_view key) const {
-  for (const auto &e : key_map) {
+const Bundle::Entry& Bundle::get_entry(std::string_view key) const {
+  for (const auto& e : key_map) {
     if (match(e.first, key)) {
       return e.second;
     }
@@ -574,7 +574,7 @@ const Bundle::Entry &Bundle::get_entry(std::string_view key) const {
   return invalid;
 }
 
-const Lconst &Bundle::get_trivial() const {
+const Lconst& Bundle::get_trivial() const {
   int pos = -1;
   for (auto i = 0u; i < key_map.size(); ++i) {
     if (is_attribute(key_map[i].first)) {
@@ -592,7 +592,7 @@ const Lconst &Bundle::get_trivial() const {
 }
 
 bool Bundle::has_trivial(std::string_view key) const {
-  for (const auto &e : key_map) {
+  for (const auto& e : key_map) {
     if (match(e.first, key)) {
       return true;
     }
@@ -607,7 +607,7 @@ bool Bundle::has_bundle(std::string_view key) const {
 
   I(!key.empty());  // do not call without sub-fields
 
-  for (const auto &e : key_map) {
+  for (const auto& e : key_map) {
     auto e_pos = match_first_partial(key, e.first);
     if (e_pos == 0) {
       continue;
@@ -628,7 +628,7 @@ std::shared_ptr<Bundle> Bundle::get_bundle(std::string_view key) const {
 
   std::shared_ptr<Bundle> tup;
 
-  for (const auto &e : key_map) {
+  for (const auto& e : key_map) {
     auto e_pos = match_first_partial(key, e.first);
     if (e_pos == 0) {
       continue;
@@ -662,12 +662,12 @@ std::shared_ptr<Bundle> Bundle::get_bundle(std::string_view key) const {
   return tup;
 }
 
-std::shared_ptr<Bundle> Bundle::get_bundle(const std::shared_ptr<Bundle const> &tup) const {
+std::shared_ptr<Bundle> Bundle::get_bundle(const std::shared_ptr<Bundle const>& tup) const {
   // create a trivial or sub-bundle with the selected fields
   std::shared_ptr<Bundle> ret_tup;
 
   int pos = 0;
-  for (const auto &e : tup->key_map) {
+  for (const auto& e : tup->key_map) {
     auto field = e.second.trivial.to_field();
 
     if (!has_trivial(field)) {
@@ -689,7 +689,7 @@ std::shared_ptr<Bundle> Bundle::get_bundle(const std::shared_ptr<Bundle const> &
   return ret_tup;
 }
 
-void Bundle::set(std::string_view key, const std::shared_ptr<Bundle const> &tup) {
+void Bundle::set(std::string_view key, const std::shared_ptr<Bundle const>& tup) {
   I(!key.empty());
 
   if (tup == nullptr) {
@@ -705,7 +705,7 @@ void Bundle::set(std::string_view key, const std::shared_ptr<Bundle const> &tup)
 
   bool tup_scalar = tup->is_scalar();
 
-  for (const auto &e : tup->key_map) {
+  for (const auto& e : tup->key_map) {
     std::string_view key2;
     // Remove 0. from tup if tup is scalar
     if (tup_scalar && e.first.front() == '0' && (e.first.size() == 1 || e.first[1] == '.')) {
@@ -727,7 +727,7 @@ void Bundle::set(std::string_view key, const std::shared_ptr<Bundle const> &tup)
   }
 }
 
-void Bundle::set(std::string_view key, const Entry &&entry) {
+void Bundle::set(std::string_view key, const Entry&& entry) {
   I(!key.empty());
 
   std::string uncanonical_key{key};
@@ -765,7 +765,7 @@ void Bundle::set(std::string_view key, const Entry &&entry) {
     if (is_attribute(fixed_key)) {
       key_part = get_all_but_last_level(fixed_key);
     }
-    for (auto &e : key_map) {
+    for (auto& e : key_map) {
       std::string_view fpart{e.first};
       std::string_view lpart;
       if (is_attribute(e.first)) {
@@ -797,7 +797,7 @@ void Bundle::set(std::string_view key, const Entry &&entry) {
   key_map.emplace_back(fixed_key, entry);
 
 #ifdef DEBUG_SLOW
-  for (const auto &e : key_map) {
+  for (const auto& e : key_map) {
     auto lower = get_all_but_last_level(e.first);
     if (is_attribute(e.first)) {
       lower = get_all_but_last_level(lower);
@@ -816,12 +816,12 @@ void Bundle::set(std::string_view key, const Entry &&entry) {
 #endif
 }
 
-bool Bundle::concat(const std::shared_ptr<Bundle const> &tup) {
+bool Bundle::concat(const std::shared_ptr<Bundle const>& tup) {
   bool ok = true;
 
   std::vector<std::pair<std::string, Lconst>> delayed_numbers;
 
-  for (const auto &it : tup->key_map) {
+  for (const auto& it : tup->key_map) {
     if (has_trivial(it.first)) {
       if (std::isdigit(it.first.front()) && is_single_level(it.first)) {
         delayed_numbers.emplace_back(it.first, it.second.trivial);
@@ -840,7 +840,7 @@ bool Bundle::concat(const std::shared_ptr<Bundle const> &tup) {
 
   if (delayed_numbers.size()) {
     auto max_pos = 0;
-    for (const auto &e : key_map) {
+    for (const auto& e : key_map) {
       int x = 0;
       if (str_tools::is_i(e.first)) {
         x = str_tools::to_i(e.first);
@@ -855,7 +855,7 @@ bool Bundle::concat(const std::shared_ptr<Bundle const> &tup) {
         max_pos = x;
       }
     }
-    for (const auto &e : delayed_numbers) {
+    for (const auto& e : delayed_numbers) {
       auto        x = str_tools::to_i(e.first);
       std::string new_key(std::to_string(x + max_pos + 1));
 
@@ -876,7 +876,7 @@ Lconst Bundle::flatten() const {
   std::stable_sort(key_map.begin(), key_map.end(), bundle_sort);
 
   Lconst result;
-  for (const auto &e : key_map) {
+  for (const auto& e : key_map) {
     if (is_attribute(e.first)) {
       continue;
     }
@@ -892,7 +892,7 @@ Lconst Bundle::flatten() const {
   return result;
 }
 
-std::shared_ptr<Bundle> Bundle::create_assign(const std::shared_ptr<Bundle const> &rhs_tup) const {
+std::shared_ptr<Bundle> Bundle::create_assign(const std::shared_ptr<Bundle const>& rhs_tup) const {
   (void)rhs_tup;
 
   I(false);  // FIXME: implement it
@@ -901,7 +901,7 @@ std::shared_ptr<Bundle> Bundle::create_assign(const std::shared_ptr<Bundle const
   return new_tup;
 }
 
-std::shared_ptr<Bundle> Bundle::create_assign(const Lconst &rhs_trivial) const {
+std::shared_ptr<Bundle> Bundle::create_assign(const Lconst& rhs_trivial) const {
   if (rhs_trivial.is_invalid()) {
     return nullptr;
   }
@@ -996,14 +996,14 @@ std::shared_ptr<Bundle> Bundle::create_assign(const Lconst &rhs_trivial) const {
   return tup;
 }
 
-const Bundle::Key_map_type &Bundle::get_sort_map() const {
+const Bundle::Key_map_type& Bundle::get_sort_map() const {
   std::stable_sort(key_map.begin(), key_map.end(), bundle_sort);  // mutable (no semantic check. Just faster to process)
   return key_map;
 }
 
-bool Bundle::concat(const Lconst &trivial) {
+bool Bundle::concat(const Lconst& trivial) {
   auto max_pos = 0;
-  for (const auto &e : key_map) {
+  for (const auto& e : key_map) {
     int x = 0;
     if (str_tools::is_i(e.first)) {
       x = str_tools::to_i(e.first);
@@ -1028,7 +1028,7 @@ bool Bundle::concat(const Lconst &trivial) {
 
 bool Bundle::is_scalar() const {
   auto conta = 0;
-  for (const auto &e : key_map) {
+  for (const auto& e : key_map) {
     if (is_attribute(e.first)) {
       continue;
     }
@@ -1041,7 +1041,7 @@ bool Bundle::is_scalar() const {
 }
 
 bool Bundle::is_ordered(std::string_view key) const {
-  for (const auto &e : key_map) {
+  for (const auto& e : key_map) {
     auto             e_pos = 0u;
     std::string_view field;
     if (key.empty()) {
@@ -1079,7 +1079,7 @@ bool Bundle::is_ordered(std::string_view key) const {
 std::string_view Bundle::get_scalar_name() const {
   std::string_view sname;
 
-  for (const auto &e : key_map) {
+  for (const auto& e : key_map) {
     std::string_view s;
     if (is_attribute(e.first)) {
       s = get_all_but_last_level(e.first);
@@ -1098,7 +1098,7 @@ std::string_view Bundle::get_scalar_name() const {
 bool Bundle::is_trivial_scalar() const {
   auto conta = 0;
 
-  for (const auto &e : key_map) {
+  for (const auto& e : key_map) {
     std::string_view field{e.first};
 
     if (is_attribute(field)) {
@@ -1120,7 +1120,7 @@ bool Bundle::is_trivial_scalar() const {
 }
 
 bool Bundle::has_just_attributes() const {
-  for (const auto &e : key_map) {
+  for (const auto& e : key_map) {
     if (is_attribute(e.first)) {
       continue;
     }
@@ -1133,7 +1133,7 @@ bool Bundle::has_just_attributes() const {
 void Bundle::dump() const {
   std::print("bundle_name: {}{}\n", name, correct ? "" : " ISSUES");
 
-  for (const auto &it : key_map) {
+  for (const auto& it : key_map) {
     std::print("  key:{} trivial:{} {}\n", it.first, it.second.trivial, it.second.immutable ? "let" : "mut");
   }
 }

@@ -10,7 +10,7 @@
 
 #ifdef TRACE
 #include "verilated_fst_c.h"
-VerilatedFstC *tfp = 0;
+VerilatedFstC* tfp = 0;
 #endif
 
 #define MAX_TIME  2000
@@ -36,7 +36,7 @@ void do_terminate() {
   exit(0);
 }
 
-void advance_clock(Vadd_csa *top, int nclocks = 1) {
+void advance_clock(Vadd_csa* top, int nclocks = 1) {
   for (int i = 0; i < nclocks; i++) {
     for (int clk = 0; clk < 2; clk++) {
       top->eval();
@@ -59,14 +59,14 @@ void advance_clock(Vadd_csa *top, int nclocks = 1) {
   }
 }
 
-int main(int argc, char **argv, char **env) {
+int main(int argc, char** argv, char** env) {
   int sim_seed = time(0);
   srand(sim_seed);
   printf("random seed was %d\n", sim_seed);
 
   Verilated::commandArgs(argc, argv);
   // init top verilog instance
-  Vadd_csa *top = new Vadd_csa;
+  Vadd_csa* top = new Vadd_csa;
 
   uint64_t val_a[NUM_TESTS] = {(uint64_t)~0, 0, 0xAAAAAAAAAAAAAAAA, (uint64_t)1 << 63};
 

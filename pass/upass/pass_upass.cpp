@@ -60,15 +60,19 @@ void Pass_upass::setup() {
   m1.add_label_optional("max_iters", "maximum upass iterations to run", "1");
   m1.add_label_optional("ir", "IR mode: lnast (default) or lgraph", "lnast");
   m1.add_label_optional("dry_run", "lgraph-only: collect rewrite metrics without mutating graph", "false");
-  m1.add_label_optional("inherit", "inherit labels from prior pipeline stages (default true); false resets sticky upass options", "true");
+  m1.add_label_optional("inherit",
+                        "inherit labels from prior pipeline stages (default true); false resets sticky upass options",
+                        "true");
   register_pass(m1);
 }
 
-Pass_upass::Pass_upass(const Eprp_var &var) : Pass("pass.upass", var) {
+Pass_upass::Pass_upass(const Eprp_var& var) : Pass("pass.upass", var) {
   auto inherit_txt = std::string(var.get_stage("inherit", "true"));
-  std::transform(
-      inherit_txt.begin(), inherit_txt.end(), inherit_txt.begin(), [](unsigned char c) { return static_cast<char>(std::tolower(c)); });
-  inherit_labels = !(inherit_txt.empty() || inherit_txt == "0" || inherit_txt == "false" || inherit_txt == "no" || inherit_txt == "off");
+  std::transform(inherit_txt.begin(), inherit_txt.end(), inherit_txt.begin(), [](unsigned char c) {
+    return static_cast<char>(std::tolower(c));
+  });
+  inherit_labels
+      = !(inherit_txt.empty() || inherit_txt == "0" || inherit_txt == "false" || inherit_txt == "no" || inherit_txt == "off");
 
   const auto get_label = [&](std::string_view label, std::string_view default_value = "") -> std::string_view {
     if (inherit_labels) {
@@ -106,8 +110,9 @@ Pass_upass::Pass_upass(const Eprp_var &var) : Pass("pass.upass", var) {
   }
 
   auto dry_run_txt = std::string(get_label("dry_run", "false"));
-  std::transform(
-      dry_run_txt.begin(), dry_run_txt.end(), dry_run_txt.begin(), [](unsigned char c) { return static_cast<char>(std::tolower(c)); });
+  std::transform(dry_run_txt.begin(), dry_run_txt.end(), dry_run_txt.begin(), [](unsigned char c) {
+    return static_cast<char>(std::tolower(c));
+  });
   dry_run = !(dry_run_txt.empty() || dry_run_txt == "0" || dry_run_txt == "false" || dry_run_txt == "no" || dry_run_txt == "off");
 
   if (!upass_order.empty()) {
@@ -148,14 +153,14 @@ Pass_upass::Pass_upass(const Eprp_var &var) : Pass("pass.upass", var) {
   }
 }
 
-void Pass_upass::work(Eprp_var &var) {
+void Pass_upass::work(Eprp_var& var) {
   Pass_upass up(var);
 
   if (up.ir_mode == "lgraph") {
     if (var.lgs.empty()) {
       fail_upass_runtime("pass.upass ir:lgraph requires lgraph input (e.g. ... |> pass.lnast_tolg |> pass.upass ir:lgraph)");
     }
-    for (auto *lg : var.lgs) {
+    for (auto* lg : var.lgs) {
       auto gm     = std::make_shared<upass::Lgraph_manager>(lg);
       auto runner = uPass_runner_lgraph(gm, up.upass_order, up.dry_run);
       if (runner.has_configuration_error()) {
@@ -166,7 +171,7 @@ void Pass_upass::work(Eprp_var &var) {
     return;
   }
 
-  for (const auto &ln : var.lnasts) {
+  for (const auto& ln : var.lnasts) {
     auto lm     = std::make_shared<upass::Lnast_manager>(ln);
     auto runner = uPass_runner(lm, up.upass_order);
     if (runner.has_configuration_error()) {

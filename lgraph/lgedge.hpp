@@ -110,16 +110,16 @@ protected:
   [[nodiscard]] Port_ID get_dst_pid() const;
 
   [[nodiscard]] Port_ID get_inp_pid() const {
-    const auto *s = reinterpret_cast<const SEdge_Internal *>(this);
+    const auto* s = reinterpret_cast<const SEdge_Internal*>(this);
     if (is_snode()) {
       return s->get_inp_pid();
     }
 
-    const auto *l = reinterpret_cast<const LEdge_Internal *>(this);
+    const auto* l = reinterpret_cast<const LEdge_Internal*>(this);
     return l->get_inp_pid();
   }
 
-  static const Edge_raw *find_edge(const Edge_raw *bt, const Edge_raw *et, Index_id ptr_nid, Port_ID inp_pod, Port_ID dst_pid);
+  static const Edge_raw* find_edge(const Edge_raw* bt, const Edge_raw* et, Index_id ptr_nid, Port_ID inp_pod, Port_ID dst_pid);
 
   [[nodiscard]] Index_id get_self_idx() const;  // WARNING: it can point to overflow. Be careful!
 
@@ -136,26 +136,26 @@ public:
 
   [[nodiscard]] bool is_snode() const { return snode; }
   void               set_snode(bool s) {
-    I(snode == reinterpret_cast<const SEdge_Internal *>(this)->is_snode());
+    I(snode == reinterpret_cast<const SEdge_Internal*>(this)->is_snode());
     snode = s;
-    I(snode == reinterpret_cast<const SEdge_Internal *>(this)->is_snode());
+    I(snode == reinterpret_cast<const SEdge_Internal*>(this)->is_snode());
   }
 
-  Node_pin get_out_pin(Lgraph *g, Lgraph *cg, const Hierarchy_index &hidx, Index_id idx) const;
-  Node_pin get_inp_pin(Lgraph *g, Lgraph *cg, const Hierarchy_index &hidx, Index_id idx) const;
+  Node_pin get_out_pin(Lgraph* g, Lgraph* cg, const Hierarchy_index& hidx, Index_id idx) const;
+  Node_pin get_inp_pin(Lgraph* g, Lgraph* cg, const Hierarchy_index& hidx, Index_id idx) const;
 
   [[nodiscard]] Index_id get_self_nid() const;
   [[nodiscard]] Index_id get_idx() const {
-    const auto *s = reinterpret_cast<const SEdge_Internal *>(this);
+    const auto* s = reinterpret_cast<const SEdge_Internal*>(this);
     if (is_snode()) {
       return s->get_idx(get_page_idx());
     }
 
-    const auto *l = reinterpret_cast<const LEdge_Internal *>(this);
+    const auto* l = reinterpret_cast<const LEdge_Internal*>(this);
     return l->get_idx();
   }
   void dump() const {
-    const auto *s = reinterpret_cast<const SEdge_Internal *>(this);
+    const auto* s = reinterpret_cast<const SEdge_Internal*>(this);
     Index_id    a = -1;
     if (is_snode()) {
       a = s->ridx;
@@ -168,14 +168,14 @@ public:
     return ((((uint64_t)this) & 0xFFF) == 0);  // page align.
   }
 
-  Edge_raw(Edge_raw &&rhs)            = delete;
-  Edge_raw &operator=(Edge_raw &&rhs) = delete;
+  Edge_raw(Edge_raw&& rhs)            = delete;
+  Edge_raw& operator=(Edge_raw&& rhs) = delete;
 
 private:  // all constructor&assignment should be marked as private
   Edge_raw()                               = default;
-  Edge_raw(const Edge_raw &rhs)            = default;
+  Edge_raw(const Edge_raw& rhs)            = default;
   ~Edge_raw()                              = default;
-  Edge_raw &operator=(const Edge_raw &rhs) = default;
+  Edge_raw& operator=(const Edge_raw& rhs) = default;
 };
 
 struct __attribute__((packed)) LEdge : public Edge_raw {  // 6 bytes total
@@ -210,20 +210,20 @@ struct __attribute__((packed)) Node_internal_Page {
 
   [[nodiscard]] Index_id get_idx() const { return idx; }
 
-  static const Node_internal_Page &get(const SEdge_Internal *ptr) {
+  static const Node_internal_Page& get(const SEdge_Internal* ptr) {
     // Every 1 Page a full Node is reserved for pointer keeping
     auto root_int = (uint64_t)ptr;
     root_int      = root_int >> 12;
     root_int      = root_int << 12;
 
-    const auto *root = (const Node_internal_Page *)root_int;
+    const auto* root = (const Node_internal_Page*)root_int;
     I(root->state == Page_node_state);
 
     return *root;
   }
-  static const Node_internal_Page &get(const Edge_raw *ptr) { return get(reinterpret_cast<const SEdge_Internal *>(ptr)); }
+  static const Node_internal_Page& get(const Edge_raw* ptr) { return get(reinterpret_cast<const SEdge_Internal*>(ptr)); }
 
-  static const Node_internal_Page &get(const Node_internal *ptr) { return get(reinterpret_cast<const SEdge_Internal *>(ptr)); }
+  static const Node_internal_Page& get(const Node_internal* ptr) { return get(reinterpret_cast<const SEdge_Internal*>(ptr)); }
 
   [[nodiscard]] bool is_page_align() const {
     return ((((uint64_t)this) & 0xFFF) == 0);  // page align.
@@ -271,8 +271,8 @@ private:
   // END 13 Bytes common payload
 
   void try_recycle();
-  void del_input_int(const Edge_raw *out_edge);
-  void del_output_int(const Edge_raw *out_edge);
+  void del_input_int(const Edge_raw* out_edge);
+  void del_output_int(const Edge_raw* out_edge);
 
 protected:
   friend class Edge_raw;
@@ -300,7 +300,7 @@ public:
     if (is_last_state()) {
       return;  // No hint
     }
-    auto *raw_ptr = (uint8_t *)&sedge[0];
+    auto* raw_ptr = (uint8_t*)&sedge[0];
     raw_ptr[5]    = 1;  // 4 bytes for next. Rest is clear
   }
 
@@ -309,7 +309,7 @@ public:
     if (is_last_state()) {
       return;  // No hint
     }
-    auto *raw_ptr = (uint8_t *)&sedge[0];
+    auto* raw_ptr = (uint8_t*)&sedge[0];
     raw_ptr[5]    = 0;  // 4 bytes for next. Rest is clear
   }
 
@@ -318,7 +318,7 @@ public:
     if (is_last_state()) {
       return false;  // No hint
     }
-    auto *raw_ptr = (uint8_t *)&sedge[0];
+    auto* raw_ptr = (uint8_t*)&sedge[0];
     return raw_ptr[5] != 0;
   }
 
@@ -415,8 +415,8 @@ public:
     return get_root().get_nid();  // No need to do get_master_root
   }
 
-  [[nodiscard]] const Node_internal &get_root() const;
-  [[nodiscard]] const Node_internal &get_master_root() const;
+  [[nodiscard]] const Node_internal& get_root() const;
+  [[nodiscard]] const Node_internal& get_master_root() const;
 
   void set_nid(Index_id _nid) {
     I(_nid < (1LL << Index_bits));
@@ -424,18 +424,18 @@ public:
     GI(nid == get_self_idx().value, root);
   }
 
-  [[nodiscard]] inline const Node_internal &get(Index_id idx2) const {
-    const Node_internal *root_n = this;
+  [[nodiscard]] inline const Node_internal& get(Index_id idx2) const {
+    const Node_internal* root_n = this;
     return root_n[idx2.value - get_self_idx().value];
   }
 
-  [[nodiscard]] inline static Node_internal &get(const Edge_raw *ptr) {
+  [[nodiscard]] inline static Node_internal& get(const Edge_raw* ptr) {
     // WARNING: this belongs to a structure that it is cache aligned (32 bytes)
     auto root_int = (uint64_t)ptr;
     root_int      = root_int >> 5;  // 32 byte alignment
     root_int      = root_int << 5;  // 32 byte alignment
 
-    auto *root_n = reinterpret_cast<Node_internal *>(root_int);
+    auto* root_n = reinterpret_cast<Node_internal*>(root_int);
     I(root_n->is_node_state());
 
     return *root_n;
@@ -451,13 +451,13 @@ public:
   void set_next_state(Index_id _idx) {
     I(is_next_state());
     uint32_t idx_value = _idx.value;
-    std::memcpy(static_cast<void *>(&sedge[0]), &idx_value, sizeof(uint32_t));
+    std::memcpy(static_cast<void*>(&sedge[0]), &idx_value, sizeof(uint32_t));
   }
 
   void force_next_state(Index_id _idx) {
     state              = Next_node_state;
     uint32_t idx_value = _idx.value;
-    std::memcpy(static_cast<void *>(&sedge[0]), &idx_value, sizeof(uint32_t));
+    std::memcpy(static_cast<void*>(&sedge[0]), &idx_value, sizeof(uint32_t));
   }
 
   void push_next_state(Index_id _idx) {
@@ -473,7 +473,7 @@ public:
     I(is_next_state());
   }
 
-  void assimilate_edges(Node_internal *other);
+  void assimilate_edges(Node_internal* other);
 
   void set_last_state() { state = Last_node_state; }
   void set_free_state() {
@@ -546,11 +546,11 @@ public:
     bits = _bits;
   }
 
-  [[nodiscard]] const SEdge *get_input_begin() const { return &sedge[get_input_begin_pos_int()]; }
-  [[nodiscard]] const SEdge *get_input_end() const { return &sedge[get_input_end_pos_int()]; }
+  [[nodiscard]] const SEdge* get_input_begin() const { return &sedge[get_input_begin_pos_int()]; }
+  [[nodiscard]] const SEdge* get_input_end() const { return &sedge[get_input_end_pos_int()]; }
 
-  [[nodiscard]] const SEdge *get_output_begin() const { return &sedge[get_output_begin_pos_int() + 1]; }
-  [[nodiscard]] const SEdge *get_output_end() const { return &sedge[Num_SEdges]; }  // WARNING: A position over the limit
+  [[nodiscard]] const SEdge* get_output_begin() const { return &sedge[get_output_begin_pos_int() + 1]; }
+  [[nodiscard]] const SEdge* get_output_end() const { return &sedge[Num_SEdges]; }  // WARNING: A position over the limit
 
   [[nodiscard]] int next_free_input_pos() const {
     I(has_space_short());

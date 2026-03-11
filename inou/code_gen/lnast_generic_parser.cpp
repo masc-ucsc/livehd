@@ -112,7 +112,7 @@ void Cpp_parser::set_supp_buffer_to_print(std::string_view modname) {
   std::string outps_nline;
   if (!outp_bw.empty()) {
     outps_nline = "struct {";
-    for (auto const &[key, val] : outp_bw) {
+    for (auto const& [key, val] : outp_bw) {
       absl::StrAppend(&outps_nline, "UInt<", val, "> ", key, "; ");
     }
     outps_nline = outps_nline.append("} outputs;\n");
@@ -121,7 +121,7 @@ void Cpp_parser::set_supp_buffer_to_print(std::string_view modname) {
   std::string regs_nline, regs_next_nline;
   if (!reg_bw.empty()) {
     regs_nline = "struct {";
-    for (auto const &[key, val] : reg_bw) {
+    for (auto const& [key, val] : reg_bw) {
       absl::StrAppend(&regs_nline, "UInt<", val, "> ", key, "; ");
     }
     absl::StrAppend(&regs_next_nline, regs_nline, "} regs_next;");
@@ -133,7 +133,7 @@ void Cpp_parser::set_supp_buffer_to_print(std::string_view modname) {
   auto vcd_params = "  std::string scope_name;\n  vcd::VCDWriter* vcd_writer;\n";
 
   std::string vcd_varptrs;
-  for (const auto &[key, val] : inp_bw) {
+  for (const auto& [key, val] : inp_bw) {
     auto i_val = str_tools::to_i(val);
 
     if (!(i_val < 2)) {
@@ -155,7 +155,7 @@ void Cpp_parser::set_supp_buffer_to_print(std::string_view modname) {
                       ");\n");
     }
   }
-  for (auto const &[key, val] : outp_bw) {
+  for (auto const& [key, val] : outp_bw) {
     auto i_val = str_tools::to_i(val);
     if (!(i_val < 2)) {  // was (val>"1") before std::string
       absl::StrAppend(&vcd_varptrs,
@@ -176,7 +176,7 @@ void Cpp_parser::set_supp_buffer_to_print(std::string_view modname) {
                       ");\n");
     }
   }
-  for (auto const &[key, val] : reg_bw) {
+  for (auto const& [key, val] : reg_bw) {
     auto i_val = str_tools::to_i(val);
     if (!(i_val < 2)) {
       absl::StrAppend(&vcd_varptrs,
@@ -266,36 +266,36 @@ bool Cpp_parser::set_convert_parameters(std::string_view key, std::string_view r
 
 void Prp_parser::dump_maps() const {
   std::cout << "printing the unsigned vector\n";
-  for (const auto &elem : unsigned_vars) {
+  for (const auto& elem : unsigned_vars) {
     std::print("var:{}\n", elem);
   }
 }
 void Prp_parser::call_dump_maps() const { Prp_parser::dump_maps(); }
 void Ver_parser::dump_maps() const {
   std::cout << "printing the unsigned vector\n";
-  for (const auto &elem : unsigned_vars) {
+  for (const auto& elem : unsigned_vars) {
     std::print("var:{}\n", elem);
   }
 }
 void Ver_parser::call_dump_maps() const { Ver_parser::dump_maps(); }
 void Cpp_parser::dump_maps() const {
   std::cout << "printing I/P bitwidth values:\n";
-  for (const auto &elem : inp_bw) {
+  for (const auto& elem : inp_bw) {
     std::print("\tkey: {}, value: {}\n", elem.first, elem.second);
   }
 
   std::cout << "printing O/P bitwidth values:\n";
-  for (const auto &elem : outp_bw) {
+  for (const auto& elem : outp_bw) {
     std::print("\tkey: {}, value: {}\n", elem.first, elem.second);
   }
 
   std::cout << "printing reg bitwidth values:\n";
-  for (const auto &elem : reg_bw) {
+  for (const auto& elem : reg_bw) {
     std::print("\tkey: {}, value: {}\n", elem.first, elem.second);
   }
 
   std::cout << "printing the unsigned vector\n";
-  for (const auto &elem : unsigned_vars) {
+  for (const auto& elem : unsigned_vars) {
     std::print("var:{}\n", elem);
   }
 }
@@ -322,11 +322,11 @@ void Cpp_parser::set_final_print(std::string_view modname, std::shared_ptr<File_
   auto constructor     = absl::StrCat(modname, "_sim::", modname, "_sim(uint64_t _hidx)\n  : hidx(_hidx) {\n}\n");
 
   std::string rst_vals_nline, rst_vals_nline_vcd;
-  for (auto const &[key, val] : outp_bw) {
+  for (auto const& [key, val] : outp_bw) {
     absl::StrAppend(&rst_vals_nline, "  outputs.", key, " = UInt<", val, "> (0);\n");
     absl::StrAppend(&rst_vals_nline_vcd, "  vcd_writer->change(vcd_", key, ", outputs.", key, ".to_string_binary());\n");
   }
-  for (auto const &[key, val] : reg_bw) {
+  for (auto const& [key, val] : reg_bw) {
     absl::StrAppend(&rst_vals_nline, "  regs.", key, " = UInt<", val, "> (0);\n");
     absl::StrAppend(&rst_vals_nline_vcd, "  vcd_writer->change(vcd_", key, ", regs.", key, ".to_string_binary());\n");
   }

@@ -18,18 +18,18 @@ class Inou_yosys_api : public Pass {
 protected:
   std::string script_file;
 
-  void set_script_yosys(const Eprp_var &var, bool do_read);
+  void set_script_yosys(const Eprp_var& var, bool do_read);
 
-  void do_tolg(Eprp_var &var);
+  void do_tolg(Eprp_var& var);
 
-  void call_yosys(mustache::data &vars);
+  void call_yosys(mustache::data& vars);
 
   // eprp callback
-  static void tolg(Eprp_var &var);
-  static void fromlg(Eprp_var &var);
+  static void tolg(Eprp_var& var);
+  static void fromlg(Eprp_var& var);
 
 public:
-  Inou_yosys_api(Eprp_var &var, bool do_read);
+  Inou_yosys_api(Eprp_var& var, bool do_read);
 
   static void setup();
 };

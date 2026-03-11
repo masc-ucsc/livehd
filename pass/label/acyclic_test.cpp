@@ -30,8 +30,8 @@ public:
 
 #if TEST1
 TEST_F(Label_acyclic_test, simple_graph_no_loop) {
-  auto   *lib     = Graph_library::instance("lgdb");
-  Lgraph *a_graph = lib->create_lgraph("a_graph", "-");
+  auto*   lib     = Graph_library::instance("lgdb");
+  Lgraph* a_graph = lib->create_lgraph("a_graph", "-");
 
   ASSERT_NE(a_graph, nullptr);
 
@@ -80,7 +80,7 @@ TEST_F(Label_acyclic_test, simple_graph_no_loop) {
   a_graph->add_edge(mux_node_out_Y, graph_out_Y, 10);  // Mux output -> overall output
 
   labeler.label(a_graph);
-  for (const auto &n : a_graph->forward(hier)) {
+  for (const auto& n : a_graph->forward(hier)) {
     ASSERT_EQ(0, static_cast<int>(n.get_color()));
 #ifdef DEBUG
     std::print("Node Name:{} , Node Color:{}\n", n.debug_name(), n.get_color());
@@ -91,8 +91,8 @@ TEST_F(Label_acyclic_test, simple_graph_no_loop) {
 
 #if TEST2
 TEST_F(Label_acyclic_test, simple_graph_loop) {
-  auto   *lib     = Graph_library::instance("lgdb");
-  Lgraph *b_graph = lib->create_lgraph("b_graph", "-");
+  auto*   lib     = Graph_library::instance("lgdb");
+  Lgraph* b_graph = lib->create_lgraph("b_graph", "-");
   ASSERT_NE(b_graph, nullptr);
   std::vector<int>                      expected_gen = {3, 0, 0, 0, 0, 3};
   absl::flat_hash_map<std::string, int> expected;
@@ -177,19 +177,19 @@ TEST_F(Label_acyclic_test, simple_graph_loop) {
   labeler.label(b_graph);
 
 #ifdef DEBUG
-  for (const auto &n : b_graph->forward(hier)) {
+  for (const auto& n : b_graph->forward(hier)) {
     std::print("Node Name:{} , Node Color:{}\n", n.debug_name(), n.get_color());
   }
 #endif
 
 #ifdef GENERIC_CHECK
   int i = 0;
-  for (const auto &n : b_graph->forward(hier)) {
+  for (const auto& n : b_graph->forward(hier)) {
     ASSERT_EQ(expected_gen[i], static_cast<int>(n.get_color()));
     i++;
   }
 #else
-  for (const auto &n : b_graph->forward(hier)) {
+  for (const auto& n : b_graph->forward(hier)) {
     ASSERT_EQ(expected[n.debug_name()], static_cast<int>(n.get_color()));
   }
 #endif
@@ -199,8 +199,8 @@ TEST_F(Label_acyclic_test, simple_graph_loop) {
 
 #if TEST3
 TEST_F(Label_acyclic_test, essent_test) {
-  auto   *lib     = Graph_library::instance("lgdb");
-  Lgraph *c_graph = lib->create_lgraph("c_graph", "-");
+  auto*   lib     = Graph_library::instance("lgdb");
+  Lgraph* c_graph = lib->create_lgraph("c_graph", "-");
   ASSERT_NE(c_graph, nullptr);
   std::vector<int>                      expected_gen = {1, 1, 3, 1, 1, 1, 1, 3};
   absl::flat_hash_map<std::string, int> expected;
@@ -270,19 +270,19 @@ TEST_F(Label_acyclic_test, essent_test) {
   labeler.label(c_graph);
 
 #ifdef DEBUG
-  for (const auto &n : c_graph->forward(hier)) {
+  for (const auto& n : c_graph->forward(hier)) {
     std::print("Node Name:{} , Node Color:{}\n", n.debug_name(), n.get_color());
   }
 #endif
 
 #ifdef GENERIC_CHECK
   int i = 0;
-  for (const auto &n : c_graph->forward(hier)) {
+  for (const auto& n : c_graph->forward(hier)) {
     ASSERT_EQ(expected_gen[i], static_cast<int>(n.get_color()));
     i++;
   }
 #else
-  for (const auto &n : c_graph->forward(hier)) {
+  for (const auto& n : c_graph->forward(hier)) {
     ASSERT_EQ(expected[n.debug_name()], static_cast<int>(n.get_color()));
   }
 #endif
@@ -291,10 +291,10 @@ TEST_F(Label_acyclic_test, essent_test) {
 #endif
 
 #ifdef RUN
-int main(int argc, char **argv) {
+int main(int argc, char** argv) {
   ::testing::InitGoogleTest(&argc, argv);
   return RUN_ALL_TESTS();
 }
 #else
-int main(int argc, char **argv) { return 0; }
+int main(int argc, char** argv) { return 0; }
 #endif

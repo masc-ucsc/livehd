@@ -9,12 +9,12 @@
 #include "lgraph.hpp"
 #include "pass_abc.hpp"
 
-void Pass_abc::write_src_info(const Lgraph *g, const index_offset &inp, std::ofstream &fs) {
+void Pass_abc::write_src_info(const Lgraph* g, const index_offset& inp, std::ofstream& fs) {
   auto src_idx  = inp.idx;
   auto src_type = g->node_type_get(src_idx).op;
   switch (src_type) {
     case TechMap_Op: {
-      const Tech_cell *tcell = g->get_tlibrary().get_const_cell(g->tmap_id_get(src_idx));
+      const Tech_cell* tcell = g->get_tlibrary().get_const_cell(g->tmap_id_get(src_idx));
       if (is_latch(tcell)) {
         fs << g->get_node_wirename(src_idx) << " ";
       } else {
@@ -45,7 +45,7 @@ void Pass_abc::write_src_info(const Lgraph *g, const index_offset &inp, std::ofs
   }
 }
 
-void Pass_abc::dump_blif(const Lgraph *g, const std::string &filename) {
+void Pass_abc::dump_blif(const Lgraph* g, const std::string& filename) {
   if (!setup_techmap(g)) {
     Pass::error("pass_abc.dump_blif: supports techmap graphs only");
     return;
@@ -67,10 +67,10 @@ void Pass_abc::dump_blif(const Lgraph *g, const std::string &filename) {
   fs.close();
 }
 
-void Pass_abc::gen_module(const Lgraph *g, std::ofstream &fs) {
+void Pass_abc::gen_module(const Lgraph* g, std::ofstream& fs) {
   fs << ".model " << g->get_name() << "\n";
   fs << ".inputs";
-  for (const auto &idx : graph_info->graphio_input_id) {
+  for (const auto& idx : graph_info->graphio_input_id) {
     int width = g->get_bits(idx);
     if (width > 1) {
       for (int j = 0; j < width; j++) {
@@ -82,7 +82,7 @@ void Pass_abc::gen_module(const Lgraph *g, std::ofstream &fs) {
   }
   fs << "\n";
   fs << ".outputs";
-  for (const auto &idx : graph_info->graphio_output_id) {
+  for (const auto& idx : graph_info->graphio_output_id) {
     int width = g->get_bits(idx);
     if (width > 1) {
       for (int j = 0; j < width; j++) {
@@ -99,15 +99,15 @@ void Pass_abc::gen_module(const Lgraph *g, std::ofstream &fs) {
   fs << "\n";
 }
 
-void Pass_abc::gen_io_conn(const Lgraph *g, std::ofstream &fs) {
-  for (const auto &idx : graph_info->graphio_output_id) {
+void Pass_abc::gen_io_conn(const Lgraph* g, std::ofstream& fs) {
+  for (const auto& idx : graph_info->graphio_output_id) {
     auto src = graph_info->primary_output_conn[idx];
     assert(src.size() == 1);
     if (g->get_node_wirename(src[0].idx) == g->get_node_wirename(idx)) {
       continue;
     }
     fs << ".names ";
-    for (const auto &inp : src) {
+    for (const auto& inp : src) {
       write_src_info(g, inp, fs);
     }
     fs << g->get_node_wirename(idx);
@@ -115,13 +115,13 @@ void Pass_abc::gen_io_conn(const Lgraph *g, std::ofstream &fs) {
   }
 }
 
-void Pass_abc::gen_cell_conn(const Lgraph *g, std::ofstream &fs) {
-  for (const auto &idx : graph_info->combinational_id) {
+void Pass_abc::gen_cell_conn(const Lgraph* g, std::ofstream& fs) {
+  for (const auto& idx : graph_info->combinational_id) {
     auto             src        = graph_info->comb_conn[idx];
-    const Tech_cell *tcell      = g->get_tlibrary().get_const_cell(g->tmap_id_get(idx));
+    const Tech_cell* tcell      = g->get_tlibrary().get_const_cell(g->tmap_id_get(idx));
     std::string_view tcell_name = tcell->get_name();
     fs << ".names ";
-    for (const auto &inp : src) {
+    for (const auto& inp : src) {
       write_src_info(g, inp, fs);
     }
     std::string gate_name = "g" + std::to_string(idx);
@@ -161,18 +161,18 @@ void Pass_abc::gen_cell_conn(const Lgraph *g, std::ofstream &fs) {
   }
 }
 
-void Pass_abc::gen_latch_conn(const Lgraph *g, std::ofstream &fs) {
-  for (const auto &idx : graph_info->latch_id) {
+void Pass_abc::gen_latch_conn(const Lgraph* g, std::ofstream& fs) {
+  for (const auto& idx : graph_info->latch_id) {
     auto src = graph_info->latch_conn[idx];
     fs << ".latch ";
-    for (const auto &inp : src) {
+    for (const auto& inp : src) {
       write_src_info(g, inp, fs);
     }
     fs << g->get_node_wirename(idx) << " "
        << "re ";
 
     std::string ck_name;
-    for (const auto &sg : graph_info->skew_group_map) {
+    for (const auto& sg : graph_info->skew_group_map) {
       if (sg.second.find(idx) != sg.second.end()) {
         ck_name = sg.first;
         break;

@@ -30,7 +30,7 @@ protected:
 
   struct Graph_attributes {
     bool        tried_to_load;
-    Lgraph     *lg;
+    Lgraph*     lg;
     std::string source;  // File were this module came from. If file updated (all the associated Lgraphs must be deleted). If empty,
                          // it ies not present (blackbox)
     Lg_type_id version;  // In which sequence order were the graphs last modified
@@ -53,7 +53,7 @@ protected:
   std::vector<Tech_via>   via_list;    // only for routing
   // END: common attributes
 
-  using Global_instances = absl::flat_hash_map<std::string, Graph_library *>;
+  using Global_instances = absl::flat_hash_map<std::string, Graph_library*>;
   using Name2id          = absl::flat_hash_map<std::string, Lg_type_id::type>;
   using Recycled_id      = absl::flat_hash_set<uint64_t>;
 
@@ -64,7 +64,7 @@ protected:
   Name2id                       name2id;      // WR protect on add entries, RD protect any access
   Recycled_id                   recycled_id;  // WR protect on add entries, RD protect any access
   std::vector<Graph_attributes> attributes;   // WR protect on add entries, RD protect any access
-  std::vector<Sub_node *>       sub_nodes;    // WR protect on add entries, RD protect any access
+  std::vector<Sub_node*>        sub_nodes;    // WR protect on add entries, RD protect any access
 
   static Global_instances global_instances;  // WR protect on add entries, RD protect any access
   // End protect for MT
@@ -88,12 +88,12 @@ protected:
   [[nodiscard]] bool exists_int(std::string_view name) const;
   [[nodiscard]] bool exists_int(Lg_type_id lgid) const;
 
-  [[nodiscard]] Lgraph *try_ref_lgraph_int(std::string_view name) const;
-  [[nodiscard]] Lgraph *try_ref_lgraph_int(const Lg_type_id lgid) const;
+  [[nodiscard]] Lgraph* try_ref_lgraph_int(std::string_view name) const;
+  [[nodiscard]] Lgraph* try_ref_lgraph_int(const Lg_type_id lgid) const;
 
-  [[nodiscard]] Sub_node       *create_sub_int(std::string_view name, std::string_view source);
-  [[nodiscard]] Sub_node       *ref_sub_int(Lg_type_id lgid);
-  [[nodiscard]] const Sub_node &get_sub_int(Lg_type_id lgid) const;
+  [[nodiscard]] Sub_node*       create_sub_int(std::string_view name, std::string_view source);
+  [[nodiscard]] Sub_node*       ref_sub_int(Lg_type_id lgid);
+  [[nodiscard]] const Sub_node& get_sub_int(Lg_type_id lgid) const;
 
   Lg_type_id add_name_int(std::string_view name, std::string_view source);
   bool       rename_name_int(std::string_view orig, std::string_view dest);
@@ -106,7 +106,7 @@ protected:
   }
 
   [[nodiscard]] Lg_type_id get_lgid_int(std::string_view name) const {
-    const auto &it = name2id.find(name);
+    const auto& it = name2id.find(name);
     if (it != name2id.end()) {
       return it->second;
     }
@@ -130,9 +130,9 @@ protected:
 
   [[nodiscard]] bool has_name_int(std::string_view name) const { return name2id.find(name) != name2id.end(); }
 
-  static Graph_library *instance_int(std::string_view path);
+  static Graph_library* instance_int(std::string_view path);
 
-  void        unregister_int(Lgraph *lg);
+  void        unregister_int(Lgraph* lg);
   Lg_type_id  copy_lgraph_int(std::string_view name, std::string_view new_name);
   void        expunge_int(std::string_view name);
   void        clear_int(Lg_type_id lgid);
@@ -141,16 +141,16 @@ protected:
   static void shutdown_int();
   void        reload_int();
 
-  [[nodiscard]] std::pair<Lgraph *, bool> open_lgraph_int(Lg_id_t lgid);
-  [[nodiscard]] std::pair<Lgraph *, bool> open_lgraph_int(std::string_view name, std::string_view source);
-  [[nodiscard]] std::pair<Lgraph *, bool> open_or_create_lgraph_int(std::string_view name, std::string_view source);
-  [[nodiscard]] Lgraph                   *ref_or_create_lgraph_int(std::string_view name, std::string_view source);
-  [[nodiscard]] Lgraph                   *create_lgraph_int(std::string_view name, std::string_view source);
-  [[nodiscard]] Lgraph                   *do_pending_load_int(Lg_id_t lgid);
+  [[nodiscard]] std::pair<Lgraph*, bool> open_lgraph_int(Lg_id_t lgid);
+  [[nodiscard]] std::pair<Lgraph*, bool> open_lgraph_int(std::string_view name, std::string_view source);
+  [[nodiscard]] std::pair<Lgraph*, bool> open_or_create_lgraph_int(std::string_view name, std::string_view source);
+  [[nodiscard]] Lgraph*                  ref_or_create_lgraph_int(std::string_view name, std::string_view source);
+  [[nodiscard]] Lgraph*                  create_lgraph_int(std::string_view name, std::string_view source);
+  [[nodiscard]] Lgraph*                  do_pending_load_int(Lg_id_t lgid);
 
 public:
-  Graph_library(const Graph_library &s)           = delete;
-  Graph_library &operator=(const Graph_library &) = delete;
+  Graph_library(const Graph_library& s)          = delete;
+  Graph_library& operator=(const Graph_library&) = delete;
 
   [[nodiscard]] bool exists(Lg_type_id lgid) const {
     // std::lock_guard<std::mutex> guard(lgs_mutex); NOT needed (sub_nodes guaranteed to be populated)
@@ -163,12 +163,12 @@ public:
     return exists_int(name);
   }
 
-  [[nodiscard]] Lgraph *try_ref_lgraph(const Lg_type_id lgid) const {
+  [[nodiscard]] Lgraph* try_ref_lgraph(const Lg_type_id lgid) const {
     // WARNING: This is a frequent case to build netlists (designed to not require lock)
     // std::lock_guard<std::mutex> guard(lgs_mutex);
     return try_ref_lgraph_int(lgid);
   }
-  [[nodiscard]] Lgraph *try_ref_lgraph(std::string_view name) const {
+  [[nodiscard]] Lgraph* try_ref_lgraph(std::string_view name) const {
     absl::ReaderMutexLock guard(&lgs_mutex);
     // std::lock_guard<std::mutex> guard(lgs_mutex);
     return try_ref_lgraph_int(name);
@@ -179,34 +179,34 @@ public:
   // changed, max_version should increase
   [[nodiscard]] Lg_type_id get_max_version() const { return max_next_version - 1; }
 
-  Sub_node *create_sub(std::string_view name, std::string_view source) {
+  Sub_node* create_sub(std::string_view name, std::string_view source) {
     absl::WriterMutexLock guard(&lgs_mutex);
     // std::lock_guard<std::mutex> guard(lgs_mutex);
     return create_sub_int(name, source);
   }
 
-  [[nodiscard]] Sub_node *ref_or_create_sub(std::string_view name, std::string_view source);
-  [[nodiscard]] Sub_node *ref_or_create_sub(std::string_view name) { return ref_or_create_sub(name, "-"); }
+  [[nodiscard]] Sub_node* ref_or_create_sub(std::string_view name, std::string_view source);
+  [[nodiscard]] Sub_node* ref_or_create_sub(std::string_view name) { return ref_or_create_sub(name, "-"); }
 
-  [[nodiscard]] Sub_node *ref_sub(Lg_type_id lgid) {
+  [[nodiscard]] Sub_node* ref_sub(Lg_type_id lgid) {
     // WARNING: This is a frequent case to build netlists (designed to not require lock)
     // std::lock_guard<std::mutex> guard(lgs_mutex);
     return ref_sub_int(lgid);
   }
 
-  [[nodiscard]] const Sub_node &get_sub(Lg_type_id lgid) const {
+  [[nodiscard]] const Sub_node& get_sub(Lg_type_id lgid) const {
     // WARNING: This is a frequent case to build netlists (designed to not require lock)
     // std::lock_guard<std::mutex> guard(lgs_mutex);
     return get_sub_int(lgid);
   }
 
-  [[nodiscard]] Sub_node *ref_sub(std::string_view name) {
+  [[nodiscard]] Sub_node* ref_sub(std::string_view name) {
     absl::ReaderMutexLock guard(&lgs_mutex);
     // std::lock_guard<std::mutex> guard(lgs_mutex);
     return ref_sub_int(get_lgid_int(name));
   }
 
-  [[nodiscard]] const Sub_node &get_sub(std::string_view name) const {
+  [[nodiscard]] const Sub_node& get_sub(std::string_view name) const {
     absl::ReaderMutexLock guard(&lgs_mutex);
     // std::lock_guard<std::mutex> guard(lgs_mutex);
     return get_sub_int(get_lgid_int(name));
@@ -267,7 +267,7 @@ public:
   }
 
   // TODO: Change to Graph_library &instance...
-  [[nodiscard]] static Graph_library *instance(std::string_view path) {
+  [[nodiscard]] static Graph_library* instance(std::string_view path) {
     // absl::ReaderMutexLock guard(&lgs_mutex);
     // std::lock_guard<std::mutex> guard(lgs_mutex);
     return instance_int(path);
@@ -279,29 +279,29 @@ public:
     return copy_lgraph_int(name, new_name);
   }
 
-  [[nodiscard]] Lgraph *ref_or_create_lgraph(std::string_view name, std::string_view source) {
+  [[nodiscard]] Lgraph* ref_or_create_lgraph(std::string_view name, std::string_view source) {
     absl::WriterMutexLock guard(&lgs_mutex);
     // std::lock_guard<std::mutex> guard(lgs_mutex);
     return ref_or_create_lgraph_int(name, source);
   }
 
-  [[nodiscard]] Lgraph *create_lgraph(std::string_view name, std::string_view source) {
+  [[nodiscard]] Lgraph* create_lgraph(std::string_view name, std::string_view source) {
     absl::WriterMutexLock guard(&lgs_mutex);
     // std::lock_guard<std::mutex> guard(lgs_mutex);
     return create_lgraph_int(name, source);
   }
 
-  [[nodiscard]] Lgraph *open_or_create_lgraph(std::string_view name, std::string_view source);
-  [[nodiscard]] Lgraph *open_lgraph(std::string_view name, std::string_view source);
-  [[nodiscard]] Lgraph *open_lgraph(Lg_id_t lgid);
+  [[nodiscard]] Lgraph* open_or_create_lgraph(std::string_view name, std::string_view source);
+  [[nodiscard]] Lgraph* open_lgraph(std::string_view name, std::string_view source);
+  [[nodiscard]] Lgraph* open_lgraph(Lg_id_t lgid);
 
-  [[nodiscard]] Lgraph *open_lgraph(std::string_view source) {
+  [[nodiscard]] Lgraph* open_lgraph(std::string_view source) {
     auto name = str_tools::get_str_after_last_if_exists(source, '/');
 
     return open_lgraph(name, source);
   }
 
-  void unregister(Lgraph *lg) {
+  void unregister(Lgraph* lg) {
     absl::WriterMutexLock guard(&lgs_mutex);
     // std::lock_guard<std::mutex> guard(lgs_mutex);
     unregister_int(lg);
@@ -343,8 +343,8 @@ public:
   [[nodiscard]] absl::Span<const Tech_layer> get_layer() const { return absl::MakeSpan(layer_list); };
   [[nodiscard]] absl::Span<const Tech_via>   get_via() const { return absl::MakeSpan(via_list); };
 
-  void each_sub(const std::function<void(Lg_type_id lgid, std::string_view name)> &f1) const;
-  void each_sub(std::string_view match, const std::function<void(Lg_type_id lgid, std::string_view name)> &f1) const;
+  void each_sub(const std::function<void(Lg_type_id lgid, std::string_view name)>& f1) const;
+  void each_sub(std::string_view match, const std::function<void(Lg_type_id lgid, std::string_view name)>& f1) const;
 
   void reload() {
     absl::WriterMutexLock guard(&lgs_mutex);

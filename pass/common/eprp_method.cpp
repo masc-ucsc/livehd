@@ -5,7 +5,7 @@
 
 #include "elab_scanner.hpp"
 
-Eprp_method::Eprp_method(std::string_view _name, std::string_view _help, const std::function<void(Eprp_var &var)> &_method)
+Eprp_method::Eprp_method(std::string_view _name, std::string_view _help, const std::function<void(Eprp_var& var)>& _method)
     : name(_name), help(_help), method(_method) {};
 
 bool Eprp_method::has_label(std::string_view label) const { return labels.find(label) != labels.end(); }
@@ -23,8 +23,8 @@ std::string_view Eprp_method::get_label_help(std::string_view label) const {
   return it->second.help;
 }
 
-std::pair<bool, std::string> Eprp_method::check_labels(const Eprp_var &var) const {
-  for (const auto &l : labels) {
+std::pair<bool, std::string> Eprp_method::check_labels(const Eprp_var& var) const {
+  for (const auto& l : labels) {
     if (!l.second.required) {
       continue;
     }

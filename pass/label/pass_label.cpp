@@ -10,7 +10,7 @@
 
 static Pass_plugin sample("pass_label", Pass_label::setup);
 
-Pass_label::Pass_label(const Eprp_var &var) : Pass("pass.label", var) {
+Pass_label::Pass_label(const Eprp_var& var) : Pass("pass.label", var) {
   auto hier_txt = var.get("hier");
 
   if (hier_txt != "false" && hier_txt != "0") {
@@ -56,7 +56,7 @@ void Pass_label::setup() {
   register_pass(m4);
 }
 
-void Pass_label::label_mincut(Eprp_var &var) {
+void Pass_label::label_mincut(Eprp_var& var) {
   Pass_label pp(var);
 
   auto iters_str = var.get("iters");
@@ -69,24 +69,24 @@ void Pass_label::label_mincut(Eprp_var &var) {
 
   Label_mincut p(pp.verbose, pp.hier, iters, seed, alg_txt);
 
-  for (const auto &l : var.lgs) {
+  for (const auto& l : var.lgs) {
     p.label(l);
   }
 }
 
-void Pass_label::label_synth(Eprp_var &var) {
+void Pass_label::label_synth(Eprp_var& var) {
   Pass_label pp(var);
 
   auto alg_txt = var.get("alg");
 
   Label_synth p(pp.verbose, pp.hier, alg_txt);
 
-  for (const auto &l : var.lgs) {
+  for (const auto& l : var.lgs) {
     p.label(l);
   }
 }
 
-void Pass_label::label_acyclic(Eprp_var &var) {
+void Pass_label::label_acyclic(Eprp_var& var) {
   Pass_label pp(var);
 
   auto cutoff_str = var.get("cutoff");
@@ -100,18 +100,18 @@ void Pass_label::label_acyclic(Eprp_var &var) {
 
   Label_acyclic p(pp.verbose, pp.hier, cutoff, merge_en);
 
-  for (const auto &l : var.lgs) {
+  for (const auto& l : var.lgs) {
     p.label(l);
   }
 }
 
-void Pass_label::label_path(Eprp_var &var) {
+void Pass_label::label_path(Eprp_var& var) {
   Pass_label pp(var);
   auto       instance_txt = var.get("instance");
 
   Label_path p(pp.verbose, pp.hier, instance_txt);
 
-  for (const auto &l : var.lgs) {
+  for (const auto& l : var.lgs) {
     p.label(l);
   }
 }

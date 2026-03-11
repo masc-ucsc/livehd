@@ -11,10 +11,10 @@
 class Inou_json : public Pass {
 private:
 protected:
-  static void tolg(Eprp_var &var);
-  static void fromlg(Eprp_var &var);
+  static void tolg(Eprp_var& var);
+  static void fromlg(Eprp_var& var);
 
 public:
-  Inou_json(const Eprp_var &var);
+  Inou_json(const Eprp_var& var);
   static void setup();
 };

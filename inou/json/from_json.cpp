@@ -5,7 +5,7 @@
 
 static absl::flat_hash_map<int, Node::Compact_class> json_remap;
 
-void from_json(Lgraph *g, rapidjson::Document &document) {
+void from_json(Lgraph* g, rapidjson::Document& document) {
   json_remap.clear();
 
   if (document.HasParseError()) {
@@ -16,9 +16,9 @@ void from_json(Lgraph *g, rapidjson::Document &document) {
   }
 
   I(document.HasMember("nodes"));
-  const rapidjson::Value &nodesArray = document["nodes"];
+  const rapidjson::Value& nodesArray = document["nodes"];
   I(nodesArray.IsArray());
-  for (const auto &nodes : nodesArray.GetArray()) {
+  for (const auto& nodes : nodesArray.GetArray()) {
     assert(nodes.IsObject());
 
     assert(nodes.HasMember("nid"));
@@ -36,7 +36,7 @@ void from_json(Lgraph *g, rapidjson::Document &document) {
 
     if (nodes.HasMember("inputs")) {
       assert(nodes["inputs"].IsArray());
-      for (const auto &input_edge : nodes["inputs"].GetArray()) {
+      for (const auto& input_edge : nodes["inputs"].GetArray()) {
         assert(input_edge.IsObject());
         if (input_edge.HasMember("inp_in_pid")) {
           std::print("DEBUG:: inp_in_pid {} \n", input_edge["inp_in_pid"].GetUint64());
@@ -85,7 +85,7 @@ void from_json(Lgraph *g, rapidjson::Document &document) {
 
     if (nodes.HasMember("outputs")) {
       assert(nodes["outputs"].IsArray());
-      for (const auto &output_edge : nodes["outputs"].GetArray()) {
+      for (const auto& output_edge : nodes["outputs"].GetArray()) {
         assert(output_edge.IsObject());
         // if(output_edge.HasMember("out_out_pid")) {
         //  src_pid = output_edge["out_out_pid"].GetUint();

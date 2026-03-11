@@ -67,7 +67,7 @@ COMMENTS:
 
 */
 
-Opt_lnast::Opt_lnast(const Eprp_var &var) {
+Opt_lnast::Opt_lnast(const Eprp_var& var) {
   (void)var;
   // could check for options
 
@@ -90,13 +90,13 @@ void Opt_lnast::hierarchy_info_int(std::string_view msg) {
   }
 }
 
-void Opt_lnast::process_plus(const std::shared_ptr<Lnast> &ln, const Lnast_nid &lnid) {
+void Opt_lnast::process_plus(const std::shared_ptr<Lnast>& ln, const Lnast_nid& lnid) {
   std::string var;
   Lconst      result_trivial;
 
   bool first_child = true;
   for (auto child : ln->children(lnid)) {
-    const auto &data = ln->get_data(child);
+    const auto& data = ln->get_data(child);
     // std::print("plus:{} n_children:{}\n", data.type.debug_name(), n_children);
 
     if (first_child) {
@@ -117,14 +117,14 @@ void Opt_lnast::process_plus(const std::shared_ptr<Lnast> &ln, const Lnast_nid &
   st.set(var, result_trivial);
 }
 
-void Opt_lnast::process_minus(const std::shared_ptr<Lnast> &ln, const Lnast_nid &lnid) {
+void Opt_lnast::process_minus(const std::shared_ptr<Lnast>& ln, const Lnast_nid& lnid) {
   std::string var;
   Lconst      result_trivial;
 
   bool first_child   = true;
   bool first_operand = true;
   for (auto child : ln->children(lnid)) {
-    const auto &data = ln->get_data(child);
+    const auto& data = ln->get_data(child);
 
     if (first_child) {
       first_child = false;
@@ -154,14 +154,14 @@ void Opt_lnast::process_minus(const std::shared_ptr<Lnast> &ln, const Lnast_nid 
   st.set(var, result_trivial);
 }
 
-void Opt_lnast::process_mult(const std::shared_ptr<Lnast> &ln, const Lnast_nid &lnid) {
+void Opt_lnast::process_mult(const std::shared_ptr<Lnast>& ln, const Lnast_nid& lnid) {
   std::string var;
   Lconst      result_trivial;
 
   bool first_child   = true;
   bool first_operand = true;
   for (auto child : ln->children(lnid)) {
-    const auto &data = ln->get_data(child);
+    const auto& data = ln->get_data(child);
 
     if (first_child) {
       first_child = false;
@@ -191,14 +191,14 @@ void Opt_lnast::process_mult(const std::shared_ptr<Lnast> &ln, const Lnast_nid &
   st.set(var, result_trivial);
 }
 
-void Opt_lnast::process_div(const std::shared_ptr<Lnast> &ln, const Lnast_nid &lnid) {
+void Opt_lnast::process_div(const std::shared_ptr<Lnast>& ln, const Lnast_nid& lnid) {
   std::string var;
   Lconst      result_trivial;
 
   bool first_child   = true;
   bool first_operand = true;
   for (auto child : ln->children(lnid)) {
-    const auto &data = ln->get_data(child);
+    const auto& data = ln->get_data(child);
 
     if (first_child) {
       first_child = false;
@@ -268,14 +268,14 @@ void Opt_lnast::process_div(const std::shared_ptr<Lnast> &ln, const Lnast_nid &l
 //   st.set(var, result_trivial);
 // }
 
-void Opt_lnast::process_bit_and(const std::shared_ptr<Lnast> &ln, const Lnast_nid &lnid) {
+void Opt_lnast::process_bit_and(const std::shared_ptr<Lnast>& ln, const Lnast_nid& lnid) {
   std::string var;
   Lconst      result_trivial;
 
   bool first_child   = true;
   bool first_operand = true;
   for (auto child : ln->children(lnid)) {
-    const auto &data = ln->get_data(child);
+    const auto& data = ln->get_data(child);
 
     if (first_child) {
       first_child = false;
@@ -305,13 +305,13 @@ void Opt_lnast::process_bit_and(const std::shared_ptr<Lnast> &ln, const Lnast_ni
   st.set(var, result_trivial);
 }
 
-void Opt_lnast::process_bit_or(const std::shared_ptr<Lnast> &ln, const Lnast_nid &lnid) {
+void Opt_lnast::process_bit_or(const std::shared_ptr<Lnast>& ln, const Lnast_nid& lnid) {
   std::string var;
   Lconst      result_trivial;
 
   bool first_child = true;
   for (auto child : ln->children(lnid)) {
-    const auto &data = ln->get_data(child);
+    const auto& data = ln->get_data(child);
 
     if (first_child) {
       first_child = false;
@@ -331,13 +331,13 @@ void Opt_lnast::process_bit_or(const std::shared_ptr<Lnast> &ln, const Lnast_nid
   st.set(var, result_trivial);
 }
 
-void Opt_lnast::process_bit_not(const std::shared_ptr<Lnast> &ln, const Lnast_nid &lnid) {
+void Opt_lnast::process_bit_not(const std::shared_ptr<Lnast>& ln, const Lnast_nid& lnid) {
   std::string var;
   Lconst      result_trivial;
 
   bool first_child = true;
   for (auto child : ln->children(lnid)) {
-    const auto &data = ln->get_data(child);
+    const auto& data = ln->get_data(child);
 
     if (first_child) {
       first_child = false;
@@ -357,7 +357,7 @@ void Opt_lnast::process_bit_not(const std::shared_ptr<Lnast> &ln, const Lnast_ni
   st.set(var, result_trivial);
 }
 
-void Opt_lnast::process_log_and(const std::shared_ptr<Lnast> &ln, const Lnast_nid &lnid) {
+void Opt_lnast::process_log_and(const std::shared_ptr<Lnast>& ln, const Lnast_nid& lnid) {
   std::string var;
   Lconst      result_trivial;
   Lconst      operand1;
@@ -366,7 +366,7 @@ void Opt_lnast::process_log_and(const std::shared_ptr<Lnast> &ln, const Lnast_ni
   bool first_child   = true;
   bool first_operand = true;
   for (auto child : ln->children(lnid)) {
-    const auto &data = ln->get_data(child);
+    const auto& data = ln->get_data(child);
 
     if (first_child) {
       first_child = false;
@@ -402,7 +402,7 @@ void Opt_lnast::process_log_and(const std::shared_ptr<Lnast> &ln, const Lnast_ni
   st.set(var, result_trivial);
 }
 
-void Opt_lnast::process_log_or(const std::shared_ptr<Lnast> &ln, const Lnast_nid &lnid) {
+void Opt_lnast::process_log_or(const std::shared_ptr<Lnast>& ln, const Lnast_nid& lnid) {
   std::string var;
   Lconst      result_trivial;
   Lconst      operand1;
@@ -411,7 +411,7 @@ void Opt_lnast::process_log_or(const std::shared_ptr<Lnast> &ln, const Lnast_nid
   bool first_child   = true;
   bool first_operand = true;
   for (auto child : ln->children(lnid)) {
-    const auto &data = ln->get_data(child);
+    const auto& data = ln->get_data(child);
 
     if (first_child) {
       first_child = false;
@@ -447,14 +447,14 @@ void Opt_lnast::process_log_or(const std::shared_ptr<Lnast> &ln, const Lnast_nid
   st.set(var, result_trivial);
 }
 
-void Opt_lnast::process_log_not(const std::shared_ptr<Lnast> &ln, const Lnast_nid &lnid) {
+void Opt_lnast::process_log_not(const std::shared_ptr<Lnast>& ln, const Lnast_nid& lnid) {
   std::string var;
   Lconst      result_trivial;
   Lconst      operand;
 
   bool first_child = true;
   for (auto child : ln->children(lnid)) {
-    const auto &data = ln->get_data(child);
+    const auto& data = ln->get_data(child);
 
     if (first_child) {
       first_child = false;
@@ -480,12 +480,12 @@ void Opt_lnast::process_log_not(const std::shared_ptr<Lnast> &ln, const Lnast_ni
   st.set(var, result_trivial);
 }
 
-void Opt_lnast::process_if(const std::shared_ptr<Lnast> &ln, const Lnast_nid &lnid) {
+void Opt_lnast::process_if(const std::shared_ptr<Lnast>& ln, const Lnast_nid& lnid) {
   std::string var;
   Lconst      val;
 
   for (auto child : ln->children(lnid)) {
-    const auto &data = ln->get_data(child);
+    const auto& data = ln->get_data(child);
 
     if (data.type.is_ref()) {  // if reference, check stored trivial value for conditional
       I(data.type.is_ref());
@@ -507,7 +507,7 @@ void Opt_lnast::process_if(const std::shared_ptr<Lnast> &ln, const Lnast_nid &ln
   }
 }
 
-void Opt_lnast::process_ne(const std::shared_ptr<Lnast> &ln, const Lnast_nid &lnid) {
+void Opt_lnast::process_ne(const std::shared_ptr<Lnast>& ln, const Lnast_nid& lnid) {
   std::string var;
   Lconst      result_trivial;
   Lconst      arg1;
@@ -516,7 +516,7 @@ void Opt_lnast::process_ne(const std::shared_ptr<Lnast> &ln, const Lnast_nid &ln
   bool first_child   = true;
   bool first_operand = true;
   for (auto child : ln->children(lnid)) {
-    const auto &data = ln->get_data(child);
+    const auto& data = ln->get_data(child);
 
     if (first_child) {
       first_child = false;
@@ -552,7 +552,7 @@ void Opt_lnast::process_ne(const std::shared_ptr<Lnast> &ln, const Lnast_nid &ln
   st.set(var, result_trivial);
 }
 
-void Opt_lnast::process_eq(const std::shared_ptr<Lnast> &ln, const Lnast_nid &lnid) {
+void Opt_lnast::process_eq(const std::shared_ptr<Lnast>& ln, const Lnast_nid& lnid) {
   std::string var;
   Lconst      result_trivial;
   Lconst      arg1;
@@ -561,7 +561,7 @@ void Opt_lnast::process_eq(const std::shared_ptr<Lnast> &ln, const Lnast_nid &ln
   bool first_child   = true;
   bool first_operand = true;
   for (auto child : ln->children(lnid)) {
-    const auto &data = ln->get_data(child);
+    const auto& data = ln->get_data(child);
 
     if (first_child) {
       first_child = false;
@@ -597,7 +597,7 @@ void Opt_lnast::process_eq(const std::shared_ptr<Lnast> &ln, const Lnast_nid &ln
   st.set(var, result_trivial);
 }
 
-void Opt_lnast::process_lt(const std::shared_ptr<Lnast> &ln, const Lnast_nid &lnid) {
+void Opt_lnast::process_lt(const std::shared_ptr<Lnast>& ln, const Lnast_nid& lnid) {
   std::string var;
   Lconst      result_trivial;
   Lconst      arg1;
@@ -606,7 +606,7 @@ void Opt_lnast::process_lt(const std::shared_ptr<Lnast> &ln, const Lnast_nid &ln
   bool first_child   = true;
   bool first_operand = true;
   for (auto child : ln->children(lnid)) {
-    const auto &data = ln->get_data(child);
+    const auto& data = ln->get_data(child);
 
     if (first_child) {
       first_child = false;
@@ -642,7 +642,7 @@ void Opt_lnast::process_lt(const std::shared_ptr<Lnast> &ln, const Lnast_nid &ln
   st.set(var, result_trivial);
 }
 
-void Opt_lnast::process_le(const std::shared_ptr<Lnast> &ln, const Lnast_nid &lnid) {
+void Opt_lnast::process_le(const std::shared_ptr<Lnast>& ln, const Lnast_nid& lnid) {
   std::string var;
   Lconst      result_trivial;
   Lconst      arg1;
@@ -651,7 +651,7 @@ void Opt_lnast::process_le(const std::shared_ptr<Lnast> &ln, const Lnast_nid &ln
   bool first_child   = true;
   bool first_operand = true;
   for (auto child : ln->children(lnid)) {
-    const auto &data = ln->get_data(child);
+    const auto& data = ln->get_data(child);
 
     if (first_child) {
       first_child = false;
@@ -687,7 +687,7 @@ void Opt_lnast::process_le(const std::shared_ptr<Lnast> &ln, const Lnast_nid &ln
   st.set(var, result_trivial);
 }
 
-void Opt_lnast::process_gt(const std::shared_ptr<Lnast> &ln, const Lnast_nid &lnid) {
+void Opt_lnast::process_gt(const std::shared_ptr<Lnast>& ln, const Lnast_nid& lnid) {
   std::string var;
   Lconst      result_trivial;
   Lconst      arg1;
@@ -696,7 +696,7 @@ void Opt_lnast::process_gt(const std::shared_ptr<Lnast> &ln, const Lnast_nid &ln
   bool first_child   = true;
   bool first_operand = true;
   for (auto child : ln->children(lnid)) {
-    const auto &data = ln->get_data(child);
+    const auto& data = ln->get_data(child);
 
     if (first_child) {
       first_child = false;
@@ -732,7 +732,7 @@ void Opt_lnast::process_gt(const std::shared_ptr<Lnast> &ln, const Lnast_nid &ln
   st.set(var, result_trivial);
 }
 
-void Opt_lnast::process_ge(const std::shared_ptr<Lnast> &ln, const Lnast_nid &lnid) {
+void Opt_lnast::process_ge(const std::shared_ptr<Lnast>& ln, const Lnast_nid& lnid) {
   std::string var;
   Lconst      result_trivial;
   Lconst      arg1;
@@ -741,7 +741,7 @@ void Opt_lnast::process_ge(const std::shared_ptr<Lnast> &ln, const Lnast_nid &ln
   bool first_child   = true;
   bool first_operand = true;
   for (auto child : ln->children(lnid)) {
-    const auto &data = ln->get_data(child);
+    const auto& data = ln->get_data(child);
 
     if (first_child) {
       first_child = false;
@@ -777,10 +777,10 @@ void Opt_lnast::process_ge(const std::shared_ptr<Lnast> &ln, const Lnast_nid &ln
   st.set(var, result_trivial);
 }
 
-void Opt_lnast::process_tuple_set(const std::shared_ptr<Lnast> &ln, const Lnast_nid &lnid) {
+void Opt_lnast::process_tuple_set(const std::shared_ptr<Lnast>& ln, const Lnast_nid& lnid) {
   //-------------------------------
   auto        idx              = ln->get_first_child(lnid);
-  const auto &first_child_data = ln->get_data(idx);
+  const auto& first_child_data = ln->get_data(idx);
   I(first_child_data.type.is_ref());
 
   auto        var_root = first_child_data.token.get_text();
@@ -791,7 +791,7 @@ void Opt_lnast::process_tuple_set(const std::shared_ptr<Lnast> &ln, const Lnast_
   idx         = ln->get_sibling_next(idx);
 
   while (idx != rhs_id) {
-    const auto &data = ln->get_data(idx);
+    const auto& data = ln->get_data(idx);
     if (data.type.is_const()) {  // CASE 1: foo.bar
       absl::StrAppend(&var_field, ".", data.token.get_text());
     } else {
@@ -822,7 +822,7 @@ void Opt_lnast::process_tuple_set(const std::shared_ptr<Lnast> &ln, const Lnast_
     idx = ln->get_sibling_next(idx);
   }
 
-  const auto &rhs_data = ln->get_data(rhs_id);
+  const auto& rhs_data = ln->get_data(rhs_id);
   auto        rhs_txt  = rhs_data.token.get_text();
 
   auto lhs_txt = absl::StrCat(var_root, var_field);
@@ -836,13 +836,13 @@ void Opt_lnast::process_tuple_set(const std::shared_ptr<Lnast> &ln, const Lnast_
   }
 }
 
-void Opt_lnast::process_tuple_get(const std::shared_ptr<Lnast> &ln, const Lnast_nid &lnid) {
+void Opt_lnast::process_tuple_get(const std::shared_ptr<Lnast>& ln, const Lnast_nid& lnid) {
   auto        lhs_id   = ln->get_first_child(lnid);
-  const auto &lhs_data = ln->get_data(lhs_id);
+  const auto& lhs_data = ln->get_data(lhs_id);
   auto        lhs_txt  = lhs_data.token.get_text();
 
   auto        idx               = ln->get_sibling_next(lhs_id);
-  const auto &second_child_data = ln->get_data(idx);
+  const auto& second_child_data = ln->get_data(idx);
   I(second_child_data.type.is_ref());
 
   auto        var_root = second_child_data.token.get_text();
@@ -852,7 +852,7 @@ void Opt_lnast::process_tuple_get(const std::shared_ptr<Lnast> &ln, const Lnast_
   auto rhs_id = ln->get_last_child(lnid);
 
   while (idx != rhs_id) {
-    const auto &data = ln->get_data(idx);
+    const auto& data = ln->get_data(idx);
     if (data.type.is_const()) {  // CASE 1: foo.bar
       absl::StrAppend(&var_field, ".", data.token.get_text());
     } else {
@@ -868,7 +868,7 @@ void Opt_lnast::process_tuple_get(const std::shared_ptr<Lnast> &ln, const Lnast_
     idx = ln->get_sibling_next(idx);
   }
   // Repeat one last time for last child
-  const auto &rhs_data = ln->get_data(rhs_id);
+  const auto& rhs_data = ln->get_data(rhs_id);
   if (rhs_data.type.is_const()) {  // CASE 1: foo.bar
     absl::StrAppend(&var_field, ".", rhs_data.token.get_text());
   } else {
@@ -892,10 +892,10 @@ void Opt_lnast::process_tuple_get(const std::shared_ptr<Lnast> &ln, const Lnast_
   st.set(lhs_txt, bundle_trivial);
 }
 
-void Opt_lnast::process_tuple_add(const std::shared_ptr<Lnast> &ln, const Lnast_nid &lnid) {
+void Opt_lnast::process_tuple_add(const std::shared_ptr<Lnast>& ln, const Lnast_nid& lnid) {
   //-------------------------------
   auto        idx              = ln->get_first_child(lnid);
-  const auto &first_child_data = ln->get_data(idx);
+  const auto& first_child_data = ln->get_data(idx);
   I(first_child_data.type.is_ref());
 
   auto var_root = first_child_data.token.get_text();
@@ -914,7 +914,7 @@ void Opt_lnast::process_tuple_add(const std::shared_ptr<Lnast> &ln, const Lnast_
   while (!idx.is_invalid()) {
     auto pos_txt = std::to_string(pos);
 
-    const auto &data = ln->get_data(idx);
+    const auto& data = ln->get_data(idx);
     if (data.type.is_const()) {  // CASE 1: (..., 123, ...)
       bundle->set(pos_txt, Lconst::from_pyrope(data.token.get_text()));
     } else if (data.type.is_ref()) {  // CASE 2: (..., $run, ...)
@@ -924,8 +924,8 @@ void Opt_lnast::process_tuple_add(const std::shared_ptr<Lnast> &ln, const Lnast_
       auto lhs_id = ln->get_first_child(idx);
       auto rhs_id = ln->get_sibling_next(lhs_id);
 
-      const auto &data_lhs = ln->get_data(lhs_id);
-      const auto &data_rhs = ln->get_data(rhs_id);
+      const auto& data_lhs = ln->get_data(lhs_id);
+      const auto& data_rhs = ln->get_data(rhs_id);
       I(data_lhs.type.is_ref());
       auto data_lhs_txt = data_lhs.token.get_text();
       if (str_tools::is_i(data_lhs_txt)) {
@@ -948,12 +948,12 @@ void Opt_lnast::process_tuple_add(const std::shared_ptr<Lnast> &ln, const Lnast_
   st.set(var_root, bundle);
 }
 
-void Opt_lnast::process_assign(const std::shared_ptr<Lnast> &ln, const Lnast_nid &lnid) {
+void Opt_lnast::process_assign(const std::shared_ptr<Lnast>& ln, const Lnast_nid& lnid) {
   auto lhs_id = ln->get_first_child(lnid);
   auto rhs_id = ln->get_sibling_next(lhs_id);
 
-  const auto &lhs_data = ln->get_data(lhs_id);
-  const auto &rhs_data = ln->get_data(rhs_id);
+  const auto& lhs_data = ln->get_data(lhs_id);
+  const auto& rhs_data = ln->get_data(rhs_id);
 
   I(lhs_data.type.is_ref());
 
@@ -1036,19 +1036,19 @@ yy = (1,a=3)
   }
 }
 
-void Opt_lnast::process_todo(const std::shared_ptr<Lnast> &ln, const Lnast_nid &lnid) {
-  auto &data = ln->get_data(lnid);
+void Opt_lnast::process_todo(const std::shared_ptr<Lnast>& ln, const Lnast_nid& lnid) {
+  auto& data = ln->get_data(lnid);
 
   std::print("not handling lnast type:{} (TODO)\n", data.type.debug_name());
 }
 
-void Opt_lnast::process_stmts(const std::shared_ptr<Lnast> &ln, const Lnast_nid &lnid) {
+void Opt_lnast::process_stmts(const std::shared_ptr<Lnast>& ln, const Lnast_nid& lnid) {
   I(ln->get_data(lnid).type.is_stmts());
 
   auto idx = ln->get_first_child(lnid);
 
   while (!idx.is_invalid()) {
-    const auto &data = ln->get_data(idx);
+    const auto& data = ln->get_data(idx);
 
     switch (data.type.get_raw_ntype()) {
       case Lnast_ntype::Lnast_ntype_int::Lnast_ntype_plus: process_plus(ln, idx); break;
@@ -1080,7 +1080,7 @@ void Opt_lnast::process_stmts(const std::shared_ptr<Lnast> &ln, const Lnast_nid 
   }
 }
 
-void Opt_lnast::reconstruct_stmts(const std::shared_ptr<Lnast> &ln, const Lnast_nid &lnid, Lnast_create &ln2) {
+void Opt_lnast::reconstruct_stmts(const std::shared_ptr<Lnast>& ln, const Lnast_nid& lnid, Lnast_create& ln2) {
   I(ln->get_data(lnid).type.is_stmts());
 
   auto idx = ln->get_first_child(lnid);
@@ -1088,10 +1088,10 @@ void Opt_lnast::reconstruct_stmts(const std::shared_ptr<Lnast> &ln, const Lnast_
   bool nested_flag = false;  // flag to indicate whether the loop is currently checking grandchildren
   auto return_node = idx;    //  node to return to after a node's grandchildren are done being checked
   while (!idx.is_invalid()) {
-    const auto &data = ln->get_data(idx);
+    const auto& data = ln->get_data(idx);
 
     auto  lhs_id    = ln->get_first_child(idx);
-    auto &lhs_data  = ln->get_data(lhs_id);
+    auto& lhs_data  = ln->get_data(lhs_id);
     auto  lhs_txt   = lhs_data.token.get_text();
     auto  rhs_const = st.get_trivial(lhs_txt);
 
@@ -1116,7 +1116,7 @@ void Opt_lnast::reconstruct_stmts(const std::shared_ptr<Lnast> &ln, const Lnast_
         return_node = idx;
 
         for (auto child : ln->children(idx)) {
-          const auto &child_data = ln->get_data(child);
+          const auto& child_data = ln->get_data(child);
 
           if (child_data.type.is_ref()) {  // if reference, check stored trivial value for conditional
             if (rhs_const.is_known_true()) {
@@ -1162,7 +1162,7 @@ void Opt_lnast::reconstruct_stmts(const std::shared_ptr<Lnast> &ln, const Lnast_
   }
 }
 
-void Opt_lnast::opt(const std::shared_ptr<Lnast> &ln) {
+void Opt_lnast::opt(const std::shared_ptr<Lnast>& ln) {
   st.function_scope(ln->get_top_module_name());
 
   if (ln->get_top_module_name() == top || top.empty()) {
@@ -1171,7 +1171,7 @@ void Opt_lnast::opt(const std::shared_ptr<Lnast> &ln) {
     hier_mode = false;
   }
 
-  const auto &data = ln->get_data(Lnast_nid::root());
+  const auto& data = ln->get_data(Lnast_nid::root());
   if (!data.type.is_top()) {
     throw Lnast::error("invalid lnast. It should be top");
   }
@@ -1184,14 +1184,14 @@ void Opt_lnast::opt(const std::shared_ptr<Lnast> &ln) {
   //   outputs->dump();
 }
 
-void Opt_lnast::reconstruct(const std::shared_ptr<Lnast> &ln, Lnast_create &ln2) {
+void Opt_lnast::reconstruct(const std::shared_ptr<Lnast>& ln, Lnast_create& ln2) {
   if (ln->get_top_module_name() == top || top.empty()) {
     hier_mode = true;
   } else {
     hier_mode = false;
   }
 
-  const auto &data = ln->get_data(Lnast_nid::root());
+  const auto& data = ln->get_data(Lnast_nid::root());
   if (!data.type.is_top()) {
     throw Lnast::error("invalid lnast. It should be top");
   }

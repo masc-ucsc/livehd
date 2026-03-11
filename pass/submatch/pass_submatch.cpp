@@ -22,23 +22,23 @@ void pass_submatch::setup() {
   register_pass(m1);
 }
 
-pass_submatch::pass_submatch(const Eprp_var &var) : Pass("pass.submatch", var) {}
+pass_submatch::pass_submatch(const Eprp_var& var) : Pass("pass.submatch", var) {}
 
-void pass_submatch::do_work(Lgraph *g) {
+void pass_submatch::do_work(Lgraph* g) {
   find_mffc_group(g);
   find_subs(g);
 }
 
 uint32_t pass_submatch::submatch_depth = 15;
 
-void pass_submatch::work(Eprp_var &var) {
+void pass_submatch::work(Eprp_var& var) {
   pass_submatch p(var);
 
   if (var.dict.count("depth")) {
     submatch_depth = str_tools::to_i(var.dict["depth"]);
   }
 
-  for (const auto &g : var.lgs) {
+  for (const auto& g : var.lgs) {
     std::print("finding subgraphs for graph {}...\n", g->get_name());
     p.do_work(g);
   }
@@ -70,7 +70,7 @@ uint64_t pass_submatch::hash_node(Node n) {
 
 uint32_t pass_submatch::group_score(uint32_t group_size, uint32_t num_nodes) { return group_size * group_size * num_nodes; }
 
-void pass_submatch::find_mffc_group(Lgraph *g) {
+void pass_submatch::find_mffc_group(Lgraph* g) {
   std::cout << "0 - Find MFFCs\n";
 
   uint32_t mffc_id        = 0;
@@ -108,7 +108,7 @@ void pass_submatch::find_mffc_group(Lgraph *g) {
   std::vector<std::vector<MFFCTree>>           mffc_depth_tree;
   absl::flat_hash_map<Node::Compact, MFFCNode> mffc;
 
-  g->each_graph_output([&](const Node_pin &pin) {
+  g->each_graph_output([&](const Node_pin& pin) {
     auto node                = pin.get_node();
     auto h_root              = hash_mffc_root(node);
     mffc[node.get_compact()] = {mffc_id++, h_root, 0};
@@ -116,7 +116,7 @@ void pass_submatch::find_mffc_group(Lgraph *g) {
     mffc_root_set.insert(node.get_compact());
   });
 
-  for (auto &node : g->forward()) {
+  for (auto& node : g->forward()) {
     if (node.get_num_out_edges() == 1) {
       continue;
     }
@@ -193,18 +193,18 @@ void pass_submatch::find_mffc_group(Lgraph *g) {
   }
 
   std::print("#MFFCs - {}\n", mffc_id);
-  for (auto &[id, info] : mffc_group) {
+  for (auto& [id, info] : mffc_group) {
     std::print("Group #{} - {} x {}\n", id, info.tree_size, info.mffc_set.size());
   }
 }
 
-void pass_submatch::find_subs(Lgraph *g) {
+void pass_submatch::find_subs(Lgraph* g) {
   // Topological Sort
   std::cout << "1 - Topological Sort\n";
   std::vector<Node::Compact>         sorted_compact_nodes;
   absl::flat_hash_set<Node::Compact> visited;
   std::queue<Node::Compact>          node_queue;
-  g->each_graph_output([&](const Node_pin &pin) {
+  g->each_graph_output([&](const Node_pin& pin) {
     node_queue.push(pin.get_node().get_compact());
     while (!node_queue.empty()) {
       auto node = Node(g, node_queue.front());
@@ -235,7 +235,7 @@ void pass_submatch::find_subs(Lgraph *g) {
   std::cout << "2 - Construct Depth Map\n";
   absl::flat_hash_map<Node::Compact, std::vector<uint64_t>>              node2depth_hash;
   std::vector<absl::flat_hash_map<uint64_t, std::vector<Node::Compact>>> depth_hash2node;
-  for (const auto &compact_node : sorted_compact_nodes) {
+  for (const auto& compact_node : sorted_compact_nodes) {
     auto node = Node(g, compact_node);
     for (size_t depth = 0; depth < submatch_depth; ++depth) {
       size_t                max_depth = 0;
@@ -285,7 +285,7 @@ void pass_submatch::find_subs(Lgraph *g) {
 
   absl::flat_hash_map<Node::Compact, std::vector<Root_hash>>             node2height_hash;
   std::vector<absl::flat_hash_map<uint64_t, std::vector<Node::Compact>>> height_hash2node;
-  for (const auto &compact_node : sorted_compact_nodes) {
+  for (const auto& compact_node : sorted_compact_nodes) {
     bool     has_output = true;
     Node     node       = Node(g, compact_node);
     uint64_t pid;
@@ -337,7 +337,7 @@ void pass_submatch::find_subs(Lgraph *g) {
     uint64_t h_best;
     uint8_t  d_best;
     for (size_t depth = 1; depth < depth_hash2node.size(); ++depth) {
-      for (const auto &[hash, vec] : depth_hash2node[depth]) {
+      for (const auto& [hash, vec] : depth_hash2node[depth]) {
         int score = (vec.size() - 1) * depth * depth;
         if (score >= best_score) {
           h_best     = hash;
@@ -391,7 +391,7 @@ void pass_submatch::find_subs(Lgraph *g) {
 
     absl::flat_hash_map<Node::Compact, Node::Compact>                 leaf2root;
     absl::flat_hash_map<uint64_t, absl::flat_hash_set<Node::Compact>> hash2leaf;
-    for (const auto &[nc, vec] : node2height_hash) {
+    for (const auto& [nc, vec] : node2height_hash) {
       for (size_t d = 0; d < d_best && d < vec.size(); ++d) {
         if (shared_node_set.count(nc)) {
           continue;
@@ -403,7 +403,7 @@ void pass_submatch::find_subs(Lgraph *g) {
       }
     }
 
-    for (const auto &[hash, leaves] : hash2leaf) {
+    for (const auto& [hash, leaves] : hash2leaf) {
       std::print("Subtree: {} -> {}", hash, leaves.size());
       std::cout << "\n";
     }

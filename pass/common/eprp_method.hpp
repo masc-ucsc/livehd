@@ -24,11 +24,11 @@ public:
   [[nodiscard]] std::string_view get_name() const { return name; }
 
   const std::string                        help;
-  const std::function<void(Eprp_var &var)> method;
+  const std::function<void(Eprp_var& var)> method;
 
-  Eprp_method(std::string_view _name, std::string_view _help, const std::function<void(Eprp_var &var)> &_method);
+  Eprp_method(std::string_view _name, std::string_view _help, const std::function<void(Eprp_var& var)>& _method);
 
-  [[nodiscard]] std::pair<bool, std::string> check_labels(const Eprp_var &var) const;
+  [[nodiscard]] std::pair<bool, std::string> check_labels(const Eprp_var& var) const;
 
   [[nodiscard]] bool has_label(std::string_view label) const;
   void               add_label_optional(std::string_view attr, std::string_view help_txt, std::string_view default_value = "") {

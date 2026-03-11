@@ -19,9 +19,9 @@ protected:
 
   std::vector<std::string> generated_files;
 
-  Graph_library *library;
+  Graph_library* library;
 
-  void format_append(std::string &text) const {
+  void format_append(std::string& text) const {
     assert(scanner_pos < token_list.size());
     auto txt = token_list[scanner_pos].get_text();
 
@@ -47,11 +47,11 @@ protected:
   void write_file(std::string_view filename, std::string_view text1, std::string_view text2) const;
   void write_file(std::string_view filename, std::string_view text) const;
 
-  void add_io(Sub_node *sub, bool input, std::string_view io_name, Port_ID pos);
+  void add_io(Sub_node* sub, bool input, std::string_view io_name, Port_ID pos);
 
 public:
   Chunkify_verilog(std::string_view path, bool incremental_mode);
   void elaborate() final;
 
-  const std::vector<std::string> &get_generated_files() const { return generated_files; }
+  const std::vector<std::string>& get_generated_files() const { return generated_files; }
 };

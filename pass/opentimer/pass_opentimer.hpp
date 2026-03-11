@@ -24,28 +24,28 @@ protected:
   std::vector<std::string> vcd_file_list;
   std::vector<Vcd_power>   vcd_list;
 
-  static void liberty_open(Eprp_var &var);
-  static void time_work(Eprp_var &var);
-  static void power_work(Eprp_var &var);
+  static void liberty_open(Eprp_var& var);
+  static void time_work(Eprp_var& var);
+  static void power_work(Eprp_var& var);
 
   void read_files();
 
-  void set_input_delays(const std::string &pname);
-  void set_output_delays(const std::string &pname);
-  void build_circuit(Lgraph *lg);
+  void set_input_delays(const std::string& pname);
+  void set_output_delays(const std::string& pname);
+  void build_circuit(Lgraph* lg);
 
   void read_vcd();
   void read_sdc_spef();
   void read_sdc(std::string_view sdc_file);
-  void compute_timing(Lgraph *lg);
-  void compute_power(Lgraph *lg);
-  void populate_table(Lgraph *lg);
+  void compute_timing(Lgraph* lg);
+  void compute_power(Lgraph* lg);
+  void populate_table(Lgraph* lg);
 
-  std::string get_driver_net_name(const Node_pin &dpin) const;
-  void        backpath_set_color(Node &node, int color);
+  std::string get_driver_net_name(const Node_pin& dpin) const;
+  void        backpath_set_color(Node& node, int color);
 
 public:
-  Pass_opentimer(const Eprp_var &var);
+  Pass_opentimer(const Eprp_var& var);
 
   static void setup();
 };

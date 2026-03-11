@@ -5,13 +5,13 @@
 #include "eprp_var.hpp"
 
 struct Pipe_step {
-  Pipe_step(const Eprp_method &fun, const Eprp_var &var) : m(fun), var_fields(var), next_step(nullptr) {}
+  Pipe_step(const Eprp_method& fun, const Eprp_var& var) : m(fun), var_fields(var), next_step(nullptr) {}
 
-  void run(Eprp_var &last_cmd_var);
+  void run(Eprp_var& last_cmd_var);
 
   Eprp_method m;
   Eprp_var    var_fields;
-  Pipe_step  *next_step;
+  Pipe_step*  next_step;
 };
 
 class Eprp_pipe {
@@ -21,7 +21,7 @@ protected:
 public:
   void clear() { steps.clear(); }
 
-  void add_command(const Eprp_method &m, const Eprp_var &field_var);
+  void add_command(const Eprp_method& m, const Eprp_var& field_var);
 
   void run();
 };
