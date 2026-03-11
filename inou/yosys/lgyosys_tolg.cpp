@@ -1980,6 +1980,10 @@ static void process_cells(RTLIL::Module* mod, Lgraph* g) {
                || std::strncmp(cell->type.c_str(), "$aldff", 6) == 0 || std::strncmp(cell->type.c_str(), "$sdff", 5) == 0
                || std::strncmp(cell->type.c_str(), "$sdffe", 6) == 0 || std::strncmp(cell->type.c_str(), "$sdffsr", 7) == 0) {
       exit_node.set_type(Ntype_op::Flop, get_output_size(cell));
+      std::string inst_name{cell->name.str()};
+      if (!inst_name.empty()) {
+        exit_node.set_name(inst_name[0] == '\\' ? inst_name.substr(1) : inst_name);
+      }
 
       if (cell->hasPort(ID::Q)) {
         const RTLIL::Wire* wire = cell->getPort(ID::Q).chunks().at(0).wire;
