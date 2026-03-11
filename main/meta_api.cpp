@@ -43,15 +43,22 @@ void Meta_api::open(Eprp_var &var) {
 void Meta_api::save(Eprp_var &var) {
   auto hier = var.get("hier");
 
+  absl::flat_hash_set<Lgraph *> saved;
+
   for (Lgraph *lg : var.lgs) {
     if (lg->is_empty()) {
       file_utils::clean_dir(lg->get_save_filename());
     } else {
       if (hier != "false" && hier != "0") {
-        // lg->each_hier_unique_sub_bottom_up([&var](Lgraph *g) { g->save(); });
-        lg->each_hier_unique_sub_bottom_up([](Lgraph *g) { thread_pool.add([g]() -> void { g->save(); }); });
+        lg->each_hier_unique_sub_bottom_up([&saved](Lgraph *g) {
+          if (saved.insert(g).second) {
+            thread_pool.add([g]() -> void { g->save(); });
+          }
+        });
       } else {
-        thread_pool.add([lg]() -> void { lg->save(); });
+        if (saved.insert(lg).second) {
+          thread_pool.add([lg]() -> void { lg->save(); });
+        }
       }
     }
   }
