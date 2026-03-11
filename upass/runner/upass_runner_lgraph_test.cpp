@@ -42,8 +42,8 @@ static upass::uPass_lgraph_plugin plugin_lgraph_missing_dep("__upass_lgraph_miss
 
 class Exposed_runner_lgraph : public uPass_runner_lgraph {
 public:
-  Exposed_runner_lgraph(std::shared_ptr<upass::Lgraph_manager> gm, const std::vector<std::string>& names = {})
-      : uPass_runner_lgraph(std::move(gm), names) {}
+  Exposed_runner_lgraph(std::shared_ptr<upass::Lgraph_manager> _gm, const std::vector<std::string>& names = {})
+      : uPass_runner_lgraph(std::move(_gm), names) {}
 
   std::vector<std::string> expose_resolve(const std::vector<std::string>& names) const { return resolve_order(names); }
 };

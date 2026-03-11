@@ -70,8 +70,8 @@ struct Lgraph_pass_fold_tag final : public upass::uPass_lgraph {
 
 struct Lgraph_pass_fold_sum_const final : public upass::uPass_lgraph {
   using upass::uPass_lgraph::uPass_lgraph;
-  explicit Lgraph_pass_fold_sum_const(std::shared_ptr<upass::Lgraph_manager>& gm, bool _dry_run = false)
-      : upass::uPass_lgraph(gm), dry_run(_dry_run) {}
+  explicit Lgraph_pass_fold_sum_const(std::shared_ptr<upass::Lgraph_manager>& _gm, bool _dry_run = false)
+      : upass::uPass_lgraph(_gm), dry_run(_dry_run) {}
 
   void run_once() override {
     if (!gm || !gm->ref_lgraph()) {
@@ -97,8 +97,8 @@ private:
 
 struct Lgraph_pass_fold_neutral final : public upass::uPass_lgraph {
   using upass::uPass_lgraph::uPass_lgraph;
-  explicit Lgraph_pass_fold_neutral(std::shared_ptr<upass::Lgraph_manager>& gm, bool _dry_run = false)
-      : upass::uPass_lgraph(gm), dry_run(_dry_run) {}
+  explicit Lgraph_pass_fold_neutral(std::shared_ptr<upass::Lgraph_manager>& _gm, bool _dry_run = false)
+      : upass::uPass_lgraph(_gm), dry_run(_dry_run) {}
 
   void run_once() override {
     if (!gm || !gm->ref_lgraph()) {
@@ -129,8 +129,8 @@ private:
 
 struct Lgraph_pass_fold_shift_div final : public upass::uPass_lgraph {
   using upass::uPass_lgraph::uPass_lgraph;
-  explicit Lgraph_pass_fold_shift_div(std::shared_ptr<upass::Lgraph_manager>& gm, bool _dry_run = false)
-      : upass::uPass_lgraph(gm), dry_run(_dry_run) {}
+  explicit Lgraph_pass_fold_shift_div(std::shared_ptr<upass::Lgraph_manager>& _gm, bool _dry_run = false)
+      : upass::uPass_lgraph(_gm), dry_run(_dry_run) {}
 
   void run_once() override {
     if (!gm || !gm->ref_lgraph()) {
@@ -163,8 +163,8 @@ private:
 
 struct Lgraph_pass_fold_sub_const final : public upass::uPass_lgraph {
   using upass::uPass_lgraph::uPass_lgraph;
-  explicit Lgraph_pass_fold_sub_const(std::shared_ptr<upass::Lgraph_manager>& gm, bool _dry_run = false)
-      : upass::uPass_lgraph(gm), dry_run(_dry_run) {}
+  explicit Lgraph_pass_fold_sub_const(std::shared_ptr<upass::Lgraph_manager>& _gm, bool _dry_run = false)
+      : upass::uPass_lgraph(_gm), dry_run(_dry_run) {}
 
   void run_once() override {
     if (!gm || !gm->ref_lgraph()) {
@@ -194,8 +194,8 @@ private:
 
 struct Lgraph_pass_fold_mult_const final : public upass::uPass_lgraph {
   using upass::uPass_lgraph::uPass_lgraph;
-  explicit Lgraph_pass_fold_mult_const(std::shared_ptr<upass::Lgraph_manager>& gm, bool _dry_run = false)
-      : upass::uPass_lgraph(gm), dry_run(_dry_run) {}
+  explicit Lgraph_pass_fold_mult_const(std::shared_ptr<upass::Lgraph_manager>& _gm, bool _dry_run = false)
+      : upass::uPass_lgraph(_gm), dry_run(_dry_run) {}
 
   void run_once() override {
     if (!gm || !gm->ref_lgraph()) {
@@ -220,8 +220,8 @@ private:
 
 struct Lgraph_pass_dce final : public upass::uPass_lgraph {
   using upass::uPass_lgraph::uPass_lgraph;
-  explicit Lgraph_pass_dce(std::shared_ptr<upass::Lgraph_manager>& gm, bool _dry_run = false)
-      : upass::uPass_lgraph(gm), dry_run(_dry_run) {}
+  explicit Lgraph_pass_dce(std::shared_ptr<upass::Lgraph_manager>& _gm, bool _dry_run = false)
+      : upass::uPass_lgraph(_gm), dry_run(_dry_run) {}
 
   void run_once() override {
     if (!gm || !gm->ref_lgraph()) {

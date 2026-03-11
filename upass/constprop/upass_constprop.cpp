@@ -20,20 +20,20 @@ void uPass_constprop::process_assign() {
 
   if (is_type(Lnast_ntype::Lnast_ntype_ref)) {
     auto rhs_bundle = current_bundle();
-    bool changed    = true;
+    bool local_changed    = true;
     if (st.has_bundle(lhs_text)) {
-      changed = st.get_bundle(lhs_text) != rhs_bundle;
+      local_changed = st.get_bundle(lhs_text) != rhs_bundle;
     }
-    if (changed && st.set(lhs_text, rhs_bundle)) {
+    if (local_changed && st.set(lhs_text, rhs_bundle)) {
       mark_changed();
     }
   } else {
     auto rhs_value = current_pyrope_value();
-    bool changed   = true;
+    bool local_changed   = true;
     if (st.has_trivial(lhs_text)) {
-      changed = st.get_trivial(lhs_text) != rhs_value;
+      local_changed = st.get_trivial(lhs_text) != rhs_value;
     }
-    if (changed && st.set(lhs_text, rhs_value)) {
+    if (local_changed && st.set(lhs_text, rhs_value)) {
       mark_changed();
     }
   }
@@ -51,11 +51,11 @@ void uPass_constprop::process_nary(F op) {
   while (move_to_sibling()) {
     op(r, current_prim_value());
   }
-  bool changed = true;
+  bool local_changed = true;
   if (st.has_trivial(var)) {
-    changed = st.get_trivial(var) != r;
+    local_changed = st.get_trivial(var) != r;
   }
-  if (changed && st.set(var, r)) {
+  if (local_changed && st.set(var, r)) {
     mark_changed();
   }
 
@@ -72,11 +72,11 @@ void uPass_constprop::process_binary(F op) {
   move_to_sibling();
   Lconst n2      = current_prim_value();
   Lconst r       = op(n1, n2);
-  bool   changed = true;
+  bool   local_changed = true;
   if (st.has_trivial(var)) {
-    changed = st.get_trivial(var) != r;
+    local_changed = st.get_trivial(var) != r;
   }
-  if (changed && st.set(var, r)) {
+  if (local_changed && st.set(var, r)) {
     mark_changed();
   }
 
@@ -91,11 +91,11 @@ void uPass_constprop::process_unary(F op) {
   move_to_sibling();
   Lconst r = current_prim_value();
   op(r);
-  bool changed = true;
+  bool local_changed = true;
   if (st.has_trivial(var)) {
-    changed = st.get_trivial(var) != r;
+    local_changed = st.get_trivial(var) != r;
   }
-  if (changed && st.set(var, r)) {
+  if (local_changed && st.set(var, r)) {
     mark_changed();
   }
 

@@ -33,7 +33,7 @@ static upass::uPass_plugin plugin_missing_dep("__upass_missing_dep", upass::uPas
 
 class Exposed_runner : public uPass_runner {
 public:
-  Exposed_runner(std::shared_ptr<upass::Lnast_manager>& lm, const std::vector<std::string>& names) : uPass_runner(lm, names) {}
+  Exposed_runner(std::shared_ptr<upass::Lnast_manager>& _lm, const std::vector<std::string>& names) : uPass_runner(_lm, names) {}
 
   std::vector<std::string> expose_resolve(const std::vector<std::string>& names) const { return resolve_order(names); }
 };

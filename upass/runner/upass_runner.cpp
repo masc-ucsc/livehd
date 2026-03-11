@@ -142,13 +142,13 @@ std::vector<std::string> uPass_runner::resolve_order(const std::vector<std::stri
 }
 
 std::vector<std::string> uPass_runner::changed_passes() const {
-  std::vector<std::string> changed;
+  std::vector<std::string> changed_list;
   for (const auto& entry : upasses) {
     if (entry.pass->has_changed()) {
-      changed.emplace_back(entry.name);
+      changed_list.emplace_back(entry.name);
     }
   }
-  return changed;
+  return changed_list;
 }
 
 void uPass_runner::run(std::size_t max_iters) {
