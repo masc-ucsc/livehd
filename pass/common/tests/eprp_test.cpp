@@ -38,7 +38,7 @@ public:
     for (const auto s : absl::StrSplit(files, ',')) {
       svector.emplace_back(s);
     }
-    EXPECT_EQ(svector.size(), 4);
+    EXPECT_EQ(svector.size(), size_t{4});
 
     EXPECT_EQ(svector[0], "g3xx");
     EXPECT_EQ(svector[1], "./f1/f1.v");

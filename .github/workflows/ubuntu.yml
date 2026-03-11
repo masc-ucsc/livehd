@@ -8,6 +8,9 @@ jobs:
   test-opt:
     name: Build everything
     runs-on: ubuntu-24.04
+    env:
+      CC: gcc-14
+      CXX: g++-14
     steps:
       - name: Checkout repo
         uses: actions/checkout@v6
@@ -22,12 +25,19 @@ jobs:
             bazel-gcc-${{ runner.os }}-
             bazel-gcc-
 
-      #      - run: sudo apt install -y build-essential
+      - name: Show compiler selection
+        run: |
+          "$CC" --version
+          "$CXX" --version
+
       - run: bazel test -c dbg -s //...
 
   coverage:
     name: Gather coverage metrics
     runs-on: ubuntu-24.04
+    env:
+      CC: gcc-14
+      CXX: g++-14
 
     steps:
       - name: Checkout repo
@@ -46,6 +56,11 @@ jobs:
       - name: Print the list of targets
         run: bazel query --output label_kind //...
 
+      - name: Show compiler selection
+        run: |
+          "$CC" --version
+          "$CXX" --version
+
       - run: bazel coverage --instrument_test_targets --collect_code_coverage --test_tag_filters=-fixme --combined_report=lcov --test_output=all //...
 
       - uses: codecov/codecov-action@v5
@@ -53,4 +68,3 @@ jobs:
           slug: masc-ucsc/livehd
           token: ${{ secrets.CODECOV_TOKEN }}
           directory: ./bazel-out/_coverage
-

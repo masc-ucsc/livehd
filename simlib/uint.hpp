@@ -42,7 +42,6 @@ public:
   constexpr UInt(const std::integer_sequence<word_t, Limbs...>) : words_{Limbs...} {}
 
   constexpr UInt(word_t initial) : UInt() {
-    constexpr int bits_word = std::is_same<word_t, uint64_t>::value ? 64 : 8;
     if constexpr (w_ < 64) {
       uint64_t top_word_mask = (1l << w_) - 1;
       words_[0]              = initial & top_word_mask;
@@ -165,7 +164,7 @@ public:
     if constexpr (w_ > other_w) {
       result = core_add_sub<max_bits + 1, false>(other.template pad<max_bits>());
     } else if constexpr (w_ < other_w) {
-      result = other.core_add_sub<max_bits + 1, false>(pad<max_bits>());
+      result = other.template core_add_sub<max_bits + 1, false>(pad<max_bits>());
     } else {
       result = core_add_sub<w_ + 1, false>(other);
     }
@@ -553,7 +552,6 @@ public:
     } else if constexpr (n_ <= 8) {
       bool        top_zeroes = true;
       auto        v          = words_[0];
-      auto        v_casted   = static_cast<uint64_t>(words_[0]);
       std::string result     = (multibit ? "b" : "");
 
       if (!multibit) {
@@ -794,7 +792,7 @@ std::ostream& operator<<(std::ostream& os, const UInt<w>& ui) {
 constexpr size_t ctlog2(uint8_t n) { return ((n < 2) ? 1 : 1 + ctlog2(n / 2)); }
 
 template <char... Chars>
-constexpr auto operator"" _uint() {
+constexpr auto operator""_uint() {
   constexpr int                 N = sizeof...(Chars);
   constexpr std::array<char, N> seq{Chars...};
 
