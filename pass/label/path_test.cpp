@@ -214,6 +214,40 @@ TEST_F(Label_path_test, instance_multiple_seeds_get_different_colors) {
   EXPECT_EQ(bb_color, bb_stop.get_color());
 }
 
+TEST_F(Label_path_test, alias_passthrough_nodes_keep_same_color) {
+  auto*   lib = Graph_library::instance("lgdb_path_test");
+  Lgraph* g   = lib->create_lgraph("alias_passthrough_nodes_keep_same_color", "-");
+  ASSERT_NE(g, nullptr);
+
+  Label_path labeler(false, false);
+
+  auto flop     = g->create_node(Ntype_op::Flop);
+  auto flop_q   = flop.setup_driver_pin(std::string_view("Q"));
+  auto flop_din = flop.setup_sink_pin(std::string_view("din"));
+  g->add_edge(g->create_node_const(1).setup_driver_pin(), flop_din, 1);
+  flop_q.set_name("pipeB_id_ex.reg_isValid");
+
+  auto mask      = g->create_node(Ntype_op::Get_mask);
+  auto mask_a    = mask.setup_sink_pin(std::string_view("a"));
+  auto mask_sel  = mask.setup_sink_pin(std::string_view("mask"));
+  auto mask_y    = mask.setup_driver_pin(std::string_view("Y"));
+  g->add_edge(flop_q, mask_a, 1);
+  g->add_edge(g->create_node_const(-1).setup_driver_pin(), mask_sel, 1);
+
+  auto alias     = g->create_node(Ntype_op::Or);
+  auto alias_a   = alias.setup_sink_pin(std::string_view("A"));
+  auto alias_out = alias.setup_driver_pin(std::string_view("Y"));
+  alias_out.set_name("nextPCmod.io_pipeB_valid");
+  g->add_edge(mask_y, alias_a, 1);
+
+  labeler.label(g);
+
+  auto flop_color = flop.get_color();
+  EXPECT_NE(0, flop_color);
+  EXPECT_EQ(flop_color, mask.get_color());
+  EXPECT_EQ(flop_color, alias.get_color());
+}
+
 int main(int argc, char** argv) {
   ::testing::InitGoogleTest(&argc, argv);
   return RUN_ALL_TESTS();

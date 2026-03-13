@@ -761,6 +761,20 @@ void Node::dump() const {
                edge.sink.debug_name(),
                edge.driver.get_wire_name());
   }
+
+  if (!has_outputs() && !is_type_multi_driver()) {
+    auto dpin = get_driver_pin();
+    if (!dpin.is_invalid() && dpin.has_name()) {
+      std::print("  out bits:{:<3} pid:{:<2} name:{:<30} -> nid:{:<5} pid:{:<2} name:{} wname:{}\n",
+                 dpin.get_bits(),
+                 dpin.get_pid(),
+                 dpin.debug_name(),
+                 0,
+                 0,
+                 "DISCONNECTED",
+                 dpin.get_wire_name());
+    }
+  }
 }
 // LCOV_EXCL_STOP
 //

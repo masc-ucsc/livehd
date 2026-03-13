@@ -478,6 +478,20 @@ static bool is_yosys_output(const std::string& idstring) {
   return idstring == "\\Y" || idstring == "\\Q" || idstring == "\\RD_DATA";
 }
 
+static bool set_driver_name_if_free(Node_pin& pin, std::string_view name) {
+  if (name.empty()) {
+    return false;
+  }
+
+  auto existing = Node_pin::find_driver_pin(pin.get_class_lgraph(), name);
+  if (!existing.is_invalid() && existing != pin) {
+    return false;
+  }
+
+  pin.set_name(std::string(name));
+  return true;
+}
+
 static void connect_all_inputs(const Node_pin& spin, const RTLIL::Cell* cell) {
   I(spin.is_sink());
   bool is_signed = false;
@@ -526,8 +540,17 @@ static void set_bits_wirename(Node_pin& pin, const RTLIL::Wire* wire) {
         && wire->name.str().rfind("\\lg_") != 0
         // dc generated names
         && !std::regex_match(wire->name.str(), dc_name)) {
+      if (pin.has_name()) {
+        auto current_name = std::string(pin.get_name());
+        if (!current_name.empty() && current_name[0] != '_') {
+          return;
+        }
+      }
+      if (!set_driver_name_if_free(pin, std::string(&wire->name.c_str()[1]))) {
+        return;
+      }
       // WARNING: preserve Chisel names!! Helps with network match
-      pin.set_name(std::string(&wire->name.c_str()[1]));
+      return;
     }
   }
 
@@ -877,6 +900,16 @@ static void process_cell_drivers_intialization(RTLIL::Module* mod, Lgraph* g) {
           if (chunk.width == ss.size()) {
             I(driver_pin.get_bits() == wire->width);  // bits should still not be set
             I(driver_pin.get_bits() == ss.size());
+            auto prev_it = wire2pin.find(wire);
+            if (prev_it != wire2pin.end()) {
+              auto prev_pin = prev_it->second;
+              auto prev_node = prev_pin.get_node();
+              if (prev_node.is_type(Ntype_op::Or) && !prev_node.has_inputs()) {
+                // Assign processing may have created a placeholder for aliases before the real
+                // cell driver is known. Preserve that alias node and feed it from this driver.
+                append_to_or_node(g, prev_node, driver_pin, 0);
+              }
+            }
             // output port drives a single wire
             wire2pin[wire] = driver_pin;
             set_bits_wirename(driver_pin, wire);
@@ -1054,6 +1087,8 @@ static void process_assigns(RTLIL::Module* mod, Lgraph* g) {
         } else if (!lhs_is_internal) {
           best_name = lhs_name;
         }
+        bool needs_alias_node = rhs_wire && !lhs_wire->port_output && !lhs_is_internal && !rhs_is_internal && !lhs_is_temp
+                                && !rhs_is_temp && lhs_name != rhs_name;
 
         // std::print("DBG assign lhs:{} rhs:{} lhs_temp:{} rhs_temp:{} lhs_int:{} rhs_int:{} best:{}\n",
         //            lhs_wire->name.c_str(),
@@ -1079,14 +1114,14 @@ static void process_assigns(RTLIL::Module* mod, Lgraph* g) {
               if (!prev_pin.has_name() || prev_pin.get_name()[0] == '_') {
                 // std::print("DBG  fast_path: RENAME {} -> {}\n",
                 //            prev_pin.has_name() ? std::string(prev_pin.get_name()) : "(none)", best_name);
-                prev_pin.set_name(best_name);
+                set_driver_name_if_free(prev_pin, best_name);
               } else if (prev_pin.get_name() != best_name && best_name[0] != '_') {
                 // std::print("DBG  fast_path: OR node for both names {} and {}\n",
                 //            std::string(prev_pin.get_name()), best_name);
                 auto or_node = prev_pin.get_node().create(Ntype_op::Or);
                 auto or_dpin = or_node.setup_driver_pin();
                 or_dpin.set_bits(lhs_wire->width);
-                or_dpin.set_name(best_name);
+                set_driver_name_if_free(or_dpin, best_name);
                 or_node.connect_sink(prev_pin);
                 wire2pin[lhs_wire] = or_dpin;
               } else {
@@ -1133,13 +1168,13 @@ static void process_assigns(RTLIL::Module* mod, Lgraph* g) {
                 }
                 if (!chunk_pin.has_name() || chunk_pin.get_name()[0] == '_') {
                   // No name or temp name — just rename
-                  chunk_pin.set_name(bit_name);
+                  set_driver_name_if_free(chunk_pin, bit_name);
                 } else if (chunk_pin.get_name() != bit_name) {
                   // Pin already has a meaningful name — add OR node to preserve both
                   auto or_node = chunk_pin.get_node().create(Ntype_op::Or);
                   auto or_dpin = or_node.setup_driver_pin();
                   or_dpin.set_bits(chunk.width);
-                  or_dpin.set_name(bit_name);
+                  set_driver_name_if_free(or_dpin, bit_name);
                   or_node.connect_sink(chunk_pin);
                   wire2pin[chunk.wire] = or_dpin;
                 }
@@ -1153,7 +1188,15 @@ static void process_assigns(RTLIL::Module* mod, Lgraph* g) {
           //   std::print("DBG  multi-chunk: SKIPPED ss.size()={}\n", ss.size());
         }
 
-        if (!lhs_is_internal) {
+        if (needs_alias_node) {
+          auto alias_node = g->create_node(Ntype_op::Or, lhs_wire->width).get_non_hierarchical();
+          set_loc(alias_node, lhs_wire->get_src_attribute());
+
+          auto alias_dpin = alias_node.setup_driver_pin();
+          set_driver_name_if_free(alias_dpin, lhs_name);
+          alias_node.connect_sink(dpin);
+          dpin = alias_dpin;
+        } else if (!lhs_is_internal) {
           bool rhs_adjusted_name = false;
           if (!lhs_wire->port_output && rhs_wire) {
             auto it = wire2pin.find(rhs_wire);
@@ -1165,7 +1208,7 @@ static void process_assigns(RTLIL::Module* mod, Lgraph* g) {
               if (!rhs_dpin.has_name() || rhs_dpin.get_name()[0] == '_') {
                 auto set_name = best_name.empty() ? lhs_name : best_name;
                 // std::print("DBG  normal: rhs_adjusted_name -> set {} on rhs_dpin\n", set_name);
-                rhs_dpin.set_name(set_name);
+                set_driver_name_if_free(rhs_dpin, set_name);
                 rhs_adjusted_name = true;
               }
               // } else {
@@ -1175,13 +1218,13 @@ static void process_assigns(RTLIL::Module* mod, Lgraph* g) {
           if (!rhs_adjusted_name && !best_name.empty()) {
             if (!dpin.has_name() || dpin.get_name()[0] == '_') {
               // std::print("DBG  normal: set best_name {} on dpin\n", best_name);
-              dpin.set_name(best_name);
+              set_driver_name_if_free(dpin, best_name);
             } else if (dpin.get_name() != best_name && best_name[0] != '_') {
               // std::print("DBG  normal: OR node dpin:{} best:{}\n", std::string(dpin.get_name()), best_name);
               auto or_node = dpin.get_node().create(Ntype_op::Or);
               auto or_dpin = or_node.setup_driver_pin();
               or_dpin.set_bits(lhs_wire->width);
-              or_dpin.set_name(best_name);
+              set_driver_name_if_free(or_dpin, best_name);
               or_node.connect_sink(dpin);
               dpin = or_dpin;
               // } else {
@@ -1424,9 +1467,9 @@ static void connect_partial_dpin(Lgraph* g, Node& or_node, uint32_t or_offset, B
   }
 }
 
-static void process_partially_assigned_other(Lgraph *g) {
-  for (const auto &it : partially_assigned) {
-    const RTLIL::Wire *wire = it.first;
+static void process_partially_assigned_other(Lgraph* g) {
+  for (const auto& it : partially_assigned) {
+    const RTLIL::Wire* wire = it.first;
 #ifndef NDEBUG
     std::print(" wire:{} width:{}\n", wire->name.str(), wire->width);
 #endif
@@ -1601,7 +1644,7 @@ static void connect_comparator(Node& exit_node, const RTLIL::Cell* cell) {
   }
 }
 
-static void process_partially_assigned(Lgraph *g) {
+static void process_partially_assigned(Lgraph* g) {
 #ifndef NDEBUG
   dump_partially_assigned();
 #endif
@@ -2754,8 +2797,8 @@ struct Yosys2lg_Pass : public Yosys::Pass {
         auto* g = library->try_ref_lgraph(mod_name);
         I(g);
 
-        process_cell_drivers_intialization(mod, g);
         process_assigns(mod, g);
+        process_cell_drivers_intialization(mod, g);
         process_cells(mod, g);
         process_partially_assigned(g);
         process_connect_outputs(mod, g);

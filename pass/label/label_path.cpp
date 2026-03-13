@@ -29,6 +29,11 @@ static bool has_real_wname(const Node_pin& dpin) {
   return !wn.empty() && wn[0] != '_' && !is_special_wire_name(wn);
 }
 
+static bool is_alias_passthrough_node(const Node& node) {
+  auto op = node.get_type_op();
+  return op == Ntype_op::Or || op == Ntype_op::Get_mask;
+}
+
 // Returns true if color was newly added, false if already present
 static bool add_color(std::vector<int>& colors, int color) {
   if (std::find(colors.begin(), colors.end(), color) != colors.end()) {
@@ -66,6 +71,19 @@ static std::string canonicalize_wire_name(std::string_view wname, const absl::fl
   return std::string(wname);
 }
 
+static std::string get_disconnected_real_wname(const Node& node) {
+  if (node.is_type_multi_driver() || node.has_outputs()) {
+    return {};
+  }
+
+  auto dpin = node.get_driver_pin();
+  if (dpin.is_invalid() || !has_real_wname(dpin)) {
+    return {};
+  }
+
+  return dpin.get_wire_name();
+}
+
 std::vector<std::string> Label_path::parse_instance_names(std::string_view instance_csv) {
   std::vector<std::string> names;
 
@@ -82,6 +100,9 @@ std::vector<std::string> Label_path::parse_instance_names(std::string_view insta
 
 bool Label_path::should_stop_fwd(const Node& node, int color) const {
   if (instance_names.empty()) {
+    if (is_alias_passthrough_node(node)) {
+      return false;
+    }
     for (const auto& oe : node.out_edges()) {
       if (has_real_wname(oe.driver)) {
         return true;
@@ -145,7 +166,7 @@ void Label_path::propagate_bwd(const Node& node, int color) {
         break;
       }
     }
-    if (has_wname) {
+    if (has_wname && !is_alias_passthrough_node(pred)) {
       continue;
     }
 
@@ -263,6 +284,11 @@ void Label_path::dump(Lgraph* g) const {
         if (!wn.empty() && wn[0] != '_' && !is_special_wire_name(wn)) {
           color2wnames[color].insert(canonicalize_wire_name(wn, memory_names));
         }
+      }
+
+      auto dangling_wn = get_disconnected_real_wname(node);
+      if (!dangling_wn.empty()) {
+        color2wnames[color].insert(canonicalize_wire_name(dangling_wn, memory_names));
       }
 
       // Collect source files (with location for flops)

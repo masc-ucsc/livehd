@@ -63,6 +63,5 @@ maccmap -unmap
 {{/techmap_alumacc}}
 
 write_rtlil pp-mem.il
-#write_verilog pp.v
+write_verilog pp.v
 yosys2lg -path {{path}}
-
