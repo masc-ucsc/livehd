@@ -76,6 +76,11 @@ public:
   // Function Call
   PROCESS_NODE(func_call)
 
+  // Tuple Operations
+  PROCESS_NODE(tuple_get)
+  PROCESS_NODE(tuple_set)
+  PROCESS_NODE(tuple_add)
+
   // Structure
   PROCESS_NODE(top)
   PROCESS_NODE(stmts)
