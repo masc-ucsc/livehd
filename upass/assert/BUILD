@@ -1,6 +1,6 @@
 # This file is distributed under the BSD 3-Clause License. See LICENSE for details.
 
-load("@rules_cc//cc:defs.bzl", "cc_library")
+load("@rules_cc//cc:defs.bzl", "cc_library", "cc_test")
 load("//tools:copt_default.bzl", "COPTS")
 
 cc_library(
@@ -18,4 +18,14 @@ cc_library(
         "//upass/core:upass",
     ],
     alwayslink = True,
+)
+
+cc_test(
+    name = "upass_assert_test",
+    srcs = ["upass_assert_test.cpp"],
+    copts = COPTS,
+    deps = [
+        ":upass_assert",
+        "@googletest//:gtest_main",
+    ],
 )

@@ -79,6 +79,7 @@ public:
   // Structure
   PROCESS_NODE(top)
   PROCESS_NODE(stmts)
+  PROCESS_NODE(if)
 
 #undef PROCESS_NODE
 

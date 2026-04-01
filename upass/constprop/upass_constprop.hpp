@@ -18,9 +18,13 @@ public:
   void process_minus();
   void process_mult();
   void process_div();
+  void process_mod();
+  void process_shl();
+  void process_sra();
   void process_bit_and();
   void process_bit_or();
   void process_bit_not();
+  void process_bit_xor();
   void process_log_and();
   void process_log_or();
   void process_log_not();
@@ -31,6 +35,14 @@ public:
   void process_gt();
   void process_ge();
   void process_if();
+
+  // Bitwidth Insensitive Reduce
+  void process_red_or();
+  void process_red_and();
+  void process_red_xor();
+
+  // Bit Manipulation
+  void process_sext();
 
   void process_stmts();
   void process_tuple_set();
@@ -62,4 +74,5 @@ protected:
   inline void process_unary(F op);
 };
 
-static upass::uPass_plugin cprop("constprop", upass::uPass_wrapper<uPass_constprop>::get_upass);
+// Plugin registration lives in upass_constprop.cpp to avoid duplicate
+// construction when multiple TUs include this header.

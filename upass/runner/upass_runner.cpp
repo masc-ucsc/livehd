@@ -109,7 +109,7 @@ std::vector<std::string> uPass_runner::resolve_order(const std::vector<std::stri
     const auto mit = marks.find(name);
     if (mit != marks.end()) {
       if (mit->second == Mark::kVisiting) {
-        upass::error("uPass dependency cycle detected at {}\n", name);
+        std::print(stderr, "uPass dependency cycle detected at {}\n", name);
         if (error_msg && error_msg->empty()) {
           *error_msg = std::format("dependency cycle detected at '{}'", name);
         }
@@ -121,7 +121,7 @@ std::vector<std::string> uPass_runner::resolve_order(const std::vector<std::stri
     marks.emplace(name, Mark::kVisiting);
     for (const auto& dep : it->second.depends_on) {
       if (!dfs(dep)) {
-        upass::error("uPass dependency chain for {} is invalid\n", name);
+        std::print(stderr, "uPass dependency chain for {} is invalid\n", name);
         if (error_msg && error_msg->empty()) {
           *error_msg = std::format("dependency chain for '{}' is invalid", name);
         }
@@ -189,6 +189,7 @@ void uPass_runner::process_lnast() {
   switch (get_raw_ntype()) {
     PROCESS_BLOCK(top)
     PROCESS_BLOCK(stmts)
+    PROCESS_BLOCK(if)
 
     // Assignment
     PROCESS_NODE(assign)
@@ -254,6 +255,29 @@ void uPass_runner::process_top() {
 }
 
 void uPass_runner::process_stmts() {
+  move_to_child();
+  do {
+    process_lnast();
+  } while (move_to_sibling());
+  move_to_parent();
+}
+
+void uPass_runner::process_if() {
+  // Dispatch to every pass's process_if() so passes can inspect the condition
+  // (e.g. constprop peeks at the condition variable; future passes may prune
+  // dead branches).  Each pass must leave the cursor back at the if-node.
+  for (const auto& entry : upasses) {
+    try {
+      entry.pass->process_if();
+    } catch (const std::runtime_error& _e) {
+      std::print(stderr, "uPass [{}] if error: {}", entry.name, _e.what());
+    }
+  }
+
+  // Traverse all children of the if-node.
+  // Layout: (cond-ref, stmts)+ [stmts]
+  //   cond-ref nodes → process_lnast() hits default:break (no-op)
+  //   stmts nodes    → process_lnast() hits PROCESS_BLOCK(stmts) → recurse
   move_to_child();
   do {
     process_lnast();

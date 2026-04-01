@@ -37,5 +37,6 @@ protected:
 
   void process_top() override;
   void process_stmts() override;
+  void process_if() override;
   void process_lnast();
 };

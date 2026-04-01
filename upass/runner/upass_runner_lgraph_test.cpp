@@ -1221,4 +1221,111 @@ TEST(UpassRunnerLgraph, DceTransitiveChain) {
   EXPECT_EQ(node_count, 0U);
 }
 
+// ── N-ary fold tests (P2-B) ──────────────────────────────────────────────────
+// Verify that fold_sum_const and fold_mult_const now handle 3+ constant inputs.
+
+// Sum node with 3 constant inputs: 2 + 3 + 5 → 10
+TEST(UpassRunnerLgraph, FoldSumConstThreeInputs) {
+  constexpr std::string_view kDbPath = "lgdb_upass_nary_sum3";
+  file_utils::clean_dir(kDbPath);
+  auto *lib = Graph_library::instance(kDbPath);
+  ASSERT_NE(lib, nullptr);
+  auto *lg = lib->create_lgraph("top", "nary_sum3");
+  ASSERT_NE(lg, nullptr);
+
+  auto out0 = lg->add_graph_output("o", 1, 8);
+  auto c2   = lg->create_node_const(2);
+  auto c3   = lg->create_node_const(3);
+  auto c5   = lg->create_node_const(5);
+  auto s0   = lg->create_node(Ntype_op::Sum);
+  lg->add_edge(c2.get_driver_pin(), s0.setup_sink_pin_raw(0));
+  lg->add_edge(c3.get_driver_pin(), s0.setup_sink_pin_raw(0));
+  lg->add_edge(c5.get_driver_pin(), s0.setup_sink_pin_raw(0));
+  auto s0_out = s0.setup_driver_pin();
+  s0_out.set_bits(8);
+  lg->add_edge(s0_out, out0);
+
+  auto gm = std::make_shared<upass::Lgraph_manager>(lg);
+  uPass_runner_lgraph runner(gm, {"fold_sum_const"});
+  runner.run(3);
+
+  std::size_t sum_count = 0;
+  for (const auto &n : lg->fast()) {
+    if (n.get_type_op() == Ntype_op::Sum) ++sum_count;
+  }
+  EXPECT_EQ(sum_count, 0U);
+
+  auto out_dpin = lg->get_graph_output("o").get_driver_pin();
+  EXPECT_EQ(out_dpin.get_type_op(), Ntype_op::Const);
+  EXPECT_EQ(out_dpin.get_type_const().to_i(), 10);  // 2+3+5 = 10
+}
+
+// Mult node with 3 constant inputs: 2 * 3 * 4 → 24
+TEST(UpassRunnerLgraph, FoldMultConstThreeInputs) {
+  constexpr std::string_view kDbPath = "lgdb_upass_nary_mult3";
+  file_utils::clean_dir(kDbPath);
+  auto *lib = Graph_library::instance(kDbPath);
+  ASSERT_NE(lib, nullptr);
+  auto *lg = lib->create_lgraph("top", "nary_mult3");
+  ASSERT_NE(lg, nullptr);
+
+  auto out0 = lg->add_graph_output("o", 1, 8);
+  auto c2   = lg->create_node_const(2);
+  auto c3   = lg->create_node_const(3);
+  auto c4   = lg->create_node_const(4);
+  auto m0   = lg->create_node(Ntype_op::Mult);
+  lg->add_edge(c2.get_driver_pin(), m0.setup_sink_pin_raw(0));
+  lg->add_edge(c3.get_driver_pin(), m0.setup_sink_pin_raw(0));
+  lg->add_edge(c4.get_driver_pin(), m0.setup_sink_pin_raw(0));
+  auto m0_out = m0.setup_driver_pin();
+  m0_out.set_bits(8);
+  lg->add_edge(m0_out, out0);
+
+  auto gm = std::make_shared<upass::Lgraph_manager>(lg);
+  uPass_runner_lgraph runner(gm, {"fold_mult_const"});
+  runner.run(3);
+
+  std::size_t mult_count = 0;
+  for (const auto &n : lg->fast()) {
+    if (n.get_type_op() == Ntype_op::Mult) ++mult_count;
+  }
+  EXPECT_EQ(mult_count, 0U);
+
+  auto out_dpin = lg->get_graph_output("o").get_driver_pin();
+  EXPECT_EQ(out_dpin.get_type_op(), Ntype_op::Const);
+  EXPECT_EQ(out_dpin.get_type_const().to_i(), 24);  // 2*3*4 = 24
+}
+
+// Mixed: Sum node with 3 inputs where one is non-const — must NOT be folded.
+TEST(UpassRunnerLgraph, FoldSumConstThreeInputsOneNonConst) {
+  constexpr std::string_view kDbPath = "lgdb_upass_nary_sum_mixed";
+  file_utils::clean_dir(kDbPath);
+  auto *lib = Graph_library::instance(kDbPath);
+  ASSERT_NE(lib, nullptr);
+  auto *lg = lib->create_lgraph("top", "nary_sum_mixed");
+  ASSERT_NE(lg, nullptr);
+
+  auto in_a = lg->add_graph_input("a", 1, 8);
+  auto out0 = lg->add_graph_output("o", 2, 8);
+  auto c2   = lg->create_node_const(2);
+  auto c3   = lg->create_node_const(3);
+  auto s0   = lg->create_node(Ntype_op::Sum);
+  lg->add_edge(in_a, s0.setup_sink_pin_raw(0));
+  lg->add_edge(c2.get_driver_pin(), s0.setup_sink_pin_raw(0));
+  lg->add_edge(c3.get_driver_pin(), s0.setup_sink_pin_raw(0));
+  auto s0_out = s0.setup_driver_pin();
+  s0_out.set_bits(8);
+  lg->add_edge(s0_out, out0);
+
+  auto gm = std::make_shared<upass::Lgraph_manager>(lg);
+  uPass_runner_lgraph runner(gm, {"fold_sum_const"});
+  runner.run(3);
+
+  std::size_t sum_count = 0;
+  for (const auto &n : lg->fast()) {
+    if (n.get_type_op() == Ntype_op::Sum) ++sum_count;
+  }
+  EXPECT_EQ(sum_count, 1U);  // Sum should still be there
+}
+
 }  // namespace

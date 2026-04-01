@@ -3,8 +3,10 @@
 
 #include <print>
 #include <string_view>
+#include <vector>
 
 #include "ir_adapter.hpp"
+#include "lconst.hpp"
 
 namespace upass {
 
@@ -71,20 +73,34 @@ inline Shared_fold_sum_const_report run_fold_sum_const_shared(IR_adapter& adapte
     }
 
     const auto inps = adapter.inputs(node);
-    if (inps.size() != 2) {
+    // N-ary fold: handle any number of inputs ≥ 1; all must be compile-time constants.
+    if (inps.empty()) {
       continue;
     }
 
-    const auto c0 = adapter.const_value(inps[0]);
-    const auto c1 = adapter.const_value(inps[1]);
-    if (!c0 || !c1) {
+    bool                 all_const = true;
+    std::vector<Lconst>  const_vals;
+    for (const auto &inp : inps) {
+      const auto cv = adapter.const_value(inp);
+      if (!cv) {
+        all_const = false;
+        break;
+      }
+      const_vals.push_back(*cv);
+    }
+    if (!all_const) {
       continue;
+    }
+
+    // Reduce-fold: accumulate sum across all constant inputs.
+    Lconst folded = const_vals[0];
+    for (std::size_t i = 1; i < const_vals.size(); ++i) {
+      folded = folded + const_vals[i];
     }
 
     const auto effect = adapter.estimate_replace_with_const(node);
-    const auto folded = *c0 + *c1;
     if (!dry_run) {
-      if (!adapter.replace_with_const(node, folded)) {
+      if (!adapter.replace_with_const(node, folded.to_i())) {
         continue;
       }
     }
