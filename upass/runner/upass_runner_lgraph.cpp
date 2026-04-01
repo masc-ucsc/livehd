@@ -396,7 +396,7 @@ std::vector<std::string> uPass_runner_lgraph::resolve_order(const std::vector<st
     const auto mit = marks.find(name);
     if (mit != marks.end()) {
       if (mit->second == Mark::kVisiting) {
-        upass::error("uPass(lgraph) dependency cycle detected at {}\n", name);
+        std::print(stderr, "uPass(lgraph) dependency cycle detected at {}\n", name);
         if (error_msg && error_msg->empty()) {
           *error_msg = std::format("dependency cycle detected at '{}'", name);
         }
@@ -408,7 +408,7 @@ std::vector<std::string> uPass_runner_lgraph::resolve_order(const std::vector<st
     marks.emplace(name, Mark::kVisiting);
     for (const auto& dep : it->second.depends_on) {
       if (!dfs(dep)) {
-        upass::error("uPass(lgraph) dependency chain for {} is invalid\n", name);
+        std::print(stderr, "uPass(lgraph) dependency chain for {} is invalid\n", name);
         if (error_msg && error_msg->empty()) {
           *error_msg = std::format("dependency chain for '{}' is invalid", name);
         }

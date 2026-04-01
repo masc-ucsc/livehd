@@ -2,14 +2,15 @@
 #pragma once
 
 #include <format>
-#include <iostream>
 #include <print>
+#include <stdexcept>
 
 namespace upass {
 
 template <typename... Args>
-void error(std::format_string<Args...> format, Args&&... args) {
-  std::print(format, std::forward<Args>(args)...);
+[[noreturn]] void error(std::format_string<Args...> format, Args&&... args) {
+  std::print(stderr, format, std::forward<Args>(args)...);
+  throw std::runtime_error(std::format(format, std::forward<Args>(args)...));
 }
 
 }  // namespace upass

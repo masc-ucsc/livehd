@@ -31,4 +31,5 @@ protected:
   }
 };
 
-static upass::uPass_plugin plugin_assert("assert", upass::uPass_wrapper<uPass_assert>::get_upass, {"constprop"});
+// Plugin registration lives in upass_assert.cpp to avoid duplicate
+// construction when multiple TUs include this header.

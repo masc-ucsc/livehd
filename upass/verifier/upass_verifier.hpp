@@ -11,7 +11,7 @@ public:
   using uPass::uPass;
 
   // Assignment
-  // void process_assign() override { check_binary(); }
+  void process_assign() override { check_unary(); }
 
   // Operators
   // - Bitwidth
@@ -63,6 +63,15 @@ private:
     move_to_parent();
   }
 
+  void check_unary() {
+    move_to_child();
+    check_type(Lnast_ntype::Lnast_ntype_ref);
+    move_to_sibling();
+    check_type(Lnast_ntype::Lnast_ntype_ref, Lnast_ntype::Lnast_ntype_const);
+    end_of_siblings();
+    move_to_parent();
+  }
+
   void end_of_siblings() const {
     if (!is_last_child()) {
       upass::error("");
@@ -75,11 +84,10 @@ private:
       upass::error("invalid\n");
       return;
     }
-    // print_types(ty...);
-    auto n = get_raw_ntype();
-    // print_types(n);
-    if (((n == ty) || ...) || false) {
-      return;
+    auto       actual  = get_raw_ntype();
+    const bool type_ok = ((actual == ty) || ...);
+    if (type_ok) {
+      return;  // OK
     }
     upass::error("failed\n");
   }

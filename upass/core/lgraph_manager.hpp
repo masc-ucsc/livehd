@@ -377,16 +377,31 @@ public:
       for (const auto& inp : node.inp_edges()) {
         inputs.emplace_back(inp);
       }
-      if (inputs.size() != 2) {
+      // N-ary fold: skip nodes with no inputs; all inputs must be compile-time constants.
+      if (inputs.empty()) {
         continue;
       }
-      if (!inputs[0].driver.is_type(Ntype_op::Const) || !inputs[1].driver.is_type(Ntype_op::Const)) {
+      if (!std::ranges::all_of(inputs, [](const XEdge &inp) {
+            return inp.driver.is_type(Ntype_op::Const);
+          })) {
         continue;
       }
 
-      const auto c0 = inputs[0].driver.get_type_const();
-      const auto c1 = inputs[1].driver.get_type_const();
-      if (!c0.is_i() || !c1.is_i()) {
+      // Reduce-fold: accumulate the sum of all constant inputs.
+      Lconst result = inputs[0].driver.get_type_const();
+      if (!result.is_i()) {
+        continue;
+      }
+      bool all_i = true;
+      for (std::size_t i = 1; i < inputs.size(); ++i) {
+        const auto cn = inputs[i].driver.get_type_const();
+        if (!cn.is_i()) {
+          all_i = false;
+          break;
+        }
+        result = result + cn;
+      }
+      if (!all_i) {
         continue;
       }
 
@@ -397,7 +412,7 @@ public:
 
       ++summary.new_const_nodes;
       if (!dry_run) {
-        auto new_c = lg->create_node_const(c0 + c1);
+        auto new_c = lg->create_node_const(result);
         auto dpin  = new_c.setup_driver_pin();
         dpin.set_size(node_out);
         for (const auto& sink : sinks) {
@@ -440,20 +455,33 @@ public:
       for (const auto& inp : node.inp_edges()) {
         inputs.emplace_back(inp);
       }
-      if (inputs.size() != 2) {
+      // N-ary fold: skip nodes with no inputs; all inputs must be compile-time constants.
+      if (inputs.empty()) {
         continue;
       }
-      if (!inputs[0].driver.is_type(Ntype_op::Const) || !inputs[1].driver.is_type(Ntype_op::Const)) {
-        continue;
-      }
-
-      const auto c0 = inputs[0].driver.get_type_const();
-      const auto c1 = inputs[1].driver.get_type_const();
-      if (!c0.is_i() || !c1.is_i()) {
+      if (!std::ranges::all_of(inputs, [](const XEdge &inp) {
+            return inp.driver.is_type(Ntype_op::Const);
+          })) {
         continue;
       }
 
-      const auto result = Lconst(c0.to_i() * c1.to_i());
+      // Reduce-fold: accumulate the product of all constant inputs.
+      Lconst result = inputs[0].driver.get_type_const();
+      if (!result.is_i()) {
+        continue;
+      }
+      bool all_i = true;
+      for (std::size_t i = 1; i < inputs.size(); ++i) {
+        const auto cn = inputs[i].driver.get_type_const();
+        if (!cn.is_i()) {
+          all_i = false;
+          break;
+        }
+        result = Lconst(result.to_i() * cn.to_i());
+      }
+      if (!all_i) {
+        continue;
+      }
 
       std::vector<Node_pin> sinks;
       for (const auto& out : node.out_edges()) {
