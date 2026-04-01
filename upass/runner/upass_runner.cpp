@@ -245,6 +245,11 @@ void uPass_runner::process_lnast() {
     // Function Call
     PROCESS_NODE(func_call)
 
+    // Tuple Operations
+    PROCESS_NODE(tuple_get)
+    PROCESS_NODE(tuple_set)
+    PROCESS_NODE(tuple_add)
+
     default: break;
   }
 #undef PROCESS_BLOCK

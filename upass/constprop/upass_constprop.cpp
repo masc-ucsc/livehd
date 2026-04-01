@@ -23,15 +23,22 @@ void uPass_constprop::process_assign() {
   }
 
   if (is_type(Lnast_ntype::Lnast_ntype_ref)) {
+    // RHS is a variable reference: track the bundle
     auto rhs_bundle = current_bundle();
-    bool local_changed    = true;
-    if (st.has_bundle(lhs_text)) {
-      local_changed = st.get_bundle(lhs_text) != rhs_bundle;
+    if (!rhs_bundle) {
+      // RHS variable doesn't exist in symbol table yet (unknown)
+      // Skip to avoid null bundle crash
+    } else {
+      bool local_changed    = true;
+      if (st.has_bundle(lhs_text)) {
+        local_changed = st.get_bundle(lhs_text) != rhs_bundle;
+      }
+      if (local_changed && st.set(lhs_text, rhs_bundle)) {
+        mark_changed();
+      }
     }
-    if (local_changed && st.set(lhs_text, rhs_bundle)) {
-      mark_changed();
-    }
-  } else {
+  } else if (is_type(Lnast_ntype::Lnast_ntype_const)) {
+    // RHS is a const literal: parse and track the constant value
     auto rhs_value = current_pyrope_value();
     bool local_changed   = true;
     if (st.has_trivial(lhs_text)) {
@@ -40,6 +47,10 @@ void uPass_constprop::process_assign() {
     if (local_changed && st.set(lhs_text, rhs_value)) {
       mark_changed();
     }
+  } else {
+    // RHS is a compound expression (tuple_get, tuple_set, func_call, attr_get, attr_set, etc.)
+    // Not yet handled by constprop.  Skip this assignment to avoid crashes.
+    // TODO: Recursively process RHS expression and track the result.
   }
 
   move_to_parent();
