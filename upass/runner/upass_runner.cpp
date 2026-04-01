@@ -109,6 +109,10 @@ std::vector<std::string> uPass_runner::resolve_order(const std::vector<std::stri
     const auto mit = marks.find(name);
     if (mit != marks.end()) {
       if (mit->second == Mark::kVisiting) {
+        // Intentional: print to stderr rather than throw so tests can use
+        // EXPECT_TRUE(ordered.empty()) instead of EXPECT_THROW.
+        // The non-empty error_msg is propagated to run(), which refuses to
+        // execute passes when configuration_error is set.
         std::print(stderr, "uPass dependency cycle detected at {}\n", name);
         if (error_msg && error_msg->empty()) {
           *error_msg = std::format("dependency cycle detected at '{}'", name);
@@ -121,6 +125,7 @@ std::vector<std::string> uPass_runner::resolve_order(const std::vector<std::stri
     marks.emplace(name, Mark::kVisiting);
     for (const auto& dep : it->second.depends_on) {
       if (!dfs(dep)) {
+        // Intentional: same rationale as cycle detection above — print not throw.
         std::print(stderr, "uPass dependency chain for {} is invalid\n", name);
         if (error_msg && error_msg->empty()) {
           *error_msg = std::format("dependency chain for '{}' is invalid", name);
@@ -269,8 +274,8 @@ void uPass_runner::process_if() {
   for (const auto& entry : upasses) {
     try {
       entry.pass->process_if();
-    } catch (const std::runtime_error& _e) {
-      std::print(stderr, "uPass [{}] if error: {}", entry.name, _e.what());
+    } catch (const std::runtime_error& ex) {
+      std::print(stderr, "uPass [{}] if error: {}", entry.name, ex.what());
     }
   }
 

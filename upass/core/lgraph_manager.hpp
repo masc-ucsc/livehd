@@ -466,6 +466,8 @@ public:
       }
 
       // Reduce-fold: accumulate the product of all constant inputs.
+      // Uses mult_op() to match fold_sum_const's use of add_op() and preserve
+      // Lconst bit-width semantics rather than raw to_i() arithmetic.
       Lconst result = inputs[0].driver.get_type_const();
       if (!result.is_i()) {
         continue;
@@ -477,7 +479,7 @@ public:
           all_i = false;
           break;
         }
-        result = Lconst(result.to_i() * cn.to_i());
+        result = result.mult_op(cn);
       }
       if (!all_i) {
         continue;
