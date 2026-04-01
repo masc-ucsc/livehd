@@ -143,6 +143,11 @@ void uPass_constprop::process_bit_xor() {
 
 void uPass_constprop::process_mod() {
   process_binary([](Lconst n1, Lconst n2) {
+    // Guard: modulo by zero is undefined behaviour.  Return invalid so the
+    // caller leaves the variable unset rather than crashing.
+    if (n2.is_known_false()) {
+      return Lconst::invalid();
+    }
     return Lconst(n1.to_i() % n2.to_i());
   });
 }
@@ -239,9 +244,9 @@ void uPass_constprop::process_red_or() {
   move_to_sibling();
   const auto input = current_prim_value();
   if (!input.is_invalid()) {
-    const Lconst result = input.is_known_false() ? Lconst(0) : Lconst(1);
-    bool changed = !st.has_trivial(var) || st.get_trivial(var) != result;
-    if (changed && st.set(var, result)) {
+    const Lconst result       = input.is_known_false() ? Lconst(0) : Lconst(1);
+    bool         local_changed = !st.has_trivial(var) || st.get_trivial(var) != result;
+    if (local_changed && st.set(var, result)) {
       mark_changed();
     }
   }
@@ -257,9 +262,9 @@ void uPass_constprop::process_red_and() {
   move_to_sibling();
   const auto input = current_prim_value();
   if (!input.is_invalid() && !input.has_unknowns()) {
-    const Lconst result = input.is_mask() ? Lconst(1) : Lconst(0);
-    bool changed = !st.has_trivial(var) || st.get_trivial(var) != result;
-    if (changed && st.set(var, result)) {
+    const Lconst result       = input.is_mask() ? Lconst(1) : Lconst(0);
+    bool         local_changed = !st.has_trivial(var) || st.get_trivial(var) != result;
+    if (local_changed && st.set(var, result)) {
       mark_changed();
     }
   }
@@ -273,9 +278,9 @@ void uPass_constprop::process_red_xor() {
   move_to_sibling();
   const auto input = current_prim_value();
   if (!input.is_invalid() && !input.has_unknowns()) {
-    const Lconst result = (input.popcount() % 2 == 1) ? Lconst(1) : Lconst(0);
-    bool changed = !st.has_trivial(var) || st.get_trivial(var) != result;
-    if (changed && st.set(var, result)) {
+    const Lconst result       = (input.popcount() % 2 == 1) ? Lconst(1) : Lconst(0);
+    bool         local_changed = !st.has_trivial(var) || st.get_trivial(var) != result;
+    if (local_changed && st.set(var, result)) {
       mark_changed();
     }
   }
@@ -302,10 +307,10 @@ void uPass_constprop::process_sext() {
   const auto nbits_lc = current_prim_value();
   if (!src.is_invalid() && !src.has_unknowns() && !src.is_string() &&
       !nbits_lc.is_invalid() && nbits_lc.is_i()) {
-    const auto ebits  = static_cast<Bits_t>(nbits_lc.to_i());
-    const Lconst result = src.sext_op(ebits);
-    bool changed = !st.has_trivial(var) || st.get_trivial(var) != result;
-    if (changed && st.set(var, result)) {
+    const auto   ebits        = static_cast<Bits_t>(nbits_lc.to_i());
+    const Lconst result       = src.sext_op(ebits);
+    bool         local_changed = !st.has_trivial(var) || st.get_trivial(var) != result;
+    if (local_changed && st.set(var, result)) {
       mark_changed();
     }
   }
