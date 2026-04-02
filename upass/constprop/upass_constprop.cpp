@@ -23,19 +23,16 @@ void uPass_constprop::process_assign() {
   }
 
   if (is_type(Lnast_ntype::Lnast_ntype_ref)) {
-    // RHS is a variable reference: track the bundle
+    // RHS is a variable reference: alias the bundle in the symbol table.
+    // We do NOT call mark_changed here — bundle aliasing (A = ___t1) is just
+    // pointer bookkeeping and doesn't create new scalar information.
+    // Convergence is driven exclusively by process_tuple_get propagating scalar
+    // values.  Marking changed for bundle pointers causes infinite loops when
+    // the same variable is reassigned multiple times per iteration (e.g. SSA-
+    // form append:  A = ___t1, A = ___t2, A = ___t3).
     auto rhs_bundle = current_bundle();
-    if (!rhs_bundle) {
-      // RHS variable doesn't exist in symbol table yet (unknown)
-      // Skip to avoid null bundle crash
-    } else {
-      bool local_changed    = true;
-      if (st.has_bundle(lhs_text)) {
-        local_changed = st.get_bundle(lhs_text) != rhs_bundle;
-      }
-      if (local_changed && st.set(lhs_text, rhs_bundle)) {
-        mark_changed();
-      }
+    if (rhs_bundle) {
+      st.set(lhs_text, rhs_bundle);
     }
   } else if (is_type(Lnast_ntype::Lnast_ntype_const)) {
     // RHS is a const literal: parse and track the constant value
@@ -232,9 +229,189 @@ void uPass_constprop::process_if() {
 }
 void uPass_constprop::process_stmts() {}
 
-void uPass_constprop::process_tuple_set() {}
-void uPass_constprop::process_tuple_get() {}
-void uPass_constprop::process_tuple_add() {}
+// ── Tuple Operations ─────────────────────────────────────────────────────────
+//
+// Layout reference (matches opt_lnast):
+//   tuple_add:  ref(dst), [const|ref|assign(ref(key),const/ref(val))]...
+//   tuple_get:  ref(dst), ref(src), (const|ref)(field)...
+//   tuple_set:  ref(tuple), (const|ref)(field)..., (const|ref)(value)
+//
+// Bundle key format for named fields: ":pos:name"  (e.g. ":1:foo")
+// Symbol_table looks up "A.foo" as → Bundle A → Bundle::get_trivial("foo")
+
+void uPass_constprop::process_tuple_add() {
+  // Build (or update in-place) a Bundle for the destination from each entry.
+  // We reuse the existing Bundle object if one already exists so that the
+  // pointer stored in process_assign ("A = ___t1") stays stable across
+  // iterations and does not trigger spurious mark_changed().
+  move_to_child();
+  auto dst = std::string(current_text());
+
+  // Get or create the bundle for dst.
+  auto bundle = st.get_bundle(dst);
+  if (!bundle) {
+    bundle = std::make_shared<Bundle>(dst);
+    st.set(dst, bundle);
+  }
+
+  int pos = 0;
+  while (move_to_sibling()) {
+    auto pos_txt = std::to_string(pos);
+
+    if (is_type(Lnast_ntype::Lnast_ntype_const)) {
+      bundle->set(pos_txt, Lconst::from_pyrope(current_text()));
+
+    } else if (is_type(Lnast_ntype::Lnast_ntype_ref)) {
+      bundle->set(pos_txt, st.get_bundle(current_text()));
+
+    } else if (is_type(Lnast_ntype::Lnast_ntype_assign)) {
+      // Named field: assign(ref(key), const/ref(val))
+      move_to_child();
+      auto key       = std::string(current_text());
+      auto field_key = std::format(":{}:{}", pos_txt, key);
+      move_to_sibling();
+      if (is_type(Lnast_ntype::Lnast_ntype_const)) {
+        bundle->set(field_key, Lconst::from_pyrope(current_text()));
+      } else if (is_type(Lnast_ntype::Lnast_ntype_ref)) {
+        bundle->set(field_key, st.get_bundle(current_text()));
+      }
+      move_to_parent();
+    }
+    ++pos;
+  }
+  // Bundle was updated in-place; no mark_changed() — process_tuple_get drives convergence.
+  move_to_parent();
+}
+
+void uPass_constprop::process_tuple_get() {
+  // Read: dst = src[field]
+  // Build the symbol-table key as "src.field" and propagate the stored value.
+  move_to_child();
+  auto dst = std::string(current_text());
+
+  move_to_sibling();
+  auto src = std::string(current_text());  // source tuple variable
+
+  if (!move_to_sibling()) {
+    move_to_parent();
+    return;  // no field — nothing to propagate
+  }
+
+  // Accumulate field path: each child after src appends ".field" to the key.
+  std::string key = src;
+  do {
+    if (is_type(Lnast_ntype::Lnast_ntype_const)) {
+      key += '.';
+      key += current_text();
+    } else if (is_type(Lnast_ntype::Lnast_ntype_ref)) {
+      // Runtime index: must be a known constant to fold statically.
+      const auto idx = st.get_trivial(current_text());
+      if (idx.is_invalid()) {
+        move_to_parent();
+        return;  // can't fold unknown index
+      }
+      key += '.';
+      key += std::to_string(idx.to_i());
+    } else {
+      move_to_parent();
+      return;  // unhandled field type
+    }
+  } while (!is_last_child() && move_to_sibling());
+
+  move_to_parent();
+
+  // Propagate trivial value if available; fall back to bundle propagation.
+  if (st.has_trivial(key)) {
+    const Lconst result       = st.get_trivial(key);
+    bool         local_changed = !st.has_trivial(dst) || st.get_trivial(dst) != result;
+    if (local_changed && st.set(dst, result)) {
+      mark_changed();
+    }
+  } else if (st.has_bundle(key)) {
+    auto sub_bundle = st.get_bundle(key);
+    if (sub_bundle) {
+      bool local_changed = !st.has_bundle(dst) || st.get_bundle(dst) != sub_bundle;
+      if (local_changed && st.set(dst, sub_bundle)) {
+        mark_changed();
+      }
+    }
+  }
+}
+
+void uPass_constprop::process_tuple_set() {
+  // Update a single field inside an existing tuple bundle.
+  // Layout: ref(tuple), field_path..., value
+  // We handle the simple one-field case: tuple.field = value.
+  //
+  // IMPORTANT: Attribute assignments (e.g. x["__bits"] = 2, x["__signed"] = 1)
+  // must be skipped.  Bundle::set() interns attribute keys as "0.__attr"
+  // while Symbol_table::has_trivial() does a literal match, so the round-trip
+  // "set then has_trivial" always returns false → mark_changed on every
+  // iteration → non-convergence.  Attribute annotations are not values that
+  // constprop needs to propagate.
+  move_to_child();
+  auto tuple_var = std::string(current_text());
+
+  if (is_last_child()) {
+    move_to_parent();
+    return;
+  }
+
+  // Collect all children after the tuple ref into a path + value list.
+  // The last child is the value; everything before it is the field path.
+  std::vector<std::string> path_and_val;
+  while (move_to_sibling()) {
+    path_and_val.emplace_back(current_text());
+  }
+  if (path_and_val.size() < 2) {
+    // Need at least one field and one value.
+    move_to_parent();
+    return;
+  }
+
+  // Skip attribute assignments (e.g. x["__bits"] = 2).
+  // Any field component that begins with "__" and whose third char is not '_'
+  // is a Pyrope bitwidth/signed attribute — not a propagatable value.
+  for (std::size_t i = 0; i + 1 < path_and_val.size(); ++i) {
+    const auto& f = path_and_val[i];
+    if (f.size() > 2 && f[0] == '_' && f[1] == '_' && f[2] != '_') {
+      move_to_parent();
+      return;
+    }
+  }
+
+  // Build field key from path elements (all except last).
+  std::string field;
+  for (std::size_t i = 0; i + 1 < path_and_val.size(); ++i) {
+    field += '.';
+    field += path_and_val[i];
+  }
+  auto        key       = tuple_var + field;
+  const auto& val_text  = path_and_val.back();
+
+  // Value is the last child — stored as trivial if it parses, else as a bundle ref.
+  Lconst val = Lconst::from_pyrope(val_text);
+  if (!val.is_invalid()) {
+    bool local_changed = !st.has_trivial(key) || st.get_trivial(key) != val;
+    if (local_changed) {
+      st.set(key, val);
+      mark_changed();
+    }
+  } else if (st.has_trivial(val_text)) {
+    const auto sv     = st.get_trivial(val_text);
+    bool local_changed = !st.has_trivial(key) || st.get_trivial(key) != sv;
+    if (local_changed) {
+      st.set(key, sv);
+      mark_changed();
+    }
+  } else if (st.has_bundle(val_text)) {
+    auto b = st.get_bundle(val_text);
+    if (b) {
+      st.set(key, b);  // bundle comparison not value-based; don't mark_changed
+    }
+  }
+  move_to_parent();
+}
 
 // ── Bitwidth Insensitive Reduce ──────────────────────────────────────────────
 //
