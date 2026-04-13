@@ -17,7 +17,7 @@ jobs:
 
 
       - name: Mount bazel cache
-        uses: actions/cache@v5.0.4
+        uses: actions/cache@v5.0.5
         with:
           path: "~/.cache/bazel"
           key: bazel-gcc-${{ runner.os }}-${{ hashFiles('.bazelrc', '.bazelversion', 'WORKSPACE*', 'MODULE.bazel') }}
@@ -45,7 +45,7 @@ jobs:
 
 
       - name: Mount bazel cache
-        uses: actions/cache@v5.0.4
+        uses: actions/cache@v5.0.5
         with:
           path: "~/.cache/bazel"
           key: bazel-coverage-${{ runner.os }}-${{ hashFiles('.bazelrc', '.bazelversion', 'WORKSPACE*', 'MODULE.bazel') }}
