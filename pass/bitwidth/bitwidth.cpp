@@ -1056,7 +1056,7 @@ Bitwidth::Attr Bitwidth::get_key_attr(std::string_view key) {
     return Attr::Set_ubits;
   }
 
-  if (str_tools::ends_with(key, "__sbits")) {
+  if (str_tools::ends_with(key, "__bits") || str_tools::ends_with(key, "__sbits")) {
     return Attr::Set_sbits;
   }
 

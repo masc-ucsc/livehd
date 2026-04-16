@@ -720,7 +720,7 @@ bool Lnast_tolg::is_hier_inp_bits_set(const Lnast_nid& lnidx_ta) {
       }
       return false;
     }
-    if (lnast->get_vname(child) == "__ubits" || lnast->get_vname(child) == "__sbits") {
+    if (lnast->get_vname(child) == "__bits" || lnast->get_vname(child) == "__ubits" || lnast->get_vname(child) == "__sbits") {
       return true;
     }
   }
@@ -742,11 +742,13 @@ void Lnast_tolg::process_hier_inp_bits_set(Lgraph* lg, const Lnast_nid& lnidx_ta
       std::tie(io_pos, full_inp_hier_name) = Lgtuple::convert_key_to_io(lnast->get_vname(c0_ta));
       root_inp_sname                       = Lgtuple::convert_key_to_io(lnast->get_sname(c0_ta)).second;
 
-    } else if (lnast->get_vname(child) != "__ubits" && lnast->get_vname(child) != "__sbits") {
+    } else if (lnast->get_vname(child) != "__bits" && lnast->get_vname(child) != "__ubits"
+               && lnast->get_vname(child) != "__sbits") {
       I(child != lnast->get_last_child(lnidx_ta));
       absl::StrAppend(&full_inp_hier_name, ".", lnast->get_vname(child));
 
-    } else if (lnast->get_vname(child) == "__ubits" || lnast->get_vname(child) == "__sbits") {  // at the __bits child
+    } else if (lnast->get_vname(child) == "__bits" || lnast->get_vname(child) == "__ubits"
+               || lnast->get_vname(child) == "__sbits") {  // at the __bits child
       //(1) create flattened input
       std::string bits_str = std::string{lnast->get_vname(lnast->get_sibling_next(child))};
       auto        bits     = std::stoi(bits_str);

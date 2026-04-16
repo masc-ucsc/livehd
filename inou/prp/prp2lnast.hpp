@@ -61,6 +61,7 @@ protected:
   void process_assignment_or_declaration(TSNode);
   void process_simple_assignment(TSNode);
   void process_simple_declaration(TSNode);
+  void process_lvalue_assignment(const Lnast_node& rvalue);
 
   // Expressions
   void process_if_expression(TSNode);
