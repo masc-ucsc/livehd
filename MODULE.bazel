@@ -26,7 +26,7 @@ bazel_dep(name = "googletest", version = "1.17.0.bcr.2")
 bazel_dep(name = "boost.multiprecision", version = "1.90.0.bcr.1")
 bazel_dep(name = "boost.unordered", version = "1.90.0.bcr.1")
 #### M4/Flex/Bison
-bazel_dep(name = "rules_m4", version = "0.3")
+bazel_dep(name = "rules_m4", version = "0.3.bcr.1")
 bazel_dep(name = "bison", version = "3.8.2.bcr.5")
 bazel_dep(name = "flex", version = "2.6.4.bcr.4")
 
