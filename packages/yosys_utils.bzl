@@ -99,12 +99,55 @@ def _yosys_flex_impl(ctx):
         ),
     }
 
-    return _yosys_gen_action(
-        ctx = ctx,
+    if len(ctx.outputs.outs) != 1:
+        fail("yosys_flex expects exactly one output")
+
+    args = ctx.actions.args()
+    out = ctx.outputs.outs[0]
+    out_tmp = "{}.tmp".format(out.path)
+
+    out_replaces = {}
+    for file, label in zip(ctx.outputs.outs, ctx.attr.outs):
+        _, _, relative = str(label).partition("//")
+        out_replaces["$(execpath {})".format(label)] = "{}.tmp".format(file.path)
+        out_replaces["$(execpath {})".format(relative)] = "{}.tmp".format(file.path)
+
+    for arg in ctx.attr.args:
+        if arg in out_replaces:
+            args.add(out_replaces[arg])
+            continue
+
+        expanded = ctx.expand_location(arg, ctx.attr.srcs)
+        if expanded == out.path:
+            args.add(out_tmp)
+            continue
+
+        args.add(expanded)
+
+    ctx.actions.run_shell(
+        command = """
+set -e
+"$1" "${@:4}"
+if [ "$(uname)" = "Darwin" ]; then
+  sed -e 's/int yyFlexLexer::LexerInput( char\\* buf, int/size_t yyFlexLexer::LexerInput( char* buf, size_t/' \
+      -e 's/void yyFlexLexer::LexerOutput( const char\\* buf, int size/void yyFlexLexer::LexerOutput( const char* buf, size_t size/' \
+      "$2" > "$3"
+else
+  cp "$2" "$3"
+fi
+rm "$2"
+""",
+        arguments = [ctx.executable.flex.path, out_tmp, out.path, args],
+        inputs = ctx.files.srcs,
+        outputs = [out],
+        tools = [ctx.executable.flex] + ctx.attr.flex[DefaultInfo].default_runfiles.files.to_list(),
         mnemonic = "YosysFlexGen",
-        tool = ctx.executable.flex,
         env = env,
     )
+
+    return [DefaultInfo(
+        files = depset(ctx.outputs.outs),
+    )]
 
 yosys_flex = rule(
     doc = "An internal rule for running flex in the yosys project.",
