@@ -11,7 +11,8 @@ Principles:
 - Structured JSON output on stdout (agents parse it directly)
 - TOML config per tag (agents read and edit it)
 - Explicit state via `@tag` references (no in-memory-only state)
-- Self-documenting API (`list`, `describe`) so agents discover capabilities
+- Self-documenting API (`list`, `describe`) for both capability discovery and
+  tag-scoped introspection
 - Raw logs separate from structured results
 
 ## @tag Sigil
@@ -63,19 +64,25 @@ livehd run cgen-verilog @tst1 --set odir=custom_out
 livehd status @tst1
 ```
 
-### list — discover available commands
+### list — discover patterns or inspect tag-scoped design data
 
 ```bash
+livehd list
 livehd list steps
 livehd list recipes
+livehd list modules @tst1
+livehd list hierarchy @tst1 --top foo
+livehd list modules @tst1 --from original
 ```
 
-### describe — get step details (JSON)
+### describe — get step or list-pattern details (JSON)
 
 ```bash
 livehd describe parse
 livehd describe cprop
 livehd describe recipe:roundtrip
+livehd describe modules
+livehd describe hierarchy
 ```
 
 ### help — human-readable (calls describe internally)
@@ -210,18 +217,96 @@ $ livehd run recipe:roundtrip @tst1
 `--verbose` interleaves raw output for human debugging but still emits
 JSONL lines.
 
+## List Patterns
+
+`livehd list` is the single entrypoint for enumeration. It can either:
+
+- enumerate what patterns exist
+- enumerate objects inside a specific tag
+
+There is no separate `--list` flag. `list` is its own command.
+
+This keeps the meaning clean:
+
+- `list` = enumerate available patterns or matching objects
+- `describe` = what does one step/recipe/list-pattern do?
+- `status` = what is the high-level state of this tag?
+
+Examples:
+
+```bash
+$ livehd list
+{"patterns":[
+  {"name":"steps","scope":"global"},
+  {"name":"recipes","scope":"global"},
+  {"name":"modules","scope":"tag"},
+  {"name":"hierarchy","scope":"tag"},
+  {"name":"stats","scope":"tag"},
+  {"name":"history","scope":"tag"}
+]}
+
+$ livehd list steps
+{"pattern":"steps","items":["parse","cprop","cgen-verilog","check","lnast-tolg","lnast-fromlg","graphviz"]}
+
+$ livehd list recipes
+{"pattern":"recipes","items":["roundtrip","compile"]}
+
+$ livehd list modules @tst1
+{"pattern":"modules","tag":"@tst1","items":["foo","alu","regfile"]}
+
+$ livehd list hierarchy @tst1
+{"pattern":"hierarchy","tag":"@tst1","top":"foo","tree":{"name":"foo","children":[{"name":"alu"},{"name":"regfile"}]}}
+
+$ livehd list hierarchy @tst1 --top alu
+{"pattern":"hierarchy","tag":"@tst1","top":"alu","tree":{"name":"alu","children":[]}}
+
+$ livehd list modules @tst1 --from original
+{"pattern":"modules","tag":"@tst1","source":"input:original","items":["foo","alu","regfile"]}
+```
+
+Recommended initial tag-scoped patterns:
+
+- `modules` — list module names known in the tag
+- `hierarchy` — instance/module tree top at top or `--top`
+- `stats` — summary counts (modules, cells, flops, memories, edges)
+- `history` — which LiveHD steps have been run for the tag
+
+Minimal selector options:
+
+- `--top <module>` — top the query at one module
+- `--from <input-name>` — list against a named input tag from `[inputs]`
+- `--format <name>` — optional alternate rendering such as `tree` or `flat`
+
+Patterns that do not need a tag:
+
+- `steps` — available LiveHD execution steps
+- `recipes` — available named recipes
+
+If a pattern requires a tag and none is provided, the CLI should return a
+structured `config` error explaining that the pattern is tag-scoped.
+
 ## Discovery Protocol
 
-Agents use two commands to discover capabilities:
+Agents use `list` and `describe`:
 
 ### Step 1: list
 
 ```bash
+$ livehd list
+{"patterns":[
+  {"name":"steps","scope":"global"},
+  {"name":"recipes","scope":"global"},
+  {"name":"modules","scope":"tag"},
+  {"name":"hierarchy","scope":"tag"},
+  {"name":"stats","scope":"tag"},
+  {"name":"history","scope":"tag"}
+]}
+
 $ livehd list steps
-{"steps":["parse","cprop","cgen-verilog","check","lnast-tolg","lnast-fromlg","graphviz"]}
+{"pattern":"steps","items":["parse","cprop","cgen-verilog","check","lnast-tolg","lnast-fromlg","graphviz"]}
 
 $ livehd list recipes
-{"recipes":["roundtrip","compile"]}
+{"pattern":"recipes","items":["roundtrip","compile"]}
 ```
 
 ### Step 2: describe
@@ -235,6 +320,12 @@ $ livehd describe cprop
 
 $ livehd describe recipe:roundtrip
 {"name":"recipe:roundtrip","steps":["parse","cprop","cgen-verilog","check"],"description":"Full compile + equivalence check"}
+
+$ livehd describe modules
+{"name":"modules","description":"List module names available from a tag","scope":"tag","selectors":{"optional":["from"]},"outputs":["items"]}
+
+$ livehd describe hierarchy
+{"name":"hierarchy","description":"Return module/instance hierarchy top at top or --top","scope":"tag","selectors":{"optional":["top","from","format"]},"outputs":["tree"]}
 ```
 
 ### --help (human rendering of describe)
@@ -285,4 +376,5 @@ while livehd wraps internal compiler passes. Both can share a tag directory.
 | Log naming          | `NNN_runner_<step>.log`       | `NNN_livehd_<step>.log`       |
 | Tag sigil           | `@tag`                        | `@tag`                        |
 | Discovery           | `runner list` / `describe`    | `livehd list` / `describe`    |
+| Tag introspection   | not defined yet               | `livehd list <pattern> @tag`  |
 | Test orchestration  | `runner run @tag` (parallel)  | `livehd run recipe:X @tag`    |
