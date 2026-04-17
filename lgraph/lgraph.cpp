@@ -135,6 +135,15 @@ void Lgraph::load(const std::shared_ptr<Hif_read> hif) {
             dpin = Node_pin::find_driver_pin(this, io.rhs);
           }
 
+          // The IO-alias block is the authoritative source of truth for which
+          // node drives each graph output. The node-load pass above may have
+          // auto-wired a node whose output wire name happens to match the
+          // graph output name, even when it's not the real driver (e.g. an
+          // orphan Or placeholder from tolg). Strip any prior wiring so this
+          // alias overrides it.
+          for (auto e : spin.inp_edges()) {
+            e.del_edge();
+          }
           spin.connect_driver(dpin);
         }
       }
@@ -228,11 +237,11 @@ void Lgraph::load(const std::shared_ptr<Hif_read> hif) {
           dpin.set_name(io.rhs);
           if (has_graph_output(io.rhs)) {
             auto spin = get_graph_output(io.rhs);
-            // Multiple nodes may share the same wire name (e.g. an alias/placeholder
-            // Or node in tolg shares the port name with the actual cell driver).
-            // Only the first one encountered in topological order — the real driver —
-            // should be wired to the graph output; skip the rest to avoid the graph
-            // output ending up with multiple drivers.
+            // Multiple nodes may share the same wire name (e.g. a placeholder Or
+            // node in tolg shares the port name with the actual cell driver, or
+            // the real driver has a different wire name captured via IO alias).
+            // Wire the first candidate we see; the trailing IO-alias block below
+            // will override this if the authoritative driver differs.
             if (!spin.is_connected()) {
               dpin.connect_sink(spin);
             }
