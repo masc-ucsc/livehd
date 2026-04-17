@@ -101,4 +101,5 @@ private:
   void print_types() const {}
 };
 
-static upass::uPass_plugin verifier("verifier", upass::uPass_wrapper<uPass_verifier>::get_upass);
+// Plugin registration lives in upass_verifier.cpp to avoid duplicate
+// construction when multiple TUs include this header.
