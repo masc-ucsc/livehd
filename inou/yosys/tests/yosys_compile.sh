@@ -79,11 +79,12 @@ do
   mkdir -p tmp_yosys
 
   echo "inou.yosys.tolg path:lgdb_yosys top:${base} files:${full_input} |> lgraph.save" | ${LGSHELL} -q >tmp_yosys/${input}.log 2>tmp_yosys/${input}.err
+  tolg_rc=$?
   #echo "inou.verilog path:lgdb_yosys top:${base} files:${full_input} |> pass.compiler "  | ${LGSHELL} -q >tmp_yosys/${input}.log 2>tmp_yosys/${input}.err
-  if [ $? -eq 0 ]; then
+  if [ $tolg_rc -eq 0 ]; then
     echo "Successfully created graph from ${input}"
   else
-    echo "FAIL: lgyosys parsing terminated with an error (testcase ${input})"
+    echo "FAIL: lgyosys parsing terminated with an error rc=$tolg_rc (testcase ${input})"
     cat tmp_yosys/${input}.log
     cat tmp_yosys/${input}.err
     ((fail++))
@@ -93,6 +94,7 @@ do
   LC=$(grep -iv Warning tmp_yosys/${input}.err | grep -v perf_event | grep -v "recommended to use " | wc -l | cut -d" " -f1)
   if [[ $LC -gt 0 ]]; then
     echo "FAIL: Faulty $LC err verilog file tmp_yosys/${input}.err"
+    cat tmp_yosys/${input}.err
     ((fail++))
     fail_list+=" "$base
     continue
@@ -105,25 +107,43 @@ do
     continue
   fi
 
+  rm -f tmp_yosys/*.v
   echo "lgraph.match path:lgdb_yosys |> pass.cprop |> inou.cgen.verilog odir:tmp_yosys" | ${LGSHELL} -q 2>tmp_yosys/${input}.err
+  cgen_rc=$?
   #echo "lgraph.match path:lgdb_yosys |> pass.cprop |> inou.yosys.fromlg odir:tmp_yosys" | ${LGSHELL} -q 2>tmp_yosys/${input}.err
+  if [ $cgen_rc -ne 0 ]; then
+    echo "FAIL: verilog generation terminated with an error rc=$cgen_rc (testcase ${input})"
+    cat tmp_yosys/${input}.err
+    ((fail++))
+    fail_list+=" "$base
+    continue
+  fi
   LC=$(grep -iv Warning tmp_yosys/${input}.err | grep -v perf_event | grep -v "recommended to use " | grep -v "IPC=" | wc -l | cut -d" " -f1)
   if [[ $LC -gt 0 ]]; then
     echo "FAIL: Faulty $LC err verilog file tmp_yosys/${input}.err"
+    cat tmp_yosys/${input}.err
     ((fail++))
     fail_list+=" "$base
     continue
   fi
-  if [ $? -eq 0 ]; then
-    echo "Successfully created verilog from graph ${input}"
-  else
-    echo "yosys -g"${base} -h -d
-    echo "FAIL: verilog generation terminated with an error (testcase ${input})"
+  echo "Successfully created verilog from graph ${input}"
+
+  shopt -s nullglob
+  gen_v_files=(tmp_yosys/*.v)
+  shopt -u nullglob
+  if [ ${#gen_v_files[@]} -eq 0 ]; then
+    echo "FAIL: no verilog generated in tmp_yosys/ for (testcase ${input})"
     ((fail++))
     fail_list+=" "$base
     continue
   fi
-  $(cat tmp_yosys/*.v >tmp_yosys_mix/all_${base}.v)
+  cat "${gen_v_files[@]}" >tmp_yosys_mix/all_${base}.v
+  if [ ! -s tmp_yosys_mix/all_${base}.v ]; then
+    echo "FAIL: generated verilog tmp_yosys_mix/all_${base}.v is empty (testcase ${input})"
+    ((fail++))
+    fail_list+=" "$base
+    continue
+  fi
 
   if [[ $input =~ "nocheck_" ]]; then
     LC=$(wc -l < tmp_yosys_mix/all_${base}.v | tr -d ' ')
