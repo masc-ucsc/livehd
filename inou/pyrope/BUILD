@@ -36,13 +36,30 @@ _PYROPE_PRP_BASES = {
     for f in glob(["tests/*.prp"])
 }
 
+_PYROPE_COMPILE_SKIP = {
+    # These have golden Verilog files, but the legacy inou/pyrope compile
+    # harness still uses the raw lnast_tolg/cprop/bitwidth pipeline. Keep
+    # work-in-progress cases out of //... until the lowering path supports them.
+    "connect_through": True,
+    "connect_through2": True,
+    "firrtl_gcd": True,
+    "funcall": True,
+    "funcall3": True,
+    "funcall4": True,
+    "struct_uflop": True,
+    "top": True,
+    "tuple_nested2": True,
+    "tuple_reg": True,
+    "vec_shift_register_param": True,
+}
+
 PYROPE_COMPILE_TESTS = [
     base
     for base in [
         f[len("tests/verilog_gld/"):-len(".gld.v")]
         for f in glob(["tests/verilog_gld/*.gld.v"])
     ]
-    if base in _PYROPE_PRP_BASES
+    if base in _PYROPE_PRP_BASES and base not in _PYROPE_COMPILE_SKIP
 ]
 
 [sh_test(

@@ -777,28 +777,17 @@ void Lnast::ssa_rhs_handle_a_statement(const Lnast_nid& psts_nid, const Lnast_ni
 
   // I(!type.is_select());  // Select is deprecated
 
-  bool the_ta_is_tuple_struct = false;
-  if (type.is_tuple_add() || type.is_tuple_set()) {
-    auto first_child  = get_first_child(opr_nid);
-    auto second_child = get_sibling_next(first_child);
-    if (!second_child.is_invalid() && get_type(second_child).is_assign()) {
-      the_ta_is_tuple_struct = true;
-    }
-  }
+  const bool is_tuple_op = type.is_tuple_add() || type.is_tuple_set();
 
-  if (the_ta_is_tuple_struct) {
-    for (auto itr_opd : children(opr_nid)) {
-      if (itr_opd == get_first_child(opr_nid)) {
-        continue;
-      }
-      ssa_rhs_handle_a_statement(psts_nid, itr_opd);
+  for (auto itr_opd : children(opr_nid)) {
+    if (itr_opd == get_first_child(opr_nid)) {
+      continue;
     }
-  } else {
-    // handle statement rhs of normal operators
-    for (auto itr_opd : children(opr_nid)) {
-      if (itr_opd == get_first_child(opr_nid)) {
-        continue;
-      }
+    // A tuple_add/tuple_set can mix positional refs and named assign children,
+    // so recurse into nested assigns to resolve their RHS SSA properly.
+    if (is_tuple_op && get_type(itr_opd).is_assign()) {
+      ssa_rhs_handle_a_statement(psts_nid, itr_opd);
+    } else {
       ssa_rhs_handle_a_operand(psts_nid, itr_opd);
     }
   }
