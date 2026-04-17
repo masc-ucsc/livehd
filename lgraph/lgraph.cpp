@@ -228,7 +228,14 @@ void Lgraph::load(const std::shared_ptr<Hif_read> hif) {
           dpin.set_name(io.rhs);
           if (has_graph_output(io.rhs)) {
             auto spin = get_graph_output(io.rhs);
-            dpin.connect_sink(spin);
+            // Multiple nodes may share the same wire name (e.g. an alias/placeholder
+            // Or node in tolg shares the port name with the actual cell driver).
+            // Only the first one encountered in topological order — the real driver —
+            // should be wired to the graph output; skip the rest to avoid the graph
+            // output ending up with multiple drivers.
+            if (!spin.is_connected()) {
+              dpin.connect_sink(spin);
+            }
           }
         }
       }
