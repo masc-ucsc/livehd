@@ -2238,6 +2238,14 @@ bool Cprop::scalar_get_mask(Node& node) {
   if (!mask_node.is_type_const()) {
     return false;
   }
+
+  // Rule 4: get_mask(a, -1) == a
+  if (mask_node.get_type_const() == -1) {
+    auto a_dpin = a_spin.get_driver_pin();
+    collapse_forward_for_pin(node, a_dpin);
+    return true;
+  }
+
   auto a_node = a_spin.get_driver_node();
   if (!a_node.is_type(Ntype_op::Set_mask)) {
     return false;
