@@ -318,6 +318,10 @@ Lnast_node Pass_lnastfmt::duplicate_node(std::shared_ptr<Lnast>& lnastfmted, con
     new_node = Lnast_node::create_attr_set();
   } else if (orig_node_type.is_attr_get()) {
     new_node = Lnast_node::create_attr_get();
+  } else if (orig_node_type.is_delay_assign()) {
+    new_node = Lnast_node::create_delay_assign();
+  } else if (orig_node_type.is_tuple_set()) {
+    new_node = Lnast_node::create_tuple_set();
   } else {
     I(false, "Please check the node type and add it");
   }

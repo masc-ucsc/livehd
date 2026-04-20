@@ -1224,9 +1224,9 @@ void Prp2lnast::process_identifier(TSNode node) {
         if (ref_name_map.count(name) == 0) {
           std::string directed_name(name);
           if (is_function_input) {
-            directed_name = absl::StrCat("$.", name);
+            directed_name = absl::StrCat("$", name);
           } else if (is_function_output) {
-            directed_name = absl::StrCat("%.", name);
+            directed_name = absl::StrCat("%", name);
           }
           ref_name_map[name] = directed_name;
         }
@@ -1285,7 +1285,7 @@ void Prp2lnast::add_attr_check(const Lnast_node key) {
   lnast->add_child(cassert_index, tmp_ref_node);
 }
 
-inline std::string Prp2lnast::get_tmp_name() { return absl::StrCat("___t", tmp_ref_count++); }
+inline std::string Prp2lnast::get_tmp_name() { return absl::StrCat("___", tmp_ref_count++); }
 
 inline Lnast_node Prp2lnast::get_tmp_ref() { return Lnast_node::create_ref(get_tmp_name()); }
 

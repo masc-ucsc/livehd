@@ -68,6 +68,8 @@ void Lnast_tolg::process_ast_stmts(Lgraph* lg, const Lnast_nid& lnidx_stmts) {
       process_ast_attr_set_op(lg, lnidx);
     } else if (ntype.is_attr_get()) {
       process_ast_attr_get_op(lg, lnidx);
+    } else if (ntype.is_delay_assign()) {
+      process_ast_delay_assign_op(lg, lnidx);
     } else if (ntype.is_tuple_add() || ntype.is_tuple_set()) {
       process_ast_tuple_add_op(lg, lnidx);
     } else if (ntype.is_tuple_get()) {
@@ -1524,6 +1526,42 @@ void Lnast_tolg::process_ast_attr_get_op(Lgraph* lg, const Lnast_nid& lnidx_aget
     }
     return;
   }
+}
+
+void Lnast_tolg::process_ast_delay_assign_op(Lgraph* lg, const Lnast_nid& lnidx_delay) {
+  // delay_assign dst src offset   (see lnast_nodes.def)
+  // Initial impl: only offset=1 on a non-reg src is supported (same lowering as
+  // the old attr_get X __last_value path — a wire placeholder driven later).
+  auto c0 = lnast->get_first_child(lnidx_delay);             // dst (fresh tmp ref)
+  auto c1 = lnast->get_sibling_next(c0);                     // src (declared var ref)
+  auto c2 = lnast->get_sibling_next(c1);                     // offset (const | ref)
+
+  auto c0_sname = lnast->get_sname(c0);
+  auto c0_vname = lnast->get_vname(c0);
+
+  if (!lnast->get_type(c2).is_const()) {
+    Pass::error("delay_assign offset must be a comptime constant (ref offsets not yet lowered)");
+    return;
+  }
+  auto offset_str = lnast->get_vname(c2);
+  if (offset_str != "1") {
+    Pass::error("delay_assign offset {} not yet supported (only offset=1 lowered today)", offset_str);
+    return;
+  }
+
+  Node wire_node   = lg->create_node(Ntype_op::Or);          // identity/wire placeholder
+  const auto& tok2 = lnast->get_token(lnidx_delay);
+  wire_node.set_loc(tok2.pos1, tok2.pos2);
+  wire_node.set_source(tok2.fname);
+  auto wire_dpin = wire_node.setup_driver_pin();
+  wire_dpin.set_name(std::string(lnast->get_vname(c1)));
+
+  name2dpin[c0_sname] = wire_dpin;
+  if (!is_tmp_var(c0_vname)) {
+    setup_dpin_ssa(name2dpin[c0_sname], c0_vname, lnast->get_subs(c0));
+  }
+
+  driver_vname2wire_nodes[std::string(lnast->get_vname(c1))].emplace_back(wire_node);
 }
 
 void Lnast_tolg::process_ast_func_call_op(Lgraph* lg, const Lnast_nid& lnidx_fc) {

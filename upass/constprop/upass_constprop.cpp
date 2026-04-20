@@ -18,7 +18,9 @@ void uPass_constprop::process_assign() {
   auto lhs_text = current_text();
   move_to_sibling();
 
-  if (lhs_text == "%out") {
+  // Strip I/O prefixes so symbol-table keys match the producer-visible name.
+  // §12 will move direction out of the ref text entirely; until then, normalize here.
+  if (!lhs_text.empty() && (lhs_text.front() == '%' || lhs_text.front() == '$')) {
     lhs_text = lhs_text.substr(1);
   }
 

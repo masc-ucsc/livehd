@@ -26,6 +26,14 @@ LNAST_NODE( assign, assign )
 LNAST_NODE( dp_assign, dp_assign )  // FIXME: remove FUTURE
 LNAST_NODE( mut, mut )              // FIXME: remove
 
+// Deferred / past-cycle read:
+//   delay_assign dst src offset
+// - dst    : fresh tmp ref
+// - src    : declared variable ref (pre-SSA name)
+// - offset : comptime const (int).  Positive = future/next-cycle (reg D, wire settled);
+//                                   negative = past cycle; 0 = reg Q pin (reg only)
+LNAST_NODE( delay_assign, delay_assign )
+
 // Operators
 // - Bitwidth
 LNAST_NODE( bit_and, bit_and )

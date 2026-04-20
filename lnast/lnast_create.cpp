@@ -25,11 +25,11 @@ std::string Lnast_create::get_lnast_name(std::string_view vname, bool last_value
     return std::string(lname);
   }
 
-  auto idx_dot = lnast->add_child(idx_stmts, Lnast_node::create_attr_get());
-  auto tmp_var = create_lnast_tmp();
-  lnast->add_child(idx_dot, Lnast_node::create_ref(tmp_var));
-  lnast->add_child(idx_dot, Lnast_node::create_ref(lname));
-  lnast->add_child(idx_dot, Lnast_node::create_const("__last_value"));
+  auto idx_delay = lnast->add_child(idx_stmts, Lnast_node::create_delay_assign());
+  auto tmp_var   = create_lnast_tmp();
+  lnast->add_child(idx_delay, Lnast_node::create_ref(tmp_var));
+  lnast->add_child(idx_delay, Lnast_node::create_ref(lname));
+  lnast->add_child(idx_delay, Lnast_node::create_const("1"));
 
   return tmp_var;
 }

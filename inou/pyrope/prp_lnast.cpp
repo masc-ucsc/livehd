@@ -26,7 +26,7 @@ void Prp_lnast::dump(lh::Tree_index idx) const {
 }
 
 std::string Prp_lnast::get_temp_string() {
-  static std::string current_temp_var("___t");
+  static std::string current_temp_var("___");
 
   return absl::StrCat(current_temp_var, last_temp_var_counter++);
 }

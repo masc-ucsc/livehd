@@ -29,6 +29,7 @@ public:
 
   // Assignment
   PROCESS_NODE(assign)
+  PROCESS_NODE(delay_assign)
 
   // Bitwidth
   PROCESS_NODE(bit_and)
@@ -75,11 +76,28 @@ public:
 
   // Function Call
   PROCESS_NODE(func_call)
+  PROCESS_NODE(func_def)
 
   // Tuple Operations
   PROCESS_NODE(tuple_get)
   PROCESS_NODE(tuple_set)
   PROCESS_NODE(tuple_add)
+  PROCESS_NODE(tuple_concat)
+
+  // Attributes
+  PROCESS_NODE(attr_set)
+  PROCESS_NODE(attr_get)
+
+  // Control flow
+  PROCESS_NODE(for)
+  PROCESS_NODE(while)
+  PROCESS_NODE(uif)
+  PROCESS_NODE(range)
+  PROCESS_NODE(cassert)
+
+  // Types
+  PROCESS_NODE(type_def)
+  PROCESS_NODE(type_spec)
 
   // Structure
   PROCESS_NODE(top)

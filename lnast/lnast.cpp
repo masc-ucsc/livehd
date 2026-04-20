@@ -803,7 +803,7 @@ void Lnast::ssa_rhs_handle_a_statement(const Lnast_nid& psts_nid, const Lnast_ni
   auto lhs_nid  = get_first_child(opr_nid);
   auto lhs_name = get_name(lhs_nid);
 
-  if (lhs_name.size() > 4 && lhs_name.substr(0, 3) == "___") {
+  if (lhs_name.size() > 3 && lhs_name.substr(0, 3) == "___") {
     return;
   }
 
@@ -985,7 +985,7 @@ void Lnast::ssa_handle_phi_nodes(const Lnast_nid& if_nid) {
   candidates_update_phi_resolve_table.clear();
 }
 
-std::string Lnast::create_tmp_var() { return absl::StrCat("___T", tmp_var_cnt++); }
+std::string Lnast::create_tmp_var() { return absl::StrCat("___", tmp_var_cnt++); }
 
 void Lnast::resolve_phi_nodes(const Lnast_nid& cond_nid, Phi_rtable& true_table, Phi_rtable& false_table) {
   auto if_nid   = get_parent(cond_nid);
