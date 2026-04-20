@@ -5,6 +5,13 @@ build --cxxopt="-std=c++23" --cxxopt="-fexceptions" --force_pic --build_tag_filt
 build --action_env=BAZEL_CXXOPTS="-std=c++23"
 # build --action_env=PATH
 
+# External deps that don't yet tolerate clang 21's stricter default diagnostics.
+# Scope these as narrowly as possible — LiveHD code still gets the warning, just
+# not as an error. googletest 1.17's gtest-printers.h emits -Wcharacter-conversion;
+# downgrade it to a warning wherever it surfaces.
+build --copt=-Wno-error=character-conversion
+build --cxxopt=-Wno-error=character-conversion
+
 # Set minimum macOS version to support C++23 features (requires 13.3+)
 # Only applies to macOS builds, ignored on other platforms
 build:macos --linkopt="-mmacosx-version-min=13.3"

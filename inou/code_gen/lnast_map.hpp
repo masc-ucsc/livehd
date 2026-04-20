@@ -13,7 +13,7 @@ protected:
                                              "top",      "sts",        "if",        "uif",       "for",
                                              "while",    "func_call",  "func_def",
 
-                                             "=",        ":=",         "mut",
+                                             "=",        ":=",         "mut",        "delay_assign",
 
                                              "&",        "|",          "~",         "^",
 
@@ -53,6 +53,7 @@ protected:
       "=",
       "=",  // dp_assign
       "mut",
+      "delay_assign",
 
       "&",
       "|",
@@ -125,6 +126,7 @@ protected:
       "=",  // assign
       "=",  // dp_assign
       "mut",
+      "delay_assign",
 
       "&",  // and
       "|",  // or
