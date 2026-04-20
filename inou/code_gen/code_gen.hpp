@@ -41,6 +41,7 @@ public:
   void do_cond(const lh::Tree_index& cond_node_index);
   void do_tuple(const lh::Tree_index& tuple_node_index);
   void do_select(const lh::Tree_index& select_node_index, std::string_view select_type);
+  void do_attr_set(const lh::Tree_index& attr_set_node_index);
   void do_func_def(const lh::Tree_index& func_def_node_index);
   void do_func_call(const lh::Tree_index& func_def_node_index);
   void do_get_mask(const lh::Tree_index& tposs_node_index);

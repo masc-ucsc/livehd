@@ -1628,7 +1628,20 @@ Lnast_node Prp_lnast::eval_tuple_dot_notation(lh::Tree_index idx_start_ast, lh::
   } else if (is_attr) {  // rhs
 
     auto field = select_fields.back().token.get_text();
-    if (field == "__create_flop" || field == "__last_value") {
+    if (field == "__create_flop") {
+      // lnast_todo §15.1: emit `attr_set X storage reg` in place of the old
+      // `attr_get ___t X __create_flop`. Return the accessed ref so the
+      // surrounding `x = x.__create_flop` assignment collapses to a self
+      // assign — the consumer first creates the flop via the attr_set,
+      // then the self-assign threads the flop output through SSA.
+      I(select_fields.size() == 1);
+      auto idx_attr_set = lnast->add_child(cur_stmts, Lnast_node::create_attr_set());
+      lnast->add_child(idx_attr_set, accessed_el);
+      lnast->add_child(idx_attr_set, Lnast_node::create_const("storage"));
+      lnast->add_child(idx_attr_set, Lnast_node::create_const("reg"));
+      return accessed_el;
+    }
+    if (field == "__last_value") {
       idx_dot_root = lnast->add_child(cur_stmts, Lnast_node::create_attr_get());
     } else {
       idx_dot_root = lnast->add_child(cur_stmts, Lnast_node::create_tuple_get());

@@ -131,7 +131,7 @@ void Code_gen::do_stmts(const lh::Tree_index& stmt_node_index) {
     } else if (curr_node_type.is_tuple_set()) {
       do_select(curr_index, "tuple_add");  // FIXME: we may want different syntax
     } else if (curr_node_type.is_attr_set()) {
-      Pass::error("Error in BitWidth Pass in LGraph optimization.\n");
+      do_attr_set(curr_index);
     } else if (curr_node_type.is_tuple_get()) {
       do_select(curr_index, "tuple_get");
     } else if (curr_node_type.is_func_def()) {
@@ -1029,6 +1029,60 @@ void Code_gen::do_select(const lh::Tree_index& select_node_index, std::string_vi
   } else {
     I(false, "Unexpected node. Please check.");
   }
+}
+
+//-------------------------------------------------------------------------------------
+// Emit pyrope source for an attr_set node. Shape: (ref root, const p1 .. pN,
+// const|ref value). lnast_todo §15.1: the `storage = reg` form is rendered as
+// the legacy `root = root.__create_flop` surface syntax so the prp2prp
+// round-trip re-parses back into the same attr_set.
+void Code_gen::do_attr_set(const lh::Tree_index& attr_set_node_index) {
+  std::cout << "node:attr_set\n";
+
+  std::vector<std::string> parts;
+  std::vector<bool>        is_const;
+  for (auto idx = lnast->get_first_child(attr_set_node_index); idx != lnast->invalid_index(); idx = lnast->get_sibling_next(idx)) {
+    parts.emplace_back(lnast->get_name(idx));
+    is_const.emplace_back(lnast->get_type(idx).is_const());
+  }
+
+  I(parts.size() >= 3, "attr_set must have at least (root, key, value)");
+  const auto& root  = parts.front();
+  const auto& value = parts.back();
+
+  std::string field;
+  for (size_t i = 1; i + 1 < parts.size(); ++i) {
+    if (!field.empty()) {
+      field.append(".");
+    }
+    field.append(parts[i]);
+  }
+
+  if (field == "storage" && value == "reg") {
+    buffer_to_print->append(absl::StrCat(indent(),
+                                         lnast_to->ref_name_str(root),
+                                         " = ",
+                                         lnast_to->ref_name_str(root),
+                                         ".__create_flop",
+                                         lnast_to->stmt_sep()));
+    return;
+  }
+
+  auto value_resolved = value;
+  auto map_it         = ref_map.find(value_resolved);
+  if (map_it != ref_map.end()) {
+    value_resolved = map_it->second;
+  } else if (is_number(value_resolved)) {
+    value_resolved = process_number(value_resolved);
+  }
+
+  buffer_to_print->append(absl::StrCat(indent(),
+                                       lnast_to->ref_name_str(root),
+                                       ".",
+                                       field,
+                                       " = ",
+                                       lnast_to->ref_name_str(value_resolved),
+                                       lnast_to->stmt_sep()));
 }
 
 //-------------------------------------------------------------------------------------

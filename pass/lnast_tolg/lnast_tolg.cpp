@@ -1359,22 +1359,16 @@ void Lnast_tolg::process_ast_attr_set_op(Lgraph* lg, const Lnast_nid& lnidx_aset
   auto name  = lnast->get_sname(name_aset);  // ssa name
   auto vname = lnast->get_vname(name_aset);  // no-ssa name
 
-  auto        aset_node = lg->create_node(Ntype_op::AttrSet);
-  const auto& tok2      = lnast->get_token(lnidx_aset);
-  aset_node.set_loc(tok2.pos1, tok2.pos2);
-  aset_node.set_source(tok2.fname);
-
+  // Walk the path children to find (field-string, val_aset) for the terminal
+  // attribute. Before building the AttrSet node, peek at the field+value so we
+  // can dispatch special sticky attributes like `storage = reg` (lnast_todo
+  // §15.1) that lower to LGraph nodes other than AttrSet.
+  std::string    field;
   lh::Tree_index val_aset;
-
   {
-    // Get the field[s] foo.bar.xxx.__tree = 3 -> field = "bar.xxx.__tree"
-    auto        af_spin = aset_node.setup_sink_pin("field");  // attribute field
-    std::string field;
-
     auto it_aset = field_aset;
-
     while (!it_aset.is_invalid()) {
-      I(lnast->get_type(it_aset).is_const());  // How can it be a ref?? foo.a.b.c.__xxx (a/b/c/__xxx must be consts)
+      I(lnast->get_type(it_aset).is_const());  // paths must be const
       auto vname2 = lnast->get_vname(it_aset);
       if (field.empty()) {
         field = vname2;
@@ -1387,6 +1381,36 @@ void Lnast_tolg::process_ast_attr_set_op(Lgraph* lg, const Lnast_nid& lnidx_aset
         break;
       }
     }
+  }
+
+  if (field == "storage" && lnast->get_type(val_aset).is_const() && lnast->get_vname(val_aset) == "reg") {
+    // lnast_todo §15.1: replaces the old `attr_get X __create_flop` path.
+    // The declaration itself materializes the Flop node; subsequent writes to
+    // the same name (dp_assign or assign) later feed the `din` pin via
+    // driver_vname2wire_nodes.
+    auto        flop_node = lg->create_node(Ntype_op::Flop);
+    const auto& tok2      = lnast->get_token(lnidx_aset);
+    flop_node.set_loc(tok2.pos1, tok2.pos2);
+    flop_node.set_source(tok2.fname);
+    auto flop_dpin = flop_node.setup_driver_pin();
+    flop_dpin.set_name(std::string(vname));
+    name2dpin[name] = flop_dpin;
+
+    if (!is_tmp_var(vname)) {
+      setup_dpin_ssa(name2dpin[name], vname, lnast->get_subs(name_aset));
+    }
+
+    driver_vname2wire_nodes[std::string(vname)].emplace_back(flop_node);
+    return;
+  }
+
+  auto        aset_node = lg->create_node(Ntype_op::AttrSet);
+  const auto& tok2      = lnast->get_token(lnidx_aset);
+  aset_node.set_loc(tok2.pos1, tok2.pos2);
+  aset_node.set_source(tok2.fname);
+
+  {
+    auto af_spin = aset_node.setup_sink_pin("field");  // attribute field
     auto av_dpin = setup_field_dpin(lg, field);
     lg->add_edge(av_dpin, af_spin);
   }
@@ -1468,37 +1492,8 @@ void Lnast_tolg::process_ast_attr_get_op(Lgraph* lg, const Lnast_nid& lnidx_aget
     it_aset = lnast->get_sibling_next(it_aset);
   }
 
-  if (attr_vname == "__create_flop") {
-    auto        flop_node = lg->create_node(Ntype_op::Flop);
-    const auto& tok2      = lnast->get_token(lnidx_aget);
-    flop_node.set_loc(tok2.pos1, tok2.pos2);
-    flop_node.set_source(tok2.fname);
-    auto flop_dpin = flop_node.setup_driver_pin();
-    flop_dpin.set_name(hier_fields_cat_name);
-    name2dpin[c0_aget_name] = flop_dpin;
-
-    if (!is_tmp_var(c0_aget_vname)) {
-      setup_dpin_ssa(name2dpin[c0_aget_name], c0_aget_vname, lnast->get_subs(c0_aget));
-    }
-
-    auto flop_din_driver_pin = setup_ref_node_dpin(lg, c1_aget);
-    auto driver_vname        = lnast->get_vname(c1_aget);
-    auto tup_head_it         = vname2tuple_head.find(driver_vname);
-    if (!flop_din_driver_pin.is_invalid() && tup_head_it != vname2tuple_head.end()) {  // flop has some previous attribute set
-      flop_din_driver_pin.connect_sink(flop_node.setup_sink_pin("din"));
-      // put the head of the tuple chain as the wire_node that will be driven by the largest ssa later
-      auto tup_head_node = tup_head_it->second;
-      driver_vname2wire_nodes[driver_vname].emplace_back(tup_head_node);
-    } else {  // if no previous attribute set, use the normal __last_value flow
-      driver_vname2wire_nodes[driver_vname].emplace_back(flop_node);
-    }
-
-    it_aset = lnast->get_sibling_next(it_aset);
-    if (!it_aset.is_invalid()) {
-      Pass::error("attribute {} must be the last in the entry {}\n", attr_vname, hier_fields_cat_name);
-    }
-    return;
-  }
+  // lnast_todo §15.1: __create_flop is gone — register creation now flows
+  // through process_ast_attr_set_op on `attr_set X storage reg`.
 
   if (attr_vname == "__last_value") {
     Node wire_node;
