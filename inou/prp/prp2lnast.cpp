@@ -1036,6 +1036,9 @@ void Prp2lnast::process_unary_expression(TSNode node) {
     auto ref        = get_tmp_ref();
 
     lnast->add_child(expr_index, ref);
+    if (op == "-") {
+      lnast->add_child(expr_index, Lnast_node::create_const("0"));
+    }
     lnast->add_child(expr_index, arg);
 
     primary_node_stack.push(ref);
