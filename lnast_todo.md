@@ -154,6 +154,13 @@ is verified with a file:line pointer so the next pass can confirm.
   absl's `AssertNotDebugCapacity` kReentrance check, intermittently crashing
   `pyrope_compile-connect_through2` (2/10 flaky). Replaced the TOCTOU pattern
   with `std::call_once`. Fully reliable now (15/15 green).
+- **§5.3 partial: reportable assign/dp_assign arity** landed 2026-04-20.
+  `pass/lnastfmt/pass_lnastfmt.cpp Pass_lnastfmt::process_node` now
+  reports three malformed-tree cases (missing/non-ref LHS, missing
+  RHS, >2 children) as `Pass::error` instead of the debug-only
+  `I(...)` asserts, so the check runs in release builds too. Each
+  error names the node type and the offending LHS, making producer
+  bugs easier to track.
 - **F.7 partial: prefix-char helper delegation** landed 2026-04-20.
   `lnast/lnast_create.cpp:24` replaced direct `lname[0] == '$'` with
   `Lnast::is_input(lname)`. `pass/lnast_tolg/lnast_tolg.hpp:86-88`
@@ -744,9 +751,15 @@ format *validator* run before every LNAST consumer (`lnast_tolg`, `upass`,
 2. Every `const` text is either a numeric literal (parseable by
    `Lconst::from_pyrope`), a `"string"` literal, or an attribute identifier
    from a documented whitelist (or drops the `__` prefix per §4.1).
-3. `assign` has exactly 2 children (lhs `ref`, rhs `ref|const`). Today
-   `pass_lnastfmt.cpp:197` only asserts this during `observe_lnast`, not as a
-   reportable error.
+3. ~~`assign` has exactly 2 children (lhs `ref`, rhs `ref|const`).~~
+   **Partial 2026-04-20.** `Pass_lnastfmt::process_node`
+   (`pass/lnastfmt/pass_lnastfmt.cpp:208-237`) now reports three
+   precise malformed-tree cases via `Pass::error` (missing/non-ref LHS,
+   missing RHS, >2 children) for `assign` / `dp_assign`. The release
+   build used to silently skip the `I(...)` asserts; now both build
+   modes surface the error with the offending node's type and LHS
+   name. Still to add: a positive check that the RHS is `ref` or
+   `const` (rather than e.g. a nested statement).
 4. `tuple_set`/`tuple_get`/`tuple_add`/`attr_set`/`attr_get` child shapes
    match the docs in `12-lnast.md`. The docs are the spec; lnastfmt should
    enforce them.

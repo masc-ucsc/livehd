@@ -210,13 +210,27 @@ void Pass_lnastfmt::process_node(Lnast* ln, const lh::Tree_index& it) {
 
   if (node_data.type.is_assign() || node_data.type.is_dp_assign()) {
     auto frst_child_indx = ln->get_first_child(it);
-    I(ln->get_type(frst_child_indx).debug_name() == "ref", "unexpected node found! not ref!?");
+    if (frst_child_indx.is_invalid() || !ln->get_type(frst_child_indx).is_ref()) {
+      Pass::error("lnastfmt: {} LHS must be a ref, got {}",
+                  node_data.type.debug_name(),
+                  frst_child_indx.is_invalid() ? "missing" : ln->get_type(frst_child_indx).debug_name());
+      return;
+    }
     std::print("first child type and data: {}, {}\n", ln->get_type(frst_child_indx).debug_name(), ln->get_name(frst_child_indx));
 
     auto sec_child_indx = ln->get_sibling_next(frst_child_indx);
+    if (sec_child_indx.is_invalid()) {
+      Pass::error("lnastfmt: {} with LHS '{}' is missing its RHS (expected exactly 2 children)",
+                  node_data.type.debug_name(),
+                  ln->get_name(frst_child_indx));
+      return;
+    }
     std::print("sec child type and data: {}, {}\n", ln->get_type(sec_child_indx).debug_name(), ln->get_name(sec_child_indx));
 
-    I(ln->get_sibling_next(sec_child_indx).is_invalid(), "This assign node has more than 2 children??");
+    if (!ln->get_sibling_next(sec_child_indx).is_invalid()) {
+      Pass::error("lnastfmt: {} with LHS '{}' has more than 2 children", node_data.type.debug_name(), ln->get_name(frst_child_indx));
+      return;
+    }
 
     ref_hash_map.try_emplace(ln->get_name(sec_child_indx), ln->get_name(frst_child_indx));  // insert key, value pair.
   }
