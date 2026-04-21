@@ -154,6 +154,13 @@ is verified with a file:line pointer so the next pass can confirm.
   absl's `AssertNotDebugCapacity` kReentrance check, intermittently crashing
   `pyrope_compile-connect_through2` (2/10 flaky). Replaced the TOCTOU pattern
   with `std::call_once`. Fully reliable now (15/15 green).
+- **§7.2 opaque `delay_assign` in lnastopt** landed 2026-04-20.
+  `pass/lnastopt/opt_lnast.cpp process_stmts` now has an explicit
+  no-op case for `Lnast_ntype_delay_assign`. Previously it fell
+  through `default: process_todo` and printed "not handling lnast
+  type:delay_assign (TODO)" every time. Matches §15.2 intent — the
+  node is opaque to copy-prop because non-zero offsets are never a
+  pure copy. No functional change; just quieter output.
 - **F.1 dead `Lnast::create_tmp_var` + `tmp_var_cnt` removed** 2026-04-20.
   Neither had any caller (verified via `grep create_tmp_var` — only
   the definition and declaration matched; `tmp_var_cnt` was only
@@ -828,9 +835,14 @@ diff-check their LNAST output.
 
 - Performs SSA-aware copy propagation. Does not currently cross `if`
   boundaries; check whether this is intentional vs. an outstanding TODO.
-- Should treat `delay_assign` as opaque (non-zero offsets are not a pure
-  copy). Currently it doesn't even know about the node; verify this is
-  safe.
+- ~~Should treat `delay_assign` as opaque~~ — **done 2026-04-20.**
+  `Opt_lnast::process_stmts` (`pass/lnastopt/opt_lnast.cpp:1075-1077`)
+  now has an explicit no-op case for `Lnast_ntype_delay_assign` so the
+  node silently short-circuits instead of hitting `process_todo` and
+  printing a "not handling" warning. Matches the §15.2 semantics
+  ("non-zero offsets are not a pure copy"): folding across
+  `delay_assign` is never safe, so `lnastopt` simply leaves the node
+  alone.
 
 ### 7.3 `upass/*` (work in progress)
 
