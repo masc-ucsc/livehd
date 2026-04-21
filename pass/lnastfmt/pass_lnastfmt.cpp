@@ -178,18 +178,43 @@ void Pass_lnastfmt::validate_legacy_magic_strings(const Lnast* ln) {
   // `__last_value` as a const any more. Flop creation is `attr_set X storage
   // reg`; deferred reads are `delay_assign`. This check keeps the migration
   // from silently regressing — catches any producer that re-introduces the
-  // legacy magic strings.
+  // legacy magic strings. Also validates delay_assign shape per §5.7:
+  // `(tmp_ref dst, ref src, const offset)`.
   for (const lh::Tree_index& it : ln->depth_preorder()) {
     const auto& data = ln->get_data(it);
-    if (!data.type.is_const()) {
-      continue;
+    if (data.type.is_const()) {
+      const auto name = data.token.get_text();
+      if (name == "__create_flop" || name == "__last_value") {
+        Pass::error(
+            "lnastfmt: const '{}' appears in LNAST; migrate the producer to `attr_set X storage reg` (§15.1) or `delay_assign` (§15.2)",
+            name);
+        return;  // Pass::error throws, but be explicit.
+      }
     }
-    const auto name = data.token.get_text();
-    if (name == "__create_flop" || name == "__last_value") {
-      Pass::error(
-          "lnastfmt: const '{}' appears in LNAST; migrate the producer to `attr_set X storage reg` (§15.1) or `delay_assign` (§15.2)",
-          name);
-      return;  // Pass::error throws, but be explicit.
+    if (data.type.is_delay_assign()) {
+      auto c0 = ln->get_first_child(it);
+      auto c1 = c0.is_invalid() ? c0 : ln->get_sibling_next(c0);
+      auto c2 = c1.is_invalid() ? c1 : ln->get_sibling_next(c1);
+      if (c0.is_invalid() || c1.is_invalid() || c2.is_invalid() || !ln->get_sibling_next(c2).is_invalid()) {
+        Pass::error("lnastfmt: delay_assign must have exactly 3 children (dst, src, offset) per §15.2");
+        return;
+      }
+      if (!ln->get_type(c0).is_ref() || !Lnast::is_tmp(ln->get_name(c0))) {
+        Pass::error("lnastfmt: delay_assign child 0 must be a tmp ref (___<n>), got '{}' of type {}",
+                    ln->get_name(c0),
+                    ln->get_type(c0).debug_name());
+        return;
+      }
+      if (!ln->get_type(c1).is_ref()) {
+        Pass::error("lnastfmt: delay_assign child 1 must be a ref (declared variable name), got type {}",
+                    ln->get_type(c1).debug_name());
+        return;
+      }
+      if (!ln->get_type(c2).is_const() && !ln->get_type(c2).is_ref()) {
+        Pass::error("lnastfmt: delay_assign child 2 (offset) must be a const or comptime ref, got type {}",
+                    ln->get_type(c2).debug_name());
+        return;
+      }
     }
   }
 }

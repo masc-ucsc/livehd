@@ -154,6 +154,13 @@ is verified with a file:line pointer so the next pass can confirm.
   absl's `AssertNotDebugCapacity` kReentrance check, intermittently crashing
   `pyrope_compile-connect_through2` (2/10 flaky). Replaced the TOCTOU pattern
   with `std::call_once`. Fully reliable now (15/15 green).
+- **§5.7 partial: `delay_assign` shape validation** landed 2026-04-20.
+  `Pass_lnastfmt::validate_legacy_magic_strings` grew a
+  `delay_assign` case that enforces exactly 3 children (dst, src,
+  offset), dst is a tmp ref, src is a ref, offset is const or ref.
+  Catches producer bugs at lnastfmt time, before `lnast_tolg`'s
+  partial lowering panics on malformed input. Still pending: "reject
+  offset=0 on non-reg src" — needs ST visibility into `storage=reg`.
 - **§5.3 partial: reportable assign/dp_assign arity** landed 2026-04-20.
   `pass/lnastfmt/pass_lnastfmt.cpp Pass_lnastfmt::process_node` now
   reports three malformed-tree cases (missing/non-ref LHS, missing
@@ -770,8 +777,15 @@ format *validator* run before every LNAST consumer (`lnast_tolg`, `upass`,
 6. `dp_assign`, `mut`, `uif`, `phi`, `hot_phi` — all marked `FIXME: remove` in
    `lnast_nodes.def`. The formatter should warn when a fresh producer emits
    them and reject them in CI once the migration is done.
-7. `delay_assign` — validate shape (child 0 tmp, child 1 declared ref,
-   child 2 comptime const); reject offset=0 on non-reg src.
+7. ~~`delay_assign` — validate shape~~ **Partial 2026-04-20.**
+   `Pass_lnastfmt::validate_legacy_magic_strings` now enforces exactly
+   3 children (dst, src, offset), dst must be a tmp ref (matches
+   `Lnast::is_tmp`), src must be a ref, offset must be `const` or
+   `ref` (ref reserved for comptime-const offsets once §15.2 ext
+   ships). Still pending: "reject offset=0 on non-reg src" — needs
+   symbol-table visibility into declared `storage=reg` attrs, which
+   lives in `lnast_tolg` right now, not `lnastfmt`. Deferred until
+   §10 ST API.
 
 This also gives us a tool to compare the three producers on the same input
 (once a common source language exists — probably the new small-Pyrope) and
