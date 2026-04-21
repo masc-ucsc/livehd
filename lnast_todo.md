@@ -154,6 +154,16 @@ is verified with a file:line pointer so the next pass can confirm.
   absl's `AssertNotDebugCapacity` kReentrance check, intermittently crashing
   `pyrope_compile-connect_through2` (2/10 flaky). Replaced the TOCTOU pattern
   with `std::call_once`. Fully reliable now (15/15 green).
+- **F.7 partial: prefix-char helper delegation** landed 2026-04-20.
+  `lnast/lnast_create.cpp:24` replaced direct `lname[0] == '$'` with
+  `Lnast::is_input(lname)`. `pass/lnast_tolg/lnast_tolg.hpp:86-88`
+  `is_register` / `is_input` / `is_output` now delegate to the
+  canonical `Lnast::` helpers instead of duplicating the `front() ==`
+  test. The remaining direct `front()` / `[0] ==` prefix checks
+  (~15 sites across cgen, semantic, code_gen, bundle, lgtuple,
+  upass, fromlg, yosys) stay — they vanish under §12 when
+  `$`/`%`/`#` prefixes move to ST attributes. Keeping those for now
+  avoids a redundant migration.
 - **§7.2 opaque `delay_assign` in lnastopt** landed 2026-04-20.
   `pass/lnastopt/opt_lnast.cpp process_stmts` now has an explicit
   no-op case for `Lnast_ntype_delay_assign`. Previously it fell
@@ -380,8 +390,14 @@ Things I noticed while editing that aren't really captured by the existing
    not `Lnast_node`.** And they test `front()` on a `string_view`. After
    §12 these should vanish entirely — but as long as they exist, they're
    static `Lnast` methods called with a name, which invites "did the
-   caller strip the prefix already?" bugs. Example: `Lnast_create.cpp:24`
-   gates on `lname[0] == '$'` directly instead of calling the helper.
+   caller strip the prefix already?" bugs. ~~Example: `Lnast_create.cpp:24`
+   gates on `lname[0] == '$'` directly instead of calling the helper.~~
+   **Partial 2026-04-20:** `Lnast_create::get_lnast_name` now calls
+   `Lnast::is_input(lname)`, and the `Lnast_tolg::is_register/is_input/
+   is_output` duplicates delegate to the canonical `Lnast::is_*` helpers.
+   Other direct `front()` / `[0] ==` checks in `pass/lnast_fromlg`,
+   `inou/code_gen`, `pass/semantic`, `upass/constprop`, `lgraph/lgtuple`,
+   `lnast/bundle` remain — they go away entirely under §12.
 
 8. ~~**`_._` tmp prefix reader**~~ **Resolved 2026-04-20** (§D): the
    acceptance was deleted from `Pass_lnastfmt::is_temp_var` and

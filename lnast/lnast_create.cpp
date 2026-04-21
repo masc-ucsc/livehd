@@ -21,7 +21,7 @@ std::string Lnast_create::get_lnast_name(std::string_view vname, bool last_value
     lname = it->second;
   }
 
-  if (!last_value || lname[0] == '$') {  // global input
+  if (!last_value || Lnast::is_input(lname)) {  // global input
     return std::string(lname);
   }
 

@@ -83,9 +83,9 @@ protected:
   void     setup_lnast_to_lgraph_primitive_type_mapping();
 
   static bool is_tmp_var(std::string_view name) { return Lnast::is_tmp(name); }
-  static bool is_register(std::string_view name) { return name.front() == '#'; }
-  static bool is_input(std::string_view name) { return name.front() == '$'; }
-  static bool is_output(std::string_view name) { return name.front() == '%'; }
+  static bool is_register(std::string_view name) { return Lnast::is_register(name); }
+  static bool is_input(std::string_view name) { return Lnast::is_input(name); }
+  static bool is_output(std::string_view name) { return Lnast::is_output(name); }
   static bool is_bool_true(std::string_view name) { return str_tools::starts_with(name, "true"); }
   static bool is_bool_false(std::string_view name) { return str_tools::starts_with(name, "false"); }
   static bool is_scalar(Node_pin dpin) { return dpin.get_node().get_type_op() != Ntype_op::TupAdd; }
