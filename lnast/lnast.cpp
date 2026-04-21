@@ -415,8 +415,6 @@ void Lnast::ssa_handle_phi_nodes(const Lnast_nid& if_nid) {
   candidates_update_phi_resolve_table.clear();
 }
 
-std::string Lnast::create_tmp_var() { return absl::StrCat("___", tmp_var_cnt++); }
-
 void Lnast::resolve_phi_nodes(const Lnast_nid& cond_nid, Phi_rtable& true_table, Phi_rtable& false_table) {
   auto if_nid   = get_parent(cond_nid);
   auto psts_nid = get_parent(if_nid);

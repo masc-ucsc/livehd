@@ -154,6 +154,13 @@ is verified with a file:line pointer so the next pass can confirm.
   absl's `AssertNotDebugCapacity` kReentrance check, intermittently crashing
   `pyrope_compile-connect_through2` (2/10 flaky). Replaced the TOCTOU pattern
   with `std::call_once`. Fully reliable now (15/15 green).
+- **F.1 dead `Lnast::create_tmp_var` + `tmp_var_cnt` removed** 2026-04-20.
+  Neither had any caller (verified via `grep create_tmp_var` — only
+  the definition and declaration matched; `tmp_var_cnt` was only
+  read by `create_tmp_var` itself). Deleted the method and the
+  counter from `lnast/lnast.{hpp,cpp}`. The "two independent tmp-var
+  counters" concern in §F.1 is dissolved — only
+  `Lnast_create::tmp_var_cnt` remains in use.
 - **§13 partial: canonical `Lnast::is_tmp` helper** landed 2026-04-20.
   `lnast/lnast.hpp:148` adds `static bool Lnast::is_tmp(std::string_view)`
   next to `is_register` / `is_input` / `is_output`. Three duplicated
@@ -319,14 +326,12 @@ with their host functions.
 Things I noticed while editing that aren't really captured by the existing
 §1-§15 punch-list:
 
-1. **Two independent tmp-var counters.** `Lnast::tmp_var_cnt`
-   (`lnast/lnast.hpp:80`, used by `create_tmp_var` during the SSA transform)
-   and `Lnast_create::tmp_var_cnt` (`lnast/lnast_create.cpp:12`, used by the
-   slang/lnastopt producer path) are independent integers. Both now emit
-   `___<n>` after §1.1. If both ever contribute tmps to the same LNAST
-   (e.g., `Lnast_create` builds a tree and then `Lnast::ssa_trans` also
-   creates helpers), they can collide on the same name. Candidate fix:
-   single shared counter or — better — §13 full `Tree_index` tmps.
+1. ~~**Two independent tmp-var counters.**~~ **Resolved 2026-04-20**:
+   `Lnast::tmp_var_cnt` and `Lnast::create_tmp_var()` were dead (no
+   callers). Both deleted from `lnast/lnast.{hpp,cpp}`. Only
+   `Lnast_create::tmp_var_cnt` remains in use (`lnast/lnast_create.cpp`
+   emits `___<n>` via `create_lnast_tmp`), so the collision risk
+   described here is gone.
 
 2. ~~**`delay_assign` is single-producer today.**~~ **Resolved 2026-04-20**:
    all three producers now emit `delay_assign`. `inou/pyrope/prp_lnast.cpp`

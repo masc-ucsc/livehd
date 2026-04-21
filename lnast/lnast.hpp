@@ -77,7 +77,6 @@ private:
   std::string       top_module_name;
   std::string       source_filename;
   Lnast_nid         undefined_var_nid;
-  uint32_t          tmp_var_cnt      = 0;
   static inline int trace_module_cnt = 0;
 
   void      do_ssa_trans(const Lnast_nid& top_nid);
@@ -112,7 +111,6 @@ private:
   void        trans_tuple_opr(const Lnast_nid& pats_nid);  // from sel to tuple_add/get
   void        trans_tuple_opr_if_subtree(const Lnast_nid& if_nid);
   void        merge_tconcat_paired_assign(const Lnast_nid& psts_nid, const Lnast_nid& concat_nid);
-  std::string create_tmp_var();
 
   // hierarchical statements node -> symbol table
   absl::node_hash_map<Lnast_nid, Phi_rtable>      phi_resolve_tables;
