@@ -154,6 +154,22 @@ is verified with a file:line pointer so the next pass can confirm.
   absl's `AssertNotDebugCapacity` kReentrance check, intermittently crashing
   `pyrope_compile-connect_through2` (2/10 flaky). Replaced the TOCTOU pattern
   with `std::call_once`. Fully reliable now (15/15 green).
+- **§6.3 `inou.slang` registered as an alias for `inou.verilog`** landed
+  2026-04-20. `inou/slang/inou_slang.cpp:30-36` adds a second
+  `Eprp_method("inou.slang", ...)` pointing at the same
+  `Inou_slang::work` with the same required/optional labels. Verified:
+  `lgshell -q` → `help inou.slang` prints the alias description.
+  Any future doc that types `inou.slang` now resolves. The `adder.v`
+  half of the original §6.3 item was a red herring (no real doc
+  referenced it — only the TODO self-referenced).
+- **§7.4 `pass/upass` vs `upass/runner` not actually duplicated** —
+  documented 2026-04-20. The two directories are layered, not
+  redundant: `pass/upass` (~180 LOC) is the EPRP plugin shell that
+  registers `pass.upass` and dispatches by IR mode; `upass/runner`
+  (~900 LOC) contains `uPass_runner` / `uPass_runner_lgraph` core
+  implementations. The original "duplicated setup code" note was a
+  misreading. No code change; §7.4 text updated to reflect the
+  architecture.
 - **§4.3 SSA subscript separator unified** landed 2026-04-20.
   `Lnast::dump` at `lnast/lnast.cpp:639-650` previously rendered SSA refs as
   `name___subs` — using the same `___` separator that also marks tmp
@@ -206,7 +222,7 @@ detailed sections below.
 | 4    | §4.1 / §4.5 `__ubits` / `__sbits` / other `__` attrs → bare names        | Blocked by §10/§11 (need ST to store non-stringly attrs). |
 | —    | ~~§4.3 Move SSA subscript out of ref text~~ DONE 2026-04-20              | `Lnast::dump` at `lnast/lnast.cpp:639-650` now renders the SSA subscript as `name|subs` (matching `get_sname`) and only when `subs != 0`. The `___`-as-separator collision with the tmp-var prefix is gone; the dump no longer renders a bogus `name___0` for fresh refs. |
 | —    | ~~§6.1 prp unary-`minus` 2-child canonicalization~~ DONE 2026-04-20      | `inou/prp/prp2lnast.cpp process_unary_expression` now emits 3-child `minus(dst, const 0, arg)` for unary `-`. Matches binary minus shape, so no consumer change needed; also fixes a latent correctness bug where `Lnast_tolg::nary_node_rhs_connections` wired the single operand to Sum's A pin, leaving unary `-x` evaluating to `+x`. |
-| 4    | §6.3 slang command alias, `adder.v` docs                                | Slang builds again; the alias + docs are a small follow-up. |
+| —    | ~~§6.3 slang command alias, `adder.v` docs~~ DONE 2026-04-20             | `inou/slang/inou_slang.cpp:30-36` now registers `inou.slang` as an alias `Eprp_method` with identical labels, same `Inou_slang::work`. Verified via `lgshell -q`: `help inou.slang` prints the alias description. No real doc referenced `adder.v` — only the TODO self-referenced it; nothing to fix there. |
 | —    | ~~F.11 Auto-generate `inou/code_gen/lnast_map.hpp` from `lnast_nodes.def`~~ PARTIAL DONE 2026-04-20 | `static_assert(namemap_*.size() == Lnast_ntype::Lnast_ntype_last_invalid)` added in `lnast_map.hpp`; 17 missing type-node entries filled in. Full X-macro generation still open. |
 | —    | ~~§7.4 Merge / document `pass/upass` vs `upass/runner`~~ RESOLVED 2026-04-20 | Not actually duplicated. `pass/upass` (~180 LOC) is the EPRP plugin shell that registers the `pass.upass` command and dispatches to the runner; `upass/runner` (~900 LOC) is the core implementation (`uPass_runner`, `uPass_runner_lgraph`). §7.4 entry updated to reflect the layering; no code change needed. |
 
@@ -756,9 +772,15 @@ diff-check their LNAST output.
 - ~~Tmp-var prefix `___<n>`~~ — **already canonical**; no change needed.
 - Now emits `delay_assign` (via `Lnast_create::get_lnast_name`) instead of
   `attr_get __last_value`.
-- `adder.v` test file referenced in docs is still missing; `inou.slang`
-  isn't a registered command either — the command is `inou.verilog`.
-  Update docs and/or register `inou.slang` as an alias.
+- ~~`adder.v` test file referenced in docs is still missing; `inou.slang`
+  isn't a registered command either~~ — **done 2026-04-20.**
+  `inou/slang/inou_slang.cpp Inou_slang::setup` now registers
+  `inou.slang` as a second `Eprp_method` pointing at the same
+  `Inou_slang::work`, with the same label set as `inou.verilog`.
+  `lgshell -q` confirms `help inou.slang` works. The `adder.v` half
+  of the item was a red herring: the only references to `adder.v` in
+  this repo were in this TODO and a working note (`pp.md`); no real
+  docs depended on it.
 - `process_top_instance` at `slang_tree.cpp:113` — the `I(false)` is
   actually unreachable in practice (InterfacePort is handled in its own
   branch with a FIXME log). The TODO's description was slightly wrong;

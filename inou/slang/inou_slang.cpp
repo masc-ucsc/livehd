@@ -26,6 +26,14 @@ void Inou_slang::setup() {
   m1.add_label_optional("undefines", "comma separated undefines");
 
   register_pass(m1);
+
+  Eprp_method m2("inou.slang", "alias for inou.verilog (System verilog to LNAST using slang)", &Inou_slang::work);
+  m2.add_label_required("files", "input verilog files");
+  m2.add_label_optional("includes", "comma separated include paths (otherwise, verilog paths)");
+  m2.add_label_optional("defines", "comma separated defines. E.g: defines:foo=1,XXX,LALA=1");
+  m2.add_label_optional("undefines", "comma separated undefines");
+
+  register_pass(m2);
 }
 
 Inou_slang::Inou_slang(const Eprp_var& var) : Pass("pass.lec", var) {}
