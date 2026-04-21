@@ -69,7 +69,7 @@ do
   rm -rf lgdb_pyrope tmp_pyrope
   mkdir -p tmp_pyrope
 
-  CMD="inou.pyrope path:lgdb_pyrope files:${full_input} |> pass.lnast_tolg |> pass.cprop |> pass.bitwidth |> inou.cgen.verilog odir:tmp_pyrope"
+  CMD="inou.pyrope path:lgdb_pyrope files:${full_input} |> pass.lnastfmt |> pass.lnast_tolg |> pass.cprop |> pass.bitwidth |> inou.cgen.verilog odir:tmp_pyrope"
   echo "CMD: ${CMD}"
   echo "${CMD}" | ${LGSHELL} -q >tmp_pyrope/${input}.log 2>tmp_pyrope/${input}.err
   if [ $? -ne 0 ]; then

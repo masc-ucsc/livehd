@@ -77,8 +77,8 @@ do
   rm -rf lgdb_slang tmp_slang
   mkdir -p tmp_slang
 
-  echo "inou.verilog path:lgdb_slang top:${base} files:${full_input} |> pass.compiler |> lgraph.save odir:lgdb_slang"  | ${LGSHELL} -q >tmp_slang/${input}.log 2>tmp_slang/${input}.err
-  echo "CMD: inou.verilog path:lgdb_slang top:${base} files:${full_input} |> pass.compiler |> lgraph.save odir:lgdb_slang"
+  echo "inou.verilog path:lgdb_slang top:${base} files:${full_input} |> pass.lnastfmt |> pass.compiler |> lgraph.save odir:lgdb_slang"  | ${LGSHELL} -q >tmp_slang/${input}.log 2>tmp_slang/${input}.err
+  echo "CMD: inou.verilog path:lgdb_slang top:${base} files:${full_input} |> pass.lnastfmt |> pass.compiler |> lgraph.save odir:lgdb_slang"
   if [ $? -eq 0 ]; then
     echo "Successfully created graph from ${input}"
   else

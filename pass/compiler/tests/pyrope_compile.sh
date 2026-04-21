@@ -86,8 +86,8 @@ Pyrope_step () {
 	# fi
 
 	rm -rf lgdb_prp
-  ${LGSHELL} "inou.pyrope files:${all_files} |> pass.lnast_tolg.dbg_lnast_ssa |> lnast.dump " > ${pt}.lnast.txt
-	${LGSHELL} "inou.pyrope files:${all_files} |> pass.compiler path:lgdb_prp gviz:true top:${top_module} |> lgraph.save hier:true"
+  ${LGSHELL} "inou.pyrope files:${all_files} |> pass.lnastfmt |> pass.lnast_tolg.dbg_lnast_ssa |> lnast.dump " > ${pt}.lnast.txt
+	${LGSHELL} "inou.pyrope files:${all_files} |> pass.lnastfmt |> pass.compiler path:lgdb_prp gviz:true top:${top_module} |> lgraph.save hier:true"
 	# ${LGSHELL} "inou.pyrope files:${all_files} |> pass.compiler path:lgdb_prp top:${top_module} |> lgraph.save hier:true"
 	ret_val=$?
 	if [ $ret_val -ne 0 ]; then
@@ -124,7 +124,7 @@ Pyrope_step () {
 	# Trying the same code but using the PRP2PRP pass
 
 	rm -rf tmp_prp
-	${LGSHELL} "inou.pyrope files:${all_files} |> inou.code_gen.prp odir:tmp_prp"
+	${LGSHELL} "inou.pyrope files:${all_files} |> pass.lnastfmt |> inou.code_gen.prp odir:tmp_prp"
 	ret_val=$?
 	if [ $ret_val -ne 0 ]; then
 		echo "ERROR: could not prp2prp top: ${top_module} with files:${all_files}!"
@@ -133,7 +133,7 @@ Pyrope_step () {
 
 	rm -rf lgdb_prp2prp
 	# ${LGSHELL} "files src_path:tmp_prp match:\"\.prp$\" filter:"_err\.prp$" |> inou.pyrope |> pass.compiler path:lgdb_prp2prp gviz:true top:${top_module} |> lgraph.save hier:true"
-	${LGSHELL} "files src_path:tmp_prp match:\"\.prp$\" filter:"_err\.prp$" |> inou.pyrope |> pass.compiler path:lgdb_prp2prp top:${top_module} |> lgraph.save hier:true"
+	${LGSHELL} "files src_path:tmp_prp match:\"\.prp$\" filter:"_err\.prp$" |> inou.pyrope |> pass.lnastfmt |> pass.compiler path:lgdb_prp2prp top:${top_module} |> lgraph.save hier:true"
 	ret_val=$?
 	if [ $ret_val -ne 0 ]; then
 		echo "ERROR: could not prp2prp compile with files:${all_files}!"

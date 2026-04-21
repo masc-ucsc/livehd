@@ -563,12 +563,12 @@ void Pass_lnast_fromlg::attach_mask_node(Lnast& lnast, Lnast_nid& parent_node, c
     } else {
       {
         auto asg_rang_begin_node = lnast.add_child(gm_tup_node, Lnast_node::create_assign());
-        lnast.add_child(asg_rang_begin_node, Lnast_node::create_const("__range_begin"));
+        lnast.add_child(asg_rang_begin_node, Lnast_node::create_ref("__range_begin"));
         lnast.add_child(asg_rang_begin_node, Lnast_node::create_const(range_begin));
       }
       {
         auto asg_rang_end_node = lnast.add_child(gm_tup_node, Lnast_node::create_assign());
-        lnast.add_child(asg_rang_end_node, Lnast_node::create_const("__range_end"));
+        lnast.add_child(asg_rang_end_node, Lnast_node::create_ref("__range_end"));
         lnast.add_child(asg_rang_end_node, Lnast_node::create_const(range_end));
       }
     }

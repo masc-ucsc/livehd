@@ -220,7 +220,7 @@ void Code_gen::do_assign(const lh::Tree_index& assign_node_index, std::vector<st
           // hier_tup_vec.push_back("str");
           if (has_DblUndrScor(lnast_to->ref_name_str(key_sec))) {
             //   assign:
-            //       const: __range_begin
+            //       ref  : __range_begin
             //       const: 0
             if (key == "__range_begin") {
               hier_tup_vec.emplace_back(lnast_to->ref_name_str(ref));
@@ -258,7 +258,7 @@ void Code_gen::do_assign(const lh::Tree_index& assign_node_index, std::vector<st
     if (hier_tup_assign) {
       if (has_DblUndrScor(lnast_to->ref_name_str(key))) {
         //   assign:
-        //       const: __range_begin
+        //       ref  : __range_begin
         //       const: 0
         if (key == "__range_begin") {
           hier_tup_vec.emplace_back(lnast_to->ref_name_str(ref));

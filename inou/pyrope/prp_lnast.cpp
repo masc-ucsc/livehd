@@ -852,7 +852,7 @@ Lnast_node Prp_lnast::evaluate_all_tuple_nodes(const lh::Tree_index& idx_start_a
     auto range_el       = ast->get_data(idx_range_next);
 
     auto       assign_root          = Lnast_node::create_assign();
-    auto       range_start_sentinel = Lnast_node::create_const("__range_begin");
+    auto       range_start_sentinel = Lnast_node::create_ref("__range_begin");
     Lnast_node range_start;
     bool       range_start_is_null = false;
     if (range_el.token_entry != 0) {
@@ -873,7 +873,7 @@ Lnast_node Prp_lnast::evaluate_all_tuple_nodes(const lh::Tree_index& idx_start_a
       idx_range_next = ast->get_sibling_next(idx_range_next);
     }
 
-    auto       range_end_sentinel = Lnast_node::create_const("__range_end");
+    auto       range_end_sentinel = Lnast_node::create_ref("__range_end");
     Lnast_node range_end;
     bool       range_end_is_null = false;
     if (idx_range_next.is_invalid()) {
