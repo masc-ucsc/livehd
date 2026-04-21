@@ -260,7 +260,7 @@ void Lnast::ssa_rhs_handle_a_statement(const Lnast_nid& psts_nid, const Lnast_ni
   auto lhs_nid  = get_first_child(opr_nid);
   auto lhs_name = get_name(lhs_nid);
 
-  if (lhs_name.size() > 3 && lhs_name.substr(0, 3) == "___") {
+  if (is_tmp(lhs_name)) {
     return;
   }
 
@@ -308,7 +308,7 @@ void Lnast::opr_lhs_merge_handle_a_statement(const Lnast_nid& assign_nid) {
   const auto c0_assign      = get_first_child(assign_nid);
   const auto c1_assign_name = get_name(get_sibling_next(c0_assign));
 
-  if (c1_assign_name.substr(0, 3) != "___") {
+  if (!is_tmp(c1_assign_name)) {
     return;
   }
 
@@ -549,7 +549,7 @@ void Lnast::ssa_lhs_handle_a_statement(const Lnast_nid& psts_nid, const Lnast_ni
   const auto lhs_nid  = get_first_child(opr_nid);
   const auto lhs_name = get_name(lhs_nid);
 
-  if (!lhs_name.empty() && lhs_name.substr(0, 3) == "___") {
+  if (is_tmp(lhs_name)) {
     return;
   }
 
@@ -637,7 +637,7 @@ void Lnast::dump(const Lnast_nid& root_nid) const {
     std::print("{:<3}-{:<3} {:<10} ", tok.pos1, tok.pos2, tok.fname);
 
     if (node.type.is_ref() && node.subs != 0
-        && node.token.get_text().substr(0, 3) != "___") {  // only ref need/have ssa info, exclude tmp variable case
+        && !is_tmp(node.token.get_text())) {  // only ref need/have ssa info, exclude tmp variable case
       std::print("({:<1},{:<6}) {} {:<8}: {}|{}\n",
                  it.level,
                  it.pos,

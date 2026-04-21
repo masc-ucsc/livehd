@@ -145,6 +145,7 @@ public:
   static bool      is_register(std::string_view name) { return name.front() == '#'; }
   static bool      is_output(std::string_view name) { return name.front() == '%'; }
   static bool      is_input(std::string_view name) { return name.front() == '$'; }
+  static bool      is_tmp(std::string_view name) { return name.size() >= 3 && name.substr(0, 3) == "___"; }
   std::string_view get_name(const Lnast_nid& nid) const { return get_data(nid).token.get_text(); }
   std::string_view get_vname(const Lnast_nid& nid) const { return get_data(nid).token.get_text(); }
 

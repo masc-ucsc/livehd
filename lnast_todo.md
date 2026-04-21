@@ -154,6 +154,21 @@ is verified with a file:line pointer so the next pass can confirm.
   absl's `AssertNotDebugCapacity` kReentrance check, intermittently crashing
   `pyrope_compile-connect_through2` (2/10 flaky). Replaced the TOCTOU pattern
   with `std::call_once`. Fully reliable now (15/15 green).
+- **§13 partial: canonical `Lnast::is_tmp` helper** landed 2026-04-20.
+  `lnast/lnast.hpp:148` adds `static bool Lnast::is_tmp(std::string_view)`
+  next to `is_register` / `is_input` / `is_output`. Three duplicated
+  impls now delegate: `Lnast_tolg::is_tmp_var`
+  (`pass/lnast_tolg/lnast_tolg.hpp:85`), `Pass_lnastfmt::is_temp_var`
+  (`pass/lnastfmt/pass_lnastfmt.cpp:225`), and `Code_gen::is_temp_var`
+  (`inou/code_gen/code_gen.cpp:1260`). Inline `substr(0,3) == "___"`
+  guards in `lnast/lnast.cpp` (4 sites) and `pass/lnast_fromlg/pass_lnast_fromlg.cpp`
+  also migrated to the helper. `pass/semantic/semantic_check.cpp:16`
+  `is_temp_var` left alone — its definition is `front() == '_'`
+  (single underscore), a semantically distinct check used by the
+  semantic checker's own conventions, not the `___<n>` producer
+  tmp-prefix. Narrows the string-matching surface §13 full still has
+  to rewrite: consumers now call one predicate, which can flip to a
+  `Tree_index`-based check once `Lnast_node` carries a tmp bit.
 - **§6.3 `inou.slang` registered as an alias for `inou.verilog`** landed
   2026-04-20. `inou/slang/inou_slang.cpp:30-36` adds a second
   `Eprp_method("inou.slang", ...)` pointing at the same
@@ -213,7 +228,7 @@ detailed sections below.
 |------|-------------------------------------------------------------------------|--------------|
 | 1    | §5 / §8.1 Golden-output harness                                         | Unblocked now that slang/lgshell build. Snapshot three-producer baselines so future migrations can diff against them. |
 | 1    | §2 Doc ↔ `lnast_nodes.def` name drift                                    | Docs live in `../tree-sitter-pyrope/*_syntax_doc/`, outside this repo. |
-| 2    | §13 full — `Tree_index`-identity tmps (no string)                       | Requires `Lnast_node::is_tmp()` bit + cgen/semantic-test rewrites. Prefix unification (done) removed the drift but not the string-matching surface. |
+| 2    | §13 full — `Tree_index`-identity tmps (no string)                       | Partial done 2026-04-20 (see §A): `Lnast::is_tmp` is the single canonical predicate, the three wrapper impls delegate to it, and inline `substr(0,3)=="___"` sites in `lnast.cpp` / `pass_lnast_fromlg.cpp` migrated. Remaining: a `Tree_index`-keyed tmp API on `Lnast_node` so consumers don't need any name at all. |
 | —    | ~~§15.1 `__create_flop` → `storage = reg` sticky attr~~ DONE 2026-04-20  | See §A. Producer (pyrope), consumer (lnast_tolg), fromlg emitter, and code_gen round-trip all migrated. Slang already went through `Lnast_create` so no change there. |
 | 2    | §15.2 ext — offset=0 (reg Q) / offset=-1 (past cycle) / ref offsets     | `process_ast_delay_assign_op` currently only lowers offset=1. Other offsets error out rather than doing useful work. |
 | 3    | §10 Symbol-table API + value-attr inference                              | Multi-day effort; needs golden harness as safety net. |

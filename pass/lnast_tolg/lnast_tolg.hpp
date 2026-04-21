@@ -82,9 +82,7 @@ protected:
   void     setup_scalar_reg_clkrst(Lgraph* lg, Node& reg_node);
   void     setup_lnast_to_lgraph_primitive_type_mapping();
 
-  static bool is_tmp_var(std::string_view name) {
-    return name.substr(0, 3) == "___";
-  }  // FIXME->sh: any other way to avoic create tmp string every time?
+  static bool is_tmp_var(std::string_view name) { return Lnast::is_tmp(name); }
   static bool is_register(std::string_view name) { return name.front() == '#'; }
   static bool is_input(std::string_view name) { return name.front() == '$'; }
   static bool is_output(std::string_view name) { return name.front() == '%'; }

@@ -222,8 +222,7 @@ void Pass_lnast_fromlg::attach_to_lnast(Lnast& lnast, Lnast_nid& parent_node, co
 
   std::string name;
   auto        bw = pin.get_bits();
-  // if ((bw > 0) & (pin.get_name().substr(0,3) != "___")) {
-  if ((bw > 0) & (dpin_get_name(pin).substr(0, 3) != "___")) {
+  if ((bw > 0) & (!Lnast::is_tmp(dpin_get_name(pin)))) {
     if (ntype == Ntype_op::Flop || ntype == Ntype_op::Latch) {
       /* NOTE->hunter: I decided to only specify reg and IO bw (not
        * wires). If more is needed just widen below condition. */
