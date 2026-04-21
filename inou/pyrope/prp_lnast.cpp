@@ -1642,10 +1642,24 @@ Lnast_node Prp_lnast::eval_tuple_dot_notation(lh::Tree_index idx_start_ast, lh::
       return accessed_el;
     }
     if (field == "__last_value") {
-      idx_dot_root = lnast->add_child(cur_stmts, Lnast_node::create_attr_get());
-    } else {
-      idx_dot_root = lnast->add_child(cur_stmts, Lnast_node::create_tuple_get());
+      // lnast_todo §15.2: emit `delay_assign ___t X 1` in place of the old
+      // `attr_get ___t X __last_value`. Same shape as slang's
+      // `Lnast_create::get_lnast_name(..., last_value=true)`.
+      //
+      // Multi-field paths (e.g. `foo.a.__last_value`) lose the intermediate
+      // fields, matching the old `attr_get` lowering which already used only
+      // the root ref as `driver_vname`. That approximation is the pre-§15.2
+      // behavior; proper path-aware deferred reads need §15.2 offset=1 on a
+      // tuple element, which isn't implemented yet in `process_ast_delay_
+      // assign_op` (only handles `Or` wire placeholder today).
+      auto idx_delay = lnast->add_child(cur_stmts, Lnast_node::create_delay_assign());
+      auto tmp_lhs   = get_lnast_temp_ref();
+      lnast->add_child(idx_delay, tmp_lhs);
+      lnast->add_child(idx_delay, accessed_el);
+      lnast->add_child(idx_delay, Lnast_node::create_const("1"));
+      return tmp_lhs;
     }
+    idx_dot_root = lnast->add_child(cur_stmts, Lnast_node::create_tuple_get());
   } else {
     I(!is_attr);  // rhs
     idx_dot_root = lnast->add_child(cur_stmts, Lnast_node::create_tuple_get());

@@ -36,6 +36,7 @@ void Pass_lnastfmt::fmt_begin(Eprp_var& var) {
 void Pass_lnastfmt::parse_ln(const std::shared_ptr<Lnast>& ln, Eprp_var& var, std::string_view module_name) {
   std::shared_ptr<Lnast> lnastfmted = std::make_shared<Lnast>(module_name);
 
+  validate_legacy_magic_strings(ln.get());  // lnast_todo §15: reject __create_flop / __last_value in the incoming LNAST.
   observe_lnast(ln.get());  // 1st traversal through the original LN to record assign subtrees.
 
   // now we will make the formatted LNAST:
@@ -170,6 +171,27 @@ void Pass_lnastfmt::parse_ln(const std::shared_ptr<Lnast>& ln, Eprp_var& var, st
   // lnastfmted->dump();
   var.replace(ln, lnastfmted);  // just replace the pointer
   // var.add(std::move(lnastfmted));//FIXME. make replace function instead of add
+}
+
+void Pass_lnastfmt::validate_legacy_magic_strings(const Lnast* ln) {
+  // lnast_todo §15.1 / §15.2: no producer should emit `__create_flop` or
+  // `__last_value` as a const any more. Flop creation is `attr_set X storage
+  // reg`; deferred reads are `delay_assign`. This check keeps the migration
+  // from silently regressing — catches any producer that re-introduces the
+  // legacy magic strings.
+  for (const lh::Tree_index& it : ln->depth_preorder()) {
+    const auto& data = ln->get_data(it);
+    if (!data.type.is_const()) {
+      continue;
+    }
+    const auto name = data.token.get_text();
+    if (name == "__create_flop" || name == "__last_value") {
+      Pass::error(
+          "lnastfmt: const '{}' appears in LNAST; migrate the producer to `attr_set X storage reg` (§15.1) or `delay_assign` (§15.2)",
+          name);
+      return;  // Pass::error throws, but be explicit.
+    }
+  }
 }
 
 void Pass_lnastfmt::observe_lnast(Lnast* ln) {

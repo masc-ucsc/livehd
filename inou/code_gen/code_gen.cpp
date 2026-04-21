@@ -119,7 +119,9 @@ void Code_gen::do_stmts(const lh::Tree_index& stmt_node_index) {
                curlvl);
 
     assert(!curr_node_type.is_invalid());
-    if (curr_node_type.is_assign() || curr_node_type.is_dp_assign()) {
+    if (curr_node_type.is_delay_assign()) {
+      do_delay_assign(curr_index);
+    } else if (curr_node_type.is_assign() || curr_node_type.is_dp_assign()) {
       std::vector<std::string> vec1;
       do_assign(curr_index, vec1, false);
     } else if (curr_node_type.is_if()) {
@@ -1029,6 +1031,40 @@ void Code_gen::do_select(const lh::Tree_index& select_node_index, std::string_vi
   } else {
     I(false, "Unexpected node. Please check.");
   }
+}
+
+//-------------------------------------------------------------------------------------
+// Emit pyrope source for a delay_assign node. Shape: (dst tmp, src ref,
+// offset const). lnast_todo §15.2: only offset=1 is supported today; emit as
+// `dst = src.__last_value` so the prp2prp round-trip re-parses back into the
+// same delay_assign via prp_lnast.cpp's `__last_value` handler.
+void Code_gen::do_delay_assign(const lh::Tree_index& delay_assign_node_index) {
+  std::cout << "node:delay_assign\n";
+
+  auto c0 = lnast->get_first_child(delay_assign_node_index);
+  auto c1 = lnast->get_sibling_next(c0);
+  auto c2 = lnast->get_sibling_next(c1);
+  I(!c2.is_invalid(), "delay_assign must have 3 children (dst, src, offset)");
+
+  std::string dst(lnast->get_name(c0));
+  std::string src(lnast->get_name(c1));
+  std::string offset(lnast->get_name(c2));
+  I(offset == "1", "delay_assign only supports offset=1 at code_gen today");
+
+  if (is_temp_var(dst)) {
+    // Stash the `src.__last_value` expression so consumers of dst (usually a
+    // following assign) render it inline, matching how other tmp-producing
+    // nodes thread values through ref_map.
+    ref_map.insert(std::pair<std::string, std::string>(dst, absl::StrCat(lnast_to->ref_name_str(src), ".__last_value")));
+    return;
+  }
+
+  buffer_to_print->append(absl::StrCat(indent(),
+                                       lnast_to->ref_name_str(dst),
+                                       " = ",
+                                       lnast_to->ref_name_str(src),
+                                       ".__last_value",
+                                       lnast_to->stmt_sep()));
 }
 
 //-------------------------------------------------------------------------------------

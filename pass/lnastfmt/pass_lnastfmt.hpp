@@ -13,6 +13,7 @@ protected:
   void parse_ln(const std::shared_ptr<Lnast>& ln, Eprp_var& var, std::string_view module_name);
   void observe_lnast(Lnast* ln);
   void process_node(Lnast* ln, const lh::Tree_index& it);
+  void validate_legacy_magic_strings(const Lnast* ln);
 
   absl::flat_hash_map<std::string, std::string> ref_hash_map;
 

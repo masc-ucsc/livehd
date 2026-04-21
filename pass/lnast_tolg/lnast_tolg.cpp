@@ -1472,55 +1472,13 @@ void Lnast_tolg::process_ast_attr_set_op(Lgraph* lg, const Lnast_nid& lnidx_aset
   name2dpin[name] = aset_node_dpin;
 }
 
-void Lnast_tolg::process_ast_attr_get_op(Lgraph* lg, const Lnast_nid& lnidx_aget) {
-  auto c0_aget       = lnast->get_first_child(lnidx_aget);
-  auto c1_aget       = lnast->get_sibling_next(c0_aget);
-  auto cn_aget       = lnast->get_last_child(lnidx_aget);
-  auto c0_aget_name  = lnast->get_sname(c0_aget);
-  auto c0_aget_vname = lnast->get_vname(c0_aget);
-
-  std::string hier_fields_cat_name;
-  auto        attr_vname = lnast->get_vname(cn_aget);
-  auto        it_aset    = c1_aget;
-
-  while (it_aset != cn_aget) {
-    if (hier_fields_cat_name.empty()) {
-      hier_fields_cat_name = lnast->get_vname(it_aset);
-    } else {
-      absl::StrAppend(&hier_fields_cat_name, ".", lnast->get_vname(it_aset));
-    }
-    it_aset = lnast->get_sibling_next(it_aset);
-  }
-
-  // lnast_todo §15.1: __create_flop is gone — register creation now flows
-  // through process_ast_attr_set_op on `attr_set X storage reg`.
-
-  if (attr_vname == "__last_value") {
-    Node wire_node;
-    wire_node        = lg->create_node(Ntype_op::Or);  // might need to change to other type according to the real driver
-    const auto& tok2 = lnast->get_token(lnidx_aget);
-    wire_node.set_loc(tok2.pos1, tok2.pos2);
-    wire_node.set_source(tok2.fname);
-    auto wire_dpin = wire_node.setup_driver_pin();
-    wire_dpin.set_name(hier_fields_cat_name);
-
-    name2dpin[c0_aget_name] = wire_dpin;
-
-    if (!is_tmp_var(c0_aget_vname)) {
-      setup_dpin_ssa(name2dpin[c0_aget_name], c0_aget_vname, lnast->get_subs(c0_aget));
-    }
-
-    std::string driver_vname;
-    driver_vname = lnast->get_vname(c1_aget);
-
-    driver_vname2wire_nodes[driver_vname].emplace_back(wire_node);
-
-    it_aset = lnast->get_sibling_next(it_aset);
-    if (!it_aset.is_invalid()) {
-      Pass::error("attribute {} must be the last in the entry {}\n", attr_vname, hier_fields_cat_name);
-    }
-    return;
-  }
+void Lnast_tolg::process_ast_attr_get_op(Lgraph* /*lg*/, const Lnast_nid& /*lnidx_aget*/) {
+  // lnast_todo §15.1 + §15.2: both old consumers of attr_get in this pass —
+  // `__create_flop` and `__last_value` — are gone. Register creation lives in
+  // process_ast_attr_set_op (storage = reg) and deferred reads live in
+  // process_ast_delay_assign_op. Generic attr_get lowering is not implemented
+  // here yet; producers that emit other attr_get shapes (e.g. inou/prp's
+  // `a.[size]`) must either grow handling or be caught by lnastfmt.
 }
 
 void Lnast_tolg::process_ast_delay_assign_op(Lgraph* lg, const Lnast_nid& lnidx_delay) {
