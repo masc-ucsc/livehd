@@ -15,8 +15,7 @@
 using Lnast_nid                     = lh::Tree_index;
 using Phi_rtable                    = absl::flat_hash_map<std::string, Lnast_nid>;  // rtable = resolve_table
 using Cnt_rtable                    = absl::flat_hash_map<std::string, int16_t>;
-using Selc_lrhs_table               = absl::flat_hash_map<Lnast_nid, std::pair<bool, Lnast_nid>>;  // sel -> (lrhs, paired opr node)
-using Tuple_var_1st_scope_ssa_table = absl::flat_hash_map<std::string, Lnast_nid>;                 // rtable = resolve_table
+using Selc_lrhs_table = absl::flat_hash_map<Lnast_nid, Lnast_nid>;  // sel -> paired opr node
 
 // tricky old C macro to avoid redundant code from function overloadings
 #define CREATE_LNAST_NODE(type)                                                                                                 \
@@ -107,18 +106,12 @@ private:
   void      analyze_selc_lrhs_handle_a_statement(const Lnast_nid& psts_nid, const Lnast_nid& opr_nid);
   void      insert_implicit_dp_parent(const Lnast_nid& opr_nid);
 
-  bool is_special_case_of_sel_rhs(const Lnast_nid& psts_nid, const Lnast_nid& opr_nid);
   void ssa_rhs_handle_a_operand(const Lnast_nid& gpsts_nid, const Lnast_nid& opd_nid);  // gpsts = grand parent
-  void ssa_rhs_handle_a_operand_special(const Lnast_nid& gpsts_nid, const Lnast_nid& opd_nid);
 
   // tuple operator process
   void        trans_tuple_opr(const Lnast_nid& pats_nid);  // from sel to tuple_add/get
   void        trans_tuple_opr_if_subtree(const Lnast_nid& if_nid);
-  bool        check_tuple_table_parents_chain(const Lnast_nid& psts_nid, std::string_view ref_name);
-  void        sel2local_tuple_chain(const Lnast_nid& pats_nid, Lnast_nid& sel_nid);
   void        merge_tconcat_paired_assign(const Lnast_nid& psts_nid, const Lnast_nid& concat_nid);
-  void        update_tuple_var_table(const Lnast_nid& psts_nid, const Lnast_nid& opr_nid);
-  bool        update_tuple_var_1st_scope_ssa_table(const Lnast_nid& psts_nid, const Lnast_nid& target_nid);
   std::string create_tmp_var();
 
   // hierarchical statements node -> symbol table
@@ -130,15 +123,8 @@ private:
   absl::flat_hash_map<std::string, Lnast_nid>     candidates_update_phi_resolve_table;
   absl::flat_hash_map<std::string, int16_t>       global_ssa_lhs_cnt_table;
 
-  // for chaining parent tuple-chain and local tuple chain, only record the first tuple variable appeared in each local scope
-  absl::flat_hash_map<Lnast_nid, Phi_rtable> tuple_var_1st_scope_ssa_tables;
-
-  absl::flat_hash_set<std::string> collected_hier_tuple_reg_name;
-
   // populated during LG->LN pass, maps name -> bitwidth
   absl::flat_hash_map<std::string, uint32_t> from_lgraph_bw_table;
-
-  uint32_t tup_internal_cnt = 0;
 
 public:
   static constexpr char version[] = "0.1.0";
@@ -156,7 +142,6 @@ public:
 
   void set_top_module_name(std::string_view name) { top_module_name = name; }
 
-  bool             is_lhs(const Lnast_nid& psts_nid, const Lnast_nid& opr_nid) const;
   static bool      is_register(std::string_view name) { return name.front() == '#'; }
   static bool      is_output(std::string_view name) { return name.front() == '%'; }
   static bool      is_input(std::string_view name) { return name.front() == '$'; }
