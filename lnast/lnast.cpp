@@ -636,9 +636,9 @@ void Lnast::dump(const Lnast_nid& root_nid) const {
     const auto& tok = node.token;
     std::print("{:<3}-{:<3} {:<10} ", tok.pos1, tok.pos2, tok.fname);
 
-    if (node.type.is_ref()
+    if (node.type.is_ref() && node.subs != 0
         && node.token.get_text().substr(0, 3) != "___") {  // only ref need/have ssa info, exclude tmp variable case
-      std::print("({:<1},{:<6}) {} {:<8}: {}___{}\n",
+      std::print("({:<1},{:<6}) {} {:<8}: {}|{}\n",
                  it.level,
                  it.pos,
                  indent,
