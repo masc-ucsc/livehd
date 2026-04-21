@@ -223,7 +223,7 @@ void Pass_lnastfmt::process_node(Lnast* ln, const lh::Tree_index& it) {
 }
 
 bool Pass_lnastfmt::is_temp_var(std::string_view test_string) {
-  return str_tools::starts_with(test_string, "___") || str_tools::starts_with(test_string, "_._");
+  return str_tools::starts_with(test_string, "___");
 }
 
 bool Pass_lnastfmt::is_ssa(std::string_view test_string) { return test_string.substr(0, 2) != "__"; }

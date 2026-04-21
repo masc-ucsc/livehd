@@ -1257,11 +1257,7 @@ std::string Code_gen::resolve_tuple_assign(const lh::Tree_index& tuple_assign_in
 
 //-------------------------------------------------------------------------------------
 // check if the node has "___"
-bool Code_gen::is_temp_var(std::string_view test_string) {
-  auto txt = test_string.substr(0, 3);
-
-  return (txt == "___") || (txt == "_._");
-}
+bool Code_gen::is_temp_var(std::string_view test_string) { return str_tools::starts_with(test_string, "___"); }
 
 //-------------------------------------------------------------------------------------
 // check if the node has "__"
