@@ -19,7 +19,7 @@ Generated from a survey of: `lnast/lnast_nodes.def`, `lnast/lnast_create.cpp`,
 | Tier | Item                                                                    | Why deferred |
 |------|-------------------------------------------------------------------------|--------------|
 | 1    | §5 / §8.1 Golden-output harness                                         | Snapshot three-producer baselines so future migrations can diff against them. |
-| 1    | §2 Doc ↔ `lnast_nodes.def` name drift                                   | Docs live in `../tree-sitter-pyrope/*_syntax_doc/`, outside this repo. |
+| 1    | §2 Doc ↔ `lnast_nodes.def` name drift                                   | Docs live in `../docs/docs/pyrope/`, outside this repo. |
 | 2    | §13 full — `Tree_index`-identity tmps (no string)                       | Partial done: `Lnast::is_tmp` is the single canonical predicate, wrappers delegate to it. Remaining: a `Tree_index`-keyed tmp API on `Lnast_node` so consumers don't need any name at all. |
 | 2    | §15.2 ext — offset=0 (reg Q) / offset=-1 (past cycle) / ref offsets     | `process_ast_delay_assign_op` currently only lowers offset=1. Other offsets error out rather than doing useful work. |
 | 3    | §10 Symbol-table API + value-attr inference                             | Multi-day effort; needs golden harness as safety net. |
@@ -107,7 +107,7 @@ on §10 ST API.
 ## 2. Node-name drift between docs and implementation
 
 *Status:* **deferred** — the docs referenced in the original TODO live in
-`../tree-sitter-pyrope/{old,new}_syntax_doc/`, which is outside LiveHD.
+`../docs/docs/pyrope/`, which is outside LiveHD.
 Aligning them belongs in that repo. No code-side action needed.
 
 `docs/pyrope/12-lnast.md` describes nodes by names that don't exist in
