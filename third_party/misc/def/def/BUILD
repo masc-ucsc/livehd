@@ -1,21 +1,23 @@
 # This file is distributed under the BSD 3-Clause License. See LICENSE for details.
 
 load("@rules_cc//cc:defs.bzl", "cc_library")
+load("@livehd//packages:yosys_utils.bzl", "yosys_bison")
 
 licenses(["notice"])  # Apache License 2.0
 
-genrule(
+yosys_bison(
     name = "defyy",
     srcs = ["def.yy"],
     outs = [
         "def.tab.cpp",
         "def.tab.hpp",
     ],
-    cmd = "M4=$(M4) bison --defines=$(location def.tab.hpp) --output-file=$(location def.tab.cpp) $<",
-    # "--name-prefix=xxx",
-    toolchains = [
-        "@rules_m4//m4:current_m4_toolchain",
+    args = [
+        "--defines=$(execpath def.tab.hpp)",
+        "--output-file=$(execpath def.tab.cpp)",
+        "$(execpath def.yy)",
     ],
+    bison = "@bison//:bison",
 )
 
 cc_library(
