@@ -517,7 +517,11 @@ void uPass_constprop::process_attr_get() {
   move_to_child();
   auto dst = std::string(current_text());
 
-  move_to_sibling();
+  // Guard: malformed node with no tuple sibling — leave dst unknown.
+  if (!move_to_sibling()) {
+    move_to_parent();
+    return;
+  }
   std::string key = std::string(current_text());  // start with tuple name
 
   while (move_to_sibling()) {
