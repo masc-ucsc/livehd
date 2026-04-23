@@ -1,6 +1,8 @@
 /*
 :name: add_complex
-:type: parsing lnast
+:type: comptime
+:verifier_pass: 1
+:verifier_fail: 0
 */
 
 const c = 1 - -3
@@ -10,4 +12,4 @@ const vari = (c + 100)
         - (10-5-5)
         - 10-(5-(-5))
 
-cassert vari == 98
+cassert vari == 84

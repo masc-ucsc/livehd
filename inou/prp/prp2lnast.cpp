@@ -1361,28 +1361,61 @@ Lnast_node Prp2lnast::function_call_expr_to_node(TSNode n) {
 }
 
 Lnast_node Prp2lnast::tuple_to_node(TSNode n, bool /*is_square*/) {
-  auto idx = lnast->add_child(stmts_index, Lnast_node::create_tuple_add());
-  auto ref = make_tmp_ref();
-  lnast->add_child(idx, ref);
   uint32_t nnc = ts_node_named_child_count(n);
+
+  // Pre-compute sub-expressions so their LNAST statements emit BEFORE the
+  // tuple_add that references them — constprop runs in textual order.
+  struct Item {
+    bool        is_assign = false;
+    std::string assign_key;
+    Lnast_node  value;
+  };
+  std::vector<Item> items;
+  items.reserve(nnc);
   for (uint32_t i = 0; i < nnc; i++) {
     TSNode c = ts_node_named_child(n, i);
     std::string t(ts_node_type(c));
     if (t == "assignment") {
+      Item it;
+      it.is_assign = true;
       TSNode lv = child_by_field(c, "lvalue");
       TSNode rv = child_by_field(c, "rvalue");
-      auto aidx = lnast->add_child(idx, Lnast_node::create_assign());
-      lnast->add_child(aidx, Lnast_node::create_ref(trim(get_text(lv))));
+      it.assign_key = trim(get_text(lv));
       if (!ts_node_is_null(rv)) {
-        lnast->add_child(aidx, expr_to_node(rv));
+        it.value = expr_to_node(rv);
       } else {
-        // Hidden rvalue fallback: text after operator.
         TSNode op = child_by_field(c, "operator");
         auto start = ts_node_is_null(op) ? ts_node_end_byte(lv) : ts_node_end_byte(op);
-        lnast->add_child(aidx, constant_text_to_node(trim(text_between(start, ts_node_end_byte(c)))));
+        it.value = constant_text_to_node(trim(text_between(start, ts_node_end_byte(c))));
       }
+      items.push_back(std::move(it));
     } else {
-      lnast->add_child(idx, expr_to_node(c));
+      Item it;
+      it.value = expr_to_node(c);
+      items.push_back(std::move(it));
+    }
+  }
+
+  auto idx = lnast->add_child(stmts_index, Lnast_node::create_tuple_add());
+  auto ref = make_tmp_ref();
+  lnast->add_child(idx, ref);
+  if (nnc == 0) {
+    // Tree-sitter-pyrope hides `_simple_number` (and other `_constant`) tokens,
+    // so literals like `(10)` or `(-100)` parse as a tuple with zero named
+    // children. Recover the literal from the text between `(` and `)`.
+    auto inner = trim(text_between(ts_node_start_byte(n) + 1, ts_node_end_byte(n) - 1));
+    if (!inner.empty()) {
+      lnast->add_child(idx, constant_text_to_node(inner));
+    }
+    return ref;
+  }
+  for (auto& it : items) {
+    if (it.is_assign) {
+      auto aidx = lnast->add_child(idx, Lnast_node::create_assign());
+      lnast->add_child(aidx, Lnast_node::create_ref(it.assign_key));
+      lnast->add_child(aidx, it.value);
+    } else {
+      lnast->add_child(idx, it.value);
     }
   }
   return ref;

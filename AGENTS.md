@@ -27,6 +27,12 @@ inou.yosys.tolg top:foo files:foo.v |> pass.cprop |> inou.cgen.verilog odir:out
 
 Always fix source code — never add `-Wno-*` flags to BUILD files. Exception: external deps in `MODULE.bazel`.
 
+## Running Pyrope Tests
+
+- **Single test (harness)**: `python3 inou/prp/tests/pyrope_test.py -i inou/prp/tests/<dir>/<test>.prp`
+- **Direct pipeline (comptime)**: `./bazel-bin/main/lgshell "inou.prp files:<test>.prp |> pass.lnastfmt |> pass.upass constprop:1 max_iters:1 verifier_pass:1 verifier_fail:0 |> pass.lnastfmt |> lnast.dump"`
+- Test header `:type:` selects the pipeline (`parsing`, `lnast`, `upass`, `comptime`, `lgraph`, `compile`); `:verifier_pass:` / `:verifier_fail:` set expected cassert tallies for `comptime`.
+
 ## Debugging Yosys-to-LGraph Flow
 
 ### Running Yosys tests
