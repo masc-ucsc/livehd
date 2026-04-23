@@ -99,11 +99,6 @@ public:
   PROCESS_NODE(type_def)
   PROCESS_NODE(type_spec)
 
-  // Tuple Operations
-  PROCESS_NODE(tuple_get)
-  PROCESS_NODE(tuple_set)
-  PROCESS_NODE(tuple_add)
-
   // Structure
   PROCESS_NODE(top)
   PROCESS_NODE(stmts)
