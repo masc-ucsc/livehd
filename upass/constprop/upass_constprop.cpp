@@ -479,6 +479,75 @@ void uPass_constprop::process_red_xor() {
 
 // ── Bit Manipulation ─────────────────────────────────────────────────────────
 
+// ── Emit classification (Slice 1 drop + fold rules) ─────────────────────────
+//
+// See upass.md §2.4. Called by the runner AFTER process_* has populated the
+// symbol table for this node, so the LHS entry — if any — reflects the
+// value this statement just computed.
+//
+// Rule: drop this statement iff
+//   - LHS (first child) is a ref, and
+//   - LHS name is not a reg (#), input ($), or output (%) — prefix check is
+//     the Slice 1 stand-in for §12's `st.is_reg/is_input/is_output`, and
+//   - the symbol table holds a concrete Lconst for LHS (known, no unknowns).
+// Otherwise emit.
+upass::Emit_decision uPass_constprop::classify_statement() {
+  // Peek at the first child (LHS/dst) without disturbing cursor state.
+  // cassert is dispatched through the same path but has no dst — its
+  // single child is an operand; always emit so it reaches the verifier.
+  if (is_type(Lnast_ntype::Lnast_ntype_cassert)) {
+    return upass::Emit_decision::emit_node();
+  }
+
+  bool got_child  = move_to_child();
+  bool lhs_is_ref = got_child && is_type(Lnast_ntype::Lnast_ntype_ref);
+  std::string lhs_text{lhs_is_ref ? current_text() : std::string_view{}};
+  move_to_parent();
+
+  if (!lhs_is_ref || lhs_text.empty()) {
+    return upass::Emit_decision::emit_node();
+  }
+
+  // Regs, inputs, outputs carry semantics beyond value. Keep.
+  const char c0 = lhs_text.front();
+  if (c0 == '#' || c0 == '$' || c0 == '%') {
+    return upass::Emit_decision::emit_node();
+  }
+
+  // Symbol table uses the stripped name (process_assign already strips
+  // leading %/$ on assignment — see upass_constprop.cpp::process_assign).
+  // Here we've already rejected those cases, so lhs_text is the key.
+  if (!st.has_trivial(lhs_text)) {
+    return upass::Emit_decision::emit_node();
+  }
+  const auto val = st.get_trivial(lhs_text);
+  if (val.is_invalid() || val.has_unknowns()) {
+    return upass::Emit_decision::emit_node();
+  }
+
+  return upass::Emit_decision::drop();
+}
+
+std::optional<Lconst> uPass_constprop::fold_ref(std::string_view name) {
+  if (name.empty()) {
+    return std::nullopt;
+  }
+  // Match the stripping in process_assign so lookups against %foo / $foo
+  // resolve the same entry the writer populated.
+  std::string_view key = name;
+  if (key.front() == '%' || key.front() == '$') {
+    key.remove_prefix(1);
+  }
+  if (!st.has_trivial(key)) {
+    return std::nullopt;
+  }
+  auto val = st.get_trivial(key);
+  if (val.is_invalid() || val.has_unknowns()) {
+    return std::nullopt;
+  }
+  return val;
+}
+
 void uPass_constprop::process_sext() {
   // Sign-extend: [sext: ref(dst), ref_or_const(src), const(nbits)]
   //

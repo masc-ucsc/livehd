@@ -171,12 +171,22 @@ void Pass_upass::work(Eprp_var& var) {
     return;
   }
 
-  for (const auto& ln : var.lnasts) {
+  // Snapshot the current lnasts — we replace entries as runs complete,
+  // and Eprp_var::replace iterates the live vector to find the old entry.
+  const auto inputs = var.lnasts;
+  for (const auto& ln : inputs) {
     auto lm     = std::make_shared<upass::Lnast_manager>(ln);
     auto runner = uPass_runner(lm, up.upass_order);
     if (runner.has_configuration_error()) {
       fail_upass_runtime(std::format("pass.upass invalid pass configuration: {}", runner.get_configuration_error()));
     }
     runner.run(up.max_iters);
+
+    // Swap the rewritten staging tree into var.lnasts so downstream passes
+    // (lnast.dump, pass.lnast_tolg, …) see the folded/DCE'd IR.
+    auto staged = runner.take_staging();
+    if (staged) {
+      var.replace(ln, staged);
+    }
   }
 }

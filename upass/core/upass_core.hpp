@@ -4,10 +4,13 @@
 #include <functional>
 #include <map>
 #include <memory>
+#include <optional>
 #include <stack>
 #include <string>
+#include <string_view>
 #include <vector>
 
+#include "lconst.hpp"
 #include "lnast.hpp"
 #include "lnast_manager.hpp"
 #include "lnast_ntype.hpp"
@@ -16,6 +19,15 @@
 
 namespace upass {
 
+enum class Emit_kind { emit, drop_subtree };
+
+struct Emit_decision {
+  Emit_kind kind{Emit_kind::emit};
+
+  static constexpr Emit_decision emit_node() { return Emit_decision{Emit_kind::emit}; }
+  static constexpr Emit_decision drop() { return Emit_decision{Emit_kind::drop_subtree}; }
+};
+
 struct uPass {
 public:
   uPass(std::shared_ptr<Lnast_manager>& _lm) : lm(_lm) {}
@@ -23,6 +35,18 @@ public:
 
   void begin_iteration() { changed = false; }
   bool has_changed() const { return changed; }
+
+  // Called by the runner on every drop-candidate op-node (assign, plus, eq, …)
+  // after its per-node process_* has populated any ST state. Returning `drop`
+  // tells the runner to omit the node (and its subtree) from the staging tree.
+  // Default: always emit.
+  virtual Emit_decision classify_statement() { return Emit_decision::emit_node(); }
+
+  // Called by the runner for every `ref <name>` operand it is about to emit
+  // (RHS of an op, condition of an `if`, cassert operand). If any pass
+  // returns a concrete Lconst, the runner writes `const <value>` in place of
+  // the ref. First non-nullopt wins.
+  virtual std::optional<Lconst> fold_ref(std::string_view /*name*/) { return std::nullopt; }
 
 #define PROCESS_NODE(NAME) \
   virtual void process_##NAME() {}

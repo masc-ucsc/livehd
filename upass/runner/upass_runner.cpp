@@ -109,10 +109,6 @@ std::vector<std::string> uPass_runner::resolve_order(const std::vector<std::stri
     const auto mit = marks.find(name);
     if (mit != marks.end()) {
       if (mit->second == Mark::kVisiting) {
-        // Intentional: print to stderr rather than throw so tests can use
-        // EXPECT_TRUE(ordered.empty()) instead of EXPECT_THROW.
-        // The non-empty error_msg is propagated to run(), which refuses to
-        // execute passes when configuration_error is set.
         std::print(stderr, "uPass dependency cycle detected at {}\n", name);
         if (error_msg && error_msg->empty()) {
           *error_msg = std::format("dependency cycle detected at '{}'", name);
@@ -125,7 +121,6 @@ std::vector<std::string> uPass_runner::resolve_order(const std::vector<std::stri
     marks.emplace(name, Mark::kVisiting);
     for (const auto& dep : it->second.depends_on) {
       if (!dfs(dep)) {
-        // Intentional: same rationale as cycle detection above — print not throw.
         std::print(stderr, "uPass dependency chain for {} is invalid\n", name);
         if (error_msg && error_msg->empty()) {
           *error_msg = std::format("dependency chain for '{}' is invalid", name);
@@ -156,6 +151,122 @@ std::vector<std::string> uPass_runner::changed_passes() const {
   return changed_list;
 }
 
+// ── Staging emit helpers ──────────────────────────────────────────────────────
+
+void uPass_runner::emit_push(const Lnast_node& node) {
+  auto nid = staging->add_child(staging_parent, node);
+  staging_parent_stack.push(staging_parent);
+  staging_parent = nid;
+}
+
+void uPass_runner::emit_pop() {
+  staging_parent = staging_parent_stack.top();
+  staging_parent_stack.pop();
+}
+
+void uPass_runner::emit_leaf(const Lnast_node& node) {
+  staging->add_child(staging_parent, node);
+}
+
+void uPass_runner::emit_subtree_verbatim() {
+  auto node = lm->current_node();
+  if (lm->has_child()) {
+    emit_push(node);
+    lm->move_to_child();
+    do {
+      emit_subtree_verbatim();
+    } while (lm->move_to_sibling());
+    lm->move_to_parent();
+    emit_pop();
+  } else {
+    emit_leaf(node);
+  }
+}
+
+std::optional<Lconst> uPass_runner::try_fold_ref(std::string_view name) {
+  for (auto& entry : upasses) {
+    auto folded = entry.pass->fold_ref(name);
+    if (folded) {
+      return folded;
+    }
+  }
+  return std::nullopt;
+}
+
+void uPass_runner::emit_op_with_fold(bool fold_all) {
+  auto op_node = lm->current_node();
+  emit_push(op_node);
+
+  if (lm->has_child()) {
+    lm->move_to_child();
+    int idx = 0;
+    do {
+      const bool is_lhs = (idx == 0) && !fold_all;
+      if (!is_lhs && lm->get_raw_ntype() == Lnast_ntype::Lnast_ntype_ref) {
+        auto folded = try_fold_ref(lm->current_text());
+        if (folded && !folded->is_invalid()) {
+          emit_leaf(Lnast_node::create_const(folded->to_pyrope()));
+        } else {
+          emit_leaf(lm->current_node());
+        }
+      } else {
+        // Either the LHS (don't fold — it's a dst) or a non-ref child
+        // (const, or a nested subtree like tuple_add's assign(key, val)).
+        emit_subtree_verbatim();
+      }
+      ++idx;
+    } while (lm->move_to_sibling());
+    lm->move_to_parent();
+  }
+
+  emit_pop();
+}
+
+// ── Pass dispatch ─────────────────────────────────────────────────────────────
+
+void uPass_runner::dispatch_to_passes(Pass_method fn) {
+  for (auto& entry : upasses) {
+    // Snapshot the read cursor before dispatch. If the pass throws (e.g.
+    // constprop's sub_op refuses a string-typed invalid Lconst) or is
+    // otherwise unbalanced, restoring here keeps the runner-level emit
+    // logic operating on the op-node the switch case selected.
+    const auto saved = lm->save_cursor();
+    try {
+      (entry.pass.get()->*fn)();
+    } catch (const std::runtime_error& ex) {
+      std::print(stderr, "uPass [{}] error: {}\n", entry.name, ex.what());
+    }
+    lm->restore_cursor(saved);
+  }
+}
+
+void uPass_runner::process_drop_candidate(Pass_method fn, bool fold_all) {
+  // 1. Run per-node process_* so symbol tables see the current statement.
+  dispatch_to_passes(fn);
+
+  // 2. Ask every pass whether to keep this statement. First drop wins.
+  auto decision = upass::Emit_decision::emit_node();
+  for (auto& entry : upasses) {
+    auto d = entry.pass->classify_statement();
+    if (d.kind == upass::Emit_kind::drop_subtree) {
+      decision = d;
+      break;
+    }
+  }
+
+  // 3. Emit (with operand folding) unless dropped.
+  if (decision.kind == upass::Emit_kind::emit) {
+    emit_op_with_fold(fold_all);
+  }
+}
+
+void uPass_runner::process_verbatim(Pass_method fn) {
+  dispatch_to_passes(fn);
+  emit_subtree_verbatim();
+}
+
+// ── Top-level run loop ────────────────────────────────────────────────────────
+
 void uPass_runner::run(std::size_t max_iters) {
   if (configuration_error) {
     std::print("uPass - invalid configuration: {}\n", configuration_error_msg);
@@ -166,6 +277,14 @@ void uPass_runner::run(std::size_t max_iters) {
     std::print("uPass - no passes configured\n");
     return;
   }
+
+  // Initialize a fresh staging tree with the same top-module name as the
+  // input. set_root() materializes the root slot; its data (the `top` node)
+  // is overwritten by process_top() when it pushes.
+  staging = std::make_shared<Lnast>(lm->get_top_module_name());
+  staging->set_root(Lnast_node::create_top());
+  staging_parent      = Lnast_nid::root();
+  staging_parent_stack = {};
 
   upass::Runner_fixed_point::run(
       "uPass",
@@ -179,118 +298,160 @@ void uPass_runner::run(std::size_t max_iters) {
       [this]() { return changed_passes(); });
 }
 
-void uPass_runner::process_lnast() {
-#define PROCESS_BLOCK(NAME) \
-  case Lnast_ntype::Lnast_ntype_##NAME: process_##NAME(); break;
+// ── Node dispatch ─────────────────────────────────────────────────────────────
 
-#define PROCESS_NODE(NAME)              \
-  case Lnast_ntype::Lnast_ntype_##NAME: \
-    write_node();                       \
-    for (const auto& entry : upasses) { \
-      entry.pass->process_##NAME();     \
-    }                                   \
+void uPass_runner::process_lnast() {
+  using Ntype = Lnast_ntype;
+
+  // Category A: drop-candidate op-nodes. First child is the LHS/dst (not
+  // folded); subsequent ref children are fed to fold_ref.
+#define A_OP(NAME)                                                                              \
+  case Ntype::Lnast_ntype_##NAME:                                                               \
+    process_drop_candidate(&upass::uPass::process_##NAME, /*fold_all=*/false);                  \
     break;
 
+  // Category C: emit verbatim; still dispatch so passes can observe.
+#define C_OP(NAME)                                                                              \
+  case Ntype::Lnast_ntype_##NAME: process_verbatim(&upass::uPass::process_##NAME); break;
+
   switch (get_raw_ntype()) {
-    PROCESS_BLOCK(top)
-    PROCESS_BLOCK(stmts)
-    PROCESS_BLOCK(if)
+    // Structural — push the node into staging and recurse.
+    case Ntype::Lnast_ntype_top:   process_top(); break;
+    case Ntype::Lnast_ntype_stmts: process_stmts(); break;
+    case Ntype::Lnast_ntype_if:    process_if(); break;
+
+    // Statement-scope leaves (e.g. an if condition's ref/const). Fold refs
+    // through the symbol table so dropping the producing assign doesn't
+    // leave a dangling name.
+    case Ntype::Lnast_ntype_ref: {
+      auto folded = try_fold_ref(lm->current_text());
+      if (folded && !folded->is_invalid()) {
+        emit_leaf(Lnast_node::create_const(folded->to_pyrope()));
+      } else {
+        emit_leaf(lm->current_node());
+      }
+      break;
+    }
+    case Ntype::Lnast_ntype_const: emit_leaf(lm->current_node()); break;
 
     // Assignment
-    PROCESS_NODE(assign)
+    A_OP(assign)
 
     // Bitwidth
-    PROCESS_NODE(bit_and)
-    PROCESS_NODE(bit_or)
-    PROCESS_NODE(bit_not)
-    PROCESS_NODE(bit_xor)
+    A_OP(bit_and)
+    A_OP(bit_or)
+    A_OP(bit_not)
+    A_OP(bit_xor)
 
     // Bitwidth Insensitive Reduce
-    PROCESS_NODE(red_or)
-    PROCESS_NODE(red_and)
-    PROCESS_NODE(red_xor)
+    A_OP(red_or)
+    A_OP(red_and)
+    A_OP(red_xor)
 
     // Logical
-    PROCESS_NODE(log_and)
-    PROCESS_NODE(log_or)
-    PROCESS_NODE(log_not)
+    A_OP(log_and)
+    A_OP(log_or)
+    A_OP(log_not)
 
     // Arithmetic
-    PROCESS_NODE(plus)
-    PROCESS_NODE(minus)
-    PROCESS_NODE(mult)
-    PROCESS_NODE(div)
-    PROCESS_NODE(mod)
+    A_OP(plus)
+    A_OP(minus)
+    A_OP(mult)
+    A_OP(div)
+    A_OP(mod)
 
     // Shift
-    PROCESS_NODE(shl)
-    PROCESS_NODE(sra)
+    A_OP(shl)
+    A_OP(sra)
 
     // Bit Manipulation
-    PROCESS_NODE(sext)
-    PROCESS_NODE(set_mask)
-    PROCESS_NODE(get_mask)
-    PROCESS_NODE(mask_and)
-    PROCESS_NODE(mask_popcount)
-    PROCESS_NODE(mask_xor)
+    A_OP(sext)
+    A_OP(set_mask)
+    A_OP(get_mask)
+    A_OP(mask_and)
+    A_OP(mask_popcount)
+    A_OP(mask_xor)
 
     // Comparison
-    PROCESS_NODE(ne)
-    PROCESS_NODE(eq)
-    PROCESS_NODE(lt)
-    PROCESS_NODE(le)
-    PROCESS_NODE(gt)
-    PROCESS_NODE(ge)
+    A_OP(ne)
+    A_OP(eq)
+    A_OP(lt)
+    A_OP(le)
+    A_OP(gt)
+    A_OP(ge)
 
-    // Function Call
-    PROCESS_NODE(func_call)
+    // Function Call — Slice 1 pass-through (Slice 3 reconstructs tuple args).
+    C_OP(func_call)
 
-    // Tuple Operations
-    PROCESS_NODE(tuple_get)
-    PROCESS_NODE(tuple_set)
-    PROCESS_NODE(tuple_add)
+    // Tuple Operations — Slice 1 pass-through (Slice 6 flattens).
+    C_OP(tuple_get)
+    C_OP(tuple_set)
+    C_OP(tuple_add)
 
-    default: break;
+    // Attribute Statements — Slice 1 pass-through (Slice 5 lifts to side-map).
+    C_OP(attr_set)
+    C_OP(attr_get)
+
+    // Cassert — emit with all operand refs folded (Slice 2 gives this to
+    // verifier so known-true cassert gets dropped).
+    case Ntype::Lnast_ntype_cassert:
+      process_drop_candidate(&upass::uPass::process_cassert, /*fold_all=*/true);
+      break;
+
+    // Delay-assign carries timing; emit verbatim (see upass.md invariant 6).
+    C_OP(delay_assign)
+
+    default:
+      // Unknown / not-yet-handled node type: copy its subtree verbatim so
+      // nothing silently disappears from the output tree. Add an explicit
+      // A_OP/C_OP entry above when folding behavior is needed.
+      emit_subtree_verbatim();
+      break;
   }
-#undef PROCESS_BLOCK
-#undef PROCESS_NODE
+
+#undef A_OP
+#undef C_OP
 }
 
+// ── Structural handlers ───────────────────────────────────────────────────────
+
 void uPass_runner::process_top() {
-  move_to_child();
-  do {
-    process_lnast();
-  } while (move_to_sibling());
-  move_to_parent();
+  // staging_parent is the already-materialized root slot; overwrite its
+  // data with the input top node (preserves the correct text/token).
+  staging->set_data(staging_parent, lm->current_node());
+
+  if (lm->has_child()) {
+    lm->move_to_child();
+    do {
+      process_lnast();
+    } while (lm->move_to_sibling());
+    lm->move_to_parent();
+  }
 }
 
 void uPass_runner::process_stmts() {
-  move_to_child();
-  do {
-    process_lnast();
-  } while (move_to_sibling());
-  move_to_parent();
+  emit_push(lm->current_node());
+  if (lm->has_child()) {
+    lm->move_to_child();
+    do {
+      process_lnast();
+    } while (lm->move_to_sibling());
+    lm->move_to_parent();
+  }
+  emit_pop();
 }
 
 void uPass_runner::process_if() {
-  // Dispatch to every pass's process_if() so passes can inspect the condition
-  // (e.g. constprop peeks at the condition variable; future passes may prune
-  // dead branches).  Each pass must leave the cursor back at the if-node.
-  for (const auto& entry : upasses) {
-    try {
-      entry.pass->process_if();
-    } catch (const std::runtime_error& ex) {
-      std::print(stderr, "uPass [{}] if error: {}", entry.name, ex.what());
-    }
-  }
+  // Dispatch first so passes can inspect the condition before we emit.
+  dispatch_to_passes(&upass::uPass::process_if);
 
-  // Traverse all children of the if-node.
-  // Layout: (cond-ref, stmts)+ [stmts]
-  //   cond-ref nodes → process_lnast() hits default:break (no-op)
-  //   stmts nodes    → process_lnast() hits PROCESS_BLOCK(stmts) → recurse
-  move_to_child();
-  do {
-    process_lnast();
-  } while (move_to_sibling());
-  move_to_parent();
+  emit_push(lm->current_node());
+  if (lm->has_child()) {
+    lm->move_to_child();
+    do {
+      process_lnast();
+    } while (lm->move_to_sibling());
+    lm->move_to_parent();
+  }
+  emit_pop();
 }

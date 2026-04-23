@@ -176,6 +176,28 @@ public:
 
   auto current_text() const { return lnast->get_data(current_nid).token.get_text(); }
 
+  // Returns a copy of the full Lnast_node at the read cursor. Used by the
+  // runner to replicate the input node into the staging tree.
+  Lnast_node current_node() const { return lnast->get_data(current_nid); }
+
+  // Cursor-state snapshot used by the runner to recover from a pass that
+  // mishandled its own move_to_* calls (e.g. an exception escaped before
+  // move_to_parent). Not a replacement for correct balancing inside each
+  // pass — it just keeps one buggy pass from corrupting the rest.
+  struct Cursor_state {
+    Lnast_nid             current;
+    std::stack<Lnast_nid> stack;
+  };
+  Cursor_state save_cursor() const { return {current_nid, nid_stack}; }
+  void         restore_cursor(const Cursor_state& s) {
+    current_nid = s.current;
+    nid_stack   = s.stack;
+  }
+
+  // True iff the read cursor has at least one child. Does not move the
+  // cursor — safe to call before deciding whether to recurse.
+  bool has_child() const { return !lnast->get_child(current_nid).is_invalid(); }
+
   virtual bool move_to_child() {
     nid_stack.push(current_nid);
     current_nid = lnast->get_child(current_nid);

@@ -13,41 +13,44 @@ public:
   uPass_constprop() = delete;
   virtual ~uPass_constprop() {}
 
-  void process_assign();
-  void process_plus();
-  void process_minus();
-  void process_mult();
-  void process_div();
-  void process_mod();
-  void process_shl();
-  void process_sra();
-  void process_bit_and();
-  void process_bit_or();
-  void process_bit_not();
-  void process_bit_xor();
-  void process_log_and();
-  void process_log_or();
-  void process_log_not();
-  void process_ne();
-  void process_eq();
-  void process_lt();
-  void process_le();
-  void process_gt();
-  void process_ge();
-  void process_if();
+  void process_assign() override;
+  void process_plus() override;
+  void process_minus() override;
+  void process_mult() override;
+  void process_div() override;
+  void process_mod() override;
+  void process_shl() override;
+  void process_sra() override;
+  void process_bit_and() override;
+  void process_bit_or() override;
+  void process_bit_not() override;
+  void process_bit_xor() override;
+  void process_log_and() override;
+  void process_log_or() override;
+  void process_log_not() override;
+  void process_ne() override;
+  void process_eq() override;
+  void process_lt() override;
+  void process_le() override;
+  void process_gt() override;
+  void process_ge() override;
+  void process_if() override;
 
   // Bitwidth Insensitive Reduce
-  void process_red_or();
-  void process_red_and();
-  void process_red_xor();
+  void process_red_or() override;
+  void process_red_and() override;
+  void process_red_xor() override;
 
   // Bit Manipulation
-  void process_sext();
+  void process_sext() override;
 
-  void process_stmts();
-  void process_tuple_set();
-  void process_tuple_get();
-  void process_tuple_add();
+  void process_stmts() override;
+  void process_tuple_set() override;
+  void process_tuple_get() override;
+  void process_tuple_add() override;
+
+  upass::Emit_decision    classify_statement() override;
+  std::optional<Lconst>   fold_ref(std::string_view name) override;
 
 protected:
   Symbol_table st;
