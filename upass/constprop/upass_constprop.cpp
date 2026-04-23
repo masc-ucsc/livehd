@@ -573,7 +573,8 @@ void uPass_constprop::process_tuple_concat() {
   // If either side is unknown we cannot fold — leave dst unknown (soundness).
   if (!lhs_bundle || !rhs_bundle) return;
 
-  // Build dst as a copy of lhs, then concat rhs into it using Bundle::concat().
+  // Build dst as an empty bundle, then concatenate lhs and rhs fields in order
+  // using Bundle::concat() — lhs fields come first, rhs fields follow.
   auto dst_bundle = std::make_shared<Bundle>(dst);
   dst_bundle->concat(lhs_bundle);
   dst_bundle->concat(rhs_bundle);
