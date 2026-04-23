@@ -415,6 +415,146 @@ void uPass_constprop::process_tuple_set() {
   move_to_parent();
 }
 
+// ── Attribute Operations ─────────────────────────────────────────────────────
+//
+// Layout (from lnast_writer):
+//   attr_set:  ref(tuple), ref/const(attr)..., ref/const(value)
+//              Printed as:  tuple.attr = value
+//   attr_get:  ref(dst), ref(tuple), ref/const(attr)...
+//              Printed as:  dst = tuple.attr
+//
+// Constprop skips __bits / __signed attributes — those are bitwidth annotations
+// that the bitwidth pass owns; propagating them causes non-convergence (see
+// tuple_set comment above for the same reason).
+
+void uPass_constprop::process_attr_set() {
+  // Layout: ref(tuple), ref/const(attr)..., ref/const(value)
+  // All children after the tuple ref are path components; the LAST child is the value.
+  move_to_child();
+  auto tuple_var = std::string(current_text());
+
+  std::vector<std::string> path_and_val;
+  while (move_to_sibling()) {
+    path_and_val.emplace_back(current_text());
+  }
+  move_to_parent();
+
+  if (path_and_val.size() < 2) return;  // need at least one attr component + value
+
+  // Skip Pyrope bitwidth / signedness annotations (__bits, __signed, etc.)
+  for (std::size_t i = 0; i + 1 < path_and_val.size(); ++i) {
+    const auto& f = path_and_val[i];
+    if (f.size() > 2 && f[0] == '_' && f[1] == '_' && f[2] != '_') return;
+  }
+
+  // Build key: "tuple.attr1.attr2..."
+  std::string key = tuple_var;
+  for (std::size_t i = 0; i + 1 < path_and_val.size(); ++i) {
+    key += '.';
+    key += path_and_val[i];
+  }
+  const auto& val_text = path_and_val.back();
+
+  Lconst val = Lconst::from_pyrope(val_text);
+  if (!val.is_invalid()) {
+    bool local_changed = !st.has_trivial(key) || st.get_trivial(key) != val;
+    if (local_changed) {
+      st.set(key, val);
+      mark_changed();
+    }
+  } else if (st.has_trivial(val_text)) {
+    const auto sv      = st.get_trivial(val_text);
+    bool local_changed = !st.has_trivial(key) || st.get_trivial(key) != sv;
+    if (local_changed) {
+      st.set(key, sv);
+      mark_changed();
+    }
+  }
+}
+
+void uPass_constprop::process_attr_get() {
+  // Layout: ref(dst), ref(tuple), ref/const(attr)...
+  // Printed as: dst = tuple.attr
+  move_to_child();
+  auto dst = std::string(current_text());
+
+  move_to_sibling();
+  std::string key = std::string(current_text());  // start with tuple name
+
+  while (move_to_sibling()) {
+    key += '.';
+    key += current_text();
+  }
+  move_to_parent();
+
+  if (st.has_trivial(key)) {
+    const Lconst result    = st.get_trivial(key);
+    bool local_changed     = !st.has_trivial(dst) || st.get_trivial(dst) != result;
+    if (local_changed && st.set(dst, result)) {
+      mark_changed();
+    }
+  } else if (st.has_bundle(key)) {
+    auto sub_bundle    = st.get_bundle(key);
+    bool local_changed = !st.has_bundle(dst) || st.get_bundle(dst) != sub_bundle;
+    if (sub_bundle && local_changed && st.set(dst, sub_bundle)) {
+      mark_changed();
+    }
+  }
+}
+
+// ── Tuple Concatenation ───────────────────────────────────────────────────────
+//
+// Layout:  ref(dst), ref(lhs), ref(rhs)
+// Pyrope:  dst = lhs ++ rhs
+//
+// Merges the fields from lhs and rhs bundles into a new bundle for dst.
+// Fields from lhs come first (positions 0..N-1), rhs fields follow (N..M-1).
+// If either side is unknown (no bundle in symbol table), dst stays unknown —
+// soundness over completeness.
+
+void uPass_constprop::process_tuple_concat() {
+  move_to_child();
+  auto dst = std::string(current_text());
+
+  if (!move_to_sibling()) { move_to_parent(); return; }
+  auto lhs_name = std::string(current_text());
+
+  if (!move_to_sibling()) { move_to_parent(); return; }
+  auto rhs_name = std::string(current_text());
+
+  move_to_parent();
+
+  auto lhs_bundle = st.get_bundle(lhs_name);
+  auto rhs_bundle = st.get_bundle(rhs_name);
+
+  // If either side is unknown we cannot fold — leave dst unknown (soundness).
+  if (!lhs_bundle || !rhs_bundle) return;
+
+  // Build dst as a copy of lhs, then concat rhs into it using Bundle::concat().
+  auto dst_bundle = std::make_shared<Bundle>(dst);
+  dst_bundle->concat(lhs_bundle);
+  dst_bundle->concat(rhs_bundle);
+  st.set(dst, dst_bundle);
+  // Field-level convergence driven by downstream process_tuple_get calls.
+}
+
+// ── Delay Assign ─────────────────────────────────────────────────────────────
+//
+// Layout:  ref(dst), ref(src), const(offset)
+// Meaning: dst = value of src delayed by `offset` clock cycles.
+//   offset > 0 → next-cycle (register D pin)
+//   offset = 0 → current reg Q pin
+//   offset < 0 → past cycle
+//
+// Constprop cannot know the previous/next cycle's value at compile time, so
+// dst is left unknown (no entry written to symbol table).  This is soundness
+// over completeness — better to leave unknown than to fold incorrectly.
+
+void uPass_constprop::process_delay_assign() {
+  // Intentional no-op: cross-cycle values are not statically foldable.
+  // dst stays unknown in the symbol table.
+}
+
 // ── Bitwidth Insensitive Reduce ──────────────────────────────────────────────
 //
 // All three reduction ops share the same inline pattern:

@@ -45,9 +45,19 @@ public:
   void process_sext();
 
   void process_stmts();
-  void process_tuple_set();
-  void process_tuple_get();
+
+  // Tuple Operations
   void process_tuple_add();
+  void process_tuple_get();
+  void process_tuple_set();
+  void process_tuple_concat();
+
+  // Attribute Operations
+  void process_attr_set();
+  void process_attr_get();
+
+  // Delay Assign (cross-cycle — no-op, left unknown)
+  void process_delay_assign();
 
 protected:
   Symbol_table st;

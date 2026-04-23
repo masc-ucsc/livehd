@@ -242,13 +242,22 @@ void uPass_runner::process_lnast() {
     PROCESS_NODE(gt)
     PROCESS_NODE(ge)
 
-    // Function Call
+    // Assignment variants
+    PROCESS_NODE(delay_assign)
+
+    // Function Call / Definition
     PROCESS_NODE(func_call)
+    PROCESS_NODE(func_def)
 
     // Tuple Operations
     PROCESS_NODE(tuple_get)
     PROCESS_NODE(tuple_set)
     PROCESS_NODE(tuple_add)
+    PROCESS_NODE(tuple_concat)
+
+    // Attribute Operations
+    PROCESS_NODE(attr_set)
+    PROCESS_NODE(attr_get)
 
     default: break;
   }
