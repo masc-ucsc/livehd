@@ -1,6 +1,6 @@
 /*
 :name: scope_simple
-:type: parsing lnast
+:type: parsing lnast upass
 */
 
 mut x = 2

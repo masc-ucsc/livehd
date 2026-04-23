@@ -1,6 +1,6 @@
 /*
 :name: valid_tuple
-:type: parsing
+:type: parsing lnast upass
 */
 
 type Complex = (v1:string, v2:string)

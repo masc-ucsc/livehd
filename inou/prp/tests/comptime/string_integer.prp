@@ -1,6 +1,6 @@
 /*
 :name: string_integer
-:type: parsing
+:type: parsing lnast upass
 */
 
 cassert 3 == int("3")

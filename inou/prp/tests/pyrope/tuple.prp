@@ -1,6 +1,6 @@
 /*
 :name: tuple
-:type: parsing lnast
+:type: parsing lnast upass
 */
 
 comb top() -> (a, b, c) {

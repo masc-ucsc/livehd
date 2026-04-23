@@ -1,6 +1,6 @@
 /*
 :name: tuple_bracket
-:type: parsing
+:type: parsing lnast upass
 */
 
 const a = ('hello', a=3)

@@ -1,6 +1,6 @@
 /*
 :name: enum_simple
-:type: parsing
+:type: parsing lnast upass
 */
 
 enum X = (l0, l1, l2)

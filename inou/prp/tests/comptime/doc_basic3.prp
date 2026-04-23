@@ -1,6 +1,6 @@
 /*
 :name: doc_basic3
-:type: parsing
+:type: parsing lnast upass
 */
 
 mut `other id too` = 1

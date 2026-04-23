@@ -1,6 +1,6 @@
 /*
 :name: key_access
-:type: parsing
+:type: parsing lnast upass
 */
 
 const foo = (xx=3, yy=4)

@@ -1,6 +1,6 @@
 /*
 :name: simple
-:type: parsing lnast
+:type: parsing lnast upass
 */
 
 comb top(a, b) -> (c, d) {

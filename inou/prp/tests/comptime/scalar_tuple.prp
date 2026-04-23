@@ -1,6 +1,6 @@
 /*
 :name: scalar_tuple
-:type: parsing lnast
+:type: parsing lnast upass
 */
 
 mut a = 2

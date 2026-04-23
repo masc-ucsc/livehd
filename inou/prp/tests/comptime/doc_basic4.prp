@@ -1,6 +1,6 @@
 /*
 :name: doc_basic4
-:type: parsing
+:type: parsing lnast upass
 */
 
 const a = 1; mut b = 2; cassert a+b == 3; cassert true

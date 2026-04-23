@@ -1,6 +1,6 @@
 /*
 :name: expressions
-:type: parsing lnast
+:type: parsing lnast upass
 */
 
 comb top() {

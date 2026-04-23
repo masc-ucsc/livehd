@@ -1,6 +1,6 @@
 /*
 :name: bit_select
-:type: parsing lnast
+:type: parsing lnast upass
 */
 
 comb top() {

@@ -1,6 +1,6 @@
 /*
 :name: loop_equivalent
-:type: parsing
+:type: parsing lnast upass
 */
 
 mut c = ()

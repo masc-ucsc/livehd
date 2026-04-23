@@ -1,6 +1,6 @@
 /*
 :name: tuple_typename
-:type: parsing
+:type: parsing lnast upass
 */
 
 const X1 = (a=33)

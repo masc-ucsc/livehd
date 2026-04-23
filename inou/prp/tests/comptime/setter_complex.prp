@@ -1,6 +1,6 @@
 /*
 :name: setter_complex
-:type: parsing
+:type: parsing lnast upass
 */
 
 const fint:int = 0

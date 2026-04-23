@@ -1,6 +1,6 @@
 /*
 :name: attributes
-:type: parsing lnast
+:type: parsing lnast upass
 */
 
 comb top(a::[comptime], b::[comptime], c) {

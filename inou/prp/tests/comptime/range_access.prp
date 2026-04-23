@@ -1,6 +1,6 @@
 /*
 :name: range_access
-:type: parsing
+:type: parsing lnast upass
 */
 
 const a = 2..=4

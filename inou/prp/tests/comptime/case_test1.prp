@@ -1,6 +1,6 @@
 /*
 :name: case_test1
-:type: parsing
+:type: parsing lnast upass
 */
 
 const m1 = (a=1,b=50)

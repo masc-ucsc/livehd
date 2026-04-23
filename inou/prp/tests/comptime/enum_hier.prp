@@ -1,6 +1,6 @@
 /*
 :name: enum_hier
-:type: parsing
+:type: parsing lnast upass
 */
 
 enum Mammal = (rat, human)

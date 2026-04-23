@@ -1,6 +1,6 @@
 /*
 :name: string_simple
-:type: parsing
+:type: parsing lnast upass
 */
 
 mut hello = "hello"

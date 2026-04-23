@@ -1,6 +1,6 @@
 /*
 :name: tuple_simple6
-:type: parsing lnast
+:type: parsing lnast upass
 */
 
 mut x = (a:u32 = 3, b = 4, _:u32 = 5)

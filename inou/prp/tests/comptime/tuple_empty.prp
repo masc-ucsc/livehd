@@ -1,6 +1,6 @@
 /*
 :name: tuple_empty
-:type: parsing
+:type: parsing lnast upass
 */
 
 const a = "text"

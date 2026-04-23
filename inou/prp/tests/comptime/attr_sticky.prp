@@ -1,6 +1,6 @@
 /*
 :name: attr_sticky
-:type: parsing
+:type: parsing lnast upass
 */
 
 mut b = 100

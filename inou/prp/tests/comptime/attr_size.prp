@@ -1,6 +1,6 @@
 /*
 :name: attr_size
-:type: parsing lnast
+:type: parsing lnast upass
 */
 
 a = 3

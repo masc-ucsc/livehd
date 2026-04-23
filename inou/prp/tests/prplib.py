@@ -68,11 +68,23 @@ class PrpRunner:
 
         lg_cmd.append('inou.prp')
         lg_cmd.append('files:{}'.format(','.join(test.params['files'])))
+        lg_cmd.append('|> pass.lnastfmt')
+
+        return lg_cmd
+
+    def lgshell_upass(self, test):
+        lg_cmd = self.lgshell_lnast(test)
+
+        lg_cmd.append('|>')
+        lg_cmd.append('pass.upass constprop:1 max_iters:1')
+
+        lg_cmd.append('|>')
+        lg_cmd.append('pass.lnastfmt')
 
         return lg_cmd
 
     def lgshell_lgraph(self, test):
-        lg_cmd = self.lgshell_lnast(test)
+        lg_cmd = self.lgshell_upass(test)
 
         lg_cmd.append('|>')
         lg_cmd.append('pass.lnastopt')
@@ -97,6 +109,7 @@ class PrpRunner:
         gen_lg_cmd = {
             'parsing' : self.lgshell_parse,
             'lnast'   : self.lgshell_lnast,
+            'upass'   : self.lgshell_upass,
             'lgraph'  : self.lgshell_lgraph,
             'compile' : self.lgshell_lg_compile
         }

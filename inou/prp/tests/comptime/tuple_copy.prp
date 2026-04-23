@@ -1,6 +1,6 @@
 /*
 :name: tuple_copy
-:type: parsing
+:type: parsing lnast upass
 */
 
 mut foo = (a=40,b=50)

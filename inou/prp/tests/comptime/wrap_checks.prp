@@ -1,6 +1,6 @@
 /*
 :name: wrap_checks
-:type: parsing
+:type: parsing lnast upass
 */
 
 mut x:s8 = 33

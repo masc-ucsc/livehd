@@ -1,6 +1,6 @@
 /*
 :name: crand_test
-:type: parsing
+:type: parsing lnast upass
 */
 
 const a = false

@@ -1,6 +1,6 @@
 /*
 :name: wrap_trivial
-:type: parsing lnast
+:type: parsing lnast upass
 */
 
 mut x::[ubits=12] = 0

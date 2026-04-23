@@ -1,6 +1,6 @@
 /*
 :name: tuple_exclude
-:type: parsing
+:type: parsing lnast upass
 */
 
 const t1 = (a=1,b=2,c=3)

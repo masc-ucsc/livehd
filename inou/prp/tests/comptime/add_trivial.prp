@@ -1,6 +1,6 @@
 /*
 :name: add_trivial
-:type: parsing lnast
+:type: parsing lnast upass
 */
 
 const x = 1

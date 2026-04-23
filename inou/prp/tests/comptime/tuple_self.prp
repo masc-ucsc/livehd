@@ -1,6 +1,6 @@
 /*
 :name: tuple_self
-:type: parsing
+:type: parsing lnast upass
 */
 
 const a = 1

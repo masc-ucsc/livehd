@@ -1,6 +1,6 @@
 /*
 :name: enum_types
-:type: parsing
+:type: parsing lnast upass
 */
 
 comb robot_charge() -> (s:string) { s = "robot charge" }

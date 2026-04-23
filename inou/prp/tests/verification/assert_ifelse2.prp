@@ -1,6 +1,6 @@
 /*
 :name: assert_ifelse2
-:type: parsing
+:type: parsing lnast upass
 */
 
 comb pick_max(a:u32, b:u32) -> (x:u32) {

@@ -1,6 +1,6 @@
 /*
 :name: tuple_simple_attr
-:type: parsing
+:type: parsing lnast upass
 */
 
 mut foo = (a=-1)

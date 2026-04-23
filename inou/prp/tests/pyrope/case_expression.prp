@@ -1,6 +1,6 @@
 /*
 :name: case_expression
-:type: parsing lnast
+:type: parsing lnast upass
 */
 
 const x = 1

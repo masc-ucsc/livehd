@@ -1,6 +1,6 @@
 /*
 :name: tuple_decorator_complex
-:type: parsing
+:type: parsing lnast upass
 */
 
 mod set_xy(ref self, x:int, y:int) {

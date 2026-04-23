@@ -1,6 +1,6 @@
 /*
 :name: wrap_complex
-:type: parsing lnast
+:type: parsing lnast upass
 */
 
 mut x::[sbits=8] = 0
