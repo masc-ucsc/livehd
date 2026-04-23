@@ -62,8 +62,21 @@ void uPass_constprop::process_nary(F op) {
   auto var = current_text();
   move_to_sibling();
   Lconst r = current_prim_value();
+
+  // If the first operand is unknown or a non-numeric type, leave dst unknown.
+  // Arithmetic on strings or invalid Lconst values is undefined and will crash.
+  if (r.is_invalid() || r.is_string() || r.has_unknowns()) {
+    move_to_parent();
+    return;
+  }
+
   while (move_to_sibling()) {
-    op(r, current_prim_value());
+    auto operand = current_prim_value();
+    if (operand.is_invalid() || operand.is_string() || operand.has_unknowns()) {
+      move_to_parent();
+      return;
+    }
+    op(r, operand);
   }
   bool local_changed = true;
   if (st.has_trivial(var)) {
@@ -84,9 +97,25 @@ void uPass_constprop::process_binary(F op) {
   move_to_sibling();
   Lconst n1 = current_prim_value();
   move_to_sibling();
-  Lconst n2      = current_prim_value();
-  Lconst r       = op(n1, n2);
-  bool   local_changed = true;
+  Lconst n2 = current_prim_value();
+
+  // Guard: if either operand is unknown, a non-numeric string, or has X-bits,
+  // skip folding — leave dst unknown.  This prevents "one is a string" errors
+  // and the "assertion is_i() failed" crash in shift lambdas that call .to_i().
+  if (n1.is_invalid() || n1.is_string() || n1.has_unknowns() ||
+      n2.is_invalid() || n2.is_string() || n2.has_unknowns()) {
+    move_to_parent();
+    return;
+  }
+
+  Lconst r = op(n1, n2);
+  // If the operation itself produced an invalid result (e.g., divide-by-zero,
+  // or shift amount not representable as integer), leave dst unknown.
+  if (r.is_invalid()) {
+    move_to_parent();
+    return;
+  }
+  bool local_changed = true;
   if (st.has_trivial(var)) {
     local_changed = st.get_trivial(var) != r;
   }
@@ -104,6 +133,13 @@ void uPass_constprop::process_unary(F op) {
   auto var = current_text();
   move_to_sibling();
   Lconst r = current_prim_value();
+
+  // Guard: leave dst unknown if input is invalid, non-numeric, or has X-bits.
+  if (r.is_invalid() || r.is_string() || r.has_unknowns()) {
+    move_to_parent();
+    return;
+  }
+
   op(r);
   bool local_changed = true;
   if (st.has_trivial(var)) {
@@ -152,10 +188,9 @@ void uPass_constprop::process_bit_xor() {
 }
 
 void uPass_constprop::process_mod() {
-  process_binary([](Lconst n1, Lconst n2) {
-    // Guard: modulo by zero is undefined behaviour.  Return invalid so the
-    // caller leaves the variable unset rather than crashing.
-    if (n2.is_known_false()) {
+  process_binary([](Lconst n1, Lconst n2) -> Lconst {
+    // Guard: modulo by zero or non-integer operands is undefined.
+    if (!n1.is_i() || !n2.is_i() || n2.is_known_false()) {
       return Lconst::invalid();
     }
     return Lconst(n1.to_i() % n2.to_i());
@@ -163,13 +198,17 @@ void uPass_constprop::process_mod() {
 }
 
 void uPass_constprop::process_shl() {
-  process_binary([](Lconst n1, Lconst n2) {
+  process_binary([](Lconst n1, Lconst n2) -> Lconst {
+    // to_i() asserts is_i() — outer guard in process_binary screens out
+    // invalid/string/unknowns, but defend-in-depth for non-integer types.
+    if (!n2.is_i()) return Lconst::invalid();
     return n1.lsh_op(static_cast<Bits_t>(n2.to_i()));
   });
 }
 
 void uPass_constprop::process_sra() {
-  process_binary([](Lconst n1, Lconst n2) {
+  process_binary([](Lconst n1, Lconst n2) -> Lconst {
+    if (!n2.is_i()) return Lconst::invalid();
     return n1.rsh_op(static_cast<Bits_t>(n2.to_i()));
   });
 }

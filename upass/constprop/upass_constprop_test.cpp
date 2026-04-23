@@ -141,6 +141,50 @@ struct ConstpropFixture {
     ln->add_child(op, Lnast_node::create_const(value));
     return op;
   }
+
+  // Build: [attr_set: ref(tuple_var), const(attr_name), const(value)]
+  Lnast_nid add_attr_set_node(std::string_view tuple_var,
+                               std::string_view attr_name,
+                               int64_t          value) {
+    auto op = ln->add_child(stmts_nid, Lnast_node::create_attr_set());
+    ln->add_child(op, Lnast_node::create_ref(tuple_var));
+    ln->add_child(op, Lnast_node::create_const(attr_name));
+    ln->add_child(op, Lnast_node::create_const(value));
+    return op;
+  }
+
+  // Build: [attr_get: ref(dst), ref(tuple_var), const(attr_name)]
+  Lnast_nid add_attr_get_node(std::string_view dst,
+                               std::string_view tuple_var,
+                               std::string_view attr_name) {
+    auto op = ln->add_child(stmts_nid, Lnast_node::create_attr_get());
+    ln->add_child(op, Lnast_node::create_ref(dst));
+    ln->add_child(op, Lnast_node::create_ref(tuple_var));
+    ln->add_child(op, Lnast_node::create_const(attr_name));
+    return op;
+  }
+
+  // Build: [tuple_concat: ref(dst), ref(lhs), ref(rhs)]
+  Lnast_nid add_tuple_concat_node(std::string_view dst,
+                                   std::string_view lhs,
+                                   std::string_view rhs) {
+    auto op = ln->add_child(stmts_nid, Lnast_node::create_tuple_concat());
+    ln->add_child(op, Lnast_node::create_ref(dst));
+    ln->add_child(op, Lnast_node::create_ref(lhs));
+    ln->add_child(op, Lnast_node::create_ref(rhs));
+    return op;
+  }
+
+  // Build: [delay_assign: ref(dst), ref(src), const(offset)]
+  Lnast_nid add_delay_assign_node(std::string_view dst,
+                                   std::string_view src,
+                                   int64_t          offset) {
+    auto op = ln->add_child(stmts_nid, Lnast_node::create_delay_assign());
+    ln->add_child(op, Lnast_node::create_ref(dst));
+    ln->add_child(op, Lnast_node::create_ref(src));
+    ln->add_child(op, Lnast_node::create_const(offset));
+    return op;
+  }
 };
 
 // ── Arithmetic ──────────────────────────────────────────────────────────────
@@ -708,6 +752,124 @@ TEST(UpassConstpropTuple, TupleSetThenGetRoundTrip) {
   cp.process_tuple_get();   // dst = ___t0[0] = 77
 
   EXPECT_EQ(cp.get_result("dst").to_i(), 77);
+}
+
+// ── Attribute Operations ────────────────────────────────────────────────────
+
+TEST(UpassConstpropAttr, AttrSetAndGet) {
+  // attr_set stores a value; attr_get reads it back into dst.
+  ConstpropFixture f;
+  auto set_op = f.add_attr_set_node("x", "myattr", 42);
+  auto get_op = f.add_attr_get_node("dst", "x", "myattr");
+
+  TestableConstprop cp(f.lm);
+  cp.position(set_op);
+  cp.process_attr_set();   // x.myattr = 42
+
+  cp.position(get_op);
+  cp.process_attr_get();   // dst = x.myattr
+
+  EXPECT_EQ(cp.get_result("dst").to_i(), 42);
+}
+
+TEST(UpassConstpropAttr, AttrSetBitsSkipped) {
+  // __bits is a Pyrope bitwidth annotation — constprop must skip it
+  // to avoid non-convergence (same guard as tuple_set).
+  ConstpropFixture f;
+  auto set_op = f.add_attr_set_node("x", "__bits", 8);
+
+  TestableConstprop cp(f.lm);
+  cp.position(set_op);
+  cp.process_attr_set();
+
+  // x.__bits must NOT be stored in the symbol table.
+  EXPECT_FALSE(cp.has_changed());
+}
+
+TEST(UpassConstpropAttr, AttrSetConvergesOnRepeat) {
+  // Calling process_attr_set() twice with the same value must not
+  // fire mark_changed() on the second call.
+  ConstpropFixture f;
+  auto set_op = f.add_attr_set_node("x", "width", 16);
+
+  TestableConstprop cp(f.lm);
+  cp.position(set_op);
+  cp.process_attr_set();
+  EXPECT_TRUE(cp.has_changed());
+
+  cp.begin_iteration();    // reset changed flag
+  cp.position(set_op);
+  cp.process_attr_set();   // same value — should NOT fire mark_changed
+  EXPECT_FALSE(cp.has_changed());
+}
+
+TEST(UpassConstpropAttr, AttrGetMissingSourceNoStore) {
+  // attr_get on a variable with no stored attribute leaves dst unknown.
+  ConstpropFixture f;
+  auto get_op = f.add_attr_get_node("dst", "undefined_var", "myattr");
+
+  TestableConstprop cp(f.lm);
+  cp.position(get_op);
+  cp.process_attr_get();
+
+  EXPECT_TRUE(cp.get_result("dst").is_invalid());
+  EXPECT_FALSE(cp.has_changed());
+}
+
+// ── Tuple Concat ────────────────────────────────────────────────────────────
+
+TEST(UpassConstpropTuple, TupleConcatMergesTwoTuples) {
+  // dst = lhs ++ rhs  where lhs=(3,7) and rhs=(11)
+  // After concat + get, dst[0]=3, dst[1]=7, dst[2]=11.
+  ConstpropFixture f;
+  auto lhs_op    = f.add_tuple_add_node("lhs", {3, 7});
+  auto rhs_op    = f.add_tuple_add_node("rhs", {11});
+  auto concat_op = f.add_tuple_concat_node("dst", "lhs", "rhs");
+  auto get0_op   = f.add_tuple_get_node("r0", "dst", "0");
+  auto get1_op   = f.add_tuple_get_node("r1", "dst", "1");
+  auto get2_op   = f.add_tuple_get_node("r2", "dst", "2");
+
+  TestableConstprop cp(f.lm);
+  cp.position(lhs_op);    cp.process_tuple_add();
+  cp.position(rhs_op);    cp.process_tuple_add();
+  cp.position(concat_op); cp.process_tuple_concat();
+  cp.position(get0_op);   cp.process_tuple_get();
+  cp.position(get1_op);   cp.process_tuple_get();
+  cp.position(get2_op);   cp.process_tuple_get();
+
+  EXPECT_EQ(cp.get_result("r0").to_i(), 3);
+  EXPECT_EQ(cp.get_result("r1").to_i(), 7);
+  EXPECT_EQ(cp.get_result("r2").to_i(), 11);
+}
+
+TEST(UpassConstpropTuple, TupleConcatUnknownLhsNoStore) {
+  // If lhs bundle is unknown, dst must stay unknown (soundness).
+  ConstpropFixture f;
+  auto rhs_op    = f.add_tuple_add_node("rhs", {5});
+  auto concat_op = f.add_tuple_concat_node("dst", "unknown_lhs", "rhs");
+
+  TestableConstprop cp(f.lm);
+  cp.position(rhs_op);    cp.process_tuple_add();
+  cp.position(concat_op); cp.process_tuple_concat();
+
+  EXPECT_FALSE(cp.has_changed());
+}
+
+// ── Delay Assign ────────────────────────────────────────────────────────────
+
+TEST(UpassConstpropDelay, DelayAssignLeavesDestUnknown) {
+  // delay_assign reads from a previous clock cycle — not statically foldable.
+  // dst must remain unknown in the symbol table.
+  ConstpropFixture f;
+  auto delay_op = f.add_delay_assign_node("dst", "src", 1);
+
+  TestableConstprop cp(f.lm);
+  cp.seed("src", Lconst(99));   // src is known — but dst still can't be folded
+  cp.position(delay_op);
+  cp.process_delay_assign();
+
+  EXPECT_TRUE(cp.get_result("dst").is_invalid());
+  EXPECT_FALSE(cp.has_changed());
 }
 
 }  // namespace
