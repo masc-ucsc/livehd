@@ -3,9 +3,8 @@
 :type: parsing lnast
 */
 
-var x = (a:u32=3, b=4, _:u32=5) // _ means no name, but needed for type assign
+mut x = (a:u32 = 3, b = 4, _:u32 = 5)
 
-cassert x == (3,4,5)            // if no name provided, match jsut position
+cassert x == (3,4,5)
 cassert x != (a=3,foo=4,5)
-cassert x == (a=3,b=4,5)        // match names too
-
+cassert x == (a=3,b=4,5)

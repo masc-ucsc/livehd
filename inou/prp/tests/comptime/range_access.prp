@@ -1,6 +1,9 @@
+/*
+:name: range_access
+:type: parsing
+*/
 
-
-let a = 2..=4
+const a = 2..=4
 
 cassert !a[0]
 cassert !a[1]
@@ -9,5 +12,4 @@ cassert  a[3]
 cassert  a[4]
 cassert !a[5]
 
-cassert a.[size] == 3
-
+cassert a::[size] == 3

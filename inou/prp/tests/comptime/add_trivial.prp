@@ -3,9 +3,9 @@
 :type: parsing lnast
 */
 
-let x = 1
-let y = 2
+const x = 1
+const y = 2
 
-var c = x + y
+mut c = x + y
 
 cassert c == 3

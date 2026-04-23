@@ -3,17 +3,16 @@
 :type: parsing
 */
 
-let a=false // boolean type inferred
+const a = false
 
-c = a.[crand]
+c = a::[crand]
 
-var x = 0
+mut x = 0
 
 if c {
   x = 1
-}else{
+} else {
   x = 2
 }
 
-cassert x==1 or x==2 // still compile time
-
+cassert x==1 or x==2

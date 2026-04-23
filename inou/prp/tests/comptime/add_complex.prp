@@ -3,8 +3,8 @@
 :type: parsing lnast
 */
 
-let c = 1 - -3
-let vari = (c + 100)
+const c = 1 - -3
+const vari = (c + 100)
         + (10) - (10)
         + (100+(-100)) + 0
         - (10-5-5)

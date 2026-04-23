@@ -3,9 +3,8 @@
 :type: parsing lnast
 */
 
-var x::[ubits=12] = 0
+mut x::[ubits=12] = 0
 
 x::[wrap] = 0xFEAD
 
 cassert x == 0xEAD
-

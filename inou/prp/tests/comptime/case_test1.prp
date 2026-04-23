@@ -3,29 +3,25 @@
 :type: parsing
 */
 
-let m1 = (a=1,b=50)
-let m2 = (a=2,b=60)
-var m3 = (b=2,a=70)
-let m4 = (c=2,b=80)
-let m5 = (a=2,b=90,c=100)
+const m1 = (a=1,b=50)
+const m2 = (a=2,b=60)
+mut m3 = (b=2,a=70)
+const m4 = (c=2,b=80)
+const m5 = (a=2,b=90,c=100)
 
-var hit=0
+mut hit=0
 
-let b=300
+const b=300
 
-match let t = m1 ; t {
- case (a=33,b=_)   { hit = 300 + t.a + t.b }
- case (a=2,b=_)    { hit = t.a + m1.b ; cassert m1 == t }
- case (a=true,b=_) { hit = if t.a { b+100 }else{ b-100 } }
+match const t = m1; t {
+ case (a=33,b=?)   { hit = 300 + t.a + t.b }
+ case (a=2,b=?)    { hit = t.a + m1.b; cassert m1 == t }
+ case (a=true,b=?) { hit = if t.a { b+100 } else { b-100 } }
 }
 cassert hit == 51
 
-// (L case R) == (R does L) AND for each R.value, they match in L.values
-//
-// _ is "any value" allowed to match
-
-cassert (a=1,3)  case (a=_,3)
-cassert (a=1,3)  case (a=1,_)
+cassert (a=1,3)  case (a=?,3)
+cassert (a=1,3)  case (a=1,?)
 cassert (a=1,3)  case (a=1)
 cassert (a=1)   !case (a=1,3)
 
@@ -34,5 +30,5 @@ cassert (a=1,b=2) case (b=1)
 cassert (a=1,b=2) !case (b=1)
 cassert (b=2) !case (b=2,a=1)
 cassert (b=2) !case (b=2,1)
-cassert (b=2) !case (b=2,_)
-cassert (b=2) !case (b=2,c=_)
+cassert (b=2) !case (b=2,?)
+cassert (b=2) !case (b=2,c=?)

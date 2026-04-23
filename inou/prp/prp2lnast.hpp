@@ -1,7 +1,11 @@
 //  This file is distributed under the BSD 3-Clause License. See LICENSE for details.
 
+#pragma once
+
 #include <functional>
 #include <stack>
+#include <string>
+#include <string_view>
 #include <vector>
 
 #include "lnast.hpp"
@@ -16,149 +20,86 @@ protected:
   TSParser*   parser;
   TSNode      ts_root_node;
 
-  // AST States
-  enum class Expression_state { Type, Lvalue, Rvalue, Const, Decl, Attr };
-  std::stack<Expression_state> expr_state_stack;
+  // LNAST output
+  std::unique_ptr<Lnast> lnast;
+  lh::Tree_index         stmts_index;
 
-  // a::[b] = c::[d = f::[g]]
-  // \___________0__________/
-  //    \1/      \____1_____/
-  //                 \0/ \1/
-  std::stack<bool> attr_scope_stack;
+  // Temporary variable counter for compiler-generated tmps
+  int tmp_ref_count;
 
-  using attr_map_t  = std::vector<std::pair<Lnast_node, Lnast_node>>;
-  using node_attr_t = std::pair<Lnast_node, attr_map_t>;
-
-  // FIXME: Temporary fix for generating input/output refs
-  bool                                          is_function_input;
-  bool                                          is_function_output;
+  // Directed name tracking for function input/output refs ($a / %x)
+  enum class Name_role { None, FuncInput, FuncOutput, Register };
+  Name_role                                     current_name_role;
   absl::flat_hash_map<std::string, std::string> ref_name_map;
-
-  // TODO: Replace this with Prp_type
-  uint16_t bitwidth;
 
   // Top
   void process_description();
 
   // Statements
-  void process_statement(TSNode);
-  void process_stmt_list(TSNode);
+  void process_statement(TSNode n);
+  void process_scope_statement(TSNode n, lh::Tree_index target_stmts);
+  void process_assignment(TSNode n);
+  void process_declaration_statement(TSNode n);
+  void process_assert_statement(TSNode n);
+  void process_while_statement(TSNode n);
+  void process_for_statement(TSNode n);
+  void process_loop_statement(TSNode n);
+  void process_control_statement(TSNode n);
+  void process_function_call_statement(TSNode n);
+  void process_lambda_statement(TSNode n);
+  void process_enum_assignment(TSNode n);
+  void process_type_statement(TSNode n);
+  void process_import_statement(TSNode n);
+  void process_test_statement(TSNode n);
+  void process_spawn_statement(TSNode n);
+  void process_impl_statement(TSNode n);
 
-  // Non-terminal rules
-  void process_node(TSNode);
+  // Expressions: returns an Lnast_node (ref or const) naming the result
+  Lnast_node expr_to_node(TSNode n);
+  Lnast_node binary_expr_to_node(TSNode n);
+  Lnast_node unary_expr_to_node(TSNode n);
+  Lnast_node if_expr_to_node(TSNode n);
+  Lnast_node match_expr_to_node(TSNode n);
+  Lnast_node bit_selection_to_node(TSNode n);
+  Lnast_node member_selection_to_node(TSNode n);
+  Lnast_node dot_expression_to_node(TSNode n);
+  Lnast_node function_call_expr_to_node(TSNode n);
+  Lnast_node tuple_to_node(TSNode n, bool is_square);
+  Lnast_node identifier_to_node(TSNode n, bool for_lvalue);
+  Lnast_node constant_text_to_node(std::string_view text);
+  Lnast_node type_specification_to_node(TSNode n);
 
-  // Statements
-  void process_scope_statement(TSNode);
-  void process_expression_statement(TSNode);
-  void process_while_statement(TSNode);
+  // Type handling
+  void emit_type_spec(const Lnast_node& target, TSNode type_cast_node);
+  void emit_attribute_list(const Lnast_node& target, TSNode attribute_list_node);
+  void emit_type_expr(const lh::Tree_index& type_index, TSNode type_node);
 
-  // Functions
-  void process_function_call_statement(TSNode);
-  void process_simple_function_call(TSNode);
-  void process_function_definition(TSNode);
+  // Lvalue helpers
+  Lnast_node process_lvalue_for_assign(TSNode lvalue, const Lnast_node& rvalue, TSNode decl_node, TSNode type_cast_node);
 
-  // Assignment/Declaration
-  void process_assignment_or_declaration(TSNode);
-  void process_simple_assignment(TSNode);
-  void process_simple_declaration(TSNode);
-  void process_lvalue_assignment(const Lnast_node& rvalue);
+  // Helpers
+  std::string      get_tmp_name();
+  Lnast_node       make_tmp_ref();
+  std::string_view get_text(const TSNode& n) const;
+  std::string      get_text_str(const TSNode& n) const { return std::string(get_text(n)); }
+  static std::string trim(std::string_view s);
+  std::string_view text_between(uint32_t start, uint32_t end) const;
 
-  // Expressions
-  void process_if_expression(TSNode);
-  void process_for_expression(TSNode);
-  void process_match_expression(TSNode);
-  void process_binary_expression(TSNode);
-  void process_unary_expression(TSNode);
-  void process_dot_expression(TSNode);
-  void process_member_selection(TSNode);
+  // Get rvalue text even when the rvalue field is a hidden token (numbers,
+  // bool/string literals, '?'). Returns the text between the '=' operator's
+  // end and the end of the enclosing parent span.
+  std::string rvalue_text_fallback(TSNode parent, TSNode after_field) const;
+  // Get binary_expression right operand text when hidden.
+  std::string binary_right_text(TSNode bin, TSNode operator_node) const;
+  // Get binary_expression left operand text when hidden.
+  std::string binary_left_text(TSNode bin, TSNode operator_node) const;
 
-  // Type
-  void process_type_specification(TSNode);
-  void process_primitive_type(TSNode);
-  void process_unsized_integer_type(TSNode);
-  void process_sized_integer_type(TSNode);
-  void process_range_type();
-  void process_string_type();
-  void process_boolean_type();
-  void process_type_type();
-  void process_array_type(TSNode);
-
-  // Select
-  void process_select(TSNode);
-  void process_select_options(TSNode);
-  void process_member_select(TSNode);
-  void process_bit_selection(TSNode);
-  void process_bit_select(TSNode);
-
-  // Attributes
-  void process_attribute_entry(TSNode);
-  void process_attr_list(TSNode);
-
-  // Basics
-  void process_tuple(TSNode);
-  void process_tuple_sq(TSNode);
-  void process_tuple_or_expression_list(TSNode);
-  void process_lvalue_list(TSNode);
-  void process_rvalue_list(TSNode);
-  void process_tuple_type_list(TSNode);
-  void process_declaration_list(TSNode);
-  void process_identifier(TSNode);
-  void process_constant(TSNode);
-
-  // Ref-Attribute Helpers
-  // NOTE: This function adds `ref_node` with all attributes `parent` index
-  void add_ref_child(lh::Tree_index parent, node_attr_t ref_node);
-  void add_ref_child(lh::Tree_index parent);  // NOTE: add `primary_node_stack.top()`
-  // NOTE: add `primary_node_stack.top()` if it has any attribute
-  void add_ref_child_conditional(lh::Tree_index parent);
-
-  // Lnast Tree Helpers
-  std::unique_ptr<Lnast> lnast;
-  lh::Tree_index         stmts_index;
-
-  lh::Tree_index             prev_stmt_index;
-  std::stack<lh::Tree_index> tuple_index_stack;
-
-  lh::Tree_index   type_index;
-  std::vector<int> tuple_lvalue_positions;
-  // NOTE: suboptimal - copying the whole attribute vector
-  std::stack<Lnast_node> rvalue_node_stack;
-  std::stack<Lnast_node> lvalue_node_stack;
-  std::stack<Lnast_node> primary_node_stack;
-
-  struct select_list_t {
-    bool                    is_attribute = false;
-    std::vector<Lnast_node> nodes;
-  };
-
-  std::stack<select_list_t>                                  select_stack;
-  std::stack<std::vector<std::pair<Lnast_node, Lnast_node>>> tuple_rvalue_stack;
-  Lnast_node                                                 ret_node;
-
-  std::stack<std::vector<Lnast_node>> scope_node_stack;
-
-  void       add_attr_set(const Lnast_node key, const Lnast_node value);
-  Lnast_node add_attr_get(const Lnast_node key);
-  void       add_attr_check(const Lnast_node key);
-
-  // Lnast_node Helpers
-  // TODO: Forward location to Lnast_node
-  int               tmp_ref_count;
-  std::string       get_tmp_name();
-  inline Lnast_node get_tmp_ref();
-
-  void        enter_scope(Expression_state);
-  void        leave_scope();
-  std::string str(Expression_state);
-
-  // TS API Helpers
-  std::string_view get_text(const TSNode& node) const;
-  inline TSNode    get_child(const TSNode&, const char*) const;
-  inline TSNode    get_child(const TSNode&, unsigned int) const;
-  inline TSNode    get_child(const TSNode&) const;
-  inline TSNode    get_sibling(const TSNode&) const;
-  inline TSNode    get_named_child(const TSNode&) const;
-  inline TSNode    get_named_sibling(const TSNode&) const;
+  // TS API helpers
+  inline TSNode   child_by_field(const TSNode& n, const char* field) const;
+  inline uint32_t child_count(const TSNode& n) const { return ts_node_child_count(n); }
+  inline TSNode   child(const TSNode& n, uint32_t i) const { return ts_node_child(n, i); }
+  inline TSNode   named_child(const TSNode& n, uint32_t i) const { return ts_node_named_child(n, i); }
+  inline uint32_t named_child_count(const TSNode& n) const { return ts_node_named_child_count(n); }
 
 public:
   Prp2lnast(std::string_view filename, std::string_view module_name, bool parse_only);

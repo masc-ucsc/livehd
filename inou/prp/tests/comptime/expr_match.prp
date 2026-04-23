@@ -3,9 +3,9 @@
 :type: parsing
 */
 
-let sel = 2 // for loop in the future
+const sel = 2
 
-let result = match sel {
+const result = match sel {
   == 0b00 { 0b0001 }
   == 0b01 { 0b0010 }
   == 0b10 { 0b0100 }
@@ -13,10 +13,7 @@ let result = match sel {
 }
 cassert result == 4
 
-// Pyrope 2
-let table = (1,2,4,8)
+const table = (1,2,4,8)
 cassert result == table[sel]
 
-// Pyrope 3
-cassert result == 1<<sel
-
+cassert result == 1 << sel

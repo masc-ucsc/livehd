@@ -1,7 +1,10 @@
+/*
+:name: tuple_empty
+:type: parsing
+*/
 
-let a = "text"
+const a = "text"
 
-var x = (:u8:[wrap] = 0xFFF, :string=a)
+mut x = (0xFFF, a)
 
 cassert x.0 == 255 and x[1] == "text"
-

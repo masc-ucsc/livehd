@@ -3,7 +3,6 @@
 :type: parsing
 */
 
-cassert "hello\n" == "\x68ello\x0d"  // \x?? is hex ascii character
+cassert "hello\n" == "\x68ello\x0d"
 
-cassert 'hello\n' == "hello\\n"  // ' ' does not have backticks
-
+cassert 'hello\n' == "hello\\n"

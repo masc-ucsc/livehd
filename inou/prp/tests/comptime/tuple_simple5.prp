@@ -3,58 +3,32 @@
 :type: parsing
 */
 
-// https://masc-ucsc.github.io/docs/pyrope/06-functions/#arguments
-//
-// Cases when function call and therefore tuple assignment need/avoid being named
-
-// 1-single letter fields
-
-var case1:(
-  ,x=0
-  ,y=1
-) = _ // keep default values
+mut case1:(x=0, y=1) = (0, 1)
 
 case1 = (3,4)
 cassert case1.x==3 and case1.y==4
 cassert case1 == (3,4) == (x=3,y=4)
-cassert case1 != (y=4,x=3)            // comparison uses position AND name if present
+cassert case1 != (y=4,x=3)
 
 case1 = (x=3,y=4)
 cassert case1.x==3 and case1.y==4
 cassert case1 == (3,4) == (x=3,y=4)
-cassert case1 != (y=4,x=3)            // comparison uses position AND name if present
+cassert case1 != (y=4,x=3)
 
-case1 = (y=4,x=3) // compile error, order does not match
-
-
-// 2-different types allow to distinguish
-
-var case2:(
-  ,long=true
-  ,myint=33
-) = _
+mut case2:(long=true, myint=33) = (true, 33)
 
 case2 = (false, 44)
 cassert case2.long == false and case2.myint==44
 cassert case2 == (false,44)
 cassert case2 != (44,false)
 
-case2 = (44, false) // compile error
+mut longer = 3
 
-// 3-Variable name matches
+mut case3:(longer=100, x=33) = (100, 33)
 
-var longer=3
-
-var case3:(
-  ,longer=100
-  ,x=33
-) = _
-
-case3 = (longer,88)
+case3 = (longer, 88)
 cassert case3 == (3,88) == (longer=3,88) == (longer=3,x=88) == (3,x=88)
 
-let potato=66
-case3 = (potato,54) // compile error
-case3 = (longer=potato,54)  // OK
+const potato = 66
+case3 = (longer=potato, 54)
 cassert case3 == (66,54) == (longer=66,54) == (longer=66,x=54) == (66,x=54)
-

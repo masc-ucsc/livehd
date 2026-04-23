@@ -3,9 +3,8 @@
 :type: parsing lnast
 */
 
-let top = fun {
-  var a = 1
-  var b = 2
+comb top() {
+  mut a = 1
+  mut b = 2
   cassert a == b
 }
-

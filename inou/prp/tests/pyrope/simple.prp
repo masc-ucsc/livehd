@@ -3,7 +3,7 @@
 :type: parsing lnast
 */
 
-let top = fun(a, b) -> (c, d) {
+comb top(a, b) -> (c, d) {
   c = a + b;
   d = a - b;
 }
