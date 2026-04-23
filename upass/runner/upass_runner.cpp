@@ -59,7 +59,8 @@ static upass::uPass_plugin plugin_decide_shared("decide_shared", upass::uPass_wr
 
 }  // namespace
 
-uPass_runner::uPass_runner(std::shared_ptr<upass::Lnast_manager>& _lm, const std::vector<std::string>& upass_names)
+uPass_runner::uPass_runner(std::shared_ptr<upass::Lnast_manager>& _lm, const std::vector<std::string>& upass_names,
+                           upass::Options_map options)
     : uPass_struct(_lm) {
   auto        upass_registry = upass::uPass_plugin::get_registry();
   std::string order_error;
@@ -85,6 +86,15 @@ uPass_runner::uPass_runner(std::shared_ptr<upass::Lnast_manager>& _lm, const std
 
     std::print("uPass - add {}\n", name);
     upasses.emplace_back(Pass_entry{.name = name, .pass = it->second.setup_fn(_lm)});
+  }
+
+  // Wire runner-backed fold callback + options into every pass. Done once,
+  // after all passes are constructed, so the callback sees the full pass
+  // list and each pass can pick the options it recognizes.
+  auto fold_fn = [this](std::string_view name) { return try_fold_ref(name); };
+  for (auto& entry : upasses) {
+    entry.pass->set_runner_fold_fn(fold_fn);
+    entry.pass->set_options(options);
   }
 }
 
@@ -296,6 +306,14 @@ void uPass_runner::run(std::size_t max_iters) {
       },
       [this]() { process_lnast(); },
       [this]() { return changed_passes(); });
+
+  // Per-pass finalization. Runs after all iterations finish — passes use
+  // this to emit summaries or enforce end-of-run invariants (see
+  // uPass_verifier::end_run, which compares cassert tallies against
+  // expected counts).
+  for (auto& entry : upasses) {
+    entry.pass->end_run();
+  }
 }
 
 // ── Node dispatch ─────────────────────────────────────────────────────────────

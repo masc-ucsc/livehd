@@ -19,7 +19,8 @@
 
 struct uPass_runner : public upass::uPass_struct {
 public:
-  uPass_runner(std::shared_ptr<upass::Lnast_manager>& _lm, const std::vector<std::string>& upass_names);
+  uPass_runner(std::shared_ptr<upass::Lnast_manager>& _lm, const std::vector<std::string>& upass_names,
+               upass::Options_map options = {});
 
   void               run(std::size_t max_iters = 1);
   bool               has_configuration_error() const { return configuration_error; }

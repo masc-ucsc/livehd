@@ -1,6 +1,8 @@
 /*
 :name: add_trivial
-:type: parsing lnast upass
+:type: comptime
+:verifier_pass: 1
+:verifier_fail: 0
 */
 
 const x = 1

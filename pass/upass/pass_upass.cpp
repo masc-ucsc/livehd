@@ -63,6 +63,12 @@ void Pass_upass::setup() {
   m1.add_label_optional("inherit",
                         "inherit labels from prior pipeline stages (default true); false resets sticky upass options",
                         "true");
+  m1.add_label_optional("verifier_pass",
+                        "verifier: expected count of comptime-known-true casserts (omit or -1 to disable check)",
+                        "");
+  m1.add_label_optional("verifier_fail",
+                        "verifier: expected count of comptime-known-false casserts (omit or -1 to disable check)",
+                        "");
   register_pass(m1);
 }
 
@@ -114,6 +120,17 @@ Pass_upass::Pass_upass(const Eprp_var& var) : Pass("pass.upass", var) {
     return static_cast<char>(std::tolower(c));
   });
   dry_run = !(dry_run_txt.empty() || dry_run_txt == "0" || dry_run_txt == "false" || dry_run_txt == "no" || dry_run_txt == "off");
+
+  // Per-pass config forwarded to the runner. Pick up labels whose meaning
+  // is pass-specific (as opposed to runner/order labels above).
+  auto capture_opt = [&](std::string_view label) {
+    auto v = std::string(get_label(label, ""));
+    if (!v.empty()) {
+      pass_options[std::string(label)] = std::move(v);
+    }
+  };
+  capture_opt("verifier_pass");
+  capture_opt("verifier_fail");
 
   if (!upass_order.empty()) {
     return;
@@ -176,7 +193,7 @@ void Pass_upass::work(Eprp_var& var) {
   const auto inputs = var.lnasts;
   for (const auto& ln : inputs) {
     auto lm     = std::make_shared<upass::Lnast_manager>(ln);
-    auto runner = uPass_runner(lm, up.upass_order);
+    auto runner = uPass_runner(lm, up.upass_order, up.pass_options);
     if (runner.has_configuration_error()) {
       fail_upass_runtime(std::format("pass.upass invalid pass configuration: {}", runner.get_configuration_error()));
     }

@@ -1,14 +1,45 @@
 //  This file is distributed under the BSD 3-Clause License. See LICENSE for details.
 #pragma once
 
+#include <cstddef>
 #include <format>
+#include <optional>
+#include <string>
+#include <vector>
 
+#include "lconst.hpp"
 #include "lnast_ntype.hpp"
 #include "upass_core.hpp"
 
 struct uPass_verifier : public upass::uPass {
 public:
   using uPass::uPass;
+
+  // Cassert disposition at comptime. Uses the runner-backed fold callback
+  // to resolve the operand. See upass.md §3 Slice 2.
+  //   known-true  → drop (assertion discharged), increments pass_count
+  //   known-false → upass::error, increments fail_count
+  //   unknown     → emit, increments unknown_count
+  upass::Emit_decision classify_statement() override;
+
+  // Reset counts so a re-entered iteration starts fresh. The final
+  // iteration's counts are the ones compared in end_run.
+  void begin_iteration() override {
+    upass::uPass::begin_iteration();
+    pass_count    = 0;
+    fail_count    = 0;
+    unknown_count = 0;
+    unknown_operands.clear();
+  }
+
+  // Parses `verifier_pass` / `verifier_fail` from the runner-supplied
+  // options. Integer values set the expected counts; the special value
+  // "-1" (or an absent key) disables the corresponding check.
+  void set_options(const upass::Options_map& opts) override;
+
+  // Compares tallies against expected counts when set. Always prints a
+  // one-line count summary to stderr. Calls upass::error on mismatch.
+  void end_run() override;
 
   // Assignment
   void process_assign() override { check_unary(); }
@@ -50,6 +81,15 @@ public:
   void process_ge() override { check_binary(); }
 
 private:
+  std::size_t              pass_count{0};
+  std::size_t              fail_count{0};
+  std::size_t              unknown_count{0};
+  std::vector<std::string> unknown_operands;
+
+  // -1 sentinels mean "not set, don't check".
+  int expected_pass{-1};
+  int expected_fail{-1};
+
   void check_binary() {
     move_to_child();
 

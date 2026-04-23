@@ -596,14 +596,16 @@ assert saturating_counter == 255
 8. **`#[]` vs `:@[]`**: Bit selection uses `#[]`, cycle timing uses `:@[N]`
    (type check) and `await[N]` (declaration). Never mix them.
 
-9. **`0sb?` / `0b?` vs `nil`**: unknown bits live *inside an integer literal*
-   (`0b?`, `0sb?`, `0b??10`, etc.), not as a bare `?`. They are valid
-   integer values (Verilog `x`) and propagate through arithmetic
-   (`0sb? + 1 == 0sb??`, `0sb? | 1 == 1`). `nil` is *invalid* — any
-   arithmetic or branch on it is a hard error, and the compiler must
-   prove it is eliminated before synthesis. Bare `?` is only a
-   declaration placeholder (`mut x:u8 = ?` = "use the type default"),
-   **not** an integer value you can do math on.
+9. **`0sb?` / `0b?` / `0ub?` vs `nil`**: unknown bits live *inside an
+   integer literal* (`0b?`, `0ub?`, `0sb?`, `0b??10`, `0ub10??1?01`,
+   etc.), not as a bare `?`. `0b` and `0ub` are both unsigned-binary
+   prefixes (`0ub` is just the explicit form); `0sb` is signed. They
+   are valid integer values (Verilog `x`) and propagate through
+   arithmetic (`0sb? + 1 == 0sb??`, `0sb? | 1 == 1`). `nil` is
+   *invalid* — any arithmetic or branch on it is a hard error, and the
+   compiler must prove it is eliminated before synthesis. Bare `?` is
+   only a declaration placeholder (`mut x:u8 = ?` = "use the type
+   default"), **not** an integer value you can do math on.
 
 10. **`ref` is semantic, not performance**: In hardware all signals are
     wires. `ref` allows mutation, not optimization.
@@ -647,14 +649,15 @@ assert saturating_counter == 255
 8. **`_pin` attributes need `ref`.** `clock_pin=ref clk`, not
    `clock_pin=clk`.
 
-9. **`nil` vs `0sb?` vs bare `?`.** For a don't-care / Verilog-`x`
-   *integer value*, use the bit-literal forms `0sb?` (signed) or `0b?`
-   (unsigned) — bare `?` is **not** an integer and does not propagate
-   through arithmetic. Bare `?` is only a declaration placeholder
-   (`mut x:u8 = ?` = "use the type's default"), so `? + 1` is a type
-   error while `0sb? + 1` is `0sb??`. Use `nil` to mean *no value here
-   yet*; reading a `nil` value is a hard error. The three are not
-   interchangeable.
+9. **`nil` vs `0sb?` / `0b?` / `0ub?` vs bare `?`.** For a don't-care /
+   Verilog-`x` *integer value*, use the bit-literal forms `0sb?`
+   (signed) or `0b?` / `0ub?` (unsigned — `0ub` is the explicit
+   unsigned prefix, `0b` is its shorthand). Bare `?` is **not** an
+   integer and does not propagate through arithmetic — it is only a
+   declaration placeholder (`mut x:u8 = ?` = "use the type's default"),
+   so `? + 1` is a type error while `0sb? + 1` is `0sb??`. Use `nil`
+   to mean *no value here yet*; reading a `nil` value is a hard error.
+   The three are not interchangeable.
 
 10. **No implicit int/bool conversion.** `if 5 { ... }` is a type error.
     Write `if 5 != 0 { ... }`.
@@ -673,8 +676,9 @@ assert saturating_counter == 255
 15. **Initialization is explicit.** Every `mut`/`const`/`reg` declaration
     needs an initializer. Pick by intent:
     * a concrete value (`0`, `false`, `""`, `(a=1, b=2)`) — normal case.
-    * `0sb?` / `0b?` (or any bit-literal with `?` digits) — an integer
-      value with unknown bits that participates in arithmetic.
+    * `0sb?` / `0b?` / `0ub?` (or any bit-literal with `?` digits) —
+      an integer value with unknown bits that participates in
+      arithmetic. `0b` and `0ub` are both unsigned; `0sb` is signed.
     * bare `?` — "use the type's default" placeholder (`mut x:u8 = ?`).
       Not a value; cannot be used in arithmetic.
     * `nil` — "no valid value yet" (tuple/range default). Reading it is
