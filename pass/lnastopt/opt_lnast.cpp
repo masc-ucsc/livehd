@@ -1073,6 +1073,9 @@ void Opt_lnast::process_stmts(const std::shared_ptr<Lnast>& ln, const Lnast_nid&
       case Lnast_ntype::Lnast_ntype_int::Lnast_ntype_ge: process_ge(ln, idx); break;
       case Lnast_ntype::Lnast_ntype_int::Lnast_ntype_if: process_if(ln, idx); break;
       case Lnast_ntype::Lnast_ntype_int::Lnast_ntype_stmts: process_stmts(ln, idx); break;
+      case Lnast_ntype::Lnast_ntype_int::Lnast_ntype_delay_assign:
+        // opaque: non-zero offsets are not a pure copy, so never fold through delay_assign.
+        break;
       default: process_todo(ln, idx);
     }
 

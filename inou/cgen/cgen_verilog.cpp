@@ -13,9 +13,12 @@
 #include "perf_tracing.hpp"
 
 Cgen_verilog::Cgen_verilog(bool _verbose, std::string_view _odir) : verbose(_verbose), odir(_odir), nrunning(0) {
-  if (reserved_keyword.empty()) {
-    std::lock_guard<std::mutex> guard(lgs_mutex);
-
+  // Inou_cgen::to_cgen_verilog launches one Cgen_verilog per Lgraph on the thread pool, so the
+  // static reserved_keyword set is touched concurrently. The previous "check empty outside the
+  // lock, then lock-and-insert" pattern races: a reader sees !empty while a writer is mid-insert,
+  // tripping absl's debug kReentrance check. call_once funnels the init through a single writer.
+  static std::once_flag init_once;
+  std::call_once(init_once, [] {
     reserved_keyword.insert("reg");
     reserved_keyword.insert("input");
     reserved_keyword.insert("output");
@@ -30,7 +33,7 @@ Cgen_verilog::Cgen_verilog(bool _verbose, std::string_view _odir) : verbose(_ver
     reserved_keyword.insert("begin");
     reserved_keyword.insert("end");
     reserved_keyword.insert("logic");
-  }
+  });
 }
 
 std::string Cgen_verilog::get_wire_or_const(const Node_pin& dpin) const {

@@ -1056,7 +1056,7 @@ Bitwidth::Attr Bitwidth::get_key_attr(std::string_view key) {
     return Attr::Set_ubits;
   }
 
-  if (str_tools::ends_with(key, "__sbits")) {
+  if (str_tools::ends_with(key, "__bits") || str_tools::ends_with(key, "__sbits")) {
     return Attr::Set_sbits;
   }
 
@@ -1131,8 +1131,11 @@ void Bitwidth::process_attr_set_dp_assign(Node& node_dp) {
     return;
   }
 
+  // Copy the value before insert_or_assign: a rehash inside the loop would
+  // invalidate `it`, making `it->second` a use-after-free.
+  const Bitwidth_range lhs_bw = it->second;
   for (auto out_dpin : node_dp.out_connected_pins()) {
-    bwmap.insert_or_assign(out_dpin.get_compact_class(), it->second);
+    bwmap.insert_or_assign(out_dpin.get_compact_class(), lhs_bw);
   }
 
   auto it2 = bwmap.find(dpin_rhs.get_compact_class());
@@ -1524,7 +1527,9 @@ void Bitwidth::bw_pass(Lgraph* lg) {
             set_graph_boundary(out_driver, spin);
           }
 
-          bwmap.insert_or_assign(dpin.get_compact_class(), it->second);
+          // Copy before insert_or_assign: rehash would invalidate `it`.
+          const Bitwidth_range src_bw = it->second;
+          bwmap.insert_or_assign(dpin.get_compact_class(), src_bw);
         },
         hier);
 

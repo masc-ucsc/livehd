@@ -109,7 +109,7 @@ void Symbol_table::always_scope() {
 }
 
 void Symbol_table::function_scope(std::string_view func_id, std::shared_ptr<Bundle> inp_bundle) {
-  std::string_view scope = func_id;
+  std::string scope(func_id);
   for (int i = stack.size() - 1; i >= 0; --i) {
     const auto& s = stack[i];
     if (s.func_id != func_id) {

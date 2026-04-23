@@ -144,8 +144,9 @@ void Pass_lnast_fromlg::handle_source_node(Lgraph* lg, Node_pin& pin, Lnast& lna
       if (editable_pin.get_node().get_color() == GREY || editable_pin.get_node().get_color() == WHITE) {
         auto ntype = editable_pin.get_node().get_type_op();
         if (ntype == Ntype_op::Flop || ntype == Ntype_op::Fflop || ntype == Ntype_op::Latch) {
-          // add this as : #x = #x.__create_flop. Because #x could be a normal variable as well. So you need to tell that it is a
-          // latch.
+          // Flop/Latch driver — register-ness is emitted separately via
+          // `attr_set X storage reg` at the declaration site, so skip the
+          // usual source-node recursion here.
           continue;
         }
         handle_source_node(lg, editable_pin, lnast, ln_node);
@@ -161,22 +162,17 @@ void Pass_lnast_fromlg::handle_source_node(Lgraph* lg, Node_pin& pin, Lnast& lna
   I(pin.get_node().get_color() == WHITE);
   pin.get_node().set_color(GREY);
 
-  // add this as : #x = #x.__create_flop. Because #x could be a normal variable as well. So you need to tell that it is a latch.
+  // Mark flops/latches with the `storage = reg` sticky attribute
+  // (lnast_todo §15.1) so consumers see an explicit attr_set rather than the
+  // legacy `__create_flop` magic string.
   auto ntype = pin.get_node().get_type_op();
   if (ntype == Ntype_op::Flop || ntype == Ntype_op::Fflop || ntype == Ntype_op::Latch) {
-    // add this as : #x = #x.__create_flop. Because #x could be a normal variable as well. So you need to tell that it is a latch.
     auto pin_name = dpin_get_name(pin);
-    // to add #x = #x.__create_flop
-    auto temp_decl_var_name = create_temp_var();
 
-    auto dot_decl_node = lnast.add_child(ln_node, Lnast_node::create_attr_get());
-    lnast.add_child(dot_decl_node, Lnast_node::create_ref(temp_decl_var_name));
-    lnast.add_child(dot_decl_node, Lnast_node::create_ref(pin_name));
-    lnast.add_child(dot_decl_node, Lnast_node::create_const("__create_flop"));
-
-    auto asg_decl_node = lnast.add_child(ln_node, Lnast_node::create_assign());
-    lnast.add_child(asg_decl_node, Lnast_node::create_ref(pin_name));
-    lnast.add_child(asg_decl_node, Lnast_node::create_ref(temp_decl_var_name));
+    auto attr_set_node = lnast.add_child(ln_node, Lnast_node::create_attr_set());
+    lnast.add_child(attr_set_node, Lnast_node::create_ref(pin_name));
+    lnast.add_child(attr_set_node, Lnast_node::create_const("storage"));
+    lnast.add_child(attr_set_node, Lnast_node::create_const("reg"));
 
     // to create #x_q = #x // test case: firrtl_tail3.prp
     auto pin_nam_q   = absl::StrCat(pin_name, "_q");
@@ -226,8 +222,7 @@ void Pass_lnast_fromlg::attach_to_lnast(Lnast& lnast, Lnast_nid& parent_node, co
 
   std::string name;
   auto        bw = pin.get_bits();
-  // if ((bw > 0) & (pin.get_name().substr(0,3) != "___")) {
-  if ((bw > 0) & (dpin_get_name(pin).substr(0, 3) != "___")) {
+  if ((bw > 0) & (!Lnast::is_tmp(dpin_get_name(pin)))) {
     if (ntype == Ntype_op::Flop || ntype == Ntype_op::Latch) {
       /* NOTE->hunter: I decided to only specify reg and IO bw (not
        * wires). If more is needed just widen below condition. */
@@ -568,12 +563,12 @@ void Pass_lnast_fromlg::attach_mask_node(Lnast& lnast, Lnast_nid& parent_node, c
     } else {
       {
         auto asg_rang_begin_node = lnast.add_child(gm_tup_node, Lnast_node::create_assign());
-        lnast.add_child(asg_rang_begin_node, Lnast_node::create_const("__range_begin"));
+        lnast.add_child(asg_rang_begin_node, Lnast_node::create_ref("__range_begin"));
         lnast.add_child(asg_rang_begin_node, Lnast_node::create_const(range_begin));
       }
       {
         auto asg_rang_end_node = lnast.add_child(gm_tup_node, Lnast_node::create_assign());
-        lnast.add_child(asg_rang_end_node, Lnast_node::create_const("__range_end"));
+        lnast.add_child(asg_rang_end_node, Lnast_node::create_ref("__range_end"));
         lnast.add_child(asg_rang_end_node, Lnast_node::create_const(range_end));
       }
     }

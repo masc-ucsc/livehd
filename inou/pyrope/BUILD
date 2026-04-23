@@ -25,22 +25,60 @@ cc_library(
     alwayslink = True,
 )
 
-sh_test(
-    name = "pyrope_test.sh",
-    srcs = ["tests/pyrope_test.sh"],
-    data = [
-        ":pyrope_tests",
-        "//inou/yosys/tests:verilog_tests",
-        "//main:lgshell",
-    ],
-    tags = ["fixme"],
-)
-
 filegroup(
     name = "pyrope_tests",
     srcs = glob(["tests/*.prp"]),
     visibility = ["//visibility:public"],
 )
+
+_PYROPE_PRP_BASES = {
+    f[len("tests/"):-len(".prp")]: True
+    for f in glob(["tests/*.prp"])
+}
+
+_PYROPE_COMPILE_SKIP = {
+    # These have golden Verilog files, but the legacy inou/pyrope compile
+    # harness still uses the raw lnast_tolg/cprop/bitwidth pipeline. Keep
+    # work-in-progress cases out of //... until the lowering path supports them.
+    "connect_through": True,
+    "connect_through2": True,
+    "firrtl_gcd": True,
+    "funcall": True,
+    "funcall3": True,
+    "funcall4": True,
+    "struct_uflop": True,
+    "top": True,
+    "tuple_nested2": True,
+    "tuple_reg": True,
+    "vec_shift_register_param": True,
+}
+
+PYROPE_COMPILE_TESTS = [
+    base
+    for base in [
+        f[len("tests/verilog_gld/"):-len(".gld.v")]
+        for f in glob(["tests/verilog_gld/*.gld.v"])
+    ]
+    if base in _PYROPE_PRP_BASES and base not in _PYROPE_COMPILE_SKIP
+]
+
+[sh_test(
+    name = "pyrope_compile-%s" % t,
+    srcs = ["tests/pyrope_compile.sh"],
+    args = ["$(location //inou/pyrope:tests/%s.prp)" % t],
+    data = [
+        "//inou/pyrope:tests/%s.prp" % t,
+        "//inou/pyrope:tests/verilog_gld/%s.gld.v" % t,
+        "//inou/yosys:scripts",
+        "//main:lgshell",
+    ],
+    tags = [
+        "pyrope_compile",
+    ],
+    deps = [
+        "//inou/yosys:scripts",
+    ],
+) for t in PYROPE_COMPILE_TESTS]
 
 cc_binary(
     name = "prp_test",

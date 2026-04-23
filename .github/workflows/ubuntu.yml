@@ -17,7 +17,7 @@ jobs:
 
 
       - name: Mount bazel cache
-        uses: actions/cache@v5.0.3
+        uses: actions/cache@v5.0.5
         with:
           path: "~/.cache/bazel"
           key: bazel-gcc-${{ runner.os }}-${{ hashFiles('.bazelrc', '.bazelversion', 'WORKSPACE*', 'MODULE.bazel') }}
@@ -45,7 +45,7 @@ jobs:
 
 
       - name: Mount bazel cache
-        uses: actions/cache@v5.0.3
+        uses: actions/cache@v5.0.5
         with:
           path: "~/.cache/bazel"
           key: bazel-coverage-${{ runner.os }}-${{ hashFiles('.bazelrc', '.bazelversion', 'WORKSPACE*', 'MODULE.bazel') }}
@@ -63,7 +63,7 @@ jobs:
 
       - run: bazel coverage --instrument_test_targets --collect_code_coverage --test_tag_filters=-fixme --combined_report=lcov --test_output=all //...
 
-      - uses: codecov/codecov-action@v5
+      - uses: codecov/codecov-action@v6
         with:
           slug: masc-ucsc/livehd
           token: ${{ secrets.CODECOV_TOKEN }}

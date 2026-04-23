@@ -119,7 +119,9 @@ void Code_gen::do_stmts(const lh::Tree_index& stmt_node_index) {
                curlvl);
 
     assert(!curr_node_type.is_invalid());
-    if (curr_node_type.is_assign() || curr_node_type.is_dp_assign()) {
+    if (curr_node_type.is_delay_assign()) {
+      do_delay_assign(curr_index);
+    } else if (curr_node_type.is_assign() || curr_node_type.is_dp_assign()) {
       std::vector<std::string> vec1;
       do_assign(curr_index, vec1, false);
     } else if (curr_node_type.is_if()) {
@@ -131,7 +133,7 @@ void Code_gen::do_stmts(const lh::Tree_index& stmt_node_index) {
     } else if (curr_node_type.is_tuple_set()) {
       do_select(curr_index, "tuple_add");  // FIXME: we may want different syntax
     } else if (curr_node_type.is_attr_set()) {
-      Pass::error("Error in BitWidth Pass in LGraph optimization.\n");
+      do_attr_set(curr_index);
     } else if (curr_node_type.is_tuple_get()) {
       do_select(curr_index, "tuple_get");
     } else if (curr_node_type.is_func_def()) {
@@ -218,7 +220,7 @@ void Code_gen::do_assign(const lh::Tree_index& assign_node_index, std::vector<st
           // hier_tup_vec.push_back("str");
           if (has_DblUndrScor(lnast_to->ref_name_str(key_sec))) {
             //   assign:
-            //       const: __range_begin
+            //       ref  : __range_begin
             //       const: 0
             if (key == "__range_begin") {
               hier_tup_vec.emplace_back(lnast_to->ref_name_str(ref));
@@ -256,7 +258,7 @@ void Code_gen::do_assign(const lh::Tree_index& assign_node_index, std::vector<st
     if (hier_tup_assign) {
       if (has_DblUndrScor(lnast_to->ref_name_str(key))) {
         //   assign:
-        //       const: __range_begin
+        //       ref  : __range_begin
         //       const: 0
         if (key == "__range_begin") {
           hier_tup_vec.emplace_back(lnast_to->ref_name_str(ref));
@@ -1032,6 +1034,94 @@ void Code_gen::do_select(const lh::Tree_index& select_node_index, std::string_vi
 }
 
 //-------------------------------------------------------------------------------------
+// Emit pyrope source for a delay_assign node. Shape: (dst tmp, src ref,
+// offset const). lnast_todo §15.2: only offset=1 is supported today; emit as
+// `dst = src.__last_value` so the prp2prp round-trip re-parses back into the
+// same delay_assign via prp_lnast.cpp's `__last_value` handler.
+void Code_gen::do_delay_assign(const lh::Tree_index& delay_assign_node_index) {
+  std::cout << "node:delay_assign\n";
+
+  auto c0 = lnast->get_first_child(delay_assign_node_index);
+  auto c1 = lnast->get_sibling_next(c0);
+  auto c2 = lnast->get_sibling_next(c1);
+  I(!c2.is_invalid(), "delay_assign must have 3 children (dst, src, offset)");
+
+  std::string dst(lnast->get_name(c0));
+  std::string src(lnast->get_name(c1));
+  std::string offset(lnast->get_name(c2));
+  I(offset == "1", "delay_assign only supports offset=1 at code_gen today");
+
+  if (is_temp_var(dst)) {
+    // Stash the `src.__last_value` expression so consumers of dst (usually a
+    // following assign) render it inline, matching how other tmp-producing
+    // nodes thread values through ref_map.
+    ref_map.insert(std::pair<std::string, std::string>(dst, absl::StrCat(lnast_to->ref_name_str(src), ".__last_value")));
+    return;
+  }
+
+  buffer_to_print->append(absl::StrCat(indent(),
+                                       lnast_to->ref_name_str(dst),
+                                       " = ",
+                                       lnast_to->ref_name_str(src),
+                                       ".__last_value",
+                                       lnast_to->stmt_sep()));
+}
+
+//-------------------------------------------------------------------------------------
+// Emit pyrope source for an attr_set node. Shape: (ref root, const p1 .. pN,
+// const|ref value). lnast_todo §15.1: the `storage = reg` form is rendered as
+// the legacy `root = root.__create_flop` surface syntax so the prp2prp
+// round-trip re-parses back into the same attr_set.
+void Code_gen::do_attr_set(const lh::Tree_index& attr_set_node_index) {
+  std::cout << "node:attr_set\n";
+
+  std::vector<std::string> parts;
+  std::vector<bool>        is_const;
+  for (auto idx = lnast->get_first_child(attr_set_node_index); idx != lnast->invalid_index(); idx = lnast->get_sibling_next(idx)) {
+    parts.emplace_back(lnast->get_name(idx));
+    is_const.emplace_back(lnast->get_type(idx).is_const());
+  }
+
+  I(parts.size() >= 3, "attr_set must have at least (root, key, value)");
+  const auto& root  = parts.front();
+  const auto& value = parts.back();
+
+  std::string field;
+  for (size_t i = 1; i + 1 < parts.size(); ++i) {
+    if (!field.empty()) {
+      field.append(".");
+    }
+    field.append(parts[i]);
+  }
+
+  if (field == "storage" && value == "reg") {
+    buffer_to_print->append(absl::StrCat(indent(),
+                                         lnast_to->ref_name_str(root),
+                                         " = ",
+                                         lnast_to->ref_name_str(root),
+                                         ".__create_flop",
+                                         lnast_to->stmt_sep()));
+    return;
+  }
+
+  auto value_resolved = value;
+  auto map_it         = ref_map.find(value_resolved);
+  if (map_it != ref_map.end()) {
+    value_resolved = map_it->second;
+  } else if (is_number(value_resolved)) {
+    value_resolved = process_number(value_resolved);
+  }
+
+  buffer_to_print->append(absl::StrCat(indent(),
+                                       lnast_to->ref_name_str(root),
+                                       ".",
+                                       field,
+                                       " = ",
+                                       lnast_to->ref_name_str(value_resolved),
+                                       lnast_to->stmt_sep()));
+}
+
+//-------------------------------------------------------------------------------------
 // processing tuple
 void Code_gen::do_tuple(const lh::Tree_index& tuple_node_index) {
   std::cout << "node:tuple\n";
@@ -1167,11 +1257,7 @@ std::string Code_gen::resolve_tuple_assign(const lh::Tree_index& tuple_assign_in
 
 //-------------------------------------------------------------------------------------
 // check if the node has "___"
-bool Code_gen::is_temp_var(std::string_view test_string) {
-  auto txt = test_string.substr(0, 3);
-
-  return (txt == "___") || (txt == "_._");
-}
+bool Code_gen::is_temp_var(std::string_view test_string) { return Lnast::is_tmp(test_string); }
 
 //-------------------------------------------------------------------------------------
 // check if the node has "__"

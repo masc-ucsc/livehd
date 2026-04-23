@@ -13,7 +13,7 @@ protected:
                                              "top",      "sts",        "if",        "uif",       "for",
                                              "while",    "func_call",  "func_def",
 
-                                             "=",        ":=",         "mut",
+                                             "=",        ":=",         "mut",        "delay_assign",
 
                                              "&",        "|",          "~",         "^",
 
@@ -37,7 +37,15 @@ protected:
 
                                              "attr_set", "attr_get",
 
-                                             "cassert",  "error_flag", "phi",       "hot_phi"};
+                                             "cassert",  "error_flag", "phi",       "hot_phi",
+
+                                             "type_def", "type_spec",
+
+                                             "none",     "uint",       "sint",      "range",      "string",
+                                             "boolean",  "type",       "ref",
+
+                                             "tuple",    "array",      "mixin",     "lambda",     "enum",
+                                             "expr_type", "unknown"};
 
   constexpr static std::array namemap_verilog{
       "invalid",
@@ -53,6 +61,7 @@ protected:
       "=",
       "=",  // dp_assign
       "mut",
+      "delay_assign",
 
       "&",
       "|",
@@ -108,6 +117,26 @@ protected:
       "error_flag",
       "phi",
       "hotphi",
+
+      "typedef",
+      "type_spec",
+
+      "none",
+      "logic",  // prim_type_uint
+      "signed logic",  // prim_type_sint
+      "range",
+      "string",
+      "bit",  // prim_type_boolean
+      "type",
+      "ref",  // prim_type_ref
+
+      "struct",  // comp_type_tuple
+      "array",
+      "mixin",
+      "lambda",
+      "enum",
+      "expr_type",
+      "unknown",
   };
 
   constexpr static std::array namemap_cpp{
@@ -125,6 +154,7 @@ protected:
       "=",  // assign
       "=",  // dp_assign
       "mut",
+      "delay_assign",
 
       "&",  // and
       "|",  // or
@@ -180,6 +210,26 @@ protected:
       "error_flag",
       "phi",
       "hotphi",
+
+      "typedef",
+      "type_spec",
+
+      "none",
+      "unsigned",  // prim_type_uint
+      "signed",    // prim_type_sint
+      "range",
+      "string",
+      "bool",  // prim_type_boolean
+      "type",
+      "ref",   // prim_type_ref
+
+      "tuple",  // comp_type_tuple
+      "array",
+      "mixin",
+      "lambda",
+      "enum",
+      "expr_type",
+      "unknown",
   };
 
 public:
@@ -189,4 +239,10 @@ public:
 
   static_assert(namemap_cpp.size() == namemap_pyrope.size());
   static_assert(namemap_cpp.size() == namemap_verilog.size());
+  static_assert(namemap_pyrope.size() == Lnast_ntype::Lnast_ntype_last_invalid,
+                "lnast_map.hpp namemap_pyrope out of sync with lnast_nodes.def — add/remove the matching entry");
+  static_assert(namemap_verilog.size() == Lnast_ntype::Lnast_ntype_last_invalid,
+                "lnast_map.hpp namemap_verilog out of sync with lnast_nodes.def — add/remove the matching entry");
+  static_assert(namemap_cpp.size() == Lnast_ntype::Lnast_ntype_last_invalid,
+                "lnast_map.hpp namemap_cpp out of sync with lnast_nodes.def — add/remove the matching entry");
 };

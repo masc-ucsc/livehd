@@ -706,7 +706,7 @@ void Bundle::set(std::string_view key, const std::shared_ptr<Bundle const>& tup)
   bool tup_scalar = tup->is_scalar();
 
   for (const auto& e : tup->key_map) {
-    std::string_view key2;
+    std::string key2;
     // Remove 0. from tup if tup is scalar
     if (tup_scalar && e.first.front() == '0' && (e.first.size() == 1 || e.first[1] == '.')) {
       if (e.first.size() == 1) {
@@ -1064,7 +1064,7 @@ bool Bundle::is_ordered(std::string_view key) const {
         continue;  // attributes do not affect order
       }
 
-      field = e.first.substr(e_pos);
+      field = std::string_view(e.first).substr(e_pos);
     }
 
     auto pos = get_first_level_pos(field);

@@ -88,7 +88,7 @@ Pyrope_compile_LL_LN () {
     echo "PRP -> HL LNAST -> LGraph"
     echo "----------------------------------------------------"
     #PRP->LN->LG
-    ${LGSHELL} "inou.pyrope files:${PATTERN_PATH}/${pt}.prp |> pass.compiler gviz:true top:${pt} path:lgdb2 |> lgraph.dump"
+    ${LGSHELL} "inou.pyrope files:${PATTERN_PATH}/${pt}.prp |> pass.lnastfmt |> pass.compiler gviz:true top:${pt} path:lgdb2 |> lgraph.dump"
     
     ret_val=$?
     if [ $ret_val -ne 0 ]; then
@@ -105,7 +105,7 @@ Pyrope_compile_LL_LN () {
     #LG->LN->LG
     ${LGSHELL} "lgraph.open name:${pt} path:lgdb2 |> inou.graphviz.from odir:gvizes" 
     dot -Tpdf -o gvizes/${pt}.dot.pdf gvizes/${pt}.dot
-    ${LGSHELL} "lgraph.open name:${pt} path:lgdb2 |> pass.lnast_fromlg |> lnast.dump |> inou.code_gen.prp odir:tmp_prp" #This is just to see the LN generated
+    ${LGSHELL} "lgraph.open name:${pt} path:lgdb2 |> pass.lnast_fromlg |> pass.lnastfmt |> lnast.dump |> inou.code_gen.prp odir:tmp_prp" #This is just to see the LN generated
 
 
     ret_val=$?
@@ -125,7 +125,7 @@ Pyrope_compile_LL_LN () {
     echo "pyrope_gen -> 2nd HL LNAST -> LGraph"
     echo "----------------------------------------------------"
 
-    ${LGSHELL} "inou.pyrope files:tmp_prp/${pt}.prp |> pass.compiler gviz:true top:${pt} path:lgdb/ |> lgraph.dump"
+    ${LGSHELL} "inou.pyrope files:tmp_prp/${pt}.prp |> pass.lnastfmt |> pass.compiler gviz:true top:${pt} path:lgdb/ |> lgraph.dump"
 
     ret_val=$?
     if [ $ret_val -ne 0 ]; then
@@ -217,13 +217,13 @@ Pyrope_compile_hier_LL_LN () {
     fi
   done
 
-  ${LGSHELL} "inou.pyrope files:${pts_concat} |> inou.code_gen.prp odir:tmp_prp"
+  ${LGSHELL} "inou.pyrope files:${pts_concat} |> pass.lnastfmt |> inou.code_gen.prp odir:tmp_prp"
   ret_val=$?
   if [ $ret_val -ne 0 ]; then
     echo "ERROR: could not compile with pattern: ${pts_concat}.prp!"
     exit $ret_val
   fi
-  ${LGSHELL} "inou.pyrope files:${tmp_pts_concat} |> pass.compiler gviz:true top:${top_module}"
+  ${LGSHELL} "inou.pyrope files:${tmp_pts_concat} |> pass.lnastfmt |> pass.compiler gviz:true top:${top_module}"
   #${LGSHELL} "inou.pyrope files:${pts_concat} |> pass.compiler top:${top_module}"
   ret_val=$?
   if [ $ret_val -ne 0 ]; then

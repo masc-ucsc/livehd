@@ -174,6 +174,19 @@ void Lnast_writer::write_assign() {
 void Lnast_writer::write_dp_assign() {}
 void Lnast_writer::write_mut() {}
 
+void Lnast_writer::write_delay_assign() {
+  move_to_child();
+  write_lnast();
+  print(" = delay_assign(");
+  move_to_sibling();
+  write_lnast();
+  print(", ");
+  move_to_sibling();
+  write_lnast();
+  print(")");
+  move_to_parent();
+}
+
 void Lnast_writer::write_n_ary(std::string_view op) {
   move_to_child();
   write_lnast();

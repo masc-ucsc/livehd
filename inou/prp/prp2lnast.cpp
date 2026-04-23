@@ -337,7 +337,11 @@ void Prp2lnast::process_assignment_or_declaration(TSNode node) {
     primary_node_stack.pop();
 
     enter_scope(Expression_state::Lvalue);
+    auto primary_stack_size = primary_node_stack.size();
     process_node(lnode);
+    if (primary_node_stack.size() > primary_stack_size) {
+      process_lvalue_assignment(rvalue_node_stack.top());
+    }
     leave_scope();
 
     rvalue_node_stack.pop();
@@ -348,6 +352,34 @@ void Prp2lnast::process_assignment_or_declaration(TSNode node) {
     process_node(lnode);
     leave_scope();
     primary_node_stack.pop();
+  }
+}
+
+void Prp2lnast::process_lvalue_assignment(const Lnast_node& rvalue) {
+  if (rvalue.is_invalid()) {
+    primary_node_stack.pop();
+    return;
+  }
+
+  if (select_stack.top().nodes.empty()) {
+    std::print("Rvalue node stack : {}\n", rvalue_node_stack.size());
+    std::print("Primary node stack : {}\n", primary_node_stack.size());
+    auto assign_index = lnast->add_child(stmts_index, Lnast_node::create_assign());
+    lnast->add_child(assign_index, primary_node_stack.top());
+    lnast->add_child(assign_index, rvalue);
+    primary_node_stack.pop();
+  } else {
+    auto hier_set_index
+        = lnast->add_child(stmts_index,
+                           select_stack.top().is_attribute ? Lnast_node::create_attr_set() : Lnast_node::create_tuple_set());
+    lnast->add_child(hier_set_index, primary_node_stack.top());
+    primary_node_stack.pop();
+    for (auto n : select_stack.top().nodes) {
+      lnast->add_child(hier_set_index, n);
+    }
+    lnast->add_child(hier_set_index, rvalue);
+    select_stack.top().nodes.clear();
+    select_stack.top().is_attribute = false;
   }
 }
 
@@ -543,26 +575,7 @@ void Prp2lnast::process_lvalue_list(TSNode node) {
         primary_node_stack.pop();
         break;
       }
-      if (select_stack.top().nodes.empty()) {
-        std::print("Rvalue node stack : {}\n", rvalue_node_stack.size());
-        std::print("Primary node stack : {}\n", primary_node_stack.size());
-        auto assign_index = lnast->add_child(stmts_index, Lnast_node::create_assign());
-        lnast->add_child(assign_index, primary_node_stack.top());
-        lnast->add_child(assign_index, rvalue);
-        primary_node_stack.pop();
-      } else {
-        auto hier_set_index
-            = lnast->add_child(stmts_index,
-                               select_stack.top().is_attribute ? Lnast_node::create_attr_set() : Lnast_node::create_tuple_set());
-        lnast->add_child(hier_set_index, primary_node_stack.top());
-        primary_node_stack.pop();
-        for (auto n : select_stack.top().nodes) {
-          lnast->add_child(hier_set_index, n);
-        }
-        lnast->add_child(hier_set_index, rvalue);
-        select_stack.top().nodes.clear();
-        select_stack.top().is_attribute = false;
-      }
+      process_lvalue_assignment(rvalue);
     }
     if (has_multiple_items) {
       ++tuple_lvalue_positions.back();
@@ -1023,6 +1036,9 @@ void Prp2lnast::process_unary_expression(TSNode node) {
     auto ref        = get_tmp_ref();
 
     lnast->add_child(expr_index, ref);
+    if (op == "-") {
+      lnast->add_child(expr_index, Lnast_node::create_const("0"));
+    }
     lnast->add_child(expr_index, arg);
 
     primary_node_stack.push(ref);
@@ -1211,9 +1227,9 @@ void Prp2lnast::process_identifier(TSNode node) {
         if (ref_name_map.count(name) == 0) {
           std::string directed_name(name);
           if (is_function_input) {
-            directed_name = absl::StrCat("$.", name);
+            directed_name = absl::StrCat("$", name);
           } else if (is_function_output) {
-            directed_name = absl::StrCat("%.", name);
+            directed_name = absl::StrCat("%", name);
           }
           ref_name_map[name] = directed_name;
         }
@@ -1272,7 +1288,7 @@ void Prp2lnast::add_attr_check(const Lnast_node key) {
   lnast->add_child(cassert_index, tmp_ref_node);
 }
 
-inline std::string Prp2lnast::get_tmp_name() { return absl::StrCat("___t", tmp_ref_count++); }
+inline std::string Prp2lnast::get_tmp_name() { return absl::StrCat("___", tmp_ref_count++); }
 
 inline Lnast_node Prp2lnast::get_tmp_ref() { return Lnast_node::create_ref(get_tmp_name()); }
 

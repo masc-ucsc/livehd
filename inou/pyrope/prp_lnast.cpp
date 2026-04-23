@@ -26,7 +26,7 @@ void Prp_lnast::dump(lh::Tree_index idx) const {
 }
 
 std::string Prp_lnast::get_temp_string() {
-  static std::string current_temp_var("___t");
+  static std::string current_temp_var("___");
 
   return absl::StrCat(current_temp_var, last_temp_var_counter++);
 }
@@ -852,7 +852,7 @@ Lnast_node Prp_lnast::evaluate_all_tuple_nodes(const lh::Tree_index& idx_start_a
     auto range_el       = ast->get_data(idx_range_next);
 
     auto       assign_root          = Lnast_node::create_assign();
-    auto       range_start_sentinel = Lnast_node::create_const("__range_begin");
+    auto       range_start_sentinel = Lnast_node::create_ref("__range_begin");
     Lnast_node range_start;
     bool       range_start_is_null = false;
     if (range_el.token_entry != 0) {
@@ -873,7 +873,7 @@ Lnast_node Prp_lnast::evaluate_all_tuple_nodes(const lh::Tree_index& idx_start_a
       idx_range_next = ast->get_sibling_next(idx_range_next);
     }
 
-    auto       range_end_sentinel = Lnast_node::create_const("__range_end");
+    auto       range_end_sentinel = Lnast_node::create_ref("__range_end");
     Lnast_node range_end;
     bool       range_end_is_null = false;
     if (idx_range_next.is_invalid()) {
@@ -1628,11 +1628,38 @@ Lnast_node Prp_lnast::eval_tuple_dot_notation(lh::Tree_index idx_start_ast, lh::
   } else if (is_attr) {  // rhs
 
     auto field = select_fields.back().token.get_text();
-    if (field == "__create_flop" || field == "__last_value") {
-      idx_dot_root = lnast->add_child(cur_stmts, Lnast_node::create_attr_get());
-    } else {
-      idx_dot_root = lnast->add_child(cur_stmts, Lnast_node::create_tuple_get());
+    if (field == "__create_flop") {
+      // lnast_todo §15.1: emit `attr_set X storage reg` in place of the old
+      // `attr_get ___t X __create_flop`. Return the accessed ref so the
+      // surrounding `x = x.__create_flop` assignment collapses to a self
+      // assign — the consumer first creates the flop via the attr_set,
+      // then the self-assign threads the flop output through SSA.
+      I(select_fields.size() == 1);
+      auto idx_attr_set = lnast->add_child(cur_stmts, Lnast_node::create_attr_set());
+      lnast->add_child(idx_attr_set, accessed_el);
+      lnast->add_child(idx_attr_set, Lnast_node::create_const("storage"));
+      lnast->add_child(idx_attr_set, Lnast_node::create_const("reg"));
+      return accessed_el;
     }
+    if (field == "__last_value") {
+      // lnast_todo §15.2: emit `delay_assign ___t X 1` in place of the old
+      // `attr_get ___t X __last_value`. Same shape as slang's
+      // `Lnast_create::get_lnast_name(..., last_value=true)`.
+      //
+      // Multi-field paths (e.g. `foo.a.__last_value`) lose the intermediate
+      // fields, matching the old `attr_get` lowering which already used only
+      // the root ref as `driver_vname`. That approximation is the pre-§15.2
+      // behavior; proper path-aware deferred reads need §15.2 offset=1 on a
+      // tuple element, which isn't implemented yet in `process_ast_delay_
+      // assign_op` (only handles `Or` wire placeholder today).
+      auto idx_delay = lnast->add_child(cur_stmts, Lnast_node::create_delay_assign());
+      auto tmp_lhs   = get_lnast_temp_ref();
+      lnast->add_child(idx_delay, tmp_lhs);
+      lnast->add_child(idx_delay, accessed_el);
+      lnast->add_child(idx_delay, Lnast_node::create_const("1"));
+      return tmp_lhs;
+    }
+    idx_dot_root = lnast->add_child(cur_stmts, Lnast_node::create_tuple_get());
   } else {
     I(!is_attr);  // rhs
     idx_dot_root = lnast->add_child(cur_stmts, Lnast_node::create_tuple_get());

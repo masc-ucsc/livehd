@@ -68,6 +68,8 @@ void Lnast_tolg::process_ast_stmts(Lgraph* lg, const Lnast_nid& lnidx_stmts) {
       process_ast_attr_set_op(lg, lnidx);
     } else if (ntype.is_attr_get()) {
       process_ast_attr_get_op(lg, lnidx);
+    } else if (ntype.is_delay_assign()) {
+      process_ast_delay_assign_op(lg, lnidx);
     } else if (ntype.is_tuple_add() || ntype.is_tuple_set()) {
       process_ast_tuple_add_op(lg, lnidx);
     } else if (ntype.is_tuple_get()) {
@@ -720,7 +722,7 @@ bool Lnast_tolg::is_hier_inp_bits_set(const Lnast_nid& lnidx_ta) {
       }
       return false;
     }
-    if (lnast->get_vname(child) == "__ubits" || lnast->get_vname(child) == "__sbits") {
+    if (lnast->get_vname(child) == "__bits" || lnast->get_vname(child) == "__ubits" || lnast->get_vname(child) == "__sbits") {
       return true;
     }
   }
@@ -742,11 +744,13 @@ void Lnast_tolg::process_hier_inp_bits_set(Lgraph* lg, const Lnast_nid& lnidx_ta
       std::tie(io_pos, full_inp_hier_name) = Lgtuple::convert_key_to_io(lnast->get_vname(c0_ta));
       root_inp_sname                       = Lgtuple::convert_key_to_io(lnast->get_sname(c0_ta)).second;
 
-    } else if (lnast->get_vname(child) != "__ubits" && lnast->get_vname(child) != "__sbits") {
+    } else if (lnast->get_vname(child) != "__bits" && lnast->get_vname(child) != "__ubits"
+               && lnast->get_vname(child) != "__sbits") {
       I(child != lnast->get_last_child(lnidx_ta));
       absl::StrAppend(&full_inp_hier_name, ".", lnast->get_vname(child));
 
-    } else if (lnast->get_vname(child) == "__ubits" || lnast->get_vname(child) == "__sbits") {  // at the __bits child
+    } else if (lnast->get_vname(child) == "__bits" || lnast->get_vname(child) == "__ubits"
+               || lnast->get_vname(child) == "__sbits") {  // at the __bits child
       //(1) create flattened input
       std::string bits_str = std::string{lnast->get_vname(lnast->get_sibling_next(child))};
       auto        bits     = std::stoi(bits_str);
@@ -1355,22 +1359,16 @@ void Lnast_tolg::process_ast_attr_set_op(Lgraph* lg, const Lnast_nid& lnidx_aset
   auto name  = lnast->get_sname(name_aset);  // ssa name
   auto vname = lnast->get_vname(name_aset);  // no-ssa name
 
-  auto        aset_node = lg->create_node(Ntype_op::AttrSet);
-  const auto& tok2      = lnast->get_token(lnidx_aset);
-  aset_node.set_loc(tok2.pos1, tok2.pos2);
-  aset_node.set_source(tok2.fname);
-
+  // Walk the path children to find (field-string, val_aset) for the terminal
+  // attribute. Before building the AttrSet node, peek at the field+value so we
+  // can dispatch special sticky attributes like `storage = reg` (lnast_todo
+  // §15.1) that lower to LGraph nodes other than AttrSet.
+  std::string    field;
   lh::Tree_index val_aset;
-
   {
-    // Get the field[s] foo.bar.xxx.__tree = 3 -> field = "bar.xxx.__tree"
-    auto        af_spin = aset_node.setup_sink_pin("field");  // attribute field
-    std::string field;
-
     auto it_aset = field_aset;
-
     while (!it_aset.is_invalid()) {
-      I(lnast->get_type(it_aset).is_const());  // How can it be a ref?? foo.a.b.c.__xxx (a/b/c/__xxx must be consts)
+      I(lnast->get_type(it_aset).is_const());  // paths must be const
       auto vname2 = lnast->get_vname(it_aset);
       if (field.empty()) {
         field = vname2;
@@ -1383,6 +1381,36 @@ void Lnast_tolg::process_ast_attr_set_op(Lgraph* lg, const Lnast_nid& lnidx_aset
         break;
       }
     }
+  }
+
+  if (field == "storage" && lnast->get_type(val_aset).is_const() && lnast->get_vname(val_aset) == "reg") {
+    // lnast_todo §15.1: replaces the old `attr_get X __create_flop` path.
+    // The declaration itself materializes the Flop node; subsequent writes to
+    // the same name (dp_assign or assign) later feed the `din` pin via
+    // driver_vname2wire_nodes.
+    auto        flop_node = lg->create_node(Ntype_op::Flop);
+    const auto& tok2      = lnast->get_token(lnidx_aset);
+    flop_node.set_loc(tok2.pos1, tok2.pos2);
+    flop_node.set_source(tok2.fname);
+    auto flop_dpin = flop_node.setup_driver_pin();
+    flop_dpin.set_name(std::string(vname));
+    name2dpin[name] = flop_dpin;
+
+    if (!is_tmp_var(vname)) {
+      setup_dpin_ssa(name2dpin[name], vname, lnast->get_subs(name_aset));
+    }
+
+    driver_vname2wire_nodes[std::string(vname)].emplace_back(flop_node);
+    return;
+  }
+
+  auto        aset_node = lg->create_node(Ntype_op::AttrSet);
+  const auto& tok2      = lnast->get_token(lnidx_aset);
+  aset_node.set_loc(tok2.pos1, tok2.pos2);
+  aset_node.set_source(tok2.fname);
+
+  {
+    auto af_spin = aset_node.setup_sink_pin("field");  // attribute field
     auto av_dpin = setup_field_dpin(lg, field);
     lg->add_edge(av_dpin, af_spin);
   }
@@ -1444,84 +1472,49 @@ void Lnast_tolg::process_ast_attr_set_op(Lgraph* lg, const Lnast_nid& lnidx_aset
   name2dpin[name] = aset_node_dpin;
 }
 
-void Lnast_tolg::process_ast_attr_get_op(Lgraph* lg, const Lnast_nid& lnidx_aget) {
-  auto c0_aget       = lnast->get_first_child(lnidx_aget);
-  auto c1_aget       = lnast->get_sibling_next(c0_aget);
-  auto cn_aget       = lnast->get_last_child(lnidx_aget);
-  auto c0_aget_name  = lnast->get_sname(c0_aget);
-  auto c0_aget_vname = lnast->get_vname(c0_aget);
+void Lnast_tolg::process_ast_attr_get_op(Lgraph* /*lg*/, const Lnast_nid& /*lnidx_aget*/) {
+  // lnast_todo §15.1 + §15.2: both old consumers of attr_get in this pass —
+  // `__create_flop` and `__last_value` — are gone. Register creation lives in
+  // process_ast_attr_set_op (storage = reg) and deferred reads live in
+  // process_ast_delay_assign_op. Generic attr_get lowering is not implemented
+  // here yet; producers that emit other attr_get shapes (e.g. inou/prp's
+  // `a.[size]`) must either grow handling or be caught by lnastfmt.
+}
 
-  std::string hier_fields_cat_name;
-  auto        attr_vname = lnast->get_vname(cn_aget);
-  auto        it_aset    = c1_aget;
+void Lnast_tolg::process_ast_delay_assign_op(Lgraph* lg, const Lnast_nid& lnidx_delay) {
+  // delay_assign dst src offset   (see lnast_nodes.def)
+  // Initial impl: only offset=1 on a non-reg src is supported (same lowering as
+  // the old attr_get X __last_value path — a wire placeholder driven later).
+  auto c0 = lnast->get_first_child(lnidx_delay);             // dst (fresh tmp ref)
+  auto c1 = lnast->get_sibling_next(c0);                     // src (declared var ref)
+  auto c2 = lnast->get_sibling_next(c1);                     // offset (const | ref)
 
-  while (it_aset != cn_aget) {
-    if (hier_fields_cat_name.empty()) {
-      hier_fields_cat_name = lnast->get_vname(it_aset);
-    } else {
-      absl::StrAppend(&hier_fields_cat_name, ".", lnast->get_vname(it_aset));
-    }
-    it_aset = lnast->get_sibling_next(it_aset);
+  auto c0_sname = lnast->get_sname(c0);
+  auto c0_vname = lnast->get_vname(c0);
+
+  if (!lnast->get_type(c2).is_const()) {
+    Pass::error("delay_assign offset must be a comptime constant (ref offsets not yet lowered)");
+    return;
   }
-
-  if (attr_vname == "__create_flop") {
-    auto        flop_node = lg->create_node(Ntype_op::Flop);
-    const auto& tok2      = lnast->get_token(lnidx_aget);
-    flop_node.set_loc(tok2.pos1, tok2.pos2);
-    flop_node.set_source(tok2.fname);
-    auto flop_dpin = flop_node.setup_driver_pin();
-    flop_dpin.set_name(hier_fields_cat_name);
-    name2dpin[c0_aget_name] = flop_dpin;
-
-    if (!is_tmp_var(c0_aget_vname)) {
-      setup_dpin_ssa(name2dpin[c0_aget_name], c0_aget_vname, lnast->get_subs(c0_aget));
-    }
-
-    auto flop_din_driver_pin = setup_ref_node_dpin(lg, c1_aget);
-    auto driver_vname        = lnast->get_vname(c1_aget);
-    auto tup_head_it         = vname2tuple_head.find(driver_vname);
-    if (!flop_din_driver_pin.is_invalid() && tup_head_it != vname2tuple_head.end()) {  // flop has some previous attribute set
-      flop_din_driver_pin.connect_sink(flop_node.setup_sink_pin("din"));
-      // put the head of the tuple chain as the wire_node that will be driven by the largest ssa later
-      auto tup_head_node = tup_head_it->second;
-      driver_vname2wire_nodes[driver_vname].emplace_back(tup_head_node);
-    } else {  // if no previous attribute set, use the normal __last_value flow
-      driver_vname2wire_nodes[driver_vname].emplace_back(flop_node);
-    }
-
-    it_aset = lnast->get_sibling_next(it_aset);
-    if (!it_aset.is_invalid()) {
-      Pass::error("attribute {} must be the last in the entry {}\n", attr_vname, hier_fields_cat_name);
-    }
+  auto offset_str = lnast->get_vname(c2);
+  if (offset_str != "1") {
+    Pass::error("delay_assign offset {} not yet supported (only offset=1 lowered today)", offset_str);
     return;
   }
 
-  if (attr_vname == "__last_value") {
-    Node wire_node;
-    wire_node        = lg->create_node(Ntype_op::Or);  // might need to change to other type according to the real driver
-    const auto& tok2 = lnast->get_token(lnidx_aget);
-    wire_node.set_loc(tok2.pos1, tok2.pos2);
-    wire_node.set_source(tok2.fname);
-    auto wire_dpin = wire_node.setup_driver_pin();
-    wire_dpin.set_name(hier_fields_cat_name);
+  Node wire_node   = lg->create_node(Ntype_op::Or);          // identity/wire placeholder
+  const auto& tok2 = lnast->get_token(lnidx_delay);
+  wire_node.set_loc(tok2.pos1, tok2.pos2);
+  wire_node.set_source(tok2.fname);
+  auto wire_dpin = wire_node.setup_driver_pin();
+  wire_dpin.set_name(std::string(lnast->get_vname(c1)));
 
-    name2dpin[c0_aget_name] = wire_dpin;
-
-    if (!is_tmp_var(c0_aget_vname)) {
-      setup_dpin_ssa(name2dpin[c0_aget_name], c0_aget_vname, lnast->get_subs(c0_aget));
-    }
-
-    std::string driver_vname;
-    driver_vname = lnast->get_vname(c1_aget);
-
-    driver_vname2wire_nodes[driver_vname].emplace_back(wire_node);
-
-    it_aset = lnast->get_sibling_next(it_aset);
-    if (!it_aset.is_invalid()) {
-      Pass::error("attribute {} must be the last in the entry {}\n", attr_vname, hier_fields_cat_name);
-    }
-    return;
+  name2dpin[c0_sname] = wire_dpin;
+  if (!is_tmp_var(c0_vname)) {
+    setup_dpin_ssa(name2dpin[c0_sname], c0_vname, lnast->get_subs(c0));
   }
+
+  driver_vname2wire_nodes[std::string(lnast->get_vname(c1))].emplace_back(wire_node);
 }
 
 void Lnast_tolg::process_ast_func_call_op(Lgraph* lg, const Lnast_nid& lnidx_fc) {
