@@ -27,6 +27,18 @@ public:
 
   // Pre-populate the symbol table so process_if() can look up conditions.
   void seed(std::string_view name, const Lconst& val) { st.set(name, val); }
+
+  // Expose §5.a ST query helpers for testing.
+  bool st_is_known_const(std::string_view name) const { return st.is_known_const(name); }
+  bool st_is_reg(std::string_view name)         const { return st.is_reg(name); }
+  bool st_is_input(std::string_view name)       const { return st.is_input(name); }
+  bool st_is_output(std::string_view name)      const { return st.is_output(name); }
+
+  // Directly write a trivial value into the symbol table (for ST tests).
+  void st_set(std::string_view name, const Lconst& val) { st.set(name, val); }
+
+  // Expose classify_statement() for white-box testing.
+  upass::Emit_decision classify() { return classify_statement(); }
 };
 
 // Build a fresh Lnast and Lnast_manager for each test.
@@ -694,6 +706,101 @@ TEST(UpassConstpropTuple, TupleSetThenGetRoundTrip) {
   cp.process_tuple_get();  // dst = ___t0[0] = 77
 
   EXPECT_EQ(cp.get_result("dst").to_i(), 77);
+}
+
+// ─── Symbol_table query API (§5.a) ──────────────────────────────────────────
+
+// is_known_const returns true when the variable holds a concrete, fully-known Lconst.
+TEST(UpassConstpropST, IsKnownConstWithValidValue) {
+  ConstpropFixture  f;
+  TestableConstprop cp(f.lm);
+
+  cp.st_set("x", Lconst(42));
+  EXPECT_TRUE(cp.st_is_known_const("x"));
+}
+
+// is_known_const returns false when the variable has never been declared.
+TEST(UpassConstpropST, IsKnownConstAbsentReturnsFalse) {
+  ConstpropFixture  f;
+  TestableConstprop cp(f.lm);
+
+  EXPECT_FALSE(cp.st_is_known_const("no_such_var"));
+}
+
+// is_known_const returns false when the stored value is Lconst::invalid().
+TEST(UpassConstpropST, IsKnownConstInvalidLconstReturnsFalse) {
+  ConstpropFixture  f;
+  TestableConstprop cp(f.lm);
+
+  cp.st_set("y", Lconst::invalid());
+  EXPECT_FALSE(cp.st_is_known_const("y"));
+}
+
+// is_reg correctly identifies '#'-prefixed names as registers.
+TEST(UpassConstpropST, IsRegDetectsHashPrefix) {
+  ConstpropFixture  f;
+  TestableConstprop cp(f.lm);
+
+  EXPECT_TRUE(cp.st_is_reg("#counter"));
+  EXPECT_FALSE(cp.st_is_reg("counter"));
+  EXPECT_FALSE(cp.st_is_reg("$inp"));
+  EXPECT_FALSE(cp.st_is_reg(""));
+}
+
+// is_input correctly identifies '$'-prefixed names as input ports.
+TEST(UpassConstpropST, IsInputDetectsDollarPrefix) {
+  ConstpropFixture  f;
+  TestableConstprop cp(f.lm);
+
+  EXPECT_TRUE(cp.st_is_input("$inp"));
+  EXPECT_FALSE(cp.st_is_input("inp"));
+  EXPECT_FALSE(cp.st_is_input("#reg"));
+  EXPECT_FALSE(cp.st_is_input(""));
+}
+
+// is_output correctly identifies '%'-prefixed names as output ports.
+TEST(UpassConstpropST, IsOutputDetectsPercentPrefix) {
+  ConstpropFixture  f;
+  TestableConstprop cp(f.lm);
+
+  EXPECT_TRUE(cp.st_is_output("%out"));
+  EXPECT_FALSE(cp.st_is_output("out"));
+  EXPECT_FALSE(cp.st_is_output("$inp"));
+  EXPECT_FALSE(cp.st_is_output(""));
+}
+
+// classify_statement drops an assign whose LHS is a known-const temp variable.
+TEST(UpassConstpropST, ClassifyDropsKnownConstTemp) {
+  ConstpropFixture f;
+
+  // Build:  ___tmp = 7
+  auto assign_op = f.ln->add_child(f.stmts_nid, Lnast_node::create_assign());
+  f.ln->add_child(assign_op, Lnast_node::create_ref("___tmp"));
+  f.ln->add_child(assign_op, Lnast_node::create_const("7"));
+
+  TestableConstprop cp(f.lm);
+  cp.st_set("___tmp", Lconst(7));
+
+  cp.position(assign_op);
+  auto decision = cp.classify();
+  EXPECT_EQ(decision.kind, upass::Emit_kind::drop_subtree);
+}
+
+// classify_statement emits a register assignment even when the value is known.
+TEST(UpassConstpropST, ClassifyKeepsRegEvenIfKnownConst) {
+  ConstpropFixture f;
+
+  // Build:  #reg = 7
+  auto assign_op = f.ln->add_child(f.stmts_nid, Lnast_node::create_assign());
+  f.ln->add_child(assign_op, Lnast_node::create_ref("#reg"));
+  f.ln->add_child(assign_op, Lnast_node::create_const("7"));
+
+  TestableConstprop cp(f.lm);
+  cp.st_set("#reg", Lconst(7));
+
+  cp.position(assign_op);
+  auto decision = cp.classify();
+  EXPECT_EQ(decision.kind, upass::Emit_kind::emit);
 }
 
 }  // namespace

@@ -45,6 +45,19 @@ public:
   bool has_bundle(std::string_view key) const;
   bool has_known(std::string_view key) const { return has_trivial(key) || has_bundle(key); }
 
+  /// Returns true iff `name` holds a concrete Lconst with no unknown bits.
+  bool is_known_const(std::string_view name) const;
+
+  /// Slice-1 stand-in: true iff `name` starts with '#' (register prefix).
+  /// Migrates to ST-backed lookup after lnast_todo.md §12.
+  bool is_reg(std::string_view name) const { return !name.empty() && name.front() == '#'; }
+
+  /// Slice-1 stand-in: true iff `name` starts with '$' (input-port prefix).
+  bool is_input(std::string_view name) const { return !name.empty() && name.front() == '$'; }
+
+  /// Slice-1 stand-in: true iff `name` starts with '%' (output-port prefix).
+  bool is_output(std::string_view name) const { return !name.empty() && name.front() == '%'; }
+
   // Lconst can be 0sb? or 123 or string or bool or nil or runtime (0sb? and runtime?)
   const Lconst&           get_trivial(std::string_view key) const;
   std::shared_ptr<Bundle> get_bundle(std::string_view key) const;

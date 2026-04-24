@@ -158,6 +158,12 @@ std::shared_ptr<Bundle> Symbol_table::leave_scope() {
   return outputs;
 }
 
+bool Symbol_table::is_known_const(std::string_view name) const {
+  if (!has_trivial(name)) return false;
+  const auto& val = get_trivial(name);
+  return !val.is_invalid() && !val.has_unknowns();
+}
+
 bool Symbol_table::has_trivial(std::string_view key) const {
   auto [var, field] = get_var_field(key);
 
