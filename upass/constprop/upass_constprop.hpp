@@ -43,6 +43,7 @@ public:
 
   // Bit Manipulation
   void process_sext() override;
+  void process_get_mask() override;
 
   void process_stmts() override;
   void process_tuple_set() override;
@@ -51,8 +52,8 @@ public:
   void process_tuple_concat() override;
   void process_func_call() override;
 
-  upass::Emit_decision    classify_statement() override;
-  std::optional<Lconst>   fold_ref(std::string_view name) override;
+  upass::Emit_decision  classify_statement() override;
+  std::optional<Lconst> fold_ref(std::string_view name) override;
 
 protected:
   Symbol_table st;

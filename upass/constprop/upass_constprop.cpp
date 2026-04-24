@@ -8,7 +8,7 @@
 // errors when multiple TUs include upass_constprop.hpp.
 static upass::uPass_plugin cprop("constprop", upass::uPass_wrapper<uPass_constprop>::get_upass);
 
-uPass_constprop::uPass_constprop(std::shared_ptr<upass::Lnast_manager> &_lm) : uPass(_lm) {
+uPass_constprop::uPass_constprop(std::shared_ptr<upass::Lnast_manager>& _lm) : uPass(_lm) {
   st.function_scope(_lm->get_top_module_name());
 }
 
@@ -39,7 +39,7 @@ void uPass_constprop::process_assign() {
       // Scalar RHS (stored as trivial, not a bundle). Propagate the value so
       // subsequent uses of `lhs_text` resolve. Mark changed iff the value
       // differs, matching the const-RHS branch below.
-      auto rhs_value = st.get_trivial(current_text());
+      auto rhs_value     = st.get_trivial(current_text());
       bool local_changed = true;
       if (st.has_trivial(lhs_text)) {
         local_changed = st.get_trivial(lhs_text) != rhs_value;
@@ -50,8 +50,8 @@ void uPass_constprop::process_assign() {
     }
   } else if (is_type(Lnast_ntype::Lnast_ntype_const)) {
     // RHS is a const literal: parse and track the constant value
-    auto rhs_value = current_pyrope_value();
-    bool local_changed   = true;
+    auto rhs_value     = current_pyrope_value();
+    bool local_changed = true;
     if (st.has_trivial(lhs_text)) {
       local_changed = st.get_trivial(lhs_text) != rhs_value;
     }
@@ -96,8 +96,8 @@ void uPass_constprop::process_binary(F op) {
   move_to_sibling();
   Lconst n1 = current_prim_value();
   move_to_sibling();
-  Lconst n2      = current_prim_value();
-  Lconst r       = op(n1, n2);
+  Lconst n2            = current_prim_value();
+  Lconst r             = op(n1, n2);
   bool   local_changed = true;
   if (st.has_trivial(var)) {
     local_changed = st.get_trivial(var) != r;
@@ -158,9 +158,7 @@ void uPass_constprop::process_bit_not() {
 
 void uPass_constprop::process_bit_xor() {
   // XOR via identity: (a | b) & ~(a & b)
-  process_binary([](Lconst n1, Lconst n2) {
-    return n1.or_op(n2).and_op(n1.and_op(n2).not_op());
-  });
+  process_binary([](Lconst n1, Lconst n2) { return n1.or_op(n2).and_op(n1.and_op(n2).not_op()); });
 }
 
 void uPass_constprop::process_mod() {
@@ -175,21 +173,16 @@ void uPass_constprop::process_mod() {
 }
 
 void uPass_constprop::process_shl() {
-  process_binary([](Lconst n1, Lconst n2) {
-    return n1.lsh_op(static_cast<Bits_t>(n2.to_i()));
-  });
+  process_binary([](Lconst n1, Lconst n2) { return n1.lsh_op(static_cast<Bits_t>(n2.to_i())); });
 }
 
 void uPass_constprop::process_sra() {
-  process_binary([](Lconst n1, Lconst n2) {
-    return n1.rsh_op(static_cast<Bits_t>(n2.to_i()));
-  });
+  process_binary([](Lconst n1, Lconst n2) { return n1.rsh_op(static_cast<Bits_t>(n2.to_i())); });
 }
 
 void uPass_constprop::process_log_and() {
-  process_binary([](Lconst n1, Lconst n2) -> Lconst {
-    return (!n1.is_known_false() && !n2.is_known_false()) ? Lconst(1) : Lconst(0);
-  });
+  process_binary(
+      [](Lconst n1, Lconst n2) -> Lconst { return (!n1.is_known_false() && !n2.is_known_false()) ? Lconst(1) : Lconst(0); });
 }
 
 void uPass_constprop::process_log_or() {
@@ -197,7 +190,7 @@ void uPass_constprop::process_log_or() {
 }
 
 void uPass_constprop::process_log_not() {
-  process_unary([](Lconst &r) { r = r.is_known_false() ? Lconst(1) : Lconst(0); });
+  process_unary([](Lconst& r) { r = r.is_known_false() ? Lconst(1) : Lconst(0); });
 }
 
 void uPass_constprop::process_ne() {
@@ -226,7 +219,9 @@ void uPass_constprop::process_if() {
   // Conservative if-handling: inspect condition variables but always let the
   // runner traverse all branches.
   // Dead-branch elimination requires tree-surgery hooks not yet in the runner.
-  if (!move_to_child()) return;
+  if (!move_to_child()) {
+    return;
+  }
 
   while (true) {
     if (is_type(Lnast_ntype::Lnast_ntype_stmts)) {
@@ -235,8 +230,12 @@ void uPass_constprop::process_if() {
     if (is_type(Lnast_ntype::Lnast_ntype_ref) || is_type(Lnast_ntype::Lnast_ntype_const)) {
       [[maybe_unused]] const auto cond_val = current_prim_value();
     }
-    if (!move_to_sibling()) break;
-    if (!move_to_sibling()) break;
+    if (!move_to_sibling()) {
+      break;
+    }
+    if (!move_to_sibling()) {
+      break;
+    }
   }
 
   move_to_parent();
@@ -309,15 +308,21 @@ void uPass_constprop::process_func_call() {
   // sized-int). Anything else is left as-is for a later pass.
   move_to_child();
   std::string dst(current_text());
-  if (!move_to_sibling()) { move_to_parent(); return; }
-  if (!is_type(Lnast_ntype::Lnast_ntype_ref)) { move_to_parent(); return; }
+  if (!move_to_sibling()) {
+    move_to_parent();
+    return;
+  }
+  if (!is_type(Lnast_ntype::Lnast_ntype_ref)) {
+    move_to_parent();
+    return;
+  }
   std::string fname(current_text());
 
   // Enumerate known typecast dispatch.
   enum class Cast { none, to_int, to_uint, to_string, to_sized };
-  Cast  kind      = Cast::none;
-  bool  sized_sig = false;  // true for sN, false for uN
-  int   sized_bits = 0;
+  Cast kind       = Cast::none;
+  bool sized_sig  = false;  // true for sN, false for uN
+  int  sized_bits = 0;
   if (fname == "int") {
     kind = Cast::to_int;
   } else if (fname == "uint" || fname == "unsigned") {
@@ -328,7 +333,10 @@ void uPass_constprop::process_func_call() {
     // u32 / s32 / u8 ... — size suffix is decimal digits.
     bool all_digits = true;
     for (size_t i = 1; i < fname.size(); ++i) {
-      if (fname[i] < '0' || fname[i] > '9') { all_digits = false; break; }
+      if (fname[i] < '0' || fname[i] > '9') {
+        all_digits = false;
+        break;
+      }
     }
     if (all_digits && fname.size() > 1) {
       kind       = Cast::to_sized;
@@ -336,7 +344,10 @@ void uPass_constprop::process_func_call() {
       sized_bits = std::stoi(fname.substr(1));
     }
   }
-  if (kind == Cast::none) { move_to_parent(); return; }
+  if (kind == Cast::none) {
+    move_to_parent();
+    return;
+  }
 
   // Collect argument Lconsts. Bail if any is unresolved so a later iteration
   // can retry.
@@ -346,13 +357,19 @@ void uPass_constprop::process_func_call() {
     if (is_type(Lnast_ntype::Lnast_ntype_const)) {
       v = Lconst::from_pyrope(current_text());
     } else if (is_type(Lnast_ntype::Lnast_ntype_ref)) {
-      if (!st.has_trivial(current_text())) { move_to_parent(); return; }
+      if (!st.has_trivial(current_text())) {
+        move_to_parent();
+        return;
+      }
       v = st.get_trivial(current_text());
     } else {
       move_to_parent();
       return;
     }
-    if (v.is_invalid()) { move_to_parent(); return; }
+    if (v.is_invalid()) {
+      move_to_parent();
+      return;
+    }
     args.push_back(v);
   }
   move_to_parent();
@@ -363,7 +380,9 @@ void uPass_constprop::process_func_call() {
   // wrappers before re-parsing so `Lconst::from_pyrope("3")` (an int) is
   // produced rather than `Lconst::from_pyrope("'3'")` (a string round-trip).
   auto to_scalar = [](const Lconst& a) -> Lconst {
-    if (!a.is_string()) return a;
+    if (!a.is_string()) {
+      return a;
+    }
     std::string s = a.to_pyrope();
     if (s.size() >= 2 && s.front() == '\'' && s.back() == '\'') {
       s = s.substr(1, s.size() - 2);
@@ -383,7 +402,9 @@ void uPass_constprop::process_func_call() {
       result = Lconst::from_pyrope("''");
     } else {
       result = args.front();
-      for (size_t i = 1; i < args.size(); ++i) result = result.concat_op(args[i]);
+      for (size_t i = 1; i < args.size(); ++i) {
+        result = result.concat_op(args[i]);
+      }
     }
     // Force string representation of a pure-numeric arg (e.g. `string(4)`
     // must yield '4', not the integer 4).
@@ -391,9 +412,13 @@ void uPass_constprop::process_func_call() {
       result = Lconst::from_pyrope(absl::StrCat("'", std::to_string(result.to_i()), "'"));
     }
   } else {
-    if (args.size() != 1) { return; }  // unsupported arity
+    if (args.size() != 1) {
+      return;
+    }  // unsupported arity
     Lconst v = to_scalar(args.front());
-    if (v.is_invalid()) { return; }
+    if (v.is_invalid()) {
+      return;
+    }
     if (kind == Cast::to_uint) {
       if (v.is_string() || v.is_negative()) {
         // Cast failure (non-numeric string or negative) → pyrope `nil`.
@@ -401,12 +426,16 @@ void uPass_constprop::process_func_call() {
       }
       result = v;
     } else if (kind == Cast::to_int) {
-      if (v.is_string()) { v = Lconst::from_pyrope("nil"); }
+      if (v.is_string()) {
+        v = Lconst::from_pyrope("nil");
+      }
       result = v;
     } else {
       // sized: fold only when the value fits. Signed/unsigned range check is
       // deferred; the current test set just stores small positives.
-      if (v.is_string()) { v = Lconst::from_pyrope("nil"); }
+      if (v.is_string()) {
+        v = Lconst::from_pyrope("nil");
+      }
       (void)sized_sig;
       (void)sized_bits;
       result = v;
@@ -414,8 +443,12 @@ void uPass_constprop::process_func_call() {
   }
 
   bool local_changed = true;
-  if (st.has_trivial(dst)) local_changed = st.get_trivial(dst) != result;
-  if (local_changed && st.set(dst, result)) mark_changed();
+  if (st.has_trivial(dst)) {
+    local_changed = st.get_trivial(dst) != result;
+  }
+  if (local_changed && st.set(dst, result)) {
+    mark_changed();
+  }
 }
 
 void uPass_constprop::process_tuple_get() {
@@ -457,7 +490,7 @@ void uPass_constprop::process_tuple_get() {
 
   // Propagate trivial value if available; fall back to bundle propagation.
   if (st.has_trivial(key)) {
-    const Lconst result       = st.get_trivial(key);
+    const Lconst result        = st.get_trivial(key);
     bool         local_changed = !st.has_trivial(dst) || st.get_trivial(dst) != result;
     if (local_changed && st.set(dst, result)) {
       mark_changed();
@@ -521,8 +554,8 @@ void uPass_constprop::process_tuple_set() {
     field += '.';
     field += path_and_val[i];
   }
-  auto        key       = tuple_var + field;
-  const auto& val_text  = path_and_val.back();
+  auto        key      = tuple_var + field;
+  const auto& val_text = path_and_val.back();
 
   // Value is the last child — stored as trivial if it parses, else as a bundle ref.
   Lconst val = Lconst::from_pyrope(val_text);
@@ -533,8 +566,8 @@ void uPass_constprop::process_tuple_set() {
       mark_changed();
     }
   } else if (st.has_trivial(val_text)) {
-    const auto sv     = st.get_trivial(val_text);
-    bool local_changed = !st.has_trivial(key) || st.get_trivial(key) != sv;
+    const auto sv            = st.get_trivial(val_text);
+    bool       local_changed = !st.has_trivial(key) || st.get_trivial(key) != sv;
     if (local_changed) {
       st.set(key, sv);
       mark_changed();
@@ -567,7 +600,7 @@ void uPass_constprop::process_red_or() {
   move_to_sibling();
   const auto input = current_prim_value();
   if (!input.is_invalid()) {
-    const Lconst result       = input.is_known_false() ? Lconst(0) : Lconst(1);
+    const Lconst result        = input.is_known_false() ? Lconst(0) : Lconst(1);
     bool         local_changed = !st.has_trivial(var) || st.get_trivial(var) != result;
     if (local_changed && st.set(var, result)) {
       mark_changed();
@@ -585,7 +618,7 @@ void uPass_constprop::process_red_and() {
   move_to_sibling();
   const auto input = current_prim_value();
   if (!input.is_invalid() && !input.has_unknowns()) {
-    const Lconst result       = input.is_mask() ? Lconst(1) : Lconst(0);
+    const Lconst result        = input.is_mask() ? Lconst(1) : Lconst(0);
     bool         local_changed = !st.has_trivial(var) || st.get_trivial(var) != result;
     if (local_changed && st.set(var, result)) {
       mark_changed();
@@ -601,7 +634,7 @@ void uPass_constprop::process_red_xor() {
   move_to_sibling();
   const auto input = current_prim_value();
   if (!input.is_invalid() && !input.has_unknowns()) {
-    const Lconst result       = (input.popcount() % 2 == 1) ? Lconst(1) : Lconst(0);
+    const Lconst result        = (input.popcount() % 2 == 1) ? Lconst(1) : Lconst(0);
     bool         local_changed = !st.has_trivial(var) || st.get_trivial(var) != result;
     if (local_changed && st.set(var, result)) {
       mark_changed();
@@ -632,8 +665,8 @@ upass::Emit_decision uPass_constprop::classify_statement() {
     return upass::Emit_decision::emit_node();
   }
 
-  bool got_child  = move_to_child();
-  bool lhs_is_ref = got_child && is_type(Lnast_ntype::Lnast_ntype_ref);
+  bool        got_child  = move_to_child();
+  bool        lhs_is_ref = got_child && is_type(Lnast_ntype::Lnast_ntype_ref);
   std::string lhs_text{lhs_is_ref ? current_text() : std::string_view{}};
   move_to_parent();
 
@@ -697,14 +730,22 @@ void uPass_constprop::process_sext() {
   const auto src = current_prim_value();
   move_to_sibling();
   const auto nbits_lc = current_prim_value();
-  if (!src.is_invalid() && !src.has_unknowns() && !src.is_string() &&
-      !nbits_lc.is_invalid() && nbits_lc.is_i()) {
-    const auto   ebits        = static_cast<Bits_t>(nbits_lc.to_i());
-    const Lconst result       = src.sext_op(ebits);
+  if (!src.is_invalid() && !src.has_unknowns() && !src.is_string() && !nbits_lc.is_invalid() && nbits_lc.is_i()) {
+    const auto   ebits         = static_cast<Bits_t>(nbits_lc.to_i());
+    const Lconst result        = src.sext_op(ebits);
     bool         local_changed = !st.has_trivial(var) || st.get_trivial(var) != result;
     if (local_changed && st.set(var, result)) {
       mark_changed();
     }
   }
   move_to_parent();
+}
+
+void uPass_constprop::process_get_mask() {
+  process_binary([](Lconst value, Lconst mask) {
+    if (value.is_invalid() || mask.is_invalid()) {
+      return Lconst::invalid();
+    }
+    return value.get_mask_op(mask);
+  });
 }
