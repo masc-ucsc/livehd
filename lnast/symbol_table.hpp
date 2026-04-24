@@ -33,20 +33,36 @@ public:
   bool var(std::string_view key);
 
   bool mut(std::string_view key, std::shared_ptr<Bundle> bundle);
-  bool mut(std::string_view key, const Lconst &trivial);
+  bool mut(std::string_view key, const Lconst& trivial);
 
   bool set(std::string_view key, std::shared_ptr<Bundle> bundle);
-  bool set(std::string_view key, const Lconst &trivial);
+  bool set(std::string_view key, const Lconst& trivial);
 
   bool let(std::string_view key, std::shared_ptr<Bundle> bundle);
-  bool let(std::string_view key, const Lconst &trivial);
+  bool let(std::string_view key, const Lconst& trivial);
 
   bool has_trivial(std::string_view key) const;
   bool has_bundle(std::string_view key) const;
   bool has_known(std::string_view key) const { return has_trivial(key) || has_bundle(key); }
 
+  /// Returns true iff `name` holds a concrete Lconst with no unknown bits.
+  /// Used by constprop's classify_statement and fold_ref to decide whether a
+  /// variable is fully resolved.
+  bool is_known_const(std::string_view name) const;
+
+  /// Slice-1 stand-in: true iff `name` starts with '#' (register prefix).
+  /// Every call site migrates to a real ST-backed direction lookup once
+  /// lnast_todo.md §12 lands; until then, the prefix IS the contract.
+  bool is_reg(std::string_view name) const { return !name.empty() && name.front() == '#'; }
+
+  /// Slice-1 stand-in: true iff `name` starts with '$' (input-port prefix).
+  bool is_input(std::string_view name) const { return !name.empty() && name.front() == '$'; }
+
+  /// Slice-1 stand-in: true iff `name` starts with '%' (output-port prefix).
+  bool is_output(std::string_view name) const { return !name.empty() && name.front() == '%'; }
+
   // Lconst can be 0sb? or 123 or string or bool or nil or runtime (0sb? and runtime?)
-  const Lconst           &get_trivial(std::string_view key) const;
+  const Lconst&           get_trivial(std::string_view key) const;
   std::shared_ptr<Bundle> get_bundle(std::string_view key) const;
 
   void dump() const;
