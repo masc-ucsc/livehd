@@ -74,8 +74,20 @@ void uPass_constprop::process_nary(F op) {
   auto var = current_text();
   move_to_sibling();
   Lconst r = current_prim_value();
+
+  // Skip folding if any operand is unknown, a non-numeric string, or has X-bits.
+  // Arithmetic on invalid/string Lconst values is undefined and will crash.
+  if (r.is_invalid() || r.is_string() || r.has_unknowns()) {
+    move_to_parent();
+    return;
+  }
   while (move_to_sibling()) {
-    op(r, current_prim_value());
+    auto operand = current_prim_value();
+    if (operand.is_invalid() || operand.is_string() || operand.has_unknowns()) {
+      move_to_parent();
+      return;
+    }
+    op(r, operand);
   }
   bool local_changed = true;
   if (st.has_trivial(var)) {
@@ -96,9 +108,20 @@ void uPass_constprop::process_binary(F op) {
   move_to_sibling();
   Lconst n1 = current_prim_value();
   move_to_sibling();
-  Lconst n2            = current_prim_value();
-  Lconst r             = op(n1, n2);
-  bool   local_changed = true;
+  Lconst n2 = current_prim_value();
+
+  // Skip folding if either operand is unknown, non-numeric, or has X-bits.
+  if (n1.is_invalid() || n1.is_string() || n1.has_unknowns() ||
+      n2.is_invalid() || n2.is_string() || n2.has_unknowns()) {
+    move_to_parent();
+    return;
+  }
+  Lconst r = op(n1, n2);
+  if (r.is_invalid()) {
+    move_to_parent();
+    return;
+  }
+  bool local_changed = true;
   if (st.has_trivial(var)) {
     local_changed = st.get_trivial(var) != r;
   }
@@ -116,6 +139,12 @@ void uPass_constprop::process_unary(F op) {
   auto var = current_text();
   move_to_sibling();
   Lconst r = current_prim_value();
+
+  // Skip folding if input is unknown, non-numeric, or has X-bits.
+  if (r.is_invalid() || r.is_string() || r.has_unknowns()) {
+    move_to_parent();
+    return;
+  }
   op(r);
   bool local_changed = true;
   if (st.has_trivial(var)) {
@@ -173,11 +202,17 @@ void uPass_constprop::process_mod() {
 }
 
 void uPass_constprop::process_shl() {
-  process_binary([](Lconst n1, Lconst n2) { return n1.lsh_op(static_cast<Bits_t>(n2.to_i())); });
+  process_binary([](Lconst n1, Lconst n2) -> Lconst {
+    if (!n2.is_i()) return Lconst::invalid();
+    return n1.lsh_op(static_cast<Bits_t>(n2.to_i()));
+  });
 }
 
 void uPass_constprop::process_sra() {
-  process_binary([](Lconst n1, Lconst n2) { return n1.rsh_op(static_cast<Bits_t>(n2.to_i())); });
+  process_binary([](Lconst n1, Lconst n2) -> Lconst {
+    if (!n2.is_i()) return Lconst::invalid();
+    return n1.rsh_op(static_cast<Bits_t>(n2.to_i()));
+  });
 }
 
 void uPass_constprop::process_log_and() {
@@ -297,9 +332,73 @@ void uPass_constprop::process_tuple_add() {
 }
 
 void uPass_constprop::process_tuple_concat() {
-  // n-ary concat: ref(dst), (const|ref)...
-  // Fold when every source operand is a known scalar (string or integer).
-  process_nary([](Lconst& r, Lconst n) { r = r.concat_op(n); });
+  // Layout: ref(dst), (const|ref)...
+  // Two modes determined by the first operand:
+  //   Bundle mode  — every operand must be a known Bundle; merged via Bundle::concat().
+  //                  No mark_changed — convergence via downstream tuple_get (same as tuple_add).
+  //   Scalar mode  — every operand must be a known scalar; folded via Lconst::concat_op.
+  // Bail without folding when any operand is truly unknown or types are mixed.
+  move_to_child();
+  auto dst = std::string(current_text());
+
+  if (!move_to_sibling()) {
+    move_to_parent();
+    return;
+  }
+
+  bool                    bundle_mode = false;
+  std::shared_ptr<Bundle> acc_bundle;
+  Lconst                  acc_scalar;
+  bool                    is_first = true;
+
+  auto process_one = [&]() -> bool {
+    if (is_type(Lnast_ntype::Lnast_ntype_ref)) {
+      auto b = st.get_bundle(current_text());
+      if (b) {
+        if (!is_first && !bundle_mode) return false;
+        if (is_first) {
+          acc_bundle  = std::make_shared<Bundle>(dst);
+          bundle_mode = true;
+        }
+        acc_bundle->concat(b);
+        return true;
+      }
+      if (st.has_trivial(current_text())) {
+        auto val = st.get_trivial(current_text());
+        if (val.is_invalid() || val.has_unknowns() || bundle_mode) return false;
+        acc_scalar = is_first ? val : acc_scalar.concat_op(val);
+        return true;
+      }
+      return false;
+    }
+    if (is_type(Lnast_ntype::Lnast_ntype_const)) {
+      if (bundle_mode) return false;
+      auto val = Lconst::from_pyrope(current_text());
+      if (val.is_invalid()) return false;
+      acc_scalar = is_first ? val : acc_scalar.concat_op(val);
+      return true;
+    }
+    return false;
+  };
+
+  do {
+    if (!process_one()) {
+      move_to_parent();
+      return;
+    }
+    is_first = false;
+  } while (move_to_sibling());
+
+  move_to_parent();
+
+  if (bundle_mode) {
+    st.set(dst, acc_bundle);
+  } else {
+    bool local_changed = !st.has_trivial(dst) || st.get_trivial(dst) != acc_scalar;
+    if (local_changed && st.set(dst, acc_scalar)) {
+      mark_changed();
+    }
+  }
 }
 
 void uPass_constprop::process_func_call() {
@@ -674,20 +773,15 @@ upass::Emit_decision uPass_constprop::classify_statement() {
     return upass::Emit_decision::emit_node();
   }
 
-  // Regs, inputs, outputs carry semantics beyond value. Keep.
-  const char c0 = lhs_text.front();
-  if (c0 == '#' || c0 == '$' || c0 == '%') {
+  // Regs, inputs, and outputs carry timing/boundary semantics beyond value — always emit.
+  // Slice-1 prefix check; migrates to st.is_reg/is_input/is_output after §12.
+  if (st.is_reg(lhs_text) || st.is_input(lhs_text) || st.is_output(lhs_text)) {
     return upass::Emit_decision::emit_node();
   }
 
-  // Symbol table uses the stripped name (process_assign already strips
-  // leading %/$ on assignment — see upass_constprop.cpp::process_assign).
-  // Here we've already rejected those cases, so lhs_text is the key.
-  if (!st.has_trivial(lhs_text)) {
-    return upass::Emit_decision::emit_node();
-  }
-  const auto val = st.get_trivial(lhs_text);
-  if (val.is_invalid() || val.has_unknowns()) {
+  // Drop iff the ST holds a fully-known value. is_known_const() encapsulates
+  // has_trivial + is_invalid + has_unknowns in one call.
+  if (!st.is_known_const(lhs_text)) {
     return upass::Emit_decision::emit_node();
   }
 
@@ -698,20 +792,15 @@ std::optional<Lconst> uPass_constprop::fold_ref(std::string_view name) {
   if (name.empty()) {
     return std::nullopt;
   }
-  // Match the stripping in process_assign so lookups against %foo / $foo
-  // resolve the same entry the writer populated.
+  // Strip I/O prefixes so the lookup matches what process_assign stored.
   std::string_view key = name;
-  if (key.front() == '%' || key.front() == '$') {
+  if (st.is_input(key) || st.is_output(key)) {
     key.remove_prefix(1);
   }
-  if (!st.has_trivial(key)) {
+  if (!st.is_known_const(key)) {
     return std::nullopt;
   }
-  auto val = st.get_trivial(key);
-  if (val.is_invalid() || val.has_unknowns()) {
-    return std::nullopt;
-  }
-  return val;
+  return st.get_trivial(key);
 }
 
 void uPass_constprop::process_sext() {
