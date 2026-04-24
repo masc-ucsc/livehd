@@ -48,6 +48,8 @@ public:
   void process_tuple_set() override;
   void process_tuple_get() override;
   void process_tuple_add() override;
+  void process_tuple_concat() override;
+  void process_func_call() override;
 
   upass::Emit_decision    classify_statement() override;
   std::optional<Lconst>   fold_ref(std::string_view name) override;

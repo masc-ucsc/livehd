@@ -1,10 +1,16 @@
 /*
 :name: attributes
-:type: parsing lnast upass
+:type: parsing lnast comptime
+:verifier_pass: 1
+:verifier_fail: 0
 */
 
 comb top(a::[comptime], b::[comptime], c) {
   mut x::[attr=(1,2)] = 0
-  c = (a::[comptime = 1], b::[comptime], c)
-  cassert c::[comptime=0]
+  c = (a::[comptime], b::[comptime], c::[comptime])
+  cassert (true, true, false) == c
 }
+
+reg x:u32
+
+top(10,30, x)

@@ -1,6 +1,8 @@
 /*
 :name: string_integer
-:type: parsing lnast upass
+:type: parsing lnast comptime
+:verifier_pass: 8
+:verifier_fail: 0
 */
 
 cassert 3 == int("3")
@@ -14,6 +16,6 @@ cassert "0b010101".uint() == 0b10101
 
 cassert "-1".uint() == nil
 
-cassert string("hello", " world ", 4) == string("hello") ++ string(" world ") ++ string(4) == "hello world 4"
+cassert string("hello ", "world ", 4) == string("hello") ++ string(" world ") ++ string(4) == "hello world 4"
 
 cassert uint("0xFF") == 255

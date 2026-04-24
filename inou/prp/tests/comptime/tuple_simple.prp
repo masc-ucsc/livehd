@@ -1,6 +1,8 @@
 /*
 :name: tuple_simple
-:type: parsing lnast upass
+:type: parsing lnast comptime
+:verifier_pass: 2
+:verifier_fail: 0
 */
 
 const t = (1,b=2,3,d=4)

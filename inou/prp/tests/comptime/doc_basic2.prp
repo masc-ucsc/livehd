@@ -1,6 +1,8 @@
 /*
 :name: doc_basic2
-:type: parsing lnast upass
+:type: parsing lnast comptime
+:verifier_pass: 2
+:verifier_fail: 0
 */
 
 cassert "hello\n" == "\x68ello\x0d"

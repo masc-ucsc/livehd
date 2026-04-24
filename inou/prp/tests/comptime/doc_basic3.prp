@@ -1,6 +1,8 @@
 /*
 :name: doc_basic3
-:type: parsing lnast upass
+:type: parsing lnast comptime
+:verifier_pass: 1
+:verifier_fail: 0
 */
 
 mut `other id too` = 1

@@ -1,6 +1,8 @@
 /*
 :name: tuple_simple4
-:type: parsing lnast upass
+:type: parsing lnast comptime
+:verifier_pass: 5
+:verifier_fail: 0
 */
 
 mut tup0 = (0, y = 1)

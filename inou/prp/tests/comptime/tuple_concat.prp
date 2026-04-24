@@ -1,6 +1,8 @@
 /*
 :name: tuple_concat
-:type: parsing lnast upass
+:type: parsing lnast comptime
+:verifier_pass: 5
+:verifier_fail: 0
 */
 
 cassert ((a=1,c=3) ++ (a=1,b=2,c=nil)) == (a=(1,1), c=3, b=2)

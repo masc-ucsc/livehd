@@ -1,6 +1,8 @@
 /*
 :name: expr_match
-:type: parsing lnast upass
+:type: parsing lnast comptime
+:verifier_pass: 3
+:verifier_fail: 0
 */
 
 const sel = 2

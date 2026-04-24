@@ -1,6 +1,8 @@
 /*
 :name: setter_complex
-:type: parsing lnast upass
+:type: parsing lnast comptime
+:verifier_pass: 5
+:verifier_fail: 0
 */
 
 const fint:int = 0

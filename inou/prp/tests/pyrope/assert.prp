@@ -1,10 +1,14 @@
 /*
 :name: assert
-:type: parsing lnast upass
+:type: parsing lnast comptime
+:verifier_pass: 0
+:verifier_fail: 1
 */
 
 comb top() {
   mut a = 1
   mut b = 2
-  cassert a == b
+  cassert a == b // bad assert, should fail
 }
+
+top()

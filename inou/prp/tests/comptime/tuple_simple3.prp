@@ -1,6 +1,8 @@
 /*
 :name: tuple_simple3
-:type: parsing lnast upass
+:type: parsing lnast comptime
+:verifier_pass: 5
+:verifier_fail: 0
 */
 
 const x = 1

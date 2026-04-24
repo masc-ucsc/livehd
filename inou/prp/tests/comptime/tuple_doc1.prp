@@ -1,6 +1,8 @@
 /*
 :name: tuple_doc1
-:type: parsing lnast upass
+:type: parsing lnast comptime
+:verifier_pass: 20
+:verifier_fail: 0
 */
 
 {

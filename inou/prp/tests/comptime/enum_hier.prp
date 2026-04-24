@@ -1,6 +1,8 @@
 /*
 :name: enum_hier
-:type: parsing lnast upass
+:type: parsing lnast comptime
+:verifier_pass: 6
+:verifier_fail: 0
 */
 
 enum Mammal = (rat, human)

@@ -1,6 +1,8 @@
 /*
 :name: scalar_tuple
-:type: parsing lnast upass
+:type: parsing lnast comptime
+:verifier_pass: 10
+:verifier_fail: 0
 */
 
 mut a = 2

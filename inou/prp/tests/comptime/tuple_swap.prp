@@ -1,6 +1,8 @@
 /*
 :name: tuple_swap
-:type: parsing lnast upass
+:type: parsing lnast comptime
+:verifier_pass: 2
+:verifier_fail: 0
 */
 
 mut a:u2 = 3

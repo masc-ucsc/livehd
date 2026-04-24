@@ -398,13 +398,19 @@ void uPass_runner::process_lnast() {
     A_OP(gt)
     A_OP(ge)
 
-    // Function Call — Slice 1 pass-through (Slice 3 reconstructs tuple args).
-    C_OP(func_call)
+    // Function Call — treated like arithmetic so constprop can fold the
+    // built-in typecast calls (int/uint/string/uNN/sNN); anything constprop
+    // declines to handle stays un-folded and the statement is emitted.
+    A_OP(func_call)
 
     // Tuple Operations — Slice 1 pass-through (Slice 6 flattens).
     C_OP(tuple_get)
     C_OP(tuple_set)
     C_OP(tuple_add)
+    // tuple_concat folds when every operand is a known scalar (string/int
+    // concat via Lconst::concat_op); treat like arithmetic so classify can
+    // drop the statement once the destination is resolved.
+    A_OP(tuple_concat)
 
     // Attribute Statements — Slice 1 pass-through (Slice 5 lifts to side-map).
     C_OP(attr_set)

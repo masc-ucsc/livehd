@@ -1,6 +1,8 @@
 /*
 :name: does_test1
-:type: parsing lnast upass
+:type: parsing lnast comptime
+:verifier_pass: 35
+:verifier_fail: 0
 */
 
 const m1 = (a=1,b=0)

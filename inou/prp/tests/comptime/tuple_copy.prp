@@ -1,6 +1,8 @@
 /*
 :name: tuple_copy
-:type: parsing lnast upass
+:type: parsing lnast comptime
+:verifier_pass: 4
+:verifier_fail: 0
 */
 
 mut foo = (a=40,b=50)

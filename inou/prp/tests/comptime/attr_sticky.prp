@@ -1,6 +1,8 @@
 /*
 :name: attr_sticky
-:type: parsing lnast upass
+:type: parsing lnast comptime
+:verifier_pass: 17
+:verifier_fail: 0
 */
 
 mut b = 100

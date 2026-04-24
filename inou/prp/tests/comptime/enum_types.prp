@@ -1,6 +1,8 @@
 /*
 :name: enum_types
-:type: parsing lnast upass
+:type: parsing lnast comptime
+:verifier_pass: 1
+:verifier_fail: 0
 */
 
 comb robot_charge() -> (s:string) { s = "robot charge" }

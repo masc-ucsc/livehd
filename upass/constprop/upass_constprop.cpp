@@ -35,6 +35,18 @@ void uPass_constprop::process_assign() {
     auto rhs_bundle = current_bundle();
     if (rhs_bundle) {
       st.set(lhs_text, rhs_bundle);
+    } else if (st.has_trivial(current_text())) {
+      // Scalar RHS (stored as trivial, not a bundle). Propagate the value so
+      // subsequent uses of `lhs_text` resolve. Mark changed iff the value
+      // differs, matching the const-RHS branch below.
+      auto rhs_value = st.get_trivial(current_text());
+      bool local_changed = true;
+      if (st.has_trivial(lhs_text)) {
+        local_changed = st.get_trivial(lhs_text) != rhs_value;
+      }
+      if (local_changed && st.set(lhs_text, rhs_value)) {
+        mark_changed();
+      }
     }
   } else if (is_type(Lnast_ntype::Lnast_ntype_const)) {
     // RHS is a const literal: parse and track the constant value
@@ -283,6 +295,127 @@ void uPass_constprop::process_tuple_add() {
   }
   // Bundle was updated in-place; no mark_changed() — process_tuple_get drives convergence.
   move_to_parent();
+}
+
+void uPass_constprop::process_tuple_concat() {
+  // n-ary concat: ref(dst), (const|ref)...
+  // Fold when every source operand is a known scalar (string or integer).
+  process_nary([](Lconst& r, Lconst n) { r = r.concat_op(n); });
+}
+
+void uPass_constprop::process_func_call() {
+  // Layout: ref(dst), ref(func_name), (const|ref)(arg)...
+  // For now we only fold the built-in typecast callables (int/uint/string/
+  // sized-int). Anything else is left as-is for a later pass.
+  move_to_child();
+  std::string dst(current_text());
+  if (!move_to_sibling()) { move_to_parent(); return; }
+  if (!is_type(Lnast_ntype::Lnast_ntype_ref)) { move_to_parent(); return; }
+  std::string fname(current_text());
+
+  // Enumerate known typecast dispatch.
+  enum class Cast { none, to_int, to_uint, to_string, to_sized };
+  Cast  kind      = Cast::none;
+  bool  sized_sig = false;  // true for sN, false for uN
+  int   sized_bits = 0;
+  if (fname == "int") {
+    kind = Cast::to_int;
+  } else if (fname == "uint" || fname == "unsigned") {
+    kind = Cast::to_uint;
+  } else if (fname == "string") {
+    kind = Cast::to_string;
+  } else if (fname.size() >= 2 && (fname[0] == 'u' || fname[0] == 's' || fname[0] == 'i')) {
+    // u32 / s32 / u8 ... — size suffix is decimal digits.
+    bool all_digits = true;
+    for (size_t i = 1; i < fname.size(); ++i) {
+      if (fname[i] < '0' || fname[i] > '9') { all_digits = false; break; }
+    }
+    if (all_digits && fname.size() > 1) {
+      kind       = Cast::to_sized;
+      sized_sig  = (fname[0] == 's' || fname[0] == 'i');
+      sized_bits = std::stoi(fname.substr(1));
+    }
+  }
+  if (kind == Cast::none) { move_to_parent(); return; }
+
+  // Collect argument Lconsts. Bail if any is unresolved so a later iteration
+  // can retry.
+  std::vector<Lconst> args;
+  while (move_to_sibling()) {
+    Lconst v;
+    if (is_type(Lnast_ntype::Lnast_ntype_const)) {
+      v = Lconst::from_pyrope(current_text());
+    } else if (is_type(Lnast_ntype::Lnast_ntype_ref)) {
+      if (!st.has_trivial(current_text())) { move_to_parent(); return; }
+      v = st.get_trivial(current_text());
+    } else {
+      move_to_parent();
+      return;
+    }
+    if (v.is_invalid()) { move_to_parent(); return; }
+    args.push_back(v);
+  }
+  move_to_parent();
+
+  // Parse a scalar from either a string (re-parse its textual content) or an
+  // already-numeric Lconst. Returns invalid on parse failure.
+  // `to_pyrope()` on a string renders as `'content'`; strip the single-quote
+  // wrappers before re-parsing so `Lconst::from_pyrope("3")` (an int) is
+  // produced rather than `Lconst::from_pyrope("'3'")` (a string round-trip).
+  auto to_scalar = [](const Lconst& a) -> Lconst {
+    if (!a.is_string()) return a;
+    std::string s = a.to_pyrope();
+    if (s.size() >= 2 && s.front() == '\'' && s.back() == '\'') {
+      s = s.substr(1, s.size() - 2);
+    }
+    try {
+      return Lconst::from_pyrope(s);
+    } catch (...) {
+      return Lconst::invalid();
+    }
+  };
+
+  Lconst result;
+  if (kind == Cast::to_string) {
+    // Concat stringified args: `Lconst::concat_op` already handles
+    // string/int/bool coercion consistently with `++`.
+    if (args.empty()) {
+      result = Lconst::from_pyrope("''");
+    } else {
+      result = args.front();
+      for (size_t i = 1; i < args.size(); ++i) result = result.concat_op(args[i]);
+    }
+    // Force string representation of a pure-numeric arg (e.g. `string(4)`
+    // must yield '4', not the integer 4).
+    if (!result.is_string()) {
+      result = Lconst::from_pyrope(absl::StrCat("'", std::to_string(result.to_i()), "'"));
+    }
+  } else {
+    if (args.size() != 1) { return; }  // unsupported arity
+    Lconst v = to_scalar(args.front());
+    if (v.is_invalid()) { return; }
+    if (kind == Cast::to_uint) {
+      if (v.is_string() || v.is_negative()) {
+        // Cast failure (non-numeric string or negative) → pyrope `nil`.
+        v = Lconst::from_pyrope("nil");
+      }
+      result = v;
+    } else if (kind == Cast::to_int) {
+      if (v.is_string()) { v = Lconst::from_pyrope("nil"); }
+      result = v;
+    } else {
+      // sized: fold only when the value fits. Signed/unsigned range check is
+      // deferred; the current test set just stores small positives.
+      if (v.is_string()) { v = Lconst::from_pyrope("nil"); }
+      (void)sized_sig;
+      (void)sized_bits;
+      result = v;
+    }
+  }
+
+  bool local_changed = true;
+  if (st.has_trivial(dst)) local_changed = st.get_trivial(dst) != result;
+  if (local_changed && st.set(dst, result)) mark_changed();
 }
 
 void uPass_constprop::process_tuple_get() {

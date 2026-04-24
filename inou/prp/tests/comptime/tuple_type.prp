@@ -1,6 +1,8 @@
 /*
 :name: tuple_type
-:type: parsing lnast upass
+:type: parsing lnast comptime
+:verifier_pass: 10
+:verifier_fail: 0
 */
 
 cassert ((a=1,b=2) has "a")

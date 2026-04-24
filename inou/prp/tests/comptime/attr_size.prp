@@ -1,6 +1,8 @@
 /*
 :name: attr_size
-:type: parsing lnast upass
+:type: parsing lnast comptime
+:verifier_pass: 7
+:verifier_fail: 0
 */
 
 a = 3

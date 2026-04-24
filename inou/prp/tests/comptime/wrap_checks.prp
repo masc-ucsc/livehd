@@ -1,6 +1,8 @@
 /*
 :name: wrap_checks
-:type: parsing lnast upass
+:type: parsing lnast comptime
+:verifier_pass: 4
+:verifier_fail: 0
 */
 
 mut x:s8 = 33

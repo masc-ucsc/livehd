@@ -1,6 +1,8 @@
 /*
 :name: valid_simple
-:type: parsing lnast upass
+:type: parsing lnast comptime
+:verifier_pass: 4
+:verifier_fail: 0
 */
 
 mut v1:u32 = 0

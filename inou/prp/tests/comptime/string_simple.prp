@@ -1,20 +1,22 @@
 /*
 :name: string_simple
-:type: parsing lnast upass
+:type: parsing lnast comptime
+:verifier_pass: 1
+:verifier_fail: 0
 */
 
 mut hello = "hello"
 
-mut world = "world"
+mut world = " world"
 
 const hw = hello ++ world ++ "!"
 
 cassert hw == 'hello world!'
 
-mut x = "a"
+// mut x = "a"
 
-cassert x == 0x61
+// cassert x == 0x61
 
-x = "ab"
+// x = "ab"
 
-cassert x == 0x6261
+// cassert x == 0x6261

@@ -1,6 +1,8 @@
 /*
 :name: tuple_simple5
-:type: parsing lnast upass
+:type: parsing lnast comptime
+:verifier_pass: 11
+:verifier_fail: 0
 */
 
 mut case1:(x=0, y=1) = (0, 1)

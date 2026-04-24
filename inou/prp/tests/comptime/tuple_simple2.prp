@@ -1,6 +1,8 @@
 /*
 :name: tuple_simple2
-:type: parsing lnast upass
+:type: parsing lnast comptime
+:verifier_pass: 3
+:verifier_fail: 0
 */
 
 mut t = (1,2)
