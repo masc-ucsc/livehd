@@ -1,0 +1,10 @@
+/*
+:name: string_integer
+:type: parsing lnast comptime
+:verifier_pass: 1
+:verifier_fail: 0
+*/
+
+const a = 2
+const b = 2
+cassert 2 == a == b

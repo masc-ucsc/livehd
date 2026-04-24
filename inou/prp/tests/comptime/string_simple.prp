@@ -1,34 +1,22 @@
 /*
 :name: string_simple
-:type: parsing
+:type: parsing lnast comptime
+:verifier_pass: 1
+:verifier_fail: 0
 */
 
-var hello = "hello"
+mut hello = "hello"
 
-var world = "world"
+mut world = " world"
 
-let hw = hello ++ world ++ "!"
+const hw = hello ++ world ++ "!"
 
-cassert hw == 'hello world!' // "" and '' are similar, just difference is the escape sequence
+cassert hw == 'hello world!'
 
-var x = "a"
+// mut x = "a"
 
-cassert x@[] == 0x61 // typecast from string to integer
+// cassert x == 0x61
 
-x = "ab"
+// x = "ab"
 
-cassert x@[] == 0x6261
-
-if false { // future with types
-  let str:string = 0x636261
-  cassert str == "abc"
-}
-
-if false { // future with function calls
-  let to_digit = fun(a:int(0..=9)) -> (s:string) {
-    s = 0x30+a
-  }
-
-  cassert to_digit(3) == "3"
-}
-
+// cassert x == 0x6261

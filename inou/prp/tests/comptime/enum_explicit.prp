@@ -1,14 +1,6 @@
 /*
 :name: enum_explicit
-:type: parsing
+:type: parsing lnast upass
 */
 
-let e:enum = [
-  ,v0
-  ,v3=3
-  ,v4
-]
-
-// Explicit enum with integer type follow traditional (C/C++) enumeration order
-
-
+enum X = (v0, v3=3, v4)

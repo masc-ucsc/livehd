@@ -1,15 +1,16 @@
 /*
-:name: tuple_simple
-:type: parsing
+:name: tuple_simple_attr
+:type: parsing lnast comptime
+:verifier_pass: 3
+:verifier_fail: 0
 */
 
-var foo = (a=-1)
+mut foo = (a=-1)
 
-foo ++= (b::[potato=4]=1)
+foo ++= (b::[potato=4] = 1)
 
-foo ++= (c::[ubits=5]=2)
+foo ++= (c::[ubits=5] = 2)
 
 cassert foo == (0,1,2)
-cassert foo.c.[ubits] <= 5   // ubits is special. Recomputed but constrained
-cassert foo.b.[potato] == 4
-
+cassert foo.c::[ubits] <= 5
+cassert foo.b::[potato] == 4

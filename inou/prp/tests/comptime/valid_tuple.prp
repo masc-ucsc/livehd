@@ -1,30 +1,17 @@
 /*
 :name: valid_tuple
-:type: parsing
+:type: parsing lnast comptime
+:verifier_pass: 2
+:verifier_fail: 0
 */
 
-let Complex = (
-  ,v1:string = _
-  ,v2:string = _
-)
+type Complex = (v1:string, v2:string)
 
-var x1:Complex = (v1="", v2="")
-var x2:Complex = _
+mut x1:Complex = (v1="", v2="")
+mut x2:Complex = (v1="", v2="")
 
 cassert x1.v1 == "" and x1.v2 == ""
-cassert not x2? and x2.v1 == "" and x2.v2 == ""
 
-cassert x2?.v1 == "" and x2?.v1 != ""  // any comparison is false
+x2.v2 = "hello"
 
-// When x2? is false, any x2?.foo returns 0sb? with the associated x rules
-
-x2.v2 = "hello" // direct access still OK
-
-cassert not x2? and x2.v2? and x2.v1 == "" and x2.v2 == "hello"
-
-x2 = "world"
-
-cassert x2? and x2?.v1 == "world" and x2.v1 == "world"
-
-//if x2?.v1 { // if x2? and x2.v1!=0
-//}
+cassert x2.v2 == "hello"

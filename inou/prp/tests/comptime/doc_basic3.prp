@@ -1,15 +1,14 @@
 /*
 :name: doc_basic3
-:type: parsing
+:type: parsing lnast comptime
+:verifier_pass: 1
+:verifier_fail: 0
 */
 
+mut `other id too` = 1
 
-var `other id too` = 1
+const `a` = 7
 
-let `a` = 7
-
-let `my long id` = 3 + `other id too` + a + `a`
-
+const `my long id` = 3 + `other id too` + a + `a`
 
 cassert `my long id` == 3+2+7+7
-

@@ -5,6 +5,7 @@
 #include <string>
 
 #include "pass.hpp"
+#include "upass_core.hpp"
 #include "upass_runner.hpp"
 
 class Pass_upass : public Pass {
@@ -14,6 +15,7 @@ protected:
   std::string              ir_mode{"lnast"};
   bool                     dry_run{false};
   bool                     inherit_labels{true};
+  upass::Options_map       pass_options;
 
 public:
   static void work(Eprp_var& var);

@@ -4,10 +4,13 @@
 #include <functional>
 #include <map>
 #include <memory>
+#include <optional>
 #include <stack>
 #include <string>
+#include <string_view>
 #include <vector>
 
+#include "lconst.hpp"
 #include "lnast.hpp"
 #include "lnast_manager.hpp"
 #include "lnast_ntype.hpp"
@@ -16,13 +19,62 @@
 
 namespace upass {
 
+// Free-form, per-pass configuration threaded from `pass.upass` labels down
+// through the runner to individual passes. Pass_upass collects the labels
+// it cares about and stuffs them in here; each pass pulls the keys it
+// recognizes in its `set_options` override. Unknown keys are silently
+// ignored so new labels can be added without a whole-stack change.
+using Options_map = std::map<std::string, std::string>;
+
+enum class Emit_kind { emit, drop_subtree };
+
+struct Emit_decision {
+  Emit_kind kind{Emit_kind::emit};
+
+  static constexpr Emit_decision emit_node() { return Emit_decision{Emit_kind::emit}; }
+  static constexpr Emit_decision drop() { return Emit_decision{Emit_kind::drop_subtree}; }
+};
+
 struct uPass {
 public:
   uPass(std::shared_ptr<Lnast_manager>& _lm) : lm(_lm) {}
   virtual ~uPass() = default;
 
-  void begin_iteration() { changed = false; }
-  bool has_changed() const { return changed; }
+  virtual void begin_iteration() { changed = false; }
+  bool         has_changed() const { return changed; }
+
+  // Called by the runner on every drop-candidate op-node (assign, plus, eq, …)
+  // after its per-node process_* has populated any ST state. Returning `drop`
+  // tells the runner to omit the node (and its subtree) from the staging tree.
+  // Default: always emit.
+  virtual Emit_decision classify_statement() { return Emit_decision::emit_node(); }
+
+  // Called by the runner for every `ref <name>` operand it is about to emit
+  // (RHS of an op, condition of an `if`, cassert operand). If any pass
+  // returns a concrete Lconst, the runner writes `const <value>` in place of
+  // the ref. First non-nullopt wins.
+  virtual std::optional<Lconst> fold_ref(std::string_view /*name*/) { return std::nullopt; }
+
+  // Runner-supplied helper that delegates to `try_fold_ref` across every
+  // registered pass. Passes can use this to resolve a ref against the
+  // aggregate symbol-table state (e.g. verifier consulting constprop's ST
+  // to decide whether a cassert operand is comptime-known).
+  //
+  // The runner wires this up after every pass is constructed (so the
+  // callback sees the full pass list). Before that point it is empty —
+  // defensive callers should check before invoking.
+  using Fold_fn = std::function<std::optional<Lconst>(std::string_view)>;
+  void set_runner_fold_fn(Fold_fn fn) { runner_fold_fn = std::move(fn); }
+
+  // Consume per-pass options (see Options_map). Default: no-op. Passes
+  // override to pull the keys they care about. Called once, before run().
+  virtual void set_options(const Options_map& /*opts*/) {}
+
+  // Called once after the last iteration of the run completes. Passes can
+  // use it to emit summaries or assert invariants that only make sense
+  // once the full traversal is done (e.g. verifier comparing its cassert
+  // tallies against expected counts).
+  virtual void end_run() {}
 
 #define PROCESS_NODE(NAME) \
   virtual void process_##NAME() {}
@@ -109,6 +161,7 @@ public:
 protected:
   std::shared_ptr<Lnast_manager>& lm;
   bool                            changed{false};
+  Fold_fn                         runner_fold_fn;
 
   void move_to_nid(const Lnast_nid& nid) { lm->move_to_nid(nid); }
   auto current_text() const { return lm->current_text(); }

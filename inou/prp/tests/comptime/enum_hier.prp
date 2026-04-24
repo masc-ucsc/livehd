@@ -1,31 +1,22 @@
 /*
 :name: enum_hier
-:type: parsing
+:type: parsing lnast comptime
+:verifier_pass: 6
+:verifier_fail: 0
 */
 
-let animal:enum = [
-  ,mammal = [
-    ,rat
-    ,human
-  ]
-  ,bird = [
-    ,parroket
-    ,flinch
-  ]
-]
+enum Mammal = (rat, human)
+enum Bird = (parroket, flinch)
 
-let r = animal.mammal.rat
-let h = animal.mammal.human
+const r = Mammal.rat
+const h = Mammal.human
 
-let p = animal.bird.parroket
+const p = Bird.parroket
 
 cassert r != h
-cassert r in animal.mammal
-cassert h in animal.mammal
+cassert r in Mammal
+cassert h in Mammal
 
-cassert p !in animal.mammal
-cassert p in animal.bird
-cassert p != animal.bird
-cassert p in animal.bird.parroket
-cassert p == animal.bird.parroket
-
+cassert p !in Mammal
+cassert p in Bird
+cassert p == Bird.parroket

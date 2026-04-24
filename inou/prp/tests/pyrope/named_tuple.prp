@@ -1,8 +1,8 @@
 /*
 :name: named_tuple
-:type: parsing lnast
+:type: parsing lnast upass
 */
 
-let top = fun {
-  x = (a=1, var b=(c=1), var c)
+comb top() {
+  x = (a=1, mut b = (c=1), mut c)
 }

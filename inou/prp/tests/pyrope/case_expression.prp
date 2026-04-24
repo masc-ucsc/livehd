@@ -1,10 +1,11 @@
 /*
 :name: case_expression
-:type: parsing lnast
+:type: parsing lnast upass
 */
 
-let x = 1
-let y = match x {
+const x = 1
+const y = match x {
   > 0 { 1 }
   < 0 { 2 }
+  else { 0 }
 }

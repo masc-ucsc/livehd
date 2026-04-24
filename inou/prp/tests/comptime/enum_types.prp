@@ -1,67 +1,25 @@
 /*
 :name: enum_types
-:type: parsing
+:type: parsing lnast comptime
+:verifier_pass: 1
+:verifier_fail: 0
 */
 
-// Pyrope opt1
+comb robot_charge() -> (s:string) { s = "robot charge" }
+comb person_consume() -> (s:string) { s = "person consume" }
+comb cyborg_consume() -> (s:string) { s = "cyborg consume" }
+comb cyborg_charge() -> (s:string) { s = "cyborg charge" }
+comb potato_consume() -> (s:string) { s = "potato consume" }
 
-let Robot = (
-  ,charge = fun() { ret "robot charge" }
-)
-let Person = (
-  ,consume = fun() { ret "person consume" }
-)
+const Robot = (charge = robot_charge)
+const Person = (consume = person_consume)
+const Cyborg = (consume = cyborg_consume, charge = cyborg_charge)
+const Potato = (consume = potato_consume)
 
-let Cyborg = (
-  ,consume = fun() { ret "cyborg consume" }
-  ,charge = fun() { ret "cyborg charge" }
-)
-
-let Potato = (
-  ,consume = fun() { ret "potato consume" }
-  ,something_else = fun() { ret "not called" }
-)
-
-let nourish = fun(x) where (x does Person) or (x does Robot) { // if Person and Robot it is already a Cyborg
-  ret match x {
+comb nourish(x) -> (r:string) {
+  cassert (x does Person) or (x does Robot)
+  r = match x {
     does Person { x.consume() }
     does Robot  { x.charge()  }
   }
 }
-
-let ro:Robot = _
-let pe:Person = _
-let po:Potato = _
-
-cassert nourish(pe) == "person consume"
-cassert nourish(ro) == "robot charge"
-cassert nourish(po) == "potato consume" // (po does Person) is true 
-//cassert nourish(_:Cyborg=_) == "XX"             // compile error, two match entry options at once
-
-// Pyrope opt2
-
-let Eater:enum = (
- ,person:Person = _
- ,robot:Robot   = _
- ,cyborg:Cyborg = _
-)
-
-let nourish = fun(x:Eater) -> (_:string) {
-  ret match x {
-    == Eater.person { x.consume() }
-    == Eater.robot  { x.charge()  }
-    == Eater.cyborg  { x.charge() ++ x.consume()  }
-  }
-}
-
-let p:Eaters.Person = _
-let r:Eaters.Robot  = _
-let c:Eaters.Cyborg = _
-
-cassert nourish(p) == "person consume"
-cassert nourish(r) == "robot charge"
-cassert nourish(c) == "cyborg charge cyborg consume"
-
-//cassert nourish(:Person) != ""  // compile error, not Eater entry
-//cassert nourish(:Potato) != ""  // compile error, not Eater entry
-

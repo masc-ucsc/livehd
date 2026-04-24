@@ -1,27 +1,25 @@
 /*
 :name: setter_complex
-:type: parsing
+:type: parsing lnast comptime
+:verifier_pass: 5
+:verifier_fail: 0
 */
 
-let fint:int = _
+const fint:int = 0
 cassert fint == 0
 
-var fbool:bool = _
+mut fbool:bool = false
 cassert fbool == 0
 
-let Tup = (
-  ,v:string = _  // default to empty
-  ,setter = fun(ref self) { // no args
-     cassert self.v == ""
-     self.v = "empty"
-  } ++ fun(ref self, v) {
-     self.v = v
-  }
-)
+mod set_empty(ref self) {
+  cassert self.v == ""
+  self.v = "empty"
+}
 
-var x:Tup = _
+const Tup = (v = "", setter = set_empty)
+
+mut x:Tup = (v = "")
 cassert x.v == "empty"
 
 x = "Padua"
 cassert x.v == "Padua"
-

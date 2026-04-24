@@ -1,13 +1,12 @@
 /*
 :name: tuple_bracket
-:type: parsing
+:type: parsing lnast comptime
+:verifier_pass: 1
+:verifier_fail: 0
 */
 
-// Bracket syntax (cleaner enums and cases with ids)
+const a = ('hello', a=3)
 
-let a = ('hello', a=3)
-
-let b = [hello, a=3]
+const b = [hello, a=3]
 
 cassert a == b
-

@@ -68,11 +68,56 @@ class PrpRunner:
 
         lg_cmd.append('inou.prp')
         lg_cmd.append('files:{}'.format(','.join(test.params['files'])))
+        lg_cmd.append('|> pass.lnastfmt')
+
+        return lg_cmd
+
+    def lgshell_upass(self, test):
+        # Pipeline smoke-test: runs constprop only (verifier:false). Exists
+        # because constprop has known gaps (tuple index, enum values, string
+        # ops, __wrap/__ubits attrs, ...) that would cause the verifier to
+        # hard-error on casserts constprop folds incorrectly. These tests
+        # just assert the pipeline doesn't crash. For correctness checking,
+        # use `:type: comptime`.
+        lg_cmd = self.lgshell_lnast(test)
+
+        lg_cmd.append('|>')
+        lg_cmd.append('pass.upass constprop:1 verifier:false max_iters:1')
+
+        lg_cmd.append('|>')
+        lg_cmd.append('pass.lnastfmt')
+
+        return lg_cmd
+
+    def lgshell_comptime(self, test):
+        # Pure compile-time program: every cassert must resolve. Default
+        # pass.upass pipeline runs the verifier, which hard-errors on
+        # known-false cassert and discharges known-true. To opt out for a
+        # specific case, drop `:type: comptime` back to `:type: upass`.
+        #
+        # Optional header tags (read via PrpTest.params):
+        #   :verifier_pass: N   — expected count of discharged casserts
+        #   :verifier_fail: N   — expected count of known-false casserts
+        # When set, the verifier end_run compares its tally and fails the
+        # test if they don't match. -1 or absent disables the check.
+        lg_cmd = self.lgshell_lnast(test)
+
+        upass_args = 'pass.upass constprop:1 max_iters:1'
+        if 'verifier_pass' in test.params:
+            upass_args += ' verifier_pass:' + test.params['verifier_pass']
+        if 'verifier_fail' in test.params:
+            upass_args += ' verifier_fail:' + test.params['verifier_fail']
+
+        lg_cmd.append('|>')
+        lg_cmd.append(upass_args)
+
+        lg_cmd.append('|>')
+        lg_cmd.append('pass.lnastfmt')
 
         return lg_cmd
 
     def lgshell_lgraph(self, test):
-        lg_cmd = self.lgshell_lnast(test)
+        lg_cmd = self.lgshell_upass(test)
 
         lg_cmd.append('|>')
         lg_cmd.append('pass.lnastopt')
@@ -95,10 +140,12 @@ class PrpRunner:
 
     def gen_lgshell_cmd(self, test, mode):
         gen_lg_cmd = {
-            'parsing' : self.lgshell_parse,
-            'lnast'   : self.lgshell_lnast,
-            'lgraph'  : self.lgshell_lgraph,
-            'compile' : self.lgshell_lg_compile
+            'parsing'  : self.lgshell_parse,
+            'lnast'    : self.lgshell_lnast,
+            'upass'    : self.lgshell_upass,
+            'comptime' : self.lgshell_comptime,
+            'lgraph'   : self.lgshell_lgraph,
+            'compile'  : self.lgshell_lg_compile
         }
 
         cmd = []

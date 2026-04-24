@@ -1,6 +1,6 @@
 /*
 :name: doc_basic1
-:type: parsing
+:type: parsing lnast
 */
 
 cassert 1K == 1024

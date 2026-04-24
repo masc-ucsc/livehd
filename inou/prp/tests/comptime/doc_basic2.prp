@@ -1,9 +1,10 @@
 /*
 :name: doc_basic2
-:type: parsing
+:type: parsing lnast comptime
+:verifier_pass: 2
+:verifier_fail: 0
 */
 
-cassert "hello\n" == "\x68ello\x0d"  // \x?? is hex ascii character
+cassert "hello\n" == "\x68ello\x0d"
 
-cassert 'hello\n' == "hello\\n"  // ' ' does not have backticks
-
+cassert 'hello\n' == "hello\\n"

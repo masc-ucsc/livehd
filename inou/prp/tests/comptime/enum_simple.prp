@@ -1,33 +1,24 @@
 /*
 :name: enum_simple
-:type: parsing
+:type: parsing lnast comptime
+:verifier_pass: 9
+:verifier_fail: 0
 */
 
-let X:enum = [
-  ,l0
-  ,l1
-  ,l2
-]
+enum X = (l0, l1, l2)
 
-let a = X.l0
-let b = X.l1
+const a = X.l0
+const b = X.l1
 
-cassert a!=b
+cassert a != b
 cassert a == X.l0
 cassert b == X.l1
 
-// Typecast to get enum value (one hot encoded)
-cassert l0@[] == 0sb001
-cassert l1@[] == 0sb010
-cassert l2@[] == 0sb100
+cassert X.l0 == 0sb001
+cassert X.l1 == 0sb010
+cassert X.l2 == 0sb100
 
-let V3:enum = [
-   ,a
-   ,b=5
-   ,c
-]
+enum V3 = (a, b=5, c)
 cassert V3.a == 0
 cassert V3.b == 5
 cassert V3.c == 6
-
-

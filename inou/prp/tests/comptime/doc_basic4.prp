@@ -1,7 +1,6 @@
 /*
 :name: doc_basic4
-:type: parsing
+:type: parsing lnast upass
 */
 
-let a = 1 ; var b = 2 ; cassert a+b == 3 ; cassert true
-
+const a = 1; mut b = 2; cassert a+b == 3; cassert true

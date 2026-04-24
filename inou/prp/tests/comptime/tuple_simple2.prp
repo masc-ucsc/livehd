@@ -1,9 +1,11 @@
 /*
 :name: tuple_simple2
-:type: parsing
+:type: parsing lnast comptime
+:verifier_pass: 3
+:verifier_fail: 0
 */
 
-var t = (1,2)
+mut t = (1,2)
 
 t ++= (b=3,44)
 
@@ -11,11 +13,10 @@ cassert t.0 == 1 and t.1==2 and t.b==3 and t.3==4
 
 cassert t == (1,2,b=3,44)
 
-var x = ()
+mut x = ()
 
 x = (1,2,3,7)
 
 x[3] = 44
 
 cassert x == t and x.3 == 44
-
