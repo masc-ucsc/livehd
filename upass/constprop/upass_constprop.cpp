@@ -251,9 +251,9 @@ void uPass_constprop::process_ge() {
 }
 
 void uPass_constprop::process_if() {
-  // Conservative if-handling: inspect condition variables but always let the
-  // runner traverse all branches.
-  // Dead-branch elimination requires tree-surgery hooks not yet in the runner.
+  // Observe the condition so the symbol table is populated before the runner
+  // queries try_fold_ref(). The runner's process_if (Slice 7) performs the
+  // actual dead-branch elimination based on the folded condition value.
   if (!move_to_child()) {
     return;
   }

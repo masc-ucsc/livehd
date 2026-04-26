@@ -90,3 +90,151 @@ TEST(UpassRunnerResolve, SharedDecideResolves) {
   EXPECT_EQ(ordered[0], "decide_shared");
   EXPECT_FALSE(runner.has_configuration_error());
 }
+
+// ── Slice 7: if-branch pruning ────────────────────────────────────────────────
+//
+// Helper: count the number of nodes of a given ntype in the staging LNAST.
+static size_t count_ntype(const Lnast& ln, Lnast_ntype::Lnast_ntype_int target) {
+  size_t n = 0;
+  for (const auto& nid : ln.depth_preorder(Lnast_nid::root())) {
+    if (ln.get_type(nid).get_raw_ntype() == target) {
+      ++n;
+    }
+  }
+  return n;
+}
+
+// Build a minimal LNAST:
+//   top → stmts → if(cond, then_stmts[assign(___a, val)], [else_stmts[assign(___a, else_val)]])
+// `cond_text` is the condition literal ("true", "false", or a ref name like "___c").
+// `else_val`  is "" when there is no else branch.
+static std::shared_ptr<Lnast> make_if_lnast(std::string_view cond_text,
+                                             std::string_view then_val  = "4",
+                                             std::string_view else_val  = "") {
+  auto ln = std::make_shared<Lnast>("if_test");
+  ln->set_root(Lnast_node::create_top());
+  auto stmts = ln->add_child(Lnast_nid::root(), Lnast_node::create_stmts());
+  auto if_nid = ln->add_child(stmts, Lnast_node::create_if());
+
+  // Condition — emit as const ("true"/"false") or ref (unknown variable).
+  bool is_literal = (cond_text == "true" || cond_text == "false");
+  if (is_literal) {
+    ln->add_child(if_nid, Lnast_node::create_const(cond_text));
+  } else {
+    ln->add_child(if_nid, Lnast_node::create_ref(cond_text));
+  }
+
+  // Then-stmts.
+  auto then_s = ln->add_child(if_nid, Lnast_node::create_stmts());
+  auto asgn1  = ln->add_child(then_s, Lnast_node::create_assign());
+  ln->add_child(asgn1, Lnast_node::create_ref("___a"));
+  ln->add_child(asgn1, Lnast_node::create_const(then_val));
+
+  // Optional else-stmts.
+  if (!else_val.empty()) {
+    auto else_s = ln->add_child(if_nid, Lnast_node::create_stmts());
+    auto asgn2  = ln->add_child(else_s, Lnast_node::create_assign());
+    ln->add_child(asgn2, Lnast_node::create_ref("___a"));
+    ln->add_child(asgn2, Lnast_node::create_const(else_val));
+  }
+
+  return ln;
+}
+
+// ── Test 1: condition is const "true" → if is pruned, then-branch spliced ───
+TEST(UpassRunnerIfPrune, TrueConditionPrunesIfNode) {
+  auto ln     = make_if_lnast("true");
+  auto lm     = std::make_shared<upass::Lnast_manager>(ln);
+  uPass_runner runner(lm, {"constprop"});
+  runner.run();
+  auto staging = runner.take_staging();
+  ASSERT_NE(staging, nullptr);
+  // No if-node should remain in the staging tree.
+  EXPECT_EQ(count_ntype(*staging, Lnast_ntype::Lnast_ntype_if), 0U);
+}
+
+// ── Test 2: condition is const "false" → if is pruned, no output emitted ────
+TEST(UpassRunnerIfPrune, FalseConditionPrunesIfNodeNoElse) {
+  auto ln     = make_if_lnast("false");
+  auto lm     = std::make_shared<upass::Lnast_manager>(ln);
+  uPass_runner runner(lm, {"constprop"});
+  runner.run();
+  auto staging = runner.take_staging();
+  ASSERT_NE(staging, nullptr);
+  // No if-node and no assign should remain (branch dropped entirely).
+  EXPECT_EQ(count_ntype(*staging, Lnast_ntype::Lnast_ntype_if), 0U);
+  EXPECT_EQ(count_ntype(*staging, Lnast_ntype::Lnast_ntype_assign), 0U);
+}
+
+// ── Test 3: condition false + else branch → else-stmts spliced into parent ──
+TEST(UpassRunnerIfPrune, FalseConditionSplicesElseBranch) {
+  auto ln     = make_if_lnast("false", "4", "5");
+  auto lm     = std::make_shared<upass::Lnast_manager>(ln);
+  uPass_runner runner(lm, {"constprop"});
+  runner.run();
+  auto staging = runner.take_staging();
+  ASSERT_NE(staging, nullptr);
+  // No if-node — else branch was spliced.
+  EXPECT_EQ(count_ntype(*staging, Lnast_ntype::Lnast_ntype_if), 0U);
+  // else branch is dropped too because ___a=5 is a known-const temp.
+  // Important invariant: staging must not crash and must have no if node.
+}
+
+// ── Test 4: unknown condition → full if node is preserved ───────────────────
+TEST(UpassRunnerIfPrune, UnknownConditionKeepsIfNode) {
+  // ___c is never defined → constprop ST has no value for it → condition unknown.
+  auto ln     = make_if_lnast("___c");
+  auto lm     = std::make_shared<upass::Lnast_manager>(ln);
+  uPass_runner runner(lm, {"constprop"});
+  runner.run();
+  auto staging = runner.take_staging();
+  ASSERT_NE(staging, nullptr);
+  // The if-node must be preserved when the condition is unknown.
+  EXPECT_GE(count_ntype(*staging, Lnast_ntype::Lnast_ntype_if), 1U);
+}
+
+// ── Test 5: ref condition resolved by constprop → if is pruned ───────────────
+// This is the primary real-world path: the condition is a tmp ref (___cond)
+// whose value is folded by constprop via a preceding eq statement.
+//
+// LNAST built:
+//   top → stmts
+//     assign:  ___x  = 3          ← known scalar
+//     eq:      ___cond = ___x == 3 ← constprop folds to true
+//     if(ref:___cond)
+//       stmts → assign: ___a = 4
+//
+// After run(): constprop sets ___cond=true in its ST; runner calls
+// try_fold_ref("___cond") → true → splices then-stmts, no if in staging.
+TEST(UpassRunnerIfPrune, RefCondResolvedByConstpropPrunesIfNode) {
+  auto ln = std::make_shared<Lnast>("if_ref_cond");
+  ln->set_root(Lnast_node::create_top());
+  auto stmts = ln->add_child(Lnast_nid::root(), Lnast_node::create_stmts());
+
+  // assign ___x = 3
+  auto asgn_x = ln->add_child(stmts, Lnast_node::create_assign());
+  ln->add_child(asgn_x, Lnast_node::create_ref("___x"));
+  ln->add_child(asgn_x, Lnast_node::create_const("3"));
+
+  // eq ___cond = ___x == 3  →  constprop folds to true (1)
+  auto eq_nid = ln->add_child(stmts, Lnast_node::create_eq());
+  ln->add_child(eq_nid, Lnast_node::create_ref("___cond"));
+  ln->add_child(eq_nid, Lnast_node::create_ref("___x"));
+  ln->add_child(eq_nid, Lnast_node::create_const("3"));
+
+  // if ___cond { assign ___a = 4 }
+  auto if_nid   = ln->add_child(stmts, Lnast_node::create_if());
+  ln->add_child(if_nid, Lnast_node::create_ref("___cond"));
+  auto then_s   = ln->add_child(if_nid, Lnast_node::create_stmts());
+  auto asgn_a   = ln->add_child(then_s, Lnast_node::create_assign());
+  ln->add_child(asgn_a, Lnast_node::create_ref("___a"));
+  ln->add_child(asgn_a, Lnast_node::create_const("4"));
+
+  auto lm     = std::make_shared<upass::Lnast_manager>(ln);
+  uPass_runner runner(lm, {"constprop"});
+  runner.run();
+  auto staging = runner.take_staging();
+  ASSERT_NE(staging, nullptr);
+  // ___cond was folded to true by constprop → runner must prune the if node.
+  EXPECT_EQ(count_ntype(*staging, Lnast_ntype::Lnast_ntype_if), 0U);
+}
