@@ -1,12 +1,14 @@
 /*
 :name: tuple_simple6
 :type: parsing lnast comptime
-:verifier_pass: 3
+:verifier_pass: 4
 :verifier_fail: 0
 */
 
-mut x = (a:u32 = 3, b = 4, _:u32 = 5)
+mut x = (a:u32 = 3, b = 4, mut 5)
 
 cassert x == (3,4,5)
 cassert x != (a=3,foo=4,5)
 cassert x == (a=3,b=4,5)
+x[2] += 5
+cassert x == (a=3,b=4,10)

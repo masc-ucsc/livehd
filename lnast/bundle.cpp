@@ -819,11 +819,32 @@ void Bundle::set(std::string_view key, const Entry&& entry) {
 bool Bundle::concat(const std::shared_ptr<Bundle const>& tup) {
   bool ok = true;
 
+  // Collect entries that collide on positional matches; we renumber them
+  // after we know `max_pos` of the existing bundle.  Two collision shapes:
+  //   - plain `N` (positional) key
+  //   - `:N:name` (named-position) key — colliding because `:0:b` matches
+  //     existing `0` per Bundle::match.  Without renumbering, `(1,2) ++=
+  //     (b=3,44)` would lose the `b=3` entry.
   std::vector<std::pair<std::string, Lconst>> delayed_numbers;
+
+  auto is_named_pos = [](std::string_view k) {
+    if (k.size() < 4 || k.front() != ':') {
+      return false;
+    }
+    if (!std::isdigit(static_cast<unsigned char>(k[1]))) {
+      return false;
+    }
+    auto second_colon = k.find(':', 1);
+    return second_colon != std::string_view::npos && second_colon + 1 < k.size();
+  };
 
   for (const auto& it : tup->key_map) {
     if (has_trivial(it.first)) {
       if (std::isdigit(it.first.front()) && is_single_level(it.first)) {
+        delayed_numbers.emplace_back(it.first, it.second.trivial);
+        continue;
+      }
+      if (is_named_pos(it.first)) {
         delayed_numbers.emplace_back(it.first, it.second.trivial);
         continue;
       }
@@ -856,9 +877,19 @@ bool Bundle::concat(const std::shared_ptr<Bundle const>& tup) {
       }
     }
     for (const auto& e : delayed_numbers) {
-      auto        x = str_tools::to_i(e.first);
-      std::string new_key(std::to_string(x + max_pos + 1));
-
+      std::string new_key;
+      if (e.first.front() == ':') {
+        // `:N:name` → `:(N+max+1):name`; preserve the trailing `name` (and
+        // any further `.sub.field` path) verbatim.
+        auto second_colon = e.first.find(':', 1);
+        I(second_colon != std::string::npos);
+        auto x         = str_tools::to_i(e.first.substr(1, second_colon - 1));
+        auto suffix_sv = std::string_view(e.first).substr(second_colon);  // includes leading ':'
+        new_key        = absl::StrCat(":", std::to_string(x + max_pos + 1), suffix_sv);
+      } else {
+        auto x  = str_tools::to_i(e.first);
+        new_key = std::to_string(x + max_pos + 1);
+      }
       key_map.emplace_back(new_key, Entry(false, e.second));
     }
   }

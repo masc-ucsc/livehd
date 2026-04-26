@@ -5,12 +5,13 @@
 :verifier_fail: 0
 */
 
-mut foo = (a=-1)
+mut foo::[potato=4] = (a=-1)
 
-foo ++= (b::[potato=4] = 1)
+foo ++= (b = 1)
 
-foo ++= (c::[ubits=5] = 2)
+foo ++= (const c::[ubits=5] = 2)
 
-cassert foo == (0,1,2)
-cassert foo.c::[ubits] <= 5
-cassert foo.b::[potato] == 4
+cassert foo == (-1,1,2)
+cassert foo.c.[ubits] <= 5  // could be less if bitwidth proves that 2 only needs 2 bits
+cassert foo.[potato] == 4
+cassert foo.b.[potato] == nil

@@ -300,6 +300,55 @@ void Prp2lnast::process_declaration_statement(TSNode n) {
 
 Lnast_node Prp2lnast::process_lvalue_for_assign(TSNode lvalue, const Lnast_node& rvalue, TSNode decl_node, TSNode type_cast_node) {
   std::string lvt(ts_node_type(lvalue));
+  if (lvt == "lvalue_list") {
+    // Tuple lvalue: `(x0, x1, …) = rhs`. The grammar's `lvalue_list`
+    // children are `lvalue_item`s, each either a `typed_identifier` directly
+    // or a `(_complex_identifier, optional type_cast)` pair. For each item
+    // we extract the matching positional field from `rvalue` into a fresh
+    // tmp and recurse. The recursion lets nested cases (member_selection,
+    // dot_expression, even nested lvalue_lists) reuse the existing single-
+    // lvalue paths below.
+    uint32_t nnc = ts_node_named_child_count(lvalue);
+    uint32_t pos = 0;
+    for (uint32_t i = 0; i < nnc; i++) {
+      TSNode      item = ts_node_named_child(lvalue, i);
+      std::string itt(ts_node_type(item));
+      if (itt != "lvalue_item") {
+        continue;
+      }
+      // Resolve the inner lvalue + per-item type_cast.
+      TSNode inner;
+      TSNode item_tc      = type_cast_node;  // default: outer type_cast (lvalue_list has none today)
+      TSNode item_id_only = child_by_field(item, "identifier");
+      TSNode item_tc_only = child_by_field(item, "type");
+      if (!ts_node_is_null(item_id_only)) {
+        // Option 2: bare _complex_identifier with optional type_cast.
+        inner = item_id_only;
+        if (!ts_node_is_null(item_tc_only)) {
+          item_tc = item_tc_only;
+        }
+      } else {
+        // Option 1: lvalue_item wraps a typed_identifier (or other lvalue
+        // node) as its sole named child.
+        inner = ts_node_named_child(item, 0);
+      }
+      if (ts_node_is_null(inner)) {
+        ++pos;
+        continue;
+      }
+      // tuple_get tmp, rvalue, <pos>
+      auto       tg_idx = lnast->add_child(stmts_index, Lnast_node::create_tuple_get());
+      Lnast_node tmp    = make_tmp_ref();
+      lnast->add_child(tg_idx, tmp);
+      lnast->add_child(tg_idx, rvalue);
+      lnast->add_child(tg_idx, Lnast_node::create_const(std::to_string(pos)));
+      // Recurse: the per-position tmp is the new "rvalue" for the inner lvalue.
+      // `decl_node` propagates so `mut (a, b) = …` declares both items.
+      (void)process_lvalue_for_assign(inner, tmp, decl_node, item_tc);
+      ++pos;
+    }
+    return rvalue;
+  }
   if (lvt == "identifier" || lvt == "typed_identifier") {
     TSNode id = (lvt == "typed_identifier") ? child_by_field(lvalue, "identifier") : lvalue;
     TSNode tc = (lvt == "typed_identifier") ? child_by_field(lvalue, "type") : type_cast_node;
@@ -336,48 +385,87 @@ Lnast_node Prp2lnast::process_lvalue_for_assign(TSNode lvalue, const Lnast_node&
     return ref;
   }
   if (lvt == "member_selection" || lvt == "dot_expression") {
-    // Collect base and selection path, then emit tuple_set
-    // Simplified: expr_to_node reads it as get; here we need set form.
-    // Only support dot_expression: a.b.c = rv  ->  tuple_set a b c rv
-    if (lvt == "dot_expression") {
-      // dot_expression: item + repeat1(. identifier|const)
-      TSNode     item = child_by_field(lvalue, "item");
-      Lnast_node base = ts_node_is_null(item) ? identifier_to_node(ts_node_named_child(lvalue, 0), true) : expr_to_node(item);
-      auto       idx  = lnast->add_child(stmts_index, Lnast_node::create_tuple_set());
-      lnast->add_child(idx, base);
-      uint32_t nnc = ts_node_named_child_count(lvalue);
-      for (uint32_t i = 1; i < nnc; i++) {
-        TSNode      nc = ts_node_named_child(lvalue, i);
-        std::string t(ts_node_type(nc));
-        if (t == "identifier") {
-          lnast->add_child(idx, Lnast_node::create_const(std::string(get_text(nc))));
+    // Extract a deep path so `t.b[0] = …` lowers to `tuple_set t b 0 …`
+    // (one tuple_set rooted on the actual variable) instead of going
+    // through `tuple_get tmp t b; tuple_set tmp 0 …` — the tmp would not
+    // propagate the update back to t. The walker handles arbitrarily
+    // nested member_selection / dot_expression chains.
+    std::vector<Lnast_node> path;
+    Lnast_node              root;
+    bool                    have_root = false;
+    std::function<void(TSNode)> collect = [&](TSNode n) {
+      std::string t(ts_node_type(n));
+      if (t == "dot_expression") {
+        TSNode item = child_by_field(n, "item");
+        if (ts_node_is_null(item)) {
+          uint32_t nc = ts_node_named_child_count(n);
+          if (nc > 0) {
+            collect(ts_node_named_child(n, 0));
+          }
+          for (uint32_t i = 1; i < nc; i++) {
+            TSNode      c = ts_node_named_child(n, i);
+            std::string ct(ts_node_type(c));
+            if (ct == "identifier") {
+              path.push_back(Lnast_node::create_const(std::string(trim(get_text(c)))));
+            } else {
+              path.push_back(expr_to_node(c));
+            }
+          }
         } else {
-          lnast->add_child(idx, expr_to_node(nc));
-        }
-      }
-      lnast->add_child(idx, rvalue);
-      return base;
-    }
-    if (lvt == "member_selection") {
-      TSNode     arg  = child_by_field(lvalue, "argument");
-      Lnast_node base = expr_to_node(arg);
-      auto       idx  = lnast->add_child(stmts_index, Lnast_node::create_tuple_set());
-      lnast->add_child(idx, base);
-      // All select children after argument
-      uint32_t nnc = ts_node_named_child_count(lvalue);
-      for (uint32_t i = 1; i < nnc; i++) {
-        TSNode sel_node = ts_node_named_child(lvalue, i);
-        // sel_node is a "select" containing a list/open_range/from_zero
-        TSNode list = child_by_field(sel_node, "list");
-        if (!ts_node_is_null(list)) {
-          uint32_t lnnc = ts_node_named_child_count(list);
-          for (uint32_t j = 0; j < lnnc; j++) {
-            lnast->add_child(idx, expr_to_node(ts_node_named_child(list, j)));
+          collect(item);
+          uint32_t nc = ts_node_named_child_count(n);
+          for (uint32_t i = 0; i < nc; i++) {
+            TSNode  c = ts_node_named_child(n, i);
+            if (ts_node_eq(c, item)) {
+              continue;
+            }
+            std::string ct(ts_node_type(c));
+            if (ct == "identifier") {
+              path.push_back(Lnast_node::create_const(std::string(trim(get_text(c)))));
+            } else {
+              path.push_back(expr_to_node(c));
+            }
           }
         }
+      } else if (t == "member_selection") {
+        TSNode arg = child_by_field(n, "argument");
+        if (!ts_node_is_null(arg)) {
+          collect(arg);
+        }
+        uint32_t nnc = ts_node_named_child_count(n);
+        for (uint32_t i = 0; i < nnc; i++) {
+          TSNode c = ts_node_named_child(n, i);
+          if (!ts_node_is_null(arg) && ts_node_eq(c, arg)) {
+            continue;
+          }
+          // Each `select` carries either a list of indices, or an
+          // open/from-zero range. Only the list form is supported as an
+          // lvalue path today.
+          TSNode list = child_by_field(c, "list");
+          if (!ts_node_is_null(list)) {
+            uint32_t lnnc = ts_node_named_child_count(list);
+            for (uint32_t j = 0; j < lnnc; j++) {
+              path.push_back(expr_to_node(ts_node_named_child(list, j)));
+            }
+          }
+        }
+      } else if (t == "identifier") {
+        root      = identifier_to_node(n, /*for_lvalue=*/true);
+        have_root = true;
+      } else {
+        root      = expr_to_node(n);
+        have_root = true;
+      }
+    };
+    collect(lvalue);
+    if (have_root) {
+      auto idx = lnast->add_child(stmts_index, Lnast_node::create_tuple_set());
+      lnast->add_child(idx, root);
+      for (auto& p : path) {
+        lnast->add_child(idx, p);
       }
       lnast->add_child(idx, rvalue);
-      return base;
+      return root;
     }
   }
   // Fallback: treat as a single assign using the text span.
@@ -1002,6 +1090,24 @@ Lnast_node Prp2lnast::identifier_to_node(TSNode n, bool for_lvalue) {
   if (name == "true" || name == "false" || name == "nil") {
     return Lnast_node::create_const(name);
   }
+  // Pyrope's `…` escape lets identifiers carry spaces/punctuation. When the
+  // escaped text is a plain alnum/underscore identifier (the common case in
+  // tests like ``a`` ↔ `a`), strip the backticks so the LNAST ref text is
+  // the canonical name. The escape stays only when it actually carries a
+  // special character.
+  if (name.size() >= 2 && name.front() == '`' && name.back() == '`') {
+    auto inner = name.substr(1, name.size() - 2);
+    bool ok    = !inner.empty();
+    for (char ch : inner) {
+      if (!(ch == '_' || (ch >= 'A' && ch <= 'Z') || (ch >= 'a' && ch <= 'z') || (ch >= '0' && ch <= '9'))) {
+        ok = false;
+        break;
+      }
+    }
+    if (ok && !(inner[0] >= '0' && inner[0] <= '9')) {
+      name = std::string(inner);
+    }
+  }
   auto it = ref_name_map.find(name);
   if (it != ref_name_map.end()) {
     return Lnast_node::create_ref(it->second);
@@ -1042,10 +1148,36 @@ void Prp2lnast::emit_type_spec(const Lnast_node& target, TSNode type_cast_node) 
   // walk children to find the actual attribute_list.
   TSNode ty = child_by_field(type_cast_node, "type");
   if (!ts_node_is_null(ty)) {
-    auto idx = lnast->add_child(stmts_index, Lnast_node::create_type_spec());
-    lnast->add_child(idx, target);
-    emit_type_expr(idx, ty);
+    // Tuple-shape type with default values (e.g. `:(x=0, y=1)`) is the only
+    // way to declare a named-position tuple in Pyrope. Lower the inner
+    // tuple as a normal `tuple_add` and assign it to the target so the
+    // bundle starts with `:0:x=0, :1:y=1` keys; subsequent positional
+    // assignments use upass's shape-preserving merge to keep those names.
+    // The bit-width primitive types are still ignored at the value-folding
+    // layer — this only handles the shape carried by the tuple type.
+    std::string tt(ts_node_type(ty));
+    if (tt == "expression_type") {
+      uint32_t inner_count = ts_node_named_child_count(ty);
+      for (uint32_t i = 0; i < inner_count; i++) {
+        TSNode inner = ts_node_named_child(ty, i);
+        if (std::string(ts_node_type(inner)) == "tuple") {
+          auto bundle_ref = tuple_to_node(inner, false);
+          auto aidx       = lnast->add_child(stmts_index, Lnast_node::create_assign());
+          lnast->add_child(aidx, target);
+          lnast->add_child(aidx, bundle_ref);
+          // Skip the empty `type_spec expr_type:` we'd otherwise emit; the
+          // tuple-shape information is now encoded in the target's bundle.
+          goto attrs;
+        }
+      }
+    }
+    {
+      auto idx = lnast->add_child(stmts_index, Lnast_node::create_type_spec());
+      lnast->add_child(idx, target);
+      emit_type_expr(idx, ty);
+    }
   }
+attrs:
   uint32_t total = ts_node_child_count(type_cast_node);
   for (uint32_t i = 0; i < total; i++) {
     TSNode c = ts_node_child(type_cast_node, i);
@@ -1962,10 +2094,29 @@ Lnast_node Prp2lnast::tuple_to_node(TSNode n, bool /*is_square*/) {
     std::string t(ts_node_type(c));
     if (t == "assignment") {
       Item it;
-      it.is_assign  = true;
-      TSNode lv     = child_by_field(c, "lvalue");
-      TSNode rv     = child_by_field(c, "rvalue");
-      it.assign_key = trim(get_text(lv));
+      it.is_assign = true;
+      TSNode lv    = child_by_field(c, "lvalue");
+      TSNode rv    = child_by_field(c, "rvalue");
+      // The lvalue may carry a type_cast (`(a:u4=1, …)` parses lv as a
+      // `typed_identifier`). Strip it: the ref text must be a bare
+      // identifier; otherwise lnastfmt rejects the LNAST.
+      std::string lvt2(ts_node_type(lv));
+      if (lvt2 == "typed_identifier") {
+        TSNode id = child_by_field(lv, "identifier");
+        if (!ts_node_is_null(id)) {
+          it.assign_key = std::string(trim(get_text(id)));
+        }
+      } else {
+        // `_complex_identifier` with optional sibling `type` field on the
+        // assignment node. Use the lvalue text directly; for plain
+        // identifiers it's already clean.
+        it.assign_key = std::string(trim(get_text(lv)));
+      }
+      if (it.assign_key.empty()) {
+        // Anonymous slot (e.g. `(mut :u13 = 5)`) — synthesize a tmp name so
+        // we don't emit an empty `ref` (lnastfmt would reject it).
+        it.assign_key = get_tmp_name();
+      }
       if (!ts_node_is_null(rv)) {
         it.value = expr_to_node(rv);
       } else {

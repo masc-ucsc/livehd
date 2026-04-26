@@ -45,12 +45,107 @@ static std::string node_loc(const Lnast* ln, const lh::Tree_index& it) {
   return s;
 }
 
+// A `ref` carries a single variable name. Allowed shapes (today):
+//   - tmp ref      : `___<digits>` (Slice 1; will move to `Tree_index` per §13)
+//   - quoted ident : `` `…` `` — Pyrope's escape for names containing
+//                    characters outside `[A-Za-z0-9_]`. Producers must keep
+//                    the backticks ONLY when the name actually has a
+//                    special character; ``a`` is normalized to `a`
+//                    (prp2lnast strips the escape).
+//   - dotted path  : `[$%#]?<id>(\.<id>)*` where `<id>` is
+//                    `[A-Za-z_][A-Za-z0-9_]*`. The optional leading `$`/`%`/`#`
+//                    is the port-direction/register prefix per
+//                    `lnast_todo.md` §12 — input/output/reg, not a free
+//                    "random identifier" form.
+// Anything else (commas, spaces, colons, slashes, …) is a producer bug —
+// most often a `get_text(lvalue)` that swallowed surrounding syntax (type
+// cast, comma list, brackets) or a stale escape that wasn't stripped at
+// lowering time.
+static bool is_valid_ref_text(std::string_view name) {
+  if (name.empty()) {
+    return false;
+  }
+  if (name.front() == '`') {
+    // Pyrope backtick-escaped name: must be terminated and must actually
+    // need the escape — i.e. the inner text contains at least one char
+    // that's not `[A-Za-z0-9_]` (otherwise prp2lnast should have stripped
+    // the backticks). Reject ``a`` to keep the LNAST canonical.
+    if (name.size() < 2 || name.back() != '`') {
+      return false;
+    }
+    auto inner = name.substr(1, name.size() - 2);
+    if (inner.empty()) {
+      return false;
+    }
+    for (char ch : inner) {
+      bool plain = (ch == '_') || (ch >= 'A' && ch <= 'Z') || (ch >= 'a' && ch <= 'z') || (ch >= '0' && ch <= '9');
+      if (!plain) {
+        return true;  // escape needed — keep it
+      }
+    }
+    return false;  // pure alnum/underscore — should have been stripped
+  }
+  size_t i = 0;
+  if (name[0] == '$' || name[0] == '%' || name[0] == '#') {
+    // Direction/storage prefix per `lnast_todo.md` §12: `$` input port,
+    // `%` output port, `#` register. The rest must be a normal identifier.
+    if (name.size() == 1) {
+      return false;
+    }
+    i = 1;
+  }
+  // ___<digits> tmp form
+  if (name.size() - i >= 4 && name.substr(i, 3) == "___") {
+    for (size_t j = i + 3; j < name.size(); ++j) {
+      if (name[j] < '0' || name[j] > '9') {
+        return false;
+      }
+    }
+    return name.size() > i + 3;
+  }
+  // Dotted identifier path
+  bool start_of_segment = true;
+  for (size_t j = i; j < name.size(); ++j) {
+    char ch = name[j];
+    if (ch == '.') {
+      if (start_of_segment) {
+        return false;  // empty segment
+      }
+      start_of_segment = true;
+      continue;
+    }
+    bool ok = (ch == '_') || (ch >= 'A' && ch <= 'Z') || (ch >= 'a' && ch <= 'z')
+              || (!start_of_segment && ch >= '0' && ch <= '9');
+    if (!ok) {
+      return false;
+    }
+    start_of_segment = false;
+  }
+  return !start_of_segment;
+}
+
 void Pass_lnastfmt::validate(const Lnast* ln) {
   // Validation-only pass. Any normalization (SSA stripping, tuple rebuild,
   // …) must be safe for every producer before it can run here — until then
   // lnastfmt only checks and leaves the LNAST untouched.
   for (const lh::Tree_index& it : ln->depth_preorder()) {
     const auto& data = ln->get_data(it);
+
+    if (data.type.is_ref()) {
+      const auto name = data.token.get_text();
+      if (!is_valid_ref_text(name)) {
+        Pass::error(
+            "lnastfmt: {} ref text '{}' is not a valid identifier — must be a single name "
+            "(`tmp ___N`, `[$%#]?<id>(.<id>)*` over alnum/underscore, or "
+            "`` `…` `` only if the name carries non-alnum characters). "
+            "Commas/spaces/colons typically mean the producer captured surrounding syntax "
+            "(type cast, lvalue list, …) into the ref; a backtick-escaped pure-alnum name "
+            "(like ``a``) means the producer didn't normalize it.",
+            node_loc(ln, it),
+            name);
+        return;
+      }
+    }
 
     if (data.type.is_const()) {
       const auto name = data.token.get_text();

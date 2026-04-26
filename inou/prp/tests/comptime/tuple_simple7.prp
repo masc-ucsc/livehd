@@ -1,0 +1,19 @@
+/*
+:name: tuple_simple7
+:type: parsing lnast comptime
+:verifier_pass: 5
+:verifier_fail: 0
+*/
+
+// c has no mut/const, do mut by default
+const t = (mut a:u4=1, mut b=(c:u7=33, mut d:u6=44))
+
+t.a += 3
+t.b[0] += 5
+t.b.d  += 5
+
+cassert t.a == 4
+cassert t.b.c == 38
+cassert t.b.d == 49
+cassert t.b == (38, 49)
+cassert t == (4, (38, 49))

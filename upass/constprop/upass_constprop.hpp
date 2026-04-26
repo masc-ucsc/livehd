@@ -78,6 +78,9 @@ protected:
 
   template <typename F>
   inline void process_unary(F op);
+
+  template <bool Negate>
+  void process_eq_ne_impl();
 };
 
 // Plugin registration lives in upass_constprop.cpp to avoid duplicate

@@ -9,6 +9,37 @@ deferred pieces (func_call, func_def extraction, attr_set side-map, tuple
 flattening, if-branch pruning) plug in later. When a future change touches
 this area, update this doc first.
 
+## Roadmap — next phase (post-Slice-2)
+
+The inou/prp grammar and the upass micro-pipeline are advancing in lockstep.
+The next three milestones, in order, are:
+
+1. **Tighten expression / tuple lowering.** Patch the producer-side bugs
+   that surface when `lnastfmt` rejects malformed `ref` text. Examples
+   already landed: tuple-LHS `(a,b) = …`, tuple-field `(a:u4=1, …)`,
+   anonymous slot `(mut :u13 = 5)`, ``a`` ↔ `a` normalization (the
+   backtick escape only stays when the name actually carries a non-alnum
+   character). Continue this until every `ref` in every test pipeline is
+   a single name — a tmp `___N`, a dotted alnum/underscore identifier, or
+   a backtick-escaped form that genuinely needs the escape — `pass.lnastfmt`
+   is the canonical check. Each violation is a `prp2lnast` shape bug, not
+   a downstream concern.
+2. **Implement function input/output wiring.** Today `func_call` and
+   `func_def` are pass-throughs in the runner (Slice 1 / §3). The next step
+   is the calling-convention contract: bind caller-side argument bundles to
+   callee-side parameter names, and route the callee return tuple back to
+   the caller's symbol table. This is what unblocks Slice 3 (func_call
+   argument reconstruction) — the upass already documents the iteration
+   model for it.
+3. **Per-`func_def` LNAST extraction + recursive upass.** When `func_def`
+   appears inside an input LNAST, the runner allocates a fresh staging
+   LNAST for the callee body, registers it in `var.lnasts`, and runs the
+   full upass pipeline on it (Slice 4 / §3). N `func_def`s in 1 input
+   LNAST → up to N+1 output LNASTs, each independently const-propagated.
+
+Slices 5–7 (attr_set side-map, tuple flattening, if-branch pruning) follow
+on the same staging-tree machinery and are unblocked once #2 and #3 land.
+
 ## 0. Context and scope
 
 upass lives downstream of `pass.lnastfmt` and consumes LNAST produced by

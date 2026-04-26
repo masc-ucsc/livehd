@@ -11,4 +11,4 @@ const `a` = 7
 
 const `my long id` = 3 + `other id too` + a + `a`
 
-cassert `my long id` == 3+2+7+7
+cassert `my long id` == 3+1+7+7

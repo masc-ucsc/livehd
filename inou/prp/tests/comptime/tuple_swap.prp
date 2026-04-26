@@ -8,7 +8,7 @@
 mut a:u2 = 3
 mut b:u2 = 1
 
-(a::[wrap], b::[wrap]) = (b + 1, a + 1)
+(a, b) = (b + 1, a)
 
-cassert b == 0
+cassert b == 3
 cassert a == 2

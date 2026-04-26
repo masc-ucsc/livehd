@@ -2,7 +2,11 @@
 
 #include "upass_constprop.hpp"
 
+#include <map>
+#include <optional>
+
 #include "lnast_ntype.hpp"
+#include "str_tools.hpp"
 
 // Registered once here (not in the header) to avoid duplicate-registration
 // errors when multiple TUs include upass_constprop.hpp.
@@ -34,7 +38,54 @@ void uPass_constprop::process_assign() {
     // form append:  A = ___t1, A = ___t2, A = ___t3).
     auto rhs_bundle = current_bundle();
     if (rhs_bundle) {
-      st.set(lhs_text, rhs_bundle);
+      // Type-shape preservation: when LHS already holds a bundle whose keys
+      // include named-position slots (`:N:name`), and RHS is a pure
+      // positional bundle (only `N` keys), bind RHS positions onto LHS's
+      // named slots so a downstream `tup0.y` keeps tracking position 1
+      // across `tup0 = (55, 66)`.
+      //
+      // Skip the merge when RHS itself carries names (e.g. `bar = foo` with
+      // foo = `(a=…, b=…)`): that's a full bundle copy, not a positional
+      // rebind, and the user expects bar's old shape to be replaced.
+      auto existing = st.get_bundle(lhs_text);
+      bool do_merge = false;
+      if (existing && existing.get() != rhs_bundle.get() && !existing->get_map().empty()) {
+        bool lhs_has_named_pos = false;
+        for (const auto& e : existing->get_map()) {
+          if (!e.first.empty() && e.first.front() == ':') {
+            lhs_has_named_pos = true;
+            break;
+          }
+        }
+        bool rhs_pure_positional = true;
+        for (const auto& e : rhs_bundle->get_map()) {
+          if (!e.first.empty() && e.first.front() == ':') {
+            rhs_pure_positional = false;
+            break;
+          }
+        }
+        do_merge = lhs_has_named_pos && rhs_pure_positional;
+      }
+      if (do_merge) {
+        auto merged = std::make_shared<Bundle>(std::string(lhs_text));
+        for (const auto& lhs_entry : existing->get_map()) {
+          if (rhs_bundle->has_trivial(lhs_entry.first)) {
+            merged->set(lhs_entry.first, rhs_bundle->get_trivial(lhs_entry.first));
+          } else {
+            merged->set(lhs_entry.first, lhs_entry.second);
+          }
+        }
+        // Carry over any RHS entries the LHS shape doesn't cover (e.g. a
+        // wider RHS appends new positions).
+        for (const auto& rhs_entry : rhs_bundle->get_map()) {
+          if (!merged->has_trivial(rhs_entry.first)) {
+            merged->set(rhs_entry.first, rhs_entry.second);
+          }
+        }
+        st.set(lhs_text, merged);
+      } else {
+        st.set(lhs_text, rhs_bundle);
+      }
     } else if (st.has_trivial(current_text())) {
       // Scalar RHS (stored as trivial, not a bundle). Propagate the value so
       // subsequent uses of `lhs_text` resolve. Mark changed iff the value
@@ -228,13 +279,110 @@ void uPass_constprop::process_log_not() {
   process_unary([](Lconst& r) { r = r.is_known_false() ? Lconst(1) : Lconst(0); });
 }
 
-void uPass_constprop::process_ne() {
-  process_binary([](Lconst x, Lconst y) { return x != y; });
+// Bundle-aware equality. Returns nullopt when constprop can't decide
+// (unknown entries, attribute round-trip artefacts). Otherwise true/false.
+//
+// We delegate key-shape semantics to `Bundle::match` (used via
+// `has_trivial` / `get_trivial`): it already handles `:N:name` vs `N`
+// positional matching and nested paths (`:1:b.:0:c` ↔ `1.0`). The check
+// is symmetric — every non-attribute entry on each side must be present
+// on the other with the same Lconst value. That gives the user-visible
+// Pyrope behaviour: `(a=3,b=4,5) == (3,4,5)` but `(a=3,b=4,5) != (a=3,foo=4,5)`
+// (named slots collide on `:1:b` vs `:1:foo` — Bundle::match rejects).
+static std::optional<bool> compare_bundles_eq(const std::shared_ptr<Bundle const>& a,
+                                              const std::shared_ptr<Bundle const>& b) {
+  auto contains = [](const std::shared_ptr<Bundle const>& src,
+                     const std::shared_ptr<Bundle const>& other) -> std::optional<bool> {
+    for (const auto& e : src->get_map()) {
+      if (Bundle::is_attribute(e.first)) {
+        continue;
+      }
+      if (e.second.trivial.is_invalid() || e.second.trivial.has_unknowns()) {
+        return std::nullopt;
+      }
+      if (!other->has_trivial(e.first)) {
+        return false;
+      }
+      const auto& ov = other->get_trivial(e.first);
+      if (ov.is_invalid() || ov.has_unknowns()) {
+        return std::nullopt;
+      }
+      if (ov != e.second.trivial) {
+        return false;
+      }
+    }
+    return true;
+  };
+  auto a_in_b = contains(a, b);
+  if (!a_in_b.has_value()) {
+    return std::nullopt;
+  }
+  if (!*a_in_b) {
+    return false;
+  }
+  auto b_in_a = contains(b, a);
+  if (!b_in_a.has_value()) {
+    return std::nullopt;
+  }
+  return *b_in_a;
 }
 
-void uPass_constprop::process_eq() {
-  process_binary([](Lconst x, Lconst y) { return x == y; });
+// process_eq / process_ne with bundle awareness. Falls back to the scalar
+// process_binary path when neither operand is a tracked bundle, so plain
+// integer compares are unchanged.
+template <bool Negate>
+void uPass_constprop::process_eq_ne_impl() {
+  move_to_child();
+  auto var = std::string(current_text());
+  move_to_sibling();
+
+  // Resolve operands: bundles that hold a single trivial value collapse to
+  // a scalar so we can use the cheap Lconst comparison (st.get_bundle on a
+  // scalar-stored ref still returns its single-entry bundle wrapper, so we
+  // can't just check ba/bb non-null).
+  auto resolve = [this](std::shared_ptr<Bundle const>& bp, Lconst& sv) {
+    if (is_type(Lnast_ntype::Lnast_ntype_ref)) {
+      auto b = st.get_bundle(current_text());
+      if (b && !b->is_scalar()) {
+        bp = b;
+      } else {
+        sv = st.get_trivial(current_text());
+      }
+    } else {
+      sv = current_pyrope_value();
+    }
+  };
+  std::shared_ptr<Bundle const> ba;
+  Lconst                        n1;
+  resolve(ba, n1);
+  move_to_sibling();
+  std::shared_ptr<Bundle const> bb;
+  Lconst                        n2;
+  resolve(bb, n2);
+
+  std::optional<bool> result;
+  if (ba && bb) {
+    result = compare_bundles_eq(ba, bb);
+  } else if (!ba && !bb) {
+    if (!n1.is_invalid() && !n1.is_string() && !n1.has_unknowns() && !n2.is_invalid() && !n2.is_string()
+        && !n2.has_unknowns()) {
+      result = (n1 == n2);
+    }
+  }
+  // Mixed bundle vs scalar — leave unresolved.
+
+  if (result.has_value()) {
+    Lconst r             = (*result ^ Negate) ? Lconst(1) : Lconst(0);
+    bool   local_changed = !st.has_trivial(var) || st.get_trivial(var) != r;
+    if (local_changed && st.set(var, r)) {
+      mark_changed();
+    }
+  }
+  move_to_parent();
 }
+
+void uPass_constprop::process_ne() { process_eq_ne_impl<true>(); }
+void uPass_constprop::process_eq() { process_eq_ne_impl<false>(); }
 
 void uPass_constprop::process_lt() {
   process_binary([](Lconst x, Lconst y) { return x < y; });
@@ -624,11 +772,19 @@ void uPass_constprop::process_tuple_set() {
     return;
   }
 
-  // Collect all children after the tuple ref into a path + value list.
+  // Collect all children after the tuple ref into a (text, is_ref) list.
   // The last child is the value; everything before it is the field path.
-  std::vector<std::string> path_and_val;
+  // Capturing `is_ref` matters for the value: a ref's text is a variable name
+  // (look it up in the symbol table), not a literal — `Lconst::from_pyrope`
+  // happily accepts unparseable text as a string, so without the type tag we
+  // would store the raw ref name (e.g. `___3`) as a string Lconst.
+  struct Child {
+    std::string text;
+    bool        is_ref;
+  };
+  std::vector<Child> path_and_val;
   while (move_to_sibling()) {
-    path_and_val.emplace_back(current_text());
+    path_and_val.push_back({std::string(current_text()), is_type(Lnast_ntype::Lnast_ntype_ref)});
   }
   if (path_and_val.size() < 2) {
     // Need at least one field and one value.
@@ -640,7 +796,7 @@ void uPass_constprop::process_tuple_set() {
   // Any field component that begins with "__" and whose third char is not '_'
   // is a Pyrope bitwidth/signed attribute — not a propagatable value.
   for (std::size_t i = 0; i + 1 < path_and_val.size(); ++i) {
-    const auto& f = path_and_val[i];
+    const auto& f = path_and_val[i].text;
     if (f.size() > 2 && f[0] == '_' && f[1] == '_' && f[2] != '_') {
       move_to_parent();
       return;
@@ -651,30 +807,37 @@ void uPass_constprop::process_tuple_set() {
   std::string field;
   for (std::size_t i = 0; i + 1 < path_and_val.size(); ++i) {
     field += '.';
-    field += path_and_val[i];
+    field += path_and_val[i].text;
   }
-  auto        key      = tuple_var + field;
-  const auto& val_text = path_and_val.back();
+  auto        key       = tuple_var + field;
+  const auto& val_child = path_and_val.back();
 
-  // Value is the last child — stored as trivial if it parses, else as a bundle ref.
-  Lconst val = Lconst::from_pyrope(val_text);
-  if (!val.is_invalid()) {
-    bool local_changed = !st.has_trivial(key) || st.get_trivial(key) != val;
-    if (local_changed) {
-      st.set(key, val);
-      mark_changed();
+  if (val_child.is_ref) {
+    // Value is a ref: resolve through the symbol table. Trivial first, then
+    // bundle. If the source has no value yet, leave the field unchanged so
+    // a later iteration can still discover it.
+    if (st.has_trivial(val_child.text)) {
+      const auto sv            = st.get_trivial(val_child.text);
+      bool       local_changed = !st.has_trivial(key) || st.get_trivial(key) != sv;
+      if (local_changed) {
+        st.set(key, sv);
+        mark_changed();
+      }
+    } else if (st.has_bundle(val_child.text)) {
+      auto b = st.get_bundle(val_child.text);
+      if (b) {
+        st.set(key, b);  // bundle comparison not value-based; don't mark_changed
+      }
     }
-  } else if (st.has_trivial(val_text)) {
-    const auto sv            = st.get_trivial(val_text);
-    bool       local_changed = !st.has_trivial(key) || st.get_trivial(key) != sv;
-    if (local_changed) {
-      st.set(key, sv);
-      mark_changed();
-    }
-  } else if (st.has_bundle(val_text)) {
-    auto b = st.get_bundle(val_text);
-    if (b) {
-      st.set(key, b);  // bundle comparison not value-based; don't mark_changed
+  } else {
+    // Const literal: parse and store as trivial.
+    Lconst val = Lconst::from_pyrope(val_child.text);
+    if (!val.is_invalid()) {
+      bool local_changed = !st.has_trivial(key) || st.get_trivial(key) != val;
+      if (local_changed) {
+        st.set(key, val);
+        mark_changed();
+      }
     }
   }
   move_to_parent();
