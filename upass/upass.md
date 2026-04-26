@@ -369,12 +369,18 @@ verifier / downstream consumers read via the ST.
 - Exception: tuples that cross a `func_call` boundary stay as `tup_add`
   (Slice 3 emission pattern) — they encode ABI.
 
-### Slice 7 — if-branch pruning
+### Slice 7 — if-branch pruning (landed)
 
 - If condition is comptime-known: emit only the taken branch's stmts,
-  spliced into the parent stmts block.
-- Requires phi-resolution awareness (LNAST already has SSA) so live-outs
-  of the removed branch don't leave dangling refs.
+  spliced into the parent stmts block (no `if` node in the output).
+- Implemented in `uPass_runner::process_if()`: after dispatching to passes
+  so constprop's ST is populated, the runner folds the condition via
+  `try_fold_ref`. True → splice then-stmts; false → splice else-stmts (or
+  emit nothing when there is no else); unknown → emit full if node.
+- elif chains (condition false, next sibling is another condition) are not
+  yet pruned and fall through to full-if emit. Phi-resolution concern from
+  the original stub: the current prp2lnast LNAST does not emit explicit phi
+  nodes, so live-out dangling refs are not an issue in practice.
 
 ## 4. Invariants
 

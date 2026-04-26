@@ -545,9 +545,74 @@ void uPass_runner::process_stmts() {
 }
 
 void uPass_runner::process_if() {
-  // Dispatch first so passes can inspect the condition before we emit.
+  // Dispatch first so passes can update their symbol tables from the condition.
   dispatch_to_passes(&upass::uPass::process_if);
 
+  // Slice 7 — dead-branch elimination.
+  // When the first child is a comptime-known condition (ref or const), emit
+  // only the taken branch's stmts spliced into the parent (no if node).
+  // Cursor invariant: must be at the if-node on all exit paths.  // See upass.md §Slice 7 and §5 (if cursor discipline).
+  if (lm->has_child()) {
+    lm->move_to_child();
+    using Ntype        = Lnast_ntype;
+    const auto raw     = lm->get_raw_ntype();
+
+    if (raw != Ntype::Lnast_ntype_stmts) {
+      // First child is a condition (ref or const). Try to fold it.
+      std::optional<Lconst> cval;
+      if (raw == Ntype::Lnast_ntype_const) {
+        cval = Lconst::from_pyrope(lm->current_text());
+      } else {
+        cval = try_fold_ref(lm->current_text());
+      }
+
+      if (cval && !cval->is_invalid() && !cval->has_unknowns()) {
+        const bool taken = !cval->is_known_false();
+
+        // Advance past the condition to the then-stmts.
+        if (lm->move_to_sibling()) {
+          if (taken) {
+            // Splice then-stmts children directly into the parent stmts block.
+            if (lm->has_child()) {
+              lm->move_to_child();
+              do {
+                process_lnast();
+              } while (lm->move_to_sibling());
+              lm->move_to_parent();
+            }
+            lm->move_to_parent();  // back to if-node
+            return;                // pruned — no if node emitted
+          }
+
+          // Condition is false: skip the then-stmts, look for an else-stmts.
+          if (lm->move_to_sibling()) {
+            if (lm->get_raw_ntype() == Ntype::Lnast_ntype_stmts) {
+              // Bare else-stmts: splice its children into the parent.
+              if (lm->has_child()) {
+                lm->move_to_child();
+                do {
+                  process_lnast();
+                } while (lm->move_to_sibling());
+                lm->move_to_parent();
+              }
+              lm->move_to_parent();  // back to if-node
+              return;                // pruned
+            }
+            // elif chain (next sibling is another condition, not stmts): fall
+            // through to full-if emit. Recursive elif pruning is a future task.
+          } else {
+            // No else-stmts: false condition → emit nothing.
+            lm->move_to_parent();  // back to if-node
+            return;                // pruned
+          }
+        }
+      }
+    }
+
+    lm->move_to_parent();  // condition unknown or elif chain — fall through
+  }
+
+  // Unknown condition (or elif chain): emit the full if node unchanged.
   emit_push(lm->current_node());
   if (lm->has_child()) {
     lm->move_to_child();
