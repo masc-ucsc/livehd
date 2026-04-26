@@ -347,9 +347,15 @@ verifier / downstream consumers read via the ST.
   `try_fold_ref`. True → splice then-stmts; false → splice else-stmts (or
   emit nothing when there is no else); unknown → emit full if node.
 - elif chains (condition false, next sibling is another condition) are not
-  yet pruned and fall through to full-if emit. Phi-resolution concern from
-  the original stub: the current prp2lnast LNAST does not emit explicit phi
-  nodes, so live-out dangling refs are not an issue in practice.
+  yet pruned and fall through to full-if emit.
+  **Known ST side-effect limitation**: `dispatch_to_passes` runs before the
+  fold decision, so constprop has already walked the entire if subtree
+  (including the statically-dead then-branch) when the elif fallthrough
+  path calls `process_lnast()` recursively.  Writes from the dead branch
+  are in constprop's ST, which could cause `classify_statement` to
+  incorrectly DCE a live write in a later elif/else body whose LHS
+  collides with a dead-branch entry.  No current test triggers this; track
+  against the test suite as elif coverage grows.
 
 ## 4. Invariants
 

@@ -520,7 +520,16 @@ void uPass_runner::process_if() {
               return;                // pruned
             }
             // elif chain (next sibling is another condition, not stmts): fall
-            // through to full-if emit. Recursive elif pruning is a future task.
+            // through to full-if emit.  Recursive elif pruning is a future task.
+            //
+            // KNOWN LIMITATION (flagged by PR review): dispatch_to_passes above
+            // has already let constprop walk the *entire* if subtree, so its ST
+            // now contains writes from the (statically-unreached) then-branch.
+            // When process_lnast() below recurses into the elif/else bodies,
+            // classify_statement may incorrectly DCE a live write whose LHS was
+            // already recorded in the ST from that dead branch.  Safe to defer
+            // until elif pruning is implemented; track against the test suite
+            // as elif coverage grows.  (See upass.md §Slice 7 TODO.)
           } else {
             // No else-stmts: false condition → emit nothing.
             lm->move_to_parent();  // back to if-node
