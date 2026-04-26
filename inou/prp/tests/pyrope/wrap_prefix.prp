@@ -1,0 +1,10 @@
+/*
+:name: wrap_prefix
+:type: parsing lnast
+*/
+
+// `wrap` / `sat` are statement-level overflow prefixes in the new grammar.
+// They control how an integer RHS narrows into a smaller integer LHS.
+mut x:u8 = 0
+wrap x = 0xFEAD
+sat  x = 1024

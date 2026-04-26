@@ -1,0 +1,10 @@
+/*
+:name: proc_lambda
+:type: parsing lnast upass
+*/
+
+// `proc` is a recognized lambda kind in the new grammar (alongside
+// `comb`/`mod`/`pipe`). Output tuple is always declared explicitly.
+proc do_thing(a, b) -> (r) {
+  r = a + b
+}

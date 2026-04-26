@@ -1,0 +1,13 @@
+/*
+:name: placeholder_lambda
+:type: parsing lnast upass
+*/
+
+// Placeholder lambda sugar: single-output `comb` with a bare expression
+// body implicitly assigns the expression to the single output.
+comb add(a, b) -> (r) { _0 + _1 }
+comb inc(a)    -> (r) { _ + 1 }
+comb top(a, b) -> (s, t) {
+  s = a + b;
+  t = a - b;
+}

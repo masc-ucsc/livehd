@@ -1,0 +1,10 @@
+/*
+:name: attribute_read
+:type: parsing lnast
+*/
+
+// Attribute SET form `::[attr]` is only allowed at declaration sites.
+// Attribute READ form `.[attr]` is the only legal form on RHS.
+const a::[debug] = 3
+const b = a.[debug]
+const c = a.[bits] + 1
