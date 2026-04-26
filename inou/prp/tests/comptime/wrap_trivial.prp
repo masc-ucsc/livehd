@@ -7,6 +7,6 @@
 
 mut x::[ubits=12] = 0
 
-x::[wrap] = 0xFEAD
+wrap x = 0xFEAD
 
 cassert x == 0xEAD

@@ -5,12 +5,12 @@
 :verifier_fail: 0
 */
 
-comb top(a::[comptime], b::[comptime], c) {
+comb top(a::[comptime], b::[comptime], c) -> (r) {
   mut x::[attr=(1,2)] = 0
-  c = (a::[comptime], b::[comptime], c::[comptime])
-  cassert (true, true, false) == c
+  r = (a.[comptime], b.[comptime], c.[comptime])
+  cassert (true, true, false) == r
 }
 
 reg x:u32
 
-top(10,30, x)
+top(10, 30, x)

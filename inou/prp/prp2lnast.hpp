@@ -32,6 +32,11 @@ protected:
   Name_role                                     current_name_role;
   absl::flat_hash_map<std::string, std::string> ref_name_map;
 
+  // Pending overflow kind ("wrap"/"sat") to apply to the next assignment.
+  // Set by process_{description,scope_statement} when the new grammar's
+  // statement-level `wrap`/`sat` prefix is seen; consumed by process_assignment.
+  std::string pending_overflow_kind;
+
   // Top
   void process_description();
 
@@ -62,6 +67,7 @@ protected:
   Lnast_node match_expr_to_node(TSNode n);
   Lnast_node bit_selection_to_node(TSNode n);
   Lnast_node member_selection_to_node(TSNode n);
+  Lnast_node attribute_read_to_node(TSNode n);
   Lnast_node dot_expression_to_node(TSNode n);
   Lnast_node function_call_expr_to_node(TSNode n);
   Lnast_node tuple_to_node(TSNode n, bool is_square);

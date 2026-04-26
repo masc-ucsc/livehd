@@ -37,7 +37,7 @@ mod counter(en) -> (val) { /* regs + orchestration */ }   // No constraints; can
 ```
 
 `mod` replaces the old `flow` lambda kind — pipeline orchestration lives
-inside `mod` now, using `await[N]` and `:@[N]`.
+inside `mod` now, using `await[N]` and `@[N]`.
 
 A `comb`/`pipe`/`mod` with `self` as the first argument is a **method**.
 `async` is reserved for future use.
@@ -51,14 +51,17 @@ A `comb`/`pipe`/`mod` with `self` as the first argument is a **method**.
 // Shifts:     <<  >>
 // Concat:     ++  (tuple concatenation — strings, lambdas, tuples)
 // Bit select: val#[3..=6]   val#[3]           (NEVER use #[] for timing)
-// Cycle type: val:@[N]  on LHS or RHS         (pure type check; NEVER use @[] for bit select)
+// Cycle type: val@[N]  on LHS or RHS          (pure type check; NEVER use @[] for bit select)
 // Timing:     await[N] lhs = rhs              (declaration modifier in mod only)
-// Attribute:  var::[attr]  var::[attr=value]  (reads/writes attribute)
+// Attr set:   var::[attr=value]               (only at declaration; with type: var:T:[attr])
+// Attr read:  var.[attr]                      (returns value; nil if unset)
+// Attr lhs:   var.[attr] = value              (only for runtime hw signals: valid, defer)
+// Narrowing:  wrap lhs = rhs   sat lhs = rhs  (per-statement prefix modifier)
 ```
 
 ### Register and pipeline timing (Pyrope 3.0)
 
-Registers are read/written through **bare references**, `::[defer]`, and
+Registers are read/written through **bare references**, `.[defer]`, and
 `past[n]()` — the older `@[0]`, `@[]`, `@[-1]`, `@[1]` forms from Pyrope 2.0
 are **not valid** in Pyrope 3.0.
 
@@ -66,9 +69,9 @@ are **not valid** in Pyrope 3.0.
 reg counter:u8 = 0
 
 const q_now   = counter            // current 'q' value
-const q_end   = counter::[defer]   // end-of-cycle value (next cycle's 'q')
+const q_end   = counter.[defer]    // end-of-cycle value (next cycle's 'q')
 counter       = counter + 1        // write: takes effect at cycle boundary (like Verilog <=)
-counter::[defer] = 42              // explicit deferred write (end-of-cycle)
+counter.[defer] = 42               // explicit deferred write (end-of-cycle)
 
 const prev1   = past[1](counter)   // value from 1 cycle ago (debug; inserts a flop)
 const prev2   = past[2](counter)   // value from 2 cycles ago
@@ -81,16 +84,16 @@ pipe mul(a, b) -> (c) { c = a * b }
 pipe add(a, b) -> (c) { c = a + b }
 
 mod mac(a, b, c) -> (out) {
-  await[3] tmp      = mul(a, b)               // await[N]: RHS is delivered N cycles later
-  await[3] c_d      = c                       // await[N] on any RHS, not just a pipe call
-  await[1] out:@[4] = add(tmp:@[3], c_d:@[3]) // :@[N] on use asserts value lives at cycle N
+  await[3] tmp     = mul(a, b)              // await[N]: RHS is delivered N cycles later
+  await[3] c_d     = c                      // await[N] on any RHS, not just a pipe call
+  await[1] out@[4] = add(tmp@[3], c_d@[3])  // @[N] on use asserts value lives at cycle N
 }
 ```
 
 Rules:
 * `await[N]` is a **declaration modifier** (in the same slot as `const`/`mut`/`reg`)
   and is only valid inside `mod`. Not allowed in `comb` or `pipe` bodies.
-* `:@[N]` is a **pure cycle type check** on either LHS or RHS uses —
+* `@[N]` is a **pure cycle type check** on either LHS or RHS uses —
   it inserts no flops; misalignment is a compile error.
 * Bare `pipe` calls **must** be consumed via `await[N]` at the call site.
 
@@ -136,7 +139,7 @@ test "name" { step; assert x } // Test block; `step` advances one clock cycle
 ```pyrope
 step              // advance one cycle
 step 5            // advance five cycles
-waitfor cond      // block until cond becomes true (can use ::[rising], ::[falling], ::[changed])
+waitfor cond      // block until cond becomes true (can use .[rising], .[falling], .[changed])
 poke  "path", v   // drive a signal in the DUT hierarchy
 sigref("path")    // reference a DUT signal by hierarchical path
 regref("path")    // reference a DUT register by hierarchical path
@@ -193,9 +196,9 @@ pipe mul(a, b) -> (c) { c = a * b }
 pipe add(a, b) -> (c) { c = a + b }
 
 mod multiply_add(in1, in2) -> (out) {
-  await[3] tmp      = mul(in1, in2)
-  await[3] in1_d    = in1
-  await[1] out:@[4] = add(tmp:@[3], in1_d:@[3])
+  await[3] tmp     = mul(in1, in2)
+  await[3] in1_d   = in1
+  await[1] out@[4] = add(tmp@[3], in1_d@[3])
 }
 ```
 
@@ -204,7 +207,7 @@ mod multiply_add(in1, in2) -> (out) {
 mod accum(in1, in2) -> (out) {
   reg total = 0
   await[3] tmp = mul(in1, in2)
-  total::[defer] = total + tmp:@[3]
+  total.[defer] = total + tmp@[3]
   out = total
 }
 ```
@@ -233,7 +236,7 @@ pipe[1] dual_port_ram(we:bool, waddr:u8, raddr:u8, wdata:u32) -> (rdata:u32) {
 mut saturating_counter = (
   mut _val:u8 = 0,
   getter = comb(self) { self._val },
-  setter = comb(ref self, v:u8) { self._val::[saturate] = v },
+  setter = comb(ref self, v:u8) { sat self._val = v },
 )
 
 saturating_counter = 300     // saturates to 255
@@ -466,9 +469,9 @@ assert saturating_counter == 255
     pipe add(a:u32, b:u32) -> (c:u32) { c = a + b }
 
     mod mac(a:u16, b:u16, c:u16) -> (out:u32) {
-      await[3] prod     = mul(a, b)
-      await[3] c_d      = c
-      await[1] out:@[4] = add(prod:@[3], c_d:@[3])
+      await[3] prod    = mul(a, b)
+      await[3] c_d     = c
+      await[1] out@[4] = add(prod@[3], c_d@[3])
     }
     ```
 
@@ -567,10 +570,11 @@ assert saturating_counter == 255
 | `test "name" { ... }` | `initial begin ... end` in testbench |
 | `step` | `@(posedge clk);` |
 | bare `counter` (read) | register output `q` |
-| `counter::[defer]` | register input `d` (end-of-cycle value) |
+| `counter.[defer]` | register input `d` (end-of-cycle value) |
 | `past[n](counter)` | N chained flops feeding a debug signal |
 | `await[N] x = rhs` | N-deep shift register on `rhs` |
-| `x:@[N]` (use) | no-op Verilog (timing type check only; fails at compile if wrong) |
+| `x@[N]` (use) | no-op Verilog (timing type check only; fails at compile if wrong) |
+| `wrap x = rhs` / `sat x = rhs` | per-statement narrowing (truncate / saturate) |
 
 ## Key Differences from Verilog
 
@@ -593,30 +597,44 @@ assert saturating_counter == 255
 7. **No tri-state `z`**: Use `unique if` instead. EDA tools can optimize to
    tri-state buffers when branches are mutually exclusive.
 
-8. **`#[]` vs `:@[]`**: Bit selection uses `#[]`, cycle timing uses `:@[N]`
-   (type check) and `await[N]` (declaration). Never mix them.
+8. **`#[]` vs `@[]`**: Bit selection uses `#[]`, cycle timing uses `@[N]`
+   (type check) and `await[N]` (declaration). Never mix them. There is
+   **no** colon between the variable and `@[N]` — `foo@[3]`, not `foo:@[3]`.
 
-9. **`0sb?` / `0b?` / `0ub?` vs `nil`**: unknown bits live *inside an
-   integer literal* (`0b?`, `0ub?`, `0sb?`, `0b??10`, `0ub10??1?01`,
-   etc.), not as a bare `?`. `0b` and `0ub` are both unsigned-binary
-   prefixes (`0ub` is just the explicit form); `0sb` is signed. They
-   are valid integer values (Verilog `x`) and propagate through
-   arithmetic (`0sb? + 1 == 0sb??`, `0sb? | 1 == 1`). `nil` is
-   *invalid* — any arithmetic or branch on it is a hard error, and the
-   compiler must prove it is eliminated before synthesis. Bare `?` is
-   only a declaration placeholder (`mut x:u8 = ?` = "use the type
-   default"), **not** an integer value you can do math on.
+9. **`0sb?` / `0ub?` vs `nil`**: unknown bits live *inside an
+   integer literal* (`0ub?`, `0sb?`, `0ub??10`, `0ub10??1?01`,
+   etc.), not as a bare `?`. `0ub` is the unsigned-binary prefix;
+   `0sb` is signed. The bare `0b` prefix is **not** valid — you must
+   write `0ub` or `0sb` explicitly. Unknown-bit literals are valid
+   integer values (Verilog `x`) and propagate through arithmetic
+   (`0sb? + 1 == 0sb??`, `0sb? | 1 == 1`). `nil` is *invalid* — any
+   arithmetic or branch on it is a hard error, and the compiler must
+   prove it is eliminated before synthesis. Bare `?` is only a
+   declaration placeholder (`mut x:u8 = ?` = "use the type default"),
+   **not** an integer value you can do math on.
 
 10. **`ref` is semantic, not performance**: In hardware all signals are
     wires. `ref` allows mutation, not optimization.
 
 11. **Pipeline orchestration lives in `mod`**: There is no `flow` lambda in
-    Pyrope 3.0. Use `mod` with `await[N]` (declare) and `:@[N]` (type-check).
+    Pyrope 3.0. Use `mod` with `await[N]` (declare) and `@[N]` (type-check).
 
 12. **Register access is by name, not by cycle index**: bare `counter`
-    reads `q`, `counter::[defer]` reads/writes end-of-cycle, `past[n]()` is
+    reads `q`, `counter.[defer]` reads/writes end-of-cycle, `past[n]()` is
     debug-only read of a previous cycle. The Pyrope 2.0 forms `@[0]`,
     `@[-1]`, `@[1]`, bare `@[]` do not exist in 3.0.
+
+13. **`::[attr]` sets, `.[attr]` reads**: `::[attr=value]` is only legal at
+    a *declaration* site (`mut`/`reg`/`const`/`comb`/`pipe`/`mod` and tuple
+    field intros). Reads anywhere else use `var.[attr]`. A small set of
+    runtime hardware signals (`valid`, `defer`) also accept the read form
+    on the LHS — `reg.[defer] = rhs`, `self.[valid] = false`. The earlier
+    form `var::[defer] = rhs` is no longer valid outside a declaration.
+
+14. **`wrap` / `sat` as prefix modifiers**: per-statement narrowing on
+    assignments uses the prefix keywords `wrap` and `sat` (e.g.
+    `wrap c = a + 1`, `sat d += 1`). The sticky form at declaration is
+    still `var::[wrap]` / `var::[saturate]` (or `var:Type:[wrap]`).
 
 ## Gotchas — common mistakes
 
@@ -627,7 +645,7 @@ assert saturating_counter == 255
 2. **`await[N]` only in `mod`.** Inside `comb` or `pipe` bodies it is a
    compile error. A bare `pipe` call *must* be consumed by an `await[N]`.
 
-3. **`:@[N]` never inserts flops.** It is a type check. If the operand
+3. **`@[N]` never inserts flops.** It is a type check. If the operand
    doesn't live at cycle `N`, the compiler errors out — it will not
    silently insert registers. Use `await[N]` to actually add cycles.
 
@@ -649,10 +667,10 @@ assert saturating_counter == 255
 8. **`_pin` attributes need `ref`.** `clock_pin=ref clk`, not
    `clock_pin=clk`.
 
-9. **`nil` vs `0sb?` / `0b?` / `0ub?` vs bare `?`.** For a don't-care /
+9. **`nil` vs `0sb?` / `0ub?` vs bare `?`.** For a don't-care /
    Verilog-`x` *integer value*, use the bit-literal forms `0sb?`
-   (signed) or `0b?` / `0ub?` (unsigned — `0ub` is the explicit
-   unsigned prefix, `0b` is its shorthand). Bare `?` is **not** an
+   (signed) or `0ub?` (unsigned). The bare `0b` prefix is no longer
+   accepted — use `0ub` or `0sb` explicitly. Bare `?` is **not** an
    integer and does not propagate through arithmetic — it is only a
    declaration placeholder (`mut x:u8 = ?` = "use the type's default"),
    so `? + 1` is a type error while `0sb? + 1` is `0sb??`. Use `nil`
@@ -676,9 +694,10 @@ assert saturating_counter == 255
 15. **Initialization is explicit.** Every `mut`/`const`/`reg` declaration
     needs an initializer. Pick by intent:
     * a concrete value (`0`, `false`, `""`, `(a=1, b=2)`) — normal case.
-    * `0sb?` / `0b?` / `0ub?` (or any bit-literal with `?` digits) —
-      an integer value with unknown bits that participates in
-      arithmetic. `0b` and `0ub` are both unsigned; `0sb` is signed.
+    * `0sb?` / `0ub?` (or any bit-literal with `?` digits like `0ub10??1?01`)
+      — an integer value with unknown bits that participates in arithmetic.
+      `0ub` is unsigned; `0sb` is signed. The bare `0b` prefix is no
+      longer accepted.
     * bare `?` — "use the type's default" placeholder (`mut x:u8 = ?`).
       Not a value; cannot be used in arithmetic.
     * `nil` — "no valid value yet" (tuple/range default). Reading it is
