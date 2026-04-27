@@ -16,6 +16,7 @@ cc_library(
     deps = [
         "//lnast",
         "//upass/core:upass",
+        "//upass/verifier:upass_verifier",
     ],
     alwayslink = True,
 )

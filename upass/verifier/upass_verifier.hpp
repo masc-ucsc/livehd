@@ -5,6 +5,8 @@
 #include <format>
 #include <optional>
 #include <string>
+#include <string_view>
+#include <unordered_set>
 #include <vector>
 
 #include "lconst.hpp"
@@ -47,6 +49,21 @@ public:
   static void reset_aggregate();
   static void set_aggregate_expected(int expected_pass, int expected_fail);
   static void finalize_aggregate();
+
+  // Inliner-driven cassert tally. When constprop's try_eval_comb_call proves
+  // a function-body cassert at a call site (with concrete actuals), it
+  // records the result here keyed by the cassert's source location. The
+  // dedup ensures the body cassert counts once even when the function is
+  // called from multiple sites, and the spawned-lnast verifier consults the
+  // same set in classify_statement to skip already-counted casserts (avoids
+  // double-counting via the spawned-lnast walk where the operand is
+  // unresolvable because the parameters are templates).
+  //
+  // First mark wins for pass/fail. We could refine to "any fail demotes a
+  // prior pass" if that ever matters; today's tests don't need it.
+  static bool already_counted_cassert(std::string_view key);
+  static void mark_inlined_cassert_pass(std::string_view key);
+  static void mark_inlined_cassert_fail(std::string_view key);
 
   // Assignment
   void process_assign() override { check_unary(); }
@@ -96,12 +113,13 @@ private:
   // Aggregate state shared across every verifier instance in a single
   // pass.upass invocation. -1 sentinels in expected_* mean "not set,
   // don't check".
-  static std::size_t              aggregate_pass_count;
-  static std::size_t              aggregate_fail_count;
-  static std::size_t              aggregate_unknown_count;
-  static std::vector<std::string> aggregate_unknown_operands;
-  static int                      aggregate_expected_pass;
-  static int                      aggregate_expected_fail;
+  static std::size_t                     aggregate_pass_count;
+  static std::size_t                     aggregate_fail_count;
+  static std::size_t                     aggregate_unknown_count;
+  static std::vector<std::string>        aggregate_unknown_operands;
+  static int                             aggregate_expected_pass;
+  static int                             aggregate_expected_fail;
+  static std::unordered_set<std::string> processed_cassert_keys;
 
   void check_binary() {
     move_to_child();

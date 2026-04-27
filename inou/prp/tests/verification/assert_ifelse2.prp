@@ -1,17 +1,19 @@
 /*
 :name: assert_ifelse2
-:type: parsing lnast upass
+:type: parsing lnast comptime
+:verifier_pass: 3
+:verifier_fail: 0
 */
 
 comb pick_max(a:u32, b:u32) -> (x:u32) {
-  assert a != b
+  cassert a != b
 
   if a < b {
-    x = a
-  } elif a > b {
     x = b
+  } elif a > b {
+    x = a
   }
 }
 
-assert pick_max(3,50) == 50
-assert pick_max(0,5) == 5
+cassert pick_max(3,50) == 50
+cassert pick_max(0,5) == 5

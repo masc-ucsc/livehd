@@ -176,6 +176,11 @@ public:
 
   auto current_text() const { return lnast->get_data(current_nid).token.get_text(); }
 
+  // Returns the Lnast_nid of the read cursor. Used by passes that need a
+  // stable identity for the current node (e.g. for cross-pass cassert
+  // dedup keyed by source location).
+  Lnast_nid get_current_nid() const { return current_nid; }
+
   // Returns a copy of the full Lnast_node at the read cursor. Used by the
   // runner to replicate the input node into the staging tree.
   Lnast_node current_node() const { return lnast->get_data(current_nid); }

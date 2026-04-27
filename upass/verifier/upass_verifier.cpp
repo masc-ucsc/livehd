@@ -11,12 +11,13 @@
 // dropped when no TU in the final binary includes upass_verifier.hpp.
 static upass::uPass_plugin plugin_verifier("verifier", upass::uPass_wrapper<uPass_verifier>::get_upass);
 
-std::size_t              uPass_verifier::aggregate_pass_count    = 0;
-std::size_t              uPass_verifier::aggregate_fail_count    = 0;
-std::size_t              uPass_verifier::aggregate_unknown_count = 0;
-std::vector<std::string> uPass_verifier::aggregate_unknown_operands;
-int                      uPass_verifier::aggregate_expected_pass = -1;
-int                      uPass_verifier::aggregate_expected_fail = -1;
+std::size_t                     uPass_verifier::aggregate_pass_count    = 0;
+std::size_t                     uPass_verifier::aggregate_fail_count    = 0;
+std::size_t                     uPass_verifier::aggregate_unknown_count = 0;
+std::vector<std::string>        uPass_verifier::aggregate_unknown_operands;
+int                             uPass_verifier::aggregate_expected_pass = -1;
+int                             uPass_verifier::aggregate_expected_fail = -1;
+std::unordered_set<std::string> uPass_verifier::processed_cassert_keys;
 
 void uPass_verifier::reset_aggregate() {
   aggregate_pass_count    = 0;
@@ -25,6 +26,7 @@ void uPass_verifier::reset_aggregate() {
   aggregate_unknown_operands.clear();
   aggregate_expected_pass = -1;
   aggregate_expected_fail = -1;
+  processed_cassert_keys.clear();
 }
 
 void uPass_verifier::set_aggregate_expected(int expected_pass, int expected_fail) {
@@ -32,9 +34,35 @@ void uPass_verifier::set_aggregate_expected(int expected_pass, int expected_fail
   aggregate_expected_fail = expected_fail;
 }
 
+bool uPass_verifier::already_counted_cassert(std::string_view key) {
+  return processed_cassert_keys.contains(std::string{key});
+}
+
+void uPass_verifier::mark_inlined_cassert_pass(std::string_view key) {
+  if (processed_cassert_keys.insert(std::string{key}).second) {
+    ++aggregate_pass_count;
+  }
+}
+
+void uPass_verifier::mark_inlined_cassert_fail(std::string_view key) {
+  if (processed_cassert_keys.insert(std::string{key}).second) {
+    ++aggregate_fail_count;
+  }
+}
+
 upass::Emit_decision uPass_verifier::classify_statement() {
   if (!is_type(Lnast_ntype::Lnast_ntype_cassert)) {
     return upass::Emit_decision::emit_node();
+  }
+
+  // If constprop's try_eval_comb_call already proved this cassert at every
+  // call site of the enclosing function, drop it without re-counting. The
+  // key matches what mark_inlined_cassert_* uses (lnast top-name + nid).
+  const auto cassert_nid = lm->get_current_nid();
+  const auto dedup_key
+      = std::format("{}:{}:{}", lm->get_top_module_name(), cassert_nid.level, cassert_nid.pos);
+  if (processed_cassert_keys.contains(dedup_key)) {
+    return upass::Emit_decision::drop();
   }
 
   // Cassert has a single child — a ref or a const (post-Slice-1 fold).

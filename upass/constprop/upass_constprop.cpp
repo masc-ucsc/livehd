@@ -10,6 +10,7 @@
 #include "boost/multiprecision/cpp_int.hpp"
 #include "lnast_ntype.hpp"
 #include "str_tools.hpp"
+#include "upass_verifier.hpp"
 
 // Registered once here (not in the header) to avoid duplicate-registration
 // errors when multiple TUs include upass_constprop.hpp.
@@ -859,7 +860,11 @@ bool uPass_constprop::try_eval_comb_call(std::string_view dst, std::string_view 
     return false;
   }
 
-  bool after_io = false;
+  // Phase 1 — pre-IO setup: collect param/output names from the synthetic
+  // __input_tuple_ref / __output_tuple_ref tuple_adds, then bind actuals to
+  // params on the io marker. Body statements are deferred to phase 2.
+  std::vector<Lnast_nid> body_stmts;
+  bool                   after_io = false;
   for (auto stmt = fn->get_child(stmts); !stmt.is_invalid(); stmt = fn->get_sibling_next(stmt)) {
     const auto type = fn->get_type(stmt);
     if (!after_io) {
@@ -904,64 +909,242 @@ bool uPass_constprop::try_eval_comb_call(std::string_view dst, std::string_view 
       }
       continue;
     }
+    body_stmts.push_back(stmt);
+  }
+
+  // Phase 2 — body evaluation. Multi-pass fixed-point traversal so a stmt
+  // whose inputs are produced *later* in source order can still be folded
+  // (prp2lnast emits if's branch conditions as siblings *after* the if
+  // node itself; assert_ifelse2.prp's pick_max body is the canonical
+  // example). Each visit either records the stmt as processed, defers it
+  // for the next sweep, or aborts the whole inline.
+
+  enum class Eval_result { processed, deferred, aborted };
+
+  // Eval helpers shared between top-level and nested stmts blocks.
+  std::function<Eval_result(Lnast_nid)> try_eval_stmt;
+  std::function<Eval_result(Lnast_nid)> try_eval_block;
+
+  auto eval_nary = [&](Lnast_nid stmt, auto op) -> Eval_result {
+    auto lhs = fn->get_child(stmt);
+    if (lhs.is_invalid() || !fn->get_type(lhs).is_ref()) {
+      return Eval_result::aborted;
+    }
+    auto arg = fn->get_sibling_next(lhs);
+    if (arg.is_invalid()) {
+      return Eval_result::aborted;
+    }
+    auto acc = resolve_local(fn->get_data(arg));
+    if (!acc.has_value() || acc->is_invalid() || acc->is_string()) {
+      return Eval_result::deferred;
+    }
+    while (!(arg = fn->get_sibling_next(arg)).is_invalid()) {
+      auto rhs = resolve_local(fn->get_data(arg));
+      if (!rhs.has_value() || rhs->is_invalid() || rhs->is_string()) {
+        return Eval_result::deferred;
+      }
+      *acc = op(*acc, *rhs);
+      if (acc->is_invalid()) {
+        return Eval_result::aborted;
+      }
+    }
+    local_values[std::string(fn->get_data(lhs).token.get_text())] = *acc;
+    return Eval_result::processed;
+  };
+
+  // Two-operand comparison producing 0/1. ne/lt/le/gt/ge use the C++
+  // operator overload on Lconst; eq goes through eq_op so it picks up the
+  // structural-identity contract used elsewhere in constprop.
+  auto eval_compare = [&](Lnast_nid stmt, auto pred) -> Eval_result {
+    auto lhs = fn->get_child(stmt);
+    if (lhs.is_invalid() || !fn->get_type(lhs).is_ref()) {
+      return Eval_result::aborted;
+    }
+    auto a_nid = fn->get_sibling_next(lhs);
+    if (a_nid.is_invalid()) {
+      return Eval_result::aborted;
+    }
+    auto b_nid = fn->get_sibling_next(a_nid);
+    if (b_nid.is_invalid()) {
+      return Eval_result::aborted;
+    }
+    auto a_val = resolve_local(fn->get_data(a_nid));
+    auto b_val = resolve_local(fn->get_data(b_nid));
+    if (!a_val.has_value() || a_val->is_invalid() || a_val->is_string()
+        || !b_val.has_value() || b_val->is_invalid() || b_val->is_string()) {
+      return Eval_result::deferred;
+    }
+    Lconst result = pred(*a_val, *b_val) ? Lconst(1) : Lconst(0);
+    local_values[std::string(fn->get_data(lhs).token.get_text())] = result;
+    return Eval_result::processed;
+  };
+
+  try_eval_stmt = [&](Lnast_nid stmt) -> Eval_result {
+    const auto type = fn->get_type(stmt);
 
     if (type.is_assign()) {
       auto lhs = fn->get_child(stmt);
       if (lhs.is_invalid() || !fn->get_type(lhs).is_ref()) {
-        continue;
+        return Eval_result::processed;  // skip malformed
       }
       auto rhs = fn->get_sibling_next(lhs);
       if (rhs.is_invalid()) {
-        continue;
+        return Eval_result::processed;
       }
       auto value = resolve_local(fn->get_data(rhs));
       if (!value.has_value() || value->is_invalid()) {
-        return false;
+        return Eval_result::deferred;
       }
       local_values[std::string(fn->get_data(lhs).token.get_text())] = *value;
-      continue;
+      return Eval_result::processed;
     }
 
-    auto eval_nary = [&](auto op) -> bool {
-      auto lhs = fn->get_child(stmt);
-      if (lhs.is_invalid() || !fn->get_type(lhs).is_ref()) {
-        return false;
-      }
-      auto arg = fn->get_sibling_next(lhs);
-      if (arg.is_invalid()) {
-        return false;
-      }
-      auto acc = resolve_local(fn->get_data(arg));
-      if (!acc.has_value() || acc->is_invalid() || acc->is_string()) {
-        return false;
-      }
-      while (!(arg = fn->get_sibling_next(arg)).is_invalid()) {
-        auto rhs = resolve_local(fn->get_data(arg));
-        if (!rhs.has_value() || rhs->is_invalid() || rhs->is_string()) {
-          return false;
-        }
-        *acc = op(*acc, *rhs);
-        if (acc->is_invalid()) {
-          return false;
-        }
-      }
-      local_values[std::string(fn->get_data(lhs).token.get_text())] = *acc;
-      return true;
-    };
-
     if (type.is_plus()) {
-      if (!eval_nary([](Lconst a, Lconst b) { return a.add_op(b); })) {
+      return eval_nary(stmt, [](Lconst a, Lconst b) { return a.add_op(b); });
+    }
+    if (type.is_minus()) {
+      return eval_nary(stmt, [](Lconst a, Lconst b) { return a.sub_op(b); });
+    }
+    if (type.is_mult()) {
+      return eval_nary(stmt, [](Lconst a, Lconst b) { return a.mult_op(b); });
+    }
+
+    if (type.is_eq()) {
+      return eval_compare(stmt, [](const Lconst& a, const Lconst& b) { return a.eq_op(b).is_known_true(); });
+    }
+    if (type.is_ne()) {
+      return eval_compare(stmt, [](const Lconst& a, const Lconst& b) { return !a.eq_op(b).is_known_true(); });
+    }
+    if (type.is_lt()) {
+      return eval_compare(stmt, [](const Lconst& a, const Lconst& b) { return a < b; });
+    }
+    if (type.is_le()) {
+      return eval_compare(stmt, [](const Lconst& a, const Lconst& b) { return a <= b; });
+    }
+    if (type.is_gt()) {
+      return eval_compare(stmt, [](const Lconst& a, const Lconst& b) { return a > b; });
+    }
+    if (type.is_ge()) {
+      return eval_compare(stmt, [](const Lconst& a, const Lconst& b) { return a >= b; });
+    }
+
+    if (type.is_if()) {
+      // children: ref(cond), stmts, [ref(cond), stmts]..., [stmts default]
+      auto child = fn->get_child(stmt);
+      while (!child.is_invalid()) {
+        if (fn->get_type(child).is_stmts()) {
+          // bare stmts in the cond slot ⇒ default else
+          return try_eval_block(child);
+        }
+        auto cond_val = resolve_local(fn->get_data(child));
+        if (!cond_val.has_value() || cond_val->is_invalid() || cond_val->has_unknowns()) {
+          return Eval_result::deferred;
+        }
+        auto branch = fn->get_sibling_next(child);
+        if (branch.is_invalid() || !fn->get_type(branch).is_stmts()) {
+          return Eval_result::aborted;
+        }
+        if (cond_val->is_known_true()) {
+          return try_eval_block(branch);
+        }
+        // known-false ⇒ try the next (cond, stmts) pair
+        child = fn->get_sibling_next(branch);
+      }
+      return Eval_result::processed;  // fell through, no branch ran
+    }
+
+    if (type.is_cassert()) {
+      auto operand = fn->get_child(stmt);
+      if (operand.is_invalid()) {
+        return Eval_result::processed;
+      }
+      auto val = resolve_local(fn->get_data(operand));
+      if (!val.has_value() || val->is_invalid() || val->has_unknowns()) {
+        return Eval_result::deferred;
+      }
+      // Dedup-keyed by source location (lnast top-name + cassert nid) so a
+      // function called from N call sites contributes one tally per source
+      // cassert, not N. The spawned-lnast verifier consults the same key
+      // and skips re-counting in classify_statement.
+      auto key = std::format("{}:{}:{}", fn->get_top_module_name(), stmt.level, stmt.pos);
+      if (val->is_known_false()) {
+        uPass_verifier::mark_inlined_cassert_fail(key);
+      } else if (val->is_known_true()) {
+        uPass_verifier::mark_inlined_cassert_pass(key);
+      }
+      return Eval_result::processed;
+    }
+
+    // Tuple/attr ops in the body are no-ops for this slim inliner — the
+    // function-template lnast may still carry default-value scaffolding
+    // (output tuple_add inside the body, attr_set on locals) we don't need
+    // to replay since outputs come from the explicit assigns in branches.
+    if (type.is_tuple_add() || type.is_tuple_get() || type.is_tuple_set() || type.is_attr_set() || type.is_attr_get()) {
+      return Eval_result::processed;
+    }
+
+    return Eval_result::aborted;
+  };
+
+  try_eval_block = [&](Lnast_nid block) -> Eval_result {
+    if (!fn->get_type(block).is_stmts()) {
+      return Eval_result::aborted;
+    }
+    std::vector<Lnast_nid> sub_stmts;
+    for (auto s = fn->get_child(block); !s.is_invalid(); s = fn->get_sibling_next(s)) {
+      sub_stmts.push_back(s);
+    }
+    std::vector<bool> processed(sub_stmts.size(), false);
+    while (true) {
+      bool progress = false;
+      for (std::size_t i = 0; i < sub_stmts.size(); ++i) {
+        if (processed[i]) {
+          continue;
+        }
+        const auto r = try_eval_stmt(sub_stmts[i]);
+        if (r == Eval_result::aborted) {
+          return Eval_result::aborted;
+        }
+        if (r == Eval_result::processed) {
+          processed[i] = true;
+          progress     = true;
+        }
+      }
+      if (!progress) {
+        break;
+      }
+    }
+    for (auto p : processed) {
+      if (!p) {
+        return Eval_result::aborted;
+      }
+    }
+    return Eval_result::processed;
+  };
+
+  // Drive the body's fixed-point sweep.
+  std::vector<bool> processed(body_stmts.size(), false);
+  while (true) {
+    bool progress = false;
+    for (std::size_t i = 0; i < body_stmts.size(); ++i) {
+      if (processed[i]) {
+        continue;
+      }
+      const auto r = try_eval_stmt(body_stmts[i]);
+      if (r == Eval_result::aborted) {
         return false;
       }
-    } else if (type.is_minus()) {
-      if (!eval_nary([](Lconst a, Lconst b) { return a.sub_op(b); })) {
-        return false;
+      if (r == Eval_result::processed) {
+        processed[i] = true;
+        progress     = true;
       }
-    } else if (type.is_mult()) {
-      if (!eval_nary([](Lconst a, Lconst b) { return a.mult_op(b); })) {
-        return false;
-      }
-    } else {
+    }
+    if (!progress) {
+      break;
+    }
+  }
+  for (auto p : processed) {
+    if (!p) {
       return false;
     }
   }

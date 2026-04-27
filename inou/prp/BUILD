@@ -56,5 +56,6 @@ cc_binary(
     for prp_file in glob([
         "tests/pyrope/*.prp",
         "tests/comptime/*.prp",
+        "tests/verification/*.prp",
     ])
 ]
