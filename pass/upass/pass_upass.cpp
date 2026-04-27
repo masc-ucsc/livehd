@@ -154,6 +154,8 @@ Pass_upass::Pass_upass(const Eprp_var& var) : Pass("pass.upass", var) {
     upass_order.emplace_back("verifier");
   }
 
+  upass_order.emplace_back("func_extract");
+
   if (do_constprop) {
     upass_order.emplace_back("constprop");
   }
@@ -188,12 +190,13 @@ void Pass_upass::work(Eprp_var& var) {
     return;
   }
 
-  // Snapshot the current lnasts — we replace entries as runs complete,
-  // and Eprp_var::replace iterates the live vector to find the old entry.
-  const auto inputs = var.lnasts;
-  for (const auto& ln : inputs) {
-    auto lm     = std::make_shared<upass::Lnast_manager>(ln);
-    auto runner = uPass_runner(lm, up.upass_order, up.pass_options);
+  // Walk as a queue: structural passes can append new LNASTs (e.g. extracted
+  // comb functions), and those generated trees should run through the same
+  // configured upass pipeline before downstream stages see them.
+  for (std::size_t idx = 0; idx < var.lnasts.size(); ++idx) {
+    const auto ln     = var.lnasts.at(idx);
+    auto       lm     = std::make_shared<upass::Lnast_manager>(ln);
+    auto       runner = uPass_runner(lm, up.upass_order, up.pass_options);
     if (runner.has_configuration_error()) {
       fail_upass_runtime(std::format("pass.upass invalid pass configuration: {}", runner.get_configuration_error()));
     }
@@ -204,6 +207,10 @@ void Pass_upass::work(Eprp_var& var) {
     auto staged = runner.take_staging();
     if (staged) {
       var.replace(ln, staged);
+    }
+    auto new_lnasts = runner.take_new_lnasts();
+    for (const auto& new_ln : new_lnasts) {
+      var.add(new_ln);
     }
   }
 }

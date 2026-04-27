@@ -11,7 +11,7 @@ protected:
   constexpr static std::array namemap_pyrope{"invalid",
 
                                              "top",      "sts",        "if",        "uif",       "for",
-                                             "while",    "func_call",  "func_def",
+                                             "while",    "func_call",  "func_def",  "io",
 
                                              "=",        ":=",         "mut",        "delay_assign",
 
@@ -57,6 +57,7 @@ protected:
       "while",
       "func_call",
       "func_def",
+      "io",
 
       "=",
       "=",  // dp_assign
@@ -150,6 +151,7 @@ protected:
       "while",
       "func_call",
       "func_def",
+      "io",
 
       "=",  // assign
       "=",  // dp_assign

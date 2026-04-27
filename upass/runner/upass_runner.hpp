@@ -28,7 +28,8 @@ public:
 
   // Hands the freshly-built staging LNAST to the caller; after this the
   // runner no longer owns it. Call once per run(), after run() returns.
-  std::shared_ptr<Lnast> take_staging() { return std::move(staging); }
+  std::shared_ptr<Lnast>              take_staging() { return std::move(staging); }
+  std::vector<std::shared_ptr<Lnast>> take_new_lnasts() override { return std::move(new_lnasts); }
 
 protected:
   struct Pass_entry {
@@ -41,9 +42,10 @@ protected:
   std::string             configuration_error_msg;
 
   // Staging tree being built during traversal. See upass.md §2.1.
-  std::shared_ptr<Lnast> staging;
-  std::stack<Lnast_nid>  staging_parent_stack;
-  Lnast_nid              staging_parent;
+  std::shared_ptr<Lnast>              staging;
+  std::stack<Lnast_nid>               staging_parent_stack;
+  Lnast_nid                           staging_parent;
+  std::vector<std::shared_ptr<Lnast>> new_lnasts;
 
   std::vector<std::string> resolve_order(const std::vector<std::string>& requested_names, std::string* error_msg = nullptr) const;
   std::vector<std::string> changed_passes() const;
@@ -78,6 +80,7 @@ private:
   // Drop-candidate path (category A / B in upass.md §3 Slice 1): dispatch,
   // classify via every pass's classify_statement, emit if no pass drops.
   void process_drop_candidate(Pass_method fn, bool fold_all);
+  void process_drop_candidate_verbatim(Pass_method fn);
 
   // Verbatim path (category C): dispatch so passes see the node, then copy
   // the subtree without folding.

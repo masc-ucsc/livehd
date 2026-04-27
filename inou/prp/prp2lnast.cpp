@@ -36,14 +36,13 @@ Prp2lnast::Prp2lnast(std::string_view filename, std::string_view module_name, bo
   TSTree* tst_tree = ts_parser_parse_string(parser, NULL, prp_file.data(), prp_file.size());
   ts_root_node     = ts_tree_root_node(tst_tree);
 
-  dump();
+  // dump();  // tree-sitter parse tree; enable for debugging the grammar
 
   if (parse_only) {
     return;
   }
 
-  tmp_ref_count     = 0;
-  current_name_role = Name_role::None;
+  tmp_ref_count = 0;
 
   process_description();
 }
@@ -129,7 +128,7 @@ void Prp2lnast::process_description() {
   // that the new grammar attaches as the `overflow` field on an assignment
   // statement can be detected — it precedes the assignment as a sibling
   // because `_statement` is hidden.
-  uint32_t nc = ts_node_child_count(ts_root_node);
+  uint32_t    nc = ts_node_child_count(ts_root_node);
   std::string pending_overflow;
   for (uint32_t i = 0; i < nc; i++) {
     TSNode      c = ts_node_child(ts_root_node, i);
@@ -196,8 +195,8 @@ void Prp2lnast::process_statement(TSNode n) {
     process_impl_statement(n);
   } else if (t == "if_expression" || t == "match_expression" || t == "expression_item" || t == "unary_expression"
              || t == "bit_selection" || t == "member_selection" || t == "attribute_read" || t == "dot_expression"
-             || t == "function_call_expression" || t == "identifier" || t == "tuple" || t == "tuple_sq"
-             || t == "type_specification" || t == "constant") {
+             || t == "function_call_expression" || t == "identifier" || t == "tuple" || t == "tuple_sq" || t == "type_specification"
+             || t == "constant") {
     // Expression used as a statement — evaluate for side effects.
     (void)expr_to_node(n);
   } else {
@@ -206,7 +205,7 @@ void Prp2lnast::process_statement(TSNode n) {
 }
 
 void Prp2lnast::process_scope_statement(TSNode n, lh::Tree_index /*target_stmts*/) {
-  uint32_t nc = ts_node_child_count(n);
+  uint32_t    nc = ts_node_child_count(n);
   std::string pending_overflow;
   for (uint32_t i = 0; i < nc; i++) {
     TSNode      c = ts_node_child(n, i);
@@ -390,10 +389,10 @@ Lnast_node Prp2lnast::process_lvalue_for_assign(TSNode lvalue, const Lnast_node&
     // through `tuple_get tmp t b; tuple_set tmp 0 …` — the tmp would not
     // propagate the update back to t. The walker handles arbitrarily
     // nested member_selection / dot_expression chains.
-    std::vector<Lnast_node> path;
-    Lnast_node              root;
-    bool                    have_root = false;
-    std::function<void(TSNode)> collect = [&](TSNode n) {
+    std::vector<Lnast_node>     path;
+    Lnast_node                  root;
+    bool                        have_root = false;
+    std::function<void(TSNode)> collect   = [&](TSNode n) {
       std::string t(ts_node_type(n));
       if (t == "dot_expression") {
         TSNode item = child_by_field(n, "item");
@@ -415,7 +414,7 @@ Lnast_node Prp2lnast::process_lvalue_for_assign(TSNode lvalue, const Lnast_node&
           collect(item);
           uint32_t nc = ts_node_named_child_count(n);
           for (uint32_t i = 0; i < nc; i++) {
-            TSNode  c = ts_node_named_child(n, i);
+            TSNode c = ts_node_named_child(n, i);
             if (ts_node_eq(c, item)) {
               continue;
             }
@@ -729,6 +728,75 @@ void Prp2lnast::process_control_statement(TSNode n) {
   make_marker("return", ts_node_is_null(arg) ? Lnast_node::create_invalid() : expr_to_node(arg));
 }
 
+std::vector<Prp2lnast::Call_arg> Prp2lnast::collect_call_args(TSNode arg_tuple) {
+  std::vector<Call_arg> call_args;
+  if (ts_node_is_null(arg_tuple)) {
+    return call_args;
+  }
+
+  uint32_t nnc = ts_node_named_child_count(arg_tuple);
+  call_args.reserve(nnc);
+  for (uint32_t i = 0; i < nnc; ++i) {
+    TSNode      c = ts_node_named_child(arg_tuple, i);
+    std::string t(ts_node_type(c));
+
+    Call_arg arg;
+    if (t == "assignment") {
+      arg.is_assign = true;
+      TSNode lv     = child_by_field(c, "lvalue");
+      TSNode rv     = child_by_field(c, "rvalue");
+
+      std::string lvt(ts_node_type(lv));
+      if (lvt == "typed_identifier") {
+        TSNode id = child_by_field(lv, "identifier");
+        if (!ts_node_is_null(id)) {
+          arg.assign_key = std::string(trim(get_text(id)));
+        }
+      } else {
+        arg.assign_key = std::string(trim(get_text(lv)));
+      }
+
+      if (arg.assign_key.empty()) {
+        arg.assign_key = get_tmp_name();
+      }
+
+      if (!ts_node_is_null(rv)) {
+        arg.value = expr_to_node(rv);
+      } else {
+        TSNode op    = child_by_field(c, "operator");
+        auto   start = ts_node_is_null(op) ? ts_node_end_byte(lv) : ts_node_end_byte(op);
+        arg.value    = constant_text_to_node(trim(text_between(start, ts_node_end_byte(c))));
+      }
+    } else {
+      arg.value = expr_to_node(c);
+    }
+    call_args.emplace_back(std::move(arg));
+  }
+
+  if (call_args.empty() && ts_node_child_count(arg_tuple) > 0) {
+    auto inner = trim(text_between(ts_node_start_byte(arg_tuple) + 1, ts_node_end_byte(arg_tuple) - 1));
+    if (!inner.empty()) {
+      Call_arg arg;
+      arg.value = constant_text_to_node(inner);
+      call_args.emplace_back(std::move(arg));
+    }
+  }
+
+  return call_args;
+}
+
+void Prp2lnast::add_call_args_to_fcall(const lh::Tree_index& fcall_idx, const std::vector<Call_arg>& call_args) {
+  for (const auto& arg : call_args) {
+    if (arg.is_assign) {
+      auto aidx = lnast->add_child(fcall_idx, Lnast_node::create_assign());
+      lnast->add_child(aidx, Lnast_node::create_ref(arg.assign_key));
+      lnast->add_child(aidx, arg.value);
+    } else {
+      lnast->add_child(fcall_idx, arg.value);
+    }
+  }
+}
+
 void Prp2lnast::process_function_call_statement(TSNode n) {
   TSNode     func = child_by_field(n, "function");
   TSNode     args = child_by_field(n, "argument");
@@ -742,12 +810,7 @@ void Prp2lnast::process_function_call_statement(TSNode n) {
   auto idx = lnast->add_child(stmts_index, Lnast_node::create_func_call());
   lnast->add_child(idx, make_tmp_ref());
   lnast->add_child(idx, func_ref);
-  if (!ts_node_is_null(args)) {
-    uint32_t nnc = ts_node_named_child_count(args);
-    for (uint32_t i = 0; i < nnc; i++) {
-      lnast->add_child(idx, expr_to_node(ts_node_named_child(args, i)));
-    }
-  }
+  add_call_args_to_fcall(idx, collect_call_args(args));
 }
 
 void Prp2lnast::process_lambda_statement(TSNode n) {
@@ -799,17 +862,16 @@ void Prp2lnast::process_lambda_statement(TSNode n) {
         if (ts_node_is_null(id)) {
           continue;
         }
-        auto refn                               = absl::StrCat("$", std::string(get_text(id)));
-        ref_name_map[std::string(get_text(id))] = refn;
-        auto aidx                               = lnast->add_child(in_idx, Lnast_node::create_assign());
-        lnast->add_child(aidx, Lnast_node::create_ref(refn));
+        auto arg_name = std::string(get_text(id));
+        auto aidx     = lnast->add_child(in_idx, Lnast_node::create_assign());
+        lnast->add_child(aidx, Lnast_node::create_ref(arg_name));
         lnast->add_child(aidx, Lnast_node::create_const("0"));
       }
     }
   }
 
   // Output args
-  auto out_idx = lnast->add_child(fd_idx, Lnast_node::create_tuple_add());
+  auto                     out_idx = lnast->add_child(fd_idx, Lnast_node::create_tuple_add());
   std::vector<std::string> output_refs;  // for placeholder-lambda implicit assign
   if (!ts_node_is_null(fdef)) {
     // Collect ALL output field occurrences (there may be multiple due to "->" anchor + arg_list form)
@@ -826,20 +888,18 @@ void Prp2lnast::process_lambda_statement(TSNode n) {
             if (ts_node_is_null(id)) {
               continue;
             }
-            auto refn                               = absl::StrCat("%", std::string(get_text(id)));
-            ref_name_map[std::string(get_text(id))] = refn;
+            auto refn = std::string(get_text(id));
             output_refs.push_back(refn);
-            auto aidx                               = lnast->add_child(out_idx, Lnast_node::create_assign());
+            auto aidx = lnast->add_child(out_idx, Lnast_node::create_assign());
             lnast->add_child(aidx, Lnast_node::create_ref(refn));
             lnast->add_child(aidx, Lnast_node::create_const("0"));
           }
         } else if (ot == "typed_identifier") {
           TSNode id = child_by_field(o, "identifier");
           if (!ts_node_is_null(id)) {
-            auto refn                               = absl::StrCat("%", std::string(get_text(id)));
-            ref_name_map[std::string(get_text(id))] = refn;
+            auto refn = std::string(get_text(id));
             output_refs.push_back(refn);
-            auto aidx                               = lnast->add_child(out_idx, Lnast_node::create_assign());
+            auto aidx = lnast->add_child(out_idx, Lnast_node::create_assign());
             lnast->add_child(aidx, Lnast_node::create_ref(refn));
             lnast->add_child(aidx, Lnast_node::create_const("0"));
           }
@@ -882,8 +942,6 @@ void Prp2lnast::process_lambda_statement(TSNode n) {
   }
   stmts_index = saved;
 
-  // Clear the directed-name mapping after the function body.
-  ref_name_map.clear();
 }
 
 void Prp2lnast::process_enum_assignment(TSNode n) {
@@ -1107,10 +1165,6 @@ Lnast_node Prp2lnast::identifier_to_node(TSNode n, bool for_lvalue) {
     if (ok && !(inner[0] >= '0' && inner[0] <= '9')) {
       name = std::string(inner);
     }
-  }
-  auto it = ref_name_map.find(name);
-  if (it != ref_name_map.end()) {
-    return Lnast_node::create_ref(it->second);
   }
   if (for_lvalue) {
     return Lnast_node::create_ref(name);
@@ -1874,10 +1928,8 @@ Lnast_node Prp2lnast::bit_selection_to_node(TSNode n) {
     if (!ts_node_is_null(open_n)) {
       // `b#[expr..]` — open_range field holds the start expression.
       // `b#[..]`     — open_range is the literal `..` token.
-      Lnast_node start_node = (std::string(ts_node_type(open_n)) == "..")
-                                  ? Lnast_node::create_const("0")
-                                  : expr_to_node(open_n);
-      mask_ref               = emit_range(start_node, Lnast_node::create_const("nil"));
+      Lnast_node start_node = (std::string(ts_node_type(open_n)) == "..") ? Lnast_node::create_const("0") : expr_to_node(open_n);
+      mask_ref              = emit_range(start_node, Lnast_node::create_const("nil"));
     } else if (!ts_node_is_null(fz_n)) {
       // `b#[..=expr]` or `b#[..<expr]`. The grammar tags `from_zero` as
       // `multiple: true` covering both the anonymous operator token (`..=`
@@ -1999,9 +2051,7 @@ Lnast_node Prp2lnast::member_selection_to_node(TSNode n) {
     if (!ts_node_is_null(open_n)) {
       // `x[expr..]` — open_range field holds the expression child.
       // `x[..]`     — open_range field holds the literal `..` token (no expr).
-      Lnast_node start_node = (std::string(ts_node_type(open_n)) == "..")
-                                  ? Lnast_node::create_const("0")
-                                  : expr_to_node(open_n);
+      Lnast_node start_node = (std::string(ts_node_type(open_n)) == "..") ? Lnast_node::create_const("0") : expr_to_node(open_n);
       // `nil` is the open-end sentinel — round-trips through Lconst as a
       // string and is recognised by process_tuple_get as "slice to source's
       // last index". Using a real value here would falsely truncate.
@@ -2077,8 +2127,8 @@ Lnast_node Prp2lnast::attribute_read_to_node(TSNode n) {
         continue;
       }
       TSNode name_n = ts_node_child(al, j);
-      auto idx      = lnast->add_child(stmts_index, Lnast_node::create_attr_get());
-      auto ref      = make_tmp_ref();
+      auto   idx    = lnast->add_child(stmts_index, Lnast_node::create_attr_get());
+      auto   ref    = make_tmp_ref();
       lnast->add_child(idx, ref);
       lnast->add_child(idx, base);
       lnast->add_child(idx, Lnast_node::create_const(std::string(get_text(name_n))));
@@ -2143,55 +2193,18 @@ Lnast_node Prp2lnast::function_call_expr_to_node(TSNode n) {
   } else {
     func_ref = Lnast_node::create_ref(trim(get_text(func)));
   }
-  // Pre-lower call arguments so any sub-expression statements are emitted
-  // BEFORE the fcall that references them (same invariant as tuple_to_node).
-  // Walk the tuple's children in source order; each comma-separated segment
-  // is one argument. For segments whose expression is a hidden token (e.g.
-  // `_simple_number`) there is no named child — fall back to the segment's
-  // raw text as a constant, matching the tuple_to_node recovery path.
-  std::vector<Lnast_node> call_args;
-  if (!ts_node_is_null(arg)) {
-    uint32_t total     = ts_node_child_count(arg);
-    uint32_t seg_start = ts_node_start_byte(arg);
-    if (total > 0) {
-      seg_start = ts_node_end_byte(ts_node_child(arg, 0));  // after '('
-    }
-    bool       have_named_in_seg = false;
-    Lnast_node seg_named_value;
-    auto       flush_segment = [&](uint32_t seg_end) {
-      if (have_named_in_seg) {
-        call_args.push_back(seg_named_value);
-      } else {
-        auto text = trim(text_between(seg_start, seg_end));
-        if (!text.empty()) {
-          call_args.push_back(constant_text_to_node(text));
-        }
-      }
-      have_named_in_seg = false;
-    };
-    for (uint32_t i = 1; i < total; i++) {
-      TSNode      c = ts_node_child(arg, i);
-      std::string ct(ts_node_type(c));
-      if (ct == "," || ct == ")") {
-        flush_segment(ts_node_start_byte(c));
-        seg_start = ts_node_end_byte(c);
-      } else if (ts_node_is_named(c)) {
-        seg_named_value   = expr_to_node(c);
-        have_named_in_seg = true;
-      }
-    }
+  auto call_args = collect_call_args(arg);
+  if (has_receiver) {
+    Call_arg receiver_arg;
+    receiver_arg.value = receiver_ref;
+    call_args.insert(call_args.begin(), receiver_arg);
   }
 
   auto idx = lnast->add_child(stmts_index, Lnast_node::create_func_call());
   auto ref = make_tmp_ref();
   lnast->add_child(idx, ref);
   lnast->add_child(idx, func_ref);
-  if (has_receiver) {
-    lnast->add_child(idx, receiver_ref);
-  }
-  for (auto& a : call_args) {
-    lnast->add_child(idx, a);
-  }
+  add_call_args_to_fcall(idx, call_args);
   return ref;
 }
 
@@ -2251,7 +2264,7 @@ Lnast_node Prp2lnast::tuple_to_node(TSNode n, bool /*is_square*/) {
       // expression (positional value with mutability override). Either way
       // the field is positional — record the value only.
       if (i + 1 < nnc) {
-        TSNode      next  = ts_node_named_child(n, i + 1);
+        TSNode      next = ts_node_named_child(n, i + 1);
         std::string nextt(ts_node_type(next));
         Item        it;
         if (nextt == "typed_identifier") {

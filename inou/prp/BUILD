@@ -4,6 +4,11 @@ load("@rules_cc//cc:defs.bzl", "cc_binary", "cc_library")
 load("@rules_shell//shell:sh_test.bzl", "sh_test")
 load("//tools:copt_default.bzl", "COPTS")
 
+exports_files([
+    "tests/pyrope/proc_lambda.prp",
+    "tests/pyrope/simple.prp",
+])
+
 cc_library(
     name = "inou_prp",
     srcs = glob(

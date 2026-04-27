@@ -1,6 +1,8 @@
 /*
 :name: proc_lambda
-:type: parsing lnast upass
+:type: comptime
+:verifier_pass: 3
+:verifier_fail: 0
 */
 
 comb do_thing(a, b) -> (r) {

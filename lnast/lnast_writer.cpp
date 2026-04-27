@@ -157,6 +157,8 @@ void Lnast_writer::write_func_def() {
   move_to_parent();
 }
 
+void Lnast_writer::write_io() { write_n_ary("io"); }
+
 void Lnast_writer::write_assign() {
   move_to_child();
   write_lnast();

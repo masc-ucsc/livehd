@@ -20,6 +20,7 @@ LNAST_NODE( for, for )
 LNAST_NODE( while, while )
 LNAST_NODE( func_call, fcall )
 LNAST_NODE( func_def, fdef )
+LNAST_NODE( io, io )
 
 // Assignment
 LNAST_NODE( assign, assign )

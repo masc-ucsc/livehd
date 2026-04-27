@@ -21,6 +21,7 @@ cc_library(
         "//upass/core:upass",
         "//upass/cyclecmd:upass_cyclecmd",
         "//upass/cyclecmd_lgraph:upass_cyclecmd_lgraph",
+        "//upass/func_extract:upass_func_extract",
         "//upass/noop:upass_noop",
         "//upass/runner:upass_runner",
         "//upass/verifier:upass_verifier",
@@ -105,6 +106,16 @@ sh_test(
     srcs = ["tests/upass_invalid_ir_test.sh"],
     data = [
         "//inou/pyrope:pyrope_tests",
+        "//main:lgshell",
+    ],
+)
+
+sh_test(
+    name = "upass_func_extract_test.sh",
+    srcs = ["tests/upass_func_extract_test.sh"],
+    data = [
+        "//inou/prp:tests/pyrope/simple.prp",
+        "//inou/prp:tests/pyrope/proc_lambda.prp",
         "//main:lgshell",
     ],
 )

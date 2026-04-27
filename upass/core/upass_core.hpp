@@ -76,6 +76,11 @@ public:
   // tallies against expected counts).
   virtual void end_run() {}
 
+  // Side-output LNASTs produced by structural lowering passes. The runner
+  // collects these after end_run() and hands them to pass.upass so they can be
+  // appended to Eprp_var::lnasts.
+  virtual std::vector<std::shared_ptr<Lnast>> take_new_lnasts() { return {}; }
+
 #define PROCESS_NODE(NAME) \
   virtual void process_##NAME() {}
 
@@ -129,6 +134,7 @@ public:
   // Function Call
   PROCESS_NODE(func_call)
   PROCESS_NODE(func_def)
+  PROCESS_NODE(io)
 
   // Tuple Operations
   PROCESS_NODE(tuple_get)

@@ -71,6 +71,7 @@ protected:
       CASE_LNAST_NTYPE(while, tree)
       CASE_LNAST_NTYPE(func_call, tree)
       CASE_LNAST_NTYPE(func_def, tree)
+      CASE_LNAST_NTYPE(io, tree)
       CASE_LNAST_NTYPE(assign, tree)
       CASE_LNAST_NTYPE(dp_assign, tree)
       CASE_LNAST_NTYPE(mut, tree)

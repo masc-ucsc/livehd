@@ -27,11 +27,6 @@ protected:
   // Temporary variable counter for compiler-generated tmps
   int tmp_ref_count;
 
-  // Directed name tracking for function input/output refs ($a / %x)
-  enum class Name_role { None, FuncInput, FuncOutput, Register };
-  Name_role                                     current_name_role;
-  absl::flat_hash_map<std::string, std::string> ref_name_map;
-
   // Pending overflow kind ("wrap"/"sat") to apply to the next assignment.
   // Set by process_{description,scope_statement} when the new grammar's
   // statement-level `wrap`/`sat` prefix is seen; consumed by process_assignment.
@@ -80,16 +75,24 @@ protected:
   void emit_attribute_list(const Lnast_node& target, TSNode attribute_list_node);
   void emit_type_expr(const lh::Tree_index& type_index, TSNode type_node);
 
+  struct Call_arg {
+    bool        is_assign = false;
+    std::string assign_key;
+    Lnast_node  value;
+  };
+  std::vector<Call_arg> collect_call_args(TSNode arg_tuple);
+  void                  add_call_args_to_fcall(const lh::Tree_index& fcall_idx, const std::vector<Call_arg>& call_args);
+
   // Lvalue helpers
   Lnast_node process_lvalue_for_assign(TSNode lvalue, const Lnast_node& rvalue, TSNode decl_node, TSNode type_cast_node);
 
   // Helpers
-  std::string      get_tmp_name();
-  Lnast_node       make_tmp_ref();
-  std::string_view get_text(const TSNode& n) const;
-  std::string      get_text_str(const TSNode& n) const { return std::string(get_text(n)); }
+  std::string        get_tmp_name();
+  Lnast_node         make_tmp_ref();
+  std::string_view   get_text(const TSNode& n) const;
+  std::string        get_text_str(const TSNode& n) const { return std::string(get_text(n)); }
   static std::string trim(std::string_view s);
-  std::string_view text_between(uint32_t start, uint32_t end) const;
+  std::string_view   text_between(uint32_t start, uint32_t end) const;
 
   // Get rvalue text even when the rvalue field is a hidden token (numbers,
   // bool/string literals, '?'). Returns the text between the '=' operator's

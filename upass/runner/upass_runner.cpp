@@ -270,6 +270,23 @@ void uPass_runner::process_drop_candidate(Pass_method fn, bool fold_all) {
   }
 }
 
+void uPass_runner::process_drop_candidate_verbatim(Pass_method fn) {
+  dispatch_to_passes(fn);
+
+  auto decision = upass::Emit_decision::emit_node();
+  for (auto& entry : upasses) {
+    auto d = entry.pass->classify_statement();
+    if (d.kind == upass::Emit_kind::drop_subtree) {
+      decision = d;
+      break;
+    }
+  }
+
+  if (decision.kind == upass::Emit_kind::emit) {
+    emit_subtree_verbatim();
+  }
+}
+
 void uPass_runner::process_verbatim(Pass_method fn) {
   dispatch_to_passes(fn);
   emit_subtree_verbatim();
@@ -313,6 +330,8 @@ void uPass_runner::run(std::size_t max_iters) {
   // expected counts).
   for (auto& entry : upasses) {
     entry.pass->end_run();
+    auto produced = entry.pass->take_new_lnasts();
+    new_lnasts.insert(new_lnasts.end(), produced.begin(), produced.end());
   }
 }
 
@@ -402,6 +421,10 @@ void uPass_runner::process_lnast() {
     // built-in typecast calls (int/uint/string/uNN/sNN); anything constprop
     // declines to handle stays un-folded and the statement is emitted.
     A_OP(func_call)
+    case Ntype::Lnast_ntype_func_def:
+      process_drop_candidate_verbatim(&upass::uPass::process_func_def);
+      break;
+    C_OP(io)
 
     // Tuple Operations — Slice 1 pass-through (Slice 6 flattens).
     C_OP(tuple_get)
