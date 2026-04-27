@@ -4,17 +4,20 @@
 
 #include <algorithm>
 #include <cctype>
+#include <charconv>
 #include <format>
 #include <memory>
 #include <print>
 #include <stdexcept>
 #include <string>
+#include <string_view>
 #include <vector>
 
 #include "lgraph_manager.hpp"
 #include "upass_constprop.hpp"
 #include "upass_runner.hpp"
 #include "upass_runner_lgraph.hpp"
+#include "upass_verifier.hpp"
 
 static Pass_plugin sample("pass.upass", Pass_upass::setup);
 
@@ -46,6 +49,23 @@ std::vector<std::string> parse_order_csv(std::string_view txt_view) {
 [[noreturn]] void fail_upass_runtime(std::string_view msg) {
   std::print("ERROR: {}\n", msg);
   throw std::runtime_error(std::string(msg));
+}
+
+// Parse a non-negative integer option. Returns -1 on absent/empty/invalid
+// to match the "don't check" sentinel used by the verifier.
+int parse_expected_count(const upass::Options_map& opts, std::string_view key) {
+  auto it = opts.find(std::string{key});
+  if (it == opts.end() || it->second.empty()) {
+    return -1;
+  }
+  int         value = -1;
+  const auto* begin = it->second.data();
+  const auto* end   = begin + it->second.size();
+  auto        r     = std::from_chars(begin, end, value);
+  if (r.ec != std::errc() || r.ptr != end) {
+    return -1;
+  }
+  return value;
 }
 }  // namespace
 
@@ -192,19 +212,13 @@ void Pass_upass::work(Eprp_var& var) {
   }
 
   // Test-level expectations (verifier_pass / verifier_fail) describe the
-  // *top* lnasts the user fed into the pipeline, not the helper lnasts
-  // func_extract spawns from comb func_defs. Only the first
-  // `top_lnast_count` entries of var.lnasts get those options applied;
-  // anything appended later runs the verifier without count expectations.
-  const std::size_t top_lnast_count = var.lnasts.size();
-
-  upass::Options_map spawned_options = up.pass_options;
-  spawned_options.erase("verifier_pass");
-  spawned_options.erase("verifier_fail");
-
-  const auto options_for_idx = [&](std::size_t idx) -> const upass::Options_map& {
-    return idx < top_lnast_count ? up.pass_options : spawned_options;
-  };
+  // whole program, including any helper lnasts func_extract spawns from
+  // comb func_defs. Counts are aggregated across every verifier instance
+  // and checked once via uPass_verifier::finalize_aggregate after the
+  // last lnast has been processed.
+  uPass_verifier::reset_aggregate();
+  uPass_verifier::set_aggregate_expected(parse_expected_count(up.pass_options, "verifier_pass"),
+                                         parse_expected_count(up.pass_options, "verifier_fail"));
 
   const auto extract_it = std::find(up.upass_order.begin(), up.upass_order.end(), "func_extract");
   if (extract_it != up.upass_order.end()) {
@@ -212,7 +226,7 @@ void Pass_upass::work(Eprp_var& var) {
     for (std::size_t idx = 0; idx < var.lnasts.size(); ++idx) {
       const auto ln     = var.lnasts.at(idx);
       auto       lm     = std::make_shared<upass::Lnast_manager>(ln);
-      auto       runner = uPass_runner(lm, extract_order, options_for_idx(idx));
+      auto       runner = uPass_runner(lm, extract_order, up.pass_options);
       if (runner.has_configuration_error()) {
         fail_upass_runtime(std::format("pass.upass invalid pass configuration: {}", runner.get_configuration_error()));
       }
@@ -231,6 +245,7 @@ void Pass_upass::work(Eprp_var& var) {
   }
 
   if (up.upass_order.empty()) {
+    uPass_verifier::finalize_aggregate();
     return;
   }
 
@@ -242,7 +257,7 @@ void Pass_upass::work(Eprp_var& var) {
   for (std::size_t idx = 0; idx < var.lnasts.size(); ++idx) {
     const auto ln     = var.lnasts.at(idx);
     auto       lm     = std::make_shared<upass::Lnast_manager>(ln);
-    auto       runner = uPass_runner(lm, up.upass_order, options_for_idx(idx));
+    auto       runner = uPass_runner(lm, up.upass_order, up.pass_options);
     if (runner.has_configuration_error()) {
       fail_upass_runtime(std::format("pass.upass invalid pass configuration: {}", runner.get_configuration_error()));
     }
@@ -259,4 +274,6 @@ void Pass_upass::work(Eprp_var& var) {
       var.add(new_ln);
     }
   }
+
+  uPass_verifier::finalize_aggregate();
 }

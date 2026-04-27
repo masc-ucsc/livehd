@@ -6,8 +6,6 @@
 comb pick_max(a:u32, b:u32) -> (x:u32) {
   assert a != b
 
-  // `return` is a bare terminator in the new grammar — it never carries
-  // a value. Assign the output first; the caller sees whatever was bound.
   if a < b {
     x = a
   } elif a > b {
@@ -15,7 +13,5 @@ comb pick_max(a:u32, b:u32) -> (x:u32) {
   }
 }
 
-test "works" {
-  assert pick_max(3,50) == 50
-  assert pick_max(0,5) == 5
-}
+assert pick_max(3,50) == 50
+assert pick_max(0,5) == 5

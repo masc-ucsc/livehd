@@ -1,6 +1,8 @@
 /*
 :name: simple
-:type: parsing lnast upass
+:type: parsing lnast comptime
+:verifier_pass: 2
+:verifier_fail: 0
 */
 
 comb top(a, b) -> (c, d) {

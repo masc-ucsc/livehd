@@ -32,14 +32,21 @@ public:
     unknown_operands.clear();
   }
 
-  // Parses `verifier_pass` / `verifier_fail` from the runner-supplied
-  // options. Integer values set the expected counts; the special value
-  // "-1" (or an absent key) disables the corresponding check.
-  void set_options(const upass::Options_map& opts) override;
-
-  // Compares tallies against expected counts when set. Always prints a
-  // one-line count summary to stderr. Calls upass::error on mismatch.
+  // Prints a one-line count summary for the current lnast and adds the
+  // local tallies to the test-level aggregate. Per-lnast counts are
+  // informational only — the actual expected_pass / expected_fail check
+  // runs once across all lnasts via finalize_aggregate(), since a test's
+  // verifier_pass / verifier_fail describes the whole program (top + any
+  // lnasts spawned by func_extract), not just the entry-point lnast.
   void end_run() override;
+
+  // Test-level aggregate counters. pass.upass calls reset_aggregate() /
+  // set_aggregate_expected() before processing the first lnast and
+  // finalize_aggregate() after the last one finishes. Each verifier
+  // instance contributes via end_run().
+  static void reset_aggregate();
+  static void set_aggregate_expected(int expected_pass, int expected_fail);
+  static void finalize_aggregate();
 
   // Assignment
   void process_assign() override { check_unary(); }
@@ -86,9 +93,15 @@ private:
   std::size_t              unknown_count{0};
   std::vector<std::string> unknown_operands;
 
-  // -1 sentinels mean "not set, don't check".
-  int expected_pass{-1};
-  int expected_fail{-1};
+  // Aggregate state shared across every verifier instance in a single
+  // pass.upass invocation. -1 sentinels in expected_* mean "not set,
+  // don't check".
+  static std::size_t              aggregate_pass_count;
+  static std::size_t              aggregate_fail_count;
+  static std::size_t              aggregate_unknown_count;
+  static std::vector<std::string> aggregate_unknown_operands;
+  static int                      aggregate_expected_pass;
+  static int                      aggregate_expected_fail;
 
   void check_binary() {
     move_to_child();

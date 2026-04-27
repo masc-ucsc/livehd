@@ -11,28 +11,25 @@
 // dropped when no TU in the final binary includes upass_verifier.hpp.
 static upass::uPass_plugin plugin_verifier("verifier", upass::uPass_wrapper<uPass_verifier>::get_upass);
 
-namespace {
-// Helper — parse an integer option, tolerating empty / absent values.
-// Returns -1 on empty or invalid (the sentinel meaning "don't check").
-int parse_expected(const upass::Options_map& opts, std::string_view key) {
-  auto it = opts.find(std::string{key});
-  if (it == opts.end() || it->second.empty()) {
-    return -1;
-  }
-  int         value = -1;
-  const auto* begin = it->second.data();
-  const auto* end   = begin + it->second.size();
-  auto        r     = std::from_chars(begin, end, value);
-  if (r.ec != std::errc() || r.ptr != end) {
-    return -1;
-  }
-  return value;
-}
-}  // namespace
+std::size_t              uPass_verifier::aggregate_pass_count    = 0;
+std::size_t              uPass_verifier::aggregate_fail_count    = 0;
+std::size_t              uPass_verifier::aggregate_unknown_count = 0;
+std::vector<std::string> uPass_verifier::aggregate_unknown_operands;
+int                      uPass_verifier::aggregate_expected_pass = -1;
+int                      uPass_verifier::aggregate_expected_fail = -1;
 
-void uPass_verifier::set_options(const upass::Options_map& opts) {
-  expected_pass = parse_expected(opts, "verifier_pass");
-  expected_fail = parse_expected(opts, "verifier_fail");
+void uPass_verifier::reset_aggregate() {
+  aggregate_pass_count    = 0;
+  aggregate_fail_count    = 0;
+  aggregate_unknown_count = 0;
+  aggregate_unknown_operands.clear();
+  aggregate_expected_pass = -1;
+  aggregate_expected_fail = -1;
+}
+
+void uPass_verifier::set_aggregate_expected(int expected_pass, int expected_fail) {
+  aggregate_expected_pass = expected_pass;
+  aggregate_expected_fail = expected_fail;
 }
 
 upass::Emit_decision uPass_verifier::classify_statement() {
@@ -84,30 +81,49 @@ void uPass_verifier::end_run() {
   std::print(stderr, "uPass - verifier cassert counts: pass:{} fail:{} unknown:{}\n", pass_count, fail_count,
              unknown_count);
 
+  // Roll local counts into the test-level aggregate. The mismatch check
+  // moved to finalize_aggregate so it runs once across the whole program
+  // (top lnast + any lnasts spawned by func_extract).
+  aggregate_pass_count += pass_count;
+  aggregate_fail_count += fail_count;
+  aggregate_unknown_count += unknown_count;
+  for (auto& s : unknown_operands) {
+    aggregate_unknown_operands.emplace_back(std::move(s));
+  }
+  unknown_operands.clear();
+}
+
+void uPass_verifier::finalize_aggregate() {
+  std::print(stderr,
+             "uPass - verifier aggregate cassert counts: pass:{} fail:{} unknown:{}\n",
+             aggregate_pass_count,
+             aggregate_fail_count,
+             aggregate_unknown_count);
+
   bool mismatch = false;
-  if (expected_pass >= 0 && static_cast<int>(pass_count) != expected_pass) {
+  if (aggregate_expected_pass >= 0 && static_cast<int>(aggregate_pass_count) != aggregate_expected_pass) {
     std::print(stderr,
                "uPass - verifier expected verifier_pass:{} but saw pass:{}\n",
-               expected_pass,
-               pass_count);
+               aggregate_expected_pass,
+               aggregate_pass_count);
     mismatch = true;
   }
   // When verifier_fail is set, treat it as the allowed count: mismatch is
   // an error. When unset, any fail is unexpected — match expected_fail==0
   // as the default so a naked run still catches false casserts.
-  const int fail_allowed = expected_fail >= 0 ? expected_fail : 0;
-  if (static_cast<int>(fail_count) != fail_allowed) {
+  const int fail_allowed = aggregate_expected_fail >= 0 ? aggregate_expected_fail : 0;
+  if (static_cast<int>(aggregate_fail_count) != fail_allowed) {
     std::print(stderr,
                "uPass - verifier expected verifier_fail:{} but saw fail:{}\n",
                fail_allowed,
-               fail_count);
+               aggregate_fail_count);
     mismatch = true;
   }
 
   if (mismatch) {
-    if (!unknown_operands.empty()) {
+    if (!aggregate_unknown_operands.empty()) {
       std::print(stderr, "uPass - verifier unresolved cassert operand(s):");
-      for (const auto& s : unknown_operands) {
+      for (const auto& s : aggregate_unknown_operands) {
         std::print(stderr, " {}", s);
       }
       std::print(stderr, "\n");
