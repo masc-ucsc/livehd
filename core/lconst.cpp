@@ -1,6 +1,7 @@
 
 #include "lconst.hpp"
 
+#include <algorithm>
 #include <format>
 #include <iostream>
 #include <print>
@@ -888,50 +889,58 @@ Lconst Lconst::add_op(const Lconst& o) const {
       return invalid();
     }
 
+    // to_binary returns the bit string MSB-first. Carry propagates from LSB
+    // upward, so iterate LSB → MSB by indexing from the back. Out-of-range
+    // bits sign-extend with the operand's MSB (front char). The result is
+    // signed iff either operand is signed (numerically negative or carries
+    // a non-'0' MSB unknown bit).
     auto s_txt = to_binary();
     auto o_txt = o.to_binary();
 
-    auto        max_size = std::max(s_txt.size(), o_txt.size());
-    std::string result("0b");
+    auto bit_at = [](const std::string& t, size_t lsb_off) -> char {
+      if (lsb_off < t.size()) {
+        return t[t.size() - 1 - lsb_off];
+      }
+      return t.empty() ? '0' : t[0];  // sign-extend from MSB
+    };
 
+    const char s_sign = s_txt.empty() ? '0' : s_txt.front();
+    const char o_sign = o_txt.empty() ? '0' : o_txt.front();
+    const bool signed_result
+        = is_negative() || o.is_negative()
+          || (has_unknowns() && s_sign != '0')
+          || (o.has_unknowns() && o_sign != '0');
+
+    const auto width = std::max(s_txt.size(), o_txt.size());
+
+    std::string body;  // collected LSB → MSB; reversed at the end
+    body.reserve(width + 1);
     char carry = '0';
-    for (auto i = 0u; i < max_size; ++i) {
-      auto n_ones     = 0;
-      auto n_unknowns = 0;
-      if (i >= s_txt.size() || s_txt[i] == '0') {
-      } else if (s_txt[i] == '1') {
-        ++n_ones;
-      } else {
-        ++n_unknowns;
-      }
+    for (size_t i = 0; i < width; ++i) {
+      const char a = bit_at(s_txt, i);
+      const char b = bit_at(o_txt, i);
+      auto       count = [](char c) {
+        struct R {
+          int ones;
+          int unknowns;
+        } r{0, 0};
+        if (c == '1') {
+          r.ones = 1;
+        } else if (c == '?' || c == 'x' || c == 'X' || c == 'z' || c == 'Z') {
+          r.unknowns = 1;
+        }
+        return r;
+      };
+      auto       ca = count(a);
+      auto       cb = count(b);
+      auto       cc = count(carry);
+      const int  n_ones     = ca.ones + cb.ones + cc.ones;
+      const int  n_unknowns = ca.unknowns + cb.unknowns + cc.unknowns;
 
-      if (i >= o_txt.size() || o_txt[i] == '0') {
-      } else if (o_txt[i] == '1') {
-        ++n_ones;
-      } else {
-        ++n_unknowns;
-      }
-
-      if (carry == '1') {
-        ++n_ones;
-      } else if (carry == '0') {
-      } else {
-        ++n_unknowns;
-      }
-
-      unsigned char ch;
-      if (n_unknowns == 0 && n_ones == 0) {
-        ch    = '0';
-        carry = '0';
-      } else if (n_unknowns == 0 && n_ones == 1) {
-        ch    = '1';
-        carry = '0';
-      } else if (n_unknowns == 0 && n_ones == 2) {
-        ch    = '0';
-        carry = '1';
-      } else if (n_unknowns == 0 && n_ones == 3) {
-        ch    = '1';
-        carry = '1';
+      char ch;
+      if (n_unknowns == 0) {
+        ch    = (n_ones & 1) ? '1' : '0';
+        carry = (n_ones >= 2) ? '1' : '0';
       } else if (n_unknowns == 1 && n_ones == 0) {
         ch    = '?';
         carry = '0';
@@ -942,12 +951,21 @@ Lconst Lconst::add_op(const Lconst& o) const {
         ch    = '?';
         carry = '?';
       }
-
-      result.append(1, ch);
+      body.push_back(ch);
     }
-    result.append(1, carry);
+    // For a signed result, dropping the carry-out when it matches the
+    // computed MSB collapses redundant sign-extension. This is what
+    // produces the documented `0sb? + 1 == 0sb??` width: the carry-out
+    // is `?` and so is the MSB, so we keep the result at width N rather
+    // than widening to N+1. For unsigned, or when the carry differs from
+    // the MSB, append the carry as a fresh top bit.
+    const bool drop_carry = signed_result && !body.empty() && carry == body.back();
+    if (!drop_carry) {
+      body.push_back(carry);
+    }
+    std::reverse(body.begin(), body.end());
 
-    return Lconst::from_pyrope(result);
+    return Lconst::from_binary(body, !signed_result);
   }
 
   Lconst res;
@@ -1277,22 +1295,30 @@ Lconst Lconst::eq_op(const Lconst& o) const {
   }
 
   if (unlikely(has_unknowns() || o.has_unknowns())) {
-    auto [l_str, r_str] = match_binary(*this, o);
-
-    for (auto i = 0u; i < l_str.size(); ++i) {
-      if (l_str[i] == '0' || r_str[i] == '0') {
-        continue;
-      }
-      if (l_str[i] == '1' || r_str[i] == '1') {
-        continue;
-      }
-      if (l_str[i] == '?' || r_str[i] == '?') {
-        return Lconst::from_pyrope("0sb?");
-      } else {
-        return Lconst(0);
-      }
+    // Structural identity wins: identical Lconst representations compare
+    // equal even when both contain unknowns. Pyrope's comptime semantics
+    // treat `0sb? == 0sb?` as known-true so a programmer can assert that an
+    // expression folded to a specific bit pattern (`(v != 0) == 0sb?`).
+    if (*this == o) {
+      return Lconst(-1);
     }
 
+    auto [l_str, r_str] = match_binary(*this, o);
+    bool any_unknown = false;
+    for (auto i = 0u; i < l_str.size(); ++i) {
+      const char l = l_str[i];
+      const char r = r_str[i];
+      if (l == '?' || r == '?' || l == 'z' || r == 'z') {
+        any_unknown = true;
+        continue;
+      }
+      if (l != r) {
+        return Lconst(0);  // differing concrete bits → known unequal
+      }
+    }
+    if (any_unknown) {
+      return Lconst::from_pyrope("0sb?");
+    }
     return Lconst(-1);
   }
 

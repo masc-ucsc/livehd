@@ -4,7 +4,9 @@
 
 #include <map>
 #include <optional>
+#include <set>
 
+#include "boost/multiprecision/cpp_int.hpp"
 #include "lnast_ntype.hpp"
 #include "str_tools.hpp"
 
@@ -126,19 +128,25 @@ void uPass_constprop::process_nary(F op) {
   move_to_sibling();
   Lconst r = current_prim_value();
 
-  // Skip folding if any operand is unknown, a non-numeric string, or has X-bits.
-  // Arithmetic on invalid/string Lconst values is undefined and will crash.
-  if (r.is_invalid() || r.is_string() || r.has_unknowns()) {
+  // Bail on truly opaque operands (no value tracked / non-numeric strings).
+  // Unknowns (`0sb?…`) are allowed through — Lconst::add_op / mult_op / etc.
+  // already propagate `?` bits, and downstream eq_op uses the resulting
+  // pattern for structural-identity folding (see valid_simple).
+  if (r.is_invalid() || r.is_string()) {
     move_to_parent();
     return;
   }
   while (move_to_sibling()) {
     auto operand = current_prim_value();
-    if (operand.is_invalid() || operand.is_string() || operand.has_unknowns()) {
+    if (operand.is_invalid() || operand.is_string()) {
       move_to_parent();
       return;
     }
     op(r, operand);
+  }
+  if (r.is_invalid()) {
+    move_to_parent();
+    return;
   }
   bool local_changed = true;
   if (st.has_trivial(var)) {
@@ -327,9 +335,86 @@ static std::optional<bool> compare_bundles_eq(const std::shared_ptr<Bundle const
   return *b_in_a;
 }
 
+// Structural-only `a does b` check.
+//
+// `a does b` succeeds when a's tuple shape covers every non-attribute
+// first-level entry in b:
+//   - For every NAMED field in b (`:N:name`), a must have any first-level
+//     key with the same `name` — position is irrelevant. So
+//     `(a=1,b=0) does (b=2,a=0)` is true even though `a` and `b` swap
+//     positions on the two sides.
+//   - For every UNNAMED entry in b (key starts with a digit, like `1`), a
+//     must have an UNNAMED entry at the same position. A named slot at
+//     that position does *not* satisfy the unnamed requirement, so
+//     `(a=3) does (1)` is false (b has unnamed pos 0, a has only a named
+//     field).
+//
+// Values are not compared here — this is the structural half of `does`.
+// Bundle keys may be hierarchical (e.g. `:1:foo.:0:bar`); we look at the
+// first level only, which is enough for the flat-tuple cases the comptime
+// tests exercise. Nested-tuple structural matching can be added later.
+static bool structural_does(const std::shared_ptr<Bundle const>& a,
+                            const std::shared_ptr<Bundle const>& b) {
+  // Collect a's first-level shape: which names, and which unnamed positions.
+  std::set<std::string_view> a_names;
+  std::set<int>              a_unnamed_pos;
+  for (const auto& e : a->get_map()) {
+    if (Bundle::is_attribute(e.first)) {
+      continue;
+    }
+    auto first = Bundle::get_first_level(e.first);
+    if (!first.empty() && first.front() == ':') {
+      a_names.insert(Bundle::get_first_level_name(first));
+    } else {
+      const auto pos = Bundle::get_first_level_pos(first);
+      if (pos >= 0) {
+        a_unnamed_pos.insert(pos);
+      }
+    }
+  }
+
+  // Walk b's first-level shape; bail as soon as a doesn't cover something.
+  // Track seen names/positions so we don't re-check sub-entries that share
+  // the same first level (`:1:foo.x` and `:1:foo.y` collapse to one check).
+  std::set<std::string_view> seen_names;
+  std::set<int>              seen_pos;
+  for (const auto& e : b->get_map()) {
+    if (Bundle::is_attribute(e.first)) {
+      continue;
+    }
+    auto first = Bundle::get_first_level(e.first);
+    if (!first.empty() && first.front() == ':') {
+      auto name = Bundle::get_first_level_name(first);
+      if (seen_names.insert(name).second) {
+        if (a_names.find(name) == a_names.end()) {
+          return false;
+        }
+      }
+    } else {
+      const auto pos = Bundle::get_first_level_pos(first);
+      if (pos < 0) {
+        continue;
+      }
+      if (seen_pos.insert(pos).second) {
+        if (a_unnamed_pos.find(pos) == a_unnamed_pos.end()) {
+          return false;
+        }
+      }
+    }
+  }
+  return true;
+}
+
 // process_eq / process_ne with bundle awareness. Falls back to the scalar
 // process_binary path when neither operand is a tracked bundle, so plain
 // integer compares are unchanged.
+//
+// Result handling is tri-state to support unknowns (`0sb?` literals): the
+// final stored value is `Lconst(1)` for known-true (negated for ne), the
+// matching `Lconst(0)`, or a 1-bit unknown when the comparison itself is
+// undecidable. Storing the 1-bit unknown lets a downstream
+// `(v != 0) == 0sb?` cassert fold via Lconst::eq_op's structural-identity
+// short-circuit.
 template <bool Negate>
 void uPass_constprop::process_eq_ne_impl() {
   move_to_child();
@@ -360,23 +445,40 @@ void uPass_constprop::process_eq_ne_impl() {
   Lconst                        n2;
   resolve(bb, n2);
 
-  std::optional<bool> result;
+  // Three outcomes the rest of the pass cares about: known-true, known-false,
+  // or a 1-bit unknown. Bundles only produce known true/false; the scalar
+  // path may produce unknowns when an operand has them.
+  std::optional<Lconst> result;
   if (ba && bb) {
-    result = compare_bundles_eq(ba, bb);
+    auto eq = compare_bundles_eq(ba, bb);
+    if (eq.has_value()) {
+      bool truth = *eq ^ Negate;
+      result     = truth ? Lconst(1) : Lconst(0);
+    }
   } else if (!ba && !bb) {
-    if (!n1.is_invalid() && !n1.has_unknowns() && !n2.is_invalid() && !n2.has_unknowns()) {
-      // Lconst::operator== is the source of truth — it compares (num,bits)
-      // so cross-type matches like `'a' == 0x61` resolve true (deliberate
-      // by Lconst's bit-level model).
-      result = (n1 == n2);
+    if (!n1.is_invalid() && !n2.is_invalid()) {
+      // Defer to Lconst::eq_op: it compares (num,bits) for fully-known
+      // operands and yields a 1-bit unknown (`0sb?`) when bits collide
+      // with `?` chars. Structural identity (operator==) inside eq_op
+      // returns known-true even when both operands carry unknowns —
+      // that's the comptime-equality contract used by valid_simple.
+      const Lconst eq = n1.eq_op(n2);
+      if (eq.is_known_true()) {
+        result = Negate ? Lconst(0) : Lconst(1);
+      } else if (eq.is_known_false()) {
+        result = Negate ? Lconst(1) : Lconst(0);
+      } else if (eq.has_unknowns()) {
+        // ne is bitwise-not of eq; for a 1-bit unknown the inversion is
+        // still a 1-bit unknown, so both branches store the same value.
+        result = eq;
+      }
     }
   }
   // Mixed bundle vs scalar — leave unresolved.
 
   if (result.has_value()) {
-    Lconst r             = (*result ^ Negate) ? Lconst(1) : Lconst(0);
-    bool   local_changed = !st.has_trivial(var) || st.get_trivial(var) != r;
-    if (local_changed && st.set(var, r)) {
+    bool local_changed = !st.has_trivial(var) || st.get_trivial(var) != *result;
+    if (local_changed && st.set(var, *result)) {
       mark_changed();
     }
   }
@@ -556,16 +658,139 @@ void uPass_constprop::process_tuple_concat() {
   }
 }
 
+// Distinguish a "tuple-shaped" bundle from the symbol-table wrapper used
+// for plain scalars. `Symbol_table::set(name, Lconst)` stores scalars in a
+// wrapper bundle keyed at position 0, which is *indistinguishable* from a
+// real single-element tuple `(3)` in the bundle layer. We can't tell them
+// apart without type info, so we stay conservative: a bundle counts as
+// tuple-shaped only when it carries a named (`:N:name`) first-level key,
+// or when it has two-or-more distinct first-level positional entries.
+//
+// Consequence: scalar-vs-scalar `does` (e.g. `i3 does b1`) stays
+// unresolved instead of folding to a wrong answer based on type. The cost
+// is that genuine single-element tuples like `(3) does ...` also stay
+// unresolved; that's a small subset of the test surface and the right
+// trade for correctness without type tracking.
+static bool is_tuple_shaped(const std::shared_ptr<Bundle const>& b) {
+  std::set<int> seen_pos;
+  for (const auto& e : b->get_map()) {
+    if (Bundle::is_attribute(e.first)) {
+      continue;
+    }
+    auto first = Bundle::get_first_level(e.first);
+    if (!first.empty() && first.front() == ':') {
+      return true;  // any named field → tuple-shaped
+    }
+    const auto pos = Bundle::get_first_level_pos(first);
+    if (pos >= 0) {
+      seen_pos.insert(pos);
+      if (seen_pos.size() >= 2) {
+        return true;  // ≥2 distinct positional fields → tuple-shaped
+      }
+    }
+  }
+  return false;
+}
+
+// Returns true if the bundle has any first-level non-attribute key with a
+// recognizable shape — named or positional. Used as the "weak" requirement
+// for the other operand once we've already decided one side is clearly
+// tuple-shaped: a bundle whose first-level keys are e.g. `0` (single
+// positional) doesn't itself prove tuple-ness, but it's enough structure
+// to compare against a known tuple.
+static bool has_first_level_shape(const std::shared_ptr<Bundle const>& b) {
+  for (const auto& e : b->get_map()) {
+    if (Bundle::is_attribute(e.first)) {
+      continue;
+    }
+    auto first = Bundle::get_first_level(e.first);
+    if (first.empty()) {
+      continue;
+    }
+    if (first.front() == ':' || Bundle::get_first_level_pos(first) >= 0) {
+      return true;
+    }
+  }
+  return false;
+}
+
+// Fold `dst = does(l, r)`. Cursor is currently on the const("does") fname
+// node. Walks forward to read l and r, decides the structural outcome, and
+// stores the boolean (Lconst(0/1)) in the symbol table for `dst`.
+//
+// We only fold the structural half today, and we require at least one side
+// to be *clearly* tuple-shaped (named field or ≥2 positional fields). If
+// neither side proves it's a tuple (e.g. both are single-position scalar
+// wrappers), we can't decide the outcome without type info — leave the
+// result unresolved rather than fold to a wrong answer.
+//
+// On exit the cursor is left on whichever child we last visited; the caller
+// (process_func_call) is responsible for `move_to_parent`.
+void uPass_constprop::fold_does(const std::string& dst) {
+  auto resolve_bundle = [this]() -> std::shared_ptr<Bundle const> {
+    if (is_type(Lnast_ntype::Lnast_ntype_ref)) {
+      auto b = st.get_bundle(current_text());
+      if (b && has_first_level_shape(b)) {
+        return b;
+      }
+    }
+    return nullptr;
+  };
+
+  if (!move_to_sibling()) {
+    return;
+  }
+  auto ba = resolve_bundle();
+  if (!move_to_sibling()) {
+    return;
+  }
+  auto bb = resolve_bundle();
+
+  if (!ba || !bb) {
+    return;
+  }
+  // At least one side must prove it's a real tuple, otherwise scalar-vs-
+  // scalar would over-fold (e.g. `b1 does i2` where both are scalar
+  // wrappers). The structural check itself handles the asymmetry once one
+  // side is known-tuple.
+  if (!is_tuple_shaped(ba) && !is_tuple_shaped(bb)) {
+    return;
+  }
+
+  const Lconst result        = structural_does(ba, bb) ? Lconst(1) : Lconst(0);
+  bool         local_changed = !st.has_trivial(dst) || st.get_trivial(dst) != result;
+  if (local_changed && st.set(dst, result)) {
+    mark_changed();
+  }
+}
+
 void uPass_constprop::process_func_call() {
-  // Layout: ref(dst), ref(func_name), (const|ref)(arg)...
-  // For now we only fold the built-in typecast callables (int/uint/string/
-  // sized-int). Anything else is left as-is for a later pass.
+  // Layout: ref(dst), ref(func_name) | const(marker_name), (const|ref)(arg)...
+  // Two flavours:
+  //   - ref-form fname  : built-in typecast callables (int/uint/string/sized).
+  //   - const-form fname: marker calls emitted by prp2lnast for operators
+  //     without a dedicated LNAST node — `does`, `case`, `has`, `in`,
+  //     `break`, `continue`, `return`. We fold the comptime ones here
+  //     (`does` for now); the rest are passed through.
+  // Anything we don't recognise is left as-is for a later pass.
   move_to_child();
   std::string dst(current_text());
   if (!move_to_sibling()) {
     move_to_parent();
     return;
   }
+
+  // Marker-form func_call: const(name). Dispatch on the marker name.
+  if (is_type(Lnast_ntype::Lnast_ntype_const)) {
+    std::string marker(current_text());
+    if (marker == "does") {
+      fold_does(dst);
+    }
+    // Other markers (case/has/in/break/continue/return) — leave unfolded.
+    move_to_parent();
+    return;
+  }
+
   if (!is_type(Lnast_ntype::Lnast_ntype_ref)) {
     move_to_parent();
     return;
@@ -718,6 +943,10 @@ void uPass_constprop::process_range() {
   // `x[a..]` / `x[..]`, prp2lnast emits the open end as the literal pyrope
   // `nil`, which round-trips as a string Lconst — process_tuple_get treats
   // that sentinel as "to source's last index".
+  //
+  // For closed `lo..=hi` ranges with concrete integer bounds, also
+  // materialize a positional tuple bundle so `cassert (2..=4) == (2,3,4)`
+  // folds via compare_bundles_eq.
   move_to_child();
   auto dst = std::string(current_text());
 
@@ -749,12 +978,33 @@ void uPass_constprop::process_range() {
     return;
   }
 
-  auto it = range_map.find(dst);
+  auto it      = range_map.find(dst);
+  bool changed = false;
   if (it == range_map.end()) {
     range_map.emplace(dst, std::make_pair(start, end));
-    mark_changed();
+    changed = true;
   } else if (it->second.first != start || it->second.second != end) {
     it->second = {start, end};
+    changed    = true;
+  }
+
+  // Materialize a tuple bundle for closed integer ranges so eq/tuple_get can
+  // operate on the concrete sequence. Skip for open-ended (nil) or negative
+  // spans, and bound the size so a pathological span can't blow up memory.
+  if (start.is_i() && end.is_i()) {
+    const auto lo = start.to_i();
+    const auto hi = end.to_i();
+    if (hi >= lo && (hi - lo) < 4096) {
+      auto bundle = std::make_shared<Bundle>(dst);
+      int  pos    = 0;
+      for (int64_t v = lo; v <= hi; ++v, ++pos) {
+        bundle->set(std::to_string(pos), Lconst(v));
+      }
+      st.set(dst, bundle);
+    }
+  }
+
+  if (changed) {
     mark_changed();
   }
 }
@@ -774,7 +1024,8 @@ void uPass_constprop::process_tuple_get() {
   }
 
   // Range-indexed tuple_get on a string folds inline (`x[1..=2]` / `x[1..]`).
-  // Detect: exactly one field operand which is a ref bound by a prior
+  // Same path also handles integer source for bit-slicing (`b[0..<4]`):
+  // detect: exactly one field operand which is a ref bound by a prior
   // `range` LNAST node.
   if (is_type(Lnast_ntype::Lnast_ntype_ref) && is_last_child()) {
     auto it = range_map.find(std::string(current_text()));
@@ -802,6 +1053,31 @@ void uPass_constprop::process_tuple_get() {
           bool         local_changed = !st.has_trivial(dst) || st.get_trivial(dst) != result;
           if (local_changed && st.set(dst, result)) {
             mark_changed();
+          }
+          move_to_parent();
+          return;
+        }
+      }
+      // Integer bit-slice: `b[lo..=hi]` / `b[lo..<hi]` / `b[lo..]` on an
+      // integer source extracts the named bit window via Lconst::get_mask_op.
+      if (!src_val.is_string() && !src_val.is_invalid() && !src_val.has_unknowns()
+          && it->second.first.is_i()) {
+        const auto& end_lc = it->second.second;
+        const auto  lo     = static_cast<Bits_t>(it->second.first.to_i());
+        Lconst      mask;
+        if (end_lc.is_nil()) {
+          using Number = boost::multiprecision::cpp_int;
+          mask         = Lconst(-(Number(1) << lo));
+        } else if (end_lc.is_i() && end_lc.to_i() >= it->second.first.to_i()) {
+          mask = Lconst::get_mask_value(static_cast<Bits_t>(end_lc.to_i()), lo);
+        }
+        if (!mask.is_invalid()) {
+          const Lconst result        = src_val.get_mask_op(mask);
+          if (!result.is_invalid()) {
+            bool       local_changed = !st.has_trivial(dst) || st.get_trivial(dst) != result;
+            if (local_changed && st.set(dst, result)) {
+              mark_changed();
+            }
           }
           move_to_parent();
           return;
@@ -1092,10 +1368,67 @@ void uPass_constprop::process_sext() {
 }
 
 void uPass_constprop::process_get_mask() {
-  process_binary([](Lconst value, Lconst mask) {
-    if (value.is_invalid() || mask.is_invalid()) {
-      return Lconst::invalid();
+  // Layout: ref(dst), ref(value), (const|ref)(mask)
+  // The mask operand may be:
+  //   - a constant integer / known scalar (treated as a bitmask),
+  //   - a `range` ref previously bound in range_map (`b#[lo..]`,
+  //     `b#[lo..=hi]`, `b#[..=hi]`, etc.).
+  // For the range case we synthesize the equivalent integer mask from the
+  // (start, end) pair: closed `lo..=hi` → bits lo..hi mask; open
+  // `lo..` → all bits from `lo` upward, encoded as `-(1 << lo)` so
+  // Lconst::get_mask_op's negative-mask path extracts the upper bits
+  // correctly.
+  move_to_child();
+  auto var = std::string(current_text());
+  move_to_sibling();
+  Lconst value = current_prim_value();
+  if (!move_to_sibling()) {
+    move_to_parent();
+    return;
+  }
+
+  Lconst mask;
+  if (is_type(Lnast_ntype::Lnast_ntype_ref)) {
+    auto rit = range_map.find(std::string(current_text()));
+    if (rit != range_map.end()) {
+      const auto& start = rit->second.first;
+      const auto& end   = rit->second.second;
+      if (start.is_i()) {
+        const auto lo = static_cast<Bits_t>(start.to_i());
+        if (end.is_nil()) {
+          // Open end: bits lo..msb. Negative-mask form for get_mask_op.
+          using Number = boost::multiprecision::cpp_int;
+          Number n     = -(Number(1) << lo);
+          mask         = Lconst(n);
+        } else if (end.is_i() && end.to_i() >= start.to_i()) {
+          const auto hi = static_cast<Bits_t>(end.to_i());
+          mask          = Lconst::get_mask_value(hi, lo);
+        } else {
+          mask = Lconst::invalid();
+        }
+      } else {
+        mask = Lconst::invalid();
+      }
+    } else {
+      mask = current_prim_value();
     }
-    return value.get_mask_op(mask);
-  });
+  } else {
+    mask = current_prim_value();
+  }
+
+  move_to_parent();
+
+  if (value.is_invalid() || mask.is_invalid() || value.is_string() || mask.is_string()
+      || value.has_unknowns() || mask.has_unknowns()) {
+    return;
+  }
+
+  Lconst result        = value.get_mask_op(mask);
+  if (result.is_invalid()) {
+    return;
+  }
+  bool   local_changed = !st.has_trivial(var) || st.get_trivial(var) != result;
+  if (local_changed && st.set(var, result)) {
+    mark_changed();
+  }
 }

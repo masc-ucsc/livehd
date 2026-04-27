@@ -3,8 +3,10 @@
 :type: parsing lnast upass
 */
 
-// `proc` is a recognized lambda kind in the new grammar (alongside
-// `comb`/`mod`/`pipe`). Output tuple is always declared explicitly.
-proc do_thing(a, b) -> (r) {
-  r = a + b
+comb do_thing(a, b) -> (r) {
+  r = a - b
 }
+
+cassert do_thing(a=5,b=2) == 3
+cassert do_thing(b=2,a=5) == 3
+cassert do_thing(7,2) == 5

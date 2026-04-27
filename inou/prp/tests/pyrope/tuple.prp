@@ -12,3 +12,8 @@ comb top() -> (a, b, c) {
   b = x[2][1]
   c = x[3]
 }
+
+const z = top()
+cassert z.a == (2,0)
+cassert z.b == (0,6)
+cassert z.c == 7

@@ -16,14 +16,14 @@ mut hit=0
 const b=300
 
 match const t = m1; t {
- case (a=33,b=?)   { hit = 300 + t.a + t.b }
- case (a=2,b=?)    { hit = t.a + m1.b; cassert m1 == t }
- case (a=true,b=?) { hit = if t.a { b+100 } else { b-100 } }
+ case (a=33,b=0sb?)   { hit = 300 + t.a + t.b }
+ case (a=2,b=0sb?)    { hit = t.a + m1.b; cassert m1 == t }
+ case (a=true,b=0sb?) { hit = if t.a { b+100 } else { b-100 } }
 }
 cassert hit == 51
 
-cassert (a=1,3)  case (a=?,3)
-cassert (a=1,3)  case (a=1,?)
+cassert (a=1,3)  case (a=0sb?,3)
+cassert (a=1,3)  case (a=1,0sb?)
 cassert (a=1,3)  case (a=1)
 cassert (a=1)   !case (a=1,3)
 
@@ -32,5 +32,5 @@ cassert (a=1,b=2) case (b=1)
 cassert (a=1,b=2) !case (b=1)
 cassert (b=2) !case (b=2,a=1)
 cassert (b=2) !case (b=2,1)
-cassert (b=2) !case (b=2,?)
-cassert (b=2) !case (b=2,c=?)
+cassert (b=2) !case (b=2,0sb?)
+cassert (b=2) !case (b=2,c=0sb?)

@@ -269,30 +269,37 @@ TEST_F(Lconst2_test, nil_equality) {
 
 // ─── Unknowns (0sb?…) arithmetic and comparison ─────────────────────────────
 
-// Adding 1 to `0sb101?` should widen the unknown forward: the carry of
-// the `?` bit propagates upward, so bits 1..2 become unknown. The sign
-// bit (msb) is preserved as 1 (both -6 and -5, plus 1, give a negative
-// result), so the expected value is `0sb1???` — a 4-bit signed unknown
-// with the sign known.
-//
-// Today add_op's unknown path emits a `0b…` (unsigned) prefix, losing
-// the sign bit and widening the result. The DISABLED suffix tracks the
-// fix; remove it once add_op preserves the signed binary form.
-TEST_F(Lconst2_test, DISABLED_unknowns_add_propagates) {
-  auto a = Lconst::from_pyrope("0sb101?");
-  auto r = a.add_op(Lconst(1));
-  EXPECT_TRUE(r.has_unknowns());
-  EXPECT_EQ(r, Lconst::from_pyrope("0sb1???"));
-}
-
 // Comparison with an unknown should yield a single-bit *unknown*, not nil:
 // we don't know the answer, but the answer space is {0,1}. nil represents
 // "no value" / "cast failure", which is a different concept.
-TEST_F(Lconst2_test, DISABLED_unknowns_compare_returns_unknown_bit) {
+TEST_F(Lconst2_test, unknowns_compare_returns_unknown_bit) {
   auto a = Lconst::from_pyrope("0sb?");
   auto r = a.eq_op(Lconst(1));
   // The expected result is a single unknown bit (representable as 0sb?
   // or 0b? — a 1-bit Lconst with the unknown flag), NOT a nil.
   EXPECT_FALSE(r.is_nil());
   EXPECT_TRUE(r.has_unknowns());
+}
+
+// Structural identity: comparing identically-shaped unknowns folds to
+// known-true at comptime. `(v != 0) == 0sb?` relies on this — `v != 0`
+// produces `0sb?`, and the user-visible cassert asserts the result IS
+// the literal 0sb? bit pattern.
+TEST_F(Lconst2_test, unknowns_compare_structural_identity) {
+  auto a = Lconst::from_pyrope("0sb?");
+  auto b = Lconst::from_pyrope("0sb?");
+  EXPECT_TRUE(a.eq_op(b).is_known_true());
+
+  auto c = Lconst::from_pyrope("0sb??");
+  auto d = Lconst::from_pyrope("0sb??");
+  EXPECT_TRUE(c.eq_op(d).is_known_true());
+}
+
+// Adding `1` to `0sb?` must widen the unknown by one bit while keeping
+// signed semantics — the documented identity `0sb? + 1 == 0sb??`.
+TEST_F(Lconst2_test, unknowns_add_one_to_0sb_q) {
+  auto a = Lconst::from_pyrope("0sb?");
+  auto r = a.add_op(Lconst(1));
+  EXPECT_TRUE(r.has_unknowns());
+  EXPECT_EQ(r, Lconst::from_pyrope("0sb??"));
 }

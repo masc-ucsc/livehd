@@ -4,5 +4,10 @@
 */
 
 comb top() {
-  x = (a=1, mut b = (c=1), mut c)
+  const c = 10
+  x = (a=1, mut b = (c=2), mut c)
 }
+
+const a = top()
+
+cassert a == (1,2,10) == (a=1, b=(c=2), 10)

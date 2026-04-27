@@ -92,6 +92,8 @@ protected:
 
   template <bool Negate>
   void process_eq_ne_impl();
+
+  void fold_does(const std::string& dst);
 };
 
 // Plugin registration lives in upass_constprop.cpp to avoid duplicate

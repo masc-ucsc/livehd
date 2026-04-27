@@ -7,3 +7,7 @@ comb top(a, b) -> (c, d) {
   c = a + b;
   d = a - b;
 }
+
+const x = top(7,3)
+cassert x == (10,4)
+cassert x.c == 10 and x.d == 4

@@ -1,17 +1,14 @@
 /*
 :name: range_access
 :type: parsing lnast comptime
-:verifier_pass: 7
+:verifier_pass: 4
 :verifier_fail: 0
 */
 
 const a = 2..=4
+cassert a == (2,3,4)
 
-cassert !a[0]
-cassert !a[1]
-cassert  a[2]
-cassert  a[3]
-cassert  a[4]
-cassert !a[5]
-
-cassert a::[size] == 3
+const b = 0xAB
+cassert b#[0..] == 0xAB
+cassert b#[4..] == 0xA == b#[4..<8]
+cassert b#[..=3] == 0xB == b[0..<4]

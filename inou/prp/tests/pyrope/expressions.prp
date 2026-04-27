@@ -3,8 +3,16 @@
 :type: parsing lnast upass
 */
 
-comb top() {
+comb top(x) ->(x) {
   const a = 2 * 3 + 4
   const b = (10 - 1) / 3
-  const c = a + b
+  const c = a + b + x
+
+  cassert c == 14
+  x = 100
 }
+
+const y = top(1)
+
+cassert y   == 100
+cassert y.x == 100

@@ -1852,18 +1852,71 @@ Lnast_node Prp2lnast::bit_selection_to_node(TSNode n) {
     return ref;
   };
 
+  // Helper: emit a `range` LNAST node (start, end) and return its ref.
+  // Used by the open-end and from-zero forms below; constprop's
+  // process_get_mask consults range_map to synthesize the mask integer
+  // (closed `lo..=hi` → bits-lo..hi mask; open `lo..` → -(1<<lo)).
+  auto emit_range = [&](const Lnast_node& start, const Lnast_node& end) {
+    auto rng_idx = lnast->add_child(stmts_index, Lnast_node::create_range());
+    auto rng_ref = make_tmp_ref();
+    lnast->add_child(rng_idx, rng_ref);
+    lnast->add_child(rng_idx, start);
+    lnast->add_child(rng_idx, end);
+    return rng_ref;
+  };
+
   Lnast_node mask_ref = Lnast_node::create_const("-1");
   if (!ts_node_is_null(sel_node)) {
-    TSNode list = {};
-    for (uint32_t i = 0; i < ts_node_named_child_count(sel_node); i++) {
-      TSNode c = ts_node_named_child(sel_node, i);
-      if (std::string_view(ts_node_type(c)) == "expression_list") {
-        list = c;
-        break;
-      }
-    }
+    TSNode list   = child_by_field(sel_node, "list");
+    TSNode open_n = child_by_field(sel_node, "open_range");
+    TSNode fz_n   = child_by_field(sel_node, "from_zero");
 
-    if (!ts_node_is_null(list) && ts_node_named_child_count(list) > 0) {
+    if (!ts_node_is_null(open_n)) {
+      // `b#[expr..]` — open_range field holds the start expression.
+      // `b#[..]`     — open_range is the literal `..` token.
+      Lnast_node start_node = (std::string(ts_node_type(open_n)) == "..")
+                                  ? Lnast_node::create_const("0")
+                                  : expr_to_node(open_n);
+      mask_ref               = emit_range(start_node, Lnast_node::create_const("nil"));
+    } else if (!ts_node_is_null(fz_n)) {
+      // `b#[..=expr]` or `b#[..<expr]`. The grammar tags `from_zero` as
+      // `multiple: true` covering both the anonymous operator token (`..=`
+      // / `..<`) and the expression. child_by_field returns the operator
+      // first, so scan named children for the actual expression and the
+      // anonymous tokens for the operator.
+      bool     is_lt = false;
+      TSNode   expr_n{};
+      uint32_t total = ts_node_child_count(sel_node);
+      for (uint32_t k = 0; k < total; k++) {
+        TSNode      c = ts_node_child(sel_node, k);
+        std::string t(ts_node_type(c));
+        if (!ts_node_is_named(c)) {
+          if (t == "..<") {
+            is_lt = true;
+          }
+          continue;
+        }
+        if (ts_node_is_null(expr_n) && t != "select") {
+          expr_n = c;
+        }
+      }
+      if (ts_node_is_null(expr_n)) {
+        expr_n = fz_n;  // fallback
+      }
+      Lnast_node end_expr = expr_to_node(expr_n);
+      Lnast_node end_node = end_expr;
+      if (is_lt) {
+        // `..<n` is exclusive: end = n - 1 (matches the inclusive form
+        // stored on the range node downstream).
+        auto m    = lnast->add_child(stmts_index, Lnast_node::create_minus());
+        auto mref = make_tmp_ref();
+        lnast->add_child(m, mref);
+        lnast->add_child(m, end_expr);
+        lnast->add_child(m, Lnast_node::create_const("1"));
+        end_node = mref;
+      }
+      mask_ref = emit_range(Lnast_node::create_const("0"), end_node);
+    } else if (!ts_node_is_null(list) && ts_node_named_child_count(list) > 0) {
       TSNode expr = ts_node_named_child(list, 0);
       auto   et   = std::string_view(ts_node_type(expr));
       if (et == "expression_item") {
