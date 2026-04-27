@@ -57,6 +57,24 @@ bool Symbol_table::var(std::string_view key) {
   return true;
 }
 
+// Tmp refs (`___N`) are LNAST-internal SSA-style values, not user variables.
+// They have no real "scope" — a producer in a nested block (e.g. inside an
+// if-stmts) writes a tmp that an outer-block consumer reads. If we stored
+// the tmp in the innermost block, the outer reader's fold would fail once
+// the inner block was left (block scope no longer reachable from the outer).
+// Anchor every tmp at the nearest Function scope so it stays visible until
+// the surrounding function returns.
+static Symbol_table::Scope* anchor_for(Symbol_table::Scope* innermost, std::string_view var) {
+  if (var.size() < 3 || var.substr(0, 3) != "___") {
+    return innermost;
+  }
+  Symbol_table::Scope* s = innermost;
+  while (s->parent != nullptr && s->type != Symbol_table::Scope_type::Function) {
+    s = s->parent;
+  }
+  return s;
+}
+
 bool Symbol_table::set(std::string_view key, std::shared_ptr<Bundle> bundle) {
   I(bundle);
   I(!stack.empty());
@@ -65,10 +83,11 @@ bool Symbol_table::set(std::string_view key, std::shared_ptr<Bundle> bundle) {
 
   // Bare `x = …`: prefer an existing declaration in any reachable scope so
   // a write inside `{ … }` updates the outer var. If none, declare in the
-  // current (innermost) scope.
+  // current (innermost) scope (or the enclosing function for tmps — see
+  // anchor_for).
   Scope* target = find_decl_scope(var);
   if (target == nullptr) {
-    target = stack.back();
+    target = anchor_for(stack.back(), var);
   }
 
   std::shared_ptr<Bundle> var_bundle;
@@ -100,7 +119,7 @@ bool Symbol_table::set(std::string_view key, const Lconst& trivial) {
 
   Scope* target = find_decl_scope(var);
   if (target == nullptr) {
-    target = stack.back();
+    target = anchor_for(stack.back(), var);
   }
 
   std::shared_ptr<Bundle> bundle;

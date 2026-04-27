@@ -1,0 +1,70 @@
+/*
+:name: paths_if
+:type: comptime
+:verifier_pass: 6
+:verifier_fail: 0
+*/
+
+
+mut c = 1
+
+if true {
+}else{
+    c = 2
+}
+
+if false {
+    c += 3
+}
+
+cassert c == 1
+
+if false {
+}else{
+    c = 2
+}
+
+if true {
+    c += 3
+}
+
+cassert c == 5
+
+c = 100 when false
+cassert c == 5
+c = 100 unless true
+cassert c == 5
+
+c = 100 when true
+cassert c == 100
+c = 200 unless false
+cassert c == 200
+
+// FIXME: the verifier_pass should have an option for "functions"
+comb no_know_input(a)->(r) {
+  r = 1
+
+  if true {
+    r = 2
+  }else{
+    r = 100
+  }
+  cassert r == 2
+
+  if a { // NOT comptime - BUT both path same, could be optimized
+    r = 200
+  }else{
+    r = 200
+  }
+  cassert r == 200 or r == 2
+
+  r = 1
+  if a { // NOT comptime - COULD NOT BE OPTIMIZED
+    r = 200
+  }
+  if a { // NOT comptime - COULD NOT BE OPTIMIZED
+  }else{
+    r = 100
+  }
+  cassert r == 1
+}

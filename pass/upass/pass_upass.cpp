@@ -171,6 +171,18 @@ Pass_upass::Pass_upass(const Eprp_var& var) : Pass("pass.upass", var) {
   auto constp_txt   = get_label("constprop");
   bool do_constprop = constp_txt != "false" && constp_txt != "0";
 
+  // The assert pass declares depends_on={"constprop"}, so the runner's
+  // resolve_order will silently pull constprop back in if assert is enabled
+  // — even when the user explicitly passed constprop:0. Honor the explicit
+  // disable here: with constprop off, assert can't run anyway (it reads the
+  // symbol-table values constprop populates), so drop it. The user can
+  // override by passing assert:0 explicitly or by using the order=…  arg
+  // to spell out exactly which passes to run.
+  if (!do_constprop && do_assert) {
+    Pass::warn("pass.upass: constprop:0 forces assert:0 (assert depends on constprop)");
+    do_assert = false;
+  }
+
   if (do_verifier) {  // 1st and last pass
     upass_order.emplace_back("verifier");
   }

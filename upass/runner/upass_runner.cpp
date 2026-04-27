@@ -289,7 +289,14 @@ void uPass_runner::process_drop_candidate_verbatim(Pass_method fn) {
 
 void uPass_runner::process_verbatim(Pass_method fn) {
   dispatch_to_passes(fn);
-  emit_subtree_verbatim();
+  // Emit the op-node with operand folding (skipping LHS at child 0). This
+  // matches A_OP behavior except we never drop the statement — verbatim
+  // ops (tuple_*, attr_*, range, io, delay_assign) carry side-effects or
+  // shape information that downstream passes still need to see, but their
+  // ref operands should fold so the staged tree doesn't carry references
+  // to tmps whose producing op was dropped (lnastfmt's read-without-write
+  // check would correctly flag the dangling refs otherwise).
+  emit_op_with_fold(/*fold_all=*/false);
 }
 
 // ── Top-level run loop ────────────────────────────────────────────────────────
@@ -427,9 +434,20 @@ void uPass_runner::process_lnast() {
     C_OP(io)
 
     // Tuple Operations — Slice 1 pass-through (Slice 6 flattens).
-    C_OP(tuple_get)
+    //
+    // tuple_add / tuple_get produce a fresh tmp bundle (or a folded scalar
+    // extracted from a bundle); their dst is a tmp that's purely scaffolding.
+    // Once the destination is resolved (is_known_const true on its first
+    // entry), dropping the stmt is safe — consumers either fold the value
+    // via fold_ref or read the bundle directly from the symbol table.
+    // Without this, for-loop unrolls leave behind orphan
+    // `tuple_add ___N = (i,)` stmts whose tuple_concat / assign-to-c
+    // consumers got dropped, producing dead code with dangling tmp refs.
+    A_OP(tuple_get)
+    A_OP(tuple_add)
+    // tuple_set mutates its LHS bundle in place — never drop; the side
+    // effect on the bundle is the whole point.
     C_OP(tuple_set)
-    C_OP(tuple_add)
     // tuple_concat folds when every operand is a known scalar (string/int
     // concat via Lconst::concat_op); treat like arithmetic so classify can
     // drop the statement once the destination is resolved.
@@ -505,7 +523,67 @@ void uPass_runner::process_if() {
   emit_push(lm->current_node());
   if (lm->has_child()) {
     lm->move_to_child();
+    // Branch elimination for known conditions. The if's children alternate
+    // (cond, stmts) pairs, with an optional trailing stmts (else). For
+    // every cond/stmts pair we peek at the cond's folded value:
+    //   - known-false: emit the stmts subtree verbatim (no constprop
+    //     dispatch into the body) so dead-branch assigns can't update
+    //     the symbol table. Without this, `if false { c = 2 }` would
+    //     overwrite c=1 because constprop's process_assign runs
+    //     unconditionally during traversal.
+    //   - known-true (and we haven't seen a true arm yet): process the
+    //     body normally; mark a "matched" flag so any later arms / else
+    //     are emit-verbatim'd (only the first matching arm runs).
+    //   - matched-already (previous arm was known-true): emit verbatim.
+    //   - unknown / partially-known: process normally (conservative —
+    //     the symbol table merges values across both branches today).
+    bool last_cond_false   = false;
+    bool last_cond_true    = false;
+    bool last_was_cond     = false;
+    bool already_matched   = false;  // a *previous* arm already fired
+
+    auto cond_value = [this]() -> std::optional<Lconst> {
+      if (lm->get_raw_ntype() == Lnast_ntype::Lnast_ntype_const) {
+        try {
+          return Lconst::from_pyrope(lm->current_text());
+        } catch (...) {
+          return std::nullopt;
+        }
+      }
+      if (lm->get_raw_ntype() == Lnast_ntype::Lnast_ntype_ref) {
+        return try_fold_ref(lm->current_text());
+      }
+      return std::nullopt;
+    };
+
     do {
+      auto t = lm->get_raw_ntype();
+      if (t == Lnast_ntype::Lnast_ntype_stmts) {
+        // Body for the prior cond, or the trailing else (no prior cond
+        // this round). Dead iff a prior arm has already fired, or the
+        // immediate cond just folded to false.
+        const bool dead = already_matched || (last_was_cond && last_cond_false);
+        const bool just_matched = last_was_cond && last_cond_true;
+        last_was_cond = false;
+        if (dead) {
+          emit_subtree_verbatim();
+          continue;
+        }
+        process_lnast();
+        // Process the body first, THEN flip the matched flag — so the
+        // current arm's body actually dispatches into constprop. Only
+        // *subsequent* arms / else become dead.
+        if (just_matched) {
+          already_matched = true;
+        }
+        continue;
+      }
+
+      // Non-stmts child — must be a cond (ref/const).
+      auto val        = cond_value();
+      last_cond_true  = val.has_value() && !val->is_invalid() && val->is_known_true();
+      last_cond_false = val.has_value() && !val->is_invalid() && val->is_known_false();
+      last_was_cond   = true;
       process_lnast();
     } while (lm->move_to_sibling());
     lm->move_to_parent();

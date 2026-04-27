@@ -3,7 +3,10 @@
 #include "pass_lnastfmt.hpp"
 
 #include <format>
+#include <set>
 #include <string>
+#include <unordered_map>
+#include <unordered_set>
 
 #include "perf_tracing.hpp"
 
@@ -124,6 +127,110 @@ static bool is_valid_ref_text(std::string_view name) {
   return !start_of_segment;
 }
 
+// Returns true if a ref-child at child position 0 of a parent of this type
+// is a write target (LHS / dst) — i.e., the parent produces or rebinds the
+// variable named by its first child. Anything else falls through to "read".
+//
+// Notes on the ambiguous cases:
+//   - `tuple_set`: position 0 names the bundle being mutated; we count it as
+//     a write because the named variable is rebound (Bundle::set() replaces
+//     entries) and any post-tuple_set reader sees the new value.
+//   - `attr_set`: position 0 is the variable whose attribute is being set.
+//     Treated as a write because it is the LNAST shape that *introduces* the
+//     variable for `mut x = …` (prp2lnast emits `attr_set X type mut`
+//     before the first `assign X = …`).
+//   - `for`: position 0 is the iteration variable (bound for the loop body).
+//   - `func_def`: position 0 is the function name.
+//   - `if` / `while` / `cassert`: ALL ref children are reads (no write at
+//     position 0), so this returns false for those — handled by the caller.
+static bool parent_writes_pos0(Lnast_ntype pt) {
+  return pt.is_assign() || pt.is_dp_assign() || pt.is_mut() || pt.is_delay_assign() || pt.is_log_and() || pt.is_log_or()
+         || pt.is_log_not() || pt.is_bit_and() || pt.is_bit_or() || pt.is_bit_not() || pt.is_bit_xor() || pt.is_red_and()
+         || pt.is_red_or() || pt.is_red_xor() || pt.is_popcount() || pt.is_plus() || pt.is_minus() || pt.is_mult() || pt.is_div()
+         || pt.is_mod() || pt.is_shl() || pt.is_sra() || pt.is_sext() || pt.is_mask_and() || pt.is_mask_xor()
+         || pt.is_mask_popcount() || pt.is_set_mask() || pt.is_get_mask() || pt.is_eq() || pt.is_ne() || pt.is_lt() || pt.is_le()
+         || pt.is_gt() || pt.is_ge() || pt.is_is() || pt.is_tuple_add() || pt.is_tuple_get() || pt.is_tuple_set()
+         || pt.is_tuple_concat() || pt.is_attr_set() || pt.is_attr_get() || pt.is_func_call() || pt.is_func_def() || pt.is_range()
+         || pt.is_phi() || pt.is_hot_phi() || pt.is_for();
+}
+
+// Walk the tree and flag any tmp ref (`___N`) that is read but never written
+// by any statement in the same LNAST. This catches producer bugs where an op
+// is emitted referencing a tmp whose producing statement was dropped or
+// emitted *after* the consumer (`if ___2 { … } ne ___2 = i!=2` — constprop's
+// fixed-point can't fold the if because `___2` is set later in source order;
+// once classify_statement drops the `ne`, the `if` is left dangling).
+//
+// We deliberately restrict this to tmps. Named variables can be implicitly
+// declared by parent scopes / function parameters / module ports, and a
+// whole-tree read-without-write check would flag those false-positives.
+// Tmps are LNAST-internal: every tmp consumer must have a matching producer
+// in the same tree.
+static void check_unwritten_tmps(const Lnast* ln) {
+  std::unordered_set<std::string>                                        written;
+  std::unordered_map<std::string, std::pair<lh::Tree_index, std::string>> read_first;
+
+  for (const lh::Tree_index& it : ln->depth_preorder()) {
+    if (!ln->get_type(it).is_ref()) {
+      continue;
+    }
+    auto name = ln->get_data(it).token.get_text();
+    if (!Lnast::is_tmp(name)) {
+      continue;
+    }
+    auto parent = ln->get_parent(it);
+    if (parent.is_invalid()) {
+      continue;
+    }
+    bool is_first_child = (ln->get_first_child(parent) == it);
+    auto pt             = ln->get_type(parent);
+
+    // tuple_add / tuple_set entry-form: an inner `assign(ref:key, val)` whose
+    // child[0] is a *field name*, not a variable. A tmp shouldn't appear as
+    // a key in practice, but skip just in case so we don't over-flag.
+    if (pt.is_assign() && is_first_child) {
+      auto grand = ln->get_parent(parent);
+      if (!grand.is_invalid()) {
+        auto gt = ln->get_type(grand);
+        if (gt.is_tuple_add() || gt.is_tuple_set()) {
+          continue;
+        }
+      }
+    }
+
+    if (is_first_child && parent_writes_pos0(pt)) {
+      written.insert(std::string(name));
+    } else {
+      auto key = std::string(name);
+      if (!read_first.contains(key)) {
+        read_first.emplace(key, std::make_pair(it, std::string(ln->get_type(parent).debug_name())));
+      }
+    }
+  }
+
+  // Sort for deterministic error reporting (the unordered_map iteration order
+  // varies, which would make CI failures non-reproducible by name).
+  std::set<std::string> dangling;
+  for (const auto& kv : read_first) {
+    if (!written.contains(kv.first)) {
+      dangling.insert(kv.first);
+    }
+  }
+  for (const auto& name : dangling) {
+    const auto& info = read_first.at(name);
+    Pass::error(
+        "lnastfmt: {} tmp ref '{}' is read (under {}) but never written by any statement "
+        "in this LNAST. Producer dropped its assignment, or producer emits the consumer "
+        "before the producing statement (e.g. an `if cond` whose `cond = …` lands as a "
+        "later sibling — fix prp2lnast to emit the cond's compute statements *before* "
+        "the `if` node).",
+        node_loc(ln, info.first),
+        name,
+        info.second);
+    return;
+  }
+}
+
 void Pass_lnastfmt::validate(const Lnast* ln) {
   // Validation-only pass. Any normalization (SSA stripping, tuple rebuild,
   // …) must be safe for every producer before it can run here — until then
@@ -223,4 +330,6 @@ void Pass_lnastfmt::validate(const Lnast* ln) {
       }
     }
   }
+
+  check_unwritten_tmps(ln);
 }

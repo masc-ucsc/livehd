@@ -1845,11 +1845,39 @@ Lnast_node Prp2lnast::unary_expr_to_node(TSNode n) {
 
 Lnast_node Prp2lnast::if_expr_to_node(TSNode n) {
   // if init?; cond { code } (elif init?; cond { code })* (else { code })?
-  auto if_idx = lnast->add_child(stmts_index, Lnast_node::create_if());
+  //
+  // Order matters: we must evaluate every condition expression *before*
+  // adding the `if` LNAST node to stmts_index. expr_to_node can emit
+  // helper statements (e.g. `ne ___2 = i != 2`) into stmts_index; if the
+  // `if` is already there, those helpers land as siblings *after* the
+  // `if`, and the resulting LNAST has the `if` reading a tmp ref before
+  // the producing ne — a downstream constprop pass that drops the
+  // already-folded ne leaves the if's ref dangling. lnastfmt's
+  // read-without-write check flags this. By staging cond evaluation first,
+  // every helper stmt lands before the `if` and the consumer-after-producer
+  // invariant holds.
+  //
+  // Caveat: this evaluates ALL elif conds eagerly into the surrounding
+  // scope, even those that strictly should only run if the prior arm
+  // missed. For pyrope comptime cond expressions this is fine (no side
+  // effects); a future change could lower elif-conds inside their parent
+  // arm's else branch for correctness on side-effecting conds.
   auto result = make_tmp_ref();
 
-  auto process_branch = [&](TSNode cond, TSNode code) {
-    // Init statements are emitted inline into the current scope if present.
+  struct Arm {
+    Lnast_node cref;
+    TSNode     code;
+  };
+  std::vector<Arm> arms;
+  TSNode           else_code{};
+  bool             have_else = false;
+  bool             init_done = false;
+
+  auto eval_init = [&]() {
+    if (init_done) {
+      return;
+    }
+    init_done   = true;
     TSNode init = child_by_field(n, "init");
     if (!ts_node_is_null(init)) {
       uint32_t inc = ts_node_named_child_count(init);
@@ -1857,8 +1885,58 @@ Lnast_node Prp2lnast::if_expr_to_node(TSNode n) {
         process_statement(ts_node_named_child(init, i));
       }
     }
-    Lnast_node cref = ts_node_is_null(cond) ? Lnast_node::create_const("true") : expr_to_node(cond);
-    lnast->add_child(if_idx, cref);
+  };
+
+  uint32_t nc = child_count(n);
+  TSNode   pending_cond{};
+  bool     have_cond = false;
+  bool     in_else   = false;
+  for (uint32_t i = 0; i < nc; i++) {
+    const char* field_name = ts_node_field_name_for_child(n, i);
+    if (!field_name) {
+      continue;
+    }
+    std::string f(field_name);
+    TSNode      c = child(n, i);
+    if (f == "condition") {
+      pending_cond = c;
+      have_cond    = true;
+    } else if (f == "code") {
+      if (in_else) {
+        else_code = c;
+        have_else = true;
+        in_else   = false;
+      } else if (have_cond) {
+        eval_init();
+        Lnast_node cref = ts_node_is_null(pending_cond) ? Lnast_node::create_const("true") : expr_to_node(pending_cond);
+        arms.push_back({cref, c});
+        have_cond = false;
+      }
+    } else if (f == "else") {
+      // Tree-sitter applies field("else", optseq("else", scope_statement))
+      // by tagging EVERY child of the optseq with field "else" — so we see
+      // two "else"-tagged children: the literal keyword and the body. The
+      // keyword has node type "else" (text "else"); the body has type
+      // "scope_statement". Capture the latter as the else body.
+      std::string ct(ts_node_type(c));
+      if (ct == "scope_statement") {
+        else_code = c;
+        have_else = true;
+        in_else   = false;
+      } else {
+        std::string_view txt = get_text(c);
+        if (txt == "else") {
+          in_else = true;
+        }
+      }
+    }
+  }
+
+  // All cond stmts (and init) have now been emitted to stmts_index. Add the
+  // `if` here so it follows its producers in source order.
+  auto if_idx = lnast->add_child(stmts_index, Lnast_node::create_if());
+
+  auto emit_body = [&](TSNode code) {
     auto body_idx = lnast->add_child(if_idx, Lnast_node::create_stmts());
     auto saved    = stmts_index;
     stmts_index   = body_idx;
@@ -1871,45 +1949,12 @@ Lnast_node Prp2lnast::if_expr_to_node(TSNode n) {
     stmts_index = saved;
   };
 
-  // Walk children in order: find each (condition, code) pair and the optional else.
-  uint32_t nc = child_count(n);
-  TSNode   pending_cond;
-  bool     have_cond = false;
-  bool     in_else   = false;
-  for (uint32_t i = 0; i < nc; i++) {
-    const char* field_name = ts_node_field_name_for_child(n, i);
-    if (!field_name) {
-      continue;
-    }
-    std::string f(field_name);
-    TSNode      c = child(n, i);
-    std::string ctxt(get_text(c));
-    if (f == "condition") {
-      pending_cond = c;
-      have_cond    = true;
-    } else if (f == "code") {
-      if (in_else) {
-        // Else branch — single scope_statement child.
-        auto body_idx = lnast->add_child(if_idx, Lnast_node::create_stmts());
-        auto saved    = stmts_index;
-        stmts_index   = body_idx;
-        process_scope_statement(c, body_idx);
-        auto a = lnast->add_child(stmts_index, Lnast_node::create_assign());
-        lnast->add_child(a, result);
-        lnast->add_child(a, Lnast_node::create_const("0"));
-        stmts_index = saved;
-        in_else     = false;
-      } else if (have_cond) {
-        process_branch(pending_cond, c);
-        have_cond = false;
-      }
-    } else if (f == "else") {
-      // Anonymous else keyword — marks that next code is else.
-      std::string_view txt = get_text(c);
-      if (txt == "else") {
-        in_else = true;
-      }
-    }
+  for (const auto& arm : arms) {
+    lnast->add_child(if_idx, arm.cref);
+    emit_body(arm.code);
+  }
+  if (have_else) {
+    emit_body(else_code);
   }
 
   return result;
@@ -1938,14 +1983,23 @@ Lnast_node Prp2lnast::match_expr_to_node(TSNode n) {
   }
   Lnast_node subject_ref = expr_to_node(subject);
 
-  // Now walk children in order to build arms.
-  auto       if_idx              = lnast->add_child(stmts_index, Lnast_node::create_if());
-  Lnast_node result              = make_tmp_ref();
-  bool       saw_first_condition = false;
+  // Same producer-before-consumer reordering as if_expr_to_node: walk every
+  // arm first, emit each arm's eq/log_or compute stmts to stmts_index,
+  // collect (cref, code) pairs, THEN add the if and assemble. Otherwise
+  // every eq lands as a sibling AFTER the if and the if's cond refs are
+  // dangling once constprop drops the eqs.
+  Lnast_node result = make_tmp_ref();
 
-  TSNode pending_expr_list = {};
-  bool   have_pending      = false;
-  bool   pending_is_else   = false;
+  struct Arm {
+    Lnast_node cref;
+    TSNode     code;
+  };
+  std::vector<Arm> arms;
+
+  bool   saw_first_condition = false;
+  TSNode pending_expr_list   = {};
+  bool   have_pending        = false;
+  bool   pending_is_else     = false;
   for (uint32_t i = 0; i < child_count(n); i++) {
     const char* f = ts_node_field_name_for_child(n, i);
     if (!f) {
@@ -1971,11 +2025,9 @@ Lnast_node Prp2lnast::match_expr_to_node(TSNode n) {
         else_code       = c;
         pending_is_else = false;
       } else if (have_pending) {
-        // Equality check against each expression in the list.
         Lnast_node arm_cond;
         uint32_t   nnc = ts_node_named_child_count(pending_expr_list);
         if (nnc == 0) {
-          // Hidden constant — extract text of the entire expression_list.
           Lnast_node rhs = constant_text_to_node(trim(get_text(pending_expr_list)));
           auto       idx = lnast->add_child(stmts_index, Lnast_node::create_eq());
           auto       ref = make_tmp_ref();
@@ -2003,28 +2055,33 @@ Lnast_node Prp2lnast::match_expr_to_node(TSNode n) {
             lnast->add_child(or_idx, ref);
           }
         }
-        lnast->add_child(if_idx, arm_cond);
-        auto body_idx = lnast->add_child(if_idx, Lnast_node::create_stmts());
-        auto saved    = stmts_index;
-        stmts_index   = body_idx;
-        process_scope_statement(c, body_idx);
-        auto a = lnast->add_child(stmts_index, Lnast_node::create_assign());
-        lnast->add_child(a, result);
-        lnast->add_child(a, Lnast_node::create_const("0"));
-        stmts_index  = saved;
+        arms.push_back({arm_cond, c});
         have_pending = false;
       }
     }
   }
-  if (else_code.tree != nullptr) {
+
+  // All eq/log_or compute stmts have been emitted to stmts_index. Add the
+  // `if` here so it follows its producers in source order.
+  auto if_idx = lnast->add_child(stmts_index, Lnast_node::create_if());
+
+  auto emit_body = [&](TSNode code) {
     auto body_idx = lnast->add_child(if_idx, Lnast_node::create_stmts());
     auto saved    = stmts_index;
     stmts_index   = body_idx;
-    process_scope_statement(else_code, body_idx);
+    process_scope_statement(code, body_idx);
     auto a = lnast->add_child(stmts_index, Lnast_node::create_assign());
     lnast->add_child(a, result);
     lnast->add_child(a, Lnast_node::create_const("0"));
     stmts_index = saved;
+  };
+
+  for (const auto& arm : arms) {
+    lnast->add_child(if_idx, arm.cref);
+    emit_body(arm.code);
+  }
+  if (else_code.tree != nullptr) {
+    emit_body(else_code);
   }
   return result;
 }

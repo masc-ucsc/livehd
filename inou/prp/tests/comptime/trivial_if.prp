@@ -1,0 +1,15 @@
+/*
+:name: trivial_if
+:type: comptime
+:verifier_pass: 1
+:verifier_fail: 0
+*/
+
+
+mut c = 1
+
+if false {
+    c = 2
+}
+
+cassert c == 1

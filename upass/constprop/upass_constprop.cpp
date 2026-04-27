@@ -871,6 +871,260 @@ void uPass_constprop::fold_does(const std::string& dst) {
   }
 }
 
+// Per-first-level summary used by fold_in / fold_has: groups a bundle's flat
+// (single-level) entries by their first-level key, marking sub-bundle entries
+// (multi-level keys like `:0:a.0`) so the comparison can distinguish a scalar
+// `a=1` from a nested `a=(1,2)`.
+struct Bundle_flat_entry {
+  std::string_view name;          // empty for unnamed positional
+  int              pos = -1;
+  Lconst           value;         // valid only when !is_sub_bundle
+  bool             is_sub_bundle = false;
+};
+
+static std::vector<Bundle_flat_entry> collect_first_level(const std::shared_ptr<Bundle const>& b) {
+  // Iterate the bundle's full key map and group hierarchical keys by their
+  // first-level prefix. Sub-bundle entries (multi-level keys) collapse to a
+  // single Bundle_flat_entry with is_sub_bundle=true; plain single-level
+  // entries record their trivial scalar value.
+  std::vector<Bundle_flat_entry> entries;
+  std::map<std::string, size_t>  by_first;
+  for (const auto& kv : b->get_map()) {
+    if (Bundle::is_attribute(kv.first)) {
+      continue;
+    }
+    auto first = Bundle::get_first_level(kv.first);
+    if (first.empty()) {
+      continue;
+    }
+    auto first_str = std::string(first);
+    auto it        = by_first.find(first_str);
+    Bundle_flat_entry* e;
+    if (it == by_first.end()) {
+      Bundle_flat_entry n;
+      n.pos = Bundle::get_first_level_pos(first);
+      if (first.front() == ':') {
+        n.name = Bundle::get_first_level_name(first);
+      }
+      by_first[first_str] = entries.size();
+      entries.emplace_back(std::move(n));
+      e = &entries.back();
+    } else {
+      e = &entries[it->second];
+    }
+    if (Bundle::is_single_level(kv.first)) {
+      if (!e->is_sub_bundle) {
+        e->value = kv.second.trivial;
+      }
+    } else {
+      e->is_sub_bundle = true;
+      e->value         = Lconst::invalid();
+    }
+  }
+  return entries;
+}
+
+// Fold `dst = in(l, r)`. Cursor is on the const("in") marker. Walks forward
+// to read l and r, evaluates the membership predicate, and stores Lconst(0/1)
+// in the symbol table.
+//
+// Semantics for `lhs in rhs` (matches Pyrope tuple-membership):
+//   - Each first-level entry in lhs must be "satisfied" by rhs.
+//   - Named entry `name=v` in lhs: rhs must have a first-level entry with the
+//     same name whose scalar value equals v. nil-on-LHS acts as a wildcard.
+//     A sub-bundle on the rhs side at that name fails the scalar comparison
+//     (e.g. `(a=1) in (a=(1,2))` is false).
+//   - Unnamed entry `v` in lhs: there must exist some first-level rhs entry
+//     (named or unnamed) whose scalar value equals v.
+// Sub-bundle entries on lhs cause the fold to defer until they collapse.
+//
+// On exit the cursor is left on the last visited child; the caller
+// (process_func_call) is responsible for `move_to_parent`.
+void uPass_constprop::fold_in(const std::string& dst) {
+  auto resolve_bundle = [this]() -> std::shared_ptr<Bundle const> {
+    if (is_type(Lnast_ntype::Lnast_ntype_ref)) {
+      return st.get_bundle(current_text());
+    }
+    return nullptr;
+  };
+
+  if (!move_to_sibling()) {
+    return;
+  }
+  auto ba = resolve_bundle();
+  if (!move_to_sibling()) {
+    return;
+  }
+  auto bb = resolve_bundle();
+  if (!ba || !bb) {
+    return;  // need both sides as known bundles
+  }
+
+  auto lhs_flat = collect_first_level(ba);
+  auto rhs_flat = collect_first_level(bb);
+
+  // Tri-state result: nullopt = defer until more info, true/false = decided.
+  std::optional<bool> outcome;
+  outcome = true;
+  for (const auto& le : lhs_flat) {
+    if (le.is_sub_bundle) {
+      outcome.reset();  // defer: nested-LHS not modelled yet
+      break;
+    }
+    if (le.value.is_invalid()) {
+      outcome.reset();  // defer: lhs entry not yet folded
+      break;
+    }
+
+    if (!le.name.empty()) {
+      // Named entry — wildcard if value is nil.
+      if (le.value.is_nil()) {
+        continue;
+      }
+      bool                found_name = false;
+      std::optional<bool> matched_value;
+      for (const auto& re : rhs_flat) {
+        if (re.name != le.name) {
+          continue;
+        }
+        found_name = true;
+        if (re.is_sub_bundle) {
+          matched_value = false;  // scalar lhs vs sub-bundle rhs → unequal
+          break;
+        }
+        if (re.value.is_invalid()) {
+          break;  // defer (matched_value stays nullopt)
+        }
+        const Lconst eq = le.value.eq_op(re.value);
+        if (eq.is_known_true()) {
+          matched_value = true;
+        } else if (eq.is_known_false()) {
+          matched_value = false;
+        }
+        break;
+      }
+      if (!found_name) {
+        outcome = false;
+        break;
+      }
+      if (!matched_value.has_value()) {
+        outcome.reset();  // defer
+        break;
+      }
+      if (!*matched_value) {
+        outcome = false;
+        break;
+      }
+    } else {
+      // Unnamed entry — value must occur in any rhs first-level scalar.
+      bool any_unknown = false;
+      bool matched     = false;
+      for (const auto& re : rhs_flat) {
+        if (re.is_sub_bundle) {
+          continue;
+        }
+        if (re.value.is_invalid()) {
+          any_unknown = true;
+          continue;
+        }
+        const Lconst eq = le.value.eq_op(re.value);
+        if (eq.is_known_true()) {
+          matched = true;
+          break;
+        }
+        if (!eq.is_known_false()) {
+          any_unknown = true;
+        }
+      }
+      if (!matched) {
+        if (any_unknown) {
+          outcome.reset();  // defer
+          break;
+        }
+        outcome = false;
+        break;
+      }
+    }
+  }
+
+  if (!outcome.has_value()) {
+    return;
+  }
+  const Lconst result        = *outcome ? Lconst(1) : Lconst(0);
+  bool         local_changed = !st.has_trivial(dst) || st.get_trivial(dst) != result;
+  if (local_changed && st.set(dst, result)) {
+    mark_changed();
+  }
+}
+
+// Fold `dst = has(l, key)`. Cursor is on the const("has") marker.
+//
+// Semantics for `bundle has key`:
+//   - String key `'name'`: bundle must have a first-level named entry
+//     matching `name` (i.e., a key shaped `:N:name`).
+//   - Integer key `N`: bundle must have any first-level entry at position N
+//     (named or unnamed; both are recorded with explicit positions).
+// Returns Lconst(1) for present, Lconst(0) for absent.
+void uPass_constprop::fold_has(const std::string& dst) {
+  if (!move_to_sibling()) {
+    return;
+  }
+  std::shared_ptr<Bundle const> b;
+  if (is_type(Lnast_ntype::Lnast_ntype_ref)) {
+    b = st.get_bundle(current_text());
+  }
+  if (!b) {
+    return;
+  }
+  if (!move_to_sibling()) {
+    return;
+  }
+  Lconst key_val;
+  if (is_type(Lnast_ntype::Lnast_ntype_const)) {
+    key_val = Lconst::from_pyrope(current_text());
+  } else if (is_type(Lnast_ntype::Lnast_ntype_ref) && st.has_trivial(current_text())) {
+    key_val = st.get_trivial(current_text());
+  }
+  if (key_val.is_invalid()) {
+    return;
+  }
+
+  auto entries = collect_first_level(b);
+
+  bool found = false;
+  if (key_val.is_string()) {
+    // String literals round-trip through `'foo'` — strip the quotes to get
+    // the bare name used in `:N:name` keys.
+    std::string s = key_val.to_pyrope();
+    if (s.size() >= 2 && s.front() == '\'' && s.back() == '\'') {
+      s = s.substr(1, s.size() - 2);
+    }
+    for (const auto& e : entries) {
+      if (e.name == s) {
+        found = true;
+        break;
+      }
+    }
+  } else if (!key_val.is_nil() && !key_val.has_unknowns()) {
+    // Position lookup: any first-level entry whose recorded pos matches.
+    const int target = key_val.to_i();
+    for (const auto& e : entries) {
+      if (e.pos == target) {
+        found = true;
+        break;
+      }
+    }
+  } else {
+    return;  // nil/unknown key — defer
+  }
+
+  const Lconst result        = found ? Lconst(1) : Lconst(0);
+  bool         local_changed = !st.has_trivial(dst) || st.get_trivial(dst) != result;
+  if (local_changed && st.set(dst, result)) {
+    mark_changed();
+  }
+}
+
 std::optional<Lconst> uPass_constprop::resolve_current_scalar() const {
   if (is_type(Lnast_ntype::Lnast_ntype_const)) {
     return Lconst::from_pyrope(current_text());
@@ -1293,8 +1547,12 @@ void uPass_constprop::process_func_call() {
     std::string marker(current_text());
     if (marker == "does") {
       fold_does(dst);
+    } else if (marker == "in") {
+      fold_in(dst);
+    } else if (marker == "has") {
+      fold_has(dst);
     }
-    // Other markers (case/has/in/break/continue/return) — leave unfolded.
+    // Other markers (case/break/continue/return) — leave unfolded.
     move_to_parent();
     return;
   }
@@ -1826,6 +2084,20 @@ upass::Emit_decision uPass_constprop::classify_statement() {
     return upass::Emit_decision::emit_node();
   }
 
+  // Bundle-shape guard. is_known_const returns true as soon as the bundle's
+  // position-0 entry is a concrete Lconst, but that's also true for:
+  //   - multi-entry tuples: `(1,2)` — two non-attribute entries
+  //   - single-entry named tuples: `(c=2)` — one entry but keyed `:0:c`,
+  //     not `0`; inlining as a scalar loses the name
+  // fold_ref returns only the position-0 trivial, so dropping the producer
+  // and substituting via fold_ref would silently truncate `(1,2)` → `1`
+  // or convert `(c=2)` → `2`. Keep the stmt unless the bundle is a
+  // *trivial* scalar (exactly one anonymous `0` entry), where fold_ref's
+  // inline is faithful.
+  if (auto b = st.get_bundle(lhs_text); b && !b->is_trivial_scalar()) {
+    return upass::Emit_decision::emit_node();
+  }
+
   return upass::Emit_decision::drop();
 }
 
@@ -1839,6 +2111,17 @@ std::optional<Lconst> uPass_constprop::fold_ref(std::string_view name) {
     key.remove_prefix(1);
   }
   if (!st.is_known_const(key)) {
+    return std::nullopt;
+  }
+  // is_known_const returns true once the bundle's position-0 entry is a
+  // concrete Lconst, but that's also true for multi-entry tuples like
+  // `(1,2)` and single-entry named tuples like `(c=2)`. Inlining the
+  // position-0 trivial would silently truncate `(1,2)` → `1` or strip
+  // the name from `(c=2)` → `2`. Only inline when the bundle is a
+  // trivial scalar (exactly one anonymous `0` entry); for everything
+  // else, return nullopt so the consumer keeps the ref and reads the
+  // full bundle from the symbol table.
+  if (auto b = st.get_bundle(key); b && !b->is_trivial_scalar()) {
     return std::nullopt;
   }
   return st.get_trivial(key);

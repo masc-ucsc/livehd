@@ -107,6 +107,8 @@ protected:
   void process_eq_ne_impl();
 
   void fold_does(const std::string& dst);
+  void fold_in(const std::string& dst);
+  void fold_has(const std::string& dst);
 
   struct Call_actual {
     bool        is_named = false;
