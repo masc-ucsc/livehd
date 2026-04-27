@@ -52,6 +52,7 @@ public:
   void process_get_mask() override;
 
   void process_stmts() override;
+  void process_stmts_post() override;
   void process_tuple_set() override;
   void process_tuple_get() override;
   void process_tuple_add() override;
@@ -66,6 +67,13 @@ public:
 
 protected:
   Symbol_table st;
+
+  // Names whose bundle should be treated as a tuple (rather than scalar
+  // wrapper) by process_tuple_concat — populated by every successful
+  // tuple_add / tuple_concat write, and propagated through assign(ref).
+  // Lets `c ++ (i,)` stay in bundle mode after the accumulator collapses
+  // to a single-entry shape, so for-loop unrolls advance correctly.
+  std::unordered_set<std::string> tuple_typed_names;
 
   // Range bookkeeping outside the symbol table: a `range` LNAST node binds
   // its destination ref to a (start, end) pair. `end` may be the literal

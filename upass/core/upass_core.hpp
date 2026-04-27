@@ -160,6 +160,10 @@ public:
   // Structure
   PROCESS_NODE(top)
   PROCESS_NODE(stmts)
+  // Called by the runner after children of a stmts node have been
+  // processed. Lets a pass tear down per-block state (e.g. constprop
+  // popping a block scope it pushed in process_stmts).
+  PROCESS_NODE(stmts_post)
   PROCESS_NODE(if)
 
 #undef PROCESS_NODE

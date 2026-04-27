@@ -481,6 +481,11 @@ void uPass_runner::process_top() {
 }
 
 void uPass_runner::process_stmts() {
+  // Pre-dispatch lets passes push a block scope before children are
+  // walked; post-dispatch (after emit_pop) lets them pop it. The cursor
+  // is restored by dispatch_to_passes around each pass call, so passes
+  // can move freely without disturbing the runner's traversal.
+  dispatch_to_passes(&upass::uPass::process_stmts);
   emit_push(lm->current_node());
   if (lm->has_child()) {
     lm->move_to_child();
@@ -490,6 +495,7 @@ void uPass_runner::process_stmts() {
     lm->move_to_parent();
   }
   emit_pop();
+  dispatch_to_passes(&upass::uPass::process_stmts_post);
 }
 
 void uPass_runner::process_if() {

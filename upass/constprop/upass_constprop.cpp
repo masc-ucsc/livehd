@@ -100,6 +100,13 @@ void uPass_constprop::process_assign() {
       } else {
         st.set(lhs_text, rhs_bundle);
       }
+      // Propagate the tuple-typed flag across aliasing assigns. `c = ___4`
+      // where ___4 came from a tuple_concat keeps c marked as a tuple, so
+      // the next iteration's tuple_concat reads c via bundle mode rather
+      // than mis-classifying it as a scalar wrapper.
+      if (tuple_typed_names.contains(std::string(current_text()))) {
+        tuple_typed_names.insert(std::string(lhs_text));
+      }
     } else if (st.has_trivial(current_text())) {
       // Scalar RHS (stored as trivial, not a bundle). Propagate the value so
       // subsequent uses of `lhs_text` resolve. Mark changed iff the value
@@ -436,26 +443,61 @@ void uPass_constprop::process_eq_ne_impl() {
   // Resolve operands: bundles that hold a single trivial value collapse to
   // a scalar so we can use the cheap Lconst comparison (st.get_bundle on a
   // scalar-stored ref still returns its single-entry bundle wrapper, so we
-  // can't just check ba/bb non-null).
-  auto resolve = [this](std::shared_ptr<Bundle const>& bp, Lconst& sv) {
+  // can't just check ba/bb non-null). undeclared_invalid tracks per-operand
+  // whether the operand was a never-declared ref — used by the post-resolve
+  // pass below to fold `x == nil` semantics for out-of-scope reads.
+  auto resolve = [this](std::shared_ptr<Bundle const>& bp, Lconst& sv,
+                        bool& is_const_nil, bool& undeclared_ref) {
     if (is_type(Lnast_ntype::Lnast_ntype_ref)) {
-      auto b = st.get_bundle(current_text());
+      auto name = current_text();
+      auto b = st.get_bundle(name);
       if (b && !b->is_scalar()) {
         bp = b;
-      } else {
-        sv = st.get_trivial(current_text());
+      } else if (st.has_trivial(name)) {
+        sv = st.get_trivial(name);
+      } else if (!st.is_declared(name)) {
+        undeclared_ref = true;
       }
+      // else: declared but no concrete value yet — leave sv invalid so the
+      // eq stays unfolded for this iteration.
     } else {
       sv = current_pyrope_value();
+      if (sv.is_nil()) {
+        is_const_nil = true;
+      }
     }
   };
   std::shared_ptr<Bundle const> ba;
-  Lconst                        n1;
-  resolve(ba, n1);
+  // Default-constructed Lconst is bits=0/num=0/explicit_str=false — NOT
+  // is_invalid() — so initialize explicitly. Otherwise an undeclared ref
+  // (whose sv we leave untouched) would parade as a known-zero value and
+  // fold every "z == 123" against it.
+  Lconst                        n1              = Lconst::invalid();
+  bool                          n1_is_const_nil = false;
+  bool                          n1_undeclared   = false;
+  resolve(ba, n1, n1_is_const_nil, n1_undeclared);
   move_to_sibling();
   std::shared_ptr<Bundle const> bb;
-  Lconst                        n2;
-  resolve(bb, n2);
+  Lconst                        n2              = Lconst::invalid();
+  bool                          n2_is_const_nil = false;
+  bool                          n2_undeclared   = false;
+  resolve(bb, n2, n2_is_const_nil, n2_undeclared);
+
+  // Out-of-scope ref vs. literal `nil`: the pyrope semantic is that an
+  // undeclared name reads as nil, so `a == nil` / `b != nil` should fold
+  // even when the ref has never been declared in any reachable scope.
+  // We narrow the substitution to comparisons where the OTHER operand is a
+  // literal `nil`, so the function-body code that prp2lnast still emits as
+  // a top-level sibling of fdef (see scope2.prp's mytest body) doesn't have
+  // its `cassert a == 11` casserts fold against `a = nil` and trigger
+  // false verifier failures. Scope1 only tests the `== nil` shape, so this
+  // narrower rule covers the intended semantics without the side-effects.
+  if (n1_undeclared && n2_is_const_nil) {
+    n1 = Lconst::nil();
+  }
+  if (n2_undeclared && n1_is_const_nil) {
+    n2 = Lconst::nil();
+  }
 
   // Three outcomes the rest of the pass cares about: known-true, known-false,
   // or a 1-bit unknown. Bundles only produce known true/false; the scalar
@@ -539,7 +581,22 @@ void uPass_constprop::process_if() {
 
   move_to_parent();
 }
-void uPass_constprop::process_stmts() {}
+// Block scope push/pop. Each `stmts` LNAST node gets its own persistent
+// scope keyed by its nid hash, so a `mut b = 2` inside `{ … }` is invisible
+// outside the block, but state still survives across the upass fixed-point
+// iterations (see Symbol_table::block_scope).
+//
+// The runner calls process_stmts BEFORE descending into children and
+// process_stmts_post AFTER, mirroring the pattern used for `if`. The
+// outermost stmts of every function body is itself wrapped here too;
+// the function_scope established in the constructor remains the parent.
+void uPass_constprop::process_stmts() {
+  st.block_scope(lm->get_current_nid().get_hash());
+}
+
+void uPass_constprop::process_stmts_post() {
+  st.leave_scope();
+}
 
 // ── Tuple Operations ─────────────────────────────────────────────────────────
 //
@@ -565,6 +622,11 @@ void uPass_constprop::process_tuple_add() {
     bundle = std::make_shared<Bundle>(dst);
     st.set(dst, bundle);
   }
+  // Mark the destination as tuple-typed so a downstream tuple_concat
+  // routes it through bundle mode even if the bundle ends up looking
+  // scalar (single positional entry, which is_scalar() can't distinguish
+  // from a true scalar). See process_tuple_concat.
+  tuple_typed_names.insert(dst);
 
   int pos = 0;
   while (move_to_sibling()) {
@@ -622,14 +684,45 @@ void uPass_constprop::process_tuple_concat() {
       // the scalar path — otherwise string concat (`"hi" ++ " there"`) gets
       // routed through Bundle::concat, which renumbers positional keys
       // instead of folding via Lconst::concat_op.
+      //
+      // Exception: an *empty* bundle (no positional/named keys, only
+      // attributes at most) is unambiguously the empty tuple `()` — never a
+      // scalar — so it must enter bundle mode. This is the common shape for
+      // an accumulator initialized with `mut c = ()`; without this special
+      // case `c ++ (i,)` aborts and the for-loop unroll never advances `c`.
       auto b = st.get_bundle(current_text());
-      if (b && !b->is_scalar()) {
+      bool b_is_empty_tuple = false;
+      if (b) {
+        bool any_kv = false;
+        for (const auto& e : b->get_map()) {
+          if (!e.first.empty() && e.first.front() == ':') { any_kv = true; break; }
+          // Plain "0", "1", ... positional keys are also content.
+          if (!e.first.empty() && std::isdigit(static_cast<unsigned char>(e.first.front()))) {
+            any_kv = true;
+            break;
+          }
+        }
+        b_is_empty_tuple = !any_kv;
+      }
+      // Use bundle mode when:
+      //   - the operand is a multi-entry bundle (always tuple), or
+      //   - the operand is empty (must be empty tuple — see comment above), or
+      //   - it's been marked as tuple-typed by an earlier tuple_add /
+      //     tuple_concat / aliasing-assign (covers the "single-entry
+      //     bundle that is actually a 1-element tuple" case), or
+      //   - we're already in bundle_mode (the first operand chose tuple,
+      //     so subsequent single-entry bundles must concat as tuples too,
+      //     not be re-routed to the scalar path).
+      const bool is_tuple_typed = tuple_typed_names.contains(std::string(current_text()));
+      if (b && (!b->is_scalar() || b_is_empty_tuple || is_tuple_typed || bundle_mode)) {
         if (!is_first && !bundle_mode) return false;
         if (is_first) {
           acc_bundle  = std::make_shared<Bundle>(dst);
           bundle_mode = true;
         }
-        acc_bundle->concat(b);
+        if (!b_is_empty_tuple) {
+          acc_bundle->concat(b);
+        }
         return true;
       }
       if (st.has_trivial(current_text())) {
@@ -662,6 +755,8 @@ void uPass_constprop::process_tuple_concat() {
 
   if (bundle_mode) {
     st.set(dst, acc_bundle);
+    // Tuple-mode result: dst is a tuple regardless of its final entry count.
+    tuple_typed_names.insert(dst);
   } else {
     bool local_changed = !st.has_trivial(dst) || st.get_trivial(dst) != acc_scalar;
     if (local_changed && st.set(dst, acc_scalar)) {

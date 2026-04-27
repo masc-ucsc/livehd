@@ -139,6 +139,14 @@ void Prp2lnast::process_description() {
       }
       continue;
     }
+    // A scope_statement that was already consumed as a lambda body must
+    // not be re-walked here, otherwise the body content emits twice
+    // (once inside the lambda's body_idx, once as an orphan top-level
+    // stmts). See `consumed_lambda_body_starts`.
+    if (consumed_lambda_body_starts.contains(ts_node_start_byte(c))) {
+      pending_overflow.clear();
+      continue;
+    }
     if (t == "assignment" && !pending_overflow.empty()) {
       pending_overflow_kind = pending_overflow;
       process_statement(c);
@@ -214,6 +222,12 @@ void Prp2lnast::process_scope_statement(TSNode n, lh::Tree_index /*target_stmts*
       if (t == "wrap" || t == "sat") {
         pending_overflow = std::move(t);
       }
+      continue;
+    }
+    // Skip scope_statements that have been consumed as a lambda body
+    // (see process_description for the same guard).
+    if (consumed_lambda_body_starts.contains(ts_node_start_byte(c))) {
+      pending_overflow.clear();
       continue;
     }
     if (t == "assignment" && !pending_overflow.empty()) {
@@ -631,10 +645,36 @@ void Prp2lnast::process_while_statement(TSNode n) {
 }
 
 void Prp2lnast::process_for_statement(TSNode n) {
-  // Lower `for i in xs { body }` to a while with tmp counter and tuple_get.
+  // Pyrope `for` is comptime-only: every for-loop's iteration count must be
+  // resolvable at parse time so we can emit an unrolled sequence of nested
+  // stmts blocks. Each iteration block re-binds the iter variable and runs
+  // a fresh emission of the body. Block scoping (see Symbol_table::block_scope)
+  // gives every iteration its own scope, so user-name shadowing and temp
+  // collisions are handled automatically — no per-iter renaming pass needed.
+  //
+  // Lowering shape, e.g. `for i in 1..<4 { … }`:
+  //
+  //   stmts (outer wrap)
+  //     attr_set i type mut
+  //     assign   i nil
+  //     stmts (iter 0)
+  //       assign i 1
+  //       <body>
+  //     stmts (iter 1)
+  //       assign i 2
+  //       <body>
+  //     stmts (iter 2)
+  //       assign i 3
+  //       <body>
+  //
+  // Bare `i = k` resolves to the outer mut via Symbol_table's parent walk.
+  // Bare writes to outer-scope variables inside the body work the same way,
+  // so `c = c ++ (i,)` (loop_equivalent) updates the caller's `c` correctly.
+  //
+  // For non-comptime ranges we fall back to the legacy placeholder while
+  // loop so existing tests that don't actually need to unroll still parse.
+
   TSNode code = child_by_field(n, "code");
-  // Identify binding (typed_identifier or typed_identifier_list) and data.
-  TSNode binding;
   TSNode data = child_by_field(n, "data");
   if (ts_node_is_null(data)) {
     // ref_identifier form — find and use it as data
@@ -648,7 +688,7 @@ void Prp2lnast::process_for_statement(TSNode n) {
     }
   }
   // Find binding: first typed_identifier or typed_identifier_list under arg_list
-  binding = ts_node_child_by_field_name(n, "index", 5);
+  TSNode binding = ts_node_child_by_field_name(n, "index", 5);
   if (ts_node_is_null(binding)) {
     for (uint32_t i = 0; i < child_count(n); i++) {
       TSNode      c = child(n, i);
@@ -660,14 +700,137 @@ void Prp2lnast::process_for_statement(TSNode n) {
     }
   }
 
-  // Simplified emission: while true with break — enough for parser tests to compile.
+  // Try to detect a comptime literal range under data: an expression_item
+  // shaped as `<int_const> ..<|..= <int_const>` (possibly nested in an
+  // expression_list/expression_item). Returns the (start, end_inclusive)
+  // pair on success.
+  auto parse_int_const = [&](TSNode c) -> std::optional<int64_t> {
+    if (ts_node_is_null(c)) return std::nullopt;
+    std::string t(ts_node_type(c));
+    if (t != "constant") return std::nullopt;
+    auto txt = trim(get_text(c));
+    if (txt.empty()) return std::nullopt;
+    try {
+      size_t pos = 0;
+      int64_t v = std::stoll(std::string(txt), &pos);
+      // Reject suffixes / non-decimal forms; we only handle plain ints.
+      if (pos != txt.size()) return std::nullopt;
+      return v;
+    } catch (...) {
+      return std::nullopt;
+    }
+  };
+
+  // Walk a data expression looking for the literal-range pattern. Accepts
+  // `expression_list { item: expression_item { const, ..<|..=, const } }`
+  // and the bare expression_item form.
+  auto try_parse_literal_range = [&](TSNode d) -> std::optional<std::tuple<int64_t, int64_t, bool>> {
+    if (ts_node_is_null(d)) return std::nullopt;
+    std::string dt(ts_node_type(d));
+    TSNode inner = d;
+    if (dt == "expression_list") {
+      // Reject multi-item lists — `for i in a, b` isn't a range.
+      uint32_t count = 0;
+      TSNode   first;
+      for (uint32_t i = 0; i < child_count(d); i++) {
+        TSNode c = child(d, i);
+        const char* fn = ts_node_field_name_for_child(d, i);
+        if (fn && std::string(fn) == "item") {
+          if (count == 0) first = c;
+          ++count;
+        }
+      }
+      if (count != 1) return std::nullopt;
+      inner = first;
+      dt = std::string(ts_node_type(inner));
+    }
+    if (dt != "expression_item") return std::nullopt;
+    // Expect exactly: const, binary_other_op(`..<` or `..=`), const.
+    TSNode lhs, op, rhs;
+    int    seen_named = 0;
+    for (uint32_t i = 0; i < ts_node_named_child_count(inner); i++) {
+      TSNode c = ts_node_named_child(inner, i);
+      if (seen_named == 0) lhs = c;
+      else if (seen_named == 1) op = c;
+      else if (seen_named == 2) rhs = c;
+      ++seen_named;
+    }
+    if (seen_named != 3) return std::nullopt;
+    if (std::string(ts_node_type(op)) != "binary_other_op") return std::nullopt;
+    auto op_text = trim(get_text(op));
+    bool inclusive;
+    if (op_text == "..=") inclusive = true;
+    else if (op_text == "..<") inclusive = false;
+    else return std::nullopt;
+    auto lo = parse_int_const(lhs);
+    auto hi = parse_int_const(rhs);
+    if (!lo || !hi) return std::nullopt;
+    int64_t end_incl = inclusive ? *hi : (*hi - 1);
+    return std::make_tuple(*lo, end_incl, true);
+  };
+
+  auto literal_range = try_parse_literal_range(data);
+
+  // Need a single typed_identifier binding to map the iter variable. The
+  // 3-tuple destructuring form (`for (e, idx, key) in t1`) is intentionally
+  // out of scope for this pass.
+  TSNode bind_id;
+  if (!ts_node_is_null(binding) && std::string(ts_node_type(binding)) == "typed_identifier") {
+    bind_id = child_by_field(binding, "identifier");
+  }
+
+  if (literal_range && !ts_node_is_null(bind_id) && !ts_node_is_null(code)) {
+    auto [lo, hi_incl, ok] = *literal_range;
+    (void)ok;
+    // Outer wrap stmts so the iter mut isn't visible to siblings.
+    auto outer_idx = lnast->add_child(stmts_index, Lnast_node::create_stmts());
+    auto saved     = stmts_index;
+    stmts_index    = outer_idx;
+
+    Lnast_node iter_ref = identifier_to_node(bind_id, true);
+    {
+      auto attr = lnast->add_child(stmts_index, Lnast_node::create_attr_set());
+      lnast->add_child(attr, iter_ref);
+      lnast->add_child(attr, Lnast_node::create_const("type"));
+      lnast->add_child(attr, Lnast_node::create_const("mut"));
+      auto a = lnast->add_child(stmts_index, Lnast_node::create_assign());
+      lnast->add_child(a, iter_ref);
+      lnast->add_child(a, Lnast_node::create_const("nil"));
+    }
+
+    // Empty range (lo > hi_incl) emits no iteration blocks. We still
+    // declare the iter mut so the wrap remains a valid stmts.
+    for (int64_t k = lo; k <= hi_incl; ++k) {
+      auto iter_stmts = lnast->add_child(stmts_index, Lnast_node::create_stmts());
+      auto saved2     = stmts_index;
+      stmts_index     = iter_stmts;
+      // Bare `i = k` — Symbol_table::set walks up to the outer mut declared
+      // above, so each iteration overwrites the same slot rather than
+      // shadowing. Emitting `assign` (no attr_set) keeps the resolution
+      // out-of-scope rather than re-declaring locally.
+      auto a = lnast->add_child(stmts_index, Lnast_node::create_assign());
+      lnast->add_child(a, iter_ref);
+      lnast->add_child(a, Lnast_node::create_const(std::to_string(k)));
+      // Re-walk the body TSNode each iter — make_tmp_ref counter advances,
+      // so emitted temps (`___N`) get fresh names per iteration. User
+      // names (mut x = …) get fresh per-iter declarations because each
+      // iter's stmts is a new scope.
+      process_scope_statement(code, iter_stmts);
+      stmts_index = saved2;
+    }
+    stmts_index = saved;
+    return;
+  }
+
+  // Fallback: legacy placeholder while-loop. Keeps existing parser-only
+  // tests building until we extend the unroll to range expressions whose
+  // bounds need constprop folding to resolve.
   auto while_idx = lnast->add_child(stmts_index, Lnast_node::create_while());
   lnast->add_child(while_idx, Lnast_node::create_const("true"));
   auto body_idx = lnast->add_child(while_idx, Lnast_node::create_stmts());
   auto saved    = stmts_index;
   stmts_index   = body_idx;
 
-  // Emit a placeholder assign for binding if present
   if (!ts_node_is_null(binding) && !ts_node_is_null(data)) {
     std::string t(ts_node_type(binding));
     if (t == "typed_identifier") {
@@ -685,7 +848,6 @@ void Prp2lnast::process_for_statement(TSNode n) {
     process_scope_statement(code, body_idx);
   }
 
-  // Emit break to prevent infinite loop placeholder.
   lnast->add_child(stmts_index, Lnast_node::create_invalid());  // sentinel (invalid never emitted normally)
   stmts_index = saved;
 }
@@ -833,6 +995,25 @@ void Prp2lnast::process_lambda_statement(TSNode n) {
   // recognized lambda kind; treat it as-is (no normalization).
   if (kind.size() >= 4 && kind.substr(0, 4) == "pipe") {
     kind = "pipe";
+  }
+
+  // Workaround for tree-sitter not always attaching the body to `code`:
+  // `comb mytest(a,b) -> (r) { ... }` parses as a `lambda` node followed
+  // by a sibling `scope_statement` instead of attaching the block to the
+  // lambda's `code` field. When we detect that, adopt the sibling as the
+  // body and mark its start byte so the enclosing walker
+  // (process_description / process_scope_statement) skips it.
+  if (ts_node_is_null(code)) {
+    for (TSNode sib = ts_node_next_named_sibling(n); !ts_node_is_null(sib);
+         sib       = ts_node_next_named_sibling(sib)) {
+      std::string st(ts_node_type(sib));
+      if (st == "comment") continue;
+      if (st == "scope_statement") {
+        code = sib;
+        consumed_lambda_body_starts.insert(ts_node_start_byte(sib));
+      }
+      break;
+    }
   }
 
   Lnast_node lambda_ref;

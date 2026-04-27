@@ -1,6 +1,8 @@
 //  This file is distributed under the BSD 3-Clause License. See LICENSE for details.
 #pragma once
 
+#include <cstdint>
+#include <deque>
 #include <vector>
 
 #include "absl/container/flat_hash_map.h"
@@ -9,8 +11,11 @@
 
 class Symbol_table {
 public:
-  // Every new variable declared in scope is added
-  enum class Scope_type { Function, Always, Conditional };
+  // Function: hard barrier — name lookup never crosses (callee can't see caller).
+  // Block:    transparent — bare-`x = …` walks outward to find the nearest mut.
+  // Always / Conditional: legacy categories used by hardware-style scoping;
+  //   treated as transparent walk-through, same as Block.
+  enum class Scope_type { Function, Block, Always, Conditional };
   struct Scope {
     Scope(Scope_type _type, std::string_view _func_id, std::string_view _scope) : type(_type), func_id(_func_id), scope(_scope) {}
 
@@ -19,15 +24,26 @@ public:
     std::string                                               scope;  // 0.0.1 ...
     std::vector<std::string>                                  declared;
     absl::flat_hash_map<std::string, std::shared_ptr<Bundle>> varmap;  // field, value, path_scope
+    Scope*                                                    parent{nullptr};
   };
 
   static inline Lconst invalid_lconst = Lconst::invalid();
 
-  std::vector<Scope> stack;
+  Symbol_table()                               = default;
+  Symbol_table(const Symbol_table&)            = delete;
+  Symbol_table& operator=(const Symbol_table&) = delete;
+
+  // Active scope chain: innermost at back(). Pointers refer into scope_storage.
+  std::vector<Scope*> stack;
 
   void                    function_scope(std::string_view func_id, std::shared_ptr<Bundle> inp_bundle = nullptr);  // input
   void                    always_scope();
   void                    conditional_scope();
+  // Push a block scope keyed by `key` (e.g. an LNAST nid hash). Re-entering
+  // the same `key` on a subsequent iteration restores the same Scope object,
+  // so per-iteration state (declarations, values) persists across the upass
+  // fixed-point loop. Returns the Scope that was pushed.
+  Scope*                  block_scope(uint64_t key);
   std::shared_ptr<Bundle> leave_scope();  // output bundle only when leaving function scope
 
   bool var(std::string_view key);
@@ -44,6 +60,12 @@ public:
   bool has_trivial(std::string_view key) const;
   bool has_bundle(std::string_view key) const;
   bool has_known(std::string_view key) const { return has_trivial(key) || has_bundle(key); }
+
+  // True iff `name` is declared in any reachable scope (walks the parent
+  // chain, stopping at and including the nearest Function-typed scope).
+  // The eq path uses this to distinguish "never declared anywhere" — which
+  // folds to nil — from "declared but unresolved" (stays unfolded).
+  bool is_declared(std::string_view key) const;
 
   /// Returns true iff `name` holds a concrete Lconst with no unknown bits.
   bool is_known_const(std::string_view name) const;
@@ -65,6 +87,21 @@ public:
   void dump() const;
 
 private:
+  // Owns every scope ever created. deque keeps emplaced pointers stable so
+  // `stack` and `block_scope_index` can hold raw pointers safely.
+  std::deque<Scope> scope_storage;
+
+  // Stable mapping from caller-supplied scope key (LNAST nid hash) to the
+  // Scope object that represents that block. Re-pushing the same key on a
+  // later iteration recovers the same Scope.
+  absl::flat_hash_map<uint64_t, Scope*> block_scope_index;
+
+  // Walks the active stack from innermost outward, stopping at and including
+  // the nearest Function scope (callee bodies cannot see caller variables).
+  // Returns the first scope whose varmap contains `var`, or nullptr.
+  Scope* find_decl_scope(std::string_view var);
+  const Scope* find_decl_scope(std::string_view var) const;
+
   static std::pair<std::string_view, std::string_view> get_var_field(std::string_view key) {
     auto var   = Bundle::get_first_level(key);
     auto field = Bundle::get_all_but_first_level(key);

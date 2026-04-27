@@ -6,6 +6,7 @@
 #include <stack>
 #include <string>
 #include <string_view>
+#include <unordered_set>
 #include <vector>
 
 #include "lnast.hpp"
@@ -31,6 +32,15 @@ protected:
   // Set by process_{description,scope_statement} when the new grammar's
   // statement-level `wrap`/`sat` prefix is seen; consumed by process_assignment.
   std::string pending_overflow_kind;
+
+  // Tree-sitter currently doesn't always attach a `comb foo(...) { ... }`
+  // body to the lambda's `code` field; for some inputs the body parses as
+  // a separate sibling scope_statement next to the lambda. process_lambda
+  // detects that pattern, uses the sibling as the body, and records its
+  // start byte here so the enclosing walker (process_description /
+  // process_scope_statement) skips it on the next iteration. Without
+  // this, the body content would also emit as an orphan top-level stmts.
+  std::unordered_set<uint32_t> consumed_lambda_body_starts;
 
   // Top
   void process_description();
