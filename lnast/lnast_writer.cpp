@@ -159,6 +159,32 @@ void Lnast_writer::write_func_def() {
 
 void Lnast_writer::write_io() { write_n_ary("io"); }
 
+// Pseudo-function markers: emit `dst = name(args…)` so the textual form
+// matches the legacy `func_call(dst, const(name), …)` shape.
+void Lnast_writer::write_func_marker(std::string_view name) {
+  move_to_child();
+  write_lnast();  // dst
+  print(" = ");
+  print(name);
+  print("(");
+  while (move_to_sibling()) {
+    write_lnast();
+    if (!is_last_child()) {
+      print(", ");
+    }
+  }
+  print(")");
+  move_to_parent();
+}
+
+void Lnast_writer::write_func_does()     { write_func_marker("does"); }
+void Lnast_writer::write_func_in()       { write_func_marker("in"); }
+void Lnast_writer::write_func_has()      { write_func_marker("has"); }
+void Lnast_writer::write_func_case()     { write_func_marker("case"); }
+void Lnast_writer::write_func_break()    { write_func_marker("break"); }
+void Lnast_writer::write_func_continue() { write_func_marker("continue"); }
+void Lnast_writer::write_func_return()   { write_func_marker("return"); }
+
 void Lnast_writer::write_assign() {
   move_to_child();
   write_lnast();

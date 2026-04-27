@@ -15,6 +15,7 @@ protected:
   std::string              ir_mode{"lnast"};
   bool                     dry_run{false};
   bool                     inherit_labels{true};
+  bool                     verifier_include_funcs{false};
   upass::Options_map       pass_options;
 
 public:

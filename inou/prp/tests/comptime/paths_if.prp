@@ -1,8 +1,9 @@
 /*
 :name: paths_if
 :type: comptime
-:verifier_pass: 6
+:verifier_pass: 9
 :verifier_fail: 0
+:verifier_include_funcs: true
 */
 
 
@@ -40,8 +41,21 @@ cassert c == 100
 c = 200 unless false
 cassert c == 200
 
-// FIXME: the verifier_pass should have an option for "functions"
 comb no_know_input(a)->(r) {
+  // Inner-scope folding under an uncertain cond: writes are visible while
+  // the body is walked, so casserts inside the if can fold against the
+  // in-progress value. On exit constprop invalidates anything assigned
+  // inside, which is what the (future) `cassert !c.[comptime]` would prove.
+  mut c = 1
+  mut d = 2
+  // FIXME: cassert c.[comptime]   (future, once attribute reads are supported)
+  if a {
+    cassert c == 1
+    c = d + 1
+    cassert c == 3
+  }
+  // FIXME: cassert !c.[comptime]  (future, once attribute reads are supported)
+
   r = 1
 
   if true {
@@ -51,12 +65,14 @@ comb no_know_input(a)->(r) {
   }
   cassert r == 2
 
-  if a { // NOT comptime - BUT both path same, could be optimized
+  if a { // NOT comptime - both branches converge, but invalidate-on-exit
+         // gives up the convergent value. Convergent-branch path-merge is
+         // a follow-up.
     r = 200
   }else{
     r = 200
   }
-  cassert r == 200 or r == 2
+  // FIXME: cassert !r.[comptime]   (future, once attribute reads are supported)
 
   r = 1
   if a { // NOT comptime - COULD NOT BE OPTIMIZED
@@ -66,5 +82,6 @@ comb no_know_input(a)->(r) {
   }else{
     r = 100
   }
-  cassert r == 1
+  cassert r == 1  // unknown after invalidate-on-exit; would only pass
+                  // under a convergent-branch path-merge.
 }

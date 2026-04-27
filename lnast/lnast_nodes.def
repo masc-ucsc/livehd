@@ -22,6 +22,18 @@ LNAST_NODE( func_call, fcall )
 LNAST_NODE( func_def, fdef )
 LNAST_NODE( io, io )
 
+// Pseudo-functions emitted by prp2lnast for keywords that share the
+// `func_call` shape but want a distinct dispatch tag instead of a
+// `const(name)` first child. has/in/does are folded by constprop;
+// case/break/continue/return are emitted verbatim.
+LNAST_NODE( func_does, does )
+LNAST_NODE( func_in, in )
+LNAST_NODE( func_has, has )
+LNAST_NODE( func_case, case )
+LNAST_NODE( func_break, break )
+LNAST_NODE( func_continue, continue )
+LNAST_NODE( func_return, return )
+
 // Assignment
 LNAST_NODE( assign, assign )
 LNAST_NODE( dp_assign, dp_assign )  // FIXME: remove FUTURE

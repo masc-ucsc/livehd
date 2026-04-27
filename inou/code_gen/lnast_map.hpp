@@ -13,6 +13,9 @@ protected:
                                              "top",      "sts",        "if",        "uif",       "for",
                                              "while",    "func_call",  "func_def",  "io",
 
+                                             "does",     "in",         "has",       "case",
+                                             "break",    "continue",   "return",
+
                                              "=",        ":=",         "mut",        "delay_assign",
 
                                              "&",        "|",          "~",         "^",
@@ -58,6 +61,14 @@ protected:
       "func_call",
       "func_def",
       "io",
+
+      "does",
+      "in",
+      "has",
+      "case",
+      "break",
+      "continue",
+      "return",
 
       "=",
       "=",  // dp_assign
@@ -152,6 +163,14 @@ protected:
       "func_call",
       "func_def",
       "io",
+
+      "does",
+      "in",
+      "has",
+      "case",
+      "break",
+      "continue",
+      "return",
 
       "=",  // assign
       "=",  // dp_assign

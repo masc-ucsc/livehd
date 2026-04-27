@@ -81,6 +81,13 @@ public:
   // appended to Eprp_var::lnasts.
   virtual std::vector<std::shared_ptr<Lnast>> take_new_lnasts() { return {}; }
 
+  // Called by the runner immediately before / after descending into an if-arm
+  // whose condition didn't fold to a comptime-known true or false. Constprop
+  // overrides to mark the next pushed block scope so any var assigned inside
+  // gets invalidated when the arm exits. Default: no-op.
+  virtual void notify_uncertain_arm_begin() {}
+  virtual void notify_uncertain_arm_end() {}
+
 #define PROCESS_NODE(NAME) \
   virtual void process_##NAME() {}
 
@@ -135,6 +142,16 @@ public:
   PROCESS_NODE(func_call)
   PROCESS_NODE(func_def)
   PROCESS_NODE(io)
+
+  // Pseudo-function markers (typed replacements for the const(name)-first
+  // func_call form). does/in/has fold; the rest are emitted verbatim.
+  PROCESS_NODE(func_does)
+  PROCESS_NODE(func_in)
+  PROCESS_NODE(func_has)
+  PROCESS_NODE(func_case)
+  PROCESS_NODE(func_break)
+  PROCESS_NODE(func_continue)
+  PROCESS_NODE(func_return)
 
   // Tuple Operations
   PROCESS_NODE(tuple_get)

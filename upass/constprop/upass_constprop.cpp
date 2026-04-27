@@ -16,6 +16,21 @@
 // errors when multiple TUs include upass_constprop.hpp.
 static upass::uPass_plugin cprop("constprop", upass::uPass_wrapper<uPass_constprop>::get_upass);
 
+Lconst uPass_constprop::range_to_mask(const Lconst& start, const Lconst& end) {
+  if (!start.is_i()) {
+    return Lconst::invalid();
+  }
+  const auto lo = static_cast<Bits_t>(start.to_i());
+  if (end.is_nil()) {
+    using Number = boost::multiprecision::cpp_int;
+    return Lconst(-(Number(1) << lo));
+  }
+  if (end.is_i() && end.to_i() >= start.to_i()) {
+    return Lconst::get_mask_value(static_cast<Bits_t>(end.to_i()), lo);
+  }
+  return Lconst::invalid();
+}
+
 uPass_constprop::uPass_constprop(std::shared_ptr<upass::Lnast_manager>& _lm) : uPass(_lm) {
   st.function_scope(_lm->get_top_module_name());
 }
@@ -109,27 +124,11 @@ void uPass_constprop::process_assign() {
       }
     } else if (st.has_trivial(current_text())) {
       // Scalar RHS (stored as trivial, not a bundle). Propagate the value so
-      // subsequent uses of `lhs_text` resolve. Mark changed iff the value
-      // differs, matching the const-RHS branch below.
-      auto rhs_value     = st.get_trivial(current_text());
-      bool local_changed = true;
-      if (st.has_trivial(lhs_text)) {
-        local_changed = st.get_trivial(lhs_text) != rhs_value;
-      }
-      if (local_changed && st.set(lhs_text, rhs_value)) {
-        mark_changed();
-      }
+      // subsequent uses of `lhs_text` resolve.
+      store_trivial(lhs_text, st.get_trivial(current_text()));
     }
   } else if (is_type(Lnast_ntype::Lnast_ntype_const)) {
-    // RHS is a const literal: parse and track the constant value
-    auto rhs_value     = current_pyrope_value();
-    bool local_changed = true;
-    if (st.has_trivial(lhs_text)) {
-      local_changed = st.get_trivial(lhs_text) != rhs_value;
-    }
-    if (local_changed && st.set(lhs_text, rhs_value)) {
-      mark_changed();
-    }
+    store_trivial(lhs_text, current_pyrope_value());
   } else {
     // RHS is a compound expression (tuple_get, tuple_set, func_call, attr_get, attr_set, etc.)
     // Not yet handled by constprop.  Skip this assignment to avoid crashes.
@@ -147,35 +146,25 @@ void uPass_constprop::process_nary(F op) {
   move_to_sibling();
   Lconst r = current_prim_value();
 
-  // Bail on truly opaque operands (no value tracked / non-numeric strings).
   // Unknowns (`0sb?…`) are allowed through — Lconst::add_op / mult_op / etc.
   // already propagate `?` bits, and downstream eq_op uses the resulting
   // pattern for structural-identity folding (see valid_simple).
-  if (r.is_invalid() || r.is_string()) {
+  if (!is_numeric(r)) {
     move_to_parent();
     return;
   }
   while (move_to_sibling()) {
     auto operand = current_prim_value();
-    if (operand.is_invalid() || operand.is_string()) {
+    if (!is_numeric(operand)) {
       move_to_parent();
       return;
     }
     op(r, operand);
   }
-  if (r.is_invalid()) {
-    move_to_parent();
-    return;
-  }
-  bool local_changed = true;
-  if (st.has_trivial(var)) {
-    local_changed = st.get_trivial(var) != r;
-  }
-  if (local_changed && st.set(var, r)) {
-    mark_changed();
-  }
-
   move_to_parent();
+  if (!r.is_invalid()) {
+    store_trivial(var, r);
+  }
 }
 
 template <typename F>
@@ -187,27 +176,15 @@ void uPass_constprop::process_binary(F op) {
   Lconst n1 = current_prim_value();
   move_to_sibling();
   Lconst n2 = current_prim_value();
+  move_to_parent();
 
-  // Skip folding if either operand is unknown, non-numeric, or has X-bits.
-  if (n1.is_invalid() || n1.is_string() || n1.has_unknowns() ||
-      n2.is_invalid() || n2.is_string() || n2.has_unknowns()) {
-    move_to_parent();
+  if (!foldable(n1) || !foldable(n2)) {
     return;
   }
   Lconst r = op(n1, n2);
-  if (r.is_invalid()) {
-    move_to_parent();
-    return;
+  if (!r.is_invalid()) {
+    store_trivial(var, r);
   }
-  bool local_changed = true;
-  if (st.has_trivial(var)) {
-    local_changed = st.get_trivial(var) != r;
-  }
-  if (local_changed && st.set(var, r)) {
-    mark_changed();
-  }
-
-  move_to_parent();
 }
 
 template <typename F>
@@ -217,22 +194,13 @@ void uPass_constprop::process_unary(F op) {
   auto var = current_text();
   move_to_sibling();
   Lconst r = current_prim_value();
+  move_to_parent();
 
-  // Skip folding if input is unknown, non-numeric, or has X-bits.
-  if (r.is_invalid() || r.is_string() || r.has_unknowns()) {
-    move_to_parent();
+  if (!foldable(r)) {
     return;
   }
   op(r);
-  bool local_changed = true;
-  if (st.has_trivial(var)) {
-    local_changed = st.get_trivial(var) != r;
-  }
-  if (local_changed && st.set(var, r)) {
-    mark_changed();
-  }
-
-  move_to_parent();
+  store_trivial(var, r);
 }
 
 void uPass_constprop::process_plus() {
@@ -436,107 +404,82 @@ static bool structural_does(const std::shared_ptr<Bundle const>& a,
 // short-circuit.
 template <bool Negate>
 void uPass_constprop::process_eq_ne_impl() {
+  // Resolve an operand to one of three states:
+  //   - bundle: a tracked tuple (multi-entry or non-scalar wrapper)
+  //   - scalar: a known Lconst (default is invalid; never zero)
+  //   - undeclared_ref: ref that was never declared in any reachable scope
+  //   - is_const_nil: literal `nil` const
+  // is_const_nil + the OTHER side being undeclared lets us fold the pyrope
+  // semantic that an undeclared name reads as nil — narrowed to the
+  // `== nil` shape so casserts in function bodies prp2lnast still emits as
+  // top-level fdef siblings (scope2.prp's mytest body) don't fold against a
+  // synthesized nil and trip the verifier.
+  struct Operand {
+    std::shared_ptr<Bundle const> bundle;
+    Lconst                        scalar         = Lconst::invalid();
+    bool                          is_const_nil   = false;
+    bool                          undeclared_ref = false;
+  };
+  auto resolve = [this]() -> Operand {
+    Operand o;
+    if (is_type(Lnast_ntype::Lnast_ntype_ref)) {
+      auto name = current_text();
+      auto b    = st.get_bundle(name);
+      if (b && !b->is_scalar()) {
+        o.bundle = b;
+      } else if (st.has_trivial(name)) {
+        o.scalar = st.get_trivial(name);
+      } else if (!st.is_declared(name)) {
+        o.undeclared_ref = true;
+      }
+      // else: declared but no concrete value yet — leave scalar invalid.
+    } else {
+      o.scalar       = current_pyrope_value();
+      o.is_const_nil = o.scalar.is_nil();
+    }
+    return o;
+  };
+
   move_to_child();
   auto var = std::string(current_text());
   move_to_sibling();
-
-  // Resolve operands: bundles that hold a single trivial value collapse to
-  // a scalar so we can use the cheap Lconst comparison (st.get_bundle on a
-  // scalar-stored ref still returns its single-entry bundle wrapper, so we
-  // can't just check ba/bb non-null). undeclared_invalid tracks per-operand
-  // whether the operand was a never-declared ref — used by the post-resolve
-  // pass below to fold `x == nil` semantics for out-of-scope reads.
-  auto resolve = [this](std::shared_ptr<Bundle const>& bp, Lconst& sv,
-                        bool& is_const_nil, bool& undeclared_ref) {
-    if (is_type(Lnast_ntype::Lnast_ntype_ref)) {
-      auto name = current_text();
-      auto b = st.get_bundle(name);
-      if (b && !b->is_scalar()) {
-        bp = b;
-      } else if (st.has_trivial(name)) {
-        sv = st.get_trivial(name);
-      } else if (!st.is_declared(name)) {
-        undeclared_ref = true;
-      }
-      // else: declared but no concrete value yet — leave sv invalid so the
-      // eq stays unfolded for this iteration.
-    } else {
-      sv = current_pyrope_value();
-      if (sv.is_nil()) {
-        is_const_nil = true;
-      }
-    }
-  };
-  std::shared_ptr<Bundle const> ba;
-  // Default-constructed Lconst is bits=0/num=0/explicit_str=false — NOT
-  // is_invalid() — so initialize explicitly. Otherwise an undeclared ref
-  // (whose sv we leave untouched) would parade as a known-zero value and
-  // fold every "z == 123" against it.
-  Lconst                        n1              = Lconst::invalid();
-  bool                          n1_is_const_nil = false;
-  bool                          n1_undeclared   = false;
-  resolve(ba, n1, n1_is_const_nil, n1_undeclared);
+  Operand a = resolve();
   move_to_sibling();
-  std::shared_ptr<Bundle const> bb;
-  Lconst                        n2              = Lconst::invalid();
-  bool                          n2_is_const_nil = false;
-  bool                          n2_undeclared   = false;
-  resolve(bb, n2, n2_is_const_nil, n2_undeclared);
+  Operand b = resolve();
+  move_to_parent();
 
-  // Out-of-scope ref vs. literal `nil`: the pyrope semantic is that an
-  // undeclared name reads as nil, so `a == nil` / `b != nil` should fold
-  // even when the ref has never been declared in any reachable scope.
-  // We narrow the substitution to comparisons where the OTHER operand is a
-  // literal `nil`, so the function-body code that prp2lnast still emits as
-  // a top-level sibling of fdef (see scope2.prp's mytest body) doesn't have
-  // its `cassert a == 11` casserts fold against `a = nil` and trigger
-  // false verifier failures. Scope1 only tests the `== nil` shape, so this
-  // narrower rule covers the intended semantics without the side-effects.
-  if (n1_undeclared && n2_is_const_nil) {
-    n1 = Lconst::nil();
+  if (a.undeclared_ref && b.is_const_nil) {
+    a.scalar = Lconst::nil();
   }
-  if (n2_undeclared && n1_is_const_nil) {
-    n2 = Lconst::nil();
+  if (b.undeclared_ref && a.is_const_nil) {
+    b.scalar = Lconst::nil();
   }
 
   // Three outcomes the rest of the pass cares about: known-true, known-false,
   // or a 1-bit unknown. Bundles only produce known true/false; the scalar
   // path may produce unknowns when an operand has them.
   std::optional<Lconst> result;
-  if (ba && bb) {
-    auto eq = compare_bundles_eq(ba, bb);
-    if (eq.has_value()) {
-      bool truth = *eq ^ Negate;
-      result     = truth ? Lconst(1) : Lconst(0);
+  if (a.bundle && b.bundle) {
+    if (auto eq = compare_bundles_eq(a.bundle, b.bundle); eq.has_value()) {
+      result = (*eq ^ Negate) ? Lconst(1) : Lconst(0);
     }
-  } else if (!ba && !bb) {
-    if (!n1.is_invalid() && !n2.is_invalid()) {
-      // Defer to Lconst::eq_op: it compares (num,bits) for fully-known
-      // operands and yields a 1-bit unknown (`0sb?`) when bits collide
-      // with `?` chars. Structural identity (operator==) inside eq_op
-      // returns known-true even when both operands carry unknowns —
-      // that's the comptime-equality contract used by valid_simple.
-      const Lconst eq = n1.eq_op(n2);
-      if (eq.is_known_true()) {
-        result = Negate ? Lconst(0) : Lconst(1);
-      } else if (eq.is_known_false()) {
-        result = Negate ? Lconst(1) : Lconst(0);
-      } else if (eq.has_unknowns()) {
-        // ne is bitwise-not of eq; for a 1-bit unknown the inversion is
-        // still a 1-bit unknown, so both branches store the same value.
-        result = eq;
-      }
+  } else if (!a.bundle && !b.bundle && !a.scalar.is_invalid() && !b.scalar.is_invalid()) {
+    // Defer to Lconst::eq_op: structural identity yields known-true even
+    // when both sides carry unknowns; otherwise a 1-bit `0sb?` for unknowns.
+    const Lconst eq = a.scalar.eq_op(b.scalar);
+    if (eq.is_known_true()) {
+      result = Negate ? Lconst(0) : Lconst(1);
+    } else if (eq.is_known_false()) {
+      result = Negate ? Lconst(1) : Lconst(0);
+    } else if (eq.has_unknowns()) {
+      // ne is bitwise-not of eq; a 1-bit unknown inverted is still 1-bit unknown.
+      result = eq;
     }
   }
-  // Mixed bundle vs scalar — leave unresolved.
 
   if (result.has_value()) {
-    bool local_changed = !st.has_trivial(var) || st.get_trivial(var) != *result;
-    if (local_changed && st.set(var, *result)) {
-      mark_changed();
-    }
+    store_trivial(var, *result);
   }
-  move_to_parent();
 }
 
 void uPass_constprop::process_ne() { process_eq_ne_impl<true>(); }
@@ -592,6 +535,16 @@ void uPass_constprop::process_if() {
 // the function_scope established in the constructor remains the parent.
 void uPass_constprop::process_stmts() {
   st.block_scope(lm->get_current_nid().get_hash());
+  // The runner sets next_block_uncertain via notify_uncertain_arm_begin
+  // immediately before descending into an if-arm whose cond didn't fold to
+  // known-true/known-false. Mark the just-pushed scope so leave_scope can
+  // invalidate any var assigned inside the body — without this, the
+  // sequential walk leaves the last-branch's writes visible to code after
+  // the if and folds casserts that depend on them.
+  if (next_block_uncertain) {
+    st.mark_current_uncertain();
+    next_block_uncertain = false;
+  }
 }
 
 void uPass_constprop::process_stmts_post() {
@@ -758,10 +711,7 @@ void uPass_constprop::process_tuple_concat() {
     // Tuple-mode result: dst is a tuple regardless of its final entry count.
     tuple_typed_names.insert(dst);
   } else {
-    bool local_changed = !st.has_trivial(dst) || st.get_trivial(dst) != acc_scalar;
-    if (local_changed && st.set(dst, acc_scalar)) {
-      mark_changed();
-    }
+    store_trivial(dst, acc_scalar);
   }
 }
 
@@ -834,26 +784,18 @@ static bool has_first_level_shape(const std::shared_ptr<Bundle const>& b) {
 // On exit the cursor is left on whichever child we last visited; the caller
 // (process_func_call) is responsible for `move_to_parent`.
 void uPass_constprop::fold_does(const std::string& dst) {
-  auto resolve_bundle = [this]() -> std::shared_ptr<Bundle const> {
-    if (is_type(Lnast_ntype::Lnast_ntype_ref)) {
-      auto b = st.get_bundle(current_text());
-      if (b && has_first_level_shape(b)) {
-        return b;
-      }
-    }
-    return nullptr;
-  };
-
   if (!move_to_sibling()) {
     return;
   }
-  auto ba = resolve_bundle();
+  auto ba = current_ref_bundle();
   if (!move_to_sibling()) {
     return;
   }
-  auto bb = resolve_bundle();
+  auto bb = current_ref_bundle();
 
-  if (!ba || !bb) {
+  // Both sides need at least a recognisable first-level shape; otherwise
+  // structural matching has nothing to compare.
+  if (!ba || !bb || !has_first_level_shape(ba) || !has_first_level_shape(bb)) {
     return;
   }
   // At least one side must prove it's a real tuple, otherwise scalar-vs-
@@ -864,11 +806,7 @@ void uPass_constprop::fold_does(const std::string& dst) {
     return;
   }
 
-  const Lconst result        = structural_does(ba, bb) ? Lconst(1) : Lconst(0);
-  bool         local_changed = !st.has_trivial(dst) || st.get_trivial(dst) != result;
-  if (local_changed && st.set(dst, result)) {
-    mark_changed();
-  }
+  store_trivial(dst, structural_does(ba, bb) ? Lconst(1) : Lconst(0));
 }
 
 // Per-first-level summary used by fold_in / fold_has: groups a bundle's flat
@@ -941,21 +879,14 @@ static std::vector<Bundle_flat_entry> collect_first_level(const std::shared_ptr<
 // On exit the cursor is left on the last visited child; the caller
 // (process_func_call) is responsible for `move_to_parent`.
 void uPass_constprop::fold_in(const std::string& dst) {
-  auto resolve_bundle = [this]() -> std::shared_ptr<Bundle const> {
-    if (is_type(Lnast_ntype::Lnast_ntype_ref)) {
-      return st.get_bundle(current_text());
-    }
-    return nullptr;
-  };
-
   if (!move_to_sibling()) {
     return;
   }
-  auto ba = resolve_bundle();
+  auto ba = current_ref_bundle();
   if (!move_to_sibling()) {
     return;
   }
-  auto bb = resolve_bundle();
+  auto bb = current_ref_bundle();
   if (!ba || !bb) {
     return;  // need both sides as known bundles
   }
@@ -1050,11 +981,7 @@ void uPass_constprop::fold_in(const std::string& dst) {
   if (!outcome.has_value()) {
     return;
   }
-  const Lconst result        = *outcome ? Lconst(1) : Lconst(0);
-  bool         local_changed = !st.has_trivial(dst) || st.get_trivial(dst) != result;
-  if (local_changed && st.set(dst, result)) {
-    mark_changed();
-  }
+  store_trivial(dst, *outcome ? Lconst(1) : Lconst(0));
 }
 
 // Fold `dst = has(l, key)`. Cursor is on the const("has") marker.
@@ -1095,10 +1022,7 @@ void uPass_constprop::fold_has(const std::string& dst) {
   if (key_val.is_string()) {
     // String literals round-trip through `'foo'` — strip the quotes to get
     // the bare name used in `:N:name` keys.
-    std::string s = key_val.to_pyrope();
-    if (s.size() >= 2 && s.front() == '\'' && s.back() == '\'') {
-      s = s.substr(1, s.size() - 2);
-    }
+    const std::string s = strip_pyrope_quotes(key_val.to_pyrope());
     for (const auto& e : entries) {
       if (e.name == s) {
         found = true;
@@ -1106,7 +1030,6 @@ void uPass_constprop::fold_has(const std::string& dst) {
       }
     }
   } else if (!key_val.is_nil() && !key_val.has_unknowns()) {
-    // Position lookup: any first-level entry whose recorded pos matches.
     const int target = key_val.to_i();
     for (const auto& e : entries) {
       if (e.pos == target) {
@@ -1118,11 +1041,7 @@ void uPass_constprop::fold_has(const std::string& dst) {
     return;  // nil/unknown key — defer
   }
 
-  const Lconst result        = found ? Lconst(1) : Lconst(0);
-  bool         local_changed = !st.has_trivial(dst) || st.get_trivial(dst) != result;
-  if (local_changed && st.set(dst, result)) {
-    mark_changed();
-  }
+  store_trivial(dst, found ? Lconst(1) : Lconst(0));
 }
 
 std::optional<Lconst> uPass_constprop::resolve_current_scalar() const {
@@ -1507,10 +1426,7 @@ bool uPass_constprop::try_eval_comb_call(std::string_view dst, std::string_view 
     if (it == local_values.end() || it->second.is_invalid()) {
       return false;
     }
-    bool local_changed = !st.has_trivial(dst) || st.get_trivial(dst) != it->second;
-    if (local_changed && st.set(dst, it->second)) {
-      mark_changed();
-    }
+    store_trivial(dst, it->second);
     return true;
   }
 
@@ -1526,33 +1442,40 @@ bool uPass_constprop::try_eval_comb_call(std::string_view dst, std::string_view 
   return true;
 }
 
+// Marker pseudo-function handlers. The runner has already moved the cursor
+// onto the func_<name> node; each fold_* helper expects the cursor to be on
+// a sibling whose next-sibling is the first argument, which `move_to_child`
+// (landing on dst-ref) satisfies.
+void uPass_constprop::process_func_does() {
+  move_to_child();
+  std::string dst(current_text());
+  fold_does(dst);
+  move_to_parent();
+}
+
+void uPass_constprop::process_func_in() {
+  move_to_child();
+  std::string dst(current_text());
+  fold_in(dst);
+  move_to_parent();
+}
+
+void uPass_constprop::process_func_has() {
+  move_to_child();
+  std::string dst(current_text());
+  fold_has(dst);
+  move_to_parent();
+}
+
 void uPass_constprop::process_func_call() {
-  // Layout: ref(dst), ref(func_name) | const(marker_name), (const|ref)(arg)...
-  // Two flavours:
-  //   - ref-form fname  : built-in typecast callables (int/uint/string/sized).
-  //   - const-form fname: marker calls emitted by prp2lnast for operators
-  //     without a dedicated LNAST node — `does`, `case`, `has`, `in`,
-  //     `break`, `continue`, `return`. We fold the comptime ones here
-  //     (`does` for now); the rest are passed through.
-  // Anything we don't recognise is left as-is for a later pass.
+  // Layout: ref(dst), ref(func_name), (const|ref)(arg)...
+  // Now strictly the ref-form (built-in typecast callables and user funcs).
+  // Pseudo-functions `does/in/has/case/break/continue/return` arrive as
+  // dedicated ntypes (process_func_does/in/has/...). The remaining const-form
+  // shapes (e.g. `import`) fall through and are left unfolded.
   move_to_child();
   std::string dst(current_text());
   if (!move_to_sibling()) {
-    move_to_parent();
-    return;
-  }
-
-  // Marker-form func_call: const(name). Dispatch on the marker name.
-  if (is_type(Lnast_ntype::Lnast_ntype_const)) {
-    std::string marker(current_text());
-    if (marker == "does") {
-      fold_does(dst);
-    } else if (marker == "in") {
-      fold_in(dst);
-    } else if (marker == "has") {
-      fold_has(dst);
-    }
-    // Other markers (case/break/continue/return) — leave unfolded.
     move_to_parent();
     return;
   }
@@ -1624,12 +1547,8 @@ void uPass_constprop::process_func_call() {
     if (!a.is_string()) {
       return a;
     }
-    std::string s = a.to_pyrope();
-    if (s.size() >= 2 && s.front() == '\'' && s.back() == '\'') {
-      s = s.substr(1, s.size() - 2);
-    }
     try {
-      return Lconst::from_pyrope(s);
+      return Lconst::from_pyrope(strip_pyrope_quotes(a.to_pyrope()));
     } catch (...) {
       return Lconst::invalid();
     }
@@ -1689,13 +1608,7 @@ void uPass_constprop::process_func_call() {
     }
   }
 
-  bool local_changed = true;
-  if (st.has_trivial(dst)) {
-    local_changed = st.get_trivial(dst) != result;
-  }
-  if (local_changed && st.set(dst, result)) {
-    mark_changed();
-  }
+  store_trivial(dst, result);
 }
 
 void uPass_constprop::process_range() {
@@ -1712,28 +1625,16 @@ void uPass_constprop::process_range() {
   move_to_child();
   auto dst = std::string(current_text());
 
-  auto read_operand = [this]() -> Lconst {
-    if (is_type(Lnast_ntype::Lnast_ntype_const)) {
-      return Lconst::from_pyrope(current_text());
-    }
-    if (is_type(Lnast_ntype::Lnast_ntype_ref)) {
-      if (st.has_trivial(current_text())) {
-        return st.get_trivial(current_text());
-      }
-    }
-    return Lconst::invalid();
-  };
-
   if (!move_to_sibling()) {
     move_to_parent();
     return;
   }
-  Lconst start = read_operand();
+  Lconst start = current_prim_value();
   if (!move_to_sibling()) {
     move_to_parent();
     return;
   }
-  Lconst end = read_operand();
+  Lconst end = current_prim_value();
   move_to_parent();
 
   if (start.is_invalid() || end.is_invalid()) {
@@ -1792,54 +1693,32 @@ void uPass_constprop::process_tuple_get() {
   if (is_type(Lnast_ntype::Lnast_ntype_ref) && is_last_child()) {
     auto it = range_map.find(std::string(current_text()));
     if (it != range_map.end() && st.has_trivial(src)) {
-      const auto src_val = st.get_trivial(src);
-      if (src_val.is_string() && it->second.first.is_i()) {
-        const auto& end_lc    = it->second.second;
-        const auto  start_idx = static_cast<size_t>(it->second.first.to_i());
-        std::string body      = src_val.to_pyrope();
-        // to_pyrope wraps strings in single-quotes; strip them.
-        if (body.size() >= 2 && body.front() == '\'' && body.back() == '\'') {
-          body = body.substr(1, body.size() - 2);
-        }
-        size_t len   = body.size();
-        bool   open  = end_lc.is_nil();  // open-end sentinel for `x[a..]`
+      const auto& src_val = st.get_trivial(src);
+      const auto& start   = it->second.first;
+      const auto& end_lc  = it->second.second;
+      if (src_val.is_string() && start.is_i()) {
+        const auto  start_idx = static_cast<size_t>(start.to_i());
+        std::string body      = strip_pyrope_quotes(src_val.to_pyrope());
+        size_t      len       = body.size();
+        bool        open      = end_lc.is_nil();  // open-end sentinel for `x[a..]`
         if (!open && !end_lc.is_i()) {
-          // closed end must be an integer to fold; bail otherwise.
           move_to_parent();
           return;
         }
         size_t end_i = open ? (len == 0 ? 0 : len - 1) : static_cast<size_t>(end_lc.to_i());
         if (start_idx <= len && end_i + 1 <= len && start_idx <= end_i + 1) {
-          auto         sliced       = body.substr(start_idx, end_i - start_idx + 1);
-          const Lconst result       = Lconst::from_string(sliced);
-          bool         local_changed = !st.has_trivial(dst) || st.get_trivial(dst) != result;
-          if (local_changed && st.set(dst, result)) {
-            mark_changed();
-          }
+          store_trivial(dst, Lconst::from_string(body.substr(start_idx, end_i - start_idx + 1)));
           move_to_parent();
           return;
         }
       }
-      // Integer bit-slice: `b[lo..=hi]` / `b[lo..<hi]` / `b[lo..]` on an
-      // integer source extracts the named bit window via Lconst::get_mask_op.
-      if (!src_val.is_string() && !src_val.is_invalid() && !src_val.has_unknowns()
-          && it->second.first.is_i()) {
-        const auto& end_lc = it->second.second;
-        const auto  lo     = static_cast<Bits_t>(it->second.first.to_i());
-        Lconst      mask;
-        if (end_lc.is_nil()) {
-          using Number = boost::multiprecision::cpp_int;
-          mask         = Lconst(-(Number(1) << lo));
-        } else if (end_lc.is_i() && end_lc.to_i() >= it->second.first.to_i()) {
-          mask = Lconst::get_mask_value(static_cast<Bits_t>(end_lc.to_i()), lo);
-        }
+      // Integer bit-slice via the same range→mask synthesis used by get_mask.
+      if (foldable(src_val)) {
+        const Lconst mask = range_to_mask(start, end_lc);
         if (!mask.is_invalid()) {
-          const Lconst result        = src_val.get_mask_op(mask);
+          const Lconst result = src_val.get_mask_op(mask);
           if (!result.is_invalid()) {
-            bool       local_changed = !st.has_trivial(dst) || st.get_trivial(dst) != result;
-            if (local_changed && st.set(dst, result)) {
-              mark_changed();
-            }
+            store_trivial(dst, result);
           }
           move_to_parent();
           return;
@@ -1873,11 +1752,7 @@ void uPass_constprop::process_tuple_get() {
 
   // Propagate trivial value if available; fall back to bundle propagation.
   if (st.has_trivial(key)) {
-    const Lconst result        = st.get_trivial(key);
-    bool         local_changed = !st.has_trivial(dst) || st.get_trivial(dst) != result;
-    if (local_changed && st.set(dst, result)) {
-      mark_changed();
-    }
+    store_trivial(dst, st.get_trivial(key));
   } else if (st.has_bundle(key)) {
     auto sub_bundle = st.get_bundle(key);
     if (sub_bundle) {
@@ -1953,12 +1828,7 @@ void uPass_constprop::process_tuple_set() {
     // bundle. If the source has no value yet, leave the field unchanged so
     // a later iteration can still discover it.
     if (st.has_trivial(val_child.text)) {
-      const auto sv            = st.get_trivial(val_child.text);
-      bool       local_changed = !st.has_trivial(key) || st.get_trivial(key) != sv;
-      if (local_changed) {
-        st.set(key, sv);
-        mark_changed();
-      }
+      store_trivial(key, st.get_trivial(val_child.text));
     } else if (st.has_bundle(val_child.text)) {
       auto b = st.get_bundle(val_child.text);
       if (b) {
@@ -1966,14 +1836,9 @@ void uPass_constprop::process_tuple_set() {
       }
     }
   } else {
-    // Const literal: parse and store as trivial.
     Lconst val = Lconst::from_pyrope(val_child.text);
     if (!val.is_invalid()) {
-      bool local_changed = !st.has_trivial(key) || st.get_trivial(key) != val;
-      if (local_changed) {
-        st.set(key, val);
-        mark_changed();
-      }
+      store_trivial(key, val);
     }
   }
   move_to_parent();
@@ -1981,64 +1846,39 @@ void uPass_constprop::process_tuple_set() {
 
 // ── Bitwidth Insensitive Reduce ──────────────────────────────────────────────
 //
-// All three reduction ops share the same inline pattern:
-//   1. Move into the op-node and read the destination ref.
-//   2. Move to the single input operand (ref or const).
-//   3. If the input is unknown (invalid), skip — we cannot fold.
-//   4. Otherwise, compute the 1-bit boolean result and store it.
-//
-// We do NOT use process_unary() here because that template unconditionally
-// calls st.set() even when the input is Lconst::invalid(), which would
-// corrupt the symbol table with a spurious zero.
-
-void uPass_constprop::process_red_or() {
-  // Reduce-OR: returns 1 if any bit in input is set, 0 if all bits are zero.
+// Each reduction op reads its single operand, runs a predicate, and stores
+// the 1-bit result. We can't reuse process_unary because it stores even when
+// the input is invalid (red_or in particular wants to skip on invalid but
+// fold through unknowns; red_and/xor reject unknowns). The shared template
+// here takes the gate predicate so each op states its own contract.
+template <typename Gate, typename Pred>
+void uPass_constprop::process_reduction(Gate gate, Pred pred) {
   move_to_child();
-  auto var = current_text();
+  auto       var   = current_text();
   move_to_sibling();
   const auto input = current_prim_value();
-  if (!input.is_invalid()) {
-    const Lconst result        = input.is_known_false() ? Lconst(0) : Lconst(1);
-    bool         local_changed = !st.has_trivial(var) || st.get_trivial(var) != result;
-    if (local_changed && st.set(var, result)) {
-      mark_changed();
-    }
-  }
   move_to_parent();
+  if (!gate(input)) {
+    return;
+  }
+  store_trivial(var, pred(input) ? Lconst(1) : Lconst(0));
+}
+
+void uPass_constprop::process_red_or() {
+  // Reduce-OR: 1 if any bit in input is set. Unknown bits are ok — the
+  // value is non-zero iff *any* bit (known or `?`) is set.
+  process_reduction([](const Lconst& v) { return !v.is_invalid(); },
+                    [](const Lconst& v) { return !v.is_known_false(); });
 }
 
 void uPass_constprop::process_red_and() {
-  // Reduce-AND: returns 1 only if every bit in input is set (i.e., input is
-  // an all-ones mask in its natural bit-width).  Lconst::is_mask() returns
-  // true iff the numeric value is of the form 2^n - 1 (all-ones).
-  move_to_child();
-  auto var = current_text();
-  move_to_sibling();
-  const auto input = current_prim_value();
-  if (!input.is_invalid() && !input.has_unknowns()) {
-    const Lconst result        = input.is_mask() ? Lconst(1) : Lconst(0);
-    bool         local_changed = !st.has_trivial(var) || st.get_trivial(var) != result;
-    if (local_changed && st.set(var, result)) {
-      mark_changed();
-    }
-  }
-  move_to_parent();
+  // Reduce-AND: 1 iff every bit is set (input is a 2^n-1 mask).
+  process_reduction(foldable, [](const Lconst& v) { return v.is_mask(); });
 }
 
 void uPass_constprop::process_red_xor() {
-  // Reduce-XOR: returns the parity of the set bits (1 if popcount is odd).
-  move_to_child();
-  auto var = current_text();
-  move_to_sibling();
-  const auto input = current_prim_value();
-  if (!input.is_invalid() && !input.has_unknowns()) {
-    const Lconst result        = (input.popcount() % 2 == 1) ? Lconst(1) : Lconst(0);
-    bool         local_changed = !st.has_trivial(var) || st.get_trivial(var) != result;
-    if (local_changed && st.set(var, result)) {
-      mark_changed();
-    }
-  }
-  move_to_parent();
+  // Reduce-XOR: parity of set bits.
+  process_reduction(foldable, [](const Lconst& v) { return v.popcount() % 2 == 1; });
 }
 
 // ── Bit Manipulation ─────────────────────────────────────────────────────────
@@ -2129,29 +1969,18 @@ std::optional<Lconst> uPass_constprop::fold_ref(std::string_view name) {
 
 void uPass_constprop::process_sext() {
   // Sign-extend: [sext: ref(dst), ref_or_const(src), const(nbits)]
-  //
-  // sext_op(ebits) interprets bit (ebits-1) of src as the sign bit and
-  // truncates/extends to that width.  The result is a narrower (or equal)
-  // signed integer.
-  //
-  // We skip folding if:
-  //   - src is unknown (invalid or has unknowns), or
-  //   - nbits is not a known integer (not is_i()).
+  // sext_op(ebits) interprets bit (ebits-1) of src as the sign bit.
+  // Skip folding if src is unfoldable or nbits is not a known integer.
   move_to_child();
-  auto var = current_text();
+  auto       var      = current_text();
   move_to_sibling();
-  const auto src = current_prim_value();
+  const auto src      = current_prim_value();
   move_to_sibling();
   const auto nbits_lc = current_prim_value();
-  if (!src.is_invalid() && !src.has_unknowns() && !src.is_string() && !nbits_lc.is_invalid() && nbits_lc.is_i()) {
-    const auto   ebits         = static_cast<Bits_t>(nbits_lc.to_i());
-    const Lconst result        = src.sext_op(ebits);
-    bool         local_changed = !st.has_trivial(var) || st.get_trivial(var) != result;
-    if (local_changed && st.set(var, result)) {
-      mark_changed();
-    }
-  }
   move_to_parent();
+  if (foldable(src) && !nbits_lc.is_invalid() && nbits_lc.is_i()) {
+    store_trivial(var, src.sext_op(static_cast<Bits_t>(nbits_lc.to_i())));
+  }
 }
 
 void uPass_constprop::process_get_mask() {
@@ -2174,48 +2003,20 @@ void uPass_constprop::process_get_mask() {
     return;
   }
 
-  Lconst mask;
+  Lconst mask = current_prim_value();
   if (is_type(Lnast_ntype::Lnast_ntype_ref)) {
-    auto rit = range_map.find(std::string(current_text()));
-    if (rit != range_map.end()) {
-      const auto& start = rit->second.first;
-      const auto& end   = rit->second.second;
-      if (start.is_i()) {
-        const auto lo = static_cast<Bits_t>(start.to_i());
-        if (end.is_nil()) {
-          // Open end: bits lo..msb. Negative-mask form for get_mask_op.
-          using Number = boost::multiprecision::cpp_int;
-          Number n     = -(Number(1) << lo);
-          mask         = Lconst(n);
-        } else if (end.is_i() && end.to_i() >= start.to_i()) {
-          const auto hi = static_cast<Bits_t>(end.to_i());
-          mask          = Lconst::get_mask_value(hi, lo);
-        } else {
-          mask = Lconst::invalid();
-        }
-      } else {
-        mask = Lconst::invalid();
-      }
-    } else {
-      mask = current_prim_value();
+    if (auto rit = range_map.find(std::string(current_text())); rit != range_map.end()) {
+      mask = range_to_mask(rit->second.first, rit->second.second);
     }
-  } else {
-    mask = current_prim_value();
   }
 
   move_to_parent();
 
-  if (value.is_invalid() || mask.is_invalid() || value.is_string() || mask.is_string()
-      || value.has_unknowns() || mask.has_unknowns()) {
+  if (!foldable(value) || !foldable(mask)) {
     return;
   }
-
-  Lconst result        = value.get_mask_op(mask);
-  if (result.is_invalid()) {
-    return;
-  }
-  bool   local_changed = !st.has_trivial(var) || st.get_trivial(var) != result;
-  if (local_changed && st.set(var, result)) {
-    mark_changed();
+  Lconst result = value.get_mask_op(mask);
+  if (!result.is_invalid()) {
+    store_trivial(var, result);
   }
 }

@@ -107,6 +107,8 @@ class PrpRunner:
             upass_args += ' verifier_pass:' + test.params['verifier_pass']
         if 'verifier_fail' in test.params:
             upass_args += ' verifier_fail:' + test.params['verifier_fail']
+        if 'verifier_include_funcs' in test.params:
+            upass_args += ' verifier_include_funcs:' + test.params['verifier_include_funcs']
 
         lg_cmd.append('|>')
         lg_cmd.append(upass_args)

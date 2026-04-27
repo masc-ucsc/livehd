@@ -428,6 +428,15 @@ void uPass_runner::process_lnast() {
     // built-in typecast calls (int/uint/string/uNN/sNN); anything constprop
     // declines to handle stays un-folded and the statement is emitted.
     A_OP(func_call)
+    // does/in/has fold to a known boolean → drop-candidate.
+    A_OP(func_does)
+    A_OP(func_in)
+    A_OP(func_has)
+    // case/break/continue/return have no comptime fold yet — emit verbatim.
+    C_OP(func_case)
+    C_OP(func_break)
+    C_OP(func_continue)
+    C_OP(func_return)
     case Ntype::Lnast_ntype_func_def:
       process_drop_candidate_verbatim(&upass::uPass::process_func_def);
       break;
@@ -537,10 +546,11 @@ void uPass_runner::process_if() {
     //   - matched-already (previous arm was known-true): emit verbatim.
     //   - unknown / partially-known: process normally (conservative —
     //     the symbol table merges values across both branches today).
-    bool last_cond_false   = false;
-    bool last_cond_true    = false;
-    bool last_was_cond     = false;
-    bool already_matched   = false;  // a *previous* arm already fired
+    bool last_cond_false      = false;
+    bool last_cond_true       = false;
+    bool last_was_cond        = false;
+    bool already_matched      = false;  // a *previous* arm already fired
+    bool any_prior_uncertain  = false;  // some earlier cond folded to neither true nor false
 
     auto cond_value = [this]() -> std::optional<Lconst> {
       if (lm->get_raw_ntype() == Lnast_ntype::Lnast_ntype_const) {
@@ -564,12 +574,24 @@ void uPass_runner::process_if() {
         // immediate cond just folded to false.
         const bool dead = already_matched || (last_was_cond && last_cond_false);
         const bool just_matched = last_was_cond && last_cond_true;
+        // Uncertain := body executes but isn't *guaranteed* to. After a
+        // cond: !just_matched (dead is handled separately, so the cond
+        // wasn't known-false). Trailing else with no preceding cond: only
+        // uncertain when some prior arm's cond didn't fold either way; if
+        // every prior cond folded to known-false the else *is* guaranteed.
+        const bool uncertain = last_was_cond ? !just_matched : any_prior_uncertain;
         last_was_cond = false;
         if (dead) {
           emit_subtree_verbatim();
           continue;
         }
+        if (uncertain) {
+          dispatch_to_passes(&upass::uPass::notify_uncertain_arm_begin);
+        }
         process_lnast();
+        if (uncertain) {
+          dispatch_to_passes(&upass::uPass::notify_uncertain_arm_end);
+        }
         // Process the body first, THEN flip the matched flag — so the
         // current arm's body actually dispatches into constprop. Only
         // *subsequent* arms / else become dead.
@@ -584,6 +606,9 @@ void uPass_runner::process_if() {
       last_cond_true  = val.has_value() && !val->is_invalid() && val->is_known_true();
       last_cond_false = val.has_value() && !val->is_invalid() && val->is_known_false();
       last_was_cond   = true;
+      if (!last_cond_true && !last_cond_false) {
+        any_prior_uncertain = true;
+      }
       process_lnast();
     } while (lm->move_to_sibling());
     lm->move_to_parent();

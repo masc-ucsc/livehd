@@ -151,6 +151,8 @@ static bool parent_writes_pos0(Lnast_ntype pt) {
          || pt.is_mask_popcount() || pt.is_set_mask() || pt.is_get_mask() || pt.is_eq() || pt.is_ne() || pt.is_lt() || pt.is_le()
          || pt.is_gt() || pt.is_ge() || pt.is_is() || pt.is_tuple_add() || pt.is_tuple_get() || pt.is_tuple_set()
          || pt.is_tuple_concat() || pt.is_attr_set() || pt.is_attr_get() || pt.is_func_call() || pt.is_func_def() || pt.is_range()
+         || pt.is_func_does() || pt.is_func_in() || pt.is_func_has() || pt.is_func_case()
+         || pt.is_func_break() || pt.is_func_continue() || pt.is_func_return()
          || pt.is_phi() || pt.is_hot_phi() || pt.is_for();
 }
 

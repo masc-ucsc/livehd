@@ -90,6 +90,9 @@ void Pass_upass::setup() {
   m1.add_label_optional("verifier_fail",
                         "verifier: expected count of comptime-known-false casserts (omit or -1 to disable check)",
                         "");
+  m1.add_label_optional("verifier_include_funcs",
+                        "verifier: also tally casserts inside func_extract-spawned function bodies (default false)",
+                        "false");
   register_pass(m1);
 }
 
@@ -141,6 +144,13 @@ Pass_upass::Pass_upass(const Eprp_var& var) : Pass("pass.upass", var) {
     return static_cast<char>(std::tolower(c));
   });
   dry_run = !(dry_run_txt.empty() || dry_run_txt == "0" || dry_run_txt == "false" || dry_run_txt == "no" || dry_run_txt == "off");
+
+  auto vif_txt = std::string(get_label("verifier_include_funcs", "false"));
+  std::transform(vif_txt.begin(), vif_txt.end(), vif_txt.begin(), [](unsigned char c) {
+    return static_cast<char>(std::tolower(c));
+  });
+  verifier_include_funcs
+      = !(vif_txt.empty() || vif_txt == "0" || vif_txt == "false" || vif_txt == "no" || vif_txt == "off");
 
   // Per-pass config forwarded to the runner. Pick up labels whose meaning
   // is pass-specific (as opposed to runner/order labels above).
@@ -232,6 +242,12 @@ void Pass_upass::work(Eprp_var& var) {
   uPass_verifier::set_aggregate_expected(parse_expected_count(up.pass_options, "verifier_pass"),
                                          parse_expected_count(up.pass_options, "verifier_fail"));
 
+  // Capture original entry-point count BEFORE func_extract spawns helper
+  // lnasts. Anything appended past this index in the func_extract loop is
+  // a function-body spawn — used below to gate the verifier off for
+  // spawn lnasts unless verifier_include_funcs:true was passed.
+  const auto original_lnast_count = var.lnasts.size();
+
   const auto extract_it = std::find(up.upass_order.begin(), up.upass_order.end(), "func_extract");
   if (extract_it != up.upass_order.end()) {
     std::vector<std::string> extract_order{"func_extract"};
@@ -269,7 +285,18 @@ void Pass_upass::work(Eprp_var& var) {
   for (std::size_t idx = 0; idx < var.lnasts.size(); ++idx) {
     const auto ln     = var.lnasts.at(idx);
     auto       lm     = std::make_shared<upass::Lnast_manager>(ln);
-    auto       runner = uPass_runner(lm, up.upass_order, up.pass_options);
+
+    // For func_extract-spawned lnasts (idx beyond the original entry-point
+    // count), strip the verifier from the order unless the test opted in
+    // via verifier_include_funcs:true. Function-body casserts that constprop
+    // already proved at call sites still get tallied via mark_inlined_cassert_*
+    // in try_eval_comb_call, so dropping the verifier here just avoids
+    // double-walking unproven function bodies into the aggregate.
+    auto order = up.upass_order;
+    if (idx >= original_lnast_count && !up.verifier_include_funcs) {
+      order.erase(std::remove(order.begin(), order.end(), "verifier"), order.end());
+    }
+    auto runner = uPass_runner(lm, order, up.pass_options);
     if (runner.has_configuration_error()) {
       fail_upass_runtime(std::format("pass.upass invalid pass configuration: {}", runner.get_configuration_error()));
     }

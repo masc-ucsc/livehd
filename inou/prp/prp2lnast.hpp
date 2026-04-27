@@ -48,6 +48,11 @@ protected:
   // Statements
   void process_statement(TSNode n);
   void process_scope_statement(TSNode n, lh::Tree_index target_stmts);
+  // Wrap a statement in a synthesized `if cond { stmt }` (or `if !cond { stmt }`
+  // for `unless`). For decl-form assignments (`mut x = e when cond`) the decl
+  // is hoisted to the surrounding scope with a `nil` initializer, so `x` is
+  // visible regardless of the gate result.
+  void process_gated_statement(TSNode stmt, TSNode gate);
   void process_assignment(TSNode n);
   void process_declaration_statement(TSNode n);
   void process_assert_statement(TSNode n);

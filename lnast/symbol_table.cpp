@@ -89,6 +89,7 @@ bool Symbol_table::set(std::string_view key, std::shared_ptr<Bundle> bundle) {
   if (target == nullptr) {
     target = anchor_for(stack.back(), var);
   }
+  record_uncertain_modification(var);
 
   std::shared_ptr<Bundle> var_bundle;
   const auto it = target->varmap.find(var);
@@ -121,6 +122,7 @@ bool Symbol_table::set(std::string_view key, const Lconst& trivial) {
   if (target == nullptr) {
     target = anchor_for(stack.back(), var);
   }
+  record_uncertain_modification(var);
 
   std::shared_ptr<Bundle> bundle;
   const auto it = target->varmap.find(var);
@@ -155,6 +157,7 @@ bool Symbol_table::mut(std::string_view key, const Lconst& trivial) {
   }
 
   it->second->mut(field, trivial);
+  record_uncertain_modification(var);
 
   return true;
 }
@@ -235,8 +238,42 @@ Symbol_table::Scope* Symbol_table::block_scope(uint64_t key) {
   // pushed during this iteration). Parent at push-time is what the lookup
   // walk needs.
   s->parent = stack.back();
+  // Reset uncertainty bookkeeping per entry — the same Scope object is
+  // reused across upass iterations, but the uncertainty bit is set by the
+  // runner each time and the modification list is rebuilt each time.
+  s->uncertain_cond = false;
+  s->modified_under_uncertainty.clear();
   stack.emplace_back(s);
   return s;
+}
+
+void Symbol_table::mark_current_uncertain() {
+  I(!stack.empty());
+  stack.back()->uncertain_cond = true;
+}
+
+void Symbol_table::record_uncertain_modification(std::string_view name) {
+  // Tmps (___N) are SSA values anchored at the function scope (see
+  // anchor_for). They aren't user-visible and shouldn't be invalidated when
+  // an uncertain arm exits, or downstream uses inside the arm itself break.
+  if (name.size() >= 3 && name.substr(0, 3) == "___") {
+    return;
+  }
+  // Innermost uncertain scope wins: when an outer uncertain scope eventually
+  // leaves, anything set after the inner left will get re-recorded if the
+  // outer arm is still active. No need to mark on every uncertain ancestor.
+  for (auto it = stack.rbegin(); it != stack.rend(); ++it) {
+    if ((*it)->uncertain_cond) {
+      auto& mods = (*it)->modified_under_uncertainty;
+      for (const auto& existing : mods) {
+        if (existing == name) {
+          return;
+        }
+      }
+      mods.emplace_back(name);
+      return;
+    }
+  }
 }
 
 std::shared_ptr<Bundle> Symbol_table::leave_scope() {
@@ -248,6 +285,43 @@ std::shared_ptr<Bundle> Symbol_table::leave_scope() {
     if (it != stack.back()->varmap.end()) {
       I(has_bundle("%"));
       outputs = it->second;
+    }
+  }
+
+  // Uncertain-arm cleanup. Any var assigned inside this scope had its
+  // declaring-scope value updated while we walked the body (so casserts
+  // *inside* the arm could fold against the in-progress value). On exit we
+  // can no longer claim that value is comptime-known, since the arm itself
+  // wasn't guaranteed to run, so flip the trivial back to invalid in the
+  // declaring scope. The Scope object is reused across iterations; the
+  // bookkeeping is reset on the next block_scope() entry.
+  if (stack.back()->uncertain_cond) {
+    auto* arm = stack.back();
+    for (const auto& var_name : arm->modified_under_uncertainty) {
+      // Find the declaring scope by walking from this arm's parent outward
+      // (skipping the arm itself, which we're about to pop). Stops at and
+      // includes the nearest Function scope.
+      Scope* declaring = nullptr;
+      for (auto* s = arm->parent; s != nullptr; s = s->parent) {
+        if (s->varmap.find(var_name) != s->varmap.end()) {
+          declaring = s;
+          break;
+        }
+        if (s->type == Scope_type::Function) {
+          break;
+        }
+      }
+      if (declaring == nullptr) {
+        continue;
+      }
+      auto it = declaring->varmap.find(var_name);
+      // Setting the scalar field to invalid is enough — readers go through
+      // get_trivial / is_known_const, which both check is_invalid(). We
+      // don't tear out sub-fields: a non-scalar bundle (e.g. a tuple) gets
+      // its scalar slot invalidated and any reader that relied on the slot
+      // sees unknown; tuple-shape readers still see the structure, which
+      // is the conservative answer for a mutation we couldn't prove.
+      it->second->set("0", Lconst::invalid());
     }
   }
 

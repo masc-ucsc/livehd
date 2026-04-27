@@ -25,6 +25,13 @@ public:
     std::vector<std::string>                                  declared;
     absl::flat_hash_map<std::string, std::shared_ptr<Bundle>> varmap;  // field, value, path_scope
     Scope*                                                    parent{nullptr};
+    // Set by the caller (constprop's process_stmts) when this scope is the
+    // body of an if-arm whose condition is not a comptime-known true/false.
+    // On leave_scope, every var listed in modified_under_uncertainty is
+    // invalidated in its declaring scope so the unknown side-effects of the
+    // arm don't leak out. See record_uncertain_modification().
+    bool                                                      uncertain_cond{false};
+    std::vector<std::string>                                  modified_under_uncertainty;
   };
 
   static inline Lconst invalid_lconst = Lconst::invalid();
@@ -45,6 +52,13 @@ public:
   // fixed-point loop. Returns the Scope that was pushed.
   Scope*                  block_scope(uint64_t key);
   std::shared_ptr<Bundle> leave_scope();  // output bundle only when leaving function scope
+
+  // Mark the current (innermost) scope as the body of an uncertain-cond
+  // if-arm. Caller is constprop's process_stmts; the runner notifies it via
+  // notify_uncertain_arm before descending into the arm. On leave_scope of
+  // an uncertain scope, every var modified inside is invalidated in its
+  // declaring scope.
+  void mark_current_uncertain();
 
   bool var(std::string_view key);
 
@@ -101,6 +115,12 @@ private:
   // Returns the first scope whose varmap contains `var`, or nullptr.
   Scope* find_decl_scope(std::string_view var);
   const Scope* find_decl_scope(std::string_view var) const;
+
+  // If any active scope was marked uncertain via mark_current_uncertain,
+  // record `name` on the innermost such scope so leave_scope can invalidate
+  // it once the arm exits. Tmps (___N) are skipped — they're SSA values
+  // anchored at the function scope, not user-visible state.
+  void record_uncertain_modification(std::string_view name);
 
   static std::pair<std::string_view, std::string_view> get_var_field(std::string_view key) {
     auto var   = Bundle::get_first_level(key);
