@@ -1,0 +1,19 @@
+/*
+:name: scope1
+:type: comptime
+:verifier_pass: 5
+:verifier_fail: 0
+*/
+
+cassert a == nil // Still not defined, not in scope is nil
+cassert undefined_whatever == nil
+
+mut a = 1
+cassert a != nil
+
+{
+  mut b = 2
+  cassert a == 1 and b == 2
+}
+
+cassert b == nil // out of scope

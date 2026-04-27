@@ -1,0 +1,39 @@
+/*
+:name: scope2
+:type: comptime
+:verifier_pass: 12
+:verifier_fail: 0
+*/
+
+cassert a == nil // Still not defined, not in scope is nil
+cassert undefined_whatever == nil
+
+comb mytest(a,b)->(r) {
+  cassert a == 11
+  cassert b == 12
+
+  b += 100
+
+  r = a+b
+
+  a += 100
+}
+
+mut a = 1
+cassert a != nil
+
+{
+  mut b = 2
+  cassert a == 1 and b == 2
+
+  mut z = mytest(10+a,10+b)
+
+  cassert z == 123
+  cassert a == 1 and b == 2
+}
+
+cassert b == nil // out of scope
+mut z = mytest(10+a,b=12)
+cassert z == 123
+cassert a == 1
+cassert b == nil // out of scope
