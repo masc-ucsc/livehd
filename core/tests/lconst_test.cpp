@@ -1795,3 +1795,5 @@ TEST_F(Lconst_test, mask_range_pairs) {
   EXPECT_EQ(neg1.get_mask_range_pairs()[1].first, 4);
   EXPECT_EQ(neg1.get_mask_range_pairs()[1].second, Bits_max);
 }
+
+// String / nil / concat / unknowns tests live in lconst_test2.cpp.

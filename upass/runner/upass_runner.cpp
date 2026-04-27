@@ -411,6 +411,10 @@ void uPass_runner::process_lnast() {
     // concat via Lconst::concat_op); treat like arithmetic so classify can
     // drop the statement once the destination is resolved.
     A_OP(tuple_concat)
+    // Range nodes carry start/end for slicing (`x[a..=b]` / `x[a..]`). They
+    // must dispatch so constprop can stash bounds before the consuming
+    // tuple_get folds. C_OP keeps the node visible for downstream passes.
+    C_OP(range)
 
     // Attribute Statements — Slice 1 pass-through (Slice 5 lifts to side-map).
     C_OP(attr_set)

@@ -1916,20 +1916,85 @@ Lnast_node Prp2lnast::bit_selection_to_node(TSNode n) {
 Lnast_node Prp2lnast::member_selection_to_node(TSNode n) {
   TSNode     arg  = child_by_field(n, "argument");
   Lnast_node base = expr_to_node(arg);
-  auto       idx  = lnast->add_child(stmts_index, Lnast_node::create_tuple_get());
-  auto       ref  = make_tmp_ref();
-  lnast->add_child(idx, ref);
-  lnast->add_child(idx, base);
-  uint32_t nnc = ts_node_named_child_count(n);
+  // Collect field nodes first — each may emit auxiliary stmts (range, minus)
+  // that must precede the tuple_get so single-pass constprop can resolve the
+  // field's value before consuming it. Adding the tuple_get last keeps the
+  // dependency order without a post-hoc reordering pass.
+  auto emit_range = [&](const Lnast_node& start, const Lnast_node& end) {
+    auto rng_idx = lnast->add_child(stmts_index, Lnast_node::create_range());
+    auto rng_ref = make_tmp_ref();
+    lnast->add_child(rng_idx, rng_ref);
+    lnast->add_child(rng_idx, start);
+    lnast->add_child(rng_idx, end);
+    return rng_ref;
+  };
+  std::vector<Lnast_node> fields;
+  uint32_t                nnc = ts_node_named_child_count(n);
   for (uint32_t i = 1; i < nnc; i++) {
-    TSNode sel  = ts_node_named_child(n, i);
+    TSNode sel = ts_node_named_child(n, i);
+
     TSNode list = child_by_field(sel, "list");
     if (!ts_node_is_null(list)) {
       uint32_t lnnc = ts_node_named_child_count(list);
       for (uint32_t j = 0; j < lnnc; j++) {
-        lnast->add_child(idx, expr_to_node(ts_node_named_child(list, j)));
+        fields.push_back(expr_to_node(ts_node_named_child(list, j)));
       }
+      continue;
     }
+
+    TSNode open_n = child_by_field(sel, "open_range");
+    if (!ts_node_is_null(open_n)) {
+      // `x[expr..]` — open_range field holds the expression child.
+      // `x[..]`     — open_range field holds the literal `..` token (no expr).
+      Lnast_node start_node = (std::string(ts_node_type(open_n)) == "..")
+                                  ? Lnast_node::create_const("0")
+                                  : expr_to_node(open_n);
+      // `nil` is the open-end sentinel — round-trips through Lconst as a
+      // string and is recognised by process_tuple_get as "slice to source's
+      // last index". Using a real value here would falsely truncate.
+      auto end_node = Lnast_node::create_const("nil");
+      fields.push_back(emit_range(start_node, end_node));
+      continue;
+    }
+
+    TSNode fz_n = child_by_field(sel, "from_zero");
+    if (!ts_node_is_null(fz_n)) {
+      // `x[..=expr]` or `x[..<expr]`. The operator is an anonymous token
+      // child of `sel`; scan to find which one was used.
+      bool     is_lt = false;
+      uint32_t total = ts_node_child_count(sel);
+      for (uint32_t k = 0; k < total; k++) {
+        std::string t(ts_node_type(ts_node_child(sel, k)));
+        if (t == "..<") {
+          is_lt = true;
+          break;
+        }
+        if (t == "..=") {
+          break;
+        }
+      }
+      Lnast_node end_expr = expr_to_node(fz_n);
+      Lnast_node end_node = end_expr;
+      if (is_lt) {
+        // `..<n` is exclusive: end = n - 1 to match the inclusive form
+        // stored on the range node.
+        auto m    = lnast->add_child(stmts_index, Lnast_node::create_minus());
+        auto mref = make_tmp_ref();
+        lnast->add_child(m, mref);
+        lnast->add_child(m, end_expr);
+        lnast->add_child(m, Lnast_node::create_const("1"));
+        end_node = mref;
+      }
+      fields.push_back(emit_range(Lnast_node::create_const("0"), end_node));
+      continue;
+    }
+  }
+  auto idx = lnast->add_child(stmts_index, Lnast_node::create_tuple_get());
+  auto ref = make_tmp_ref();
+  lnast->add_child(idx, ref);
+  lnast->add_child(idx, base);
+  for (const auto& f : fields) {
+    lnast->add_child(idx, f);
   }
   return ref;
 }

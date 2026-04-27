@@ -1,7 +1,7 @@
 /*
 :name: string_simple
 :type: parsing lnast comptime
-:verifier_pass: 1
+:verifier_pass: 3
 :verifier_fail: 0
 */
 
@@ -13,10 +13,7 @@ const hw = hello ++ world ++ "!"
 
 cassert hw == 'hello world!'
 
-// mut x = "a"
+mut x = "cadena"
 
-// cassert x == 0x61
-
-// x = "ab"
-
-// cassert x == 0x6261
+cassert x[1..] == "adena"
+cassert x[1..=2] == "ad"

@@ -2,7 +2,10 @@
 #pragma once
 
 #include <format>
+#include <map>
+#include <string>
 
+#include "lconst.hpp"
 #include "lnast_ntype.hpp"
 #include "symbol_table.hpp"
 #include "upass_core.hpp"
@@ -51,12 +54,20 @@ public:
   void process_tuple_add() override;
   void process_tuple_concat() override;
   void process_func_call() override;
+  void process_range() override;
 
   upass::Emit_decision  classify_statement() override;
   std::optional<Lconst> fold_ref(std::string_view name) override;
 
 protected:
   Symbol_table st;
+
+  // Range bookkeeping outside the symbol table: a `range` LNAST node binds
+  // its destination ref to a (start, end) pair. `end` may be the literal
+  // pyrope `nil` to mean "open-ended" (slice runs to the source's last
+  // index). process_tuple_get consults this map when the field operand is
+  // a ref so it can fold string slicing like `x[1..]` and `x[1..=2]`.
+  std::map<std::string, std::pair<Lconst, Lconst>> range_map;
 
   auto current_bundle() { return st.get_bundle(current_text()); }
 

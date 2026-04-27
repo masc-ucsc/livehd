@@ -87,6 +87,13 @@ public:
   static Lconst from_ref(std::string_view txt);
   static Lconst invalid() { return Lconst(true, 0, 0); }
 
+  // `nil` is a tagged unit value distinct from any int/string/invalid.
+  // Encoding: (explicit_str=false, bits=0, num=-1) — the unique
+  // (!explicit_str, bits==0, num!=0) slot in the encoding space (default
+  // Lconst() and Lconst(0) both have num==0). All arithmetic / logical ops
+  // propagate nil (binary: result is nil if either operand is nil).
+  static Lconst nil() { return Lconst(false, 0, Number(-1)); }
+
   static Lconst unknown(Bits_t nbits);
   static Lconst unknown_positive(Bits_t nbits);
   static Lconst unknown_negative(Bits_t nbits);
@@ -96,6 +103,7 @@ public:
 
   bool is_invalid() const { return explicit_str && bits == 0; }
   bool is_ref() const { return is_invalid() && num != 0; }
+  bool is_nil() const { return !explicit_str && bits == 0 && num == Number(-1); }
 
   uint64_t hash() const;
 
@@ -132,6 +140,9 @@ public:
 
   bool has_unknowns() const { return explicit_str && bits < calc_num_bits(num); }
   bool is_negative() const {
+    if (is_nil()) {
+      return false;
+    }
     if (!explicit_str) {
       return num < 0;
     }
@@ -144,6 +155,9 @@ public:
     return (msb == '1');
   }
   bool is_positive() const {
+    if (is_nil()) {
+      return false;
+    }
     if (!explicit_str) {
       return num >= 0;
     }
@@ -158,11 +172,12 @@ public:
   bool has_unknown_sign() const { return has_unknowns() && static_cast<uint8_t>(num) == '?'; }
   bool is_fully_unkown() const { return explicit_str && bits == 8 && static_cast<uint8_t>(num) == '?'; }
 
-  [[nodiscard]] bool is_known_false() const { return num == 0; }
+  // nil is neither known-true nor known-false: it's the absence of a value.
+  [[nodiscard]] bool is_known_false() const { return !is_nil() && num == 0; }
   [[nodiscard]] bool is_known_true() const;
   [[nodiscard]] bool is_string() const { return explicit_str && !has_unknowns(); }
-  [[nodiscard]] bool is_mask() const { return !explicit_str && ((num + 1) & (num)) == 0; }
-  [[nodiscard]] bool is_power2() const { return !explicit_str && ((num - 1) & (num)) == 0; }
+  [[nodiscard]] bool is_mask() const { return !explicit_str && !is_nil() && ((num + 1) & (num)) == 0; }
+  [[nodiscard]] bool is_power2() const { return !explicit_str && !is_nil() && ((num - 1) & (num)) == 0; }
 
   [[nodiscard]] std::vector<std::pair<int, int>> get_mask_range_pairs() const;
   [[nodiscard]] std::pair<int, int>              get_mask_range() const;
@@ -175,7 +190,7 @@ public:
 
   [[nodiscard]] size_t popcount() const;
 
-  [[nodiscard]] bool    is_i() const { return !explicit_str && bits <= 62; }  // 62 to handle sign (int)
+  [[nodiscard]] bool    is_i() const { return !explicit_str && !is_nil() && bits <= 62; }  // 62 to handle sign (int)
   [[nodiscard]] int64_t to_i() const;                                         // must fit in int or exception raised
 
   // Operator list

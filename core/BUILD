@@ -140,6 +140,15 @@ cc_test(
 )
 
 cc_test(
+    name = "lconst_test2",
+    srcs = ["tests/lconst_test2.cpp"],
+    deps = [
+        ":core",
+        "@googletest//:gtest_main",
+    ],
+)
+
+cc_test(
     name = "lconst_bench",
     srcs = ["tests/lconst_bench.cpp"],
     deps = [

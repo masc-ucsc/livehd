@@ -181,14 +181,58 @@ Lconst Lconst::from_binary(std::string_view txt, bool unsigned_result) {
 }
 
 Lconst Lconst::from_string(std::string_view orig_txt) {
-  Number num;
-
-  for (int i = orig_txt.size() - 1; i >= 0; --i) {
-    num <<= 8;
-    num += orig_txt[i];
+  // Decode C-style escape sequences left-to-right so the string Lconst
+  // matches what a Pyrope `"…"` literal denotes (the raw form `'…'` is
+  // handled by from_pyrope, which keeps bytes verbatim).
+  //
+  // Supported: \\  \'  \"  \n  \r  \t  \0  \xNN
+  // Unknown escape (e.g. \z): keep the backslash and following char
+  // verbatim — same as a permissive C compiler. Lone trailing '\' is
+  // also kept literally.
+  //
+  // The byte cast is via unsigned char so high-bit bytes (0x80–0xFF)
+  // round-trip without sign-extending into negative cpp_int values.
+  std::string decoded;
+  decoded.reserve(orig_txt.size());
+  for (size_t i = 0; i < orig_txt.size(); ++i) {
+    if (orig_txt[i] != '\\' || i + 1 >= orig_txt.size()) {
+      decoded.push_back(orig_txt[i]);
+      continue;
+    }
+    char nxt = orig_txt[i + 1];
+    switch (nxt) {
+      case 'n':  decoded.push_back('\n'); ++i; continue;
+      case 'r':  decoded.push_back('\r'); ++i; continue;
+      case 't':  decoded.push_back('\t'); ++i; continue;
+      case '0':  decoded.push_back('\0'); ++i; continue;
+      case '\\': decoded.push_back('\\'); ++i; continue;
+      case '\'': decoded.push_back('\''); ++i; continue;
+      case '"':  decoded.push_back('"');  ++i; continue;
+      case 'x': {
+        if (i + 3 >= orig_txt.size()) {
+          break;  // incomplete \x — fall through to literal
+        }
+        int hi = char_to_val[static_cast<uint8_t>(orig_txt[i + 2])];
+        int lo = char_to_val[static_cast<uint8_t>(orig_txt[i + 3])];
+        if (hi < 0 || hi > 15 || lo < 0 || lo > 15) {
+          break;  // not valid hex — fall through to literal
+        }
+        decoded.push_back(static_cast<char>((hi << 4) | lo));
+        i += 3;
+        continue;
+      }
+      default: break;  // unknown escape — fall through to literal
+    }
+    decoded.push_back(orig_txt[i]);  // literal backslash for unknown escape
   }
 
-  return Lconst(true, orig_txt.size() * 8, num);
+  Number num;
+  for (int i = static_cast<int>(decoded.size()) - 1; i >= 0; --i) {
+    num <<= 8;
+    num += static_cast<unsigned char>(decoded[i]);
+  }
+
+  return Lconst(true, decoded.size() * 8, num);
 }
 
 Lconst Lconst::from_ref(std::string_view orig_txt) {
@@ -209,11 +253,15 @@ Lconst Lconst::from_pyrope(std::string_view orig_txt) {
 
   std::string txt = str_tools::to_lower(orig_txt);
 
-  // Special cases
+  // Special cases. `nil` is the bareword form (no quotes); `'nil'` and
+  // `"nil"` keep the 3-byte string interpretation via the alphanumeric
+  // branch below.
   if (txt == "true") {
     return Lconst(false, 1, -1);
   } else if (txt == "false") {
     return Lconst(false, 0, 0);
+  } else if (txt == "nil") {
+    return Lconst::nil();
   }
 
   bool negative   = false;
@@ -269,7 +317,15 @@ Lconst Lconst::from_pyrope(std::string_view orig_txt) {
     int start_i = static_cast<int>(orig_txt.size());
     int end_i   = 0;
 
-    if (orig_txt.size() > 1 && orig_txt.front() == '\'' && orig_txt.back() == '\'') {
+    // Accept both quote forms — Pyrope source uses `'…'` for raw and
+    // `"…"` for interpreted-escape strings. At the Lconst layer they
+    // produce the same packed bytes (escape interpretation, when added,
+    // belongs in prp2lnast or a dedicated path).
+    bool quoted = orig_txt.size() > 1
+                  && ((orig_txt.front() == '\'' && orig_txt.back() == '\'')
+                      || (orig_txt.front() == '"' && orig_txt.back() == '"'));
+    char quote_ch = quoted ? orig_txt.front() : '\0';
+    if (quoted) {
       --start_i;
       ++end_i;
     }
@@ -281,8 +337,11 @@ Lconst Lconst::from_pyrope(std::string_view orig_txt) {
       num <<= 8;
       num |= orig_txt[i];
 
-      if (orig_txt[i] == '\'' && !prev_escaped && i != 0) {
-        throw std::runtime_error(std::format("ERROR: {} malformed pyrope string. ' must be escaped\n", orig_txt));
+      // Inner quotes must be escaped — same rule for ' and "; the matching
+      // quote character is determined by the outer wrapper.
+      if (quoted && orig_txt[i] == quote_ch && !prev_escaped && i != 0) {
+        throw std::runtime_error(
+            std::format("ERROR: {} malformed pyrope string. {} must be escaped\n", orig_txt, quote_ch));
       }
 
       if (orig_txt[i] == '\\') {
@@ -435,6 +494,9 @@ std::pair<std::string, std::string> Lconst::match_binary(const Lconst& l, const 
 }
 
 bool Lconst::is_known_true() const {
+  if (is_nil()) {
+    return false;  // nil is neither known-true nor known-false
+  }
   if (!explicit_str) {
     return num != 0;
   }
@@ -585,6 +647,9 @@ size_t Lconst::get_trailing_zeroes() const {
 }
 
 Lconst Lconst::sext_op(Bits_t ebits) const {
+  if (is_nil()) {
+    return nil();
+  }
   I(!is_string());  // FIXME: handle 0b0??
 
   if (ebits >= bits) {
@@ -630,6 +695,9 @@ Lconst Lconst::sext_op(Bits_t ebits) const {
 }
 
 Lconst Lconst::get_mask_op() const {
+  if (is_nil()) {
+    return nil();
+  }
   if (has_unknowns()) {
     auto sign = static_cast<unsigned char>(num & 0xFF);
     if (sign == '0') {
@@ -655,6 +723,9 @@ Lconst Lconst::get_mask_op() const {
 }
 
 Lconst Lconst::get_mask_op(const Lconst& mask) const {
+  if (is_nil() || mask.is_nil()) {
+    return nil();
+  }
   if (mask == Lconst(-1)) {
     return get_mask_op();  // faster logic for common case
   }
@@ -724,6 +795,9 @@ Lconst Lconst::get_mask_op(const Lconst& mask) const {
 // set_mask(foo ^ (rand & bar_mask), bar_mask, get_mask(foo, bar_mask)) == foo
 
 Lconst Lconst::set_mask_op(const Lconst& mask, const Lconst& value) const {
+  if (is_nil() || mask.is_nil() || value.is_nil()) {
+    return nil();
+  }
   if (unlikely(mask.is_string())) {
     throw std::runtime_error(
         std::format("ERROR: no string in mask get_bits({},{},{})", to_pyrope(), mask.to_pyrope(), value.to_pyrope()));
@@ -802,6 +876,9 @@ Lconst Lconst::set_mask_op(const Lconst& mask, const Lconst& value) const {
 }
 
 Lconst Lconst::add_op(const Lconst& o) const {
+  if (is_nil() || o.is_nil()) {
+    return nil();
+  }
   if (unlikely(is_string() || o.is_string())) {
     return invalid();
   }
@@ -881,34 +958,34 @@ Lconst Lconst::add_op(const Lconst& o) const {
 }
 
 Lconst Lconst::concat_op(const Lconst& o) const {
-  if (unlikely(is_string() || o.is_string())) {
-    std::string str;
-    std::string o_str;
-    if (is_string()) {
-      str = to_string();
-    } else if (is_i()) {
-      str = std::to_string(to_i());
-    } else {
-      str = to_binary();
-    }
-
-    if (o.is_string()) {
-      o_str = o.to_string();
-    } else if (o.is_i()) {
-      o_str = std::to_string(o.to_i());
-    } else {
-      o_str = o.to_binary();
-    }
-
-    return Lconst::from_string(absl::StrCat(str, o_str));
+  if (is_nil() || o.is_nil()) {
+    return nil();
+  }
+  // String ++ string is byte-text concat. To keep the same little-endian
+  // packing as from_string ("first byte → LSB"), the *first* operand's
+  // bytes occupy the low positions so the result reads left-to-right as
+  // (this | o). Result is a string Lconst whose bit-width is the sum of
+  // the two byte widths — preserving leading zero bytes that calc_num_bits
+  // would have lost.
+  if (is_string() && o.is_string()) {
+    Number res = (o.get_num() << bits) | num;
+    return Lconst(true, bits + o.get_bits(), res);
   }
 
+  // Everything else (int ++ int, string ++ int, int ++ string) is a
+  // bit-level concat producing an integer Lconst. Mixed string/int does
+  // NOT auto-stringify the int as decimal text — callers wanting text
+  // concat must stringify the int explicitly via
+  // `Lconst::from_string(std::to_string(...))` before concat_op.
   Number res_num = get_num() << o.get_bits() | o.get_num();
 
   return Lconst(false, calc_num_bits(res_num), res_num);
 }
 
 Lconst Lconst::mult_op(const Lconst& o) const {
+  if (is_nil() || o.is_nil()) {
+    return nil();
+  }
   if (is_string() || o.is_string()) {
     throw std::runtime_error(std::format("ERROR: {}*{} not allowed because one is a string\n", to_pyrope(), o.to_pyrope()));
 
@@ -931,6 +1008,9 @@ Lconst Lconst::mult_op(const Lconst& o) const {
 }
 
 Lconst Lconst::div_op(const Lconst& o) const {
+  if (is_nil() || o.is_nil()) {
+    return nil();
+  }
   if (is_string() || o.is_string()) {
     throw std::runtime_error(std::format("ERROR: {}/{} not allowed because one is a string\n", to_pyrope(), o.to_pyrope()));
 
@@ -969,6 +1049,9 @@ Lconst Lconst::div_op(const Lconst& o) const {
 }
 
 Lconst Lconst::sub_op(const Lconst& o) const {
+  if (is_nil() || o.is_nil()) {
+    return nil();
+  }
   if (is_string() || o.is_string()) {
     throw std::runtime_error(std::format("ERROR: {}-{} not allowed because one is a string\n", to_pyrope(), o.to_pyrope()));
 
@@ -983,6 +1066,9 @@ Lconst Lconst::sub_op(const Lconst& o) const {
 }
 
 Lconst Lconst::lsh_op(Bits_t amount) const {
+  if (is_nil()) {
+    return nil();
+  }
   if (bits == 0) {
     return *this;
   }
@@ -994,10 +1080,22 @@ Lconst Lconst::lsh_op(Bits_t amount) const {
 
   auto res_num = num << amount;
 
+  if (is_string()) {
+    // String bits track byte count, not numeric msb. Using calc_num_bits
+    // here would silently drop leading zero bytes (e.g. shifting "\1\1"
+    // by 8 should yield a 3-byte string "\0\1\1", but calc_num_bits of
+    // 0x010100 is 18, not 24). Mirror rsh_op: add `amount` to the byte-
+    // count-derived bit width so byte-multiple shifts stay byte-aligned.
+    return Lconst(true, bits + amount, res_num);
+  }
+
   return Lconst(is_string(), calc_num_bits(res_num), res_num);
 }
 
 Lconst Lconst::rsh_op(Bits_t amount) const {
+  if (is_nil()) {
+    return nil();
+  }
   if (bits == 0) {
     return *this;
   }
@@ -1019,8 +1117,18 @@ Lconst Lconst::rsh_op(Bits_t amount) const {
   }
 
   if (is_string()) {
-    auto qmarks = to_pyrope();
-    return Lconst::from_pyrope(qmarks.substr(amount));
+    // from_string packs bytes little-endian (first char in LSB), so an
+    // 8-bit shift drops the leading character. The previous version called
+    // to_pyrope().substr(amount) — `amount` is in bits but substr counts
+    // characters, and to_pyrope wraps strings in `'…'`, so any small shift
+    // returned an empty/garbage string. Mirror the integer path: shift the
+    // packed bytes and shrink `bits` by the same amount, preserving the
+    // explicit_str flag.
+    if (amount >= bits) {
+      return Lconst(true, 0, 0);  // shifted-out → empty string
+    }
+    auto res_num = num >> amount;
+    return Lconst(true, bits - amount, res_num);
   }
 
   auto res_num = num >> amount;
@@ -1029,12 +1137,18 @@ Lconst Lconst::rsh_op(Bits_t amount) const {
 }
 
 Lconst Lconst::ror_op(const Lconst& o) const {
+  if (is_nil() || o.is_nil()) {
+    return nil();
+  }
   Number res_num = (num != 0 || o != 0) ? 1 : 0;
 
   return Lconst(false, 1, res_num);
 }
 
 Lconst Lconst::or_op(const Lconst& o) const {
+  if (is_nil() || o.is_nil()) {
+    return nil();
+  }
   if (unlikely(has_unknowns() || o.has_unknowns())) {
     bool signed_result = is_negative() || o.is_negative();
 
@@ -1069,6 +1183,9 @@ Lconst Lconst::or_op(const Lconst& o) const {
 }
 
 Lconst Lconst::not_op() const {
+  if (is_nil()) {
+    return nil();
+  }
   if (unlikely(has_unknowns())) {
     bool unsigned_result = is_negative();  // toggle sign
     auto result          = to_binary();
@@ -1092,6 +1209,9 @@ Lconst Lconst::not_op() const {
 }
 
 Lconst Lconst::neg_op() const {
+  if (is_nil()) {
+    return nil();
+  }
   if (unlikely(is_string())) {
     return invalid();
   }
@@ -1105,6 +1225,9 @@ Lconst Lconst::neg_op() const {
 }
 
 Lconst Lconst::and_op(const Lconst& o) const {
+  if (is_nil() || o.is_nil()) {
+    return nil();
+  }
   if (unlikely(has_unknowns() || o.has_unknowns())) {
     auto [l_str, r_str] = match_binary(*this, o);
 
@@ -1137,6 +1260,14 @@ Lconst Lconst::and_op(const Lconst& o) const {
 }
 
 Lconst Lconst::eq_op(const Lconst& o) const {
+  // Equality is intentionally NOT nil-propagating: `nil == nil` is true
+  // and `nil == <anything else>` is false. Pyrope code uses this pattern
+  // to test cast failures, e.g. `uint("-1") == nil`. Arithmetic and
+  // bitwise ops still propagate nil; equality (and other comparisons)
+  // are decision-producing, not value-producing.
+  if (is_nil() || o.is_nil()) {
+    return (is_nil() && o.is_nil()) ? Lconst(-1) : Lconst(0);
+  }
   if (unlikely(is_string() && o.is_string())) {
     return to_string() == o.to_string() ? Lconst(-1) : Lconst(0);
   }
@@ -1169,6 +1300,9 @@ Lconst Lconst::eq_op(const Lconst& o) const {
 }
 
 Lconst Lconst::adjust_bits(Bits_t amount) const {
+  if (is_nil()) {
+    return nil();
+  }
   I(amount > 0);
 
   Number r(1);
@@ -1236,6 +1370,12 @@ std::string Lconst::to_field() const {
 }
 
 std::string Lconst::to_pyrope() const {
+  // nil round-trips through the bareword form (matches from_pyrope("nil")).
+  // The 3-byte string "nil" is rendered with quotes, so `to_pyrope() == "nil"`
+  // is unambiguous.
+  if (is_nil()) {
+    return "nil";
+  }
   if (explicit_str) {
     auto str_no_underscore = to_string();
     if (str_no_underscore.empty()) {

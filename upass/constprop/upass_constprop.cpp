@@ -364,8 +364,10 @@ void uPass_constprop::process_eq_ne_impl() {
   if (ba && bb) {
     result = compare_bundles_eq(ba, bb);
   } else if (!ba && !bb) {
-    if (!n1.is_invalid() && !n1.is_string() && !n1.has_unknowns() && !n2.is_invalid() && !n2.is_string()
-        && !n2.has_unknowns()) {
+    if (!n1.is_invalid() && !n1.has_unknowns() && !n2.is_invalid() && !n2.has_unknowns()) {
+      // Lconst::operator== is the source of truth — it compares (num,bits)
+      // so cross-type matches like `'a' == 0x61` resolve true (deliberate
+      // by Lconst's bit-level model).
       result = (n1 == n2);
     }
   }
@@ -501,8 +503,13 @@ void uPass_constprop::process_tuple_concat() {
 
   auto process_one = [&]() -> bool {
     if (is_type(Lnast_ntype::Lnast_ntype_ref)) {
+      // st.get_bundle returns a wrapper Bundle even when the ref holds a
+      // trivial scalar (string or int). Use is_scalar() to demote those to
+      // the scalar path — otherwise string concat (`"hi" ++ " there"`) gets
+      // routed through Bundle::concat, which renumbers positional keys
+      // instead of folding via Lconst::concat_op.
       auto b = st.get_bundle(current_text());
-      if (b) {
+      if (b && !b->is_scalar()) {
         if (!is_first && !bundle_mode) return false;
         if (is_first) {
           acc_bundle  = std::make_shared<Bundle>(dst);
@@ -643,20 +650,26 @@ void uPass_constprop::process_func_call() {
 
   Lconst result;
   if (kind == Cast::to_string) {
-    // Concat stringified args: `Lconst::concat_op` already handles
-    // string/int/bool coercion consistently with `++`.
-    if (args.empty()) {
-      result = Lconst::from_pyrope("''");
-    } else {
-      result = args.front();
-      for (size_t i = 1; i < args.size(); ++i) {
-        result = result.concat_op(args[i]);
+    // Lconst::concat_op no longer auto-stringifies ints — string ++ int is
+    // a bit-concat producing an int. The `string()` builtin's job is text
+    // concat, so coerce each int arg to its decimal-text Lconst up front;
+    // the subsequent concat_op then sees only strings.
+    auto stringify = [](const Lconst& v) -> Lconst {
+      if (v.is_nil()) {
+        return Lconst::from_string("nil");  // mirror Pyrope's nil → 'nil' text
       }
-    }
-    // Force string representation of a pure-numeric arg (e.g. `string(4)`
-    // must yield '4', not the integer 4).
-    if (!result.is_string()) {
-      result = Lconst::from_pyrope(absl::StrCat("'", std::to_string(result.to_i()), "'"));
+      if (v.is_string()) {
+        return v;
+      }
+      return Lconst::from_string(std::to_string(v.to_i()));
+    };
+    if (args.empty()) {
+      result = Lconst::from_string("");
+    } else {
+      result = stringify(args.front());
+      for (size_t i = 1; i < args.size(); ++i) {
+        result = result.concat_op(stringify(args[i]));
+      }
     }
   } else {
     if (args.size() != 1) {
@@ -669,19 +682,19 @@ void uPass_constprop::process_func_call() {
     if (kind == Cast::to_uint) {
       if (v.is_string() || v.is_negative()) {
         // Cast failure (non-numeric string or negative) → pyrope `nil`.
-        v = Lconst::from_pyrope("nil");
+        v = Lconst::nil();
       }
       result = v;
     } else if (kind == Cast::to_int) {
       if (v.is_string()) {
-        v = Lconst::from_pyrope("nil");
+        v = Lconst::nil();
       }
       result = v;
     } else {
       // sized: fold only when the value fits. Signed/unsigned range check is
       // deferred; the current test set just stores small positives.
       if (v.is_string()) {
-        v = Lconst::from_pyrope("nil");
+        v = Lconst::nil();
       }
       (void)sized_sig;
       (void)sized_bits;
@@ -698,6 +711,54 @@ void uPass_constprop::process_func_call() {
   }
 }
 
+void uPass_constprop::process_range() {
+  // Layout: ref(dst), (const|ref)(start), (const|ref)(end)
+  // Resolve start/end and stash in range_map keyed by dst. When either side
+  // is unknown, leave the entry absent so a later iteration can retry. For
+  // `x[a..]` / `x[..]`, prp2lnast emits the open end as the literal pyrope
+  // `nil`, which round-trips as a string Lconst — process_tuple_get treats
+  // that sentinel as "to source's last index".
+  move_to_child();
+  auto dst = std::string(current_text());
+
+  auto read_operand = [this]() -> Lconst {
+    if (is_type(Lnast_ntype::Lnast_ntype_const)) {
+      return Lconst::from_pyrope(current_text());
+    }
+    if (is_type(Lnast_ntype::Lnast_ntype_ref)) {
+      if (st.has_trivial(current_text())) {
+        return st.get_trivial(current_text());
+      }
+    }
+    return Lconst::invalid();
+  };
+
+  if (!move_to_sibling()) {
+    move_to_parent();
+    return;
+  }
+  Lconst start = read_operand();
+  if (!move_to_sibling()) {
+    move_to_parent();
+    return;
+  }
+  Lconst end = read_operand();
+  move_to_parent();
+
+  if (start.is_invalid() || end.is_invalid()) {
+    return;
+  }
+
+  auto it = range_map.find(dst);
+  if (it == range_map.end()) {
+    range_map.emplace(dst, std::make_pair(start, end));
+    mark_changed();
+  } else if (it->second.first != start || it->second.second != end) {
+    it->second = {start, end};
+    mark_changed();
+  }
+}
+
 void uPass_constprop::process_tuple_get() {
   // Read: dst = src[field]
   // Build the symbol-table key as "src.field" and propagate the stored value.
@@ -710,6 +771,43 @@ void uPass_constprop::process_tuple_get() {
   if (!move_to_sibling()) {
     move_to_parent();
     return;  // no field — nothing to propagate
+  }
+
+  // Range-indexed tuple_get on a string folds inline (`x[1..=2]` / `x[1..]`).
+  // Detect: exactly one field operand which is a ref bound by a prior
+  // `range` LNAST node.
+  if (is_type(Lnast_ntype::Lnast_ntype_ref) && is_last_child()) {
+    auto it = range_map.find(std::string(current_text()));
+    if (it != range_map.end() && st.has_trivial(src)) {
+      const auto src_val = st.get_trivial(src);
+      if (src_val.is_string() && it->second.first.is_i()) {
+        const auto& end_lc    = it->second.second;
+        const auto  start_idx = static_cast<size_t>(it->second.first.to_i());
+        std::string body      = src_val.to_pyrope();
+        // to_pyrope wraps strings in single-quotes; strip them.
+        if (body.size() >= 2 && body.front() == '\'' && body.back() == '\'') {
+          body = body.substr(1, body.size() - 2);
+        }
+        size_t len   = body.size();
+        bool   open  = end_lc.is_nil();  // open-end sentinel for `x[a..]`
+        if (!open && !end_lc.is_i()) {
+          // closed end must be an integer to fold; bail otherwise.
+          move_to_parent();
+          return;
+        }
+        size_t end_i = open ? (len == 0 ? 0 : len - 1) : static_cast<size_t>(end_lc.to_i());
+        if (start_idx <= len && end_i + 1 <= len && start_idx <= end_i + 1) {
+          auto         sliced       = body.substr(start_idx, end_i - start_idx + 1);
+          const Lconst result       = Lconst::from_string(sliced);
+          bool         local_changed = !st.has_trivial(dst) || st.get_trivial(dst) != result;
+          if (local_changed && st.set(dst, result)) {
+            mark_changed();
+          }
+          move_to_parent();
+          return;
+        }
+      }
+    }
   }
 
   // Accumulate field path: each child after src appends ".field" to the key.
