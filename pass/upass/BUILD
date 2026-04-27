@@ -115,7 +115,6 @@ sh_test(
     srcs = ["tests/upass_func_extract_test.sh"],
     data = [
         "//inou/prp:tests/pyrope/simple.prp",
-        "//inou/prp:tests/pyrope/proc_lambda.prp",
         "//main:lgshell",
     ],
 )

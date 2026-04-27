@@ -31,17 +31,30 @@ def emit_verilog(n: int, path: Path) -> None:
     path.write_text("".join(lines))
 
 
+def emit_cpp(n: int, path: Path) -> None:
+    # Self-contained, no headers — keeps the -O0 measurement tracking parse
+    # cost rather than libstdc++ include processing. The final return uses
+    # `a` so -O0 cannot dead-code it; -O2 still folds the whole chain.
+    lines = ["int main() {\n", "  int a = 1;\n"]
+    lines.extend(["  a += 1;\n"] * n)
+    lines.append(f"  return a == {n + 1} ? 0 : 1;\n")
+    lines.append("}\n")
+    path.write_text("".join(lines))
+
+
 def main() -> int:
     p = argparse.ArgumentParser()
     p.add_argument("--n", type=int, required=True, help="chain length")
     p.add_argument("--prp", type=Path, required=True)
     p.add_argument("--verilog", type=Path, required=True)
+    p.add_argument("--cpp", type=Path, required=True)
     args = p.parse_args()
 
-    args.prp.parent.mkdir(parents=True, exist_ok=True)
-    args.verilog.parent.mkdir(parents=True, exist_ok=True)
+    for out in (args.prp, args.verilog, args.cpp):
+        out.parent.mkdir(parents=True, exist_ok=True)
     emit_prp(args.n, args.prp)
     emit_verilog(args.n, args.verilog)
+    emit_cpp(args.n, args.cpp)
     return 0
 
 

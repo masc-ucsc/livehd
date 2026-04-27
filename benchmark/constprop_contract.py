@@ -12,6 +12,7 @@ contract we want to enforce.
 """
 
 import os
+import shutil
 import statistics
 import subprocess
 import sys
@@ -83,10 +84,12 @@ def main() -> int:
     tmpdir = Path(os.environ.get("TEST_TMPDIR", "/tmp"))
     prp_path = tmpdir / f"bench_{N}.prp"
     v_path = tmpdir / f"bench_{N}.v"
+    cpp_path = tmpdir / f"bench_{N}.cpp"
 
     print(f"Generating synthetics N={N} ...", flush=True)
     constprop_gen.emit_prp(N, prp_path)
     constprop_gen.emit_verilog(N, v_path)
+    constprop_gen.emit_cpp(N, cpp_path)
 
     lgshell = runfile("main/lgshell")
     yosys = runfile("inou/yosys/yosys2")
@@ -129,12 +132,39 @@ def main() -> int:
     print("\n[yosys full] read_verilog ; opt", flush=True)
     t_yosys_full = measure("yosys_full", yosys_full_cmd, None, env)
 
+    # External C++ reference (report-only, not part of the contract).
+    # Times $CXX -c at -O0 (parse + emit, no opt) and -O2 (parse + heavy
+    # constant-folding). Best-effort: skipped silently if no compiler is
+    # reachable from the test sandbox.
+    t_cxx_o0: float | None = None
+    t_cxx_o2: float | None = None
+    cxx = os.environ.get("CXX") or shutil.which("c++") or shutil.which("clang++") or shutil.which("g++")
+    if cxx:
+        cxx_obj = tmpdir / "bench.o"
+        for opt_level, slot in (("-O0", "cxx_O0"), ("-O2", "cxx_O2")):
+            cmd = [cxx, opt_level, "-c", str(cpp_path), "-o", str(cxx_obj)]
+            print(f"\n[cxx {opt_level}] {cxx} {opt_level} -c", flush=True)
+            try:
+                t = measure(slot, cmd, None, env)
+            except SystemExit:
+                print(f"  WARN: $CXX {opt_level} failed; skipping", flush=True)
+                continue
+            if opt_level == "-O0":
+                t_cxx_o0 = t
+            else:
+                t_cxx_o2 = t
+    else:
+        print("\n[cxx] no C++ compiler found; skipping reference", flush=True)
+
     ratio_parse = t_prp_parse / t_yosys_parse
     ratio_full = t_prp_full / t_yosys_full
+    cxx_o0_str = f"{t_cxx_o0:.4f}s" if t_cxx_o0 is not None else "n/a"
+    cxx_o2_str = f"{t_cxx_o2:.4f}s" if t_cxx_o2 is not None else "n/a"
     print(
         f"\nresult:"
         f"\n  parse-only:  T_prp={t_prp_parse:.4f}s T_yosys={t_yosys_parse:.4f}s ratio={ratio_parse:.3f}"
         f"\n  full:        T_prp={t_prp_full:.4f}s T_yosys={t_yosys_full:.4f}s ratio={ratio_full:.3f}"
+        f"\n  cxx-ref:     T_O0={cxx_o0_str} T_O2={cxx_o2_str} (report-only, not enforced)"
         f"\n  contract:    full ratio must be < {MAX_RATIO}",
         flush=True,
     )

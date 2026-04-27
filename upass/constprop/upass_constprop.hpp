@@ -3,7 +3,10 @@
 
 #include <format>
 #include <map>
+#include <memory>
 #include <string>
+#include <unordered_map>
+#include <vector>
 
 #include "lconst.hpp"
 #include "lnast_ntype.hpp"
@@ -59,6 +62,8 @@ public:
   upass::Emit_decision  classify_statement() override;
   std::optional<Lconst> fold_ref(std::string_view name) override;
 
+  static void set_function_registry(const std::vector<std::shared_ptr<Lnast>>& lnasts);
+
 protected:
   Symbol_table st;
 
@@ -94,6 +99,18 @@ protected:
   void process_eq_ne_impl();
 
   void fold_does(const std::string& dst);
+
+  struct Call_actual {
+    bool        is_named = false;
+    std::string name;
+    Lconst      value;
+  };
+
+  static inline std::unordered_map<std::string, std::shared_ptr<Lnast>> function_registry;
+
+  std::optional<Lconst> resolve_current_scalar() const;
+  std::optional<std::vector<Call_actual>> collect_call_actuals();
+  bool try_eval_comb_call(std::string_view dst, std::string_view fname, const std::vector<Call_actual>& actuals);
 };
 
 // Plugin registration lives in upass_constprop.cpp to avoid duplicate

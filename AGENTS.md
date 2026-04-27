@@ -6,6 +6,7 @@
 - **Test**: `bazel test //...`
 - **lgshell**: `./bazel-bin/main/lgshell`
 - C++ formatted with `clang-format`
+- **Contract tests/benchmarks**: Any test or benchmark file whose name contains the word `contract` is immutable to the coding agent. Do NOT modify these files — they define the expected behavior contract. If a contract test fails, fix the implementation, not the test.
 
 ## Key Directories
 

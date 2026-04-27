@@ -5,6 +5,7 @@
 #include <map>
 #include <optional>
 #include <set>
+#include <unordered_map>
 
 #include "boost/multiprecision/cpp_int.hpp"
 #include "lnast_ntype.hpp"
@@ -16,6 +17,16 @@ static upass::uPass_plugin cprop("constprop", upass::uPass_wrapper<uPass_constpr
 
 uPass_constprop::uPass_constprop(std::shared_ptr<upass::Lnast_manager>& _lm) : uPass(_lm) {
   st.function_scope(_lm->get_top_module_name());
+}
+
+void uPass_constprop::set_function_registry(const std::vector<std::shared_ptr<Lnast>>& lnasts) {
+  function_registry.clear();
+  for (const auto& ln : lnasts) {
+    if (!ln) {
+      continue;
+    }
+    function_registry.emplace(std::string(ln->get_top_module_name()), ln);
+  }
 }
 
 void uPass_constprop::process_assign() {
@@ -764,6 +775,225 @@ void uPass_constprop::fold_does(const std::string& dst) {
   }
 }
 
+std::optional<Lconst> uPass_constprop::resolve_current_scalar() const {
+  if (is_type(Lnast_ntype::Lnast_ntype_const)) {
+    return Lconst::from_pyrope(current_text());
+  }
+  if (is_type(Lnast_ntype::Lnast_ntype_ref) && st.has_trivial(current_text())) {
+    return st.get_trivial(current_text());
+  }
+  return std::nullopt;
+}
+
+std::optional<std::vector<uPass_constprop::Call_actual>> uPass_constprop::collect_call_actuals() {
+  std::vector<Call_actual> actuals;
+
+  while (move_to_sibling()) {
+    if (is_type(Lnast_ntype::Lnast_ntype_assign)) {
+      if (!move_to_child()) {
+        continue;
+      }
+      Call_actual actual;
+      actual.is_named = true;
+      actual.name     = std::string(current_text());
+      if (!move_to_sibling()) {
+        move_to_parent();
+        continue;
+      }
+      auto value = resolve_current_scalar();
+      move_to_parent();
+      if (!value.has_value() || value->is_invalid()) {
+        return std::nullopt;
+      }
+      actual.value = *value;
+      actuals.emplace_back(std::move(actual));
+      continue;
+    }
+
+    auto value = resolve_current_scalar();
+    if (!value.has_value() || value->is_invalid()) {
+      return std::nullopt;
+    }
+    actuals.emplace_back(Call_actual{.value = *value});
+  }
+
+  return actuals;
+}
+
+bool uPass_constprop::try_eval_comb_call(std::string_view dst, std::string_view fname, const std::vector<Call_actual>& actuals) {
+  std::string callee_name(fname);
+  if (callee_name.find('.') == std::string::npos) {
+    callee_name = std::string(lm->get_top_module_name()) + "." + callee_name;
+  }
+
+  auto fit = function_registry.find(callee_name);
+  if (fit == function_registry.end()) {
+    return false;
+  }
+
+  const auto& fn = fit->second;
+  if (!fn) {
+    return false;
+  }
+
+  std::vector<std::string>                params;
+  std::vector<std::string>                outputs;
+  std::unordered_map<std::string, Lconst> local_values;
+
+  auto resolve_local = [&](const Lnast_node& node) -> std::optional<Lconst> {
+    if (node.type.is_const()) {
+      return Lconst::from_pyrope(node.token.get_text());
+    }
+    if (node.type.is_ref()) {
+      auto it = local_values.find(std::string(node.token.get_text()));
+      if (it != local_values.end()) {
+        return it->second;
+      }
+    }
+    return std::nullopt;
+  };
+
+  const auto root  = Lnast_nid::root();
+  const auto stmts = fn->get_child(root);
+  if (stmts.is_invalid()) {
+    return false;
+  }
+
+  bool after_io = false;
+  for (auto stmt = fn->get_child(stmts); !stmt.is_invalid(); stmt = fn->get_sibling_next(stmt)) {
+    const auto type = fn->get_type(stmt);
+    if (!after_io) {
+      if (type.is_tuple_add()) {
+        auto tuple_ref = fn->get_child(stmt);
+        if (tuple_ref.is_invalid() || !fn->get_type(tuple_ref).is_ref()) {
+          continue;
+        }
+        const auto tuple_name = fn->get_data(tuple_ref).token.get_text();
+        for (auto item = fn->get_sibling_next(tuple_ref); !item.is_invalid(); item = fn->get_sibling_next(item)) {
+          if (!fn->get_type(item).is_assign()) {
+            continue;
+          }
+          auto key = fn->get_child(item);
+          if (key.is_invalid() || !fn->get_type(key).is_ref()) {
+            continue;
+          }
+          if (tuple_name == "__input_tuple_ref") {
+            params.emplace_back(fn->get_data(key).token.get_text());
+          } else if (tuple_name == "__output_tuple_ref") {
+            outputs.emplace_back(fn->get_data(key).token.get_text());
+          }
+        }
+        continue;
+      }
+      if (type.is_io()) {
+        std::size_t positional_idx = 0;
+        for (const auto& actual : actuals) {
+          if (actual.is_named) {
+            local_values[actual.name] = actual.value;
+            continue;
+          }
+          while (positional_idx < params.size() && local_values.contains(params[positional_idx])) {
+            ++positional_idx;
+          }
+          if (positional_idx < params.size()) {
+            local_values[params[positional_idx++]] = actual.value;
+          }
+        }
+        after_io = true;
+        continue;
+      }
+      continue;
+    }
+
+    if (type.is_assign()) {
+      auto lhs = fn->get_child(stmt);
+      if (lhs.is_invalid() || !fn->get_type(lhs).is_ref()) {
+        continue;
+      }
+      auto rhs = fn->get_sibling_next(lhs);
+      if (rhs.is_invalid()) {
+        continue;
+      }
+      auto value = resolve_local(fn->get_data(rhs));
+      if (!value.has_value() || value->is_invalid()) {
+        return false;
+      }
+      local_values[std::string(fn->get_data(lhs).token.get_text())] = *value;
+      continue;
+    }
+
+    auto eval_nary = [&](auto op) -> bool {
+      auto lhs = fn->get_child(stmt);
+      if (lhs.is_invalid() || !fn->get_type(lhs).is_ref()) {
+        return false;
+      }
+      auto arg = fn->get_sibling_next(lhs);
+      if (arg.is_invalid()) {
+        return false;
+      }
+      auto acc = resolve_local(fn->get_data(arg));
+      if (!acc.has_value() || acc->is_invalid() || acc->is_string()) {
+        return false;
+      }
+      while (!(arg = fn->get_sibling_next(arg)).is_invalid()) {
+        auto rhs = resolve_local(fn->get_data(arg));
+        if (!rhs.has_value() || rhs->is_invalid() || rhs->is_string()) {
+          return false;
+        }
+        *acc = op(*acc, *rhs);
+        if (acc->is_invalid()) {
+          return false;
+        }
+      }
+      local_values[std::string(fn->get_data(lhs).token.get_text())] = *acc;
+      return true;
+    };
+
+    if (type.is_plus()) {
+      if (!eval_nary([](Lconst a, Lconst b) { return a.add_op(b); })) {
+        return false;
+      }
+    } else if (type.is_minus()) {
+      if (!eval_nary([](Lconst a, Lconst b) { return a.sub_op(b); })) {
+        return false;
+      }
+    } else if (type.is_mult()) {
+      if (!eval_nary([](Lconst a, Lconst b) { return a.mult_op(b); })) {
+        return false;
+      }
+    } else {
+      return false;
+    }
+  }
+
+  if (outputs.empty()) {
+    return false;
+  }
+
+  if (outputs.size() == 1) {
+    auto it = local_values.find(outputs.front());
+    if (it == local_values.end() || it->second.is_invalid()) {
+      return false;
+    }
+    bool local_changed = !st.has_trivial(dst) || st.get_trivial(dst) != it->second;
+    if (local_changed && st.set(dst, it->second)) {
+      mark_changed();
+    }
+    return true;
+  }
+
+  auto out_bundle = std::make_shared<Bundle>(std::string(dst));
+  for (std::size_t i = 0; i < outputs.size(); ++i) {
+    auto it = local_values.find(outputs[i]);
+    if (it == local_values.end() || it->second.is_invalid()) {
+      return false;
+    }
+    out_bundle->set(std::format(":{}:{}", i, outputs[i]), it->second);
+  }
+  st.set(dst, out_bundle);
+  return true;
+}
+
 void uPass_constprop::process_func_call() {
   // Layout: ref(dst), ref(func_name) | const(marker_name), (const|ref)(arg)...
   // Two flavours:
@@ -797,6 +1027,12 @@ void uPass_constprop::process_func_call() {
   }
   std::string fname(current_text());
 
+  auto actuals = collect_call_actuals();
+  if (actuals.has_value() && try_eval_comb_call(dst, fname, *actuals)) {
+    move_to_parent();
+    return;
+  }
+
   // Enumerate known typecast dispatch.
   enum class Cast { none, to_int, to_uint, to_string, to_sized };
   Cast kind       = Cast::none;
@@ -828,28 +1064,18 @@ void uPass_constprop::process_func_call() {
     return;
   }
 
-  // Collect argument Lconsts. Bail if any is unresolved so a later iteration
-  // can retry.
   std::vector<Lconst> args;
-  while (move_to_sibling()) {
-    Lconst v;
-    if (is_type(Lnast_ntype::Lnast_ntype_const)) {
-      v = Lconst::from_pyrope(current_text());
-    } else if (is_type(Lnast_ntype::Lnast_ntype_ref)) {
-      if (!st.has_trivial(current_text())) {
-        move_to_parent();
-        return;
-      }
-      v = st.get_trivial(current_text());
-    } else {
+  if (!actuals.has_value()) {
+    move_to_parent();
+    return;
+  }
+  args.reserve(actuals->size());
+  for (const auto& actual : *actuals) {
+    if (actual.is_named || actual.value.is_invalid()) {
       move_to_parent();
       return;
     }
-    if (v.is_invalid()) {
-      move_to_parent();
-      return;
-    }
-    args.push_back(v);
+    args.push_back(actual.value);
   }
   move_to_parent();
 

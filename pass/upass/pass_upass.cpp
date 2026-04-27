@@ -12,6 +12,7 @@
 #include <vector>
 
 #include "lgraph_manager.hpp"
+#include "upass_constprop.hpp"
 #include "upass_runner.hpp"
 #include "upass_runner_lgraph.hpp"
 
@@ -190,13 +191,58 @@ void Pass_upass::work(Eprp_var& var) {
     return;
   }
 
+  // Test-level expectations (verifier_pass / verifier_fail) describe the
+  // *top* lnasts the user fed into the pipeline, not the helper lnasts
+  // func_extract spawns from comb func_defs. Only the first
+  // `top_lnast_count` entries of var.lnasts get those options applied;
+  // anything appended later runs the verifier without count expectations.
+  const std::size_t top_lnast_count = var.lnasts.size();
+
+  upass::Options_map spawned_options = up.pass_options;
+  spawned_options.erase("verifier_pass");
+  spawned_options.erase("verifier_fail");
+
+  const auto options_for_idx = [&](std::size_t idx) -> const upass::Options_map& {
+    return idx < top_lnast_count ? up.pass_options : spawned_options;
+  };
+
+  const auto extract_it = std::find(up.upass_order.begin(), up.upass_order.end(), "func_extract");
+  if (extract_it != up.upass_order.end()) {
+    std::vector<std::string> extract_order{"func_extract"};
+    for (std::size_t idx = 0; idx < var.lnasts.size(); ++idx) {
+      const auto ln     = var.lnasts.at(idx);
+      auto       lm     = std::make_shared<upass::Lnast_manager>(ln);
+      auto       runner = uPass_runner(lm, extract_order, options_for_idx(idx));
+      if (runner.has_configuration_error()) {
+        fail_upass_runtime(std::format("pass.upass invalid pass configuration: {}", runner.get_configuration_error()));
+      }
+      runner.run(up.max_iters);
+
+      auto staged = runner.take_staging();
+      if (staged) {
+        var.replace(ln, staged);
+      }
+      auto new_lnasts = runner.take_new_lnasts();
+      for (const auto& new_ln : new_lnasts) {
+        var.add(new_ln);
+      }
+    }
+    up.upass_order.erase(std::remove(up.upass_order.begin(), up.upass_order.end(), "func_extract"), up.upass_order.end());
+  }
+
+  if (up.upass_order.empty()) {
+    return;
+  }
+
+  uPass_constprop::set_function_registry(var.lnasts);
+
   // Walk as a queue: structural passes can append new LNASTs (e.g. extracted
   // comb functions), and those generated trees should run through the same
   // configured upass pipeline before downstream stages see them.
   for (std::size_t idx = 0; idx < var.lnasts.size(); ++idx) {
     const auto ln     = var.lnasts.at(idx);
     auto       lm     = std::make_shared<upass::Lnast_manager>(ln);
-    auto       runner = uPass_runner(lm, up.upass_order, up.pass_options);
+    auto       runner = uPass_runner(lm, up.upass_order, options_for_idx(idx));
     if (runner.has_configuration_error()) {
       fail_upass_runtime(std::format("pass.upass invalid pass configuration: {}", runner.get_configuration_error()));
     }
