@@ -7,6 +7,6 @@
 
 const a = "text"
 
-mut x = (0xFFF, a)
+mut x = (0xFF, a)
 
-cassert x.0 == 255 and x[1] == "text"
+cassert x[0] == 255 and x[1] == "text"

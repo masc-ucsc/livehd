@@ -6,7 +6,9 @@
 #include <stack>
 #include <string>
 #include <string_view>
+#include <unordered_map>
 #include <unordered_set>
+#include <utility>
 #include <vector>
 
 #include "lnast.hpp"
@@ -41,6 +43,31 @@ protected:
   // process_scope_statement) skips it on the next iteration. Without
   // this, the body content would also emit as an orphan top-level stmts.
   std::unordered_set<uint32_t> consumed_lambda_body_starts;
+
+  // Comptime-known tuples used by process_for_statement to unroll
+  //   `for (e[, idx[, key]]) in NAME { … }` over a static shape, and to size
+  //   `for i in ref NAME { … }` ref-iterations (write-back unroll).
+  //
+  // Recording paths:
+  //   - `const NAME = <literal_tuple>` with all-literal entries → entries
+  //     have `value_known=true` and `value_text` set; powers value-bound
+  //     unrolls (tuple_exclude).
+  //   - `mut NAME = ()` and `mut NAME = <literal_tuple>` → tracks the size,
+  //     mutating ops below keep size in sync.
+  //   - `NAME = NAME ++ <literal_tuple>` (or `NAME ++= <literal_tuple>`)
+  //     where the rhs is a positional/named tuple → appends placeholder
+  //     entries with `value_known=false` (size grows but the per-iter values
+  //     aren't statically known).
+  //   - Any other write to NAME invalidates by erasing the entry.
+  //
+  // Empty `key` means a positional slot. `value_text` is only consumed when
+  // `value_known` is true.
+  struct Comptime_tuple_entry {
+    std::string key;         // empty string for positional entries
+    std::string value_text;  // pyrope constant literal (verbatim source text)
+    bool        value_known = false;
+  };
+  std::unordered_map<std::string, std::vector<Comptime_tuple_entry>> comptime_tuples_;
 
   // Top
   void process_description();

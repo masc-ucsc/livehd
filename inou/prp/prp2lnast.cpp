@@ -643,6 +643,173 @@ void Prp2lnast::process_assignment(TSNode n) {
   TSNode rv   = child_by_field(n, "rvalue");
   TSNode tc   = child_by_field(n, "type");  // outer type_cast on complex lvalue
 
+  // ── Comptime tuple-shape tracking ─────────────────────────────────────
+  //
+  // Used by process_for_statement to unroll `for (…) in NAME` (with values)
+  // and `for i in ref NAME` (sized, with write-back). See header for the
+  // recording rules. This block runs on every assignment, and either:
+  //   - records / extends comptime_tuples_[NAME], or
+  //   - invalidates it (any non-trackable write to NAME).
+  // It must run before the rvalue is lowered: the rvalue handler may emit
+  // its own assigns to other names, but those won't disturb our LHS.
+  auto get_simple_lvalue_name = [&]() -> std::string {
+    if (ts_node_is_null(lv)) return {};
+    std::string lvt(ts_node_type(lv));
+    if (lvt == "typed_identifier") {
+      TSNode id = child_by_field(lv, "identifier");
+      if (!ts_node_is_null(id)) return std::string(trim(get_text(id)));
+    } else if (lvt == "identifier") {
+      return std::string(trim(get_text(lv)));
+    }
+    return {};
+  };
+
+  // Walk a tuple-literal TSNode and either fully extract entries (every slot
+  // a constant or `name=const`) or report what we know structurally — the
+  // count and key shape — with `value_known=false` so callers know the
+  // values aren't statically resolvable. Returns nullopt only when the shape
+  // itself is unrecognized (spread, decl-form item, nested expressions in
+  // unexpected positions).
+  auto extract_tuple_shape = [&](TSNode tup) -> std::optional<std::vector<Comptime_tuple_entry>> {
+    if (ts_node_is_null(tup) || std::string(ts_node_type(tup)) != "tuple") return std::nullopt;
+    std::vector<Comptime_tuple_entry> entries;
+    uint32_t                          nnc = ts_node_named_child_count(tup);
+    for (uint32_t i = 0; i < nnc; i++) {
+      TSNode               c = ts_node_named_child(tup, i);
+      std::string          ct(ts_node_type(c));
+      Comptime_tuple_entry ent;
+      if (ct == "assignment") {
+        TSNode it_lv = child_by_field(c, "lvalue");
+        TSNode it_rv = child_by_field(c, "rvalue");
+        TSNode it_op = child_by_field(c, "operator");
+        if (ts_node_is_null(it_lv)) return std::nullopt;
+        std::string it_lvt(ts_node_type(it_lv));
+        if (it_lvt == "typed_identifier") {
+          TSNode it_id = child_by_field(it_lv, "identifier");
+          if (ts_node_is_null(it_id)) return std::nullopt;
+          ent.key = std::string(trim(get_text(it_id)));
+        } else if (it_lvt == "identifier") {
+          ent.key = std::string(trim(get_text(it_lv)));
+        } else {
+          return std::nullopt;
+        }
+        if (ts_node_is_null(it_rv)) {
+          if (ts_node_is_null(it_op)) return std::nullopt;
+          ent.value_text = std::string(trim(text_between(ts_node_end_byte(it_op), ts_node_end_byte(c))));
+          ent.value_known = !ent.value_text.empty();
+        } else if (std::string(ts_node_type(it_rv)) == "constant") {
+          ent.value_text  = std::string(trim(get_text(it_rv)));
+          ent.value_known = true;
+        } else {
+          // Non-literal value (identifier, expression). Slot exists; value
+          // unknown.
+          ent.value_known = false;
+        }
+      } else if (ct == "constant") {
+        ent.value_text  = std::string(trim(get_text(c)));
+        ent.value_known = true;
+      } else if (ct == "identifier") {
+        // Bare positional identifier — slot exists, value unknown.
+        ent.value_known = false;
+      } else if (ct == "unary_expression") {
+        // `...spread` would change size dynamically; bail.
+        return std::nullopt;
+      } else {
+        // Other expressions: treat as positional unknown rather than bailing,
+        // so `(i,)` from an unrolled loop still grows the size by 1.
+        ent.value_known = false;
+      }
+      entries.push_back(std::move(ent));
+    }
+    return entries;
+  };
+
+  // Detect `lhs = lhs ++ <tuple_literal>` (also `lhs ++= <tuple_literal>`).
+  // The compound `++=` form short-circuits via `op_text` below; here we only
+  // look at the explicit-form rvalue: an `expression_item` of (lhs_name,
+  // binary_other_op `++`, tuple_literal).
+  auto is_self_concat_with_tuple = [&](const std::string& lhs_name, TSNode rvn) -> std::optional<TSNode> {
+    if (ts_node_is_null(rvn)) return std::nullopt;
+    if (std::string(ts_node_type(rvn)) != "expression_item") return std::nullopt;
+    if (ts_node_named_child_count(rvn) != 3) return std::nullopt;
+    TSNode lhs_id = ts_node_named_child(rvn, 0);
+    TSNode op_n   = ts_node_named_child(rvn, 1);
+    TSNode rhs_n  = ts_node_named_child(rvn, 2);
+    if (std::string(ts_node_type(lhs_id)) != "identifier") return std::nullopt;
+    if (std::string(trim(get_text(lhs_id))) != lhs_name) return std::nullopt;
+    if (std::string(ts_node_type(op_n)) != "binary_other_op") return std::nullopt;
+    if (trim(get_text(op_n)) != "++") return std::nullopt;
+    if (std::string(ts_node_type(rhs_n)) != "tuple") return std::nullopt;
+    return rhs_n;
+  };
+
+  // Handle the recording rules in source order.
+  std::string lhs_name = get_simple_lvalue_name();
+  if (!lhs_name.empty()) {
+    bool        has_decl = !ts_node_is_null(decl);
+    std::string op_text_early = ts_node_is_null(op) ? std::string("=") : std::string(get_text(op));
+    bool        is_compound_concat = op_text_early == "++=";
+    bool        is_plain_assign    = op_text_early == "=";
+
+    auto invalidate = [&]() { comptime_tuples_.erase(lhs_name); };
+
+    if (has_decl && is_plain_assign) {
+      // Declaration assignments always rebind the slot. `mut/const NAME =
+      // <tuple_literal>` populates the shape; anything else clears stale
+      // tracking.
+      bool recorded = false;
+      if (!ts_node_is_null(rv) && std::string(ts_node_type(rv)) == "tuple") {
+        if (auto entries = extract_tuple_shape(rv)) {
+          comptime_tuples_[lhs_name] = std::move(*entries);
+          recorded                   = true;
+        }
+      }
+      if (!recorded) invalidate();
+    } else if (is_compound_concat) {
+      // `NAME ++= <tuple_literal>` → if we know NAME's shape, append.
+      auto it = comptime_tuples_.find(lhs_name);
+      if (it != comptime_tuples_.end() && !ts_node_is_null(rv)
+          && std::string(ts_node_type(rv)) == "tuple") {
+        if (auto extra = extract_tuple_shape(rv)) {
+          for (auto& e : *extra) it->second.push_back(std::move(e));
+        } else {
+          invalidate();
+        }
+      } else if (it != comptime_tuples_.end()) {
+        invalidate();
+      }
+    } else if (is_plain_assign) {
+      // `NAME = …`. Two trackable sub-cases:
+      //   1. `NAME = NAME ++ <tuple_literal>` — append the rhs entries.
+      //   2. `NAME = <tuple_literal>` — rebind to that shape (only if NAME
+      //      was already tracked, otherwise stay agnostic to avoid creating
+      //      false comptime entries for plain mut-rebinds).
+      auto it = comptime_tuples_.find(lhs_name);
+      if (auto rhs_tup = is_self_concat_with_tuple(lhs_name, rv)) {
+        if (it != comptime_tuples_.end()) {
+          if (auto extra = extract_tuple_shape(*rhs_tup)) {
+            for (auto& e : *extra) it->second.push_back(std::move(e));
+          } else {
+            invalidate();
+          }
+        }
+      } else if (it != comptime_tuples_.end() && !ts_node_is_null(rv)
+                 && std::string(ts_node_type(rv)) == "tuple") {
+        if (auto entries = extract_tuple_shape(rv)) {
+          it->second = std::move(*entries);
+        } else {
+          invalidate();
+        }
+      } else if (it != comptime_tuples_.end()) {
+        invalidate();
+      }
+    } else {
+      // Compound op other than `++=` (e.g. `+=`, `*=`) on a tracked name
+      // changes the value semantics in ways we can't model cheaply.
+      if (comptime_tuples_.contains(lhs_name)) comptime_tuples_.erase(lhs_name);
+    }
+  }
+
   // The new grammar attaches a statement-level `wrap`/`sat` prefix as the
   // `overflow` field of the enclosing _statement. Lower it as an attr_set
   // bound to the lvalue. Consumed once per assignment.
@@ -917,13 +1084,29 @@ void Prp2lnast::process_for_statement(TSNode n) {
 
   auto literal_range = try_parse_literal_range(data);
 
-  // Need a single typed_identifier binding to map the iter variable. The
-  // 3-tuple destructuring form (`for (e, idx, key) in t1`) is intentionally
-  // out of scope for this pass.
-  TSNode bind_id;
-  if (!ts_node_is_null(binding) && std::string(ts_node_type(binding)) == "typed_identifier") {
-    bind_id = child_by_field(binding, "identifier");
+  // Collect 1..N binding ids. `for i in …` parses as a single typed_identifier;
+  // `for (e, idx, key) in …` parses as typed_identifier_list with 1–3 items
+  // (value, position, key). Anything else falls back to the placeholder while.
+  std::vector<TSNode> bind_ids;
+  if (!ts_node_is_null(binding)) {
+    std::string bt(ts_node_type(binding));
+    if (bt == "typed_identifier") {
+      TSNode id = child_by_field(binding, "identifier");
+      if (!ts_node_is_null(id)) bind_ids.push_back(id);
+    } else if (bt == "typed_identifier_list") {
+      uint32_t nnc = ts_node_named_child_count(binding);
+      for (uint32_t i = 0; i < nnc && bind_ids.size() < 3; i++) {
+        TSNode      item = ts_node_named_child(binding, i);
+        std::string it(ts_node_type(item));
+        if (it == "typed_identifier") {
+          TSNode id = child_by_field(item, "identifier");
+          if (!ts_node_is_null(id)) bind_ids.push_back(id);
+        }
+      }
+    }
   }
+  TSNode bind_id;
+  if (!bind_ids.empty()) bind_id = bind_ids.front();
 
   if (literal_range && !ts_node_is_null(bind_id) && !ts_node_is_null(code)) {
     auto [lo, hi_incl, ok] = *literal_range;
@@ -966,6 +1149,124 @@ void Prp2lnast::process_for_statement(TSNode n) {
     }
     stmts_index = saved;
     return;
+  }
+
+  // Comptime-tuple unroll: `for (e[, idx[, key]]) in [ref] NAME { … }` when
+  // NAME's shape was tracked by process_assignment (see comptime_tuples_).
+  //
+  //   - The value binding (refs[0]) is read via `tuple_get NAME pos` each
+  //     iteration so it works whether or not the per-slot value is known
+  //     statically (handles both `const t1 = (a=1,b=2,c=3)` and a tuple
+  //     built up by a prior unrolled `for i in 0..<N { d = d ++ (i,) }`).
+  //   - idx (refs[1]) is the position const; key (refs[2]) is the tracked
+  //     slot name (empty string when the slot is purely positional).
+  //   - When the source is `ref NAME`, we emit `tuple_set NAME pos refs[0]`
+  //     after the body so user mutations to the binding flow back into NAME
+  //     (mirrors the source-level `i = NAME[pos]; <body>; NAME[pos] = i`
+  //     equivalent).
+  if (!literal_range && !bind_ids.empty() && !ts_node_is_null(code) && !ts_node_is_null(data)) {
+    TSNode      src     = data;
+    bool        is_ref  = false;
+    std::string src_top(ts_node_type(src));
+    if (src_top == "ref_identifier") {
+      // ref_identifier := 'ref' _complex_identifier — drill to the inner id.
+      is_ref      = true;
+      uint32_t nc = ts_node_named_child_count(src);
+      if (nc >= 1) src = ts_node_named_child(src, 0);
+    }
+    while (true) {
+      std::string st(ts_node_type(src));
+      if (st == "ref_identifier" || st == "identifier") break;
+      if (st == "expression_list" || st == "expression_item") {
+        if (ts_node_named_child_count(src) == 1) {
+          src = ts_node_named_child(src, 0);
+          continue;
+        }
+      }
+      break;
+    }
+    std::string src_name;
+    {
+      std::string st(ts_node_type(src));
+      if (st == "ref_identifier" || st == "identifier") {
+        src_name = std::string(trim(get_text(src)));
+      }
+    }
+    auto it = src_name.empty() ? comptime_tuples_.end() : comptime_tuples_.find(src_name);
+    if (it != comptime_tuples_.end()) {
+      // Snapshot entries by value: process_scope_statement may emit
+      // assignments that mutate comptime_tuples_[src_name] as a side effect
+      // (the `mut d = ()` / `d = d ++ (i,)` tracking in the body would grow
+      // d while we're iterating its current shape). Iterating a stale
+      // snapshot keeps the unroll bounded.
+      const auto entries = it->second;
+
+      auto outer_idx = lnast->add_child(stmts_index, Lnast_node::create_stmts());
+      auto saved     = stmts_index;
+      stmts_index    = outer_idx;
+
+      std::vector<Lnast_node> refs;
+      refs.reserve(bind_ids.size());
+      for (TSNode bid : bind_ids) {
+        Lnast_node r = identifier_to_node(bid, true);
+        refs.push_back(r);
+        auto attr = lnast->add_child(stmts_index, Lnast_node::create_attr_set());
+        lnast->add_child(attr, r);
+        lnast->add_child(attr, Lnast_node::create_const("type"));
+        lnast->add_child(attr, Lnast_node::create_const("mut"));
+        auto a = lnast->add_child(stmts_index, Lnast_node::create_assign());
+        lnast->add_child(a, r);
+        lnast->add_child(a, Lnast_node::create_const("nil"));
+      }
+
+      Lnast_node src_ref = Lnast_node::create_ref(src_name);
+
+      for (size_t i = 0; i < entries.size(); ++i) {
+        const auto& ent        = entries[i];
+        auto        iter_stmts = lnast->add_child(stmts_index, Lnast_node::create_stmts());
+        auto        saved2     = stmts_index;
+        stmts_index            = iter_stmts;
+
+        // refs[0] = NAME[pos]. Indexed read keeps this branch generic across
+        // value-known (const tuple) and value-unknown (loop-built) shapes.
+        if (refs.size() >= 1) {
+          auto tg = lnast->add_child(stmts_index, Lnast_node::create_tuple_get());
+          lnast->add_child(tg, refs[0]);
+          lnast->add_child(tg, src_ref);
+          lnast->add_child(tg, Lnast_node::create_const(std::to_string(i)));
+        }
+        if (refs.size() >= 2) {
+          auto a = lnast->add_child(stmts_index, Lnast_node::create_assign());
+          lnast->add_child(a, refs[1]);
+          lnast->add_child(a, Lnast_node::create_const(std::to_string(i)));
+        }
+        if (refs.size() >= 3) {
+          auto a = lnast->add_child(stmts_index, Lnast_node::create_assign());
+          lnast->add_child(a, refs[2]);
+          // String literal so constprop's tuple_set field-resolution sees a
+          // string trivial, not a bareword ref. Empty key (positional slot)
+          // becomes the empty-string literal.
+          lnast->add_child(a, Lnast_node::create_const("'" + ent.key + "'"));
+        }
+
+        process_scope_statement(code, iter_stmts);
+
+        // Write back through the value binding when the source is `ref`.
+        // `for i in ref d { i += 10 }` lowers per-iter to a `tuple_set d pos
+        // i` after the body, so any in-body mutation of `i` propagates into
+        // d's slot. Skipped for the read-only `for i in d` form.
+        if (is_ref && refs.size() >= 1) {
+          auto ts = lnast->add_child(stmts_index, Lnast_node::create_tuple_set());
+          lnast->add_child(ts, src_ref);
+          lnast->add_child(ts, Lnast_node::create_const(std::to_string(i)));
+          lnast->add_child(ts, refs[0]);
+        }
+
+        stmts_index = saved2;
+      }
+      stmts_index = saved;
+      return;
+    }
   }
 
   // Fallback: legacy placeholder while-loop. Keeps existing parser-only
@@ -1795,10 +2096,10 @@ Lnast_node Prp2lnast::binary_expr_to_node(TSNode n) {
       return wrap_not(make_op_call(Lnast_node::create_func_case(), l, r));
     }
     if (op == "equals") {
-      return make_binop(Lnast_node::create_eq(), l, r);
+      return make_op_call(Lnast_node::create_func_equals(), l, r);
     }
     if (op == "!equals") {
-      return make_binop(Lnast_node::create_ne(), l, r);
+      return wrap_not(make_op_call(Lnast_node::create_func_equals(), l, r));
     }
     std::print("prp2lnast: unhandled compare op `{}`\n", op);
     return make_tmp_ref();
@@ -2610,6 +2911,7 @@ Lnast_node Prp2lnast::tuple_to_node(TSNode n, bool /*is_square*/) {
   // tuple_add that references them — constprop runs in textual order.
   struct Item {
     bool        is_assign = false;
+    bool        is_spread = false;  // `...expr` — emit value as its own concat chunk
     std::string assign_key;
     Lnast_node  value;
   };
@@ -2618,6 +2920,23 @@ Lnast_node Prp2lnast::tuple_to_node(TSNode n, bool /*is_square*/) {
   for (uint32_t i = 0; i < nnc; i++) {
     TSNode      c = ts_node_named_child(n, i);
     std::string t(ts_node_type(c));
+    if (t == "unary_expression") {
+      // Spread (`...inner`) is the only positional unary in a tuple item that
+      // needs to flatten — every other unary just becomes a regular value. We
+      // detect it via the operator text rather than restructuring expr_to_node.
+      TSNode      op_n    = child_by_field(c, "operator");
+      std::string op_text = ts_node_is_null(op_n) ? std::string() : std::string(trim(get_text(op_n)));
+      if (op_text == "...") {
+        TSNode arg_n = child_by_field(c, "argument");
+        if (!ts_node_is_null(arg_n)) {
+          Item it;
+          it.is_spread = true;
+          it.value     = expr_to_node(arg_n);
+          items.push_back(std::move(it));
+          continue;
+        }
+      }
+    }
     if (t == "assignment") {
       Item it;
       it.is_assign = true;
@@ -2691,27 +3010,86 @@ Lnast_node Prp2lnast::tuple_to_node(TSNode n, bool /*is_square*/) {
     }
   }
 
-  auto idx = lnast->add_child(stmts_index, Lnast_node::create_tuple_add());
-  auto ref = make_tmp_ref();
-  lnast->add_child(idx, ref);
-  if (nnc == 0) {
-    // Tree-sitter-pyrope hides `_simple_number` (and other `_constant`) tokens,
-    // so literals like `(10)` or `(-100)` parse as a tuple with zero named
-    // children. Recover the literal from the text between `(` and `)`.
-    auto inner = trim(text_between(ts_node_start_byte(n) + 1, ts_node_end_byte(n) - 1));
-    if (!inner.empty()) {
-      lnast->add_child(idx, constant_text_to_node(inner));
+  // Spread (`...inner`) items expand inline at the tuple's outer level; we
+  // emit a tuple_concat of (chunks of non-spread items as their own
+  // tuple_add tmps) interleaved with each spread's bundle ref. The simple
+  // no-spread case stays as a single tuple_add.
+  bool has_spread = false;
+  for (const auto& it : items) {
+    if (it.is_spread) {
+      has_spread = true;
+      break;
+    }
+  }
+
+  auto emit_chunk_tuple_add = [&](const std::vector<Item>& chunk) -> Lnast_node {
+    auto chunk_idx = lnast->add_child(stmts_index, Lnast_node::create_tuple_add());
+    auto chunk_ref = make_tmp_ref();
+    lnast->add_child(chunk_idx, chunk_ref);
+    for (const auto& it : chunk) {
+      if (it.is_assign) {
+        auto aidx = lnast->add_child(chunk_idx, Lnast_node::create_assign());
+        lnast->add_child(aidx, Lnast_node::create_ref(it.assign_key));
+        lnast->add_child(aidx, it.value);
+      } else {
+        lnast->add_child(chunk_idx, it.value);
+      }
+    }
+    return chunk_ref;
+  };
+
+  if (!has_spread) {
+    auto idx = lnast->add_child(stmts_index, Lnast_node::create_tuple_add());
+    auto ref = make_tmp_ref();
+    lnast->add_child(idx, ref);
+    if (nnc == 0) {
+      // Tree-sitter-pyrope hides `_simple_number` (and other `_constant`) tokens,
+      // so literals like `(10)` or `(-100)` parse as a tuple with zero named
+      // children. Recover the literal from the text between `(` and `)`.
+      auto inner = trim(text_between(ts_node_start_byte(n) + 1, ts_node_end_byte(n) - 1));
+      if (!inner.empty()) {
+        lnast->add_child(idx, constant_text_to_node(inner));
+      }
+      return ref;
+    }
+    for (auto& it : items) {
+      if (it.is_assign) {
+        auto aidx = lnast->add_child(idx, Lnast_node::create_assign());
+        lnast->add_child(aidx, Lnast_node::create_ref(it.assign_key));
+        lnast->add_child(aidx, it.value);
+      } else {
+        lnast->add_child(idx, it.value);
+      }
     }
     return ref;
   }
+
+  // Spread path: build a list of bundle refs to concat. Each contiguous run
+  // of non-spread items becomes a tuple_add tmp; each spread contributes its
+  // pre-evaluated inner ref directly. Concat is then a single tuple_concat
+  // over those refs.
+  std::vector<Lnast_node> chunks;
+  std::vector<Item>       pending;
   for (auto& it : items) {
-    if (it.is_assign) {
-      auto aidx = lnast->add_child(idx, Lnast_node::create_assign());
-      lnast->add_child(aidx, Lnast_node::create_ref(it.assign_key));
-      lnast->add_child(aidx, it.value);
+    if (it.is_spread) {
+      if (!pending.empty()) {
+        chunks.push_back(emit_chunk_tuple_add(pending));
+        pending.clear();
+      }
+      chunks.push_back(it.value);
     } else {
-      lnast->add_child(idx, it.value);
+      pending.push_back(std::move(it));
     }
+  }
+  if (!pending.empty()) {
+    chunks.push_back(emit_chunk_tuple_add(pending));
+  }
+
+  auto idx = lnast->add_child(stmts_index, Lnast_node::create_tuple_concat());
+  auto ref = make_tmp_ref();
+  lnast->add_child(idx, ref);
+  for (const auto& c : chunks) {
+    lnast->add_child(idx, c);
   }
   return ref;
 }

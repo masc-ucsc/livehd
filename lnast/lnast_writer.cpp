@@ -178,6 +178,7 @@ void Lnast_writer::write_func_marker(std::string_view name) {
 }
 
 void Lnast_writer::write_func_does()     { write_func_marker("does"); }
+void Lnast_writer::write_func_equals()   { write_func_marker("equals"); }
 void Lnast_writer::write_func_in()       { write_func_marker("in"); }
 void Lnast_writer::write_func_has()      { write_func_marker("has"); }
 void Lnast_writer::write_func_case()     { write_func_marker("case"); }

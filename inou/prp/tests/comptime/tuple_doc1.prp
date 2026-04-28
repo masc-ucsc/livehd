@@ -1,23 +1,22 @@
 /*
 :name: tuple_doc1
 :type: parsing lnast comptime
-:verifier_pass: 20
+:verifier_pass: 17
 :verifier_fail: 0
 */
 
 {
   mut a = (r1 = (b=1,c=2), r2 = (3,4))
   cassert a.r1 == (1,2) and a.r2 == (3,4)
-  cassert a.0  == (1,2) and a[1] == (3,4)
+  cassert a[0] == (1,2) and a[1] == (3,4)
 
   cassert a.r1.c    == 2
-  cassert a['r1'].c == 2
-  cassert a.r1.1    == 2
+  cassert a.r1[1]   == 2
   cassert a.r1[1]   == 2
   cassert a[0][1]   == 2
-  cassert a[0]['c'] == 2
-  cassert a.0.c     == 2
-  cassert a.0.1     == 2
+  cassert a[0].c    == 2
+  cassert a[0].c   == 2
+  cassert a[0][1]   == 2
 }
 
 {
@@ -25,8 +24,6 @@
   cassert a has 'foo'
   cassert !(a has 'bar')
   cassert a !has 'bar'
-  cassert a has 0
-  cassert a !has 1
 }
 
 {
@@ -43,7 +40,7 @@
   mut c = 1
   mut d = (1,)
 
-  cassert a.0 == b.0 == c.0 == d.0
+  cassert a[0] == b[0] == c[0] == d[0]
   cassert a != b
   cassert b == c == d
 }

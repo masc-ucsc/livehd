@@ -146,6 +146,7 @@ public:
   // Pseudo-function markers (typed replacements for the const(name)-first
   // func_call form). does/in/has fold; the rest are emitted verbatim.
   PROCESS_NODE(func_does)
+  PROCESS_NODE(func_equals)
   PROCESS_NODE(func_in)
   PROCESS_NODE(func_has)
   PROCESS_NODE(func_case)

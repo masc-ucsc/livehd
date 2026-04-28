@@ -1,9 +1,14 @@
 /*
 :name: tuple_doc2
 :type: parsing lnast comptime
-:verifier_pass: 15
+:verifier_pass: 16
 :verifier_fail: 0
 */
+
+{
+        const x = (first=(second=3))
+        cassert x == 3 == x.first == x.first.second
+}
 
 {
   mut c = (x=1, const b = 2, mut d = 3)
@@ -31,7 +36,7 @@
 }
 
 {
-  cassert (((1,a=2,c=3) ++ (a=20,33,c=30,4)) == (1,a=(2,20),c=(3,30),33,4))
+  cassert (1,a=2,c=3) ++ (a=20,33,c=30,4) == (1,a=(2,20),c=(3,30),33,4)
 }
 
 {

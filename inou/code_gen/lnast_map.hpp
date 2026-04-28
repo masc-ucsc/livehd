@@ -13,7 +13,7 @@ protected:
                                              "top",      "sts",        "if",        "uif",       "for",
                                              "while",    "func_call",  "func_def",  "io",
 
-                                             "does",     "in",         "has",       "case",
+                                             "does",     "equals",     "in",        "has",       "case",
                                              "break",    "continue",   "return",
 
                                              "=",        ":=",         "mut",        "delay_assign",
@@ -63,6 +63,7 @@ protected:
       "io",
 
       "does",
+      "equals",
       "in",
       "has",
       "case",
@@ -165,6 +166,7 @@ protected:
       "io",
 
       "does",
+      "equals",
       "in",
       "has",
       "case",

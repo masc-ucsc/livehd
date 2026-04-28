@@ -27,6 +27,7 @@ LNAST_NODE( io, io )
 // `const(name)` first child. has/in/does are folded by constprop;
 // case/break/continue/return are emitted verbatim.
 LNAST_NODE( func_does, does )
+LNAST_NODE( func_equals, equals )
 LNAST_NODE( func_in, in )
 LNAST_NODE( func_has, has )
 LNAST_NODE( func_case, case )

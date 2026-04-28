@@ -277,13 +277,15 @@ void uPass_constprop::process_log_not() {
 // Bundle-aware equality. Returns nullopt when constprop can't decide
 // (unknown entries, attribute round-trip artefacts). Otherwise true/false.
 //
-// We delegate key-shape semantics to `Bundle::match` (used via
-// `has_trivial` / `get_trivial`): it already handles `:N:name` vs `N`
-// positional matching and nested paths (`:1:b.:0:c` ↔ `1.0`). The check
-// is symmetric — every non-attribute entry on each side must be present
-// on the other with the same Lconst value. That gives the user-visible
-// Pyrope behaviour: `(a=3,b=4,5) == (3,4,5)` but `(a=3,b=4,5) != (a=3,foo=4,5)`
-// (named slots collide on `:1:b` vs `:1:foo` — Bundle::match rejects).
+// Pyrope tuple equality is order-insensitive on names: `(x=1,d=4) ==
+// (d=4,x=1)` is true, since both bundles carry the same {name → value}
+// mapping. Bundle::match keys by `:N:name` (so `:0:x` rejects `:1:x`); we
+// layer a name-based fallback on top, so a top-level named-positional
+// entry in src matches any same-name entry in other regardless of source
+// position. Unnamed positional entries still match by position via
+// Bundle::match's `:N:name ↔ N` special-case (so `(a=3,b=4,5) == (3,4,5)`
+// still holds), and nested paths (`:1:b.:0:c`) keep the existing
+// position-based behaviour.
 static std::optional<bool> compare_bundles_eq(const std::shared_ptr<Bundle const>& a,
                                               const std::shared_ptr<Bundle const>& b) {
   auto contains = [](const std::shared_ptr<Bundle const>& src,
@@ -292,19 +294,57 @@ static std::optional<bool> compare_bundles_eq(const std::shared_ptr<Bundle const
       if (Bundle::is_attribute(e.first)) {
         continue;
       }
-      if (e.second.trivial.is_invalid() || e.second.trivial.has_unknowns()) {
+      if (e.second.trivial.is_invalid()) {
         return std::nullopt;
       }
-      if (!other->has_trivial(e.first)) {
+      auto find_by_name = [&]() -> const Lconst* {
+        // Top-level named-positional only (`:N:name`, no sub-path); other
+        // shapes fall through to the position-based path via Bundle::match.
+        if (e.first.empty() || e.first.front() != ':') {
+          return nullptr;
+        }
+        if (e.first.find('.') != std::string::npos) {
+          return nullptr;
+        }
+        const auto src_name = Bundle::get_first_level_name(e.first);
+        for (const auto& oe : other->get_map()) {
+          if (Bundle::is_attribute(oe.first)) {
+            continue;
+          }
+          if (oe.first.empty() || oe.first.front() != ':') {
+            continue;
+          }
+          if (oe.first.find('.') != std::string::npos) {
+            continue;
+          }
+          if (Bundle::get_first_level_name(oe.first) == src_name) {
+            return &oe.second.trivial;
+          }
+        }
+        return nullptr;
+      };
+      const Lconst* ov = nullptr;
+      if (other->has_trivial(e.first)) {
+        ov = &other->get_trivial(e.first);
+      } else if (auto by_name = find_by_name(); by_name) {
+        ov = by_name;
+      } else {
         return false;
       }
-      const auto& ov = other->get_trivial(e.first);
-      if (ov.is_invalid() || ov.has_unknowns()) {
+      if (ov->is_invalid()) {
         return std::nullopt;
       }
-      if (ov != e.second.trivial) {
+      // Use eq_op so wildcards (`0sb?`) compare by structural identity:
+      // `0sb? == 0sb?` is known-true, `0sb? == 1` is unknown. That lets
+      // bundles with matching wildcard slots still fold equal.
+      const Lconst eq = ov->eq_op(e.second.trivial);
+      if (eq.is_known_true()) {
+        continue;
+      }
+      if (eq.is_known_false()) {
         return false;
       }
+      return std::nullopt;  // unknown bits prevent a definitive answer
     }
     return true;
   };
@@ -392,6 +432,41 @@ static bool structural_does(const std::shared_ptr<Bundle const>& a,
   return true;
 }
 
+// Structural-only `a equals b` check.
+//
+// `equals` is "same positional shape, ignoring values and specific names":
+// at each top-level position, both sides must be named-or-both-unnamed.
+// Specific names on named slots and the values themselves don't have to
+// match. So `(x=1,d=4) equals (d=7,x=100)` is true (same shape: 2 named
+// slots), `(x=1,4) equals (d=4,100)` is true (named@0, unnamed@1 on both),
+// and `(x=1,4) !equals (100,d=4)` (shape differs: named@0/unnamed@1 vs
+// unnamed@0/named@1).
+static bool structural_equals(const std::shared_ptr<Bundle const>& a,
+                              const std::shared_ptr<Bundle const>& b) {
+  auto collect_shape = [](const std::shared_ptr<Bundle const>& src) {
+    // (pos, is_named) per top-level slot. Dedup so nested sub-bundle entries
+    // (`:0:a.0`, `:0:a.1`) collapse to a single shape entry for slot 0.
+    std::set<std::pair<int, bool>> shape;
+    for (const auto& e : src->get_map()) {
+      if (Bundle::is_attribute(e.first)) {
+        continue;
+      }
+      auto first = Bundle::get_first_level(e.first);
+      if (first.empty()) {
+        continue;
+      }
+      const bool is_named = (first.front() == ':');
+      const int  pos      = is_named ? Bundle::get_first_level_pos(first) : Bundle::get_first_level_pos(first);
+      if (pos < 0) {
+        continue;
+      }
+      shape.insert({pos, is_named});
+    }
+    return shape;
+  };
+  return collect_shape(a) == collect_shape(b);
+}
+
 // process_eq / process_ne with bundle awareness. Falls back to the scalar
 // process_binary path when neither operand is a tracked bundle, so plain
 // integer compares are unchanged.
@@ -427,6 +502,17 @@ void uPass_constprop::process_eq_ne_impl() {
       auto b    = st.get_bundle(name);
       if (b && !b->is_scalar()) {
         o.bundle = b;
+      } else if (b && b->is_scalar()) {
+        // Single-entry bundle: flatten via Bundle::get_trivial() (no-arg)
+        // which returns the lone non-attr entry's value regardless of key
+        // depth. Symbol_table::has_trivial keys by field "0" which fails to
+        // match nested named-positional keys like `:0:first.:0:second`,
+        // so for a tuple-of-tuple-of-… single-entry bundle we'd otherwise
+        // miss the scalar (`cassert x == 3` where `x = (first=(second=3))`).
+        auto v = b->get_trivial();
+        if (!v.is_invalid()) {
+          o.scalar = v;
+        }
       } else if (st.has_trivial(name)) {
         o.scalar = st.get_trivial(name);
       } else if (!st.is_declared(name)) {
@@ -459,10 +545,28 @@ void uPass_constprop::process_eq_ne_impl() {
   // or a 1-bit unknown. Bundles only produce known true/false; the scalar
   // path may produce unknowns when an operand has them.
   std::optional<Lconst> result;
+  // Mixed bundle-vs-scalar: a multi-entry tuple can never structurally
+  // equal a scalar, but a 1-entry tuple `(v,)` is equivalent to its scalar
+  // `v`. Without this case `(1,2) != (1,)` (where Symbol_table::set wraps
+  // the 1-tuple as a scalar at position 0) hits neither the bundle-eq
+  // nor scalar-eq paths and stays unfolded.
+  auto bundle_count_non_attr = [](const std::shared_ptr<Bundle const>& b) {
+    int n = 0;
+    for (const auto& e : b->get_map()) {
+      if (!Bundle::is_attribute(e.first)) {
+        ++n;
+      }
+    }
+    return n;
+  };
   if (a.bundle && b.bundle) {
     if (auto eq = compare_bundles_eq(a.bundle, b.bundle); eq.has_value()) {
       result = (*eq ^ Negate) ? Lconst(1) : Lconst(0);
     }
+  } else if (a.bundle && !b.scalar.is_invalid() && bundle_count_non_attr(a.bundle) > 1) {
+    result = Negate ? Lconst(1) : Lconst(0);
+  } else if (b.bundle && !a.scalar.is_invalid() && bundle_count_non_attr(b.bundle) > 1) {
+    result = Negate ? Lconst(1) : Lconst(0);
   } else if (!a.bundle && !b.bundle && !a.scalar.is_invalid() && !b.scalar.is_invalid()) {
     // Defer to Lconst::eq_op: structural identity yields known-true even
     // when both sides carry unknowns; otherwise a 1-bit `0sb?` for unknowns.
@@ -630,13 +734,23 @@ void uPass_constprop::process_tuple_concat() {
   Lconst                  acc_scalar;
   bool                    is_first = true;
 
+  // Wrap a scalar trivial into a 1-entry positional bundle so it concats as
+  // a single tuple element rather than bit-packing. Only used when bundle
+  // mode is selected (or implied by the operand mix).
+  auto wrap_scalar_as_bundle = [&](const Lconst& val) -> std::shared_ptr<Bundle> {
+    auto b = std::make_shared<Bundle>(dst);
+    b->set("0", val);
+    return b;
+  };
+
   auto process_one = [&]() -> bool {
     if (is_type(Lnast_ntype::Lnast_ntype_ref)) {
       // st.get_bundle returns a wrapper Bundle even when the ref holds a
-      // trivial scalar (string or int). Use is_scalar() to demote those to
-      // the scalar path — otherwise string concat (`"hi" ++ " there"`) gets
-      // routed through Bundle::concat, which renumbers positional keys
-      // instead of folding via Lconst::concat_op.
+      // trivial scalar (string or int). String scalars want the scalar path
+      // (so `"hi" ++ " there"` folds via Lconst::concat_op rather than
+      // re-encoded into a positional bundle). Int scalars participate in
+      // tuple-concat as a single-element tuple so `e ++ 3` with `mut e=1`
+      // yields `(1, 3)` not the bit-packed `0b1_011`.
       //
       // Exception: an *empty* bundle (no positional/named keys, only
       // attributes at most) is unambiguously the empty tuple `()` — never a
@@ -645,6 +759,7 @@ void uPass_constprop::process_tuple_concat() {
       // case `c ++ (i,)` aborts and the for-loop unroll never advances `c`.
       auto b = st.get_bundle(current_text());
       bool b_is_empty_tuple = false;
+      bool b_is_string_scalar = false;
       if (b) {
         bool any_kv = false;
         for (const auto& e : b->get_map()) {
@@ -656,6 +771,9 @@ void uPass_constprop::process_tuple_concat() {
           }
         }
         b_is_empty_tuple = !any_kv;
+        if (b->is_scalar() && st.has_trivial(current_text())) {
+          b_is_string_scalar = st.get_trivial(current_text()).is_string();
+        }
       }
       // Use bundle mode when:
       //   - the operand is a multi-entry bundle (always tuple), or
@@ -665,9 +783,12 @@ void uPass_constprop::process_tuple_concat() {
       //     bundle that is actually a 1-element tuple" case), or
       //   - we're already in bundle_mode (the first operand chose tuple,
       //     so subsequent single-entry bundles must concat as tuples too,
-      //     not be re-routed to the scalar path).
+      //     not be re-routed to the scalar path), or
+      //   - the operand is a single non-string trivial: Pyrope's `++` over
+      //     ints is tuple concat, not bit concat — wrap as a 1-tuple.
       const bool is_tuple_typed = tuple_typed_names.contains(std::string(current_text()));
-      if (b && (!b->is_scalar() || b_is_empty_tuple || is_tuple_typed || bundle_mode)) {
+      const bool int_scalar_promote = b && b->is_scalar() && !b_is_string_scalar && !b_is_empty_tuple;
+      if (b && (!b->is_scalar() || b_is_empty_tuple || is_tuple_typed || bundle_mode || int_scalar_promote)) {
         if (!is_first && !bundle_mode) return false;
         if (is_first) {
           acc_bundle  = std::make_shared<Bundle>(dst);
@@ -680,16 +801,28 @@ void uPass_constprop::process_tuple_concat() {
       }
       if (st.has_trivial(current_text())) {
         auto val = st.get_trivial(current_text());
-        if (val.is_invalid() || val.has_unknowns() || bundle_mode) return false;
+        if (val.is_invalid() || val.has_unknowns()) return false;
+        if (bundle_mode) {
+          // Promote a string trivial entering an in-progress bundle concat
+          // into a 1-tuple so positional ordering is preserved.
+          acc_bundle->concat(wrap_scalar_as_bundle(val));
+          return true;
+        }
         acc_scalar = is_first ? val : acc_scalar.concat_op(val);
         return true;
       }
       return false;
     }
     if (is_type(Lnast_ntype::Lnast_ntype_const)) {
-      if (bundle_mode) return false;
       auto val = Lconst::from_pyrope(current_text());
       if (val.is_invalid()) return false;
+      if (bundle_mode) {
+        // Wrap the const as a 1-tuple so `tuple ++ N` appends N as a slot.
+        acc_bundle->concat(wrap_scalar_as_bundle(val));
+        return true;
+      }
+      // First-operand scalar mode: defer the decision until we see operand 2.
+      // For now stay in scalar mode; an int operand 2 will trigger promotion.
       acc_scalar = is_first ? val : acc_scalar.concat_op(val);
       return true;
     }
@@ -1453,6 +1586,26 @@ void uPass_constprop::process_func_does() {
   move_to_parent();
 }
 
+void uPass_constprop::process_func_equals() {
+  move_to_child();
+  std::string dst(current_text());
+  if (!move_to_sibling()) {
+    move_to_parent();
+    return;
+  }
+  auto ba = current_ref_bundle();
+  if (!move_to_sibling()) {
+    move_to_parent();
+    return;
+  }
+  auto bb = current_ref_bundle();
+  move_to_parent();
+  if (!ba || !bb) {
+    return;
+  }
+  store_trivial(dst, structural_equals(ba, bb) ? Lconst(1) : Lconst(0));
+}
+
 void uPass_constprop::process_func_in() {
   move_to_child();
   std::string dst(current_text());
@@ -1783,6 +1936,12 @@ void uPass_constprop::process_tuple_set() {
     return;
   }
 
+  // `tup[idx] = v` promotes a scalar to a 1-element tuple in Pyrope. Mark the
+  // target so a downstream tuple_concat reads `tup` via bundle mode rather
+  // than mis-classifying a single-entry bundle as a scalar wrapper. Mirrors
+  // the propagation done by process_tuple_add for its destination.
+  tuple_typed_names.insert(tuple_var);
+
   // Collect all children after the tuple ref into a (text, is_ref) list.
   // The last child is the value; everything before it is the field path.
   // Capturing `is_ref` matters for the value: a ref's text is a variable name
@@ -1814,19 +1973,119 @@ void uPass_constprop::process_tuple_set() {
     }
   }
 
-  // Build field key from path elements (all except last).
-  std::string field;
+  // Resolve each path element to its final field text. A path element may be:
+  //   - const: literal field text (e.g. `0`, `a`) — use as-is.
+  //   - ref:   variable whose value names the field (`sing_tup[key] = e`).
+  //            Resolve through the symbol table; a trivial string yields its
+  //            content (no quotes), a trivial int its decimal text. If the
+  //            ref has no trivial yet, fall back to the variable name so
+  //            convergence can still happen on a later iteration.
+  std::vector<std::string> path;
+  path.reserve(path_and_val.size() - 1);
   for (std::size_t i = 0; i + 1 < path_and_val.size(); ++i) {
-    field += '.';
-    field += path_and_val[i].text;
+    std::string elem = path_and_val[i].text;
+    if (path_and_val[i].is_ref && st.has_trivial(elem)) {
+      // to_field() unwraps a string trivial to its content (no quotes) and
+      // renders an int trivial as its decimal text — exactly the field-name
+      // shape we want for `tuple[ref] = …`.
+      elem = st.get_trivial(elem).to_field();
+    }
+    path.push_back(std::move(elem));
   }
-  auto        key       = tuple_var + field;
+
+  // Decide between the legacy flat-key path (numeric or dotted positional)
+  // and the named-positional path (single non-numeric name → `:N:name` so
+  // downstream Bundle::concat treats this entry as a named-positional slot,
+  // matching what tuple_add emits for `(name=val, …)`).
+  auto is_decimal = [](const std::string& s) {
+    if (s.empty()) return false;
+    for (char c : s) {
+      if (!std::isdigit(static_cast<unsigned char>(c))) return false;
+    }
+    return true;
+  };
+
+  bool use_named_positional = path.size() == 1 && !is_decimal(path[0]) && !path[0].empty();
+
   const auto& val_child = path_and_val.back();
+  auto resolve_value = [&]() -> std::optional<Lconst> {
+    if (val_child.is_ref) {
+      if (st.has_trivial(val_child.text)) {
+        return st.get_trivial(val_child.text);
+      }
+      return std::nullopt;
+    }
+    Lconst v = Lconst::from_pyrope(val_child.text);
+    if (v.is_invalid()) return std::nullopt;
+    return v;
+  };
+
+  if (use_named_positional) {
+    // Place the entry into tuple_var's bundle as `:N:name`. N is reused if
+    // the bundle already has the name (idempotent re-set), otherwise it's
+    // the next free positional slot. This mirrors tuple_add's encoding so
+    // tuple_concat's named-positional grouping recognizes the slot.
+    auto bundle = st.get_bundle(tuple_var);
+    if (!bundle) {
+      bundle = std::make_shared<Bundle>(tuple_var);
+      st.set(tuple_var, bundle);
+    }
+    const std::string& name      = path[0];
+    int                next_pos  = 0;
+    int                found_pos = -1;
+    for (const auto& e : bundle->get_map()) {
+      if (e.first.empty() || e.first.front() == '_') continue;  // attribute
+      if (e.first.front() == ':') {
+        // `:N:name[.suffix]`
+        auto second = e.first.find(':', 1);
+        if (second == std::string::npos) continue;
+        int pos = 0;
+        try {
+          pos = std::stoi(e.first.substr(1, second - 1));
+        } catch (...) { continue; }
+        if (pos + 1 > next_pos) next_pos = pos + 1;
+        auto rest = e.first.substr(second + 1);
+        auto dot  = rest.find('.');
+        auto top_name = dot == std::string::npos ? rest : rest.substr(0, dot);
+        if (top_name == name && found_pos < 0) found_pos = pos;
+      } else if (std::isdigit(static_cast<unsigned char>(e.first.front()))) {
+        // Plain positional (no name); count the slot for next_pos only.
+        auto dot = e.first.find('.');
+        auto top = dot == std::string::npos ? e.first : e.first.substr(0, dot);
+        try {
+          int pos = std::stoi(top);
+          if (pos + 1 > next_pos) next_pos = pos + 1;
+        } catch (...) {}
+      } else if (e.first == name || e.first.substr(0, name.size() + 1) == name + ".") {
+        // Pre-existing flat-name entry (legacy tuple_set output). Reuse its
+        // implicit position 0 if no `:N:name` claimed slot 0 yet.
+        if (found_pos < 0) found_pos = 0;
+      }
+    }
+    int  pos       = found_pos >= 0 ? found_pos : next_pos;
+    auto field_key = std::format(":{}:{}", pos, name);
+
+    auto v = resolve_value();
+    if (v) {
+      // Update bundle in place. mark_changed is driven by tuple_get; matching
+      // process_tuple_add's no-mark policy here keeps convergence behavior.
+      bundle->set(field_key, *v);
+    } else if (val_child.is_ref && st.has_bundle(val_child.text)) {
+      auto sub = st.get_bundle(val_child.text);
+      if (sub) bundle->set(field_key, sub);
+    }
+    move_to_parent();
+    return;
+  }
+
+  std::string field;
+  for (const auto& p : path) {
+    field += '.';
+    field += p;
+  }
+  auto key = tuple_var + field;
 
   if (val_child.is_ref) {
-    // Value is a ref: resolve through the symbol table. Trivial first, then
-    // bundle. If the source has no value yet, leave the field unchanged so
-    // a later iteration can still discover it.
     if (st.has_trivial(val_child.text)) {
       store_trivial(key, st.get_trivial(val_child.text));
     } else if (st.has_bundle(val_child.text)) {

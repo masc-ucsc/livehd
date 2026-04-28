@@ -430,6 +430,7 @@ void uPass_runner::process_lnast() {
     A_OP(func_call)
     // does/in/has fold to a known boolean → drop-candidate.
     A_OP(func_does)
+    A_OP(func_equals)
     A_OP(func_in)
     A_OP(func_has)
     // case/break/continue/return have no comptime fold yet — emit verbatim.

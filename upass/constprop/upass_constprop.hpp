@@ -61,6 +61,7 @@ public:
   void process_tuple_concat() override;
   void process_func_call() override;
   void process_func_does() override;
+  void process_func_equals() override;
   void process_func_in() override;
   void process_func_has() override;
   void process_range() override;

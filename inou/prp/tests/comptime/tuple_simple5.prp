@@ -10,12 +10,12 @@ mut case1:(x=0, y=1) = (0, 1)
 case1 = (3,4)
 cassert case1.x==3 and case1.y==4
 cassert case1 == (3,4) == (x=3,y=4)
-cassert case1 != (y=4,x=3)
+cassert case1 == (y=4,x=3)
 
 case1 = (x=3,y=4)
 cassert case1.x==3 and case1.y==4
 cassert case1 == (3,4) == (x=3,y=4)
-cassert case1 != (y=4,x=3)
+cassert case1 == (y=4,x=3)
 
 mut case2:(long=true, myint=33) = (true, 33)
 

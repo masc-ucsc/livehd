@@ -1,0 +1,19 @@
+/*
+:name: string_interpolation
+:type: parsing lnast comptime
+:verifier_pass: 2
+:verifier_fail: 0
+*/
+
+mut hello = "hello"
+
+mut world = " world"
+
+const hw = "{hello} {world}!"
+
+cassert hw == 'hello world!'
+
+const tmp = 103
+mut x = "cadena {tmp+1}"
+
+cassert x == "cadena 103"
