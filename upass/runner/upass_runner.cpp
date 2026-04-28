@@ -572,14 +572,11 @@ void uPass_runner::process_if() {
         // Advance past the condition to the then-stmts.
         if (lm->move_to_sibling()) {
           if (taken) {
-            // Splice then-stmts children directly into the parent stmts block.
-            if (lm->has_child()) {
-              lm->move_to_child();
-              do {
-                process_lnast();
-              } while (lm->move_to_sibling());
-              lm->move_to_parent();
-            }
+            // Emit the then-stmts block (preserving its scope) — the if
+            // node itself is dropped, but the stmts wrapper stays so that
+            // `mut x = ...` inside the body remains scoped to that block
+            // instead of leaking into the parent.
+            process_lnast();
             lm->move_to_parent();  // back to if-node
             return;                // pruned — no if node emitted
           }
@@ -587,14 +584,8 @@ void uPass_runner::process_if() {
           // Condition is false: skip the then-stmts, look for an else-stmts.
           if (lm->move_to_sibling()) {
             if (lm->get_raw_ntype() == Ntype::Lnast_ntype_stmts) {
-              // Bare else-stmts: splice its children into the parent.
-              if (lm->has_child()) {
-                lm->move_to_child();
-                do {
-                  process_lnast();
-                } while (lm->move_to_sibling());
-                lm->move_to_parent();
-              }
+              // Bare else-stmts: emit it (preserving its scope), drop the if.
+              process_lnast();
               lm->move_to_parent();  // back to if-node
               return;                // pruned
             }
