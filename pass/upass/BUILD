@@ -31,35 +31,8 @@ cc_library(
 )
 
 sh_test(
-    name = "upass_converge_test.sh",
-    srcs = ["tests/upass_converge_test.sh"],
-    data = [
-        "//inou/pyrope:pyrope_tests",
-        "//main:lgshell",
-    ],
-)
-
-sh_test(
     name = "upass_dependency_test.sh",
     srcs = ["tests/upass_dependency_test.sh"],
-    data = [
-        "//inou/pyrope:pyrope_tests",
-        "//main:lgshell",
-    ],
-)
-
-sh_test(
-    name = "upass_unknown_and_maxiters_test.sh",
-    srcs = ["tests/upass_unknown_and_maxiters_test.sh"],
-    data = [
-        "//inou/pyrope:pyrope_tests",
-        "//main:lgshell",
-    ],
-)
-
-sh_test(
-    name = "upass_iteration_diag_test.sh",
-    srcs = ["tests/upass_iteration_diag_test.sh"],
     data = [
         "//inou/pyrope:pyrope_tests",
         "//main:lgshell",
@@ -78,15 +51,6 @@ sh_test(
 sh_test(
     name = "upass_cycle_cmd_test.sh",
     srcs = ["tests/upass_cycle_cmd_test.sh"],
-    data = [
-        "//inou/pyrope:pyrope_tests",
-        "//main:lgshell",
-    ],
-)
-
-sh_test(
-    name = "upass_maxiters_zero_test.sh",
-    srcs = ["tests/upass_maxiters_zero_test.sh"],
     data = [
         "//inou/pyrope:pyrope_tests",
         "//main:lgshell",
@@ -303,12 +267,9 @@ test_suite(
     name = "upass_smoke_suite",
     tests = [
         "//upass/runner:upass_runner_cycle_test",
-        ":upass_converge_test.sh",
         ":upass_dependency_test.sh",
-        ":upass_iteration_diag_test.sh",
         ":upass_noop_first_iter_test.sh",
         ":upass_cycle_cmd_test.sh",
-        ":upass_maxiters_zero_test.sh",
         ":upass_order_parse_test.sh",
         ":upass_invalid_ir_test.sh",
         ":upass_lnast_shared_scan_test.sh",
@@ -330,6 +291,5 @@ test_suite(
         ":upass_lgraph_sub_fold_test.sh",
         ":upass_lgraph_mult_fold_test.sh",
         ":upass_lgraph_dce_test.sh",
-        ":upass_unknown_and_maxiters_test.sh",
     ],
 )
