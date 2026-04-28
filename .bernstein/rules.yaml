@@ -1,0 +1,78 @@
+# LiveHD organizational rules for Bernstein.
+#
+# Two layers of protection:
+#  1. permission_rules — block tool calls (Edit/Write/MultiEdit) at the source
+#     before they touch any *contract* path.
+#  2. rules — post-task command-type gate that fails the agent run if the diff
+#     touched any *contract* file (defense-in-depth in case an agent bypasses
+#     the tool layer, e.g. via Bash).
+#
+# Globs use fnmatch; `**` matches across path separators.
+
+version: 1
+enabled: true
+
+# ---------------------------------------------------------------------------
+# Tool-level permission rules. First match wins.
+# ---------------------------------------------------------------------------
+permission_rules:
+  - id: deny-write-contract-files
+    action: deny
+    tool: Write
+    path: "**/*contract*"
+    description: "Block Write on any path containing 'contract'."
+
+  - id: deny-edit-contract-files
+    action: deny
+    tool: Edit
+    path: "**/*contract*"
+    description: "Block Edit on any path containing 'contract'."
+
+  - id: deny-multiedit-contract-files
+    action: deny
+    tool: MultiEdit
+    path: "**/*contract*"
+    description: "Block MultiEdit on any path containing 'contract'."
+
+  - id: deny-write-Contract-files
+    action: deny
+    tool: Write
+    path: "**/*Contract*"
+    description: "Block Write on any path containing 'Contract' (case)."
+
+  - id: deny-edit-Contract-files
+    action: deny
+    tool: Edit
+    path: "**/*Contract*"
+    description: "Block Edit on any path containing 'Contract' (case)."
+
+  - id: deny-multiedit-Contract-files
+    action: deny
+    tool: MultiEdit
+    path: "**/*Contract*"
+    description: "Block MultiEdit on any path containing 'Contract' (case)."
+
+  # Block obvious Bash bypasses (rm/mv/sed/cp on contract paths).
+  - id: deny-bash-rm-contract
+    action: deny
+    tool: Bash
+    command: "*contract*"
+    description: "Block Bash commands referencing a 'contract' path."
+
+# ---------------------------------------------------------------------------
+# Post-task organizational rules. `command` exits non-zero on violation.
+# ---------------------------------------------------------------------------
+rules:
+  - id: contract-files-immutable
+    type: command
+    severity: error
+    description: "*contract* files/directories must not appear in the diff."
+    command: "scripts/bernstein/check_contract_untouched.sh"
+    message: "A path containing 'contract' was modified. Revert those edits."
+
+  - id: no-new-test-regressions
+    type: command
+    severity: error
+    description: "Test failures must not exceed the recorded baseline."
+    command: "scripts/bernstein/test_no_regressions.sh"
+    message: "New test regressions detected vs. .bernstein/test_baseline.txt. Fix or refresh the baseline if intentional."

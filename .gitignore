@@ -41,4 +41,4 @@ livehd_regression
 *.lnast.raw.txt
 *.lock
 pp*
-
+.sdd/runtime/
