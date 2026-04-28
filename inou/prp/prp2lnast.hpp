@@ -133,7 +133,7 @@ protected:
   Lnast_node         make_tmp_ref();
   std::string_view   get_text(const TSNode& n) const;
   std::string        get_text_str(const TSNode& n) const { return std::string(get_text(n)); }
-  static std::string trim(std::string_view s);
+  static std::string_view trim(std::string_view s);
   std::string_view   text_between(uint32_t start, uint32_t end) const;
 
   // Get rvalue text even when the rvalue field is a hidden token (numbers,

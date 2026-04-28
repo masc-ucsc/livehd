@@ -73,6 +73,7 @@ void Pass_upass::setup() {
   Eprp_method m1("pass.upass", "lnast micropass (upass) controller", &Pass_upass::work);
   m1.add_label_optional("verifier", "enable lnast verifier upass", "true");
   m1.add_label_optional("constprop", "enable constant propagation upass", "true");
+  m1.add_label_optional("coalescer", "enable deferred-emit / DSE coalescer upass", "true");
   m1.add_label_optional("assert", "enable assert test", "true");
   m1.add_label_optional(
       "order",
@@ -162,6 +163,7 @@ Pass_upass::Pass_upass(const Eprp_var& var) : Pass("pass.upass", var) {
   };
   capture_opt("verifier_pass");
   capture_opt("verifier_fail");
+  capture_opt("coalescer");
 
   if (!upass_order.empty()) {
     return;
@@ -180,6 +182,9 @@ Pass_upass::Pass_upass(const Eprp_var& var) : Pass("pass.upass", var) {
 
   auto constp_txt   = get_label("constprop");
   bool do_constprop = constp_txt != "false" && constp_txt != "0";
+
+  auto coalescer_txt = get_label("coalescer");
+  bool do_coalescer  = coalescer_txt != "false" && coalescer_txt != "0";
 
   // The assert pass declares depends_on={"constprop"}, so the runner's
   // resolve_order will silently pull constprop back in if assert is enabled
@@ -201,6 +206,12 @@ Pass_upass::Pass_upass(const Eprp_var& var) : Pass("pass.upass", var) {
 
   if (do_constprop) {
     upass_order.emplace_back("constprop");
+  }
+  // Coalescer runs after constprop so its handle_op sees an up-to-date
+  // runner_fold_fn — the known-const guard skips parking when constprop has
+  // already proven the LHS comptime, letting constprop's classify drop fire.
+  if (do_coalescer) {
+    upass_order.emplace_back("coalescer");
   }
   if (do_assert) {  // last before codegen
     upass_order.emplace_back("assert");

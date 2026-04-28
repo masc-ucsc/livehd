@@ -91,9 +91,11 @@ uPass_runner::uPass_runner(std::shared_ptr<upass::Lnast_manager>& _lm, const std
   // Wire runner-backed fold callback + options into every pass. Done once,
   // after all passes are constructed, so the callback sees the full pass
   // list and each pass can pick the options it recognizes.
-  auto fold_fn = [this](std::string_view name) { return try_fold_ref(name); };
+  auto fold_fn    = [this](std::string_view name) { return try_fold_ref(name); };
+  auto emit_at_fn = [this](const Lnast_nid& src) { emit_op_with_fold_at(src); };
   for (auto& entry : upasses) {
     entry.pass->set_runner_fold_fn(fold_fn);
+    entry.pass->set_runner_emit_at_fn(emit_at_fn);
     entry.pass->set_options(options);
   }
 }
@@ -201,6 +203,17 @@ std::optional<Lconst> uPass_runner::try_fold_ref(std::string_view name) {
     }
   }
   return std::nullopt;
+}
+
+void uPass_runner::emit_op_with_fold_at(const Lnast_nid& src) {
+  // Save and re-position the read cursor so the in-progress traversal isn't
+  // disturbed. emit_op_with_fold balances its own move_to_child / sibling /
+  // parent operations, so the nid_stack returns to baseline; restoring here
+  // just covers move_to_nid (which doesn't push onto the stack).
+  auto saved = lm->save_cursor();
+  lm->move_to_nid(src);
+  emit_op_with_fold(/*fold_all=*/false);
+  lm->restore_cursor(saved);
 }
 
 void uPass_runner::emit_op_with_fold(bool fold_all) {
@@ -522,6 +535,11 @@ void uPass_runner::process_stmts() {
     } while (lm->move_to_sibling());
     lm->move_to_parent();
   }
+  // Pre-pop hook fires while the staging cursor is still inside the stmts
+  // block, so a pass (e.g. coalescer) can flush deferred writes into the
+  // closing block rather than the parent scope. process_stmts_post fires
+  // after the pop and is for tear-down (e.g. constprop's scope leave).
+  dispatch_to_passes(&upass::uPass::process_stmts_pre_pop);
   emit_pop();
   dispatch_to_passes(&upass::uPass::process_stmts_post);
 }

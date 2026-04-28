@@ -64,6 +64,12 @@ protected:
   // children are fed through fold_ref. When true, every ref child is folded.
   void emit_op_with_fold(bool fold_all);
 
+  // Replays emit_op_with_fold for the op-node at `src` at the current staging
+  // position. Saves/restores the read cursor so passes can call this from
+  // inside process_* without disturbing the in-progress traversal. Exposed to
+  // passes via the Emit_at_fn callback wired in the constructor.
+  void emit_op_with_fold_at(const Lnast_nid& src);
+
   void process_top() override;
   void process_stmts() override;
   void process_if() override;

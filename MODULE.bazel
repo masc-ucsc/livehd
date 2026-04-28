@@ -105,9 +105,9 @@ http_archive(
 http_archive(
     name = "tree-sitter-pyrope",
     build_file = "//packages:tree-sitter-pyrope.BUILD",
-    integrity = "sha256-piHmDPuuScYRJUS3UDolW/zQst/j6WahXsk53rVcHPs=",
-    strip_prefix = "tree-sitter-pyrope-869239c6d5f97c089d1f29901cd6ff466e5188de",
-    urls = ["https://github.com/masc-ucsc/tree-sitter-pyrope/archive/869239c6d5f97c089d1f29901cd6ff466e5188de.zip",
+    integrity = "sha256-QGSEfw4sk1ZRHcekDAqHBR/elgjZmayRCC8BnVSFIxs=",
+    strip_prefix = "tree-sitter-pyrope-4d3b9d66628a0e8f36bf6960c4a5c8558d7f38ed",
+    urls = ["https://github.com/masc-ucsc/tree-sitter-pyrope/archive/4d3b9d66628a0e8f36bf6960c4a5c8558d7f38ed.zip",
     ],
 )
 

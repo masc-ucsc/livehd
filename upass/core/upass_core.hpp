@@ -66,6 +66,16 @@ public:
   using Fold_fn = std::function<std::optional<Lconst>(std::string_view)>;
   void set_runner_fold_fn(Fold_fn fn) { runner_fold_fn = std::move(fn); }
 
+  // Runner-supplied helper that re-emits the op-node at `src` (with operand
+  // folding through try_fold_ref) at the runner's current staging cursor.
+  // Used by the coalescer to flush a deferred (parked) statement: the source
+  // LNAST nid is captured at park time and replayed here when a downstream
+  // read or scope exit triggers the flush. The runner saves/restores its
+  // own read cursor around the replay so passes can call this from inside
+  // their process_* without disturbing the in-progress traversal.
+  using Emit_at_fn = std::function<void(const Lnast_nid&)>;
+  void set_runner_emit_at_fn(Emit_at_fn fn) { runner_emit_at_fn = std::move(fn); }
+
   // Consume per-pass options (see Options_map). Default: no-op. Passes
   // override to pull the keys they care about. Called once, before run().
   virtual void set_options(const Options_map& /*opts*/) {}
@@ -179,6 +189,13 @@ public:
   PROCESS_NODE(top)
   PROCESS_NODE(stmts)
   // Called by the runner after children of a stmts node have been
+  // processed but BEFORE the staging cursor pops out of the stmts block.
+  // Used by the coalescer to flush any deferred writes still parked at
+  // end-of-block: emissions land inside the closing stmts so order is
+  // preserved. process_stmts_post fires after the pop and is the wrong
+  // hook for emission — it would land in the parent scope.
+  PROCESS_NODE(stmts_pre_pop)
+  // Called by the runner after children of a stmts node have been
   // processed. Lets a pass tear down per-block state (e.g. constprop
   // popping a block scope it pushed in process_stmts).
   PROCESS_NODE(stmts_post)
@@ -190,6 +207,7 @@ protected:
   std::shared_ptr<Lnast_manager>& lm;
   bool                            changed{false};
   Fold_fn                         runner_fold_fn;
+  Emit_at_fn                      runner_emit_at_fn;
 
   void move_to_nid(const Lnast_nid& nid) { lm->move_to_nid(nid); }
   auto current_text() const { return lm->current_text(); }

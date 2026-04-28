@@ -17,6 +17,7 @@ cc_library(
         "//lnast",
         "//pass/common:pass",
         "//upass/assert:upass_assert",
+        "//upass/coalescer:upass_coalescer",
         "//upass/constprop:upass_constprop",
         "//upass/core:upass",
         "//upass/cyclecmd:upass_cyclecmd",
@@ -124,6 +125,14 @@ sh_test(
     srcs = ["tests/upass_lnast_shared_scan_test.sh"],
     data = [
         "//inou/pyrope:pyrope_tests",
+        "//main:lgshell",
+    ],
+)
+
+sh_test(
+    name = "upass_coalescer_dse_test.sh",
+    srcs = ["tests/upass_coalescer_dse_test.sh"],
+    data = [
         "//main:lgshell",
     ],
 )
