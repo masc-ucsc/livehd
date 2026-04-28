@@ -381,9 +381,7 @@ public:
       if (inputs.empty()) {
         continue;
       }
-      if (!std::ranges::all_of(inputs, [](const XEdge &inp) {
-            return inp.driver.is_type(Ntype_op::Const);
-          })) {
+      if (!std::ranges::all_of(inputs, [](const XEdge& inp) { return inp.driver.is_type(Ntype_op::Const); })) {
         continue;
       }
 
@@ -459,9 +457,7 @@ public:
       if (inputs.empty()) {
         continue;
       }
-      if (!std::ranges::all_of(inputs, [](const XEdge &inp) {
-            return inp.driver.is_type(Ntype_op::Const);
-          })) {
+      if (!std::ranges::all_of(inputs, [](const XEdge& inp) { return inp.driver.is_type(Ntype_op::Const); })) {
         continue;
       }
 

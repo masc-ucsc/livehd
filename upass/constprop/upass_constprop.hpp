@@ -173,7 +173,7 @@ protected:
 
   static inline std::unordered_map<std::string, std::shared_ptr<Lnast>> function_registry;
 
-  std::optional<Lconst> resolve_current_scalar() const;
+  std::optional<Lconst>                   resolve_current_scalar() const;
   std::optional<std::vector<Call_actual>> collect_call_actuals();
   bool try_eval_comb_call(std::string_view dst, std::string_view fname, const std::vector<Call_actual>& actuals);
 };

@@ -10,45 +10,104 @@ class Lnast_map {
 protected:
   constexpr static std::array namemap_pyrope{"invalid",
 
-                                             "top",      "sts",        "if",        "uif",       "for",
-                                             "while",    "func_call",  "func_def",  "io",
+                                             "top",
+                                             "sts",
+                                             "if",
+                                             "uif",
+                                             "for",
+                                             "while",
+                                             "func_call",
+                                             "func_def",
+                                             "io",
 
-                                             "does",     "equals",     "in",        "has",       "case",
-                                             "break",    "continue",   "return",
+                                             "does",
+                                             "equals",
+                                             "in",
+                                             "has",
+                                             "case",
+                                             "break",
+                                             "continue",
+                                             "return",
 
-                                             "=",        ":=",         "mut",        "delay_assign",
+                                             "=",
+                                             ":=",
+                                             "mut",
+                                             "delay_assign",
 
-                                             "&",        "|",          "~",         "^",
+                                             "&",
+                                             "|",
+                                             "~",
+                                             "^",
 
-                                             "ror",      "rand",       "rxor",      "popcount",
+                                             "ror",
+                                             "rand",
+                                             "rxor",
+                                             "popcount",
 
-                                             "and",      "or",         "!",
+                                             "and",
+                                             "or",
+                                             "!",
 
-                                             "+",        "-",          "*",         "/",         "mod",
+                                             "+",
+                                             "-",
+                                             "*",
+                                             "/",
+                                             "mod",
 
-                                             "<<",       ">>",
+                                             "<<",
+                                             ">>",
 
-                                             "sext",     "set_mask",   "get_mask",  "mask_and",  "mask_popcount",
+                                             "sext",
+                                             "set_mask",
+                                             "get_mask",
+                                             "mask_and",
+                                             "mask_popcount",
                                              "mask_xor",
 
-                                             "is",       "!=",         "==",        "<",         "<=",
-                                             ">",        ">=",
+                                             "is",
+                                             "!=",
+                                             "==",
+                                             "<",
+                                             "<=",
+                                             ">",
+                                             ">=",
 
-                                             "ref",      "const",      "range",
+                                             "ref",
+                                             "const",
+                                             "range",
 
-                                             "++",       "++",         "tuple_get", "tuple_set",
+                                             "++",
+                                             "++",
+                                             "tuple_get",
+                                             "tuple_set",
 
-                                             "attr_set", "attr_get",
+                                             "attr_set",
+                                             "attr_get",
 
-                                             "cassert",  "error_flag", "phi",       "hot_phi",
+                                             "cassert",
+                                             "error_flag",
+                                             "phi",
+                                             "hot_phi",
 
-                                             "type_def", "type_spec",
+                                             "type_def",
+                                             "type_spec",
 
-                                             "none",     "uint",       "sint",      "range",      "string",
-                                             "boolean",  "type",       "ref",
+                                             "none",
+                                             "uint",
+                                             "sint",
+                                             "range",
+                                             "string",
+                                             "boolean",
+                                             "type",
+                                             "ref",
 
-                                             "tuple",    "array",      "mixin",     "lambda",     "enum",
-                                             "expr_type", "unknown"};
+                                             "tuple",
+                                             "array",
+                                             "mixin",
+                                             "lambda",
+                                             "enum",
+                                             "expr_type",
+                                             "unknown"};
 
   constexpr static std::array namemap_verilog{
       "invalid",
@@ -135,7 +194,7 @@ protected:
       "type_spec",
 
       "none",
-      "logic",  // prim_type_uint
+      "logic",         // prim_type_uint
       "signed logic",  // prim_type_sint
       "range",
       "string",
@@ -244,7 +303,7 @@ protected:
       "string",
       "bool",  // prim_type_boolean
       "type",
-      "ref",   // prim_type_ref
+      "ref",  // prim_type_ref
 
       "tuple",  // comp_type_tuple
       "array",

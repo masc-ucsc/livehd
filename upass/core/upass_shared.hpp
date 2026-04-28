@@ -78,9 +78,9 @@ inline Shared_fold_sum_const_report run_fold_sum_const_shared(IR_adapter& adapte
       continue;
     }
 
-    bool                 all_const = true;
-    std::vector<Lconst>  const_vals;
-    for (const auto &inp : inps) {
+    bool                all_const = true;
+    std::vector<Lconst> const_vals;
+    for (const auto& inp : inps) {
       const auto cv = adapter.const_value(inp);
       if (!cv) {
         all_const = false;
