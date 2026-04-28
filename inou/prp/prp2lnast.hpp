@@ -33,7 +33,8 @@ protected:
   // Pending overflow kind ("wrap"/"sat") to apply to the next assignment.
   // Set by process_{description,scope_statement} when the new grammar's
   // statement-level `wrap`/`sat` prefix is seen; consumed by process_assignment.
-  std::string pending_overflow_kind;
+  // ts_node_type strings have static lifetime, so a string_view is safe.
+  std::string_view pending_overflow_kind;
 
   // Tree-sitter currently doesn't always attach a `comb foo(...) { ... }`
   // body to the lambda's `code` field; for some inputs the body parses as
@@ -75,6 +76,10 @@ protected:
   // Statements
   void process_statement(TSNode n);
   void process_scope_statement(TSNode n, lh::Tree_index target_stmts);
+  // Shared body for process_description / process_scope_statement: walks ALL
+  // children of `parent` (named + anonymous) so the grammar's hidden `wrap`/
+  // `sat` overflow tokens and `gate` field bubble-ups are visible.
+  void walk_statement_block(TSNode parent);
   // Wrap a statement in a synthesized `if cond { stmt }` (or `if !cond { stmt }`
   // for `unless`). For decl-form assignments (`mut x = e when cond`) the decl
   // is hoisted to the surrounding scope with a `nil` initializer, so `x` is

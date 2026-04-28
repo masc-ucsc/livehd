@@ -59,6 +59,11 @@ protected:
   // Returns the first non-nullopt result from any pass's fold_ref(name).
   std::optional<Lconst> try_fold_ref(std::string_view name);
 
+  // Emits either the folded value of `name` (when any pass returns a valid
+  // Lconst) or the original ref node otherwise. Used by both emit_op_with_fold
+  // and the statement-scope ref leaf case.
+  void emit_ref_or_folded(std::string_view name);
+
   // Emits the current op-node and its children into staging. When fold_all is
   // false, the first child (LHS/dst) is copied verbatim and subsequent ref
   // children are fed through fold_ref. When true, every ref child is folded.
@@ -87,6 +92,7 @@ private:
   // classify via every pass's classify_statement, emit if no pass drops.
   void process_drop_candidate(Pass_method fn, bool fold_all);
   void process_drop_candidate_verbatim(Pass_method fn);
+  bool any_pass_drops() const;
 
   // Verbatim path (category C): dispatch so passes see the node, then copy
   // the subtree without folding.

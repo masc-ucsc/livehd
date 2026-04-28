@@ -10,6 +10,8 @@
 #include <unordered_map>
 #include <vector>
 
+#include "absl/container/flat_hash_map.h"
+#include "absl/container/flat_hash_set.h"
 #include "lgedgeiter.hpp"
 #include "lgraph.hpp"
 #include "upass_runner_common.hpp"
@@ -338,6 +340,23 @@ uPass_runner_lgraph::uPass_runner_lgraph(std::shared_ptr<upass::Lgraph_manager> 
     std::print("\n");
   }
 
+  // Passes that take dry_run in their constructor go through this lookup; the
+  // rest fall back to the plugin's default setup_fn.
+  using Dry_factory = std::unique_ptr<upass::uPass_lgraph> (*)(std::shared_ptr<upass::Lgraph_manager>&, bool);
+  static const absl::flat_hash_map<std::string_view, Dry_factory> dry_factory = {
+      {"fold_sum_const",
+       [](auto& g, bool d) -> std::unique_ptr<upass::uPass_lgraph> { return std::make_unique<Lgraph_pass_fold_sum_const>(g, d); }},
+      {"fold_neutral",
+       [](auto& g, bool d) -> std::unique_ptr<upass::uPass_lgraph> { return std::make_unique<Lgraph_pass_fold_neutral>(g, d); }},
+      {"fold_shift_div",
+       [](auto& g, bool d) -> std::unique_ptr<upass::uPass_lgraph> { return std::make_unique<Lgraph_pass_fold_shift_div>(g, d); }},
+      {"fold_sub_const",
+       [](auto& g, bool d) -> std::unique_ptr<upass::uPass_lgraph> { return std::make_unique<Lgraph_pass_fold_sub_const>(g, d); }},
+      {"fold_mult_const",
+       [](auto& g, bool d) -> std::unique_ptr<upass::uPass_lgraph> { return std::make_unique<Lgraph_pass_fold_mult_const>(g, d); }},
+      {"dce", [](auto& g, bool d) -> std::unique_ptr<upass::uPass_lgraph> { return std::make_unique<Lgraph_pass_dce>(g, d); }},
+  };
+
   const auto& registry = upass::uPass_lgraph_plugin::get_registry();
   for (const auto& name : resolved) {
     const auto it = registry.find(name);
@@ -345,33 +364,11 @@ uPass_runner_lgraph::uPass_runner_lgraph(std::shared_ptr<upass::Lgraph_manager> 
       std::print("{} is not defined.\n", name);
       continue;
     }
-
     std::print("uPass(lgraph) - add {}\n", name);
-    if (name == "fold_sum_const") {
-      upasses.emplace_back(Pass_entry{.name = name, .pass = std::make_unique<Lgraph_pass_fold_sum_const>(gm, dry_run)});
-      continue;
-    }
-    if (name == "fold_neutral") {
-      upasses.emplace_back(Pass_entry{.name = name, .pass = std::make_unique<Lgraph_pass_fold_neutral>(gm, dry_run)});
-      continue;
-    }
-    if (name == "fold_shift_div") {
-      upasses.emplace_back(Pass_entry{.name = name, .pass = std::make_unique<Lgraph_pass_fold_shift_div>(gm, dry_run)});
-      continue;
-    }
-    if (name == "fold_sub_const") {
-      upasses.emplace_back(Pass_entry{.name = name, .pass = std::make_unique<Lgraph_pass_fold_sub_const>(gm, dry_run)});
-      continue;
-    }
-    if (name == "fold_mult_const") {
-      upasses.emplace_back(Pass_entry{.name = name, .pass = std::make_unique<Lgraph_pass_fold_mult_const>(gm, dry_run)});
-      continue;
-    }
-    if (name == "dce") {
-      upasses.emplace_back(Pass_entry{.name = name, .pass = std::make_unique<Lgraph_pass_dce>(gm, dry_run)});
-      continue;
-    }
-    upasses.emplace_back(Pass_entry{.name = name, .pass = it->second.setup_fn(gm)});
+
+    auto df = dry_factory.find(name);
+    upasses.emplace_back(
+        Pass_entry{.name = name, .pass = (df != dry_factory.end()) ? df->second(gm, dry_run) : it->second.setup_fn(gm)});
   }
 }
 
@@ -441,8 +438,7 @@ std::vector<std::string> uPass_runner_lgraph::changed_passes() const {
 void uPass_runner_lgraph::execute_passes() {
   // fold_tag, fold_sum_const, and fold_mult_const are gated by the general
   // "all-inputs-const" scan (they only fire when every input is a constant).
-  auto is_general_guarded_fold
-      = [](const std::string& name) { return name == "fold_tag" || name == "fold_sum_const" || name == "fold_mult_const"; };
+  static const absl::flat_hash_set<std::string_view> general_guarded_folds = {"fold_tag", "fold_sum_const", "fold_mult_const"};
 
   std::optional<upass::Shared_decision_report> decide_cache;
   auto                                         get_decision = [&]() -> upass::Shared_decision_report {
@@ -463,7 +459,7 @@ void uPass_runner_lgraph::execute_passes() {
       continue;
     }
 
-    if (is_general_guarded_fold(entry.name)) {
+    if (general_guarded_folds.contains(entry.name)) {
       const auto rep = get_decision();
       if (!rep.has_fold_candidates) {
         std::print("uPass(lgraph) - skip {} (no fold candidates)\n", entry.name);

@@ -216,6 +216,15 @@ void uPass_runner::emit_op_with_fold_at(const Lnast_nid& src) {
   lm->restore_cursor(saved);
 }
 
+void uPass_runner::emit_ref_or_folded(std::string_view name) {
+  auto folded = try_fold_ref(name);
+  if (folded && !folded->is_invalid()) {
+    emit_leaf(Lnast_node::create_const(folded->to_pyrope()));
+  } else {
+    emit_leaf(lm->current_node());
+  }
+}
+
 void uPass_runner::emit_op_with_fold(bool fold_all) {
   auto op_node = lm->current_node();
   emit_push(op_node);
@@ -226,12 +235,7 @@ void uPass_runner::emit_op_with_fold(bool fold_all) {
     do {
       const bool is_lhs = (idx == 0) && !fold_all;
       if (!is_lhs && lm->get_raw_ntype() == Lnast_ntype::Lnast_ntype_ref) {
-        auto folded = try_fold_ref(lm->current_text());
-        if (folded && !folded->is_invalid()) {
-          emit_leaf(Lnast_node::create_const(folded->to_pyrope()));
-        } else {
-          emit_leaf(lm->current_node());
-        }
+        emit_ref_or_folded(lm->current_text());
       } else {
         // Either the LHS (don't fold — it's a dst) or a non-ref child
         // (const, or a nested subtree like tuple_add's assign(key, val)).
@@ -263,39 +267,28 @@ void uPass_runner::dispatch_to_passes(Pass_method fn) {
   }
 }
 
+bool uPass_runner::any_pass_drops() const {
+  for (auto& entry : upasses) {
+    if (entry.pass->classify_statement().kind == upass::Emit_kind::drop_subtree) {
+      return true;
+    }
+  }
+  return false;
+}
+
 void uPass_runner::process_drop_candidate(Pass_method fn, bool fold_all) {
   // 1. Run per-node process_* so symbol tables see the current statement.
   dispatch_to_passes(fn);
-
-  // 2. Ask every pass whether to keep this statement. First drop wins.
-  auto decision = upass::Emit_decision::emit_node();
-  for (auto& entry : upasses) {
-    auto d = entry.pass->classify_statement();
-    if (d.kind == upass::Emit_kind::drop_subtree) {
-      decision = d;
-      break;
-    }
-  }
-
+  // 2. Ask every pass whether to keep this statement; first drop wins.
   // 3. Emit (with operand folding) unless dropped.
-  if (decision.kind == upass::Emit_kind::emit) {
+  if (!any_pass_drops()) {
     emit_op_with_fold(fold_all);
   }
 }
 
 void uPass_runner::process_drop_candidate_verbatim(Pass_method fn) {
   dispatch_to_passes(fn);
-
-  auto decision = upass::Emit_decision::emit_node();
-  for (auto& entry : upasses) {
-    auto d = entry.pass->classify_statement();
-    if (d.kind == upass::Emit_kind::drop_subtree) {
-      decision = d;
-      break;
-    }
-  }
-
-  if (decision.kind == upass::Emit_kind::emit) {
+  if (!any_pass_drops()) {
     emit_subtree_verbatim();
   }
 }
@@ -380,15 +373,7 @@ void uPass_runner::process_lnast() {
     // Statement-scope leaves (e.g. an if condition's ref/const). Fold refs
     // through the symbol table so dropping the producing assign doesn't
     // leave a dangling name.
-    case Ntype::Lnast_ntype_ref: {
-      auto folded = try_fold_ref(lm->current_text());
-      if (folded && !folded->is_invalid()) {
-        emit_leaf(Lnast_node::create_const(folded->to_pyrope()));
-      } else {
-        emit_leaf(lm->current_node());
-      }
-      break;
-    }
+    case Ntype::Lnast_ntype_ref: emit_ref_or_folded(lm->current_text()); break;
     case Ntype::Lnast_ntype_const: emit_leaf(lm->current_node()); break;
 
     // Assignment
