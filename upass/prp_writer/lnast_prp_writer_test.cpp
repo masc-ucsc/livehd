@@ -55,11 +55,12 @@ TEST(LnastPrpWriter, AssignEmittedAsMut) {
   EXPECT_EQ(output.find('%'),   std::string::npos)  << "% prefix must be stripped: " << output;
 }
 
-// ── Test 2: add_trivial pattern — all tmps DCE'd, cassert discharged ─────────
-// LNAST:  const x=1, const y=2, ___c = x+y, cassert ___c==3
-// After constprop+verifier: everything DCE'd → staging stmts is empty.
-// Writer should produce a valid (empty-body) comb block.
-TEST(LnastPrpWriter, AddTrivialProducesEmptyBody) {
+// ── Test 2: add_trivial pattern — constprop DCEs all-tmp intermediates ───────
+// LNAST:  assign x=1, assign y=2, ___c = x+y, eq ___1 = ___c==3, cassert ___1
+// After constprop: all three-underscore temps (___c, ___1) are eliminated
+// because they are provably constant and only used in further constant folds.
+// The comb block header must appear; no ___ temp tokens should remain.
+TEST(LnastPrpWriter, TmpsAreDCEdByConstprop) {
   auto ln = std::make_shared<Lnast>("add_trivial");
   ln->set_root(Lnast_node::create_top());
   auto stmts = ln->add_child(Lnast_nid::root(), Lnast_node::create_stmts());
