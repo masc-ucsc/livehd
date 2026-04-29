@@ -241,7 +241,7 @@ void Lnast_prp_writer::write_const() {
   auto text = current_text();
   if (!text.empty() && (isdigit(static_cast<unsigned char>(text[0])) || text[0] == '-')) {
     print(text);
-  } else if (text == "true" || text == "false") {
+  } else if (text == "true" || text == "false" || text == "nil") {
     print(text);
   } else {
     os << std::format("\"{}\"", escape_string(text));
@@ -270,11 +270,22 @@ void Lnast_prp_writer::write_func_call() {
   move_to_sibling();
   print(current_text());
   print("(");
-  // arguments
+  // arguments — positional args are ref/const nodes; named args are assign
+  // nodes (name = value) that must NOT carry the "mut" keyword in call context.
   bool first = true;
   while (move_to_sibling()) {
     if (!first) print(", ");
-    write_node();
+    if (current_ntype() == Lnast_ntype::Lnast_ntype_assign) {
+      // Named actual: emit as  name = value  (no "mut").
+      if (move_to_child()) {
+        print(strip_prefix(current_text()));  // argument name
+        print(" = ");
+        if (move_to_sibling()) write_node();  // argument value
+        move_to_parent();
+      }
+    } else {
+      write_node();
+    }
     first = false;
   }
   print(")");

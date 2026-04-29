@@ -154,6 +154,7 @@ TEST(LnastPrpWriter, CassertHasNoParens) {
   // cassert must not be followed by '('
   auto pos = output.find("cassert");
   ASSERT_NE(pos, std::string::npos);
+  ASSERT_LT(pos + 7, output.size()) << "output too short after 'cassert': " << output;
   EXPECT_NE(output[pos + 7], '(') << "cassert must have no parens: " << output;
 }
 
