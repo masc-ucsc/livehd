@@ -424,5 +424,7 @@ public:
     Prp_rule_sentinel  // last rule is a special one for communicating with the LNAST translator
   };
 
-  void ast_dump(lh::Tree_index tree_idx) const;
+  void ast_dump(hhds::Tree::Node_class tree_idx) const;
+  // Dumps the full AST starting at the parser's root.
+  void ast_dump() const;
 };

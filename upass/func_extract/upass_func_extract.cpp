@@ -112,8 +112,8 @@ void uPass_func_extract::process_func_def() {
   extracted_names.insert(extracted_name);
 
   auto new_lnast = std::make_shared<Lnast>(extracted_name);
-  new_lnast->set_root(Lnast_node::create_top());
-  auto stmts = new_lnast->add_child(Lnast_nid::root(), Lnast_node::create_stmts());
+  auto root_nid  = new_lnast->set_root(Lnast_node::create_top());
+  auto stmts     = new_lnast->add_child(root_nid, Lnast_node::create_stmts());
 
   // Skip generics and captures for this first comb-only extraction slice.
   if (!move_to_sibling() || !move_to_sibling() || !move_to_sibling()) {

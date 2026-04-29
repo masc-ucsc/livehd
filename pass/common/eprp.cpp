@@ -268,9 +268,9 @@ void Eprp::elaborate() {
   pipe.run();
 }
 
-void Eprp::process_ast_handler(const lh::Tree_index& self, const Ast_parser_node& node) {
+void Eprp::process_ast_handler(const hhds::Tree::Node_class& self, const Ast_parser_node& node) {
   auto txt = scan_text(node.token_entry);
-  std::print("level:{} pos:{} te:{} rid:{} txt:{}\n", self.level, self.pos, (int)node.token_entry, (int)node.rule_id, txt);
+  std::print("level:{} pos:{} te:{} rid:{} txt:{}\n", level_of(self), pos_of(self), (int)node.token_entry, (int)node.rule_id, txt);
 
   if (node.rule_id == Eprp_rule_cmd_or_reg) {
     std::string children_txt;
@@ -293,10 +293,13 @@ void Eprp::process_ast_handler(const lh::Tree_index& self, const Ast_parser_node
 
 void Eprp::process_ast() {
   for (const auto& ti : ast->depth_preorder()) {
-    std::print("ti.level:{} ti.pos:{}\n", ti.level, ti.pos);
+    std::print("ti.level:{} ti.pos:{}\n", level_of(ti), pos_of(ti));
   }
 
-  ast->each_bottom_up_fast(std::bind(&Eprp::process_ast_handler, this, std::placeholders::_1, std::placeholders::_2));
+  // Bottom-up walk: HHDS post-order yields children before their parent.
+  for (const auto& nid : ast->get_root().post_order_class()) {
+    process_ast_handler(nid, ast->get_data(nid));
+  }
 }
 
 void Eprp::run_cmd(std::string_view cmd, const Eprp_var& cmd_var_fields) {

@@ -24,8 +24,8 @@ struct AssertFixture {
 
   AssertFixture() {
     ln        = std::make_shared<Lnast>("test");
-    ln->set_root(Lnast_node::create_top("top"));
-    stmts_nid = ln->add_child(Lnast_nid::root(), Lnast_node::create_stmts("stmts"));
+    auto root_nid_ = ln->set_root(Lnast_node::create_top("top"));
+    stmts_nid = ln->add_child(root_nid_, Lnast_node::create_stmts("stmts"));
     lm        = std::make_shared<upass::Lnast_manager>(ln);
   }
 

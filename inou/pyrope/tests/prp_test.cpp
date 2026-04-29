@@ -17,7 +17,7 @@ int main(int argc, char **argv) {
   Prp scanner;
 
   scanner.parse_file(argv[1]);
-  scanner.ast_dump(lh::Tree_index::root());
+  scanner.ast_dump();
 
   return 0;
 }

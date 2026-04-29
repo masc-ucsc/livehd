@@ -21,7 +21,7 @@ struct Lnast_manager : public IR_adapter {
 public:
   explicit Lnast_manager(const std::shared_ptr<Lnast>& ln) : lnast(ln), wr(std::cout, ln) {
     nid_stack   = {};
-    current_nid = Lnast_nid::root();
+    current_nid = lnast->get_root();
   }
   virtual ~Lnast_manager() = default;
   Lnast_manager()          = delete;
@@ -29,7 +29,7 @@ public:
   std::string_view kind() const override { return "lnast"; }
   std::size_t      node_count() const override {
     std::size_t count = 0;
-    for (const auto& nid : lnast->depth_preorder(Lnast_nid::root())) {
+    for (const auto& nid : lnast->depth_preorder(lnast->get_root())) {
       if (!nid.is_invalid()) {
         ++count;
       }
@@ -38,7 +38,7 @@ public:
   }
   std::size_t const_count() const override {
     std::size_t count = 0;
-    for (const auto& nid : lnast->depth_preorder(Lnast_nid::root())) {
+    for (const auto& nid : lnast->depth_preorder(lnast->get_root())) {
       if (nid.is_invalid()) {
         continue;
       }
@@ -50,7 +50,7 @@ public:
   }
   std::size_t arithmetic_count() const override {
     std::size_t count = 0;
-    for (const auto& nid : lnast->depth_preorder(Lnast_nid::root())) {
+    for (const auto& nid : lnast->depth_preorder(lnast->get_root())) {
       if (nid.is_invalid()) {
         continue;
       }
@@ -85,7 +85,7 @@ public:
   std::vector<Node_id> list_nodes() const override {
     std::vector<Node_id> nodes;
     nodes.reserve(node_count());
-    for (const auto& nid : lnast->depth_preorder(Lnast_nid::root())) {
+    for (const auto& nid : lnast->depth_preorder(lnast->get_root())) {
       if (!nid.is_invalid()) {
         nodes.emplace_back(encode_nid(nid));
       }
@@ -174,7 +174,11 @@ public:
 
   void move_to_nid(const Lnast_nid& nid) { current_nid = nid; }
 
-  auto current_text() const { return lnast->get_data(current_nid).token.get_text(); }
+  // Returns a string_view backed by the persistent attribute store, so it
+  // stays valid until the LNAST mutates that node's text. Avoid `get_data()`
+  // here — that returns a temporary Lnast_node and the contained State_token
+  // would dangle the moment the full expression ends.
+  auto current_text() const { return lnast->get_name(current_nid); }
 
   // Returns the Lnast_nid of the read cursor. Used by passes that need a
   // stable identity for the current node (e.g. for cross-pass cassert
@@ -244,16 +248,16 @@ public:
   }
 
 protected:
+  // Stable Node_id encoding for HHDS handles. The Tree_class_index value is a
+  // single Tree_pos that uniquely identifies a node within a tree body, so we
+  // round-trip via that. decode_nid reconstructs the Node_class through the
+  // owning Lnast's tree.
   static Node_id encode_nid(const Lnast_nid& nid) {
-    const auto level = static_cast<std::uint32_t>(nid.level);
-    const auto pos   = static_cast<std::uint32_t>(nid.pos);
-    return (static_cast<Node_id>(level) << 32) | static_cast<Node_id>(pos);
+    return static_cast<Node_id>(nid.get_class_index().value);
   }
 
-  static Lnast_nid decode_nid(Node_id nid) {
-    const auto level = static_cast<std::int32_t>((nid >> 32) & 0xFFFF'FFFFULL);
-    const auto pos   = static_cast<std::int32_t>(nid & 0xFFFF'FFFFULL);
-    return {level, pos};
+  Lnast_nid decode_nid(Node_id node) const {
+    return lnast->tree().get_node(hhds::Tree_class_index{static_cast<hhds::Tree_pos>(node)});
   }
 
   const std::shared_ptr<Lnast>& lnast;

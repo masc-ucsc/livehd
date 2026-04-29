@@ -6,7 +6,6 @@
 #include <ostream>
 #include <stack>
 
-#include "lhtree.hpp"
 #include "lnast.hpp"
 
 class Lnast_writer {
@@ -26,7 +25,7 @@ protected:
   std::stack<Lnast_nid> nid_stack;
   Lnast_nid             current_nid;
 
-  auto current_text() { return lnast->get_data(current_nid).token.get_text(); }
+  auto current_text() { return lnast->get_name(current_nid); }
 
   bool move_to_child() {
     nid_stack.push(current_nid);

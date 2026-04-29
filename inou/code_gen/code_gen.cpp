@@ -43,9 +43,9 @@ Code_gen::Code_gen(Inou_code_gen::Code_gen_type code_gen_type, std::shared_ptr<L
 // this processes the node "top"
 //
 void Code_gen::generate() {
-  constexpr auto root_index = lh::Tree_index::root();
+  const auto root_index = lnast->get_root();
 
-  const auto& node_data = lnast->get_data(root_index);
+  const auto node_data = lnast->get_data(root_index);
   std::cout << "\n\nprocessing LNAST tree\n\n";
 
   auto fname         = lnast->get_top_module_name();
@@ -102,7 +102,7 @@ std::string Code_gen::get_fname(std::string_view fname, std::string_view outdir)
 // the node "stmts" is processed here
 // and all other nodes are checked in this
 //
-void Code_gen::do_stmts(const lh::Tree_index& stmt_node_index) {
+void Code_gen::do_stmts(const Lnast_nid& stmt_node_index) {
   std::cout << "node:stmts\n";
   if (lnast->is_leaf(stmt_node_index)) {
     return;
@@ -110,9 +110,9 @@ void Code_gen::do_stmts(const lh::Tree_index& stmt_node_index) {
 
   auto curr_index = lnast->get_first_child(stmt_node_index);
 
-  while (curr_index != lnast->invalid_index()) {
+  while (curr_index != Lnast_nid()) {
     const auto& curr_node_type = lnast->get_type(curr_index);
-    auto        curlvl         = curr_index.level;
+    auto        curlvl         = level_of(curr_index);
     std::print("Processing stmt child {}:{} at level {} \n",
                lnast->get_name(curr_index),
                lnast->get_type(curr_index).debug_name(),
@@ -169,15 +169,15 @@ void Code_gen::invalid_node() {
 */
 //-------------------------------------------------------------------------------------
 // Process the assign node:
-void Code_gen::do_assign(const lh::Tree_index& assign_node_index, std::vector<std::string>& hier_tup_vec, bool hier_tup_assign) {
+void Code_gen::do_assign(const Lnast_nid& assign_node_index, std::vector<std::string>& hier_tup_vec, bool hier_tup_assign) {
   std::print("node:assign: {}:{}\n", lnast->get_name(assign_node_index), lnast->get_type(assign_node_index).debug_name());
   auto                     curr_index = lnast->get_first_child(assign_node_index);
   std::vector<std::string> assign_str_vect;
 
-  while (curr_index != lnast->invalid_index()) {
+  while (curr_index != Lnast_nid()) {
     assert(!(lnast->get_type(curr_index)).is_invalid());
     // const auto& curr_node_data = lnast->get_data(curr_index);
-    auto curlvl = curr_index.level;
+    auto curlvl = level_of(curr_index);
     std::print("Processing assign child {} at level {} \n", lnast->get_name(curr_index), curlvl);
     assign_str_vect.emplace_back(lnast->get_name(curr_index));
     curr_index = lnast->get_sibling_next(curr_index);
@@ -299,7 +299,7 @@ void Code_gen::do_assign(const lh::Tree_index& assign_node_index, std::vector<st
 //-------------------------------------------------------------------------------------
 // Process the while node:
 // pattern: while -> cond , stmts
-void Code_gen::do_while(const lh::Tree_index& while_node_index) {
+void Code_gen::do_while(const Lnast_nid& while_node_index) {
   std::cout << "node:while\n";
   buffer_to_print->append(indent(), "while");
   lnast_to->add_to_buff_vec_for_cpp(indent());
@@ -332,7 +332,7 @@ void Code_gen::do_while(const lh::Tree_index& while_node_index) {
 // pattern: for -> stmts , ref "i" , ref "___a"
 // example: for i in 0..3 {//stmts}
 // 0..3 is resolved as ___a as tuple already.
-void Code_gen::do_for(const lh::Tree_index& for_node_index) {
+void Code_gen::do_for(const Lnast_nid& for_node_index) {
   std::cout << "node:for\n";
   buffer_to_print->append(indent(), "for");
   lnast_to->add_to_buff_vec_for_cpp(absl::StrCat(indent(), "for"));
@@ -380,7 +380,7 @@ void Code_gen::do_for(const lh::Tree_index& for_node_index) {
 // 3                           ref : $b
 // 3                           ref : $valid
 // 3                           ref : %out
-void Code_gen::do_func_def(const lh::Tree_index& func_def_node_index) {
+void Code_gen::do_func_def(const Lnast_nid& func_def_node_index) {
   std::cout << "node:func_def\n";
   auto curr_index = lnast->get_first_child(func_def_node_index);
   auto func_name  = lnast->get_name(curr_index);
@@ -393,8 +393,8 @@ void Code_gen::do_func_def(const lh::Tree_index& func_def_node_index) {
   curr_index = lnast->get_sibling_next(stmt_index);
   std::string parameters;
   bool        param_exist = true;
-  if (curr_index != lnast->invalid_index()) {
-    while (curr_index != lnast->invalid_index()) {
+  if (curr_index != Lnast_nid()) {
+    while (curr_index != Lnast_nid()) {
       assert(!(lnast->get_type(curr_index)).is_invalid());
       if (parameters.empty()) {
         parameters = lnast->get_name(curr_index);
@@ -434,7 +434,7 @@ void Code_gen::do_func_def(const lh::Tree_index& func_def_node_index) {
 // cond node is generally either "true" -> nothing to be printed, true by default
 // or it is like ___x -> value of ___x must be resolved and "when <reolved ___x>" must be printed
 // or it is just the variable which must be printed as is
-std::string Code_gen::resolve_func_cond(const lh::Tree_index& func_cond_index) {
+std::string Code_gen::resolve_func_cond(const Lnast_nid& func_cond_index) {
   std::cout << "node:function cond\n";
 
   std::string ref(lnast->get_name(func_cond_index));
@@ -456,7 +456,7 @@ std::string Code_gen::resolve_func_cond(const lh::Tree_index& func_cond_index) {
 // all nodes are "ref" type
 // arguments are "___x"
 // refer to: https://masc.soe.ucsc.edu/lnast-doc/?coffescript#explicit-function-argument-assignment
-void Code_gen::do_func_call(const lh::Tree_index& func_call_node_index) {
+void Code_gen::do_func_call(const Lnast_nid& func_call_node_index) {
   std::cout << "node:func_call\n";
   auto curr_index = lnast->get_first_child(func_call_node_index);
   // const auto& curr_node_data = lnast->get_data(func_cond_index);//returns the entire node contents.
@@ -500,17 +500,17 @@ void Code_gen::do_func_call(const lh::Tree_index& func_call_node_index) {
 // if ->
 //   cond (like ___a)
 //   stmts
-void Code_gen::do_if(const lh::Tree_index& if_node_index) {
+void Code_gen::do_if(const Lnast_nid& if_node_index) {
   std::cout << "node:if\n";
   auto curr_index = lnast->get_first_child(if_node_index);
   int  node_num   = 0;
 
   bool if_closed = false;
-  while (curr_index != lnast->invalid_index()) {
+  while (curr_index != Lnast_nid()) {
     assert(!(lnast->get_type(curr_index)).is_invalid());
     node_num++;
     const auto& curr_node_type = lnast->get_type(curr_index);
-    auto        curlvl         = curr_index.level;  // for debugging message printing purposes only
+    auto        curlvl         = level_of(curr_index);  // for debugging message printing purposes only
     std::print("Processing if child {} at level {} \n", lnast->get_name(curr_index), curlvl);
 
     if (node_num > 2) {
@@ -559,7 +559,7 @@ void Code_gen::do_if(const lh::Tree_index& if_node_index) {
 
 //-------------------------------------------------------------------------------------
 // Process the if-cond node:
-void Code_gen::do_cond(const lh::Tree_index& cond_node_index) {
+void Code_gen::do_cond(const Lnast_nid& cond_node_index) {
   std::cout << "node:cond\n";
   // const auto& curr_node_data = lnast->get_data(cond_node_index);
   std::string ref(lnast->get_name(cond_node_index));
@@ -574,20 +574,20 @@ void Code_gen::do_cond(const lh::Tree_index& cond_node_index) {
 
 //-------------------------------------------------------------------------------------
 // Process the operator (like and,or,etc.) node:
-void Code_gen::do_op(const lh::Tree_index& op_node_index, std::string_view op_type) {
+void Code_gen::do_op(const Lnast_nid& op_node_index, std::string_view op_type) {
   std::print("node:{}: {}:{}\n", op_type, lnast->get_name(op_node_index), lnast->get_type(op_node_index).debug_name());
   auto                     curr_index = lnast->get_first_child(op_node_index);
   std::vector<std::string> op_str_vect;
 
-  while (curr_index != lnast->invalid_index()) {
+  while (curr_index != Lnast_nid()) {
     assert(!(lnast->get_type(curr_index)).is_invalid());
     // const auto& curr_node_data = lnast->get_data(curr_index);
-    auto curlvl = curr_index.level;  // for debugging message printing purposes only
-    auto curpos = curr_index.pos;
+    auto curlvl = level_of(curr_index);  // for debugging message printing purposes only
+    auto curpos = pos_of(curr_index);
     std::print("Processing op child {} at level {} pos {}\n", lnast->get_name(curr_index), curlvl, curpos);
     // if it is shl subtree and it is doing left shift by 1 then do not store the "1"
     if (lnast->get_type(op_node_index).is_shl()
-        && (curpos == lnast->get_sibling_next(lnast->get_first_child(op_node_index)).pos) /*we are on 2nd child*/
+        && (curr_index == lnast->get_sibling_next(lnast->get_first_child(op_node_index))) /*we are on 2nd child*/
         && (lnast->get_name(curr_index) == "1") /*it is const 1*/) {
       /*For set_mask cases*/
       curr_index = lnast->get_sibling_next(curr_index);
@@ -680,7 +680,7 @@ void Code_gen::do_op(const lh::Tree_index& op_node_index, std::string_view op_ty
 //                 pattern: tposs --> ref,___L5        ref,$a
 // Another possible pattern: tposs --> ref,___L5        ref,___L7
 // this means $a is unsigned
-void Code_gen::do_tposs(const lh::Tree_index& tposs_node_index) {
+void Code_gen::do_tposs(const Lnast_nid& tposs_node_index) {
   std::print("node:op: {}:{}\n", lnast->get_name(tposs_node_index), lnast->get_type(tposs_node_index).debug_name());
 
   auto        first_child_index = lnast->get_first_child(tposs_node_index);
@@ -703,14 +703,14 @@ void Code_gen::do_tposs(const lh::Tree_index& tposs_node_index) {
 //-------------------------------------------------------------------------------------
 // processing set_mask operator
 
-void Code_gen::do_set_mask(const lh::Tree_index& smask_node_index) {
+void Code_gen::do_set_mask(const Lnast_nid& smask_node_index) {
   std::cout << "node:set_mask\n";
 
   auto                     curr_index = lnast->get_first_child(smask_node_index);
   std::vector<std::string> smask_str_vect;
-  while (curr_index != lnast->invalid_index()) {
+  while (curr_index != Lnast_nid()) {
     assert(!(lnast->get_type(curr_index)).is_invalid());
-    auto curlvl = curr_index.level;
+    auto curlvl = level_of(curr_index);
     std::print("Processing gmask child {}:{} at level {} \n",
                lnast->get_name(curr_index),
                lnast->get_type(curr_index).debug_name(),
@@ -753,14 +753,14 @@ void Code_gen::do_set_mask(const lh::Tree_index& smask_node_index) {
 // get mask: { ref: ___L1 , ref: x , const:0 }
 // or equivalently
 // tup_add: {ref:___L0, const: 0} ; get mask: { ref: ___L1 , ref: x , ref: ___L0 }
-void Code_gen::do_get_mask(const lh::Tree_index& gmask_node_index) {
+void Code_gen::do_get_mask(const Lnast_nid& gmask_node_index) {
   std::cout << "node:get_mask\n";
 
   auto                     curr_index = lnast->get_first_child(gmask_node_index);
   std::vector<std::string> gmask_str_vect;
-  while (curr_index != lnast->invalid_index()) {
+  while (curr_index != Lnast_nid()) {
     assert(!(lnast->get_type(curr_index)).is_invalid());
-    auto curlvl = curr_index.level;
+    auto curlvl = level_of(curr_index);
     std::print("Processing gmask child {}:{} at level {} \n",
                lnast->get_name(curr_index),
                lnast->get_type(curr_index).debug_name(),
@@ -799,14 +799,14 @@ void Code_gen::do_get_mask(const lh::Tree_index& gmask_node_index) {
 //-------------------------------------------------------------------------------------
 // processing dot operator
 // best testing case: cfg/tests/ring.prp
-void Code_gen::do_dot(const lh::Tree_index& dot_node_index, std::string_view select_type) {
+void Code_gen::do_dot(const Lnast_nid& dot_node_index, std::string_view select_type) {
   std::cout << "node:dot\n";
 
   auto                     curr_index = lnast->get_first_child(dot_node_index);
   std::vector<std::string> dot_str_vect;
-  while (curr_index != lnast->invalid_index()) {
+  while (curr_index != Lnast_nid()) {
     assert(!(lnast->get_type(curr_index)).is_invalid());
-    auto curlvl = curr_index.level;
+    auto curlvl = level_of(curr_index);
     std::print("Processing dot child {}:{} at level {} \n",
                lnast->get_name(curr_index),
                lnast->get_type(curr_index).debug_name(),
@@ -886,20 +886,20 @@ void Code_gen::do_dot(const lh::Tree_index& dot_node_index, std::string_view sel
 //-------------------------------------------------------------------------------------
 // Process the select node:
 // ref LNAST subtree: select,""  ->  ref,"___l" , ref,"A" , const,"0"
-void Code_gen::do_select(const lh::Tree_index& select_node_index, std::string_view select_type) {
+void Code_gen::do_select(const Lnast_nid& select_node_index, std::string_view select_type) {
   std::cout << "node:select\n";
   auto                     curr_index = lnast->get_first_child(select_node_index);
   std::vector<std::string> sel_str_vect;
   bool                     lastIsRef = false;
-  while (curr_index != lnast->invalid_index()) {
+  while (curr_index != Lnast_nid()) {
     assert(!(lnast->get_type(curr_index)).is_invalid());
-    auto curlvl = curr_index.level;
+    auto curlvl = level_of(curr_index);
     std::print("Processing {} child {}:{} at level {} \n",
                select_type,
                lnast->get_name(curr_index),
                lnast->get_type(curr_index).debug_name(),
                curlvl);
-    if (lnast->get_first_child(curr_index).pos != lnast->invalid_index().pos) {
+    if (lnast->get_first_child(curr_index).is_valid()) {
       // it is nested tuple
       // resolve the entire subtree, make into a string and pushback to sel_str_vect
       I(((lnast->get_type(curr_index)).is_assign() || (lnast->get_type(curr_index)).is_dp_assign()),
@@ -1038,7 +1038,7 @@ void Code_gen::do_select(const lh::Tree_index& select_node_index, std::string_vi
 // offset const). lnast_todo §15.2: only offset=1 is supported today; emit as
 // `dst = src.__last_value` so the prp2prp round-trip re-parses back into the
 // same delay_assign via prp_lnast.cpp's `__last_value` handler.
-void Code_gen::do_delay_assign(const lh::Tree_index& delay_assign_node_index) {
+void Code_gen::do_delay_assign(const Lnast_nid& delay_assign_node_index) {
   std::cout << "node:delay_assign\n";
 
   auto c0 = lnast->get_first_child(delay_assign_node_index);
@@ -1072,12 +1072,12 @@ void Code_gen::do_delay_assign(const lh::Tree_index& delay_assign_node_index) {
 // const|ref value). lnast_todo §15.1: the `storage = reg` form is rendered as
 // the legacy `root = root.__create_flop` surface syntax so the prp2prp
 // round-trip re-parses back into the same attr_set.
-void Code_gen::do_attr_set(const lh::Tree_index& attr_set_node_index) {
+void Code_gen::do_attr_set(const Lnast_nid& attr_set_node_index) {
   std::cout << "node:attr_set\n";
 
   std::vector<std::string> parts;
   std::vector<bool>        is_const;
-  for (auto idx = lnast->get_first_child(attr_set_node_index); idx != lnast->invalid_index(); idx = lnast->get_sibling_next(idx)) {
+  for (auto idx = lnast->get_first_child(attr_set_node_index); idx != Lnast_nid(); idx = lnast->get_sibling_next(idx)) {
     parts.emplace_back(lnast->get_name(idx));
     is_const.emplace_back(lnast->get_type(idx).is_const());
   }
@@ -1123,7 +1123,7 @@ void Code_gen::do_attr_set(const lh::Tree_index& attr_set_node_index) {
 
 //-------------------------------------------------------------------------------------
 // processing tuple
-void Code_gen::do_tuple(const lh::Tree_index& tuple_node_index) {
+void Code_gen::do_tuple(const Lnast_nid& tuple_node_index) {
   std::cout << "node:tuple\n";
 
   // Process the first child-node in key and move to the next node:
@@ -1135,7 +1135,7 @@ void Code_gen::do_tuple(const lh::Tree_index& tuple_node_index) {
   // Process remaining nodes/sub-trees:
   curr_index = lnast->get_sibling_next(curr_index);
   std::string tuple_value;
-  while (curr_index != lnast->invalid_index()) {
+  while (curr_index != Lnast_nid()) {
     assert(!(lnast->get_type(curr_index)).is_invalid());
     if (lnast->is_leaf(curr_index)) {
       std::string ref(lnast->get_name(curr_index));
@@ -1186,11 +1186,11 @@ void Code_gen::do_tuple(const lh::Tree_index& tuple_node_index) {
 
 //-------------------------------------------------------------------------------------
 // function called to process the tuple:
-std::string Code_gen::resolve_tuple_assign(const lh::Tree_index& tuple_assign_index) {
+std::string Code_gen::resolve_tuple_assign(const Lnast_nid& tuple_assign_index) {
   auto                     curr_index = lnast->get_first_child(tuple_assign_index);
   std::vector<std::string> op_str_vect;
 
-  while (curr_index != lnast->invalid_index()) {
+  while (curr_index != Lnast_nid()) {
     assert(!(lnast->get_type(curr_index)).is_invalid());
     // const auto& curr_node_data = lnast->get_data(curr_index);
     op_str_vect.emplace_back(lnast->get_name(curr_index));

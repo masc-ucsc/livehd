@@ -124,7 +124,7 @@ inline TSNode Prp2lnast::child_by_field(const TSNode& node, const char* field) c
 // ---------------- Top level ----------------
 
 void Prp2lnast::process_description() {
-  stmts_index = lnast->add_child(lh::Tree_index::root(), Lnast_node::create_stmts());
+  stmts_index = lnast->add_child(lnast->get_root(), Lnast_node::create_stmts());
   walk_statement_block(ts_root_node);
 }
 
@@ -247,7 +247,7 @@ void Prp2lnast::process_statement(TSNode n) {
   std::print("prp2lnast: unhandled statement type `{}`\n", t);
 }
 
-void Prp2lnast::process_scope_statement(TSNode n, lh::Tree_index /*target_stmts*/) { walk_statement_block(n); }
+void Prp2lnast::process_scope_statement(TSNode n, Lnast_nid /*target_stmts*/) { walk_statement_block(n); }
 
 void Prp2lnast::process_gated_statement(TSNode stmt, TSNode gate) {
   // gate is a `when_unless_cond` node:
@@ -1336,7 +1336,7 @@ std::vector<Prp2lnast::Call_arg> Prp2lnast::collect_call_args(TSNode arg_tuple) 
   return call_args;
 }
 
-void Prp2lnast::add_call_args_to_fcall(const lh::Tree_index& fcall_idx, const std::vector<Call_arg>& call_args) {
+void Prp2lnast::add_call_args_to_fcall(const Lnast_nid& fcall_idx, const std::vector<Call_arg>& call_args) {
   for (const auto& arg : call_args) {
     if (arg.is_assign) {
       auto aidx = lnast->add_child(fcall_idx, Lnast_node::create_assign());
@@ -1798,7 +1798,7 @@ attrs:
   }
 }
 
-void Prp2lnast::emit_type_expr(const lh::Tree_index& parent, TSNode type_node) {
+void Prp2lnast::emit_type_expr(const Lnast_nid& parent, TSNode type_node) {
   std::string_view t(ts_node_type(type_node));
   if (t == "uint_type" || t == "sint_type") {
     auto node = (t == "uint_type") ? Lnast_node::create_prim_type_uint() : Lnast_node::create_prim_type_sint();

@@ -1364,7 +1364,7 @@ void Lnast_tolg::process_ast_attr_set_op(Lgraph* lg, const Lnast_nid& lnidx_aset
   // can dispatch special sticky attributes like `storage = reg` (lnast_todo
   // §15.1) that lower to LGraph nodes other than AttrSet.
   std::string    field;
-  lh::Tree_index val_aset;
+  Lnast_nid val_aset;
   {
     auto it_aset = field_aset;
     while (!it_aset.is_invalid()) {

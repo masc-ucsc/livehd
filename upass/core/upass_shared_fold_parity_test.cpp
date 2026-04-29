@@ -15,8 +15,8 @@ namespace {
 
 TEST(UpassSharedFoldParity, FoldSumConstAcrossLnastAndLgraph) {
   auto ln = std::make_shared<Lnast>("top");
-  ln->set_root(Lnast_node::create_top("top"));
-  auto st = ln->add_child(Lnast_nid::root(), Lnast_node::create_stmts("stmts"));
+  auto root_nid = ln->set_root(Lnast_node::create_top("top"));
+  auto st = ln->add_child(root_nid, Lnast_node::create_stmts("stmts"));
   auto pl = ln->add_child(st, Lnast_node::create_plus("plus"));
   ln->add_child(pl, Lnast_node::create_const(2));
   ln->add_child(pl, Lnast_node::create_const(3));
@@ -65,8 +65,8 @@ TEST(UpassSharedFoldParity, FoldSumConstAcrossLnastAndLgraph) {
 
 TEST(UpassSharedFoldParity, FoldSumConstDryRunNoMutation) {
   auto ln = std::make_shared<Lnast>("top");
-  ln->set_root(Lnast_node::create_top("top"));
-  auto st = ln->add_child(Lnast_nid::root(), Lnast_node::create_stmts("stmts"));
+  auto root_nid = ln->set_root(Lnast_node::create_top("top"));
+  auto st = ln->add_child(root_nid, Lnast_node::create_stmts("stmts"));
   auto pl = ln->add_child(st, Lnast_node::create_plus("plus"));
   ln->add_child(pl, Lnast_node::create_const(2));
   ln->add_child(pl, Lnast_node::create_const(3));

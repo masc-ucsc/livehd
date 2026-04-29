@@ -13,7 +13,7 @@ void Lnast_writer::write_all() {
   is_func_name = false;
   write_metadata();
   nid_stack   = {};
-  current_nid = Lnast_nid::root();
+  current_nid = lnast->get_root();
   write_lnast();
 }
 

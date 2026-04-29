@@ -25,7 +25,7 @@ protected:
 
   // LNAST output
   std::unique_ptr<Lnast> lnast;
-  lh::Tree_index         stmts_index;
+  Lnast_nid         stmts_index;
 
   // Temporary variable counter for compiler-generated tmps
   int tmp_ref_count;
@@ -75,7 +75,7 @@ protected:
 
   // Statements
   void process_statement(TSNode n);
-  void process_scope_statement(TSNode n, lh::Tree_index target_stmts);
+  void process_scope_statement(TSNode n, Lnast_nid target_stmts);
   // Shared body for process_description / process_scope_statement: walks ALL
   // children of `parent` (named + anonymous) so the grammar's hidden `wrap`/
   // `sat` overflow tokens and `gate` field bubble-ups are visible.
@@ -120,7 +120,7 @@ protected:
   // Type handling
   void emit_type_spec(const Lnast_node& target, TSNode type_cast_node);
   void emit_attribute_list(const Lnast_node& target, TSNode attribute_list_node);
-  void emit_type_expr(const lh::Tree_index& type_index, TSNode type_node);
+  void emit_type_expr(const Lnast_nid& type_index, TSNode type_node);
 
   struct Call_arg {
     bool        is_assign = false;
@@ -128,7 +128,7 @@ protected:
     Lnast_node  value;
   };
   std::vector<Call_arg> collect_call_args(TSNode arg_tuple);
-  void                  add_call_args_to_fcall(const lh::Tree_index& fcall_idx, const std::vector<Call_arg>& call_args);
+  void                  add_call_args_to_fcall(const Lnast_nid& fcall_idx, const std::vector<Call_arg>& call_args);
 
   // Lvalue helpers
   Lnast_node process_lvalue_for_assign(TSNode lvalue, const Lnast_node& rvalue, TSNode decl_node, TSNode type_cast_node);

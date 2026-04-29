@@ -23,9 +23,9 @@ struct VerifierFixture {
   Lnast_nid                             stmts_nid;
 
   VerifierFixture() {
-    ln        = std::make_shared<Lnast>("test");
-    ln->set_root(Lnast_node::create_top("top"));
-    stmts_nid = ln->add_child(Lnast_nid::root(), Lnast_node::create_stmts("stmts"));
+    ln            = std::make_shared<Lnast>("test");
+    auto root_nid = ln->set_root(Lnast_node::create_top("top"));
+    stmts_nid     = ln->add_child(root_nid, Lnast_node::create_stmts("stmts"));
     lm        = std::make_shared<upass::Lnast_manager>(ln);
   }
 };

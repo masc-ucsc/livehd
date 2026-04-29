@@ -34,13 +34,13 @@ OUT1="${TEST_TMPDIR}/coalescer_dse.1.out"
 run_pipeline 0 "${OUT0}"
 run_pipeline 1 "${OUT1}"
 
-# Count `assign  :` stmts whose first child is `tmp` — these are the dead-store
+# Count `assign:` stmts whose first child is `tmp` — these are the dead-store
 # candidates. coalescer:0 should see >=3 (one per source-level `tmp = …`);
 # coalescer:1 should see exactly 1 (only the live store before %out reads tmp).
 count_tmp_assigns() {
   awk '
-    /assign  :/ { in_assign = 1; saw_tmp = 0; next }
-    in_assign && /ref     : tmp/ { saw_tmp = 1; in_assign = 0; count++; next }
+    /assign:/ { in_assign = 1; saw_tmp = 0; next }
+    in_assign && /ref: tmp$/ { saw_tmp = 1; in_assign = 0; count++; next }
     in_assign { in_assign = 0 }
     END { print count + 0 }
   ' "$1"

@@ -1880,7 +1880,7 @@ void Prp::elaborate() {
     // scan_text(term_token + base_token));
     PRINT_DBG_AST("base token: {}, term token: {}\n", base_token, term_token);
     PRINT_DBG_AST("terminal token: {}\n", scan_text(term_token + base_token));
-    ast_dump(lh::Tree_index::root());
+    ast_dump(ast->get_root());
     std::print("Parsing error line {}\n", get_token(term_token + base_token).line + 1);
     err_tracker::logger("Parsing error line {}\n", get_token(term_token + base_token).line + 1);
     exit(1);
@@ -1990,16 +1990,18 @@ void Prp::ast_handler() {
   }
 }
 
-void Prp::ast_dump(lh::Tree_index tree_idx) const {
+void Prp::ast_dump(hhds::Tree::Node_class tree_idx) const {
   for (const auto& index : ast->depth_preorder(tree_idx)) {
     const auto& d          = ast->get_data(index);
     auto        rule_name  = rule_id_to_string(d.rule_id);
     auto        token_text = scan_text(d.token_entry);
 
-    std::string indent(index.level, ' ');
-    std::print("{} l:{} p:{} rule_id:{}/{} txt:{}\n", indent, index.level, index.pos, d.rule_id, rule_name, token_text);
+    std::string indent(level_of(index), ' ');
+    std::print("{} l:{} p:{} rule_id:{}/{} txt:{}\n", indent, level_of(index), pos_of(index), d.rule_id, rule_name, token_text);
   }
 }
+
+void Prp::ast_dump() const { ast_dump(ast->get_root()); }
 
 void Prp::ast_builder(std::list<std::tuple<Rule_id, Token_entry>>& passed_list) {
   for (auto ast_op : passed_list) {

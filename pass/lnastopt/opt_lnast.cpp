@@ -1037,7 +1037,7 @@ yy = (1,a=3)
 }
 
 void Opt_lnast::process_todo(const std::shared_ptr<Lnast>& ln, const Lnast_nid& lnid) {
-  auto& data = ln->get_data(lnid);
+  auto data = ln->get_data(lnid);
 
   std::print("not handling lnast type:{} (TODO)\n", data.type.debug_name());
 }
@@ -1093,9 +1093,9 @@ void Opt_lnast::reconstruct_stmts(const std::shared_ptr<Lnast>& ln, const Lnast_
   while (!idx.is_invalid()) {
     const auto& data = ln->get_data(idx);
 
-    auto  lhs_id    = ln->get_first_child(idx);
-    auto& lhs_data  = ln->get_data(lhs_id);
-    auto  lhs_txt   = lhs_data.token.get_text();
+    auto lhs_id   = ln->get_first_child(idx);
+    auto lhs_data = ln->get_data(lhs_id);
+    auto lhs_txt  = ln->get_name(lhs_id);  // grab text from persistent attr store, not temporary
     auto  rhs_const = st.get_trivial(lhs_txt);
 
     switch (data.type.get_raw_ntype()) {
@@ -1174,12 +1174,12 @@ void Opt_lnast::opt(const std::shared_ptr<Lnast>& ln) {
     hier_mode = false;
   }
 
-  const auto& data = ln->get_data(Lnast_nid::root());
+  const auto& data = ln->get_data(ln->get_root());
   if (!data.type.is_top()) {
     throw Lnast::error("invalid lnast. It should be top");
   }
 
-  auto idx = ln->get_first_child(Lnast_nid::root());
+  auto idx = ln->get_first_child(ln->get_root());
   process_stmts(ln, idx);
 
   // auto outputs = st.leave_scope();
@@ -1194,12 +1194,12 @@ void Opt_lnast::reconstruct(const std::shared_ptr<Lnast>& ln, Lnast_create& ln2)
     hier_mode = false;
   }
 
-  const auto& data = ln->get_data(Lnast_nid::root());
+  const auto& data = ln->get_data(ln->get_root());
   if (!data.type.is_top()) {
     throw Lnast::error("invalid lnast. It should be top");
   }
 
-  auto idx = ln->get_first_child(Lnast_nid::root());
+  auto idx = ln->get_first_child(ln->get_root());
   reconstruct_stmts(ln, idx, ln2);
 
   auto outputs = st.leave_scope();

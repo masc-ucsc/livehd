@@ -6,7 +6,6 @@
 #include <iostream>
 #include <stack>
 
-#include "lhtree.hpp"
 #include "lnast.hpp"
 #include "lnast_lexer.hpp"
 
@@ -22,8 +21,8 @@ protected:
 
   std::vector<Lnast_token> token_array;
 
-  int                        token_index;
-  std::stack<lh::Tree_index> tree_index;
+  int                   token_index;
+  std::stack<Lnast_nid> tree_index;
 
   void read_all_tokens() {
     do {

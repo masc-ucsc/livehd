@@ -21,7 +21,7 @@ cc_library(
         "//core",
         "//parser",
         "@abseil-cpp//absl/strings",
-        "@hif//hif",
+        "@hhds//hhds:core",
     ],
 )
 
@@ -139,6 +139,5 @@ cc_binary(
     deps = [
         ":lnast",
         "@google_benchmark//:benchmark",
-        "@hif//hif",
     ],
 )

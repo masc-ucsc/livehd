@@ -101,6 +101,18 @@ http_archive(
     ],
 )
 
+# HHDS (replaces core/lhtree*.hpp; see hhds_migration.md)
+bazel_dep(name = "hhds", version = "0.2.0")
+
+archive_override(
+    module_name = "hhds",
+    integrity = "sha256-mrs96SNrsS0i+QRpZtkTFcz8Oo4I3Er3g2Owr2GzQTQ=",
+    strip_prefix = "hhds-98937f6e1d4a637b2a4d6e659f829bd86bf28467",
+    urls = [
+        "https://github.com/masc-ucsc/hhds/archive/98937f6e1d4a637b2a4d6e659f829bd86bf28467.zip",
+    ],
+)
+
 # tree-sitter-pyrope
 http_archive(
     name = "tree-sitter-pyrope",

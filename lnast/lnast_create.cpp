@@ -45,14 +45,11 @@ std::string_view Lnast_create::get_lnast_lhs_name(std::string_view vname) {
 }
 
 void Lnast_create::new_lnast(std::string_view name) {
-  lnast = std::make_unique<Lnast>(name);
-  lnast->set_root(Lnast_node(Lnast_ntype::create_top()));
-
-  auto node_stmts = Lnast_node::create_stmts();
-  idx_stmts       = lnast->add_child(lh::Tree_index::root(), node_stmts);
+  lnast          = std::make_unique<Lnast>(name);
+  auto root_nid  = lnast->set_root(Lnast_node(Lnast_ntype::create_top()));
+  idx_stmts      = lnast->add_child(root_nid, Lnast_node::create_stmts());
 
   vname2lname.clear();
-
   tmp_var_cnt = 0;
 }
 

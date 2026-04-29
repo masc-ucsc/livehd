@@ -40,21 +40,21 @@ void Pass_locator::begin_pass(Eprp_var& var) {
   // now we will make the formatted LNAST:
   lnastfmted->set_root(
       Lnast_node(Lnast_ntype::create_top(), State_token(0, 0, 0, 0, ln->get_top_module_name())));  // root node of lnfmted
-  const auto& stmt_index = ln->get_child(lh::Tree_index::root());                                  // stmt node of ln
-  const auto& stmt_index_fmt
-      = lnastfmted->add_child(lh::Tree_index::root(),
+  const auto stmt_index = ln->get_child(ln->get_root());  // stmt node of ln
+  const auto stmt_index_fmt
+      = lnastfmted->add_child(lnastfmted->get_root(),
                               duplicate_node(lnastfmted, ln, stmt_index));  // stmt node of lnfmted (copied from ln)
 
   auto curr_index = ln->get_child(stmt_index);  // 1st child of ln after stmt
 
-  while (curr_index != ln->invalid_index()) {
+  while (curr_index != Lnast_nid()) {
     // iterate through all children of stmt of ln
     bool curr_incremented = false;
     // check if curr_index's child is leaf child?
     // const auto& leaf_child_check = ln->get_child(curr_index);
     bool all_are_leaves = true;
-    for (const lh::Tree_index& it : ln->children(curr_index)) {
-      // std::print("PARSING TO CHECK LEAVES:   {}:{}\n",ln->get_name(it), it.level );
+    for (const Lnast_nid& it : ln->children(curr_index)) {
+      // std::print("PARSING TO CHECK LEAVES:   {}:{}\n",ln->get_name(it), level_of(it) );
       if (!(ln->is_leaf(it))) {
         all_are_leaves = false;
       }
@@ -84,10 +84,10 @@ void Pass_locator::begin_pass(Eprp_var& var) {
       // if curr_index node was not ssa-assign
       // traverse and keep adding to lnfmted
       // if value from map used? replcae it and move on.
-      if (curr_index != ln->invalid_index() && !curr_incremented) {
+      if (curr_index != Lnast_nid() && !curr_incremented) {
         auto curr_index_fmt = lnastfmted->add_child(stmt_index_fmt, duplicate_node(lnastfmted, ln, curr_index));
 
-        for (const lh::Tree_index& it : ln->children(curr_index)) {
+        for (const Lnast_nid& it : ln->children(curr_index)) {
           auto is = ref_hash_map.find(ln->get_name(it));
           if (is != ref_hash_map.end() && is_ssa(ln->get_name(it))) {
             // auto frst_fmt =
@@ -100,15 +100,15 @@ void Pass_locator::begin_pass(Eprp_var& var) {
     } else {  // This else is for nested subtrees (like an "if" subtree)
 
       auto curr_index_fmt = lnastfmted->add_child(stmt_index_fmt, duplicate_node(lnastfmted, ln, curr_index));
-      auto curr_lev       = curr_index.level;
-      auto curr_pos       = curr_index.pos;
-      for (const lh::Tree_index& it : ln->depth_preorder(curr_index)) {
-        //        if (((it.level == curr_index.level) && (it.pos > curr_index.pos)) || (it.level < curr_index.level)) {
+      auto curr_lev       = level_of(curr_index);
+      auto curr_pos       = pos_of(curr_index);
+      for (const Lnast_nid& it : ln->depth_preorder(curr_index)) {
+        //        if (((level_of(it) == level_of(curr_index)) && (pos_of(it) > pos_of(curr_index))) || (level_of(it) < level_of(curr_index))) {
         //         break;
         //       }//This if is needed because depth preorder traverses the next subtree as well. It does not stop after traversing
         //       the particular subtree (of root curr_index)
-        auto new_lev = it.level;
-        auto new_pos = it.pos;
+        auto new_lev = level_of(it);
+        auto new_pos = pos_of(it);
         auto is      = ref_hash_map.find(ln->get_name(it));
 
         if (new_lev == curr_lev + 1) {
@@ -160,7 +160,7 @@ void Pass_locator::begin_pass(Eprp_var& var) {
         }
       }
     }
-    if (curr_index != ln->invalid_index() && !curr_incremented) {
+    if (curr_index != Lnast_nid() && !curr_incremented) {
       curr_index = ln->get_sibling_next(curr_index);
     }
   }

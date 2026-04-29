@@ -19,7 +19,6 @@ cc_binary(
         "//lnast",
         "//pass/lnast_tolg:pass_lnast_tolg",
         "@google_benchmark//:benchmark",
-        "@hif//hif",
     ],
 )
 

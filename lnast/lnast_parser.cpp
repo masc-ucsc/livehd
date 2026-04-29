@@ -2,7 +2,6 @@
 
 #include "lnast_parser.hpp"
 
-#include "lhtree.hpp"
 #include "lnast.hpp"
 #include "lnast_lexer.hpp"
 
@@ -21,9 +20,8 @@ std::shared_ptr<Lnast> Lnast_parser::parse_all() {
 }
 
 void Lnast_parser::parse_top() {
-  // std::cout << "parse_top\n";
-  lnast->set_root(Lnast_node::create_top());
-  tree_index.push(lh::Tree_index::root());
+  auto root_nid = lnast->set_root(Lnast_node::create_top());
+  tree_index.push(root_nid);
   parse_stmts();
 }
 

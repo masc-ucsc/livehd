@@ -143,9 +143,9 @@ void Semantic_check::error_print_lnast_by_name(Lnast* lnast, std::string_view er
   for (const auto& it : lnast->depth_preorder()) {
     auto node = lnast->get_data(it);
 
-    std::string indent(2 * (it.level + 1), ' ');
+    std::string indent(2 * (level_of(it) + 1), ' ');
 
-    std::print("{} {} {:>20} : {}", it.level, indent, node.type.to_sv(), node.token.get_text());
+    std::print("{} {} {:>20} : {}", level_of(it), indent, node.type.to_sv(), node.token.get_text());
 
     if (node.token.get_text() == error_name && !printed) {
       std::cout << "    <==========\n";
@@ -166,9 +166,9 @@ void Semantic_check::error_print_lnast_by_type(Lnast* lnast, std::string_view er
   for (const auto& it : lnast->depth_preorder()) {
     const auto& node = lnast->get_data(it);
 
-    std::string indent(2 * (it.level + 1), ' ');
+    std::string indent(2 * (level_of(it) + 1), ' ');
 
-    std::print("{} {} {:>20} : {}", it.level, indent, node.type.to_sv(), node.token.get_text());
+    std::print("{} {} {:>20} : {}", level_of(it), indent, node.type.to_sv(), node.token.get_text());
 
     if (node.type.to_sv() == error_name && !printed) {
       std::cout << "    <==========\n";
@@ -190,9 +190,9 @@ void Semantic_check::error_print_lnast_var_warn(Lnast* lnast, std::vector<std::s
   for (const auto& it : lnast->depth_preorder()) {
     auto node = lnast->get_data(it);
 
-    std::string indent(2 * (it.level + 1), ' ');
+    std::string indent(2 * (level_of(it) + 1), ' ');
 
-    std::print("{} {} {:>20} : {}", it.level, indent, node.type.to_sv(), node.token.get_text());
+    std::print("{} {} {:>20} : {}", level_of(it), indent, node.type.to_sv(), node.token.get_text());
 
     if (error_names.size() != 0) {
       for (auto node_name = error_names.begin(); node_name != error_names.end(); node_name++) {
@@ -794,7 +794,7 @@ void Semantic_check::check_func_call(Lnast* lnast, const Lnast_nid& lnidx_opr, s
 // NOTE: Test does only consider tuple and tuple concat operations
 void Semantic_check::do_check(Lnast* lnast) {
   // Get Lnast Root
-  const auto stmts = lnast->get_first_child(lh::Tree_index::root());
+  const auto stmts = lnast->get_first_child(lnast->get_root());
   // Iterate through Lnast top statements
   for (const auto& stmt : lnast->children(stmts)) {
     const auto ntype     = lnast->get_data(stmt).type;

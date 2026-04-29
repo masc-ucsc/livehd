@@ -322,8 +322,7 @@ void uPass_runner::run(std::size_t max_iters) {
   // input. set_root() materializes the root slot; its data (the `top` node)
   // is overwritten by process_top() when it pushes.
   staging = std::make_shared<Lnast>(lm->get_top_module_name());
-  staging->set_root(Lnast_node::create_top());
-  staging_parent      = Lnast_nid::root();
+  staging_parent      = staging->set_root(Lnast_node::create_top());
   staging_parent_stack = {};
 
   upass::Runner_fixed_point::run(

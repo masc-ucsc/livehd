@@ -96,7 +96,7 @@ TEST(UpassRunnerResolve, SharedDecideResolves) {
 // Helper: count the number of nodes of a given ntype in the staging LNAST.
 static size_t count_ntype(const Lnast& ln, Lnast_ntype::Lnast_ntype_int target) {
   size_t n = 0;
-  for (const auto& nid : ln.depth_preorder(Lnast_nid::root())) {
+  for (const auto& nid : ln.depth_preorder(ln.get_root())) {
     if (ln.get_type(nid).get_raw_ntype() == target) {
       ++n;
     }
@@ -113,7 +113,7 @@ static std::shared_ptr<Lnast> make_if_lnast(std::string_view cond_text,
                                              std::string_view else_val  = "") {
   auto ln = std::make_shared<Lnast>("if_test");
   ln->set_root(Lnast_node::create_top());
-  auto stmts = ln->add_child(Lnast_nid::root(), Lnast_node::create_stmts());
+  auto stmts = ln->add_child(ln->get_root(), Lnast_node::create_stmts());
   auto if_nid = ln->add_child(stmts, Lnast_node::create_if());
 
   // Condition — emit as const ("true"/"false") or ref (unknown variable).
@@ -209,7 +209,7 @@ TEST(UpassRunnerIfPrune, UnknownConditionKeepsIfNode) {
 TEST(UpassRunnerIfPrune, RefCondResolvedByConstpropPrunesIfNode) {
   auto ln = std::make_shared<Lnast>("if_ref_cond");
   ln->set_root(Lnast_node::create_top());
-  auto stmts = ln->add_child(Lnast_nid::root(), Lnast_node::create_stmts());
+  auto stmts = ln->add_child(ln->get_root(), Lnast_node::create_stmts());
 
   // assign ___x = 3
   auto asgn_x = ln->add_child(stmts, Lnast_node::create_assign());

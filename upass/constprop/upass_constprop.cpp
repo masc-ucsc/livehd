@@ -638,7 +638,7 @@ void uPass_constprop::process_if() {
 // outermost stmts of every function body is itself wrapped here too;
 // the function_scope established in the constructor remains the parent.
 void uPass_constprop::process_stmts() {
-  st.block_scope(lm->get_current_nid().get_hash());
+  st.block_scope(hash_of(lm->get_current_nid()));
   // The runner sets next_block_uncertain via notify_uncertain_arm_begin
   // immediately before descending into an if-arm whose cond didn't fold to
   // known-true/known-false. Mark the just-pushed scope so leave_scope can
@@ -1255,7 +1255,7 @@ bool uPass_constprop::try_eval_comb_call(std::string_view dst, std::string_view 
     return std::nullopt;
   };
 
-  const auto root  = Lnast_nid::root();
+  const auto root  = fn->get_root();
   const auto stmts = fn->get_child(root);
   if (stmts.is_invalid()) {
     return false;
@@ -1467,7 +1467,7 @@ bool uPass_constprop::try_eval_comb_call(std::string_view dst, std::string_view 
       // function called from N call sites contributes one tally per source
       // cassert, not N. The spawned-lnast verifier consults the same key
       // and skips re-counting in classify_statement.
-      auto key = std::format("{}:{}:{}", fn->get_top_module_name(), stmt.level, stmt.pos);
+      auto key = std::format("{}:{}:{}", fn->get_top_module_name(), level_of(stmt), pos_of(stmt));
       if (val->is_known_false()) {
         uPass_verifier::mark_inlined_cassert_fail(key);
       } else if (val->is_known_true()) {

@@ -34,10 +34,10 @@ void Pass_lnastfmt::fmt_begin(Eprp_var& var) {
 //   `[L,P pos1-pos2 line N @ fname]` — L/P is the tree index (level,pos)
 //   printed by dump as `(L,P)`, pos1-pos2 is the dump's leading range,
 //   line/fname come from the source token when available.
-static std::string node_loc(const Lnast* ln, const lh::Tree_index& it) {
+static std::string node_loc(const Lnast* ln, const Lnast_nid& it) {
   const auto& data = ln->get_data(it);
   const auto& tok  = data.token;
-  std::string s = std::format("[{},{} pos {}-{}", it.level, it.pos, tok.pos1, tok.pos2);
+  std::string s = std::format("[{},{} pos {}-{}", level_of(it), pos_of(it), tok.pos1, tok.pos2);
   if (tok.line != 0) {
     s += std::format(" line {}", tok.line);
   }
@@ -170,9 +170,9 @@ static bool parent_writes_pos0(Lnast_ntype pt) {
 // in the same tree.
 static void check_unwritten_tmps(const Lnast* ln) {
   std::unordered_set<std::string>                                        written;
-  std::unordered_map<std::string, std::pair<lh::Tree_index, std::string>> read_first;
+  std::unordered_map<std::string, std::pair<Lnast_nid, std::string>> read_first;
 
-  for (const lh::Tree_index& it : ln->depth_preorder()) {
+  for (const Lnast_nid& it : ln->depth_preorder()) {
     if (!ln->get_type(it).is_ref()) {
       continue;
     }
@@ -237,7 +237,7 @@ void Pass_lnastfmt::validate(const Lnast* ln) {
   // Validation-only pass. Any normalization (SSA stripping, tuple rebuild,
   // …) must be safe for every producer before it can run here — until then
   // lnastfmt only checks and leaves the LNAST untouched.
-  for (const lh::Tree_index& it : ln->depth_preorder()) {
+  for (const Lnast_nid& it : ln->depth_preorder()) {
     const auto& data = ln->get_data(it);
 
     if (data.type.is_ref()) {
