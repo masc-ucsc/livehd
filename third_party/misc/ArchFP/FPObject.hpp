@@ -1,7 +1,7 @@
 #pragma once
 
 #include "floorplan.hpp"
-#include "node_tree.hpp"
+#include "node.hpp"
 
 // This is a wrapper class for MV5 components that wish to be included in a floorplan.
 // If we wanted to use multiple inheritance, we chould use this as a mix-in.
@@ -75,10 +75,6 @@ public:
   virtual void          setName(std::string_view nameArg) { name = nameArg; }
   virtual void          setType(Ntype_op typeArg) { type = typeArg; }
 
-  virtual bool         layout(FPOptimization opt, double targetAR = 1.0) = 0;
-  virtual void         outputHotSpotLayout(std::ostream& o, double startX = 0.0, double startY = 0.0);
-  virtual unsigned int outputLgraphLayout(Node_tree& tree, lh::Tree_index tidx, double startX = 0.0, double startY = 0.0);
-
-  // find a node in tree that can be mapped to this FPObject
-  unsigned int findNode(Node_tree& tree, lh::Tree_index tidx, double calcX, double calcY);
+  virtual bool layout(FPOptimization opt, double targetAR = 1.0) = 0;
+  virtual void outputHotSpotLayout(std::ostream& o, double startX = 0.0, double startY = 0.0);
 };

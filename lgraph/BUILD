@@ -22,17 +22,6 @@ cc_library(
     alwayslink = True,
 )
 
-cc_library(
-    name = "tree_lgdb_test",
-    hdrs = ["tests/tree_lgdb_setup.hpp"],
-    copts = COPTS,
-    includes = ["."],
-    deps = [
-        ":lgraph",
-        "@googletest//:gtest_main",
-    ],
-)
-
 cc_test(
     name = "lgtuple_test",
     srcs = ["tests/lgtuple_test.cpp"],
@@ -41,23 +30,6 @@ cc_test(
     deps = [
         ":lgraph",
         "@googletest//:gtest_main",
-    ],
-)
-
-cc_test(
-    name = "traversal_hierarchy_test",
-    srcs = ["tests/traversal_hierarchy_test.cpp"],
-    deps = [
-        ":tree_lgdb_test",
-    ],
-)
-
-cc_test(
-    name = "traverse_test",
-    srcs = ["tests/traverse_test.cpp"],
-    tags = ["fixme"],
-    deps = [
-        ":tree_lgdb_test",
     ],
 )
 
@@ -94,16 +66,6 @@ cc_test(
     tags = ["fixme"],
     deps = [
         ":lgraph",
-    ],
-)
-
-cc_test(
-    name = "graph_bench",
-    srcs = ["tests/graph_bench.cpp"],
-    tags = ["fixme"],
-    deps = [
-        ":lgraph",
-        ":tree_lgdb_test",
     ],
 )
 

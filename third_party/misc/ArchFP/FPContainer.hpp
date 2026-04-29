@@ -2,7 +2,6 @@
 
 #include "FPObject.hpp"
 #include "floorplan.hpp"
-#include "node_tree.hpp"
 
 // Should the container and the layout manager be two separate classes or one class?
 // For some reason the GUI engines have them as separate things, that are independent.
@@ -59,6 +58,4 @@ public:
   virtual void      addComponent(FPObject* comp);
   virtual void      addComponent(FPObject* comp, int count);
 
-  // Writes current container and all subcontainers to the specified root lgraph
-  virtual unsigned int outputLgraphLayout(Node_tree& tree, lh::Tree_index tidx, double startX = 0.0, double startY = 0.0);
 };

@@ -11,11 +11,22 @@
 ## Key Directories
 
 - `lgraph/`: LGraph IR — nodes (logic, muxes, registers, memories, sub-graphs), pins (driver/sink), edges
-- `lnast/`: LNAST high-level IR
+- `lnast/`: LNAST high-level IR (HHDS-backed `hhds::Tree` + flat-storage attributes)
+- `parser/`: AST built on `hhds::Tree`
 - `inou/yosys/`: Yosys integration (`lgyosys_tolg.cpp` = Yosys→LGraph, `inou_yosys_read.ys` = Yosys script)
 - `inou/cgen/`: Verilog code generation from LGraph
 - `pass/cprop/`: Constant propagation pass
 - `ware/rtl/`: Memory RTL modules (`cgen_memory_*.v`, `cgen_memory_multiclock_*.v`)
+
+## Tree library
+
+LiveHD's tree IRs (LNAST, parser AST) sit on top of HHDS (`@hhds//hhds:core`,
+headers `hhds/tree.hpp`, `hhds/attr.hpp`). New tree code should use
+`hhds::Tree` + `hhds::Forest` and attach per-node payload via `flat_storage`
+attribute tags — see `lnast/lnast_attrs.hpp` for the pattern. Pass-local
+state should live in `absl::flat_hash_map<Tree_class_index, T>` side maps
+rather than registering throwaway attributes. Legacy `core/lhtree.hpp` is
+gone; do not reintroduce `lh::tree` / `lh::Tree_index`.
 
 ## lgshell / EPRP
 

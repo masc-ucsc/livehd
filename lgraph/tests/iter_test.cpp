@@ -6,7 +6,6 @@
 
 #include "lgedgeiter.hpp"
 #include "lgraph.hpp"
-#include "lhtree.hpp"
 #include "perf_tracing.hpp"
 #include "spmc.hpp"
 #include "thread_pool.hpp"
@@ -750,16 +749,6 @@ int main(int argc, char** argv) {
       }
     }
 #endif
-#ifdef ITER_TREE
-    lh::tree<Node::Compact_class> fwd_order;
-    Node                          invalid;
-    fwd_order.set_root(invalid.get_compact_class());
-
-    const auto root = fwd_order.get_root();
-    for (auto node : lg->forward()) {
-      fwd_order.add_child(root, node.get_compact_class());
-    }
-#endif
 #ifdef ITER_MMAP
     absl::flat_hash_map<Node::Compact_class, Node::Compact_class> fwd_order;
     Node                                                          invalid;
@@ -804,15 +793,6 @@ int main(int argc, char** argv) {
 #ifdef ITER_REBUILD
       for (auto node : tlg->fast()) {
         auto op = node.get_type_op();
-        if (Ntype::is_multi_driver(op)) {
-          total += 1;
-        }
-      }
-#endif
-#ifdef ITER_TREE
-      for (const auto& it : fwd_order.depth_preorder()) {
-        auto node = fwd_order.get_data(it).get_node(lg);
-        auto op   = node.get_type_op();
         if (Ntype::is_multi_driver(op)) {
           total += 1;
         }
