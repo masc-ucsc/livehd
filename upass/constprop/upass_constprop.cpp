@@ -1216,7 +1216,7 @@ std::optional<std::vector<uPass_constprop::Call_actual>> uPass_constprop::collec
     if (!value.has_value() || value->is_invalid()) {
       return std::nullopt;
     }
-    actuals.emplace_back(Call_actual{.value = *value});
+    actuals.emplace_back(Call_actual{.is_named = false, .name = {}, .value = *value});
   }
 
   return actuals;

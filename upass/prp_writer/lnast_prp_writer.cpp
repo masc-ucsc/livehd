@@ -7,8 +7,8 @@
 
 // ── Constructor ───────────────────────────────────────────────────────────────
 
-Lnast_prp_writer::Lnast_prp_writer(std::ostream& _os, const std::shared_ptr<Lnast>& _lnast)
-    : os(_os), lnast(_lnast) {}
+Lnast_prp_writer::Lnast_prp_writer(std::ostream& _os, std::shared_ptr<Lnast> _lnast)
+    : os(_os), lnast(std::move(_lnast)) {}
 
 // ── Public entry point ────────────────────────────────────────────────────────
 
@@ -214,6 +214,29 @@ void Lnast_prp_writer::write_ref() {
   print(strip_prefix(current_text()));
 }
 
+// File-local helper: escapes special characters inside a Pyrope string literal.
+static std::string escape_string(std::string_view s) {
+  std::string out;
+  out.reserve(s.size());
+  for (unsigned char c : s) {
+    switch (c) {
+      case '\\': out += "\\\\"; break;
+      case '"':  out += "\\\""; break;
+      case '\n': out += "\\n";  break;
+      case '\r': out += "\\r";  break;
+      case '\t': out += "\\t";  break;
+      default:
+        if (c < 0x20 || c == 0x7f) {
+          out += std::format("\\x{:02x}", static_cast<unsigned>(c));
+        } else {
+          out += static_cast<char>(c);
+        }
+        break;
+    }
+  }
+  return out;
+}
+
 void Lnast_prp_writer::write_const() {
   auto text = current_text();
   if (!text.empty() && (isdigit(static_cast<unsigned char>(text[0])) || text[0] == '-')) {
@@ -221,7 +244,7 @@ void Lnast_prp_writer::write_const() {
   } else if (text == "true" || text == "false") {
     print(text);
   } else {
-    os << std::format("\"{}\"", text);
+    os << std::format("\"{}\"", escape_string(text));
   }
 }
 
@@ -361,38 +384,32 @@ void Lnast_prp_writer::write_delay_assign() {
 void Lnast_prp_writer::write_infix(std::string_view op) {
   if (!move_to_child()) return;
 
-  // Collect LHS text
+  // First child is the LHS (result variable) — read its name for mut-detection.
   auto lhs = strip_prefix(current_text());
-
-  // Collect all RHS operand texts (N-ary: a op b op c …)
-  std::vector<std::string> operands;
-  while (move_to_sibling()) {
-    // Each operand is a leaf (ref or const) — read its text directly.
-    operands.emplace_back(strip_prefix(current_text()));
-  }
-  move_to_parent();
-
   if (!is_tmp(lhs)) print("mut ");
   print(lhs);
   print(" = ");
-  for (std::size_t i = 0; i < operands.size(); ++i) {
-    if (i > 0) { print(" "); print(op); print(" "); }
-    print(operands[i]);
+
+  // Remaining siblings are the RHS operands.  Serialize each through
+  // write_node() so nested non-leaf nodes are handled correctly.
+  bool first = true;
+  while (move_to_sibling()) {
+    if (!first) { print(" "); print(op); print(" "); }
+    write_node();
+    first = false;
   }
+  move_to_parent();
 }
 
 void Lnast_prp_writer::write_prefix_unary(std::string_view op) {
   if (!move_to_child()) return;
   auto lhs = strip_prefix(current_text());
-  move_to_sibling();
-  auto rhs = strip_prefix(current_text());
-  move_to_parent();
-
   if (!is_tmp(lhs)) print("mut ");
   print(lhs);
   print(" = ");
   print(op);
-  print(rhs);
+  if (move_to_sibling()) write_node();
+  move_to_parent();
 }
 
 void Lnast_prp_writer::write_sext() {

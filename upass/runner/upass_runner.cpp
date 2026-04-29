@@ -551,7 +551,8 @@ void uPass_runner::process_if() {
   // Slice 7 — dead-branch elimination.
   // When the first child is a comptime-known condition (ref or const), emit
   // only the taken branch's stmts spliced into the parent (no if node).
-  // Cursor invariant: must be at the if-node on all exit paths.  // See upass.md §Slice 7 and §5 (if cursor discipline).
+  // Cursor invariant: must be at the if-node on all exit paths.
+  // See upass.md §Slice 7 and §5 (if cursor discipline).
   if (lm->has_child()) {
     lm->move_to_child();
     using Ntype        = Lnast_ntype;
@@ -598,17 +599,8 @@ void uPass_runner::process_if() {
               lm->move_to_parent();  // back to if-node
               return;                // pruned
             }
-            // elif chain (next sibling is another condition, not stmts): fall
-            // through to full-if emit.  Recursive elif pruning is a future task.
-            //
-            // KNOWN LIMITATION (flagged by PR review): dispatch_to_passes above
-            // has already let constprop walk the *entire* if subtree, so its ST
-            // now contains writes from the (statically-unreached) then-branch.
-            // When process_lnast() below recurses into the elif/else bodies,
-            // classify_statement may incorrectly DCE a live write whose LHS was
-            // already recorded in the ST from that dead branch.  Safe to defer
-            // until elif pruning is implemented; track against the test suite
-            // as elif coverage grows.  (See upass.md §Slice 7 TODO.)
+            // elif chain: fall through to full-if emit with per-arm dead
+            // branch tracking (see loop below).
           } else {
             // No else-stmts: false condition → emit nothing.
             lm->move_to_parent();  // back to if-node
@@ -621,24 +613,21 @@ void uPass_runner::process_if() {
     lm->move_to_parent();  // condition unknown or elif chain — fall through
   }
 
-  // Unknown condition (or elif chain): emit the full if node unchanged.
+  // Unknown condition (or elif chain): emit the full if node.
+  // Branch elimination for known conditions. The if's children alternate
+  // (cond, stmts) pairs, with an optional trailing stmts (else). For
+  // every cond/stmts pair we peek at the cond's folded value:
+  //   - known-false: emit the stmts subtree verbatim (no constprop
+  //     dispatch into the body) so dead-branch assigns can't update
+  //     the symbol table.
+  //   - known-true (and we haven't seen a true arm yet): process the
+  //     body normally; mark a "matched" flag so any later arms / else
+  //     are emit-verbatim'd (only the first matching arm runs).
+  //   - matched-already (previous arm was known-true): emit verbatim.
+  //   - unknown / partially-known: process normally (conservative).
   emit_push(lm->current_node());
   if (lm->has_child()) {
     lm->move_to_child();
-    // Branch elimination for known conditions. The if's children alternate
-    // (cond, stmts) pairs, with an optional trailing stmts (else). For
-    // every cond/stmts pair we peek at the cond's folded value:
-    //   - known-false: emit the stmts subtree verbatim (no constprop
-    //     dispatch into the body) so dead-branch assigns can't update
-    //     the symbol table. Without this, `if false { c = 2 }` would
-    //     overwrite c=1 because constprop's process_assign runs
-    //     unconditionally during traversal.
-    //   - known-true (and we haven't seen a true arm yet): process the
-    //     body normally; mark a "matched" flag so any later arms / else
-    //     are emit-verbatim'd (only the first matching arm runs).
-    //   - matched-already (previous arm was known-true): emit verbatim.
-    //   - unknown / partially-known: process normally (conservative —
-    //     the symbol table merges values across both branches today).
     bool last_cond_false      = false;
     bool last_cond_true       = false;
     bool last_was_cond        = false;

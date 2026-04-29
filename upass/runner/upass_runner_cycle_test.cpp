@@ -105,8 +105,14 @@ static size_t count_ntype(const Lnast& ln, Lnast_ntype::Lnast_ntype_int target) 
 }
 
 // Build a minimal LNAST:
-//   top → stmts → if(cond, then_stmts[assign(___a, val)], [else_stmts[assign(___a, else_val)]])
-// `cond_text` is the condition literal ("true", "false", or a ref name like "___c").
+//   top → stmts → if(cond, then_stmts[assign(%out, val)], [else_stmts[assign(%alt, else_val)]])
+//
+// Then- and else-branches write to *distinct* observable output ports (%out vs
+// %alt) so constprop cannot silently drop them (ports are never DCE'd as tmps).
+// This makes it possible to verify WHICH branch was spliced into the staging
+// tree after dead-branch elimination.
+//
+// `cond_text` is the condition literal ("true", "false", or a ref like "___c").
 // `else_val`  is "" when there is no else branch.
 static std::shared_ptr<Lnast> make_if_lnast(std::string_view cond_text,
                                              std::string_view then_val  = "4",
@@ -124,17 +130,17 @@ static std::shared_ptr<Lnast> make_if_lnast(std::string_view cond_text,
     ln->add_child(if_nid, Lnast_node::create_ref(cond_text));
   }
 
-  // Then-stmts.
+  // Then-stmts: assigns to %out (observable output port, never DCE'd).
   auto then_s = ln->add_child(if_nid, Lnast_node::create_stmts());
   auto asgn1  = ln->add_child(then_s, Lnast_node::create_assign());
-  ln->add_child(asgn1, Lnast_node::create_ref("___a"));
+  ln->add_child(asgn1, Lnast_node::create_ref("%out"));
   ln->add_child(asgn1, Lnast_node::create_const(then_val));
 
-  // Optional else-stmts.
+  // Optional else-stmts: assigns to %alt (distinct port, never DCE'd).
   if (!else_val.empty()) {
     auto else_s = ln->add_child(if_nid, Lnast_node::create_stmts());
     auto asgn2  = ln->add_child(else_s, Lnast_node::create_assign());
-    ln->add_child(asgn2, Lnast_node::create_ref("___a"));
+    ln->add_child(asgn2, Lnast_node::create_ref("%alt"));
     ln->add_child(asgn2, Lnast_node::create_const(else_val));
   }
 
@@ -149,8 +155,10 @@ TEST(UpassRunnerIfPrune, TrueConditionPrunesIfNode) {
   runner.run();
   auto staging = runner.take_staging();
   ASSERT_NE(staging, nullptr);
-  // No if-node should remain in the staging tree.
+  // No if-node should remain — the then-branch (%out=4) was spliced into parent.
   EXPECT_EQ(count_ntype(*staging, Lnast_ntype::Lnast_ntype_if), 0U);
+  // The then-branch assign (%out=4) must appear in the staging tree.
+  EXPECT_GE(count_ntype(*staging, Lnast_ntype::Lnast_ntype_assign), 1U);
 }
 
 // ── Test 2: condition is const "false" → if is pruned, no output emitted ────
@@ -161,7 +169,7 @@ TEST(UpassRunnerIfPrune, FalseConditionPrunesIfNodeNoElse) {
   runner.run();
   auto staging = runner.take_staging();
   ASSERT_NE(staging, nullptr);
-  // No if-node and no assign should remain (branch dropped entirely).
+  // No if-node and no assign — the entire if was dropped (no else branch).
   EXPECT_EQ(count_ntype(*staging, Lnast_ntype::Lnast_ntype_if), 0U);
   EXPECT_EQ(count_ntype(*staging, Lnast_ntype::Lnast_ntype_assign), 0U);
 }
@@ -174,10 +182,10 @@ TEST(UpassRunnerIfPrune, FalseConditionSplicesElseBranch) {
   runner.run();
   auto staging = runner.take_staging();
   ASSERT_NE(staging, nullptr);
-  // No if-node — else branch was spliced.
+  // No if-node — else-branch (%alt=5) was spliced into the parent stmts.
   EXPECT_EQ(count_ntype(*staging, Lnast_ntype::Lnast_ntype_if), 0U);
-  // else branch is dropped too because ___a=5 is a known-const temp.
-  // Important invariant: staging must not crash and must have no if node.
+  // %alt is an output port, so it is not DCE'd; the assign must remain.
+  EXPECT_GE(count_ntype(*staging, Lnast_ntype::Lnast_ntype_assign), 1U);
 }
 
 // ── Test 4: unknown condition → full if node is preserved ───────────────────

@@ -5,7 +5,6 @@
 #include <ostream>
 #include <stack>
 #include <string_view>
-#include <vector>
 
 #include "lnast.hpp"
 
@@ -24,12 +23,14 @@
 //   writer.write_all();
 class Lnast_prp_writer {
 public:
-  explicit Lnast_prp_writer(std::ostream& os, const std::shared_ptr<Lnast>& lnast);
+  // Takes lnast by value so the writer owns the tree for its entire lifetime
+  // (avoids dangling-reference UB if the caller's shared_ptr is destroyed).
+  explicit Lnast_prp_writer(std::ostream& os, std::shared_ptr<Lnast> lnast);
   void write_all();
 
 private:
-  std::ostream&                 os;
-  const std::shared_ptr<Lnast>& lnast;
+  std::ostream&          os;
+  std::shared_ptr<Lnast> lnast;
   int                           depth{0};
 
   std::stack<Lnast_nid> nid_stack;
