@@ -1,0 +1,410 @@
+//  This file is distributed under the BSD 3-Clause License. See LICENSE for details.
+
+#include "lnast_prp_writer.hpp"
+
+#include <format>
+#include <string>
+
+// ── Constructor ───────────────────────────────────────────────────────────────
+
+Lnast_prp_writer::Lnast_prp_writer(std::ostream& _os, const std::shared_ptr<Lnast>& _lnast)
+    : os(_os), lnast(_lnast) {}
+
+// ── Public entry point ────────────────────────────────────────────────────────
+
+void Lnast_prp_writer::write_all() {
+  depth = 0;
+  nid_stack = {};
+  cur = Lnast_nid::root();
+  write_node();
+}
+
+// ── Cursor helpers ────────────────────────────────────────────────────────────
+
+bool Lnast_prp_writer::move_to_child() {
+  auto child = lnast->get_child(cur);
+  if (child.is_invalid()) return false;
+  nid_stack.push(cur);
+  cur = child;
+  return true;
+}
+
+bool Lnast_prp_writer::move_to_sibling() {
+  auto sib = lnast->get_sibling_next(cur);
+  if (sib.is_invalid()) return false;
+  cur = sib;
+  return true;
+}
+
+void Lnast_prp_writer::move_to_parent() {
+  cur = nid_stack.top();
+  nid_stack.pop();
+}
+
+bool Lnast_prp_writer::is_last_child() const {
+  return lnast->is_last_child(cur);
+}
+
+std::string_view Lnast_prp_writer::current_text() const {
+  return lnast->get_data(cur).token.get_text();
+}
+
+Lnast_ntype::Lnast_ntype_int Lnast_prp_writer::current_ntype() const {
+  return lnast->get_type(cur).get_raw_ntype();
+}
+
+// ── Output helpers ────────────────────────────────────────────────────────────
+
+void Lnast_prp_writer::print(std::string_view s) { os << s; }
+
+void Lnast_prp_writer::print_indent() {
+  for (int i = 0; i < depth; ++i) os << "  ";
+}
+
+void Lnast_prp_writer::println(std::string_view s) {
+  print_indent();
+  os << s << "\n";
+}
+
+// ── Utilities ─────────────────────────────────────────────────────────────────
+
+bool Lnast_prp_writer::is_tmp(std::string_view name) {
+  return name.size() >= 3 && name[0] == '_' && name[1] == '_' && name[2] == '_';
+}
+
+std::string_view Lnast_prp_writer::strip_prefix(std::string_view name) {
+  if (!name.empty() && (name[0] == '%' || name[0] == '$')) {
+    return name.substr(1);
+  }
+  return name;
+}
+
+// ── Main dispatch ─────────────────────────────────────────────────────────────
+
+void Lnast_prp_writer::write_node() {
+  using N = Lnast_ntype;
+  switch (current_ntype()) {
+    case N::Lnast_ntype_top:          write_top();          break;
+    case N::Lnast_ntype_stmts:        write_stmts();        break;
+    case N::Lnast_ntype_if:           write_if();           break;
+    case N::Lnast_ntype_assign:       write_assign();       break;
+    case N::Lnast_ntype_ref:          write_ref();          break;
+    case N::Lnast_ntype_const:        write_const();        break;
+    case N::Lnast_ntype_cassert:      write_cassert();      break;
+    case N::Lnast_ntype_func_call:    write_func_call();    break;
+    case N::Lnast_ntype_func_def:     write_func_def();     break;
+    case N::Lnast_ntype_tuple_add:    write_tuple_add();    break;
+    case N::Lnast_ntype_tuple_get:    write_tuple_get();    break;
+    case N::Lnast_ntype_tuple_set:    write_tuple_set();    break;
+    case N::Lnast_ntype_attr_set:     write_attr_set();     break;
+    case N::Lnast_ntype_attr_get:     write_attr_get();     break;
+    case N::Lnast_ntype_delay_assign: write_delay_assign(); break;
+    case N::Lnast_ntype_plus:         write_infix("+");     break;
+    case N::Lnast_ntype_minus:        write_infix("-");     break;
+    case N::Lnast_ntype_mult:         write_infix("*");     break;
+    case N::Lnast_ntype_div:          write_infix("/");     break;
+    case N::Lnast_ntype_mod:          write_infix("%");     break;
+    case N::Lnast_ntype_shl:          write_infix("<<");    break;
+    case N::Lnast_ntype_sra:          write_infix(">>");    break;
+    case N::Lnast_ntype_sext:         write_sext();         break;
+    case N::Lnast_ntype_eq:           write_infix("==");    break;
+    case N::Lnast_ntype_ne:           write_infix("!=");    break;
+    case N::Lnast_ntype_lt:           write_infix("<");     break;
+    case N::Lnast_ntype_le:           write_infix("<=");    break;
+    case N::Lnast_ntype_gt:           write_infix(">");     break;
+    case N::Lnast_ntype_ge:           write_infix(">=");    break;
+    case N::Lnast_ntype_log_and:      write_infix("and");   break;
+    case N::Lnast_ntype_log_or:       write_infix("or");    break;
+    case N::Lnast_ntype_log_not:      write_prefix_unary("not "); break;
+    case N::Lnast_ntype_bit_and:      write_infix("&");     break;
+    case N::Lnast_ntype_bit_or:       write_infix("|");     break;
+    case N::Lnast_ntype_bit_xor:      write_infix("^");     break;
+    case N::Lnast_ntype_bit_not:      write_prefix_unary("~"); break;
+    default: {
+      // Unknown node — emit a comment so the output stays parseable.
+      println(std::format("/* TODO: unhandled node type {} */",
+                          static_cast<int>(current_ntype())));
+      break;
+    }
+  }
+}
+
+// ── Structural ────────────────────────────────────────────────────────────────
+
+void Lnast_prp_writer::write_top() {
+  os << std::format("comb {}() {{\n", lnast->get_top_module_name());
+  ++depth;
+  if (move_to_child()) {
+    write_node();
+    move_to_parent();
+  }
+  --depth;
+  os << "}\n";
+}
+
+void Lnast_prp_writer::write_stmts() {
+  if (move_to_child()) {
+    do {
+      print_indent();
+      write_node();
+      os << "\n";
+    } while (move_to_sibling());
+    move_to_parent();
+  }
+}
+
+// ── if ────────────────────────────────────────────────────────────────────────
+
+void Lnast_prp_writer::write_if() {
+  if (!move_to_child()) return;
+
+  // First child: condition (ref or const)
+  print("if ");
+  write_node();
+  print(" {\n");
+  ++depth;
+
+  // Second child: then-stmts
+  if (!move_to_sibling()) { --depth; println("}"); move_to_parent(); return; }
+  write_node();
+  --depth;
+  print_indent(); print("}");
+
+  // Optional: else / elif chains
+  while (move_to_sibling()) {
+    if (is_last_child()) {
+      // Bare else-stmts
+      print(" else {\n");
+      ++depth;
+      write_node();
+      --depth;
+      print_indent(); print("}");
+    } else {
+      // elif condition
+      print(" elif ");
+      write_node();
+      print(" {\n");
+      ++depth;
+      if (!move_to_sibling()) { --depth; print_indent(); print("}"); break; }
+      write_node();
+      --depth;
+      print_indent(); print("}");
+    }
+  }
+
+  move_to_parent();
+}
+
+// ── assign ────────────────────────────────────────────────────────────────────
+
+void Lnast_prp_writer::write_assign() {
+  if (!move_to_child()) return;
+  auto lhs = strip_prefix(current_text());
+  if (!is_tmp(lhs)) print("mut ");
+  print(lhs);
+  print(" = ");
+  move_to_sibling();
+  write_node();
+  move_to_parent();
+}
+
+// ── ref / const ───────────────────────────────────────────────────────────────
+
+void Lnast_prp_writer::write_ref() {
+  print(strip_prefix(current_text()));
+}
+
+void Lnast_prp_writer::write_const() {
+  auto text = current_text();
+  if (!text.empty() && (isdigit(static_cast<unsigned char>(text[0])) || text[0] == '-')) {
+    print(text);
+  } else if (text == "true" || text == "false") {
+    print(text);
+  } else {
+    os << std::format("\"{}\"", text);
+  }
+}
+
+// ── cassert ───────────────────────────────────────────────────────────────────
+
+void Lnast_prp_writer::write_cassert() {
+  if (!move_to_child()) return;
+  print("cassert ");
+  write_node();
+  move_to_parent();
+}
+
+// ── func_call ─────────────────────────────────────────────────────────────────
+
+void Lnast_prp_writer::write_func_call() {
+  if (!move_to_child()) return;
+  // LHS
+  auto lhs = strip_prefix(current_text());
+  if (!is_tmp(lhs)) print("mut ");
+  print(lhs);
+  print(" = ");
+  // function name
+  move_to_sibling();
+  print(current_text());
+  print("(");
+  // arguments
+  bool first = true;
+  while (move_to_sibling()) {
+    if (!first) print(", ");
+    write_node();
+    first = false;
+  }
+  print(")");
+  move_to_parent();
+}
+
+// ── func_def ──────────────────────────────────────────────────────────────────
+
+void Lnast_prp_writer::write_func_def() {
+  // Slice 4 not yet implemented — emit a TODO comment block.
+  print("/* TODO: func_def — Slice 4 not yet implemented */");
+}
+
+// ── Tuples ────────────────────────────────────────────────────────────────────
+
+void Lnast_prp_writer::write_tuple_add() {
+  if (!move_to_child()) return;
+  auto lhs = strip_prefix(current_text());
+  if (!is_tmp(lhs)) print("mut ");
+  print(lhs);
+  print(" = (");
+  bool first = true;
+  while (move_to_sibling()) {
+    if (!first) print(", ");
+    write_node();
+    first = false;
+  }
+  print(")");
+  move_to_parent();
+}
+
+void Lnast_prp_writer::write_tuple_get() {
+  if (!move_to_child()) return;
+  auto lhs = strip_prefix(current_text());
+  if (!is_tmp(lhs)) print("mut ");
+  print(lhs);
+  print(" = ");
+  move_to_sibling();
+  print(strip_prefix(current_text()));
+  while (move_to_sibling()) {
+    print("[");
+    write_node();
+    print("]");
+  }
+  move_to_parent();
+}
+
+void Lnast_prp_writer::write_tuple_set() {
+  if (!move_to_child()) return;
+  print(strip_prefix(current_text()));
+  while (move_to_sibling() && !is_last_child()) {
+    print("[");
+    write_node();
+    print("]");
+  }
+  print(" = ");
+  write_node();
+  move_to_parent();
+}
+
+// ── Attributes ────────────────────────────────────────────────────────────────
+
+void Lnast_prp_writer::write_attr_set() {
+  if (!move_to_child()) return;
+  print(strip_prefix(current_text()));
+  while (move_to_sibling()) {
+    if (!is_last_child()) {
+      print(".");
+    } else {
+      print(" = ");
+    }
+    write_node();
+  }
+  move_to_parent();
+}
+
+void Lnast_prp_writer::write_attr_get() {
+  if (!move_to_child()) return;
+  auto lhs = strip_prefix(current_text());
+  if (!is_tmp(lhs)) print("mut ");
+  print(lhs);
+  print(" = ");
+  move_to_sibling();
+  print(strip_prefix(current_text()));
+  while (move_to_sibling()) {
+    print(".");
+    write_node();
+  }
+  move_to_parent();
+}
+
+// ── delay_assign ──────────────────────────────────────────────────────────────
+
+void Lnast_prp_writer::write_delay_assign() {
+  if (!move_to_child()) return;
+  print(strip_prefix(current_text()));
+  print(" = #[");
+  move_to_sibling();
+  write_node();
+  if (move_to_sibling()) { print(", "); write_node(); }
+  print("]");
+  move_to_parent();
+}
+
+// ── Infix / prefix helpers ────────────────────────────────────────────────────
+
+void Lnast_prp_writer::write_infix(std::string_view op) {
+  if (!move_to_child()) return;
+
+  // Collect LHS text
+  auto lhs = strip_prefix(current_text());
+
+  // Collect all RHS operand texts (N-ary: a op b op c …)
+  std::vector<std::string> operands;
+  while (move_to_sibling()) {
+    // Each operand is a leaf (ref or const) — read its text directly.
+    operands.emplace_back(strip_prefix(current_text()));
+  }
+  move_to_parent();
+
+  if (!is_tmp(lhs)) print("mut ");
+  print(lhs);
+  print(" = ");
+  for (std::size_t i = 0; i < operands.size(); ++i) {
+    if (i > 0) { print(" "); print(op); print(" "); }
+    print(operands[i]);
+  }
+}
+
+void Lnast_prp_writer::write_prefix_unary(std::string_view op) {
+  if (!move_to_child()) return;
+  auto lhs = strip_prefix(current_text());
+  move_to_sibling();
+  auto rhs = strip_prefix(current_text());
+  move_to_parent();
+
+  if (!is_tmp(lhs)) print("mut ");
+  print(lhs);
+  print(" = ");
+  print(op);
+  print(rhs);
+}
+
+void Lnast_prp_writer::write_sext() {
+  // No Pyrope 3.0 operator for sext — emit as a named call with comment.
+  if (!move_to_child()) return;
+  auto lhs = strip_prefix(current_text());
+  move_to_sibling();
+  auto val = strip_prefix(current_text());
+  auto bits = std::string{};
+  if (move_to_sibling()) bits = strip_prefix(current_text());
+  move_to_parent();
+
+  if (!is_tmp(lhs)) print("mut ");
+  os << std::format("{} = sext({}, {})  /* sign-extend */", lhs, val, bits);
+}
