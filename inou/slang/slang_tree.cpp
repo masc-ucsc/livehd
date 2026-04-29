@@ -416,25 +416,18 @@ std::string Slang_tree::process_expression(const slang::ast::Expression& expr, b
   if (expr.kind == slang::ast::ExpressionKind::UnaryOp) {
     const auto& op = expr.as<slang::ast::UnaryExpression>();
 
-    if (op.op == slang::ast::UnaryOperator::BitwiseAnd) {
-      return process_mask_and(op, last_value);
-    }
-    if (op.op == slang::ast::UnaryOperator::BitwiseNand) {
-      return lnast_create_obj.create_bit_not_stmts(process_mask_and(op, last_value));
-    }
-    if (op.op == slang::ast::UnaryOperator::BitwiseXor) {
-      return process_mask_xor(op, last_value);
-    }
-    if (op.op == slang::ast::UnaryOperator::BitwiseXnor) {
-      return lnast_create_obj.create_bit_not_stmts(process_mask_xor(op, last_value));
-    }
-
     auto lhs = process_expression(op.operand(), last_value);
     switch (op.op) {
       case slang::ast::UnaryOperator::BitwiseNot: return lnast_create_obj.create_bit_not_stmts(lhs);
       case slang::ast::UnaryOperator::LogicalNot: return lnast_create_obj.create_log_not_stmts(lhs);
       case slang::ast::UnaryOperator::Plus: return lhs;
       case slang::ast::UnaryOperator::Minus: return lnast_create_obj.create_minus_stmts("0", lhs);
+      case slang::ast::UnaryOperator::BitwiseAnd: return lnast_create_obj.create_red_and_stmts(lhs);
+      case slang::ast::UnaryOperator::BitwiseNand:
+        return lnast_create_obj.create_bit_not_stmts(lnast_create_obj.create_red_and_stmts(lhs));
+      case slang::ast::UnaryOperator::BitwiseXor: return lnast_create_obj.create_red_xor_stmts(lhs);
+      case slang::ast::UnaryOperator::BitwiseXnor:
+        return lnast_create_obj.create_bit_not_stmts(lnast_create_obj.create_red_xor_stmts(lhs));
       case slang::ast::UnaryOperator::BitwiseOr: return lnast_create_obj.create_red_or_stmts(lhs);
       // do I use bit not or logical not?
       // Also is it ok for it to be two connected references if we have no lnast node?
@@ -548,27 +541,3 @@ std::string Slang_tree::process_expression(const slang::ast::Expression& expr, b
   return "FIXME_op";
 }
 
-std::string Slang_tree::process_mask_and(const slang::ast::UnaryExpression& uexpr, bool last_value) {
-  // reduce and does not have a direct mapping in Lgraph
-  // And(Not(Ror(Not(inp))), inp.MSB)
-
-  const auto& op      = uexpr.operand();
-  auto        msb_pos = op.type->getBitWidth() - 1;
-
-  auto inp = process_expression(op, last_value);
-
-  auto tmp
-      = lnast_create_obj.create_bit_not_stmts(lnast_create_obj.create_red_or_stmts(lnast_create_obj.create_bit_not_stmts(inp)));
-  return lnast_create_obj.create_bit_and_stmts(
-      tmp,
-      lnast_create_obj.create_sra_stmts(inp, std::to_string(msb_pos)));  // No need pick (reduce is 1 bit)
-}
-
-std::string Slang_tree::process_mask_xor(const slang::ast::UnaryExpression& uexpr, bool last_value) {
-  const auto& op = uexpr.operand();
-
-  auto inp = process_expression(op, last_value);
-
-  auto mask = lnast_create_obj.create_mask_stmts(std::to_string(op.type->getBitWidth()));
-  return lnast_create_obj.create_mask_xor_stmts(mask, inp);
-}

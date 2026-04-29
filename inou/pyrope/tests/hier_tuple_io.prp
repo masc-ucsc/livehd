@@ -1,9 +1,0 @@
-foo.tup1.a = 1
-foo.tup1.b = 3
-foo.tup2.c = 5
-foo.tup3   = 7
-
-foo1 = foo
-%out = foo1
-
-%out2.sub = 9

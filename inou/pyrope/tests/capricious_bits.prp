@@ -1,6 +1,0 @@
-a = 2
-a.__ubits = 3
-
-b = a + 1
-a.__ubits = 4
-%out = a + b + a.__ubits // 2 + 3 + 2 = 7

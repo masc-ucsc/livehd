@@ -8,7 +8,7 @@ static Pass_plugin sample("pass_locator", Pass_locator::setup);
 
 void Pass_locator::setup() {
   Eprp_method m1("pass.locator",
-                 "after inou.pyrope or any other FE pass that creates LN.(For paper: LoC.) (Paper pass)",
+                 "after inou.prp or any other FE pass that creates LN.(For paper: LoC.) (Paper pass)",
                  &Pass_locator::begin_pass);
   // m1.add_label_optional("odir", "path to put the LNAST", ".");
   register_pass(m1);

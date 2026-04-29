@@ -1,4 +1,0 @@
-a = $inp
-tmp = (a.foo & 0xf) + (a.bar & 0xFF)
-%out = tmp
-

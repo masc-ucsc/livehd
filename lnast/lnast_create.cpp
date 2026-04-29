@@ -165,6 +165,40 @@ std::string Lnast_create::create_red_or_stmts(std::string_view var_name) {
   return res_var;
 }
 
+std::string Lnast_create::create_red_and_stmts(std::string_view var_name) {
+  if (var_name.empty()) {
+    return "";
+  }
+
+  auto res_var = create_lnast_tmp();
+  auto and_idx = lnast->add_child(idx_stmts, Lnast_node::create_red_and());
+  lnast->add_child(and_idx, Lnast_node::create_ref(res_var));
+  if (str_tools::is_string(var_name)) {
+    lnast->add_child(and_idx, Lnast_node::create_ref(var_name));
+  } else {
+    lnast->add_child(and_idx, Lnast_node::create_const(var_name));
+  }
+
+  return res_var;
+}
+
+std::string Lnast_create::create_red_xor_stmts(std::string_view var_name) {
+  if (var_name.empty()) {
+    return "";
+  }
+
+  auto res_var = create_lnast_tmp();
+  auto xor_idx = lnast->add_child(idx_stmts, Lnast_node::create_red_xor());
+  lnast->add_child(xor_idx, Lnast_node::create_ref(res_var));
+  if (str_tools::is_string(var_name)) {
+    lnast->add_child(xor_idx, Lnast_node::create_ref(var_name));
+  } else {
+    lnast->add_child(xor_idx, Lnast_node::create_const(var_name));
+  }
+
+  return res_var;
+}
+
 std::string Lnast_create::create_sra_stmts(std::string_view a_var, std::string_view b_var) {
   I(!a_var.empty());
   I(!b_var.empty());
@@ -295,27 +329,6 @@ std::string Lnast_create::create_shl_stmts(std::string_view a_var, std::string_v
 
   auto res_var = create_lnast_tmp();
   auto shl_idx = lnast->add_child(idx_stmts, Lnast_node::create_shl());
-  lnast->add_child(shl_idx, Lnast_node::create_ref(res_var));
-  if (str_tools::is_string(a_var)) {
-    lnast->add_child(shl_idx, Lnast_node::create_ref(a_var));
-  } else {
-    lnast->add_child(shl_idx, Lnast_node::create_const(a_var));
-  }
-  if (str_tools::is_string(b_var)) {
-    lnast->add_child(shl_idx, Lnast_node::create_ref(b_var));
-  } else {
-    lnast->add_child(shl_idx, Lnast_node::create_const(b_var));
-  }
-
-  return res_var;
-}
-
-std::string Lnast_create::create_mask_xor_stmts(std::string_view a_var, std::string_view b_var) {
-  I(!a_var.empty());  // mask
-  I(!b_var.empty());  // data
-
-  auto res_var = create_lnast_tmp();
-  auto shl_idx = lnast->add_child(idx_stmts, Lnast_node::create_mask_xor());
   lnast->add_child(shl_idx, Lnast_node::create_ref(res_var));
   if (str_tools::is_string(a_var)) {
     lnast->add_child(shl_idx, Lnast_node::create_ref(a_var));

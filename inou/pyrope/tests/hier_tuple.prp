@@ -1,9 +1,0 @@
-foo.a.b.__ubits = 73
-foo.a.b = 5
-
-%out  = foo.a.b.__ubits  // 3 needed for 0b0101
-%out2 = foo.a.b
-
-c = 3
-foo.c = 6  // note: c is a key under the tuple scope, not 3
-%out3 = foo.c

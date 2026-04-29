@@ -39,15 +39,12 @@ void Inou_yosys_api::set_script_yosys(const Eprp_var& var, bool do_read) {
   auto main_path = file_utils::get_exe_path();
 
   std::vector<std::string> alt_paths{"/../pass/mockturtle/mt_test.sh.runfiles/livehd/inou/yosys/",
-                                     "/../pass/lnast_fromlg/lgtoln_verif_from_verilog.sh.runfiles/livehd/inou/yosys/",
-                                     "/../pass/lnast_fromlg/lgtoln_verif_from_pyrope.sh.runfiles/livehd/inou/yosys/",
                                      "/../pass/sample/sample_test1.sh.runfiles/livehd/inou/yosys/",
                                      "/main_test.runfiles/livehd/inou/yosys/",
                                      "/verilog.sh.runfiles/livehd/inou/yosys/",
                                      "/verilog.sh-long.runfiles/livehd/inou/yosys/",
                                      "/lgshell.runfiles/livehd/inou/yosys/",
                                      "/lgshell.runfiles/_main/inou/yosys/",
-                                     "/../inou/pyrope/lnast_prp_test.sh.runfiles/livehd/inou/yosys/",
                                      "/../share/livehd/inou/yosys/",
                                      "/../inou/yosys/",
                                      "/inou/yosys/"};

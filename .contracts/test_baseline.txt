@@ -1,0 +1,23 @@
+# Recorded by scripts/bernstein/test_no_regressions.sh --update
+# 2026-04-28T21:42:08Z  bazel rc=3
+//inou/prp:prp-assert
+//inou/prp:prp-attr_size
+//inou/prp:prp-attr_sticky
+//inou/prp:prp-attributes
+//inou/prp:prp-case_test1
+//inou/prp:prp-doc_basic2
+//inou/prp:prp-enum_hier
+//inou/prp:prp-enum_simple
+//inou/prp:prp-enum_types
+//inou/prp:prp-expr_match
+//inou/prp:prp-key_access
+//inou/prp:prp-scope_simple
+//inou/prp:prp-setter_complex
+//inou/prp:prp-string_interpolation
+//inou/prp:prp-tuple_decorator_complex
+//inou/prp:prp-tuple_simple_attr
+//inou/prp:prp-tuple_typename
+//inou/prp:prp-valid_tuple
+//inou/prp:prp-wrap_checks
+//inou/prp:prp-wrap_complex
+//inou/prp:prp-wrap_trivial

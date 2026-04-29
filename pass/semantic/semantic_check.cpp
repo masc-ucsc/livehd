@@ -9,7 +9,6 @@
 
 #include "lnast_ntype.hpp"
 #include "pass.hpp"
-#include "prp_lnast.hpp"
 
 using FlatHashMap = absl::flat_hash_map<std::string, std::string>;
 
@@ -136,8 +135,7 @@ void Semantic_check::print_out_of_scope_vars(Lnast* lnast) {
 
 void Semantic_check::error_print_lnast_by_name(Lnast* lnast, std::string_view error_name) {
   // Print LNAST and indicate error based Node's Text Name
-  Prp_lnast converter;
-  bool      printed = false;
+  bool printed = false;
   std::cout << "\n";
 
   for (const auto& it : lnast->depth_preorder()) {
@@ -159,8 +157,7 @@ void Semantic_check::error_print_lnast_by_name(Lnast* lnast, std::string_view er
 
 void Semantic_check::error_print_lnast_by_type(Lnast* lnast, std::string_view error_name) {
   // Print LNAST and indicate error based Node's Type
-  Prp_lnast converter;
-  bool      printed = false;
+  bool printed = false;
   std::cout << "\n";
 
   for (const auto& it : lnast->depth_preorder()) {
@@ -183,8 +180,7 @@ void Semantic_check::error_print_lnast_by_type(Lnast* lnast, std::string_view er
 void Semantic_check::error_print_lnast_var_warn(Lnast* lnast, std::vector<std::string> error_names) {
   std::sort(error_names.begin(), error_names.end());
   // Print LNAST and indicate error based a vector of variable warnings
-  Prp_lnast converter;
-  bool      printed = false;
+  bool printed = false;
   std::cout << "\n";
 
   for (const auto& it : lnast->depth_preorder()) {

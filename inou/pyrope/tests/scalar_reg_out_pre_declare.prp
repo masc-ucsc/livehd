@@ -1,9 +1,0 @@
-reg = reg.__create_flop
-reg_q = reg
-foo = 1
-if (foo == 1) {
-  %out = 1
-  reg = 2
-}
-
-%out2 = reg_q

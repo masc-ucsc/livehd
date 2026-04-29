@@ -1,5 +1,0 @@
-$c.__bits = 1
-
-if ($c == 1) {
-  A[0] = 4 //compile error: no local tuple A defined
-}

@@ -93,9 +93,6 @@ public:
   // void process_sext() override { check_binary(); }
   // void process_set_mask() override { check_binary(); }
   // void process_get_mask() override { check_binary(); }
-  // void process_mask_and() override { check_binary(); }
-  // void process_mask_popcount() override { check_binary(); }
-  // void process_mask_xor() override { check_binary(); }
   // - Comparison
   void process_ne() override { check_binary(); }
   void process_eq() override { check_binary(); }

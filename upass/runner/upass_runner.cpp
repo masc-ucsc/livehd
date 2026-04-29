@@ -409,9 +409,6 @@ void uPass_runner::process_lnast() {
     A_OP(sext)
     A_OP(set_mask)
     A_OP(get_mask)
-    A_OP(mask_and)
-    A_OP(mask_popcount)
-    A_OP(mask_xor)
 
     // Comparison
     A_OP(ne)

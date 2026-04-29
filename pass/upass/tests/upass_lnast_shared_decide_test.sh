@@ -3,10 +3,10 @@
 set -eu
 
 LGSHELL="${TEST_SRCDIR}/${TEST_WORKSPACE}/main/lgshell"
-PRP_FILE="${TEST_SRCDIR}/${TEST_WORKSPACE}/inou/pyrope/tests/sum2.prp"
+PRP_FILE="${TEST_SRCDIR}/${TEST_WORKSPACE}/inou/prp/tests/pyrope/simple.prp"
 OUT_FILE="${TEST_TMPDIR}/upass_lnast_shared_decide.out"
 
-printf 'inou.pyrope files:%s |> pass.upass ir:lnast order:decide_shared max_iters:1\nquit\n' "${PRP_FILE}" \
+printf 'inou.prp files:%s |> pass.upass order:decide_shared max_iters:1\nquit\n' "${PRP_FILE}" \
   | HOME="${TEST_TMPDIR}" "${LGSHELL}" >"${OUT_FILE}" 2>&1
 
 if ! grep -q "uPass - resolved order: decide_shared" "${OUT_FILE}"; then

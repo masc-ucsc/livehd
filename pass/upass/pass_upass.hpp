@@ -12,8 +12,6 @@ class Pass_upass : public Pass {
 protected:
   std::vector<std::string> upass_order;
   std::size_t              max_iters{1};
-  std::string              ir_mode{"lnast"};
-  bool                     dry_run{false};
   bool                     inherit_labels{true};
   bool                     verifier_include_funcs{false};
   upass::Options_map       pass_options;

@@ -1,2 +1,0 @@
-$foo.__ubits = 2
-%bar = $foo

@@ -8,7 +8,6 @@
 #include "thread_pool.hpp"
 #include "top_api.hpp"
 
-void setup_inou_pyrope();
 void setup_inou_yosys();
 void setup_inou_liveparse();
 
@@ -20,7 +19,6 @@ void Main_api::init() {
     it.second();
   }
 
-  setup_inou_pyrope();
   setup_inou_yosys();
   setup_inou_liveparse();
 

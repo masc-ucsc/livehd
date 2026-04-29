@@ -14,7 +14,7 @@ cc_library(
     includes = ["."],
     visibility = ["//visibility:public"],
     deps = [
-        "//inou/pyrope:inou_pyrope",
+        "//lnast",
         "//pass/common:pass",
     ],
     alwayslink = True,
@@ -34,7 +34,7 @@ cc_library(
     includes = ["."],
     visibility = ["//visibility:public"],
     deps = [
-        "//inou/pyrope:inou_pyrope",
+        "//lnast",
         "//pass/common:pass",
     ],
 )

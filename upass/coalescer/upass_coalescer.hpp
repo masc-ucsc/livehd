@@ -68,9 +68,6 @@ public:
   void process_sext() override { handle_op(); }
   void process_get_mask() override { handle_op(); }
   void process_set_mask() override { handle_op(); }
-  void process_mask_and() override { handle_op(); }
-  void process_mask_popcount() override { handle_op(); }
-  void process_mask_xor() override { handle_op(); }
   void process_ne() override { handle_op(); }
   void process_eq() override { handle_op(); }
   void process_lt() override { handle_op(); }

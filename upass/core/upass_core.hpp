@@ -136,9 +136,6 @@ public:
   PROCESS_NODE(sext)
   PROCESS_NODE(set_mask)
   PROCESS_NODE(get_mask)
-  PROCESS_NODE(mask_and)
-  PROCESS_NODE(mask_popcount)
-  PROCESS_NODE(mask_xor)
 
   // Comparison
   PROCESS_NODE(ne)

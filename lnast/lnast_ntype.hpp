@@ -44,15 +44,13 @@ public:
     return (val == Lnast_ntype_log_and) || (val == Lnast_ntype_log_or) || (val == Lnast_ntype_log_not);
   }
 
-  bool constexpr is_mask_op() const { return val >= Lnast_ntype_mask_and && val <= Lnast_ntype_mask_xor; }
-
   bool constexpr is_unary_op() const {
     return (val == Lnast_ntype_bit_not) || (val == Lnast_ntype_log_not) || (val == Lnast_ntype_assign)
            || (val == Lnast_ntype_dp_assign) || (val == Lnast_ntype_mut);
   }
 
   bool constexpr is_binary_op() const {
-    return (val == Lnast_ntype_shl) || (val == Lnast_ntype_sra) || (val == Lnast_ntype_sext) || is_mask_op();
+    return (val == Lnast_ntype_shl) || (val == Lnast_ntype_sra) || (val == Lnast_ntype_sext);
   }
 
   bool constexpr is_nary_op() const {
@@ -64,7 +62,7 @@ public:
 
   // basic_op have 1 to 1 translation between LNAST and Lgraph
   bool constexpr is_direct_lgraph_op() const {
-    return (val >= Lnast_ntype_bit_and && val <= Lnast_ntype_ge) && !is_mask_op() && val != Lnast_ntype_mod && val != Lnast_ntype_is
+    return (val >= Lnast_ntype_bit_and && val <= Lnast_ntype_ge) && val != Lnast_ntype_mod && val != Lnast_ntype_is
            && val != Lnast_ntype_ne && val != Lnast_ntype_le && val != Lnast_ntype_ge;
   }
 

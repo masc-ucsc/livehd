@@ -3,10 +3,10 @@
 set -eu
 
 LGSHELL="${TEST_SRCDIR}/${TEST_WORKSPACE}/main/lgshell"
-PRP_FILE="${TEST_SRCDIR}/${TEST_WORKSPACE}/inou/pyrope/tests/sum2.prp"
+PRP_FILE="${TEST_SRCDIR}/${TEST_WORKSPACE}/inou/prp/tests/pyrope/simple.prp"
 OUT_FILE="${TEST_TMPDIR}/upass_noop_first_iter.out"
 
-printf 'inou.pyrope files:%s |> pass.upass order:noop max_iters:5\nquit\n' "${PRP_FILE}" \
+printf 'inou.prp files:%s |> pass.upass order:noop max_iters:5\nquit\n' "${PRP_FILE}" \
   | HOME="${TEST_TMPDIR}" "${LGSHELL}" >"${OUT_FILE}" 2>&1
 
 if ! grep -q "uPass - resolved order: noop" "${OUT_FILE}"; then

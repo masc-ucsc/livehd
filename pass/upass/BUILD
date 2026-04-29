@@ -21,7 +21,6 @@ cc_library(
         "//upass/constprop:upass_constprop",
         "//upass/core:upass",
         "//upass/cyclecmd:upass_cyclecmd",
-        "//upass/cyclecmd_lgraph:upass_cyclecmd_lgraph",
         "//upass/func_extract:upass_func_extract",
         "//upass/noop:upass_noop",
         "//upass/runner:upass_runner",
@@ -30,65 +29,32 @@ cc_library(
     alwayslink = True,  # Needed to have constructor called
 )
 
-sh_test(
-    name = "upass_dependency_test.sh",
-    srcs = ["tests/upass_dependency_test.sh"],
-    data = [
-        "//inou/pyrope:pyrope_tests",
-        "//main:lgshell",
-    ],
-)
+_LNAST_UPASS_TESTS = [
+    "upass_dependency_test.sh",
+    "upass_noop_first_iter_test.sh",
+    "upass_cycle_cmd_test.sh",
+    "upass_order_parse_test.sh",
+    "upass_lnast_shared_scan_test.sh",
+    "upass_lnast_shared_decide_test.sh",
+]
 
-sh_test(
-    name = "upass_noop_first_iter_test.sh",
-    srcs = ["tests/upass_noop_first_iter_test.sh"],
-    data = [
-        "//inou/pyrope:pyrope_tests",
-        "//main:lgshell",
-    ],
-)
-
-sh_test(
-    name = "upass_cycle_cmd_test.sh",
-    srcs = ["tests/upass_cycle_cmd_test.sh"],
-    data = [
-        "//inou/pyrope:pyrope_tests",
-        "//main:lgshell",
-    ],
-)
-
-sh_test(
-    name = "upass_order_parse_test.sh",
-    srcs = ["tests/upass_order_parse_test.sh"],
-    data = [
-        "//inou/pyrope:pyrope_tests",
-        "//main:lgshell",
-    ],
-)
-
-sh_test(
-    name = "upass_invalid_ir_test.sh",
-    srcs = ["tests/upass_invalid_ir_test.sh"],
-    data = [
-        "//inou/pyrope:pyrope_tests",
-        "//main:lgshell",
-    ],
-)
+[
+    sh_test(
+        name = t,
+        srcs = ["tests/%s" % t],
+        data = [
+            "//inou/prp:tests/pyrope/simple.prp",
+            "//main:lgshell",
+        ],
+    )
+    for t in _LNAST_UPASS_TESTS
+]
 
 sh_test(
     name = "upass_func_extract_test.sh",
     srcs = ["tests/upass_func_extract_test.sh"],
     data = [
         "//inou/prp:tests/pyrope/simple.prp",
-        "//main:lgshell",
-    ],
-)
-
-sh_test(
-    name = "upass_lnast_shared_scan_test.sh",
-    srcs = ["tests/upass_lnast_shared_scan_test.sh"],
-    data = [
-        "//inou/pyrope:pyrope_tests",
         "//main:lgshell",
     ],
 )
@@ -101,168 +67,6 @@ sh_test(
     ],
 )
 
-sh_test(
-    name = "upass_lnast_shared_decide_test.sh",
-    srcs = ["tests/upass_lnast_shared_decide_test.sh"],
-    data = [
-        "//inou/pyrope:pyrope_tests",
-        "//main:lgshell",
-    ],
-)
-
-sh_test(
-    name = "upass_lgraph_mode_test.sh",
-    srcs = ["tests/upass_lgraph_mode_test.sh"],
-    data = [
-        "//inou/pyrope:pyrope_tests",
-        "//main:lgshell",
-    ],
-)
-
-sh_test(
-    name = "upass_lgraph_shared_decide_test.sh",
-    srcs = ["tests/upass_lgraph_shared_decide_test.sh"],
-    data = [
-        ":tests/lgraph_shift_div.prp",
-        "//main:lgshell",
-    ],
-)
-
-sh_test(
-    name = "upass_lgraph_missing_input_test.sh",
-    srcs = ["tests/upass_lgraph_missing_input_test.sh"],
-    data = [
-        "//inou/pyrope:pyrope_tests",
-        "//main:lgshell",
-    ],
-)
-
-sh_test(
-    name = "upass_lgraph_mutation_test.sh",
-    srcs = ["tests/upass_lgraph_mutation_test.sh"],
-    data = [
-        ":tests/lgraph_sum_const.prp",
-        "//main:lgshell",
-    ],
-)
-
-sh_test(
-    name = "upass_lgraph_cycle_cmd_test.sh",
-    srcs = ["tests/upass_lgraph_cycle_cmd_test.sh"],
-    data = [
-        "//inou/pyrope:pyrope_tests",
-        "//main:lgshell",
-    ],
-)
-
-sh_test(
-    name = "upass_lgraph_unknown_test.sh",
-    srcs = ["tests/upass_lgraph_unknown_test.sh"],
-    data = [
-        "//inou/pyrope:pyrope_tests",
-        "//main:lgshell",
-    ],
-)
-
-sh_test(
-    name = "upass_lgraph_semantic_fold_test.sh",
-    srcs = ["tests/upass_lgraph_semantic_fold_test.sh"],
-    data = [
-        ":tests/lgraph_sum_const.prp",
-        "//main:lgshell",
-    ],
-)
-
-sh_test(
-    name = "upass_lgraph_neutral_fold_test.sh",
-    srcs = ["tests/upass_lgraph_neutral_fold_test.sh"],
-    data = [
-        ":tests/lgraph_neutral.prp",
-        "//main:lgshell",
-    ],
-)
-
-sh_test(
-    name = "upass_lgraph_inherit_false_test.sh",
-    srcs = ["tests/upass_lgraph_inherit_false_test.sh"],
-    data = [
-        ":tests/lgraph_shift_div.prp",
-        "//main:lgshell",
-    ],
-)
-
-sh_test(
-    name = "upass_lgraph_label_carryover_test.sh",
-    srcs = ["tests/upass_lgraph_label_carryover_test.sh"],
-    data = [
-        ":tests/lgraph_shift_div.prp",
-        "//main:lgshell",
-    ],
-)
-
-sh_test(
-    name = "upass_lgraph_dry_run_test.sh",
-    srcs = ["tests/upass_lgraph_dry_run_test.sh"],
-    data = [
-        ":tests/lgraph_shift_div.prp",
-        "//main:lgshell",
-    ],
-)
-
-sh_test(
-    name = "upass_cross_ir_pipeline_test.sh",
-    srcs = ["tests/upass_cross_ir_pipeline_test.sh"],
-    data = [
-        ":tests/lgraph_shift_div.prp",
-        "//main:lgshell",
-    ],
-)
-
-sh_test(
-    name = "upass_cross_ir_inherit_false_test.sh",
-    srcs = ["tests/upass_cross_ir_inherit_false_test.sh"],
-    data = [
-        ":tests/lgraph_shift_div.prp",
-        "//main:lgshell",
-    ],
-)
-
-sh_test(
-    name = "upass_lgraph_shift_div_fold_test.sh",
-    srcs = ["tests/upass_lgraph_shift_div_fold_test.sh"],
-    data = [
-        ":tests/lgraph_shift_div.prp",
-        "//main:lgshell",
-    ],
-)
-
-sh_test(
-    name = "upass_lgraph_sub_fold_test.sh",
-    srcs = ["tests/upass_lgraph_sub_fold_test.sh"],
-    data = [
-        ":tests/lgraph_sub.prp",
-        "//main:lgshell",
-    ],
-)
-
-sh_test(
-    name = "upass_lgraph_mult_fold_test.sh",
-    srcs = ["tests/upass_lgraph_mult_fold_test.sh"],
-    data = [
-        ":tests/lgraph_mult.prp",
-        "//main:lgshell",
-    ],
-)
-
-sh_test(
-    name = "upass_lgraph_dce_test.sh",
-    srcs = ["tests/upass_lgraph_dce_test.sh"],
-    data = [
-        ":tests/lgraph_dce.prp",
-        "//main:lgshell",
-    ],
-)
-
 test_suite(
     name = "upass_smoke_suite",
     tests = [
@@ -271,25 +75,9 @@ test_suite(
         ":upass_noop_first_iter_test.sh",
         ":upass_cycle_cmd_test.sh",
         ":upass_order_parse_test.sh",
-        ":upass_invalid_ir_test.sh",
         ":upass_lnast_shared_scan_test.sh",
         ":upass_lnast_shared_decide_test.sh",
-        ":upass_lgraph_mode_test.sh",
-        ":upass_lgraph_shared_decide_test.sh",
-        ":upass_lgraph_missing_input_test.sh",
-        ":upass_lgraph_mutation_test.sh",
-        ":upass_lgraph_cycle_cmd_test.sh",
-        ":upass_lgraph_unknown_test.sh",
-        ":upass_lgraph_semantic_fold_test.sh",
-        ":upass_lgraph_neutral_fold_test.sh",
-        ":upass_lgraph_inherit_false_test.sh",
-        ":upass_lgraph_label_carryover_test.sh",
-        ":upass_lgraph_dry_run_test.sh",
-        ":upass_cross_ir_pipeline_test.sh",
-        ":upass_cross_ir_inherit_false_test.sh",
-        ":upass_lgraph_shift_div_fold_test.sh",
-        ":upass_lgraph_sub_fold_test.sh",
-        ":upass_lgraph_mult_fold_test.sh",
-        ":upass_lgraph_dce_test.sh",
+        ":upass_func_extract_test.sh",
+        ":upass_coalescer_dse_test.sh",
     ],
 )

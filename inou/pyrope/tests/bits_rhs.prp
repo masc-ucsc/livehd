@@ -1,6 +1,0 @@
-t1 = 8
-t2 = 5
-a = t1
-b = t2
-
-%out = (a << b.__ubits) | b //{a,b}

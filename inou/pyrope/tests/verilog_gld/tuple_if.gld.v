@@ -1,7 +1,0 @@
-module tuple_if (
-  output [3:0] out1
-);
-
-assign out1 = 2'd2 == 2'd2 ? 4'd10 : 4'd2;
-
-endmodule

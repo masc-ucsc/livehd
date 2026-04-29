@@ -1,8 +1,0 @@
-
-
-a.c.foo = 1
-
-index = "c" ++ ".foo"
-tmp = index@() // Force concat
-%out = a[tmp] + 2
-

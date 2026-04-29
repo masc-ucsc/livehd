@@ -1,3 +1,0 @@
-a = 2
-%out.__ubits = 3
-%out = a.0

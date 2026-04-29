@@ -13,10 +13,8 @@
 #include <string_view>
 #include <vector>
 
-#include "lgraph_manager.hpp"
 #include "upass_constprop.hpp"
 #include "upass_runner.hpp"
-#include "upass_runner_lgraph.hpp"
 #include "upass_verifier.hpp"
 
 static Pass_plugin sample("pass.upass", Pass_upass::setup);
@@ -80,8 +78,6 @@ void Pass_upass::setup() {
       "comma-separated upass names; overrides verifier/constprop/assert toggles (example: verifier,constprop,verifier)",
       "");
   m1.add_label_optional("max_iters", "maximum upass iterations to run", "1");
-  m1.add_label_optional("ir", "IR mode: lnast (default) or lgraph", "lnast");
-  m1.add_label_optional("dry_run", "lgraph-only: collect rewrite metrics without mutating graph", "false");
   m1.add_label_optional("inherit",
                         "inherit labels from prior pipeline stages (default true); false resets sticky upass options",
                         "true");
@@ -112,13 +108,6 @@ Pass_upass::Pass_upass(const Eprp_var& var) : Pass("pass.upass", var) {
     return var.get_stage(label, default_value);
   };
 
-  auto ir_txt = std::string(get_label("ir", "lnast"));
-  std::transform(ir_txt.begin(), ir_txt.end(), ir_txt.begin(), [](unsigned char c) { return static_cast<char>(std::tolower(c)); });
-  if (ir_txt != "lnast" && ir_txt != "lgraph") {
-    fail_upass_runtime(std::format("pass.upass invalid ir:{} (expected lnast or lgraph)", ir_txt));
-  }
-  ir_mode = std::move(ir_txt);
-
   auto max_iters_txt = get_label("max_iters");
   if (!max_iters_txt.empty()) {
     try {
@@ -140,12 +129,6 @@ Pass_upass::Pass_upass(const Eprp_var& var) : Pass("pass.upass", var) {
     upass_order = parse_order_csv(order_txt);
   }
 
-  auto dry_run_txt = std::string(get_label("dry_run", "false"));
-  std::transform(dry_run_txt.begin(), dry_run_txt.end(), dry_run_txt.begin(), [](unsigned char c) {
-    return static_cast<char>(std::tolower(c));
-  });
-  dry_run = !(dry_run_txt.empty() || dry_run_txt == "0" || dry_run_txt == "false" || dry_run_txt == "no" || dry_run_txt == "off");
-
   auto vif_txt = std::string(get_label("verifier_include_funcs", "false"));
   std::transform(vif_txt.begin(), vif_txt.end(), vif_txt.begin(), [](unsigned char c) {
     return static_cast<char>(std::tolower(c));
@@ -166,11 +149,6 @@ Pass_upass::Pass_upass(const Eprp_var& var) : Pass("pass.upass", var) {
   capture_opt("coalescer");
 
   if (!upass_order.empty()) {
-    return;
-  }
-
-  if (ir_mode == "lgraph") {
-    upass_order = {"visit", "fold_scan"};
     return;
   }
 
@@ -228,21 +206,6 @@ Pass_upass::Pass_upass(const Eprp_var& var) : Pass("pass.upass", var) {
 
 void Pass_upass::work(Eprp_var& var) {
   Pass_upass up(var);
-
-  if (up.ir_mode == "lgraph") {
-    if (var.lgs.empty()) {
-      fail_upass_runtime("pass.upass ir:lgraph requires lgraph input (e.g. ... |> pass.lnast_tolg |> pass.upass ir:lgraph)");
-    }
-    for (auto* lg : var.lgs) {
-      auto gm     = std::make_shared<upass::Lgraph_manager>(lg);
-      auto runner = uPass_runner_lgraph(gm, up.upass_order, up.dry_run);
-      if (runner.has_configuration_error()) {
-        fail_upass_runtime(std::format("pass.upass invalid lgraph pass configuration: {}", runner.get_configuration_error()));
-      }
-      runner.run(up.max_iters);
-    }
-    return;
-  }
 
   // Test-level expectations (verifier_pass / verifier_fail) describe the
   // whole program, including any helper lnasts func_extract spawns from
@@ -314,7 +277,7 @@ void Pass_upass::work(Eprp_var& var) {
     runner.run(up.max_iters);
 
     // Swap the rewritten staging tree into var.lnasts so downstream passes
-    // (lnast.dump, pass.lnast_tolg, …) see the folded/DCE'd IR.
+    // (lnast.dump, …) see the folded/DCE'd IR.
     auto staged = runner.take_staging();
     if (staged) {
       var.replace(ln, staged);

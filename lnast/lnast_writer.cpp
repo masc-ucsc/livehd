@@ -260,9 +260,6 @@ void Lnast_writer::write_popcount() { write_n_ary("popcount"); }
 void Lnast_writer::write_sext() { write_n_ary("sext"); }
 void Lnast_writer::write_set_mask() { write_n_ary("set_mask"); }
 void Lnast_writer::write_get_mask() { write_n_ary("get_mask"); }
-void Lnast_writer::write_mask_and() { write_n_ary("mask_and"); }
-void Lnast_writer::write_mask_popcount() { write_n_ary("mask_popcount"); }
-void Lnast_writer::write_mask_xor() { write_n_ary("mask_xor"); }
 
 void Lnast_writer::write_ref() {
   if (is_func_name) {

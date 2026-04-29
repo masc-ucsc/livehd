@@ -1,7 +1,0 @@
-$inp.__ubits = 1
-
-x = 1 + 2
-if ($inp == 0) {
-  x = 4
-}
-%out = x

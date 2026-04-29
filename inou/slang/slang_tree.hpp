@@ -34,7 +34,4 @@ protected:
   void process_lhs(const slang::ast::Expression& lhs, const std::string& rhs_var, bool last_value);
 
   std::string process_expression(const slang::ast::Expression& expr, bool last_value);
-  std::string process_mask_and(const slang::ast::UnaryExpression& uexpr, bool last_value);
-  std::string process_mask_popcount(const slang::ast::UnaryExpression& uexpr, bool last_value);
-  std::string process_mask_xor(const slang::ast::UnaryExpression& uexpr, bool last_value);
 };

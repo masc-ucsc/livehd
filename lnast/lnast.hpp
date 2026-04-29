@@ -11,8 +11,6 @@
 #include <string_view>
 
 #include "absl/container/flat_hash_map.h"
-#include "absl/container/flat_hash_set.h"
-#include "absl/container/node_hash_map.h"
 #include "absl/strings/str_cat.h"
 #include "elab_scanner.hpp"
 #include "hhds/attrs/name.hpp"
@@ -22,10 +20,6 @@
 #include "tree_compat.hpp"  // level_of / pos_of helpers
 
 using Lnast_nid = hhds::Tree::Node_class;
-
-using Phi_rtable      = absl::flat_hash_map<std::string, Lnast_nid>;  // rtable = resolve_table
-using Cnt_rtable      = absl::flat_hash_map<std::string, int16_t>;
-using Selc_lrhs_table = absl::flat_hash_map<Lnast_nid, Lnast_nid>;  // sel -> paired opr node
 
 #define CREATE_LNAST_NODE(type)                                                                                                 \
   static Lnast_node create_##type() { return Lnast_node(Lnast_ntype::create_##type(), State_token(0, 0, 0, 0, "")); }           \
@@ -76,49 +70,6 @@ private:
   std::string                   top_module_name;
   std::string                   source_filename;
   Lnast_nid                     undefined_var_nid;
-  static inline int             trace_module_cnt = 0;
-
-  void      do_ssa_trans(const Lnast_nid& top_nid);
-  void      ssa_lhs_handle_a_statement(const Lnast_nid& psts_nid, const Lnast_nid& opr_nid);
-  void      ssa_rhs_handle_a_statement(const Lnast_nid& psts_nid, const Lnast_nid& opr_nid);
-  void      ssa_lhs_if_subtree(const Lnast_nid& if_nid);
-  void      ssa_rhs_if_subtree(const Lnast_nid& if_nid);
-  void      opr_lhs_merge_if_subtree(const Lnast_nid& if_nid);
-  void      opr_lhs_merge_handle_a_statement(const Lnast_nid& opr_nid);
-  void      ssa_handle_phi_nodes(const Lnast_nid& if_nid);
-  void      resolve_phi_nodes(const Lnast_nid& cond_nid, Phi_rtable& true_table, Phi_rtable& false_table);
-  void      update_phi_resolve_table(const Lnast_nid& psts_nid, const Lnast_nid& target_nid);
-  bool      has_else_stmts(const Lnast_nid& if_nid);
-  void      add_phi_node(const Lnast_nid& cond_nid, const Lnast_nid& t_nid, const Lnast_nid& f_nid);
-  Lnast_nid get_complement_nid(std::string_view brother_name, const Lnast_nid& psts_nid, bool false_path);
-  Lnast_nid check_phi_table_parents_chain(std::string_view brother_name, const Lnast_nid& psts_nid);
-  void      resolve_ssa_lhs_subs(const Lnast_nid& psts_nid);
-  void      resolve_ssa_rhs_subs(const Lnast_nid& psts_nid);
-  void      opr_lhs_merge(const Lnast_nid& psts_nid);
-  void      update_global_lhs_ssa_cnt_table(const Lnast_nid& target_nid);
-  void      respect_latest_global_lhs_ssa(const Lnast_nid& target_nid);
-  int8_t    check_rhs_cnt_table_parents_chain(const Lnast_nid& psts_nid, const Lnast_nid& target_key);
-  void      update_rhs_ssa_cnt_table(const Lnast_nid& psts_nid, const Lnast_nid& target_key);
-  void      analyze_selc_lrhs(const Lnast_nid& psts_nid);
-  void      analyze_selc_lrhs_if_subtree(const Lnast_nid& if_nid);
-  void      analyze_selc_lrhs_handle_a_statement(const Lnast_nid& psts_nid, const Lnast_nid& opr_nid);
-  void      insert_implicit_dp_parent(const Lnast_nid& opr_nid);
-
-  void ssa_rhs_handle_a_operand(const Lnast_nid& gpsts_nid, const Lnast_nid& opd_nid);
-
-  // tuple operator process
-  void trans_tuple_opr(const Lnast_nid& pats_nid);
-  void trans_tuple_opr_if_subtree(const Lnast_nid& if_nid);
-  void merge_tconcat_paired_assign(const Lnast_nid& psts_nid, const Lnast_nid& concat_nid);
-
-  // hierarchical statements node -> symbol table
-  absl::node_hash_map<Lnast_nid, Phi_rtable>      phi_resolve_tables;
-  absl::node_hash_map<Lnast_nid, Cnt_rtable>      ssa_rhs_cnt_tables;
-  absl::node_hash_map<Lnast_nid, Selc_lrhs_table> selc_lrhs_tables;
-  absl::node_hash_map<Lnast_nid, Phi_rtable>      new_added_phi_node_tables;
-  absl::flat_hash_set<std::string>                tuplized_table;
-  absl::flat_hash_map<std::string, Lnast_nid>     candidates_update_phi_resolve_table;
-  absl::flat_hash_map<std::string, int16_t>       global_ssa_lhs_cnt_table;
 
   // populated during LG->LN pass, maps name -> bitwidth
   absl::flat_hash_map<std::string, uint32_t> from_lgraph_bw_table;
@@ -190,9 +141,6 @@ public:
   // narrow accessors above on hot paths.
   Lnast_node get_data(const Lnast_nid& nid) const;
   void       set_data(const Lnast_nid& nid, const Lnast_node& n);
-
-  // ── ssa transform ───────────────────────────────────────────────────────
-  void ssa_trans() { do_ssa_trans(get_root()); }
 
   // ── module / source metadata ────────────────────────────────────────────
   std::string_view get_top_module_name() const { return top_module_name; }
