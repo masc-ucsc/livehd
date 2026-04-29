@@ -1,5 +1,7 @@
 //  This file is distributed under the BSD 3-Clause License. See LICENSE for details.
 
+#include <cstdlib>
+#include <fstream>
 #include <memory>
 #include <sstream>
 #include <string>
@@ -8,6 +10,7 @@
 #include "lnast.hpp"
 #include "lnast_manager.hpp"
 #include "lnast_prp_writer.hpp"
+#include "prp2lnast.hpp"
 #include "upass_runner.hpp"
 
 namespace {
@@ -332,4 +335,109 @@ TEST(LnastPrpWriter, TupleAddEmitted) {
   EXPECT_NE(output.find('b'), std::string::npos) << output;
   // Must not use call form
   EXPECT_EQ(output.find("tuple_add("), std::string::npos) << output;
+}
+
+// ── Round-trip helpers (Pyrope 3.0 → prp2lnast → uPass → Lnast_prp_writer) ──
+//
+// These tests exercise the full pipeline: real .prp source is written to a
+// temp file, parsed by Prp2lnast into an LNAST, optimised by uPass, and then
+// serialised back to Pyrope 3.0 text by Lnast_prp_writer.  They verify that
+// the writer can consume parser-generated LNASTs without crashing and that the
+// expected high-level output properties hold.
+
+// Write `src` to $TEST_TMPDIR/<name>.prp and return the path.
+static std::string write_prp(std::string_view name, std::string_view src) {
+  const char* tmpdir = std::getenv("TEST_TMPDIR");
+  std::string path   = (tmpdir ? std::string(tmpdir) : std::string("/tmp"))
+                       + "/" + std::string(name) + ".prp";
+  std::ofstream f(path);
+  f << src;
+  return path;
+}
+
+// Parse a .prp file → run uPass → emit Pyrope 3.0 text.
+static std::string round_trip(std::string_view name,
+                               std::string_view src,
+                               const std::vector<std::string>& passes = {"noop_shared"}) {
+  auto path = write_prp(name, src);
+  Prp2lnast converter(path, std::string(name), /*parse_only=*/false);
+  auto ln = std::shared_ptr<Lnast>(converter.get_lnast().release());
+
+  auto lm = std::make_shared<upass::Lnast_manager>(ln);
+  uPass_runner runner(lm, passes);
+  runner.run();
+  auto staging = runner.take_staging();
+  if (!staging) return "";
+
+  std::ostringstream oss;
+  Lnast_prp_writer writer(oss, staging);
+  writer.write_all();
+  return oss.str();
+}
+
+// ── Test 13: round-trip — comb block with params is parsed as func_def ────────
+// A comb block with parameters is represented as a func_def node in LNAST.
+// func_def bodies are deferred to Slice 4, so the writer emits a TODO comment
+// in place of the body.  This test verifies:
+//   1. The round-trip does not crash.
+//   2. The top-level "comb rt_simple" header is emitted.
+//   3. The func_def TODO comment is present (expected current behavior).
+TEST(LnastPrpWriter, RoundTripCombWithParamsIsFuncDef) {
+  const char* src = R"prp(
+comb rt_simple(a) -> (out) {
+  out = a
+}
+)prp";
+
+  auto output = round_trip("rt_simple", src, {"noop_shared"});
+  ASSERT_FALSE(output.empty()) << "round-trip produced no output";
+  EXPECT_NE(output.find("comb rt_simple"), std::string::npos)
+      << "comb header missing:\n" << output;
+  // func_def bodies are not yet serialised (Slice 4); the writer emits a TODO.
+  EXPECT_NE(output.find("TODO: func_def"), std::string::npos)
+      << "expected func_def TODO comment:\n" << output;
+}
+
+// ── Test 14: round-trip — constprop folds arithmetic, no raw + in output ──────
+// `const a = 2 + 3` — constprop folds the plus to 5 and DCEs the tmp.
+// The emitted Pyrope must not contain a bare `+` operator (folded away).
+TEST(LnastPrpWriter, RoundTripConstpropFoldsArith) {
+  const char* src = R"prp(
+comb rt_fold() {
+  const a = 2 + 3
+  cassert a == 5
+}
+rt_fold()
+)prp";
+
+  auto output = round_trip("rt_fold", src, {"constprop"});
+  ASSERT_FALSE(output.empty()) << "round-trip produced no output";
+  EXPECT_NE(output.find("comb rt_fold"), std::string::npos)
+      << "comb header missing:\n" << output;
+  // After constprop, the `2 + 3` plus node should be folded — no raw `+` remains.
+  EXPECT_EQ(output.find(" + "), std::string::npos)
+      << "unexpected `+` in output (should be folded):\n" << output;
+}
+
+// ── Test 15: round-trip — if(true) branch is pruned by constprop ─────────────
+// `if true { out = 1 } else { out = 2 }` — constprop prunes the dead else.
+// The emitted Pyrope must have no `if` keyword.
+TEST(LnastPrpWriter, RoundTripIfTruePruned) {
+  const char* src = R"prp(
+comb rt_if() -> (out) {
+  if true {
+    out = 1
+  } else {
+    out = 2
+  }
+}
+rt_if()
+)prp";
+
+  auto output = round_trip("rt_if", src, {"constprop"});
+  ASSERT_FALSE(output.empty()) << "round-trip produced no output";
+  EXPECT_NE(output.find("comb rt_if"), std::string::npos)
+      << "comb header missing:\n" << output;
+  EXPECT_EQ(output.find("if "), std::string::npos)
+      << "if should be pruned but still present:\n" << output;
 }
