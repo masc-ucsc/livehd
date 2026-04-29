@@ -104,6 +104,17 @@ static size_t count_ntype(const Lnast& ln, Lnast_ntype::Lnast_ntype_int target) 
   return n;
 }
 
+// Helper: return true if any ref node in `ln` carries exactly `tok` as its text.
+static bool has_ref_tok(const Lnast& ln, std::string_view tok) {
+  for (const auto& nid : ln.depth_preorder(Lnast_nid::root())) {
+    if (ln.get_type(nid).get_raw_ntype() == Lnast_ntype::Lnast_ntype_ref
+        && ln.get_data(nid).token.get_text() == tok) {
+      return true;
+    }
+  }
+  return false;
+}
+
 // Build a minimal LNAST:
 //   top → stmts → if(cond, then_stmts[assign(%out, val)], [else_stmts[assign(%alt, else_val)]])
 //
@@ -157,8 +168,9 @@ TEST(UpassRunnerIfPrune, TrueConditionPrunesIfNode) {
   ASSERT_NE(staging, nullptr);
   // No if-node should remain — the then-branch (%out=4) was spliced into parent.
   EXPECT_EQ(count_ntype(*staging, Lnast_ntype::Lnast_ntype_if), 0U);
-  // The then-branch assign (%out=4) must appear in the staging tree.
-  EXPECT_GE(count_ntype(*staging, Lnast_ntype::Lnast_ntype_assign), 1U);
+  // The then-branch port (%out) must be present; the else port (%alt) must not.
+  EXPECT_TRUE(has_ref_tok(*staging, "%out")) << "then-branch %out missing from staging";
+  EXPECT_FALSE(has_ref_tok(*staging, "%alt")) << "dead else-branch %alt leaked into staging";
 }
 
 // ── Test 2: condition is const "false" → if is pruned, no output emitted ────
@@ -184,8 +196,9 @@ TEST(UpassRunnerIfPrune, FalseConditionSplicesElseBranch) {
   ASSERT_NE(staging, nullptr);
   // No if-node — else-branch (%alt=5) was spliced into the parent stmts.
   EXPECT_EQ(count_ntype(*staging, Lnast_ntype::Lnast_ntype_if), 0U);
-  // %alt is an output port, so it is not DCE'd; the assign must remain.
-  EXPECT_GE(count_ntype(*staging, Lnast_ntype::Lnast_ntype_assign), 1U);
+  // The else-branch port (%alt) must be present; the dead then port (%out) must not.
+  EXPECT_TRUE(has_ref_tok(*staging, "%alt")) << "else-branch %alt missing from staging";
+  EXPECT_FALSE(has_ref_tok(*staging, "%out")) << "dead then-branch %out leaked into staging";
 }
 
 // ── Test 4: unknown condition → full if node is preserved ───────────────────
