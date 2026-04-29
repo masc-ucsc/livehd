@@ -21,6 +21,7 @@ cc_test(
     copts = COPTS,
     deps = [
         ":upass_prp_writer",
+        "//inou/prp:inou_prp",
         "//upass/constprop:upass_constprop",
         "//upass/runner:upass_runner",
         "@googletest//:gtest_main",
