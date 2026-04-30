@@ -27,8 +27,8 @@ TEST(UpassSharedFoldParity, FoldSumConstAcrossLnastAndLgraph) {
   EXPECT_EQ(lnast_rep.rewired_edges, 0U);
   EXPECT_EQ(lnast_rep.new_const_nodes, 0U);
   EXPECT_EQ(lnast_rep.deleted_nodes, 0U);
-  EXPECT_TRUE(ln->get_type(pl).is_const());
-  EXPECT_EQ(ln->get_data(pl).name, "5");
+  EXPECT_TRUE(Lnast_ntype::is_const(ln->get_type(pl)));
+  EXPECT_EQ(ln->get_name(pl), "5");
 
   constexpr std::string_view kDbPath = "lgdb_upass_shared_fold_parity";
   file_utils::clean_dir(kDbPath);
@@ -77,7 +77,7 @@ TEST(UpassSharedFoldParity, FoldSumConstDryRunNoMutation) {
   EXPECT_EQ(lnast_rep.rewired_edges, 0U);
   EXPECT_EQ(lnast_rep.new_const_nodes, 0U);
   EXPECT_EQ(lnast_rep.deleted_nodes, 0U);
-  EXPECT_TRUE(ln->get_type(pl).is_plus());
+  EXPECT_TRUE(Lnast_ntype::is_plus(ln->get_type(pl)));
 
   constexpr std::string_view kDbPath = "lgdb_upass_shared_fold_parity_dry_run";
   file_utils::clean_dir(kDbPath);

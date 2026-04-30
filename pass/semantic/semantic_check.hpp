@@ -44,8 +44,8 @@ protected:
   std::vector<FlatHashMap> out_of_scope_stack;
 
   // Type Check Functions
-  static bool is_primitive_op(const Lnast_ntype node_type);
-  static bool is_tree_structs(const Lnast_ntype node_type);
+  static bool is_primitive_op(const Lnast_ntype::Lnast_ntype_int node_type);
+  static bool is_tree_structs(const Lnast_ntype::Lnast_ntype_int node_type);
   static bool is_temp_var(std::string_view node_name);
   static bool is_a_number(std::string_view node_name);
 
@@ -76,8 +76,8 @@ protected:
   void resolve_out_of_scope_func_def();
 
   // Semantic Check Functions
-  void check_primitive_ops(Lnast* lnast, const Lnast_nid& lnidx_opr, const Lnast_ntype node_type, std::string_view stmt_name);
-  void check_tree_struct_ops(Lnast* lnast, const Lnast_nid& lnidx_opr, const Lnast_ntype node_type, std::string_view stmt_name);
+  void check_primitive_ops(Lnast* lnast, const Lnast_nid& lnidx_opr, const Lnast_ntype::Lnast_ntype_int node_type, std::string_view stmt_name);
+  void check_tree_struct_ops(Lnast* lnast, const Lnast_nid& lnidx_opr, const Lnast_ntype::Lnast_ntype_int node_type, std::string_view stmt_name);
   void check_if_op(Lnast* lnast, const Lnast_nid& lnidx_opr, std::string_view stmt_name);
   void check_for_op(Lnast* lnast, const Lnast_nid& lnidx_opr, std::string_view stmt_name);
   void check_while_op(Lnast* lnast, const Lnast_nid& lnidx_opr, std::string_view stmt_name);

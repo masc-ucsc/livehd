@@ -97,7 +97,7 @@ TEST(UpassRunnerResolve, SharedDecideResolves) {
 static size_t count_ntype(const Lnast& ln, Lnast_ntype::Lnast_ntype_int target) {
   size_t n = 0;
   for (const auto& nid : ln.depth_preorder(ln.get_root())) {
-    if (ln.get_type(nid).get_raw_ntype() == target) {
+    if (ln.get_type(nid) == target) {
       ++n;
     }
   }

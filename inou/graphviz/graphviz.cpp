@@ -298,14 +298,13 @@ void Graphviz::do_from_lnast(const std::shared_ptr<Lnast>& lnast, std::string_vi
   std::string data = "digraph {\n";
 
   for (const auto& itr : lnast->depth_preorder()) {
-    auto node_data = lnast->get_data(itr);
-
-    auto name = node_data.name;
+    auto type = lnast->get_type(itr);
+    auto name = lnast->get_name(itr);
 
     auto id = std::to_string(level_of(itr)) + std::to_string(pos_of(itr));
-    data += std::format(" {} [ label = <{}, {}> ];\n", id, node_data.type.debug_name(), name);
+    data += std::format(" {} [ label = <{}, {}> ];\n", id, Lnast_ntype::debug_name(type), name);
 
-    if (node_data.type.is_top()) {
+    if (Lnast_ntype::is_top(type)) {
       continue;
     }
 

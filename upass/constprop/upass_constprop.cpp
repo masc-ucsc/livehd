@@ -1242,12 +1242,14 @@ bool uPass_constprop::try_eval_comb_call(std::string_view dst, std::string_view 
   std::vector<std::string>                outputs;
   std::unordered_map<std::string, Lconst> local_values;
 
-  auto resolve_local = [&](const Lnast_node& node) -> std::optional<Lconst> {
-    if (node.type.is_const()) {
-      return Lconst::from_pyrope(node.name);
+  auto resolve_local = [&](const Lnast_nid& nid) -> std::optional<Lconst> {
+    const auto type = fn->get_type(nid);
+    const auto name = fn->get_name(nid);
+    if (Lnast_ntype::is_const(type)) {
+      return Lconst::from_pyrope(name);
     }
-    if (node.type.is_ref()) {
-      auto it = local_values.find(std::string(node.name));
+    if (Lnast_ntype::is_ref(type)) {
+      auto it = local_values.find(std::string(name));
       if (it != local_values.end()) {
         return it->second;
       }
@@ -1269,31 +1271,31 @@ bool uPass_constprop::try_eval_comb_call(std::string_view dst, std::string_view 
   for (auto stmt = fn->get_child(stmts); !stmt.is_invalid(); stmt = fn->get_sibling_next(stmt)) {
     const auto type = fn->get_type(stmt);
     if (!after_io) {
-      if (type.is_tuple_add()) {
+      if (Lnast_ntype::is_tuple_add(type)) {
         auto tuple_ref = fn->get_child(stmt);
-        if (tuple_ref.is_invalid() || !fn->get_type(tuple_ref).is_ref()) {
+        if (tuple_ref.is_invalid() || !Lnast_ntype::is_ref(fn->get_type(tuple_ref))) {
           continue;
         }
         // Materialize into an owned string so the comparison below holds
         // even if the Lnast_node temporary's `name` storage moves.
-        const std::string tuple_name(fn->get_data(tuple_ref).name);
+        const std::string tuple_name(fn->get_name(tuple_ref));
         for (auto item = fn->get_sibling_next(tuple_ref); !item.is_invalid(); item = fn->get_sibling_next(item)) {
-          if (!fn->get_type(item).is_assign()) {
+          if (!Lnast_ntype::is_assign(fn->get_type(item))) {
             continue;
           }
           auto key = fn->get_child(item);
-          if (key.is_invalid() || !fn->get_type(key).is_ref()) {
+          if (key.is_invalid() || !Lnast_ntype::is_ref(fn->get_type(key))) {
             continue;
           }
           if (tuple_name == "__input_tuple_ref") {
-            params.emplace_back(fn->get_data(key).name);
+            params.emplace_back(fn->get_name(key));
           } else if (tuple_name == "__output_tuple_ref") {
-            outputs.emplace_back(fn->get_data(key).name);
+            outputs.emplace_back(fn->get_name(key));
           }
         }
         continue;
       }
-      if (type.is_io()) {
+      if (Lnast_ntype::is_io(type)) {
         std::size_t positional_idx = 0;
         for (const auto& actual : actuals) {
           if (actual.is_named) {
@@ -1330,19 +1332,19 @@ bool uPass_constprop::try_eval_comb_call(std::string_view dst, std::string_view 
 
   auto eval_nary = [&](Lnast_nid stmt, auto op) -> Eval_result {
     auto lhs = fn->get_child(stmt);
-    if (lhs.is_invalid() || !fn->get_type(lhs).is_ref()) {
+    if (lhs.is_invalid() || !Lnast_ntype::is_ref(fn->get_type(lhs))) {
       return Eval_result::aborted;
     }
     auto arg = fn->get_sibling_next(lhs);
     if (arg.is_invalid()) {
       return Eval_result::aborted;
     }
-    auto acc = resolve_local(fn->get_data(arg));
+    auto acc = resolve_local(arg);
     if (!acc.has_value() || acc->is_invalid() || acc->is_string()) {
       return Eval_result::deferred;
     }
     while (!(arg = fn->get_sibling_next(arg)).is_invalid()) {
-      auto rhs = resolve_local(fn->get_data(arg));
+      auto rhs = resolve_local(arg);
       if (!rhs.has_value() || rhs->is_invalid() || rhs->is_string()) {
         return Eval_result::deferred;
       }
@@ -1351,7 +1353,7 @@ bool uPass_constprop::try_eval_comb_call(std::string_view dst, std::string_view 
         return Eval_result::aborted;
       }
     }
-    local_values[std::string(fn->get_data(lhs).name)] = *acc;
+    local_values[std::string(fn->get_name(lhs))] = *acc;
     return Eval_result::processed;
   };
 
@@ -1360,7 +1362,7 @@ bool uPass_constprop::try_eval_comb_call(std::string_view dst, std::string_view 
   // structural-identity contract used elsewhere in constprop.
   auto eval_compare = [&](Lnast_nid stmt, auto pred) -> Eval_result {
     auto lhs = fn->get_child(stmt);
-    if (lhs.is_invalid() || !fn->get_type(lhs).is_ref()) {
+    if (lhs.is_invalid() || !Lnast_ntype::is_ref(fn->get_type(lhs))) {
       return Eval_result::aborted;
     }
     auto a_nid = fn->get_sibling_next(lhs);
@@ -1371,80 +1373,80 @@ bool uPass_constprop::try_eval_comb_call(std::string_view dst, std::string_view 
     if (b_nid.is_invalid()) {
       return Eval_result::aborted;
     }
-    auto a_val = resolve_local(fn->get_data(a_nid));
-    auto b_val = resolve_local(fn->get_data(b_nid));
+    auto a_val = resolve_local(a_nid);
+    auto b_val = resolve_local(b_nid);
     if (!a_val.has_value() || a_val->is_invalid() || a_val->is_string()
         || !b_val.has_value() || b_val->is_invalid() || b_val->is_string()) {
       return Eval_result::deferred;
     }
     Lconst result = pred(*a_val, *b_val) ? Lconst(1) : Lconst(0);
-    local_values[std::string(fn->get_data(lhs).name)] = result;
+    local_values[std::string(fn->get_name(lhs))] = result;
     return Eval_result::processed;
   };
 
   try_eval_stmt = [&](Lnast_nid stmt) -> Eval_result {
     const auto type = fn->get_type(stmt);
 
-    if (type.is_assign()) {
+    if (Lnast_ntype::is_assign(type)) {
       auto lhs = fn->get_child(stmt);
-      if (lhs.is_invalid() || !fn->get_type(lhs).is_ref()) {
+      if (lhs.is_invalid() || !Lnast_ntype::is_ref(fn->get_type(lhs))) {
         return Eval_result::processed;  // skip malformed
       }
       auto rhs = fn->get_sibling_next(lhs);
       if (rhs.is_invalid()) {
         return Eval_result::processed;
       }
-      auto value = resolve_local(fn->get_data(rhs));
+      auto value = resolve_local(rhs);
       if (!value.has_value() || value->is_invalid()) {
         return Eval_result::deferred;
       }
-      local_values[std::string(fn->get_data(lhs).name)] = *value;
+      local_values[std::string(fn->get_name(lhs))] = *value;
       return Eval_result::processed;
     }
 
-    if (type.is_plus()) {
+    if (Lnast_ntype::is_plus(type)) {
       return eval_nary(stmt, [](Lconst a, Lconst b) { return a.add_op(b); });
     }
-    if (type.is_minus()) {
+    if (Lnast_ntype::is_minus(type)) {
       return eval_nary(stmt, [](Lconst a, Lconst b) { return a.sub_op(b); });
     }
-    if (type.is_mult()) {
+    if (Lnast_ntype::is_mult(type)) {
       return eval_nary(stmt, [](Lconst a, Lconst b) { return a.mult_op(b); });
     }
 
-    if (type.is_eq()) {
+    if (Lnast_ntype::is_eq(type)) {
       return eval_compare(stmt, [](const Lconst& a, const Lconst& b) { return a.eq_op(b).is_known_true(); });
     }
-    if (type.is_ne()) {
+    if (Lnast_ntype::is_ne(type)) {
       return eval_compare(stmt, [](const Lconst& a, const Lconst& b) { return !a.eq_op(b).is_known_true(); });
     }
-    if (type.is_lt()) {
+    if (Lnast_ntype::is_lt(type)) {
       return eval_compare(stmt, [](const Lconst& a, const Lconst& b) { return a < b; });
     }
-    if (type.is_le()) {
+    if (Lnast_ntype::is_le(type)) {
       return eval_compare(stmt, [](const Lconst& a, const Lconst& b) { return a <= b; });
     }
-    if (type.is_gt()) {
+    if (Lnast_ntype::is_gt(type)) {
       return eval_compare(stmt, [](const Lconst& a, const Lconst& b) { return a > b; });
     }
-    if (type.is_ge()) {
+    if (Lnast_ntype::is_ge(type)) {
       return eval_compare(stmt, [](const Lconst& a, const Lconst& b) { return a >= b; });
     }
 
-    if (type.is_if()) {
+    if (Lnast_ntype::is_if(type)) {
       // children: ref(cond), stmts, [ref(cond), stmts]..., [stmts default]
       auto child = fn->get_child(stmt);
       while (!child.is_invalid()) {
-        if (fn->get_type(child).is_stmts()) {
+        if (Lnast_ntype::is_stmts(fn->get_type(child))) {
           // bare stmts in the cond slot ⇒ default else
           return try_eval_block(child);
         }
-        auto cond_val = resolve_local(fn->get_data(child));
+        auto cond_val = resolve_local(child);
         if (!cond_val.has_value() || cond_val->is_invalid() || cond_val->has_unknowns()) {
           return Eval_result::deferred;
         }
         auto branch = fn->get_sibling_next(child);
-        if (branch.is_invalid() || !fn->get_type(branch).is_stmts()) {
+        if (branch.is_invalid() || !Lnast_ntype::is_stmts(fn->get_type(branch))) {
           return Eval_result::aborted;
         }
         if (cond_val->is_known_true()) {
@@ -1456,12 +1458,12 @@ bool uPass_constprop::try_eval_comb_call(std::string_view dst, std::string_view 
       return Eval_result::processed;  // fell through, no branch ran
     }
 
-    if (type.is_cassert()) {
+    if (Lnast_ntype::is_cassert(type)) {
       auto operand = fn->get_child(stmt);
       if (operand.is_invalid()) {
         return Eval_result::processed;
       }
-      auto val = resolve_local(fn->get_data(operand));
+      auto val = resolve_local(operand);
       if (!val.has_value() || val->is_invalid() || val->has_unknowns()) {
         return Eval_result::deferred;
       }
@@ -1482,7 +1484,7 @@ bool uPass_constprop::try_eval_comb_call(std::string_view dst, std::string_view 
     // function-template lnast may still carry default-value scaffolding
     // (output tuple_add inside the body, attr_set on locals) we don't need
     // to replay since outputs come from the explicit assigns in branches.
-    if (type.is_tuple_add() || type.is_tuple_get() || type.is_tuple_set() || type.is_attr_set() || type.is_attr_get()) {
+    if (Lnast_ntype::is_tuple_add(type) || Lnast_ntype::is_tuple_get(type) || Lnast_ntype::is_tuple_set(type) || Lnast_ntype::is_attr_set(type) || Lnast_ntype::is_attr_get(type)) {
       return Eval_result::processed;
     }
 
@@ -1490,7 +1492,7 @@ bool uPass_constprop::try_eval_comb_call(std::string_view dst, std::string_view 
   };
 
   try_eval_block = [&](Lnast_nid block) -> Eval_result {
-    if (!fn->get_type(block).is_stmts()) {
+    if (!Lnast_ntype::is_stmts(fn->get_type(block))) {
       return Eval_result::aborted;
     }
     std::vector<Lnast_nid> sub_stmts;

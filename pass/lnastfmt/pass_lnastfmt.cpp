@@ -143,15 +143,15 @@ static bool is_valid_ref_text(std::string_view name) {
 //   - `func_def`: position 0 is the function name.
 //   - `if` / `while` / `cassert`: ALL ref children are reads (no write at
 //     position 0), so this returns false for those — handled by the caller.
-static bool parent_writes_pos0(Lnast_ntype pt) {
-  return pt.is_assign() || pt.is_dp_assign() || pt.is_delay_assign() || pt.is_log_and() || pt.is_log_or() || pt.is_log_not()
-         || pt.is_bit_and() || pt.is_bit_or() || pt.is_bit_not() || pt.is_bit_xor() || pt.is_red_and() || pt.is_red_or()
-         || pt.is_red_xor() || pt.is_popcount() || pt.is_plus() || pt.is_minus() || pt.is_mult() || pt.is_div() || pt.is_mod()
-         || pt.is_shl() || pt.is_sra() || pt.is_sext() || pt.is_set_mask() || pt.is_get_mask() || pt.is_eq() || pt.is_ne()
-         || pt.is_lt() || pt.is_le() || pt.is_gt() || pt.is_ge() || pt.is_is() || pt.is_tuple_add() || pt.is_tuple_get()
-         || pt.is_tuple_set() || pt.is_tuple_concat() || pt.is_attr_set() || pt.is_attr_get() || pt.is_func_call()
-         || pt.is_func_def() || pt.is_range() || pt.is_func_does() || pt.is_func_equals() || pt.is_func_in() || pt.is_func_has()
-         || pt.is_func_case() || pt.is_func_break() || pt.is_func_continue() || pt.is_func_return() || pt.is_for();
+static bool parent_writes_pos0(Lnast_ntype::Lnast_ntype_int pt) {
+  return Lnast_ntype::is_assign(pt) || Lnast_ntype::is_dp_assign(pt) || Lnast_ntype::is_delay_assign(pt) || Lnast_ntype::is_log_and(pt) || Lnast_ntype::is_log_or(pt) || Lnast_ntype::is_log_not(pt)
+         || Lnast_ntype::is_bit_and(pt) || Lnast_ntype::is_bit_or(pt) || Lnast_ntype::is_bit_not(pt) || Lnast_ntype::is_bit_xor(pt) || Lnast_ntype::is_red_and(pt) || Lnast_ntype::is_red_or(pt)
+         || Lnast_ntype::is_red_xor(pt) || Lnast_ntype::is_popcount(pt) || Lnast_ntype::is_plus(pt) || Lnast_ntype::is_minus(pt) || Lnast_ntype::is_mult(pt) || Lnast_ntype::is_div(pt) || Lnast_ntype::is_mod(pt)
+         || Lnast_ntype::is_shl(pt) || Lnast_ntype::is_sra(pt) || Lnast_ntype::is_sext(pt) || Lnast_ntype::is_set_mask(pt) || Lnast_ntype::is_get_mask(pt) || Lnast_ntype::is_eq(pt) || Lnast_ntype::is_ne(pt)
+         || Lnast_ntype::is_lt(pt) || Lnast_ntype::is_le(pt) || Lnast_ntype::is_gt(pt) || Lnast_ntype::is_ge(pt) || Lnast_ntype::is_is(pt) || Lnast_ntype::is_tuple_add(pt) || Lnast_ntype::is_tuple_get(pt)
+         || Lnast_ntype::is_tuple_set(pt) || Lnast_ntype::is_tuple_concat(pt) || Lnast_ntype::is_attr_set(pt) || Lnast_ntype::is_attr_get(pt) || Lnast_ntype::is_func_call(pt)
+         || Lnast_ntype::is_func_def(pt) || Lnast_ntype::is_range(pt) || Lnast_ntype::is_func_does(pt) || Lnast_ntype::is_func_equals(pt) || Lnast_ntype::is_func_in(pt) || Lnast_ntype::is_func_has(pt)
+         || Lnast_ntype::is_func_case(pt) || Lnast_ntype::is_func_break(pt) || Lnast_ntype::is_func_continue(pt) || Lnast_ntype::is_func_return(pt) || Lnast_ntype::is_for(pt);
 }
 
 // Walk the tree and flag any tmp ref (`___N`) that is read but never written
@@ -171,15 +171,10 @@ static void check_unwritten_tmps(const Lnast* ln) {
   std::unordered_map<std::string, std::pair<Lnast_nid, std::string>> read_first;
 
   for (const Lnast_nid& it : ln->depth_preorder()) {
-    if (!ln->get_type(it).is_ref()) {
+    if (!Lnast_ntype::is_ref(ln->get_type(it))) {
       continue;
     }
-    // Bind by const-ref to extend the temporary's lifetime; otherwise
-    // get_text() returns a string_view to the temporary's std::string text
-    // which dangles after the full-expression and trips on -O2/-O3 stack
-    // reuse.
-    const auto data = ln->get_data(it);
-    auto       name = data.name;
+    auto name = std::string(ln->get_name(it));
     if (!Lnast::is_tmp(name)) {
       continue;
     }
@@ -193,11 +188,11 @@ static void check_unwritten_tmps(const Lnast* ln) {
     // tuple_add / tuple_set entry-form: an inner `assign(ref:key, val)` whose
     // child[0] is a *field name*, not a variable. A tmp shouldn't appear as
     // a key in practice, but skip just in case so we don't over-flag.
-    if (pt.is_assign() && is_first_child) {
+    if (Lnast_ntype::is_assign(pt) && is_first_child) {
       auto grand = ln->get_parent(parent);
       if (!grand.is_invalid()) {
         auto gt = ln->get_type(grand);
-        if (gt.is_tuple_add() || gt.is_tuple_set()) {
+        if (Lnast_ntype::is_tuple_add(gt) || Lnast_ntype::is_tuple_set(gt)) {
           continue;
         }
       }
@@ -208,7 +203,7 @@ static void check_unwritten_tmps(const Lnast* ln) {
     } else {
       auto key = std::string(name);
       if (!read_first.contains(key)) {
-        read_first.emplace(key, std::make_pair(it, std::string(ln->get_type(parent).debug_name())));
+        read_first.emplace(key, std::make_pair(it, std::string(Lnast_ntype::debug_name(ln->get_type(parent)))));
       }
     }
   }
@@ -241,10 +236,10 @@ void Pass_lnastfmt::validate(const Lnast* ln) {
   // …) must be safe for every producer before it can run here — until then
   // lnastfmt only checks and leaves the LNAST untouched.
   for (const Lnast_nid& it : ln->depth_preorder()) {
-    const auto& data = ln->get_data(it);
+    const auto type = ln->get_type(it);
 
-    if (data.type.is_ref()) {
-      const auto name = data.name;
+    if (Lnast_ntype::is_ref(type)) {
+      const auto name = ln->get_name(it);
       if (!is_valid_ref_text(name)) {
         Pass::error(
             "lnastfmt: {} ref text '{}' is not a valid identifier — must be a single name "
@@ -259,8 +254,8 @@ void Pass_lnastfmt::validate(const Lnast* ln) {
       }
     }
 
-    if (data.type.is_const()) {
-      const auto name = data.name;
+    if (Lnast_ntype::is_const(type)) {
+      const auto name = ln->get_name(it);
       if (name == "__create_flop" || name == "__last_value") {
         Pass::error(
             "lnastfmt: {} const '{}' appears in LNAST; migrate the producer to `attr_set X storage reg` (§15.1) or `delay_assign` (§15.2)",
@@ -270,7 +265,7 @@ void Pass_lnastfmt::validate(const Lnast* ln) {
       }
     }
 
-    if (data.type.is_delay_assign()) {
+    if (Lnast_ntype::is_delay_assign(type)) {
       auto c0 = ln->get_first_child(it);
       auto c1 = c0.is_invalid() ? c0 : ln->get_sibling_next(c0);
       auto c2 = c1.is_invalid() ? c1 : ln->get_sibling_next(c1);
@@ -279,41 +274,41 @@ void Pass_lnastfmt::validate(const Lnast* ln) {
                     node_loc(ln, it));
         return;
       }
-      if (!ln->get_type(c0).is_ref() || !Lnast::is_tmp(ln->get_name(c0))) {
+      if (!Lnast_ntype::is_ref(ln->get_type(c0)) || !Lnast::is_tmp(ln->get_name(c0))) {
         Pass::error("lnastfmt: {} delay_assign child 0 {} must be a tmp ref (___<n>), got '{}' of type {}",
                     node_loc(ln, it),
                     node_loc(ln, c0),
                     ln->get_name(c0),
-                    ln->get_type(c0).debug_name());
+                    Lnast_ntype::debug_name(ln->get_type(c0)));
         return;
       }
-      if (!ln->get_type(c1).is_ref()) {
+      if (!Lnast_ntype::is_ref(ln->get_type(c1))) {
         Pass::error("lnastfmt: {} delay_assign child 1 {} must be a ref (declared variable name), got type {}",
                     node_loc(ln, it),
                     node_loc(ln, c1),
-                    ln->get_type(c1).debug_name());
+                    Lnast_ntype::debug_name(ln->get_type(c1)));
         return;
       }
-      if (!ln->get_type(c2).is_const() && !ln->get_type(c2).is_ref()) {
+      if (!Lnast_ntype::is_const(ln->get_type(c2)) && !Lnast_ntype::is_ref(ln->get_type(c2))) {
         Pass::error("lnastfmt: {} delay_assign child 2 {} (offset) must be a const or comptime ref, got type {}",
                     node_loc(ln, it),
                     node_loc(ln, c2),
-                    ln->get_type(c2).debug_name());
+                    Lnast_ntype::debug_name(ln->get_type(c2)));
         return;
       }
     }
 
-    if (data.type.is_assign() || data.type.is_dp_assign()) {
+    if (Lnast_ntype::is_assign(type) || Lnast_ntype::is_dp_assign(type)) {
       auto c0 = ln->get_first_child(it);
-      if (c0.is_invalid() || !ln->get_type(c0).is_ref()) {
+      if (c0.is_invalid() || !Lnast_ntype::is_ref(ln->get_type(c0))) {
         if (c0.is_invalid()) {
-          Pass::error("lnastfmt: {} {} LHS is missing", node_loc(ln, it), data.type.debug_name());
+          Pass::error("lnastfmt: {} {} LHS is missing", node_loc(ln, it), Lnast_ntype::debug_name(type));
         } else {
           Pass::error("lnastfmt: {} {} LHS {} must be a ref, got {} '{}'",
                       node_loc(ln, it),
-                      data.type.debug_name(),
+                      Lnast_ntype::debug_name(type),
                       node_loc(ln, c0),
-                      ln->get_type(c0).debug_name(),
+                      Lnast_ntype::debug_name(ln->get_type(c0)),
                       ln->get_name(c0));
         }
         return;
@@ -322,14 +317,14 @@ void Pass_lnastfmt::validate(const Lnast* ln) {
       if (c1.is_invalid()) {
         Pass::error("lnastfmt: {} {} with LHS '{}' is missing its RHS (expected exactly 2 children)",
                     node_loc(ln, it),
-                    data.type.debug_name(),
+                    Lnast_ntype::debug_name(type),
                     ln->get_name(c0));
         return;
       }
       if (!ln->get_sibling_next(c1).is_invalid()) {
         Pass::error("lnastfmt: {} {} with LHS '{}' has more than 2 children",
                     node_loc(ln, it),
-                    data.type.debug_name(),
+                    Lnast_ntype::debug_name(type),
                     ln->get_name(c0));
         return;
       }

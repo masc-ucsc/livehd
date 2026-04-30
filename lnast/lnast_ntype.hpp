@@ -2,8 +2,13 @@
 #pragma once
 
 #include <array>
+#include <cstdint>
 #include <string_view>
 
+// Static-only utility over the Lnast node-type enum. The enum value (one byte)
+// is stored directly in the HHDS tree slot via Lnast::set_type/get_type, and
+// in Lnast_node::type as a raw `Lnast_ntype::Lnast_ntype_int`. There is no
+// instance state — every helper takes the int by value.
 class Lnast_ntype {
 public:
   enum Lnast_ntype_int : uint8_t {
@@ -12,65 +17,56 @@ public:
     Lnast_ntype_last_invalid
   };
 
-protected:
+private:
   constexpr static std::array namemap{
 #define LNAST_NODE(NAME, VERBAL) #VERBAL,
 #include "lnast_nodes.def"
   };
 
-  Lnast_ntype_int val = Lnast_ntype_int::Lnast_ntype_invalid;
-
 public:
-  constexpr explicit Lnast_ntype() = default;
-  constexpr explicit Lnast_ntype(Lnast_ntype_int _val) : val(_val) {}
+  Lnast_ntype()                              = delete;
+  Lnast_ntype(const Lnast_ntype&)            = delete;
+  Lnast_ntype& operator=(const Lnast_ntype&) = delete;
 
-  [[nodiscard]] std::string_view to_sv() const { return namemap[val]; }
-
-  [[nodiscard]] Lnast_ntype_int get_raw_ntype() const { return val; }
-
-#define LNAST_NODE(NAME, VERBAL)                                                           \
-  static constexpr Lnast_ntype create_##NAME() { return Lnast_ntype(Lnast_ntype_##NAME); } \
-  bool constexpr is_##NAME() const { return val == Lnast_ntype_##NAME; }
+  // Per-type creator + predicate.
+#define LNAST_NODE(NAME, VERBAL)                                                            \
+  static constexpr Lnast_ntype_int create_##NAME() { return Lnast_ntype_##NAME; }           \
+  static constexpr bool            is_##NAME(Lnast_ntype_int v) { return v == Lnast_ntype_##NAME; }
 #include "lnast_nodes.def"
 
-  bool constexpr is_tuple_attr() const {
-    return val == Lnast_ntype_tuple_add || val == Lnast_ntype_tuple_get || val == Lnast_ntype_tuple_set
-           || val == Lnast_ntype_attr_set || val == Lnast_ntype_attr_get || val == Lnast_ntype_tuple_set;
+  static constexpr bool is_tuple_attr(Lnast_ntype_int v) {
+    return v == Lnast_ntype_tuple_add || v == Lnast_ntype_tuple_get || v == Lnast_ntype_tuple_set || v == Lnast_ntype_attr_set
+           || v == Lnast_ntype_attr_get;
   }
 
   // Super types
-  bool constexpr is_primitive_op() const { return (val >= Lnast_ntype_assign && val <= Lnast_ntype_attr_get); }
-  bool constexpr is_logical_op() const {
-    return (val == Lnast_ntype_log_and) || (val == Lnast_ntype_log_or) || (val == Lnast_ntype_log_not);
+  static constexpr bool is_primitive_op(Lnast_ntype_int v) { return v >= Lnast_ntype_assign && v <= Lnast_ntype_attr_get; }
+  static constexpr bool is_logical_op(Lnast_ntype_int v) {
+    return v == Lnast_ntype_log_and || v == Lnast_ntype_log_or || v == Lnast_ntype_log_not;
+  }
+  static constexpr bool is_unary_op(Lnast_ntype_int v) {
+    return v == Lnast_ntype_bit_not || v == Lnast_ntype_log_not || v == Lnast_ntype_assign || v == Lnast_ntype_dp_assign;
+  }
+  static constexpr bool is_binary_op(Lnast_ntype_int v) {
+    return v == Lnast_ntype_shl || v == Lnast_ntype_sra || v == Lnast_ntype_sext;
+  }
+  static constexpr bool is_nary_op(Lnast_ntype_int v) {
+    return v == Lnast_ntype_bit_and || v == Lnast_ntype_bit_or || v == Lnast_ntype_bit_xor || v == Lnast_ntype_log_and
+           || v == Lnast_ntype_log_or || v == Lnast_ntype_plus || v == Lnast_ntype_minus || v == Lnast_ntype_mult
+           || v == Lnast_ntype_is || v == Lnast_ntype_eq || v == Lnast_ntype_ne || v == Lnast_ntype_lt || v == Lnast_ntype_le
+           || v == Lnast_ntype_gt || v == Lnast_ntype_ge;
   }
 
-  bool constexpr is_unary_op() const {
-    return (val == Lnast_ntype_bit_not) || (val == Lnast_ntype_log_not) || (val == Lnast_ntype_assign)
-           || (val == Lnast_ntype_dp_assign);
+  // basic_op have 1-to-1 translation between LNAST and Lgraph
+  static constexpr bool is_direct_lgraph_op(Lnast_ntype_int v) {
+    return (v >= Lnast_ntype_bit_and && v <= Lnast_ntype_ge) && v != Lnast_ntype_mod && v != Lnast_ntype_is
+           && v != Lnast_ntype_ne && v != Lnast_ntype_le && v != Lnast_ntype_ge;
   }
 
-  bool constexpr is_binary_op() const {
-    return (val == Lnast_ntype_shl) || (val == Lnast_ntype_sra) || (val == Lnast_ntype_sext);
-  }
+  static constexpr bool is_type(Lnast_ntype_int v) { return v >= Lnast_ntype_none_type && v <= Lnast_ntype_unknown_type; }
 
-  bool constexpr is_nary_op() const {
-    return (val == Lnast_ntype_bit_and) || (val == Lnast_ntype_bit_or) || (val == Lnast_ntype_bit_xor)
-           || (val == Lnast_ntype_log_and) || (val == Lnast_ntype_log_or) || (val == Lnast_ntype_plus) || (val == Lnast_ntype_minus)
-           || (val == Lnast_ntype_mult) || (val == Lnast_ntype_is) || (val == Lnast_ntype_eq) || (val == Lnast_ntype_ne)
-           || (val == Lnast_ntype_lt) || (val == Lnast_ntype_le) || (val == Lnast_ntype_gt) || (val == Lnast_ntype_ge);
-  }
-
-  // basic_op have 1 to 1 translation between LNAST and Lgraph
-  bool constexpr is_direct_lgraph_op() const {
-    return (val >= Lnast_ntype_bit_and && val <= Lnast_ntype_ge) && val != Lnast_ntype_mod && val != Lnast_ntype_is
-           && val != Lnast_ntype_ne && val != Lnast_ntype_le && val != Lnast_ntype_ge;
-  }
-
-  bool constexpr is_type() const { return (val >= Lnast_ntype_none_type && val <= Lnast_ntype_unknown_type); }
-
-  std::string_view debug_name() const { return namemap[val]; }
-
-  static std::string_view debug_name(Lnast_ntype_int val) { return namemap[val]; }
+  static std::string_view to_sv(Lnast_ntype_int v) { return namemap[v]; }
+  static std::string_view debug_name(Lnast_ntype_int v) { return namemap[v]; }
 
   static_assert(namemap.size() == Lnast_ntype_last_invalid);
 };

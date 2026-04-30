@@ -42,7 +42,7 @@ public:
       if (nid.is_invalid()) {
         continue;
       }
-      if (lnast->get_type(nid).is_const()) {
+      if (Lnast_ntype::is_const(lnast->get_type(nid))) {
         ++count;
       }
     }
@@ -54,7 +54,7 @@ public:
       if (nid.is_invalid()) {
         continue;
       }
-      switch (lnast->get_type(nid).get_raw_ntype()) {
+      switch (lnast->get_type(nid)) {
         case Lnast_ntype::Lnast_ntype_plus:
         case Lnast_ntype::Lnast_ntype_minus:
         case Lnast_ntype::Lnast_ntype_mult:
@@ -97,7 +97,7 @@ public:
     if (nid.is_invalid()) {
       return "invalid";
     }
-    switch (lnast->get_type(nid).get_raw_ntype()) {
+    switch (lnast->get_type(nid)) {
       case Lnast_ntype::Lnast_ntype_const: return "const";
       case Lnast_ntype::Lnast_ntype_plus: return "sum";
       case Lnast_ntype::Lnast_ntype_minus: return "sub";
@@ -131,16 +131,13 @@ public:
     if (nid.is_invalid()) {
       return false;
     }
-    return lnast->get_type(nid).is_const();
+    return Lnast_ntype::is_const(lnast->get_type(nid));
   }
   std::optional<std::int64_t> const_value(Node_id node) const override {
     if (!is_const(node)) {
       return std::nullopt;
     }
-    // get_data() returns by value; keep the Lnast_node alive so the
-    // string_view from get_text() doesn't dangle for std::from_chars below.
-    const auto data = lnast->get_data(decode_nid(node));
-    const auto text = data.name;
+    const auto text = lnast->get_name(decode_nid(node));
     int64_t    value{0};
     auto*      begin = text.data();
     auto*      end   = text.data() + text.size();
@@ -191,8 +188,16 @@ public:
   Lnast_nid get_current_nid() const { return current_nid; }
 
   // Returns a copy of the full Lnast_node at the read cursor. Used by the
-  // runner to replicate the input node into the staging tree.
-  Lnast_node current_node() const { return lnast->get_data(current_nid); }
+  // runner to replicate the input node into the staging tree. Builds the
+  // bundle from the persistent type/name attrs at call time — there's no
+  // pre-computed Lnast_node sitting around.
+  Lnast_node current_node() const {
+    const auto type = lnast->get_type(current_nid);
+    if (Lnast_ntype::is_invalid(type)) {
+      return Lnast_node();
+    }
+    return Lnast_node(type, std::string(lnast->get_name(current_nid)));
+  }
 
   // Cursor-state snapshot used by the runner to recover from a pass that
   // mishandled its own move_to_* calls (e.g. an exception escaped before
@@ -234,7 +239,7 @@ public:
 
   auto get_ntype() const { return lnast->get_type(current_nid); }
 
-  auto get_raw_ntype() const { return lnast->get_type(current_nid).get_raw_ntype(); }
+  auto get_raw_ntype() const { return lnast->get_type(current_nid); }
 
   bool is_invalid() const { return current_nid.is_invalid(); }
 

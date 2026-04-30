@@ -39,22 +39,28 @@ using Lnast_nid = hhds::Tree::Node_class;
 // (line/pos/fname) are NOT carried here — set them via Lnast::set_loc on
 // the resulting nid when needed.
 //
+// `type` is the raw `Lnast_ntype::Lnast_ntype_int` enum value; predicates
+// and pretty-printers live as static functions on Lnast_ntype.
 // `name` is owned (std::string) so the int-form `create_const(int64_t)` can
 // stringify safely. SSO covers the common case (short var names, "nil",
 // "true", small constants).
-#define CREATE_LNAST_NODE(type)                                                                                  \
-  static Lnast_node create_##type() { return Lnast_node(Lnast_ntype::create_##type(), std::string{}); }          \
-  static Lnast_node create_##type(std::string_view str) { return Lnast_node(Lnast_ntype::create_##type(), std::string{str}); }
+#define CREATE_LNAST_NODE(type)                                                                                          \
+  static Lnast_node create_##type() { return Lnast_node(Lnast_ntype::create_##type(), std::string{}); }                  \
+  static Lnast_node create_##type(std::string_view str) {                                                                \
+    return Lnast_node(Lnast_ntype::create_##type(), std::string{str});                                                   \
+  }
 
 struct Lnast_node {
-  Lnast_ntype type;
-  std::string name;
+  Lnast_ntype::Lnast_ntype_int type{Lnast_ntype::Lnast_ntype_invalid};
+  std::string                  name;
 
-  Lnast_node() : type(Lnast_ntype::create_invalid()) {}
-  Lnast_node(Lnast_ntype _type) : type(_type) {}
-  Lnast_node(Lnast_ntype _type, std::string _name) : type(_type), name(std::move(_name)) { I(!type.is_invalid()); }
+  Lnast_node() = default;
+  Lnast_node(Lnast_ntype::Lnast_ntype_int _type) : type(_type) {}
+  Lnast_node(Lnast_ntype::Lnast_ntype_int _type, std::string _name) : type(_type), name(std::move(_name)) {
+    I(!Lnast_ntype::is_invalid(type));
+  }
 
-  constexpr bool is_invalid() const { return type.is_invalid(); }
+  constexpr bool is_invalid() const { return Lnast_ntype::is_invalid(type); }
   void           dump() const;
 
 #define LNAST_NODE(NAME, VERBAL) CREATE_LNAST_NODE(NAME)
@@ -142,9 +148,9 @@ public:
   Lnast_nid append_sibling(const Lnast_nid& sibling, const Lnast_node& n);
 
   // ── payload accessors ───────────────────────────────────────────────────
-  Lnast_ntype      get_type(const Lnast_nid& nid) const;
-  void             set_type(const Lnast_nid& nid, Lnast_ntype t);
-  std::string_view get_name(const Lnast_nid& nid) const;
+  Lnast_ntype::Lnast_ntype_int get_type(const Lnast_nid& nid) const;
+  void                         set_type(const Lnast_nid& nid, Lnast_ntype::Lnast_ntype_int t);
+  std::string_view             get_name(const Lnast_nid& nid) const;
   std::string_view get_vname(const Lnast_nid& nid) const { return get_name(nid); }
   void             set_name(const Lnast_nid& nid, std::string_view name);
 
@@ -162,11 +168,13 @@ public:
   std::string_view get_fname(const Lnast_nid& nid) const;
   void             set_fname(const Lnast_nid& nid, std::string_view fname);
 
-  // get_data / set_data: bundle accessors for code that wants the legacy
-  // Lnast_node value at once. Performs multiple attribute lookups; prefer the
-  // narrow accessors above on hot paths.
-  Lnast_node get_data(const Lnast_nid& nid) const;
-  void       set_data(const Lnast_nid& nid, const Lnast_node& n);
+  // set_data: write-side bundle helper used by add_child / set_root /
+  // append_sibling and external builders that already have an Lnast_node
+  // value (e.g. uPass runner replaying the cursor's current node into a
+  // staging tree). On the read side, callers go through the narrow
+  // get_type / get_name accessors directly — bundling on read produced
+  // wasted lookups when callers only needed one of the two.
+  void set_data(const Lnast_nid& nid, const Lnast_node& n);
 
   // ── module / source metadata ────────────────────────────────────────────
   std::string_view get_top_module_name() const { return top_module_name; }

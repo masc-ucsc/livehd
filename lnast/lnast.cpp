@@ -23,7 +23,7 @@ struct Lnast_attr_init {
 [[maybe_unused]] const Lnast_attr_init lnast_attr_init_{};
 }  // namespace
 
-void Lnast_node::dump() const { std::print("{}, {}\n", type.debug_name(), name); }
+void Lnast_node::dump() const { std::print("{}, {}\n", Lnast_ntype::debug_name(type), name); }
 
 Lnast::Lnast(std::string_view _module_name, std::string_view _file_name)
     : forest_(hhds::Forest::create()), top_module_name(_module_name), source_filename(_file_name) {
@@ -77,12 +77,12 @@ Lnast_nid Lnast::append_sibling(const Lnast_nid& sibling, const Lnast_node& n) {
 // slot (uint16_t). Token/text/fname ride on flat-storage attributes.
 // ─────────────────────────────────────────────────────────────────────────
 
-Lnast_ntype Lnast::get_type(const Lnast_nid& nid) const {
-  return Lnast_ntype(static_cast<Lnast_ntype::Lnast_ntype_int>(nid.get_type()));
+Lnast_ntype::Lnast_ntype_int Lnast::get_type(const Lnast_nid& nid) const {
+  return static_cast<Lnast_ntype::Lnast_ntype_int>(nid.get_type());
 }
 
-void Lnast::set_type(const Lnast_nid& nid, Lnast_ntype t) {
-  nid.set_type(static_cast<hhds::Type>(t.get_raw_ntype()));
+void Lnast::set_type(const Lnast_nid& nid, Lnast_ntype::Lnast_ntype_int t) {
+  nid.set_type(static_cast<hhds::Type>(t));
 }
 
 std::string_view Lnast::get_name(const Lnast_nid& nid) const {
@@ -144,14 +144,6 @@ void Lnast::set_fname(const Lnast_nid& nid, std::string_view fname) {
   nid.attr(lnast::attrs::fname).set(std::string(fname));
 }
 
-Lnast_node Lnast::get_data(const Lnast_nid& nid) const {
-  auto t = get_type(nid);
-  if (t.is_invalid()) {
-    return Lnast_node();
-  }
-  return Lnast_node(t, std::string(get_name(nid)));
-}
-
 void Lnast::set_data(const Lnast_nid& nid, const Lnast_node& n) {
   set_type(nid, n.type);
   set_name(nid, n.name);
@@ -163,7 +155,7 @@ void Lnast::dump(const Lnast_nid& root_nid) const {
   opts.node_text  = [this](const hhds::Tree::Node_class& node) {
     const auto t = get_type(node);
     const auto n = get_name(node);
-    return std::format("{}: {}", t.to_sv(), n);
+    return std::format("{}: {}", Lnast_ntype::to_sv(t), n);
   };
   opts.attributes.emplace_back("loc", [this](const hhds::Tree::Node_class& node) -> std::optional<std::string> {
     auto loc = get_loc(node);

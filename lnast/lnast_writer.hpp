@@ -46,7 +46,7 @@ protected:
 
   auto get_ntype() { return lnast->get_type(current_nid); }
 
-  auto get_raw_ntype() { return lnast->get_type(current_nid).get_raw_ntype(); }
+  auto get_raw_ntype() { return lnast->get_type(current_nid); }
 
   bool is_invalid() { return current_nid.is_invalid(); }
 
