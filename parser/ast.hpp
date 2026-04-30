@@ -18,8 +18,6 @@ public:
   constexpr Ast_parser_node(const Rule_id rid, const Token_entry te) : rule_id(rid), token_entry(te) { I(rid); }
 };
 
-#include "tree_compat.hpp"  // level_of / pos_of helpers
-
 class Ast_parser {
 public:
   using Tree_index = hhds::Tree::Node_class;

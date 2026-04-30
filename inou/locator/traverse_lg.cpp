@@ -173,10 +173,6 @@ void Traverse_lg::debug_function(Lgraph* lg) {
   for (const auto& node : lg->forward(true)) {
     if (node.has_outputs()) {
       std::print("{}(n{})({})\n", node.debug_name(), node.get_nid(), (node.get_class_lgraph())->get_name());
-      if (node.is_type_sub() && node.get_type_sub_node().get_name() == "__fir_const") {
-        auto node_sub_name = node.get_type_sub_node().get_name();
-        std::print("\t\t\t\t {}\n", node_sub_name);
-      }
       for (const auto dpin : node.out_connected_pins()) {
         std::print("\t {}({})", dpin.has_name() ? dpin.get_name() : (std::to_string(dpin.get_pid())), dpin.get_wire_name());
         get_node_pin_compact_flat_details(dpin.get_compact_flat(), lg_path);
@@ -198,10 +194,6 @@ void Traverse_lg::debug_function(Lgraph* lg) {
   for (const auto& node : lg->fast(true)) {
     if (node.has_outputs()) {
       std::print("{}(n{})({})\n", node.debug_name(), node.get_nid(), (node.get_class_lgraph())->get_name());
-      if (node.is_type_sub() && node.get_type_sub_node().get_name() == "__fir_const") {
-        auto node_sub_name = node.get_type_sub_node().get_name();
-        std::print("\t\t\t\t {}\n", node_sub_name);
-      }
       for (const auto dpin : node.out_connected_pins()) {
         std::print("\t {}({})", dpin.has_name() ? dpin.get_name() : (std::to_string(dpin.get_pid())), dpin.get_wire_name());
         get_node_pin_compact_flat_details(dpin.get_compact_flat(), lg_path);
@@ -960,7 +952,7 @@ void Traverse_lg::fwd_traversal_for_inp_map(Lgraph* lg, map_of_sets& inp_map_of_
   std::print("\t\tis_orig_lg: {}\n", is_orig_lg);
 #endif
   for (const auto& node : lg->forward(true)) {
-    if (node.is_type_const() || (node.is_type_sub() && node.get_type_sub_node().get_name() == "__fir_const")) {
+    if (node.is_type_const()) {
       continue;
     }
     for (const auto node_dpins : node.out_connected_pins()) {
@@ -1260,9 +1252,6 @@ void Traverse_lg::netpin_to_origpin_default_match(Lgraph* orig_lg, Lgraph* synth
     /*Save lgIDs of origLG for weighted match LL only*/
     origLGID_set.insert((uint32_t)((original_node.get_class_lgraph())->get_lgid()));
 
-    if (original_node.is_type_sub() && original_node.get_type_sub_node().get_name() == "__fir_const") {
-      continue;
-    }
     for (const auto& original_node_dpin : original_node.out_connected_pins()) {
       if (original_node_dpin.has_name()) {
 #ifdef BASIC_DBG
@@ -1333,10 +1322,6 @@ void Traverse_lg::netpin_to_origpin_default_match(Lgraph* orig_lg, Lgraph* synth
   /*known points matching*/
   // synth_lg->dump(true);                           // FIXME: remove this
   for (auto synth_node : synth_lg->fast(true)) {  // FIXME : do NOT use hier true here !?
-
-    if (synth_node.is_type_sub() && synth_node.get_type_sub_node().get_name() == "__fir_const") {
-      continue;
-    }
 
     for (const auto synth_node_dpin : synth_node.out_connected_pins()) {  // might be multi driver node
       if (synth_node_dpin.has_name()) {
@@ -2865,8 +2850,7 @@ std::vector<Node_pin::Compact_flat> Traverse_lg::get_surrounding_pins(Node& node
       dpin_vec.emplace_back(in_pin.get_compact_flat());
       continue;
     }
-    if (!n.is_type_const() && main_node_dpin != in_pin.get_compact_flat()
-        && !(node.is_type_sub() && node.get_type_sub_node().get_name() == "__fir_const")) {  // get_dpin_cf(n)) {
+    if (!n.is_type_const() && main_node_dpin != in_pin.get_compact_flat()) {
       dpin_vec.emplace_back(in_pin.get_compact_flat());
     }
   }
@@ -3927,7 +3911,7 @@ void Traverse_lg::get_input_node(const Node_pin& node_pin, std::set<std::string>
   if (node.is_type_flop() || (!node.has_inputs())
       || (node.is_type_sub() ? ((std::string(node.get_type_sub_node().get_name())).find("_df") != std::string::npos) : false)
       || node.is_type_loop_last() || node.is_type_loop_first()) {
-    if (node.is_type_const() || (node.is_type_sub() && node.get_type_sub_node().get_name() == "__fir_const")) {
+    if (node.is_type_const()) {
       // do not keep const for future reference
       // return Node::Compact_flat();
       return;

@@ -310,7 +310,6 @@ and collides with any identifier that happens to start with those characters.
 | `__dp_assign`     | Deferred-parent assign marker      | `lnast.cpp:145`, `cgen_verilog.cpp:1023`                 |
 | `__reset`         | Reset pin for a register           | `inou/pyrope/tests/cnt_attr7.prp`                        |
 | `__mask`          | Bit-mask-derived name              | `inou/yosys/lgyosys_tolg.cpp:2374`                       |
-| `__fir_const`     | FIRRTL constant marker (sub-name)  | `inou/locator/traverse_lg.cpp:176+`                      |
 | `__range_begin`/`__range_end` | Range endpoints         | `inou/code_gen/code_gen.cpp:221-263`                     |
 | `__valid`/`__retry` | Dataflow handshake attributes    | `inou/code_gen/code_gen.cpp:842-845`                     |
 | `0.<attr>` vs `__<attr>` | Root-attribute canonicalization | `lnast/bundle.cpp:736-759`                           |

@@ -59,8 +59,9 @@ upass::Emit_decision uPass_verifier::classify_statement() {
   // call site of the enclosing function, drop it without re-counting. The
   // key matches what mark_inlined_cassert_* uses (lnast top-name + nid).
   const auto cassert_nid = lm->get_current_nid();
-  const auto dedup_key
-      = std::format("{}:{}:{}", lm->get_top_module_name(), level_of(cassert_nid), pos_of(cassert_nid));
+  // class_index().value is unique per node within a tree, so module-qualifying
+  // it gives a stable cassert key without paying for a parent walk.
+  const auto dedup_key = std::format("{}:{}", lm->get_top_module_name(), cassert_nid.get_class_index().value);
   if (processed_cassert_keys.contains(dedup_key)) {
     return upass::Emit_decision::drop();
   }

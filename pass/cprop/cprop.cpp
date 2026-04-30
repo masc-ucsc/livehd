@@ -2497,8 +2497,7 @@ void Cprop::tuple_pass(Lgraph* lg) {
 }
 
 void Cprop::clean_io(Lgraph* lg) {
-  // Remove IOs that are undriven (this is a bit controversial, but to be
-  // consistent with FIRRTL for LEC)
+  // Remove IOs that are undriven.
   //
   // TODO: Maybe a cprop option (preserve_io) unset by default
 

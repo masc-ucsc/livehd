@@ -7,6 +7,20 @@
 #include "gtest/gtest.h"
 #include "str_tools.hpp"
 
+namespace {
+// Local diagnostic helper (replacement for the deleted core/tree_compat.hpp
+// shim). `level_of` walks parents — fine for this test's pre-order scan.
+inline int32_t level_of(const hhds::Tree::Node_class& nid) {
+  int32_t d = 0;
+  auto    p = nid.parent();
+  while (p.is_valid()) {
+    ++d;
+    p = p.parent();
+  }
+  return d;
+}
+}  // namespace
+
 class Ast_test_setup : public ::testing::Test {
 protected:
   void SetUp() override {}

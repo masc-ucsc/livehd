@@ -12,6 +12,7 @@
 #include <vector>
 
 #include "lnast.hpp"
+#include "lnast_builder.hpp"
 #include "lnast_ntype.hpp"
 #include "symbol_table.hpp"
 #include "tree_sitter/api.h"
@@ -23,12 +24,11 @@ protected:
   TSParser*   parser;
   TSNode      ts_root_node;
 
-  // LNAST output
-  std::unique_ptr<Lnast> lnast;
-  Lnast_nid         stmts_index;
-
-  // Temporary variable counter for compiler-generated tmps
-  int tmp_ref_count;
+  // LNAST output. `builder` co-owns `lnast` and is the canonical home for
+  // the current `idx_stmts` cursor, tmp-ref minting, and frontend-agnostic
+  // stmt emitters (cleanup_todo §3.4).
+  std::shared_ptr<Lnast> lnast;
+  Lnast_builder          builder;
 
   // Pending overflow kind ("wrap"/"sat") to apply to the next assignment.
   // Set by process_{description,scope_statement} when the new grammar's
@@ -134,8 +134,6 @@ protected:
   Lnast_node process_lvalue_for_assign(TSNode lvalue, const Lnast_node& rvalue, TSNode decl_node, TSNode type_cast_node);
 
   // Helpers
-  std::string             get_tmp_name();
-  Lnast_node              make_tmp_ref();
   std::string_view        get_text(const TSNode& n) const;
   std::string             get_text_str(const TSNode& n) const { return std::string(get_text(n)); }
   static std::string_view trim(std::string_view s);
@@ -162,7 +160,7 @@ public:
 
   ~Prp2lnast();
 
-  std::unique_ptr<Lnast> get_lnast() { return std::move(lnast); }
+  std::shared_ptr<Lnast> get_lnast() { return std::move(lnast); }
   void                   dump_tree_sitter() const;
   void                   dump_tree_sitter(TSTreeCursor* tc, int level) const;
   void                   dump() const;

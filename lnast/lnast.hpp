@@ -17,7 +17,20 @@
 #include "hhds/tree.hpp"
 #include "lnast_attrs.hpp"
 #include "lnast_ntype.hpp"
-#include "tree_compat.hpp"  // level_of / pos_of helpers
+
+// Local replacements for the legacy `(level, pos)` accessors. `level_of`
+// walks the parent chain, so it's diagnostic-only — algorithmic users
+// (pass/locator) carry depth along their pre-order walk instead.
+inline int32_t level_of(const hhds::Tree::Node_class& nid) {
+  int32_t d = 0;
+  auto    p = nid.parent();
+  while (p.is_valid()) {
+    ++d;
+    p = p.parent();
+  }
+  return d;
+}
+inline int64_t pos_of(const hhds::Tree::Node_class& nid) { return nid.get_class_index().value; }
 
 using Lnast_nid = hhds::Tree::Node_class;
 

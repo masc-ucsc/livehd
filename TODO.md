@@ -29,3 +29,11 @@ Rules to enforce:
   `yosys_compile.sh`, `slang_compile.sh`, and the other `*_compile.sh` scripts
   out of `tests/` directories and place them under a consistent `contracts/`
   structure.
+
+## simlib fixed-width int types
+
+`simlib/uint.hpp` and `simlib/sint.hpp` (extracted from the `firrtl-sig`
+upstream project, kept under `simlib/LICENSE.firrtl-sig`) are still used by
+`core/tests/lconst_test.cpp` and the simlib examples. Once HLOP lands, these
+types will be replaced/rewritten as part of the HLOP simulation runtime —
+revisit the simlib int surface and the `firrtl-sig` attribution at that point.
