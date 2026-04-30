@@ -137,7 +137,10 @@ public:
     if (!is_const(node)) {
       return std::nullopt;
     }
-    const auto text = lnast->get_data(decode_nid(node)).token.get_text();
+    // get_data() returns by value; keep the Lnast_node alive so the
+    // string_view from get_text() doesn't dangle for std::from_chars below.
+    const auto data = lnast->get_data(decode_nid(node));
+    const auto text = data.token.get_text();
     int64_t    value{0};
     auto*      begin = text.data();
     auto*      end   = text.data() + text.size();

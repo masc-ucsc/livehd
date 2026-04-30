@@ -1274,7 +1274,11 @@ bool uPass_constprop::try_eval_comb_call(std::string_view dst, std::string_view 
         if (tuple_ref.is_invalid() || !fn->get_type(tuple_ref).is_ref()) {
           continue;
         }
-        const auto tuple_name = fn->get_data(tuple_ref).token.get_text();
+        // get_data() returns Lnast_node by value; its State_token::text owns
+        // the storage that token.get_text() views. Materialize into a string
+        // so the comparison below isn't reading freed stack memory after the
+        // temporary's destruction.
+        const std::string tuple_name(fn->get_data(tuple_ref).token.get_text());
         for (auto item = fn->get_sibling_next(tuple_ref); !item.is_invalid(); item = fn->get_sibling_next(item)) {
           if (!fn->get_type(item).is_assign()) {
             continue;

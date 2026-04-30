@@ -174,7 +174,12 @@ static void check_unwritten_tmps(const Lnast* ln) {
     if (!ln->get_type(it).is_ref()) {
       continue;
     }
-    auto name = ln->get_data(it).token.get_text();
+    // Bind by const-ref to extend the temporary's lifetime; otherwise
+    // get_text() returns a string_view to the temporary's std::string text
+    // which dangles after the full-expression and trips on -O2/-O3 stack
+    // reuse.
+    const auto data = ln->get_data(it);
+    auto       name = data.token.get_text();
     if (!Lnast::is_tmp(name)) {
       continue;
     }
