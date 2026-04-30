@@ -11,6 +11,42 @@ Lnast_builder::Lnast_builder() {}
 
 std::string Lnast_builder::create_lnast_tmp() { return absl::StrCat("___", ++tmp_var_cnt); }
 
+Lnast_nid Lnast_builder::add_ref_child(const Lnast_nid& parent, std::string_view name) {
+  return lnast->add_child(parent, Lnast_node::create_ref(name));
+}
+
+Lnast_nid Lnast_builder::add_const_child(const Lnast_nid& parent, std::string_view value) {
+  return lnast->add_child(parent, Lnast_node::create_const(value));
+}
+
+Lnast_nid Lnast_builder::add_value_child(const Lnast_nid& parent, std::string_view value) {
+  return str_tools::is_string(value) ? add_ref_child(parent, value) : add_const_child(parent, value);
+}
+
+std::string Lnast_builder::emit_unary_result(Lnast_ntype::Lnast_ntype_int op_type, std::string_view operand) {
+  I(!operand.empty());
+
+  auto res_var = create_lnast_tmp();
+  auto op_idx  = lnast->add_child(idx_stmts, Lnast_node(op_type));
+  add_ref_child(op_idx, res_var);
+  add_value_child(op_idx, operand);
+
+  return res_var;
+}
+
+std::string Lnast_builder::emit_binary_result(Lnast_ntype::Lnast_ntype_int op_type, std::string_view lhs, std::string_view rhs) {
+  I(!lhs.empty());
+  I(!rhs.empty());
+
+  auto res_var = create_lnast_tmp();
+  auto op_idx  = lnast->add_child(idx_stmts, Lnast_node(op_type));
+  add_ref_child(op_idx, res_var);
+  add_value_child(op_idx, lhs);
+  add_value_child(op_idx, rhs);
+
+  return res_var;
+}
+
 std::string Lnast_builder::get_lnast_name(std::string_view vname, bool last_value) {
   std::string_view lname;
 
@@ -27,9 +63,9 @@ std::string Lnast_builder::get_lnast_name(std::string_view vname, bool last_valu
 
   auto idx_delay = lnast->add_child(idx_stmts, Lnast_node::create_delay_assign());
   auto tmp_var   = create_lnast_tmp();
-  lnast->add_child(idx_delay, Lnast_node::create_ref(tmp_var));
-  lnast->add_child(idx_delay, Lnast_node::create_ref(lname));
-  lnast->add_child(idx_delay, Lnast_node::create_const("1"));
+  add_ref_child(idx_delay, tmp_var);
+  add_ref_child(idx_delay, lname);
+  add_const_child(idx_delay, "1");
 
   return tmp_var;
 }
@@ -45,9 +81,9 @@ std::string_view Lnast_builder::get_lnast_lhs_name(std::string_view vname) {
 }
 
 void Lnast_builder::new_lnast(std::string_view name) {
-  lnast          = std::make_unique<Lnast>(name);
-  auto root_nid  = lnast->set_root(Lnast_node(Lnast_ntype::create_top()));
-  idx_stmts      = lnast->add_child(root_nid, Lnast_node::create_stmts());
+  lnast         = std::make_unique<Lnast>(name);
+  auto root_nid = lnast->set_root(Lnast_node(Lnast_ntype::create_top()));
+  idx_stmts     = lnast->add_child(root_nid, Lnast_node::create_stmts());
 
   vname2lname.clear();
   tmp_var_cnt = 0;
@@ -119,16 +155,7 @@ std::string Lnast_builder::create_bit_not_stmts(std::string_view var_name) {
     return "";
   }
 
-  auto res_var = create_lnast_tmp();
-  auto not_idx = lnast->add_child(idx_stmts, Lnast_node::create_bit_not());
-  lnast->add_child(not_idx, Lnast_node::create_ref(res_var));
-  if (str_tools::is_string(var_name)) {
-    lnast->add_child(not_idx, Lnast_node::create_ref(var_name));
-  } else {
-    lnast->add_child(not_idx, Lnast_node::create_const(var_name));
-  }
-
-  return res_var;
+  return emit_unary_result(Lnast_ntype::create_bit_not(), var_name);
 }
 
 std::string Lnast_builder::create_log_not_stmts(std::string_view var_name) {
@@ -136,16 +163,7 @@ std::string Lnast_builder::create_log_not_stmts(std::string_view var_name) {
     return "";
   }
 
-  auto res_var = create_lnast_tmp();
-  auto not_idx = lnast->add_child(idx_stmts, Lnast_node::create_log_not());
-  lnast->add_child(not_idx, Lnast_node::create_ref(res_var));
-  if (str_tools::is_string(var_name)) {
-    lnast->add_child(not_idx, Lnast_node::create_ref(var_name));
-  } else {
-    lnast->add_child(not_idx, Lnast_node::create_const(var_name));
-  }
-
-  return res_var;
+  return emit_unary_result(Lnast_ntype::create_log_not(), var_name);
 }
 
 std::string Lnast_builder::create_red_or_stmts(std::string_view var_name) {
@@ -153,16 +171,7 @@ std::string Lnast_builder::create_red_or_stmts(std::string_view var_name) {
     return "";
   }
 
-  auto res_var = create_lnast_tmp();
-  auto or_idx  = lnast->add_child(idx_stmts, Lnast_node::create_red_or());
-  lnast->add_child(or_idx, Lnast_node::create_ref(res_var));
-  if (str_tools::is_string(var_name)) {
-    lnast->add_child(or_idx, Lnast_node::create_ref(var_name));
-  } else {
-    lnast->add_child(or_idx, Lnast_node::create_const(var_name));
-  }
-
-  return res_var;
+  return emit_unary_result(Lnast_ntype::create_red_or(), var_name);
 }
 
 std::string Lnast_builder::create_red_and_stmts(std::string_view var_name) {
@@ -170,16 +179,7 @@ std::string Lnast_builder::create_red_and_stmts(std::string_view var_name) {
     return "";
   }
 
-  auto res_var = create_lnast_tmp();
-  auto and_idx = lnast->add_child(idx_stmts, Lnast_node::create_red_and());
-  lnast->add_child(and_idx, Lnast_node::create_ref(res_var));
-  if (str_tools::is_string(var_name)) {
-    lnast->add_child(and_idx, Lnast_node::create_ref(var_name));
-  } else {
-    lnast->add_child(and_idx, Lnast_node::create_const(var_name));
-  }
-
-  return res_var;
+  return emit_unary_result(Lnast_ntype::create_red_and(), var_name);
 }
 
 std::string Lnast_builder::create_red_xor_stmts(std::string_view var_name) {
@@ -187,38 +187,14 @@ std::string Lnast_builder::create_red_xor_stmts(std::string_view var_name) {
     return "";
   }
 
-  auto res_var = create_lnast_tmp();
-  auto xor_idx = lnast->add_child(idx_stmts, Lnast_node::create_red_xor());
-  lnast->add_child(xor_idx, Lnast_node::create_ref(res_var));
-  if (str_tools::is_string(var_name)) {
-    lnast->add_child(xor_idx, Lnast_node::create_ref(var_name));
-  } else {
-    lnast->add_child(xor_idx, Lnast_node::create_const(var_name));
-  }
-
-  return res_var;
+  return emit_unary_result(Lnast_ntype::create_red_xor(), var_name);
 }
 
 std::string Lnast_builder::create_sra_stmts(std::string_view a_var, std::string_view b_var) {
   I(!a_var.empty());
   I(!b_var.empty());
 
-  auto res_var = create_lnast_tmp();
-  auto idx     = lnast->add_child(idx_stmts, Lnast_node::create_sra());
-  lnast->add_child(idx, Lnast_node::create_ref(res_var));
-  if (str_tools::is_string(a_var)) {
-    lnast->add_child(idx, Lnast_node::create_ref(a_var));
-  } else {
-    lnast->add_child(idx, Lnast_node::create_const(a_var));
-  }
-
-  if (str_tools::is_string(b_var)) {
-    lnast->add_child(idx, Lnast_node::create_ref(b_var));
-  } else {
-    lnast->add_child(idx, Lnast_node::create_const(b_var));
-  }
-
-  return res_var;
+  return emit_binary_result(Lnast_ntype::create_sra(), a_var, b_var);
 }
 
 std::string Lnast_builder::create_pick_bit_stmts(std::string_view a_var, std::string_view pos) {
@@ -231,21 +207,7 @@ std::string Lnast_builder::create_sext_stmts(std::string_view a_var, std::string
   I(!a_var.empty());
   I(!b_var.empty());
 
-  auto res_var = create_lnast_tmp();
-  auto idx     = lnast->add_child(idx_stmts, Lnast_node::create_sext());
-  lnast->add_child(idx, Lnast_node::create_ref(res_var));
-  if (str_tools::is_string(a_var)) {
-    lnast->add_child(idx, Lnast_node::create_ref(a_var));
-  } else {
-    lnast->add_child(idx, Lnast_node::create_const(a_var));
-  }
-  if (str_tools::is_string(b_var)) {
-    lnast->add_child(idx, Lnast_node::create_ref(b_var));
-  } else {
-    lnast->add_child(idx, Lnast_node::create_const(b_var));
-  }
-
-  return res_var;
+  return emit_binary_result(Lnast_ntype::create_sext(), a_var, b_var);
 }
 
 std::string Lnast_builder::create_bit_and_stmts(std::string_view a_var, std::string_view b_var) {
@@ -256,21 +218,7 @@ std::string Lnast_builder::create_bit_and_stmts(std::string_view a_var, std::str
     return std::string(a_var);
   }
 
-  auto res_var = create_lnast_tmp();
-  auto and_idx = lnast->add_child(idx_stmts, Lnast_node::create_bit_and());
-  lnast->add_child(and_idx, Lnast_node::create_ref(res_var));
-  if (str_tools::is_string(a_var)) {
-    lnast->add_child(and_idx, Lnast_node::create_ref(a_var));
-  } else {
-    lnast->add_child(and_idx, Lnast_node::create_const(a_var));
-  }
-  if (str_tools::is_string(b_var)) {
-    lnast->add_child(and_idx, Lnast_node::create_ref(b_var));
-  } else {
-    lnast->add_child(and_idx, Lnast_node::create_const(b_var));
-  }
-
-  return res_var;
+  return emit_binary_result(Lnast_ntype::create_bit_and(), a_var, b_var);
 }
 
 std::string Lnast_builder::create_bit_or_stmts(const std::vector<std::string>& var) {
@@ -285,14 +233,10 @@ std::string Lnast_builder::create_bit_or_stmts(const std::vector<std::string>& v
     if (res_var.empty()) {
       res_var = create_lnast_tmp();
       lid     = lnast->add_child(idx_stmts, Lnast_node::create_bit_or());
-      lnast->add_child(lid, Lnast_node::create_ref(res_var));
+      add_ref_child(lid, res_var);
     }
 
-    if (str_tools::is_string(v)) {
-      lnast->add_child(lid, Lnast_node::create_ref(v));
-    } else {
-      lnast->add_child(lid, Lnast_node::create_const(v));
-    }
+    add_value_child(lid, v);
   }
 
   return res_var;
@@ -306,42 +250,14 @@ std::string Lnast_builder::create_bit_xor_stmts(std::string_view a_var, std::str
     return std::string(a_var);
   }
 
-  auto res_var = create_lnast_tmp();
-  auto or_idx  = lnast->add_child(idx_stmts, Lnast_node::create_bit_xor());
-  lnast->add_child(or_idx, Lnast_node::create_ref(res_var));
-  if (str_tools::is_string(a_var)) {
-    lnast->add_child(or_idx, Lnast_node::create_ref(a_var));
-  } else {
-    lnast->add_child(or_idx, Lnast_node::create_const(a_var));
-  }
-  if (str_tools::is_string(b_var)) {
-    lnast->add_child(or_idx, Lnast_node::create_ref(b_var));
-  } else {
-    lnast->add_child(or_idx, Lnast_node::create_const(b_var));
-  }
-
-  return res_var;
+  return emit_binary_result(Lnast_ntype::create_bit_xor(), a_var, b_var);
 }
 
 std::string Lnast_builder::create_shl_stmts(std::string_view a_var, std::string_view b_var) {
   I(!a_var.empty());
   I(!b_var.empty());
 
-  auto res_var = create_lnast_tmp();
-  auto shl_idx = lnast->add_child(idx_stmts, Lnast_node::create_shl());
-  lnast->add_child(shl_idx, Lnast_node::create_ref(res_var));
-  if (str_tools::is_string(a_var)) {
-    lnast->add_child(shl_idx, Lnast_node::create_ref(a_var));
-  } else {
-    lnast->add_child(shl_idx, Lnast_node::create_const(a_var));
-  }
-  if (str_tools::is_string(b_var)) {
-    lnast->add_child(shl_idx, Lnast_node::create_ref(b_var));
-  } else {
-    lnast->add_child(shl_idx, Lnast_node::create_const(b_var));
-  }
-
-  return res_var;
+  return emit_binary_result(Lnast_ntype::create_shl(), a_var, b_var);
 }
 
 void Lnast_builder::create_dp_assign_stmts(std::string_view lhs_var, std::string_view rhs_var) {
@@ -349,12 +265,8 @@ void Lnast_builder::create_dp_assign_stmts(std::string_view lhs_var, std::string
   I(rhs_var.size());
 
   auto idx_assign = lnast->add_child(idx_stmts, Lnast_node::create_dp_assign());
-  lnast->add_child(idx_assign, Lnast_node::create_ref(lhs_var));
-  if (str_tools::is_string(rhs_var)) {
-    lnast->add_child(idx_assign, Lnast_node::create_ref(rhs_var));
-  } else {
-    lnast->add_child(idx_assign, Lnast_node::create_const(rhs_var));
-  }
+  add_ref_child(idx_assign, lhs_var);
+  add_value_child(idx_assign, rhs_var);
 }
 
 void Lnast_builder::create_assign_stmts(std::string_view lhs_var, std::string_view rhs_var) {
@@ -369,12 +281,8 @@ void Lnast_builder::create_assign_stmts(std::string_view lhs_var, std::string_vi
 
     if (Bundle::is_single_level(lhs_var)) {
       auto idx_assign = lnast->add_child(idx_stmts, Lnast_node::create_assign());
-      lnast->add_child(idx_assign, Lnast_node::create_ref(lhs_var));
-      if (str_tools::is_string(rhs_dest)) {
-        lnast->add_child(idx_assign, Lnast_node::create_ref(rhs_dest));
-      } else {
-        lnast->add_child(idx_assign, Lnast_node::create_const(rhs_dest));
-      }
+      add_ref_child(idx_assign, lhs_var);
+      add_value_child(idx_assign, rhs_dest);
     } else {
       std::vector<std::string> vec = absl::StrSplit(lhs_var, '.');
 
@@ -384,7 +292,7 @@ void Lnast_builder::create_assign_stmts(std::string_view lhs_var, std::string_vi
 
       auto idx_dot = lnast->add_child(idx_stmts, Lnast_node::create_tuple_set());
       lhs_dest     = create_lnast_tmp();
-      lnast->add_child(idx_dot, Lnast_node::create_ref(lhs_dest));
+      add_ref_child(idx_dot, lhs_dest);
 
       std::string io_declare;
 
@@ -397,17 +305,13 @@ void Lnast_builder::create_assign_stmts(std::string_view lhs_var, std::string_vi
         auto strip_pos = Bundle::get_first_level_name(f);  // WARNING: This is wrong but lnast_tolg has bugs handling this
 
         if (io_declare.empty()) {
-          lnast->add_child(idx_dot, Lnast_node::create_const(strip_pos));
+          add_const_child(idx_dot, strip_pos);
         } else {
-          lnast->add_child(idx_dot, Lnast_node::create_const(absl::StrCat(io_declare, strip_pos)));
+          add_const_child(idx_dot, absl::StrCat(io_declare, strip_pos));
           io_declare.clear();
         }
       }
-      if (str_tools::is_string(rhs_dest)) {
-        lnast->add_child(idx_dot, Lnast_node::create_ref(rhs_dest));
-      } else {
-        lnast->add_child(idx_dot, Lnast_node::create_const(rhs_dest));
-      }
+      add_value_child(idx_dot, rhs_dest);
     }
 
     return;
@@ -415,19 +319,15 @@ void Lnast_builder::create_assign_stmts(std::string_view lhs_var, std::string_vi
 #endif
 
   auto idx_assign = lnast->add_child(idx_stmts, Lnast_node::create_assign());
-  lnast->add_child(idx_assign, Lnast_node::create_ref(lhs_var));
-  if (str_tools::is_string(rhs_var)) {
-    lnast->add_child(idx_assign, Lnast_node::create_ref(rhs_var));
-  } else {
-    lnast->add_child(idx_assign, Lnast_node::create_const(rhs_var));
-  }
+  add_ref_child(idx_assign, lhs_var);
+  add_value_child(idx_assign, rhs_var);
 }
 
 void Lnast_builder::create_declare_bits_stmts(std::string_view a_var, bool is_signed, int bits) {
   auto idx_dot = lnast->add_child(idx_stmts, Lnast_node::create_tuple_set());
 
 #ifdef LNASTOP_DONE
-  lnast->add_child(idx_dot, Lnast_node::create_ref(a_var));
+  add_ref_child(idx_dot, a_var);
 #else
   bool        first = true;
   std::string io_declare;
@@ -439,14 +339,14 @@ void Lnast_builder::create_declare_bits_stmts(std::string_view a_var, bool is_si
         io_declare = f;
         continue;
       }
-      lnast->add_child(idx_dot, Lnast_node::create_ref(f));
+      add_ref_child(idx_dot, f);
     } else {
       if (io_declare.empty()) {
         auto strip_pos = Bundle::get_first_level_name(f);  // WARNING: This is wrong but lnast_tolg has bugs handling this
-        lnast->add_child(idx_dot, Lnast_node::create_const(strip_pos));
+        add_const_child(idx_dot, strip_pos);
       } else {
         auto n = Bundle::get_first_level_name(f);
-        lnast->add_child(idx_dot, Lnast_node::create_ref(absl::StrCat(io_declare, n)));
+        add_ref_child(idx_dot, absl::StrCat(io_declare, n));
 
         io_declare.clear();
       }
@@ -455,35 +355,31 @@ void Lnast_builder::create_declare_bits_stmts(std::string_view a_var, bool is_si
 #endif
 
   if (is_signed) {
-    lnast->add_child(idx_dot, Lnast_node::create_const("__sbits"));
+    add_const_child(idx_dot, "__sbits");
   } else {
-    lnast->add_child(idx_dot, Lnast_node::create_const("__ubits"));
+    add_const_child(idx_dot, "__ubits");
   }
-  lnast->add_child(idx_dot, Lnast_node::create_const(bits));
+  add_const_child(idx_dot, std::to_string(bits));
 }
 
 void Lnast_builder::create_func_call(std::string_view out_tup, std::string_view fname, std::string_view inp_tup) {
   auto idx_dot = lnast->add_child(idx_stmts, Lnast_node::create_func_call());
 
-  lnast->add_child(idx_dot, Lnast_node::create_ref(out_tup));
-  lnast->add_child(idx_dot, Lnast_node::create_ref(fname));
-  lnast->add_child(idx_dot, Lnast_node::create_ref(inp_tup));
+  add_ref_child(idx_dot, out_tup);
+  add_ref_child(idx_dot, fname);
+  add_ref_child(idx_dot, inp_tup);
 }
 
 void Lnast_builder::create_named_tuple(std::string_view lhs_var, const std::vector<std::pair<std::string, std::string>>& rhs) {
 #ifdef LNASTOP_DONE
   auto idx_dot = lnast->add_child(idx_stmts, Lnast_node::create_tuple_add());
 
-  lnast->add_child(idx_dot, Lnast_node::create_ref(lhs_var));
+  add_ref_child(idx_dot, lhs_var);
 
   for (const auto& it : rhs) {
     auto idx_assign = lnast->add_child(idx_dot, Lnast_node::create_assign());
-    lnast->add_child(idx_assign, Lnast_node::create_ref(it.first));
-    if (str_tools::is_string(it.second)) {
-      lnast->add_child(idx_assign, Lnast_node::create_ref(it.second));
-    } else {
-      lnast->add_child(idx_assign, Lnast_node::create_const(it.second));
-    }
+    add_ref_child(idx_assign, it.first);
+    add_value_child(idx_assign, it.second);
   }
 #else
 
@@ -500,16 +396,12 @@ void Lnast_builder::create_named_tuple(std::string_view lhs_var, const std::vect
 
   auto idx_dot = lnast->add_child(idx_stmts, Lnast_node::create_tuple_add());
 
-  lnast->add_child(idx_dot, Lnast_node::create_ref(lhs_var));
+  add_ref_child(idx_dot, lhs_var);
 
   for (const auto& it : tup_expanded_rhs) {
     auto idx_assign = lnast->add_child(idx_dot, Lnast_node::create_assign());
-    lnast->add_child(idx_assign, Lnast_node::create_ref(it.first));
-    if (str_tools::is_string(it.second)) {
-      lnast->add_child(idx_assign, Lnast_node::create_ref(it.second));
-    } else {
-      lnast->add_child(idx_assign, Lnast_node::create_const(it.second));
-    }
+    add_ref_child(idx_assign, it.first);
+    add_value_child(idx_assign, it.second);
   }
 #endif
 }
@@ -541,15 +433,15 @@ std::string Lnast_builder::create_tuple_get(std::string_view var) {
   auto idx_dot = lnast->add_child(idx_stmts, Lnast_node::create_tuple_get());
 
   auto res_var = create_lnast_tmp();
-  lnast->add_child(idx_dot, Lnast_node::create_ref(res_var));
+  add_ref_child(idx_dot, res_var);
   bool first = true;
 
   for (const auto& f : absl::StrSplit(var, '.')) {
     if (first) {
       first = false;
-      lnast->add_child(idx_dot, Lnast_node::create_ref(f));
+      add_ref_child(idx_dot, f);
     } else {
-      lnast->add_child(idx_dot, Lnast_node::create_const(f));
+      add_const_child(idx_dot, f);
     }
   }
 
@@ -561,14 +453,14 @@ std::string Lnast_builder::create_tuple_get(std::string_view tup_var, std::strin
   auto idx_dot = lnast->add_child(idx_stmts, Lnast_node::create_tuple_get());
 
   auto res_var = create_lnast_tmp();
-  lnast->add_child(idx_dot, Lnast_node::create_ref(res_var));
-  lnast->add_child(idx_dot, Lnast_node::create_ref(tup_var));
+  add_ref_child(idx_dot, res_var);
+  add_ref_child(idx_dot, tup_var);
 
 #ifdef LNASTOP_DONE
-  lnast->add_child(idx_dot, Lnast_node::create_const(field_var));
+  add_const_child(idx_dot, field_var);
 #else
   for (const auto& f : absl::StrSplit(field_var, '.')) {
-    lnast->add_child(idx_dot, Lnast_node::create_const(f));
+    add_const_child(idx_dot, f);
   }
 #endif
 
@@ -582,21 +474,13 @@ std::string Lnast_builder::create_minus_stmts(std::string_view a_var, std::strin
 
   auto res_var = create_lnast_tmp();
   auto sub_idx = lnast->add_child(idx_stmts, Lnast_node::create_minus());
-  lnast->add_child(sub_idx, Lnast_node::create_ref(res_var));
+  add_ref_child(sub_idx, res_var);
   if (a_var.empty()) {
-    lnast->add_child(sub_idx, Lnast_node::create_const("0"));
+    add_const_child(sub_idx, "0");
   } else {
-    if (str_tools::is_string(a_var)) {
-      lnast->add_child(sub_idx, Lnast_node::create_ref(a_var));
-    } else {
-      lnast->add_child(sub_idx, Lnast_node::create_const(a_var));
-    }
+    add_value_child(sub_idx, a_var);
   }
-  if (str_tools::is_string(b_var)) {
-    lnast->add_child(sub_idx, Lnast_node::create_ref(b_var));
-  } else {
-    lnast->add_child(sub_idx, Lnast_node::create_const(b_var));
-  }
+  add_value_child(sub_idx, b_var);
 
   return res_var;
 }
@@ -609,21 +493,7 @@ std::string Lnast_builder::create_plus_stmts(std::string_view a_var, std::string
     return std::string(a_var);
   }
 
-  auto res_var = create_lnast_tmp();
-  auto add_idx = lnast->add_child(idx_stmts, Lnast_node::create_plus());
-  lnast->add_child(add_idx, Lnast_node::create_ref(res_var));
-  if (str_tools::is_string(a_var)) {
-    lnast->add_child(add_idx, Lnast_node::create_ref(a_var));
-  } else {
-    lnast->add_child(add_idx, Lnast_node::create_const(a_var));
-  }
-  if (str_tools::is_string(b_var)) {
-    lnast->add_child(add_idx, Lnast_node::create_ref(b_var));
-  } else {
-    lnast->add_child(add_idx, Lnast_node::create_const(b_var));
-  }
-
-  return res_var;
+  return emit_binary_result(Lnast_ntype::create_plus(), a_var, b_var);
 }
 
 std::string Lnast_builder::create_mult_stmts(std::string_view a_var, std::string_view b_var) {
@@ -634,21 +504,7 @@ std::string Lnast_builder::create_mult_stmts(std::string_view a_var, std::string
     return std::string(a_var);
   }
 
-  auto res_var = create_lnast_tmp();
-  auto idx     = lnast->add_child(idx_stmts, Lnast_node::create_mult());
-  lnast->add_child(idx, Lnast_node::create_ref(res_var));
-  if (str_tools::is_string(a_var)) {
-    lnast->add_child(idx, Lnast_node::create_ref(a_var));
-  } else {
-    lnast->add_child(idx, Lnast_node::create_const(a_var));
-  }
-  if (str_tools::is_string(b_var)) {
-    lnast->add_child(idx, Lnast_node::create_ref(b_var));
-  } else {
-    lnast->add_child(idx, Lnast_node::create_const(b_var));
-  }
-
-  return res_var;
+  return emit_binary_result(Lnast_ntype::create_mult(), a_var, b_var);
 }
 
 std::string Lnast_builder::create_div_stmts(std::string_view a_var, std::string_view b_var) {
@@ -658,23 +514,15 @@ std::string Lnast_builder::create_div_stmts(std::string_view a_var, std::string_
 
   auto res_var = create_lnast_tmp();
   auto idx     = lnast->add_child(idx_stmts, Lnast_node::create_div());
-  lnast->add_child(idx, Lnast_node::create_ref(res_var));
+  add_ref_child(idx, res_var);
 
   if (a_var.empty()) {
-    lnast->add_child(idx, Lnast_node::create_const("1"));
+    add_const_child(idx, "1");
   } else {
-    if (str_tools::is_string(a_var)) {
-      lnast->add_child(idx, Lnast_node::create_ref(a_var));
-    } else {
-      lnast->add_child(idx, Lnast_node::create_const(a_var));
-    }
+    add_value_child(idx, a_var);
   }
 
-  if (str_tools::is_string(b_var)) {
-    lnast->add_child(idx, Lnast_node::create_ref(b_var));
-  } else {
-    lnast->add_child(idx, Lnast_node::create_const(b_var));
-  }
+  add_value_child(idx, b_var);
 
   return res_var;
 }
@@ -682,21 +530,7 @@ std::string Lnast_builder::create_div_stmts(std::string_view a_var, std::string_
 std::string Lnast_builder::create_mod_stmts(std::string_view a_var, std::string_view b_var) {
   I(a_var.size() && b_var.size());
 
-  auto res_var = create_lnast_tmp();
-  auto idx     = lnast->add_child(idx_stmts, Lnast_node::create_mod());
-  lnast->add_child(idx, Lnast_node::create_ref(res_var));
-  if (str_tools::is_string(a_var)) {
-    lnast->add_child(idx, Lnast_node::create_ref(a_var));
-  } else {
-    lnast->add_child(idx, Lnast_node::create_const(a_var));
-  }
-  if (str_tools::is_string(b_var)) {
-    lnast->add_child(idx, Lnast_node::create_ref(b_var));
-  } else {
-    lnast->add_child(idx, Lnast_node::create_const(b_var));
-  }
-
-  return res_var;
+  return emit_binary_result(Lnast_ntype::create_mod(), a_var, b_var);
 }
 
 std::string Lnast_builder::create_get_mask_stmts(std::string_view sel_var, std::string_view bitmask) {
@@ -704,13 +538,9 @@ std::string Lnast_builder::create_get_mask_stmts(std::string_view sel_var, std::
 
   auto res_var = create_lnast_tmp();
   auto idx     = lnast->add_child(idx_stmts, Lnast_node::create_get_mask());
-  lnast->add_child(idx, Lnast_node::create_ref(res_var));
-  lnast->add_child(idx, Lnast_node::create_ref(sel_var));
-  if (str_tools::is_string(bitmask)) {
-    lnast->add_child(idx, Lnast_node::create_ref(bitmask));
-  } else {
-    lnast->add_child(idx, Lnast_node::create_const(bitmask));
-  }
+  add_ref_child(idx, res_var);
+  add_ref_child(idx, sel_var);
+  add_value_child(idx, bitmask);
 
   return res_var;
 }
@@ -719,16 +549,8 @@ void Lnast_builder::create_set_mask_stmts(std::string_view sel_var, std::string_
   I(sel_var.size() && bitmask.size() && value.size());
 
   auto idx = lnast->add_child(idx_stmts, Lnast_node::create_set_mask());
-  lnast->add_child(idx, Lnast_node::create_ref(sel_var));
-  lnast->add_child(idx, Lnast_node::create_ref(sel_var));
-  if (str_tools::is_string(bitmask)) {
-    lnast->add_child(idx, Lnast_node::create_ref(bitmask));
-  } else {
-    lnast->add_child(idx, Lnast_node::create_const(bitmask));
-  }
-  if (str_tools::is_string(value)) {
-    lnast->add_child(idx, Lnast_node::create_ref(value));
-  } else {
-    lnast->add_child(idx, Lnast_node::create_const(value));
-  }
+  add_ref_child(idx, sel_var);
+  add_ref_child(idx, sel_var);
+  add_value_child(idx, bitmask);
+  add_value_child(idx, value);
 }

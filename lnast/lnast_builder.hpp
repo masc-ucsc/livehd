@@ -87,5 +87,11 @@ public:
   void        create_set_mask_stmts(std::string_view sel_var, std::string_view bitmask, std::string_view value);
 
 private:
+  Lnast_nid   add_ref_child(const Lnast_nid& parent, std::string_view name);
+  Lnast_nid   add_const_child(const Lnast_nid& parent, std::string_view value);
+  Lnast_nid   add_value_child(const Lnast_nid& parent, std::string_view value);
+  std::string emit_unary_result(Lnast_ntype::Lnast_ntype_int op_type, std::string_view operand);
+  std::string emit_binary_result(Lnast_ntype::Lnast_ntype_int op_type, std::string_view lhs, std::string_view rhs);
+
   std::stack<Lnast_nid> stmts_stack_;
 };
