@@ -305,23 +305,10 @@ void Graphviz::do_from_lnast(const std::shared_ptr<Lnast>& lnast, std::string_vi
   for (const auto& itr : lnast->depth_preorder()) {
     auto node_data = lnast->get_data(itr);
 
-    auto subs = node_data.subs;
     auto name = node_data.token.get_text();
 
     auto id = std::to_string(level_of(itr)) + std::to_string(pos_of(itr));
-    if (node_data.type.is_ref()) {
-      data += std::format(" {} [ label = <{}, {}<I><SUB><font color=\"#ff1020\">{}</font></SUB></I>> ];\n",
-                          id,
-                          node_data.type.debug_name(),
-                          name,
-                          subs);
-#if 0
-    } else if (node_data.type.is_select()) {
-      data += std::format(" {} [label=<{}, {}>];\n", id, "selc", name);
-#endif
-    } else {
-      data += std::format(" {} [ label = <{}, {}> ];\n", id, node_data.type.debug_name(), name);
-    }
+    data += std::format(" {} [ label = <{}, {}> ];\n", id, node_data.type.debug_name(), name);
 
     if (node_data.type.is_top()) {
       continue;

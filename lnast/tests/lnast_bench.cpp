@@ -1,10 +1,10 @@
 
 #include "benchmark/benchmark.h"
-#include "lnast_create.hpp"
+#include "lnast_builder.hpp"
 
 static void BM_assign_const(benchmark::State& state) {
   for (auto _ : state) {
-    Lnast_create ln;
+    Lnast_builder ln;
     ln.new_lnast(absl::StrCat("t", state.range(0)));
 
 #if 0
@@ -24,7 +24,7 @@ static void BM_assign_const(benchmark::State& state) {
 
 static void BM_assign_pyrope_const(benchmark::State& state) {
   for (auto _ : state) {
-    Lnast_create ln;
+    Lnast_builder ln;
     ln.new_lnast(absl::StrCat("t", state.range(0)));
 
 #if 0

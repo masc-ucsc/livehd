@@ -20,15 +20,12 @@ struct Lnast_attr_init {
     hhds::register_attr_tag<hhds::attrs::name_t>("hhds::attrs::name");
     hhds::register_attr_tag<lnast::attrs::loc_t>("lnast.loc");
     hhds::register_attr_tag<lnast::attrs::fname_t>("lnast.fname");
-    hhds::register_attr_tag<lnast::attrs::ssa_subs_t>("lnast.ssa_subs");
   }
 };
 [[maybe_unused]] const Lnast_attr_init lnast_attr_init_{};
 }  // namespace
 
-void Lnast_node::dump() const {
-  std::print("{}, {}, {}\n", type.debug_name(), token.get_text(), subs);
-}
+void Lnast_node::dump() const { std::print("{}, {}\n", type.debug_name(), token.get_text()); }
 
 Lnast::Lnast(std::string_view _module_name, std::string_view _file_name)
     : forest_(hhds::Forest::create()), top_module_name(_module_name), source_filename(_file_name) {
@@ -65,7 +62,7 @@ Lnast_nid Lnast::append_sibling(const Lnast_nid& sibling, const Lnast_node& n) {
 
 // ─────────────────────────────────────────────────────────────────────────
 // Payload accessors. The Lnast_ntype enum lives in the native HHDS Type
-// slot (uint16_t). Token/text/fname/subs ride on flat-storage attributes.
+// slot (uint16_t). Token/text/fname ride on flat-storage attributes.
 // ─────────────────────────────────────────────────────────────────────────
 
 Lnast_ntype Lnast::get_type(const Lnast_nid& nid) const {
@@ -112,13 +109,6 @@ void Lnast::set_token(const Lnast_nid& nid, const State_token& tok) {
   nid.attr(lnast::attrs::loc).set(loc);
 }
 
-int16_t Lnast::get_subs(const Lnast_nid& nid) const {
-  auto ref = nid.attr(lnast::attrs::ssa_subs);
-  return ref.has() ? ref.get() : int16_t{0};
-}
-
-void Lnast::set_subs(const Lnast_nid& nid, int16_t v) { nid.attr(lnast::attrs::ssa_subs).set(v); }
-
 std::string_view Lnast::get_name(const Lnast_nid& nid) const {
   auto ref = nid.attr(hhds::attrs::name);
   if (!ref.has()) {
@@ -127,56 +117,24 @@ std::string_view Lnast::get_name(const Lnast_nid& nid) const {
   return ref.get();
 }
 
-std::string Lnast::get_sname(const Lnast_nid& nid) const {
-  const auto subs = get_subs(nid);
-  const auto name = get_name(nid);
-  if (get_type(nid).is_const() || subs == 0) {
-    return std::string(name);
-  }
-  return absl::StrCat(name, "|", subs);
-}
-
 Lnast_node Lnast::get_data(const Lnast_nid& nid) const {
   if (get_type(nid).is_invalid()) {
     return Lnast_node();  // default invalid
   }
-  return Lnast_node(get_type(nid), get_token(nid), get_subs(nid));
+  return Lnast_node(get_type(nid), get_token(nid));
 }
 
 void Lnast::set_data(const Lnast_nid& nid, const Lnast_node& n) {
   set_type(nid, n.type);
   set_token(nid, n.token);
-  set_subs(nid, n.subs);
-}
-
-
-bool Lnast::is_in_bw_table(std::string_view name) const { return from_lgraph_bw_table.contains(name); }
-
-uint32_t Lnast::get_bitwidth(std::string_view name) const {
-  I(is_in_bw_table(name));
-  const auto it = from_lgraph_bw_table.find(name);
-  I(it != from_lgraph_bw_table.end());
-  return it->second;
-}
-
-void Lnast::set_bitwidth(std::string_view name, uint32_t bitwidth) {
-  I(bitwidth > 0);
-  from_lgraph_bw_table[name] = bitwidth;
 }
 
 void Lnast::dump(const Lnast_nid& root_nid) const {
-  // Use HHDS's UTF-8 dump with custom node text, so output stays close to the
-  // legacy "type, text|subs" form. Source location is shown via PrintOptions
-  // attributes.
   hhds::Tree::PrintOptions opts;
   opts.show_types = false;
   opts.node_text  = [this](const hhds::Tree::Node_class& node) {
     const auto t = get_type(node);
-    const auto s = get_subs(node);
     const auto n = get_name(node);
-    if (t.is_ref() && s != 0 && !is_tmp(n)) {
-      return std::format("{}: {}|{}", t.to_sv(), n, s);
-    }
     return std::format("{}: {}", t.to_sv(), n);
   };
   opts.attributes.emplace_back("loc", [this](const hhds::Tree::Node_class& node) -> std::optional<std::string> {

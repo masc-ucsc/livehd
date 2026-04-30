@@ -6,9 +6,9 @@
 #include "lconst.hpp"
 #include "lnast.hpp"
 
-class Lnast_create {
+class Lnast_builder {
 public:
-  Lnast_create();
+  Lnast_builder();
 
   // static std::vector<std::shared_ptr<Lnast>> pick_lnast();
 

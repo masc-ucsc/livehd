@@ -46,7 +46,7 @@ public:
 
   bool constexpr is_unary_op() const {
     return (val == Lnast_ntype_bit_not) || (val == Lnast_ntype_log_not) || (val == Lnast_ntype_assign)
-           || (val == Lnast_ntype_dp_assign) || (val == Lnast_ntype_mut);
+           || (val == Lnast_ntype_dp_assign);
   }
 
   bool constexpr is_binary_op() const {

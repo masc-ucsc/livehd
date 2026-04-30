@@ -30,13 +30,6 @@ struct fname_t {
 };
 inline constexpr fname_t fname{};
 
-// SSA subscript. Heavily mutated during ssa_trans.
-struct ssa_subs_t {
-  using value_type = int16_t;
-  using storage    = hhds::flat_storage;
-};
-inline constexpr ssa_subs_t ssa_subs{};
-
 }  // namespace lnast::attrs
 
 namespace hhds {
@@ -49,11 +42,6 @@ template <>
 template <>
 [[nodiscard]] inline std::string attr_tag_name<lnast::attrs::fname_t>() {
   return "lnast.fname";
-}
-
-template <>
-[[nodiscard]] inline std::string attr_tag_name<lnast::attrs::ssa_subs_t>() {
-  return "lnast.ssa_subs";
 }
 
 }  // namespace hhds

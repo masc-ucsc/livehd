@@ -120,7 +120,6 @@ void Lnast_writer::write_if() {
   move_to_parent();
 }
 
-void Lnast_writer::write_uif() {}
 void Lnast_writer::write_for() {}
 void Lnast_writer::write_while() {}
 
@@ -201,7 +200,6 @@ void Lnast_writer::write_assign() {
 }
 
 void Lnast_writer::write_dp_assign() {}
-void Lnast_writer::write_mut() {}
 
 void Lnast_writer::write_delay_assign() {
   move_to_child();
@@ -382,10 +380,6 @@ void Lnast_writer::write_comp_type_lambda() {
   move_to_parent();
 }
 
-void Lnast_writer::write_comp_type_enum() {
-  // TODO: Implement this function
-}
-
 void Lnast_writer::write_expr_type() {
   print("#expr(");
   move_to_child();
@@ -476,6 +470,3 @@ void Lnast_writer::write_cassert() {
   move_to_parent();
 }
 
-void Lnast_writer::write_err_flag() {}
-void Lnast_writer::write_phi() {}
-void Lnast_writer::write_hot_phi() {}

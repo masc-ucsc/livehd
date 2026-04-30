@@ -43,14 +43,10 @@ using Lnast_nid = hhds::Tree::Node_class;
 struct Lnast_node {
   Lnast_ntype type;
   State_token token;
-  int16_t     subs;  // ssa subscript
 
-  Lnast_node() : type(Lnast_ntype::create_invalid()), subs(0) {}
-  Lnast_node(Lnast_ntype _type) : type(_type), subs(0) {}
-  Lnast_node(Lnast_ntype _type, const State_token& _token) : type(_type), token(_token), subs(0) {}
-  Lnast_node(Lnast_ntype _type, const State_token& _token, int16_t _subs) : type(_type), token(_token), subs(_subs) {
-    I(!type.is_invalid());
-  }
+  Lnast_node() : type(Lnast_ntype::create_invalid()) {}
+  Lnast_node(Lnast_ntype _type) : type(_type) {}
+  Lnast_node(Lnast_ntype _type, const State_token& _token) : type(_type), token(_token) { I(!type.is_invalid()); }
 
   constexpr bool is_invalid() const { return type.is_invalid(); }
   void           dump() const;
@@ -70,9 +66,6 @@ private:
   std::string                   top_module_name;
   std::string                   source_filename;
   Lnast_nid                     undefined_var_nid;
-
-  // populated during LG->LN pass, maps name -> bitwidth
-  absl::flat_hash_map<std::string, uint32_t> from_lgraph_bw_table;
 
 public:
   static constexpr char version[] = "0.1.0";
@@ -126,15 +119,12 @@ public:
   Lnast_nid append_sibling(const Lnast_nid& sibling, const Lnast_node& n);
 
   // ── payload accessors ───────────────────────────────────────────────────
-  Lnast_ntype     get_type(const Lnast_nid& nid) const;
-  void            set_type(const Lnast_nid& nid, Lnast_ntype t);
-  State_token     get_token(const Lnast_nid& nid) const;
-  void            set_token(const Lnast_nid& nid, const State_token& tok);
-  int16_t         get_subs(const Lnast_nid& nid) const;
-  void            set_subs(const Lnast_nid& nid, int16_t v);
+  Lnast_ntype      get_type(const Lnast_nid& nid) const;
+  void             set_type(const Lnast_nid& nid, Lnast_ntype t);
+  State_token      get_token(const Lnast_nid& nid) const;
+  void             set_token(const Lnast_nid& nid, const State_token& tok);
   std::string_view get_name(const Lnast_nid& nid) const;
   std::string_view get_vname(const Lnast_nid& nid) const { return get_name(nid); }
-  std::string      get_sname(const Lnast_nid& nid) const;
 
   // get_data / set_data: bundle accessors for code that wants the legacy
   // Lnast_node value at once. Performs multiple attribute lookups; prefer the
@@ -152,11 +142,6 @@ public:
   static bool is_output(std::string_view name) { return !name.empty() && name.front() == '%'; }
   static bool is_input(std::string_view name) { return !name.empty() && name.front() == '$'; }
   static bool is_tmp(std::string_view name) { return name.size() >= 3 && name.substr(0, 3) == "___"; }
-
-  // ── bitwidth side-table (populated during LG->LN) ───────────────────────
-  bool     is_in_bw_table(std::string_view name) const;
-  uint32_t get_bitwidth(std::string_view name) const;
-  void     set_bitwidth(std::string_view name, uint32_t bitwidth);
 
   // ── dump ────────────────────────────────────────────────────────────────
   void dump(const Lnast_nid& root_nid) const;

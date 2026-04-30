@@ -8,7 +8,7 @@
 #include "slang/ast/ASTVisitor.h"
 
 #include "pass.hpp"
-#include "lnast_create.hpp"
+#include "lnast_builder.hpp"
 // clang-format on
 
 class Slang_tree {
@@ -20,7 +20,7 @@ public:
   std::vector<std::shared_ptr<Lnast>> pick_lnast();
 
 protected:
-  Lnast_create lnast_create_obj;
+  Lnast_builder lnast_builder;
 
   absl::flat_hash_map<std::string, std::shared_ptr<Lnast>> parsed_lnasts;
 

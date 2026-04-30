@@ -144,16 +144,14 @@ static bool is_valid_ref_text(std::string_view name) {
 //   - `if` / `while` / `cassert`: ALL ref children are reads (no write at
 //     position 0), so this returns false for those — handled by the caller.
 static bool parent_writes_pos0(Lnast_ntype pt) {
-  return pt.is_assign() || pt.is_dp_assign() || pt.is_mut() || pt.is_delay_assign() || pt.is_log_and() || pt.is_log_or()
-         || pt.is_log_not() || pt.is_bit_and() || pt.is_bit_or() || pt.is_bit_not() || pt.is_bit_xor() || pt.is_red_and()
-         || pt.is_red_or() || pt.is_red_xor() || pt.is_popcount() || pt.is_plus() || pt.is_minus() || pt.is_mult() || pt.is_div()
-         || pt.is_mod() || pt.is_shl() || pt.is_sra() || pt.is_sext() || pt.is_set_mask() || pt.is_get_mask() || pt.is_eq()
-         || pt.is_ne() || pt.is_lt() || pt.is_le()
-         || pt.is_gt() || pt.is_ge() || pt.is_is() || pt.is_tuple_add() || pt.is_tuple_get() || pt.is_tuple_set()
-         || pt.is_tuple_concat() || pt.is_attr_set() || pt.is_attr_get() || pt.is_func_call() || pt.is_func_def() || pt.is_range()
-         || pt.is_func_does() || pt.is_func_equals() || pt.is_func_in() || pt.is_func_has() || pt.is_func_case()
-         || pt.is_func_break() || pt.is_func_continue() || pt.is_func_return()
-         || pt.is_phi() || pt.is_hot_phi() || pt.is_for();
+  return pt.is_assign() || pt.is_dp_assign() || pt.is_delay_assign() || pt.is_log_and() || pt.is_log_or() || pt.is_log_not()
+         || pt.is_bit_and() || pt.is_bit_or() || pt.is_bit_not() || pt.is_bit_xor() || pt.is_red_and() || pt.is_red_or()
+         || pt.is_red_xor() || pt.is_popcount() || pt.is_plus() || pt.is_minus() || pt.is_mult() || pt.is_div() || pt.is_mod()
+         || pt.is_shl() || pt.is_sra() || pt.is_sext() || pt.is_set_mask() || pt.is_get_mask() || pt.is_eq() || pt.is_ne()
+         || pt.is_lt() || pt.is_le() || pt.is_gt() || pt.is_ge() || pt.is_is() || pt.is_tuple_add() || pt.is_tuple_get()
+         || pt.is_tuple_set() || pt.is_tuple_concat() || pt.is_attr_set() || pt.is_attr_get() || pt.is_func_call()
+         || pt.is_func_def() || pt.is_range() || pt.is_func_does() || pt.is_func_equals() || pt.is_func_in() || pt.is_func_has()
+         || pt.is_func_case() || pt.is_func_break() || pt.is_func_continue() || pt.is_func_return() || pt.is_for();
 }
 
 // Walk the tree and flag any tmp ref (`___N`) that is read but never written

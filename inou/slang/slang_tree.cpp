@@ -59,11 +59,11 @@ bool Slang_tree::process_top_instance(const slang::ast::InstanceSymbol& symbol) 
 
   I(symbol.isModule());  // modules are fine. Interfaces are a TODO
 
-  I(lnast_create_obj.lnast == nullptr);
+  I(lnast_builder.lnast == nullptr);
 
   parsed_lnasts.emplace(def.name, nullptr);  // insert to avoid recursion (reinsert at the end)
 
-  lnast_create_obj.new_lnast(def.name);
+  lnast_builder.new_lnast(def.name);
 
   // symbol.resolvePortConnections();
 #ifdef LNAST_NODE_POS
@@ -82,14 +82,14 @@ bool Slang_tree::process_top_instance(const slang::ast::InstanceSymbol& symbol) 
 #else
         var_name = absl::StrCat("$", port.name);
 #endif
-        lnast_create_obj.vname2lname.emplace(port.name, var_name);
+        lnast_builder.vname2lname.emplace(port.name, var_name);
       } else {
 #ifdef LNAST_NODE_POS
         var_name = absl::StrCat("%.:", decl_pos, ":", port.name);
 #else
         var_name = absl::StrCat("%", port.name);
 #endif
-        lnast_create_obj.vname2lname.emplace(port.name, var_name);
+        lnast_builder.vname2lname.emplace(port.name, var_name);
       }
 
       const auto& type = port.getType();
@@ -99,8 +99,8 @@ bool Slang_tree::process_top_instance(const slang::ast::InstanceSymbol& symbol) 
           std::print("WARNING: {} is big endian, Flipping IO to handle. Careful about mix/match with modules\n", port.name);
         }
       }
-      lnast_create_obj.vname2lname.emplace(var_name, var_name);
-      lnast_create_obj.create_declare_bits_stmts(var_name, type.isSigned(), type.getBitWidth());
+      lnast_builder.vname2lname.emplace(var_name, var_name);
+      lnast_builder.create_declare_bits_stmts(var_name, type.isSigned(), type.getBitWidth());
 #ifdef LNAST_NODE_POS
       ++decl_pos;
 #endif
@@ -121,15 +121,15 @@ bool Slang_tree::process_top_instance(const slang::ast::InstanceSymbol& symbol) 
       const auto& ns   = member.as<slang::ast::NetSymbol>();
       auto*       expr = ns.getInitializer();
       if (expr) {
-        // std::string lhs_var = lnast_create_obj.get_lnast_name(member.name);
-        lnast_create_obj.create_assign_stmts(member.name, process_expression(*expr, true));  // get last value for assigns
+        // std::string lhs_var = lnast_builder.get_lnast_name(member.name);
+        lnast_builder.create_assign_stmts(member.name, process_expression(*expr, true));  // get last value for assigns
       }
     } else if (member.kind == slang::ast::SymbolKind::ContinuousAssign) {
       const auto& ca = member.as<slang::ast::ContinuousAssignSymbol>();
       const auto& as = ca.getAssignment();
       bool        ok = process(as.as<slang::ast::AssignmentExpression>());
       if (!ok) {
-        lnast_create_obj.lnast = nullptr;
+        lnast_builder.lnast = nullptr;
         return false;
       }
     } else if (member.kind == slang::ast::SymbolKind::ProceduralBlock) {
@@ -151,7 +151,7 @@ bool Slang_tree::process_top_instance(const slang::ast::InstanceSymbol& symbol) 
                 const auto& expr = bstmt->as<slang::ast::ExpressionStatement>().expr;
                 bool        ok   = process(expr.as<slang::ast::AssignmentExpression>());
                 if (!ok) {
-                  lnast_create_obj.lnast = nullptr;
+                  lnast_builder.lnast = nullptr;
                   return false;
                 }
               } else {
@@ -240,11 +240,11 @@ bool Slang_tree::process_top_instance(const slang::ast::InstanceSymbol& symbol) 
             std::make_pair(n, process_expression(expr.expr, true)));  // module connections should use last_value write
       }
 
-      auto inp_tup_var = lnast_create_obj.create_lnast_tmp();
-      lnast_create_obj.create_named_tuple(inp_tup_var, inp_tup);
+      auto inp_tup_var = lnast_builder.create_lnast_tmp();
+      lnast_builder.create_named_tuple(inp_tup_var, inp_tup);
 
       // 2nd- create function call
-      lnast_create_obj.create_func_call(mod.name, mod.moduleName, inp_tup_var);
+      lnast_builder.create_func_call(mod.name, mod.moduleName, inp_tup_var);
 
       // 3rd- assign output tuple to associated variables
       for (auto i = 0u; i < plist.size(); ++i) {
@@ -254,7 +254,7 @@ bool Slang_tree::process_top_instance(const slang::ast::InstanceSymbol& symbol) 
           continue;
         }
 
-        auto rhs_var = lnast_create_obj.create_tuple_get(mod.name, n);
+        auto rhs_var = lnast_builder.create_tuple_get(mod.name, n);
 
         const auto &p = plist[i];
         I(p->kind == slang::ast::AssertionExprKind::Simple);
@@ -268,10 +268,10 @@ bool Slang_tree::process_top_instance(const slang::ast::InstanceSymbol& symbol) 
     }
   }
 
-  // lnast_create_obj.lnast->dump();
+  // lnast_builder.lnast->dump();
 
-  parsed_lnasts.insert_or_assign(def.name, std::move(lnast_create_obj.lnast));
-  lnast_create_obj.lnast = nullptr;
+  parsed_lnasts.insert_or_assign(def.name, std::move(lnast_builder.lnast));
+  lnast_builder.lnast = nullptr;
 
   return true;
 }
@@ -286,7 +286,7 @@ void Slang_tree::process_lhs(const slang::ast::Expression& lhs, const std::strin
 
   if (lhs.kind == slang::ast::ExpressionKind::NamedValue) {
     const auto& var = lhs.as<slang::ast::NamedValueExpression>();
-    var_name        = lnast_create_obj.get_lnast_lhs_name(var.symbol.name);
+    var_name        = lnast_builder.get_lnast_lhs_name(var.symbol.name);
     dest_var_sign   = var.type->isSigned();
     dest_var_bits   = var.type->getBitWidth();
     I(!var.type->isStruct());  // FIXME: structs
@@ -298,7 +298,7 @@ void Slang_tree::process_lhs(const slang::ast::Expression& lhs, const std::strin
     dest_min_bit = dest_max_bit;
 
     const auto& var = es.value().as<slang::ast::NamedValueExpression>();
-    var_name        = lnast_create_obj.get_lnast_lhs_name(var.symbol.name);
+    var_name        = lnast_builder.get_lnast_lhs_name(var.symbol.name);
 
     dest_var_sign = false;
     dest_var_bits = 1;
@@ -308,7 +308,7 @@ void Slang_tree::process_lhs(const slang::ast::Expression& lhs, const std::strin
     I(rs.value().kind == slang::ast::ExpressionKind::NamedValue);
 
     const auto& var = rs.value().as<slang::ast::NamedValueExpression>();
-    var_name        = lnast_create_obj.get_lnast_lhs_name(var.symbol.name);
+    var_name        = lnast_builder.get_lnast_lhs_name(var.symbol.name);
     dest_var_sign   = var.type->isSigned();
     dest_var_bits   = var.type->getBitWidth();
     I(!var.type->isStruct());  // FIXME: structs
@@ -317,31 +317,31 @@ void Slang_tree::process_lhs(const slang::ast::Expression& lhs, const std::strin
     dest_min_bit = process_expression(rs.right(), last_value);
   }
 
-  auto it = lnast_create_obj.vname2lname.find(var_name);
-  if (it == lnast_create_obj.vname2lname.end()) {
-    lnast_create_obj.vname2lname.emplace(var_name, var_name);
-    lnast_create_obj.create_declare_bits_stmts(var_name, dest_var_sign, dest_var_bits);
+  auto it = lnast_builder.vname2lname.find(var_name);
+  if (it == lnast_builder.vname2lname.end()) {
+    lnast_builder.vname2lname.emplace(var_name, var_name);
+    lnast_builder.create_declare_bits_stmts(var_name, dest_var_sign, dest_var_bits);
     if (dest_var_sign) {
-      lnast_create_obj.create_assign_stmts(var_name, "0sb?");
+      lnast_builder.create_assign_stmts(var_name, "0sb?");
     } else {
       std::string qmarks(dest_var_bits, '?');
 
-      lnast_create_obj.create_assign_stmts(var_name,
+      lnast_builder.create_assign_stmts(var_name,
                                            absl::StrCat("0b", qmarks));  // mark with x so that potential use is poison if needed
     }
   }
 
   if (dest_min_bit.empty() && dest_max_bit.empty()) {
-    lnast_create_obj.create_assign_stmts(var_name, rhs_var);
+    lnast_builder.create_assign_stmts(var_name, rhs_var);
   } else {
-    auto bitmask = lnast_create_obj.create_bitmask_stmts(dest_max_bit, dest_min_bit);
+    auto bitmask = lnast_builder.create_bitmask_stmts(dest_max_bit, dest_min_bit);
 #ifdef LNASTOP_DONE
-    lnast_create_obj.create_set_mask_stmts(var_name, bitmask, rhs_var);
+    lnast_builder.create_set_mask_stmts(var_name, bitmask, rhs_var);
 #else
-    auto tmp_var = lnast_create_obj.create_lnast_tmp();
-    lnast_create_obj.create_assign_stmts(tmp_var, var_name);
-    lnast_create_obj.create_set_mask_stmts(tmp_var, bitmask, rhs_var);
-    lnast_create_obj.create_assign_stmts(var_name, tmp_var);
+    auto tmp_var = lnast_builder.create_lnast_tmp();
+    lnast_builder.create_assign_stmts(tmp_var, var_name);
+    lnast_builder.create_set_mask_stmts(tmp_var, bitmask, rhs_var);
+    lnast_builder.create_assign_stmts(var_name, tmp_var);
 #endif
   }
 }
@@ -359,7 +359,7 @@ bool Slang_tree::process(const slang::ast::AssignmentExpression& expr) {
 std::string Slang_tree::process_expression(const slang::ast::Expression& expr, bool last_value) {
   if (expr.kind == slang::ast::ExpressionKind::NamedValue) {
     const auto& nv = expr.as<slang::ast::NamedValueExpression>();
-    return lnast_create_obj.get_lnast_name(nv.symbol.name, last_value);
+    return lnast_builder.get_lnast_name(nv.symbol.name, last_value);
   }
 
   if (expr.kind == slang::ast::ExpressionKind::IntegerLiteral) {
@@ -387,16 +387,16 @@ std::string Slang_tree::process_expression(const slang::ast::Expression& expr, b
 
     std::string var;
     switch (op.op) {
-      case slang::ast::BinaryOperator::Add: var = lnast_create_obj.create_plus_stmts(lhs, rhs); break;
-      case slang::ast::BinaryOperator::Subtract: var = lnast_create_obj.create_minus_stmts(lhs, rhs); break;
-      case slang::ast::BinaryOperator::Multiply: var = lnast_create_obj.create_mult_stmts(lhs, rhs); break;
-      case slang::ast::BinaryOperator::Divide: var = lnast_create_obj.create_div_stmts(lhs, rhs); break;
-      case slang::ast::BinaryOperator::Mod: var = lnast_create_obj.create_mod_stmts(lhs, rhs); break;
-      case slang::ast::BinaryOperator::BinaryAnd: var = lnast_create_obj.create_bit_and_stmts(lhs, rhs); break;
-      case slang::ast::BinaryOperator::BinaryOr: var = lnast_create_obj.create_bit_or_stmts({lhs, rhs}); break;
-      case slang::ast::BinaryOperator::BinaryXor: var = lnast_create_obj.create_bit_xor_stmts(lhs, rhs); break;
+      case slang::ast::BinaryOperator::Add: var = lnast_builder.create_plus_stmts(lhs, rhs); break;
+      case slang::ast::BinaryOperator::Subtract: var = lnast_builder.create_minus_stmts(lhs, rhs); break;
+      case slang::ast::BinaryOperator::Multiply: var = lnast_builder.create_mult_stmts(lhs, rhs); break;
+      case slang::ast::BinaryOperator::Divide: var = lnast_builder.create_div_stmts(lhs, rhs); break;
+      case slang::ast::BinaryOperator::Mod: var = lnast_builder.create_mod_stmts(lhs, rhs); break;
+      case slang::ast::BinaryOperator::BinaryAnd: var = lnast_builder.create_bit_and_stmts(lhs, rhs); break;
+      case slang::ast::BinaryOperator::BinaryOr: var = lnast_builder.create_bit_or_stmts({lhs, rhs}); break;
+      case slang::ast::BinaryOperator::BinaryXor: var = lnast_builder.create_bit_xor_stmts(lhs, rhs); break;
       case slang::ast::BinaryOperator::BinaryXnor:
-        var = lnast_create_obj.create_bit_not_stmts(lnast_create_obj.create_bit_xor_stmts(lhs, rhs));
+        var = lnast_builder.create_bit_not_stmts(lnast_builder.create_bit_xor_stmts(lhs, rhs));
         break;
       default: {
         std::cout << "FIXME unimplemented binary operator\n";
@@ -406,11 +406,11 @@ std::string Slang_tree::process_expression(const slang::ast::Expression& expr, b
 
     auto bw = std::to_string(op.type->getBitWidth());
     if (op.type->isSigned()) {
-      return lnast_create_obj.create_sext_stmts(var, bw);
+      return lnast_builder.create_sext_stmts(var, bw);
     }
 
-    auto mask = lnast_create_obj.create_mask_stmts(bw);
-    return lnast_create_obj.create_bit_and_stmts(var, mask);
+    auto mask = lnast_builder.create_mask_stmts(bw);
+    return lnast_builder.create_bit_and_stmts(var, mask);
   }
 
   if (expr.kind == slang::ast::ExpressionKind::UnaryOp) {
@@ -418,21 +418,21 @@ std::string Slang_tree::process_expression(const slang::ast::Expression& expr, b
 
     auto lhs = process_expression(op.operand(), last_value);
     switch (op.op) {
-      case slang::ast::UnaryOperator::BitwiseNot: return lnast_create_obj.create_bit_not_stmts(lhs);
-      case slang::ast::UnaryOperator::LogicalNot: return lnast_create_obj.create_log_not_stmts(lhs);
+      case slang::ast::UnaryOperator::BitwiseNot: return lnast_builder.create_bit_not_stmts(lhs);
+      case slang::ast::UnaryOperator::LogicalNot: return lnast_builder.create_log_not_stmts(lhs);
       case slang::ast::UnaryOperator::Plus: return lhs;
-      case slang::ast::UnaryOperator::Minus: return lnast_create_obj.create_minus_stmts("0", lhs);
-      case slang::ast::UnaryOperator::BitwiseAnd: return lnast_create_obj.create_red_and_stmts(lhs);
+      case slang::ast::UnaryOperator::Minus: return lnast_builder.create_minus_stmts("0", lhs);
+      case slang::ast::UnaryOperator::BitwiseAnd: return lnast_builder.create_red_and_stmts(lhs);
       case slang::ast::UnaryOperator::BitwiseNand:
-        return lnast_create_obj.create_bit_not_stmts(lnast_create_obj.create_red_and_stmts(lhs));
-      case slang::ast::UnaryOperator::BitwiseXor: return lnast_create_obj.create_red_xor_stmts(lhs);
+        return lnast_builder.create_bit_not_stmts(lnast_builder.create_red_and_stmts(lhs));
+      case slang::ast::UnaryOperator::BitwiseXor: return lnast_builder.create_red_xor_stmts(lhs);
       case slang::ast::UnaryOperator::BitwiseXnor:
-        return lnast_create_obj.create_bit_not_stmts(lnast_create_obj.create_red_xor_stmts(lhs));
-      case slang::ast::UnaryOperator::BitwiseOr: return lnast_create_obj.create_red_or_stmts(lhs);
+        return lnast_builder.create_bit_not_stmts(lnast_builder.create_red_xor_stmts(lhs));
+      case slang::ast::UnaryOperator::BitwiseOr: return lnast_builder.create_red_or_stmts(lhs);
       // do I use bit not or logical not?
       // Also is it ok for it to be two connected references if we have no lnast node?
       case slang::ast::UnaryOperator::BitwiseNor:
-        return lnast_create_obj.create_bit_not_stmts(lnast_create_obj.create_red_or_stmts(lhs));
+        return lnast_builder.create_bit_not_stmts(lnast_builder.create_red_or_stmts(lhs));
         // case UnaryOperator::Preincrement:
         // case UnaryOperator::Predecrement:
         // case UnaryOperator::Postincrement:
@@ -458,31 +458,31 @@ std::string Slang_tree::process_expression(const slang::ast::Expression& expr, b
     auto min_bits = std::to_string(std::min(to_type->getBitWidth(), from_type->getBitWidth()));
 
     if (to_type->isSigned()) {
-      return lnast_create_obj.create_sext_stmts(res, min_bits);
+      return lnast_builder.create_sext_stmts(res, min_bits);
     }
 
     I(!to_type->isSigned());
     // and(and(X,a),b) -> and(X,min(a,b))
     auto bw   = std::to_string(to_type->getBitWidth());
-    auto mask = lnast_create_obj.create_mask_stmts(bw);
-    return lnast_create_obj.create_bit_and_stmts(res, mask);
+    auto mask = lnast_builder.create_mask_stmts(bw);
+    return lnast_builder.create_bit_and_stmts(res, mask);
 #if 0
     if (to_type->isSigned() && !from_type->isSigned()) {
       if (to_type->getBitWidth()<=from_type->getBitWidth()) {
         // sext(and(X,a),b) && a>b -> sext(X,b)
-        return lnast_create_obj.create_sext_stmts(res, create_lnast(min_bits));
+        return lnast_builder.create_sext_stmts(res, create_lnast(min_bits));
       }else{
         // sext(and(X,a),b) && a<b -> and(X,a)
-        auto mask = lnast_create_obj.create_mask_stmts(create_lnast(min_bits));
-        return lnast_create_obj.create_bit_and_stmts(res, mask);
+        auto mask = lnast_builder.create_mask_stmts(create_lnast(min_bits));
+        return lnast_builder.create_bit_and_stmts(res, mask);
       }
     }
 
     I(!to_type->isSigned() && from_type->isSigned());
 
-    auto tmp = lnast_create_obj.create_sext_stmts(res, create_lnast(from_type->getBitWidth()));
-    auto mask = lnast_create_obj.create_mask_stmts(create_lnast(to_type->getBitWidth()));
-    return lnast_create_obj.create_bit_and_stmts(tmp, mask);
+    auto tmp = lnast_builder.create_sext_stmts(res, create_lnast(from_type->getBitWidth()));
+    auto mask = lnast_builder.create_mask_stmts(create_lnast(to_type->getBitWidth()));
+    return lnast_builder.create_bit_and_stmts(tmp, mask);
 #endif
   }
 
@@ -499,14 +499,14 @@ std::string Slang_tree::process_expression(const slang::ast::Expression& expr, b
       auto res_var = process_expression(*e, last_value);
 
       if (offset) {
-        res_var = lnast_create_obj.create_shl_stmts(res_var, std::to_string(offset));
+        res_var = lnast_builder.create_shl_stmts(res_var, std::to_string(offset));
       }
       adjusted_fields.emplace_back(res_var);
 
       offset += bits;
     }
 
-    return lnast_create_obj.create_bit_or_stmts(adjusted_fields);
+    return lnast_builder.create_bit_or_stmts(adjusted_fields);
   }
 
   if (expr.kind == slang::ast::ExpressionKind::ElementSelect) {
@@ -515,11 +515,11 @@ std::string Slang_tree::process_expression(const slang::ast::Expression& expr, b
 
     const auto& var = es.value().as<slang::ast::NamedValueExpression>();
 
-    auto sel_var  = lnast_create_obj.get_lnast_name(var.symbol.name, last_value);
+    auto sel_var  = lnast_builder.get_lnast_name(var.symbol.name, last_value);
     auto sel_bit  = process_expression(es.selector(), last_value);
-    auto sel_mask = lnast_create_obj.create_shl_stmts("1", sel_bit);
+    auto sel_mask = lnast_builder.create_shl_stmts("1", sel_bit);
 
-    return lnast_create_obj.create_get_mask_stmts(sel_var, sel_mask);
+    return lnast_builder.create_get_mask_stmts(sel_var, sel_mask);
   }
 
   if (expr.kind == slang::ast::ExpressionKind::RangeSelect) {
@@ -528,12 +528,12 @@ std::string Slang_tree::process_expression(const slang::ast::Expression& expr, b
 
     const auto& var = es.value().as<slang::ast::NamedValueExpression>();
 
-    auto sel_var = lnast_create_obj.get_lnast_name(var.symbol.name, last_value);
+    auto sel_var = lnast_builder.get_lnast_name(var.symbol.name, last_value);
     auto max_bit = process_expression(es.left(), last_value);
     auto min_bit = process_expression(es.right(), last_value);
 
-    auto sel_mask = lnast_create_obj.create_bitmask_stmts(max_bit, min_bit);
-    return lnast_create_obj.create_get_mask_stmts(sel_var, sel_mask);
+    auto sel_mask = lnast_builder.create_bitmask_stmts(max_bit, min_bit);
+    return lnast_builder.create_get_mask_stmts(sel_var, sel_mask);
   }
 
   std::cout << "FIXME still unimplemented Expression kind\n";

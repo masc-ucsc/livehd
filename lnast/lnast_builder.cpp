@@ -1,17 +1,17 @@
 //  This file is distributed under the BSD 3-Clause License. See LICENSE for details.
 
-#include "lnast_create.hpp"
+#include "lnast_builder.hpp"
 
 #include "absl/strings/str_split.h"
 #include "bundle.hpp"
 #include "iassert.hpp"
 #include "str_tools.hpp"
 
-Lnast_create::Lnast_create() {}
+Lnast_builder::Lnast_builder() {}
 
-std::string Lnast_create::create_lnast_tmp() { return absl::StrCat("___", ++tmp_var_cnt); }
+std::string Lnast_builder::create_lnast_tmp() { return absl::StrCat("___", ++tmp_var_cnt); }
 
-std::string Lnast_create::get_lnast_name(std::string_view vname, bool last_value) {
+std::string Lnast_builder::get_lnast_name(std::string_view vname, bool last_value) {
   std::string_view lname;
 
   const auto it = vname2lname.find(vname);
@@ -34,7 +34,7 @@ std::string Lnast_create::get_lnast_name(std::string_view vname, bool last_value
   return tmp_var;
 }
 
-std::string_view Lnast_create::get_lnast_lhs_name(std::string_view vname) {
+std::string_view Lnast_builder::get_lnast_lhs_name(std::string_view vname) {
   const auto& it = vname2lname.find(vname);
   if (it == vname2lname.end()) {
     // vname2lname.emplace(vname,vname);
@@ -44,7 +44,7 @@ std::string_view Lnast_create::get_lnast_lhs_name(std::string_view vname) {
   return it->second;
 }
 
-void Lnast_create::new_lnast(std::string_view name) {
+void Lnast_builder::new_lnast(std::string_view name) {
   lnast          = std::make_unique<Lnast>(name);
   auto root_nid  = lnast->set_root(Lnast_node(Lnast_ntype::create_top()));
   idx_stmts      = lnast->add_child(root_nid, Lnast_node::create_stmts());
@@ -53,7 +53,7 @@ void Lnast_create::new_lnast(std::string_view name) {
   tmp_var_cnt = 0;
 }
 
-// std::vector<std::shared_ptr<Lnast>> Lnast_create::pick_lnast() {
+// std::vector<std::shared_ptr<Lnast>> Lnast_builder::pick_lnast() {
 //   std::vector<std::shared_ptr<Lnast>> v;
 //
 //   for (auto &l : parsed_lnasts) {
@@ -67,7 +67,7 @@ void Lnast_create::new_lnast(std::string_view name) {
 // }
 
 // Return a __tmp for (1<<expr)-1
-std::string Lnast_create::create_mask_stmts(std::string_view dest_max_bit) {
+std::string Lnast_builder::create_mask_stmts(std::string_view dest_max_bit) {
   if (dest_max_bit.empty()) {
     return "";
   }
@@ -87,7 +87,7 @@ std::string Lnast_create::create_mask_stmts(std::string_view dest_max_bit) {
   return mask_h_var;
 }
 
-std::string Lnast_create::create_bitmask_stmts(std::string_view max_bit, std::string_view min_bit) {
+std::string Lnast_builder::create_bitmask_stmts(std::string_view max_bit, std::string_view min_bit) {
   if (str_tools::is_i(max_bit) && str_tools::is_i(min_bit)) {
     auto a = str_tools::to_i(max_bit);
     auto b = str_tools::to_i(min_bit);
@@ -114,7 +114,7 @@ std::string Lnast_create::create_bitmask_stmts(std::string_view max_bit, std::st
   return create_shl_stmts(upper_mask, min_bit);
 }
 
-std::string Lnast_create::create_bit_not_stmts(std::string_view var_name) {
+std::string Lnast_builder::create_bit_not_stmts(std::string_view var_name) {
   if (var_name.empty()) {
     return "";
   }
@@ -131,7 +131,7 @@ std::string Lnast_create::create_bit_not_stmts(std::string_view var_name) {
   return res_var;
 }
 
-std::string Lnast_create::create_log_not_stmts(std::string_view var_name) {
+std::string Lnast_builder::create_log_not_stmts(std::string_view var_name) {
   if (var_name.empty()) {
     return "";
   }
@@ -148,7 +148,7 @@ std::string Lnast_create::create_log_not_stmts(std::string_view var_name) {
   return res_var;
 }
 
-std::string Lnast_create::create_red_or_stmts(std::string_view var_name) {
+std::string Lnast_builder::create_red_or_stmts(std::string_view var_name) {
   if (var_name.empty()) {
     return "";
   }
@@ -165,7 +165,7 @@ std::string Lnast_create::create_red_or_stmts(std::string_view var_name) {
   return res_var;
 }
 
-std::string Lnast_create::create_red_and_stmts(std::string_view var_name) {
+std::string Lnast_builder::create_red_and_stmts(std::string_view var_name) {
   if (var_name.empty()) {
     return "";
   }
@@ -182,7 +182,7 @@ std::string Lnast_create::create_red_and_stmts(std::string_view var_name) {
   return res_var;
 }
 
-std::string Lnast_create::create_red_xor_stmts(std::string_view var_name) {
+std::string Lnast_builder::create_red_xor_stmts(std::string_view var_name) {
   if (var_name.empty()) {
     return "";
   }
@@ -199,7 +199,7 @@ std::string Lnast_create::create_red_xor_stmts(std::string_view var_name) {
   return res_var;
 }
 
-std::string Lnast_create::create_sra_stmts(std::string_view a_var, std::string_view b_var) {
+std::string Lnast_builder::create_sra_stmts(std::string_view a_var, std::string_view b_var) {
   I(!a_var.empty());
   I(!b_var.empty());
 
@@ -221,13 +221,13 @@ std::string Lnast_create::create_sra_stmts(std::string_view a_var, std::string_v
   return res_var;
 }
 
-std::string Lnast_create::create_pick_bit_stmts(std::string_view a_var, std::string_view pos) {
+std::string Lnast_builder::create_pick_bit_stmts(std::string_view a_var, std::string_view pos) {
   auto v = create_sra_stmts(a_var, pos);
 
   return create_bit_and_stmts(v, "1");
 }
 
-std::string Lnast_create::create_sext_stmts(std::string_view a_var, std::string_view b_var) {
+std::string Lnast_builder::create_sext_stmts(std::string_view a_var, std::string_view b_var) {
   I(!a_var.empty());
   I(!b_var.empty());
 
@@ -248,7 +248,7 @@ std::string Lnast_create::create_sext_stmts(std::string_view a_var, std::string_
   return res_var;
 }
 
-std::string Lnast_create::create_bit_and_stmts(std::string_view a_var, std::string_view b_var) {
+std::string Lnast_builder::create_bit_and_stmts(std::string_view a_var, std::string_view b_var) {
   if (a_var.empty()) {
     return std::string(b_var);
   }
@@ -273,7 +273,7 @@ std::string Lnast_create::create_bit_and_stmts(std::string_view a_var, std::stri
   return res_var;
 }
 
-std::string Lnast_create::create_bit_or_stmts(const std::vector<std::string>& var) {
+std::string Lnast_builder::create_bit_or_stmts(const std::vector<std::string>& var) {
   std::string res_var;
   Lnast_nid   lid;
 
@@ -298,7 +298,7 @@ std::string Lnast_create::create_bit_or_stmts(const std::vector<std::string>& va
   return res_var;
 }
 
-std::string Lnast_create::create_bit_xor_stmts(std::string_view a_var, std::string_view b_var) {
+std::string Lnast_builder::create_bit_xor_stmts(std::string_view a_var, std::string_view b_var) {
   if (a_var.empty()) {
     return std::string(b_var);
   }
@@ -323,7 +323,7 @@ std::string Lnast_create::create_bit_xor_stmts(std::string_view a_var, std::stri
   return res_var;
 }
 
-std::string Lnast_create::create_shl_stmts(std::string_view a_var, std::string_view b_var) {
+std::string Lnast_builder::create_shl_stmts(std::string_view a_var, std::string_view b_var) {
   I(!a_var.empty());
   I(!b_var.empty());
 
@@ -344,7 +344,7 @@ std::string Lnast_create::create_shl_stmts(std::string_view a_var, std::string_v
   return res_var;
 }
 
-void Lnast_create::create_dp_assign_stmts(std::string_view lhs_var, std::string_view rhs_var) {
+void Lnast_builder::create_dp_assign_stmts(std::string_view lhs_var, std::string_view rhs_var) {
   I(lhs_var.size());
   I(rhs_var.size());
 
@@ -357,7 +357,7 @@ void Lnast_create::create_dp_assign_stmts(std::string_view lhs_var, std::string_
   }
 }
 
-void Lnast_create::create_assign_stmts(std::string_view lhs_var, std::string_view rhs_var) {
+void Lnast_builder::create_assign_stmts(std::string_view lhs_var, std::string_view rhs_var) {
   I(lhs_var.size());
   I(rhs_var.size());
 
@@ -423,7 +423,7 @@ void Lnast_create::create_assign_stmts(std::string_view lhs_var, std::string_vie
   }
 }
 
-void Lnast_create::create_declare_bits_stmts(std::string_view a_var, bool is_signed, int bits) {
+void Lnast_builder::create_declare_bits_stmts(std::string_view a_var, bool is_signed, int bits) {
   auto idx_dot = lnast->add_child(idx_stmts, Lnast_node::create_tuple_set());
 
 #ifdef LNASTOP_DONE
@@ -462,7 +462,7 @@ void Lnast_create::create_declare_bits_stmts(std::string_view a_var, bool is_sig
   lnast->add_child(idx_dot, Lnast_node::create_const(bits));
 }
 
-void Lnast_create::create_func_call(std::string_view out_tup, std::string_view fname, std::string_view inp_tup) {
+void Lnast_builder::create_func_call(std::string_view out_tup, std::string_view fname, std::string_view inp_tup) {
   auto idx_dot = lnast->add_child(idx_stmts, Lnast_node::create_func_call());
 
   lnast->add_child(idx_dot, Lnast_node::create_ref(out_tup));
@@ -470,7 +470,7 @@ void Lnast_create::create_func_call(std::string_view out_tup, std::string_view f
   lnast->add_child(idx_dot, Lnast_node::create_ref(inp_tup));
 }
 
-void Lnast_create::create_named_tuple(std::string_view lhs_var, const std::vector<std::pair<std::string, std::string>>& rhs) {
+void Lnast_builder::create_named_tuple(std::string_view lhs_var, const std::vector<std::pair<std::string, std::string>>& rhs) {
 #ifdef LNASTOP_DONE
   auto idx_dot = lnast->add_child(idx_stmts, Lnast_node::create_tuple_add());
 
@@ -514,7 +514,7 @@ void Lnast_create::create_named_tuple(std::string_view lhs_var, const std::vecto
 #endif
 }
 
-std::string Lnast_create::create_tuple_get(std::string_view var) {
+std::string Lnast_builder::create_tuple_get(std::string_view var) {
 #ifdef LNASTOP_DONE
   return std::string(var);
 #else
@@ -557,7 +557,7 @@ std::string Lnast_create::create_tuple_get(std::string_view var) {
 #endif
 }
 
-std::string Lnast_create::create_tuple_get(std::string_view tup_var, std::string_view field_var) {
+std::string Lnast_builder::create_tuple_get(std::string_view tup_var, std::string_view field_var) {
   auto idx_dot = lnast->add_child(idx_stmts, Lnast_node::create_tuple_get());
 
   auto res_var = create_lnast_tmp();
@@ -575,7 +575,7 @@ std::string Lnast_create::create_tuple_get(std::string_view tup_var, std::string
   return res_var;
 }
 
-std::string Lnast_create::create_minus_stmts(std::string_view a_var, std::string_view b_var) {
+std::string Lnast_builder::create_minus_stmts(std::string_view a_var, std::string_view b_var) {
   if (b_var.empty()) {
     return std::string(a_var);
   }
@@ -601,7 +601,7 @@ std::string Lnast_create::create_minus_stmts(std::string_view a_var, std::string
   return res_var;
 }
 
-std::string Lnast_create::create_plus_stmts(std::string_view a_var, std::string_view b_var) {
+std::string Lnast_builder::create_plus_stmts(std::string_view a_var, std::string_view b_var) {
   if (a_var.empty()) {
     return std::string(b_var);
   }
@@ -626,7 +626,7 @@ std::string Lnast_create::create_plus_stmts(std::string_view a_var, std::string_
   return res_var;
 }
 
-std::string Lnast_create::create_mult_stmts(std::string_view a_var, std::string_view b_var) {
+std::string Lnast_builder::create_mult_stmts(std::string_view a_var, std::string_view b_var) {
   if (a_var.empty() || a_var == "1") {
     return std::string(b_var);
   }
@@ -651,7 +651,7 @@ std::string Lnast_create::create_mult_stmts(std::string_view a_var, std::string_
   return res_var;
 }
 
-std::string Lnast_create::create_div_stmts(std::string_view a_var, std::string_view b_var) {
+std::string Lnast_builder::create_div_stmts(std::string_view a_var, std::string_view b_var) {
   if (b_var.empty() || b_var == "1") {
     return std::string(a_var);
   }
@@ -679,7 +679,7 @@ std::string Lnast_create::create_div_stmts(std::string_view a_var, std::string_v
   return res_var;
 }
 
-std::string Lnast_create::create_mod_stmts(std::string_view a_var, std::string_view b_var) {
+std::string Lnast_builder::create_mod_stmts(std::string_view a_var, std::string_view b_var) {
   I(a_var.size() && b_var.size());
 
   auto res_var = create_lnast_tmp();
@@ -699,7 +699,7 @@ std::string Lnast_create::create_mod_stmts(std::string_view a_var, std::string_v
   return res_var;
 }
 
-std::string Lnast_create::create_get_mask_stmts(std::string_view sel_var, std::string_view bitmask) {
+std::string Lnast_builder::create_get_mask_stmts(std::string_view sel_var, std::string_view bitmask) {
   I(sel_var.size() && bitmask.size());
 
   auto res_var = create_lnast_tmp();
@@ -715,7 +715,7 @@ std::string Lnast_create::create_get_mask_stmts(std::string_view sel_var, std::s
   return res_var;
 }
 
-void Lnast_create::create_set_mask_stmts(std::string_view sel_var, std::string_view bitmask, std::string_view value) {
+void Lnast_builder::create_set_mask_stmts(std::string_view sel_var, std::string_view bitmask, std::string_view value) {
   I(sel_var.size() && bitmask.size() && value.size());
 
   auto idx = lnast->add_child(idx_stmts, Lnast_node::create_set_mask());
