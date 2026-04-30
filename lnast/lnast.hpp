@@ -12,7 +12,6 @@
 
 #include "absl/container/flat_hash_map.h"
 #include "absl/strings/str_cat.h"
-#include "elab_scanner.hpp"
 #include "hhds/attrs/name.hpp"
 #include "hhds/tree.hpp"
 #include "lnast_attrs.hpp"
@@ -34,32 +33,26 @@ inline int64_t pos_of(const hhds::Tree::Node_class& nid) { return nid.get_class_
 
 using Lnast_nid = hhds::Tree::Node_class;
 
-#define CREATE_LNAST_NODE(type)                                                                                                 \
-  static Lnast_node create_##type() { return Lnast_node(Lnast_ntype::create_##type(), State_token(0, 0, 0, 0, "")); }           \
-  static Lnast_node create_##type(std::string_view str) {                                                                       \
-    return Lnast_node(Lnast_ntype::create_##type(), State_token(0, 0, 0, 0, str));                                              \
-  }                                                                                                                             \
-  static Lnast_node create_##type(std::string_view str, uint32_t line_num) {                                                    \
-    return Lnast_node(Lnast_ntype::create_##type(), State_token(0, 0, 0, line_num, str));                                       \
-  }                                                                                                                             \
-  static Lnast_node create_##type(std::string_view str, uint32_t line_num, uint64_t pos1, uint64_t pos2) {                      \
-    return Lnast_node(Lnast_ntype::create_##type(), State_token(0, pos1, pos2, line_num, str));                                 \
-  }                                                                                                                             \
-  static Lnast_node create_##type(const State_token& new_token) { return Lnast_node(Lnast_ntype::create_##type(), new_token); } \
-  static Lnast_node create_##type(std::string_view str, uint32_t line_num, uint64_t pos1, uint64_t pos2, std::string fname) {   \
-    return Lnast_node(Lnast_ntype::create_##type(), State_token(0, pos1, pos2, line_num, str, fname));                          \
-  }                                                                                                                             \
-  static Lnast_node create_##type(std::string_view str, uint64_t pos1, uint64_t pos2, std::string fname) {                      \
-    return Lnast_node(Lnast_ntype::create_##type(), State_token(0, pos1, pos2, 0, str, fname));                                 \
-  }
+// Lightweight transient bundle: tree slot is the source of truth for `type`
+// after `Lnast::set_data` runs; this struct is only used to carry
+// (type, name) into add_child / set_root / append_sibling. LoC fields
+// (line/pos/fname) are NOT carried here — set them via Lnast::set_loc on
+// the resulting nid when needed.
+//
+// `name` is owned (std::string) so the int-form `create_const(int64_t)` can
+// stringify safely. SSO covers the common case (short var names, "nil",
+// "true", small constants).
+#define CREATE_LNAST_NODE(type)                                                                                  \
+  static Lnast_node create_##type() { return Lnast_node(Lnast_ntype::create_##type(), std::string{}); }          \
+  static Lnast_node create_##type(std::string_view str) { return Lnast_node(Lnast_ntype::create_##type(), std::string{str}); }
 
 struct Lnast_node {
   Lnast_ntype type;
-  State_token token;
+  std::string name;
 
   Lnast_node() : type(Lnast_ntype::create_invalid()) {}
   Lnast_node(Lnast_ntype _type) : type(_type) {}
-  Lnast_node(Lnast_ntype _type, const State_token& _token) : type(_type), token(_token) { I(!type.is_invalid()); }
+  Lnast_node(Lnast_ntype _type, std::string _name) : type(_type), name(std::move(_name)) { I(!type.is_invalid()); }
 
   constexpr bool is_invalid() const { return type.is_invalid(); }
   void           dump() const;
@@ -68,13 +61,17 @@ struct Lnast_node {
 #include "lnast_nodes.def"
 
   static Lnast_node create_const(int64_t v) {
-    return Lnast_node(Lnast_ntype::create_const(), State_token(0, 0, 0, 0, std::to_string(v)));
+    return Lnast_node(Lnast_ntype::create_const(), std::to_string(v));
   }
 };
 
 class Lnast {
 private:
+  // Forest must outlive the tree — HHDS Tree::forest_ptr is a raw pointer
+  // and TreeIO::forest_owner_ is weak, so dropping our shared_ptr would
+  // leave forest_ptr dangling.
   std::shared_ptr<hhds::Forest> forest_;
+  std::shared_ptr<hhds::TreeIO> treeio_;
   std::shared_ptr<hhds::Tree>   tree_;
   std::string                   top_module_name;
   std::string                   source_filename;
@@ -86,6 +83,11 @@ public:
   explicit Lnast() : Lnast("noname", "") {}
   explicit Lnast(std::string_view _module_name) : Lnast(_module_name, "") {}
   Lnast(std::string_view _module_name, std::string_view _file_name);
+  // Wrap an already-built unattached tree (no Forest, no TreeIO). Used by
+  // the upass runner to wrap a `Forest::create_tree_temp` body so the
+  // existing add_child / set_data API drives staging emission. The wrapper
+  // cannot be replaced (no TreeIO); replace_body() asserts on this Lnast.
+  Lnast(std::shared_ptr<hhds::Tree> body, std::string_view _module_name);
   ~Lnast();
 
   // ── tree access ─────────────────────────────────────────────────────────
@@ -93,6 +95,14 @@ public:
   const hhds::Tree&                    tree() const noexcept { return *tree_; }
   std::shared_ptr<hhds::Tree>          tree_ptr() const noexcept { return tree_; }
   const std::shared_ptr<hhds::Forest>& forest() const noexcept { return forest_; }
+  const std::shared_ptr<hhds::TreeIO>& treeio() const noexcept { return treeio_; }
+
+  // Atomically swap the tree body backing this Lnast. `new_body` must be an
+  // unattached tree (e.g. from `forest()->create_tree_temp(...)` or
+  // `tree_ptr()->clone()`). Slot identity (Tid + name) is preserved; any
+  // other holder of this Lnast picks up the new body on next access.
+  // Asserts when called on a Lnast constructed without a TreeIO.
+  void replace_body(std::shared_ptr<hhds::Tree> new_body);
 
   Lnast_nid get_root() const { return tree_->get_root_node(); }
 
@@ -134,10 +144,23 @@ public:
   // ── payload accessors ───────────────────────────────────────────────────
   Lnast_ntype      get_type(const Lnast_nid& nid) const;
   void             set_type(const Lnast_nid& nid, Lnast_ntype t);
-  State_token      get_token(const Lnast_nid& nid) const;
-  void             set_token(const Lnast_nid& nid, const State_token& tok);
   std::string_view get_name(const Lnast_nid& nid) const;
   std::string_view get_vname(const Lnast_nid& nid) const { return get_name(nid); }
+  void             set_name(const Lnast_nid& nid, std::string_view name);
+
+  // LoC payload — read/write the per-node source-position attributes
+  // independently of the name/type bundle. Most callers don't need this;
+  // diagnostic prints and the parser do.
+  struct Loc {
+    uint64_t pos1{0};
+    uint64_t pos2{0};
+    uint32_t line{0};
+    uint8_t  tok{0};
+  };
+  Loc              get_loc(const Lnast_nid& nid) const;
+  void             set_loc(const Lnast_nid& nid, const Loc& loc);
+  std::string_view get_fname(const Lnast_nid& nid) const;
+  void             set_fname(const Lnast_nid& nid, std::string_view fname);
 
   // get_data / set_data: bundle accessors for code that wants the legacy
   // Lnast_node value at once. Performs multiple attribute lookups; prefer the

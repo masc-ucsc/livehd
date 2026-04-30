@@ -236,7 +236,10 @@ void Pass_upass::work(Eprp_var& var) {
 
       auto staged = runner.take_staging();
       if (staged) {
-        var.replace(ln, staged);
+        // In-place body swap via TreeIO::replace. `ln` (the same shared_ptr
+        // already in var.lnasts) now refers to the rewritten tree; the
+        // staging wrapper is dropped.
+        ln->replace_body(staged->tree_ptr());
       }
       auto new_lnasts = runner.take_new_lnasts();
       for (const auto& new_ln : new_lnasts) {
@@ -276,11 +279,12 @@ void Pass_upass::work(Eprp_var& var) {
     }
     runner.run(up.max_iters);
 
-    // Swap the rewritten staging tree into var.lnasts so downstream passes
-    // (lnast.dump, …) see the folded/DCE'd IR.
+    // Swap the rewritten staging tree into the existing Lnast so downstream
+    // passes (lnast.dump, …) see the folded/DCE'd IR. Slot identity (the
+    // shared_ptr in var.lnasts and the underlying TreeIO Tid) is preserved.
     auto staged = runner.take_staging();
     if (staged) {
-      var.replace(ln, staged);
+      ln->replace_body(staged->tree_ptr());
     }
     auto new_lnasts = runner.take_new_lnasts();
     for (const auto& new_ln : new_lnasts) {

@@ -106,10 +106,10 @@ bazel_dep(name = "hhds", version = "0.2.0")
 
 archive_override(
     module_name = "hhds",
-    integrity = "sha256-mrs96SNrsS0i+QRpZtkTFcz8Oo4I3Er3g2Owr2GzQTQ=",
-    strip_prefix = "hhds-98937f6e1d4a637b2a4d6e659f829bd86bf28467",
+    integrity = "sha256-UFl8ebc09xxBhG4Q71KVBmd9oR+kmF3/BC7LF6wLIkM=",
+    strip_prefix = "hhds-1f0e8c8770e32fc6a6c2fa6651e9af5957889697",
     urls = [
-        "https://github.com/masc-ucsc/hhds/archive/98937f6e1d4a637b2a4d6e659f829bd86bf28467.zip",
+        "https://github.com/masc-ucsc/hhds/archive/1f0e8c8770e32fc6a6c2fa6651e9af5957889697.zip",
     ],
 )
 

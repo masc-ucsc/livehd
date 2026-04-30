@@ -143,9 +143,9 @@ void Semantic_check::error_print_lnast_by_name(Lnast* lnast, std::string_view er
 
     std::string indent(2 * (level_of(it) + 1), ' ');
 
-    std::print("{} {} {:>20} : {}", level_of(it), indent, node.type.to_sv(), node.token.get_text());
+    std::print("{} {} {:>20} : {}", level_of(it), indent, node.type.to_sv(), node.name);
 
-    if (node.token.get_text() == error_name && !printed) {
+    if (node.name == error_name && !printed) {
       std::cout << "    <==========\n";
       printed = true;
     } else {
@@ -165,7 +165,7 @@ void Semantic_check::error_print_lnast_by_type(Lnast* lnast, std::string_view er
 
     std::string indent(2 * (level_of(it) + 1), ' ');
 
-    std::print("{} {} {:>20} : {}", level_of(it), indent, node.type.to_sv(), node.token.get_text());
+    std::print("{} {} {:>20} : {}", level_of(it), indent, node.type.to_sv(), node.name);
 
     if (node.type.to_sv() == error_name && !printed) {
       std::cout << "    <==========\n";
@@ -188,11 +188,11 @@ void Semantic_check::error_print_lnast_var_warn(Lnast* lnast, std::vector<std::s
 
     std::string indent(2 * (level_of(it) + 1), ' ');
 
-    std::print("{} {} {:>20} : {}", level_of(it), indent, node.type.to_sv(), node.token.get_text());
+    std::print("{} {} {:>20} : {}", level_of(it), indent, node.type.to_sv(), node.name);
 
     if (error_names.size() != 0) {
       for (auto node_name = error_names.begin(); node_name != error_names.end(); node_name++) {
-        if (*node_name == node.token.get_text()) {
+        if (*node_name == node.name) {
           std::cout << "    <==========\n";
           error_names.erase(node_name);
           printed = true;

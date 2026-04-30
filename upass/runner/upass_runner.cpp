@@ -318,11 +318,15 @@ void uPass_runner::run(std::size_t max_iters) {
     return;
   }
 
-  // Initialize a fresh staging tree with the same top-module name as the
-  // input. set_root() materializes the root slot; its data (the `top` node)
-  // is overwritten by process_top() when it pushes.
-  staging = std::make_shared<Lnast>(lm->get_top_module_name());
-  staging_parent      = staging->set_root(Lnast_node::create_top());
+  // Allocate the staging body in the input Lnast's Forest as an unattached
+  // temp tree (HHDS Forest::create_tree_temp). The runner builds into it
+  // with the tree-only Lnast wrapper; pass_upass.cpp then atomically swaps
+  // it in via Lnast::replace_body so any holder of the input Lnast picks
+  // up the new body without a shared_ptr swap.
+  auto staging_body = lm->get_lnast()->forest()->create_tree_temp(
+      std::format("staging-{}", lm->get_top_module_name()));
+  staging              = std::make_shared<Lnast>(staging_body, lm->get_top_module_name());
+  staging_parent       = staging->set_root(Lnast_node::create_top());
   staging_parent_stack = {};
 
   upass::Runner_fixed_point::run(

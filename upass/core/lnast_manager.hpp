@@ -140,7 +140,7 @@ public:
     // get_data() returns by value; keep the Lnast_node alive so the
     // string_view from get_text() doesn't dangle for std::from_chars below.
     const auto data = lnast->get_data(decode_nid(node));
-    const auto text = data.token.get_text();
+    const auto text = data.name;
     int64_t    value{0};
     auto*      begin = text.data();
     auto*      end   = text.data() + text.size();
@@ -173,14 +173,16 @@ public:
     return true;
   }
 
-  auto get_top_module_name() { return lnast->get_top_module_name(); }
+  auto                          get_top_module_name() { return lnast->get_top_module_name(); }
+  const std::shared_ptr<Lnast>& get_lnast() const { return lnast; }
 
   void move_to_nid(const Lnast_nid& nid) { current_nid = nid; }
 
   // Returns a string_view backed by the persistent attribute store, so it
-  // stays valid until the LNAST mutates that node's text. Avoid `get_data()`
-  // here — that returns a temporary Lnast_node and the contained State_token
-  // would dangle the moment the full expression ends.
+  // stays valid until the LNAST mutates that node's text. Cheaper than
+  // `get_data()` — that returns an Lnast_node by value with an owned name
+  // string copy, fine for short-lived use but unnecessary if you just want
+  // the text.
   auto current_text() const { return lnast->get_name(current_nid); }
 
   // Returns the Lnast_nid of the read cursor. Used by passes that need a

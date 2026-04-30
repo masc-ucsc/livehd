@@ -28,7 +28,7 @@ TEST(UpassSharedFoldParity, FoldSumConstAcrossLnastAndLgraph) {
   EXPECT_EQ(lnast_rep.new_const_nodes, 0U);
   EXPECT_EQ(lnast_rep.deleted_nodes, 0U);
   EXPECT_TRUE(ln->get_type(pl).is_const());
-  EXPECT_EQ(ln->get_data(pl).token.get_text(), "5");
+  EXPECT_EQ(ln->get_data(pl).name, "5");
 
   constexpr std::string_view kDbPath = "lgdb_upass_shared_fold_parity";
   file_utils::clean_dir(kDbPath);

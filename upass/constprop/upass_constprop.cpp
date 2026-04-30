@@ -1244,10 +1244,10 @@ bool uPass_constprop::try_eval_comb_call(std::string_view dst, std::string_view 
 
   auto resolve_local = [&](const Lnast_node& node) -> std::optional<Lconst> {
     if (node.type.is_const()) {
-      return Lconst::from_pyrope(node.token.get_text());
+      return Lconst::from_pyrope(node.name);
     }
     if (node.type.is_ref()) {
-      auto it = local_values.find(std::string(node.token.get_text()));
+      auto it = local_values.find(std::string(node.name));
       if (it != local_values.end()) {
         return it->second;
       }
@@ -1274,11 +1274,9 @@ bool uPass_constprop::try_eval_comb_call(std::string_view dst, std::string_view 
         if (tuple_ref.is_invalid() || !fn->get_type(tuple_ref).is_ref()) {
           continue;
         }
-        // get_data() returns Lnast_node by value; its State_token::text owns
-        // the storage that token.get_text() views. Materialize into a string
-        // so the comparison below isn't reading freed stack memory after the
-        // temporary's destruction.
-        const std::string tuple_name(fn->get_data(tuple_ref).token.get_text());
+        // Materialize into an owned string so the comparison below holds
+        // even if the Lnast_node temporary's `name` storage moves.
+        const std::string tuple_name(fn->get_data(tuple_ref).name);
         for (auto item = fn->get_sibling_next(tuple_ref); !item.is_invalid(); item = fn->get_sibling_next(item)) {
           if (!fn->get_type(item).is_assign()) {
             continue;
@@ -1288,9 +1286,9 @@ bool uPass_constprop::try_eval_comb_call(std::string_view dst, std::string_view 
             continue;
           }
           if (tuple_name == "__input_tuple_ref") {
-            params.emplace_back(fn->get_data(key).token.get_text());
+            params.emplace_back(fn->get_data(key).name);
           } else if (tuple_name == "__output_tuple_ref") {
-            outputs.emplace_back(fn->get_data(key).token.get_text());
+            outputs.emplace_back(fn->get_data(key).name);
           }
         }
         continue;
@@ -1353,7 +1351,7 @@ bool uPass_constprop::try_eval_comb_call(std::string_view dst, std::string_view 
         return Eval_result::aborted;
       }
     }
-    local_values[std::string(fn->get_data(lhs).token.get_text())] = *acc;
+    local_values[std::string(fn->get_data(lhs).name)] = *acc;
     return Eval_result::processed;
   };
 
@@ -1380,7 +1378,7 @@ bool uPass_constprop::try_eval_comb_call(std::string_view dst, std::string_view 
       return Eval_result::deferred;
     }
     Lconst result = pred(*a_val, *b_val) ? Lconst(1) : Lconst(0);
-    local_values[std::string(fn->get_data(lhs).token.get_text())] = result;
+    local_values[std::string(fn->get_data(lhs).name)] = result;
     return Eval_result::processed;
   };
 
@@ -1400,7 +1398,7 @@ bool uPass_constprop::try_eval_comb_call(std::string_view dst, std::string_view 
       if (!value.has_value() || value->is_invalid()) {
         return Eval_result::deferred;
       }
-      local_values[std::string(fn->get_data(lhs).token.get_text())] = *value;
+      local_values[std::string(fn->get_data(lhs).name)] = *value;
       return Eval_result::processed;
     }
 

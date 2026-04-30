@@ -35,14 +35,14 @@ void Pass_lnastfmt::fmt_begin(Eprp_var& var) {
 //   printed by dump as `(L,P)`, pos1-pos2 is the dump's leading range,
 //   line/fname come from the source token when available.
 static std::string node_loc(const Lnast* ln, const Lnast_nid& it) {
-  const auto& data = ln->get_data(it);
-  const auto& tok  = data.token;
-  std::string s = std::format("[{},{} pos {}-{}", level_of(it), pos_of(it), tok.pos1, tok.pos2);
-  if (tok.line != 0) {
-    s += std::format(" line {}", tok.line);
+  const auto loc   = ln->get_loc(it);
+  const auto fname = ln->get_fname(it);
+  std::string s = std::format("[{},{} pos {}-{}", level_of(it), pos_of(it), loc.pos1, loc.pos2);
+  if (loc.line != 0) {
+    s += std::format(" line {}", loc.line);
   }
-  if (!tok.fname.empty()) {
-    s += std::format(" @ {}", tok.fname);
+  if (!fname.empty()) {
+    s += std::format(" @ {}", fname);
   }
   s += "]";
   return s;
@@ -179,7 +179,7 @@ static void check_unwritten_tmps(const Lnast* ln) {
     // which dangles after the full-expression and trips on -O2/-O3 stack
     // reuse.
     const auto data = ln->get_data(it);
-    auto       name = data.token.get_text();
+    auto       name = data.name;
     if (!Lnast::is_tmp(name)) {
       continue;
     }
@@ -244,7 +244,7 @@ void Pass_lnastfmt::validate(const Lnast* ln) {
     const auto& data = ln->get_data(it);
 
     if (data.type.is_ref()) {
-      const auto name = data.token.get_text();
+      const auto name = data.name;
       if (!is_valid_ref_text(name)) {
         Pass::error(
             "lnastfmt: {} ref text '{}' is not a valid identifier — must be a single name "
@@ -260,7 +260,7 @@ void Pass_lnastfmt::validate(const Lnast* ln) {
     }
 
     if (data.type.is_const()) {
-      const auto name = data.token.get_text();
+      const auto name = data.name;
       if (name == "__create_flop" || name == "__last_value") {
         Pass::error(
             "lnastfmt: {} const '{}' appears in LNAST; migrate the producer to `attr_set X storage reg` (§15.1) or `delay_assign` (§15.2)",
