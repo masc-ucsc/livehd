@@ -41,8 +41,9 @@ protected:
   inline void rewind_token() { --token_index; }
 
   void add_leaf(Lnast_node n) { lnast->add_child(tree_index.top(), n); }
+  void add_leaf(Lnast_ntype::Lnast_ntype_int n) { lnast->add_child(tree_index.top(), n); }
 
-  void start_tree(Lnast_node n) {
+  void start_tree(Lnast_ntype::Lnast_ntype_int n) {
     auto i = lnast->add_child(tree_index.top(), n);
     tree_index.push(i);
   }

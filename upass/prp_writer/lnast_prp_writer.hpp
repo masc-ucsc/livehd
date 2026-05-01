@@ -31,17 +31,17 @@ public:
 private:
   std::ostream&          os;
   std::shared_ptr<Lnast> lnast;
-  int                           depth{0};
+  int                    depth{0};
 
   std::stack<Lnast_nid> nid_stack;
   Lnast_nid             cur;
 
   // ── Cursor helpers ───────────────────────────────────────────────────────
-  bool        move_to_child();
-  bool        move_to_sibling();
-  void        move_to_parent();
-  bool        is_last_child() const;
-  std::string_view current_text() const;
+  bool                         move_to_child();
+  bool                         move_to_sibling();
+  void                         move_to_parent();
+  bool                         is_last_child() const;
+  std::string_view             current_text() const;
   Lnast_ntype::Lnast_ntype_int current_ntype() const;
 
   // ── Output helpers ───────────────────────────────────────────────────────
@@ -77,6 +77,6 @@ private:
   void write_sext();
 
   // ── Utilities ────────────────────────────────────────────────────────────
-  static bool        is_tmp(std::string_view name);
+  static bool             is_tmp(std::string_view name);
   static std::string_view strip_prefix(std::string_view name);
 };

@@ -165,8 +165,8 @@ std::vector<std::string> uPass_runner::changed_passes() const {
 
 // ── Staging emit helpers ──────────────────────────────────────────────────────
 
-void uPass_runner::emit_push(const Lnast_node& node) {
-  auto nid = staging->add_child(staging_parent, node);
+void uPass_runner::emit_push(Lnast_ntype::Lnast_ntype_int type) {
+  auto nid = staging->add_child(staging_parent, type);
   staging_parent_stack.push(staging_parent);
   staging_parent = nid;
 }
@@ -176,14 +176,14 @@ void uPass_runner::emit_pop() {
   staging_parent_stack.pop();
 }
 
-void uPass_runner::emit_leaf(const Lnast_node& node) {
-  staging->add_child(staging_parent, node);
-}
+void uPass_runner::emit_leaf(Lnast_ntype::Lnast_ntype_int type) { staging->add_child(staging_parent, type); }
+
+void uPass_runner::emit_leaf(const Lnast_node& node) { staging->add_child(staging_parent, node); }
 
 void uPass_runner::emit_subtree_verbatim() {
-  auto node = lm->current_node();
+  auto type = lm->current_type();
   if (lm->has_child()) {
-    emit_push(node);
+    emit_push(type);
     lm->move_to_child();
     do {
       emit_subtree_verbatim();
@@ -191,7 +191,11 @@ void uPass_runner::emit_subtree_verbatim() {
     lm->move_to_parent();
     emit_pop();
   } else {
-    emit_leaf(node);
+    if (Lnast_ntype::is_ref(type) || Lnast_ntype::is_const(type)) {
+      emit_leaf(lm->current_node());
+    } else {
+      emit_leaf(type);
+    }
   }
 }
 
@@ -226,8 +230,7 @@ void uPass_runner::emit_ref_or_folded(std::string_view name) {
 }
 
 void uPass_runner::emit_op_with_fold(bool fold_all) {
-  auto op_node = lm->current_node();
-  emit_push(op_node);
+  emit_push(lm->current_type());
 
   if (lm->has_child()) {
     lm->move_to_child();
@@ -323,10 +326,9 @@ void uPass_runner::run(std::size_t max_iters) {
   // with the tree-only Lnast wrapper; pass_upass.cpp then atomically swaps
   // it in via Lnast::replace_body so any holder of the input Lnast picks
   // up the new body without a shared_ptr swap.
-  auto staging_body = lm->get_lnast()->forest()->create_tree_temp(
-      std::format("staging-{}", lm->get_top_module_name()));
+  auto staging_body    = lm->get_lnast()->forest()->create_tree_temp(std::format("staging-{}", lm->get_top_module_name()));
   staging              = std::make_shared<Lnast>(staging_body, lm->get_top_module_name());
-  staging_parent       = staging->set_root(Lnast_node::create_top());
+  staging_parent       = staging->set_root(Lnast_ntype::create_top());
   staging_parent_stack = {};
 
   upass::Runner_fixed_point::run(
@@ -356,6 +358,7 @@ void uPass_runner::run(std::size_t max_iters) {
 void uPass_runner::process_lnast() {
   using Ntype = Lnast_ntype;
 
+  // clang-format off
   // Category A: drop-candidate op-nodes. First child is the LHS/dst (not
   // folded); subsequent ref children are fed to fold_ref.
 #define A_OP(NAME)                                                                              \
@@ -377,7 +380,9 @@ void uPass_runner::process_lnast() {
     // through the symbol table so dropping the producing assign doesn't
     // leave a dangling name.
     case Ntype::Lnast_ntype_ref: emit_ref_or_folded(lm->current_text()); break;
-    case Ntype::Lnast_ntype_const: emit_leaf(lm->current_node()); break;
+    case Ntype::Lnast_ntype_const:
+      emit_leaf(lm->current_node());
+      break;
 
     // Assignment
     A_OP(assign)
@@ -488,6 +493,7 @@ void uPass_runner::process_lnast() {
 
 #undef A_OP
 #undef C_OP
+  // clang-format on
 }
 
 // ── Structural handlers ───────────────────────────────────────────────────────
@@ -495,7 +501,7 @@ void uPass_runner::process_lnast() {
 void uPass_runner::process_top() {
   // staging_parent is the already-materialized root slot; overwrite its
   // data with the input top node (preserves the correct text/token).
-  staging->set_data(staging_parent, lm->current_node());
+  staging->set_data(staging_parent, lm->current_type());
 
   if (lm->has_child()) {
     lm->move_to_child();
@@ -512,7 +518,7 @@ void uPass_runner::process_stmts() {
   // is restored by dispatch_to_passes around each pass call, so passes
   // can move freely without disturbing the runner's traversal.
   dispatch_to_passes(&upass::uPass::process_stmts);
-  emit_push(lm->current_node());
+  emit_push(lm->current_type());
   if (lm->has_child()) {
     lm->move_to_child();
     do {
@@ -540,8 +546,8 @@ void uPass_runner::process_if() {
   // See upass.md §Slice 7 and §5 (if cursor discipline).
   if (lm->has_child()) {
     lm->move_to_child();
-    using Ntype        = Lnast_ntype;
-    const auto raw     = lm->get_raw_ntype();
+    using Ntype    = Lnast_ntype;
+    const auto raw = lm->get_raw_ntype();
 
     if (raw != Ntype::Lnast_ntype_stmts) {
       // First child is a condition (ref or const). Try to fold it.
@@ -589,26 +595,29 @@ void uPass_runner::process_if() {
     lm->move_to_parent();  // condition unknown or elif chain — fall through
   }
 
-  // Unknown condition (or elif chain): emit the full if node.
-  // Branch elimination for known conditions. The if's children alternate
-  // (cond, stmts) pairs, with an optional trailing stmts (else). For
-  // every cond/stmts pair we peek at the cond's folded value:
-  //   - known-false: emit the stmts subtree verbatim (no constprop
-  //     dispatch into the body) so dead-branch assigns can't update
-  //     the symbol table.
-  //   - known-true (and we haven't seen a true arm yet): process the
-  //     body normally; mark a "matched" flag so any later arms / else
-  //     are emit-verbatim'd (only the first matching arm runs).
-  //   - matched-already (previous arm was known-true): emit verbatim.
-  //   - unknown / partially-known: process normally (conservative).
-  emit_push(lm->current_node());
+  // Unknown condition (or elif chain): emit the full if node unchanged.
+  emit_push(lm->current_type());
   if (lm->has_child()) {
     lm->move_to_child();
-    bool last_cond_false      = false;
-    bool last_cond_true       = false;
-    bool last_was_cond        = false;
-    bool already_matched      = false;  // a *previous* arm already fired
-    bool any_prior_uncertain  = false;  // some earlier cond folded to neither true nor false
+    // Branch elimination for known conditions. The if's children alternate
+    // (cond, stmts) pairs, with an optional trailing stmts (else). For
+    // every cond/stmts pair we peek at the cond's folded value:
+    //   - known-false: emit the stmts subtree verbatim (no constprop
+    //     dispatch into the body) so dead-branch assigns can't update
+    //     the symbol table. Without this, `if false { c = 2 }` would
+    //     overwrite c=1 because constprop's process_assign runs
+    //     unconditionally during traversal.
+    //   - known-true (and we haven't seen a true arm yet): process the
+    //     body normally; mark a "matched" flag so any later arms / else
+    //     are emit-verbatim'd (only the first matching arm runs).
+    //   - matched-already (previous arm was known-true): emit verbatim.
+    //   - unknown / partially-known: process normally (conservative —
+    //     the symbol table merges values across both branches today).
+    bool last_cond_false     = false;
+    bool last_cond_true      = false;
+    bool last_was_cond       = false;
+    bool already_matched     = false;  // a *previous* arm already fired
+    bool any_prior_uncertain = false;  // some earlier cond folded to neither true nor false
 
     auto cond_value = [this]() -> std::optional<Lconst> {
       if (lm->get_raw_ntype() == Lnast_ntype::Lnast_ntype_const) {
@@ -630,7 +639,7 @@ void uPass_runner::process_if() {
         // Body for the prior cond, or the trailing else (no prior cond
         // this round). Dead iff a prior arm has already fired, or the
         // immediate cond just folded to false.
-        const bool dead = already_matched || (last_was_cond && last_cond_false);
+        const bool dead         = already_matched || (last_was_cond && last_cond_false);
         const bool just_matched = last_was_cond && last_cond_true;
         // Uncertain := body executes but isn't *guaranteed* to. After a
         // cond: !just_matched (dead is handled separately, so the cond
@@ -638,7 +647,7 @@ void uPass_runner::process_if() {
         // uncertain when some prior arm's cond didn't fold either way; if
         // every prior cond folded to known-false the else *is* guaranteed.
         const bool uncertain = last_was_cond ? !just_matched : any_prior_uncertain;
-        last_was_cond = false;
+        last_was_cond        = false;
         if (dead) {
           emit_subtree_verbatim();
           continue;

@@ -30,8 +30,13 @@ public:
   //                            if/while/for scope). Pair with pop_stmts().
   // pop_stmts():               restore the cursor saved by the matching
   //                            push_stmts().
+  Lnast_nid add_child(Lnast_ntype::Lnast_ntype_int type) { return lnast->add_child(idx_stmts, type); }
   Lnast_nid add_child(const Lnast_node& n) { return lnast->add_child(idx_stmts, n); }
+  Lnast_nid add_child(const Lnast_nid& parent, Lnast_ntype::Lnast_ntype_int type) { return lnast->add_child(parent, type); }
   Lnast_nid add_child(const Lnast_nid& parent, const Lnast_node& n) { return lnast->add_child(parent, n); }
+  Lnast_nid append_after(const Lnast_nid& sibling, Lnast_ntype::Lnast_ntype_int type) {
+    return lnast->append_sibling(sibling, type);
+  }
   Lnast_nid append_after(const Lnast_nid& sibling, const Lnast_node& n) { return lnast->append_sibling(sibling, n); }
   void      push_stmts(const Lnast_nid& new_stmts) {
     stmts_stack_.push(idx_stmts);

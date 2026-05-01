@@ -22,10 +22,10 @@ TEST(UpassCoalescer, PluginRegisters) {
 // nothing to drive it without a runner, but the field exists).
 TEST(UpassCoalescer, SetOptionsDisable) {
   auto ln = std::make_shared<Lnast>("test");
-  ln->set_root(Lnast_node::create_top());
+  ln->set_root(Lnast_ntype::create_top());
   auto lm = std::make_shared<upass::Lnast_manager>(ln);
 
-  uPass_coalescer pass(lm);
+  uPass_coalescer    pass(lm);
   upass::Options_map opts;
   opts["coalescer"] = "0";
   pass.set_options(opts);

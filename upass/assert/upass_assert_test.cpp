@@ -1,11 +1,12 @@
 //  This file is distributed under the BSD 3-Clause License. See LICENSE for details.
 
+#include "upass_assert.hpp"
+
 #include <memory>
 
 #include "gtest/gtest.h"
 #include "lnast.hpp"
 #include "lnast_manager.hpp"
-#include "upass_assert.hpp"
 
 namespace {
 
@@ -23,16 +24,16 @@ struct AssertFixture {
   Lnast_nid                             stmts_nid;
 
   AssertFixture() {
-    ln        = std::make_shared<Lnast>("test");
-    auto root_nid_ = ln->set_root(Lnast_node::create_top("top"));
-    stmts_nid = ln->add_child(root_nid_, Lnast_node::create_stmts("stmts"));
-    lm        = std::make_shared<upass::Lnast_manager>(ln);
+    ln             = std::make_shared<Lnast>("test");
+    auto root_nid_ = ln->set_root(Lnast_ntype::create_top());
+    stmts_nid      = ln->add_child(root_nid_, Lnast_ntype::create_stmts());
+    lm             = std::make_shared<upass::Lnast_manager>(ln);
   }
 
   // Build: func_call ref("_ret") ref("cassert") <arg>
   // arg_is_const: adds const(arg_value), else adds ref(arg_value)
   Lnast_nid add_cassert(int64_t arg_value) {
-    auto fc = ln->add_child(stmts_nid, Lnast_node::create_func_call());
+    auto fc = ln->add_child(stmts_nid, Lnast_ntype::create_func_call());
     ln->add_child(fc, Lnast_node::create_ref("_ret"));
     ln->add_child(fc, Lnast_node::create_ref("cassert"));
     ln->add_child(fc, Lnast_node::create_const(arg_value));
@@ -41,7 +42,7 @@ struct AssertFixture {
 
   // Build cassert with a ref argument (non-const, unknown to the symbol table)
   Lnast_nid add_cassert_ref(std::string_view arg_name) {
-    auto fc = ln->add_child(stmts_nid, Lnast_node::create_func_call());
+    auto fc = ln->add_child(stmts_nid, Lnast_ntype::create_func_call());
     ln->add_child(fc, Lnast_node::create_ref("_ret"));
     ln->add_child(fc, Lnast_node::create_ref("cassert"));
     ln->add_child(fc, Lnast_node::create_ref(arg_name));
@@ -53,7 +54,7 @@ struct AssertFixture {
 
 TEST(UpassAssert, CassertFalseThrows) {
   AssertFixture f;
-  auto fc = f.add_cassert(0);
+  auto          fc = f.add_cassert(0);
 
   TestableAssert ap(f.lm);
   ap.position(fc);
@@ -64,7 +65,7 @@ TEST(UpassAssert, CassertFalseThrows) {
 
 TEST(UpassAssert, CassertTrueNoThrow) {
   AssertFixture f;
-  auto fc = f.add_cassert(1);
+  auto          fc = f.add_cassert(1);
 
   TestableAssert ap(f.lm);
   ap.position(fc);
@@ -75,7 +76,7 @@ TEST(UpassAssert, CassertTrueNoThrow) {
 
 TEST(UpassAssert, CassertNonZeroTrueNoThrow) {
   AssertFixture f;
-  auto fc = f.add_cassert(42);
+  auto          fc = f.add_cassert(42);
 
   TestableAssert ap(f.lm);
   ap.position(fc);
@@ -88,7 +89,7 @@ TEST(UpassAssert, CassertNonZeroTrueNoThrow) {
 
 TEST(UpassAssert, CassertUnknownRefNoThrow) {
   AssertFixture f;
-  auto fc = f.add_cassert_ref("some_unknown_var");
+  auto          fc = f.add_cassert_ref("some_unknown_var");
 
   TestableAssert ap(f.lm);
   ap.position(fc);
@@ -99,7 +100,7 @@ TEST(UpassAssert, CassertUnknownRefNoThrow) {
 
 TEST(UpassAssert, NonCassertCallIgnored) {
   AssertFixture f;
-  auto fc = f.ln->add_child(f.stmts_nid, Lnast_node::create_func_call());
+  auto          fc = f.ln->add_child(f.stmts_nid, Lnast_ntype::create_func_call());
   f.ln->add_child(fc, Lnast_node::create_ref("_ret"));
   f.ln->add_child(fc, Lnast_node::create_ref("some_other_func"));
   f.ln->add_child(fc, Lnast_node::create_const(int64_t(0)));  // arg=0 but not cassert

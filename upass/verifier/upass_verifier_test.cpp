@@ -1,11 +1,12 @@
 //  This file is distributed under the BSD 3-Clause License. See LICENSE for details.
 
+#include "upass_verifier.hpp"
+
 #include <memory>
 
 #include "gtest/gtest.h"
 #include "lnast.hpp"
 #include "lnast_manager.hpp"
-#include "upass_verifier.hpp"
 
 namespace {
 
@@ -24,9 +25,9 @@ struct VerifierFixture {
 
   VerifierFixture() {
     ln            = std::make_shared<Lnast>("test");
-    auto root_nid = ln->set_root(Lnast_node::create_top("top"));
-    stmts_nid     = ln->add_child(root_nid, Lnast_node::create_stmts("stmts"));
-    lm        = std::make_shared<upass::Lnast_manager>(ln);
+    auto root_nid = ln->set_root(Lnast_ntype::create_top());
+    stmts_nid     = ln->add_child(root_nid, Lnast_ntype::create_stmts());
+    lm            = std::make_shared<upass::Lnast_manager>(ln);
   }
 };
 
@@ -35,7 +36,7 @@ struct VerifierFixture {
 TEST(UpassVerifier, WellFormedBinaryNoThrow) {
   VerifierFixture f;
   // plus ref("dst") const(1) const(2)   ← exactly 3 children
-  auto op = f.ln->add_child(f.stmts_nid, Lnast_node::create_plus());
+  auto op = f.ln->add_child(f.stmts_nid, Lnast_ntype::create_plus());
   f.ln->add_child(op, Lnast_node::create_ref("dst"));
   f.ln->add_child(op, Lnast_node::create_const(int64_t(1)));
   f.ln->add_child(op, Lnast_node::create_const(int64_t(2)));
@@ -50,7 +51,7 @@ TEST(UpassVerifier, WellFormedBinaryNoThrow) {
 TEST(UpassVerifier, BinaryMissingSecondOperandThrows) {
   VerifierFixture f;
   // plus ref("dst") const(1)   ← only 2 children — missing second operand
-  auto op = f.ln->add_child(f.stmts_nid, Lnast_node::create_plus());
+  auto op = f.ln->add_child(f.stmts_nid, Lnast_ntype::create_plus());
   f.ln->add_child(op, Lnast_node::create_ref("dst"));
   f.ln->add_child(op, Lnast_node::create_const(int64_t(1)));
 
@@ -64,7 +65,7 @@ TEST(UpassVerifier, BinaryMissingSecondOperandThrows) {
 TEST(UpassVerifier, BinaryExtraOperandThrows) {
   VerifierFixture f;
   // plus ref("dst") const(1) const(2) const(3)   ← 4 children — extra
-  auto op = f.ln->add_child(f.stmts_nid, Lnast_node::create_plus());
+  auto op = f.ln->add_child(f.stmts_nid, Lnast_ntype::create_plus());
   f.ln->add_child(op, Lnast_node::create_ref("dst"));
   f.ln->add_child(op, Lnast_node::create_const(int64_t(1)));
   f.ln->add_child(op, Lnast_node::create_const(int64_t(2)));
@@ -80,7 +81,7 @@ TEST(UpassVerifier, BinaryExtraOperandThrows) {
 TEST(UpassVerifier, BinaryWrongDestTypeThrows) {
   VerifierFixture f;
   // plus const("1") const(2) const(3)   ← dest is const, not ref
-  auto op = f.ln->add_child(f.stmts_nid, Lnast_node::create_plus());
+  auto op = f.ln->add_child(f.stmts_nid, Lnast_ntype::create_plus());
   f.ln->add_child(op, Lnast_node::create_const(int64_t(1)));
   f.ln->add_child(op, Lnast_node::create_const(int64_t(2)));
   f.ln->add_child(op, Lnast_node::create_const(int64_t(3)));
@@ -95,7 +96,7 @@ TEST(UpassVerifier, BinaryWrongDestTypeThrows) {
 TEST(UpassVerifier, WellFormedUnaryNoThrow) {
   VerifierFixture f;
   // assign ref("dst") const(5)   ← exactly 2 children
-  auto op = f.ln->add_child(f.stmts_nid, Lnast_node::create_assign());
+  auto op = f.ln->add_child(f.stmts_nid, Lnast_ntype::create_assign());
   f.ln->add_child(op, Lnast_node::create_ref("dst"));
   f.ln->add_child(op, Lnast_node::create_const(int64_t(5)));
 
@@ -109,7 +110,7 @@ TEST(UpassVerifier, WellFormedUnaryNoThrow) {
 TEST(UpassVerifier, UnaryExtraChildThrows) {
   VerifierFixture f;
   // assign ref("dst") const(5) const(6)   ← 3 children — extra
-  auto op = f.ln->add_child(f.stmts_nid, Lnast_node::create_assign());
+  auto op = f.ln->add_child(f.stmts_nid, Lnast_ntype::create_assign());
   f.ln->add_child(op, Lnast_node::create_ref("dst"));
   f.ln->add_child(op, Lnast_node::create_const(int64_t(5)));
   f.ln->add_child(op, Lnast_node::create_const(int64_t(6)));
@@ -124,7 +125,7 @@ TEST(UpassVerifier, UnaryExtraChildThrows) {
 TEST(UpassVerifier, WellFormedBitNotUnaryNoThrow) {
   VerifierFixture f;
   // bit_not ref("dst") const(5)
-  auto op = f.ln->add_child(f.stmts_nid, Lnast_node::create_bit_not());
+  auto op = f.ln->add_child(f.stmts_nid, Lnast_ntype::create_bit_not());
   f.ln->add_child(op, Lnast_node::create_ref("dst"));
   f.ln->add_child(op, Lnast_node::create_const(int64_t(5)));
 

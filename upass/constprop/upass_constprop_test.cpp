@@ -30,9 +30,9 @@ public:
 
   // Expose §5.a ST query helpers for testing.
   bool st_is_known_const(std::string_view name) const { return st.is_known_const(name); }
-  bool st_is_reg(std::string_view name)         const { return st.is_reg(name); }
-  bool st_is_input(std::string_view name)       const { return st.is_input(name); }
-  bool st_is_output(std::string_view name)      const { return st.is_output(name); }
+  bool st_is_reg(std::string_view name) const { return st.is_reg(name); }
+  bool st_is_input(std::string_view name) const { return st.is_input(name); }
+  bool st_is_output(std::string_view name) const { return st.is_output(name); }
 
   // Directly write a trivial value into the symbol table (for ST tests).
   void st_set(std::string_view name, const Lconst& val) { st.set(name, val); }
@@ -48,16 +48,16 @@ struct ConstpropFixture {
   Lnast_nid                             stmts_nid;
 
   ConstpropFixture() {
-    ln = std::make_shared<Lnast>("test");
-    auto root_nid_ = ln->set_root(Lnast_node::create_top("top"));
-    stmts_nid = ln->add_child(root_nid_, Lnast_node::create_stmts("stmts"));
-    lm        = std::make_shared<upass::Lnast_manager>(ln);
+    ln             = std::make_shared<Lnast>("test");
+    auto root_nid_ = ln->set_root(Lnast_ntype::create_top());
+    stmts_nid      = ln->add_child(root_nid_, Lnast_ntype::create_stmts());
+    lm             = std::make_shared<upass::Lnast_manager>(ln);
   }
 
   // Build: <op_type> ref("dst") const(lhs) const(rhs)
   // Returns the nid of the operator node.
-  Lnast_nid add_binary_node(Lnast_node op_node, std::string_view dst, int64_t lhs, int64_t rhs) {
-    auto op = ln->add_child(stmts_nid, op_node);
+  Lnast_nid add_binary_node(Lnast_ntype::Lnast_ntype_int op_type, std::string_view dst, int64_t lhs, int64_t rhs) {
+    auto op = ln->add_child(stmts_nid, op_type);
     ln->add_child(op, Lnast_node::create_ref(dst));
     ln->add_child(op, Lnast_node::create_const(lhs));
     ln->add_child(op, Lnast_node::create_const(rhs));
@@ -65,8 +65,8 @@ struct ConstpropFixture {
   }
 
   // Build: <op_type> ref("dst") const(operand)
-  Lnast_nid add_unary_node(Lnast_node op_node, std::string_view dst, int64_t operand) {
-    auto op = ln->add_child(stmts_nid, op_node);
+  Lnast_nid add_unary_node(Lnast_ntype::Lnast_ntype_int op_type, std::string_view dst, int64_t operand) {
+    auto op = ln->add_child(stmts_nid, op_type);
     ln->add_child(op, Lnast_node::create_ref(dst));
     ln->add_child(op, Lnast_node::create_const(operand));
     return op;
@@ -79,22 +79,23 @@ struct ConstpropFixture {
   // Returns the nid of the if-node itself.
   Lnast_nid add_if_node(std::string_view cond_var, std::function<void(Lnast_nid)> build_then,
                         std::function<void(Lnast_nid)> build_else = nullptr) {
-    auto if_nid = ln->add_child(stmts_nid, Lnast_node::create_if());
+    auto if_nid = ln->add_child(stmts_nid, Lnast_ntype::create_if());
     ln->add_child(if_nid, Lnast_node::create_ref(cond_var));
-    auto then_stmts = ln->add_child(if_nid, Lnast_node::create_stmts());
+    auto then_stmts = ln->add_child(if_nid, Lnast_ntype::create_stmts());
     if (build_then) {
       build_then(then_stmts);
     }
     if (build_else) {
-      auto else_stmts = ln->add_child(if_nid, Lnast_node::create_stmts());
+      auto else_stmts = ln->add_child(if_nid, Lnast_ntype::create_stmts());
       build_else(else_stmts);
     }
     return if_nid;
   }
 
   // Convenience: add a binary op node under an arbitrary parent stmts nid.
-  Lnast_nid add_binary_under(Lnast_nid parent_stmts, Lnast_node op_node, std::string_view dst, int64_t lhs, int64_t rhs) {
-    auto op = ln->add_child(parent_stmts, op_node);
+  Lnast_nid add_binary_under(Lnast_nid parent_stmts, Lnast_ntype::Lnast_ntype_int op_type, std::string_view dst, int64_t lhs,
+                             int64_t rhs) {
+    auto op = ln->add_child(parent_stmts, op_type);
     ln->add_child(op, Lnast_node::create_ref(dst));
     ln->add_child(op, Lnast_node::create_const(lhs));
     ln->add_child(op, Lnast_node::create_const(rhs));
@@ -104,7 +105,7 @@ struct ConstpropFixture {
   // Build: [tuple_add: ref(dst), const(vals[0]), const(vals[1]), ...]
   // Each entry is a positional constant field.
   Lnast_nid add_tuple_add_node(std::string_view dst, std::initializer_list<int64_t> vals) {
-    auto op = ln->add_child(stmts_nid, Lnast_node::create_tuple_add());
+    auto op = ln->add_child(stmts_nid, Lnast_ntype::create_tuple_add());
     ln->add_child(op, Lnast_node::create_ref(dst));
     for (auto v : vals) {
       ln->add_child(op, Lnast_node::create_const(v));
@@ -115,7 +116,7 @@ struct ConstpropFixture {
   // Build: [tuple_get: ref(dst), ref(src), const(field)]
   // field is a string like "0", "1", "foo".
   Lnast_nid add_tuple_get_node(std::string_view dst, std::string_view src, std::string_view field) {
-    auto op = ln->add_child(stmts_nid, Lnast_node::create_tuple_get());
+    auto op = ln->add_child(stmts_nid, Lnast_ntype::create_tuple_get());
     ln->add_child(op, Lnast_node::create_ref(dst));
     ln->add_child(op, Lnast_node::create_ref(src));
     ln->add_child(op, Lnast_node::create_const(field));
@@ -125,7 +126,7 @@ struct ConstpropFixture {
   // Build: [tuple_get: ref(dst), ref(src), ref(idx_var)]
   // idx_var is a runtime variable (not a compile-time const).
   Lnast_nid add_tuple_get_ref_idx_node(std::string_view dst, std::string_view src, std::string_view idx_var) {
-    auto op = ln->add_child(stmts_nid, Lnast_node::create_tuple_get());
+    auto op = ln->add_child(stmts_nid, Lnast_ntype::create_tuple_get());
     ln->add_child(op, Lnast_node::create_ref(dst));
     ln->add_child(op, Lnast_node::create_ref(src));
     ln->add_child(op, Lnast_node::create_ref(idx_var));
@@ -135,7 +136,7 @@ struct ConstpropFixture {
   // Build: [tuple_set: ref(tuple_var), const(field), const(value)]
   // field is a string key; value is a compile-time integer.
   Lnast_nid add_tuple_set_node(std::string_view tuple_var, std::string_view field, int64_t value) {
-    auto op = ln->add_child(stmts_nid, Lnast_node::create_tuple_set());
+    auto op = ln->add_child(stmts_nid, Lnast_ntype::create_tuple_set());
     ln->add_child(op, Lnast_node::create_ref(tuple_var));
     ln->add_child(op, Lnast_node::create_const(field));
     ln->add_child(op, Lnast_node::create_const(value));
@@ -147,7 +148,7 @@ struct ConstpropFixture {
 
 TEST(UpassConstprop, FoldsPlus) {
   ConstpropFixture  f;
-  auto              op = f.add_binary_node(Lnast_node::create_plus(), "a", 2, 3);
+  auto              op = f.add_binary_node(Lnast_ntype::create_plus(), "a", 2, 3);
   TestableConstprop cp(f.lm);
   cp.position(op);
   cp.process_plus();
@@ -157,7 +158,7 @@ TEST(UpassConstprop, FoldsPlus) {
 
 TEST(UpassConstprop, FoldsMinus) {
   ConstpropFixture  f;
-  auto              op = f.add_binary_node(Lnast_node::create_minus(), "a", 10, 3);
+  auto              op = f.add_binary_node(Lnast_ntype::create_minus(), "a", 10, 3);
   TestableConstprop cp(f.lm);
   cp.position(op);
   cp.process_minus();
@@ -167,7 +168,7 @@ TEST(UpassConstprop, FoldsMinus) {
 
 TEST(UpassConstprop, FoldsMult) {
   ConstpropFixture  f;
-  auto              op = f.add_binary_node(Lnast_node::create_mult(), "a", 3, 4);
+  auto              op = f.add_binary_node(Lnast_ntype::create_mult(), "a", 3, 4);
   TestableConstprop cp(f.lm);
   cp.position(op);
   cp.process_mult();
@@ -177,7 +178,7 @@ TEST(UpassConstprop, FoldsMult) {
 
 TEST(UpassConstprop, FoldsDiv) {
   ConstpropFixture  f;
-  auto              op = f.add_binary_node(Lnast_node::create_div(), "a", 8, 2);
+  auto              op = f.add_binary_node(Lnast_ntype::create_div(), "a", 8, 2);
   TestableConstprop cp(f.lm);
   cp.position(op);
   cp.process_div();
@@ -187,7 +188,7 @@ TEST(UpassConstprop, FoldsDiv) {
 
 TEST(UpassConstprop, FoldsMod) {
   ConstpropFixture  f;
-  auto              op = f.add_binary_node(Lnast_node::create_mod(), "a", 7, 3);
+  auto              op = f.add_binary_node(Lnast_ntype::create_mod(), "a", 7, 3);
   TestableConstprop cp(f.lm);
   cp.position(op);
   cp.process_mod();
@@ -199,7 +200,7 @@ TEST(UpassConstprop, FoldsMod) {
 
 TEST(UpassConstprop, FoldsShl) {
   ConstpropFixture  f;
-  auto              op = f.add_binary_node(Lnast_node::create_shl(), "a", 1, 3);
+  auto              op = f.add_binary_node(Lnast_ntype::create_shl(), "a", 1, 3);
   TestableConstprop cp(f.lm);
   cp.position(op);
   cp.process_shl();
@@ -209,7 +210,7 @@ TEST(UpassConstprop, FoldsShl) {
 
 TEST(UpassConstprop, FoldsSra) {
   ConstpropFixture  f;
-  auto              op = f.add_binary_node(Lnast_node::create_sra(), "a", 16, 2);
+  auto              op = f.add_binary_node(Lnast_ntype::create_sra(), "a", 16, 2);
   TestableConstprop cp(f.lm);
   cp.position(op);
   cp.process_sra();
@@ -222,7 +223,7 @@ TEST(UpassConstprop, FoldsSra) {
 TEST(UpassConstprop, FoldsBitAnd) {
   ConstpropFixture f;
   // 0b1010 & 0b1100 = 0b1000 = 8
-  auto              op = f.add_binary_node(Lnast_node::create_bit_and(), "a", 0b1010, 0b1100);
+  auto              op = f.add_binary_node(Lnast_ntype::create_bit_and(), "a", 0b1010, 0b1100);
   TestableConstprop cp(f.lm);
   cp.position(op);
   cp.process_bit_and();
@@ -233,7 +234,7 @@ TEST(UpassConstprop, FoldsBitAnd) {
 TEST(UpassConstprop, FoldsBitOr) {
   ConstpropFixture f;
   // 0b1010 | 0b0101 = 0b1111 = 15
-  auto              op = f.add_binary_node(Lnast_node::create_bit_or(), "a", 0b1010, 0b0101);
+  auto              op = f.add_binary_node(Lnast_ntype::create_bit_or(), "a", 0b1010, 0b0101);
   TestableConstprop cp(f.lm);
   cp.position(op);
   cp.process_bit_or();
@@ -244,7 +245,7 @@ TEST(UpassConstprop, FoldsBitOr) {
 TEST(UpassConstprop, FoldsBitXor) {
   ConstpropFixture f;
   // 0b1010 ^ 0b1100 = 0b0110 = 6
-  auto              op = f.add_binary_node(Lnast_node::create_bit_xor(), "a", 0b1010, 0b1100);
+  auto              op = f.add_binary_node(Lnast_ntype::create_bit_xor(), "a", 0b1010, 0b1100);
   TestableConstprop cp(f.lm);
   cp.position(op);
   cp.process_bit_xor();
@@ -254,7 +255,7 @@ TEST(UpassConstprop, FoldsBitXor) {
 
 TEST(UpassConstprop, FoldsBitNot) {
   ConstpropFixture  f;
-  auto              op = f.add_unary_node(Lnast_node::create_bit_not(), "a", 0);
+  auto              op = f.add_unary_node(Lnast_ntype::create_bit_not(), "a", 0);
   TestableConstprop cp(f.lm);
   cp.position(op);
   cp.process_bit_not();
@@ -266,7 +267,7 @@ TEST(UpassConstprop, FoldsBitNot) {
 TEST(UpassConstprop, FoldsGetMask) {
   ConstpropFixture f;
   // 0x12345678#[0..=7] = 0x78
-  auto              op = f.add_binary_node(Lnast_node::create_get_mask(), "a", 0x12345678, 0xff);
+  auto              op = f.add_binary_node(Lnast_ntype::create_get_mask(), "a", 0x12345678, 0xff);
   TestableConstprop cp(f.lm);
   cp.position(op);
   cp.process_get_mask();
@@ -278,7 +279,7 @@ TEST(UpassConstprop, FoldsGetMask) {
 
 TEST(UpassConstprop, FoldsLogAndBothTrue) {
   ConstpropFixture  f;
-  auto              op = f.add_binary_node(Lnast_node::create_log_and(), "a", 1, 2);
+  auto              op = f.add_binary_node(Lnast_ntype::create_log_and(), "a", 1, 2);
   TestableConstprop cp(f.lm);
   cp.position(op);
   cp.process_log_and();
@@ -288,7 +289,7 @@ TEST(UpassConstprop, FoldsLogAndBothTrue) {
 
 TEST(UpassConstprop, FoldsLogAndOneFalse) {
   ConstpropFixture  f;
-  auto              op = f.add_binary_node(Lnast_node::create_log_and(), "a", 0, 1);
+  auto              op = f.add_binary_node(Lnast_ntype::create_log_and(), "a", 0, 1);
   TestableConstprop cp(f.lm);
   cp.position(op);
   cp.process_log_and();
@@ -298,7 +299,7 @@ TEST(UpassConstprop, FoldsLogAndOneFalse) {
 
 TEST(UpassConstprop, FoldsLogOrOneFalse) {
   ConstpropFixture  f;
-  auto              op = f.add_binary_node(Lnast_node::create_log_or(), "a", 0, 1);
+  auto              op = f.add_binary_node(Lnast_ntype::create_log_or(), "a", 0, 1);
   TestableConstprop cp(f.lm);
   cp.position(op);
   cp.process_log_or();
@@ -308,7 +309,7 @@ TEST(UpassConstprop, FoldsLogOrOneFalse) {
 
 TEST(UpassConstprop, FoldsLogOrBothFalse) {
   ConstpropFixture  f;
-  auto              op = f.add_binary_node(Lnast_node::create_log_or(), "a", 0, 0);
+  auto              op = f.add_binary_node(Lnast_ntype::create_log_or(), "a", 0, 0);
   TestableConstprop cp(f.lm);
   cp.position(op);
   cp.process_log_or();
@@ -318,7 +319,7 @@ TEST(UpassConstprop, FoldsLogOrBothFalse) {
 
 TEST(UpassConstprop, FoldsLogNotFalse) {
   ConstpropFixture  f;
-  auto              op = f.add_unary_node(Lnast_node::create_log_not(), "a", 0);
+  auto              op = f.add_unary_node(Lnast_ntype::create_log_not(), "a", 0);
   TestableConstprop cp(f.lm);
   cp.position(op);
   cp.process_log_not();
@@ -328,7 +329,7 @@ TEST(UpassConstprop, FoldsLogNotFalse) {
 
 TEST(UpassConstprop, FoldsLogNotTrue) {
   ConstpropFixture  f;
-  auto              op = f.add_unary_node(Lnast_node::create_log_not(), "a", 5);
+  auto              op = f.add_unary_node(Lnast_ntype::create_log_not(), "a", 5);
   TestableConstprop cp(f.lm);
   cp.position(op);
   cp.process_log_not();
@@ -341,7 +342,7 @@ TEST(UpassConstprop, FoldsLogNotTrue) {
 // Running the same fold a second time should not mark changed (value already in st).
 TEST(UpassConstprop, SecondRunConverges) {
   ConstpropFixture  f;
-  auto              op = f.add_binary_node(Lnast_node::create_plus(), "a", 2, 3);
+  auto              op = f.add_binary_node(Lnast_ntype::create_plus(), "a", 2, 3);
   TestableConstprop cp(f.lm);
   cp.position(op);
   cp.process_plus();
@@ -363,7 +364,7 @@ TEST(UpassConstprop, SecondRunConverges) {
 TEST(UpassConstpropIf, KnownTrueConditionNoElse) {
   ConstpropFixture f;
   auto             if_nid
-      = f.add_if_node("cond", [&](Lnast_nid then_stmts) { f.add_binary_under(then_stmts, Lnast_node::create_plus(), "x", 1, 2); });
+      = f.add_if_node("cond", [&](Lnast_nid then_stmts) { f.add_binary_under(then_stmts, Lnast_ntype::create_plus(), "x", 1, 2); });
   TestableConstprop cp(f.lm);
   cp.seed("cond", Lconst(1));  // condition is known-true
   cp.position(if_nid);
@@ -374,7 +375,7 @@ TEST(UpassConstpropIf, KnownTrueConditionNoElse) {
 TEST(UpassConstpropIf, KnownFalseConditionNoElse) {
   ConstpropFixture  f;
   auto              if_nid = f.add_if_node("cond", [&](Lnast_nid then_stmts) {
-    f.add_binary_under(then_stmts, Lnast_node::create_plus(), "x", 10, 20);
+    f.add_binary_under(then_stmts, Lnast_ntype::create_plus(), "x", 10, 20);
   });
   TestableConstprop cp(f.lm);
   cp.seed("cond", Lconst(0));  // condition is known-false
@@ -386,7 +387,7 @@ TEST(UpassConstpropIf, KnownFalseConditionNoElse) {
 TEST(UpassConstpropIf, UnknownConditionNoElse) {
   ConstpropFixture f;
   auto if_nid = f.add_if_node("unknown_cond",
-                              [&](Lnast_nid then_stmts) { f.add_binary_under(then_stmts, Lnast_node::create_plus(), "y", 3, 4); });
+                              [&](Lnast_nid then_stmts) { f.add_binary_under(then_stmts, Lnast_ntype::create_plus(), "y", 3, 4); });
   TestableConstprop cp(f.lm);
   // Do NOT seed "unknown_cond" — leave it absent from the symbol table.
   cp.position(if_nid);
@@ -399,8 +400,8 @@ TEST(UpassConstpropIf, KnownTrueConditionWithElse) {
   ConstpropFixture f;
   auto             if_nid = f.add_if_node(
       "cond",
-      [&](Lnast_nid then_stmts) { f.add_binary_under(then_stmts, Lnast_node::create_plus(), "r", 1, 0); },
-      [&](Lnast_nid else_stmts) { f.add_binary_under(else_stmts, Lnast_node::create_plus(), "r", 0, 0); });
+      [&](Lnast_nid then_stmts) { f.add_binary_under(then_stmts, Lnast_ntype::create_plus(), "r", 1, 0); },
+      [&](Lnast_nid else_stmts) { f.add_binary_under(else_stmts, Lnast_ntype::create_plus(), "r", 0, 0); });
   TestableConstprop cp(f.lm);
   cp.seed("cond", Lconst(1));
   cp.position(if_nid);
@@ -412,8 +413,8 @@ TEST(UpassConstpropIf, KnownFalseConditionWithElse) {
   ConstpropFixture f;
   auto             if_nid = f.add_if_node(
       "cond",
-      [&](Lnast_nid then_stmts) { f.add_binary_under(then_stmts, Lnast_node::create_plus(), "r", 5, 5); },
-      [&](Lnast_nid else_stmts) { f.add_binary_under(else_stmts, Lnast_node::create_plus(), "r", 9, 9); });
+      [&](Lnast_nid then_stmts) { f.add_binary_under(then_stmts, Lnast_ntype::create_plus(), "r", 5, 5); },
+      [&](Lnast_nid else_stmts) { f.add_binary_under(else_stmts, Lnast_ntype::create_plus(), "r", 9, 9); });
   TestableConstprop cp(f.lm);
   cp.seed("cond", Lconst(0));
   cp.position(if_nid);
@@ -424,10 +425,10 @@ TEST(UpassConstpropIf, KnownFalseConditionWithElse) {
 TEST(UpassConstpropIf, ConstConditionNoElse) {
   ConstpropFixture f;
   // Build [if: [const:1], [stmts:...]] — constant-true condition literal.
-  auto if_nid = f.ln->add_child(f.stmts_nid, Lnast_node::create_if());
+  auto if_nid = f.ln->add_child(f.stmts_nid, Lnast_ntype::create_if());
   f.ln->add_child(if_nid, Lnast_node::create_const(1));
-  auto then_stmts = f.ln->add_child(if_nid, Lnast_node::create_stmts());
-  f.add_binary_under(then_stmts, Lnast_node::create_plus(), "z", 7, 8);
+  auto then_stmts = f.ln->add_child(if_nid, Lnast_ntype::create_stmts());
+  f.add_binary_under(then_stmts, Lnast_ntype::create_plus(), "z", 7, 8);
   TestableConstprop cp(f.lm);
   cp.position(if_nid);
   EXPECT_NO_THROW(cp.process_if());
@@ -438,7 +439,7 @@ TEST(UpassConstpropIf, ConstConditionNoElse) {
 // red_or: 1 if any bit set, 0 if zero.
 TEST(UpassConstprop, RedOrNonZero) {
   ConstpropFixture  f;
-  auto              op = f.add_unary_node(Lnast_node::create_red_or(), "a", 5);
+  auto              op = f.add_unary_node(Lnast_ntype::create_red_or(), "a", 5);
   TestableConstprop cp(f.lm);
   cp.position(op);
   cp.process_red_or();
@@ -448,7 +449,7 @@ TEST(UpassConstprop, RedOrNonZero) {
 
 TEST(UpassConstprop, RedOrZero) {
   ConstpropFixture  f;
-  auto              op = f.add_unary_node(Lnast_node::create_red_or(), "a", 0);
+  auto              op = f.add_unary_node(Lnast_ntype::create_red_or(), "a", 0);
   TestableConstprop cp(f.lm);
   cp.position(op);
   cp.process_red_or();
@@ -460,7 +461,7 @@ TEST(UpassConstprop, RedOrUnknownInputNoStore) {
   // Input is an unknown ref — result should NOT be stored.
   // Build: [red_or: ref("b"), ref("unknown_x")]
   ConstpropFixture f;
-  auto             red_nid = f.ln->add_child(f.stmts_nid, Lnast_node::create_red_or());
+  auto             red_nid = f.ln->add_child(f.stmts_nid, Lnast_ntype::create_red_or());
   f.ln->add_child(red_nid, Lnast_node::create_ref("b"));
   f.ln->add_child(red_nid, Lnast_node::create_ref("unknown_x"));
   TestableConstprop cp(f.lm);
@@ -475,7 +476,7 @@ TEST(UpassConstprop, RedOrUnknownInputNoStore) {
 TEST(UpassConstprop, RedAndAllOnes) {
   ConstpropFixture f;
   // 0b111 = 7: all bits set → red_and = 1.
-  auto              op = f.add_unary_node(Lnast_node::create_red_and(), "a", 0b111);
+  auto              op = f.add_unary_node(Lnast_ntype::create_red_and(), "a", 0b111);
   TestableConstprop cp(f.lm);
   cp.position(op);
   cp.process_red_and();
@@ -486,7 +487,7 @@ TEST(UpassConstprop, RedAndAllOnes) {
 TEST(UpassConstprop, RedAndNotAllOnes) {
   ConstpropFixture f;
   // 0b101 = 5: bit 1 is clear → red_and = 0.
-  auto              op = f.add_unary_node(Lnast_node::create_red_and(), "a", 0b101);
+  auto              op = f.add_unary_node(Lnast_ntype::create_red_and(), "a", 0b101);
   TestableConstprop cp(f.lm);
   cp.position(op);
   cp.process_red_and();
@@ -499,7 +500,7 @@ TEST(UpassConstprop, RedXorOddParity) {
   ConstpropFixture f;
   // 0b101 = 5: popcount = 2 (even) → red_xor = 0
   // Let's use 0b111 = 7: popcount = 3 (odd) → red_xor = 1.
-  auto              op = f.add_unary_node(Lnast_node::create_red_xor(), "a", 0b111);
+  auto              op = f.add_unary_node(Lnast_ntype::create_red_xor(), "a", 0b111);
   TestableConstprop cp(f.lm);
   cp.position(op);
   cp.process_red_xor();
@@ -510,7 +511,7 @@ TEST(UpassConstprop, RedXorOddParity) {
 TEST(UpassConstprop, RedXorEvenParity) {
   ConstpropFixture f;
   // 0b1010 = 10: popcount = 2 (even) → red_xor = 0.
-  auto              op = f.add_unary_node(Lnast_node::create_red_xor(), "a", 0b1010);
+  auto              op = f.add_unary_node(Lnast_ntype::create_red_xor(), "a", 0b1010);
   TestableConstprop cp(f.lm);
   cp.position(op);
   cp.process_red_xor();
@@ -523,7 +524,7 @@ TEST(UpassConstprop, RedXorEvenParity) {
 // Fixture helper: [sext: ref(dst), const_or_ref(src), const(nbits)]
 // Since add_binary_node uses two int64_t literals, we build this manually.
 static Lnast_nid add_sext_node(ConstpropFixture& f, std::string_view dst, int64_t src_val, int64_t nbits) {
-  auto op = f.ln->add_child(f.stmts_nid, Lnast_node::create_sext());
+  auto op = f.ln->add_child(f.stmts_nid, Lnast_ntype::create_sext());
   f.ln->add_child(op, Lnast_node::create_ref(dst));
   f.ln->add_child(op, Lnast_node::create_const(src_val));
   f.ln->add_child(op, Lnast_node::create_const(nbits));
@@ -774,7 +775,7 @@ TEST(UpassConstpropST, ClassifyDropsKnownConstTemp) {
   ConstpropFixture f;
 
   // Build:  ___tmp = 7
-  auto assign_op = f.ln->add_child(f.stmts_nid, Lnast_node::create_assign());
+  auto assign_op = f.ln->add_child(f.stmts_nid, Lnast_ntype::create_assign());
   f.ln->add_child(assign_op, Lnast_node::create_ref("___tmp"));
   f.ln->add_child(assign_op, Lnast_node::create_const("7"));
 
@@ -791,7 +792,7 @@ TEST(UpassConstpropST, ClassifyKeepsRegEvenIfKnownConst) {
   ConstpropFixture f;
 
   // Build:  #reg = 7
-  auto assign_op = f.ln->add_child(f.stmts_nid, Lnast_node::create_assign());
+  auto assign_op = f.ln->add_child(f.stmts_nid, Lnast_ntype::create_assign());
   f.ln->add_child(assign_op, Lnast_node::create_ref("#reg"));
   f.ln->add_child(assign_op, Lnast_node::create_const("7"));
 

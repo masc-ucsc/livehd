@@ -177,26 +177,26 @@ public:
 
   // Returns a string_view backed by the persistent attribute store, so it
   // stays valid until the LNAST mutates that node's text. Cheaper than
-  // `get_data()` — that returns an Lnast_node by value with an owned name
-  // string copy, fine for short-lived use but unnecessary if you just want
-  // the text.
   auto current_text() const { return lnast->get_name(current_nid); }
+  auto current_type() const { return lnast->get_type(current_nid); }
 
   // Returns the Lnast_nid of the read cursor. Used by passes that need a
   // stable identity for the current node (e.g. for cross-pass cassert
   // dedup keyed by source location).
   Lnast_nid get_current_nid() const { return current_nid; }
 
-  // Returns a copy of the full Lnast_node at the read cursor. Used by the
-  // runner to replicate the input node into the staging tree. Builds the
-  // bundle from the persistent type/name attrs at call time — there's no
-  // pre-computed Lnast_node sitting around.
+  // Returns a detached copy of a ref/const leaf at the read cursor.
+  // Structural nodes are represented by current_type().
   Lnast_node current_node() const {
     const auto type = lnast->get_type(current_nid);
-    if (Lnast_ntype::is_invalid(type)) {
-      return Lnast_node();
+    if (Lnast_ntype::is_ref(type)) {
+      return Lnast_node::create_ref(lnast->get_name(current_nid));
     }
-    return Lnast_node(type, std::string(lnast->get_name(current_nid)));
+    if (Lnast_ntype::is_const(type)) {
+      return Lnast_node::create_const(lnast->get_name(current_nid));
+    }
+    I(Lnast_ntype::is_invalid(type));
+    return Lnast_node::create_invalid();
   }
 
   // Cursor-state snapshot used by the runner to recover from a pass that
@@ -262,9 +262,7 @@ protected:
   // single Tree_pos that uniquely identifies a node within a tree body, so we
   // round-trip via that. decode_nid reconstructs the Node_class through the
   // owning Lnast's tree.
-  static Node_id encode_nid(const Lnast_nid& nid) {
-    return static_cast<Node_id>(nid.get_class_index().value);
-  }
+  static Node_id encode_nid(const Lnast_nid& nid) { return static_cast<Node_id>(nid.get_class_index().value); }
 
   Lnast_nid decode_nid(Node_id node) const {
     return lnast->tree().get_node(hhds::Tree_class_index{static_cast<hhds::Tree_pos>(node)});

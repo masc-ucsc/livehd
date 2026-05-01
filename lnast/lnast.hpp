@@ -33,42 +33,42 @@ inline int64_t pos_of(const hhds::Tree::Node_class& nid) { return nid.get_class_
 
 using Lnast_nid = hhds::Tree::Node_class;
 
-// Lightweight transient bundle: tree slot is the source of truth for `type`
-// after `Lnast::set_data` runs; this struct is only used to carry
-// (type, name) into add_child / set_root / append_sibling. LoC fields
-// (line/pos/fname) are NOT carried here — set them via Lnast::set_loc on
-// the resulting nid when needed.
-//
-// `type` is the raw `Lnast_ntype::Lnast_ntype_int` enum value; predicates
-// and pretty-printers live as static functions on Lnast_ntype.
-// `name` is owned (std::string) so the int-form `create_const(int64_t)` can
-// stringify safely. SSO covers the common case (short var names, "nil",
-// "true", small constants).
-#define CREATE_LNAST_NODE(type)                                                                                          \
-  static Lnast_node create_##type() { return Lnast_node(Lnast_ntype::create_##type(), std::string{}); }                  \
-  static Lnast_node create_##type(std::string_view str) {                                                                \
-    return Lnast_node(Lnast_ntype::create_##type(), std::string{str});                                                   \
-  }
-
-struct Lnast_node {
-  Lnast_ntype::Lnast_ntype_int type{Lnast_ntype::Lnast_ntype_invalid};
-  std::string                  name;
+// Detached leaf payload. Structural nodes are just Lnast_ntype values and
+// should be inserted with Lnast::add_child(parent, type). A detached
+// Lnast_node is only needed when code must carry a ref/const result before it
+// knows where that leaf will be inserted.
+class Lnast_node {
+public:
+  enum class Kind : uint8_t { invalid, ref, constant };
 
   Lnast_node() = default;
-  Lnast_node(Lnast_ntype::Lnast_ntype_int _type) : type(_type) {}
-  Lnast_node(Lnast_ntype::Lnast_ntype_int _type, std::string _name) : type(_type), name(std::move(_name)) {
-    I(!Lnast_ntype::is_invalid(type));
+
+  static Lnast_node create_invalid() { return Lnast_node(); }
+  static Lnast_node create_ref(std::string_view name) { return Lnast_node(Kind::ref, std::string{name}); }
+  static Lnast_node create_const(std::string_view value) { return Lnast_node(Kind::constant, std::string{value}); }
+  static Lnast_node create_const(int64_t v) { return Lnast_node(Kind::constant, std::to_string(v)); }
+
+  bool is_invalid() const { return kind == Kind::invalid; }
+  bool is_ref() const { return kind == Kind::ref; }
+  bool is_const() const { return kind == Kind::constant; }
+
+  Lnast_ntype::Lnast_ntype_int get_type() const {
+    switch (kind) {
+      case Kind::invalid: return Lnast_ntype::create_invalid();
+      case Kind::ref: return Lnast_ntype::create_ref();
+      case Kind::constant: return Lnast_ntype::create_const();
+    }
+    return Lnast_ntype::create_invalid();
   }
 
-  constexpr bool is_invalid() const { return Lnast_ntype::is_invalid(type); }
-  void           dump() const;
+  std::string_view get_name() const { return text; }
+  void             dump() const;
 
-#define LNAST_NODE(NAME, VERBAL) CREATE_LNAST_NODE(NAME)
-#include "lnast_nodes.def"
+private:
+  Lnast_node(Kind k, std::string value) : kind(k), text(std::move(value)) {}
 
-  static Lnast_node create_const(int64_t v) {
-    return Lnast_node(Lnast_ntype::create_const(), std::to_string(v));
-  }
+  Kind        kind{Kind::invalid};
+  std::string text;
 };
 
 class Lnast {
@@ -140,19 +140,21 @@ public:
   // post-order traversal should reach into the Node_class API directly.
 
   // ── mutation ────────────────────────────────────────────────────────────
-  // set_root(node): create the root and stamp `node`'s payload onto it.
+  // Structural nodes are inserted with an explicit type. Detached
+  // Lnast_node values are only for ref/const/invalid leaves.
+  Lnast_nid set_root(Lnast_ntype::Lnast_ntype_int type);
   Lnast_nid set_root(const Lnast_node& n);
-  // add_child(parent, node): append `node` as a new last-child of `parent`.
+  Lnast_nid add_child(const Lnast_nid& parent, Lnast_ntype::Lnast_ntype_int type);
   Lnast_nid add_child(const Lnast_nid& parent, const Lnast_node& n);
-  // append_sibling(sibling, node): insert `node` right after `sibling`.
+  Lnast_nid append_sibling(const Lnast_nid& sibling, Lnast_ntype::Lnast_ntype_int type);
   Lnast_nid append_sibling(const Lnast_nid& sibling, const Lnast_node& n);
 
   // ── payload accessors ───────────────────────────────────────────────────
   Lnast_ntype::Lnast_ntype_int get_type(const Lnast_nid& nid) const;
   void                         set_type(const Lnast_nid& nid, Lnast_ntype::Lnast_ntype_int t);
   std::string_view             get_name(const Lnast_nid& nid) const;
-  std::string_view get_vname(const Lnast_nid& nid) const { return get_name(nid); }
-  void             set_name(const Lnast_nid& nid, std::string_view name);
+  std::string_view             get_vname(const Lnast_nid& nid) const { return get_name(nid); }
+  void                         set_name(const Lnast_nid& nid, std::string_view name);
 
   // LoC payload — read/write the per-node source-position attributes
   // independently of the name/type bundle. Most callers don't need this;
@@ -168,12 +170,9 @@ public:
   std::string_view get_fname(const Lnast_nid& nid) const;
   void             set_fname(const Lnast_nid& nid, std::string_view fname);
 
-  // set_data: write-side bundle helper used by add_child / set_root /
-  // append_sibling and external builders that already have an Lnast_node
-  // value (e.g. uPass runner replaying the cursor's current node into a
-  // staging tree). On the read side, callers go through the narrow
-  // get_type / get_name accessors directly — bundling on read produced
-  // wasted lookups when callers only needed one of the two.
+  // set_data: write-side helpers used by add_child / set_root /
+  // append_sibling. On the read side, callers go through get_type/get_name.
+  void set_data(const Lnast_nid& nid, Lnast_ntype::Lnast_ntype_int type);
   void set_data(const Lnast_nid& nid, const Lnast_node& n);
 
   // ── module / source metadata ────────────────────────────────────────────

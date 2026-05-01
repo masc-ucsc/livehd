@@ -38,8 +38,7 @@ void Pass_locator::begin_pass(Eprp_var& var) {
   observe_lnast(ln.get());  // 1st traversal through the original LN to record assign subtrees.
 
   // now we will make the formatted LNAST:
-  lnastfmted->set_root(
-      Lnast_node(Lnast_ntype::create_top(), State_token(0, 0, 0, 0, ln->get_top_module_name())));  // root node of lnfmted
+  lnastfmted->set_root(Lnast_ntype::create_top());  // root node of lnfmted
   const auto stmt_index = ln->get_child(ln->get_root());  // stmt node of ln
   const auto stmt_index_fmt
       = lnastfmted->add_child(lnastfmted->get_root(),

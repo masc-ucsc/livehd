@@ -51,8 +51,9 @@ protected:
   std::vector<std::string> changed_passes() const;
 
   // Staging emit helpers.
-  void emit_push(const Lnast_node& node);
+  void emit_push(Lnast_ntype::Lnast_ntype_int type);
   void emit_pop();
+  void emit_leaf(Lnast_ntype::Lnast_ntype_int type);
   void emit_leaf(const Lnast_node& node);
   void emit_subtree_verbatim();
 

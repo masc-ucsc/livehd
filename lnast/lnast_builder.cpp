@@ -27,7 +27,7 @@ std::string Lnast_builder::emit_unary_result(Lnast_ntype::Lnast_ntype_int op_typ
   I(!operand.empty());
 
   auto res_var = create_lnast_tmp();
-  auto op_idx  = lnast->add_child(idx_stmts, Lnast_node(op_type));
+  auto op_idx  = lnast->add_child(idx_stmts, op_type);
   add_ref_child(op_idx, res_var);
   add_value_child(op_idx, operand);
 
@@ -39,7 +39,7 @@ std::string Lnast_builder::emit_binary_result(Lnast_ntype::Lnast_ntype_int op_ty
   I(!rhs.empty());
 
   auto res_var = create_lnast_tmp();
-  auto op_idx  = lnast->add_child(idx_stmts, Lnast_node(op_type));
+  auto op_idx  = lnast->add_child(idx_stmts, op_type);
   add_ref_child(op_idx, res_var);
   add_value_child(op_idx, lhs);
   add_value_child(op_idx, rhs);
@@ -61,7 +61,7 @@ std::string Lnast_builder::get_lnast_name(std::string_view vname, bool last_valu
     return std::string(lname);
   }
 
-  auto idx_delay = lnast->add_child(idx_stmts, Lnast_node::create_delay_assign());
+  auto idx_delay = lnast->add_child(idx_stmts, Lnast_ntype::create_delay_assign());
   auto tmp_var   = create_lnast_tmp();
   add_ref_child(idx_delay, tmp_var);
   add_ref_child(idx_delay, lname);
@@ -82,8 +82,8 @@ std::string_view Lnast_builder::get_lnast_lhs_name(std::string_view vname) {
 
 void Lnast_builder::new_lnast(std::string_view name) {
   lnast         = std::make_unique<Lnast>(name);
-  auto root_nid = lnast->set_root(Lnast_node(Lnast_ntype::create_top()));
-  idx_stmts     = lnast->add_child(root_nid, Lnast_node::create_stmts());
+  auto root_nid = lnast->set_root(Lnast_ntype::create_top());
+  idx_stmts     = lnast->add_child(root_nid, Lnast_ntype::create_stmts());
 
   vname2lname.clear();
   tmp_var_cnt = 0;
@@ -232,7 +232,7 @@ std::string Lnast_builder::create_bit_or_stmts(const std::vector<std::string>& v
 
     if (res_var.empty()) {
       res_var = create_lnast_tmp();
-      lid     = lnast->add_child(idx_stmts, Lnast_node::create_bit_or());
+      lid     = lnast->add_child(idx_stmts, Lnast_ntype::create_bit_or());
       add_ref_child(lid, res_var);
     }
 
@@ -264,7 +264,7 @@ void Lnast_builder::create_dp_assign_stmts(std::string_view lhs_var, std::string
   I(lhs_var.size());
   I(rhs_var.size());
 
-  auto idx_assign = lnast->add_child(idx_stmts, Lnast_node::create_dp_assign());
+  auto idx_assign = lnast->add_child(idx_stmts, Lnast_ntype::create_dp_assign());
   add_ref_child(idx_assign, lhs_var);
   add_value_child(idx_assign, rhs_var);
 }
@@ -280,7 +280,7 @@ void Lnast_builder::create_assign_stmts(std::string_view lhs_var, std::string_vi
     auto rhs_dest = create_tuple_get(rhs_var);
 
     if (Bundle::is_single_level(lhs_var)) {
-      auto idx_assign = lnast->add_child(idx_stmts, Lnast_node::create_assign());
+      auto idx_assign = lnast->add_child(idx_stmts, Lnast_ntype::create_assign());
       add_ref_child(idx_assign, lhs_var);
       add_value_child(idx_assign, rhs_dest);
     } else {
@@ -290,7 +290,7 @@ void Lnast_builder::create_assign_stmts(std::string_view lhs_var, std::string_vi
         return create_assign_stmts(absl::StrCat(vec[0], Bundle::get_first_level_name(vec[1])), rhs_var);
       }
 
-      auto idx_dot = lnast->add_child(idx_stmts, Lnast_node::create_tuple_set());
+      auto idx_dot = lnast->add_child(idx_stmts, Lnast_ntype::create_tuple_set());
       lhs_dest     = create_lnast_tmp();
       add_ref_child(idx_dot, lhs_dest);
 
@@ -318,13 +318,13 @@ void Lnast_builder::create_assign_stmts(std::string_view lhs_var, std::string_vi
   }
 #endif
 
-  auto idx_assign = lnast->add_child(idx_stmts, Lnast_node::create_assign());
+  auto idx_assign = lnast->add_child(idx_stmts, Lnast_ntype::create_assign());
   add_ref_child(idx_assign, lhs_var);
   add_value_child(idx_assign, rhs_var);
 }
 
 void Lnast_builder::create_declare_bits_stmts(std::string_view a_var, bool is_signed, int bits) {
-  auto idx_dot = lnast->add_child(idx_stmts, Lnast_node::create_tuple_set());
+  auto idx_dot = lnast->add_child(idx_stmts, Lnast_ntype::create_tuple_set());
 
 #ifdef LNASTOP_DONE
   add_ref_child(idx_dot, a_var);
@@ -363,7 +363,7 @@ void Lnast_builder::create_declare_bits_stmts(std::string_view a_var, bool is_si
 }
 
 void Lnast_builder::create_func_call(std::string_view out_tup, std::string_view fname, std::string_view inp_tup) {
-  auto idx_dot = lnast->add_child(idx_stmts, Lnast_node::create_func_call());
+  auto idx_dot = lnast->add_child(idx_stmts, Lnast_ntype::create_func_call());
 
   add_ref_child(idx_dot, out_tup);
   add_ref_child(idx_dot, fname);
@@ -372,12 +372,12 @@ void Lnast_builder::create_func_call(std::string_view out_tup, std::string_view 
 
 void Lnast_builder::create_named_tuple(std::string_view lhs_var, const std::vector<std::pair<std::string, std::string>>& rhs) {
 #ifdef LNASTOP_DONE
-  auto idx_dot = lnast->add_child(idx_stmts, Lnast_node::create_tuple_add());
+  auto idx_dot = lnast->add_child(idx_stmts, Lnast_ntype::create_tuple_add());
 
   add_ref_child(idx_dot, lhs_var);
 
   for (const auto& it : rhs) {
-    auto idx_assign = lnast->add_child(idx_dot, Lnast_node::create_assign());
+    auto idx_assign = lnast->add_child(idx_dot, Lnast_ntype::create_assign());
     add_ref_child(idx_assign, it.first);
     add_value_child(idx_assign, it.second);
   }
@@ -394,12 +394,12 @@ void Lnast_builder::create_named_tuple(std::string_view lhs_var, const std::vect
     tup_expanded_rhs.emplace_back(std::make_pair(it.first, create_tuple_get(it.second)));
   }
 
-  auto idx_dot = lnast->add_child(idx_stmts, Lnast_node::create_tuple_add());
+  auto idx_dot = lnast->add_child(idx_stmts, Lnast_ntype::create_tuple_add());
 
   add_ref_child(idx_dot, lhs_var);
 
   for (const auto& it : tup_expanded_rhs) {
-    auto idx_assign = lnast->add_child(idx_dot, Lnast_node::create_assign());
+    auto idx_assign = lnast->add_child(idx_dot, Lnast_ntype::create_assign());
     add_ref_child(idx_assign, it.first);
     add_value_child(idx_assign, it.second);
   }
@@ -430,7 +430,7 @@ std::string Lnast_builder::create_tuple_get(std::string_view var) {
     return create_tuple_get(absl::StrCat(first_level, n, ".", rest));
   }
 
-  auto idx_dot = lnast->add_child(idx_stmts, Lnast_node::create_tuple_get());
+  auto idx_dot = lnast->add_child(idx_stmts, Lnast_ntype::create_tuple_get());
 
   auto res_var = create_lnast_tmp();
   add_ref_child(idx_dot, res_var);
@@ -450,7 +450,7 @@ std::string Lnast_builder::create_tuple_get(std::string_view var) {
 }
 
 std::string Lnast_builder::create_tuple_get(std::string_view tup_var, std::string_view field_var) {
-  auto idx_dot = lnast->add_child(idx_stmts, Lnast_node::create_tuple_get());
+  auto idx_dot = lnast->add_child(idx_stmts, Lnast_ntype::create_tuple_get());
 
   auto res_var = create_lnast_tmp();
   add_ref_child(idx_dot, res_var);
@@ -473,7 +473,7 @@ std::string Lnast_builder::create_minus_stmts(std::string_view a_var, std::strin
   }
 
   auto res_var = create_lnast_tmp();
-  auto sub_idx = lnast->add_child(idx_stmts, Lnast_node::create_minus());
+  auto sub_idx = lnast->add_child(idx_stmts, Lnast_ntype::create_minus());
   add_ref_child(sub_idx, res_var);
   if (a_var.empty()) {
     add_const_child(sub_idx, "0");
@@ -513,7 +513,7 @@ std::string Lnast_builder::create_div_stmts(std::string_view a_var, std::string_
   }
 
   auto res_var = create_lnast_tmp();
-  auto idx     = lnast->add_child(idx_stmts, Lnast_node::create_div());
+  auto idx     = lnast->add_child(idx_stmts, Lnast_ntype::create_div());
   add_ref_child(idx, res_var);
 
   if (a_var.empty()) {
@@ -537,7 +537,7 @@ std::string Lnast_builder::create_get_mask_stmts(std::string_view sel_var, std::
   I(sel_var.size() && bitmask.size());
 
   auto res_var = create_lnast_tmp();
-  auto idx     = lnast->add_child(idx_stmts, Lnast_node::create_get_mask());
+  auto idx     = lnast->add_child(idx_stmts, Lnast_ntype::create_get_mask());
   add_ref_child(idx, res_var);
   add_ref_child(idx, sel_var);
   add_value_child(idx, bitmask);
@@ -548,7 +548,7 @@ std::string Lnast_builder::create_get_mask_stmts(std::string_view sel_var, std::
 void Lnast_builder::create_set_mask_stmts(std::string_view sel_var, std::string_view bitmask, std::string_view value) {
   I(sel_var.size() && bitmask.size() && value.size());
 
-  auto idx = lnast->add_child(idx_stmts, Lnast_node::create_set_mask());
+  auto idx = lnast->add_child(idx_stmts, Lnast_ntype::create_set_mask());
   add_ref_child(idx, sel_var);
   add_ref_child(idx, sel_var);
   add_value_child(idx, bitmask);
