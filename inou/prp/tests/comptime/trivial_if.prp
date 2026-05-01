@@ -1,7 +1,7 @@
 /*
 :name: trivial_if
 :type: comptime
-:verifier_pass: 5
+:verifier_pass: 7
 :verifier_fail: 0
 */
 
@@ -11,14 +11,15 @@ mut c = 1
 if false {
     c = 2
 }
-
+cassert c == 1
+c = 100 when false
 cassert c == 1
 
-mut c = 3 when false
-cassert c == nil
+mut c2 = 3 when false
+cassert c2 == nil
 
-mut c = 4 when true
-cassert c == 4
+mut c3 = 4 when true
+cassert c3 == 4
 
 if false {
   mut d = 3
@@ -26,5 +27,6 @@ if false {
 cassert d == nil
 if true {
   mut d = 4
+  cassert d == 4
 }
 cassert d == nil
