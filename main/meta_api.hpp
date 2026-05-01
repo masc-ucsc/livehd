@@ -22,6 +22,8 @@ protected:
 
   static void lgdump(Eprp_var& var);
   static void lnastdump(Eprp_var& var);
+  static void lnastprint(Eprp_var& var);
+  static void lnastread(Eprp_var& var);
 
   Meta_api() {}
 

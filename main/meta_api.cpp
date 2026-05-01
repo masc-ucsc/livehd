@@ -3,6 +3,7 @@
 #include "meta_api.hpp"
 
 #include <format>
+#include <fstream>
 #include <iostream>
 #include <regex>
 #include <string>
@@ -204,11 +205,69 @@ void Meta_api::lgdump(Eprp_var& var) {
   }
 }
 
+// Eprp labels propagate through `|>` pipes, so a `file:foo` left in the var
+// by an upstream stage would silently steer the next lnast.{print,dump,read}
+// to that same path. Each of these helpers consumes its own `file` label
+// after using it so the label does not leak across the pipe.
+
 void Meta_api::lnastdump(Eprp_var& var) {
-  std::print("lnast.dump lnast:\n");
-  for (const auto& l : var.lnasts) {
-    std::print("  {}\n", l->get_top_module_name());
-    l->dump();
+  auto file = std::string{var.get("file")};
+  var.delete_label("file");
+  if (file.empty()) {
+    std::print("lnast.dump lnast:\n");
+    for (const auto& l : var.lnasts) {
+      std::print("  {}\n", l->get_top_module_name());
+      l->dump(std::cout);
+    }
+  } else {
+    std::ofstream ofs(file);
+    if (!ofs.is_open()) {
+      Main_api::error("lnast.dump could not open {} for writing", file);
+      return;
+    }
+    for (const auto& l : var.lnasts) {
+      l->dump(ofs);
+    }
+  }
+}
+
+void Meta_api::lnastprint(Eprp_var& var) {
+  auto file = std::string{var.get("file")};
+  var.delete_label("file");
+  if (file.empty()) {
+    std::print("lnast.print lnast:\n");
+    for (const auto& l : var.lnasts) {
+      std::print("  {}\n", l->get_top_module_name());
+      l->print(std::cout);
+    }
+  } else {
+    std::ofstream ofs(file);
+    if (!ofs.is_open()) {
+      Main_api::error("lnast.print could not open {} for writing", file);
+      return;
+    }
+    for (const auto& l : var.lnasts) {
+      l->print(ofs);
+    }
+  }
+}
+
+void Meta_api::lnastread(Eprp_var& var) {
+  auto file = std::string{var.get("file")};
+  var.delete_label("file");
+  if (file.empty()) {
+    Main_api::error("lnast.read requires file:<path>");
+    return;
+  }
+  std::ifstream ifs(file);
+  if (!ifs.is_open()) {
+    Main_api::error("lnast.read could not open {} for reading", file);
+    return;
+  }
+  for (auto& lnast : Lnast::read_all(ifs)) {
+    if (lnast) {
+      var.add(lnast);
+    }
   }
 }
 
@@ -239,13 +298,20 @@ void Meta_api::setup(Eprp& eprp) {
   eprp.register_method(m3);
 
   //---------------------
-  Eprp_method m4a("lnast.dump", "verbose LNAST dump ", &Meta_api::lnastdump);
+  Eprp_method m4a("lnast.dump", "round-trippable LNAST text dump (read with lnast.read)", &Meta_api::lnastdump);
+  m4a.add_label_optional("file", "file to write the dump to (default: stdout)", "");
   Eprp_method m4b("lgraph.dump", "verbose lgraph dump ", &Meta_api::lgdump);
   m4b.add_label_optional("hier", "hierarchical traversal", "false");
   m4b.add_label_optional("odir", "directory to dump (not screen)", "");
+  Eprp_method m4c("lnast.print", "pretty (human-only) LNAST tree print", &Meta_api::lnastprint);
+  m4c.add_label_optional("file", "file to write the pretty print to (default: stdout)", "");
+  Eprp_method m4d("lnast.read", "load an LNAST from a file produced by lnast.dump", &Meta_api::lnastread);
+  m4d.add_label_required("file", "file produced by lnast.dump");
 
   eprp.register_method(m4a);
   eprp.register_method(m4b);
+  eprp.register_method(m4c);
+  eprp.register_method(m4d);
   //---------------------
   Eprp_method m5("dump", "dump labels and lgraphs passed", &Meta_api::dump);
   eprp.register_method(m5);

@@ -15,7 +15,6 @@ cc_library(
     ]),
     copts = COPTS,
     includes = ["."],
-    linkopts = ["-lpthread"],
     visibility = ["//visibility:public"],
     deps = [
         "//core",

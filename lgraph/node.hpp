@@ -104,7 +104,7 @@ public:
     friend class Bwd_edge_iterator;
 
   public:
-    Compact_flat(const Compact_flat& obj) : lgid(obj.lgid), nid(obj.nid) {}
+    Compact_flat(const Compact_flat& obj) = default;
     constexpr Compact_flat(const Lg_type_id& _lgid, Index_id _nid) : lgid(_lgid.value), nid(_nid) { assert(nid); };
     constexpr Compact_flat() : nid(0) {};
 

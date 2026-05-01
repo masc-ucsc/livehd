@@ -2,9 +2,14 @@
 
 #include "lnast.hpp"
 
+#include <charconv>
 #include <format>
+#include <fstream>
 #include <iostream>
+#include <span>
+#include <sstream>
 #include <string>
+#include <vector>
 
 namespace {
 // Pre-register every Lnast attribute tag at static-init time. The HHDS
@@ -170,7 +175,73 @@ void Lnast::set_data(const Lnast_nid& nid, const Lnast_node& n) {
   set_name(nid, n.get_name());
 }
 
-void Lnast::dump(const Lnast_nid& root_nid) const {
+// ─────────────────────────────────────────────────────────────────────────
+// print / dump / read
+//
+// hhds split: print() is pretty-only (box-drawing, not round-trippable);
+// dump() goes through write_dump (parseable by read_dump). Lnast::read uses
+// hhds Tree::read_dump and re-applies the lnast-side attributes (name,
+// loc, fname) that ride in the dump as `'<name>' @(loc=..,fname=..)`.
+// ─────────────────────────────────────────────────────────────────────────
+
+namespace {
+
+// Build a Type_entry table indexed by Lnast_ntype enum value. The Type
+// stored on each tree node is Lnast_ntype's uint8_t, so type_table[i].name
+// must equal Lnast_ntype::to_sv(i) for read_dump to round-trip.
+std::span<const hhds::Type_entry> lnast_type_table() {
+  static const auto table = []() {
+    std::vector<hhds::Type_entry> t;
+    t.reserve(Lnast_ntype::Lnast_ntype_last_invalid);
+    for (uint8_t i = 0; i < Lnast_ntype::Lnast_ntype_last_invalid; ++i) {
+      t.push_back({Lnast_ntype::to_sv(static_cast<Lnast_ntype::Lnast_ntype_int>(i)), hhds::Statement_class::Node});
+    }
+    return t;
+  }();
+  return table;
+}
+
+// Encode/decode loc as "pos1:pos2:line:tok" so it survives a single
+// comma-separated attribute slot in the dump.
+std::string encode_loc(const Lnast::Loc& loc) {
+  return std::format("{}:{}:{}:{}", loc.pos1, loc.pos2, loc.line, static_cast<uint32_t>(loc.tok));
+}
+
+bool decode_loc(std::string_view s, Lnast::Loc& out) {
+  std::array<uint64_t, 4> v{0, 0, 0, 0};
+  size_t                  field = 0;
+  size_t                  pos   = 0;
+  while (pos <= s.size() && field < 4) {
+    size_t end = s.find(':', pos);
+    if (end == std::string_view::npos) {
+      end = s.size();
+    }
+    auto piece = s.substr(pos, end - pos);
+    auto first = piece.data();
+    auto last  = piece.data() + piece.size();
+    auto [ptr, ec] = std::from_chars(first, last, v[field]);
+    if (ec != std::errc{} || ptr != last) {
+      return false;
+    }
+    ++field;
+    if (end == s.size()) {
+      break;
+    }
+    pos = end + 1;
+  }
+  if (field != 4) {
+    return false;
+  }
+  out.pos1 = v[0];
+  out.pos2 = v[1];
+  out.line = static_cast<uint32_t>(v[2]);
+  out.tok  = static_cast<uint8_t>(v[3]);
+  return true;
+}
+
+}  // namespace
+
+void Lnast::print(std::ostream& os, const Lnast_nid& root_nid) const {
   hhds::Tree::PrintOptions opts;
   opts.show_types = false;
   opts.node_text  = [this](const hhds::Tree::Node_class& node) {
@@ -185,5 +256,143 @@ void Lnast::dump(const Lnast_nid& root_nid) const {
     }
     return std::format("{}-{}@{}", loc.pos1, loc.pos2, get_fname(node));
   });
-  tree_->print(std::cout, root_nid, opts);
+  tree_->print(os, root_nid, opts);
+}
+
+void Lnast::dump(std::ostream& os) const {
+  hhds::Tree::PrintOptions opts;
+  opts.type_table = lnast_type_table();
+  opts.show_types = true;
+  // node_text is just the variable name (the type column already carries
+  // the lnast type). hhds write_dump suppresses node_text only when it
+  // equals the type name, so we echo the type name back for unnamed nodes
+  // — that prints as bare "assign" instead of "assign ''".
+  opts.node_text = [this](const hhds::Tree::Node_class& node) -> std::string {
+    auto n = get_name(node);
+    if (n.empty()) {
+      return std::string(Lnast_ntype::to_sv(get_type(node)));
+    }
+    return std::string(n);
+  };
+  opts.attributes.emplace_back("loc", [this](const hhds::Tree::Node_class& node) -> std::optional<std::string> {
+    auto loc = get_loc(node);
+    if (loc.pos1 == 0 && loc.pos2 == 0 && loc.line == 0 && loc.tok == 0) {
+      return std::nullopt;
+    }
+    return encode_loc(loc);
+  });
+  opts.attributes.emplace_back("fname", [this](const hhds::Tree::Node_class& node) -> std::optional<std::string> {
+    auto f = get_fname(node);
+    if (f.empty()) {
+      return std::nullopt;
+    }
+    return std::string(f);
+  });
+  tree_->write_dump(os, opts);
+}
+
+void Lnast::dump(const std::string& filename) const {
+  std::ofstream ofs(filename);
+  I(ofs.is_open(), "lnast.dump: cannot open {} for writing", filename);
+  dump(ofs);
+}
+
+namespace {
+
+// Build an Lnast from one already-decoded hhds read_dump segment. Factored
+// out so single- and multi-tree readers share the post-processing.
+std::shared_ptr<Lnast> finish_read(hhds::Tree::ReadDumpResult result) {
+  auto top_name = std::string(result.tree->get_name());
+  auto lnast    = std::make_shared<Lnast>(top_name, "");
+  // The loaded tree is unattached (forest=null); replace_body wires it
+  // through TreeIO so forest_/treeio_ owns it from here on.
+  lnast->replace_body(result.tree);
+
+  // Re-apply per-node lnast attributes (name, loc, fname). NodeData entries
+  // are recorded in pre-order; iterating tree.pre_order() yields the same
+  // order, so we match them index-by-index.
+  size_t i = 0;
+  for (auto node : lnast->tree().pre_order()) {
+    if (i >= result.nodes.size()) {
+      break;
+    }
+    const auto& nd = result.nodes[i++];
+
+    // NodeData::node_text falls back to type_name when the dump line had no
+    // quoted text. Suppress that fallback so an unset name stays unset.
+    auto type     = lnast->get_type(node);
+    auto type_str = Lnast_ntype::to_sv(type);
+    if (!nd.node_text.empty() && nd.node_text != type_str) {
+      lnast->set_name(node, nd.node_text);
+    }
+
+    for (const auto& [k, v] : nd.attributes) {
+      if (k == "loc") {
+        Lnast::Loc loc{};
+        if (decode_loc(v, loc)) {
+          lnast->set_loc(node, loc);
+        }
+      } else if (k == "fname") {
+        lnast->set_fname(node, v);
+      }
+    }
+  }
+
+  return lnast;
+}
+
+// A "name line" in a multi-tree dump is the header that starts a new tree:
+// it carries no tree-drawing prefix (every node line begins either with the
+// 0xe2 byte of ├/└/│ or with the 4-space prefix that hhds emits under a
+// last-child parent).
+bool is_name_line(const std::string& line) {
+  if (line.empty()) {
+    return false;
+  }
+  unsigned char c = static_cast<unsigned char>(line.front());
+  return c != 0xe2 && c != ' ';
+}
+
+}  // namespace
+
+std::shared_ptr<Lnast> Lnast::read(std::istream& is) {
+  auto trees = read_all(is);
+  return trees.empty() ? nullptr : trees.front();
+}
+
+std::shared_ptr<Lnast> Lnast::read(const std::string& filename) {
+  std::ifstream ifs(filename);
+  I(ifs.is_open(), "lnast.read: cannot open {} for reading", filename);
+  return read(ifs);
+}
+
+std::vector<std::shared_ptr<Lnast>> Lnast::read_all(std::istream& is) {
+  std::vector<std::shared_ptr<Lnast>> out;
+
+  // Split the stream into one-tree segments at every "name line" (header
+  // with no tree-drawing prefix), then hand each segment to hhds::read_dump.
+  std::string current;
+  bool        have_segment = false;
+  std::string line;
+  while (std::getline(is, line)) {
+    if (is_name_line(line) && have_segment) {
+      std::istringstream segment(current);
+      out.push_back(finish_read(hhds::Tree::read_dump(segment, lnast_type_table())));
+      current.clear();
+    }
+    current.append(line);
+    current.push_back('\n');
+    have_segment = true;
+  }
+  if (have_segment) {
+    std::istringstream segment(current);
+    out.push_back(finish_read(hhds::Tree::read_dump(segment, lnast_type_table())));
+  }
+  return out;
+}
+
+std::vector<std::shared_ptr<Lnast>> Lnast::read_all(const std::string& filename) {
+  std::ifstream ifs(filename);
+  I(ifs.is_open(), "lnast.read: cannot open {} for reading", filename);
+  return read_all(ifs);
 }

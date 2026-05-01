@@ -186,9 +186,27 @@ public:
   static bool is_input(std::string_view name) { return !name.empty() && name.front() == '$'; }
   static bool is_tmp(std::string_view name) { return name.size() >= 3 && name.substr(0, 3) == "___"; }
 
-  // ── dump ────────────────────────────────────────────────────────────────
-  void dump(const Lnast_nid& root_nid) const;
-  void dump() const { dump(get_root()); }
+  // ── print / dump / read ────────────────────────────────────────────────
+  // print: pretty box-drawing tree for humans (hhds Tree::print).
+  //   Not round-trippable. node_text shows "type: name".
+  // dump: structured text via hhds Tree::write_dump. Round-trips through
+  //   Lnast::read. node_text holds just the variable name; type comes from
+  //   the type column. Per-node loc/fname ride as @(loc=..,fname=..).
+  // read: parse a `dump` file back into an Lnast.
+  void print(std::ostream& os, const Lnast_nid& root_nid) const;
+  void print(std::ostream& os) const { print(os, get_root()); }
+  void print() const { print(std::cout, get_root()); }
+
+  void dump(std::ostream& os) const;
+  void dump(const std::string& filename) const;
+  void dump() const { dump(std::cout); }
+
+  // read: parse a single tree from a dump. read_all: parse every tree in a
+  // multi-tree dump (lnast.dump concatenates trees one after the other).
+  static std::shared_ptr<Lnast>              read(std::istream& is);
+  static std::shared_ptr<Lnast>              read(const std::string& filename);
+  static std::vector<std::shared_ptr<Lnast>> read_all(std::istream& is);
+  static std::vector<std::shared_ptr<Lnast>> read_all(const std::string& filename);
 
   template <typename... Args>
   static void info(std::format_string<Args...> format, Args&&... args) {

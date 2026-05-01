@@ -22,8 +22,8 @@ TEST_F(Lnast_parser_writer_test, parse_then_write_eq) {
     Lnast_parser parser(fs);
     auto         lnast = parser.parse_all();
 
-    std::cout << "\nlnast->dump():\n\n";
-    lnast->dump();
+    std::cout << "\nlnast->print():\n\n";
+    lnast->print();
 
     // Writer test
     std::stringstream ss;
@@ -52,5 +52,25 @@ TEST_F(Lnast_parser_writer_test, parse_then_write_eq) {
     }
 
     std::cout << "\n";
+  }
+}
+
+TEST_F(Lnast_parser_writer_test, dump_read_roundtrip) {
+  for (const auto& entry : std::filesystem::directory_iterator("./lnast/tests/ln")) {
+    std::ifstream fs(entry.path());
+    Lnast_parser  parser(fs);
+    auto          lnast = parser.parse_all();
+
+    std::stringstream first;
+    lnast->dump(first);
+
+    std::stringstream first_in(first.str());
+    auto              loaded = Lnast::read(first_in);
+    ASSERT_TRUE(loaded != nullptr);
+
+    std::stringstream second;
+    loaded->dump(second);
+
+    EXPECT_EQ(first.str(), second.str()) << "dump/read round-trip diverged on " << std::string{entry.path()};
   }
 }
