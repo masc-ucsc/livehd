@@ -7,6 +7,7 @@ load("//tools:copt_default.bzl", "COPTS")
 exports_files([
     "tests/pyrope/proc_lambda.prp",
     "tests/pyrope/simple.prp",
+    "tests/comptime/trivial_if.prp",
 ])
 
 cc_library(
