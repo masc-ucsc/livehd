@@ -75,6 +75,7 @@ cc_library(
         #add dependencies to new passes here
         #"//inou/hif:inou_hif"
         "//pass/upass:pass_upass",
+        "//pass/prp_writer:pass_prp_writer",
     ],
 )
 
