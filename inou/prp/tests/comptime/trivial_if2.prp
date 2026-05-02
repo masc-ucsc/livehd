@@ -1,0 +1,14 @@
+/*
+:name: trivial_if2
+:type: comptime
+:verifier_pass: 2
+:verifier_fail: 0
+*/
+
+mut c2 = 100
+mut c2 = 3 when false   // No impact line of code
+cassert c2 == 100
+
+cond = true
+c2 = 4 when cond
+cassert c2 == 4

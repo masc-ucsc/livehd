@@ -260,37 +260,21 @@ void Prp2lnast::process_gated_statement(TSNode stmt, TSNode gate) {
   // gate is a `when_unless_cond` node:
   //   when_unless_cond := ('when' | 'unless') condition:_expression
   //
-  // Lower `stmt when c`   to `if c { stmt }`
-  //       `stmt unless c` to `if !c { stmt }`
+  // Lower `stmt when c`   to `if c <stmt-children…>`
+  //       `stmt unless c` to `if !c <stmt-children…>`
   //
-  // For decl-form assignments (`mut x = e when c`) the binding semantics
-  // differ from a plain `if`: the variable must be visible in the enclosing
-  // scope regardless of the gate (with value `nil` when the gate is false).
-  // We hoist the decl out of the synthesized `if` and seed `nil`, so the
-  // gate's body becomes a bare assignment to the already-declared name.
+  // Unlike a normal `if`, the gated body must NOT introduce a new scope:
+  // `mut x = e when c` declares x in the surrounding scope when c is true,
+  // and is a complete no-op when c is false (preserving any prior binding
+  // of x). We encode this by giving the `if` direct stmt children — no
+  // `stmts` wrapper — which signals to consumers (writer, constprop,
+  // runner) that the body executes flat in the parent scope.
   // TODO(grammar_todo2.md #1): once the grammar splits when/unless into
   // distinct named nodes, dispatch on node kind here.
   std::string_view gate_kw_text = trim(get_text(gate));
   bool             is_unless    = gate_kw_text.starts_with("unless");
 
   TSNode cond_node = child_by_field(gate, "condition");
-
-  std::string_view stmt_type(ts_node_type(stmt));
-  bool             has_decl_assign = false;
-  if (stmt_type == "assignment") {
-    TSNode decl     = child_by_field(stmt, "decl");
-    has_decl_assign = !ts_node_is_null(decl);
-  }
-
-  // Hoist the decl + nil-init for `<decl> x = e when c`. After this the
-  // variable exists in the surrounding scope; the synthesized if body just
-  // overwrites it on the gate-true path.
-  if (has_decl_assign) {
-    TSNode lv   = child_by_field(stmt, "lvalue");
-    TSNode decl = child_by_field(stmt, "decl");
-    TSNode tc   = child_by_field(stmt, "type");
-    (void)process_lvalue_for_assign(lv, Lnast_node::create_const("nil"), decl, tc);
-  }
 
   // Evaluate the gate condition into the surrounding scope so any
   // helper stmts emitted by expr_to_node land before the `if`.
@@ -310,33 +294,13 @@ void Prp2lnast::process_gated_statement(TSNode stmt, TSNode gate) {
 
   auto if_idx = builder.add_child(Lnast_ntype::create_if());
   lnast->add_child(if_idx, cref);
-  auto body_idx = lnast->add_child(if_idx, Lnast_ntype::create_stmts());
-  builder.push_stmts(body_idx);
 
-  if (has_decl_assign) {
-    // Re-emit the assignment without the decl: the binding was already
-    // hoisted above. We mirror process_assignment's rvalue-fallback path
-    // for hidden constant rvalues.
-    TSNode lv = child_by_field(stmt, "lvalue");
-    TSNode op = child_by_field(stmt, "operator");
-    TSNode rv = child_by_field(stmt, "rvalue");
-    TSNode tc = child_by_field(stmt, "type");
-
-    Lnast_node rvalue_node;
-    if (ts_node_is_null(rv)) {
-      auto op_end  = ts_node_end_byte(op);
-      auto par_end = ts_node_end_byte(stmt);
-      auto text    = trim(text_between(op_end, par_end));
-      rvalue_node  = constant_text_to_node(text);
-    } else {
-      rvalue_node = expr_to_node(rv);
-    }
-    TSNode null_decl{};
-    (void)process_lvalue_for_assign(lv, rvalue_node, null_decl, tc);
-  } else {
-    process_statement(stmt);
-  }
-
+  // Flat form: emit the gated stmt's children directly under the if (no
+  // `stmts` wrapper). For multi-effect statements (e.g. `mut x = e when c`
+  // emits attr_set + assign), all effects live as siblings under the same
+  // `if`, sharing one cond evaluation.
+  builder.push_stmts(if_idx);
+  process_statement(stmt);
   builder.pop_stmts();
 }
 

@@ -544,6 +544,15 @@ void uPass_runner::process_if() {
   // only the taken branch's stmts spliced into the parent (no if node).
   // Cursor invariant: must be at the if-node on all exit paths.
   // See upass.md §Slice 7 and §5 (if cursor discipline).
+  //
+  // Two if shapes are recognized:
+  //   * Scoped form: (cond, stmts, [cond, stmts]…, [stmts]) — normal
+  //     if/elif/else. The body's `stmts` wrapper is a real scope.
+  //   * Flat form (when/unless): (cond, stmt, [stmt]…) — gated stmts with
+  //     no `stmts` wrapper. The body is executed in the parent scope when
+  //     the cond is true. Emitted by prp2lnast for `s when c` / `s unless c`.
+  //     when/unless conditions are required to be comptime-known; if the
+  //     fold here fails, downstream verifier flags it as a build error.
   if (lm->has_child()) {
     lm->move_to_child();
     using Ntype    = Lnast_ntype;
@@ -556,6 +565,44 @@ void uPass_runner::process_if() {
         cval = Lconst::from_pyrope(lm->current_text());
       } else {
         cval = try_fold_ref(lm->current_text());
+      }
+
+      // Peek at the body shape: if the second child is not `stmts`, this
+      // is a flat (when/unless) if. Flat ifs have no else/elif chain.
+      bool is_flat = false;
+      if (lm->move_to_sibling()) {
+        is_flat = lm->get_raw_ntype() != Ntype::Lnast_ntype_stmts;
+      }
+      // The peek above moved cursor onto the second child (or invalid
+      // if there isn't one). The original move_to_child pushed the
+      // if-node onto the cursor stack, so a single move_to_parent
+      // restores cursor to the if-node and unwinds that push. After
+      // that we re-enter via move_to_child to leave the cursor at the
+      // condition again — exactly mirroring the pre-peek state.
+      lm->move_to_parent();
+      lm->move_to_child();
+
+      if (is_flat) {
+        // Flat form: cond known-true → emit each body stmt in parent scope;
+        // cond known-false → drop entirely; cond unknown → emit verbatim
+        // (when/unless conditions must be comptime-known; the verifier
+        // reports the build error downstream).
+        if (cval && !cval->is_invalid() && !cval->has_unknowns()) {
+          const bool taken = !cval->is_known_false();
+          if (taken) {
+            while (lm->move_to_sibling()) {
+              process_lnast();
+            }
+          }
+          lm->move_to_parent();
+          return;  // pruned — no if node emitted
+        }
+        // Unknown cond: emit the if and its children verbatim, no
+        // dispatch into the body (we don't want the body's effects to
+        // mutate the symbol table when the gate didn't fire).
+        lm->move_to_parent();  // matches the move_to_child above
+        emit_subtree_verbatim();
+        return;
       }
 
       if (cval && !cval->is_invalid() && !cval->has_unknowns()) {

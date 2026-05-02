@@ -607,6 +607,18 @@ void uPass_constprop::process_if() {
   // Observe the condition so the symbol table is populated before the runner
   // queries try_fold_ref(). The runner's process_if (Slice 7) performs the
   // actual dead-branch elimination based on the folded condition value.
+  //
+  // Two if shapes flow through here (see runner's process_if for the
+  // structural distinction):
+  //   * Scoped form  — (cond, stmts, [cond, stmts]…, [stmts]). Walked
+  //     here as alternating cond/stmts pairs.
+  //   * Flat form    — (cond, stmt, [stmt]…). Lowered from
+  //     `s when c` / `s unless c`. when/unless conditions are required
+  //     to be comptime-known: there is no codegen lowering for an
+  //     unresolved gate, so a non-folded cond is reported as a build
+  //     error by the verifier downstream. Constprop only needs to peek
+  //     at the cond here; the runner handles drop / splice based on the
+  //     folded value.
   if (!move_to_child()) {
     return;
   }
