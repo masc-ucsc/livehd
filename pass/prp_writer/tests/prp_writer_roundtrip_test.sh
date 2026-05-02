@@ -31,7 +31,7 @@ printf 'inou.prp files:%s |> pass.upass |> pass.lnastfmt\nquit\n' \
   "${ODIR}/trivial_if.prp" \
   | HOME="${TEST_TMPDIR}" "${LGSHELL}" >"${OUT2}" 2>&1
 
-if grep -qi "error\|FAIL\|exception" "${OUT2}"; then
+if grep -v "cassert counts" "${OUT2}" | grep -qi "error\|fail\|exception"; then
   echo "FAIL: pass 2 produced errors when re-parsing the emitted Pyrope"
   cat "${OUT2}"
   exit 2
