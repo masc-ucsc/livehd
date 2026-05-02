@@ -33,7 +33,10 @@ void Pass_prp_writer::work(Eprp_var& var) {
     out_dir = ".";
   }
 
-  p.setup_directory(out_dir);
+  if (!p.setup_directory(out_dir)) {
+    Pass::error("pass.prp_writer: could not create output directory: {}", out_dir);
+    return;
+  }
 
   for (const auto& ln : var.lnasts) {
     auto module_name = ln->get_top_module_name();
