@@ -23,7 +23,7 @@ if ! grep -q "  simple.top" "${OUT_FILE}"; then
   exit 2
 fi
 
-if ! grep -q "io:" "${OUT_FILE}"; then
+if ! grep -qE "── io( |$)" "${OUT_FILE}"; then
   echo "FAIL: extracted function LNAST does not contain io node"
   cat "${OUT_FILE}"
   exit 3
@@ -50,7 +50,7 @@ if ! grep -q "  upass_func_extract_empty.answer" "${EMPTY_OUT_FILE}"; then
   exit 5
 fi
 
-if ! grep -q "ref: __empty_tuple" "${EMPTY_OUT_FILE}"; then
+if ! grep -q "ref '__empty_tuple'" "${EMPTY_OUT_FILE}"; then
   echo "FAIL: no-input function does not reference __empty_tuple"
   cat "${EMPTY_OUT_FILE}"
   exit 6

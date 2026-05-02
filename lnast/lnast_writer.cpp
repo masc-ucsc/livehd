@@ -51,9 +51,10 @@ void Lnast_writer::write_invalid() { print("invalid"); }
 void Lnast_writer::write_top() {
   print_line("{\n");
   ++depth;
-  move_to_child();
-  if (!is_invalid()) {
-    write_lnast();
+  if (move_to_child()) {
+    do {
+      write_lnast();
+    } while (move_to_sibling());
   }
   --depth;
   print_line("}\n");

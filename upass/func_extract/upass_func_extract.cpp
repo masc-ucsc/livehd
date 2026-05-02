@@ -115,14 +115,20 @@ void uPass_func_extract::process_func_def() {
 
   auto new_lnast = std::make_shared<Lnast>(extracted_name);
   auto root_nid  = new_lnast->set_root(Lnast_ntype::create_top());
-  auto stmts     = new_lnast->add_child(root_nid, Lnast_ntype::create_stmts());
 
   // Skip generics and captures for this first comb-only extraction slice.
+  // No signature => bare `top -> stmts` (no `io` child).
   if (!move_to_sibling() || !move_to_sibling() || !move_to_sibling()) {
+    new_lnast->add_child(root_nid, Lnast_ntype::create_stmts());
     move_to_parent();
     extracted_lnasts.emplace_back(std::move(new_lnast));
     return;
   }
+
+  // Signature present => `top -> [io, stmts]`. io is the first child of top;
+  // its ref children name tuple_add stmts that live in `stmts`.
+  auto io_idx = new_lnast->add_child(root_nid, Lnast_ntype::create_io());
+  auto stmts  = new_lnast->add_child(root_nid, Lnast_ntype::create_stmts());
 
   const bool has_input_tuple = emit_io_tuple_from_decl(new_lnast, stmts, input_tuple_name);
 
@@ -130,7 +136,6 @@ void uPass_func_extract::process_func_def() {
     if (!has_input_tuple) {
       emit_empty_tuple(new_lnast, stmts);
     }
-    auto io_idx = new_lnast->add_child(stmts, Lnast_ntype::create_io());
     new_lnast->add_child(io_idx, Lnast_node::create_ref(has_input_tuple ? input_tuple_name : empty_tuple_name));
     new_lnast->add_child(io_idx, Lnast_node::create_ref(empty_tuple_name));
     move_to_parent();
@@ -144,7 +149,6 @@ void uPass_func_extract::process_func_def() {
     emit_empty_tuple(new_lnast, stmts);
   }
 
-  auto io_idx = new_lnast->add_child(stmts, Lnast_ntype::create_io());
   new_lnast->add_child(io_idx, Lnast_node::create_ref(has_input_tuple ? input_tuple_name : empty_tuple_name));
   new_lnast->add_child(io_idx, Lnast_node::create_ref(has_output_tuple ? output_tuple_name : empty_tuple_name));
 

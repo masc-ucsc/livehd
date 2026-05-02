@@ -1269,64 +1269,76 @@ bool uPass_constprop::try_eval_comb_call(std::string_view dst, std::string_view 
     return std::nullopt;
   };
 
-  const auto root  = fn->get_root();
-  const auto stmts = fn->get_child(root);
+  const auto root        = fn->get_root();
+  const auto first_child = fn->get_child(root);
+  if (first_child.is_invalid()) {
+    return false;
+  }
+
+  // top -> [io?, stmts]. io is optional (only present when the lambda has a
+  // non-empty signature); stmts is always present.
+  Lnast_nid io_nid;
+  Lnast_nid stmts;
+  if (Lnast_ntype::is_io(fn->get_type(first_child))) {
+    io_nid = first_child;
+    stmts  = fn->get_sibling_next(first_child);
+  } else {
+    stmts = first_child;
+  }
   if (stmts.is_invalid()) {
     return false;
   }
 
-  // Phase 1 — pre-IO setup: collect param/output names from the synthetic
-  // __input_tuple_ref / __output_tuple_ref tuple_adds, then bind actuals to
-  // params on the io marker. Body statements are deferred to phase 2.
+  // Phase 1 — collect param/output names from the synthetic
+  // __input_tuple_ref / __output_tuple_ref tuple_adds at the head of stmts,
+  // and partition the rest into body statements for phase 2.
   std::vector<Lnast_nid> body_stmts;
-  bool                   after_io = false;
   for (auto stmt = fn->get_child(stmts); !stmt.is_invalid(); stmt = fn->get_sibling_next(stmt)) {
     const auto type = fn->get_type(stmt);
-    if (!after_io) {
-      if (Lnast_ntype::is_tuple_add(type)) {
-        auto tuple_ref = fn->get_child(stmt);
-        if (tuple_ref.is_invalid() || !Lnast_ntype::is_ref(fn->get_type(tuple_ref))) {
-          continue;
-        }
+    if (Lnast_ntype::is_tuple_add(type)) {
+      auto tuple_ref = fn->get_child(stmt);
+      if (!tuple_ref.is_invalid() && Lnast_ntype::is_ref(fn->get_type(tuple_ref))) {
         // Materialize into an owned string so the comparison below holds
         // even if the Lnast_node temporary's `name` storage moves.
         const std::string tuple_name(fn->get_name(tuple_ref));
-        for (auto item = fn->get_sibling_next(tuple_ref); !item.is_invalid(); item = fn->get_sibling_next(item)) {
-          if (!Lnast_ntype::is_assign(fn->get_type(item))) {
-            continue;
+        if (tuple_name == "__input_tuple_ref" || tuple_name == "__output_tuple_ref" || tuple_name == "__empty_tuple") {
+          for (auto item = fn->get_sibling_next(tuple_ref); !item.is_invalid(); item = fn->get_sibling_next(item)) {
+            if (!Lnast_ntype::is_assign(fn->get_type(item))) {
+              continue;
+            }
+            auto key = fn->get_child(item);
+            if (key.is_invalid() || !Lnast_ntype::is_ref(fn->get_type(key))) {
+              continue;
+            }
+            if (tuple_name == "__input_tuple_ref") {
+              params.emplace_back(fn->get_name(key));
+            } else if (tuple_name == "__output_tuple_ref") {
+              outputs.emplace_back(fn->get_name(key));
+            }
           }
-          auto key = fn->get_child(item);
-          if (key.is_invalid() || !Lnast_ntype::is_ref(fn->get_type(key))) {
-            continue;
-          }
-          if (tuple_name == "__input_tuple_ref") {
-            params.emplace_back(fn->get_name(key));
-          } else if (tuple_name == "__output_tuple_ref") {
-            outputs.emplace_back(fn->get_name(key));
-          }
+          continue;
         }
-        continue;
       }
-      if (Lnast_ntype::is_io(type)) {
-        std::size_t positional_idx = 0;
-        for (const auto& actual : actuals) {
-          if (actual.is_named) {
-            local_values[actual.name] = actual.value;
-            continue;
-          }
-          while (positional_idx < params.size() && local_values.contains(params[positional_idx])) {
-            ++positional_idx;
-          }
-          if (positional_idx < params.size()) {
-            local_values[params[positional_idx++]] = actual.value;
-          }
-        }
-        after_io = true;
-        continue;
-      }
-      continue;
     }
     body_stmts.push_back(stmt);
+  }
+
+  // Phase 1b — bind actuals to params now that the signature is known.
+  // Skipped when there is no io node (signature-less callee).
+  if (!io_nid.is_invalid()) {
+    std::size_t positional_idx = 0;
+    for (const auto& actual : actuals) {
+      if (actual.is_named) {
+        local_values[actual.name] = actual.value;
+        continue;
+      }
+      while (positional_idx < params.size() && local_values.contains(params[positional_idx])) {
+        ++positional_idx;
+      }
+      if (positional_idx < params.size()) {
+        local_values[params[positional_idx++]] = actual.value;
+      }
+    }
   }
 
   // Phase 2 — body evaluation. Multi-pass fixed-point traversal so a stmt

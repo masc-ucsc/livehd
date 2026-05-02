@@ -39,9 +39,11 @@ run_pipeline 1 "${OUT1}"
 # coalescer:1 should see exactly 1 (only the live store before %out reads tmp).
 count_tmp_assigns() {
   awk '
-    /assign:/ { in_assign = 1; saw_tmp = 0; next }
-    in_assign && /ref: tmp$/ { saw_tmp = 1; in_assign = 0; count++; next }
-    in_assign { in_assign = 0 }
+    /assign$/ { in_assign = 1; next }
+    in_assign {
+      if ($0 ~ /ref '\''tmp'\''$/) count++
+      in_assign = 0
+    }
     END { print count + 0 }
   ' "$1"
 }
