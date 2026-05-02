@@ -389,15 +389,34 @@ void Lnast_prp_writer::write_attr_set() {
   if (!move_to_child()) {
     return;
   }
-  print(strip_prefix(current_text()));
-  while (move_to_sibling()) {
+  auto var_name = strip_prefix(current_text());
+
+  if (!move_to_sibling()) {
+    move_to_parent();
+    return;
+  }
+
+  // Suppress LNAST-internal type annotations: attr_set x type mut/reg/wire.
+  // prp2lnast emits these before every "mut x = …" assignment.  The mut/reg
+  // keyword is already handled by write_assign / write_infix when the
+  // assignment node is present.  If the assignment was DCE'd and only the
+  // bare attr_set survives, there is nothing meaningful to emit in Pyrope.
+  if (current_text() == "type") {
+    move_to_parent();
+    return;
+  }
+
+  // Generic attribute set: var.attr = value
+  print(var_name);
+  do {
     if (!is_last_child()) {
       print(".");
     } else {
       print(" = ");
     }
     write_node();
-  }
+  } while (move_to_sibling());
+
   move_to_parent();
 }
 

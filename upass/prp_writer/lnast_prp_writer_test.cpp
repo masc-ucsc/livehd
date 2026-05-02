@@ -417,6 +417,28 @@ rt_fold()
   EXPECT_EQ(output.find(" + "), std::string::npos) << "unexpected `+` in output (should be folded):\n" << output;
 }
 
+// ── Test 16: attr_set type annotation is suppressed, not emitted ─────────────
+// prp2lnast emits `attr_set x type mut` before every `mut x = …` assignment.
+// These nodes are LNAST-internal bookkeeping.  If the assignment is DCE'd and
+// only the bare attr_set survives, the writer must emit nothing (not `x.type = mut`).
+TEST(LnastPrpWriter, AttrSetTypeAnnotationSuppressed) {
+  // Build:  top → stmts → attr_set(ref:x, const:'type', const:'mut')
+  auto ln = std::make_shared<Lnast>("attr_type_test");
+  ln->set_root(Lnast_ntype::create_top());
+  auto stmts = ln->add_child(ln->get_root(), Lnast_ntype::create_stmts());
+  auto aset  = ln->add_child(stmts, Lnast_ntype::create_attr_set());
+  ln->add_child(aset, Lnast_node::create_ref("x"));
+  ln->add_child(aset, Lnast_node::create_const("type"));
+  ln->add_child(aset, Lnast_node::create_const("mut"));
+
+  auto output = run_and_emit(ln, {"noop_shared"});
+  // The body must not contain `x.type = mut` (wrong) or any `type` attribute text.
+  EXPECT_EQ(output.find("type"), std::string::npos)
+      << "attr_set type annotation leaked into output:\n" << output;
+  EXPECT_EQ(output.find(".type"), std::string::npos)
+      << "attr_set type annotation leaked into output:\n" << output;
+}
+
 // ── Test 15: round-trip — if(true) branch is pruned by constprop ─────────────
 // `if true { out = 1 } else { out = 2 }` — constprop prunes the dead else.
 // The emitted Pyrope must have no `if` keyword.
