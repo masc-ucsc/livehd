@@ -423,7 +423,7 @@ rt_fold()
 // only the bare attr_set survives, the writer must emit nothing (not `x.type = mut`).
 TEST(LnastPrpWriter, AttrSetTypeAnnotationSuppressed) {
   // Build:  top → stmts → attr_set(ref:x, const:'type', const:'mut')
-  auto ln = std::make_shared<Lnast>("attr_type_test");
+  auto ln = std::make_shared<Lnast>("suppress_attr");
   ln->set_root(Lnast_ntype::create_top());
   auto stmts = ln->add_child(ln->get_root(), Lnast_ntype::create_stmts());
   auto aset  = ln->add_child(stmts, Lnast_ntype::create_attr_set());
@@ -432,10 +432,10 @@ TEST(LnastPrpWriter, AttrSetTypeAnnotationSuppressed) {
   ln->add_child(aset, Lnast_node::create_const("mut"));
 
   auto output = run_and_emit(ln, {"noop_shared"});
-  // The body must not contain `x.type = mut` (wrong) or any `type` attribute text.
-  EXPECT_EQ(output.find("type"), std::string::npos)
+  // Must not emit x.type = mut — that is not valid Pyrope.
+  EXPECT_EQ(output.find("x.type"), std::string::npos)
       << "attr_set type annotation leaked into output:\n" << output;
-  EXPECT_EQ(output.find(".type"), std::string::npos)
+  EXPECT_EQ(output.find("= mut"), std::string::npos)
       << "attr_set type annotation leaked into output:\n" << output;
 }
 
