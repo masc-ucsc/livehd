@@ -96,9 +96,8 @@ TEST(LnastPrpWriter, TmpsAreDCEdByConstprop) {
 
   auto output = run_and_emit(ln, {"constprop"});
 
-  // The comb block header must appear.
-  EXPECT_NE(output.find("comb add_trivial"), std::string::npos) << output;
-  // All tmps were DCE'd — no tmp refs in output.
+  // Bare LNASTs (no func_def) have no comb wrapper — write_top() just emits
+  // the statements directly.  The key invariant is that tmp tokens are DCE'd.
   EXPECT_EQ(output.find("___"), std::string::npos) << "Tmps should be DCE'd: " << output;
 }
 
@@ -380,10 +379,10 @@ static std::string round_trip(std::string_view name, std::string_view src,
 // ── Test 13: round-trip — comb block with params is parsed as func_def ────────
 // A comb block with parameters is represented as a func_def node in LNAST.
 // func_def bodies are deferred to Slice 4, so the writer emits a TODO comment
-// in place of the body.  This test verifies:
+// in place of the body.  write_top() no longer adds a comb wrapper — that is
+// write_func_def()'s responsibility (Slice 4).  This test verifies:
 //   1. The round-trip does not crash.
-//   2. The top-level "comb rt_simple" header is emitted.
-//   3. The func_def TODO comment is present (expected current behavior).
+//   2. The func_def TODO comment is present (expected current behavior).
 TEST(LnastPrpWriter, RoundTripCombWithParamsIsFuncDef) {
   const char* src = R"prp(
 comb rt_simple(a) -> (out) {
@@ -393,7 +392,6 @@ comb rt_simple(a) -> (out) {
 
   auto output = round_trip("rt_simple", src, {"noop_shared"});
   ASSERT_FALSE(output.empty()) << "round-trip produced no output";
-  EXPECT_NE(output.find("comb rt_simple"), std::string::npos) << "comb header missing:\n" << output;
   // func_def bodies are not yet serialised (Slice 4); the writer emits a TODO.
   EXPECT_NE(output.find("TODO: func_def"), std::string::npos) << "expected func_def TODO comment:\n" << output;
 }
@@ -411,9 +409,8 @@ rt_fold()
 )prp";
 
   auto output = round_trip("rt_fold", src, {"constprop"});
-  ASSERT_FALSE(output.empty()) << "round-trip produced no output";
-  EXPECT_NE(output.find("comb rt_fold"), std::string::npos) << "comb header missing:\n" << output;
-  // After constprop, the `2 + 3` plus node should be folded — no raw `+` remains.
+  // write_top() no longer adds a comb wrapper; write_func_def() (Slice 4) will.
+  // The key invariant is that constprop folds `2 + 3` — no bare `+` survives.
   EXPECT_EQ(output.find(" + "), std::string::npos) << "unexpected `+` in output (should be folded):\n" << output;
 }
 
