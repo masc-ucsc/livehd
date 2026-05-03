@@ -388,7 +388,9 @@ void Lnast_prp_writer::write_tuple_set() {
   if (!move_to_child()) {
     return;
   }
-  print(strip_prefix(current_text()));
+  auto lhs = strip_prefix(current_text());
+  take_decl_keyword(lhs);  // consume any pending decl so it doesn't leak
+  print(lhs);
   while (move_to_sibling() && !is_last_child()) {
     print("[");
     write_node();
@@ -467,7 +469,9 @@ void Lnast_prp_writer::write_delay_assign() {
   if (!move_to_child()) {
     return;
   }
-  print(strip_prefix(current_text()));
+  auto lhs = strip_prefix(current_text());
+  take_decl_keyword(lhs);  // consume any pending decl so it doesn't leak
+  print(lhs);
   print(" = #[");
   move_to_sibling();
   write_node();
