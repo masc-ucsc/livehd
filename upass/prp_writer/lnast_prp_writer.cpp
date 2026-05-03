@@ -71,6 +71,16 @@ bool Lnast_prp_writer::is_tmp(std::string_view name) {
   return name.size() >= 3 && name[0] == '_' && name[1] == '_' && name[2] == '_';
 }
 
+std::string Lnast_prp_writer::take_decl_keyword(std::string_view lhs) {
+  auto it = pending_decl_.find(std::string(lhs));
+  if (it == pending_decl_.end()) {
+    return {};
+  }
+  auto kw = it->second;
+  pending_decl_.erase(it);
+  return kw;
+}
+
 std::string_view Lnast_prp_writer::strip_prefix(std::string_view name) {
   if (!name.empty() && (name[0] == '%' || name[0] == '$')) {
     return name.substr(1);
@@ -130,14 +140,12 @@ void Lnast_prp_writer::write_node() {
 // ── Structural ────────────────────────────────────────────────────────────────
 
 void Lnast_prp_writer::write_top() {
-  os << std::format("comb {}() {{\n", lnast->get_top_module_name());
-  ++depth;
+  // Bare-file modules have no enclosing comb/fun declaration in the source;
+  // explicit function definitions are emitted by write_func_def() instead.
   if (move_to_child()) {
     write_node();
     move_to_parent();
   }
-  --depth;
-  os << "}\n";
 }
 
 void Lnast_prp_writer::write_stmts() {
@@ -215,8 +223,10 @@ void Lnast_prp_writer::write_assign() {
     return;
   }
   auto lhs = strip_prefix(current_text());
-  if (!is_tmp(lhs)) {
-    print("mut ");
+  auto kw  = take_decl_keyword(lhs);
+  if (!kw.empty()) {
+    print(kw);
+    print(" ");
   }
   print(lhs);
   print(" = ");
@@ -282,8 +292,10 @@ void Lnast_prp_writer::write_func_call() {
   }
   // LHS
   auto lhs = strip_prefix(current_text());
-  if (!is_tmp(lhs)) {
-    print("mut ");
+  auto kw  = take_decl_keyword(lhs);
+  if (!kw.empty()) {
+    print(kw);
+    print(" ");
   }
   print(lhs);
   print(" = ");
@@ -331,8 +343,10 @@ void Lnast_prp_writer::write_tuple_add() {
     return;
   }
   auto lhs = strip_prefix(current_text());
-  if (!is_tmp(lhs)) {
-    print("mut ");
+  auto kw  = take_decl_keyword(lhs);
+  if (!kw.empty()) {
+    print(kw);
+    print(" ");
   }
   print(lhs);
   print(" = (");
@@ -353,8 +367,10 @@ void Lnast_prp_writer::write_tuple_get() {
     return;
   }
   auto lhs = strip_prefix(current_text());
-  if (!is_tmp(lhs)) {
-    print("mut ");
+  auto kw  = take_decl_keyword(lhs);
+  if (!kw.empty()) {
+    print(kw);
+    print(" ");
   }
   print(lhs);
   print(" = ");
@@ -397,11 +413,15 @@ void Lnast_prp_writer::write_attr_set() {
   }
 
   // Suppress LNAST-internal type annotations: attr_set x type mut/reg/wire.
-  // prp2lnast emits these before every "mut x = …" assignment.  The mut/reg
-  // keyword is already handled by write_assign / write_infix when the
-  // assignment node is present.  If the assignment was DCE'd and only the
-  // bare attr_set survives, there is nothing meaningful to emit in Pyrope.
+  // Record the storage-class keyword in pending_decl_ so the NEXT assignment
+  // to this variable can emit "mut x = …" exactly once.
   if (current_text() == "type") {
+    if (move_to_sibling()) {
+      auto kw = current_text();
+      if (kw == "mut" || kw == "reg" || kw == "wire") {
+        pending_decl_[std::string(var_name)] = std::string(kw);
+      }
+    }
     move_to_parent();
     return;
   }
@@ -425,8 +445,10 @@ void Lnast_prp_writer::write_attr_get() {
     return;
   }
   auto lhs = strip_prefix(current_text());
-  if (!is_tmp(lhs)) {
-    print("mut ");
+  auto kw  = take_decl_keyword(lhs);
+  if (!kw.empty()) {
+    print(kw);
+    print(" ");
   }
   print(lhs);
   print(" = ");
@@ -464,10 +486,12 @@ void Lnast_prp_writer::write_infix(std::string_view op) {
     return;
   }
 
-  // First child is the LHS (result variable) — read its name for mut-detection.
+  // First child is the LHS (result variable).
   auto lhs = strip_prefix(current_text());
-  if (!is_tmp(lhs)) {
-    print("mut ");
+  auto kw  = take_decl_keyword(lhs);
+  if (!kw.empty()) {
+    print(kw);
+    print(" ");
   }
   print(lhs);
   print(" = ");
@@ -492,8 +516,10 @@ void Lnast_prp_writer::write_prefix_unary(std::string_view op) {
     return;
   }
   auto lhs = strip_prefix(current_text());
-  if (!is_tmp(lhs)) {
-    print("mut ");
+  auto kw  = take_decl_keyword(lhs);
+  if (!kw.empty()) {
+    print(kw);
+    print(" ");
   }
   print(lhs);
   print(" = ");
@@ -518,8 +544,9 @@ void Lnast_prp_writer::write_sext() {
   }
   move_to_parent();
 
-  if (!is_tmp(lhs)) {
-    print("mut ");
+  auto kw = take_decl_keyword(lhs);
+  if (!kw.empty()) {
+    os << kw << " ";
   }
   os << std::format("{} = sext({}, {})  /* sign-extend */", lhs, val, bits);
 }

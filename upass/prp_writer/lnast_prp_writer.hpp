@@ -4,7 +4,9 @@
 #include <memory>
 #include <ostream>
 #include <stack>
+#include <string>
 #include <string_view>
+#include <unordered_map>
 
 #include "lnast.hpp"
 
@@ -75,6 +77,16 @@ private:
   void write_prefix_unary(std::string_view op);
   // sext — no Pyrope operator; emit as call with comment
   void write_sext();
+
+  // ── Declaration tracking ─────────────────────────────────────────────────
+  // Maps a variable name to its pending storage-class keyword ("mut", "reg",
+  // "wire") recorded when write_attr_set() suppresses an attr_set x type kw
+  // node.  The NEXT assignment to that variable consumes the keyword (once).
+  std::unordered_map<std::string, std::string> pending_decl_;
+
+  // Returns the stored keyword for `lhs` (e.g. "mut") and removes it from
+  // the map, or returns "" if no pending declaration exists.
+  std::string take_decl_keyword(std::string_view lhs);
 
   // ── Utilities ────────────────────────────────────────────────────────────
   static bool             is_tmp(std::string_view name);
