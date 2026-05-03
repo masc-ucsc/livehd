@@ -1,7 +1,6 @@
 //  This file is distributed under the BSD 3-Clause License. See LICENSE for details.
 #pragma once
 
-#include "lnast_prp_writer.hpp"
 #include "pass.hpp"
 
 class Pass_prp_writer : public Pass {
