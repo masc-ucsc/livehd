@@ -453,6 +453,7 @@ rt_if()
 
   auto output = round_trip("rt_if", src, {"constprop"});
   ASSERT_FALSE(output.empty()) << "round-trip produced no output";
-  EXPECT_NE(output.find("comb rt_if"), std::string::npos) << "comb header missing:\n" << output;
+  // write_top() no longer adds a comb wrapper; write_func_def() (Slice 4) will.
+  // The key invariant is that constprop prunes the dead else-branch — no "if".
   EXPECT_EQ(output.find("if "), std::string::npos) << "if should be pruned but still present:\n" << output;
 }
