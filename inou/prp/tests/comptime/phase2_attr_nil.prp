@@ -1,0 +1,20 @@
+/*
+:name: phase2_attr_nil
+:type: parsing lnast comptime
+:verifier_pass: 5
+:verifier_fail: 0
+*/
+
+// Phase 2 — reading an attribute that was never set returns nil.
+// Comparisons against nil inside `.[…]` reads are exempt from the
+// "attribute must be defined" rule (per spec).
+
+const a::[debug] = 3
+
+cassert a.[debug] != nil
+cassert a.[never_set] == nil
+
+const b = 10                 // no attributes set
+cassert b.[debug] == nil
+cassert b.[anything] == nil
+cassert b.[max] != nil       // every integer has a max

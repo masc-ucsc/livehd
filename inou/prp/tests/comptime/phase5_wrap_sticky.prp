@@ -1,0 +1,31 @@
+/*
+:name: phase5_wrap_sticky
+:type: parsing lnast comptime
+:verifier_pass: 6
+:verifier_fail: 0
+*/
+
+// Phase 5 — sticky `[wrap]` on declaration: every assignment to that
+// variable wraps automatically. Per-statement `wrap` / `sat` prefix
+// modifiers control a single assignment. Existing `wrap_*.prp` cover
+// most shapes; this one emphasizes the sticky-vs-per-statement contrast.
+
+mut w:u4:[wrap] = 0          // sticky: wraps every store
+w = 0xFF
+cassert w == 0xF
+w = 0x10
+cassert w == 0
+
+mut x:u4 = 0
+wrap x = 0xFF                // per-statement
+cassert x == 0xF
+
+sat x = 0xFF                 // per-statement saturate
+cassert x == 0xF             // 0xF is u4 max
+
+mut y:s4 = 0
+sat y = 100
+cassert y == 7               // s4 max
+
+sat y = -100
+cassert y == -8              // s4 min

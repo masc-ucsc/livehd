@@ -1,0 +1,24 @@
+/*
+:name: phase7_user_attr
+:type: parsing lnast comptime
+:verifier_pass: 6
+:verifier_fail: 0
+*/
+
+// Phase 7 — unknown / user-defined attributes pass through upass. They
+// must round-trip a `.[name]` read with whatever value was set.
+
+const x::[poison=true] = 7
+cassert x.[poison]
+cassert x == 7
+
+const y::[label="reset"] = 1
+cassert y.[label] == "reset"
+
+const z::[count=42, tag="hot"] = 99
+cassert z.[count] == 42
+cassert z.[tag] == "hot"
+
+// User attributes that share names with synthesis hints are still pass-through.
+mut w::[donttouch] = 0
+cassert w.[donttouch]

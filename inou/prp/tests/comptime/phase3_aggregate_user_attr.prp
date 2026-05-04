@@ -1,0 +1,30 @@
+/*
+:name: phase3_aggregate_user_attr
+:type: parsing lnast comptime
+:verifier_pass: 8
+:verifier_fail: 0
+*/
+
+// Phase 3 — non-Pyrope (user / unknown) attributes set on the aggregate
+// propagate down to every field unless that field overrides them. This
+// preserves the annotation when the tuple gets flattened away in Phase 4
+// — without propagation, the LGraph-bound consumer would lose the flag.
+//
+// Pyrope's own aggregate-only reads (`size`, `bits`, `typename`, `key`)
+// stay aggregate-only and are NOT subject to this propagation; they have
+// dedicated semantics resolved before flattening.
+
+const t::[poison=42] = (a=1, b::[poison=99]=2, c=3)
+
+cassert t.[poison] == 42         // aggregate keeps its own value
+cassert t.b.[poison] == 99       // field-level override wins
+cassert t.a.[poison] == 42       // inherits from aggregate
+cassert t.c.[poison] == 42       // inherits from aggregate
+
+const u::[label="hot"] = (1, 2)
+cassert u.[label] == "hot"
+cassert u[0].[label] == "hot"    // index access also inherits
+cassert u[1].[label] == "hot"
+
+// Pyrope built-in aggregate read is not propagated to fields.
+cassert t.[size] == 3

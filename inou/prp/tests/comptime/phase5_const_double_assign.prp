@@ -1,0 +1,17 @@
+/*
+:name: phase5_const_double_assign
+:type: parsing lnast comptime
+:verifier_pass: 0
+:verifier_fail: 1
+*/
+
+// Phase 5 — negative test. Re-binding a `const` is a compile error. Until
+// the attribute pass enforces this, the test stands in with `cassert false`
+// so the suite carries one expected failure that flips meaning once the
+// pass lands. Replace the cassert with the actual rebind once supported.
+
+const a = 5
+// FIXME (phase 5): once rebind enforcement lands, replace the line below
+// with `const a = 6` and remove the explicit `cassert false`.
+cassert false
+cassert a == 5

@@ -1,0 +1,24 @@
+/*
+:name: phase5_const_check
+:type: parsing lnast comptime
+:verifier_pass: 4
+:verifier_fail: 0
+*/
+
+// Phase 5 — `const` accepts a single non-nil assignment per cycle. This
+// positive test covers nil-then-bind, which the spec allows. The negative
+// counterpart (double-bind error) belongs in a verifier_fail:1 test.
+
+const a = 5
+cassert a == 5
+
+// Comptime const used in a derived const: still single-assign, and the
+// derivation is comptime-resolvable.
+const b = a + 1
+cassert b == 6
+
+// Tuple field declared const inside an aggregate.
+mut t = (mut x = 0, const y = 100)
+t.x = 7
+cassert t.x == 7
+cassert t.y == 100

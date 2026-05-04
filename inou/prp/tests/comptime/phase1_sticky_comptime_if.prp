@@ -1,0 +1,31 @@
+/*
+:name: phase1_sticky_comptime_if
+:type: parsing lnast comptime
+:verifier_pass: 4
+:verifier_fail: 0
+*/
+
+// Phase 1 — sticky propagation interacting with comptime-folded if.
+// Only the live branch should contribute to the sticky annotation;
+// the dead branch's stickiness is discarded along with the dead code.
+
+const d::[debug] = 100
+const p = 7
+
+mut a = 0
+if true {
+  a = d + 1     // taken: sticky 'debug' flows in
+}else{
+  a = p         // dead: would not have introduced 'debug'
+}
+cassert a == 101
+cassert a.[debug]
+
+mut b = 0
+if false {
+  b = d         // dead: 'debug' would have entered, but doesn't
+}else{
+  b = p + 1     // taken: no sticky
+}
+cassert b == 8
+cassert !b.[debug]

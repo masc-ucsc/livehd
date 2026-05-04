@@ -1,0 +1,22 @@
+/*
+:name: phase4_array_of_tuple
+:type: parsing lnast comptime
+:verifier_pass: 6
+:verifier_fail: 0
+*/
+
+// Phase 4 — array of named tuples with mixed-type fields lowers to SoA
+// (each field becomes its own array variable). Indexed field access
+// (`buf[i].name`) must continue to read the right value through the
+// lowering.
+
+const buf = ((a=1, b=10), (a=2, b=20), (a=3, b=30))
+
+cassert buf.[size] == 3
+cassert buf[0].a == 1
+cassert buf[1].b == 20
+cassert buf[2].a == 3
+cassert buf[2].b == 30
+
+const total_a = buf[0].a + buf[1].a + buf[2].a
+cassert total_a == 6

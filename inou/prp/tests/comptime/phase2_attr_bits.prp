@@ -1,0 +1,27 @@
+/*
+:name: phase2_attr_bits
+:type: parsing lnast comptime
+:verifier_pass: 6
+:verifier_fail: 0
+*/
+
+// Phase 2 — `.[bits]` is derived from the *current* required width, not from
+// the declared type bound. Each assignment can change it.
+
+mut a:uint:[max=300] = 0
+cassert a.[ubits] == 0      // value 0 fits in 0 bits
+
+a = 7
+cassert a.[ubits] == 3      // 0b111 → 3 bits
+
+a = 200
+cassert a.[ubits] == 8      // 0b11001000 → 8 bits
+
+const c = 100
+cassert c.[bits] == 7       // 0b1100100
+
+const d = -1
+cassert d.[bits] == 1       // sign bit only
+
+const e = 0
+cassert e.[bits] == 0

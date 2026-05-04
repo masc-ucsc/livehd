@@ -1,0 +1,17 @@
+/*
+:name: phase4_multid_array
+:type: parsing lnast comptime
+:verifier_pass: 5
+:verifier_fail: 0
+*/
+
+// Phase 4 — multi-dimensional arrays flatten to 1-D in LGraph using a
+// comptime index equation. From comptime view the indexing semantics
+// must round-trip: a[i][j] still reads the right value.
+
+const a = ((1, 2, 3), (4, 5, 6), (7, 8, 9))
+cassert a.[size] == 3
+cassert a[0][0] == 1
+cassert a[1][2] == 6
+cassert a[2][2] == 9
+cassert a[0][1] + a[1][1] + a[2][1] == 15

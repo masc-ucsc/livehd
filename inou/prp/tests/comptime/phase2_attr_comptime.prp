@@ -1,0 +1,23 @@
+/*
+:name: phase2_attr_comptime
+:type: parsing lnast comptime
+:verifier_pass: 5
+:verifier_fail: 0
+*/
+
+// Phase 2 — `.[comptime]` reads. Every value here is comptime, so the
+// attribute should always be true. `paths_if.prp` covers the runtime case
+// behind FIXMEs.
+
+const a = 5
+cassert a.[comptime]
+
+comptime mut b = 10
+cassert b.[comptime]
+
+const X = 100               // implicit comptime: starts uppercase
+cassert X.[comptime]
+
+const c = a + b + X
+cassert c.[comptime]
+cassert c == 115
