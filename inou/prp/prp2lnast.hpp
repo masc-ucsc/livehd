@@ -105,8 +105,8 @@ protected:
   Lnast_node expr_to_node(TSNode n);
   Lnast_node binary_expr_to_node(TSNode n);
   Lnast_node unary_expr_to_node(TSNode n);
-  Lnast_node if_expr_to_node(TSNode n);
-  Lnast_node match_expr_to_node(TSNode n);
+  Lnast_node if_expr_to_node(TSNode n, bool need_result = true);
+  Lnast_node match_expr_to_node(TSNode n, bool need_result = true);
   Lnast_node bit_selection_to_node(TSNode n);
   Lnast_node member_selection_to_node(TSNode n);
   Lnast_node attribute_read_to_node(TSNode n);

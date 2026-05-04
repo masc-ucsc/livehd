@@ -247,6 +247,17 @@ void Prp2lnast::process_statement(TSNode n) {
     (this->*it->second)(n);
     return;
   }
+  // if/match used as a statement: the value is discarded, so skip the
+  // result tmp + per-arm placeholder `assign ___N = 0` that the expression
+  // form emits.
+  if (t == "if_expression") {
+    (void)if_expr_to_node(n, /*need_result=*/false);
+    return;
+  }
+  if (t == "match_expression") {
+    (void)match_expr_to_node(n, /*need_result=*/false);
+    return;
+  }
   if (expr_stmt.contains(t)) {
     (void)expr_to_node(n);
     return;
@@ -2276,7 +2287,7 @@ Lnast_node Prp2lnast::unary_expr_to_node(TSNode n) {
   return arg_ref;
 }
 
-Lnast_node Prp2lnast::if_expr_to_node(TSNode n) {
+Lnast_node Prp2lnast::if_expr_to_node(TSNode n, bool need_result) {
   // if init?; cond { code } (elif init?; cond { code })* (else { code })?
   //
   // Order matters: we must evaluate every condition expression *before*
@@ -2295,7 +2306,14 @@ Lnast_node Prp2lnast::if_expr_to_node(TSNode n) {
   // missed. For pyrope comptime cond expressions this is fine (no side
   // effects); a future change could lower elif-conds inside their parent
   // arm's else branch for correctness on side-effecting conds.
-  auto result = builder.mint_tmp_ref();
+  //
+  // need_result == false when the if is used as a statement (its value is
+  // discarded); skip the per-arm placeholder `assign result = 0` and the
+  // result tmp entirely.
+  Lnast_node result;
+  if (need_result) {
+    result = builder.mint_tmp_ref();
+  }
 
   struct Arm {
     Lnast_node cref;
@@ -2375,9 +2393,11 @@ Lnast_node Prp2lnast::if_expr_to_node(TSNode n) {
     if (!ts_node_is_null(code)) {
       process_scope_statement(code, body_idx);
     }
-    auto a = builder.add_child(Lnast_ntype::create_assign());
-    lnast->add_child(a, result);
-    lnast->add_child(a, Lnast_node::create_const("0"));
+    if (need_result) {
+      auto a = builder.add_child(Lnast_ntype::create_assign());
+      lnast->add_child(a, result);
+      lnast->add_child(a, Lnast_node::create_const("0"));
+    }
     builder.pop_stmts();
   };
 
@@ -2389,10 +2409,10 @@ Lnast_node Prp2lnast::if_expr_to_node(TSNode n) {
     emit_body(else_code);
   }
 
-  return result;
+  return need_result ? result : Lnast_node::create_const("0");
 }
 
-Lnast_node Prp2lnast::match_expr_to_node(TSNode n) {
+Lnast_node Prp2lnast::match_expr_to_node(TSNode n, bool need_result) {
   // match init?; subject { (operator? expr_list | else) { code } ... }
   // Simplified: produce a uif chain with equality checks.
   TSNode subject   = {};
@@ -2420,7 +2440,13 @@ Lnast_node Prp2lnast::match_expr_to_node(TSNode n) {
   // collect (cref, code) pairs, THEN add the if and assemble. Otherwise
   // every eq lands as a sibling AFTER the if and the if's cond refs are
   // dangling once constprop drops the eqs.
-  Lnast_node result = builder.mint_tmp_ref();
+  // need_result == false when the match is used as a statement (its value is
+  // discarded); skip the per-arm placeholder `assign result = 0` and the
+  // result tmp entirely.
+  Lnast_node result;
+  if (need_result) {
+    result = builder.mint_tmp_ref();
+  }
 
   struct Arm {
     Lnast_node cref;
@@ -2495,9 +2521,11 @@ Lnast_node Prp2lnast::match_expr_to_node(TSNode n) {
     auto body_idx = lnast->add_child(if_idx, Lnast_ntype::create_stmts());
     builder.push_stmts(body_idx);
     process_scope_statement(code, body_idx);
-    auto a = builder.add_child(Lnast_ntype::create_assign());
-    lnast->add_child(a, result);
-    lnast->add_child(a, Lnast_node::create_const("0"));
+    if (need_result) {
+      auto a = builder.add_child(Lnast_ntype::create_assign());
+      lnast->add_child(a, result);
+      lnast->add_child(a, Lnast_node::create_const("0"));
+    }
     builder.pop_stmts();
   };
 
@@ -2508,7 +2536,7 @@ Lnast_node Prp2lnast::match_expr_to_node(TSNode n) {
   if (else_code.tree != nullptr) {
     emit_body(else_code);
   }
-  return result;
+  return need_result ? result : Lnast_node::create_const("0");
 }
 
 Lnast_node Prp2lnast::bit_selection_to_node(TSNode n) {
