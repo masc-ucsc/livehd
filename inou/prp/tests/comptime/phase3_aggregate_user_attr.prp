@@ -10,9 +10,10 @@
 // preserves the annotation when the tuple gets flattened away in Phase 4
 // — without propagation, the LGraph-bound consumer would lose the flag.
 //
-// Pyrope's own aggregate-only reads (`size`, `bits`, `typename`, `key`)
-// stay aggregate-only and are NOT subject to this propagation; they have
-// dedicated semantics resolved before flattening.
+// Built-in Pyrope aggregate reads (`size`, `bits`, `typename`, `key`) have
+// dedicated semantics resolved before flattening; they are not generic
+// aggregate-to-field inheritance. Other built-ins may choose different
+// semantics, e.g. aggregate `[debug]` marks every tuple field as debug.
 
 const t::[poison=42] = (a=1, b::[poison=99]=2, c=3)
 
@@ -26,5 +27,5 @@ cassert u.[label] == "hot"
 cassert u[0].[label] == "hot"    // index access also inherits
 cassert u[1].[label] == "hot"
 
-// Pyrope built-in aggregate read is not propagated to fields.
+// Built-in aggregate read has dedicated semantics, not generic inheritance.
 cassert t.[size] == 3
