@@ -244,10 +244,34 @@ public:
   // in generic cat-D aggregate→field inheritance).
   static bool is_builtin_attr(std::string_view name);
 
+  // ── Phase 4 — tuple expansion / array lowering ─────────────────────────
+  //
+  // The structural lowering (tuple_add → field-vars, mixed-type split, multi-D
+  // flatten) is constprop's job (upass.md §Slice 6). Phase 4's *attribute*
+  // responsibility is "user-attr migration" — when fields/aliases come into
+  // existence, the cat-D aggregate attrs must follow them so that LGraph
+  // generation still sees the annotation after the tuple shape is gone, and
+  // comptime reads on the new aliased name continue to resolve.
+  //
+  // Two materialization triggers:
+  //   1. process_tuple_add / on_assign_like (alias branch): when a name
+  //      acquires a tuple shape, walk its known cat-D attrs and write each to
+  //      every field's flattened name (`base.fieldname`) unless the field
+  //      already has an explicit override.
+  //   2. on_assign_like (alias branch) with rhs carrying a tuple_get_alias:
+  //      copy the alias to the lhs so a later `lhs.[attr]` chains through to
+  //      the underlying aggregate's inheritance lookup. This is the
+  //      `const v = t.a` case: v inherits poison from t.a → t.
+
+  // Public so phase4 helpers (and future tests) can drive materialization.
+  void migrate_aggregate_attrs_to_fields(std::string_view base);
+  void migrate_alias(std::string_view lhs, std::string_view rhs);
+
 private:
   std::map<std::string, Tuple_shape> tuple_shapes;     // var → shape
   std::map<std::string, Get_alias>   tuple_get_alias;  // tmp → resolved alias
   std::map<std::string, std::string> shape_source;     // var → source-tmp from `assign var src` (chained)
+  std::map<std::string, std::string> direct_alias;     // Phase 4 — lhs → rhs for direct-ref `assign` aliases
 
   // Phase 2 evaluator: compute the attribute's value when possible, store it
   // in tmp_fold[dst] so downstream reads pick it up. base_text is the raw

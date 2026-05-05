@@ -127,6 +127,12 @@ void uPass_attributes::process_tuple_add() {
   if (changed) {
     mark_changed();
   }
+
+  // Phase 4 — once dst has a shape, eagerly materialize any aggregate cat-D
+  // attrs onto each field's flattened path so downstream LGraph generation
+  // sees them after the tuple shape is gone. attrs added later (e.g. an
+  // attr_set on dst that follows the tuple_add) re-trigger from process_attr_set.
+  migrate_aggregate_attrs_to_fields(dst);
 }
 
 void uPass_attributes::process_tuple_concat() {
@@ -419,6 +425,32 @@ std::optional<Lconst> uPass_attributes::lookup_attr_with_inheritance(std::string
   if (auto it = shape_source.find(std::string{base}); it != shape_source.end()) {
     if (auto v = lookup_attr_value(it->second, attr); v) {
       return v;
+    }
+  }
+  // Phase 4 — chain through direct-ref aliases (`const v = t`,
+  // `mut u = a`). Walk the chain so attrs landed at any level of the
+  // aliasing hierarchy are visible to comptime reads on the surface name.
+  // Bounded walk avoids any pathological loop introduced by mark_changed
+  // re-running the pass on iterating constprop convergence.
+  {
+    std::string cursor{base};
+    for (int hops = 0; hops < 8; ++hops) {
+      auto it = direct_alias.find(cursor);
+      if (it == direct_alias.end()) {
+        break;
+      }
+      if (auto v = lookup_attr_value(it->second, attr); v) {
+        return v;
+      }
+      // Also try the rhs's get_alias chain if the rhs itself was a tuple_get tmp.
+      if (auto* a = lookup_get_alias(it->second); a) {
+        if (!is_builtin_attr(attr)) {
+          if (auto v = lookup_attr_value(a->base, attr); v) {
+            return v;
+          }
+        }
+      }
+      cursor = it->second;
     }
   }
   return std::nullopt;

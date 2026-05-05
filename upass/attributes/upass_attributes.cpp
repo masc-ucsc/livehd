@@ -104,6 +104,7 @@ void uPass_attributes::on_assign_like(bool /*is_assign_node*/) {
     // takes on the same shape so aggregate reads `foo.[size]` etc. resolve.
     const auto& rhs = view.rhs_refs.front();
     bool        record_source = false;
+    bool        gained_shape  = false;
     if (auto* sh = lookup_tuple_shape(rhs); sh) {
       auto&      slot    = tuple_shapes[view.lhs];
       const bool changed = slot.fields != sh->fields || slot.from_range != sh->from_range;
@@ -112,6 +113,7 @@ void uPass_attributes::on_assign_like(bool /*is_assign_node*/) {
         mark_changed();
       }
       record_source = true;
+      gained_shape  = true;
     } else if (lookup_range(rhs)) {
       // Range tmp aliased into a named var — preserve the shape-source
       // mapping so `h.[size]` can chain back to range_bounds[___16].
@@ -125,6 +127,14 @@ void uPass_attributes::on_assign_like(bool /*is_assign_node*/) {
       } else if (inserted) {
         mark_changed();
       }
+    }
+    // Phase 4 — alias attribute migration. Copy direct attrs and any
+    // tuple_get_alias from rhs onto lhs so future `lhs.[attr]` reads chain
+    // through the same path. Then, if lhs just gained a shape, materialize
+    // any cat-D aggregate→field inheritance onto the per-field paths.
+    migrate_alias(view.lhs, rhs);
+    if (gained_shape) {
+      migrate_aggregate_attrs_to_fields(view.lhs);
     }
     reg.for_each_handler([&](upass::attributes::Attribute_handler& h) {
       h.on_alias_assign(*this, view.lhs, view.rhs_refs.front());
@@ -247,6 +257,12 @@ void uPass_attributes::process_attr_set() {
             std::string named = a->base + "." + a->field_name;
             attr_set_values[named][attr_name] = stored;
           }
+        }
+        // Phase 4 — when the target already has a tuple shape (i.e. a later
+        // attr_set on an existing aggregate), re-materialize aggregate→field
+        // inheritance so the new attr lands on every field path too.
+        if (lookup_tuple_shape(target) != nullptr || shape_source.find(target) != shape_source.end()) {
+          migrate_aggregate_attrs_to_fields(target);
         }
       }
     }
