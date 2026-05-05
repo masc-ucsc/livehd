@@ -9,20 +9,37 @@
 #include <utility>
 
 #include "lnast_ntype.hpp"
+#include "upass_attributes_phase5.hpp"
 #include "upass_attributes_sticky.hpp"
 
 // Plugin registration. Name "attributes" is what pass_upass appends to the
 // default upass order.
 static upass::uPass_plugin plugin_attributes("attributes", upass::uPass_wrapper<uPass_attributes>::get_upass);
 
+// Defined in upass_attributes_phase6.cpp.
+void uPass_attributes_register_phase6(uPass_attributes& self);
+
 uPass_attributes::uPass_attributes(std::shared_ptr<upass::Lnast_manager>& _lm) : upass::uPass(_lm) {
-  // Phase 1: register the sticky pattern handler. Later phases will register
-  // additional exact-name handlers (bits/ubits/sbits/max/min, clock_pin,
-  // reset_pin, …) and a default pass-through handler for category C/D.
+  // Phase 1 — sticky `_*` / `debug` attribute pattern.
   reg.register_sticky_pattern(std::make_shared<upass::attributes::Sticky_handler>());
-  // TODO(phase 5+): register exact-name handlers for category-A attrs.
-  // TODO(phase 6): register handlers for category-B wiring attrs.
-  // TODO(phase 7): register the default pass-through handler.
+
+  // Phase 5 — category-A consumption.
+  auto wrap_sat = std::make_shared<upass::attributes::Wrap_sat_handler>();
+  reg.register_exact("wrap", wrap_sat);
+  reg.register_exact("saturate", wrap_sat);
+  reg.register_exact("sat", wrap_sat);
+  reg.register_exact("type", std::make_shared<upass::attributes::Const_handler>());
+
+  // Phase 6 — category-B LGraph-wiring handlers (clock_pin, reset_pin,
+  // posclk, ...). Lives in its own translation unit so the table of
+  // pin/mode names doesn't clutter constructor logic.
+  uPass_attributes_register_phase6(*this);
+
+  // Phase 7 — default pass-through handler. Unknown attribute names land
+  // here. The handler is intentionally a no-op: process_attr_set already
+  // records every value into attr_set_values regardless of name, so cat-D
+  // attrs round-trip via the side-map for downstream LGraph generation.
+  reg.register_default(std::make_shared<upass::attributes::Attribute_handler>());
 }
 
 void uPass_attributes::begin_iteration() {
@@ -93,11 +110,64 @@ void uPass_attributes::dispatch_attr_get(std::string_view attr_name, std::string
   dispatch_bucket.clear();
 }
 
-void uPass_attributes::on_assign_like(bool /*is_assign_node*/) {
+void uPass_attributes::on_assign_like(bool is_assign_node) {
   auto view = scan_op();
   if (view.lhs.empty()) {
     return;
   }
+  // Phase 5 — bookkeeping for any assignment-shaped op. The `nil` rvalue
+  // is an explicit invalidation per spec and is not counted as a binding.
+  // Detect by checking the single rhs ref or const text.
+  bool                  rhs_is_nil = false;
+  std::optional<Lconst> rhs_value;  // direct LNAST-source value, when scalar
+  if (is_assign_node) {
+    move_to_child();
+    if (move_to_sibling()) {
+      auto txt = current_text();
+      if (txt == "nil") {
+        rhs_is_nil = true;
+      }
+      if (Lnast_ntype::is_const(get_raw_ntype())) {
+        auto v = Lconst::from_pyrope(txt);
+        if (!v.is_invalid()) {
+          rhs_value = v;
+        }
+      } else if (Lnast_ntype::is_ref(get_raw_ntype()) && runner_fold_fn) {
+        auto folded = runner_fold_fn(txt);
+        if (folded && !folded->is_invalid()) {
+          rhs_value = *folded;
+        }
+      }
+    }
+    move_to_parent();
+  }
+  // Phase 5 — apply wrap/sat narrowing eagerly when we have a fresh RHS
+  // value in hand. record_assign also tries this via runner_fold_fn, but
+  // that lookup falls back to constprop's ST which still holds the
+  // previous iteration's value at the moment our process_assign runs
+  // (constprop's process_assign fires AFTER ours in pass order). Reading
+  // the RHS directly from the LNAST gets us the right input.
+  if (!view.lhs.empty() && is_assign_node && !rhs_is_nil) {
+    // Drop any stale narrowed value from a previous assign so a per-
+    // statement wrap/sat applied to the next attr_set picks up the fresh
+    // constprop-stored RHS via runner_fold_fn instead of the previous
+    // iteration's narrowed result.
+    tmp_fold.erase(view.lhs);
+  }
+  if (rhs_value && !view.lhs.empty() && (has_wrap_policy(view.lhs) || has_sat_policy(view.lhs))) {
+    Lconst out = narrow_for_lhs(view.lhs, *rhs_value);
+    if (!out.is_invalid()) {
+      auto [iter, inserted] = tmp_fold.emplace(view.lhs, out);
+      if (!inserted && iter->second != out) {
+        iter->second = out;
+        mark_changed();
+      } else if (inserted) {
+        mark_changed();
+      }
+    }
+  }
+  record_assign(view.lhs, rhs_is_nil);
+
   if (view.is_alias) {
     // Phase 3 — shape / typename / range inheritance through direct aliases.
     // When `assign foo bar` and bar carries a tuple shape (or range), foo
@@ -232,6 +302,24 @@ void uPass_attributes::process_attr_set() {
       // Still record the explicit value (true/false) so a `.[comptime]`
       // read returns the explicit answer.
       attr_set_values[target][attr_name] = (value_text == "false" || value_text == "0") ? Lconst(0) : Lconst(1);
+    } else if ((attr_name == "ubits" || attr_name == "sbits") && !value_is_ref) {
+      // Phase 5 — `[ubits=N]` / `[sbits=N]` are alternative type-info entry
+      // points (the user wrote `mut x::[ubits=12] = 0` rather than
+      // `mut x:u12 = 0`). Mirror them into type_info_map so wrap/sat
+      // narrowing has a width to clamp against. Lconst::from_pyrope on a
+      // numeric literal yields a foldable Lconst whose to_i fits in
+      // uint32_t for any realistic bit width.
+      auto v = Lconst::from_pyrope(value_text);
+      if (v.is_i()) {
+        auto& ti = type_info_map[target];
+        ti.bits  = static_cast<uint32_t>(v.to_i());
+        if (attr_name == "ubits") {
+          ti.kind = Numeric_kind::unsigned_int;
+        } else {
+          ti.kind = Numeric_kind::signed_int;
+        }
+      }
+      attr_set_values[target][attr_name] = v;
     } else if (value_is_ref) {
       // Refs (e.g. range tmp, or a runtime wire ref for clock_pin) are
       // stored separately so derive_max can chain through range_bounds.

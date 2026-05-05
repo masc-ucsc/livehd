@@ -507,7 +507,19 @@ void uPass_constprop::process_eq_ne_impl() {
     Operand o;
     if (is_type(Lnast_ntype::Lnast_ntype_ref)) {
       auto name = current_text();
-      auto b    = st.get_bundle(name);
+      // Cross-pass override: when uPass_attributes published a narrowed
+      // value for this ref (wrap/sat policy, see attribute_todo.md §Phase
+      // 5), the override must win over the raw bundle in our ST. The
+      // override is published via runner_fold_fn / fold_ref before the
+      // operand is read here.
+      if (runner_fold_fn) {
+        auto folded = runner_fold_fn(name);
+        if (folded && !folded->is_invalid()) {
+          o.scalar = *folded;
+          return o;
+        }
+      }
+      auto b = st.get_bundle(name);
       if (b && !b->is_scalar()) {
         o.bundle = b;
       } else if (b && b->is_scalar()) {

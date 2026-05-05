@@ -316,6 +316,28 @@ void uPass_attributes::evaluate_attr_get(std::string_view dst, std::string_view 
       }
     } else if (attr == "comptime") {
       result = derive_comptime(base, base_text);
+    } else if (attr == "wrap") {
+      // Built-in overflow-policy attribute: presence-only on declaration
+      // (`x::[wrap]`) → true; nothing recorded → false. The statement-level
+      // `wrap x = ...` form removes any pre-recorded value via the
+      // wrap/sat handler, so a read here lands on the false branch.
+      if (auto v = lookup_attr_value(base, attr); v) {
+        result = *v;
+      } else {
+        result = Lconst(has_wrap_policy(base) ? 1 : 0);
+      }
+    } else if (attr == "saturate" || attr == "sat") {
+      // `sat` is shorthand for `saturate`; both names alias to the same
+      // policy slot.
+      auto v = lookup_attr_value(base, "saturate");
+      if (!v) {
+        v = lookup_attr_value(base, "sat");
+      }
+      if (v) {
+        result = *v;
+      } else {
+        result = Lconst(has_sat_policy(base) ? 1 : 0);
+      }
     } else if (attr == "typename") {
       result = derive_aggregate_typename(base, base_text);
     } else if (attr == "key") {

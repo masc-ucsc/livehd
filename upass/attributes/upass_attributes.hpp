@@ -5,6 +5,7 @@
 #include <map>
 #include <memory>
 #include <optional>
+#include <set>
 #include <string>
 #include <string_view>
 #include <utility>
@@ -267,11 +268,71 @@ public:
   void migrate_aggregate_attrs_to_fields(std::string_view base);
   void migrate_alias(std::string_view lhs, std::string_view rhs);
 
+  // ── Phase 5 — overflow-policy state ───────────────────────────────────
+  //
+  // wrap / saturate as declaration attributes set a persistent narrowing
+  // policy on the target variable; subsequent assignments are narrowed in
+  // place via tmp_fold so consumers (verifier cassert, constprop's eq/ne
+  // fallback) see the post-narrowed value through runner_fold_fn. The
+  // statement-level form (`wrap x = ...` / `sat x = ...`) lowers to the
+  // same attr_set but is emitted *after* the assign — distinguishing
+  // declaration vs. statement is "did this var already have an assign?"
+  // The statement-level form narrows the in-flight value and leaves no
+  // sticky attribute on the variable.
+  bool has_wrap_policy(std::string_view var) const {
+    return wrap_policy.count(std::string{var}) != 0;
+  }
+  bool has_sat_policy(std::string_view var) const {
+    return sat_policy.count(std::string{var}) != 0;
+  }
+  bool was_assigned(std::string_view var) const {
+    return assigned_once.count(std::string{var}) != 0;
+  }
+  void set_wrap_policy(std::string_view var) { wrap_policy.emplace(std::string{var}); }
+  void set_sat_policy(std::string_view var) { sat_policy.emplace(std::string{var}); }
+
+  // Resolve the value being narrowed (either the LHS's last-stored value if
+  // it's already been assigned, or the RHS we are currently emitting) and
+  // overwrite tmp_fold[lhs] with the policy-narrowed result.
+  void apply_narrowing(std::string_view lhs, bool is_wrap, bool is_sat);
+
+  // Erase a stored attr value (used by the wrap/sat handler to drop the
+  // per-statement attr — process_attr_set always pre-records, but
+  // statement-level wrap/sat must not leave a sticky entry).
+  void erase_attr_value(std::string_view var, std::string_view attr) {
+    auto it = attr_set_values.find(std::string{var});
+    if (it == attr_set_values.end()) {
+      return;
+    }
+    it->second.erase(std::string{attr});
+    if (it->second.empty()) {
+      attr_set_values.erase(it);
+    }
+  }
+
+  // Fold a value through the wrap/sat policy on `lhs` if any. Returns the
+  // possibly-narrowed value; returns the input untouched when no policy is
+  // active or type info is missing.
+  Lconst narrow_for_lhs(std::string_view lhs, const Lconst& v) const;
+
+  // ── Phase 5 — const single-assign tracking ─────────────────────────────
+  //
+  // A `const` declaration may receive at most one non-nil assignment per
+  // cycle. record_assign() bumps the counter for the LHS; the second non-
+  // nil assignment to a const-marked var raises upass::error.
+  void record_assign(std::string_view lhs, bool rhs_is_nil);
+
 private:
   std::map<std::string, Tuple_shape> tuple_shapes;     // var → shape
   std::map<std::string, Get_alias>   tuple_get_alias;  // tmp → resolved alias
   std::map<std::string, std::string> shape_source;     // var → source-tmp from `assign var src` (chained)
   std::map<std::string, std::string> direct_alias;     // Phase 4 — lhs → rhs for direct-ref `assign` aliases
+
+  // Phase 5 — overflow policy + assignment tracking.
+  std::set<std::string>    wrap_policy;
+  std::set<std::string>    sat_policy;
+  std::set<std::string>    assigned_once;     // any non-nil assign happened
+  std::map<std::string, int> const_assign_count;  // for const single-assign check
 
   // Phase 2 evaluator: compute the attribute's value when possible, store it
   // in tmp_fold[dst] so downstream reads pick it up. base_text is the raw
