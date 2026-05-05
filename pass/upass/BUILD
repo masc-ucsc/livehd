@@ -17,6 +17,7 @@ cc_library(
         "//lnast",
         "//pass/common:pass",
         "//upass/assert:upass_assert",
+        "//upass/attributes:upass_attributes",
         "//upass/coalescer:upass_coalescer",
         "//upass/constprop:upass_constprop",
         "//upass/core:upass",
