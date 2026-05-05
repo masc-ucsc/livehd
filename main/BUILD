@@ -76,6 +76,7 @@ cc_library(
         #"//inou/hif:inou_hif"
         "//pass/upass:pass_upass",
         "//pass/prp_writer:pass_prp_writer",
+        "//pass/lnast_to_lgraph:pass_lnast_to_lgraph",
     ],
 )
 
