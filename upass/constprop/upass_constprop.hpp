@@ -109,7 +109,22 @@ protected:
 
   auto current_prim_value() const {
     if (is_type(Lnast_ntype::Lnast_ntype_ref)) {
-      return st.get_trivial(current_text());
+      auto       name = current_text();
+      const auto v    = st.get_trivial(name);
+      if (!v.is_invalid()) {
+        return v;
+      }
+      // Cross-pass fallback: another pass (e.g. uPass_attributes folding an
+      // attr_get destination) may know this ref's value even though
+      // constprop never assigned it. Consult before giving up so n-ary
+      // ops fold in the same iteration the producer pass publishes.
+      if (runner_fold_fn) {
+        auto folded = runner_fold_fn(name);
+        if (folded && !folded->is_invalid()) {
+          return *folded;
+        }
+      }
+      return v;  // invalid — caller's foldable() check will short-circuit
     }
     I(is_type(Lnast_ntype::Lnast_ntype_const));
     return Lconst::from_pyrope(current_text());

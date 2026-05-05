@@ -162,10 +162,56 @@ void uPass_attributes::process_attr_set() {
   }
   std::string attr_name{current_text()};
   std::string value_text;
+  bool        value_is_ref = false;
   if (move_to_sibling()) {
-    value_text = std::string{current_text()};
+    value_text   = std::string{current_text()};
+    value_is_ref = Lnast_ntype::is_ref(get_raw_ntype());
   }
   move_to_parent();
+
+  // Phase 2 side-state writes — keep these BEFORE dispatch so handlers can
+  // see the updated maps.
+  if (!target.empty() && !attr_name.empty()) {
+    if (attr_name == "type") {
+      auto&     ti   = type_info_map[target];
+      Decl_kind kind = Decl_kind::unknown;
+      if (value_text == "mut") {
+        kind = Decl_kind::mut_kind;
+      } else if (value_text == "const") {
+        kind = Decl_kind::const_kind;
+      } else if (value_text == "reg") {
+        kind = Decl_kind::reg_kind;
+      } else if (value_text == "await") {
+        kind = Decl_kind::await_kind;
+      }
+      if (kind != Decl_kind::unknown) {
+        ti.decl = kind;
+      }
+    } else if (attr_name == "comptime") {
+      auto& ti = type_info_map[target];
+      if (value_text != "false" && value_text != "0") {
+        ti.is_comptime = true;
+      }
+      // Still record the explicit value (true/false) so a `.[comptime]`
+      // read returns the explicit answer.
+      attr_set_values[target][attr_name] = (value_text == "false" || value_text == "0") ? Lconst(0) : Lconst(1);
+    } else if (value_is_ref) {
+      // Refs (e.g. range tmp, or a runtime wire ref for clock_pin) are
+      // stored separately so derive_max can chain through range_bounds.
+      attr_set_refs[target][attr_name] = normalize_name(value_text);
+    } else {
+      Lconst stored;
+      if (value_text.empty() || value_text == "true") {
+        stored = Lconst(1);
+      } else {
+        stored = Lconst::from_pyrope(value_text);
+      }
+      if (!stored.is_invalid()) {
+        attr_set_values[target][attr_name] = stored;
+      }
+    }
+  }
+
   dispatch_attr_set(attr_name, target, value_text);
 }
 
@@ -183,7 +229,8 @@ void uPass_attributes::process_attr_get() {
     move_to_parent();
     return;
   }
-  auto base = normalize_name(current_text());
+  std::string base_text{current_text()};
+  auto        base = normalize_name(base_text);
   std::string attr_name;
   if (move_to_sibling()) {
     attr_name = std::string{current_text()};
@@ -192,6 +239,12 @@ void uPass_attributes::process_attr_get() {
   if (attr_name.empty()) {
     return;
   }
+
+  // Phase 2 — compute and publish the folded value before per-name dispatch
+  // so the sticky/per-attr handlers see the same observable state every
+  // pass other consumer would.
+  evaluate_attr_get(dst, base_text, base, attr_name);
+
   dispatch_attr_get(attr_name, dst, base);
 }
 

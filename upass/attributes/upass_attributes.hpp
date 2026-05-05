@@ -4,10 +4,13 @@
 #include <cstdint>
 #include <map>
 #include <memory>
+#include <optional>
 #include <string>
 #include <string_view>
+#include <utility>
 #include <vector>
 
+#include "lconst.hpp"
 #include "upass_attributes_handler.hpp"
 #include "upass_core.hpp"
 
@@ -66,10 +69,20 @@ public:
   void process_attr_set() override;
   void process_attr_get() override;
 
+  // Phase 2 hooks — track type info, range bounds, value derivations.
+  void process_type_spec() override;
+  void process_range() override;
+
   // Control-flow hooks for sticky control taint and runtime-join OR-merge.
   void process_if() override;
   void process_stmts() override;
   void process_stmts_post() override;
+
+  // Phase 2 — fold the attr_get destination tmp to its computed Lconst so
+  // the runner's emit-time substitution picks it up and downstream passes
+  // (verifier cassert, constprop eq/ne via runner_fold_fn fallback) see the
+  // resolved value without an extra iteration.
+  std::optional<Lconst> fold_ref(std::string_view name) override;
 
   // Read-side accessor for tests / cross-handler queries.
   upass::attributes::Handler_registry& registry() { return reg; }
@@ -126,6 +139,75 @@ private:
   // see the same identifier whether the LNAST happens to carry direction
   // sigils on a particular reference or not.
   static std::string normalize_name(std::string_view name);
+
+  // ── Phase 2 — attribute-read evaluation ────────────────────────────────────
+  //
+  // Side state owned by the pass (rather than a single handler) because
+  // multiple kinds of dispatch read/write the same maps:
+  //   * process_attr_set populates attr_set_values (and the type / range /
+  //     comptime sub-maps that drive derived reads).
+  //   * process_type_spec / process_range populate the structural data the
+  //     attr_get evaluator needs before any read fires.
+  //   * fold_ref reads tmp_fold to substitute the attr_get destination at
+  //     every downstream consumer (cassert via runner_fold_fn, eq/ne via
+  //     constprop's runner_fold_fn fallback).
+public:
+  // Storage classification recorded by the `type` decl-attr that prp2lnast
+  // emits (`mut`/`const`/`reg`/`await`).
+  enum class Decl_kind : uint8_t { unknown, mut_kind, const_kind, reg_kind, await_kind };
+
+  // Numeric type carried by a type_spec node. Width 0 means the declaration
+  // omitted the bit count (e.g. `int` / `uint`); concrete widths populate
+  // bits via the trailing const child of prim_type_uint/sint.
+  enum class Numeric_kind : uint8_t { none, unsigned_int, signed_int, boolean, string };
+  struct Type_info {
+    Decl_kind    decl{Decl_kind::unknown};
+    Numeric_kind kind{Numeric_kind::none};
+    uint32_t     bits{0};
+    bool         is_comptime{false};
+  };
+
+  // Look up explicitly-stored attribute values (set by attr_set). Returns
+  // nullopt when no entry exists for that (var, attr) pair.
+  std::optional<Lconst> lookup_attr_value(std::string_view var, std::string_view attr) const;
+
+  // Type info recorded by process_type_spec + the `type` and `comptime`
+  // decl-attrs. Returns nullopt when nothing is known.
+  const Type_info* lookup_type_info(std::string_view var) const;
+
+  // Range bounds previously recorded by process_range, keyed by the range
+  // op's destination tmp ref (so attr_set with a `range` value pointing to
+  // that tmp can lower to max/min).
+  std::optional<std::pair<Lconst, Lconst>> lookup_range(std::string_view tmp) const;
+
+  // Ref-text value recorded for an attr_set whose value was a ref (e.g.
+  // `attr_set d "range" tmp_1`). Used to chain into range_bounds for
+  // max/min derivation.
+  std::optional<std::string> lookup_attr_ref(std::string_view var, std::string_view attr) const;
+
+private:
+  std::map<std::string, std::map<std::string, Lconst>>      attr_set_values;
+  std::map<std::string, std::map<std::string, std::string>> attr_set_refs;  // (var, attr) → ref-text value
+  std::map<std::string, Type_info>                          type_info_map;
+  std::map<std::string, std::pair<Lconst, Lconst>>          range_bounds;  // start, end keyed by tmp
+  std::map<std::string, Lconst>                             tmp_fold;      // attr_get dst → folded Lconst
+
+  // Phase 2 evaluator: compute the attribute's value when possible, store it
+  // in tmp_fold[dst] so downstream reads pick it up. base_text is the raw
+  // text of the base ref (before normalize_name); base is its normalized
+  // form. attr is the attribute name (lower-case identifier).
+  void evaluate_attr_get(std::string_view dst, std::string_view base_text, std::string_view base, std::string_view attr);
+
+  // Helpers used by evaluate_attr_get.
+  std::optional<Lconst> derive_max(std::string_view base) const;
+  std::optional<Lconst> derive_min(std::string_view base) const;
+  std::optional<Lconst> derive_bits(std::string_view base, std::string_view variant) const;  // "bits"/"ubits"/"sbits"
+  std::optional<Lconst> derive_comptime(std::string_view base, std::string_view base_text) const;
+
+  // Best-effort comptime value for `var` — consults runner_fold_fn (which
+  // aggregates every pass's fold_ref) and our own tmp_fold, returning the
+  // first foldable answer.
+  std::optional<Lconst> resolve_value(std::string_view var) const;
 };
 
 // Plugin registration lives in upass_attributes.cpp.

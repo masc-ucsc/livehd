@@ -271,7 +271,15 @@ void uPass_constprop::process_log_or() {
 }
 
 void uPass_constprop::process_log_not() {
-  process_unary([](Lconst& r) { r = r.is_known_false() ? Lconst(1) : Lconst(0); });
+  process_unary([](Lconst& r) {
+    // Propagate nil: `!nil` stays nil so a chained `and` with a known-true
+    // operand collapses to true (the cassert escape hatch for unset attrs
+    // documented in attribute_todo.md §Phase 2).
+    if (r.is_nil()) {
+      return;
+    }
+    r = r.is_known_false() ? Lconst(1) : Lconst(0);
+  });
 }
 
 // Bundle-aware equality. Returns nullopt when constprop can't decide
@@ -515,6 +523,18 @@ void uPass_constprop::process_eq_ne_impl() {
         }
       } else if (st.has_trivial(name)) {
         o.scalar = st.get_trivial(name);
+      } else if (runner_fold_fn) {
+        // Cross-pass fallback: another pass (e.g. uPass_attributes folding
+        // an `attr_get` destination) may have a concrete value for this
+        // ref even though constprop never assigned it. Consult before
+        // marking undeclared so eq/ne fold in the same iteration the
+        // attribute pass produces the value.
+        auto v = runner_fold_fn(name);
+        if (v && !v->is_invalid()) {
+          o.scalar = *v;
+        } else if (!st.is_declared(name)) {
+          o.undeclared_ref = true;
+        }
       } else if (!st.is_declared(name)) {
         o.undeclared_ref = true;
       }
