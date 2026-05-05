@@ -1,6 +1,6 @@
 # This file is distributed under the BSD 3-Clause License. See LICENSE for details.
 # buildifier: disable=load
-load("@rules_cc//cc:defs.bzl", "cc_library")
+load("@rules_cc//cc:defs.bzl", "cc_library", "cc_test")
 load("//tools:copt_default.bzl", "COPTS")
 
 cc_library(
@@ -13,5 +13,16 @@ cc_library(
     deps = [
         "//lgraph",
         "//lnast",
+    ],
+)
+
+cc_test(
+    name = "upass_lnast_to_lgraph_test",
+    srcs = ["lnast_to_lgraph_test.cpp"],
+    copts = COPTS,
+    deps = [
+        ":upass_lnast_to_lgraph",
+        "//lgraph",
+        "@googletest//:gtest_main",
     ],
 )
