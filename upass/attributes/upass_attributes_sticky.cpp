@@ -2,6 +2,8 @@
 
 #include "upass_attributes_sticky.hpp"
 
+#include <algorithm>
+#include <cctype>
 #include <string>
 #include <string_view>
 
@@ -27,36 +29,73 @@ std::string Sticky_handler::canonical_bucket(std::string_view name) {
 }
 
 void Sticky_handler::begin_iteration(uPass_attributes& /*owner*/) {
-  // TODO: decide whether to clear `acquired` between iterations. Sticky is
-  // monotonic per program point, but the runner re-walks the tree on each
-  // iteration; design will likely keep state across iterations.
+  // `acquired` is monotonic across iterations per attribute_todo.md §Phase 1
+  // implementation note: a variable that earned a sticky attr in iteration N
+  // still has it in iteration N+1, so the runner's whole-tree fixed point
+  // doesn't unwind sticky propagation. Only the per-arm taint stack resets,
+  // since the runner re-walks every if-arm each sweep.
   control_taint_stack.clear();
 }
 
-void Sticky_handler::end_run(uPass_attributes& /*owner*/) {
-  // TODO: nothing to finalize for Phase 1 unless we want a debug dump.
+void Sticky_handler::end_run(uPass_attributes& /*owner*/) {}
+
+namespace {
+// Decide whether an attr_set value text should mark the target sticky.
+// Presence-only (empty value) and any non-`false`/non-`0` literal mark
+// sticky-active. `false` / `0` is present-but-inactive — we record nothing
+// here and let Phase 2's read evaluate it as boolean false.
+bool value_is_truthy(std::string_view v) {
+  if (v.empty()) {
+    return true;
+  }
+  std::string lower;
+  lower.reserve(v.size());
+  for (char c : v) {
+    lower.push_back(static_cast<char>(std::tolower(static_cast<unsigned char>(c))));
+  }
+  if (lower == "false" || lower == "0") {
+    return false;
+  }
+  return true;
+}
+}  // namespace
+
+void Sticky_handler::on_attr_set(uPass_attributes& owner, std::string_view lhs, std::string_view value_text) {
+  // The dispatcher already routed by name, so we know the attr matches the
+  // sticky pattern. Look up which bucket via owner's last-attr-name context.
+  // Here we mark using the bucket recorded on the dispatcher's behalf.
+  //
+  // We rely on owner publishing the canonical bucket for the in-flight
+  // attr_set so the handler doesn't need to re-derive it.
+  if (!value_is_truthy(value_text)) {
+    return;  // present-but-inactive; do not mark sticky-active
+  }
+  mark(lhs, owner.current_dispatch_bucket());
 }
 
-void Sticky_handler::on_attr_set(uPass_attributes& /*owner*/, std::string_view lhs, std::string_view value_text) {
-  // TODO: presence-only or `=true` → mark sticky on lhs.
-  //       explicit `=false` → record presence-but-inactive (Phase 2 read
-  //       semantics) without marking sticky-active.
-  (void)lhs;
-  (void)value_text;
-}
-
-void Sticky_handler::on_attr_get(uPass_attributes& /*owner*/, std::string_view /*lhs*/) {
-  // No state change on a read; Phase 2 (constprop) folds the value at use.
-  // Sticky control taint via `if a.[_foo] { ... }` is recorded via
-  // on_if_arm_enter's cond_attr_reads, not here.
+void Sticky_handler::on_attr_get(uPass_attributes& owner, std::string_view dst, std::string_view base) {
+  // Reading a sticky attr propagates the bucket to the destination tmp:
+  //   tmp = a.[_foo]   // tmp inherits _foo
+  // So a downstream `if tmp { ... }` sees the bucket via cond_refs lookup.
+  // The base also keeps its bucket (sticky is monotonic).
+  const auto& bucket = owner.current_dispatch_bucket();
+  if (bucket.empty()) {
+    return;
+  }
+  // Mark the destination with the bucket. If `base` already has the bucket
+  // we propagate; if not, we still mark `dst` because reading a sticky-
+  // qualified attribute name carries the dependency. Phase 2 evaluates the
+  // numeric value separately.
+  (void)base;
+  mark(dst, bucket);
+  // Apply control taint to the destination as well.
+  for (const auto& b : active_control_taint()) {
+    mark(dst, b);
+  }
 }
 
 void Sticky_handler::on_alias_assign(uPass_attributes& /*owner*/, std::string_view lhs, std::string_view rhs) {
-  // TODO: copy every sticky bucket from rhs onto lhs (full attr migration
-  // happens at the dispatcher level for non-sticky attrs handled by other
-  // handlers; here we only own sticky buckets).
-  merge_from(lhs, rhs, /*only_sticky=*/false);
-  // Apply control taint if any.
+  merge_from(lhs, rhs);
   for (const auto& bucket : active_control_taint()) {
     mark(lhs, bucket);
   }
@@ -64,11 +103,8 @@ void Sticky_handler::on_alias_assign(uPass_attributes& /*owner*/, std::string_vi
 
 void Sticky_handler::on_expr_assign(uPass_attributes& /*owner*/, std::string_view lhs,
                                     const std::vector<std::string_view>& rhs_refs) {
-  // TODO: OR every rhs_ref's sticky buckets into lhs. Non-sticky attrs are
-  // dropped at the dispatcher level — this handler only owns sticky buckets,
-  // so the merge is sticky-only by construction.
   for (auto rhs : rhs_refs) {
-    merge_from(lhs, rhs, /*only_sticky=*/true);
+    merge_from(lhs, rhs);
   }
   for (const auto& bucket : active_control_taint()) {
     mark(lhs, bucket);
@@ -79,10 +115,14 @@ void Sticky_handler::on_if_arm_enter(uPass_attributes& /*owner*/,
                                      const std::vector<std::string_view>& cond_refs,
                                      const std::vector<std::pair<std::string_view, std::string_view>>& cond_attr_reads) {
   // Build the taint set for this arm:
-  //   - any sticky bucket already on a cond ref var,
+  //   - any sticky bucket already on a cond ref var (covers `if tmp {…}` where
+  //     tmp came from `tmp = a.[_foo]`),
   //   - any sticky bucket named directly by an attr-read on the cond
-  //     (`if a.[_foo] {…}` adds bucket `_foo`).
-  std::set<std::string> arm_taint;
+  //     (`if a.[_foo] {…}` adds bucket `_foo` — kept for completeness even
+  //     though current LNAST always lowers attr_gets to tmps before the if).
+  // Carry forward parent taint so nested ifs accumulate (per spec: "Nested
+  // conditions OR their sticky contexts").
+  std::set<std::string> arm_taint = active_control_taint();
   for (auto ref : cond_refs) {
     auto it = acquired.find(std::string{ref});
     if (it != acquired.end()) {
@@ -91,7 +131,7 @@ void Sticky_handler::on_if_arm_enter(uPass_attributes& /*owner*/,
       }
     }
   }
-  for (auto [/*var*/ _v, attr] : cond_attr_reads) {
+  for (const auto& [_v, attr] : cond_attr_reads) {
     if (Sticky_handler::is_sticky_name(attr)) {
       arm_taint.insert(canonical_bucket(attr));
     }
@@ -100,8 +140,6 @@ void Sticky_handler::on_if_arm_enter(uPass_attributes& /*owner*/,
 }
 
 void Sticky_handler::on_if_arm_exit(uPass_attributes& /*owner*/) {
-  // OR-merge handled by the runner-level join (the parent uPass_attributes
-  // stitches arms together). Here we just pop the per-arm taint frame.
   if (!control_taint_stack.empty()) {
     control_taint_stack.pop_back();
   }
@@ -116,13 +154,13 @@ bool Sticky_handler::has_sticky(std::string_view var, std::string_view bucket) c
 }
 
 void Sticky_handler::mark(std::string_view var, std::string_view bucket) {
+  if (var.empty() || bucket.empty()) {
+    return;
+  }
   acquired[std::string{var}].insert(std::string{bucket});
 }
 
-void Sticky_handler::merge_from(std::string_view dst, std::string_view src, bool /*only_sticky*/) {
-  // For Phase 1 every bucket this handler owns is sticky by definition, so
-  // only_sticky is informational. The dispatcher uses the same flag to
-  // decide whether non-sticky handlers' state should also migrate.
+void Sticky_handler::merge_from(std::string_view dst, std::string_view src) {
   auto it = acquired.find(std::string{src});
   if (it == acquired.end()) {
     return;

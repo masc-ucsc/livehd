@@ -5,6 +5,7 @@
 #include <set>
 #include <string>
 #include <string_view>
+#include <utility>
 #include <vector>
 
 #include "upass_attributes_handler.hpp"
@@ -34,7 +35,7 @@ public:
   void end_run(uPass_attributes& owner) override;
 
   void on_attr_set(uPass_attributes& owner, std::string_view lhs, std::string_view value_text) override;
-  void on_attr_get(uPass_attributes& owner, std::string_view lhs) override;
+  void on_attr_get(uPass_attributes& owner, std::string_view dst, std::string_view base) override;
 
   void on_alias_assign(uPass_attributes& owner, std::string_view lhs, std::string_view rhs) override;
   void on_expr_assign(uPass_attributes& owner, std::string_view lhs,
@@ -57,6 +58,11 @@ public:
   // identified by `bucket` at the current point of the walk.
   bool has_sticky(std::string_view var, std::string_view bucket) const;
 
+  // Direct mark from the per-name dispatcher. Visible to uPass_attributes so
+  // attr_set on a sticky bucket can mark the target without re-routing
+  // through on_attr_set's value parsing.
+  void mark(std::string_view var, std::string_view bucket);
+
 private:
   // Per-variable acquired sticky attrs. Monotonic — entries are added but
   // never removed (later clean assignments cannot clear a sticky).
@@ -67,9 +73,7 @@ private:
   // state. Pushed by on_if_arm_enter, popped by on_if_arm_exit.
   std::vector<std::set<std::string>> control_taint_stack;
 
-  // Helpers to be implemented in the .cpp.
-  void mark(std::string_view var, std::string_view bucket);
-  void merge_from(std::string_view dst, std::string_view src, bool only_sticky);
+  void merge_from(std::string_view dst, std::string_view src);
   std::set<std::string> active_control_taint() const;  // OR of stack entries
 };
 

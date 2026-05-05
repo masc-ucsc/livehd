@@ -1,10 +1,12 @@
 //  This file is distributed under the BSD 3-Clause License. See LICENSE for details.
 #pragma once
 
+#include <functional>
 #include <map>
 #include <memory>
 #include <string>
 #include <string_view>
+#include <utility>
 #include <vector>
 
 // Per-attribute-name handler interface used by uPass_attributes.
@@ -37,8 +39,9 @@ struct Attribute_handler {
   // Declaration-site set: `lhs::[name=value]` or `lhs::[name]`.
   virtual void on_attr_set(uPass_attributes& /*owner*/, std::string_view /*lhs*/, std::string_view /*value_text*/) {}
 
-  // Read site: `lhs.[name]` returns a value.
-  virtual void on_attr_get(uPass_attributes& /*owner*/, std::string_view /*lhs*/) {}
+  // Read site: `dst = base.[name]`. `dst` is the destination ref (typically
+  // a tmp) the read result lands in; `base` is the variable being read from.
+  virtual void on_attr_get(uPass_attributes& /*owner*/, std::string_view /*dst*/, std::string_view /*base*/) {}
 
   // Direct alias: `const y = a` or `mut b = a` or `c = b`.
   // Both sticky and non-sticky attrs migrate from rhs to lhs.
@@ -80,6 +83,12 @@ public:
 
   // Register the default handler used for any name not otherwise matched.
   void register_default(std::shared_ptr<Attribute_handler> h);
+
+  // Visit every distinct registered handler exactly once. Used for
+  // broadcast events (begin_iteration / end_run / on_alias_assign /
+  // on_expr_assign / on_if_arm_enter / on_if_arm_exit) that aren't tied to
+  // a specific attribute name.
+  void for_each_handler(const std::function<void(Attribute_handler&)>& fn) const;
 
 private:
   std::map<std::string, std::shared_ptr<Attribute_handler>> exact;

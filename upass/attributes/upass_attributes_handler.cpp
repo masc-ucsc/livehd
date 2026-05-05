@@ -2,6 +2,7 @@
 
 #include "upass_attributes_handler.hpp"
 
+#include <set>
 #include <utility>
 
 #include "upass_attributes_sticky.hpp"
@@ -33,6 +34,22 @@ void Handler_registry::register_sticky_pattern(std::shared_ptr<Attribute_handler
 
 void Handler_registry::register_default(std::shared_ptr<Attribute_handler> h) {
   default_handler = std::move(h);
+}
+
+void Handler_registry::for_each_handler(const std::function<void(Attribute_handler&)>& fn) const {
+  // Use a pointer-set so a handler shared across slots (or eventually the
+  // same instance registered for multiple exact names) is visited only once.
+  std::set<Attribute_handler*> seen;
+  auto visit = [&](Attribute_handler* h) {
+    if (h && seen.insert(h).second) {
+      fn(*h);
+    }
+  };
+  for (const auto& [_, h] : exact) {
+    visit(h.get());
+  }
+  visit(sticky_pattern.get());
+  visit(default_handler.get());
 }
 
 }  // namespace attributes
