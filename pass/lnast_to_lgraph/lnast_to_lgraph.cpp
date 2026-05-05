@@ -101,13 +101,14 @@ void Lnast_to_lgraph::lower_node() {
     case N::Lnast_ntype_bit_or:  lower_infix(Ntype_op::Or,  "A", "A"); break;
     case N::Lnast_ntype_bit_xor: lower_infix(Ntype_op::Xor, "A", "A"); break;
     case N::Lnast_ntype_bit_not: lower_not(); break;
-    // Logical
-    case N::Lnast_ntype_log_and: lower_infix(Ntype_op::And_op, "A", "A"); break;
-    case N::Lnast_ntype_log_or:  lower_infix(Ntype_op::Or_op,  "A", "A"); break;
+    // Logical — log_and/log_or reduce to a single bit.
+    // LGraph uses And/Or with multi-driver A pins; reduction is implicit.
+    case N::Lnast_ntype_log_and: lower_infix(Ntype_op::And, "A", "A"); break;
+    case N::Lnast_ntype_log_or:  lower_infix(Ntype_op::Ror, "A", "A"); break;
     case N::Lnast_ntype_log_not: lower_not(); break;
     // Shift
-    case N::Lnast_ntype_shl: lower_infix(Ntype_op::SHL_op, "a", "amount"); break;
-    case N::Lnast_ntype_sra: lower_infix(Ntype_op::SRA_op, "a", "b");      break;
+    case N::Lnast_ntype_shl: lower_infix(Ntype_op::SHL, "a", "amount"); break;
+    case N::Lnast_ntype_sra: lower_infix(Ntype_op::SRA, "a", "b");      break;
     // TODO stubs
     case N::Lnast_ntype_if:
       Pass::warn("lnast_to_lgraph: if/mux not yet implemented");  break;
@@ -177,7 +178,7 @@ void Lnast_to_lgraph::lower_not() {
 
 Node_pin Lnast_to_lgraph::lower_leaf() {
   if (current_ntype() == Lnast_ntype::Lnast_ntype_const) {
-    auto cnode = lg_->create_node_const(Lconst(std::string(current_text())));
+    auto cnode = lg_->create_node_const(Lconst::from_pyrope(current_text()));
     return cnode.setup_driver_pin();
   }
   return resolve(current_text());
