@@ -6,6 +6,7 @@
 #include <string>
 #include <string_view>
 #include <unordered_map>
+#include <unordered_set>
 
 #include "cell.hpp"
 #include "lgraph.hpp"
@@ -22,6 +23,7 @@ private:
   std::stack<Lnast_nid> nid_stack_;
   Lnast_nid             cur_;
   std::unordered_map<std::string, Node_pin> pin_map_;
+  std::unordered_set<std::string>           output_names_;
   int next_inp_pos_{0};
   int next_out_pos_{0};
 

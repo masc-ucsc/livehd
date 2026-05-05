@@ -51,25 +51,34 @@ Node_pin Lnast_to_lgraph::resolve(std::string_view raw_name) {
   auto name = std::string(strip_prefix(raw_name));
   auto it = pin_map_.find(name);
   if (it != pin_map_.end()) return it->second;
-  // Unknown — treat as an undeclared input port.
-  auto inp = lg_->add_graph_input(name, next_inp_pos_++, 0);
-  pin_map_.emplace(name, inp);
-  return inp;
+  if (is_input_port(raw_name)) {
+    // $-prefixed: auto-promote to a graph input.
+    auto inp = lg_->add_graph_input(name, next_inp_pos_++, 0);
+    pin_map_.emplace(name, inp);
+    return inp;
+  }
+  // Unknown bare ref — likely a typo or unresolved intermediate.
+  Pass::warn("lnast_to_lgraph: unresolved ref '{}' — wiring zero constant", name);
+  auto zero = lg_->create_node_const(Lconst(0));
+  auto pin  = zero.setup_driver_pin();
+  pin_map_.emplace(name, pin);
+  return pin;
 }
 
 void Lnast_to_lgraph::bind(std::string_view raw_name, Node_pin drv) {
   auto name = std::string(strip_prefix(raw_name));
   pin_map_.insert_or_assign(name, drv);
+  if (is_output_port(raw_name)) {
+    output_names_.insert(name);
+  }
 }
 
 void Lnast_to_lgraph::wire_outputs() {
-  for (auto& [name, drv] : pin_map_) {
-    bool is_inp = false;
-    lg_->each_graph_input([&](const Node_pin& pin) {
-      if (pin.has_name() && pin.get_name() == name) is_inp = true;
-    });
-    if (is_inp) continue;
-    auto out_pin = lg_->add_graph_output(name, next_out_pos_++, drv.get_bits());
+  for (const auto& name : output_names_) {
+    auto it = pin_map_.find(name);
+    if (it == pin_map_.end()) continue;
+    auto& drv     = it->second;
+    auto  out_pin = lg_->add_graph_output(name, next_out_pos_++, drv.get_bits());
     lg_->add_edge(drv, out_pin);
   }
 }
