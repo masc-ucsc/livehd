@@ -1846,6 +1846,22 @@ void Prp2lnast::emit_type_spec(const Lnast_node& target, TSNode type_cast_node) 
       lnast->add_child(idx, target);
       emit_type_expr(idx, ty);
     }
+    // Preserve the typename when the type is an identifier-based (named)
+    // type so `target.[typename]` reads can resolve at the attribute pass.
+    if (tt == "expression_type" || tt == "dot_expression_type" || tt == "function_call_type") {
+      auto raw = trim(get_text(ty));
+      if (!raw.empty()) {
+        auto as_idx = builder.add_child(Lnast_ntype::create_attr_set());
+        lnast->add_child(as_idx, target);
+        lnast->add_child(as_idx, Lnast_node::create_const("typename"));
+        std::string quoted;
+        quoted.reserve(raw.size() + 2);
+        quoted.push_back('\'');
+        quoted.append(raw);
+        quoted.push_back('\'');
+        lnast->add_child(as_idx, Lnast_node::create_const(quoted));
+      }
+    }
   }
 attrs:
   uint32_t total = ts_node_child_count(type_cast_node);
@@ -2895,6 +2911,12 @@ Lnast_node Prp2lnast::tuple_to_node(TSNode n, bool /*is_square*/) {
     bool        is_spread = false;  // `...expr` — emit value as its own concat chunk
     std::string assign_key;
     Lnast_node  value;
+    // Phase 3: per-field attribute decorations on the lvalue
+    // (e.g. `b::[poison=99]=2`). Lowered after the tuple_add as a
+    // `tuple_get` + `attr_set` pair so the override is observable on the
+    // resulting tuple field.
+    TSNode attr_list_node{};
+    bool   has_attr_list{false};
   };
   std::vector<Item> items;
   items.reserve(nnc);
@@ -2927,7 +2949,62 @@ Lnast_node Prp2lnast::tuple_to_node(TSNode n, bool /*is_square*/) {
       // `typed_identifier`). Strip it: the ref text must be a bare
       // identifier; otherwise lnastfmt rejects the LNAST.
       std::string_view lvt2(ts_node_type(lv));
-      if (lvt2 == "typed_identifier") {
+      // Phase 3 — capture any per-field attribute_list (`b::[poison=99]=2`)
+      // wherever the grammar attaches it so we can lower it as a post-tuple
+      // attr_set. The attribute_list may live under a `type_specification`
+      // wrapper or directly under the `typed_identifier`; walk children of
+      // the lvalue to find it. Doing so before the lvt2 dispatch keeps the
+      // logic shared between `typed_identifier` and `type_specification`.
+      // Recursively walk the lvalue subtree (and the assignment node itself,
+      // since the grammar may attach `::[...]` between lvalue and `=`) to
+      // find an attribute_list.
+      std::function<void(TSNode)> capture_attr_list_under = [&](TSNode parent_node) {
+        if (it.has_attr_list) {
+          return;
+        }
+        uint32_t total = ts_node_child_count(parent_node);
+        for (uint32_t k = 0; k < total; k++) {
+          TSNode kc = ts_node_child(parent_node, k);
+          if (std::string_view(ts_node_type(kc)) == "attribute_list") {
+            it.attr_list_node = kc;
+            it.has_attr_list  = true;
+            return;
+          }
+          capture_attr_list_under(kc);
+          if (it.has_attr_list) {
+            return;
+          }
+        }
+      };
+      capture_attr_list_under(lv);
+      // Some grammar shapes attach the `::[...]` attribute_list to the
+      // assignment node directly (between lvalue and rvalue); also scan
+      // the assignment's own children but exclude rvalue/operator subtrees.
+      if (!it.has_attr_list) {
+        uint32_t total = ts_node_child_count(c);
+        for (uint32_t k = 0; k < total; k++) {
+          TSNode kc = ts_node_child(c, k);
+          if (std::string_view(ts_node_type(kc)) == "attribute_list") {
+            it.attr_list_node = kc;
+            it.has_attr_list  = true;
+            break;
+          }
+        }
+      }
+      if (lvt2 == "type_specification") {
+        // `b::[poison=99]` parses as a type_specification with the bare
+        // identifier in the `argument` field.
+        TSNode arg = child_by_field(lv, "argument");
+        if (!ts_node_is_null(arg)) {
+          std::string_view at(ts_node_type(arg));
+          if (at == "typed_identifier") {
+            TSNode id = child_by_field(arg, "identifier");
+            it.assign_key = ts_node_is_null(id) ? trim(get_text(arg)) : trim(get_text(id));
+          } else {
+            it.assign_key = trim(get_text(arg));
+          }
+        }
+      } else if (lvt2 == "typed_identifier") {
         TSNode id = child_by_field(lv, "identifier");
         if (!ts_node_is_null(id)) {
           it.assign_key = trim(get_text(id));
@@ -3041,6 +3118,22 @@ Lnast_node Prp2lnast::tuple_to_node(TSNode n, bool /*is_square*/) {
       } else {
         lnast->add_child(idx, it.value);
       }
+    }
+    // Per-field attribute overrides (e.g. `b::[poison=99]=2`). Emit a
+    // tuple_get to introduce a tmp ref bound to the field, then attr_set
+    // each declared attribute against that tmp. The attribute pass tracks
+    // tuple_get aliases and migrates the attrs to the underlying path so
+    // `t.b.[poison]` reads find the override.
+    for (const auto& it : items) {
+      if (!it.has_attr_list || !it.is_assign) {
+        continue;
+      }
+      auto tg_idx = builder.add_child(Lnast_ntype::create_tuple_get());
+      auto tg_ref = builder.mint_tmp_ref();
+      lnast->add_child(tg_idx, tg_ref);
+      lnast->add_child(tg_idx, ref);
+      lnast->add_child(tg_idx, Lnast_node::create_const(it.assign_key));
+      emit_attribute_list(tg_ref, it.attr_list_node);
     }
     return ref;
   }

@@ -73,6 +73,15 @@ public:
   void process_type_spec() override;
   void process_range() override;
 
+  // Phase 3 hooks — aggregate tuple-attribute resolution. Track tuple shape
+  // (field count + field-name list) so .[size] / .[bits] / .[typename] / .[key]
+  // and category-D aggregate→field inheritance can resolve before Phase 4
+  // flattens the tuple away.
+  void process_tuple_add() override;
+  void process_tuple_concat() override;
+  void process_tuple_set() override;
+  void process_tuple_get() override;
+
   // Control-flow hooks for sticky control taint and runtime-join OR-merge.
   void process_if() override;
   void process_stmts() override;
@@ -191,6 +200,54 @@ private:
   std::map<std::string, Type_info>                          type_info_map;
   std::map<std::string, std::pair<Lconst, Lconst>>          range_bounds;  // start, end keyed by tmp
   std::map<std::string, Lconst>                             tmp_fold;      // attr_get dst → folded Lconst
+
+public:
+  // ── Phase 3 — tuple-shape side state ────────────────────────────────────
+  //
+  // Tracked per tuple-typed variable so aggregate `.[size]` / `.[bits]` /
+  // `.[typename]` / `.[key]` reads can resolve before Phase 4 flattens the
+  // tuple away. Field list is in source order; `name` is empty for unnamed
+  // positional entries.
+  struct Tuple_field {
+    std::string positional;  // "0", "1", ...
+    std::string name;        // "a", "xx", or empty for unnamed positional
+    bool        operator==(const Tuple_field& other) const {
+      return positional == other.positional && name == other.name;
+    }
+  };
+  struct Tuple_shape {
+    std::vector<Tuple_field> fields;
+    bool                     from_range{false};  // size derived from range_bounds[var]
+  };
+
+  // tuple_get destination tmp → resolution info. Lets later attr_get see what
+  // the tmp logically points at so cat-D inheritance and `.[key]` work.
+  struct Get_alias {
+    std::string base;        // canonical aggregate var (e.g. "t" or "___1")
+    std::string field_key;   // "0", "xx", ...
+    std::string field_name;  // for `.[key]` reads — the source name at this slot
+  };
+
+  bool                                  is_tuple(std::string_view var) const;
+  const Tuple_shape*                    lookup_tuple_shape(std::string_view var) const;
+  const Get_alias*                      lookup_get_alias(std::string_view tmp) const;
+  std::optional<Lconst>                 derive_aggregate_size(std::string_view base) const;
+  std::optional<Lconst>                 derive_aggregate_bits(std::string_view base) const;
+  std::optional<Lconst>                 derive_aggregate_typename(std::string_view base, std::string_view base_text) const;
+  std::optional<Lconst>                 derive_aggregate_key(std::string_view base, std::string_view base_text) const;
+
+  // Cat-D inheritance: walk get-alias and shape-source aliases looking for
+  // an explicit attr value, then fall back to the parent aggregate's value.
+  std::optional<Lconst> lookup_attr_with_inheritance(std::string_view base, std::string_view attr) const;
+
+  // Built-in attribute names that have dedicated semantics (do NOT participate
+  // in generic cat-D aggregate→field inheritance).
+  static bool is_builtin_attr(std::string_view name);
+
+private:
+  std::map<std::string, Tuple_shape> tuple_shapes;     // var → shape
+  std::map<std::string, Get_alias>   tuple_get_alias;  // tmp → resolved alias
+  std::map<std::string, std::string> shape_source;     // var → source-tmp from `assign var src` (chained)
 
   // Phase 2 evaluator: compute the attribute's value when possible, store it
   // in tmp_fold[dst] so downstream reads pick it up. base_text is the raw

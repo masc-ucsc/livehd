@@ -298,17 +298,38 @@ void uPass_attributes::evaluate_attr_get(std::string_view dst, std::string_view 
       result = derive_max(base);
     } else if (attr == "min") {
       result = derive_min(base);
-    } else if (attr == "bits" || attr == "ubits" || attr == "sbits") {
+    } else if (attr == "bits") {
+      // Phase 3 — aggregate `tup.[bits]` is the sum of the per-field bits.
+      // Falls back to scalar derivation when no tuple shape is known.
+      result = derive_aggregate_bits(base);
+      if (!result) {
+        result = derive_bits(base, attr);
+      }
+    } else if (attr == "ubits" || attr == "sbits") {
       result = derive_bits(base, attr);
     } else if (attr == "size") {
-      // Phase 2 only handles scalars; aggregate sizes are Phase 3.
-      // Treat anything with a known scalar value (or no recorded bundle)
-      // as size==1.
-      if (resolve_value(base).has_value()) {
+      // Phase 3 — aggregate size first; scalar fallback gives 1 when the
+      // value is known.
+      result = derive_aggregate_size(base);
+      if (!result && resolve_value(base).has_value()) {
         result = Lconst(1);
       }
     } else if (attr == "comptime") {
       result = derive_comptime(base, base_text);
+    } else if (attr == "typename") {
+      result = derive_aggregate_typename(base, base_text);
+    } else if (attr == "key") {
+      // `.[key]` on a tuple_get tmp returns the source field's name; on a
+      // bare aggregate it returns the aggregate's own name.
+      if (auto* a = lookup_get_alias(base); a && !a->field_name.empty()) {
+        result = Lconst::from_pyrope(std::string{"\'"} + a->field_name + "\'");
+      } else {
+        result = derive_aggregate_key(base, base_text);
+      }
+    } else if (auto v_inh = lookup_attr_with_inheritance(base, attr); v_inh) {
+      // Phase 3 — cat-D aggregate→field inheritance: a tuple_get tmp's
+      // attribute look-up chains through the alias to the parent aggregate.
+      result = *v_inh;
     } else if (auto v = lookup_attr_value(base, attr); v) {
       result = *v;
     }

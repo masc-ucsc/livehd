@@ -99,6 +99,33 @@ void uPass_attributes::on_assign_like(bool /*is_assign_node*/) {
     return;
   }
   if (view.is_alias) {
+    // Phase 3 — shape / typename / range inheritance through direct aliases.
+    // When `assign foo bar` and bar carries a tuple shape (or range), foo
+    // takes on the same shape so aggregate reads `foo.[size]` etc. resolve.
+    const auto& rhs = view.rhs_refs.front();
+    bool        record_source = false;
+    if (auto* sh = lookup_tuple_shape(rhs); sh) {
+      auto&      slot    = tuple_shapes[view.lhs];
+      const bool changed = slot.fields != sh->fields || slot.from_range != sh->from_range;
+      slot               = *sh;
+      if (changed) {
+        mark_changed();
+      }
+      record_source = true;
+    } else if (lookup_range(rhs)) {
+      // Range tmp aliased into a named var — preserve the shape-source
+      // mapping so `h.[size]` can chain back to range_bounds[___16].
+      record_source = true;
+    }
+    if (record_source) {
+      auto [it, inserted] = shape_source.emplace(view.lhs, rhs);
+      if (!inserted && it->second != rhs) {
+        it->second = rhs;
+        mark_changed();
+      } else if (inserted) {
+        mark_changed();
+      }
+    }
     reg.for_each_handler([&](upass::attributes::Attribute_handler& h) {
       h.on_alias_assign(*this, view.lhs, view.rhs_refs.front());
     });
@@ -208,6 +235,19 @@ void uPass_attributes::process_attr_set() {
       }
       if (!stored.is_invalid()) {
         attr_set_values[target][attr_name] = stored;
+        // Phase 3 — when the target is a tuple_get tmp (per-field decl-site
+        // attribute, e.g. `b::[poison=99]=2` lowered to `tuple_get tmp __1 b
+        // ; attr_set tmp poison 99`), also store at the canonical
+        // base.field_key path so a later `t.b.[poison]` read finds the
+        // override after `assign t __1` migrates the shape.
+        if (auto* a = lookup_get_alias(target); a) {
+          std::string canonical = a->base + "." + a->field_key;
+          attr_set_values[canonical][attr_name] = stored;
+          if (!a->field_name.empty() && a->field_name != a->field_key) {
+            std::string named = a->base + "." + a->field_name;
+            attr_set_values[named][attr_name] = stored;
+          }
+        }
       }
     }
   }

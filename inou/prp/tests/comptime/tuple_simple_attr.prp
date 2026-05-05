@@ -1,7 +1,7 @@
 /*
 :name: tuple_simple_attr
 :type: parsing lnast comptime
-:verifier_pass: 3
+:verifier_pass: 4
 :verifier_fail: 0
 */
 
