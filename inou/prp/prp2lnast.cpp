@@ -2403,16 +2403,72 @@ Lnast_node Prp2lnast::if_expr_to_node(TSNode n, bool need_result) {
   // `if` here so it follows its producers in source order.
   auto if_idx = builder.add_child(Lnast_ntype::create_if());
 
+  // Set of named-child node kinds that are expression-typed and can serve
+  // as the value of an arm body. Mirrors `expr_stmt` in process_statement.
+  static const absl::flat_hash_set<std::string_view> arm_expr_kinds = {
+      "if_expression",
+      "match_expression",
+      "expression_item",
+      "unary_expression",
+      "bit_selection",
+      "member_selection",
+      "attribute_read",
+      "dot_expression",
+      "function_call_expression",
+      "identifier",
+      "tuple",
+      "tuple_sq",
+      "type_specification",
+      "constant",
+  };
+
   auto emit_body = [&](TSNode code) {
     auto body_idx = lnast->add_child(if_idx, Lnast_ntype::create_stmts());
     builder.push_stmts(body_idx);
-    if (!ts_node_is_null(code)) {
-      process_scope_statement(code, body_idx);
+    // When the if is used as an expression, the arm body's value is its
+    // last expression. Detect a trailing expression-typed named child and
+    // emit `assign result <expr>` for it; preceding statements process as
+    // normal. Without this, every arm assigns 0 and the if-expression
+    // always folds to 0 instead of the body's computed value.
+    bool emitted_result = false;
+    if (need_result && !ts_node_is_null(code)
+        && std::string_view(ts_node_type(code)) == "scope_statement") {
+      uint32_t nnc = ts_node_named_child_count(code);
+      if (nnc > 0) {
+        TSNode           last = ts_node_named_child(code, nnc - 1);
+        std::string_view lt(ts_node_type(last));
+        if (arm_expr_kinds.contains(lt)) {
+          // Process the leading statements (everything before the last
+          // expression) by walking the children in source order, skipping
+          // the trailing expression which we will lower as a value.
+          for (uint32_t i = 0; i < ts_node_child_count(code); i++) {
+            TSNode c = ts_node_child(code, i);
+            if (!ts_node_is_named(c)) {
+              continue;
+            }
+            if (ts_node_start_byte(c) == ts_node_start_byte(last)
+                && ts_node_end_byte(c) == ts_node_end_byte(last)) {
+              break;  // reached the trailing expression — handle below
+            }
+            process_statement(c);
+          }
+          Lnast_node val  = expr_to_node(last);
+          auto       aidx = builder.add_child(Lnast_ntype::create_assign());
+          lnast->add_child(aidx, result);
+          lnast->add_child(aidx, val);
+          emitted_result = true;
+        }
+      }
     }
-    if (need_result) {
-      auto a = builder.add_child(Lnast_ntype::create_assign());
-      lnast->add_child(a, result);
-      lnast->add_child(a, Lnast_node::create_const("0"));
+    if (!emitted_result) {
+      if (!ts_node_is_null(code)) {
+        process_scope_statement(code, body_idx);
+      }
+      if (need_result) {
+        auto a = builder.add_child(Lnast_ntype::create_assign());
+        lnast->add_child(a, result);
+        lnast->add_child(a, Lnast_node::create_const("0"));
+      }
     }
     builder.pop_stmts();
   };

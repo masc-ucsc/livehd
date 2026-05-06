@@ -206,6 +206,19 @@ void uPass_attributes::on_assign_like(bool is_assign_node) {
     if (gained_shape) {
       migrate_aggregate_attrs_to_fields(view.lhs);
     }
+    // Phase 5 — propagate any narrowed value from rhs to lhs so a downstream
+    // `lhs == k` (e.g. after `sat z = 3000` then `const m = z`) sees the
+    // narrowed value via runner_fold_fn instead of the raw bundle in
+    // constprop's symbol table.
+    if (auto it = tmp_fold.find(rhs); it != tmp_fold.end() && !it->second.is_invalid()) {
+      auto [m_it, inserted] = tmp_fold.emplace(view.lhs, it->second);
+      if (!inserted && m_it->second != it->second) {
+        m_it->second = it->second;
+        mark_changed();
+      } else if (inserted) {
+        mark_changed();
+      }
+    }
     reg.for_each_handler([&](upass::attributes::Attribute_handler& h) {
       h.on_alias_assign(*this, view.lhs, view.rhs_refs.front());
     });
@@ -351,6 +364,22 @@ void uPass_attributes::process_attr_set() {
         // inheritance so the new attr lands on every field path too.
         if (lookup_tuple_shape(target) != nullptr || shape_source.find(target) != shape_source.end()) {
           migrate_aggregate_attrs_to_fields(target);
+        }
+        // Typename-driven attribute inheritance — `const x:a = 100` lowers
+        // to `attr_set x typename 'a'`, and per spec x takes on a's
+        // attribute set. When the typename string matches a known variable
+        // with tracked attrs, treat it as a direct alias for attribute
+        // lookup: copy attrs through migrate_alias and notify handlers so
+        // sticky buckets propagate too.
+        if (attr_name == "typename" && value_text.size() >= 2 && value_text.front() == '\''
+            && value_text.back() == '\'') {
+          std::string src{value_text.substr(1, value_text.size() - 2)};
+          if (!src.empty() && src != target
+              && (attr_set_values.count(src) != 0 || type_info_map.count(src) != 0)) {
+            migrate_alias(target, src);
+            reg.for_each_handler(
+                [&](upass::attributes::Attribute_handler& h) { h.on_alias_assign(*this, target, src); });
+          }
         }
       }
     }

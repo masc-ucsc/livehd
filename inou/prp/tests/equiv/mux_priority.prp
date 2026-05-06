@@ -1,0 +1,11 @@
+comb mux_priority(c1:bool, c2:bool, base:u8, a:u8, b:u8) -> (y:u8) {
+  y = base
+
+  if c1 {
+    y = a
+  }
+
+  if c2 {
+    y = b
+  }
+}

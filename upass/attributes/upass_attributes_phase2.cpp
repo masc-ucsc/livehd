@@ -318,25 +318,31 @@ void uPass_attributes::evaluate_attr_get(std::string_view dst, std::string_view 
       result = derive_comptime(base, base_text);
     } else if (attr == "wrap") {
       // Built-in overflow-policy attribute: presence-only on declaration
-      // (`x::[wrap]`) → true; nothing recorded → false. The statement-level
-      // `wrap x = ...` form removes any pre-recorded value via the
-      // wrap/sat handler, so a read here lands on the false branch.
+      // (`x::[wrap]`) → true; an explicit `[wrap=false]` returns false; an
+      // active policy without an explicit attr_set value returns true.
+      // Otherwise the attr was never present on this var (statement-level
+      // `wrap x = ...` erases any pre-recorded value), and per spec the
+      // read is nil.
       if (auto v = lookup_attr_value(base, attr); v) {
         result = *v;
+      } else if (has_wrap_policy(base)) {
+        result = Lconst(1);
       } else {
-        result = Lconst(has_wrap_policy(base) ? 1 : 0);
+        result = Lconst::nil();
       }
     } else if (attr == "saturate" || attr == "sat") {
       // `sat` is shorthand for `saturate`; both names alias to the same
-      // policy slot.
+      // policy slot. Same nil-when-unset semantics as `wrap` above.
       auto v = lookup_attr_value(base, "saturate");
       if (!v) {
         v = lookup_attr_value(base, "sat");
       }
       if (v) {
         result = *v;
+      } else if (has_sat_policy(base)) {
+        result = Lconst(1);
       } else {
-        result = Lconst(has_sat_policy(base) ? 1 : 0);
+        result = Lconst::nil();
       }
     } else if (attr == "typename") {
       result = derive_aggregate_typename(base, base_text);
@@ -357,13 +363,23 @@ void uPass_attributes::evaluate_attr_get(std::string_view dst, std::string_view 
     }
   }
 
-  // Unset / unresolved attrs: do NOT publish a fold. Leaving the dst tmp
-  // unresolved keeps the cassert as "unknown" (not fail) for cases this
-  // phase doesn't yet understand (e.g. aggregate `.[size]` in Phase 3),
-  // and leaves the existing constprop "undeclared_ref + const(nil)" trick
-  // free to handle `cassert ... == nil` against unset scalar attrs.
+  // Unset / unresolved attrs: per spec (§Phase 2), an unset ordinary
+  // attribute reads as `nil`. Two classes of attribute fold here:
+  //   * Cat-D user/unknown names (`foo`, `poison`, …) — never set on this
+  //     variable and not inherited from an alias chain.
+  //   * Sticky names (`debug`, `_debug`, `_*`) — variable did not acquire
+  //     the bucket and no explicit attr_set value is on file.
+  // Folding to nil lets `cassert b.[foo] == nil` discharge, and lets
+  // `cassert !b.[debug]` discharge via log_not's nil-passthrough +
+  // verifier-treats-nil-as-pass behavior. Other builtins (`bits`, `size`,
+  // `max`, `comptime`, …) keep their "leave unresolved" behavior so a
+  // later iteration of the runner can still produce a value.
   if (!result) {
-    return;
+    if (sticky_pattern || !is_builtin_attr(attr)) {
+      result = Lconst::nil();
+    } else {
+      return;
+    }
   }
 
   auto [it, inserted] = tmp_fold.emplace(std::string{dst}, *result);
