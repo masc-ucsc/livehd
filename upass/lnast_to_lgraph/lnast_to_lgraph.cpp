@@ -58,8 +58,9 @@ Node_pin Lnast_to_lgraph::resolve(std::string_view raw_name) {
     return inp;
   }
   // Unknown bare ref — likely a typo or unresolved intermediate.
-  Pass::warn("lnast_to_lgraph: unresolved ref '{}' — wiring zero constant", name);
-  auto zero = lg_->create_node_const(Lconst(0));
+  // Wire nil (0sb?) per lnast2lgraph.md §8 rather than a typed zero.
+  Pass::warn("lnast_to_lgraph: unresolved ref '{}' — wiring nil (0sb?)", name);
+  auto zero = lg_->create_node_const(Lconst::invalid());
   auto pin  = zero.setup_driver_pin();
   pin_map_.emplace(name, pin);
   return pin;
@@ -95,16 +96,21 @@ void Lnast_to_lgraph::lower_node() {
     case N::Lnast_ntype_plus:  lower_infix(Ntype_op::Sum,  "A", "A"); break;
     case N::Lnast_ntype_minus: lower_infix(Ntype_op::Sum,  "A", "B"); break;
     case N::Lnast_ntype_mult:  lower_infix(Ntype_op::Mult, "A", "A"); break;
-    case N::Lnast_ntype_div:   lower_infix(Ntype_op::Div,  "a", "b"); break;
+    // Division: raw Div is not synthesizable. Per lnast2lgraph.md §9, lower to
+    // SRA when divisor is a compile-time power-of-two; otherwise call a generic
+    // sub-graph. For now emit a warning and wire a nil constant — TODO: emit Sub.
+    case N::Lnast_ntype_div:
+      Pass::warn("lnast_to_lgraph: division not synthesizable — TODO: lower to SRA or generic div Sub");
+      break;
     // Comparison
     case N::Lnast_ntype_eq: lower_infix(Ntype_op::EQ, "A", "B"); break;
     case N::Lnast_ntype_lt: lower_infix(Ntype_op::LT, "A", "B"); break;
     case N::Lnast_ntype_gt: lower_infix(Ntype_op::GT, "A", "B"); break;
-    case N::Lnast_ntype_ne:
-    case N::Lnast_ntype_le:
-    case N::Lnast_ntype_ge:
-      Pass::warn("lnast_to_lgraph: ne/le/ge not yet implemented — skipping");
-      break;
+    // ne/le/ge: composed from existing primitives
+    // ne(a,b) = Not(EQ(a,b))   le(a,b) = Not(GT(a,b))   ge(a,b) = Not(LT(a,b))
+    case N::Lnast_ntype_ne: lower_negated_infix(Ntype_op::EQ, "A", "A"); break;
+    case N::Lnast_ntype_le: lower_negated_infix(Ntype_op::GT, "A", "B"); break;
+    case N::Lnast_ntype_ge: lower_negated_infix(Ntype_op::LT, "A", "B"); break;
     // Bitwise
     case N::Lnast_ntype_bit_and: lower_infix(Ntype_op::And, "A", "A"); break;
     case N::Lnast_ntype_bit_or:  lower_infix(Ntype_op::Or,  "A", "A"); break;
@@ -113,10 +119,10 @@ void Lnast_to_lgraph::lower_node() {
     // Logical — log_and/log_or reduce to a single bit.
     // LGraph uses And/Or with multi-driver A pins; reduction is implicit.
     case N::Lnast_ntype_log_and: lower_infix(Ntype_op::And, "A", "A"); break;
-    case N::Lnast_ntype_log_or:  lower_infix(Ntype_op::Ror, "A", "A"); break;
+    case N::Lnast_ntype_log_or:  lower_infix(Ntype_op::Or,  "A", "A"); break;
     case N::Lnast_ntype_log_not: lower_not(); break;
     // Shift
-    case N::Lnast_ntype_shl: lower_infix(Ntype_op::SHL, "a", "amount"); break;
+    case N::Lnast_ntype_shl: lower_infix(Ntype_op::SHL, "a", "B"); break;
     case N::Lnast_ntype_sra: lower_infix(Ntype_op::SRA, "a", "b");      break;
     // TODO stubs
     case N::Lnast_ntype_if:
@@ -171,6 +177,25 @@ void Lnast_to_lgraph::lower_infix(Ntype_op op, std::string_view a_pin, std::stri
   lg_->add_edge(op_a, node.setup_sink_pin(a_pin));
   lg_->add_edge(op_b, node.setup_sink_pin(b_pin));
   bind(result, node.setup_driver_pin("Y"));
+}
+
+// ne(a,b) = Not(EQ(a,b)), le(a,b) = Not(GT(a,b)), ge(a,b) = Not(LT(a,b))
+void Lnast_to_lgraph::lower_negated_infix(Ntype_op op, std::string_view a_pin, std::string_view b_pin) {
+  if (!move_to_child()) return;
+  auto result = current_text();
+  if (!move_to_sibling()) { move_to_parent(); return; }
+  auto op_a = lower_leaf();
+  if (!move_to_sibling()) { move_to_parent(); return; }
+  auto op_b = lower_leaf();
+  move_to_parent();
+
+  auto inner = lg_->create_node(op);
+  lg_->add_edge(op_a, inner.setup_sink_pin(a_pin));
+  lg_->add_edge(op_b, inner.setup_sink_pin(b_pin));
+
+  auto not_node = lg_->create_node(Ntype_op::Not);
+  lg_->add_edge(inner.setup_driver_pin("Y"), not_node.setup_sink_pin("a"));
+  bind(result, not_node.setup_driver_pin("Y"));
 }
 
 void Lnast_to_lgraph::lower_not() {
