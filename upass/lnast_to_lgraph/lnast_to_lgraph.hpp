@@ -7,6 +7,7 @@
 #include <string_view>
 #include <unordered_map>
 #include <unordered_set>
+#include <vector>
 
 #include "cell.hpp"
 #include "lgraph.hpp"
@@ -42,10 +43,19 @@ private:
   void     bind(std::string_view name, Node_pin drv);
   void     wire_outputs();
 
+  // Returns a nil (0sb?) constant driver pin.
+  Node_pin nil_pin();
+  // Runs lower_node() on the current cursor position and returns what was
+  // written to pin_map_, then restores pin_map_ to its pre-call state.
+  // output_names_ is left updated (output ports discovered inside are kept).
+  using WriteMap = std::unordered_map<std::string, Node_pin>;
+  WriteMap lower_branch();
+
   void lower_node();
   void lower_top();
   void lower_stmts();
   void lower_assign();
+  void lower_if();
   void lower_attr_set();
   void lower_cassert();
   void lower_infix(Ntype_op op, std::string_view a_pin_name, std::string_view b_pin_name);

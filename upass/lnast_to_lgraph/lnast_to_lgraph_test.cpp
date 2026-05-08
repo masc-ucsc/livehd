@@ -218,3 +218,112 @@ TEST(LnastToLgraph, Multiply) {
   EXPECT_EQ(count_op(lg, Ntype_op::Mult), 1) << "expected exactly one Mult node";
   EXPECT_TRUE(has_output(lg, "out"))           << "expected graph output 'out'";
 }
+
+// ── Test 8: if/else → two Mux nodes (one per branch variable) ────────────────
+// LNAST:
+//   if $cond { %out = $a } else { %out = $b }
+// Expected:
+//   one Mux node: pin0=$cond, pin1=$b (else), pin2=$a (then)
+TEST(LnastToLgraph, IfElseToMux) {
+  auto ln = std::make_shared<Lnast>("if_else");
+  ln->set_root(Lnast_ntype::create_top());
+  auto stmts = ln->add_child(ln->get_root(), Lnast_ntype::create_stmts());
+
+  auto if_node = ln->add_child(stmts, Lnast_ntype::create_if());
+  // condition
+  ln->add_child(if_node, Lnast_node::create_ref("$cond"));
+  // then-stmts: %out = $a
+  auto then_s = ln->add_child(if_node, Lnast_ntype::create_stmts());
+  auto asgn_t = ln->add_child(then_s, Lnast_ntype::create_assign());
+  ln->add_child(asgn_t, Lnast_node::create_ref("%out"));
+  ln->add_child(asgn_t, Lnast_node::create_ref("$a"));
+  // else-stmts: %out = $b
+  auto else_s = ln->add_child(if_node, Lnast_ntype::create_stmts());
+  auto asgn_e = ln->add_child(else_s, Lnast_ntype::create_assign());
+  ln->add_child(asgn_e, Lnast_node::create_ref("%out"));
+  ln->add_child(asgn_e, Lnast_node::create_ref("$b"));
+
+  auto* lg = make_lg("if8");
+  ASSERT_NE(lg, nullptr);
+  Lnast_to_lgraph lowerer(lg, ln);
+  lowerer.lower();
+
+  EXPECT_EQ(count_op(lg, Ntype_op::Mux), 1) << "expected exactly one Mux node";
+  EXPECT_TRUE(has_output(lg, "out"))          << "expected graph output 'out'";
+  EXPECT_TRUE(has_input(lg, "cond"))          << "expected graph input 'cond'";
+  EXPECT_TRUE(has_input(lg, "a"))             << "expected graph input 'a'";
+  EXPECT_TRUE(has_input(lg, "b"))             << "expected graph input 'b'";
+}
+
+// ── Test 9: if without else → Mux with incoming value as false-path ──────────
+// LNAST:
+//   %out = $default
+//   if $cond { %out = $a }
+// Expected:
+//   one Mux: pin0=$cond, pin1=$default (pre-if value), pin2=$a
+TEST(LnastToLgraph, IfNoElse) {
+  auto ln = std::make_shared<Lnast>("if_no_else");
+  ln->set_root(Lnast_ntype::create_top());
+  auto stmts = ln->add_child(ln->get_root(), Lnast_ntype::create_stmts());
+
+  // %out = $default   (establishes pre-if value)
+  auto asgn0 = ln->add_child(stmts, Lnast_ntype::create_assign());
+  ln->add_child(asgn0, Lnast_node::create_ref("%out"));
+  ln->add_child(asgn0, Lnast_node::create_ref("$default"));
+
+  auto if_node = ln->add_child(stmts, Lnast_ntype::create_if());
+  ln->add_child(if_node, Lnast_node::create_ref("$cond"));
+  auto then_s = ln->add_child(if_node, Lnast_ntype::create_stmts());
+  auto asgn_t = ln->add_child(then_s, Lnast_ntype::create_assign());
+  ln->add_child(asgn_t, Lnast_node::create_ref("%out"));
+  ln->add_child(asgn_t, Lnast_node::create_ref("$a"));
+
+  auto* lg = make_lg("ifne9");
+  ASSERT_NE(lg, nullptr);
+  Lnast_to_lgraph lowerer(lg, ln);
+  lowerer.lower();
+
+  EXPECT_EQ(count_op(lg, Ntype_op::Mux), 1) << "expected exactly one Mux node";
+  EXPECT_TRUE(has_output(lg, "out"))          << "expected graph output 'out'";
+}
+
+// ── Test 10: if/elif/else → two Mux nodes ────────────────────────────────────
+// LNAST:
+//   if $c1 { %out = $a } elif $c2 { %out = $b } else { %out = $d }
+// Expected: two Mux nodes chained
+//   tmp = mux($c2, $d, $b)
+//   out = mux($c1, tmp, $a)
+TEST(LnastToLgraph, IfElifElseChain) {
+  auto ln = std::make_shared<Lnast>("if_elif_else");
+  ln->set_root(Lnast_ntype::create_top());
+  auto stmts = ln->add_child(ln->get_root(), Lnast_ntype::create_stmts());
+
+  auto if_node = ln->add_child(stmts, Lnast_ntype::create_if());
+  // if $c1
+  ln->add_child(if_node, Lnast_node::create_ref("$c1"));
+  // then: %out = $a
+  auto then_s = ln->add_child(if_node, Lnast_ntype::create_stmts());
+  auto asgn_t = ln->add_child(then_s, Lnast_ntype::create_assign());
+  ln->add_child(asgn_t, Lnast_node::create_ref("%out"));
+  ln->add_child(asgn_t, Lnast_node::create_ref("$a"));
+  // elif $c2
+  ln->add_child(if_node, Lnast_node::create_ref("$c2"));
+  // elif body: %out = $b
+  auto elif_s = ln->add_child(if_node, Lnast_ntype::create_stmts());
+  auto asgn_e = ln->add_child(elif_s, Lnast_ntype::create_assign());
+  ln->add_child(asgn_e, Lnast_node::create_ref("%out"));
+  ln->add_child(asgn_e, Lnast_node::create_ref("$b"));
+  // else: %out = $d
+  auto else_s = ln->add_child(if_node, Lnast_ntype::create_stmts());
+  auto asgn_el = ln->add_child(else_s, Lnast_ntype::create_assign());
+  ln->add_child(asgn_el, Lnast_node::create_ref("%out"));
+  ln->add_child(asgn_el, Lnast_node::create_ref("$d"));
+
+  auto* lg = make_lg("ifee10");
+  ASSERT_NE(lg, nullptr);
+  Lnast_to_lgraph lowerer(lg, ln);
+  lowerer.lower();
+
+  EXPECT_EQ(count_op(lg, Ntype_op::Mux), 2) << "expected two chained Mux nodes";
+  EXPECT_TRUE(has_output(lg, "out"))          << "expected graph output 'out'";
+}

@@ -125,8 +125,7 @@ void Lnast_to_lgraph::lower_node() {
     case N::Lnast_ntype_shl: lower_infix(Ntype_op::SHL, "a", "B"); break;
     case N::Lnast_ntype_sra: lower_infix(Ntype_op::SRA, "a", "b");      break;
     // TODO stubs
-    case N::Lnast_ntype_if:
-      Pass::warn("lnast_to_lgraph: if/mux not yet implemented");  break;
+    case N::Lnast_ntype_if: lower_if(); break;
     case N::Lnast_ntype_func_def:
       Pass::warn("lnast_to_lgraph: func_def not yet implemented"); break;
     case N::Lnast_ntype_func_call:
@@ -177,6 +176,106 @@ void Lnast_to_lgraph::lower_infix(Ntype_op op, std::string_view a_pin, std::stri
   lg_->add_edge(op_a, node.setup_sink_pin(a_pin));
   lg_->add_edge(op_b, node.setup_sink_pin(b_pin));
   bind(result, node.setup_driver_pin("Y"));
+}
+
+Node_pin Lnast_to_lgraph::nil_pin() {
+  return lg_->create_node_const(Lconst::invalid()).setup_driver_pin();
+}
+
+// Lower the stmts at the current cursor into a fresh scope.
+// Returns what was written; restores pin_map_ afterwards.
+Lnast_to_lgraph::WriteMap Lnast_to_lgraph::lower_branch() {
+  auto saved = pin_map_;
+  lower_node();  // descends into the stmts subtree, mutates pin_map_
+  WriteMap writes;
+  for (auto& [name, pin] : pin_map_) {
+    auto it = saved.find(name);
+    if (it == saved.end() || !(it->second == pin)) {
+      writes.emplace(name, pin);
+    }
+  }
+  pin_map_ = saved;  // restore (output_names_ kept — output ports are permanent)
+  return writes;
+}
+
+// LNAST if-node children: cond, then-stmts, [cond, stmts]*, [else-stmts]
+// Lowered to binary Mux chains per lnast2lgraph.md §11:
+//   pin "0" = selector, pin "1" = false/else, pin "2" = true/then
+void Lnast_to_lgraph::lower_if() {
+  if (!move_to_child()) return;
+
+  // ── Collect branches ─────────────────────────────────────────────────────
+  struct Branch {
+    bool     is_else{false};
+    Node_pin cond;
+    WriteMap writes;
+  };
+  std::vector<Branch> branches;
+
+  // First child is the if-condition.
+  Node_pin first_cond = lower_leaf();
+  if (!move_to_sibling()) { move_to_parent(); return; }
+
+  // Second child is the then-stmts.
+  branches.push_back({false, first_cond, lower_branch()});
+
+  // Walk the rest: elif (cond + stmts) pairs and an optional bare else-stmts.
+  while (move_to_sibling()) {
+    bool last = is_last_child();
+    if (last && current_ntype() == Lnast_ntype::Lnast_ntype_stmts) {
+      // Bare else-stmts — no condition.
+      branches.push_back({true, {}, lower_branch()});
+      break;
+    }
+    // elif: current child is the condition.
+    Node_pin elif_cond = lower_leaf();
+    if (!move_to_sibling()) break;
+    branches.push_back({false, elif_cond, lower_branch()});
+  }
+
+  move_to_parent();
+
+  // ── Collect all variables touched by any branch ───────────────────────────
+  std::unordered_set<std::string> all_vars;
+  for (auto& br : branches) {
+    for (auto& [name, _] : br.writes) all_vars.insert(name);
+  }
+
+  // ── Build Mux chains per variable ────────────────────────────────────────
+  // Start value = else-branch write (or current pin_map_ value, or nil).
+  const WriteMap& else_writes = (!branches.empty() && branches.back().is_else)
+                                    ? branches.back().writes
+                                    : WriteMap{};
+
+  for (const auto& var : all_vars) {
+    // Default value when no branch writes: incoming value or nil.
+    auto base_it = pin_map_.find(var);
+    Node_pin cur_val = (base_it != pin_map_.end()) ? base_it->second : nil_pin();
+
+    // Start from else-value (innermost false path).
+    auto else_it = else_writes.find(var);
+    if (else_it != else_writes.end()) cur_val = else_it->second;
+
+    // Fold cond-branches right-to-left (skip the else entry at the back).
+    int n = static_cast<int>(branches.size());
+    int last_cond = (!branches.empty() && branches.back().is_else) ? n - 2 : n - 1;
+
+    for (int i = last_cond; i >= 0; --i) {
+      auto& br     = branches[i];
+      auto  wr_it  = br.writes.find(var);
+      // true-path: branch wrote it; false-path: carry cur_val through.
+      Node_pin true_val = (wr_it != br.writes.end()) ? wr_it->second : cur_val;
+
+      auto mux = lg_->create_node(Ntype_op::Mux);
+      lg_->add_edge(br.cond,    mux.setup_sink_pin("0"));  // selector
+      lg_->add_edge(cur_val,    mux.setup_sink_pin("1"));  // false / else
+      lg_->add_edge(true_val,   mux.setup_sink_pin("2"));  // true / then
+      cur_val = mux.setup_driver_pin("Y");
+    }
+
+    // Write final mux output back (preserve output_names_ membership).
+    pin_map_.insert_or_assign(var, cur_val);
+  }
 }
 
 // ne(a,b) = Not(EQ(a,b)), le(a,b) = Not(GT(a,b)), ge(a,b) = Not(LT(a,b))
