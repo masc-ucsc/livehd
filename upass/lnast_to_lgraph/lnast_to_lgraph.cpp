@@ -116,14 +116,29 @@ void Lnast_to_lgraph::lower_node() {
     case N::Lnast_ntype_bit_or:  lower_infix(Ntype_op::Or,  "A", "A"); break;
     case N::Lnast_ntype_bit_xor: lower_infix(Ntype_op::Xor, "A", "A"); break;
     case N::Lnast_ntype_bit_not: lower_not(); break;
-    // Logical — log_and/log_or reduce to a single bit.
-    // LGraph uses And/Or with multi-driver A pins; reduction is implicit.
+    // Bitwise reductions (single input, all bits folded to 1)
+    case N::Lnast_ntype_red_or:  lower_unary(Ntype_op::Ror,  "A"); break;
+    case N::Lnast_ntype_red_and: lower_unary(Ntype_op::And,  "A"); break;
+    case N::Lnast_ntype_red_xor: lower_unary(Ntype_op::Xor,  "A"); break;
+    // Logical — booleans, map directly to And/Or (§8)
     case N::Lnast_ntype_log_and: lower_infix(Ntype_op::And, "A", "A"); break;
     case N::Lnast_ntype_log_or:  lower_infix(Ntype_op::Or,  "A", "A"); break;
     case N::Lnast_ntype_log_not: lower_not(); break;
     // Shift
     case N::Lnast_ntype_shl: lower_infix(Ntype_op::SHL, "a", "B"); break;
-    case N::Lnast_ntype_sra: lower_infix(Ntype_op::SRA, "a", "b");      break;
+    case N::Lnast_ntype_sra: lower_infix(Ntype_op::SRA, "a", "b"); break;
+    // Bit manipulation (§10)
+    case N::Lnast_ntype_sext:     lower_infix(Ntype_op::Sext,     "a", "b");     break;
+    case N::Lnast_ntype_get_mask: lower_infix(Ntype_op::Get_mask, "a", "mask");  break;
+    case N::Lnast_ntype_set_mask: lower_set_mask(); break;
+    // mod: same policy as div — not directly synthesizable (§9)
+    case N::Lnast_ntype_mod:
+      Pass::warn("lnast_to_lgraph: mod not synthesizable — TODO: lower to Get_mask or generic mod Sub");
+      break;
+    // popcount: no direct LGraph cell — TODO: lower to a Sub call
+    case N::Lnast_ntype_popcount:
+      Pass::warn("lnast_to_lgraph: popcount not yet implemented");
+      break;
     // TODO stubs
     case N::Lnast_ntype_if: lower_if(); break;
     case N::Lnast_ntype_func_def:
@@ -295,6 +310,38 @@ void Lnast_to_lgraph::lower_negated_infix(Ntype_op op, std::string_view a_pin, s
   auto not_node = lg_->create_node(Ntype_op::Not);
   lg_->add_edge(inner.setup_driver_pin("Y"), not_node.setup_sink_pin("a"));
   bind(result, not_node.setup_driver_pin("Y"));
+}
+
+// Single-operand ops: red_or, red_and, red_xor — result = op(A)
+void Lnast_to_lgraph::lower_unary(Ntype_op op, std::string_view a_pin) {
+  if (!move_to_child()) return;
+  auto result  = current_text();
+  if (!move_to_sibling()) { move_to_parent(); return; }
+  auto operand = lower_leaf();
+  move_to_parent();
+
+  auto node = lg_->create_node(op);
+  lg_->add_edge(operand, node.setup_sink_pin(a_pin));
+  bind(result, node.setup_driver_pin("Y"));
+}
+
+// set_mask has three inputs: a, mask, value — result = Set_mask(a, mask, value)
+void Lnast_to_lgraph::lower_set_mask() {
+  if (!move_to_child()) return;
+  auto result = current_text();
+  if (!move_to_sibling()) { move_to_parent(); return; }
+  auto op_a    = lower_leaf();
+  if (!move_to_sibling()) { move_to_parent(); return; }
+  auto op_mask = lower_leaf();
+  if (!move_to_sibling()) { move_to_parent(); return; }
+  auto op_val  = lower_leaf();
+  move_to_parent();
+
+  auto node = lg_->create_node(Ntype_op::Set_mask);
+  lg_->add_edge(op_a,    node.setup_sink_pin("a"));
+  lg_->add_edge(op_mask, node.setup_sink_pin("mask"));
+  lg_->add_edge(op_val,  node.setup_sink_pin("value"));
+  bind(result, node.setup_driver_pin("Y"));
 }
 
 void Lnast_to_lgraph::lower_not() {
