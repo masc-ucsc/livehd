@@ -58,8 +58,9 @@ Node_pin Lnast_to_lgraph::resolve(std::string_view raw_name) {
     return inp;
   }
   // Unknown bare ref — likely a typo or unresolved intermediate.
-  Pass::warn("lnast_to_lgraph: unresolved ref '{}' — wiring zero constant", name);
-  auto zero = lg_->create_node_const(Lconst(0));
+  // Wire nil (0sb?) per lnast2lgraph.md §8 rather than a typed zero.
+  Pass::warn("lnast_to_lgraph: unresolved ref '{}' — wiring nil (0sb?)", name);
+  auto zero = lg_->create_node_const(Lconst::invalid());
   auto pin  = zero.setup_driver_pin();
   pin_map_.emplace(name, pin);
   return pin;
@@ -95,34 +96,52 @@ void Lnast_to_lgraph::lower_node() {
     case N::Lnast_ntype_plus:  lower_infix(Ntype_op::Sum,  "A", "A"); break;
     case N::Lnast_ntype_minus: lower_infix(Ntype_op::Sum,  "A", "B"); break;
     case N::Lnast_ntype_mult:  lower_infix(Ntype_op::Mult, "A", "A"); break;
-    case N::Lnast_ntype_div:   lower_infix(Ntype_op::Div,  "a", "b"); break;
+    // Division: raw Div is not synthesizable. Per lnast2lgraph.md §9, lower to
+    // SRA when divisor is a compile-time power-of-two; otherwise call a generic
+    // sub-graph. For now emit a warning and wire a nil constant — TODO: emit Sub.
+    case N::Lnast_ntype_div:
+      Pass::warn("lnast_to_lgraph: division not synthesizable — TODO: lower to SRA or generic div Sub");
+      break;
     // Comparison
     case N::Lnast_ntype_eq: lower_infix(Ntype_op::EQ, "A", "B"); break;
     case N::Lnast_ntype_lt: lower_infix(Ntype_op::LT, "A", "B"); break;
     case N::Lnast_ntype_gt: lower_infix(Ntype_op::GT, "A", "B"); break;
-    case N::Lnast_ntype_ne:
-    case N::Lnast_ntype_le:
-    case N::Lnast_ntype_ge:
-      Pass::warn("lnast_to_lgraph: ne/le/ge not yet implemented — skipping");
-      break;
+    // ne/le/ge: composed from existing primitives
+    // ne(a,b) = Not(EQ(a,b))   le(a,b) = Not(GT(a,b))   ge(a,b) = Not(LT(a,b))
+    case N::Lnast_ntype_ne: lower_negated_infix(Ntype_op::EQ, "A", "A"); break;
+    case N::Lnast_ntype_le: lower_negated_infix(Ntype_op::GT, "A", "B"); break;
+    case N::Lnast_ntype_ge: lower_negated_infix(Ntype_op::LT, "A", "B"); break;
     // Bitwise
     case N::Lnast_ntype_bit_and: lower_infix(Ntype_op::And, "A", "A"); break;
     case N::Lnast_ntype_bit_or:  lower_infix(Ntype_op::Or,  "A", "A"); break;
     case N::Lnast_ntype_bit_xor: lower_infix(Ntype_op::Xor, "A", "A"); break;
     case N::Lnast_ntype_bit_not: lower_not(); break;
-    // Logical — log_and/log_or reduce to a single bit.
-    // LGraph uses And/Or with multi-driver A pins; reduction is implicit.
+    // Bitwise reductions (single input, all bits folded to 1)
+    case N::Lnast_ntype_red_or:  lower_unary(Ntype_op::Ror,  "A"); break;
+    case N::Lnast_ntype_red_and: lower_unary(Ntype_op::And,  "A"); break;
+    case N::Lnast_ntype_red_xor: lower_unary(Ntype_op::Xor,  "A"); break;
+    // Logical — booleans, map directly to And/Or (§8)
     case N::Lnast_ntype_log_and: lower_infix(Ntype_op::And, "A", "A"); break;
-    case N::Lnast_ntype_log_or:  lower_infix(Ntype_op::Ror, "A", "A"); break;
+    case N::Lnast_ntype_log_or:  lower_infix(Ntype_op::Or,  "A", "A"); break;
     case N::Lnast_ntype_log_not: lower_not(); break;
     // Shift
-    case N::Lnast_ntype_shl: lower_infix(Ntype_op::SHL, "a", "amount"); break;
-    case N::Lnast_ntype_sra: lower_infix(Ntype_op::SRA, "a", "b");      break;
+    case N::Lnast_ntype_shl: lower_infix(Ntype_op::SHL, "a", "B"); break;
+    case N::Lnast_ntype_sra: lower_infix(Ntype_op::SRA, "a", "b"); break;
+    // Bit manipulation (§10)
+    case N::Lnast_ntype_sext:     lower_infix(Ntype_op::Sext,     "a", "b");     break;
+    case N::Lnast_ntype_get_mask: lower_infix(Ntype_op::Get_mask, "a", "mask");  break;
+    case N::Lnast_ntype_set_mask: lower_set_mask(); break;
+    // mod: same policy as div — not directly synthesizable (§9)
+    case N::Lnast_ntype_mod:
+      Pass::warn("lnast_to_lgraph: mod not synthesizable — TODO: lower to Get_mask or generic mod Sub");
+      break;
+    // popcount: no direct LGraph cell — TODO: lower to a Sub call
+    case N::Lnast_ntype_popcount:
+      Pass::warn("lnast_to_lgraph: popcount not yet implemented");
+      break;
     // TODO stubs
-    case N::Lnast_ntype_if:
-      Pass::warn("lnast_to_lgraph: if/mux not yet implemented");  break;
-    case N::Lnast_ntype_func_def:
-      Pass::warn("lnast_to_lgraph: func_def not yet implemented"); break;
+    case N::Lnast_ntype_if: lower_if(); break;
+    case N::Lnast_ntype_func_def: lower_func_def(); break;
     case N::Lnast_ntype_func_call:
       Pass::warn("lnast_to_lgraph: func_call not yet implemented"); break;
     case N::Lnast_ntype_tuple_add:
@@ -171,6 +190,241 @@ void Lnast_to_lgraph::lower_infix(Ntype_op op, std::string_view a_pin, std::stri
   lg_->add_edge(op_a, node.setup_sink_pin(a_pin));
   lg_->add_edge(op_b, node.setup_sink_pin(b_pin));
   bind(result, node.setup_driver_pin("Y"));
+}
+
+Node_pin Lnast_to_lgraph::nil_pin() {
+  return lg_->create_node_const(Lconst::invalid()).setup_driver_pin();
+}
+
+// Lower the stmts at the current cursor into a fresh scope.
+// Returns what was written; restores pin_map_ afterwards.
+Lnast_to_lgraph::WriteMap Lnast_to_lgraph::lower_branch() {
+  auto saved = pin_map_;
+  lower_node();  // descends into the stmts subtree, mutates pin_map_
+  WriteMap writes;
+  for (auto& [name, pin] : pin_map_) {
+    auto it = saved.find(name);
+    if (it == saved.end() || !(it->second == pin)) {
+      writes.emplace(name, pin);
+    }
+  }
+  pin_map_ = saved;  // restore (output_names_ kept — output ports are permanent)
+  return writes;
+}
+
+// LNAST if-node children: cond, then-stmts, [cond, stmts]*, [else-stmts]
+// Lowered to binary Mux chains per lnast2lgraph.md §11:
+//   pin "0" = selector, pin "1" = false/else, pin "2" = true/then
+void Lnast_to_lgraph::lower_if() {
+  if (!move_to_child()) return;
+
+  // ── Collect branches ─────────────────────────────────────────────────────
+  struct Branch {
+    bool     is_else{false};
+    Node_pin cond;
+    WriteMap writes;
+  };
+  std::vector<Branch> branches;
+
+  // First child is the if-condition.
+  Node_pin first_cond = lower_leaf();
+  if (!move_to_sibling()) { move_to_parent(); return; }
+
+  // Second child is the then-stmts.
+  branches.push_back({false, first_cond, lower_branch()});
+
+  // Walk the rest: elif (cond + stmts) pairs and an optional bare else-stmts.
+  while (move_to_sibling()) {
+    bool last = is_last_child();
+    if (last && current_ntype() == Lnast_ntype::Lnast_ntype_stmts) {
+      // Bare else-stmts — no condition.
+      branches.push_back({true, {}, lower_branch()});
+      break;
+    }
+    // elif: current child is the condition.
+    Node_pin elif_cond = lower_leaf();
+    if (!move_to_sibling()) break;
+    branches.push_back({false, elif_cond, lower_branch()});
+  }
+
+  move_to_parent();
+
+  // ── Collect all variables touched by any branch ───────────────────────────
+  std::unordered_set<std::string> all_vars;
+  for (auto& br : branches) {
+    for (auto& [name, _] : br.writes) all_vars.insert(name);
+  }
+
+  // ── Build Mux chains per variable ────────────────────────────────────────
+  // Start value = else-branch write (or current pin_map_ value, or nil).
+  const WriteMap& else_writes = (!branches.empty() && branches.back().is_else)
+                                    ? branches.back().writes
+                                    : WriteMap{};
+
+  for (const auto& var : all_vars) {
+    // Default value when no branch writes: incoming value or nil.
+    auto base_it = pin_map_.find(var);
+    Node_pin cur_val = (base_it != pin_map_.end()) ? base_it->second : nil_pin();
+
+    // Start from else-value (innermost false path).
+    auto else_it = else_writes.find(var);
+    if (else_it != else_writes.end()) cur_val = else_it->second;
+
+    // Fold cond-branches right-to-left (skip the else entry at the back).
+    int n = static_cast<int>(branches.size());
+    int last_cond = (!branches.empty() && branches.back().is_else) ? n - 2 : n - 1;
+
+    for (int i = last_cond; i >= 0; --i) {
+      auto& br     = branches[i];
+      auto  wr_it  = br.writes.find(var);
+      // true-path: branch wrote it; false-path: carry cur_val through.
+      Node_pin true_val = (wr_it != br.writes.end()) ? wr_it->second : cur_val;
+
+      auto mux = lg_->create_node(Ntype_op::Mux);
+      lg_->add_edge(br.cond,    mux.setup_sink_pin("0"));  // selector
+      lg_->add_edge(cur_val,    mux.setup_sink_pin("1"));  // false / else
+      lg_->add_edge(true_val,   mux.setup_sink_pin("2"));  // true / then
+      cur_val = mux.setup_driver_pin("Y");
+    }
+
+    // Write final mux output back (preserve output_names_ membership).
+    pin_map_.insert_or_assign(var, cur_val);
+  }
+}
+
+// ne(a,b) = Not(EQ(a,b)), le(a,b) = Not(GT(a,b)), ge(a,b) = Not(LT(a,b))
+void Lnast_to_lgraph::lower_negated_infix(Ntype_op op, std::string_view a_pin, std::string_view b_pin) {
+  if (!move_to_child()) return;
+  auto result = current_text();
+  if (!move_to_sibling()) { move_to_parent(); return; }
+  auto op_a = lower_leaf();
+  if (!move_to_sibling()) { move_to_parent(); return; }
+  auto op_b = lower_leaf();
+  move_to_parent();
+
+  auto inner = lg_->create_node(op);
+  lg_->add_edge(op_a, inner.setup_sink_pin(a_pin));
+  lg_->add_edge(op_b, inner.setup_sink_pin(b_pin));
+
+  auto not_node = lg_->create_node(Ntype_op::Not);
+  lg_->add_edge(inner.setup_driver_pin("Y"), not_node.setup_sink_pin("a"));
+  bind(result, not_node.setup_driver_pin("Y"));
+}
+
+// Single-operand ops: red_or, red_and, red_xor — result = op(A)
+void Lnast_to_lgraph::lower_unary(Ntype_op op, std::string_view a_pin) {
+  if (!move_to_child()) return;
+  auto result  = current_text();
+  if (!move_to_sibling()) { move_to_parent(); return; }
+  auto operand = lower_leaf();
+  move_to_parent();
+
+  auto node = lg_->create_node(op);
+  lg_->add_edge(operand, node.setup_sink_pin(a_pin));
+  bind(result, node.setup_driver_pin("Y"));
+}
+
+// set_mask has three inputs: a, mask, value — result = Set_mask(a, mask, value)
+void Lnast_to_lgraph::lower_set_mask() {
+  if (!move_to_child()) return;
+  auto result = current_text();
+  if (!move_to_sibling()) { move_to_parent(); return; }
+  auto op_a    = lower_leaf();
+  if (!move_to_sibling()) { move_to_parent(); return; }
+  auto op_mask = lower_leaf();
+  if (!move_to_sibling()) { move_to_parent(); return; }
+  auto op_val  = lower_leaf();
+  move_to_parent();
+
+  auto node = lg_->create_node(Ntype_op::Set_mask);
+  lg_->add_edge(op_a,    node.setup_sink_pin("a"));
+  lg_->add_edge(op_mask, node.setup_sink_pin("mask"));
+  lg_->add_edge(op_val,  node.setup_sink_pin("value"));
+  bind(result, node.setup_driver_pin("Y"));
+}
+
+// func_def children (per prp2lnast.cpp):
+//   child0: ref <name>          — function name (matches lg_ name; skip)
+//   child1: const <kind>        — "comb" / "seq" etc.; skip
+//   child2: tuple_add           — generics (empty for Pyrope basics); skip
+//   child3: tuple_add           — captures (empty for Pyrope basics); skip
+//   child4: tuple_add of assign — input parameters; each assign: ref<name>, const"0"
+//   child5: tuple_add of assign — output parameters; each assign: ref<name>, const"0"
+//   child6: stmts               — body
+//
+// Variable names inside the body are bare (no $/% prefix). We:
+//   (a) create graph inputs from child4 and register them in pin_map_,
+//   (b) collect output names from child5,
+//   (c) lower the body normally — resolve() finds inputs by name; bind() records results,
+//   (d) wire output names to graph outputs after body lowering.
+void Lnast_to_lgraph::lower_func_def() {
+  if (!move_to_child()) return;
+
+  // ── child0: name — skip ────────────────────────────────────────────────────
+  if (!move_to_sibling()) { move_to_parent(); return; }
+
+  // ── child1: kind — skip ────────────────────────────────────────────────────
+  if (!move_to_sibling()) { move_to_parent(); return; }
+
+  // ── child2: generics tuple_add — skip ─────────────────────────────────────
+  if (!move_to_sibling()) { move_to_parent(); return; }
+
+  // ── child3: captures tuple_add — skip ─────────────────────────────────────
+  if (!move_to_sibling()) { move_to_parent(); return; }
+
+  // ── child4: inputs tuple_add ──────────────────────────────────────────────
+  if (move_to_child()) {
+    do {
+      if (current_ntype() == Lnast_ntype::Lnast_ntype_assign) {
+        if (move_to_child()) {
+          auto inp_name = std::string(current_text());
+          move_to_parent();
+          // Register the graph input pin so body references resolve correctly.
+          auto inp = lg_->add_graph_input(inp_name, next_inp_pos_++, 0);
+          pin_map_.emplace(inp_name, inp);
+        }
+      }
+    } while (move_to_sibling());
+    move_to_parent();
+  }
+
+  if (!move_to_sibling()) { move_to_parent(); return; }
+
+  // ── child5: outputs tuple_add — collect names ─────────────────────────────
+  std::vector<std::string> out_names;
+  if (move_to_child()) {
+    do {
+      if (current_ntype() == Lnast_ntype::Lnast_ntype_assign) {
+        if (move_to_child()) {
+          out_names.emplace_back(current_text());
+          move_to_parent();
+        }
+      }
+    } while (move_to_sibling());
+    move_to_parent();
+  }
+
+  if (!move_to_sibling()) { move_to_parent(); return; }
+
+  // ── child6: body stmts ────────────────────────────────────────────────────
+  lower_node();  // lower_stmts() handles Lnast_ntype_stmts
+
+  move_to_parent();
+
+  // ── Wire output names to graph output ports ────────────────────────────────
+  for (const auto& name : out_names) {
+    auto it = pin_map_.find(name);
+    if (it == pin_map_.end()) {
+      Pass::warn("lnast_to_lgraph: func_def output '{}' not written in body — wiring nil", name);
+      auto nil = nil_pin();
+      auto out_pin = lg_->add_graph_output(name, next_out_pos_++, 0);
+      lg_->add_edge(nil, out_pin);
+      continue;
+    }
+    auto& drv     = it->second;
+    auto  out_pin = lg_->add_graph_output(name, next_out_pos_++, drv.get_bits());
+    lg_->add_edge(drv, out_pin);
+  }
 }
 
 void Lnast_to_lgraph::lower_not() {
