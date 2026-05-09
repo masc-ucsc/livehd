@@ -20,11 +20,11 @@ Generated from a survey of: `lnast/lnast_nodes.def`, `lnast/lnast_create.cpp`,
 |------|-------------------------------------------------------------------------|--------------|
 | 1    | §5 / §8.1 Golden-output harness                                         | Snapshot three-producer baselines so future migrations can diff against them. |
 | 1    | §2 Doc ↔ `lnast_nodes.def` name drift                                   | Docs live in `../docs/docs/pyrope/`, outside this repo. |
-| 2    | §13 full — `Tree_index`-identity tmps (no string)                       | Partial done: `Lnast::is_tmp` is the single canonical predicate, wrappers delegate to it. Remaining: a `Tree_index`-keyed tmp API on `Lnast_node` so consumers don't need any name at all. |
+| 2    | §13 — source-derived SSA / tmp names                                    | Partial done: `Lnast::is_tmp` is the single canonical predicate. Remaining: producers stop emitting `___<n>` and switch to file/function/line-derived suffixes (`a`, `b`, `c` for siblings on the same source line) per the lnast2lgraph contract. |
 | 2    | §15.2 ext — offset=0 (reg Q) / offset=-1 (past cycle) / ref offsets     | `process_ast_delay_assign_op` currently only lowers offset=1. Other offsets error out rather than doing useful work. |
 | 3    | §10 Symbol-table API + value-attr inference                             | Multi-day effort; needs golden harness as safety net. |
-| 3    | §11 Unify `attr_set` / `tuple_set` shape; collapse `assign`             | Touches every producer and every consumer. Gated on §10. |
-| 3    | §12 `$` / `%` / `#` → ST-backed direction/storage                       | Gated on §10 and §13 full. |
+| 3    | §11 Unify `attr_set` / `tuple_set` path shape (no `assign` collapse)    | Touches every producer and every consumer. Gated on §10. |
+| 3    | §12 `$` / `%` / `#` → ST-backed direction/storage                       | Gated on §10 and §13. |
 | 4    | §4.1 / §4.5 `__ubits` / `__sbits` / other `__` attrs → bare names       | Blocked by §10/§11 (need ST to store non-stringly attrs). |
 
 ---
@@ -165,13 +165,17 @@ become an attribute (e.g., `::[comptime]`) or a type kind?
 ### 3.2 Attributes on declarations vs reads
 
 ```pyrope
-mut data:u32:[max=1000, min=0] = 0      // set at decl
-cassert counter::[bits] == 8             // read via ::[ ]
+mut data:u32:[max=1000, min=0] = 0      // set at decl (typed)
+mut counter::[ubits=8] = 0               // set at decl (no explicit type)
+cassert counter.[bits] == 8              // read via .[ ]
 ```
 
-Two distinct syntaxes (`:[...]` set, `::[...]` read). Current `inou/prp`
-emits the same `attr_get` in both cases. Decide LNAST shape for decl-time sets
-(nested under the declaration? a separate `attr_set` statement right after?).
+`:[...]` and `::[...]` are both **declaration-site set** forms (the
+single-colon variant follows a type; the double-colon variant is used
+when there is no explicit type). Attribute reads are always `name.[attr]`.
+Current `inou/prp` emits the same `attr_get` for the (only valid) read
+form. Decide LNAST shape for decl-time sets (nested under the
+declaration? a separate `attr_set` statement right after?).
 
 ### 3.3 Memory and array declarations
 
@@ -260,7 +264,7 @@ a@[-1]              // previous cycle
 
 The `delay_assign` node added in §15.2 covers the offset semantics. Still
 needed: a producer emission for each surface form in `inou/prp` (none of
-`@[N]`, `@[-1]`, `@[]`, `::[defer]` produce LNAST today).
+`@[N]`, `@[-1]`, `@[]`, `.[defer]` produce LNAST today).
 
 ### 3.12 Enums / variants / `impl` / `type` statements
 
@@ -328,7 +332,7 @@ and collides with any identifier that happens to start with those characters.
    §12.
 
 3. **Tmp-var prefix proliferation.** Done for strings (§1.1).
-   `Tree_index`-identity tmps (§13) **pending**.
+   Source-derived SSA / tmp names (§13) **pending**.
 
 4. **`:pos:name` bundle key.** Decide if it's a language
    feature (document in `12-lnast.md` §Tuples) or a symbol-table
@@ -475,7 +479,10 @@ Smallest blast-radius first:
 Complements §1 and §4. Decides how attributes flow (or don't) once they live
 in a side symbol table instead of in-band strings.
 
-### 10.0 Model: "attributes don't propagate — values are computed"
+### 10.0 Model: declaration-owns + alias-shares
+
+(The canonical Pyrope rule lives in `attributes.md`; this is the ST-side
+restatement.)
 
 - **Declarations own attributes.** The only place user/decl attributes are
   written is at the declaration site (`let`, `mut`, `const`, `reg`,
@@ -483,18 +490,24 @@ in a side symbol table instead of in-band strings.
   attrs: `storage` (const/mut/reg/comptime), `direction` (in/out),
   `reset_pin`, `clock_pin`, `initial`, `pipeline_depth`, `debug`, user-
   asserted bounds (`max=N`, `min=N`).
-- **Assign/expressions do NOT propagate attributes.** `y = x` creates a
-  fresh entity `y`. None of x's decl-only attrs travel to y. This matches
-  hardware semantics (y is a new wire/net, not a view of x).
+- **Declaration-with-init copies sticky only.** `const y = x`, `mut y = x`
+  declare `y`; sticky `_*` / `debug` attrs on `x` propagate, non-sticky
+  do not. The LHS's own declaration syntax (`const y::[foo=2] = x`) is
+  the sole source of `y`'s non-sticky attrs.
+- **Plain reassignment is a pure alias.** `y = x` after `y` is already
+  declared makes `y` read through `x`'s entire attribute set — sticky and
+  non-sticky alike. Reassignment cannot introduce new attrs. The ST
+  represents this by following the alias edge on lookup, not by copying.
 - **Value attrs `__min`/`__max` are computed, not propagated.** They are
   derived per-SSA-version from the RHS expression via interval arithmetic.
   `y = x` computes `y.__max = x.__max` as a trivial case of identity, not
   as a propagation rule. `z = a + 1` computes `z.__max = a.__max + 1`.
-- **Tuple literals are the one structural exception.** In
-  `a = (foo=b, c)`, field `a.foo` carries forward b's decl-only attrs, and
-  the positional slot carries c's. This is because a tuple literal
-  constructs structure that references the source entities per-field; it's
-  not a flat expression.
+- **Tuple literals are structural.** In `a = (foo=b, c)`, field `a.foo`
+  references `b` per-field, so `b`'s decl-only attrs are visible through
+  `a.foo`; positional slot `a.1` references `c` similarly. This is the
+  only place where what looks like an expression carries non-sticky attrs
+  through, and it's because the tuple literal is a structural reference
+  per-field.
 - **Bit-width attrs (`bits`/`ubits`/`sbits`) are derived views over
   `__min`/`__max`** — not stored independently. Consumers that need a bit
   width query a helper that inspects min/max and the signedness attribute.
@@ -565,12 +578,15 @@ in a side symbol table instead of in-band strings.
 
 ---
 
-## 11. Plan: unify `attr_set` with `tuple_set` syntax; collapse `assign`
+## 11. Plan: unify `attr_set` / `tuple_set` path shape
 
 *Status:* **pending.** Gated on §10.
 
-Outcome of a design discussion on Issue 3 (path addressing) and §2's
-`let`/`var`/`assign`/`mut` confusion.
+Resolves path-vs-attr-key ambiguity (Issue 3) by giving `attr_set` and
+`tuple_set` a shared variadic-path layout. **`assign` stays as a distinct
+LNAST node** — the earlier "collapse `assign` into 2-child `tuple_set`"
+plan was rejected; `tuple_set` is reserved for tuple-path writes,
+`assign` for plain bindings. See §11.3.
 
 ### 11.1 Shared variadic-path shape
 
@@ -626,7 +642,7 @@ flow. The constraints are on *evaluation*, not location:
   inference pass (§10.2) writes them to the per-SSA-version ST table
   directly; `attr_set` remains exclusively for user/decl-time attrs.
 - **Unset attrs at use site are "absent", not error.** A consumer querying
-  `a::[max]` when no `attr_set a max ...` ever ran (e.g., comptime-guarded
+  `a.[max]` when no `attr_set a max ...` ever ran (e.g., comptime-guarded
   branch was false) gets "absent". Consumers decide whether absence is
   meaningful (e.g., width inference falls back to `__min`/`__max`
   derivation).
@@ -648,21 +664,22 @@ for i in 0..<N {
 }
 ```
 
-### 11.3 Collapse `assign` into `tuple_set`
+### 11.3 `assign` stays distinct from `tuple_set`
 
-`tuple_set` with two children (`root`, `value`) is semantically identical to
-today's `assign`. Collapse:
+Decision (recorded in `lnast2lgraph.md` and the example fcalls there):
+keep `assign` as its own LNAST node. `tuple_set` is reserved for indexed
+or path-rooted tuple writes; `assign root value` is the plain-binding
+form that survives final translation unchanged.
 
-- `assign root value` → `tuple_set root value` (canonical 2-child form).
-- Remove `assign` from `lnast_nodes.def` (or keep as a deprecated alias for
-  migration).
-- `mut` (already `FIXME: remove`) → `tuple_set` + decl-time `attr_set ...
-  storage mut`. Mutability lives in the attribute, not a node kind.
-- `dp_assign` (also `FIXME: remove`) stays as its own concern — "deferred
-  parent ownership" is a scope question, not a tuple-path operation.
-  Separate issue.
-- Producers, `lnast_create.cpp`, and consumers migrate in lockstep with the
-  ST rollout.
+Related node-kind decisions:
+
+- `mut` (`FIXME: remove`) goes away as a node kind: mutability moves into
+  a decl-time `attr_set ... storage mut` instead.
+- `dp_assign` (`FIXME: remove`) is a separate concern — "deferred parent
+  ownership" is a scope question, not a tuple-path operation. Tracked
+  outside this plan.
+- Producers, `lnast_create.cpp`, and consumers stop emitting `mut`
+  in lockstep with the ST rollout. `assign` is *not* migrated away.
 
 ### 11.4 Example lowerings
 
@@ -677,10 +694,10 @@ attr_set data storage mut
 attr_set data bits 32
 attr_set data max 1000
 attr_set data min 0
-tuple_set data 0
+assign   data 0
 ```
 
-**Nested-field attribute:**
+**Nested-field attribute (path before terminal attr key):**
 
 ```pyrope
 mut config:[clock = (freq:u32:[max=1e9] = 100_000_000)]
@@ -704,8 +721,11 @@ attr_set counter storage reg
 attr_set counter bits 8
 attr_set counter reset_pin rst
 attr_set counter initial 0
-tuple_set counter 0
+assign   counter 0
 ```
+
+`assign` carries the plain initial-value bind. `tuple_set` is used only
+when the LHS itself targets a tuple slot/path.
 
 ### 11.5 lnastfmt enforcement
 
@@ -721,10 +741,10 @@ Single-pass validation:
 
 ### 11.6 Files affected
 
-- `lnast/lnast_nodes.def` — add/confirm `attr_set` as variadic; mark
-  `assign`/`mut` deprecated.
-- `lnast/lnast.cpp`, `lnast/lnast_create.cpp` — emit `tuple_set` for the
-  assign case; emit `attr_set` with path-value form.
+- `lnast/lnast_nodes.def` — add/confirm `attr_set` and `tuple_set` as
+  variadic; mark `mut` deprecated. `assign` stays.
+- `lnast/lnast.cpp`, `lnast/lnast_create.cpp` — emit `attr_set` with the
+  path-key-value layout; keep `assign` for plain bindings.
 - `lnast/bundle.cpp:736-956` — replace the `__`-prefix canonicalization
   with ST-backed attribute lookup.
 - `inou/prp/prp2lnast.cpp`, `inou/pyrope/prp_lnast.cpp`,
@@ -822,30 +842,40 @@ first.
 
 ---
 
-## 13. Plan: tmp vars use `Tree_index`; foreign names sanitized per-producer
+## 13. Plan: source-derived SSA / tmp names
 
-*Status:* **partial.** String-prefix drift resolved (§1.1); `Tree_index`
-identity pending.
+*Status:* **partial.** `Lnast::is_tmp` is the single canonical predicate
+(§1.1). Remaining: replace producer-generated `___<n>` with
+source-derived suffixes per the lnast2lgraph contract.
 
-### 13.1 Tmp variables
+### 13.1 Naming rule (per `lnast2lgraph.md` §3)
 
-- Compiler-generated tmps carry **no ref text**. Their identity is
-  `Lnast_node::Tree_index`. **Pending.** Today all three producers emit
-  the canonical `___<n>` string.
-- A tmp is an `Lnast_node` with kind `ref` and a tmp-marker (bit on the
-  node, or a dedicated leaf kind — decision during impl).
-- When one operator's output feeds another's input, they reference each
-  other via `Tree_index`, not by name.
-- `lnast.print` renders tmps LLVM-style: `%<tree_index>` in dumps.
-- `pass_lnastfmt.cpp:204` `is_temp_var` string-match goes away; becomes
-  `node.is_tmp()`.
+Compiler-generated SSA names and intermediate aliases are produced by
+the local LNAST upass and carry text that **preserves file/function
+context and line number**, with short suffixes such as `a`, `b`, `c` for
+multiple aliases generated on the same source line. The motivation is
+end-to-end LGraph-back-to-source mapping without storing source-location
+attributes on every node — the name itself is the locator.
+
+Examples (illustrative, exact format TBD):
+
+```
+foo_l42_a, foo_l42_b      // two tmps from line 42 of function foo
+mod1_init_l7_a            // single tmp from line 7 of mod1's init
+```
+
+Tmps remain LNAST `ref` nodes; the `is_tmp()` predicate stays as the
+single classification entrypoint. There is no second "no-text /
+positional-only" tmp representation — the textless / `Tree_class_index`
+LLVM-style scheme considered earlier was rejected in favor of these
+human-meaningful suffixes.
 
 ### 13.2 SSA interaction
 
-- Tmps are SSA by construction (single-assignment by tree position); the
-  SSA pass does not rename them.
-- `lnast.cpp:1229`'s `starts_with("___") → skip SSA` guard becomes
-  unnecessary.
+- Source-derived SSA names are themselves single-assignment by
+  construction. The SSA pass does not need to subscript them further.
+- Today's `___<n>`-prefix-skip guard in `lnast.cpp` goes away once
+  producers stop emitting that prefix.
 
 ### 13.3 Foreign-language identifier safety
 
@@ -877,25 +907,23 @@ original identifier.
 
 ### 13.4 Benefits
 
-- Eliminates cross-producer tmp collisions (only one tmp representation:
-  `Tree_index`).
-- Faster SSA (no string allocation per tmp, no substring checks).
+- Source mapping for free: a name like `foo_l42_b` already says where it
+  came from; no `loc`/`source` attribute needed in the common case.
+- Eliminates cross-producer tmp collisions: `___<n>` counters in
+  different producers stop drifting.
 - Clean handling of arbitrary source identifiers without collisions with
-  LNAST-internal naming.
-- Dump output is shorter (`%5` vs `___t5`).
+  LNAST-internal naming (sanitizer layer in §13.3).
 
 ### 13.5 Migration
 
-1. Add `Lnast_node::is_tmp()` and `tmp_ref(Tree_index)` API.
-2. Producers stop generating `___t<n>` strings; emit tmp refs by tree
-   position.
+1. Define the suffix grammar (file-prefix, function-prefix, line number,
+   per-line suffix index).
+2. Producers stop emitting `___t<n>`. The local upass becomes the single
+   point that mints SSA / tmp names.
 3. Add a sanitizer in `inou/slang` (and future `inou/verilog`) that
    rewrites non-safe names and emits `source_name` attrs.
-4. Consumers that look up tmps by name get a migration helper mapping old
-   string forms to `Tree_index` — temporary, removed once producers are
-   migrated.
-5. Regenerate `lnast/tests/ln/*.ln` golden files.
-6. Delete the `___*` prefix generators and the associated
+4. Regenerate `lnast/tests/ln/*.ln` golden files.
+5. Delete the `___*` prefix generators and the associated
    `substr`/`starts_with` tests from `lnast.cpp:988,1229`,
    `pass_lnastfmt.cpp:204`, and producer code.
 
@@ -920,9 +948,9 @@ because it reduces the string-matching surface area §12 has to audit.
   - Where it emits `tuple_set X __<attr> V`, emit `attr_set X <attr> V`.
   - Where it emits a `$X` / `%X` / `#X` prefix, emit bare `X` + the
     corresponding `attr_set X direction/storage ...`.
-  - Skip the harder migrations: tmp-vars → `Tree_index` (§13). The tests
-    exercising these keep the legacy form on this producer until it is
-    deleted.
+  - Skip the harder migrations: source-derived tmp names (§13). The tests
+    exercising these keep the legacy `___<n>` form on this producer
+    until it is deleted.
 - **`inou/slang`.** Owned locally; update emission sites directly to the
   new form. No dual-mode needed.
 
@@ -950,9 +978,9 @@ nodes.
 
 ### 14.4 Ordering
 
-- **§13 (Tree_index tmps)**: land first. Smallest blast radius, no ST
-  dependency. Only `inou/prp` and `inou/slang` migrate here; `inou/pyrope`
-  keeps `___<n>` until deletion.
+- **§13 (source-derived tmp names)**: land first. Smallest blast radius,
+  no ST dependency. Only `inou/prp` and `inou/slang` migrate here;
+  `inou/pyrope` keeps `___<n>` until deletion.
 - **§10 (ST API + value-attr inference)**: second. Unblocks everything.
 - **§11 (attr_set/tuple_set shape + collapse assign)**: third. Depends on
   §10.
@@ -1005,7 +1033,7 @@ delay_assign:
 - Offset `0` is legal **only if `src` is a reg**, and reads the flop Q pin
   (pre-update value at cycle start). For a non-reg, offset `0` is a compile
   error — lnastfmt rejects.
-- Offset `1` on a reg reads the D / next-cycle value (the `::[defer]` case
+- Offset `1` on a reg reads the D / next-cycle value (the `.[defer]` case
   today encoded as offset=1). Offset `1` on a wire reads the settled
   end-of-block value.
 - Offset operand may be a `const` literal or a `ref` to a comptime-const
@@ -1013,7 +1041,7 @@ delay_assign:
   Resolution happens during constant folding; lnastfmt flags if the offset
   is still non-const after folding.
 - Surface mapping:
-  - `a::[defer]`  → `delay_assign tmp a 1` (non-reg) or `1` (reg = next-cycle D)
+  - `a.[defer]`   → `delay_assign tmp a 1` (non-reg) or `1` (reg = next-cycle D)
   - `a@[N]`       → `delay_assign tmp a N`
   - `a@[-1]`      → `delay_assign tmp a -1`
   - `a@[]`        → `delay_assign tmp a 1`  (shorthand for defer)
@@ -1029,13 +1057,13 @@ delay_assign:
 - `dst` is always a fresh tmp; the SSA pass does not subscript it further.
 - `src` references the **pre-SSA declaration name**. Today this works
   because `get_vname` returns token text (pre-SSA) and the SSA subscript
-  lives in `Lnast_node::subs` separately. The TODO's intent of "SSA pass
-  must skip child 1 of `delay_assign` when renaming" should be explicitly
-  enforced once tmp identity switches to `Tree_index` (§13).
+  lives in the node's `ssa_subs` attr separately. The TODO's intent of
+  "SSA pass must skip child 1 of `delay_assign` when renaming" should be
+  explicitly enforced once §13's source-derived naming lands.
 
 **Files affected (pending):**
 
-- `inou/prp/prp2lnast.cpp` — emit `delay_assign` for `::[defer]`, `@[N]`,
+- `inou/prp/prp2lnast.cpp` — emit `delay_assign` for `.[defer]`, `@[N]`,
   `@[-1]`, `@[]` (none of these work today).
 - `pass/lnast_tolg/lnast_tolg.cpp` — extend `process_ast_delay_assign_op`
   to handle offset=0 (reg Q pin), offset=-1 (past cycle), ref offsets.

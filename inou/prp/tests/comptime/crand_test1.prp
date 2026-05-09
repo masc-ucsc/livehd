@@ -7,7 +7,7 @@
 
 const a = false
 
-c = a::[crand]
+c = a.[crand]
 
 mut x = 0
 

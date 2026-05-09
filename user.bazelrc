@@ -1,0 +1,12 @@
+# Force clang-21
+build --action_env=CC=/usr/bin/clang-21
+build --action_env=CXX=/usr/bin/clang++-21
+build --repo_env=CC=/usr/bin/clang-21
+build --repo_env=CXX=/usr/bin/clang++-21
+
+# Inject missing <mutex> include into hhds/tree.cpp (upstream bug: unique_lock used without include)
+build --per_file_copt=.*hhds.*tree\.cpp@-include,mutex
+
+# Suppress unknown warning options (clang: -Wcharacter-conversion not in clang<19)
+build --copt=-Wno-unknown-warning-option
+build --cxxopt=-Wno-unknown-warning-option

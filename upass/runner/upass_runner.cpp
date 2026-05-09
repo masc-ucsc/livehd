@@ -474,6 +474,11 @@ void uPass_runner::process_lnast() {
     C_OP(attr_set)
     C_OP(attr_get)
 
+    // Type metadata — emit verbatim, but dispatch so the attribute pass
+    // observes type_spec / type_def for max/min/bits derivation.
+    C_OP(type_spec)
+    C_OP(type_def)
+
     // Cassert — emit with all operand refs folded (Slice 2 gives this to
     // verifier so known-true cassert gets dropped).
     case Ntype::Lnast_ntype_cassert:

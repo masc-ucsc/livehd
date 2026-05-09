@@ -1,13 +1,16 @@
 /*
 :name: phase1_sticky_comptime_if
 :type: parsing lnast comptime
-:verifier_pass: 4
+:verifier_pass: 8
 :verifier_fail: 0
 */
 
 // Phase 1 — sticky propagation interacting with comptime-folded if.
 // Only the live branch should contribute to the sticky annotation;
 // the dead branch's stickiness is discarded along with the dead code.
+// A sticky condition is also a control dependency: assignments in the
+// selected branch inherit the condition's sticky annotation even if the
+// assigned RHS is otherwise clean.
 
 const d::[debug] = 100
 const p = 7
@@ -29,3 +32,20 @@ if false {
 }
 cassert b == 8
 cassert !b.[debug]
+
+mut c = 0
+if d > 0 {
+  c = p         // RHS is clean, but the condition depends on debug `d`
+}else{
+  c = p + 1
+}
+cassert c == 7
+cassert c.[debug]
+
+const t::[_foo,foo] = true
+mut e = 0
+if t.[_foo] {
+  e = p         // sticky attr read in condition taints the assignment
+}
+cassert e == 7
+cassert e.[_foo] and !e.[foo]

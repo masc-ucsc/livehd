@@ -1,0 +1,9 @@
+comb uif_select(sel:u2, base:u8, a:u8, b:u8) -> (y:u8) {
+  y = base
+
+  unique if sel == 0 {
+    y = a
+  } elif sel == 1 {
+    y = b
+  }
+}

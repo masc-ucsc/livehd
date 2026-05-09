@@ -13,6 +13,7 @@
 #include <string_view>
 #include <vector>
 
+#include "upass_attributes.hpp"  // NOLINT: ensures plugin "attributes" is linked
 #include "upass_constprop.hpp"
 #include "upass_runner.hpp"
 #include "upass_verifier.hpp"
@@ -72,6 +73,7 @@ void Pass_upass::setup() {
   m1.add_label_optional("verifier", "enable lnast verifier upass", "true");
   m1.add_label_optional("constprop", "enable constant propagation upass", "true");
   m1.add_label_optional("coalescer", "enable deferred-emit / DSE coalescer upass", "true");
+  m1.add_label_optional("attributes", "enable Pyrope attribute upass (sticky propagation, comptime checks)", "true");
   m1.add_label_optional("assert", "enable assert test", "true");
   m1.add_label_optional(
       "order",
@@ -164,6 +166,9 @@ Pass_upass::Pass_upass(const Eprp_var& var) : Pass("pass.upass", var) {
   auto coalescer_txt = get_label("coalescer");
   bool do_coalescer  = coalescer_txt != "false" && coalescer_txt != "0";
 
+  auto attrs_txt   = get_label("attributes");
+  bool do_attrs    = attrs_txt != "false" && attrs_txt != "0";
+
   // The assert pass declares depends_on={"constprop"}, so the runner's
   // resolve_order will silently pull constprop back in if assert is enabled
   // — even when the user explicitly passed constprop:0. Honor the explicit
@@ -181,6 +186,14 @@ Pass_upass::Pass_upass(const Eprp_var& var) : Pass("pass.upass", var) {
   }
 
   upass_order.emplace_back("func_extract");
+
+  // Phase 1 of the attribute pass runs before constprop so sticky/attribute
+  // state is available when constprop folds `.[attr]` reads (Phase 2 in
+  // attribute_todo.md). Later phases of attributes hook in after constprop;
+  // they share the same `attributes` plugin and are toggled internally.
+  if (do_attrs) {
+    upass_order.emplace_back("attributes");
+  }
 
   if (do_constprop) {
     upass_order.emplace_back("constprop");

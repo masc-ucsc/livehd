@@ -7,8 +7,8 @@
 
 const X1 = (a=33)
 
-cassert X1::[typename] == "X1"
+cassert X1.[typename] == "X1"
 
 const c1:X1 = (a=100)
 
-cassert c1::[typename] == "X1"
+cassert c1.[typename] == "X1"

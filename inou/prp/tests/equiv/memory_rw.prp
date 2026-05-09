@@ -1,0 +1,9 @@
+comb memory_rw(clk::[clock], we:bool, waddr:u2, raddr:u2, din:u8) -> (dout:u8) {
+  reg mem:[4]u8 = 0sb?
+
+  if we {
+    mem[waddr] = din
+  }
+
+  dout = mem[raddr]
+}

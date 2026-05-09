@@ -109,7 +109,23 @@ protected:
 
   auto current_prim_value() const {
     if (is_type(Lnast_ntype::Lnast_ntype_ref)) {
-      return st.get_trivial(current_text());
+      auto name = current_text();
+      // Cross-pass override-or-fallback. uPass_attributes publishes
+      // narrowed values for vars under wrap/sat policy via tmp_fold; those
+      // overrides must win over constprop's stored raw value, otherwise
+      // `cassert w == 0xF` on a wrap-policy `w = 0xFF` reads back the
+      // unwrapped 0xFF. For refs with no override, fold_ref returns
+      // nullopt and we fall through to the ST. The runner_fold_fn loop
+      // also covers attribute-pass-only tmps (attr_get destinations,
+      // aggregate `.[size]` folds) that constprop never assigned.
+      if (runner_fold_fn) {
+        auto folded = runner_fold_fn(name);
+        if (folded && !folded->is_invalid()) {
+          return *folded;
+        }
+      }
+      const auto v = st.get_trivial(name);
+      return v;  // may be invalid — caller's foldable() check short-circuits.
     }
     I(is_type(Lnast_ntype::Lnast_ntype_const));
     return Lconst::from_pyrope(current_text());

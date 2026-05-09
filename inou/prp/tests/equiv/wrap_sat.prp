@@ -1,0 +1,13 @@
+comb wrap_sat(x:u8, y:s8) -> (wrapped:u4, sat_u:u4, sat_s:s4) {
+  mut w:u4 = 0
+  wrap w = x
+  wrapped = w
+
+  mut su:u4 = 0
+  sat su = x
+  sat_u = su
+
+  mut ss:s4 = 0
+  sat ss = y
+  sat_s = ss
+}

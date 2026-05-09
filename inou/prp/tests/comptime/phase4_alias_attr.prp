@@ -1,0 +1,31 @@
+/*
+:name: phase4_alias_attr
+:type: parsing lnast comptime
+:verifier_pass: 5
+:verifier_fail: 0
+*/
+
+// Phase 4 — alias attribute migration. When fields are split out via a
+// direct ref alias (`const v = t.a`), the alias inherits the field's
+// resolved attributes; when an aggregate is aliased (`const u = t`),
+// the alias keeps both the aggregate's own attrs and the cat-D
+// inheritance path for its fields.
+
+const t::[poison=42] = (a=1, b::[poison=99]=2, c=3)
+
+// Alias of the whole aggregate — u inherits poison=42 directly and the
+// per-field inheritance keeps b's override visible through the alias.
+const u = t
+cassert u.[poison] == 42
+cassert u.a.[poison] == 42
+cassert u.b.[poison] == 99
+
+// Field extracted via alias — v stands in for t.a, so reads on v inherit
+// the aggregate's poison=42 since t.a has no override.
+const v = t.a
+cassert v.[poison] == 42
+
+// Field extracted via alias with its own override — w stands in for t.b,
+// which has the field-level override poison=99.
+const w = t.b
+cassert w.[poison] == 99
