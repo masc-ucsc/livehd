@@ -287,6 +287,56 @@ TEST(LnastToLgraph, IfNoElse) {
   EXPECT_TRUE(has_output(lg, "out"))          << "expected graph output 'out'";
 }
 
+// ── Test 11: func_def lowers trivial XOR function ────────────────────────────
+// Mimics the LNAST produced by prp2lnast for:
+//   comb trivial(a:u1, b:u1)->(c:u1) { c = a ^ b }
+// Structure:
+//   top → stmts → func_def(ref"trivial", const"comb",
+//                           tuple_add/*generics*/, tuple_add/*captures*/,
+//                           tuple_add(assign(ref"a",const"0"), assign(ref"b",const"0")),
+//                           tuple_add(assign(ref"c",const"0")),
+//                           stmts(bit_xor(ref"___t1",ref"a",ref"b"),
+//                                 assign(ref"c",ref"___t1")))
+// Expected: one Xor node, graph inputs a+b, graph output c.
+static std::shared_ptr<Lnast> make_trivial_func_def() {
+  auto ln = std::make_shared<Lnast>("trivial");
+  ln->set_root(Lnast_ntype::create_top());
+  auto stmts = ln->add_child(ln->get_root(), Lnast_ntype::create_stmts());
+
+  auto fd = ln->add_child(stmts, Lnast_ntype::create_func_def());
+  // child0: name
+  ln->add_child(fd, Lnast_node::create_ref("trivial"));
+  // child1: kind
+  ln->add_child(fd, Lnast_node::create_const("comb"));
+  // child2: generics (empty tuple_add)
+  ln->add_child(fd, Lnast_ntype::create_tuple_add());
+  // child3: captures (empty tuple_add)
+  ln->add_child(fd, Lnast_ntype::create_tuple_add());
+  // child4: inputs tuple_add
+  auto in_ta = ln->add_child(fd, Lnast_ntype::create_tuple_add());
+  auto ai_a  = ln->add_child(in_ta, Lnast_ntype::create_assign());
+  ln->add_child(ai_a, Lnast_node::create_ref("a"));
+  ln->add_child(ai_a, Lnast_node::create_const("0"));
+  auto ai_b  = ln->add_child(in_ta, Lnast_ntype::create_assign());
+  ln->add_child(ai_b, Lnast_node::create_ref("b"));
+  ln->add_child(ai_b, Lnast_node::create_const("0"));
+  // child5: outputs tuple_add
+  auto out_ta = ln->add_child(fd, Lnast_ntype::create_tuple_add());
+  auto ao_c   = ln->add_child(out_ta, Lnast_ntype::create_assign());
+  ln->add_child(ao_c, Lnast_node::create_ref("c"));
+  ln->add_child(ao_c, Lnast_node::create_const("0"));
+  // child6: body stmts — c = a ^ b via temp ref ___t1
+  auto body = ln->add_child(fd, Lnast_ntype::create_stmts());
+  auto xorN = ln->add_child(body, Lnast_ntype::create_bit_xor());
+  ln->add_child(xorN, Lnast_node::create_ref("___t1"));
+  ln->add_child(xorN, Lnast_node::create_ref("a"));
+  ln->add_child(xorN, Lnast_node::create_ref("b"));
+  auto asgn = ln->add_child(body, Lnast_ntype::create_assign());
+  ln->add_child(asgn, Lnast_node::create_ref("c"));
+  ln->add_child(asgn, Lnast_node::create_ref("___t1"));
+  return ln;
+}
+
 // ── Test 10: if/elif/else → two Mux nodes ────────────────────────────────────
 // LNAST:
 //   if $c1 { %out = $a } elif $c2 { %out = $b } else { %out = $d }
@@ -326,4 +376,20 @@ TEST(LnastToLgraph, IfElifElseChain) {
 
   EXPECT_EQ(count_op(lg, Ntype_op::Mux), 2) << "expected two chained Mux nodes";
   EXPECT_TRUE(has_output(lg, "out"))          << "expected graph output 'out'";
+}
+
+// ── Test 11: func_def — trivial XOR function ──────────────────────────────────
+TEST(LnastToLgraph, FuncDefTrivialXor) {
+  auto* lg = make_lg("trivial11");
+  ASSERT_NE(lg, nullptr);
+  Lnast_to_lgraph lowerer(lg, make_trivial_func_def());
+  lowerer.lower();
+
+  EXPECT_EQ(count_op(lg, Ntype_op::Xor), 1) << "expected exactly one Xor node";
+  EXPECT_TRUE(has_input(lg, "a"))             << "expected graph input 'a'";
+  EXPECT_TRUE(has_input(lg, "b"))             << "expected graph input 'b'";
+  EXPECT_TRUE(has_output(lg, "c"))            << "expected graph output 'c'";
+  // No spurious Sum/Mux nodes from func_def scaffolding.
+  EXPECT_EQ(count_op(lg, Ntype_op::Sum), 0);
+  EXPECT_EQ(count_op(lg, Ntype_op::Mux), 0);
 }

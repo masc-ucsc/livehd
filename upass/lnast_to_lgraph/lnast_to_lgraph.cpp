@@ -141,8 +141,7 @@ void Lnast_to_lgraph::lower_node() {
       break;
     // TODO stubs
     case N::Lnast_ntype_if: lower_if(); break;
-    case N::Lnast_ntype_func_def:
-      Pass::warn("lnast_to_lgraph: func_def not yet implemented"); break;
+    case N::Lnast_ntype_func_def: lower_func_def(); break;
     case N::Lnast_ntype_func_call:
       Pass::warn("lnast_to_lgraph: func_call not yet implemented"); break;
     case N::Lnast_ntype_tuple_add:
@@ -342,6 +341,90 @@ void Lnast_to_lgraph::lower_set_mask() {
   lg_->add_edge(op_mask, node.setup_sink_pin("mask"));
   lg_->add_edge(op_val,  node.setup_sink_pin("value"));
   bind(result, node.setup_driver_pin("Y"));
+}
+
+// func_def children (per prp2lnast.cpp):
+//   child0: ref <name>          — function name (matches lg_ name; skip)
+//   child1: const <kind>        — "comb" / "seq" etc.; skip
+//   child2: tuple_add           — generics (empty for Pyrope basics); skip
+//   child3: tuple_add           — captures (empty for Pyrope basics); skip
+//   child4: tuple_add of assign — input parameters; each assign: ref<name>, const"0"
+//   child5: tuple_add of assign — output parameters; each assign: ref<name>, const"0"
+//   child6: stmts               — body
+//
+// Variable names inside the body are bare (no $/% prefix). We:
+//   (a) create graph inputs from child4 and register them in pin_map_,
+//   (b) collect output names from child5,
+//   (c) lower the body normally — resolve() finds inputs by name; bind() records results,
+//   (d) wire output names to graph outputs after body lowering.
+void Lnast_to_lgraph::lower_func_def() {
+  if (!move_to_child()) return;
+
+  // ── child0: name — skip ────────────────────────────────────────────────────
+  if (!move_to_sibling()) { move_to_parent(); return; }
+
+  // ── child1: kind — skip ────────────────────────────────────────────────────
+  if (!move_to_sibling()) { move_to_parent(); return; }
+
+  // ── child2: generics tuple_add — skip ─────────────────────────────────────
+  if (!move_to_sibling()) { move_to_parent(); return; }
+
+  // ── child3: captures tuple_add — skip ─────────────────────────────────────
+  if (!move_to_sibling()) { move_to_parent(); return; }
+
+  // ── child4: inputs tuple_add ──────────────────────────────────────────────
+  if (move_to_child()) {
+    do {
+      if (current_ntype() == Lnast_ntype::Lnast_ntype_assign) {
+        if (move_to_child()) {
+          auto inp_name = std::string(current_text());
+          move_to_parent();
+          // Register the graph input pin so body references resolve correctly.
+          auto inp = lg_->add_graph_input(inp_name, next_inp_pos_++, 0);
+          pin_map_.emplace(inp_name, inp);
+        }
+      }
+    } while (move_to_sibling());
+    move_to_parent();
+  }
+
+  if (!move_to_sibling()) { move_to_parent(); return; }
+
+  // ── child5: outputs tuple_add — collect names ─────────────────────────────
+  std::vector<std::string> out_names;
+  if (move_to_child()) {
+    do {
+      if (current_ntype() == Lnast_ntype::Lnast_ntype_assign) {
+        if (move_to_child()) {
+          out_names.emplace_back(current_text());
+          move_to_parent();
+        }
+      }
+    } while (move_to_sibling());
+    move_to_parent();
+  }
+
+  if (!move_to_sibling()) { move_to_parent(); return; }
+
+  // ── child6: body stmts ────────────────────────────────────────────────────
+  lower_node();  // lower_stmts() handles Lnast_ntype_stmts
+
+  move_to_parent();
+
+  // ── Wire output names to graph output ports ────────────────────────────────
+  for (const auto& name : out_names) {
+    auto it = pin_map_.find(name);
+    if (it == pin_map_.end()) {
+      Pass::warn("lnast_to_lgraph: func_def output '{}' not written in body — wiring nil", name);
+      auto nil = nil_pin();
+      auto out_pin = lg_->add_graph_output(name, next_out_pos_++, 0);
+      lg_->add_edge(nil, out_pin);
+      continue;
+    }
+    auto& drv     = it->second;
+    auto  out_pin = lg_->add_graph_output(name, next_out_pos_++, drv.get_bits());
+    lg_->add_edge(drv, out_pin);
+  }
 }
 
 void Lnast_to_lgraph::lower_not() {

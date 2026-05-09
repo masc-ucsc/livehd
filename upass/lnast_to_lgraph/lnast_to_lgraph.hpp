@@ -56,6 +56,7 @@ private:
   void lower_stmts();
   void lower_assign();
   void lower_if();
+  void lower_func_def();
   void lower_attr_set();
   void lower_cassert();
   void lower_infix(Ntype_op op, std::string_view a_pin_name, std::string_view b_pin_name);
