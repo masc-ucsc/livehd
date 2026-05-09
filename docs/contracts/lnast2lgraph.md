@@ -441,11 +441,32 @@ The binary mux chain is valid but not always efficient.
 - `Fflop` / fluid flop is future work, although direct `__fflop` may exist
   structurally later.
 
-`defer` is not an LGraph node or attribute. It is consumed during LGraph
-generation as a wiring rule:
+`defer` is not an LGraph node or attribute. It is a wire-level end-of-cycle
+binding: `x.[defer]` reads or writes the *final* value of `x` for this cycle,
+after all in-cycle assignments are resolved. It applies to plain wires as
+well as regs — defer is what enables intra-cycle loops, which most often
+appear around a register but can also exist on a pure wire (an intentional
+ring; a combinational loop with no register in it is otherwise a bug).
+
+For regs, the wiring rule is:
 
 - normal reads of a scalar `reg r` use the flop output (`q`);
 - the final `r.[defer]` / next-state value connects to `Flop.din`.
+
+For plain wires, `defer` selects the cycle-final value:
+
+```
+f1 = 100
+f1 = 200
+f2 = f1.[defer]   // f2 reads 200 (last assignment to f1 wins)
+```
+
+```
+f1 = 200
+f1.[defer] = 300  // forces the cycle-final value of f1 to 300
+f1 = 400          // discarded if f1 is not otherwise read; if f1 feeds a
+                  // reg, the reg sees 300, not 400
+```
 
 For scalar `reg r = init`:
 
@@ -508,10 +529,14 @@ From `cell.cpp`:
 
 Defaults:
 
-- `clock_pin`: input named `clk` or `clock`; if both exist, require explicit
-  clock; if neither exists, compile error.
-- `reset_pin`: input named `reset` if present and the reg has a non-nil
-  initial value.
+- `clock_pin`: if exactly one of the inputs `clk` or `clock` exists, default
+  to it. If both exist or neither exists, the reg must specify `clock_pin`
+  explicitly.
+- `reset_pin`: if exactly one of the inputs `reset`, `rst`, `reset_n`, or
+  `rst_n` exists, default to it (the `_n` variants are active-low — flip
+  `negreset` accordingly). If more than one matches or none does, an
+  explicit `reset_pin` is required when the reg has a non-nil initial
+  value.
 - `initial`: explicit init value, or `0sb?` for nil/no explicit init.
 - `posclk`: true.
 - `async`: false.
@@ -520,7 +545,11 @@ Defaults:
 Reset rules:
 
 - `reg a = nil`: `reset_pin=false`, `initial=0sb?`.
-- `reg a = 0` with implicit `reset` input: `reset_pin=reset`, `initial=0`.
+- `reg a = 0` with exactly one implicit reset input (`reset` / `rst` /
+  `reset_n` / `rst_n`): connect that wire to `reset_pin` (set `negreset` for
+  `_n` variants), `initial=0`.
+- `reg a = 0` with multiple implicit reset candidates: compile error
+  (require explicit `reset_pin`).
 - `reg a = 0` with no implicit/explicit reset: compile error.
 - `reg a:[reset_pin=false] = 0`: compile error.
 - `reg a:[reset_pin=false] = nil`: valid.
