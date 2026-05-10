@@ -25,8 +25,10 @@ private:
   Lnast_nid             cur_;
   std::unordered_map<std::string, Node_pin> pin_map_;
   std::unordered_set<std::string>           output_names_;
-  int next_inp_pos_{0};
-  int next_out_pos_{0};
+  // 1-based per contract §5: "input tuple field 1 maps to input pin 1; output
+  // tuple field 1 maps to output pin 1."
+  int next_inp_pos_{1};
+  int next_out_pos_{1};
 
   bool             move_to_child();
   bool             move_to_sibling();
@@ -46,13 +48,25 @@ private:
   // Returns a nil (0sb?) constant driver pin.
   Node_pin nil_pin();
   // Runs lower_node() on the current cursor position and returns what was
-  // written to pin_map_, then restores pin_map_ to its pre-call state.
+  // bound (assigned) by the subtree, then restores those bindings to their
+  // pre-call values.  Auto-promoted graph inputs (added via resolve()) are
+  // NOT considered branch writes and are KEPT across branches, so siblings
+  // see the same input pin without re-promoting.
   // output_names_ is left updated (output ports discovered inside are kept).
   using WriteMap = std::unordered_map<std::string, Node_pin>;
   WriteMap lower_branch();
+  // Active stack of branch-local write trackers populated by bind().  Only
+  // user-written names (via assign / op result) end up here, never names
+  // that resolve() auto-promotes to graph inputs.
+  std::vector<WriteMap> branch_writes_stack_;
 
   void lower_node();
   void lower_top();
+  // Lowers the post-upass layout `top -> [io, stmts]`, reading I/O from
+  // the io ref-pair and the named tuple_adds that live in `stmts`.
+  // Cursor must be at the `io` child on entry; on exit the cursor is back
+  // at `top` (caller drops the parent frame).
+  void lower_post_upass_top();
   void lower_stmts();
   void lower_assign();
   void lower_if();

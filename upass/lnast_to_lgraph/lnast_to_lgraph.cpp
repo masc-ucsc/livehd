@@ -69,6 +69,9 @@ Node_pin Lnast_to_lgraph::resolve(std::string_view raw_name) {
 void Lnast_to_lgraph::bind(std::string_view raw_name, Node_pin drv) {
   auto name = std::string(strip_prefix(raw_name));
   pin_map_.insert_or_assign(name, drv);
+  if (!branch_writes_stack_.empty()) {
+    branch_writes_stack_.back().insert_or_assign(name, drv);
+  }
   if (is_output_port(raw_name)) {
     output_names_.insert(name);
   }
@@ -102,8 +105,10 @@ void Lnast_to_lgraph::lower_node() {
     case N::Lnast_ntype_div:
       Pass::warn("lnast_to_lgraph: division not synthesizable — TODO: lower to SRA or generic div Sub");
       break;
-    // Comparison
-    case N::Lnast_ntype_eq: lower_infix(Ntype_op::EQ, "A", "B"); break;
+    // Comparison.
+    // EQ is variadic on pin "A" — cell.cpp lines 107-117 group it with
+    // Mult/And/Or/Xor/Ror; pin "B" does not exist.  See contract §7.
+    case N::Lnast_ntype_eq: lower_infix(Ntype_op::EQ, "A", "A"); break;
     case N::Lnast_ntype_lt: lower_infix(Ntype_op::LT, "A", "B"); break;
     case N::Lnast_ntype_gt: lower_infix(Ntype_op::GT, "A", "B"); break;
     // ne/le/ge: composed from existing primitives
@@ -154,8 +159,128 @@ void Lnast_to_lgraph::lower_node() {
   }
 }
 
+// `top` has two known layouts:
+//
+//  (a) Pre-upass / direct from prp2lnast or hand-built tests:
+//        top -> stmts             (with optional func_def inside stmts)
+//      We simply descend into stmts and let lower_node() / lower_func_def()
+//      do the work.
+//
+//  (b) Post-upass (after upass/func_extract — see upass_func_extract.cpp:128-160):
+//        top -> [io, stmts]
+//      where `io` has two ref children naming an `__input_tuple_ref` and
+//      `__output_tuple_ref` (or `__empty_tuple` if absent), and the matching
+//      `tuple_add(<name>) { assign(field, "nil"), ... }` nodes live as the
+//      first statements of `stmts` (followed by the original body).
+//
+// In layout (b) we read I/O directly from the io ref-pair plus the
+// tuple_adds; the body statements after the I/O tuple_adds are then lowered
+// the same way as layout (a). 1-based pin numbering per contract §5.
 void Lnast_to_lgraph::lower_top() {
-  if (move_to_child()) { lower_node(); move_to_parent(); }
+  if (!move_to_child()) return;
+
+  if (current_ntype() == Lnast_ntype::Lnast_ntype_io) {
+    // Layout (b): post-upass.
+    lower_post_upass_top();
+  } else {
+    // Layout (a): pre-upass — first child is stmts.
+    lower_node();
+  }
+  move_to_parent();
+}
+
+// Walks the post-upass `top -> [io, stmts]` layout produced by
+// upass/func_extract.  Cursor is at the `io` child on entry; on exit the
+// cursor returns to the same `io` position so the caller's
+// `move_to_parent()` lands on `top`.
+//
+// `io` carries two ref children — refs into `stmts` for the input and
+// output tuples (or `__empty_tuple`).  We:
+//   1. read the input/output tuple ref names from `io`,
+//   2. walk stmts: for each top-level `tuple_add(<input-tuple-name>)`
+//      register its assign-children as graph inputs (1-based positions);
+//      for `tuple_add(<output-tuple-name>)` collect output field names;
+//      skip `__empty_tuple` placeholders; lower every other statement as
+//      regular body code,
+//   3. wire collected output names to graph outputs after the body
+//      finishes (so the body's bind() values are visible).
+void Lnast_to_lgraph::lower_post_upass_top() {
+  // ── Read io ref-pair to learn the input/output tuple ref names ───────────
+  std::string input_tuple_name;
+  std::string output_tuple_name;
+  if (move_to_child()) {
+    input_tuple_name = std::string(current_text());
+    if (move_to_sibling()) {
+      output_tuple_name = std::string(current_text());
+    }
+    move_to_parent();
+  }
+
+  // Sentinel name from upass/func_extract.cpp for absent tuples.
+  constexpr std::string_view empty_tuple_name = "__empty_tuple";
+
+  // ── Move to the sibling `stmts` and walk it once ─────────────────────────
+  if (!move_to_sibling()) return;  // no stmts? nothing to do
+  if (current_ntype() != Lnast_ntype::Lnast_ntype_stmts) {
+    return;  // unexpected layout — bail safely
+  }
+
+  std::vector<std::string> out_names;
+  if (move_to_child()) {
+    do {
+      if (current_ntype() == Lnast_ntype::Lnast_ntype_tuple_add) {
+        // Determine which tuple this is by inspecting its first child ref.
+        std::string tuple_ref_name;
+        if (move_to_child()) {
+          tuple_ref_name = std::string(current_text());
+          // If this is the input tuple, register its assign children as inputs.
+          if (!input_tuple_name.empty() && tuple_ref_name == input_tuple_name) {
+            while (move_to_sibling()) {
+              if (current_ntype() == Lnast_ntype::Lnast_ntype_assign && move_to_child()) {
+                auto field = std::string(current_text());
+                move_to_parent();
+                auto inp = lg_->add_graph_input(field, next_inp_pos_++, 0);
+                pin_map_.emplace(field, inp);
+              }
+            }
+          } else if (!output_tuple_name.empty() && tuple_ref_name == output_tuple_name) {
+            while (move_to_sibling()) {
+              if (current_ntype() == Lnast_ntype::Lnast_ntype_assign && move_to_child()) {
+                out_names.emplace_back(current_text());
+                move_to_parent();
+              }
+            }
+          } else if (tuple_ref_name == empty_tuple_name) {
+            // Placeholder; nothing to do.
+          } else {
+            // Body tuple_add (not I/O) — lower as a regular statement once
+            // tuple lowering exists.  For now warn and skip.
+            Pass::warn("lnast_to_lgraph: body tuple_add '{}' not lowered yet", tuple_ref_name);
+          }
+          move_to_parent();
+        }
+      } else {
+        // Ordinary body statement.
+        lower_node();
+      }
+    } while (move_to_sibling());
+    move_to_parent();
+  }
+
+  // ── Wire collected output names to graph output ports ────────────────────
+  for (const auto& name : out_names) {
+    auto it = pin_map_.find(name);
+    if (it == pin_map_.end()) {
+      Pass::warn("lnast_to_lgraph: output '{}' not driven by body — wiring nil", name);
+      auto nil = nil_pin();
+      auto out_pin = lg_->add_graph_output(name, next_out_pos_++, 0);
+      lg_->add_edge(nil, out_pin);
+      continue;
+    }
+    auto& drv     = it->second;
+    auto  out_pin = lg_->add_graph_output(name, next_out_pos_++, drv.get_bits());
+    lg_->add_edge(drv, out_pin);
+  }
 }
 
 void Lnast_to_lgraph::lower_stmts() {
@@ -196,19 +321,26 @@ Node_pin Lnast_to_lgraph::nil_pin() {
   return lg_->create_node_const(Lconst::invalid()).setup_driver_pin();
 }
 
-// Lower the stmts at the current cursor into a fresh scope.
-// Returns what was written; restores pin_map_ afterwards.
+// Lower the subtree at the current cursor into a fresh branch scope.
+// Returns the names *bound* (via bind()) inside the branch.  Names that
+// resolve() auto-promotes to graph inputs are NOT branch writes and are
+// kept in pin_map_ across branches so siblings reuse the same input pin.
 Lnast_to_lgraph::WriteMap Lnast_to_lgraph::lower_branch() {
-  auto saved = pin_map_;
-  lower_node();  // descends into the stmts subtree, mutates pin_map_
-  WriteMap writes;
-  for (auto& [name, pin] : pin_map_) {
+  branch_writes_stack_.emplace_back();
+  auto saved = pin_map_;            // snapshot the entries we may overwrite
+  lower_node();
+  auto writes = std::move(branch_writes_stack_.back());
+  branch_writes_stack_.pop_back();
+  // Roll back ONLY the names the branch actually wrote.  Anything resolve()
+  // added (auto-promoted graph inputs) stays in pin_map_.
+  for (auto& [name, _drv] : writes) {
     auto it = saved.find(name);
-    if (it == saved.end() || !(it->second == pin)) {
-      writes.emplace(name, pin);
+    if (it == saved.end()) {
+      pin_map_.erase(name);
+    } else {
+      pin_map_[name] = it->second;
     }
   }
-  pin_map_ = saved;  // restore (output_names_ kept — output ports are permanent)
   return writes;
 }
 

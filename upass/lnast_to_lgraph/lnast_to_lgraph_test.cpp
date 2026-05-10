@@ -8,6 +8,7 @@
 #include "cell.hpp"
 #include "graph_library.hpp"
 #include "gtest/gtest.h"
+#include "lgedgeiter.hpp"
 #include "lgraph.hpp"
 #include "lnast.hpp"
 
@@ -21,16 +22,14 @@ static Lgraph* make_lg(const std::string& name) {
   return lib->create_lgraph(name, "lgdb_lnast_to_lgraph_test");
 }
 
-// Count non-IO nodes of a given op type in the graph.
+// Count non-IO nodes of a given op type in the graph using the public
+// fast iterator.
 static int count_op(Lgraph* lg, Ntype_op op) {
-  int   n   = 0;
-  auto  nid = lg->fast_first();
-  while (nid) {
-    auto node = Node(lg, nid);
+  int n = 0;
+  for (auto node : lg->fast()) {
     if (node.get_type_op() == op) {
       n++;
     }
-    nid = lg->fast_next(nid);
   }
   return n;
 }
@@ -376,6 +375,106 @@ TEST(LnastToLgraph, IfElifElseChain) {
 
   EXPECT_EQ(count_op(lg, Ntype_op::Mux), 2) << "expected two chained Mux nodes";
   EXPECT_TRUE(has_output(lg, "out"))          << "expected graph output 'out'";
+}
+
+// ── Test 12: post-upass shape — trivial XOR function ─────────────────────────
+// Mimics what upass/func_extract.cpp produces for trivial.prp:
+//   top
+//     io
+//       ref __input_tuple_ref
+//       ref __output_tuple_ref
+//     stmts
+//       tuple_add(__input_tuple_ref) { assign(a, "nil"), assign(b, "nil") }
+//       tuple_add(__output_tuple_ref) { assign(c, "nil") }
+//       bit_xor(___t1, a, b)
+//       assign(c, ___t1)
+// Expected: one Xor, inputs a+b (1-based positions per §5), output c.
+static std::shared_ptr<Lnast> make_trivial_post_upass() {
+  auto ln = std::make_shared<Lnast>("trivial");
+  auto root = ln->set_root(Lnast_ntype::create_top());
+
+  auto io = ln->add_child(root, Lnast_ntype::create_io());
+  ln->add_child(io, Lnast_node::create_ref("__input_tuple_ref"));
+  ln->add_child(io, Lnast_node::create_ref("__output_tuple_ref"));
+
+  auto stmts = ln->add_child(root, Lnast_ntype::create_stmts());
+
+  // Inputs tuple_add
+  auto in_ta = ln->add_child(stmts, Lnast_ntype::create_tuple_add());
+  ln->add_child(in_ta, Lnast_node::create_ref("__input_tuple_ref"));
+  auto ai_a  = ln->add_child(in_ta, Lnast_ntype::create_assign());
+  ln->add_child(ai_a, Lnast_node::create_ref("a"));
+  ln->add_child(ai_a, Lnast_node::create_const("nil"));
+  auto ai_b  = ln->add_child(in_ta, Lnast_ntype::create_assign());
+  ln->add_child(ai_b, Lnast_node::create_ref("b"));
+  ln->add_child(ai_b, Lnast_node::create_const("nil"));
+
+  // Outputs tuple_add
+  auto out_ta = ln->add_child(stmts, Lnast_ntype::create_tuple_add());
+  ln->add_child(out_ta, Lnast_node::create_ref("__output_tuple_ref"));
+  auto ao_c   = ln->add_child(out_ta, Lnast_ntype::create_assign());
+  ln->add_child(ao_c, Lnast_node::create_ref("c"));
+  ln->add_child(ao_c, Lnast_node::create_const("nil"));
+
+  // Body: bit_xor(___t1, a, b); assign(c, ___t1)
+  auto xorN = ln->add_child(stmts, Lnast_ntype::create_bit_xor());
+  ln->add_child(xorN, Lnast_node::create_ref("___t1"));
+  ln->add_child(xorN, Lnast_node::create_ref("a"));
+  ln->add_child(xorN, Lnast_node::create_ref("b"));
+  auto asgn = ln->add_child(stmts, Lnast_ntype::create_assign());
+  ln->add_child(asgn, Lnast_node::create_ref("c"));
+  ln->add_child(asgn, Lnast_node::create_ref("___t1"));
+
+  return ln;
+}
+
+TEST(LnastToLgraph, PostUpassTrivialXor) {
+  auto* lg = make_lg("trivial_post12");
+  ASSERT_NE(lg, nullptr);
+  Lnast_to_lgraph lowerer(lg, make_trivial_post_upass());
+  lowerer.lower();
+
+  EXPECT_EQ(count_op(lg, Ntype_op::Xor), 1) << "expected exactly one Xor node";
+  EXPECT_TRUE(has_input(lg, "a"))             << "expected graph input 'a'";
+  EXPECT_TRUE(has_input(lg, "b"))             << "expected graph input 'b'";
+  EXPECT_TRUE(has_output(lg, "c"))            << "expected graph output 'c'";
+  // No body tuple_add residue; no extra Sum/Mux/Or nodes.
+  EXPECT_EQ(count_op(lg, Ntype_op::Sum), 0);
+  EXPECT_EQ(count_op(lg, Ntype_op::Mux), 0);
+}
+
+// ── Test 13: post-upass with __empty_tuple placeholder for outputs ────────────
+// Verifies the empty-tuple placeholder is skipped without creating an output.
+TEST(LnastToLgraph, PostUpassEmptyOutputTuple) {
+  auto ln = std::make_shared<Lnast>("only_inputs");
+  auto root = ln->set_root(Lnast_ntype::create_top());
+
+  auto io = ln->add_child(root, Lnast_ntype::create_io());
+  ln->add_child(io, Lnast_node::create_ref("__input_tuple_ref"));
+  ln->add_child(io, Lnast_node::create_ref("__empty_tuple"));
+
+  auto stmts = ln->add_child(root, Lnast_ntype::create_stmts());
+
+  auto in_ta = ln->add_child(stmts, Lnast_ntype::create_tuple_add());
+  ln->add_child(in_ta, Lnast_node::create_ref("__input_tuple_ref"));
+  auto ai_x  = ln->add_child(in_ta, Lnast_ntype::create_assign());
+  ln->add_child(ai_x, Lnast_node::create_ref("x"));
+  ln->add_child(ai_x, Lnast_node::create_const("nil"));
+
+  // Empty placeholder tuple_add
+  auto empty = ln->add_child(stmts, Lnast_ntype::create_tuple_add());
+  ln->add_child(empty, Lnast_node::create_ref("__empty_tuple"));
+
+  auto* lg = make_lg("only_inputs13");
+  ASSERT_NE(lg, nullptr);
+  Lnast_to_lgraph lowerer(lg, ln);
+  lowerer.lower();
+
+  EXPECT_TRUE(has_input(lg, "x"));
+  // No outputs registered.
+  bool any_output = false;
+  lg->each_graph_output([&](const Node_pin&) { any_output = true; });
+  EXPECT_FALSE(any_output) << "expected no graph outputs";
 }
 
 // ── Test 11: func_def — trivial XOR function ──────────────────────────────────

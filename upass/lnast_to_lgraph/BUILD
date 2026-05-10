@@ -13,6 +13,7 @@ cc_library(
     deps = [
         "//lgraph",
         "//lnast",
+        "//pass/common:pass",
     ],
 )
 
