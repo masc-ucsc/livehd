@@ -16,6 +16,7 @@
 #include "upass_attributes.hpp"  // NOLINT: ensures plugin "attributes" is linked
 #include "upass_constprop.hpp"
 #include "upass_runner.hpp"
+#include "upass_ssa.hpp"
 #include "upass_verifier.hpp"
 
 static Pass_plugin sample("pass.upass", Pass_upass::setup);
@@ -74,6 +75,10 @@ void Pass_upass::setup() {
   m1.add_label_optional("constprop", "enable constant propagation upass", "true");
   m1.add_label_optional("coalescer", "enable deferred-emit / DSE coalescer upass", "true");
   m1.add_label_optional("attributes", "enable Pyrope attribute upass (sticky propagation, comptime checks)", "true");
+  m1.add_label_optional("ssa",
+                        "enable SSA normalisation: harvest I/O metadata into tree_io, expand I/O tuple nodes, "
+                        "rename multi-assigned user variables to SSA-unique names",
+                        "false");
   m1.add_label_optional("assert", "enable assert test", "true");
   m1.add_label_optional(
       "order",
@@ -168,6 +173,10 @@ Pass_upass::Pass_upass(const Eprp_var& var) : Pass("pass.upass", var) {
 
   auto attrs_txt   = get_label("attributes");
   bool do_attrs    = attrs_txt != "false" && attrs_txt != "0";
+
+  auto ssa_txt = get_label("ssa");
+  bool do_ssa  = ssa_txt == "true" || ssa_txt == "1";
+  run_ssa      = do_ssa;
 
   // The assert pass declares depends_on={"constprop"}, so the runner's
   // resolve_order will silently pull constprop back in if assert is enabled
@@ -265,6 +274,17 @@ void Pass_upass::work(Eprp_var& var) {
   if (up.upass_order.empty()) {
     uPass_verifier::finalize_aggregate();
     return;
+  }
+
+  // ── SSA normalisation (ssa:1): run after func_extract, before the main
+  // runner.  Harvests I/O metadata into lnast->io_meta(), expands I/O
+  // tuple_add nodes into a flat stmts body, drops the top-level 'io' node.
+  // Only function-body LNASTs (the ones func_extract spawned) have the
+  // io+stmts layout; run() is a no-op on top-level LNASTs.
+  if (up.run_ssa) {
+    for (const auto& ln : var.lnasts) {
+      uPass_ssa::run(ln);
+    }
   }
 
   uPass_constprop::set_function_registry(var.lnasts);

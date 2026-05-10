@@ -180,10 +180,13 @@ void Lnast_to_lgraph::lower_top() {
   if (!move_to_child()) return;
 
   if (current_ntype() == Lnast_ntype::Lnast_ntype_io) {
-    // Layout (b): post-upass.
+    // Layout (b): post-upass with io node (ssa:0 path).
     lower_post_upass_top();
+  } else if (!lnast_->io_meta().empty()) {
+    // Layout (c): post-SSA-pass — io_meta populated, no io node, flat stmts.
+    lower_from_io_meta();
   } else {
-    // Layout (a): pre-upass — first child is stmts.
+    // Layout (a): pre-upass or top-level module with no I/O metadata.
     lower_node();
   }
   move_to_parent();
@@ -273,6 +276,46 @@ void Lnast_to_lgraph::lower_post_upass_top() {
     if (it == pin_map_.end()) {
       Pass::warn("lnast_to_lgraph: output '{}' not driven by body — wiring nil", name);
       auto nil = nil_pin();
+      auto out_pin = lg_->add_graph_output(name, next_out_pos_++, 0);
+      lg_->add_edge(nil, out_pin);
+      continue;
+    }
+    auto& drv     = it->second;
+    auto  out_pin = lg_->add_graph_output(name, next_out_pos_++, drv.get_bits());
+    lg_->add_edge(drv, out_pin);
+  }
+}
+
+// Lowers the post-SSA layout produced by uPass_ssa::run():
+//   top → stmts (body only — no io node, no tuple_add I/O nodes)
+// I/O metadata is read from lnast_->io_meta().
+// Cursor is at `stmts` on entry and remains at `stmts` on exit; the caller's
+// move_to_parent() returns to `top`.
+void Lnast_to_lgraph::lower_from_io_meta() {
+  const auto& meta = lnast_->io_meta();
+
+  // Register graph inputs from io_meta.
+  for (const auto& entry : meta.inputs) {
+    auto inp = lg_->add_graph_input(entry.name, next_inp_pos_++, entry.bits);
+    pin_map_.emplace(entry.name, inp);
+  }
+
+  // Collect output names for wiring after the body runs.
+  std::vector<std::string> out_names;
+  out_names.reserve(meta.outputs.size());
+  for (const auto& entry : meta.outputs) {
+    out_names.push_back(entry.name);
+  }
+
+  // Lower the body (cursor is already at `stmts`).
+  lower_stmts();
+
+  // Wire outputs using the bindings the body established.
+  for (const auto& name : out_names) {
+    auto it = pin_map_.find(name);
+    if (it == pin_map_.end()) {
+      Pass::warn("lnast_to_lgraph(ssa): output '{}' not driven by body — wiring nil", name);
+      auto nil     = nil_pin();
       auto out_pin = lg_->add_graph_output(name, next_out_pos_++, 0);
       lg_->add_edge(nil, out_pin);
       continue;

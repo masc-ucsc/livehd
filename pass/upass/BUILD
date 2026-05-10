@@ -25,6 +25,7 @@ cc_library(
         "//upass/func_extract:upass_func_extract",
         "//upass/noop:upass_noop",
         "//upass/runner:upass_runner",
+        "//upass/ssa:upass_ssa",
         "//upass/verifier:upass_verifier",
     ],
     alwayslink = True,  # Needed to have constructor called
