@@ -67,6 +67,11 @@ private:
   // Cursor must be at the `io` child on entry; on exit the cursor is back
   // at `top` (caller drops the parent frame).
   void lower_post_upass_top();
+  // Lowers the post-SSA layout `top -> stmts` where I/O info has already
+  // been harvested into lnast_->io_meta().  Cursor must be at the `stmts`
+  // child on entry; on exit the cursor is still at `stmts` (caller's
+  // move_to_parent() returns to `top`).
+  void lower_from_io_meta();
   void lower_stmts();
   void lower_assign();
   void lower_if();

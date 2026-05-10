@@ -71,6 +71,19 @@ private:
   std::string text;
 };
 
+// ── I/O metadata side-channel (populated by upass/ssa when ssa:1 is set) ────
+// Separate from hhds::TreeIO (which is tree-replacement plumbing).
+struct Lnast_io_entry {
+  std::string name;          // field name, no $ / % prefix
+  int32_t     bits     = 0;  // 0 = unknown / infer from context
+  bool        is_signed = true;
+};
+struct Lnast_tree_io {
+  std::vector<Lnast_io_entry> inputs;
+  std::vector<Lnast_io_entry> outputs;
+  bool empty() const noexcept { return inputs.empty() && outputs.empty(); }
+};
+
 class Lnast {
 private:
   // Forest must outlive the tree — HHDS Tree::forest_ptr is a raw pointer
@@ -82,6 +95,9 @@ private:
   std::string                   top_module_name;
   std::string                   source_filename;
   Lnast_nid                     undefined_var_nid;
+  // I/O metadata populated by the SSA upass (ssa:1).  Empty unless the SSA
+  // pass has run on this LNAST.
+  Lnast_tree_io                 io_meta_;
 
 public:
   static constexpr char version[] = "0.1.0";
@@ -179,6 +195,10 @@ public:
   std::string_view get_top_module_name() const { return top_module_name; }
   std::string_view get_source() const { return source_filename; }
   void             set_top_module_name(std::string_view name) { top_module_name = name; }
+
+  // ── I/O metadata side-channel (set by the SSA upass when ssa:1) ─────────
+  const Lnast_tree_io& io_meta() const noexcept { return io_meta_; }
+  Lnast_tree_io&       io_meta() noexcept { return io_meta_; }
 
   // ── name predicates (work off the textual name only) ────────────────────
   static bool is_register(std::string_view name) { return !name.empty() && name.front() == '#'; }

@@ -84,10 +84,12 @@ LGDB="${WORK_DIR}/lgdb"
 ODIR="${WORK_DIR}/out"
 mkdir -p "${ODIR}"
 
-# Pipeline: parse Pyrope -> upass (constprop only, no verifier) -> lower to
-# LGraph -> emit Verilog.
+# Pipeline: parse Pyrope -> upass (constprop + SSA normalisation + attributes,
+# no verifier) -> lower to LGraph -> emit Verilog.
+# ssa:1    harvests I/O metadata into tree_io, expands I/O tuple_add nodes
+# attributes:1  runs Pyrope attribute propagation (sticky + comptime)
 PIPELINE="inou.prp files:${PRP_FILE} \
-  |> pass.upass constprop:1 verifier:false max_iters:1 \
+  |> pass.upass constprop:1 verifier:false max_iters:1 ssa:1 attributes:1 \
   |> pass.lnast_to_lgraph path:${LGDB} \
   |> inou.cgen.verilog odir:${ODIR}"
 

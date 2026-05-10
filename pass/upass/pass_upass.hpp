@@ -14,6 +14,7 @@ protected:
   std::size_t              max_iters{1};
   bool                     inherit_labels{true};
   bool                     verifier_include_funcs{false};
+  bool                     run_ssa{false};
   upass::Options_map       pass_options;
 
 public:
