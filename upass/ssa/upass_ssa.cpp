@@ -102,13 +102,22 @@ void uPass_ssa::run(const std::shared_ptr<Lnast>& lnast) {
   auto new_root  = staging->set_root(Lnast_ntype::create_top());
   auto new_stmts = staging->add_child(new_root, Lnast_ntype::create_stmts());
 
-  // Copy body statements, skipping tuple_add I/O nodes.
+  // Copy body statements, skipping only the tuple_add nodes that target
+  // the harvested I/O tuple refs.  Body-local tuple_adds (local struct ops)
+  // must be preserved so downstream passes / the lowerer can see them.
   for (auto child : lnast->children(stmts_nid)) {
     if (Lnast_ntype::is_tuple_add(lnast->get_type(child))) {
-      // I/O tuple_adds have been harvested above — drop them.
-      // Body-internal tuple_adds (local struct ops) are also skipped for
-      // now; full Slice 6 tuple flattening is a future extension.
-      continue;
+      Lnast_nid first_ch = lnast->get_first_child(child);
+      if (!first_ch.is_invalid()) {
+        auto       tuple_ref = std::string(lnast->get_name(first_ch));
+        const bool is_io_input
+            = !input_ref_name.empty() && tuple_ref == input_ref_name && tuple_ref != k_empty_tuple;
+        const bool is_io_output
+            = !output_ref_name.empty() && tuple_ref == output_ref_name && tuple_ref != k_empty_tuple;
+        if (is_io_input || is_io_output) {
+          continue;  // I/O tuple_add — already harvested into io_meta_.
+        }
+      }
     }
     copy_subtree(lnast, child, staging, new_stmts);
   }
