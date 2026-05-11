@@ -189,6 +189,17 @@ next `get_tree()` call.
   `var.lnasts[i]` is the same pointer before and after; the body
   underneath is swapped.
 
+### 7.2.1 Partition descriptor as tree-level attribute
+
+Each tree carries a `Partition` descriptor (see `architecture.md §3`)
+as a tree-scope attribute on the `hhds::Tree`: kind
+(`comb`/`pipe`/`mod`), latency range, clock domain, port list,
+external boundaries, and the `interface_hash` / `state_shape_hash`
+content hashes. The clone/replace dance from §7.2 must preserve the
+descriptor on the new body — it is part of the partition's identity,
+not the tree body. `TreeIO::replace` should be passed (or recompute)
+the descriptor at swap time.
+
 ### 7.3 Out of scope for Phase 7
 
 - Hoisting Forest ownership to `Eprp_var` so every LNAST in a run shares

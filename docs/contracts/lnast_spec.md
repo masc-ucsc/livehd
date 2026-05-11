@@ -238,14 +238,34 @@ or add a `match` node.
 ### 3.9 Lambda / function types with timing
 
 ```pyrope
-comb add(a:u8, b:u8) -> (result:u8) { ... }
-pipe[1] counter() -> (reg count:u8) { ... }
-flow alu(in1, in2) -> (out) { ... }
+comb add(a:u8, b:u8) -> (sum:u9) { ... }
+pipe[2] mac(clk:clock, a:u8, b:u8, acc:u16) -> (out:u16) { ... }
+pipe[1..<4] alu(in1:u8, in2:u8) -> (out:u8) { ... }
+mod cpu(
+  clk:clock, rst:reset,
+  in:  (instr:u32, data_in:u32),
+  out: (data_out:u32, valid:bool),
+  ext: imem : memory(addr:u10, data:u32, bits=32, size=1024),
+) { ... }
 ```
 
-`comp_type_lambda` exists but doesn't carry `comb`/`pipe`/`flow`/`mod`
-classification or the `[N]` pipeline depth. Need to either extend the node or
-add an attribute.
+**Resolution.** `comp_type_lambda` carries a `Partition` descriptor —
+see `architecture.md §3` for the full struct. Concretely:
+
+- `kind` ∈ {`comb`, `pipe`, `mod`} stored as an attribute on the node
+  (`flow` is deferred).
+- `latency_range` = `{lo, hi}`. Plain `pipe[N]` has `lo == hi == N`.
+  `pipe[1..<N]` has `lo == 1, hi == N-1`. `pipe[N]` is a **hard
+  contract** (exact); `pipe[1..<N]` is also hard (the tool picks any
+  value in the closed range, but the body must be retimeable to *some*
+  value in it).
+- Input and output lists are **flat, named, typed port lists** — not
+  tuple types. Each port has its own bits/sign/role/`decl_loc`. The
+  body may still construct tuples internally (`out = (sum, carry)`);
+  the partition boundary destructures.
+- `ext:` is a third list at the partition signature for external
+  memories and submodule references — see `attributes_spec.md` and
+  `lnast2lgraph.md §5` for the binding rules.
 
 ### 3.10 `ref` parameters
 
@@ -407,10 +427,30 @@ diff-check their LNAST output.
 
 ### 6.3 `inou/slang`
 
+*Status:* **non-critical / experimental.** Pyrope is the design-center
+input for the agent loop; SystemVerilog ingress is not on the hot path.
+`inou/slang` is retained as a language-portability sanity check that
+LNAST stays generic across producers, and as a potential fallback when
+a feature is reachable in SV but not yet implemented in `inou/prp`.
+Candidate for removal if maintenance cost rises.
+
 - `process_top_instance` at `slang_tree.cpp:113` — the `I(false)` is
   actually unreachable in practice (InterfacePort is handled in its own
   branch with a FIXME log). First SV interface test will print FIXME and
   silently skip, not crash.
+
+### 6.4 `inou/yosys` (Verilog → LGraph direct path)
+
+*Status:* **kept as a testing substrate, not an agent-loop feature.**
+The yosys-driven Verilog→LGraph path bypasses LNAST entirely; its value
+is providing an independent input to LGraph passes (LEC, bitwidth,
+cgen, partitioning) without depending on the Pyrope front-end being
+correct. It is also a fallback for features not yet implemented on the
+Pyrope path.
+
+Not used by the agent feedback loop. Verilog *egress* (LGraph→Verilog,
+`inou/cgen`) remains primary because it closes the loop with external
+synth and LEC against vendor flows.
 
 ---
 

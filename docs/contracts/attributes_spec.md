@@ -43,6 +43,22 @@ logic. `rand` propagates through calls and has LGraph-generation behavior.
 
 ### B. LGraph signal / wiring attrs — comptime-resolved connection semantics
 
+**Partition-level vs per-decl.** Under the partition model
+(`architecture.md §3`), `clock` and `reset` are declared at the
+partition signature as typed ports (`clk:clock`, `rst:reset`), and
+each partition has a single clock domain and reset for its body.
+Per-declaration `clk::[clock]` / `rst::[reset]` markers remain valid
+for declaring signals as clocks/resets at the language level, but the
+partition's clock/reset identity is the load-bearing fact used by
+cross-clock checks and LEC. Reg / memory `clock_pin` / `reset_pin`
+override the default by referencing a port by name.
+
+External memories declared in a partition's `ext:` list (see
+`architecture.md §3.3`) carry their own pin attributes (`addr`,
+`din`, `enable`, `rdport`, `wensize`, etc.) at the boundary; the LEC
+pass uses the `ext:` declaration as the abstraction handle
+(`architecture.md §5.2`).
+
 Signal classification: `clock`, `reset` mark a declared wire/input as a
 clock or reset signal, e.g. `clk::[clock]`.
 Debug / sticky visibility: `debug` / `_debug` and any user `_*` sticky attr

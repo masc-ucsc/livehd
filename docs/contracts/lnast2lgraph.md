@@ -16,6 +16,12 @@ of existing LGraph structure. Later passes can optimize the graph.
 
 ## 1. Pipeline context
 
+`lnast2lgraph` is the **synthesis-path** lowering. See
+`architecture.md` for the Y-diagram: post-upass LNAST lowers to either
+this path (LGraph → synth / LEC / Verilog egress / large simulation)
+or to `hlop`/`slop` (fast simulation, hot-reloadable). Both paths
+share the upass trunk; do not duplicate upass work in either backend.
+
 The compiler pipeline has three conceptual LNAST stages before LGraph
 generation:
 
@@ -153,14 +159,25 @@ Multiple outputs map to multiple `Sub` driver pins in output tuple order.
 
 ### Tree-level I/O declarations
 
-Each LNAST tree (function / module / pipe) carries its own declared input and
-output interface. The Forest stores this on a per-tree side structure
-(`tree_io` next to `trees`), populated by the local upass once it has fully
-resolved the tree's body. After the local upass completes, every tree's
-`tree_io` lists, in declared order:
+Each LNAST tree (function / module / pipe) carries its own
+**`Partition` descriptor** (see `architecture.md §3`), populated by
+the local upass once the body is resolved. The descriptor is the
+single source of truth for I/O, latency, clock/reset domain, external
+boundaries, and the two content hashes that drive incremental rebuild
+and checkpoint compatibility:
 
-- input variable names and their types/widths (or "unknown" if unresolved);
-- output variable names and their types/widths.
+- `kind` ∈ {`comb`, `pipe[N]`, `pipe[1..<N]`, `mod`} — see
+  `architecture.md §3.1`. `pipe` latency is a hard contract; the
+  translator must reject any body that cannot be retimed to the
+  declared latency (or some value in the legal range).
+- `inputs` / `outputs` are a flat, named, typed port list — never a
+  tuple type. Each port has its own bits / sign / role / `decl_loc`.
+- `ext` lists declared external partitions (memories, submodule
+  references). Memory abstraction for LEC keys off this list.
+- `interface_hash` — content hash over `(kind, latency_range, sorted
+  ports, ext)`. Caller cache key.
+- `state_shape_hash` — content hash over internal `reg` / `memory`
+  declarations. Checkpoint compatibility key (`architecture.md §9`).
 
 Call sites do **not** need to carry an explicit `outputs` child. The
 information needed at LGraph generation lives on the callee tree, not on the
@@ -186,12 +203,18 @@ callee's `tree_io` output list during LGraph generation.
 LGraph generation contract for each fcall:
 
 1. Resolve the callee tree by name.
-2. Read the callee's `tree_io` to get declared input and output ordering and
-   types/widths.
-3. Validate that the fcall's named/positional inputs match the callee inputs
-   (presence, count, type/width compatibility). Mismatches are compile errors.
-4. Emit a `Sub` node and bind result fields to driver pins in callee output
-   order.
+2. Read the callee's `Partition` descriptor to get declared input/output
+   ordering, types/widths, and `interface_hash`.
+3. Validate that the fcall's named/positional inputs match the callee
+   inputs (presence, count, type/width compatibility). Mismatches are
+   compile errors.
+4. Bind by `interface_hash`: the caller records the hash it was compiled
+   against. A later edit that changes only the callee's *body* (same
+   `interface_hash`) does not invalidate the caller's LGraph; an edit
+   that changes the interface does. This is the incrementality contract
+   from `architecture.md §4`.
+5. Emit a `Sub` node and bind result fields to driver pins in callee
+   output order.
 
 If any input or output of the resolved callee has unknown type/width, the
 translator cannot finish:

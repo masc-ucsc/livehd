@@ -262,11 +262,24 @@ $ livehd list hierarchy @tst1 --top alu
 
 $ livehd list modules @tst1 --from original
 {"pattern":"modules","tag":"@tst1","source":"input:original","items":["foo","alu","regfile"]}
+
+$ livehd list partitions @tst1
+{"pattern":"partitions","tag":"@tst1","items":[
+  {"name":"add","kind":"comb","latency":0,"interface_hash":"0x1a2b…",
+   "state_shape_hash":"0x0","clock":null},
+  {"name":"mac","kind":"pipe","latency":2,"interface_hash":"0x3c4d…",
+   "state_shape_hash":"0x5e6f…","clock":"clk"},
+  {"name":"cpu","kind":"mod","interface_hash":"0x7a8b…",
+   "state_shape_hash":"0x9c0d…","clock":"clk","ext":["imem","dmem"]}
+]}
 ```
 
 Recommended initial tag-scoped patterns:
 
 - `modules` — list module names known in the tag
+- `partitions` — list partitions (`comb` / `pipe` / `mod`) with kind,
+  latency, clock domain, and `interface_hash` / `state_shape_hash`.
+  See `architecture.md §3`.
 - `hierarchy` — instance/module tree top at top or `--top`
 - `stats` — summary counts (modules, cells, flops, memories, edges)
 - `history` — which LiveHD steps have been run for the tag
@@ -326,6 +339,22 @@ $ livehd describe modules
 
 $ livehd describe hierarchy
 {"name":"hierarchy","description":"Return module/instance hierarchy top at top or --top","scope":"tag","selectors":{"optional":["top","from","format"]},"outputs":["tree"]}
+
+$ livehd describe partitions
+{"name":"partitions","description":"List partitions with kind, latency, clock domain, and content hashes","scope":"tag","selectors":{"optional":["kind","top","from"]},"outputs":["items"]}
+```
+
+### Hot-reload reporting
+
+Steps that may hot-reload (`run sim @tag --hot`) report the tier in
+the JSONL result (`simulation.md` hot-reload tiers). Agents read
+`tier` to decide whether the run is verification-grade or
+exploration-only:
+
+```jsonl
+{"seq":4,"tool":"livehd","step":"sim","status":"pass","tier":"hot-debug","elapsed":0.2,"at":"…"}
+{"seq":5,"tool":"livehd","step":"sim","status":"pass","tier":"hot-approx","warning":"checkpoint stale; not for LEC","elapsed":0.3,"at":"…"}
+{"seq":6,"tool":"livehd","step":"sim","status":"pass","tier":"cold","reason":"state_shape_hash changed","elapsed":4.1,"at":"…"}
 ```
 
 ### --help (human rendering of describe)
