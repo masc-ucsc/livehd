@@ -101,10 +101,7 @@ protected:
 
   uint64_t snode : 1;
   uint64_t input : 1;  // Same position for SEdge and LEdge
-#pragma clang diagnostic push
-#pragma clang diagnostic ignored "-Wunused"
-  uint64_t pad2 : 22;
-#pragma clang diagnostic pop
+  [[maybe_unused]] uint64_t pad2 : 22;
   [[nodiscard]] Index_id get_page_idx() const;
 
   [[nodiscard]] Port_ID get_dst_pid() const;
@@ -203,10 +200,7 @@ struct __attribute__((packed)) Node_internal_Page {
   uint64_t   pad1 : 56;  // 7bytes waste just to get Index_id aligned
   uint32_t   idx;        // 4bytes 32bits but for speed
   uint32_t   free_idx;   // 4bytes 32bits to the first free node
-#pragma clang diagnostic push
-#pragma clang diagnostic ignored "-Wunused"
-  uint8_t pad2[32 - 16];
-#pragma clang diagnostic pop
+  [[maybe_unused]] uint8_t pad2[32 - 16];
 
   [[nodiscard]] Index_id get_idx() const { return idx; }
 
