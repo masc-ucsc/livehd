@@ -60,7 +60,7 @@ TEST_F(VTest1, interface) {
   EXPECT_EQ(access("tdelta/liveparse/test1_modb.v", R_OK), F_OK);
 
   auto v1 = chunker2.get_generated_files();
-  EXPECT_EQ(v1.size(), 2);
+  EXPECT_EQ(v1.size(), 2U);
 
   std::string test2_verilog
       = "  "
@@ -74,7 +74,7 @@ TEST_F(VTest1, interface) {
   EXPECT_EQ(access("tdelta/liveparse/test1_modb.v", R_OK), F_OK);
 
   auto v = chunker2.get_generated_files();
-  EXPECT_EQ(v.size(), 1);
+  EXPECT_EQ(v.size(), 1U);
   EXPECT_EQ(v[0], "tdelta/liveparse/test1_moda.v");
 }
 
