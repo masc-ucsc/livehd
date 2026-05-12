@@ -171,6 +171,12 @@ void uPass_ssa::run(const std::shared_ptr<Lnast>& lnast) {
     if (stmt_has_dest(type)) {
       auto stmt_node = staging->add_child(new_stmts, type);
 
+      // Defer rename_map update until after RHS is fully copied so that a
+      // self-referencing assignment like `t = t + 1` (second assignment)
+      // reads the *previous* SSA version of `t` on the RHS, not the new one.
+      std::string pending_lhs;  // empty = no deferred update
+      std::string pending_ssa;
+
       bool first = true;
       for (auto sub : lnast->children(child)) {
         if (first) {
@@ -180,10 +186,11 @@ void uPass_ssa::run(const std::shared_ptr<Lnast>& lnast) {
 
           if (is_user_var(lhs_name)) {
             if (seen_lhs.count(lhs_name)) {
-              // Second (or later) assignment → fresh SSA version.
-              int n    = ++ssa_count[lhs_name];
+              // Preview next SSA version — do NOT touch rename_map yet.
+              int n    = ssa_count[lhs_name] + 1;
               out_name = lhs_name + "___ssa_" + std::to_string(n);
-              rename_map[lhs_name] = out_name;
+              pending_lhs = lhs_name;
+              pending_ssa = out_name;
             } else {
               seen_lhs.insert(lhs_name);
               // Initialise identity mapping so RHS reads work correctly
@@ -196,9 +203,15 @@ void uPass_ssa::run(const std::shared_ptr<Lnast>& lnast) {
           staging->add_child(stmt_node, Lnast_node::create_ref(out_name));
           first = false;
         } else {
-          // ── RHS: substitute renamed refs ───────────────────────────────
+          // ── RHS: rename_map still holds OLD mapping — correct. ──────────
           copy_with_rename(lnast, sub, staging, stmt_node, rename_map);
         }
+      }
+
+      // Apply deferred update: subsequent statements now see the new SSA name.
+      if (!pending_lhs.empty()) {
+        ++ssa_count[pending_lhs];
+        rename_map[pending_lhs] = pending_ssa;
       }
     } else {
       // Control-flow / structural nodes (if, func_def, …): copy verbatim.
