@@ -24,6 +24,7 @@ cc_test(
     deps = [
         ":upass_lnast_to_lgraph",
         "//lgraph",
+        "//upass/ssa:upass_ssa",
         "@googletest//:gtest_main",
     ],
 )
