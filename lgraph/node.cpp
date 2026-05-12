@@ -730,9 +730,9 @@ void Node::dump() const {
   std::print(" source:{} ", get_source());
 
   if (get_type_op() == Ntype_op::LUT) {
-    std::print(" lut:{}\n", get_type_lut()->to_pyrope());
+    std::print(" lut:{}\n", get_type_lut().to_pyrope());
   } else if (get_type_op() == Ntype_op::Const) {
-    std::print(" const:{}\n", get_type_const()->to_pyrope());
+    std::print(" const:{}\n", get_type_const().to_pyrope());
   } else if (get_type_op() == Ntype_op::Sub) {
     Lg_type_id sub_lgid = current_g->get_type_sub(nid);
     auto       sub_name = top_g->get_library().get_name(sub_lgid);

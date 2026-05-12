@@ -7,7 +7,6 @@
 #include <set>
 #include <unordered_map>
 
-#include "boost/multiprecision/cpp_int.hpp"
 #include "lnast_ntype.hpp"
 #include "str_tools.hpp"
 #include "upass_verifier.hpp"
@@ -17,17 +16,17 @@
 static upass::uPass_plugin cprop("constprop", upass::uPass_wrapper<uPass_constprop>::get_upass);
 
 Const uPass_constprop::range_to_mask(const Const& start, const Const& end) {
-  if (!start->is_i()) {
-    return Dlop::invalid();
+  if (!start.is_i()) {
+    return *Dlop::invalid();
   }
-  const auto lo = static_cast<Bits_t>(start->to_i());
-  if (end->is_nil()) {
-    return Dlop::get_neg_mask_value(lo);
+  const auto lo = static_cast<int>(start.to_i());
+  if (end.is_nil()) {
+    return *Dlop::get_neg_mask_value(lo);
   }
-  if (end->is_i() && end->to_i() >= start->to_i()) {
-    return Dlop::get_mask_value(static_cast<Bits_t>(end->to_i()), lo);
+  if (end.is_i() && end.to_i() >= start.to_i()) {
+    return *Dlop::get_mask_value(static_cast<int>(end.to_i()), lo);
   }
-  return Dlop::invalid();
+  return *Dlop::invalid();
 }
 
 uPass_constprop::uPass_constprop(std::shared_ptr<upass::Lnast_manager>& _lm) : uPass(_lm) {
@@ -180,7 +179,8 @@ void uPass_constprop::process_binary(F op) {
   if (!foldable(n1) || !foldable(n2)) {
     return;
   }
-  Const r = op(n1, n2);
+  Const r;
+  r = op(n1, n2);
   if (!r.is_invalid()) {
     store_trivial(var, r);
   }
@@ -203,70 +203,70 @@ void uPass_constprop::process_unary(F op) {
 }
 
 void uPass_constprop::process_plus() {
-  process_nary([](Const& r, Const n) { r = r->add_op(n); });
+  process_nary([](Const& r, Const n) { r = r.add_op(n); });
 }
 
 void uPass_constprop::process_minus() {
-  process_nary([](Const& r, Const n) { r = r->sub_op(n); });
+  process_nary([](Const& r, Const n) { r = r.sub_op(n); });
 }
 
 void uPass_constprop::process_mult() {
-  process_nary([](Const& r, Const n) { r = r->mult_op(n); });
+  process_nary([](Const& r, Const n) { r = r.mult_op(n); });
 }
 
 void uPass_constprop::process_div() {
-  process_nary([](Const& r, Const n) { r = r->div_op(n); });
+  process_nary([](Const& r, Const n) { r = r.div_op(n); });
 }
 
 void uPass_constprop::process_bit_and() {
-  process_nary([](Const& r, Const n) { r = r->and_op(n); });
+  process_nary([](Const& r, Const n) { r = r.and_op(n); });
 }
 
 void uPass_constprop::process_bit_or() {
-  process_nary([](Const& r, Const n) { r = r->or_op(n); });
+  process_nary([](Const& r, Const n) { r = r.or_op(n); });
 }
 
 void uPass_constprop::process_bit_not() {
-  process_unary([](Const& r) { r = r->not_op(); });
+  process_unary([](Const& r) { r = r.not_op(); });
 }
 
 void uPass_constprop::process_bit_xor() {
   // XOR via identity: (a | b) & ~(a & b)
-  process_binary([](Const n1, Const n2) { return n1->or_op(n2)->and_op(n1->and_op(n2)->not_op()); });
+  process_binary([](Const n1, Const n2) -> Const { return *n1.or_op(n2)->and_op(*n1.and_op(n2)->not_op()); });
 }
 
 void uPass_constprop::process_mod() {
-  process_binary([](Const n1, Const n2) {
+  process_binary([](Const n1, Const n2) -> Const {
     // Guard: modulo by zero is undefined behaviour.  Return invalid so the
     // caller leaves the variable unset rather than crashing.
-    if (n2->is_known_false()) {
-      return Dlop::invalid();
+    if (n2.is_known_false()) {
+      return *Dlop::invalid();
     }
-    return Dlop::create_integer(n1->to_i() % n2->to_i());
+    return *Dlop::create_integer(n1.to_i() % n2.to_i());
   });
 }
 
 void uPass_constprop::process_shl() {
   process_binary([](Const n1, Const n2) -> Const {
-    if (!n2->is_i()) return Dlop::invalid();
-    return n1->lsh_op(static_cast<Bits_t>(n2->to_i()));
+    if (!n2.is_i()) return *Dlop::invalid();
+    return *n1.lsh_op(static_cast<int>(n2.to_i()));
   });
 }
 
 void uPass_constprop::process_sra() {
   process_binary([](Const n1, Const n2) -> Const {
-    if (!n2->is_i()) return Dlop::invalid();
-    return n1->rsh_op(static_cast<Bits_t>(n2->to_i()));
+    if (!n2.is_i()) return *Dlop::invalid();
+    return *n1.rsh_op(static_cast<int>(n2.to_i()));
   });
 }
 
 void uPass_constprop::process_log_and() {
   process_binary(
-      [](Const n1, Const n2) -> Const { return (!n1->is_known_false() && !n2->is_known_false()) ? Dlop::create_integer(1) : Dlop::create_integer(0); });
+      [](Const n1, Const n2) -> Const { return (!n1.is_known_false() && !n2.is_known_false()) ? *Dlop::create_integer(1) : *Dlop::create_integer(0); });
 }
 
 void uPass_constprop::process_log_or() {
-  process_binary([](Const n1, Const n2) -> Const { return n1->ror_op(n2); });
+  process_binary([](Const n1, Const n2) -> Const { return *n1.ror_op(n2); });
 }
 
 void uPass_constprop::process_log_not() {
@@ -274,10 +274,10 @@ void uPass_constprop::process_log_not() {
     // Propagate nil: `!nil` stays nil so a chained `and` with a known-true
     // operand collapses to true (the cassert escape hatch for unset attrs
     // documented in attribute_todo.md §Phase 2).
-    if (r->is_nil()) {
+    if (r.is_nil()) {
       return;
     }
-    r = r->is_known_false() ? Dlop::create_integer(1) : Dlop::create_integer(0);
+    r = r.is_known_false() ? Dlop::create_integer(1) : Dlop::create_integer(0);
   });
 }
 
@@ -341,14 +341,16 @@ static std::optional<bool> compare_bundles_eq(const std::shared_ptr<Bundle const
       if (ov->is_invalid()) {
         return std::nullopt;
       }
-      // Use eq_op so wildcards (`0sb?`) compare by structural identity:
-      // `0sb? == 0sb?` is known-true, `0sb? == 1` is unknown. That lets
-      // bundles with matching wildcard slots still fold equal.
-      const Const eq = ov->eq_op(e.second.trivial);
-      if (eq->is_known_true()) {
+      // Wildcards (`0sb?`) compare by structural identity: `0sb? == 0sb?`
+      // is known-true, `0sb? == 1` is unknown. `same_repr` gives bit-for-bit
+      // identity (including unknown positions); `eq_op` reduces to known-false
+      // only when neither side carries unknowns. That lets bundles with
+      // matching wildcard slots still fold equal.
+      if (ov->same_repr(e.second.trivial)) {
         continue;
       }
-      if (eq->is_known_false()) {
+      const Const eq = *ov->eq_op(e.second.trivial);
+      if (eq.is_known_false()) {
         return false;
       }
       return std::nullopt;  // unknown bits prevent a definitive answer
@@ -498,7 +500,7 @@ void uPass_constprop::process_eq_ne_impl() {
   // synthesized nil and trip the verifier.
   struct Operand {
     std::shared_ptr<Bundle const> bundle;
-    Const                        scalar         = Dlop::invalid();
+    Const                        scalar;
     bool                          is_const_nil   = false;
     bool                          undeclared_ref = false;
   };
@@ -552,7 +554,7 @@ void uPass_constprop::process_eq_ne_impl() {
       // else: declared but no concrete value yet — leave scalar invalid.
     } else {
       o.scalar       = current_pyrope_value();
-      o.is_const_nil = o.scalar->is_nil();
+      o.is_const_nil = o.scalar.is_nil();
     }
     return o;
   };
@@ -592,23 +594,27 @@ void uPass_constprop::process_eq_ne_impl() {
   };
   if (a.bundle && b.bundle) {
     if (auto eq = compare_bundles_eq(a.bundle, b.bundle); eq.has_value()) {
-      result = (*eq ^ Negate) ? Dlop::create_integer(1) : Dlop::create_integer(0);
+      result = (*eq ^ Negate) ? *Dlop::create_integer(1) : *Dlop::create_integer(0);
     }
   } else if (a.bundle && !b.scalar.is_invalid() && bundle_count_non_attr(a.bundle) > 1) {
-    result = Negate ? Dlop::create_integer(1) : Dlop::create_integer(0);
+    result = Negate ? *Dlop::create_integer(1) : *Dlop::create_integer(0);
   } else if (b.bundle && !a.scalar.is_invalid() && bundle_count_non_attr(b.bundle) > 1) {
-    result = Negate ? Dlop::create_integer(1) : Dlop::create_integer(0);
+    result = Negate ? *Dlop::create_integer(1) : *Dlop::create_integer(0);
   } else if (!a.bundle && !b.bundle && !a.scalar.is_invalid() && !b.scalar.is_invalid()) {
-    // Defer to Lconst::eq_op: structural identity yields known-true even
-    // when both sides carry unknowns; otherwise a 1-bit `0sb?` for unknowns.
-    const Const eq = a.scalar->eq_op(b.scalar);
-    if (eq->is_known_true()) {
-      result = Negate ? Dlop::create_integer(0) : Dlop::create_integer(1);
-    } else if (eq->is_known_false()) {
-      result = Negate ? Dlop::create_integer(1) : Dlop::create_integer(0);
-    } else if (eq->has_unknowns()) {
-      // ne is bitwise-not of eq; a 1-bit unknown inverted is still 1-bit unknown.
-      result = eq;
+    // same_repr gives bit-identity including unknown positions (so
+    // `0sb? == 0sb?` is known-true). eq_op only reduces to known-false
+    // when neither side carries unknowns; otherwise it returns a 1-bit
+    // unknown which we propagate. `ne` is bitwise-not of `eq`; a 1-bit
+    // unknown inverted is still a 1-bit unknown.
+    if (a.scalar.same_repr(b.scalar)) {
+      result = Negate ? *Dlop::create_integer(0) : *Dlop::create_integer(1);
+    } else {
+      const Const eq = *a.scalar.eq_op(b.scalar);
+      if (eq.is_known_false()) {
+        result = Negate ? *Dlop::create_integer(1) : *Dlop::create_integer(0);
+      } else if (eq.has_unknowns()) {
+        result = eq;
+      }
     }
   }
 
@@ -621,17 +627,17 @@ void uPass_constprop::process_ne() { process_eq_ne_impl<true>(); }
 void uPass_constprop::process_eq() { process_eq_ne_impl<false>(); }
 
 void uPass_constprop::process_lt() {
-  process_binary([](Const x, Const y) { return x < y; });
+  process_binary([](Const x, Const y) -> Const { return x < y ? *Dlop::create_integer(1) : *Dlop::create_integer(0); });
 }
 void uPass_constprop::process_le() {
-  process_binary([](Const x, Const y) { return x <= y; });
+  process_binary([](Const x, Const y) -> Const { return x <= y ? *Dlop::create_integer(1) : *Dlop::create_integer(0); });
 }
 void uPass_constprop::process_gt() {
-  process_binary([](Const x, Const y) { return x > y; });
+  process_binary([](Const x, Const y) -> Const { return x > y ? *Dlop::create_integer(1) : *Dlop::create_integer(0); });
 }
 
 void uPass_constprop::process_ge() {
-  process_binary([](Const x, Const y) { return x >= y; });
+  process_binary([](Const x, Const y) -> Const { return x >= y ? *Dlop::create_integer(1) : *Dlop::create_integer(0); });
 }
 
 void uPass_constprop::process_if() {
@@ -733,7 +739,7 @@ void uPass_constprop::process_tuple_add() {
     auto pos_txt = std::to_string(pos);
 
     if (is_type(Lnast_ntype::Lnast_ntype_const)) {
-      bundle->set(pos_txt, Dlop::from_pyrope(current_text()));
+      bundle->set(pos_txt, *Dlop::from_pyrope(current_text()));
 
     } else if (is_type(Lnast_ntype::Lnast_ntype_ref)) {
       bundle->set(pos_txt, st.get_bundle(current_text()));
@@ -745,7 +751,7 @@ void uPass_constprop::process_tuple_add() {
       auto field_key = std::format(":{}:{}", pos_txt, key);
       move_to_sibling();
       if (is_type(Lnast_ntype::Lnast_ntype_const)) {
-        bundle->set(field_key, Dlop::from_pyrope(current_text()));
+        bundle->set(field_key, *Dlop::from_pyrope(current_text()));
       } else if (is_type(Lnast_ntype::Lnast_ntype_ref)) {
         bundle->set(field_key, st.get_bundle(current_text()));
       }
@@ -844,20 +850,20 @@ void uPass_constprop::process_tuple_concat() {
       }
       if (st.has_trivial(current_text())) {
         auto val = st.get_trivial(current_text());
-        if (val.is_invalid() || val->has_unknowns()) return false;
+        if (val.is_invalid() || val.has_unknowns()) return false;
         if (bundle_mode) {
           // Promote a string trivial entering an in-progress bundle concat
           // into a 1-tuple so positional ordering is preserved.
           acc_bundle->concat(wrap_scalar_as_bundle(val));
           return true;
         }
-        acc_scalar = is_first ? val : acc_scalar->concat_op(val);
+        acc_scalar = is_first ? val : *acc_scalar.concat_op(val);
         return true;
       }
       return false;
     }
     if (is_type(Lnast_ntype::Lnast_ntype_const)) {
-      auto val = Dlop::from_pyrope(current_text());
+      Const val = *Dlop::from_pyrope(current_text());
       if (val.is_invalid()) return false;
       if (bundle_mode) {
         // Wrap the const as a 1-tuple so `tuple ++ N` appends N as a slot.
@@ -866,7 +872,7 @@ void uPass_constprop::process_tuple_concat() {
       }
       // First-operand scalar mode: defer the decision until we see operand 2.
       // For now stay in scalar mode; an int operand 2 will trigger promotion.
-      acc_scalar = is_first ? val : acc_scalar->concat_op(val);
+      acc_scalar = is_first ? val : *acc_scalar.concat_op(val);
       return true;
     }
     return false;
@@ -982,7 +988,7 @@ void uPass_constprop::fold_does(const std::string& dst) {
     return;
   }
 
-  store_trivial(dst, structural_does(ba, bb) ? Dlop::create_integer(1) : Dlop::create_integer(0));
+  store_trivial(dst, structural_does(ba, bb) ? *Dlop::create_integer(1) : *Dlop::create_integer(0));
 }
 
 // Per-first-level summary used by fold_in / fold_has: groups a bundle's flat
@@ -1085,7 +1091,7 @@ void uPass_constprop::fold_in(const std::string& dst) {
 
     if (!le.name.empty()) {
       // Named entry — wildcard if value is nil.
-      if (le.value->is_nil()) {
+      if (le.value.is_nil()) {
         continue;
       }
       bool                found_name = false;
@@ -1102,10 +1108,10 @@ void uPass_constprop::fold_in(const std::string& dst) {
         if (re.value.is_invalid()) {
           break;  // defer (matched_value stays nullopt)
         }
-        const Const eq = le.value->eq_op(re.value);
-        if (eq->is_known_true()) {
+        const Const eq = *le.value.eq_op(re.value);
+        if (eq.is_known_true()) {
           matched_value = true;
-        } else if (eq->is_known_false()) {
+        } else if (eq.is_known_false()) {
           matched_value = false;
         }
         break;
@@ -1134,12 +1140,12 @@ void uPass_constprop::fold_in(const std::string& dst) {
           any_unknown = true;
           continue;
         }
-        const Const eq = le.value->eq_op(re.value);
-        if (eq->is_known_true()) {
+        const Const eq = *le.value.eq_op(re.value);
+        if (eq.is_known_true()) {
           matched = true;
           break;
         }
-        if (!eq->is_known_false()) {
+        if (!eq.is_known_false()) {
           any_unknown = true;
         }
       }
@@ -1198,15 +1204,15 @@ void uPass_constprop::fold_has(const std::string& dst) {
   if (key_val.is_string()) {
     // String literals round-trip through `'foo'` — strip the quotes to get
     // the bare name used in `:N:name` keys.
-    const std::string s = strip_pyrope_quotes(key_val->to_pyrope());
+    const std::string s = strip_pyrope_quotes(key_val.to_pyrope());
     for (const auto& e : entries) {
       if (e.name == s) {
         found = true;
         break;
       }
     }
-  } else if (!key_val->is_nil() && !key_val->has_unknowns()) {
-    const int target = key_val->to_i();
+  } else if (!key_val.is_nil() && !key_val.has_unknowns()) {
+    const int target = key_val.to_i();
     for (const auto& e : entries) {
       if (e.pos == target) {
         found = true;
@@ -1222,7 +1228,7 @@ void uPass_constprop::fold_has(const std::string& dst) {
 
 std::optional<Const> uPass_constprop::resolve_current_scalar() const {
   if (is_type(Lnast_ntype::Lnast_ntype_const)) {
-    return Dlop::from_pyrope(current_text());
+    return *Dlop::from_pyrope(current_text());
   }
   if (is_type(Lnast_ntype::Lnast_ntype_ref) && st.has_trivial(current_text())) {
     return st.get_trivial(current_text());
@@ -1289,7 +1295,7 @@ bool uPass_constprop::try_eval_comb_call(std::string_view dst, std::string_view 
     const auto type = fn->get_type(nid);
     const auto name = fn->get_name(nid);
     if (Lnast_ntype::is_const(type)) {
-      return Dlop::from_pyrope(name);
+      return *Dlop::from_pyrope(name);
     }
     if (Lnast_ntype::is_ref(type)) {
       auto it = local_values.find(std::string(name));
@@ -1434,7 +1440,8 @@ bool uPass_constprop::try_eval_comb_call(std::string_view dst, std::string_view 
         || !b_val.has_value() || b_val->is_invalid() || b_val->is_string()) {
       return Eval_result::deferred;
     }
-    Const result = pred(*a_val, *b_val) ? Dlop::create_integer(1) : Dlop::create_integer(0);
+    Const result;
+    result = pred(*a_val, *b_val) ? Dlop::create_integer(1) : Dlop::create_integer(0);
     local_values[std::string(fn->get_name(lhs))] = result;
     return Eval_result::processed;
   };
@@ -1460,20 +1467,20 @@ bool uPass_constprop::try_eval_comb_call(std::string_view dst, std::string_view 
     }
 
     if (Lnast_ntype::is_plus(type)) {
-      return eval_nary(stmt, [](Const a, Const b) { return a->add_op(b); });
+      return eval_nary(stmt, [](Const a, Const b) { return a.add_op(b); });
     }
     if (Lnast_ntype::is_minus(type)) {
-      return eval_nary(stmt, [](Const a, Const b) { return a->sub_op(b); });
+      return eval_nary(stmt, [](Const a, Const b) { return a.sub_op(b); });
     }
     if (Lnast_ntype::is_mult(type)) {
-      return eval_nary(stmt, [](Const a, Const b) { return a->mult_op(b); });
+      return eval_nary(stmt, [](Const a, Const b) { return a.mult_op(b); });
     }
 
     if (Lnast_ntype::is_eq(type)) {
-      return eval_compare(stmt, [](const Const& a, const Const& b) { return a->eq_op(b)->is_known_true(); });
+      return eval_compare(stmt, [](const Const& a, const Const& b) { return a.eq_op(b)->is_known_true(); });
     }
     if (Lnast_ntype::is_ne(type)) {
-      return eval_compare(stmt, [](const Const& a, const Const& b) { return !a->eq_op(b)->is_known_true(); });
+      return eval_compare(stmt, [](const Const& a, const Const& b) { return !a.eq_op(b)->is_known_true(); });
     }
     if (Lnast_ntype::is_lt(type)) {
       return eval_compare(stmt, [](const Const& a, const Const& b) { return a < b; });
@@ -1760,9 +1767,9 @@ void uPass_constprop::process_func_call() {
       return a;
     }
     try {
-      return Dlop::from_pyrope(strip_pyrope_quotes(a->to_pyrope()));
+      return *Dlop::from_pyrope(strip_pyrope_quotes(a.to_pyrope()));
     } catch (...) {
-      return Dlop::invalid();
+      return *Dlop::invalid();
     }
   };
 
@@ -1773,20 +1780,20 @@ void uPass_constprop::process_func_call() {
     // concat, so coerce each int arg to its decimal-text Const up front;
     // the subsequent concat_op then sees only strings.
     auto stringify = [](const Const& v) -> Const {
-      if (v->is_nil()) {
-        return Dlop::from_string("nil");  // mirror Pyrope's nil → 'nil' text
+      if (v.is_nil()) {
+        return *Dlop::from_string("nil");  // mirror Pyrope's nil → 'nil' text
       }
       if (v.is_string()) {
         return v;
       }
-      return Dlop::from_string(std::to_string(v->to_i()));
+      return *Dlop::from_string(std::to_string(v.to_i()));
     };
     if (args.empty()) {
       result = Dlop::from_string("");
     } else {
       result = stringify(args.front());
       for (size_t i = 1; i < args.size(); ++i) {
-        result = result->concat_op(stringify(args[i]));
+        result = result.concat_op(stringify(args[i]));
       }
     }
   } else {
@@ -1798,7 +1805,7 @@ void uPass_constprop::process_func_call() {
       return;
     }
     if (kind == Cast::to_uint) {
-      if (v.is_string() || v->is_negative()) {
+      if (v.is_string() || v.is_negative()) {
         // Cast failure (non-numeric string or negative) → pyrope `nil`.
         v = Dlop::nil();
       }
@@ -1858,7 +1865,7 @@ void uPass_constprop::process_range() {
   if (it == range_map.end()) {
     range_map.emplace(dst, std::make_pair(start, end));
     changed = true;
-  } else if (it->second.first != start || it->second.second != end) {
+  } else if (!it->second.first.same_repr(start) || !it->second.second.same_repr(end)) {
     it->second = {start, end};
     changed    = true;
   }
@@ -1866,14 +1873,14 @@ void uPass_constprop::process_range() {
   // Materialize a tuple bundle for closed integer ranges so eq/tuple_get can
   // operate on the concrete sequence. Skip for open-ended (nil) or negative
   // spans, and bound the size so a pathological span can't blow up memory.
-  if (start->is_i() && end->is_i()) {
-    const auto lo = start->to_i();
-    const auto hi = end->to_i();
+  if (start.is_i() && end.is_i()) {
+    const auto lo = start.to_i();
+    const auto hi = end.to_i();
     if (hi >= lo && (hi - lo) < 4096) {
       auto bundle = std::make_shared<Bundle>(dst);
       int  pos    = 0;
       for (int64_t v = lo; v <= hi; ++v, ++pos) {
-        bundle->set(std::to_string(pos), Dlop::create_integer(v));
+        bundle->set(std::to_string(pos), *Dlop::create_integer(v));
       }
       st.set(dst, bundle);
     }
@@ -1908,16 +1915,16 @@ void uPass_constprop::process_tuple_get() {
       const auto& src_val = st.get_trivial(src);
       const auto& start   = it->second.first;
       const auto& end_lc  = it->second.second;
-      if (src_val.is_string() && start->is_i()) {
-        const auto  start_idx = static_cast<size_t>(start->to_i());
-        std::string body      = strip_pyrope_quotes(src_val->to_pyrope());
+      if (src_val.is_string() && start.is_i()) {
+        const auto  start_idx = static_cast<size_t>(start.to_i());
+        std::string body      = strip_pyrope_quotes(src_val.to_pyrope());
         size_t      len       = body.size();
-        bool        open      = end_lc->is_nil();  // open-end sentinel for `x[a..]`
-        if (!open && !end_lc->is_i()) {
+        bool        open      = end_lc.is_nil();  // open-end sentinel for `x[a..]`
+        if (!open && !end_lc.is_i()) {
           move_to_parent();
           return;
         }
-        size_t end_i = open ? (len == 0 ? 0 : len - 1) : static_cast<size_t>(end_lc->to_i());
+        size_t end_i = open ? (len == 0 ? 0 : len - 1) : static_cast<size_t>(end_lc.to_i());
         if (start_idx <= len && end_i + 1 <= len && start_idx <= end_i + 1) {
           store_trivial(dst, Dlop::from_string(body.substr(start_idx, end_i - start_idx + 1)));
           move_to_parent();
@@ -1928,7 +1935,7 @@ void uPass_constprop::process_tuple_get() {
       if (foldable(src_val)) {
         const Const mask = range_to_mask(start, end_lc);
         if (!mask.is_invalid()) {
-          const Const result = src_val->get_mask_op(mask);
+          const Const result = *src_val.get_mask_op(mask);
           if (!result.is_invalid()) {
             store_trivial(dst, result);
           }
@@ -1953,7 +1960,7 @@ void uPass_constprop::process_tuple_get() {
         return;  // can't fold unknown index
       }
       key += '.';
-      key += std::to_string(idx->to_i());
+      key += std::to_string(idx.to_i());
     } else {
       move_to_parent();
       return;  // unhandled field type
@@ -2047,7 +2054,7 @@ void uPass_constprop::process_tuple_set() {
       // to_field() unwraps a string trivial to its content (no quotes) and
       // renders an int trivial as its decimal text — exactly the field-name
       // shape we want for `tuple[ref] = …`.
-      elem = st.get_trivial(elem)->to_field();
+      elem = st.get_trivial(elem).to_field();
     }
     path.push_back(std::move(elem));
   }
@@ -2074,7 +2081,7 @@ void uPass_constprop::process_tuple_set() {
       }
       return std::nullopt;
     }
-    Const v = Dlop::from_pyrope(val_child.text);
+    Const v = *Dlop::from_pyrope(val_child.text);
     if (v.is_invalid()) return std::nullopt;
     return v;
   };
@@ -2154,7 +2161,7 @@ void uPass_constprop::process_tuple_set() {
       }
     }
   } else {
-    Const val = Dlop::from_pyrope(val_child.text);
+    Const val = *Dlop::from_pyrope(val_child.text);
     if (!val.is_invalid()) {
       store_trivial(key, val);
     }
@@ -2186,17 +2193,17 @@ void uPass_constprop::process_red_or() {
   // Reduce-OR: 1 if any bit in input is set. Unknown bits are ok — the
   // value is non-zero iff *any* bit (known or `?`) is set.
   process_reduction([](const Const& v) { return !v.is_invalid(); },
-                    [](const Const& v) { return !v->is_known_false(); });
+                    [](const Const& v) { return !v.is_known_false(); });
 }
 
 void uPass_constprop::process_red_and() {
   // Reduce-AND: 1 iff every bit is set (input is a 2^n-1 mask).
-  process_reduction(foldable, [](const Const& v) { return v->is_mask(); });
+  process_reduction(foldable, [](const Const& v) { return v.is_mask(); });
 }
 
 void uPass_constprop::process_red_xor() {
   // Reduce-XOR: parity of set bits.
-  process_reduction(foldable, [](const Const& v) { return v->popcount() % 2 == 1; });
+  process_reduction(foldable, [](const Const& v) { return v.popcount() % 2 == 1; });
 }
 
 // ── Bit Manipulation ─────────────────────────────────────────────────────────
@@ -2296,8 +2303,8 @@ void uPass_constprop::process_sext() {
   move_to_sibling();
   const auto nbits_lc = current_prim_value();
   move_to_parent();
-  if (foldable(src) && !nbits_lc.is_invalid() && nbits_lc->is_i()) {
-    store_trivial(var, src->sext_op(static_cast<Bits_t>(nbits_lc->to_i())));
+  if (foldable(src) && !nbits_lc.is_invalid() && nbits_lc.is_i()) {
+    store_trivial(var, src.sext_op(static_cast<int>(nbits_lc.to_i())));
   }
 }
 
@@ -2333,7 +2340,7 @@ void uPass_constprop::process_get_mask() {
   if (!foldable(value) || !foldable(mask)) {
     return;
   }
-  Const result = value->get_mask_op(mask);
+  Const result = *value.get_mask_op(mask);
   if (!result.is_invalid()) {
     store_trivial(var, result);
   }

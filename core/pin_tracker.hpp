@@ -36,7 +36,7 @@ public:
       it = full_map.find(a_pin);
     }
 
-    auto pairs = mask->get_mask_range_pairs();
+    auto pairs = mask.get_mask_range_pairs();
     for (const auto& p : pairs) {
       auto start = static_cast<size_t>(p.first);
       auto end   = static_cast<size_t>(p.first + p.second);  // [start,end)
@@ -61,7 +61,7 @@ public:
     }
 
     size_t pick_v_pos = 0;
-    auto   pairs      = mask->get_mask_range_pairs();
+    auto   pairs      = mask.get_mask_range_pairs();
     for (const auto& p : pairs) {
       auto start = static_cast<size_t>(p.first);
       auto end   = static_cast<size_t>(p.first + p.second);  // [start,end)
@@ -87,7 +87,7 @@ public:
   }
 
   void add_shl(Pin dst_pin, Pin a_pin, Bits_t a_sbits, Const amount) {
-    const auto amount_i = amount->to_i();
+    const auto amount_i = amount.to_i();
     I(amount_i >= 0);
 
     const auto amount_u  = static_cast<size_t>(amount_i);
@@ -120,7 +120,7 @@ public:
 
   void add_sra(Pin dst_pin, Pin a_pin, Bits_t a_sbits, Const amount) {
     I(a_sbits > 0);
-    const auto amount_i = amount->to_i();
+    const auto amount_i = amount.to_i();
     I(amount_i >= 0);
 
     const auto amount_u  = static_cast<size_t>(amount_i);
@@ -150,7 +150,7 @@ public:
 
   void add_sext(Pin dst_pin, Pin a_pin, Bits_t a_sbits, Const amount) {
     I(a_sbits > 0);
-    const auto amount_i = amount->to_i();
+    const auto amount_i = amount.to_i();
     I(amount_i >= 0);
 
     const auto amount_u = static_cast<size_t>(amount_i);
@@ -206,7 +206,7 @@ public:
     auto& pv = full_map[dst_pin];
     it       = full_map.find(a_pin);  // WARNING: insert could destroy iterator
 
-    auto max_bits_i = a_mask->get_mask_range().second;
+    auto max_bits_i = a_mask.get_mask_range().second;
     I(max_bits_i >= 0);
     auto max_bits = static_cast<size_t>(max_bits_i);
     if (it->second.size() < max_bits) {
@@ -221,7 +221,7 @@ public:
       if (it->second[i].id == Zero_pin && it->second[i].pos == 0) {
         continue;  // Nothing to do in this bit
       }
-      if (!a_mask->bit_test(static_cast<Bits_t>(i))) {
+      if (!a_mask.bit_test(static_cast<Bits_t>(i))) {
         continue;
       }
       if (pv[i].id == Zero_pin && pv[i].pos == 0) {

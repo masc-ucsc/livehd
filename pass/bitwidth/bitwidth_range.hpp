@@ -70,6 +70,11 @@ public:
 
   Bitwidth_range(const Const& value);
   Bitwidth_range(const Const& min_val, const Const& max_val);
+  // Convenience overloads accepting transient spool_ptr<Dlop> op results.
+  Bitwidth_range(const spool_ptr<Dlop>& value) : Bitwidth_range(*value) {}
+  Bitwidth_range(const spool_ptr<Dlop>& min_val, const spool_ptr<Dlop>& max_val) : Bitwidth_range(*min_val, *max_val) {}
+  Bitwidth_range(const Const& min_val, const spool_ptr<Dlop>& max_val) : Bitwidth_range(min_val, *max_val) {}
+  Bitwidth_range(const spool_ptr<Dlop>& min_val, const Const& max_val) : Bitwidth_range(*min_val, max_val) {}
 
   Bitwidth_range(const int64_t min_val, const int64_t max_val) {
     I(min_val <= max_val);
@@ -80,11 +85,21 @@ public:
 
   void set_narrower_range(const Bitwidth_range& bw);
   void set_narrower_range(const Const& min_val, const Const& max_val) { set_narrower_range(Bitwidth_range(min_val, max_val)); }
+  void set_narrower_range(const spool_ptr<Dlop>& min_val, const spool_ptr<Dlop>& max_val) { set_narrower_range(*min_val, *max_val); }
+  void set_narrower_range(const Const& min_val, const spool_ptr<Dlop>& max_val) { set_narrower_range(min_val, *max_val); }
+  void set_narrower_range(const spool_ptr<Dlop>& min_val, const Const& max_val) { set_narrower_range(*min_val, max_val); }
 
   void set_wider_range(const Bitwidth_range& bw);
   void set_wider_range(const Const& min_val, const Const& max_val) { set_wider_range(Bitwidth_range(min_val, max_val)); }
+  void set_wider_range(const spool_ptr<Dlop>& min_val, const spool_ptr<Dlop>& max_val) { set_wider_range(*min_val, *max_val); }
+  void set_wider_range(const Const& min_val, const spool_ptr<Dlop>& max_val) { set_wider_range(min_val, *max_val); }
+  void set_wider_range(const spool_ptr<Dlop>& min_val, const Const& max_val) { set_wider_range(*min_val, max_val); }
 
   void set_range(const Const& min_val, const Const& max_val);
+  void set_range(const spool_ptr<Dlop>& min_val, const Const& max_val) { set_range(*min_val, max_val); }
+  void set_range(const Const& min_val, const spool_ptr<Dlop>& max_val) { set_range(min_val, *max_val); }
+  void set_range(const spool_ptr<Dlop>& min_val, const spool_ptr<Dlop>& max_val) { set_range(*min_val, *max_val); }
+  void set_range(int64_t min_val, int64_t max_val) { set_range(*Dlop::create_integer(min_val), *Dlop::create_integer(max_val)); }
 
   bool   is_overflow() const { return overflow; };
   void   set_sbits_range(Bits_t size);
@@ -92,9 +107,9 @@ public:
   Bits_t get_sbits() const;
   Const get_range() const {
     if (overflow) {
-      return Dlop::create_integer(1)->lsh_op(get_sbits());
+      return *Dlop::create_integer(1)->lsh_op(get_sbits());
     }
-    return Dlop::create_integer(max - min + 1);
+    return *Dlop::create_integer(max - min + 1);
   }
   Const get_max() const { return to_lconst(overflow, max); };
   Const get_min() const { return to_lconst(overflow, min); };

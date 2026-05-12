@@ -681,7 +681,7 @@ std::shared_ptr<Bundle> Bundle::get_bundle(const std::shared_ptr<Bundle const>& 
 
   int pos = 0;
   for (const auto& e : tup->key_map) {
-    auto field = e.second.trivial->to_field();
+    auto field = e.second.trivial.to_field();
 
     if (!has_trivial(field)) {
       Lnast::info("bundle {} can not be indexed with {} key:{} with value {}", get_name(), tup->get_name(), e.first, field);
@@ -1006,13 +1006,13 @@ bool Bundle::concat(const std::shared_ptr<Bundle const>& tup) {
         // "drop nil → keep LHS" branch since LHS is already nil.)
         const auto& lhs_top                = it->second;
         bool        rhs_is_nil_scalar      = g.entries.size() == 1 && g.entries[0].first.empty()
-                                             && g.entries[0].second->is_nil();
+                                             && g.entries[0].second.is_nil();
         if (rhs_is_nil_scalar) {
           continue;  // RHS contributes nothing; LHS slot stays untouched.
         }
         bool lhs_is_nil_scalar = false;
         for (auto& e : key_map) {
-          if (e.first == lhs_top && e.second.trivial->is_nil()) {
+          if (e.first == lhs_top && e.second.trivial.is_nil()) {
             lhs_is_nil_scalar = true;
             break;
           }
@@ -1071,12 +1071,12 @@ Const Bundle::flatten() const {
       continue;
     }
 
-    if (e.second.trivial->is_invalid()) {
+    if (e.second.trivial.is_invalid()) {
       return e.second.trivial;
     }
 
-    auto v = e.second.trivial->lsh_op(result->get_bits());
-    result = result->or_op(v->get_mask_op());
+    auto v = e.second.trivial.lsh_op(result.get_bits());
+    result = result.or_op(*v->get_mask_op());
   }
 
   return result;
@@ -1092,7 +1092,7 @@ std::shared_ptr<Bundle> Bundle::create_assign(const std::shared_ptr<Bundle const
 }
 
 std::shared_ptr<Bundle> Bundle::create_assign(const Const& rhs_trivial) const {
-  if (rhs_trivial->is_invalid()) {
+  if (rhs_trivial.is_invalid()) {
     return nullptr;
   }
 

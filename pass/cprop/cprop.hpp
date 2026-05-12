@@ -39,7 +39,9 @@ protected:
   void replace_part_inputs_const(Node& node, XEdge_iterator& inp_edges_ordered);
   void replace_all_inputs_const(Node& node, XEdge_iterator& inp_edges_ordered);
   void replace_node(Node& node, const Const& result);
+  void replace_node(Node& node, const spool_ptr<Dlop>& result) { replace_node(node, *result); }
   void replace_logic_node(Node& node, const Const& result);
+  void replace_logic_node(Node& node, const spool_ptr<Dlop>& result) { replace_logic_node(node, *result); }
 
   void try_connect_tuple_to_sub(const std::shared_ptr<Lgtuple const>& tup, Node& sub_node, Node& tup_node);
   void try_connect_lgcpp(const Node& node);

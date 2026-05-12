@@ -250,7 +250,7 @@ bool bwd(int n) {
       return false;
     }
 
-    // g->dump();
+    // g.dump();
     // std::cout << "----------------------\n";
     absl::flat_hash_set<Node::Compact> visited;
     for (auto node : g->backward()) {

@@ -107,7 +107,7 @@ void uPass_attributes::migrate_aggregate_attrs_to_fields(std::string_view base) 
       if (it == slot.end()) {
         slot.emplace(attr_name, chosen_value);
         mark_changed();
-      } else if (it->second != chosen_value) {
+      } else if (!it->second.same_repr(chosen_value)) {
         // An earlier migration wrote the aggregate value here, but the
         // source-tmp's override is more authoritative. Update.
         it->second = chosen_value;
@@ -127,7 +127,7 @@ void uPass_attributes::migrate_aggregate_attrs_to_fields(std::string_view base) 
         if (pit == pslot.end()) {
           pslot.emplace(attr_name, chosen_value);
           mark_changed();
-        } else if (pit->second != chosen_value) {
+        } else if (!pit->second.same_repr(chosen_value)) {
           pit->second = chosen_value;
           mark_changed();
         }

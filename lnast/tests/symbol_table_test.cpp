@@ -5,6 +5,12 @@
 #include "gtest/gtest.h"
 #include "lrand.hpp"
 
+// Dlop no longer defines operator==; same_repr is the structural-identity
+// check (including matching unknowns), which is what these tests actually
+// want. Wrap it so EXPECT_TRUE prints something readable on mismatch.
+#define EXPECT_DLOP_EQ(lhs, rhs) EXPECT_TRUE((lhs).same_repr(*(rhs))) \
+    << "  lhs: " << (lhs).to_pyrope() << "\n  rhs: " << (rhs)->to_pyrope()
+
 class Symbol_table_test : public ::testing::Test {
 protected:
   void SetUp() override {}
@@ -33,14 +39,14 @@ TEST_F(Symbol_table_test, trivial_constants) {
     EXPECT_TRUE(st.has_trivial("foo"));
     EXPECT_TRUE(st.has_bundle("foo"));
 
-    EXPECT_EQ(st.get_trivial("foo"), Dlop::create_integer(1));
+    EXPECT_DLOP_EQ(st.get_trivial("foo"), Dlop::create_integer(1));
   }
 
   {
     auto ok = st.mut("foo", Dlop::create_integer(2));
     EXPECT_TRUE(ok);
 
-    EXPECT_EQ(st.get_trivial("foo"), Dlop::create_integer(2));
+    EXPECT_DLOP_EQ(st.get_trivial("foo"), Dlop::create_integer(2));
   }
 
   auto out = st.leave_scope();
@@ -61,7 +67,7 @@ TEST_F(Symbol_table_test, recursion) {
 
   auto ok1 = st.mut("foo", Dlop::create_integer(1));
   EXPECT_TRUE(ok1);
-  EXPECT_EQ(st.get_trivial("foo"), Dlop::create_integer(1));
+  EXPECT_DLOP_EQ(st.get_trivial("foo"), Dlop::create_integer(1));
 
   //------------------------------------------
   st.function_scope("myfunc");
@@ -72,7 +78,7 @@ TEST_F(Symbol_table_test, recursion) {
 
   auto ok3 = st.mut("foo", Dlop::create_integer(2));
   EXPECT_TRUE(ok3);
-  EXPECT_EQ(st.get_trivial("foo"), Dlop::create_integer(2));
+  EXPECT_DLOP_EQ(st.get_trivial("foo"), Dlop::create_integer(2));
 
   //------------------------------------------
   st.function_scope("other_call");
@@ -83,7 +89,7 @@ TEST_F(Symbol_table_test, recursion) {
 
   auto ok5 = st.mut("foo", Dlop::create_integer(3));
   EXPECT_TRUE(ok5);
-  EXPECT_EQ(st.get_trivial("foo"), Dlop::create_integer(3));
+  EXPECT_DLOP_EQ(st.get_trivial("foo"), Dlop::create_integer(3));
 
   //------------------------------------------
   st.function_scope("myfunc");
@@ -94,17 +100,17 @@ TEST_F(Symbol_table_test, recursion) {
 
   auto ok7 = st.mut("foo", Dlop::create_integer(4));
   EXPECT_TRUE(ok7);
-  EXPECT_EQ(st.get_trivial("foo"), Dlop::create_integer(4));
+  EXPECT_DLOP_EQ(st.get_trivial("foo"), Dlop::create_integer(4));
 
   //------------------------------------------
   st.leave_scope();
-  EXPECT_EQ(st.get_trivial("foo"), Dlop::create_integer(3));
+  EXPECT_DLOP_EQ(st.get_trivial("foo"), Dlop::create_integer(3));
 
   st.leave_scope();
-  EXPECT_EQ(st.get_trivial("foo"), Dlop::create_integer(2));
+  EXPECT_DLOP_EQ(st.get_trivial("foo"), Dlop::create_integer(2));
 
   st.leave_scope();
-  EXPECT_EQ(st.get_trivial("foo"), Dlop::create_integer(1));
+  EXPECT_DLOP_EQ(st.get_trivial("foo"), Dlop::create_integer(1));
 }
 
 TEST_F(Symbol_table_test, ordered_check) {
@@ -120,13 +126,13 @@ TEST_F(Symbol_table_test, ordered_check) {
   auto bundle = st.get_bundle("foo");
   bundle->dump();
 
-  EXPECT_EQ(bundle->get_trivial("0"), Dlop::create_integer(1));
-  EXPECT_EQ(bundle->get_trivial("bar"), Dlop::create_integer(1));
-  EXPECT_EQ(bundle->get_trivial(":1:xxx"), Dlop::create_integer(2));
+  EXPECT_DLOP_EQ(bundle->get_trivial("0"), Dlop::create_integer(1));
+  EXPECT_DLOP_EQ(bundle->get_trivial("bar"), Dlop::create_integer(1));
+  EXPECT_DLOP_EQ(bundle->get_trivial(":1:xxx"), Dlop::create_integer(2));
 
   EXPECT_TRUE(bundle->is_ordered("foo"));
   st.set("foo.bar", Dlop::create_integer(4));  // replace ":0:bar"
-  EXPECT_EQ(bundle->get_trivial("bar"), Dlop::create_integer(4));
+  EXPECT_DLOP_EQ(bundle->get_trivial("bar"), Dlop::create_integer(4));
   EXPECT_TRUE(bundle->is_ordered(""));
 
   st.set("foo.nothere", Dlop::create_integer(4));

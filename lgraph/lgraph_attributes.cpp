@@ -122,7 +122,7 @@ Sub_node* Lgraph_attributes::ref_type_sub_node(std::string_view sub_name) {
 void Lgraph_attributes::set_type_lut(Index_id nid, const Const& lutid) {
   node_internal[nid].set_type(Ntype_op::LUT);
 
-  lut_map.insert_or_assign(Node::Compact_class(nid), lutid->serialize());
+  lut_map.insert_or_assign(Node::Compact_class(nid), lutid.serialize());
 }
 
 Const Lgraph_attributes::get_type_lut(Index_id nid) const {
@@ -131,27 +131,31 @@ Const Lgraph_attributes::get_type_lut(Index_id nid) const {
   auto it = lut_map.find(Node::Compact_class(nid));
   I(it != lut_map.end());
 
-  return Dlop::unserialize(it->second);
+  Const r;
+  r = Dlop::unserialize(it->second);
+  return r;
 }
 
 Const Lgraph_attributes::get_type_const(Index_id nid) const {
   auto it = const_map.find(Node::Compact_class(nid));
   I(it != const_map.end());
 
-  return Dlop::unserialize(it->second);
+  Const r;
+  r = Dlop::unserialize(it->second);
+  return r;
 }
 
 void Lgraph_attributes::set_type_const(Index_id nid, const Const& value) {
-  const_map.insert_or_assign(Node::Compact_class(nid), value->serialize());
+  const_map.insert_or_assign(Node::Compact_class(nid), value.serialize());
 
   auto* ptr = &node_internal[nid];
   ptr->set_type(Ntype_op::Const);
-  ptr->set_bits(value->get_bits());
+  ptr->set_bits(value.get_bits());
 }
 
-void Lgraph_attributes::set_type_const(Index_id nid, std::string_view sv) { set_type_const(nid, Dlop::from_pyrope(sv)); }
+void Lgraph_attributes::set_type_const(Index_id nid, std::string_view sv) { set_type_const(nid, *Dlop::from_pyrope(sv)); }
 
-void Lgraph_attributes::set_type_const(Index_id nid, int64_t value) { set_type_const(nid, Dlop::create_integer(value)); }
+void Lgraph_attributes::set_type_const(Index_id nid, int64_t value) { set_type_const(nid, *Dlop::create_integer(value)); }
 
 void Lgraph_attributes::dump_source_map() const {
   for (const auto& it : node_source_map) {

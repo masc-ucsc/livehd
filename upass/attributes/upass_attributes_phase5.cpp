@@ -29,14 +29,12 @@
 #include <string>
 #include <string_view>
 
-#include "boost/multiprecision/cpp_int.hpp"
 #include "const.hpp"
 #include "upass_attributes.hpp"
 #include "upass_utils.hpp"
 
 namespace {
 
-using Number = boost::multiprecision::cpp_int;
 
 bool is_truthy(std::string_view v) {
   if (v.empty() || v == "true") {
@@ -48,50 +46,55 @@ bool is_truthy(std::string_view v) {
 // Wrap (modulo) and saturate clamps for the given numeric type. n==0 means
 // the type's bit width is unknown and no narrowing is possible.
 Const wrap_to_unsigned(const Const& v, uint32_t n) {
-  if (n == 0 || v->is_invalid() || v->is_string() || v->has_unknowns() || v->is_nil()) {
+  if (n == 0 || v.is_invalid() || v.is_string() || v.has_unknowns() || v.is_nil()) {
     return v;
   }
   // Build a 2^n - 1 mask and apply.
-  Const mask = Dlop::get_mask_value(n);
-  return v->and_op(mask);
+  Const mask;
+  mask = Dlop::get_mask_value(n);
+  return *v.and_op(mask);
 }
 
 Const wrap_to_signed(const Const& v, uint32_t n) {
-  if (n == 0 || v->is_invalid() || v->is_string() || v->has_unknowns() || v->is_nil()) {
+  if (n == 0 || v.is_invalid() || v.is_string() || v.has_unknowns() || v.is_nil()) {
     return v;
   }
   // Two's-complement wrap to n bits: take low n bits, then sign-extend if
   // the n-th-1 bit is set. Const's adjust_bits already implements this for
   // signed widths.
-  return v->adjust_bits(n);
+  return *v.adjust_bits(n);
 }
 
 Const saturate_unsigned(const Const& v, uint32_t n) {
-  if (n == 0 || v->is_invalid() || v->is_string() || v->has_unknowns() || v->is_nil()) {
+  if (n == 0 || v.is_invalid() || v.is_string() || v.has_unknowns() || v.is_nil()) {
     return v;
   }
-  Const lo = Dlop::create_integer(0);
-  Const hi = Dlop::get_mask_value(n);
-  if (v->is_negative()) {
+  Const lo;
+  lo = Dlop::create_integer(0);
+  Const hi;
+  hi = Dlop::get_mask_value(n);
+  if (v.is_negative()) {
     return lo;
   }
   // v > hi — compare via subtraction sign.
-  if (v->sub_op(hi)->is_positive() && *v != *hi) {
+  if (v.sub_op(hi)->is_positive() && !v.same_repr(hi)) {
     return hi;
   }
   return v;
 }
 
 Const saturate_signed(const Const& v, uint32_t n) {
-  if (n == 0 || v->is_invalid() || v->is_string() || v->has_unknowns() || v->is_nil()) {
+  if (n == 0 || v.is_invalid() || v.is_string() || v.has_unknowns() || v.is_nil()) {
     return v;
   }
-  Const hi = Dlop::get_mask_value(n - 1);
-  Const lo = Dlop::get_neg_mask_value(n - 1);
-  if (v->sub_op(hi)->is_positive() && *v != *hi) {
+  Const hi;
+  hi = Dlop::get_mask_value(n - 1);
+  Const lo;
+  lo = Dlop::get_neg_mask_value(n - 1);
+  if (v.sub_op(hi)->is_positive() && !v.same_repr(hi)) {
     return hi;
   }
-  if (lo->sub_op(v)->is_positive() && *v != *lo) {
+  if (lo.sub_op(v)->is_positive() && !v.same_repr(lo)) {
     return lo;
   }
   return v;
@@ -147,11 +150,11 @@ void uPass_attributes::apply_narrowing(std::string_view lhs, bool is_wrap, bool 
   } else {
     out = is_signed ? saturate_signed(*cur, ti->bits) : saturate_unsigned(*cur, ti->bits);
   }
-  if (out.is_invalid() || out == *cur) {
+  if (out.is_invalid() || out.same_repr(*cur)) {
     return;
   }
   auto [iter, inserted] = tmp_fold.emplace(std::string{lhs}, out);
-  if (!inserted && iter->second != out) {
+  if (!inserted && !iter->second.same_repr(out)) {
     iter->second = out;
     mark_changed();
   } else if (inserted) {

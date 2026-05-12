@@ -51,7 +51,7 @@ Const pyrope_string(std::string_view raw) {
   s.push_back('\'');
   s.append(raw.data(), raw.size());
   s.push_back('\'');
-  return Dlop::from_pyrope(s);
+  return *Dlop::from_pyrope(s);
 }
 
 }  // namespace
@@ -284,12 +284,12 @@ void uPass_attributes::process_tuple_get() {
 
 std::optional<Const> uPass_attributes::derive_aggregate_size(std::string_view base) const {
   if (auto* sh = lookup_tuple_shape(base); sh) {
-    return Dlop::create_integer(static_cast<int64_t>(sh->fields.size()));
+    return *Dlop::create_integer(static_cast<int64_t>(sh->fields.size()));
   }
   // Aliased through `assign foo bar` where bar is shaped.
   if (auto it = shape_source.find(std::string{base}); it != shape_source.end()) {
     if (auto* sh = lookup_tuple_shape(it->second); sh) {
-      return Dlop::create_integer(static_cast<int64_t>(sh->fields.size()));
+      return *Dlop::create_integer(static_cast<int64_t>(sh->fields.size()));
     }
   }
   // Range-typed: size = end - start + 1 (closed); end - start (open). Range
@@ -301,10 +301,10 @@ std::optional<Const> uPass_attributes::derive_aggregate_size(std::string_view ba
     range_key = it->second;
   }
   if (auto rb = lookup_range(range_key); rb) {
-    if (rb->first->is_i() && rb->second->is_i()) {
-      const auto sz = rb->second->to_i() - rb->first->to_i() + 1;
+    if (rb->first.is_i() && rb->second.is_i()) {
+      const auto sz = rb->second.to_i() - rb->first.to_i() + 1;
       if (sz > 0) {
-        return Dlop::create_integer(static_cast<int64_t>(sz));
+        return *Dlop::create_integer(static_cast<int64_t>(sz));
       }
     }
   }
@@ -350,7 +350,7 @@ std::optional<Const> uPass_attributes::derive_aggregate_bits(std::string_view ba
     }
     total += bits->to_i();
   }
-  return Dlop::create_integer(total);
+  return *Dlop::create_integer(total);
 }
 
 std::optional<Const> uPass_attributes::derive_aggregate_typename(std::string_view base, std::string_view base_text) const {

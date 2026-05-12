@@ -222,7 +222,8 @@ public:
   // the developer has the responsibility to translate to proper Const before calling this function
   Node create_node_const(const Const& value);
 
-  Node create_node_const(int64_t val) { return create_node_const(Dlop::create_integer(val)); }
+  Node create_node_const(int64_t val) { return create_node_const(*Dlop::create_integer(val)); }
+  Node create_node_const(const spool_ptr<Dlop>& val) { return create_node_const(*val); }
 
   Node create_node_lut(const Const& value);
   Node create_node_sub(Lg_type_id sub);

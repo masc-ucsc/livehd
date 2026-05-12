@@ -34,7 +34,7 @@ public:
     std::vector<std::string>                                  modified_under_uncertainty;
   };
 
-  static inline Const invalid_lconst = Dlop::invalid();
+  static inline Const invalid_lconst{};  // default Dlop is Type::Invalid
 
   Symbol_table()                               = default;
   Symbol_table(const Symbol_table&)            = delete;
@@ -64,9 +64,11 @@ public:
 
   bool mut(std::string_view key, std::shared_ptr<Bundle> bundle);
   bool mut(std::string_view key, const Const& trivial);
+  bool mut(std::string_view key, const spool_ptr<Dlop>& trivial) { return mut(key, *trivial); }
 
   bool set(std::string_view key, std::shared_ptr<Bundle> bundle);
   bool set(std::string_view key, const Const& trivial);
+  bool set(std::string_view key, const spool_ptr<Dlop>& trivial) { return set(key, *trivial); }
 
   bool let(std::string_view key, std::shared_ptr<Bundle> bundle);
   bool let(std::string_view key, const Const& trivial);

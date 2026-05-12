@@ -2636,10 +2636,10 @@ Lnast_node Prp2lnast::bit_selection_to_node(TSNode n) {
 
   auto make_const_mask = [](std::string_view text) -> std::optional<Lnast_node> {
     auto v = Dlop::from_pyrope(text);
-    if (v.is_invalid() || !v->is_i()) {
+    if (v->is_invalid() || !v->is_i()) {
       return std::nullopt;
     }
-    return Lnast_node::create_const(Dlop::get_mask_value(static_cast<Bits_t>(v->to_i()))->to_pyrope());
+    return Lnast_node::create_const(Dlop::get_mask_value(static_cast<int>(v->to_i()))->to_pyrope());
   };
 
   auto make_range_mask = [&](TSNode expr_item) -> std::optional<Lnast_node> {
@@ -2661,12 +2661,12 @@ Lnast_node Prp2lnast::bit_selection_to_node(TSNode n) {
 
     auto lo_v = Dlop::from_pyrope(get_text(lo));
     auto hi_v = Dlop::from_pyrope(get_text(hi));
-    if (lo_v.is_invalid() || hi_v.is_invalid() || !lo_v->is_i() || !hi_v->is_i()) {
+    if (lo_v->is_invalid() || hi_v->is_invalid() || !lo_v->is_i() || !hi_v->is_i()) {
       return std::nullopt;
     }
 
     return Lnast_node::create_const(
-        Dlop::get_mask_value(static_cast<Bits_t>(hi_v->to_i()), static_cast<Bits_t>(lo_v->to_i()))->to_pyrope());
+        Dlop::get_mask_value(static_cast<int>(hi_v->to_i()), static_cast<int>(lo_v->to_i()))->to_pyrope());
   };
 
   auto make_dynamic_mask = [&](TSNode expr) {

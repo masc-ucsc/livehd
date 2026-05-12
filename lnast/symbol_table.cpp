@@ -321,7 +321,7 @@ std::shared_ptr<Bundle> Symbol_table::leave_scope() {
       // its scalar slot invalidated and any reader that relied on the slot
       // sees unknown; tuple-shape readers still see the structure, which
       // is the conservative answer for a mutation we couldn't prove.
-      it->second->set("0", Dlop::invalid());
+      it->second->set("0", Const{});
     }
   }
 
@@ -339,7 +339,7 @@ std::shared_ptr<Bundle> Symbol_table::leave_scope() {
 bool Symbol_table::is_known_const(std::string_view name) const {
   if (!has_trivial(name)) return false;
   const auto& val = get_trivial(name);
-  return !val->is_invalid() && !val->has_unknowns();
+  return !val.is_invalid() && !val.has_unknowns();
 }
 
 bool Symbol_table::has_trivial(std::string_view key) const {

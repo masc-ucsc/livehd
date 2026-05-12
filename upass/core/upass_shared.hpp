@@ -86,7 +86,7 @@ inline Shared_fold_sum_const_report run_fold_sum_const_shared(IR_adapter& adapte
         all_const = false;
         break;
       }
-      const_vals.push_back(*cv);
+      const_vals.push_back(*Dlop::create_integer(*cv));
     }
     if (!all_const) {
       continue;
@@ -95,12 +95,12 @@ inline Shared_fold_sum_const_report run_fold_sum_const_shared(IR_adapter& adapte
     // Reduce-fold: accumulate sum across all constant inputs.
     Const folded = const_vals[0];
     for (std::size_t i = 1; i < const_vals.size(); ++i) {
-      folded = folded + const_vals[i];
+      folded = folded.add_op(const_vals[i]);
     }
 
     const auto effect = adapter.estimate_replace_with_const(node);
     if (!dry_run) {
-      if (!adapter.replace_with_const(node, folded->to_i())) {
+      if (!adapter.replace_with_const(node, folded.to_i())) {
         continue;
       }
     }

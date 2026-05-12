@@ -149,7 +149,7 @@ static Node_pin resolve_constant(Lgraph* g, const std::vector<RTLIL::State>& dat
   }
 
   auto lc = Dlop::from_pyrope(val);
-  // std::print("val:{} prp:{} bits:{}\n", val, lc->to_pyrope(), lc.get_bits());
+  // std::print("val:{} prp:{} bits:{}\n", val, lc.to_pyrope(), lc.get_bits());
   return g->create_node_const(lc).setup_driver_pin();
 }
 
@@ -233,7 +233,7 @@ static Node_pin create_pick_operator(const Node_pin& wide_dpin, int offset, int 
       and_node.connect_sink(wide_dpin);
     }
 
-    and_node.connect_sink(node.create_const(((Dlop::create_integer(1) << Dlop::create_integer(width)) - 1)));
+    and_node.connect_sink(node.create_const(Dlop::get_mask_value(width)));
     dpin = and_node.setup_driver_pin();
   }
 
@@ -277,7 +277,7 @@ static Node_pin get_edge_pin(Lgraph* g, const RTLIL::Wire* wire, bool is_signed)
       return dpin;
     }
 
-    if (node.is_type_const() && !node.get_type_const()->is_negative()) {
+    if (node.is_type_const() && !node.get_type_const().is_negative()) {
       return dpin;
     }
 
@@ -326,7 +326,7 @@ static Node_pin create_pick_operator(Lgraph* g, const RTLIL::Wire* wire, int off
 static void append_to_or_node(Lgraph* g, const Node& or_node, const Node_pin& dpin, int or_offset) {
   if (or_node.has_inputs() && dpin.get_node().is_type_const()) {
     auto val = dpin.get_node().get_type_const();
-    if (val == 0) {
+    if (val.is_known_zero()) {
       return;
     }
   }
@@ -460,7 +460,7 @@ static Node_pin get_unsigned_dpin(Lgraph* g, const RTLIL::Cell* cell, const RTLI
   if (node.is_type(Ntype_op::Get_mask)) {
     return dpin;
   }
-  if (node.is_type_const() && !node.get_type_const()->is_negative()) {
+  if (node.is_type_const() && !node.get_type_const().is_negative()) {
     return dpin;
   }
 
@@ -1358,7 +1358,7 @@ static void process_assigns(RTLIL::Module* mod, Lgraph* g) {
               if (to_in_rchunk < rchunk.width) {
                 auto and_node = g->create_node(Ntype_op::And, bits_needed).get_non_hierarchical();
                 and_node.connect_sink(dpin);
-                auto c_node = g->create_node_const((Dlop::create_integer(1) << Dlop::create_integer(bits_needed)) - Dlop::create_integer(1));
+                auto c_node = g->create_node_const(Dlop::get_mask_value(bits_needed));
                 and_node.connect_sink(c_node);
                 dpin = and_node.setup_driver_pin();
               }
@@ -1443,7 +1443,7 @@ static void connect_partial_dpin(Lgraph* g, Node& or_node, uint32_t or_offset, B
   } else if (current_dpin.get_bits() > nbits) {
     auto and_node = or_node.create(Ntype_op::And);
     and_node.setup_driver_pin().set_bits(nbits);
-    and_node.connect_sink(g->create_node_const((Dlop::create_integer(1) << Dlop::create_integer(nbits)) - 1));
+    and_node.connect_sink(g->create_node_const(Dlop::get_mask_value(nbits)));
     and_node.connect_sink(current_dpin);
 
     append_to_or_node(g, or_node, and_node.setup_driver_pin(), or_offset);
@@ -1566,25 +1566,26 @@ static void process_partially_assigned_self_chains(Lgraph* g) {
       master_or_node.connect_sink(pre_or_node);
 
       for (auto shift : shifts) {
-        Const wr_mask = Dlop::create_integer(0);
+        Dlop wr_mask;
+        wr_mask = Dlop::create_integer(0);
         bool        started = false;
         const auto& v       = partially_assigned_fwd[wire];
         for (int pos = static_cast<int>(v.size()) - 1; pos >= 0; --pos) {
           auto i = v[pos];
           if (started) {
-            wr_mask = wr_mask << 1;
+            wr_mask = wr_mask.lsh_op(1);
           }
           started = true;
 
           if (i == shift && processed_pos.count(pos - shift)) {
-            wr_mask = wr_mask | 1;
+            wr_mask = wr_mask.or_op(*Dlop::create_integer(1));
           }
         }
-        Const rd_mask;
+        Dlop rd_mask;
         if (shift < 0) {
-          rd_mask = wr_mask->lsh_op(-shift)->adjust_bits(wire->width);
+          rd_mask = wr_mask.lsh_op(-shift)->adjust_bits(wire->width);
         } else {
-          rd_mask = wr_mask->rsh_op(shift)->adjust_bits(wire->width);
+          rd_mask = wr_mask.rsh_op(shift)->adjust_bits(wire->width);
         }
 
         // std::print("wr_mask:{} = rd_mask:{}>>{} from node:{} wire:{}\n" ,wr_mask.to_yosys(), rd_mask.to_yosys(), shift,
@@ -2240,7 +2241,7 @@ static void process_cells(RTLIL::Module* mod, Lgraph* g) {
 
           auto and_node = exit_node.create(Ntype_op::And);
           and_node.setup_driver_pin().set_bits(y_bits);
-          and_node.connect_sink(g->create_node_const((Dlop::create_integer(1) << Dlop::create_integer(y_bits)) - 1));
+          and_node.connect_sink(g->create_node_const(Dlop::get_mask_value(y_bits)));
           and_node.connect_sink(not_node);
 
           exit_node.set_type(Ntype_op::Not, y_bits);
@@ -2250,7 +2251,7 @@ static void process_cells(RTLIL::Module* mod, Lgraph* g) {
           exit_node.set_type(Ntype_op::And, y_bits);
 
           exit_node.connect_sink(sum_node);
-          exit_node.connect_sink(g->create_node_const((Dlop::create_integer(1) << Dlop::create_integer(y_bits)) - 1));
+          exit_node.connect_sink(g->create_node_const(Dlop::get_mask_value(y_bits)));
         }
       } else {
         exit_node.set_type(Ntype_op::Sum, y_bits);
@@ -2285,7 +2286,7 @@ static void process_cells(RTLIL::Module* mod, Lgraph* g) {
       mul_node.setup_driver_pin().set_bits(y_bits);
 
       exit_node.connect_sink(mul_node);
-      exit_node.connect_sink(g->create_node_const((Dlop::create_integer(1) << Dlop::create_integer(y_bits)) - 1));
+      exit_node.connect_sink(g->create_node_const(Dlop::get_mask_value(y_bits)));
 #else
       exit_node.set_type(Ntype_op::Mult, y_bits);
       auto mul_node = exit_node;
@@ -2303,7 +2304,7 @@ static void process_cells(RTLIL::Module* mod, Lgraph* g) {
       div_node.setup_driver_pin().set_bits(y_bits);
 
       exit_node.connect_sink(div_node);
-      exit_node.connect_sink(g->create_node_const((Dlop::create_integer(1) << Dlop::create_integer(y_bits)) - 1));
+      exit_node.connect_sink(g->create_node_const(Dlop::get_mask_value(y_bits)));
 #else
       exit_node.set_type(Ntype_op::Div, y_bits);
       auto div_node = exit_node;
@@ -2334,7 +2335,7 @@ static void process_cells(RTLIL::Module* mod, Lgraph* g) {
       Node_pin b_dpin = get_unsigned_dpin(g, cell, ID::B);
 
       exit_node.set_type(Ntype_op::And, y_bits);
-      exit_node.connect_sink(g->create_node_const((Dlop::create_integer(1) << Dlop::create_integer(y_bits)) - 1));
+      exit_node.connect_sink(g->create_node_const(Dlop::get_mask_value(y_bits)));
 
       div_node.setup_sink_pin("a").connect_driver(a_dpin);
       div_node.setup_sink_pin("b").connect_driver(b_dpin);
@@ -2353,12 +2354,12 @@ static void process_cells(RTLIL::Module* mod, Lgraph* g) {
 
       if (cell->getParam(ID::A_SIGNED).as_bool()) {
         exit_node.set_type(Ntype_op::And, y_bits);
-        exit_node.connect_sink(g->create_node_const((Dlop::create_integer(1) << Dlop::create_integer(y_bits)) - 1));
+        exit_node.connect_sink(g->create_node_const(Dlop::get_mask_value(y_bits)));
         exit_node.connect_sink(get_dpin(g, cell, ID::A));
       } else {
         auto and_node = exit_node.create(Ntype_op::And);
         and_node.setup_driver_pin().set_bits(y_bits);
-        and_node.connect_sink(g->create_node_const((Dlop::create_integer(1) << Dlop::create_integer(y_bits)) - 1));
+        and_node.connect_sink(g->create_node_const(Dlop::get_mask_value(y_bits)));
         and_node.connect_sink(get_unsigned_dpin(g, cell, ID::A));
 
         exit_node.set_type(Ntype_op::Get_mask, y_bits + 1);
@@ -2423,7 +2424,7 @@ static void process_cells(RTLIL::Module* mod, Lgraph* g) {
 
       //--
       exit_node.connect_sink(y2_dpin);
-      exit_node.connect_sink(g->create_node_const((Dlop::create_integer(1) << Dlop::create_integer(y_bits)) - 1));
+      exit_node.connect_sink(g->create_node_const(Dlop::get_mask_value(y_bits)));
 
     } else if (std::strncmp(cell->type.c_str(), "$shr", 4) == 0
                || (std::strncmp(cell->type.c_str(), "$shiftx", 6) == 0 && !cell->getParam(ID::B_SIGNED).as_bool())
@@ -2443,7 +2444,7 @@ static void process_cells(RTLIL::Module* mod, Lgraph* g) {
           auto and_node = exit_node.create(Ntype_op::And);
           and_node.setup_driver_pin().set_bits(y_bits);
           and_node.connect_sink(dpin_a_signed);
-          and_node.connect_sink(g->create_node_const((Dlop::create_integer(1) << Dlop::create_integer(y_bits)) - 1));
+          and_node.connect_sink(g->create_node_const(Dlop::get_mask_value(y_bits)));
 
           auto tposs_node = exit_node.create(Ntype_op::Get_mask);
           tposs_node.setup_driver_pin().set_bits(y_bits + 1);
@@ -2457,7 +2458,7 @@ static void process_cells(RTLIL::Module* mod, Lgraph* g) {
         auto node = dpin_a_signed.get_node();
         if (node.is_type(Ntype_op::Get_mask)) {
           dpin_a = dpin_a_signed;
-        } else if (node.is_type_const() && !node.get_type_const()->is_negative()) {
+        } else if (node.is_type_const() && !node.get_type_const().is_negative()) {
           dpin_a = dpin_a_signed;
         } else {
           auto tposs_node = exit_node.create(Ntype_op::Get_mask);

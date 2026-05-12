@@ -528,7 +528,7 @@ void Pass_mockturtle::mapping_shift_cell_lg2mt(const bool& is_shift_right, const
   setup_input_signals(group_id, opr_A_edge, opr_A_sigs, mt_ntk);
   if (opr_B_edge.driver.get_node().get_type_op() == Ntype_op::Const) {
     // creating output signal for const shift
-    uint32_t offset = opr_B_edge.driver.get_node().get_type_const()->to_i();
+    uint32_t offset = opr_B_edge.driver.get_node().get_type_const().to_i();
     shift_op(opr_A_sigs, is_shift_right, sign_ext, offset, out_sigs, mt_ntk);
   } else {
     std::vector<typename ntk_type::signal>              opr_B_sigs, temp_out;
@@ -607,7 +607,7 @@ void Pass_mockturtle::mapping_dynamic_shift_cell_lg2mt(const bool& is_shift_righ
     // creating output signal for const shift
     uint32_t ofs;
     bool     is_negative;
-    converting_uint32_to_signed_SMR(opr_B_edge.driver.get_node().get_type_const()->to_i(), ofs, is_negative);
+    converting_uint32_to_signed_SMR(opr_B_edge.driver.get_node().get_type_const().to_i(), ofs, is_negative);
     if (is_negative) {
       shift_op(opr_A_sigs, !is_shift_right, false, ofs, out_sigs, mt_ntk);
     } else {

@@ -619,10 +619,10 @@ std::shared_ptr<Lgtuple> Lgtuple::get_sub_tuple(const std::shared_ptr<Lgtuple co
     }
     auto        v = e_node.get_type_const();
     std::string txt;
-    if (v->is_i()) {
-      txt = str_tools::to_s(v->to_i());
+    if (v.is_i()) {
+      txt = str_tools::to_s(v.to_i());
     } else {
-      txt = v->to_pyrope();
+      txt = v.to_pyrope();
     }
     auto dpin = get_dpin(txt);
     if (dpin.is_invalid()) {
@@ -871,7 +871,7 @@ std::pair<Node, Node_pin> Lgtuple::flatten_field(Node& result_node, Node_pin& dp
 
   if (dpin.is_type_const()) {
     auto v      = dpin.get_type_const();
-    auto v_bits = v->get_bits();
+    auto v_bits = v.get_bits();
     auto v_mask = Dlop::get_mask_value(v_bits);
 
     auto just_mask_dpin = result_node.create_const(v_mask).setup_driver_pin();
@@ -986,10 +986,10 @@ Node_pin Lgtuple::flatten() const {
         continue;
       }
       auto v = e.second.get_type_const();
-      // v      = v << result->get_bits();
-      v      = v->lsh_op(accu_bits);
-      result = result->or_op(v->get_mask_op());
-      accu_bits += result->get_bits();
+      // v      = v << result.get_bits();
+      v      = v.lsh_op(accu_bits);
+      result = result.or_op(v.get_mask_op());
+      accu_bits += result.get_bits();
     }
     return a_dpin.get_node().create_const(result).get_driver_pin();
   }
@@ -1163,7 +1163,7 @@ std::shared_ptr<Lgtuple> Lgtuple::create_assign(const Node_pin& rhs_dpin) const 
         I(sbits_dpin.is_invalid());
 
         auto v      = e.second.get_type_const();
-        auto v_bits = v->get_bits();
+        auto v_bits = v.get_bits();
 
         pending_entries.emplace_back(e.first, rhs_node.create_const(v_bits).setup_driver_pin());
         sbits_dpin = invalid_dpin;
@@ -1601,7 +1601,7 @@ std::shared_ptr<Lgtuple> Lgtuple::make_flop(Node& flop) const {
         auto attr2_dpin = parent_node.get_sink_pin("field").get_driver_pin();
         I(!attr2_dpin.is_invalid());
         I(attr2_dpin.is_type_const());
-        auto attr2 = attr2_dpin.get_type_const()->to_pyrope();
+        auto attr2 = attr2_dpin.get_type_const().to_pyrope();
         if (attr2 == attr) {
           continue;  // same attribute already set (can it have different value??)
         }
@@ -1663,7 +1663,8 @@ std::shared_ptr<Lgtuple> Lgtuple::make_flop(Node& flop) const {
         // use get_mask to get the bit that assigned to the corresponding individual flop
         if (it.second.is_type_const()) {
           Const init_val    = it.second.get_type_const();
-          Const masked_val  = init_val->get_mask_op(Dlop::create_integer(1 << i));
+          Const masked_val;
+          masked_val = init_val.get_mask_op(*Dlop::create_integer(1 << i));
           auto   masked_node = lg->create_node_const(masked_val);
           flop_spin.connect_driver(masked_node.setup_driver_pin());
         } else {

@@ -11,7 +11,7 @@ class Bundle : std::enable_shared_from_this<Bundle> {
 public:
   struct Entry {
     Entry(const Entry& ent) : immutable(ent.immutable), trivial(ent.trivial) {}
-    Entry() : immutable(false), trivial(Dlop::invalid()) {}
+    Entry() : immutable(false), trivial() {}  // default Dlop is Type::Invalid
     Entry(bool i, const Const& t) : immutable(i), trivial(t) {}
     Entry& operator=(const Entry& ent) {
       immutable = ent.immutable;
@@ -22,7 +22,7 @@ public:
     Const trivial;
   };
 
-  static inline Const invalid_lconst = Dlop::invalid();
+  static inline Const invalid_lconst{};  // default Dlop is Type::Invalid
 
 protected:
   using Key_map_type = std::vector<std::pair<std::string, Entry>>;

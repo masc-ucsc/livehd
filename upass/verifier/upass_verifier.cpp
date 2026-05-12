@@ -75,7 +75,7 @@ upass::Emit_decision uPass_verifier::classify_statement() {
   if (got_child) {
     operand_text = std::string{current_text()};
     if (is_type(Lnast_ntype::Lnast_ntype_const)) {
-      val = Dlop::from_pyrope(current_text());
+      val = *Dlop::from_pyrope(current_text());
     } else if (is_type(Lnast_ntype::Lnast_ntype_ref) && runner_fold_fn) {
       val = runner_fold_fn(current_text());
     }

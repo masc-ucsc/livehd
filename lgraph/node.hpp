@@ -316,6 +316,8 @@ public:
 
   void            set_type_sub(Lg_type_id subid);
   void            set_type_const(const Const& val);
+  void            set_type_const(int64_t val) { set_type_const(*Dlop::create_integer(val)); }
+  void            set_type_const(const spool_ptr<Dlop>& val) { set_type_const(*val); }
   Lg_type_id      get_type_sub() const;
   const Sub_node& get_type_sub_node() const;
   Sub_node*       ref_type_sub_node() const;
@@ -359,8 +361,9 @@ public:
   Node create(Ntype_op op) const;                                                        // create a new node, keep same hierarchy
   Node create(Ntype_op op, std::pair<uint64_t, uint64_t> loc, std::string fname) const;  // create a new node, keep same hierarchy
   Node create_const(const Const& value) const;                                          // create a new node, keep same hierarchy
-  Node create_const(int64_t value) const { return create_const(Dlop::create_integer(value)); }
-  Node create_const(int value) const { return create_const(Dlop::create_integer(value)); }
+  Node create_const(int64_t value) const { return create_const(*Dlop::create_integer(value)); }
+  Node create_const(int value) const { return create_const(*Dlop::create_integer(value)); }
+  Node create_const(const spool_ptr<Dlop>& value) const { return create_const(*value); }
 
   // BEGIN ATTRIBUTE ACCESSORS
   std::string debug_name() const;

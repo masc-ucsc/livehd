@@ -224,6 +224,10 @@ Node Node_pin::create_const(const Const& value) const {
   return node;
 }
 
+Node Node_pin::create_const(int64_t value) const { return create_const(*Dlop::create_integer(value)); }
+
+Node Node_pin::create_const(const spool_ptr<Dlop>& value) const { return create_const(*value); }
+
 void Node_pin::del_sink(Node_pin& spin) {
   I(spin.is_sink());
   I(is_driver());
@@ -407,7 +411,7 @@ std::string Node_pin::debug_name() const {
     if (node.is_type_sub()) {
       name = node.get_type_sub_node().get_name_from_instance_pid(pid);
     } else if (node.is_type_const()) {
-      name = node.get_type_const()->to_pyrope();
+      name = node.get_type_const().to_pyrope();
       return absl::StrCat("pin_", "n", std::to_string(node.nid), "_", name);
     } else if (node.has_name()) {
       name = node.get_name();

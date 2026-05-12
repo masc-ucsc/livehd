@@ -130,6 +130,30 @@ synthesized) point at one or more locations in that map (so an alias
 - Egress comment format: pick one (`// src: file:line:col`) and commit, so
   external LEC tooling can parse it reliably.
 
+## Bitwidth_range: replace int+overflow with Const min/max
+
+`pass/bitwidth/bitwidth_range.{hpp,cpp}` currently stores `int min, max`
+plus an `overflow` flag, then materializes a `Const` from those when the
+value escapes the range representable in `int`. This was a workaround for
+when the constant value type was expensive to allocate.
+
+With `Const = Dlop` (inline storage for size <= 1, pool storage above), the
+internal `int+overflow` representation is largely redundant — `Dlop`
+already handles arbitrary widths efficiently. Refactor to store `Const
+min; Const max;` directly and drop the `overflow` bookkeeping. Expected
+benefits:
+
+- Fewer materialize/round-trip conversions per query (`get_max`/`get_min`
+  currently rebuilds a `Const` every call; storing it eliminates the
+  reconstruction).
+- Cleaner arithmetic in callers — no need to branch on `is_overflow()` or
+  to special-case the int-fits path; the same `Dlop` ops cover both.
+- One representation for the value, simpler invariants
+  (`min <= max` becomes a single `Dlop` comparison).
+
+Deferred until after the lconst-to-Dlop migration stabilizes so that the
+churn lands in one focused commit.
+
 ## simlib fixed-width int types
 
 `simlib/uint.hpp` and `simlib/sint.hpp` (extracted from the `firrtl-sig`

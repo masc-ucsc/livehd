@@ -175,10 +175,10 @@ public:
     }
 
     const auto c = node.get_type_const();
-    if (!c->is_i()) {
+    if (!c.is_i()) {
       return std::nullopt;
     }
-    return c->to_i();
+    return c.to_i();
   }
   Replace_effect estimate_replace_with_const(Node_id node_id) const override {
     Replace_effect effect;
@@ -207,7 +207,7 @@ public:
 
     if (node.get_type_op() == Ntype_op::Const) {
       const auto cur = node.get_type_const();
-      if (cur->is_i() && cur->to_i() == value) {
+      if (cur.is_i() && cur.to_i() == value) {
         return false;
       }
       node.set_type_const(Dlop::create_integer(value));
@@ -305,7 +305,7 @@ public:
       const auto& b_drv = b_ins[0].driver;
 
       // a - 0
-      if (b_drv.is_type(Ntype_op::Const) && b_drv.get_type_const() == 0) {
+      if (b_drv.is_type(Ntype_op::Const) && b_drv.get_type_const().is_known_zero()) {
         ++count;
         continue;
       }
@@ -387,17 +387,17 @@ public:
 
       // Reduce-fold: accumulate the sum of all constant inputs.
       Const result = inputs[0].driver.get_type_const();
-      if (!result->is_i()) {
+      if (!result.is_i()) {
         continue;
       }
       bool all_i = true;
       for (std::size_t i = 1; i < inputs.size(); ++i) {
         const auto cn = inputs[i].driver.get_type_const();
-        if (!cn->is_i()) {
+        if (!cn.is_i()) {
           all_i = false;
           break;
         }
-        result = result + cn;
+        result = result.add_op(cn);
       }
       if (!all_i) {
         continue;
@@ -465,17 +465,17 @@ public:
       // Uses mult_op() to match fold_sum_const's use of add_op() and preserve
       // Const bit-width semantics rather than raw to_i() arithmetic.
       Const result = inputs[0].driver.get_type_const();
-      if (!result->is_i()) {
+      if (!result.is_i()) {
         continue;
       }
       bool all_i = true;
       for (std::size_t i = 1; i < inputs.size(); ++i) {
         const auto cn = inputs[i].driver.get_type_const();
-        if (!cn->is_i()) {
+        if (!cn.is_i()) {
           all_i = false;
           break;
         }
-        result = result->mult_op(cn);
+        result = result.mult_op(cn);
       }
       if (!all_i) {
         continue;
@@ -545,7 +545,7 @@ public:
 
       int const_zero_pos = -1;
       for (int i = 0; i < 2; ++i) {
-        if (inputs[i].driver.is_type(Ntype_op::Const) && inputs[i].driver.get_type_const() == 0) {
+        if (inputs[i].driver.is_type(Ntype_op::Const) && inputs[i].driver.get_type_const().is_known_zero()) {
           const_zero_pos = i;
           break;
         }
@@ -584,7 +584,7 @@ public:
       if (!rewritten && node.get_type_op() == Ntype_op::Mult) {
         int const_zero_pos_mul = -1;
         for (int i = 0; i < 2; ++i) {
-          if (inputs[i].driver.is_type(Ntype_op::Const) && inputs[i].driver.get_type_const() == 0) {
+          if (inputs[i].driver.is_type(Ntype_op::Const) && inputs[i].driver.get_type_const().is_known_zero()) {
             const_zero_pos_mul = i;
             break;
           }
@@ -610,7 +610,7 @@ public:
       if (!rewritten && node.get_type_op() == Ntype_op::Mult) {
         int const_one_pos = -1;
         for (int i = 0; i < 2; ++i) {
-          if (inputs[i].driver.is_type(Ntype_op::Const) && inputs[i].driver.get_type_const() == 1) {
+          if (inputs[i].driver.is_type(Ntype_op::Const) && inputs[i].driver.get_type_const().is_i() && inputs[i].driver.get_type_const().to_i() == 1) {
             const_one_pos = i;
             break;
           }
@@ -633,7 +633,7 @@ public:
       if (!rewritten && node.get_type_op() == Ntype_op::And) {
         int const_one_pos = -1;
         for (int i = 0; i < 2; ++i) {
-          if (inputs[i].driver.is_type(Ntype_op::Const) && inputs[i].driver.get_type_const() == 1) {
+          if (inputs[i].driver.is_type(Ntype_op::Const) && inputs[i].driver.get_type_const().is_i() && inputs[i].driver.get_type_const().to_i() == 1) {
             const_one_pos = i;
             break;
           }
@@ -674,7 +674,7 @@ public:
         if (node.get_type_op() == Ntype_op::Or) {
           int const_one_pos = -1;
           for (int i = 0; i < 2; ++i) {
-            if (inputs[i].driver.is_type(Ntype_op::Const) && inputs[i].driver.get_type_const() == 1) {
+            if (inputs[i].driver.is_type(Ntype_op::Const) && inputs[i].driver.get_type_const().is_i() && inputs[i].driver.get_type_const().to_i() == 1) {
               const_one_pos = i;
               break;
             }
@@ -778,7 +778,7 @@ public:
       bool rewritten = false;
 
       if ((node.get_type_op() == Ntype_op::Div || node.get_type_op() == Ntype_op::SHL || node.get_type_op() == Ntype_op::SRA)
-          && rhs.is_type(Ntype_op::Const) && rhs.get_type_const() == 0) {
+          && rhs.is_type(Ntype_op::Const) && rhs.get_type_const().is_known_zero()) {
         if (node.get_type_op() == Ntype_op::Div) {
           // Do not rewrite x/0
         } else {
@@ -795,7 +795,7 @@ public:
         }
       }
 
-      if (!rewritten && node.get_type_op() == Ntype_op::Div && rhs.is_type(Ntype_op::Const) && rhs.get_type_const() == 1) {
+      if (!rewritten && node.get_type_op() == Ntype_op::Div && rhs.is_type(Ntype_op::Const) && rhs.get_type_const().is_i() && rhs.get_type_const().to_i() == 1) {
         if (!dry_run) {
           for (const auto& sink : sinks) {
             lhs.connect_sink(sink);
@@ -808,8 +808,8 @@ public:
         rewritten = true;
       }
 
-      if (!rewritten && node.get_type_op() == Ntype_op::Div && lhs.is_type(Ntype_op::Const) && lhs.get_type_const() == 0
-          && rhs.is_type(Ntype_op::Const) && rhs.get_type_const() != 0) {
+      if (!rewritten && node.get_type_op() == Ntype_op::Div && lhs.is_type(Ntype_op::Const) && lhs.get_type_const().is_known_zero()
+          && rhs.is_type(Ntype_op::Const) && rhs.get_type_const().is_known_zero() == false) {
         ++summary.new_const_nodes;
         if (!dry_run) {
           auto c0   = lg->create_node_const(0);
@@ -827,7 +827,7 @@ public:
       }
 
       if (!rewritten && node.get_type_op() == Ntype_op::Div && lhs.is_type(Ntype_op::Const) && rhs.is_type(Ntype_op::Const)
-          && lhs.get_type_const() == rhs.get_type_const() && rhs.get_type_const() != 0) {
+          && lhs.get_type_const().same_repr(rhs.get_type_const()) && rhs.get_type_const().is_known_zero() == false) {
         ++summary.new_const_nodes;
         if (!dry_run) {
           auto c1   = lg->create_node_const(1);
@@ -845,11 +845,11 @@ public:
       }
 
       if (!rewritten && node.get_type_op() == Ntype_op::Div && lhs.is_type(Ntype_op::Const) && rhs.is_type(Ntype_op::Const)
-          && rhs.get_type_const() != 0) {
+          && rhs.get_type_const().is_known_zero() == false) {
         const auto c_lhs = lhs.get_type_const();
         const auto c_rhs = rhs.get_type_const();
-        if (c_lhs->is_i() && c_rhs->is_i()) {
-          const auto c_res = Dlop::create_integer(c_lhs->to_i() / c_rhs->to_i());
+        if (c_lhs.is_i() && c_rhs.is_i()) {
+          const auto c_res = Dlop::create_integer(c_lhs.to_i() / c_rhs.to_i());
           ++summary.new_const_nodes;
           if (!dry_run) {
             auto cnew = lg->create_node_const(c_res);
@@ -863,9 +863,9 @@ public:
             summary.rewired_edges += sinks.size();
           }
 
-          if (c_res == 0) {
+          if (c_res->is_known_zero()) {
             ++summary.simplified_to_const_zero;
-          } else if (c_res == 1) {
+          } else if (c_res->is_i() && c_res->to_i() == 1) {
             ++summary.simplified_to_const_one;
           } else {
             ++summary.simplified_to_const_other;
@@ -937,7 +937,7 @@ public:
       bool rewritten = false;
 
       // Case 1: a - 0 → a  (B input is the constant zero)
-      if (b_drv.is_type(Ntype_op::Const) && b_drv.get_type_const() == 0) {
+      if (b_drv.is_type(Ntype_op::Const) && b_drv.get_type_const().is_known_zero()) {
         if (!dry_run) {
           for (const auto& sink : sinks) {
             a_drv.connect_sink(sink);
@@ -972,8 +972,8 @@ public:
       if (!rewritten && a_drv.is_type(Ntype_op::Const) && b_drv.is_type(Ntype_op::Const)) {
         const auto ca = a_drv.get_type_const();
         const auto cb = b_drv.get_type_const();
-        if (ca->is_i() && cb->is_i()) {
-          const auto result = Dlop::create_integer(ca->to_i() - cb->to_i());
+        if (ca.is_i() && cb.is_i()) {
+          const auto result = Dlop::create_integer(ca.to_i() - cb.to_i());
           ++summary.new_const_nodes;
           if (!dry_run) {
             auto cnew = lg->create_node_const(result);

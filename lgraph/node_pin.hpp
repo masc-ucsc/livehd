@@ -373,6 +373,8 @@ public:
   [[nodiscard]] Node create(Ntype_op op) const;  // create a new node, keep same hierarchy
   //[[nodiscard]] Node create(Ntype_op op, std::pair<uint64_t, uint64_t> loc, std::string fname) const ;
   [[nodiscard]] Node create_const(const Const& value) const;  // create a new node, keep same hierarchy
+  [[nodiscard]] Node create_const(int64_t value) const;
+  [[nodiscard]] Node create_const(const spool_ptr<Dlop>& value) const;
 
   void connect_sink(const Node_pin& dst) const;
   void connect_sink(const Node& dst) const;

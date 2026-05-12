@@ -129,8 +129,8 @@ void uPass_attributes::on_assign_like(bool is_assign_node) {
       }
       if (Lnast_ntype::is_const(get_raw_ntype())) {
         auto v = Dlop::from_pyrope(txt);
-        if (!v.is_invalid()) {
-          rhs_value = v;
+        if (!v->is_invalid()) {
+          rhs_value = *v;
         }
       } else if (Lnast_ntype::is_ref(get_raw_ntype()) && runner_fold_fn) {
         auto folded = runner_fold_fn(txt);
@@ -158,7 +158,7 @@ void uPass_attributes::on_assign_like(bool is_assign_node) {
     Const out = narrow_for_lhs(view.lhs, *rhs_value);
     if (!out.is_invalid()) {
       auto [iter, inserted] = tmp_fold.emplace(view.lhs, out);
-      if (!inserted && iter->second != out) {
+      if (!inserted && !iter->second.same_repr(out)) {
         iter->second = out;
         mark_changed();
       } else if (inserted) {
@@ -212,7 +212,7 @@ void uPass_attributes::on_assign_like(bool is_assign_node) {
     // constprop's symbol table.
     if (auto it = tmp_fold.find(rhs); it != tmp_fold.end() && !it->second.is_invalid()) {
       auto [m_it, inserted] = tmp_fold.emplace(view.lhs, it->second);
-      if (!inserted && m_it->second != it->second) {
+      if (!inserted && !m_it->second.same_repr(it->second)) {
         m_it->second = it->second;
         mark_changed();
       } else if (inserted) {

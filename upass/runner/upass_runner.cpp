@@ -567,7 +567,7 @@ void uPass_runner::process_if() {
       // First child is a condition (ref or const). Try to fold it.
       std::optional<Const> cval;
       if (raw == Ntype::Lnast_ntype_const) {
-        cval = Dlop::from_pyrope(lm->current_text());
+        cval = *Dlop::from_pyrope(lm->current_text());
       } else {
         cval = try_fold_ref(lm->current_text());
       }
@@ -674,7 +674,7 @@ void uPass_runner::process_if() {
     auto cond_value = [this]() -> std::optional<Const> {
       if (lm->get_raw_ntype() == Lnast_ntype::Lnast_ntype_const) {
         try {
-          return Dlop::from_pyrope(lm->current_text());
+          return *Dlop::from_pyrope(lm->current_text());
         } catch (...) {
           return std::nullopt;
         }
