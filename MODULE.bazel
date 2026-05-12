@@ -36,17 +36,20 @@ bazel_dep(name = "libffi", version = "3.4.7.bcr.4")
 
 # iassert
 bazel_dep(name = "iassert", version = "0.1.0")
-local_path_override(
+git_override(
     module_name = "iassert",
-    path = "../iassert",
+    remote = "https://github.com/masc-ucsc/iassert.git",
+    commit = "0460fbd8405a96b3615be425df9066eba835fcf0",
 )
+# For local debug/testing, swap the git_override above for:
+# local_path_override(module_name = "iassert", path = "../iassert")
 
 # hlop (Dlop value type + slop/dlop execution layer)
 bazel_dep(name = "hlop", version = "0.2.0")
 git_override(
     module_name = "hlop",
     remote = "https://github.com/masc-ucsc/hlop.git",
-    commit = "d47f9c6fd10d612fd6c2f9b3e95df429ee8dfe3c",
+    commit = "4da8e608c24cc7fa211c12efd5f81661dbd41ec3",
 )
 
 # slang (fmt required by slang CMake)
@@ -106,10 +109,13 @@ http_archive(
 
 # HHDS (replaces core/lhtree*.hpp; see hhds_migration.md)
 bazel_dep(name = "hhds", version = "0.2.0")
-local_path_override(
+git_override(
     module_name = "hhds",
-    path = "../hhds",
+    remote = "https://github.com/masc-ucsc/hhds.git",
+    commit = "91f9b0a7e7d24ddef834873367aceb3f067890b2",
 )
+# For local debug/testing, swap the git_override above for:
+# local_path_override(module_name = "hhds", path = "../hhds")
 
 # tree-sitter-pyrope
 http_archive(
