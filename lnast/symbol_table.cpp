@@ -6,6 +6,17 @@
 #include "likely.hpp"
 #include "lnast.hpp"
 
+// Reject the legacy I/O / register prefixes ($, %, #) at every write site.
+// Pyrope no longer carries direction or register-ness in the textual name —
+// those are tracked structurally by lnast_to_lgraph / the attribute pass.
+// Names with these prefixes only show up when an upstream pass forgot to
+// normalize; surface that early instead of silently accepting them.
+static void assert_no_prefix(std::string_view key) {
+  auto var = Bundle::get_first_level(key);
+  I(var.empty() || (var.front() != '#' && var.front() != '$' && var.front() != '%'),
+    "symbol_table: variable name carries a legacy $/%/# prefix; upstream pass must normalize");
+}
+
 Symbol_table::Scope* Symbol_table::find_decl_scope(std::string_view var) {
   if (stack.empty()) {
     return nullptr;
@@ -41,6 +52,7 @@ const Symbol_table::Scope* Symbol_table::find_decl_scope(std::string_view var) c
 
 bool Symbol_table::var(std::string_view key) {
   I(!stack.empty());
+  assert_no_prefix(key);
   auto [var, field] = get_var_field(key);
 
   auto& cur = *stack.back();
@@ -78,6 +90,7 @@ static Symbol_table::Scope* anchor_for(Symbol_table::Scope* innermost, std::stri
 bool Symbol_table::set(std::string_view key, std::shared_ptr<Bundle> bundle) {
   I(bundle);
   I(!stack.empty());
+  assert_no_prefix(key);
 
   auto [var, field] = get_var_field(key);
 
@@ -116,6 +129,7 @@ bool Symbol_table::set(std::string_view key, std::shared_ptr<Bundle> bundle) {
 
 bool Symbol_table::set(std::string_view key, const Const& trivial) {
   I(!stack.empty());
+  assert_no_prefix(key);
   auto [var, field] = get_var_field(key);
 
   Scope* target = find_decl_scope(var);
@@ -140,6 +154,7 @@ bool Symbol_table::set(std::string_view key, const Const& trivial) {
 }
 
 bool Symbol_table::mut(std::string_view key, const Const& trivial) {
+  assert_no_prefix(key);
   auto [var, field] = get_var_field(key);
 
   Scope* target = find_decl_scope(var);
@@ -164,6 +179,7 @@ bool Symbol_table::mut(std::string_view key, const Const& trivial) {
 
 bool Symbol_table::let(std::string_view key, std::shared_ptr<Bundle> bundle) {
   I(!stack.empty());
+  assert_no_prefix(key);
   auto [var, field] = get_var_field(key);
 
   auto& cur = *stack.back();
@@ -197,7 +213,7 @@ void Symbol_table::conditional_scope() {
   stack.emplace_back(s);
 }
 
-void Symbol_table::function_scope(std::string_view func_id, std::shared_ptr<Bundle> inp_bundle) {
+void Symbol_table::function_scope(std::string_view func_id) {
   std::string scope(func_id);
   for (int i = static_cast<int>(stack.size()) - 1; i >= 0; --i) {
     const auto* s = stack[i];
@@ -213,11 +229,6 @@ void Symbol_table::function_scope(std::string_view func_id, std::shared_ptr<Bund
   auto* s = &scope_storage.back();
   s->parent = stack.empty() ? nullptr : stack.back();
   stack.emplace_back(s);
-
-  if (inp_bundle) {
-    auto ok = let("$", inp_bundle);
-    I(ok);
-  }
 }
 
 Symbol_table::Scope* Symbol_table::block_scope(uint64_t key) {
@@ -279,15 +290,6 @@ void Symbol_table::record_uncertain_modification(std::string_view name) {
 std::shared_ptr<Bundle> Symbol_table::leave_scope() {
   I(!stack.empty());
 
-  std::shared_ptr<Bundle> outputs;
-  if (stack.back()->type == Scope_type::Function) {
-    auto it = stack.back()->varmap.find("%");
-    if (it != stack.back()->varmap.end()) {
-      I(has_bundle("%"));
-      outputs = it->second;
-    }
-  }
-
   // Uncertain-arm cleanup. Any var assigned inside this scope had its
   // declaring-scope value updated while we walked the body (so casserts
   // *inside* the arm could fold against the in-progress value). On exit we
@@ -333,7 +335,7 @@ std::shared_ptr<Bundle> Symbol_table::leave_scope() {
   // the next iteration can re-enter it (block_scope) and accumulated state
   // remains consistent.
   stack.pop_back();
-  return outputs;
+  return nullptr;
 }
 
 bool Symbol_table::is_known_const(std::string_view name) const {

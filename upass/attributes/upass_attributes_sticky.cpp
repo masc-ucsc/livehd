@@ -74,21 +74,22 @@ void Sticky_handler::on_attr_set(uPass_attributes& owner, std::string_view lhs, 
 }
 
 void Sticky_handler::on_attr_get(uPass_attributes& owner, std::string_view dst, std::string_view base) {
-  // Reading a sticky attr propagates the bucket to the destination tmp:
-  //   tmp = a.[_foo]   // tmp inherits _foo
-  // So a downstream `if tmp { ... }` sees the bucket via cond_refs lookup.
-  // The base also keeps its bucket (sticky is monotonic).
+  // Per attributes_spec §Phase 1: "If a sticky value can affect another
+  // value Z in any way, then Z inherits that sticky attr." `tmp = base.[…]`
+  // makes `tmp` depend on the whole of `base`, so every sticky bucket
+  // already on `base` flows through. Without this, `if a.[_foo] { … }` —
+  // which lowers to `tmp = a.[_foo]; if tmp { … }` — would carry only
+  // `_foo` into the arm's control taint and lose `_debug` (and any other
+  // sticky `_*` bucket on `a`).
+  merge_from(dst, base);
+  // The dispatched bucket (the attr name being read) is also marked
+  // explicitly: a read can be the first surface where that bucket
+  // appears on `dst`, independent of whether `base` carries it yet.
   const auto& bucket = owner.current_dispatch_bucket();
-  if (bucket.empty()) {
-    return;
+  if (!bucket.empty()) {
+    mark(dst, bucket);
   }
-  // Mark the destination with the bucket. If `base` already has the bucket
-  // we propagate; if not, we still mark `dst` because reading a sticky-
-  // qualified attribute name carries the dependency. Phase 2 evaluates the
-  // numeric value separately.
-  (void)base;
-  mark(dst, bucket);
-  // Apply control taint to the destination as well.
+  // Control taint from enclosing if-arms still applies.
   for (const auto& b : active_control_taint()) {
     mark(dst, b);
   }

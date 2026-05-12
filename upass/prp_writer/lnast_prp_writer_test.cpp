@@ -164,20 +164,21 @@ TEST(LnastPrpWriter, TrueIfPrunedInOutput) {
   ln->set_root(Lnast_ntype::create_top());
   auto stmts = ln->add_child(ln->get_root(), Lnast_ntype::create_stmts());
 
-  // if true { %out = 4 }
+  // if true { out = src }     `src` is undeclared so constprop can't fold the
+  // assign to a known constant and DCE it — that lets us observe the splice.
   auto if_nid = ln->add_child(stmts, Lnast_ntype::create_if());
   ln->add_child(if_nid, Lnast_node::create_const("true"));
   auto then_s = ln->add_child(if_nid, Lnast_ntype::create_stmts());
   auto asgn   = ln->add_child(then_s, Lnast_ntype::create_assign());
-  ln->add_child(asgn, Lnast_node::create_ref("%out"));
-  ln->add_child(asgn, Lnast_node::create_const("4"));
+  ln->add_child(asgn, Lnast_node::create_ref("out"));
+  ln->add_child(asgn, Lnast_node::create_ref("src"));
 
   auto output = run_and_emit(ln, {"constprop"});
   // Slice 7 pruned the if — no `if` keyword in output.
   EXPECT_EQ(output.find("if "), std::string::npos) << "if should be pruned: " << output;
   // The then-branch assignment was spliced in.
   EXPECT_NE(output.find("out"), std::string::npos) << output;
-  EXPECT_NE(output.find('4'), std::string::npos) << output;
+  EXPECT_NE(output.find("src"), std::string::npos) << output;
 }
 
 // ── Test 7: ref strips $ prefix (input port) ─────────────────────────────────
@@ -199,32 +200,33 @@ TEST(LnastPrpWriter, InputPortPrefixStripped) {
 }
 
 // ── Test 8: if/else with unknown condition — structure preserved ──────────────
-// if %cond { %out = 4 } else { %out = 5 }
-// %cond is a port — constprop can't fold it → full if/else emitted.
+// if cond { out = then_v } else { out = else_v }
+// `cond`/`then_v`/`else_v` are undeclared — constprop can't fold the cond
+// or the assigns → full if/else emitted.
 TEST(LnastPrpWriter, UnknownCondIfElsePreserved) {
   auto ln = std::make_shared<Lnast>("if_else_test");
   ln->set_root(Lnast_ntype::create_top());
   auto stmts = ln->add_child(ln->get_root(), Lnast_ntype::create_stmts());
 
   auto if_nid = ln->add_child(stmts, Lnast_ntype::create_if());
-  ln->add_child(if_nid, Lnast_node::create_ref("%cond"));
+  ln->add_child(if_nid, Lnast_node::create_ref("cond"));
 
   auto then_s = ln->add_child(if_nid, Lnast_ntype::create_stmts());
   auto asgn1  = ln->add_child(then_s, Lnast_ntype::create_assign());
-  ln->add_child(asgn1, Lnast_node::create_ref("%out"));
-  ln->add_child(asgn1, Lnast_node::create_const("4"));
+  ln->add_child(asgn1, Lnast_node::create_ref("out"));
+  ln->add_child(asgn1, Lnast_node::create_ref("then_v"));
 
   auto else_s = ln->add_child(if_nid, Lnast_ntype::create_stmts());
   auto asgn2  = ln->add_child(else_s, Lnast_ntype::create_assign());
-  ln->add_child(asgn2, Lnast_node::create_ref("%out"));
-  ln->add_child(asgn2, Lnast_node::create_const("5"));
+  ln->add_child(asgn2, Lnast_node::create_ref("out"));
+  ln->add_child(asgn2, Lnast_node::create_ref("else_v"));
 
   auto output = run_and_emit(ln, {"constprop"});
   EXPECT_NE(output.find("if "), std::string::npos) << "if must be kept: " << output;
   EXPECT_NE(output.find("else"), std::string::npos) << "else must appear: " << output;
   EXPECT_NE(output.find("cond"), std::string::npos) << "condition missing: " << output;
-  EXPECT_NE(output.find("4"), std::string::npos) << "then-val missing: " << output;
-  EXPECT_NE(output.find("5"), std::string::npos) << "else-val missing: " << output;
+  EXPECT_NE(output.find("then_v"), std::string::npos) << "then-val missing: " << output;
+  EXPECT_NE(output.find("else_v"), std::string::npos) << "else-val missing: " << output;
 }
 
 // ── Test 9: multiple statements emitted in order ──────────────────────────────

@@ -43,7 +43,7 @@ public:
   // Active scope chain: innermost at back(). Pointers refer into scope_storage.
   std::vector<Scope*> stack;
 
-  void                    function_scope(std::string_view func_id, std::shared_ptr<Bundle> inp_bundle = nullptr);  // input
+  void                    function_scope(std::string_view func_id);
   void                    always_scope();
   void                    conditional_scope();
   // Push a block scope keyed by `key` (e.g. an LNAST nid hash). Re-entering
@@ -85,16 +85,6 @@ public:
 
   /// Returns true iff `name` holds a concrete Const with no unknown bits.
   bool is_known_const(std::string_view name) const;
-
-  /// Slice-1 stand-in: true iff `name` starts with '#' (register prefix).
-  /// Migrates to ST-backed lookup after lnast_todo.md §12.
-  bool is_reg(std::string_view name) const { return !name.empty() && name.front() == '#'; }
-
-  /// Slice-1 stand-in: true iff `name` starts with '$' (input-port prefix).
-  bool is_input(std::string_view name) const { return !name.empty() && name.front() == '$'; }
-
-  /// Slice-1 stand-in: true iff `name` starts with '%' (output-port prefix).
-  bool is_output(std::string_view name) const { return !name.empty() && name.front() == '%'; }
 
   // Const can be 0sb? or 123 or string or bool or nil or runtime (0sb? and runtime?)
   const Const&           get_trivial(std::string_view key) const;

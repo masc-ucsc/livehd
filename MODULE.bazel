@@ -46,10 +46,9 @@ git_override(
 
 # hlop (Dlop value type + slop/dlop execution layer)
 bazel_dep(name = "hlop", version = "0.2.0")
-git_override(
+local_path_override(
     module_name = "hlop",
-    remote = "https://github.com/masc-ucsc/hlop.git",
-    commit = "4da8e608c24cc7fa211c12efd5f81661dbd41ec3",
+    path = "../hlop",
 )
 
 # slang (fmt required by slang CMake)

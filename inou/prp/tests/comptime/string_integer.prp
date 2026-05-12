@@ -12,7 +12,7 @@ cassert string(1+2) == "3"
 const v = u32("33")
 cassert v == 33
 
-cassert "0b010101".uint() == 0b10101
+cassert "0ub010101".uint() == 0ub10101
 
 cassert "-1".uint() == nil
 

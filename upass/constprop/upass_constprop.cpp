@@ -49,12 +49,6 @@ void uPass_constprop::process_assign() {
   auto lhs_text = current_text();
   move_to_sibling();
 
-  // Strip I/O prefixes so symbol-table keys match the producer-visible name.
-  // §12 will move direction out of the ref text entirely; until then, normalize here.
-  if (!lhs_text.empty() && (lhs_text.front() == '%' || lhs_text.front() == '$')) {
-    lhs_text = lhs_text.substr(1);
-  }
-
   if (is_type(Lnast_ntype::Lnast_ntype_ref)) {
     // RHS is a variable reference: alias the bundle in the symbol table.
     // We do NOT call mark_changed here — bundle aliasing (A = ___t1) is just
@@ -2216,8 +2210,6 @@ void uPass_constprop::process_red_xor() {
 //
 // Rule: drop this statement iff
 //   - LHS (first child) is a ref, and
-//   - LHS name is not a reg (#), input ($), or output (%) — prefix check is
-//     the Slice 1 stand-in for §12's `st.is_reg/is_input/is_output`, and
 //   - the symbol table holds a concrete Const for LHS (known, no unknowns).
 // Otherwise emit.
 upass::Emit_decision uPass_constprop::classify_statement() {
@@ -2234,12 +2226,6 @@ upass::Emit_decision uPass_constprop::classify_statement() {
   move_to_parent();
 
   if (!lhs_is_ref || lhs_text.empty()) {
-    return upass::Emit_decision::emit_node();
-  }
-
-  // Regs, inputs, and outputs carry timing/boundary semantics beyond value — always emit.
-  // Slice-1 prefix check; migrates to st.is_reg/is_input/is_output after §12.
-  if (st.is_reg(lhs_text) || st.is_input(lhs_text) || st.is_output(lhs_text)) {
     return upass::Emit_decision::emit_node();
   }
 
@@ -2270,12 +2256,7 @@ std::optional<Const> uPass_constprop::fold_ref(std::string_view name) {
   if (name.empty()) {
     return std::nullopt;
   }
-  // Strip I/O prefixes so the lookup matches what process_assign stored.
-  std::string_view key = name;
-  if (st.is_input(key) || st.is_output(key)) {
-    key.remove_prefix(1);
-  }
-  if (!st.is_known_const(key)) {
+  if (!st.is_known_const(name)) {
     return std::nullopt;
   }
   // is_known_const returns true once the bundle's position-0 entry is a
@@ -2286,10 +2267,10 @@ std::optional<Const> uPass_constprop::fold_ref(std::string_view name) {
   // trivial scalar (exactly one anonymous `0` entry); for everything
   // else, return nullopt so the consumer keeps the ref and reads the
   // full bundle from the symbol table.
-  if (auto b = st.get_bundle(key); b && !b->is_trivial_scalar()) {
+  if (auto b = st.get_bundle(name); b && !b->is_trivial_scalar()) {
     return std::nullopt;
   }
-  return st.get_trivial(key);
+  return st.get_trivial(name);
 }
 
 void uPass_constprop::process_sext() {

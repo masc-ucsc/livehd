@@ -31,9 +31,6 @@ public:
 
   // Expose §5.a ST query helpers for testing.
   bool st_is_known_const(std::string_view name) const { return st.is_known_const(name); }
-  bool st_is_reg(std::string_view name) const { return st.is_reg(name); }
-  bool st_is_input(std::string_view name) const { return st.is_input(name); }
-  bool st_is_output(std::string_view name) const { return st.is_output(name); }
 
   // Directly write a trivial value into the symbol table (for ST tests).
   void st_set(std::string_view name, const Const& val) { st.set(name, val); }
@@ -739,39 +736,6 @@ TEST(UpassConstpropST, IsKnownConstInvalidLconstReturnsFalse) {
   EXPECT_FALSE(cp.st_is_known_const("y"));
 }
 
-// is_reg correctly identifies '#'-prefixed names as registers.
-TEST(UpassConstpropST, IsRegDetectsHashPrefix) {
-  ConstpropFixture  f;
-  TestableConstprop cp(f.lm);
-
-  EXPECT_TRUE(cp.st_is_reg("#counter"));
-  EXPECT_FALSE(cp.st_is_reg("counter"));
-  EXPECT_FALSE(cp.st_is_reg("$inp"));
-  EXPECT_FALSE(cp.st_is_reg(""));
-}
-
-// is_input correctly identifies '$'-prefixed names as input ports.
-TEST(UpassConstpropST, IsInputDetectsDollarPrefix) {
-  ConstpropFixture  f;
-  TestableConstprop cp(f.lm);
-
-  EXPECT_TRUE(cp.st_is_input("$inp"));
-  EXPECT_FALSE(cp.st_is_input("inp"));
-  EXPECT_FALSE(cp.st_is_input("#reg"));
-  EXPECT_FALSE(cp.st_is_input(""));
-}
-
-// is_output correctly identifies '%'-prefixed names as output ports.
-TEST(UpassConstpropST, IsOutputDetectsPercentPrefix) {
-  ConstpropFixture  f;
-  TestableConstprop cp(f.lm);
-
-  EXPECT_TRUE(cp.st_is_output("%out"));
-  EXPECT_FALSE(cp.st_is_output("out"));
-  EXPECT_FALSE(cp.st_is_output("$inp"));
-  EXPECT_FALSE(cp.st_is_output(""));
-}
-
 // classify_statement drops an assign whose LHS is a known-const temp variable.
 TEST(UpassConstpropST, ClassifyDropsKnownConstTemp) {
   ConstpropFixture f;
@@ -787,23 +751,6 @@ TEST(UpassConstpropST, ClassifyDropsKnownConstTemp) {
   cp.position(assign_op);
   auto decision = cp.classify();
   EXPECT_EQ(decision.kind, upass::Emit_kind::drop_subtree);
-}
-
-// classify_statement emits a register assignment even when the value is known.
-TEST(UpassConstpropST, ClassifyKeepsRegEvenIfKnownConst) {
-  ConstpropFixture f;
-
-  // Build:  #reg = 7
-  auto assign_op = f.ln->add_child(f.stmts_nid, Lnast_ntype::create_assign());
-  f.ln->add_child(assign_op, Lnast_node::create_ref("#reg"));
-  f.ln->add_child(assign_op, Lnast_node::create_const("7"));
-
-  TestableConstprop cp(f.lm);
-  cp.st_set("#reg", Dlop::create_integer(7));
-
-  cp.position(assign_op);
-  auto decision = cp.classify();
-  EXPECT_EQ(decision.kind, upass::Emit_kind::emit);
 }
 
 }  // namespace
