@@ -587,7 +587,7 @@ const Bundle::Entry& Bundle::get_entry(std::string_view key) const {
   return invalid;
 }
 
-const Lconst& Bundle::get_trivial() const {
+const Const& Bundle::get_trivial() const {
   int pos = -1;
   for (auto i = 0u; i < key_map.size(); ++i) {
     if (is_attribute(key_map[i].first)) {
@@ -681,7 +681,7 @@ std::shared_ptr<Bundle> Bundle::get_bundle(const std::shared_ptr<Bundle const>& 
 
   int pos = 0;
   for (const auto& e : tup->key_map) {
-    auto field = e.second.trivial.to_field();
+    auto field = e.second.trivial->to_field();
 
     if (!has_trivial(field)) {
       Lnast::info("bundle {} can not be indexed with {} key:{} with value {}", get_name(), tup->get_name(), e.first, field);
@@ -899,7 +899,7 @@ bool Bundle::concat(const std::shared_ptr<Bundle const>& tup) {
   // Group RHS entries by top-level prefix while preserving group order.
   struct Rhs_group {
     std::string                                   top;       // RHS top-level prefix as-emitted
-    std::vector<std::pair<std::string, Lconst>>   entries;   // (suffix-after-top, value); suffix "" = scalar at slot
+    std::vector<std::pair<std::string, Const>>   entries;   // (suffix-after-top, value); suffix "" = scalar at slot
   };
   std::vector<Rhs_group>                rhs_groups;
   std::unordered_map<std::string, size_t> rhs_top_idx;
@@ -927,7 +927,7 @@ bool Bundle::concat(const std::shared_ptr<Bundle const>& tup) {
   // prefix, with `suffix` optionally tucked between the new top and the
   // group's original suffix path (used by collision-merge to nest the
   // RHS payload under a fresh `.K` slot in the existing LHS sub-tuple).
-  auto emit_group = [&](const std::vector<std::pair<std::string, Lconst>>& entries,
+  auto emit_group = [&](const std::vector<std::pair<std::string, Const>>& entries,
                         std::string_view                                    new_top,
                         std::string_view                                    extra_prefix = {}) {
     for (const auto& [suffix, value] : entries) {
@@ -1006,13 +1006,13 @@ bool Bundle::concat(const std::shared_ptr<Bundle const>& tup) {
         // "drop nil → keep LHS" branch since LHS is already nil.)
         const auto& lhs_top                = it->second;
         bool        rhs_is_nil_scalar      = g.entries.size() == 1 && g.entries[0].first.empty()
-                                             && g.entries[0].second.is_nil();
+                                             && g.entries[0].second->is_nil();
         if (rhs_is_nil_scalar) {
           continue;  // RHS contributes nothing; LHS slot stays untouched.
         }
         bool lhs_is_nil_scalar = false;
         for (auto& e : key_map) {
-          if (e.first == lhs_top && e.second.trivial.is_nil()) {
+          if (e.first == lhs_top && e.second.trivial->is_nil()) {
             lhs_is_nil_scalar = true;
             break;
           }
@@ -1056,7 +1056,7 @@ bool Bundle::concat(const std::shared_ptr<Bundle const>& tup) {
   return true;
 }
 
-Lconst Bundle::flatten() const {
+Const Bundle::flatten() const {
   // a_dpin = (tup[0]|(tup[1]<<tup[0].__sbits)|(tup[2]<<(tup[0..1].__sbits)|.....)
 
   if (!is_correct()) {
@@ -1065,18 +1065,18 @@ Lconst Bundle::flatten() const {
 
   std::stable_sort(key_map.begin(), key_map.end(), bundle_sort);
 
-  Lconst result;
+  Const result;
   for (const auto& e : key_map) {
     if (is_attribute(e.first)) {
       continue;
     }
 
-    if (e.second.trivial.is_invalid()) {
+    if (e.second.trivial->is_invalid()) {
       return e.second.trivial;
     }
 
-    auto v = e.second.trivial << result.get_bits();
-    result = result.or_op(v.get_mask_op());
+    auto v = e.second.trivial->lsh_op(result->get_bits());
+    result = result->or_op(v->get_mask_op());
   }
 
   return result;
@@ -1091,8 +1091,8 @@ std::shared_ptr<Bundle> Bundle::create_assign(const std::shared_ptr<Bundle const
   return new_tup;
 }
 
-std::shared_ptr<Bundle> Bundle::create_assign(const Lconst& rhs_trivial) const {
-  if (rhs_trivial.is_invalid()) {
+std::shared_ptr<Bundle> Bundle::create_assign(const Const& rhs_trivial) const {
+  if (rhs_trivial->is_invalid()) {
     return nullptr;
   }
 
@@ -1105,8 +1105,8 @@ std::shared_ptr<Bundle> Bundle::create_assign(const Lconst& rhs_trivial) const {
 
 #if 0
   {
-    Lconst sbits = Lconst::invalid();
-    Lconst ubits = Lconst::invalid();
+    Const sbits = Dlop::invalid();
+    Const ubits = Dlop::invalid();
 
     for (const auto i = 0u; i < key_map.size(); ++i) {
       const auto &e = key_map[i];
@@ -1136,8 +1136,8 @@ std::shared_ptr<Bundle> Bundle::create_assign(const Lconst& rhs_trivial) const {
           return nullptr;
 
         non_attr_field = e.first;
-        ubits     = Lconst::invalid;
-        sbits     = Lconst::invalid;
+        ubits     = Dlop::invalid;
+        sbits     = Dlop::invalid;
         continue;
       }
 
@@ -1152,8 +1152,8 @@ std::shared_ptr<Bundle> Bundle::create_assign(const Lconst& rhs_trivial) const {
           pending_pos = -1;
 
         non_attr_field = "";
-        ubits     = Lconst::invalid;
-        sbits     = Lconst::invalid;
+        ubits     = Dlop::invalid;
+        sbits     = Dlop::invalid;
       }
 
       if (pending_pos < 0) {
@@ -1191,7 +1191,7 @@ const Bundle::Key_map_type& Bundle::get_sort_map() const {
   return key_map;
 }
 
-bool Bundle::concat(const Lconst& trivial) {
+bool Bundle::concat(const Const& trivial) {
   auto max_pos = 0;
   for (const auto& e : key_map) {
     int x = 0;

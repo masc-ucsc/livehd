@@ -86,14 +86,14 @@ void Lgraph::load(const std::shared_ptr<Hif_read> hif) {
       I(!stmt.attr.empty() && stmt.attr[0].lhs == "const");
       I(stmt.attr[0].lhs_cat == Hif_base::ID_cat::String_cat);
 
-      Lconst lc = Lconst::unserialize(stmt.attr[0].rhs);
+      Const lc = Dlop::unserialize(stmt.attr[0].rhs);
       node      = create_node_const(lc);
 
     } else if (op == Ntype_op::LUT) {
       I(!stmt.attr.empty() && stmt.attr[0].lhs == "lut");
       I(stmt.attr[0].lhs_cat == Hif_base::ID_cat::String_cat);
 
-      Lconst lc = Lconst::unserialize(stmt.attr[0].rhs);
+      Const lc = Dlop::unserialize(stmt.attr[0].rhs);
       node      = create_node_lut(lc);
 
     } else if (op == Ntype_op::Sub) {
@@ -1471,15 +1471,15 @@ Node Lgraph::create_node(const Ntype_op op, Bits_t bits) {
   return node;
 }
 
-Node Lgraph::create_node_const(const Lconst& value) {
+Node Lgraph::create_node_const(const Const& value) {
   // WARNING: There is a const_map, but it is NOT a bimap (speed). Just from
   // nid to const.
-  Index_id nid = memoize_const_hint[value.hash() % memoize_const_hint.size()];
+  Index_id nid = memoize_const_hint[value->hash() % memoize_const_hint.size()];
   if (nid == 0 || nid >= node_internal.size() || !node_internal[nid].is_valid() || node_internal[nid].get_type() != Ntype_op::Const
-      || get_type_const(nid) != value || get_type_const(nid).get_bits() != value.get_bits()) {
+      || *get_type_const(nid) != *value || get_type_const(nid)->get_bits() != value->get_bits()) {
     nid = create_node_int();
     set_type_const(nid, value);
-    memoize_const_hint[value.hash() % memoize_const_hint.size()] = nid;
+    memoize_const_hint[value->hash() % memoize_const_hint.size()] = nid;
   }
 
   I(node_internal[nid].get_dst_pid() == 0);
@@ -1487,7 +1487,7 @@ Node Lgraph::create_node_const(const Lconst& value) {
   return Node{this, Hierarchy::hierarchical_root(), nid};
 }
 
-Node Lgraph::create_node_lut(const Lconst& lut) {
+Node Lgraph::create_node_lut(const Const& lut) {
   auto nid = create_node().get_nid();
   set_type_lut(nid, lut);
 
@@ -1650,10 +1650,10 @@ void Lgraph::save(std::string filename) {
       auto subid = node.get_type_sub();
       n.add_attr("subid", subid.value);
     } else if (op == Ntype_op::Const) {
-      auto str = node.get_type_const().serialize();
+      auto str = node.get_type_const()->serialize();
       n.add_attr("const", str);
     } else if (op == Ntype_op::LUT) {
-      auto str = node.get_type_lut().serialize();
+      auto str = node.get_type_lut()->serialize();
       n.add_attr("lut", str);
     }
 

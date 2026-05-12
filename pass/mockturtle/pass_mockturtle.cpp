@@ -528,7 +528,7 @@ void Pass_mockturtle::mapping_shift_cell_lg2mt(const bool& is_shift_right, const
   setup_input_signals(group_id, opr_A_edge, opr_A_sigs, mt_ntk);
   if (opr_B_edge.driver.get_node().get_type_op() == Ntype_op::Const) {
     // creating output signal for const shift
-    uint32_t offset = opr_B_edge.driver.get_node().get_type_const().to_i();
+    uint32_t offset = opr_B_edge.driver.get_node().get_type_const()->to_i();
     shift_op(opr_A_sigs, is_shift_right, sign_ext, offset, out_sigs, mt_ntk);
   } else {
     std::vector<typename ntk_type::signal>              opr_B_sigs, temp_out;
@@ -607,7 +607,7 @@ void Pass_mockturtle::mapping_dynamic_shift_cell_lg2mt(const bool& is_shift_righ
     // creating output signal for const shift
     uint32_t ofs;
     bool     is_negative;
-    converting_uint32_to_signed_SMR(opr_B_edge.driver.get_node().get_type_const().to_i(), ofs, is_negative);
+    converting_uint32_to_signed_SMR(opr_B_edge.driver.get_node().get_type_const()->to_i(), ofs, is_negative);
     if (is_negative) {
       shift_op(opr_A_sigs, !is_shift_right, false, ofs, out_sigs, mt_ntk);
     } else {
@@ -1046,7 +1046,7 @@ void Pass_mockturtle::create_lutified_lgraph(Lgraph* old_lg) {
       });
 
       auto encoding = std::string("0x") + kitty::to_hex(func);
-      auto new_node = new_lg->create_node_lut(Lconst::from_pyrope(encoding));
+      auto new_node = new_lg->create_node_lut(Dlop::from_pyrope(encoding));
 
       gid_klut_node2lg_node[std::make_pair(group_id, klut_ntk_node)] = new_node.get_compact();
     });
@@ -1125,7 +1125,7 @@ void Pass_mockturtle::create_lutified_lgraph(Lgraph* old_lg) {
         /*   auto pick_node_sink_pin        = pick_node.setup_sink_pin(0); */
         /*   auto pick_node_offset_pin      = pick_node.setup_sink_pin(1); */
         /*   auto pick_node_driver_pin      = pick_node.setup_driver_pin(); */
-        /*   auto const_node_for_bit_select = new_lg->create_node_const(Lconst(i, bits)); */
+        /*   auto const_node_for_bit_select = new_lg->create_node_const(/*FIXME-LCONST-CTOR*/Lconst(i, bits)); */
         /*   auto bit_select_signal         = const_node_for_bit_select.get_driver_pin(); */
         /*   pick_node_driver_pin.set_bits(1); */
         /*   new_lg->add_edge(bit_select_signal, pick_node_offset_pin); */

@@ -5,24 +5,24 @@
 #include <print>
 #include <vector>
 
-#include "lconst.hpp"
+#include "const.hpp"
 
 class Bundle : std::enable_shared_from_this<Bundle> {
 public:
   struct Entry {
     Entry(const Entry& ent) : immutable(ent.immutable), trivial(ent.trivial) {}
-    Entry() : immutable(false), trivial(Lconst::invalid()) {}
-    Entry(bool i, const Lconst& t) : immutable(i), trivial(t) {}
+    Entry() : immutable(false), trivial(Dlop::invalid()) {}
+    Entry(bool i, const Const& t) : immutable(i), trivial(t) {}
     Entry& operator=(const Entry& ent) {
       immutable = ent.immutable;
       trivial   = ent.trivial;
       return *this;
     }
     bool   immutable;
-    Lconst trivial;
+    Const trivial;
   };
 
-  static inline Lconst invalid_lconst = Lconst::invalid();
+  static inline Const invalid_lconst = Dlop::invalid();
 
 protected:
   using Key_map_type = std::vector<std::pair<std::string, Entry>>;
@@ -66,8 +66,8 @@ public:
   std::string learn_fix(std::string_view key);
 
   const Entry&  get_entry(std::string_view key) const;
-  const Lconst& get_trivial(std::string_view key) const { return get_entry(key).trivial; }
-  const Lconst& get_trivial() const;
+  const Const& get_trivial(std::string_view key) const { return get_entry(key).trivial; }
+  const Const& get_trivial() const;
 
   bool                    has_bundle(std::string_view key) const;
   std::shared_ptr<Bundle> get_bundle(std::string_view key) const;
@@ -79,33 +79,33 @@ public:
   void set(std::string_view key, const Entry&& entry);
   void set(std::string_view key, const Entry& entry) { set(key, Entry(entry)); }
 
-  void set(std::string_view key, const Lconst& trivial) { set(key, Entry(false, trivial)); }
-  void let(std::string_view key, const Lconst& trivial) {
+  void set(std::string_view key, const Const& trivial) { set(key, Entry(false, trivial)); }
+  void let(std::string_view key, const Const& trivial) {
     I(!immutable);  // FIXME: use llog library
     set(key, Entry(true, trivial));
   }
-  void mut(std::string_view key, const Lconst& trivial) {
+  void mut(std::string_view key, const Const& trivial) {
     I(!immutable);  // FIXME: use llog library
     set(key, Entry(false, trivial));
   }
-  void var(std::string_view key, const Lconst& trivial) {
+  void var(std::string_view key, const Const& trivial) {
     I(!immutable);  // FIXME: use llog library
     set(key, Entry(false, trivial));
   }
 
-  void set(const Lconst& trivial) {  // clear everything that is not 0.__attr. set 0
+  void set(const Const& trivial) {  // clear everything that is not 0.__attr. set 0
     return set("0", trivial);
   }
 
   bool concat(const std::shared_ptr<Bundle const>& tup2);
-  bool concat(const Lconst& trivial);
+  bool concat(const Const& trivial);
 
   std::shared_ptr<Bundle> create_assign(const std::shared_ptr<Bundle const>& tup) const;
-  std::shared_ptr<Bundle> create_assign(const Lconst& lconst) const;
+  std::shared_ptr<Bundle> create_assign(const Const& lconst) const;
 
   const Key_map_type& get_map() const { return key_map; }
   const Key_map_type& get_sort_map() const;
-  Lconst              flatten() const;
+  Const              flatten() const;
 
   std::string_view get_scalar_name() const;  // empty if not scalar
 

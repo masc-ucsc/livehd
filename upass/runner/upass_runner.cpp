@@ -199,7 +199,7 @@ void uPass_runner::emit_subtree_verbatim() {
   }
 }
 
-std::optional<Lconst> uPass_runner::try_fold_ref(std::string_view name) {
+std::optional<Const> uPass_runner::try_fold_ref(std::string_view name) {
   for (auto& entry : upasses) {
     auto folded = entry.pass->fold_ref(name);
     if (folded) {
@@ -257,7 +257,7 @@ void uPass_runner::emit_op_with_fold(bool fold_all) {
 void uPass_runner::dispatch_to_passes(Pass_method fn) {
   for (auto& entry : upasses) {
     // Snapshot the read cursor before dispatch. If the pass throws (e.g.
-    // constprop's sub_op refuses a string-typed invalid Lconst) or is
+    // constprop's sub_op refuses a string-typed invalid Const) or is
     // otherwise unbalanced, restoring here keeps the runner-level emit
     // logic operating on the op-node the switch case selected.
     const auto saved = lm->save_cursor();
@@ -565,9 +565,9 @@ void uPass_runner::process_if() {
 
     if (raw != Ntype::Lnast_ntype_stmts) {
       // First child is a condition (ref or const). Try to fold it.
-      std::optional<Lconst> cval;
+      std::optional<Const> cval;
       if (raw == Ntype::Lnast_ntype_const) {
-        cval = Lconst::from_pyrope(lm->current_text());
+        cval = Dlop::from_pyrope(lm->current_text());
       } else {
         cval = try_fold_ref(lm->current_text());
       }
@@ -671,10 +671,10 @@ void uPass_runner::process_if() {
     bool already_matched     = false;  // a *previous* arm already fired
     bool any_prior_uncertain = false;  // some earlier cond folded to neither true nor false
 
-    auto cond_value = [this]() -> std::optional<Lconst> {
+    auto cond_value = [this]() -> std::optional<Const> {
       if (lm->get_raw_ntype() == Lnast_ntype::Lnast_ntype_const) {
         try {
-          return Lconst::from_pyrope(lm->current_text());
+          return Dlop::from_pyrope(lm->current_text());
         } catch (...) {
           return std::nullopt;
         }

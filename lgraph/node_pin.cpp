@@ -130,7 +130,7 @@ bool Node_pin::is_type(const Ntype_op op) const {
   return op == current_g->get_type_op(nid);
 }
 
-Lconst Node_pin::get_type_const() const {
+Const Node_pin::get_type_const() const {
   auto nid = current_g->get_node_nid(idx);
   return current_g->get_type_const(nid);
 }
@@ -217,7 +217,7 @@ Node Node_pin::create(Ntype_op op, std::pair<uint64_t, uint64_t> loc, std::strin
 }
 #endif
 
-Node Node_pin::create_const(const Lconst& value) const {
+Node Node_pin::create_const(const Const& value) const {
   auto node  = current_g->create_node_const(value);
   node.top_g = top_g;
   node.hidx  = hidx;
@@ -407,7 +407,7 @@ std::string Node_pin::debug_name() const {
     if (node.is_type_sub()) {
       name = node.get_type_sub_node().get_name_from_instance_pid(pid);
     } else if (node.is_type_const()) {
-      name = node.get_type_const().to_pyrope();
+      name = node.get_type_const()->to_pyrope();
       return absl::StrCat("pin_", "n", std::to_string(node.nid), "_", name);
     } else if (node.has_name()) {
       name = node.get_name();

@@ -27,20 +27,20 @@ TEST_F(Symbol_table_test, trivial_constants) {
   }
 
   {
-    auto ok = st.mut("foo", Lconst(1));
+    auto ok = st.mut("foo", Dlop::create_integer(1));
     EXPECT_TRUE(ok);
 
     EXPECT_TRUE(st.has_trivial("foo"));
     EXPECT_TRUE(st.has_bundle("foo"));
 
-    EXPECT_EQ(st.get_trivial("foo"), Lconst(1));
+    EXPECT_EQ(st.get_trivial("foo"), Dlop::create_integer(1));
   }
 
   {
-    auto ok = st.mut("foo", Lconst(2));
+    auto ok = st.mut("foo", Dlop::create_integer(2));
     EXPECT_TRUE(ok);
 
-    EXPECT_EQ(st.get_trivial("foo"), Lconst(2));
+    EXPECT_EQ(st.get_trivial("foo"), Dlop::create_integer(2));
   }
 
   auto out = st.leave_scope();
@@ -59,9 +59,9 @@ TEST_F(Symbol_table_test, recursion) {
   EXPECT_TRUE(ok);
   EXPECT_TRUE(st.has_trivial("foo"));
 
-  auto ok1 = st.mut("foo", Lconst(1));
+  auto ok1 = st.mut("foo", Dlop::create_integer(1));
   EXPECT_TRUE(ok1);
-  EXPECT_EQ(st.get_trivial("foo"), Lconst(1));
+  EXPECT_EQ(st.get_trivial("foo"), Dlop::create_integer(1));
 
   //------------------------------------------
   st.function_scope("myfunc");
@@ -70,9 +70,9 @@ TEST_F(Symbol_table_test, recursion) {
   EXPECT_TRUE(ok2);
   EXPECT_TRUE(st.has_trivial("foo"));
 
-  auto ok3 = st.mut("foo", Lconst(2));
+  auto ok3 = st.mut("foo", Dlop::create_integer(2));
   EXPECT_TRUE(ok3);
-  EXPECT_EQ(st.get_trivial("foo"), Lconst(2));
+  EXPECT_EQ(st.get_trivial("foo"), Dlop::create_integer(2));
 
   //------------------------------------------
   st.function_scope("other_call");
@@ -81,9 +81,9 @@ TEST_F(Symbol_table_test, recursion) {
   EXPECT_TRUE(ok4);
   EXPECT_TRUE(st.has_trivial("foo"));
 
-  auto ok5 = st.mut("foo", Lconst(3));
+  auto ok5 = st.mut("foo", Dlop::create_integer(3));
   EXPECT_TRUE(ok5);
-  EXPECT_EQ(st.get_trivial("foo"), Lconst(3));
+  EXPECT_EQ(st.get_trivial("foo"), Dlop::create_integer(3));
 
   //------------------------------------------
   st.function_scope("myfunc");
@@ -92,19 +92,19 @@ TEST_F(Symbol_table_test, recursion) {
   EXPECT_TRUE(ok6);
   EXPECT_TRUE(st.has_trivial("foo"));
 
-  auto ok7 = st.mut("foo", Lconst(4));
+  auto ok7 = st.mut("foo", Dlop::create_integer(4));
   EXPECT_TRUE(ok7);
-  EXPECT_EQ(st.get_trivial("foo"), Lconst(4));
+  EXPECT_EQ(st.get_trivial("foo"), Dlop::create_integer(4));
 
   //------------------------------------------
   st.leave_scope();
-  EXPECT_EQ(st.get_trivial("foo"), Lconst(3));
+  EXPECT_EQ(st.get_trivial("foo"), Dlop::create_integer(3));
 
   st.leave_scope();
-  EXPECT_EQ(st.get_trivial("foo"), Lconst(2));
+  EXPECT_EQ(st.get_trivial("foo"), Dlop::create_integer(2));
 
   st.leave_scope();
-  EXPECT_EQ(st.get_trivial("foo"), Lconst(1));
+  EXPECT_EQ(st.get_trivial("foo"), Dlop::create_integer(1));
 }
 
 TEST_F(Symbol_table_test, ordered_check) {
@@ -112,38 +112,38 @@ TEST_F(Symbol_table_test, ordered_check) {
 
   st.function_scope("my function with spaces and very log name");
 
-  st.set("foo.:0:bar", Lconst(1));
-  st.set("foo.:1:xxx", Lconst(2));
-  st.set("foo.2", Lconst(3));
-  st.set("foo.99", Lconst(4));
+  st.set("foo.:0:bar", Dlop::create_integer(1));
+  st.set("foo.:1:xxx", Dlop::create_integer(2));
+  st.set("foo.2", Dlop::create_integer(3));
+  st.set("foo.99", Dlop::create_integer(4));
 
   auto bundle = st.get_bundle("foo");
   bundle->dump();
 
-  EXPECT_EQ(bundle->get_trivial("0"), Lconst(1));
-  EXPECT_EQ(bundle->get_trivial("bar"), Lconst(1));
-  EXPECT_EQ(bundle->get_trivial(":1:xxx"), Lconst(2));
+  EXPECT_EQ(bundle->get_trivial("0"), Dlop::create_integer(1));
+  EXPECT_EQ(bundle->get_trivial("bar"), Dlop::create_integer(1));
+  EXPECT_EQ(bundle->get_trivial(":1:xxx"), Dlop::create_integer(2));
 
   EXPECT_TRUE(bundle->is_ordered("foo"));
-  st.set("foo.bar", Lconst(4));  // replace ":0:bar"
-  EXPECT_EQ(bundle->get_trivial("bar"), Lconst(4));
+  st.set("foo.bar", Dlop::create_integer(4));  // replace ":0:bar"
+  EXPECT_EQ(bundle->get_trivial("bar"), Dlop::create_integer(4));
   EXPECT_TRUE(bundle->is_ordered(""));
 
-  st.set("foo.nothere", Lconst(4));
+  st.set("foo.nothere", Dlop::create_integer(4));
   EXPECT_FALSE(bundle->is_ordered(""));
 
   EXPECT_TRUE(bundle->is_ordered("nothere"));
-  st.set("foo.nothere.2", Lconst(4));
+  st.set("foo.nothere.2", Dlop::create_integer(4));
   EXPECT_TRUE(bundle->is_ordered("nothere"));
-  st.set("foo.nothere.x", Lconst(4));
+  st.set("foo.nothere.x", Dlop::create_integer(4));
   EXPECT_FALSE(bundle->is_ordered("nothere"));
 
-  st.set("foo.bar.0.xx", Lconst(10));
-  st.set("foo.bar.1.yy", Lconst(11));
-  st.set("foo.bar.2.xx", Lconst(12));
-  st.set("foo.bar.8.zz", Lconst(13));
+  st.set("foo.bar.0.xx", Dlop::create_integer(10));
+  st.set("foo.bar.1.yy", Dlop::create_integer(11));
+  st.set("foo.bar.2.xx", Dlop::create_integer(12));
+  st.set("foo.bar.8.zz", Dlop::create_integer(13));
   EXPECT_TRUE(bundle->is_ordered("bar"));
-  st.set("foo.bar.NOT.zz", Lconst(13));
+  st.set("foo.bar.NOT.zz", Dlop::create_integer(13));
   EXPECT_FALSE(bundle->is_ordered("bar"));
 
   st.leave_scope();

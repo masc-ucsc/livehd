@@ -13,7 +13,7 @@
 #include <string_view>
 #include <vector>
 
-#include "lconst.hpp"
+#include "const.hpp"
 #include "node.hpp"
 #include "node_pin.hpp"
 

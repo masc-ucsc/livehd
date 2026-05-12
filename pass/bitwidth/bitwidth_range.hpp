@@ -3,11 +3,12 @@
 
 #include <cstdint>
 
-#include "lconst.hpp"
+#include "const.hpp"
+#include "graph_sizing.hpp"
 
 class __attribute__((packed)) Bitwidth_range {
 protected:
-  static Lconst to_lconst(bool overflow, int64_t val);
+  static Const to_lconst(bool overflow, int64_t val);
 
   // TODO:
   //  It may be interesting to explore to have unknowns, known zero, know ones
@@ -67,8 +68,8 @@ public:
     return *this;
   }
 
-  Bitwidth_range(const Lconst& value);
-  Bitwidth_range(const Lconst& min_val, const Lconst& max_val);
+  Bitwidth_range(const Const& value);
+  Bitwidth_range(const Const& min_val, const Const& max_val);
 
   Bitwidth_range(const int64_t min_val, const int64_t max_val) {
     I(min_val <= max_val);
@@ -78,25 +79,25 @@ public:
   }
 
   void set_narrower_range(const Bitwidth_range& bw);
-  void set_narrower_range(const Lconst& min_val, const Lconst& max_val) { set_narrower_range(Bitwidth_range(min_val, max_val)); }
+  void set_narrower_range(const Const& min_val, const Const& max_val) { set_narrower_range(Bitwidth_range(min_val, max_val)); }
 
   void set_wider_range(const Bitwidth_range& bw);
-  void set_wider_range(const Lconst& min_val, const Lconst& max_val) { set_wider_range(Bitwidth_range(min_val, max_val)); }
+  void set_wider_range(const Const& min_val, const Const& max_val) { set_wider_range(Bitwidth_range(min_val, max_val)); }
 
-  void set_range(const Lconst& min_val, const Lconst& max_val);
+  void set_range(const Const& min_val, const Const& max_val);
 
   bool   is_overflow() const { return overflow; };
   void   set_sbits_range(Bits_t size);
   void   set_ubits_range(Bits_t size);
   Bits_t get_sbits() const;
-  Lconst get_range() const {
+  Const get_range() const {
     if (overflow) {
-      return (Lconst(1) << get_sbits());
+      return Dlop::create_integer(1)->lsh_op(get_sbits());
     }
-    return Lconst(max - min + 1);
+    return Dlop::create_integer(max - min + 1);
   }
-  Lconst get_max() const { return to_lconst(overflow, max); };
-  Lconst get_min() const { return to_lconst(overflow, min); };
+  Const get_max() const { return to_lconst(overflow, max); };
+  Const get_min() const { return to_lconst(overflow, min); };
   int    get_raw_max() const { return max; };
 
   bool is_always_negative() const { return max < 0; }

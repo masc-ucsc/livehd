@@ -178,8 +178,8 @@ void Lgyosys_dump::create_memory(Lgraph* g, RTLIL::Module* mod, Node& node) {
 
   RTLIL::State rd_posedge = RTLIL::State::Sx;
 
-  auto mem_size  = node.get_sink_pin("size").get_driver_node().get_type_const().to_i();
-  auto data_bits = node.get_sink_pin("bits").get_driver_node().get_type_const().to_i();
+  auto mem_size  = node.get_sink_pin("size").get_driver_node().get_type_const()->to_i();
+  auto data_bits = node.get_sink_pin("bits").get_driver_node().get_type_const()->to_i();
   auto addr_dpin = node.get_sink_pin("addr").get_driver_pin();
   auto mode_node = node.get_sink_pin("mode").get_driver_node();
   if (!mode_node.is_type_const()) {
@@ -192,12 +192,12 @@ void Lgyosys_dump::create_memory(Lgraph* g, RTLIL::Module* mod, Node& node) {
   (void)n_ports;
   assert(n_ports * addr_bits == (int)addr_dpin.get_bits());  // exact match
 
-  auto mode_mask = mode_node.get_type_const().to_i();
+  auto mode_mask = mode_node.get_type_const()->to_i();
 
-  auto do_fwd = node.get_sink_pin("fwd").get_driver_node().get_type_const().to_i();
+  auto do_fwd = node.get_sink_pin("fwd").get_driver_node().get_type_const()->to_i();
   assert(do_fwd == 0 || do_fwd == 1);
 
-  auto latency_value = node.get_sink_pin("type").get_driver_node().get_type_const().to_i();
+  auto latency_value = node.get_sink_pin("type").get_driver_node().get_type_const()->to_i();
   I(latency_value < 2);  // TODO: 2 is array (no flop)
 
   memory->setParam("\\SIZE", mem_size);
@@ -207,7 +207,7 @@ void Lgyosys_dump::create_memory(Lgraph* g, RTLIL::Module* mod, Node& node) {
   memory->setParam("\\OFFSET", RTLIL::Const(0));  // mem[addr-OFFSET]. Why????
   memory->setParam("\\INIT", RTLIL::Const::from_string("x"));
 
-  auto posedge_value = node.get_sink_pin("posclk").get_driver_node().get_type_const().to_i();
+  auto posedge_value = node.get_sink_pin("posclk").get_driver_node().get_type_const()->to_i();
 
   auto  clock_dpin = node.get_sink_pin("clock_pin").get_driver_pin();
   auto* clk_wire   = get_wire(clock_dpin);
@@ -380,7 +380,7 @@ void Lgyosys_dump::create_wires(Lgraph* g, RTLIL::Module* mod) {
       auto         lc = node.get_type_const();
       RTLIL::Wire* new_wire;
 #if 0
-      if (lc.is_negative() || lc.get_bits()==1) {
+      if (lc->is_negative() || lc.get_bits()==1) {
         new_wire = mod->addWire(next_id(node.get_class_lgraph()), lc.get_bits());
         do_unsign = false;
       }else{
@@ -392,11 +392,11 @@ void Lgyosys_dump::create_wires(Lgraph* g, RTLIL::Module* mod) {
       new_wire = mod->addWire(next_id(node.get_class_lgraph()), lc.get_bits());
 #endif
 
-      if (lc.get_bits() < 31 && lc.is_i()) {  // 32bit in yosys const
-        mod->connect(new_wire, RTLIL::SigSpec(RTLIL::Const(lc.to_i(), new_wire->width)));
+      if (lc.get_bits() < 31 && lc->is_i()) {  // 32bit in yosys const
+        mod->connect(new_wire, RTLIL::SigSpec(RTLIL::Const(lc->to_i(), new_wire->width)));
       } else {
-        // std::print("add:{} prp:{}\n",lc.to_binary(), lc.to_pyrope());
-        mod->connect(new_wire, RTLIL::SigSpec(RTLIL::Const::from_string(lc.to_binary())));
+        // std::print("add:{} prp:{}\n",lc->to_binary(), lc->to_pyrope());
+        mod->connect(new_wire, RTLIL::SigSpec(RTLIL::Const::from_string(lc->to_binary())));
       }
 
       input_map[node.get_driver_pin().get_compact()] = new_wire;
@@ -624,8 +624,8 @@ void Lgyosys_dump::to_yosys(Lgraph* g) {
           w2.extend_u0(out_wire->width, false);  // unsigned extend
           mod->connect(out_wire, w2);
         } else {
-          Lconst mask = (Lconst(1) << Lconst(out_wire->width)) - 1;
-          mod->addAnd(next_id(g), in_wire, RTLIL::Const::from_string(mask.to_binary()), out_wire);
+          Const mask = Dlop::get_mask_value(out_wire->width);
+          mod->addAnd(next_id(g), in_wire, RTLIL::Const::from_string(mask->to_binary()), out_wire);
         }
       } break;
       case Ntype_op::Sext: {
@@ -634,9 +634,9 @@ void Lgyosys_dump::to_yosys(Lgraph* g) {
         auto* out_wire   = cell_output_map[node.get_driver_pin().get_compact()];
 
         I(width_dpin.is_type_const());
-        I(width_dpin.get_node().get_type_const().is_i());
+        I(width_dpin.get_node().get_type_const()->is_i());
 
-        auto w = width_dpin.get_node().get_type_const().to_i();
+        auto w = width_dpin.get_node().get_type_const()->to_i();
 
         I(w == out_wire->width);  // Can this be broken in yosys?
 
@@ -659,7 +659,7 @@ void Lgyosys_dump::to_yosys(Lgraph* g) {
 
         assert(cell_output_map.find(node.get_driver_pin().get_compact()) != cell_output_map.end());
 
-        auto lut_code = RTLIL::Const::from_string(node.get_type_lut().to_binary());
+        auto lut_code = RTLIL::Const::from_string(node.get_type_lut()->to_binary());
 
         mod->addLut(next_id(g), joined_inp_wires, cell_output_map[node.get_driver_pin().get_compact()], lut_code);
       } break;
@@ -668,7 +668,7 @@ void Lgyosys_dump::to_yosys(Lgraph* g) {
       case Ntype_op::Xor: {
         std::vector<RTLIL::Wire*> inps;
         auto                      y_bits    = node.get_bits();
-        auto                      y_mask    = (Lconst(1) << (y_bits)) - 1;
+        auto                      y_mask    = (Dlop::create_integer(1) << (y_bits)) - 1;
         const auto                inp_edges = node.inp_edges();
         for (const auto& e : inp_edges) {
           if (op == Ntype_op::And) {
@@ -728,7 +728,7 @@ void Lgyosys_dump::to_yosys(Lgraph* g) {
 
         if (!posclk_dpin.is_invalid()) {
           auto v   = posclk_dpin.get_node().get_type_const();
-          polarity = v.to_i() != 0;
+          polarity = v->to_i() != 0;
         }
 
         mod->addDlatch(next_id(g), enable_wire, din_wire, cell_output_map[node.get_driver_pin().get_compact()], polarity);
@@ -789,9 +789,9 @@ void Lgyosys_dump::to_yosys(Lgraph* g) {
           assert(reset_wire);
         }  //  no reset value in yosys, add mux before
 
-        bool posclk   = posclk_dpin.is_invalid() || posclk_dpin.get_node().get_type_const().to_i() != 0;
-        bool async    = !async_dpin.is_invalid() && async_dpin.get_node().get_type_const().to_i() != 0;
-        bool negreset = !negreset_dpin.is_invalid() && negreset_dpin.get_node().get_type_const().to_i() != 0;
+        bool posclk   = posclk_dpin.is_invalid() || posclk_dpin.get_node().get_type_const()->to_i() != 0;
+        bool async    = !async_dpin.is_invalid() && async_dpin.get_node().get_type_const()->to_i() != 0;
+        bool negreset = !negreset_dpin.is_invalid() && negreset_dpin.get_node().get_type_const()->to_i() != 0;
 
         assert(clock_wire);
         assert(din_wire);
@@ -814,7 +814,7 @@ void Lgyosys_dump::to_yosys(Lgraph* g) {
         } else {  // reset wire
           RTLIL::Const initial_const(0, node.get_bits());
           if (!initial_dpin.is_invalid()) {
-            initial_const = RTLIL::Const::from_string(initial_dpin.get_node().get_type_const().to_binary());
+            initial_const = RTLIL::Const::from_string(initial_dpin.get_node().get_type_const()->to_binary());
           }
 
           if (enable_wire == nullptr) {
@@ -969,14 +969,14 @@ void Lgyosys_dump::to_yosys(Lgraph* g) {
 
         if (unsigned_wire.contains(lhs)) {
           if (b_dpin.get_node().is_type_const()) {  // common optimization
-            auto amount = RTLIL::Const::from_string(b_dpin.get_node().get_type_const().to_binary());
+            auto amount = RTLIL::Const::from_string(b_dpin.get_node().get_type_const()->to_binary());
             mod->addShr(next_id(g), lhs, amount, dpin, false);
           } else {
             mod->addShr(next_id(g), lhs, rhs, dpin, false);
           }
         } else {
           if (b_dpin.get_node().is_type_const()) {  // common optimization
-            auto amount = RTLIL::Const::from_string(b_dpin.get_node().get_type_const().to_binary());
+            auto amount = RTLIL::Const::from_string(b_dpin.get_node().get_type_const()->to_binary());
             mod->addSshr(next_id(g), lhs, amount, dpin, true);
           } else {
             mod->addSshr(next_id(g), lhs, rhs, dpin, true);
@@ -992,7 +992,7 @@ void Lgyosys_dump::to_yosys(Lgraph* g) {
 
         auto* result_wire = cell_output_map[node.get_driver_pin().get_compact()];
         if (b_dpin.get_node().is_type_const()) {  // common optimization
-          auto amount = RTLIL::Const::from_string(b_dpin.get_node().get_type_const().to_binary());
+          auto amount = RTLIL::Const::from_string(b_dpin.get_node().get_type_const()->to_binary());
           if (unsigned_wire.contains(lhs)) {
             mod->addShl(next_id(g), lhs, amount, result_wire, false);
             unsigned_wire.insert(result_wire);

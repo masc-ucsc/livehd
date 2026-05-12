@@ -29,7 +29,7 @@ cc_library(
     linkopts = ["-lpthread"],
     visibility = ["//visibility:public"],
     deps = [
-        "@boost.multiprecision",
+        "@hlop//hlop:hlop",
         "@abseil-cpp//absl/container:btree",
         "@abseil-cpp//absl/container:flat_hash_map",
         "@abseil-cpp//absl/container:flat_hash_set",
@@ -127,34 +127,4 @@ cc_test(
     ],
 )
 
-cc_test(
-    name = "lconst_test",
-    srcs = ["tests/lconst_test.cpp"],
-    deps = [
-        ":core",
-        "//simlib:headers",
-        "@abseil-cpp//absl/container:flat_hash_map",
-        "@abseil-cpp//absl/container:flat_hash_set",
-        "@googletest//:gtest_main",
-    ],
-)
-
-cc_test(
-    name = "lconst_test2",
-    srcs = ["tests/lconst_test2.cpp"],
-    deps = [
-        ":core",
-        "@googletest//:gtest_main",
-    ],
-)
-
-cc_test(
-    name = "lconst_bench",
-    srcs = ["tests/lconst_bench.cpp"],
-    deps = [
-        ":core",
-        "@abseil-cpp//absl/container:flat_hash_map",
-        "@abseil-cpp//absl/container:flat_hash_set",
-        "@google_benchmark//:benchmark",
-    ],
-)
+# lconst tests removed; equivalent coverage lives in @hlop//hlop:dlop_test

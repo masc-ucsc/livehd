@@ -444,7 +444,7 @@ Node Node::get_up_node() const {
 }
 
 void Node::set_type_sub(Lg_type_id subid) { current_g->set_type_sub(nid, subid); }
-void Node::set_type_const(const Lconst& val) { current_g->set_type_const(nid, val); }
+void Node::set_type_const(const Const& val) { current_g->set_type_const(nid, val); }
 
 Lg_type_id Node::get_type_sub() const { return current_g->get_type_sub(nid); }
 
@@ -462,15 +462,15 @@ bool Node::is_type_sub_present() const {
   return sub_lg != nullptr;
 }
 
-void Node::set_type_lut(const Lconst& lutid) { current_g->set_type_lut(nid, lutid); }
+void Node::set_type_lut(const Const& lutid) { current_g->set_type_lut(nid, lutid); }
 
-Lconst Node::get_type_lut() const { return current_g->get_type_lut(nid); }
+Const Node::get_type_lut() const { return current_g->get_type_lut(nid); }
 
 const Sub_node& Node::get_type_sub_node() const { return current_g->get_type_sub_node(nid); }
 
 Sub_node* Node::ref_type_sub_node() const { return current_g->ref_type_sub_node(nid); }
 
-Lconst Node::get_type_const() const { return current_g->get_type_const(nid); }
+Const Node::get_type_const() const { return current_g->get_type_const(nid); }
 
 void Node::nuke() {
   I(false);  // TODO:
@@ -526,7 +526,7 @@ Node Node::create(Ntype_op op, std::pair<uint64_t, uint64_t> loc, std::string fn
   return node;
 }
 
-Node Node::create_const(const Lconst& value) const {
+Node Node::create_const(const Const& value) const {
   auto node  = current_g->create_node_const(value);
   node.top_g = top_g;
   node.hidx  = hidx;
@@ -730,9 +730,9 @@ void Node::dump() const {
   std::print(" source:{} ", get_source());
 
   if (get_type_op() == Ntype_op::LUT) {
-    std::print(" lut:{}\n", get_type_lut().to_pyrope());
+    std::print(" lut:{}\n", get_type_lut()->to_pyrope());
   } else if (get_type_op() == Ntype_op::Const) {
-    std::print(" const:{}\n", get_type_const().to_pyrope());
+    std::print(" const:{}\n", get_type_const()->to_pyrope());
   } else if (get_type_op() == Ntype_op::Sub) {
     Lg_type_id sub_lgid = current_g->get_type_sub(nid);
     auto       sub_name = top_g->get_library().get_name(sub_lgid);

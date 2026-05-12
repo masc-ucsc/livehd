@@ -11,7 +11,7 @@
 #include <utility>
 #include <vector>
 
-#include "lconst.hpp"
+#include "const.hpp"
 #include "upass_attributes_handler.hpp"
 #include "upass_core.hpp"
 
@@ -88,11 +88,11 @@ public:
   void process_stmts() override;
   void process_stmts_post() override;
 
-  // Phase 2 — fold the attr_get destination tmp to its computed Lconst so
+  // Phase 2 — fold the attr_get destination tmp to its computed Const so
   // the runner's emit-time substitution picks it up and downstream passes
   // (verifier cassert, constprop eq/ne via runner_fold_fn fallback) see the
   // resolved value without an extra iteration.
-  std::optional<Lconst> fold_ref(std::string_view name) override;
+  std::optional<Const> fold_ref(std::string_view name) override;
 
   // Read-side accessor for tests / cross-handler queries.
   upass::attributes::Handler_registry& registry() { return reg; }
@@ -179,7 +179,7 @@ public:
 
   // Look up explicitly-stored attribute values (set by attr_set). Returns
   // nullopt when no entry exists for that (var, attr) pair.
-  std::optional<Lconst> lookup_attr_value(std::string_view var, std::string_view attr) const;
+  std::optional<Const> lookup_attr_value(std::string_view var, std::string_view attr) const;
 
   // Type info recorded by process_type_spec + the `type` and `comptime`
   // decl-attrs. Returns nullopt when nothing is known.
@@ -188,7 +188,7 @@ public:
   // Range bounds previously recorded by process_range, keyed by the range
   // op's destination tmp ref (so attr_set with a `range` value pointing to
   // that tmp can lower to max/min).
-  std::optional<std::pair<Lconst, Lconst>> lookup_range(std::string_view tmp) const;
+  std::optional<std::pair<Const, Const>> lookup_range(std::string_view tmp) const;
 
   // Ref-text value recorded for an attr_set whose value was a ref (e.g.
   // `attr_set d "range" tmp_1`). Used to chain into range_bounds for
@@ -196,11 +196,11 @@ public:
   std::optional<std::string> lookup_attr_ref(std::string_view var, std::string_view attr) const;
 
 private:
-  std::map<std::string, std::map<std::string, Lconst>>      attr_set_values;
+  std::map<std::string, std::map<std::string, Const>>      attr_set_values;
   std::map<std::string, std::map<std::string, std::string>> attr_set_refs;  // (var, attr) → ref-text value
   std::map<std::string, Type_info>                          type_info_map;
-  std::map<std::string, std::pair<Lconst, Lconst>>          range_bounds;  // start, end keyed by tmp
-  std::map<std::string, Lconst>                             tmp_fold;      // attr_get dst → folded Lconst
+  std::map<std::string, std::pair<Const, Const>>          range_bounds;  // start, end keyed by tmp
+  std::map<std::string, Const>                             tmp_fold;      // attr_get dst → folded Const
 
 public:
   // ── Phase 3 — tuple-shape side state ────────────────────────────────────
@@ -232,14 +232,14 @@ public:
   bool                                  is_tuple(std::string_view var) const;
   const Tuple_shape*                    lookup_tuple_shape(std::string_view var) const;
   const Get_alias*                      lookup_get_alias(std::string_view tmp) const;
-  std::optional<Lconst>                 derive_aggregate_size(std::string_view base) const;
-  std::optional<Lconst>                 derive_aggregate_bits(std::string_view base) const;
-  std::optional<Lconst>                 derive_aggregate_typename(std::string_view base, std::string_view base_text) const;
-  std::optional<Lconst>                 derive_aggregate_key(std::string_view base, std::string_view base_text) const;
+  std::optional<Const>                 derive_aggregate_size(std::string_view base) const;
+  std::optional<Const>                 derive_aggregate_bits(std::string_view base) const;
+  std::optional<Const>                 derive_aggregate_typename(std::string_view base, std::string_view base_text) const;
+  std::optional<Const>                 derive_aggregate_key(std::string_view base, std::string_view base_text) const;
 
   // Cat-D inheritance: walk get-alias and shape-source aliases looking for
   // an explicit attr value, then fall back to the parent aggregate's value.
-  std::optional<Lconst> lookup_attr_with_inheritance(std::string_view base, std::string_view attr) const;
+  std::optional<Const> lookup_attr_with_inheritance(std::string_view base, std::string_view attr) const;
 
   // Built-in attribute names that have dedicated semantics (do NOT participate
   // in generic cat-D aggregate→field inheritance).
@@ -313,7 +313,7 @@ public:
   // Fold a value through the wrap/sat policy on `lhs` if any. Returns the
   // possibly-narrowed value; returns the input untouched when no policy is
   // active or type info is missing.
-  Lconst narrow_for_lhs(std::string_view lhs, const Lconst& v) const;
+  Const narrow_for_lhs(std::string_view lhs, const Const& v) const;
 
   // ── Phase 5 — const single-assign tracking ─────────────────────────────
   //
@@ -341,15 +341,15 @@ private:
   void evaluate_attr_get(std::string_view dst, std::string_view base_text, std::string_view base, std::string_view attr);
 
   // Helpers used by evaluate_attr_get.
-  std::optional<Lconst> derive_max(std::string_view base) const;
-  std::optional<Lconst> derive_min(std::string_view base) const;
-  std::optional<Lconst> derive_bits(std::string_view base, std::string_view variant) const;  // "bits"/"ubits"/"sbits"
-  std::optional<Lconst> derive_comptime(std::string_view base, std::string_view base_text) const;
+  std::optional<Const> derive_max(std::string_view base) const;
+  std::optional<Const> derive_min(std::string_view base) const;
+  std::optional<Const> derive_bits(std::string_view base, std::string_view variant) const;  // "bits"/"ubits"/"sbits"
+  std::optional<Const> derive_comptime(std::string_view base, std::string_view base_text) const;
 
   // Best-effort comptime value for `var` — consults runner_fold_fn (which
   // aggregates every pass's fold_ref) and our own tmp_fold, returning the
   // first foldable answer.
-  std::optional<Lconst> resolve_value(std::string_view var) const;
+  std::optional<Const> resolve_value(std::string_view var) const;
 };
 
 // Plugin registration lives in upass_attributes.cpp.

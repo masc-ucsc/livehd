@@ -7,7 +7,7 @@
 
 #include "cell.hpp"
 #include "hierarchy.hpp"
-#include "lconst.hpp"
+#include "const.hpp"
 #include "lgraph_base_core.hpp"
 #include "node_pin.hpp"
 #include "sub_node.hpp"
@@ -289,8 +289,8 @@ public:
   }
   constexpr bool operator!=(const Node& other) const { return !(*this == other); }
 
-  void   set_type_lut(const Lconst& lutid);
-  Lconst get_type_lut() const;
+  void   set_type_lut(const Const& lutid);
+  Const get_type_lut() const;
 
   std::string_view get_type_name() const;
   Ntype_op         get_type_op() const;
@@ -315,14 +315,14 @@ public:
   bool            is_root() const;
 
   void            set_type_sub(Lg_type_id subid);
-  void            set_type_const(const Lconst& val);
+  void            set_type_const(const Const& val);
   Lg_type_id      get_type_sub() const;
   const Sub_node& get_type_sub_node() const;
   Sub_node*       ref_type_sub_node() const;
   Lgraph*         ref_type_sub_lgraph() const;  // Slower than other get_type_sub
   bool            is_type_sub_present() const;
 
-  Lconst get_type_const() const;
+  Const get_type_const() const;
 
   void connect_sink(const Node& n2) const { setup_sink_pin().connect_driver(n2.setup_driver_pin()); }
   void connect_driver(const Node& n2) const { setup_driver_pin().connect_sink(n2.setup_sink_pin()); }
@@ -358,7 +358,9 @@ public:
 
   Node create(Ntype_op op) const;                                                        // create a new node, keep same hierarchy
   Node create(Ntype_op op, std::pair<uint64_t, uint64_t> loc, std::string fname) const;  // create a new node, keep same hierarchy
-  Node create_const(const Lconst& value) const;                                          // create a new node, keep same hierarchy
+  Node create_const(const Const& value) const;                                          // create a new node, keep same hierarchy
+  Node create_const(int64_t value) const { return create_const(Dlop::create_integer(value)); }
+  Node create_const(int value) const { return create_const(Dlop::create_integer(value)); }
 
   // BEGIN ATTRIBUTE ACCESSORS
   std::string debug_name() const;

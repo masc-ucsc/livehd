@@ -10,7 +10,7 @@
 #include <string_view>
 #include <vector>
 
-#include "lconst.hpp"
+#include "const.hpp"
 #include "lnast.hpp"
 #include "lnast_manager.hpp"
 #include "lnast_ntype.hpp"
@@ -51,9 +51,9 @@ public:
 
   // Called by the runner for every `ref <name>` operand it is about to emit
   // (RHS of an op, condition of an `if`, cassert operand). If any pass
-  // returns a concrete Lconst, the runner writes `const <value>` in place of
+  // returns a concrete Const, the runner writes `const <value>` in place of
   // the ref. First non-nullopt wins.
-  virtual std::optional<Lconst> fold_ref(std::string_view /*name*/) { return std::nullopt; }
+  virtual std::optional<Const> fold_ref(std::string_view /*name*/) { return std::nullopt; }
 
   // Runner-supplied helper that delegates to `try_fold_ref` across every
   // registered pass. Passes can use this to resolve a ref against the
@@ -63,7 +63,7 @@ public:
   // The runner wires this up after every pass is constructed (so the
   // callback sees the full pass list). Before that point it is empty —
   // defensive callers should check before invoking.
-  using Fold_fn = std::function<std::optional<Lconst>(std::string_view)>;
+  using Fold_fn = std::function<std::optional<Const>(std::string_view)>;
   void set_runner_fold_fn(Fold_fn fn) { runner_fold_fn = std::move(fn); }
 
   // Runner-supplied helper that re-emits the op-node at `src` (with operand

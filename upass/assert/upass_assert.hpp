@@ -20,13 +20,13 @@ protected:
 
   inline auto current_bundle() { return st.get_bundle(current_text()); }
 
-  inline auto current_pyrope_value() { return Lconst::from_pyrope(current_text()); }
+  inline auto current_pyrope_value() { return Dlop::from_pyrope(current_text()); }
 
   inline auto current_prim_value() {
     if (is_type(Lnast_ntype::Lnast_ntype_ref)) {
       return st.get_trivial(current_text());
     } else {
-      return Lconst::from_pyrope(current_text());
+      return Dlop::from_pyrope(current_text());
     }
   }
 };

@@ -11,7 +11,7 @@
 #include <string>
 #include <vector>
 
-#include "lconst.hpp"
+#include "const.hpp"
 #include "lnast.hpp"
 #include "lnast_manager.hpp"
 #include "lnast_ntype.hpp"
@@ -58,10 +58,10 @@ protected:
   void emit_subtree_verbatim();
 
   // Returns the first non-nullopt result from any pass's fold_ref(name).
-  std::optional<Lconst> try_fold_ref(std::string_view name);
+  std::optional<Const> try_fold_ref(std::string_view name);
 
   // Emits either the folded value of `name` (when any pass returns a valid
-  // Lconst) or the original ref node otherwise. Used by both emit_op_with_fold
+  // Const) or the original ref node otherwise. Used by both emit_op_with_fold
   // and the statement-scope ref leaf case.
   void emit_ref_or_folded(std::string_view name);
 

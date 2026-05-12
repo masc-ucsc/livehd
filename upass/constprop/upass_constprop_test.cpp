@@ -18,15 +18,15 @@ public:
 
   void position(const Lnast_nid& nid) { move_to_nid(nid); }
 
-  Lconst get_result(std::string_view name) const {
+  Const get_result(std::string_view name) const {
     if (!st.has_trivial(name)) {
-      return Lconst::invalid();
+      return Dlop::invalid();
     }
     return st.get_trivial(name);
   }
 
   // Pre-populate the symbol table so process_if() can look up conditions.
-  void seed(std::string_view name, const Lconst& val) { st.set(name, val); }
+  void seed(std::string_view name, const Const& val) { st.set(name, val); }
 
   // Expose §5.a ST query helpers for testing.
   bool st_is_known_const(std::string_view name) const { return st.is_known_const(name); }
@@ -35,7 +35,7 @@ public:
   bool st_is_output(std::string_view name) const { return st.is_output(name); }
 
   // Directly write a trivial value into the symbol table (for ST tests).
-  void st_set(std::string_view name, const Lconst& val) { st.set(name, val); }
+  void st_set(std::string_view name, const Const& val) { st.set(name, val); }
 
   // Expose classify_statement() for white-box testing.
   upass::Emit_decision classify() { return classify_statement(); }
@@ -153,7 +153,7 @@ TEST(UpassConstprop, FoldsPlus) {
   cp.position(op);
   cp.process_plus();
   EXPECT_TRUE(cp.has_changed());
-  EXPECT_EQ(cp.get_result("a").to_i(), 5);
+  EXPECT_EQ(cp.get_result("a")->to_i(), 5);
 }
 
 TEST(UpassConstprop, FoldsMinus) {
@@ -163,7 +163,7 @@ TEST(UpassConstprop, FoldsMinus) {
   cp.position(op);
   cp.process_minus();
   EXPECT_TRUE(cp.has_changed());
-  EXPECT_EQ(cp.get_result("a").to_i(), 7);
+  EXPECT_EQ(cp.get_result("a")->to_i(), 7);
 }
 
 TEST(UpassConstprop, FoldsMult) {
@@ -173,7 +173,7 @@ TEST(UpassConstprop, FoldsMult) {
   cp.position(op);
   cp.process_mult();
   EXPECT_TRUE(cp.has_changed());
-  EXPECT_EQ(cp.get_result("a").to_i(), 12);
+  EXPECT_EQ(cp.get_result("a")->to_i(), 12);
 }
 
 TEST(UpassConstprop, FoldsDiv) {
@@ -183,7 +183,7 @@ TEST(UpassConstprop, FoldsDiv) {
   cp.position(op);
   cp.process_div();
   EXPECT_TRUE(cp.has_changed());
-  EXPECT_EQ(cp.get_result("a").to_i(), 4);
+  EXPECT_EQ(cp.get_result("a")->to_i(), 4);
 }
 
 TEST(UpassConstprop, FoldsMod) {
@@ -193,7 +193,7 @@ TEST(UpassConstprop, FoldsMod) {
   cp.position(op);
   cp.process_mod();
   EXPECT_TRUE(cp.has_changed());
-  EXPECT_EQ(cp.get_result("a").to_i(), 1);
+  EXPECT_EQ(cp.get_result("a")->to_i(), 1);
 }
 
 // ── Shift ────────────────────────────────────────────────────────────────────
@@ -205,7 +205,7 @@ TEST(UpassConstprop, FoldsShl) {
   cp.position(op);
   cp.process_shl();
   EXPECT_TRUE(cp.has_changed());
-  EXPECT_EQ(cp.get_result("a").to_i(), 8);  // 1 << 3 = 8
+  EXPECT_EQ(cp.get_result("a")->to_i(), 8);  // 1 << 3 = 8
 }
 
 TEST(UpassConstprop, FoldsSra) {
@@ -215,7 +215,7 @@ TEST(UpassConstprop, FoldsSra) {
   cp.position(op);
   cp.process_sra();
   EXPECT_TRUE(cp.has_changed());
-  EXPECT_EQ(cp.get_result("a").to_i(), 4);  // 16 >> 2 = 4
+  EXPECT_EQ(cp.get_result("a")->to_i(), 4);  // 16 >> 2 = 4
 }
 
 // ── Bitwise ──────────────────────────────────────────────────────────────────
@@ -228,7 +228,7 @@ TEST(UpassConstprop, FoldsBitAnd) {
   cp.position(op);
   cp.process_bit_and();
   EXPECT_TRUE(cp.has_changed());
-  EXPECT_EQ(cp.get_result("a").to_i(), 0b1000);
+  EXPECT_EQ(cp.get_result("a")->to_i(), 0b1000);
 }
 
 TEST(UpassConstprop, FoldsBitOr) {
@@ -239,7 +239,7 @@ TEST(UpassConstprop, FoldsBitOr) {
   cp.position(op);
   cp.process_bit_or();
   EXPECT_TRUE(cp.has_changed());
-  EXPECT_EQ(cp.get_result("a").to_i(), 0b1111);
+  EXPECT_EQ(cp.get_result("a")->to_i(), 0b1111);
 }
 
 TEST(UpassConstprop, FoldsBitXor) {
@@ -250,7 +250,7 @@ TEST(UpassConstprop, FoldsBitXor) {
   cp.position(op);
   cp.process_bit_xor();
   EXPECT_TRUE(cp.has_changed());
-  EXPECT_EQ(cp.get_result("a").to_i(), 0b0110);
+  EXPECT_EQ(cp.get_result("a")->to_i(), 0b0110);
 }
 
 TEST(UpassConstprop, FoldsBitNot) {
@@ -261,7 +261,7 @@ TEST(UpassConstprop, FoldsBitNot) {
   cp.process_bit_not();
   EXPECT_TRUE(cp.has_changed());
   // ~0 = -1 in two's complement
-  EXPECT_EQ(cp.get_result("a").to_i(), -1);
+  EXPECT_EQ(cp.get_result("a")->to_i(), -1);
 }
 
 TEST(UpassConstprop, FoldsGetMask) {
@@ -272,7 +272,7 @@ TEST(UpassConstprop, FoldsGetMask) {
   cp.position(op);
   cp.process_get_mask();
   EXPECT_TRUE(cp.has_changed());
-  EXPECT_EQ(cp.get_result("a").to_i(), 0x78);
+  EXPECT_EQ(cp.get_result("a")->to_i(), 0x78);
 }
 
 // ── Logical ──────────────────────────────────────────────────────────────────
@@ -284,7 +284,7 @@ TEST(UpassConstprop, FoldsLogAndBothTrue) {
   cp.position(op);
   cp.process_log_and();
   EXPECT_TRUE(cp.has_changed());
-  EXPECT_EQ(cp.get_result("a").to_i(), 1);
+  EXPECT_EQ(cp.get_result("a")->to_i(), 1);
 }
 
 TEST(UpassConstprop, FoldsLogAndOneFalse) {
@@ -294,7 +294,7 @@ TEST(UpassConstprop, FoldsLogAndOneFalse) {
   cp.position(op);
   cp.process_log_and();
   EXPECT_TRUE(cp.has_changed());
-  EXPECT_EQ(cp.get_result("a").to_i(), 0);
+  EXPECT_EQ(cp.get_result("a")->to_i(), 0);
 }
 
 TEST(UpassConstprop, FoldsLogOrOneFalse) {
@@ -304,7 +304,7 @@ TEST(UpassConstprop, FoldsLogOrOneFalse) {
   cp.position(op);
   cp.process_log_or();
   EXPECT_TRUE(cp.has_changed());
-  EXPECT_EQ(cp.get_result("a").to_i(), 1);
+  EXPECT_EQ(cp.get_result("a")->to_i(), 1);
 }
 
 TEST(UpassConstprop, FoldsLogOrBothFalse) {
@@ -314,7 +314,7 @@ TEST(UpassConstprop, FoldsLogOrBothFalse) {
   cp.position(op);
   cp.process_log_or();
   EXPECT_TRUE(cp.has_changed());
-  EXPECT_EQ(cp.get_result("a").to_i(), 0);
+  EXPECT_EQ(cp.get_result("a")->to_i(), 0);
 }
 
 TEST(UpassConstprop, FoldsLogNotFalse) {
@@ -324,7 +324,7 @@ TEST(UpassConstprop, FoldsLogNotFalse) {
   cp.position(op);
   cp.process_log_not();
   EXPECT_TRUE(cp.has_changed());
-  EXPECT_EQ(cp.get_result("a").to_i(), 1);  // !0 = 1
+  EXPECT_EQ(cp.get_result("a")->to_i(), 1);  // !0 = 1
 }
 
 TEST(UpassConstprop, FoldsLogNotTrue) {
@@ -334,7 +334,7 @@ TEST(UpassConstprop, FoldsLogNotTrue) {
   cp.position(op);
   cp.process_log_not();
   EXPECT_TRUE(cp.has_changed());
-  EXPECT_EQ(cp.get_result("a").to_i(), 0);  // !5 = 0
+  EXPECT_EQ(cp.get_result("a")->to_i(), 0);  // !5 = 0
 }
 
 // ── Convergence ──────────────────────────────────────────────────────────────
@@ -366,7 +366,7 @@ TEST(UpassConstpropIf, KnownTrueConditionNoElse) {
   auto             if_nid
       = f.add_if_node("cond", [&](Lnast_nid then_stmts) { f.add_binary_under(then_stmts, Lnast_ntype::create_plus(), "x", 1, 2); });
   TestableConstprop cp(f.lm);
-  cp.seed("cond", Lconst(1));  // condition is known-true
+  cp.seed("cond", Dlop::create_integer(1));  // condition is known-true
   cp.position(if_nid);
   EXPECT_NO_THROW(cp.process_if());
 }
@@ -378,7 +378,7 @@ TEST(UpassConstpropIf, KnownFalseConditionNoElse) {
     f.add_binary_under(then_stmts, Lnast_ntype::create_plus(), "x", 10, 20);
   });
   TestableConstprop cp(f.lm);
-  cp.seed("cond", Lconst(0));  // condition is known-false
+  cp.seed("cond", Dlop::create_integer(0));  // condition is known-false
   cp.position(if_nid);
   EXPECT_NO_THROW(cp.process_if());
 }
@@ -403,7 +403,7 @@ TEST(UpassConstpropIf, KnownTrueConditionWithElse) {
       [&](Lnast_nid then_stmts) { f.add_binary_under(then_stmts, Lnast_ntype::create_plus(), "r", 1, 0); },
       [&](Lnast_nid else_stmts) { f.add_binary_under(else_stmts, Lnast_ntype::create_plus(), "r", 0, 0); });
   TestableConstprop cp(f.lm);
-  cp.seed("cond", Lconst(1));
+  cp.seed("cond", Dlop::create_integer(1));
   cp.position(if_nid);
   EXPECT_NO_THROW(cp.process_if());
 }
@@ -416,7 +416,7 @@ TEST(UpassConstpropIf, KnownFalseConditionWithElse) {
       [&](Lnast_nid then_stmts) { f.add_binary_under(then_stmts, Lnast_ntype::create_plus(), "r", 5, 5); },
       [&](Lnast_nid else_stmts) { f.add_binary_under(else_stmts, Lnast_ntype::create_plus(), "r", 9, 9); });
   TestableConstprop cp(f.lm);
-  cp.seed("cond", Lconst(0));
+  cp.seed("cond", Dlop::create_integer(0));
   cp.position(if_nid);
   EXPECT_NO_THROW(cp.process_if());
 }
@@ -444,7 +444,7 @@ TEST(UpassConstprop, RedOrNonZero) {
   cp.position(op);
   cp.process_red_or();
   EXPECT_TRUE(cp.has_changed());
-  EXPECT_EQ(cp.get_result("a").to_i(), 1);  // 5 != 0 → 1
+  EXPECT_EQ(cp.get_result("a")->to_i(), 1);  // 5 != 0 → 1
 }
 
 TEST(UpassConstprop, RedOrZero) {
@@ -454,7 +454,7 @@ TEST(UpassConstprop, RedOrZero) {
   cp.position(op);
   cp.process_red_or();
   EXPECT_TRUE(cp.has_changed());
-  EXPECT_EQ(cp.get_result("a").to_i(), 0);  // 0 == 0 → 0
+  EXPECT_EQ(cp.get_result("a")->to_i(), 0);  // 0 == 0 → 0
 }
 
 TEST(UpassConstprop, RedOrUnknownInputNoStore) {
@@ -481,7 +481,7 @@ TEST(UpassConstprop, RedAndAllOnes) {
   cp.position(op);
   cp.process_red_and();
   EXPECT_TRUE(cp.has_changed());
-  EXPECT_EQ(cp.get_result("a").to_i(), 1);
+  EXPECT_EQ(cp.get_result("a")->to_i(), 1);
 }
 
 TEST(UpassConstprop, RedAndNotAllOnes) {
@@ -492,7 +492,7 @@ TEST(UpassConstprop, RedAndNotAllOnes) {
   cp.position(op);
   cp.process_red_and();
   EXPECT_TRUE(cp.has_changed());
-  EXPECT_EQ(cp.get_result("a").to_i(), 0);
+  EXPECT_EQ(cp.get_result("a")->to_i(), 0);
 }
 
 // red_xor: parity of set bits (1 if popcount is odd).
@@ -505,7 +505,7 @@ TEST(UpassConstprop, RedXorOddParity) {
   cp.position(op);
   cp.process_red_xor();
   EXPECT_TRUE(cp.has_changed());
-  EXPECT_EQ(cp.get_result("a").to_i(), 1);  // popcount(7) = 3, odd → 1
+  EXPECT_EQ(cp.get_result("a")->to_i(), 1);  // popcount(7) = 3, odd → 1
 }
 
 TEST(UpassConstprop, RedXorEvenParity) {
@@ -516,7 +516,7 @@ TEST(UpassConstprop, RedXorEvenParity) {
   cp.position(op);
   cp.process_red_xor();
   EXPECT_TRUE(cp.has_changed());
-  EXPECT_EQ(cp.get_result("a").to_i(), 0);  // popcount(10) = 2, even → 0
+  EXPECT_EQ(cp.get_result("a")->to_i(), 0);  // popcount(10) = 2, even → 0
 }
 
 // ── sext ─────────────────────────────────────────────────────────────────────
@@ -539,7 +539,7 @@ TEST(UpassConstprop, SextNoTruncation) {
   cp.position(op);
   cp.process_sext();
   EXPECT_TRUE(cp.has_changed());
-  EXPECT_EQ(cp.get_result("a").to_i(), 3);
+  EXPECT_EQ(cp.get_result("a")->to_i(), 3);
 }
 
 TEST(UpassConstprop, SextSignExtendNarrows) {
@@ -552,7 +552,7 @@ TEST(UpassConstprop, SextSignExtendNarrows) {
   cp.position(op);
   cp.process_sext();
   EXPECT_TRUE(cp.has_changed());
-  EXPECT_EQ(cp.get_result("a").to_i(), -4);  // 3-bit 0b100 sign-extended = -4
+  EXPECT_EQ(cp.get_result("a")->to_i(), -4);  // 3-bit 0b100 sign-extended = -4
 }
 
 // ── Tuple operations ──────────────────────────────────────────────────────────
@@ -575,7 +575,7 @@ TEST(UpassConstpropTuple, TupleAddAndGetFirstField) {
   cp.process_tuple_get();  // dst = ___t0[0] = 3
 
   EXPECT_TRUE(cp.has_changed());
-  EXPECT_EQ(cp.get_result("dst").to_i(), 3);
+  EXPECT_EQ(cp.get_result("dst")->to_i(), 3);
 }
 
 // tuple_add + tuple_get: second positional field (index 1).
@@ -592,7 +592,7 @@ TEST(UpassConstpropTuple, TupleAddAndGetSecondField) {
   cp.process_tuple_get();  // dst = ___t0[1] = 7
 
   EXPECT_TRUE(cp.has_changed());
-  EXPECT_EQ(cp.get_result("dst").to_i(), 7);
+  EXPECT_EQ(cp.get_result("dst")->to_i(), 7);
 }
 
 // tuple_get on a source variable not in the symbol table: no store, no mark_changed.
@@ -639,7 +639,7 @@ TEST(UpassConstpropTuple, TupleGetConvergesOnRepeat) {
   cp.position(get_op);
   cp.process_tuple_get();
   ASSERT_TRUE(cp.has_changed());
-  ASSERT_EQ(cp.get_result("dst").to_i(), 5);
+  ASSERT_EQ(cp.get_result("dst")->to_i(), 5);
 
   // Second iteration: same nodes, same values → no change.
   cp.begin_iteration();
@@ -661,7 +661,7 @@ TEST(UpassConstpropTuple, TupleSetWritesField) {
 
   EXPECT_TRUE(cp.has_changed());
   // The symbol table key "___t0.0" should now hold 99.
-  EXPECT_EQ(cp.get_result("___t0.0").to_i(), 99);
+  EXPECT_EQ(cp.get_result("___t0.0")->to_i(), 99);
 }
 
 // tuple_set with a __bits attribute field must be silently skipped (no mark_changed).
@@ -706,17 +706,17 @@ TEST(UpassConstpropTuple, TupleSetThenGetRoundTrip) {
   cp.position(get_op);
   cp.process_tuple_get();  // dst = ___t0[0] = 77
 
-  EXPECT_EQ(cp.get_result("dst").to_i(), 77);
+  EXPECT_EQ(cp.get_result("dst")->to_i(), 77);
 }
 
 // ─── Symbol_table query API (§5.a) ──────────────────────────────────────────
 
-// is_known_const returns true when the variable holds a concrete, fully-known Lconst.
+// is_known_const returns true when the variable holds a concrete, fully-known Const.
 TEST(UpassConstpropST, IsKnownConstWithValidValue) {
   ConstpropFixture  f;
   TestableConstprop cp(f.lm);
 
-  cp.st_set("x", Lconst(42));
+  cp.st_set("x", Dlop::create_integer(42));
   EXPECT_TRUE(cp.st_is_known_const("x"));
 }
 
@@ -728,12 +728,12 @@ TEST(UpassConstpropST, IsKnownConstAbsentReturnsFalse) {
   EXPECT_FALSE(cp.st_is_known_const("no_such_var"));
 }
 
-// is_known_const returns false when the stored value is Lconst::invalid().
+// is_known_const returns false when the stored value is Dlop::invalid().
 TEST(UpassConstpropST, IsKnownConstInvalidLconstReturnsFalse) {
   ConstpropFixture  f;
   TestableConstprop cp(f.lm);
 
-  cp.st_set("y", Lconst::invalid());
+  cp.st_set("y", Dlop::invalid());
   EXPECT_FALSE(cp.st_is_known_const("y"));
 }
 
@@ -780,7 +780,7 @@ TEST(UpassConstpropST, ClassifyDropsKnownConstTemp) {
   f.ln->add_child(assign_op, Lnast_node::create_const("7"));
 
   TestableConstprop cp(f.lm);
-  cp.st_set("___tmp", Lconst(7));
+  cp.st_set("___tmp", Dlop::create_integer(7));
 
   cp.position(assign_op);
   auto decision = cp.classify();
@@ -797,7 +797,7 @@ TEST(UpassConstpropST, ClassifyKeepsRegEvenIfKnownConst) {
   f.ln->add_child(assign_op, Lnast_node::create_const("7"));
 
   TestableConstprop cp(f.lm);
-  cp.st_set("#reg", Lconst(7));
+  cp.st_set("#reg", Dlop::create_integer(7));
 
   cp.position(assign_op);
   auto decision = cp.classify();

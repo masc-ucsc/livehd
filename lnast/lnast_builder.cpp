@@ -133,8 +133,8 @@ std::string Lnast_builder::create_bitmask_stmts(std::string_view max_bit, std::s
       b        = tmp;
     }
 
-    auto mask = Lconst::get_mask_value(a, b);
-    return mask.to_pyrope();
+    auto mask = Dlop::get_mask_value(a, b);
+    return mask->to_pyrope();
   }
 
   if (max_bit == min_bit) {

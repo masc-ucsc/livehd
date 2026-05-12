@@ -8,7 +8,7 @@
 #include <unordered_map>
 #include <vector>
 
-#include "lconst.hpp"
+#include "const.hpp"
 #include "lnast_ntype.hpp"
 #include "symbol_table.hpp"
 #include "upass_core.hpp"
@@ -67,7 +67,7 @@ public:
   void process_range() override;
 
   upass::Emit_decision  classify_statement() override;
-  std::optional<Lconst> fold_ref(std::string_view name) override;
+  std::optional<Const> fold_ref(std::string_view name) override;
 
   static void set_function_registry(const std::vector<std::shared_ptr<Lnast>>& lnasts);
 
@@ -92,7 +92,7 @@ protected:
   // pyrope `nil` to mean "open-ended" (slice runs to the source's last
   // index). process_tuple_get consults this map when the field operand is
   // a ref so it can fold string slicing like `x[1..]` and `x[1..=2]`.
-  std::map<std::string, std::pair<Lconst, Lconst>> range_map;
+  std::map<std::string, std::pair<Const, Const>> range_map;
 
   auto current_bundle() { return st.get_bundle(current_text()); }
 
@@ -105,7 +105,7 @@ protected:
     return nullptr;
   }
 
-  auto current_pyrope_value() { return Lconst::from_pyrope(current_text()); }
+  auto current_pyrope_value() { return Dlop::from_pyrope(current_text()); }
 
   auto current_prim_value() const {
     if (is_type(Lnast_ntype::Lnast_ntype_ref)) {
@@ -128,14 +128,14 @@ protected:
       return v;  // may be invalid — caller's foldable() check short-circuits.
     }
     I(is_type(Lnast_ntype::Lnast_ntype_const));
-    return Lconst::from_pyrope(current_text());
+    return Dlop::from_pyrope(current_text());
   }
 
   // Predicates for the standard "is this value foldable?" guard. `is_numeric`
   // allows X-bit unknowns through (n-ary bitwise ops propagate `?` bits);
   // `foldable` is the strict version used everywhere else.
-  static bool is_numeric(const Lconst& v) { return !v.is_invalid() && !v.is_string(); }
-  static bool foldable(const Lconst& v) { return is_numeric(v) && !v.has_unknowns(); }
+  static bool is_numeric(const Const& v) { return !v.is_invalid() && !v.is_string(); }
+  static bool foldable(const Const& v) { return is_numeric(v) && !v->has_unknowns(); }
 
   // Strip the single-quote wrapping `Lconst::to_pyrope` adds around string
   // values so the bare contents can be re-parsed or compared.
@@ -151,12 +151,12 @@ protected:
   // as `-(1 << lo)` so Lconst::get_mask_op extracts the upper bits correctly.
   // Returns invalid when bounds are not folded integers (or the closed range
   // is empty).
-  static Lconst range_to_mask(const Lconst& start, const Lconst& end);
+  static Const range_to_mask = Dlop::create_integer(const Const& start, const Const& end);
 
   // Single-shot "store result, mark_changed if value actually changed".
   // The has_trivial/get_trivial!=/set+mark_changed dance was repeated at
   // every fold site; centralising it kills a bug-prone pattern.
-  void store_trivial(std::string_view name, const Lconst& v) {
+  void store_trivial(std::string_view name, const Const& v) {
     if ((!st.has_trivial(name) || st.get_trivial(name) != v) && st.set(name, v)) {
       mark_changed();
     }
@@ -184,12 +184,12 @@ protected:
   struct Call_actual {
     bool        is_named = false;
     std::string name;
-    Lconst      value;
+    Const      value;
   };
 
   static inline std::unordered_map<std::string, std::shared_ptr<Lnast>> function_registry;
 
-  std::optional<Lconst>                   resolve_current_scalar() const;
+  std::optional<Const>                   resolve_current_scalar() const;
   std::optional<std::vector<Call_actual>> collect_call_actuals();
   bool try_eval_comb_call(std::string_view dst, std::string_view fname, const std::vector<Call_actual>& actuals);
 };

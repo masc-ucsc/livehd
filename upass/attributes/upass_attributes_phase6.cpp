@@ -44,8 +44,8 @@ class Signal_class_handler : public Attribute_handler {};
 
 // Mode-selection handler: posclk / async / negreset / type (memory) /
 // initial. Per spec these must be comptime-known; process_attr_set's
-// shared path stores them as Lconst values, which means a non-comptime
-// expression operand becomes Lconst::invalid() and is silently dropped
+// shared path stores them as Const values, which means a non-comptime
+// expression operand becomes Dlop::invalid() and is silently dropped
 // today. A future tightening can fail loudly here once the cassert
 // coverage exists.
 class Mode_handler : public Attribute_handler {};

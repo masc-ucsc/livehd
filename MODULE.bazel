@@ -36,14 +36,16 @@ bazel_dep(name = "libffi", version = "3.4.7.bcr.4")
 
 # iassert
 bazel_dep(name = "iassert", version = "0.1.0")
-
-archive_override(
+local_path_override(
     module_name = "iassert",
-    integrity = "sha256-sMOp2bzYfLhVMYfFoliGIXKHAi3bZpTVTSD+2oXjMp8=",
-    strip_prefix = "iassert-0460fbd8405a96b3615be425df9066eba835fcf0",
-    urls = [
-        "https://github.com/masc-ucsc/iassert/archive/0460fbd8405a96b3615be425df9066eba835fcf0.zip",
-    ],
+    path = "../iassert",
+)
+
+# hlop (Dlop value type + slop/dlop execution layer)
+bazel_dep(name = "hlop", version = "0.2.0")
+local_path_override(
+    module_name = "hlop",
+    path = "../hlop",
 )
 
 # slang (fmt required by slang CMake)
@@ -103,14 +105,9 @@ http_archive(
 
 # HHDS (replaces core/lhtree*.hpp; see hhds_migration.md)
 bazel_dep(name = "hhds", version = "0.2.0")
-
-archive_override(
+local_path_override(
     module_name = "hhds",
-    integrity = "sha256-MYwobdtgU6Q3ZJE/5OnmE7P+baN1BDZlHd+mZBOpRN8=",
-    strip_prefix = "hhds-91f9b0a7e7d24ddef834873367aceb3f067890b2",
-    urls = [
-        "https://github.com/masc-ucsc/hhds/archive/91f9b0a7e7d24ddef834873367aceb3f067890b2.zip",
-    ],
+    path = "../hhds",
 )
 
 # tree-sitter-pyrope

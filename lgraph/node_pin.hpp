@@ -327,7 +327,7 @@ public:
   [[nodiscard]] bool   is_type_flop() const;
   [[nodiscard]] bool   is_type_register() const;
   [[nodiscard]] bool   is_type(const Ntype_op op) const;
-  [[nodiscard]] Lconst get_type_const() const;
+  [[nodiscard]] Const get_type_const() const;
 
   [[nodiscard]] Node_pin change_to_sink_from_graph_out_driver() const {
     I(is_graph_output());
@@ -372,7 +372,7 @@ public:
 
   [[nodiscard]] Node create(Ntype_op op) const;  // create a new node, keep same hierarchy
   //[[nodiscard]] Node create(Ntype_op op, std::pair<uint64_t, uint64_t> loc, std::string fname) const ;
-  [[nodiscard]] Node create_const(const Lconst& value) const;  // create a new node, keep same hierarchy
+  [[nodiscard]] Node create_const(const Const& value) const;  // create a new node, keep same hierarchy
 
   void connect_sink(const Node_pin& dst) const;
   void connect_sink(const Node& dst) const;

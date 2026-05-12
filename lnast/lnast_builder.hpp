@@ -3,7 +3,7 @@
 
 #include <stack>
 
-#include "lconst.hpp"
+#include "const.hpp"
 #include "lnast.hpp"
 
 // Frontend-agnostic LNAST construction surface. Owns the shared lnast and

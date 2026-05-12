@@ -30,7 +30,7 @@
 #include <string_view>
 
 #include "boost/multiprecision/cpp_int.hpp"
-#include "lconst.hpp"
+#include "const.hpp"
 #include "upass_attributes.hpp"
 #include "upass_utils.hpp"
 
@@ -47,51 +47,51 @@ bool is_truthy(std::string_view v) {
 
 // Wrap (modulo) and saturate clamps for the given numeric type. n==0 means
 // the type's bit width is unknown and no narrowing is possible.
-Lconst wrap_to_unsigned(const Lconst& v, uint32_t n) {
-  if (n == 0 || v.is_invalid() || v.is_string() || v.has_unknowns() || v.is_nil()) {
+Const wrap_to_unsigned(const Const& v, uint32_t n) {
+  if (n == 0 || v->is_invalid() || v->is_string() || v->has_unknowns() || v->is_nil()) {
     return v;
   }
-  // Build a 2^n - 1 mask via Lconst arithmetic and apply.
-  Lconst mask((Number(1) << n) - 1);
-  return v.and_op(mask);
+  // Build a 2^n - 1 mask and apply.
+  Const mask = Dlop::get_mask_value(n);
+  return v->and_op(mask);
 }
 
-Lconst wrap_to_signed(const Lconst& v, uint32_t n) {
-  if (n == 0 || v.is_invalid() || v.is_string() || v.has_unknowns() || v.is_nil()) {
+Const wrap_to_signed(const Const& v, uint32_t n) {
+  if (n == 0 || v->is_invalid() || v->is_string() || v->has_unknowns() || v->is_nil()) {
     return v;
   }
   // Two's-complement wrap to n bits: take low n bits, then sign-extend if
-  // the n-th-1 bit is set. Lconst's adjust_bits already implements this for
+  // the n-th-1 bit is set. Const's adjust_bits already implements this for
   // signed widths.
-  return v.adjust_bits(n);
+  return v->adjust_bits(n);
 }
 
-Lconst saturate_unsigned(const Lconst& v, uint32_t n) {
-  if (n == 0 || v.is_invalid() || v.is_string() || v.has_unknowns() || v.is_nil()) {
+Const saturate_unsigned(const Const& v, uint32_t n) {
+  if (n == 0 || v->is_invalid() || v->is_string() || v->has_unknowns() || v->is_nil()) {
     return v;
   }
-  Lconst lo(0);
-  Lconst hi((Number(1) << n) - 1);
-  if (v.is_negative()) {
+  Const lo = Dlop::create_integer(0);
+  Const hi = Dlop::get_mask_value(n);
+  if (v->is_negative()) {
     return lo;
   }
   // v > hi — compare via subtraction sign.
-  if (v.sub_op(hi).is_positive() && v != hi) {
+  if (v->sub_op(hi)->is_positive() && *v != *hi) {
     return hi;
   }
   return v;
 }
 
-Lconst saturate_signed(const Lconst& v, uint32_t n) {
-  if (n == 0 || v.is_invalid() || v.is_string() || v.has_unknowns() || v.is_nil()) {
+Const saturate_signed(const Const& v, uint32_t n) {
+  if (n == 0 || v->is_invalid() || v->is_string() || v->has_unknowns() || v->is_nil()) {
     return v;
   }
-  Lconst hi((Number(1) << (n - 1)) - 1);
-  Lconst lo(-(Number(1) << (n - 1)));
-  if (v.sub_op(hi).is_positive() && v != hi) {
+  Const hi = Dlop::get_mask_value(n - 1);
+  Const lo = Dlop::get_neg_mask_value(n - 1);
+  if (v->sub_op(hi)->is_positive() && *v != *hi) {
     return hi;
   }
-  if (lo.sub_op(v).is_positive() && v != lo) {
+  if (lo->sub_op(v)->is_positive() && *v != *lo) {
     return lo;
   }
   return v;
@@ -99,7 +99,7 @@ Lconst saturate_signed(const Lconst& v, uint32_t n) {
 
 }  // namespace
 
-Lconst uPass_attributes::narrow_for_lhs(std::string_view lhs, const Lconst& v) const {
+Const uPass_attributes::narrow_for_lhs(std::string_view lhs, const Const& v) const {
   const bool wrap = has_wrap_policy(lhs);
   const bool sat  = has_sat_policy(lhs);
   if (!wrap && !sat) {
@@ -127,7 +127,7 @@ void uPass_attributes::apply_narrowing(std::string_view lhs, bool is_wrap, bool 
   // Resolve the current value: tmp_fold first (so chained narrowings see
   // the previous narrowing), then runner_fold_fn (constprop's ST + every
   // other pass's fold contribution).
-  std::optional<Lconst> cur;
+  std::optional<Const> cur;
   auto                  it = tmp_fold.find(std::string{lhs});
   if (it != tmp_fold.end() && !it->second.is_invalid()) {
     cur = it->second;
@@ -141,7 +141,7 @@ void uPass_attributes::apply_narrowing(std::string_view lhs, bool is_wrap, bool 
     return;
   }
   const bool is_signed = ti->kind == Numeric_kind::signed_int;
-  Lconst     out;
+  Const     out;
   if (is_wrap) {
     out = is_signed ? wrap_to_signed(*cur, ti->bits) : wrap_to_unsigned(*cur, ti->bits);
   } else {

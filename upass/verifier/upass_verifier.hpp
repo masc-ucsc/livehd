@@ -9,7 +9,7 @@
 #include <unordered_set>
 #include <vector>
 
-#include "lconst.hpp"
+#include "const.hpp"
 #include "lnast_ntype.hpp"
 #include "upass_core.hpp"
 

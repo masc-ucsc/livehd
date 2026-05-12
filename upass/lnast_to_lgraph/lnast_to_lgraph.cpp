@@ -60,7 +60,7 @@ Node_pin Lnast_to_lgraph::resolve(std::string_view raw_name) {
   // Unknown bare ref — likely a typo or unresolved intermediate.
   // Wire nil (0sb?) per lnast2lgraph.md §8 rather than a typed zero.
   Pass::warn("lnast_to_lgraph: unresolved ref '{}' — wiring nil (0sb?)", name);
-  auto zero = lg_->create_node_const(Lconst::invalid());
+  auto zero = lg_->create_node_const(Dlop::invalid());
   auto pin  = zero.setup_driver_pin();
   pin_map_.emplace(name, pin);
   return pin;
@@ -361,7 +361,7 @@ void Lnast_to_lgraph::lower_infix(Ntype_op op, std::string_view a_pin, std::stri
 }
 
 Node_pin Lnast_to_lgraph::nil_pin() {
-  return lg_->create_node_const(Lconst::invalid()).setup_driver_pin();
+  return lg_->create_node_const(Dlop::invalid()).setup_driver_pin();
 }
 
 // Lower the subtree at the current cursor into a fresh branch scope.
@@ -616,7 +616,7 @@ void Lnast_to_lgraph::lower_not() {
 
 Node_pin Lnast_to_lgraph::lower_leaf() {
   if (current_ntype() == Lnast_ntype::Lnast_ntype_const) {
-    auto cnode = lg_->create_node_const(Lconst::from_pyrope(current_text()));
+    auto cnode = lg_->create_node_const(Dlop::from_pyrope(current_text()));
     return cnode.setup_driver_pin();
   }
   return resolve(current_text());

@@ -134,7 +134,7 @@ void generate_graphs(int n) {
 
     int const_nodes = SIZE_BASE / 10 + rand_r(&rseed) % SIZE_BASE;
     for (int j = 0; j < const_nodes; j++) {  // Simple output nodes
-      auto node = g->create_node_const(Lconst(rand_r(&rseed) & 0xFF));
+      auto node = g->create_node_const(Dlop::create_integer(rand_r(&rseed) & 0xFF));
       dpins.push_back(node.setup_driver_pin().get_compact());
     }
 
@@ -409,10 +409,10 @@ void simple(int num) {
   auto o7 = g->add_graph_output("o2", pos++, rand() & 0xF);  // 7
   auto o8 = g->add_graph_output("o3", pos++, rand() & 0xF);  // 8
 
-  auto c9  = g->create_node_const(Lconst(1));         //  9
-  auto c10 = g->create_node_const(Lconst(21));        //  10
-  auto c11 = g->create_node_const(Lconst("0bxxx"));   //  11
-  auto c12 = g->create_node_const(Lconst("0b????"));  // 12
+  auto c9  = g->create_node_const(Dlop::create_integer(1));         //  9
+  auto c10 = g->create_node_const(Dlop::create_integer(21));        //  10
+  auto c11 = g->create_node_const(Dlop::from_pyrope("0bxxx"));   //  11
+  auto c12 = g->create_node_const(Dlop::from_pyrope("0b????"));  // 12
 
   auto t13 = g->create_node_sub(sub_g->get_lgid());  // 13
   t13.set_name("13g");

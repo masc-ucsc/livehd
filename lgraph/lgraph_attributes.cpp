@@ -119,39 +119,39 @@ Sub_node* Lgraph_attributes::ref_type_sub_node(std::string_view sub_name) {
   return library->ref_sub(sub_name);
 }
 
-void Lgraph_attributes::set_type_lut(Index_id nid, const Lconst& lutid) {
+void Lgraph_attributes::set_type_lut(Index_id nid, const Const& lutid) {
   node_internal[nid].set_type(Ntype_op::LUT);
 
-  lut_map.insert_or_assign(Node::Compact_class(nid), lutid.serialize());
+  lut_map.insert_or_assign(Node::Compact_class(nid), lutid->serialize());
 }
 
-Lconst Lgraph_attributes::get_type_lut(Index_id nid) const {
+Const Lgraph_attributes::get_type_lut(Index_id nid) const {
   I(node_internal[nid].get_type() == Ntype_op::LUT);
 
   auto it = lut_map.find(Node::Compact_class(nid));
   I(it != lut_map.end());
 
-  return Lconst::unserialize(it->second);
+  return Dlop::unserialize(it->second);
 }
 
-Lconst Lgraph_attributes::get_type_const(Index_id nid) const {
+Const Lgraph_attributes::get_type_const(Index_id nid) const {
   auto it = const_map.find(Node::Compact_class(nid));
   I(it != const_map.end());
 
-  return Lconst::unserialize(it->second);
+  return Dlop::unserialize(it->second);
 }
 
-void Lgraph_attributes::set_type_const(Index_id nid, const Lconst& value) {
-  const_map.insert_or_assign(Node::Compact_class(nid), value.serialize());
+void Lgraph_attributes::set_type_const(Index_id nid, const Const& value) {
+  const_map.insert_or_assign(Node::Compact_class(nid), value->serialize());
 
   auto* ptr = &node_internal[nid];
   ptr->set_type(Ntype_op::Const);
-  ptr->set_bits(value.get_bits());
+  ptr->set_bits(value->get_bits());
 }
 
-void Lgraph_attributes::set_type_const(Index_id nid, std::string_view sv) { set_type_const(nid, Lconst::from_pyrope(sv)); }
+void Lgraph_attributes::set_type_const(Index_id nid, std::string_view sv) { set_type_const(nid, Dlop::from_pyrope(sv)); }
 
-void Lgraph_attributes::set_type_const(Index_id nid, int64_t value) { set_type_const(nid, Lconst(value)); }
+void Lgraph_attributes::set_type_const(Index_id nid, int64_t value) { set_type_const(nid, Dlop::create_integer(value)); }
 
 void Lgraph_attributes::dump_source_map() const {
   for (const auto& it : node_source_map) {

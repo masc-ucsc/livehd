@@ -3,7 +3,7 @@
 
 #include <tuple>
 
-#include "lconst.hpp"
+#include "const.hpp"
 #include "lgtuple.hpp"
 #include "node.hpp"
 #include "pass.hpp"
@@ -38,8 +38,8 @@ protected:
 
   void replace_part_inputs_const(Node& node, XEdge_iterator& inp_edges_ordered);
   void replace_all_inputs_const(Node& node, XEdge_iterator& inp_edges_ordered);
-  void replace_node(Node& node, const Lconst& result);
-  void replace_logic_node(Node& node, const Lconst& result);
+  void replace_node(Node& node, const Const& result);
+  void replace_logic_node(Node& node, const Const& result);
 
   void try_connect_tuple_to_sub(const std::shared_ptr<Lgtuple const>& tup, Node& sub_node, Node& tup_node);
   void try_connect_lgcpp(const Node& node);

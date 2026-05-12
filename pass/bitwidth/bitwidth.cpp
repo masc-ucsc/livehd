@@ -108,8 +108,8 @@ void Bitwidth::process_flop(Node& node) {
     flop_cpins.emplace_back(node.get_sink_pin("initial").get_driver_pin());
   }
 
-  Lconst max_val;
-  Lconst min_val;
+  Const max_val;
+  Const min_val;
 
   for (auto& cpin : flop_cpins) {
     auto           it = bwmap.find(cpin.get_compact_class());
@@ -167,16 +167,16 @@ void Bitwidth::process_ror(Node& node, XEdge_iterator& inp_edges) {
 void Bitwidth::process_not(Node& node, XEdge_iterator& inp_edges) {
   I(inp_edges.size());  // Dangling???
 
-  Lconst max_val;
-  Lconst min_val;
+  Const max_val;
+  Const min_val;
   for (auto e : inp_edges) {
     auto it = bwmap.find(e.driver.get_compact_class());
     if (it != bwmap.end()) {
       auto pmax = it->second.get_max();  // pmax = parent_max
       auto pmin = it->second.get_min();
       // calculate 1s'complemet value
-      auto pmax_1scomp = pmax.not_op();
-      auto pmin_1scomp = pmin.not_op();
+      auto pmax_1scomp = pmax->not_op();
+      auto pmin_1scomp = pmin->not_op();
       if (pmax_1scomp > max_val) {
         max_val = pmax_1scomp;
       }
@@ -315,14 +315,14 @@ void Bitwidth::process_sra(Node& node, XEdge_iterator& inp_edges) {
   auto n_bw = n_it->second;
 
   // FIXME->sh: lgraph should only support arithmetic shift right now,
-  //            how to express it using Lconst? for now the temporary solution
+  //            how to express it using Const? for now the temporary solution
   //            is convert everything back to C++ integer and perform a division :(
-  if (n_bw.get_min() > 0 && n_bw.get_min().is_i()) {
+  if (n_bw.get_min() > 0 && n_bw.get_min()->is_i()) {
     auto max     = a_bw.get_max();
     auto min     = a_bw.get_min();
-    auto amount  = Lconst(Lconst(1) << n_bw.get_min());
-    auto max_val = max.div_op(amount);
-    auto min_val = min.div_op(amount);
+    auto amount  = Dlop::create_integer(1)->lsh_op(n_bw.get_min()->to_i());
+    auto max_val = max->div_op(amount);
+    auto min_val = min->div_op(amount);
 
     Bitwidth_range bw(min_val, max_val);
     adjust_bw(node.get_driver_pin(), bw);
@@ -334,8 +334,8 @@ void Bitwidth::process_sra(Node& node, XEdge_iterator& inp_edges) {
 void Bitwidth::process_sum(Node& node, XEdge_iterator& inp_edges) {
   I(inp_edges.size());  // Dangling sum??? (delete)
 
-  Lconst max_val;
-  Lconst min_val;
+  Const max_val;
+  Const min_val;
 
   for (auto e : inp_edges) {
     auto it = bwmap.find(e.driver.get_compact_class());
@@ -383,12 +383,12 @@ void Bitwidth::process_memory(Node& node) {
           Pass::error("Memory node:{} has {} connected to a non-constant pin:{}", node.debug_name(), n, e.driver.debug_name());
           return;
         }
-        if (!val.is_i()) {
+        if (!val->is_i()) {
           node.dump();
-          Pass::error("Memory node:{} has {} connected to a non-integer value of {}", node.debug_name(), n, val.to_pyrope());
+          Pass::error("Memory node:{} has {} connected to a non-integer value of {}", node.debug_name(), n, val->to_pyrope());
           return;
         }
-        auto v = val.to_i();
+        auto v = val->to_i();
         if (n == "bits") {
           mem_bits = v;
         } else {
@@ -481,20 +481,20 @@ void Bitwidth::process_memory(Node& node) {
           continue;
         }
 
-        if (!it->second.get_range().is_i()) {
-          Pass::error("memory {} size exceeds limit", it->second.get_range().to_pyrope());
+        if (!it->second.get_range()->is_i()) {
+          Pass::error("memory {} size exceeds limit", it->second.get_range()->to_pyrope());
           return;
         }
 
-        auto sz      = it->second.get_range().to_i();
+        auto sz      = it->second.get_range()->to_i();
         new_mem_size = std::max(sz, new_mem_size);
 
         // if (sz > mem_size && mem_size != 0) {
         //   Pass::error("memory {} input pin:{} needs from {} to {} but memory only has {} entries",
         //               node.debug_name(),
         //               dpin.debug_name(),
-        //               it->second.get_max().to_pyrope(),
-        //               it->second.get_min().to_pyrope(),
+        //               it->second.get_max()->to_pyrope(),
+        //               it->second.get_min()->to_pyrope(),
         //               mem_size);
         //   return;
         // }
@@ -559,13 +559,13 @@ void Bitwidth::process_memory(Node& node) {
 void Bitwidth::process_mult(Node& node, XEdge_iterator& inp_edges) {
   I(inp_edges.size());  // Dangling sum??? (delete)
 
-  Lconst max_val(1);
-  Lconst min_val(1);
+  Const max_val = Dlop::create_integer(1);
+  Const min_val = Dlop::create_integer(1);
   for (auto e : inp_edges) {
     auto it = bwmap.find(e.driver.get_compact_class());
     if (it != bwmap.end()) {
-      max_val = max_val.mult_op(it->second.get_max());
-      min_val = min_val.mult_op(it->second.get_min());
+      max_val = max_val->mult_op(it->second.get_max());
+      min_val = min_val->mult_op(it->second.get_min());
       if (max_val < min_val) {
         auto tmp = max_val;
         max_val  = min_val;
@@ -627,14 +627,14 @@ void Bitwidth::process_set_mask(Node& node) {
   Bitwidth_range value_bw;
   if (it2 == bwmap.end()) {
     if (value_dpin.is_type_const()) {
-      value_bw.set_range(Lconst(0), value_dpin.get_type_const());
-    } else if (mask.is_negative()) {
+      value_bw.set_range(Dlop::create_integer(0), value_dpin.get_type_const());
+    } else if (mask->is_negative()) {
       debug_unconstrained_msg(node, value_dpin);
       not_finished = true;
       return;
     } else {
       // Pass::info("bw pin:{} is not constrained but constraining to mask size", value_dpin.debug_name());
-      bw.set_wider_range(Lconst(0), mask);
+      bw.set_wider_range(Dlop::create_integer(0), mask);
       adjust_bw(node.get_driver_pin(), bw);
       return;
     }
@@ -642,11 +642,11 @@ void Bitwidth::process_set_mask(Node& node) {
     value_bw = it2->second;
   }
 
-  if (mask == Lconst(-1)) {  // Just pick all the bits from value
+  if (mask == Dlop::create_integer(-1)) {  // Just pick all the bits from value
     adjust_bw(node.get_driver_pin(), value_bw);
     return;
   }
-  if (mask == Lconst(0)) {  // just do not pick anything and keep "a"
+  if (mask == Dlop::create_integer(0)) {  // just do not pick anything and keep "a"
     adjust_bw(node.get_driver_pin(), bw);
     return;
   }
@@ -655,31 +655,31 @@ void Bitwidth::process_set_mask(Node& node) {
   auto min_val = value_bw.get_min();
   {
     auto mask_bits = mask.get_bits();
-    if (!mask.is_negative()) {  // drop upper bits from value if non negative mask
+    if (!mask->is_negative()) {  // drop upper bits from value if non negative mask
       if (mask_bits < max_val.get_bits()) {
-        max_val = max_val.rsh_op(max_val.get_bits() - mask_bits);
+        max_val = max_val->rsh_op(max_val.get_bits() - mask_bits);
       }
       if (mask_bits < min_val.get_bits()) {
-        min_val = min_val.rsh_op(min_val.get_bits() - mask_bits);
+        min_val = min_val->rsh_op(min_val.get_bits() - mask_bits);
       }
     }
   }
   {
     size_t n_zeroes_in_mask;
-    if (mask.is_negative()) {  // Keep full value bits and shift left as much as mask zeroes
-      auto not_mask = mask.not_op();
-      I(!not_mask.is_negative());
-      n_zeroes_in_mask = not_mask.popcount();
+    if (mask->is_negative()) {  // Keep full value bits and shift left as much as mask zeroes
+      auto not_mask = mask->not_op();
+      I(!not_mask->is_negative());
+      n_zeroes_in_mask = not_mask->popcount();
 
     } else {
-      n_zeroes_in_mask = mask.get_trailing_zeroes();  // mask_affects_sign, so -1
+      n_zeroes_in_mask = mask->get_trailing_zeroes();  // mask_affects_sign, so -1
     }
 
-    max_val = max_val.lsh_op(n_zeroes_in_mask);
-    min_val = min_val.lsh_op(n_zeroes_in_mask);
+    max_val = max_val->lsh_op(n_zeroes_in_mask);
+    min_val = min_val->lsh_op(n_zeroes_in_mask);
   }
 
-  if (mask.is_negative()) {
+  if (mask->is_negative()) {
     adjust_bw(node.get_driver_pin(), Bitwidth_range(min_val, max_val));
   } else {
     bw.set_wider_range(min_val, max_val);
@@ -706,7 +706,7 @@ void Bitwidth::process_get_mask(Node& node) {
   }
 
   auto   it2 = bwmap.find(mask_dpin.get_compact_class());
-  Lconst mask_val;
+  Const mask_val;
   if (it2 == bwmap.end()) {
     if (!mask_dpin.is_type_const()) {
       debug_unconstrained_msg(node, mask_dpin);
@@ -715,32 +715,32 @@ void Bitwidth::process_get_mask(Node& node) {
     }
     mask_val = mask_dpin.get_type_const();
   } else {
-    mask_val = it2->second.get_max().or_op(it2->second.get_min());
+    mask_val = it2->second.get_max()->or_op(it2->second.get_min());
   }
 
-  Lconst a_max = it->second.get_max();
-  Lconst a_min = it->second.get_min();
+  Const a_max = it->second.get_max();
+  Const a_min = it->second.get_min();
 
-  Lconst res_max;
+  Const res_max;
   if (a_max == a_min) {
-    res_max = a_max.get_mask_op(mask_val);
+    res_max = a_max->get_mask_op(mask_val);
   } else {
-    res_max = a_max.get_mask_value().get_mask_op(mask_val);
+    res_max = a_max->get_mask_value()->get_mask_op(mask_val);
   }
 
-  Lconst res_min = res_max;
+  Const res_min = res_max;
 
   if (a_min < 0) {  // 2s complement usual
-    auto tmp = Lconst(-1).get_mask_op(mask_val);
+    auto tmp = Dlop::create_integer(-1)->get_mask_op(mask_val);
     if (tmp > res_max) {
       res_max = tmp;
     }
-    res_min = Lconst(0);
+    res_min = Dlop::create_integer(0);
 
-    a_min = a_min.neg_op();
+    a_min = a_min->neg_op();
   }
 
-  Lconst val2 = a_min.get_mask_op(mask_val);
+  Const val2 = a_min->get_mask_op(mask_val);
   if (val2 > res_max) {
     res_max = val2;
   }
@@ -771,7 +771,7 @@ void Bitwidth::process_sext(Node& node, XEdge_iterator& inp_edges) {
 
   auto sign_max = Bits_max;
   if (pos_dpin.is_type_const()) {
-    sign_max = pos_dpin.get_type_const().to_i();
+    sign_max = pos_dpin.get_type_const()->to_i();
   }
 
   if (sign_max == Bits_max && no_wire) {
@@ -827,9 +827,9 @@ void Bitwidth::process_sext(Node& node, XEdge_iterator& inp_edges) {
           return;
         }
 
-        if (n0c && n0.get_type_const().is_mask()) {
+        if (n0c && n0.get_type_const()->is_mask()) {
           grandpa_dpin = mask_e[1].driver;
-        } else if (n1c && n1.get_type_const().is_mask()) {
+        } else if (n1c && n1.get_type_const()->is_mask()) {
           grandpa_dpin = mask_e[0].driver;
         } else {
           return;
@@ -891,12 +891,12 @@ void Bitwidth::process_bit_or(Node& node, XEdge_iterator& inp_edges) {
     return;
   }
 
-  Lconst max_val(0);
-  Lconst min_val(0);
+  Const max_val = Dlop::create_integer(0);
+  Const min_val = Dlop::create_integer(0);
   if (!any_negative) {
-    max_val = (Lconst(1UL) << Lconst(max_bits - 1)) - 1;
+    max_val = Dlop::get_mask_value(max_bits - 1);
   } else {
-    min_val = ((Lconst(1UL) << Lconst(max_bits - 1)) - Lconst(1)).not_op();
+    min_val = Dlop::get_neg_mask_value(max_bits - 1);
   }
 
   adjust_bw(node.get_driver_pin(), Bitwidth_range(min_val, max_val));
@@ -926,8 +926,8 @@ void Bitwidth::process_bit_xor(Node& node, XEdge_iterator& inp_edges) {
     }
   }
 
-  auto max_val = (Lconst(1UL) << Lconst(max_bits - 1)) - 1;  // 2^62 -1
-  auto min_val = Lconst(-1) - max_val;
+  auto max_val = Dlop::get_mask_value(max_bits - 1);                                       // 2^(max_bits-1) - 1
+  auto min_val = Dlop::create_integer(-1)->sub_op(max_val);
 
   adjust_bw(node.get_driver_pin(), Bitwidth_range(min_val, max_val));
 }
@@ -989,8 +989,8 @@ void Bitwidth::process_bit_and(Node& node, XEdge_iterator& inp_edges) {
   if (!hier && mask_pos >= 0 && pos_min_sbits != Bits_max && pos_min_sbits_pos != mask_pos) {
     // There is a MASK that it is not needed (something else constrains the same or more)
     //
-    auto v = (Lconst(1) << Lconst(pos_min_sbits - 1)) - inp_edges[mask_pos].driver.get_node().get_type_const();
-    if (v == Lconst(1)) {  // Check that mask was right
+    auto v = Dlop::create_integer(1)->lsh_op(pos_min_sbits - 1)->sub_op(inp_edges[mask_pos].driver.get_node().get_type_const());
+    if (*v == *Dlop::create_integer(1)) {  // Check that mask was right
       if (inp_edges.size() == 2) {
         // collapse forward the non-mask pin (not if input)
         int pos = mask_pos == 0 ? 1 : 0;
@@ -1009,15 +1009,15 @@ void Bitwidth::process_bit_and(Node& node, XEdge_iterator& inp_edges) {
     }
   }
 
-  Lconst max_val;
-  Lconst min_val;
+  Const max_val;
+  Const min_val;
 
   if (pos_min_sbits != Bits_max) {
-    max_val = (Lconst(1) << Lconst(pos_min_sbits - 1)) - 1;
-    min_val = Lconst(0);  // note: this could avoid the (max, min) of AND to pollute the later Sum_op
+    max_val = Dlop::get_mask_value(pos_min_sbits - 1);
+    min_val = Dlop::create_integer(0);  // note: this could avoid the (max, min) of AND to pollute the later Sum_op
   } else {
-    max_val = (Lconst(1) << Lconst(unk_max_sbits - 1)) - 1;
-    min_val = Lconst(-1) - max_val;
+    max_val = Dlop::get_mask_value(unk_max_sbits - 1);
+    min_val = Dlop::create_integer(-1)->sub_op(max_val);
   }
 
   Bitwidth_range bw(min_val, max_val);
@@ -1072,7 +1072,7 @@ void Bitwidth::process_attr_get(Node& node) {
   auto dpin_key = node.get_sink_pin("field").get_driver_pin();
   I(dpin_key.get_node().is_type_const());
 
-  auto key  = dpin_key.get_type_const().to_field();
+  auto key  = dpin_key.get_type_const()->to_field();
   auto attr = get_key_attr(key);
   I(attr != Attr::Set_dp_assign);  // Not get attr with __dp_assign
   if (attr == Attr::Set_other) {
@@ -1090,16 +1090,16 @@ void Bitwidth::process_attr_get(Node& node) {
   }
   auto& bw = it->second;
 
-  Lconst result;
+  Const result;
   if (attr == Attr::Set_ubits) {
-    result = bw.get_min() >= 0 ? Lconst(bw.get_sbits() - 1) : Lconst(bw.get_sbits());
+    result = bw.get_min()->is_positive() ? Dlop::create_integer(bw.get_sbits() - 1) : Dlop::create_integer(bw.get_sbits());
 
 #ifndef NDEBUG
-    std::print("min:{}, result:{}\n", bw.get_min().to_i(), result.to_i());
+    std::print("min:{}, result:{}\n", bw.get_min()->to_i(), result->to_i());
 #endif
 
   } else if (attr == Attr::Set_sbits) {
-    result = Lconst(bw.get_sbits());
+    result = Dlop::create_integer(bw.get_sbits());
   } else if (attr == Attr::Set_max) {
     result = bw.get_max();
   } else if (attr == Attr::Set_min) {
@@ -1174,7 +1174,7 @@ void Bitwidth::process_attr_set_bw(Node& node_attr, Bitwidth::Attr attr, Fwd_edg
   auto val = dpin_val.get_node().get_type_const();
 
   if (attr == Attr::Set_ubits) {
-    auto bits = static_cast<Bits_t>(val.to_i());
+    auto bits = static_cast<Bits_t>(val->to_i());
 
     if (!parent_pending) {
       Bitwidth_range set_bw;
@@ -1197,7 +1197,7 @@ void Bitwidth::process_attr_set_bw(Node& node_attr, Bitwidth::Attr attr, Fwd_edg
       insert_tposs_nodes(node_attr, bits, fwd_it);
     }
   } else if (attr == Attr::Set_sbits) {
-    auto bits = static_cast<Bits_t>(val.to_i());
+    auto bits = static_cast<Bits_t>(val->to_i());
 
     if (!parent_pending) {
       Bitwidth_range set_bw;
@@ -1252,7 +1252,7 @@ void Bitwidth::process_attr_set_bw(Node& node_attr, Bitwidth::Attr attr, Fwd_edg
 
 // insert tposs after attr node when ubits
 void Bitwidth::insert_tposs_nodes(Node& node_attr_hier, Bits_t ubits, Fwd_edge_iterator::Fwd_iter& fwd_it) {
-  I(absl::StrContains(node_attr_hier.get_sink_pin("field").get_driver_pin().get_type_const().to_field(), "__ubits"));
+  I(absl::StrContains(node_attr_hier.get_sink_pin("field").get_driver_pin().get_type_const()->to_field(), "__ubits"));
 
   auto node_attr = node_attr_hier.get_non_hierarchical();  // insert locally not through hierarchy
   auto name_dpin = node_attr.get_sink_pin("parent").get_driver_pin();
@@ -1260,7 +1260,7 @@ void Bitwidth::insert_tposs_nodes(Node& node_attr_hier, Bits_t ubits, Fwd_edge_i
     return;
   }
 
-  auto mask = (Lconst(1) << Lconst(ubits)) - Lconst(1);
+  auto mask = (Dlop::create_integer(1) << Dlop::create_integer(ubits)) - Dlop::create_integer(1);
 
   Node ntposs;
 
@@ -1302,7 +1302,7 @@ void Bitwidth::process_attr_set(Node& node_attr, Fwd_edge_iterator::Fwd_iter& fw
   I(node_attr.is_sink_connected("field"));
 
   auto dpin_key = node_attr.get_sink_pin("field").get_driver_pin();
-  auto key      = dpin_key.get_type_const().to_field();
+  auto key      = dpin_key.get_type_const()->to_field();
   auto attr     = get_key_attr(key);
 
   if (attr == Attr::Set_other) {
@@ -1599,7 +1599,7 @@ void Bitwidth::bw_pass(Lgraph* lg) {
         auto v = it->second.get_max();
         if (it->second.get_min() != v)
           continue;
-        std::print("could delete node:{} with value:{}\n",node.debug_name(), v.to_pyrope());
+        std::print("could delete node:{} with value:{}\n",node.debug_name(), v->to_pyrope());
         auto data_dpin = node.create_const(v);
         for (auto e : dpin.out_edges()) {
           e.sink.connect_driver(data_dpin);
@@ -1656,7 +1656,7 @@ void Bitwidth::try_delete_attr_node(Node& node) {
   Attr attr = Attr::Set_other;
   if (node.is_sink_connected("field")) {
     auto key_dpin = node.get_sink_pin("field").get_driver_pin();
-    attr          = get_key_attr(key_dpin.get_type_const().to_field());
+    attr          = get_key_attr(key_dpin.get_type_const()->to_field());
     if (attr == Attr::Set_other) {
       return;
     }
@@ -1682,12 +1682,12 @@ void Bitwidth::try_delete_attr_node(Node& node) {
 
       mask_dpin.set_bits(bw_lhs_bits);
 
-      auto mask_const   = (Lconst(1UL) << Lconst(bw_lhs_bits)) - 1;
+      auto mask_const   = Dlop::get_mask_value(bw_lhs_bits);
       auto all_one_node = node.create_const(mask_const);
       auto all_one_dpin = all_one_node.setup_driver_pin();
 
       // Note: I set the unsigned k-bits (max, min) for the mask
-      bwmap.insert_or_assign(mask_dpin.get_compact_class(), Bitwidth_range(Lconst(0), mask_const));
+      bwmap.insert_or_assign(mask_dpin.get_compact_class(), Bitwidth_range(Dlop::create_integer(0), mask_const));
       dpin_rhs.connect_sink(mask_node.setup_sink_pin("A"));
       all_one_dpin.connect_sink(mask_node.setup_sink_pin("A"));
       for (auto e : node.out_edges()) {

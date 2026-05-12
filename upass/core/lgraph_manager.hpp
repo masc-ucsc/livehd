@@ -175,10 +175,10 @@ public:
     }
 
     const auto c = node.get_type_const();
-    if (!c.is_i()) {
+    if (!c->is_i()) {
       return std::nullopt;
     }
-    return c.to_i();
+    return c->to_i();
   }
   Replace_effect estimate_replace_with_const(Node_id node_id) const override {
     Replace_effect effect;
@@ -207,10 +207,10 @@ public:
 
     if (node.get_type_op() == Ntype_op::Const) {
       const auto cur = node.get_type_const();
-      if (cur.is_i() && cur.to_i() == value) {
+      if (cur->is_i() && cur->to_i() == value) {
         return false;
       }
-      node.set_type_const(Lconst(value));
+      node.set_type_const(Dlop::create_integer(value));
       return true;
     }
 
@@ -386,14 +386,14 @@ public:
       }
 
       // Reduce-fold: accumulate the sum of all constant inputs.
-      Lconst result = inputs[0].driver.get_type_const();
-      if (!result.is_i()) {
+      Const result = inputs[0].driver.get_type_const();
+      if (!result->is_i()) {
         continue;
       }
       bool all_i = true;
       for (std::size_t i = 1; i < inputs.size(); ++i) {
         const auto cn = inputs[i].driver.get_type_const();
-        if (!cn.is_i()) {
+        if (!cn->is_i()) {
           all_i = false;
           break;
         }
@@ -463,19 +463,19 @@ public:
 
       // Reduce-fold: accumulate the product of all constant inputs.
       // Uses mult_op() to match fold_sum_const's use of add_op() and preserve
-      // Lconst bit-width semantics rather than raw to_i() arithmetic.
-      Lconst result = inputs[0].driver.get_type_const();
-      if (!result.is_i()) {
+      // Const bit-width semantics rather than raw to_i() arithmetic.
+      Const result = inputs[0].driver.get_type_const();
+      if (!result->is_i()) {
         continue;
       }
       bool all_i = true;
       for (std::size_t i = 1; i < inputs.size(); ++i) {
         const auto cn = inputs[i].driver.get_type_const();
-        if (!cn.is_i()) {
+        if (!cn->is_i()) {
           all_i = false;
           break;
         }
-        result = result.mult_op(cn);
+        result = result->mult_op(cn);
       }
       if (!all_i) {
         continue;
@@ -848,8 +848,8 @@ public:
           && rhs.get_type_const() != 0) {
         const auto c_lhs = lhs.get_type_const();
         const auto c_rhs = rhs.get_type_const();
-        if (c_lhs.is_i() && c_rhs.is_i()) {
-          const auto c_res = Lconst(c_lhs.to_i() / c_rhs.to_i());
+        if (c_lhs->is_i() && c_rhs->is_i()) {
+          const auto c_res = Dlop::create_integer(c_lhs->to_i() / c_rhs->to_i());
           ++summary.new_const_nodes;
           if (!dry_run) {
             auto cnew = lg->create_node_const(c_res);
@@ -972,8 +972,8 @@ public:
       if (!rewritten && a_drv.is_type(Ntype_op::Const) && b_drv.is_type(Ntype_op::Const)) {
         const auto ca = a_drv.get_type_const();
         const auto cb = b_drv.get_type_const();
-        if (ca.is_i() && cb.is_i()) {
-          const auto result = Lconst(ca.to_i() - cb.to_i());
+        if (ca->is_i() && cb->is_i()) {
+          const auto result = Dlop::create_integer(ca->to_i() - cb->to_i());
           ++summary.new_const_nodes;
           if (!dry_run) {
             auto cnew = lg->create_node_const(result);

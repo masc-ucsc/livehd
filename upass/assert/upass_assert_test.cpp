@@ -85,7 +85,7 @@ TEST(UpassAssert, CassertNonZeroTrueNoThrow) {
 
 // ── cassert(x): unknown variable — cannot decide statically ──────────────
 // The assert pass must not throw for unknown refs since it can't prove
-// the condition false (invalid Lconst has num==0, but is flagged invalid).
+// the condition false (invalid Const has num==0, but is flagged invalid).
 
 TEST(UpassAssert, CassertUnknownRefNoThrow) {
   AssertFixture f;

@@ -114,7 +114,7 @@ bool Symbol_table::set(std::string_view key, std::shared_ptr<Bundle> bundle) {
   return true;
 }
 
-bool Symbol_table::set(std::string_view key, const Lconst& trivial) {
+bool Symbol_table::set(std::string_view key, const Const& trivial) {
   I(!stack.empty());
   auto [var, field] = get_var_field(key);
 
@@ -139,7 +139,7 @@ bool Symbol_table::set(std::string_view key, const Lconst& trivial) {
   return true;
 }
 
-bool Symbol_table::mut(std::string_view key, const Lconst& trivial) {
+bool Symbol_table::mut(std::string_view key, const Const& trivial) {
   auto [var, field] = get_var_field(key);
 
   Scope* target = find_decl_scope(var);
@@ -321,7 +321,7 @@ std::shared_ptr<Bundle> Symbol_table::leave_scope() {
       // its scalar slot invalidated and any reader that relied on the slot
       // sees unknown; tuple-shape readers still see the structure, which
       // is the conservative answer for a mutation we couldn't prove.
-      it->second->set("0", Lconst::invalid());
+      it->second->set("0", Dlop::invalid());
     }
   }
 
@@ -339,7 +339,7 @@ std::shared_ptr<Bundle> Symbol_table::leave_scope() {
 bool Symbol_table::is_known_const(std::string_view name) const {
   if (!has_trivial(name)) return false;
   const auto& val = get_trivial(name);
-  return !val.is_invalid() && !val.has_unknowns();
+  return !val->is_invalid() && !val->has_unknowns();
 }
 
 bool Symbol_table::has_trivial(std::string_view key) const {
@@ -353,7 +353,7 @@ bool Symbol_table::has_trivial(std::string_view key) const {
   return it->second->has_trivial(field);
 }
 
-const Lconst& Symbol_table::get_trivial(std::string_view key) const {
+const Const& Symbol_table::get_trivial(std::string_view key) const {
   auto [var, field] = get_var_field(key);
 
   const auto* s = find_decl_scope(var);

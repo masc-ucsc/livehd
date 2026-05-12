@@ -9,32 +9,32 @@
 #include "iassert.hpp"
 #include "likely.hpp"
 
-Lconst Bitwidth_range::to_lconst(bool overflow, int64_t val) {
+Const Bitwidth_range::to_lconst(bool overflow, int64_t val) {
   if (!overflow) {
-    return Lconst(val);
+    return Dlop::create_integer(val);
   }
   if (val == 0) {
-    return Lconst(0);
+    return Dlop::create_integer(0);
   }
 
   if (val > 0) {
-    return Lconst::get_mask_value(val);
+    return Dlop::get_mask_value(val);
   }
 
-  return Lconst::get_neg_mask_value(-(val + 1));  // Lconst(0) - (Lconst(1).lsh_op(-val));
+  return Dlop::get_neg_mask_value(-(val + 1));  // Dlop::create_integer(0) - (Dlop::create_integer(1)->lsh_op(-val));
 }
 
-Bitwidth_range::Bitwidth_range(const Lconst& val) {
-  if (val.is_i()) {
+Bitwidth_range::Bitwidth_range(const Const& val) {
+  if (val->is_i()) {
     overflow = false;
-    max      = val.to_i();
-    min      = val.to_i();
+    max      = val->to_i();
+    min      = val->to_i();
   } else {
     // val.dump();
     overflow  = true;
-    auto bits = val.get_bits();
+    auto bits = val->get_bits();
 
-    if (val.is_negative()) {
+    if (val->is_negative()) {
       max = 0;
       min = -bits;
     } else {
@@ -45,31 +45,31 @@ Bitwidth_range::Bitwidth_range(const Lconst& val) {
   }
 }
 
-void Bitwidth_range::set_range(const Lconst& min_val, const Lconst& max_val) {
-  I(max_val >= min_val);
+void Bitwidth_range::set_range(const Const& min_val, const Const& max_val) {
+  I(*max_val >= *min_val);
 
-  if (max_val.is_i() && min_val.is_i()) {
+  if (max_val->is_i() && min_val->is_i()) {
     overflow = false;
-    max      = max_val.to_i();
-    min      = min_val.to_i();
+    max      = max_val->to_i();
+    min      = min_val->to_i();
     I(max >= min);
   } else {
     overflow = true;
     min      = 0;
     max      = 0;
-    if (min_val.is_negative()) {
-      min = -(min_val.get_bits());
+    if (min_val->is_negative()) {
+      min = -(min_val->get_bits());
     }
-    if (max_val.is_positive()) {
-      max = max_val.get_bits();
+    if (max_val->is_positive()) {
+      max = max_val->get_bits();
     }
 
-    // std::print("min:{} max:{} min_val:{} max_val:{}\n", (int)min, (int)max, min_val.to_pyrope(), max_val.to_pyrope());
+    // std::print("min:{} max:{} min_val:{} max_val:{}\n", (int)min, (int)max, min_val->to_pyrope(), max_val->to_pyrope());
     I(min == 0 || min <= max || max == 0);
   }
 }
 
-Bitwidth_range::Bitwidth_range(const Lconst& min_val, const Lconst& max_val) { set_range(min_val, max_val); }
+Bitwidth_range::Bitwidth_range(const Const& min_val, const Const& max_val) { set_range(min_val, max_val); }
 
 void Bitwidth_range::set_narrower_range(const Bitwidth_range& bw) {
   if (likely(!bw.is_overflow() && !is_overflow())) {
@@ -81,13 +81,13 @@ void Bitwidth_range::set_narrower_range(const Bitwidth_range& bw) {
 
   auto l_max = get_max();
   auto n_max = bw.get_max();
-  if (n_max < l_max) {
+  if (*n_max < *l_max) {
     l_max = n_max;
   }
 
   auto l_min = get_min();
   auto n_min = bw.get_min();
-  if (n_min > l_min) {
+  if (*n_min > *l_min) {
     l_min = n_min;
   }
 
@@ -104,13 +104,13 @@ void Bitwidth_range::set_wider_range(const Bitwidth_range& bw) {
 
   auto l_max = get_max();
   auto n_max = bw.get_max();
-  if (n_max > l_max) {
+  if (*n_max > *l_max) {
     l_max = n_max;
   }
 
   auto l_min = get_min();
   auto n_min = bw.get_min();
-  if (n_min < l_min) {
+  if (*n_min < *l_min) {
     l_min = n_min;
   }
 
@@ -175,8 +175,8 @@ Bits_t Bitwidth_range::get_sbits() const {
     return bits;
   }
 
-  auto a    = Lconst(max).get_bits();  // 15 -> 5sbits
-  auto b    = Lconst(min).get_bits();
+  auto a    = Dlop::create_integer(max)->get_bits();  // 15 -> 5sbits
+  auto b    = Dlop::create_integer(min)->get_bits();
   auto bits = std::max(a, b);
 
   I(bits < Bits_max);

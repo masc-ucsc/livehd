@@ -48,7 +48,7 @@ void Cprop::add_pin_with_check(const std::shared_ptr<Lgtuple>& tup, std::string_
 
   auto pos_dpin = pos_spin.get_driver_pin();
   if (pos_dpin.is_type_const()) {
-    auto v = pos_dpin.get_type_const().to_field();
+    auto v = pos_dpin.get_type_const()->to_field();
     if (!Lgtuple::is_root_attribute(v)) {
       tup->set_issue();
       tuple_issues = true;
@@ -199,7 +199,7 @@ bool Cprop::try_constant_prop(Node& node, XEdge_iterator& inp_edges_ordered) {
 }
 
 void Cprop::try_collapse_forward(Node& node, XEdge_iterator& inp_edges_ordered) {
-  // No need to collapse things like const -> join because the Lconst will be forward eval
+  // No need to collapse things like const -> join because the Const will be forward eval
   auto op = node.get_type_op();
 
   if (inp_edges_ordered.size() == 1) {
@@ -243,12 +243,12 @@ void Cprop::replace_part_inputs_const(Node& node, XEdge_iterator& inp_edges_orde
   auto op = node.get_type_op();
   if (op == Ntype_op::Mux) {
     auto s_node = inp_edges_ordered[0].driver.get_node();
-    if (!s_node.is_type_const() || s_node.get_type_const().has_unknowns()) {
+    if (!s_node.is_type_const() || s_node.get_type_const()->has_unknowns()) {
       return;
     }
 
-    I(s_node.get_type_const().is_i());  // string with ??? in mux? Give me test case to debug
-    size_t sel = s_node.get_type_const().to_i();
+    I(s_node.get_type_const()->is_i());  // string with ??? in mux? Give me test case to debug
+    size_t sel = s_node.get_type_const()->to_i();
 
     Node_pin a_pin;
     for (auto& e : inp_edges_ordered) {
@@ -279,9 +279,9 @@ void Cprop::replace_part_inputs_const(Node& node, XEdge_iterator& inp_edges_orde
     int   nconstants = 0;
     int   npending   = 0;
 
-    Lconst result;
+    Const result;
     if (op == Ntype_op::And) {
-      result = Lconst(-1);
+      result = Dlop::create_integer(-1);
     }
 
     XEdge_iterator edge_it2;
@@ -300,16 +300,16 @@ void Cprop::replace_part_inputs_const(Node& node, XEdge_iterator& inp_edges_orde
 
       if (op == Ntype_op::Sum) {
         if (i.sink.get_pin_name() == "A") {
-          result = result.add_op(c);
+          result = result->add_op(c);
         } else {
           I(i.sink.get_pin_name() == "B");
-          result = result.sub_op(c);
+          result = result->sub_op(c);
         }
       } else if (op == Ntype_op::Or) {
-        result = result.or_op(c);
+        result = result->or_op(c);
       } else {
         I(op == Ntype_op::And);
-        result = result.and_op(c);
+        result = result->and_op(c);
       }
 
       if (nconstants == 1) {
@@ -366,55 +366,55 @@ void Cprop::replace_all_inputs_const(Node& node, XEdge_iterator& inp_edges_order
   // simple constant propagation
   auto op = node.get_type_op();
   if (op == Ntype_op::SHL) {
-    Lconst val = node.get_sink_pin("a").get_driver_node().get_type_const();
+    Const val = node.get_sink_pin("a").get_driver_node().get_type_const();
 
-    Lconst result(0);
+    Const result = Dlop::create_integer(0);
 
     bool zero_shifts = true;
     for (auto& amt_dpin : node.get_sink_pin("B").inp_drivers()) {
-      Lconst amt = amt_dpin.get_type_const();
+      Const amt = amt_dpin.get_type_const();
 
-      result      = result.or_op(val << amt);
+      result      = result->or_op(val << amt);
       zero_shifts = false;
     }
 
     if (zero_shifts) {
-      replace_node(node, Lconst(-1));
+      replace_node(node, Dlop::create_integer(-1));
     } else {
       replace_node(node, result);
     }
 
   } else if (op == Ntype_op::Ror) {
-    Lconst result(0);
+    Const result = Dlop::create_integer(0);
     for (auto& i : inp_edges_ordered) {
       auto c = i.driver.get_node().get_type_const();
-      result = result.ror_op(c);
+      result = result->ror_op(c);
     }
 
     replace_node(node, result);
   } else if (false && op == Ntype_op::Get_mask) {
-    Lconst val       = node.get_sink_pin("a").get_driver_node().get_type_const();
+    Const val       = node.get_sink_pin("a").get_driver_node().get_type_const();
     auto   mask_spin = node.get_sink_pin("mask");
     if (mask_spin.is_connected()) {
       auto mask = mask_spin.get_driver_node().get_type_const();
-      replace_node(node, val.get_mask_op(mask));
+      replace_node(node, val->get_mask_op(mask));
     } else {
-      replace_node(node, val.get_mask_op());  // old tposs
+      replace_node(node, val->get_mask_op());  // old tposs
     }
   } else if (op == Ntype_op::Set_mask) {
-    Lconst val        = node.get_sink_pin("a").get_driver_node().get_type_const();
+    Const val        = node.get_sink_pin("a").get_driver_node().get_type_const();
     auto   mask_spin  = node.get_sink_pin("mask");
     auto   value_spin = node.get_sink_pin("value");
 
     if (mask_spin.is_connected() && value_spin.is_connected()) {
       auto mask  = mask_spin.get_driver_node().get_type_const();
       auto value = value_spin.get_driver_node().get_type_const();
-      replace_node(node, val.set_mask_op(mask, value));
+      replace_node(node, val->set_mask_op(mask, value));
     } else {
       replace_node(node, val);
     }
   } else if (op == Ntype_op::Sum) {
-    Lconst result;
+    Const result;
     for (auto& i : inp_edges_ordered) {
       auto c = i.driver.get_node().get_type_const();
       if (i.sink.get_pid() == 0) {
@@ -424,28 +424,28 @@ void Cprop::replace_all_inputs_const(Node& node, XEdge_iterator& inp_edges_order
       }
     }
 
-    TRACE(std::print("cprop: add node:{} to {}\n", node.debug_name(), result.to_pyrope()));
+    TRACE(std::print("cprop: add node:{} to {}\n", node.debug_name(), result->to_pyrope()));
 
     replace_node(node, result);
   } else if (op == Ntype_op::Or) {
-    Lconst result;
+    Const result;
     for (auto& e : inp_edges_ordered) {
       auto c = e.driver.get_node().get_type_const();
-      result = result.or_op(c);
+      result = result->or_op(c);
     }
 
-    TRACE(std::print("cprop: and node:{} to {}\n", node.debug_name(), result.to_pyrope()));
+    TRACE(std::print("cprop: and node:{} to {}\n", node.debug_name(), result->to_pyrope()));
 
     replace_logic_node(node, result);
 
   } else if (op == Ntype_op::And) {
-    Lconst result(-1);
+    Const result = Dlop::create_integer(-1);
     for (auto& i : inp_edges_ordered) {
       auto c = i.driver.get_node().get_type_const();
-      result = result.and_op(c);
+      result = result->and_op(c);
     }
 
-    TRACE(std::print("cprop: and node:{} to {}\n", node.debug_name(), result.to_pyrope()));
+    TRACE(std::print("cprop: and node:{} to {}\n", node.debug_name(), result->to_pyrope()));
 
     replace_node(node, result);
 
@@ -455,21 +455,21 @@ void Cprop::replace_all_inputs_const(Node& node, XEdge_iterator& inp_edges_order
     auto first = inp_edges_ordered[0].driver.get_node().get_type_const();
     for (auto i = 1u; i < inp_edges_ordered.size(); ++i) {
       auto c = inp_edges_ordered[i].driver.get_node().get_type_const();
-      eq     = eq && !first.eq_op(c).is_known_false();
+      eq     = eq && !first->eq_op(c)->is_known_false();
     }
 
-    Lconst result(eq ? 1 : 0);
+    Const result = Dlop::create_integer(eq ? 1 : 0);
 
-    TRACE(std::print("cprop: eq node:{} to {}\n", node.debug_name(), result.to_pyrope()));
+    TRACE(std::print("cprop: eq node:{} to {}\n", node.debug_name(), result->to_pyrope()));
 
     replace_node(node, result);
   } else if (op == Ntype_op::Mux) {
     auto sel_const = inp_edges_ordered[0].driver.get_node().get_type_const();
-    I(sel_const.is_i());  // string with ??? in mux? Give me test case to debug
+    I(sel_const->is_i());  // string with ??? in mux? Give me test case to debug
 
-    size_t sel = sel_const.to_i();
+    size_t sel = sel_const->to_i();
 
-    Lconst result;
+    Const result;
     for (auto& e : inp_edges_ordered) {
       if (e.sink.get_pid() == 0) {
         continue;  // ignore selector
@@ -482,7 +482,7 @@ void Cprop::replace_all_inputs_const(Node& node, XEdge_iterator& inp_edges_order
     }
 
     if (result.get_bits() == 0) {
-      result = Lconst(0);
+      result = Dlop::create_integer(0);
 #ifndef NDEBUG
       Pass::info("WARNING: mux:{} selector:{} goes for disconnected pin in mux. Using zero\n", node.debug_name(), sel);
 #endif
@@ -490,19 +490,19 @@ void Cprop::replace_all_inputs_const(Node& node, XEdge_iterator& inp_edges_order
 
     replace_node(node, result);
   } else if (op == Ntype_op::Mult) {
-    Lconst result(1);
+    Const result = Dlop::create_integer(1);
     for (auto& i : inp_edges_ordered) {
       auto c = i.driver.get_node().get_type_const();
-      result = result.mult_op(c);
+      result = result->mult_op(c);
     }
 
     replace_node(node, result);
   } else if (op == Ntype_op::Div) {
     I(inp_edges_ordered.size() == 2);
-    Lconst a = inp_edges_ordered[0].driver.get_type_const();
-    Lconst b = inp_edges_ordered[1].driver.get_type_const();
+    Const a = inp_edges_ordered[0].driver.get_type_const();
+    Const b = inp_edges_ordered[1].driver.get_type_const();
 
-    auto result = a.div_op(b);
+    auto result = a->div_op(b);
 
     replace_node(node, result);
   } else {
@@ -512,25 +512,25 @@ void Cprop::replace_all_inputs_const(Node& node, XEdge_iterator& inp_edges_order
   }
 }
 
-void Cprop::replace_node(Node& node, const Lconst& result) {
+void Cprop::replace_node(Node& node, const Const& result) {
   auto new_node = node.create_const(result);
   auto dpin     = new_node.get_driver_pin();
 
   for (auto& out : node.out_edges()) {
     if (dpin.get_bits() == out.driver.get_bits() || out.driver.get_bits() == 0) {
-      TRACE(std::print("cprop: const:{} to out.driver:{}\n", result.to_pyrope(), out.driver.debug_name()));
+      TRACE(std::print("cprop: const:{} to out.driver:{}\n", result->to_pyrope(), out.driver.debug_name()));
       dpin.connect_sink(out.sink);
     } else {
       // create new const node to preserve bits
-      auto result2 = result.adjust_bits(out.driver.get_bits());
+      auto result2 = result->adjust_bits(out.driver.get_bits());
 
       auto dpin2 = node.create_const(result2).get_driver_pin();
 
       TRACE(std::print("creating const:{} {}bits {}  from const:{} {}bits\n",
-                       result2.to_pyrope(),
+                       result2->to_pyrope(),
                        out.driver.get_bits(),
                        dpin2.get_bits(),
-                       result.to_pyrope(),
+                       result->to_pyrope(),
                        dpin.get_bits()));
 
       dpin2.connect_sink(out.sink);
@@ -541,7 +541,7 @@ void Cprop::replace_node(Node& node, const Lconst& result) {
   node.del_node();
 }
 
-void Cprop::replace_logic_node(Node& node, const Lconst& result) {
+void Cprop::replace_logic_node(Node& node, const Const& result) {
   Node_pin dpin_0;
 
   for (auto& out : node.out_edges()) {
@@ -622,7 +622,7 @@ std::tuple<std::string, std::string> Cprop::get_tuple_name_key(const Node& node)
   if (node.is_sink_connected("field")) {
     auto node2 = node.get_sink_pin("field").get_driver_node();
     if (node2.is_type_const()) {
-      key_name = node2.get_type_const().to_field();
+      key_name = node2.get_type_const()->to_field();
     }
   }
 
@@ -907,7 +907,7 @@ void Cprop::tuple_get_mask_mut(Node& node) {
       Node b_mask_node;
       if (!b_dpin.is_invalid()) {
         if (b_dpin.is_type_const()) {
-          auto v      = Lconst(0) - (Lconst(1) << b_dpin.get_type_const());
+          auto v      = Dlop::create_integer(0) - (Dlop::create_integer(1) << b_dpin.get_type_const());
           b_mask_node = node.create_const(v);
         } else {
           auto zero_dpin = node.create_const(0).setup_driver_pin();
@@ -928,7 +928,7 @@ void Cprop::tuple_get_mask_mut(Node& node) {
         if (e_dpin.is_type_const()) {
           auto e_val = e_dpin.get_type_const();
           if (e_val > 0) {
-            e_mask_node = node.create_const((Lconst(2) << e_val) - Lconst(1));  // 2 to avoid <<(e_val+1)
+            e_mask_node = node.create_const((Dlop::create_integer(2) << e_val) - Dlop::create_integer(1));  // 2 to avoid <<(e_val+1)
           }
         }
         if (e_mask_node.is_invalid()) {
@@ -947,7 +947,7 @@ void Cprop::tuple_get_mask_mut(Node& node) {
           lt_node.setup_sink_pin("B").connect_driver(zero_dpin);
 
           auto bits_node = node.create(Ntype_op::AttrGet);
-          bits_node.setup_sink_pin("field").connect_driver(node.create_const(Lconst::from_string("__sbits")));
+          bits_node.setup_sink_pin("field").connect_driver(node.create_const(Dlop::from_string("__sbits")));
           bits_node.setup_sink_pin("parent").connect_driver(a_spin.get_driver_pin());
 
           auto tmp_node = node.create(Ntype_op::Sum);
@@ -1041,10 +1041,10 @@ void Cprop::tuple_subgraph(const Node& node) {
                 }
 
                 auto v = e.second.get_type_const();
-                if (!v.is_i()) {
-                  Pass::error("Memory {} rdport:{} must be a constant bitmask (1 rd, 0 wr)", node.debug_name(), v.to_pyrope());
+                if (!v->is_i()) {
+                  Pass::error("Memory {} rdport:{} must be a constant bitmask (1 rd, 0 wr)", node.debug_name(), v->to_pyrope());
                 }
-                if (v.is_known_false()) {
+                if (v->is_known_false()) {
                   read_map.emplace_back(false);
                 } else {
                   read_map.emplace_back(true);
@@ -1328,7 +1328,7 @@ bool Cprop::handle_runtime_index(Node& ori_tg, const Node& field_node, const std
     new_tg.setup_driver_pin().connect_sink(mux_spin);
 
     auto new_tg_field_spin = new_tg.setup_sink_pin("field");
-    auto new_tg_field_dpin = ori_tg.create_const(Lconst::from_string(itr.first));
+    auto new_tg_field_dpin = ori_tg.create_const(Dlop::from_string(itr.first));
     new_tg_field_spin.connect_driver(new_tg_field_dpin);
 
     auto new_tg_parent_spin = new_tg.setup_sink_pin("parent");
@@ -1473,7 +1473,7 @@ void Cprop::tuple_attr_set(const Node& node) {
   auto field_spin = node.get_sink_pin("field");
   I(field_spin.is_connected());
 
-  auto attr_field = field_spin.get_driver_pin().get_type_const().to_field();
+  auto attr_field = field_spin.get_driver_pin().get_type_const()->to_field();
   I(Lgtuple::is_root_attribute(attr_field));  // AttrSet is only for root fields
 
   if (attr_field != "__dp_assign") {
@@ -1564,16 +1564,16 @@ bool Cprop::scalar_mux(Node& node, XEdge_iterator& inp_edges_ordered) {
   bool false_path_one  = false;
   if (inp_edges_ordered[1].driver.is_type_const()) {
     auto v          = inp_edges_ordered[1].driver.get_type_const();
-    false_path_zero = v == Lconst(0) || v.is_string();
-    false_path_one  = v == Lconst(-1);
+    false_path_zero = v == Dlop::create_integer(0) || v.is_string();
+    false_path_one  = v == Dlop::create_integer(-1);
   }
 
   bool true_path_zero = false;
   bool true_path_one  = false;
   if (inp_edges_ordered[2].driver.is_type_const()) {
     auto v         = inp_edges_ordered[2].driver.get_type_const();
-    true_path_zero = v == Lconst(0) || v.is_string();
-    true_path_one  = v == Lconst(-1);
+    true_path_zero = v == Dlop::create_integer(0) || v.is_string();
+    true_path_one  = v == Dlop::create_integer(-1);
   }
 
   bool false_path_sel = inp_edges_ordered[0].driver == inp_edges_ordered[1].driver;
@@ -1611,11 +1611,11 @@ void Cprop::scalar_sext(Node& node, XEdge_iterator& inp_edges_ordered) {
   int64_t self_pos;
   {
     auto v = pos_dpin.get_type_const();
-    if (!v.is_i()) {
+    if (!v->is_i()) {
       return;
     }
 
-    self_pos = v.to_i();
+    self_pos = v->to_i();
   }
 
   const auto& wire_dpin = inp_edges_ordered[0].driver;
@@ -1640,7 +1640,7 @@ void Cprop::scalar_sext(Node& node, XEdge_iterator& inp_edges_ordered) {
     return;
   }
 
-  auto parent_pos = parent_pos_dpin.get_type_const().to_i();
+  auto parent_pos = parent_pos_dpin.get_type_const()->to_i();
 
   auto b = std::min(self_pos, parent_pos);
   if (b != self_pos) {
@@ -1690,9 +1690,9 @@ void Cprop::reconnect_memory_port(Node& node, size_t n_ports, std::string_view f
 
     if (sub_tup == nullptr) {
       if (field == "enable") {
-        dpin = node.create_const(Lconst(1)).setup_driver_pin();  // all enabled by default
+        dpin = node.create_const(Dlop::create_integer(1)).setup_driver_pin();  // all enabled by default
       } else if (field == "din") {
-        dpin = node.create_const(Lconst(0)).setup_driver_pin();
+        dpin = node.create_const(Dlop::create_integer(0)).setup_driver_pin();
       } else {
         Pass::warn("could not find memory input tuple with field {}", field);
         tuple_issues = true;
@@ -1732,9 +1732,9 @@ void Cprop::reconnect_memory(Node& node, std::shared_ptr<Lgtuple const> tup) {
     if (field == "rdport") {
       ++n_ports;
       auto v = e.second.get_type_const();
-      I(v.is_i());
+      I(v->is_i());
 
-      if (v.is_known_false()) {
+      if (v->is_known_false()) {
         read_map.emplace_back(false);
       } else {
         read_map.emplace_back(true);
@@ -1757,7 +1757,7 @@ void Cprop::reconnect_memory(Node& node, std::shared_ptr<Lgtuple const> tup) {
     return;
   }
 
-  auto type_val = type_dpin.get_node().get_type_const().to_i();
+  auto type_val = type_dpin.get_node().get_type_const()->to_i();
   if (n_clocks == 0) {
     if (type_val != 2) {
       connect_clock_pin_if_needed(node);
@@ -1995,7 +1995,7 @@ void Cprop::reconnect_tuple_add(Node& node) {
   if (!pos_spin.is_invalid()) {
     auto pos_dpin = pos_spin.get_driver_pin();
     if (pos_dpin.is_type_const()) {
-      auto field = pos_dpin.get_type_const().to_field();
+      auto field = pos_dpin.get_type_const()->to_field();
       if (Lgtuple::is_root_attribute(field)) {
         if (!Ntype::has_sink(Ntype_op::Flop, field.substr(2)) && field != "__fdef") {
           node.set_type(Ntype_op::AttrSet);
@@ -2122,7 +2122,7 @@ Node_pin Cprop::expand_data_and_attributes(Node& node, std::string_view key_name
     auto av_spin   = attr_node.setup_sink_pin("value");
 
     // auto attr_key_node = node.create_const(Lconst::string(attr));
-    auto attr_key_node = node.create_const(Lconst::from_string(attr));
+    auto attr_key_node = node.create_const(Dlop::from_string(attr));
     auto attr_key_dpin = attr_key_node.setup_driver_pin();
     attr_key_dpin.connect_sink(af_spin);
 
@@ -2207,11 +2207,11 @@ Node_pin Cprop::try_find_single_driver_pin(Node& node, int pos) {
     return invalid_pin;
   }
 
-  auto [range_begin, range_end] = mask_node.get_type_const().get_mask_range();
+  auto [range_begin, range_end] = mask_node.get_type_const()->get_mask_range();
   if (pos >= range_end || pos < range_begin) {
     auto a_node = a_spin.get_driver_node();
     if (a_node.is_type_const()) {
-      auto v = a_node.get_type_const().get_mask_op(Lconst::get_mask_value(pos));
+      auto v = a_node.get_type_const()->get_mask_op(Dlop::get_mask_value(pos));
       return node.create_const(v).get_driver_pin();
     }
     if (!a_node.is_type(Ntype_op::Set_mask)) {
@@ -2251,7 +2251,7 @@ bool Cprop::scalar_get_mask(Node& node) {
     return false;
   }
 
-  auto [range_begin, range_end] = mask_node.get_type_const().get_mask_range();
+  auto [range_begin, range_end] = mask_node.get_type_const()->get_mask_range();
 
   if ((range_begin + 1) != range_end) {
     return false;
@@ -2574,7 +2574,7 @@ void Cprop::try_create_graph_output(Node& node, const std::shared_ptr<Lgtuple co
     if (tup->has_dpin(full_attr_name)) {
       auto bits_dpin = tup->get_dpin(full_attr_name);
       if (!bits_dpin.is_invalid()) {
-        bits = bits_dpin.get_type_const().to_i();
+        bits = bits_dpin.get_type_const()->to_i();
         if (bits < 0) {
           continue;
         }

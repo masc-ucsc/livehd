@@ -30,7 +30,7 @@
 #include <string>
 #include <string_view>
 
-#include "lconst.hpp"
+#include "const.hpp"
 #include "upass_attributes.hpp"
 
 void uPass_attributes::migrate_aggregate_attrs_to_fields(std::string_view base) {
@@ -60,7 +60,7 @@ void uPass_attributes::migrate_aggregate_attrs_to_fields(std::string_view base) 
   auto src_it = shape_source.find(std::string{base});
   const std::string src_base = (src_it != shape_source.end()) ? src_it->second : std::string{};
 
-  auto field_override = [&](const std::string& key, const std::string& attr_name) -> std::optional<Lconst> {
+  auto field_override = [&](const std::string& key, const std::string& attr_name) -> std::optional<Const> {
     if (src_base.empty()) {
       return std::nullopt;
     }
@@ -87,7 +87,7 @@ void uPass_attributes::migrate_aggregate_attrs_to_fields(std::string_view base) 
       }
       // Resolve the value to write: a per-field override on the source-tmp
       // wins; otherwise the aggregate's value flows down.
-      Lconst chosen_value = attr_value;
+      Const chosen_value = attr_value;
       if (auto ov_named = field_override(key, attr_name); ov_named) {
         chosen_value = *ov_named;
       } else if (!f.positional.empty() && f.positional != key) {

@@ -1737,7 +1737,7 @@ Lnast_node Prp2lnast::expr_to_node(TSNode n) {
     // Double-quoted string. When there are no `{expr}` interpolations, the
     // named-child list is empty (only the outer quote tokens, which are
     // anonymous), so re-emit the body as a single-quoted pyrope string
-    // literal so `Lconst::from_pyrope` can round-trip it as a string.
+    // literal so `Dlop::from_pyrope` can round-trip it as a string.
     bool has_interp = ts_node_named_child_count(n) > 0;
     if (!has_interp) {
       auto body = text_between(ts_node_start_byte(n) + 1, ts_node_end_byte(n) - 1);
@@ -2635,11 +2635,11 @@ Lnast_node Prp2lnast::bit_selection_to_node(TSNode n) {
   TSNode type_node = child_by_field(n, "reduction");
 
   auto make_const_mask = [](std::string_view text) -> std::optional<Lnast_node> {
-    auto v = Lconst::from_pyrope(text);
-    if (v.is_invalid() || !v.is_i()) {
+    auto v = Dlop::from_pyrope(text);
+    if (v.is_invalid() || !v->is_i()) {
       return std::nullopt;
     }
-    return Lnast_node::create_const(Lconst::get_mask_value(static_cast<Bits_t>(v.to_i())).to_pyrope());
+    return Lnast_node::create_const(Dlop::get_mask_value(static_cast<Bits_t>(v->to_i()))->to_pyrope());
   };
 
   auto make_range_mask = [&](TSNode expr_item) -> std::optional<Lnast_node> {
@@ -2659,14 +2659,14 @@ Lnast_node Prp2lnast::bit_selection_to_node(TSNode n) {
       return std::nullopt;
     }
 
-    auto lo_v = Lconst::from_pyrope(get_text(lo));
-    auto hi_v = Lconst::from_pyrope(get_text(hi));
-    if (lo_v.is_invalid() || hi_v.is_invalid() || !lo_v.is_i() || !hi_v.is_i()) {
+    auto lo_v = Dlop::from_pyrope(get_text(lo));
+    auto hi_v = Dlop::from_pyrope(get_text(hi));
+    if (lo_v.is_invalid() || hi_v.is_invalid() || !lo_v->is_i() || !hi_v->is_i()) {
       return std::nullopt;
     }
 
     return Lnast_node::create_const(
-        Lconst::get_mask_value(static_cast<Bits_t>(hi_v.to_i()), static_cast<Bits_t>(lo_v.to_i())).to_pyrope());
+        Dlop::get_mask_value(static_cast<Bits_t>(hi_v->to_i()), static_cast<Bits_t>(lo_v->to_i()))->to_pyrope());
   };
 
   auto make_dynamic_mask = [&](TSNode expr) {
@@ -2814,7 +2814,7 @@ Lnast_node Prp2lnast::member_selection_to_node(TSNode n) {
       TSNode open_from = ts_node_child_by_field_name(range, "open_from", 9);
       TSNode fz_incl   = ts_node_child_by_field_name(range, "from_zero_inclusive", 19);
       TSNode fz_excl   = ts_node_child_by_field_name(range, "from_zero_exclusive", 19);
-      // `nil` is the open-end sentinel — round-trips through Lconst as a
+      // `nil` is the open-end sentinel — round-trips through Const as a
       // string and is recognised by process_tuple_get as "slice to source's
       // last index". Using a real value here would falsely truncate.
       if (!ts_node_is_null(open_all)) {

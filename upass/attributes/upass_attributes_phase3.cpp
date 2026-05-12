@@ -26,7 +26,7 @@
 #include <utility>
 #include <vector>
 
-#include "lconst.hpp"
+#include "const.hpp"
 #include "lnast_ntype.hpp"
 #include "upass_attributes.hpp"
 
@@ -43,15 +43,15 @@ bool is_uppercase_first(std::string_view s) {
   return !s.empty() && std::isupper(static_cast<unsigned char>(s.front())) != 0;
 }
 
-// String-quote helper: Lconst::from_pyrope expects strings with surrounding
-// single quotes. Build an Lconst from a raw identifier text.
-Lconst pyrope_string(std::string_view raw) {
+// String-quote helper: Dlop::from_pyrope expects strings with surrounding
+// single quotes. Build an Const from a raw identifier text.
+Const pyrope_string(std::string_view raw) {
   std::string s;
   s.reserve(raw.size() + 2);
   s.push_back('\'');
   s.append(raw.data(), raw.size());
   s.push_back('\'');
-  return Lconst::from_pyrope(s);
+  return Dlop::from_pyrope(s);
 }
 
 }  // namespace
@@ -282,14 +282,14 @@ void uPass_attributes::process_tuple_get() {
   }
 }
 
-std::optional<Lconst> uPass_attributes::derive_aggregate_size(std::string_view base) const {
+std::optional<Const> uPass_attributes::derive_aggregate_size(std::string_view base) const {
   if (auto* sh = lookup_tuple_shape(base); sh) {
-    return Lconst(static_cast<int64_t>(sh->fields.size()));
+    return Dlop::create_integer(static_cast<int64_t>(sh->fields.size()));
   }
   // Aliased through `assign foo bar` where bar is shaped.
   if (auto it = shape_source.find(std::string{base}); it != shape_source.end()) {
     if (auto* sh = lookup_tuple_shape(it->second); sh) {
-      return Lconst(static_cast<int64_t>(sh->fields.size()));
+      return Dlop::create_integer(static_cast<int64_t>(sh->fields.size()));
     }
   }
   // Range-typed: size = end - start + 1 (closed); end - start (open). Range
@@ -301,17 +301,17 @@ std::optional<Lconst> uPass_attributes::derive_aggregate_size(std::string_view b
     range_key = it->second;
   }
   if (auto rb = lookup_range(range_key); rb) {
-    if (rb->first.is_i() && rb->second.is_i()) {
-      const auto sz = rb->second.to_i() - rb->first.to_i() + 1;
+    if (rb->first->is_i() && rb->second->is_i()) {
+      const auto sz = rb->second->to_i() - rb->first->to_i() + 1;
       if (sz > 0) {
-        return Lconst(static_cast<int64_t>(sz));
+        return Dlop::create_integer(static_cast<int64_t>(sz));
       }
     }
   }
   return std::nullopt;
 }
 
-std::optional<Lconst> uPass_attributes::derive_aggregate_bits(std::string_view base) const {
+std::optional<Const> uPass_attributes::derive_aggregate_bits(std::string_view base) const {
   const Tuple_shape* sh = lookup_tuple_shape(base);
   std::string        bits_base{base};
   if (!sh) {
@@ -350,10 +350,10 @@ std::optional<Lconst> uPass_attributes::derive_aggregate_bits(std::string_view b
     }
     total += bits->to_i();
   }
-  return Lconst(total);
+  return Dlop::create_integer(total);
 }
 
-std::optional<Lconst> uPass_attributes::derive_aggregate_typename(std::string_view base, std::string_view base_text) const {
+std::optional<Const> uPass_attributes::derive_aggregate_typename(std::string_view base, std::string_view base_text) const {
   // Explicit attr wins.
   if (auto v = lookup_attr_value(base, "typename"); v) {
     return v;
@@ -365,7 +365,7 @@ std::optional<Lconst> uPass_attributes::derive_aggregate_typename(std::string_vi
   return std::nullopt;
 }
 
-std::optional<Lconst> uPass_attributes::derive_aggregate_key(std::string_view base, std::string_view base_text) const {
+std::optional<Const> uPass_attributes::derive_aggregate_key(std::string_view base, std::string_view base_text) const {
   (void)base_text;
   // For an aggregate read on `var`, [key] returns the variable's own name.
   if (!base.empty()) {
@@ -374,7 +374,7 @@ std::optional<Lconst> uPass_attributes::derive_aggregate_key(std::string_view ba
   return std::nullopt;
 }
 
-std::optional<Lconst> uPass_attributes::lookup_attr_with_inheritance(std::string_view base, std::string_view attr) const {
+std::optional<Const> uPass_attributes::lookup_attr_with_inheritance(std::string_view base, std::string_view attr) const {
   // Direct lookup first.
   if (auto v = lookup_attr_value(base, attr); v) {
     return v;

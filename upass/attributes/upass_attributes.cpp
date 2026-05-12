@@ -119,7 +119,7 @@ void uPass_attributes::on_assign_like(bool is_assign_node) {
   // is an explicit invalidation per spec and is not counted as a binding.
   // Detect by checking the single rhs ref or const text.
   bool                  rhs_is_nil = false;
-  std::optional<Lconst> rhs_value;  // direct LNAST-source value, when scalar
+  std::optional<Const> rhs_value;  // direct LNAST-source value, when scalar
   if (is_assign_node) {
     move_to_child();
     if (move_to_sibling()) {
@@ -128,7 +128,7 @@ void uPass_attributes::on_assign_like(bool is_assign_node) {
         rhs_is_nil = true;
       }
       if (Lnast_ntype::is_const(get_raw_ntype())) {
-        auto v = Lconst::from_pyrope(txt);
+        auto v = Dlop::from_pyrope(txt);
         if (!v.is_invalid()) {
           rhs_value = v;
         }
@@ -155,7 +155,7 @@ void uPass_attributes::on_assign_like(bool is_assign_node) {
     tmp_fold.erase(view.lhs);
   }
   if (rhs_value && !view.lhs.empty() && (has_wrap_policy(view.lhs) || has_sat_policy(view.lhs))) {
-    Lconst out = narrow_for_lhs(view.lhs, *rhs_value);
+    Const out = narrow_for_lhs(view.lhs, *rhs_value);
     if (!out.is_invalid()) {
       auto [iter, inserted] = tmp_fold.emplace(view.lhs, out);
       if (!inserted && iter->second != out) {
@@ -314,18 +314,18 @@ void uPass_attributes::process_attr_set() {
       }
       // Still record the explicit value (true/false) so a `.[comptime]`
       // read returns the explicit answer.
-      attr_set_values[target][attr_name] = (value_text == "false" || value_text == "0") ? Lconst(0) : Lconst(1);
+      attr_set_values[target][attr_name] = (value_text == "false" || value_text == "0") ? Dlop::create_integer(0) : Dlop::create_integer(1);
     } else if ((attr_name == "ubits" || attr_name == "sbits") && !value_is_ref) {
       // Phase 5 — `[ubits=N]` / `[sbits=N]` are alternative type-info entry
       // points (the user wrote `mut x::[ubits=12] = 0` rather than
       // `mut x:u12 = 0`). Mirror them into type_info_map so wrap/sat
-      // narrowing has a width to clamp against. Lconst::from_pyrope on a
-      // numeric literal yields a foldable Lconst whose to_i fits in
+      // narrowing has a width to clamp against. Dlop::from_pyrope on a
+      // numeric literal yields a foldable Const whose to_i fits in
       // uint32_t for any realistic bit width.
-      auto v = Lconst::from_pyrope(value_text);
-      if (v.is_i()) {
+      auto v = Dlop::from_pyrope(value_text);
+      if (v->is_i()) {
         auto& ti = type_info_map[target];
-        ti.bits  = static_cast<uint32_t>(v.to_i());
+        ti.bits  = static_cast<uint32_t>(v->to_i());
         if (attr_name == "ubits") {
           ti.kind = Numeric_kind::unsigned_int;
         } else {
@@ -338,11 +338,11 @@ void uPass_attributes::process_attr_set() {
       // stored separately so derive_max can chain through range_bounds.
       attr_set_refs[target][attr_name] = normalize_name(value_text);
     } else {
-      Lconst stored;
+      Const stored;
       if (value_text.empty() || value_text == "true") {
-        stored = Lconst(1);
+        stored = Dlop::create_integer(1);
       } else {
-        stored = Lconst::from_pyrope(value_text);
+        stored = Dlop::from_pyrope(value_text);
       }
       if (!stored.is_invalid()) {
         attr_set_values[target][attr_name] = stored;

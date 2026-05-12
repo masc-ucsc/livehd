@@ -11,7 +11,7 @@
 #include "explicit_type.hpp"
 #include "graph_sizing.hpp"
 #include "iassert.hpp"
-#include "lconst.hpp"
+#include "const.hpp"
 #include "likely.hpp"
 
 using Lg_id_t = uint32_t;

@@ -69,13 +69,13 @@ upass::Emit_decision uPass_verifier::classify_statement() {
   // Cassert has a single child — a ref or a const (post-Slice-1 fold).
   // Resolve it through the runner's aggregated fold_ref so we see whatever
   // constprop (or any future pass) knows.
-  std::optional<Lconst> val;
+  std::optional<Const> val;
   std::string           operand_text;
   bool                  got_child = move_to_child();
   if (got_child) {
     operand_text = std::string{current_text()};
     if (is_type(Lnast_ntype::Lnast_ntype_const)) {
-      val = Lconst::from_pyrope(current_text());
+      val = Dlop::from_pyrope(current_text());
     } else if (is_type(Lnast_ntype::Lnast_ntype_ref) && runner_fold_fn) {
       val = runner_fold_fn(current_text());
     }

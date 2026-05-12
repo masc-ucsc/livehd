@@ -4,14 +4,14 @@
 //
 // Implements the rules from attribute_todo.md §Phase 2:
 //   * presence-only attr_set stores boolean true; explicit values
-//     (including `false`) round-trip as the explicit Lconst.
+//     (including `false`) round-trip as the explicit Const.
 //   * .[bits]/.[ubits]/.[sbits]/.[max]/.[min] derive from the base value or
 //     declared type when no explicit attr is on the side-map.
 //   * .[size] returns the field count (1 for scalars; aggregate cases are
 //     Phase 3's job).
 //   * .[comptime] resolves true iff the base value (or declaration) is
 //     comptime-known.
-//   * unset ordinary reads return Lconst::nil().
+//   * unset ordinary reads return Dlop::nil().
 //
 // The evaluator writes every successful fold to `tmp_fold` so the override
 // of `fold_ref` substitutes the value at every downstream consumer.
@@ -24,7 +24,7 @@
 #include <utility>
 
 #include "boost/multiprecision/cpp_int.hpp"
-#include "lconst.hpp"
+#include "const.hpp"
 #include "lnast_ntype.hpp"
 #include "upass_attributes.hpp"
 #include "upass_attributes_sticky.hpp"
@@ -40,9 +40,9 @@ bool is_uppercase_ident(std::string_view name) {
 
 // Lconst::get_bits stores SIGNED width — fine for negative values, but
 // the spec wants `.[bits]` on a positive literal to be the unsigned width
-// (so `100 → 7`, not `8`). Special-case 0 and -1 per Lconst's own contract.
-uint32_t bits_natural(const Lconst& v) {
-  if (v.is_nil() || v.is_invalid() || v.is_string() || v.has_unknowns()) {
+// (so `100 → 7`, not `8`). Special-case 0 and -1 per Const's own contract.
+uint32_t bits_natural(const Const& v) {
+  if (v->is_nil() || v.is_invalid() || v.is_string() || v->has_unknowns()) {
     return 0;
   }
   if (v == 0) {
@@ -51,7 +51,7 @@ uint32_t bits_natural(const Lconst& v) {
   if (v == -1) {
     return 1;
   }
-  if (v.is_negative()) {
+  if (v->is_negative()) {
     return v.get_bits();
   }
   // Non-negative: minimal unsigned width. get_bits is signed-style (msb+2),
@@ -60,8 +60,8 @@ uint32_t bits_natural(const Lconst& v) {
   return sb >= 1 ? sb - 1 : 0;
 }
 
-uint32_t bits_unsigned(const Lconst& v) {
-  if (v.is_nil() || v.is_invalid() || v.is_string() || v.has_unknowns() || v.is_negative()) {
+uint32_t bits_unsigned(const Const& v) {
+  if (v->is_nil() || v.is_invalid() || v.is_string() || v->has_unknowns() || v->is_negative()) {
     return 0;
   }
   if (v == 0) {
@@ -71,8 +71,8 @@ uint32_t bits_unsigned(const Lconst& v) {
   return sb >= 1 ? sb - 1 : 0;
 }
 
-uint32_t bits_signed(const Lconst& v) {
-  if (v.is_nil() || v.is_invalid() || v.is_string() || v.has_unknowns()) {
+uint32_t bits_signed(const Const& v) {
+  if (v->is_nil() || v.is_invalid() || v.is_string() || v->has_unknowns()) {
     return 0;
   }
   return v.get_bits();
@@ -80,33 +80,30 @@ uint32_t bits_signed(const Lconst& v) {
 
 // max/min for an unsigned type with `n` bits. n==0 means "unbounded" — the
 // caller should treat that as "no derivation possible".
-Lconst max_unsigned(uint32_t n) {
-  using Number = boost::multiprecision::cpp_int;
+Const max_unsigned(uint32_t n) {
   if (n == 0) {
-    return Lconst(0);
+    return Dlop::create_integer(0);
   }
-  return Lconst((Number(1) << n) - 1);
+  return Dlop::get_mask_value(n);
 }
 
-Lconst max_signed(uint32_t n) {
-  using Number = boost::multiprecision::cpp_int;
+Const max_signed(uint32_t n) {
   if (n == 0) {
-    return Lconst(0);
+    return Dlop::create_integer(0);
   }
-  return Lconst((Number(1) << (n - 1)) - 1);
+  return Dlop::get_mask_value(n - 1);
 }
 
-Lconst min_signed(uint32_t n) {
-  using Number = boost::multiprecision::cpp_int;
+Const min_signed(uint32_t n) {
   if (n == 0) {
-    return Lconst(0);
+    return Dlop::create_integer(0);
   }
-  return Lconst(-(Number(1) << (n - 1)));
+  return Dlop::get_neg_mask_value(n - 1);
 }
 
 }  // namespace
 
-std::optional<Lconst> uPass_attributes::lookup_attr_value(std::string_view var, std::string_view attr) const {
+std::optional<Const> uPass_attributes::lookup_attr_value(std::string_view var, std::string_view attr) const {
   auto it = attr_set_values.find(std::string{var});
   if (it == attr_set_values.end()) {
     return std::nullopt;
@@ -126,7 +123,7 @@ const uPass_attributes::Type_info* uPass_attributes::lookup_type_info(std::strin
   return &it->second;
 }
 
-std::optional<std::pair<Lconst, Lconst>> uPass_attributes::lookup_range(std::string_view tmp) const {
+std::optional<std::pair<Const, Const>> uPass_attributes::lookup_range(std::string_view tmp) const {
   auto it = range_bounds.find(std::string{tmp});
   if (it == range_bounds.end()) {
     return std::nullopt;
@@ -146,7 +143,7 @@ std::optional<std::string> uPass_attributes::lookup_attr_ref(std::string_view va
   return ait->second;
 }
 
-std::optional<Lconst> uPass_attributes::resolve_value(std::string_view var) const {
+std::optional<Const> uPass_attributes::resolve_value(std::string_view var) const {
   // Prefer the runner's aggregate fold (constprop's symbol table is the
   // primary source). Fall back to our own tmp_fold for refs that only this
   // pass knows about (e.g. chained attr_get→attr_get).
@@ -163,7 +160,7 @@ std::optional<Lconst> uPass_attributes::resolve_value(std::string_view var) cons
   return std::nullopt;
 }
 
-std::optional<Lconst> uPass_attributes::derive_max(std::string_view base) const {
+std::optional<Const> uPass_attributes::derive_max(std::string_view base) const {
   // Explicit attr wins.
   if (auto v = lookup_attr_value(base, "max"); v) {
     return v;
@@ -171,7 +168,7 @@ std::optional<Lconst> uPass_attributes::derive_max(std::string_view base) const 
   // `range` lowering: an attr_set(var, "range", tmp) recorded the tmp ref
   // text; pair with range_bounds to materialize max.
   if (auto tmp = lookup_attr_ref(base, "range"); tmp) {
-    if (auto rb = lookup_range(*tmp); rb && rb->second.is_i()) {
+    if (auto rb = lookup_range(*tmp); rb && rb->second->is_i()) {
       return rb->second;
     }
   }
@@ -195,18 +192,18 @@ std::optional<Lconst> uPass_attributes::derive_max(std::string_view base) const 
   return std::nullopt;
 }
 
-std::optional<Lconst> uPass_attributes::derive_min(std::string_view base) const {
+std::optional<Const> uPass_attributes::derive_min(std::string_view base) const {
   if (auto v = lookup_attr_value(base, "min"); v) {
     return v;
   }
   if (auto tmp = lookup_attr_ref(base, "range"); tmp) {
-    if (auto rb = lookup_range(*tmp); rb && rb->first.is_i()) {
+    if (auto rb = lookup_range(*tmp); rb && rb->first->is_i()) {
       return rb->first;
     }
   }
   if (auto* ti = lookup_type_info(base); ti && ti->bits != 0) {
     if (ti->kind == Numeric_kind::unsigned_int) {
-      return Lconst(0);
+      return Dlop::create_integer(0);
     }
     if (ti->kind == Numeric_kind::signed_int) {
       return min_signed(ti->bits);
@@ -216,12 +213,12 @@ std::optional<Lconst> uPass_attributes::derive_min(std::string_view base) const 
     if (v->is_negative()) {
       return min_signed(bits_signed(*v));
     }
-    return Lconst(0);
+    return Dlop::create_integer(0);
   }
   return std::nullopt;
 }
 
-std::optional<Lconst> uPass_attributes::derive_bits(std::string_view base, std::string_view variant) const {
+std::optional<Const> uPass_attributes::derive_bits(std::string_view base, std::string_view variant) const {
   auto v = resolve_value(base);
   if (!v) {
     return std::nullopt;
@@ -237,39 +234,39 @@ std::optional<Lconst> uPass_attributes::derive_bits(std::string_view base, std::
   return Lconst(static_cast<int64_t>(bits_natural(*v)));
 }
 
-std::optional<Lconst> uPass_attributes::derive_comptime(std::string_view base, std::string_view base_text) const {
+std::optional<Const> uPass_attributes::derive_comptime(std::string_view base, std::string_view base_text) const {
   // Explicit attr wins (attr_set "comptime" true/false from prp2lnast or
   // user code).
   if (auto v = lookup_attr_value(base, "comptime"); v) {
-    return *v == 0 ? Lconst(0) : Lconst(1);
+    return *v == 0 ? Dlop::create_integer(0) : Dlop::create_integer(1);
   }
   if (auto* ti = lookup_type_info(base); ti && ti->is_comptime) {
-    return Lconst(1);
+    return Dlop::create_integer(1);
   }
   // Uppercase identifier → implicit comptime (per spec).
   if (is_uppercase_ident(base_text) || is_uppercase_ident(base)) {
     if (resolve_value(base).has_value()) {
-      return Lconst(1);
+      return Dlop::create_integer(1);
     }
   }
   // const declarations are comptime when their value is known.
   if (auto* ti = lookup_type_info(base); ti && ti->decl == Decl_kind::const_kind) {
     if (resolve_value(base).has_value()) {
-      return Lconst(1);
+      return Dlop::create_integer(1);
     }
   }
   // Fallback: any value that constprop has fully resolved is comptime.
   if (resolve_value(base).has_value()) {
-    return Lconst(1);
+    return Dlop::create_integer(1);
   }
-  return Lconst(0);
+  return Dlop::create_integer(0);
 }
 
 void uPass_attributes::evaluate_attr_get(std::string_view dst, std::string_view base_text, std::string_view base,
                                          std::string_view attr) {
-  std::optional<Lconst> result;
+  std::optional<Const> result;
 
-  // Sticky bucket presence — `_*` and `debug` reads return Lconst(1) when
+  // Sticky bucket presence — `_*` and `debug` reads return Dlop::create_integer(1) when
   // the variable has acquired the bucket. When unmarked, fall through to
   // the explicit-set lookup so an `x::[debug=false]` read returns the
   // false (not nil); only when nothing explicit nor sticky is recorded do
@@ -285,7 +282,7 @@ void uPass_attributes::evaluate_attr_get(std::string_view dst, std::string_view 
         if (auto explicit_val = lookup_attr_value(base, attr); explicit_val) {
           result = *explicit_val;
         } else {
-          result = Lconst(1);
+          result = Dlop::create_integer(1);
         }
       }
     }
@@ -312,7 +309,7 @@ void uPass_attributes::evaluate_attr_get(std::string_view dst, std::string_view 
       // value is known.
       result = derive_aggregate_size(base);
       if (!result && resolve_value(base).has_value()) {
-        result = Lconst(1);
+        result = Dlop::create_integer(1);
       }
     } else if (attr == "comptime") {
       result = derive_comptime(base, base_text);
@@ -326,9 +323,9 @@ void uPass_attributes::evaluate_attr_get(std::string_view dst, std::string_view 
       if (auto v = lookup_attr_value(base, attr); v) {
         result = *v;
       } else if (has_wrap_policy(base)) {
-        result = Lconst(1);
+        result = Dlop::create_integer(1);
       } else {
-        result = Lconst::nil();
+        result = Dlop::nil();
       }
     } else if (attr == "saturate" || attr == "sat") {
       // `sat` is shorthand for `saturate`; both names alias to the same
@@ -340,9 +337,9 @@ void uPass_attributes::evaluate_attr_get(std::string_view dst, std::string_view 
       if (v) {
         result = *v;
       } else if (has_sat_policy(base)) {
-        result = Lconst(1);
+        result = Dlop::create_integer(1);
       } else {
-        result = Lconst::nil();
+        result = Dlop::nil();
       }
     } else if (attr == "typename") {
       result = derive_aggregate_typename(base, base_text);
@@ -350,7 +347,7 @@ void uPass_attributes::evaluate_attr_get(std::string_view dst, std::string_view 
       // `.[key]` on a tuple_get tmp returns the source field's name; on a
       // bare aggregate it returns the aggregate's own name.
       if (auto* a = lookup_get_alias(base); a && !a->field_name.empty()) {
-        result = Lconst::from_pyrope(std::string{"\'"} + a->field_name + "\'");
+        result = Dlop::from_pyrope(std::string{"\'"} + a->field_name + "\'");
       } else {
         result = derive_aggregate_key(base, base_text);
       }
@@ -376,7 +373,7 @@ void uPass_attributes::evaluate_attr_get(std::string_view dst, std::string_view 
   // later iteration of the runner can still produce a value.
   if (!result) {
     if (sticky_pattern || !is_builtin_attr(attr)) {
-      result = Lconst::nil();
+      result = Dlop::nil();
     } else {
       return;
     }
@@ -391,7 +388,7 @@ void uPass_attributes::evaluate_attr_get(std::string_view dst, std::string_view 
   }
 }
 
-std::optional<Lconst> uPass_attributes::fold_ref(std::string_view name) {
+std::optional<Const> uPass_attributes::fold_ref(std::string_view name) {
   auto it = tmp_fold.find(std::string{name});
   if (it == tmp_fold.end()) {
     return std::nullopt;
@@ -434,9 +431,9 @@ void uPass_attributes::process_type_spec() {
       // The width const is a child of the prim_type_* node.
       if (move_to_child()) {
         if (Lnast_ntype::is_const(get_raw_ntype())) {
-          auto v = Lconst::from_pyrope(current_text());
-          if (v.is_i()) {
-            bits = static_cast<uint32_t>(v.to_i());
+          auto v = Dlop::from_pyrope(current_text());
+          if (v->is_i()) {
+            bits = static_cast<uint32_t>(v->to_i());
           }
         }
         move_to_parent();
@@ -471,9 +468,9 @@ void uPass_attributes::process_range() {
   // Resolve start/end opportunistically. Refs (e.g. comptime symbol) need
   // to be looked up via runner_fold_fn since this pass doesn't track its
   // own scalar table.
-  auto read_value = [this]() -> Lconst {
+  auto read_value = [this]() -> Const {
     if (Lnast_ntype::is_const(get_raw_ntype())) {
-      return Lconst::from_pyrope(current_text());
+      return Dlop::from_pyrope(current_text());
     }
     if (Lnast_ntype::is_ref(get_raw_ntype()) && runner_fold_fn) {
       auto v = runner_fold_fn(current_text());
@@ -481,14 +478,14 @@ void uPass_attributes::process_range() {
         return *v;
       }
     }
-    return Lconst::invalid();
+    return Dlop::invalid();
   };
-  Lconst start = read_value();
+  Const start = read_value();
   if (!move_to_sibling()) {
     move_to_parent();
     return;
   }
-  Lconst end = read_value();
+  Const end = read_value();
   move_to_parent();
 
   if (start.is_invalid() || end.is_invalid()) {
