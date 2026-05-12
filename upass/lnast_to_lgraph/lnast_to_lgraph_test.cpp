@@ -11,6 +11,7 @@
 #include "lgedgeiter.hpp"
 #include "lgraph.hpp"
 #include "lnast.hpp"
+#include "upass_ssa.hpp"
 
 namespace {
 
@@ -491,4 +492,98 @@ TEST(LnastToLgraph, FuncDefTrivialXor) {
   // No spurious Sum/Mux nodes from func_def scaffolding.
   EXPECT_EQ(count_op(lg, Ntype_op::Sum), 0);
   EXPECT_EQ(count_op(lg, Ntype_op::Mux), 0);
+}
+
+// ── Test 14: SSA renaming — multi-assigned user variable ──────────────────────
+// Verifies that uPass_ssa::run() correctly renames a variable assigned twice
+// in straight-line code, and that the resulting LNAST lowers cleanly to LGraph.
+//
+// Source (conceptual Pyrope):
+//   comb f(a:u4, b:u4) -> (c:u4) {
+//     t = a + b      // first assignment
+//     t = t + 1      // second assignment → renamed t___ssa_1 after SSA
+//     c = t          // reads t___ssa_1
+//   }
+//
+// Expected LGraph: 2 Sum nodes (one per addition), inputs a & b, output c.
+// The SSA rename ensures the second plus uses the result of the first, not
+// a fresh graph input.
+TEST(LnastToLgraph, SsaRenameMultiAssign) {
+  // Build post-func_extract LNAST:
+  //   top → io(ref __input_tuple_ref, ref __output_tuple_ref)
+  //        → stmts(
+  //            tuple_add(__input_tuple_ref){ assign(a,nil), assign(b,nil) }
+  //            tuple_add(__output_tuple_ref){ assign(c,nil) }
+  //            plus(t, a, b)         // t = a + b
+  //            plus(t, t, 1)         // t = t + 1  (multi-assign → gets renamed)
+  //            assign(c, t)          // c = t      (reads renamed t)
+  //          )
+  auto ln   = std::make_shared<Lnast>("ssa_multiassign");
+  auto root = ln->set_root(Lnast_ntype::create_top());
+
+  auto io = ln->add_child(root, Lnast_ntype::create_io());
+  ln->add_child(io, Lnast_node::create_ref("__input_tuple_ref"));
+  ln->add_child(io, Lnast_node::create_ref("__output_tuple_ref"));
+
+  auto stmts = ln->add_child(root, Lnast_ntype::create_stmts());
+
+  // Inputs tuple_add
+  auto in_ta = ln->add_child(stmts, Lnast_ntype::create_tuple_add());
+  ln->add_child(in_ta, Lnast_node::create_ref("__input_tuple_ref"));
+  auto ai_a = ln->add_child(in_ta, Lnast_ntype::create_assign());
+  ln->add_child(ai_a, Lnast_node::create_ref("a"));
+  ln->add_child(ai_a, Lnast_node::create_const("nil"));
+  auto ai_b = ln->add_child(in_ta, Lnast_ntype::create_assign());
+  ln->add_child(ai_b, Lnast_node::create_ref("b"));
+  ln->add_child(ai_b, Lnast_node::create_const("nil"));
+
+  // Outputs tuple_add
+  auto out_ta = ln->add_child(stmts, Lnast_ntype::create_tuple_add());
+  ln->add_child(out_ta, Lnast_node::create_ref("__output_tuple_ref"));
+  auto ao_c = ln->add_child(out_ta, Lnast_ntype::create_assign());
+  ln->add_child(ao_c, Lnast_node::create_ref("c"));
+  ln->add_child(ao_c, Lnast_node::create_const("nil"));
+
+  // plus(t, a, b)  →  t = a + b
+  auto p1 = ln->add_child(stmts, Lnast_ntype::create_plus());
+  ln->add_child(p1, Lnast_node::create_ref("t"));
+  ln->add_child(p1, Lnast_node::create_ref("a"));
+  ln->add_child(p1, Lnast_node::create_ref("b"));
+
+  // plus(t, t, 1)  →  t = t + 1  (second assignment to t — SSA renames this)
+  auto p2 = ln->add_child(stmts, Lnast_ntype::create_plus());
+  ln->add_child(p2, Lnast_node::create_ref("t"));
+  ln->add_child(p2, Lnast_node::create_ref("t"));
+  ln->add_child(p2, Lnast_node::create_const("1"));
+
+  // assign(c, t)   →  c = t  (reads the SSA-renamed version of t)
+  auto asgn = ln->add_child(stmts, Lnast_ntype::create_assign());
+  ln->add_child(asgn, Lnast_node::create_ref("c"));
+  ln->add_child(asgn, Lnast_node::create_ref("t"));
+
+  // Run the SSA pass: should rename the second `t` to `t___ssa_1` and
+  // substitute the RHS `t` in the third statement with `t___ssa_1`.
+  uPass_ssa::run(ln);
+
+  // Verify io_meta was harvested correctly.
+  ASSERT_EQ(ln->io_meta().inputs.size(), 2u);
+  EXPECT_EQ(ln->io_meta().inputs[0].name, "a");
+  EXPECT_EQ(ln->io_meta().inputs[1].name, "b");
+  ASSERT_EQ(ln->io_meta().outputs.size(), 1u);
+  EXPECT_EQ(ln->io_meta().outputs[0].name, "c");
+
+  // Lower to LGraph via the io_meta path.
+  auto* lg = make_lg("ssa_multiassign14");
+  ASSERT_NE(lg, nullptr);
+  Lnast_to_lgraph lowerer(lg, ln);
+  lowerer.lower();
+
+  // Expect exactly 2 Sum nodes (one for a+b, one for t+1).
+  EXPECT_EQ(count_op(lg, Ntype_op::Sum), 2) << "expected two Sum nodes";
+  EXPECT_TRUE(has_input(lg, "a"))            << "expected graph input 'a'";
+  EXPECT_TRUE(has_input(lg, "b"))            << "expected graph input 'b'";
+  EXPECT_TRUE(has_output(lg, "c"))           << "expected graph output 'c'";
+  // No Mux or Xor nodes expected.
+  EXPECT_EQ(count_op(lg, Ntype_op::Mux), 0);
+  EXPECT_EQ(count_op(lg, Ntype_op::Xor), 0);
 }
