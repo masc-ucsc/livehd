@@ -46,7 +46,7 @@ Bitwidth_range::Bitwidth_range(const Const& val) {
 }
 
 void Bitwidth_range::set_range(const Const& min_val, const Const& max_val) {
-  I(max_val >= min_val);
+  I(max_val.ge_op(min_val)->is_known_true());
 
   if (max_val.is_i() && min_val.is_i()) {
     overflow = false;
@@ -81,13 +81,13 @@ void Bitwidth_range::set_narrower_range(const Bitwidth_range& bw) {
 
   auto l_max = get_max();
   auto n_max = bw.get_max();
-  if (n_max < l_max) {
+  if (n_max.lt_op(l_max)->is_known_true()) {
     l_max = n_max;
   }
 
   auto l_min = get_min();
   auto n_min = bw.get_min();
-  if (n_min > l_min) {
+  if (n_min.gt_op(l_min)->is_known_true()) {
     l_min = n_min;
   }
 
@@ -104,13 +104,13 @@ void Bitwidth_range::set_wider_range(const Bitwidth_range& bw) {
 
   auto l_max = get_max();
   auto n_max = bw.get_max();
-  if (n_max > l_max) {
+  if (n_max.gt_op(l_max)->is_known_true()) {
     l_max = n_max;
   }
 
   auto l_min = get_min();
   auto n_min = bw.get_min();
-  if (n_min < l_min) {
+  if (n_min.lt_op(l_min)->is_known_true()) {
     l_min = n_min;
   }
 

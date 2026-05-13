@@ -15,6 +15,48 @@
 // errors when multiple TUs include upass_constprop.hpp.
 static upass::uPass_plugin cprop("constprop", upass::uPass_wrapper<uPass_constprop>::get_upass);
 
+// Coerce one value to its text-form Const. Mirrors Pyrope's `string()` cast:
+//   nil    → "nil"
+//   string → as-is
+//   int    → decimal text
+// Returns invalid if `v` is invalid; the caller decides whether to bail or
+// keep going.
+static Const stringify_one(const Const& v) {
+  if (v.is_invalid()) {
+    return *Dlop::invalid();
+  }
+  if (v.is_nil()) {
+    return *Dlop::from_string("nil");
+  }
+  if (v.is_string()) {
+    return v;
+  }
+  return *Dlop::from_string(std::to_string(v.to_i()));
+}
+
+// Stringify each entry in `vals` and text-concat them. Returns nullopt if any
+// entry is invalid or has unknown bits (caller should bail and retry later);
+// returns an empty string Const for an empty input.
+static std::optional<Const> stringify_concat_trivials(const std::vector<Const>& vals) {
+  if (vals.empty()) {
+    return *Dlop::from_string("");
+  }
+  Const acc;
+  bool  first = true;
+  for (const auto& v : vals) {
+    if (v.is_invalid() || v.has_unknowns()) {
+      return std::nullopt;
+    }
+    auto s = stringify_one(v);
+    if (s.is_invalid()) {
+      return std::nullopt;
+    }
+    acc   = first ? s : *acc.concat_op(s);
+    first = false;
+  }
+  return acc;
+}
+
 Const uPass_constprop::range_to_mask(const Const& start, const Const& end) {
   if (!start.is_i()) {
     return *Dlop::invalid();
@@ -180,6 +222,30 @@ void uPass_constprop::process_binary(F op) {
   }
 }
 
+// Same shape as process_binary but does NOT pre-reject unknowns. Used for
+// ops like lt/le/gt/ge whose Dlop implementations propagate unknowns to a
+// 1-bit unknown result themselves — the constprop wrapper just hands the
+// raw operands through.
+template <typename F>
+void uPass_constprop::process_binary_passthrough(F op) {
+  move_to_child();
+
+  auto var = current_text();
+  move_to_sibling();
+  Const n1 = current_prim_value();
+  move_to_sibling();
+  Const n2 = current_prim_value();
+  move_to_parent();
+
+  if (!is_numeric(n1) || !is_numeric(n2)) {
+    return;  // strings / invalid / nil still bail; only unknowns flow through.
+  }
+  Const r = op(n1, n2);
+  if (!r.is_invalid()) {
+    store_trivial(var, r);
+  }
+}
+
 template <typename F>
 void uPass_constprop::process_unary(F op) {
   move_to_child();
@@ -225,53 +291,45 @@ void uPass_constprop::process_bit_not() {
 }
 
 void uPass_constprop::process_bit_xor() {
-  // XOR via identity: (a | b) & ~(a & b)
-  process_binary([](Const n1, Const n2) -> Const { return *n1.or_op(n2)->and_op(*n1.and_op(n2)->not_op()); });
+  process_nary([](Const& r, Const n) { r = r.xor_op(n); });
 }
 
 void uPass_constprop::process_mod() {
-  process_binary([](Const n1, Const n2) -> Const {
-    // Guard: modulo by zero is undefined behaviour.  Return invalid so the
-    // caller leaves the variable unset rather than crashing.
-    if (n2.is_known_false()) {
-      return *Dlop::invalid();
-    }
-    return *Dlop::create_integer(n1.to_i() % n2.to_i());
-  });
+  process_binary_passthrough([](Const n1, Const n2) -> Const { return *n1.mod_op(n2); });
 }
 
 void uPass_constprop::process_shl() {
-  process_binary([](Const n1, Const n2) -> Const {
-    if (!n2.is_i()) return *Dlop::invalid();
-    return *n1.lsh_op(static_cast<int>(n2.to_i()));
-  });
+  process_binary_passthrough([](Const n1, Const n2) -> Const { return *n1.lsh_op(n2); });
 }
 
 void uPass_constprop::process_sra() {
-  process_binary([](Const n1, Const n2) -> Const {
-    if (!n2.is_i()) return *Dlop::invalid();
-    return *n1.rsh_op(static_cast<int>(n2.to_i()));
-  });
+  process_binary_passthrough([](Const n1, Const n2) -> Const { return *n1.rsh_op(n2); });
 }
 
 void uPass_constprop::process_log_and() {
-  process_binary(
-      [](Const n1, Const n2) -> Const { return (!n1.is_known_false() && !n2.is_known_false()) ? *Dlop::create_integer(1) : *Dlop::create_integer(0); });
+  // Pyrope's type rule (future type-check): `and` operands must already be
+  // bool — non-bool sources are required to write `foo != 0 and bar != 0`.
+  // With bool operands, bitwise AND equals logical AND, so we just call
+  // Dlop::and_op and let it deal with unknowns.
+  process_binary_passthrough([](Const n1, Const n2) -> Const { return *n1.and_op(n2); });
 }
 
 void uPass_constprop::process_log_or() {
-  process_binary([](Const n1, Const n2) -> Const { return *n1.ror_op(n2); });
+  // Same rationale as process_log_and: assume bool operands; bitwise OR over
+  // bool values equals logical OR.
+  process_binary_passthrough([](Const n1, Const n2) -> Const { return *n1.or_op(n2); });
 }
 
 void uPass_constprop::process_log_not() {
+  // Pyrope's type rule (future type-check): `not` operand must be bool.
+  // Bitwise NOT over a 1-bit bool (0 ↔ -1) flips it. nil stays nil — chained
+  // `and` with a known-true operand still collapses to true (the cassert
+  // escape hatch for unset attrs documented in attribute_todo.md §Phase 2).
   process_unary([](Const& r) {
-    // Propagate nil: `!nil` stays nil so a chained `and` with a known-true
-    // operand collapses to true (the cassert escape hatch for unset attrs
-    // documented in attribute_todo.md §Phase 2).
     if (r.is_nil()) {
       return;
     }
-    r = r.is_known_false() ? Dlop::create_integer(1) : Dlop::create_integer(0);
+    r = r.not_op();
   });
 }
 
@@ -475,9 +533,9 @@ static bool structural_equals(const std::shared_ptr<Bundle const>& a,
 // integer compares are unchanged.
 //
 // Result handling is tri-state to support unknowns (`0sb?` literals): the
-// final stored value is `Dlop::create_integer(1)` for known-true (negated for ne), the
-// matching `Dlop::create_integer(0)`, or a 1-bit unknown when the comparison itself is
-// undecidable. Storing the 1-bit unknown lets a downstream
+// final stored value is `Dlop::create_bool(true)` for known-true (negated for
+// ne), the matching `Dlop::create_bool(false)`, or a 1-bit unknown when the
+// comparison itself is undecidable. Storing the 1-bit unknown lets a downstream
 // `(v != 0) == 0sb?` cassert fold via Lconst::eq_op's structural-identity
 // short-circuit.
 template <bool Negate>
@@ -588,12 +646,12 @@ void uPass_constprop::process_eq_ne_impl() {
   };
   if (a.bundle && b.bundle) {
     if (auto eq = compare_bundles_eq(a.bundle, b.bundle); eq.has_value()) {
-      result = (*eq ^ Negate) ? *Dlop::create_integer(1) : *Dlop::create_integer(0);
+      result = *Dlop::create_bool(*eq ^ Negate);
     }
   } else if (a.bundle && !b.scalar.is_invalid() && bundle_count_non_attr(a.bundle) > 1) {
-    result = Negate ? *Dlop::create_integer(1) : *Dlop::create_integer(0);
+    result = *Dlop::create_bool(Negate);
   } else if (b.bundle && !a.scalar.is_invalid() && bundle_count_non_attr(b.bundle) > 1) {
-    result = Negate ? *Dlop::create_integer(1) : *Dlop::create_integer(0);
+    result = *Dlop::create_bool(Negate);
   } else if (!a.bundle && !b.bundle && !a.scalar.is_invalid() && !b.scalar.is_invalid()) {
     // same_repr gives bit-identity including unknown positions (so
     // `0sb? == 0sb?` is known-true). eq_op only reduces to known-false
@@ -601,11 +659,17 @@ void uPass_constprop::process_eq_ne_impl() {
     // unknown which we propagate. `ne` is bitwise-not of `eq`; a 1-bit
     // unknown inverted is still a 1-bit unknown.
     if (a.scalar.same_repr(b.scalar)) {
-      result = Negate ? *Dlop::create_integer(0) : *Dlop::create_integer(1);
+      result = *Dlop::create_bool(!Negate);
     } else {
+      // Defer to eq_op: types may differ (e.g. Bool vs Integer) but if the
+      // bit patterns match it folds true. Constprop is type-agnostic — the
+      // separate typecheck pass flags illegal cross-type comparisons; here
+      // we just take whatever eq_op decides.
       const Const eq = *a.scalar.eq_op(b.scalar);
-      if (eq.is_known_false()) {
-        result = Negate ? *Dlop::create_integer(1) : *Dlop::create_integer(0);
+      if (eq.is_known_true()) {
+        result = *Dlop::create_bool(!Negate);
+      } else if (eq.is_known_false()) {
+        result = *Dlop::create_bool(Negate);
       } else if (eq.has_unknowns()) {
         result = eq;
       }
@@ -621,17 +685,17 @@ void uPass_constprop::process_ne() { process_eq_ne_impl<true>(); }
 void uPass_constprop::process_eq() { process_eq_ne_impl<false>(); }
 
 void uPass_constprop::process_lt() {
-  process_binary([](Const x, Const y) -> Const { return x < y ? *Dlop::create_integer(1) : *Dlop::create_integer(0); });
+  process_binary_passthrough([](Const x, Const y) -> Const { return *x.lt_op(y); });
 }
 void uPass_constprop::process_le() {
-  process_binary([](Const x, Const y) -> Const { return x <= y ? *Dlop::create_integer(1) : *Dlop::create_integer(0); });
+  process_binary_passthrough([](Const x, Const y) -> Const { return *x.le_op(y); });
 }
 void uPass_constprop::process_gt() {
-  process_binary([](Const x, Const y) -> Const { return x > y ? *Dlop::create_integer(1) : *Dlop::create_integer(0); });
+  process_binary_passthrough([](Const x, Const y) -> Const { return *x.gt_op(y); });
 }
 
 void uPass_constprop::process_ge() {
-  process_binary([](Const x, Const y) -> Const { return x >= y ? *Dlop::create_integer(1) : *Dlop::create_integer(0); });
+  process_binary_passthrough([](Const x, Const y) -> Const { return *x.ge_op(y); });
 }
 
 void uPass_constprop::process_if() {
@@ -758,12 +822,19 @@ void uPass_constprop::process_tuple_add() {
 }
 
 void uPass_constprop::process_tuple_concat() {
+  // Pyrope `++` semantics (matches the explicit `string(...)` cast for the
+  // string case):
+  //   - Build a Bundle via Bundle::concat over every operand. Trivial
+  //     operands (int/string/nil) wrap as 1-element positional tuples first.
+  //   - If any first-level entry of the result is a string trivial, fold
+  //     the whole thing to a single text-concatenated string (this matches
+  //     `string("hello", " world") == "hello world"` and
+  //     `string(1, "2", 3) == "123"`). The collapse needs every entry to be
+  //     a single-level trivial — a nested sub-bundle means we can't decide
+  //     yet, so we keep the bundle.
+  //   - Bail (no store) on unknowns / invalid operands; a later iteration
+  //     of the upass fixed-point may resolve them.
   // Layout: ref(dst), (const|ref)...
-  // Two modes determined by the first operand:
-  //   Bundle mode  — every operand must be a known Bundle; merged via Bundle::concat().
-  //                  No mark_changed — convergence via downstream tuple_get (same as tuple_add).
-  //   Scalar mode  — every operand must be a known scalar; folded via Lconst::concat_op.
-  // Bail without folding when any operand is truly unknown or types are mixed.
   move_to_child();
   auto dst = std::string(current_text());
 
@@ -772,122 +843,91 @@ void uPass_constprop::process_tuple_concat() {
     return;
   }
 
-  bool                    bundle_mode = false;
-  std::shared_ptr<Bundle> acc_bundle;
-  Const                  acc_scalar;
-  bool                    is_first = true;
+  auto acc = std::make_shared<Bundle>(dst);
 
-  // Wrap a scalar trivial into a 1-entry positional bundle so it concats as
-  // a single tuple element rather than bit-packing. Only used when bundle
-  // mode is selected (or implied by the operand mix).
-  auto wrap_scalar_as_bundle = [&](const Const& val) -> std::shared_ptr<Bundle> {
+  // Wrap a single trivial as a 1-entry positional bundle so Bundle::concat
+  // appends it as a slot instead of mishandling the bare key.
+  auto wrap_trivial = [&](const Const& val) -> std::shared_ptr<Bundle> {
     auto b = std::make_shared<Bundle>(dst);
     b->set("0", val);
     return b;
   };
 
-  auto process_one = [&]() -> bool {
-    if (is_type(Lnast_ntype::Lnast_ntype_ref)) {
-      // st.get_bundle returns a wrapper Bundle even when the ref holds a
-      // trivial scalar (string or int). String scalars want the scalar path
-      // (so `"hi" ++ " there"` folds via Lconst::concat_op rather than
-      // re-encoded into a positional bundle). Int scalars participate in
-      // tuple-concat as a single-element tuple so `e ++ 3` with `mut e=1`
-      // yields `(1, 3)` not the bit-packed `0b1_011`.
-      //
-      // Exception: an *empty* bundle (no positional/named keys, only
-      // attributes at most) is unambiguously the empty tuple `()` — never a
-      // scalar — so it must enter bundle mode. This is the common shape for
-      // an accumulator initialized with `mut c = ()`; without this special
-      // case `c ++ (i,)` aborts and the for-loop unroll never advances `c`.
-      auto b = st.get_bundle(current_text());
-      bool b_is_empty_tuple = false;
-      bool b_is_string_scalar = false;
-      if (b) {
-        bool any_kv = false;
-        for (const auto& e : b->get_map()) {
-          if (!e.first.empty() && e.first.front() == ':') { any_kv = true; break; }
-          // Plain "0", "1", ... positional keys are also content.
-          if (!e.first.empty() && std::isdigit(static_cast<unsigned char>(e.first.front()))) {
-            any_kv = true;
-            break;
-          }
-        }
-        b_is_empty_tuple = !any_kv;
-        if (b->is_scalar() && st.has_trivial(current_text())) {
-          b_is_string_scalar = st.get_trivial(current_text()).is_string();
-        }
+  // Resolve one operand to a Bundle-shaped value. Returns nullptr on
+  // unfoldable (caller bails). Empty bundles are returned as-is; Bundle::concat
+  // treats them as identity.
+  auto resolve_operand = [&]() -> std::shared_ptr<Bundle const> {
+    if (is_type(Lnast_ntype::Lnast_ntype_const)) {
+      Const val = *Dlop::from_pyrope(current_text());
+      if (val.is_invalid()) {
+        return nullptr;
       }
-      // Use bundle mode when:
-      //   - the operand is a multi-entry bundle (always tuple), or
-      //   - the operand is empty (must be empty tuple — see comment above), or
-      //   - it's been marked as tuple-typed by an earlier tuple_add /
-      //     tuple_concat / aliasing-assign (covers the "single-entry
-      //     bundle that is actually a 1-element tuple" case), or
-      //   - we're already in bundle_mode (the first operand chose tuple,
-      //     so subsequent single-entry bundles must concat as tuples too,
-      //     not be re-routed to the scalar path), or
-      //   - the operand is a single non-string trivial: Pyrope's `++` over
-      //     ints is tuple concat, not bit concat — wrap as a 1-tuple.
-      const bool is_tuple_typed = tuple_typed_names.contains(std::string(current_text()));
-      const bool int_scalar_promote = b && b->is_scalar() && !b_is_string_scalar && !b_is_empty_tuple;
-      if (b && (!b->is_scalar() || b_is_empty_tuple || is_tuple_typed || bundle_mode || int_scalar_promote)) {
-        if (!is_first && !bundle_mode) return false;
-        if (is_first) {
-          acc_bundle  = std::make_shared<Bundle>(dst);
-          bundle_mode = true;
-        }
-        if (!b_is_empty_tuple) {
-          acc_bundle->concat(b);
-        }
-        return true;
+      return wrap_trivial(val);
+    }
+    if (is_type(Lnast_ntype::Lnast_ntype_ref)) {
+      // Prefer the bundle view: a tuple_add/tuple_concat producer stores its
+      // result as a bundle. For names that only hold a trivial scalar (string
+      // or int from a constprop store), fall back to wrapping as a 1-tuple.
+      if (auto b = st.get_bundle(current_text())) {
+        return b;
       }
       if (st.has_trivial(current_text())) {
         auto val = st.get_trivial(current_text());
-        if (val.is_invalid() || val.has_unknowns()) return false;
-        if (bundle_mode) {
-          // Promote a string trivial entering an in-progress bundle concat
-          // into a 1-tuple so positional ordering is preserved.
-          acc_bundle->concat(wrap_scalar_as_bundle(val));
-          return true;
+        if (val.is_invalid() || val.has_unknowns()) {
+          return nullptr;
         }
-        acc_scalar = is_first ? val : *acc_scalar.concat_op(val);
-        return true;
+        return wrap_trivial(val);
       }
-      return false;
     }
-    if (is_type(Lnast_ntype::Lnast_ntype_const)) {
-      Const val = *Dlop::from_pyrope(current_text());
-      if (val.is_invalid()) return false;
-      if (bundle_mode) {
-        // Wrap the const as a 1-tuple so `tuple ++ N` appends N as a slot.
-        acc_bundle->concat(wrap_scalar_as_bundle(val));
-        return true;
-      }
-      // First-operand scalar mode: defer the decision until we see operand 2.
-      // For now stay in scalar mode; an int operand 2 will trigger promotion.
-      acc_scalar = is_first ? val : *acc_scalar.concat_op(val);
-      return true;
-    }
-    return false;
+    return nullptr;
   };
 
   do {
-    if (!process_one()) {
+    auto op = resolve_operand();
+    if (!op) {
       move_to_parent();
-      return;
+      return;  // unfoldable; leave dst unchanged
     }
-    is_first = false;
+    acc->concat(op);
   } while (move_to_sibling());
 
   move_to_parent();
 
-  if (bundle_mode) {
-    st.set(dst, acc_bundle);
-    // Tuple-mode result: dst is a tuple regardless of its final entry count.
-    tuple_typed_names.insert(dst);
+  // Any-string → stringify all. Mirrors the `string()` cast rule. Aborts the
+  // collapse if any first-level entry is a sub-bundle or carries unknowns —
+  // the bundle stays, and a later iteration retries.
+  auto try_stringify = [&]() -> std::optional<Const> {
+    std::vector<Const> entries;
+    bool any_string = false;
+    for (const auto& e : acc->get_map()) {
+      if (Bundle::is_attribute(e.first)) {
+        continue;
+      }
+      if (!Bundle::is_single_level(e.first)) {
+        return std::nullopt;  // nested sub-bundle — don't try to stringify
+      }
+      const auto& v = e.second.trivial;
+      if (v.is_invalid()) {
+        return std::nullopt;
+      }
+      if (v.is_string()) {
+        any_string = true;
+      }
+      entries.push_back(v);
+    }
+    if (!any_string) {
+      return std::nullopt;
+    }
+    return stringify_concat_trivials(entries);
+  };
+
+  if (auto folded = try_stringify(); folded.has_value()) {
+    store_trivial(dst, *folded);
   } else {
-    store_trivial(dst, acc_scalar);
+    st.set(dst, acc);
+    // Tuple-shaped result: keep the tuple-typed marker for downstream code
+    // that distinguishes a real tuple from a scalar-wrapper bundle.
+    tuple_typed_names.insert(dst);
   }
 }
 
@@ -982,7 +1022,7 @@ void uPass_constprop::fold_does(const std::string& dst) {
     return;
   }
 
-  store_trivial(dst, structural_does(ba, bb) ? *Dlop::create_integer(1) : *Dlop::create_integer(0));
+  store_trivial(dst, *Dlop::create_bool(structural_does(ba, bb)));
 }
 
 // Per-first-level summary used by fold_in / fold_has: groups a bundle's flat
@@ -1157,7 +1197,7 @@ void uPass_constprop::fold_in(const std::string& dst) {
   if (!outcome.has_value()) {
     return;
   }
-  store_trivial(dst, *outcome ? Dlop::create_integer(1) : Dlop::create_integer(0));
+  store_trivial(dst, Dlop::create_bool(*outcome));
 }
 
 // Fold `dst = has(l, key)`. Cursor is on the const("has") marker.
@@ -1167,7 +1207,7 @@ void uPass_constprop::fold_in(const std::string& dst) {
 //     matching `name` (i.e., a key shaped `:N:name`).
 //   - Integer key `N`: bundle must have any first-level entry at position N
 //     (named or unnamed; both are recorded with explicit positions).
-// Returns Dlop::create_integer(1) for present, Dlop::create_integer(0) for absent.
+// Returns Dlop::create_bool(true) for present, Dlop::create_bool(false) for absent.
 void uPass_constprop::fold_has(const std::string& dst) {
   if (!move_to_sibling()) {
     return;
@@ -1217,7 +1257,7 @@ void uPass_constprop::fold_has(const std::string& dst) {
     return;  // nil/unknown key — defer
   }
 
-  store_trivial(dst, found ? Dlop::create_integer(1) : Dlop::create_integer(0));
+  store_trivial(dst, Dlop::create_bool(found));
 }
 
 std::optional<Const> uPass_constprop::resolve_current_scalar() const {
@@ -1412,10 +1452,10 @@ bool uPass_constprop::try_eval_comb_call(std::string_view dst, std::string_view 
     return Eval_result::processed;
   };
 
-  // Two-operand comparison producing 0/1. ne/lt/le/gt/ge use the C++
-  // operator overload on Const; eq goes through eq_op so it picks up the
-  // structural-identity contract used elsewhere in constprop.
-  auto eval_compare = [&](Lnast_nid stmt, auto pred) -> Eval_result {
+  // Two-operand comparison delegating to a Dlop op that returns a Bool
+  // result (or a 1-bit unknown). Each LNAST compare node maps directly to
+  // its hlop counterpart — no special-casing eq vs lt etc.
+  auto eval_compare = [&](Lnast_nid stmt, auto op) -> Eval_result {
     auto lhs = fn->get_child(stmt);
     if (lhs.is_invalid() || !Lnast_ntype::is_ref(fn->get_type(lhs))) {
       return Eval_result::aborted;
@@ -1434,8 +1474,10 @@ bool uPass_constprop::try_eval_comb_call(std::string_view dst, std::string_view 
         || !b_val.has_value() || b_val->is_invalid() || b_val->is_string()) {
       return Eval_result::deferred;
     }
-    Const result;
-    result = pred(*a_val, *b_val) ? Dlop::create_integer(1) : Dlop::create_integer(0);
+    Const result = op(*a_val, *b_val);
+    if (result.is_invalid()) {
+      return Eval_result::deferred;
+    }
     local_values[std::string(fn->get_name(lhs))] = result;
     return Eval_result::processed;
   };
@@ -1471,22 +1513,22 @@ bool uPass_constprop::try_eval_comb_call(std::string_view dst, std::string_view 
     }
 
     if (Lnast_ntype::is_eq(type)) {
-      return eval_compare(stmt, [](const Const& a, const Const& b) { return a.eq_op(b)->is_known_true(); });
+      return eval_compare(stmt, [](const Const& a, const Const& b) { return *a.eq_op(b); });
     }
     if (Lnast_ntype::is_ne(type)) {
-      return eval_compare(stmt, [](const Const& a, const Const& b) { return !a.eq_op(b)->is_known_true(); });
+      return eval_compare(stmt, [](const Const& a, const Const& b) { return *a.eq_op(b)->not_op(); });
     }
     if (Lnast_ntype::is_lt(type)) {
-      return eval_compare(stmt, [](const Const& a, const Const& b) { return a < b; });
+      return eval_compare(stmt, [](const Const& a, const Const& b) { return *a.lt_op(b); });
     }
     if (Lnast_ntype::is_le(type)) {
-      return eval_compare(stmt, [](const Const& a, const Const& b) { return a <= b; });
+      return eval_compare(stmt, [](const Const& a, const Const& b) { return *a.le_op(b); });
     }
     if (Lnast_ntype::is_gt(type)) {
-      return eval_compare(stmt, [](const Const& a, const Const& b) { return a > b; });
+      return eval_compare(stmt, [](const Const& a, const Const& b) { return *a.gt_op(b); });
     }
     if (Lnast_ntype::is_ge(type)) {
-      return eval_compare(stmt, [](const Const& a, const Const& b) { return a >= b; });
+      return eval_compare(stmt, [](const Const& a, const Const& b) { return *a.ge_op(b); });
     }
 
     if (Lnast_ntype::is_if(type)) {
@@ -1663,7 +1705,7 @@ void uPass_constprop::process_func_equals() {
   if (!ba || !bb) {
     return;
   }
-  store_trivial(dst, structural_equals(ba, bb) ? Dlop::create_integer(1) : Dlop::create_integer(0));
+  store_trivial(dst, Dlop::create_bool(structural_equals(ba, bb)));
 }
 
 void uPass_constprop::process_func_in() {
@@ -1769,27 +1811,11 @@ void uPass_constprop::process_func_call() {
 
   Const result;
   if (kind == Cast::to_string) {
-    // Lconst::concat_op no longer auto-stringifies ints — string ++ int is
-    // a bit-concat producing an int. The `string()` builtin's job is text
-    // concat, so coerce each int arg to its decimal-text Const up front;
-    // the subsequent concat_op then sees only strings.
-    auto stringify = [](const Const& v) -> Const {
-      if (v.is_nil()) {
-        return *Dlop::from_string("nil");  // mirror Pyrope's nil → 'nil' text
-      }
-      if (v.is_string()) {
-        return v;
-      }
-      return *Dlop::from_string(std::to_string(v.to_i()));
-    };
-    if (args.empty()) {
-      result = Dlop::from_string("");
-    } else {
-      result = stringify(args.front());
-      for (size_t i = 1; i < args.size(); ++i) {
-        result = result.concat_op(stringify(args[i]));
-      }
+    auto stringified = stringify_concat_trivials(args);
+    if (!stringified.has_value()) {
+      return;  // unknown bits in some arg — leave dst unset for next iteration
     }
+    result = *stringified;
   } else {
     if (args.size() != 1) {
       return;
@@ -2165,39 +2191,37 @@ void uPass_constprop::process_tuple_set() {
 
 // ── Bitwidth Insensitive Reduce ──────────────────────────────────────────────
 //
-// Each reduction op reads its single operand, runs a predicate, and stores
-// the 1-bit result. We can't reuse process_unary because it stores even when
-// the input is invalid (red_or in particular wants to skip on invalid but
-// fold through unknowns; red_and/xor reject unknowns). The shared template
-// here takes the gate predicate so each op states its own contract.
-template <typename Gate, typename Pred>
-void uPass_constprop::process_reduction(Gate gate, Pred pred) {
+// Each reduction op reads its single operand and stores the result of the
+// matching Dlop op. The Dlop op already encodes the right unknown handling:
+// rand_op/rxor_op return a 1-bit unknown when the input has unknowns, and
+// ror_op (binary form, called with v on both sides) folds true if any bit is
+// set — which is what red_or wants for the unknown-friendly case too.
+template <typename F>
+void uPass_constprop::process_reduction(F op) {
   move_to_child();
   auto       var   = current_text();
   move_to_sibling();
   const auto input = current_prim_value();
   move_to_parent();
-  if (!gate(input)) {
+  if (input.is_invalid() || input.is_string()) {
     return;
   }
-  store_trivial(var, pred(input) ? Dlop::create_integer(1) : Dlop::create_integer(0));
+  Const r = op(input);
+  if (!r.is_invalid()) {
+    store_trivial(var, r);
+  }
 }
 
 void uPass_constprop::process_red_or() {
-  // Reduce-OR: 1 if any bit in input is set. Unknown bits are ok — the
-  // value is non-zero iff *any* bit (known or `?`) is set.
-  process_reduction([](const Const& v) { return !v.is_invalid(); },
-                    [](const Const& v) { return !v.is_known_false(); });
+  process_reduction([](const Const& v) -> Const { return *v.ror_op(); });
 }
 
 void uPass_constprop::process_red_and() {
-  // Reduce-AND: 1 iff every bit is set (input is a 2^n-1 mask).
-  process_reduction(foldable, [](const Const& v) { return v.is_mask(); });
+  process_reduction([](const Const& v) -> Const { return *v.rand_op(); });
 }
 
 void uPass_constprop::process_red_xor() {
-  // Reduce-XOR: parity of set bits.
-  process_reduction(foldable, [](const Const& v) { return v.popcount() % 2 == 1; });
+  process_reduction([](const Const& v) -> Const { return *v.rxor_op(); });
 }
 
 // ── Bit Manipulation ─────────────────────────────────────────────────────────
@@ -2321,8 +2345,8 @@ void uPass_constprop::process_get_mask() {
   if (!foldable(value) || !foldable(mask)) {
     return;
   }
-  Const result = *value.get_mask_op(mask);
-  if (!result.is_invalid()) {
-    store_trivial(var, result);
-  }
+  // Trust Dlop::get_mask_op — including the single-bit-mask → Bool rule. We
+  // store whatever it returns (invalid included): all inputs were known so
+  // the fold is real, and downstream code shouldn't silently drop it.
+  store_trivial(var, *value.get_mask_op(mask));
 }

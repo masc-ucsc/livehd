@@ -277,13 +277,19 @@ TEST(UpassConstprop, FoldsGetMask) {
 // ── Logical ──────────────────────────────────────────────────────────────────
 
 TEST(UpassConstprop, FoldsLogAndBothTrue) {
-  ConstpropFixture  f;
-  auto              op = f.add_binary_node(Lnast_ntype::create_log_and(), "a", 1, 2);
+  // log_and operands must be bool per Pyrope's type rule (`1 and 2` is a
+  // type error; source must write `1 != 0 and 2 != 0`). Feed bool literals.
+  ConstpropFixture f;
+  auto             op = f.ln->add_child(f.stmts_nid, Lnast_ntype::create_log_and());
+  f.ln->add_child(op, Lnast_node::create_ref("a"));
+  f.ln->add_child(op, Lnast_node::create_const("true"));
+  f.ln->add_child(op, Lnast_node::create_const("true"));
+
   TestableConstprop cp(f.lm);
   cp.position(op);
   cp.process_log_and();
   EXPECT_TRUE(cp.has_changed());
-  EXPECT_EQ(cp.get_result("a").to_i(), 1);
+  EXPECT_TRUE(cp.get_result("a").is_known_true());
 }
 
 TEST(UpassConstprop, FoldsLogAndOneFalse) {
@@ -293,7 +299,7 @@ TEST(UpassConstprop, FoldsLogAndOneFalse) {
   cp.position(op);
   cp.process_log_and();
   EXPECT_TRUE(cp.has_changed());
-  EXPECT_EQ(cp.get_result("a").to_i(), 0);
+  EXPECT_TRUE(cp.get_result("a").is_known_false());
 }
 
 TEST(UpassConstprop, FoldsLogOrOneFalse) {
@@ -303,7 +309,7 @@ TEST(UpassConstprop, FoldsLogOrOneFalse) {
   cp.position(op);
   cp.process_log_or();
   EXPECT_TRUE(cp.has_changed());
-  EXPECT_EQ(cp.get_result("a").to_i(), 1);
+  EXPECT_TRUE(cp.get_result("a").is_known_true());
 }
 
 TEST(UpassConstprop, FoldsLogOrBothFalse) {
@@ -313,7 +319,7 @@ TEST(UpassConstprop, FoldsLogOrBothFalse) {
   cp.position(op);
   cp.process_log_or();
   EXPECT_TRUE(cp.has_changed());
-  EXPECT_EQ(cp.get_result("a").to_i(), 0);
+  EXPECT_TRUE(cp.get_result("a").is_known_false());
 }
 
 TEST(UpassConstprop, FoldsLogNotFalse) {
@@ -323,17 +329,21 @@ TEST(UpassConstprop, FoldsLogNotFalse) {
   cp.position(op);
   cp.process_log_not();
   EXPECT_TRUE(cp.has_changed());
-  EXPECT_EQ(cp.get_result("a").to_i(), 1);  // !0 = 1
+  EXPECT_TRUE(cp.get_result("a").is_known_true());  // !0 = true
 }
 
 TEST(UpassConstprop, FoldsLogNotTrue) {
-  ConstpropFixture  f;
-  auto              op = f.add_unary_node(Lnast_ntype::create_log_not(), "a", 5);
+  // log_not operand must be bool per Pyrope's type rule.
+  ConstpropFixture f;
+  auto             op = f.ln->add_child(f.stmts_nid, Lnast_ntype::create_log_not());
+  f.ln->add_child(op, Lnast_node::create_ref("a"));
+  f.ln->add_child(op, Lnast_node::create_const("true"));
+
   TestableConstprop cp(f.lm);
   cp.position(op);
   cp.process_log_not();
   EXPECT_TRUE(cp.has_changed());
-  EXPECT_EQ(cp.get_result("a").to_i(), 0);  // !5 = 0
+  EXPECT_TRUE(cp.get_result("a").is_known_false());  // !true = false
 }
 
 // ── Convergence ──────────────────────────────────────────────────────────────
@@ -443,7 +453,7 @@ TEST(UpassConstprop, RedOrNonZero) {
   cp.position(op);
   cp.process_red_or();
   EXPECT_TRUE(cp.has_changed());
-  EXPECT_EQ(cp.get_result("a").to_i(), 1);  // 5 != 0 → 1
+  EXPECT_TRUE(cp.get_result("a").is_known_true());  // 5 != 0 → true
 }
 
 TEST(UpassConstprop, RedOrZero) {
@@ -453,7 +463,7 @@ TEST(UpassConstprop, RedOrZero) {
   cp.position(op);
   cp.process_red_or();
   EXPECT_TRUE(cp.has_changed());
-  EXPECT_EQ(cp.get_result("a").to_i(), 0);  // 0 == 0 → 0
+  EXPECT_TRUE(cp.get_result("a").is_known_false());  // 0 == 0 → false
 }
 
 TEST(UpassConstprop, RedOrUnknownInputNoStore) {
@@ -474,48 +484,48 @@ TEST(UpassConstprop, RedOrUnknownInputNoStore) {
 // red_and: 1 only when all bits are 1 (value is all-ones mask).
 TEST(UpassConstprop, RedAndAllOnes) {
   ConstpropFixture f;
-  // 0b111 = 7: all bits set → red_and = 1.
+  // 0b111 = 7: all bits set → red_and = true.
   auto              op = f.add_unary_node(Lnast_ntype::create_red_and(), "a", 0b111);
   TestableConstprop cp(f.lm);
   cp.position(op);
   cp.process_red_and();
   EXPECT_TRUE(cp.has_changed());
-  EXPECT_EQ(cp.get_result("a").to_i(), 1);
+  EXPECT_TRUE(cp.get_result("a").is_known_true());
 }
 
 TEST(UpassConstprop, RedAndNotAllOnes) {
   ConstpropFixture f;
-  // 0b101 = 5: bit 1 is clear → red_and = 0.
+  // 0b101 = 5: bit 1 is clear → red_and = false.
   auto              op = f.add_unary_node(Lnast_ntype::create_red_and(), "a", 0b101);
   TestableConstprop cp(f.lm);
   cp.position(op);
   cp.process_red_and();
   EXPECT_TRUE(cp.has_changed());
-  EXPECT_EQ(cp.get_result("a").to_i(), 0);
+  EXPECT_TRUE(cp.get_result("a").is_known_false());
 }
 
-// red_xor: parity of set bits (1 if popcount is odd).
+// red_xor: parity of set bits (true if popcount is odd).
 TEST(UpassConstprop, RedXorOddParity) {
   ConstpropFixture f;
-  // 0b101 = 5: popcount = 2 (even) → red_xor = 0
-  // Let's use 0b111 = 7: popcount = 3 (odd) → red_xor = 1.
+  // 0b101 = 5: popcount = 2 (even) → red_xor = false
+  // Let's use 0b111 = 7: popcount = 3 (odd) → red_xor = true.
   auto              op = f.add_unary_node(Lnast_ntype::create_red_xor(), "a", 0b111);
   TestableConstprop cp(f.lm);
   cp.position(op);
   cp.process_red_xor();
   EXPECT_TRUE(cp.has_changed());
-  EXPECT_EQ(cp.get_result("a").to_i(), 1);  // popcount(7) = 3, odd → 1
+  EXPECT_TRUE(cp.get_result("a").is_known_true());  // popcount(7) = 3, odd → true
 }
 
 TEST(UpassConstprop, RedXorEvenParity) {
   ConstpropFixture f;
-  // 0b1010 = 10: popcount = 2 (even) → red_xor = 0.
+  // 0b1010 = 10: popcount = 2 (even) → red_xor = false.
   auto              op = f.add_unary_node(Lnast_ntype::create_red_xor(), "a", 0b1010);
   TestableConstprop cp(f.lm);
   cp.position(op);
   cp.process_red_xor();
   EXPECT_TRUE(cp.has_changed());
-  EXPECT_EQ(cp.get_result("a").to_i(), 0);  // popcount(10) = 2, even → 0
+  EXPECT_TRUE(cp.get_result("a").is_known_false());  // popcount(10) = 2, even → false
 }
 
 // ── sext ─────────────────────────────────────────────────────────────────────

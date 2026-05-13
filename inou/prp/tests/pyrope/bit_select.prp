@@ -1,7 +1,7 @@
 /*
 :name: bit_select
 :type: parsing lnast comptime
-:verifier_pass: 5
+:verifier_pass: 9
 :verifier_fail: 1
 */
 
@@ -14,7 +14,15 @@ const y5 = x#^[0..=3]
 
 cassert y1 == 0
 cassert y2 == 0x78
+
+cassert y3 == (true ^ true ^ 0 ^ 0)
 cassert y3 == (1 ^ 1 ^ 0 ^ 0)
-cassert y4 == (1 | 0 | 0 | 0)
-cassert y5 == (1 ^ 0 ^ 0 ^ 0)
+cassert y3 == (1 ^ 1 ^ 0 ^ 0)#[0]
+
+cassert y4 == (true | 0 | 0 | 0)
+
+cassert y5 == (true ^ 0 ^ 0 ^ 0)
+cassert y5 != (1 ^ 0 ^ 0 ^ 0)      // WEIRD, but -1 != 1
+cassert y5 == (1 ^ 0 ^ 0 ^ 0)#[0]
+
 cassert false

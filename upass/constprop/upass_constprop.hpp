@@ -169,11 +169,15 @@ protected:
   template <typename F>
   inline void process_binary(F op);
 
+  // Variant for ops whose Dlop kernel propagates unknowns itself (lt_op etc).
+  template <typename F>
+  inline void process_binary_passthrough(F op);
+
   template <typename F>
   inline void process_unary(F op);
 
-  template <typename Gate, typename Pred>
-  inline void process_reduction(Gate gate, Pred pred);
+  template <typename F>
+  inline void process_reduction(F op);
 
   template <bool Negate>
   void process_eq_ne_impl();

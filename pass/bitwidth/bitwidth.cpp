@@ -134,7 +134,7 @@ void Bitwidth::process_flop(Node& node) {
     }
 
     auto a = bw.get_max();
-    if (max_val < a) {
+    if (max_val.lt_op(a)->is_known_true()) {
       if (!max_val.is_known_zero()) {
         not_finished = true;
       }
@@ -142,7 +142,7 @@ void Bitwidth::process_flop(Node& node) {
       max_val = a;
     }
     auto b = bw.get_min();
-    if (min_val > b) {
+    if (min_val.gt_op(b)->is_known_true()) {
       if (!min_val.is_known_zero()) {
         not_finished = true;
       }
@@ -177,19 +177,19 @@ void Bitwidth::process_not(Node& node, XEdge_iterator& inp_edges) {
       // calculate 1s'complemet value
       auto pmax_1scomp = pmax.not_op();
       auto pmin_1scomp = pmin.not_op();
-      if (*pmax_1scomp > max_val) {
+      if (pmax_1scomp->gt_op(max_val)->is_known_true()) {
         max_val = pmax_1scomp;
       }
 
-      if (*pmin_1scomp > max_val) {
+      if (pmin_1scomp->gt_op(max_val)->is_known_true()) {
         max_val = pmin_1scomp;
       }
 
-      if (*pmax_1scomp < min_val) {
+      if (pmax_1scomp->lt_op(min_val)->is_known_true()) {
         min_val = pmax_1scomp;
       }
 
-      if (*pmin_1scomp < min_val) {
+      if (pmin_1scomp->lt_op(min_val)->is_known_true()) {
         min_val = pmin_1scomp;
       }
 
@@ -568,7 +568,7 @@ void Bitwidth::process_mult(Node& node, XEdge_iterator& inp_edges) {
     if (it != bwmap.end()) {
       max_val = max_val.mult_op(it->second.get_max());
       min_val = min_val.mult_op(it->second.get_min());
-      if (max_val < min_val) {
+      if (max_val.lt_op(min_val)->is_known_true()) {
         auto tmp = max_val;
         max_val  = min_val;
         min_val  = tmp;
@@ -735,7 +735,7 @@ void Bitwidth::process_get_mask(Node& node) {
   if (a_min.is_negative()) {  // 2s complement usual
     Const tmp;
     tmp = Dlop::create_integer(-1)->get_mask_op(mask_val);
-    if (tmp > res_max) {
+    if (tmp.gt_op(res_max)->is_known_true()) {
       res_max = tmp;
     }
     res_min = *Dlop::create_integer(0);
@@ -745,10 +745,10 @@ void Bitwidth::process_get_mask(Node& node) {
 
   Const val2;
   val2 = a_min.get_mask_op(mask_val);
-  if (val2 > res_max) {
+  if (val2.gt_op(res_max)->is_known_true()) {
     res_max = val2;
   }
-  if (val2 < res_min) {
+  if (val2.lt_op(res_min)->is_known_true()) {
     res_min = val2;
   }
 
@@ -1208,7 +1208,7 @@ void Bitwidth::process_attr_set_bw(Node& node_attr, Bitwidth::Attr attr, Fwd_edg
     if (!parent_pending) {
       Bitwidth_range set_bw;
       set_bw.set_sbits_range(bits);
-      if (bw.get_min() < set_bw.get_min()) {
+      if (bw.get_min().lt_op(set_bw.get_min())->is_known_true()) {
         Pass::error("bitwidth mismatch at node {}. \nVariable {} min is {}, but constrained to {}sbits\n",
                     node_attr.debug_name(),
                     attr_dpin.debug_name(),
