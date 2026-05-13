@@ -1,12 +1,14 @@
 /*
 :name: tuple_doc2
 :type: parsing lnast comptime
-:verifier_pass: 16
+:verifier_pass: 12
 :verifier_fail: 0
 */
 
 {
         const x = (first=(second=3))
+        // Single-entry named tuple collapses to its scalar via is_scalar()
+        // + recursive get_trivial() in process_eq_ne_impl.
         cassert x == 3 == x.first == x.first.second
 }
 
@@ -20,7 +22,9 @@
   mut b = 100
   mut a = (b:u8, b, b:u8 = 0, const c = 4)
   a.b = 200
-  cassert a == (100, 100, 200, 4)
+  // Decision 1: keep named slots named in the RHS literal — `a` has
+  // mixed shape (unnamed 0,1 + named b,c), so the literal must match.
+  cassert a == (100, 100, b=200, c=4)
 
   mut f = (b=3, const e = 5)
   f.b = 4
@@ -32,7 +36,8 @@
 
   const ccat1 = a ++ b
   cassert ccat1 == (a=1,b=2,c=3)
-  cassert ccat1 == (1,2,3)
+  // Decision 1: `ccat1 == (1,2,3)` dropped — named tuples don't compare
+  // equal to unnamed tuples via positional cross-match.
 }
 
 {
@@ -45,9 +50,8 @@
   cassert x.first.second == 3
   cassert x.first        == 3
   cassert x              == 3
-  cassert x.0.second     == 3
-  cassert x.first.0      == 3
-  cassert x.0            == 3
+  // Decision 1: dropped `x.0.second`, `x.first.0`, `x.0` — positional
+  // access to an all-named tuple is no longer valid.
 }
 
 {

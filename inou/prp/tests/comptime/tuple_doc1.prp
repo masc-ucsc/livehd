@@ -1,22 +1,20 @@
 /*
 :name: tuple_doc1
 :type: parsing lnast comptime
-:verifier_pass: 17
+:verifier_pass: 13
 :verifier_fail: 0
 */
 
 {
   mut a = (r1 = (b=1,c=2), r2 = (3,4))
-  cassert a.r1 == (1,2) and a.r2 == (3,4)
-  cassert a[0] == (1,2) and a[1] == (3,4)
-
+  cassert a.r1 == (b=1,c=2) and a.r2 == (3,4)
   cassert a.r1.c    == 2
-  cassert a.r1[1]   == 2
-  cassert a.r1[1]   == 2
-  cassert a[0][1]   == 2
-  cassert a[0].c    == 2
-  cassert a[0].c   == 2
-  cassert a[0][1]   == 2
+  cassert a.r1.b    == 1
+  cassert a.r2.0    == 3
+  cassert a.r2.1    == 4
+  // Decision 1 (bundle_sorted §1.1): positional access on an all-named
+  // tuple (`a.r1[1]`, `a[0]`) is no longer valid — named tuples are
+  // name-access only, unnamed are decimal-index only.
 }
 
 {
@@ -30,7 +28,8 @@
   const xx = 3
 
   mut a = (xx, xx = 44, foo = 55)
-  cassert a == (3, 44, 55) == (3, xx=44, foo=55)
+  // Decision 1: drop `(3, 44, 55)` cross-match — named slots stay named.
+  cassert a == (xx, xx=44, foo=55)
   cassert xx == 3
 }
 
