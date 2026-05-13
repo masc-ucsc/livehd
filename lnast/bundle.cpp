@@ -56,51 +56,26 @@ static bool canonical_compare(const std::pair<std::string, Bundle::Entry>& lhs,
 }
 
 std::string Bundle::normalize_key(std::string_view key) {
-  // Walk dot-separated segments; rewrite any ":N:name" → "name" and bare
-  // ":N:" → "N" (the legacy two encodings). Other segments pass through.
-  // Only first segments are expected to carry the encoding today, but
-  // normalizing every segment is cheap and removes a class of subtle bugs
-  // when nested transforms produce mid-path `:N:` (e.g. composed keys from
-  // get_bundle prefixing).
-  std::string out;
-  out.reserve(key.size());
-  size_t start = 0;
-  bool   first = true;
-  while (start <= key.size()) {
-    auto end = key.find('.', start);
+  // Post-PR3 (bundle_sorted plan §8): legacy `:N:name` / `:N:` producers
+  // have all been migrated to canonical form (bare name / bare decimal
+  // index). Any `:` at the start of a key segment is now an error —
+  // surface it via I() so a regression is loud rather than papered over.
+#ifndef NDEBUG
+  size_t scan_start = 0;
+  while (scan_start <= key.size()) {
+    auto end = key.find('.', scan_start);
     if (end == std::string_view::npos) {
       end = key.size();
     }
-    auto seg = key.substr(start, end - start);
-
-    if (!first) {
-      out += '.';
-    }
-    first = false;
-
-    if (seg.size() >= 2 && seg.front() == ':') {
-      auto second = seg.find(':', 1);
-      if (second != std::string_view::npos) {
-        auto pos_str   = seg.substr(1, second - 1);
-        auto name_part = seg.substr(second + 1);
-        if (name_part.empty()) {
-          out.append(pos_str.data(), pos_str.size());
-        } else {
-          out.append(name_part.data(), name_part.size());
-        }
-      } else {
-        out.append(seg.data(), seg.size());
-      }
-    } else {
-      out.append(seg.data(), seg.size());
-    }
-
+    auto seg = key.substr(scan_start, end - scan_start);
+    I(seg.empty() || seg.front() != ':', "legacy :N: key encoding reached Bundle; producer not migrated");
     if (end == key.size()) {
       break;
     }
-    start = end + 1;
+    scan_start = end + 1;
   }
-  return out;
+#endif
+  return std::string(key);
 }
 
 std::tuple<bool, size_t, size_t> Bundle::match_int_advance(std::string_view a, std::string_view b, size_t a_pos, size_t b_pos) {

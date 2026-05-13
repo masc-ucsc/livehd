@@ -113,18 +113,19 @@ void uPass_constprop::process_assign() {
     // form append:  A = ___t1, A = ___t2, A = ___t3).
     auto rhs_bundle = current_bundle();
     if (rhs_bundle) {
-      // Type-shape preservation: when LHS already declares named slots
-      // (from `mut foo:(x=…, y=…) = …`) and RHS is a pure positional
-      // tuple, bind RHS unnamed entries onto LHS's named slots in
-      // canonical (alphabetical) order. This is what makes
+      // Type-shape preservation: when LHS is a *purely-named* bundle
+      // (the shape declared by `mut foo:(x=…, y=…) = …` — no unnamed
+      // slots) and RHS is a pure positional tuple, bind RHS unnamed
+      // entries onto LHS's named slots in canonical (alphabetical) order.
+      // This is what makes
       //   mut case1:(x=0, y=1) = (0, 1)
       //   case1 = (3, 4)        // → case1 becomes (x=3, y=4)
-      // work — the declaration carries the field shape, and a subsequent
-      // positional assignment is interpreted against that shape.
+      // work.
       //
-      // Skip the merge when RHS carries names of its own (e.g. `bar = foo`
-      // with foo = `(a=…, b=…)`): that's a full copy, not a positional
-      // rebind, and the user expects LHS's shape to be replaced.
+      // Skip the merge when LHS is mixed (named+unnamed, e.g. from
+      // `mut tup0 = (0, y=1)`) — that's a plain initializer, not a typed
+      // shape, and the user expects subsequent assignments to fully
+      // replace. Also skip when RHS carries names of its own (full copy).
       auto existing = st.get_bundle(lhs_text);
       auto first_seg = [](const std::string& k) -> std::string_view {
         auto dot = k.find('.');
@@ -137,30 +138,36 @@ void uPass_constprop::process_assign() {
       std::vector<std::string> lhs_named_order;
       std::set<std::string>    lhs_named_seen;
       if (existing && existing.get() != rhs_bundle.get() && !existing->get_map().empty()) {
+        bool lhs_has_unnamed = false;
         for (const auto& e : existing->get_map()) {
           if (Bundle::is_attribute(e.first)) {
             continue;
           }
           auto seg = first_seg(e.first);
-          if (!is_named_top(seg)) {
-            continue;
-          }
-          auto seg_s = std::string(seg);
-          if (lhs_named_seen.insert(seg_s).second) {
-            lhs_named_order.push_back(std::move(seg_s));
-          }
-        }
-        bool rhs_pure_positional = true;
-        for (const auto& e : rhs_bundle->get_map()) {
-          if (Bundle::is_attribute(e.first)) {
-            continue;
-          }
-          if (is_named_top(first_seg(e.first))) {
-            rhs_pure_positional = false;
+          if (is_named_top(seg)) {
+            auto seg_s = std::string(seg);
+            if (lhs_named_seen.insert(seg_s).second) {
+              lhs_named_order.push_back(std::move(seg_s));
+            }
+          } else {
+            // Unnamed entry — LHS isn't a pure typed shape; bail.
+            lhs_has_unnamed = true;
             break;
           }
         }
-        do_merge = !lhs_named_order.empty() && rhs_pure_positional;
+        bool rhs_pure_positional = true;
+        if (!lhs_has_unnamed && !lhs_named_order.empty()) {
+          for (const auto& e : rhs_bundle->get_map()) {
+            if (Bundle::is_attribute(e.first)) {
+              continue;
+            }
+            if (is_named_top(first_seg(e.first))) {
+              rhs_pure_positional = false;
+              break;
+            }
+          }
+        }
+        do_merge = !lhs_has_unnamed && !lhs_named_order.empty() && rhs_pure_positional;
       }
       if (do_merge) {
         // RHS unnamed entries in numeric (canonical) order, walked by
@@ -1715,7 +1722,7 @@ bool uPass_constprop::try_eval_comb_call(std::string_view dst, std::string_view 
     if (it == local_values.end() || it->second.is_invalid()) {
       return false;
     }
-    out_bundle->set(std::format(":{}:{}", i, outputs[i]), it->second);
+    out_bundle->set(outputs[i], it->second);
   }
   st.set(dst, out_bundle);
   return true;

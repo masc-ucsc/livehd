@@ -11,5 +11,5 @@ comb top(a, b) -> (c, d) {
 }
 
 const x = top(7,3)
-cassert x == (10,4)
+cassert x == (c=10, d=4)
 cassert x.c == 10 and x.d == 4
