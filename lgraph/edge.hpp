@@ -24,16 +24,8 @@ public:
         : driver_hidx(d_hidx), driver_idx(d_idx), pad1(0), sink_hidx(s_hidx), sink_idx(s_idx), pad2(0) {}
     Compact() : driver_idx(0), pad1(0), sink_idx(0), pad2(0) {}
 
-    Compact& operator=(const Compact& obj) {
-      if (this != &obj) {
-        driver_hidx = obj.driver_hidx;
-        driver_idx  = obj.driver_idx;
-        sink_hidx   = obj.sink_hidx;
-        sink_idx    = obj.sink_idx;
-      };
-
-      return *this;
-    }
+    Compact(const Compact&)            = default;
+    Compact& operator=(const Compact&) = default;
 
     constexpr bool is_invalid() const { return driver_idx == 0; }
 
