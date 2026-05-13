@@ -15,6 +15,18 @@
 // errors when multiple TUs include upass_constprop.hpp.
 static upass::uPass_plugin cprop("constprop", upass::uPass_wrapper<uPass_constprop>::get_upass);
 
+// Canonical-key shape detection after the bundle_sorted refactor. Defined
+// here (forward) so process_assign can use it for shape-preserving merge.
+static bool is_named_top(std::string_view first) {
+  if (first.empty()) {
+    return false;
+  }
+  if (first.front() == '_' || std::isdigit(static_cast<unsigned char>(first.front()))) {
+    return false;
+  }
+  return true;
+}
+
 // Coerce one value to its text-form Const. Mirrors Pyrope's `string()` cast:
 //   nil    → "nil"
 //   string → as-is
@@ -101,49 +113,87 @@ void uPass_constprop::process_assign() {
     // form append:  A = ___t1, A = ___t2, A = ___t3).
     auto rhs_bundle = current_bundle();
     if (rhs_bundle) {
-      // Type-shape preservation: when LHS already holds a bundle whose keys
-      // include named-position slots (`:N:name`), and RHS is a pure
-      // positional bundle (only `N` keys), bind RHS positions onto LHS's
-      // named slots so a downstream `tup0.y` keeps tracking position 1
-      // across `tup0 = (55, 66)`.
+      // Type-shape preservation: when LHS already declares named slots
+      // (from `mut foo:(x=…, y=…) = …`) and RHS is a pure positional
+      // tuple, bind RHS unnamed entries onto LHS's named slots in
+      // canonical (alphabetical) order. This is what makes
+      //   mut case1:(x=0, y=1) = (0, 1)
+      //   case1 = (3, 4)        // → case1 becomes (x=3, y=4)
+      // work — the declaration carries the field shape, and a subsequent
+      // positional assignment is interpreted against that shape.
       //
-      // Skip the merge when RHS itself carries names (e.g. `bar = foo` with
-      // foo = `(a=…, b=…)`): that's a full bundle copy, not a positional
-      // rebind, and the user expects bar's old shape to be replaced.
+      // Skip the merge when RHS carries names of its own (e.g. `bar = foo`
+      // with foo = `(a=…, b=…)`): that's a full copy, not a positional
+      // rebind, and the user expects LHS's shape to be replaced.
       auto existing = st.get_bundle(lhs_text);
+      auto first_seg = [](const std::string& k) -> std::string_view {
+        auto dot = k.find('.');
+        return dot == std::string::npos ? std::string_view{k} : std::string_view{k}.substr(0, dot);
+      };
       bool do_merge = false;
+      // LHS named slots in canonical (alphabetical) order, deduped on
+      // first-level segment so nested entries (`x.b`, `x.c`) collapse to
+      // one slot `x`.
+      std::vector<std::string> lhs_named_order;
+      std::set<std::string>    lhs_named_seen;
       if (existing && existing.get() != rhs_bundle.get() && !existing->get_map().empty()) {
-        bool lhs_has_named_pos = false;
         for (const auto& e : existing->get_map()) {
-          if (!e.first.empty() && e.first.front() == ':') {
-            lhs_has_named_pos = true;
-            break;
+          if (Bundle::is_attribute(e.first)) {
+            continue;
+          }
+          auto seg = first_seg(e.first);
+          if (!is_named_top(seg)) {
+            continue;
+          }
+          auto seg_s = std::string(seg);
+          if (lhs_named_seen.insert(seg_s).second) {
+            lhs_named_order.push_back(std::move(seg_s));
           }
         }
         bool rhs_pure_positional = true;
         for (const auto& e : rhs_bundle->get_map()) {
-          if (!e.first.empty() && e.first.front() == ':') {
+          if (Bundle::is_attribute(e.first)) {
+            continue;
+          }
+          if (is_named_top(first_seg(e.first))) {
             rhs_pure_positional = false;
             break;
           }
         }
-        do_merge = lhs_has_named_pos && rhs_pure_positional;
+        do_merge = !lhs_named_order.empty() && rhs_pure_positional;
       }
       if (do_merge) {
+        // RHS unnamed entries in numeric (canonical) order, walked by
+        // looking them up at "0", "1", …
         auto merged = std::make_shared<Bundle>(std::string(lhs_text));
+        // Start by copying LHS shape verbatim (incl. nil placeholders and
+        // any nested sub-entries).
         for (const auto& lhs_entry : existing->get_map()) {
-          if (rhs_bundle->has_trivial(lhs_entry.first)) {
-            merged->set(lhs_entry.first, rhs_bundle->get_trivial(lhs_entry.first));
-          } else {
-            merged->set(lhs_entry.first, lhs_entry.second);
+          if (Bundle::is_attribute(lhs_entry.first)) {
+            continue;
           }
+          merged->set(lhs_entry.first, lhs_entry.second);
         }
-        // Carry over any RHS entries the LHS shape doesn't cover (e.g. a
-        // wider RHS appends new positions).
-        for (const auto& rhs_entry : rhs_bundle->get_map()) {
-          if (!merged->has_trivial(rhs_entry.first)) {
-            merged->set(rhs_entry.first, rhs_entry.second);
+        // Bind each RHS positional value to the next LHS named slot.
+        size_t idx = 0;
+        for (const auto& name : lhs_named_order) {
+          auto pos_key = std::to_string(idx);
+          if (!rhs_bundle->has_trivial(pos_key)) {
+            break;
           }
+          merged->set(name, rhs_bundle->get_trivial(pos_key));
+          ++idx;
+        }
+        // RHS positions beyond LHS shape append as unnamed slots after
+        // the named ones — preserves "wider RHS appends new positions"
+        // semantics, picking up where the named binding stopped.
+        size_t append_pos = 0;
+        for (;; ++append_pos) {
+          auto pos_key = std::to_string(idx + append_pos);
+          if (!rhs_bundle->has_trivial(pos_key)) {
+            break;
+          }
+          merged->set(std::to_string(append_pos), rhs_bundle->get_trivial(pos_key));
         }
         st.set(lhs_text, merged);
       } else {
@@ -345,8 +395,23 @@ void uPass_constprop::process_log_not() {
 // Bundle::match's `:N:name ↔ N` special-case (so `(a=3,b=4,5) == (3,4,5)`
 // still holds), and nested paths (`:1:b.:0:c`) keep the existing
 // position-based behaviour.
+// Canonical key shape detection after the bundle_sorted refactor:
+//   - "__attr"          → attribute (covered by Bundle::is_attribute)
+//   - "0", "1", …       → unnamed (first char is a digit)
+//   - anything else     → named (bare name, no `:N:` prefix)
+// is_named_top forward-declared near the top of the file so
+// process_assign can call it during shape-preserving merge.
+
 static std::optional<bool> compare_bundles_eq(const std::shared_ptr<Bundle const>& a,
                                               const std::shared_ptr<Bundle const>& b) {
+  // Plan §2 equality contract: bundles compare equal iff (recursively)
+  //   1. same set of attribute keys with same values, AND
+  //   2. same set of named-entry names with each name's value equal, AND
+  //   3. same number of unnamed entries with each canonical-index value equal.
+  // Storage is canonical (named entries by bare name, unnamed by decimal
+  // index), so a lockstep walk by key suffices — no `:N:name ↔ N` fallback.
+  // Tri-state: nullopt = unknown (any operand invalid / mismatch via unknowns).
+
   auto contains = [](const std::shared_ptr<Bundle const>& src,
                      const std::shared_ptr<Bundle const>& other) -> std::optional<bool> {
     for (const auto& e : src->get_map()) {
@@ -356,41 +421,11 @@ static std::optional<bool> compare_bundles_eq(const std::shared_ptr<Bundle const
       if (e.second.trivial.is_invalid()) {
         return std::nullopt;
       }
-      auto find_by_name = [&]() -> const Const* {
-        // Top-level named-positional only (`:N:name`, no sub-path); other
-        // shapes fall through to the position-based path via Bundle::match.
-        if (e.first.empty() || e.first.front() != ':') {
-          return nullptr;
-        }
-        if (e.first.find('.') != std::string::npos) {
-          return nullptr;
-        }
-        const auto src_name = Bundle::get_first_level_name(e.first);
-        for (const auto& oe : other->get_map()) {
-          if (Bundle::is_attribute(oe.first)) {
-            continue;
-          }
-          if (oe.first.empty() || oe.first.front() != ':') {
-            continue;
-          }
-          if (oe.first.find('.') != std::string::npos) {
-            continue;
-          }
-          if (Bundle::get_first_level_name(oe.first) == src_name) {
-            return &oe.second.trivial;
-          }
-        }
-        return nullptr;
-      };
-      const Const* ov = nullptr;
-      if (other->has_trivial(e.first)) {
-        ov = &other->get_trivial(e.first);
-      } else if (auto by_name = find_by_name(); by_name) {
-        ov = by_name;
-      } else {
+      if (!other->has_trivial(e.first)) {
         return false;
       }
-      if (ov->is_invalid()) {
+      const Const& ov = other->get_trivial(e.first);
+      if (ov.is_invalid()) {
         return std::nullopt;
       }
       // Wildcards (`0sb?`) compare by structural identity: `0sb? == 0sb?`
@@ -398,14 +433,14 @@ static std::optional<bool> compare_bundles_eq(const std::shared_ptr<Bundle const
       // identity (including unknown positions); `eq_op` reduces to known-false
       // only when neither side carries unknowns. That lets bundles with
       // matching wildcard slots still fold equal.
-      if (ov->same_repr(e.second.trivial)) {
+      if (ov.same_repr(e.second.trivial)) {
         continue;
       }
-      const Const eq = *ov->eq_op(e.second.trivial);
+      const Const eq = *ov.eq_op(e.second.trivial);
       if (eq.is_known_false()) {
         return false;
       }
-      return std::nullopt;  // unknown bits prevent a definitive answer
+      return std::nullopt;
     }
     return true;
   };
@@ -451,8 +486,8 @@ static bool structural_does(const std::shared_ptr<Bundle const>& a,
       continue;
     }
     auto first = Bundle::get_first_level(e.first);
-    if (!first.empty() && first.front() == ':') {
-      a_names.insert(Bundle::get_first_level_name(first));
+    if (is_named_top(first)) {
+      a_names.insert(first);
     } else {
       const auto pos = Bundle::get_first_level_pos(first);
       if (pos >= 0) {
@@ -463,7 +498,7 @@ static bool structural_does(const std::shared_ptr<Bundle const>& a,
 
   // Walk b's first-level shape; bail as soon as a doesn't cover something.
   // Track seen names/positions so we don't re-check sub-entries that share
-  // the same first level (`:1:foo.x` and `:1:foo.y` collapse to one check).
+  // the same first level (`foo.x` and `foo.y` collapse to one check).
   std::set<std::string_view> seen_names;
   std::set<int>              seen_pos;
   for (const auto& e : b->get_map()) {
@@ -471,10 +506,9 @@ static bool structural_does(const std::shared_ptr<Bundle const>& a,
       continue;
     }
     auto first = Bundle::get_first_level(e.first);
-    if (!first.empty() && first.front() == ':') {
-      auto name = Bundle::get_first_level_name(first);
-      if (seen_names.insert(name).second) {
-        if (a_names.find(name) == a_names.end()) {
+    if (is_named_top(first)) {
+      if (seen_names.insert(first).second) {
+        if (a_names.find(first) == a_names.end()) {
           return false;
         }
       }
@@ -504,26 +538,31 @@ static bool structural_does(const std::shared_ptr<Bundle const>& a,
 // unnamed@0/named@1).
 static bool structural_equals(const std::shared_ptr<Bundle const>& a,
                               const std::shared_ptr<Bundle const>& b) {
+  // After the bundle_sorted refactor, structural equality is:
+  //   - same SET of named-entry first-level names (specific names matter:
+  //     `(x=1) equals (y=1)` is false — `equals` keys on name presence,
+  //     unlike `does` which compares names by exact match too).
+  //   - same NUMBER of distinct unnamed first-level positions.
+  // Top-level sub-bundle nesting (`foo.0`, `foo.1`) collapses to one slot
+  // per first-level key.
   auto collect_shape = [](const std::shared_ptr<Bundle const>& src) {
-    // (pos, is_named) per top-level slot. Dedup so nested sub-bundle entries
-    // (`:0:a.0`, `:0:a.1`) collapse to a single shape entry for slot 0.
-    std::set<std::pair<int, bool>> shape;
+    std::set<std::string_view> named;
+    std::set<int>              unnamed;
     for (const auto& e : src->get_map()) {
       if (Bundle::is_attribute(e.first)) {
         continue;
       }
       auto first = Bundle::get_first_level(e.first);
-      if (first.empty()) {
+      if (is_named_top(first)) {
+        named.insert(first);
         continue;
       }
-      const bool is_named = (first.front() == ':');
-      const int  pos      = is_named ? Bundle::get_first_level_pos(first) : Bundle::get_first_level_pos(first);
-      if (pos < 0) {
-        continue;
+      const int pos = Bundle::get_first_level_pos(first);
+      if (pos >= 0) {
+        unnamed.insert(pos);
       }
-      shape.insert({pos, is_named});
     }
-    return shape;
+    return std::pair{std::move(named), std::move(unnamed)};
   };
   return collect_shape(a) == collect_shape(b);
 }
@@ -769,8 +808,13 @@ void uPass_constprop::process_stmts_post() {
 //   tuple_get:  ref(dst), ref(src), (const|ref)(field)...
 //   tuple_set:  ref(tuple), (const|ref)(field)..., (const|ref)(value)
 //
-// Bundle key format for named fields: ":pos:name"  (e.g. ":1:foo")
-// Symbol_table looks up "A.foo" as → Bundle A → Bundle::get_trivial("foo")
+// Bundle keys after the bundle_sorted refactor:
+//   - named fields are the bare name ("foo")
+//   - unnamed fields are the bare decimal index ("0", "1", …)
+// The two key spaces are independent: a named slot does NOT consume an
+// unnamed position. So the literal `(bar=true, 4)` stores {bar:true, 0:4},
+// matching what `(4, bar=true)` (and bundle-built concat output) produces —
+// Decision 4 (§1.4) of the plan: unnamed position = canonical vector index.
 
 void uPass_constprop::process_tuple_add() {
   // Build (or update in-place) a Bundle for the destination from each entry.
@@ -792,30 +836,29 @@ void uPass_constprop::process_tuple_add() {
   // from a true scalar). See process_tuple_concat.
   tuple_typed_names.insert(dst);
 
-  int pos = 0;
+  int unnamed_pos = 0;  // advances only on unnamed entries
   while (move_to_sibling()) {
-    auto pos_txt = std::to_string(pos);
-
     if (is_type(Lnast_ntype::Lnast_ntype_const)) {
-      bundle->set(pos_txt, *Dlop::from_pyrope(current_text()));
+      bundle->set(std::to_string(unnamed_pos), *Dlop::from_pyrope(current_text()));
+      ++unnamed_pos;
 
     } else if (is_type(Lnast_ntype::Lnast_ntype_ref)) {
-      bundle->set(pos_txt, st.get_bundle(current_text()));
+      bundle->set(std::to_string(unnamed_pos), st.get_bundle(current_text()));
+      ++unnamed_pos;
 
     } else if (is_type(Lnast_ntype::Lnast_ntype_assign)) {
-      // Named field: assign(ref(key), const/ref(val))
+      // Named field: assign(ref(key), const/ref(val)). Stored under the
+      // bare name — named slots don't advance unnamed_pos.
       move_to_child();
-      auto key       = std::string(current_text());
-      auto field_key = std::format(":{}:{}", pos_txt, key);
+      auto key = std::string(current_text());
       move_to_sibling();
       if (is_type(Lnast_ntype::Lnast_ntype_const)) {
-        bundle->set(field_key, *Dlop::from_pyrope(current_text()));
+        bundle->set(key, *Dlop::from_pyrope(current_text()));
       } else if (is_type(Lnast_ntype::Lnast_ntype_ref)) {
-        bundle->set(field_key, st.get_bundle(current_text()));
+        bundle->set(key, st.get_bundle(current_text()));
       }
       move_to_parent();
     }
-    ++pos;
   }
   // Bundle was updated in-place; no mark_changed() — process_tuple_get drives convergence.
   move_to_parent();
@@ -951,7 +994,7 @@ static bool is_tuple_shaped(const std::shared_ptr<Bundle const>& b) {
       continue;
     }
     auto first = Bundle::get_first_level(e.first);
-    if (!first.empty() && first.front() == ':') {
+    if (is_named_top(first)) {
       return true;  // any named field → tuple-shaped
     }
     const auto pos = Bundle::get_first_level_pos(first);
@@ -980,7 +1023,7 @@ static bool has_first_level_shape(const std::shared_ptr<Bundle const>& b) {
     if (first.empty()) {
       continue;
     }
-    if (first.front() == ':' || Bundle::get_first_level_pos(first) >= 0) {
+    if (is_named_top(first) || Bundle::get_first_level_pos(first) >= 0) {
       return true;
     }
   }
@@ -1056,9 +1099,10 @@ static std::vector<Bundle_flat_entry> collect_first_level(const std::shared_ptr<
     Bundle_flat_entry* e;
     if (it == by_first.end()) {
       Bundle_flat_entry n;
-      n.pos = Bundle::get_first_level_pos(first);
-      if (first.front() == ':') {
-        n.name = Bundle::get_first_level_name(first);
+      if (is_named_top(first)) {
+        n.name = first;  // bare name, no `:N:` prefix in canonical storage
+      } else {
+        n.pos = Bundle::get_first_level_pos(first);
       }
       by_first[first_str] = entries.size();
       entries.emplace_back(std::move(n));
@@ -1967,11 +2011,21 @@ void uPass_constprop::process_tuple_get() {
   }
 
   // Accumulate field path: each child after src appends ".field" to the key.
+  // LNAST const text is the pyrope-syntactic form (`"0"`, `"'b'"`, `"\"hi\""`),
+  // not the field name. Parse and use Const::to_field() so integers render
+  // as their decimal and strings drop their surrounding quotes — making
+  // `t[0]`, `t['b']` and `t["foo"]` resolve uniformly to the bare-name
+  // stored key in the bundle.
   std::string key = src;
   do {
     if (is_type(Lnast_ntype::Lnast_ntype_const)) {
+      auto v = Dlop::from_pyrope(current_text());
+      if (!v || v->is_invalid()) {
+        move_to_parent();
+        return;
+      }
       key += '.';
-      key += current_text();
+      key += v->to_field();
     } else if (is_type(Lnast_ntype::Lnast_ntype_ref)) {
       // Runtime index: must be a known constant to fold statically.
       const auto idx = st.get_trivial(current_text());
@@ -2107,58 +2161,24 @@ void uPass_constprop::process_tuple_set() {
   };
 
   if (use_named_positional) {
-    // Place the entry into tuple_var's bundle as `:N:name`. N is reused if
-    // the bundle already has the name (idempotent re-set), otherwise it's
-    // the next free positional slot. This mirrors tuple_add's encoding so
-    // tuple_concat's named-positional grouping recognizes the slot.
+    // Place the entry into tuple_var's bundle under the bare name. Named
+    // and unnamed slots live in separate key spaces after the bundle_sorted
+    // refactor — no position prefix to compute or reuse.
     auto bundle = st.get_bundle(tuple_var);
     if (!bundle) {
       bundle = std::make_shared<Bundle>(tuple_var);
       st.set(tuple_var, bundle);
     }
-    const std::string& name      = path[0];
-    int                next_pos  = 0;
-    int                found_pos = -1;
-    for (const auto& e : bundle->get_map()) {
-      if (e.first.empty() || e.first.front() == '_') continue;  // attribute
-      if (e.first.front() == ':') {
-        // `:N:name[.suffix]`
-        auto second = e.first.find(':', 1);
-        if (second == std::string::npos) continue;
-        int pos = 0;
-        try {
-          pos = std::stoi(e.first.substr(1, second - 1));
-        } catch (...) { continue; }
-        if (pos + 1 > next_pos) next_pos = pos + 1;
-        auto rest = e.first.substr(second + 1);
-        auto dot  = rest.find('.');
-        auto top_name = dot == std::string::npos ? rest : rest.substr(0, dot);
-        if (top_name == name && found_pos < 0) found_pos = pos;
-      } else if (std::isdigit(static_cast<unsigned char>(e.first.front()))) {
-        // Plain positional (no name); count the slot for next_pos only.
-        auto dot = e.first.find('.');
-        auto top = dot == std::string::npos ? e.first : e.first.substr(0, dot);
-        try {
-          int pos = std::stoi(top);
-          if (pos + 1 > next_pos) next_pos = pos + 1;
-        } catch (...) {}
-      } else if (e.first == name || e.first.substr(0, name.size() + 1) == name + ".") {
-        // Pre-existing flat-name entry (legacy tuple_set output). Reuse its
-        // implicit position 0 if no `:N:name` claimed slot 0 yet.
-        if (found_pos < 0) found_pos = 0;
-      }
-    }
-    int  pos       = found_pos >= 0 ? found_pos : next_pos;
-    auto field_key = std::format(":{}:{}", pos, name);
+    const std::string& name = path[0];
 
     auto v = resolve_value();
     if (v) {
       // Update bundle in place. mark_changed is driven by tuple_get; matching
       // process_tuple_add's no-mark policy here keeps convergence behavior.
-      bundle->set(field_key, *v);
+      bundle->set(name, *v);
     } else if (val_child.is_ref && st.has_bundle(val_child.text)) {
       auto sub = st.get_bundle(val_child.text);
-      if (sub) bundle->set(field_key, sub);
+      if (sub) bundle->set(name, sub);
     }
     move_to_parent();
     return;

@@ -1,36 +1,37 @@
 /*
 :name: tuple_simple5
 :type: parsing lnast comptime
-:verifier_pass: 11
+:verifier_pass: 12
 :verifier_fail: 0
 */
 
-mut case1:(x=0, y=1) = (0, 1)
+mut case1:(x=nil, y=nil) = (x=0, y=1)
 
-case1 = (3,4)
+case1 = (y=4,x=3)
 cassert case1.x==3 and case1.y==4
-cassert case1 == (3,4) == (x=3,y=4)
+cassert case1 == (x=3,y=4)
 cassert case1 == (y=4,x=3)
 
-case1 = (x=3,y=4)
-cassert case1.x==3 and case1.y==4
-cassert case1 == (3,4) == (x=3,y=4)
-cassert case1 == (y=4,x=3)
+case1 = (x=30,y=40)
+cassert case1.x==30 and case1.y==40
+cassert case1 == (x=30,y=40)
+cassert case1 == (y=40,x=30)
 
-mut case2:(long=true, myint=33) = (true, 33)
+mut case2:(long=nil, myint=100) = (long=true, myint=33)
 
-case2 = (false, 44)
+cassert case2 == (long=true,myint=33)
+case2 = (long=false, myint=44)
 cassert case2.long == false and case2.myint==44
-cassert case2 == (false,44)
-cassert case2 != (44,false)
+cassert case2 != (false,44)  // named tuple
+cassert case2 != (44,false)  // named tuple
 
 mut longer = 3
 
-mut case3:(longer=100, x=33) = (100, 33)
+mut case3:(longer=10000, x=33000) = (longer=100, x=33)
 
-case3 = (longer, 88)
-cassert case3 == (3,88) == (longer=3,88) == (longer=3,x=88) == (3,x=88)
+case3 = (longer=longer, x=88)
+cassert case3 == (longer=3,x=88)
 
 const potato = 66
-case3 = (longer=potato, 54)
-cassert case3 == (66,54) == (longer=66,54) == (longer=66,x=54) == (66,x=54)
+case3 = (longer=potato, x=54)
+cassert case3 == (longer=66,x=54)

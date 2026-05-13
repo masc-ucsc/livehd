@@ -12,39 +12,95 @@
 
 using namespace std::literals;
 
-// Custom sort, to make _ ordered first. This helps to get attributes first which helps to speedup some algorithms in bundle
-static bool inline compare_less(char c1, char c2) {
-  // return (std::tolower(c1) < std::tolower(c2));
-  return (c1 == '_' || c1 < c2) && c2 != '_';
+// Canonical ordering for keys stored after normalize_key():
+//   1. attributes ("__name…") — alphabetical by first segment
+//   2. named ("name…")         — alphabetical by first segment
+//   3. unnamed ("0", "1", …)   — by integer value of first segment
+//
+// Ties broken by full-key lexicographic compare (matters for nested paths
+// like "foo.bar.__bits" vs "foo.baz").
+static std::string_view first_segment_view(std::string_view k) {
+  auto dot = k.find('.');
+  return dot == std::string_view::npos ? k : k.substr(0, dot);
 }
 
-static bool bundle_sort(const std::pair<const std::string&, Bundle::Entry>& lhs,
-                        const std::pair<const std::string&, Bundle::Entry>& rhs) {
-  auto l     = 0u;
-  auto l_end = lhs.first.size();
-  auto r     = 0u;
-  auto r_end = rhs.first.size();
-
-  while (l != l_end && r != r_end) {
-    if (lhs.first[l] == ':') {  // Skip : from things like :3:id. Then we can sort bundles like (a=..., 333) // ":0:a" < "1"
-      ++l;
-      continue;
-    }
-    if (rhs.first[r] == ':') {
-      ++r;
-      continue;
-    }
-    if (lhs.first[l] != rhs.first[r]) {
-      auto v = compare_less(lhs.first[l], rhs.first[r]);
-      return v;
-    }
-    ++l;
-    ++r;
+static int segment_category(std::string_view seg) {
+  if (seg.size() >= 2 && seg[0] == '_' && seg[1] == '_') {
+    return 0;  // attribute
   }
+  if (!seg.empty() && std::isdigit(static_cast<unsigned char>(seg.front()))) {
+    return 2;  // unnamed (decimal index)
+  }
+  return 1;  // named
+}
 
-  auto v = lhs.first.size() <= rhs.first.size();  // l == l_end; // longest
+static bool canonical_compare(const std::pair<std::string, Bundle::Entry>& lhs,
+                              const std::pair<std::string, Bundle::Entry>& rhs) {
+  auto l_seg = first_segment_view(lhs.first);
+  auto r_seg = first_segment_view(rhs.first);
+  auto l_cat = segment_category(l_seg);
+  auto r_cat = segment_category(r_seg);
+  if (l_cat != r_cat) {
+    return l_cat < r_cat;
+  }
+  if (l_cat == 2) {
+    int li = str_tools::to_i(l_seg);
+    int ri = str_tools::to_i(r_seg);
+    if (li != ri) {
+      return li < ri;
+    }
+  } else if (l_seg != r_seg) {
+    return l_seg < r_seg;
+  }
+  return lhs.first < rhs.first;
+}
 
-  return v;
+std::string Bundle::normalize_key(std::string_view key) {
+  // Walk dot-separated segments; rewrite any ":N:name" → "name" and bare
+  // ":N:" → "N" (the legacy two encodings). Other segments pass through.
+  // Only first segments are expected to carry the encoding today, but
+  // normalizing every segment is cheap and removes a class of subtle bugs
+  // when nested transforms produce mid-path `:N:` (e.g. composed keys from
+  // get_bundle prefixing).
+  std::string out;
+  out.reserve(key.size());
+  size_t start = 0;
+  bool   first = true;
+  while (start <= key.size()) {
+    auto end = key.find('.', start);
+    if (end == std::string_view::npos) {
+      end = key.size();
+    }
+    auto seg = key.substr(start, end - start);
+
+    if (!first) {
+      out += '.';
+    }
+    first = false;
+
+    if (seg.size() >= 2 && seg.front() == ':') {
+      auto second = seg.find(':', 1);
+      if (second != std::string_view::npos) {
+        auto pos_str   = seg.substr(1, second - 1);
+        auto name_part = seg.substr(second + 1);
+        if (name_part.empty()) {
+          out.append(pos_str.data(), pos_str.size());
+        } else {
+          out.append(name_part.data(), name_part.size());
+        }
+      } else {
+        out.append(seg.data(), seg.size());
+      }
+    } else {
+      out.append(seg.data(), seg.size());
+    }
+
+    if (end == key.size()) {
+      break;
+    }
+    start = end + 1;
+  }
+  return out;
 }
 
 std::tuple<bool, size_t, size_t> Bundle::match_int_advance(std::string_view a, std::string_view b, size_t a_pos, size_t b_pos) {
@@ -343,18 +399,12 @@ std::tuple<std::string, std::string> Bundle::learn_fix_int(std::string_view a, s
 }
 
 bool Bundle::match(std::string_view a, std::string_view b) {
+  // Decision 1 (bundle_sorted plan): "no positional access on all-named
+  // tuples". The legacy `":0:"` / `"0"` cross-fallback that let `tup.0` find
+  // the first named slot is gone — callers must use the actual key (name
+  // for named, decimal index for unnamed, attribute string for attrs).
   if (a == b) {
     return true;
-  }
-  if (a.empty()) {
-    if (b == "0" || (b.size() > 3 && b.substr(0, 3) == ":0:")) {
-      return true;
-    }
-  }
-  if (b.empty()) {
-    if (a == "0" || (a.size() > 3 && a.substr(0, 3) == ":0:")) {
-      return true;
-    }
   }
 
   auto [m1, m2, x] = match_int(a, b);
@@ -740,7 +790,14 @@ void Bundle::set(std::string_view key, const std::shared_ptr<Bundle const>& tup)
   }
 }
 
-void Bundle::set(std::string_view key, const Entry&& entry) {
+void Bundle::set(std::string_view key_in, const Entry&& entry) {
+  I(!key_in.empty());
+
+  // Normalize legacy `:N:name` / `:N:` producers to canonical storage form.
+  // After PR2 lands and all producers emit canonical keys, this is a no-op
+  // for the inputs we see in practice.
+  auto        normalized_key = normalize_key(key_in);
+  std::string_view key{normalized_key};
   I(!key.empty());
 
   std::string uncanonical_key{key};
@@ -830,145 +887,104 @@ void Bundle::set(std::string_view key, const Entry&& entry) {
 }
 
 bool Bundle::concat(const std::shared_ptr<Bundle const>& tup) {
-  // Pyrope tuple concat (`a ++ b`):
-  //   - Iterate RHS top-level slots in source order.
-  //   - Drop any slot whose only entry is a `nil` scalar (`nil` means
-  //     "invalid / not yet bound" — concat with anything else takes the
-  //     non-nil side; if both sides are nil at a colliding name, one nil
-  //     remains).
-  //   - Top-level named slots whose name already exists in LHS *merge*:
-  //     LHS keeps its position, and LHS scalar + RHS scalar pack into a
-  //     positional sub-tuple at that slot. Subsequent collisions extend
-  //     the sub-tuple. nil from either side drops itself rather than
-  //     merging.
-  //   - Everything else is appended at the next free top-level position
-  //     (positional renumbering keeps the result densely indexed).
+  // Pyrope tuple concat (`a ++ b`) in canonical-key form:
+  //   - attrs: rhs wins on collision (matches the legacy "forward as-is")
+  //   - named: per-name merge — `nil` from either side drops; otherwise
+  //     LHS scalar+RHS scalar packs into a `(scalar, scalar)` sub-tuple
+  //     at the existing slot, and further collisions extend that sub-tuple.
+  //   - unnamed: appended at the next free position (densely renumbered).
+  //
+  // Storage is normalize_key()-canonical: first segment is "__attr", a
+  // bare name, or a decimal index — no `:N:name` encoding to parse.
 
-  // Helpers mirror the encoding documented in the class header:
-  //   - top-level *unnamed* keys start with a digit (`0`, `1.foo`, …)
-  //   - top-level *named-positional* keys are `:N:name` (or `:N:name.sub`)
-  // We treat the substring up to the first `.` as the "top-level prefix".
-  auto top_level_prefix = [](std::string_view k) -> std::string_view {
-    auto dot = k.find('.');
-    return dot == std::string_view::npos ? k : k.substr(0, dot);
-  };
-  auto top_pos = [](std::string_view top) -> int {
-    if (top.empty()) {
-      return -1;
-    }
-    if (top.front() == ':') {
-      return str_tools::to_i(top.substr(1));
-    }
-    if (std::isdigit(static_cast<unsigned char>(top.front()))) {
-      return str_tools::to_i(top);
-    }
-    return -1;
-  };
-  auto top_name = [](std::string_view top) -> std::string_view {
-    // `:N:name` → name; otherwise empty.
-    if (top.size() < 4 || top.front() != ':') {
-      return {};
-    }
-    auto second_colon = top.find(':', 1);
-    if (second_colon == std::string_view::npos) {
-      return {};
-    }
-    return top.substr(second_colon + 1);
-  };
+  auto seg = [](std::string_view k) -> std::string_view { return first_segment_view(k); };
+  auto cat = [&](std::string_view k) -> int { return segment_category(seg(k)); };
 
-  // Snapshot LHS shape: max top-level position + name → top-level prefix.
-  // We scan the existing key_map exactly once; any new entries appended
-  // during this pass don't feed back into collision detection.
-  int                                          next_pos = 0;
-  std::unordered_map<std::string, std::string> lhs_name_top;
+  // Snapshot LHS shape: names already present and the next free decimal slot.
+  std::unordered_set<std::string> lhs_named;
+  int                             next_unnamed = 0;
   for (const auto& e : key_map) {
-    if (is_attribute(e.first)) {
-      continue;
-    }
-    auto top = top_level_prefix(e.first);
-    auto pos = top_pos(top);
-    if (pos >= 0 && pos + 1 > next_pos) {
-      next_pos = pos + 1;
-    }
-    auto lhs_top_name_sv = top_name(top);
-    if (!lhs_top_name_sv.empty()) {
-      lhs_name_top.try_emplace(std::string(lhs_top_name_sv), std::string(top));
+    auto c = cat(e.first);
+    if (c == 1) {
+      lhs_named.emplace(std::string(seg(e.first)));
+    } else if (c == 2) {
+      int n = str_tools::to_i(seg(e.first));
+      if (n + 1 > next_unnamed) {
+        next_unnamed = n + 1;
+      }
     }
   }
 
-  // Group RHS entries by top-level prefix while preserving group order.
+  // Group RHS entries by first segment, preserving first-seen order.
   struct Rhs_group {
-    std::string                                   top;       // RHS top-level prefix as-emitted
-    std::vector<std::pair<std::string, Const>>   entries;   // (suffix-after-top, value); suffix "" = scalar at slot
+    std::string                          first_seg;     // canonical first segment
+    int                                  category;      // 0 attr / 1 named / 2 unnamed
+    std::vector<std::pair<std::string, Entry>> entries; // (suffix incl. leading ".", entry)
   };
-  std::vector<Rhs_group>                rhs_groups;
-  std::unordered_map<std::string, size_t> rhs_top_idx;
+  std::vector<Rhs_group>                  groups;
+  std::unordered_map<std::string, size_t> group_idx;
   for (const auto& it : tup->key_map) {
-    if (is_attribute(it.first)) {
-      // Attributes ride along on the RHS side (rare in tuple-concat tests);
-      // forward as-is — they live on the root key, not on a positional slot.
-      key_map.emplace_back(it.first, it.second);
-      continue;
+    auto         seg_sv = seg(it.first);
+    std::string  seg_s(seg_sv);
+    std::string  suffix;
+    if (it.first.size() > seg_sv.size()) {
+      I(it.first[seg_sv.size()] == '.');
+      suffix = it.first.substr(seg_sv.size());  // keep leading '.'
     }
-    auto top = std::string(top_level_prefix(it.first));
-    std::string suffix;
-    if (it.first.size() > top.size()) {
-      I(it.first[top.size()] == '.');
-      suffix = it.first.substr(top.size() + 1);
-    }
-    auto [iter, inserted] = rhs_top_idx.try_emplace(top, rhs_groups.size());
+    auto [iter, inserted] = group_idx.try_emplace(seg_s, groups.size());
     if (inserted) {
-      rhs_groups.push_back({top, {}});
+      groups.push_back({seg_s, segment_category(seg_sv), {}});
     }
-    rhs_groups[iter->second].entries.emplace_back(std::move(suffix), it.second.trivial);
+    groups[iter->second].entries.emplace_back(std::move(suffix), it.second);
   }
 
-  // Helper: emit the entries of an RHS group under a chosen top-level
-  // prefix, with `suffix` optionally tucked between the new top and the
-  // group's original suffix path (used by collision-merge to nest the
-  // RHS payload under a fresh `.K` slot in the existing LHS sub-tuple).
-  auto emit_group = [&](const std::vector<std::pair<std::string, Const>>& entries,
-                        std::string_view                                    new_top,
-                        std::string_view                                    extra_prefix = {}) {
-    for (const auto& [suffix, value] : entries) {
-      std::string new_key(new_top);
-      if (!extra_prefix.empty()) {
+  // Emit an RHS group under a chosen first-segment, optionally inserting
+  // an extra ".K" path between the segment and the group's suffix (used to
+  // tuck the RHS payload under a fresh sub-tuple slot during name merge).
+  auto emit_group = [&](const std::vector<std::pair<std::string, Entry>>& entries,
+                        std::string_view                                   new_seg,
+                        std::string_view                                   extra = {}) {
+    for (const auto& [suffix, ent] : entries) {
+      std::string new_key(new_seg);
+      if (!extra.empty()) {
         new_key += '.';
-        new_key += extra_prefix;
+        new_key.append(extra.data(), extra.size());
       }
-      if (!suffix.empty()) {
-        new_key += '.';
-        new_key += suffix;
-      }
-      key_map.emplace_back(new_key, Entry(false, value));
+      new_key.append(suffix);
+      key_map.emplace_back(std::move(new_key), ent);
     }
   };
 
-  // Helper: count how many top-level "sub-positions" already live under a
-  // given LHS slot. A scalar (single empty-suffix entry) counts as 1; a
-  // sub-tuple `(x.0, x.1)` counts as 2; etc. Used to pick the next `.K`
-  // when extending a colliding LHS slot.
-  auto next_sub_pos = [&](std::string_view lhs_top) -> int {
-    int   sub_max = -1;
-    bool  has_scalar = false;
+  // Erase every LHS entry whose first segment equals `s`.
+  auto erase_top = [&](std::string_view s) {
+    for (auto it = key_map.begin(); it != key_map.end();) {
+      if (seg(it->first) == s) {
+        it = key_map.erase(it);
+      } else {
+        ++it;
+      }
+    }
+  };
+
+  // Count next sub-position under an LHS slot (for collision-merge into a
+  // growing sub-tuple). A bare-scalar entry counts as 1; existing digit
+  // sub-entries pick the max+1.
+  auto next_sub_pos = [&](std::string_view lhs_seg) -> int {
+    int  sub_max    = -1;
+    bool has_scalar = false;
     for (const auto& e : key_map) {
-      if (is_attribute(e.first)) {
+      if (seg(e.first) != lhs_seg) {
         continue;
       }
-      auto top = top_level_prefix(e.first);
-      if (top != lhs_top) {
-        continue;
-      }
-      if (e.first.size() == top.size()) {
+      if (e.first.size() == lhs_seg.size()) {
         has_scalar = true;
         continue;
       }
-      I(e.first[top.size()] == '.');
-      auto rest_start = top.size() + 1;
+      auto rest_start = lhs_seg.size() + 1;
       auto next_dot   = e.first.find('.', rest_start);
-      auto first_seg  = e.first.substr(rest_start, next_dot == std::string::npos ? std::string::npos : next_dot - rest_start);
-      if (!first_seg.empty() && std::isdigit(static_cast<unsigned char>(first_seg.front()))) {
-        int n = str_tools::to_i(first_seg);
+      auto frag       = e.first.substr(rest_start, next_dot == std::string::npos ? std::string::npos : next_dot - rest_start);
+      if (!frag.empty() && std::isdigit(static_cast<unsigned char>(frag.front()))) {
+        int n = str_tools::to_i(frag);
         if (n > sub_max) {
           sub_max = n;
         }
@@ -980,77 +996,58 @@ bool Bundle::concat(const std::shared_ptr<Bundle const>& tup) {
     return has_scalar ? 1 : 0;
   };
 
-  // Helper: rewrite a colliding LHS scalar slot (`top` = scalar value)
-  // into a sub-tuple's slot 0 (`top.0` = same value). We do this lazily
-  // the first time the slot collides, so non-colliding slots stay flat.
-  auto promote_scalar_to_sub = [&](std::string_view lhs_top) {
+  // Lazily rewrite a colliding LHS scalar entry `seg` into `seg.0`.
+  auto promote_scalar_to_sub = [&](std::string_view lhs_seg) {
     for (auto& e : key_map) {
-      if (e.first == lhs_top) {
-        std::string new_key(lhs_top);
-        new_key += ".0";
-        e.first = std::move(new_key);
+      if (e.first == lhs_seg) {
+        e.first = std::string(lhs_seg) + ".0";
         return;
       }
     }
   };
 
-  for (auto& g : rhs_groups) {
-    auto rhs_name = top_name(g.top);
-    if (!rhs_name.empty()) {
-      auto it = lhs_name_top.find(std::string(rhs_name));
-      if (it != lhs_name_top.end()) {
-        // Name collision. Pyrope rule: concat the values into a sub-tuple
-        // unless one side is `nil` — `nil` means "no value" so it drops
-        // out instead of contributing a slot. (If both sides are nil we
-        // keep one nil at the LHS slot, but that case falls out of the
-        // "drop nil → keep LHS" branch since LHS is already nil.)
-        const auto& lhs_top                = it->second;
-        bool        rhs_is_nil_scalar      = g.entries.size() == 1 && g.entries[0].first.empty()
-                                             && g.entries[0].second.is_nil();
-        if (rhs_is_nil_scalar) {
-          continue;  // RHS contributes nothing; LHS slot stays untouched.
-        }
-        bool lhs_is_nil_scalar = false;
-        for (auto& e : key_map) {
-          if (e.first == lhs_top && e.second.trivial.is_nil()) {
-            lhs_is_nil_scalar = true;
-            break;
-          }
-        }
-        if (lhs_is_nil_scalar) {
-          // Drop the LHS nil placeholder, then re-emit RHS entries at the
-          // existing LHS slot (preserving LHS's position).
-          for (auto eit = key_map.begin(); eit != key_map.end();) {
-            auto top = top_level_prefix(eit->first);
-            if (top == lhs_top) {
-              eit = key_map.erase(eit);
-            } else {
-              ++eit;
-            }
-          }
-          emit_group(g.entries, lhs_top);
-          continue;
-        }
-        // LHS slot is currently a flat scalar — promote it to `.0` so the
-        // sub-tuple has positions 0,1,…  (no-op if already a sub-tuple).
-        promote_scalar_to_sub(lhs_top);
-        int sub_pos = next_sub_pos(lhs_top);
-        emit_group(g.entries, lhs_top, std::to_string(sub_pos));
-        continue;
-      }
+  for (auto& g : groups) {
+    if (g.category == 0) {  // attribute: rhs wins
+      erase_top(g.first_seg);
+      emit_group(g.entries, g.first_seg);
+      continue;
     }
 
-    // No collision — append at next free top-level position. For a named
-    // slot we keep the name (`:next_pos:name`); for an unnamed slot we
-    // emit the bare position (`next_pos`).
-    std::string new_top;
-    if (!rhs_name.empty()) {
-      new_top = absl::StrCat(":", std::to_string(next_pos), ":", rhs_name);
-    } else {
-      new_top = std::to_string(next_pos);
+    if (g.category == 1) {  // named
+      bool rhs_is_nil_scalar = g.entries.size() == 1 && g.entries[0].first.empty()
+                               && g.entries[0].second.trivial.is_nil();
+      if (rhs_is_nil_scalar) {
+        continue;  // RHS nil drops itself.
+      }
+      if (!lhs_named.count(g.first_seg)) {
+        emit_group(g.entries, g.first_seg);
+        lhs_named.emplace(g.first_seg);
+        continue;
+      }
+      // Collision. If LHS is a nil placeholder, RHS takes the slot;
+      // otherwise pack into a sub-tuple at the existing slot.
+      bool lhs_is_nil_scalar = false;
+      for (const auto& e : key_map) {
+        if (e.first == g.first_seg && e.second.trivial.is_nil()) {
+          lhs_is_nil_scalar = true;
+          break;
+        }
+      }
+      if (lhs_is_nil_scalar) {
+        erase_top(g.first_seg);
+        emit_group(g.entries, g.first_seg);
+        continue;
+      }
+      promote_scalar_to_sub(g.first_seg);
+      int sub_pos = next_sub_pos(g.first_seg);
+      emit_group(g.entries, g.first_seg, std::to_string(sub_pos));
+      continue;
     }
-    emit_group(g.entries, new_top);
-    ++next_pos;
+
+    // category == 2 (unnamed): re-number at the next free slot.
+    auto new_seg = std::to_string(next_unnamed);
+    emit_group(g.entries, new_seg);
+    ++next_unnamed;
   }
 
   return true;
@@ -1063,7 +1060,7 @@ Const Bundle::flatten() const {
     return invalid_lconst;
   }
 
-  std::stable_sort(key_map.begin(), key_map.end(), bundle_sort);
+  std::stable_sort(key_map.begin(), key_map.end(), canonical_compare);
 
   Const result;
   for (const auto& e : key_map) {
@@ -1099,7 +1096,7 @@ std::shared_ptr<Bundle> Bundle::create_assign(const Const& rhs_trivial) const {
   I(false);
   I(is_correct());
 
-  std::stable_sort(key_map.begin(), key_map.end(), bundle_sort);
+  std::stable_sort(key_map.begin(), key_map.end(), canonical_compare);
 
   auto tup = std::make_shared<Bundle>(get_name());
 
@@ -1181,38 +1178,32 @@ std::shared_ptr<Bundle> Bundle::create_assign(const Const& rhs_trivial) const {
   }
 #endif
 
-  std::stable_sort(tup->key_map.begin(), tup->key_map.end(), bundle_sort);
+  std::stable_sort(tup->key_map.begin(), tup->key_map.end(), canonical_compare);
 
   return tup;
 }
 
 const Bundle::Key_map_type& Bundle::get_sort_map() const {
-  std::stable_sort(key_map.begin(), key_map.end(), bundle_sort);  // mutable (no semantic check. Just faster to process)
+  std::stable_sort(key_map.begin(), key_map.end(), canonical_compare);  // mutable, just faster downstream
   return key_map;
 }
 
 bool Bundle::concat(const Const& trivial) {
-  auto max_pos = 0;
+  int next_pos = 0;
   for (const auto& e : key_map) {
-    int x = 0;
-    if (str_tools::is_i(e.first)) {
-      x = str_tools::to_i(e.first);
-    } else if (e.first.front() == ':' && std::isdigit(e.first[1])) {
-      x = str_tools::to_i(e.first.substr(1));
-    } else {
+    auto seg = first_segment_view(e.first);
+    if (segment_category(seg) != 2) {
       dump();
       Lnast::info("can not concat trivial:{} to bundle unordered {} field {}", trivial, get_name(), e.first);
       return false;
     }
-    if (x > max_pos) {
-      max_pos = x;
+    int n = str_tools::to_i(seg);
+    if (n + 1 > next_pos) {
+      next_pos = n + 1;
     }
   }
 
-  std::string new_key(std::to_string(max_pos + 1));
-
-  key_map.emplace_back(new_key, Entry(false, trivial));
-
+  key_map.emplace_back(std::to_string(next_pos), Entry(false, trivial));
   return true;
 }
 

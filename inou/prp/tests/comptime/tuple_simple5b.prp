@@ -1,0 +1,9 @@
+/*
+:name: tuple_simple5b
+:type: parsing lnast comptime
+:verifier_pass: 1
+:verifier_fail: 0
+*/
+
+mut case1:(x=3, y=4) = nil
+cassert case1.x==3 and case1.y==4

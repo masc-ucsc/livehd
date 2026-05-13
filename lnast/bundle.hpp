@@ -37,6 +37,17 @@ protected:
 
   void sort_key_map();
 
+  // Normalize the textual key on the way into the bundle. The post-refactor
+  // storage convention is:
+  //   - named first-segment kept as-is: "name"
+  //   - unnamed first-segment is the bare decimal index: "0", "1", …
+  //   - attribute first-segment: "__attr"
+  // Transitionally accept legacy ":N:name" / ":N:" producers and strip the
+  // position prefix on insert; nested ":N:" inside a dotted path is rewritten
+  // too. After PR2 lands, every producer emits the canonical form and this
+  // helper becomes the identity for the inputs it sees.
+  static std::string normalize_key(std::string_view key);
+
   static std::tuple<bool, size_t, size_t> match_int_advance(std::string_view a, std::string_view b, size_t a_pos, size_t b_pos);
   static std::tuple<bool, bool, size_t>   match_int(std::string_view a, std::string_view b);
   static std::string                      append_field(std::string_view a, std::string_view b);

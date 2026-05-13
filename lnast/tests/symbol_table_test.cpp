@@ -118,26 +118,44 @@ TEST_F(Symbol_table_test, ordered_check) {
 
   st.function_scope("my function with spaces and very log name");
 
-  st.set("foo.:0:bar", Dlop::create_integer(1));
-  st.set("foo.:1:xxx", Dlop::create_integer(2));
+  // Post-bundle_sorted refactor: ":N:name" producers are transitionally
+  // accepted but stored as the bare name. Decision 1: positional access on
+  // named slots (`tup.0` → first-by-position) is no longer supported; named
+  // entries are name-only, unnamed are decimal-index-only.
+  st.set("foo.:0:bar", Dlop::create_integer(1));  // stored as "bar"
+  st.set("foo.:1:xxx", Dlop::create_integer(2));  // stored as "xxx"
   st.set("foo.2", Dlop::create_integer(3));
   st.set("foo.99", Dlop::create_integer(4));
 
   auto bundle = st.get_bundle("foo");
   bundle->dump();
 
-  EXPECT_DLOP_EQ(bundle->get_trivial("0"), Dlop::create_integer(1));
+  // Named access — both the canonical "name" and the legacy ":N:name"
+  // form (during PR1 transitional acceptance) hit the same stored entry.
   EXPECT_DLOP_EQ(bundle->get_trivial("bar"), Dlop::create_integer(1));
   EXPECT_DLOP_EQ(bundle->get_trivial(":1:xxx"), Dlop::create_integer(2));
+  EXPECT_DLOP_EQ(bundle->get_trivial("xxx"), Dlop::create_integer(2));
+  // Unnamed access by decimal index — entries stored at their position-key.
+  EXPECT_DLOP_EQ(bundle->get_trivial("2"), Dlop::create_integer(3));
+  EXPECT_DLOP_EQ(bundle->get_trivial("99"), Dlop::create_integer(4));
+  // Decision 1: "0" no longer aliases the first named slot.
+  EXPECT_FALSE(bundle->has_trivial("0"));
 
+  // "foo" key has no entries matching the prefix (entries live inside this
+  // bundle), so is_ordered("foo") is vacuously true.
   EXPECT_TRUE(bundle->is_ordered("foo"));
-  st.set("foo.bar", Dlop::create_integer(4));  // replace ":0:bar"
+
+  st.set("foo.bar", Dlop::create_integer(4));  // replace stored "bar"
   EXPECT_DLOP_EQ(bundle->get_trivial("bar"), Dlop::create_integer(4));
-  EXPECT_TRUE(bundle->is_ordered(""));
+  // Bundle now mixes named ("bar", "xxx") and unnamed ("2", "99") — no
+  // longer a pure positional list, so is_ordered("") is false.
+  EXPECT_FALSE(bundle->is_ordered(""));
 
   st.set("foo.nothere", Dlop::create_integer(4));
   EXPECT_FALSE(bundle->is_ordered(""));
 
+  // is_ordered("nothere") inspects the "nothere" sub-bundle's first-segment
+  // pos; a leaf entry has no sub-positions so it's vacuously true.
   EXPECT_TRUE(bundle->is_ordered("nothere"));
   st.set("foo.nothere.2", Dlop::create_integer(4));
   EXPECT_TRUE(bundle->is_ordered("nothere"));
