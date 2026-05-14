@@ -7,7 +7,7 @@
 
 mut hello = "hello"
 
-mut world = " world"
+mut world = "world"
 
 const hw = "{hello} {world}!"
 
@@ -16,4 +16,4 @@ cassert hw == 'hello world!'
 const tmp = 103
 mut x = "cadena {tmp+1}"
 
-cassert x == "cadena 103"
+cassert x == "cadena 104"

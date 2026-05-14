@@ -112,6 +112,7 @@ protected:
   Lnast_node attribute_read_to_node(TSNode n);
   Lnast_node dot_expression_to_node(TSNode n);
   Lnast_node function_call_expr_to_node(TSNode n);
+  Lnast_node interpolated_string_to_node(TSNode n);
   Lnast_node tuple_to_node(TSNode n, bool is_square);
   Lnast_node identifier_to_node(TSNode n, bool for_lvalue);
   Lnast_node constant_text_to_node(std::string_view text);

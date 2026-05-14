@@ -1745,19 +1745,73 @@ Lnast_node Prp2lnast::expr_to_node(TSNode n) {
     return Lnast_node::create_const("0");
   }
   if (t == "interpolated_string_literal") {
-    // Double-quoted string. When there are no `{expr}` interpolations, the
-    // named-child list is empty (only the outer quote tokens, which are
-    // anonymous), so re-emit the body as a single-quoted pyrope string
-    // literal so `Dlop::from_pyrope` can round-trip it as a string.
-    bool has_interp = ts_node_named_child_count(n) > 0;
-    if (!has_interp) {
-      auto body = text_between(ts_node_start_byte(n) + 1, ts_node_end_byte(n) - 1);
-      return Lnast_node::create_const(absl::StrCat("'", body, "'"));
-    }
-    // Interpolated strings are not yet lowered; fall through to textual form.
+    return interpolated_string_to_node(n);
   }
   // Fallback: treat as a constant from source text.
   return constant_text_to_node(trim(get_text(n)));
+}
+
+Lnast_node Prp2lnast::interpolated_string_to_node(TSNode n) {
+  // Double-quoted string body, possibly containing `{expr[:fmt]}` chunks.
+  // With no interpolations the named-child list is empty (all quote/text
+  // tokens are anonymous), so re-emit the body as a single-quoted pyrope
+  // string literal that `Dlop::from_pyrope` can round-trip.
+  uint32_t nnc        = ts_node_named_child_count(n);
+  uint32_t body_start = ts_node_start_byte(n) + 1;
+  uint32_t body_end   = ts_node_end_byte(n) - 1;
+  if (nnc == 0) {
+    auto body = text_between(body_start, body_end);
+    return Lnast_node::create_const(absl::StrCat("'", body, "'"));
+  }
+
+  // Lower to `string("part0", expr0, "part1", expr1, ..., "partN")`. The
+  // constprop pass folds calls whose every arg is a comptime constant into a
+  // single string literal; otherwise the call survives at runtime.
+  // Literal chunks aren't named children — find each `{` by scanning back
+  // from the expression's start byte, and the matching `}` (past any format
+  // spec, which is also anonymous) by scanning forward from its end.
+  std::vector<Lnast_node> args;
+  uint32_t                cursor = body_start;
+  for (uint32_t i = 0; i < nnc; ++i) {
+    TSNode   expr       = ts_node_named_child(n, i);
+    uint32_t expr_start = ts_node_start_byte(expr);
+    uint32_t expr_end   = ts_node_end_byte(expr);
+
+    uint32_t brace_open = expr_start;
+    while (brace_open > cursor && prp_file[brace_open - 1] != '{') {
+      --brace_open;
+    }
+    if (brace_open > cursor) {
+      --brace_open;  // step onto the `{`
+    }
+    auto pre = text_between(cursor, brace_open);
+    if (!pre.empty()) {
+      args.push_back(Lnast_node::create_const(absl::StrCat("'", pre, "'")));
+    }
+
+    args.push_back(expr_to_node(expr));
+
+    uint32_t brace_close = expr_end;
+    while (brace_close < body_end && prp_file[brace_close] != '}') {
+      ++brace_close;
+    }
+    cursor = brace_close < body_end ? brace_close + 1 : body_end;
+  }
+  if (cursor < body_end) {
+    auto tail = text_between(cursor, body_end);
+    if (!tail.empty()) {
+      args.push_back(Lnast_node::create_const(absl::StrCat("'", tail, "'")));
+    }
+  }
+
+  auto idx = builder.add_child(Lnast_ntype::create_func_call());
+  auto ref = builder.mint_tmp_ref();
+  lnast->add_child(idx, ref);
+  lnast->add_child(idx, Lnast_node::create_ref("string"));
+  for (auto& a : args) {
+    lnast->add_child(idx, a);
+  }
+  return ref;
 }
 
 Lnast_node Prp2lnast::constant_text_to_node(std::string_view text) {
