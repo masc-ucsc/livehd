@@ -35,11 +35,16 @@ derived), `wrap`, `saturate`/`sat`, `comptime`, `const`, `mut`, `typename`,
 
 After upass: enforced/lowered where possible. Some attrs are LNAST-only and
 must not reach LGraph generation except as a hard error if missed. Others
-drive LGraph-generation behavior: unresolved value-dependent reads such as
-`.[bits]`, `.[ubits]`, `.[sbits]`, `.[max]`, and `.[min]` may remain as LGraph
-attr_get nodes or equivalent LGraph-side logic for the range/bitwidth pass.
-`wrap` / `saturate` disappear during LGraph generation by creating replacement
-logic. `rand` propagates through calls and has LGraph-generation behavior.
+drive LGraph-generation behavior: value-dependent reads such as
+`.[bits]`, `.[ubits]`, `.[sbits]`, `.[max]`, and `.[min]` are resolved by
+the LNAST `pass.upass bitwidth` step against the HHDS `max` / `min`
+attrs it publishes. Reads that cannot be resolved at LNAST time (e.g.
+inputs that did not go through `pass.upass bitwidth`) fall back to
+LGraph `attr_get` nodes for the legacy LGraph `pass/bitwidth`.
+`wrap` / `saturate` resolution lives in `bitwidth` (see
+`lnast_bitwidth.md`); `attributes` keeps only the policy bit and
+presence reads. `rand` propagates through calls and has
+LGraph-generation behavior.
 
 ### B. LGraph signal / wiring attrs — comptime-resolved connection semantics
 
@@ -369,10 +374,13 @@ Slice 5/7 work.
   when never explicitly set. Example: `bits` is present for all types and is
   derived; `size` / `typename` / `key` have their documented aggregate/type
   semantics.
-- `.[bits]` / `.[ubits]` / `.[sbits]` / `.[max]` / `.[min]` are folded by
-  LNAST/upass when the value is comptime-known. For runtime/unknown values,
-  preserve/lower the read for the dedicated LGraph range/bitwidth pass.
-  For an invalidated/nil value, these attrs return `0`.
+- `.[bits]` / `.[ubits]` / `.[sbits]` / `.[max]` / `.[min]` are
+  resolved by `pass.upass bitwidth` against the HHDS `max` / `min`
+  attrs it publishes; `bits` / `signed` derive from `max` / `min`.
+  For runtime/unknown values that LNAST cannot bound (e.g.
+  Verilog-ingress inputs), preserve/lower the read for the legacy
+  LGraph `pass/bitwidth` fallback. For an invalidated/nil value,
+  these attrs return `0`.
 - `.[size]` is field count (1 for scalar).
 - Constprop evaluates attribute reads opportunistically during the normal
   upass node walk. There is no attribute-specific fixed-point loop.
@@ -475,29 +483,39 @@ mark/lower attrs that intentionally survive to LGraph generation.
   - `comptime`: value resolved at end of upass; else error.
   - `mut`: presence-only; multi-assign allowed.
   - Names starting with uppercase: implicitly `comptime const`.
-- `bits` / `ubits` / `sbits` / `max` / `min` (and `range` sugar): handled
-  similarly. Respect explicit constraints and validate `max >= min`,
-  `max >= last_assigned_value` when the value is known at comptime (or wrap/sat
-  handles the overflow). Reads are value-derived when LNAST knows the value:
-  nil/invalidated value → `0`; known value `1233` → `max == min == 1233` and
-  `bits` / `ubits` / `sbits` computed from that value. When the value is not
-  known, LNAST usually cannot compute the range/bitwidth and should
-  lower/preserve the read as LGraph attr_get / equivalent LGraph-side logic for
-  the dedicated LGraph range/bitwidth pass.
-- `wrap` / `sat` / `saturate`: `sat` is shorthand for `saturate`. Declaration
-  attrs (`[wrap]`, `[saturate]`) are assignment policies for that variable:
-  every assignment to the variable uses the selected narrowing operation, and
-  reads like `w.[wrap]` / `w.[saturate]` return boolean `true` when set
-  (or `false` for a known explicit false value). Explicit false follows the
-  general attr-value rule: `w::[wrap=false]` behaves like no wrap policy for
-  assignment narrowing, while `w.[wrap] != nil` still reports that the attr was
-  explicitly present and `w.[wrap]` evaluates false.
-  Statement-level `wrap` / `sat` prefixes apply the same operation only to that
-  one result assignment. These operations do not leave a `wrap` / `saturate`
-  attr stuck on the result after the operation. If the relevant widths/ranges
-  are comptime-known, upass can fold/lower to slice/clamp logic directly. If not
-  time-constant, LGraph generation must emit the required mask/arithmetic gates
-  for wrap or saturate; that logic may use attr_get `bits` / range reads.
+- `bits` / `ubits` / `sbits` / `max` / `min` (and `range` sugar): owned
+  by `pass.upass bitwidth` (see `lnast_bitwidth.md`). `attributes`
+  forwards explicit constraints to `bitwidth`, which validates
+  `max >= min`, `max >= last_assigned_value` (or wrap/sat handles
+  overflow), and publishes HHDS `max` / `min` attrs. Reads are
+  value-derived: nil/invalidated value → `0`; known value `1233` →
+  `max == min == 1233` and `bits` / `ubits` / `sbits` derived from
+  `max` / `min`. When LNAST cannot bound the value (e.g.
+  Verilog-ingress inputs), the read is preserved/lowered as
+  `attr_get` for the legacy LGraph `pass/bitwidth` fallback.
+- `wrap` / `sat` / `saturate`: split between two passes once
+  `pass.upass bitwidth` lands (see `lnast_bitwidth.md`).
+  - `attributes` owns **policy recording and presence reads**.
+    Declaration attrs (`[wrap]`, `[saturate]`) mark the variable as
+    using the named narrowing operation on every assignment. Reads
+    like `w.[wrap]` / `w.[saturate]` return boolean `true` when set
+    (or `false` for an explicit false value). Explicit false follows
+    the general attr-value rule: `w::[wrap=false]` behaves like no
+    wrap policy for assignment narrowing, while `w.[wrap] != nil`
+    still reports that the attr was explicitly present and
+    `w.[wrap]` evaluates false.
+  - `bitwidth` owns the **narrowing math**. It reads the policy bit
+    from `attributes` and applies wrap / saturate to constants and
+    to inferred ranges using the variable's `max` / `min`.
+    Statement-level `wrap` / `sat` prefixes apply the same operation
+    only to that one result assignment; the attr does not stick on
+    the result. If widths/ranges are comptime-known, `bitwidth`
+    folds/lowers to slice/clamp logic directly. If not time-constant,
+    LGraph generation emits the required mask/arithmetic gates;
+    that logic uses `max` / `min` from LNAST HHDS attrs.
+  - Prior to `pass.upass bitwidth`, the narrowing math lived
+    end-to-end in `upass/attributes/upass_attributes_phase5.cpp`.
+    That code moves to the new pass at the cutover.
 - `typename`: Pyrope type metadata. Pyrope basic / named types are exposed
   through `.[typename]`; for example `foo:XX` means `foo.[typename] == "XX"`.
   Validate type/typename is invariant across all assignments (even for `mut`).

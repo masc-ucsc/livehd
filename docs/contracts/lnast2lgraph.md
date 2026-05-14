@@ -303,18 +303,29 @@ Use the pin names from `cell.cpp`:
 - `Mux`: pin `0` selector, pin `1` false/default, pin `2` true for binary mux.
 
 Both LNAST and LGraph are signed unlimited-precision by default. Width/range
-is inferred later by `pass/bitwidth` when Verilog/code generation needs actual
-bits/signs. Do not add nodes merely to annotate inferred widths.
+is inferred by the LNAST `pass.upass bitwidth` step before LGraph creation;
+LGraph nodes are created with bits/sign populated from the LNAST `max` /
+`min` HHDS attrs. The legacy LGraph `pass/bitwidth` remains as a fallback
+for inputs that did not come through `pass.upass bitwidth` (e.g.
+Verilog-ingress paths via `inou/yosys`). Do not add nodes merely to
+annotate inferred widths.
 
-Known unsigned/range facts are represented internally as `min`/`max`;
-`uN`/`ubits` lower to `min >= 0` with an associated max. The existing
-LGraph bitwidth pass can recompute most facts from graph structure. A future
-global LNAST bitwidth pass may precompute these facts, but the first
-translator should mostly defer to LGraph bitwidth.
+Known unsigned/range facts are represented internally as `min` / `max`;
+`uN` / `ubits` lower to `min >= 0` with an associated max. The LNAST
+bitwidth pass publishes `max` / `min` as HHDS attributes on LNAST
+nodes/results; `bits` and `signed` are derived on demand from `max` /
+`min`. `pass.lnast_to_lgraph` reads those attrs at node creation, so
+bitwidth/sign do not need a separate post-lowering pass for the
+LNAST-origin path.
 
-Explicit constraints such as `ubits`, `sbits`, `max`, and `min` should reach
-LGraph as `AttrSet` nodes for now. The current bitwidth pass already handles
-`sbits`/`ubits`; extending it for `max`/`min` is the simpler path.
+Cutover history: prior to `pass.upass bitwidth`, the lowering deferred
+to the LGraph bitwidth pass and explicit constraints (`ubits`, `sbits`,
+`max`, `min`) traveled as `AttrSet` nodes. That guidance was correct
+only while LNAST bitwidth did not exist; with the new pass landed,
+LGraph receives bits/sign at creation and the LNAST does not need to
+preserve bit attributes for downstream lowering. The LGraph bitwidth
+pass still handles `max` / `min` as `AttrSet` for the Verilog-ingress
+fallback path described above.
 
 Emit an `AttrSet` after each expression assignment when the LHS variable has a
 type/bit/range constraint. If the LHS has no type/bits/range constraint, do
@@ -672,15 +683,19 @@ compile error.
 Unknown/user attributes and synthesis hints may pass through as LGraph
 `AttrSet` / `AttrGet`.
 
-For type/range constraints, prefer emitting `AttrSet` and allowing
-`pass/bitwidth` to consume them:
+For type/range constraints, the path depends on whether the LNAST has
+been through `pass.upass bitwidth`:
 
-- `ubits`
-- `sbits`
-- `max`
-- `min`
+- **LNAST-origin path (post-`pass.upass bitwidth`).** `max` / `min`
+  are already attached as HHDS attrs on LNAST nodes. Read those at
+  node creation and populate the LGraph node's bits/sign directly;
+  no `AttrSet` is needed for `ubits` / `sbits` / `max` / `min`.
+- **Fallback path (Verilog ingress / inputs that did not go through
+  `pass.upass bitwidth`).** Emit `AttrSet` for `ubits` / `sbits` /
+  `max` / `min` and let the legacy LGraph `pass/bitwidth` consume them.
 
-Do not emit attribute nodes for unconstrained variables.
+Do not emit attribute nodes for unconstrained variables on either
+path.
 
 `wrap` / `saturate` assignment policies may be lowered by upass or by LGraph
 generation. If they survive to LGraph generation and widths/ranges are not
@@ -760,11 +775,16 @@ the fcall against it, and emit `Sub` nodes. Enforce the
 fully-typed-interface precondition when the global pass is disabled; error
 otherwise.
 
-**Phase 9 — Attributes.** Emit `AttrSet` for type/range constraints
-(`ubits`, `sbits`, `max`, `min`); pass through unknown/user/synthesis
-attributes; diagnose leftover LNAST-only attributes (`comptime`, `const`,
-`mut`, `private`, `typename`, `key`, `loc`, `file`, `crand`). Extend
-`pass/bitwidth` to consume `max` / `min`.
+**Phase 9 — Attributes.** For LNAST-origin paths after
+`pass.upass bitwidth`, read `max` / `min` HHDS attrs at node creation
+and populate LGraph node bits/sign directly — no `AttrSet` needed for
+type/range constraints. For fallback paths (Verilog ingress), emit
+`AttrSet` for `ubits` / `sbits` / `max` / `min` so the legacy LGraph
+`pass/bitwidth` can consume them. In both cases, pass through
+unknown/user/synthesis attributes and diagnose leftover LNAST-only
+attributes (`comptime`, `const`, `mut`, `private`, `typename`, `key`,
+`loc`, `file`, `crand`). Extending the legacy `pass/bitwidth` to
+consume `max` / `min` remains the fallback-path requirement.
 
 **Phase 10 — Optional global pass.** Implement specialization, hierarchical
 naming (`top.a.foo`), structural-equality dedup (`top.a|b.foo`), and the

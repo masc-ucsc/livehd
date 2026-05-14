@@ -109,14 +109,34 @@ swaps into `var.lnasts` at the end.
 
 ### 2.2 Iteration policy
 
-- **One pass, no fixpoint**, when the input has no `func_call`/`func_def`.
-  A forward sweep with a symbol table converges in one pass for straight-line
-  code; re-iterating would just duplicate work.
-- When func_calls are present (future work), the runner will iterate so that
-  a resolved callee can feed values back into a caller's symbol table. This
-  is the **only** reason to iterate.
-- The `changed`/`begin_iteration` hook in `uPass` stays, but the default
-  runner path only calls `begin_iteration` once unless func_calls exist.
+The runner does **a single tree walk per `pass.upass` call**. Inside that
+walk, multiple **step iterations** can fire on the same node:
+
+- At each node, every registered pass dispatches once.
+- If any pass calls `mark_changed()` (writes a new HHDS attr, rewrites
+  the node, etc.), the runner re-dispatches the **other** passes at
+  the same node. A pass does not re-dispatch itself unless a different
+  pass subsequently modifies state it reads.
+- `max_iters` bounds the per-node step loop (default 1; tests may
+  raise it). Convergence is expected in 0–3 steps in practice.
+
+A second `pass.upass` call ("**TOP-rooted, top-down**") is only
+required when an unresolved `import` function call remains in the
+staged LNAST. The TOP is the existing `top:xxx` entry-point convention
+(same as `inou.yosys.tolg top:foo …`). This second-call mode is **not
+yet implemented** — `import` does not exist yet, so today every
+program completes in a single sweep.
+
+**Reader passes** (`verifier`, `assert`) attach only to the **final**
+outer `pass.upass` invocation. Since today every invocation is "final"
+(no second pass exists), readers run by default. When `import` lands,
+the driver must withhold readers from the non-final invocation and
+attach them only to the TOP-rooted sweep, which always runs a verifier
+and flags an error if it did not converge.
+
+The `changed` / `begin_iteration` hook in `uPass` stays — it is the
+signal the runner uses to detect convergence both at the per-node
+step level and at end-of-walk.
 
 ### 2.3 Classify-before-emit hook
 
@@ -230,11 +250,15 @@ After Slice 2 (verifier drops known-true cassert): empty `stmts`.
     `pass.upass verifier:false`.
   - unknown (operand still a ref after Slice 1 folding, or a const with
     unknowns) → `emit_node()` — kept for downstream / runtime.
-- Pass order stays `verifier → constprop → assert → verifier`. The second
-  verifier run sees constprop's populated ST through the fold callback and
-  is the one that actually discharges casserts. The first-pass verifier
-  sees no ST yet and just passes them through (plus the existing shape
-  checks on other ops).
+- Pass order: optimizers (`func_extract`, `attributes`, `constprop`,
+  `coalescer`, `ssa`, future `bitwidth`) first, then readers
+  (`assert`, `verifier`) at the end. Readers run only in the final
+  outer `pass.upass` call. The verifier sees the optimizers' populated
+  ST through the fold callback and is the one that actually discharges
+  casserts. Shape checks that the old "first verifier" ran on every
+  operator are not needed — `pass.lnastfmt` is the well-formedness
+  gate before `pass.upass` starts, and the producer (`prp2lnast`)
+  is the right fix site for any shape bug that slips through.
 
 **Test mode split.** `prplib.py` distinguishes two test types that drive
 this pipeline:

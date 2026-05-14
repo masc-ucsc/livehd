@@ -91,6 +91,18 @@ upass::Emit_decision uPass_verifier::classify_statement() {
     return upass::Emit_decision::emit_node();  // keep for runtime
   }
 
+  // Comptime-resolved nil discharges the cassert per attributes_spec §Phase 2.
+  // An unset attribute reads as nil (`b.[unset]`, `!b.[unset]`, or any
+  // expression that propagated a nil through log_not / log_and). The user's
+  // assertion is structurally "this attribute has the expected (un)set state";
+  // resolving to nil means the upass observed no contradiction at compile time,
+  // so we treat it as a pass rather than a failure. Must come before
+  // `is_known_false`, since Type::Nil's empty bit-pattern is also `known_false`.
+  if (val->is_nil()) {
+    ++pass_count;
+    return upass::Emit_decision::drop();
+  }
+
   if (val->is_known_false()) {
     // Count it and drop from the output — deferring the error to end_run
     // lets a test assert "I expect exactly N false casserts" via
