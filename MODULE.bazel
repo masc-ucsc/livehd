@@ -46,14 +46,13 @@ git_override(
 
 # hlop (Dlop value type + slop/dlop execution layer)
 bazel_dep(name = "hlop", version = "0.2.0")
-local_path_override(module_name = "hlop", path = "../hlop")
-# To switch back to the upstream pinned commit, swap the local_path_override
-# above for:
-# git_override(
-#     module_name = "hlop",
-#     remote = "https://github.com/masc-ucsc/hlop.git",
-#     commit = "c0b64d10a2a23af0bc4d4bf661c21356197ae8d5",
-# )
+git_override(
+    module_name = "hlop",
+    remote = "https://github.com/masc-ucsc/hlop.git",
+    commit = "30fe5836db76b41aac0d93c890b02a2ec607ac3c",
+)
+# For local debug/testing, swap the git_override above for:
+# local_path_override(module_name = "hlop", path = "../hlop")
 
 # slang (fmt required by slang CMake)
 http_archive(
