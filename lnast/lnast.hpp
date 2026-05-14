@@ -9,6 +9,7 @@
 #include <stdexcept>
 #include <string>
 #include <string_view>
+#include <unordered_map>
 
 #include "absl/container/flat_hash_map.h"
 #include "absl/strings/str_cat.h"
@@ -71,6 +72,25 @@ private:
   std::string text;
 };
 
+// ── Bitwidth metadata side-channel (populated by upass/bitwidth) ─────────────
+// A lightweight POD mirror of Lnast_range stored on the Lnast after the
+// bitwidth pass runs.  lnast_range.hpp is intentionally NOT included here to
+// avoid a dependency between lnast/ and upass/bitwidth/.
+struct BitwidthEntry {
+  int64_t min{0};
+  int64_t max{0};
+  bool    neg_inf{true};  // min = −∞ (unbounded below)
+  bool    pos_inf{true};  // max = +∞ (unbounded above)
+
+  bool is_unbounded() const noexcept { return neg_inf || pos_inf; }
+  bool is_constant()  const noexcept { return !neg_inf && !pos_inf && min == max; }
+};
+
+struct Lnast_bitwidth_meta {
+  std::unordered_map<std::string, BitwidthEntry> ranges;
+  bool empty() const noexcept { return ranges.empty(); }
+};
+
 // ── I/O metadata side-channel (populated by upass/ssa when ssa:1 is set) ────
 // Separate from hhds::TreeIO (which is tree-replacement plumbing).
 struct Lnast_io_entry {
@@ -98,6 +118,9 @@ private:
   // I/O metadata populated by the SSA upass (ssa:1).  Empty unless the SSA
   // pass has run on this LNAST.
   Lnast_tree_io                 io_meta_;
+  // Bitwidth metadata populated by uPass_bitwidth::end_run().  Empty unless
+  // the bitwidth pass has run on this LNAST.
+  Lnast_bitwidth_meta           bw_meta_;
 
 public:
   static constexpr char version[] = "0.1.0";
@@ -199,6 +222,10 @@ public:
   // ── I/O metadata side-channel (set by the SSA upass when ssa:1) ─────────
   const Lnast_tree_io& io_meta() const noexcept { return io_meta_; }
   Lnast_tree_io&       io_meta() noexcept { return io_meta_; }
+
+  // ── Bitwidth metadata side-channel (set by uPass_bitwidth::end_run) ──────
+  const Lnast_bitwidth_meta& bw_meta() const noexcept { return bw_meta_; }
+  Lnast_bitwidth_meta&       bw_meta() noexcept { return bw_meta_; }
 
   // ── name predicates (work off the textual name only) ────────────────────
   static bool is_register(std::string_view name) { return !name.empty() && name.front() == '#'; }

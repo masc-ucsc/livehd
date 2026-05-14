@@ -47,6 +47,10 @@ private:
 
   // Returns a nil (0sb?) constant driver pin.
   Node_pin nil_pin();
+
+  // Apply bitwidth metadata to a driver pin if lnast_->bw_meta() has a finite
+  // range for `lhs_name`.  No-op when the range is absent or unbounded.
+  void apply_bw(Node_pin& drv, std::string_view lhs_name);
   // Runs lower_node() on the current cursor position and returns what was
   // bound (assigned) by the subtree, then restores those bindings to their
   // pre-call values.  Auto-promoted graph inputs (added via resolve()) are

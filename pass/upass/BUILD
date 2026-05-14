@@ -18,6 +18,7 @@ cc_library(
         "//pass/common:pass",
         "//upass/assert:upass_assert",
         "//upass/attributes:upass_attributes",
+        "//upass/bitwidth:upass_bitwidth",
         "//upass/coalescer:upass_coalescer",
         "//upass/constprop:upass_constprop",
         "//upass/core:upass",
