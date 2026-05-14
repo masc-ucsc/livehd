@@ -10,8 +10,10 @@
 //   * fat_pins  — fully connected, every incoming edge lands on a distinct sink pin
 //
 // For each shape we measure five operations: create / fast traverse /
-// forward traverse / delete_pin (explicit per-edge del + del_node) /
-// delete_node (rely on del_node to bulk-remove edges).
+// forward traverse / delete_pin (forward iteration, explicit per-edge
+// del + del_node — stresses the harder case of mutating while walking
+// forward) / delete_node (fast iteration, rely on del_node to bulk-remove
+// edges).
 
 #include <string>
 
@@ -208,7 +210,7 @@ static std::unique_ptr<HhdsBundle> build_fat_pins_hhds(int n) {
       auto* g = BUILDER(std::string(#NAME "_lg_delp_") + std::to_string(next_gen()),    \
                        static_cast<int>(state.range(0)));                               \
       state.ResumeTiming();                                                             \
-      for (auto node : g->fast()) {                                                     \
+      for (auto node : g->forward()) {                                                  \
         for (auto& e : node.out_edges()) {                                              \
           e.del_edge();                                                                 \
         }                                                                               \
@@ -300,7 +302,7 @@ BENCH_LG_DELETE_NODE(fat_pins, build_fat_pins_lg)
       auto b = BUILDER(static_cast<int>(state.range(0)));                               \
       auto g = b->graph;                                                                \
       state.ResumeTiming();                                                             \
-      for (auto node : g->fast_class()) {                                               \
+      for (auto node : g->forward_class()) {                                            \
         for (auto& e : node.out_edges()) {                                              \
           e.del_edge();                                                                 \
         }                                                                               \
