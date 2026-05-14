@@ -12,10 +12,7 @@ cc_library(
     name = "core",
     srcs = glob(
         ["*.cpp"],
-        exclude = [
-            "*test*.cpp",
-            "graph_core.*",
-        ],
+        exclude = ["*test*.cpp"],
     ),
     hdrs = glob(["*.hpp"]),
     copts = ["-std=c++23"] + COPTS,
@@ -88,18 +85,6 @@ cc_test(
     deps = [
         ":core",
         "@googletest//:gtest_main",
-    ],
-)
-
-cc_test(
-    name = "graph_core_bench",
-    srcs = [
-        "tests/graph_core_bench.cpp",
-    ],
-    tags = ["fixme"],
-    deps = [
-        ":core",
-        "@google_benchmark//:benchmark",
     ],
 )
 

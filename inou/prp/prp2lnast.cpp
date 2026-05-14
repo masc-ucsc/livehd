@@ -1355,6 +1355,19 @@ std::vector<Prp2lnast::Call_arg> Prp2lnast::collect_call_args(TSNode arg_tuple) 
     return call_args;
   }
 
+  // Statement form (`process_function_call_statement`) wraps the call's
+  // argument tuple in an outer `expression_list`. Unwrap to the inner tuple
+  // so the loop below iterates the real arg children (not a single
+  // wrapped-tuple "arg" that would emit `f((a,b))` instead of `f(a,b)`).
+  if (std::string_view(ts_node_type(arg_tuple)) == "expression_list"
+      && ts_node_named_child_count(arg_tuple) == 1) {
+    TSNode inner = ts_node_named_child(arg_tuple, 0);
+    std::string_view it(ts_node_type(inner));
+    if (it == "tuple" || it == "tuple_sq") {
+      arg_tuple = inner;
+    }
+  }
+
   uint32_t nnc = ts_node_named_child_count(arg_tuple);
   call_args.reserve(nnc);
   for (uint32_t i = 0; i < nnc; ++i) {

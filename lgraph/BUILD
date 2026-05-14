@@ -79,12 +79,11 @@ cc_test(
 )
 
 cc_test(
-    name = "graph_core_test",
-    srcs = ["tests/graph_core_test.cpp"],
-    tags = ["fixme"],
+    name = "graph_bench",
+    srcs = ["tests/graph_bench.cpp"],
     deps = [
         ":lgraph",
-        "@boost//:graph",
-        "@googletest//:gtest_main",
+        "@google_benchmark//:benchmark",
+        "@hhds//hhds:graph",
     ],
 )
