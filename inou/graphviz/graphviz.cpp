@@ -67,7 +67,7 @@ void Graphviz::populate_lg_handle_xedge(const Node& node, const XEdge& out, std:
   auto dbits   = out.driver.get_bits();
   auto dp_name = graphviz_legalize_name(out.driver.has_name() ? out.driver.get_name() : "unk");
 
-  if (node.get_type_op() == Ntype_op::Const) {
+  if (node.get_type_op() == Ntype_op::Nconst) {
     data += std::format(" {} -> {} [ label = <{}b:({},{})> ];\n", dn_name, sn_name, dbits, dp_pid, sp_pid);
   } else if (node.get_type_op() == Ntype_op::TupAdd) {
     data += std::format(" {} -> {} [ label = <{}b:({},{}):<font color=\"#0000ff\">{}</font>> ];\n",
@@ -259,7 +259,7 @@ void Graphviz::populate_lg_data(Lgraph* g, std::string_view dot_postfix) {
         color = absl::StrCat("fillcolor = \"", it->second, "\" ");
       }
     }
-    if (node.get_type_op() == Ntype_op::Const) {
+    if (node.get_type_op() == Ntype_op::Nconst) {
       data += std::format(" {} [ {} label = <{}:{}> ];\n", gv_name, color, node_info, node.get_type_const().to_pyrope());
     } else {
       data += std::format(" {} [ {} label = <{}> ];\n", gv_name, color, node_info);

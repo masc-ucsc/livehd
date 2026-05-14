@@ -158,7 +158,7 @@ TEST(LnastToLgraph, ConstAssign) {
   lowerer.lower();
 
   EXPECT_TRUE(has_output(lg, "out")) << "expected graph output 'out'";
-  EXPECT_EQ(count_op(lg, Ntype_op::Const), 1) << "expected exactly one Const node";
+  EXPECT_EQ(count_op(lg, Ntype_op::Nconst), 1) << "expected exactly one Const node";
 }
 
 // ── Test 3: addition lowered to Sum node ─────────────────────────────────────

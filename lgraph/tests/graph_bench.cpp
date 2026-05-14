@@ -9,11 +9,11 @@
 //   * fat_pin0  — fully connected, every incoming edge lands on sink pin 0
 //   * fat_pins  — fully connected, every incoming edge lands on a distinct sink pin
 //
-// For each shape we measure four operations: create / fast traverse /
-// forward traverse / delete (per-node edges then node).
+// For each shape we measure five operations: create / fast traverse /
+// forward traverse / delete_pin (explicit per-edge del + del_node) /
+// delete_node (rely on del_node to bulk-remove edges).
 
 #include <string>
-#include <vector>
 
 #include "benchmark/benchmark.h"
 #include "cell.hpp"
@@ -55,14 +55,14 @@ static Lgraph* build_fat_pin0_lg(const std::string& name, int n) {
   auto* lib = Graph_library::instance("lgdb_graph_bench");
   auto* g   = lib->create_lgraph(name, "graph_bench");
 
-  std::vector<Node> nodes;
-  nodes.reserve(static_cast<size_t>(n));
   for (int i = 0; i < n; ++i) {
     Node node = g->create_node(Ntype_op::Or, 1);
-    for (int j = 0; j < i; ++j) {
-      nodes[j].setup_driver_pin().connect_sink(node.setup_sink_pin_raw(0));
+    for (auto prev : g->fast()) {
+      if (prev == node) {
+        break;
+      }
+      prev.setup_driver_pin().connect_sink(node.setup_sink_pin_raw(0));
     }
-    nodes.push_back(node);
   }
   return g;
 }
@@ -71,14 +71,16 @@ static Lgraph* build_fat_pins_lg(const std::string& name, int n) {
   auto* lib = Graph_library::instance("lgdb_graph_bench");
   auto* g   = lib->create_lgraph(name, "graph_bench");
 
-  std::vector<Node> nodes;
-  nodes.reserve(static_cast<size_t>(n));
   for (int i = 0; i < n; ++i) {
-    Node node = g->create_node(Ntype_op::Mux, 1);  // unlimited_sink
-    for (int j = 0; j < i; ++j) {
-      nodes[j].setup_driver_pin().connect_sink(node.setup_sink_pin_raw(static_cast<Port_ID>(j)));
+    Node    node = g->create_node(Ntype_op::Mux, 1);  // unlimited_sink
+    Port_ID j    = 0;
+    for (auto prev : g->fast()) {
+      if (prev == node) {
+        break;
+      }
+      prev.setup_driver_pin().connect_sink(node.setup_sink_pin_raw(j));
+      ++j;
     }
-    nodes.push_back(node);
   }
   return g;
 }
@@ -102,49 +104,56 @@ static std::unique_ptr<HhdsBundle> make_hhds_bundle(const char* name) {
   return b;
 }
 
+// hhds::Graph reserves nid < 16 for built-in IO/Const singletons, but its
+// fast_class() / forward_class() iterators already start past them, so user
+// code does not need to filter them out.
+
 static std::unique_ptr<HhdsBundle> build_chain_hhds(int n) {
-  auto                    b = make_hhds_bundle("chain_hhds");
-  auto                    g = b->graph;
-  std::vector<hhds::Node> nodes;
-  nodes.reserve(static_cast<size_t>(n));
-  for (int i = 0; i < n; ++i) {
-    nodes.push_back(g->create_node());
+  auto b = make_hhds_bundle("chain_hhds");
+  auto g = b->graph;
+  if (n <= 0) {
+    return b;
   }
-  for (int i = 0; i + 1 < n; ++i) {
-    nodes[i].create_driver_pin().connect_sink(nodes[i + 1].create_sink_pin());
+  auto prev = g->create_node();
+  for (int i = 1; i < n; ++i) {
+    auto cur = g->create_node();
+    prev.create_driver_pin().connect_sink(cur.create_sink_pin());
+    prev = cur;
   }
   return b;
 }
 
 static std::unique_ptr<HhdsBundle> build_fat_pin0_hhds(int n) {
-  auto                    b = make_hhds_bundle("fat_pin0_hhds");
-  auto                    g = b->graph;
-  std::vector<hhds::Node> nodes;
-  nodes.reserve(static_cast<size_t>(n));
+  auto b = make_hhds_bundle("fat_pin0_hhds");
+  auto g = b->graph;
   for (int i = 0; i < n; ++i) {
     auto node = g->create_node();
     // Every incoming edge lands on the same sink pin (port 0).
     auto spin = node.create_sink_pin(static_cast<hhds::Port_id>(0));
-    for (int j = 0; j < i; ++j) {
-      nodes[j].create_driver_pin().connect_sink(spin);
+    for (auto prev : g->fast_class()) {
+      if (prev == node) {
+        break;
+      }
+      prev.create_driver_pin().connect_sink(spin);
     }
-    nodes.push_back(node);
   }
   return b;
 }
 
 static std::unique_ptr<HhdsBundle> build_fat_pins_hhds(int n) {
-  auto                    b = make_hhds_bundle("fat_pins_hhds");
-  auto                    g = b->graph;
-  std::vector<hhds::Node> nodes;
-  nodes.reserve(static_cast<size_t>(n));
+  auto b = make_hhds_bundle("fat_pins_hhds");
+  auto g = b->graph;
   for (int i = 0; i < n; ++i) {
-    auto node = g->create_node();
-    for (int j = 0; j < i; ++j) {
-      auto spin = node.create_sink_pin(static_cast<hhds::Port_id>(j));
-      nodes[j].create_driver_pin().connect_sink(spin);
+    auto          node = g->create_node();
+    hhds::Port_id j    = 0;
+    for (auto prev : g->fast_class()) {
+      if (prev == node) {
+        break;
+      }
+      auto spin = node.create_sink_pin(j);
+      prev.create_driver_pin().connect_sink(spin);
+      ++j;
     }
-    nodes.push_back(node);
   }
   return b;
 }
@@ -181,20 +190,22 @@ static std::unique_ptr<HhdsBundle> build_fat_pins_hhds(int n) {
     auto* g = BUILDER(std::string(#NAME "_lg_fwd_") + std::to_string(next_gen()),       \
                      static_cast<int>(state.range(0)));                                 \
     for (auto _ : state) {                                                              \
-      int n_nodes = 0;                                                                  \
+      int n_edges = 0;                                                                  \
       for (auto node : g->forward()) {                                                  \
-        benchmark::DoNotOptimize(node);                                                 \
-        ++n_nodes;                                                                      \
+        for (auto& e : node.out_edges()) {                                              \
+          benchmark::DoNotOptimize(e);                                                  \
+          ++n_edges;                                                                    \
+        }                                                                               \
       }                                                                                 \
-      benchmark::DoNotOptimize(n_nodes);                                                \
+      benchmark::DoNotOptimize(n_edges);                                                \
     }                                                                                   \
   }
 
-#define BENCH_LG_DELETE(NAME, BUILDER)                                                  \
-  void BM_##NAME##_delete_lgraph(benchmark::State& state) {                             \
+#define BENCH_LG_DELETE_PIN(NAME, BUILDER)                                              \
+  void BM_##NAME##_delete_pin_lgraph(benchmark::State& state) {                         \
     for (auto _ : state) {                                                              \
       state.PauseTiming();                                                              \
-      auto* g = BUILDER(std::string(#NAME "_lg_del_") + std::to_string(next_gen()),     \
+      auto* g = BUILDER(std::string(#NAME "_lg_delp_") + std::to_string(next_gen()),    \
                        static_cast<int>(state.range(0)));                               \
       state.ResumeTiming();                                                             \
       for (auto node : g->fast()) {                                                     \
@@ -209,20 +220,36 @@ static std::unique_ptr<HhdsBundle> build_fat_pins_hhds(int n) {
     }                                                                                   \
   }
 
+#define BENCH_LG_DELETE_NODE(NAME, BUILDER)                                             \
+  void BM_##NAME##_delete_node_lgraph(benchmark::State& state) {                        \
+    for (auto _ : state) {                                                              \
+      state.PauseTiming();                                                              \
+      auto* g = BUILDER(std::string(#NAME "_lg_deln_") + std::to_string(next_gen()),    \
+                       static_cast<int>(state.range(0)));                               \
+      state.ResumeTiming();                                                             \
+      for (auto node : g->fast()) {                                                     \
+        node.del_node();                                                                \
+      }                                                                                 \
+    }                                                                                   \
+  }
+
 BENCH_LG_BUILD(chain, build_chain_lg)
 BENCH_LG_FAST(chain, build_chain_lg)
 BENCH_LG_FORWARD(chain, build_chain_lg)
-BENCH_LG_DELETE(chain, build_chain_lg)
+BENCH_LG_DELETE_PIN(chain, build_chain_lg)
+BENCH_LG_DELETE_NODE(chain, build_chain_lg)
 
 BENCH_LG_BUILD(fat_pin0, build_fat_pin0_lg)
 BENCH_LG_FAST(fat_pin0, build_fat_pin0_lg)
 BENCH_LG_FORWARD(fat_pin0, build_fat_pin0_lg)
-BENCH_LG_DELETE(fat_pin0, build_fat_pin0_lg)
+BENCH_LG_DELETE_PIN(fat_pin0, build_fat_pin0_lg)
+BENCH_LG_DELETE_NODE(fat_pin0, build_fat_pin0_lg)
 
 BENCH_LG_BUILD(fat_pins, build_fat_pins_lg)
 BENCH_LG_FAST(fat_pins, build_fat_pins_lg)
 BENCH_LG_FORWARD(fat_pins, build_fat_pins_lg)
-BENCH_LG_DELETE(fat_pins, build_fat_pins_lg)
+BENCH_LG_DELETE_PIN(fat_pins, build_fat_pins_lg)
+BENCH_LG_DELETE_NODE(fat_pins, build_fat_pins_lg)
 
 // ---------------------------------------------------------------------------
 // hhds benchmarks (build / fast / forward / delete) × (chain / fat_pin0 / fat_pins)
@@ -255,26 +282,25 @@ BENCH_LG_DELETE(fat_pins, build_fat_pins_lg)
     auto b = BUILDER(static_cast<int>(state.range(0)));                                 \
     auto g = b->graph;                                                                  \
     for (auto _ : state) {                                                              \
-      int n_nodes = 0;                                                                  \
+      int n_edges = 0;                                                                  \
       for (auto node : g->forward_class()) {                                            \
-        benchmark::DoNotOptimize(node);                                                 \
-        ++n_nodes;                                                                      \
+        for (auto& e : node.out_edges()) {                                              \
+          benchmark::DoNotOptimize(e);                                                  \
+          ++n_edges;                                                                    \
+        }                                                                               \
       }                                                                                 \
-      benchmark::DoNotOptimize(n_nodes);                                                \
+      benchmark::DoNotOptimize(n_edges);                                                \
     }                                                                                   \
   }
 
-#define BENCH_HHDS_DELETE(NAME, BUILDER)                                                \
-  void BM_##NAME##_delete_hhds(benchmark::State& state) {                               \
+#define BENCH_HHDS_DELETE_PIN(NAME, BUILDER)                                            \
+  void BM_##NAME##_delete_pin_hhds(benchmark::State& state) {                           \
     for (auto _ : state) {                                                              \
       state.PauseTiming();                                                              \
       auto b = BUILDER(static_cast<int>(state.range(0)));                               \
       auto g = b->graph;                                                                \
       state.ResumeTiming();                                                             \
       for (auto node : g->fast_class()) {                                               \
-        if (node.get_debug_nid() < 16) {                                                \
-          continue;  /* built-in IO/Const nodes — cannot be deleted */                  \
-        }                                                                               \
         for (auto& e : node.out_edges()) {                                              \
           e.del_edge();                                                                 \
         }                                                                               \
@@ -286,20 +312,36 @@ BENCH_LG_DELETE(fat_pins, build_fat_pins_lg)
     }                                                                                   \
   }
 
+#define BENCH_HHDS_DELETE_NODE(NAME, BUILDER)                                           \
+  void BM_##NAME##_delete_node_hhds(benchmark::State& state) {                          \
+    for (auto _ : state) {                                                              \
+      state.PauseTiming();                                                              \
+      auto b = BUILDER(static_cast<int>(state.range(0)));                               \
+      auto g = b->graph;                                                                \
+      state.ResumeTiming();                                                             \
+      for (auto node : g->fast_class()) {                                               \
+        node.del_node();                                                                \
+      }                                                                                 \
+    }                                                                                   \
+  }
+
 BENCH_HHDS_BUILD(chain, build_chain_hhds)
 BENCH_HHDS_FAST(chain, build_chain_hhds)
 BENCH_HHDS_FORWARD(chain, build_chain_hhds)
-BENCH_HHDS_DELETE(chain, build_chain_hhds)
+BENCH_HHDS_DELETE_PIN(chain, build_chain_hhds)
+BENCH_HHDS_DELETE_NODE(chain, build_chain_hhds)
 
 BENCH_HHDS_BUILD(fat_pin0, build_fat_pin0_hhds)
 BENCH_HHDS_FAST(fat_pin0, build_fat_pin0_hhds)
 BENCH_HHDS_FORWARD(fat_pin0, build_fat_pin0_hhds)
-BENCH_HHDS_DELETE(fat_pin0, build_fat_pin0_hhds)
+BENCH_HHDS_DELETE_PIN(fat_pin0, build_fat_pin0_hhds)
+BENCH_HHDS_DELETE_NODE(fat_pin0, build_fat_pin0_hhds)
 
 BENCH_HHDS_BUILD(fat_pins, build_fat_pins_hhds)
 BENCH_HHDS_FAST(fat_pins, build_fat_pins_hhds)
 BENCH_HHDS_FORWARD(fat_pins, build_fat_pins_hhds)
-BENCH_HHDS_DELETE(fat_pins, build_fat_pins_hhds)
+BENCH_HHDS_DELETE_PIN(fat_pins, build_fat_pins_hhds)
+BENCH_HHDS_DELETE_NODE(fat_pins, build_fat_pins_hhds)
 
 }  // namespace
 
@@ -310,8 +352,10 @@ BENCHMARK(BM_chain_fast_lgraph)->Arg(kChainLen);
 BENCHMARK(BM_chain_fast_hhds)->Arg(kChainLen);
 BENCHMARK(BM_chain_forward_lgraph)->Arg(kChainLen);
 BENCHMARK(BM_chain_forward_hhds)->Arg(kChainLen);
-BENCHMARK(BM_chain_delete_lgraph)->Arg(kChainLen);
-BENCHMARK(BM_chain_delete_hhds)->Arg(kChainLen);
+BENCHMARK(BM_chain_delete_pin_lgraph)->Arg(kChainLen);
+BENCHMARK(BM_chain_delete_pin_hhds)->Arg(kChainLen);
+BENCHMARK(BM_chain_delete_node_lgraph)->Arg(kChainLen);
+BENCHMARK(BM_chain_delete_node_hhds)->Arg(kChainLen);
 
 // fat_pin0: 500 nodes, fully connected, all incoming on pin 0
 BENCHMARK(BM_fat_pin0_build_lgraph)->Arg(kFatLen);
@@ -320,8 +364,10 @@ BENCHMARK(BM_fat_pin0_fast_lgraph)->Arg(kFatLen);
 BENCHMARK(BM_fat_pin0_fast_hhds)->Arg(kFatLen);
 BENCHMARK(BM_fat_pin0_forward_lgraph)->Arg(kFatLen);
 BENCHMARK(BM_fat_pin0_forward_hhds)->Arg(kFatLen);
-BENCHMARK(BM_fat_pin0_delete_lgraph)->Arg(kFatLen);
-BENCHMARK(BM_fat_pin0_delete_hhds)->Arg(kFatLen);
+BENCHMARK(BM_fat_pin0_delete_pin_lgraph)->Arg(kFatLen);
+BENCHMARK(BM_fat_pin0_delete_pin_hhds)->Arg(kFatLen);
+BENCHMARK(BM_fat_pin0_delete_node_lgraph)->Arg(kFatLen);
+BENCHMARK(BM_fat_pin0_delete_node_hhds)->Arg(kFatLen);
 
 // fat_pins: 500 nodes, fully connected, distinct sink pin per edge
 BENCHMARK(BM_fat_pins_build_lgraph)->Arg(kFatLen);
@@ -330,7 +376,9 @@ BENCHMARK(BM_fat_pins_fast_lgraph)->Arg(kFatLen);
 BENCHMARK(BM_fat_pins_fast_hhds)->Arg(kFatLen);
 BENCHMARK(BM_fat_pins_forward_lgraph)->Arg(kFatLen);
 BENCHMARK(BM_fat_pins_forward_hhds)->Arg(kFatLen);
-BENCHMARK(BM_fat_pins_delete_lgraph)->Arg(kFatLen);
-BENCHMARK(BM_fat_pins_delete_hhds)->Arg(kFatLen);
+BENCHMARK(BM_fat_pins_delete_pin_lgraph)->Arg(kFatLen);
+BENCHMARK(BM_fat_pins_delete_pin_hhds)->Arg(kFatLen);
+BENCHMARK(BM_fat_pins_delete_node_lgraph)->Arg(kFatLen);
+BENCHMARK(BM_fat_pins_delete_node_hhds)->Arg(kFatLen);
 
 BENCHMARK_MAIN();

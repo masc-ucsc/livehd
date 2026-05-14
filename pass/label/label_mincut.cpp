@@ -40,7 +40,7 @@ void Label_mincut::gather_ids(Lgraph* g) {
     if (n.get_type_op() == Ntype_op::IO) {
       continue;
     }
-    if (n.get_type_op() == Ntype_op::Const) {
+    if (n.get_type_op() == Ntype_op::Nconst) {
       continue;
     }
     node2id[n.get_compact()] = node_id;
@@ -60,7 +60,7 @@ void Label_mincut::gather_neighs(Lgraph* g) {
 
     Node tmp_n(g, curr_node);
 
-    if (tmp_n.get_type_op() == Ntype_op::Const) {
+    if (tmp_n.get_type_op() == Ntype_op::Nconst) {
       continue;
     }
     // gather the sinks
@@ -72,7 +72,7 @@ void Label_mincut::gather_neighs(Lgraph* g) {
       auto outgoing_id = node2id[snode.get_compact()];
       auto this_id     = node2id[dnode.get_compact()];
 
-      if (snode.get_type_op() == Ntype_op::Const) {
+      if (snode.get_type_op() == Ntype_op::Nconst) {
         continue;
       }
       if (snode.get_type_op() != Ntype_op::IO) {
@@ -92,7 +92,7 @@ void Label_mincut::gather_neighs(Lgraph* g) {
       auto incoming_id = node2id[dnode.get_compact()];
       auto this_id     = node2id[snode.get_compact()];
 
-      if (dnode.get_type_op() == Ntype_op::Const) {
+      if (dnode.get_type_op() == Ntype_op::Nconst) {
         continue;
       }
       if (dnode.get_type_op() != Ntype_op::IO) {

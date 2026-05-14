@@ -376,7 +376,7 @@ void Lgyosys_dump::create_wires(Lgraph* g, RTLIL::Module* mod) {
       continue;
     }
 
-    if (op == Ntype_op::Const) {
+    if (op == Ntype_op::Nconst) {
       auto         lc = node.get_type_const();
       RTLIL::Wire* new_wire;
 #if 0
@@ -486,7 +486,7 @@ void Lgyosys_dump::to_yosys(Lgraph* g) {
       }
     }
 
-    assert(op != Ntype_op::Const);  // filtered before
+    assert(op != Ntype_op::Nconst);  // filtered before
 
     bool all_inp_unsigned  = true;
     bool some_inp_unsigned = false;

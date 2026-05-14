@@ -234,10 +234,10 @@ TEST(UpassRunnerLgraph, FoldSumConstMutation) {
 
   auto out0_dpin = lg->get_graph_output("o_sum0").get_driver_pin();
   auto out1_dpin = lg->get_graph_output("o_sum1").get_driver_pin();
-  EXPECT_EQ(out0_dpin.get_type_op(), Ntype_op::Const);
+  EXPECT_EQ(out0_dpin.get_type_op(), Ntype_op::Nconst);
   EXPECT_EQ(out0_dpin.get_bits(), 9);
   EXPECT_FALSE(out0_dpin.is_unsign());
-  EXPECT_EQ(out1_dpin.get_type_op(), Ntype_op::Const);
+  EXPECT_EQ(out1_dpin.get_type_op(), Ntype_op::Nconst);
   EXPECT_EQ(out1_dpin.get_bits(), 13);
   EXPECT_TRUE(out1_dpin.is_unsign());
 
@@ -246,7 +246,7 @@ TEST(UpassRunnerLgraph, FoldSumConstMutation) {
   for (const auto& n : lg->fast()) {
     if (n.get_type_op() == Ntype_op::Sum) {
       ++sum_count;
-    } else if (n.get_type_op() == Ntype_op::Const) {
+    } else if (n.get_type_op() == Ntype_op::Nconst) {
       ++const_count;
     }
   }
@@ -449,13 +449,13 @@ TEST(UpassRunnerLgraph, FoldNeutralMutation) {
   auto out1_dpin = lg->get_graph_output("o_and").get_driver_pin();
   auto out4_dpin = lg->get_graph_output("o_xor").get_driver_pin();
   auto out8_dpin = lg->get_graph_output("o_or1").get_driver_pin();
-  EXPECT_EQ(out1_dpin.get_type_op(), Ntype_op::Const);
+  EXPECT_EQ(out1_dpin.get_type_op(), Ntype_op::Nconst);
   EXPECT_EQ(out1_dpin.get_bits(), 8);
   EXPECT_FALSE(out1_dpin.is_unsign());
-  EXPECT_EQ(out4_dpin.get_type_op(), Ntype_op::Const);
+  EXPECT_EQ(out4_dpin.get_type_op(), Ntype_op::Nconst);
   EXPECT_EQ(out4_dpin.get_bits(), 8);
   EXPECT_FALSE(out4_dpin.is_unsign());
-  EXPECT_EQ(out8_dpin.get_type_op(), Ntype_op::Const);
+  EXPECT_EQ(out8_dpin.get_type_op(), Ntype_op::Nconst);
   EXPECT_EQ(out8_dpin.get_bits(), 1);
   EXPECT_FALSE(out8_dpin.is_unsign());
 
@@ -485,7 +485,7 @@ TEST(UpassRunnerLgraph, FoldNeutralMutation) {
 
   std::size_t const_count = 0;
   for (const auto& n : lg->fast()) {
-    if (n.get_type_op() == Ntype_op::Const) {
+    if (n.get_type_op() == Ntype_op::Nconst) {
       ++const_count;
     }
   }
@@ -660,13 +660,13 @@ TEST(UpassRunnerLgraph, FoldShiftDivMutation) {
   auto out3_dpin = lg->get_graph_output("o_div0num").get_driver_pin();
   auto out4_dpin = lg->get_graph_output("o_divxx").get_driver_pin();
   auto out6_dpin = lg->get_graph_output("o_div62").get_driver_pin();
-  EXPECT_EQ(out3_dpin.get_type_op(), Ntype_op::Const);
+  EXPECT_EQ(out3_dpin.get_type_op(), Ntype_op::Nconst);
   EXPECT_EQ(out3_dpin.get_bits(), 8);
   EXPECT_FALSE(out3_dpin.is_unsign());
-  EXPECT_EQ(out4_dpin.get_type_op(), Ntype_op::Const);
+  EXPECT_EQ(out4_dpin.get_type_op(), Ntype_op::Nconst);
   EXPECT_EQ(out4_dpin.get_bits(), 8);
   EXPECT_FALSE(out4_dpin.is_unsign());
-  EXPECT_EQ(out6_dpin.get_type_op(), Ntype_op::Const);
+  EXPECT_EQ(out6_dpin.get_type_op(), Ntype_op::Nconst);
   EXPECT_EQ(out6_dpin.get_bits(), 8);
   EXPECT_TRUE(out6_dpin.is_unsign());
 
@@ -849,7 +849,7 @@ TEST(UpassRunnerLgraph, FoldSubConstSubSelf) {
 
   // Output driver must now be a Const node with value 0.
   auto out_dpin = lg->get_graph_output("o_sub_self").get_driver_pin();
-  EXPECT_EQ(out_dpin.get_type_op(), Ntype_op::Const);
+  EXPECT_EQ(out_dpin.get_type_op(), Ntype_op::Nconst);
   EXPECT_EQ(out_dpin.get_type_const().to_i(), 0);
 }
 
@@ -901,7 +901,7 @@ TEST(UpassRunnerLgraph, FoldSubConstConstSub) {
   EXPECT_EQ(sum_count, 0U);
 
   auto out_dpin = lg->get_graph_output("o_const_sub").get_driver_pin();
-  EXPECT_EQ(out_dpin.get_type_op(), Ntype_op::Const);
+  EXPECT_EQ(out_dpin.get_type_op(), Ntype_op::Nconst);
   EXPECT_EQ(out_dpin.get_type_const().to_i(), 5);
 }
 
@@ -991,7 +991,7 @@ TEST(UpassRunnerLgraph, FoldMultConstConstMult) {
   EXPECT_EQ(mult_count, 0U);
 
   auto out_dpin = lg->get_graph_output("o_const_mult").get_driver_pin();
-  EXPECT_EQ(out_dpin.get_type_op(), Ntype_op::Const);
+  EXPECT_EQ(out_dpin.get_type_op(), Ntype_op::Nconst);
   EXPECT_EQ(out_dpin.get_type_const().to_i(), 12);
 }
 
@@ -1074,11 +1074,11 @@ TEST(UpassRunnerLgraph, FoldMultConstMultipleNodes) {
   EXPECT_EQ(mult_count, 0U);
 
   auto d1 = lg->get_graph_output("o1").get_driver_pin();
-  EXPECT_EQ(d1.get_type_op(), Ntype_op::Const);
+  EXPECT_EQ(d1.get_type_op(), Ntype_op::Nconst);
   EXPECT_EQ(d1.get_type_const().to_i(), 10);
 
   auto d2 = lg->get_graph_output("o2").get_driver_pin();
-  EXPECT_EQ(d2.get_type_op(), Ntype_op::Const);
+  EXPECT_EQ(d2.get_type_op(), Ntype_op::Nconst);
   EXPECT_EQ(d2.get_type_const().to_i(), 42);
 }
 
@@ -1106,7 +1106,7 @@ TEST(UpassRunnerLgraph, DceRemovesOrphanConst) {
   EXPECT_EQ(dry.edges_freed, 0U);  // orphan has no inputs
   std::size_t const_count = 0;
   for (const auto& n : lg->fast()) {
-    if (n.get_type_op() == Ntype_op::Const) {
+    if (n.get_type_op() == Ntype_op::Nconst) {
       ++const_count;
     }
   }
@@ -1118,7 +1118,7 @@ TEST(UpassRunnerLgraph, DceRemovesOrphanConst) {
 
   const_count = 0;
   for (const auto& n : lg->fast()) {
-    if (n.get_type_op() == Ntype_op::Const) {
+    if (n.get_type_op() == Ntype_op::Nconst) {
       ++const_count;
     }
   }
@@ -1157,14 +1157,14 @@ TEST(UpassRunnerLgraph, DceConvergesAfterFoldMult) {
   //   const(12) feeds the graph output → kept
   std::size_t const_count = 0;
   for (const auto& n : lg->fast()) {
-    if (n.get_type_op() == Ntype_op::Const) {
+    if (n.get_type_op() == Ntype_op::Nconst) {
       ++const_count;
     }
   }
   EXPECT_EQ(const_count, 1U);  // only const(12) survives
 
   auto out_dpin = lg->get_graph_output("o").get_driver_pin();
-  EXPECT_EQ(out_dpin.get_type_op(), Ntype_op::Const);
+  EXPECT_EQ(out_dpin.get_type_op(), Ntype_op::Nconst);
   EXPECT_EQ(out_dpin.get_type_const().to_i(), 12);
 }
 
@@ -1256,7 +1256,7 @@ TEST(UpassRunnerLgraph, FoldSumConstThreeInputs) {
   EXPECT_EQ(sum_count, 0U);
 
   auto out_dpin = lg->get_graph_output("o").get_driver_pin();
-  EXPECT_EQ(out_dpin.get_type_op(), Ntype_op::Const);
+  EXPECT_EQ(out_dpin.get_type_op(), Ntype_op::Nconst);
   EXPECT_EQ(out_dpin.get_type_const().to_i(), 10);  // 2+3+5 = 10
 }
 
@@ -1292,7 +1292,7 @@ TEST(UpassRunnerLgraph, FoldMultConstThreeInputs) {
   EXPECT_EQ(mult_count, 0U);
 
   auto out_dpin = lg->get_graph_output("o").get_driver_pin();
-  EXPECT_EQ(out_dpin.get_type_op(), Ntype_op::Const);
+  EXPECT_EQ(out_dpin.get_type_op(), Ntype_op::Nconst);
   EXPECT_EQ(out_dpin.get_type_const().to_i(), 24);  // 2*3*4 = 24
 }
 

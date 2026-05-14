@@ -54,7 +54,7 @@ void Lgraph_attributes::set_type(Index_id nid, const Ntype_op op) {
 }
 
 bool Lgraph_attributes::is_type_const(Index_id nid) const {
-  bool b = node_internal[nid].get_type() == Ntype_op::Const;
+  bool b = node_internal[nid].get_type() == Ntype_op::Nconst;
 
   return b;
 }
@@ -149,7 +149,7 @@ void Lgraph_attributes::set_type_const(Index_id nid, const Const& value) {
   const_map.insert_or_assign(Node::Compact_class(nid), value.serialize());
 
   auto* ptr = &node_internal[nid];
-  ptr->set_type(Ntype_op::Const);
+  ptr->set_type(Ntype_op::Nconst);
   ptr->set_bits(value.get_bits());
 }
 

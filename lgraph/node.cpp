@@ -365,7 +365,7 @@ Ntype_op         Node::get_type_op() const { return current_g->get_type_op(nid);
 std::string_view Node::get_type_name() const { return Ntype::get_name(current_g->get_type_op(nid)); }
 
 void Node::set_type(const Ntype_op op) {
-  I(op != Ntype_op::Sub && op != Ntype_op::Const && op != Ntype_op::LUT);  // do not set type directly, call set_type_const ....
+  I(op != Ntype_op::Sub && op != Ntype_op::Nconst && op != Ntype_op::LUT);  // do not set type directly, call set_type_const ....
   current_g->set_type(nid, op);
 }
 
@@ -731,7 +731,7 @@ void Node::dump() const {
 
   if (get_type_op() == Ntype_op::LUT) {
     std::print(" lut:{}\n", get_type_lut().to_pyrope());
-  } else if (get_type_op() == Ntype_op::Const) {
+  } else if (get_type_op() == Ntype_op::Nconst) {
     std::print(" const:{}\n", get_type_const().to_pyrope());
   } else if (get_type_op() == Ntype_op::Sub) {
     Lg_type_id sub_lgid = current_g->get_type_sub(nid);

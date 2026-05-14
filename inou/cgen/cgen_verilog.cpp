@@ -641,7 +641,7 @@ void Cgen_verilog::process_simple_node(std::shared_ptr<File_output> fout, Node& 
 
     // TODO: If val_expr min>=0, then >> is OK
     final_expr = absl::StrCat(val_expr, " >>> ", amt_expr);
-  } else if (op == Ntype_op::Const) {
+  } else if (op == Ntype_op::Nconst) {
     // final_expr = node.get_type_const().to_verilog();
     return;  // Done before at create_locals
   } else if (op == Ntype_op::TupAdd || op == Ntype_op::TupGet || op == Ntype_op::AttrGet) {
@@ -781,7 +781,7 @@ void Cgen_verilog::create_combinational(std::shared_ptr<File_output> fout, Lgrap
     }
 
     if (node.get_driver_pin().get_bits() == 0) {
-      if (op != Ntype_op::Const && op != Ntype_op::AttrSet && op != Ntype_op::Mux) {
+      if (op != Ntype_op::Nconst && op != Ntype_op::AttrSet && op != Ntype_op::Mux) {
         node.dump();
         // Pass::error("node:{} does not have bits set. It needs bits to generate correct verilog", node.debug_name());
       }
@@ -1002,7 +1002,7 @@ void Cgen_verilog::create_locals(std::shared_ptr<File_output> fout, Lgraph* lg) 
       }
     } else if (op == Ntype_op::Set_mask) {
       add_to_pin2var(fout, dpin, name, false);
-    } else if (op == Ntype_op::Const) {
+    } else if (op == Ntype_op::Nconst) {
       auto final_expr = node.get_type_const().to_verilog();
       pin2expr.emplace(node.get_driver_pin().get_compact_class(), Expr(final_expr, false));
     } else if (op == Ntype_op::Get_mask) {

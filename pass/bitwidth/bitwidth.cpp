@@ -1410,14 +1410,14 @@ void Bitwidth::bw_pass(Lgraph* lg) {
       auto inp_edges = node.inp_edges();
       auto op        = node.get_type_op();
 
-      if (inp_edges.empty() && (op != Ntype_op::Const && op != Ntype_op::Sub && op != Ntype_op::LUT)) {
+      if (inp_edges.empty() && (op != Ntype_op::Nconst && op != Ntype_op::Sub && op != Ntype_op::LUT)) {
         if (!hier) {  // FIXME: once hier del works
           node.del_node();
         }
         continue;
       }
 
-      if (op == Ntype_op::Const) {
+      if (op == Ntype_op::Nconst) {
         process_const(node);
         continue;
       } else if (!Ntype::is_multi_driver(op)) {
@@ -1596,7 +1596,7 @@ void Bitwidth::bw_pass(Lgraph* lg) {
       // DISABLED because the fast iterator can delete inputs for
       // attr_set node before the attr_set is evaluated
 
-      if (op == Ntype_op::Const)
+      if (op == Ntype_op::Nconst)
         continue;
       for (auto dpin : node.out_connected_pins()) {
         auto it = bwmap.find(dpin.get_compact_class());

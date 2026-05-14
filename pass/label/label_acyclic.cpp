@@ -72,7 +72,7 @@ void Label_acyclic::int_set_write(IntSet& tgt, IntSet& ref) {
 void Label_acyclic::gather_roots(Lgraph* g) {
   // Iterating through outputs of the graphs (0 out edges), all are potential roots
   g->each_graph_output([&](const Node_pin& pin) {
-    if (pin.get_node().get_type_op() != Ntype_op::Const) {
+    if (pin.get_node().get_type_op() != Ntype_op::Nconst) {
       const auto nodec = (pin.get_node()).get_compact();  // Node compact flat
       roots.insert(nodec);                                // Saving roots
       node2id[nodec] = part_id;                           // Saving part ID of nodes
@@ -84,7 +84,7 @@ void Label_acyclic::gather_roots(Lgraph* g) {
   // Adding potential roots to the root list
   bool add_root = false;
   for (const auto& n : g->forward(hier)) {
-    if (n.get_type_op() == Ntype_op::Const) {
+    if (n.get_type_op() == Ntype_op::Nconst) {
       continue;
     }
     if (n.get_num_out_edges() > 1) {
@@ -137,14 +137,14 @@ void Label_acyclic::grow_partitions(Lgraph* g) {
       // Get driver of all inp_edges and add to pot list if not already in a Part
       Node temp_n(g, curr_pred);
 
-      if (temp_n.get_type_op() == Ntype_op::Const) {
+      if (temp_n.get_type_op() == Ntype_op::Nconst) {
         continue;
       }
 
       for (auto& ie : temp_n.inp_edges()) {
         auto pot_pred = ie.driver.get_node();
 
-        if (pot_pred.get_type_op() == Ntype_op::Const) {
+        if (pot_pred.get_type_op() == Ntype_op::Nconst) {
           continue;
         }
 
@@ -190,7 +190,7 @@ void Label_acyclic::gather_inou(Lgraph* g) {
     for (auto& n : curr_id_nodes) {
       Node tmp_n(g, n);
 
-      if (tmp_n.get_type_op() == Ntype_op::Const) {
+      if (tmp_n.get_type_op() == Ntype_op::Nconst) {
         continue;
       }
       // gather the sinks for id2out and id2outparts
@@ -202,7 +202,7 @@ void Label_acyclic::gather_inou(Lgraph* g) {
         auto outgoing_id = node2id[snode.get_compact()];
         auto this_id     = node2id[dnode.get_compact()];
 
-        if (snode.get_type_op() == Ntype_op::Const) {
+        if (snode.get_type_op() == Ntype_op::Nconst) {
           continue;
         }
         if (snode.get_type_op() != Ntype_op::IO) {
@@ -222,7 +222,7 @@ void Label_acyclic::gather_inou(Lgraph* g) {
         auto incoming_id = node2id[dnode.get_compact()];
         auto this_id     = node2id[snode.get_compact()];
 
-        if (dnode.get_type_op() == Ntype_op::Const) {
+        if (dnode.get_type_op() == Ntype_op::Nconst) {
           continue;
         }
         if (dnode.get_type_op() != Ntype_op::IO) {

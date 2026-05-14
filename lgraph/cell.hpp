@@ -48,7 +48,7 @@ enum class Ntype_op : uint8_t {
 
   Sub,  // Sub module instance
   //------------------END PIPELINED (break LOOPS)
-  Const,  // Constant
+  Nconst,  // Constant
 
   // High Level Lgraph constructs
 
@@ -87,7 +87,7 @@ protected:
   static constexpr std::string_view get_sink_name_slow(Ntype_op op, int pid);
 
 public:
-  static inline constexpr bool is_loop_first(Ntype_op op) { return op == Ntype_op::Const || op == Ntype_op::IO; }
+  static inline constexpr bool is_loop_first(Ntype_op op) { return op == Ntype_op::Nconst || op == Ntype_op::IO; }
   static inline constexpr bool is_loop_last(Ntype_op op) {
     return (static_cast<int>(op) >= static_cast<int>(Ntype_op::Memory) && static_cast<int>(op) <= static_cast<int>(Ntype_op::Sub))
            || op == Ntype_op::IO;

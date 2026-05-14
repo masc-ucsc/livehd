@@ -1438,7 +1438,7 @@ static void connect_partial_dpin(Lgraph* g, Node& or_node, uint32_t or_offset, B
   */
   I(or_node.get_type_op() == Ntype_op::Or);
 
-  if (current_dpin.get_node().is_type(Ntype_op::Const)) {  // just use the dpin with zero/sign extend
+  if (current_dpin.get_node().is_type(Ntype_op::Nconst)) {  // just use the dpin with zero/sign extend
     append_to_or_node(g, or_node, current_dpin, or_offset);
   } else if (current_dpin.get_bits() > nbits) {
     auto and_node = or_node.create(Ntype_op::And);

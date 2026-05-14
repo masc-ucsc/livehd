@@ -2390,7 +2390,7 @@ void Cprop::tuple_pass(Lgraph* lg) {
       }
 
       auto op = node.get_type_op();
-      if (op != Ntype_op::Get_mask && op != Ntype_op::SHL && (op < Ntype_op::Mux || op == Ntype_op::Const)) {
+      if (op != Ntype_op::Get_mask && op != Ntype_op::SHL && (op < Ntype_op::Mux || op == Ntype_op::Nconst)) {
         continue;
       }
 

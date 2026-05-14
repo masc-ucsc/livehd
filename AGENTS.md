@@ -8,6 +8,16 @@
 - C++ formatted with `clang-format`
 - **Contract tests/benchmarks**: Any test or benchmark file whose name contains the word `contract` is immutable to the coding agent. Do NOT modify these files — they define the expected behavior contract. If a contract test fails, fix the implementation, not the test.
 
+## Sibling Repositories (DO NOT search the filesystem for these)
+
+LiveHD depends on several sibling repos. **Always look in these exact paths — do NOT run `find` to locate them:**
+
+- `../hhds/` — HHDS library (Graph, Tree, Forest, flat_storage attributes). Headers: `hhds/graph.hpp`, `hhds/tree.hpp`, `hhds/attr.hpp`.
+- `../hlop/` — HLOP library (dlop / slop helpers).
+- `../iassert/` — iassert library (`I(...)`, `GI(...)` invariant macros).
+
+If you need to read or fix code in one of these libraries, go directly to `../hhds`, `../hlop`, or `../iassert`. They are configured as `local_path_override` in `MODULE.bazel`.
+
 ## Key Directories
 
 - `lgraph/`: LGraph IR — nodes (logic, muxes, registers, memories, sub-graphs), pins (driver/sink), edges
@@ -17,8 +27,6 @@
 - `inou/cgen/`: Verilog code generation from LGraph
 - `pass/cprop/`: Constant propagation pass
 - `ware/rtl/`: Memory RTL modules (`cgen_memory_*.v`, `cgen_memory_multiclock_*.v`)
-
-If you need to explore/fix the hlop (dlop/slop) or hdds library, they likely reside in ../hlop and ../hhds
 
 ## Tree library
 

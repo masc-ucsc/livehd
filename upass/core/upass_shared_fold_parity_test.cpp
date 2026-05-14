@@ -55,7 +55,7 @@ TEST(UpassSharedFoldParity, FoldSumConstAcrossLnastAndLgraph) {
   for (const auto& n : lg->fast()) {
     if (n.get_type_op() == Ntype_op::Sum) {
       ++sum_count;
-    } else if (n.get_type_op() == Ntype_op::Const) {
+    } else if (n.get_type_op() == Ntype_op::Nconst) {
       ++const_count;
     }
   }

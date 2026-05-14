@@ -82,7 +82,7 @@ void Lgraph::load(const std::shared_ptr<Hif_read> hif) {
 
     Node node;
 
-    if (op == Ntype_op::Const) {
+    if (op == Ntype_op::Nconst) {
       I(!stmt.attr.empty() && stmt.attr[0].lhs == "const");
       I(stmt.attr[0].lhs_cat == Hif_base::ID_cat::String_cat);
 
@@ -1127,7 +1127,7 @@ void Lgraph::del_node(const Node& node) {
 
   auto op = node_internal[idx2].get_type();
 
-  if (op == Ntype_op::Const) {
+  if (op == Ntype_op::Nconst) {
     const_map.erase(node.get_compact_class());
   } else if (op == Ntype_op::IO) {
     I(false);  // add the case once we have a testing case
@@ -1431,7 +1431,7 @@ Node Lgraph::create_node(const Node& old_node) {
     new_node.set_type_lut(old_node.get_type_lut());
   } else if (op == Ntype_op::Sub) {
     new_node = create_node_sub(old_node.get_type_sub());
-  } else if (op == Ntype_op::Const) {
+  } else if (op == Ntype_op::Nconst) {
     new_node = create_node_const(old_node.get_type_const());
     I(new_node.get_driver_pin().get_bits() == old_node.get_driver_pin().get_bits());
   } else {
@@ -1477,7 +1477,7 @@ Node Lgraph::create_node_const(const Const& value) {
   // WARNING: There is a const_map, but it is NOT a bimap (speed). Just from
   // nid to const.
   Index_id nid = memoize_const_hint[value.hash() % memoize_const_hint.size()];
-  if (nid == 0 || nid >= node_internal.size() || !node_internal[nid].is_valid() || node_internal[nid].get_type() != Ntype_op::Const
+  if (nid == 0 || nid >= node_internal.size() || !node_internal[nid].is_valid() || node_internal[nid].get_type() != Ntype_op::Nconst
       || !get_type_const(nid).same_repr(value) || get_type_const(nid).get_bits() != value.get_bits()) {
     nid = create_node_int();
     set_type_const(nid, value);
@@ -1651,7 +1651,7 @@ void Lgraph::save(std::string filename) {
     if (op == Ntype_op::Sub) {
       auto subid = node.get_type_sub();
       n.add_attr("subid", subid.value);
-    } else if (op == Ntype_op::Const) {
+    } else if (op == Ntype_op::Nconst) {
       auto str = node.get_type_const().serialize();
       n.add_attr("const", str);
     } else if (op == Ntype_op::LUT) {

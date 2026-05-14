@@ -99,7 +99,7 @@ public:
     }
     std::size_t count = 0;
     for (const auto& node : lg->fast()) {
-      if (node.get_type_op() == Ntype_op::Const) {
+      if (node.get_type_op() == Ntype_op::Nconst) {
         ++count;
       }
     }
@@ -137,7 +137,7 @@ public:
     }
 
     switch (node.get_type_op()) {
-      case Ntype_op::Const: return "const";
+      case Ntype_op::Nconst: return "const";
       case Ntype_op::Sum: return "sum";
       case Ntype_op::Mult: return "mult";
       case Ntype_op::Div: return "div";
@@ -166,11 +166,11 @@ public:
     if (node.is_invalid()) {
       return false;
     }
-    return node.get_type_op() == Ntype_op::Const;
+    return node.get_type_op() == Ntype_op::Nconst;
   }
   std::optional<std::int64_t> const_value(Node_id node_id) const override {
     const auto node = get_node(node_id);
-    if (node.is_invalid() || node.get_type_op() != Ntype_op::Const) {
+    if (node.is_invalid() || node.get_type_op() != Ntype_op::Nconst) {
       return std::nullopt;
     }
 
@@ -187,7 +187,7 @@ public:
       return effect;
     }
 
-    if (node.get_type_op() == Ntype_op::Const) {
+    if (node.get_type_op() == Ntype_op::Nconst) {
       return effect;
     }
 
@@ -205,7 +205,7 @@ public:
       return false;
     }
 
-    if (node.get_type_op() == Ntype_op::Const) {
+    if (node.get_type_op() == Ntype_op::Nconst) {
       const auto cur = node.get_type_const();
       if (cur.is_i() && cur.to_i() == value) {
         return false;
@@ -242,7 +242,7 @@ public:
       ++summary.visited_nodes;
 
       auto op = node.get_type_op();
-      if (op == Ntype_op::Const) {
+      if (op == Ntype_op::Nconst) {
         ++summary.const_nodes;
         continue;
       }
@@ -256,7 +256,7 @@ public:
       bool        all_const   = true;
       for (const auto& inp : node.inp_edges()) {
         ++input_count;
-        if (!inp.driver.is_type(Ntype_op::Const)) {
+        if (!inp.driver.is_type(Ntype_op::Nconst)) {
           all_const = false;
           break;
         }
@@ -305,7 +305,7 @@ public:
       const auto& b_drv = b_ins[0].driver;
 
       // a - 0
-      if (b_drv.is_type(Ntype_op::Const) && b_drv.get_type_const().is_known_zero()) {
+      if (b_drv.is_type(Ntype_op::Nconst) && b_drv.get_type_const().is_known_zero()) {
         ++count;
         continue;
       }
@@ -315,7 +315,7 @@ public:
         continue;
       }
       // c1 - c2
-      if (a_drv.is_type(Ntype_op::Const) && b_drv.is_type(Ntype_op::Const)) {
+      if (a_drv.is_type(Ntype_op::Nconst) && b_drv.is_type(Ntype_op::Nconst)) {
         ++count;
       }
     }
@@ -339,7 +339,7 @@ public:
       bool        all_const   = true;
       for (const auto& inp : node.inp_edges()) {
         ++input_count;
-        if (!inp.driver.is_type(Ntype_op::Const)) {
+        if (!inp.driver.is_type(Ntype_op::Nconst)) {
           all_const = false;
           break;
         }
@@ -381,7 +381,7 @@ public:
       if (inputs.empty()) {
         continue;
       }
-      if (!std::ranges::all_of(inputs, [](const XEdge& inp) { return inp.driver.is_type(Ntype_op::Const); })) {
+      if (!std::ranges::all_of(inputs, [](const XEdge& inp) { return inp.driver.is_type(Ntype_op::Nconst); })) {
         continue;
       }
 
@@ -457,7 +457,7 @@ public:
       if (inputs.empty()) {
         continue;
       }
-      if (!std::ranges::all_of(inputs, [](const XEdge& inp) { return inp.driver.is_type(Ntype_op::Const); })) {
+      if (!std::ranges::all_of(inputs, [](const XEdge& inp) { return inp.driver.is_type(Ntype_op::Nconst); })) {
         continue;
       }
 
@@ -545,7 +545,7 @@ public:
 
       int const_zero_pos = -1;
       for (int i = 0; i < 2; ++i) {
-        if (inputs[i].driver.is_type(Ntype_op::Const) && inputs[i].driver.get_type_const().is_known_zero()) {
+        if (inputs[i].driver.is_type(Ntype_op::Nconst) && inputs[i].driver.get_type_const().is_known_zero()) {
           const_zero_pos = i;
           break;
         }
@@ -584,7 +584,7 @@ public:
       if (!rewritten && node.get_type_op() == Ntype_op::Mult) {
         int const_zero_pos_mul = -1;
         for (int i = 0; i < 2; ++i) {
-          if (inputs[i].driver.is_type(Ntype_op::Const) && inputs[i].driver.get_type_const().is_known_zero()) {
+          if (inputs[i].driver.is_type(Ntype_op::Nconst) && inputs[i].driver.get_type_const().is_known_zero()) {
             const_zero_pos_mul = i;
             break;
           }
@@ -610,7 +610,7 @@ public:
       if (!rewritten && node.get_type_op() == Ntype_op::Mult) {
         int const_one_pos = -1;
         for (int i = 0; i < 2; ++i) {
-          if (inputs[i].driver.is_type(Ntype_op::Const) && inputs[i].driver.get_type_const().is_i() && inputs[i].driver.get_type_const().to_i() == 1) {
+          if (inputs[i].driver.is_type(Ntype_op::Nconst) && inputs[i].driver.get_type_const().is_i() && inputs[i].driver.get_type_const().to_i() == 1) {
             const_one_pos = i;
             break;
           }
@@ -633,7 +633,7 @@ public:
       if (!rewritten && node.get_type_op() == Ntype_op::And) {
         int const_one_pos = -1;
         for (int i = 0; i < 2; ++i) {
-          if (inputs[i].driver.is_type(Ntype_op::Const) && inputs[i].driver.get_type_const().is_i() && inputs[i].driver.get_type_const().to_i() == 1) {
+          if (inputs[i].driver.is_type(Ntype_op::Nconst) && inputs[i].driver.get_type_const().is_i() && inputs[i].driver.get_type_const().to_i() == 1) {
             const_one_pos = i;
             break;
           }
@@ -674,7 +674,7 @@ public:
         if (node.get_type_op() == Ntype_op::Or) {
           int const_one_pos = -1;
           for (int i = 0; i < 2; ++i) {
-            if (inputs[i].driver.is_type(Ntype_op::Const) && inputs[i].driver.get_type_const().is_i() && inputs[i].driver.get_type_const().to_i() == 1) {
+            if (inputs[i].driver.is_type(Ntype_op::Nconst) && inputs[i].driver.get_type_const().is_i() && inputs[i].driver.get_type_const().to_i() == 1) {
               const_one_pos = i;
               break;
             }
@@ -778,7 +778,7 @@ public:
       bool rewritten = false;
 
       if ((node.get_type_op() == Ntype_op::Div || node.get_type_op() == Ntype_op::SHL || node.get_type_op() == Ntype_op::SRA)
-          && rhs.is_type(Ntype_op::Const) && rhs.get_type_const().is_known_zero()) {
+          && rhs.is_type(Ntype_op::Nconst) && rhs.get_type_const().is_known_zero()) {
         if (node.get_type_op() == Ntype_op::Div) {
           // Do not rewrite x/0
         } else {
@@ -795,7 +795,7 @@ public:
         }
       }
 
-      if (!rewritten && node.get_type_op() == Ntype_op::Div && rhs.is_type(Ntype_op::Const) && rhs.get_type_const().is_i() && rhs.get_type_const().to_i() == 1) {
+      if (!rewritten && node.get_type_op() == Ntype_op::Div && rhs.is_type(Ntype_op::Nconst) && rhs.get_type_const().is_i() && rhs.get_type_const().to_i() == 1) {
         if (!dry_run) {
           for (const auto& sink : sinks) {
             lhs.connect_sink(sink);
@@ -808,8 +808,8 @@ public:
         rewritten = true;
       }
 
-      if (!rewritten && node.get_type_op() == Ntype_op::Div && lhs.is_type(Ntype_op::Const) && lhs.get_type_const().is_known_zero()
-          && rhs.is_type(Ntype_op::Const) && rhs.get_type_const().is_known_zero() == false) {
+      if (!rewritten && node.get_type_op() == Ntype_op::Div && lhs.is_type(Ntype_op::Nconst) && lhs.get_type_const().is_known_zero()
+          && rhs.is_type(Ntype_op::Nconst) && rhs.get_type_const().is_known_zero() == false) {
         ++summary.new_const_nodes;
         if (!dry_run) {
           auto c0   = lg->create_node_const(0);
@@ -826,7 +826,7 @@ public:
         rewritten = true;
       }
 
-      if (!rewritten && node.get_type_op() == Ntype_op::Div && lhs.is_type(Ntype_op::Const) && rhs.is_type(Ntype_op::Const)
+      if (!rewritten && node.get_type_op() == Ntype_op::Div && lhs.is_type(Ntype_op::Nconst) && rhs.is_type(Ntype_op::Nconst)
           && lhs.get_type_const().same_repr(rhs.get_type_const()) && rhs.get_type_const().is_known_zero() == false) {
         ++summary.new_const_nodes;
         if (!dry_run) {
@@ -844,7 +844,7 @@ public:
         rewritten = true;
       }
 
-      if (!rewritten && node.get_type_op() == Ntype_op::Div && lhs.is_type(Ntype_op::Const) && rhs.is_type(Ntype_op::Const)
+      if (!rewritten && node.get_type_op() == Ntype_op::Div && lhs.is_type(Ntype_op::Nconst) && rhs.is_type(Ntype_op::Nconst)
           && rhs.get_type_const().is_known_zero() == false) {
         const auto c_lhs = lhs.get_type_const();
         const auto c_rhs = rhs.get_type_const();
@@ -937,7 +937,7 @@ public:
       bool rewritten = false;
 
       // Case 1: a - 0 → a  (B input is the constant zero)
-      if (b_drv.is_type(Ntype_op::Const) && b_drv.get_type_const().is_known_zero()) {
+      if (b_drv.is_type(Ntype_op::Nconst) && b_drv.get_type_const().is_known_zero()) {
         if (!dry_run) {
           for (const auto& sink : sinks) {
             a_drv.connect_sink(sink);
@@ -969,7 +969,7 @@ public:
       }
 
       // Case 3: const_a - const_b → result  (both inputs are compile-time constants)
-      if (!rewritten && a_drv.is_type(Ntype_op::Const) && b_drv.is_type(Ntype_op::Const)) {
+      if (!rewritten && a_drv.is_type(Ntype_op::Nconst) && b_drv.is_type(Ntype_op::Nconst)) {
         const auto ca = a_drv.get_type_const();
         const auto cb = b_drv.get_type_const();
         if (ca.is_i() && cb.is_i()) {

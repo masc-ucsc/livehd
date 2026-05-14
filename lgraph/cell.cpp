@@ -139,7 +139,7 @@ constexpr std::string_view Ntype::get_sink_name_slow(Ntype_op op, int pid) {
       }
       return "invalid";
       break;
-    case Ntype_op::Const:  // No drivers to Constants
+    case Ntype_op::Nconst:  // No drivers to Constants
       return "invalid";
       break;
     case Ntype_op::IO:

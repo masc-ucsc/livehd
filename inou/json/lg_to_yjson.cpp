@@ -59,7 +59,7 @@ Prototype LGtoYJson::primitives[] = {Prototype(Ntype_op::Invalid, NULL),  // DO 
 
                                      Prototype(Ntype_op::Sub, NULL),  // Sub module instance
                                      //------------------END PIPELINED (break LOOPS)
-                                     Prototype(Ntype_op::Const, NULL),  // Constant
+                                     Prototype(Ntype_op::Nconst, NULL),  // Constant
 
                                      // High Level Lgraph constructs
 
@@ -80,7 +80,7 @@ void LGtoYJson::create_all_wires(Lgraph* lg, Module* module) {
     auto op = node.get_type_op();
     if (op == Ntype_op::Get_mask) {
       continue;
-    } else if (op == Ntype_op::Const) {
+    } else if (op == Ntype_op::Nconst) {
       for (auto e : node.out_edges()) {
         if (e.sink.get_node().get_type_op() != Ntype_op::Get_mask) {
           // TODO: if const value is not -1
@@ -265,7 +265,7 @@ void LGtoYJson::import_module(Lgraph* lg) {
 
   for (auto node : lg->forward()) {
     auto op = node.get_type_op();
-    if (op == Ntype_op::Get_mask || op == Ntype_op::Const) {
+    if (op == Ntype_op::Get_mask || op == Ntype_op::Nconst) {
       continue;
     }
 

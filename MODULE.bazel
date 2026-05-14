@@ -46,13 +46,13 @@ git_override(
 
 # hlop (Dlop value type + slop/dlop execution layer)
 bazel_dep(name = "hlop", version = "0.2.0")
-git_override(
-    module_name = "hlop",
-    remote = "https://github.com/masc-ucsc/hlop.git",
-    commit = "30fe5836db76b41aac0d93c890b02a2ec607ac3c",
-)
+# git_override(
+#     module_name = "hlop",
+#     remote = "https://github.com/masc-ucsc/hlop.git",
+#     commit = "30fe5836db76b41aac0d93c890b02a2ec607ac3c",
+# )
 # For local debug/testing, swap the git_override above for:
-# local_path_override(module_name = "hlop", path = "../hlop")
+local_path_override(module_name = "hlop", path = "../hlop")
 
 # slang (fmt required by slang CMake)
 http_archive(
@@ -111,13 +111,13 @@ http_archive(
 
 # HHDS (replaces core/lhtree*.hpp; see hhds_migration.md)
 bazel_dep(name = "hhds", version = "0.2.0")
-git_override(
-    module_name = "hhds",
-    remote = "https://github.com/masc-ucsc/hhds.git",
-    commit = "b10578b46501bc1bad5917aa17ef4d345984e01a",
-)
+# git_override(
+#     module_name = "hhds",
+#     remote = "https://github.com/masc-ucsc/hhds.git",
+#     commit = "b10578b46501bc1bad5917aa17ef4d345984e01a",
+# )
 # For local debug/testing, swap the git_override above for:
-# local_path_override(module_name = "hhds", path = "../hhds")
+local_path_override(module_name = "hhds", path = "../hhds")
 
 # tree-sitter-pyrope
 http_archive(

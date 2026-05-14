@@ -139,7 +139,7 @@ void Pass_opentimer::build_circuit(Lgraph* g) {  // Enhance this for build_circu
   // 2nd: populate all the net names
   for (const auto node : g->forward(true)) {
     auto op = node.get_type_op();
-    if (op == Ntype_op::Const || op == Ntype_op::AttrSet) {
+    if (op == Ntype_op::Nconst || op == Ntype_op::AttrSet) {
       continue;
     }
 
@@ -301,7 +301,7 @@ void Pass_opentimer::build_circuit(Lgraph* g) {  // Enhance this for build_circu
   // 3rd: populate the cells
   for (const auto node : g->fast(true)) {
     auto op = node.get_type_op();
-    if (op == Ntype_op::Const || op == Ntype_op::AttrSet) {
+    if (op == Ntype_op::Nconst || op == Ntype_op::AttrSet) {
       continue;
     }
 
