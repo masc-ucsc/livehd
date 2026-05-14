@@ -2,6 +2,119 @@
 
 High-level pending tasks and cleanup items for LiveHD.
 
+## Pyrope punch list
+
+Ordered work to finish Pyrope. Items in the same group can be done in
+parallel; all letters in group N must complete before group N+1 starts.
+
+### Group 1 — foundation
+
+- **1a** Finish HHDS port to replace lgraph (`Graph_library`, `lgedge`, …)
+  and land HHDS Phase 7 (`Tree::clone()`, `TreeIO::replace()`) —
+  `docs/contracts/hhds_migration.md §7`.
+- **1b** New CLI: `setup/run/status/list/describe`, TOML config, JSONL
+  results, error classes — `docs/contracts/future_cli.md`.
+- **1c** Symbol-table API + value-attr inference (per-decl and
+  per-SSA-version attribute tables; migrate consumers off in-band strings) —
+  `docs/contracts/lnast_spec.md §10`.
+- **1d** Source-derived SSA / tmp names (`foo_l42_a`, drop `___N`) —
+  `lnast_spec.md §13`.
+- **1e** Bundle refactor (split `attrs_/named_/unnamed_`, drop `:N:`,
+  canonical ordering) — `bundle_sorted.md`.
+- **1f** Source-map indirection (LOC propagation: canonical map + per-cell
+  index, alias multi-loc, partition-root fallback) — see "Source location
+  (LOC) propagation strategy" below.
+- **1g** Import `docs/docs/pyrope` `cassert` examples into
+  `inou/prp/tests/docs/` (`extract.rb` helper); iterate doc/Pyrope until
+  they pass.
+- **1h** Golden-output baseline for `inou/prp` vs `inou/pyrope` vs
+  `inou/slang` on a shared corpus — safety net for everything below.
+- **1i** Enum support (fix the failing tests).
+- **1j** `ref xx` as function argument (semantics + lowering).
+
+### Group 2 — depends on Group 1
+
+- **2a** Forest per-tree readiness (`local_done`, `cache_origin`,
+  `inline_reason`) — `hhds_migration.md §8`.
+- **2b** LNAST bitwidth upass: ranges, wrap/saturate, publish `bits`/
+  `signed` on demand — `lnast_bitwidth.md`.
+- **2c** `pass.lnastfmt` validator (arity, SSA uniqueness, `delay_assign`
+  rules, deprecation warnings) — `lnast_spec.md §5`.
+- **2d** Unify `attr_set` / `tuple_set` variadic-path shape —
+  `lnast_spec.md §11`.
+- **2e** Replace `$ / % / #` prefixes with ST-backed direction/storage —
+  `lnast_spec.md §12`.
+- **2f** `delay_assign` offsets (`0`=Q, `-1`=past, ref offsets, comptime
+  const validation) — `lnast_spec.md §15.2`.
+- **2g** Attribute pass Phases 1–7 (sticky propagation, categories
+  A/B/C/D, debug-taint anti-pollution) — `attributes_spec.md §3`.
+- **2h** Demand-driven incremental upass cache keyed on
+  `(tree_body_hash, deps.interface_hash)` — `architecture.md §4`.
+- **2i** Type-check pass (no int/bool mix; bitwidth size checks;
+  tuple/enum consistency).
+- **2j** Hot-reload tier reporting in JSONL (`hot-debug` / `hot-approx` /
+  `cold`) — `architecture.md §8`.
+
+### Group 3 — depends on Group 2
+
+- **3a** Two-phase `upass/func_extract` (parallel per-LNAST, then
+  top-down resolve) — `import.md`.
+- **3b** `tree_ios` leaf ABI with `bits`/`min`/`max` populated from the
+  bitwidth upass — `import.md §Function signatures`.
+- **3c** `Partition` descriptor as a tree-level HHDS attribute (`kind`,
+  `latency_range`, ports, `ext`, `interface_hash`, `state_shape_hash`) —
+  `architecture.md §3`.
+- **3d** New upass `lnast_to_slop` (parallel to `lnast_to_lgraph`)
+  producing executable slop.
+- **3e** Debug remaining `inou/prp` e2e failures (constprop `cassert`
+  verifier) — `hhds_migration.md §8.4`.
+- **3f** Unified compile error/warning surface from `inou/prp`, upass,
+  lgraph passes (+ tests for expected diagnostics).
+- **3g** Memory port tuple semantics + `pipestage` `lat`/`num` —
+  `attributes_spec.md §6`.
+- **3h** `Bitwidth_range` → `Const min/max` (drop `int+overflow`) once
+  Dlop migration is stable — see below.
+- **3i** Finish `lnast_to_lgraph` and validate against a Verilog golden
+  via `inou/cgen` round-trip (synthesis-path closure).
+- **3j** Pyrope Memory / `Fflop` / clock-reset end-to-end: declaration
+  syntax, lowering to LGraph `Memory` cell, multi-clock-domain checks,
+  sync/async reset trees.
+
+### Group 4 — depends on Group 3
+
+- **4a** Test functionality on top of slop generation (`test::[…]`
+  blocks, runtime harness).
+- **4b** Emit `assert` / `assume` / `coverpoint` into slop.
+- **4c** Hot-probe injection at checkpoint replay (no recompile) —
+  `simulation.md`.
+- **4d** What-if `poke(signal, value)` engine with safety semantics.
+- **4e** Queryable indexed trace store (slice, transition, distribution
+  queries).
+- **4f** Invariant-detector codegen → emits `debug.prp` the agent can
+  edit.
+- **4g** Checkpoint format + reload validator (after slop codegen lands
+  in 3d); partition-keyed via `state_shape_hash`, covers memories and
+  registers for large simulation — `architecture.md §9`.
+- **4h** Compile-error test infrastructure: harness that pins expected
+  errors / warnings to expected source spans (golden-error files),
+  consumed by inou/prp, upass, and lgraph-pass diagnostics from 3f.
+
+### Group 5 — polish / final
+
+- **5a** Rewrite `simlib/{uint,sint}.hpp` as part of the HLOP runtime;
+  retire `firrtl-sig` attribution — see below.
+- **5b** Attribute hot-path benchmark (flat_storage vs lhtree regression
+  check) — `hhds_migration.md §8.1`.
+- **5c** Agent-legible globally-unique, optimization-stable signal names
+  — `simulation.md`.
+- **5d** Test reorg per "Test Organization" below (`tests/` layout,
+  `contracts/` split, `*_test.cpp` rules).
+- **5e** `inou/cgen` Verilog egress: emit `// src: file:line:col`
+  comments derived from the source map.
+- **5f** Benchmark contracts (extend `benchmark/`): codegen throughput,
+  simulation speed, agent-loop iteration latency — regression gates so
+  the "seconds matter" promise of `architecture.md §1` stays measurable.
+
 ## Test Organization
 
 Tests are scattered across the codebase. Some subsystems place tests in
