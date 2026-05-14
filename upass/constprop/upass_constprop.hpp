@@ -64,6 +64,7 @@ public:
   void process_func_equals() override;
   void process_func_in() override;
   void process_func_has() override;
+  void process_func_case() override;
   void process_range() override;
 
   upass::Emit_decision  classify_statement() override;
@@ -184,6 +185,7 @@ protected:
   void fold_does(const std::string& dst);
   void fold_in(const std::string& dst);
   void fold_has(const std::string& dst);
+  void fold_case(const std::string& dst);
 
   struct Call_actual {
     bool        is_named = false;

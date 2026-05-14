@@ -237,5 +237,25 @@ the descriptor at swap time.
    `hier_storage`) or whether instances share a Tree body and
    disambiguate via `hier_pos`. The latter matches HHDS's intended
    Forest model.
+6. **Forest-level per-tree readiness for parallel func_extract.**
+   `upass/func_extract` handles imports in two phases (parallel
+   per-LNAST, then top-down resolve — see `../../import.md`). To
+   prevent phase 1 from racing on another tree's half-built body, the
+   Forest needs to track, per tree:
+   - `local_done` (atomic bool) — flipped true *after* tree_ios is
+     fully published with `bits`/`min`/`max` on every leaf and the
+     tree-level `Inline_reason` is set.
+   - `cache_origin` (`fresh` | `incremental`) — phase 1 may consume a
+     tree only when `local_done && cache_origin == incremental`;
+     otherwise the consumer must defer to phase 2.
+   - `inline_reason` (enum from `import.md §Inline marker`) — single
+     read tells phase 2 whether to inline the body or emit a call.
+
+   These fields live on the Forest, not on `hhds::Tree`, so the
+   `Tree::clone()` / `TreeIO::replace()` swap dance from §7 does not
+   have to preserve them — they describe the slot's compilation state,
+   not the tree body. The clone/replace path should reset
+   `local_done = false` on the slot until the new body finishes its
+   local upass.
 6. **Concurrency.** HHDS Trees are not thread-safe. Confirm no LiveHD
    pass builds an LNAST/Node_tree concurrently from multiple threads.

@@ -2497,11 +2497,47 @@ Lnast_node Prp2lnast::if_expr_to_node(TSNode n, bool need_result) {
 
 Lnast_node Prp2lnast::match_expr_to_node(TSNode n, bool need_result) {
   // match init?; subject { (operator? expr_list | else) { code } ... }
-  // Simplified: produce a uif chain with equality checks.
+  // Expand to a chain of unique if/else: each arm's per-pattern compare
+  // emits the operator-appropriate node (`eq` for `==` / default,
+  // `func_case` for `case`, negated counterparts for `!=` / `!case`).
+  // Multi-pattern arms collapse via `log_or`. The `init` clause (e.g.
+  // `match const t = m1; t { … }`) is processed *before* the conds so
+  // any local binding it introduces is visible to the arm bodies.
+
+  // Mint the `result` ref (when consumed) BEFORE wrapping in the match's
+  // private stmts. Tmps live at function scope so they survive the wrap
+  // exit, but doing this here also lets the caller reference `result`
+  // outside the wrap.
+  Lnast_node result_outer;
+  if (need_result) {
+    result_outer = builder.mint_tmp_ref();
+  }
+
+  // Wrap the entire match (init + compare nodes + if) in a private stmts
+  // scope so any local binding introduced by `init` (e.g.
+  // `match const t = m1; t { … }`) goes out of scope after the match
+  // exits. Without this t would leak into outer code and `cassert t == nil`
+  // post-match would observe the bound bundle instead of an undeclared ref.
+  auto match_scope_idx = builder.add_child(Lnast_ntype::create_stmts());
+  builder.push_stmts(match_scope_idx);
+
+  // Init: process every statement in the init list — they declare locals
+  // (typical: `const t = subject`) inside the match scope, where the arm
+  // bodies can still see them via lexical lookup.
+  TSNode init = child_by_field(n, "init");
+  if (!ts_node_is_null(init)) {
+    uint32_t inc = ts_node_named_child_count(init);
+    for (uint32_t i = 0; i < inc; i++) {
+      process_statement(ts_node_named_child(init, i));
+    }
+  }
+
   TSNode subject   = {};
   TSNode else_code = {};
   bool   have_subj = false;
-  // Find subject: the first 'condition' field child is the subject.
+  // Find subject: the first 'condition' field child whose node type is
+  // not an op-token or the 'else' keyword (tree-sitter tags every child
+  // of the seq with the field name — see if_expr_to_node).
   for (uint32_t i = 0; i < child_count(n); i++) {
     const char* f = ts_node_field_name_for_child(n, i);
     if (!f) {
@@ -2519,17 +2555,15 @@ Lnast_node Prp2lnast::match_expr_to_node(TSNode n, bool need_result) {
   Lnast_node subject_ref = expr_to_node(subject);
 
   // Same producer-before-consumer reordering as if_expr_to_node: walk every
-  // arm first, emit each arm's eq/log_or compute stmts to builder.idx_stmts,
+  // arm first, emit each arm's compare/log_or compute stmts to builder.idx_stmts,
   // collect (cref, code) pairs, THEN add the if and assemble. Otherwise
-  // every eq lands as a sibling AFTER the if and the if's cond refs are
-  // dangling once constprop drops the eqs.
+  // every compare lands as a sibling AFTER the if and the if's cond refs are
+  // dangling once constprop drops the helpers.
   // need_result == false when the match is used as a statement (its value is
   // discarded); skip the per-arm placeholder `assign result = 0` and the
-  // result tmp entirely.
-  Lnast_node result;
-  if (need_result) {
-    result = builder.mint_tmp_ref();
-  }
+  // result tmp entirely. The result tmp itself was minted above before the
+  // wrap stmts, so the caller's reference outlives the match scope.
+  Lnast_node result = result_outer;
 
   struct Arm {
     Lnast_node cref;
@@ -2537,10 +2571,11 @@ Lnast_node Prp2lnast::match_expr_to_node(TSNode n, bool need_result) {
   };
   std::vector<Arm> arms;
 
-  bool   saw_first_condition = false;
-  TSNode pending_expr_list   = {};
-  bool   have_pending        = false;
-  bool   pending_is_else     = false;
+  bool             saw_first_condition = false;
+  TSNode           pending_expr_list   = {};
+  bool             have_pending        = false;
+  bool             pending_is_else     = false;
+  std::string_view pending_op          = "==";  // default per pyrope `match`
   for (uint32_t i = 0; i < child_count(n); i++) {
     const char* f = ts_node_field_name_for_child(n, i);
     if (!f) {
@@ -2560,54 +2595,127 @@ Lnast_node Prp2lnast::match_expr_to_node(TSNode n, bool need_result) {
       } else if (t == "expression_list") {
         pending_expr_list = c;
         have_pending      = true;
+      } else {
+        // Anonymous op-token preceding the expression_list (e.g. 'case',
+        // '!=', '<'). Tree-sitter tags it with the same "condition" field
+        // because the grammar uses field('condition', seq(optional(op),
+        // expression_list)). Remember it so the next expression_list knows
+        // which compare node to emit.
+        pending_op = txt;
       }
     } else if (field == "code") {
       if (pending_is_else) {
         else_code       = c;
         pending_is_else = false;
       } else if (have_pending) {
-        // Emit `eq tmp = subject_ref rhs` and return the tmp ref.
-        auto emit_eq = [&](const Lnast_node& rhs) {
-          auto idx = builder.add_child(Lnast_ntype::create_eq());
-          auto ref = builder.mint_tmp_ref();
+        const bool       use_case   = (pending_op == "case" || pending_op == "!case");
+        const bool       negate     = (pending_op == "!case" || pending_op == "!=");
+        // Emit `<compare> tmp = subject_ref rhs` and return the tmp ref,
+        // wrapping in log_not when the operator is the negated form.
+        auto emit_compare = [&](const Lnast_node& rhs) {
+          auto compare_ntype = use_case ? Lnast_ntype::create_func_case() : Lnast_ntype::create_eq();
+          auto idx           = builder.add_child(compare_ntype);
+          auto ref           = builder.mint_tmp_ref();
           lnast->add_child(idx, ref);
           lnast->add_child(idx, subject_ref);
           lnast->add_child(idx, rhs);
-          return ref;
+          if (!negate) {
+            return ref;
+          }
+          auto not_idx = builder.add_child(Lnast_ntype::create_log_not());
+          auto neg_ref = builder.mint_tmp_ref();
+          lnast->add_child(not_idx, neg_ref);
+          lnast->add_child(not_idx, ref);
+          return neg_ref;
         };
 
         Lnast_node arm_cond;
         uint32_t   nnc = ts_node_named_child_count(pending_expr_list);
         if (nnc == 0) {
-          arm_cond = emit_eq(constant_text_to_node(trim(get_text(pending_expr_list))));
+          arm_cond = emit_compare(constant_text_to_node(trim(get_text(pending_expr_list))));
         } else if (nnc == 1) {
-          arm_cond = emit_eq(expr_to_node(ts_node_named_child(pending_expr_list, 0)));
+          arm_cond = emit_compare(expr_to_node(ts_node_named_child(pending_expr_list, 0)));
         } else {
           auto or_idx = builder.add_child(Lnast_ntype::create_log_or());
           arm_cond    = builder.mint_tmp_ref();
           lnast->add_child(or_idx, arm_cond);
           for (uint32_t j = 0; j < nnc; j++) {
-            lnast->add_child(or_idx, emit_eq(expr_to_node(ts_node_named_child(pending_expr_list, j))));
+            lnast->add_child(or_idx, emit_compare(expr_to_node(ts_node_named_child(pending_expr_list, j))));
           }
         }
         arms.push_back({arm_cond, c});
         have_pending = false;
+        pending_op   = "==";  // reset for the next arm
       }
     }
   }
 
-  // All eq/log_or compute stmts have been emitted to builder.idx_stmts. Add the
-  // `if` here so it follows its producers in source order.
+  // All compare/log_or compute stmts have been emitted to builder.idx_stmts.
+  // Add the `if` here so it follows its producers in source order.
   auto if_idx = builder.add_child(Lnast_ntype::create_if());
+
+  // Same expression-typed arm-body lowering as if_expr_to_node: when the
+  // match's value is consumed (need_result==true), detect a trailing
+  // expression-typed named child and emit `assign result <expr>` for it;
+  // preceding statements process as normal. Without this, every arm
+  // assigns 0 and the match-expression always folds to 0 instead of the
+  // body's computed value.
+  static const absl::flat_hash_set<std::string_view> arm_expr_kinds = {
+      "if_expression",
+      "match_expression",
+      "expression_item",
+      "unary_expression",
+      "bit_selection",
+      "member_selection",
+      "attribute_read",
+      "dot_expression",
+      "function_call_expression",
+      "identifier",
+      "tuple",
+      "tuple_sq",
+      "type_specification",
+      "constant",
+  };
 
   auto emit_body = [&](TSNode code) {
     auto body_idx = lnast->add_child(if_idx, Lnast_ntype::create_stmts());
     builder.push_stmts(body_idx);
-    process_scope_statement(code, body_idx);
-    if (need_result) {
-      auto a = builder.add_child(Lnast_ntype::create_assign());
-      lnast->add_child(a, result);
-      lnast->add_child(a, Lnast_node::create_const("0"));
+    bool emitted_result = false;
+    if (need_result && !ts_node_is_null(code)
+        && std::string_view(ts_node_type(code)) == "scope_statement") {
+      uint32_t nnc = ts_node_named_child_count(code);
+      if (nnc > 0) {
+        TSNode           last = ts_node_named_child(code, nnc - 1);
+        std::string_view lt(ts_node_type(last));
+        if (arm_expr_kinds.contains(lt)) {
+          for (uint32_t i = 0; i < ts_node_child_count(code); i++) {
+            TSNode cc = ts_node_child(code, i);
+            if (!ts_node_is_named(cc)) {
+              continue;
+            }
+            if (ts_node_start_byte(cc) == ts_node_start_byte(last)
+                && ts_node_end_byte(cc) == ts_node_end_byte(last)) {
+              break;  // reached the trailing expression — handle below
+            }
+            process_statement(cc);
+          }
+          Lnast_node val  = expr_to_node(last);
+          auto       aidx = builder.add_child(Lnast_ntype::create_assign());
+          lnast->add_child(aidx, result);
+          lnast->add_child(aidx, val);
+          emitted_result = true;
+        }
+      }
+    }
+    if (!emitted_result) {
+      if (!ts_node_is_null(code)) {
+        process_scope_statement(code, body_idx);
+      }
+      if (need_result) {
+        auto a = builder.add_child(Lnast_ntype::create_assign());
+        lnast->add_child(a, result);
+        lnast->add_child(a, Lnast_node::create_const("0"));
+      }
     }
     builder.pop_stmts();
   };
@@ -2619,6 +2727,11 @@ Lnast_node Prp2lnast::match_expr_to_node(TSNode n, bool need_result) {
   if (else_code.tree != nullptr) {
     emit_body(else_code);
   }
+
+  // Exit the private match scope; any local declared in `init` (e.g.
+  // `const t = subject`) is now invisible to the surrounding code.
+  builder.pop_stmts();
+
   return need_result ? result : Lnast_node::create_const("0");
 }
 

@@ -431,13 +431,13 @@ void uPass_runner::process_lnast() {
     // built-in typecast calls (int/uint/string/uNN/sNN); anything constprop
     // declines to handle stays un-folded and the statement is emitted.
     A_OP(func_call)
-    // does/in/has fold to a known boolean → drop-candidate.
+    // does/in/has/case fold to a known boolean (or nil) → drop-candidate.
     A_OP(func_does)
     A_OP(func_equals)
     A_OP(func_in)
     A_OP(func_has)
-    // case/break/continue/return have no comptime fold yet — emit verbatim.
-    C_OP(func_case)
+    A_OP(func_case)
+    // break/continue/return have no comptime fold yet — emit verbatim.
     C_OP(func_break)
     C_OP(func_continue)
     C_OP(func_return)
@@ -592,7 +592,7 @@ void uPass_runner::process_if() {
         // cond known-false → drop entirely; cond unknown → emit verbatim
         // (when/unless conditions must be comptime-known; the verifier
         // reports the build error downstream).
-        if (cval && !cval->is_invalid() && !cval->has_unknowns()) {
+        if (cval && !cval->is_invalid() && !cval->has_unknowns() && !cval->is_nil()) {
           const bool taken = !cval->is_known_false();
           if (taken) {
             while (lm->move_to_sibling()) {
@@ -610,7 +610,7 @@ void uPass_runner::process_if() {
         return;
       }
 
-      if (cval && !cval->is_invalid() && !cval->has_unknowns()) {
+      if (cval && !cval->is_invalid() && !cval->has_unknowns() && !cval->is_nil()) {
         const bool taken = !cval->is_known_false();
 
         // Advance past the condition to the then-stmts.
@@ -692,7 +692,16 @@ void uPass_runner::process_if() {
         // this round). Dead iff a prior arm has already fired, or the
         // immediate cond just folded to false.
         const bool dead         = already_matched || (last_was_cond && last_cond_false);
-        const bool just_matched = last_was_cond && last_cond_true;
+        // `just_matched` only fires when no earlier arm was uncertain — if
+        // a prior cond was undecided at comptime (nil/unknown) the runtime
+        // ordering may still pick *that* arm, so a later concrete-true
+        // cond doesn't deterministically take over. Treat the body as
+        // uncertain instead so its writes get invalidated on exit.
+        // Without this gate, a `match` chain where `case (a=33,…)` folds
+        // to nil and `case (a=2,…)` folds to true would still concretely
+        // apply case-2's body, leaving the var "definitely 1052" even
+        // though case-1 might actually fire at runtime.
+        const bool just_matched = last_was_cond && last_cond_true && !any_prior_uncertain;
         // Uncertain := body executes but isn't *guaranteed* to. After a
         // cond: !just_matched (dead is handled separately, so the cond
         // wasn't known-false). Trailing else with no preceding cond: only
@@ -722,8 +731,13 @@ void uPass_runner::process_if() {
 
       // Non-stmts child — must be a cond (ref/const).
       auto val        = cond_value();
-      last_cond_true  = val.has_value() && !val->is_invalid() && val->is_known_true();
-      last_cond_false = val.has_value() && !val->is_invalid() && val->is_known_false();
+      // nil cond models "comptime can't decide" (e.g. a `case` whose values
+      // didn't match but whose runtime predicate might still fire). Treat
+      // it the same as has_unknowns(): not known-true and not known-false,
+      // so the arm body is visited as uncertain rather than dead-pruned.
+      const bool val_is_nil = val.has_value() && !val->is_invalid() && val->is_nil();
+      last_cond_true  = val.has_value() && !val->is_invalid() && !val_is_nil && val->is_known_true();
+      last_cond_false = val.has_value() && !val->is_invalid() && !val_is_nil && val->is_known_false();
       last_was_cond   = true;
       if (!last_cond_true && !last_cond_false) {
         any_prior_uncertain = true;

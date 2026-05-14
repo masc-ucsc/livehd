@@ -1,7 +1,7 @@
 /*
 :name: case_test1
 :type: parsing lnast comptime
-:verifier_pass: 12
+:verifier_pass: 14
 :verifier_fail: 0
 */
 
@@ -15,12 +15,13 @@ mut hit=0
 
 const b=300
 
-match const t = m1; t {
+match const t = m2; t {
  case (a=33,b=0sb?)   { hit = 300 + t.a + t.b }
- case (a=2,b=0sb?)    { hit = t.a + m1.b; cassert m1 == t }
+ case (a=2,b=0sb?)    { hit = 1000+t.a + m1.b; cassert m1 == t }
  case (a=true,b=0sb?) { hit = if t.a { b+100 } else { b-100 } }
 }
-cassert hit == 51
+cassert t == nil  // t was in local match scope
+cassert hit == 1051
 
 cassert (a=1,3)  case (a=0sb?,3)
 cassert (a=1,3)  case (a=1,0sb?)

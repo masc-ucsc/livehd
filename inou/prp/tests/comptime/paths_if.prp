@@ -1,7 +1,7 @@
 /*
 :name: paths_if
 :type: comptime
-:verifier_pass: 9
+:verifier_pass: 10
 :verifier_fail: 0
 :verifier_include_funcs: true
 */
@@ -82,6 +82,11 @@ comb no_know_input(a)->(r) {
   }else{
     r = 100
   }
-  cassert r == 1  // unknown after invalidate-on-exit; would only pass
-                  // under a convergent-branch path-merge.
+  cassert r == 1  // Discharged by nil-on-uncertain-exit: after the two
+                  // uncertain ifs, r reads as nil (Symbol_table::leave_scope
+                  // re-pins modified vars to nil), so `r == 1` folds to nil
+                  // and cassert nil passes per attributes_spec §Phase 2.
+                  // Convergent-branch path-merge would still be a stronger
+                  // proof, but nil-on-exit already moves this out of
+                  // "verifier-unresolved" territory.
 }

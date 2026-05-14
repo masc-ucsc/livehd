@@ -317,13 +317,14 @@ std::shared_ptr<Bundle> Symbol_table::leave_scope() {
         continue;
       }
       auto it = declaring->varmap.find(var_name);
-      // Setting the scalar field to invalid is enough — readers go through
-      // get_trivial / is_known_const, which both check is_invalid(). We
-      // don't tear out sub-fields: a non-scalar bundle (e.g. a tuple) gets
-      // its scalar slot invalidated and any reader that relied on the slot
-      // sees unknown; tuple-shape readers still see the structure, which
-      // is the conservative answer for a mutation we couldn't prove.
-      it->second->set("0", Const{});
+      // Setting the scalar to nil (concrete Type::Nil) — readers see a
+      // known-nil value, downstream `==` against another operand
+      // short-circuits to nil (see process_eq_ne_impl), and cassert nil
+      // discharges as pass per attributes_spec §Phase 2. Using plain-
+      // invalid would leave the cassert unfolded and counted as
+      // "unknown", which masks tests that *do* want the verifier to
+      // discharge a conditionally-modified var.
+      it->second->set("0", *Dlop::nil());
     }
   }
 

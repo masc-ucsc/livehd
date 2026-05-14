@@ -422,60 +422,87 @@ void uPass_constprop::process_log_not() {
 // is_named_top forward-declared near the top of the file so
 // process_assign can call it during shape-preserving merge.
 
-static std::optional<bool> compare_bundles_eq(const std::shared_ptr<Bundle const>& a,
-                                              const std::shared_ptr<Bundle const>& b) {
-  // Plan §2 equality contract: bundles compare equal iff (recursively)
-  //   1. same set of attribute keys with same values, AND
-  //   2. same set of named-entry names with each name's value equal, AND
-  //   3. same number of unnamed entries with each canonical-index value equal.
-  // Storage is canonical (named entries by bare name, unnamed by decimal
-  // index), so a lockstep walk by key suffices — no `:N:name ↔ N` fallback.
-  // Tri-state: nullopt = unknown (any operand invalid / mismatch via unknowns).
-
-  auto contains = [](const std::shared_ptr<Bundle const>& src,
-                     const std::shared_ptr<Bundle const>& other) -> std::optional<bool> {
+// Bundle == result is *four-valued*:
+//   - std::nullopt        → can't decide (operand has unknowns)
+//   - Const{create_bool}  → true / false (definite shape+value verdict)
+//   - Const{nil}          → shape (and named keys) match but at least one
+//                            named-entry value differs concretely
+//
+// The nil outcome mirrors `func_case`'s "structural-match with value
+// mismatch on a named entry" rule (see fold_case): it lets `cassert m1
+// == t` discharge as pass when m1 and t share their key set but the
+// payload differs — the contract is "this assertion is structurally
+// well-formed but value-divergent", not a hard error. Bundles whose
+// first-level *key sets* differ still fold to false, so existing
+// `(x=1,4) != (y=1,4)` tests keep their semantics.
+static std::optional<Const> compare_bundles_eq(const std::shared_ptr<Bundle const>& a,
+                                               const std::shared_ptr<Bundle const>& b) {
+  // Walks `src` and inspects each entry in `other`. Returns:
+  //   - 'k' key-mismatch (other lacks an entry src has, OR positional
+  //          mismatch) — caller maps to false (structural inequality)
+  //   - 'v' value-mismatch (named-key present, eq known-false) — caller
+  //          maps to nil
+  //   - 't' all entries matched
+  //   - '?' undecidable (invalid scalar, or eq returned unknowns)
+  auto walk = [](const std::shared_ptr<Bundle const>& src,
+                 const std::shared_ptr<Bundle const>& other) -> char {
+    char worst = 't';
     for (const auto& e : src->get_map()) {
       if (Bundle::is_attribute(e.first)) {
         continue;
       }
       if (e.second.trivial.is_invalid()) {
-        return std::nullopt;
+        worst = '?';
+        continue;
       }
       if (!other->has_trivial(e.first)) {
-        return false;
+        return 'k';
       }
       const Const& ov = other->get_trivial(e.first);
       if (ov.is_invalid()) {
-        return std::nullopt;
+        worst = '?';
+        continue;
       }
-      // Wildcards (`0sb?`) compare by structural identity: `0sb? == 0sb?`
-      // is known-true, `0sb? == 1` is unknown. `same_repr` gives bit-for-bit
-      // identity (including unknown positions); `eq_op` reduces to known-false
-      // only when neither side carries unknowns. That lets bundles with
-      // matching wildcard slots still fold equal.
       if (ov.same_repr(e.second.trivial)) {
         continue;
       }
       const Const eq = *ov.eq_op(e.second.trivial);
-      if (eq.is_known_false()) {
-        return false;
+      if (eq.is_known_true()) {
+        continue;
       }
-      return std::nullopt;
+      if (eq.is_known_false()) {
+        auto first = Bundle::get_first_level(e.first);
+        if (is_named_top(first)) {
+          if (worst == 't') {
+            worst = 'v';
+          }
+          continue;
+        }
+        return 'k';  // positional value mismatch is a hard inequality
+      }
+      worst = '?';
     }
-    return true;
+    return worst;
   };
-  auto a_in_b = contains(a, b);
-  if (!a_in_b.has_value()) {
+
+  const char ab = walk(a, b);
+  if (ab == 'k') {
+    return *Dlop::create_bool(false);
+  }
+  if (ab == '?') {
     return std::nullopt;
   }
-  if (!*a_in_b) {
-    return false;
+  const char ba = walk(b, a);
+  if (ba == 'k') {
+    return *Dlop::create_bool(false);
   }
-  auto b_in_a = contains(b, a);
-  if (!b_in_a.has_value()) {
+  if (ba == '?') {
     return std::nullopt;
   }
-  return *b_in_a;
+  if (ab == 'v' || ba == 'v') {
+    return *Dlop::nil();
+  }
+  return *Dlop::create_bool(true);
 }
 
 // Structural-only `a does b` check.
@@ -685,6 +712,21 @@ void uPass_constprop::process_eq_ne_impl() {
     b.scalar = Dlop::nil();
   }
 
+  // Mixed nil propagation: exactly one operand is a known-nil scalar. The
+  // result is nil (indeterminate) — typically because the var was
+  // mutated under an uncertain arm and Symbol_table::leave_scope
+  // re-pinned it to nil. Both-sides-nil falls through to the regular eq
+  // path (same_repr → known-true). nil-vs-bundle is handled here too
+  // (a bundle never compares equal to nil concretely).
+  const bool a_nil = (!a.bundle && !a.scalar.is_invalid() && a.scalar.is_nil());
+  const bool b_nil = (!b.bundle && !b.scalar.is_invalid() && b.scalar.is_nil());
+  const bool a_concrete_other = (a.bundle != nullptr) || (!a.scalar.is_invalid() && !a.scalar.is_nil());
+  const bool b_concrete_other = (b.bundle != nullptr) || (!b.scalar.is_invalid() && !b.scalar.is_nil());
+  if ((a_nil && b_concrete_other) || (b_nil && a_concrete_other)) {
+    store_trivial(var, *Dlop::nil());
+    return;
+  }
+
   // Three outcomes the rest of the pass cares about: known-true, known-false,
   // or a 1-bit unknown. Bundles only produce known true/false; the scalar
   // path may produce unknowns when an operand has them.
@@ -705,7 +747,16 @@ void uPass_constprop::process_eq_ne_impl() {
   };
   if (a.bundle && b.bundle) {
     if (auto eq = compare_bundles_eq(a.bundle, b.bundle); eq.has_value()) {
-      result = *Dlop::create_bool(*eq ^ Negate);
+      // Tri-state: nil propagates verbatim (the
+      // structural-match-with-value-mismatch case discharges as pass via
+      // cassert); concrete bool flips for Negate.
+      if (eq->is_nil()) {
+        result = *eq;
+      } else if (eq->is_known_true()) {
+        result = *Dlop::create_bool(!Negate);
+      } else {
+        result = *Dlop::create_bool(Negate);
+      }
     }
   } else if (a.bundle && !b.scalar.is_invalid() && bundle_count_non_attr(a.bundle) > 1) {
     result = *Dlop::create_bool(Negate);
@@ -1324,6 +1375,116 @@ void uPass_constprop::fold_has(const std::string& dst) {
   store_trivial(dst, Dlop::create_bool(found));
 }
 
+// Fold `dst = case(l, r)`. Cursor is on the `case` marker child. Walks
+// forward to read the subject (l) and pattern (r), evaluates the
+// case-match predicate, and stores the result in the symbol table.
+//
+// Semantics for `L case R` (pyrope tuple pattern matching):
+//   - Structural: every first-level key in R (named or positional) must
+//     exist in L. If any R-key is absent in L → known-false (concrete).
+//   - Values: at each R-key, R's value must match L's value at that key,
+//     where R's `0sb?` / any has_unknowns() literal is a wildcard.
+//     - All matched → known-true.
+//     - Concrete mismatch on a named R-entry → nil (treated as a
+//       runtime-deferred outcome). cassert/verifier counts nil as pass;
+//       the if-processor treats nil as uncertain so match-expanded bodies
+//       still get visited at comptime.
+//     - Concrete mismatch on a purely-positional R (eq-like shape) →
+//       known-false, so scalar match arms (e.g. `match sel { case 0b00
+//       {…} }`) still let dead-branch elimination prune the arm.
+//   - Sub-bundles or undecidable comparisons (unknowns on the L side) →
+//     leave dst unfolded so a later iteration can decide.
+//
+// Cursor is left on whichever child we last visited; the caller
+// (process_func_case) restores via `move_to_parent`.
+void uPass_constprop::fold_case(const std::string& dst) {
+  if (!move_to_sibling()) {
+    return;
+  }
+  auto ba = current_ref_bundle();
+  if (!move_to_sibling()) {
+    return;
+  }
+  auto bb = current_ref_bundle();
+  if (!ba || !bb) {
+    return;
+  }
+
+  auto lhs_flat = collect_first_level(ba);
+  auto rhs_flat = collect_first_level(bb);
+
+  bool r_has_named = false;
+  for (const auto& re : rhs_flat) {
+    if (!re.name.empty()) {
+      r_has_named = true;
+      break;
+    }
+  }
+
+  bool defer = false;
+  for (const auto& re : rhs_flat) {
+    if (re.is_sub_bundle || re.value.is_invalid()) {
+      defer = true;
+      continue;
+    }
+
+    const Bundle_flat_entry* lmatch = nullptr;
+    if (!re.name.empty()) {
+      for (const auto& le : lhs_flat) {
+        if (le.name == re.name) {
+          lmatch = &le;
+          break;
+        }
+      }
+    } else {
+      for (const auto& le : lhs_flat) {
+        if (le.name.empty() && le.pos == re.pos) {
+          lmatch = &le;
+          break;
+        }
+      }
+    }
+
+    if (lmatch == nullptr) {
+      store_trivial(dst, *Dlop::create_bool(false));
+      return;
+    }
+
+    if (lmatch->is_sub_bundle || lmatch->value.is_invalid()) {
+      defer = true;
+      continue;
+    }
+
+    if (re.value.has_unknowns()) {
+      continue;
+    }
+
+    if (lmatch->value.same_repr(re.value)) {
+      continue;
+    }
+
+    const Const eq_result = *lmatch->value.eq_op(re.value);
+    if (eq_result.is_known_true()) {
+      continue;
+    }
+    if (eq_result.is_known_false()) {
+      if (r_has_named) {
+        store_trivial(dst, *Dlop::nil());
+      } else {
+        store_trivial(dst, *Dlop::create_bool(false));
+      }
+      return;
+    }
+    defer = true;
+  }
+
+  if (defer) {
+    return;
+  }
+
+  store_trivial(dst, *Dlop::create_bool(true));
+}
+
 std::optional<Const> uPass_constprop::resolve_current_scalar() const {
   if (is_type(Lnast_ntype::Lnast_ntype_const)) {
     return *Dlop::from_pyrope(current_text());
@@ -1783,6 +1944,13 @@ void uPass_constprop::process_func_has() {
   move_to_child();
   std::string dst(current_text());
   fold_has(dst);
+  move_to_parent();
+}
+
+void uPass_constprop::process_func_case() {
+  move_to_child();
+  std::string dst(current_text());
+  fold_case(dst);
   move_to_parent();
 }
 
