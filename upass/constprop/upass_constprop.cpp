@@ -1572,7 +1572,9 @@ bool uPass_constprop::try_eval_comb_call(std::string_view dst, std::string_view 
   }
 
   // top -> [io?, stmts]. io is optional (only present when the lambda has a
-  // non-empty signature); stmts is always present.
+  // non-empty signature pre-SSA); stmts is always present. After the SSA upass
+  // runs, the io node and the synthetic __input/__output_tuple_ref tuple_adds
+  // are stripped and the signature lives in lnast->io_meta() — handled below.
   Lnast_nid io_nid;
   Lnast_nid stmts;
   if (Lnast_ntype::is_io(fn->get_type(first_child))) {
@@ -1585,13 +1587,29 @@ bool uPass_constprop::try_eval_comb_call(std::string_view dst, std::string_view 
     return false;
   }
 
+  const auto& io_meta      = fn->io_meta();
+  const bool  use_io_meta  = io_nid.is_invalid() && !io_meta.empty();
+  const bool  has_signature = !io_nid.is_invalid() || use_io_meta;
+
+  if (use_io_meta) {
+    params.reserve(io_meta.inputs.size());
+    outputs.reserve(io_meta.outputs.size());
+    for (const auto& e : io_meta.inputs) {
+      params.emplace_back(e.name);
+    }
+    for (const auto& e : io_meta.outputs) {
+      outputs.emplace_back(e.name);
+    }
+  }
+
   // Phase 1 — collect param/output names from the synthetic
   // __input_tuple_ref / __output_tuple_ref tuple_adds at the head of stmts,
-  // and partition the rest into body statements for phase 2.
+  // and partition the rest into body statements for phase 2. After SSA the
+  // tuple_add headers are gone, so every stmt is a body stmt.
   std::vector<Lnast_nid> body_stmts;
   for (auto stmt = fn->get_child(stmts); !stmt.is_invalid(); stmt = fn->get_sibling_next(stmt)) {
     const auto type = fn->get_type(stmt);
-    if (Lnast_ntype::is_tuple_add(type)) {
+    if (!use_io_meta && Lnast_ntype::is_tuple_add(type)) {
       auto tuple_ref = fn->get_child(stmt);
       if (!tuple_ref.is_invalid() && Lnast_ntype::is_ref(fn->get_type(tuple_ref))) {
         // Materialize into an owned string so the comparison below holds
@@ -1620,8 +1638,8 @@ bool uPass_constprop::try_eval_comb_call(std::string_view dst, std::string_view 
   }
 
   // Phase 1b — bind actuals to params now that the signature is known.
-  // Skipped when there is no io node (signature-less callee).
-  if (!io_nid.is_invalid()) {
+  // Skipped only for signature-less callees (no io node and no io_meta).
+  if (has_signature) {
     std::size_t positional_idx = 0;
     for (const auto& actual : actuals) {
       if (actual.is_named) {

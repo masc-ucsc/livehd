@@ -8,7 +8,7 @@ OUT_FILE="${TEST_TMPDIR}/upass_func_extract.out"
 EMPTY_PRP="${TEST_TMPDIR}/upass_func_extract_empty.prp"
 EMPTY_OUT_FILE="${TEST_TMPDIR}/upass_func_extract_empty.out"
 
-"${LGSHELL}" -q -c "inou.prp files:${PRP_FILE} |> pass.upass constprop:false assert:false verifier:false max_iters:1 |> lnast.dump" \
+"${LGSHELL}" -q -c "inou.prp files:${PRP_FILE} |> pass.upass constprop:false assert:false verifier:false ssa:false max_iters:1 |> lnast.dump" \
   >"${OUT_FILE}" 2>&1
 
 if ! grep -q "uPass - resolved order: func_extract" "${OUT_FILE}"; then
@@ -41,7 +41,7 @@ comb answer() -> (r) {
 }
 EOF
 
-"${LGSHELL}" -q -c "inou.prp files:${EMPTY_PRP} |> pass.upass constprop:false assert:false verifier:false max_iters:1 |> lnast.dump" \
+"${LGSHELL}" -q -c "inou.prp files:${EMPTY_PRP} |> pass.upass constprop:false assert:false verifier:false ssa:false max_iters:1 |> lnast.dump" \
   >"${EMPTY_OUT_FILE}" 2>&1
 
 if ! grep -q "  upass_func_extract_empty.answer" "${EMPTY_OUT_FILE}"; then

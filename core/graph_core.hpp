@@ -1,8 +1,6 @@
 //  This file is distributed under the BSD 3-Clause License. See LICENSE for details.
 #pragma once
 
-#include "hash_set8.hpp"
-
 // This is a graph representation optimized based on structure and use in
 // LiveHD.
 //

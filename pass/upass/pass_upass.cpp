@@ -78,7 +78,7 @@ void Pass_upass::setup() {
   m1.add_label_optional("ssa",
                         "enable SSA normalisation: harvest I/O metadata into tree_io, expand I/O tuple nodes, "
                         "rename multi-assigned user variables to SSA-unique names",
-                        "false");
+                        "true");
   m1.add_label_optional("assert", "enable assert test", "true");
   m1.add_label_optional(
       "order",
@@ -175,7 +175,7 @@ Pass_upass::Pass_upass(const Eprp_var& var) : Pass("pass.upass", var) {
   bool do_attrs    = attrs_txt != "false" && attrs_txt != "0";
 
   auto ssa_txt = get_label("ssa");
-  bool do_ssa  = ssa_txt == "true" || ssa_txt == "1";
+  bool do_ssa  = ssa_txt != "false" && ssa_txt != "0";
   run_ssa      = do_ssa;
 
   // The assert pass declares depends_on={"constprop"}, so the runner's

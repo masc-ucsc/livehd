@@ -104,18 +104,6 @@ cc_test(
 )
 
 cc_test(
-    name = "small_set_bench",
-    srcs = [
-        "tests/small_set_bench.cpp",
-    ],
-    deps = [
-        ":core",
-        "@abseil-cpp//absl/container:flat_hash_set",
-        "@google_benchmark//:benchmark",
-    ],
-)
-
-cc_test(
     name = "pool_bench",
     srcs = [
         "tests/concurrentqueue.hpp",
