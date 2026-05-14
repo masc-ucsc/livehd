@@ -2,6 +2,8 @@
 
 #include "lnast_to_lgraph.hpp"
 
+#include <bit>
+#include <cstdint>
 #include <string>
 
 #include "pass.hpp"
@@ -339,6 +341,7 @@ void Lnast_to_lgraph::lower_assign() {
   if (!move_to_sibling()) { move_to_parent(); return; }
   auto drv = lower_leaf();
   move_to_parent();
+  apply_bw(drv, lhs);
   bind(lhs, drv);
 }
 
@@ -357,11 +360,41 @@ void Lnast_to_lgraph::lower_infix(Ntype_op op, std::string_view a_pin, std::stri
   auto node = lg_->create_node(op);
   lg_->add_edge(op_a, node.setup_sink_pin(a_pin));
   lg_->add_edge(op_b, node.setup_sink_pin(b_pin));
-  bind(result, node.setup_driver_pin("Y"));
+  auto drv = node.setup_driver_pin("Y");
+  apply_bw(drv, result);
+  bind(result, drv);
 }
 
 Node_pin Lnast_to_lgraph::nil_pin() {
   return lg_->create_node_const(Dlop::invalid()).setup_driver_pin();
+}
+
+void Lnast_to_lgraph::apply_bw(Node_pin& drv, std::string_view lhs_name) {
+  const auto& meta = lnast_->bw_meta();
+  if (meta.empty()) return;
+  auto it = meta.ranges.find(std::string{lhs_name});
+  if (it == meta.ranges.end()) return;
+  const auto& e = it->second;
+  if (e.is_unbounded()) return;
+
+  // Compute signed bit count to represent [min, max] in two's complement.
+  // Same formula as Lnast_range::sbits_for(v).
+  auto sbits_for = [](int64_t v) -> int64_t {
+    if (v >= 0) {
+      return static_cast<int64_t>(std::bit_width(static_cast<uint64_t>(v))) + 1;
+    }
+    return static_cast<int64_t>(std::bit_width(static_cast<uint64_t>(-v - 1))) + 1;
+  };
+  int64_t bits = std::max(sbits_for(e.min), sbits_for(e.max));
+  if (bits <= 0 || bits > 4096) return;  // sanity guard
+
+  drv.set_bits(static_cast<uint32_t>(bits));
+  bool is_signed = e.min < 0;
+  if (is_signed) {
+    drv.set_sign();
+  } else {
+    drv.set_unsign();
+  }
 }
 
 // Lower the subtree at the current cursor into a fresh branch scope.
