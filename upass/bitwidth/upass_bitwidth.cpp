@@ -3,12 +3,14 @@
 #include "upass_bitwidth.hpp"
 
 #include <charconv>
+#include <limits>
 #include <string>
 #include <string_view>
 #include <system_error>
 
 #include "lnast.hpp"
 #include "lnast_ntype.hpp"
+#include "pass.hpp"
 
 // ── Plugin registration ───────────────────────────────────────────────────────
 // The static initializer fires at program startup so the runner discovers
@@ -332,4 +334,101 @@ void uPass_bitwidth::process_set_mask() {
   auto [lhs, rhs] = scan_op();
   (void)rhs;
   set_range(lhs, Lnast_range::unbounded());
+}
+
+// ── process_attr_set ─────────────────────────────────────────────────────────
+//
+// LNAST shape (mirrors uPass_attributes::process_attr_set):
+//   attr_set
+//     ref(target)
+//     const(attr_name)        — "ubits" | "sbits" | "max" | "min" | …
+//     <value: const | ref>
+//
+// For numeric bit/range attributes, derive an explicit Lnast_range and meet it
+// with whatever the target currently holds. Conflict reporting is best-effort:
+// we warn (not error) until wrap/saturate policy migrates to bitwidth (T2 #7).
+// Non-bitwidth attributes (e.g. `comptime`, `type`, `wrap`, `saturate`) are
+// ignored — uPass_attributes owns those.
+void uPass_bitwidth::process_attr_set() {
+  if (!move_to_child()) return;
+  auto target = normalize_name(current_text());
+  if (!move_to_sibling()) { move_to_parent(); return; }
+  std::string attr_name{current_text()};
+  std::string value_text;
+  bool        value_is_const = false;
+  if (move_to_sibling()) {
+    value_text     = std::string{current_text()};
+    value_is_const = Lnast_ntype::is_const(get_raw_ntype());
+  }
+  move_to_parent();
+
+  if (target.empty() || attr_name.empty() || !value_is_const) return;
+
+  // Parse value text to int64_t (handles dec / 0x / 0b, returns unbounded on
+  // unparseable inputs like Pyrope-unknown-bits constants).
+  auto val_range = range_from_const_text(value_text);
+  if (!val_range.is_constant()) return;
+  int64_t n = val_range.min;
+
+  // Build the implied range from this attribute.
+  Lnast_range narrow;
+  if (attr_name == "ubits") {
+    if (n <= 0 || n >= 63) return;  // sanity: 1..62 representable in int64_t
+    narrow.min     = 0;
+    narrow.max     = (int64_t{1} << n) - 1;
+    narrow.neg_inf = false;
+    narrow.pos_inf = false;
+  } else if (attr_name == "sbits") {
+    if (n <= 1 || n >= 63) return;  // sanity: 2..62 (1 bit = single sign)
+    narrow.min     = -(int64_t{1} << (n - 1));
+    narrow.max     = (int64_t{1} << (n - 1)) - 1;
+    narrow.neg_inf = false;
+    narrow.pos_inf = false;
+  } else if (attr_name == "max") {
+    narrow.max     = n;
+    narrow.neg_inf = true;   // only constrains upper bound
+    narrow.pos_inf = false;
+  } else if (attr_name == "min") {
+    narrow.min     = n;
+    narrow.neg_inf = false;  // only constrains lower bound
+    narrow.pos_inf = true;
+  } else {
+    return;  // not a bitwidth-owned attribute
+  }
+
+  // Compute the meet of `current` and `narrow` manually. We can't use
+  // Lnast_range::meet here: it short-circuits to the other operand whenever
+  // either side is half-bounded (e.g. `(-inf, 10]`), which is too coarse for
+  // attribute narrowing. Per-side merge: take the tighter of the two bounds,
+  // respecting infinity flags.
+  auto current = read_range(target);
+  Lnast_range merged;
+  merged.neg_inf = current.neg_inf && narrow.neg_inf;
+  merged.pos_inf = current.pos_inf && narrow.pos_inf;
+  if (!merged.neg_inf) {
+    int64_t lo = current.neg_inf ? narrow.min
+              : (narrow.neg_inf  ? current.min
+                                 : std::max(current.min, narrow.min));
+    merged.min = lo;
+  }
+  if (!merged.pos_inf) {
+    int64_t hi = current.pos_inf ? narrow.max
+              : (narrow.pos_inf  ? current.max
+                                 : std::min(current.max, narrow.max));
+    merged.max = hi;
+  }
+
+  // Hard contradiction (e.g. `x = 100; x.[ubits] = 3` → meet is empty).
+  if (!merged.neg_inf && !merged.pos_inf && merged.min > merged.max) {
+    // Warn for now; once wrap/saturate policy migrates here (T2 #7) this
+    // promotes to upass::error unless the target has [wrap] or [saturate].
+    Pass::warn(
+        std::format("uPass_bitwidth: explicit `[{}]` constraint on `{}` is unsatisfiable "
+                    "(current range does not fit declared bounds)",
+                    attr_name, target));
+    return;
+  }
+
+  // set_range only updates if `merged` is strictly narrower than `current`.
+  set_range(target, merged);
 }

@@ -266,3 +266,153 @@ TEST(BitwidthIntegration, PropagateConst) {
   EXPECT_EQ(it_c->second.min, 3);
   EXPECT_EQ(it_c->second.max, 3);
 }
+
+// ── attr_set narrowing tests ─────────────────────────────────────────────────
+
+namespace {
+// Append an attr_set node under `stmts`: attr_set ref(target) const(attr)
+// const(value).
+static void add_attr_set(const std::shared_ptr<Lnast>& ln, Lnast_nid stmts,
+                         std::string_view target, std::string_view attr,
+                         std::string_view value) {
+  auto node = ln->add_child(stmts, Lnast_ntype::create_attr_set());
+  ln->add_child(node, Lnast_node::create_ref(std::string{target}));
+  ln->add_child(node, Lnast_node::create_const(std::string{attr}));
+  ln->add_child(node, Lnast_node::create_const(std::string{value}));
+}
+}  // namespace
+
+// `x.[ubits] = 4` (no prior assignment) → range = [0, 15]
+TEST(BitwidthAttrSet, UbitsAlone) {
+  auto ln    = std::make_shared<Lnast>("bw_attr_ubits");
+  auto root  = ln->set_root(Lnast_ntype::create_top());
+  auto stmts = ln->add_child(root, Lnast_ntype::create_stmts());
+  add_attr_set(ln, stmts, "x", "ubits", "4");
+
+  run_bw(ln);
+  const auto& meta = ln->bw_meta().ranges;
+  auto it = meta.find("x");
+  ASSERT_NE(it, meta.end());
+  EXPECT_FALSE(it->second.neg_inf);
+  EXPECT_FALSE(it->second.pos_inf);
+  EXPECT_EQ(it->second.min, 0);
+  EXPECT_EQ(it->second.max, 15);
+}
+
+// `x.[sbits] = 4` → range = [-8, 7]
+TEST(BitwidthAttrSet, SbitsAlone) {
+  auto ln    = std::make_shared<Lnast>("bw_attr_sbits");
+  auto root  = ln->set_root(Lnast_ntype::create_top());
+  auto stmts = ln->add_child(root, Lnast_ntype::create_stmts());
+  add_attr_set(ln, stmts, "x", "sbits", "4");
+
+  run_bw(ln);
+  const auto& meta = ln->bw_meta().ranges;
+  auto it = meta.find("x");
+  ASSERT_NE(it, meta.end());
+  EXPECT_FALSE(it->second.neg_inf);
+  EXPECT_FALSE(it->second.pos_inf);
+  EXPECT_EQ(it->second.min, -8);
+  EXPECT_EQ(it->second.max, 7);
+}
+
+// `x.[max] = 100` → range = (-inf, 100]
+TEST(BitwidthAttrSet, MaxAlone) {
+  auto ln    = std::make_shared<Lnast>("bw_attr_max");
+  auto root  = ln->set_root(Lnast_ntype::create_top());
+  auto stmts = ln->add_child(root, Lnast_ntype::create_stmts());
+  add_attr_set(ln, stmts, "x", "max", "100");
+
+  run_bw(ln);
+  const auto& meta = ln->bw_meta().ranges;
+  auto it = meta.find("x");
+  ASSERT_NE(it, meta.end());
+  EXPECT_TRUE(it->second.neg_inf);
+  EXPECT_FALSE(it->second.pos_inf);
+  EXPECT_EQ(it->second.max, 100);
+}
+
+// `x.[min] = -5` → range = [-5, +inf)
+TEST(BitwidthAttrSet, MinAlone) {
+  auto ln    = std::make_shared<Lnast>("bw_attr_min");
+  auto root  = ln->set_root(Lnast_ntype::create_top());
+  auto stmts = ln->add_child(root, Lnast_ntype::create_stmts());
+  add_attr_set(ln, stmts, "x", "min", "-5");
+
+  run_bw(ln);
+  const auto& meta = ln->bw_meta().ranges;
+  auto it = meta.find("x");
+  ASSERT_NE(it, meta.end());
+  EXPECT_FALSE(it->second.neg_inf);
+  EXPECT_TRUE(it->second.pos_inf);
+  EXPECT_EQ(it->second.min, -5);
+}
+
+// `x = 7; x.[ubits] = 4` → fits; range stays [7,7] (meet with [0,15]).
+TEST(BitwidthAttrSet, FitsAfterAssign) {
+  auto ln    = std::make_shared<Lnast>("bw_attr_fits");
+  auto root  = ln->set_root(Lnast_ntype::create_top());
+  auto stmts = ln->add_child(root, Lnast_ntype::create_stmts());
+  auto asgn  = ln->add_child(stmts, Lnast_ntype::create_assign());
+  ln->add_child(asgn, Lnast_node::create_ref("x"));
+  ln->add_child(asgn, Lnast_node::create_const("7"));
+  add_attr_set(ln, stmts, "x", "ubits", "4");
+
+  run_bw(ln);
+  const auto& meta = ln->bw_meta().ranges;
+  auto it = meta.find("x");
+  ASSERT_NE(it, meta.end());
+  EXPECT_EQ(it->second.min, 7);
+  EXPECT_EQ(it->second.max, 7);
+}
+
+// `x = 100; x.[ubits] = 3` → 100 cannot fit in [0,7]. Pass warns and leaves
+// the original range alone (does not narrow). Test that the original range
+// is preserved and no crash occurs.
+TEST(BitwidthAttrSet, ConflictWarnsAndKeepsOriginal) {
+  auto ln    = std::make_shared<Lnast>("bw_attr_conflict");
+  auto root  = ln->set_root(Lnast_ntype::create_top());
+  auto stmts = ln->add_child(root, Lnast_ntype::create_stmts());
+  auto asgn  = ln->add_child(stmts, Lnast_ntype::create_assign());
+  ln->add_child(asgn, Lnast_node::create_ref("x"));
+  ln->add_child(asgn, Lnast_node::create_const("100"));
+  add_attr_set(ln, stmts, "x", "ubits", "3");
+
+  run_bw(ln);
+  const auto& meta = ln->bw_meta().ranges;
+  auto it = meta.find("x");
+  ASSERT_NE(it, meta.end());
+  // Original assignment of 100 still recorded; constraint was rejected.
+  EXPECT_EQ(it->second.min, 100);
+  EXPECT_EQ(it->second.max, 100);
+}
+
+// `x.[ubits] = 4; x.[max] = 10` → meet of [0,15] and (-inf,10] = [0,10].
+TEST(BitwidthAttrSet, ChainedNarrowing) {
+  auto ln    = std::make_shared<Lnast>("bw_attr_chain");
+  auto root  = ln->set_root(Lnast_ntype::create_top());
+  auto stmts = ln->add_child(root, Lnast_ntype::create_stmts());
+  add_attr_set(ln, stmts, "x", "ubits", "4");
+  add_attr_set(ln, stmts, "x", "max", "10");
+
+  run_bw(ln);
+  const auto& meta = ln->bw_meta().ranges;
+  auto it = meta.find("x");
+  ASSERT_NE(it, meta.end());
+  EXPECT_FALSE(it->second.neg_inf);
+  EXPECT_FALSE(it->second.pos_inf);
+  EXPECT_EQ(it->second.min, 0);
+  EXPECT_EQ(it->second.max, 10);
+}
+
+// Non-bitwidth attributes (e.g. `comptime`) are ignored — no range stored.
+TEST(BitwidthAttrSet, NonBitwidthAttrIgnored) {
+  auto ln    = std::make_shared<Lnast>("bw_attr_other");
+  auto root  = ln->set_root(Lnast_ntype::create_top());
+  auto stmts = ln->add_child(root, Lnast_ntype::create_stmts());
+  add_attr_set(ln, stmts, "x", "comptime", "true");
+
+  run_bw(ln);
+  const auto& meta = ln->bw_meta().ranges;
+  EXPECT_EQ(meta.find("x"), meta.end()) << "comptime attr should not record a range";
+}

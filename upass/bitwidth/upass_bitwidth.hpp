@@ -68,6 +68,12 @@ public:
   void process_get_mask() override;
   void process_set_mask() override;
 
+  // Explicit constraints: `[ubits]`, `[sbits]`, `[max]`, `[min]` narrow the
+  // target's inferred range. Conflict reporting is best-effort here (wrap /
+  // saturate policy is owned by uPass_attributes today); a hard error will
+  // land once the wrap/sat math migrates here per the spec.
+  void process_attr_set() override;
+
   // Returns Const(v) only when the stored range is a single-value constant.
   std::optional<Const> fold_ref(std::string_view name) override;
 

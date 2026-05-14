@@ -16,6 +16,7 @@ cc_library(
     deps = [
         "//core",
         "//lnast",
+        "//pass/common:pass",
         "//upass/core:upass",
     ],
     alwayslink = True,  # ensures the static plugin_bitwidth registration fires
