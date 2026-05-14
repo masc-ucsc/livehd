@@ -26,6 +26,24 @@ void uPass_bitwidth::begin_iteration() {
   // Reset the changed flag only — ranges accumulate across iterations so a
   // second sweep can tighten what was unbounded in the first.
   changed = false;
+
+  // Cross-invocation persistence: a fresh uPass_bitwidth instance starts
+  // with empty range_map_, but the previous pass.upass call may have left
+  // ranges in lnast->bw_meta(). Seed range_map_ from bw_meta so a second
+  // sweep can tighten what was unbounded before. Only do this once per run
+  // (when range_map_ is empty); subsequent begin_iteration calls inside the
+  // same run leave the accumulated state alone.
+  if (range_map_.empty()) {
+    const auto& meta = lm->get_lnast()->bw_meta();
+    for (const auto& [name, e] : meta.ranges) {
+      Lnast_range r;
+      r.min     = e.min;
+      r.max     = e.max;
+      r.neg_inf = e.neg_inf;
+      r.pos_inf = e.pos_inf;
+      range_map_.emplace(name, r);
+    }
+  }
 }
 
 void uPass_bitwidth::end_run() {
@@ -101,18 +119,29 @@ static Lnast_range range_from_const_text(std::string_view text) {
   return Lnast_range::constant(negative ? -val : val);
 }
 
+// Strip a leading port sigil (`%` output, `$` input) so the bitwidth pass
+// uses the same canonical key on both write and read sides — matches
+// uPass_attributes::normalize_name. lnast_to_lgraph's apply_bw also uses
+// the unprefixed name when looking up bw_meta.
+static std::string normalize_name(std::string_view name) {
+  if (!name.empty() && (name.front() == '%' || name.front() == '$')) {
+    return std::string{name.substr(1)};
+  }
+  return std::string{name};
+}
+
 uPass_bitwidth::Op_ranges uPass_bitwidth::scan_op() {
   Op_ranges out;
   if (!move_to_child()) return out;
 
   // First child: LHS (always a ref whose text is the destination name).
-  out.lhs = std::string{current_text()};
+  out.lhs = normalize_name(current_text());
 
   // Remaining children: RHS operands.
   while (move_to_sibling()) {
     auto t = get_raw_ntype();
     if (Lnast_ntype::is_ref(t)) {
-      out.rhs.push_back(read_range(current_text()));
+      out.rhs.push_back(read_range(normalize_name(current_text())));
     } else if (Lnast_ntype::is_const(t)) {
       out.rhs.push_back(range_from_const_text(current_text()));
     } else {
@@ -126,7 +155,7 @@ uPass_bitwidth::Op_ranges uPass_bitwidth::scan_op() {
 
 std::string uPass_bitwidth::scan_lhs_only() {
   if (!move_to_child()) return {};
-  std::string lhs{current_text()};
+  std::string lhs = normalize_name(current_text());
   move_to_parent();
   return lhs;
 }
@@ -134,7 +163,9 @@ std::string uPass_bitwidth::scan_lhs_only() {
 // ── fold_ref ─────────────────────────────────────────────────────────────────
 
 std::optional<Const> uPass_bitwidth::fold_ref(std::string_view name) {
-  auto it = range_map_.find(std::string{name});
+  // Callers may pass either `%out` or `out`; normalize so we hit the same
+  // key the pass stored under (see normalize_name() above).
+  auto it = range_map_.find(normalize_name(name));
   if (it == range_map_.end()) return std::nullopt;
   if (!it->second.is_constant()) return std::nullopt;
   return *Dlop::create_integer(it->second.min);
