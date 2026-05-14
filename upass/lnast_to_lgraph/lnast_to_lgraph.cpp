@@ -56,6 +56,7 @@ Node_pin Lnast_to_lgraph::resolve(std::string_view raw_name) {
   if (is_input_port(raw_name)) {
     // $-prefixed: auto-promote to a graph input.
     auto inp = lg_->add_graph_input(name, next_inp_pos_++, 0);
+    apply_bw(inp, name);
     pin_map_.emplace(name, inp);
     return inp;
   }
@@ -85,6 +86,7 @@ void Lnast_to_lgraph::wire_outputs() {
     if (it == pin_map_.end()) continue;
     auto& drv     = it->second;
     auto  out_pin = lg_->add_graph_output(name, next_out_pos_++, drv.get_bits());
+    apply_bw(out_pin, name);
     lg_->add_edge(drv, out_pin);
   }
 }
@@ -245,6 +247,7 @@ void Lnast_to_lgraph::lower_post_upass_top() {
                 auto field = std::string(current_text());
                 move_to_parent();
                 auto inp = lg_->add_graph_input(field, next_inp_pos_++, 0);
+                apply_bw(inp, field);
                 pin_map_.emplace(field, inp);
               }
             }
@@ -284,6 +287,7 @@ void Lnast_to_lgraph::lower_post_upass_top() {
     }
     auto& drv     = it->second;
     auto  out_pin = lg_->add_graph_output(name, next_out_pos_++, drv.get_bits());
+    apply_bw(out_pin, name);
     lg_->add_edge(drv, out_pin);
   }
 }
@@ -296,9 +300,12 @@ void Lnast_to_lgraph::lower_post_upass_top() {
 void Lnast_to_lgraph::lower_from_io_meta() {
   const auto& meta = lnast_->io_meta();
 
-  // Register graph inputs from io_meta.
+  // Register graph inputs from io_meta. bw_meta (if populated by the bitwidth
+  // pass) overrides the io_meta bits — io_meta carries Pyrope-declared widths,
+  // bw_meta carries inferred ranges that may be tighter.
   for (const auto& entry : meta.inputs) {
     auto inp = lg_->add_graph_input(entry.name, next_inp_pos_++, entry.bits);
+    apply_bw(inp, entry.name);
     pin_map_.emplace(entry.name, inp);
   }
 
@@ -324,6 +331,7 @@ void Lnast_to_lgraph::lower_from_io_meta() {
     }
     auto& drv     = it->second;
     auto  out_pin = lg_->add_graph_output(name, next_out_pos_++, drv.get_bits());
+    apply_bw(out_pin, name);
     lg_->add_edge(drv, out_pin);
   }
 }
@@ -372,7 +380,13 @@ Node_pin Lnast_to_lgraph::nil_pin() {
 void Lnast_to_lgraph::apply_bw(Node_pin& drv, std::string_view lhs_name) {
   const auto& meta = lnast_->bw_meta();
   if (meta.empty()) return;
-  auto it = meta.ranges.find(std::string{lhs_name});
+  // bw_meta keys are stored unprefixed (the bitwidth pass strips %/$ port
+  // sigils on write). Mirror that here so callers can pass either form.
+  std::string_view key = lhs_name;
+  if (!key.empty() && (key.front() == '%' || key.front() == '$')) {
+    key.remove_prefix(1);
+  }
+  auto it = meta.ranges.find(std::string{key});
   if (it == meta.ranges.end()) return;
   const auto& e = it->second;
   if (e.is_unbounded()) return;
@@ -495,6 +509,10 @@ void Lnast_to_lgraph::lower_if() {
       cur_val = mux.setup_driver_pin("Y");
     }
 
+    // Apply bitwidth to the final Mux output (the merged value seen as `var`).
+    // The intermediate muxes for the same var share its inferred range.
+    apply_bw(cur_val, var);
+
     // Write final mux output back (preserve output_names_ membership).
     pin_map_.insert_or_assign(var, cur_val);
   }
@@ -516,7 +534,9 @@ void Lnast_to_lgraph::lower_negated_infix(Ntype_op op, std::string_view a_pin, s
 
   auto not_node = lg_->create_node(Ntype_op::Not);
   lg_->add_edge(inner.setup_driver_pin("Y"), not_node.setup_sink_pin("a"));
-  bind(result, not_node.setup_driver_pin("Y"));
+  auto drv = not_node.setup_driver_pin("Y");
+  apply_bw(drv, result);
+  bind(result, drv);
 }
 
 // Single-operand ops: red_or, red_and, red_xor — result = op(A)
@@ -529,7 +549,9 @@ void Lnast_to_lgraph::lower_unary(Ntype_op op, std::string_view a_pin) {
 
   auto node = lg_->create_node(op);
   lg_->add_edge(operand, node.setup_sink_pin(a_pin));
-  bind(result, node.setup_driver_pin("Y"));
+  auto drv = node.setup_driver_pin("Y");
+  apply_bw(drv, result);
+  bind(result, drv);
 }
 
 // set_mask has three inputs: a, mask, value — result = Set_mask(a, mask, value)
@@ -548,7 +570,9 @@ void Lnast_to_lgraph::lower_set_mask() {
   lg_->add_edge(op_a,    node.setup_sink_pin("a"));
   lg_->add_edge(op_mask, node.setup_sink_pin("mask"));
   lg_->add_edge(op_val,  node.setup_sink_pin("value"));
-  bind(result, node.setup_driver_pin("Y"));
+  auto drv = node.setup_driver_pin("Y");
+  apply_bw(drv, result);
+  bind(result, drv);
 }
 
 // func_def children (per prp2lnast.cpp):
@@ -589,6 +613,7 @@ void Lnast_to_lgraph::lower_func_def() {
           move_to_parent();
           // Register the graph input pin so body references resolve correctly.
           auto inp = lg_->add_graph_input(inp_name, next_inp_pos_++, 0);
+          apply_bw(inp, inp_name);
           pin_map_.emplace(inp_name, inp);
         }
       }
@@ -631,6 +656,7 @@ void Lnast_to_lgraph::lower_func_def() {
     }
     auto& drv     = it->second;
     auto  out_pin = lg_->add_graph_output(name, next_out_pos_++, drv.get_bits());
+    apply_bw(out_pin, name);
     lg_->add_edge(drv, out_pin);
   }
 }
@@ -644,7 +670,9 @@ void Lnast_to_lgraph::lower_not() {
 
   auto node = lg_->create_node(Ntype_op::Not);
   lg_->add_edge(operand, node.setup_sink_pin("a"));
-  bind(result, node.setup_driver_pin("Y"));
+  auto drv = node.setup_driver_pin("Y");
+  apply_bw(drv, result);
+  bind(result, drv);
 }
 
 Node_pin Lnast_to_lgraph::lower_leaf() {

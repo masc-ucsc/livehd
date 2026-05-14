@@ -14,6 +14,7 @@
 #include <vector>
 
 #include "upass_attributes.hpp"  // NOLINT: ensures plugin "attributes" is linked
+#include "upass_bitwidth.hpp"    // NOLINT: ensures plugin "bitwidth" is linked
 #include "upass_constprop.hpp"
 #include "upass_runner.hpp"
 #include "upass_ssa.hpp"
@@ -75,6 +76,9 @@ void Pass_upass::setup() {
   m1.add_label_optional("constprop", "enable constant propagation upass", "true");
   m1.add_label_optional("coalescer", "enable deferred-emit / DSE coalescer upass", "true");
   m1.add_label_optional("attributes", "enable Pyrope attribute upass (sticky propagation, comptime checks)", "true");
+  m1.add_label_optional("bitwidth",
+                        "enable LNAST bitwidth optimizer (range inference; publishes max/min into bw_meta)",
+                        "true");
   m1.add_label_optional("ssa",
                         "enable SSA normalisation: harvest I/O metadata into tree_io, expand I/O tuple nodes, "
                         "rename multi-assigned user variables to SSA-unique names",
@@ -174,6 +178,9 @@ Pass_upass::Pass_upass(const Eprp_var& var) : Pass("pass.upass", var) {
   auto attrs_txt   = get_label("attributes");
   bool do_attrs    = attrs_txt != "false" && attrs_txt != "0";
 
+  auto bw_txt      = get_label("bitwidth");
+  bool do_bitwidth = bw_txt != "false" && bw_txt != "0";
+
   auto ssa_txt = get_label("ssa");
   bool do_ssa  = ssa_txt != "false" && ssa_txt != "0";
   run_ssa      = do_ssa;
@@ -202,6 +209,13 @@ Pass_upass::Pass_upass(const Eprp_var& var) : Pass("pass.upass", var) {
   // they share the same `attributes` plugin and are toggled internally.
   if (do_attrs) {
     upass_order.emplace_back("attributes");
+  }
+
+  // Bitwidth runs after attributes (so wrap/saturate policy is on the
+  // symbol table) and before constprop (so `.[max]`/`.[min]`/`.[bits]`
+  // reads can fold using the inferred ranges).
+  if (do_bitwidth) {
+    upass_order.emplace_back("bitwidth");
   }
 
   if (do_constprop) {
