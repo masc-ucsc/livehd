@@ -69,16 +69,29 @@ static std::optional<Const> stringify_concat_trivials(const std::vector<Const>& 
   return acc;
 }
 
-Const uPass_constprop::range_to_mask(const Const& start, const Const& end) {
+Const uPass_constprop::apply_range_mask(const Const& value, const Const& start, const Const& end) {
   if (!start.is_i()) {
     return *Dlop::invalid();
   }
-  const auto lo = static_cast<int>(start.to_i());
-  if (end.is_nil()) {
-    return *Dlop::get_neg_mask_value(lo);
+  const auto lo = start.to_i();
+  if (lo < 0) {
+    return *Dlop::invalid();
   }
-  if (end.is_i() && end.to_i() >= start.to_i()) {
-    return *Dlop::get_mask_value(static_cast<int>(end.to_i()), lo);
+  // Open-ended `lo..` (end == nil): right-shift by lo. This dodges the
+  // negative-mask path of get_mask_op (whose `bits<=1 → 1` legacy in
+  // get_neg_mask_value silently breaks the lo==0 "all bits" case), and
+  // matches Pyrope's bit-slice semantics where `b#[lo..]` is the upper
+  // bits of `b` packed LSB-first.
+  if (end.is_nil()) {
+    return *value.rsh_op(lo);
+  }
+  if (end.is_i()) {
+    const auto hi = end.to_i();
+    if (hi < lo) {
+      return *Dlop::invalid();
+    }
+    const auto mask = Dlop::get_mask_value(static_cast<int>(hi), static_cast<int>(lo));
+    return *value.get_mask_op(*mask);
   }
   return *Dlop::invalid();
 }
@@ -2002,14 +2015,11 @@ void uPass_constprop::process_tuple_get() {
           return;
         }
       }
-      // Integer bit-slice via the same range→mask synthesis used by get_mask.
+      // Integer bit-slice via the same range→value synthesis used by get_mask.
       if (foldable(src_val)) {
-        const Const mask = range_to_mask(start, end_lc);
-        if (!mask.is_invalid()) {
-          const Const result = *src_val.get_mask_op(mask);
-          if (!result.is_invalid()) {
-            store_trivial(dst, result);
-          }
+        const Const result = apply_range_mask(src_val, start, end_lc);
+        if (!result.is_invalid()) {
+          store_trivial(dst, result);
           move_to_parent();
           return;
         }
@@ -2346,11 +2356,9 @@ void uPass_constprop::process_get_mask() {
   //   - a constant integer / known scalar (treated as a bitmask),
   //   - a `range` ref previously bound in range_map (`b#[lo..]`,
   //     `b#[lo..=hi]`, `b#[..=hi]`, etc.).
-  // For the range case we synthesize the equivalent integer mask from the
-  // (start, end) pair: closed `lo..=hi` → bits lo..hi mask; open
-  // `lo..` → all bits from `lo` upward, encoded as `-(1 << lo)` so
-  // Lconst::get_mask_op's negative-mask path extracts the upper bits
-  // correctly.
+  // Range refs lower via apply_range_mask, which routes open-ended `lo..`
+  // through rsh_op (skipping get_mask_op's broken negative-mask path) and
+  // closed `lo..=hi` through get_mask_op with the equivalent positive mask.
   move_to_child();
   auto var = std::string(current_text());
   move_to_sibling();
@@ -2360,16 +2368,37 @@ void uPass_constprop::process_get_mask() {
     return;
   }
 
-  Const mask = current_prim_value();
+  bool  is_range = false;
+  Const range_start;
+  Const range_end;
+  Const mask;
   if (is_type(Lnast_ntype::Lnast_ntype_ref)) {
     if (auto rit = range_map.find(std::string(current_text())); rit != range_map.end()) {
-      mask = range_to_mask(rit->second.first, rit->second.second);
+      is_range    = true;
+      range_start = rit->second.first;
+      range_end   = rit->second.second;
+    } else {
+      mask = current_prim_value();
     }
+  } else {
+    mask = current_prim_value();
   }
 
   move_to_parent();
 
-  if (!foldable(value) || !foldable(mask)) {
+  if (!foldable(value)) {
+    return;
+  }
+
+  if (is_range) {
+    const Const result = apply_range_mask(value, range_start, range_end);
+    if (!result.is_invalid()) {
+      store_trivial(var, result);
+    }
+    return;
+  }
+
+  if (!foldable(mask)) {
     return;
   }
   // Trust Dlop::get_mask_op — including the single-bit-mask → Bool rule. We

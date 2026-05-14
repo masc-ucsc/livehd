@@ -146,12 +146,11 @@ protected:
     return s;
   }
 
-  // Synthesize the integer bitmask described by a (start, end) range pair.
-  // `end` may be `nil` for an open-ended range; the result encodes "bits lo..msb"
-  // as `-(1 << lo)` so Lconst::get_mask_op extracts the upper bits correctly.
-  // Returns invalid when bounds are not folded integers (or the closed range
-  // is empty).
-  static Const range_to_mask(const Const& start, const Const& end);
+  // Apply a (start, end) bit-slice range to `value` and return the extracted
+  // bits packed LSB-first. `end` may be `nil` for an open-ended `lo..` slice
+  // (lowered via rsh_op); a concrete `hi >= lo` lowers via get_mask_op with
+  // the closed mask. Returns invalid when bounds are not folded integers.
+  static Const apply_range_mask(const Const& value, const Const& start, const Const& end);
 
   // Single-shot "store result, mark_changed if value actually changed".
   // The has_trivial/get_trivial!=/set+mark_changed dance was repeated at
