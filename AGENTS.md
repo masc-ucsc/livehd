@@ -18,6 +18,8 @@
 - `pass/cprop/`: Constant propagation pass
 - `ware/rtl/`: Memory RTL modules (`cgen_memory_*.v`, `cgen_memory_multiclock_*.v`)
 
+If you need to explore/fix the hlop (dlop/slop) or hdds library, they likely reside in ../hlop and ../hhds
+
 ## Tree library
 
 LiveHD's tree IRs (LNAST, parser AST) sit on top of HHDS (`@hhds//hhds:core`,

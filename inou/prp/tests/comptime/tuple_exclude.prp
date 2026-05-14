@@ -28,4 +28,4 @@ for (e, idx, key) in t1 {
 
 cassert t1 != t3
 cassert t3.a == t1.a == t2.a
-cassert t3.b == t1.c == t2.c
+cassert t3.c == t1.c == t2.c

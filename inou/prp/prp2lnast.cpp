@@ -1227,13 +1227,24 @@ void Prp2lnast::process_for_statement(TSNode n) {
         auto        iter_stmts = builder.add_child(Lnast_ntype::create_stmts());
         builder.push_stmts(iter_stmts);
 
-        // refs[0] = NAME[pos]. Indexed read keeps this branch generic across
+        // Slot indexer: named entries live in the bundle under their name
+        // (e.g. `(a=1,b=2,c=3)` keys are "a"/"b"/"c", never "0"/"1"/"2"), so
+        // a positional read would miss them. Use the name as a string-literal
+        // const when known; fall back to the positional index otherwise.
+        auto slot_index_const = [&]() {
+          if (!ent.key.empty()) {
+            return Lnast_node::create_const("'" + ent.key + "'");
+          }
+          return Lnast_node::create_const(std::to_string(i));
+        };
+
+        // refs[0] = NAME[slot]. Indexed read keeps this branch generic across
         // value-known (const tuple) and value-unknown (loop-built) shapes.
         if (refs.size() >= 1) {
           auto tg = builder.add_child(Lnast_ntype::create_tuple_get());
           lnast->add_child(tg, refs[0]);
           lnast->add_child(tg, src_ref);
-          lnast->add_child(tg, Lnast_node::create_const(std::to_string(i)));
+          lnast->add_child(tg, slot_index_const());
         }
         if (refs.size() >= 2) {
           auto a = builder.add_child(Lnast_ntype::create_assign());
@@ -1258,7 +1269,7 @@ void Prp2lnast::process_for_statement(TSNode n) {
         if (is_ref && refs.size() >= 1) {
           auto ts = builder.add_child(Lnast_ntype::create_tuple_set());
           lnast->add_child(ts, src_ref);
-          lnast->add_child(ts, Lnast_node::create_const(std::to_string(i)));
+          lnast->add_child(ts, slot_index_const());
           lnast->add_child(ts, refs[0]);
         }
 
