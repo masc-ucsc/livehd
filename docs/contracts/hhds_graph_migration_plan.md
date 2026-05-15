@@ -81,6 +81,17 @@ After the five priority passes are migrated, the gating tests
 (`inou/yosys:all` + `inou/prp:all`) run on the new infrastructure;
 non-priority passes follow.
 
+### Recommended next-session ordering
+
+Given the coupling note below, the practical migration order is:
+
+1. **`main/meta_api.cpp` — `Meta_api::save` / `Meta_api::match` / `Meta_api::create` / `Meta_api::dump`.** Smaller than yosys (~200 LOC across these). Migrate to read/write `var.graphs` via `hhds::GraphLibrary::save` / `load`. Persistence format flips to HHDS's `library.txt` + per-graph dirs (HIF goes away alongside `//hif`).
+2. **`pass/cprop`.** ~2845 LOC, currently mutates Lgraph (which mirrors to HHDS shadow). Migrate to operate on `hhds::Graph` directly. Largest of the priority passes after yosys, but uniformly read-only/mutator on the graph body — the cgen lessons cover all the read-side patterns.
+3. **`inou/yosys`.** Once save/match/cprop work with `var.graphs` independently of `var.lgs`, yosys can flip to produce `hhds::Graph` directly via `hhds::GraphLibrary` (skipping the Lgraph wrapper). Use the call-site translation table in `docs/contracts/yosys_migration_skeleton.md`.
+4. **`pass/bitwidth`.** 2241 LOC, similar shape to cprop.
+5. **BUILD cleanup.** Drop `//lgraph` from all migrated passes' BUILD; drop `@hif//hif` from `MODULE.bazel` once `pass/common/eprp_var.cpp` no longer pulls in `lgraph.hpp` for `Lgraph::get_hhds_graph_shared`.
+6. **Wholesale `lgraph/` deletion.**
+
 ### Coupling note — yosys migration is not standalone (discovered 2026-05-15)
 
 The yosys_compile.sh pipeline is:
