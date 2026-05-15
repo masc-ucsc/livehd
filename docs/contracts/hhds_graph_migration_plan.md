@@ -72,8 +72,8 @@ the lgraph wrapper continues to compile while passes migrate.
 | Pass | LOC | Lgraph touchpoints | Status |
 | --- | --- | --- | --- |
 | `inou/prp` | 3666 | 0 in BUILD | DONE (was never coupled — produces LNAST only). Dead `do_work`/`to_lgraph` decls removed. |
-| `inou/cgen` | 1226 | ~50 method calls | **PENDING** — start here next session. |
-| `inou/yosys` | 5251 | ~322 | PENDING. User expects this to be a mostly-mechanical create-side migration. |
+| `inou/cgen` | 1103 | ~163 method calls | **DONE** (2026-05-15). Drops `//lgraph`, consumes `var.graphs`. yosys_compile.sh: 82/85 (same as legacy lgraph baseline; 3 pre-existing failures `blackboxing2`/`cpp_api`/`chunk_FetchTargetQueue`). |
+| `inou/yosys` | 5251 | ~322 | PENDING. The producer side; biggest single migration. Pipeline already works end-to-end because `Eprp_var::add(Lgraph*)` lockstep-populates `var.graphs` from `Lgraph::get_hhds_graph_shared()` (the existing shadow), so the migrated cgen consumes the right Graph today. Migration here is about dropping `//lgraph` from `inou/yosys/BUILD` and rewriting the Yosys-RTLIL → Lgraph builder to write directly into `hhds::Graph` / `hhds::GraphLibrary`. |
 | `pass/bitwidth` | 2241 | ~55 | PENDING. |
 | `pass/cprop` | 2845 | ~116 | PENDING. |
 
@@ -553,12 +553,26 @@ document. To pick up:
      folding — the verilog is structurally valid but not logically
      equivalent. These come back as cprop migrates.
 
-3. **Pick the next un-migrated priority pass.** Start with `inou/cgen`
-   (smallest, 1103 LOC, ~163 Lgraph/Node/Pin call sites, pure
-   consumer that emits Verilog). Its BUILD is in `inou/cgen/BUILD`;
-   the main file is `inou/cgen/cgen_verilog.cpp`. Helpers in
-   `graph/node_util.hpp` (`livehd::graph_util::type_op_of`,
-   `bits_of`, `is_unsign`, `has_color`, …) cover the common idioms.
+3. **Pick the next un-migrated priority pass.** `inou/cgen` is **done**
+   (commit history: `cgen: migrate inou.cgen.verilog to hhds::Graph`
+   + `cgen: fix HHDS-cgen 4 regressions ...`). The remaining priority
+   pass is `inou/yosys` (5251 LOC, the producer side). Helpers in
+   `graph/node_util.hpp` cover most of the common idioms; cgen
+   exercised three additions that may help the yosys side too:
+   - **Sink-name → port_id**: HHDS does not store LiveHD's sink-name
+     convention. Translate via `Ntype::get_sink_pid(op, name)` and use
+     `node.get_sink_pin(port_id)`. For optional sinks (LiveHD allows
+     missing pins, HHDS asserts), walk `node.inp_edges()` and match by
+     `e.sink.get_port_id()` instead of calling `get_sink_pin` directly.
+   - **`is_const_pin` must accept Ntype_op::Nconst nodes** (separate
+     from HHDS's `CONST_NODE` singleton — LiveHD's wrapper materialises
+     constants as regular Nconst nodes with `livehd::attrs::const_value`).
+   - **Graph-IO pin counterparts.** `graph->get_input_pin(name)` returns
+     the driver counterpart (`pid | 2`); `graph->get_output_pin(name)`
+     returns the sink counterpart. After cprop manipulations, both
+     counterparts can appear in iteration; HHDS's `get_pin_name`
+     resolves either to the declared IO name, so a final wire-name
+     fallback in `get_expression` covers the late-arriving variant.
 
 3. **Migration template (per pass):**
    - Replace `Lgraph* lg` parameters with `hhds::Graph*` (or
