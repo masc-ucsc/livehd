@@ -34,17 +34,25 @@ can be migrated later or retired with their `//lgraph` dep.
 `graph/` contents (landed):
 - `graph/cell.{cpp,hpp}` — `Ntype_op` + cell-type metadata (sink/driver
   names, loop_first/loop_last, multi-driver/sink predicates). HHDS
-  `NodeEntry::type` carries the encoded value.
+  `NodeEntry::type` carries the encoded value. **Canonical** —
+  previously duplicated in `lgraph/cell.{cpp,hpp}`, those are gone.
 - `graph/ann_place.hpp` — `Ann_place` value type used by
-  `livehd::attrs::place`.
+  `livehd::attrs::place`. **Canonical** — previously duplicated in
+  `lgraph/ann_place.hpp`, that one is gone.
 - `graph/attrs.hpp` — every LiveHD per-node / per-pin attribute tag
   backed by `hhds::flat_storage`: `bits`, `pin_offset`, `pin_name`,
   `pin_delay`, `pin_unsigned`, `color`, `place`, `loc`, `source`,
-  `subid`, `const_value`, `lut`. Pre-registered at static-init in
-  `graph/cell.cpp` (avoids the registry race documented in
-  `hhds_migration.md §3.1`).
+  `subid`, `const_value`, `lut`. **Canonical** — previously duplicated
+  in `lgraph/lgraph_attrs.hpp`, that one is gone. Pre-registered at
+  static-init in `graph/cell.cpp` (avoids the registry race documented
+  in `hhds_migration.md §3.1`). One rename: `livehd::attrs::sign` →
+  `livehd::attrs::pin_unsigned` (semantics unchanged; 1 = unsigned,
+  absent = signed).
 - `graph/BUILD` — `cc_library "graph"`, deps `//core` +
   `@hhds//hhds:graph` (notably **not** `//lgraph`).
+
+`//lgraph` now depends on `//graph` for these shared definitions, so
+the lgraph wrapper continues to compile while passes migrate.
 
 ## Baseline
 
@@ -489,6 +497,35 @@ Where the 27 failures are exactly the baseline set.
 
 This plan was created while completing **task 1a** of the Pyrope
 punch list in `TODO.md`.
+
+### Structural prerequisite — `Eprp_var::lgs`
+
+Before per-pass migrations to direct `hhds::Graph` access can finish,
+the pipeline-variable type that flows through every Eprp pass needs
+to stop carrying `Lgraph*`:
+
+```cpp
+// pass/common/eprp_var.hpp today:
+class Lgraph;  // forward decl
+class Eprp_var {
+  using Eprp_lgs = std::vector<Lgraph*>;
+  Eprp_lgs lgs;
+  ...
+};
+```
+
+Every consumer pass (cgen, bitwidth, cprop, yosys's output side) reads
+`var.lgs[i]` and gets an `Lgraph*`. To remove `//lgraph` entirely,
+this needs to become `std::vector<std::shared_ptr<hhds::Graph>>` (or
+some HHDS handle). Each pass that reads it then adapts to the new
+type. This is the structural single point that, once flipped, lets
+every per-pass migration land independently.
+
+Doing this in one commit is invasive but contained — touches
+`pass/common/eprp_var.{hpp,cpp}` plus every direct reader of
+`var.lgs` (Meta_api passes that produce, downstream passes that
+consume). Once it lands, cgen / bitwidth / cprop / yosys can migrate
+in any order; each pass's BUILD drops `//lgraph` independently.
 
 ### Entry point — start here
 
