@@ -335,11 +335,21 @@ public:
     auto instance_pid = name2id.at(io_name);
     I(io_pins[instance_pid].name == io_name);
     io_pins[instance_pid].bits = bits;
+    // HHDS Phase G2 (mirror): also stamp on the paired GraphIO.
+    if (hhds_io_ && hhds_io_->get_library() != nullptr) {
+      hhds_io_->set_bits(io_name, static_cast<uint32_t>(bits));
+    }
   }
 
   void set_bits(Port_ID instance_pid, Bits_t bits) {
     I(has_instance_pin(instance_pid));
     io_pins[instance_pid].bits = bits;
+    // HHDS Phase G2 (mirror): also stamp on the paired GraphIO (look up
+    // the declared-pin name by instance_pid).
+    if (hhds_io_ && hhds_io_->get_library() != nullptr
+        && instance_pid < io_pins.size() && !io_pins[instance_pid].name.empty()) {
+      hhds_io_->set_bits(io_pins[instance_pid].name, static_cast<uint32_t>(bits));
+    }
   }
 
   [[nodiscard]] const IO_pin& get_pin(std::string_view io_name) const {
