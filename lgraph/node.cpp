@@ -456,6 +456,10 @@ void Node::set_type_const(const Const& val) {
   current_g->set_type_const(nid, val);
   current_g->mirror_set_type_hhds(nid, Ntype_op::Nconst);
   current_g->mirror_set_const_hhds(nid, val.serialize());
+  // set_type_const stores the const's bit-width on node_internal[nid] (port 0
+  // driver). Mirror to the shadow's per-pin bits attr so Node_pin::get_bits
+  // can be served from the shadow even before any add_edge runs.
+  current_g->mirror_set_pin_bits_hhds(nid, 0, val.get_bits());
 }
 
 Lg_type_id Node::get_type_sub() const { return current_g->get_type_sub(nid); }
