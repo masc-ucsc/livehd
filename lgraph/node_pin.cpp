@@ -312,11 +312,32 @@ void Node_pin::set_bits(Bits_t bits) {
   current_g->mirror_set_pin_bits_hhds(current_g->get_node_nid(idx), pid, bits);
 }
 
-void Node_pin::set_unsign() { get_lg()->ref_node_pin_unsigned_map()->insert(get_compact_driver()); }
+void Node_pin::set_unsign() {
+  get_lg()->ref_node_pin_unsigned_map()->insert(get_compact_driver());
+  current_g->mirror_set_pin_sign_hhds(current_g->get_node_nid(idx), pid, /*unsigned_flag=*/true);
+}
 
-void Node_pin::set_sign() { get_lg()->ref_node_pin_unsigned_map()->erase(get_compact_driver()); }
+void Node_pin::set_sign() {
+  get_lg()->ref_node_pin_unsigned_map()->erase(get_compact_driver());
+  current_g->mirror_set_pin_sign_hhds(current_g->get_node_nid(idx), pid, /*unsigned_flag=*/false);
+}
 
-bool Node_pin::is_unsign() const { return get_lg()->get_node_pin_unsigned_map().contains(get_compact_driver()); }
+bool Node_pin::is_unsign() const {
+  // HHDS Phase G3 read: consult per-pin sign attr on shadow first; absence
+  // of the attr (or value 0) means signed. Falls back to legacy
+  // node_pin_unsigned_map for shadow misses.
+  auto hpin = get_hhds_pin();
+  if (hpin.is_valid()) {
+    auto ref = hpin.attr(livehd::attrs::sign);
+    if (ref.has()) {
+      return ref.get() != 0;
+    }
+    // attr absent — but we can't be sure the shadow is authoritative for
+    // this pin (write may have hit only the legacy map for a previously
+    // signed pin). Fall through to the legacy check.
+  }
+  return get_lg()->get_node_pin_unsigned_map().contains(get_compact_driver());
+}
 
 std::string_view Node_pin::get_type_sub_pin_name() const {
   const auto node = get_node();

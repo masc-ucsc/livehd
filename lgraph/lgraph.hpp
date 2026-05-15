@@ -303,6 +303,36 @@ public:
     hnode.attr(livehd::attrs::lut).set(std::move(serialized));
   }
 
+  // HHDS Phase G3 (shadow write): mirror per-pin sign as a per-pin HHDS
+  // attribute on the driver pin. unsigned == 1, signed == 0. Threaded
+  // through Node_pin::set_unsign / set_sign. Uses create_driver_pin
+  // (find-or-create) so the mirror works pre-add_edge.
+  void mirror_set_pin_sign_hhds(Index_id nid_master, Port_ID pid, bool unsigned_flag) {
+    if (!hhds_graph_) {
+      return;
+    }
+    if (nid_master == Hardcoded_input_nid || nid_master == Hardcoded_output_nid) {
+      return;
+    }
+    auto it = idx_to_hhds_nid_.find(nid_master);
+    if (it == idx_to_hhds_nid_.end()) {
+      return;
+    }
+    auto hnode = hhds_graph_->get_node(it->second);
+    if (!hnode.is_valid()) {
+      return;
+    }
+    auto hpin = hnode.create_driver_pin(static_cast<hhds::Port_id>(pid));
+    if (!hpin.is_valid()) {
+      return;
+    }
+    if (unsigned_flag) {
+      hpin.attr(livehd::attrs::sign).set(static_cast<int8_t>(1));
+    } else {
+      hpin.attr(livehd::attrs::sign).del();
+    }
+  }
+
   // HHDS Phase G3 (shadow write): mirror per-pin bits as a per-pin HHDS
   // attribute on the driver pin. Threaded into Node_pin::set_bits / set_size
   // and through create_node_const for the const-derived bits. Uses
