@@ -450,6 +450,7 @@ Node Node::get_up_node() const {
 void Node::set_type_sub(Lg_type_id subid) {
   current_g->set_type_sub(nid, subid);
   current_g->mirror_set_type_hhds(nid, Ntype_op::Sub);
+  current_g->mirror_set_subid_hhds(nid, subid);
 }
 void Node::set_type_const(const Const& val) {
   current_g->set_type_const(nid, val);

@@ -12,6 +12,7 @@
 #include "lgraph_attributes.hpp"
 #include "lgraphbase.hpp"
 #include "node.hpp"
+#include "lgraph_attrs.hpp"
 #include "node_pin.hpp"
 
 class Lgraph : public Lgraph_attributes {
@@ -103,8 +104,9 @@ protected:
   // mirror_set_type_hhds. Fall back to the legacy node_internal[] read for
   // shadow misses (e.g., raw non-master Index_id values, or graph-IO
   // pseudo-nodes). These hide the Lgraph_attributes inline equivalents.
-  [[nodiscard]] Ntype_op get_type_op(Index_id nid) const;
-  [[nodiscard]] bool     is_type_const(Index_id nid) const;
+  [[nodiscard]] Ntype_op   get_type_op(Index_id nid) const;
+  [[nodiscard]] bool       is_type_const(Index_id nid) const;
+  [[nodiscard]] Lg_type_id get_type_sub(Index_id nid) const;
 
   int get_num_out_edges(const Node& node) const;
   int get_num_inp_edges(const Node& node) const;
@@ -241,6 +243,24 @@ public:
       return;
     }
     hnode.set_type(static_cast<hhds::Type>(static_cast<uint16_t>(op) << 1));
+  }
+
+  // HHDS Phase G3 (shadow write): mirror a sub-graph id assignment as a
+  // node-level HHDS attribute. Threaded into Node::set_type_sub and
+  // Lgraph::create_node_sub paths. No-op on shadow miss.
+  void mirror_set_subid_hhds(Index_id nid, Lg_type_id sub_id) {
+    if (!hhds_graph_) {
+      return;
+    }
+    auto it = idx_to_hhds_nid_.find(nid);
+    if (it == idx_to_hhds_nid_.end()) {
+      return;
+    }
+    auto hnode = hhds_graph_->get_node(it->second);
+    if (!hnode.is_valid()) {
+      return;
+    }
+    hnode.attr(livehd::attrs::subid).set(sub_id.value);
   }
 
   void add_edge(const Node_pin& dpin, const Node_pin& spin);

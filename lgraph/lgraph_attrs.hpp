@@ -57,6 +57,34 @@ struct color_t {
 };
 inline constexpr color_t color{};
 
+// Sub-graph reference id — per-node attribute set by Lgraph::set_type_sub
+// and read back by Lgraph::get_type_sub. Stores the raw Lg_type_id value
+// (uint32_t) rather than the typed alias to keep the attribute storage
+// header-light.
+struct subid_t {
+  using value_type = uint32_t;  // matches Lg_type_id::value
+  using storage    = hhds::flat_storage;
+};
+inline constexpr subid_t subid{};
+
+// Per-node serialized Const value used by Nconst cells. Const::serialize()
+// returns std::string; we mirror that as-is. Stored per-node (not per-pin)
+// because each Nconst node has exactly one driver carrying the constant.
+struct const_value_t {
+  using value_type = std::string;
+  using storage    = hhds::flat_storage;
+};
+inline constexpr const_value_t const_value{};
+
+// Per-node serialized LUT-table Const value used by LUT cells. Same shape
+// as const_value, separate tag so a cell can never be both Nconst and LUT
+// in attribute storage.
+struct lut_t {
+  using value_type = std::string;
+  using storage    = hhds::flat_storage;
+};
+inline constexpr lut_t lut{};
+
 }  // namespace livehd::attrs
 
 namespace hhds {
@@ -80,6 +108,18 @@ template <>
 template <>
 [[nodiscard]] inline std::string attr_tag_name<livehd::attrs::color_t>() {
   return "livehd::attrs::color";
+}
+template <>
+[[nodiscard]] inline std::string attr_tag_name<livehd::attrs::subid_t>() {
+  return "livehd::attrs::subid";
+}
+template <>
+[[nodiscard]] inline std::string attr_tag_name<livehd::attrs::const_value_t>() {
+  return "livehd::attrs::const_value";
+}
+template <>
+[[nodiscard]] inline std::string attr_tag_name<livehd::attrs::lut_t>() {
+  return "livehd::attrs::lut";
 }
 
 }  // namespace hhds

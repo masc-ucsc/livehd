@@ -20,6 +20,27 @@
 #include "lgraph_base_core.hpp"
 #include "str_tools.hpp"
 
+namespace {
+// HHDS Phase G3+ attribute pre-registration. The HHDS attribute registry is
+// not thread-safe on first-touch — two threads racing to register the same
+// tag both find the registry empty and try to insert. Pre-registering before
+// `main()` keeps the lazy `attr()` path on the early-return branch. Mirrors
+// the pattern from lnast/lnast.cpp.
+struct Lgraph_attr_init {
+  Lgraph_attr_init() {
+    hhds::register_attr_tag<livehd::attrs::bits_t>("livehd::attrs::bits");
+    hhds::register_attr_tag<livehd::attrs::pin_name_t>("livehd::attrs::pin_name");
+    hhds::register_attr_tag<livehd::attrs::sign_t>("livehd::attrs::sign");
+    hhds::register_attr_tag<livehd::attrs::instance_pid_t>("livehd::attrs::instance_pid");
+    hhds::register_attr_tag<livehd::attrs::color_t>("livehd::attrs::color");
+    hhds::register_attr_tag<livehd::attrs::subid_t>("livehd::attrs::subid");
+    hhds::register_attr_tag<livehd::attrs::const_value_t>("livehd::attrs::const_value");
+    hhds::register_attr_tag<livehd::attrs::lut_t>("livehd::attrs::lut");
+  }
+};
+[[maybe_unused]] const Lgraph_attr_init lgraph_attr_init_{};
+}  // namespace
+
 void Lgraph::setup_hierarchy_down(Lgraph* sub_lg, Hierarchy_index parent_hidx) {
   I(sub_lg);
 
@@ -916,6 +937,24 @@ bool Lgraph::is_type_const(Index_id nid) const {
   return get_type_op(nid) == Ntype_op::Nconst;
 }
 
+Lg_type_id Lgraph::get_type_sub(Index_id nid) const {
+  // HHDS Phase G3 read: query the per-node `subid` attribute on the shadow
+  // when present. Falls back to the legacy subid_map (via the base impl)
+  // for shadow misses (graph-IO pseudo-nodes, non-master nids).
+  if (hhds_graph_ && nid != Hardcoded_input_nid && nid != Hardcoded_output_nid) {
+    if (auto it = idx_to_hhds_nid_.find(nid); it != idx_to_hhds_nid_.end()) {
+      auto hnode = hhds_graph_->get_node(it->second);
+      if (hnode.is_valid()) {
+        auto ref = hnode.attr(livehd::attrs::subid);
+        if (ref.has()) {
+          return Lg_type_id(ref.get());
+        }
+      }
+    }
+  }
+  return Lgraph_attributes::get_type_sub(nid);
+}
+
 bool Lgraph::has_outputs(const Node& node) const {
   // HHDS Phase G3 read: for non-IO nodes tracked in the shadow, query
   // Node_class::has_out_edges() (cheap boolean — no edge vector
@@ -1635,10 +1674,12 @@ Node Lgraph::create_node_sub(Lg_type_id sub_id) {
   auto nid = create_node().get_nid();
   set_type_sub(nid, sub_id);
 
-  // HHDS Phase G3 (shadow): mirror the cell-type. The sub-graph reference
-  // itself (sub_id) is not yet wired to a HHDS set_subnode — that lands when
-  // Hierarchy uses the HHDS Forest model.
+  // HHDS Phase G3 (shadow): mirror the cell-type plus the sub_id payload as
+  // a node-level HHDS attribute. The Hierarchy/Forest set_subnode wiring is
+  // still a Phase G4 follow-up; this gives readers (get_type_sub) a
+  // shadow-backed source while the legacy subid_map keeps the live data.
   mirror_set_type_hhds(nid, Ntype_op::Sub);
+  mirror_set_subid_hhds(nid, sub_id);
 
   return Node{this, Hierarchy::hierarchical_root(), nid};
 }
@@ -1648,10 +1689,11 @@ Node Lgraph::create_node_sub(std::string_view sub_name) {
   auto* sub = library->ref_or_create_sub(sub_name);
   set_type_sub(nid, sub->get_lgid());
 
-  // HHDS Phase G3 (shadow): mirror the cell-type for the name-keyed overload
-  // too. Without this, downstream set_type readers see the default Invalid
+  // HHDS Phase G3 (shadow): same mirror pair as the Lg_type_id overload.
+  // Without this, downstream set_type readers see the default Invalid
   // type for sub-instances built through this path (lnast2lgraph emitter).
   mirror_set_type_hhds(nid, Ntype_op::Sub);
+  mirror_set_subid_hhds(nid, sub->get_lgid());
 
   return Node{this, Hierarchy::hierarchical_root(), nid};
 }
