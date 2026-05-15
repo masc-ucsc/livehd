@@ -16,6 +16,7 @@ cc_library(
     deps = [
         "//core",
         "//lnast",
+        "//upass/bitwidth:wrap_sat_hdr",
         "//upass/core:upass",
     ],
     alwayslink = True,

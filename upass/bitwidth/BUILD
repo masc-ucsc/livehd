@@ -14,12 +14,27 @@ cc_library(
     includes = ["."],
     visibility = ["//visibility:public"],
     deps = [
+        ":wrap_sat_hdr",
         "//core",
         "//lnast",
         "//pass/common:pass",
         "//upass/core:upass",
     ],
     alwayslink = True,  # ensures the static plugin_bitwidth registration fires
+)
+
+# Header-only utility: pure wrap/saturate narrowing math. Lives in
+# upass/bitwidth/ per lnast_bitwidth.md ("max/min-dependent operations
+# live in bitwidth") but exposed as a separate target so consumers like
+# upass/attributes/ can pull in the helpers without linking the
+# bitwidth plugin's static registration.
+cc_library(
+    name = "wrap_sat_hdr",
+    hdrs = ["wrap_sat.hpp"],
+    copts = COPTS,
+    includes = ["."],
+    visibility = ["//visibility:public"],
+    deps = ["//core"],
 )
 
 cc_test(

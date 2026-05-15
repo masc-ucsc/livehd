@@ -32,6 +32,7 @@
 #include "const.hpp"
 #include "upass_attributes.hpp"
 #include "upass_utils.hpp"
+#include "wrap_sat.hpp"  // narrowing math now lives in //upass/bitwidth (T2 #7)
 
 namespace {
 
@@ -42,62 +43,14 @@ bool is_truthy(std::string_view v) {
   return v != "false" && v != "0";
 }
 
-// Wrap (modulo) and saturate clamps for the given numeric type. n==0 means
-// the type's bit width is unknown and no narrowing is possible.
-Const wrap_to_unsigned(const Const& v, uint32_t n) {
-  if (n == 0 || v.is_invalid() || v.is_string() || v.has_unknowns() || v.is_nil()) {
-    return v;
-  }
-  // Build a 2^n - 1 mask and apply.
-  Const mask;
-  mask = Dlop::get_mask_value(n);
-  return *v.and_op(mask);
-}
-
-Const wrap_to_signed(const Const& v, uint32_t n) {
-  if (n == 0 || v.is_invalid() || v.is_string() || v.has_unknowns() || v.is_nil()) {
-    return v;
-  }
-  // Two's-complement wrap to n bits: take low n bits, then sign-extend if
-  // the n-th-1 bit is set. Const's adjust_bits already implements this for
-  // signed widths.
-  return *v.adjust_bits(n);
-}
-
-Const saturate_unsigned(const Const& v, uint32_t n) {
-  if (n == 0 || v.is_invalid() || v.is_string() || v.has_unknowns() || v.is_nil()) {
-    return v;
-  }
-  Const lo;
-  lo = Dlop::create_integer(0);
-  Const hi;
-  hi = Dlop::get_mask_value(n);
-  if (v.is_negative()) {
-    return lo;
-  }
-  // v > hi — compare via subtraction sign.
-  if (v.sub_op(hi)->is_positive() && !v.same_repr(hi)) {
-    return hi;
-  }
-  return v;
-}
-
-Const saturate_signed(const Const& v, uint32_t n) {
-  if (n == 0 || v.is_invalid() || v.is_string() || v.has_unknowns() || v.is_nil()) {
-    return v;
-  }
-  Const hi;
-  hi = Dlop::get_mask_value(n - 1);
-  Const lo;
-  lo = Dlop::get_neg_mask_value(n - 1);
-  if (v.sub_op(hi)->is_positive() && !v.same_repr(hi)) {
-    return hi;
-  }
-  if (lo.sub_op(v)->is_positive() && !v.same_repr(lo)) {
-    return lo;
-  }
-  return v;
-}
+// Wrap / saturate narrowing math moved to upass/bitwidth/wrap_sat.hpp.
+// Re-export under the same names so the rest of this file's call sites
+// stay unchanged and policy/trigger semantics here remain isolated from
+// the value-math.
+using upass::bitwidth::wrap_to_unsigned;
+using upass::bitwidth::wrap_to_signed;
+using upass::bitwidth::saturate_unsigned;
+using upass::bitwidth::saturate_signed;
 
 }  // namespace
 
