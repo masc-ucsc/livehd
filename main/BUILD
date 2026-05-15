@@ -66,12 +66,8 @@ cc_library(
         "//pass/lnastfmt:pass_lnastfmt",
         "//pass/locator:pass_locator",
         "//pass/opentimer:pass_opentimer",
-        "//pass/punch:pass_punch",
         "//pass/sample:pass_sample",
-        "//pass/semantic:pass_semantic",
         "//pass/submatch:pass_submatch",
-        "//pass/randomize_dpins:pass_randomize_dpins",
-        # "//pass/mockturtle:pass_mockturtle",
         #add dependencies to new passes here
         #"//inou/hif:inou_hif"
         "//pass/upass:pass_upass",
