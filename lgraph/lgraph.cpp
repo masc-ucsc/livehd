@@ -896,15 +896,15 @@ Node_pin_iterator Lgraph::out_sinks(const Node& node) const {
 
 Ntype_op Lgraph::get_type_op(Index_id nid) const {
   // HHDS Phase G3 read: for nodes tracked in the shadow, return the type
-  // stored on hhds::Node_class (with the bit-0 shift inverted). Falls back
-  // to legacy for shadow misses — graph-IO pseudo-nodes and any nid that
-  // isn't a tracked master root (e.g. pin-tail indices).
+  // stored on hhds::Node_class directly — the Ntype_op encoding places
+  // is_loop_last in bit 0 to match HHDS's storage scheme (see cell.hpp).
+  // Falls back to legacy for shadow misses — graph-IO pseudo-nodes and
+  // any nid that isn't a tracked master root (e.g. pin-tail indices).
   if (hhds_graph_ && nid != Hardcoded_input_nid && nid != Hardcoded_output_nid) {
     if (auto it = idx_to_hhds_nid_.find(nid); it != idx_to_hhds_nid_.end()) {
       auto hnode = hhds_graph_->get_node(it->second);
       if (hnode.is_valid()) {
-        auto raw = static_cast<uint16_t>(hnode.get_type());
-        return static_cast<Ntype_op>(raw >> 1);
+        return static_cast<Ntype_op>(static_cast<uint16_t>(hnode.get_type()));
       }
     }
   }

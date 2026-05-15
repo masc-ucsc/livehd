@@ -235,8 +235,9 @@ public:
   // HHDS Phase G3 (shadow write): mirror a cell-type assignment to the
   // paired hhds::Node_class. Called from create_node*() and from
   // Node::set_type* so external mutations (cprop, yosys) keep the shadow in
-  // sync. Shifts Ntype_op left by 1 to preserve HHDS's bit-0 `is_loop_last`
-  // semantics. No-op when there is no shadow or no mapping for `nid`.
+  // sync. Ntype_op is encoded so that bit 0 already matches HHDS's
+  // `is_loop_last` flag (see cell.hpp), so the value stores directly with
+  // no shift. No-op when there is no shadow or no mapping for `nid`.
   void mirror_set_type_hhds(Index_id nid, Ntype_op op) {
     if (!hhds_graph_) {
       return;
@@ -249,7 +250,7 @@ public:
     if (!hnode.is_valid()) {
       return;
     }
-    hnode.set_type(static_cast<hhds::Type>(static_cast<uint16_t>(op) << 1));
+    hnode.set_type(static_cast<hhds::Type>(static_cast<uint16_t>(op)));
   }
 
   // HHDS Phase G3 (shadow write): mirror a sub-graph id assignment as a

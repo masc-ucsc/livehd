@@ -13,64 +13,120 @@
 #include "likely.hpp"
 #include "str_tools.hpp"
 
+// Encoding invariant: bit 0 of the underlying value is `is_loop_last`.
+// HHDS reserves the low bit of NodeEntry::type for its own loop-last flag,
+// so making the Ntype_op encoding match means LiveHD can store the enum
+// value directly into hhds::Node_class without a shift on either side.
+//
+// Layout: non-loop-last ops take even values, loop-last ops take odd values.
+// Relative ordering is preserved so the range-based predicates below
+// (is_synthesizable, etc.) keep working. Gaps (odd slots for non-loop-last
+// ops, and one even slot interleaved with the loop-last block) are unused
+// and array slots at those indices stay "invalid" — see cell.cpp init.
 enum class Ntype_op : uint8_t {
-  Invalid,  // Detect bugs/unset (not used anywhere)
-  Sum,
-  Mult,
-  Div,
+  Invalid    = 0,  // Detect bugs/unset (not used anywhere)
+  Sum        = 2,
+  Mult       = 4,
+  Div        = 6,
 
-  And,
-  Or,
-  Xor,
-  Ror,  // Reduce OR (This is a bit different from the LNAST reduce_or (lnast uses mask)
+  And        = 8,
+  Or         = 10,
+  Xor        = 12,
+  Ror        = 14,  // Reduce OR (This is a bit different from the LNAST reduce_or (lnast uses mask)
 
-  Not,       // bitwise not
-  Get_mask,  // To positive signed
-  Set_mask,  // To positive signed
-  Sext,      // Sign extend from a given bit (b) position
+  Not        = 16,  // bitwise not
+  Get_mask   = 18,  // To positive signed
+  Set_mask   = 20,  // To positive signed
+  Sext       = 22,  // Sign extend from a given bit (b) position
 
-  LT,  // Less Than   , also GE = !LT
-  GT,  // Greater Than, also LE = !GT
-  EQ,  // Equal       , also NE = !EQ
+  LT         = 24,  // Less Than   , also GE = !LT
+  GT         = 26,  // Greater Than, also LE = !GT
+  EQ         = 28,  // Equal       , also NE = !EQ
 
-  SHL,  // Shift Left Logical
-  SRA,  // Shift Right Arithmetic
+  SHL        = 30,  // Shift Left Logical
+  SRA        = 32,  // Shift Right Arithmetic
 
-  LUT,  // LUT
-  Mux,  // Multiplexor with many options
+  LUT        = 34,  // LUT
+  Mux        = 36,  // Multiplexor with many options
 
-  IO,  // Graph Input or Output
+  IO         = 39,  // Graph Input or Output  -- loop_last
 
-  //------------------BEGIN PIPELINED (break LOOPS)
-  Memory,
+  //------------------BEGIN PIPELINED (break LOOPS) -- all loop_last (odd)
+  Memory     = 41,
 
-  Flop,   // Asynchronous & sync reset flop
-  Latch,  // Latch
-  Fflop,  // Fluid flop
+  Flop       = 43,  // Asynchronous & sync reset flop
+  Latch      = 45,  // Latch
+  Fflop      = 47,  // Fluid flop
 
-  Sub,  // Sub module instance
+  Sub        = 49,  // Sub module instance
   //------------------END PIPELINED (break LOOPS)
-  Nconst,  // Constant
+  Nconst     = 50,  // Constant
 
   // High Level Lgraph constructs
 
-  TupAdd,
-  TupGet,
+  TupAdd     = 52,
+  TupGet     = 54,
 
-  AttrSet,
-  AttrGet,
+  AttrSet    = 56,
+  AttrGet    = 58,
 
-  CompileErr,  // Indicate a compile error during a pass
+  CompileErr = 60,  // Indicate a compile error during a pass
 
-  Last_invalid
+  Last_invalid = 61
 };
+
+// Encoding invariant: bit 0 == is_loop_last.
+static_assert((static_cast<uint8_t>(Ntype_op::IO)     & 1) == 1);
+static_assert((static_cast<uint8_t>(Ntype_op::Memory) & 1) == 1);
+static_assert((static_cast<uint8_t>(Ntype_op::Flop)   & 1) == 1);
+static_assert((static_cast<uint8_t>(Ntype_op::Latch)  & 1) == 1);
+static_assert((static_cast<uint8_t>(Ntype_op::Fflop)  & 1) == 1);
+static_assert((static_cast<uint8_t>(Ntype_op::Sub)    & 1) == 1);
+static_assert((static_cast<uint8_t>(Ntype_op::Sum)    & 1) == 0);
+static_assert((static_cast<uint8_t>(Ntype_op::Nconst) & 1) == 0);
+static_assert((static_cast<uint8_t>(Ntype_op::Invalid)& 1) == 0);
 
 class Ntype {
 protected:
-  inline static constexpr std::string_view cell_name_sv[] = {
-      "invalid", "sum",   "mult", "div",   "and",     "or",      "xor",      "ror",      "not",         "get_mask",    "set_mask",
-      "sext",    "lt",    "gt",   "eq",    "shl",     "sra",     "lut",      "mux",      "io",          "memory",      "flop",
-      "latch",   "fflop", "sub",  "const", "tup_add", "tup_get", "attr_set", "attr_get", "compile_err", "last_invalid"};
+  // Sparse: indexed by Ntype_op underlying value. Unused slots ("invalid")
+  // never round-trip through cell_name_map (see the init in cell.cpp).
+  inline static constexpr auto cell_name_sv = []() {
+    std::array<std::string_view, static_cast<size_t>(Ntype_op::Last_invalid) + 1> a{};
+    for (auto& s : a) {
+      s = "invalid";
+    }
+    a[static_cast<size_t>(Ntype_op::Sum)]        = "sum";
+    a[static_cast<size_t>(Ntype_op::Mult)]       = "mult";
+    a[static_cast<size_t>(Ntype_op::Div)]        = "div";
+    a[static_cast<size_t>(Ntype_op::And)]        = "and";
+    a[static_cast<size_t>(Ntype_op::Or)]         = "or";
+    a[static_cast<size_t>(Ntype_op::Xor)]        = "xor";
+    a[static_cast<size_t>(Ntype_op::Ror)]        = "ror";
+    a[static_cast<size_t>(Ntype_op::Not)]        = "not";
+    a[static_cast<size_t>(Ntype_op::Get_mask)]   = "get_mask";
+    a[static_cast<size_t>(Ntype_op::Set_mask)]   = "set_mask";
+    a[static_cast<size_t>(Ntype_op::Sext)]       = "sext";
+    a[static_cast<size_t>(Ntype_op::LT)]         = "lt";
+    a[static_cast<size_t>(Ntype_op::GT)]         = "gt";
+    a[static_cast<size_t>(Ntype_op::EQ)]         = "eq";
+    a[static_cast<size_t>(Ntype_op::SHL)]        = "shl";
+    a[static_cast<size_t>(Ntype_op::SRA)]        = "sra";
+    a[static_cast<size_t>(Ntype_op::LUT)]        = "lut";
+    a[static_cast<size_t>(Ntype_op::Mux)]        = "mux";
+    a[static_cast<size_t>(Ntype_op::IO)]         = "io";
+    a[static_cast<size_t>(Ntype_op::Memory)]     = "memory";
+    a[static_cast<size_t>(Ntype_op::Flop)]       = "flop";
+    a[static_cast<size_t>(Ntype_op::Latch)]      = "latch";
+    a[static_cast<size_t>(Ntype_op::Fflop)]      = "fflop";
+    a[static_cast<size_t>(Ntype_op::Sub)]        = "sub";
+    a[static_cast<size_t>(Ntype_op::Nconst)]     = "const";
+    a[static_cast<size_t>(Ntype_op::TupAdd)]     = "tup_add";
+    a[static_cast<size_t>(Ntype_op::TupGet)]     = "tup_get";
+    a[static_cast<size_t>(Ntype_op::AttrSet)]    = "attr_set";
+    a[static_cast<size_t>(Ntype_op::AttrGet)]    = "attr_get";
+    a[static_cast<size_t>(Ntype_op::CompileErr)] = "compile_err";
+    return a;
+  }();
 
   inline static absl::flat_hash_map<std::string, Ntype_op> cell_name_map;
 
@@ -90,10 +146,10 @@ protected:
 
 public:
   static inline constexpr bool is_loop_first(Ntype_op op) { return op == Ntype_op::Nconst || op == Ntype_op::IO; }
-  static inline constexpr bool is_loop_last(Ntype_op op) {
-    return (static_cast<int>(op) >= static_cast<int>(Ntype_op::Memory) && static_cast<int>(op) <= static_cast<int>(Ntype_op::Sub))
-           || op == Ntype_op::IO;
-  }
+  // Bit 0 of the underlying value encodes loop_last (see the Ntype_op
+  // declaration). This matches the bit HHDS already reserves for its own
+  // is_loop_last flag, so a LiveHD-stored type round-trips both meanings.
+  static inline constexpr bool is_loop_last(Ntype_op op) { return (static_cast<uint8_t>(op) & 1) != 0; }
 
   static inline constexpr bool is_multi_sink(Ntype_op op) {
     return op != Ntype_op::Mult && op != Ntype_op::And && op != Ntype_op::Or && op != Ntype_op::Xor && op != Ntype_op::Ror

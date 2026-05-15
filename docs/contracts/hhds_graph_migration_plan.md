@@ -74,23 +74,50 @@ the lgraph wrapper continues to compile while passes migrate.
 | `inou/prp` | 3666 | 0 in BUILD | DONE (was never coupled — produces LNAST only). Dead `do_work`/`to_lgraph` decls removed. |
 | `inou/cgen` | 1103 | ~163 method calls | **DONE** (2026-05-15). Drops `//lgraph`, consumes `var.graphs`. yosys_compile.sh: 82/85 (same as legacy lgraph baseline; 3 pre-existing failures `blackboxing2`/`cpp_api`/`chunk_FetchTargetQueue`). |
 | `inou/yosys` | 5251 | ~322 | PENDING. The producer side; biggest single migration. Pipeline already works end-to-end because `Eprp_var::add(Lgraph*)` lockstep-populates `var.graphs` from `Lgraph::get_hhds_graph_shared()` (the existing shadow), so the migrated cgen consumes the right Graph today. Migration here is about dropping `//lgraph` from `inou/yosys/BUILD` and rewriting the Yosys-RTLIL → Lgraph builder to write directly into `hhds::Graph` / `hhds::GraphLibrary`. **Coupling note** below. |
-| `pass/bitwidth` | 2241 | ~55 | PENDING. |
+| `pass/bitwidth` | 1776 | 0 in BUILD | **DONE 2026-05-15**. Rewritten over hhds::Graph; uses graph_util helpers. bazel test //...: 215/11/1 preserved. yosys_compile.sh: 82/85 unchanged. Hierarchical mode (`hier=true`) is not exercised by any caller; the `set_graph_boundary` path is dropped (not a regression). |
 | `pass/cprop` | 2845 | ~116 | PENDING. |
 
 After the five priority passes are migrated, the gating tests
 (`inou/yosys:all` + `inou/prp:all`) run on the new infrastructure;
 non-priority passes follow.
 
-### Recommended next-session ordering
+### Recommended next-session ordering (revised 2026-05-15)
 
-Given the coupling note below, the practical migration order is:
+Earlier the plan had `main/meta_api.cpp` first. Revised: migrate the
+**mutators first** (lower risk than the atomic persistence flip), then
+do `meta_api` once nothing else depends on Lgraph's on-disk format.
 
-1. **`main/meta_api.cpp` — `Meta_api::save` / `Meta_api::match` / `Meta_api::create` / `Meta_api::dump`.** Smaller than yosys (~200 LOC across these). Migrate to read/write `var.graphs` via `hhds::GraphLibrary::save` / `load`. Persistence format flips to HHDS's `library.txt` + per-graph dirs (HIF goes away alongside `//hif`).
-2. **`pass/cprop`.** ~2845 LOC, currently mutates Lgraph (which mirrors to HHDS shadow). Migrate to operate on `hhds::Graph` directly. Largest of the priority passes after yosys, but uniformly read-only/mutator on the graph body — the cgen lessons cover all the read-side patterns.
-3. **`inou/yosys`.** Once save/match/cprop work with `var.graphs` independently of `var.lgs`, yosys can flip to produce `hhds::Graph` directly via `hhds::GraphLibrary` (skipping the Lgraph wrapper). Use the call-site translation table in `docs/contracts/yosys_migration_skeleton.md`.
-4. **`pass/bitwidth`.** 2241 LOC, similar shape to cprop.
-5. **BUILD cleanup.** Drop `//lgraph` from all migrated passes' BUILD; drop `@hif//hif` from `MODULE.bazel` once `pass/common/eprp_var.cpp` no longer pulls in `lgraph.hpp` for `Lgraph::get_hhds_graph_shared`.
+1. **`pass/bitwidth`.** **DONE 2026-05-15**. 1776 LOC rewritten. Validated
+   the mutation helpers (`graph/node_util.hpp`). bazel tests 215/11/1
+   preserved. yosys_compile.sh 82/85 unchanged.
+2. **`pass/cprop`.** 2680 LOC. On the yosys_compile.sh critical path.
+   Audit Lgtuple consumers first (likely cprop-only) and migrate
+   Lgtuple alongside. Same translation table applies.
+3. **`main/meta_api.cpp`** + HHDS persistence flip. ~200 LOC of meta_api
+   plus the disk format change. `lgraph.save` → `hhds::GraphLibrary::save`;
+   `lgraph.match` → `hhds::GraphLibrary::load`. Breaks compat with
+   existing `lgdb/` directories; document the one-shot.
+4. **`inou/yosys`.** 5251 LOC producer. At this point nothing else
+   depends on Lgraph on-disk; yosys.tolg writes `hhds::Graph` directly
+   into `var.graphs`. Use `docs/contracts/yosys_migration_skeleton.md`.
+5. **BUILD cleanup.** Drop `//lgraph` from all migrated passes' BUILD;
+   drop `@hif//hif` from `MODULE.bazel` once `pass/common/eprp_var.cpp`
+   no longer pulls in `lgraph.hpp` for `Lgraph::get_hhds_graph_shared`.
 6. **Wholesale `lgraph/` deletion.**
+
+**Prep work landed 2026-05-15** (commits `graph: add mutation helpers ...`
+and `docs: bitwidth+cprop migration skeleton`):
+- `graph/node_util.hpp` now includes the mutation helpers each migrated
+  pass needs: `set_bits`, `clear_bits`, `set_sign`, `set_unsign`,
+  `set_color`, `clear_color`, `set_pin_name`, `find_sink_pin`,
+  `is_sink_connected`, `get_driver_of_sink_name`, `inp_drivers_of`,
+  `set_type_op`, `set_type_const_serialized`, `create_typed_node`,
+  `create_const_node_serialized`. All inline, no Dlop dep (callers
+  serialize constants before calling).
+- `docs/contracts/bitwidth_cprop_migration_skeleton.md` — per-call-site
+  translation table for bitwidth + cprop, mirroring the existing
+  yosys skeleton. Includes HHDS API gaps to patch upstream
+  (Pin_class::del, forward_class add-during-iter, find_io_by_gid).
 
 ### Coupling note — yosys migration is not standalone (discovered 2026-05-15)
 

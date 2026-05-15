@@ -35,6 +35,12 @@ struct Livehd_attr_init {
 Ntype::_init Ntype::_static_initializer;
 
 Ntype::_init::_init() {
+  // Sparse iteration: Ntype_op values are no longer contiguous (bit 0 of
+  // the underlying value is reserved for is_loop_last, see cell.hpp). Op
+  // indices between valid ops behave as no-ops here — sink_*[op] slots
+  // stay Port_invalid / "invalid" and get_sink_name_slow returns
+  // "invalid" for them, so the inner loop's `pin_name == "invalid"`
+  // check skips them. Starting at 1 still skips Ntype_op::Invalid (== 0).
   for (uint8_t op = 1; op < static_cast<uint8_t>(Ntype_op::Last_invalid); ++op) {
     for (auto& e : sink_name2pid) {
       e[op] = Port_invalid;
@@ -111,10 +117,15 @@ Ntype::_init::_init() {
     assert(pid == Port_invalid || pid == 1);
   }
 
-  int pos = 0;
-  for (auto e : cell_name_sv) {
-    cell_name_map[e] = static_cast<Ntype_op>(pos);
-    ++pos;
+  // cell_name_sv is sparse; "invalid" placeholders at gap indices must not
+  // overwrite cell_name_map["invalid"] (which legitimately maps to
+  // Ntype_op::Invalid == 0).
+  for (size_t pos = 0; pos < cell_name_sv.size(); ++pos) {
+    auto e = cell_name_sv[pos];
+    if (pos != 0 && e == "invalid") {
+      continue;
+    }
+    cell_name_map[std::string{e}] = static_cast<Ntype_op>(pos);
   }
 }
 
@@ -285,7 +296,9 @@ constexpr std::string_view Ntype::get_sink_name_slow(Ntype_op op, int pid) {
         default: return "invalid";
       }
       break;
-    default: assert(false); return "invalid";
+    // Unused op indices (gaps in the sparse encoding) fall through here
+    // silently. The init loop in _init treats "invalid" as "skip this slot".
+    default: return "invalid";
   }
 
   return "invalid";

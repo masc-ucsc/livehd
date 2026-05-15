@@ -2,11 +2,7 @@
 #include "pass_bitwidth.hpp"
 
 #include "bitwidth.hpp"
-#include "lgraph.hpp"
 #include "pass.hpp"
-
-// Useful for debug
-// #define PRESERVE_ATTR_NODE
 
 static Pass_plugin sample("pass_bitwidth", Pass_bitwidth::setup);
 
@@ -47,8 +43,10 @@ void Pass_bitwidth::trans(Eprp_var& var) {
 
   Bitwidth bw(p.hier, p.max_iterations);
 
-  std::vector<const Lgraph*> lgs;
-  for (const auto& lg : var.lgs) {
-    bw.do_trans(lg);
+  for (const auto& g : var.graphs) {
+    if (!g) {
+      continue;
+    }
+    bw.do_trans(g);
   }
 }
