@@ -1546,14 +1546,13 @@ Node Lgraph::create_node(const Ntype_op op) {
   I(op != Ntype_op::IO);   // Special case, must use add input/output API
   I(op != Ntype_op::Sub);  // Do not build by steps. call create_node_sub
 
-  // HHDS Phase G3 (shadow write): mirror node creation + cell type. HHDS
-  // reserves bit 0 of `Type` for `is_loop_last()`; shift Ntype_op left by
-  // one to keep that bit zero so we don't accidentally flag every node as
-  // loop-last.
+  // HHDS Phase G3 (shadow write): mirror node creation, then mirror the
+  // cell type via the shared helper (which applies the bit-0 shift to
+  // preserve HHDS's `is_loop_last` semantics).
   if (hhds_graph_) {
-    auto hnode = hhds_graph_->create_node();
-    hnode.set_type(static_cast<hhds::Type>(static_cast<uint16_t>(op) << 1));
+    auto hnode            = hhds_graph_->create_node();
     idx_to_hhds_nid_[nid] = hnode.get_class_index();
+    mirror_set_type_hhds(nid, op);
   }
 
   return {this, Hierarchy::hierarchical_root(), nid};
@@ -1582,9 +1581,9 @@ Node Lgraph::create_node_const(const Const& value) {
     // itself is not yet mirrored to a HHDS attribute (that lands when
     // readers depend on it via livehd::attrs::const_value).
     if (hhds_graph_) {
-      auto hnode = hhds_graph_->create_node();
-      hnode.set_type(static_cast<hhds::Type>(static_cast<uint16_t>(Ntype_op::Nconst) << 1));
+      auto hnode            = hhds_graph_->create_node();
       idx_to_hhds_nid_[nid] = hnode.get_class_index();
+      mirror_set_type_hhds(nid, Ntype_op::Nconst);
     }
   }
 
@@ -1599,14 +1598,7 @@ Node Lgraph::create_node_lut(const Const& lut) {
 
   // HHDS Phase G3 (shadow): mirror the cell-type. The LUT value itself
   // (lut) is not yet on a HHDS attribute.
-  if (hhds_graph_) {
-    if (auto it = idx_to_hhds_nid_.find(nid); it != idx_to_hhds_nid_.end()) {
-      auto hnode = hhds_graph_->get_node(it->second);
-      if (hnode.is_valid()) {
-        hnode.set_type(static_cast<hhds::Type>(static_cast<uint16_t>(Ntype_op::LUT) << 1));
-      }
-    }
-  }
+  mirror_set_type_hhds(nid, Ntype_op::LUT);
 
   return Node{this, Hierarchy::hierarchical_root(), nid};
 }
@@ -1620,14 +1612,7 @@ Node Lgraph::create_node_sub(Lg_type_id sub_id) {
   // HHDS Phase G3 (shadow): mirror the cell-type. The sub-graph reference
   // itself (sub_id) is not yet wired to a HHDS set_subnode — that lands when
   // Hierarchy uses the HHDS Forest model.
-  if (hhds_graph_) {
-    if (auto it = idx_to_hhds_nid_.find(nid); it != idx_to_hhds_nid_.end()) {
-      auto hnode = hhds_graph_->get_node(it->second);
-      if (hnode.is_valid()) {
-        hnode.set_type(static_cast<hhds::Type>(static_cast<uint16_t>(Ntype_op::Sub) << 1));
-      }
-    }
-  }
+  mirror_set_type_hhds(nid, Ntype_op::Sub);
 
   return Node{this, Hierarchy::hierarchical_root(), nid};
 }
@@ -1636,6 +1621,11 @@ Node Lgraph::create_node_sub(std::string_view sub_name) {
   auto  nid = create_node().get_nid();
   auto* sub = library->ref_or_create_sub(sub_name);
   set_type_sub(nid, sub->get_lgid());
+
+  // HHDS Phase G3 (shadow): mirror the cell-type for the name-keyed overload
+  // too. Without this, downstream set_type readers see the default Invalid
+  // type for sub-instances built through this path (lnast2lgraph emitter).
+  mirror_set_type_hhds(nid, Ntype_op::Sub);
 
   return Node{this, Hierarchy::hierarchical_root(), nid};
 }

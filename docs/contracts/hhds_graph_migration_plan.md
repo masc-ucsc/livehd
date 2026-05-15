@@ -255,6 +255,23 @@ This is the biggest single change. Strategy:
    Decoding goes through a future Lgraph helper that masks/shifts
    back. (LANDED — workaround. A cleaner long-term option is a
    HHDS `set_user_type` API that hides the encoding from callers.)
+
+16. [x] **set_type mirror plug (LANDED).** Centralized the cell-type
+    mirror in `Lgraph::mirror_set_type_hhds(nid, op)` and threaded it
+    through every external mutator: `Node::set_type`,
+    `Node::set_type(op, bits)`, `Node::set_type_sub`,
+    `Node::set_type_const`, `Node::set_type_lut`, plus the
+    name-keyed `Lgraph::create_node_sub(string_view)` (which
+    previously skipped the mirror entirely). The four
+    `create_node*` paths also funnel through the helper now,
+    deduping the inline mirror blocks. **Why this matters:** the
+    yosys-to-lgraph builder and cprop both call `node.set_type(op)`
+    after creation; without this fix, `get_type_op` could not be
+    migrated to read the HHDS shadow because the shadow's type
+    would diverge from `node_internal[]` whenever a node was
+    retyped post-creation (e.g. cprop morphing `Sum` → `AttrSet`).
+    Now safe to migrate `get_type_op` and `is_type_const` readers
+    in a follow-up.
 3. [ ] Mirror `Lgraph::add_edge(dpin, spin)` to
    `Graph::add_edge(driver_pin, sink_pin)`.
 4. [ ] Per-pin Bits/Const/Lut tables become HHDS pin attributes via

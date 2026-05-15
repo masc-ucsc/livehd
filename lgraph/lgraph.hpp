@@ -212,6 +212,26 @@ public:
   }
   [[nodiscard]] hhds::Graph* ref_hhds_graph() const { return hhds_graph_.get(); }
 
+  // HHDS Phase G3 (shadow write): mirror a cell-type assignment to the
+  // paired hhds::Node_class. Called from create_node*() and from
+  // Node::set_type* so external mutations (cprop, yosys) keep the shadow in
+  // sync. Shifts Ntype_op left by 1 to preserve HHDS's bit-0 `is_loop_last`
+  // semantics. No-op when there is no shadow or no mapping for `nid`.
+  void mirror_set_type_hhds(Index_id nid, Ntype_op op) {
+    if (!hhds_graph_) {
+      return;
+    }
+    auto it = idx_to_hhds_nid_.find(nid);
+    if (it == idx_to_hhds_nid_.end()) {
+      return;
+    }
+    auto hnode = hhds_graph_->get_node(it->second);
+    if (!hnode.is_valid()) {
+      return;
+    }
+    hnode.set_type(static_cast<hhds::Type>(static_cast<uint16_t>(op) << 1));
+  }
+
   void add_edge(const Node_pin& dpin, const Node_pin& spin);
   void add_edge(const Node_pin& dpin, const Node_pin& spin, Bits_t bits) {
     add_edge(dpin, spin);

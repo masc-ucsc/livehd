@@ -369,10 +369,12 @@ hhds::Node_class Node::get_hhds_node() const { return current_g->get_hhds_node(n
 void Node::set_type(const Ntype_op op) {
   I(op != Ntype_op::Sub && op != Ntype_op::Nconst && op != Ntype_op::LUT);  // do not set type directly, call set_type_const ....
   current_g->set_type(nid, op);
+  current_g->mirror_set_type_hhds(nid, op);
 }
 
 void Node::set_type(const Ntype_op op, Bits_t bits) {
   current_g->set_type(nid, op);
+  current_g->mirror_set_type_hhds(nid, op);
 
   I(!Ntype::is_multi_driver(op));  // bits only possible when the cell has a single output
   setup_driver_pin().set_bits(bits);
@@ -445,8 +447,14 @@ Node Node::get_up_node() const {
   return up_node;
 }
 
-void Node::set_type_sub(Lg_type_id subid) { current_g->set_type_sub(nid, subid); }
-void Node::set_type_const(const Const& val) { current_g->set_type_const(nid, val); }
+void Node::set_type_sub(Lg_type_id subid) {
+  current_g->set_type_sub(nid, subid);
+  current_g->mirror_set_type_hhds(nid, Ntype_op::Sub);
+}
+void Node::set_type_const(const Const& val) {
+  current_g->set_type_const(nid, val);
+  current_g->mirror_set_type_hhds(nid, Ntype_op::Nconst);
+}
 
 Lg_type_id Node::get_type_sub() const { return current_g->get_type_sub(nid); }
 
@@ -464,7 +472,10 @@ bool Node::is_type_sub_present() const {
   return sub_lg != nullptr;
 }
 
-void Node::set_type_lut(const Const& lutid) { current_g->set_type_lut(nid, lutid); }
+void Node::set_type_lut(const Const& lutid) {
+  current_g->set_type_lut(nid, lutid);
+  current_g->mirror_set_type_hhds(nid, Ntype_op::LUT);
+}
 
 Const Node::get_type_lut() const { return current_g->get_type_lut(nid); }
 
