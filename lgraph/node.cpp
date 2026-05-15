@@ -492,10 +492,6 @@ Sub_node* Node::ref_type_sub_node() const { return current_g->ref_type_sub_node(
 
 Const Node::get_type_const() const { return current_g->get_type_const(nid); }
 
-void Node::nuke() {
-  I(false);  // TODO:
-}
-
 XEdge_iterator Node::inp_edges() const { return current_g->inp_edges(*this); }
 
 XEdge_iterator Node::out_edges() const { return current_g->out_edges(*this); }

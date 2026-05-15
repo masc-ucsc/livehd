@@ -416,7 +416,6 @@ public:
   }
   [[nodiscard]] bool operator!=(const Node_pin& other) const { return !(*this == other); }
 
-  void nuke();  // Delete all the edges, and attributes of this node_pin
 
   // BEGIN ATTRIBUTE ACCESSORS
   [[nodiscard]] std::string      debug_name() const;

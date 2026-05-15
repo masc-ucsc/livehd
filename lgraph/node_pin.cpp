@@ -426,10 +426,6 @@ void Node_pin::del_name() {
   ref->erase(it);
 }
 
-void Node_pin::nuke() {
-  I(false);  // TODO:
-}
-
 std::string Node_pin::debug_name() const {
 #ifndef NDEBUG
   static uint16_t conta = 8192;

@@ -339,8 +339,6 @@ public:
   void connect_sink(const Node_pin& dpin) const { setup_sink_pin().connect_driver(dpin); }
   void connect_driver(const Node_pin& spin) const { setup_driver_pin().connect_sink(spin); }
 
-  void nuke();  // Delete all the pins, edges, and attributes of this node
-
   bool is_sink_connected(std::string_view v) const;
   bool is_driver_connected(std::string_view v) const;
 
