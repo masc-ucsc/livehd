@@ -50,7 +50,6 @@ cc_library(
         "//inou/attr:inou_attr",
         "//inou/locator:traverse_lg",
         "//inou/graphviz:inou_graphviz",
-        "//inou/json:inou_json",
         "//inou/lefdef:inou_lefdef",
         "//inou/liberty:inou_liberty",
         "//inou/liveparse:inou_liveparse",
