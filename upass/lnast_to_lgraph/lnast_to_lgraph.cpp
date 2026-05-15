@@ -430,12 +430,21 @@ void Lnast_to_lgraph::apply_bw(Node_pin& drv, std::string_view lhs_name) {
     return;  // sanity guard
   }
 
-  drv.set_bits(static_cast<uint32_t>(bits));
+  // `add_graph_output` returns the SINK view of the output port; set_bits /
+  // set_sign require a driver pin. Swap to the driver side first when we're
+  // applying bw to a graph-output sink. (Other call sites pass real drivers
+  // — Sum's "Y", graph_input return, etc. — and is_graph_output() is false
+  // there, so this is a no-op.)
+  Node_pin target = drv;
+  if (target.is_sink() && target.is_graph_output()) {
+    target = target.change_to_driver_from_graph_out_sink();
+  }
+  target.set_bits(static_cast<uint32_t>(bits));
   bool is_signed = e.min < 0;
   if (is_signed) {
-    drv.set_sign();
+    target.set_sign();
   } else {
-    drv.set_unsign();
+    target.set_unsign();
   }
 }
 
