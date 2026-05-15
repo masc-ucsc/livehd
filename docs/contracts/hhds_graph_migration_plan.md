@@ -73,7 +73,7 @@ the lgraph wrapper continues to compile while passes migrate.
 | --- | --- | --- | --- |
 | `inou/prp` | 3666 | 0 in BUILD | DONE (was never coupled — produces LNAST only). Dead `do_work`/`to_lgraph` decls removed. |
 | `inou/cgen` | 1103 | ~163 method calls | **DONE** (2026-05-15). Drops `//lgraph`, consumes `var.graphs`. yosys_compile.sh: 82/85 (same as legacy lgraph baseline; 3 pre-existing failures `blackboxing2`/`cpp_api`/`chunk_FetchTargetQueue`). |
-| `inou/yosys` | 5251 | ~322 | PENDING. The producer side; biggest single migration. Pipeline already works end-to-end because `Eprp_var::add(Lgraph*)` lockstep-populates `var.graphs` from `Lgraph::get_hhds_graph_shared()` (the existing shadow), so the migrated cgen consumes the right Graph today. Migration here is about dropping `//lgraph` from `inou/yosys/BUILD` and rewriting the Yosys-RTLIL → Lgraph builder to write directly into `hhds::Graph` / `hhds::GraphLibrary`. **Coupling note** below. |
+| `inou/yosys` | 5251 | ~363 | PENDING. The producer side; biggest single migration. Pipeline already works end-to-end because `Eprp_var::add(Lgraph*)` lockstep-populates `var.graphs` from `Lgraph::get_hhds_graph_shared()` (the existing shadow), so the migrated cgen consumes the right Graph today. Migration here is about dropping `//lgraph` from `inou/yosys/BUILD` and rewriting the Yosys-RTLIL → Lgraph builder to write directly into `hhds::Graph` / `hhds::GraphLibrary`. **Coupling note** below. Per-file touchpoint counts: lgyosys_tolg.cpp 339, lgyosys_dump.cpp 20, lgyosys_fromlg.cpp 2, inou_yosys_api.cpp 2, yosys_driver.cpp 0. **Helpers needed for the migration landed 2026-05-15** (setup_sink_by_name, create_typed_node(g, op, bits) overload, create_node_on, create_const_pin_on, set_pin_offset, set_source, set_loc1 — all in graph/node_util.hpp). |
 | `pass/bitwidth` | 1776 | 0 in BUILD | **DONE 2026-05-15**. Rewritten over hhds::Graph; uses graph_util helpers. bazel test //...: 215/11/1 preserved. yosys_compile.sh: 82/85 unchanged. Hierarchical mode (`hier=true`) is not exercised by any caller; the `set_graph_boundary` path is dropped (not a regression). |
 | `pass/cprop` | 2680 → 842 | 0 in BUILD | **DONE 2026-05-15**. tuple_pass stripped entirely (yosys + lnast_to_lg never produce tuples). Rewrote scalar_pass / collapse_forward / replace_*_inputs_const / scalar_mux / scalar_sext / scalar_get_mask / bwd_del_node over hhds::Graph. Drops `//lgraph` dep. bazel test //...: 215/11/1. yosys_compile.sh: 82/85. |
 
@@ -99,6 +99,66 @@ do `meta_api` once nothing else depends on Lgraph's on-disk format.
 4. **`inou/yosys`.** 5251 LOC producer. At this point nothing else
    depends on Lgraph on-disk; yosys.tolg writes `hhds::Graph` directly
    into `var.graphs`. Use `docs/contracts/yosys_migration_skeleton.md`.
+
+   **Recommended sub-ordering** (lgyosys_tolg.cpp must come first since
+   inou_yosys_api.cpp and lgyosys_dump.cpp consume its outputs):
+
+   1. `lgyosys_tolg.cpp` (2817 LOC). The bulk. Strategy:
+      - Retype static state: `wire2pin`, `cell2node`, `partially_assigned`,
+        `picks` from `Node_pin`/`Node` to `hhds::Pin_class`/`hhds::Node_class`.
+        `Pick_ID` hash function uses `driver.get_class_index()` instead of
+        `get_compact()`.
+      - Mechanical substitutions (most-frequent first):
+        `node.setup_sink_pin(name)` → `setup_sink_by_name(node, name)`;
+        `node.setup_driver_pin()` → `node.create_driver_pin(0)`;
+        `pin.set_bits(w)` → `set_bits(pin, w)`;
+        `pin.set_offset(off)` → `set_pin_offset(pin, off)`;
+        `pin.set_name(s)` → `set_pin_name(pin, s)`;
+        `node.create(op)` → `create_node_on(node, op)`;
+        `g->create_node(op, bits)` → `create_typed_node(*g, op, bits)`;
+        `g->create_node_const(v)` (returns Node) → use a Node-returning
+        helper around `create_const_node_serialized` (returns Pin) —
+        new helper needed.
+        `node.create_const(v)` → `create_const_pin_on(node, v.serialize())`;
+        `pin.get_node()` → `pin.get_master_node()`;
+        `pin.get_bits()` → `bits_of(pin)`;
+        `pin.get_compact()` (map key) → `pin.get_class_index()`;
+        `pin.is_hierarchical()` → false in Class context;
+        `pin.get_non_hierarchical()` → identity in Class context;
+        `node.is_type(op)` → `type_op_of(node) == op`;
+        `node.is_type_const()` → check `type_op_of == Nconst` or use is_const_pin;
+        `node.get_type_const()` → hydrate_const(node) (local helper, see cprop.cpp);
+        `node.has_inputs()` → `node.has_inp_edges()`;
+        `node.set_source(s)` → `set_source(node, s)`;
+        `node.set_loc1(line)` → `set_loc1(node, line)`;
+        `node.set_color(c)` → `set_color(node, c)`;
+        `node.set_name(s)` → `node.attr(hhds::attrs::name).set(std::string{s})`;
+        `node.has_name()` → `has_name(node)`;
+        `node.get_name()` → `node_name_of(node)`;
+        `node.debug_name()` → `debug_name(node)`;
+        `g->has_graph_input(s)` → `g->get_io()->has_input(s)`;
+        `g->has_graph_output(s)` → `g->get_io()->has_output(s)`;
+        `g->get_graph_input(s)` → `g->get_input_pin(s)`;
+        `g->get_graph_output(s)` → `g->get_output_pin(s)`;
+        `g->add_graph_input(s, pid, w)` → `g->get_io()->add_input(s, pid)` + `set_bits(w)`;
+        `g->add_graph_output(s, pid, w)` → `g->get_io()->add_output(s, pid)` + `set_bits(w)`;
+        `g->add_edge(d, s)` → `g->add_edge(d, s)` (same API);
+        `node.get_class_lgraph()` → `node.get_graph()`;
+        `Node_pin::find_driver_pin(lg, name)` → no direct HHDS equivalent;
+        walk pins or maintain side-map.
+      - For Sub nodes: `ref_self_sub_node` and library lookups need
+        the meta_api migration in place; either co-migrate or stub.
+      - For `node.setup_driver_pin_raw(pid)` → `node.create_driver_pin(pid)`.
+   2. `lgyosys_dump.cpp` + `lgyosys_fromlg.cpp` (1180 + 107 LOC). The
+      output side; not on yosys_compile.sh critical path. Can land
+      separately if needed.
+   3. `inou_yosys_api.cpp` (432 LOC, 2 Lgraph touchpoints). Two changes:
+      - `gl->each_sub` enumeration: switch to `hhds_lib.each_graph()`
+        equivalent (need to confirm HHDS GraphLibrary API or add an
+        enumerator helper).
+      - `for (auto& lg : var.lgs)` in `fromlg` → `for (auto& g : var.graphs)`.
+      Drop `//lgraph` dep from inou/yosys/BUILD only AFTER all four files
+      compile without `lgraph.hpp`.
 5. **BUILD cleanup.** Drop `//lgraph` from all migrated passes' BUILD;
    drop `@hif//hif` from `MODULE.bazel` once `pass/common/eprp_var.cpp`
    no longer pulls in `lgraph.hpp` for `Lgraph::get_hhds_graph_shared`.
