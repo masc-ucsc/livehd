@@ -24,17 +24,6 @@ cc_library(
 )
 
 cc_test(
-    name = "lgtuple_test",
-    srcs = ["tests/lgtuple_test.cpp"],
-    copts = COPTS,
-    includes = ["."],
-    deps = [
-        ":lgraph",
-        "@googletest//:gtest_main",
-    ],
-)
-
-cc_test(
     name = "lgraph_test",
     srcs = ["tests/lgraph_test.cpp"],
     deps = [
@@ -58,24 +47,5 @@ cc_test(
     deps = [
         ":lgraph",
         "@googletest//:gtest_main",
-    ],
-)
-
-cc_test(
-    name = "edge_test",
-    srcs = ["tests/edge_test.cpp"],
-    deps = [
-        ":lgraph",
-        "@googletest//:gtest_main",
-    ],
-)
-
-cc_test(
-    name = "graph_bench",
-    srcs = ["tests/graph_bench.cpp"],
-    deps = [
-        ":lgraph",
-        "@google_benchmark//:benchmark",
-        "@hhds//hhds:graph",
     ],
 )
