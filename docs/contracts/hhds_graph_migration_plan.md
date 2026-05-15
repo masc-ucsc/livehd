@@ -539,10 +539,26 @@ document. To pick up:
    11 are the known `inou/prp` constprop-verifier regressions
    (`hhds_migration.md §8.4`). No other test should fail.
 
-2. **Pick the next un-migrated priority pass.** Start with `inou/cgen`
-   (smallest, 1226 LOC, ~50 touchpoints, pure consumer that emits
-   Verilog). Its BUILD is in `inou/cgen/BUILD`; the main file is
-   `inou/cgen/cgen_verilog.cpp`.
+2. **Check `yosys_compile.sh` for the cgen/yosys validation.**
+   - With `pass.cprop` in the pipeline (current script): 82/85 pass.
+     The 3 failures are pre-existing (`blackboxing2`, `cpp_api`:
+     "no verilog generated" because the test exercises pure-blackbox
+     submodules and the cgen path doesn't emit a top file when only
+     blackboxes are present; `chunk_FetchTargetQueue`: asserts in
+     `lgyosys_tolg.cpp:623` on a malformed Or cell). None are caused
+     by the in-flight migration.
+   - With `pass.cprop` removed (the eventual HHDS-only pipeline,
+     since cprop is the last priority pass to migrate): 70/85 pass.
+     The extra 12 failures are all from cprop's missing constant
+     folding — the verilog is structurally valid but not logically
+     equivalent. These come back as cprop migrates.
+
+3. **Pick the next un-migrated priority pass.** Start with `inou/cgen`
+   (smallest, 1103 LOC, ~163 Lgraph/Node/Pin call sites, pure
+   consumer that emits Verilog). Its BUILD is in `inou/cgen/BUILD`;
+   the main file is `inou/cgen/cgen_verilog.cpp`. Helpers in
+   `graph/node_util.hpp` (`livehd::graph_util::type_op_of`,
+   `bits_of`, `is_unsign`, `has_color`, …) cover the common idioms.
 
 3. **Migration template (per pass):**
    - Replace `Lgraph* lg` parameters with `hhds::Graph*` (or
