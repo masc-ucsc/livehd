@@ -268,6 +268,33 @@ benefits:
 Deferred until after the lconst-to-Dlop migration stabilizes so that the
 churn lands in one focused commit.
 
+## HHDS PinEntry/NodeEntry: native bits + sign storage
+
+LiveHD currently stores per-pin `bits` (Bits_t / 24-bit) and `sign` (1 bit)
+as HHDS attributes (`livehd::attrs::bits` / `livehd::attrs::sign`) — see
+`hhds_graph_migration_plan.md §G3`. Attributes are flat_storage hashmaps;
+fine for correctness, but every read does a hash lookup.
+
+Native fields on `PinEntry` / `NodeEntry` would be one indexed load. The
+proposed layout (keeps both classes at 32 bytes by dropping `ledge1` and
+widening `Nid_bits` from 42 to 48):
+
+- **PinEntry** — `master_nid:48 + port_id:22 + next_pin_id:48 + ledge0:48
+  + use_overflow:1 + sign:1 + bits:24 + sedges_/overflow_idx:64`
+- **NodeEntry** — `type:16 + next_pin_id:48 + ledge0:48 + use_overflow:1
+  + alive:1 + sign:1 + bits:24 + pad:5 + sedges_extra:48 + sedges_:64`
+
+Touches every overflow/edge code path in `hhds/graph.cpp` (single-ledge
+fast path, EdgeRange `kInlineMax` constants, NodeEntry edge accounting).
+Worth its own focused multi-commit campaign in `../hhds`. Once landed,
+LiveHD drops `livehd::attrs::bits` / `livehd::attrs::sign` and the
+`mirror_set_pin_bits_hhds` / `mirror_set_pin_sign_hhds` helpers, reading
+`bits()` / `is_unsign()` directly off the HHDS pin/node handle.
+
+The `GraphIO::DeclaredIoPin` graph-level bits + sign extension lands
+sooner (it's the immediate Sub_node-deletion unblocker, smaller scope,
+no PinEntry/NodeEntry surgery required).
+
 ## simlib fixed-width int types
 
 `simlib/uint.hpp` and `simlib/sint.hpp` (extracted from the `firrtl-sig`
