@@ -279,8 +279,35 @@ This is the biggest single change. Strategy:
     for shadow misses (graph-IO pseudo-nodes, non-master Index_ids).
     All live callers go through `current_g->get_type_op(nid)` where
     `current_g` is `Lgraph*`, so name resolution picks up the override
-    via `Node`, `Node_pin`, etc. (all friends of Lgraph). Confirmed
-    219/11/1 baseline preserved.
+    via `Node`, `Node_pin`, etc. (all friends of Lgraph). `Lgraph::is_sub`
+    routed through the same override.
+
+18. [x] **Cell-type payload mirrors (LANDED).** Three payload mirrors
+    added for the Sub/Nconst/LUT cell triple, each a node-level HHDS
+    attribute defined in `lgraph_attrs.hpp`:
+
+    | LiveHD payload | HHDS attribute (per-node) |
+    | --- | --- |
+    | `Lg_type_id` (subid_map) | `livehd::attrs::subid` (uint32) |
+    | `Const` (const_map, serialized) | `livehd::attrs::const_value` (std::string) |
+    | `Const` (lut_map, serialized) | `livehd::attrs::lut` (std::string) |
+
+    All tags pre-registered at static-init in `lgraph.cpp` (same
+    pattern as `lnast/lnast.cpp`, avoiding the registry race). Three
+    new `Lgraph::mirror_set_{subid,const,lut}_hhds(nid, …)` helpers
+    threaded through `Node::set_type_sub`, `Node::set_type_const`,
+    `Node::set_type_lut`, plus all `create_node_sub` /
+    `create_node_const` / `create_node_lut` paths. Reader overrides
+    `Lgraph::get_type_sub`, `Lgraph::get_type_const`,
+    `Lgraph::get_type_lut` consult the shadow attribute first and
+    fall back to the legacy `subid_map` / `const_map` / `lut_map` via
+    the base impl on shadow miss.
+
+    **Why this matters:** removes the last cell-type readers that
+    were forced to go through Lgraph_attributes side maps. Once all
+    consumers funnel through the Lgraph* overrides (most already do
+    via `Node`/`Node_pin`), the legacy maps become dead weight and
+    can be retired in Phase G6.
 3. [ ] Mirror `Lgraph::add_edge(dpin, spin)` to
    `Graph::add_edge(driver_pin, sink_pin)`.
 4. [ ] Per-pin Bits/Const/Lut tables become HHDS pin attributes via
