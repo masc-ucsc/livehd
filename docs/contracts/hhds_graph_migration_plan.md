@@ -309,6 +309,21 @@ This is the biggest single change. Strategy:
     via `Node`/`Node_pin`), the legacy maps become dead weight and
     can be retired in Phase G6.
 
+20. [x] **Per-pin sign mirror + is_unsign reader (LANDED).** Pin sign
+    is a small boolean (unsigned == 1, signed == 0). New helper
+    `mirror_set_pin_sign_hhds(nid_master, pid, unsigned_flag)` calls
+    `attr().set(1)` on set_unsign / `attr().del()` on set_sign so the
+    absence-of-attribute case matches the signed default. Threaded
+    through `Node_pin::set_unsign`/`set_sign`. `Node_pin::is_unsign`
+    consults shadow first, falls back to the legacy
+    `node_pin_unsigned_map` on shadow miss.
+
+21. [x] **Node color mirror + get_color/has_color (LANDED).** Color
+    is a small int taint used by pass diagnostics. New
+    `mirror_set_color_hhds`/`mirror_del_color_hhds` helpers attach
+    `livehd::attrs::color` to the HHDS node. `Node::get_color` and
+    `Node::has_color` consult shadow first.
+
 19. [x] **Per-pin bits mirror + Node_pin::get_bits migration (LANDED).**
     Bits are the most pervasive per-pin attribute. The
     `livehd::attrs::bits` tag (defined in `lgraph_attrs.hpp` from
