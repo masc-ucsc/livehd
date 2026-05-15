@@ -955,6 +955,44 @@ Lg_type_id Lgraph::get_type_sub(Index_id nid) const {
   return Lgraph_attributes::get_type_sub(nid);
 }
 
+Const Lgraph::get_type_const(Index_id nid) const {
+  // HHDS Phase G3 read: query the per-node `const_value` attribute on the
+  // shadow when present. Falls back to the legacy const_map via the base.
+  if (hhds_graph_ && nid != Hardcoded_input_nid && nid != Hardcoded_output_nid) {
+    if (auto it = idx_to_hhds_nid_.find(nid); it != idx_to_hhds_nid_.end()) {
+      auto hnode = hhds_graph_->get_node(it->second);
+      if (hnode.is_valid()) {
+        auto ref = hnode.attr(livehd::attrs::const_value);
+        if (ref.has()) {
+          Const r;
+          r = Dlop::unserialize(ref.get());
+          return r;
+        }
+      }
+    }
+  }
+  return Lgraph_attributes::get_type_const(nid);
+}
+
+Const Lgraph::get_type_lut(Index_id nid) const {
+  // HHDS Phase G3 read: query the per-node `lut` attribute on the shadow
+  // when present. Falls back to the legacy lut_map via the base.
+  if (hhds_graph_ && nid != Hardcoded_input_nid && nid != Hardcoded_output_nid) {
+    if (auto it = idx_to_hhds_nid_.find(nid); it != idx_to_hhds_nid_.end()) {
+      auto hnode = hhds_graph_->get_node(it->second);
+      if (hnode.is_valid()) {
+        auto ref = hnode.attr(livehd::attrs::lut);
+        if (ref.has()) {
+          Const r;
+          r = Dlop::unserialize(ref.get());
+          return r;
+        }
+      }
+    }
+  }
+  return Lgraph_attributes::get_type_lut(nid);
+}
+
 bool Lgraph::has_outputs(const Node& node) const {
   // HHDS Phase G3 read: for non-IO nodes tracked in the shadow, query
   // Node_class::has_out_edges() (cheap boolean — no edge vector
@@ -1649,6 +1687,7 @@ Node Lgraph::create_node_const(const Const& value) {
       auto hnode            = hhds_graph_->create_node();
       idx_to_hhds_nid_[nid] = hnode.get_class_index();
       mirror_set_type_hhds(nid, Ntype_op::Nconst);
+      mirror_set_const_hhds(nid, value.serialize());
     }
   }
 
@@ -1661,9 +1700,10 @@ Node Lgraph::create_node_lut(const Const& lut) {
   auto nid = create_node().get_nid();
   set_type_lut(nid, lut);
 
-  // HHDS Phase G3 (shadow): mirror the cell-type. The LUT value itself
-  // (lut) is not yet on a HHDS attribute.
+  // HHDS Phase G3 (shadow): mirror the cell-type plus the serialized LUT
+  // table as a node-level HHDS attribute.
   mirror_set_type_hhds(nid, Ntype_op::LUT);
+  mirror_set_lut_hhds(nid, lut.serialize());
 
   return Node{this, Hierarchy::hierarchical_root(), nid};
 }

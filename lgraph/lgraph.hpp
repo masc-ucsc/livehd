@@ -107,6 +107,8 @@ protected:
   [[nodiscard]] Ntype_op   get_type_op(Index_id nid) const;
   [[nodiscard]] bool       is_type_const(Index_id nid) const;
   [[nodiscard]] Lg_type_id get_type_sub(Index_id nid) const;
+  [[nodiscard]] Const      get_type_const(Index_id nid) const;
+  [[nodiscard]] Const      get_type_lut(Index_id nid) const;
 
   int get_num_out_edges(const Node& node) const;
   int get_num_inp_edges(const Node& node) const;
@@ -261,6 +263,44 @@ public:
       return;
     }
     hnode.attr(livehd::attrs::subid).set(sub_id.value);
+  }
+
+  // HHDS Phase G3 (shadow write): mirror the serialized Const value used by
+  // an Nconst cell. Threaded into Node::set_type_const and
+  // Lgraph::create_node_const paths. Stores Const::serialize() result on the
+  // shadow node so get_type_const can hydrate without consulting the legacy
+  // const_map.
+  void mirror_set_const_hhds(Index_id nid, std::string serialized) {
+    if (!hhds_graph_) {
+      return;
+    }
+    auto it = idx_to_hhds_nid_.find(nid);
+    if (it == idx_to_hhds_nid_.end()) {
+      return;
+    }
+    auto hnode = hhds_graph_->get_node(it->second);
+    if (!hnode.is_valid()) {
+      return;
+    }
+    hnode.attr(livehd::attrs::const_value).set(std::move(serialized));
+  }
+
+  // HHDS Phase G3 (shadow write): mirror the serialized LUT-table Const
+  // used by a LUT cell. Threaded into Node::set_type_lut and
+  // Lgraph::create_node_lut.
+  void mirror_set_lut_hhds(Index_id nid, std::string serialized) {
+    if (!hhds_graph_) {
+      return;
+    }
+    auto it = idx_to_hhds_nid_.find(nid);
+    if (it == idx_to_hhds_nid_.end()) {
+      return;
+    }
+    auto hnode = hhds_graph_->get_node(it->second);
+    if (!hnode.is_valid()) {
+      return;
+    }
+    hnode.attr(livehd::attrs::lut).set(std::move(serialized));
   }
 
   void add_edge(const Node_pin& dpin, const Node_pin& spin);

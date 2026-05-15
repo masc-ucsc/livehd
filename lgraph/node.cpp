@@ -455,6 +455,7 @@ void Node::set_type_sub(Lg_type_id subid) {
 void Node::set_type_const(const Const& val) {
   current_g->set_type_const(nid, val);
   current_g->mirror_set_type_hhds(nid, Ntype_op::Nconst);
+  current_g->mirror_set_const_hhds(nid, val.serialize());
 }
 
 Lg_type_id Node::get_type_sub() const { return current_g->get_type_sub(nid); }
@@ -476,6 +477,7 @@ bool Node::is_type_sub_present() const {
 void Node::set_type_lut(const Const& lutid) {
   current_g->set_type_lut(nid, lutid);
   current_g->mirror_set_type_hhds(nid, Ntype_op::LUT);
+  current_g->mirror_set_lut_hhds(nid, lutid.serialize());
 }
 
 Const Node::get_type_lut() const { return current_g->get_type_lut(nid); }
