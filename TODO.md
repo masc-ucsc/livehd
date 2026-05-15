@@ -19,18 +19,14 @@ parallel; all letters in group N must complete before group N+1 starts.
   `docs/contracts/lnast_spec.md §10`.
 - **1d** Source-derived SSA / tmp names (`foo_l42_a`, drop `___N`) —
   `lnast_spec.md §13`.
-- **1e** Bundle refactor (split `attrs_/named_/unnamed_`, drop `:N:`,
-  canonical ordering) — `bundle_sorted.md`.
 - **1f** Source-map indirection (LOC propagation: canonical map + per-cell
   index, alias multi-loc, partition-root fallback) — see "Source location
   (LOC) propagation strategy" below.
 - **1g** Import `docs/docs/pyrope` `cassert` examples into
   `inou/prp/tests/docs/` (`extract.rb` helper); iterate doc/Pyrope until
   they pass.
-- **1h** Golden-output baseline for `inou/prp` vs `inou/pyrope` vs
-  `inou/slang` on a shared corpus — safety net for everything below.
+- **1h** Golden-output baseline in `inou/prp/tests/equiv/` adding more feature tests.
 - **1i** Enum support (fix the failing tests).
-- **1j** `ref xx` as function argument (semantics + lowering).
 
 ### Group 2 — depends on Group 1
 
@@ -98,6 +94,11 @@ parallel; all letters in group N must complete before group N+1 starts.
 - **4h** Compile-error test infrastructure: harness that pins expected
   errors / warnings to expected source spans (golden-error files),
   consumed by inou/prp, upass, and lgraph-pass diagnostics from 3f.
+- **4i** Tuple-free LGraph cleanup: once `lnast_to_lgraph` (3i) and the
+  LNAST bitwidth upass (2b) are in, LGraph should never see a tuple.
+  Remove `lgraph/lgtuple.{hpp,cpp}` (and its test), drop tuple-related
+  opcodes from `lgraph/cell.hpp` / `Ntype_op`, and simplify `pass/cprop`
+  to its non-tuple core (or retire it if unused from `main/`).
 
 ### Group 5 — polish / final
 

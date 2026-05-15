@@ -408,17 +408,14 @@ void uPass_constprop::process_log_not() {
 //
 // Pyrope tuple equality is order-insensitive on names: `(x=1,d=4) ==
 // (d=4,x=1)` is true, since both bundles carry the same {name → value}
-// mapping. Bundle::match keys by `:N:name` (so `:0:x` rejects `:1:x`); we
-// layer a name-based fallback on top, so a top-level named-positional
-// entry in src matches any same-name entry in other regardless of source
-// position. Unnamed positional entries still match by position via
-// Bundle::match's `:N:name ↔ N` special-case (so `(a=3,b=4,5) == (3,4,5)`
-// still holds), and nested paths (`:1:b.:0:c`) keep the existing
-// position-based behaviour.
-// Canonical key shape detection after the bundle_sorted refactor:
+// mapping. After the bundle_sorted refactor, Bundle storage is already
+// in canonical order (attributes → named alphabetical → unnamed by
+// index), so name matching is direct and position matching falls out of
+// the unnamed-by-index ordering. Nested paths (`b.c`) walk by exact key.
+// Canonical key shape detection:
 //   - "__attr"          → attribute (covered by Bundle::is_attribute)
 //   - "0", "1", …       → unnamed (first char is a digit)
-//   - anything else     → named (bare name, no `:N:` prefix)
+//   - anything else     → named (bare name)
 // is_named_top forward-declared near the top of the file so
 // process_assign can call it during shape-preserving merge.
 
@@ -509,7 +506,7 @@ static std::optional<Const> compare_bundles_eq(const std::shared_ptr<Bundle cons
 //
 // `a does b` succeeds when a's tuple shape covers every non-attribute
 // first-level entry in b:
-//   - For every NAMED field in b (`:N:name`), a must have any first-level
+//   - For every NAMED field in b (bare name), a must have any first-level
 //     key with the same `name` — position is irrelevant. So
 //     `(a=1,b=0) does (b=2,a=0)` is true even though `a` and `b` swap
 //     positions on the two sides.
@@ -520,8 +517,8 @@ static std::optional<Const> compare_bundles_eq(const std::shared_ptr<Bundle cons
 //     field).
 //
 // Values are not compared here — this is the structural half of `does`.
-// Bundle keys may be hierarchical (e.g. `:1:foo.:0:bar`); we look at the
-// first level only, which is enough for the flat-tuple cases the comptime
+// Bundle keys may be hierarchical (e.g. `foo.bar`); we look at the first
+// level only, which is enough for the flat-tuple cases the comptime
 // tests exercise. Nested-tuple structural matching can be added later.
 static bool structural_does(const std::shared_ptr<Bundle const>& a,
                             const std::shared_ptr<Bundle const>& b) {
@@ -665,9 +662,9 @@ void uPass_constprop::process_eq_ne_impl() {
         // Single-entry bundle: flatten via Bundle::get_trivial() (no-arg)
         // which returns the lone non-attr entry's value regardless of key
         // depth. Symbol_table::has_trivial keys by field "0" which fails to
-        // match nested named-positional keys like `:0:first.:0:second`,
-        // so for a tuple-of-tuple-of-… single-entry bundle we'd otherwise
-        // miss the scalar (`cassert x == 3` where `x = (first=(second=3))`).
+        // match nested named keys like `first.second`, so for a tuple-of-
+        // tuple-of-… single-entry bundle we'd otherwise miss the scalar
+        // (`cassert x == 3` where `x = (first=(second=3))`).
         auto v = b->get_trivial();
         if (!v.is_invalid()) {
           o.scalar = v;
@@ -1050,8 +1047,8 @@ void uPass_constprop::process_tuple_concat() {
 // wrapper bundle keyed at position 0, which is *indistinguishable* from a
 // real single-element tuple `(3)` in the bundle layer. We can't tell them
 // apart without type info, so we stay conservative: a bundle counts as
-// tuple-shaped only when it carries a named (`:N:name`) first-level key,
-// or when it has two-or-more distinct first-level positional entries.
+// tuple-shaped only when it carries a named first-level key, or when it
+// has two-or-more distinct first-level positional entries.
 //
 // Consequence: scalar-vs-scalar `does` (e.g. `i3 does b1`) stays
 // unresolved instead of folding to a wrong answer based on type. The cost
@@ -1059,24 +1056,10 @@ void uPass_constprop::process_tuple_concat() {
 // unresolved; that's a small subset of the test surface and the right
 // trade for correctness without type tracking.
 static bool is_tuple_shaped(const std::shared_ptr<Bundle const>& b) {
-  std::set<int> seen_pos;
-  for (const auto& e : b->get_map()) {
-    if (Bundle::is_attribute(e.first)) {
-      continue;
-    }
-    auto first = Bundle::get_first_level(e.first);
-    if (is_named_top(first)) {
-      return true;  // any named field → tuple-shaped
-    }
-    const auto pos = Bundle::get_first_level_pos(first);
-    if (pos >= 0) {
-      seen_pos.insert(pos);
-      if (seen_pos.size() >= 2) {
-        return true;  // ≥2 distinct positional fields → tuple-shaped
-      }
-    }
-  }
-  return false;
+  // O(1) via the bundle_sorted §3 side-indices: any named first-level slot
+  // marks the bundle as tuple-shaped; otherwise we need at least two
+  // distinct unnamed first-level positions.
+  return b->has_named_top() || b->unnamed_top_count() >= 2;
 }
 
 // Returns true if the bundle has any first-level non-attribute key with a
@@ -1086,19 +1069,8 @@ static bool is_tuple_shaped(const std::shared_ptr<Bundle const>& b) {
 // positional) doesn't itself prove tuple-ness, but it's enough structure
 // to compare against a known tuple.
 static bool has_first_level_shape(const std::shared_ptr<Bundle const>& b) {
-  for (const auto& e : b->get_map()) {
-    if (Bundle::is_attribute(e.first)) {
-      continue;
-    }
-    auto first = Bundle::get_first_level(e.first);
-    if (first.empty()) {
-      continue;
-    }
-    if (is_named_top(first) || Bundle::get_first_level_pos(first) >= 0) {
-      return true;
-    }
-  }
-  return false;
+  // O(1) via §3 side-indices: any non-attribute first-level entry counts.
+  return b->has_named_top() || b->has_unnamed_top();
 }
 
 // Fold `dst = does(l, r)`. Cursor is currently on the const("does") fname
@@ -1141,7 +1113,7 @@ void uPass_constprop::fold_does(const std::string& dst) {
 
 // Per-first-level summary used by fold_in / fold_has: groups a bundle's flat
 // (single-level) entries by their first-level key, marking sub-bundle entries
-// (multi-level keys like `:0:a.0`) so the comparison can distinguish a scalar
+// (multi-level keys like `a.0`) so the comparison can distinguish a scalar
 // `a=1` from a nested `a=(1,2)`.
 struct Bundle_flat_entry {
   std::string_view name;          // empty for unnamed positional
@@ -1171,7 +1143,7 @@ static std::vector<Bundle_flat_entry> collect_first_level(const std::shared_ptr<
     if (it == by_first.end()) {
       Bundle_flat_entry n;
       if (is_named_top(first)) {
-        n.name = first;  // bare name, no `:N:` prefix in canonical storage
+        n.name = first;  // bare name in canonical storage
       } else {
         n.pos = Bundle::get_first_level_pos(first);
       }
@@ -1319,9 +1291,9 @@ void uPass_constprop::fold_in(const std::string& dst) {
 //
 // Semantics for `bundle has key`:
 //   - String key `'name'`: bundle must have a first-level named entry
-//     matching `name` (i.e., a key shaped `:N:name`).
-//   - Integer key `N`: bundle must have any first-level entry at position N
-//     (named or unnamed; both are recorded with explicit positions).
+//     matching `name`.
+//   - Integer key `N`: bundle must have any first-level unnamed entry at
+//     position N.
 // Returns Dlop::create_bool(true) for present, Dlop::create_bool(false) for absent.
 void uPass_constprop::fold_has(const std::string& dst) {
   if (!move_to_sibling()) {
@@ -1352,7 +1324,7 @@ void uPass_constprop::fold_has(const std::string& dst) {
   bool found = false;
   if (key_val.is_string()) {
     // String literals round-trip through `'foo'` — strip the quotes to get
-    // the bare name used in `:N:name` keys.
+    // the bare name used as the canonical key.
     const std::string s = strip_pyrope_quotes(key_val.to_pyrope());
     for (const auto& e : entries) {
       if (e.name == s) {
@@ -1510,6 +1482,9 @@ std::optional<std::vector<uPass_constprop::Call_actual>> uPass_constprop::collec
         move_to_parent();
         continue;
       }
+      if (is_type(Lnast_ntype::Lnast_ntype_ref)) {
+        actual.var_name = std::string(current_text());
+      }
       auto value = resolve_current_scalar();
       move_to_parent();
       if (!value.has_value() || value->is_invalid()) {
@@ -1520,11 +1495,15 @@ std::optional<std::vector<uPass_constprop::Call_actual>> uPass_constprop::collec
       continue;
     }
 
+    std::string var_name;
+    if (is_type(Lnast_ntype::Lnast_ntype_ref)) {
+      var_name = std::string(current_text());
+    }
     auto value = resolve_current_scalar();
     if (!value.has_value() || value->is_invalid()) {
       return std::nullopt;
     }
-    actuals.emplace_back(Call_actual{.is_named = false, .name = {}, .value = *value});
+    actuals.emplace_back(Call_actual{.is_named = false, .name = {}, .value = *value, .var_name = std::move(var_name)});
   }
 
   return actuals;
@@ -1547,8 +1526,13 @@ bool uPass_constprop::try_eval_comb_call(std::string_view dst, std::string_view 
   }
 
   std::vector<std::string>                params;
+  std::vector<bool>                       params_is_ref;
   std::vector<std::string>                outputs;
   std::unordered_map<std::string, Const> local_values;
+  // After binding, remembers which caller-side variable each ref param was
+  // bound to so the post-fold write-back can find its destination. Keyed by
+  // the formal param name (the local that the body mutates).
+  std::unordered_map<std::string, std::string> ref_param_writeback;
 
   auto resolve_local = [&](const Lnast_nid& nid) -> std::optional<Const> {
     const auto type = fn->get_type(nid);
@@ -1593,9 +1577,11 @@ bool uPass_constprop::try_eval_comb_call(std::string_view dst, std::string_view 
 
   if (use_io_meta) {
     params.reserve(io_meta.inputs.size());
+    params_is_ref.reserve(io_meta.inputs.size());
     outputs.reserve(io_meta.outputs.size());
     for (const auto& e : io_meta.inputs) {
       params.emplace_back(e.name);
+      params_is_ref.push_back(e.is_ref);
     }
     for (const auto& e : io_meta.outputs) {
       outputs.emplace_back(e.name);
@@ -1625,7 +1611,17 @@ bool uPass_constprop::try_eval_comb_call(std::string_view dst, std::string_view 
               continue;
             }
             if (tuple_name == "__input_tuple_ref") {
+              // The RHS const carries the "ref" marker (prp2lnast +
+              // func_extract pass-through). Any other shape is a
+              // non-ref param.
+              bool is_ref = false;
+              auto rhs    = fn->get_sibling_next(key);
+              if (!rhs.is_invalid() && Lnast_ntype::is_const(fn->get_type(rhs))
+                  && fn->get_name(rhs) == "ref") {
+                is_ref = true;
+              }
               params.emplace_back(fn->get_name(key));
+              params_is_ref.push_back(is_ref);
             } else if (tuple_name == "__output_tuple_ref") {
               outputs.emplace_back(fn->get_name(key));
             }
@@ -1640,17 +1636,35 @@ bool uPass_constprop::try_eval_comb_call(std::string_view dst, std::string_view 
   // Phase 1b — bind actuals to params now that the signature is known.
   // Skipped only for signature-less callees (no io node and no io_meta).
   if (has_signature) {
+    auto param_index_of = [&](std::string_view pname) -> std::size_t {
+      for (std::size_t i = 0; i < params.size(); ++i) {
+        if (params[i] == pname) {
+          return i;
+        }
+      }
+      return params.size();
+    };
     std::size_t positional_idx = 0;
     for (const auto& actual : actuals) {
       if (actual.is_named) {
         local_values[actual.name] = actual.value;
+        auto idx = param_index_of(actual.name);
+        if (idx < params_is_ref.size() && params_is_ref[idx] && !actual.var_name.empty()) {
+          ref_param_writeback[actual.name] = actual.var_name;
+        }
         continue;
       }
       while (positional_idx < params.size() && local_values.contains(params[positional_idx])) {
         ++positional_idx;
       }
       if (positional_idx < params.size()) {
-        local_values[params[positional_idx++]] = actual.value;
+        const auto& pname = params[positional_idx];
+        local_values[pname] = actual.value;
+        if (positional_idx < params_is_ref.size() && params_is_ref[positional_idx]
+            && !actual.var_name.empty()) {
+          ref_param_writeback[pname] = actual.var_name;
+        }
+        ++positional_idx;
       }
     }
   }
@@ -1893,6 +1907,18 @@ bool uPass_constprop::try_eval_comb_call(std::string_view dst, std::string_view 
     if (!p) {
       return false;
     }
+  }
+
+  // Write back `ref` params into the caller's scope. A `ref a` callee param
+  // behaves like a C++ reference: mutations inside the body must be visible
+  // at the call site. The write-back happens only when the body folded
+  // successfully so callers never see a half-applied update.
+  for (const auto& [param_name, caller_var] : ref_param_writeback) {
+    auto it = local_values.find(param_name);
+    if (it == local_values.end() || it->second.is_invalid()) {
+      return false;
+    }
+    store_trivial(caller_var, it->second);
   }
 
   if (outputs.empty()) {
@@ -2336,10 +2362,10 @@ void uPass_constprop::process_tuple_set() {
     path.push_back(std::move(elem));
   }
 
-  // Decide between the legacy flat-key path (numeric or dotted positional)
-  // and the named-positional path (single non-numeric name → `:N:name` so
-  // downstream Bundle::concat treats this entry as a named-positional slot,
-  // matching what tuple_add emits for `(name=val, …)`).
+  // Decide between the flat-key path (numeric or dotted positional) and
+  // the named path (single non-numeric name → bare-name key so downstream
+  // Bundle::concat treats this entry as a named slot, matching what
+  // tuple_add emits for `(name=val, …)`).
   auto is_decimal = [](const std::string& s) {
     if (s.empty()) return false;
     for (char c : s) {
@@ -2485,7 +2511,7 @@ upass::Emit_decision uPass_constprop::classify_statement() {
   // Bundle-shape guard. is_known_const returns true as soon as the bundle's
   // position-0 entry is a concrete Const, but that's also true for:
   //   - multi-entry tuples: `(1,2)` — two non-attribute entries
-  //   - single-entry named tuples: `(c=2)` — one entry but keyed `:0:c`,
+  //   - single-entry named tuples: `(c=2)` — one entry but keyed `c`,
   //     not `0`; inlining as a scalar loses the name
   // fold_ref returns only the position-0 trivial, so dropping the producer
   // and substituting via fold_ref would silently truncate `(1,2)` → `1`

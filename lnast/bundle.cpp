@@ -55,6 +55,30 @@ static bool canonical_compare(const std::pair<std::string, Bundle::Entry>& lhs,
   return lhs.first < rhs.first;
 }
 
+void Bundle::rebuild_indices() const {
+  // bundle_sorted §3: partition key_map into the three categorical
+  // containers. attrs_ and named_ hold full keys (alphabetical); unnamed_
+  // is an int-keyed map of per-position inner maps so the top-level
+  // unnamed-position count is `unnamed_.size()` in O(1) and `tup.N` lookup
+  // is O(log K + log E) where K = distinct unnamed positions and E =
+  // entries under that position.
+  attrs_.clear();
+  named_.clear();
+  unnamed_.clear();
+  for (const auto& [k, v] : key_map) {
+    auto seg = first_segment_view(k);
+    auto cat = segment_category(seg);
+    if (cat == 0) {
+      attrs_.emplace(k, v);
+    } else if (cat == 1) {
+      named_.emplace(k, v);
+    } else {
+      int idx = str_tools::to_i(seg);
+      unnamed_[idx].emplace(k, v);
+    }
+  }
+}
+
 std::string Bundle::normalize_key(std::string_view key) {
   // Post-PR3 (bundle_sorted plan §8): legacy `:N:name` / `:N:` producers
   // have all been migrated to canonical form (bare name / bare decimal
@@ -78,328 +102,41 @@ std::string Bundle::normalize_key(std::string_view key) {
   return std::string(key);
 }
 
-std::tuple<bool, size_t, size_t> Bundle::match_int_advance(std::string_view a, std::string_view b, size_t a_pos, size_t b_pos) {
-  I(a[a_pos] == ':');
-  I(b[b_pos] != ':');
-
-  I(a_pos < a.size());  // pending :
-  if (a[a_pos] == ':') {
-    if (!std::isdigit(b[b_pos])) {
-      ++a_pos;  // skip :
-      while (a[a_pos] != ':') {
-        I(a_pos < a.size());  // must have matching :
-        ++a_pos;
-      }
-    }
-    ++a_pos;  // Skip :
-  }
-
-  while (a.size() > a_pos && b.size() > b_pos) {
-    if (a[a_pos] != b[b_pos]) {
-      return std::make_tuple(false, a_pos, b_pos);
-    }
-
-    ++b_pos;
-    ++a_pos;
-    GI(b.size() < b_pos, b[b_pos] != ':');  // should not call this method for this
-
-    if (b_pos == b.size() || b[b_pos] == '.') {
-      bool m = (a_pos == a.size() || a[a_pos] == '.' || a[a_pos] == ':');
-      if (a[a_pos] == ':') {
-        while (a_pos < a.size() && a[a_pos] != '.') {
-          ++a_pos;  // advance to the next section
-        }
-      }
-      return std::make_tuple(m, a_pos, b_pos);
-    }
-    if (a_pos == a.size() || a[a_pos] == ':' || a[a_pos] == '.') {
-      bool m = (b_pos == b.size() || b[b_pos] == '.');
-      if (a[a_pos] == ':') {
-        while (a_pos < a.size() && a[a_pos] != '.') {
-          ++a_pos;  // advance to the next section
-        }
-      }
-      return std::make_tuple(m, a_pos, b_pos);
-    }
-  }
-
-  while (a_pos < a.size() && a[a_pos] != '.') {
-    ++a_pos;  // advance to the next section
-  }
-
-  return std::make_tuple(true, a_pos, b_pos);
-}
-
-std::tuple<bool, bool, size_t> Bundle::match_int(std::string_view a, std::string_view b) {
-  auto a_last_section = 0u;
-  auto b_last_section = 0u;
-  auto a_pos          = 0u;
-  auto b_pos          = 0u;
-
-  while (a_pos < a.size() && b_pos < b.size()) {
-    if (a[a_pos] == b[b_pos]) {
-      ++a_pos;
-      ++b_pos;
-      if (a_pos >= a.size() || b_pos >= b.size() || a[a_pos] == '.' || b[b_pos] == '.') {
-        a_last_section = a_pos + 1;
-        b_last_section = b_pos + 1;
-      }
-      continue;
-    } else if (a_pos != a_last_section || b_pos != b_last_section) {
-      return std::make_tuple(false, false, b_last_section);
-    }
-    if (a[a_last_section] == ':' && b[b_last_section] != ':') {
-      I(b[b_last_section] != ':');
-
-      if (std::isdigit(b[b_last_section])) {
-        bool m;
-        std::tie(m, a_pos, b_pos) = match_int_advance(a, b, a_last_section, b_last_section);
-        if (!m) {
-          return std::make_tuple(false, false, b_last_section);
-        }
-        // If either side has fully consumed in this segment, restart the
-        // outer loop so the post-loop a_match/b_match sees b at `.` (a
-        // partial match on the lookup key). Falling through to the
-        // unconditional `++` below would push past the `.` and break the
-        // `b[b_pos]=='.'` terminator check. Multi-segment chains stay on
-        // the original fall-through path so subsequent `.` separators get
-        // consumed and last_section advances.
-        if (a_pos >= a.size() || b_pos >= b.size()) {
-          continue;
-        }
-      } else {
-        I(a[a_pos] == ':');
-        ++a_pos;  // skip first
-        while (a[a_pos] != ':') {
-          I(a_pos < a.size());  // pending :
-          ++a_pos;
-        }
-        ++a_pos;  // :
-        continue;
-      }
-
-    } else if (b[b_last_section] == ':') {
-      I(a[a_last_section] != ':');
-      I(b[b_last_section] == ':');
-
-      if (std::isdigit(a[a_last_section])) {
-        bool m;
-        std::tie(m, b_pos, a_pos) = match_int_advance(b, a, b_last_section, a_last_section);  // swap order
-        if (!m) {
-          return std::make_tuple(false, false, b_last_section);
-        }
-        if (a_pos >= a.size() || b_pos >= b.size()) {
-          continue;  // see comment in the symmetric branch above
-        }
-      } else {
-        I(b[b_pos] == ':');
-        ++b_pos;  // skip first
-        while (b[b_pos] != ':') {
-          I(b_pos < b.size());  // pending :
-          ++b_pos;
-        }
-        ++b_pos;  // :
-        continue;
-      }
-    } else {
-      I(a[a_pos] != b[b_pos]);
-      return std::make_tuple(false, false, b_last_section);
-    }
-    I(a_pos == a.size() || a[a_pos] == '.');
-    I(b_pos == b.size() || b[b_pos] == '.');
-    ++a_pos;
-    ++b_pos;
-    a_last_section = a_pos;
-    b_last_section = b_pos;
-  }
-
-  bool a_match = (a_pos >= a.size()) && (b_pos >= b.size() || b[b_pos] == '.');
-  bool b_match = (b_pos >= b.size()) && (a_pos >= a.size() || a[a_pos] == '.');
-
-  if (b.size() > b_pos && b[b_pos] == '.') {
-    ++b_pos;
-  }
-  if (a.size() > a_pos && a[a_pos] == '.') {
-    ++a_pos;
-  }
-
-  return std::make_tuple(a_match, b_match, b_pos);
-}
-
-std::string Bundle::append_field(std::string_view a, std::string_view b) {
-  if (a.empty()) {
-    return std::string(b);
-  }
-
-  return absl::StrCat(a, ".", b);
-}
-
-std::tuple<std::string, std::string> Bundle::learn_fix_int(std::string_view a, std::string_view b) {
-  auto a_last_section = 0u;
-  auto b_last_section = 0u;
-  auto a_pos          = 0u;
-  auto b_pos          = 0u;
-
-  std::string new_a;
-  std::string new_b;
-
-  bool a_last_match;
-  bool b_last_match;
-
-  while (true) {  // FSM main loop
-
-    // STEP: Advance up to mismatch
-    while (a_pos < a.size() && b_pos < b.size() && a[a_pos] == b[b_pos]) {
-      if (likely(a[a_pos] != '.')) {
-        ++a_pos;
-        ++b_pos;
-        continue;
-      }
-      I(b[b_pos] == '.');
-      if (a[a_last_section] == ':') {
-        new_a = append_field(new_a, a.substr(a_last_section, a_pos - a_last_section));
-        new_b = append_field(new_b, a.substr(a_last_section, a_pos - a_last_section));
-      } else {
-        new_a = append_field(new_a, b.substr(b_last_section, b_pos - b_last_section));
-        new_b = append_field(new_b, b.substr(b_last_section, b_pos - b_last_section));
-      }
-      ++a_pos;
-      ++b_pos;
-      a_last_section = a_pos;
-      b_last_section = b_pos;
-    }
-
-    // STEP: Did we reach the end of string?
-    if (a_pos >= a.size() || b_pos >= b.size()) {
-      a_last_match = (b[b_last_section] == ':') && (b_pos >= b.size() || b[b_pos] == '.');
-      b_last_match = (a[a_last_section] == ':') && (a_pos >= a.size() || a[a_pos] == '.');
-      break;
-    }
-
-    // STEP: Fully populated entries should match already
-    if (a_last_section != a_pos || b_last_section != b_pos) {
-      I(a[a_pos] != b[b_pos]);
-      a_last_match = false;
-      b_last_match = false;
-      break;
-    }
-
-    if (a[a_last_section] == ':' && b[b_last_section] != ':') {
-      I(b[b_last_section] != ':');
-
-      if (std::isdigit(b[b_last_section])) {
-        bool m;
-        std::tie(m, a_pos, b_pos) = match_int_advance(a, b, a_pos, b_pos);
-        if (a_pos == a.size() || b_pos == b.size() || !m) {
-          a_last_match = false;
-          b_last_match = m;
-          break;
-        }
-        new_a = append_field(new_a, a.substr(a_last_section, a_last_section - a_pos));
-        ++a_pos;
-        ++b_pos;
-        a_last_section = a_pos;
-        b_last_section = b_pos;
-        new_b          = append_field(new_b, a.substr(a_last_section, a_last_section - a_pos));
-      } else {
-        I(a[a_pos] == ':');
-        ++a_pos;  // skip first
-        while (a[a_pos] != ':') {
-          I(a_pos < a.size());  // pending :
-          ++a_pos;
-        }
-        ++a_pos;  // :
-      }
-      continue;
-    } else if (b[b_last_section] == ':') {
-      I(a[a_last_section] != ':');
-      I(b[b_last_section] == ':');
-
-      if (std::isdigit(a[a_last_section])) {
-        bool m;
-        std::tie(m, b_pos, a_pos) = match_int_advance(b, a, b_pos, a_pos);  // swap order
-        if (a_pos == a.size() || b_pos == b.size() || !m) {
-          a_last_match = m;
-          b_last_match = false;
-          break;
-        }
-        new_a = append_field(new_a, a.substr(b_last_section, b_last_section - b_pos));
-        new_b = append_field(new_b, a.substr(b_last_section, b_last_section - b_pos));
-        ++a_pos;
-        ++b_pos;
-        a_last_section = a_pos;
-        b_last_section = b_pos;
-      } else {
-        I(b[b_pos] == ':');
-        ++b_pos;  // skip first
-        while (b[b_pos] != ':') {
-          I(b_pos < b.size());  // pending :
-          ++b_pos;
-        }
-        ++b_pos;  // :
-      }
-      continue;
-    } else {
-      a_last_match = false;
-      b_last_match = false;
-      break;
-    }
-
-    I(false);  // never reaches this place
-  }
-
-  // Finish the rest of the swap (if match) and add the rest
-  if (a_last_match) {
-    I(b[b_last_section] == ':');
-    new_a = append_field(new_a, b.substr(b_last_section, b_pos - b_last_section));
-    if (a_pos < a.size()) {
-      I(a[a_pos] == '.');
-      new_a = append_field(new_a, a.substr(a_pos + 1));  // +1 to skip .
-    }
-  } else {
-    new_a = append_field(new_a, a.substr(a_last_section));
-  }
-  if (b_last_match) {
-    I(a[a_last_section] == ':');
-    new_b = append_field(new_b, a.substr(a_last_section, a_pos - a_last_section));
-    if (b_pos < b.size()) {
-      I(b[b_pos] == '.');
-      new_b = append_field(new_b, b.substr(b_pos + 1));  // +1 to skip .
-    }
-  } else {
-    new_b = append_field(new_b, b.substr(b_last_section));
-  }
-
-  return std::make_tuple(new_a, new_b);
-}
-
 bool Bundle::match(std::string_view a, std::string_view b) {
-  // Decision 1 (bundle_sorted plan): "no positional access on all-named
-  // tuples". The legacy `":0:"` / `"0"` cross-fallback that let `tup.0` find
-  // the first named slot is gone — callers must use the actual key (name
-  // for named, decimal index for unnamed, attribute string for attrs).
-  if (a == b) {
-    return true;
-  }
-
-  auto [m1, m2, x] = match_int(a, b);
-  (void)x;
-  return m1 && m2;  // both reach the end in match_int
+  // Post-bundle_sorted (Decision 1): keys are canonical — bare name,
+  // decimal index, or attribute string — with no `:N:` prefix. Equality
+  // reduces to plain string compare. The legacy `":0:" ↔ "0"` cross-
+  // fallback that let `tup.0` find the first named slot is gone.
+  return a == b;
 }
 
 size_t Bundle::match_first_partial(std::string_view a, std::string_view b) {
-  auto [m1, m2, x] = match_int(a, b);
-  (void)m2;
-  if (m1) {
-    return x;  // a reached the end in match
+  // Canonical keys (no `:N:`): a is a "partial prefix match" of b iff
+  // a == b (full match — return a.size()) or b starts with a followed by
+  // a `.` segment separator (prefix match — return a.size()+1 to skip
+  // the dot). Otherwise 0.
+  if (a == b) {
+    return a.size();
+  }
+  if (b.size() > a.size() && b[a.size()] == '.' && b.starts_with(a)) {
+    return a.size() + 1;
   }
   return 0;
 }
 
 bool Bundle::match_either_partial(std::string_view a, std::string_view b) {
-  auto [m1, m2, x] = match_int(a, b);
-  (void)x;
-  return m1 || m2;  // either reached the end it match_int
+  // Canonical keys: true iff one is a prefix of the other at a segment
+  // boundary (a == b, b == a + ".x…", or a == b + ".x…").
+  if (a == b) {
+    return true;
+  }
+  if (a.size() < b.size() && b[a.size()] == '.' && b.starts_with(a)) {
+    return true;
+  }
+  if (b.size() < a.size() && a[b.size()] == '.' && a.starts_with(b)) {
+    return true;
+  }
+  return false;
 }
 
 void Bundle::add_int(std::string_view key, const std::shared_ptr<Bundle const> tup) {
@@ -407,6 +144,7 @@ void Bundle::add_int(std::string_view key, const std::shared_ptr<Bundle const> t
   if (tup->is_scalar()) {
     I(!has_trivial(key));  // It was deleted before
     key_map.emplace_back(key, Entry(tup->is_immutable(), tup->get_trivial()));
+    rebuild_indices();
     return;
   }
 
@@ -418,11 +156,13 @@ void Bundle::add_int(std::string_view key, const std::shared_ptr<Bundle const> t
       key_map.emplace_back(absl::StrCat(key, ".", ent.first), ent.second);
     }
   }
+  rebuild_indices();
 }
 
 void Bundle::del_int(std::string_view key) {
   if (key.empty()) {
     key_map.clear();
+    rebuild_indices();
     return;
   }
 
@@ -463,24 +203,16 @@ void Bundle::del_int(std::string_view key) {
   }
 
   key_map.swap(new_map);
+  rebuild_indices();
 }
 
 int Bundle::get_first_level_pos(std::string_view key) {
-  if (key.empty()) {
+  // Canonical keys: unnamed entries are bare decimals (`"0"`, `"1"`, …).
+  // Returns -1 for empty, named, or attribute keys.
+  if (key.empty() || !std::isdigit(static_cast<unsigned char>(key.front()))) {
     return -1;
   }
-
-  auto skip = 0u;
-
-  if (key[skip] == ':') {
-    ++skip;
-  }
-
-  if (!std::isdigit(key[skip])) {
-    return -1;
-  }
-
-  return str_tools::to_i(key.substr(skip));
+  return str_tools::to_i(key);
 }
 
 std::string_view Bundle::get_first_level(std::string_view key) {
@@ -493,39 +225,15 @@ std::string_view Bundle::get_first_level(std::string_view key) {
 }
 
 std::string_view Bundle::get_first_level_name(std::string_view key) {
+  // Canonical keys: no `:N:` prefix to strip. First-level "name" is the
+  // first segment (including decimal indices for unnamed entries — callers
+  // that need to distinguish named-vs-unnamed use get_first_level_pos or
+  // check the first character).
   auto dot_pos = key.find('.');
-  if (key.size() > 0 && key.front() != ':') {
-    if (dot_pos == std::string::npos) {
-      return key;
-    }
-    return key.substr(0, dot_pos);
-  }
-
-  auto n = key.substr(1).find(':');
   if (dot_pos == std::string::npos) {
-    return key.substr(1 + 1 + n);
+    return key;
   }
-  return key.substr(1 + 1 + n, dot_pos - 1 - 1 - n);
-}
-
-std::string_view Bundle::get_canonical_name(std::string_view key) {
-  std::string_view key2{key};
-
-  // Remove xxx.0.0.0
-  while (key2.size() > 1 && key2.back() == '0') {
-    auto sz = key2.size();
-    if (key2.substr(sz - 2, sz) == ".0") {
-      key2 = key2.substr(0, sz - 2);
-      continue;
-    }
-    break;
-  }
-
-  if (key2 == "0") {
-    key2 = "";
-  }
-
-  return key2;
+  return key.substr(0, dot_pos);
 }
 
 std::string_view Bundle::get_last_level(std::string_view key) {
@@ -547,37 +255,6 @@ std::string_view Bundle::get_all_but_last_level(std::string_view key) {
   return std::string_view("");
 }
 
-std::pair<int, std::string_view> Bundle::convert_key_to_io(std::string_view key) {
-  size_t skip = 0;
-
-  if (key[skip] == '$' || key[skip] == '%') {
-    ++skip;
-  }
-  if (key[skip] == '.') {
-    ++skip;
-  }
-
-  if (key[skip] != ':') {
-    return std::pair(-1, key.substr(skip));
-  }
-
-  auto key2 = key.substr(skip + 1);
-
-  if (!std::isdigit(key2.front())) {
-    throw Lnast::error("name should have digit after position specified :digits: not {}\n", key2);
-  }
-
-  auto n = key2.find(':');
-  if (n == std::string::npos) {
-    throw Lnast::error("name should have a format like :digits:name not {}\n", key2);
-  }
-
-  auto x = str_tools::to_i(key2);
-  I(x == str_tools::to_i(key2.substr(0, n)));
-
-  return std::pair(x, key2.substr(n + 1));
-}
-
 std::string_view Bundle::get_all_but_first_level(std::string_view key) {
   auto n = key.find('.');
   if (n != std::string::npos) {
@@ -592,12 +269,11 @@ std::string_view Bundle::get_all_but_first_level(std::string_view key) {
 }
 
 std::string Bundle::learn_fix(std::string_view key_sv) {
-  std::string key(key_sv);
-  for (auto& e : key_map) {
-    std::tie(key, e.first) = learn_fix_int(key, e.first);
-  }
-
-  return key;
+  // Canonical keys carry no `:N:` annotations, so there is nothing to
+  // swap or "learn" between the lookup key and the stored keys. The
+  // function survives as a no-op while callers continue to refer to it;
+  // the heavy learn_fix_int state machine is gone.
+  return std::string(key_sv);
 }
 
 const Bundle::Entry& Bundle::get_entry(std::string_view key) const {
@@ -674,10 +350,9 @@ std::shared_ptr<Bundle> Bundle::get_bundle(std::string_view key) const {
     GI(e_pos < e.first.size(), e.first[e_pos] != '.');  // . not included
 
     if (!tup) {
-      std::string key_with_pos{key};
-      std::string expanded{e.first};
-      std::tie(key_with_pos, expanded) = learn_fix_int(key_with_pos, expanded);
-      tup                              = std::make_shared<Bundle>(absl::StrCat(name, ".", key_with_pos));
+      // Canonical keys: no `:N:` swap needed, the lookup key is already
+      // in the form it'll appear in the new sub-bundle's name.
+      tup = std::make_shared<Bundle>(absl::StrCat(name, ".", key));
     }
 
     if (e_pos >= e.first.size()) {
@@ -697,6 +372,9 @@ std::shared_ptr<Bundle> Bundle::get_bundle(std::string_view key) const {
     tup->set_issue();
   }
 
+  if (tup) {
+    tup->rebuild_indices();
+  }
   return tup;
 }
 
@@ -724,6 +402,9 @@ std::shared_ptr<Bundle> Bundle::get_bundle(const std::shared_ptr<Bundle const>& 
     ret_tup->set_issue();
   }
 
+  if (ret_tup) {
+    ret_tup->rebuild_indices();
+  }
   return ret_tup;
 }
 
@@ -768,9 +449,8 @@ void Bundle::set(std::string_view key, const std::shared_ptr<Bundle const>& tup)
 void Bundle::set(std::string_view key_in, const Entry&& entry) {
   I(!key_in.empty());
 
-  // Normalize legacy `:N:name` / `:N:` producers to canonical storage form.
-  // After PR2 lands and all producers emit canonical keys, this is a no-op
-  // for the inputs we see in practice.
+  // normalize_key asserts the canonical form and otherwise returns the
+  // key as-is; producers no longer emit `:N:` annotations.
   auto        normalized_key = normalize_key(key_in);
   std::string_view key{normalized_key};
   I(!key.empty());
@@ -840,6 +520,8 @@ void Bundle::set(std::string_view key_in, const Entry&& entry) {
   I(!has_trivial(fixed_key));
   I(!fixed_key.empty());
   key_map.emplace_back(fixed_key, entry);
+
+  rebuild_indices();
 
 #ifdef DEBUG_SLOW
   for (const auto& e : key_map) {
@@ -1025,6 +707,7 @@ bool Bundle::concat(const std::shared_ptr<Bundle const>& tup) {
     ++next_unnamed;
   }
 
+  rebuild_indices();
   return true;
 }
 
@@ -1179,6 +862,7 @@ bool Bundle::concat(const Const& trivial) {
   }
 
   key_map.emplace_back(std::to_string(next_pos), Entry(false, trivial));
+  rebuild_indices();
   return true;
 }
 

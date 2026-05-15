@@ -10,13 +10,14 @@
 
 ## Sibling Repositories (DO NOT search the filesystem for these)
 
-LiveHD depends on several sibling repos. **Always look in these exact paths — do NOT run `find` to locate them:**
+LiveHD depends on several sibling repos. **Always look in these exact paths — do NOT run `find`, `fd`, `locate`, or any other filesystem search to find them or files inside them:**
 
 - `../hhds/` — HHDS library (Graph, Tree, Forest, flat_storage attributes). Headers: `hhds/graph.hpp`, `hhds/tree.hpp`, `hhds/attr.hpp`.
 - `../hlop/` — HLOP library (dlop / slop helpers).
 - `../iassert/` — iassert library (`I(...)`, `GI(...)` invariant macros).
+- `../tree-sitter-pyrope/` — Tree-sitter grammar for Pyrope. The grammar lives at `../tree-sitter-pyrope/grammar.js`; generated parser sources are under `../tree-sitter-pyrope/src/`.
 
-If you need to read or fix code in one of these libraries, go directly to `../hhds`, `../hlop`, or `../iassert`. They are configured as `local_path_override` in `MODULE.bazel`.
+**Rule:** if you need anything from one of these libraries (e.g. `grammar.js`, `tree.hpp`, `graph.hpp`, `attr.hpp`), open it directly at the path above. Do **not** start a `find / ...`, `find . ...`, or recursive `grep` to locate them — they are always at these fixed sibling paths and are configured as `local_path_override` in `MODULE.bazel`. Running a broad `find` is wasteful and frequently the wrong tool; go straight to the known path.
 
 ## Key Directories
 
@@ -48,6 +49,27 @@ inou.yosys.tolg top:foo files:foo.v |> pass.cprop |> inou.cgen.verilog odir:out
 ## Compiler Warnings Policy
 
 Always fix source code — never add `-Wno-*` flags to BUILD files. Exception: external deps in `MODULE.bazel`.
+
+## Contracts
+
+### Compiler warning options
+
+Unless the user explicitly indicates otherwise, do **not** change compiler
+warning options to make warnings or errors go away. Always fix the source
+code instead.
+
+This includes (non-exhaustive):
+
+- Adding or modifying `-W*`, `-Wno-*`, `-Werror`, `-pedantic`, or `-w` flags
+  in `BUILD`, `BUILD.bazel`, `*.bzl`, or any other build configuration.
+- Removing warning flags from `tools/copt_default.bzl` or a target's `copts`.
+- Disabling diagnostics via `#pragma GCC diagnostic` / `#pragma clang diagnostic`
+  pushes around live code.
+
+The only built-in exception is `MODULE.bazel` (external-dep warning
+suppression — see "Compiler Warnings Policy" above).
+
+Enforced by `scripts/contracts/diff_no_compile_flags_touched.sh`.
 
 ## Running Pyrope Tests
 

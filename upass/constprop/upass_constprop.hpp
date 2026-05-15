@@ -191,6 +191,11 @@ protected:
     bool        is_named = false;
     std::string name;
     Const      value;
+    // When the actual is a bare ref to a caller variable, remember the name
+    // so a `ref` param can write back into the caller's scope after the
+    // body is folded. Empty when the actual is a const literal or named with
+    // a non-ref value (write-back only happens when the param is `ref`).
+    std::string var_name;
   };
 
   static inline std::unordered_map<std::string, std::shared_ptr<Lnast>> function_registry;

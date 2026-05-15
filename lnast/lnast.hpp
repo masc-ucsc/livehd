@@ -97,6 +97,7 @@ struct Lnast_io_entry {
   std::string name;          // field name, no $ / % prefix
   int32_t     bits     = 0;  // 0 = unknown / infer from context
   bool        is_signed = true;
+  bool        is_ref    = false;  // input declared with `ref` → write-back on inline
 };
 struct Lnast_tree_io {
   std::vector<Lnast_io_entry> inputs;

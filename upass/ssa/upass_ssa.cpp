@@ -134,8 +134,19 @@ void uPass_ssa::run(const std::shared_ptr<Lnast>& lnast) {
       Lnast_nid lhs = lnast->get_first_child(field_node);
       if (lhs.is_invalid()) continue;
       auto fname = std::string(lnast->get_name(lhs));
-      if (is_input)  meta.inputs.push_back({fname, 0, true});
-      if (is_output) meta.outputs.push_back({fname, 0, true});
+      // The synthetic tuple_add encodes a `ref` param via the assign's
+      // const RHS = "ref" (prp2lnast / func_extract pass-through). Default
+      // shapes use "nil" or "0".
+      bool is_ref = false;
+      if (is_input) {
+        Lnast_nid rhs = lnast->get_sibling_next(lhs);
+        if (!rhs.is_invalid() && Lnast_ntype::is_const(lnast->get_type(rhs))
+            && lnast->get_name(rhs) == "ref") {
+          is_ref = true;
+        }
+      }
+      if (is_input)  meta.inputs.push_back({fname, 0, true, is_ref});
+      if (is_output) meta.outputs.push_back({fname, 0, true, false});
     }
   }
 

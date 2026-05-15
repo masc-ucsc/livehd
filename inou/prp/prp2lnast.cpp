@@ -1499,21 +1499,38 @@ void Prp2lnast::process_lambda_statement(TSNode n) {
   // captures tuple (empty)
   lnast->add_child(fd_idx, Lnast_ntype::create_tuple_add());
 
-  // Emit input args
+  // Emit input args. The grammar tags `ref`/`reg`/`...` prefixes on each arg
+  // via the `mod` field; iterate ALL children (anonymous + named) so we can
+  // pair a `mod` token with its immediately-following typed_identifier. The
+  // `ref` marker is encoded as the assign's RHS const text ("ref" vs the
+  // default "0") so downstream passes (func_extract, constprop) can detect
+  // it without inventing a new ntype.
   auto in_idx = lnast->add_child(fd_idx, Lnast_ntype::create_tuple_add());
   if (!ts_node_is_null(fdef)) {
     TSNode inp = child_by_field(fdef, "input");
     if (!ts_node_is_null(inp)) {
-      uint32_t nnc = ts_node_named_child_count(inp);
-      for (uint32_t i = 0; i < nnc; i++) {
-        TSNode ti = ts_node_named_child(inp, i);
-        TSNode id = child_by_field(ti, "identifier");
-        if (ts_node_is_null(id)) {
+      bool     pending_ref = false;
+      uint32_t nc          = child_count(inp);
+      for (uint32_t i = 0; i < nc; i++) {
+        TSNode           ci    = child(inp, i);
+        const char*      fname = ts_node_field_name_for_child(inp, i);
+        std::string_view ct(ts_node_type(ci));
+        if (fname && std::string_view(fname) == "mod") {
+          if (ct == "ref") {
+            pending_ref = true;
+          }
           continue;
         }
-        auto aidx = lnast->add_child(in_idx, Lnast_ntype::create_assign());
-        lnast->add_child(aidx, Lnast_node::create_ref(get_text(id)));
-        lnast->add_child(aidx, Lnast_node::create_const("0"));
+        if (ct != "typed_identifier") {
+          continue;
+        }
+        TSNode id = child_by_field(ci, "identifier");
+        if (!ts_node_is_null(id)) {
+          auto aidx = lnast->add_child(in_idx, Lnast_ntype::create_assign());
+          lnast->add_child(aidx, Lnast_node::create_ref(get_text(id)));
+          lnast->add_child(aidx, Lnast_node::create_const(pending_ref ? "ref" : "0"));
+        }
+        pending_ref = false;
       }
     }
   }
@@ -1899,7 +1916,7 @@ void Prp2lnast::emit_type_spec(const Lnast_node& target, TSNode type_cast_node) 
     // Tuple-shape type with default values (e.g. `:(x=0, y=1)`) is the only
     // way to declare a named-position tuple in Pyrope. Lower the inner
     // tuple as a normal `tuple_add` and assign it to the target so the
-    // bundle starts with `:0:x=0, :1:y=1` keys; subsequent positional
+    // bundle starts with `x=0, y=1` named keys; subsequent positional
     // assignments use upass's shape-preserving merge to keep those names.
     // The bit-width primitive types are still ignored at the value-folding
     // layer — this only handles the shape carried by the tuple type.

@@ -1,6 +1,7 @@
 // This file is distributed under the BSD 3-Clause License. See LICENSE for details.
 #pragma once
 
+#include <map>
 #include <memory>
 #include <print>
 #include <vector>
@@ -26,6 +27,11 @@ public:
 
 protected:
   using Key_map_type = std::vector<std::pair<std::string, Entry>>;
+  // bundle_sorted plan §3 storage split: three side-containers indexed by
+  // first-segment category. Eagerly rebuilt from key_map at the end of every
+  // mutation; queries read them directly for O(1)/O(log N) answers.
+  using Named_map_type   = std::map<std::string, Entry>;
+  using Unnamed_map_type = std::map<int, Named_map_type>;
 
   const std::string name;
 
@@ -35,24 +41,28 @@ protected:
   mutable bool         correct;
   mutable Key_map_type key_map;
 
-  void sort_key_map();
+  // Side-indices, derived from key_map. attrs_ and named_ are keyed by the
+  // full key (alphabetical); unnamed_ is a nested map outer-keyed by the
+  // first-segment integer so unnamed_.size() is exactly the number of
+  // distinct unnamed top-level positions in O(1).
+  mutable Named_map_type   attrs_;
+  mutable Named_map_type   named_;
+  mutable Unnamed_map_type unnamed_;
 
-  // Normalize the textual key on the way into the bundle. The post-refactor
+  void sort_key_map();
+  // Rebuild attrs_/named_/unnamed_ from key_map. Cheap (O(N log N)) and run
+  // at the end of every public mutation point.
+  void rebuild_indices() const;
+
+  // Normalize the textual key on the way into the bundle. The canonical
   // storage convention is:
   //   - named first-segment kept as-is: "name"
   //   - unnamed first-segment is the bare decimal index: "0", "1", …
   //   - attribute first-segment: "__attr"
-  // Transitionally accept legacy ":N:name" / ":N:" producers and strip the
-  // position prefix on insert; nested ":N:" inside a dotted path is rewritten
-  // too. After PR2 lands, every producer emits the canonical form and this
-  // helper becomes the identity for the inputs it sees.
+  // Producers have been migrated to the canonical form; in NDEBUG-off
+  // builds normalize_key asserts that no legacy `:N:` keys are passed in.
+  // The function itself is the identity on canonical keys.
   static std::string normalize_key(std::string_view key);
-
-  static std::tuple<bool, size_t, size_t> match_int_advance(std::string_view a, std::string_view b, size_t a_pos, size_t b_pos);
-  static std::tuple<bool, bool, size_t>   match_int(std::string_view a, std::string_view b);
-  static std::string                      append_field(std::string_view a, std::string_view b);
-
-  static std::tuple<std::string, std::string> learn_fix_int(std::string_view a, std::string_view b);
 
   static bool   match(std::string_view a, std::string_view b);
   static size_t match_first_partial(std::string_view a, std::string_view b);
@@ -125,6 +135,14 @@ public:
   bool is_trivial_scalar() const;
   bool has_just_attributes() const;
 
+  // bundle_sorted §3 query API. Side-indices are kept in sync with key_map;
+  // these are the canonical O(1) shape checks the plan calls for.
+  size_t unnamed_top_count() const { return unnamed_.size(); }
+  size_t named_top_count() const { return named_.size(); }
+  size_t attrs_top_count() const { return attrs_.size(); }
+  bool   has_named_top() const { return !named_.empty(); }
+  bool   has_unnamed_top() const { return !unnamed_.empty(); }
+
   bool is_ordered(std::string_view key) const;
 
   void dump() const;
@@ -134,11 +152,8 @@ public:
   static std::string_view get_all_but_first_level(std::string_view key);
   static std::string_view get_first_level(std::string_view key);
   static std::string_view get_first_level_name(std::string_view key);
-  static std::string_view get_canonical_name(std::string_view key);
   static int              get_first_level_pos(std::string_view key);
   static int              get_last_level_pos(std::string_view key) { return get_first_level_pos(get_last_level(key)); }
-
-  static std::pair<int, std::string_view> convert_key_to_io(std::string_view key);
 
   static bool is_single_level(std::string_view key) { return key.find('.') == std::string::npos; }
 

@@ -66,13 +66,20 @@ bool uPass_func_extract::emit_io_tuple_from_decl(const std::shared_ptr<Lnast>& d
     }
 
     move_to_child();
-    const auto internal_name = std::string(current_text());
-    const auto field_name    = strip_io_prefix(internal_name);
+    const auto  internal_name = std::string(current_text());
+    const auto  field_name    = strip_io_prefix(internal_name);
+    // Preserve a "ref" marker on input args so the inliner (constprop's
+    // try_eval_comb_call) can write back to the caller's variable. All
+    // other RHS shapes collapse to "nil" (the placeholder default value).
+    std::string marker        = "nil";
+    if (move_to_sibling() && is_type(Lnast_ntype::Lnast_ntype_const) && current_text() == "ref") {
+      marker = "ref";
+    }
     move_to_parent();
 
     auto assign_idx = dst->add_child(tuple_idx, Lnast_ntype::create_assign());
     dst->add_child(assign_idx, Lnast_node::create_ref(field_name));
-    dst->add_child(assign_idx, Lnast_node::create_const("nil"));
+    dst->add_child(assign_idx, Lnast_node::create_const(marker));
   } while (move_to_sibling());
   move_to_parent();
 
