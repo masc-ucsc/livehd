@@ -8,6 +8,7 @@
 #include <format>
 #include <fstream>
 #include <iostream>
+#include <print>
 #include <set>
 #include <string>
 
@@ -890,12 +891,17 @@ Node_pin_iterator Lgraph::out_sinks(const Node& node) const {
 }
 
 bool Lgraph::has_outputs(const Node& node) const {
-  // NOTE: HHDS Phase G3 read migration deferred — `Lgraph::load()` / HIF
-  // reconstitution bypasses create_node and add_edge, so the shadow graph
-  // is empty for any lgraph that came from disk. Switching this reader to
-  // hhds_graph_ regresses ~10 yosys/prp tests (verified 2026-05-14). Needs
-  // load() to mirror nodes + edges into hhds_graph_ first.
-  auto idx2 = node.get_nid();
+  // HHDS Phase G3 read: for non-IO nodes tracked in the shadow, query
+  // Node_class::has_out_edges() (cheap boolean — no edge vector
+  // materialization). Falls back to the legacy walk for graph-IO nodes
+  // (not tracked in idx_to_hhds_nid_) and for shadow misses.
+  const auto nid_master = node.get_nid();
+  if (hhds_graph_ && nid_master != Hardcoded_input_nid && nid_master != Hardcoded_output_nid) {
+    if (auto it = idx_to_hhds_nid_.find(nid_master); it != idx_to_hhds_nid_.end()) {
+      return hhds_graph_->get_node(it->second).has_out_edges();
+    }
+  }
+  auto idx2 = nid_master;
   while (true) {
     if (node_internal[idx2].has_local_outputs()) {
       return true;
@@ -905,14 +911,19 @@ bool Lgraph::has_outputs(const Node& node) const {
     }
     idx2 = node_internal[idx2].get_next();
   }
-
   I(false);
   return false;
 }
 
 bool Lgraph::has_inputs(const Node& node) const {
-  // See has_outputs note above — same migration blocker (load/HIF path).
-  auto idx2 = node.get_nid();
+  // HHDS Phase G3 read: see has_outputs above.
+  const auto nid_master = node.get_nid();
+  if (hhds_graph_ && nid_master != Hardcoded_input_nid && nid_master != Hardcoded_output_nid) {
+    if (auto it = idx_to_hhds_nid_.find(nid_master); it != idx_to_hhds_nid_.end()) {
+      return hhds_graph_->get_node(it->second).has_inp_edges();
+    }
+  }
+  auto idx2 = nid_master;
   while (true) {
     if (node_internal[idx2].has_local_inputs()) {
       return true;
@@ -922,7 +933,6 @@ bool Lgraph::has_inputs(const Node& node) const {
     }
     idx2 = node_internal[idx2].get_next();
   }
-
   I(false);
   return false;
 }
