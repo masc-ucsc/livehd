@@ -172,8 +172,11 @@ protected:
     return fast_next(Hardcoded_output_nid);
   }
 
-  bool is_sub(Index_id nid) const {  // Very common function (shoud be fast)
-    return node_internal[nid].get_type() == Ntype_op::Sub;
+  bool is_sub(Index_id nid) const {  // Very common function (should be fast)
+    // HHDS Phase G3 read: delegates to get_type_op so we share the shadow
+    // consult. The legacy direct-read path remains via the override's
+    // fallback for graph-IO / non-master nids.
+    return get_type_op(nid) == Ntype_op::Sub;
   }
 
   static void trace_back2driver(Node_pin_iterator& xiter, const Node_pin& dpin, const Node_pin& spin);
