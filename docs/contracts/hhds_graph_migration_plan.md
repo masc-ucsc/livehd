@@ -219,21 +219,33 @@ This is the biggest single change. Strategy:
     `has_inputs` hot paths once the shadow is trustworthy on every
     graph (see step 13). (LANDED)
 
-13. **Read-path switch blocker.** Attempted to switch
-    `Lgraph::has_outputs(const Node&)` / `has_inputs(const Node&)`
-    to consult `hhds_graph_` via `Node_class::has_{out,inp}_edges()`.
-    Result: ~10 yosys/prp tests regress (verified 2026-05-14).
-    Root cause: in-memory builds (e.g., `node_test` /
-    `graph_bench`) populate the shadow correctly via the mirrored
-    `create_node` / `add_edge`, but the cells whose ops produce
-    "no outputs" in tests where the lgraph crosses an HIF
-    save/load boundary, or where `add_edge_int` is called
-    through paths that bypass `Lgraph::add_edge`, get an empty
-    shadow read. Before reads can switch, `Lgraph::load()` must
-    populate `idx_to_hhds_nid_` + mirror all edges into
-    `hhds_graph_`, and any code path that calls `add_edge_int`
-    directly (e.g., `Lgraph_Base::add_edge(idx,idx)`) must also
-    mirror. Until then the readers stay on `node_internal[]`.
+13. **Read-path switch (LANDED).** Root cause of earlier
+    "shadow=false / legacy=true" divergence was in the HHDS
+    upstream `Node_class::has_out_edges()` / `has_inp_edges()`
+    naive impl — it walked `graph_->get_pins(node)` which only
+    enumerates the pin linked list and skips port 0 (the
+    node-as-pin, whose edges live on `NodeEntry` itself). Since
+    most LiveHD nodes carry port-0 edges (single driver/sink),
+    the predicate returned `false` for fully-connected nodes.
+    Fixed upstream (`../hhds/hhds/graph.cpp`) to scan node-entry
+    edges + walk pin list, mirroring `Graph::out_edges(Node_class)`.
+
+14. [x] **Reader migration batch 1 (LANDED).** Migrated to consult
+    `hhds_graph_` for non-IO nodes tracked in `idx_to_hhds_nid_`:
+    - `has_outputs(const Node&)` / `has_inputs(const Node&)`
+    - `has_outputs(const Node_pin&)` / `has_inputs(const Node_pin&)`
+    - `get_num_out_edges(const Node&)` / `get_num_inp_edges(const Node&)`
+    - `get_num_edges(const Node&)`
+    - `get_num_out_edges(const Node_pin&)` / `get_num_inp_edges(const Node_pin&)`
+    All fall back to legacy walk for Hardcoded_input/output_nid or
+    shadow misses. Confirmed 219/231 baseline preserved.
+
+15. [ ] **Reader migration batch 2** — `out_edges` / `inp_edges` /
+    `out_connected_pins` / `inp_connected_pins` / `out_sinks` /
+    `inp_drivers` iterators. These return `XEdge_iterator` /
+    `Node_pin_iterator` (vectors of LiveHD-style handles). Cannot
+    switch underlying storage until `XEdge` / `Node_pin` are
+    rewritten as HHDS-handle wrappers (Phase G4).
 6. [x] **Set-type mirror gotcha**: HHDS encodes `is_loop_last()`
    in bit 0 of `NodeEntry::type`. Storing `Ntype_op` raw values
    triggers heap corruption (`tcache_thread_shutdown()`) when
