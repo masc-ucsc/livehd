@@ -1849,7 +1849,6 @@ void Lgraph::add_edge(const Node_pin& dpin, const Node_pin& spin) {
 }
 
 Fwd_edge_iterator Lgraph::forward(bool visit_sub) { return Fwd_edge_iterator(this, visit_sub); }
-Bwd_edge_iterator Lgraph::backward(bool visit_sub) { return Bwd_edge_iterator(this, visit_sub); }
 
 // Skip after 1, but first may be deleted, so fast_next
 Fast_edge_iterator Lgraph::fast(bool visit_sub) { return Fast_edge_iterator(this, visit_sub); }

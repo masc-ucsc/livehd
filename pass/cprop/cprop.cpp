@@ -1531,12 +1531,11 @@ void Cprop::tuple_attr_set(const Node& node) {
   } else {
     auto value_tup = find_lgtuple(value_spin.get_driver_node());
     if (value_tup) {
-      if (value_tup->is_correct()) {
-        node_tup = parent_tup->create_assign(value_tup);
-      } else {
-        node_tup = std::make_shared<Lgtuple>(value_tup->get_name());
-        node_tup->set_issue();
-      }
+      // Tuple-to-tuple assign was historically a stub that aborted; we no
+      // longer carry the dead helper. Emit an issue marker so downstream
+      // sees a non-null result with the issue flag set.
+      node_tup = std::make_shared<Lgtuple>(value_tup->get_name());
+      node_tup->set_issue();
     } else {
       node_tup = parent_tup->create_assign(value_spin.get_driver_pin());
     }

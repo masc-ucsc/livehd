@@ -150,7 +150,6 @@ public:
   bool                     concat(const std::shared_ptr<Lgtuple const>& tup2);
   bool                     concat(const Node_pin& dpin);
   Node_pin                 flatten() const;
-  std::shared_ptr<Lgtuple> create_assign(const std::shared_ptr<Lgtuple const>& tup) const;
   std::shared_ptr<Lgtuple> create_assign(const Node_pin& dpin) const;
 
   /// Get all the attributes (__bits) in the same tuple level

@@ -443,7 +443,6 @@ public:
   }
 
   Fwd_edge_iterator  forward(bool visit_sub = false);
-  Bwd_edge_iterator  backward(bool visit_sub = false);
   Fast_edge_iterator fast(bool visit_sub = false);
 
   Lgraph* clone_skeleton(std::string_view new_lg_name);

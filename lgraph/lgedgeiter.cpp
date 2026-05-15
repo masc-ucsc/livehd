@@ -383,13 +383,4 @@ void Fwd_edge_iterator::Fwd_iter::fwd_next() {
   fwd_get_from_linear_last();
 }
 
-void Bwd_edge_iterator::Bwd_iter::bwd_first(Lgraph* lg) {
-  (void)lg;
-  I(pending_stack.empty());
-  I(unvisited.empty());
-}
-
-void Bwd_edge_iterator::Bwd_iter::bwd_next() {
-  I(false);  // FIXME: forward works, now do backward
-}
 Node Fast_edge_iterator::Fast_iter::operator*() const { return Node(top_g, current_g, hidx, nid); }

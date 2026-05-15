@@ -121,9 +121,6 @@ public:
   bool concat(const std::shared_ptr<Bundle const>& tup2);
   bool concat(const Const& trivial);
 
-  std::shared_ptr<Bundle> create_assign(const std::shared_ptr<Bundle const>& tup) const;
-  std::shared_ptr<Bundle> create_assign(const Const& lconst) const;
-
   const Key_map_type& get_map() const { return key_map; }
   const Key_map_type& get_sort_map() const;
   Const               flatten() const;

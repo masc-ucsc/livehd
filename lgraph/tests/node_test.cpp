@@ -183,10 +183,6 @@ TEST_F(Setup_graphs_test, annotated) {
     EXPECT_EQ(place4, place2);
   }
 
-  for (auto node : top->backward()) {
-    EXPECT_TRUE(node.has_place());
-  }
-
   EXPECT_TRUE(true);
 }
 

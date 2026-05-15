@@ -1218,14 +1218,9 @@ void Bitwidth::process_attr_set_bw(Node& node_attr, Bitwidth::Attr attr, Fwd_edg
     } else {
       bw.set_sbits_range(bits);
     }
-  } else if (attr == Attr::Set_max) {
-    I(false);  // FIXME: todo
-  } else if (attr == Attr::Set_min) {
-    I(false);  // FIXME: todo
   } else {
-    I(false);
-    // note-I:  Attr::unsigned may need insert Tposs also
-    // note-II: Attr::set_dp_assign handled in another method
+    I(false);  // Set_max / Set_min are unimplemented; Attr::unsigned may
+    // need insert Tposs also; Attr::set_dp_assign is handled elsewhere.
   }
 
   if (!node_attr.is_invalid()) {

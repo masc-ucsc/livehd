@@ -1045,18 +1045,6 @@ Node_pin Lgtuple::flatten() const {
   return result_node.setup_driver_pin();
 }
 
-std::shared_ptr<Lgtuple> Lgtuple::create_assign(const std::shared_ptr<Lgtuple const>& rhs_tup) const {
-  (void)rhs_tup;
-
-  dump();
-  rhs_tup->dump();
-
-  I(false);  // FIXME: implement it
-  auto new_tup = std::make_shared<Lgtuple>(get_name());
-
-  return new_tup;
-}
-
 bool Lgtuple::add_pending(Node& node, std::vector<std::pair<std::string, Node_pin>>& pending_entries, std::string_view entry_txt,
                           const Node_pin& ubits_dpin, const Node_pin& sbits_dpin) {
   I(!entry_txt.empty());

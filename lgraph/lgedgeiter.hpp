@@ -153,39 +153,3 @@ public:
   [[nodiscard]] Fwd_iter end() const { return {visit_sub}; }
 };
 
-class Bwd_edge_iterator {
-public:
-  class Bwd_iter : public Flow_base_iterator {
-  protected:
-    void bwd_first(Lgraph* lg);
-    void bwd_next();
-
-  public:
-    Bwd_iter(Lgraph* lg, bool _visit_sub) : Flow_base_iterator(lg, _visit_sub) { bwd_first(lg); }
-    Bwd_iter(bool _visit_sub) : Flow_base_iterator(_visit_sub) { I(current_node.is_invalid()); }
-
-    bool operator!=(const Bwd_iter& other) const {
-      GI(!current_node.is_invalid() && !other.current_node.is_invalid(),
-         current_node.get_top_lgraph() == other.current_node.get_top_lgraph());
-      return current_node != other.current_node;
-    }
-
-    Bwd_iter& operator++() {
-      I(!current_node.is_invalid());  // Do not call ++ after end
-      bwd_next();
-      return *this;
-    }
-  };
-
-protected:
-  Lgraph*    top_g;
-  const bool visit_sub;
-
-public:
-  Bwd_edge_iterator() = delete;
-  explicit Bwd_edge_iterator(Lgraph* _g, bool _visit_sub) : top_g(_g), visit_sub(_visit_sub) {}
-
-  [[nodiscard]] Bwd_iter begin() const { return {top_g, visit_sub}; }
-
-  [[nodiscard]] Bwd_iter end() const { return {visit_sub}; }
-};
