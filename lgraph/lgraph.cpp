@@ -20,27 +20,9 @@
 #include "lgraph_base_core.hpp"
 #include "str_tools.hpp"
 
-namespace {
-// HHDS Phase G3+ attribute pre-registration. The HHDS attribute registry is
-// not thread-safe on first-touch — two threads racing to register the same
-// tag both find the registry empty and try to insert. Pre-registering before
-// `main()` keeps the lazy `attr()` path on the early-return branch. Mirrors
-// the pattern from lnast/lnast.cpp.
-struct Lgraph_attr_init {
-  Lgraph_attr_init() {
-    hhds::register_attr_tag<hhds::attrs::name_t>("hhds::attrs::name");
-    hhds::register_attr_tag<livehd::attrs::bits_t>("livehd::attrs::bits");
-    hhds::register_attr_tag<livehd::attrs::pin_name_t>("livehd::attrs::pin_name");
-    hhds::register_attr_tag<livehd::attrs::sign_t>("livehd::attrs::sign");
-    hhds::register_attr_tag<livehd::attrs::instance_pid_t>("livehd::attrs::instance_pid");
-    hhds::register_attr_tag<livehd::attrs::color_t>("livehd::attrs::color");
-    hhds::register_attr_tag<livehd::attrs::subid_t>("livehd::attrs::subid");
-    hhds::register_attr_tag<livehd::attrs::const_value_t>("livehd::attrs::const_value");
-    hhds::register_attr_tag<livehd::attrs::lut_t>("livehd::attrs::lut");
-  }
-};
-[[maybe_unused]] const Lgraph_attr_init lgraph_attr_init_{};
-}  // namespace
+// Attribute-tag static-init lives in //graph:graph (graph/cell.cpp) — it
+// registers all livehd::attrs::* + hhds::attrs::name before main() so
+// neither lgraph nor cgen needs to re-register here.
 
 void Lgraph::setup_hierarchy_down(Lgraph* sub_lg, Hierarchy_index parent_hidx) {
   I(sub_lg);

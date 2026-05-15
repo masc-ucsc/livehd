@@ -328,7 +328,7 @@ bool Node_pin::is_unsign() const {
   // node_pin_unsigned_map for shadow misses.
   auto hpin = get_hhds_pin();
   if (hpin.is_valid()) {
-    auto ref = hpin.attr(livehd::attrs::sign);
+    auto ref = hpin.attr(livehd::attrs::pin_unsigned);
     if (ref.has()) {
       return ref.get() != 0;
     }

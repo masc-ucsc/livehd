@@ -16,6 +16,7 @@ cc_library(
     deps = [
         # "//eprp",
         "//core",
+        "//graph",
         "@hhds//hhds:graph",
         "@hif//hif",
         "@rapidjson",

@@ -12,8 +12,8 @@
 #include "lgraph_attributes.hpp"
 #include "lgraphbase.hpp"
 #include "node.hpp"
+#include "attrs.hpp"  // //graph:graph — single source of livehd::attrs::* tags
 #include "hhds/attrs/name.hpp"
-#include "lgraph_attrs.hpp"
 #include "node_pin.hpp"
 
 class Lgraph : public Lgraph_attributes {
@@ -401,9 +401,9 @@ public:
       return;
     }
     if (unsigned_flag) {
-      hpin.attr(livehd::attrs::sign).set(static_cast<int8_t>(1));
+      hpin.attr(livehd::attrs::pin_unsigned).set(static_cast<int8_t>(1));
     } else {
-      hpin.attr(livehd::attrs::sign).del();
+      hpin.attr(livehd::attrs::pin_unsigned).del();
     }
   }
 
