@@ -16,6 +16,8 @@
 // The evaluator writes every successful fold to `tmp_fold` so the override
 // of `fold_ref` substitutes the value at every downstream consumer.
 
+#include <algorithm>
+#include <bit>
 #include <cctype>
 #include <cstdint>
 #include <optional>
@@ -24,6 +26,7 @@
 #include <utility>
 
 #include "const.hpp"
+#include "lnast.hpp"
 #include "lnast_ntype.hpp"
 #include "upass_attributes.hpp"
 #include "upass_attributes_sticky.hpp"
@@ -171,6 +174,16 @@ std::optional<Const> uPass_attributes::derive_max(std::string_view base) const {
       return rb->second;
     }
   }
+  // Bitwidth-pass inferred range: takes precedence over type-derived bounds
+  // because the bitwidth pass may have proven a tighter range from data flow
+  // (e.g. `a:u8 = b & 0xF` → max=15 even though u8 type max is 255).
+  if (lm) {
+    const auto& meta = lm->get_lnast()->bw_meta();
+    auto        it   = meta.ranges.find(std::string{base});
+    if (it != meta.ranges.end() && !it->second.pos_inf) {
+      return *Dlop::create_integer(it->second.max);
+    }
+  }
   // Type-derived.
   if (auto* ti = lookup_type_info(base); ti && ti->bits != 0) {
     if (ti->kind == Numeric_kind::unsigned_int) {
@@ -200,6 +213,14 @@ std::optional<Const> uPass_attributes::derive_min(std::string_view base) const {
       return rb->first;
     }
   }
+  // Bitwidth-pass inferred range: see derive_max for rationale.
+  if (lm) {
+    const auto& meta = lm->get_lnast()->bw_meta();
+    auto        it   = meta.ranges.find(std::string{base});
+    if (it != meta.ranges.end() && !it->second.neg_inf) {
+      return *Dlop::create_integer(it->second.min);
+    }
+  }
   if (auto* ti = lookup_type_info(base); ti && ti->bits != 0) {
     if (ti->kind == Numeric_kind::unsigned_int) {
       return *Dlop::create_integer(0);
@@ -218,19 +239,50 @@ std::optional<Const> uPass_attributes::derive_min(std::string_view base) const {
 }
 
 std::optional<Const> uPass_attributes::derive_bits(std::string_view base, std::string_view variant) const {
-  auto v = resolve_value(base);
-  if (!v) {
-    return std::nullopt;
+  // Concrete value (constprop already proved it) is the most precise source.
+  if (auto v = resolve_value(base); v) {
+    if (variant == "ubits") {
+      return *Dlop::create_integer(static_cast<int64_t>(bits_unsigned(*v)));
+    }
+    if (variant == "sbits") {
+      return *Dlop::create_integer(static_cast<int64_t>(bits_signed(*v)));
+    }
+    // "bits": the natural width — unsigned for non-negative values, signed
+    // (including the sign bit) for negative values, 0 for zero, 1 for -1.
+    return *Dlop::create_integer(static_cast<int64_t>(bits_natural(*v)));
   }
-  if (variant == "ubits") {
-    return *Dlop::create_integer(static_cast<int64_t>(bits_unsigned(*v)));
+  // No concrete value yet — try the bitwidth pass's inferred range. Same
+  // sbits-of-min-and-max convention as apply_bw() in lnast_to_lgraph.
+  if (lm) {
+    const auto& meta = lm->get_lnast()->bw_meta();
+    auto        it   = meta.ranges.find(std::string{base});
+    if (it != meta.ranges.end() && !it->second.is_unbounded()) {
+      const auto& e = it->second;
+      auto        sbits_for = [](int64_t x) -> int64_t {
+        if (x >= 0) {
+          return static_cast<int64_t>(std::bit_width(static_cast<uint64_t>(x))) + 1;
+        }
+        return static_cast<int64_t>(std::bit_width(static_cast<uint64_t>(-x - 1))) + 1;
+      };
+      const int64_t sbits = std::max(sbits_for(e.min), sbits_for(e.max));
+      if (variant == "sbits") {
+        return *Dlop::create_integer(sbits);
+      }
+      if (variant == "ubits") {
+        // ubits is only meaningful when the range is non-negative.
+        if (e.min < 0) {
+          return *Dlop::create_integer(0);
+        }
+        return *Dlop::create_integer(sbits - 1);  // drop sign bit
+      }
+      // "bits": unsigned width when non-negative, signed otherwise.
+      if (e.min >= 0) {
+        return *Dlop::create_integer(sbits - 1);
+      }
+      return *Dlop::create_integer(sbits);
+    }
   }
-  if (variant == "sbits") {
-    return *Dlop::create_integer(static_cast<int64_t>(bits_signed(*v)));
-  }
-  // "bits": the natural width — unsigned for non-negative values, signed
-  // (including the sign bit) for negative values, 0 for zero, 1 for -1.
-  return *Dlop::create_integer(static_cast<int64_t>(bits_natural(*v)));
+  return std::nullopt;
 }
 
 std::optional<Const> uPass_attributes::derive_comptime(std::string_view base, std::string_view base_text) const {
