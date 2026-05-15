@@ -718,11 +718,25 @@ void Node::del_source() {
 }
 
 //----- Subject to changes in the future:
-void Node::del_color() { current_g->ref_node_color_map()->erase(get_compact_class()); }
+void Node::del_color() {
+  current_g->ref_node_color_map()->erase(get_compact_class());
+  current_g->mirror_del_color_hhds(nid);
+}
 
-void Node::set_color(int new_color) { current_g->ref_node_color_map()->insert_or_assign(get_compact_class(), new_color); }
+void Node::set_color(int new_color) {
+  current_g->ref_node_color_map()->insert_or_assign(get_compact_class(), new_color);
+  current_g->mirror_set_color_hhds(nid, static_cast<int32_t>(new_color));
+}
 
 int Node::get_color() const {
+  // HHDS Phase G3 read: consult shadow color attr first, fall back to legacy.
+  auto hnode = get_hhds_node();
+  if (hnode.is_valid()) {
+    auto ref = hnode.attr(livehd::attrs::color);
+    if (ref.has()) {
+      return ref.get();
+    }
+  }
   const auto& ptr = current_g->get_node_color_map();
   const auto  it  = ptr.find(get_compact_class());
   I(it != ptr.end());
@@ -730,6 +744,13 @@ int Node::get_color() const {
 }
 
 bool Node::has_color() const {
+  auto hnode = get_hhds_node();
+  if (hnode.is_valid()) {
+    auto ref = hnode.attr(livehd::attrs::color);
+    if (ref.has()) {
+      return true;
+    }
+  }
   const auto& ptr = current_g->get_node_color_map();
   const auto  it  = ptr.find(get_compact_class());
   return it != ptr.end();

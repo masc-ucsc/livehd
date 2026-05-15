@@ -303,6 +303,37 @@ public:
     hnode.attr(livehd::attrs::lut).set(std::move(serialized));
   }
 
+  // HHDS Phase G3 (shadow write): mirror node-level color as a per-node
+  // HHDS attribute. Threaded into Node::set_color / Node::del_color.
+  void mirror_set_color_hhds(Index_id nid, int32_t color) {
+    if (!hhds_graph_) {
+      return;
+    }
+    auto it = idx_to_hhds_nid_.find(nid);
+    if (it == idx_to_hhds_nid_.end()) {
+      return;
+    }
+    auto hnode = hhds_graph_->get_node(it->second);
+    if (!hnode.is_valid()) {
+      return;
+    }
+    hnode.attr(livehd::attrs::color).set(color);
+  }
+  void mirror_del_color_hhds(Index_id nid) {
+    if (!hhds_graph_) {
+      return;
+    }
+    auto it = idx_to_hhds_nid_.find(nid);
+    if (it == idx_to_hhds_nid_.end()) {
+      return;
+    }
+    auto hnode = hhds_graph_->get_node(it->second);
+    if (!hnode.is_valid()) {
+      return;
+    }
+    hnode.attr(livehd::attrs::color).del();
+  }
+
   // HHDS Phase G3 (shadow write): mirror per-pin sign as a per-pin HHDS
   // attribute on the driver pin. unsigned == 1, signed == 0. Threaded
   // through Node_pin::set_unsign / set_sign. Uses create_driver_pin
