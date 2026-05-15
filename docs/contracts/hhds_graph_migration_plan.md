@@ -5,21 +5,73 @@ is already complete — see `hhds_migration.md`). It replaces LiveHD's
 hand-rolled `Lgraph` storage with `hhds::Graph`, and `Graph_library`
 with `hhds::GraphLibrary`.
 
-## Baseline (2026-05-14)
+## Strategy pivot (2026-05-15) — new `graph/` directory + per-pass migration
 
-- 201 tests pass, 27 fail. The 27 failures concentrate in
-  `inou/prp` (10 — known constprop verifier regressions documented
-  in `hhds_migration.md §8.4`) and `inou/slang` (17 — preexisting,
-  unrelated). These must remain the *only* failures after migration.
-- `lgraph/` directory: ~12,205 LOC across 17 .cpp/.hpp files.
-- 124 files across 37 directories `#include` lgraph headers.
+After landing Phase G3 reader/payload migration to shadow and most of
+Phase G6 deletions (see history below), the in-place migration of the
+`lgraph/` wrapper layer hit two structural walls:
 
-## Scope and rough effort
+1. The `Sub_node` ↔ `hhds::GraphIO` mirror needed bits / sign / position
+   fields HHDS did not have. Patching HHDS unblocked it, but each
+   subsequent reader (e.g., `Node_pin::get_name`) required threading
+   migration plumbing through the dual-write Lgraph wrapper.
+2. The `Node` / `Node_pin` / `XEdge` storage rewrite (Phase G4) is
+   atomic by nature — flipping `Index_id` storage to HHDS handles
+   means touching ~100+ sites simultaneously, with the Compact /
+   Compact_flat / Compact_class serialization keys depending on
+   `Index_id`. Doing it incrementally is hard.
 
-This is roughly the same scope as the LNAST migration (which spanned
-many commits over weeks). It is **not a single-session task**.
-Concrete sub-tasks below; each must keep all 201 baseline tests
-passing.
+**New direction**: stop migrating `lgraph/` in place. Build a small new
+`graph/` directory with just the LiveHD bits that ride on top of
+`hhds::Graph`, and migrate each pass directly to use
+`hhds::Graph` + `hhds::Node_class` + `hhds::Pin_class` +
+`livehd::attrs::*`. Once the priority passes (inou/prp, inou/yosys,
+inou/cgen, pass/bitwidth, pass/cprop) are migrated, `lgraph/`
+disappears from the build and gets deleted wholesale. Non-priority
+passes (label, locator, opentimer, abc, submatch, sample, prp_writer)
+can be migrated later or retired with their `//lgraph` dep.
+
+`graph/` contents (landed):
+- `graph/cell.{cpp,hpp}` — `Ntype_op` + cell-type metadata (sink/driver
+  names, loop_first/loop_last, multi-driver/sink predicates). HHDS
+  `NodeEntry::type` carries the encoded value.
+- `graph/ann_place.hpp` — `Ann_place` value type used by
+  `livehd::attrs::place`.
+- `graph/attrs.hpp` — every LiveHD per-node / per-pin attribute tag
+  backed by `hhds::flat_storage`: `bits`, `pin_offset`, `pin_name`,
+  `pin_delay`, `pin_unsigned`, `color`, `place`, `loc`, `source`,
+  `subid`, `const_value`, `lut`. Pre-registered at static-init in
+  `graph/cell.cpp` (avoids the registry race documented in
+  `hhds_migration.md §3.1`).
+- `graph/BUILD` — `cc_library "graph"`, deps `//core` +
+  `@hhds//hhds:graph` (notably **not** `//lgraph`).
+
+## Baseline
+
+- **Current (2026-05-15):** 215 pass / 11 fail / 1 skipped. The 11
+  failures are all `inou/prp` constprop-verifier regressions documented
+  in `hhds_migration.md §8.4`. No previously-passing test has regressed
+  since the migration began.
+- Historical (2026-05-14): 201 pass / 27 fail / 1 skipped. The
+  improvement to 215/11 comes from deleting fixme-tagged tests, dead
+  test stubs, and obsolete `inou/slang` paths along the way; no test
+  that was passing then has stopped passing.
+- `lgraph/` directory: still ~12k LOC; remains in tree but slated for
+  deletion once the priority passes are off it.
+
+## Per-pass migration status (priority list)
+
+| Pass | LOC | Lgraph touchpoints | Status |
+| --- | --- | --- | --- |
+| `inou/prp` | 3666 | 0 in BUILD | DONE (was never coupled — produces LNAST only). Dead `do_work`/`to_lgraph` decls removed. |
+| `inou/cgen` | 1226 | ~50 method calls | **PENDING** — start here next session. |
+| `inou/yosys` | 5251 | ~322 | PENDING. User expects this to be a mostly-mechanical create-side migration. |
+| `pass/bitwidth` | 2241 | ~55 | PENDING. |
+| `pass/cprop` | 2845 | ~116 | PENDING. |
+
+After the five priority passes are migrated, the gating tests
+(`inou/yosys:all` + `inou/prp:all`) run on the new infrastructure;
+non-priority passes follow.
 
 ## API mapping (lgraph → hhds)
 
@@ -436,11 +488,114 @@ Where the 27 failures are exactly the baseline set.
 ## Notes for future sessions
 
 This plan was created while completing **task 1a** of the Pyrope
-punch list in `TODO.md`. Pick up by:
-1. Read the latest "Phased plan" section above; pick the lowest
-   un-finished Phase Gn.
-2. Run `bazel test //... --keep_going` for a fresh baseline before
-   touching anything.
-3. Patch missing HHDS API upstream in `../hhds`, not locally.
-4. Cross-reference `hhds_migration.md §4` (side-map convention)
-   for any pass-local node→T data structures.
+punch list in `TODO.md`.
+
+### Entry point — start here
+
+The Phased plan below (G0-G6) is historical: most of G3 landed before
+the strategy pivot, and parts of G6 were done eagerly. The current
+working plan is the **per-pass migration list** at the top of this
+document. To pick up:
+
+1. **Run baseline first.** Expect 215 pass / 11 fail / 1 skipped. The
+   11 are the known `inou/prp` constprop-verifier regressions
+   (`hhds_migration.md §8.4`). No other test should fail.
+
+2. **Pick the next un-migrated priority pass.** Start with `inou/cgen`
+   (smallest, 1226 LOC, ~50 touchpoints, pure consumer that emits
+   Verilog). Its BUILD is in `inou/cgen/BUILD`; the main file is
+   `inou/cgen/cgen_verilog.cpp`.
+
+3. **Migration template (per pass):**
+   - Replace `Lgraph* lg` parameters with `hhds::Graph*` (or
+     `std::shared_ptr<hhds::Graph>`).
+   - `lg->fast()` → `graph.forward_class()` (or `fast_class()` if
+     order doesn't matter).
+   - `node.get_type_op()` → `Ntype_op{static_cast<uint16_t>(node.get_type()) >> 1}`
+     (invert the bit-0 shift LiveHD's mirror applies — see
+     `Lgraph::mirror_set_type_hhds` for the encoding).
+   - `node.setup_driver_pin_raw(pid)` →
+     `node.create_driver_pin(pid)` (HHDS find-or-create).
+   - `node.get_type_sub_node()` → look up GraphIO via
+     `graph_lib.find_io(name)` or
+     `graph.get_io_for_subnode(node.get_subnode())`.
+   - `dpin.get_top_lgraph()->get_self_sub_node()` →
+     `graph.get_io()` (returns `shared_ptr<hhds::GraphIO>`).
+   - `dpin.get_bits()` →
+     `dpin.attr(livehd::attrs::bits).has() ? dpin.attr(livehd::attrs::bits).get() : 0`.
+   - `node.set_color(c)` → `node.attr(livehd::attrs::color).set(c)`.
+   - Other per-pin / per-node attrs: `livehd::attrs::pin_name`,
+     `pin_offset`, `pin_delay`, `pin_unsigned`, `place`, `loc`,
+     `source`, `subid`, `const_value`, `lut`. All defined in
+     `graph/attrs.hpp`.
+   - For Verilog positional argument order, use HHDS `port_id` (it
+     is the unified instance_pid + graph_io_pos per user direction
+     2026-05-15).
+
+4. **HHDS API gaps from earlier scans** — patch upstream in `../hhds`,
+   not locally. Currently identified:
+   - `hhds::Node_class::find_or_create_pin(name)` — cleaner than
+     `resolve_driver_port(name)` + `find_or_create_pin(port_id)`.
+     User specifically called this out as a candidate addition.
+   - PinEntry/NodeEntry native `bits` (24 bits) + `sign` (1 bit) —
+     layout overhaul documented in `TODO.md`. Drops the
+     `livehd::attrs::bits` / `livehd::attrs::pin_unsigned`
+     flat_storage attrs in favor of indexed loads. Its own multi-commit
+     campaign; do *after* the per-pass migrations are done so the
+     attribute-tag side is well-validated.
+
+5. **Tests:**
+   - `bazel test //inou/yosys/... //inou/prp/... --keep_going` for the
+     gating set.
+   - Each per-pass commit should preserve 215 pass / 11 fail / 1
+     skipped. The single skipped test has been stable through the
+     entire migration.
+
+6. **Once all five priority passes are migrated:**
+   - Drop `//lgraph` from `main/BUILD` (and any pass that still lists
+     it).
+   - Rebuild and confirm tests still pass.
+   - Wholesale delete `lgraph/` (the directory and all source).
+   - Drop `@hif//hif` from `MODULE.bazel` if no consumer remains.
+   - Update this doc's status table to "DONE".
+
+### Cumulative deletions to date (Phase G6 partial)
+
+Roughly 15,000+ lines of obsolete LiveHD code already removed across
+the sessions leading to this pivot:
+- All fixme-tagged tests + their sources (8 files, ~2600 lines).
+- `cops/live/` (orphaned, ~3000 lines).
+- `pass/fluid/` (orphaned, ~1000 lines).
+- 5 unused passes: `extractor`, `randomize_dpins`, `punch`,
+  `mockturtle`, `semantic` (~5400 lines).
+- `inou/json/` (~1200 lines).
+- `lgraph.copy` Eprp pass + supporting code (dead `I(false)` stub).
+- `Lgtuple::create_assign(Lgtuple)` / `Bundle::create_assign(*)`
+  / `Bwd_edge_iterator` + `Lgraph::backward()` (all
+  `I(false)` stubs with no live callers).
+- `Lgraph_attributes::set_type_const(string_view|int64_t)` (unused).
+- `Node::nuke()` / `Node_pin::nuke()` (TODO stubs).
+- 4 obsolete lgraph tests: `edge_test`, `lgtuple_test`,
+  `graph_bench`, `hierarchy_test`.
+
+The remaining big deletion is `lgraph/` itself — blocked on the
+per-pass migration. See the priority table above.
+
+### HHDS upstream patches landed during this migration
+
+For session continuity, the HHDS commits added in support of this
+migration (all in `../hhds/hhds/`):
+- `Node_class::has_inp_edges()` / `has_out_edges()` + matching
+  `Graph::erase_declared_io_pin` assertion relaxation.
+- Bug fix: `has_*_edges()` walks node-entry edges in addition to the
+  pin linked list (covers port-0 edges).
+- `GraphIO::reset_declarations()` — clears declarations without
+  tombstoning the GraphIO + paired Graph.
+- `GraphIO::has_pin_with_port_id` /
+  `has_input_with_port_id` / `has_output_with_port_id`.
+- `GraphIO::DeclaredIoPin` extended with `bits` (uint32) + `unsign`
+  (bool); accessor methods `set_bits`/`get_bits`/`set_unsign`/`is_unsign`.
+- `DeclaredIoPin` promoted to public + `get_input_pin_decls()` /
+  `get_output_pin_decls()` for external iteration.
+- `GraphLibrary::save/load` text format extended to round-trip the
+  new bits + unsigned fields (no backward compat with older saves).

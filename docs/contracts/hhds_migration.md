@@ -12,17 +12,28 @@ is still planned and is captured at the end.
 ## 1. Goal and scope
 
 Maximise deletion of LiveHD code; do not preserve old APIs or binary
-formats. Only the LNAST stack moved to HHDS:
+formats. The LNAST stack moved to HHDS (this doc); the graph stack is
+in flight (see `hhds_graph_migration_plan.md` for status + entry point):
 
 - LNAST trees, the AST parser, and the (now-deleted) `lgraph::Node_tree`.
 - LNAST persistence: HIF reader/writer for LNAST is gone; LNAST round-trips
   via `Tree::save_body` / `Forest::save`.
+- Graph side **in progress**: `Sub_node`/`Lgraph_attributes` payload
+  mirrored to HHDS attributes; `GraphIO` extended with bits + sign;
+  new `graph/` directory holds the LiveHD bits that ride on top of
+  `hhds::Graph`. Per-pass migration of `inou/yosys`, `inou/cgen`,
+  `pass/bitwidth`, `pass/cprop` is the next bite. `inou/prp` was never
+  coupled to Lgraph; it produces LNAST only.
 
 Out of scope (still on `@hif`):
 
 - `lgraph::Lgraph` HIF persistence (`lgraph.cpp`, `graph_library.cpp`).
-- `core/graph_core*.hpp`, `core/graph_sizing.hpp`. These are covered by
-  the future graph migration to `hhds::graph`.
+  Slated for replacement by `hhds::GraphLibrary::save/load` (see graph
+  migration plan).
+- `core/graph_sizing.hpp` (small sizing constants — `Bits_t`, `Port_ID`).
+  Likely survives the graph migration as is.
+- `core/graph_core*.hpp` was removed in earlier graph cleanup; LiveHD
+  no longer carries that interim graph abstraction.
 
 `lh::woothash64` / `lh::waterhash` (in `core/woothash.hpp`,
 `core/waterhash.hpp`) survive — they are unrelated hashing utilities, not
