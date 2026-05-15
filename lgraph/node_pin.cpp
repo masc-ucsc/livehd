@@ -174,6 +174,15 @@ Ntype_op Node_pin::get_type_op() const {
   return current_g->get_type_op(nid);
 }
 
+hhds::Pin_class Node_pin::get_hhds_pin() const {
+  auto hnode = current_g->get_hhds_node(current_g->get_node_nid(idx));
+  if (!hnode.is_valid()) {
+    return {};
+  }
+  return sink ? hnode.get_sink_pin(static_cast<hhds::Port_id>(pid))
+              : hnode.get_driver_pin(static_cast<hhds::Port_id>(pid));
+}
+
 Node Node_pin::get_driver_node() const { return get_driver_pin().get_node(); }
 
 Node_pin Node_pin::get_driver_pin() const {

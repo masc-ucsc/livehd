@@ -7,6 +7,7 @@ class Node;
 
 #include <vector>
 
+#include "hhds/graph.hpp"
 #include "hierarchy.hpp"
 #include "lgedge.hpp"
 #include "woothash.hpp"
@@ -351,6 +352,14 @@ public:
   [[nodiscard]] Index_id get_node_nid() const;
   [[nodiscard]] Node     get_node() const;
   [[nodiscard]] Ntype_op get_type_op() const;
+
+  // HHDS Phase G4 prep: paired hhds::Pin_class accessor. Resolves through
+  // the owning node's shadow Node_class and looks up the driver/sink pin by
+  // port_id. Returns a default-constructed (invalid) Pin_class when the
+  // pin's owning node isn't tracked in idx_to_hhds_nid_, when the pin was
+  // never materialized on the shadow, or for graph-IO pseudo-pins. Defined
+  // in node_pin.cpp because it needs the full Lgraph definition.
+  [[nodiscard]] hhds::Pin_class get_hhds_pin() const;
 
   [[nodiscard]] Node              get_driver_node() const;  // common 0 or 1 driver case
   [[nodiscard]] Node_pin          get_driver_pin() const;   // common 0 or 1 driver case
