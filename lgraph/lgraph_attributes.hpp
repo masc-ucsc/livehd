@@ -114,8 +114,6 @@ protected:
   [[nodiscard]] Const get_type_lut(Index_id nid) const;
 
   void set_type_const(Index_id nid, const Const& value);
-  void set_type_const(Index_id nid, std::string_view value);
-  void set_type_const(Index_id nid, int64_t value);
 
   // No const because Const created
   [[nodiscard]] Const get_type_const(Index_id nid) const;
