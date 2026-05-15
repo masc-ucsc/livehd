@@ -78,12 +78,12 @@ void lefiViaRuleLayer::clearLayerOverhang() {
   overhang2_ = -1;
 }
 
-void lefiViaRuleLayer::setName(const char *name) {
+void lefiViaRuleLayer::setName(const char* name) {
   int len = strlen(name) + 1;
   if (name_) {
     lefFree(name_);
   }
-  name_ = (char *)lefMalloc(len);
+  name_ = (char*)lefMalloc(len);
   strcpy(name_, CASE(name));
   direction_ = '\0';
   // overhang1_ = -1;    already reset in clearLayerOverhang
@@ -183,7 +183,7 @@ int lefiViaRuleLayer::hasMetalOverhang() const { return hasMetalOverhang_; }
 
 int lefiViaRuleLayer::hasSpacing() const { return hasSpacing_; }
 
-char *lefiViaRuleLayer::name() const { return name_; }
+char* lefiViaRuleLayer::name() const { return name_; }
 
 int lefiViaRuleLayer::isHorizontal() const { return direction_ == 'H' ? 1 : 0; }
 
@@ -217,7 +217,7 @@ double lefiViaRuleLayer::xh() const { return xh_; }
 
 double lefiViaRuleLayer::yh() const { return yh_; }
 
-void lefiViaRuleLayer::print(FILE *f) const {
+void lefiViaRuleLayer::print(FILE* f) const {
   fprintf(f, "  Layer %s", name_);
 
   if (isHorizontal()) {
@@ -277,9 +277,9 @@ lefiViaRule::lefiViaRule()
 
 void lefiViaRule::Init() {
   nameSize_      = 16;
-  name_          = (char *)lefMalloc(16);
+  name_          = (char*)lefMalloc(16);
   viasAllocated_ = 2;
-  vias_          = (char **)lefMalloc(sizeof(char *) * 2);
+  vias_          = (char**)lefMalloc(sizeof(char*) * 2);
   layers_[0].Init();
   layers_[1].Init();
   layers_[2].Init();
@@ -287,10 +287,10 @@ void lefiViaRule::Init() {
   numVias_        = 0;
   numProps_       = 0;
   propsAllocated_ = 1;
-  names_          = (char **)lefMalloc(sizeof(char *));
-  values_         = (char **)lefMalloc(sizeof(char *));
-  dvalues_        = (double *)lefMalloc(sizeof(double));
-  types_          = (char *)lefMalloc(sizeof(char));
+  names_          = (char**)lefMalloc(sizeof(char*));
+  values_         = (char**)lefMalloc(sizeof(char*));
+  dvalues_        = (double*)lefMalloc(sizeof(double));
+  types_          = (char*)lefMalloc(sizeof(char));
 }
 
 void lefiViaRule::clear() {
@@ -315,11 +315,11 @@ void lefiViaRule::clearLayerOverhang() {
   layers_[1].clearLayerOverhang();
 }
 
-void lefiViaRule::setName(const char *name) {
+void lefiViaRule::setName(const char* name) {
   int len = strlen(name) + 1;
   if (len > nameSize_) {
     lefFree(name_);
-    name_     = (char *)lefMalloc(len);
+    name_     = (char*)lefMalloc(len);
     nameSize_ = len;
   }
   strcpy(name_, CASE(name));
@@ -329,11 +329,11 @@ void lefiViaRule::setName(const char *name) {
 void lefiViaRule::Destroy() {
   clear();
   lefFree(name_);
-  lefFree((char *)(vias_));
-  lefFree((char *)(names_));
-  lefFree((char *)(values_));
-  lefFree((char *)(dvalues_));
-  lefFree((char *)(types_));
+  lefFree((char*)(vias_));
+  lefFree((char*)(names_));
+  lefFree((char*)(values_));
+  lefFree((char*)(dvalues_));
+  lefFree((char*)(types_));
   layers_[0].Destroy();
   layers_[1].Destroy();
   layers_[2].Destroy();
@@ -345,25 +345,25 @@ void lefiViaRule::setGenerate() { hasGenerate_ = 1; }
 
 void lefiViaRule::setDefault() { hasDefault_ = 1; }
 
-void lefiViaRule::addViaName(const char *name) {
+void lefiViaRule::addViaName(const char* name) {
   // Add one of possibly many via names
   int len = strlen(name) + 1;
   if (numVias_ == viasAllocated_) {
     int    i;
-    char **nn;
+    char** nn;
     if (viasAllocated_ == 0) {
       viasAllocated_ = 2;
     } else {
       viasAllocated_ *= 2;
     }
-    nn = (char **)lefMalloc(sizeof(char *) * viasAllocated_);
+    nn = (char**)lefMalloc(sizeof(char*) * viasAllocated_);
     for (i = 0; i < numVias_; i++) {
       nn[i] = vias_[i];
     }
-    lefFree((char *)(vias_));
+    lefFree((char*)(vias_));
     vias_ = nn;
   }
-  vias_[numVias_] = (char *)lefMalloc(len);
+  vias_[numVias_] = (char*)lefMalloc(len);
   strcpy(vias_[numVias_], CASE(name));
   numVias_ += 1;
 }
@@ -392,7 +392,7 @@ void lefiViaRule::setHorizontal() { layers_[numLayers_ - 1].setHorizontal(); }
 
 void lefiViaRule::setEnclosure(double overhang1, double overhang2) { layers_[numLayers_ - 1].setEnclosure(overhang1, overhang2); }
 
-void lefiViaRule::setLayer(const char *name) {
+void lefiViaRule::setLayer(const char* name) {
   if (numLayers_ == 3) {
     lefiError(0, 1430, "ERROR (LEFPARS-1430): too many via rule layers");
     return;
@@ -413,16 +413,16 @@ int lefiViaRule::numLayers() const {
   return numLayers_;
 }
 
-lefiViaRuleLayer *lefiViaRule::layer(int index) const {
+lefiViaRuleLayer* lefiViaRule::layer(int index) const {
   if (index < 0 || index > 2) {
     return 0;
   }
-  return (lefiViaRuleLayer *)&(layers_[index]);
+  return (lefiViaRuleLayer*)&(layers_[index]);
 }
 
-char *lefiViaRule::name() const { return name_; }
+char* lefiViaRule::name() const { return name_; }
 
-void lefiViaRule::print(FILE *f) const {
+void lefiViaRule::print(FILE* f) const {
   int i;
   fprintf(f, "VIA RULE %s", name());
   if (hasGenerate()) {
@@ -441,7 +441,7 @@ void lefiViaRule::print(FILE *f) const {
 
 int lefiViaRule::numVias() const { return numVias_; }
 
-char *lefiViaRule::viaName(int index) const {
+char* lefiViaRule::viaName(int index) const {
   if (index < 0 || index >= numVias_) {
     return 0;
   }
@@ -450,97 +450,97 @@ char *lefiViaRule::viaName(int index) const {
 
 int lefiViaRule::numProps() const { return numProps_; }
 
-void lefiViaRule::addProp(const char *name, const char *value, const char type) {
+void lefiViaRule::addProp(const char* name, const char* value, const char type) {
   int len = strlen(name) + 1;
   if (numProps_ == propsAllocated_) {
     int     i;
     int     max;
     int     lim;
-    char  **nn;
-    char  **nv;
-    double *nd;
-    char   *nt;
+    char**  nn;
+    char**  nv;
+    double* nd;
+    char*   nt;
 
     if (propsAllocated_ == 0) {
       propsAllocated_ = 1;  // initialize propsAllocated_
     }
     max = propsAllocated_ *= 2;
     lim = numProps_;
-    nn  = (char **)lefMalloc(sizeof(char *) * max);
-    nv  = (char **)lefMalloc(sizeof(char *) * max);
-    nd  = (double *)lefMalloc(sizeof(double) * max);
-    nt  = (char *)lefMalloc(sizeof(char) * max);
+    nn  = (char**)lefMalloc(sizeof(char*) * max);
+    nv  = (char**)lefMalloc(sizeof(char*) * max);
+    nd  = (double*)lefMalloc(sizeof(double) * max);
+    nt  = (char*)lefMalloc(sizeof(char) * max);
     for (i = 0; i < lim; i++) {
       nn[i] = names_[i];
       nv[i] = values_[i];
       nd[i] = dvalues_[i];
       nt[i] = types_[i];
     }
-    lefFree((char *)(names_));
-    lefFree((char *)(values_));
-    lefFree((char *)(dvalues_));
-    lefFree((char *)(types_));
+    lefFree((char*)(names_));
+    lefFree((char*)(values_));
+    lefFree((char*)(dvalues_));
+    lefFree((char*)(types_));
     names_   = nn;
     values_  = nv;
     dvalues_ = nd;
     types_   = nt;
   }
-  names_[numProps_] = (char *)lefMalloc(sizeof(char) * len);
+  names_[numProps_] = (char*)lefMalloc(sizeof(char) * len);
   strcpy(names_[numProps_], name);
   len                = strlen(value) + 1;
-  values_[numProps_] = (char *)lefMalloc(sizeof(char) * len);
+  values_[numProps_] = (char*)lefMalloc(sizeof(char) * len);
   strcpy(values_[numProps_], value);
   dvalues_[numProps_] = 0;
   types_[numProps_]   = type;
   numProps_ += 1;
 }
 
-void lefiViaRule::addNumProp(const char *name, const double d, const char *value, const char type) {
+void lefiViaRule::addNumProp(const char* name, const double d, const char* value, const char type) {
   int len = strlen(name) + 1;
   if (numProps_ == propsAllocated_) {
     int     i;
     int     max;
     int     lim;
-    char  **nn;
-    char  **nv;
-    double *nd;
-    char   *nt;
+    char**  nn;
+    char**  nv;
+    double* nd;
+    char*   nt;
 
     if (propsAllocated_ == 0) {
       propsAllocated_ = 1;  // initialize propsAllocated_
     }
     max = propsAllocated_ *= 2;
     lim = numProps_;
-    nn  = (char **)lefMalloc(sizeof(char *) * max);
-    nv  = (char **)lefMalloc(sizeof(char *) * max);
-    nd  = (double *)lefMalloc(sizeof(double) * max);
-    nt  = (char *)lefMalloc(sizeof(char) * max);
+    nn  = (char**)lefMalloc(sizeof(char*) * max);
+    nv  = (char**)lefMalloc(sizeof(char*) * max);
+    nd  = (double*)lefMalloc(sizeof(double) * max);
+    nt  = (char*)lefMalloc(sizeof(char) * max);
     for (i = 0; i < lim; i++) {
       nn[i] = names_[i];
       nv[i] = values_[i];
       nd[i] = dvalues_[i];
       nt[i] = types_[i];
     }
-    lefFree((char *)(names_));
-    lefFree((char *)(values_));
-    lefFree((char *)(dvalues_));
-    lefFree((char *)(types_));
+    lefFree((char*)(names_));
+    lefFree((char*)(values_));
+    lefFree((char*)(dvalues_));
+    lefFree((char*)(types_));
     names_   = nn;
     values_  = nv;
     dvalues_ = nd;
     types_   = nt;
   }
-  names_[numProps_] = (char *)lefMalloc(sizeof(char) * len);
+  names_[numProps_] = (char*)lefMalloc(sizeof(char) * len);
   strcpy(names_[numProps_], name);
   len                = strlen(value) + 1;
-  values_[numProps_] = (char *)lefMalloc(sizeof(char) * len);
+  values_[numProps_] = (char*)lefMalloc(sizeof(char) * len);
   strcpy(values_[numProps_], value);
   dvalues_[numProps_] = d;
   types_[numProps_]   = type;
   numProps_ += 1;
 }
 
-const char *lefiViaRule::propName(int i) const {
+const char* lefiViaRule::propName(int i) const {
   char msg[160];
   if (i < 0 || i >= numProps_) {
     sprintf(msg,
@@ -553,7 +553,7 @@ const char *lefiViaRule::propName(int i) const {
   return names_[i];
 }
 
-const char *lefiViaRule::propValue(int i) const {
+const char* lefiViaRule::propValue(int i) const {
   char msg[160];
   if (i < 0 || i >= numProps_) {
     sprintf(msg,

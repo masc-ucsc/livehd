@@ -6,8 +6,8 @@
 // #include "absl/container/inlined_vector.h"
 
 #include "cell.hpp"
-#include "hierarchy.hpp"
 #include "const.hpp"
+#include "hierarchy.hpp"
 #include "lgraph_base_core.hpp"
 #include "node_pin.hpp"
 #include "sub_node.hpp"
@@ -289,7 +289,7 @@ public:
   }
   constexpr bool operator!=(const Node& other) const { return !(*this == other); }
 
-  void   set_type_lut(const Const& lutid);
+  void  set_type_lut(const Const& lutid);
   Const get_type_lut() const;
 
   std::string_view get_type_name() const;
@@ -360,7 +360,7 @@ public:
 
   Node create(Ntype_op op) const;                                                        // create a new node, keep same hierarchy
   Node create(Ntype_op op, std::pair<uint64_t, uint64_t> loc, std::string fname) const;  // create a new node, keep same hierarchy
-  Node create_const(const Const& value) const;                                          // create a new node, keep same hierarchy
+  Node create_const(const Const& value) const;                                           // create a new node, keep same hierarchy
   Node create_const(int64_t value) const { return create_const(*Dlop::create_integer(value)); }
   Node create_const(int value) const { return create_const(*Dlop::create_integer(value)); }
   Node create_const(const spool_ptr<Dlop>& value) const { return create_const(*value); }

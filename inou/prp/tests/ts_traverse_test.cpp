@@ -8,7 +8,7 @@
 
 #include "tree_sitter/api.h"
 
-extern "C" TSLanguage *tree_sitter_pyrope();
+extern "C" TSLanguage* tree_sitter_pyrope();
 
 #include <filesystem>
 #include <fstream>
@@ -16,7 +16,7 @@ extern "C" TSLanguage *tree_sitter_pyrope();
 #include <string>
 #include <vector>
 
-std::string read_whole_file(const std::string &filename) {
+std::string read_whole_file(const std::string& filename) {
   auto          ss = std::ostringstream{};
   std::ifstream file(filename);
   ss << file.rdbuf();
@@ -24,7 +24,7 @@ std::string read_whole_file(const std::string &filename) {
   return ss.str();
 }
 
-int main(int argc, const char **argv) {
+int main(int argc, const char** argv) {
   if (argc != 2) {
     std::cerr << "usage:\n";
     std::cerr << "\t" << argv[0] << " prp_file\n";
@@ -33,11 +33,11 @@ int main(int argc, const char **argv) {
 
   std::string prp_file(read_whole_file(argv[1]));
 
-  TSParser *parser = ts_parser_new();
+  TSParser* parser = ts_parser_new();
 
   ts_parser_set_language(parser, tree_sitter_pyrope());
 
-  TSTree *tst_tree = ts_parser_parse_string(parser, NULL, prp_file.data(), prp_file.size());
+  TSTree* tst_tree = ts_parser_parse_string(parser, NULL, prp_file.data(), prp_file.size());
 
   std::cout << "Code reprinted:" << std::endl;
 

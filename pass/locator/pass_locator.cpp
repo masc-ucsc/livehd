@@ -102,7 +102,8 @@ void Pass_locator::begin_pass(Eprp_var& var) {
       auto curr_lev       = level_of(curr_index);
       auto curr_pos       = pos_of(curr_index);
       for (const Lnast_nid& it : ln->depth_preorder(curr_index)) {
-        //        if (((level_of(it) == level_of(curr_index)) && (pos_of(it) > pos_of(curr_index))) || (level_of(it) < level_of(curr_index))) {
+        //        if (((level_of(it) == level_of(curr_index)) && (pos_of(it) > pos_of(curr_index))) || (level_of(it) <
+level_of(curr_index))) {
         //         break;
         //       }//This if is needed because depth preorder traverses the next subtree as well. It does not stop after traversing
         //       the particular subtree (of root curr_index)

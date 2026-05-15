@@ -8,7 +8,7 @@
 // errors when multiple TUs include upass_assert.hpp.
 static upass::uPass_plugin plugin_assert("assert", upass::uPass_wrapper<uPass_assert>::get_upass, {"constprop"});
 
-uPass_assert::uPass_assert(std::shared_ptr<upass::Lnast_manager> &_lm) : uPass(_lm) {
+uPass_assert::uPass_assert(std::shared_ptr<upass::Lnast_manager>& _lm) : uPass(_lm) {
   st.function_scope(_lm->get_top_module_name());
 }
 
@@ -22,8 +22,7 @@ void uPass_assert::process_func_call() {
     // An invalid/unknown Const (val.is_invalid()) means the argument is not
     // constpropagated yet — we cannot statically decide, so do not throw.
     if (!val.is_invalid() && val.is_known_false()) {
-      upass::error("assert: cassert condition is statically false at '{}'\n",
-                   current_text());
+      upass::error("assert: cassert condition is statically false at '{}'\n", current_text());
     }
     // If the value is not known-false (unknown or provably true), silently pass.
   }

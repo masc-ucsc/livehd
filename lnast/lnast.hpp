@@ -83,26 +83,26 @@ struct BitwidthEntry {
   bool    pos_inf{true};  // max = +∞ (unbounded above)
 
   bool is_unbounded() const noexcept { return neg_inf || pos_inf; }
-  bool is_constant()  const noexcept { return !neg_inf && !pos_inf && min == max; }
+  bool is_constant() const noexcept { return !neg_inf && !pos_inf && min == max; }
 };
 
 struct Lnast_bitwidth_meta {
   std::unordered_map<std::string, BitwidthEntry> ranges;
-  bool empty() const noexcept { return ranges.empty(); }
+  bool                                           empty() const noexcept { return ranges.empty(); }
 };
 
 // ── I/O metadata side-channel (populated by upass/ssa when ssa:1 is set) ────
 // Separate from hhds::TreeIO (which is tree-replacement plumbing).
 struct Lnast_io_entry {
-  std::string name;          // field name, no $ / % prefix
-  int32_t     bits     = 0;  // 0 = unknown / infer from context
+  std::string name;           // field name, no $ / % prefix
+  int32_t     bits      = 0;  // 0 = unknown / infer from context
   bool        is_signed = true;
   bool        is_ref    = false;  // input declared with `ref` → write-back on inline
 };
 struct Lnast_tree_io {
   std::vector<Lnast_io_entry> inputs;
   std::vector<Lnast_io_entry> outputs;
-  bool empty() const noexcept { return inputs.empty() && outputs.empty(); }
+  bool                        empty() const noexcept { return inputs.empty() && outputs.empty(); }
 };
 
 class Lnast {
@@ -118,10 +118,10 @@ private:
   Lnast_nid                     undefined_var_nid;
   // I/O metadata populated by the SSA upass (ssa:1).  Empty unless the SSA
   // pass has run on this LNAST.
-  Lnast_tree_io                 io_meta_;
+  Lnast_tree_io io_meta_;
   // Bitwidth metadata populated by uPass_bitwidth::end_run().  Empty unless
   // the bitwidth pass has run on this LNAST.
-  Lnast_bitwidth_meta           bw_meta_;
+  Lnast_bitwidth_meta bw_meta_;
 
 public:
   static constexpr char version[] = "0.1.0";

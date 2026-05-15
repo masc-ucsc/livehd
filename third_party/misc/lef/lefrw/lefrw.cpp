@@ -447,13 +447,13 @@ int arrayCB(lefrCallbackType_e c, lefiArray* a, lefiUserData) {
     for (i = 0; i < a->lefiArray::numSitePattern(); i++) {
       pattern = a->lefiArray::sitePattern(i);
       status  = lefwArraySite(pattern->lefiSitePattern::name(),
-                             pattern->lefiSitePattern::x(),
-                             pattern->lefiSitePattern::y(),
-                             pattern->lefiSitePattern::orient(),
-                             pattern->lefiSitePattern::xStart(),
-                             pattern->lefiSitePattern::yStart(),
-                             pattern->lefiSitePattern::xStep(),
-                             pattern->lefiSitePattern::yStep());
+                              pattern->lefiSitePattern::x(),
+                              pattern->lefiSitePattern::y(),
+                              pattern->lefiSitePattern::orient(),
+                              pattern->lefiSitePattern::xStart(),
+                              pattern->lefiSitePattern::yStart(),
+                              pattern->lefiSitePattern::xStep(),
+                              pattern->lefiSitePattern::yStep());
       if (status != LEFW_OK) {
         dataError();
       }
@@ -463,13 +463,13 @@ int arrayCB(lefrCallbackType_e c, lefiArray* a, lefiUserData) {
     for (i = 0; i < a->lefiArray::numCanPlace(); i++) {
       pattern = a->lefiArray::canPlace(i);
       status  = lefwArrayCanplace(pattern->lefiSitePattern::name(),
-                                 pattern->lefiSitePattern::x(),
-                                 pattern->lefiSitePattern::y(),
-                                 pattern->lefiSitePattern::orient(),
-                                 pattern->lefiSitePattern::xStart(),
-                                 pattern->lefiSitePattern::yStart(),
-                                 pattern->lefiSitePattern::xStep(),
-                                 pattern->lefiSitePattern::yStep());
+                                  pattern->lefiSitePattern::x(),
+                                  pattern->lefiSitePattern::y(),
+                                  pattern->lefiSitePattern::orient(),
+                                  pattern->lefiSitePattern::xStart(),
+                                  pattern->lefiSitePattern::yStart(),
+                                  pattern->lefiSitePattern::xStep(),
+                                  pattern->lefiSitePattern::yStep());
       if (status != LEFW_OK) {
         dataError();
       }
@@ -479,13 +479,13 @@ int arrayCB(lefrCallbackType_e c, lefiArray* a, lefiUserData) {
     for (i = 0; i < a->lefiArray::numCannotOccupy(); i++) {
       pattern = a->lefiArray::cannotOccupy(i);
       status  = lefwArrayCannotoccupy(pattern->lefiSitePattern::name(),
-                                     pattern->lefiSitePattern::x(),
-                                     pattern->lefiSitePattern::y(),
-                                     pattern->lefiSitePattern::orient(),
-                                     pattern->lefiSitePattern::xStart(),
-                                     pattern->lefiSitePattern::yStart(),
-                                     pattern->lefiSitePattern::xStep(),
-                                     pattern->lefiSitePattern::yStep());
+                                      pattern->lefiSitePattern::x(),
+                                      pattern->lefiSitePattern::y(),
+                                      pattern->lefiSitePattern::orient(),
+                                      pattern->lefiSitePattern::xStart(),
+                                      pattern->lefiSitePattern::yStart(),
+                                      pattern->lefiSitePattern::xStep(),
+                                      pattern->lefiSitePattern::yStep());
       if (status != LEFW_OK) {
         dataError();
       }
@@ -532,14 +532,14 @@ int arrayCB(lefrCallbackType_e c, lefiArray* a, lefiUserData) {
       for (j = 0; j < a->lefiArray::numSites(i); j++) {
         pattern = a->lefiArray::site(i, j);
         status  = lefwArrayFloorplan(a->lefiArray::siteType(i, j),
-                                    pattern->lefiSitePattern::name(),
-                                    pattern->lefiSitePattern::x(),
-                                    pattern->lefiSitePattern::y(),
-                                    pattern->lefiSitePattern::orient(),
-                                    (int)pattern->lefiSitePattern::xStart(),
-                                    (int)pattern->lefiSitePattern::yStart(),
-                                    pattern->lefiSitePattern::xStep(),
-                                    pattern->lefiSitePattern::yStep());
+                                     pattern->lefiSitePattern::name(),
+                                     pattern->lefiSitePattern::x(),
+                                     pattern->lefiSitePattern::y(),
+                                     pattern->lefiSitePattern::orient(),
+                                     (int)pattern->lefiSitePattern::xStart(),
+                                     (int)pattern->lefiSitePattern::yStart(),
+                                     pattern->lefiSitePattern::xStep(),
+                                     pattern->lefiSitePattern::yStep());
         if (status != LEFW_OK) {
           dataError();
         }

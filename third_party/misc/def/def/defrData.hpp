@@ -48,7 +48,7 @@
 BEGIN_LEFDEF_PARSER_NAMESPACE
 
 struct defCompareStrings {
-  bool operator()(const std::string &lhs, const std::string &rhs) const { return std::strcmp(lhs.c_str(), rhs.c_str()) < 0; }
+  bool operator()(const std::string& lhs, const std::string& rhs) const { return std::strcmp(lhs.c_str(), rhs.c_str()) < 0; }
 };
 
 typedef std::map<std::string, std::string, defCompareStrings> defAliasMap;
@@ -57,72 +57,72 @@ typedef std::map<std::string, std::string, defCompareStrings> defDefineMap;
 typedef union {
   double          dval;
   int             integer;
-  char           *string;
+  char*           string;
   int             keyword;  // really just a nop
   struct defpoint pt;
-  defTOKEN       *tk;
+  defTOKEN*       tk;
 } YYSTYPE;
 
 #define YYSTYPE_IS_DECLARED
 
 class defrData {
 public:
-  defrData(const defrCallbacks *pCallbacks, const defrSettings *pSettings, defrSession *pSession);
+  defrData(const defrCallbacks* pCallbacks, const defrSettings* pSettings, defrSession* pSession);
   ~defrData();
 
-  inline int defGetKeyword(const char *name, int *result);
-  inline int defGetAlias(const std::string &name, std::string &result);
-  inline int defGetDefine(const std::string &name, std::string &result);
+  inline int defGetKeyword(const char* name, int* result);
+  inline int defGetAlias(const std::string& name, std::string& result);
+  inline int defGetDefine(const std::string& name, std::string& result);
   void       reload_buffer();
   int        GETC();
 
   void               UNGETC(char ch);
-  char              *ringCopy(const char *string);
-  int                DefGetTokenFromStack(char *s);
+  char*              ringCopy(const char* string);
+  int                DefGetTokenFromStack(char* s);
   inline void        print_lines(long long lines);
-  const char        *lines2str(long long lines);
-  static inline void IncCurPos(char **curPos, char **buffer, int *bufferSize);
-  int                DefGetToken(char **buffer, int *bufferSize);
-  static void        uc_array(char *source, char *dest);
+  const char*        lines2str(long long lines);
+  static inline void IncCurPos(char** curPos, char** buffer, int* bufferSize);
+  int                DefGetToken(char** buffer, int* bufferSize);
+  static void        uc_array(char* source, char* dest);
   void               StoreAlias();
-  int                defyylex(YYSTYPE *pYylval);
-  int                sublex(YYSTYPE *pYylval);
-  int                amper_lookup(YYSTYPE *pYylval, char *tkn);
-  void               defError(int msgNum, const char *s);
-  void               defyyerror(const char *s);
-  void               defInfo(int msgNum, const char *s);
-  void               defWarning(int msgNum, const char *s);
+  int                defyylex(YYSTYPE* pYylval);
+  int                sublex(YYSTYPE* pYylval);
+  int                amper_lookup(YYSTYPE* pYylval, char* tkn);
+  void               defError(int msgNum, const char* s);
+  void               defyyerror(const char* s);
+  void               defInfo(int msgNum, const char* s);
+  void               defWarning(int msgNum, const char* s);
 
-  void        defiError(int check, int msgNum, const char *mess);
-  const char *DEFCASE(const char *ch);
-  void        pathIsDone(int shield, int reset, int netOsnet, int *needCbk);
-  const char *upperCase(const char *str);
+  void        defiError(int check, int msgNum, const char* mess);
+  const char* DEFCASE(const char* ch);
+  void        pathIsDone(int shield, int reset, int netOsnet, int* needCbk);
+  const char* upperCase(const char* str);
 
   inline int checkErrors();
   int        validateMaskInput(int input, int warningIndex, int getWarningsIndex);
-  int        validateMaskShiftInput(const char *shiftMask, int warningIndex, int getWarningsIndex);
+  int        validateMaskShiftInput(const char* shiftMask, int warningIndex, int getWarningsIndex);
 
-  static double convert_defname2num(char *versionName);
+  static double convert_defname2num(char* versionName);
 
-  static int numIsInt(char *volt);
+  static int numIsInt(char* volt);
   int        defValidNum(int values);
 
-  inline static const char *defkywd(int num);
+  inline static const char* defkywd(int num);
 
-  FILE     *defrLog;
+  FILE*     defrLog;
   char      defPropDefType;  // save the current type of the property
-  char     *ch;
-  char     *defMsg;
-  char     *deftoken;
-  char     *uc_token;
-  char     *last;
-  char     *magic;
-  char     *next;
-  char     *pv_deftoken;
-  char     *rowName;     // to hold the rowName for message
-  char     *shieldName;  // to hold the shieldNetName
-  char     *shiftBuf;
-  char     *warningMsg;
+  char*     ch;
+  char*     defMsg;
+  char*     deftoken;
+  char*     uc_token;
+  char*     last;
+  char*     magic;
+  char*     next;
+  char*     pv_deftoken;
+  char*     rowName;     // to hold the rowName for message
+  char*     shieldName;  // to hold the shieldNetName
+  char*     shiftBuf;
+  char*     warningMsg;
   double    save_x;
   double    save_y;
   double    lVal;
@@ -211,9 +211,9 @@ public:
   defAliasMap       def_alias_set;
   defDefineMap      def_defines_set;
 
-  char  *specialWire_routeStatus;
-  char  *specialWire_routeStatusName;
-  char  *specialWire_shapeType;
+  char*  specialWire_routeStatus;
+  char*  specialWire_routeStatusName;
+  char*  specialWire_shapeType;
   double VersionNum;
   double xStep;
   double yStep;
@@ -254,32 +254,32 @@ public:
   // Flags to control what happens
   int NeedPathData;
 
-  defiSubnet *Subnet;
+  defiSubnet* Subnet;
   int         msgLimit[DEF_MSGS];
   char        buffer[IN_BUF_SIZE];
-  char       *ring[RING_SIZE];
+  char*       ring[RING_SIZE];
   int         ringSizes[RING_SIZE];
   std::string stack[20]; /* the stack itself */
 
   YYSTYPE              yylval;
-  const defrCallbacks *callbacks;
-  const defrSettings  *settings;
-  defrSession         *session;
+  const defrCallbacks* callbacks;
+  const defrSettings*  settings;
+  defrSession*         session;
   char                 lineBuffer[MSG_SIZE];
 
-  FILE *File;
+  FILE* File;
 };
 
 class defrContext {
 public:
   defrContext(int ownConf = 0);
 
-  defrSettings  *settings;
-  defrCallbacks *callbacks;
-  defrSession   *session;
-  defrData      *data;
+  defrSettings*  settings;
+  defrCallbacks* callbacks;
+  defrSession*   session;
+  defrData*      data;
   int            ownConfig;
-  const char    *init_call_func;
+  const char*    init_call_func;
 };
 
 int defrData::checkErrors() {

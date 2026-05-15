@@ -19,10 +19,10 @@ public:
   void lower();
 
 private:
-  Lgraph*                lg_;
-  std::shared_ptr<Lnast> lnast_;
-  std::stack<Lnast_nid> nid_stack_;
-  Lnast_nid             cur_;
+  Lgraph*                                   lg_;
+  std::shared_ptr<Lnast>                    lnast_;
+  std::stack<Lnast_nid>                     nid_stack_;
+  Lnast_nid                                 cur_;
   std::unordered_map<std::string, Node_pin> pin_map_;
   std::unordered_set<std::string>           output_names_;
   // 1-based per contract §5: "input tuple field 1 maps to input pin 1; output
@@ -30,11 +30,11 @@ private:
   int next_inp_pos_{1};
   int next_out_pos_{1};
 
-  bool             move_to_child();
-  bool             move_to_sibling();
-  void             move_to_parent();
-  bool             is_last_child() const;
-  std::string_view current_text() const;
+  bool                         move_to_child();
+  bool                         move_to_sibling();
+  void                         move_to_parent();
+  bool                         is_last_child() const;
+  std::string_view             current_text() const;
   Lnast_ntype::Lnast_ntype_int current_ntype() const;
 
   static std::string_view strip_prefix(std::string_view name);
@@ -75,17 +75,17 @@ private:
   // been harvested into lnast_->io_meta().  Cursor must be at the `stmts`
   // child on entry; on exit the cursor is still at `stmts` (caller's
   // move_to_parent() returns to `top`).
-  void lower_from_io_meta();
-  void lower_stmts();
-  void lower_assign();
-  void lower_if();
-  void lower_func_def();
-  void lower_attr_set();
-  void lower_cassert();
-  void lower_infix(Ntype_op op, std::string_view a_pin_name, std::string_view b_pin_name);
-  void lower_negated_infix(Ntype_op op, std::string_view a_pin_name, std::string_view b_pin_name);
-  void lower_unary(Ntype_op op, std::string_view a_pin_name);
-  void lower_set_mask();
-  void lower_not();
+  void     lower_from_io_meta();
+  void     lower_stmts();
+  void     lower_assign();
+  void     lower_if();
+  void     lower_func_def();
+  void     lower_attr_set();
+  void     lower_cassert();
+  void     lower_infix(Ntype_op op, std::string_view a_pin_name, std::string_view b_pin_name);
+  void     lower_negated_infix(Ntype_op op, std::string_view a_pin_name, std::string_view b_pin_name);
+  void     lower_unary(Ntype_op op, std::string_view a_pin_name);
+  void     lower_set_mask();
+  void     lower_not();
   Node_pin lower_leaf();
 };

@@ -50,7 +50,7 @@ public:
   void Clear();
 
   char propType(char* name) const;
-  void       bumpProps();
+  void bumpProps();
 
 protected:
   int    numProperties_;

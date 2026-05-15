@@ -39,9 +39,9 @@ using namespace std;
 
 BEGIN_LEFDEF_PARSER_NAMESPACE
 
-extern void *lefMalloc(size_t lef_size);
+extern void* lefMalloc(size_t lef_size);
 
-lefrData *lefData = NULL;
+lefrData* lefData = NULL;
 
 lefrData::lefrData()
     : antennaInoutWarnings(0)
@@ -226,18 +226,18 @@ lefrData::lefrData()
     , viaRuleName(NULL)
     , viaRuleWarnings(0)
     , viaWarnings(0)
-    , current_token((char *)malloc(TOKEN_SIZE))
-    , pv_token((char *)malloc(TOKEN_SIZE))
-    , uc_token((char *)malloc(TOKEN_SIZE))
+    , current_token((char*)malloc(TOKEN_SIZE))
+    , pv_token((char*)malloc(TOKEN_SIZE))
+    , uc_token((char*)malloc(TOKEN_SIZE))
     , tokenSize(TOKEN_SIZE) {
   Hist_text.push_back('\0');
 
   // Initialization of arrays.
-  memset(ring, 0, RING_SIZE * sizeof(char *));
+  memset(ring, 0, RING_SIZE * sizeof(char*));
   memset(ringSizes, 0, RING_SIZE * sizeof(int));
   memset(lefDebug, 0, 100 * sizeof(char));
   memset(current_buffer, 0, IN_BUF_SIZE * sizeof(char));
-  memset(current_stack, 0, 20 * sizeof(char *));
+  memset(current_stack, 0, 20 * sizeof(char*));
   memset(lefrErrMsg, 0, 1024 * sizeof(char));
   memset(msgLimit, 0, 2 * MAX_LEF_MSGS * sizeof(int));
   memset(temp_name, 0, 258 * sizeof(char));
@@ -251,7 +251,7 @@ lefrData::lefrData()
   int i;
   ringPlace = 0;
   for (i = 0; i < RING_SIZE; i++) {
-    ring[i]      = (char *)lefMalloc(TOKEN_SIZE);
+    ring[i]      = (char*)lefMalloc(TOKEN_SIZE);
     ringSizes[i] = TOKEN_SIZE;
   }
 
@@ -299,7 +299,7 @@ lefrData::~lefrData() {
   }
 
   // destroyRingBuffer();
-  for (auto &e : ring) {
+  for (auto& e : ring) {
     free(e);
   }
 

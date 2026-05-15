@@ -88,8 +88,8 @@ void Ast_parser::dump() const {
   // Walk preorder. Depth is recovered via parent walks (cheap for diagnostic
   // dumps; the parser doesn't carry an explicit depth on each node anymore).
   for (const auto& index : depth_preorder()) {
-    int         depth = 0;
-    auto        p     = index.parent();
+    int  depth = 0;
+    auto p     = index.parent();
     while (p.is_valid()) {
       ++depth;
       p = p.parent();

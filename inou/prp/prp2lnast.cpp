@@ -19,6 +19,8 @@
 
 extern "C" TSLanguage* tree_sitter_pyrope();
 
+static constexpr std::string_view call_ref_arg_marker = "__ref_arg";
+
 Prp2lnast::Prp2lnast(std::string_view filename, std::string_view module_name, bool parse_only = false) {
   lnast = std::make_shared<Lnast>(module_name);
 
@@ -1359,9 +1361,8 @@ std::vector<Prp2lnast::Call_arg> Prp2lnast::collect_call_args(TSNode arg_tuple) 
   // argument tuple in an outer `expression_list`. Unwrap to the inner tuple
   // so the loop below iterates the real arg children (not a single
   // wrapped-tuple "arg" that would emit `f((a,b))` instead of `f(a,b)`).
-  if (std::string_view(ts_node_type(arg_tuple)) == "expression_list"
-      && ts_node_named_child_count(arg_tuple) == 1) {
-    TSNode inner = ts_node_named_child(arg_tuple, 0);
+  if (std::string_view(ts_node_type(arg_tuple)) == "expression_list" && ts_node_named_child_count(arg_tuple) == 1) {
+    TSNode           inner = ts_node_named_child(arg_tuple, 0);
     std::string_view it(ts_node_type(inner));
     if (it == "tuple" || it == "tuple_sq") {
       arg_tuple = inner;
@@ -1401,6 +1402,9 @@ std::vector<Prp2lnast::Call_arg> Prp2lnast::collect_call_args(TSNode arg_tuple) 
         auto   start = ts_node_is_null(op) ? ts_node_end_byte(lv) : ts_node_end_byte(op);
         arg.value    = constant_text_to_node(trim(text_between(start, ts_node_end_byte(c))));
       }
+    } else if (t == "ref_identifier") {
+      arg.is_ref = true;
+      arg.value  = expr_to_node(c);
     } else {
       arg.value = expr_to_node(c);
     }
@@ -1421,7 +1425,11 @@ std::vector<Prp2lnast::Call_arg> Prp2lnast::collect_call_args(TSNode arg_tuple) 
 
 void Prp2lnast::add_call_args_to_fcall(const Lnast_nid& fcall_idx, const std::vector<Call_arg>& call_args) {
   for (const auto& arg : call_args) {
-    if (arg.is_assign) {
+    if (arg.is_ref) {
+      auto aidx = lnast->add_child(fcall_idx, Lnast_ntype::create_assign());
+      lnast->add_child(aidx, Lnast_node::create_ref(call_ref_arg_marker));
+      lnast->add_child(aidx, arg.value);
+    } else if (arg.is_assign) {
       auto aidx = lnast->add_child(fcall_idx, Lnast_ntype::create_assign());
       lnast->add_child(aidx, Lnast_node::create_ref(arg.assign_key));
       lnast->add_child(aidx, arg.value);
@@ -2526,8 +2534,7 @@ Lnast_node Prp2lnast::if_expr_to_node(TSNode n, bool need_result) {
     // normal. Without this, every arm assigns 0 and the if-expression
     // always folds to 0 instead of the body's computed value.
     bool emitted_result = false;
-    if (need_result && !ts_node_is_null(code)
-        && std::string_view(ts_node_type(code)) == "scope_statement") {
+    if (need_result && !ts_node_is_null(code) && std::string_view(ts_node_type(code)) == "scope_statement") {
       uint32_t nnc = ts_node_named_child_count(code);
       if (nnc > 0) {
         TSNode           last = ts_node_named_child(code, nnc - 1);
@@ -2541,8 +2548,7 @@ Lnast_node Prp2lnast::if_expr_to_node(TSNode n, bool need_result) {
             if (!ts_node_is_named(c)) {
               continue;
             }
-            if (ts_node_start_byte(c) == ts_node_start_byte(last)
-                && ts_node_end_byte(c) == ts_node_end_byte(last)) {
+            if (ts_node_start_byte(c) == ts_node_start_byte(last) && ts_node_end_byte(c) == ts_node_end_byte(last)) {
               break;  // reached the trailing expression — handle below
             }
             process_statement(c);
@@ -2692,8 +2698,8 @@ Lnast_node Prp2lnast::match_expr_to_node(TSNode n, bool need_result) {
         else_code       = c;
         pending_is_else = false;
       } else if (have_pending) {
-        const bool       use_case   = (pending_op == "case" || pending_op == "!case");
-        const bool       negate     = (pending_op == "!case" || pending_op == "!=");
+        const bool use_case = (pending_op == "case" || pending_op == "!case");
+        const bool negate   = (pending_op == "!case" || pending_op == "!=");
         // Emit `<compare> tmp = subject_ref rhs` and return the tmp ref,
         // wrapping in log_not when the operator is the negated form.
         auto emit_compare = [&](const Lnast_node& rhs) {
@@ -2765,8 +2771,7 @@ Lnast_node Prp2lnast::match_expr_to_node(TSNode n, bool need_result) {
     auto body_idx = lnast->add_child(if_idx, Lnast_ntype::create_stmts());
     builder.push_stmts(body_idx);
     bool emitted_result = false;
-    if (need_result && !ts_node_is_null(code)
-        && std::string_view(ts_node_type(code)) == "scope_statement") {
+    if (need_result && !ts_node_is_null(code) && std::string_view(ts_node_type(code)) == "scope_statement") {
       uint32_t nnc = ts_node_named_child_count(code);
       if (nnc > 0) {
         TSNode           last = ts_node_named_child(code, nnc - 1);
@@ -2777,8 +2782,7 @@ Lnast_node Prp2lnast::match_expr_to_node(TSNode n, bool need_result) {
             if (!ts_node_is_named(cc)) {
               continue;
             }
-            if (ts_node_start_byte(cc) == ts_node_start_byte(last)
-                && ts_node_end_byte(cc) == ts_node_end_byte(last)) {
+            if (ts_node_start_byte(cc) == ts_node_start_byte(last) && ts_node_end_byte(cc) == ts_node_end_byte(last)) {
               break;  // reached the trailing expression — handle below
             }
             process_statement(cc);
@@ -3262,7 +3266,7 @@ Lnast_node Prp2lnast::tuple_to_node(TSNode n, bool /*is_square*/) {
         if (!ts_node_is_null(arg)) {
           std::string_view at(ts_node_type(arg));
           if (at == "typed_identifier") {
-            TSNode id = child_by_field(arg, "identifier");
+            TSNode id     = child_by_field(arg, "identifier");
             it.assign_key = ts_node_is_null(id) ? trim(get_text(arg)) : trim(get_text(id));
           } else {
             it.assign_key = trim(get_text(arg));

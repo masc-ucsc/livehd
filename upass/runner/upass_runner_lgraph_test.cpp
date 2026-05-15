@@ -1228,9 +1228,9 @@ TEST(UpassRunnerLgraph, DceTransitiveChain) {
 TEST(UpassRunnerLgraph, FoldSumConstThreeInputs) {
   constexpr std::string_view kDbPath = "lgdb_upass_nary_sum3";
   file_utils::clean_dir(kDbPath);
-  auto *lib = Graph_library::instance(kDbPath);
+  auto* lib = Graph_library::instance(kDbPath);
   ASSERT_NE(lib, nullptr);
-  auto *lg = lib->create_lgraph("top", "nary_sum3");
+  auto* lg = lib->create_lgraph("top", "nary_sum3");
   ASSERT_NE(lg, nullptr);
 
   auto out0 = lg->add_graph_output("o", 1, 8);
@@ -1245,13 +1245,15 @@ TEST(UpassRunnerLgraph, FoldSumConstThreeInputs) {
   s0_out.set_bits(8);
   lg->add_edge(s0_out, out0);
 
-  auto gm = std::make_shared<upass::Lgraph_manager>(lg);
+  auto                gm = std::make_shared<upass::Lgraph_manager>(lg);
   uPass_runner_lgraph runner(gm, {"fold_sum_const"});
   runner.run(3);
 
   std::size_t sum_count = 0;
-  for (const auto &n : lg->fast()) {
-    if (n.get_type_op() == Ntype_op::Sum) ++sum_count;
+  for (const auto& n : lg->fast()) {
+    if (n.get_type_op() == Ntype_op::Sum) {
+      ++sum_count;
+    }
   }
   EXPECT_EQ(sum_count, 0U);
 
@@ -1264,9 +1266,9 @@ TEST(UpassRunnerLgraph, FoldSumConstThreeInputs) {
 TEST(UpassRunnerLgraph, FoldMultConstThreeInputs) {
   constexpr std::string_view kDbPath = "lgdb_upass_nary_mult3";
   file_utils::clean_dir(kDbPath);
-  auto *lib = Graph_library::instance(kDbPath);
+  auto* lib = Graph_library::instance(kDbPath);
   ASSERT_NE(lib, nullptr);
-  auto *lg = lib->create_lgraph("top", "nary_mult3");
+  auto* lg = lib->create_lgraph("top", "nary_mult3");
   ASSERT_NE(lg, nullptr);
 
   auto out0 = lg->add_graph_output("o", 1, 8);
@@ -1281,13 +1283,15 @@ TEST(UpassRunnerLgraph, FoldMultConstThreeInputs) {
   m0_out.set_bits(8);
   lg->add_edge(m0_out, out0);
 
-  auto gm = std::make_shared<upass::Lgraph_manager>(lg);
+  auto                gm = std::make_shared<upass::Lgraph_manager>(lg);
   uPass_runner_lgraph runner(gm, {"fold_mult_const"});
   runner.run(3);
 
   std::size_t mult_count = 0;
-  for (const auto &n : lg->fast()) {
-    if (n.get_type_op() == Ntype_op::Mult) ++mult_count;
+  for (const auto& n : lg->fast()) {
+    if (n.get_type_op() == Ntype_op::Mult) {
+      ++mult_count;
+    }
   }
   EXPECT_EQ(mult_count, 0U);
 
@@ -1300,9 +1304,9 @@ TEST(UpassRunnerLgraph, FoldMultConstThreeInputs) {
 TEST(UpassRunnerLgraph, FoldSumConstThreeInputsOneNonConst) {
   constexpr std::string_view kDbPath = "lgdb_upass_nary_sum_mixed";
   file_utils::clean_dir(kDbPath);
-  auto *lib = Graph_library::instance(kDbPath);
+  auto* lib = Graph_library::instance(kDbPath);
   ASSERT_NE(lib, nullptr);
-  auto *lg = lib->create_lgraph("top", "nary_sum_mixed");
+  auto* lg = lib->create_lgraph("top", "nary_sum_mixed");
   ASSERT_NE(lg, nullptr);
 
   auto in_a = lg->add_graph_input("a", 1, 8);
@@ -1317,13 +1321,15 @@ TEST(UpassRunnerLgraph, FoldSumConstThreeInputsOneNonConst) {
   s0_out.set_bits(8);
   lg->add_edge(s0_out, out0);
 
-  auto gm = std::make_shared<upass::Lgraph_manager>(lg);
+  auto                gm = std::make_shared<upass::Lgraph_manager>(lg);
   uPass_runner_lgraph runner(gm, {"fold_sum_const"});
   runner.run(3);
 
   std::size_t sum_count = 0;
-  for (const auto &n : lg->fast()) {
-    if (n.get_type_op() == Ntype_op::Sum) ++sum_count;
+  for (const auto& n : lg->fast()) {
+    if (n.get_type_op() == Ntype_op::Sum) {
+      ++sum_count;
+    }
   }
   EXPECT_EQ(sum_count, 1U);  // Sum should still be there
 }

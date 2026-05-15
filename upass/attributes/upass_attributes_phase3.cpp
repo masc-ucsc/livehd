@@ -61,22 +61,73 @@ bool uPass_attributes::is_builtin_attr(std::string_view name) {
   // and inherit from aggregate to field.
   static constexpr std::string_view names[] = {
       // Category A — LNAST/upass attrs
-      "max", "min", "ubits", "sbits", "bits", "wrap", "saturate", "sat", "comptime", "const", "mut",
-      "typename", "private", "size", "key", "crand", "rand", "loc", "file", "type", "range",
+      "max",
+      "min",
+      "ubits",
+      "sbits",
+      "bits",
+      "wrap",
+      "saturate",
+      "sat",
+      "comptime",
+      "const",
+      "mut",
+      "typename",
+      "private",
+      "size",
+      "key",
+      "crand",
+      "rand",
+      "loc",
+      "file",
+      "type",
+      "range",
       // Category B — LGraph wiring attrs
-      "clock", "reset", "debug", "_debug", "async", "initial", "clock_pin", "din", "enable",
-      "negreset", "posclk", "reset_pin", "valid", "stop", "lat", "num", "addr", "fwd", "wensize",
-      "rdport", "defer", "inputs", "outputs",
+      "clock",
+      "reset",
+      "debug",
+      "_debug",
+      "async",
+      "initial",
+      "clock_pin",
+      "din",
+      "enable",
+      "negreset",
+      "posclk",
+      "reset_pin",
+      "valid",
+      "stop",
+      "lat",
+      "num",
+      "addr",
+      "fwd",
+      "wensize",
+      "rdport",
+      "defer",
+      "inputs",
+      "outputs",
       // Category C — synthesis hints
-      "critical", "delay", "donttouch", "keep", "inp_delay", "out_delay", "max_delay", "min_delay",
-      "max_load", "max_fanout", "max_cap", "left_of", "right_of", "top_of", "bottom_of", "align_with",
+      "critical",
+      "delay",
+      "donttouch",
+      "keep",
+      "inp_delay",
+      "out_delay",
+      "max_delay",
+      "min_delay",
+      "max_load",
+      "max_fanout",
+      "max_cap",
+      "left_of",
+      "right_of",
+      "top_of",
+      "bottom_of",
+      "align_with",
   };
   return std::find(std::begin(names), std::end(names), name) != std::end(names);
 }
 
-bool uPass_attributes::is_tuple(std::string_view var) const {
-  return tuple_shapes.find(std::string{var}) != tuple_shapes.end();
-}
+bool uPass_attributes::is_tuple(std::string_view var) const { return tuple_shapes.find(std::string{var}) != tuple_shapes.end(); }
 
 const uPass_attributes::Tuple_shape* uPass_attributes::lookup_tuple_shape(std::string_view var) const {
   auto it = tuple_shapes.find(std::string{var});
@@ -102,7 +153,7 @@ void uPass_attributes::process_tuple_add() {
   if (!move_to_child()) {
     return;
   }
-  auto dst = normalize_name(current_text());
+  auto        dst = normalize_name(current_text());
   Tuple_shape shape;
   int         pos = 0;
   while (move_to_sibling()) {
@@ -121,9 +172,9 @@ void uPass_attributes::process_tuple_add() {
   move_to_parent();
 
   // Replace any existing shape for dst — tuple_add is the (re)build site.
-  auto&      slot     = tuple_shapes[dst];
-  const bool changed  = slot.fields != shape.fields || slot.from_range != shape.from_range;
-  slot                = std::move(shape);
+  auto&      slot    = tuple_shapes[dst];
+  const bool changed = slot.fields != shape.fields || slot.from_range != shape.from_range;
+  slot               = std::move(shape);
   if (changed) {
     mark_changed();
   }
@@ -142,10 +193,10 @@ void uPass_attributes::process_tuple_concat() {
   if (!move_to_child()) {
     return;
   }
-  auto dst = normalize_name(current_text());
+  auto        dst = normalize_name(current_text());
   Tuple_shape shape;
-  int         pos = 0;
-  auto append_one_positional = [&]() {
+  int         pos                   = 0;
+  auto        append_one_positional = [&]() {
     Tuple_field field;
     field.positional = std::to_string(pos++);
     shape.fields.push_back(std::move(field));
@@ -244,16 +295,15 @@ void uPass_attributes::process_tuple_get() {
   }
 
   Get_alias alias;
-  alias.base      = base;
-  alias.field_key = field_key;
+  alias.base       = base;
+  alias.field_key  = field_key;
   alias.field_name = field_key;  // default — will be overridden when positional → named
 
   // If field_key looks like a positional integer and base has a known shape,
   // resolve the positional to the source field's name (for `.[key]`).
-  bool all_digits = !field_key.empty()
-                    && std::all_of(field_key.begin(), field_key.end(), [](char c) {
-                         return std::isdigit(static_cast<unsigned char>(c)) != 0;
-                       });
+  bool all_digits = !field_key.empty() && std::all_of(field_key.begin(), field_key.end(), [](char c) {
+    return std::isdigit(static_cast<unsigned char>(c)) != 0;
+  });
   if (all_digits) {
     if (auto* sh = lookup_tuple_shape(base); sh) {
       auto idx = static_cast<size_t>(std::stoul(field_key));
@@ -272,8 +322,7 @@ void uPass_attributes::process_tuple_get() {
 
   auto [it, inserted] = tuple_get_alias.emplace(dst, std::move(alias));
   if (!inserted) {
-    if (it->second.base != alias.base || it->second.field_key != alias.field_key
-        || it->second.field_name != alias.field_name) {
+    if (it->second.base != alias.base || it->second.field_key != alias.field_key || it->second.field_name != alias.field_name) {
       it->second = std::move(alias);
       mark_changed();
     }

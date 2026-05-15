@@ -64,8 +64,8 @@ BEGIN_LEFDEF_PARSER_NAMESPACE
 
 #include "def.tab.hpp"
 
-int defrData::defGetKeyword(const char *name, int *result) {
-  map<const char *, int, defCompareCStrings>::const_iterator search = settings->Keyword_set.find(name);
+int defrData::defGetKeyword(const char* name, int* result) {
+  map<const char*, int, defCompareCStrings>::const_iterator search = settings->Keyword_set.find(name);
 
   if (search != settings->Keyword_set.end()) {
     *result = search->second;
@@ -75,7 +75,7 @@ int defrData::defGetKeyword(const char *name, int *result) {
   return FALSE;
 }
 
-int defrData::defGetAlias(const string &name, string &result) {
+int defrData::defGetAlias(const string& name, string& result) {
   map<string, string, defCompareStrings>::iterator search = def_alias_set.find(name);
 
   if (search != def_alias_set.end()) {
@@ -86,7 +86,7 @@ int defrData::defGetAlias(const string &name, string &result) {
   return FALSE;
 }
 
-int defrData::defGetDefine(const string &name, string &result) {
+int defrData::defGetDefine(const string& name, string& result) {
   map<string, string, defCompareStrings>::iterator search = def_defines_set.find(name);
 
   if (search != def_defines_set.end()) {
@@ -175,23 +175,23 @@ void defrData::UNGETC(char ch) {
  * This could cause problems if we need to use more strings than we
  * have in the buffer.
  */
-char *defrData::ringCopy(const char *string) {
+char* defrData::ringCopy(const char* string) {
   int len = strlen(string) + 1;
   if (++(ringPlace) >= RING_SIZE) {
     ringPlace = 0;
   }
   if (len > ringSizes[ringPlace]) {
     free(ring[ringPlace]);
-    ring[ringPlace]      = (char *)malloc(len);
+    ring[ringPlace]      = (char*)malloc(len);
     ringSizes[ringPlace] = len;
   }
   strcpy(ring[ringPlace], string);
   return ring[ringPlace];
 }
 
-int defrData::DefGetTokenFromStack(char *s) {
-  const char *ch;         /* utility variable */
-  char       *prS = NULL; /* pointing to the previous char or s */
+int defrData::DefGetTokenFromStack(char* s) {
+  const char* ch;         /* utility variable */
+  char*       prS = NULL; /* pointing to the previous char or s */
 
   while (input_level >= 0) {
     for (ch = stack[input_level].c_str(); *ch != 0; ch++) { /* skip white space */
@@ -249,7 +249,7 @@ void defrData::print_lines(long long lines) {
   }
 }
 
-const char *defrData::lines2str(long long lines) {
+const char* defrData::lines2str(long long lines) {
 #ifdef _WIN32
   sprintf(lineBuffer, "%I64d", lines);
 #else
@@ -261,7 +261,7 @@ const char *defrData::lines2str(long long lines) {
 
 // Increment current position of buffer pointer.
 // Double buffer size if curPos is out of boundary.
-void defrData::IncCurPos(char **curPos, char **buffer, int *bufferSize) {
+void defrData::IncCurPos(char** curPos, char** buffer, int* bufferSize) {
   (*curPos)++;
   if (*curPos - *buffer < *bufferSize) {
     return;
@@ -270,12 +270,12 @@ void defrData::IncCurPos(char **curPos, char **buffer, int *bufferSize) {
   long offset = *curPos - *buffer;
 
   *bufferSize *= 2;
-  *buffer = (char *)realloc(*buffer, *bufferSize);
+  *buffer = (char*)realloc(*buffer, *bufferSize);
   *curPos = *buffer + offset;
 }
 
-int defrData::DefGetToken(char **buf, int *bufferSize) {
-  char *s = *buf;
+int defrData::DefGetToken(char** buf, int* bufferSize) {
+  char* s = *buf;
   int   ch;
 
   ntokens++;
@@ -398,7 +398,7 @@ int defrData::DefGetToken(char **buf, int *bufferSize) {
 }
 
 /* creates an upper case copy of an array */
-void defrData::uc_array(char *source, char *dest) {
+void defrData::uc_array(char* source, char* dest) {
   for (; *source != 0;) {
     *dest++ = toupper(*source++);
   }
@@ -407,15 +407,15 @@ void defrData::uc_array(char *source, char *dest) {
 
 void defrData::StoreAlias() {
   int   tokenSize = TOKEN_SIZE;
-  char *aname     = (char *)malloc(tokenSize);
+  char* aname     = (char*)malloc(tokenSize);
 
   DefGetToken(&aname, &tokenSize);
 
-  char *line = (char *)malloc(tokenSize);
+  char* line = (char*)malloc(tokenSize);
 
   DefGetToken(&line, &tokenSize);
 
-  char *uc_line = (char *)malloc(tokenSize);
+  char* uc_line = (char*)malloc(tokenSize);
 
   string so_far; /* contains alias contents as we build it */
 
@@ -425,9 +425,9 @@ void defrData::StoreAlias() {
   }
 
   /* now keep getting lines till we get one that contains &ENDALIAS */
-  for (char *p = NULL; p == NULL;) {
+  for (char* p = NULL; p == NULL;) {
     int   i;
-    char *s = line;
+    char* s = line;
     for (i = 0; i < tokenSize - 1; i++) {
       int ch = GETC();
       if (ch == EOF) {
@@ -477,7 +477,7 @@ void defrData::StoreAlias() {
  * true, however, they are returned as the token K_NL.
  */
 
-int defrData::defyylex(YYSTYPE *pYylval) {
+int defrData::defyylex(YYSTYPE* pYylval) {
   int v = sublex(pYylval);
   if (defPrintTokens) {
     if (v == 0) {
@@ -505,12 +505,12 @@ int defrData::defyylex(YYSTYPE *pYylval) {
   return v;
 }
 
-int defrData::sublex(YYSTYPE *pYylval) {
+int defrData::sublex(YYSTYPE* pYylval) {
   char   fc;
   double numVal;
-  char  *outMsg;
+  char*  outMsg;
 
-  pv_deftoken = (char *)realloc(pv_deftoken, deftokenLength);
+  pv_deftoken = (char*)realloc(pv_deftoken, deftokenLength);
   strcpy(pv_deftoken, deftoken);
 
   /* First, we eat all the things the parser should be unaware of.
@@ -524,7 +524,7 @@ int defrData::sublex(YYSTYPE *pYylval) {
       return 0;
     }
     fc       = deftoken[0];
-    uc_token = (char *)realloc(uc_token, deftokenLength);
+    uc_token = (char*)realloc(uc_token, deftokenLength);
 
     /* first, check for # comments or &alias statements.  # comments
     we ignore, and &alias statements are eaten and recorded by the
@@ -569,7 +569,7 @@ int defrData::sublex(YYSTYPE *pYylval) {
   }
 
   if (defInvalidChar) {
-    outMsg = (char *)malloc(500 + strlen(deftoken));
+    outMsg = (char*)malloc(500 + strlen(deftoken));
     sprintf(outMsg,
             "Invalid characters found in \'%s\'.\nThese characters might be using the character types other than English.\nCreate "
             "characters by specifying valid characters types.",
@@ -605,7 +605,7 @@ int defrData::sublex(YYSTYPE *pYylval) {
   }
 
   if (isdigit(fc) || fc == '.' || (fc == '-' && deftoken[1] != '\0')) {
-    char *ch;
+    char* ch;
     /* 6/12/2003 - The following switching to use strtol first is a fix */
     /* for FE for performance improvement. */
     /* Adding the flag "parsing_property" is for pcr 594214, need to call */
@@ -622,7 +622,7 @@ int defrData::sublex(YYSTYPE *pYylval) {
           if ((numVal >= lVal) && (numVal <= rVal)) {
             return NUMBER; /* YES, it's really a number */
           } else {
-            char *str = (char *)malloc(strlen(deftoken) + strlen(session->FileName) + 350);
+            char* str = (char*)malloc(strlen(deftoken) + strlen(session->FileName) + 350);
             sprintf(str, "<Number has exceed the limit for an integer> in %s at line %s\n", session->FileName, lines2str(nlines));
             fflush(stdout);
             defiError(1, 0, str);
@@ -645,7 +645,7 @@ int defrData::sublex(YYSTYPE *pYylval) {
         if ((numVal >= lVal) && (numVal <= rVal)) {
           return NUMBER; /* YES, it's really a number */
         } else {
-          char *str = (char *)malloc(strlen(deftoken) + strlen(session->FileName) + 350);
+          char* str = (char*)malloc(strlen(deftoken) + strlen(session->FileName) + 350);
           sprintf(str, "<Number has exceed the limit for an integer> in %s at line %s\n", session->FileName, lines2str(nlines));
           fflush(stdout);
           defiError(1, 0, str);
@@ -906,7 +906,7 @@ int defrData::sublex(YYSTYPE *pYylval) {
 
 /* We have found a deftoken beginning with '&'.  If it has been previously
    defined, substitute the definition.  Otherwise return it. */
-int defrData::amper_lookup(YYSTYPE *pYylval, char *tkn) {
+int defrData::amper_lookup(YYSTYPE* pYylval, char* tkn) {
   string defValue;
 
   /* printf("Amper_lookup: %s\n", tkn); */
@@ -929,10 +929,10 @@ int defrData::amper_lookup(YYSTYPE *pYylval, char *tkn) {
   return T_STRING;
 }
 
-void defrData::defError(int msgNum, const char *s) {
-  char       *str;
-  const char *curToken = isgraph(deftoken[0]) ? deftoken : "<unprintable>";
-  const char *pvToken  = isgraph(pv_deftoken[0]) ? pv_deftoken : "<unprintable>";
+void defrData::defError(int msgNum, const char* s) {
+  char*       str;
+  const char* curToken = isgraph(deftoken[0]) ? deftoken : "<unprintable>";
+  const char* pvToken  = isgraph(pv_deftoken[0]) ? pv_deftoken : "<unprintable>";
   int         len      = strlen(curToken) - 1;
   int         pvLen    = strlen(pvToken) - 1;
 
@@ -952,7 +952,7 @@ void defrData::defError(int msgNum, const char *s) {
   /* PCR 690679, probably missing space before a ';' */
   if (strcmp(s, "parse error") == 0) {
     if ((len > 1) && (deftoken[len] == ';')) {
-      str = (char *)malloc(len + strlen(s) + strlen(session->FileName) + 350);
+      str = (char*)malloc(len + strlen(s) + strlen(session->FileName) + 350);
       sprintf(str,
               "ERROR (DEFPARS-%d): %s, file %s at line %s\nLast token was <%s>, space is missing before <;>\n",
               msgNum,
@@ -961,7 +961,7 @@ void defrData::defError(int msgNum, const char *s) {
               lines2str(nlines),
               curToken);
     } else if ((pvLen > 1) && (pv_deftoken[pvLen] == ';')) {
-      str = (char *)malloc(pvLen + strlen(s) + strlen(session->FileName) + 350);
+      str = (char*)malloc(pvLen + strlen(s) + strlen(session->FileName) + 350);
       sprintf(str,
               "ERROR (DEFPARS-%d): %s, file %s at line %s\nLast token was <%s>, space is missing before <;>\n",
               msgNum,
@@ -970,7 +970,7 @@ void defrData::defError(int msgNum, const char *s) {
               lines2str(nlines - 1),
               pvToken);
     } else {
-      str = (char *)malloc(len + strlen(session->FileName) + 350);
+      str = (char*)malloc(len + strlen(session->FileName) + 350);
       sprintf(str,
               "ERROR (DEFPARS-%d): Def parser has encountered an error in file %s at line %s, on token %s.\nProblem can be syntax "
               "error on the def file or an invalid parameter name.\nDouble check the syntax on the def file with the LEFDEF "
@@ -982,7 +982,7 @@ void defrData::defError(int msgNum, const char *s) {
     }
   } else if (strcmp(s, "syntax error") == 0) {
     if ((len > 1) && (deftoken[len] == ';')) {
-      str = (char *)malloc(len + strlen(s) + strlen(session->FileName) + 350);
+      str = (char*)malloc(len + strlen(s) + strlen(session->FileName) + 350);
       sprintf(str,
               "ERROR (DEFPARS-%d): %s, file %s at line %s\nLast token was <%s>, space is missing before <;>\n",
               msgNum,
@@ -991,7 +991,7 @@ void defrData::defError(int msgNum, const char *s) {
               lines2str(nlines),
               curToken);
     } else if ((pvLen > 1) && (pv_deftoken[pvLen] == ';')) {
-      str = (char *)malloc(pvLen + strlen(s) + strlen(session->FileName) + 350);
+      str = (char*)malloc(pvLen + strlen(s) + strlen(session->FileName) + 350);
       sprintf(str,
               "ERROR (DEFPARS-%d): %s, file %s at line %s\nLast token was <%s>, space is missing before <;>\n",
               msgNum,
@@ -1000,7 +1000,7 @@ void defrData::defError(int msgNum, const char *s) {
               lines2str(nlines - 1),
               pvToken);
     } else {
-      str = (char *)malloc(len + strlen(session->FileName) + 350);
+      str = (char*)malloc(len + strlen(session->FileName) + 350);
       sprintf(str,
               "ERROR (DEFPARS-%d): Def parser has encountered an error in file %s at line %s, on token %s.\nProblem can be syntax "
               "error on the def file or an invalid parameter name.\nDouble check the syntax on the def file with the LEFDEF "
@@ -1011,7 +1011,7 @@ void defrData::defError(int msgNum, const char *s) {
               curToken);
     }
   } else {
-    str = (char *)malloc(len + strlen(s) + strlen(session->FileName) + 350);
+    str = (char*)malloc(len + strlen(s) + strlen(session->FileName) + 350);
     sprintf(
         str,
         "ERROR (DEFPARS-%d): %s Error in file %s at line %s, on token %s.\nUpdate the def file before parsing the file again.\n",
@@ -1029,11 +1029,11 @@ void defrData::defError(int msgNum, const char *s) {
 }
 
 /* yydeferror is called by bison.simple */
-void defrData::defyyerror(const char *s) { defError(defMsgCnt++, s); }
+void defrData::defyyerror(const char* s) { defError(defMsgCnt++, s); }
 
 /* All info starts with 8000 */
 /* All info within defInfo starts with 8500 */
-void defrData::defInfo(int msgNum, const char *s) {
+void defrData::defInfo(int msgNum, const char* s) {
   int i;
 
   for (i = 0; i < settings->nDDMsgs; i++) { /* check if info has been disable */
@@ -1043,12 +1043,12 @@ void defrData::defInfo(int msgNum, const char *s) {
   }
 
   if (settings->ContextWarningLogFunction) {
-    char *str = (char *)malloc(strlen(deftoken) + strlen(s) + strlen(session->FileName) + 350);
+    char* str = (char*)malloc(strlen(deftoken) + strlen(s) + strlen(session->FileName) + 350);
     sprintf(str, "INFO (DEFPARS-%d): %s See file %s at line %s.\n", msgNum, s, session->FileName, lines2str(nlines));
     (*settings->ContextWarningLogFunction)(session->UserData, str);
     free(str);
   } else if (settings->WarningLogFunction) {
-    char *str = (char *)malloc(strlen(deftoken) + strlen(s) + strlen(session->FileName) + 350);
+    char* str = (char*)malloc(strlen(deftoken) + strlen(s) + strlen(session->FileName) + 350);
     sprintf(str, "INFO (DEFPARS-%d): %s See file %s at line %s.\n", msgNum, s, session->FileName, lines2str(nlines));
     (*settings->WarningLogFunction)(str);
     free(str);
@@ -1079,7 +1079,7 @@ void defrData::defInfo(int msgNum, const char *s) {
 
 /* All warning starts with 7000 */
 /* All warning within defWarning starts with 7500 */
-void defrData::defWarning(int msgNum, const char *s) {
+void defrData::defWarning(int msgNum, const char* s) {
   int i;
 
   for (i = 0; i < settings->nDDMsgs; i++) { /* check if warning has been disable */
@@ -1089,12 +1089,12 @@ void defrData::defWarning(int msgNum, const char *s) {
   }
 
   if (settings->ContextWarningLogFunction) {
-    char *str = (char *)malloc(strlen(deftoken) + strlen(s) + strlen(session->FileName) + 350);
+    char* str = (char*)malloc(strlen(deftoken) + strlen(s) + strlen(session->FileName) + 350);
     sprintf(str, "WARNING (DEFPARS-%d): %s See file %s at line %s.\n", msgNum, s, session->FileName, lines2str(nlines));
     (*settings->ContextWarningLogFunction)(session->UserData, str);
     free(str);
   } else if (settings->WarningLogFunction) {
-    char *str = (char *)malloc(strlen(deftoken) + strlen(s) + strlen(session->FileName) + 350);
+    char* str = (char*)malloc(strlen(deftoken) + strlen(s) + strlen(session->FileName) + 350);
     sprintf(str, "WARNING (DEFPARS-%d): %s See file %s at line %s.\n", msgNum, s, session->FileName, lines2str(nlines));
     (*settings->WarningLogFunction)(str);
     free(str);
@@ -1124,7 +1124,7 @@ void defrData::defWarning(int msgNum, const char *s) {
   def_warnings++;
 }
 
-const char *defrData::defkywd(int num) {
+const char* defrData::defkywd(int num) {
   switch (num) {
     case QSTRING: return "QSTRING";
     case T_STRING: return "T_STRING";
@@ -1334,9 +1334,9 @@ const char *defrData::defkywd(int num) {
   }
 }
 
-const char *defrData::DEFCASE(const char *ch) { return names_case_sensitive ? ch : upperCase(ch); }
+const char* defrData::DEFCASE(const char* ch) { return names_case_sensitive ? ch : upperCase(ch); }
 
-void defrData::pathIsDone(int sh, int reset, int osNet, int *needCbk) {
+void defrData::pathIsDone(int sh, int reset, int osNet, int* needCbk) {
   if ((callbacks->NetCbk || callbacks->SNetCbk) && settings->AddPathToNet) {
     // PathObj.reverseOrder();
     if (Subnet) {
@@ -1355,7 +1355,7 @@ void defrData::pathIsDone(int sh, int reset, int osNet, int *needCbk) {
     // defrPath->reverseOrder();
     (*callbacks->PathCbk)(defrPathCbkType, &PathObj, session->UserData);
     PathObj.Destroy();
-    free((char *)&PathObj);
+    free((char*)&PathObj);
   }
 
   PathObj.Init();

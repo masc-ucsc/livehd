@@ -38,7 +38,7 @@
 char defaultOut[128];
 
 // Global variables
-FILE *fout;
+FILE* fout;
 
 #define CHECK_STATUS(status) \
   if (status) {              \
@@ -46,8 +46,8 @@ FILE *fout;
     return (status);         \
   }
 
-int main(int argc, char **argv) {
-  char *outfile;
+int main(int argc, char** argv) {
+  char* outfile;
   int   status;  // return code, if none 0 means error
   int   lineNum = 0;
 
@@ -56,12 +56,12 @@ int main(int argc, char **argv) {
   outfile = defaultOut;
   fout    = stdout;
 
-  double *xpath;
-  double *ypath;
-  double *xl;
-  double *yl;
+  double* xpath;
+  double* ypath;
+  double* xl;
+  double* yl;
   double *wthn, *spng;
-  int    *aspc;
+  int*    aspc;
   int     encrypt = 0;
 
 #ifdef WIN32
@@ -196,15 +196,15 @@ int main(int argc, char **argv) {
   CHECK_STATUS(status);
 
   // LAYERS
-  double *current;
-  double *diffs;
-  double *ratios;
-  double *area;
-  double *width;
+  double* current;
+  double* diffs;
+  double* ratios;
+  double* area;
+  double* width;
 
-  current = (double *)malloc(sizeof(double) * 15);
-  diffs   = (double *)malloc(sizeof(double) * 15);
-  ratios  = (double *)malloc(sizeof(double) * 15);
+  current = (double*)malloc(sizeof(double) * 15);
+  diffs   = (double*)malloc(sizeof(double) * 15);
+  ratios  = (double*)malloc(sizeof(double) * 15);
 
   status = lefwStartLayer("POLYS", "MASTERSLICE");
   CHECK_STATUS(status);
@@ -250,16 +250,16 @@ int main(int argc, char **argv) {
   CHECK_STATUS(status);
   status = lefwLayerRoutingArea(34.1);
   CHECK_STATUS(status);
-  xl     = (double *)malloc(sizeof(double) * 2);
-  yl     = (double *)malloc(sizeof(double) * 2);
+  xl     = (double*)malloc(sizeof(double) * 2);
+  yl     = (double*)malloc(sizeof(double) * 2);
   xl[0]  = 0.14;
   yl[0]  = 0.30;
   xl[1]  = 0.08;
   yl[1]  = 0.33;
   status = lefwLayerRoutingMinsize(2, xl, yl);
   CHECK_STATUS(status);
-  free((char *)xl);
-  free((char *)yl);
+  free((char*)xl);
+  free((char*)yl);
   status = lefwLayerRoutingWireExtension(0.75);
   CHECK_STATUS(status);
   status = lefwLayerRoutingOffset(0.9);
@@ -296,8 +296,8 @@ int main(int argc, char **argv) {
   CHECK_STATUS(status);
   status = lefwLayerAntennaCumDiffAreaRatio(1000);  // 5.7
   CHECK_STATUS(status);
-  xl     = (double *)malloc(sizeof(double) * 5);
-  yl     = (double *)malloc(sizeof(double) * 5);
+  xl     = (double*)malloc(sizeof(double) * 5);
+  yl     = (double*)malloc(sizeof(double) * 5);
   xl[0]  = 0.0;
   yl[0]  = 1.0;
   xl[1]  = 0.09999;
@@ -310,8 +310,8 @@ int main(int argc, char **argv) {
   yl[4]  = 0.1;
   status = lefwLayerAntennaAreaDiffReducePwl(5, xl, yl);  // 5.7
   CHECK_STATUS(status);
-  free((char *)xl);
-  free((char *)yl);
+  free((char*)xl);
+  free((char*)yl);
   status = lefwLayerAntennaCumDiffAreaRatio(1000);  // 5.7
   CHECK_STATUS(status);
   status = lefwLayerRoutingAntennaLength(1);
@@ -450,8 +450,8 @@ int main(int argc, char **argv) {
   CHECK_STATUS(status);
   status = lefwLayerAntennaCumDiffAreaRatio(5000);  // 5.7
   CHECK_STATUS(status);
-  xl     = (double *)malloc(sizeof(double) * 5);
-  yl     = (double *)malloc(sizeof(double) * 5);
+  xl     = (double*)malloc(sizeof(double) * 5);
+  yl     = (double*)malloc(sizeof(double) * 5);
   xl[0]  = 0.0;
   yl[0]  = 1.0;
   xl[1]  = 0.09999;
@@ -464,8 +464,8 @@ int main(int argc, char **argv) {
   yl[4]  = 0.1;
   status = lefwLayerAntennaAreaDiffReducePwl(5, xl, yl);  // 5.7
   CHECK_STATUS(status);
-  free((char *)xl);
-  free((char *)yl);
+  free((char*)xl);
+  free((char*)yl);
   diffs[0]  = 1;
   ratios[0] = 4;
   diffs[1]  = 2;
@@ -755,9 +755,9 @@ int main(int argc, char **argv) {
   CHECK_STATUS(status);
   status = lefwLayerRoutineEndSpacingtable();
   CHECK_STATUS(status);
-  free((char *)current);
-  free((char *)diffs);
-  free((char *)ratios);
+  free((char*)current);
+  free((char*)diffs);
+  free((char*)ratios);
   status = lefwLayerAntennaGatePlusDiff(2.0);  // 5.7
   CHECK_STATUS(status);
   status = lefwLayerAntennaDiffAreaRatio(1000);  // 5.7
@@ -837,8 +837,8 @@ int main(int argc, char **argv) {
   status = lefwEndLayerRouting("M3");
   CHECK_STATUS(status);
 
-  area  = (double *)malloc(sizeof(double) * 3);
-  width = (double *)malloc(sizeof(double) * 3);
+  area  = (double*)malloc(sizeof(double) * 3);
+  width = (double*)malloc(sizeof(double) * 3);
 
   status = lefwStartLayerRouting("M4");
   CHECK_STATUS(status);
@@ -892,8 +892,8 @@ int main(int argc, char **argv) {
   CHECK_STATUS(status);
   status = lefwEndLayerRouting("M4");
   CHECK_STATUS(status);
-  free((char *)area);
-  free((char *)width);
+  free((char*)area);
+  free((char*)width);
 
   status = lefwStartLayer("implant1", "IMPLANT");
   CHECK_STATUS(status);
@@ -1022,9 +1022,9 @@ int main(int argc, char **argv) {
   status = lefwLayerCutSpacingEnd();  // 5.7
   CHECK_STATUS(status);
 
-  wthn    = (double *)malloc(sizeof(double) * 3);  // 5.7
-  spng    = (double *)malloc(sizeof(double) * 3);
-  aspc    = (int *)malloc(sizeof(int) * 3);
+  wthn    = (double*)malloc(sizeof(double) * 3);  // 5.7
+  spng    = (double*)malloc(sizeof(double) * 3);
+  aspc    = (int*)malloc(sizeof(int) * 3);
   wthn[0] = 0.15;
   spng[0] = 0.11;
   wthn[1] = 0.13;
@@ -1046,9 +1046,9 @@ int main(int argc, char **argv) {
   spng[2] = 2.0;
   status  = lefwLayerArraySpacing(1, 2.0, 0.2, 3, aspc, spng);
   CHECK_STATUS(status);
-  free((char *)wthn);
-  free((char *)spng);
-  free((char *)aspc);
+  free((char*)wthn);
+  free((char*)spng);
+  free((char*)aspc);
   status = lefwEndLayer("cut23");
   CHECK_STATUS(status);
 
@@ -1081,7 +1081,7 @@ int main(int argc, char **argv) {
   CHECK_STATUS(status);
   status = lefwLayerRoutingStartSpacingtableTwoWidths();  // 5.7
   CHECK_STATUS(status);
-  wthn    = (double *)malloc(sizeof(double) * 4);  // 5.7
+  wthn    = (double*)malloc(sizeof(double) * 4);  // 5.7
   wthn[0] = 0.15;
   wthn[1] = 0.20;
   wthn[2] = 0.50;
@@ -1165,8 +1165,8 @@ int main(int argc, char **argv) {
   status = lefwEndVia("M2_M3_PWR");
   CHECK_STATUS(status);
 
-  xl     = (double *)malloc(sizeof(double) * 6);
-  yl     = (double *)malloc(sizeof(double) * 6);
+  xl     = (double*)malloc(sizeof(double) * 6);
+  yl     = (double*)malloc(sizeof(double) * 6);
   status = lefwStartVia("IN1X", 0);
   CHECK_STATUS(status);
   //  status = lefwViaTopofstackonly();  5.6
@@ -1268,8 +1268,8 @@ int main(int argc, char **argv) {
   status = lefwEndVia("myVia23");
   CHECK_STATUS(status);
 
-  free((char *)xl);
-  free((char *)yl);
+  free((char*)xl);
+  free((char*)yl);
 
   // VIARULE
   status = lefwStartViaRule("VIALIST12");
@@ -1669,8 +1669,8 @@ int main(int argc, char **argv) {
   CHECK_STATUS(status);
   status = lefwEndMacroPinPort();
   CHECK_STATUS(status);
-  xl     = (double *)malloc(sizeof(double) * 5);
-  yl     = (double *)malloc(sizeof(double) * 5);
+  xl     = (double*)malloc(sizeof(double) * 5);
+  yl     = (double*)malloc(sizeof(double) * 5);
   xl[0]  = 30.8;
   yl[0]  = 30.5;
   xl[1]  = 42;
@@ -1691,8 +1691,8 @@ int main(int argc, char **argv) {
   CHECK_STATUS(status);
   status = lefwEndMacroPinPort();
   CHECK_STATUS(status);
-  free((char *)xl);
-  free((char *)yl);
+  free((char*)xl);
+  free((char*)yl);
   /* WMD - Comment them out due to mix 5.3 & 5.4 syntax
     status = lefwMacroPinAntennaMetalArea(3, "M1");
     CHECK_STATUS(status);
@@ -1869,8 +1869,8 @@ int main(int argc, char **argv) {
   CHECK_STATUS(status);
   status = lefwMacroPinPortLayerWidth(5.6);
   CHECK_STATUS(status);
-  xpath    = (double *)malloc(sizeof(double) * 7);
-  ypath    = (double *)malloc(sizeof(double) * 7);
+  xpath    = (double*)malloc(sizeof(double) * 7);
+  ypath    = (double*)malloc(sizeof(double) * 7);
   xpath[0] = 30.8;
   ypath[0] = 9;
   xpath[1] = 42;
@@ -1890,8 +1890,8 @@ int main(int argc, char **argv) {
   status = lefwEndMacroPinPort();
   CHECK_STATUS(status);
   status = lefwEndMacroPin("Z");
-  free((char *)xpath);
-  free((char *)ypath);
+  free((char*)xpath);
+  free((char*)ypath);
   // MACRO - TIMING
   /* obsolete in 5.4
   status = lefwStartMacroTiming();
@@ -1932,8 +1932,8 @@ int main(int argc, char **argv) {
   CHECK_STATUS(status);
   status = lefwMacroObsLayerRect(24.1, 1.5, 43.5, 208.5, 0, 0, 0, 0);
   CHECK_STATUS(status);
-  xpath    = (double *)malloc(sizeof(double) * 2);
-  ypath    = (double *)malloc(sizeof(double) * 2);
+  xpath    = (double*)malloc(sizeof(double) * 2);
+  ypath    = (double*)malloc(sizeof(double) * 2);
   xpath[0] = 8.4;
   ypath[0] = 3;
   xpath[1] = 8.4;
@@ -1952,10 +1952,10 @@ int main(int argc, char **argv) {
   ypath[1] = 123;
   status   = lefwMacroObsLayerPath(2, xpath, ypath, 0, 0, 0, 0);
   CHECK_STATUS(status);
-  free((char *)xpath);
-  free((char *)ypath);
-  xl     = (double *)malloc(sizeof(double) * 5);
-  yl     = (double *)malloc(sizeof(double) * 5);
+  free((char*)xpath);
+  free((char*)ypath);
+  xl     = (double*)malloc(sizeof(double) * 5);
+  yl     = (double*)malloc(sizeof(double) * 5);
   xl[0]  = 6.4;
   xl[1]  = 3.4;
   xl[2]  = 5.4;
@@ -1968,8 +1968,8 @@ int main(int argc, char **argv) {
   yl[4]  = 1.2;
   status = lefwMacroObsLayerPolygon(5, xl, yl, 0, 0, 0, 0, 3);
   CHECK_STATUS(status);
-  free((char *)xl);
-  free((char *)yl);
+  free((char*)xl);
+  free((char*)yl);
   status = lefwEndMacroObs();
   CHECK_STATUS(status);
   status = lefwEndMacro("INV");

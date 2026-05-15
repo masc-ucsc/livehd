@@ -34,8 +34,7 @@ static int segment_category(std::string_view seg) {
   return 1;  // named
 }
 
-static bool canonical_compare(const std::pair<std::string, Bundle::Entry>& lhs,
-                              const std::pair<std::string, Bundle::Entry>& rhs) {
+static bool canonical_compare(const std::pair<std::string, Bundle::Entry>& lhs, const std::pair<std::string, Bundle::Entry>& rhs) {
   auto l_seg = first_segment_view(lhs.first);
   auto r_seg = first_segment_view(rhs.first);
   auto l_cat = segment_category(l_seg);
@@ -451,7 +450,7 @@ void Bundle::set(std::string_view key_in, const Entry&& entry) {
 
   // normalize_key asserts the canonical form and otherwise returns the
   // key as-is; producers no longer emit `:N:` annotations.
-  auto        normalized_key = normalize_key(key_in);
+  auto             normalized_key = normalize_key(key_in);
   std::string_view key{normalized_key};
   I(!key.empty());
 
@@ -574,16 +573,16 @@ bool Bundle::concat(const std::shared_ptr<Bundle const>& tup) {
 
   // Group RHS entries by first segment, preserving first-seen order.
   struct Rhs_group {
-    std::string                          first_seg;     // canonical first segment
-    int                                  category;      // 0 attr / 1 named / 2 unnamed
-    std::vector<std::pair<std::string, Entry>> entries; // (suffix incl. leading ".", entry)
+    std::string                                first_seg;  // canonical first segment
+    int                                        category;   // 0 attr / 1 named / 2 unnamed
+    std::vector<std::pair<std::string, Entry>> entries;    // (suffix incl. leading ".", entry)
   };
   std::vector<Rhs_group>                  groups;
   std::unordered_map<std::string, size_t> group_idx;
   for (const auto& it : tup->key_map) {
-    auto         seg_sv = seg(it.first);
-    std::string  seg_s(seg_sv);
-    std::string  suffix;
+    auto        seg_sv = seg(it.first);
+    std::string seg_s(seg_sv);
+    std::string suffix;
     if (it.first.size() > seg_sv.size()) {
       I(it.first[seg_sv.size()] == '.');
       suffix = it.first.substr(seg_sv.size());  // keep leading '.'
@@ -598,19 +597,18 @@ bool Bundle::concat(const std::shared_ptr<Bundle const>& tup) {
   // Emit an RHS group under a chosen first-segment, optionally inserting
   // an extra ".K" path between the segment and the group's suffix (used to
   // tuck the RHS payload under a fresh sub-tuple slot during name merge).
-  auto emit_group = [&](const std::vector<std::pair<std::string, Entry>>& entries,
-                        std::string_view                                   new_seg,
-                        std::string_view                                   extra = {}) {
-    for (const auto& [suffix, ent] : entries) {
-      std::string new_key(new_seg);
-      if (!extra.empty()) {
-        new_key += '.';
-        new_key.append(extra.data(), extra.size());
-      }
-      new_key.append(suffix);
-      key_map.emplace_back(std::move(new_key), ent);
-    }
-  };
+  auto emit_group
+      = [&](const std::vector<std::pair<std::string, Entry>>& entries, std::string_view new_seg, std::string_view extra = {}) {
+          for (const auto& [suffix, ent] : entries) {
+            std::string new_key(new_seg);
+            if (!extra.empty()) {
+              new_key += '.';
+              new_key.append(extra.data(), extra.size());
+            }
+            new_key.append(suffix);
+            key_map.emplace_back(std::move(new_key), ent);
+          }
+        };
 
   // Erase every LHS entry whose first segment equals `s`.
   auto erase_top = [&](std::string_view s) {
@@ -671,8 +669,7 @@ bool Bundle::concat(const std::shared_ptr<Bundle const>& tup) {
     }
 
     if (g.category == 1) {  // named
-      bool rhs_is_nil_scalar = g.entries.size() == 1 && g.entries[0].first.empty()
-                               && g.entries[0].second.trivial.is_nil();
+      bool rhs_is_nil_scalar = g.entries.size() == 1 && g.entries[0].first.empty() && g.entries[0].second.trivial.is_nil();
       if (rhs_is_nil_scalar) {
         continue;  // RHS nil drops itself.
       }

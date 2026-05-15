@@ -902,7 +902,7 @@ static void process_cell_drivers_intialization(RTLIL::Module* mod, Lgraph* g) {
             I(driver_pin.get_bits() == ss.size());
             auto prev_it = wire2pin.find(wire);
             if (prev_it != wire2pin.end()) {
-              auto prev_pin = prev_it->second;
+              auto prev_pin  = prev_it->second;
               auto prev_node = prev_pin.get_node();
               if (prev_node.is_type(Ntype_op::Or) && !prev_node.has_inputs()) {
                 // Assign processing may have created a placeholder for aliases before the real
@@ -1567,7 +1567,7 @@ static void process_partially_assigned_self_chains(Lgraph* g) {
 
       for (auto shift : shifts) {
         Dlop wr_mask;
-        wr_mask = Dlop::create_integer(0);
+        wr_mask             = Dlop::create_integer(0);
         bool        started = false;
         const auto& v       = partially_assigned_fwd[wire];
         for (int pos = static_cast<int>(v.size()) - 1; pos >= 0; --pos) {

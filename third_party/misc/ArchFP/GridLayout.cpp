@@ -86,4 +86,3 @@ void gridLayout::outputHotSpotLayout(std::ostream& o, double startX, double star
   }
   o << "# end " << GridName << "\n";
 }
-

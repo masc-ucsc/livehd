@@ -58,8 +58,12 @@ struct Lnast_range {
   // True when this range covers a strictly smaller set of values than `other`.
   // An unbounded side is never narrower than anything (so we return false).
   bool is_narrower_than(const Lnast_range& other) const noexcept {
-    if (is_unbounded()) return false;
-    if (other.is_unbounded()) return true;
+    if (is_unbounded()) {
+      return false;
+    }
+    if (other.is_unbounded()) {
+      return true;
+    }
     return min > other.min || max < other.max;
   }
 
@@ -74,7 +78,9 @@ struct Lnast_range {
   // Returns the minimum number of bits needed to represent [min, max] in two's
   // complement. Returns 64 (a conservative upper bound) for unbounded ranges.
   int64_t get_sbits() const noexcept {
-    if (neg_inf || pos_inf) return 64;
+    if (neg_inf || pos_inf) {
+      return 64;
+    }
     return std::max(sbits_for(min), sbits_for(max));
   }
 
@@ -85,10 +91,14 @@ struct Lnast_range {
     if (neg_inf || pos_inf || b.neg_inf || b.pos_inf) {
       // If either side is totally unbounded return unbounded.
       Lnast_range r;
-      r.neg_inf = neg_inf   || b.neg_inf;
-      r.pos_inf = pos_inf   || b.pos_inf;
-      if (!r.neg_inf) r.min = std::min(min, b.min);
-      if (!r.pos_inf) r.max = std::max(max, b.max);
+      r.neg_inf = neg_inf || b.neg_inf;
+      r.pos_inf = pos_inf || b.pos_inf;
+      if (!r.neg_inf) {
+        r.min = std::min(min, b.min);
+      }
+      if (!r.pos_inf) {
+        r.max = std::max(max, b.max);
+      }
       return r;
     }
     Lnast_range r;
@@ -102,11 +112,17 @@ struct Lnast_range {
   // meet: intersection — used for explicit constraints.
   // If the intersection is empty, returns unbounded (conservative fallback).
   Lnast_range meet(const Lnast_range& b) const noexcept {
-    if (neg_inf || pos_inf) return b;  // [−∞,+∞] ∩ b = b
-    if (b.neg_inf || b.pos_inf) return *this;
+    if (neg_inf || pos_inf) {
+      return b;  // [−∞,+∞] ∩ b = b
+    }
+    if (b.neg_inf || b.pos_inf) {
+      return *this;
+    }
     int64_t lo = std::max(min, b.min);
     int64_t hi = std::min(max, b.max);
-    if (lo > hi) return unbounded();  // empty intersection → conservative
+    if (lo > hi) {
+      return unbounded();  // empty intersection → conservative
+    }
     Lnast_range r;
     r.min     = lo;
     r.max     = hi;
@@ -118,64 +134,94 @@ struct Lnast_range {
   // ── Arithmetic ────────────────────────────────────────────────────────────
 
   Lnast_range add(const Lnast_range& b) const noexcept {
-    if (is_unbounded() || b.is_unbounded()) return unbounded();
+    if (is_unbounded() || b.is_unbounded()) {
+      return unbounded();
+    }
     int64_t lo, hi;
-    if (add_overflow(min, b.min, lo) || add_overflow(max, b.max, hi)) return unbounded();
+    if (add_overflow(min, b.min, lo) || add_overflow(max, b.max, hi)) {
+      return unbounded();
+    }
     return bounded(lo, hi);
   }
 
   Lnast_range sub(const Lnast_range& b) const noexcept {
-    if (is_unbounded() || b.is_unbounded()) return unbounded();
+    if (is_unbounded() || b.is_unbounded()) {
+      return unbounded();
+    }
     // [a.min - b.max, a.max - b.min]
     int64_t lo, hi;
-    if (sub_overflow(min, b.max, lo) || sub_overflow(max, b.min, hi)) return unbounded();
+    if (sub_overflow(min, b.max, lo) || sub_overflow(max, b.min, hi)) {
+      return unbounded();
+    }
     return bounded(lo, hi);
   }
 
   Lnast_range mul(const Lnast_range& b) const noexcept {
-    if (is_unbounded() || b.is_unbounded()) return unbounded();
+    if (is_unbounded() || b.is_unbounded()) {
+      return unbounded();
+    }
     // All four corner products.
-    using i128 = __int128;
-    i128 c0 = (i128)min * b.min;
-    i128 c1 = (i128)min * b.max;
-    i128 c2 = (i128)max * b.min;
-    i128 c3 = (i128)max * b.max;
-    i128 lo = std::min({c0, c1, c2, c3});
-    i128 hi = std::max({c0, c1, c2, c3});
+    using i128          = __int128;
+    i128           c0   = (i128)min * b.min;
+    i128           c1   = (i128)min * b.max;
+    i128           c2   = (i128)max * b.min;
+    i128           c3   = (i128)max * b.max;
+    i128           lo   = std::min({c0, c1, c2, c3});
+    i128           hi   = std::max({c0, c1, c2, c3});
     constexpr i128 kMin = (i128)std::numeric_limits<int64_t>::min();
     constexpr i128 kMax = (i128)std::numeric_limits<int64_t>::max();
-    if (lo < kMin || hi > kMax) return unbounded();
+    if (lo < kMin || hi > kMax) {
+      return unbounded();
+    }
     return bounded((int64_t)lo, (int64_t)hi);
   }
 
   Lnast_range neg() const noexcept {
-    if (is_unbounded()) return unbounded();
+    if (is_unbounded()) {
+      return unbounded();
+    }
     // Check INT64_MIN negation overflow.
-    if (min == std::numeric_limits<int64_t>::min()) return unbounded();
+    if (min == std::numeric_limits<int64_t>::min()) {
+      return unbounded();
+    }
     return bounded(-max, -min);
   }
 
   // Logical shift left: result = [min << b_lo, max << b_hi].
   // Conservative: returns unbounded when b is not bounded-positive.
   Lnast_range shl(const Lnast_range& amt) const noexcept {
-    if (is_unbounded()) return unbounded();
-    if (amt.is_unbounded() || amt.min < 0) return unbounded();
-    if (amt.min > 62 || amt.max > 62) return unbounded();
-    using i128 = __int128;
-    i128 lo = (i128)min << amt.min;
-    i128 hi = (i128)max << amt.max;
+    if (is_unbounded()) {
+      return unbounded();
+    }
+    if (amt.is_unbounded() || amt.min < 0) {
+      return unbounded();
+    }
+    if (amt.min > 62 || amt.max > 62) {
+      return unbounded();
+    }
+    using i128          = __int128;
+    i128           lo   = (i128)min << amt.min;
+    i128           hi   = (i128)max << amt.max;
     constexpr i128 kMin = (i128)std::numeric_limits<int64_t>::min();
     constexpr i128 kMax = (i128)std::numeric_limits<int64_t>::max();
-    if (lo < kMin || hi > kMax) return unbounded();
+    if (lo < kMin || hi > kMax) {
+      return unbounded();
+    }
     return bounded((int64_t)std::min(lo, hi), (int64_t)std::max(lo, hi));
   }
 
   // Arithmetic shift right: conservative when b is unknown.
   Lnast_range sra(const Lnast_range& amt) const noexcept {
-    if (is_unbounded()) return unbounded();
-    if (amt.is_unbounded() || amt.min < 0) return unbounded();
+    if (is_unbounded()) {
+      return unbounded();
+    }
+    if (amt.is_unbounded() || amt.min < 0) {
+      return unbounded();
+    }
     int64_t shift = amt.min;  // shift by minimum narrows range the least
-    if (shift > 63) shift = 63;
+    if (shift > 63) {
+      shift = 63;
+    }
     int64_t lo = min >> shift;
     int64_t hi = max >> shift;
     return bounded(std::min(lo, hi), std::max(lo, hi));
@@ -207,16 +253,20 @@ private:
   // Returns true and leaves `result` undefined on overflow.
   static bool add_overflow(int64_t a, int64_t b, int64_t& result) noexcept {
     using i128 = __int128;
-    i128 r = (i128)a + b;
-    if (r < std::numeric_limits<int64_t>::min() || r > std::numeric_limits<int64_t>::max()) return true;
+    i128 r     = (i128)a + b;
+    if (r < std::numeric_limits<int64_t>::min() || r > std::numeric_limits<int64_t>::max()) {
+      return true;
+    }
     result = (int64_t)r;
     return false;
   }
 
   static bool sub_overflow(int64_t a, int64_t b, int64_t& result) noexcept {
     using i128 = __int128;
-    i128 r = (i128)a - b;
-    if (r < std::numeric_limits<int64_t>::min() || r > std::numeric_limits<int64_t>::max()) return true;
+    i128 r     = (i128)a - b;
+    if (r < std::numeric_limits<int64_t>::min() || r > std::numeric_limits<int64_t>::max()) {
+      return true;
+    }
     result = (int64_t)r;
     return false;
   }

@@ -99,10 +99,10 @@ protected:
   friend class Node_internal;
   friend class Node_pin;
 
-  uint64_t snode : 1;
-  uint64_t input : 1;  // Same position for SEdge and LEdge
+  uint64_t                  snode : 1;
+  uint64_t                  input : 1;  // Same position for SEdge and LEdge
   [[maybe_unused]] uint64_t pad2 : 22;
-  [[nodiscard]] Index_id get_page_idx() const;
+  [[nodiscard]] Index_id    get_page_idx() const;
 
   [[nodiscard]] Port_ID get_dst_pid() const;
 
@@ -196,10 +196,10 @@ enum Node_state {
 class Node_internal;
 
 struct __attribute__((packed)) Node_internal_Page {
-  Node_state state : 3;  // 1byte
-  uint64_t   pad1 : 56;  // 7bytes waste just to get Index_id aligned
-  uint32_t   idx;        // 4bytes 32bits but for speed
-  uint32_t   free_idx;   // 4bytes 32bits to the first free node
+  Node_state               state : 3;  // 1byte
+  uint64_t                 pad1 : 56;  // 7bytes waste just to get Index_id aligned
+  uint32_t                 idx;        // 4bytes 32bits but for speed
+  uint32_t                 free_idx;   // 4bytes 32bits to the first free node
   [[maybe_unused]] uint8_t pad2[32 - 16];
 
   [[nodiscard]] Index_id get_idx() const { return idx; }

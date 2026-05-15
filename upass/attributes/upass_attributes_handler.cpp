@@ -28,19 +28,15 @@ void Handler_registry::register_exact(std::string name, std::shared_ptr<Attribut
   exact[std::move(name)] = std::move(h);
 }
 
-void Handler_registry::register_sticky_pattern(std::shared_ptr<Attribute_handler> h) {
-  sticky_pattern = std::move(h);
-}
+void Handler_registry::register_sticky_pattern(std::shared_ptr<Attribute_handler> h) { sticky_pattern = std::move(h); }
 
-void Handler_registry::register_default(std::shared_ptr<Attribute_handler> h) {
-  default_handler = std::move(h);
-}
+void Handler_registry::register_default(std::shared_ptr<Attribute_handler> h) { default_handler = std::move(h); }
 
 void Handler_registry::for_each_handler(const std::function<void(Attribute_handler&)>& fn) const {
   // Use a pointer-set so a handler shared across slots (or eventually the
   // same instance registered for multiple exact names) is visited only once.
   std::set<Attribute_handler*> seen;
-  auto visit = [&](Attribute_handler* h) {
+  auto                         visit = [&](Attribute_handler* h) {
     if (h && seen.insert(h).second) {
       fn(*h);
     }

@@ -56,4 +56,3 @@ double FPObject::calcY(double startY) const {
     return startY + y;
   }
 }
-

@@ -40,33 +40,34 @@ public:
   void end_run() override;
 
   // Assignment-shaped ops (LHS = op(rhs…)).
-  void process_assign()   override;
-  void process_plus()     override;
-  void process_minus()    override;
-  void process_mult()     override;
-  void process_div()      override;
-  void process_mod()      override;
-  void process_shl()      override;
-  void process_sra()      override;
-  void process_bit_and()  override;
-  void process_bit_or()   override;
-  void process_bit_not()  override;
-  void process_bit_xor()  override;
-  void process_log_and()  override;
-  void process_log_or()   override;
-  void process_log_not()  override;
-  void process_red_or()   override;
-  void process_red_and()  override;
-  void process_red_xor()  override;
-  void process_ne()       override;
-  void process_eq()       override;
-  void process_lt()       override;
-  void process_le()       override;
-  void process_gt()       override;
-  void process_ge()       override;
-  void process_sext()     override;
+  void process_assign() override;
+  void process_plus() override;
+  void process_minus() override;
+  void process_mult() override;
+  void process_div() override;
+  void process_mod() override;
+  void process_shl() override;
+  void process_sra() override;
+  void process_bit_and() override;
+  void process_bit_or() override;
+  void process_bit_not() override;
+  void process_bit_xor() override;
+  void process_log_and() override;
+  void process_log_or() override;
+  void process_log_not() override;
+  void process_red_or() override;
+  void process_red_and() override;
+  void process_red_xor() override;
+  void process_ne() override;
+  void process_eq() override;
+  void process_lt() override;
+  void process_le() override;
+  void process_gt() override;
+  void process_ge() override;
+  void process_sext() override;
   void process_get_mask() override;
   void process_set_mask() override;
+  void process_func_call() override;
 
   // Explicit constraints: `[ubits]`, `[sbits]`, `[max]`, `[min]` narrow the
   // target's inferred range. Conflict reporting is best-effort here (wrap /
@@ -87,6 +88,10 @@ private:
   // Store `r` for `name`. Calls mark_changed() iff the range is strictly
   // narrower than what was previously recorded.
   void set_range(std::string_view name, Lnast_range r);
+
+  // Forget a value range after an opaque mutation point, such as passing a
+  // variable as an explicit `ref` actual to a function call.
+  void clear_range(std::string_view name);
 
   // Scan the current op node: walk first child (LHS name), remaining children
   // (RHS operands — ref or const), restore cursor on exit.

@@ -64,7 +64,7 @@ void lefiSetDebug(int num, int value) { lefData->lefDebug[num] = value; }
 // Read flag
 int lefiDebug(int num) { return lefData->lefDebug[num]; }
 
-void lefiError(int check, int msgNum, const char *str) {
+void lefiError(int check, int msgNum, const char* str) {
   // check is 1 if the caller function has checked TotalMsgLimit, etc.
 
   if (!check) {
@@ -102,19 +102,19 @@ static char lefiShift[]
        '\0', '\0', '\0', '\0', '\0', '\0', '\0', '\0', '\0', '\0', '\0', '\0', '\0', '\0', '\0', '\0', '\0', '\0', '\0', '\0',
        '\0', '\0', '\0', '\0', '\0', '\0', '\0', '\0', '\0', '\0', '\0', '\0', '\0', '\0', '\0', '\0'};
 
-const char *lefUpperCase(const char *str) {
-  char *place = (char *)str;
-  char *to;
+const char* lefUpperCase(const char* str) {
+  char* place = (char*)str;
+  char* to;
   int   len = strlen(str) + 1;
 
   if (len > lefData->shiftBufLength) {
     if (lefData->shiftBuf == 0) {
       len                     = len < 64 ? 64 : len;
-      lefData->shiftBuf       = (char *)lefMalloc(len);
+      lefData->shiftBuf       = (char*)lefMalloc(len);
       lefData->shiftBufLength = len;
     } else {
       lefFree(lefData->shiftBuf);
-      lefData->shiftBuf       = (char *)malloc(len);
+      lefData->shiftBuf       = (char*)malloc(len);
       lefData->shiftBufLength = len;
     }
   }
@@ -131,9 +131,9 @@ const char *lefUpperCase(const char *str) {
 }
 
 // for auto upshifting names in case insensitive files
-extern const char *lefUpperCase(const char *c);
+extern const char* lefUpperCase(const char* c);
 
 // Function is done from #define CASE, compatibility only
-const char *CASE(const char *x) { return !lefData->namesCaseSensitive && lefSettings->ShiftCase ? lefUpperCase(x) : x; }
+const char* CASE(const char* x) { return !lefData->namesCaseSensitive && lefSettings->ShiftCase ? lefUpperCase(x) : x; }
 
 END_LEFDEF_PARSER_NAMESPACE

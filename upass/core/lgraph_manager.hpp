@@ -610,7 +610,8 @@ public:
       if (!rewritten && node.get_type_op() == Ntype_op::Mult) {
         int const_one_pos = -1;
         for (int i = 0; i < 2; ++i) {
-          if (inputs[i].driver.is_type(Ntype_op::Nconst) && inputs[i].driver.get_type_const().is_i() && inputs[i].driver.get_type_const().to_i() == 1) {
+          if (inputs[i].driver.is_type(Ntype_op::Nconst) && inputs[i].driver.get_type_const().is_i()
+              && inputs[i].driver.get_type_const().to_i() == 1) {
             const_one_pos = i;
             break;
           }
@@ -633,7 +634,8 @@ public:
       if (!rewritten && node.get_type_op() == Ntype_op::And) {
         int const_one_pos = -1;
         for (int i = 0; i < 2; ++i) {
-          if (inputs[i].driver.is_type(Ntype_op::Nconst) && inputs[i].driver.get_type_const().is_i() && inputs[i].driver.get_type_const().to_i() == 1) {
+          if (inputs[i].driver.is_type(Ntype_op::Nconst) && inputs[i].driver.get_type_const().is_i()
+              && inputs[i].driver.get_type_const().to_i() == 1) {
             const_one_pos = i;
             break;
           }
@@ -674,7 +676,8 @@ public:
         if (node.get_type_op() == Ntype_op::Or) {
           int const_one_pos = -1;
           for (int i = 0; i < 2; ++i) {
-            if (inputs[i].driver.is_type(Ntype_op::Nconst) && inputs[i].driver.get_type_const().is_i() && inputs[i].driver.get_type_const().to_i() == 1) {
+            if (inputs[i].driver.is_type(Ntype_op::Nconst) && inputs[i].driver.get_type_const().is_i()
+                && inputs[i].driver.get_type_const().to_i() == 1) {
               const_one_pos = i;
               break;
             }
@@ -795,7 +798,8 @@ public:
         }
       }
 
-      if (!rewritten && node.get_type_op() == Ntype_op::Div && rhs.is_type(Ntype_op::Nconst) && rhs.get_type_const().is_i() && rhs.get_type_const().to_i() == 1) {
+      if (!rewritten && node.get_type_op() == Ntype_op::Div && rhs.is_type(Ntype_op::Nconst) && rhs.get_type_const().is_i()
+          && rhs.get_type_const().to_i() == 1) {
         if (!dry_run) {
           for (const auto& sink : sinks) {
             lhs.connect_sink(sink);

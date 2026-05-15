@@ -25,20 +25,24 @@ constexpr bool stmt_has_dest(Lnast_ntype::Lnast_ntype_int t) {
 
 // ── is_user_var ──────────────────────────────────────────────────────────────
 bool uPass_ssa::is_user_var(std::string_view name) {
-  if (name.empty()) return false;
+  if (name.empty()) {
+    return false;
+  }
   // Port sigils — pinned to graph I/O, never rename.
-  if (name[0] == '$' || name[0] == '%') return false;
+  if (name[0] == '$' || name[0] == '%') {
+    return false;
+  }
   // Compiler-generated temporaries — already unique per func_extract.
-  if (name.size() >= 3 && name[0] == '_' && name[1] == '_' && name[2] == '_') return false;
+  if (name.size() >= 3 && name[0] == '_' && name[1] == '_' && name[2] == '_') {
+    return false;
+  }
   return true;
 }
 
 // ── copy_subtree ─────────────────────────────────────────────────────────────
-void uPass_ssa::copy_subtree(const std::shared_ptr<Lnast>& src,
-                              const Lnast_nid&               src_nid,
-                              const std::shared_ptr<Lnast>& dst,
-                              const Lnast_nid&               dst_parent) {
-  auto      type    = src->get_type(src_nid);
+void uPass_ssa::copy_subtree(const std::shared_ptr<Lnast>& src, const Lnast_nid& src_nid, const std::shared_ptr<Lnast>& dst,
+                             const Lnast_nid& dst_parent) {
+  auto      type = src->get_type(src_nid);
   Lnast_nid new_nid;
   if (Lnast_ntype::is_ref(type)) {
     new_nid = dst->add_child(dst_parent, Lnast_node::create_ref(src->get_name(src_nid)));
@@ -55,19 +59,15 @@ void uPass_ssa::copy_subtree(const std::shared_ptr<Lnast>& src,
 }
 
 // ── copy_with_rename ─────────────────────────────────────────────────────────
-void uPass_ssa::copy_with_rename(
-    const std::shared_ptr<Lnast>&                       src,
-    const Lnast_nid&                                    src_nid,
-    const std::shared_ptr<Lnast>&                       dst,
-    const Lnast_nid&                                    dst_parent,
-    const std::unordered_map<std::string, std::string>& rename_map) {
-  auto      type    = src->get_type(src_nid);
+void uPass_ssa::copy_with_rename(const std::shared_ptr<Lnast>& src, const Lnast_nid& src_nid, const std::shared_ptr<Lnast>& dst,
+                                 const Lnast_nid& dst_parent, const std::unordered_map<std::string, std::string>& rename_map) {
+  auto      type = src->get_type(src_nid);
   Lnast_nid new_nid;
   if (Lnast_ntype::is_ref(type)) {
     auto        name = std::string(src->get_name(src_nid));
     auto        it   = rename_map.find(name);
     const auto& out  = (it != rename_map.end()) ? it->second : name;
-    new_nid = dst->add_child(dst_parent, Lnast_node::create_ref(out));
+    new_nid          = dst->add_child(dst_parent, Lnast_node::create_ref(out));
   } else if (Lnast_ntype::is_const(type)) {
     new_nid = dst->add_child(dst_parent, Lnast_node::create_const(src->get_name(src_nid)));
   } else if (Lnast_ntype::is_invalid(type)) {
@@ -92,8 +92,14 @@ void uPass_ssa::run(const std::shared_ptr<Lnast>& lnast) {
 
   for (auto child : lnast->children(root)) {
     const auto t = lnast->get_type(child);
-    if (Lnast_ntype::is_io(t))    { io_nid    = child; found_io    = true; }
-    if (Lnast_ntype::is_stmts(t)) { stmts_nid = child; found_stmts = true; }
+    if (Lnast_ntype::is_io(t)) {
+      io_nid   = child;
+      found_io = true;
+    }
+    if (Lnast_ntype::is_stmts(t)) {
+      stmts_nid   = child;
+      found_stmts = true;
+    }
   }
   if (!found_io || !found_stmts) {
     return;  // Not a post-func_extract function LNAST — nothing to do.
@@ -117,22 +123,30 @@ void uPass_ssa::run(const std::shared_ptr<Lnast>& lnast) {
   // ── Harvest field names from the matching tuple_add nodes in stmts ───────
   Lnast_tree_io& meta = lnast->io_meta();
   for (auto child : lnast->children(stmts_nid)) {
-    if (!Lnast_ntype::is_tuple_add(lnast->get_type(child))) continue;
+    if (!Lnast_ntype::is_tuple_add(lnast->get_type(child))) {
+      continue;
+    }
 
     Lnast_nid first_ch = lnast->get_first_child(child);
-    if (first_ch.is_invalid()) continue;
+    if (first_ch.is_invalid()) {
+      continue;
+    }
     auto tuple_ref = std::string(lnast->get_name(first_ch));
 
-    const bool is_input  = !input_ref_name.empty() && tuple_ref == input_ref_name
-                           && tuple_ref != k_empty_tuple;
-    const bool is_output = !output_ref_name.empty() && tuple_ref == output_ref_name
-                           && tuple_ref != k_empty_tuple;
-    if (!is_input && !is_output) continue;
+    const bool is_input  = !input_ref_name.empty() && tuple_ref == input_ref_name && tuple_ref != k_empty_tuple;
+    const bool is_output = !output_ref_name.empty() && tuple_ref == output_ref_name && tuple_ref != k_empty_tuple;
+    if (!is_input && !is_output) {
+      continue;
+    }
 
     for (auto field_node : lnast->children(child)) {
-      if (!Lnast_ntype::is_assign(lnast->get_type(field_node))) continue;
+      if (!Lnast_ntype::is_assign(lnast->get_type(field_node))) {
+        continue;
+      }
       Lnast_nid lhs = lnast->get_first_child(field_node);
-      if (lhs.is_invalid()) continue;
+      if (lhs.is_invalid()) {
+        continue;
+      }
       auto fname = std::string(lnast->get_name(lhs));
       // The synthetic tuple_add encodes a `ref` param via the assign's
       // const RHS = "ref" (prp2lnast / func_extract pass-through). Default
@@ -140,27 +154,29 @@ void uPass_ssa::run(const std::shared_ptr<Lnast>& lnast) {
       bool is_ref = false;
       if (is_input) {
         Lnast_nid rhs = lnast->get_sibling_next(lhs);
-        if (!rhs.is_invalid() && Lnast_ntype::is_const(lnast->get_type(rhs))
-            && lnast->get_name(rhs) == "ref") {
+        if (!rhs.is_invalid() && Lnast_ntype::is_const(lnast->get_type(rhs)) && lnast->get_name(rhs) == "ref") {
           is_ref = true;
         }
       }
-      if (is_input)  meta.inputs.push_back({fname, 0, true, is_ref});
-      if (is_output) meta.outputs.push_back({fname, 0, true, false});
+      if (is_input) {
+        meta.inputs.push_back({fname, 0, true, is_ref});
+      }
+      if (is_output) {
+        meta.outputs.push_back({fname, 0, true, false});
+      }
     }
   }
 
   // ── Build staging tree with SSA renaming ─────────────────────────────────
-  auto staging_body = lnast->forest()->create_tree_temp(
-      std::format("ssa-{}", lnast->get_top_module_name()));
-  auto staging   = std::make_shared<Lnast>(staging_body, lnast->get_top_module_name());
-  auto new_root  = staging->set_root(Lnast_ntype::create_top());
-  auto new_stmts = staging->add_child(new_root, Lnast_ntype::create_stmts());
+  auto staging_body = lnast->forest()->create_tree_temp(std::format("ssa-{}", lnast->get_top_module_name()));
+  auto staging      = std::make_shared<Lnast>(staging_body, lnast->get_top_module_name());
+  auto new_root     = staging->set_root(Lnast_ntype::create_top());
+  auto new_stmts    = staging->add_child(new_root, Lnast_ntype::create_stmts());
 
   // SSA rename state (straight-line scope only; branches copied verbatim).
-  std::unordered_map<std::string, std::string> rename_map;   // base → current SSA name
-  std::unordered_map<std::string, int>         ssa_count;    // version counter
-  std::unordered_set<std::string>              seen_lhs;     // first-seen tracker
+  std::unordered_map<std::string, std::string> rename_map;  // base → current SSA name
+  std::unordered_map<std::string, int>         ssa_count;   // version counter
+  std::unordered_set<std::string>              seen_lhs;    // first-seen tracker
 
   for (auto child : lnast->children(stmts_nid)) {
     auto type = lnast->get_type(child);
@@ -169,12 +185,12 @@ void uPass_ssa::run(const std::shared_ptr<Lnast>& lnast) {
     if (Lnast_ntype::is_tuple_add(type)) {
       Lnast_nid first_ch = lnast->get_first_child(child);
       if (!first_ch.is_invalid()) {
-        auto       tuple_ref  = std::string(lnast->get_name(first_ch));
-        const bool is_io_inp  = !input_ref_name.empty()  && tuple_ref == input_ref_name
-                                && tuple_ref != k_empty_tuple;
-        const bool is_io_out  = !output_ref_name.empty() && tuple_ref == output_ref_name
-                                && tuple_ref != k_empty_tuple;
-        if (is_io_inp || is_io_out) continue;
+        auto       tuple_ref = std::string(lnast->get_name(first_ch));
+        const bool is_io_inp = !input_ref_name.empty() && tuple_ref == input_ref_name && tuple_ref != k_empty_tuple;
+        const bool is_io_out = !output_ref_name.empty() && tuple_ref == output_ref_name && tuple_ref != k_empty_tuple;
+        if (is_io_inp || is_io_out) {
+          continue;
+        }
       }
     }
 
@@ -192,14 +208,14 @@ void uPass_ssa::run(const std::shared_ptr<Lnast>& lnast) {
       for (auto sub : lnast->children(child)) {
         if (first) {
           // ── LHS ────────────────────────────────────────────────────────
-          auto lhs_name = std::string(lnast->get_name(sub));
+          auto        lhs_name = std::string(lnast->get_name(sub));
           std::string out_name = lhs_name;
 
           if (is_user_var(lhs_name)) {
             if (seen_lhs.count(lhs_name)) {
               // Preview next SSA version — do NOT touch rename_map yet.
-              int n    = ssa_count[lhs_name] + 1;
-              out_name = lhs_name + "___ssa_" + std::to_string(n);
+              int n       = ssa_count[lhs_name] + 1;
+              out_name    = lhs_name + "___ssa_" + std::to_string(n);
               pending_lhs = lhs_name;
               pending_ssa = out_name;
             } else {

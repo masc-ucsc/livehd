@@ -5,8 +5,8 @@
 #include <string_view>
 #include <vector>
 
-#include "ir_adapter.hpp"
 #include "const.hpp"
+#include "ir_adapter.hpp"
 
 namespace upass {
 
@@ -78,7 +78,7 @@ inline Shared_fold_sum_const_report run_fold_sum_const_shared(IR_adapter& adapte
       continue;
     }
 
-    bool                all_const = true;
+    bool               all_const = true;
     std::vector<Const> const_vals;
     for (const auto& inp : inps) {
       const auto cv = adapter.const_value(inp);

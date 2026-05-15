@@ -44,12 +44,12 @@
 
 BEGIN_LEFDEF_PARSER_NAMESPACE
 
-static const char *init_call_func = NULL;
+static const char* init_call_func = NULL;
 
-extern double convert_name2num(const char *versionName);
+extern double convert_name2num(const char* versionName);
 extern bool   validateMaskNumber(int num);
 
-void lef_init(const char *func) {
+void lef_init(const char* func) {
   if (lefSettings == NULL) {
     lefrSettings::reset();
     init_call_func = func;
@@ -73,19 +73,19 @@ void lefiNwarn(int i) {
   exit(2);
 }
 
-double convert_name2num(const char *versionName) {
+double convert_name2num(const char* versionName) {
   char  majorNm[80];
   char  minorNm[80];
-  char *subMinorNm = NULL;
+  char* subMinorNm = NULL;
 
-  char *versionNm = strdup(versionName);
+  char* versionNm = strdup(versionName);
 
   double major = 0, minor = 0, subMinor = 0;
   double version, versionNumber;
   char   finalVersion[80];
 
   sscanf(versionNm, "%[^.].%s", majorNm, minorNm);
-  char *p1 = strchr(minorNm, '.');
+  char* p1 = strchr(minorNm, '.');
   if (p1) {
     subMinorNm = p1 + 1;
     *p1        = '\0';
@@ -150,7 +150,7 @@ bool validateMaskNumber(int num) {
 // This make sure the global variables are initialized
 
 // User control warning to be printed by the parser
-void lefrDisableParserMsgs(int nMsg, int *msgs) {
+void lefrDisableParserMsgs(int nMsg, int* msgs) {
   LEF_INIT;
   if (nMsg <= 0) {
     return;
@@ -161,7 +161,7 @@ void lefrDisableParserMsgs(int nMsg, int *msgs) {
   }
 }
 
-void lefrEnableParserMsgs(int nMsg, int *msgs) {
+void lefrEnableParserMsgs(int nMsg, int* msgs) {
   LEF_INIT;
   for (int i = 0; i < nMsg; i++) {
     lefSettings->enableMsg(msgs[i]);
@@ -250,11 +250,11 @@ int lefrClear() {
   return 0;
 }
 
-const char *lefrFName() { return lefData->lefrFileName; }
+const char* lefrFName() { return lefData->lefrFileName; }
 
 int lefrReleaseNResetMemory() { return 0; }
 
-int lefrRead(FILE *f, const char *fName, lefiUserData uData) {
+int lefrRead(FILE* f, const char* fName, lefiUserData uData) {
   LEF_INIT;
   int status;
 
@@ -268,7 +268,7 @@ int lefrRead(FILE *f, const char *fName, lefiUserData uData) {
     lefData->namesCaseSensitive = true;
   }
 
-  lefData->lefrFileName = (char *)fName;
+  lefData->lefrFileName = (char*)fName;
   lefData->lefrFile     = f;
   lefSettings->UserData = uData;
 
@@ -480,7 +480,7 @@ void lefrSetUnusedCallbacks(lefrVoidCbkFnType func) {
 // These count up the number of times an unset callback is called...
 static int lefrUnusedCount[NOCBK];
 
-int lefrCountFunc(lefrCallbackType_e e, void *v, lefiUserData d) {
+int lefrCountFunc(lefrCallbackType_e e, void* v, lefiUserData d) {
   LEF_INIT;
   int i = (int)e;
   if (lefiDebug(23)) {
@@ -503,7 +503,7 @@ void lefrSetRegisterUnusedCallbacks() {
   }
 }
 
-void lefrPrintUnusedCallbacks(FILE *f) {
+void lefrPrintUnusedCallbacks(FILE* f) {
   LEF_INIT;
   int i;
   int firstCB = 1;
@@ -1276,7 +1276,7 @@ void lefrUnsetRelaxMode() {
   lefSettings->RelaxMode = FALSE;
 }
 
-void lefrSetVersionValue(const char *version) {
+void lefrSetVersionValue(const char* version) {
   LEF_INIT;
   lefSettings->VersionNum = convert_name2num(version);
 }
@@ -1460,9 +1460,9 @@ void lefrDisablePropStrProcess() {
   lefSettings->DisPropStrProcess = 1;
 }
 
-void lefrRegisterLef58Type(const char *lef58Type, const char *layerType) {
+void lefrRegisterLef58Type(const char* lef58Type, const char* layerType) {
   LEF_INIT;
-  const char *typeLayers[] = {layerType, ""};
+  const char* typeLayers[] = {layerType, ""};
 
   lefSettings->addLef58Type(lef58Type, typeLayers);
 }

@@ -7,7 +7,7 @@
 #include "verilated_vcd_c.h"
 
 vluint64_t     global_time = 0;
-VerilatedVcdC *tfp         = 0;
+VerilatedVcdC* tfp         = 0;
 
 #define HALF_CLOCK_SCALE 1000  // 1000ps -> 2000ps clock period or 500MHz
 
@@ -22,7 +22,7 @@ void do_terminate() {
   exit(0);
 }
 
-void advance_clock(Vtest_and2 *uut) {
+void advance_clock(Vtest_and2* uut) {
   uut->clk ^= 1;
   uut->eval();
 #ifdef VM_TRACE

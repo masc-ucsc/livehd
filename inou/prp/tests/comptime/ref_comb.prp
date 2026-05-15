@@ -22,5 +22,5 @@ cassert b == 1 and d1 == 104
 
 mut c = 1
 cassert c == 1
-const d2 = inline_ref(c)
+const d2 = inline_ref(ref c)
 cassert c == 201 and d2 == 204

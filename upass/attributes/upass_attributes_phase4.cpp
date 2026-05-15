@@ -57,7 +57,7 @@ void uPass_attributes::migrate_aggregate_attrs_to_fields(std::string_view base) 
   // attr_set fired against the tuple_get tmp before the named assign moved
   // shape onto `base`). Resolve those once so we don't clobber a field's
   // override with the aggregate value.
-  auto src_it = shape_source.find(std::string{base});
+  auto              src_it   = shape_source.find(std::string{base});
   const std::string src_base = (src_it != shape_source.end()) ? src_it->second : std::string{};
 
   auto field_override = [&](const std::string& key, const std::string& attr_name) -> std::optional<Const> {
@@ -161,8 +161,7 @@ void uPass_attributes::migrate_alias(std::string_view lhs, std::string_view rhs)
   if (auto* a = lookup_get_alias(rhs); a) {
     auto [it, inserted] = tuple_get_alias.emplace(lhs_s, *a);
     if (!inserted) {
-      if (it->second.base != a->base || it->second.field_key != a->field_key
-          || it->second.field_name != a->field_name) {
+      if (it->second.base != a->base || it->second.field_key != a->field_key || it->second.field_name != a->field_name) {
         it->second = *a;
         mark_changed();
       }

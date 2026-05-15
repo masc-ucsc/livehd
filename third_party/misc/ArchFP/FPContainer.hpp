@@ -57,5 +57,4 @@ public:
   virtual FPObject* addComponentCluster(std::string_view name, int count, double area, double maxARArg, double minARArg);
   virtual void      addComponent(FPObject* comp);
   virtual void      addComponent(FPObject* comp, int count);
-
 };

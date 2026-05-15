@@ -47,7 +47,7 @@ BEGIN_LEFDEF_PARSER_NAMESPACE
  * a colon-delimited list of directories in which to find
  * include files.
  */
-extern int lefwWrite(FILE *file, const char *fileName, lefiUserData userData);
+extern int lefwWrite(FILE* file, const char* fileName, lefiUserData userData);
 
 /*
  * Set all of the callbacks that have not yet been set to a function
@@ -55,7 +55,7 @@ extern int lefwWrite(FILE *file, const char *fileName, lefiUserData userData);
  * (ie no callback was done).  The statistics can later be printed out.
  */
 extern void lefwSetRegisterUnusedCallbacks(void);
-extern void lefwPrintUnusedCallbacks(FILE *f);
+extern void lefwPrintUnusedCallbacks(FILE* f);
 
 /*
  * Set/get the client-provided user data.  lefi doesn't look at
@@ -192,11 +192,11 @@ extern void lefwSetEndLibCbk(lefwVoidCbkFnType);
 extern void lefwSetUnusedCallbacks(lefwVoidCbkFnType func);
 
 // Routine to set the message logging routine for errors
-typedef void (*LEFI_LOG_FUNCTION)(const char *);
+typedef void (*LEFI_LOG_FUNCTION)(const char*);
 extern void lefwSetLogFunction(LEFI_LOG_FUNCTION);
 
 // Routine to set the message logging routine for warnings
-typedef void (*LEFI_WARNING_LOG_FUNCTION)(const char *);
+typedef void (*LEFI_WARNING_LOG_FUNCTION)(const char*);
 extern void lefwSetWarningLogFunction(LEFI_WARNING_LOG_FUNCTION);
 
 END_LEFDEF_PARSER_NAMESPACE

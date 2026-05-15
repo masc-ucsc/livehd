@@ -396,7 +396,7 @@ void Cprop::replace_all_inputs_const(Node& node, XEdge_iterator& inp_edges_order
     replace_node(node, result);
   } else if (false && op == Ntype_op::Get_mask) {
     Const val       = node.get_sink_pin("a").get_driver_node().get_type_const();
-    auto   mask_spin = node.get_sink_pin("mask");
+    auto  mask_spin = node.get_sink_pin("mask");
     if (mask_spin.is_connected()) {
       auto mask = mask_spin.get_driver_node().get_type_const();
       replace_node(node, val.get_mask_op(mask));
@@ -405,8 +405,8 @@ void Cprop::replace_all_inputs_const(Node& node, XEdge_iterator& inp_edges_order
     }
   } else if (op == Ntype_op::Set_mask) {
     Const val        = node.get_sink_pin("a").get_driver_node().get_type_const();
-    auto   mask_spin  = node.get_sink_pin("mask");
-    auto   value_spin = node.get_sink_pin("value");
+    auto  mask_spin  = node.get_sink_pin("mask");
+    auto  value_spin = node.get_sink_pin("value");
 
     if (mask_spin.is_connected() && value_spin.is_connected()) {
       auto mask  = mask_spin.get_driver_node().get_type_const();

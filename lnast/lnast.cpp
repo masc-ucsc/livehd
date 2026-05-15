@@ -216,9 +216,9 @@ bool decode_loc(std::string_view s, Lnast::Loc& out) {
     if (end == std::string_view::npos) {
       end = s.size();
     }
-    auto piece = s.substr(pos, end - pos);
-    auto first = piece.data();
-    auto last  = piece.data() + piece.size();
+    auto piece     = s.substr(pos, end - pos);
+    auto first     = piece.data();
+    auto last      = piece.data() + piece.size();
     auto [ptr, ec] = std::from_chars(first, last, v[field]);
     if (ec != std::errc{} || ptr != last) {
       return false;

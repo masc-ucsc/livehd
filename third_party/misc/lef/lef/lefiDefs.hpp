@@ -69,7 +69,7 @@ struct rect {
 typedef struct token lefTOKEN;
 
 struct token {
-  lefTOKEN *next;
+  lefTOKEN* next;
   int       what;
   int       data;
   lefPOINT  pt;
@@ -164,11 +164,11 @@ typedef enum {
 //  A handle which a user can set to point to their own data
 //  on a per-callback basis.  (See the comment in lefwWriter.h)
 
-#define lefiUserData       void *
-#define lefiUserDataHandle void **
+#define lefiUserData       void*
+#define lefiUserDataHandle void**
 
 #ifdef __SunOS_4_1_3
-extern int strcasecmp(const char *, const char *);
+extern int strcasecmp(const char*, const char*);
 #endif
 
 #ifdef WIN32

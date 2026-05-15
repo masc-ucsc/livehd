@@ -68,9 +68,9 @@ void lefiUnits::Destroy() { clear(); }
 
 lefiUnits::~lefiUnits() { Destroy(); }
 
-void lefiUnits::setDatabase(const char *name, double num) {
+void lefiUnits::setDatabase(const char* name, double num) {
   int len       = strlen(name) + 1;
-  databaseName_ = (char *)lefMalloc(len);
+  databaseName_ = (char*)lefMalloc(len);
   strcpy(databaseName_, CASE(name));
   databaseNumber_ = num;
   hasDatabase_    = 1;
@@ -142,7 +142,7 @@ int lefiUnits::hasFrequency() const { return hasFrequency_; }
 
 int lefiUnits::hasTime() const { return hasTime_; }
 
-const char *lefiUnits::databaseName() const { return databaseName_; }
+const char* lefiUnits::databaseName() const { return databaseName_; }
 
 double lefiUnits::databaseNumber() const { return databaseNumber_; }
 
@@ -160,7 +160,7 @@ double lefiUnits::voltage() const { return voltage_; }
 
 double lefiUnits::frequency() const { return frequency_; }
 
-void lefiUnits::print(FILE *f) const {
+void lefiUnits::print(FILE* f) const {
   fprintf(f, "Units:\n");
   if (hasTime()) {
     fprintf(f, "  %g nanoseconds\n", time());

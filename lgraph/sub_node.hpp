@@ -94,7 +94,7 @@ public:
   // HHDS migration Phase G1.2 — set by Graph_library to a non-owning pointer
   // to the paired hhds::GraphIO. Operations mirror to it when non-null.
   // The Graph_library owns the underlying shared_ptr.
-  void                 set_hhds_io(hhds::GraphIO* io) { hhds_io_ = io; }
+  void                         set_hhds_io(hhds::GraphIO* io) { hhds_io_ = io; }
   [[nodiscard]] hhds::GraphIO* ref_hhds_io() const { return hhds_io_; }
 
   void to_json(rapidjson::PrettyWriter<rapidjson::StringBuffer>& writer) const;
@@ -254,7 +254,6 @@ public:
 
     return instance_pid;
   }
-
 
   [[nodiscard]] bool has_pin(std::string_view io_name) const {
     I(lgid);

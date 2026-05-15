@@ -38,11 +38,9 @@ public:
   void on_attr_get(uPass_attributes& owner, std::string_view dst, std::string_view base) override;
 
   void on_alias_assign(uPass_attributes& owner, std::string_view lhs, std::string_view rhs) override;
-  void on_expr_assign(uPass_attributes& owner, std::string_view lhs,
-                      const std::vector<std::string_view>& rhs_refs) override;
+  void on_expr_assign(uPass_attributes& owner, std::string_view lhs, const std::vector<std::string_view>& rhs_refs) override;
 
-  void on_if_arm_enter(uPass_attributes& owner,
-                       const std::vector<std::string_view>& cond_refs,
+  void on_if_arm_enter(uPass_attributes& owner, const std::vector<std::string_view>& cond_refs,
                        const std::vector<std::pair<std::string_view, std::string_view>>& cond_attr_reads) override;
   void on_if_arm_exit(uPass_attributes& owner) override;
 
@@ -73,7 +71,7 @@ private:
   // state. Pushed by on_if_arm_enter, popped by on_if_arm_exit.
   std::vector<std::set<std::string>> control_taint_stack;
 
-  void merge_from(std::string_view dst, std::string_view src);
+  void                  merge_from(std::string_view dst, std::string_view src);
   std::set<std::string> active_control_taint() const;  // OR of stack entries
 };
 

@@ -55,8 +55,8 @@ bool Symbol_table::var(std::string_view key) {
   assert_no_prefix(key);
   auto [var, field] = get_var_field(key);
 
-  auto& cur = *stack.back();
-  const auto it = cur.varmap.find(var);
+  auto&      cur = *stack.back();
+  const auto it  = cur.varmap.find(var);
   if (unlikely(it != cur.varmap.end())) {
     Lnast::info("re-declaring {} which already exists in {}", var, cur.scope);
     return false;
@@ -105,7 +105,7 @@ bool Symbol_table::set(std::string_view key, std::shared_ptr<Bundle> bundle) {
   record_uncertain_modification(var);
 
   std::shared_ptr<Bundle> var_bundle;
-  const auto it = target->varmap.find(var);
+  const auto              it = target->varmap.find(var);
   if (unlikely(it == target->varmap.end())) {
     target->declared.emplace_back(std::string(var));
     if (var == key) {
@@ -139,7 +139,7 @@ bool Symbol_table::set(std::string_view key, const Const& trivial) {
   record_uncertain_modification(var);
 
   std::shared_ptr<Bundle> bundle;
-  const auto it = target->varmap.find(var);
+  const auto              it = target->varmap.find(var);
   if (unlikely(it == target->varmap.end())) {
     target->declared.emplace_back(std::string(var));
     bundle = std::make_shared<Bundle>(var);
@@ -182,8 +182,8 @@ bool Symbol_table::let(std::string_view key, std::shared_ptr<Bundle> bundle) {
   assert_no_prefix(key);
   auto [var, field] = get_var_field(key);
 
-  auto& cur = *stack.back();
-  const auto it = cur.varmap.find(var);
+  auto&      cur = *stack.back();
+  const auto it  = cur.varmap.find(var);
   if (unlikely(it != cur.varmap.end())) {
     Lnast::info("let {} but variable already declared in {}", var, cur.scope);
     return false;
@@ -200,7 +200,7 @@ void Symbol_table::always_scope() {
 
   // WARNING: keep same scope-id because shadowing can not happen here.
   scope_storage.emplace_back(Scope_type::Always, stack.back()->func_id, stack.back()->scope);
-  auto* s = &scope_storage.back();
+  auto* s   = &scope_storage.back();
   s->parent = stack.back();
   stack.emplace_back(s);
 }
@@ -208,7 +208,7 @@ void Symbol_table::always_scope() {
 void Symbol_table::conditional_scope() {
   I(!stack.empty());
   scope_storage.emplace_back(Scope_type::Conditional, stack.back()->func_id, stack.back()->scope);
-  auto* s = &scope_storage.back();
+  auto* s   = &scope_storage.back();
   s->parent = stack.back();
   stack.emplace_back(s);
 }
@@ -226,15 +226,15 @@ void Symbol_table::function_scope(std::string_view func_id) {
   }
 
   scope_storage.emplace_back(Scope_type::Function, func_id, scope);
-  auto* s = &scope_storage.back();
+  auto* s   = &scope_storage.back();
   s->parent = stack.empty() ? nullptr : stack.back();
   stack.emplace_back(s);
 }
 
 Symbol_table::Scope* Symbol_table::block_scope(uint64_t key) {
   I(!stack.empty());
-  auto it = block_scope_index.find(key);
-  Scope* s = nullptr;
+  auto   it = block_scope_index.find(key);
+  Scope* s  = nullptr;
   if (it == block_scope_index.end()) {
     // First entry — create a persistent scope under the current parent.
     auto scope_id = absl::StrCat(stack.back()->scope, "/b", key);
@@ -340,7 +340,9 @@ std::shared_ptr<Bundle> Symbol_table::leave_scope() {
 }
 
 bool Symbol_table::is_known_const(std::string_view name) const {
-  if (!has_trivial(name)) return false;
+  if (!has_trivial(name)) {
+    return false;
+  }
   const auto& val = get_trivial(name);
   return !val.is_invalid() && !val.has_unknowns();
 }

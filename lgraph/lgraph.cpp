@@ -102,16 +102,16 @@ void Lgraph::load(const std::shared_ptr<Hif_read> hif) {
       I(stmt.attr[0].lhs_cat == Hif_base::ID_cat::String_cat);
 
       Const lc;
-      lc = Dlop::unserialize(stmt.attr[0].rhs);
-      node      = create_node_const(lc);
+      lc   = Dlop::unserialize(stmt.attr[0].rhs);
+      node = create_node_const(lc);
 
     } else if (op == Ntype_op::LUT) {
       I(!stmt.attr.empty() && stmt.attr[0].lhs == "lut");
       I(stmt.attr[0].lhs_cat == Hif_base::ID_cat::String_cat);
 
       Const lc;
-      lc = Dlop::unserialize(stmt.attr[0].rhs);
-      node      = create_node_lut(lc);
+      lc   = Dlop::unserialize(stmt.attr[0].rhs);
+      node = create_node_lut(lc);
 
     } else if (op == Ntype_op::Sub) {
       I(!stmt.attr.empty() && stmt.attr[0].lhs == "subid");

@@ -68,14 +68,14 @@ void lefiPropType::Destroy() {
 
 lefiPropType::~lefiPropType() { Destroy(); }
 
-void lefiPropType::setPropType(const char *name, const char type) {
+void lefiPropType::setPropType(const char* name, const char type) {
   int len;
 
   if (numProperties_ == propertiesAllocated_) {
     bumpProps();
   }
   len                        = strlen(name) + 1;
-  propNames_[numProperties_] = (char *)malloc(len);
+  propNames_[numProperties_] = (char*)malloc(len);
   strcpy(propNames_[numProperties_], CASE(name));
   propTypes_[numProperties_] = type;
   numProperties_ += 1;
@@ -84,13 +84,13 @@ void lefiPropType::setPropType(const char *name, const char type) {
 void lefiPropType::bumpProps() {
   int    lim = propertiesAllocated_;
   int    news;
-  char **newpn;
-  char  *newt;
+  char** newpn;
+  char*  newt;
 
   news = lim ? lim + lim : 2;
 
-  newpn = (char **)malloc(sizeof(char *) * news);
-  newt  = (char *)malloc(sizeof(char) * news);
+  newpn = (char**)malloc(sizeof(char*) * news);
+  newt  = (char*)malloc(sizeof(char) * news);
 
   lim = propertiesAllocated_ = news;
 
@@ -100,14 +100,14 @@ void lefiPropType::bumpProps() {
       newpn[i] = propNames_[i];
       newt[i]  = propTypes_[i];
     }
-    free((char *)(propNames_));
-    free((char *)(propTypes_));
+    free((char*)(propNames_));
+    free((char*)(propTypes_));
   }
   propNames_ = newpn;
   propTypes_ = newt;
 }
 
-char lefiPropType::propType(char *name) const {
+char lefiPropType::propType(char* name) const {
   int i;
 
   // Name is NULL, error

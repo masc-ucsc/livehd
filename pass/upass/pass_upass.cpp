@@ -76,9 +76,7 @@ void Pass_upass::setup() {
   m1.add_label_optional("constprop", "enable constant propagation upass", "true");
   m1.add_label_optional("coalescer", "enable deferred-emit / DSE coalescer upass", "true");
   m1.add_label_optional("attributes", "enable Pyrope attribute upass (sticky propagation, comptime checks)", "true");
-  m1.add_label_optional("bitwidth",
-                        "enable LNAST bitwidth optimizer (range inference; publishes max/min into bw_meta)",
-                        "true");
+  m1.add_label_optional("bitwidth", "enable LNAST bitwidth optimizer (range inference; publishes max/min into bw_meta)", "true");
   m1.add_label_optional("ssa",
                         "enable SSA normalisation: harvest I/O metadata into tree_io, expand I/O tuple nodes, "
                         "rename multi-assigned user variables to SSA-unique names",
@@ -144,8 +142,7 @@ Pass_upass::Pass_upass(const Eprp_var& var) : Pass("pass.upass", var) {
   std::transform(vif_txt.begin(), vif_txt.end(), vif_txt.begin(), [](unsigned char c) {
     return static_cast<char>(std::tolower(c));
   });
-  verifier_include_funcs
-      = !(vif_txt.empty() || vif_txt == "0" || vif_txt == "false" || vif_txt == "no" || vif_txt == "off");
+  verifier_include_funcs = !(vif_txt.empty() || vif_txt == "0" || vif_txt == "false" || vif_txt == "no" || vif_txt == "off");
 
   // Per-pass config forwarded to the runner. Pick up labels whose meaning
   // is pass-specific (as opposed to runner/order labels above).
@@ -175,8 +172,8 @@ Pass_upass::Pass_upass(const Eprp_var& var) : Pass("pass.upass", var) {
   auto coalescer_txt = get_label("coalescer");
   bool do_coalescer  = coalescer_txt != "false" && coalescer_txt != "0";
 
-  auto attrs_txt   = get_label("attributes");
-  bool do_attrs    = attrs_txt != "false" && attrs_txt != "0";
+  auto attrs_txt = get_label("attributes");
+  bool do_attrs  = attrs_txt != "false" && attrs_txt != "0";
 
   auto bw_txt      = get_label("bitwidth");
   bool do_bitwidth = bw_txt != "false" && bw_txt != "0";
@@ -211,15 +208,14 @@ Pass_upass::Pass_upass(const Eprp_var& var) : Pass("pass.upass", var) {
     upass_order.emplace_back("attributes");
   }
 
-  // Bitwidth runs after attributes (so wrap/saturate policy is on the
-  // symbol table) and before constprop (so `.[max]`/`.[min]`/`.[bits]`
-  // reads can fold using the inferred ranges).
-  if (do_bitwidth) {
-    upass_order.emplace_back("bitwidth");
-  }
-
   if (do_constprop) {
     upass_order.emplace_back("constprop");
+  }
+  // Bitwidth runs after constprop so comb calls that constprop can evaluate
+  // are handled before range inference. Opaque call-site `ref` arguments
+  // still invalidate their caller-side ranges in the bitwidth pass.
+  if (do_bitwidth) {
+    upass_order.emplace_back("bitwidth");
   }
   // Coalescer runs after constprop so its handle_op sees an up-to-date
   // runner_fold_fn — the known-const guard skips parking when constprop has
@@ -307,8 +303,8 @@ void Pass_upass::work(Eprp_var& var) {
   // comb functions), and those generated trees should run through the same
   // configured upass pipeline before downstream stages see them.
   for (std::size_t idx = 0; idx < var.lnasts.size(); ++idx) {
-    const auto ln     = var.lnasts.at(idx);
-    auto       lm     = std::make_shared<upass::Lnast_manager>(ln);
+    const auto ln = var.lnasts.at(idx);
+    auto       lm = std::make_shared<upass::Lnast_manager>(ln);
 
     // For func_extract-spawned lnasts (idx beyond the original entry-point
     // count), strip the verifier from the order unless the test opted in

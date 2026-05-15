@@ -432,10 +432,8 @@ TEST(LnastPrpWriter, AttrSetTypeAnnotationSuppressed) {
 
   auto output = run_and_emit(ln, {"noop_shared"});
   // Must not emit x.type = mut — that is not valid Pyrope.
-  EXPECT_EQ(output.find("x.type"), std::string::npos)
-      << "attr_set type annotation leaked into output:\n" << output;
-  EXPECT_EQ(output.find("= mut"), std::string::npos)
-      << "attr_set type annotation leaked into output:\n" << output;
+  EXPECT_EQ(output.find("x.type"), std::string::npos) << "attr_set type annotation leaked into output:\n" << output;
+  EXPECT_EQ(output.find("= mut"), std::string::npos) << "attr_set type annotation leaked into output:\n" << output;
 }
 
 // ── Test 15: round-trip — if(true) branch is pruned by constprop ─────────────

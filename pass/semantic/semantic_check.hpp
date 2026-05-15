@@ -76,8 +76,10 @@ protected:
   void resolve_out_of_scope_func_def();
 
   // Semantic Check Functions
-  void check_primitive_ops(Lnast* lnast, const Lnast_nid& lnidx_opr, const Lnast_ntype::Lnast_ntype_int node_type, std::string_view stmt_name);
-  void check_tree_struct_ops(Lnast* lnast, const Lnast_nid& lnidx_opr, const Lnast_ntype::Lnast_ntype_int node_type, std::string_view stmt_name);
+  void check_primitive_ops(Lnast* lnast, const Lnast_nid& lnidx_opr, const Lnast_ntype::Lnast_ntype_int node_type,
+                           std::string_view stmt_name);
+  void check_tree_struct_ops(Lnast* lnast, const Lnast_nid& lnidx_opr, const Lnast_ntype::Lnast_ntype_int node_type,
+                             std::string_view stmt_name);
   void check_if_op(Lnast* lnast, const Lnast_nid& lnidx_opr, std::string_view stmt_name);
   void check_for_op(Lnast* lnast, const Lnast_nid& lnidx_opr, std::string_view stmt_name);
   void check_while_op(Lnast* lnast, const Lnast_nid& lnidx_opr, std::string_view stmt_name);

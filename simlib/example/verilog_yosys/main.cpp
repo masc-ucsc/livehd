@@ -2,7 +2,7 @@
 
 uint64_t global_time = 0;
 
-void advance_clock(cxxrtl_design::p_sample &top) {
+void advance_clock(cxxrtl_design::p_sample& top) {
   top.p_clk = value<1>{1u};
   top.step();
   top.p_clk = value<1>{0u};

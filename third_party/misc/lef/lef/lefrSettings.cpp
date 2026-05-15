@@ -35,7 +35,7 @@
 
 BEGIN_LEFDEF_PARSER_NAMESPACE
 
-lefrSettings *lefSettings = NULL;
+lefrSettings* lefSettings = NULL;
 
 lefrSettings::lefrSettings()
     : DisPropStrProcess(0)
@@ -96,11 +96,11 @@ lefrSettings::lefrSettings()
   // Define LEF58_TYPE values and dependences here:
 
   // Popular layer groups.
-  const char *polyroutingLayers[] = {"ROUTING", ""};
-  const char *mimcapLayers[]      = {"ROUTING", "CUT", ""};
-  const char *tsvLayers[]         = {"CUT", ""};
-  const char *mastersliceOnly[]   = {"MASTERSLICE", ""};
-  const char *wellLayers[]        = {"MASTERSLICE", "OVERLAP", ""};
+  const char* polyroutingLayers[] = {"ROUTING", ""};
+  const char* mimcapLayers[]      = {"ROUTING", "CUT", ""};
+  const char* tsvLayers[]         = {"CUT", ""};
+  const char* mastersliceOnly[]   = {"MASTERSLICE", ""};
+  const char* wellLayers[]        = {"MASTERSLICE", "OVERLAP", ""};
 
   // Register LEF58 types and allowed layer types pairs.
   addLef58Type("POLYROUTING", polyroutingLayers);
@@ -569,7 +569,7 @@ int lefrSettings::suppresMsg(int msgId) {
 
 // This function will get token from input string. Also sets
 // startIdx on first character after the token.
-std::string lefrSettings::getToken(const std::string &input, int &startIdx) {
+std::string lefrSettings::getToken(const std::string& input, int& startIdx) {
   std::string divChars   = " \n\t\r;";
   int         tokenStart = input.find_first_not_of(divChars, startIdx);
   int         tokenEnd   = input.find_first_of(divChars, tokenStart);
@@ -582,7 +582,7 @@ std::string lefrSettings::getToken(const std::string &input, int &startIdx) {
 // is reference to string array last element of which should be
 // "". The pairs will be created for each element of the array.
 // Duplicated pairs will be ignored.
-void lefrSettings::addLef58Type(const char *lef58Type, const char **layerType) {
+void lefrSettings::addLef58Type(const char* lef58Type, const char** layerType) {
   for (; **layerType; layerType++) {
     std::string typesPair(lef58Type);
 
@@ -592,7 +592,7 @@ void lefrSettings::addLef58Type(const char *lef58Type, const char **layerType) {
   }
 }
 
-std::string lefrSettings::getLayerLef58Types(const char *type) const {
+std::string lefrSettings::getLayerLef58Types(const char* type) const {
   std::string               result;
   StringSet::const_iterator pairsIter = Lef58TypePairs.begin();
 

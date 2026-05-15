@@ -78,7 +78,7 @@ extern int defwInit(FILE* f, int vers1, int version2, const char* caseSensitive,
                     const char* technology,                                      /* optional(NULL) - TECHNOLOGY */
                     const char* array,                                           /* optional(NULL) - ARRAYNAME */
                     const char* floorplan,                                       /* optional(NULL) - FLOORPLAN */
-                    double      units);                                               /* optional  (set to -1 to ignore) */
+                    double      units);                                          /* optional  (set to -1 to ignore) */
 
 /* The DEF writer initialization.  Must be called first.
  * Either this routine or defwInit should be call only.
@@ -166,7 +166,7 @@ extern int defwIntPropDef(const char* objType,                    // LIBRARY | L
                                                                   // NONDEFAULTRULE | MACRO | PIN
                           const char* propName, double leftRange, /* optional(0) - RANGE */
                           double rightRange,                      /* optional(0) */
-                          int    propValue);                         /* optional(NULL) */
+                          int    propValue);                      /* optional(NULL) */
 
 /* This routine must be called after defwStartPropDef.
  * This routine can be called multiple times.
@@ -262,14 +262,14 @@ extern int defwRowStr(const char* rowName, const char* rowType, int x_orig, int 
  * This routine is optional.
  * Returns 0 if successful.
  * The operation of the do is explained in the documentation. */
-extern int defwTracks(const char*  master,       /* X | Y */
-                      int          doStart,      /* start */
-                      int          doCount,      /* numTracks */
-                      int          doStep,       /* space */
-                      int          numLayers,    /* number of layers */
-                      const char** layers,       /* list of layers */
-                      int          mask     = 0, /* optional */
-                      int          sameMask = 0);         /* optional */
+extern int defwTracks(const char*  master,        /* X | Y */
+                      int          doStart,       /* start */
+                      int          doCount,       /* numTracks */
+                      int          doStep,        /* space */
+                      int          numLayers,     /* number of layers */
+                      const char** layers,        /* list of layers */
+                      int          mask     = 0,  /* optional */
+                      int          sameMask = 0); /* optional */
 
 /* This routine must be called after the defwTracks (if any).
  * This routine is optional.
@@ -278,7 +278,7 @@ extern int defwTracks(const char*  master,       /* X | Y */
 extern int defwGcellGrid(const char* master,  /* X | Y */
                          int         doStart, /* start */
                          int         doCount, /* numColumns | numRows */
-                         int         doStep);         /* space */
+                         int         doStep); /* space */
 
 /* This routine must be called after the defwTracks (if any).
  * This section of routines is optional.
@@ -828,8 +828,8 @@ extern int defwSpecialNet(const char* name); /* netName */
 
 /* This routine is for compNameRegExpr, pinName, and SYNTHESIZED */
 /* It can be called multiple times */
-extern int defwSpecialNetConnection(const char* inst, /* compNameRegExpr */
-                                    const char* pin,  /* pinName */
+extern int defwSpecialNetConnection(const char* inst,         /* compNameRegExpr */
+                                    const char* pin,          /* pinName */
                                     int         synthesized); /* 0 - ignore, 1 - SYNTHESIZED  */
 
 /* This routine is for + FIXEDBUMP
@@ -840,14 +840,14 @@ extern int defwSpecialNetFixedbump();
 extern int defwSpecialNetVoltage(double v);
 
 /* This routine is for + SPACING layerName spacing [RANGE minwidth maxwidth */
-extern int defwSpecialNetSpacing(const char* layer,    /* layerName */
-                                 int         spacing,  /* spacing */
-                                 double      minwidth, /* optional(0) - minwidth */
-                                 double      maxwidth);     /* optional(0) - maxwidth */
+extern int defwSpecialNetSpacing(const char* layer,     /* layerName */
+                                 int         spacing,   /* spacing */
+                                 double      minwidth,  /* optional(0) - minwidth */
+                                 double      maxwidth); /* optional(0) - maxwidth */
 
 /* This routine is for + WIDTH layerName width */
-extern int defwSpecialNetWidth(const char* layer, /* layerName */
-                               int         width);        /* width */
+extern int defwSpecialNetWidth(const char* layer,  /* layerName */
+                               int         width); /* width */
 
 /* This routine is for + SOURCE {NETLIST | DIST | USER | TIMING} */
 extern int defwSpecialNetSource(const char* name);
@@ -969,8 +969,8 @@ extern int defwNet(const char* name);
 
 /* This routine is for { compName | PIN } pinName [+ SYNTHESIZED] */
 /* It can be called multiple times */
-extern int defwNetConnection(const char* inst, /* compName */
-                             const char* pin,  /* pinName */
+extern int defwNetConnection(const char* inst,         /* compName */
+                             const char* pin,          /* pinName */
                              int         synthesized); /* 0 - ignore, 1 - SYNTHESIZED */
 
 /* This routine is for MUSTJOIN, compName, pinName */
@@ -1123,21 +1123,21 @@ extern int defwIOTiming(const char* inst, /* compName | PIN */
  * This api is obsolete in 5.4. */
 extern int defwIOTimingVariable(const char* riseFall, /* RISE | FALL */
                                 int         num1,     /* min */
-                                int         num2);            /* max */
+                                int         num2);    /* max */
 
 /* This routine is for + { RISE | FALL } SLEWRATE min max
  * This api is obsolete in 5.4. */
 extern int defwIOTimingSlewrate(const char* riseFall, /* RISE | FALL */
                                 int         num1,     /* min */
-                                int         num2);            /* max */
+                                int         num2);    /* max */
 
 /* This routine is for + DRIVECELL macroName [[FROMPIN pinName] TOPIN pinName]
  * [PARALLEL numDrivers]
  * This api is obsolete in 5.4. */
-extern int defwIOTimingDrivecell(const char* name,    /* macroName*/
-                                 const char* fromPin, /* optional(NULL) */
-                                 const char* toPin,   /* optional(NULL) */
-                                 int         numDrivers);     /* optional(0) */
+extern int defwIOTimingDrivecell(const char* name,        /* macroName*/
+                                 const char* fromPin,     /* optional(NULL) */
+                                 const char* toPin,       /* optional(NULL) */
+                                 int         numDrivers); /* optional(0) */
 
 /* This routine is for + CAPACITANCE capacitance
  * This api is obsolete in 5.4. */
@@ -1192,7 +1192,7 @@ extern int defwScanchainFloatingBits(const char* name,  /* floatingComp */
                                      const char* pin1,  /* can't be null if inst1 is set */
                                      const char* inst2, /* optional(NULL) - IN | OUT */
                                      const char* pin2,  /* can't be null if inst2 is set */
-                                     int         bits);         /* optional (-1) */
+                                     int         bits); /* optional (-1) */
 
 /* This routine is for + ORDERED {fixedComp [IN pin] [OUT pin]
  * fixedComp [IN pin] [OUT pin].
@@ -1225,7 +1225,7 @@ extern int defwScanchainOrderedBits(const char* name1, const char* inst1, /* opt
                                     const char* pin3,                     /* can't be null if inst3 is set */
                                     const char* inst4,                    /* optional(NULL) - IN | OUT */
                                     const char* pin4,                     /* can't be null if inst4 is set */
-                                    int         bits2);                           /* optional(-1) */
+                                    int         bits2);                   /* optional(-1) */
 
 extern int defwEndScanchain();
 

@@ -26,10 +26,10 @@ static bool is_equal_called = false;
 
 class test1 {
 public:
-  static void files2(Eprp_var &var) {
+  static void files2(Eprp_var& var) {
     auto files = var.get("nofiles");
 
-    for (const auto &v : absl::StrSplit(files, ',')) {
+    for (const auto& v : absl::StrSplit(files, ',')) {
       std::print(" {}", v);
     }
     std::cout << "\n";
@@ -46,9 +46,9 @@ public:
     EXPECT_EQ(svector[3], "potato/bar.v");
   }
 
-  static void foo(Eprp_var &var) {
+  static void foo(Eprp_var& var) {
     std::cout << "test1.foo";
-    for (const auto &v : var.dict) {
+    for (const auto& v : var.dict) {
       std::print(" {}:{}", v.first, v.second);
     }
     std::cout << " ::";
@@ -59,7 +59,7 @@ public:
     EXPECT_EQ(var.get("test1_foo"), "field1");
   }
 
-  static void is_equal(Eprp_var &var) {
+  static void is_equal(Eprp_var& var) {
     EXPECT_EQ(var.get("test1_foo"), "field1");
 
     EXPECT_EQ(var.get("lgdb"), var.get("check1"));
@@ -72,7 +72,7 @@ public:
 
     is_equal_called = true;
   }
-  static void pass(Eprp_var &var) {
+  static void pass(Eprp_var& var) {
     (void)var;
     std::cout << "pass called\n";
   }
@@ -80,9 +80,9 @@ public:
 
 class test2 {
 public:
-  static void bar(Eprp_var &var) {
+  static void bar(Eprp_var& var) {
     std::cout << "test1.foo";
-    for (const auto &v : var.dict) {
+    for (const auto& v : var.dict) {
       std::print(" {}:{}", v.first, v.second);
     }
     std::cout << " ::";
@@ -147,14 +147,14 @@ protected:
 };
 
 TEST_F(Eprp_files, ParseFiles) {
-  const char *buffer = " test1.files2 match:\"nothing\" nofiles:g3xx,./f1/f1.v,xotato/../bar.prp,potato/bar.v";
+  const char* buffer = " test1.files2 match:\"nothing\" nofiles:g3xx,./f1/f1.v,xotato/../bar.prp,potato/bar.v";
 
   eprp.parse_inline(buffer);
 }
 
 TEST_F(Eprp_test, SimpleReadlinePipe) {
   is_equal_called = false;
-  const char *buffer
+  const char* buffer
       = " test1.xyz.generate lgdb:./lgdb graph_name:chacha |> test1.fff.test check2:jeje    lgdb:potato   check1:potato   ";
 
   eprp.parse_inline(buffer);

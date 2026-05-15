@@ -47,7 +47,7 @@ BEGIN_LEFDEF_PARSER_NAMESPACE
  * a colon-delimited list of directories in which to find
  * include files.
  */
-extern int defwWrite(FILE *file, const char *fileName, defiUserData userData);
+extern int defwWrite(FILE* file, const char* fileName, defiUserData userData);
 
 /*
  * Set all of the callbacks that have not yet been set to a function
@@ -55,7 +55,7 @@ extern int defwWrite(FILE *file, const char *fileName, defiUserData userData);
  * (ie no callback was done).  The statistics can later be printed out.
  */
 extern void defwSetRegisterUnusedCallbacks(void);
-extern void defwPrintUnusedCallbacks(FILE *log);
+extern void defwPrintUnusedCallbacks(FILE* log);
 
 /*
  * Set/get the client-provided user data.  defi doesn't look at
@@ -196,14 +196,14 @@ extern void defwSetUnusedCallbacks(defwVoidCbkFnType func);
 
 /* Routine to set the message logging routine for errors */
 #ifndef DEFI_LOG_FUNCTION
-typedef void (*DEFI_LOG_FUNCTION)(const char *);
+typedef void (*DEFI_LOG_FUNCTION)(const char*);
 #endif
 
 extern void defwSetLogFunction(DEFI_LOG_FUNCTION);
 
 /* Routine to set the message logging routine for warnings */
 #ifndef DEFI_WARNING_LOG_FUNCTION
-typedef void (*DEFI_WARNING_LOG_FUNCTION)(const char *);
+typedef void (*DEFI_WARNING_LOG_FUNCTION)(const char*);
 #endif
 
 extern void defwSetWarningLogFunction(DEFI_WARNING_LOG_FUNCTION);

@@ -67,7 +67,7 @@ public:
   void process_func_case() override;
   void process_range() override;
 
-  upass::Emit_decision  classify_statement() override;
+  upass::Emit_decision classify_statement() override;
   std::optional<Const> fold_ref(std::string_view name) override;
 
   static void set_function_registry(const std::vector<std::shared_ptr<Lnast>>& lnasts);
@@ -190,7 +190,7 @@ protected:
   struct Call_actual {
     bool        is_named = false;
     std::string name;
-    Const      value;
+    Const       value;
     // When the actual is a bare ref to a caller variable, remember the name
     // so a `ref` param can write back into the caller's scope after the
     // body is folded. Empty when the actual is a const literal or named with
@@ -200,7 +200,7 @@ protected:
 
   static inline std::unordered_map<std::string, std::shared_ptr<Lnast>> function_registry;
 
-  std::optional<Const>                   resolve_current_scalar() const;
+  std::optional<Const>                    resolve_current_scalar() const;
   std::optional<std::vector<Call_actual>> collect_call_actuals();
   bool try_eval_comb_call(std::string_view dst, std::string_view fname, const std::vector<Call_actual>& actuals);
 };

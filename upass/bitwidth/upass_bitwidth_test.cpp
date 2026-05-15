@@ -38,31 +38,24 @@ TEST(LnastRangeLattice, Boolean) {
 
 // ── sbits ─────────────────────────────────────────────────────────────────────
 
-TEST(LnastRangeLattice, SbitsConstant0) {
-  EXPECT_EQ(Lnast_range::constant(0).get_sbits(), 1);
-}
+TEST(LnastRangeLattice, SbitsConstant0) { EXPECT_EQ(Lnast_range::constant(0).get_sbits(), 1); }
 
-TEST(LnastRangeLattice, SbitsConstant7) {
-  EXPECT_EQ(Lnast_range::constant(7).get_sbits(), 4);
-}
+TEST(LnastRangeLattice, SbitsConstant7) { EXPECT_EQ(Lnast_range::constant(7).get_sbits(), 4); }
 
-TEST(LnastRangeLattice, SbitsConstantNeg1) {
-  EXPECT_EQ(Lnast_range::constant(-1).get_sbits(), 1);
-}
+TEST(LnastRangeLattice, SbitsConstantNeg1) { EXPECT_EQ(Lnast_range::constant(-1).get_sbits(), 1); }
 
 TEST(LnastRangeLattice, SbitsRange0To15) {
   Lnast_range r;
-  r.min = 0; r.max = 15; r.neg_inf = false; r.pos_inf = false;
+  r.min     = 0;
+  r.max     = 15;
+  r.neg_inf = false;
+  r.pos_inf = false;
   EXPECT_EQ(r.get_sbits(), 5);
 }
 
-TEST(LnastRangeLattice, SbitsBoolean) {
-  EXPECT_EQ(Lnast_range::boolean().get_sbits(), 1);
-}
+TEST(LnastRangeLattice, SbitsBoolean) { EXPECT_EQ(Lnast_range::boolean().get_sbits(), 1); }
 
-TEST(LnastRangeLattice, SbitsUnbounded) {
-  EXPECT_EQ(Lnast_range::unbounded().get_sbits(), 64);
-}
+TEST(LnastRangeLattice, SbitsUnbounded) { EXPECT_EQ(Lnast_range::unbounded().get_sbits(), 64); }
 
 // ── Arithmetic ────────────────────────────────────────────────────────────────
 
@@ -110,9 +103,17 @@ TEST(LnastRangeLattice, JoinWithUnbounded) {
 }
 
 TEST(LnastRangeLattice, Meet) {
-  Lnast_range a; a.min=1; a.max=10; a.neg_inf=false; a.pos_inf=false;
-  Lnast_range b; b.min=5; b.max=20; b.neg_inf=false; b.pos_inf=false;
-  auto r = a.meet(b);
+  Lnast_range a;
+  a.min     = 1;
+  a.max     = 10;
+  a.neg_inf = false;
+  a.pos_inf = false;
+  Lnast_range b;
+  b.min     = 5;
+  b.max     = 20;
+  b.neg_inf = false;
+  b.pos_inf = false;
+  auto r    = a.meet(b);
   EXPECT_FALSE(r.is_unbounded());
   EXPECT_EQ(r.min, 5);
   EXPECT_EQ(r.max, 10);
@@ -121,8 +122,12 @@ TEST(LnastRangeLattice, Meet) {
 // ── is_narrower_than ──────────────────────────────────────────────────────────
 
 TEST(LnastRangeLattice, NarrowerThan) {
-  Lnast_range wide; wide.min=0; wide.max=100; wide.neg_inf=false; wide.pos_inf=false;
-  auto narrow = Lnast_range::constant(42);
+  Lnast_range wide;
+  wide.min     = 0;
+  wide.max     = 100;
+  wide.neg_inf = false;
+  wide.pos_inf = false;
+  auto narrow  = Lnast_range::constant(42);
   EXPECT_TRUE(narrow.is_narrower_than(wide));
   EXPECT_FALSE(wide.is_narrower_than(narrow));
 }
@@ -136,9 +141,8 @@ TEST(LnastRangeLattice, NarrowerThan) {
 namespace {
 
 // Build: top → stmts → assign(lhs_ref, rhs_ref_or_const)
-static std::shared_ptr<Lnast> make_simple_assign(
-    const std::string& lhs, const std::string& rhs, bool rhs_is_const = false) {
-  auto ln = std::make_shared<Lnast>("bw_test");
+static std::shared_ptr<Lnast> make_simple_assign(const std::string& lhs, const std::string& rhs, bool rhs_is_const = false) {
+  auto ln    = std::make_shared<Lnast>("bw_test");
   auto root  = ln->set_root(Lnast_ntype::create_top());
   auto stmts = ln->add_child(root, Lnast_ntype::create_stmts());
   auto asgn  = ln->add_child(stmts, Lnast_ntype::create_assign());
@@ -152,24 +156,29 @@ static std::shared_ptr<Lnast> make_simple_assign(
 }
 
 // Build: top → stmts → plus(c, a, b)
-static std::shared_ptr<Lnast> make_plus(
-    const std::string& lhs, const std::string& rhs1, const std::string& rhs2,
-    bool r1_const = false, bool r2_const = false) {
+static std::shared_ptr<Lnast> make_plus(const std::string& lhs, const std::string& rhs1, const std::string& rhs2,
+                                        bool r1_const = false, bool r2_const = false) {
   auto ln    = std::make_shared<Lnast>("bw_plus_test");
   auto root  = ln->set_root(Lnast_ntype::create_top());
   auto stmts = ln->add_child(root, Lnast_ntype::create_stmts());
   auto plus  = ln->add_child(stmts, Lnast_ntype::create_plus());
   ln->add_child(plus, Lnast_node::create_ref(lhs));
-  if (r1_const) ln->add_child(plus, Lnast_node::create_const(rhs1));
-  else          ln->add_child(plus, Lnast_node::create_ref(rhs1));
-  if (r2_const) ln->add_child(plus, Lnast_node::create_const(rhs2));
-  else          ln->add_child(plus, Lnast_node::create_ref(rhs2));
+  if (r1_const) {
+    ln->add_child(plus, Lnast_node::create_const(rhs1));
+  } else {
+    ln->add_child(plus, Lnast_node::create_ref(rhs1));
+  }
+  if (r2_const) {
+    ln->add_child(plus, Lnast_node::create_const(rhs2));
+  } else {
+    ln->add_child(plus, Lnast_node::create_ref(rhs2));
+  }
   return ln;
 }
 
 // Run bitwidth pass only on an LNAST using the runner.
 static void run_bw(const std::shared_ptr<Lnast>& ln) {
-  auto lm = std::make_shared<upass::Lnast_manager>(ln);
+  auto         lm = std::make_shared<upass::Lnast_manager>(ln);
   uPass_runner runner(lm, {"bitwidth"});
   runner.run(/*max_iters=*/3);
   // Commit the staging tree back.
@@ -183,7 +192,7 @@ TEST(BitwidthIntegration, ConstAssign) {
   auto ln = make_simple_assign("c", "3", /*rhs_is_const=*/true);
   run_bw(ln);
   const auto& meta = ln->bw_meta().ranges;
-  auto it = meta.find("c");
+  auto        it   = meta.find("c");
   ASSERT_NE(it, meta.end()) << "Expected 'c' in bw_meta";
   EXPECT_FALSE(it->second.neg_inf);
   EXPECT_FALSE(it->second.pos_inf);
@@ -196,7 +205,7 @@ TEST(BitwidthIntegration, PlusTwoConsts) {
   auto ln = make_plus("c", "3", "5", true, true);
   run_bw(ln);
   const auto& meta = ln->bw_meta().ranges;
-  auto it = meta.find("c");
+  auto        it   = meta.find("c");
   ASSERT_NE(it, meta.end()) << "Expected 'c' in bw_meta after plus(3,5)";
   EXPECT_FALSE(it->second.neg_inf);
   EXPECT_FALSE(it->second.pos_inf);
@@ -209,7 +218,7 @@ TEST(BitwidthIntegration, PlusUnknownRef) {
   auto ln = make_plus("c", "a", "5", false, true);
   run_bw(ln);
   const auto& meta = ln->bw_meta().ranges;
-  auto it = meta.find("c");
+  auto        it   = meta.find("c");
   // c may be absent (unbounded = never stored) or explicitly unbounded.
   if (it != meta.end()) {
     EXPECT_TRUE(it->second.neg_inf || it->second.pos_inf) << "c should be unbounded";
@@ -219,7 +228,7 @@ TEST(BitwidthIntegration, PlusUnknownRef) {
 
 // Test: Boolean result from comparison (eq) → bw_meta should be [-1,0]
 TEST(BitwidthIntegration, EqResultBoolean) {
-  auto ln = std::make_shared<Lnast>("bw_eq_test");
+  auto ln    = std::make_shared<Lnast>("bw_eq_test");
   auto root  = ln->set_root(Lnast_ntype::create_top());
   auto stmts = ln->add_child(root, Lnast_ntype::create_stmts());
   auto eq    = ln->add_child(stmts, Lnast_ntype::create_eq());
@@ -229,7 +238,7 @@ TEST(BitwidthIntegration, EqResultBoolean) {
 
   run_bw(ln);
   const auto& meta = ln->bw_meta().ranges;
-  auto it = meta.find("x");
+  auto        it   = meta.find("x");
   ASSERT_NE(it, meta.end()) << "Expected 'x' in bw_meta after eq";
   EXPECT_EQ(it->second.min, -1);
   EXPECT_EQ(it->second.max, 0);
@@ -267,13 +276,33 @@ TEST(BitwidthIntegration, PropagateConst) {
   EXPECT_EQ(it_c->second.max, 3);
 }
 
+TEST(BitwidthIntegration, RefCallArgClearsRange) {
+  auto ln    = std::make_shared<Lnast>("bw_ref_call");
+  auto root  = ln->set_root(Lnast_ntype::create_top());
+  auto stmts = ln->add_child(root, Lnast_ntype::create_stmts());
+
+  auto asgn = ln->add_child(stmts, Lnast_ntype::create_assign());
+  ln->add_child(asgn, Lnast_node::create_ref("c"));
+  ln->add_child(asgn, Lnast_node::create_const("1"));
+
+  auto fcall = ln->add_child(stmts, Lnast_ntype::create_func_call());
+  ln->add_child(fcall, Lnast_node::create_ref("out"));
+  ln->add_child(fcall, Lnast_node::create_ref("opaque"));
+  auto ref_arg = ln->add_child(fcall, Lnast_ntype::create_assign());
+  ln->add_child(ref_arg, Lnast_node::create_ref("__ref_arg"));
+  ln->add_child(ref_arg, Lnast_node::create_ref("c"));
+
+  run_bw(ln);
+  const auto& meta = ln->bw_meta().ranges;
+  EXPECT_EQ(meta.find("c"), meta.end()) << "explicit ref call arg must invalidate c's range";
+}
+
 // ── attr_set narrowing tests ─────────────────────────────────────────────────
 
 namespace {
 // Append an attr_set node under `stmts`: attr_set ref(target) const(attr)
 // const(value).
-static void add_attr_set(const std::shared_ptr<Lnast>& ln, Lnast_nid stmts,
-                         std::string_view target, std::string_view attr,
+static void add_attr_set(const std::shared_ptr<Lnast>& ln, Lnast_nid stmts, std::string_view target, std::string_view attr,
                          std::string_view value) {
   auto node = ln->add_child(stmts, Lnast_ntype::create_attr_set());
   ln->add_child(node, Lnast_node::create_ref(std::string{target}));
@@ -291,7 +320,7 @@ TEST(BitwidthAttrSet, UbitsAlone) {
 
   run_bw(ln);
   const auto& meta = ln->bw_meta().ranges;
-  auto it = meta.find("x");
+  auto        it   = meta.find("x");
   ASSERT_NE(it, meta.end());
   EXPECT_FALSE(it->second.neg_inf);
   EXPECT_FALSE(it->second.pos_inf);
@@ -308,7 +337,7 @@ TEST(BitwidthAttrSet, SbitsAlone) {
 
   run_bw(ln);
   const auto& meta = ln->bw_meta().ranges;
-  auto it = meta.find("x");
+  auto        it   = meta.find("x");
   ASSERT_NE(it, meta.end());
   EXPECT_FALSE(it->second.neg_inf);
   EXPECT_FALSE(it->second.pos_inf);
@@ -325,7 +354,7 @@ TEST(BitwidthAttrSet, MaxAlone) {
 
   run_bw(ln);
   const auto& meta = ln->bw_meta().ranges;
-  auto it = meta.find("x");
+  auto        it   = meta.find("x");
   ASSERT_NE(it, meta.end());
   EXPECT_TRUE(it->second.neg_inf);
   EXPECT_FALSE(it->second.pos_inf);
@@ -341,7 +370,7 @@ TEST(BitwidthAttrSet, MinAlone) {
 
   run_bw(ln);
   const auto& meta = ln->bw_meta().ranges;
-  auto it = meta.find("x");
+  auto        it   = meta.find("x");
   ASSERT_NE(it, meta.end());
   EXPECT_FALSE(it->second.neg_inf);
   EXPECT_TRUE(it->second.pos_inf);
@@ -360,7 +389,7 @@ TEST(BitwidthAttrSet, FitsAfterAssign) {
 
   run_bw(ln);
   const auto& meta = ln->bw_meta().ranges;
-  auto it = meta.find("x");
+  auto        it   = meta.find("x");
   ASSERT_NE(it, meta.end());
   EXPECT_EQ(it->second.min, 7);
   EXPECT_EQ(it->second.max, 7);
@@ -380,7 +409,7 @@ TEST(BitwidthAttrSet, ConflictWarnsAndKeepsOriginal) {
 
   run_bw(ln);
   const auto& meta = ln->bw_meta().ranges;
-  auto it = meta.find("x");
+  auto        it   = meta.find("x");
   ASSERT_NE(it, meta.end());
   // Original assignment of 100 still recorded; constraint was rejected.
   EXPECT_EQ(it->second.min, 100);
@@ -397,7 +426,7 @@ TEST(BitwidthAttrSet, ChainedNarrowing) {
 
   run_bw(ln);
   const auto& meta = ln->bw_meta().ranges;
-  auto it = meta.find("x");
+  auto        it   = meta.find("x");
   ASSERT_NE(it, meta.end());
   EXPECT_FALSE(it->second.neg_inf);
   EXPECT_FALSE(it->second.pos_inf);

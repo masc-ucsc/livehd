@@ -6,7 +6,7 @@
 // Include the other stages that generate outputs used by this block
 #include "Sample_Stage1.h"
 
-Sample_Stage2::Sample_Stage2(Output_Sample_Stage2 *o, Output_Sample_Stage1 *_s1out) {
+Sample_Stage2::Sample_Stage2(Output_Sample_Stage2* o, Output_Sample_Stage1* _s1out) {
   output = o;
   s1out  = _s1out;
 }

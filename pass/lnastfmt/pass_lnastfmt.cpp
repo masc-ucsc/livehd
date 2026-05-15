@@ -35,9 +35,9 @@ void Pass_lnastfmt::fmt_begin(Eprp_var& var) {
 //   printed by dump as `(L,P)`, pos1-pos2 is the dump's leading range,
 //   line/fname come from the source token when available.
 static std::string node_loc(const Lnast* ln, const Lnast_nid& it) {
-  const auto loc   = ln->get_loc(it);
-  const auto fname = ln->get_fname(it);
-  std::string s = std::format("[{},{} pos {}-{}", level_of(it), pos_of(it), loc.pos1, loc.pos2);
+  const auto  loc   = ln->get_loc(it);
+  const auto  fname = ln->get_fname(it);
+  std::string s     = std::format("[{},{} pos {}-{}", level_of(it), pos_of(it), loc.pos1, loc.pos2);
   if (loc.line != 0) {
     s += std::format(" line {}", loc.line);
   }
@@ -117,8 +117,7 @@ static bool is_valid_ref_text(std::string_view name) {
       start_of_segment = true;
       continue;
     }
-    bool ok = (ch == '_') || (ch >= 'A' && ch <= 'Z') || (ch >= 'a' && ch <= 'z')
-              || (!start_of_segment && ch >= '0' && ch <= '9');
+    bool ok = (ch == '_') || (ch >= 'A' && ch <= 'Z') || (ch >= 'a' && ch <= 'z') || (!start_of_segment && ch >= '0' && ch <= '9');
     if (!ok) {
       return false;
     }
@@ -144,14 +143,20 @@ static bool is_valid_ref_text(std::string_view name) {
 //   - `if` / `while` / `cassert`: ALL ref children are reads (no write at
 //     position 0), so this returns false for those — handled by the caller.
 static bool parent_writes_pos0(Lnast_ntype::Lnast_ntype_int pt) {
-  return Lnast_ntype::is_assign(pt) || Lnast_ntype::is_dp_assign(pt) || Lnast_ntype::is_delay_assign(pt) || Lnast_ntype::is_log_and(pt) || Lnast_ntype::is_log_or(pt) || Lnast_ntype::is_log_not(pt)
-         || Lnast_ntype::is_bit_and(pt) || Lnast_ntype::is_bit_or(pt) || Lnast_ntype::is_bit_not(pt) || Lnast_ntype::is_bit_xor(pt) || Lnast_ntype::is_red_and(pt) || Lnast_ntype::is_red_or(pt)
-         || Lnast_ntype::is_red_xor(pt) || Lnast_ntype::is_popcount(pt) || Lnast_ntype::is_plus(pt) || Lnast_ntype::is_minus(pt) || Lnast_ntype::is_mult(pt) || Lnast_ntype::is_div(pt) || Lnast_ntype::is_mod(pt)
-         || Lnast_ntype::is_shl(pt) || Lnast_ntype::is_sra(pt) || Lnast_ntype::is_sext(pt) || Lnast_ntype::is_set_mask(pt) || Lnast_ntype::is_get_mask(pt) || Lnast_ntype::is_eq(pt) || Lnast_ntype::is_ne(pt)
-         || Lnast_ntype::is_lt(pt) || Lnast_ntype::is_le(pt) || Lnast_ntype::is_gt(pt) || Lnast_ntype::is_ge(pt) || Lnast_ntype::is_is(pt) || Lnast_ntype::is_tuple_add(pt) || Lnast_ntype::is_tuple_get(pt)
-         || Lnast_ntype::is_tuple_set(pt) || Lnast_ntype::is_tuple_concat(pt) || Lnast_ntype::is_attr_set(pt) || Lnast_ntype::is_attr_get(pt) || Lnast_ntype::is_func_call(pt)
-         || Lnast_ntype::is_func_def(pt) || Lnast_ntype::is_range(pt) || Lnast_ntype::is_func_does(pt) || Lnast_ntype::is_func_equals(pt) || Lnast_ntype::is_func_in(pt) || Lnast_ntype::is_func_has(pt)
-         || Lnast_ntype::is_func_case(pt) || Lnast_ntype::is_func_break(pt) || Lnast_ntype::is_func_continue(pt) || Lnast_ntype::is_func_return(pt) || Lnast_ntype::is_for(pt);
+  return Lnast_ntype::is_assign(pt) || Lnast_ntype::is_dp_assign(pt) || Lnast_ntype::is_delay_assign(pt)
+         || Lnast_ntype::is_log_and(pt) || Lnast_ntype::is_log_or(pt) || Lnast_ntype::is_log_not(pt) || Lnast_ntype::is_bit_and(pt)
+         || Lnast_ntype::is_bit_or(pt) || Lnast_ntype::is_bit_not(pt) || Lnast_ntype::is_bit_xor(pt) || Lnast_ntype::is_red_and(pt)
+         || Lnast_ntype::is_red_or(pt) || Lnast_ntype::is_red_xor(pt) || Lnast_ntype::is_popcount(pt) || Lnast_ntype::is_plus(pt)
+         || Lnast_ntype::is_minus(pt) || Lnast_ntype::is_mult(pt) || Lnast_ntype::is_div(pt) || Lnast_ntype::is_mod(pt)
+         || Lnast_ntype::is_shl(pt) || Lnast_ntype::is_sra(pt) || Lnast_ntype::is_sext(pt) || Lnast_ntype::is_set_mask(pt)
+         || Lnast_ntype::is_get_mask(pt) || Lnast_ntype::is_eq(pt) || Lnast_ntype::is_ne(pt) || Lnast_ntype::is_lt(pt)
+         || Lnast_ntype::is_le(pt) || Lnast_ntype::is_gt(pt) || Lnast_ntype::is_ge(pt) || Lnast_ntype::is_is(pt)
+         || Lnast_ntype::is_tuple_add(pt) || Lnast_ntype::is_tuple_get(pt) || Lnast_ntype::is_tuple_set(pt)
+         || Lnast_ntype::is_tuple_concat(pt) || Lnast_ntype::is_attr_set(pt) || Lnast_ntype::is_attr_get(pt)
+         || Lnast_ntype::is_func_call(pt) || Lnast_ntype::is_func_def(pt) || Lnast_ntype::is_range(pt)
+         || Lnast_ntype::is_func_does(pt) || Lnast_ntype::is_func_equals(pt) || Lnast_ntype::is_func_in(pt)
+         || Lnast_ntype::is_func_has(pt) || Lnast_ntype::is_func_case(pt) || Lnast_ntype::is_func_break(pt)
+         || Lnast_ntype::is_func_continue(pt) || Lnast_ntype::is_func_return(pt) || Lnast_ntype::is_for(pt);
 }
 
 // Walk the tree and flag any tmp ref (`___N`) that is read but never written
@@ -167,7 +172,7 @@ static bool parent_writes_pos0(Lnast_ntype::Lnast_ntype_int pt) {
 // Tmps are LNAST-internal: every tmp consumer must have a matching producer
 // in the same tree.
 static void check_unwritten_tmps(const Lnast* ln) {
-  std::unordered_set<std::string>                                        written;
+  std::unordered_set<std::string>                                    written;
   std::unordered_map<std::string, std::pair<Lnast_nid, std::string>> read_first;
 
   for (const Lnast_nid& it : ln->depth_preorder()) {
@@ -258,7 +263,8 @@ void Pass_lnastfmt::validate(const Lnast* ln) {
       const auto name = ln->get_name(it);
       if (name == "__create_flop" || name == "__last_value") {
         Pass::error(
-            "lnastfmt: {} const '{}' appears in LNAST; migrate the producer to `attr_set X storage reg` (§15.1) or `delay_assign` (§15.2)",
+            "lnastfmt: {} const '{}' appears in LNAST; migrate the producer to `attr_set X storage reg` (§15.1) or `delay_assign` "
+            "(§15.2)",
             node_loc(ln, it),
             name);
         return;
@@ -270,8 +276,7 @@ void Pass_lnastfmt::validate(const Lnast* ln) {
       auto c1 = c0.is_invalid() ? c0 : ln->get_sibling_next(c0);
       auto c2 = c1.is_invalid() ? c1 : ln->get_sibling_next(c1);
       if (c0.is_invalid() || c1.is_invalid() || c2.is_invalid() || !ln->get_sibling_next(c2).is_invalid()) {
-        Pass::error("lnastfmt: {} delay_assign must have exactly 3 children (dst, src, offset) per §15.2",
-                    node_loc(ln, it));
+        Pass::error("lnastfmt: {} delay_assign must have exactly 3 children (dst, src, offset) per §15.2", node_loc(ln, it));
         return;
       }
       if (!Lnast_ntype::is_ref(ln->get_type(c0)) || !Lnast::is_tmp(ln->get_name(c0))) {

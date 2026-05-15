@@ -162,7 +162,7 @@ BEGIN_LEFDEF_PARSER_NAMESPACE
 // *****************************************************************************
 //        Global Variables
 // *****************************************************************************
-FILE         *defwFile            = 0;            // File to write to.
+FILE*         defwFile            = 0;            // File to write to.
 int           defwLines           = 0;            // number of lines written
 int           defwState           = DEFW_UNINIT;  // Current state of writer
 int           defwFunc            = DEFW_UNINIT;  // Current function of writer
@@ -290,7 +290,7 @@ char defwStateStr[MAXSYN][80] = {
 };
 
 static int  printPointsNum = 0;
-static void printPoints(FILE *file, double x, double y, const char *prefix, const char *suffix) {
+static void printPoints(FILE* file, double x, double y, const char* prefix, const char* suffix) {
   static double x_old = 0;
   static double y_old = 0;
 
@@ -327,11 +327,11 @@ int defwNewLine() {
 // this function is required to be called first to initialize the required
 // sections.
 // Either this function or defwInitCbk can be called, cannot be both
-int defwInit(FILE *f, int vers1, int vers2, const char *caseSensitive, const char *dividerChar, const char *busBitChars,
-             const char *designName,
-             const char *technology,  // optional
-             const char *array,       // optional
-             const char *floorplan,   // optional
+int defwInit(FILE* f, int vers1, int vers2, const char* caseSensitive, const char* dividerChar, const char* busBitChars,
+             const char* designName,
+             const char* technology,  // optional
+             const char* array,       // optional
+             const char* floorplan,   // optional
              double      units        // optional  (set to -1 to ignore)
 ) {
   // if (defwFile) return DEFW_BAD_ORDER;
@@ -421,7 +421,7 @@ int defwInit(FILE *f, int vers1, int vers2, const char *caseSensitive, const cha
 
 // this function is required to be called first to initialize the variables
 // Either this function or defwInit can be called, cannot be both
-int defwInitCbk(FILE *f) {
+int defwInitCbk(FILE* f) {
   defwFile = f;
   if (defwHasInit == 1) {  // defwInit has already called, issue an error
     fprintf(stderr,
@@ -467,7 +467,7 @@ int defwVersion(int vers1, int vers2) {
   return DEFW_OK;
 }
 
-int defwCaseSensitive(const char *caseSensitive) {
+int defwCaseSensitive(const char* caseSensitive) {
   defwObsoleteNum = DEFW_CASESENSITIVE;
   defwFunc        = DEFW_CASESENSITIVE;  // Current function of writer
   if (!defwFile) {
@@ -493,7 +493,7 @@ int defwCaseSensitive(const char *caseSensitive) {
   return DEFW_OK;
 }
 
-int defwBusBitChars(const char *busBitChars) {
+int defwBusBitChars(const char* busBitChars) {
   defwFunc = DEFW_BUSBIT;  // Current function of writer
   if (!defwFile) {
     return DEFW_UNINITIALIZED;
@@ -514,7 +514,7 @@ int defwBusBitChars(const char *busBitChars) {
   return DEFW_OK;
 }
 
-int defwDividerChar(const char *dividerChar) {
+int defwDividerChar(const char* dividerChar) {
   defwFunc = DEFW_DIVIDER;  // Current function of writer
   if (!defwFile) {
     return DEFW_UNINITIALIZED;
@@ -535,7 +535,7 @@ int defwDividerChar(const char *dividerChar) {
   return DEFW_OK;
 }
 
-int defwDesignName(const char *name) {
+int defwDesignName(const char* name) {
   defwFunc = DEFW_DESIGN;  // Current function of writer
   if (!defwFile) {
     return DEFW_UNINITIALIZED;
@@ -556,7 +556,7 @@ int defwDesignName(const char *name) {
   return DEFW_OK;
 }
 
-int defwTechnology(const char *technology) {
+int defwTechnology(const char* technology) {
   defwFunc = DEFW_TECHNOLOGY;  // Current function of writer
   if (!defwFile) {
     return DEFW_UNINITIALIZED;
@@ -573,7 +573,7 @@ int defwTechnology(const char *technology) {
   return DEFW_OK;
 }
 
-int defwArray(const char *array) {
+int defwArray(const char* array) {
   defwFunc = DEFW_ARRAY;  // Current function of writer
   if (!defwFile) {
     return DEFW_UNINITIALIZED;
@@ -593,7 +593,7 @@ int defwArray(const char *array) {
   return DEFW_OK;
 }
 
-int defwFloorplan(const char *floorplan) {
+int defwFloorplan(const char* floorplan) {
   defwFunc = DEFW_FLOORPLAN;  // Current function of writer
   if (!defwFile) {
     return DEFW_UNINITIALIZED;
@@ -643,8 +643,8 @@ int defwUnits(int units) {
   return DEFW_OK;
 }
 
-int defwHistory(const char *string) {
-  char *c;
+int defwHistory(const char* string) {
+  char* c;
   defwFunc = DEFW_HISTORY;  // Current function of writer
   if (!defwFile) {
     return DEFW_UNINITIALIZED;
@@ -656,7 +656,7 @@ int defwHistory(const char *string) {
     return DEFW_BAD_DATA;
   }
 
-  for (c = (char *)string; *c; c++) {
+  for (c = (char*)string; *c; c++) {
     if (*c == '\n') {
       defwLines++;
     }
@@ -687,7 +687,7 @@ int defwStartPropDef() {
   return DEFW_OK;
 }
 
-int defwIsPropObjType(const char *objType) {
+int defwIsPropObjType(const char* objType) {
   if (strcmp(objType, "DESIGN") && strcmp(objType, "COMPONENT") && strcmp(objType, "NET") && strcmp(objType, "SPECIALNET")
       && strcmp(objType, "GROUP") && strcmp(objType, "ROW") && strcmp(objType, "COMPONENTPIN") && strcmp(objType, "REGION")
       && strcmp(objType, "NONDEFAULTRULE")) {
@@ -696,7 +696,7 @@ int defwIsPropObjType(const char *objType) {
   return 1;
 }
 
-int defwIntPropDef(const char *objType, const char *propName, double leftRange,
+int defwIntPropDef(const char* objType, const char* propName, double leftRange,
                    double rightRange,  // optional
                    int    propValue    // optional
 ) {
@@ -730,7 +730,7 @@ int defwIntPropDef(const char *objType, const char *propName, double leftRange,
   return DEFW_OK;
 }
 
-int defwRealPropDef(const char *objType, const char *propName, double leftRange,
+int defwRealPropDef(const char* objType, const char* propName, double leftRange,
                     double rightRange,  // optional
                     double propValue    // optional
 ) {
@@ -764,9 +764,9 @@ int defwRealPropDef(const char *objType, const char *propName, double leftRange,
   return DEFW_OK;
 }
 
-int defwStringPropDef(const char *objType, const char *propName, double leftRange,
+int defwStringPropDef(const char* objType, const char* propName, double leftRange,
                       double      rightRange,  // optional
-                      const char *propValue    // optional
+                      const char* propValue    // optional
 ) {
   if (!defwFile) {
     return DEFW_UNINITIALIZED;
@@ -824,7 +824,7 @@ int defwIsPropState() {
   return 1;
 }
 
-int defwStringProperty(const char *propName, const char *propValue) {
+int defwStringProperty(const char* propName, const char* propValue) {
   if (!defwIsPropState()) {
     return DEFW_BAD_ORDER;
   }
@@ -836,7 +836,7 @@ int defwStringProperty(const char *propName, const char *propValue) {
   return DEFW_OK;
 }
 
-int defwRealProperty(const char *propName, double propValue) {
+int defwRealProperty(const char* propName, double propValue) {
   if (!defwIsPropState()) {
     return DEFW_BAD_ORDER;
   }
@@ -848,7 +848,7 @@ int defwRealProperty(const char *propName, double propValue) {
   return DEFW_OK;
 }
 
-int defwIntProperty(const char *propName, int propValue) {
+int defwIntProperty(const char* propName, int propValue) {
   if (!defwIsPropState()) {
     return DEFW_BAD_ORDER;
   }
@@ -882,7 +882,7 @@ int defwDieArea(int xl, int yl, int xh, int yh) {
   return DEFW_OK;
 }
 
-int defwDieAreaList(int num_points, int *xl, int *yl) {
+int defwDieAreaList(int num_points, int* xl, int* yl) {
   int i;
 
   defwFunc = DEFW_DIE_AREA;  // Current function of writer
@@ -922,9 +922,9 @@ int defwDieAreaList(int num_points, int *xl, int *yl) {
   return DEFW_OK;
 }
 
-char *defwAddr(const char *x) { return (char *)x; }
+char* defwAddr(const char* x) { return (char*)x; }
 
-char *defwOrient(int num) {
+char* defwOrient(int num) {
   switch (num) {
     case 0: return defwAddr("N");
     case 1: return defwAddr("W");
@@ -938,7 +938,7 @@ char *defwOrient(int num) {
   return defwAddr("BOGUS ");
 }
 
-int defwRow(const char *rowName, const char *rowType, int x_orig, int y_orig, int orient, int do_count, int do_increment, int do_x,
+int defwRow(const char* rowName, const char* rowType, int x_orig, int y_orig, int orient, int do_count, int do_increment, int do_x,
             int do_y) {
   defwFunc = DEFW_ROW;  // Current function of writer
   if (!defwFile) {
@@ -972,7 +972,7 @@ int defwRow(const char *rowName, const char *rowType, int x_orig, int y_orig, in
   return DEFW_OK;
 }
 
-int defwRowStr(const char *rowName, const char *rowType, int x_orig, int y_orig, const char *orient, int do_count, int do_increment,
+int defwRowStr(const char* rowName, const char* rowType, int x_orig, int y_orig, const char* orient, int do_count, int do_increment,
                int do_x, int do_y) {
   defwFunc = DEFW_ROW;  // Current function of writer
   if (!defwFile) {
@@ -1005,7 +1005,7 @@ int defwRowStr(const char *rowName, const char *rowType, int x_orig, int y_orig,
   return DEFW_OK;
 }
 
-int defwTracks(const char *master, int do_start, int do_cnt, int do_step, int num_layers, const char **layers, int mask,
+int defwTracks(const char* master, int do_start, int do_cnt, int do_step, int num_layers, const char** layers, int mask,
                int sameMask) {
   int i;
 
@@ -1052,7 +1052,7 @@ int defwTracks(const char *master, int do_start, int do_cnt, int do_step, int nu
   return DEFW_OK;
 }
 
-int defwGcellGrid(const char *master, int do_start, int do_cnt, int do_step) {
+int defwGcellGrid(const char* master, int do_start, int do_cnt, int do_step) {
   defwFunc = DEFW_GCELL_GRID;  // Current function of writer
   if (!defwFile) {
     return DEFW_UNINITIALIZED;
@@ -1145,7 +1145,7 @@ int defwEndDefaultCap() {
   return DEFW_OK;
 }
 
-int defwCanPlace(const char *master, int xOrig, int yOrig, int orient, int doCnt, int doInc, int xStep, int yStep) {
+int defwCanPlace(const char* master, int xOrig, int yOrig, int orient, int doCnt, int doInc, int xStep, int yStep) {
   defwFunc = DEFW_CANPLACE;  // Current function of writer
   if (!defwFile) {
     return DEFW_UNINITIALIZED;
@@ -1177,7 +1177,7 @@ int defwCanPlace(const char *master, int xOrig, int yOrig, int orient, int doCnt
   return DEFW_OK;
 }
 
-int defwCanPlaceStr(const char *master, int xOrig, int yOrig, const char *orient, int doCnt, int doInc, int xStep, int yStep) {
+int defwCanPlaceStr(const char* master, int xOrig, int yOrig, const char* orient, int doCnt, int doInc, int xStep, int yStep) {
   defwFunc = DEFW_CANPLACE;  // Current function of writer
   if (!defwFile) {
     return DEFW_UNINITIALIZED;
@@ -1200,7 +1200,7 @@ int defwCanPlaceStr(const char *master, int xOrig, int yOrig, const char *orient
   return DEFW_OK;
 }
 
-int defwCannotOccupy(const char *master, int xOrig, int yOrig, int orient, int doCnt, int doInc, int xStep, int yStep) {
+int defwCannotOccupy(const char* master, int xOrig, int yOrig, int orient, int doCnt, int doInc, int xStep, int yStep) {
   defwFunc = DEFW_CANNOTOCCUPY;  // Current function of writer
   if (!defwFile) {
     return DEFW_UNINITIALIZED;
@@ -1228,7 +1228,7 @@ int defwCannotOccupy(const char *master, int xOrig, int yOrig, int orient, int d
   return DEFW_OK;
 }
 
-int defwCannotOccupyStr(const char *master, int xOrig, int yOrig, const char *orient, int doCnt, int doInc, int xStep, int yStep) {
+int defwCannotOccupyStr(const char* master, int xOrig, int yOrig, const char* orient, int doCnt, int doInc, int xStep, int yStep) {
   defwFunc = DEFW_CANNOTOCCUPY;  // Current function of writer
   if (!defwFile) {
     return DEFW_UNINITIALIZED;
@@ -1280,7 +1280,7 @@ int defwStartVias(int count) {
   return DEFW_OK;
 }
 
-int defwViaName(const char *name) {
+int defwViaName(const char* name) {
   defwFunc = DEFW_VIA;  // Current function of writer
   if (!defwFile) {
     return DEFW_UNINITIALIZED;
@@ -1300,7 +1300,7 @@ int defwViaName(const char *name) {
   return DEFW_OK;
 }
 
-int defwViaPattern(const char *pattern) {
+int defwViaPattern(const char* pattern) {
   defwFunc = DEFW_VIA;  // Current function of writer
   if (!defwFile) {
     return DEFW_UNINITIALIZED;
@@ -1323,7 +1323,7 @@ int defwViaPattern(const char *pattern) {
   return DEFW_OK;
 }
 
-int defwViaRect(const char *layerNames, int xl, int yl, int xh, int yh, int mask) {
+int defwViaRect(const char* layerNames, int xl, int yl, int xh, int yh, int mask) {
   defwFunc = DEFW_VIA;  // Current function of writer
   if (!defwFile) {
     return DEFW_UNINITIALIZED;
@@ -1350,7 +1350,7 @@ int defwViaRect(const char *layerNames, int xl, int yl, int xh, int yh, int mask
   return DEFW_OK;
 }
 
-int defwViaPolygon(const char *layerName, int num_polys, double *xl, double *yl, int mask) {
+int defwViaPolygon(const char* layerName, int num_polys, double* xl, double* yl, int mask) {
   int i;
 
   defwFunc = DEFW_VIA;  // Current function of writer
@@ -1388,8 +1388,8 @@ int defwViaPolygon(const char *layerName, int num_polys, double *xl, double *yl,
   return DEFW_OK;
 }
 
-int defwViaViarule(const char *viaRuleName, double xCutSize, double yCutSize, const char *botMetalLayer, const char *cutLayer,
-                   const char *topMetalLayer, double xCutSpacing, double yCutSpacing, double xBotEnc, double yBotEnc,
+int defwViaViarule(const char* viaRuleName, double xCutSize, double yCutSize, const char* botMetalLayer, const char* cutLayer,
+                   const char* topMetalLayer, double xCutSpacing, double yCutSpacing, double xBotEnc, double yBotEnc,
                    double xTopEnc, double yTopEnc) {
   defwFunc = DEFW_VIA;  // Current function of writer
   if (!defwFile) {
@@ -1456,7 +1456,7 @@ int defwViaViaruleOffset(int xBotOffset, int yBotOffset, int xTopOffset, int yTo
   return DEFW_OK;
 }
 
-int defwViaViarulePattern(const char *cutPattern) {
+int defwViaViarulePattern(const char* cutPattern) {
   if (!defwFile) {
     return DEFW_UNINITIALIZED;
   }
@@ -1530,7 +1530,7 @@ int defwStartRegions(int count) {
   return DEFW_OK;
 }
 
-int defwRegionName(const char *name) {
+int defwRegionName(const char* name) {
   defwFunc = DEFW_REGION;  // Current function of writer
   if (!defwFile) {
     return DEFW_UNINITIALIZED;
@@ -1567,7 +1567,7 @@ int defwRegionPoints(int xl, int yl, int xh, int yh) {
   return DEFW_OK;
 }
 
-int defwRegionType(const char *type) {
+int defwRegionType(const char* type) {
   defwFunc = DEFW_REGION;  // Current function of writer
   if (!defwFile) {
     return DEFW_UNINITIALIZED;
@@ -1614,7 +1614,7 @@ int defwEndRegions() {
   return DEFW_OK;
 }
 
-int defwComponentMaskShiftLayers(const char **layerNames, int numLayerName) {
+int defwComponentMaskShiftLayers(const char** layerNames, int numLayerName) {
   if (defVersionNum < 5.8) {
     return DEFW_WRONG_VERSION;
   }
@@ -1669,10 +1669,10 @@ int defwStartComponents(int count) {
   return DEFW_OK;
 }
 
-int defwComponent(const char *instance, const char *master, int numNetName, const char **netNames, const char *eeq,
-                  const char *genName, const char *genParemeters, const char *source, int numForeign, const char **foreigns,
-                  int *foreignX, int *foreignY, int *foreignOrients, const char *status, int statusX, int statusY, int statusOrient,
-                  double weight, const char *region, int xl, int yl, int xh, int yh) {
+int defwComponent(const char* instance, const char* master, int numNetName, const char** netNames, const char* eeq,
+                  const char* genName, const char* genParemeters, const char* source, int numForeign, const char** foreigns,
+                  int* foreignX, int* foreignY, int* foreignOrients, const char* status, int statusX, int statusY, int statusOrient,
+                  double weight, const char* region, int xl, int yl, int xh, int yh) {
   int i;
   int uplace = 0;
 
@@ -1764,10 +1764,10 @@ int defwComponent(const char *instance, const char *master, int numNetName, cons
   return DEFW_OK;
 }
 
-int defwComponentStr(const char *instance, const char *master, int numNetName, const char **netNames, const char *eeq,
-                     const char *genName, const char *genParemeters, const char *source, int numForeign, const char **foreigns,
-                     int *foreignX, int *foreignY, const char **foreignOrients, const char *status, int statusX, int statusY,
-                     const char *statusOrient, double weight, const char *region, int xl, int yl, int xh, int yh) {
+int defwComponentStr(const char* instance, const char* master, int numNetName, const char** netNames, const char* eeq,
+                     const char* genName, const char* genParemeters, const char* source, int numForeign, const char** foreigns,
+                     int* foreignX, int* foreignY, const char** foreignOrients, const char* status, int statusX, int statusY,
+                     const char* statusOrient, double weight, const char* region, int xl, int yl, int xh, int yh) {
   int i;
   int uplace = 0;
 
@@ -1912,7 +1912,7 @@ int defwComponentHaloSoft(int left, int bottom, int right, int top) {
 }
 
 // 5.7
-int defwComponentRouteHalo(int haloDist, const char *minLayer, const char *maxLayer) {
+int defwComponentRouteHalo(int haloDist, const char* minLayer, const char* maxLayer) {
   defwFunc = DEFW_COMPONENT;  // Current function of writer
   if (!defwFile) {
     return DEFW_UNINITIALIZED;
@@ -1976,13 +1976,13 @@ int defwStartPins(int count) {
   return DEFW_OK;
 }
 
-int defwPin(const char *name, const char *net,
+int defwPin(const char* name, const char* net,
             int         special,    // optional 0-ignore 1-special
-            const char *direction,  // optional
-            const char *use,        // optional
-            const char *status, int xo, int yo,
+            const char* direction,  // optional
+            const char* use,        // optional
+            const char* status, int xo, int yo,
             int         orient,  // optional
-            const char *layer, int xl, int yl, int xh,
+            const char* layer, int xl, int yl, int xh,
             int yh  // optional
 ) {
   defwFunc = DEFW_PIN;  // Current function of writer
@@ -2032,13 +2032,13 @@ int defwPin(const char *name, const char *net,
   return DEFW_OK;
 }
 
-int defwPinStr(const char *name, const char *net,
+int defwPinStr(const char* name, const char* net,
                int         special,    // optional 0-ignore 1-special
-               const char *direction,  // optional
-               const char *use,        // optional
-               const char *status, int xo, int yo,
-               const char *orient,  // optional
-               const char *layer, int xl, int yl, int xh,
+               const char* direction,  // optional
+               const char* use,        // optional
+               const char* status, int xo, int yo,
+               const char* orient,  // optional
+               const char* layer, int xl, int yl, int xh,
                int yh  // optional
 ) {
   defwFunc = DEFW_PIN;  // Current function of writer
@@ -2088,7 +2088,7 @@ int defwPinStr(const char *name, const char *net,
   return DEFW_OK;
 }
 
-int defwPinLayer(const char *layerName, int spacing, int designRuleWidth, int xl, int yl, int xh, int yh, int mask) {
+int defwPinLayer(const char* layerName, int spacing, int designRuleWidth, int xl, int yl, int xh, int yh, int mask) {
   if (!defwFile) {
     return DEFW_UNINITIALIZED;
   }
@@ -2125,7 +2125,7 @@ int defwPinLayer(const char *layerName, int spacing, int designRuleWidth, int xl
   return DEFW_OK;
 }
 
-int defwPinPolygon(const char *layerName, int spacing, int designRuleWidth, int num_polys, double *xl, double *yl, int mask) {
+int defwPinPolygon(const char* layerName, int spacing, int designRuleWidth, int num_polys, double* xl, double* yl, int mask) {
   int i;
 
   if (!defwFile) {
@@ -2175,7 +2175,7 @@ int defwPinPolygon(const char *layerName, int spacing, int designRuleWidth, int 
 }
 
 // 5.7
-int defwPinVia(const char *viaName, int xl, int yl, int mask) {
+int defwPinVia(const char* viaName, int xl, int yl, int mask) {
   if (!defwFile) {
     return DEFW_UNINITIALIZED;
   }
@@ -2221,7 +2221,7 @@ int defwPinPort() {
 }
 
 // 5.7
-int defwPinPortLayer(const char *layerName, int spacing, int designRuleWidth, int xl, int yl, int xh, int yh, int mask) {
+int defwPinPortLayer(const char* layerName, int spacing, int designRuleWidth, int xl, int yl, int xh, int yh, int mask) {
   if (!defwFile) {
     return DEFW_UNINITIALIZED;
   }
@@ -2260,7 +2260,7 @@ int defwPinPortLayer(const char *layerName, int spacing, int designRuleWidth, in
 }
 
 // 5.7
-int defwPinPortPolygon(const char *layerName, int spacing, int designRuleWidth, int num_polys, double *xl, double *yl, int mask) {
+int defwPinPortPolygon(const char* layerName, int spacing, int designRuleWidth, int num_polys, double* xl, double* yl, int mask) {
   int i;
 
   if (!defwFile) {
@@ -2309,7 +2309,7 @@ int defwPinPortPolygon(const char *layerName, int spacing, int designRuleWidth, 
 }
 
 // 5.7
-int defwPinPortVia(const char *viaName, int xl, int yl, int mask) {
+int defwPinPortVia(const char* viaName, int xl, int yl, int mask) {
   if (!defwFile) {
     return DEFW_UNINITIALIZED;
   }
@@ -2336,7 +2336,7 @@ int defwPinPortVia(const char *viaName, int xl, int yl, int mask) {
 }
 
 // 5.7
-int defwPinPortLocation(const char *status, int statusX, int statusY, const char *orient) {
+int defwPinPortLocation(const char* status, int statusX, int statusY, const char* orient) {
   if (!defwFile) {
     return DEFW_UNINITIALIZED;
   }
@@ -2356,7 +2356,7 @@ int defwPinPortLocation(const char *status, int statusX, int statusY, const char
   return DEFW_OK;
 }
 
-int defwPinNetExpr(const char *pinExpr) {
+int defwPinNetExpr(const char* pinExpr) {
   if (!defwFile) {
     return DEFW_UNINITIALIZED;
   }
@@ -2374,7 +2374,7 @@ int defwPinNetExpr(const char *pinExpr) {
   return DEFW_OK;
 }
 
-int defwPinSupplySensitivity(const char *pinName) {
+int defwPinSupplySensitivity(const char* pinName) {
   if (!defwFile) {
     return DEFW_UNINITIALIZED;
   }
@@ -2392,7 +2392,7 @@ int defwPinSupplySensitivity(const char *pinName) {
   return DEFW_OK;
 }
 
-int defwPinGroundSensitivity(const char *pinName) {
+int defwPinGroundSensitivity(const char* pinName) {
   if (!defwFile) {
     return DEFW_UNINITIALIZED;
   }
@@ -2410,7 +2410,7 @@ int defwPinGroundSensitivity(const char *pinName) {
   return DEFW_OK;
 }
 
-int defwPinAntennaPinPartialMetalArea(int value, const char *layerName) {
+int defwPinAntennaPinPartialMetalArea(int value, const char* layerName) {
   if (!defwFile) {
     return DEFW_UNINITIALIZED;
   }
@@ -2430,7 +2430,7 @@ int defwPinAntennaPinPartialMetalArea(int value, const char *layerName) {
   return DEFW_OK;
 }
 
-int defwPinAntennaPinPartialMetalSideArea(int value, const char *layerName) {
+int defwPinAntennaPinPartialMetalSideArea(int value, const char* layerName) {
   if (!defwFile) {
     return DEFW_UNINITIALIZED;
   }
@@ -2450,7 +2450,7 @@ int defwPinAntennaPinPartialMetalSideArea(int value, const char *layerName) {
   return DEFW_OK;
 }
 
-int defwPinAntennaPinPartialCutArea(int value, const char *layerName) {
+int defwPinAntennaPinPartialCutArea(int value, const char* layerName) {
   if (!defwFile) {
     return DEFW_UNINITIALIZED;
   }
@@ -2470,7 +2470,7 @@ int defwPinAntennaPinPartialCutArea(int value, const char *layerName) {
   return DEFW_OK;
 }
 
-int defwPinAntennaModel(const char *oxide) {
+int defwPinAntennaModel(const char* oxide) {
   if (!defwFile) {
     return DEFW_UNINITIALIZED;
   }
@@ -2487,7 +2487,7 @@ int defwPinAntennaModel(const char *oxide) {
   return DEFW_OK;
 }
 
-int defwPinAntennaPinDiffArea(int value, const char *layerName) {
+int defwPinAntennaPinDiffArea(int value, const char* layerName) {
   if (!defwFile) {
     return DEFW_UNINITIALIZED;
   }
@@ -2507,7 +2507,7 @@ int defwPinAntennaPinDiffArea(int value, const char *layerName) {
   return DEFW_OK;
 }
 
-int defwPinAntennaPinGateArea(int value, const char *layerName) {
+int defwPinAntennaPinGateArea(int value, const char* layerName) {
   if (!defwFile) {
     return DEFW_UNINITIALIZED;
   }
@@ -2527,7 +2527,7 @@ int defwPinAntennaPinGateArea(int value, const char *layerName) {
   return DEFW_OK;
 }
 
-int defwPinAntennaPinMaxAreaCar(int value, const char *layerName) {
+int defwPinAntennaPinMaxAreaCar(int value, const char* layerName) {
   if (!defwFile) {
     return DEFW_UNINITIALIZED;
   }
@@ -2549,7 +2549,7 @@ int defwPinAntennaPinMaxAreaCar(int value, const char *layerName) {
   return DEFW_OK;
 }
 
-int defwPinAntennaPinMaxSideAreaCar(int value, const char *layerName) {
+int defwPinAntennaPinMaxSideAreaCar(int value, const char* layerName) {
   if (!defwFile) {
     return DEFW_UNINITIALIZED;
   }
@@ -2571,7 +2571,7 @@ int defwPinAntennaPinMaxSideAreaCar(int value, const char *layerName) {
   return DEFW_OK;
 }
 
-int defwPinAntennaPinMaxCutCar(int value, const char *layerName) {
+int defwPinAntennaPinMaxCutCar(int value, const char* layerName) {
   if (!defwFile) {
     return DEFW_UNINITIALIZED;
   }
@@ -2631,7 +2631,7 @@ int defwStartPinProperties(int count) {
   return DEFW_OK;
 }
 
-int defwPinProperty(const char *name, const char *pinName) {
+int defwPinProperty(const char* name, const char* pinName) {
   defwFunc = DEFW_PINPROP;  // Current function of writer
 
   if (!defwFile) {
@@ -2711,7 +2711,7 @@ int defwSpecialNetOptions() {
   return 0;
 }
 
-int defwSpecialNet(const char *name) {
+int defwSpecialNet(const char* name) {
   defwFunc = DEFW_SNET;  // Current function of writer
   if (!defwFile) {
     return DEFW_UNINITIALIZED;
@@ -2728,7 +2728,7 @@ int defwSpecialNet(const char *name) {
   return DEFW_OK;
 }
 
-int defwSpecialNetConnection(const char *inst, const char *pin, int synthesized) {
+int defwSpecialNetConnection(const char* inst, const char* pin, int synthesized) {
   defwFunc = DEFW_SNET;  // Current function of writer
   if (!defwFile) {
     return DEFW_UNINITIALIZED;
@@ -2779,7 +2779,7 @@ int defwSpecialNetVoltage(double d) {
   return DEFW_OK;
 }
 
-int defwSpecialNetSpacing(const char *layer, int spacing, double minwidth, double maxwidth) {
+int defwSpecialNetSpacing(const char* layer, int spacing, double minwidth, double maxwidth) {
   defwFunc = DEFW_SNET;  // Current function of writer
   if (!defwFile) {
     return DEFW_UNINITIALIZED;
@@ -2796,7 +2796,7 @@ int defwSpecialNetSpacing(const char *layer, int spacing, double minwidth, doubl
   return DEFW_OK;
 }
 
-int defwSpecialNetWidth(const char *layer, int w) {
+int defwSpecialNetWidth(const char* layer, int w) {
   defwFunc = DEFW_SNET;  // Current function of writer
   if (!defwFile) {
     return DEFW_UNINITIALIZED;
@@ -2810,7 +2810,7 @@ int defwSpecialNetWidth(const char *layer, int w) {
   return DEFW_OK;
 }
 
-int defwSpecialNetSource(const char *name) {
+int defwSpecialNetSource(const char* name) {
   defwFunc = DEFW_SNET;  // Current function of writer
   if (!defwFile) {
     return DEFW_UNINITIALIZED;
@@ -2824,7 +2824,7 @@ int defwSpecialNetSource(const char *name) {
   return DEFW_OK;
 }
 
-int defwSpecialNetOriginal(const char *name) {
+int defwSpecialNetOriginal(const char* name) {
   defwFunc = DEFW_SNET;  // Current function of writer
   if (!defwFile) {
     return DEFW_UNINITIALIZED;
@@ -2838,7 +2838,7 @@ int defwSpecialNetOriginal(const char *name) {
   return DEFW_OK;
 }
 
-int defwSpecialNetPattern(const char *name) {
+int defwSpecialNetPattern(const char* name) {
   defwFunc = DEFW_SNET;  // Current function of writer
   if (!defwFile) {
     return DEFW_UNINITIALIZED;
@@ -2852,7 +2852,7 @@ int defwSpecialNetPattern(const char *name) {
   return DEFW_OK;
 }
 
-int defwSpecialNetUse(const char *name) {
+int defwSpecialNetUse(const char* name) {
   defwFunc = DEFW_SNET;  // Current function of writer
   if (!defwFile) {
     return DEFW_UNINITIALIZED;
@@ -2899,7 +2899,7 @@ int defwSpecialNetEstCap(double d) {
   return DEFW_OK;
 }
 
-int defwSpecialNetPathStart(const char *typ) {
+int defwSpecialNetPathStart(const char* typ) {
   defwFunc = DEFW_PATH;  // Current function of writer
   if (!defwFile) {
     return DEFW_UNINITIALIZED;
@@ -2934,7 +2934,7 @@ int defwSpecialNetPathStart(const char *typ) {
   return DEFW_OK;
 }
 
-int defwSpecialNetShieldNetName(const char *name) {
+int defwSpecialNetShieldNetName(const char* name) {
   defwFunc = DEFW_PATH;  // Current function of writer
   if (!defwFile) {
     return DEFW_UNINITIALIZED;
@@ -2970,7 +2970,7 @@ int defwSpecialNetPathWidth(int w) {
   return DEFW_OK;
 }
 
-int defwSpecialNetPathLayer(const char *name) {
+int defwSpecialNetPathLayer(const char* name) {
   defwFunc = DEFW_PATH;  // Current function of writer
   if (!defwFile) {
     return DEFW_UNINITIALIZED;
@@ -3006,7 +3006,7 @@ int defwSpecialNetPathStyle(int styleNum) {
   return DEFW_OK;
 }
 
-int defwSpecialNetPathShape(const char *typ) {
+int defwSpecialNetPathShape(const char* typ) {
   defwFunc = DEFW_PATH;  // Current function of writer
   if (!defwFile) {
     return DEFW_UNINITIALIZED;
@@ -3053,7 +3053,7 @@ int defwSpecialNetPathMask(int colorMask) {
   return DEFW_OK;
 }
 
-int defwSpecialNetPathPoint(int numPts, double *pointx, double *pointy) {
+int defwSpecialNetPathPoint(int numPts, double* pointx, double* pointy) {
   int i;
 
   defwFunc = DEFW_PATH;  // Current function of writer
@@ -3076,7 +3076,7 @@ int defwSpecialNetPathPoint(int numPts, double *pointx, double *pointy) {
   return DEFW_OK;
 }
 
-int defwSpecialNetPathVia(const char *name) {
+int defwSpecialNetPathVia(const char* name) {
   defwFunc = DEFW_PATH;  // Current function of writer
   if (!defwFile) {
     return DEFW_UNINITIALIZED;
@@ -3108,7 +3108,7 @@ int defwSpecialNetPathViaData(int numX, int numY, int stepX, int stepY) {
   return DEFW_OK;
 }
 
-int defwSpecialNetPathPointWithWireExt(int numPts, double *pointx, double *pointy, double *optValue) {
+int defwSpecialNetPathPointWithWireExt(int numPts, double* pointx, double* pointy, double* optValue) {
   int i;
   defwFunc = DEFW_PATH;  // Current function of writer
   if (!defwFile) {
@@ -3143,7 +3143,7 @@ int defwSpecialNetPathEnd() {
   return DEFW_OK;
 }
 
-int defwSpecialNetPolygon(const char *layerName, int num_polys, double *xl, double *yl) {
+int defwSpecialNetPolygon(const char* layerName, int num_polys, double* xl, double* yl) {
   int i;
 
   defwFunc = DEFW_SNET_OPTIONS;                                // Current function of writer
@@ -3170,7 +3170,7 @@ int defwSpecialNetPolygon(const char *layerName, int num_polys, double *xl, doub
   return DEFW_OK;
 }
 
-int defwSpecialNetRect(const char *layerName, int xl, int yl, int xh, int yh) {
+int defwSpecialNetRect(const char* layerName, int xl, int yl, int xh, int yh) {
   defwFunc = DEFW_SNET_OPTIONS;                                // Current function of writer
   if (!defwSpecialNetOptions() && (defwState != DEFW_PATH)) {  // not inside a path
     return DEFW_BAD_ORDER;
@@ -3185,7 +3185,7 @@ int defwSpecialNetRect(const char *layerName, int xl, int yl, int xh, int yh) {
   return DEFW_OK;
 }
 
-int defwSpecialNetVia(const char *layerName) {
+int defwSpecialNetVia(const char* layerName) {
   defwFunc = DEFW_SNET_OPTIONS;                                // Current function of writer
   if (!defwSpecialNetOptions() && (defwState != DEFW_PATH)) {  // not inside a path
     return DEFW_BAD_ORDER;
@@ -3200,7 +3200,7 @@ int defwSpecialNetVia(const char *layerName) {
   return DEFW_OK;
 }
 
-int defwSpecialNetViaWithOrient(const char *layerName, int orient) {
+int defwSpecialNetViaWithOrient(const char* layerName, int orient) {
   defwFunc = DEFW_SNET_OPTIONS;                                // Current function of writer
   if (!defwSpecialNetOptions() && (defwState != DEFW_PATH)) {  // not inside a path
     return DEFW_BAD_ORDER;
@@ -3216,7 +3216,7 @@ int defwSpecialNetViaWithOrient(const char *layerName, int orient) {
   return DEFW_OK;
 }
 
-int defwSpecialNetViaPoints(int num_points, double *xl, double *yl) {
+int defwSpecialNetViaPoints(int num_points, double* xl, double* yl) {
   defwFunc = DEFW_SNET_OPTIONS;                                // Current function of writer
   if (!defwSpecialNetOptions() && (defwState != DEFW_PATH)) {  // not inside a path
     return DEFW_BAD_ORDER;
@@ -3240,7 +3240,7 @@ int defwSpecialNetViaPoints(int num_points, double *xl, double *yl) {
   return DEFW_OK;
 }
 
-int defwSpecialNetShieldStart(const char *name) {
+int defwSpecialNetShieldStart(const char* name) {
   defwFunc = DEFW_SHIELD;  // Current function of writer
   if (!defwFile) {
     return DEFW_UNINITIALIZED;
@@ -3281,7 +3281,7 @@ int defwSpecialNetShieldWidth(int w) {
   return DEFW_OK;
 }
 
-int defwSpecialNetShieldLayer(const char *name) {
+int defwSpecialNetShieldLayer(const char* name) {
   defwFunc = DEFW_SHIELD;  // Current function of writer
   if (!defwFile) {
     return DEFW_UNINITIALIZED;
@@ -3297,7 +3297,7 @@ int defwSpecialNetShieldLayer(const char *name) {
   return DEFW_OK;
 }
 
-int defwSpecialNetShieldShape(const char *typ) {
+int defwSpecialNetShieldShape(const char* typ) {
   defwFunc = DEFW_SHIELD;  // Current function of writer
   if (!defwFile) {
     return DEFW_UNINITIALIZED;
@@ -3322,7 +3322,7 @@ int defwSpecialNetShieldShape(const char *typ) {
   return DEFW_OK;
 }
 
-int defwSpecialNetShieldPoint(int numPts, double *pointx, double *pointy) {
+int defwSpecialNetShieldPoint(int numPts, double* pointx, double* pointy) {
   int i;
 
   defwFunc = DEFW_SHIELD;  // Current function of writer
@@ -3344,7 +3344,7 @@ int defwSpecialNetShieldPoint(int numPts, double *pointx, double *pointy) {
   return DEFW_OK;
 }
 
-int defwSpecialNetShieldVia(const char *name) {
+int defwSpecialNetShieldVia(const char* name) {
   defwFunc = DEFW_SHIELD;  // Current function of writer
   if (!defwFile) {
     return DEFW_UNINITIALIZED;
@@ -3456,7 +3456,7 @@ int defwNetOptions() {
   return 0;
 }
 
-int defwNet(const char *name) {
+int defwNet(const char* name) {
   defwFunc = DEFW_NET;  // Current function of writer
   if (!defwFile) {
     return DEFW_UNINITIALIZED;
@@ -3473,7 +3473,7 @@ int defwNet(const char *name) {
   return DEFW_OK;
 }
 
-int defwNetConnection(const char *inst, const char *pin, int synthesized) {
+int defwNetConnection(const char* inst, const char* pin, int synthesized) {
   defwFunc = DEFW_NET;  // Current function of writer
   if (!defwFile) {
     return DEFW_UNINITIALIZED;
@@ -3495,7 +3495,7 @@ int defwNetConnection(const char *inst, const char *pin, int synthesized) {
   return DEFW_OK;
 }
 
-int defwNetMustjoinConnection(const char *inst, const char *pin) {
+int defwNetMustjoinConnection(const char* inst, const char* pin) {
   defwFunc = DEFW_NET;  // Current function of writer
   if (!defwFile) {
     return DEFW_UNINITIALIZED;
@@ -3545,7 +3545,7 @@ int defwNetFrequency(double frequency) {
   return DEFW_OK;
 }
 
-int defwNetSource(const char *name) {
+int defwNetSource(const char* name) {
   defwFunc = DEFW_NET;  // Current function of writer
   if (!defwFile) {
     return DEFW_UNINITIALIZED;
@@ -3573,7 +3573,7 @@ int defwNetXtalk(int xtalk) {
   return DEFW_OK;
 }
 
-int defwNetVpin(const char *vpinName, const char *layerName, int layerXl, int layerYl, int layerXh, int layerYh, const char *status,
+int defwNetVpin(const char* vpinName, const char* layerName, int layerXl, int layerYl, int layerXh, int layerYh, const char* status,
                 int statusX, int statusY, int orient) {
   defwFunc = DEFW_NET;  // Current function of writer
   if (!defwFile) {
@@ -3607,8 +3607,8 @@ int defwNetVpin(const char *vpinName, const char *layerName, int layerXl, int la
   return DEFW_OK;
 }
 
-int defwNetVpinStr(const char *vpinName, const char *layerName, int layerXl, int layerYl, int layerXh, int layerYh,
-                   const char *status, int statusX, int statusY, const char *orient) {
+int defwNetVpinStr(const char* vpinName, const char* layerName, int layerXl, int layerYl, int layerXh, int layerYh,
+                   const char* status, int statusX, int statusY, const char* orient) {
   defwFunc = DEFW_NET;  // Current function of writer
   if (!defwFile) {
     return DEFW_UNINITIALIZED;
@@ -3641,7 +3641,7 @@ int defwNetVpinStr(const char *vpinName, const char *layerName, int layerXl, int
   return DEFW_OK;
 }
 
-int defwNetOriginal(const char *name) {
+int defwNetOriginal(const char* name) {
   defwFunc = DEFW_NET;  // Current function of writer
   if (!defwFile) {
     return DEFW_UNINITIALIZED;
@@ -3655,7 +3655,7 @@ int defwNetOriginal(const char *name) {
   return DEFW_OK;
 }
 
-int defwNetPattern(const char *name) {
+int defwNetPattern(const char* name) {
   defwFunc = DEFW_NET;  // Current function of writer
   if (!defwFile) {
     return DEFW_UNINITIALIZED;
@@ -3669,7 +3669,7 @@ int defwNetPattern(const char *name) {
   return DEFW_OK;
 }
 
-int defwNetUse(const char *name) {
+int defwNetUse(const char* name) {
   defwFunc = DEFW_NET;  // Current function of writer
   if (!defwFile) {
     return DEFW_UNINITIALIZED;
@@ -3688,7 +3688,7 @@ int defwNetUse(const char *name) {
   return DEFW_OK;
 }
 
-int defwNetNondefaultRule(const char *name) {
+int defwNetNondefaultRule(const char* name) {
   defwFunc = DEFW_NET;  // Current function of writer
   if (!defwFile) {
     return DEFW_UNINITIALIZED;
@@ -3734,7 +3734,7 @@ int defwNetEstCap(double d) {
   return DEFW_OK;
 }
 
-int defwNetShieldnet(const char *name) {
+int defwNetShieldnet(const char* name) {
   defwFunc = DEFW_NET;  // Current function of writer
   if (!defwFile) {
     return DEFW_UNINITIALIZED;
@@ -3748,7 +3748,7 @@ int defwNetShieldnet(const char *name) {
   return DEFW_OK;
 }
 
-int defwNetNoshieldStart(const char *name) {
+int defwNetNoshieldStart(const char* name) {
   defwFunc = DEFW_NOSHIELD;  // Current function of writer
   if (!defwFile) {
     return DEFW_UNINITIALIZED;
@@ -3763,7 +3763,7 @@ int defwNetNoshieldStart(const char *name) {
   return DEFW_OK;
 }
 
-int defwNetNoshieldPoint(int numPts, const char **pointx, const char **pointy) {
+int defwNetNoshieldPoint(int numPts, const char** pointx, const char** pointy) {
   int i;
 
   defwFunc = DEFW_NOSHIELD;  // Current function of writer
@@ -3783,7 +3783,7 @@ int defwNetNoshieldPoint(int numPts, const char **pointx, const char **pointy) {
   return DEFW_OK;
 }
 
-int defwNetNoshieldVia(const char *name) {
+int defwNetNoshieldVia(const char* name) {
   defwFunc = DEFW_NOSHIELD;  // Current function of writer
   if (!defwFile) {
     return DEFW_UNINITIALIZED;
@@ -3811,7 +3811,7 @@ int defwNetNoshieldEnd() {
   return DEFW_OK;
 }
 
-int defwNetSubnetStart(const char *name) {
+int defwNetSubnetStart(const char* name) {
   defwFunc = DEFW_SUBNET;  // Current function of writer
   if (!defwFile) {
     return DEFW_UNINITIALIZED;
@@ -3830,7 +3830,7 @@ int defwNetSubnetStart(const char *name) {
   return DEFW_OK;
 }
 
-int defwNetSubnetPin(const char *compName, const char *pinName) {
+int defwNetSubnetPin(const char* compName, const char* pinName) {
   defwFunc = DEFW_SUBNET;  // Current function of writer
   if (!defwFile) {
     return DEFW_UNINITIALIZED;
@@ -3863,7 +3863,7 @@ int defwNetSubnetEnd() {
   return DEFW_OK;
 }
 
-int defwNetPathStart(const char *typ) {
+int defwNetPathStart(const char* typ) {
   defwFunc = DEFW_PATH;  // Current function of writer
   if (!defwFile) {
     return DEFW_UNINITIALIZED;
@@ -3913,7 +3913,7 @@ int defwNetPathWidth(int w) {
   return DEFW_OK;
 }
 
-int defwNetPathLayer(const char *name, int isTaper, const char *ruleName) {
+int defwNetPathLayer(const char* name, int isTaper, const char* ruleName) {
   defwFunc = DEFW_PATH;  // Current function of writer
   if (!defwFile) {
     return DEFW_UNINITIALIZED;
@@ -3953,7 +3953,7 @@ int defwNetPathStyle(int styleNum) {
   return DEFW_OK;
 }
 
-int defwNetPathPoint(int numPts, double *pointx, double *pointy) {
+int defwNetPathPoint(int numPts, double* pointx, double* pointy) {
   int i;
   defwFunc = DEFW_PATH;  // Current function of writer
   if (!defwFile) {
@@ -3974,7 +3974,7 @@ int defwNetPathPoint(int numPts, double *pointx, double *pointy) {
   return DEFW_OK;
 }
 
-int defwNetPathPointWithExt(int numPts, double *pointx, double *pointy, double *optValue) {
+int defwNetPathPointWithExt(int numPts, double* pointx, double* pointy, double* optValue) {
   int i;
   defwFunc = DEFW_PATH;  // Current function of writer
   if (!defwFile) {
@@ -3993,7 +3993,7 @@ int defwNetPathPointWithExt(int numPts, double *pointx, double *pointy, double *
   return DEFW_OK;
 }
 
-int defwNetPathVia(const char *name) {
+int defwNetPathVia(const char* name) {
   defwFunc = DEFW_PATH;  // Current function of writer
   if (!defwFile) {
     return DEFW_UNINITIALIZED;
@@ -4013,7 +4013,7 @@ int defwNetPathVia(const char *name) {
   return DEFW_OK;
 }
 
-int defwNetPathViaWithOrient(const char *name, int orient) {
+int defwNetPathViaWithOrient(const char* name, int orient) {
   defwFunc = DEFW_PATH;  // Current function of writer
   if (!defwFile) {
     return DEFW_UNINITIALIZED;
@@ -4040,7 +4040,7 @@ int defwNetPathViaWithOrient(const char *name, int orient) {
   return DEFW_OK;
 }
 
-int defwNetPathViaWithOrientStr(const char *name, const char *orient) {
+int defwNetPathViaWithOrientStr(const char* name, const char* orient) {
   defwFunc = DEFW_PATH;  // Current function of writer
   if (!defwFile) {
     return DEFW_UNINITIALIZED;
@@ -4203,7 +4203,7 @@ int defwStartIOTimings(int count) {
   return DEFW_OK;
 }
 
-int defwIOTiming(const char *instance, const char *pin) {
+int defwIOTiming(const char* instance, const char* pin) {
   defwFunc = DEFW_IOTIMING;  // Current function of writer
   if (!defwFile) {
     return DEFW_UNINITIALIZED;
@@ -4223,7 +4223,7 @@ int defwIOTiming(const char *instance, const char *pin) {
   return DEFW_OK;
 }
 
-int defwIOTimingVariable(const char *riseFall, int num1, int num2) {
+int defwIOTimingVariable(const char* riseFall, int num1, int num2) {
   defwFunc = DEFW_IOTIMING;  // Current function of writer
   if (!defwFile) {
     return DEFW_UNINITIALIZED;
@@ -4242,7 +4242,7 @@ int defwIOTimingVariable(const char *riseFall, int num1, int num2) {
   return DEFW_OK;
 }
 
-int defwIOTimingSlewrate(const char *riseFall, int num1, int num2) {
+int defwIOTimingSlewrate(const char* riseFall, int num1, int num2) {
   defwFunc = DEFW_IOTIMING;  // Current function of writer
   if (!defwFile) {
     return DEFW_UNINITIALIZED;
@@ -4261,7 +4261,7 @@ int defwIOTimingSlewrate(const char *riseFall, int num1, int num2) {
   return DEFW_OK;
 }
 
-int defwIOTimingDrivecell(const char *name, const char *fromPin, const char *toPin, int numDrivers) {
+int defwIOTimingDrivecell(const char* name, const char* fromPin, const char* toPin, int numDrivers) {
   defwFunc = DEFW_IOTIMING;  // Current function of writer
   if (!defwFile) {
     return DEFW_UNINITIALIZED;
@@ -4350,7 +4350,7 @@ int defwStartScanchains(int count) {
   return DEFW_OK;
 }
 
-int defwScanchain(const char *name) {
+int defwScanchain(const char* name) {
   defwFunc = DEFW_SCANCHAIN;  // Current function of writer
   if (!defwFile) {
     return DEFW_UNINITIALIZED;
@@ -4373,7 +4373,7 @@ int defwScanchain(const char *name) {
   return DEFW_OK;
 }
 
-int defwScanchainCommonscanpins(const char *inst1, const char *pin1, const char *inst2, const char *pin2) {
+int defwScanchainCommonscanpins(const char* inst1, const char* pin1, const char* inst2, const char* pin2) {
   defwFunc = DEFW_SCANCHAIN;  // Current function of writer
   if (!defwFile) {
     return DEFW_UNINITIALIZED;
@@ -4416,7 +4416,7 @@ int defwScanchainCommonscanpins(const char *inst1, const char *pin1, const char 
   return DEFW_OK;
 }
 
-int defwScanchainPartition(const char *name, int maxBits) {
+int defwScanchainPartition(const char* name, int maxBits) {
   defwFunc = DEFW_SCANCHAIN;  // Current function of writer
   if (!defwFile) {
     return DEFW_UNINITIALIZED;
@@ -4440,7 +4440,7 @@ int defwScanchainPartition(const char *name, int maxBits) {
   return DEFW_OK;
 }
 
-int defwScanchainStart(const char *inst, const char *pin) {
+int defwScanchainStart(const char* inst, const char* pin) {
   defwFunc = DEFW_SCANCHAIN;  // Current function of writer
   if (!defwFile) {
     return DEFW_UNINITIALIZED;
@@ -4464,7 +4464,7 @@ int defwScanchainStart(const char *inst, const char *pin) {
   return DEFW_OK;
 }
 
-int defwScanchainStop(const char *inst, const char *pin) {
+int defwScanchainStop(const char* inst, const char* pin) {
   defwFunc = DEFW_SCANCHAIN;  // Current function of writer
   if (!defwFile) {
     return DEFW_UNINITIALIZED;
@@ -4488,7 +4488,7 @@ int defwScanchainStop(const char *inst, const char *pin) {
   return DEFW_OK;
 }
 
-int defwScanchainFloating(const char *name, const char *inst1, const char *pin1, const char *inst2, const char *pin2) {
+int defwScanchainFloating(const char* name, const char* inst1, const char* pin1, const char* inst2, const char* pin2) {
   defwFunc = DEFW_SCAN_FLOATING;  // Current function of writer
   if (!defwFile) {
     return DEFW_UNINITIALIZED;
@@ -4534,7 +4534,7 @@ int defwScanchainFloating(const char *name, const char *inst1, const char *pin1,
   return DEFW_OK;
 }
 
-int defwScanchainFloatingBits(const char *name, const char *inst1, const char *pin1, const char *inst2, const char *pin2,
+int defwScanchainFloatingBits(const char* name, const char* inst1, const char* pin1, const char* inst2, const char* pin2,
                               int bits) {
   defwFunc = DEFW_SCAN_FLOATING;  // Current function of writer
   if (!defwFile) {
@@ -4583,8 +4583,8 @@ int defwScanchainFloatingBits(const char *name, const char *inst1, const char *p
 
   return DEFW_OK;
 }
-int defwScanchainOrdered(const char *name1, const char *inst1, const char *pin1, const char *inst2, const char *pin2,
-                         const char *name2, const char *inst3, const char *pin3, const char *inst4, const char *pin4) {
+int defwScanchainOrdered(const char* name1, const char* inst1, const char* pin1, const char* inst2, const char* pin2,
+                         const char* name2, const char* inst3, const char* pin3, const char* inst4, const char* pin4) {
   defwFunc = DEFW_SCAN_ORDERED;  // Current function of writer
   if (!defwFile) {
     return DEFW_UNINITIALIZED;
@@ -4658,8 +4658,8 @@ int defwScanchainOrdered(const char *name1, const char *inst1, const char *pin1,
   return DEFW_OK;
 }
 
-int defwScanchainOrderedBits(const char *name1, const char *inst1, const char *pin1, const char *inst2, const char *pin2, int bits1,
-                             const char *name2, const char *inst3, const char *pin3, const char *inst4, const char *pin4,
+int defwScanchainOrderedBits(const char* name1, const char* inst1, const char* pin1, const char* inst2, const char* pin2, int bits1,
+                             const char* name2, const char* inst3, const char* pin3, const char* inst4, const char* pin4,
                              int bits2) {
   defwFunc = DEFW_SCAN_ORDERED;  // Current function of writer
   if (!defwFile) {
@@ -4804,7 +4804,7 @@ int defwConstraintOperand() {
   return DEFW_OK;
 }
 
-int defwConstraintOperandNet(const char *netName) {
+int defwConstraintOperandNet(const char* netName) {
   defwFunc = DEFW_FPC_OPER;  // Current function of writer
   if (!defwFile) {
     return DEFW_UNINITIALIZED;
@@ -4826,7 +4826,7 @@ int defwConstraintOperandNet(const char *netName) {
   return DEFW_OK;
 }
 
-int defwConstraintOperandPath(const char *comp1, const char *fromPin, const char *comp2, const char *toPin) {
+int defwConstraintOperandPath(const char* comp1, const char* fromPin, const char* comp2, const char* toPin) {
   defwFunc = DEFW_FPC_OPER;  // Current function of writer
   if (!defwFile) {
     return DEFW_UNINITIALIZED;
@@ -4878,7 +4878,7 @@ int defwConstraintOperandSumEnd() {
   return DEFW_OK;
 }
 
-int defwConstraintOperandTime(const char *timeType, int time) {
+int defwConstraintOperandTime(const char* timeType, int time) {
   defwFunc = DEFW_FPC_OPER;  // Current function of writer
   if (!defwFile) {
     return DEFW_UNINITIALIZED;
@@ -4907,7 +4907,7 @@ int defwConstraintOperandEnd() {
   return DEFW_OK;
 }
 
-int defwConstraintWiredlogic(const char *netName, int distance) {
+int defwConstraintWiredlogic(const char* netName, int distance) {
   defwFunc = DEFW_FPC;  // Current function of writer
   if (!defwFile) {
     return DEFW_UNINITIALIZED;
@@ -4964,7 +4964,7 @@ int defwStartGroups(int count) {
   return DEFW_OK;
 }
 
-int defwGroup(const char *groupName, int numExpr, const char **groupExpr) {
+int defwGroup(const char* groupName, int numExpr, const char** groupExpr) {
   int i;
 
   defwFunc = DEFW_GROUP;  // Current function of writer
@@ -4993,7 +4993,7 @@ int defwGroup(const char *groupName, int numExpr, const char **groupExpr) {
   return DEFW_OK;
 }
 
-int defwGroupSoft(const char *type1, double value1, const char *type2, double value2, const char *type3, double value3) {
+int defwGroupSoft(const char* type1, double value1, const char* type2, double value2, const char* type3, double value3) {
   defwFunc = DEFW_GROUP;  // Current function of writer
   if (!defwFile) {
     return DEFW_UNINITIALIZED;
@@ -5024,7 +5024,7 @@ int defwGroupSoft(const char *type1, double value1, const char *type2, double va
   return DEFW_OK;
 }
 
-int defwGroupRegion(int xl, int yl, int xh, int yh, const char *regionName) {
+int defwGroupRegion(int xl, int yl, int xh, int yh, const char* regionName) {
   defwFunc = DEFW_GROUP;  // Current function of writer
   if (!defwFile) {
     return DEFW_UNINITIALIZED;
@@ -5091,7 +5091,7 @@ int defwStartBlockages(int count) {
   return DEFW_OK;
 }
 
-int defwBlockagesLayer(const char *layerName) {
+int defwBlockagesLayer(const char* layerName) {
   defwFunc = DEFW_BLOCKAGE_LAYER;  // Current function of writer
   if (!defwFile) {
     return DEFW_UNINITIALIZED;
@@ -5168,7 +5168,7 @@ int defwBlockagesLayerFills() {
   return DEFW_OK;
 }
 
-int defwBlockagesLayerComponent(const char *compName) {
+int defwBlockagesLayerComponent(const char* compName) {
   defwFunc = DEFW_BLOCKAGE_LAYER;  // Current function of writer
   if (!defwFile) {
     return DEFW_UNINITIALIZED;
@@ -5297,8 +5297,8 @@ int defwBlockagesLayerMask(int colorMask) {
 }
 
 // To be removed, replaced by defwBlockagesLayer
-int defwBlockageLayer(const char *layerName,
-                      const char *compName) {  // optional(NULL)
+int defwBlockageLayer(const char* layerName,
+                      const char* compName) {  // optional(NULL)
   defwFunc = DEFW_BLOCKAGE_LAYER;              // Current function of writer
   if (!defwFile) {
     return DEFW_UNINITIALIZED;
@@ -5327,7 +5327,7 @@ int defwBlockageLayer(const char *layerName,
 }
 
 // To be removed, replaced by defwBlockagesLayerSlots
-int defwBlockageLayerSlots(const char *layerName) {
+int defwBlockageLayerSlots(const char* layerName) {
   defwFunc = DEFW_BLOCKAGE_LAYER;  // Current function of writer
   if (!defwFile) {
     return DEFW_UNINITIALIZED;
@@ -5352,7 +5352,7 @@ int defwBlockageLayerSlots(const char *layerName) {
 }
 
 // To be removed, replaced by defwBlockagesLayerFills
-int defwBlockageLayerFills(const char *layerName) {
+int defwBlockageLayerFills(const char* layerName) {
   defwFunc = DEFW_BLOCKAGE_LAYER;  // Current function of writer
   if (!defwFile) {
     return DEFW_UNINITIALIZED;
@@ -5377,7 +5377,7 @@ int defwBlockageLayerFills(const char *layerName) {
 }
 
 // To be removed, replaced by defwBlockagesLayerPushdown
-int defwBlockageLayerPushdown(const char *layerName) {
+int defwBlockageLayerPushdown(const char* layerName) {
   defwFunc = DEFW_BLOCKAGE_LAYER;  // Current function of writer
   if (!defwFile) {
     return DEFW_UNINITIALIZED;
@@ -5402,7 +5402,7 @@ int defwBlockageLayerPushdown(const char *layerName) {
 }
 
 // To be removed, replaced by defwBlockagesLayerExceptpgnet
-int defwBlockageLayerExceptpgnet(const char *layerName) {
+int defwBlockageLayerExceptpgnet(const char* layerName) {
   defwFunc = DEFW_BLOCKAGE_LAYER;  // Current function of writer
   if (!defwFile) {
     return DEFW_UNINITIALIZED;
@@ -5490,7 +5490,7 @@ int defwBlockagesPlacement() {
   return DEFW_OK;
 }
 
-int defwBlockagesPlacementComponent(const char *compName) {
+int defwBlockagesPlacementComponent(const char* compName) {
   defwFunc = DEFW_BLOCKAGE_PLACE;  // Current function of writer
   if (!defwFile) {
     return DEFW_UNINITIALIZED;
@@ -5601,7 +5601,7 @@ int defwBlockagesRect(int xl, int yl, int xh, int yh) {
   return DEFW_OK;
 }
 
-int defwBlockagesPolygon(int num_polys, int *xl, int *yl) {
+int defwBlockagesPolygon(int num_polys, int* xl, int* yl) {
   int i;
 
   defwFunc = DEFW_BLOCKAGE_RECT;  // Current function of writer
@@ -5654,7 +5654,7 @@ int defwBlockagePlacement() {
 }
 
 // To be removed. Will replace by defwBlcokagesPlacementComponent
-int defwBlockagePlacementComponent(const char *compName) {
+int defwBlockagePlacementComponent(const char* compName) {
   defwFunc = DEFW_BLOCKAGE_PLACE;  // Current function of writer
   if (!defwFile) {
     return DEFW_UNINITIALIZED;
@@ -5786,7 +5786,7 @@ int defwBlockageRect(int xl, int yl, int xh, int yh) {
 }
 
 // Tobe removed. Will be replaced by defwBlockagesPolygon.
-int defwBlockagePolygon(int num_polys, int *xl, int *yl) {
+int defwBlockagePolygon(int num_polys, int* xl, int* yl) {
   int i;
 
   defwFunc = DEFW_BLOCKAGE_RECT;  // Current function of writer
@@ -5859,7 +5859,7 @@ int defwStartSlots(int count) {
   return DEFW_OK;
 }
 
-int defwSlotLayer(const char *layerName) {
+int defwSlotLayer(const char* layerName) {
   defwFunc = DEFW_SLOT_LAYER;  // Current function of writer
   if (!defwFile) {
     return DEFW_UNINITIALIZED;
@@ -5902,7 +5902,7 @@ int defwSlotRect(int xl, int yl, int xh, int yh) {
   return DEFW_OK;
 }
 
-int defwSlotPolygon(int num_polys, double *xl, double *yl) {
+int defwSlotPolygon(int num_polys, double* xl, double* yl) {
   int i;
 
   defwFunc = DEFW_SLOT_RECT;  // Current function of writer
@@ -5977,7 +5977,7 @@ int defwStartFills(int count) {
   return DEFW_OK;
 }
 
-int defwFillLayer(const char *layerName) {
+int defwFillLayer(const char* layerName) {
   defwFunc = DEFW_FILL_LAYER;  // Current function of writer
   if (!defwFile) {
     return DEFW_UNINITIALIZED;
@@ -6058,7 +6058,7 @@ int defwFillRect(int xl, int yl, int xh, int yh) {
   return DEFW_OK;
 }
 
-int defwFillPolygon(int num_polys, double *xl, double *yl) {
+int defwFillPolygon(int num_polys, double* xl, double* yl) {
   int i;
 
   defwFunc = DEFW_FILL_RECT;  // Current function of writer
@@ -6091,7 +6091,7 @@ int defwFillPolygon(int num_polys, double *xl, double *yl) {
 }
 
 // 5.7
-int defwFillVia(const char *viaName) {
+int defwFillVia(const char* viaName) {
   defwFunc = DEFW_FILL_LAYER;  // Current function of writer
   if (!defwFile) {
     return DEFW_UNINITIALIZED;
@@ -6151,7 +6151,7 @@ int defwFillViaOPC() {
   return DEFW_OK;
 }
 
-int defwFillPoints(int num_points, double *xl, double *yl) {
+int defwFillPoints(int num_points, double* xl, double* yl) {
   int i;
 
   defwFunc = DEFW_FILL_RECT;  // Current function of writer
@@ -6227,7 +6227,7 @@ int defwStartNonDefaultRules(int count) {
   return DEFW_OK;
 }
 
-int defwNonDefaultRule(const char *ruleName, int hardSpacing) {
+int defwNonDefaultRule(const char* ruleName, int hardSpacing) {
   defwFunc = DEFW_NDR;
   if (!defwFile) {
     return DEFW_UNINITIALIZED;
@@ -6253,7 +6253,7 @@ int defwNonDefaultRule(const char *ruleName, int hardSpacing) {
   return DEFW_OK;
 }
 
-int defwNonDefaultRuleLayer(const char *layerName, int width, int diagWidth, int spacing, int wireExt) {
+int defwNonDefaultRuleLayer(const char* layerName, int width, int diagWidth, int spacing, int wireExt) {
   defwFunc = DEFW_NDR;
   if (!defwFile) {
     return DEFW_UNINITIALIZED;
@@ -6282,7 +6282,7 @@ int defwNonDefaultRuleLayer(const char *layerName, int width, int diagWidth, int
   return DEFW_OK;
 }
 
-int defwNonDefaultRuleVia(const char *viaName) {
+int defwNonDefaultRuleVia(const char* viaName) {
   defwFunc = DEFW_NDR;
   if (!defwFile) {
     return DEFW_UNINITIALIZED;
@@ -6301,7 +6301,7 @@ int defwNonDefaultRuleVia(const char *viaName) {
   return DEFW_OK;
 }
 
-int defwNonDefaultRuleViaRule(const char *viaRuleName) {
+int defwNonDefaultRuleViaRule(const char* viaRuleName) {
   defwFunc = DEFW_NDR;
   if (!defwFile) {
     return DEFW_UNINITIALIZED;
@@ -6320,7 +6320,7 @@ int defwNonDefaultRuleViaRule(const char *viaRuleName) {
   return DEFW_OK;
 }
 
-int defwNonDefaultRuleMinCuts(const char *cutLayerName, int numCuts) {
+int defwNonDefaultRuleMinCuts(const char* cutLayerName, int numCuts) {
   defwFunc = DEFW_NDR;
   if (!defwFile) {
     return DEFW_UNINITIALIZED;
@@ -6380,7 +6380,7 @@ int defwStartStyles(int count) {
   return DEFW_OK;
 }
 
-int defwStyles(int styleNums, int num_points, double *xp, double *yp) {
+int defwStyles(int styleNums, int num_points, double* xp, double* yp) {
   int i;
 
   defwFunc = DEFW_STYLES;
@@ -6435,7 +6435,7 @@ int defwEndStyles() {
   return DEFW_OK;
 }
 
-int defwStartBeginext(const char *name) {
+int defwStartBeginext(const char* name) {
   if (!defwFile) {
     return DEFW_UNINITIALIZED;
   }
@@ -6455,7 +6455,7 @@ int defwStartBeginext(const char *name) {
   return DEFW_OK;
 }
 
-int defwBeginextCreator(const char *creatorName) {
+int defwBeginextCreator(const char* creatorName) {
   if (!defwFile) {
     return DEFW_UNINITIALIZED;
   }
@@ -6477,7 +6477,7 @@ int defwBeginextCreator(const char *creatorName) {
 
 int defwBeginextDate() {
   time_t todayTime;
-  char  *rettime;
+  char*  rettime;
 
   if (!defwFile) {
     return DEFW_UNINITIALIZED;
@@ -6516,7 +6516,7 @@ int defwBeginextRevision(int vers1, int vers2) {
   return DEFW_OK;
 }
 
-int defwBeginextSyntax(const char *title, const char *string) {
+int defwBeginextSyntax(const char* title, const char* string) {
   if (!defwFile) {
     return DEFW_UNINITIALIZED;
   }
@@ -6584,7 +6584,7 @@ void defwPrintError(int status) {
   return;
 }
 
-void defwAddComment(const char *comment) {
+void defwAddComment(const char* comment) {
   if (comment) {
     fprintf(defwFile, "# %s\n", comment);
   }

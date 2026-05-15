@@ -39,7 +39,7 @@ using namespace std;
 
 BEGIN_LEFDEF_PARSER_NAMESPACE
 
-defrData::defrData(const defrCallbacks *pCallbacks, const defrSettings *pSettings, defrSession *pSession)
+defrData::defrData(const defrCallbacks* pCallbacks, const defrSettings* pSettings, defrSession* pSession)
     : callbacks(pCallbacks)
     , settings(pSettings)
     , session(pSession)
@@ -90,7 +90,7 @@ defrData::defrData(const defrCallbacks *pCallbacks, const defrSettings *pSetting
     , iOTimingWarnings(0)
     , input_level(-1)
     , last(NULL)
-    , magic((char *)malloc(1))
+    , magic((char*)malloc(1))
     , mask_is_keyword(0)
     , mustjoin_is_keyword(0)
     , names_case_sensitive(1)
@@ -136,9 +136,9 @@ defrData::defrData(const defrCallbacks *pCallbacks, const defrSettings *pSetting
     , virtual_is_keyword(0)
     , deftokenLength(TOKEN_SIZE)
     , warningMsg(NULL)
-    , specialWire_routeStatus((char *)"ROUTED")
-    , specialWire_routeStatusName((char *)"")
-    , specialWire_shapeType((char *)"")
+    , specialWire_routeStatus((char*)"ROUTED")
+    , specialWire_routeStatusName((char*)"")
+    , specialWire_shapeType((char*)"")
     , VersionNum(5.7)
     , xStep(0)
     , yStep(0)
@@ -178,9 +178,9 @@ defrData::defrData(const defrCallbacks *pCallbacks, const defrSettings *pSetting
     , Geometries(this)
     , doneDesign(0)
     , NeedPathData(0)
-    , deftoken((char *)malloc(TOKEN_SIZE))
-    , uc_token((char *)malloc(TOKEN_SIZE))
-    , pv_deftoken((char *)malloc(TOKEN_SIZE))
+    , deftoken((char*)malloc(TOKEN_SIZE))
+    , uc_token((char*)malloc(TOKEN_SIZE))
+    , pv_deftoken((char*)malloc(TOKEN_SIZE))
     , File(0) {
   magic[0]    = '\0';
   deftoken[0] = '\0';
@@ -188,7 +188,7 @@ defrData::defrData(const defrCallbacks *pCallbacks, const defrSettings *pSetting
 
   memset(msgLimit, 0, DEF_MSGS * sizeof(int));
   memset(buffer, 0, IN_BUF_SIZE * sizeof(char));
-  memset(ring, 0, RING_SIZE * sizeof(char *));
+  memset(ring, 0, RING_SIZE * sizeof(char*));
   memset(ringSizes, 0, RING_SIZE * sizeof(int));
   memset(lineBuffer, 0, MSG_SIZE * sizeof(char));
 
@@ -196,7 +196,7 @@ defrData::defrData(const defrCallbacks *pCallbacks, const defrSettings *pSetting
   int i;
   ringPlace = 0;
   for (i = 0; i < RING_SIZE; i++) {
-    ring[i]      = (char *)malloc(TOKEN_SIZE);
+    ring[i]      = (char*)malloc(TOKEN_SIZE);
     ringSizes[i] = TOKEN_SIZE;
   }
 
@@ -231,7 +231,7 @@ defrData::~defrData() {
   }
 }
 
-void defrData::defiError(int check, int msgNum, const char *mess) {
+void defrData::defiError(int check, int msgNum, const char* mess) {
   /* check is 1 if the caller function has checked totalMsgLimit, etc. */
 
   if (!check) {
@@ -256,7 +256,7 @@ void defrData::defiError(int check, int msgNum, const char *mess) {
   }
 }
 
-const char *defrData::upperCase(const char *str) {
+const char* defrData::upperCase(const char* str) {
   const static char defiShift[]
       = {'\0', '\0', '\0', '\0', '\0', '\0', '\0', '\0', '\0', '\0', '\0', '\0', '\0', '\0', '\0', '\0', '\0', '\0', '\0', '\0',
          '\0', '\0', '\0', '\0', '\0', '\0', '\0', '\0', '\0', '\0', '\0', '\0', ' ',  '!',  '"',  '#',  '$',  '%',  '&',  '\'',
@@ -272,18 +272,18 @@ const char *defrData::upperCase(const char *str) {
          '\0', '\0', '\0', '\0', '\0', '\0', '\0', '\0', '\0', '\0', '\0', '\0', '\0', '\0', '\0', '\0', '\0', '\0', '\0', '\0',
          '\0', '\0', '\0', '\0', '\0', '\0', '\0', '\0', '\0', '\0', '\0', '\0', '\0', '\0', '\0', '\0'};
 
-  char *place = (char *)str;
-  char *to;
+  char* place = (char*)str;
+  char* to;
   int   len = strlen(str) + 1;
 
   if (len > shiftBufLength) {
     if (shiftBuf == 0) {
       len            = len < 64 ? 64 : len;
-      shiftBuf       = (char *)malloc(len);
+      shiftBuf       = (char*)malloc(len);
       shiftBufLength = len;
     } else {
       free(shiftBuf);
-      shiftBuf       = (char *)malloc(len);
+      shiftBuf       = (char*)malloc(len);
       shiftBufLength = len;
     }
   }
@@ -302,7 +302,7 @@ const char *defrData::upperCase(const char *str) {
 int defrData::validateMaskInput(int input, int warningIndex, int getWarningsIndex) {
   if (VersionNum < 5.8 && input > 0) {
     if (warningIndex++ < getWarningsIndex) {
-      defMsg = (char *)malloc(1000);
+      defMsg = (char*)malloc(1000);
       sprintf(defMsg,
               "The MASK statement is available in version 5.8 and later.\nHowever, your DEF file is defined with version %g",
               VersionNum);
@@ -318,7 +318,7 @@ int defrData::validateMaskInput(int input, int warningIndex, int getWarningsInde
   return 1;
 }
 
-int defrData::validateMaskShiftInput(const char *shiftMask, int warningIndex, int getWarningsIndex) {
+int defrData::validateMaskShiftInput(const char* shiftMask, int warningIndex, int getWarningsIndex) {
   int shiftMaskLength = strlen(shiftMask);
   int hasShiftData    = 0;
   int hasError        = 0;
@@ -337,7 +337,7 @@ int defrData::validateMaskShiftInput(const char *shiftMask, int warningIndex, in
   }
 
   if (hasError) {
-    char *msg = (char *)malloc(1000);
+    char* msg = (char*)malloc(1000);
 
     sprintf(msg,
             "The MASKSHIFT value '%s' is not valid. The value should be a string consisting of decimal digits ('0' - '9').",
@@ -354,7 +354,7 @@ int defrData::validateMaskShiftInput(const char *shiftMask, int warningIndex, in
 
   if (VersionNum < 5.8 && hasShiftData) {
     if (warningIndex++ < getWarningsIndex) {
-      char *msg = (char *)malloc(1000);
+      char* msg = (char*)malloc(1000);
 
       sprintf(msg,
               "The MASKSHIFT statement can be used only in DEF version 5.8 and later. This DEF file version is '%g'.",
@@ -372,18 +372,18 @@ int defrData::validateMaskShiftInput(const char *shiftMask, int warningIndex, in
   return 1;
 }
 
-double defrData::convert_defname2num(char *versionName) {
+double defrData::convert_defname2num(char* versionName) {
   char  majorNm[80];
   char  minorNm[80];
-  char *subMinorNm = NULL;
-  char *versionNm  = strdup(versionName);
+  char* subMinorNm = NULL;
+  char* versionNm  = strdup(versionName);
 
   double major = 0, minor = 0, subMinor = 0;
   double version;
 
   sscanf(versionNm, "%[^.].%s", majorNm, minorNm);
 
-  char *p1 = strchr(minorNm, '.');
+  char* p1 = strchr(minorNm, '.');
   if (p1) {
     subMinorNm = p1 + 1;
     *p1        = '\0';
@@ -408,7 +408,7 @@ double defrData::convert_defname2num(char *versionName) {
   return version;
 }
 
-int defrData::numIsInt(char *volt) {
+int defrData::numIsInt(char* volt) {
   if (strchr(volt, '.')) {  // a floating point
     return 0;
   } else {
@@ -417,7 +417,7 @@ int defrData::numIsInt(char *volt) {
 }
 
 int defrData::defValidNum(int values) {
-  char *outMsg;
+  char* outMsg;
   switch (values) {
     case 100:
     case 200:
@@ -432,7 +432,7 @@ int defrData::defValidNum(int values) {
       if (VersionNum < 5.6) {
         if (callbacks->UnitsCbk) {
           if (unitsWarnings++ < settings->UnitsWarnings) {
-            outMsg = (char *)malloc(1000);
+            outMsg = (char*)malloc(1000);
             sprintf(outMsg,
                     "An error has been found while processing the DEF file '%s'\nUnit %d is a 5.6 or later syntax. Define the DEF "
                     "file as 5.6 and then try again.",
@@ -450,7 +450,7 @@ int defrData::defValidNum(int values) {
   }
   if (callbacks->UnitsCbk) {
     if (unitsWarnings++ < settings->UnitsWarnings) {
-      outMsg = (char *)malloc(10000);
+      outMsg = (char*)malloc(10000);
       sprintf(outMsg,
               "The value %d defined for DEF UNITS DISTANCE MICRON is invalid\n. The valid values are 100, 200, 400, 800, 1000, "
               "2000, 4000, 8000, 10000, or 20000. Specify a valid value and then try again.",

@@ -112,8 +112,7 @@ void Sticky_handler::on_expr_assign(uPass_attributes& /*owner*/, std::string_vie
   }
 }
 
-void Sticky_handler::on_if_arm_enter(uPass_attributes& /*owner*/,
-                                     const std::vector<std::string_view>& cond_refs,
+void Sticky_handler::on_if_arm_enter(uPass_attributes& /*owner*/, const std::vector<std::string_view>& cond_refs,
                                      const std::vector<std::pair<std::string_view, std::string_view>>& cond_attr_reads) {
   // Build the taint set for this arm:
   //   - any sticky bucket already on a cond ref var (covers `if tmp {…}` where

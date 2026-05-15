@@ -30,8 +30,8 @@ public:
     // On leave_scope, every var listed in modified_under_uncertainty is
     // invalidated in its declaring scope so the unknown side-effects of the
     // arm don't leak out. See record_uncertain_modification().
-    bool                                                      uncertain_cond{false};
-    std::vector<std::string>                                  modified_under_uncertainty;
+    bool                     uncertain_cond{false};
+    std::vector<std::string> modified_under_uncertainty;
   };
 
   static inline Const invalid_lconst{};  // default Dlop is Type::Invalid
@@ -43,9 +43,9 @@ public:
   // Active scope chain: innermost at back(). Pointers refer into scope_storage.
   std::vector<Scope*> stack;
 
-  void                    function_scope(std::string_view func_id);
-  void                    always_scope();
-  void                    conditional_scope();
+  void function_scope(std::string_view func_id);
+  void always_scope();
+  void conditional_scope();
   // Push a block scope keyed by `key` (e.g. an LNAST nid hash). Re-entering
   // the same `key` on a subsequent iteration restores the same Scope object,
   // so per-iteration state (declarations, values) persists across the upass
@@ -87,7 +87,7 @@ public:
   bool is_known_const(std::string_view name) const;
 
   // Const can be 0sb? or 123 or string or bool or nil or runtime (0sb? and runtime?)
-  const Const&           get_trivial(std::string_view key) const;
+  const Const&            get_trivial(std::string_view key) const;
   std::shared_ptr<Bundle> get_bundle(std::string_view key) const;
 
   void dump() const;
@@ -105,7 +105,7 @@ private:
   // Walks the active stack from innermost outward, stopping at and including
   // the nearest Function scope (callee bodies cannot see caller variables).
   // Returns the first scope whose varmap contains `var`, or nullptr.
-  Scope* find_decl_scope(std::string_view var);
+  Scope*       find_decl_scope(std::string_view var);
   const Scope* find_decl_scope(std::string_view var) const;
 
   // If any active scope was marked uncertain via mark_current_uncertain,

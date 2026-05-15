@@ -35,7 +35,6 @@
 
 namespace {
 
-
 bool is_truthy(std::string_view v) {
   if (v.empty() || v == "true") {
     return true;
@@ -131,7 +130,7 @@ void uPass_attributes::apply_narrowing(std::string_view lhs, bool is_wrap, bool 
   // the previous narrowing), then runner_fold_fn (constprop's ST + every
   // other pass's fold contribution).
   std::optional<Const> cur;
-  auto                  it = tmp_fold.find(std::string{lhs});
+  auto                 it = tmp_fold.find(std::string{lhs});
   if (it != tmp_fold.end() && !it->second.is_invalid()) {
     cur = it->second;
   } else if (runner_fold_fn) {
@@ -144,7 +143,7 @@ void uPass_attributes::apply_narrowing(std::string_view lhs, bool is_wrap, bool 
     return;
   }
   const bool is_signed = ti->kind == Numeric_kind::signed_int;
-  Const     out;
+  Const      out;
   if (is_wrap) {
     out = is_signed ? wrap_to_signed(*cur, ti->bits) : wrap_to_unsigned(*cur, ti->bits);
   } else {
@@ -198,8 +197,8 @@ namespace upass {
 namespace attributes {
 
 void Wrap_sat_handler::on_attr_set(uPass_attributes& owner, std::string_view lhs, std::string_view value_text) {
-  const bool         active = is_truthy(value_text);
-  const std::string& bucket = owner.current_dispatch_bucket();
+  const bool         active  = is_truthy(value_text);
+  const std::string& bucket  = owner.current_dispatch_bucket();
   const bool         is_wrap = (bucket == "wrap");
   const bool         is_sat  = (bucket == "saturate") || (bucket == "sat");
   if (!is_wrap && !is_sat) {

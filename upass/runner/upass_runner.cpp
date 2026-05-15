@@ -691,7 +691,7 @@ void uPass_runner::process_if() {
         // Body for the prior cond, or the trailing else (no prior cond
         // this round). Dead iff a prior arm has already fired, or the
         // immediate cond just folded to false.
-        const bool dead         = already_matched || (last_was_cond && last_cond_false);
+        const bool dead = already_matched || (last_was_cond && last_cond_false);
         // `just_matched` only fires when no earlier arm was uncertain — if
         // a prior cond was undecided at comptime (nil/unknown) the runtime
         // ordering may still pick *that* arm, so a later concrete-true
@@ -730,15 +730,15 @@ void uPass_runner::process_if() {
       }
 
       // Non-stmts child — must be a cond (ref/const).
-      auto val        = cond_value();
+      auto val = cond_value();
       // nil cond models "comptime can't decide" (e.g. a `case` whose values
       // didn't match but whose runtime predicate might still fire). Treat
       // it the same as has_unknowns(): not known-true and not known-false,
       // so the arm body is visited as uncertain rather than dead-pruned.
       const bool val_is_nil = val.has_value() && !val->is_invalid() && val->is_nil();
-      last_cond_true  = val.has_value() && !val->is_invalid() && !val_is_nil && val->is_known_true();
-      last_cond_false = val.has_value() && !val->is_invalid() && !val_is_nil && val->is_known_false();
-      last_was_cond   = true;
+      last_cond_true        = val.has_value() && !val->is_invalid() && !val_is_nil && val->is_known_true();
+      last_cond_false       = val.has_value() && !val->is_invalid() && !val_is_nil && val->is_known_false();
+      last_was_cond         = true;
       if (!last_cond_true && !last_cond_false) {
         any_prior_uncertain = true;
       }

@@ -19,7 +19,7 @@ public:
       trivial   = ent.trivial;
       return *this;
     }
-    bool   immutable;
+    bool  immutable;
     Const trivial;
   };
 
@@ -86,7 +86,7 @@ public:
 
   std::string learn_fix(std::string_view key);
 
-  const Entry&  get_entry(std::string_view key) const;
+  const Entry& get_entry(std::string_view key) const;
   const Const& get_trivial(std::string_view key) const { return get_entry(key).trivial; }
   const Const& get_trivial() const;
 
@@ -126,7 +126,7 @@ public:
 
   const Key_map_type& get_map() const { return key_map; }
   const Key_map_type& get_sort_map() const;
-  Const              flatten() const;
+  Const               flatten() const;
 
   std::string_view get_scalar_name() const;  // empty if not scalar
 

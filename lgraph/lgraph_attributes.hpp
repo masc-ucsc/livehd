@@ -110,7 +110,7 @@ protected:
   [[nodiscard]] Sub_node*       ref_type_sub_node(Index_id nid);
   [[nodiscard]] Sub_node*       ref_type_sub_node(std::string_view sub_name);
 
-  void                 set_type_lut(Index_id nid, const Const& lutid);
+  void                set_type_lut(Index_id nid, const Const& lutid);
   [[nodiscard]] Const get_type_lut(Index_id nid) const;
 
   void set_type_const(Index_id nid, const Const& value);

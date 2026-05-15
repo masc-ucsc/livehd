@@ -41,56 +41,56 @@ BEGIN_LEFDEF_PARSER_NAMESPACE
 // lefiArrayFloorPlan
 // *****************************************************************************
 
-void lefiArrayFloorPlan::Init(const char *name) {
+void lefiArrayFloorPlan::Init(const char* name) {
   int len = strlen(name) + 1;
-  name_   = (char *)lefMalloc(len);
+  name_   = (char*)lefMalloc(len);
   strcpy(name_, CASE(name));
   numPatterns_       = 0;
   patternsAllocated_ = 2;
-  types_             = (char **)lefMalloc(sizeof(char *) * 2);
-  patterns_          = (lefiSitePattern **)lefMalloc(sizeof(lefiSitePattern *) * 2);
+  types_             = (char**)lefMalloc(sizeof(char*) * 2);
+  patterns_          = (lefiSitePattern**)lefMalloc(sizeof(lefiSitePattern*) * 2);
 }
 
 void lefiArrayFloorPlan::Destroy() {
-  lefiSitePattern *s;
+  lefiSitePattern* s;
   int              i;
   for (i = 0; i < numPatterns_; i++) {
     s = patterns_[i];
     s->Destroy();
-    lefFree((char *)s);
-    lefFree((char *)(types_[i]));
+    lefFree((char*)s);
+    lefFree((char*)(types_[i]));
   }
-  lefFree((char *)(types_));
-  lefFree((char *)(patterns_));
+  lefFree((char*)(types_));
+  lefFree((char*)(patterns_));
   lefFree(name_);
 }
 
-void lefiArrayFloorPlan::addSitePattern(const char *typ, lefiSitePattern *s) {
+void lefiArrayFloorPlan::addSitePattern(const char* typ, lefiSitePattern* s) {
   int len = strlen(typ) + 1;
   if (numPatterns_ == patternsAllocated_) {
     int               i;
     int               lim;
-    char            **nc;
-    lefiSitePattern **np;
+    char**            nc;
+    lefiSitePattern** np;
 
     if (patternsAllocated_ == 0) {
       lim = patternsAllocated_ = 2;
     } else {
       lim = patternsAllocated_ = patternsAllocated_ * 2;
     }
-    nc = (char **)lefMalloc(sizeof(char *) * lim);
-    np = (lefiSitePattern **)lefMalloc(sizeof(lefiSitePattern *) * lim);
+    nc = (char**)lefMalloc(sizeof(char*) * lim);
+    np = (lefiSitePattern**)lefMalloc(sizeof(lefiSitePattern*) * lim);
     lim /= 2;
     for (i = 0; i < lim; i++) {
       nc[i] = types_[i];
       np[i] = patterns_[i];
     }
-    lefFree((char *)(types_));
-    lefFree((char *)(patterns_));
+    lefFree((char*)(types_));
+    lefFree((char*)(patterns_));
     types_    = nc;
     patterns_ = np;
   }
-  types_[numPatterns_] = (char *)lefMalloc(len);
+  types_[numPatterns_] = (char*)lefMalloc(len);
   strcpy(types_[numPatterns_], typ);
   patterns_[numPatterns_] = s;
   numPatterns_ += 1;
@@ -98,11 +98,11 @@ void lefiArrayFloorPlan::addSitePattern(const char *typ, lefiSitePattern *s) {
 
 int lefiArrayFloorPlan::numPatterns() const { return numPatterns_; }
 
-lefiSitePattern *lefiArrayFloorPlan::pattern(int index) const { return patterns_[index]; }
+lefiSitePattern* lefiArrayFloorPlan::pattern(int index) const { return patterns_[index]; }
 
-char *lefiArrayFloorPlan::typ(int index) const { return types_[index]; }
+char* lefiArrayFloorPlan::typ(int index) const { return types_[index]; }
 
-const char *lefiArrayFloorPlan::name() const { return name_; }
+const char* lefiArrayFloorPlan::name() const { return name_; }
 
 // *****************************************************************************
 // lefiArray
@@ -139,62 +139,62 @@ lefiArray::lefiArray()
 
 void lefiArray::Init() {
   nameSize_ = 16;
-  name_     = (char *)lefMalloc(16);
+  name_     = (char*)lefMalloc(16);
 
   numPatterns_       = 0;
   patternsAllocated_ = 0;
-  bump((void ***)(&(pattern_)), numPatterns_, &(patternsAllocated_));
+  bump((void***)(&(pattern_)), numPatterns_, &(patternsAllocated_));
 
   numCan_       = 0;
   canAllocated_ = 0;
-  bump((void ***)(&(canPlace_)), numCan_, &(canAllocated_));
+  bump((void***)(&(canPlace_)), numCan_, &(canAllocated_));
 
   numCannot_       = 0;
   cannotAllocated_ = 0;
-  bump((void ***)(&(cannotOccupy_)), numCannot_, &(cannotAllocated_));
+  bump((void***)(&(cannotOccupy_)), numCannot_, &(cannotAllocated_));
 
   numTracks_       = 0;
   tracksAllocated_ = 0;
-  bump((void ***)(&(track_)), numTracks_, &(tracksAllocated_));
+  bump((void***)(&(track_)), numTracks_, &(tracksAllocated_));
 
   numG_       = 0;
   gAllocated_ = 0;
-  bump((void ***)(&(gcell_)), numG_, &(gAllocated_));
+  bump((void***)(&(gcell_)), numG_, &(gAllocated_));
 
   numDefault_       = 0;
   defaultAllocated_ = 4;
-  minPins_          = (int *)lefMalloc(sizeof(int) * 4);
-  caps_             = (double *)lefMalloc(sizeof(double) * 4);
+  minPins_          = (int*)lefMalloc(sizeof(int) * 4);
+  caps_             = (double*)lefMalloc(sizeof(double) * 4);
 
   floorPlansAllocated_ = 0;
   numFloorPlans_       = 0;
-  bump((void ***)(&(floors_)), numFloorPlans_, &(floorPlansAllocated_));
+  bump((void***)(&(floors_)), numFloorPlans_, &(floorPlansAllocated_));
 }
 
 void lefiArray::Destroy() {
   clear();
 
-  lefFree((char *)(name_));
-  lefFree((char *)(caps_));
-  lefFree((char *)(minPins_));
-  lefFree((char *)(floors_));
-  lefFree((char *)(track_));
-  lefFree((char *)(gcell_));
-  lefFree((char *)(cannotOccupy_));
-  lefFree((char *)(canPlace_));
-  lefFree((char *)(pattern_));
+  lefFree((char*)(name_));
+  lefFree((char*)(caps_));
+  lefFree((char*)(minPins_));
+  lefFree((char*)(floors_));
+  lefFree((char*)(track_));
+  lefFree((char*)(gcell_));
+  lefFree((char*)(cannotOccupy_));
+  lefFree((char*)(canPlace_));
+  lefFree((char*)(pattern_));
 }
 
 lefiArray::~lefiArray() { Destroy(); }
 
-void lefiArray::addSitePattern(lefiSitePattern *s) {
+void lefiArray::addSitePattern(lefiSitePattern* s) {
   /*
     if (numPatterns_ == patternsAllocated_)
       bump((void***)(&(pattern_)), numPatterns_,
       &(patternsAllocated_));
   */
   if (numPatterns_ == patternsAllocated_) {
-    lefiSitePattern **tpattern;
+    lefiSitePattern** tpattern;
     int               i;
 
     if (patternsAllocated_ == 0) {
@@ -202,12 +202,12 @@ void lefiArray::addSitePattern(lefiSitePattern *s) {
     } else {
       patternsAllocated_ = patternsAllocated_ * 2;
     }
-    tpattern = (lefiSitePattern **)lefMalloc(sizeof(lefiSitePattern *) * patternsAllocated_);
+    tpattern = (lefiSitePattern**)lefMalloc(sizeof(lefiSitePattern*) * patternsAllocated_);
     for (i = 0; i < numPatterns_; i++) {
       tpattern[i] = pattern_[i];
     }
     if (pattern_) {
-      lefFree((char *)(pattern_));
+      lefFree((char*)(pattern_));
     }
     pattern_ = tpattern;
     /*
@@ -220,11 +220,11 @@ void lefiArray::addSitePattern(lefiSitePattern *s) {
   numPatterns_ += 1;
 }
 
-void lefiArray::setName(const char *name) {
+void lefiArray::setName(const char* name) {
   int len = strlen(name) + 1;
   if (len > nameSize_) {
     lefFree(name_);
-    name_     = (char *)lefMalloc(len);
+    name_     = (char*)lefMalloc(len);
     nameSize_ = len;
   }
   strcpy(name_, CASE(name));
@@ -239,8 +239,8 @@ void lefiArray::addDefaultCap(int minPins, double cap) {
   if (numDefault_ == defaultAllocated_) {
     int     i;
     int     lim;
-    double *nc;
-    int    *np;
+    double* nc;
+    int*    np;
 
     if (defaultAllocated_ == 0) {
       lim = defaultAllocated_ = 2;
@@ -248,15 +248,15 @@ void lefiArray::addDefaultCap(int minPins, double cap) {
       lim = defaultAllocated_ * 2;
     }
     defaultAllocated_ = lim;
-    nc                = (double *)lefMalloc(sizeof(double) * lim);
-    np                = (int *)lefMalloc(sizeof(int) * lim);
+    nc                = (double*)lefMalloc(sizeof(double) * lim);
+    np                = (int*)lefMalloc(sizeof(int) * lim);
     lim /= 2;
     for (i = 0; i < lim; i++) {
       nc[i] = caps_[i];
       np[i] = minPins_[i];
     }
-    lefFree((char *)(caps_));
-    lefFree((char *)(minPins_));
+    lefFree((char*)(caps_));
+    lefFree((char*)(minPins_));
     caps_    = nc;
     minPins_ = np;
   }
@@ -265,9 +265,9 @@ void lefiArray::addDefaultCap(int minPins, double cap) {
   numDefault_ += 1;
 }
 
-void lefiArray::addCanPlace(lefiSitePattern *s) {
+void lefiArray::addCanPlace(lefiSitePattern* s) {
   if (numCan_ == canAllocated_) {
-    lefiSitePattern **cplace;
+    lefiSitePattern** cplace;
     int               i;
 
     if (canAllocated_ == 0) {
@@ -275,12 +275,12 @@ void lefiArray::addCanPlace(lefiSitePattern *s) {
     } else {
       canAllocated_ = canAllocated_ * 2;
     }
-    cplace = (lefiSitePattern **)lefMalloc(sizeof(lefiSitePattern *) * canAllocated_);
+    cplace = (lefiSitePattern**)lefMalloc(sizeof(lefiSitePattern*) * canAllocated_);
     for (i = 0; i < numCan_; i++) {
       cplace[i] = canPlace_[i];
     }
     if (canPlace_) {
-      lefFree((char *)(canPlace_));
+      lefFree((char*)(canPlace_));
     }
     canPlace_ = cplace;
   }
@@ -291,9 +291,9 @@ void lefiArray::addCanPlace(lefiSitePattern *s) {
   numCan_ += 1;
 }
 
-void lefiArray::addCannotOccupy(lefiSitePattern *s) {
+void lefiArray::addCannotOccupy(lefiSitePattern* s) {
   if (numCannot_ == cannotAllocated_) {
-    lefiSitePattern **cnplace;
+    lefiSitePattern** cnplace;
     int               i;
 
     if (cannotAllocated_ == 0) {
@@ -301,12 +301,12 @@ void lefiArray::addCannotOccupy(lefiSitePattern *s) {
     } else {
       cannotAllocated_ = cannotAllocated_ * 2;
     }
-    cnplace = (lefiSitePattern **)lefMalloc(sizeof(lefiSitePattern *) * cannotAllocated_);
+    cnplace = (lefiSitePattern**)lefMalloc(sizeof(lefiSitePattern*) * cannotAllocated_);
     for (i = 0; i < numCannot_; i++) {
       cnplace[i] = cannotOccupy_[i];
     }
     if (cannotOccupy_) {
-      lefFree((char *)(cannotOccupy_));
+      lefFree((char*)(cannotOccupy_));
     }
     cannotOccupy_ = cnplace;
   }
@@ -319,9 +319,9 @@ void lefiArray::addCannotOccupy(lefiSitePattern *s) {
   numCannot_ += 1;
 }
 
-void lefiArray::addTrack(lefiTrackPattern *t) {
+void lefiArray::addTrack(lefiTrackPattern* t) {
   if (numTracks_ == tracksAllocated_) {
-    lefiTrackPattern **tracks;
+    lefiTrackPattern** tracks;
     int                i;
 
     if (tracksAllocated_ == 0) {
@@ -329,12 +329,12 @@ void lefiArray::addTrack(lefiTrackPattern *t) {
     } else {
       tracksAllocated_ = tracksAllocated_ * 2;
     }
-    tracks = (lefiTrackPattern **)lefMalloc(sizeof(lefiTrackPattern *) * tracksAllocated_);
+    tracks = (lefiTrackPattern**)lefMalloc(sizeof(lefiTrackPattern*) * tracksAllocated_);
     for (i = 0; i < numTracks_; i++) {
       tracks[i] = track_[i];
     }
     if (track_) {
-      lefFree((char *)(track_));
+      lefFree((char*)(track_));
     }
     track_ = tracks;
   }
@@ -346,9 +346,9 @@ void lefiArray::addTrack(lefiTrackPattern *t) {
   numTracks_ += 1;
 }
 
-void lefiArray::addGcell(lefiGcellPattern *g) {
+void lefiArray::addGcell(lefiGcellPattern* g) {
   if (numG_ == gAllocated_) {
-    lefiGcellPattern **cells;
+    lefiGcellPattern** cells;
     int                i;
 
     if (gAllocated_ == 0) {
@@ -356,12 +356,12 @@ void lefiArray::addGcell(lefiGcellPattern *g) {
     } else {
       gAllocated_ = gAllocated_ * 2;
     }
-    cells = (lefiGcellPattern **)lefMalloc(sizeof(lefiGcellPattern *) * gAllocated_);
+    cells = (lefiGcellPattern**)lefMalloc(sizeof(lefiGcellPattern*) * gAllocated_);
     for (i = 0; i < numG_; i++) {
       cells[i] = gcell_[i];
     }
     if (gcell_) {
-      lefFree((char *)(gcell_));
+      lefFree((char*)(gcell_));
     }
     gcell_ = cells;
   }
@@ -373,23 +373,23 @@ void lefiArray::addGcell(lefiGcellPattern *g) {
   numG_ += 1;
 }
 
-void lefiArray::addFloorPlan(const char *name) {
-  lefiArrayFloorPlan *f;
+void lefiArray::addFloorPlan(const char* name) {
+  lefiArrayFloorPlan* f;
   if (numFloorPlans_ == floorPlansAllocated_) {
     int                  i;
-    lefiArrayFloorPlan **tf;
+    lefiArrayFloorPlan** tf;
 
     if (floorPlansAllocated_ == 0) {
       floorPlansAllocated_ = 2;
     } else {
       floorPlansAllocated_ = floorPlansAllocated_ * 2;
     }
-    tf = (lefiArrayFloorPlan **)lefMalloc(sizeof(lefiArrayFloorPlan *) * floorPlansAllocated_);
+    tf = (lefiArrayFloorPlan**)lefMalloc(sizeof(lefiArrayFloorPlan*) * floorPlansAllocated_);
     for (i = 0; i < numFloorPlans_; i++) {
       tf[i] = floors_[i];
     }
     if (floors_) {
-      lefFree((char *)(floors_));
+      lefFree((char*)(floors_));
     }
     floors_ = tf;
   }
@@ -399,32 +399,32 @@ void lefiArray::addFloorPlan(const char *name) {
       &(floorPlansAllocated_));
     }
   */
-  f = (lefiArrayFloorPlan *)lefMalloc(sizeof(lefiArrayFloorPlan));
+  f = (lefiArrayFloorPlan*)lefMalloc(sizeof(lefiArrayFloorPlan));
   f->Init(name);
   floors_[numFloorPlans_] = f;
   numFloorPlans_ += 1;
 }
 
-void lefiArray::addSiteToFloorPlan(const char *typ, lefiSitePattern *s) {
-  lefiArrayFloorPlan *f = floors_[numFloorPlans_ - 1];
+void lefiArray::addSiteToFloorPlan(const char* typ, lefiSitePattern* s) {
+  lefiArrayFloorPlan* f = floors_[numFloorPlans_ - 1];
   f->addSitePattern(typ, s);
 }
 
-void lefiArray::bump(void ***arr, int used, int *allocated) {
+void lefiArray::bump(void*** arr, int used, int* allocated) {
   int    size = *allocated * 2;
   int    i;
-  void **newa;
+  void** newa;
   if (size == 0) {
     size = 2;
   }
-  newa = (void **)lefMalloc(sizeof(void *) * size);
+  newa = (void**)lefMalloc(sizeof(void*) * size);
 
   for (i = 0; i < used; i++) {
     newa[i] = (*arr)[i];
   }
 
   if (*arr) {
-    lefFree((char *)(*arr));
+    lefFree((char*)(*arr));
   }
   *allocated = size;
   *arr       = newa;
@@ -432,43 +432,43 @@ void lefiArray::bump(void ***arr, int used, int *allocated) {
 
 void lefiArray::clear() {
   int                 i;
-  lefiSitePattern    *p;
-  lefiGcellPattern   *g;
-  lefiTrackPattern   *t;
-  lefiArrayFloorPlan *f;
+  lefiSitePattern*    p;
+  lefiGcellPattern*   g;
+  lefiTrackPattern*   t;
+  lefiArrayFloorPlan* f;
 
   for (i = 0; i < numPatterns_; i++) {
     p = pattern_[i];
     p->Destroy();
-    lefFree((char *)p);
+    lefFree((char*)p);
   }
   numPatterns_ = 0;
 
   for (i = 0; i < numCan_; i++) {
     p = canPlace_[i];
     p->Destroy();
-    lefFree((char *)p);
+    lefFree((char*)p);
   }
   numCan_ = 0;
 
   for (i = 0; i < numCannot_; i++) {
     p = cannotOccupy_[i];
     p->Destroy();
-    lefFree((char *)p);
+    lefFree((char*)p);
   }
   numCannot_ = 0;
 
   for (i = 0; i < numTracks_; i++) {
     t = track_[i];
     t->Destroy();
-    lefFree((char *)t);
+    lefFree((char*)t);
   }
   numTracks_ = 0;
 
   for (i = 0; i < numG_; i++) {
     g = gcell_[i];
     g->Destroy();
-    lefFree((char *)g);
+    lefFree((char*)g);
   }
   numG_ = 0;
 
@@ -479,7 +479,7 @@ void lefiArray::clear() {
   for (i = 0; i < numFloorPlans_; i++) {
     f = floors_[i];
     f->Destroy();
-    lefFree((char *)f);
+    lefFree((char*)f);
   }
   numFloorPlans_ = 0;
 }
@@ -496,17 +496,17 @@ int lefiArray::numGcell() const { return numG_; }
 
 int lefiArray::hasDefaultCap() const { return hasDefault_; }
 
-const char *lefiArray::name() const { return name_; }
+const char* lefiArray::name() const { return name_; }
 
-lefiSitePattern *lefiArray::sitePattern(int index) const { return pattern_[index]; }
+lefiSitePattern* lefiArray::sitePattern(int index) const { return pattern_[index]; }
 
-lefiSitePattern *lefiArray::canPlace(int index) const { return canPlace_[index]; }
+lefiSitePattern* lefiArray::canPlace(int index) const { return canPlace_[index]; }
 
-lefiSitePattern *lefiArray::cannotOccupy(int index) const { return cannotOccupy_[index]; }
+lefiSitePattern* lefiArray::cannotOccupy(int index) const { return cannotOccupy_[index]; }
 
-lefiTrackPattern *lefiArray::track(int index) const { return track_[index]; }
+lefiTrackPattern* lefiArray::track(int index) const { return track_[index]; }
 
-lefiGcellPattern *lefiArray::gcell(int index) const { return gcell_[index]; }
+lefiGcellPattern* lefiArray::gcell(int index) const { return gcell_[index]; }
 
 int lefiArray::tableSize() const { return tableSize_; }
 
@@ -518,26 +518,26 @@ double lefiArray::defaultCap(int index) const { return caps_[index]; }
 
 int lefiArray::numFloorPlans() const { return numFloorPlans_; }
 
-const char *lefiArray::floorPlanName(int index) const {
-  const lefiArrayFloorPlan *f = floors_[index];
+const char* lefiArray::floorPlanName(int index) const {
+  const lefiArrayFloorPlan* f = floors_[index];
   return f->name();
 }
 
 int lefiArray::numSites(int index) const {
-  const lefiArrayFloorPlan *f = floors_[index];
+  const lefiArrayFloorPlan* f = floors_[index];
   return f->numPatterns();
 }
 
-const char *lefiArray::siteType(int index, int j) const {
-  const lefiArrayFloorPlan *f = floors_[index];
+const char* lefiArray::siteType(int index, int j) const {
+  const lefiArrayFloorPlan* f = floors_[index];
   return f->typ(j);
 }
 
-lefiSitePattern *lefiArray::site(int index, int j) const {
-  const lefiArrayFloorPlan *f = floors_[index];
+lefiSitePattern* lefiArray::site(int index, int j) const {
+  const lefiArrayFloorPlan* f = floors_[index];
   return f->pattern(j);
 }
 
-void lefiArray::print(FILE *f) const { fprintf(f, "ARRAY %s\n", name()); }
+void lefiArray::print(FILE* f) const { fprintf(f, "ARRAY %s\n", name()); }
 
 END_LEFDEF_PARSER_NAMESPACE

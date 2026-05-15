@@ -4,7 +4,7 @@
 // #include "sample_stage.hpp"
 #include "add1.hpp"
 
-int main(int argc, char **argv) {
+int main(int argc, char** argv) {
   Simlib_checkpoint<add1_sim> top("ckpt");
   // top.enable_trace(".");
   if (getenv("SIMLIB_DUMPDIR")) {

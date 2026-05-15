@@ -232,7 +232,7 @@ void Pass_opentimer::build_circuit(Lgraph* g) {  // Enhance this for build_circu
           pin_tracker.add_or(wname, e.driver.get_wire_name());
         }
       } else if (op == Ntype_op::And) {
-        Const    a_mask;
+        Const a_mask;
         a_mask = Dlop::create_integer(-1);
         Node_pin a_dpin;
         for (auto e : node.inp_edges()) {

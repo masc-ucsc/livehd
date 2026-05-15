@@ -85,7 +85,9 @@ public:
 
   void set_narrower_range(const Bitwidth_range& bw);
   void set_narrower_range(const Const& min_val, const Const& max_val) { set_narrower_range(Bitwidth_range(min_val, max_val)); }
-  void set_narrower_range(const spool_ptr<Dlop>& min_val, const spool_ptr<Dlop>& max_val) { set_narrower_range(*min_val, *max_val); }
+  void set_narrower_range(const spool_ptr<Dlop>& min_val, const spool_ptr<Dlop>& max_val) {
+    set_narrower_range(*min_val, *max_val);
+  }
   void set_narrower_range(const Const& min_val, const spool_ptr<Dlop>& max_val) { set_narrower_range(min_val, *max_val); }
   void set_narrower_range(const spool_ptr<Dlop>& min_val, const Const& max_val) { set_narrower_range(*min_val, max_val); }
 
@@ -105,7 +107,7 @@ public:
   void   set_sbits_range(Bits_t size);
   void   set_ubits_range(Bits_t size);
   Bits_t get_sbits() const;
-  Const get_range() const {
+  Const  get_range() const {
     if (overflow) {
       return *Dlop::create_integer(1)->lsh_op(get_sbits());
     }
@@ -113,7 +115,7 @@ public:
   }
   Const get_max() const { return to_lconst(overflow, max); };
   Const get_min() const { return to_lconst(overflow, min); };
-  int    get_raw_max() const { return max; };
+  int   get_raw_max() const { return max; };
 
   bool is_always_negative() const { return max < 0; }
   bool is_always_positive() const { return min >= 0; }

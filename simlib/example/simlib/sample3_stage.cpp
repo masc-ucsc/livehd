@@ -9,7 +9,7 @@
 
 #ifdef SIMLIB_VCD
 
-Sample3_stage::Sample3_stage(uint64_t _hidx, const std::string &parent_name, vcd::VCDWriter *writer)
+Sample3_stage::Sample3_stage(uint64_t _hidx, const std::string& parent_name, vcd::VCDWriter* writer)
     : hidx(_hidx), scope_name(parent_name + ".s3"), vcd_writer(writer) {}
 void Sample3_stage::vcd_reset_cycle() {
   //  vcd_writer->change(vcd_reset, "1");
@@ -82,7 +82,7 @@ void Sample3_stage::cycle(UInt<1> s1_to3_cValid, UInt<32> s1_to3_c, UInt<1> s2_t
 #endif
 
 #ifdef SIMLIB_TRACE
-void Sample3_stage::add_signature(Simlib_signature &s) {
+void Sample3_stage::add_signature(Simlib_signature& s) {
   s.append(1102);  // tmp
   s.append(333);   // tmp2
   s.append(222);   // ...

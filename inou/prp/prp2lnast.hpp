@@ -125,6 +125,7 @@ protected:
 
   struct Call_arg {
     bool        is_assign = false;
+    bool        is_ref    = false;
     std::string assign_key;
     Lnast_node  value;
   };

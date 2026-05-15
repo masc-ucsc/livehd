@@ -56,22 +56,22 @@ BEGIN_LEFDEF_PARSER_NAMESPACE
 
 extern YYSTYPE lefyylval;
 
-inline string strip_case(const char *str) {
+inline string strip_case(const char* str) {
   string result(str);
 
   if (lefData->namesCaseSensitive) {
     return result;
   };
 
-  for (char &c : result) {
+  for (char& c : result) {
     c = toupper(c);
   }
 
   return result;
 }
 
-inline int lefGetKeyword(const char *name, int *result) {
-  map<const char *, int, lefCompareCStrings>::iterator search = lefSettings->Keyword_set.find(name);
+inline int lefGetKeyword(const char* name, int* result) {
+  map<const char*, int, lefCompareCStrings>::iterator search = lefSettings->Keyword_set.find(name);
   if (search != lefSettings->Keyword_set.end()) {
     *result = search->second;
     return TRUE;
@@ -80,7 +80,7 @@ inline int lefGetKeyword(const char *name, int *result) {
   return FALSE;
 }
 
-inline int lefGetStringDefine(const char *name, const char **value) {
+inline int lefGetStringDefine(const char* name, const char** value) {
   map<string, string, lefCompareStrings>::iterator search = lefData->defines_set.find(strip_case(name));
 
   if (search != lefData->defines_set.end()) {
@@ -90,7 +90,7 @@ inline int lefGetStringDefine(const char *name, const char **value) {
   return FALSE;
 }
 
-inline int lefGetIntDefine(const char *name, int *value) {
+inline int lefGetIntDefine(const char* name, int* value) {
   map<string, int, lefCompareStrings>::iterator search = lefData->defineb_set.find(strip_case(name));
 
   if (search != lefData->defineb_set.end()) {
@@ -100,7 +100,7 @@ inline int lefGetIntDefine(const char *name, int *value) {
   return FALSE;
 }
 
-inline int lefGetDoubleDefine(const char *name, double *value) {
+inline int lefGetDoubleDefine(const char* name, double* value) {
   map<string, double, lefCompareStrings>::iterator search = lefData->define_set.find(strip_case(name));
 
   if (search != lefData->define_set.end()) {
@@ -110,7 +110,7 @@ inline int lefGetDoubleDefine(const char *name, double *value) {
   return FALSE;
 }
 
-inline int lefGetAlias(const char *name, const char **value) {
+inline int lefGetAlias(const char* name, const char** value) {
   map<string, string, lefCompareStrings>::iterator search = lefData->alias_set.find(strip_case(name));
 
   if (search != lefData->alias_set.end()) {
@@ -135,7 +135,7 @@ inline int lefGetAlias(const char *name, const char **value) {
 // 12/08/1999 -- Wanda da Rosa
 // file pointer to the lefRWarning.log
 
-extern char *lef_kywd(int num);
+extern char* lef_kywd(int num);
 
 // User defined if log file should be in append from the previous run
 
@@ -162,7 +162,7 @@ void lefReloadBuffer() {
         return;
       }
     }
-    lefData->encrypted = encIsEncrypted((unsigned char *)lefData->current_buffer);
+    lefData->encrypted = encIsEncrypted((unsigned char*)lefData->current_buffer);
   }
 
   if (lefData->encrypted) {
@@ -238,24 +238,24 @@ void UNlefGetc(char ch) {
  * This could cause problems if we need to use more strings than we
  * have in the buffer.
  */
-static char *ringCopy(const char *string) {
+static char* ringCopy(const char* string) {
   int len = strlen(string) + 1;
   if (++lefData->ringPlace >= RING_SIZE) {
     lefData->ringPlace = 0;
   }
   if (len > lefData->ringSizes[lefData->ringPlace]) {
-    lefData->ring[lefData->ringPlace]      = (char *)lefRealloc(lefData->ring[lefData->ringPlace], len);
+    lefData->ring[lefData->ringPlace]      = (char*)lefRealloc(lefData->ring[lefData->ringPlace], len);
     lefData->ringSizes[lefData->ringPlace] = len;
   }
   strcpy(lefData->ring[lefData->ringPlace], string);
   return lefData->ring[lefData->ringPlace];
 }
 
-char *qStrCopy(char *string) {
+char* qStrCopy(char* string) {
   int   len = strlen(string) + 3;
-  char *retStr;
+  char* retStr;
 
-  retStr = (char *)lefMalloc(len);
+  retStr = (char*)lefMalloc(len);
   sprintf(retStr, "\"%s\"", string);
   return retStr;
 }
@@ -264,7 +264,7 @@ char *qStrCopy(char *string) {
  * we don't allocate at the beginning of the program is that we don't know
  * at that point if we should be case sensitive or not. */
 
-void lefAddStringDefine(const char *token, const char *str) {
+void lefAddStringDefine(const char* token, const char* str) {
   string tmpStr((lefData->lefDefIf == TRUE) ? "" : "\"");
 
   tmpStr += str;
@@ -274,14 +274,14 @@ void lefAddStringDefine(const char *token, const char *str) {
   lefData->inDefine                       = 0;
 }
 
-void lefAddBooleanDefine(const char *token, int val) { lefData->defineb_set[strip_case(token)] = val; }
+void lefAddBooleanDefine(const char* token, int val) { lefData->defineb_set[strip_case(token)] = val; }
 
-void lefAddNumDefine(const char *token, double val) { lefData->define_set[strip_case(token)] = val; }
+void lefAddNumDefine(const char* token, double val) { lefData->define_set[strip_case(token)] = val; }
 
-static int GetTokenFromStack(char *s) {
-  const char *ch;           // utility variable
-  char       *prS  = NULL;  // pointing to the previous char or s
-  char       *save = s;     // for debug printing
+static int GetTokenFromStack(char* s) {
+  const char* ch;           // utility variable
+  char*       prS  = NULL;  // pointing to the previous char or s
+  char*       save = s;     // for debug printing
 
   while (lefData->input_level >= 0) {
     for (ch = lefData->current_stack[lefData->input_level]; *ch != 0; ch++) {  // skip white space
@@ -329,7 +329,7 @@ static int GetTokenFromStack(char *s) {
 
 // Increment current position of buffer pointer.
 // Double buffer size if curPos is out of boundary.
-static inline void IncCurPos(char **curPos, char **buffer, int *bufferSize) {
+static inline void IncCurPos(char** curPos, char** buffer, int* bufferSize) {
   (*curPos)++;
   if (*curPos - *buffer < *bufferSize) {
     return;
@@ -338,7 +338,7 @@ static inline void IncCurPos(char **curPos, char **buffer, int *bufferSize) {
   long offset = *curPos - *buffer;
 
   *bufferSize *= 2;
-  *buffer = (char *)realloc(*buffer, *bufferSize);
+  *buffer = (char*)realloc(*buffer, *bufferSize);
   *curPos = *buffer + offset;
 }
 
@@ -349,8 +349,8 @@ inline static void print_nlines(int lineNum) {
   }
 }
 
-static int GetToken(char **buffer, int *bufferSize) {
-  char *s = *buffer;
+static int GetToken(char** buffer, int* bufferSize) {
+  char* s = *buffer;
   int   ch;
 
   lefData->lef_ntokens++;
@@ -525,37 +525,37 @@ static int GetToken(char **buffer, int *bufferSize) {
 }
 
 // creates an upper case copy of an array
-void lefuc_array(char *source, char *dest) {
+void lefuc_array(char* source, char* dest) {
   for (; *source != 0;) {
     *dest++ = toupper(*source++);
   }
   *dest = 0;
 }
 
-void lefError(int msgNum, const char *s);
+void lefError(int msgNum, const char* s);
 
 void lefStoreAlias() {
   string so_far;  // contains alias contents as we build it
 
   int   tokenSize = 10240;
-  char *aname     = (char *)malloc(tokenSize);
+  char* aname     = (char*)malloc(tokenSize);
 
   GetToken(&aname, &tokenSize);
 
-  char *line = (char *)malloc(tokenSize);
+  char* line = (char*)malloc(tokenSize);
 
   GetToken(&line, &tokenSize);  // should be "="
 
-  char *uc_line = (char *)malloc(tokenSize);
+  char* uc_line = (char*)malloc(tokenSize);
 
   if (strcmp(line, "=") != 0) {
     lefError(1000, "Expecting '='");
   }
 
   /* now keep getting lines till we get one that contains &ENDALIAS */
-  for (char *p = NULL; p == NULL;) {
+  for (char* p = NULL; p == NULL;) {
     int   i;
-    char *s = line;
+    char* s = line;
     for (i = 0; i < tokenSize - 1; i++) {
       int ch = lefGetc();
       if (ch == EOF) {
@@ -582,7 +582,7 @@ void lefStoreAlias() {
     so_far += line;
   }
 
-  char *dup = (char *)malloc(strlen(so_far.c_str()) + 1);
+  char* dup = (char*)malloc(strlen(so_far.c_str()) + 1);
 
   strcpy(dup, so_far.c_str());
   lefData->alias_set[strip_case(aname)] = dup;
@@ -592,7 +592,7 @@ void lefStoreAlias() {
   free(uc_line);
 }
 
-int lefamper_lookup(char *token);  // forward reference to this routine
+int lefamper_lookup(char* token);  // forward reference to this routine
 
 /* The main routine called by the YACC parser to get the lefData->next token.
  *    Returns 0 if no more tokens are available.
@@ -646,7 +646,7 @@ int yylex() {
 int lefsublex() {
   char   fc;
   double numVal;
-  char  *outStr;
+  char*  outStr;
 
   strcpy(lefData->pv_token, lefData->current_token);  // save the previous token
 
@@ -663,8 +663,8 @@ int lefsublex() {
     }
 
     // Token size can change. Do preventive re-alloc.
-    lefData->uc_token = (char *)realloc(lefData->uc_token, lefData->tokenSize);
-    lefData->pv_token = (char *)realloc(lefData->pv_token, lefData->tokenSize);
+    lefData->uc_token = (char*)realloc(lefData->uc_token, lefData->tokenSize);
+    lefData->pv_token = (char*)realloc(lefData->pv_token, lefData->tokenSize);
 
     fc = lefData->current_token[0];
 
@@ -684,7 +684,7 @@ int lefsublex() {
     } else if (fc == '&') {
       // begins with &.  If &alias, read contents and
       // store them.  Otherwise it's a define, or a macro use.
-      const char *cptr;
+      const char* cptr;
       lefuc_array(lefData->current_token, lefData->uc_token);
       if (strcmp(lefData->uc_token, "&ALIAS") == 0) {
         lefStoreAlias();  // read and store the alias
@@ -704,7 +704,7 @@ int lefsublex() {
   }
 
   if (lefData->lefInvalidChar) {
-    outStr = (char *)lefMalloc(500 + strlen(lefData->current_token));
+    outStr = (char*)lefMalloc(500 + strlen(lefData->current_token));
     sprintf(outStr,
             "Invalid characters found in \'%s\'.\nThese characters might have created by character types other than English.",
             lefData->current_token);
@@ -738,7 +738,7 @@ int lefsublex() {
   lefData->lefDumbMode--;
   lefData->lefNoNum--;
   if (isdigit(fc) || fc == '.' || (fc == '-' && lefData->current_token[1] != '\0')) {
-    char *ch;
+    char* ch;
     numVal = yylval.dval = strtod(lefData->current_token, &ch);
     if (lefData->lefNoNum < 0 && *ch == '\0') {  // did we use the whole string?
       return NUMBER;
@@ -940,10 +940,10 @@ int lefsublex() {
 
 /* We have found a token beginning with '&'.  If it has been previously
    defined, substitute the definition.  Otherwise return it. */
-int lefamper_lookup(char *tkn) {
+int lefamper_lookup(char* tkn) {
   double      dptr;
   int         result;
-  const char *cptr;
+  const char* cptr;
 
   // printf("Amper_lookup: %s\n", tkn);
 
@@ -969,10 +969,10 @@ int lefamper_lookup(char *tkn) {
   return T_STRING;
 }
 
-void lefError(int msgNum, const char *s) {
-  char       *str;
-  const char *curToken = isgraph(lefData->current_token[0]) ? lefData->current_token : "<unprintable>";
-  const char *pvToken  = isgraph(lefData->pv_token[0]) ? lefData->pv_token : "<unprintable>";
+void lefError(int msgNum, const char* s) {
+  char*       str;
+  const char* curToken = isgraph(lefData->current_token[0]) ? lefData->current_token : "<unprintable>";
+  const char* pvToken  = isgraph(lefData->pv_token[0]) ? lefData->pv_token : "<unprintable>";
   int         len      = strlen(curToken) - 1;
   int         pvLen    = strlen(pvToken) - 1;
 
@@ -992,7 +992,7 @@ void lefError(int msgNum, const char *s) {
   // PCR 690679, probably missing space before a ';'
   if (strcmp(s, "parse error") == 0) {
     if ((len > 1) && (lefData->current_token[len] == ';')) {
-      str = (char *)lefMalloc(len + strlen(s) + strlen(lefData->lefrFileName) + 350);
+      str = (char*)lefMalloc(len + strlen(s) + strlen(lefData->lefrFileName) + 350);
       sprintf(str,
               "ERROR (LEFPARS-%d): %s, see file %s at line %d\nLast token was <%s>, space is missing before <;>\n",
               msgNum,
@@ -1001,7 +1001,7 @@ void lefError(int msgNum, const char *s) {
               lefData->lef_nlines,
               curToken);
     } else if ((pvLen > 1) && (lefData->pv_token[pvLen] == ';')) {
-      str = (char *)lefMalloc(pvLen + strlen(s) + strlen(lefData->lefrFileName) + 350);
+      str = (char*)lefMalloc(pvLen + strlen(s) + strlen(lefData->lefrFileName) + 350);
       sprintf(str,
               "ERROR (LEFPARS-%d): %s, see file %s at line %d\nLast token was <%s>, space is missing before <;>\n",
               msgNum,
@@ -1011,7 +1011,7 @@ void lefError(int msgNum, const char *s) {
               pvToken);
     } else if ((lefData->current_token[0] == '"') && (lefData->spaceMissing)) {
       // most likely space is missing after the end "
-      str = (char *)lefMalloc(len + strlen(s) + strlen(lefData->lefrFileName) + 350);
+      str = (char*)lefMalloc(len + strlen(s) + strlen(lefData->lefrFileName) + 350);
       sprintf(str,
               "ERROR (LEFPARS-%d): %s, see file %s at line %d\nLast token was <%s\">, space is missing between the closing \" of "
               "the string and ;.\n",
@@ -1022,7 +1022,7 @@ void lefError(int msgNum, const char *s) {
               curToken);
       lefData->spaceMissing = 0;
     } else {
-      str = (char *)lefMalloc(len + strlen(lefData->lefrFileName) + 350);
+      str = (char*)lefMalloc(len + strlen(lefData->lefrFileName) + 350);
       sprintf(str,
               "ERROR (LEFPARS-%d): Lef parser has encountered an error in file %s at line %d, on token %s.\nProblem can be syntax "
               "error on the lef file or an invalid parameter name.\nDouble check the syntax on the lef file with the LEFDEF "
@@ -1034,7 +1034,7 @@ void lefError(int msgNum, const char *s) {
     }
   } else if (strcmp(s, "syntax error") == 0) {  // linux machines
     if ((len > 1) && (lefData->current_token[len] == ';')) {
-      str = (char *)lefMalloc(len + strlen(s) + strlen(lefData->lefrFileName) + 350);
+      str = (char*)lefMalloc(len + strlen(s) + strlen(lefData->lefrFileName) + 350);
       sprintf(str,
               "ERROR (LEFPARS-%d): %s, see file %s at line %d\nLast token was <%s>, space is missing before <;>\n",
               msgNum,
@@ -1043,7 +1043,7 @@ void lefError(int msgNum, const char *s) {
               lefData->lef_nlines,
               curToken);
     } else if ((pvLen > 1) && (lefData->pv_token[pvLen] == ';')) {
-      str = (char *)lefMalloc(pvLen + strlen(s) + strlen(lefData->lefrFileName) + 350);
+      str = (char*)lefMalloc(pvLen + strlen(s) + strlen(lefData->lefrFileName) + 350);
       sprintf(str,
               "ERROR (LEFPARS-%d): %s, see file %s at line %d\nLast token was <%s>, space is missing before <;>\n",
               msgNum,
@@ -1053,7 +1053,7 @@ void lefError(int msgNum, const char *s) {
               pvToken);
     } else if ((lefData->current_token[0] == '"') && (lefData->spaceMissing)) {
       // most likely space is missing after the end "
-      str = (char *)lefMalloc(len + strlen(s) + strlen(lefData->lefrFileName) + 350);
+      str = (char*)lefMalloc(len + strlen(s) + strlen(lefData->lefrFileName) + 350);
       sprintf(str,
               "ERROR (LEFPARS-%d): %s, see file %s at line %d\nLast token was <%s\">, space is missing between the closing \" of "
               "the string and ;.\n",
@@ -1064,7 +1064,7 @@ void lefError(int msgNum, const char *s) {
               curToken);
       lefData->spaceMissing = 0;
     } else {
-      str = (char *)lefMalloc(len + strlen(lefData->lefrFileName) + 350);
+      str = (char*)lefMalloc(len + strlen(lefData->lefrFileName) + 350);
       sprintf(str,
               "ERROR (LEFPARS-%d): Lef parser has encountered an error in file %s at line %d, on token %s.\nProblem can be syntax "
               "error on the lef file or an invalid parameter name.\nDouble check the syntax on the lef file with the LEFDEF "
@@ -1075,7 +1075,7 @@ void lefError(int msgNum, const char *s) {
               curToken);
     }
   } else {
-    str = (char *)lefMalloc(len + strlen(s) + strlen(lefData->lefrFileName) + 350);
+    str = (char*)lefMalloc(len + strlen(s) + strlen(lefData->lefrFileName) + 350);
     sprintf(str,
             "ERROR (LEFPARS-%d): %s Error in file %s at line %d, on token %s.\n",
             msgNum,
@@ -1096,11 +1096,11 @@ void lefError(int msgNum, const char *s) {
 }
 
 // yyerror is called by bison.simple, 5 locations will call this function
-void yyerror(const char *s) { lefError(lefData->msgCnt++, s); }
+void yyerror(const char* s) { lefError(lefData->msgCnt++, s); }
 
 // All info starts with 3000
 // All info within lefInfo starts with 3500
-void lefInfo(int msgNum, const char *s) {
+void lefInfo(int msgNum, const char* s) {
   int disableStatus = lefSettings->suppresMsg(msgNum);
 
   if (disableStatus == 1) {
@@ -1131,7 +1131,7 @@ void lefInfo(int msgNum, const char *s) {
   lefData->lefInfoMsgPrinted++;
 
   if (lefSettings->WarningLogFunction) {
-    char *str = (char *)lefMalloc(strlen(lefData->current_token) + strlen(s) + strlen(lefData->lefrFileName) + 350);
+    char* str = (char*)lefMalloc(strlen(lefData->current_token) + strlen(s) + strlen(lefData->lefrFileName) + 350);
     sprintf(str, "INFO (LEFPARS-%d): %s See file %s at line %d.\n", msgNum, s, lefData->lefrFileName, lefData->lef_nlines);
     (*lefSettings->WarningLogFunction)(str);
     free(str);
@@ -1176,7 +1176,7 @@ void lefInfo(int msgNum, const char *s) {
 
 // All warning starts with 2000
 // All warning within lefWarning starts with 2500
-void lefWarning(int msgNum, const char *s) {
+void lefWarning(int msgNum, const char* s) {
   if (lefSettings->dAllMsgs) {  // all messages are suppressed
     return;
   }
@@ -1213,7 +1213,7 @@ void lefWarning(int msgNum, const char *s) {
   lefData->lefWarnMsgPrinted++;
 
   if (lefSettings->WarningLogFunction) {
-    char *str = (char *)lefMalloc(strlen(lefData->current_token) + strlen(s) + strlen(lefData->lefrFileName) + 350);
+    char* str = (char*)lefMalloc(strlen(lefData->current_token) + strlen(s) + strlen(lefData->lefrFileName) + 350);
     sprintf(str, "WARNING (LEFPARS-%d): %s See file %s at line %d.\n", msgNum, s, lefData->lefrFileName, lefData->lef_nlines);
     (*lefSettings->WarningLogFunction)(str);
     free(str);
@@ -1257,13 +1257,13 @@ void lefWarning(int msgNum, const char *s) {
   lefData->lef_warnings++;
 }
 
-void *lefMalloc(size_t lef_size) {
-  void *mallocVar;
+void* lefMalloc(size_t lef_size) {
+  void* mallocVar;
 
   if (lefSettings->MallocFunction) {
     return (*lefSettings->MallocFunction)(lef_size);
   } else {
-    mallocVar = (void *)malloc(lef_size);
+    mallocVar = (void*)malloc(lef_size);
     if (!mallocVar) {
       fprintf(stderr, "ERROR (LEFPARS-1009): Not enough memory, stop parsing!\n");
       exit(1);
@@ -1272,15 +1272,15 @@ void *lefMalloc(size_t lef_size) {
   }
 }
 
-void *lefRealloc(void *name, size_t lef_size) {
+void* lefRealloc(void* name, size_t lef_size) {
   if (lefSettings->ReallocFunction) {
     return (*lefSettings->ReallocFunction)(name, lef_size);
   } else {
-    return (void *)realloc(name, lef_size);
+    return (void*)realloc(name, lef_size);
   }
 }
 
-void lefFree(void *name) {
+void lefFree(void* name) {
   if (lefSettings->FreeFunction) {
     (*lefSettings->FreeFunction)(name);
   } else {
@@ -1288,10 +1288,10 @@ void lefFree(void *name) {
   }
 }
 
-char *lefaddr(const char *in) { return (char *)in; }
+char* lefaddr(const char* in) { return (char*)in; }
 
-void lefSetNonDefault(const char *nd_name) {
-  lefData->ndName = (char *)malloc(strlen(nd_name) + 1);
+void lefSetNonDefault(const char* nd_name) {
+  lefData->ndName = (char*)malloc(strlen(nd_name) + 1);
   strcpy(lefData->ndName, nd_name);
 }
 
@@ -1300,8 +1300,8 @@ void lefUnsetNonDefault() {
   free(lefData->ndName);
 }
 
-char *lef_kywd(int num) {
-  char *a;
+char* lef_kywd(int num) {
+  char* a;
   switch (num) {
     case K_HISTORY: a = lefaddr("HISTORY"); break;
     case K_ABUT: a = lefaddr("ABUT"); break;

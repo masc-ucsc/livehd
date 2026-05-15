@@ -478,7 +478,7 @@ void Graph_library::reload_int() {
 
       // HHDS Phase G1: ensure a paired hhds::GraphIO exists before from_json
       // so its add_input/add_output mirror in Sub_node fires.
-      const auto loaded_name = std::string(lg_entry["name"].GetString());
+      const auto                     loaded_name = std::string(lg_entry["name"].GetString());
       std::shared_ptr<hhds::GraphIO> io;
       if (auto existing = hhds_lib_.find_io(loaded_name); existing) {
         io = existing;

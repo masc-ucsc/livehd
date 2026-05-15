@@ -49,17 +49,17 @@
 #include <unistd.h>
 extern char VersionIdent[];
 #else
-char *VersionIdent = "N/A";
+char* VersionIdent = "N/A";
 #endif /* not WIN32 */
 #include "diffLefRW.hpp"
 #include "lefrReader.hpp"
 
-char *exeName;  // use to save the executable name
+char* exeName;  // use to save the executable name
 
 // This program requires 2 inputs, fileName1 and fileName2
 void diffUsage() { printf("Usage: lefdefdiff -lef|-def fileName1 fileName2 [-o outputFileName]\n"); }
 
-int main(int argc, char **argv) {
+int main(int argc, char** argv) {
   char *fileName1, *fileName2;  // For the filenames to compare
   char *lefOut1, *lefOut2;      // For the tmp output files
 

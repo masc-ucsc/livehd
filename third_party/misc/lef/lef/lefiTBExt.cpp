@@ -112,11 +112,11 @@ int lefiValidUser() {
 // Return user name from tagName
 // *****************************************************************************
 
-char *lefiUser() {
-  char *tmpUser = tagName;
+char* lefiUser() {
+  char* tmpUser = tagName;
   tmpUser       = tmpUser + 8;
   if (strncmp(tmpUser, "     ", 5) == 0) {
-    return ((char *)"Cadence Design Systems");
+    return ((char*)"Cadence Design Systems");
   }
   return (tmpUser);
 }
@@ -124,18 +124,18 @@ char *lefiUser() {
 // Convert the orient from integer to string
 //
 // *****************************************************************************
-char *lefiOrientStr(int orient) {
+char* lefiOrientStr(int orient) {
   switch (orient) {
-    case 0: return ((char *)"N");
-    case 1: return ((char *)"W");
-    case 2: return ((char *)"S");
-    case 3: return ((char *)"E");
-    case 4: return ((char *)"FN");
-    case 5: return ((char *)"FW");
-    case 6: return ((char *)"FS");
-    case 7: return ((char *)"FE");
+    case 0: return ((char*)"N");
+    case 1: return ((char*)"W");
+    case 2: return ((char*)"S");
+    case 3: return ((char*)"E");
+    case 4: return ((char*)"FN");
+    case 5: return ((char*)"FW");
+    case 6: return ((char*)"FS");
+    case 7: return ((char*)"FE");
   };
-  return ((char *)"");
+  return ((char*)"");
 }
 
 END_LEFDEF_PARSER_NAMESPACE

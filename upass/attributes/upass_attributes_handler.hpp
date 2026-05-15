@@ -55,8 +55,7 @@ struct Attribute_handler {
   // Entering a conditional arm whose condition reads the listed refs (or
   // attribute-reads, encoded in cond_attr_reads). Sticky control taint flows
   // from these into any assignment performed inside the arm.
-  virtual void on_if_arm_enter(uPass_attributes& /*owner*/,
-                               const std::vector<std::string_view>& /*cond_refs*/,
+  virtual void on_if_arm_enter(uPass_attributes& /*owner*/, const std::vector<std::string_view>& /*cond_refs*/,
                                const std::vector<std::pair<std::string_view, std::string_view>>& /*cond_attr_reads*/) {}
 
   // Leaving the arm. Used to pop scope-local taint and OR-merge into the

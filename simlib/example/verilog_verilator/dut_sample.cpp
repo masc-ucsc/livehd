@@ -5,7 +5,7 @@
 #include "verilated_vcd_c.h"
 
 vluint64_t     global_time = 0;
-VerilatedVcdC *tfp         = 0;
+VerilatedVcdC* tfp         = 0;
 
 void do_terminate() {
 #ifdef TRACE
@@ -18,7 +18,7 @@ void do_terminate() {
   exit(0);
 }
 
-void advance_clock(Vsample *uut) {
+void advance_clock(Vsample* uut) {
   uut->clk ^= 1;
   uut->eval();
 #ifdef TRACE

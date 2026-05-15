@@ -8,7 +8,7 @@
 #include "Sample_Stage1.h"
 #include "Sample_Stage2.h"
 
-Sample_Stage3::Sample_Stage3(Output_Sample_Stage3 *o, Output_Sample_Stage1 *_s1out, Output_Sample_Stage2 *_s2out) {
+Sample_Stage3::Sample_Stage3(Output_Sample_Stage3* o, Output_Sample_Stage1* _s1out, Output_Sample_Stage2* _s2out) {
   output = o;
   s1out  = _s1out;
   s2out  = _s2out;

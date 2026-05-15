@@ -4,8 +4,8 @@
 #include "livesim_types.hpp"
 
 #ifdef SIMLIB_VCD
-Sample1_stage::Sample1_stage(uint64_t _hidx, const std::string &parent_name,
-                             vcd::VCDWriter *writer)  // const std::string &parent_name)
+Sample1_stage::Sample1_stage(uint64_t _hidx, const std::string& parent_name,
+                             vcd::VCDWriter* writer)  // const std::string &parent_name)
     : hidx(_hidx), scope_name(parent_name + ".s1"), vcd_writer(writer) {}
 void Sample1_stage::vcd_reset_cycle() {
   //  vcd_writer->change(vcd_reset, "1");
@@ -68,7 +68,7 @@ void Sample1_stage::cycle(UInt<32> s3_to1_b, UInt<1> s2_to1_aValid, UInt<32> s2_
 }
 #endif
 #ifdef SIMLIB_TRACE
-void Sample1_stage::add_signature(Simlib_signature &s) {
+void Sample1_stage::add_signature(Simlib_signature& s) {
   s.append(hidx);
   s.append(33);  // 33 is the semantic ID (hash inputs + op + bits) for to2_aValid
   s.append(103);

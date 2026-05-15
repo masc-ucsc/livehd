@@ -8,8 +8,8 @@
 // Dlop no longer defines operator==; same_repr is the structural-identity
 // check (including matching unknowns), which is what these tests actually
 // want. Wrap it so EXPECT_TRUE prints something readable on mismatch.
-#define EXPECT_DLOP_EQ(lhs, rhs) EXPECT_TRUE((lhs).same_repr(*(rhs))) \
-    << "  lhs: " << (lhs).to_pyrope() << "\n  rhs: " << (rhs)->to_pyrope()
+#define EXPECT_DLOP_EQ(lhs, rhs) \
+  EXPECT_TRUE((lhs).same_repr(*(rhs))) << "  lhs: " << (lhs).to_pyrope() << "\n  rhs: " << (rhs)->to_pyrope()
 
 class Symbol_table_test : public ::testing::Test {
 protected:

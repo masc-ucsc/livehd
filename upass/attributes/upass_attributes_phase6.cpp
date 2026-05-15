@@ -56,10 +56,10 @@ class Mode_handler : public Attribute_handler {};
 // Registration entry point — invoked from uPass_attributes' constructor.
 void uPass_attributes_register_phase6(uPass_attributes& self) {
   using namespace upass::attributes;
-  auto pin    = std::make_shared<Pin_handler>();
-  auto signal = std::make_shared<Signal_class_handler>();
-  auto mode   = std::make_shared<Mode_handler>();
-  auto& reg   = self.registry();
+  auto  pin    = std::make_shared<Pin_handler>();
+  auto  signal = std::make_shared<Signal_class_handler>();
+  auto  mode   = std::make_shared<Mode_handler>();
+  auto& reg    = self.registry();
 
   // Pin-name attributes (memory / register port wiring).
   for (const char* name : {"clock_pin", "reset_pin", "din", "addr", "enable", "wensize", "rdport", "fwd", "lat", "num"}) {

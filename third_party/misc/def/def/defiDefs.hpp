@@ -69,7 +69,7 @@ struct defrect {
 typedef struct deftoken defTOKEN;
 
 struct deftoken {
-  defTOKEN *next;
+  defTOKEN* next;
   int       what;
   int       data;
   defPOINT  pt;
@@ -158,14 +158,14 @@ typedef enum {
  * A handle which a user can set to point to their own data
  * on a per-callback basis.  (See the comment in defwWriter.h)
  */
-#define defiUserData       void *
-#define defiUserDataHandle void **
+#define defiUserData       void*
+#define defiUserDataHandle void**
 
 /* On SunOs 4.1.3 with acc, this is in libansi.a, but isn't properly
  * declared anywhere in the header files supplied with the compiler.
  */
 #ifdef __SunOS_4_1_3
-extern int strcasecmp(const char *, const char *);
+extern int strcasecmp(const char*, const char*);
 #endif
 
 #ifdef WIN32

@@ -320,13 +320,13 @@ public:
   [[nodiscard]] bool is_graph_output() const;
 
   // Some redundant code with node (implemented because frequent)
-  [[nodiscard]] bool   is_type_single_driver() const;
-  [[nodiscard]] bool   is_type_const() const;
-  [[nodiscard]] bool   is_type_tup() const;
-  [[nodiscard]] bool   is_type_sub() const;
-  [[nodiscard]] bool   is_type_flop() const;
-  [[nodiscard]] bool   is_type_register() const;
-  [[nodiscard]] bool   is_type(const Ntype_op op) const;
+  [[nodiscard]] bool  is_type_single_driver() const;
+  [[nodiscard]] bool  is_type_const() const;
+  [[nodiscard]] bool  is_type_tup() const;
+  [[nodiscard]] bool  is_type_sub() const;
+  [[nodiscard]] bool  is_type_flop() const;
+  [[nodiscard]] bool  is_type_register() const;
+  [[nodiscard]] bool  is_type(const Ntype_op op) const;
   [[nodiscard]] Const get_type_const() const;
 
   [[nodiscard]] Node_pin change_to_sink_from_graph_out_driver() const {

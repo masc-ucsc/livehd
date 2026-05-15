@@ -55,9 +55,9 @@ lefiProp::lefiProp()
 
 void lefiProp::Init() {
   stringLength_ = 16;
-  stringData_   = (char *)lefMalloc(16);
+  stringData_   = (char*)lefMalloc(16);
   nameSize_     = 16;
-  propName_     = (char *)lefMalloc(16);
+  propName_     = (char*)lefMalloc(16);
   clear();
 }
 
@@ -68,9 +68,9 @@ void lefiProp::Destroy() {
 
 lefiProp::~lefiProp() { Destroy(); }
 
-void lefiProp::setPropType(const char *typ, const char *string) {
+void lefiProp::setPropType(const char* typ, const char* string) {
   int len;
-  propType_ = (char *)typ;
+  propType_ = (char*)typ;
   if ((len = strlen(string) + 1) > nameSize_) {
     bumpName(len);
   }
@@ -94,7 +94,7 @@ void lefiProp::setPropReal() { dataType_ = 'R'; }
 
 void lefiProp::setPropString() { dataType_ = 'S'; }
 
-void lefiProp::setPropQString(const char *string) {
+void lefiProp::setPropQString(const char* string) {
   int len;
   dataType_ = 'Q';
   if ((len = strlen(string) + 1) > stringLength_) {
@@ -103,7 +103,7 @@ void lefiProp::setPropQString(const char *string) {
   strcpy(stringData_, CASE(string));
 }
 
-void lefiProp::setPropNameMapString(const char *string) {
+void lefiProp::setPropNameMapString(const char* string) {
   int len;
   dataType_         = 'N';
   hasNameMapString_ = 1;
@@ -113,9 +113,9 @@ void lefiProp::setPropNameMapString(const char *string) {
   strcpy(stringData_, CASE(string));
 }
 
-const char *lefiProp::string() const { return stringData_; }
+const char* lefiProp::string() const { return stringData_; }
 
-const char *lefiProp::propType() const { return propType_; }
+const char* lefiProp::propType() const { return propType_; }
 
 int lefiProp::hasNumber() const { return (int)(hasNumber_); }
 
@@ -129,14 +129,14 @@ double lefiProp::right() const { return right_; }
 
 void lefiProp::bumpSize(int size) {
   lefFree(stringData_);
-  stringData_    = (char *)lefMalloc(size);
+  stringData_    = (char*)lefMalloc(size);
   stringLength_  = size;
   *(stringData_) = '\0';
 }
 
 void lefiProp::bumpName(int size) {
   lefFree(propName_);
-  propName_    = (char *)lefMalloc(size);
+  propName_    = (char*)lefMalloc(size);
   nameSize_    = size;
   *(propName_) = '\0';
 }
@@ -160,11 +160,11 @@ int lefiProp::hasString() const { return *(stringData_) ? 1 : 0; }
 
 int lefiProp::hasNameMapString() const { return (hasNameMapString_) ? 1 : 0; }
 
-const char *lefiProp::propName() const { return (propName_); }
+const char* lefiProp::propName() const { return (propName_); }
 
 char lefiProp::dataType() const { return (dataType_); }
 
-void lefiProp::print(FILE *f) const {
+void lefiProp::print(FILE* f) const {
   fprintf(f, "Prop type '%s'\n", propType());
   if (hasString()) {
     fprintf(f, "  string '%s'\n", string());

@@ -36,8 +36,8 @@ static bool primesInitialized = false;
 // However, then I can't send it any arguments.  Unclear what is best here.
 // Indicate we are now initialized.
 
-bool *Primes::candidateArray = new bool[candidateArrayLen];
-int  *Primes::primeArray     = new int[primeArrayLen];
+bool* Primes::candidateArray = new bool[candidateArrayLen];
+int*  Primes::primeArray     = new int[primeArrayLen];
 
 int Primes::currMaxPrimeInx = 0;
 int Primes::currPrimeInx    = 0;
@@ -164,7 +164,7 @@ int primeFactorization::countFactors() const {
   return factorCount;
 }
 
-void primeFactorization::expandFactors(int *factors) const {
+void primeFactorization::expandFactors(int* factors) const {
   // Fill the array with the factors.
   int factorInx = 0;
   for (int i = 0; i < currMaxFactor; i++) {
@@ -175,7 +175,7 @@ void primeFactorization::expandFactors(int *factors) const {
   }
 }
 
-void primeFactorization::printFactors(ostream &o) const {
+void primeFactorization::printFactors(ostream& o) const {
   o << number << "=" << factorization[0].Prime();
   for (int i = 0; i < currMaxFactor; i++) {
     primeFactor pf = factorization[i];
@@ -194,7 +194,7 @@ void primeFactorization::printFactors(ostream &o) const {
 
 // Treat the boolean array as if it were a binary number.
 // To increment it, we must perform the carry operation.
-void incrementBoolArray(bool *arr, int len) {
+void incrementBoolArray(bool* arr, int len) {
   for (int i = 0; i < len; i++) {
     arr[i] = !arr[i];
     if (arr[i]) {
@@ -217,12 +217,12 @@ int balanceFactors(int composite, double targetRatio) {
 
   // Get an array of the factors of the number.
   int  len       = pf.countFactors();
-  int *factArray = new int[len];
+  int* factArray = new int[len];
   pf.expandFactors(factArray);
 
   // Allocate an array of booleans to dictate which factor combination we are about to try.
   // Initializing to false is the equivalent of "zero".
-  bool *boolArr = new bool[len];
+  bool* boolArr = new bool[len];
   for (int i = 0; i < len; i++) {
     boolArr[i] = false;
   }

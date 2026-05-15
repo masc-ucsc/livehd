@@ -299,7 +299,7 @@ public:
   const char* propName(int index) const;
   const char* propValue(int index) const;
   double      propNumber(int index) const;
-  char  propType(int index) const;
+  char        propType(int index) const;
   int         propIsNumber(int index) const;
   int         propIsString(int index) const;
   int         numConnections() const;

@@ -136,7 +136,7 @@ private:
   // runner mutates the staging tree, and the arm body walk happens after
   // process_if returns.
   struct Pending_arm {
-    std::vector<std::string>                       cond_refs;
+    std::vector<std::string>                         cond_refs;
     std::vector<std::pair<std::string, std::string>> cond_attr_reads;
   };
   std::map<uint64_t, Pending_arm> pending_arms;
@@ -196,11 +196,11 @@ public:
   std::optional<std::string> lookup_attr_ref(std::string_view var, std::string_view attr) const;
 
 private:
-  std::map<std::string, std::map<std::string, Const>>      attr_set_values;
+  std::map<std::string, std::map<std::string, Const>>       attr_set_values;
   std::map<std::string, std::map<std::string, std::string>> attr_set_refs;  // (var, attr) → ref-text value
   std::map<std::string, Type_info>                          type_info_map;
-  std::map<std::string, std::pair<Const, Const>>          range_bounds;  // start, end keyed by tmp
-  std::map<std::string, Const>                             tmp_fold;      // attr_get dst → folded Const
+  std::map<std::string, std::pair<Const, Const>>            range_bounds;  // start, end keyed by tmp
+  std::map<std::string, Const>                              tmp_fold;      // attr_get dst → folded Const
 
 public:
   // ── Phase 3 — tuple-shape side state ────────────────────────────────────
@@ -212,9 +212,7 @@ public:
   struct Tuple_field {
     std::string positional;  // "0", "1", ...
     std::string name;        // "a", "xx", or empty for unnamed positional
-    bool        operator==(const Tuple_field& other) const {
-      return positional == other.positional && name == other.name;
-    }
+    bool        operator==(const Tuple_field& other) const { return positional == other.positional && name == other.name; }
   };
   struct Tuple_shape {
     std::vector<Tuple_field> fields;
@@ -229,13 +227,13 @@ public:
     std::string field_name;  // for `.[key]` reads — the source name at this slot
   };
 
-  bool                                  is_tuple(std::string_view var) const;
-  const Tuple_shape*                    lookup_tuple_shape(std::string_view var) const;
-  const Get_alias*                      lookup_get_alias(std::string_view tmp) const;
-  std::optional<Const>                 derive_aggregate_size(std::string_view base) const;
-  std::optional<Const>                 derive_aggregate_bits(std::string_view base) const;
-  std::optional<Const>                 derive_aggregate_typename(std::string_view base, std::string_view base_text) const;
-  std::optional<Const>                 derive_aggregate_key(std::string_view base, std::string_view base_text) const;
+  bool                 is_tuple(std::string_view var) const;
+  const Tuple_shape*   lookup_tuple_shape(std::string_view var) const;
+  const Get_alias*     lookup_get_alias(std::string_view tmp) const;
+  std::optional<Const> derive_aggregate_size(std::string_view base) const;
+  std::optional<Const> derive_aggregate_bits(std::string_view base) const;
+  std::optional<Const> derive_aggregate_typename(std::string_view base, std::string_view base_text) const;
+  std::optional<Const> derive_aggregate_key(std::string_view base, std::string_view base_text) const;
 
   // Cat-D inheritance: walk get-alias and shape-source aliases looking for
   // an explicit attr value, then fall back to the parent aggregate's value.
@@ -279,15 +277,9 @@ public:
   // declaration vs. statement is "did this var already have an assign?"
   // The statement-level form narrows the in-flight value and leaves no
   // sticky attribute on the variable.
-  bool has_wrap_policy(std::string_view var) const {
-    return wrap_policy.count(std::string{var}) != 0;
-  }
-  bool has_sat_policy(std::string_view var) const {
-    return sat_policy.count(std::string{var}) != 0;
-  }
-  bool was_assigned(std::string_view var) const {
-    return assigned_once.count(std::string{var}) != 0;
-  }
+  bool has_wrap_policy(std::string_view var) const { return wrap_policy.count(std::string{var}) != 0; }
+  bool has_sat_policy(std::string_view var) const { return sat_policy.count(std::string{var}) != 0; }
+  bool was_assigned(std::string_view var) const { return assigned_once.count(std::string{var}) != 0; }
   void set_wrap_policy(std::string_view var) { wrap_policy.emplace(std::string{var}); }
   void set_sat_policy(std::string_view var) { sat_policy.emplace(std::string{var}); }
 
@@ -329,9 +321,9 @@ private:
   std::map<std::string, std::string> direct_alias;     // Phase 4 — lhs → rhs for direct-ref `assign` aliases
 
   // Phase 5 — overflow policy + assignment tracking.
-  std::set<std::string>    wrap_policy;
-  std::set<std::string>    sat_policy;
-  std::set<std::string>    assigned_once;     // any non-nil assign happened
+  std::set<std::string>      wrap_policy;
+  std::set<std::string>      sat_policy;
+  std::set<std::string>      assigned_once;       // any non-nil assign happened
   std::map<std::string, int> const_assign_count;  // for const single-assign check
 
   // Phase 2 evaluator: compute the attribute's value when possible, store it

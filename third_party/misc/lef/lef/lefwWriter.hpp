@@ -1017,7 +1017,7 @@ extern int lefwIntPropDef(const char* objType,  // LIBRARY | LAYER | VIA | VIARU
                           const char* propName,
                           double      leftRange,   // optional(0) - RANGE
                           double      rightRange,  // optional(0)
-                          int         propValue);          // optional(NULL)
+                          int         propValue);  // optional(NULL)
 
 // This routine must be called after lefwStartPropDef.
 // This routine can be called multiple times.
@@ -1029,7 +1029,7 @@ extern int lefwRealPropDef(const char* objType,  // LIBRARY | LAYER | VIA | VIAR
                            const char* propName,
                            double      leftRange,   // optional(0) - RANGE
                            double      rightRange,  // optional(0)
-                           double      propValue);       // optional(NULL)
+                           double      propValue);  // optional(NULL)
 
 // This routine must be called after lefwStartPropDef.
 // This routine can be called multiple times.
@@ -1064,9 +1064,9 @@ extern int lefwViaTopofstackonly();  // TOPOFSTACKONLY
 // It can only be called once.
 // Returns 0 if successful.
 extern int lefwViaForeign(const char* foreignName,
-                          double      xl,  // optional(0) - pt(x)
-                          double      yl,  // optional(0) - pt(y)
-                          int         orient);     // optional(-1)
+                          double      xl,       // optional(0) - pt(x)
+                          double      yl,       // optional(0) - pt(y)
+                          int         orient);  // optional(-1)
 
 // This routine is optional, it call only be called after lefwStartVia.
 // It can only be called once.
@@ -1177,10 +1177,10 @@ extern int lefwStartViaRule(const char* viaRuleName);
 // Returns 0 if successful.
 // The direction1 or direction2 can be HORIZONTAL or VERTICAL.
 extern int lefwViaRuleLayer(const char* layerName,
-                            const char* direction,  // HORIZONTAL | VERTICAL
-                            double      minWidth,   // optional(0) - WIDTH
-                            double      maxWidth,   // optional(0) - WIDTH
-                            double      overhang,   // optional(0) - OVERHANG
+                            const char* direction,       // HORIZONTAL | VERTICAL
+                            double      minWidth,        // optional(0) - WIDTH
+                            double      maxWidth,        // optional(0) - WIDTH
+                            double      overhang,        // optional(0) - OVERHANG
                             double      metalOverhang);  // optional(0) - METALOVERHANG
 
 // This routine is called after lefwViaRuleLayer is called twice.
@@ -1213,10 +1213,10 @@ extern int lefwViaRuleGenDefault();
 // Either this routine or lefwViaRuleGenLayerEnclosure, not both.
 // The direction1 or direction2 can be HORIZONTAL or VERTICAL.
 extern int lefwViaRuleGenLayer(const char* layerName,
-                               const char* direction,  // HORIZONTAL | VERTICAL
-                               double      minWidth,   // optional(0) - WIDTH
-                               double      maxWidth,   // optional(0) - WIDTH
-                               double      overhang,   // optional(0) - OVERHANG
+                               const char* direction,       // HORIZONTAL | VERTICAL
+                               double      minWidth,        // optional(0) - WIDTH
+                               double      maxWidth,        // optional(0) - WIDTH
+                               double      overhang,        // optional(0) - OVERHANG
                                double      metalOverhang);  // optional(0) - METALOVERHANG
 
 // This routine is called after lefwStartViaRuleGen.
@@ -1259,7 +1259,7 @@ extern int lefwNonDefaultRuleLayer(const char* routingLayerName,
                                    double      wireExtension,  // optinal(0) - WIREEXTENSION
                                    double      resistance,     // optinal(0) - RESISTANCE RPERQ
                                    double      capacitance,    // optinal(0) - CAPACITANCE CPERSQDIST
-                                   double      edgeCap);            // optinal(0) - EDGECAPACITANCE
+                                   double      edgeCap);       // optinal(0) - EDGECAPACITANCE
 
 // This routine is called after lefwInit.
 // This routine must be called after lefwStartNonDefaultRule
@@ -1608,9 +1608,9 @@ extern int lefwMacroSource(const char* value1);
 // This routine is optional and can be called multiple times per macro section.
 // Returns 0 if successful.
 extern int lefwMacroForeign(const char* name,
-                            double      xl,  // optional(0) - pt(x)
-                            double      yl,  // optional(0) - pt(y)
-                            int         orient);     // optional(-1) - 0 to 7
+                            double      xl,       // optional(0) - pt(x)
+                            double      yl,       // optional(0) - pt(y)
+                            int         orient);  // optional(-1) - 0 to 7
 
 // This routine is called after lefwStartMacro.
 // This routine is optional and can be called multiple times per macro section.
@@ -1714,9 +1714,9 @@ extern int lefwMacroPinTaperRule(const char* ruleName);
 // This routine is optional and can be called only once.
 // Returns 0 if successful.
 extern int lefwMacroPinForeign(const char* name,
-                               double      xl,  // optional(0)
-                               double      yl,  // optional(0)
-                               int         orient);     // optional(-1) - 0 to 7
+                               double      xl,       // optional(0)
+                               double      yl,       // optional(0)
+                               int         orient);  // optional(-1) - 0 to 7
 
 // This routine is called after lefwStartMacroPin.
 // This routine is optional and can be called only once.
@@ -2019,10 +2019,10 @@ extern int lefwMacroPinPortLayerWidth(double width);
 // lefwStartMacroPinPortLayerPolygon must be called.
 // Returns 0 if successful.
 extern int lefwMacroPinPortLayerPath(int num_paths, double* xl, double* yl,
-                                     int    numX,    // optional(0)
-                                     int    numY,    // optional(0)
-                                     double spaceX,  // optional(0)
-                                     double spaceY,  // optional(0)
+                                     int    numX,       // optional(0)
+                                     int    numY,       // optional(0)
+                                     double spaceX,     // optional(0)
+                                     double spaceY,     // optional(0)
                                      int    mask = 0);  // optional(0)
 
 // This routine is called after lefwStartMacroPinPortLayer.
@@ -2030,10 +2030,10 @@ extern int lefwMacroPinPortLayerPath(int num_paths, double* xl, double* yl,
 // lefwStartMacroPinPortLayerPolygon must be called.
 // Returns 0 if successful.
 extern int lefwMacroPinPortLayerRect(double xl1, double yl1, double xl2, double yl2,
-                                     int    numX,    // optional(0)
-                                     int    numY,    // optional(0)
-                                     double spaceX,  // optional(0)
-                                     double spaceY,  // optional(0)
+                                     int    numX,       // optional(0)
+                                     int    numY,       // optional(0)
+                                     double spaceX,     // optional(0)
+                                     double spaceY,     // optional(0)
                                      int    mask = 0);  // optional(0)
 
 // This routine is called after lefwStartMacroPinPortLayer.
@@ -2041,20 +2041,20 @@ extern int lefwMacroPinPortLayerRect(double xl1, double yl1, double xl2, double 
 // lefwStartMacroPinPortLayerRect must be called.
 // Returns 0 if successful.
 extern int lefwMacroPinPortLayerPolygon(int num_polys, double* xl, double* yl,
-                                        int    numX,    // optional(0)
-                                        int    numY,    // optional(0)
-                                        double spaceX,  // optional(0)
-                                        double spaceY,  // optional(0)
+                                        int    numX,       // optional(0)
+                                        int    numY,       // optional(0)
+                                        double spaceX,     // optional(0)
+                                        double spaceY,     // optional(0)
                                         int    mask = 0);  // optional(0)
 
 // This routine is called after lefwStartMacroPinPort.
 // Either this routine or lefwStartMacroPinPortLayer must be called.
 // Returns 0 if successful.
 extern int lefwMacroPinPortVia(double xl, double yl, const char* viaName,
-                               int    numX,    // optional(0)
-                               int    numY,    // optional(0)
-                               double spaceX,  // optional(0)
-                               double spaceY,  // optional(0)
+                               int    numX,       // optional(0)
+                               int    numY,       // optional(0)
+                               double spaceX,     // optional(0)
+                               double spaceY,     // optional(0)
                                int    mask = 0);  // optional(0)
 
 // This routine must be called after the lefwStartMacroPinPort call (if any).
@@ -2102,10 +2102,10 @@ extern int lefwMacroObsLayerWidth(double width);
 // lefwStartMacroObsLayerPolygon must be called.
 // Returns 0 if successful.
 extern int lefwMacroObsLayerPath(int num_paths, double* xl, double* yl,
-                                 int    numX,    // optional(0)
-                                 int    numY,    // optional(0)
-                                 double spaceX,  // optional(0)
-                                 double spaceY,  // optional(0)
+                                 int    numX,       // optional(0)
+                                 int    numY,       // optional(0)
+                                 double spaceX,     // optional(0)
+                                 double spaceY,     // optional(0)
                                  int    mask = 0);  // optional(0)
 
 // This routine is called after lefwStartMacroObsLayer.
@@ -2113,10 +2113,10 @@ extern int lefwMacroObsLayerPath(int num_paths, double* xl, double* yl,
 // lefwStartMacroObsLayerPolygon must be called.
 // Returns 0 if successful.
 extern int lefwMacroObsLayerRect(double xl1, double yl1, double xl2, double yl2,
-                                 int    numX,    // optional(0)
-                                 int    numY,    // optional(0)
-                                 double spaceX,  // optional(0)
-                                 double spaceY,  // optional(0)
+                                 int    numX,       // optional(0)
+                                 int    numY,       // optional(0)
+                                 double spaceX,     // optional(0)
+                                 double spaceY,     // optional(0)
                                  int    mask = 0);  // optional(0)
 
 // This routine is called after lefwStartMacroObsLayer.
@@ -2124,10 +2124,10 @@ extern int lefwMacroObsLayerRect(double xl1, double yl1, double xl2, double yl2,
 // lefwStartMacroObsLayerPath must be called.
 // Returns 0 if successful.
 extern int lefwMacroObsLayerPolygon(int num_polys, double* xl, double* yl,
-                                    int    numX,    // optional(0)
-                                    int    numY,    // optional(0)
-                                    double spaceX,  // optional(0)
-                                    double spaceY,  // optional(0)
+                                    int    numX,       // optional(0)
+                                    int    numY,       // optional(0)
+                                    double spaceX,     // optional(0)
+                                    double spaceY,     // optional(0)
                                     int    mask = 0);  // optional(0)
 
 // This routine is called after lefwStartMacroObs.
@@ -2135,10 +2135,10 @@ extern int lefwMacroObsLayerPolygon(int num_polys, double* xl, double* yl,
 // must be called.
 // Returns 0 if successful.
 extern int lefwMacroObsVia(double xl, double yl, const char* viaName,
-                           int    numX,    // optional(0)
-                           int    numY,    // optional(0)
-                           double spaceX,  // optional(0)
-                           double spaceY,  // optional(0)
+                           int    numX,       // optional(0)
+                           int    numY,       // optional(0)
+                           double spaceX,     // optional(0)
+                           double spaceY,     // optional(0)
                            int    mask = 0);  // optional(0)
 
 // This routine must be called after the lefwStartMacroObs call (if any).

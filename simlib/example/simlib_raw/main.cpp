@@ -17,7 +17,7 @@ void worker_singlethread() {
   }
 }
 
-int main(int argc, char **argv) {
+int main(int argc, char** argv) {
   printf("Starting simulation\n");
 
   worker_singlethread();

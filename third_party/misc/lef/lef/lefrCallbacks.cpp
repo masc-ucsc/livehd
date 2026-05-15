@@ -93,7 +93,7 @@ lefrCallbacks::lefrCallbacks()
     , ViaCbk(0)
     , ViaRuleCbk(0) {}
 
-lefrCallbacks *lefCallbacks = NULL;
+lefrCallbacks* lefCallbacks = NULL;
 
 void lefrCallbacks::reset() {
   if (lefCallbacks) {

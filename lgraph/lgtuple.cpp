@@ -979,7 +979,7 @@ Node_pin Lgtuple::flatten() const {
   }
 
   if (all_const) {
-    Const result;
+    Const  result;
     Bits_t accu_bits = 0;
     for (auto& e : key_map) {
       if (is_attribute(e.first)) {
@@ -1662,10 +1662,10 @@ std::shared_ptr<Lgtuple> Lgtuple::make_flop(Node& flop) const {
       if (attr == "initial") {
         // use get_mask to get the bit that assigned to the corresponding individual flop
         if (it.second.is_type_const()) {
-          Const init_val    = it.second.get_type_const();
+          Const init_val = it.second.get_type_const();
           Const masked_val;
-          masked_val = init_val.get_mask_op(*Dlop::create_integer(1 << i));
-          auto   masked_node = lg->create_node_const(masked_val);
+          masked_val       = init_val.get_mask_op(*Dlop::create_integer(1 << i));
+          auto masked_node = lg->create_node_const(masked_val);
           flop_spin.connect_driver(masked_node.setup_driver_pin());
         } else {
           I(i == 0);  // if tuple expantion needs a get_mask_op()

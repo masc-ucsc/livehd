@@ -8,10 +8,10 @@
 #include <string_view>
 
 #include "absl/strings/str_cat.h"
+#include "const.hpp"
 #include "explicit_type.hpp"
 #include "graph_sizing.hpp"
 #include "iassert.hpp"
-#include "const.hpp"
 #include "likely.hpp"
 
 using Lg_id_t = uint32_t;

@@ -327,7 +327,7 @@ void Slang_tree::process_lhs(const slang::ast::Expression& lhs, const std::strin
       std::string qmarks(dest_var_bits, '?');
 
       lnast_builder.create_assign_stmts(var_name,
-                                           absl::StrCat("0b", qmarks));  // mark with x so that potential use is poison if needed
+                                        absl::StrCat("0b", qmarks));  // mark with x so that potential use is poison if needed
     }
   }
 
@@ -540,4 +540,3 @@ std::string Slang_tree::process_expression(const slang::ast::Expression& expr, b
 
   return "FIXME_op";
 }
-

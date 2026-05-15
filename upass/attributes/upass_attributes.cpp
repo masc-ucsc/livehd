@@ -64,7 +64,7 @@ uPass_attributes::Op_view uPass_attributes::scan_op() {
   // Cursor is at the op node. First child is LHS; remaining children are
   // operands. For an `assign` with exactly one ref operand, classify as
   // alias (direct ref aliasing per the spec).
-  Op_view view;
+  Op_view    view;
   const bool is_assign = is_type(Lnast_ntype::Lnast_ntype_assign);
 
   if (!move_to_child()) {
@@ -118,7 +118,7 @@ void uPass_attributes::on_assign_like(bool is_assign_node) {
   // Phase 5 — bookkeeping for any assignment-shaped op. The `nil` rvalue
   // is an explicit invalidation per spec and is not counted as a binding.
   // Detect by checking the single rhs ref or const text.
-  bool                  rhs_is_nil = false;
+  bool                 rhs_is_nil = false;
   std::optional<Const> rhs_value;  // direct LNAST-source value, when scalar
   if (is_assign_node) {
     move_to_child();
@@ -172,7 +172,7 @@ void uPass_attributes::on_assign_like(bool is_assign_node) {
     // Phase 3 — shape / typename / range inheritance through direct aliases.
     // When `assign foo bar` and bar carries a tuple shape (or range), foo
     // takes on the same shape so aggregate reads `foo.[size]` etc. resolve.
-    const auto& rhs = view.rhs_refs.front();
+    const auto& rhs           = view.rhs_refs.front();
     bool        record_source = false;
     bool        gained_shape  = false;
     if (auto* sh = lookup_tuple_shape(rhs); sh) {
@@ -219,9 +219,8 @@ void uPass_attributes::on_assign_like(bool is_assign_node) {
         mark_changed();
       }
     }
-    reg.for_each_handler([&](upass::attributes::Attribute_handler& h) {
-      h.on_alias_assign(*this, view.lhs, view.rhs_refs.front());
-    });
+    reg.for_each_handler(
+        [&](upass::attributes::Attribute_handler& h) { h.on_alias_assign(*this, view.lhs, view.rhs_refs.front()); });
     return;
   }
   std::vector<std::string_view> refs;
@@ -314,7 +313,8 @@ void uPass_attributes::process_attr_set() {
       }
       // Still record the explicit value (true/false) so a `.[comptime]`
       // read returns the explicit answer.
-      attr_set_values[target][attr_name] = (value_text == "false" || value_text == "0") ? Dlop::create_integer(0) : Dlop::create_integer(1);
+      attr_set_values[target][attr_name]
+          = (value_text == "false" || value_text == "0") ? Dlop::create_integer(0) : Dlop::create_integer(1);
     } else if ((attr_name == "ubits" || attr_name == "sbits") && !value_is_ref) {
       // Phase 5 — `[ubits=N]` / `[sbits=N]` are alternative type-info entry
       // points (the user wrote `mut x::[ubits=12] = 0` rather than
@@ -352,10 +352,10 @@ void uPass_attributes::process_attr_set() {
         // base.field_key path so a later `t.b.[poison]` read finds the
         // override after `assign t __1` migrates the shape.
         if (auto* a = lookup_get_alias(target); a) {
-          std::string canonical = a->base + "." + a->field_key;
+          std::string canonical                 = a->base + "." + a->field_key;
           attr_set_values[canonical][attr_name] = stored;
           if (!a->field_name.empty() && a->field_name != a->field_key) {
-            std::string named = a->base + "." + a->field_name;
+            std::string named                 = a->base + "." + a->field_name;
             attr_set_values[named][attr_name] = stored;
           }
         }
@@ -371,14 +371,11 @@ void uPass_attributes::process_attr_set() {
         // with tracked attrs, treat it as a direct alias for attribute
         // lookup: copy attrs through migrate_alias and notify handlers so
         // sticky buckets propagate too.
-        if (attr_name == "typename" && value_text.size() >= 2 && value_text.front() == '\''
-            && value_text.back() == '\'') {
+        if (attr_name == "typename" && value_text.size() >= 2 && value_text.front() == '\'' && value_text.back() == '\'') {
           std::string src{value_text.substr(1, value_text.size() - 2)};
-          if (!src.empty() && src != target
-              && (attr_set_values.count(src) != 0 || type_info_map.count(src) != 0)) {
+          if (!src.empty() && src != target && (attr_set_values.count(src) != 0 || type_info_map.count(src) != 0)) {
             migrate_alias(target, src);
-            reg.for_each_handler(
-                [&](upass::attributes::Attribute_handler& h) { h.on_alias_assign(*this, target, src); });
+            reg.for_each_handler([&](upass::attributes::Attribute_handler& h) { h.on_alias_assign(*this, target, src); });
           }
         }
       }
@@ -441,7 +438,7 @@ void uPass_attributes::process_if() {
     if (Lnast_ntype::is_stmts(t)) {
       // This stmts is an arm body (then/else/elif). Record the most-recent
       // cond's refs against this stmts nid.
-      const auto nid_key = static_cast<uint64_t>(lm->get_current_nid().get_class_index().value);
+      const auto  nid_key = static_cast<uint64_t>(lm->get_current_nid().get_class_index().value);
       Pending_arm arm;
       arm.cond_refs = running_cond_refs;  // empty for bare-else stmts
       pending_arms.emplace(nid_key, std::move(arm));
@@ -464,7 +461,7 @@ void uPass_attributes::process_if() {
 
 void uPass_attributes::process_stmts() {
   const auto nid_key = static_cast<uint64_t>(lm->get_current_nid().get_class_index().value);
-  auto it = pending_arms.find(nid_key);
+  auto       it      = pending_arms.find(nid_key);
   if (it == pending_arms.end()) {
     return;
   }
@@ -478,8 +475,7 @@ void uPass_attributes::process_stmts() {
   for (const auto& [v, a] : it->second.cond_attr_reads) {
     attr_reads.emplace_back(v, a);
   }
-  reg.for_each_handler(
-      [&](upass::attributes::Attribute_handler& h) { h.on_if_arm_enter(*this, refs, attr_reads); });
+  reg.for_each_handler([&](upass::attributes::Attribute_handler& h) { h.on_if_arm_enter(*this, refs, attr_reads); });
   active_arm_stack.push_back(nid_key);
 }
 

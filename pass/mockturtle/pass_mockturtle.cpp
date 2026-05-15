@@ -1125,7 +1125,8 @@ void Pass_mockturtle::create_lutified_lgraph(Lgraph* old_lg) {
         /*   auto pick_node_sink_pin        = pick_node.setup_sink_pin(0); */
         /*   auto pick_node_offset_pin      = pick_node.setup_sink_pin(1); */
         /*   auto pick_node_driver_pin      = pick_node.setup_driver_pin(); */
-        /*   auto const_node_for_bit_select = new_lg->create_node_const(/*FIXME-LCONST-CTOR*/Lconst(i, bits)); */
+        /*   auto const_node_for_bit_select = new_lg->create_node_const(/*FIXME-LCONST-CTOR*/Lconst(i, bits));
+        */
         /*   auto bit_select_signal         = const_node_for_bit_select.get_driver_pin(); */
         /*   pick_node_driver_pin.set_bits(1); */
         /*   new_lg->add_edge(bit_select_signal, pick_node_offset_pin); */

@@ -72,7 +72,7 @@ protected:
   // mapping. Created lazily by add_name_int / renamed by rename_name_int. This
   // is the foundation Phase G1.1 of the HHDS graph migration —
   // docs/contracts/hhds_graph_migration_plan.md.
-  mutable hhds::GraphLibrary hhds_lib_;
+  mutable hhds::GraphLibrary                                            hhds_lib_;
   absl::flat_hash_map<Lg_type_id::type, std::shared_ptr<hhds::GraphIO>> lgid_to_hhds_io_;
 
   static Global_instances global_instances;  // WR protect on add entries, RD protect any access

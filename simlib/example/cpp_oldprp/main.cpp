@@ -11,7 +11,7 @@
 
 // #define USE_PTHREAD_BARRIER 1
 
-void usage(const char *name) {
+void usage(const char* name) {
   fprintf(stderr, "Usage:\n");
   fprintf(stderr, "\t%s [n threads]", name);
   exit(-2);
@@ -19,9 +19,9 @@ void usage(const char *name) {
 
 // NOTE: If workers can steal work from others, for load balance, this may be
 // good to have it as lock free link list of tasks
-std::vector<Stage *> w0;  // worker zero
-std::vector<Stage *> w1;
-std::vector<Stage *> w2;
+std::vector<Stage*> w0;  // worker zero
+std::vector<Stage*> w1;
+std::vector<Stage*> w2;
 
 __thread Time_t pyrope_clock = 0;
 uint32_t        nthreads     = 1;  // Single thread by default
@@ -59,10 +59,10 @@ volatile uint32_t barrier1;
 volatile uint32_t barrier2;
 #endif
 
-void *worker(void *arg) {
-  uint32_t id = *(uint32_t *)arg;
+void* worker(void* arg) {
+  uint32_t id = *(uint32_t*)arg;
 
-  std::vector<Stage *> *w;
+  std::vector<Stage*>* w;
   if (id == 0) {
     w = &w0;
   } else if (id == 1) {
@@ -158,7 +158,7 @@ void *worker(void *arg) {
 
 pthread_t threads[MAX_THREADS];
 
-int main(int argc, char **argv) {
+int main(int argc, char** argv) {
   // check input paramters
   if (argc > 1) {
     nthreads = atoi(argv[1]);
@@ -172,15 +172,15 @@ int main(int argc, char **argv) {
 
   // Create all the outputs
 
-  Output_Sample_Stage1 *o1 = new Output_Sample_Stage1;
-  Output_Sample_Stage2 *o2 = new Output_Sample_Stage2;
-  Output_Sample_Stage3 *o3 = new Output_Sample_Stage3;
+  Output_Sample_Stage1* o1 = new Output_Sample_Stage1;
+  Output_Sample_Stage2* o2 = new Output_Sample_Stage2;
+  Output_Sample_Stage3* o3 = new Output_Sample_Stage3;
 
   // Create the stages
 
-  Sample_Stage1 *s1 = new Sample_Stage1(o1, o2, o3);
-  Sample_Stage2 *s2 = new Sample_Stage2(o2, o1);
-  Sample_Stage3 *s3 = new Sample_Stage3(o3, o1, o2);
+  Sample_Stage1* s1 = new Sample_Stage1(o1, o2, o3);
+  Sample_Stage2* s2 = new Sample_Stage2(o2, o1);
+  Sample_Stage3* s3 = new Sample_Stage3(o3, o1, o2);
 
   printf("Starting simulation with %d threads\n", nthreads);
 
@@ -214,7 +214,7 @@ int main(int argc, char **argv) {
       id[i] = i;
     }
     for (uint32_t i = 0; i < nthreads; i++) {
-      pthread_create(&threads[i], NULL, worker, (void *)&id[i]);
+      pthread_create(&threads[i], NULL, worker, (void*)&id[i]);
     }
 
     for (uint32_t i = 0; i < nthreads; i++) {

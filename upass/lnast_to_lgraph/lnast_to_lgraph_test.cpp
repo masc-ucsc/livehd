@@ -39,7 +39,9 @@ static int count_op(Lgraph* lg, Ntype_op op) {
 static bool has_input(Lgraph* lg, const std::string& name) {
   bool found = false;
   lg->each_graph_input([&](const Node_pin& pin) {
-    if (pin.has_name() && pin.get_name() == name) found = true;
+    if (pin.has_name() && pin.get_name() == name) {
+      found = true;
+    }
   });
   return found;
 }
@@ -48,7 +50,9 @@ static bool has_input(Lgraph* lg, const std::string& name) {
 static bool has_output(Lgraph* lg, const std::string& name) {
   bool found = false;
   lg->each_graph_output([&](const Node_pin& pin) {
-    if (pin.has_name() && pin.get_name() == name) found = true;
+    if (pin.has_name() && pin.get_name() == name) {
+      found = true;
+    }
   });
   return found;
 }
@@ -144,7 +148,7 @@ TEST(LnastToLgraph, PassThrough) {
   Lnast_to_lgraph lowerer(lg, make_pass_through());
   lowerer.lower();
 
-  EXPECT_TRUE(has_input(lg, "a"))   << "expected graph input 'a'";
+  EXPECT_TRUE(has_input(lg, "a")) << "expected graph input 'a'";
   EXPECT_TRUE(has_output(lg, "out")) << "expected graph output 'out'";
   // No arithmetic nodes — just the IO wires.
   EXPECT_EQ(count_op(lg, Ntype_op::Sum), 0);
@@ -168,10 +172,10 @@ TEST(LnastToLgraph, Addition) {
   Lnast_to_lgraph lowerer(lg, make_add());
   lowerer.lower();
 
-  EXPECT_EQ(count_op(lg, Ntype_op::Sum), 1)  << "expected exactly one Sum node";
-  EXPECT_TRUE(has_input(lg, "a"))              << "expected graph input 'a'";
-  EXPECT_TRUE(has_input(lg, "b"))              << "expected graph input 'b'";
-  EXPECT_TRUE(has_output(lg, "out"))           << "expected graph output 'out'";
+  EXPECT_EQ(count_op(lg, Ntype_op::Sum), 1) << "expected exactly one Sum node";
+  EXPECT_TRUE(has_input(lg, "a")) << "expected graph input 'a'";
+  EXPECT_TRUE(has_input(lg, "b")) << "expected graph input 'b'";
+  EXPECT_TRUE(has_output(lg, "out")) << "expected graph output 'out'";
 }
 
 // ── Test 4: comparison lowered to LT node ───────────────────────────────────
@@ -182,7 +186,7 @@ TEST(LnastToLgraph, LessThan) {
   lowerer.lower();
 
   EXPECT_EQ(count_op(lg, Ntype_op::LT), 1) << "expected exactly one LT node";
-  EXPECT_TRUE(has_output(lg, "out"))         << "expected graph output 'out'";
+  EXPECT_TRUE(has_output(lg, "out")) << "expected graph output 'out'";
 }
 
 // ── Test 5: bitwise AND lowered to And node ──────────────────────────────────
@@ -193,7 +197,7 @@ TEST(LnastToLgraph, BitAnd) {
   lowerer.lower();
 
   EXPECT_EQ(count_op(lg, Ntype_op::And), 1) << "expected exactly one And node";
-  EXPECT_TRUE(has_output(lg, "out"))          << "expected graph output 'out'";
+  EXPECT_TRUE(has_output(lg, "out")) << "expected graph output 'out'";
 }
 
 // ── Test 6: bitwise NOT lowered to Not node ──────────────────────────────────
@@ -204,8 +208,8 @@ TEST(LnastToLgraph, BitNot) {
   lowerer.lower();
 
   EXPECT_EQ(count_op(lg, Ntype_op::Not), 1) << "expected exactly one Not node";
-  EXPECT_TRUE(has_input(lg, "a"))             << "expected graph input 'a'";
-  EXPECT_TRUE(has_output(lg, "out"))          << "expected graph output 'out'";
+  EXPECT_TRUE(has_input(lg, "a")) << "expected graph input 'a'";
+  EXPECT_TRUE(has_output(lg, "out")) << "expected graph output 'out'";
 }
 
 // ── Test 7: multiplication lowered to Mult node ──────────────────────────────
@@ -216,7 +220,7 @@ TEST(LnastToLgraph, Multiply) {
   lowerer.lower();
 
   EXPECT_EQ(count_op(lg, Ntype_op::Mult), 1) << "expected exactly one Mult node";
-  EXPECT_TRUE(has_output(lg, "out"))           << "expected graph output 'out'";
+  EXPECT_TRUE(has_output(lg, "out")) << "expected graph output 'out'";
 }
 
 // ── Test 8: if/else → two Mux nodes (one per branch variable) ────────────────
@@ -249,10 +253,10 @@ TEST(LnastToLgraph, IfElseToMux) {
   lowerer.lower();
 
   EXPECT_EQ(count_op(lg, Ntype_op::Mux), 1) << "expected exactly one Mux node";
-  EXPECT_TRUE(has_output(lg, "out"))          << "expected graph output 'out'";
-  EXPECT_TRUE(has_input(lg, "cond"))          << "expected graph input 'cond'";
-  EXPECT_TRUE(has_input(lg, "a"))             << "expected graph input 'a'";
-  EXPECT_TRUE(has_input(lg, "b"))             << "expected graph input 'b'";
+  EXPECT_TRUE(has_output(lg, "out")) << "expected graph output 'out'";
+  EXPECT_TRUE(has_input(lg, "cond")) << "expected graph input 'cond'";
+  EXPECT_TRUE(has_input(lg, "a")) << "expected graph input 'a'";
+  EXPECT_TRUE(has_input(lg, "b")) << "expected graph input 'b'";
 }
 
 // ── Test 9: if without else → Mux with incoming value as false-path ──────────
@@ -284,7 +288,7 @@ TEST(LnastToLgraph, IfNoElse) {
   lowerer.lower();
 
   EXPECT_EQ(count_op(lg, Ntype_op::Mux), 1) << "expected exactly one Mux node";
-  EXPECT_TRUE(has_output(lg, "out"))          << "expected graph output 'out'";
+  EXPECT_TRUE(has_output(lg, "out")) << "expected graph output 'out'";
 }
 
 // ── Test 11: func_def lowers trivial XOR function ────────────────────────────
@@ -317,7 +321,7 @@ static std::shared_ptr<Lnast> make_trivial_func_def() {
   auto ai_a  = ln->add_child(in_ta, Lnast_ntype::create_assign());
   ln->add_child(ai_a, Lnast_node::create_ref("a"));
   ln->add_child(ai_a, Lnast_node::create_const("0"));
-  auto ai_b  = ln->add_child(in_ta, Lnast_ntype::create_assign());
+  auto ai_b = ln->add_child(in_ta, Lnast_ntype::create_assign());
   ln->add_child(ai_b, Lnast_node::create_ref("b"));
   ln->add_child(ai_b, Lnast_node::create_const("0"));
   // child5: outputs tuple_add
@@ -364,7 +368,7 @@ TEST(LnastToLgraph, IfElifElseChain) {
   ln->add_child(asgn_e, Lnast_node::create_ref("%out"));
   ln->add_child(asgn_e, Lnast_node::create_ref("$b"));
   // else: %out = $d
-  auto else_s = ln->add_child(if_node, Lnast_ntype::create_stmts());
+  auto else_s  = ln->add_child(if_node, Lnast_ntype::create_stmts());
   auto asgn_el = ln->add_child(else_s, Lnast_ntype::create_assign());
   ln->add_child(asgn_el, Lnast_node::create_ref("%out"));
   ln->add_child(asgn_el, Lnast_node::create_ref("$d"));
@@ -375,7 +379,7 @@ TEST(LnastToLgraph, IfElifElseChain) {
   lowerer.lower();
 
   EXPECT_EQ(count_op(lg, Ntype_op::Mux), 2) << "expected two chained Mux nodes";
-  EXPECT_TRUE(has_output(lg, "out"))          << "expected graph output 'out'";
+  EXPECT_TRUE(has_output(lg, "out")) << "expected graph output 'out'";
 }
 
 // ── Test 12: post-upass shape — trivial XOR function ─────────────────────────
@@ -391,7 +395,7 @@ TEST(LnastToLgraph, IfElifElseChain) {
 //       assign(c, ___t1)
 // Expected: one Xor, inputs a+b (1-based positions per §5), output c.
 static std::shared_ptr<Lnast> make_trivial_post_upass() {
-  auto ln = std::make_shared<Lnast>("trivial");
+  auto ln   = std::make_shared<Lnast>("trivial");
   auto root = ln->set_root(Lnast_ntype::create_top());
 
   auto io = ln->add_child(root, Lnast_ntype::create_io());
@@ -403,17 +407,17 @@ static std::shared_ptr<Lnast> make_trivial_post_upass() {
   // Inputs tuple_add
   auto in_ta = ln->add_child(stmts, Lnast_ntype::create_tuple_add());
   ln->add_child(in_ta, Lnast_node::create_ref("__input_tuple_ref"));
-  auto ai_a  = ln->add_child(in_ta, Lnast_ntype::create_assign());
+  auto ai_a = ln->add_child(in_ta, Lnast_ntype::create_assign());
   ln->add_child(ai_a, Lnast_node::create_ref("a"));
   ln->add_child(ai_a, Lnast_node::create_const("nil"));
-  auto ai_b  = ln->add_child(in_ta, Lnast_ntype::create_assign());
+  auto ai_b = ln->add_child(in_ta, Lnast_ntype::create_assign());
   ln->add_child(ai_b, Lnast_node::create_ref("b"));
   ln->add_child(ai_b, Lnast_node::create_const("nil"));
 
   // Outputs tuple_add
   auto out_ta = ln->add_child(stmts, Lnast_ntype::create_tuple_add());
   ln->add_child(out_ta, Lnast_node::create_ref("__output_tuple_ref"));
-  auto ao_c   = ln->add_child(out_ta, Lnast_ntype::create_assign());
+  auto ao_c = ln->add_child(out_ta, Lnast_ntype::create_assign());
   ln->add_child(ao_c, Lnast_node::create_ref("c"));
   ln->add_child(ao_c, Lnast_node::create_const("nil"));
 
@@ -436,9 +440,9 @@ TEST(LnastToLgraph, PostUpassTrivialXor) {
   lowerer.lower();
 
   EXPECT_EQ(count_op(lg, Ntype_op::Xor), 1) << "expected exactly one Xor node";
-  EXPECT_TRUE(has_input(lg, "a"))             << "expected graph input 'a'";
-  EXPECT_TRUE(has_input(lg, "b"))             << "expected graph input 'b'";
-  EXPECT_TRUE(has_output(lg, "c"))            << "expected graph output 'c'";
+  EXPECT_TRUE(has_input(lg, "a")) << "expected graph input 'a'";
+  EXPECT_TRUE(has_input(lg, "b")) << "expected graph input 'b'";
+  EXPECT_TRUE(has_output(lg, "c")) << "expected graph output 'c'";
   // No body tuple_add residue; no extra Sum/Mux/Or nodes.
   EXPECT_EQ(count_op(lg, Ntype_op::Sum), 0);
   EXPECT_EQ(count_op(lg, Ntype_op::Mux), 0);
@@ -447,7 +451,7 @@ TEST(LnastToLgraph, PostUpassTrivialXor) {
 // ── Test 13: post-upass with __empty_tuple placeholder for outputs ────────────
 // Verifies the empty-tuple placeholder is skipped without creating an output.
 TEST(LnastToLgraph, PostUpassEmptyOutputTuple) {
-  auto ln = std::make_shared<Lnast>("only_inputs");
+  auto ln   = std::make_shared<Lnast>("only_inputs");
   auto root = ln->set_root(Lnast_ntype::create_top());
 
   auto io = ln->add_child(root, Lnast_ntype::create_io());
@@ -458,7 +462,7 @@ TEST(LnastToLgraph, PostUpassEmptyOutputTuple) {
 
   auto in_ta = ln->add_child(stmts, Lnast_ntype::create_tuple_add());
   ln->add_child(in_ta, Lnast_node::create_ref("__input_tuple_ref"));
-  auto ai_x  = ln->add_child(in_ta, Lnast_ntype::create_assign());
+  auto ai_x = ln->add_child(in_ta, Lnast_ntype::create_assign());
   ln->add_child(ai_x, Lnast_node::create_ref("x"));
   ln->add_child(ai_x, Lnast_node::create_const("nil"));
 
@@ -486,9 +490,9 @@ TEST(LnastToLgraph, FuncDefTrivialXor) {
   lowerer.lower();
 
   EXPECT_EQ(count_op(lg, Ntype_op::Xor), 1) << "expected exactly one Xor node";
-  EXPECT_TRUE(has_input(lg, "a"))             << "expected graph input 'a'";
-  EXPECT_TRUE(has_input(lg, "b"))             << "expected graph input 'b'";
-  EXPECT_TRUE(has_output(lg, "c"))            << "expected graph output 'c'";
+  EXPECT_TRUE(has_input(lg, "a")) << "expected graph input 'a'";
+  EXPECT_TRUE(has_input(lg, "b")) << "expected graph input 'b'";
+  EXPECT_TRUE(has_output(lg, "c")) << "expected graph output 'c'";
   // No spurious Sum/Mux nodes from func_def scaffolding.
   EXPECT_EQ(count_op(lg, Ntype_op::Sum), 0);
   EXPECT_EQ(count_op(lg, Ntype_op::Mux), 0);
@@ -580,9 +584,9 @@ TEST(LnastToLgraph, SsaRenameMultiAssign) {
 
   // Expect exactly 2 Sum nodes (one for a+b, one for t+1).
   EXPECT_EQ(count_op(lg, Ntype_op::Sum), 2) << "expected two Sum nodes";
-  EXPECT_TRUE(has_input(lg, "a"))            << "expected graph input 'a'";
-  EXPECT_TRUE(has_input(lg, "b"))            << "expected graph input 'b'";
-  EXPECT_TRUE(has_output(lg, "c"))           << "expected graph output 'c'";
+  EXPECT_TRUE(has_input(lg, "a")) << "expected graph input 'a'";
+  EXPECT_TRUE(has_input(lg, "b")) << "expected graph input 'b'";
+  EXPECT_TRUE(has_output(lg, "c")) << "expected graph output 'c'";
   // No Mux or Xor nodes expected.
   EXPECT_EQ(count_op(lg, Ntype_op::Mux), 0);
   EXPECT_EQ(count_op(lg, Ntype_op::Xor), 0);

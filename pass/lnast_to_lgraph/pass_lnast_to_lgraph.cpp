@@ -32,8 +32,8 @@ void Pass_lnast_to_lgraph::work(Eprp_var& var) {
   auto* lib = Graph_library::instance(db_path);
 
   for (const auto& ln : var.lnasts) {
-    auto module_name = std::string(ln->get_top_module_name());
-    auto* lg = lib->create_lgraph(module_name, db_path);
+    auto  module_name = std::string(ln->get_top_module_name());
+    auto* lg          = lib->create_lgraph(module_name, db_path);
     if (!lg) {
       Pass::error("pass.lnast_to_lgraph: could not create LGraph for '{}'", module_name);
       return;

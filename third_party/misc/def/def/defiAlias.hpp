@@ -39,21 +39,21 @@ class defrData;
 
 class defiAlias_itr {
 public:
-  defiAlias_itr(defrData *defData = 0);
+  defiAlias_itr(defrData* defData = 0);
   void Init();
 
   void Destroy();
   ~defiAlias_itr();
 
   int         Next();
-  const char *Key();
-  const char *Data();
+  const char* Key();
+  const char* Data();
   int         Marked();
 
 protected:
-  defAliasIterator *iterator;
+  defAliasIterator* iterator;
   int               first;
-  defrData         *defData;
+  defrData*         defData;
 };
 
 END_LEFDEF_PARSER_NAMESPACE

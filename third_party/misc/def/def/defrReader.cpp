@@ -51,7 +51,7 @@ BEGIN_LEFDEF_PARSER_NAMESPACE
 
 extern defrContext defContext;
 
-void def_init(const char *func) {
+void def_init(const char* func) {
   // Need for debugging config re-owning;
   if (defContext.ownConfig) {
     return;
@@ -73,7 +73,7 @@ void def_init(const char *func) {
   }
 }
 
-int defrCountUnused(defrCallbackType_e e, void *v, defiUserData d) {
+int defrCountUnused(defrCallbackType_e e, void* v, defiUserData d) {
   DEF_INIT;
   int i;
   if (defiDebug(23)) {
@@ -89,7 +89,7 @@ int defrCountUnused(defrCallbackType_e e, void *v, defiUserData d) {
   return 0;
 }
 
-const char *typeToString(defrCallbackType_e num) {
+const char* typeToString(defrCallbackType_e num) {
   switch ((int)num) {
     case defrUnspecifiedCbkType: return "Unspecified";
     case defrDesignStartCbkType: return "Design Start";
@@ -203,7 +203,7 @@ const char *typeToString(defrCallbackType_e num) {
   return "BOGUS";
 }
 
-int defrCatchAll(defrCallbackType_e typ, void *, defiUserData) {
+int defrCatchAll(defrCallbackType_e typ, void*, defiUserData) {
   DEF_INIT;
 
   if ((int)typ >= 0 && (int)typ < CBMAX) {
@@ -302,7 +302,7 @@ void defrUnsetCallbacks() {
   defContext.callbacks = new defrCallbacks();
 }
 
-void defrPrintUnusedCallbacks(FILE *log) {
+void defrPrintUnusedCallbacks(FILE* log) {
   int i;
   int first = 1;
 
@@ -840,12 +840,12 @@ void defrUnsetViaEndCbk() {
   defContext.callbacks->ViaEndCbk = NULL;
 }
 
-int *defUnusedCallbackCount() {
+int* defUnusedCallbackCount() {
   DEF_INIT;
   return defContext.settings->UnusedCallbacks;
 }
 
-const char *defrFName() {
+const char* defrFName() {
   DEF_INIT;
   return NULL;
 }
@@ -857,12 +857,12 @@ void defrClearSession() {
   }
 }
 
-int defrRead(FILE *f, const char *fName, defiUserData uData, int case_sensitive) {
+int defrRead(FILE* f, const char* fName, defiUserData uData, int case_sensitive) {
   int status;
 
   delete defContext.data;
 
-  defrData *defData = new defrData(defContext.callbacks, defContext.settings, defContext.session);
+  defrData* defData = new defrData(defContext.callbacks, defContext.settings, defContext.session);
 
   defContext.data = defData;
 
@@ -885,7 +885,7 @@ int defrRead(FILE *f, const char *fName, defiUserData uData, int case_sensitive)
     defData->names_case_sensitive = true;
   }
 
-  defData->session->FileName              = (char *)fName;
+  defData->session->FileName              = (char*)fName;
   defData->File                           = f;
   defData->session->UserData              = uData;
   defData->session->reader_case_sensitive = case_sensitive;
@@ -1555,24 +1555,24 @@ void defrSetViaWarnings(int warn) {
   defContext.settings->ViaWarnings = warn;
 }
 
-void defrDisableParserMsgs(int nMsg, int *msgs) {
+void defrDisableParserMsgs(int nMsg, int* msgs) {
   DEF_INIT;
   int  i, j;
-  int *tmp;
+  int* tmp;
 
   if (defContext.settings->nDDMsgs == 0) {
     defContext.settings->nDDMsgs      = nMsg;
-    defContext.settings->disableDMsgs = (int *)malloc(sizeof(int) * nMsg);
+    defContext.settings->disableDMsgs = (int*)malloc(sizeof(int) * nMsg);
     for (i = 0; i < nMsg; i++) {
       defContext.settings->disableDMsgs[i] = msgs[i];
     }
   } else {  // add the list to the existing list
     // 1st check if the msgId is already on the list before adding it on
-    tmp = (int *)malloc(sizeof(int) * (nMsg + defContext.settings->nDDMsgs));
+    tmp = (int*)malloc(sizeof(int) * (nMsg + defContext.settings->nDDMsgs));
     for (i = 0; i < defContext.settings->nDDMsgs; i++) {  // copy the existing to the new list
       tmp[i] = defContext.settings->disableDMsgs[i];
     }
-    free((int *)(defContext.settings->disableDMsgs));
+    free((int*)(defContext.settings->disableDMsgs));
     defContext.settings->disableDMsgs = tmp;  // set disableDMsgs to the new list
     for (i = 0; i < nMsg; i++) {              // merge the new list with the existing
       for (j = 0; j < defContext.settings->nDDMsgs; j++) {
@@ -1588,7 +1588,7 @@ void defrDisableParserMsgs(int nMsg, int *msgs) {
   return;
 }
 
-void defrEnableParserMsgs(int nMsg, int *msgs) {
+void defrEnableParserMsgs(int nMsg, int* msgs) {
   DEF_INIT;
   int i, j;
 
@@ -1627,7 +1627,7 @@ void defrEnableParserMsgs(int nMsg, int *msgs) {
 void defrEnableAllMsgs() {
   DEF_INIT;
   defContext.settings->nDDMsgs = 0;
-  free((int *)(defContext.settings->disableDMsgs));
+  free((int*)(defContext.settings->disableDMsgs));
 }
 
 void defrSetTotalMsgLimit(int totNumMsgs) {
@@ -1659,7 +1659,7 @@ void defrSetMagicCommentFoundFunction(DEFI_MAGIC_COMMENT_FOUND_FUNCTION f) {
   defContext.settings->MagicCommentFoundFunction = f;
 }
 
-void defrSetMagicCommentString(char *s) {
+void defrSetMagicCommentString(char* s) {
   DEF_INIT;
 
   free(defContext.data->magic);
@@ -1731,20 +1731,20 @@ void defrSetCaseSensitivity(int caseSense) {
   }
 }
 
-void defrAddAlias(const char *key, const char *value, int marked) {
+void defrAddAlias(const char* key, const char* value, int marked) {
   // Since the alias data is stored in the hash table, the hash table
   // only takes the key and the data, the marked data will be stored
   // at the end of the value data
 
-  defrData *defData = defContext.data;
+  defrData* defData = defContext.data;
 
-  char *k1;
-  char *v1;
+  char* k1;
+  char* v1;
   int   len = strlen(key) + 1;
-  k1        = (char *)malloc(len);
+  k1        = (char*)malloc(len);
   strcpy(k1, key);
   len = strlen(value) + 1 + 1;  // 1 for the marked
-  v1  = (char *)malloc(len);
+  v1  = (char*)malloc(len);
   // strcpy(v1, value);
   if (marked != 0) {
     marked = 1;  // make sure only 1 digit
@@ -1780,7 +1780,7 @@ void defrDisablePropStrProcess() {
 }
 
 void defrSetNLines(long long n) {
-  defrData *defData = defContext.data;
+  defrData* defData = defContext.data;
 
   defData->nlines = n;
 }

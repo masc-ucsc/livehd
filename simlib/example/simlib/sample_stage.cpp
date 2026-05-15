@@ -3,7 +3,7 @@
 #include "livesim_types.hpp"
 
 #ifdef SIMLIB_VCD
-Sample_stage::Sample_stage(uint64_t _hidx, const std::string &parent_name, vcd::VCDWriter *writer)
+Sample_stage::Sample_stage(uint64_t _hidx, const std::string& parent_name, vcd::VCDWriter* writer)
     : hidx(_hidx)
     , scope_name(parent_name.empty() ? "sample" : parent_name + ".sample")
     , vcd_writer(writer)
@@ -89,7 +89,7 @@ void Sample_stage::cycle() {
 }
 #endif
 #ifdef SIMLIB_TRACE
-void Sample_stage::add_signature(Simlib_signature &s) {
+void Sample_stage::add_signature(Simlib_signature& s) {
   s1.add_signature(s);
   s2.add_signature(s);
   s3.add_signature(s);

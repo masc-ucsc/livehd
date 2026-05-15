@@ -270,7 +270,9 @@ void Inou_yosys_api::do_tolg(Eprp_var& var) {
   vars.set("filelist", filelist);
 
   // Set a list of files as well as the filelist/manifest file for `read_lang`
-  if (!files_str.empty()) vars.set("files_str", files_str);
+  if (!files_str.empty()) {
+    vars.set("files_str", files_str);
+  }
   if (!filelist_file.empty()) {
     if (filelist_file.size() >= 2 && filelist_file[0] == '-' && (filelist_file[1] == 'f' || filelist_file[1] == 'F')) {
       vars.set("filelist_file_str", std::string(filelist_file));

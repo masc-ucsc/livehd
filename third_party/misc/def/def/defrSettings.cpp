@@ -34,7 +34,7 @@ using namespace std;
 
 BEGIN_LEFDEF_PARSER_NAMESPACE
 
-defrSettings *defSettings = NULL;
+defrSettings* defSettings = NULL;
 
 defrSettings::defrSettings()
     : defiDeltaNumberLines(10000)

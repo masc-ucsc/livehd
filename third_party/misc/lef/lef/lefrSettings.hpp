@@ -40,11 +40,11 @@
 BEGIN_LEFDEF_PARSER_NAMESPACE
 
 struct lefCompareCStrings {
-  bool operator()(const char *lhs, const char *rhs) const { return std::strcmp(lhs, rhs) < 0; }
+  bool operator()(const char* lhs, const char* rhs) const { return std::strcmp(lhs, rhs) < 0; }
 };
 
-typedef std::map<const char *, int, lefCompareCStrings> lefKeywordMap;
-typedef std::map<int, int>                              MsgsDisableMap;
+typedef std::map<const char*, int, lefCompareCStrings> lefKeywordMap;
+typedef std::map<int, int>                             MsgsDisableMap;
 
 typedef std::set<std::string> StringSet;
 
@@ -66,16 +66,16 @@ public:
 
   void        init_symbol_table();
   static void reset();
-  void        addLef58Type(const char *lef58Type, const char **layerType);
+  void        addLef58Type(const char* lef58Type, const char** layerType);
 
-  std::string getLayerLef58Types(const char *type) const;
+  std::string getLayerLef58Types(const char* type) const;
 
   void disableMsg(int msgId);
   void enableMsg(int msgId);
   void enableAllMsgs();
   int  suppresMsg(int msgId);
 
-  static std::string getToken(const std::string &input, int &startIdx);
+  static std::string getToken(const std::string& input, int& startIdx);
 
   lefKeywordMap Keyword_set;
 
@@ -142,7 +142,7 @@ public:
   lefrProps lefProps;
 };
 
-extern lefrSettings *lefSettings;
+extern lefrSettings* lefSettings;
 
 END_LEFDEF_PARSER_NAMESPACE
 

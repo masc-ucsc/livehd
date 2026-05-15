@@ -62,66 +62,66 @@ void lefiViaLayer::Init() {
   name_           = 0;
   rectsAllocated_ = 2;
   numRects_       = 0;
-  rectColorMask_  = (int *)lefMalloc(sizeof(int) * 2);
-  polyColorMask_  = (int *)lefMalloc(sizeof(int) * 2);
-  xl_             = (double *)lefMalloc(sizeof(double) * 2);
-  yl_             = (double *)lefMalloc(sizeof(double) * 2);
-  xh_             = (double *)lefMalloc(sizeof(double) * 2);
-  yh_             = (double *)lefMalloc(sizeof(double) * 2);
+  rectColorMask_  = (int*)lefMalloc(sizeof(int) * 2);
+  polyColorMask_  = (int*)lefMalloc(sizeof(int) * 2);
+  xl_             = (double*)lefMalloc(sizeof(double) * 2);
+  yl_             = (double*)lefMalloc(sizeof(double) * 2);
+  xh_             = (double*)lefMalloc(sizeof(double) * 2);
+  yh_             = (double*)lefMalloc(sizeof(double) * 2);
   polysAllocated_ = 2;
   numPolys_       = 0;
-  polygons_       = ((lefiGeomPolygon **)lefMalloc(sizeof(lefiGeomPolygon *) * 2));
+  polygons_       = ((lefiGeomPolygon**)lefMalloc(sizeof(lefiGeomPolygon*) * 2));
 }
 
 void lefiViaLayer::Destroy() {
   if (xl_) {
-    lefFree((char *)(xl_));
-    lefFree((char *)(yl_));
-    lefFree((char *)(xh_));
-    lefFree((char *)(yh_));
+    lefFree((char*)(xl_));
+    lefFree((char*)(yl_));
+    lefFree((char*)(xh_));
+    lefFree((char*)(yh_));
   }
   if (polygons_) {
-    lefiGeomPolygon *geom;
+    lefiGeomPolygon* geom;
     for (int i = 0; i < numPolys_; i++) {
       geom = polygons_[i];
-      lefFree((char *)(geom->x));
-      lefFree((char *)(geom->y));
-      lefFree((char *)(polygons_[i]));
+      lefFree((char*)(geom->x));
+      lefFree((char*)(geom->y));
+      lefFree((char*)(polygons_[i]));
     }
-    lefFree((char *)(polygons_));
+    lefFree((char*)(polygons_));
 
     polygons_ = 0;
     numPolys_ = 0;
   }
 
   lefFree(name_);
-  lefFree((char *)(rectColorMask_));
-  lefFree((char *)(polyColorMask_));
+  lefFree((char*)(rectColorMask_));
+  lefFree((char*)(polyColorMask_));
 }
 
 lefiViaLayer::~lefiViaLayer() { Destroy(); }
 
-void lefiViaLayer::setName(const char *name) {
+void lefiViaLayer::setName(const char* name) {
   int len = strlen(name) + 1;
-  name_   = (char *)lefMalloc(len);
+  name_   = (char*)lefMalloc(len);
   strcpy(name_, CASE(name));
 }
 
 void lefiViaLayer::addRect(int colorMask, double xl, double yl, double xh, double yh) {
   if (numRects_ == rectsAllocated_) {
     int     i;
-    double *newxl;
-    double *newyl;
-    double *newxh;
-    double *newyh;
-    int    *rectMask;
+    double* newxl;
+    double* newyl;
+    double* newxh;
+    double* newyh;
+    int*    rectMask;
 
     rectsAllocated_ = (rectsAllocated_ == 0) ? 2 : rectsAllocated_ * 2;
-    newxl           = (double *)lefMalloc(sizeof(double) * rectsAllocated_);
-    newyl           = (double *)lefMalloc(sizeof(double) * rectsAllocated_);
-    newxh           = (double *)lefMalloc(sizeof(double) * rectsAllocated_);
-    newyh           = (double *)lefMalloc(sizeof(double) * rectsAllocated_);
-    rectMask        = (int *)lefMalloc(sizeof(int) * rectsAllocated_);
+    newxl           = (double*)lefMalloc(sizeof(double) * rectsAllocated_);
+    newyl           = (double*)lefMalloc(sizeof(double) * rectsAllocated_);
+    newxh           = (double*)lefMalloc(sizeof(double) * rectsAllocated_);
+    newyh           = (double*)lefMalloc(sizeof(double) * rectsAllocated_);
+    rectMask        = (int*)lefMalloc(sizeof(int) * rectsAllocated_);
 
     for (i = 0; i < numRects_; i++) {
       newxl[i]    = xl_[i];
@@ -132,11 +132,11 @@ void lefiViaLayer::addRect(int colorMask, double xl, double yl, double xh, doubl
     }
 
     if (xl_) {
-      lefFree((char *)(xl_));
-      lefFree((char *)(yl_));
-      lefFree((char *)(xh_));
-      lefFree((char *)(yh_));
-      lefFree((char *)(rectColorMask_));
+      lefFree((char*)(xl_));
+      lefFree((char*)(yl_));
+      lefFree((char*)(xh_));
+      lefFree((char*)(yh_));
+      lefFree((char*)(rectColorMask_));
     }
 
     xl_            = newxl;
@@ -155,15 +155,15 @@ void lefiViaLayer::addRect(int colorMask, double xl, double yl, double xh, doubl
   numRects_ += 1;
 }
 
-void lefiViaLayer::addPoly(int colorMask, lefiGeometries *geom) {
+void lefiViaLayer::addPoly(int colorMask, lefiGeometries* geom) {
   if (numPolys_ == polysAllocated_) {
     int               i;
-    lefiGeomPolygon **poly;
-    int              *polyMask;
+    lefiGeomPolygon** poly;
+    int*              polyMask;
 
     polysAllocated_ = (polysAllocated_ == 0) ? 2 : polysAllocated_ * 2;
-    poly            = (lefiGeomPolygon **)lefMalloc(sizeof(lefiGeomPolygon *) * polysAllocated_);
-    polyMask        = (int *)lefMalloc(sizeof(int) * polysAllocated_);
+    poly            = (lefiGeomPolygon**)lefMalloc(sizeof(lefiGeomPolygon*) * polysAllocated_);
+    polyMask        = (int*)lefMalloc(sizeof(int) * polysAllocated_);
 
     for (i = 0; i < numPolys_; i++) {
       poly[i]     = polygons_[i];
@@ -171,8 +171,8 @@ void lefiViaLayer::addPoly(int colorMask, lefiGeometries *geom) {
     }
 
     if (polygons_) {
-      lefFree((char *)(polygons_));
-      lefFree((char *)(polyColorMask_));
+      lefFree((char*)(polygons_));
+      lefFree((char*)(polyColorMask_));
     }
 
     polygons_      = poly;
@@ -189,15 +189,15 @@ int lefiViaLayer::numRects() { return numRects_; }
 
 int lefiViaLayer::numPolygons() { return numPolys_; }
 
-lefiViaLayer *lefiViaLayer::clone() {
-  lefiViaLayer *vl = (lefiViaLayer *)lefMalloc(sizeof(lefiViaLayer));
+lefiViaLayer* lefiViaLayer::clone() {
+  lefiViaLayer* vl = (lefiViaLayer*)lefMalloc(sizeof(lefiViaLayer));
   int           i, j;
   if (numRects_ > 0) {
-    vl->xl_             = (double *)lefMalloc(sizeof(double) * numRects_);
-    vl->yl_             = (double *)lefMalloc(sizeof(double) * numRects_);
-    vl->xh_             = (double *)lefMalloc(sizeof(double) * numRects_);
-    vl->yh_             = (double *)lefMalloc(sizeof(double) * numRects_);
-    vl->rectColorMask_  = (int *)lefMalloc(sizeof(int) * numRects_);
+    vl->xl_             = (double*)lefMalloc(sizeof(double) * numRects_);
+    vl->yl_             = (double*)lefMalloc(sizeof(double) * numRects_);
+    vl->xh_             = (double*)lefMalloc(sizeof(double) * numRects_);
+    vl->yh_             = (double*)lefMalloc(sizeof(double) * numRects_);
+    vl->rectColorMask_  = (int*)lefMalloc(sizeof(int) * numRects_);
     vl->numRects_       = numRects_;
     vl->rectsAllocated_ = rectsAllocated_;
 
@@ -220,19 +220,19 @@ lefiViaLayer *lefiViaLayer::clone() {
 
   vl->numPolys_       = numPolys_;
   vl->polysAllocated_ = polysAllocated_;
-  vl->polygons_       = (lefiGeomPolygon **)lefMalloc(sizeof(lefiGeomPolygon *) * polysAllocated_);
+  vl->polygons_       = (lefiGeomPolygon**)lefMalloc(sizeof(lefiGeomPolygon*) * polysAllocated_);
 
   if (numPolys_ > 0) {
-    vl->polyColorMask_ = (int *)lefMalloc(sizeof(int) * numPolys_);
+    vl->polyColorMask_ = (int*)lefMalloc(sizeof(int) * numPolys_);
   } else {
     vl->polyColorMask_ = 0;
   }
 
   for (i = 0; i < numPolys_; i++) {
-    vl->polygons_[i]            = (lefiGeomPolygon *)lefMalloc(sizeof(lefiGeomPolygon));
+    vl->polygons_[i]            = (lefiGeomPolygon*)lefMalloc(sizeof(lefiGeomPolygon));
     vl->polygons_[i]->numPoints = polygons_[i]->numPoints;
-    vl->polygons_[i]->x         = (double *)lefMalloc(sizeof(double) * polygons_[i]->numPoints);
-    vl->polygons_[i]->y         = (double *)lefMalloc(sizeof(double) * polygons_[i]->numPoints);
+    vl->polygons_[i]->x         = (double*)lefMalloc(sizeof(double) * polygons_[i]->numPoints);
+    vl->polygons_[i]->y         = (double*)lefMalloc(sizeof(double) * polygons_[i]->numPoints);
     vl->polygons_[i]->colorMask = polygons_[i]->colorMask;
     vl->polyColorMask_[i]       = polyColorMask_[i];
 
@@ -244,12 +244,12 @@ lefiViaLayer *lefiViaLayer::clone() {
         vl->polygons_[i] =  polygons_[i];
     */
   }
-  vl->name_ = (char *)lefMalloc(strlen(name_) + 1);
+  vl->name_ = (char*)lefMalloc(strlen(name_) + 1);
   strcpy(vl->name_, name_);
   return vl;
 }
 
-char *lefiViaLayer::name() { return name_; }
+char* lefiViaLayer::name() { return name_; }
 
 int lefiViaLayer::rectColorMask(int index) {
   char msg[160];
@@ -333,7 +333,7 @@ double lefiViaLayer::yh(int index) {
   return yh_[index];
 }
 
-lefiGeomPolygon *lefiViaLayer::getPolygon(int index) const { return polygons_[index]; }
+lefiGeomPolygon* lefiViaLayer::getPolygon(int index) const { return polygons_[index]; }
 
 // *****************************************************************************
 // lefiVia
@@ -387,12 +387,12 @@ lefiVia::lefiVia()
 
 void lefiVia::Init() {
   nameSize_        = 16;
-  name_            = (char *)lefMalloc(16);
+  name_            = (char*)lefMalloc(16);
   foreign_         = 0;
   numProps_        = 0;
   propsAllocated_  = 0;
   layersAllocated_ = 3;
-  layers_          = (lefiViaLayer **)lefMalloc(sizeof(lefiViaLayer *) * 3);
+  layers_          = (lefiViaLayer**)lefMalloc(sizeof(lefiViaLayer*) * 3);
   numLayers_       = 0;
   clear();
   viaRuleName_ = 0;
@@ -402,35 +402,35 @@ void lefiVia::Destroy() {
   clear();
   lefFree(name_);
   if (layers_) {
-    lefFree((char *)(layers_));
+    lefFree((char*)(layers_));
   }
   layers_ = 0;
   if (propName_) {
-    lefFree((char *)(propName_));
+    lefFree((char*)(propName_));
   }
   if (propValue_) {
-    lefFree((char *)(propValue_));
+    lefFree((char*)(propValue_));
   }
   if (propDValue_) {
-    lefFree((char *)(propDValue_));
+    lefFree((char*)(propDValue_));
   }
   if (propType_) {
-    lefFree((char *)(propType_));
+    lefFree((char*)(propType_));
   }
   if (viaRuleName_) {
-    lefFree((char *)(viaRuleName_));
+    lefFree((char*)(viaRuleName_));
   }
   if (botLayer_) {
-    lefFree((char *)(botLayer_));
+    lefFree((char*)(botLayer_));
   }
   if (cutLayer_) {
-    lefFree((char *)(cutLayer_));
+    lefFree((char*)(cutLayer_));
   }
   if (topLayer_) {
-    lefFree((char *)(topLayer_));
+    lefFree((char*)(topLayer_));
   }
   if (cutPattern_) {
-    lefFree((char *)(cutPattern_));
+    lefFree((char*)(cutPattern_));
   }
   propName_    = 0;
   propValue_   = 0;
@@ -445,12 +445,12 @@ void lefiVia::Destroy() {
 
 lefiVia::~lefiVia() { Destroy(); }
 
-lefiVia *lefiVia::clone() {
+lefiVia* lefiVia::clone() {
   int           i;
-  lefiViaLayer *l;
-  lefiVia      *v = (lefiVia *)lefMalloc(sizeof(lefiVia));
+  lefiViaLayer* l;
+  lefiVia*      v = (lefiVia*)lefMalloc(sizeof(lefiVia));
   v->nameSize_    = strlen(name_) + 1;
-  v->name_        = (char *)lefMalloc(v->nameSize_);
+  v->name_        = (char*)lefMalloc(v->nameSize_);
   strcpy(v->name_, name_);
   v->foreign_ = 0;
   if (hasForeign()) {
@@ -464,17 +464,17 @@ lefiVia *lefiVia::clone() {
   v->numProps_       = numProps_;
   v->propsAllocated_ = numProps_;
   if (numProps_ > 0) {
-    v->propName_   = (char **)lefMalloc(sizeof(char *) * numProps_);
-    v->propValue_  = (char **)lefMalloc(sizeof(char *) * numProps_);
-    v->propDValue_ = (double *)lefMalloc(sizeof(double) * numProps_);
-    v->propType_   = (char *)lefMalloc(sizeof(char) * numProps_);
+    v->propName_   = (char**)lefMalloc(sizeof(char*) * numProps_);
+    v->propValue_  = (char**)lefMalloc(sizeof(char*) * numProps_);
+    v->propDValue_ = (double*)lefMalloc(sizeof(double) * numProps_);
+    v->propType_   = (char*)lefMalloc(sizeof(char) * numProps_);
     for (i = 0; i < numProps_; i++) {
-      v->propName_[i] = (char *)lefMalloc(strlen(propName_[i]) + 1);
+      v->propName_[i] = (char*)lefMalloc(strlen(propName_[i]) + 1);
       strcpy(v->propName_[i], propName_[i]);
       // Modified 8/27/99 - Wanda da Rosa for pcr 274891
       // propValue_[i] can be null, if propValue was a number
       if (propValue_[i]) {
-        v->propValue_[i] = (char *)lefMalloc(strlen(propValue_[i]) + 1);
+        v->propValue_[i] = (char*)lefMalloc(strlen(propValue_[i]) + 1);
         strcpy(v->propValue_[i], propValue_[i]);
       } else {
         v->propValue_[i] = 0;
@@ -491,9 +491,9 @@ lefiVia *lefiVia::clone() {
   v->layersAllocated_ = layersAllocated_;
   v->numLayers_       = numLayers_;
   if (numLayers_ > 0) {
-    v->layers_ = (lefiViaLayer **)lefMalloc(sizeof(lefiViaLayer *) * numLayers_);
+    v->layers_ = (lefiViaLayer**)lefMalloc(sizeof(lefiViaLayer*) * numLayers_);
   } else {  // still malloc the memory because lefiVia::Init does
-    v->layers_ = (lefiViaLayer **)lefMalloc(sizeof(lefiViaLayer *) * 2);
+    v->layers_ = (lefiViaLayer**)lefMalloc(sizeof(lefiViaLayer*) * 2);
   }
   for (i = 0; i < numLayers_; i++) {
     l             = layers_[i];
@@ -576,7 +576,7 @@ void lefiVia::clear() {
 
   for (i = 0; i < numLayers_; i++) {
     layers_[i]->Destroy();
-    lefFree((char *)(layers_[i]));
+    lefFree((char*)(layers_[i]));
     layers_[i] = 0;
   }
   numLayers_ = 0;
@@ -619,7 +619,7 @@ void lefiVia::clear() {
   cutPattern_ = 0;
 }
 
-void lefiVia::setName(const char *name, int viaType) {
+void lefiVia::setName(const char* name, int viaType) {
   int len;
   // setName calls clear to init
   // default=0 no default specified
@@ -633,7 +633,7 @@ void lefiVia::setName(const char *name, int viaType) {
   len = strlen(name) + 1;
   if (len > nameSize_) {
     lefFree(name_);
-    name_     = (char *)lefMalloc(len);
+    name_     = (char*)lefMalloc(len);
     nameSize_ = len;
   }
   strcpy(name_, CASE(name));
@@ -646,10 +646,10 @@ void lefiVia::setResistance(double num) {
 
 void lefiVia::bumpProps() {
   int     i;
-  double *d;
-  char  **n;
-  char  **v;
-  char   *t;
+  double* d;
+  char**  n;
+  char**  v;
+  char*   t;
 
   if (propsAllocated_ == 0) {
     propsAllocated_ = 2;
@@ -657,10 +657,10 @@ void lefiVia::bumpProps() {
     propsAllocated_ *= 2;
   }
 
-  d = (double *)lefMalloc(sizeof(double) * propsAllocated_);
-  n = (char **)lefMalloc(sizeof(char *) * propsAllocated_);
-  v = (char **)lefMalloc(sizeof(char *) * propsAllocated_);
-  t = (char *)lefMalloc(sizeof(char) * propsAllocated_);
+  d = (double*)lefMalloc(sizeof(double) * propsAllocated_);
+  n = (char**)lefMalloc(sizeof(char*) * propsAllocated_);
+  v = (char**)lefMalloc(sizeof(char*) * propsAllocated_);
+  t = (char*)lefMalloc(sizeof(char) * propsAllocated_);
 
   for (i = 0; i < numProps_; i++) {
     d[i] = propDValue_[i];
@@ -670,10 +670,10 @@ void lefiVia::bumpProps() {
   }
 
   if (numProps_ > 0) {
-    lefFree((char *)(propDValue_));
-    lefFree((char *)(propName_));
-    lefFree((char *)(propValue_));
-    lefFree((char *)(propType_));
+    lefFree((char*)(propDValue_));
+    lefFree((char*)(propName_));
+    lefFree((char*)(propValue_));
+    lefFree((char*)(propType_));
   }
 
   propDValue_ = d;
@@ -682,18 +682,18 @@ void lefiVia::bumpProps() {
   propType_   = t;
 }
 
-void lefiVia::addProp(const char *name, const char *value, const char type) {
+void lefiVia::addProp(const char* name, const char* value, const char type) {
   int len = strlen(name) + 1;
 
   if (numProps_ == propsAllocated_) {
     bumpProps();
   }
 
-  propName_[numProps_] = (char *)lefMalloc(len);
+  propName_[numProps_] = (char*)lefMalloc(len);
   strcpy(propName_[numProps_], CASE(name));
 
   len                   = strlen(value) + 1;
-  propValue_[numProps_] = (char *)lefMalloc(len);
+  propValue_[numProps_] = (char*)lefMalloc(len);
   strcpy(propValue_[numProps_], CASE(value));
 
   propDValue_[numProps_] = 0.0;
@@ -703,18 +703,18 @@ void lefiVia::addProp(const char *name, const char *value, const char type) {
   numProps_ += 1;
 }
 
-void lefiVia::addNumProp(const char *name, double d, const char *value, const char type) {
+void lefiVia::addNumProp(const char* name, double d, const char* value, const char type) {
   int len = strlen(name) + 1;
 
   if (numProps_ == propsAllocated_) {
     bumpProps();
   }
 
-  propName_[numProps_] = (char *)lefMalloc(len);
+  propName_[numProps_] = (char*)lefMalloc(len);
   strcpy(propName_[numProps_], CASE(name));
 
   len                   = strlen(value) + 1;
-  propValue_[numProps_] = (char *)lefMalloc(len);
+  propValue_[numProps_] = (char*)lefMalloc(len);
   strcpy(propValue_[numProps_], CASE(value));
 
   propDValue_[numProps_] = d;
@@ -724,7 +724,7 @@ void lefiVia::addNumProp(const char *name, double d, const char *value, const ch
   numProps_ += 1;
 }
 
-void lefiVia::setForeign(const char *name, int hasPnt, double x, double y, int orient) {
+void lefiVia::setForeign(const char* name, int hasPnt, double x, double y, int orient) {
   // orient=-1 means no orient was specified.
   int len = strlen(name) + 1;
 
@@ -733,30 +733,30 @@ void lefiVia::setForeign(const char *name, int hasPnt, double x, double y, int o
   foreignX_      = x;
   foreignY_      = y;
 
-  foreign_ = (char *)lefMalloc(len);
+  foreign_ = (char*)lefMalloc(len);
   strcpy(foreign_, CASE(name));
 }
 
 void lefiVia::setTopOfStack() { hasTopOfStack_ = 1; }
 
-void lefiVia::addLayer(const char *name) {
-  lefiViaLayer *newl;
+void lefiVia::addLayer(const char* name) {
+  lefiViaLayer* newl;
   if (numLayers_ == layersAllocated_) {
     int            i;
-    lefiViaLayer **l;
+    lefiViaLayer** l;
     if (layersAllocated_ == 0) {
       layersAllocated_ = 2;
     } else {
       layersAllocated_ *= 2;
     }
-    l = (lefiViaLayer **)lefMalloc(sizeof(lefiViaLayer *) * layersAllocated_);
+    l = (lefiViaLayer**)lefMalloc(sizeof(lefiViaLayer*) * layersAllocated_);
     for (i = 0; i < numLayers_; i++) {
       l[i] = layers_[i];
     }
-    lefFree((char *)(layers_));
+    lefFree((char*)(layers_));
     layers_ = l;
   }
-  newl = (lefiViaLayer *)lefMalloc(sizeof(lefiViaLayer));
+  newl = (lefiViaLayer*)lefMalloc(sizeof(lefiViaLayer));
   newl->Init();
   layers_[numLayers_] = newl;
   newl->setName(name);
@@ -767,10 +767,10 @@ void lefiVia::addRectToLayer(int mask, double xl, double yl, double xh, double y
   layers_[numLayers_ - 1]->addRect(mask, xl, yl, xh, yh);
 }
 
-void lefiVia::addPolyToLayer(int mask, lefiGeometries *geom) { layers_[numLayers_ - 1]->addPoly(mask, geom); }
+void lefiVia::addPolyToLayer(int mask, lefiGeometries* geom) { layers_[numLayers_ - 1]->addPoly(mask, geom); }
 
-void lefiVia::setViaRule(const char *viaRuleName, double xSize, double ySize, const char *botLayer, const char *cutLayer,
-                         const char *topLayer, double xCut, double yCut, double xBotEnc, double yBotEnc, double xTopEnc,
+void lefiVia::setViaRule(const char* viaRuleName, double xSize, double ySize, const char* botLayer, const char* cutLayer,
+                         const char* topLayer, double xCut, double yCut, double xBotEnc, double yBotEnc, double xTopEnc,
                          double yTopEnc) {
   viaRuleName_ = strdup(viaRuleName);
   xSize_       = xSize;
@@ -803,7 +803,7 @@ void lefiVia::setOffset(double xBot, double yBot, double xTop, double yTop) {
   yTopOs_ = yTop;
 }
 
-void lefiVia::setPattern(const char *cutPattern) { cutPattern_ = strdup(cutPattern); }
+void lefiVia::setPattern(const char* cutPattern) { cutPattern_ = strdup(cutPattern); }
 
 int lefiVia::hasDefault() const { return hasDefault_; }
 
@@ -853,8 +853,8 @@ int lefiVia::hasCutPattern() const { return cutPattern_ ? 1 : 0; }
 
 int lefiVia::numLayers() const { return numLayers_; }
 
-char *lefiVia::layerName(int layerNum) const {
-  lefiViaLayer *vl;
+char* lefiVia::layerName(int layerNum) const {
+  lefiViaLayer* vl;
   char          msg[160];
   if (layerNum < 0 || layerNum >= numLayers_) {
     sprintf(msg,
@@ -869,7 +869,7 @@ char *lefiVia::layerName(int layerNum) const {
 }
 
 int lefiVia::numRects(int layerNum) const {
-  lefiViaLayer *vl;
+  lefiViaLayer* vl;
   char          msg[160];
   if (layerNum < 0 || layerNum >= numLayers_) {
     sprintf(msg,
@@ -884,7 +884,7 @@ int lefiVia::numRects(int layerNum) const {
 }
 
 double lefiVia::xl(int layerNum, int rectNum) const {
-  lefiViaLayer *vl;
+  lefiViaLayer* vl;
   char          msg[160];
   if (layerNum < 0 || layerNum >= numLayers_) {
     sprintf(msg,
@@ -899,7 +899,7 @@ double lefiVia::xl(int layerNum, int rectNum) const {
 }
 
 double lefiVia::yl(int layerNum, int rectNum) const {
-  lefiViaLayer *vl;
+  lefiViaLayer* vl;
   char          msg[160];
   if (layerNum < 0 || layerNum >= numLayers_) {
     sprintf(msg,
@@ -914,7 +914,7 @@ double lefiVia::yl(int layerNum, int rectNum) const {
 }
 
 double lefiVia::xh(int layerNum, int rectNum) const {
-  lefiViaLayer *vl;
+  lefiViaLayer* vl;
   char          msg[160];
   if (layerNum < 0 || layerNum >= numLayers_) {
     sprintf(msg,
@@ -929,7 +929,7 @@ double lefiVia::xh(int layerNum, int rectNum) const {
 }
 
 double lefiVia::yh(int layerNum, int rectNum) const {
-  lefiViaLayer *vl;
+  lefiViaLayer* vl;
   char          msg[160];
   if (layerNum < 0 || layerNum >= numLayers_) {
     sprintf(msg,
@@ -944,7 +944,7 @@ double lefiVia::yh(int layerNum, int rectNum) const {
 }
 
 int lefiVia::rectColorMask(int layerNum, int rectNum) const {
-  lefiViaLayer *vl;
+  lefiViaLayer* vl;
   char          msg[160];
 
   if (layerNum < 0 || layerNum >= numLayers_) {
@@ -962,7 +962,7 @@ int lefiVia::rectColorMask(int layerNum, int rectNum) const {
 }
 
 int lefiVia::polyColorMask(int layerNum, int polyNum) const {
-  lefiViaLayer *vl;
+  lefiViaLayer* vl;
   char          msg[160];
 
   if (layerNum < 0 || layerNum >= numLayers_) {
@@ -980,7 +980,7 @@ int lefiVia::polyColorMask(int layerNum, int polyNum) const {
 }
 
 int lefiVia::numPolygons(int layerNum) const {
-  lefiViaLayer *vl;
+  lefiViaLayer* vl;
   char          msg[160];
   if (layerNum < 0 || layerNum >= numLayers_) {
     sprintf(msg,
@@ -995,7 +995,7 @@ int lefiVia::numPolygons(int layerNum) const {
 }
 
 lefiGeomPolygon lefiVia::getPolygon(int layerNum, int polyNum) const {
-  lefiViaLayer   *vl;
+  lefiViaLayer*   vl;
   char            msg[160];
   lefiGeomPolygon tempPoly;
 
@@ -1018,7 +1018,7 @@ lefiGeomPolygon lefiVia::getPolygon(int layerNum, int polyNum) const {
   return *(vl->getPolygon(polyNum));
 }
 
-char *lefiVia::name() const { return name_; }
+char* lefiVia::name() const { return name_; }
 
 double lefiVia::resistance() const { return resistance_; }
 
@@ -1026,7 +1026,7 @@ double lefiVia::resistance() const { return resistance_; }
 // information about that property.
 int lefiVia::numProperties() const { return numProps_; }
 
-char *lefiVia::propName(int index) const {
+char* lefiVia::propName(int index) const {
   char msg[160];
   if (index < 0 || index >= numProps_) {
     sprintf(msg,
@@ -1039,7 +1039,7 @@ char *lefiVia::propName(int index) const {
   return propName_[index];
 }
 
-char *lefiVia::propValue(int index) const {
+char* lefiVia::propValue(int index) const {
   char msg[160];
   if (index < 0 || index >= numProps_) {
     sprintf(msg,
@@ -1104,7 +1104,7 @@ int lefiVia::propIsString(int index) const {
   return propDValue_[index] ? 0 : 1;
 }
 
-char *lefiVia::foreign() const { return foreign_; }
+char* lefiVia::foreign() const { return foreign_; }
 
 double lefiVia::foreignX() const { return foreignX_; }
 
@@ -1112,20 +1112,20 @@ double lefiVia::foreignY() const { return foreignY_; }
 
 int lefiVia::foreignOrient() const { return foreignOrient_; }
 
-char *lefiVia::foreignOrientStr() const { return (lefiOrientStr(foreignOrient_)); }
+char* lefiVia::foreignOrientStr() const { return (lefiOrientStr(foreignOrient_)); }
 
 // 5.6
-const char *lefiVia::viaRuleName() const { return viaRuleName_; }
+const char* lefiVia::viaRuleName() const { return viaRuleName_; }
 
 double lefiVia::xCutSize() const { return xSize_; }
 
 double lefiVia::yCutSize() const { return ySize_; }
 
-const char *lefiVia::botMetalLayer() const { return botLayer_; }
+const char* lefiVia::botMetalLayer() const { return botLayer_; }
 
-const char *lefiVia::cutLayer() const { return cutLayer_; }
+const char* lefiVia::cutLayer() const { return cutLayer_; }
 
-const char *lefiVia::topMetalLayer() const { return topLayer_; }
+const char* lefiVia::topMetalLayer() const { return topLayer_; }
 
 double lefiVia::xCutSpacing() const { return xSpacing_; }
 
@@ -1155,10 +1155,10 @@ double lefiVia::xTopOffset() const { return xTopOs_; }
 
 double lefiVia::yTopOffset() const { return yTopOs_; }
 
-const char *lefiVia::cutPattern() const { return cutPattern_; }
+const char* lefiVia::cutPattern() const { return cutPattern_; }
 
 // Debug print
-void lefiVia::print(FILE *f) const {
+void lefiVia::print(FILE* f) const {
   int i;
   int h;
 

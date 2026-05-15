@@ -34,9 +34,7 @@ void uPass_verifier::set_aggregate_expected(int expected_pass, int expected_fail
   aggregate_expected_fail = expected_fail;
 }
 
-bool uPass_verifier::already_counted_cassert(std::string_view key) {
-  return processed_cassert_keys.contains(std::string{key});
-}
+bool uPass_verifier::already_counted_cassert(std::string_view key) { return processed_cassert_keys.contains(std::string{key}); }
 
 void uPass_verifier::mark_inlined_cassert_pass(std::string_view key) {
   if (processed_cassert_keys.insert(std::string{key}).second) {
@@ -70,8 +68,8 @@ upass::Emit_decision uPass_verifier::classify_statement() {
   // Resolve it through the runner's aggregated fold_ref so we see whatever
   // constprop (or any future pass) knows.
   std::optional<Const> val;
-  std::string           operand_text;
-  bool                  got_child = move_to_child();
+  std::string          operand_text;
+  bool                 got_child = move_to_child();
   if (got_child) {
     operand_text = std::string{current_text()};
     if (is_type(Lnast_ntype::Lnast_ntype_const)) {
@@ -119,8 +117,7 @@ upass::Emit_decision uPass_verifier::classify_statement() {
 }
 
 void uPass_verifier::end_run() {
-  std::print(stderr, "uPass - verifier cassert counts: pass:{} fail:{} unknown:{}\n", pass_count, fail_count,
-             unknown_count);
+  std::print(stderr, "uPass - verifier cassert counts: pass:{} fail:{} unknown:{}\n", pass_count, fail_count, unknown_count);
 
   // Roll local counts into the test-level aggregate. The mismatch check
   // moved to finalize_aggregate so it runs once across the whole program
@@ -154,10 +151,7 @@ void uPass_verifier::finalize_aggregate() {
   // as the default so a naked run still catches false casserts.
   const int fail_allowed = aggregate_expected_fail >= 0 ? aggregate_expected_fail : 0;
   if (static_cast<int>(aggregate_fail_count) != fail_allowed) {
-    std::print(stderr,
-               "uPass - verifier expected verifier_fail:{} but saw fail:{}\n",
-               fail_allowed,
-               aggregate_fail_count);
+    std::print(stderr, "uPass - verifier expected verifier_fail:{} but saw fail:{}\n", fail_allowed, aggregate_fail_count);
     mismatch = true;
   }
 

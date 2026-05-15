@@ -92,9 +92,9 @@ static Lgraph* build_fat_pins_lg(const std::string& name, int n) {
 // ---------------------------------------------------------------------------
 
 struct HhdsBundle {
-  hhds::GraphLibrary               lib;
-  std::shared_ptr<hhds::GraphIO>   gio;
-  std::shared_ptr<hhds::Graph>     graph;
+  hhds::GraphLibrary             lib;
+  std::shared_ptr<hhds::GraphIO> gio;
+  std::shared_ptr<hhds::Graph>   graph;
 };
 
 static std::unique_ptr<HhdsBundle> make_hhds_bundle(const char* name) {
@@ -164,75 +164,70 @@ static std::unique_ptr<HhdsBundle> build_fat_pins_hhds(int n) {
 // Lgraph benchmarks (build / fast / forward / delete) × (chain / fat_pin0 / fat_pins)
 // ---------------------------------------------------------------------------
 
-#define BENCH_LG_BUILD(NAME, BUILDER)                                                   \
-  void BM_##NAME##_build_lgraph(benchmark::State& state) {                              \
-    for (auto _ : state) {                                                              \
-      auto* g = BUILDER(std::string(#NAME "_lg_") + std::to_string(next_gen()),         \
-                       static_cast<int>(state.range(0)));                               \
-      benchmark::DoNotOptimize(g);                                                      \
-    }                                                                                   \
+#define BENCH_LG_BUILD(NAME, BUILDER)                                                                              \
+  void BM_##NAME##_build_lgraph(benchmark::State& state) {                                                         \
+    for (auto _ : state) {                                                                                         \
+      auto* g = BUILDER(std::string(#NAME "_lg_") + std::to_string(next_gen()), static_cast<int>(state.range(0))); \
+      benchmark::DoNotOptimize(g);                                                                                 \
+    }                                                                                                              \
   }
 
-#define BENCH_LG_FAST(NAME, BUILDER)                                                    \
-  void BM_##NAME##_fast_lgraph(benchmark::State& state) {                               \
-    auto* g = BUILDER(std::string(#NAME "_lg_fast_") + std::to_string(next_gen()),      \
-                     static_cast<int>(state.range(0)));                                 \
-    for (auto _ : state) {                                                              \
-      int n_nodes = 0;                                                                  \
-      for (auto node : g->fast()) {                                                     \
-        benchmark::DoNotOptimize(node);                                                 \
-        ++n_nodes;                                                                      \
-      }                                                                                 \
-      benchmark::DoNotOptimize(n_nodes);                                                \
-    }                                                                                   \
+#define BENCH_LG_FAST(NAME, BUILDER)                                                                                  \
+  void BM_##NAME##_fast_lgraph(benchmark::State& state) {                                                             \
+    auto* g = BUILDER(std::string(#NAME "_lg_fast_") + std::to_string(next_gen()), static_cast<int>(state.range(0))); \
+    for (auto _ : state) {                                                                                            \
+      int n_nodes = 0;                                                                                                \
+      for (auto node : g->fast()) {                                                                                   \
+        benchmark::DoNotOptimize(node);                                                                               \
+        ++n_nodes;                                                                                                    \
+      }                                                                                                               \
+      benchmark::DoNotOptimize(n_nodes);                                                                              \
+    }                                                                                                                 \
   }
 
-#define BENCH_LG_FORWARD(NAME, BUILDER)                                                 \
-  void BM_##NAME##_forward_lgraph(benchmark::State& state) {                            \
-    auto* g = BUILDER(std::string(#NAME "_lg_fwd_") + std::to_string(next_gen()),       \
-                     static_cast<int>(state.range(0)));                                 \
-    for (auto _ : state) {                                                              \
-      int n_edges = 0;                                                                  \
-      for (auto node : g->forward()) {                                                  \
-        for (auto& e : node.out_edges()) {                                              \
-          benchmark::DoNotOptimize(e);                                                  \
-          ++n_edges;                                                                    \
-        }                                                                               \
-      }                                                                                 \
-      benchmark::DoNotOptimize(n_edges);                                                \
-    }                                                                                   \
+#define BENCH_LG_FORWARD(NAME, BUILDER)                                                                              \
+  void BM_##NAME##_forward_lgraph(benchmark::State& state) {                                                         \
+    auto* g = BUILDER(std::string(#NAME "_lg_fwd_") + std::to_string(next_gen()), static_cast<int>(state.range(0))); \
+    for (auto _ : state) {                                                                                           \
+      int n_edges = 0;                                                                                               \
+      for (auto node : g->forward()) {                                                                               \
+        for (auto& e : node.out_edges()) {                                                                           \
+          benchmark::DoNotOptimize(e);                                                                               \
+          ++n_edges;                                                                                                 \
+        }                                                                                                            \
+      }                                                                                                              \
+      benchmark::DoNotOptimize(n_edges);                                                                             \
+    }                                                                                                                \
   }
 
-#define BENCH_LG_DELETE_PIN(NAME, BUILDER)                                              \
-  void BM_##NAME##_delete_pin_lgraph(benchmark::State& state) {                         \
-    for (auto _ : state) {                                                              \
-      state.PauseTiming();                                                              \
-      auto* g = BUILDER(std::string(#NAME "_lg_delp_") + std::to_string(next_gen()),    \
-                       static_cast<int>(state.range(0)));                               \
-      state.ResumeTiming();                                                             \
-      for (auto node : g->forward()) {                                                  \
-        for (auto& e : node.out_edges()) {                                              \
-          e.del_edge();                                                                 \
-        }                                                                               \
-        for (auto& e : node.inp_edges()) {                                              \
-          e.del_edge();                                                                 \
-        }                                                                               \
-        node.del_node();                                                                \
-      }                                                                                 \
-    }                                                                                   \
+#define BENCH_LG_DELETE_PIN(NAME, BUILDER)                                                                              \
+  void BM_##NAME##_delete_pin_lgraph(benchmark::State& state) {                                                         \
+    for (auto _ : state) {                                                                                              \
+      state.PauseTiming();                                                                                              \
+      auto* g = BUILDER(std::string(#NAME "_lg_delp_") + std::to_string(next_gen()), static_cast<int>(state.range(0))); \
+      state.ResumeTiming();                                                                                             \
+      for (auto node : g->forward()) {                                                                                  \
+        for (auto& e : node.out_edges()) {                                                                              \
+          e.del_edge();                                                                                                 \
+        }                                                                                                               \
+        for (auto& e : node.inp_edges()) {                                                                              \
+          e.del_edge();                                                                                                 \
+        }                                                                                                               \
+        node.del_node();                                                                                                \
+      }                                                                                                                 \
+    }                                                                                                                   \
   }
 
-#define BENCH_LG_DELETE_NODE(NAME, BUILDER)                                             \
-  void BM_##NAME##_delete_node_lgraph(benchmark::State& state) {                        \
-    for (auto _ : state) {                                                              \
-      state.PauseTiming();                                                              \
-      auto* g = BUILDER(std::string(#NAME "_lg_deln_") + std::to_string(next_gen()),    \
-                       static_cast<int>(state.range(0)));                               \
-      state.ResumeTiming();                                                             \
-      for (auto node : g->fast()) {                                                     \
-        node.del_node();                                                                \
-      }                                                                                 \
-    }                                                                                   \
+#define BENCH_LG_DELETE_NODE(NAME, BUILDER)                                                                             \
+  void BM_##NAME##_delete_node_lgraph(benchmark::State& state) {                                                        \
+    for (auto _ : state) {                                                                                              \
+      state.PauseTiming();                                                                                              \
+      auto* g = BUILDER(std::string(#NAME "_lg_deln_") + std::to_string(next_gen()), static_cast<int>(state.range(0))); \
+      state.ResumeTiming();                                                                                             \
+      for (auto node : g->fast()) {                                                                                     \
+        node.del_node();                                                                                                \
+      }                                                                                                                 \
+    }                                                                                                                   \
   }
 
 BENCH_LG_BUILD(chain, build_chain_lg)
@@ -257,74 +252,74 @@ BENCH_LG_DELETE_NODE(fat_pins, build_fat_pins_lg)
 // hhds benchmarks (build / fast / forward / delete) × (chain / fat_pin0 / fat_pins)
 // ---------------------------------------------------------------------------
 
-#define BENCH_HHDS_BUILD(NAME, BUILDER)                                                 \
-  void BM_##NAME##_build_hhds(benchmark::State& state) {                                \
-    for (auto _ : state) {                                                              \
-      auto b = BUILDER(static_cast<int>(state.range(0)));                               \
-      benchmark::DoNotOptimize(b);                                                      \
-    }                                                                                   \
+#define BENCH_HHDS_BUILD(NAME, BUILDER)                   \
+  void BM_##NAME##_build_hhds(benchmark::State& state) {  \
+    for (auto _ : state) {                                \
+      auto b = BUILDER(static_cast<int>(state.range(0))); \
+      benchmark::DoNotOptimize(b);                        \
+    }                                                     \
   }
 
-#define BENCH_HHDS_FAST(NAME, BUILDER)                                                  \
-  void BM_##NAME##_fast_hhds(benchmark::State& state) {                                 \
-    auto b = BUILDER(static_cast<int>(state.range(0)));                                 \
-    auto g = b->graph;                                                                  \
-    for (auto _ : state) {                                                              \
-      int n_nodes = 0;                                                                  \
-      for (auto node : g->fast_class()) {                                               \
-        benchmark::DoNotOptimize(node);                                                 \
-        ++n_nodes;                                                                      \
-      }                                                                                 \
-      benchmark::DoNotOptimize(n_nodes);                                                \
-    }                                                                                   \
+#define BENCH_HHDS_FAST(NAME, BUILDER)                  \
+  void BM_##NAME##_fast_hhds(benchmark::State& state) { \
+    auto b = BUILDER(static_cast<int>(state.range(0))); \
+    auto g = b->graph;                                  \
+    for (auto _ : state) {                              \
+      int n_nodes = 0;                                  \
+      for (auto node : g->fast_class()) {               \
+        benchmark::DoNotOptimize(node);                 \
+        ++n_nodes;                                      \
+      }                                                 \
+      benchmark::DoNotOptimize(n_nodes);                \
+    }                                                   \
   }
 
-#define BENCH_HHDS_FORWARD(NAME, BUILDER)                                               \
-  void BM_##NAME##_forward_hhds(benchmark::State& state) {                              \
-    auto b = BUILDER(static_cast<int>(state.range(0)));                                 \
-    auto g = b->graph;                                                                  \
-    for (auto _ : state) {                                                              \
-      int n_edges = 0;                                                                  \
-      for (auto node : g->forward_class()) {                                            \
-        for (auto& e : node.out_edges()) {                                              \
-          benchmark::DoNotOptimize(e);                                                  \
-          ++n_edges;                                                                    \
-        }                                                                               \
-      }                                                                                 \
-      benchmark::DoNotOptimize(n_edges);                                                \
-    }                                                                                   \
+#define BENCH_HHDS_FORWARD(NAME, BUILDER)                  \
+  void BM_##NAME##_forward_hhds(benchmark::State& state) { \
+    auto b = BUILDER(static_cast<int>(state.range(0)));    \
+    auto g = b->graph;                                     \
+    for (auto _ : state) {                                 \
+      int n_edges = 0;                                     \
+      for (auto node : g->forward_class()) {               \
+        for (auto& e : node.out_edges()) {                 \
+          benchmark::DoNotOptimize(e);                     \
+          ++n_edges;                                       \
+        }                                                  \
+      }                                                    \
+      benchmark::DoNotOptimize(n_edges);                   \
+    }                                                      \
   }
 
-#define BENCH_HHDS_DELETE_PIN(NAME, BUILDER)                                            \
-  void BM_##NAME##_delete_pin_hhds(benchmark::State& state) {                           \
-    for (auto _ : state) {                                                              \
-      state.PauseTiming();                                                              \
-      auto b = BUILDER(static_cast<int>(state.range(0)));                               \
-      auto g = b->graph;                                                                \
-      state.ResumeTiming();                                                             \
-      for (auto node : g->forward_class()) {                                            \
-        for (auto& e : node.out_edges()) {                                              \
-          e.del_edge();                                                                 \
-        }                                                                               \
-        for (auto& e : node.inp_edges()) {                                              \
-          e.del_edge();                                                                 \
-        }                                                                               \
-        node.del_node();                                                                \
-      }                                                                                 \
-    }                                                                                   \
+#define BENCH_HHDS_DELETE_PIN(NAME, BUILDER)                  \
+  void BM_##NAME##_delete_pin_hhds(benchmark::State& state) { \
+    for (auto _ : state) {                                    \
+      state.PauseTiming();                                    \
+      auto b = BUILDER(static_cast<int>(state.range(0)));     \
+      auto g = b->graph;                                      \
+      state.ResumeTiming();                                   \
+      for (auto node : g->forward_class()) {                  \
+        for (auto& e : node.out_edges()) {                    \
+          e.del_edge();                                       \
+        }                                                     \
+        for (auto& e : node.inp_edges()) {                    \
+          e.del_edge();                                       \
+        }                                                     \
+        node.del_node();                                      \
+      }                                                       \
+    }                                                         \
   }
 
-#define BENCH_HHDS_DELETE_NODE(NAME, BUILDER)                                           \
-  void BM_##NAME##_delete_node_hhds(benchmark::State& state) {                          \
-    for (auto _ : state) {                                                              \
-      state.PauseTiming();                                                              \
-      auto b = BUILDER(static_cast<int>(state.range(0)));                               \
-      auto g = b->graph;                                                                \
-      state.ResumeTiming();                                                             \
-      for (auto node : g->fast_class()) {                                               \
-        node.del_node();                                                                \
-      }                                                                                 \
-    }                                                                                   \
+#define BENCH_HHDS_DELETE_NODE(NAME, BUILDER)                  \
+  void BM_##NAME##_delete_node_hhds(benchmark::State& state) { \
+    for (auto _ : state) {                                     \
+      state.PauseTiming();                                     \
+      auto b = BUILDER(static_cast<int>(state.range(0)));      \
+      auto g = b->graph;                                       \
+      state.ResumeTiming();                                    \
+      for (auto node : g->fast_class()) {                      \
+        node.del_node();                                       \
+      }                                                        \
+    }                                                          \
   }
 
 BENCH_HHDS_BUILD(chain, build_chain_hhds)

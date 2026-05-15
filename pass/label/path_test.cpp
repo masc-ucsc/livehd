@@ -227,10 +227,10 @@ TEST_F(Label_path_test, alias_passthrough_nodes_keep_same_color) {
   g->add_edge(g->create_node_const(1).setup_driver_pin(), flop_din, 1);
   flop_q.set_name("pipeB_id_ex.reg_isValid");
 
-  auto mask      = g->create_node(Ntype_op::Get_mask);
-  auto mask_a    = mask.setup_sink_pin(std::string_view("a"));
-  auto mask_sel  = mask.setup_sink_pin(std::string_view("mask"));
-  auto mask_y    = mask.setup_driver_pin(std::string_view("Y"));
+  auto mask     = g->create_node(Ntype_op::Get_mask);
+  auto mask_a   = mask.setup_sink_pin(std::string_view("a"));
+  auto mask_sel = mask.setup_sink_pin(std::string_view("mask"));
+  auto mask_y   = mask.setup_driver_pin(std::string_view("Y"));
   g->add_edge(flop_q, mask_a, 1);
   g->add_edge(g->create_node_const(-1).setup_driver_pin(), mask_sel, 1);
 

@@ -43,19 +43,13 @@ public:
 private:
   // Recursively copy the subtree rooted at src_nid from src into dst,
   // appending it as a child of dst_parent.  No renaming applied.
-  static void copy_subtree(const std::shared_ptr<Lnast>& src,
-                            const Lnast_nid&               src_nid,
-                            const std::shared_ptr<Lnast>& dst,
-                            const Lnast_nid&               dst_parent);
+  static void copy_subtree(const std::shared_ptr<Lnast>& src, const Lnast_nid& src_nid, const std::shared_ptr<Lnast>& dst,
+                           const Lnast_nid& dst_parent);
 
   // Recursively copy src_nid into dst under dst_parent, substituting any
   // ref whose base name appears in rename_map with its current SSA name.
-  static void copy_with_rename(
-      const std::shared_ptr<Lnast>&                       src,
-      const Lnast_nid&                                    src_nid,
-      const std::shared_ptr<Lnast>&                       dst,
-      const Lnast_nid&                                    dst_parent,
-      const std::unordered_map<std::string, std::string>& rename_map);
+  static void copy_with_rename(const std::shared_ptr<Lnast>& src, const Lnast_nid& src_nid, const std::shared_ptr<Lnast>& dst,
+                               const Lnast_nid& dst_parent, const std::unordered_map<std::string, std::string>& rename_map);
 
   // Returns true when `name` is a user variable that should participate in
   // SSA renaming (excludes compiler temps `___*` and port sigils `$`/`%`).

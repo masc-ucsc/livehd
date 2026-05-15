@@ -707,7 +707,7 @@ void Bitwidth::process_get_mask(Node& node) {
     return;
   }
 
-  auto   it2 = bwmap.find(mask_dpin.get_compact_class());
+  auto  it2 = bwmap.find(mask_dpin.get_compact_class());
   Const mask_val;
   if (it2 == bwmap.end()) {
     if (!mask_dpin.is_type_const()) {
@@ -932,7 +932,7 @@ void Bitwidth::process_bit_xor(Node& node, XEdge_iterator& inp_edges) {
     }
   }
 
-  auto max_val = Dlop::get_mask_value(max_bits - 1);                                       // 2^(max_bits-1) - 1
+  auto max_val = Dlop::get_mask_value(max_bits - 1);  // 2^(max_bits-1) - 1
   auto min_val = Dlop::create_integer(-1)->sub_op(max_val);
 
   adjust_bw(node.get_driver_pin(), Bitwidth_range(min_val, max_val));

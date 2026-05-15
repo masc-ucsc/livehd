@@ -98,10 +98,10 @@ extern int lefwHasInitCbk;
 // *****************************************************************************
 
 lefiUserData lefwUserData       = 0;
-static char *lefwFileName       = 0;
+static char* lefwFileName       = 0;
 static int   lefwRegisterUnused = 0;
 
-extern FILE *lefwFile;
+extern FILE* lefwFile;
 
 // *****************************************************************************
 //       List of call back routines
@@ -251,9 +251,9 @@ lefwCallbackType_e lefwCallbacksType[MAXCBS] = {
 // *****************************************************************************
 //   Routines for the callbacks
 // *****************************************************************************
-const char *lefwFName() { return lefwFileName; }
+const char* lefwFName() { return lefwFileName; }
 
-int lefwWrite(FILE *f, const char *fName, lefiUserData uData) {
+int lefwWrite(FILE* f, const char* fName, lefiUserData uData) {
   int i;
 
   if (lefwHasInitCbk == 0 && lefwHasInit == 0) {
@@ -261,7 +261,7 @@ int lefwWrite(FILE *f, const char *fName, lefiUserData uData) {
     return -1;
   }
 
-  lefwFileName = (char *)fName;
+  lefwFileName = (char*)fName;
   lefwFile     = f;
   lefwUserData = uData;
 
@@ -315,7 +315,7 @@ void lefwSetRegisterUnusedCallbacks() {
   }
 }
 
-void lefwPrintUnusedCallbacks(FILE *f) {
+void lefwPrintUnusedCallbacks(FILE* f) {
   int i;
   int first = 1;
 

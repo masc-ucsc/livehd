@@ -103,7 +103,7 @@ public:
   lefrViaRuleCbkFnType         ViaRuleCbk;
 };
 
-extern lefrCallbacks *lefCallbacks;
+extern lefrCallbacks* lefCallbacks;
 
 END_LEFDEF_PARSER_NAMESPACE
 
