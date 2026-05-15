@@ -28,6 +28,7 @@ namespace {
 // the pattern from lnast/lnast.cpp.
 struct Lgraph_attr_init {
   Lgraph_attr_init() {
+    hhds::register_attr_tag<hhds::attrs::name_t>("hhds::attrs::name");
     hhds::register_attr_tag<livehd::attrs::bits_t>("livehd::attrs::bits");
     hhds::register_attr_tag<livehd::attrs::pin_name_t>("livehd::attrs::pin_name");
     hhds::register_attr_tag<livehd::attrs::sign_t>("livehd::attrs::sign");

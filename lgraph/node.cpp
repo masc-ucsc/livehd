@@ -553,7 +553,10 @@ Node Node::create_const(const Const& value) const {
   return node;
 }
 
-void Node::set_name(std::string_view iname) { current_g->ref_node_name_map()->insert_or_assign(get_compact_class(), iname); }
+void Node::set_name(std::string_view iname) {
+  current_g->ref_node_name_map()->insert_or_assign(get_compact_class(), iname);
+  current_g->mirror_set_name_hhds(nid, iname);
+}
 
 std::string Node::default_instance_name() const {
   std::string name{""};

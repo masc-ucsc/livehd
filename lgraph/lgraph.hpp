@@ -12,6 +12,7 @@
 #include "lgraph_attributes.hpp"
 #include "lgraphbase.hpp"
 #include "node.hpp"
+#include "hhds/attrs/name.hpp"
 #include "lgraph_attrs.hpp"
 #include "node_pin.hpp"
 
@@ -301,6 +302,23 @@ public:
       return;
     }
     hnode.attr(livehd::attrs::lut).set(std::move(serialized));
+  }
+
+  // HHDS Phase G3 (shadow write): mirror node-level instance name (HHDS
+  // provides hhds::attrs::name; we attach the same string there).
+  void mirror_set_name_hhds(Index_id nid, std::string_view name) {
+    if (!hhds_graph_) {
+      return;
+    }
+    auto it = idx_to_hhds_nid_.find(nid);
+    if (it == idx_to_hhds_nid_.end()) {
+      return;
+    }
+    auto hnode = hhds_graph_->get_node(it->second);
+    if (!hnode.is_valid()) {
+      return;
+    }
+    hnode.attr(hhds::attrs::name).set(std::string(name));
   }
 
   // HHDS Phase G3 (shadow write): mirror node-level color as a per-node
