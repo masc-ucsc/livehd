@@ -308,6 +308,23 @@ This is the biggest single change. Strategy:
     consumers funnel through the Lgraph* overrides (most already do
     via `Node`/`Node_pin`), the legacy maps become dead weight and
     can be retired in Phase G6.
+
+19. [x] **Per-pin bits mirror + Node_pin::get_bits migration (LANDED).**
+    Bits are the most pervasive per-pin attribute. The
+    `livehd::attrs::bits` tag (defined in `lgraph_attrs.hpp` from
+    Phase G0) is now actively used:
+    - New `Lgraph::mirror_set_pin_bits_hhds(nid_master, pid, bits)`
+      helper attaches bits to the HHDS driver pin via
+      `create_driver_pin(port_id)` (find-or-create), so the mirror
+      works even before `add_edge` materializes the pin in HHDS.
+    - Threaded through `Node_pin::set_bits`, `Node_pin::set_size`,
+      `Lgraph::create_node_const` (port 0 driver), and
+      `Node::set_type_const` (retypes that re-stamp bits).
+    - `Node_pin::get_bits` now consults the per-pin attr first, falls
+      back to the legacy `node_internal[]` bits on miss.
+    - Skipped: graph-IO pseudo-node bits (those live on
+      `Sub_node`/`GraphIO`, not on `idx_to_hhds_nid_`-tracked nodes).
+    Confirmed 219/11/1 baseline preserved.
 3. [ ] Mirror `Lgraph::add_edge(dpin, spin)` to
    `Graph::add_edge(driver_pin, sink_pin)`.
 4. [ ] Per-pin Bits/Const/Lut tables become HHDS pin attributes via
