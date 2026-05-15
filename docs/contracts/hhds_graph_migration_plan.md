@@ -73,13 +73,44 @@ the lgraph wrapper continues to compile while passes migrate.
 | --- | --- | --- | --- |
 | `inou/prp` | 3666 | 0 in BUILD | DONE (was never coupled — produces LNAST only). Dead `do_work`/`to_lgraph` decls removed. |
 | `inou/cgen` | 1103 | ~163 method calls | **DONE** (2026-05-15). Drops `//lgraph`, consumes `var.graphs`. yosys_compile.sh: 82/85 (same as legacy lgraph baseline; 3 pre-existing failures `blackboxing2`/`cpp_api`/`chunk_FetchTargetQueue`). |
-| `inou/yosys` | 5251 | ~322 | PENDING. The producer side; biggest single migration. Pipeline already works end-to-end because `Eprp_var::add(Lgraph*)` lockstep-populates `var.graphs` from `Lgraph::get_hhds_graph_shared()` (the existing shadow), so the migrated cgen consumes the right Graph today. Migration here is about dropping `//lgraph` from `inou/yosys/BUILD` and rewriting the Yosys-RTLIL → Lgraph builder to write directly into `hhds::Graph` / `hhds::GraphLibrary`. |
+| `inou/yosys` | 5251 | ~322 | PENDING. The producer side; biggest single migration. Pipeline already works end-to-end because `Eprp_var::add(Lgraph*)` lockstep-populates `var.graphs` from `Lgraph::get_hhds_graph_shared()` (the existing shadow), so the migrated cgen consumes the right Graph today. Migration here is about dropping `//lgraph` from `inou/yosys/BUILD` and rewriting the Yosys-RTLIL → Lgraph builder to write directly into `hhds::Graph` / `hhds::GraphLibrary`. **Coupling note** below. |
 | `pass/bitwidth` | 2241 | ~55 | PENDING. |
 | `pass/cprop` | 2845 | ~116 | PENDING. |
 
 After the five priority passes are migrated, the gating tests
 (`inou/yosys:all` + `inou/prp:all`) run on the new infrastructure;
 non-priority passes follow.
+
+### Coupling note — yosys migration is not standalone (discovered 2026-05-15)
+
+The yosys_compile.sh pipeline is:
+```
+inou.yosys.tolg ... |> lgraph.save
+lgraph.match ... |> pass.cprop |> inou.cgen.verilog
+```
+
+`lgraph.save` and `lgraph.match` (defined in `main/meta_api.cpp`) and
+`pass.cprop` all read `var.lgs` (Lgraph) and operate on Lgraph
+storage. If `inou.yosys.tolg` stops producing Lgraph (i.e. truly
+migrates and drops `//lgraph` from its BUILD), the subsequent
+`lgraph.save` finds nothing in `var.lgs` to save and the disk-roundtrip
+that yosys_compile.sh exercises breaks.
+
+So a strict yosys migration that drops the `//lgraph` BUILD dep
+requires migrating **alongside**:
+- `main/meta_api.cpp` (lgraph.save / lgraph.match) to read/write via
+  `hhds::GraphLibrary::save` / `load`, populating `var.graphs`.
+- `pass/cprop` (currently a Lgraph mutator that relies on the shadow
+  to propagate to HHDS).
+
+Until those land, the practical state is: yosys keeps producing
+Lgraph internally, the lockstep populate in `Eprp_var::add(Lgraph*)`
+keeps `var.graphs` in sync, and the migrated cgen reads `var.graphs`
+correctly. This already passes yosys_compile.sh at 82/85, matching
+the legacy lgraph baseline.
+
+See `docs/contracts/yosys_migration_skeleton.md` for the per-call-site
+API translation table covering the eventual yosys rewrite.
 
 ## API mapping (lgraph → hhds)
 
