@@ -23,6 +23,7 @@ cc_library(
         "ann_place.hpp",
         "attrs.hpp",
         "cell.hpp",
+        "node_util.hpp",
     ],
     copts = COPTS,
     includes = ["."],
