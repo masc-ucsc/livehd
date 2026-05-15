@@ -227,6 +227,10 @@ public:
     return {};
   }
   [[nodiscard]] hhds::Graph* ref_hhds_graph() const { return hhds_graph_.get(); }
+  // Shared ownership accessor — Eprp_var::add(Lgraph*) pushes this into
+  // var.graphs alongside the raw pointer so HHDS-migrated consumers can
+  // read directly from var.graphs without going through `//lgraph`.
+  [[nodiscard]] const std::shared_ptr<hhds::Graph>& get_hhds_graph_shared() const { return hhds_graph_; }
 
   // HHDS Phase G3 (shadow write): mirror a cell-type assignment to the
   // paired hhds::Node_class. Called from create_node*() and from

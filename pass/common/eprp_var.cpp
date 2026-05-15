@@ -11,6 +11,7 @@
 
 #include "absl/strings/str_split.h"
 #include "graph_library.hpp"
+#include "lgraph.hpp"
 
 void Eprp_var::add(const Eprp_dict& _dict) {
   for (const auto& var : _dict) {
@@ -38,6 +39,20 @@ void Eprp_var::add(const Eprp_var& _var) {
 void Eprp_var::add(Lgraph* lg) {
   if (std::find(lgs.begin(), lgs.end(), lg) == lgs.end()) {
     lgs.push_back(lg);
+    // Keep `graphs` in lockstep with `lgs` by extracting the HHDS shadow.
+    // Migrated consumers read `graphs`; legacy ones still walk `lgs`.
+    if (lg) {
+      const auto& hg = lg->get_hhds_graph_shared();
+      if (hg) {
+        graphs.push_back(hg);
+      }
+    }
+  }
+}
+
+void Eprp_var::add(const std::shared_ptr<hhds::Graph>& graph) {
+  if (graph && std::find(graphs.begin(), graphs.end(), graph) == graphs.end()) {
+    graphs.push_back(graph);
   }
 }
 

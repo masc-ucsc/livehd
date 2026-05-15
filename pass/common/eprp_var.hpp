@@ -10,6 +10,7 @@
 #include <vector>
 
 #include "absl/container/flat_hash_map.h"
+#include "hhds/graph.hpp"
 #include "lnast.hpp"
 #include "str_tools.hpp"
 
@@ -32,17 +33,26 @@ class Eprp_var {
 public:
   using Eprp_dict   = absl::flat_hash_map<std::string, std::string>;
   using Eprp_lgs    = std::vector<Lgraph*>;
+  using Eprp_graphs = std::vector<std::shared_ptr<hhds::Graph>>;
   using Eprp_lnasts = std::vector<std::shared_ptr<Lnast> >;
 
   Eprp_dict   dict;
   Eprp_dict   stage_dict;
   Eprp_lgs    lgs;
+  // Parallel HHDS handle to `lgs`. Producers (yosys.tolg, lnast_to_lgraph,
+  // meta_api lgraph.{open,create,match,save}) populate both vectors in
+  // lockstep so each `lgs[i]` corresponds to `graphs[i]`. Consumers that
+  // have migrated to hhds::Graph read from `graphs` (and drop their
+  // `//lgraph` dep); legacy consumers keep using `lgs`. Once every
+  // consumer is migrated, `lgs` is removed in a single commit.
+  Eprp_graphs graphs;
   Eprp_lnasts lnasts;
 
   Eprp_var() {
     dict.clear();
     stage_dict.clear();
     lgs.clear();
+    graphs.clear();
     lnasts.clear();
   }
 
@@ -55,6 +65,7 @@ public:
   void add(Eprp_lnasts& _var);
 
   void                           add(Lgraph* lg);
+  void                           add(const std::shared_ptr<hhds::Graph>& graph);
   void                           add(std::unique_ptr<Lnast> lnast);
   void                           add(const std::shared_ptr<Lnast>& lnast);
   void                           add(std::string_view name, std::string_view value);
@@ -74,8 +85,9 @@ public:
     dict.clear();
     stage_dict.clear();
     lgs.clear();
+    graphs.clear();
     lnasts.clear();
   }
 
-  [[nodiscard]] bool empty() const { return dict.empty() && lgs.empty(); }
+  [[nodiscard]] bool empty() const { return dict.empty() && lgs.empty() && graphs.empty(); }
 };

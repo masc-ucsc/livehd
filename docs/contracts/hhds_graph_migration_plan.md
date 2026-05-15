@@ -498,34 +498,35 @@ Where the 27 failures are exactly the baseline set.
 This plan was created while completing **task 1a** of the Pyrope
 punch list in `TODO.md`.
 
-### Structural prerequisite — `Eprp_var::lgs`
+### Structural prerequisite — `Eprp_var::lgs` (PARTIAL — parallel `graphs` field LANDED)
 
-Before per-pass migrations to direct `hhds::Graph` access can finish,
-the pipeline-variable type that flows through every Eprp pass needs
-to stop carrying `Lgraph*`:
+Status (2026-05-15): rather than flip `Eprp_var::lgs` atomically (which
+would touch every consumer at once), a **parallel `Eprp_var::graphs`
+field** was added so per-pass migrations can land independently:
 
 ```cpp
-// pass/common/eprp_var.hpp today:
-class Lgraph;  // forward decl
-class Eprp_var {
-  using Eprp_lgs = std::vector<Lgraph*>;
-  Eprp_lgs lgs;
-  ...
-};
+// pass/common/eprp_var.hpp:
+using Eprp_lgs    = std::vector<Lgraph*>;
+using Eprp_graphs = std::vector<std::shared_ptr<hhds::Graph>>;
+Eprp_lgs    lgs;     // legacy — read by un-migrated consumers
+Eprp_graphs graphs;  // HHDS handle — read by migrated consumers
 ```
 
-Every consumer pass (cgen, bitwidth, cprop, yosys's output side) reads
-`var.lgs[i]` and gets an `Lgraph*`. To remove `//lgraph` entirely,
-this needs to become `std::vector<std::shared_ptr<hhds::Graph>>` (or
-some HHDS handle). Each pass that reads it then adapts to the new
-type. This is the structural single point that, once flipped, lets
-every per-pass migration land independently.
+- `Eprp_var::add(Lgraph*)` now also pushes `lg->get_hhds_graph_shared()`
+  into `graphs`, so any producer that still emits Lgraph automatically
+  populates the HHDS path. (`Lgraph::get_hhds_graph_shared()` returns
+  the existing `shared_ptr<hhds::Graph>` member — no new allocation.)
+- `Eprp_var::add(const std::shared_ptr<hhds::Graph>&)` overload added
+  for future HHDS-only producers (e.g., once yosys.tolg builds an HHDS
+  graph directly without round-tripping through Lgraph).
+- Migrated consumers iterate `var.graphs` (drop `//lgraph` BUILD dep);
+  legacy consumers continue iterating `var.lgs` (no change required).
+- Once the last consumer migrates, `lgs`, `Lgraph`, and the lockstep
+  populate in `add(Lgraph*)` all delete in one cleanup pass.
 
-Doing this in one commit is invasive but contained — touches
-`pass/common/eprp_var.{hpp,cpp}` plus every direct reader of
-`var.lgs` (Meta_api passes that produce, downstream passes that
-consume). Once it lands, cgen / bitwidth / cprop / yosys can migrate
-in any order; each pass's BUILD drops `//lgraph` independently.
+This sidesteps the "huge invasive change" risk of an atomic flip and
+turns the cgen → bitwidth → cprop → yosys priority list into a series
+of independently mergeable commits.
 
 ### Entry point — start here
 
