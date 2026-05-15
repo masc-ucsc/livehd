@@ -445,3 +445,56 @@ TEST(BitwidthAttrSet, NonBitwidthAttrIgnored) {
   const auto& meta = ln->bw_meta().ranges;
   EXPECT_EQ(meta.find("x"), meta.end()) << "comptime attr should not record a range";
 }
+
+// ── Cross-invocation persistence (T3 #8) ─────────────────────────────────────
+//
+// First sweep proves nothing about `c = a + b` because a and b are unknown
+// refs (no prior writes). After the first run, the caller injects ranges for
+// a and b into bw_meta — simulating a prior pass.upass call that constrained
+// them — and re-runs bitwidth. The second sweep's begin_iteration seeds
+// range_map_ from bw_meta, so the plus(a, b) operands now resolve to finite
+// ranges and `c` is proven [a.min + b.min, a.max + b.max].
+TEST(BitwidthCrossInvocation, TightenAfterReseed) {
+  auto ln = make_plus("c", "a", "b");
+
+  // First pass: a and b are unknown, c remains unbounded (or absent).
+  run_bw(ln);
+  {
+    const auto& meta = ln->bw_meta().ranges;
+    auto        it   = meta.find("c");
+    if (it != meta.end()) {
+      EXPECT_TRUE(it->second.neg_inf || it->second.pos_inf) << "c should still be unbounded after first sweep";
+    }
+  }
+
+  // Inject ranges for a and b into bw_meta — what a prior pass.upass call
+  // would have left behind for an earlier-bounded register.
+  auto& meta_w  = ln->bw_meta();
+  BitwidthEntry ea{};
+  ea.min     = 0;
+  ea.max     = 7;
+  ea.neg_inf = false;
+  ea.pos_inf = false;
+  meta_w.ranges["a"] = ea;
+  BitwidthEntry eb{};
+  eb.min     = 1;
+  eb.max     = 2;
+  eb.neg_inf = false;
+  eb.pos_inf = false;
+  meta_w.ranges["b"] = eb;
+
+  // Second pass: begin_iteration reloads a,b into range_map_; plus computes
+  // c = [0+1, 7+2] = [1, 9].
+  run_bw(ln);
+
+  const auto& meta = ln->bw_meta().ranges;
+  auto        it_c = meta.find("c");
+  ASSERT_NE(it_c, meta.end()) << "c should be proven finite after re-seed";
+  EXPECT_FALSE(it_c->second.neg_inf);
+  EXPECT_FALSE(it_c->second.pos_inf);
+  EXPECT_EQ(it_c->second.min, 1);
+  EXPECT_EQ(it_c->second.max, 9);
+  // Re-seeded inputs are preserved across end_run (write-clear-rewrite).
+  EXPECT_NE(meta.find("a"), meta.end());
+  EXPECT_NE(meta.find("b"), meta.end());
+}

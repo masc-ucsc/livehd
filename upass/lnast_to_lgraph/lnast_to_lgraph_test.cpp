@@ -591,3 +591,86 @@ TEST(LnastToLgraph, SsaRenameMultiAssign) {
   EXPECT_EQ(count_op(lg, Ntype_op::Mux), 0);
   EXPECT_EQ(count_op(lg, Ntype_op::Xor), 0);
 }
+
+// ── Bitwidth → LGraph pin bits (T3 #9) ───────────────────────────────────────
+
+namespace {
+// Helper: fetch the bit width of a named graph input/output pin.
+static uint32_t get_input_bits(Lgraph* lg, const std::string& name) {
+  uint32_t bits = 0;
+  lg->each_graph_input([&](const Node_pin& pin) {
+    if (pin.has_name() && pin.get_name() == name) {
+      bits = pin.get_bits();
+    }
+  });
+  return bits;
+}
+static uint32_t get_output_bits(Lgraph* lg, const std::string& name) {
+  uint32_t bits = 0;
+  lg->each_graph_output([&](const Node_pin& pin) {
+    if (pin.has_name() && pin.get_name() == name) {
+      bits = pin.get_bits();
+    }
+  });
+  return bits;
+}
+
+// Insert a finite range into the LNAST's bw_meta.
+static void set_bw(Lnast& ln, std::string_view name, int64_t lo, int64_t hi) {
+  BitwidthEntry e;
+  e.min                              = lo;
+  e.max                              = hi;
+  e.neg_inf                          = false;
+  e.pos_inf                          = false;
+  ln.bw_meta().ranges[std::string{name}] = e;
+}
+}  // namespace
+
+// `c = a + b` with bw_meta proving c:[0, 15]. After lowering, the Sum's
+// driver pin should carry the sbits-of-[0,15] width = 5 (sbits_for(15) = 5),
+// per apply_bw's convention.
+TEST(LnastToLgraph, LgraphSumBitsFromBwMeta) {
+  auto ln = make_add();  // top → stmts → plus(%out, $a, $b)
+  set_bw(*ln, "out", 0, 15);
+
+  auto* lg = make_lg("bw_sum");
+  ASSERT_NE(lg, nullptr);
+  Lnast_to_lgraph lowerer(lg, ln);
+  lowerer.lower();
+
+  // The bw_meta key is "out", which maps to the %out graph output. The
+  // output pin's driver is the Sum's "Y" driver — read its bits via the
+  // graph_output handle.
+  auto out_dpin = lg->get_graph_output("out").get_driver_pin();
+  EXPECT_EQ(out_dpin.get_type_op(), Ntype_op::Sum);
+  // sbits_for(15) = bit_width(15) + 1 = 5.
+  EXPECT_EQ(out_dpin.get_bits(), 5u);
+}
+
+// `out = a + b` with bw_meta proving a:[0, 255], b:[0, 15], out:[0, 511].
+// Uses add() (not pass-through) so the inputs and output don't alias the
+// same Node_pin. apply_bw should write each pin's bits independently.
+TEST(LnastToLgraph, LgraphIoBitsFromBwMeta) {
+  auto ln = make_add();  // top → stmts → plus(%out, $a, $b)
+  set_bw(*ln, "a", 0, 255);
+  set_bw(*ln, "b", 0, 15);
+  set_bw(*ln, "out", 0, 511);
+
+  auto* lg = make_lg("bw_io");
+  ASSERT_NE(lg, nullptr);
+  Lnast_to_lgraph lowerer(lg, ln);
+  lowerer.lower();
+
+  // sbits_for(255) = bit_width(255) + 1 = 9
+  // sbits_for(15)  = bit_width(15)  + 1 = 5
+  // sbits_for(511) = bit_width(511) + 1 = 10
+  EXPECT_EQ(get_input_bits(lg, "a"), 9u);
+  EXPECT_EQ(get_input_bits(lg, "b"), 5u);
+  EXPECT_EQ(get_output_bits(lg, "out"), 10u);
+}
+
+// Note: the spec's AttrGetBits/Max/Min + Wrap/SaturateNarrowing tests
+// (T3 #8 catalog) need an integration runner that exposes the per-pass
+// fold result. The runner's try_fold_ref is currently protected;
+// promoting it for tests is out of scope here. Those checks land with
+// the dedicated runner-test target when it grows up.
