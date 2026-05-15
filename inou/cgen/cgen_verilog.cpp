@@ -206,12 +206,25 @@ std::string Cgen_verilog::get_expression(const hhds::Pin_class& dpin) const {
   }
 
   const auto expr_it = pin2expr.find(dpin.get_class_index());
-  I(expr_it != pin2expr.end());
-  if (expr_it->second.needs_parenthesis) {
-    return absl::StrCat("(", expr_it->second.var, ")");
+  if (expr_it != pin2expr.end()) {
+    if (expr_it->second.needs_parenthesis) {
+      return absl::StrCat("(", expr_it->second.var, ")");
+    }
+    return expr_it->second.var;
   }
 
-  return expr_it->second.var;
+  // Graph-IO pins on OUTPUT_NODE/INPUT_NODE can be referenced via different
+  // pid encodings (driver vs sink counterpart) than the one create_module_io
+  // registered. HHDS's get_pin_name resolves both to the declared name; fall
+  // back to that so the emitted Verilog references the right wire.
+  if (is_const_pin(dpin)) {
+    return hydrate_const(const_value_of(dpin.get_master_node())).to_verilog();
+  }
+  auto wn = pin_wire_name(dpin);
+  if (!wn.empty()) {
+    return get_scaped_name(wn);
+  }
+  return "'hx /*cgen-miss*/";
 }
 
 std::string Cgen_verilog::add_expression(std::string_view txt_seq, std::string_view txt_op, const hhds::Pin_class& dpin) const {
@@ -261,8 +274,12 @@ void Cgen_verilog::process_memory(std::shared_ptr<File_output> fout, const hhds:
   int mem_wensize = 0;
 
   for (auto e : node.inp_edges()) {
-    auto   pin_name = e.sink.get_pin_name();
-    size_t port_id  = static_cast<size_t>(e.sink.get_port_id()) / 11;
+    // HHDS does not store LiveHD's per-sink-name convention; derive the
+    // name from the port_id via Ntype::get_sink_name. For memory the names
+    // wrap with `pid % 11` (see Ntype::get_sink_name).
+    auto   raw_pid  = static_cast<int>(e.sink.get_port_id());
+    auto   pin_name = Ntype::get_sink_name(Ntype_op::Memory, raw_pid);
+    size_t port_id  = static_cast<size_t>(raw_pid) / 11;
 
     if (port_vector.size() <= port_id) {
       port_vector.resize(1 + port_id);

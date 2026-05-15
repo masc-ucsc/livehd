@@ -120,4 +120,80 @@ namespace livehd::graph_util {
   return a.has() ? std::string_view{a.get()} : std::string_view{};
 }
 
+// Pin / node classification by master node id (no attr lookup).
+[[nodiscard]] inline bool is_graph_input_pin(const hhds::Pin_class& pin) {
+  if (pin.is_invalid()) {
+    return false;
+  }
+  auto master = pin.get_master_node();
+  return master.get_debug_nid() == hhds::Graph::INPUT_NODE;
+}
+
+[[nodiscard]] inline bool is_graph_output_pin(const hhds::Pin_class& pin) {
+  if (pin.is_invalid()) {
+    return false;
+  }
+  auto master = pin.get_master_node();
+  return master.get_debug_nid() == hhds::Graph::OUTPUT_NODE;
+}
+
+[[nodiscard]] inline bool is_const_pin(const hhds::Pin_class& pin) {
+  if (pin.is_invalid()) {
+    return false;
+  }
+  auto master = pin.get_master_node();
+  if (master.get_debug_nid() == hhds::Graph::CONST_NODE) {
+    return true;
+  }
+  // LiveHD's Lgraph wrapper materialises constants as Ntype_op::Nconst
+  // regular nodes (with the value attached via livehd::attrs::const_value),
+  // distinct from HHDS's CONST_NODE singleton. Both are valid constant
+  // sources for cgen.
+  return type_op_of(master) == Ntype_op::Nconst;
+}
+
+// LiveHD's `default_instance_name`: a deterministic name derived from
+// `<type>_<nid>` if the node has no user-assigned name, otherwise the
+// user-assigned name. Used by cgen to label module instances and memories.
+[[nodiscard]] inline std::string default_instance_name(const hhds::Node_class& node) {
+  auto n = node_name_of(node);
+  if (!n.empty()) {
+    return std::string{n};
+  }
+  return std::string{Ntype::get_name(type_op_of(node))} + "_" + std::to_string(static_cast<uint64_t>(node.get_debug_nid()));
+}
+
+// LiveHD's `debug_name` (cell+nid+name) — used in error messages.
+[[nodiscard]] inline std::string debug_name(const hhds::Node_class& node) {
+  auto n = node_name_of(node);
+  auto base = std::string{Ntype::get_name(type_op_of(node))} + "_" + std::to_string(static_cast<uint64_t>(node.get_debug_nid()));
+  if (!n.empty()) {
+    base.append(":").append(n);
+  }
+  return base;
+}
+
+// Wire-name generation: prefer the user-assigned pin name; otherwise fall
+// back to the node's debug name + port id. The cgen output uses this to
+// name driver pins as Verilog wires.
+[[nodiscard]] inline std::string wire_name(const hhds::Pin_class& pin) {
+  auto pn = pin_name_of(pin);
+  if (!pn.empty()) {
+    return std::string{pn};
+  }
+  if (pin.is_invalid()) {
+    return {};
+  }
+  auto master = pin.get_master_node();
+  // Graph-IO pins carry their declared name on GraphIO; cgen handles those via
+  // its IO-walk path before falling through here. For internal pins we generate
+  // a synthetic name from the master node + port_id.
+  auto base = default_instance_name(master);
+  auto port_id = pin.get_port_id();
+  if (port_id == 0) {
+    return base;
+  }
+  return base + "_" + std::to_string(static_cast<uint32_t>(port_id));
+}
+
 }  // namespace livehd::graph_util
