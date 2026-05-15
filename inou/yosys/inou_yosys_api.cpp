@@ -18,7 +18,7 @@
 #undef I
 #endif
 #include "kernel/yosys.h"
-#include "lgraph.hpp"
+#include "graph_library_singleton.hpp"
 #include "mustache.hpp"
 
 static void log_error_atexit() { throw std::runtime_error("yosys finished"); }
@@ -352,29 +352,26 @@ void Inou_yosys_api::do_tolg(Eprp_var& var) {
     error("unrecognized abc {} option. Either true or false", techmap);
   }
 
-  auto* gl = Graph_library::instance(path);
+  auto& lib = livehd::Hhds_graph_library::instance(path);
 
-  uint32_t max_version = gl->get_max_version();
+  hhds::Gid pre_capacity = static_cast<hhds::Gid>(lib.capacity());
 
   Yosys::yosys_setup();
 
   call_yosys(vars);
 
-  std::vector<Lgraph*> lgs;
-  gl->each_sub([&lgs, gl, max_version](Lg_type_id id, std::string_view name) {
-    (void)name;
-    if (gl->get_version(id) > max_version) {
-      Lgraph* lg = gl->try_ref_lgraph(id);  // no need to push black-boxes
-      if (lg) {
-        lgs.push_back(lg);
-      }
+  // Collect newly-created graphs (gids past pre_capacity) and push their
+  // shared_ptr into var.graphs.
+  hhds::Gid post_capacity = static_cast<hhds::Gid>(lib.capacity());
+  for (hhds::Gid id = pre_capacity; id < post_capacity; ++id) {
+    if (!lib.has_graph(id)) {
+      continue;
     }
-  });
-
-  // Yosys::memhasher_off();
-  // Yosys::yosys_shutdown();
-
-  var.add(lgs);
+    auto g = lib.get_graph(id);
+    if (g) {
+      var.add(g);
+    }
+  }
 }
 
 void Inou_yosys_api::fromlg(Eprp_var& var) {
@@ -382,15 +379,24 @@ void Inou_yosys_api::fromlg(Eprp_var& var) {
 
   Yosys::yosys_setup();
 
-  for (auto& lg : var.lgs) {
+  for (const auto& g : var.graphs) {
+    if (!g) {
+      continue;
+    }
+    auto gio = g->get_io();
+    if (!gio) {
+      continue;
+    }
+    std::string name{gio->get_name()};
+
     mustache::data vars;
 
     vars.set("path", p.path);
     vars.set("odir", p.odir);
 
-    auto file = absl::StrCat(p.odir, "/", lg->get_name(), ".v");
+    auto file = absl::StrCat(p.odir, "/", name, ".v");
     vars.set("file", file);
-    vars.set("name", std::string(lg->get_name()));
+    vars.set("name", name);
 
     auto hier = var.get("hier");
     if (!hier.empty() && (hier == "1" || hier == "true")) {

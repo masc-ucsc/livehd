@@ -12,17 +12,23 @@ cc_library(
         exclude = [
             "*test*.cpp",
             "yosys_driver.cpp",
+            "lgyosys_dump.cpp",
+            "lgyosys_fromlg.cpp",
         ],
     ),
-    hdrs = glob(["*.hpp"]),
+    hdrs = glob(
+        ["*.hpp"],
+        exclude = ["lgyosys_dump.hpp"],
+    ),
     copts = COPTS + ["-Wno-shadow"],
     visibility = ["//visibility:public"],
     deps = [
+        "//graph",
         "//pass/common:pass",
         "@at_clifford_yosys2//:kernel",
         "@at_clifford_yosys2//:version",
         "@mustache//:headers",
-        "@yosys_slang//:slang.so"
+        "@yosys_slang//:slang.so",
     ],
     alwayslink = True,
 )

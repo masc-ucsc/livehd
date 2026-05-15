@@ -44,6 +44,7 @@ cc_library(
     visibility = ["//visibility:public"],
     deps = [
         "@replxx",
+        "//graph",
         "//lnast",
         "//lgraph",
         "//inou/cgen:inou_cgen",

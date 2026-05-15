@@ -209,14 +209,14 @@ namespace livehd::graph_util {
 
 // Per-pin bit width. Bits_t == int32_t (graph_sizing.hpp). Storing 0 leaves
 // the attribute untouched logically (callers should use clear_bits instead).
-inline void set_bits(hhds::Pin_class& pin, Bits_t b) {
+inline void set_bits(const hhds::Pin_class& pin, Bits_t b) {
   if (pin.is_invalid()) {
     return;
   }
   pin.attr(livehd::attrs::bits).set(b);
 }
 
-inline void clear_bits(hhds::Pin_class& pin) {
+inline void clear_bits(const hhds::Pin_class& pin) {
   if (pin.is_invalid()) {
     return;
   }
@@ -225,14 +225,14 @@ inline void clear_bits(hhds::Pin_class& pin) {
 
 // Per-pin sign hint. 1 = unsigned, absent = signed. Mirrors LiveHD's
 // `Node_pin::set_sign` / `set_unsign`.
-inline void set_unsign(hhds::Pin_class& pin) {
+inline void set_unsign(const hhds::Pin_class& pin) {
   if (pin.is_invalid()) {
     return;
   }
   pin.attr(livehd::attrs::pin_unsigned).set(1);
 }
 
-inline void set_sign(hhds::Pin_class& pin) {
+inline void set_sign(const hhds::Pin_class& pin) {
   if (pin.is_invalid()) {
     return;
   }
@@ -240,11 +240,11 @@ inline void set_sign(hhds::Pin_class& pin) {
 }
 
 // Per-node color taint.
-inline void set_color(hhds::Node_class& node, int32_t c) { node.attr(livehd::attrs::color).set(c); }
-inline void clear_color(hhds::Node_class& node) { node.attr(livehd::attrs::color).del(); }
+inline void set_color(const hhds::Node_class& node, int32_t c) { node.attr(livehd::attrs::color).set(c); }
+inline void clear_color(const hhds::Node_class& node) { node.attr(livehd::attrs::color).del(); }
 
 // User-assigned pin name. Empty string clears the attr.
-inline void set_pin_name(hhds::Pin_class& pin, std::string_view name) {
+inline void set_pin_name(const hhds::Pin_class& pin, std::string_view name) {
   if (pin.is_invalid()) {
     return;
   }
@@ -308,14 +308,14 @@ inline void set_pin_name(hhds::Pin_class& pin, std::string_view name) {
 // Cell-type mutation. The Ntype_op encoding values already bake in the
 // is_loop_last low bit (see cell.hpp), so storing the raw value into HHDS
 // round-trips correctly with type_op_of(). Do NOT shift.
-inline void set_type_op(hhds::Node_class& node, Ntype_op op) {
+inline void set_type_op(const hhds::Node_class& node, Ntype_op op) {
   node.set_type(static_cast<hhds::Type>(static_cast<uint16_t>(op)));
 }
 
 // Set this node to a constant node carrying the given serialized Const.
 // Migrated callers serialize with `Dlop::serialize()` before calling this
 // (we don't pull Dlop into node_util.hpp so it stays a leaf header).
-inline void set_type_const_serialized(hhds::Node_class& node, std::string_view serialized) {
+inline void set_type_const_serialized(const hhds::Node_class& node, std::string_view serialized) {
   set_type_op(node, Ntype_op::Nconst);
   if (serialized.empty()) {
     node.attr(livehd::attrs::const_value).del();
@@ -383,7 +383,7 @@ inline void set_type_const_serialized(hhds::Node_class& node, std::string_view s
 }
 
 // Per-pin offset (used by Get_mask / Set_mask / Sext positional ops).
-inline void set_pin_offset(hhds::Pin_class& pin, Bits_t off) {
+inline void set_pin_offset(const hhds::Pin_class& pin, Bits_t off) {
   if (pin.is_invalid()) {
     return;
   }
@@ -396,7 +396,7 @@ inline void set_pin_offset(hhds::Pin_class& pin, Bits_t off) {
 
 // Per-node source filename / source line. Mirrors LiveHD `Node::set_source`
 // and `Node::set_loc1`.
-inline void set_source(hhds::Node_class& node, std::string_view fname) {
+inline void set_source(const hhds::Node_class& node, std::string_view fname) {
   if (fname.empty()) {
     node.attr(livehd::attrs::source).del();
   } else {
@@ -404,7 +404,7 @@ inline void set_source(hhds::Node_class& node, std::string_view fname) {
   }
 }
 
-inline void set_loc1(hhds::Node_class& node, uint64_t line) {
+inline void set_loc1(const hhds::Node_class& node, uint64_t line) {
   node.attr(livehd::attrs::loc).set(livehd::attrs::loc_t::value_type{line, 0});
 }
 

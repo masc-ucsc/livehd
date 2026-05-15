@@ -18,11 +18,15 @@ load("//tools:copt_default.bzl", "COPTS")
 # Consumers should depend on //graph + @hhds//hhds:graph directly.
 cc_library(
     name = "graph",
-    srcs = ["cell.cpp"],
+    srcs = [
+        "cell.cpp",
+        "graph_library_singleton.cpp",
+    ],
     hdrs = [
         "ann_place.hpp",
         "attrs.hpp",
         "cell.hpp",
+        "graph_library_singleton.hpp",
         "node_util.hpp",
     ],
     copts = COPTS,

@@ -10,6 +10,7 @@
 
 #include "file_utils.hpp"
 #include "graph_library.hpp"
+#include "graph_library_singleton.hpp"
 #include "lgraph.hpp"
 #include "main_api.hpp"
 #include "thread_pool.hpp"
@@ -42,29 +43,20 @@ void Meta_api::open(Eprp_var& var) {
 }
 
 void Meta_api::save(Eprp_var& var) {
-  auto hier = var.get("hier");
-
-  absl::flat_hash_set<Lgraph*> saved;
-
-  for (Lgraph* lg : var.lgs) {
-    if (lg->is_empty()) {
-      file_utils::clean_dir(lg->get_save_filename());
-    } else {
-      if (hier != "false" && hier != "0") {
-        lg->each_hier_unique_sub_bottom_up([&saved](Lgraph* g) {
-          if (saved.insert(g).second) {
-            thread_pool.add([g]() -> void { g->save(); });
-          }
-        });
-      } else {
-        if (saved.insert(lg).second) {
-          thread_pool.add([lg]() -> void { lg->save(); });
-        }
-      }
-    }
+  // Determine the on-disk path from any graph currently in var. The
+  // hhds::GraphLibrary singleton is keyed by path; we save it directly.
+  // var.graphs are populated by producers (yosys) via Eprp_var::add(shared_ptr<hhds::Graph>);
+  // their owning library has the path we need.
+  //
+  // The legacy `path` argument is not supplied to lgraph.save in current
+  // scripts; rely on the first graph's owning library to identify the path.
+  auto path_arg = var.get("path");
+  std::string save_path{path_arg};
+  if (save_path.empty()) {
+    save_path = "lgdb";  // historical default
   }
 
-  Graph_library::sync_all();  // nice but not needed
+  livehd::Hhds_graph_library::save(save_path);
 }
 
 void Meta_api::create(Eprp_var& var) {
@@ -100,32 +92,40 @@ void Meta_api::match(Eprp_var& var) {
   auto path  = var.get("path");
   auto match = var.get("match");
 
-  auto* library = Graph_library::instance(path);
-  if (library == nullptr) {
-    Main_api::warn("lgraph.match could not open {} path", path);
-    return;
+  auto& lib = livehd::Hhds_graph_library::instance(path);
+
+  // Walk all live graphs and push the ones matching the regex into var.graphs.
+  // `match` may be empty (match all) or a full regex.
+  std::regex re;
+  bool       has_re = !match.empty();
+  if (has_re) {
+    try {
+      re = std::regex(std::string{match});
+    } catch (const std::regex_error&) {
+      Main_api::error(
+          "invalid match:{} regex. It is a FULL regex unlike bash. To test, try: `ls path | grep -E \"match\"`", match);
+      return;
+    }
   }
 
-  std::vector<Lgraph*> lgs;
-
-  try {
-    library->each_sub(match, [&lgs, library](Lg_type_id lgid, std::string_view name) {
-      (void)lgid;
-
-      auto* lg = library->open_lgraph(name);
-      if (lg) {
-        if (lg->is_empty()) {
-          std::print("lgraph.match lgraph {} is empty\n", name);
-        }
-        lgs.push_back(lg);
-      }
-    });
-  } catch (const std::regex_error& e) {
-    Main_api::error("invalid match:{} regex. It is a FULL regex unlike bash. To test, try: `ls path | grep -E \"match\"`", match);
-  }
-
-  for (Lgraph* lg : lgs) {
-    var.add(lg);
+  hhds::Gid cap = static_cast<hhds::Gid>(lib.capacity());
+  for (hhds::Gid id = 1; id < cap; ++id) {
+    if (!lib.has_graph(id)) {
+      continue;
+    }
+    auto g = lib.get_graph(id);
+    if (!g) {
+      continue;
+    }
+    auto gio = g->get_io();
+    if (!gio) {
+      continue;
+    }
+    std::string name{gio->get_name()};
+    if (has_re && !std::regex_match(name, re)) {
+      continue;
+    }
+    var.add(g);
   }
 }
 
