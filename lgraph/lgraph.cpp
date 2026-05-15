@@ -940,181 +940,196 @@ bool Lgraph::has_inputs(const Node& node) const {
 bool Lgraph::has_outputs(const Node_pin& pin) const {
   I(pin.is_driver());
 
-  auto idx2 = pin.get_root_idx();
+  // HHDS Phase G3 read: query the specific driver pin's edge list.
+  const auto nid_master = get_node_nid(pin.get_root_idx());
+  if (hhds_graph_ && nid_master != Hardcoded_input_nid && nid_master != Hardcoded_output_nid) {
+    if (auto it = idx_to_hhds_nid_.find(nid_master); it != idx_to_hhds_nid_.end()) {
+      auto hnode = hhds_graph_->get_node(it->second);
+      auto hpin  = hnode.get_driver_pin(static_cast<hhds::Port_id>(pin.get_pid()));
+      if (hpin.is_valid()) {
+        return !hpin.out_edges().empty();
+      }
+      return false;
+    }
+  }
 
-  // node_internal.ref_lock();
+  auto idx2 = pin.get_root_idx();
   while (true) {
     if (node_internal[idx2].get_dst_pid() == pin.get_pid()) {
       if (node_internal[idx2].has_local_outputs()) {
-        // node_internal.ref_unlock();
         return true;
       }
     }
-
     if (node_internal[idx2].is_last_state()) {
-      // node_internal.ref_unlock();
       return false;
     }
-
     idx2 = node_internal[idx2].get_next();
   }
-
   I(false);
-  // node_internal.ref_unlock();
-
   return false;
 }
 
 bool Lgraph::has_inputs(const Node_pin& pin) const {
   I(pin.is_sink());
 
-  auto idx2 = pin.get_root_idx();
+  // HHDS Phase G3 read: query the specific sink pin's edge list.
+  const auto nid_master = get_node_nid(pin.get_root_idx());
+  if (hhds_graph_ && nid_master != Hardcoded_input_nid && nid_master != Hardcoded_output_nid) {
+    if (auto it = idx_to_hhds_nid_.find(nid_master); it != idx_to_hhds_nid_.end()) {
+      auto hnode = hhds_graph_->get_node(it->second);
+      auto hpin  = hnode.get_sink_pin(static_cast<hhds::Port_id>(pin.get_pid()));
+      if (hpin.is_valid()) {
+        return !hpin.inp_edges().empty();
+      }
+      return false;
+    }
+  }
 
-  // node_internal.ref_lock();
+  auto idx2 = pin.get_root_idx();
   while (true) {
     if (node_internal[idx2].get_dst_pid() == pin.get_pid()) {
       if (node_internal[idx2].has_local_inputs()) {
-        // node_internal.ref_unlock();
         return true;
       }
     }
-
     if (node_internal[idx2].is_last_state()) {
-      // node_internal.ref_unlock();
       return false;
     }
-
     idx2 = node_internal[idx2].get_next();
   }
-
   I(false);
-  // node_internal.ref_unlock();
-
   return false;
 }
 
 int Lgraph::get_num_out_edges(const Node& node) const {
-  auto idx2  = node.get_nid();
+  // HHDS Phase G3 read: edge counts via Node_class::out_edges().size(). Not
+  // as cheap as a dedicated counter, but the existing callers use this on
+  // cold paths (verilog gen, cprop checks). Falls back to legacy for IO
+  // nodes / shadow misses.
+  const auto nid_master = node.get_nid();
+  if (hhds_graph_ && nid_master != Hardcoded_input_nid && nid_master != Hardcoded_output_nid) {
+    if (auto it = idx_to_hhds_nid_.find(nid_master); it != idx_to_hhds_nid_.end()) {
+      return static_cast<int>(hhds_graph_->get_node(it->second).out_edges().size());
+    }
+  }
+  auto idx2  = nid_master;
   int  total = 0;
-
-  // node_internal.ref_lock();
   while (true) {
     const auto* ref = &node_internal[idx2];
-
     total += ref->get_num_local_outputs();
-
     if (ref->is_last_state()) {
-      // node_internal.ref_unlock();
       return total;
     }
-
     idx2 = ref->get_next();
   }
-
   I(false);
-  // node_internal.ref_unlock();
   return -1;
 }
 
 int Lgraph::get_num_inp_edges(const Node& node) const {
-  auto idx2  = node.get_nid();
+  // HHDS Phase G3 read: see get_num_out_edges above.
+  const auto nid_master = node.get_nid();
+  if (hhds_graph_ && nid_master != Hardcoded_input_nid && nid_master != Hardcoded_output_nid) {
+    if (auto it = idx_to_hhds_nid_.find(nid_master); it != idx_to_hhds_nid_.end()) {
+      return static_cast<int>(hhds_graph_->get_node(it->second).inp_edges().size());
+    }
+  }
+  auto idx2  = nid_master;
   int  total = 0;
-
-  // node_internal.ref_lock();
   while (true) {
     const auto* ref = &node_internal[idx2];
-
     total += ref->get_num_local_inputs();
-
     if (ref->is_last_state()) {
-      // node_internal.ref_unlock();
       return total;
     }
-
     idx2 = ref->get_next();
   }
-
   I(false);
-  // node_internal.ref_unlock();
   return -1;
 }
 
 int Lgraph::get_num_edges(const Node& node) const {
-  auto idx2  = node.get_nid();
+  // HHDS Phase G3 read: sum of in + out edges.
+  const auto nid_master = node.get_nid();
+  if (hhds_graph_ && nid_master != Hardcoded_input_nid && nid_master != Hardcoded_output_nid) {
+    if (auto it = idx_to_hhds_nid_.find(nid_master); it != idx_to_hhds_nid_.end()) {
+      auto hnode = hhds_graph_->get_node(it->second);
+      return static_cast<int>(hnode.out_edges().size() + hnode.inp_edges().size());
+    }
+  }
+  auto idx2  = nid_master;
   int  total = 0;
-
-  // node_internal.ref_lock();
   while (true) {
     const auto* ref = &node_internal[idx2];
-
     total += ref->get_num_local_edges();
-
     if (ref->is_last_state()) {
-      // node_internal.ref_unlock();
       return total;
     }
-
     idx2 = ref->get_next();
   }
-
   I(false);
-  // node_internal.ref_unlock();
   return -1;
 }
 
 int Lgraph::get_num_out_edges(const Node_pin& pin) const {
   I(pin.is_driver());
 
-  int total = 0;
+  const auto nid_master = get_node_nid(pin.get_root_idx());
+  if (hhds_graph_ && nid_master != Hardcoded_input_nid && nid_master != Hardcoded_output_nid) {
+    if (auto it = idx_to_hhds_nid_.find(nid_master); it != idx_to_hhds_nid_.end()) {
+      auto hnode = hhds_graph_->get_node(it->second);
+      auto hpin  = hnode.get_driver_pin(static_cast<hhds::Port_id>(pin.get_pid()));
+      if (hpin.is_valid()) {
+        return static_cast<int>(hpin.out_edges().size());
+      }
+      return 0;
+    }
+  }
 
-  auto idx2 = pin.get_root_idx();
-
-  // node_internal.ref_lock();
+  int  total = 0;
+  auto idx2  = pin.get_root_idx();
   while (true) {
     const auto* ref = &node_internal[idx2];
-
     if (ref->get_dst_pid() == pin.get_pid()) {
       total += ref->get_num_local_outputs();
     }
-
     if (ref->is_last_state()) {
-      // node_internal.ref_unlock();
       return total;
     }
-
     idx2 = ref->get_next();
   }
-
   I(false);
-  // node_internal.ref_unlock();
   return -1;
 }
 
 int Lgraph::get_num_inp_edges(const Node_pin& pin) const {
   I(pin.is_sink());
 
-  int total = 0;
+  const auto nid_master = get_node_nid(pin.get_root_idx());
+  if (hhds_graph_ && nid_master != Hardcoded_input_nid && nid_master != Hardcoded_output_nid) {
+    if (auto it = idx_to_hhds_nid_.find(nid_master); it != idx_to_hhds_nid_.end()) {
+      auto hnode = hhds_graph_->get_node(it->second);
+      auto hpin  = hnode.get_sink_pin(static_cast<hhds::Port_id>(pin.get_pid()));
+      if (hpin.is_valid()) {
+        return static_cast<int>(hpin.inp_edges().size());
+      }
+      return 0;
+    }
+  }
 
-  auto idx2 = pin.get_root_idx();
-
-  // node_internal.ref_lock();
+  int  total = 0;
+  auto idx2  = pin.get_root_idx();
   while (true) {
     const auto* ref = &node_internal[idx2];
-
     if (ref->get_dst_pid() == pin.get_pid()) {
       total += ref->get_num_local_inputs();
     }
-
     if (ref->is_last_state()) {
-      // node_internal.ref_unlock();
       return total;
     }
-
     idx2 = ref->get_next();
   }
-
   I(false);
-  // node_internal.ref_unlock();
   return 0;
 }
 
