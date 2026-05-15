@@ -404,17 +404,20 @@ Delete (per goal):
 - [ ] `lgraph/lgraphbase.{cpp,hpp}` storage internals — blocked on G3.
 - [ ] Significant portions of `lgraph/lgraph.cpp` (now delegating) —
   blocked on G3+G4.
-- [ ] `lgraph/tests/graph_bench.cpp` (compares lgraph vs hhds — both
-  sides are now hhds) — blocked on G3 active reads making the lgraph
-  side fully HHDS-backed.
-- [ ] `lgraph/tests/edge_test.cpp` (exercises lgedgeiter / lgedge
-  mechanics) — obsolete with G3 storage switch. User confirmed
-  2026-05-14: no need to preserve API compatibility for this test
-  during migration.
-- [ ] `lgraph/tests/lgtuple_test.cpp` (lgtuple utility — depends on
-  the legacy create_node_const + node-pin model) — obsolete. User
-  confirmed 2026-05-14: deletable after migration; lgraph_test and
-  node_test "may be" relevant and should be kept (re-examine).
+- (see Phase G6 list below — graph_bench.cpp DELETED.)
+- [x] `lgraph/tests/edge_test.cpp` (exercises lgedgeiter / lgedge
+  mechanics) — DELETED. User confirmed 2026-05-14: no need to preserve
+  API compatibility for this test during migration. Removed in
+  Phase G6 partial deletion (2026-05-15).
+- [x] `lgraph/tests/lgtuple_test.cpp` (lgtuple utility — depends on
+  the legacy create_node_const + node-pin model) — DELETED. User
+  confirmed 2026-05-14: deletable after migration. The `lgtuple.cpp`
+  / `lgtuple.hpp` library itself remains (still used by passes).
+  `lgraph_test` and `node_test` kept per the user's note that they
+  "may be" relevant.
+- [x] `lgraph/tests/graph_bench.cpp` (side-by-side lgraph vs HHDS
+  micro-benchmark) — DELETED. The user's goal text explicitly calls
+  this out as obsolete ("testing HHDS vs HHDS").
 - [ ] Drop `@hif//hif` from `lgraph/BUILD`. Drop `@hif`
   `http_archive` from `MODULE.bazel` once `inou/json` (which uses
   rapidjson, not hif) is the only consumer left — verify.
