@@ -343,6 +343,71 @@ inline void set_type_const_serialized(hhds::Node_class& node, std::string_view s
   return node.create_driver_pin(0);
 }
 
+// Create-if-missing sink pin lookup by LiveHD-style name. For Sub nodes the
+// name path goes through HHDS's create_sink_pin(name) directly; for other ops
+// we translate name→port_id via Ntype and call create_sink_pin(port_id).
+[[nodiscard]] inline hhds::Pin_class setup_sink_by_name(const hhds::Node_class& node, std::string_view name) {
+  auto op = type_op_of(node);
+  if (op == Ntype_op::Sub) {
+    return node.create_sink_pin(name);
+  }
+  auto pid = Ntype::get_sink_pid(op, name);
+  if (pid < 0) {
+    return {};
+  }
+  return node.create_sink_pin(static_cast<hhds::Port_id>(pid));
+}
+
+// Create a new node of `op` in `graph` and stamp port-0 driver bits.
+[[nodiscard]] inline hhds::Node_class create_typed_node(hhds::Graph& graph, Ntype_op op, Bits_t bits) {
+  auto node = graph.create_node();
+  set_type_op(node, op);
+  if (bits != 0) {
+    auto dpin = node.create_driver_pin(0);
+    dpin.attr(livehd::attrs::bits).set(bits);
+  }
+  return node;
+}
+
+// Create a new node of `op` in the same graph as `origin`. Mirrors LiveHD's
+// `Node::create(op)` (the new node belongs to the same Lgraph the origin is on).
+[[nodiscard]] inline hhds::Node_class create_node_on(const hhds::Node_class& origin, Ntype_op op) {
+  return create_typed_node(*origin.get_graph(), op);
+}
+
+// Create a new Nconst node on the same graph as `origin` carrying the given
+// serialized Const, returning its port-0 driver pin. Mirrors
+// `Node::create_const(value).setup_driver_pin()` in the legacy API.
+[[nodiscard]] inline hhds::Pin_class create_const_pin_on(const hhds::Node_class& origin, std::string_view serialized) {
+  return create_const_node_serialized(*origin.get_graph(), serialized);
+}
+
+// Per-pin offset (used by Get_mask / Set_mask / Sext positional ops).
+inline void set_pin_offset(hhds::Pin_class& pin, Bits_t off) {
+  if (pin.is_invalid()) {
+    return;
+  }
+  if (off == 0) {
+    pin.attr(livehd::attrs::pin_offset).del();
+  } else {
+    pin.attr(livehd::attrs::pin_offset).set(off);
+  }
+}
+
+// Per-node source filename / source line. Mirrors LiveHD `Node::set_source`
+// and `Node::set_loc1`.
+inline void set_source(hhds::Node_class& node, std::string_view fname) {
+  if (fname.empty()) {
+    node.attr(livehd::attrs::source).del();
+  } else {
+    node.attr(livehd::attrs::source).set(std::string{fname});
+  }
+}
+
+inline void set_loc1(hhds::Node_class& node, uint64_t line) {
+  node.attr(livehd::attrs::loc).set(livehd::attrs::loc_t::value_type{line, 0});
+}
+
 // All drivers feeding a named sink port. Used by passes (memory, bit_or)
 // that allow multiple drivers on the same sink port_id.
 [[nodiscard]] inline std::vector<hhds::Pin_class> inp_drivers_of(const hhds::Node_class& node, std::string_view name) {
