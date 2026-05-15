@@ -304,6 +304,31 @@ public:
     hnode.attr(livehd::attrs::lut).set(std::move(serialized));
   }
 
+  // HHDS Phase G3 (shadow write): mirror per-pin wire name via
+  // livehd::attrs::pin_name on the driver pin. Threaded through
+  // Node_pin::set_name / reset_name.
+  void mirror_set_pin_name_hhds(Index_id nid_master, Port_ID pid, std::string_view name) {
+    if (!hhds_graph_) {
+      return;
+    }
+    if (nid_master == Hardcoded_input_nid || nid_master == Hardcoded_output_nid) {
+      return;
+    }
+    auto it = idx_to_hhds_nid_.find(nid_master);
+    if (it == idx_to_hhds_nid_.end()) {
+      return;
+    }
+    auto hnode = hhds_graph_->get_node(it->second);
+    if (!hnode.is_valid()) {
+      return;
+    }
+    auto hpin = hnode.create_driver_pin(static_cast<hhds::Port_id>(pid));
+    if (!hpin.is_valid()) {
+      return;
+    }
+    hpin.attr(livehd::attrs::pin_name).set(std::string(name));
+  }
+
   // HHDS Phase G3 (shadow write): mirror node-level instance name (HHDS
   // provides hhds::attrs::name; we attach the same string there).
   void mirror_set_name_hhds(Index_id nid, std::string_view name) {

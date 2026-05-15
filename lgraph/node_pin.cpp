@@ -372,6 +372,7 @@ void Node_pin::set_name(std::string_view wname) {
   rref->insert_or_assign(wname, get_compact_class_driver());
   // auto [rref_it, rref_inserted] = rref->insert_or_assign(wname, get_compact_class_driver());
   // I(rref_inserted); // name was not previously bound to something (erase or move API to cache errors)
+  current_g->mirror_set_pin_name_hhds(current_g->get_node_nid(idx), pid, wname);
 }
 
 void Node_pin::reset_name(std::string_view wname) {
@@ -390,6 +391,7 @@ void Node_pin::reset_name(std::string_view wname) {
 
   auto* rref = current_g->ref_node_pin_name_rmap();
   rref->insert_or_assign(wname, get_compact_class_driver());
+  current_g->mirror_set_pin_name_hhds(current_g->get_node_nid(idx), pid, wname);
 }
 
 void Node_pin::del() {
