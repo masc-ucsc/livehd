@@ -268,6 +268,21 @@ This is the biggest single change. Strategy:
 
 ### Phase G4 — `Node`, `Node_pin`, `XEdge` become thin wrappers
 
+**Phase G4 prep (LANDED):**
+- `Node::get_hhds_node()` — returns the paired `hhds::Node_class` via
+  the shadow lookup. Invalid for IO pseudo-nodes / shadow misses.
+- `Node_pin::get_hhds_pin()` — returns the paired `hhds::Pin_class`
+  via `get_driver_pin(port_id)` / `get_sink_pin(port_id)` on the
+  owning Node_class. Invalid for the same misses, plus pins never
+  materialized on the shadow. Required adding `#include
+  "hhds/graph.hpp"` to `node_pin.hpp` so the return type is visible.
+
+These accessors let consumer code migrate incrementally — read HHDS
+attributes / edge sets when a valid handle is returned, fall back to
+legacy paths otherwise — without rewriting Node/Node_pin storage
+layout in one atomic surgery.
+
+
 1. `Node` holds `hhds::Node_class node_` instead of `Index_id`.
 2. `Node_pin` holds `hhds::Pin_class pin_` instead of
    `(Index_id, Port_ID, sink_or_driver)`.
