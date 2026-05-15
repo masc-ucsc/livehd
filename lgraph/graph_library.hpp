@@ -14,6 +14,7 @@
 #include "absl/container/flat_hash_set.h"
 #include "absl/synchronization/mutex.h"
 #include "absl/types/span.h"
+#include "hhds/graph.hpp"
 #include "lgraphbase.hpp"
 #include "sub_node.hpp"
 #include "tech_library.hpp"
@@ -65,6 +66,14 @@ protected:
   Recycled_id                   recycled_id;  // WR protect on add entries, RD protect any access
   std::vector<Graph_attributes> attributes;   // WR protect on add entries, RD protect any access
   std::vector<Sub_node*>        sub_nodes;    // WR protect on add entries, RD protect any access
+
+  // HHDS-side mirror of the registry. Each LiveHD lgid has a paired
+  // hhds::GraphIO. The two id spaces are independent; lgid_to_hhds_io_ is the
+  // mapping. Created lazily by add_name_int / renamed by rename_name_int. This
+  // is the foundation Phase G1.1 of the HHDS graph migration —
+  // docs/contracts/hhds_graph_migration_plan.md.
+  mutable hhds::GraphLibrary hhds_lib_;
+  absl::flat_hash_map<Lg_type_id::type, std::shared_ptr<hhds::GraphIO>> lgid_to_hhds_io_;
 
   static Global_instances global_instances;  // WR protect on add entries, RD protect any access
   // End protect for MT

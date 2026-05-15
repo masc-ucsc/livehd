@@ -11,16 +11,9 @@
 // populate graph_pos for verilog interoperativity. E.g: alphabetical order, or
 // declaration order or ??
 
-#if 0
-#include "mimalloc.h"
-
-#define RAPIDJSON_MALLOC(sz)       malloc(sz)
-#define RAPIDJSON_FREE(ptr)        free(ptr)
-#define RAPIDJSON_REALLOC(ptr, sz) realloc(ptr, sz)
-#endif
-
 #include "absl/container/flat_hash_map.h"
 #include "absl/types/span.h"
+#include "hhds/graph.hpp"
 #include "lgraph_base_core.hpp"
 #include "rapidjson/document.h"
 #include "rapidjson/error/en.h"
@@ -74,6 +67,12 @@ private:
   std::vector<Port_ID>                      graph_pos2instance_pid;
   std::vector<Port_ID>                      deleted;
 
+  // Non-owning pointer to the paired hhds::GraphIO. Set by Graph_library when
+  // this Sub_node is created (HHDS migration Phase G1.2 —
+  // docs/contracts/hhds_graph_migration_plan.md). Operations mirror to the
+  // GraphIO when non-null; reads still consult the local io_pins[].
+  hhds::GraphIO* hhds_io_ = nullptr;
+
   void map_pin_int(Port_ID instance_pid, Port_ID graph_pos) {
     I(graph_pos != Port_invalid);
     I(instance_pid);  // Must be non zero for input/output pid
@@ -92,7 +91,11 @@ public:
   Sub_node(const Sub_node& s)          = default;
   Sub_node& operator=(const Sub_node&) = delete;
 
-  void copy_from(std::string_view new_name, Lg_type_id new_lgid, const Sub_node& sub);
+  // HHDS migration Phase G1.2 — set by Graph_library to a non-owning pointer
+  // to the paired hhds::GraphIO. Operations mirror to it when non-null.
+  // The Graph_library owns the underlying shared_ptr.
+  void                 set_hhds_io(hhds::GraphIO* io) { hhds_io_ = io; }
+  [[nodiscard]] hhds::GraphIO* ref_hhds_io() const { return hhds_io_; }
 
   void to_json(rapidjson::PrettyWriter<rapidjson::StringBuffer>& writer) const;
   void from_json(const rapidjson::Value& entry);
@@ -103,6 +106,12 @@ public:
     io_pins.resize(1);  // No id ZERO
     deleted.clear();
     name2id.clear();
+    // Mirror to paired hhds::GraphIO. Use reset_declarations() (clears
+    // declared input/output pins) — NOT clear(), which would tombstone the
+    // whole GraphIO and invalidate the paired Graph.
+    if (hhds_io_ && hhds_io_->get_library() != nullptr) {
+      hhds_io_->reset_declarations();
+    }
   }
 
   void reset(std::string_view _name, Lg_type_id _lgid) {
@@ -139,7 +148,6 @@ public:
   }
 
   [[nodiscard]] bool is_loop_first() const { return loop_first; }
-  void               set_loop_first() { loop_first = true; }
 
   [[nodiscard]] bool is_loop_last() const { return loop_last; }
   void               set_loop_last() { loop_last = true; }
@@ -206,6 +214,21 @@ public:
       map_pin_int(instance_pid, graph_pos);
     }
 
+    // Mirror to paired hhds::GraphIO (HHDS migration Phase G1.2). The
+    // get_library() guard makes us robust against the corner case observed
+    // during initial bring-up where an invalidated GraphIO would be reachable
+    // via a stale Sub_node->hhds_io_ pointer.
+    if (hhds_io_ && hhds_io_->get_library() != nullptr) {
+      const bool already = (dir == Direction::Input) ? hhds_io_->has_input(io_name) : hhds_io_->has_output(io_name);
+      if (!already) {
+        if (dir == Direction::Input) {
+          hhds_io_->add_input(io_name, static_cast<hhds::Port_id>(instance_pid));
+        } else if (dir == Direction::Output) {
+          hhds_io_->add_output(io_name, static_cast<hhds::Port_id>(instance_pid));
+        }
+      }
+    }
+
     return instance_pid;
   }
   void del_pin(Port_ID instance_pid);
@@ -232,10 +255,19 @@ public:
     return instance_pid;
   }
 
-  void populate_graph_pos();
 
   [[nodiscard]] bool has_pin(std::string_view io_name) const {
     I(lgid);
+    // HHDS Phase G2 (reads): consult hhds::GraphIO when the mirror is
+    // available. Falls back to the legacy io_pins[] when hhds_io_ is
+    // unset or invalidated (e.g., during ctor before set_hhds_io).
+    if (hhds_io_ && hhds_io_->get_library() != nullptr) {
+      if (hhds_io_->has_input(io_name) || hhds_io_->has_output(io_name)) {
+        return true;
+      }
+      // GraphIO doesn't know about LiveHD's `%` / `$` defaults — fall
+      // through to the legacy check for those.
+    }
     const auto it = name2id.find(io_name);
     if (it == name2id.end()) {
       return io_name == "%" || io_name == "$";
@@ -249,12 +281,29 @@ public:
   }
   [[nodiscard]] bool has_instance_pin(Port_ID instance_pid) const {
     I(lgid);
+    // HHDS Phase G2 (reads): consult GraphIO when available. instance_pid is
+    // stored as the HHDS Port_id during add_pin, so has_pin_with_port_id
+    // resolves authoritatively. Falls back to io_pins[] when mirror is unset.
+    if (hhds_io_ && hhds_io_->get_library() != nullptr) {
+      return hhds_io_->has_pin_with_port_id(static_cast<hhds::Port_id>(instance_pid));
+    }
     return io_pins.size() > instance_pid && !io_pins[instance_pid].is_invalid();
   }
 
   [[nodiscard]] Port_ID get_instance_pid(std::string_view io_name) const {
     if (io_name == "$" || io_name == "%") {
       return 0;
+    }
+    // HHDS Phase G2: consult GraphIO when the mirror is available. We
+    // stored `instance_pid` as the HHDS Port_id during add_input/add_output,
+    // so get_input_port_id / get_output_port_id round-trips correctly.
+    if (hhds_io_ && hhds_io_->get_library() != nullptr) {
+      if (hhds_io_->has_input(io_name)) {
+        return static_cast<Port_ID>(hhds_io_->get_input_port_id(io_name));
+      }
+      if (hhds_io_->has_output(io_name)) {
+        return static_cast<Port_ID>(hhds_io_->get_output_port_id(io_name));
+      }
     }
     I(has_pin(io_name));
     return name2id.at(io_name);
@@ -280,11 +329,6 @@ public:
       return io_pins[0];  // invalid PID
     }
     return io_pins[instance_pid];
-  }
-
-  [[nodiscard]] Port_ID get_io_pos_from_instance_pid(Port_ID instance_pid) const {
-    I(has_instance_pin(instance_pid));
-    return io_pins[instance_pid].graph_io_pos;
   }
 
   void set_bits(std::string_view io_name, Bits_t bits) {
@@ -343,19 +387,21 @@ public:
 
   [[nodiscard]] bool is_input_from_instance_pid(Port_ID instance_pid) const {
     I(has_instance_pin(instance_pid));
+    // HHDS Phase G2 (reads): authoritative from GraphIO when mirror is set.
+    if (hhds_io_ && hhds_io_->get_library() != nullptr) {
+      return hhds_io_->has_input_with_port_id(static_cast<hhds::Port_id>(instance_pid));
+    }
     return io_pins[instance_pid].dir == Direction::Input;
-  }
-
-  [[nodiscard]] bool is_input_from_graph_pos(Port_ID graph_pos) const {
-    I(has_graph_pos_pin(graph_pos));
-    return io_pins[graph_pos2instance_pid[graph_pos]].dir == Direction::Input;
   }
 
   [[nodiscard]] bool is_input(std::string_view io_name) const {
     if (io_name == "$") {
       return true;
     }
-
+    // HHDS Phase G2 (reads): consult GraphIO when mirror is available.
+    if (hhds_io_ && hhds_io_->get_library() != nullptr && hhds_io_->has_input(io_name)) {
+      return true;
+    }
     const auto it = name2id.find(io_name);
     if (it == name2id.end()) {
       return false;
@@ -366,19 +412,21 @@ public:
 
   [[nodiscard]] bool is_output_from_instance_pid(Port_ID instance_pid) const {
     I(has_instance_pin(instance_pid));
+    // HHDS Phase G2 (reads): authoritative from GraphIO when mirror is set.
+    if (hhds_io_ && hhds_io_->get_library() != nullptr) {
+      return hhds_io_->has_output_with_port_id(static_cast<hhds::Port_id>(instance_pid));
+    }
     return io_pins[instance_pid].dir == Direction::Output;
-  }
-
-  [[nodiscard]] bool is_output_from_graph_pos(Port_ID graph_pos) const {
-    I(has_graph_pos_pin(graph_pos));
-    return io_pins[graph_pos2instance_pid[graph_pos]].dir == Direction::Output;
   }
 
   [[nodiscard]] bool is_output(std::string_view io_name) const {
     if (io_name == "%") {
       return true;
     }
-
+    // HHDS Phase G2 (reads): consult GraphIO when mirror is available.
+    if (hhds_io_ && hhds_io_->get_library() != nullptr && hhds_io_->has_output(io_name)) {
+      return true;
+    }
     const auto it = name2id.find(io_name);
     if (it == name2id.end()) {
       return false;
@@ -390,20 +438,6 @@ public:
   [[nodiscard]] size_t size() const { return io_pins.size() - 1; };
 
   [[nodiscard]] absl::Span<const IO_pin> get_io_pins() const { return absl::MakeSpan(io_pins); }
-
-#if 0
-  // Returns a span/vector-like array of all the pins. If the pin was deleted, there may be a pin witout name and position.
-  const std::vector<const IO_pin *> get_io_pins() const {
-    I(io_pins.size() >= 1);
-    std::vector<const IO_pin *> v;
-    for (const auto &e : io_pins) {
-      if (e.is_invalid())
-        continue;
-      v.emplace_back(&e);
-    }
-    return v;
-  }
-#endif
 
   [[nodiscard]] const std::vector<std::pair<const IO_pin*, Port_ID>> get_output_pins() const {
     I(io_pins.size() >= 1);

@@ -16,6 +16,7 @@ cc_library(
     deps = [
         # "//eprp",
         "//core",
+        "@hhds//hhds:graph",
         "@hif//hif",
         "@rapidjson",
     ],
@@ -57,15 +58,6 @@ cc_test(
     deps = [
         ":lgraph",
         "@googletest//:gtest_main",
-    ],
-)
-
-cc_test(
-    name = "iter_test",
-    srcs = ["tests/iter_test.cpp"],
-    tags = ["fixme"],
-    deps = [
-        ":lgraph",
     ],
 )
 

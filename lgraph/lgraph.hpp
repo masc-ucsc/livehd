@@ -31,6 +31,18 @@ protected:
 
   Hierarchy htree;
 
+  // HHDS migration Phase G3 (shadow storage). Each Lgraph owns a paired
+  // hhds::Graph created via the paired hhds::GraphIO; storage operations
+  // (create_node, add_edge, set_type) will be mirrored to it once readers
+  // depend on it. Until then, this is dormant — node_internal[] remains the
+  // authoritative storage. See docs/contracts/hhds_graph_migration_plan.md.
+  std::shared_ptr<hhds::Graph> hhds_graph_;
+  // Side-map from LiveHD positional Index_id (master root) → HHDS
+  // Class_index for the mirrored node. Populated lazily during shadow
+  // create_node mirroring. Used during the dual-write transition so callers
+  // that still hand around Index_id can resolve their HHDS counterpart.
+  absl::flat_hash_map<Index_id, hhds::Class_index, Index_id_hash> idx_to_hhds_nid_;
+
   void setup_hierarchy_down(Lgraph* sub_lg, Hierarchy_index parent_hidx);
   void setup_hierarchy_for_traversal();
 
@@ -92,7 +104,6 @@ protected:
   int get_num_out_edges(const Node_pin& pin) const;
   int get_num_inp_edges(const Node_pin& pin) const;
 
-  void del_driver2node_int(Node& driver, const Node& sink);
   void del_sink2node_int(const Node& driver, Node& sink);
 
   void try_del_node_int(Index_id last_idx, Index_id idx);
@@ -185,6 +196,22 @@ public:
   Hierarchy*       ref_htree() { return &htree; }
   const Hierarchy& get_htree() { return htree; }
 
+  // HHDS migration Phase G3/G4 (shadow access helpers). Resolve a legacy
+  // Index_id to the paired hhds::Node_class on the shadow Graph, or to a
+  // default-constructed (invalid) handle if there is no mapping (e.g.,
+  // hardcoded IO nids or pin-tail Index_ids that don't correspond to nodes).
+  // See docs/contracts/hhds_graph_migration_plan.md.
+  [[nodiscard]] hhds::Node_class get_hhds_node(Index_id idx) const {
+    if (!hhds_graph_) {
+      return {};
+    }
+    if (auto it = idx_to_hhds_nid_.find(idx); it != idx_to_hhds_nid_.end()) {
+      return hhds_graph_->get_node(it->second);
+    }
+    return {};
+  }
+  [[nodiscard]] hhds::Graph* ref_hhds_graph() const { return hhds_graph_.get(); }
+
   void add_edge(const Node_pin& dpin, const Node_pin& spin);
   void add_edge(const Node_pin& dpin, const Node_pin& spin, Bits_t bits) {
     add_edge(dpin, spin);
@@ -196,15 +223,6 @@ public:
   Fast_edge_iterator fast(bool visit_sub = false);
 
   Lgraph* clone_skeleton(std::string_view new_lg_name);
-
-#if 0
-  static bool    exists(std::string_view path, std::string_view name);
-  static Lgraph *create(std::string_view path, std::string_view name, std::string_view source);
-  static Lgraph *open(std::string_view path, Lg_type_id lgid);
-  static Lgraph *open(std::string_view path, std::string_view name);
-  static Lgraph *open_or_create(std::string_view path, std::string_view name, std::string_view source);
-  static void    rename(std::string_view path, std::string_view orig, std::string_view dest);
-#endif
 
   void clear() override;
 
@@ -234,7 +252,6 @@ public:
 
   void save(std::string filename = "");
   void dump(bool hier = false);
-  void dump_down_nodes();
 
   Node get_graph_input_node(bool hier = false);
   Node get_graph_output_node(bool hier = false);

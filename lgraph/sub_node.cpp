@@ -4,14 +4,6 @@
 
 #include <print>
 
-void Sub_node::copy_from(std::string_view new_name, Lg_type_id new_lgid, const Sub_node& sub) {
-  name                   = new_name;
-  lgid                   = new_lgid;
-  io_pins                = sub.io_pins;
-  name2id                = sub.name2id;
-  graph_pos2instance_pid = sub.graph_pos2instance_pid;
-}
-
 void Sub_node::to_json(rapidjson::PrettyWriter<rapidjson::StringBuffer>& writer) const {
   writer.Key("lgid");
   writer.Uint64(lgid);
@@ -127,6 +119,20 @@ void Sub_node::from_json(const rapidjson::Value& entry) {
     if (pid != Port_invalid) {
       map_pin_int(instance_pid, pid);
     }
+
+    // Mirror to paired hhds::GraphIO (HHDS migration Phase G1.2). reload
+    // bypasses add_pin and writes io_pins[] directly, so the GraphIO would
+    // otherwise stay empty. Guarded against the stale-pointer case.
+    if (hhds_io_ && hhds_io_->get_library() != nullptr && !io_pins[instance_pid].is_invalid()) {
+      const bool already = (dir == Direction::Input) ? hhds_io_->has_input(io_name) : hhds_io_->has_output(io_name);
+      if (!already) {
+        if (dir == Direction::Input) {
+          hhds_io_->add_input(io_name, static_cast<hhds::Port_id>(instance_pid));
+        } else if (dir == Direction::Output) {
+          hhds_io_->add_output(io_name, static_cast<hhds::Port_id>(instance_pid));
+        }
+      }
+    }
   }
 
   std::sort(deleted.begin(), deleted.end(), std::greater<>());
@@ -210,26 +216,24 @@ std::vector<Sub_node::IO_pin> Sub_node::get_sorted_io_pins() const {
   return sort_io;
 }
 
-void Sub_node::populate_graph_pos() {
-  if (graph_pos2instance_pid.size() == io_pins.size() - 1) {
-    return;  // all the pins are already populated
-  }
-
-  Port_ID pos = 0;
-  for (auto& sorted_pin : get_sorted_io_pins()) {
-    pos++;
-    if (sorted_pin.graph_io_pos != pos) {
-      map_graph_pos(sorted_pin.name, sorted_pin.dir, pos);
-    }
-  }
-}
-
 void Sub_node::del_pin(Port_ID instance_pid) {
   if (instance_pid == 0) {
     return;  // $ and % are special cases
   }
 
   I(has_instance_pin(instance_pid));
+
+  // Mirror to paired hhds::GraphIO before we tear down the local state.
+  // The get_library() guard handles the corner case where the GraphIO is
+  // stale (see Sub_node::add_pin for the same guard pattern).
+  if (hhds_io_ && hhds_io_->get_library() != nullptr) {
+    const auto& pin = io_pins[instance_pid];
+    if (pin.dir == Direction::Input && hhds_io_->has_input(pin.name)) {
+      hhds_io_->delete_input(pin.name);
+    } else if (pin.dir == Direction::Output && hhds_io_->has_output(pin.name)) {
+      hhds_io_->delete_output(pin.name);
+    }
+  }
 
   name2id.erase(io_pins[instance_pid].name);
   auto pos = io_pins[instance_pid].graph_io_pos;

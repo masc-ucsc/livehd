@@ -306,6 +306,8 @@ Lg_type_id Graph_library::add_name_int(std::string_view name, std::string_view s
 
   I(id < attributes.size());
   I(id < sub_nodes.size());
+  // Drop any dangling hhds_io_ pointer before we possibly destroy its target.
+  sub_nodes[id]->set_hhds_io(nullptr);
   sub_nodes[id]->reset(name, id);
   attributes[id].source  = source;
   attributes[id].version = max_next_version++;
@@ -315,6 +317,27 @@ Lg_type_id Graph_library::add_name_int(std::string_view name, std::string_view s
   I(name2id.find(name) == name2id.end());
   I(id);
   name2id[name] = id;
+
+  // Mirror in the HHDS GraphLibrary. A slot may be recycled — if the previous
+  // owner left a GraphIO under a different name, drop it; create_io would
+  // otherwise assert on the name collision.
+  if (auto it = lgid_to_hhds_io_.find(id.value); it != lgid_to_hhds_io_.end()) {
+    if (it->second && it->second->get_name() != name) {
+      hhds_lib_.delete_graphio(it->second);
+    }
+    lgid_to_hhds_io_.erase(it);
+  }
+  // Skip if an unrelated GraphIO already owns this name (e.g., from a prior
+  // sub_nodes slot that's still around). Migration-time safety: leave the
+  // existing one in place rather than asserting.
+  std::shared_ptr<hhds::GraphIO> new_io;
+  if (auto existing = hhds_lib_.find_io(name); existing) {
+    new_io = existing;
+  } else {
+    new_io = hhds_lib_.create_io(name);
+  }
+  lgid_to_hhds_io_[id.value] = new_io;
+  sub_nodes[id]->set_hhds_io(new_io.get());
 
   return id;
 }
@@ -337,10 +360,29 @@ bool Graph_library::rename_name_int(std::string_view orig, std::string_view dest
   I(name2id.find(orig) == name2id.end());
 
   graph_library_clean = false;
+  // Drop any dangling hhds_io_ before we possibly destroy its target.
+  sub_nodes[id]->set_hhds_io(nullptr);
   sub_nodes[id]->rename(dest);
   I(sub_nodes[id]->get_lgid() == id);
 
   name2id[dest] = id;
+
+  // Mirror rename on the HHDS side: delete the old GraphIO and create one with
+  // the new name. HHDS GraphIO has no in-place rename API.
+  if (auto it = lgid_to_hhds_io_.find(id.value); it != lgid_to_hhds_io_.end()) {
+    if (it->second) {
+      hhds_lib_.delete_graphio(it->second);
+    }
+    lgid_to_hhds_io_.erase(it);
+  }
+  std::shared_ptr<hhds::GraphIO> new_io;
+  if (auto existing = hhds_lib_.find_io(dest); existing) {
+    new_io = existing;
+  } else {
+    new_io = hhds_lib_.create_io(dest);
+  }
+  lgid_to_hhds_io_[id.value] = new_io;
+  sub_nodes[id]->set_hhds_io(new_io.get());
 
   clean_library_int();
   return true;
@@ -433,6 +475,18 @@ void Graph_library::reload_int() {
       I(lg_entry.HasMember("source"));
       attributes[id].source  = lg_entry["source"].GetString();
       attributes[id].version = version;
+
+      // HHDS Phase G1: ensure a paired hhds::GraphIO exists before from_json
+      // so its add_input/add_output mirror in Sub_node fires.
+      const auto loaded_name = std::string(lg_entry["name"].GetString());
+      std::shared_ptr<hhds::GraphIO> io;
+      if (auto existing = hhds_lib_.find_io(loaded_name); existing) {
+        io = existing;
+      } else {
+        io = hhds_lib_.create_io(loaded_name);
+      }
+      lgid_to_hhds_io_[static_cast<uint32_t>(id)] = io;
+      sub_nodes[id]->set_hhds_io(io.get());
 
       sub_nodes[id]->from_json(lg_entry);
       // std::print("DEBUG21, sub_nodes size:{}, sub_nodes[{}]->get_lgid():{}, name:{}\n\n", sub_nodes.size(), id,
@@ -635,7 +689,17 @@ void Graph_library::expunge_int(std::string_view name) {
   }
   closedir(dr);
 
+  // Drop dangling hhds_io_ before tombstone destroys it.
+  sub_nodes[id]->set_hhds_io(nullptr);
   sub_nodes[id]->expunge();  // Nuke IO and contents, but keep around lgid
+
+  // Mirror tombstone on the HHDS side.
+  if (auto it_hhds = lgid_to_hhds_io_.find(id); it_hhds != lgid_to_hhds_io_.end()) {
+    if (it_hhds->second) {
+      hhds_lib_.delete_graphio(it_hhds->second);
+    }
+    lgid_to_hhds_io_.erase(it_hhds);
+  }
 }
 
 void Graph_library::clear_int(Lg_type_id lgid) {
@@ -644,61 +708,14 @@ void Graph_library::clear_int(Lg_type_id lgid) {
   sub_nodes[lgid]->reset_pins();
 }
 
-Lg_type_id Graph_library::copy_lgraph_int(std::string_view name, std::string_view new_name) {
+Lg_type_id Graph_library::copy_lgraph_int(std::string_view /*name*/, std::string_view /*new_name*/) {
+  // Stub asserting failure — copy_lgraph has been broken for some time
+  // (the original body started with `I(false)` followed by unreachable
+  // copy/reload logic). Removed the dead body during the HHDS migration
+  // dead-code sweep. If a real copy operation is needed, build it on top
+  // of hhds::GraphLibrary directly.
   I(false);
-  graph_library_clean = false;
-  const auto& it      = name2id.find(name);
-  I(it != name2id.end());
-  auto id_orig = it->second;
-  I(sub_nodes[id_orig]->get_name() == name);
-
-  Lg_type_id id_new = reset_id_int(new_name, attributes[id_orig].source);
-
-  attributes[id_new] = attributes[id_orig];
-  sub_nodes[id_new]->copy_from(new_name, id_new, *sub_nodes[id_orig]);
-
-  DIR* dr = opendir(path.c_str());
-  if (dr == NULL) {
-    Lgraph::error("graph_library: unable to access path {}", path);
-    return false;
-  }
-
-  struct dirent* de;  // Pointer for directory entry
-  std::string    match   = absl::StrCat("lg_", std::to_string(id_orig));
-  std::string    rematch = absl::StrCat("lg_", std::to_string(id_new));
-
-  while ((de = readdir(dr)) != NULL) {
-    std::string chop_name(de->d_name, match.size());
-    if (chop_name == match) {
-      std::string_view dname(de->d_name);
-      std::string      file      = absl::StrCat(path, "/", dname);
-      std::string_view extension = dname.substr(match.size());
-
-      auto new_file = absl::StrCat(path, "/", rematch, extension);
-
-      int source = open(file.c_str(), O_RDONLY, 0);
-      int dest   = open(new_file.c_str(), O_WRONLY | O_CREAT | O_TRUNC, 0644);
-
-#ifdef __APPLE__
-      fcopyfile(dest, source, nullptr, COPYFILE_DATA);
-#else
-      // struct required, rationale: function stat() exists also
-      struct stat stat_source;
-      fstat(source, &stat_source);
-
-      sendfile(dest, source, nullptr, stat_source.st_size);
-#endif
-
-      close(source);
-      close(dest);
-    }
-  }
-
-  closedir(dr);
-
-  clean_library_int();
-
-  return id_new;
+  return 0;
 }
 
 void Graph_library::unregister_int(Lgraph* lg) {

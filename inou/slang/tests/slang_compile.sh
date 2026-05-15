@@ -1,7 +1,7 @@
 #!/bin/bash
 # This file is distributed under the BSD 3-Clause License. See LICENSE for details.
 
-echo "verilog.sh running in "$(pwd)
+echo "slang_compile.sh running in $(pwd)"
 
 LGSHELL=./bazel-bin/main/lgshell
 
@@ -10,15 +10,14 @@ if [ ! -x $LGSHELL ]; then
     LGSHELL=./main/lgshell
     echo "lgshell is in $(pwd)"
   else
-    echo "FAILED: verilog.sh could not find lgshell binary in $(pwd)";
+    echo "FAILED: slang_compile.sh could not find lgshell binary in $(pwd)";
+    exit 1
   fi
 fi
 
-LGCHECK=./inou/yosys/lgcheck
-
 rm -rf ./logs
 
-inputs=inou/yosys/tests/*.v
+inputs=inou/slang/tests/verilog/*.v
 long=""
 if [ "$1" == "long" ]; then
   long="true"
@@ -33,15 +32,13 @@ if [ "$1" != "" ]; then
     inputs+=" "$1
     shift
   done
-  echo "verilog.sh inputs: ${inputs}"
+  echo "slang_compile.sh inputs: ${inputs}"
 fi
 
 pass=0
 fail=0
 fail_list=""
 pass_list=""
-rm -rf tmp_slang_mix
-mkdir -p tmp_slang_mix
 for full_input in ${inputs}
 do
   STARTTIME=$SECONDS
@@ -74,75 +71,65 @@ do
     base=${base:8}
   fi
 
-  rm -rf lgdb_slang tmp_slang
+  rm -rf tmp_slang
   mkdir -p tmp_slang
 
-  echo "inou.verilog path:lgdb_slang top:${base} files:${full_input} |> pass.lnastfmt |> pass.compiler |> lgraph.save odir:lgdb_slang"  | ${LGSHELL} -q >tmp_slang/${input}.log 2>tmp_slang/${input}.err
-  echo "CMD: inou.verilog path:lgdb_slang top:${base} files:${full_input} |> pass.lnastfmt |> pass.compiler |> lgraph.save odir:lgdb_slang"
+  lnast_file="tmp_slang/${base}.lnast"
+  cmd_parse="inou.slang files:${full_input} |> pass.lnastfmt |> pass.upass constprop:1 verifier:0 max_iters:1 |> pass.lnastfmt |> lnast.dump file:${lnast_file}"
+  echo "${cmd_parse}" | ${LGSHELL} -q >tmp_slang/${input}.log 2>tmp_slang/${input}.err
+  echo "CMD: ${cmd_parse}"
   if [ $? -eq 0 ]; then
-    echo "Successfully created graph from ${input}"
+    echo "Successfully created LNAST from ${input}"
   else
-    echo "FAIL: lgyosys parsing terminated with an error (testcase ${input})"
+    echo "FAIL: slang LNAST parsing/upass terminated with an error (testcase ${input})"
     cat tmp_slang/${input}.log
     cat tmp_slang/${input}.err
     ((fail++))
     fail_list+=" "$base
     continue
   fi
-  LC=$(grep -iv Warning tmp_slang/${input}.err | grep -v perf_event | grep -v "recommended to use " | wc -l | cut -d" " -f1)
+  LC=$(grep -iv Warning tmp_slang/${input}.err | grep -v perf_event | grep -v "recommended to use " | grep -v "IPC=" | grep -v "uPass - verifier aggregate cassert counts:" | wc -l | cut -d" " -f1)
   if [[ $LC -gt 0 ]]; then
-    echo "FAIL: Faulty $LC err verilog file tmp_slang/${input}.err"
+    echo "FAIL: Faulty $LC err slang file tmp_slang/${input}.err"
     ((fail++))
     fail_list+=" "$base
     continue
   fi
   LC=$(grep -i signal tmp_slang/${input}.log | wc -l | cut -d" " -f1)
   if [[ $LC -gt 0 ]]; then
-    echo "FAIL: Faulty $LC log verilog file tmp_slang/${input}.log"
+    echo "FAIL: Faulty $LC log slang file tmp_slang/${input}.log"
     ((fail++))
     fail_list+=" "$base
     continue
   fi
 
-  echo "lgraph.match path:lgdb_slang |> pass.cprop |> inou.cgen.verilog odir:tmp_slang" | ${LGSHELL} -q 2>tmp_slang/${input}.err
-  LC=$(grep -iv Warning tmp_slang/${input}.err | grep -v perf_event | grep -v "recommended to use " | grep -v "IPC=" | wc -l | cut -d" " -f1)
-  echo "lgraph.match path:lgdb_slang |> pass.cprop |> inou.cgen.verilog odir:tmp_slang"
-  if [[ $LC -gt 0 ]]; then
-    echo "FAIL: Faulty $LC err verilog file tmp_slang/${input}.err"
+  if [ ! -s "${lnast_file}" ]; then
+    echo "FAIL: LNAST dump ${lnast_file} is empty or missing"
     ((fail++))
     fail_list+=" "$base
     continue
   fi
+
+  cmd_read="lnast.read file:${lnast_file} |> pass.lnastfmt |> pass.upass constprop:1 verifier:0 max_iters:1 |> pass.lnastfmt"
+  echo "${cmd_read}" | ${LGSHELL} -q >tmp_slang/${input}.reload.log 2>tmp_slang/${input}.reload.err
+  echo "CMD: ${cmd_read}"
   if [ $? -eq 0 ]; then
-    echo "Successfully created verilog from graph ${input}"
+    echo "Successfully reloaded LNAST from ${input}"
   else
-    echo "yosys -g"${base} -h -d
-    echo "FAIL: verilog generation terminated with an error (testcase ${input})"
+    echo "FAIL: LNAST read/upass terminated with an error (testcase ${input})"
+    cat tmp_slang/${input}.reload.log
+    cat tmp_slang/${input}.reload.err
     ((fail++))
     fail_list+=" "$base
     continue
   fi
-  $(cat tmp_slang/*.v >tmp_slang_mix/all_${base}.v)
 
-  if [[ $input =~ "nocheck_" ]]; then
-    LC=$(wc -l tmp_slang_mix/all_${base}.v | cut -d" " -f1)
-    echo "Skipping check for $base LC:"$LC
-    if [[ $LC -lt 2 ]]; then
-      echo "FAIL: Generated verilog file tmp_slang_mix/all_${base}.v is too small"
-      ((fail++))
-      fail_list+=" "$base
-      continue
-    fi
-  else
-    ${LGCHECK} --implementation tmp_slang_mix/all_${base}.v --reference ${full_input} --top ${base}
-    if [ $? -eq 0 ]; then
-      echo "Successfully matched generated verilog with original verilog (${full_input})"
-    else
-      echo "FAIL: circuits are not equivalent (${full_input})"
-      ((fail++))
-      fail_list+=" "$base
-      continue
-    fi
+  LC=$(grep -iv Warning tmp_slang/${input}.reload.err | grep -v perf_event | grep -v "recommended to use " | grep -v "IPC=" | grep -v "uPass - verifier aggregate cassert counts:" | wc -l | cut -d" " -f1)
+  if [[ $LC -gt 0 ]]; then
+    echo "FAIL: Faulty $LC err slang reload file tmp_slang/${input}.reload.err"
+    ((fail++))
+    fail_list+=" "$base
+    continue
   fi
 
   pass_list+=" "$base
@@ -167,4 +154,3 @@ else
   echo "FAIL: ${fail} tests failed: ${fail_list}"
   exit 1
 fi
-

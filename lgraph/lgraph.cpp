@@ -65,6 +65,21 @@ Lgraph::Lgraph(std::string_view _path, std::string_view _name, Lg_type_id _lgid,
 
   source = _source;
 
+  // HHDS Phase G3 (shadow): materialize the paired hhds::Graph body via the
+  // paired hhds::GraphIO held by Graph_library. Defensive — skip if the
+  // GraphIO is missing or detached.
+  if (_lib) {
+    auto* sub = _lib->ref_sub(_lgid);
+    if (sub) {
+      auto* io = sub->ref_hhds_io();
+      if (io && io->get_library() != nullptr && !io->has_graph()) {
+        hhds_graph_ = io->create_graph();
+      } else if (io && io->get_library() != nullptr) {
+        hhds_graph_ = io->get_graph();
+      }
+    }
+  }
+
   // load();
 }
 
@@ -1416,6 +1431,13 @@ void Lgraph::del_edge(const Node_pin& dpin, const Node_pin& spin) {
 
 Node Lgraph::create_node() {
   Index_id nid = create_node_int();
+  // HHDS Phase G3 (shadow write): mirror node creation to hhds_graph_ when
+  // attached. Result is recorded in idx_to_hhds_nid_; no reader depends on
+  // it yet — dormant until edges + cell-types are also mirrored.
+  if (hhds_graph_) {
+    auto hnode            = hhds_graph_->create_node();
+    idx_to_hhds_nid_[nid] = hnode.get_class_index();
+  }
   return {this, Hierarchy::hierarchical_root(), nid};
 }
 
@@ -1461,6 +1483,16 @@ Node Lgraph::create_node(const Ntype_op op) {
   I(op != Ntype_op::IO);   // Special case, must use add input/output API
   I(op != Ntype_op::Sub);  // Do not build by steps. call create_node_sub
 
+  // HHDS Phase G3 (shadow write): mirror node creation + cell type. HHDS
+  // reserves bit 0 of `Type` for `is_loop_last()`; shift Ntype_op left by
+  // one to keep that bit zero so we don't accidentally flag every node as
+  // loop-last.
+  if (hhds_graph_) {
+    auto hnode = hhds_graph_->create_node();
+    hnode.set_type(static_cast<hhds::Type>(static_cast<uint16_t>(op) << 1));
+    idx_to_hhds_nid_[nid] = hnode.get_class_index();
+  }
+
   return {this, Hierarchy::hierarchical_root(), nid};
 }
 
@@ -1482,6 +1514,15 @@ Node Lgraph::create_node_const(const Const& value) {
     nid = create_node_int();
     set_type_const(nid, value);
     memoize_const_hint[value.hash() % memoize_const_hint.size()] = nid;
+
+    // HHDS Phase G3 (shadow): mirror const-node creation. The const value
+    // itself is not yet mirrored to a HHDS attribute (that lands when
+    // readers depend on it via livehd::attrs::const_value).
+    if (hhds_graph_) {
+      auto hnode = hhds_graph_->create_node();
+      hnode.set_type(static_cast<hhds::Type>(static_cast<uint16_t>(Ntype_op::Nconst) << 1));
+      idx_to_hhds_nid_[nid] = hnode.get_class_index();
+    }
   }
 
   I(node_internal[nid].get_dst_pid() == 0);
@@ -1493,6 +1534,17 @@ Node Lgraph::create_node_lut(const Const& lut) {
   auto nid = create_node().get_nid();
   set_type_lut(nid, lut);
 
+  // HHDS Phase G3 (shadow): mirror the cell-type. The LUT value itself
+  // (lut) is not yet on a HHDS attribute.
+  if (hhds_graph_) {
+    if (auto it = idx_to_hhds_nid_.find(nid); it != idx_to_hhds_nid_.end()) {
+      auto hnode = hhds_graph_->get_node(it->second);
+      if (hnode.is_valid()) {
+        hnode.set_type(static_cast<hhds::Type>(static_cast<uint16_t>(Ntype_op::LUT) << 1));
+      }
+    }
+  }
+
   return Node{this, Hierarchy::hierarchical_root(), nid};
 }
 
@@ -1501,6 +1553,18 @@ Node Lgraph::create_node_sub(Lg_type_id sub_id) {
 
   auto nid = create_node().get_nid();
   set_type_sub(nid, sub_id);
+
+  // HHDS Phase G3 (shadow): mirror the cell-type. The sub-graph reference
+  // itself (sub_id) is not yet wired to a HHDS set_subnode — that lands when
+  // Hierarchy uses the HHDS Forest model.
+  if (hhds_graph_) {
+    if (auto it = idx_to_hhds_nid_.find(nid); it != idx_to_hhds_nid_.end()) {
+      auto hnode = hhds_graph_->get_node(it->second);
+      if (hnode.is_valid()) {
+        hnode.set_type(static_cast<hhds::Type>(static_cast<uint16_t>(Ntype_op::Sub) << 1));
+      }
+    }
+  }
 
   return Node{this, Hierarchy::hierarchical_root(), nid};
 }
@@ -1578,6 +1642,31 @@ void Lgraph::add_edge(const Node_pin& dpin, const Node_pin& spin) {
   I(spin.get_top_lgraph() == dpin.get_top_lgraph());
 
   add_edge_int(spin.get_root_idx(), spin.get_pid(), dpin.get_root_idx(), dpin.get_pid());
+
+  // HHDS Phase G3 (shadow): mirror internal-to-internal edges to the paired
+  // hhds::Graph. Pin creation via Node_class::create_{driver,sink}_pin uses
+  // find_or_create internally, so repeated calls for the same (node, port_id)
+  // are idempotent. Graph-IO endpoints (Hardcoded_input/output_nid) are not
+  // mirrored yet — HHDS asserts that declared GraphIO pins have no live edges
+  // at del_pin time; del_edge currently isn't mirrored, so an attempted IO
+  // edge mirror leaks edges into the declared GraphIO pins and breaks
+  // reset/teardown. Lands once Lgraph::del_edge is mirrored too. See plan G3.
+  if (hhds_graph_) {
+    const Index_id drv_nid = get_node_nid(dpin.get_root_idx());
+    const Index_id snk_nid = get_node_nid(spin.get_root_idx());
+    if (drv_nid != Hardcoded_input_nid && drv_nid != Hardcoded_output_nid && snk_nid != Hardcoded_input_nid
+        && snk_nid != Hardcoded_output_nid) {
+      auto drv_it = idx_to_hhds_nid_.find(drv_nid);
+      auto snk_it = idx_to_hhds_nid_.find(snk_nid);
+      if (drv_it != idx_to_hhds_nid_.end() && snk_it != idx_to_hhds_nid_.end()) {
+        auto drv_hnode = hhds_graph_->get_node(drv_it->second);
+        auto snk_hnode = hhds_graph_->get_node(snk_it->second);
+        auto drv_pin   = drv_hnode.create_driver_pin(static_cast<hhds::Port_id>(dpin.get_pid()));
+        auto snk_pin   = snk_hnode.create_sink_pin(static_cast<hhds::Port_id>(spin.get_pid()));
+        drv_pin.connect_sink(snk_pin);
+      }
+    }
+  }
 }
 
 Fwd_edge_iterator Lgraph::forward(bool visit_sub) { return Fwd_edge_iterator(this, visit_sub); }
@@ -1749,30 +1838,6 @@ void Lgraph::dump(bool hier) {
     node.dump();
   }
 
-#if 0
-  absl::flat_hash_set<Node::Compact> visited;
-
-  for (auto node : forward(true)) {
-    visited.insert(node.get_compact());
-    if (node.is_type_loop_last())
-      continue;
-    for(auto e:node.inp_edges()) {
-      auto inp_node = e.driver.get_node();
-      if (visited.contains(inp_node.get_compact())) {
-        continue;
-      }
-      if (inp_node.is_type_loop_last())
-        continue;
-
-      std::cout << "PROBLEM node:\n";
-      node.dump();
-      std::cout << "VISITED before node:\n";
-      inp_node.dump();
-      exit(-3);
-    }
-  }
-#endif
-
   std::cout << "\n";
   each_local_unique_sub_fast([](Lgraph* sub_lg) -> bool {
     std::print("  sub lgraph name:{}\n", sub_lg->get_name());
@@ -1782,12 +1847,6 @@ void Lgraph::dump(bool hier) {
 
   for (const auto& cit : color_count) {
     std::print("color:{} count:{}\n", cit.first, cit.second);
-  }
-}
-
-void Lgraph::dump_down_nodes() {
-  for (auto& cnode : subid_map) {
-    std::print(" sub:{}\n", cnode.first.get_node(this).debug_name());
   }
 }
 
