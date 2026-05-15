@@ -211,6 +211,13 @@ public:
   Index_id        get_nid() const { return nid; }
   Hierarchy_index get_hidx() const { return hidx; }
 
+  // HHDS Phase G4 prep: paired hhds::Node_class accessor. Returns an invalid
+  // (default-constructed) Node_class when the node has no shadow entry —
+  // graph-IO pseudo-nodes (Hardcoded_input_nid / Hardcoded_output_nid) and
+  // any nid created before hhds_graph_ was attached. Implementation in
+  // node.cpp because the inline body needs the full Lgraph definition.
+  [[nodiscard]] hhds::Node_class get_hhds_node() const;
+
   Node_pin get_driver_pin() const {
     I(!Ntype::is_multi_driver(get_type_op()));
     Node_pin pin(top_g, current_g, hidx, nid, 0, false);

@@ -364,6 +364,8 @@ Node_pin Node::setup_driver_pin() const {
 Ntype_op         Node::get_type_op() const { return current_g->get_type_op(nid); }
 std::string_view Node::get_type_name() const { return Ntype::get_name(current_g->get_type_op(nid)); }
 
+hhds::Node_class Node::get_hhds_node() const { return current_g->get_hhds_node(nid); }
+
 void Node::set_type(const Ntype_op op) {
   I(op != Ntype_op::Sub && op != Ntype_op::Nconst && op != Ntype_op::LUT);  // do not set type directly, call set_type_const ....
   current_g->set_type(nid, op);
