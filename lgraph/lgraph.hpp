@@ -303,6 +303,35 @@ public:
     hnode.attr(livehd::attrs::lut).set(std::move(serialized));
   }
 
+  // HHDS Phase G3 (shadow write): mirror per-pin bits as a per-pin HHDS
+  // attribute on the driver pin. Threaded into Node_pin::set_bits / set_size
+  // and through create_node_const for the const-derived bits. Uses
+  // create_driver_pin (find-or-create) so the mirror works even before
+  // add_edge materializes the pin in HHDS.
+  void mirror_set_pin_bits_hhds(Index_id nid_master, Port_ID pid, Bits_t bits) {
+    if (!hhds_graph_) {
+      return;
+    }
+    if (nid_master == Hardcoded_input_nid || nid_master == Hardcoded_output_nid) {
+      // Graph-IO pins are not tracked in idx_to_hhds_nid_; bits for those
+      // ride on the Sub_node/GraphIO declaration instead.
+      return;
+    }
+    auto it = idx_to_hhds_nid_.find(nid_master);
+    if (it == idx_to_hhds_nid_.end()) {
+      return;
+    }
+    auto hnode = hhds_graph_->get_node(it->second);
+    if (!hnode.is_valid()) {
+      return;
+    }
+    auto hpin = hnode.create_driver_pin(static_cast<hhds::Port_id>(pid));
+    if (!hpin.is_valid()) {
+      return;
+    }
+    hpin.attr(livehd::attrs::bits).set(bits);
+  }
+
   void add_edge(const Node_pin& dpin, const Node_pin& spin);
   void add_edge(const Node_pin& dpin, const Node_pin& spin, Bits_t bits) {
     add_edge(dpin, spin);

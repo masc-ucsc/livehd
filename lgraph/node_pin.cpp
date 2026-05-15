@@ -279,6 +279,16 @@ int Node_pin::get_num_edges() const {
 
 Bits_t Node_pin::get_bits() const {
   I(is_driver());
+
+  // HHDS Phase G3 read: consult per-pin bits attr on the shadow when
+  // present. Falls back to the legacy node_internal[]-stored bits.
+  auto hpin = get_hhds_pin();
+  if (hpin.is_valid()) {
+    auto ref = hpin.attr(livehd::attrs::bits);
+    if (ref.has()) {
+      return ref.get();
+    }
+  }
   return current_g->get_bits(get_root_idx());
 }
 
@@ -286,7 +296,9 @@ void Node_pin::set_size(const Node_pin& dpin) {
   I(is_driver());
   I(dpin.is_driver());
 
-  current_g->set_bits(get_root_idx(), dpin.get_bits());
+  const auto bits = dpin.get_bits();
+  current_g->set_bits(get_root_idx(), bits);
+  current_g->mirror_set_pin_bits_hhds(current_g->get_node_nid(idx), pid, bits);
   if (dpin.is_unsign()) {
     set_unsign();
   } else {
@@ -297,6 +309,7 @@ void Node_pin::set_size(const Node_pin& dpin) {
 void Node_pin::set_bits(Bits_t bits) {
   I(is_driver());
   current_g->set_bits(get_root_idx(), bits);
+  current_g->mirror_set_pin_bits_hhds(current_g->get_node_nid(idx), pid, bits);
 }
 
 void Node_pin::set_unsign() { get_lg()->ref_node_pin_unsigned_map()->insert(get_compact_driver()); }

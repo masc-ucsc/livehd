@@ -1688,6 +1688,9 @@ Node Lgraph::create_node_const(const Const& value) {
       idx_to_hhds_nid_[nid] = hnode.get_class_index();
       mirror_set_type_hhds(nid, Ntype_op::Nconst);
       mirror_set_const_hhds(nid, value.serialize());
+      // Bits are set on node_internal[nid] by set_type_const (port 0,
+      // the const node's sole driver). Mirror to the shadow's pin attr.
+      mirror_set_pin_bits_hhds(nid, 0, value.get_bits());
     }
   }
 
