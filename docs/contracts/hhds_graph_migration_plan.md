@@ -270,8 +270,17 @@ This is the biggest single change. Strategy:
     migrated to read the HHDS shadow because the shadow's type
     would diverge from `node_internal[]` whenever a node was
     retyped post-creation (e.g. cprop morphing `Sum` → `AttrSet`).
-    Now safe to migrate `get_type_op` and `is_type_const` readers
-    in a follow-up.
+
+17. [x] **Reader migration batch 3 — cell-type readers (LANDED).**
+    `Lgraph::get_type_op(Index_id)` and `Lgraph::is_type_const(Index_id)`
+    now override the `Lgraph_attributes` inlines and consult the shadow
+    first via `idx_to_hhds_nid_`. Reads invert the bit-0 shift applied
+    by `mirror_set_type_hhds`. Falls back to legacy `node_internal[]`
+    for shadow misses (graph-IO pseudo-nodes, non-master Index_ids).
+    All live callers go through `current_g->get_type_op(nid)` where
+    `current_g` is `Lgraph*`, so name resolution picks up the override
+    via `Node`, `Node_pin`, etc. (all friends of Lgraph). Confirmed
+    219/11/1 baseline preserved.
 3. [ ] Mirror `Lgraph::add_edge(dpin, spin)` to
    `Graph::add_edge(driver_pin, sink_pin)`.
 4. [ ] Per-pin Bits/Const/Lut tables become HHDS pin attributes via

@@ -98,6 +98,14 @@ protected:
   bool has_outputs(const Node_pin& pin) const;
   bool has_inputs(const Node_pin& pin) const;
 
+  // HHDS Phase G3 reader migration: cell-type readers consult the shadow
+  // first (via idx_to_hhds_nid_), inverting the bit-0 shift applied by
+  // mirror_set_type_hhds. Fall back to the legacy node_internal[] read for
+  // shadow misses (e.g., raw non-master Index_id values, or graph-IO
+  // pseudo-nodes). These hide the Lgraph_attributes inline equivalents.
+  [[nodiscard]] Ntype_op get_type_op(Index_id nid) const;
+  [[nodiscard]] bool     is_type_const(Index_id nid) const;
+
   int get_num_out_edges(const Node& node) const;
   int get_num_inp_edges(const Node& node) const;
   int get_num_edges(const Node& node) const;
