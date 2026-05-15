@@ -2,7 +2,6 @@
 #include "pass_cprop.hpp"
 
 #include "cprop.hpp"
-#include "lgraph.hpp"
 
 static Pass_plugin sample("pass_cprop", Pass_cprop::setup);
 
@@ -37,10 +36,10 @@ void Pass_cprop::optimize(Eprp_var& var) {
   Pass_cprop pcp(var);
   Cprop      cp(pcp.hier);
 
-  for (auto& lg : var.lgs) {
-    if (lg->is_empty()) {
+  for (const auto& g : var.graphs) {
+    if (!g) {
       continue;
     }
-    cp.do_trans(lg);
+    cp.do_trans(g);
   }
 }

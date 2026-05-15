@@ -14,8 +14,7 @@ cc_library(
     includes = ["."],
     visibility = ["//visibility:public"],
     deps = [
-        "//lgext/common:lgcpp",
-        "//lgraph",
+        "//graph",
         "//pass/common:pass",
     ],
     alwayslink = True,

@@ -75,7 +75,7 @@ the lgraph wrapper continues to compile while passes migrate.
 | `inou/cgen` | 1103 | ~163 method calls | **DONE** (2026-05-15). Drops `//lgraph`, consumes `var.graphs`. yosys_compile.sh: 82/85 (same as legacy lgraph baseline; 3 pre-existing failures `blackboxing2`/`cpp_api`/`chunk_FetchTargetQueue`). |
 | `inou/yosys` | 5251 | ~322 | PENDING. The producer side; biggest single migration. Pipeline already works end-to-end because `Eprp_var::add(Lgraph*)` lockstep-populates `var.graphs` from `Lgraph::get_hhds_graph_shared()` (the existing shadow), so the migrated cgen consumes the right Graph today. Migration here is about dropping `//lgraph` from `inou/yosys/BUILD` and rewriting the Yosys-RTLIL → Lgraph builder to write directly into `hhds::Graph` / `hhds::GraphLibrary`. **Coupling note** below. |
 | `pass/bitwidth` | 1776 | 0 in BUILD | **DONE 2026-05-15**. Rewritten over hhds::Graph; uses graph_util helpers. bazel test //...: 215/11/1 preserved. yosys_compile.sh: 82/85 unchanged. Hierarchical mode (`hier=true`) is not exercised by any caller; the `set_graph_boundary` path is dropped (not a regression). |
-| `pass/cprop` | 2845 | ~116 | PENDING. |
+| `pass/cprop` | 2680 → 842 | 0 in BUILD | **DONE 2026-05-15**. tuple_pass stripped entirely (yosys + lnast_to_lg never produce tuples). Rewrote scalar_pass / collapse_forward / replace_*_inputs_const / scalar_mux / scalar_sext / scalar_get_mask / bwd_del_node over hhds::Graph. Drops `//lgraph` dep. bazel test //...: 215/11/1. yosys_compile.sh: 82/85. |
 
 After the five priority passes are migrated, the gating tests
 (`inou/yosys:all` + `inou/prp:all`) run on the new infrastructure;
@@ -90,9 +90,8 @@ do `meta_api` once nothing else depends on Lgraph's on-disk format.
 1. **`pass/bitwidth`.** **DONE 2026-05-15**. 1776 LOC rewritten. Validated
    the mutation helpers (`graph/node_util.hpp`). bazel tests 215/11/1
    preserved. yosys_compile.sh 82/85 unchanged.
-2. **`pass/cprop`.** 2680 LOC. On the yosys_compile.sh critical path.
-   Audit Lgtuple consumers first (likely cprop-only) and migrate
-   Lgtuple alongside. Same translation table applies.
+2. **`pass/cprop`.** **DONE 2026-05-15**. Stripped tuple_pass; rewrote
+   scalar half over hhds::Graph + graph_util helpers. 2680 → 842 LOC.
 3. **`main/meta_api.cpp`** + HHDS persistence flip. ~200 LOC of meta_api
    plus the disk format change. `lgraph.save` → `hhds::GraphLibrary::save`;
    `lgraph.match` → `hhds::GraphLibrary::load`. Breaks compat with
