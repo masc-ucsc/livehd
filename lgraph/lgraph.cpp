@@ -890,48 +890,39 @@ Node_pin_iterator Lgraph::out_sinks(const Node& node) const {
 }
 
 bool Lgraph::has_outputs(const Node& node) const {
+  // NOTE: HHDS Phase G3 read migration deferred — `Lgraph::load()` / HIF
+  // reconstitution bypasses create_node and add_edge, so the shadow graph
+  // is empty for any lgraph that came from disk. Switching this reader to
+  // hhds_graph_ regresses ~10 yosys/prp tests (verified 2026-05-14). Needs
+  // load() to mirror nodes + edges into hhds_graph_ first.
   auto idx2 = node.get_nid();
-
-  // node_internal.ref_lock();
-
   while (true) {
     if (node_internal[idx2].has_local_outputs()) {
-      // node_internal.ref_unlock();
       return true;
     }
-
     if (node_internal[idx2].is_last_state()) {
-      // node_internal.ref_unlock();
       return false;
     }
-
     idx2 = node_internal[idx2].get_next();
   }
 
-  // node_internal.ref_unlock();
   I(false);
   return false;
 }
 
 bool Lgraph::has_inputs(const Node& node) const {
-  // node_internal.ref_lock();
-
+  // See has_outputs note above — same migration blocker (load/HIF path).
   auto idx2 = node.get_nid();
   while (true) {
     if (node_internal[idx2].has_local_inputs()) {
-      // node_internal.ref_unlock();
       return true;
     }
-
     if (node_internal[idx2].is_last_state()) {
-      // node_internal.ref_unlock();
       return false;
     }
-
     idx2 = node_internal[idx2].get_next();
   }
 
-  // node_internal.ref_unlock();
   I(false);
   return false;
 }
@@ -1219,10 +1210,20 @@ void Lgraph::del_node(const Node& node) {
     if (node_int_ptr->is_last_state()) {
       node_int_ptr->try_recycle();
       // node_internal.ref_unlock();
-      return;
+      break;
     }
     idx2 = node_int_ptr->get_next();
     node_int_ptr->try_recycle();
+  }
+
+  // HHDS Phase G3 (shadow): mirror node deletion. Node_class::del_node()
+  // cascade-removes all its pins and incident edges on the HHDS side.
+  if (hhds_graph_) {
+    if (auto it = idx_to_hhds_nid_.find(node.get_nid()); it != idx_to_hhds_nid_.end()) {
+      auto hnode = hhds_graph_->get_node(it->second);
+      hnode.del_node();
+      idx_to_hhds_nid_.erase(it);
+    }
   }
 
   // node_internal.ref_unlock();
@@ -1425,6 +1426,43 @@ void Lgraph::del_edge(const Node_pin& dpin, const Node_pin& spin) {
 
   found = del_edge_sink_int(dpin, spin);
   I(found);
+
+  // HHDS Phase G3 (shadow): mirror edge deletion. Counterpart to the add_edge
+  // mirror. Graph-IO endpoints resolve via the Sub_node instance_pid → name
+  // mapping (same as add_edge). For internal nodes we use get_{driver,sink}_pin
+  // (which returns an invalid Pin_class when the pin was never materialized).
+  if (hhds_graph_) {
+    auto resolve_pin = [&](Index_id root_idx, Port_ID port_id, bool driver) -> hhds::Pin_class {
+      const Index_id master = get_node_nid(root_idx);
+      if (master == Hardcoded_input_nid) {
+        const auto name = get_self_sub_node().get_name_from_instance_pid(port_id);
+        if (name == "INVALID_PID") {
+          return {};
+        }
+        return hhds_graph_->get_input_pin(name);
+      }
+      if (master == Hardcoded_output_nid) {
+        const auto name = get_self_sub_node().get_name_from_instance_pid(port_id);
+        if (name == "INVALID_PID") {
+          return {};
+        }
+        return hhds_graph_->get_output_pin(name);
+      }
+      const auto it = idx_to_hhds_nid_.find(master);
+      if (it == idx_to_hhds_nid_.end()) {
+        return {};
+      }
+      auto hnode = hhds_graph_->get_node(it->second);
+      return driver ? hnode.get_driver_pin(static_cast<hhds::Port_id>(port_id))
+                    : hnode.get_sink_pin(static_cast<hhds::Port_id>(port_id));
+    };
+
+    auto drv_pin = resolve_pin(dpin.get_root_idx(), dpin.get_pid(), true);
+    auto snk_pin = resolve_pin(spin.get_root_idx(), spin.get_pid(), false);
+    if (drv_pin.is_valid() && snk_pin.is_valid()) {
+      snk_pin.del_sink(drv_pin);
+    }
+  }
 
   return;
 }
@@ -1643,28 +1681,42 @@ void Lgraph::add_edge(const Node_pin& dpin, const Node_pin& spin) {
 
   add_edge_int(spin.get_root_idx(), spin.get_pid(), dpin.get_root_idx(), dpin.get_pid());
 
-  // HHDS Phase G3 (shadow): mirror internal-to-internal edges to the paired
-  // hhds::Graph. Pin creation via Node_class::create_{driver,sink}_pin uses
-  // find_or_create internally, so repeated calls for the same (node, port_id)
-  // are idempotent. Graph-IO endpoints (Hardcoded_input/output_nid) are not
-  // mirrored yet — HHDS asserts that declared GraphIO pins have no live edges
-  // at del_pin time; del_edge currently isn't mirrored, so an attempted IO
-  // edge mirror leaks edges into the declared GraphIO pins and breaks
-  // reset/teardown. Lands once Lgraph::del_edge is mirrored too. See plan G3.
+  // HHDS Phase G3 (shadow): mirror the edge to the paired hhds::Graph. Pin
+  // creation via Node_class::create_{driver,sink}_pin uses find_or_create
+  // internally, so repeated calls for the same (node, port_id) are idempotent.
+  // Graph-IO endpoints (Hardcoded_input/output_nid) resolve to the
+  // hhds_graph_->get_{input,output}_pin(name) lookup via the Sub_node's
+  // instance_pid → name mapping.
   if (hhds_graph_) {
-    const Index_id drv_nid = get_node_nid(dpin.get_root_idx());
-    const Index_id snk_nid = get_node_nid(spin.get_root_idx());
-    if (drv_nid != Hardcoded_input_nid && drv_nid != Hardcoded_output_nid && snk_nid != Hardcoded_input_nid
-        && snk_nid != Hardcoded_output_nid) {
-      auto drv_it = idx_to_hhds_nid_.find(drv_nid);
-      auto snk_it = idx_to_hhds_nid_.find(snk_nid);
-      if (drv_it != idx_to_hhds_nid_.end() && snk_it != idx_to_hhds_nid_.end()) {
-        auto drv_hnode = hhds_graph_->get_node(drv_it->second);
-        auto snk_hnode = hhds_graph_->get_node(snk_it->second);
-        auto drv_pin   = drv_hnode.create_driver_pin(static_cast<hhds::Port_id>(dpin.get_pid()));
-        auto snk_pin   = snk_hnode.create_sink_pin(static_cast<hhds::Port_id>(spin.get_pid()));
-        drv_pin.connect_sink(snk_pin);
+    auto resolve_pin = [&](Index_id root_idx, Port_ID port_id, bool driver) -> hhds::Pin_class {
+      const Index_id master = get_node_nid(root_idx);
+      if (master == Hardcoded_input_nid) {
+        const auto name = get_self_sub_node().get_name_from_instance_pid(port_id);
+        if (name == "INVALID_PID") {
+          return {};
+        }
+        return hhds_graph_->get_input_pin(name);
       }
+      if (master == Hardcoded_output_nid) {
+        const auto name = get_self_sub_node().get_name_from_instance_pid(port_id);
+        if (name == "INVALID_PID") {
+          return {};
+        }
+        return hhds_graph_->get_output_pin(name);
+      }
+      const auto it = idx_to_hhds_nid_.find(master);
+      if (it == idx_to_hhds_nid_.end()) {
+        return {};
+      }
+      auto hnode = hhds_graph_->get_node(it->second);
+      return driver ? hnode.create_driver_pin(static_cast<hhds::Port_id>(port_id))
+                    : hnode.create_sink_pin(static_cast<hhds::Port_id>(port_id));
+    };
+
+    auto drv_pin = resolve_pin(dpin.get_root_idx(), dpin.get_pid(), true);
+    auto snk_pin = resolve_pin(spin.get_root_idx(), spin.get_pid(), false);
+    if (drv_pin.is_valid() && snk_pin.is_valid()) {
+      drv_pin.connect_sink(snk_pin);
     }
   }
 }
