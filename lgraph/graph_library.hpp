@@ -142,7 +142,6 @@ protected:
   static Graph_library* instance_int(std::string_view path);
 
   void        unregister_int(Lgraph* lg);
-  Lg_type_id  copy_lgraph_int(std::string_view name, std::string_view new_name);
   void        expunge_int(std::string_view name);
   void        clear_int(Lg_type_id lgid);
   void        sync_int() { clean_library_int(); }
@@ -282,13 +281,7 @@ public:
     return instance_int(path);
   }
 
-  Lg_type_id copy_lgraph(std::string_view name, std::string_view new_name) {
-    absl::WriterMutexLock guard(&lgs_mutex);
-    // std::lock_guard<std::mutex> guard(lgs_mutex);
-    return copy_lgraph_int(name, new_name);
-  }
-
-  [[nodiscard]] Lgraph* ref_or_create_lgraph(std::string_view name, std::string_view source) {
+[[nodiscard]] Lgraph* ref_or_create_lgraph(std::string_view name, std::string_view source) {
     absl::WriterMutexLock guard(&lgs_mutex);
     // std::lock_guard<std::mutex> guard(lgs_mutex);
     return ref_or_create_lgraph_int(name, source);

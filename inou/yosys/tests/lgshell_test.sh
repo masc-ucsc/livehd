@@ -87,8 +87,7 @@ if [ $? -ne 0 ]; then
   exit 1
 fi
 
-echo "lgraph.copy   name:trivial path:mlgdb dest:temp_lg" | ${LGSHELL}
-echo "lgraph.rename name:temp_lg path:mlgdb dest:potato" | ${LGSHELL}
+echo "lgraph.rename name:trivial path:mlgdb dest:potato" | ${LGSHELL}
 echo "lgraph.open name:potato path:mlgdb |> lgraph.stats" | ${LGSHELL} >potato2.log
 if [ $? -ne 0 ]; then
   echo "FAIL: it could not rename to potato"

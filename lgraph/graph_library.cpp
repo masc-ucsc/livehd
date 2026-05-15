@@ -708,16 +708,6 @@ void Graph_library::clear_int(Lg_type_id lgid) {
   sub_nodes[lgid]->reset_pins();
 }
 
-Lg_type_id Graph_library::copy_lgraph_int(std::string_view /*name*/, std::string_view /*new_name*/) {
-  // Stub asserting failure — copy_lgraph has been broken for some time
-  // (the original body started with `I(false)` followed by unreachable
-  // copy/reload logic). Removed the dead body during the HHDS migration
-  // dead-code sweep. If a real copy operation is needed, build it on top
-  // of hhds::GraphLibrary directly.
-  I(false);
-  return 0;
-}
-
 void Graph_library::unregister_int(Lgraph* lg) {
   auto lgid = lg->get_lgid();
   I(attributes.size() > (size_t)lgid);
