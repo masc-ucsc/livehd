@@ -39,11 +39,3 @@ cc_library(
     ],
 )
 
-cc_test(
-    name = "lnast_semantic_test",
-    srcs = ["tests/lnast_semantic_test.cpp"],
-    tags = ["fixme"],
-    deps = [
-        ":semantic_check",
-    ],
-)

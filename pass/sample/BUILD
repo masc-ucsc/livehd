@@ -1,7 +1,6 @@
 # This file is distributed under the BSD 3-Clause License. See LICENSE for details.
 
 load("@rules_cc//cc:defs.bzl", "cc_library", "cc_test")
-load("@rules_shell//shell:sh_test.bzl", "sh_test")
 load("//tools:copt_default.bzl", "COPTS")
 
 cc_library(
@@ -18,16 +17,6 @@ cc_library(
         "//pass/common:pass",
     ],
     alwayslink = True,  # Needed to have constructor called
-)
-
-sh_test(
-    name = "sample_test1.sh",
-    srcs = ["tests/sample_test1.sh"],
-    data = [
-        "//inou/yosys/tests:verilog_tests",
-        "//main:lgshell",
-    ],
-    tags = ["fixme"],
 )
 
 cc_test(

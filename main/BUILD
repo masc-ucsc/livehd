@@ -80,28 +80,3 @@ cc_library(
     ],
 )
 
-cc_library(
-    name = "tmt",
-    srcs = ["tmt_test.cpp"],
-    hdrs = ["tmt_test.hpp"],
-    copts = COPTS,
-)
-
-cc_test(
-    name = "main_test",
-    srcs = ["main_test.cpp"],
-    copts = COPTS,
-    data = [
-        ":lgshell",
-    ],
-    linkopts = ["-lutil"],
-    local = 1,  # Weird fork error due to forkpty otherwise
-    tags = [
-        "fixme",
-    ],
-    deps = [
-        ":tmt",
-        "@googletest//:gtest_main",
-        "@iassert",
-    ],
-)

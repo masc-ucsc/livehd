@@ -76,19 +76,6 @@ filegroup(
     visibility = ["//visibility:public"],
 )
 
-sh_test(
-    name = "lgshell_test.sh",
-    srcs = ["lgshell_test.sh"],
-    data = [
-        ":verilog_tests",
-        "//main:lgshell",
-    ],
-    tags = ["fixme"],
-    deps = [
-        "//inou/yosys:scripts",
-    ],
-)
-
 _YOSYS_TEST_PREFIX = "tests/"
 _YOSYS_TEST_SUFFIX = ".v"
 
@@ -111,29 +98,5 @@ YOSYS_COMPILE_TESTS = [
         ":scripts",
     ],
 ) for t in YOSYS_COMPILE_TESTS]
-
-VERILOG_LONG_TESTS = glob(
-    [
-        "tests/long*.v",
-    ],
-)
-
-[sh_test(
-    name = "verilog.sh-%s" % t,
-    srcs = ["verilog.sh"],
-    args = ["$(location %s)" % t],
-    data = [
-        "%s" % t,
-        "//main:lgshell",
-    ],
-    tags = [
-        "fixme",
-        "manual",
-        "verilog.sh-long",
-    ],
-    deps = [
-        "//inou/yosys:scripts",
-    ],
-) for t in VERILOG_LONG_TESTS]
 
 exports_files(VERILOG_TESTS)

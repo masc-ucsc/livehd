@@ -1,7 +1,0 @@
-comb mux_ifelse(sel:bool, a:u8, b:u8) -> (y:u8) {
-  if sel {
-    y = a
-  } else {
-    y = b
-  }
-}

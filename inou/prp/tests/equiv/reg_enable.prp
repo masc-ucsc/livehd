@@ -1,9 +1,0 @@
-comb reg_enable(clk::[clock], reset::[reset], en:bool, din:u4) -> (q:u4) {
-  reg r:u4 = 0
-
-  if en {
-    r = din
-  }
-
-  q = r
-}

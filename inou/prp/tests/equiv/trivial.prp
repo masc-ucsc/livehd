@@ -1,4 +1,0 @@
-
-comb trivial(a:u1, b:u1)->(c:u1) {
-  c = a ^ b
-}

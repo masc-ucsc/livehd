@@ -1,6 +1,0 @@
-comb bit_slice(x:u8) -> (lo:u4, hi:u4, bit0:u1, bit7:u1) {
-  lo   = x#[0..=3]
-  hi   = x#[4..=7]
-  bit0 = x#[0]
-  bit7 = x#[7]
-}

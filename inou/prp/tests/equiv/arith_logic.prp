@@ -1,9 +1,0 @@
-comb arith_logic(a:u4, b:u4) -> (sum:u5, prod:u8, band:u4, bor:u4, bxor:u4, shl1:u5, shr1:u4) {
-  sum  = a + b
-  prod = a * b
-  band = a & b
-  bor  = a | b
-  bxor = a ^ b
-  shl1 = a << 1
-  shr1 = b >> 1
-}

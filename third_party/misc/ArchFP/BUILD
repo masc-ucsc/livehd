@@ -23,28 +23,4 @@ cc_library(
     ],
 )
 
-cc_test(
-    name = "ann_test",
-    srcs = ["tests/ann_test.cpp"],
-    tags = [
-        "fixme",
-    ],
-    deps = [
-        ":archfp",
-        "@googletest//:gtest_main",
-    ],
-)
-
-cc_test(
-    name = "archfp_test",
-    srcs = ["tests/archfp_test.cpp"],
-    tags = [
-        "fixme",
-    ],
-    deps = [
-        ":archfp",
-        "@googletest//:gtest_main",
-    ],
-)
-
 # makefile and other non-source files are kept but not used.

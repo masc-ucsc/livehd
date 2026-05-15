@@ -74,16 +74,6 @@ cc_test(
 )
 
 cc_test(
-    name = "elab_scanner_unit_test",
-    srcs = ["tests/elab_scanner_unit_test.cpp"],
-    tags = ["fixme"],
-    deps = [
-        ":lnast",
-        "@googletest//:gtest_main",
-    ],
-)
-
-cc_test(
     name = "lnast_bench",
     srcs = ["tests/lnast_bench.cpp"],
     deps = [

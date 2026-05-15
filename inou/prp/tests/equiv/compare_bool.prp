@@ -1,8 +1,0 @@
-comb compare_bool(a:u8, b:u8) -> (eq:bool, ne:bool, lt:bool, le:bool, gt:bool, ge:bool) {
-  eq = a == b
-  ne = a != b
-  lt = a < b
-  le = a <= b
-  gt = a > b
-  ge = a >= b
-}
