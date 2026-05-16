@@ -12,8 +12,9 @@
 
 #include "absl/container/flat_hash_map.h"
 #include "absl/container/flat_hash_set.h"
-#include "lgedgeiter.hpp"
-#include "lgraph.hpp"
+#include "cell.hpp"
+#include "hhds/graph.hpp"
+#include "node_util.hpp"
 #include "upass_runner_common.hpp"
 #include "upass_shared.hpp"
 
@@ -23,17 +24,17 @@ struct Lgraph_pass_visit final : public upass::uPass_lgraph {
   using upass::uPass_lgraph::uPass_lgraph;
 
   void run_once() override {
-    if (!gm || !gm->ref_lgraph()) {
+    if (!gm || !gm->ref_graph()) {
       std::print("uPass(lgraph) - no graph available\n");
       return;
     }
 
     std::size_t visited = 0;
-    for (const auto& node : gm->ref_lgraph()->fast()) {
-      std::print("uPass(lgraph) - visit {}\n", node.get_type_name());
+    for (const auto& node : gm->ref_graph()->fast_class()) {
+      std::print("uPass(lgraph) - visit {}\n", Ntype::get_name(livehd::graph_util::type_op_of(node)));
       ++visited;
     }
-    std::print("uPass(lgraph) - visited {} nodes in {}\n", visited, gm->ref_lgraph()->get_name());
+    std::print("uPass(lgraph) - visited {} nodes in {}\n", visited, gm->ref_graph()->get_name());
   }
 };
 
@@ -41,7 +42,7 @@ struct Lgraph_pass_fold_scan final : public upass::uPass_lgraph {
   using upass::uPass_lgraph::uPass_lgraph;
 
   void run_once() override {
-    if (!gm || !gm->ref_lgraph()) {
+    if (!gm || !gm->ref_graph()) {
       std::print("uPass(lgraph) - no graph available\n");
       return;
     }
@@ -58,7 +59,7 @@ struct Lgraph_pass_fold_tag final : public upass::uPass_lgraph {
   using upass::uPass_lgraph::uPass_lgraph;
 
   void run_once() override {
-    if (!gm || !gm->ref_lgraph()) {
+    if (!gm || !gm->ref_graph()) {
       std::print("uPass(lgraph) - no graph available\n");
       return;
     }
@@ -76,12 +77,11 @@ struct Lgraph_pass_fold_sum_const final : public upass::uPass_lgraph {
       : upass::uPass_lgraph(_gm), dry_run(_dry_run) {}
 
   void run_once() override {
-    if (!gm || !gm->ref_lgraph()) {
+    if (!gm || !gm->ref_graph()) {
       std::print("uPass(lgraph) - no graph available\n");
       return;
     }
-    auto&      adapter = static_cast<upass::IR_adapter&>(*gm);
-    const auto s       = upass::run_fold_sum_const_shared(adapter, "uPass(lgraph)", dry_run);
+    const auto s = upass::run_fold_sum_const_shared(*gm, "uPass(lgraph)", dry_run);
     std::print("uPass(lgraph) - sum_const_folded:{} rewired:{} new_consts:{} deleted:{} dry_run:{}\n",
                s.folded_nodes,
                s.rewired_edges,
@@ -103,11 +103,11 @@ struct Lgraph_pass_fold_neutral final : public upass::uPass_lgraph {
       : upass::uPass_lgraph(_gm), dry_run(_dry_run) {}
 
   void run_once() override {
-    if (!gm || !gm->ref_lgraph()) {
+    if (!gm || !gm->ref_graph()) {
       std::print("uPass(lgraph) - no graph available\n");
       return;
     }
-    const auto s     = gm->fold_neutral_const(false, dry_run);
+    const auto s     = gm->fold_neutral_const(dry_run);
     const auto total = s.simplified_to_driver + s.simplified_to_const_zero + s.simplified_to_const_one;
     std::print(
         "uPass(lgraph) - neutral_simplified:{} to_driver:{} to_const0:{} to_const1:{} rewired:{} new_consts:{} deleted:{} "
@@ -135,11 +135,11 @@ struct Lgraph_pass_fold_shift_div final : public upass::uPass_lgraph {
       : upass::uPass_lgraph(_gm), dry_run(_dry_run) {}
 
   void run_once() override {
-    if (!gm || !gm->ref_lgraph()) {
+    if (!gm || !gm->ref_graph()) {
       std::print("uPass(lgraph) - no graph available\n");
       return;
     }
-    const auto s = gm->fold_shift_div_const(false, dry_run);
+    const auto s = gm->fold_shift_div_const(dry_run);
     const auto total
         = s.simplified_to_driver + s.simplified_to_const_zero + s.simplified_to_const_one + s.simplified_to_const_other;
     std::print(
@@ -169,11 +169,11 @@ struct Lgraph_pass_fold_sub_const final : public upass::uPass_lgraph {
       : upass::uPass_lgraph(_gm), dry_run(_dry_run) {}
 
   void run_once() override {
-    if (!gm || !gm->ref_lgraph()) {
+    if (!gm || !gm->ref_graph()) {
       std::print("uPass(lgraph) - no graph available\n");
       return;
     }
-    const auto s     = gm->fold_sub_const(false, dry_run);
+    const auto s     = gm->fold_sub_const(dry_run);
     const auto total = s.sub_zero_simplified + s.sub_self_simplified + s.const_sub_folded;
     std::print(
         "uPass(lgraph) - sub_folded:{} sub_zero:{} sub_self:{} const_sub:{} rewired:{} new_consts:{} deleted:{} dry_run:{}\n",
@@ -200,11 +200,11 @@ struct Lgraph_pass_fold_mult_const final : public upass::uPass_lgraph {
       : upass::uPass_lgraph(_gm), dry_run(_dry_run) {}
 
   void run_once() override {
-    if (!gm || !gm->ref_lgraph()) {
+    if (!gm || !gm->ref_graph()) {
       std::print("uPass(lgraph) - no graph available\n");
       return;
     }
-    const auto s = gm->fold_mult_const(false, dry_run);
+    const auto s = gm->fold_mult_const(dry_run);
     std::print("uPass(lgraph) - mult_folded:{} rewired:{} new_consts:{} deleted:{} dry_run:{}\n",
                s.const_mult_folded,
                s.rewired_edges,
@@ -226,11 +226,11 @@ struct Lgraph_pass_dce final : public upass::uPass_lgraph {
       : upass::uPass_lgraph(_gm), dry_run(_dry_run) {}
 
   void run_once() override {
-    if (!gm || !gm->ref_lgraph()) {
+    if (!gm || !gm->ref_graph()) {
       std::print("uPass(lgraph) - no graph available\n");
       return;
     }
-    const auto s = gm->fold_dce(false, dry_run);
+    const auto s = gm->fold_dce(dry_run);
     std::print("uPass(lgraph) - dce_removed:{} edges_freed:{} dry_run:{}\n",
                s.dead_nodes_removed,
                s.edges_freed,
@@ -491,7 +491,7 @@ void uPass_runner_lgraph::run(std::size_t max_iters) {
     return;
   }
 
-  if (!gm || !gm->ref_lgraph()) {
+  if (!gm || !gm->ref_graph()) {
     std::print("uPass(lgraph) - no graph available\n");
     return;
   }
@@ -513,14 +513,14 @@ void uPass_runner_lgraph::run(std::size_t max_iters) {
 }
 
 std::size_t uPass_runner_lgraph::visit_fast(bool visit_sub) const {
-  if (!gm || !gm->ref_lgraph()) {
+  if (!gm || !gm->ref_graph()) {
     std::print("uPass(lgraph) - no graph available\n");
     return 0;
   }
 
   std::size_t visited = 0;
-  for (const auto& node : gm->ref_lgraph()->fast(visit_sub)) {
-    std::print("uPass(lgraph) - visit {}\n", node.get_type_name());
+  for (const auto& node : gm->ref_graph()->fast_class()) {
+    std::print("uPass(lgraph) - visit {}\n", Ntype::get_name(livehd::graph_util::type_op_of(node)));
     ++visited;
   }
 
@@ -529,12 +529,12 @@ std::size_t uPass_runner_lgraph::visit_fast(bool visit_sub) const {
 
 std::vector<std::string> uPass_runner_lgraph::collect_type_names(bool visit_sub) const {
   std::vector<std::string> type_names;
-  if (!gm || !gm->ref_lgraph()) {
+  if (!gm || !gm->ref_graph()) {
     return type_names;
   }
 
-  for (const auto& node : gm->ref_lgraph()->fast(visit_sub)) {
-    type_names.emplace_back(node.get_type_name());
+  for (const auto& node : gm->ref_graph()->fast_class()) {
+    type_names.emplace_back(Ntype::get_name(livehd::graph_util::type_op_of(node)));
   }
 
   return type_names;

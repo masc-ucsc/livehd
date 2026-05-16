@@ -8,8 +8,10 @@
 #include <memory>
 #include <optional>
 #include <stack>
+#include <utility>
 #include <vector>
 
+#include "const.hpp"
 #include "ir_adapter.hpp"
 #include "lnast.hpp"
 #include "lnast_writer.hpp"
@@ -17,8 +19,14 @@
 
 namespace upass {
 
-struct Lnast_manager : public IR_adapter {
+struct Lnast_manager {
 public:
+  // Public node-handle type used by the templated shared passes. Lnast_nid
+  // already aliases to `hhds::Tree::Node_class`, so the iterators return the
+  // same handle the rest of LNAST works with — no encode/decode needed.
+  using Node  = Lnast_nid;
+  using Input = Lnast_nid;
+
   explicit Lnast_manager(const std::shared_ptr<Lnast>& ln) : lnast(ln), wr(std::cout, ln) {
     nid_stack   = {};
     current_nid = lnast->get_root();
@@ -26,8 +34,8 @@ public:
   virtual ~Lnast_manager() = default;
   Lnast_manager()          = delete;
 
-  std::string_view kind() const override { return "lnast"; }
-  std::size_t      node_count() const override {
+  std::string_view kind() const { return "lnast"; }
+  std::size_t      node_count() const {
     std::size_t count = 0;
     for (const auto& nid : lnast->depth_preorder(lnast->get_root())) {
       if (!nid.is_invalid()) {
@@ -36,7 +44,7 @@ public:
     }
     return count;
   }
-  std::size_t const_count() const override {
+  std::size_t const_count() const {
     std::size_t count = 0;
     for (const auto& nid : lnast->depth_preorder(lnast->get_root())) {
       if (nid.is_invalid()) {
@@ -48,7 +56,7 @@ public:
     }
     return count;
   }
-  std::size_t arithmetic_count() const override {
+  std::size_t arithmetic_count() const {
     std::size_t count = 0;
     for (const auto& nid : lnast->depth_preorder(lnast->get_root())) {
       if (nid.is_invalid()) {
@@ -78,66 +86,40 @@ public:
     }
     return count;
   }
-  std::size_t fold_candidate_count() const override {
+  std::size_t fold_candidate_count() const {
     // LNAST-side shared heuristic: treat arithmetic/comparison ops as fold candidates.
     return arithmetic_count();
   }
-  std::vector<Node_id> list_nodes() const override {
-    std::vector<Node_id> nodes;
-    nodes.reserve(node_count());
+
+  // Streams every node through `fn` using `lnast->depth_preorder()` directly —
+  // the callback receives the same `Lnast_nid` the LNAST API works with.
+  template <typename Fn>
+  void for_each_node(Fn&& fn) const {
     for (const auto& nid : lnast->depth_preorder(lnast->get_root())) {
       if (!nid.is_invalid()) {
-        nodes.emplace_back(encode_nid(nid));
+        std::forward<Fn>(fn)(nid);
       }
     }
-    return nodes;
   }
-  std::string_view op_name(Node_id node) const override {
-    const auto nid = decode_nid(node);
-    if (nid.is_invalid()) {
-      return "invalid";
-    }
-    switch (lnast->get_type(nid)) {
-      case Lnast_ntype::Lnast_ntype_const: return "const";
-      case Lnast_ntype::Lnast_ntype_plus: return "sum";
-      case Lnast_ntype::Lnast_ntype_minus: return "sub";
-      case Lnast_ntype::Lnast_ntype_mult: return "mult";
-      case Lnast_ntype::Lnast_ntype_div: return "div";
-      case Lnast_ntype::Lnast_ntype_mod: return "mod";
-      case Lnast_ntype::Lnast_ntype_shl: return "shl";
-      case Lnast_ntype::Lnast_ntype_sra: return "sra";
-      case Lnast_ntype::Lnast_ntype_bit_and: return "and";
-      case Lnast_ntype::Lnast_ntype_bit_or: return "or";
-      case Lnast_ntype::Lnast_ntype_bit_xor: return "xor";
-      case Lnast_ntype::Lnast_ntype_assign: return "assign";
-      default: return "other";
-    }
-  }
-  std::vector<Node_id> inputs(Node_id node) const override {
-    std::vector<Node_id> inps;
-    const auto           nid = decode_nid(node);
-    if (nid.is_invalid()) {
-      return inps;
-    }
 
-    for (auto child = lnast->get_child(nid); !child.is_invalid(); child = lnast->get_sibling_next(child)) {
-      inps.emplace_back(encode_nid(child));
+  template <typename Fn>
+  void for_each_input(const Node& node, Fn&& fn) const {
+    if (node.is_invalid()) {
+      return;
     }
+    for (auto child = lnast->get_child(node); !child.is_invalid(); child = lnast->get_sibling_next(child)) {
+      std::forward<Fn>(fn)(child);
+    }
+  }
 
-    return inps;
-  }
-  bool is_const(Node_id node) const override {
-    const auto nid = decode_nid(node);
-    if (nid.is_invalid()) {
-      return false;
-    }
-    return Lnast_ntype::is_const(lnast->get_type(nid));
-  }
-  std::optional<std::int64_t> const_value(Node_id node) const override {
+  bool is_sum_op(const Node& node) const { return !node.is_invalid() && Lnast_ntype::is_plus(lnast->get_type(node)); }
+  bool is_const(const Input& node) const { return !node.is_invalid() && Lnast_ntype::is_const(lnast->get_type(node)); }
+
+  std::optional<Const> const_value(const Input& node) const {
     if (!is_const(node)) {
       return std::nullopt;
     }
-    const auto text = lnast->get_name(decode_nid(node));
+    const auto text = lnast->get_name(node);
     int64_t    value{0};
     auto*      begin = text.data();
     auto*      end   = text.data() + text.size();
@@ -145,28 +127,25 @@ public:
     if (res.ec != std::errc() || res.ptr != end) {
       return std::nullopt;
     }
-    return value;
+    return *Dlop::create_integer(value);
   }
-  Replace_effect estimate_replace_with_const(Node_id node) const override {
-    if (decode_nid(node).is_invalid()) {
-      return {};
-    }
-    // LNAST currently rewrites in place for shared const replacement.
+
+  Replace_effect estimate_replace_with_const(const Node& node) const {
+    (void)node;
+    // LNAST rewrites in place — no edge rewiring, no nodes torn down.
     return {};
   }
-  bool replace_with_const(Node_id node, std::int64_t value) override {
-    const auto nid = decode_nid(node);
-    if (nid.is_invalid()) {
+
+  bool replace_with_const(const Node& node, const Const& value) {
+    if (node.is_invalid()) {
       return false;
     }
-
-    if (auto cur = const_value(node); cur && *cur == value) {
+    if (auto cur = const_value(node); cur && cur->same_repr(value)) {
       return false;
     }
-
     // Keep subtree structure intact for now; shared transform passes will own any
     // operand cleanup when they start mutating LNAST through this API.
-    lnast->set_data(nid, Lnast_node::create_const(value));
+    lnast->set_data(node, Lnast_node::create_const(value.to_i()));
     return true;
   }
 
@@ -258,16 +237,6 @@ public:
   }
 
 protected:
-  // Stable Node_id encoding for HHDS handles. The Tree_class_index value is a
-  // single Tree_pos that uniquely identifies a node within a tree body, so we
-  // round-trip via that. decode_nid reconstructs the Node_class through the
-  // owning Lnast's tree.
-  static Node_id encode_nid(const Lnast_nid& nid) { return static_cast<Node_id>(nid.get_class_index().value); }
-
-  Lnast_nid decode_nid(Node_id node) const {
-    return lnast->tree().get_node(hhds::Tree_class_index{static_cast<hhds::Tree_pos>(node)});
-  }
-
   const std::shared_ptr<Lnast>& lnast;
   std::stack<Lnast_nid>         nid_stack;
   Lnast_nid                     current_nid;

@@ -14,7 +14,10 @@ cc_library(
     includes = ["."],
     visibility = ["//visibility:public"],
     deps = [
+        "//core",
+        "//graph",
         "//lnast",
+        "@hhds//hhds:graph",
     ],
     alwayslink = True,
 )
@@ -26,8 +29,9 @@ cc_test(
     deps = [
         "//core",
         ":upass",
-        "//lgraph",
+        "//graph",
         "//lnast",
         "@googletest//:gtest_main",
+        "@hhds//hhds:graph",
     ],
 )

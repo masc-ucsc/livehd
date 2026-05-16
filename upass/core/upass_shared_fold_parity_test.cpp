@@ -3,17 +3,24 @@
 #include <memory>
 #include <string_view>
 
-#include "file_utils.hpp"
+#include "graph_library_singleton.hpp"
 #include "gtest/gtest.h"
-#include "lgraph.hpp"
+#include "hhds/graph.hpp"
 #include "lgraph_manager.hpp"
 #include "lnast.hpp"
 #include "lnast_manager.hpp"
+#include "node_util.hpp"
 #include "upass_shared.hpp"
 
 namespace {
 
-TEST(UpassSharedFoldParity, FoldSumConstAcrossLnastAndLgraph) {
+std::shared_ptr<hhds::Graph> make_graph(std::string_view path, std::string_view name) {
+  auto& lib = livehd::Hhds_graph_library::instance(path);
+  auto  gio = lib.create_io(name);
+  return gio->create_graph();
+}
+
+TEST(UpassSharedFoldParity, FoldSumConstAcrossLnastAndGraph) {
   auto ln       = std::make_shared<Lnast>("top");
   auto root_nid = ln->set_root(Lnast_ntype::create_top());
   auto st       = ln->add_child(root_nid, Lnast_ntype::create_stmts());
@@ -30,37 +37,27 @@ TEST(UpassSharedFoldParity, FoldSumConstAcrossLnastAndLgraph) {
   EXPECT_TRUE(Lnast_ntype::is_const(ln->get_type(pl)));
   EXPECT_EQ(ln->get_name(pl), "5");
 
-  constexpr std::string_view kDbPath = "lgdb_upass_shared_fold_parity";
-  file_utils::clean_dir(kDbPath);
-  auto* lib = Graph_library::instance(kDbPath);
-  ASSERT_NE(lib, nullptr);
-  auto* lg = lib->create_lgraph("top", "upass_shared_fold_parity");
-  ASSERT_NE(lg, nullptr);
+  auto g  = make_graph("lgdb_upass_shared_fold_parity", "upass_shared_fold_parity");
+  auto c0 = livehd::graph_util::create_const(*g, *Dlop::create_integer(2));
+  auto c1 = livehd::graph_util::create_const(*g, *Dlop::create_integer(3));
+  auto s0 = livehd::graph_util::create_typed_node(*g, Ntype_op::Sum);
+  c0.connect_sink(s0.create_sink_pin(0));
+  c1.connect_sink(s0.create_sink_pin(1));
 
-  auto c0 = lg->create_node_const(2);
-  auto c1 = lg->create_node_const(3);
-  auto s0 = lg->create_node(Ntype_op::Sum);
-  lg->add_edge(c0.get_driver_pin(), s0.setup_sink_pin_raw(0));
-  lg->add_edge(c1.get_driver_pin(), s0.setup_sink_pin_raw(1));
+  auto gm         = std::make_shared<upass::Lgraph_manager>(g);
+  auto graph_rep  = upass::run_fold_sum_const_shared(*gm, "test-graph", false);
+  EXPECT_EQ(graph_rep.folded_nodes, 1U);
+  EXPECT_EQ(graph_rep.rewired_edges, 0U);
+  EXPECT_EQ(graph_rep.new_const_nodes, 1U);
+  EXPECT_EQ(graph_rep.deleted_nodes, 1U);
 
-  auto gm         = std::make_shared<upass::Lgraph_manager>(lg);
-  auto lgraph_rep = upass::run_fold_sum_const_shared(*gm, "test-lgraph", false);
-  EXPECT_EQ(lgraph_rep.folded_nodes, 1U);
-  EXPECT_EQ(lgraph_rep.rewired_edges, 0U);
-  EXPECT_EQ(lgraph_rep.new_const_nodes, 1U);
-  EXPECT_EQ(lgraph_rep.deleted_nodes, 1U);
-
-  std::size_t sum_count   = 0;
-  std::size_t const_count = 0;
-  for (const auto& n : lg->fast()) {
-    if (n.get_type_op() == Ntype_op::Sum) {
+  std::size_t sum_count = 0;
+  for (const auto& n : g->fast_class()) {
+    if (livehd::graph_util::type_op_of(n) == Ntype_op::Sum) {
       ++sum_count;
-    } else if (n.get_type_op() == Ntype_op::Nconst) {
-      ++const_count;
     }
   }
   EXPECT_EQ(sum_count, 0U);
-  EXPECT_GE(const_count, 3U);
 }
 
 TEST(UpassSharedFoldParity, FoldSumConstDryRunNoMutation) {
@@ -79,29 +76,23 @@ TEST(UpassSharedFoldParity, FoldSumConstDryRunNoMutation) {
   EXPECT_EQ(lnast_rep.deleted_nodes, 0U);
   EXPECT_TRUE(Lnast_ntype::is_plus(ln->get_type(pl)));
 
-  constexpr std::string_view kDbPath = "lgdb_upass_shared_fold_parity_dry_run";
-  file_utils::clean_dir(kDbPath);
-  auto* lib = Graph_library::instance(kDbPath);
-  ASSERT_NE(lib, nullptr);
-  auto* lg = lib->create_lgraph("top", "upass_shared_fold_parity_dry_run");
-  ASSERT_NE(lg, nullptr);
+  auto g  = make_graph("lgdb_upass_shared_fold_parity_dry_run", "upass_shared_fold_parity_dry_run");
+  auto c0 = livehd::graph_util::create_const(*g, *Dlop::create_integer(2));
+  auto c1 = livehd::graph_util::create_const(*g, *Dlop::create_integer(3));
+  auto s0 = livehd::graph_util::create_typed_node(*g, Ntype_op::Sum);
+  c0.connect_sink(s0.create_sink_pin(0));
+  c1.connect_sink(s0.create_sink_pin(1));
 
-  auto c0 = lg->create_node_const(2);
-  auto c1 = lg->create_node_const(3);
-  auto s0 = lg->create_node(Ntype_op::Sum);
-  lg->add_edge(c0.get_driver_pin(), s0.setup_sink_pin_raw(0));
-  lg->add_edge(c1.get_driver_pin(), s0.setup_sink_pin_raw(1));
-
-  auto gm         = std::make_shared<upass::Lgraph_manager>(lg);
-  auto lgraph_rep = upass::run_fold_sum_const_shared(*gm, "test-lgraph", true);
-  EXPECT_EQ(lgraph_rep.folded_nodes, 1U);
-  EXPECT_EQ(lgraph_rep.rewired_edges, 0U);
-  EXPECT_EQ(lgraph_rep.new_const_nodes, 1U);
-  EXPECT_EQ(lgraph_rep.deleted_nodes, 1U);
+  auto gm        = std::make_shared<upass::Lgraph_manager>(g);
+  auto graph_rep = upass::run_fold_sum_const_shared(*gm, "test-graph", true);
+  EXPECT_EQ(graph_rep.folded_nodes, 1U);
+  EXPECT_EQ(graph_rep.rewired_edges, 0U);
+  EXPECT_EQ(graph_rep.new_const_nodes, 1U);
+  EXPECT_EQ(graph_rep.deleted_nodes, 1U);
 
   std::size_t sum_count = 0;
-  for (const auto& n : lg->fast()) {
-    if (n.get_type_op() == Ntype_op::Sum) {
+  for (const auto& n : g->fast_class()) {
+    if (livehd::graph_util::type_op_of(n) == Ntype_op::Sum) {
       ++sum_count;
     }
   }

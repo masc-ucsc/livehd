@@ -27,6 +27,8 @@ parallel; all letters in group N must complete before group N+1 starts.
   they pass.
 - **1h** Golden-output baseline in `inou/prp/tests/equiv/` adding more feature tests.
 - **1i** Enum support (fix the failing tests).
+- **1j** upass: prefer iterators over `std::vector` copies in pass
+  plumbing — see "upass: prefer iterators over std::vector copies" below.
 
 ### Group 2 — depends on Group 1
 
@@ -270,19 +272,19 @@ churn lands in one focused commit.
 
 ## HHDS PinEntry/NodeEntry: native bits + sign storage
 
-LiveHD currently stores per-pin `bits` (Bits_t / 24-bit) and `sign` (1 bit)
+LiveHD currently stores per-pin `bits` (Bits_t / 23-bit) and `sign` (1 bit)
 as HHDS attributes (`livehd::attrs::bits` / `livehd::attrs::sign`) — see
 `hhds_graph_migration_plan.md §G3`. Attributes are flat_storage hashmaps;
 fine for correctness, but every read does a hash lookup.
 
 Native fields on `PinEntry` / `NodeEntry` would be one indexed load. The
 proposed layout (keeps both classes at 32 bytes by dropping `ledge1` and
-widening `Nid_bits` from 42 to 48):
+widening `Nid_bits` from 42 to 48, and port_id:23):
 
-- **PinEntry** — `master_nid:48 + port_id:22 + next_pin_id:48 + ledge0:48
-  + use_overflow:1 + sign:1 + bits:24 + sedges_/overflow_idx:64`
+- **PinEntry** — `master_nid:48 + next_pin_id:48 + ledge0:48
+  + port_id:23 + use_overflow:1 + sign:1 + bits:23 + sedges_/overflow_idx:64`
 - **NodeEntry** — `type:16 + next_pin_id:48 + ledge0:48 + use_overflow:1
-  + alive:1 + sign:1 + bits:24 + pad:5 + sedges_extra:48 + sedges_:64`
+  + alive:1 + pad:6 + sign:1 + bits:23 + sedges_extra:48 + sedges_:64`
 
 Touches every overflow/edge code path in `hhds/graph.cpp` (single-ledge
 fast path, EdgeRange `kInlineMax` constants, NodeEntry edge accounting).
@@ -294,6 +296,29 @@ LiveHD drops `livehd::attrs::bits` / `livehd::attrs::sign` and the
 The `GraphIO::DeclaredIoPin` graph-level bits + sign extension lands
 sooner (it's the immediate Sub_node-deletion unblocker, smaller scope,
 no PinEntry/NodeEntry surgery required).
+
+## upass: prefer iterators over std::vector copies
+
+`upass/` code paths build and pass `std::vector<...>` results all over the
+place (per-pass intermediate buffers, dependency lists, traversal results).
+This is convenient but forces materialization and copies even when the
+consumer only iterates once.
+
+Refactor toward iterator/range-based APIs:
+
+- Return ranges / lazy iterators instead of `std::vector` where the caller
+  only needs a single forward pass.
+- Where a concrete container is unavoidable, pass it by `const&` / move it
+  through, and avoid the "build vector, copy vector, return vector"
+  chains.
+- Audit hot upass paths (scheduler, dependency walking, per-tree work
+  queues) for accidental quadratic copies of vectors that just get fed
+  into the next pass.
+
+Performance optimization; may require non-trivial code rewrite in pass
+plumbing. Tracked as **1j** so the cleanup lands before the upass cache
+(2h) and partition descriptor (3c) work bakes vector-copy assumptions
+into more APIs.
 
 ## simlib fixed-width int types
 
