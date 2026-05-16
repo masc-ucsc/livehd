@@ -52,7 +52,7 @@ public:
       std::print(" {}:{}", v.first, v.second);
     }
     std::cout << " ::";
-    I(var.lgs.empty());
+    I(var.graphs.empty());
     std::cout << "\n";
 
     var.add("test1_foo", "field1");
@@ -86,11 +86,10 @@ public:
       std::print(" {}:{}", v.first, v.second);
     }
     std::cout << " ::";
-    I(var.lgs.empty());
+    I(var.graphs.empty());
     std::cout << "\n";
 
     var.add("test2_bar", "field2");
-    var.add(new Lgraph());
   }
 };
 

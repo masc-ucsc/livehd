@@ -12,14 +12,9 @@ cc_library(
         exclude = [
             "*test*.cpp",
             "yosys_driver.cpp",
-            "lgyosys_dump.cpp",
-            "lgyosys_fromlg.cpp",
         ],
     ),
-    hdrs = glob(
-        ["*.hpp"],
-        exclude = ["lgyosys_dump.hpp"],
-    ),
+    hdrs = glob(["*.hpp"]),
     copts = COPTS + ["-Wno-shadow"],
     visibility = ["//visibility:public"],
     deps = [

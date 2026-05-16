@@ -10,8 +10,6 @@
 #include <regex>
 #include <string>
 
-#include "lgraph.hpp"
-
 void Top_api::files(Eprp_var& var) {
   std::string src_path(var.get("src_path"));
   std::string match(var.get("match"));
@@ -72,7 +70,7 @@ void Top_api::filter(Eprp_var& var) {
   auto match = var.get("match");
 
   if (match.empty()) {
-    var.lgs.clear();
+    var.graphs.clear();
     var.lnasts.clear();
     return;
   }
@@ -81,14 +79,21 @@ void Top_api::filter(Eprp_var& var) {
     std::string      match_str{match};
     const std::regex match_regex{match_str};
 
-    Eprp_var::Eprp_lgs filtered_lgs;
-    for (auto* lg : var.lgs) {
-      std::string name{lg->get_name()};
+    Eprp_var::Eprp_graphs filtered_graphs;
+    for (const auto& g : var.graphs) {
+      if (!g) {
+        continue;
+      }
+      auto gio = g->get_io();
+      if (!gio) {
+        continue;
+      }
+      std::string name{gio->get_name()};
       if (std::regex_search(name, match_regex)) {
-        filtered_lgs.push_back(lg);
+        filtered_graphs.push_back(g);
       }
     }
-    var.lgs = std::move(filtered_lgs);
+    var.graphs = std::move(filtered_graphs);
 
     Eprp_var::Eprp_lnasts filtered_lnasts;
     for (const auto& ln : var.lnasts) {

@@ -14,10 +14,6 @@
 #include "lnast.hpp"
 #include "str_tools.hpp"
 
-// struct eprp_casecmp_str : public std::binary_function<const std::string &, const std::string &, bool> {
-// bool operator()(std::string_view lhs, std::string_view rhs) const { return str_tools::to_lower(lhs) < str_tools::to_lower(rhs); }
-//};
-
 struct eprp_casecmp_str {
   struct nocase_compare {
     bool operator()(const unsigned char& c1, const unsigned char& c2) const { return std::tolower(c1) < std::tolower(c2); }
@@ -27,44 +23,30 @@ struct eprp_casecmp_str {
   }
 };
 
-class Lgraph;
-
 class Eprp_var {
 public:
   using Eprp_dict   = absl::flat_hash_map<std::string, std::string>;
-  using Eprp_lgs    = std::vector<Lgraph*>;
   using Eprp_graphs = std::vector<std::shared_ptr<hhds::Graph>>;
   using Eprp_lnasts = std::vector<std::shared_ptr<Lnast> >;
 
   Eprp_dict   dict;
   Eprp_dict   stage_dict;
-  Eprp_lgs    lgs;
-  // Parallel HHDS handle to `lgs`. Producers (yosys.tolg, lnast_to_lgraph,
-  // meta_api lgraph.{open,create,match,save}) populate both vectors in
-  // lockstep so each `lgs[i]` corresponds to `graphs[i]`. Consumers that
-  // have migrated to hhds::Graph read from `graphs` (and drop their
-  // `//lgraph` dep); legacy consumers keep using `lgs`. Once every
-  // consumer is migrated, `lgs` is removed in a single commit.
   Eprp_graphs graphs;
   Eprp_lnasts lnasts;
 
   Eprp_var() {
     dict.clear();
     stage_dict.clear();
-    lgs.clear();
     graphs.clear();
     lnasts.clear();
   }
 
   Eprp_var(const Eprp_dict& _dict) : dict(_dict) {}
-  Eprp_var(const Eprp_lgs& _lgs) : lgs(_lgs) {}
 
   void add(const Eprp_dict& _dict);
-  void add(const Eprp_lgs& _lgs);
   void add(const Eprp_var& _var);
   void add(Eprp_lnasts& _var);
 
-  void                           add(Lgraph* lg);
   void                           add(const std::shared_ptr<hhds::Graph>& graph);
   void                           add(std::unique_ptr<Lnast> lnast);
   void                           add(const std::shared_ptr<Lnast>& lnast);
@@ -84,10 +66,9 @@ public:
   void clear() {
     dict.clear();
     stage_dict.clear();
-    lgs.clear();
     graphs.clear();
     lnasts.clear();
   }
 
-  [[nodiscard]] bool empty() const { return dict.empty() && lgs.empty() && graphs.empty(); }
+  [[nodiscard]] bool empty() const { return dict.empty() && graphs.empty(); }
 };

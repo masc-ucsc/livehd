@@ -14,8 +14,8 @@ cc_library(
     includes = ["."],
     visibility = ["//visibility:public"],
     deps = [
-        "//lgraph",
         "//lnast",
+        "@hhds//hhds:graph",
     ],
     alwayslink = True,
 )

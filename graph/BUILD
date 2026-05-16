@@ -13,8 +13,6 @@ load("//tools:copt_default.bzl", "COPTS")
 #     used to live on Lgraph_attributes.
 #   - ann_place.hpp   → Ann_place value type used by livehd::attrs::place.
 #
-# This target is independent of //lgraph (which is the legacy wrapper layer
-# in flight for deletion — see docs/contracts/hhds_graph_migration_plan.md).
 # Consumers should depend on //graph + @hhds//hhds:graph directly.
 cc_library(
     name = "graph",

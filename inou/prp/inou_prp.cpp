@@ -3,8 +3,6 @@
 #include "inou_prp.hpp"
 
 #include "absl/strings/str_split.h"
-#include "lgedgeiter.hpp"
-#include "lgraph.hpp"
 #include "perf_tracing.hpp"
 #include "prp2lnast.hpp"
 

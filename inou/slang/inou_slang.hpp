@@ -10,11 +10,6 @@ class Inou_slang : public Pass {
 private:
   static inline std::atomic<int> trace_module_cnt = 0;
 
-protected:
-  void check_lec(Lgraph* g);
-
-  void do_work(Lgraph* g);
-
 public:
   static void work(Eprp_var& var);
 

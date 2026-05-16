@@ -13,6 +13,7 @@ cc_library(
     deps = [
         "//graph",
         "//pass/common:pass",
+        "@rapidjson",
     ],
     alwayslink = True,
 )

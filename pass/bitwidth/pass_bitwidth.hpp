@@ -5,8 +5,6 @@
 #include <vector>
 
 #include "bitwidth_range.hpp"
-#include "node.hpp"
-#include "node_pin.hpp"
 #include "pass.hpp"
 
 class Pass_bitwidth : public Pass {

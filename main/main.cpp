@@ -17,8 +17,9 @@
 #include <vector>
 
 #include "eprp.hpp"
+#include "graph_library_singleton.hpp"
+#include "hhds/graph.hpp"
 #include "iassert.hpp"
-#include "lgraph.hpp"
 #include "main_api.hpp"
 #include "meta_api.hpp"
 #include "perf_tracing.hpp"
@@ -122,12 +123,23 @@ Replxx::completions_t hook_shared(std::string const& context, int index, std::ve
 
     if (label_name) {
       std::vector<std::string> name_files;
-      auto*                    library = Graph_library::instance("lgdb/");
+      auto&                    lib = livehd::Hhds_graph_library::instance("lgdb");
 
-      library->each_sub([&name_files, path](Lg_type_id id, std::string_view name) {
-        (void)id;
-        name_files.emplace_back(name);
-      });
+      hhds::Gid cap = static_cast<hhds::Gid>(lib.capacity());
+      for (hhds::Gid id = 1; id < cap; ++id) {
+        if (!lib.has_graph(id)) {
+          continue;
+        }
+        auto g = lib.get_graph(id);
+        if (!g) {
+          continue;
+        }
+        auto gio = g->get_io();
+        if (!gio) {
+          continue;
+        }
+        name_files.emplace_back(std::string{gio->get_name()});
+      }
       fields   = name_files;
       examples = &fields;
     } else if (label_files || label_output || label_path || label_odir) {
@@ -554,7 +566,6 @@ int main(int argc, char** argv) {
         // could throw an exception
         rx.history_add(input);
         Main_api::parse_inline(input);
-        // Graph_library::sync_all();
 
         continue;
       }
@@ -587,8 +598,6 @@ int main(int argc, char** argv) {
   if (history) {
     rx.history_save(history_file);
   }
-
-  Graph_library::sync_all();
 
   if (Main_api::has_errors()) {
     return 1;

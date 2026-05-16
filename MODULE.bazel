@@ -99,16 +99,6 @@ http_archive(
     build_file = "//packages:parallel_hashmap.BUILD",
 )
 
-# HIF
-http_archive(
-    name = "hif",
-    sha256 = "af0da75b1489997356b24cfbab81741a2c50ed299f63a110226c28e55397db15",
-    strip_prefix = "hif-7652008ccb33e765d6bad7370e524fd62eb78e2f",
-    urls = [
-        "https://github.com/masc-ucsc/hif/archive/7652008ccb33e765d6bad7370e524fd62eb78e2f.zip",
-    ],
-)
-
 # HHDS (replaces core/lhtree*.hpp; see hhds_migration.md)
 bazel_dep(name = "hhds", version = "0.2.0")
 git_override(

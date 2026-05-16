@@ -9,7 +9,6 @@
 #include "absl/strings/str_split.h"
 #include "eprp.hpp"
 #include "err_tracker.hpp"
-#include "graph_library.hpp"
 #include "iassert.hpp"
 
 static_assert(__cplusplus >= 201703L, "C++ 17 support is required. Please upgrade your compiler.");
@@ -37,10 +36,7 @@ protected:
 public:
   static inline Eprp eprp;
 
-  static void error(std::string_view msg) {
-    // Graph_library::sync_all();
-    throw Eprp::parser_error(eprp, msg);
-  }
+  static void error(std::string_view msg) { throw Eprp::parser_error(eprp, msg); }
   static void warn(std::string_view msg) { eprp.parser_warn(msg); }
   static void info(std::string_view msg) {
 #ifndef NDEBUG

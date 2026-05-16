@@ -10,18 +10,10 @@
 #include <vector>
 
 #include "absl/strings/str_split.h"
-#include "graph_library.hpp"
-#include "lgraph.hpp"
 
 void Eprp_var::add(const Eprp_dict& _dict) {
   for (const auto& var : _dict) {
     add(var.first, var.second);
-  }
-}
-
-void Eprp_var::add(const Eprp_lgs& _lgs) {
-  for (const auto& lg : _lgs) {
-    add(lg);
   }
 }
 
@@ -31,24 +23,7 @@ void Eprp_var::add(Eprp_lnasts& _lns) {
   }
 }
 
-void Eprp_var::add(const Eprp_var& _var) {
-  add(_var.lgs);
-  add(_var.dict);
-}
-
-void Eprp_var::add(Lgraph* lg) {
-  if (std::find(lgs.begin(), lgs.end(), lg) == lgs.end()) {
-    lgs.push_back(lg);
-    // Keep `graphs` in lockstep with `lgs` by extracting the HHDS shadow.
-    // Migrated consumers read `graphs`; legacy ones still walk `lgs`.
-    if (lg) {
-      const auto& hg = lg->get_hhds_graph_shared();
-      if (hg) {
-        graphs.push_back(hg);
-      }
-    }
-  }
-}
+void Eprp_var::add(const Eprp_var& _var) { add(_var.dict); }
 
 void Eprp_var::add(const std::shared_ptr<hhds::Graph>& graph) {
   if (graph && std::find(graphs.begin(), graphs.end(), graph) == graphs.end()) {
@@ -78,11 +53,6 @@ void Eprp_var::add(std::string_view name, std::string_view value) {
         throw std::runtime_error("not valid file");
       }
     }
-
-    // WARNING: THis is needed because the global_instance is NOT lock
-    // protected (the path must be set/created before the threads span)
-    auto* ptr = Graph_library::instance(path);
-    I(ptr);
   }
 
   dict[name] = value;
@@ -94,20 +64,14 @@ void Eprp_var::replace(const Eprp_var::Eprp_lnasts& lns) {
 }
 
 void Eprp_var::replace(const std::shared_ptr<Lnast>& lnast_old, std::shared_ptr<Lnast>& lnast_new) {
-  // lnast_old.swap(lnast_new);
-
   auto itr = std::find(lnasts.begin(), lnasts.end(), lnast_old);
 
-  // auto indx = lnasts.begin();
   if (itr != lnasts.cend()) {
     auto indx       = std::distance(lnasts.begin(), itr);
     lnasts.at(indx) = std::move(lnast_new);
-    // lnasts.at(indx).swap(lnast_new);
-    // lnasts.at(indx) = lnast_new;
   } else {
     I(false, "lnast provided is not found in the vector");
   }
-  // lnasts[indx] = lnast_new;
 }
 
 void Eprp_var::delete_label(std::string_view name) {

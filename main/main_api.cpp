@@ -3,13 +3,11 @@
 
 #include "cloud_api.hpp"
 #include "file_utils.hpp"
-#include "inou_lef_api.hpp"
 #include "meta_api.hpp"
 #include "thread_pool.hpp"
 #include "top_api.hpp"
 
 void setup_inou_yosys();
-void setup_inou_liveparse();
 
 // add new setup function prototypes here
 
@@ -20,7 +18,6 @@ void Main_api::init() {
   }
 
   setup_inou_yosys();
-  setup_inou_liveparse();
 
   // FIXME beyond this point (to delete some of them)
 

@@ -11,7 +11,6 @@ using namespace kainjow;
 #pragma GCC diagnostic pop
 
 #include "eprp.hpp"
-#include "lgraph.hpp"
 #include "pass.hpp"
 
 class Inou_yosys_api : public Pass {
