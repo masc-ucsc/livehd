@@ -103,14 +103,6 @@ struct source_t {
 };
 inline constexpr source_t source{};
 
-// Per-node sub-graph type-id reference (set by create_node_sub).
-// Replaces Lgraph_attributes::subid_map.
-struct subid_t {
-  using value_type = uint32_t;  // matches Lg_type_id::value
-  using storage    = hhds::flat_storage;
-};
-inline constexpr subid_t subid{};
-
 // Per-node serialized Const value used by Nconst cells.
 // Replaces Lgraph_attributes::const_map (which stored Const::serialize()).
 struct const_value_t {
@@ -118,6 +110,16 @@ struct const_value_t {
   using storage    = hhds::flat_storage;
 };
 inline constexpr const_value_t const_value{};
+
+// Per-pin serialized Const value carried on CONST_NODE pins whose port_id is
+// beyond the small-int fast-path range (`Const_small_pid_count`). For pins in
+// the small-int range, the value is encoded directly in the port_id (scheme
+// A) and this attribute is absent.
+struct pin_const_value_t {
+  using value_type = std::string;
+  using storage    = hhds::flat_storage;
+};
+inline constexpr pin_const_value_t pin_const_value{};
 
 // Per-node serialized LUT-table Const used by LUT cells.
 // Replaces Lgraph_attributes::lut_map.
@@ -168,12 +170,12 @@ template <>
   return "livehd::attrs::source";
 }
 template <>
-[[nodiscard]] inline std::string attr_tag_name<livehd::attrs::subid_t>() {
-  return "livehd::attrs::subid";
-}
-template <>
 [[nodiscard]] inline std::string attr_tag_name<livehd::attrs::const_value_t>() {
   return "livehd::attrs::const_value";
+}
+template <>
+[[nodiscard]] inline std::string attr_tag_name<livehd::attrs::pin_const_value_t>() {
+  return "livehd::attrs::pin_const_value";
 }
 template <>
 [[nodiscard]] inline std::string attr_tag_name<livehd::attrs::lut_t>() {

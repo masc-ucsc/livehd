@@ -62,7 +62,6 @@ TEST(UpassRunnerLgraph, VisitsFastNodesAndCollectsTypes) {
   auto c1 = lg->create_node_const(11);
   auto s0 = lg->create_node(Ntype_op::Sum);
   auto x0 = lg->create_node(Ntype_op::Xor);
-  (void)lg->create_node(Ntype_op::CompileErr);
 
   lg->add_edge(c0.get_driver_pin(), s0.setup_sink_pin("A"));
   lg->add_edge(c1.get_driver_pin(), s0.setup_sink_pin("B"));
@@ -70,7 +69,7 @@ TEST(UpassRunnerLgraph, VisitsFastNodesAndCollectsTypes) {
 
   auto gm = std::make_shared<upass::Lgraph_manager>(lg);
   auto ss = gm->scan_fold_candidates();
-  EXPECT_EQ(ss.visited_nodes, 5U);
+  EXPECT_EQ(ss.visited_nodes, 4U);
   EXPECT_EQ(ss.const_nodes, 2U);
   EXPECT_EQ(ss.arithmetic_nodes, 2U);
   EXPECT_EQ(ss.fold_candidate_nodes, 2U);
@@ -78,15 +77,14 @@ TEST(UpassRunnerLgraph, VisitsFastNodesAndCollectsTypes) {
   uPass_runner_lgraph runner(gm);
   auto                types = runner.collect_type_names();
 
-  ASSERT_EQ(types.size(), 5U);
+  ASSERT_EQ(types.size(), 4U);
   EXPECT_EQ(types[0], "const");
   EXPECT_EQ(types[1], "const");
   EXPECT_EQ(types[2], "sum");
   EXPECT_EQ(types[3], "xor");
-  EXPECT_EQ(types[4], "compile_err");
-  EXPECT_EQ(runner.visit_fast(), 5U);
+  EXPECT_EQ(runner.visit_fast(), 4U);
   runner.run(2);
-  EXPECT_EQ(runner.get_last_visited_count(), 5U);
+  EXPECT_EQ(runner.get_last_visited_count(), 4U);
   auto rs = runner.get_last_scan_summary();
   EXPECT_EQ(rs.fold_candidate_nodes, 2U);
   EXPECT_FALSE(s0.has_color());

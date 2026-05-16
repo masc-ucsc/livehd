@@ -842,8 +842,7 @@ void Traverse_lg::fast_pass_for_inputs(Lgraph* lg, map_of_sets& inp_map_of_sets,
 
     if (is_orig_lg) {
       auto node_op_type = node.get_type_op();
-      if (node_op_type == Ntype_op::Get_mask || node_op_type == Ntype_op::Set_mask || node_op_type == Ntype_op::TupAdd
-          || node_op_type == Ntype_op::TupGet || (!node.has_loc())) {
+      if (node_op_type == Ntype_op::Get_mask || node_op_type == Ntype_op::Set_mask || (!node.has_loc())) {
         for (const auto dpins : node.out_connected_pins()) {
           unwanted_orig_NPs.insert(dpins.get_compact_flat());
 #ifdef FOR_EVAL

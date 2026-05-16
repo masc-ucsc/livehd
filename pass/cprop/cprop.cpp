@@ -20,7 +20,7 @@
 
 using livehd::graph_util::bits_of;
 using livehd::graph_util::const_value_of;
-using livehd::graph_util::create_const_node_serialized;
+using livehd::graph_util::create_const;
 using livehd::graph_util::create_typed_node;
 using livehd::graph_util::debug_name;
 using livehd::graph_util::find_sink_pin;
@@ -46,19 +46,7 @@ std::vector<hhds::Edge_class> ordered_inp_edges(const hhds::Node_class& node) {
   return e;
 }
 
-[[nodiscard]] Const hydrate_const(const hhds::Node_class& node) {
-  auto s = const_value_of(node);
-  if (s.empty()) {
-    return *Dlop::create_integer(0);
-  }
-  auto p = Dlop::unserialize(s);
-  if (!p) {
-    return *Dlop::create_integer(0);
-  }
-  return *p;
-}
-
-[[nodiscard]] Const hydrate_const(const hhds::Pin_class& pin) { return hydrate_const(pin.get_master_node()); }
+using livehd::graph_util::hydrate_const;
 
 [[nodiscard]] hhds::Pin_class setup_sink_by_name(const hhds::Node_class& node, std::string_view name) {
   auto op = type_op_of(node);
@@ -66,10 +54,10 @@ std::vector<hhds::Edge_class> ordered_inp_edges(const hhds::Node_class& node) {
     return node.create_sink_pin(name);
   }
   auto pid = Ntype::get_sink_pid(op, name);
-  if (pid < 0) {
+  if (pid == livehd::Port_invalid) {
     return {};
   }
-  return node.create_sink_pin(static_cast<hhds::Port_id>(pid));
+  return node.create_sink_pin(pid);
 }
 
 // "Is there an edge from `driver` to `sink`?"
@@ -288,7 +276,7 @@ void Cprop::replace_part_inputs_const(hhds::Node_class& node, std::vector<hhds::
 #ifndef NDEBUG
       Pass::info("WARNING: mux selector:{} for a disconnected pin in mux. Using zero\n", sel);
 #endif
-      a_pin = create_const_node_serialized(*current_graph, Dlop::create_integer(0)->serialize());
+      a_pin = create_const(*current_graph, *Dlop::create_integer(0));
     }
 
     collapse_forward_for_pin(node, a_pin);
@@ -342,7 +330,7 @@ void Cprop::replace_part_inputs_const(hhds::Node_class& node, std::vector<hhds::
     if (nconstants > 1) {
       first_const_edge.del_edge();
       if (!result.is_known_zero()) {
-        auto dpin = create_const_node_serialized(*current_graph, result.serialize());
+        auto dpin = create_const(*current_graph, result);
         if (result.is_positive() || op == Ntype_op::Or) {
           setup_sink_by_name(node, "A").connect_driver(dpin);
         } else {
@@ -518,7 +506,7 @@ void Cprop::replace_all_inputs_const(hhds::Node_class& node, std::vector<hhds::E
 }
 
 void Cprop::replace_node(hhds::Node_class& node, const Const& result) {
-  auto dpin = create_const_node_serialized(*current_graph, result.serialize());
+  auto dpin = create_const(*current_graph, result);
 
   for (auto& out : node.out_edges()) {
     auto out_bits = bits_of(out.driver);
@@ -527,7 +515,7 @@ void Cprop::replace_node(hhds::Node_class& node, const Const& result) {
       dpin.connect_sink(out.sink);
     } else {
       auto result2 = result.adjust_bits(out_bits);
-      auto dpin2   = create_const_node_serialized(*current_graph, result2->serialize());
+      auto dpin2   = create_const(*current_graph, *result2);
       dpin2.connect_sink(out.sink);
     }
   }
@@ -540,7 +528,7 @@ void Cprop::replace_logic_node(hhds::Node_class& node, const Const& result) {
 
   for (auto& out : node.out_edges()) {
     if (dpin_0.is_invalid()) {
-      dpin_0 = create_const_node_serialized(*current_graph, result.serialize());
+      dpin_0 = create_const(*current_graph, result);
     }
     dpin_0.connect_sink(out.sink);
   }
@@ -640,7 +628,7 @@ void Cprop::scalar_sext(hhds::Node_class& node, std::vector<hhds::Edge_class>& i
 
   auto b = std::min(self_pos, parent_pos);
   if (b != self_pos) {
-    auto new_const_dpin = create_const_node_serialized(*current_graph, Dlop::create_integer(b)->serialize());
+    auto new_const_dpin = create_const(*current_graph, *Dlop::create_integer(b));
     inp_edges_ordered[1].del_edge();
     setup_sink_by_name(node, "b").connect_driver(new_const_dpin);
   }
@@ -667,7 +655,7 @@ hhds::Pin_class Cprop::try_find_single_driver_pin(hhds::Node_class& node, int64_
   if (pos >= range_end || pos < range_begin) {
     if (is_const_pin(a_pin)) {
       auto v = hydrate_const(a_pin).get_mask_op(Dlop::get_mask_value(pos));
-      return create_const_node_serialized(*current_graph, v->serialize());
+      return create_const(*current_graph, *v);
     }
     auto a_master = a_pin.get_master_node();
     if (type_op_of(a_master) != Ntype_op::Set_mask) {
@@ -807,6 +795,12 @@ void Cprop::bwd_del_node(hhds::Node_class& node) {
       continue;
     }
     auto master = e.driver.get_master_node();
+    // CONST_NODE (and other singletons) cannot be deleted: const pins are
+    // leaves of the form CONST_NODE.pid_N, so dropping the consumer just
+    // leaves the pin unreferenced — harmless and dedup-friendly.
+    if (livehd::graph_util::is_builtin_node(master)) {
+      continue;
+    }
     if (potential_set.contains(master.get_class_index())) {
       continue;
     }
@@ -830,6 +824,9 @@ void Cprop::bwd_del_node(hhds::Node_class& node) {
           continue;
         }
         auto d_master = e.driver.get_master_node();
+        if (livehd::graph_util::is_builtin_node(d_master)) {
+          continue;
+        }
         if (potential_set.contains(d_master.get_class_index())) {
           continue;
         }

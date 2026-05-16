@@ -19,7 +19,7 @@
 
 using livehd::graph_util::bits_of;
 using livehd::graph_util::const_value_of;
-using livehd::graph_util::create_const_node_serialized;
+using livehd::graph_util::create_const;
 using livehd::graph_util::create_typed_node;
 using livehd::graph_util::debug_name;
 using livehd::graph_util::find_sink_pin;
@@ -48,22 +48,7 @@ void sort_inp(std::vector<hhds::Edge_class>& edges) {
   });
 }
 
-// Deserialize a Const from a node's const_value attribute.
-[[nodiscard]] Const hydrate_const(const hhds::Node_class& node) {
-  auto s = const_value_of(node);
-  if (s.empty()) {
-    return *Dlop::create_integer(0);
-  }
-  auto p = Dlop::unserialize(s);
-  if (!p) {
-    return *Dlop::create_integer(0);
-  }
-  return *p;
-}
-
-[[nodiscard]] Const hydrate_const(const hhds::Pin_class& pin) {
-  return hydrate_const(pin.get_master_node());
-}
+using livehd::graph_util::hydrate_const;
 
 // Delete every edge incident to a sink pin (drivers feeding it).
 void clear_sink(const hhds::Pin_class& spin) {
@@ -90,10 +75,10 @@ void clear_all_sinks(const hhds::Node_class& node) {
     return node.create_sink_pin(name);
   }
   auto pid = Ntype::get_sink_pid(op, name);
-  if (pid < 0) {
+  if (pid == livehd::Port_invalid) {
     return {};
   }
-  return node.create_sink_pin(static_cast<hhds::Port_id>(pid));
+  return node.create_sink_pin(pid);
 }
 
 }  // namespace
@@ -334,7 +319,7 @@ void Bitwidth::process_shl(hhds::Node_class& node, std::vector<hhds::Edge_class>
   }
 
   if (n_bw.get_sbits() == 0 || a_bw.get_sbits() == 0) {
-    auto zero_dpin = create_const_node_serialized(*current_graph, Dlop::create_integer(0)->serialize());
+    auto zero_dpin = create_const(*current_graph, *Dlop::create_integer(0));
     for (auto& e : node.out_edges()) {
       zero_dpin.connect_sink(e.sink);
     }
@@ -502,13 +487,13 @@ void Bitwidth::process_memory(hhds::Node_class& node) {
       mem_bits = mem_din_bits;
 
       clear_sink(find_sink_pin(node, "bits"));
-      auto cdpin = create_const_node_serialized(*current_graph, Dlop::create_integer(mem_bits)->serialize());
+      auto cdpin = create_const(*current_graph, *Dlop::create_integer(mem_bits));
       setup_sink_by_name(node, "bits").connect_driver(cdpin);
     }
   } else if (mem_din_bits && !mem_din_bits_missing) {
     I(mem_bits == 0);
     mem_bits   = mem_din_bits;
-    auto cdpin = create_const_node_serialized(*current_graph, Dlop::create_integer(mem_bits)->serialize());
+    auto cdpin = create_const(*current_graph, *Dlop::create_integer(mem_bits));
     setup_sink_by_name(node, "bits").connect_driver(cdpin);
   }
 
@@ -541,7 +526,7 @@ void Bitwidth::process_memory(hhds::Node_class& node) {
         Pass::info("memory {} inferring size of {}", debug_name(node), new_mem_size);
       }
       mem_size   = new_mem_size;
-      auto cdpin = create_const_node_serialized(*current_graph, Dlop::create_integer(mem_size)->serialize());
+      auto cdpin = create_const(*current_graph, *Dlop::create_integer(mem_size));
       setup_sink_by_name(node, "size").connect_driver(cdpin);
     }
 
@@ -768,7 +753,7 @@ void Bitwidth::process_get_mask(hhds::Node_class& node) {
   }
 
   if (res_min.is_known_zero() && res_max.is_known_zero() && !not_finished) {
-    auto zero_dpin = create_const_node_serialized(*current_graph, Dlop::create_integer(0)->serialize());
+    auto zero_dpin = create_const(*current_graph, *Dlop::create_integer(0));
     for (auto& e : node.out_edges()) {
       zero_dpin.connect_sink(e.sink);
     }
@@ -897,7 +882,7 @@ void Bitwidth::process_bit_or(hhds::Node_class& node, std::vector<hhds::Edge_cla
   }
 
   if (max_bits == 0) {
-    auto zero_dpin = create_const_node_serialized(*current_graph, Dlop::create_integer(0)->serialize());
+    auto zero_dpin = create_const(*current_graph, *Dlop::create_integer(0));
     for (auto& e : node.out_edges()) {
       zero_dpin.connect_sink(e.sink);
     }
@@ -964,7 +949,7 @@ void Bitwidth::process_bit_and(hhds::Node_class& node, std::vector<hhds::Edge_cl
     }
     Bits_t bw_sbits = it->second.get_sbits();
     if (bw_sbits == 0) {
-      auto zero_dpin = create_const_node_serialized(*current_graph, Dlop::create_integer(0)->serialize());
+      auto zero_dpin = create_const(*current_graph, *Dlop::create_integer(0));
       for (auto& e2 : node.out_edges()) {
         zero_dpin.connect_sink(e2.sink);
       }
@@ -1070,44 +1055,6 @@ Bitwidth::Attr Bitwidth::get_key_attr(std::string_view key) {
   return Attr::Set_other;
 }
 
-void Bitwidth::process_attr_get(hhds::Node_class& node) {
-  I(is_sink_connected(node, "field"));
-  auto dpin_key = get_driver_of_sink_name(node, "field");
-  I(is_const_pin(dpin_key));
-
-  auto key  = hydrate_const(dpin_key).to_field();
-  auto attr = get_key_attr(key);
-  I(attr != Attr::Set_dp_assign);
-  if (attr == Attr::Set_other) {
-    not_finished = true;
-    return;
-  }
-
-  I(is_sink_connected(node, "parent"));
-  auto dpin_val = get_driver_of_sink_name(node, "parent");
-
-  auto it = bwmap.find(dpin_val.get_class_index());
-  if (it == bwmap.end()) {
-    not_finished = true;
-    return;
-  }
-  auto& bw = it->second;
-
-  Const result;
-  if (attr == Attr::Set_ubits) {
-    result = bw.get_min().is_positive() ? Dlop::create_integer(bw.get_sbits() - 1) : Dlop::create_integer(bw.get_sbits());
-  } else if (attr == Attr::Set_sbits) {
-    result = Dlop::create_integer(bw.get_sbits());
-  } else if (attr == Attr::Set_max) {
-    result = bw.get_max();
-  } else if (attr == Attr::Set_min) {
-    result = bw.get_min();
-  }
-
-  clear_all_sinks(node);
-  set_type_const_serialized(node, result.serialize());
-}
-
 void Bitwidth::process_attr_set_dp_assign(hhds::Node_class& node_dp) {
   I(is_sink_connected(node_dp, "value"));
   I(is_sink_connected(node_dp, "parent"));
@@ -1177,7 +1124,7 @@ void Bitwidth::process_attr_set_bw(hhds::Node_class& node_attr, Bitwidth::Attr a
 
     if (bw.get_sbits() <= bits) {
       if (parent_dpin.is_invalid()) {
-        parent_dpin    = create_const_node_serialized(*current_graph, Dlop::create_integer(0)->serialize());
+        parent_dpin    = create_const(*current_graph, *Dlop::create_integer(0));
         parent_pending = false;
       }
       for (auto& e : node_attr.out_edges()) {
@@ -1255,7 +1202,7 @@ void Bitwidth::insert_tposs_nodes(hhds::Node_class& node_attr, Bits_t ubits) {
 
     if (ntposs.is_invalid()) {
       ntposs            = create_typed_node(*current_graph, Ntype_op::Get_mask);
-      auto mask_cnode   = create_const_node_serialized(*current_graph, mask->serialize());
+      auto mask_cnode   = create_const(*current_graph, *mask);
       setup_sink_by_name(ntposs, "mask").connect_driver(mask_cnode);
       setup_sink_by_name(ntposs, "a").connect_driver(name_dpin);
     }
@@ -1374,9 +1321,7 @@ void Bitwidth::bw_pass(hhds::Graph* g) {
         }
       }
 
-      if (op == Ntype_op::TupGet || op == Ntype_op::TupAdd) {
-        continue;
-      } else if (op == Ntype_op::Or) {
+      if (op == Ntype_op::Or) {
         if (inp_edges.size() == 1) {
           process_assignment_or(node, inp_edges);
         } else {
@@ -1390,8 +1335,6 @@ void Bitwidth::bw_pass(hhds::Graph* g) {
         process_bit_and(node, inp_edges);
       } else if (op == Ntype_op::AttrSet) {
         process_attr_set(node);
-      } else if (op == Ntype_op::AttrGet) {
-        process_attr_get(node);
       } else if (op == Ntype_op::Memory) {
         process_memory(node);
       } else if (op == Ntype_op::Sum) {
@@ -1579,7 +1522,7 @@ void Bitwidth::try_delete_attr_node(hhds::Node_class& node) {
       set_bits(mask_dpin, bw_lhs_bits);
 
       auto mask_const  = Dlop::get_mask_value(bw_lhs_bits);
-      auto all_one_dpin = create_const_node_serialized(*current_graph, mask_const->serialize());
+      auto all_one_dpin = create_const(*current_graph, *mask_const);
 
       bwmap.insert_or_assign(mask_dpin.get_class_index(), Bitwidth_range(Dlop::create_integer(0), mask_const));
       dpin_rhs.connect_sink(setup_sink_by_name(mask_node, "A"));
@@ -1607,7 +1550,7 @@ void Bitwidth::try_delete_attr_node(hhds::Node_class& node) {
       e.sink.connect_driver(data_dpin);
     }
   } else {
-    auto data_dpin = create_const_node_serialized(*current_graph, Dlop::create_integer(0)->serialize());
+    auto data_dpin = create_const(*current_graph, *Dlop::create_integer(0));
     for (auto e : node.out_edges()) {
       e.sink.connect_driver(data_dpin);
     }
@@ -1617,20 +1560,12 @@ void Bitwidth::try_delete_attr_node(hhds::Node_class& node) {
 
 void Bitwidth::set_subgraph_boundary_bw(hhds::Node_class& node) {
   // Look up the sub-graph via library.
-  auto gio = current_graph->get_io();
-  auto lib = gio ? gio->get_library() : nullptr;
-  if (lib == nullptr) {
-    return;
-  }
-
-  auto sub_gid = static_cast<hhds::Gid>(livehd::graph_util::subid_of(node));
-  if (!lib->has_graph(sub_gid)) {
+  auto sub_graph = node.get_subnode_graph();
+  if (!sub_graph) {
     Pass::info("Global IO connection pass cannot find existing subgraph in lgdb");
     return;
   }
-
-  auto sub_graph = lib->get_graph(sub_gid);
-  auto sub_gio2  = sub_graph->get_io();
+  auto sub_gio2 = sub_graph->get_io();
   if (!sub_gio2) {
     return;
   }

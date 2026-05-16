@@ -920,23 +920,7 @@ bool Lgraph::is_type_const(Index_id nid) const {
   return get_type_op(nid) == Ntype_op::Nconst;
 }
 
-Lg_type_id Lgraph::get_type_sub(Index_id nid) const {
-  // HHDS Phase G3 read: query the per-node `subid` attribute on the shadow
-  // when present. Falls back to the legacy subid_map (via the base impl)
-  // for shadow misses (graph-IO pseudo-nodes, non-master nids).
-  if (hhds_graph_ && nid != Hardcoded_input_nid && nid != Hardcoded_output_nid) {
-    if (auto it = idx_to_hhds_nid_.find(nid); it != idx_to_hhds_nid_.end()) {
-      auto hnode = hhds_graph_->get_node(it->second);
-      if (hnode.is_valid()) {
-        auto ref = hnode.attr(livehd::attrs::subid);
-        if (ref.has()) {
-          return Lg_type_id(ref.get());
-        }
-      }
-    }
-  }
-  return Lgraph_attributes::get_type_sub(nid);
-}
+Lg_type_id Lgraph::get_type_sub(Index_id nid) const { return Lgraph_attributes::get_type_sub(nid); }
 
 Const Lgraph::get_type_const(Index_id nid) const {
   // HHDS Phase G3 read: query the per-node `const_value` attribute on the
@@ -1699,13 +1683,7 @@ Node Lgraph::create_node_sub(Lg_type_id sub_id) {
 
   auto nid = create_node().get_nid();
   set_type_sub(nid, sub_id);
-
-  // HHDS Phase G3 (shadow): mirror the cell-type plus the sub_id payload as
-  // a node-level HHDS attribute. The Hierarchy/Forest set_subnode wiring is
-  // still a Phase G4 follow-up; this gives readers (get_type_sub) a
-  // shadow-backed source while the legacy subid_map keeps the live data.
   mirror_set_type_hhds(nid, Ntype_op::Sub);
-  mirror_set_subid_hhds(nid, sub_id);
 
   return Node{this, Hierarchy::hierarchical_root(), nid};
 }
@@ -1714,12 +1692,7 @@ Node Lgraph::create_node_sub(std::string_view sub_name) {
   auto  nid = create_node().get_nid();
   auto* sub = library->ref_or_create_sub(sub_name);
   set_type_sub(nid, sub->get_lgid());
-
-  // HHDS Phase G3 (shadow): same mirror pair as the Lg_type_id overload.
-  // Without this, downstream set_type readers see the default Invalid
-  // type for sub-instances built through this path (lnast2lgraph emitter).
   mirror_set_type_hhds(nid, Ntype_op::Sub);
-  mirror_set_subid_hhds(nid, sub->get_lgid());
 
   return Node{this, Hierarchy::hierarchical_root(), nid};
 }

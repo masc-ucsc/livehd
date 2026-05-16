@@ -323,7 +323,6 @@ public:
   // Some redundant code with node (implemented because frequent)
   [[nodiscard]] bool  is_type_single_driver() const;
   [[nodiscard]] bool  is_type_const() const;
-  [[nodiscard]] bool  is_type_tup() const;
   [[nodiscard]] bool  is_type_sub() const;
   [[nodiscard]] bool  is_type_flop() const;
   [[nodiscard]] bool  is_type_register() const;

@@ -372,7 +372,7 @@ void Lgyosys_dump::create_wires(Lgraph* g, RTLIL::Module* mod) {
 
     auto op = node.get_type_op();
 
-    if (op == Ntype_op::AttrSet || op == Ntype_op::AttrGet || op == Ntype_op::TupAdd || op == Ntype_op::TupGet) {
+    if (op == Ntype_op::AttrSet) {
       continue;
     }
 

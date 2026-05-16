@@ -237,37 +237,6 @@ bool Node::is_sink_connected(std::string_view pname) const {
   return get_lg()->has_inputs(Node_pin(top_g, current_g, hidx, idx, pid, true));
 }
 
-bool Node::is_driver_connected(std::string_view pname) const {
-  if (!is_type_sub()) {
-    auto pid = Ntype::get_driver_pid(get_type_op(), pname);
-    I(pid >= 0);  // if quering a cell, the name should be right, no?
-    Index_id idx = get_lg()->find_idx_from_pid(nid, pid);
-    if (idx == 0) {
-      return false;
-    }
-    return get_lg()->has_outputs(Node_pin(top_g, current_g, hidx, idx, pid, false));
-  }
-
-  Lg_type_id sub_lgid = current_g->get_type_sub(nid);
-
-  const auto& sub = current_g->get_library().get_sub(sub_lgid);
-  if (!sub.has_pin(pname) || sub.is_input(pname)) {
-    return false;
-  }
-
-  auto pid = sub.get_instance_pid(pname);
-  if (pid == Port_invalid) {
-    return false;
-  }
-
-  Index_id idx = get_lg()->find_idx_from_pid(nid, pid);
-  if (idx == 0) {
-    return false;
-  }
-
-  return get_lg()->has_inputs(Node_pin(top_g, current_g, hidx, idx, pid, false));
-}
-
 Node_pin Node::setup_sink_pin_slow(std::string_view name) {
   I(is_type_sub());
   I(name != "$");
@@ -384,12 +353,6 @@ bool Node::is_type(const Ntype_op op) const { return get_type_op() == op; }
 
 bool Node::is_type_const() const { return current_g->is_type_const(nid); }
 
-bool Node::is_type_attr() const {
-  auto op = get_type_op();
-
-  return op == Ntype_op::AttrGet || op == Ntype_op::AttrSet;
-}
-
 bool Node::is_type_flop() const {
   auto op = get_type_op();
 
@@ -400,12 +363,6 @@ bool Node::is_type_register() const {
   auto op = get_type_op();
 
   return op == Ntype_op::Flop || op == Ntype_op::Fflop || op == Ntype_op::Memory || op == Ntype_op::Latch;
-}
-
-bool Node::is_type_tup() const {
-  auto op = get_type_op();
-
-  return op == Ntype_op::TupAdd || op == Ntype_op::TupGet;
 }
 
 bool Node::is_type_loop_first() const {
@@ -450,7 +407,6 @@ Node Node::get_up_node() const {
 void Node::set_type_sub(Lg_type_id subid) {
   current_g->set_type_sub(nid, subid);
   current_g->mirror_set_type_hhds(nid, Ntype_op::Sub);
-  current_g->mirror_set_subid_hhds(nid, subid);
 }
 void Node::set_type_const(const Const& val) {
   current_g->set_type_const(nid, val);

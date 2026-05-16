@@ -10,21 +10,54 @@
 #include "absl/container/flat_hash_map.h"
 #include "absl/strings/str_cat.h"
 #include "graph_sizing.hpp"
+#include "hhds/graph_sizing.hpp"
 #include "likely.hpp"
 #include "str_tools.hpp"
+
+namespace livehd {
+// Sentinel for `hhds::Port_id` returned by Ntype::get_sink_pid on an
+// unrecognised name. HHDS itself does not declare an invalid-port constant;
+// it just sizes the port_id field to Port_bits (22) bits. Anything outside
+// that range is fine to use as the "no such pin" marker.
+inline constexpr hhds::Port_id Port_invalid = (hhds::Port_id{1} << hhds::Port_bits) - 1;
+}  // namespace livehd
 
 // Encoding invariant: bit 0 of the underlying value is `is_loop_last`.
 // HHDS reserves the low bit of NodeEntry::type for its own loop-last flag,
 // so making the Ntype_op encoding match means LiveHD can store the enum
 // value directly into hhds::Node_class without a shift on either side.
 //
-// Layout: non-loop-last ops take even values, loop-last ops take odd values.
-// Relative ordering is preserved so the range-based predicates below
-// (is_synthesizable, etc.) keep working. Gaps (odd slots for non-loop-last
-// ops, and one even slot interleaved with the loop-last block) are unused
-// and array slots at those indices stay "invalid" — see cell.cpp init.
+// Layout: non-loop-last ops take EVEN values, loop-last ops take ODD values.
+// Each op-line below has its underlying value next to it. The implied
+// neighbour (value ± 1) is the unused slot for the opposite loop-last
+// polarity; `cell_name_sv[]` keeps "invalid" there and `cell.cpp`'s init
+// loop skips it. Don't renumber to a packed sequence — the bit-0 invariant
+// is what lets the round-trip through `hhds::Node_class::set_type` /
+// `get_type` work without a shift.
+//
+// Value ranges (each "..." is a non-loop-last slot whose +1 odd neighbour
+// is empty by construction):
+//   0  Invalid            -- the empty slot at value 1 is never used
+//   2  Sum                3 unused
+//   4  Mult               5 unused
+//   ...
+//  16  Not               17 unused
+//   ...
+//  36  Mux               37 unused
+//
+//  39  IO  ← FIRST LOOP-LAST OP. Note the jump from 36→39 (skips even 38
+//                        which would have to be a non-loop-last op).
+//  41  Memory   (loop_last)
+//  43  Flop     (loop_last)
+//  45  Latch    (loop_last)
+//  47  Fflop    (loop_last)
+//  49  Sub      (loop_last)
+//  50  Nconst             -- non-loop-last; sits next to Sub on purpose so
+//                            is_loop_first(Nconst||IO) is the obvious pair.
+//   ...
+//  56  AttrSet           57 reserved for Last_invalid sentinel
 enum class Ntype_op : uint8_t {
-  Invalid    = 0,  // Detect bugs/unset (not used anywhere)
+  Invalid    = 0,  // Detect bugs/unset (not used anywhere). Bit 0 == 0.
   Sum        = 2,
   Mult       = 4,
   Div        = 6,
@@ -49,7 +82,7 @@ enum class Ntype_op : uint8_t {
   LUT        = 34,  // LUT
   Mux        = 36,  // Multiplexor with many options
 
-  IO         = 39,  // Graph Input or Output  -- loop_last
+  IO         = 39,  // Graph Input or Output  -- loop_last (first odd slot)
 
   //------------------BEGIN PIPELINED (break LOOPS) -- all loop_last (odd)
   Memory     = 41,
@@ -60,19 +93,14 @@ enum class Ntype_op : uint8_t {
 
   Sub        = 49,  // Sub module instance
   //------------------END PIPELINED (break LOOPS)
-  Nconst     = 50,  // Constant
+  Nconst     = 50,  // Constant -- non-loop-last; paired with IO via is_loop_first.
 
-  // High Level Lgraph constructs
-
-  TupAdd     = 52,
-  TupGet     = 54,
-
+  // High-level construct kept for bitwidth's leftover-AttrSet cleanup pass.
+  // Tuple-related ops (TupAdd, TupGet) and AttrGet were dropped along with
+  // cprop's tuple_pass; CompileErr was dropped (no producer post-migration).
   AttrSet    = 56,
-  AttrGet    = 58,
 
-  CompileErr = 60,  // Indicate a compile error during a pass
-
-  Last_invalid = 61
+  Last_invalid = 57
 };
 
 // Encoding invariant: bit 0 == is_loop_last.
@@ -120,11 +148,7 @@ protected:
     a[static_cast<size_t>(Ntype_op::Fflop)]      = "fflop";
     a[static_cast<size_t>(Ntype_op::Sub)]        = "sub";
     a[static_cast<size_t>(Ntype_op::Nconst)]     = "const";
-    a[static_cast<size_t>(Ntype_op::TupAdd)]     = "tup_add";
-    a[static_cast<size_t>(Ntype_op::TupGet)]     = "tup_get";
     a[static_cast<size_t>(Ntype_op::AttrSet)]    = "attr_set";
-    a[static_cast<size_t>(Ntype_op::AttrGet)]    = "attr_get";
-    a[static_cast<size_t>(Ntype_op::CompileErr)] = "compile_err";
     return a;
   }();
 
@@ -137,12 +161,12 @@ protected:
   static _init _static_initializer;
 
   // NOTE: order of operands to maximize code gen when "name" is known (typical case)
-  inline static std::array<std::array<Port_ID, static_cast<std::size_t>(Ntype_op::Last_invalid)>, 256>    sink_name2pid;
-  inline static std::array<std::array<std::string, static_cast<std::size_t>(Ntype_op::Last_invalid)>, 11> sink_pid2name;
-  inline static std::array<bool, static_cast<std::size_t>(Ntype_op::Last_invalid)>                        ntype2single_input;
-  inline static absl::flat_hash_map<std::string, int>                                                     name2pid;
+  inline static std::array<std::array<hhds::Port_id, static_cast<std::size_t>(Ntype_op::Last_invalid)>, 256> sink_name2pid;
+  inline static std::array<std::array<std::string, static_cast<std::size_t>(Ntype_op::Last_invalid)>, 11>    sink_pid2name;
+  inline static std::array<bool, static_cast<std::size_t>(Ntype_op::Last_invalid)>                           ntype2single_input;
+  inline static absl::flat_hash_map<std::string, hhds::Port_id>                                              name2pid;
 
-  static constexpr std::string_view get_sink_name_slow(Ntype_op op, int pid);
+  static constexpr std::string_view get_sink_name_slow(Ntype_op op, hhds::Port_id pid);
 
 public:
   static inline constexpr bool is_loop_first(Ntype_op op) { return op == Ntype_op::Nconst || op == Ntype_op::IO; }
@@ -153,7 +177,7 @@ public:
 
   static inline constexpr bool is_multi_sink(Ntype_op op) {
     return op != Ntype_op::Mult && op != Ntype_op::And && op != Ntype_op::Or && op != Ntype_op::Xor && op != Ntype_op::Ror
-           && op != Ntype_op::Not && op != Ntype_op::CompileErr;
+           && op != Ntype_op::Not;
   }
 
   static inline constexpr bool is_pin_trackable(Ntype_op op) {
@@ -162,13 +186,11 @@ public:
   }
 
   static inline constexpr bool is_synthesizable(Ntype_op op) {
-    return op != Ntype_op::Sub && op != Ntype_op::TupAdd && op != Ntype_op::TupGet && op != Ntype_op::AttrSet
-           && op != Ntype_op::AttrGet && op != Ntype_op::CompileErr && op != Ntype_op::Invalid && op != Ntype_op::Last_invalid;
+    return op != Ntype_op::Sub && op != Ntype_op::AttrSet && op != Ntype_op::Invalid && op != Ntype_op::Last_invalid;
   }
 
   static inline constexpr bool is_unlimited_sink(Ntype_op op) {
-    return op == Ntype_op::IO || op == Ntype_op::LUT || op == Ntype_op::Sub || op == Ntype_op::Memory || op == Ntype_op::Mux
-           || op == Ntype_op::CompileErr;
+    return op == Ntype_op::IO || op == Ntype_op::LUT || op == Ntype_op::Sub || op == Ntype_op::Memory || op == Ntype_op::Mux;
   }
   static inline constexpr bool is_unlimited_driver(Ntype_op op) {
     return op == Ntype_op::Memory || op == Ntype_op::Sub || op == Ntype_op::IO;
@@ -182,11 +204,15 @@ public:
     return c[0] >= 'a' && c[0] <= 'z';
   }
 
-  static inline constexpr int get_sink_pid(Ntype_op op, std::string_view str) {
+  // Returns the hhds::Port_id for a LiveHD sink name on the given op, or
+  // livehd::Port_invalid when the name is not a valid sink for this op.
+  // The round-trip asserts (name → pid → name) stay enabled in debug builds
+  // for the recognised-name paths.
+  static inline constexpr hhds::Port_id get_sink_pid(Ntype_op op, std::string_view str) {
     auto c = str.front();
     // Common case speedup
     if (c >= 'a' && c <= 'f') {
-      int pid = c - 'a';
+      hhds::Port_id pid = static_cast<hhds::Port_id>(c - 'a');
       assert(sink_name2pid[str.front()][static_cast<std::size_t>(op)] == pid);
       assert(get_sink_name(op, pid) == str);
       return pid;
@@ -209,16 +235,18 @@ public:
 
     if (__builtin_expect(is_unlimited_sink(op) && str.size() > 1 && str.front() >= '0' && str.front() <= '9',
                          0)) {  // unlikely case
-      return str_tools::to_i(str);
+      return static_cast<hhds::Port_id>(str_tools::to_i(str));
     }
 
     auto pid = sink_name2pid[str.front()][static_cast<std::size_t>(op)];
-    assert(pid != Port_invalid);
+    if (pid == livehd::Port_invalid) {
+      return livehd::Port_invalid;
+    }
     assert(get_sink_name(op, pid) == str);
     return pid;
   }
 
-  static inline std::string get_sink_name(Ntype_op op, int pid) {
+  static inline std::string get_sink_name(Ntype_op op, hhds::Port_id pid) {
     if (pid > 10) {
       auto pid_index = pid % 11;  // wrap names around for multi inputs like memory cell
       auto name      = sink_pid2name[pid_index][static_cast<std::size_t>(op)];
@@ -233,18 +261,11 @@ public:
   }
 
   static bool                  has_sink(Ntype_op op, std::string_view str);
-  static inline constexpr bool has_sink(Ntype_op op, int pid) {
+  static inline constexpr bool has_sink(Ntype_op op, hhds::Port_id pid) {
     if (pid > 10) {
       return is_unlimited_sink(op);
     }
     return sink_pid2name[pid][static_cast<std::size_t>(op)] != "invalid";
-  }
-
-  static int get_driver_pid(Ntype_op op, std::string_view pin_name) {
-    if (likely(!is_multi_driver(op) || pin_name == "%")) {
-      return 0;
-    }
-    return str_tools::to_i(pin_name);
   }
 
   static inline constexpr std::string_view get_driver_name(Ntype_op op) {
@@ -253,7 +274,7 @@ public:
     return {"Y"};
   }
 
-  static inline constexpr bool has_driver(Ntype_op op, int pid) {
+  static inline constexpr bool has_driver(Ntype_op op, hhds::Port_id pid) {
     if (pid == 0) {
       return true;
     }

@@ -307,10 +307,8 @@ public:
   bool             is_type_sub() const { return get_type_op() == Ntype_op::Sub; }
   bool             is_type_synth() const { return Ntype::is_synthesizable(get_type_op()); }
   bool             is_type_const() const;
-  bool             is_type_attr() const;
   bool             is_type_flop() const;
   bool             is_type_register() const;  // Flop/Latch/Memory
-  bool             is_type_tup() const;
   bool             is_type_io() const { return nid == Hardcoded_input_nid || nid == Hardcoded_output_nid; }
   bool             is_type_loop_first() const;
   bool             is_type_loop_last() const;
@@ -340,7 +338,6 @@ public:
   void connect_driver(const Node_pin& spin) const { setup_driver_pin().connect_sink(spin); }
 
   bool is_sink_connected(std::string_view v) const;
-  bool is_driver_connected(std::string_view v) const;
 
   Node_pin_iterator out_connected_pins() const;
   Node_pin_iterator inp_connected_pins() const;

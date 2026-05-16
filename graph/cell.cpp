@@ -24,8 +24,8 @@ struct Livehd_attr_init {
     hhds::register_attr_tag<livehd::attrs::place_t>("livehd::attrs::place");
     hhds::register_attr_tag<livehd::attrs::loc_t>("livehd::attrs::loc");
     hhds::register_attr_tag<livehd::attrs::source_t>("livehd::attrs::source");
-    hhds::register_attr_tag<livehd::attrs::subid_t>("livehd::attrs::subid");
     hhds::register_attr_tag<livehd::attrs::const_value_t>("livehd::attrs::const_value");
+    hhds::register_attr_tag<livehd::attrs::pin_const_value_t>("livehd::attrs::pin_const_value");
     hhds::register_attr_tag<livehd::attrs::lut_t>("livehd::attrs::lut");
   }
 };
@@ -38,12 +38,12 @@ Ntype::_init::_init() {
   // Sparse iteration: Ntype_op values are no longer contiguous (bit 0 of
   // the underlying value is reserved for is_loop_last, see cell.hpp). Op
   // indices between valid ops behave as no-ops here — sink_*[op] slots
-  // stay Port_invalid / "invalid" and get_sink_name_slow returns
+  // stay livehd::Port_invalid / "invalid" and get_sink_name_slow returns
   // "invalid" for them, so the inner loop's `pin_name == "invalid"`
   // check skips them. Starting at 1 still skips Ntype_op::Invalid (== 0).
   for (uint8_t op = 1; op < static_cast<uint8_t>(Ntype_op::Last_invalid); ++op) {
     for (auto& e : sink_name2pid) {
-      e[op] = Port_invalid;
+      e[op] = livehd::Port_invalid;
     }
 
     for (auto& e : sink_pid2name) {
@@ -51,7 +51,7 @@ Ntype::_init::_init() {
     }
 
     int n_sinks = 0;
-    for (int pid = 0; pid < 12; ++pid) {
+    for (hhds::Port_id pid = 0; pid < 12; ++pid) {
       auto pin_name = Ntype::get_sink_name_slow(static_cast<Ntype_op>(op), pid);
       if (pin_name.empty() || pin_name == "invalid") {
         continue;
@@ -59,7 +59,7 @@ Ntype::_init::_init() {
 
       ++n_sinks;
 
-      assert(is_unlimited_sink(static_cast<Ntype_op>(op)) || pid > 10 || sink_name2pid[pin_name[0]][op] == Port_invalid
+      assert(is_unlimited_sink(static_cast<Ntype_op>(op)) || pid > 10 || sink_name2pid[pin_name[0]][op] == livehd::Port_invalid
              || sink_name2pid[pin_name[0]][op] == pid);  // No double assign
 
       sink_pid2name[pid][op] = pin_name;
@@ -88,33 +88,33 @@ Ntype::_init::_init() {
     // special sink case
     sink_name2pid['$'][static_cast<int>(Ntype_op::Sub)] = 0;
 
-    int pid;
+    hhds::Port_id pid;
     (void)pid;
     // Check that common case is fine
 
     pid = sink_name2pid['a'][op];
-    assert(pid == Port_invalid || pid == 0);
+    assert(pid == livehd::Port_invalid || pid == 0);
 
     pid = sink_name2pid['b'][op];
-    assert(pid == Port_invalid || pid == 1);
+    assert(pid == livehd::Port_invalid || pid == 1);
 
     pid = sink_name2pid['c'][op];
-    assert(pid == Port_invalid || pid == 2);
+    assert(pid == livehd::Port_invalid || pid == 2);
 
     pid = sink_name2pid['d'][op];
-    assert(pid == Port_invalid || pid == 3);
+    assert(pid == livehd::Port_invalid || pid == 3);
 
     pid = sink_name2pid['e'][op];
-    assert(pid == Port_invalid || pid == 4);
+    assert(pid == livehd::Port_invalid || pid == 4);
 
     pid = sink_name2pid['f'][op];
-    assert(pid == Port_invalid || pid == 5);
+    assert(pid == livehd::Port_invalid || pid == 5);
 
     pid = sink_name2pid['A'][op];
-    assert(pid == Port_invalid || pid == 0);
+    assert(pid == livehd::Port_invalid || pid == 0);
 
     pid = sink_name2pid['B'][op];
-    assert(pid == Port_invalid || pid == 1);
+    assert(pid == livehd::Port_invalid || pid == 1);
   }
 
   // cell_name_sv is sparse; "invalid" placeholders at gap indices must not
@@ -129,7 +129,7 @@ Ntype::_init::_init() {
   }
 }
 
-constexpr std::string_view Ntype::get_sink_name_slow(Ntype_op op, int pid) {
+constexpr std::string_view Ntype::get_sink_name_slow(Ntype_op op, hhds::Port_id pid) {
   switch (op) {
     case Ntype_op::Invalid: return "invalid"; break;
     case Ntype_op::Sum:
@@ -184,7 +184,6 @@ constexpr std::string_view Ntype::get_sink_name_slow(Ntype_op op, int pid) {
     case Ntype_op::Mux:  // unlimited case: 1,2,3,4,5.... // Y = (pid0 == true) ? pid2 : pid1
     case Ntype_op::LUT:  // unlimited case: 1,2,3,4,5....
     case Ntype_op::Sub:  // unlimited case: 1,2,3,4,5....
-    case Ntype_op::CompileErr:
       assert(is_unlimited_sink(op));
       switch (pid) {
         case 0: return "0";
@@ -266,32 +265,10 @@ constexpr std::string_view Ntype::get_sink_name_slow(Ntype_op op, int pid) {
         default: return "invalid";
       }
       break;
-    case Ntype_op::TupAdd:
-      switch (pid) {
-        case 0: return "parent";  // tuple name
-        case 4: return "value";
-        case 5: return "field";  // position of tuple field
-        default: return "invalid";
-      }
-      break;
-    case Ntype_op::TupGet:
-      switch (pid) {
-        case 0: return "parent";
-        case 5: return "field";  // SAME as AttrGet field to avoid rewire
-        default: return "invalid";
-      }
-      break;
     case Ntype_op::AttrSet:
       switch (pid) {
         case 0: return "parent";
         case 4: return "value";
-        case 5: return "field";
-        default: return "invalid";
-      }
-      break;
-    case Ntype_op::AttrGet:
-      switch (pid) {
-        case 0: return "parent";
         case 5: return "field";
         default: return "invalid";
       }

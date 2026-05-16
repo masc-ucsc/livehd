@@ -57,8 +57,6 @@ cc_library(
         "//inou/prp:inou_prp",
         "//inou/slang:inou_slang",
         "//inou/yosys:lgyosys",
-        "//lgext/common:lgcpp",
-        "//lgext/prplib",
         "//pass/bitwidth:pass_bitwidth",
         "//pass/common:pass",
         "//pass/cprop:pass_cprop",

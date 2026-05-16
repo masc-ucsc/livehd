@@ -20,6 +20,7 @@ cc_library(
     name = "graph",
     srcs = [
         "cell.cpp",
+        "const_pin.cpp",
         "graph_library_singleton.cpp",
     ],
     hdrs = [

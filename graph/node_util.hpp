@@ -18,10 +18,53 @@
 
 #include "attrs.hpp"
 #include "cell.hpp"
+#include "const.hpp"
 #include "hhds/attrs/name.hpp"
 #include "hhds/graph.hpp"
 
 namespace livehd::graph_util {
+
+// ---------------------------------------------------------------------------
+// Constant pins (HHDS Graph::CONST_NODE singleton, scheme-A encoded).
+// ---------------------------------------------------------------------------
+//
+// All LiveHD constants live as pins attached to CONST_NODE (nid 3). The
+// first 32 port_ids on CONST_NODE are reserved for small integers in the
+// range [-16, 15] (scheme A):
+//   pid 0..15  -> values 0..15
+//   pid 16..31 -> values -16..-1
+// Constants outside that range get fresh port_ids starting at 32, with the
+// serialized payload attached as `livehd::attrs::pin_const_value`. A
+// per-Graph reverse map (LiveHD-side, in const_pin.cpp) provides write-side
+// deduplication so the same Const value resolves to the same pin.
+
+inline constexpr hhds::Port_id Const_small_pid_count = 32;
+
+[[nodiscard]] constexpr bool is_small_const_int(int64_t v) { return v >= -16 && v <= 15; }
+
+[[nodiscard]] constexpr hhds::Port_id encode_small_const(int64_t v) {
+  return v >= 0 ? static_cast<hhds::Port_id>(v) : static_cast<hhds::Port_id>(v + 32);
+}
+
+[[nodiscard]] constexpr int64_t decode_small_const(hhds::Port_id pid) {
+  return pid < 16 ? static_cast<int64_t>(pid) : static_cast<int64_t>(pid) - 32;
+}
+
+[[nodiscard]] constexpr bool is_small_const_pid(hhds::Port_id pid) { return pid < Const_small_pid_count; }
+
+// Create-or-find the canonical const pin for `value`. Small ints in [-16, 15]
+// are pid-encoded directly on CONST_NODE (idempotent, no payload). Larger
+// values consult a per-Graph reverse map and reuse an existing pin if the
+// same serialized Const is already materialised; otherwise allocate a fresh
+// pid (>= 32) and attach the serialized payload.
+[[nodiscard]] hhds::Pin_class create_const(hhds::Graph& g, const Const& value);
+
+// Decodes the Const a const pin represents. Handles both new CONST_NODE-pin
+// form (pid encoding for small ints, `pin_const_value` attribute otherwise)
+// and the legacy `Ntype_op::Nconst` regular-node form (with the per-node
+// `const_value` attribute) that the lgraph wrapper still produces.
+[[nodiscard]] Const hydrate_const(const hhds::Pin_class& pin);
+[[nodiscard]] Const hydrate_const(const hhds::Node_class& node);
 
 // HHDS stores the user-supplied type in NodeEntry::type with the low bit
 // reserved for HHDS's own `is_loop_last` semantics. The Ntype_op encoding
@@ -109,12 +152,6 @@ namespace livehd::graph_util {
 
 [[nodiscard]] inline bool has_name(const hhds::Node_class& node) { return node.attr(hhds::attrs::name).has(); }
 
-// Sub-graph reference id (for Ntype_op::Sub nodes).
-[[nodiscard]] inline uint32_t subid_of(const hhds::Node_class& node) {
-  auto a = node.attr(livehd::attrs::subid);
-  return a.has() ? a.get() : uint32_t{0};
-}
-
 // Serialized const value (for Ntype_op::Nconst nodes). Empty if absent.
 [[nodiscard]] inline std::string_view const_value_of(const hhds::Node_class& node) {
   auto a = node.attr(livehd::attrs::const_value);
@@ -136,6 +173,16 @@ namespace livehd::graph_util {
   }
   auto master = pin.get_master_node();
   return master.get_debug_nid() == hhds::Graph::OUTPUT_NODE;
+}
+
+// True iff `node` is one of HHDS's singleton built-ins (INPUT_NODE,
+// OUTPUT_NODE, CONST_NODE). These have nid < 4 and cannot be deleted; passes
+// that walk-and-delete must skip them.
+[[nodiscard]] inline bool is_builtin_node(const hhds::Node_class& node) {
+  if (node.is_invalid()) {
+    return false;
+  }
+  return node.get_debug_nid() < (static_cast<hhds::Nid>(4) << 2);
 }
 
 [[nodiscard]] inline bool is_const_pin(const hhds::Pin_class& pin) {
@@ -274,12 +321,11 @@ inline void set_pin_name(const hhds::Pin_class& pin, std::string_view name) {
     return node.get_sink_pin(name);
   }
   auto pid = Ntype::get_sink_pid(op, name);
-  if (pid < 0) {
+  if (pid == livehd::Port_invalid) {
     return {};
   }
-  auto target = static_cast<hhds::Port_id>(pid);
   for (const auto& e : node.inp_edges()) {
-    if (e.sink.get_port_id() == target) {
+    if (e.sink.get_port_id() == pid) {
       return e.sink;
     }
   }
@@ -332,17 +378,6 @@ inline void set_type_const_serialized(const hhds::Node_class& node, std::string_
   return node;
 }
 
-// Create a new Nconst node in `graph` carrying the given serialized Const
-// value, and return its port-0 driver pin (matches the LiveHD wrapper
-// behaviour: `Lgraph::create_node_const(C).setup_driver_pin()`).
-[[nodiscard]] inline hhds::Pin_class create_const_node_serialized(hhds::Graph& graph, std::string_view serialized) {
-  auto node = create_typed_node(graph, Ntype_op::Nconst);
-  if (!serialized.empty()) {
-    node.attr(livehd::attrs::const_value).set(std::string{serialized});
-  }
-  return node.create_driver_pin(0);
-}
-
 // Create-if-missing sink pin lookup by LiveHD-style name. For Sub nodes the
 // name path goes through HHDS's create_sink_pin(name) directly; for other ops
 // we translate name→port_id via Ntype and call create_sink_pin(port_id).
@@ -352,10 +387,10 @@ inline void set_type_const_serialized(const hhds::Node_class& node, std::string_
     return node.create_sink_pin(name);
   }
   auto pid = Ntype::get_sink_pid(op, name);
-  if (pid < 0) {
+  if (pid == livehd::Port_invalid) {
     return {};
   }
-  return node.create_sink_pin(static_cast<hhds::Port_id>(pid));
+  return node.create_sink_pin(pid);
 }
 
 // Create a new node of `op` in `graph` and stamp port-0 driver bits.
@@ -373,13 +408,6 @@ inline void set_type_const_serialized(const hhds::Node_class& node, std::string_
 // `Node::create(op)` (the new node belongs to the same Lgraph the origin is on).
 [[nodiscard]] inline hhds::Node_class create_node_on(const hhds::Node_class& origin, Ntype_op op) {
   return create_typed_node(*origin.get_graph(), op);
-}
-
-// Create a new Nconst node on the same graph as `origin` carrying the given
-// serialized Const, returning its port-0 driver pin. Mirrors
-// `Node::create_const(value).setup_driver_pin()` in the legacy API.
-[[nodiscard]] inline hhds::Pin_class create_const_pin_on(const hhds::Node_class& origin, std::string_view serialized) {
-  return create_const_node_serialized(*origin.get_graph(), serialized);
 }
 
 // Per-pin offset (used by Get_mask / Set_mask / Sext positional ops).
@@ -425,10 +453,10 @@ inline void set_loc1(const hhds::Node_class& node, uint64_t line) {
     target = pin.get_port_id();
   } else {
     auto pid = Ntype::get_sink_pid(op, name);
-    if (pid < 0) {
+    if (pid == livehd::Port_invalid) {
       return result;
     }
-    target = static_cast<hhds::Port_id>(pid);
+    target = pid;
   }
   for (const auto& e : node.inp_edges()) {
     if (e.sink.get_port_id() == target) {

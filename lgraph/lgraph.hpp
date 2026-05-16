@@ -253,24 +253,6 @@ public:
     hnode.set_type(static_cast<hhds::Type>(static_cast<uint16_t>(op)));
   }
 
-  // HHDS Phase G3 (shadow write): mirror a sub-graph id assignment as a
-  // node-level HHDS attribute. Threaded into Node::set_type_sub and
-  // Lgraph::create_node_sub paths. No-op on shadow miss.
-  void mirror_set_subid_hhds(Index_id nid, Lg_type_id sub_id) {
-    if (!hhds_graph_) {
-      return;
-    }
-    auto it = idx_to_hhds_nid_.find(nid);
-    if (it == idx_to_hhds_nid_.end()) {
-      return;
-    }
-    auto hnode = hhds_graph_->get_node(it->second);
-    if (!hnode.is_valid()) {
-      return;
-    }
-    hnode.attr(livehd::attrs::subid).set(sub_id.value);
-  }
-
   // HHDS Phase G3 (shadow write): mirror the serialized Const value used by
   // an Nconst cell. Threaded into Node::set_type_const and
   // Lgraph::create_node_const paths. Stores Const::serialize() result on the

@@ -117,49 +117,34 @@ public:
     }
     return count;
   }
-  std::size_t          fold_candidate_count() const override { return scan_fold_candidates().fold_candidate_nodes; }
-  std::vector<Node_id> list_nodes() const override {
-    std::vector<Node_id> nodes;
-    if (lg == nullptr) {
-      return nodes;
-    }
+  std::size_t fold_candidate_count() const override { return scan_fold_candidates().fold_candidate_nodes; }
 
-    nodes.reserve(node_count());
-    for (const auto& node : lg->fast()) {
-      nodes.emplace_back(static_cast<Node_id>(node.get_nid()));
+  // Streams every node through `fn` using `lg->fast()` directly — no
+  // intermediate vector of all-nodes is built. The Node_id passed to the
+  // callback is the per-class node index (Compact_class::nid), so it can
+  // be round-tripped back to a Node via `get_node(node_id)`.
+  void for_each_node(const Node_visitor& fn) const override {
+    if (lg == nullptr) {
+      return;
     }
-    return nodes;
+    for (const auto& node : lg->fast()) {
+      fn(encode(node));
+    }
   }
-  std::string_view op_name(Node_id node_id) const override {
+
+  void for_each_input(Node_id node_id, const Node_visitor& fn) const override {
     const auto node = get_node(node_id);
     if (node.is_invalid()) {
-      return "invalid";
+      return;
     }
-
-    switch (node.get_type_op()) {
-      case Ntype_op::Nconst: return "const";
-      case Ntype_op::Sum: return "sum";
-      case Ntype_op::Mult: return "mult";
-      case Ntype_op::Div: return "div";
-      case Ntype_op::And: return "and";
-      case Ntype_op::Or: return "or";
-      case Ntype_op::Xor: return "xor";
-      case Ntype_op::SHL: return "shl";
-      case Ntype_op::SRA: return "sra";
-      default: return "other";
+    for (const auto& inp : node.inp_edges()) {
+      fn(encode(inp.driver.get_node()));
     }
   }
-  std::vector<Node_id> inputs(Node_id node_id) const override {
-    std::vector<Node_id> inps;
-    const auto           node = get_node(node_id);
-    if (node.is_invalid()) {
-      return inps;
-    }
 
-    for (const auto& inp : node.inp_edges()) {
-      inps.emplace_back(static_cast<Node_id>(inp.driver.get_node().get_nid()));
-    }
-    return inps;
+  bool is_sum_op(Node_id node_id) const override {
+    const auto node = get_node(node_id);
+    return !node.is_invalid() && node.get_type_op() == Ntype_op::Sum;
   }
   bool is_const(Node_id node_id) const override {
     const auto node = get_node(node_id);
@@ -1028,9 +1013,6 @@ public:
       if (node.is_type_io()) {
         continue;  // never delete graph input / output nodes
       }
-      if (node.get_type_op() == Ntype_op::CompileErr) {
-        continue;  // preserve error markers
-      }
 
       bool has_consumers = false;
       for (const auto& out : node.out_edges()) {
@@ -1060,6 +1042,12 @@ public:
   }
 
 private:
+  // Node_id encoding uses the Compact_class handle (the class-index style
+  // accessor) rather than calling Node::get_nid() directly. The underlying
+  // value is the same Index_id, but routing through Compact_class keeps the
+  // adapter from depending on the legacy nid getter.
+  static Node_id encode(const Node& node) { return static_cast<Node_id>(node.get_compact_class().get_nid()); }
+
   Node get_node(Node_id node_id) const {
     if (lg == nullptr) {
       return {};
@@ -1070,7 +1058,7 @@ private:
       return {};
     }
 
-    return Node(lg, Hierarchy::non_hierarchical(), nid);
+    return {lg, Node::Compact_class{nid}};
   }
 
   static bool is_foldable_op(Ntype_op op) {

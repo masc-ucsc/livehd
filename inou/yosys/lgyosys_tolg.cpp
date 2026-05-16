@@ -34,7 +34,7 @@
 using livehd::Hhds_graph_library;
 using livehd::graph_util::bits_of;
 using livehd::graph_util::const_value_of;
-using livehd::graph_util::create_const_node_serialized;
+using livehd::graph_util::create_const;
 using livehd::graph_util::create_typed_node;
 using livehd::graph_util::debug_name;
 using livehd::graph_util::has_name;
@@ -225,12 +225,12 @@ static void look_for_wire(hhds::Graph* g, const RTLIL::Wire* wire) {
 static hhds::Pin_class resolve_constant(hhds::Graph* g, const std::vector<RTLIL::State>& data, bool is_signed) {
   RTLIL::Const v(data);
   if (v.is_fully_zero()) {
-    return create_const_node_serialized(*g, Dlop::create_integer(0)->serialize());
+    return create_const(*g, *Dlop::create_integer(0));
   }
 
   if (v.is_fully_def() && data.size() < 30) {
     auto x = v.as_int(is_signed);
-    return create_const_node_serialized(*g, Dlop::create_integer(x)->serialize());
+    return create_const(*g, *Dlop::create_integer(x));
   }
 
   std::string val;
@@ -250,7 +250,7 @@ static hhds::Pin_class resolve_constant(hhds::Graph* g, const std::vector<RTLIL:
   }
 
   auto lc = Dlop::from_pyrope(val);
-  return create_const_node_serialized(*g, lc->serialize());
+  return create_const(*g, *lc);
 }
 
 class Pick_ID {
@@ -299,7 +299,7 @@ static hhds::Pin_class create_pick_operator(const hhds::Pin_class& wide_dpin, in
     if (offset) {
       auto shr_node = create_typed_node(*g, Ntype_op::SRA, width);
       setup_sink_by_name(shr_node, "a").connect_driver(wide_dpin);
-      setup_sink_by_name(shr_node, "b").connect_driver(create_const_node_serialized(*g, Dlop::create_integer(offset)->serialize()));
+      setup_sink_by_name(shr_node, "b").connect_driver(create_const(*g, *Dlop::create_integer(offset)));
 
       setup_sink_by_name(sext_node, "a").connect_driver(shr_node.create_driver_pin(0));
     } else {
@@ -307,7 +307,7 @@ static hhds::Pin_class create_pick_operator(const hhds::Pin_class& wide_dpin, in
     }
 
     setup_sink_by_name(sext_node, "b")
-        .connect_driver(create_const_node_serialized(*g, Dlop::create_integer(width)->serialize()));
+        .connect_driver(create_const(*g, *Dlop::create_integer(width)));
     dpin = sext_node.create_driver_pin(0);
   } else {
     // Pick(a,width,offset, false): x = a>>offset; y = x & ((1<<width)-1)
@@ -316,7 +316,7 @@ static hhds::Pin_class create_pick_operator(const hhds::Pin_class& wide_dpin, in
     if (offset) {
       auto shr_node = create_typed_node(*g, Ntype_op::SRA, width);
       setup_sink_by_name(shr_node, "a").connect_driver(wide_dpin);
-      setup_sink_by_name(shr_node, "b").connect_driver(create_const_node_serialized(*g, Dlop::create_integer(offset)->serialize()));
+      setup_sink_by_name(shr_node, "b").connect_driver(create_const(*g, *Dlop::create_integer(offset)));
 
       and_node.create_driver_pin(0);  // ensure dpin exists
       shr_node.create_driver_pin(0).connect_sink(and_node.create_sink_pin(0));
@@ -324,7 +324,7 @@ static hhds::Pin_class create_pick_operator(const hhds::Pin_class& wide_dpin, in
       wide_dpin.connect_sink(and_node.create_sink_pin(0));
     }
 
-    create_const_node_serialized(*g, Dlop::get_mask_value(width)->serialize()).connect_sink(and_node.create_sink_pin(0));
+    create_const(*g, *Dlop::get_mask_value(width)).connect_sink(and_node.create_sink_pin(0));
     dpin = and_node.create_driver_pin(0);
   }
 
@@ -363,7 +363,7 @@ static hhds::Pin_class get_edge_pin(hhds::Graph* g, const RTLIL::Wire* wire, boo
     auto tposs_node = create_typed_node(*g, Ntype_op::Get_mask, bits_of(dpin) + 1);
     setup_sink_by_name(tposs_node, "a").connect_driver(dpin);
     setup_sink_by_name(tposs_node, "mask")
-        .connect_driver(create_const_node_serialized(*g, Dlop::create_integer(-1)->serialize()));
+        .connect_driver(create_const(*g, *Dlop::create_integer(-1)));
 
     return tposs_node.create_driver_pin(0);
   }
@@ -416,7 +416,7 @@ static void append_to_or_node(hhds::Graph* g, const hhds::Node_class& or_node, c
     auto shl_node = create_typed_node(*g, Ntype_op::SHL, or_offset + bits_of(dpin));
     setup_sink_by_name(shl_node, "a").connect_driver(dpin);
     setup_sink_by_name(shl_node, "B")
-        .connect_driver(create_const_node_serialized(*g, Dlop::create_integer(or_offset)->serialize()));
+        .connect_driver(create_const(*g, *Dlop::create_integer(or_offset)));
 
     set_bits(tposs_node.create_driver_pin(0), or_offset + bits_of(dpin) + 1);
     setup_sink_by_name(tposs_node, "a").connect_driver(shl_node.create_driver_pin(0));
@@ -425,7 +425,7 @@ static void append_to_or_node(hhds::Graph* g, const hhds::Node_class& or_node, c
     setup_sink_by_name(tposs_node, "a").connect_driver(dpin);
   }
 
-  setup_sink_by_name(tposs_node, "mask").connect_driver(create_const_node_serialized(*g, Dlop::create_integer(-1)->serialize()));
+  setup_sink_by_name(tposs_node, "mask").connect_driver(create_const(*g, *Dlop::create_integer(-1)));
   tposs_node.create_driver_pin(0).connect_sink(or_node.create_sink_pin(0));
 }
 
@@ -464,7 +464,7 @@ static hhds::Pin_class create_pick_concat_dpin(hhds::Graph* g, const RTLIL::SigS
           auto tposs_node = create_typed_node(*g, Ntype_op::Get_mask, bits_of(inp_pins[i]) + 1);
           setup_sink_by_name(tposs_node, "a").connect_driver(inp_pins[i]);
           setup_sink_by_name(tposs_node, "mask")
-              .connect_driver(create_const_node_serialized(*g, Dlop::create_integer(-1)->serialize()));
+              .connect_driver(create_const(*g, *Dlop::create_integer(-1)));
 
           inp_pin = tposs_node.create_driver_pin(0);
         }
@@ -481,7 +481,7 @@ static hhds::Pin_class create_pick_concat_dpin(hhds::Graph* g, const RTLIL::SigS
   }
 
   if (dpin.is_invalid()) {
-    return create_const_node_serialized(*g, Dlop::create_integer(0)->serialize());
+    return create_const(*g, *Dlop::create_integer(0));
   }
 
   return dpin;
@@ -491,10 +491,10 @@ static hhds::Pin_class get_dpin(hhds::Graph* g, const RTLIL::Cell* cell, const R
   if (cell->hasParam(name)) {
     const RTLIL::Const& v = cell->getParam(name);
     if (v.is_fully_def() && v.size() < 30) {
-      return create_const_node_serialized(*g, Dlop::create_integer(v.as_int())->serialize());
+      return create_const(*g, *Dlop::create_integer(v.as_int()));
     }
     auto v_str = absl::StrCat("0b", v.as_string());
-    return create_const_node_serialized(*g, Dlop::from_pyrope(v_str)->serialize());
+    return create_const(*g, *Dlop::from_pyrope(v_str));
   }
   bool is_signed = true;
   if (name == ID::A && cell->hasParam(ID::A_SIGNED)) {
@@ -504,7 +504,7 @@ static hhds::Pin_class get_dpin(hhds::Graph* g, const RTLIL::Cell* cell, const R
   }
 
   if (!cell->hasPort(name)) {
-    return create_const_node_serialized(*g, Dlop::from_pyrope("0b?")->serialize());
+    return create_const(*g, *Dlop::from_pyrope("0b?"));
   }
 
   return create_pick_concat_dpin(g, cell->getPort(name), is_signed);
@@ -546,7 +546,7 @@ static hhds::Pin_class get_unsigned_dpin(hhds::Graph* g, const RTLIL::Cell* cell
     set_bits(a_tposs.create_driver_pin(0), bits_of(dpin) + 1);
   }
   setup_sink_by_name(a_tposs, "a").connect_driver(dpin);
-  setup_sink_by_name(a_tposs, "mask").connect_driver(create_const_node_serialized(*g, Dlop::create_integer(-1)->serialize()));
+  setup_sink_by_name(a_tposs, "mask").connect_driver(create_const(*g, *Dlop::create_integer(-1)));
 
   return a_tposs.create_driver_pin(0);
 }
@@ -794,7 +794,6 @@ static void process_cell_drivers_intialization(RTLIL::Module* mod, hhds::Graph* 
       if (sub_gio && type_op_of(node) != Ntype_op::Sub) {
         set_type_op(node, Ntype_op::Sub);
         node.set_subnode(sub_gio);
-        node.attr(livehd::attrs::subid).set(sub_gio->get_gid());
         std::string inst_name{cell->name.str()};
         if (!inst_name.empty()) {
           node.attr(hhds::attrs::name).set(inst_name.substr(1));
@@ -1226,14 +1225,14 @@ static void process_assigns(RTLIL::Module* mod, hhds::Graph* g) {
               if (from_in_rchunk > 0) {
                 auto sra_node = create_typed_node(*g, Ntype_op::SRA, bits_needed);
                 setup_sink_by_name(sra_node, "a").connect_driver(dpin);
-                auto c_pin = create_const_node_serialized(*g, Dlop::create_integer(from_in_rchunk)->serialize());
+                auto c_pin = create_const(*g, *Dlop::create_integer(from_in_rchunk));
                 setup_sink_by_name(sra_node, "b").connect_driver(c_pin);
                 dpin = sra_node.create_driver_pin(0);
               }
               if (to_in_rchunk < rchunk.width) {
                 auto and_node = create_typed_node(*g, Ntype_op::And, bits_needed);
                 and_node.create_sink_pin(0).connect_driver(dpin);
-                auto c_pin = create_const_node_serialized(*g, Dlop::get_mask_value(bits_needed)->serialize());
+                auto c_pin = create_const(*g, *Dlop::get_mask_value(bits_needed));
                 and_node.create_sink_pin(0).connect_driver(c_pin);
                 dpin = and_node.create_driver_pin(0);
               }
@@ -1303,7 +1302,7 @@ static void connect_partial_dpin(hhds::Graph* g, hhds::Node_class& or_node, uint
     append_to_or_node(g, or_node, current_dpin, or_offset);
   } else if (bits_of(current_dpin) > nbits) {
     auto and_node = create_typed_node(*g, Ntype_op::And, nbits);
-    create_const_node_serialized(*g, Dlop::get_mask_value(nbits)->serialize()).connect_sink(and_node.create_sink_pin(0));
+    create_const(*g, *Dlop::get_mask_value(nbits)).connect_sink(and_node.create_sink_pin(0));
     and_node.create_sink_pin(0).connect_driver(current_dpin);
 
     append_to_or_node(g, or_node, and_node.create_driver_pin(0), or_offset);
@@ -1318,7 +1317,7 @@ static void connect_partial_dpin(hhds::Graph* g, hhds::Node_class& or_node, uint
     mask = mask.append(n_x, '?');
     mask = mask.append(n_z, '0');
 
-    create_const_node_serialized(*g, Dlop::from_pyrope(mask)->serialize()).connect_sink(local_or_node.create_sink_pin(0));
+    create_const(*g, *Dlop::from_pyrope(mask)).connect_sink(local_or_node.create_sink_pin(0));
     local_or_node.create_sink_pin(0).connect_driver(current_dpin);
 
     append_to_or_node(g, or_node, local_or_node.create_driver_pin(0), or_offset);
@@ -1435,26 +1434,26 @@ static void process_partially_assigned_self_chains(hhds::Graph* g) {
         auto and_node = create_typed_node(*g, Ntype_op::And, wire->width);
 
         and_node.create_sink_pin(0).connect_driver(pre_or_node.create_driver_pin(0));
-        create_const_node_serialized(*g, rd_mask.serialize()).connect_sink(and_node.create_sink_pin(0));
+        create_const(*g, rd_mask).connect_sink(and_node.create_sink_pin(0));
 
         auto tposs_node = create_typed_node(*g, Ntype_op::Get_mask, wire->width + 1);
         setup_sink_by_name(tposs_node, "a").connect_driver(and_node.create_driver_pin(0));
         setup_sink_by_name(tposs_node, "mask")
-            .connect_driver(create_const_node_serialized(*g, Dlop::create_integer(-1)->serialize()));
+            .connect_driver(create_const(*g, *Dlop::create_integer(-1)));
 
         I(shift);
         if (shift < 0) {
           auto sra_node = create_typed_node(*g, Ntype_op::SRA, wire->width);
           setup_sink_by_name(sra_node, "a").connect_driver(tposs_node.create_driver_pin(0));
           setup_sink_by_name(sra_node, "b")
-              .connect_driver(create_const_node_serialized(*g, Dlop::create_integer(-shift)->serialize()));
+              .connect_driver(create_const(*g, *Dlop::create_integer(-shift)));
 
           master_or_node.create_sink_pin(0).connect_driver(sra_node.create_driver_pin(0));
         } else {
           auto shl_node = create_typed_node(*g, Ntype_op::SHL, wire->width);
           setup_sink_by_name(shl_node, "a").connect_driver(tposs_node.create_driver_pin(0));
           setup_sink_by_name(shl_node, "B")
-              .connect_driver(create_const_node_serialized(*g, Dlop::create_integer(shift)->serialize()));
+              .connect_driver(create_const(*g, *Dlop::create_integer(shift)));
 
           master_or_node.create_sink_pin(0).connect_driver(shl_node.create_driver_pin(0));
         }
@@ -1572,7 +1571,7 @@ static void process_cells(RTLIL::Module* mod, hhds::Graph* g) {
           set_bits(exit_node.create_driver_pin(0), y_bits);
           setup_sink_by_name(exit_node, "a").connect_driver(and_node.create_driver_pin(0));
           setup_sink_by_name(exit_node, "mask")
-              .connect_driver(create_const_node_serialized(*g, Dlop::create_integer(-1)->serialize()));
+              .connect_driver(create_const(*g, *Dlop::create_integer(-1)));
         }
 
         auto ror_node = create_typed_node(*g, Ntype_op::Ror, 1);
@@ -1595,7 +1594,7 @@ static void process_cells(RTLIL::Module* mod, hhds::Graph* g) {
 
           setup_sink_by_name(sra_node, "a").connect_driver(a_dpin);
           setup_sink_by_name(sra_node, "b")
-              .connect_driver(create_const_node_serialized(*g, Dlop::create_integer(a_bits - 1)->serialize()));
+              .connect_driver(create_const(*g, *Dlop::create_integer(a_bits - 1)));
 
           and_node.create_sink_pin(0).connect_driver(sra_node.create_driver_pin(0));
         } else {
@@ -1627,7 +1626,7 @@ static void process_cells(RTLIL::Module* mod, hhds::Graph* g) {
         set_type_op(exit_node, Ntype_op::Get_mask);
         setup_sink_by_name(exit_node, "a").connect_driver(and_node.create_driver_pin(0));
         setup_sink_by_name(exit_node, "mask")
-            .connect_driver(create_const_node_serialized(*g, Dlop::create_integer(-1)->serialize()));
+            .connect_driver(create_const(*g, *Dlop::create_integer(-1)));
       }
 
       if (a_bits == 1) {
@@ -1664,7 +1663,7 @@ static void process_cells(RTLIL::Module* mod, hhds::Graph* g) {
         set_type_op(exit_node, Ntype_op::Get_mask);
         setup_sink_by_name(exit_node, "a").connect_driver(not_node.create_driver_pin(0));
         setup_sink_by_name(exit_node, "mask")
-            .connect_driver(create_const_node_serialized(*g, Dlop::create_integer(-1)->serialize()));
+            .connect_driver(create_const(*g, *Dlop::create_integer(-1)));
       }
 
       connect_all_inputs(entry_node.create_sink_pin(0), cell);
@@ -1701,7 +1700,7 @@ static void process_cells(RTLIL::Module* mod, hhds::Graph* g) {
         set_bits(exit_node.create_driver_pin(0), y_bits);
         setup_sink_by_name(exit_node, "a").connect_driver(ror_node.create_driver_pin(0));
         setup_sink_by_name(exit_node, "mask")
-            .connect_driver(create_const_node_serialized(*g, Dlop::create_integer(-1)->serialize()));
+            .connect_driver(create_const(*g, *Dlop::create_integer(-1)));
       }
       connect_all_inputs(entry_pin, cell);
     } else if (std::strncmp(cell->type.c_str(), "$xor", 4) == 0) {
@@ -1742,7 +1741,7 @@ static void process_cells(RTLIL::Module* mod, hhds::Graph* g) {
           set_bits(exit_node.create_driver_pin(0), 1);
           setup_sink_by_name(exit_node, "a").connect_driver(and_node.create_driver_pin(0));
           setup_sink_by_name(exit_node, "mask")
-              .connect_driver(create_const_node_serialized(*g, Dlop::create_integer(-1)->serialize()));
+              .connect_driver(create_const(*g, *Dlop::create_integer(-1)));
         }
 
         auto xor_node = create_typed_node(*g, Ntype_op::Xor, 1);
@@ -1752,13 +1751,13 @@ static void process_cells(RTLIL::Module* mod, hhds::Graph* g) {
           auto sra_node = create_typed_node(*g, Ntype_op::SRA, 1);
           setup_sink_by_name(sra_node, "a").connect_driver(a_dpin);
           setup_sink_by_name(sra_node, "b")
-              .connect_driver(create_const_node_serialized(*g, Dlop::create_integer(i)->serialize()));
+              .connect_driver(create_const(*g, *Dlop::create_integer(i)));
 
           xor_node.create_sink_pin(0).connect_driver(sra_node.create_driver_pin(0));
         }
 
         and_node.create_sink_pin(0).connect_driver(xor_node.create_driver_pin(0));
-        and_node.create_sink_pin(0).connect_driver(create_const_node_serialized(*g, Dlop::create_integer(1)->serialize()));
+        and_node.create_sink_pin(0).connect_driver(create_const(*g, *Dlop::create_integer(1)));
       }
     } else if (std::strncmp(cell->type.c_str(), "$xnor", 5) == 0) {
       auto s = get_output_size(cell);
@@ -1794,11 +1793,11 @@ static void process_cells(RTLIL::Module* mod, hhds::Graph* g) {
           set_bits(exit_node.create_driver_pin(0), 1);
           setup_sink_by_name(exit_node, "a").connect_driver(not_node.create_driver_pin(0));
           setup_sink_by_name(exit_node, "mask")
-              .connect_driver(create_const_node_serialized(*g, Dlop::create_integer(-1)->serialize()));
+              .connect_driver(create_const(*g, *Dlop::create_integer(-1)));
         }
 
         auto and_node = create_typed_node(*g, Ntype_op::And, 1);
-        and_node.create_sink_pin(0).connect_driver(create_const_node_serialized(*g, Dlop::create_integer(1)->serialize()));
+        and_node.create_sink_pin(0).connect_driver(create_const(*g, *Dlop::create_integer(1)));
 
         auto xor_node = create_typed_node(*g, Ntype_op::Xor, 1);
         xor_node.create_sink_pin(0).connect_driver(a_dpin);
@@ -1807,7 +1806,7 @@ static void process_cells(RTLIL::Module* mod, hhds::Graph* g) {
           auto sra_node = create_typed_node(*g, Ntype_op::SRA, 1);
           setup_sink_by_name(sra_node, "a").connect_driver(a_dpin);
           setup_sink_by_name(sra_node, "b")
-              .connect_driver(create_const_node_serialized(*g, Dlop::create_integer(i)->serialize()));
+              .connect_driver(create_const(*g, *Dlop::create_integer(i)));
 
           xor_node.create_sink_pin(0).connect_driver(sra_node.create_driver_pin(0));
         }
@@ -1839,7 +1838,7 @@ static void process_cells(RTLIL::Module* mod, hhds::Graph* g) {
 
       if (cell->hasParam(ID::CLK_POLARITY) && !cell->getParam(ID::CLK_POLARITY).as_bool()) {
         setup_sink_by_name(exit_node, "posclk")
-            .connect_driver(create_const_node_serialized(*g, Dlop::create_integer(0)->serialize()));
+            .connect_driver(create_const(*g, *Dlop::create_integer(0)));
       }
 
       if (cell->hasParam(ID::CLR)) {
@@ -1861,10 +1860,10 @@ static void process_cells(RTLIL::Module* mod, hhds::Graph* g) {
         if (cell->hasParam(ID::SRST_POLARITY)) {
           if (cell->getParam(ID::SRST_POLARITY).as_bool()) {
             setup_sink_by_name(exit_node, "negreset")
-                .connect_driver(create_const_node_serialized(*g, Dlop::create_integer(0)->serialize()));
+                .connect_driver(create_const(*g, *Dlop::create_integer(0)));
           } else {
             setup_sink_by_name(exit_node, "negreset")
-                .connect_driver(create_const_node_serialized(*g, Dlop::create_integer(1)->serialize()));
+                .connect_driver(create_const(*g, *Dlop::create_integer(1)));
           }
         }
 
@@ -1880,10 +1879,10 @@ static void process_cells(RTLIL::Module* mod, hhds::Graph* g) {
         if (cell->hasParam(ID::ARST_POLARITY)) {
           if (cell->getParam(ID::ARST_POLARITY).as_bool()) {
             setup_sink_by_name(exit_node, "negreset")
-                .connect_driver(create_const_node_serialized(*g, Dlop::create_integer(0)->serialize()));
+                .connect_driver(create_const(*g, *Dlop::create_integer(0)));
           } else {
             setup_sink_by_name(exit_node, "negreset")
-                .connect_driver(create_const_node_serialized(*g, Dlop::create_integer(1)->serialize()));
+                .connect_driver(create_const(*g, *Dlop::create_integer(1)));
           }
         }
 
@@ -1899,10 +1898,10 @@ static void process_cells(RTLIL::Module* mod, hhds::Graph* g) {
         if (cell->hasParam(ID::ALOAD_POLARITY)) {
           if (cell->getParam(ID::ALOAD_POLARITY).as_bool()) {
             setup_sink_by_name(exit_node, "negreset")
-                .connect_driver(create_const_node_serialized(*g, Dlop::create_integer(0)->serialize()));
+                .connect_driver(create_const(*g, *Dlop::create_integer(0)));
           } else {
             setup_sink_by_name(exit_node, "negreset")
-                .connect_driver(create_const_node_serialized(*g, Dlop::create_integer(1)->serialize()));
+                .connect_driver(create_const(*g, *Dlop::create_integer(1)));
           }
         }
 
@@ -1928,7 +1927,7 @@ static void process_cells(RTLIL::Module* mod, hhds::Graph* g) {
       if (std::strncmp(cell->type.c_str(), "$adff", 5) == 0 || std::strncmp(cell->type.c_str(), "$adffe", 6) == 0
           || std::strncmp(cell->type.c_str(), "$adffsr", 7) == 0 || std::strncmp(cell->type.c_str(), "$aldff", 6) == 0) {
         setup_sink_by_name(exit_node, "async")
-            .connect_driver(create_const_node_serialized(*g, Dlop::create_integer(1)->serialize()));
+            .connect_driver(create_const(*g, *Dlop::create_integer(1)));
       }
 
       setup_sink_by_name(exit_node, "clock_pin").connect_driver(get_dpin(g, cell, ID::CLK));
@@ -1940,7 +1939,7 @@ static void process_cells(RTLIL::Module* mod, hhds::Graph* g) {
 
       if (cell->hasParam(ID::EN_POLARITY) && !cell->getParam(ID::EN_POLARITY).as_bool()) {
         setup_sink_by_name(exit_node, "posclk")
-            .connect_driver(create_const_node_serialized(*g, Dlop::create_integer(0)->serialize()));
+            .connect_driver(create_const(*g, *Dlop::create_integer(0)));
       }
 
       setup_sink_by_name(exit_node, "din").connect_driver(get_dpin(g, cell, ID::D));
@@ -1949,7 +1948,7 @@ static void process_cells(RTLIL::Module* mod, hhds::Graph* g) {
       set_type_op(exit_node, Ntype_op::Sum);
       set_bits(exit_node.create_driver_pin(0), get_output_size(cell));
 
-      setup_sink_by_name(exit_node, "A").connect_driver(create_const_node_serialized(*g, Dlop::create_integer(0)->serialize()));
+      setup_sink_by_name(exit_node, "A").connect_driver(create_const(*g, *Dlop::create_integer(0)));
       setup_sink_by_name(exit_node, "B").connect_driver(get_dpin(g, cell, ID::A));
     } else if (std::strncmp(cell->type.c_str(), "$lt", 3) == 0 || std::strncmp(cell->type.c_str(), "$gt", 3) == 0
                || std::strncmp(cell->type.c_str(), "$eq", 3) == 0) {
@@ -1970,7 +1969,7 @@ static void process_cells(RTLIL::Module* mod, hhds::Graph* g) {
         set_bits(exit_node.create_driver_pin(0), 1);
         setup_sink_by_name(exit_node, "a").connect_driver(cmp_node.create_driver_pin(0));
         setup_sink_by_name(exit_node, "mask")
-            .connect_driver(create_const_node_serialized(*g, Dlop::create_integer(-1)->serialize()));
+            .connect_driver(create_const(*g, *Dlop::create_integer(-1)));
         connect_comparator(cmp_node, cell);
       }
     } else if (std::strncmp(cell->type.c_str(), "$ge", 3) == 0 || std::strncmp(cell->type.c_str(), "$le", 3) == 0
@@ -1997,7 +1996,7 @@ static void process_cells(RTLIL::Module* mod, hhds::Graph* g) {
         set_type_op(exit_node, Ntype_op::Get_mask);
         setup_sink_by_name(exit_node, "a").connect_driver(not_node.create_driver_pin(0));
         setup_sink_by_name(exit_node, "mask")
-            .connect_driver(create_const_node_serialized(*g, Dlop::create_integer(-1)->serialize()));
+            .connect_driver(create_const(*g, *Dlop::create_integer(-1)));
       }
     } else if (std::strncmp(cell->type.c_str(), "$mux", 4) == 0) {
       set_type_op(exit_node, Ntype_op::Mux);
@@ -2021,7 +2020,7 @@ static void process_cells(RTLIL::Module* mod, hhds::Graph* g) {
         set_bits(exit_node.create_driver_pin(0), y_bits);
         exit_node.create_sink_pin(0).connect_driver(sum_node.create_driver_pin(0));
         exit_node.create_sink_pin(0)
-            .connect_driver(create_const_node_serialized(*g, Dlop::get_mask_value(y_bits)->serialize()));
+            .connect_driver(create_const(*g, *Dlop::get_mask_value(y_bits)));
       } else {
         set_type_op(exit_node, Ntype_op::Sum);
         set_bits(exit_node.create_driver_pin(0), y_bits);
@@ -2051,7 +2050,7 @@ static void process_cells(RTLIL::Module* mod, hhds::Graph* g) {
       set_bits(exit_node.create_driver_pin(0), y_bits);
       auto mul_node = create_typed_node(*g, Ntype_op::Mult, y_bits);
       exit_node.create_sink_pin(0).connect_driver(mul_node.create_driver_pin(0));
-      exit_node.create_sink_pin(0).connect_driver(create_const_node_serialized(*g, Dlop::get_mask_value(y_bits)->serialize()));
+      exit_node.create_sink_pin(0).connect_driver(create_const(*g, *Dlop::get_mask_value(y_bits)));
 #else
       set_type_op(exit_node, Ntype_op::Mult);
       set_bits(exit_node.create_driver_pin(0), y_bits);
@@ -2067,7 +2066,7 @@ static void process_cells(RTLIL::Module* mod, hhds::Graph* g) {
       set_bits(exit_node.create_driver_pin(0), y_bits);
       auto div_node = create_typed_node(*g, Ntype_op::Div, y_bits);
       exit_node.create_sink_pin(0).connect_driver(div_node.create_driver_pin(0));
-      exit_node.create_sink_pin(0).connect_driver(create_const_node_serialized(*g, Dlop::get_mask_value(y_bits)->serialize()));
+      exit_node.create_sink_pin(0).connect_driver(create_const(*g, *Dlop::get_mask_value(y_bits)));
 #else
       set_type_op(exit_node, Ntype_op::Div);
       set_bits(exit_node.create_driver_pin(0), y_bits);
@@ -2090,7 +2089,7 @@ static void process_cells(RTLIL::Module* mod, hhds::Graph* g) {
 
       set_type_op(exit_node, Ntype_op::And);
       set_bits(exit_node.create_driver_pin(0), y_bits);
-      exit_node.create_sink_pin(0).connect_driver(create_const_node_serialized(*g, Dlop::get_mask_value(y_bits)->serialize()));
+      exit_node.create_sink_pin(0).connect_driver(create_const(*g, *Dlop::get_mask_value(y_bits)));
 
       setup_sink_by_name(div_node, "a").connect_driver(a_dpin);
       setup_sink_by_name(div_node, "b").connect_driver(b_dpin);
@@ -2108,18 +2107,18 @@ static void process_cells(RTLIL::Module* mod, hhds::Graph* g) {
       if (cell->getParam(ID::A_SIGNED).as_bool()) {
         set_type_op(exit_node, Ntype_op::And);
         set_bits(exit_node.create_driver_pin(0), y_bits);
-        exit_node.create_sink_pin(0).connect_driver(create_const_node_serialized(*g, Dlop::get_mask_value(y_bits)->serialize()));
+        exit_node.create_sink_pin(0).connect_driver(create_const(*g, *Dlop::get_mask_value(y_bits)));
         exit_node.create_sink_pin(0).connect_driver(get_dpin(g, cell, ID::A));
       } else {
         auto and_node = create_typed_node(*g, Ntype_op::And, y_bits);
-        and_node.create_sink_pin(0).connect_driver(create_const_node_serialized(*g, Dlop::get_mask_value(y_bits)->serialize()));
+        and_node.create_sink_pin(0).connect_driver(create_const(*g, *Dlop::get_mask_value(y_bits)));
         and_node.create_sink_pin(0).connect_driver(get_unsigned_dpin(g, cell, ID::A));
 
         set_type_op(exit_node, Ntype_op::Get_mask);
         set_bits(exit_node.create_driver_pin(0), y_bits + 1);
         setup_sink_by_name(exit_node, "a").connect_driver(and_node.create_driver_pin(0));
         setup_sink_by_name(exit_node, "mask")
-            .connect_driver(create_const_node_serialized(*g, Dlop::create_integer(-1)->serialize()));
+            .connect_driver(create_const(*g, *Dlop::create_integer(-1)));
       }
     } else if (std::strncmp(cell->type.c_str(), "$shiftx", 6) == 0 && cell->getParam(ID::B_SIGNED).as_bool()) {
       auto a_bits       = cell->getParam(ID::A_WIDTH).as_int();
@@ -2143,14 +2142,14 @@ static void process_cells(RTLIL::Module* mod, hhds::Graph* g) {
       setup_sink_by_name(sra_node, "b").connect_driver(get_dpin(g, cell, ID::B));
       auto y0_dpin = sra_node.create_driver_pin(0);
 
-      setup_sink_by_name(neg_node, "A").connect_driver(create_const_node_serialized(*g, Dlop::create_integer(0)->serialize()));
+      setup_sink_by_name(neg_node, "A").connect_driver(create_const(*g, *Dlop::create_integer(0)));
       setup_sink_by_name(neg_node, "B").connect_driver(b_dpin);
       setup_sink_by_name(shl_node, "a").connect_driver(a_dpin);
       setup_sink_by_name(shl_node, "B").connect_driver(neg_node.create_driver_pin(0));
       auto y1_dpin = shl_node.create_driver_pin(0);
 
       setup_sink_by_name(lt_node, "A").connect_driver(b_dpin);
-      setup_sink_by_name(lt_node, "B").connect_driver(create_const_node_serialized(*g, Dlop::create_integer(0)->serialize()));
+      setup_sink_by_name(lt_node, "B").connect_driver(create_const(*g, *Dlop::create_integer(0)));
 
       setup_sink_by_name(mux_node, "0").connect_driver(lt_node.create_driver_pin(0));
       setup_sink_by_name(mux_node, "1").connect_driver(y0_dpin);
@@ -2158,7 +2157,7 @@ static void process_cells(RTLIL::Module* mod, hhds::Graph* g) {
       auto y2_dpin = mux_node.create_driver_pin(0);
 
       exit_node.create_sink_pin(0).connect_driver(y2_dpin);
-      exit_node.create_sink_pin(0).connect_driver(create_const_node_serialized(*g, Dlop::get_mask_value(y_bits)->serialize()));
+      exit_node.create_sink_pin(0).connect_driver(create_const(*g, *Dlop::get_mask_value(y_bits)));
     } else if (std::strncmp(cell->type.c_str(), "$shr", 4) == 0
                || (std::strncmp(cell->type.c_str(), "$shiftx", 6) == 0 && !cell->getParam(ID::B_SIGNED).as_bool())
                || (std::strncmp(cell->type.c_str(), "$sshr", 5) == 0 && !cell->getParam(ID::A_SIGNED).as_bool())) {
@@ -2172,12 +2171,12 @@ static void process_cells(RTLIL::Module* mod, hhds::Graph* g) {
         if ((int)bits_of(dpin_a_signed) < y_bits) {
           auto and_node = create_typed_node(*g, Ntype_op::And, y_bits);
           and_node.create_sink_pin(0).connect_driver(dpin_a_signed);
-          and_node.create_sink_pin(0).connect_driver(create_const_node_serialized(*g, Dlop::get_mask_value(y_bits)->serialize()));
+          and_node.create_sink_pin(0).connect_driver(create_const(*g, *Dlop::get_mask_value(y_bits)));
 
           auto tposs_node = create_typed_node(*g, Ntype_op::Get_mask, y_bits + 1);
           setup_sink_by_name(tposs_node, "a").connect_driver(and_node.create_driver_pin(0));
           setup_sink_by_name(tposs_node, "mask")
-              .connect_driver(create_const_node_serialized(*g, Dlop::create_integer(-1)->serialize()));
+              .connect_driver(create_const(*g, *Dlop::create_integer(-1)));
 
           dpin_a = tposs_node.create_driver_pin(0);
         }
@@ -2195,7 +2194,7 @@ static void process_cells(RTLIL::Module* mod, hhds::Graph* g) {
           }
           setup_sink_by_name(tposs_node, "a").connect_driver(dpin_a_signed);
           setup_sink_by_name(tposs_node, "mask")
-              .connect_driver(create_const_node_serialized(*g, Dlop::create_integer(-1)->serialize()));
+              .connect_driver(create_const(*g, *Dlop::create_integer(-1)));
 
           dpin_a = tposs_node.create_driver_pin(0);
         }
@@ -2228,22 +2227,22 @@ static void process_cells(RTLIL::Module* mod, hhds::Graph* g) {
       auto     wr_clkp = cell->getParam(ID::WR_CLK_POLARITY).as_int();
 
       setup_sink_by_name(exit_node, "bits")
-          .connect_driver(create_const_node_serialized(*g, Dlop::create_integer(width)->serialize()));
+          .connect_driver(create_const(*g, *Dlop::create_integer(width)));
       setup_sink_by_name(exit_node, "fwd")
-          .connect_driver(create_const_node_serialized(*g, Dlop::create_integer(transp)->serialize()));
+          .connect_driver(create_const(*g, *Dlop::create_integer(transp)));
       setup_sink_by_name(exit_node, "posclk")
-          .connect_driver(create_const_node_serialized(*g, Dlop::create_integer(wr_clkp)->serialize()));
+          .connect_driver(create_const(*g, *Dlop::create_integer(wr_clkp)));
       setup_sink_by_name(exit_node, "type")
-          .connect_driver(create_const_node_serialized(*g, Dlop::create_integer(rd_clke)->serialize()));
+          .connect_driver(create_const(*g, *Dlop::create_integer(rd_clke)));
       setup_sink_by_name(exit_node, "wensize")
-          .connect_driver(create_const_node_serialized(*g, Dlop::create_integer(width)->serialize()));
+          .connect_driver(create_const(*g, *Dlop::create_integer(width)));
       setup_sink_by_name(exit_node, "size")
-          .connect_driver(create_const_node_serialized(*g, Dlop::create_integer(depth)->serialize()));
+          .connect_driver(create_const(*g, *Dlop::create_integer(depth)));
 
       for (int i = 0; i < wrports; i++) {
         auto port_n = i * 11;
         exit_node.create_sink_pin(static_cast<hhds::Port_id>(10 + port_n))
-            .connect_driver(create_const_node_serialized(*g, Dlop::create_integer(0)->serialize()));
+            .connect_driver(create_const(*g, *Dlop::create_integer(0)));
         exit_node.create_sink_pin(static_cast<hhds::Port_id>(3 + port_n))
             .connect_driver(create_pick_concat_dpin(g, cell->getPort(ID::WR_DATA).extract(i * width, width), false));
         exit_node.create_sink_pin(static_cast<hhds::Port_id>(4 + port_n))
@@ -2256,7 +2255,7 @@ static void process_cells(RTLIL::Module* mod, hhds::Graph* g) {
       for (int i = 0; i < rdports; i++) {
         auto port_n = (wrports + i) * 11;
         exit_node.create_sink_pin(static_cast<hhds::Port_id>(10 + port_n))
-            .connect_driver(create_const_node_serialized(*g, Dlop::create_integer(1)->serialize()));
+            .connect_driver(create_const(*g, *Dlop::create_integer(1)));
         exit_node.create_sink_pin(static_cast<hhds::Port_id>(4 + port_n))
             .connect_driver(create_pick_concat_dpin(g, cell->getPort(ID::RD_EN).extract(i, 1), false));
         exit_node.create_sink_pin(static_cast<hhds::Port_id>(0 + port_n))
@@ -2294,7 +2293,7 @@ static void process_cells(RTLIL::Module* mod, hhds::Graph* g) {
       set_type_op(exit_node, Ntype_op::Flop);
       set_bits(exit_node.create_driver_pin(0), get_output_size(cell));
       setup_sink_by_name(exit_node, "posclk")
-          .connect_driver(create_const_node_serialized(*g, Dlop::create_integer(0)->serialize()));
+          .connect_driver(create_const(*g, *Dlop::create_integer(0)));
       setup_sink_by_name(exit_node, "clock_pin").connect_driver(get_dpin(g, cell, ID::C));
       setup_sink_by_name(exit_node, "din").connect_driver(get_dpin(g, cell, ID::D));
     } else if (std::strncmp(cell->type.c_str(), "$_DFF_NN", 8) == 0 || std::strncmp(cell->type.c_str(), "$_DFF_NP", 8) == 0
@@ -2309,25 +2308,9 @@ static void process_cells(RTLIL::Module* mod, hhds::Graph* g) {
 
         absl::flat_hash_set<std::pair<hhds::Class_index, hhds::Class_index>> added_edges;
 
-        // The sub's GraphIO declares the pin shape
-        auto sub_gid = exit_node.attr(livehd::attrs::subid).get();
-        auto sub_gio = g->get_io()->get_library()->get_graph(sub_gid)
-                           ? g->get_io()->get_library()->find_graph(std::string{node_name_of(exit_node)})
-                           : nullptr;
-        // Fall back: use the GraphIO directly
-        auto& lib    = *g->get_io()->get_library();
-        std::shared_ptr<hhds::GraphIO> gio_ptr;
-        // Find by gid: walk the library
-        for (hhds::Gid id = 1, cap = static_cast<hhds::Gid>(lib.capacity()); id < cap; ++id) {
-          if (!lib.has_graph(id) && id != sub_gid) continue;
-          // We need a way to get GraphIO from gid; use find_io by exhaustive matching.
-        }
-        // Simpler: get the gio's name from the cell type
-        std::string mod_name(&cell->type.c_str()[1]);
-        if (mod_name.rfind("paramod\\", 0) == 0) {
-          mod_name = mod_name.substr(8);
-        }
-        gio_ptr = lib.find_io(mod_name);
+        // The sub's GraphIO (declared pin shape) comes straight from the
+        // set_subnode bookkeeping HHDS already maintains on this Sub node.
+        auto gio_ptr = exit_node.get_subnode_io();
         I(gio_ptr);
 
         for (auto& conn : cell->connections()) {
@@ -2362,7 +2345,7 @@ static void process_cells(RTLIL::Module* mod, hhds::Graph* g) {
             continue;
           }
           if (!gio_ptr->has_input(name)) {
-            log_error("sub:%s does not have pin:%s as input\n", mod_name.c_str(), name.c_str());
+            log_error("sub:%s does not have pin:%s as input\n", std::string{gio_ptr->get_name()}.c_str(), name.c_str());
           }
 
           hhds::Pin_class spin = exit_node.create_sink_pin(name);

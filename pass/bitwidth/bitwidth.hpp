@@ -54,7 +54,6 @@ protected:
   void process_bit_and(hhds::Node_class& node, std::vector<hhds::Edge_class>& inp_edges);
   void process_assignment_or(hhds::Node_class& node, std::vector<hhds::Edge_class>& inp_edges);
   void process_ror(hhds::Node_class& node, std::vector<hhds::Edge_class>& inp_edges);
-  void process_attr_get(hhds::Node_class& node);
   void process_attr_set_dp_assign(hhds::Node_class& node);
   void process_attr_set_bw(hhds::Node_class& node, Bitwidth::Attr attr);
   void process_attr_set(hhds::Node_class& node);

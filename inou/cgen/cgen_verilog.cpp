@@ -39,24 +39,12 @@ using livehd::graph_util::is_type_sub;
 using livehd::graph_util::is_unsign;
 using livehd::graph_util::node_name_of;
 using livehd::graph_util::pin_name_of;
-using livehd::graph_util::subid_of;
 using livehd::graph_util::type_op_of;
 using livehd::graph_util::wire_name;
 
 namespace {
 
-// Helper: deserialize a const-value attribute string into a Dlop. Returns
-// a default-constructed Dlop (integer 0) if the attribute is empty.
-[[nodiscard]] Dlop hydrate_const(std::string_view serialized) {
-  if (serialized.empty()) {
-    return *Dlop::create_integer(0);
-  }
-  auto p = Dlop::unserialize(serialized);
-  if (!p) {
-    return *Dlop::create_integer(0);
-  }
-  return *p;
-}
+using livehd::graph_util::hydrate_const;
 
 // Sort edges by sink port_id (for mux iteration).
 void sort_by_sink_pid(std::vector<hhds::Edge_class>& edges) {
@@ -135,16 +123,16 @@ hhds::Pin_class Cgen_verilog::find_sink_pin(const hhds::Node_class& node, std::s
   // emulate LiveHD's invalid-on-miss behaviour we walk inp_edges and match
   // by port_id — slower than a direct fetch but safe.
   auto op = type_op_of(node);
-  hhds::Port_id target;
   if (op == Ntype_op::Sub) {
     auto pin = node.get_sink_pin(name);  // sub-graph path: HHDS knows the port_id
     return pin;
-  } else {
-    auto pid = Ntype::get_sink_pid(op, name);
-    target   = static_cast<hhds::Port_id>(pid);
+  }
+  auto pid = Ntype::get_sink_pid(op, name);
+  if (pid == livehd::Port_invalid) {
+    return {};
   }
   for (const auto& e : node.inp_edges()) {
-    if (e.sink.get_port_id() == target) {
+    if (e.sink.get_port_id() == pid) {
       return e.sink;
     }
   }
@@ -158,7 +146,7 @@ std::string Cgen_verilog::get_wire_or_const(const hhds::Pin_class& dpin) const {
   }
 
   if (is_const_pin(dpin)) {
-    return hydrate_const(const_value_of(dpin.get_master_node())).to_verilog();
+    return hydrate_const(dpin).to_verilog();
   }
 
   return get_scaped_name(pin_wire_name(dpin));
@@ -218,7 +206,7 @@ std::string Cgen_verilog::get_expression(const hhds::Pin_class& dpin) const {
   // registered. HHDS's get_pin_name resolves both to the declared name; fall
   // back to that so the emitted Verilog references the right wire.
   if (is_const_pin(dpin)) {
-    return hydrate_const(const_value_of(dpin.get_master_node())).to_verilog();
+    return hydrate_const(dpin).to_verilog();
   }
   auto wn = pin_wire_name(dpin);
   if (!wn.empty()) {
@@ -290,31 +278,31 @@ void Cgen_verilog::process_memory(std::shared_ptr<File_output> fout, const hhds:
         Pass::error("memory {} should have a constant for bits not {}", debug_name(node), debug_name(e.driver.get_master_node()));
         return;
       }
-      mem_bits = hydrate_const(const_value_of(e.driver.get_master_node())).to_i();
+      mem_bits = hydrate_const(e.driver).to_i();
     } else if (pin_name == "size") {
       if (!is_const_pin(e.driver)) {
         Pass::error("memory {} should have a constant for size not {}", debug_name(node), debug_name(e.driver.get_master_node()));
         return;
       }
-      mem_size = hydrate_const(const_value_of(e.driver.get_master_node())).to_i();
+      mem_size = hydrate_const(e.driver).to_i();
     } else if (pin_name == "type") {
       if (!is_const_pin(e.driver)) {
         Pass::error("memory {} should have a constant type not {}", debug_name(node), debug_name(e.driver.get_master_node()));
         return;
       }
-      mem_type = hydrate_const(const_value_of(e.driver.get_master_node())).to_i();
+      mem_type = hydrate_const(e.driver).to_i();
     } else if (pin_name == "wensize") {
       if (!is_const_pin(e.driver)) {
         Pass::error("memory {} should have a constant for wensize not {}", debug_name(node), debug_name(e.driver.get_master_node()));
         return;
       }
-      mem_wensize = hydrate_const(const_value_of(e.driver.get_master_node())).to_i();
+      mem_wensize = hydrate_const(e.driver).to_i();
     } else if (pin_name == "fwd") {
       if (!is_const_pin(e.driver)) {
         Pass::error("memory {} should have a constant for fwd not {}", debug_name(node), debug_name(e.driver.get_master_node()));
         return;
       }
-      mem_fwd = hydrate_const(const_value_of(e.driver.get_master_node())).to_i();
+      mem_fwd = hydrate_const(e.driver).to_i();
     } else if (str_tools::ends_with(pin_name, "clock_pin")) {
       port_vector[port_id].clock = e.driver;
     } else if (str_tools::ends_with(pin_name, "addr")) {
@@ -328,7 +316,7 @@ void Cgen_verilog::process_memory(std::shared_ptr<File_output> fout, const hhds:
         Pass::error("memory {} should have a constant rdport not {}", debug_name(node), debug_name(e.driver.get_master_node()));
         return;
       }
-      auto v      = hydrate_const(const_value_of(e.driver.get_master_node()));
+      auto v      = hydrate_const(e.driver);
       bool rdport = !v.is_known_false();
       port_vector[port_id].rdport = rdport;
       if (rdport) {
@@ -578,7 +566,7 @@ void Cgen_verilog::process_simple_node(std::shared_ptr<File_output> fout, const 
 
     auto mask_dpin = get_driver(find_sink_pin(node, "mask"));
     I(is_const_pin(mask_dpin));
-    auto mask_v = hydrate_const(const_value_of(mask_dpin.get_master_node()));
+    auto mask_v = hydrate_const(mask_dpin);
     I(!mask_v.has_unknowns());
 
     if (mask_v.is_known_zero()) {
@@ -645,7 +633,7 @@ void Cgen_verilog::process_simple_node(std::shared_ptr<File_output> fout, const 
   } else if (op == Ntype_op::Get_mask) {
     auto mask_dpin = get_driver(find_sink_pin(node, "mask"));
     I(is_const_pin(mask_dpin));
-    auto mask_v = hydrate_const(const_value_of(mask_dpin.get_master_node()));
+    auto mask_v = hydrate_const(mask_dpin);
     I(!mask_v.has_unknowns());
 
     auto a_dpin = get_driver(find_sink_pin(node, "a"));
@@ -697,7 +685,7 @@ void Cgen_verilog::process_simple_node(std::shared_ptr<File_output> fout, const 
     auto pos_dpin  = get_driver(find_sink_pin(node, "b"));
     auto pos_node  = pos_dpin.is_invalid() ? hhds::Node_class{} : pos_dpin.get_master_node();
     if (!pos_node.is_invalid() && is_type_const(pos_node)) {
-      auto lpos = hydrate_const(const_value_of(pos_node));
+      auto lpos = hydrate_const(pos_dpin);
       if (lpos.is_i()) {
         final_expr = absl::StrCat(lhs, "[", lpos.to_i() - 1, ":0]");
       }
@@ -749,11 +737,6 @@ void Cgen_verilog::process_simple_node(std::shared_ptr<File_output> fout, const 
     final_expr    = absl::StrCat(val_expr, " >>> ", amt_expr);
   } else if (op == Ntype_op::Nconst) {
     return;  // emitted as expr at create_locals time
-  } else if (op == Ntype_op::TupAdd || op == Ntype_op::TupGet || op == Ntype_op::AttrGet) {
-    Pass::error("could not generate verilog unless it is low level Lgraph node:{} is type {}\n",
-                debug_name(node),
-                Ntype::get_name(op));
-    return;
   } else if (op == Ntype_op::AttrSet) {
     return;  // drop
   } else {
@@ -857,17 +840,13 @@ void Cgen_verilog::create_memories(std::shared_ptr<File_output> fout, hhds::Grap
 }
 
 void Cgen_verilog::create_subs(std::shared_ptr<File_output> fout, hhds::Graph* graph) {
-  auto gio = graph->get_io();
-  auto lib = gio ? gio->get_library() : nullptr;
-
   for (auto node : graph->fast_class()) {
     if (!is_type_sub(node)) {
       continue;
     }
 
-    auto iname     = get_scaped_name(default_instance_name(node));
-    auto sub_gid   = static_cast<hhds::Gid>(subid_of(node));
-    auto sub_io    = lib && lib->has_graph(sub_gid) ? lib->get_graph(sub_gid)->get_io() : std::shared_ptr<hhds::GraphIO>{};
+    auto iname  = get_scaped_name(default_instance_name(node));
+    auto sub_io = node.get_subnode_io();
     if (!sub_io) {
       continue;
     }
@@ -984,7 +963,7 @@ void Cgen_verilog::create_registers(std::shared_ptr<File_output> fout, hhds::Gra
     auto        posclk_sink = find_sink_pin(node, "posclk");
     auto        posclk_dpin = get_driver(posclk_sink);
     if (!posclk_dpin.is_invalid()) {
-      auto v = hydrate_const(const_value_of(posclk_dpin.get_master_node())).to_i() != 0;
+      auto v = hydrate_const(posclk_dpin).to_i() != 0;
       if (!v) {
         edge = "negedge";
       }
@@ -1000,7 +979,7 @@ void Cgen_verilog::create_registers(std::shared_ptr<File_output> fout, hhds::Gra
     auto reset_dpin = get_driver(reset_sink);
     if (!reset_dpin.is_invalid()) {
       if (is_const_pin(reset_dpin)) {
-        auto reset_const = hydrate_const(const_value_of(reset_dpin.get_master_node()));
+        auto reset_const = hydrate_const(reset_dpin);
         if (!reset_const.is_known_false() && !reset_const.same_repr(*Dlop::from_string("false"))) {
           reset = reset_const.to_verilog();
         }
@@ -1009,11 +988,11 @@ void Cgen_verilog::create_registers(std::shared_ptr<File_output> fout, hhds::Gra
 
         auto negreset_dpin = get_driver(find_sink_pin(node, "negreset"));
         if (!negreset_dpin.is_invalid()) {
-          negreset = hydrate_const(const_value_of(negreset_dpin.get_master_node())).to_i() != 0;
+          negreset = hydrate_const(negreset_dpin).to_i() != 0;
         }
         auto async_dpin = get_driver(find_sink_pin(node, "async"));
         if (!async_dpin.is_invalid()) {
-          auto v = hydrate_const(const_value_of(async_dpin.get_master_node())).to_i() != 0;
+          auto v = hydrate_const(async_dpin).to_i() != 0;
           if (v) {
             reset_async = absl::StrCat(negreset ? " or negedge " : " or posedge ", reset);
           }
@@ -1133,8 +1112,8 @@ void Cgen_verilog::create_locals(std::shared_ptr<File_output> fout, hhds::Graph*
       }
     } else if (op == Ntype_op::Set_mask) {
       add_to_pin2var(fout, dpin, name, false);
-    } else if (op == Ntype_op::Nconst) {
-      auto final_expr = hydrate_const(const_value_of(node)).to_verilog();
+    } else if (op == Ntype_op::Nconst || is_const_pin(dpin)) {
+      auto final_expr = hydrate_const(dpin).to_verilog();
       pin2expr.emplace(dpin.get_class_index(), Expr(final_expr, false));
     } else if (op == Ntype_op::Get_mask) {
       auto a_spin = find_sink_pin(node, "a");
@@ -1148,7 +1127,7 @@ void Cgen_verilog::create_locals(std::shared_ptr<File_output> fout, hhds::Graph*
     } else if (op == Ntype_op::AttrSet) {
       auto dpin_key = get_driver(find_sink_pin(node, "field"));
       I(!dpin_key.is_invalid() && is_type_const(dpin_key.get_master_node()));
-      auto key = hydrate_const(const_value_of(dpin_key.get_master_node())).to_field();
+      auto key = hydrate_const(dpin_key).to_field();
 
       bool dp_assign = str_tools::ends_with(key, "__dp_assign");
 

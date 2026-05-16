@@ -5,6 +5,90 @@ is already complete — see `hhds_migration.md`). It replaces LiveHD's
 hand-rolled `Lgraph` storage with `hhds::Graph`, and `Graph_library`
 with `hhds::GraphLibrary`.
 
+## Phase H — pre-deletion API simplifications (2026-05-15)
+
+Decided after the priority passes landed, before retiring non-priority
+passes and deleting `lgraph/`. The migrated `graph/` surface still
+carried items inherited from the lgraph wrapper that no current consumer
+needs.
+
+**Landed in this phase:**
+
+1. **Deleted `lgraph/lgtuple.{cpp,hpp}` + `lgext/` entirely.**
+   `Lgtuple` had no consumers after cprop's tuple_pass was stripped;
+   its one remaining utility (`get_canonical_name`, a ".0" suffix
+   trimmer) was inlined into `lgraph/node_pin.cpp:559`. `lgext/common`
+   defined an `Lgcpp_plugin` registry whose `get_registry()` had zero
+   callers; `lgext/prplib/io.cpp` was a one-line include with no body.
+   Both lgext sub-targets dropped from `main/BUILD`.
+
+2. **Dropped `Ntype_op::{TupAdd, TupGet, AttrGet, CompileErr}`** and
+   their handlers in cgen, yosys_dump, bitwidth, graphviz, locator, and
+   the upass dce path. Removed dead wrapper methods
+   `Node::is_type_attr`, `Node::is_type_tup`, `Node_pin::is_type_tup`
+   (all had zero external callers). Bitwidth's `process_attr_get`
+   helper deleted. **`AttrSet` kept** because bitwidth's leftover-node
+   cleanup (`process_attr_set` + the post-pass purge at
+   `bitwidth.cpp:1515`) still needs to recognise it during the
+   transient state between cprop and bitwidth.
+
+3. **Documented the bit-0 `is_loop_last` encoding** in
+   `graph/cell.hpp`. The enum has intentional holes — non-loop-last ops
+   on even slots, loop-last ops on odd slots — chosen so `Ntype_op`
+   values round-trip directly through `hhds::Node_class::set_type`
+   without a shift. Each op-line now carries its value range and the
+   note that the ±1 neighbour is intentionally empty.
+
+4. **Constant unification on `Graph::CONST_NODE` singleton.** All
+   migrated passes now produce constants as pins attached to HHDS's
+   `Graph::CONST_NODE` (nid 3) singleton. The model:
+   - **Scheme A small-int fast path** — pids 0..31 on CONST_NODE
+     encode literal integers in `[-16, 15]`. pid 0..15 maps to values
+     0..15 directly; pid 16..31 maps to values -16..-1. No payload
+     attribute is needed: `const_node.create_driver_pin(encode(v))`
+     is idempotent.
+   - **Slow path** — values outside the small-int range go through
+     a per-Graph deduplication map (LiveHD-side, in `graph/const_pin.cpp`,
+     keyed by `Graph*`). The serialized Const lives on the pin via
+     `livehd::attrs::pin_const_value`. Fresh pids start at 32 and
+     advance.
+   - **Reader API** — `livehd::graph_util::hydrate_const(Pin_class)`
+     returns the `Const` value; it handles both the new CONST_NODE-pin
+     form (pid encoding or pin attr) and the legacy
+     `Ntype_op::Nconst` node form so dual coexistence works during
+     `lgraph/` deletion. `is_const_pin` keeps both branches.
+
+   `livehd::graph_util::create_const_node_serialized` and
+   `create_const_pin_on` were retired (replaced by `create_const`).
+   `livehd::attrs::const_value` (per-node, legacy wrapper path) and
+   `Ntype_op::Nconst` (enum entry) stay in place: the lgraph wrapper
+   still has ~11 `Nconst` refs that go away with the wholesale
+   `lgraph/` deletion in Phase B. Once the wrapper dies,
+   `is_const_pin` collapses to the single-branch CONST_NODE check
+   and the per-node `const_value` attr can be dropped.
+
+**Decided to keep as-is:**
+
+- **`livehd::attrs::loc` and `::source` + `pass/locator`.** Slated to
+  be revived as part of the eventual sourcemap refactor; pull older
+  call sites from git history if needed when migrating locator.
+- **`livehd::attrs::color`, `place`, `pin_delay`, `lut`.** Their
+  consumers (`pass/label`, ArchFP, `pass/opentimer`, `pass/abc`) are
+  scheduled for migration to HHDS in Phase B; keeping the tags avoids
+  re-adding them later.
+- **Letter-based sink-pin names** (`"a"`, `"din"`, `"0addr"`, …) in
+  `graph_util::find_sink_pin` / `setup_sink_by_name` / `inp_drivers_of`.
+  They translate through `Ntype::get_sink_pid` (~3 KB of constexpr
+  tables) and are self-documenting at call sites — chosen specifically
+  because numeric `port_id` calls fail silently while name lookups
+  assert on typos, which matters for AI agents authoring or reviewing
+  yosys/cgen edits.
+- **`Hhds_graph_library::instance(path)` singleton.** Path-keyed model
+  supports planned multi-version-of-the-same-module use case
+  (`path_orig` for unoptimised LNAST → `path_opt` for the optimised
+  variant) where one process holds several library views
+  simultaneously.
+
 ## Strategy pivot (2026-05-15) — new `graph/` directory + per-pass migration
 
 After landing Phase G3 reader/payload migration to shadow and most of

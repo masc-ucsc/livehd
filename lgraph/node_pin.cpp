@@ -7,8 +7,27 @@
 #include <iostream>
 
 #include "lgraph.hpp"
-#include "lgtuple.hpp"
 #include "node.hpp"
+
+namespace {
+// Strip trailing ".0" segments from a tuple-style canonical name. Inlined from
+// the (deleted) Lgtuple::get_canonical_name — only Node_pin::find_driver_pin
+// ever called it.
+std::string_view strip_trailing_zero_segments(std::string_view key) {
+  while (key.size() > 1 && key.back() == '0') {
+    auto sz = key.size();
+    if (key.substr(sz - 2, sz) == ".0") {
+      key = key.substr(0, sz - 2);
+      continue;
+    }
+    break;
+  }
+  if (key == "0") {
+    key = "";
+  }
+  return key;
+}
+}  // namespace
 
 Node_pin::Node_pin(Lgraph* _g, const Compact& comp) : top_g(_g), hidx(comp.hidx), idx(comp.idx), sink(comp.sink) {
   I(!Hierarchy::is_invalid(comp.hidx));  // Why to Compact. Use Compact_class
@@ -98,12 +117,6 @@ bool Node_pin::is_type_single_driver() const {
 bool Node_pin::is_type_const() const {
   auto nid = current_g->get_node_nid(idx);
   return current_g->is_type_const(nid);
-}
-
-bool Node_pin::is_type_tup() const {
-  auto nid = current_g->get_node_nid(idx);
-  auto op  = current_g->get_type_op(nid);
-  return op == Ntype_op::TupAdd || op == Ntype_op::TupGet;
 }
 
 bool Node_pin::is_type_sub() const {
@@ -556,7 +569,7 @@ Node_pin Node_pin::find_driver_pin(Lgraph* top, std::string_view wname) {
     }
   }
 
-  auto can_wname = Lgtuple::get_canonical_name(wname);
+  auto can_wname = strip_trailing_zero_segments(wname);
   if (can_wname != wname) {
     const auto it2 = rref->find(can_wname);
     if (it2 != rref->end()) {
