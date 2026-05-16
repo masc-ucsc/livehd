@@ -2,17 +2,22 @@
 
 #include "pass_submatch.hpp"
 
+#include <algorithm>
 #include <format>
 #include <iostream>
 #include <queue>
 #include <string>
+#include <vector>
 
-#include "lgedgeiter.hpp"
-#include "lgraph.hpp"
-#include "node.hpp"
-#include "node_pin.hpp"
+#include "absl/container/flat_hash_map.h"
+#include "absl/container/flat_hash_set.h"
+#include "hhds/graph.hpp"
+#include "node_util.hpp"
+#include "str_tools.hpp"
 #include "waterhash.hpp"
 #include "woothash.hpp"
+
+using livehd::graph_util::type_op_of;
 
 static Pass_plugin sample("pass_submatch", pass_submatch::setup);
 
@@ -24,7 +29,7 @@ void pass_submatch::setup() {
 
 pass_submatch::pass_submatch(const Eprp_var& var) : Pass("pass.submatch", var) {}
 
-void pass_submatch::do_work(Lgraph* g) {
+void pass_submatch::do_work(hhds::Graph* g) {
   find_mffc_group(g);
   find_subs(g);
 }
@@ -38,53 +43,81 @@ void pass_submatch::work(Eprp_var& var) {
     submatch_depth = str_tools::to_i(var.dict["depth"]);
   }
 
-  for (const auto& g : var.lgs) {
-    std::print("finding subgraphs for graph {}...\n", g->get_name());
-    p.do_work(g);
+  for (const auto& g : var.graphs) {
+    auto gio  = g->get_io();
+    auto name = gio ? std::string{gio->get_name()} : std::string{"<anon>"};
+    std::print("finding subgraphs for graph {}...\n", name);
+    p.do_work(g.get());
   }
 }
 
-uint64_t pass_submatch::hash_mffc_root(Node n) { return hash_node(n); }
+uint64_t pass_submatch::hash_mffc_root(hhds::Node_class n) { return hash_node(n); }
 
-uint64_t pass_submatch::hash_mffc_node(Node n_driver, uint64_t h_sink, Port_ID pid) {
+uint64_t pass_submatch::hash_mffc_node(hhds::Node_class n_driver, uint64_t h_sink, hhds::Port_id pid) {
   uint64_t i_hash[3] = {h_sink, hash_node(n_driver), static_cast<uint64_t>(pid)};
   return lh::woothash64(i_hash, 24);
 }
 
-uint64_t pass_submatch::hash_mffc_leaf(uint64_t h_sink, Port_ID pid) {
+uint64_t pass_submatch::hash_mffc_leaf(uint64_t h_sink, hhds::Port_id pid) {
   uint64_t i_hash[2] = {h_sink, static_cast<uint64_t>(pid)};
   return lh::woothash64(i_hash, 16);
 }
 
-uint64_t pass_submatch::hash_node(Node n) {
+uint64_t pass_submatch::hash_node(hhds::Node_class n) {
   uint64_t              h;
   std::vector<uint16_t> i_hash;
-  i_hash.reserve(n.get_num_inp_edges());
-  for (auto e : n.inp_edges()) {
-    i_hash.push_back(static_cast<uint16_t>(e.sink.get_pid()));
+  auto                  edges = n.inp_edges();
+  i_hash.reserve(edges.size());
+  for (const auto& e : edges) {
+    i_hash.push_back(static_cast<uint16_t>(e.sink.get_port_id()));
   }
   h = lh::woothash64(i_hash.data(), i_hash.size() * 2);
-  h = lh::woothash64(&h, 8, static_cast<uint64_t>(n.get_type_op()) & 0xFFFF);
+  h = lh::woothash64(&h, 8, static_cast<uint64_t>(type_op_of(n)) & 0xFFFF);
   return h;
 }
 
 uint32_t pass_submatch::group_score(uint32_t group_size, uint32_t num_nodes) { return group_size * group_size * num_nodes; }
 
-void pass_submatch::find_mffc_group(Lgraph* g) {
+namespace {
+
+// Walk the immediate driver of every graph output. Mirrors the old
+// `each_graph_output` callback shape used by submatch.
+template <typename F>
+void each_graph_output_driver(hhds::Graph* g, F&& fn) {
+  auto gio = g->get_io();
+  if (!gio) {
+    return;
+  }
+  for (const auto& d : gio->get_output_pin_decls()) {
+    auto out_pin = g->get_output_pin(d.name);
+    if (out_pin.is_invalid()) {
+      continue;
+    }
+    auto edges = out_pin.inp_edges();
+    if (edges.empty()) {
+      continue;
+    }
+    fn(edges.front().driver);
+  }
+}
+
+}  // namespace
+
+void pass_submatch::find_mffc_group(hhds::Graph* g) {
   std::cout << "0 - Find MFFCs\n";
 
   uint32_t mffc_id        = 0;
   uint32_t max_mffc_depth = 0;
 
   struct FringeNode {
-    Node::Compact nc;
-    uint64_t      h;
-    uint32_t      depth;
+    hhds::Class_index ci;
+    uint64_t          h;
+    uint32_t          depth;
   };
 
   struct MFFCRoot {
-    Node::Compact nc;
-    uint64_t      h;
+    hhds::Class_index ci;
+    uint64_t          h;
   };
 
   struct MFFCNode {
@@ -103,52 +136,54 @@ void pass_submatch::find_mffc_group(Lgraph* g) {
     uint32_t size;
   };
 
-  absl::flat_hash_set<Node::Compact>           mffc_root_set;
-  std::vector<MFFCRoot>                        mffc_root;
-  std::vector<std::vector<MFFCTree>>           mffc_depth_tree;
-  absl::flat_hash_map<Node::Compact, MFFCNode> mffc;
+  absl::flat_hash_set<hhds::Class_index>           mffc_root_set;
+  std::vector<MFFCRoot>                            mffc_root;
+  std::vector<std::vector<MFFCTree>>               mffc_depth_tree;
+  absl::flat_hash_map<hhds::Class_index, MFFCNode> mffc;
 
-  g->each_graph_output([&](const Node_pin& pin) {
-    auto node                = pin.get_node();
-    auto h_root              = hash_mffc_root(node);
-    mffc[node.get_compact()] = {mffc_id++, h_root, 0};
-    mffc_root.push_back({node.get_compact(), h_root});
-    mffc_root_set.insert(node.get_compact());
+  each_graph_output_driver(g, [&](const hhds::Pin_class& driver) {
+    auto node                       = driver.get_master_node();
+    auto ci                         = node.get_class_index();
+    auto h_root                     = hash_mffc_root(node);
+    mffc[ci]                        = {mffc_id++, h_root, 0};
+    mffc_root.push_back({ci, h_root});
+    mffc_root_set.insert(ci);
   });
 
-  for (auto& node : g->forward()) {
-    if (node.get_num_out_edges() == 1) {
+  for (auto node : g->forward_class()) {
+    if (node.out_edges().size() == 1) {
       continue;
     }
-    auto h_root              = hash_mffc_root(node);
-    mffc[node.get_compact()] = {mffc_id++, h_root, 0};
-    mffc_root.push_back({node.get_compact(), h_root});
-    mffc_root_set.insert(node.get_compact());
+    auto ci                         = node.get_class_index();
+    auto h_root                     = hash_mffc_root(node);
+    mffc[ci]                        = {mffc_id++, h_root, 0};
+    mffc_root.push_back({ci, h_root});
+    mffc_root_set.insert(ci);
   }
 
   for (uint32_t id = 0; id < mffc_id; ++id) {
     uint32_t               mffc_size = 1;
     std::queue<FringeNode> fringe;
-    fringe.push({mffc_root[id].nc, mffc_root[id].h, 0});
+    fringe.push({mffc_root[id].ci, mffc_root[id].h, 0});
     mffc_depth_tree.push_back({{mffc_root[id].h, 1}});
     for (uint32_t mffc_depth = 1; fringe.size() > 0; ++mffc_depth) {
       std::vector<uint64_t> i_hash;
       while (fringe.size()) {
-        auto nc_sink = fringe.front().nc;
+        auto ci_sink = fringe.front().ci;
         auto depth   = fringe.front().depth;
         auto h_sink  = fringe.front().h;
         if (depth + 1 > mffc_depth) {
           break;
         }
         fringe.pop();
-        for (auto e : nc_sink.get_node(g).inp_edges()) {
-          auto nc_driver = e.driver.get_node().get_compact();
-          if (mffc_root_set.contains(nc_driver) || mffc.contains(nc_driver)) {
+        for (auto e : g->get_node(ci_sink).inp_edges()) {
+          auto ci_driver = e.driver.get_master_node().get_class_index();
+          if (mffc_root_set.contains(ci_driver) || mffc.contains(ci_driver)) {
             continue;
           }
-          auto h_driver   = hash_mffc_node(e.driver.get_node(), h_sink, e.sink.get_pid());
-          mffc[nc_driver] = {mffc[nc_sink].id, h_driver, depth + 1};
-          fringe.push({nc_driver, h_driver, depth + 1});
+          auto h_driver   = hash_mffc_node(e.driver.get_master_node(), h_sink, e.sink.get_port_id());
+          mffc[ci_driver] = {mffc[ci_sink].id, h_driver, depth + 1};
+          fringe.push({ci_driver, h_driver, depth + 1});
           i_hash.push_back(h_driver);
         }
         mffc_size++;
@@ -198,55 +233,50 @@ void pass_submatch::find_mffc_group(Lgraph* g) {
   }
 }
 
-void pass_submatch::find_subs(Lgraph* g) {
-  // Topological Sort
+void pass_submatch::find_subs(hhds::Graph* g) {
+  // Topological Sort: start from drivers of graph outputs and walk back.
   std::cout << "1 - Topological Sort\n";
-  std::vector<Node::Compact>         sorted_compact_nodes;
-  absl::flat_hash_set<Node::Compact> visited;
-  std::queue<Node::Compact>          node_queue;
-  g->each_graph_output([&](const Node_pin& pin) {
-    node_queue.push(pin.get_node().get_compact());
+  std::vector<hhds::Class_index>         sorted_class_nodes;
+  absl::flat_hash_set<hhds::Class_index> visited;
+  std::queue<hhds::Class_index>          node_queue;
+  each_graph_output_driver(g, [&](const hhds::Pin_class& driver) {
+    node_queue.push(driver.get_master_node().get_class_index());
     while (!node_queue.empty()) {
-      auto node = Node(g, node_queue.front());
+      auto ci = node_queue.front();
       node_queue.pop();
-      if (visited.count(node.get_compact())) {
+      if (visited.count(ci)) {
         continue;
       }
-      sorted_compact_nodes.emplace_back(node.get_compact());
-      visited.insert(node.get_compact());
-      for (auto e : node.inp_edges()) {
-        auto node_drv = e.driver.get_node();
-        node_queue.push(node_drv.get_compact());
+      sorted_class_nodes.emplace_back(ci);
+      visited.insert(ci);
+      for (auto e : g->get_node(ci).inp_edges()) {
+        node_queue.push(e.driver.get_master_node().get_class_index());
       }
     }
   });
-  // FIXME: Backward iterator is not working
-  // for (const auto &node : g->backward()) {
-  //  std::print("node = {}\n", node.debug_name());
-  //   sorted_compact_nodes.emplace_back(node.get_compact());
-  // }
 
-  std::reverse(sorted_compact_nodes.begin(), sorted_compact_nodes.end());
+  std::reverse(sorted_class_nodes.begin(), sorted_class_nodes.end());
 
   // Construct
   // (1) Node <-> (Depth, Hash) Map  : Query node for hash
   // (2) Depth - (Hash <-> Node) Map : Query equivalence trees with given depths
   // Time/Space Complexity = O(V x DEPTH)
   std::cout << "2 - Construct Depth Map\n";
-  absl::flat_hash_map<Node::Compact, std::vector<uint64_t>>              node2depth_hash;
-  std::vector<absl::flat_hash_map<uint64_t, std::vector<Node::Compact>>> depth_hash2node;
-  for (const auto& compact_node : sorted_compact_nodes) {
-    auto node = Node(g, compact_node);
+  absl::flat_hash_map<hhds::Class_index, std::vector<uint64_t>>              node2depth_hash;
+  std::vector<absl::flat_hash_map<uint64_t, std::vector<hhds::Class_index>>> depth_hash2node;
+  for (const auto& ci : sorted_class_nodes) {
+    auto node = g->get_node(ci);
     for (size_t depth = 0; depth < submatch_depth; ++depth) {
       size_t                max_depth = 0;
       std::vector<uint64_t> i_hash;
       for (auto e : node.inp_edges()) {
-        auto it = node2depth_hash.find(e.driver.get_node().get_compact());
+        auto drv_ci = e.driver.get_master_node().get_class_index();
+        auto it     = node2depth_hash.find(drv_ci);
         if (it == node2depth_hash.end() || depth == 0) {
-          i_hash.emplace_back(e.sink.get_pid());
+          i_hash.emplace_back(e.sink.get_port_id());
         } else {
           auto subtree_depth = std::min(it->second.size(), depth);
-          i_hash.emplace_back(it->second[subtree_depth - 1] ^ e.sink.get_pid());
+          i_hash.emplace_back(it->second[subtree_depth - 1] ^ e.sink.get_port_id());
           max_depth = std::max(subtree_depth, max_depth);
         }
       }
@@ -255,21 +285,21 @@ void pass_submatch::find_subs(Lgraph* g) {
       }
       std::sort(i_hash.begin(), i_hash.end());
       uint64_t h = lh::woothash64(i_hash.data(), i_hash.size() * 8);
-      uint64_t n = static_cast<uint64_t>(node.get_type_op());
+      uint64_t n = static_cast<uint64_t>(type_op_of(node));
       h          = lh::waterhash(&n, 4, h & 0xFFFF);
       if (depth == 0) {
-        node2depth_hash[node.get_compact()].clear();
+        node2depth_hash[ci].clear();
       }
-      node2depth_hash[node.get_compact()].emplace_back(h);
+      node2depth_hash[ci].emplace_back(h);
 
       if (depth_hash2node.size() <= depth) {
-        depth_hash2node.emplace_back(absl::flat_hash_map<uint64_t, std::vector<Node::Compact>>());
+        depth_hash2node.emplace_back();
       }
       if (depth_hash2node[depth].count(h)) {
-        depth_hash2node[depth][h].emplace_back(node.get_compact());
+        depth_hash2node[depth][h].emplace_back(ci);
       } else {
         depth_hash2node[depth][h].clear();
-        depth_hash2node[depth][h].emplace_back(node.get_compact());
+        depth_hash2node[depth][h].emplace_back(ci);
       }
     }
   }
@@ -278,70 +308,65 @@ void pass_submatch::find_subs(Lgraph* g) {
   // Time/Space Complexity = O(V x DEPTH)
   std::cout << "3 - Construct Height Map\n";
   struct Root_hash {
-    Node::Compact root;
-    uint64_t      hash;
-    Root_hash(Node::Compact r, uint64_t h) : root(r), hash(h) {}
+    hhds::Class_index root;
+    uint64_t          hash;
+    Root_hash(hhds::Class_index r, uint64_t h) : root(r), hash(h) {}
   };
 
-  absl::flat_hash_map<Node::Compact, std::vector<Root_hash>>             node2height_hash;
-  std::vector<absl::flat_hash_map<uint64_t, std::vector<Node::Compact>>> height_hash2node;
-  for (const auto& compact_node : sorted_compact_nodes) {
-    bool     has_output = true;
-    Node     node       = Node(g, compact_node);
-    uint64_t pid;
-    uint64_t n                     = static_cast<uint64_t>(node.get_type_op());
-    uint64_t h                     = lh::woothash64(&n, 8);
-    node2height_hash[compact_node] = {Root_hash(compact_node, h)};
+  absl::flat_hash_map<hhds::Class_index, std::vector<Root_hash>>             node2height_hash;
+  std::vector<absl::flat_hash_map<uint64_t, std::vector<hhds::Class_index>>> height_hash2node;
+  for (const auto& ci : sorted_class_nodes) {
+    bool             has_output = true;
+    hhds::Node_class node       = g->get_node(ci);
+    uint64_t         pid        = 0;
+    uint64_t         n          = static_cast<uint64_t>(type_op_of(node));
+    uint64_t         h          = lh::woothash64(&n, 8);
+    node2height_hash[ci]        = {Root_hash(ci, h)};
     for (uint64_t height = 1; has_output; ++height) {
       has_output = false;
       // Only trace one output edge
       // TODO: Better way to get the first out_edges()?
       for (auto e : node.out_edges()) {
-        node       = e.sink.get_node();
-        pid        = e.sink.get_pid();
+        node       = e.sink.get_master_node();
+        pid        = e.sink.get_port_id();
         has_output = true;
         break;
       }
       if (!has_output) {
         break;
       }
-      if (node2depth_hash[node.get_compact()].size() < height) {
+      auto node_ci = node.get_class_index();
+      if (node2depth_hash[node_ci].size() < height) {
         break;
       }
-      h ^= node2depth_hash[node.get_compact()][height - 1];
+      h ^= node2depth_hash[node_ci][height - 1];
       h = lh::waterhash(&h, 4, pid & 0xFFFF);
-      node2height_hash[compact_node].emplace_back(Root_hash(node.get_compact(), h));
+      node2height_hash[ci].emplace_back(Root_hash(node_ci, h));
 
       if (height_hash2node.size() < height) {
-        height_hash2node.emplace_back(absl::flat_hash_map<uint64_t, std::vector<Node::Compact>>());
+        height_hash2node.emplace_back();
       }
       if (height_hash2node[height - 1].count(h)) {
-        height_hash2node[height - 1][h].emplace_back(compact_node);
+        height_hash2node[height - 1][h].emplace_back(ci);
       } else {
-        height_hash2node[height - 1][h] = {compact_node};
+        height_hash2node[height - 1][h] = {ci};
       }
     }
   }
 
   // Iterative Matching
-  // Heuristic:
-  // (1) Pick trees with the highest score (#shared * depth^2) as primary candidate trees
-  // (2) Add matching subtrees while traversing the primary candidate trees
-  // (3) Commit matching trees
-  // (4) Mark nodes in matching trees as "used"
   std::cout << "4 - Iterative Matching\n";
   const int MAX_ITER = 1;
   for (size_t iter = 0; iter < MAX_ITER; ++iter) {
-    // Step (1)
     int      best_score = 0;
-    uint64_t h_best;
-    uint8_t  d_best;
+    uint64_t h_best     = 0;
+    uint8_t  d_best     = 0;
     for (size_t depth = 1; depth < depth_hash2node.size(); ++depth) {
       for (const auto& [hash, vec] : depth_hash2node[depth]) {
-        int score = (vec.size() - 1) * depth * depth;
+        int score = (static_cast<int>(vec.size()) - 1) * static_cast<int>(depth) * static_cast<int>(depth);
         if (score >= best_score) {
           h_best     = hash;
-          d_best     = depth;
+          d_best     = static_cast<uint8_t>(depth);
           best_score = score;
         }
       }
@@ -351,54 +376,51 @@ void pass_submatch::find_subs(Lgraph* g) {
     }
     std::print("Candidate - D={} : {}\n", d_best, depth_hash2node[d_best][h_best].size());
 
-    // Step (2)
-    absl::flat_hash_set<Node::Compact> root_set;
-    absl::flat_hash_set<Node::Compact> global_node_set;
-    absl::flat_hash_set<Node::Compact> shared_node_set;
+    absl::flat_hash_set<hhds::Class_index> root_set;
+    absl::flat_hash_set<hhds::Class_index> global_node_set;
+    absl::flat_hash_set<hhds::Class_index> shared_node_set;
 
     for (auto root : depth_hash2node[d_best][h_best]) {
       root_set.insert(root);
     }
 
     for (auto root : root_set) {
-      absl::flat_hash_set<Node::Compact>      tree_node_set;
-      std::function<void(Node::Compact, int)> traverse_tree = [&](Node::Compact nc, int depth) -> void {
+      absl::flat_hash_set<hhds::Class_index>      tree_node_set;
+      std::function<void(hhds::Class_index, int)> traverse_tree = [&](hhds::Class_index ci, int depth) -> void {
         if (depth > d_best) {
           return;
         }
-        if (tree_node_set.count(nc)) {
+        if (tree_node_set.count(ci)) {
           return;
         }
-        tree_node_set.insert(nc);
-        if (global_node_set.count(nc)) {
-          shared_node_set.insert(nc);
+        tree_node_set.insert(ci);
+        if (global_node_set.count(ci)) {
+          shared_node_set.insert(ci);
         }
-        // for (int i = 0; i < depth; ++i) std::cout << " ";
-        // std::print("{}\n", Node(g, nc).debug_name());
-        for (auto e : Node(g, nc).inp_edges()) {
-          traverse_tree(e.driver.get_node().get_compact(), depth + 1);
+        for (auto e : g->get_node(ci).inp_edges()) {
+          traverse_tree(e.driver.get_master_node().get_class_index(), depth + 1);
         }
       };
       traverse_tree(root, 0);
-      for (auto nc : tree_node_set) {
-        global_node_set.insert(nc);
+      for (auto ci : tree_node_set) {
+        global_node_set.insert(ci);
       }
     }
 
-    std::print("#Nodes:         {}\n", sorted_compact_nodes.size());
+    std::print("#Nodes:         {}\n", sorted_class_nodes.size());
     std::print("#Nodes covered: {}\n", global_node_set.size());
     std::print("#Nodes shared:  {}\n", shared_node_set.size());
 
-    absl::flat_hash_map<Node::Compact, Node::Compact>                 leaf2root;
-    absl::flat_hash_map<uint64_t, absl::flat_hash_set<Node::Compact>> hash2leaf;
-    for (const auto& [nc, vec] : node2height_hash) {
+    absl::flat_hash_map<hhds::Class_index, hhds::Class_index>                 leaf2root;
+    absl::flat_hash_map<uint64_t, absl::flat_hash_set<hhds::Class_index>>     hash2leaf;
+    for (const auto& [ci, vec] : node2height_hash) {
       for (size_t d = 0; d < d_best && d < vec.size(); ++d) {
-        if (shared_node_set.count(nc)) {
+        if (shared_node_set.count(ci)) {
           continue;
         }
         if (root_set.count(vec[d].root)) {
-          leaf2root[nc] = vec[d].root;
-          hash2leaf[vec[d].hash].insert(nc);
+          leaf2root[ci] = vec[d].root;
+          hash2leaf[vec[d].hash].insert(ci);
         }
       }
     }
@@ -407,15 +429,5 @@ void pass_submatch::find_subs(Lgraph* g) {
       std::print("Subtree: {} -> {}", hash, leaves.size());
       std::cout << "\n";
     }
-
-    // std::cout << "\nMatched Subtrees\n";
-    // for (const auto &[hash, vec] : hash2root_leaf) {
-    //   if (vec.size() < 2) continue;
-    //   std::cout << " >";
-    //   for (const auto &rl : vec) {
-    //     std::print("( {} -> {}({}) )", Node(g, rl.root).debug_name(), Node(g, rl.leaf).debug_name(), rl.depth);
-    //   }
-    //   std::cout << "\n";
-    // }
   }
 }
