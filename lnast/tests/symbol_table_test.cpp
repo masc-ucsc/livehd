@@ -1,6 +1,7 @@
 
 #include "symbol_table.hpp"
 
+#include "bundle.hpp"
 #include "gmock/gmock.h"
 #include "gtest/gtest.h"
 #include "lrand.hpp"
@@ -169,4 +170,155 @@ TEST_F(Symbol_table_test, ordered_check) {
   EXPECT_FALSE(bundle->is_ordered("bar"));
 
   st.leave_scope();
+}
+
+// bundle_flat_storage Phase 1 — Canonical_less comparator semantics.
+TEST_F(Symbol_table_test, canonical_less_segment_category) {
+  Bundle::Canonical_less less;
+
+  // attrs first
+  EXPECT_TRUE(less("__bits", "a"));
+  EXPECT_FALSE(less("a", "__bits"));
+
+  // named before unnamed
+  EXPECT_TRUE(less("a", "0"));
+  EXPECT_FALSE(less("0", "a"));
+
+  // attrs first vs unnamed
+  EXPECT_TRUE(less("__bits", "0"));
+  EXPECT_FALSE(less("0", "__bits"));
+}
+
+TEST_F(Symbol_table_test, canonical_less_numeric_within_unnamed) {
+  Bundle::Canonical_less less;
+
+  // numeric, not lex: "2" < "10"
+  EXPECT_TRUE(less("2", "10"));
+  EXPECT_FALSE(less("10", "2"));
+
+  // and at nested depth
+  EXPECT_TRUE(less("a.2", "a.10"));
+  EXPECT_FALSE(less("a.10", "a.2"));
+}
+
+TEST_F(Symbol_table_test, canonical_less_alpha_within_named) {
+  Bundle::Canonical_less less;
+
+  EXPECT_TRUE(less("alpha", "beta"));
+  EXPECT_FALSE(less("beta", "alpha"));
+  EXPECT_TRUE(less("a.foo", "a.zzz"));
+  EXPECT_FALSE(less("a.zzz", "a.foo"));
+}
+
+TEST_F(Symbol_table_test, canonical_less_prefix_orders_first) {
+  Bundle::Canonical_less less;
+
+  // shorter prefix sorts before its extensions at the same level
+  EXPECT_TRUE(less("a", "a.b"));
+  EXPECT_FALSE(less("a.b", "a"));
+}
+
+TEST_F(Symbol_table_test, canonical_less_attrs_within_named_subtree) {
+  Bundle::Canonical_less less;
+
+  // a.__bits sorts before a.0, a.foo (attrs first within level)
+  EXPECT_TRUE(less("a.__bits", "a.foo"));
+  EXPECT_TRUE(less("a.__bits", "a.0"));
+  EXPECT_FALSE(less("a.foo", "a.__bits"));
+}
+
+TEST_F(Symbol_table_test, canonical_less_strict_weak_ordering) {
+  Bundle::Canonical_less less;
+
+  // irreflexive
+  EXPECT_FALSE(less("a", "a"));
+  EXPECT_FALSE(less("a.b.0", "a.b.0"));
+
+  // antisymmetric on a sample
+  for (auto k1 : {"__bits", "a", "a.0", "a.10", "a.2", "a.__bits", "a.b.0", "b", "0", "10", "2"}) {
+    for (auto k2 : {"__bits", "a", "a.0", "a.10", "a.2", "a.__bits", "a.b.0", "b", "0", "10", "2"}) {
+      if (less(k1, k2)) {
+        EXPECT_FALSE(less(k2, k1)) << k1 << " vs " << k2;
+      }
+    }
+  }
+}
+
+// bundle_flat_storage Phase 1 — Top_level_entry collapse rule.
+TEST_F(Symbol_table_test, top_levels_collapse_and_has_leafs) {
+  auto bundle = std::make_shared<Bundle>("tlcollapse");
+
+  // scalar 'a', single-named-sub 'f.foo', multi-unnamed 'x.0' + 'x.1'.
+  bundle->set("a",     *Dlop::create_integer(3));
+  bundle->set("f.foo", *Dlop::create_integer(44));
+  bundle->set("x.0",   *Dlop::create_integer(10));
+  bundle->set("x.1",   *Dlop::create_integer(20));
+
+  auto tls = bundle->top_levels();
+  ASSERT_EQ(tls.size(), 3u);
+
+  // canonical order: named alphabetical first
+  auto it = tls.begin();
+  EXPECT_EQ(it->name, "a");
+  EXPECT_EQ(it->pos, -1);
+  EXPECT_EQ(it->leaf_count, 1u);
+  EXPECT_FALSE(it->has_leafs);
+  EXPECT_TRUE(it->scalar.same_repr(*Dlop::create_integer(3)));
+
+  ++it;
+  EXPECT_EQ(it->name, "f");
+  EXPECT_EQ(it->leaf_count, 1u);
+  EXPECT_TRUE(it->has_leafs);
+  EXPECT_TRUE(it->scalar.same_repr(*Dlop::create_integer(44)));
+
+  ++it;
+  EXPECT_EQ(it->name, "x");
+  EXPECT_EQ(it->leaf_count, 2u);
+  EXPECT_TRUE(it->has_leafs);
+  EXPECT_TRUE(it->scalar.is_invalid());
+}
+
+TEST_F(Symbol_table_test, top_levels_named_and_unnamed_orthogonal) {
+  auto bundle = std::make_shared<Bundle>("orthogonal");
+
+  bundle->set("b", *Dlop::create_integer(3));
+  bundle->set("0", *Dlop::create_integer(0));
+
+  auto tls = bundle->top_levels();
+  ASSERT_EQ(tls.size(), 2u);
+
+  // canonical order: named ('b') before unnamed ('0')
+  auto it = tls.begin();
+  EXPECT_EQ(it->name, "b");
+  EXPECT_EQ(it->pos, -1);
+  EXPECT_TRUE(it->scalar.same_repr(*Dlop::create_integer(3)));
+
+  ++it;
+  EXPECT_EQ(it->pos, 0);
+  EXPECT_TRUE(it->name.empty());
+  EXPECT_TRUE(it->scalar.same_repr(*Dlop::create_integer(0)));
+
+  EXPECT_TRUE(bundle->has_top_named("b"));
+  EXPECT_FALSE(bundle->has_top_named("a"));
+  EXPECT_TRUE(bundle->has_top_unnamed(0));
+  EXPECT_FALSE(bundle->has_top_unnamed(1));
+}
+
+TEST_F(Symbol_table_test, entries_view_skips_attrs) {
+  auto bundle = std::make_shared<Bundle>("attrs_skip");
+
+  bundle->set("a",         *Dlop::create_integer(3));
+  bundle->set("a.__bits",  *Dlop::create_integer(8));
+  bundle->set("b",         *Dlop::create_integer(5));
+
+  auto all = bundle->entries();
+  auto na  = bundle->non_attr_entries();
+  auto at  = bundle->get_attrs();
+
+  EXPECT_EQ(all.size(), 3u);
+  EXPECT_EQ(na.size(), 2u);
+  EXPECT_EQ(at.size(), 1u);
+
+  auto tls = bundle->top_levels();
+  EXPECT_EQ(tls.size(), 2u);  // 'a' and 'b' only
 }

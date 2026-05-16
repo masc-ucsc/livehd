@@ -6,8 +6,8 @@ and the LNAST half of HIF persistence have been replaced by HHDS
 `core/graph_core*.hpp`) is deferred to a separate effort.
 
 This doc records the *resulting* shape of LiveHD's tree layer and the
-design decisions behind it. Phase 7 (Forest-centric ownership for upass)
-is still planned and is captured at the end.
+design decisions behind it. Forest-centric ownership (clone/replace via
+`TreeIO::replace`) has landed; its shape is captured in §7.
 
 ## 1. Goal and scope
 
@@ -156,11 +156,13 @@ shims for diagnostic-print sites that still ask for legacy `(level,
 pos)` / hash on a `Node_class`. **Why:** there are many such sites; a
 shim header lets them keep printing without each becoming a port.
 
-## 7. Phase 7 (planned) — Forest-centric ownership and clone/replace
+## 7. Forest-centric ownership and clone/replace
 
-This phase is **not landed**. It targets HHDS top
-`1f0e8c8770e32fc6a6c2fa6651e9af5957889697`, which adds threaded Forest
-plus `Tree::clone()` / `TreeIO::replace()`.
+Landed (HHDS Forest threaded model + `Tree::clone()` / `TreeIO::replace()`).
+Live in `lnast/lnast.{hpp,cpp}` (`Lnast::replace_body`,
+`forest()->create_tree_temp(...)`) and `upass/runner/upass_runner.cpp`
+(`staging_body` build/swap), and consumed by `upass/ssa/upass_ssa.cpp`,
+`upass/bitwidth/`, and `inou/lnast/pass_lnast_load.cpp`.
 
 ### 7.1 Why
 
@@ -202,21 +204,20 @@ next `get_tree()` call.
 
 ### 7.2.1 Partition descriptor as tree-level attribute
 
-Each tree carries a `Partition` descriptor (see `architecture.md §3`)
-as a tree-scope attribute on the `hhds::Tree`: kind
-(`comb`/`pipe`/`mod`), latency range, clock domain, port list,
+Each tree is intended to carry a `Partition` descriptor (see
+`architecture.md §3`) as a tree-scope attribute on the `hhds::Tree`:
+kind (`comb`/`pipe`/`mod`), latency range, clock domain, port list,
 external boundaries, and the `interface_hash` / `state_shape_hash`
-content hashes. The clone/replace dance from §7.2 must preserve the
-descriptor on the new body — it is part of the partition's identity,
-not the tree body. `TreeIO::replace` should be passed (or recompute)
-the descriptor at swap time.
+content hashes. The descriptor is partition identity, not tree body,
+so the clone/replace dance from §7.2 must preserve it on the new body
+— `TreeIO::replace` should be passed (or recompute) the descriptor at
+swap time. Tracked as **3c** in [TODO_livehd.md](../../TODO_livehd.md).
 
-### 7.3 Out of scope for Phase 7
+### 7.3 Out of scope (still deferred)
 
 - Hoisting Forest ownership to `Eprp_var` so every LNAST in a run shares
-  one Forest. Each `Lnast` still owns a private Forest in this phase.
-  Required later for cross-module hierarchy via `set_subnode` /
-  `add_reference`.
+  one Forest. Each `Lnast` still owns a private Forest today. Required
+  later for cross-module hierarchy via `set_subnode` / `add_reference`.
 - Switching `Eprp_var::lnasts` from `vector<shared_ptr<Lnast>>` to
   `vector<shared_ptr<TreeIO>>`. Bigger surface change; deferred.
 - Removing `Eprp_var::replace`. The pointer-swap variant is left in
@@ -236,12 +237,6 @@ the descriptor at swap time.
    `(level, pos)` struct. Anywhere code stored a positional handle
    long-term and assumed positional stability across mutations needs
    review against the side-map convention in §4.
-4. **`inou/prp` end-to-end pyrope tests.** 23 failures concentrated in
-   `//inou/prp:prp-*` after the migration. Constprop's verifier reports
-   unresolved cassert operands on tests that previously passed.
-   Suspect: how the new attribute-backed `set_data` / `get_data`
-   round-trips interact with `Symbol_table` keys (`get_sname` mixing
-   name+subs). Open for a focused debug pass.
 5. **Forest sharing semantics for hierarchy.** `lgraph::Hierarchy`
    stores per-instance state. Decide whether each hierarchical
    instance is a separate Forest tree (instance-data via
@@ -254,13 +249,7 @@ the descriptor at swap time.
    prevent phase 1 from racing on another tree's half-built body, the
    Forest needs to track, per tree:
    - `local_done` (atomic bool) — flipped true *after* tree_ios is
-     fully published with `bits`/`min`/`max` on every leaf and the
-     tree-level `Inline_reason` is set.
-   - `cache_origin` (`fresh` | `incremental`) — phase 1 may consume a
-     tree only when `local_done && cache_origin == incremental`;
-     otherwise the consumer must defer to phase 2.
-   - `inline_reason` (enum from `import.md §Inline marker`) — single
-     read tells phase 2 whether to inline the body or emit a call.
+     fully published (may or not may have `bits`/`min`/`max`).
 
    These fields live on the Forest, not on `hhds::Tree`, so the
    `Tree::clone()` / `TreeIO::replace()` swap dance from §7 does not

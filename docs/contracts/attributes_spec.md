@@ -1,12 +1,20 @@
-# attribute_todo — Pyrope attribute handling in upass
+# attributes_spec — Pyrope attribute handling in upass
 
 Spec: `../docs/docs/pyrope/04b-attributes.md`.
 Existing related design: `upass/upass.md` (Slice 5: `attr_set` side-map; Slice 6: tuple flattening).
 
-`inou/prp` already emits attributes into the LNAST (`attr_set` / `attr_get`
-nodes). This document plans the **attribute pass** that consumes them inside
-upass and decides, for each attribute, whether it is consumed in upass,
-lowered to an LGraph wiring directive, passed through as a hint, or errored.
+**Status:** Phases 1–7 of §3 are landed in `upass/attributes/`
+(`upass_attributes_sticky.cpp`, `upass_attributes_phase2.cpp` …
+`upass_attributes_phase6.cpp`, `upass_attributes_handler.cpp`). This
+document is the normative reference for the attribute pass; it is no
+longer a work plan. Sub-items still open are tracked in
+[../../TODO_prp.md](../../TODO_prp.md) (Pyrope-semantics work) and
+[../../TODO_livehd.md](../../TODO_livehd.md) (infra refactors).
+
+`inou/prp` emits attributes into the LNAST (`attr_set` / `attr_get` nodes).
+The attribute pass consumes them inside upass and decides, for each
+attribute, whether it is consumed in upass, lowered to an LGraph wiring
+directive, passed through as a hint, or errored.
 
 ## 0. Goals
 

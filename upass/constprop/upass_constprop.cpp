@@ -141,42 +141,26 @@ void uPass_constprop::process_assign() {
       // `mut tup0 = (0, y=1)`) — that's a plain initializer, not a typed
       // shape, and the user expects subsequent assignments to fully
       // replace. Also skip when RHS carries names of its own (full copy).
-      auto existing  = st.get_bundle(lhs_text);
-      auto first_seg = [](const std::string& k) -> std::string_view {
-        auto dot = k.find('.');
-        return dot == std::string::npos ? std::string_view{k} : std::string_view{k}.substr(0, dot);
-      };
+      auto existing = st.get_bundle(lhs_text);
       bool do_merge = false;
-      // LHS named slots in canonical (alphabetical) order, deduped on
-      // first-level segment so nested entries (`x.b`, `x.c`) collapse to
-      // one slot `x`.
+      // LHS named slots in canonical (alphabetical) order via top_levels().
+      // Nested entries (`x.b`, `x.c`) collapse to one Top_level_entry by
+      // construction, so no manual de-duplication is needed.
       std::vector<std::string> lhs_named_order;
-      std::set<std::string>    lhs_named_seen;
-      if (existing && existing.get() != rhs_bundle.get() && !existing->get_map().empty()) {
+      if (existing && existing.get() != rhs_bundle.get() && !existing->non_attr_entries().empty()) {
         bool lhs_has_unnamed = false;
-        for (const auto& e : existing->get_map()) {
-          if (Bundle::is_attribute(e.first)) {
-            continue;
-          }
-          auto seg = first_seg(e.first);
-          if (is_named_top(seg)) {
-            auto seg_s = std::string(seg);
-            if (lhs_named_seen.insert(seg_s).second) {
-              lhs_named_order.push_back(std::move(seg_s));
-            }
+        for (const auto& tl : existing->top_levels()) {
+          if (tl.pos < 0) {
+            lhs_named_order.emplace_back(tl.name);
           } else {
-            // Unnamed entry — LHS isn't a pure typed shape; bail.
             lhs_has_unnamed = true;
             break;
           }
         }
         bool rhs_pure_positional = true;
         if (!lhs_has_unnamed && !lhs_named_order.empty()) {
-          for (const auto& e : rhs_bundle->get_map()) {
-            if (Bundle::is_attribute(e.first)) {
-              continue;
-            }
-            if (is_named_top(first_seg(e.first))) {
+          for (const auto& tl : rhs_bundle->top_levels()) {
+            if (tl.pos < 0) {
               rhs_pure_positional = false;
               break;
             }
@@ -190,11 +174,8 @@ void uPass_constprop::process_assign() {
         auto merged = std::make_shared<Bundle>(std::string(lhs_text));
         // Start by copying LHS shape verbatim (incl. nil placeholders and
         // any nested sub-entries).
-        for (const auto& lhs_entry : existing->get_map()) {
-          if (Bundle::is_attribute(lhs_entry.first)) {
-            continue;
-          }
-          merged->set(lhs_entry.first, lhs_entry.second);
+        for (const auto& [lhs_key, lhs_ep] : existing->non_attr_entries()) {
+          merged->set(lhs_key, *lhs_ep);
         }
         // Bind each RHS positional value to the next LHS named slot.
         size_t idx = 0;
@@ -444,31 +425,28 @@ static std::optional<Const> compare_bundles_eq(const std::shared_ptr<Bundle cons
   //   - '?' undecidable (invalid scalar, or eq returned unknowns)
   auto walk = [](const std::shared_ptr<Bundle const>& src, const std::shared_ptr<Bundle const>& other) -> char {
     char worst = 't';
-    for (const auto& e : src->get_map()) {
-      if (Bundle::is_attribute(e.first)) {
-        continue;
-      }
-      if (e.second.trivial.is_invalid()) {
+    for (const auto& [k, ep] : src->non_attr_entries()) {
+      if (ep->trivial.is_invalid()) {
         worst = '?';
         continue;
       }
-      if (!other->has_trivial(e.first)) {
+      if (!other->has_trivial(k)) {
         return 'k';
       }
-      const Const& ov = other->get_trivial(e.first);
+      const Const& ov = other->get_trivial(k);
       if (ov.is_invalid()) {
         worst = '?';
         continue;
       }
-      if (ov.same_repr(e.second.trivial)) {
+      if (ov.same_repr(ep->trivial)) {
         continue;
       }
-      const Const eq = *ov.eq_op(e.second.trivial);
+      const Const eq = *ov.eq_op(ep->trivial);
       if (eq.is_known_true()) {
         continue;
       }
       if (eq.is_known_false()) {
-        auto first = Bundle::get_first_level(e.first);
+        auto first = Bundle::get_first_level(k);
         if (is_named_top(first)) {
           if (worst == 't') {
             worst = 'v';
@@ -521,49 +499,17 @@ static std::optional<Const> compare_bundles_eq(const std::shared_ptr<Bundle cons
 // level only, which is enough for the flat-tuple cases the comptime
 // tests exercise. Nested-tuple structural matching can be added later.
 static bool structural_does(const std::shared_ptr<Bundle const>& a, const std::shared_ptr<Bundle const>& b) {
-  // Collect a's first-level shape: which names, and which unnamed positions.
-  std::set<std::string_view> a_names;
-  std::set<int>              a_unnamed_pos;
-  for (const auto& e : a->get_map()) {
-    if (Bundle::is_attribute(e.first)) {
-      continue;
-    }
-    auto first = Bundle::get_first_level(e.first);
-    if (is_named_top(first)) {
-      a_names.insert(first);
-    } else {
-      const auto pos = Bundle::get_first_level_pos(first);
-      if (pos >= 0) {
-        a_unnamed_pos.insert(pos);
-      }
-    }
-  }
-
-  // Walk b's first-level shape; bail as soon as a doesn't cover something.
-  // Track seen names/positions so we don't re-check sub-entries that share
-  // the same first level (`foo.x` and `foo.y` collapse to one check).
-  std::set<std::string_view> seen_names;
-  std::set<int>              seen_pos;
-  for (const auto& e : b->get_map()) {
-    if (Bundle::is_attribute(e.first)) {
-      continue;
-    }
-    auto first = Bundle::get_first_level(e.first);
-    if (is_named_top(first)) {
-      if (seen_names.insert(first).second) {
-        if (a_names.find(first) == a_names.end()) {
-          return false;
-        }
+  // Per top-level segment of b: a must have a matching top-level entry of
+  // the same kind. top_levels() collapses nested keys (`foo.x`/`foo.y`)
+  // into one entry, so each is checked once.
+  for (const auto& tb : b->top_levels()) {
+    if (tb.pos < 0) {
+      if (!a->has_top_named(tb.name)) {
+        return false;
       }
     } else {
-      const auto pos = Bundle::get_first_level_pos(first);
-      if (pos < 0) {
-        continue;
-      }
-      if (seen_pos.insert(pos).second) {
-        if (a_unnamed_pos.find(pos) == a_unnamed_pos.end()) {
-          return false;
-        }
+      if (!a->has_top_unnamed(tb.pos)) {
+        return false;
       }
     }
   }
@@ -580,33 +526,28 @@ static bool structural_does(const std::shared_ptr<Bundle const>& a, const std::s
 // and `(x=1,4) !equals (100,d=4)` (shape differs: named@0/unnamed@1 vs
 // unnamed@0/named@1).
 static bool structural_equals(const std::shared_ptr<Bundle const>& a, const std::shared_ptr<Bundle const>& b) {
-  // After the bundle_sorted refactor, structural equality is:
-  //   - same SET of named-entry first-level names (specific names matter:
-  //     `(x=1) equals (y=1)` is false — `equals` keys on name presence,
-  //     unlike `does` which compares names by exact match too).
-  //   - same NUMBER of distinct unnamed first-level positions.
-  // Top-level sub-bundle nesting (`foo.0`, `foo.1`) collapses to one slot
-  // per first-level key.
-  auto collect_shape = [](const std::shared_ptr<Bundle const>& src) {
-    std::set<std::string_view> named;
-    std::set<int>              unnamed;
-    for (const auto& e : src->get_map()) {
-      if (Bundle::is_attribute(e.first)) {
-        continue;
-      }
-      auto first = Bundle::get_first_level(e.first);
-      if (is_named_top(first)) {
-        named.insert(first);
-        continue;
-      }
-      const int pos = Bundle::get_first_level_pos(first);
-      if (pos >= 0) {
-        unnamed.insert(pos);
-      }
+  // Structural equality is:
+  //   - same SET of named-entry first-level names
+  //   - same SET of unnamed-entry first-level positions
+  // top_levels() yields one entry per first-level segment in canonical
+  // order, so a lockstep walk over the two views answers the question
+  // directly.
+  auto av = a->top_levels();
+  auto bv = b->top_levels();
+  if (av.size() != bv.size()) {
+    return false;
+  }
+  auto ita = av.begin();
+  auto itb = bv.begin();
+  for (; ita != av.end(); ++ita, ++itb) {
+    if (ita->pos != itb->pos) {
+      return false;
     }
-    return std::pair{std::move(named), std::move(unnamed)};
-  };
-  return collect_shape(a) == collect_shape(b);
+    if (ita->name != itb->name) {
+      return false;
+    }
+  }
+  return true;
 }
 
 // process_eq / process_ne with bundle awareness. Falls back to the scalar
@@ -732,13 +673,7 @@ void uPass_constprop::process_eq_ne_impl() {
   // the 1-tuple as a scalar at position 0) hits neither the bundle-eq
   // nor scalar-eq paths and stays unfolded.
   auto bundle_count_non_attr = [](const std::shared_ptr<Bundle const>& b) {
-    int n = 0;
-    for (const auto& e : b->get_map()) {
-      if (!Bundle::is_attribute(e.first)) {
-        ++n;
-      }
-    }
-    return n;
+    return static_cast<int>(b->non_attr_entries().size());
   };
   if (a.bundle && b.bundle) {
     if (auto eq = compare_bundles_eq(a.bundle, b.bundle); eq.has_value()) {
@@ -1006,14 +941,11 @@ void uPass_constprop::process_tuple_concat() {
   auto try_stringify = [&]() -> std::optional<Const> {
     std::vector<Const> entries;
     bool               any_string = false;
-    for (const auto& e : acc->get_map()) {
-      if (Bundle::is_attribute(e.first)) {
-        continue;
-      }
-      if (!Bundle::is_single_level(e.first)) {
+    for (const auto& [k, ep] : acc->non_attr_entries()) {
+      if (!Bundle::is_single_level(k)) {
         return std::nullopt;  // nested sub-bundle — don't try to stringify
       }
-      const auto& v = e.second.trivial;
+      const auto& v = ep->trivial;
       if (v.is_invalid()) {
         return std::nullopt;
       }
@@ -1119,44 +1051,25 @@ struct Bundle_flat_entry {
 };
 
 static std::vector<Bundle_flat_entry> collect_first_level(const std::shared_ptr<Bundle const>& b) {
-  // Iterate the bundle's full key map and group hierarchical keys by their
-  // first-level prefix. Sub-bundle entries (multi-level keys) collapse to a
-  // single Bundle_flat_entry with is_sub_bundle=true; plain single-level
-  // entries record their trivial scalar value.
+  // Per top-level segment of b's non-attr data, materialize a
+  // Bundle_flat_entry. top_levels() already groups by first-level
+  // segment and reports scalar (collapsed when leaf_count == 1) and
+  // has_leafs, so this is now a straight projection.
   std::vector<Bundle_flat_entry> entries;
-  std::map<std::string, size_t>  by_first;
-  for (const auto& kv : b->get_map()) {
-    if (Bundle::is_attribute(kv.first)) {
-      continue;
-    }
-    auto first = Bundle::get_first_level(kv.first);
-    if (first.empty()) {
-      continue;
-    }
-    auto               first_str = std::string(first);
-    auto               it        = by_first.find(first_str);
-    Bundle_flat_entry* e;
-    if (it == by_first.end()) {
-      Bundle_flat_entry n;
-      if (is_named_top(first)) {
-        n.name = first;  // bare name in canonical storage
-      } else {
-        n.pos = Bundle::get_first_level_pos(first);
-      }
-      by_first[first_str] = entries.size();
-      entries.emplace_back(std::move(n));
-      e = &entries.back();
+  for (const auto& tl : b->top_levels()) {
+    Bundle_flat_entry n;
+    if (tl.pos < 0) {
+      n.name = tl.name;  // bare name in canonical storage
     } else {
-      e = &entries[it->second];
+      n.pos = tl.pos;
     }
-    if (Bundle::is_single_level(kv.first)) {
-      if (!e->is_sub_bundle) {
-        e->value = kv.second.trivial;
-      }
+    n.is_sub_bundle = tl.has_leafs;
+    if (tl.has_leafs) {
+      n.value = Dlop::invalid();
     } else {
-      e->is_sub_bundle = true;
-      e->value         = Dlop::invalid();
+      n.value = tl.scalar;
     }
+    entries.emplace_back(std::move(n));
   }
   return entries;
 }

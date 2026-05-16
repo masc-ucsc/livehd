@@ -25,13 +25,65 @@ public:
 
   static inline Const invalid_lconst{};  // default Dlop is Type::Invalid
 
+  // Canonical key ordering used by Bundle storage. Per dotted segment:
+  // attrs (`__foo`) < named (alphabetical) < unnamed (numeric, not lex).
+  // Walks segment-by-segment; shorter prefix sorts before its extensions
+  // at any given level. is_transparent enables string_view lookups in maps.
+  struct Canonical_less {
+    using is_transparent = void;
+    bool operator()(std::string_view a, std::string_view b) const;
+  };
+
+  // Per top-level summary yielded by Bundle::top_levels(). Exactly one
+  // entry per distinct top-level segment in the bundle's non-attribute
+  // data:
+  //   - `name`       = top-level segment when named (pos == -1)
+  //   - `pos`        = top-level unnamed index when unnamed (>= 0)
+  //   - `leaf_count` = number of leaves under this top-level
+  //   - `has_leafs`  = true iff any leaf has a dotted suffix under it
+  //                    (i.e., top-level is a sub-bundle, not a bare scalar)
+  //   - `scalar`     = collapsed scalar value when leaf_count == 1
+  //                    (matches pyrope's `f.foo=44 ⇒ f == 44` rule);
+  //                    invalid otherwise.
+  struct Top_level_entry {
+    std::string_view name;
+    int              pos        = -1;
+    size_t           leaf_count = 0;
+    bool             has_leafs  = false;
+    Const            scalar;
+  };
+
+  // Sorted-iteration views over Bundle data. Materialized on each call
+  // (Phase 1: adapters over the underlying key_map storage). Cheap value
+  // semantics; callers typically range-for or read by index.
+  class Entries_view {
+   public:
+    using Item           = std::pair<std::string_view, const Entry*>;
+    using const_iterator = std::vector<Item>::const_iterator;
+    const_iterator begin() const { return items_.begin(); }
+    const_iterator end()   const { return items_.end();   }
+    bool           empty() const { return items_.empty(); }
+    size_t         size()  const { return items_.size();  }
+    std::vector<Item> items_;
+  };
+
+  class Top_levels_view {
+   public:
+    using const_iterator = std::vector<Top_level_entry>::const_iterator;
+    const_iterator begin() const { return items_.begin(); }
+    const_iterator end()   const { return items_.end();   }
+    bool           empty() const { return items_.empty(); }
+    size_t         size()  const { return items_.size();  }
+    std::vector<Top_level_entry> items_;
+  };
+
 protected:
-  using Key_map_type = std::vector<std::pair<std::string, Entry>>;
-  // bundle_sorted plan §3 storage split: three side-containers indexed by
-  // first-segment category. Eagerly rebuilt from key_map at the end of every
-  // mutation; queries read them directly for O(1)/O(log N) answers.
-  using Named_map_type   = std::map<std::string, Entry>;
-  using Unnamed_map_type = std::map<int, Named_map_type>;
+  // bundle_flat_storage Phase 3 — primary storage is a single sorted
+  // map keyed by canonical dotted path. Canonical_less yields canonical
+  // iteration order: per dotted level, attrs first, then named
+  // alphabetical, then unnamed numeric. Lookups by exact key are
+  // O(log N); sub-tree scans use lower_bound("prefix.") + walk.
+  using Key_map_type = std::map<std::string, Entry, Canonical_less>;
 
   const std::string name;
 
@@ -40,19 +92,6 @@ protected:
   mutable bool         immutable;
   mutable bool         correct;
   mutable Key_map_type key_map;
-
-  // Side-indices, derived from key_map. attrs_ and named_ are keyed by the
-  // full key (alphabetical); unnamed_ is a nested map outer-keyed by the
-  // first-segment integer so unnamed_.size() is exactly the number of
-  // distinct unnamed top-level positions in O(1).
-  mutable Named_map_type   attrs_;
-  mutable Named_map_type   named_;
-  mutable Unnamed_map_type unnamed_;
-
-  void sort_key_map();
-  // Rebuild attrs_/named_/unnamed_ from key_map. Cheap (O(N log N)) and run
-  // at the end of every public mutation point.
-  void rebuild_indices() const;
 
   // Normalize the textual key on the way into the bundle. The canonical
   // storage convention is:
@@ -83,8 +122,6 @@ public:
 
   bool has_trivial(std::string_view key) const;
   bool has_trivial() const { return has_trivial("0"); }
-
-  std::string learn_fix(std::string_view key);
 
   const Entry& get_entry(std::string_view key) const;
   const Const& get_trivial(std::string_view key) const { return get_entry(key).trivial; }
@@ -121,10 +158,6 @@ public:
   bool concat(const std::shared_ptr<Bundle const>& tup2);
   bool concat(const Const& trivial);
 
-  const Key_map_type& get_map() const { return key_map; }
-  const Key_map_type& get_sort_map() const;
-  Const               flatten() const;
-
   std::string_view get_scalar_name() const;  // empty if not scalar
 
   bool is_empty() const { return key_map.empty(); }
@@ -132,13 +165,34 @@ public:
   bool is_trivial_scalar() const;
   bool has_just_attributes() const;
 
-  // bundle_sorted §3 query API. Side-indices are kept in sync with key_map;
-  // these are the canonical O(1) shape checks the plan calls for.
-  size_t unnamed_top_count() const { return unnamed_.size(); }
-  size_t named_top_count() const { return named_.size(); }
-  size_t attrs_top_count() const { return attrs_.size(); }
-  bool   has_named_top() const { return !named_.empty(); }
-  bool   has_unnamed_top() const { return !unnamed_.empty(); }
+  // bundle_flat_storage query API. All counts and presence checks
+  // compute on demand from key_map; results match the canonical
+  // semantics (attrs counted once; named/unnamed counted by distinct
+  // top-level segment).
+  size_t unnamed_top_count() const;
+  size_t named_top_count() const;
+  size_t attrs_top_count() const;
+  bool   has_named_top() const { return named_top_count() > 0; }
+  bool   has_unnamed_top() const { return unnamed_top_count() > 0; }
+
+  // bundle_flat_storage Phase 1 — sorted iteration views over the bundle.
+  // Each call materializes a small vector in canonical order.
+  //
+  //   entries()          — all leaves (attrs + data), sorted
+  //   non_attr_entries() — data leaves only, sorted
+  //   get_attrs()        — attribute leaves only, sorted
+  //   top_levels()       — one Top_level_entry per distinct top-level
+  //                        segment of non-attr data, in canonical order
+  Entries_view    entries()          const;
+  Entries_view    non_attr_entries() const;
+  Entries_view    get_attrs()        const;
+  Top_levels_view top_levels()       const;
+
+  // Top-level membership queries. has_top_named checks whether any
+  // non-attribute leaf has the given top-level NAME. has_top_unnamed
+  // checks for an unnamed top-level at the given decimal position.
+  bool has_top_named(std::string_view name) const;
+  bool has_top_unnamed(int pos) const;
 
   bool is_ordered(std::string_view key) const;
 
