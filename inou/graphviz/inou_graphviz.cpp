@@ -35,8 +35,8 @@ void Inou_graphviz::from(Eprp_var& var) {
 
   Graphviz p(pp.bits, pp.verbose, pp.get_odir(var));
 
-  for (const auto& l : var.lgs) {
-    p.do_from_lgraph(l);
+  for (const auto& g : var.graphs) {
+    p.do_from_lgraph(g.get());
   }
   for (const auto& l : var.lnasts) {
     p.do_from_lnast(l);
@@ -47,7 +47,7 @@ void Inou_graphviz::hierarchy(Eprp_var& var) {
   Inou_graphviz pp(var);
   Graphviz      p(pp.bits, pp.verbose, pp.get_odir(var));
 
-  for (const auto& l : var.lgs) {
-    p.do_hierarchy(l);
+  for (const auto& g : var.graphs) {
+    p.do_hierarchy(g.get());
   }
 }

@@ -7,20 +7,36 @@
 #include <fstream>
 #include <iostream>
 #include <regex>
+#include <utility>
 
 #include "RGB.hpp"
+#include "absl/container/flat_hash_set.h"
+#include "absl/strings/str_cat.h"
 #include "cell.hpp"
+#include "hhds/attrs/name.hpp"
+#include "hhds/graph.hpp"
+#include "node_util.hpp"
 #include "pass.hpp"
 
-Graphviz::Graphviz(bool _bits, bool _verbose, std::string_view _odir) : verbose(_verbose), odir(_odir) {
-  // NOTE: since 'bits' is removed as a private member (unused), '_bits' is unused but might be used in the future
-  (void)_bits;
-}
+using livehd::graph_util::bits_of;
+using livehd::graph_util::color_of;
+using livehd::graph_util::debug_name;
+using livehd::graph_util::has_color;
+using livehd::graph_util::has_name;
+using livehd::graph_util::hydrate_const;
+using livehd::graph_util::is_const_pin;
+using livehd::graph_util::is_graph_input_pin;
+using livehd::graph_util::is_graph_output_pin;
+using livehd::graph_util::pin_name_of;
+using livehd::graph_util::type_op_of;
+using livehd::graph_util::wire_name;
+
+Graphviz::Graphviz(bool _bits, bool _verbose, std::string_view _odir) : verbose(_verbose), odir(_odir) { (void)_bits; }
 
 void Graphviz::save_graph(std::string_view name, std::string_view dot_postfix, const std::string& data) {
   auto file = absl::StrCat(odir, "/", name);
 
-  if (dot_postfix == "") {
+  if (dot_postfix.empty()) {
     absl::StrAppend(&file, ".dot");
   } else {
     absl::StrAppend(&file, ".", dot_postfix, ".dot");
@@ -40,34 +56,37 @@ void Graphviz::save_graph(std::string_view name, std::string_view dot_postfix, c
   close(fd);
 }
 
-void Graphviz::populate_lg_handle_xedge(const Node& node, const XEdge& out, std::string& data, bool verbose) {
-  std::string dp_pid, sp_pid;
+void Graphviz::populate_lg_handle_xedge(const hhds::Node_class& node, const hhds::Edge_class& out, std::string& data,
+                                        bool verbose) {
+  std::string dp_pid;
+  std::string sp_pid;
   if (verbose) {
-    dp_pid = graphviz_legalize_name(out.driver.get_pin_name());
-    sp_pid = graphviz_legalize_name(out.sink.get_pin_name());
+    dp_pid = graphviz_legalize_name(pin_name_of(out.driver));
+    sp_pid = graphviz_legalize_name(pin_name_of(out.sink));
   } else {
-    dp_pid = graphviz_legalize_name(std::to_string(out.driver.get_pid()));
-    sp_pid = graphviz_legalize_name(std::to_string(out.sink.get_pid()));
+    dp_pid = graphviz_legalize_name(std::to_string(out.driver.get_port_id()));
+    sp_pid = graphviz_legalize_name(std::to_string(out.sink.get_port_id()));
   }
 
   std::string dn_name;
-  if (out.driver.is_graph_io()) {
+  if (is_graph_input_pin(out.driver) || is_graph_output_pin(out.driver)) {
     dn_name = graphviz_legalize_name(out.driver.get_pin_name());
   } else {
-    dn_name = graphviz_legalize_name(out.driver.get_node().debug_name());
+    dn_name = graphviz_legalize_name(debug_name(out.driver.get_master_node()));
   }
 
   std::string sn_name;
-  if (out.sink.is_graph_io()) {
+  if (is_graph_input_pin(out.sink) || is_graph_output_pin(out.sink)) {
     sn_name = graphviz_legalize_name(out.sink.get_pin_name());
   } else {
-    sn_name = graphviz_legalize_name(out.sink.get_node().debug_name());
+    sn_name = graphviz_legalize_name(debug_name(out.sink.get_master_node()));
   }
 
-  auto dbits   = out.driver.get_bits();
-  auto dp_name = graphviz_legalize_name(out.driver.has_name() ? out.driver.get_name() : "unk");
+  auto dbits   = bits_of(out.driver);
+  auto pn      = pin_name_of(out.driver);
+  auto dp_name = graphviz_legalize_name(!pn.empty() ? pn : std::string_view{"unk"});
 
-  if (node.get_type_op() == Ntype_op::Nconst) {
+  if (is_const_pin(out.driver) || type_op_of(node) == Ntype_op::Nconst) {
     data += std::format(" {} -> {} [ label = <{}b:({},{})> ];\n", dn_name, sn_name, dbits, dp_pid, sp_pid);
   } else {
     data += std::format(" {} -> {} [ label = <{}b:({},{}):{}> ];\n", dn_name, sn_name, dbits, dp_pid, sp_pid, dp_name);
@@ -77,7 +96,7 @@ void Graphviz::populate_lg_handle_xedge(const Node& node, const XEdge& out, std:
 std::string Graphviz::graphviz_legalize_name(std::string_view name) {
   std::string legal;
   for (auto c : name) {
-    if (std::isalnum(c)) {
+    if (std::isalnum(static_cast<unsigned char>(c))) {
       legal.append(1, c);
     } else if (c == 32) {
       legal += " ";
@@ -99,71 +118,59 @@ std::string Graphviz::graphviz_legalize_name(std::string_view name) {
   return legal;
 }
 
-void Graphviz::do_hierarchy(Lgraph* lg) {
-  // include a font name to get graph to render properly with kgraphviewer
+void Graphviz::do_hierarchy(hhds::Graph* lg) {
+  // HHDS hierarchy traversal is via the structure-tree on the Graph; for the
+  // diagnostic dump we just enumerate Sub nodes on this graph and emit one
+  // edge from this graph's name to each immediate sub-instance's graph name.
+  // Deep hierarchy walks use Graph::hier_range() but this entrypoint only
+  // diagrams the immediate level.
   std::string data = "digraph {\n node [fontname = \"Source Code Pro\"];\n";
 
-  // WARNING: string_view is fine because lgraph keep the std::string and it is unique per lgraph
-  absl::flat_hash_set<std::pair<std::string_view, std::string_view>> added;
+  auto gio = lg->get_io();
+  if (!gio) {
+    data += "\n}\n";
+    save_graph(std::string{}, "hier", data);
+    return;
+  }
 
-  lg->each_hier_unique_sub_bottom_up([&added, &data](Lgraph* g) {
-    std::print("visiting node:{}\n", g->get_name());
+  absl::flat_hash_set<std::pair<std::string, std::string>> added;
+  auto                                                     parent_name = std::string{gio->get_name()};
 
-    Node h_inp(g, Hierarchy::hierarchical_root(), Hardcoded_input_nid);
-    for (auto e : h_inp.inp_edges()) {
-      std::print("edge from: {} to: {}\n", e.driver.get_class_lgraph()->get_name(), e.sink.get_class_lgraph()->get_name());
-
-      auto p = std::pair(e.driver.get_class_lgraph()->get_name(), e.sink.get_class_lgraph()->get_name());
-      if (p.first == p.second) {
-        continue;  // no itself edges
-      }
-      if (added.contains(p)) {
-        continue;
-      }
-      added.insert(p);
-
-      data += std::format(" {} -> {};\n",
-                          graphviz_legalize_name(e.driver.get_class_lgraph()->get_name()),
-                          graphviz_legalize_name(e.sink.get_class_lgraph()->get_name()));
-    }
-
-    Node h_out(g, Hierarchy::hierarchical_root(), Hardcoded_output_nid);
-    for (auto e : h_out.out_edges()) {
-      std::print("edge from:{} to:{}\n", e.driver.get_class_lgraph()->get_name(), e.sink.get_class_lgraph()->get_name());
-
-      auto p = std::pair(e.driver.get_class_lgraph()->get_name(), e.sink.get_class_lgraph()->get_name());
-      if (p.first == p.second) {
-        continue;  // no itself edges
-      }
-      if (added.contains(p)) {
-        continue;
-      }
-      added.insert(p);
-
-      data += std::format(" {} -> {};\n",
-                          graphviz_legalize_name(e.driver.get_class_lgraph()->get_name()),
-                          graphviz_legalize_name(e.sink.get_class_lgraph()->get_name()));
-    }
-  });
-
-  data += "\n}\n";
-
-  save_graph(lg->get_name(), ".hier", data);
-}
-
-void Graphviz::create_color_map(Lgraph* lg) {
-  absl::flat_hash_map<int, size_t> color2id;
-
-  for (auto node : lg->fast()) {
-    if (!node.has_color()) {
+  for (auto node : lg->fast_class()) {
+    if (type_op_of(node) != Ntype_op::Sub) {
       continue;
     }
+    auto sub_io = node.get_subnode_io();
+    if (!sub_io) {
+      continue;
+    }
+    auto child_name = std::string{sub_io->get_name()};
+    if (child_name == parent_name) {
+      continue;
+    }
+    auto p = std::pair{parent_name, child_name};
+    if (added.contains(p)) {
+      continue;
+    }
+    added.insert(p);
+    data += std::format(" {} -> {};\n", graphviz_legalize_name(parent_name), graphviz_legalize_name(child_name));
+  }
 
-    auto c = node.get_color();
+  data += "\n}\n";
+  save_graph(parent_name, "hier", data);
+}
+
+void Graphviz::create_color_map(hhds::Graph* lg) {
+  absl::flat_hash_map<int, size_t> color2id;
+
+  for (auto node : lg->fast_class()) {
+    if (!has_color(node)) {
+      continue;
+    }
+    auto c = color_of(node);
     if (color2id.contains(c)) {
       continue;
     }
-
     color2id.insert({c, color2id.size()});
   }
 
@@ -177,82 +184,94 @@ void Graphviz::create_color_map(Lgraph* lg) {
   }
 
   absl::flat_hash_set<uint64_t> edges;  // hackish graph
-  for (auto node : lg->fast()) {
-    if (!node.has_color()) {
+  for (auto node : lg->fast_class()) {
+    if (!has_color(node)) {
       continue;
     }
-
-    auto c = node.get_color();
+    auto c = color_of(node);
     for (auto e : node.out_edges()) {
-      auto snode = e.sink.get_node();
-      if (!snode.has_color()) {
+      auto snode = e.sink.get_master_node();
+      if (!has_color(snode)) {
         continue;
       }
-      auto sc = snode.get_color();
+      auto sc = color_of(snode);
       if (sc == c) {
         continue;
       }
 
-      uint64_t edge = c;
+      uint64_t edge = static_cast<uint64_t>(c);
       edge <<= 32;
-      edge |= sc;
+      edge |= static_cast<uint32_t>(sc);
 
       if (edges.contains(edge)) {
         continue;
       }
 
       data += std::format(" c{} -> c{};\n", c, sc);
-
       edges.insert(edge);
     }
   }
 
   data += "}\n";
 
-  save_graph(lg->get_name(), "color_map", data);
+  auto gio  = lg->get_io();
+  auto name = gio ? std::string{gio->get_name()} : std::string{};
+  save_graph(name, "color_map", data);
 }
 
-void Graphviz::do_from_lgraph(Lgraph* lg_parent, std::string_view dot_postfix) {
+void Graphviz::do_from_lgraph(hhds::Graph* lg_parent, std::string_view dot_postfix) {
   create_color_map(lg_parent);
 
   populate_lg_data(lg_parent, dot_postfix);
 
-  lg_parent->each_local_sub_fast([&, this](Node& node, Lg_type_id lgid) {
-    (void)node;
-    std::print("subgraph lgid:{}\n", lgid);
-    Lgraph* lg_child = lg_parent->ref_library()->open_lgraph(lgid);
-    if (lg_child) {
-      populate_lg_data(lg_child, dot_postfix);
+  // Walk immediate sub-instances and dump their bodies too. We iterate Sub
+  // nodes once and follow each subnode_graph(); HHDS's set_subnode wiring
+  // gives us the body directly.
+  absl::flat_hash_set<hhds::Gid> visited;
+  for (auto node : lg_parent->fast_class()) {
+    if (type_op_of(node) != Ntype_op::Sub) {
+      continue;
     }
-  });
+    auto child = node.get_subnode_graph();
+    if (!child) {
+      continue;
+    }
+    auto child_io = child->get_io();
+    if (!child_io || !visited.insert(child_io->get_gid()).second) {
+      continue;
+    }
+    populate_lg_data(child.get(), dot_postfix);
+  }
 }
 
-void Graphviz::populate_lg_data(Lgraph* g, std::string_view dot_postfix) {
+void Graphviz::populate_lg_data(hhds::Graph* g, std::string_view dot_postfix) {
   std::string data = "digraph {\n";
 
-  for (auto node : g->fast(false)) {
-    if (!node.has_inputs() && !node.has_outputs()) {
+  for (auto node : g->fast_class()) {
+    if (node.inp_edges().empty() && node.out_edges().empty()) {
       continue;
     }
     std::string node_info;
+    auto        dn = debug_name(node);
     if (!verbose) {
-      auto pos  = node.debug_name().find("_lg");
-      node_info = node.debug_name().substr(0, pos);  // get rid of the lgraph name
+      auto pos  = dn.find("_lg");
+      node_info = dn.substr(0, pos);
       node_info = graphviz_legalize_name(std::regex_replace(node_info, std::regex("node_"), "n"));
     } else {
-      node_info = graphviz_legalize_name(node.debug_name());
+      node_info = graphviz_legalize_name(dn);
     }
 
-    auto        gv_name = graphviz_legalize_name(node.debug_name());
+    auto        gv_name = graphviz_legalize_name(dn);
     std::string color;
-    if (node.has_color()) {
-      const auto it = color2rgb.find(node.get_color());
+    if (has_color(node)) {
+      const auto it = color2rgb.find(color_of(node));
       if (it != color2rgb.end()) {
         color = absl::StrCat("fillcolor = \"", it->second, "\" ");
       }
     }
-    if (node.get_type_op() == Ntype_op::Nconst) {
-      data += std::format(" {} [ {} label = <{}:{}> ];\n", gv_name, color, node_info, node.get_type_const().to_pyrope());
+    if (type_op_of(node) == Ntype_op::Nconst) {
+      auto v = hydrate_const(node);
+      data += std::format(" {} [ {} label = <{}:{}> ];\n", gv_name, color, node_info, v.to_pyrope());
     } else {
       data += std::format(" {} [ {} label = <{}> ];\n", gv_name, color, node_info);
     }
@@ -262,28 +281,31 @@ void Graphviz::populate_lg_data(Lgraph* g, std::string_view dot_postfix) {
     }
   }
 
-  g->each_graph_input([&](const Node_pin& pin) {
-    auto io_name = graphviz_legalize_name(pin.get_pin_name());
-    data += std::format(" {} [ label = <{}> ];\n", io_name, io_name);  // pin.debug_name());
-
-    for (const auto& out : pin.out_edges()) {
-      populate_lg_handle_xedge(pin.get_node(), out, data, verbose);
+  auto gio = g->get_io();
+  if (gio) {
+    for (const auto& decl : gio->get_input_pin_decls()) {
+      auto pin     = g->get_input_pin(decl.name);
+      auto io_name = graphviz_legalize_name(decl.name);
+      data += std::format(" {} [ label = <{}> ];\n", io_name, io_name);
+      for (const auto& out : pin.out_edges()) {
+        populate_lg_handle_xedge(pin.get_master_node(), out, data, verbose);
+      }
     }
-  });
-
-  // we need this to show outputs bits in graphviz
-  g->each_graph_output([&](const Node_pin& pin) {
-    std::string_view dst_str = "virtual_dst_module";
-    auto             dbits   = pin.get_bits();
-    data += std::format(" {} -> {} [ label = <{}b> ];\n", graphviz_legalize_name(pin.get_name()), dst_str, dbits);
-    for (const auto& out : pin.out_edges()) {
-      populate_lg_handle_xedge(pin.get_node(), out, data, verbose);
+    for (const auto& decl : gio->get_output_pin_decls()) {
+      auto pin                 = g->get_output_pin(decl.name);
+      std::string_view dst_str = "virtual_dst_module";
+      auto             dbits   = bits_of(pin);
+      data += std::format(" {} -> {} [ label = <{}b> ];\n", graphviz_legalize_name(decl.name), dst_str, dbits);
+      for (const auto& out : pin.out_edges()) {
+        populate_lg_handle_xedge(pin.get_master_node(), out, data, verbose);
+      }
     }
-  });
+  }
 
   data += "}\n";
 
-  save_graph(g->get_name(), dot_postfix, data);
+  auto name = gio ? std::string{gio->get_name()} : std::string{};
+  save_graph(name, dot_postfix, data);
 }
 
 void Graphviz::do_from_lnast(const std::shared_ptr<Lnast>& lnast, std::string_view dot_postfix) {
@@ -300,7 +322,6 @@ void Graphviz::do_from_lnast(const std::shared_ptr<Lnast>& lnast, std::string_vi
       continue;
     }
 
-    // get parent data for link
     auto p = lnast->get_parent(itr);
 
     auto parent_id = std::to_string(level_of(p)) + std::to_string(pos_of(p));

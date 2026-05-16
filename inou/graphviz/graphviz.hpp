@@ -11,31 +11,34 @@
 
 #pragma once
 
-#include "lgedgeiter.hpp"
-#include "lgraph.hpp"
-#include "lgraphbase.hpp"
+#include <memory>
+#include <string>
+#include <string_view>
+
+#include "absl/container/flat_hash_map.h"
+#include "hhds/graph.hpp"
 #include "lnast.hpp"
 
 class Graphviz {
 private:
-  // const bool bits;
   const bool        verbose;
   const std::string odir;
 
   absl::flat_hash_map<int, std::string> color2rgb;
 
-  void create_color_map(Lgraph* g);
+  void create_color_map(hhds::Graph* g);
 
-  static void        populate_lg_handle_xedge(const Node& node, const XEdge& out, std::string& data, bool verbose);
+  static void        populate_lg_handle_xedge(const hhds::Node_class& node, const hhds::Edge_class& out, std::string& data,
+                                              bool verbose);
   static std::string graphviz_legalize_name(std::string_view name);
-  void               populate_lg_data(Lgraph* g, std::string_view dot_postfix = "");
+  void               populate_lg_data(hhds::Graph* g, std::string_view dot_postfix = "");
 
   void save_graph(std::string_view name, std::string_view dot_postfix, const std::string& data);
 
 public:
   void do_from_lnast(const std::shared_ptr<Lnast>& lnast, std::string_view dot_postfix = "");
-  void do_from_lgraph(Lgraph* lg_parent, std::string_view dot_postfix = "");
-  void do_hierarchy(Lgraph* g);
+  void do_from_lgraph(hhds::Graph* lg_parent, std::string_view dot_postfix = "");
+  void do_hierarchy(hhds::Graph* g);
 
   Graphviz(bool _bits, bool _verbose, std::string_view _odir);
 };
