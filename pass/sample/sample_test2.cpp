@@ -2,12 +2,15 @@
 
 #include <unistd.h>
 
+#include <memory>
 #include <string>
 
+#include "eprp_var.hpp"
 #include "file_utils.hpp"
 #include "gmock/gmock.h"
+#include "graph_library_singleton.hpp"
 #include "gtest/gtest.h"
-#include "lgraph.hpp"
+#include "hhds/graph.hpp"
 #include "pass_sample.hpp"
 
 class SampleMainTest : public ::testing::Test {
@@ -18,19 +21,17 @@ protected:
 TEST_F(SampleMainTest, EmptyLgraph) {
   file_utils::clean_dir("pass_test_lgdb");
 
-  auto* lib = Graph_library::instance("pass_test_lgdb");
-
-  Lgraph* g = lib->create_lgraph("empty", "nosource");
+  auto& lib    = livehd::Hhds_graph_library::instance("pass_test_lgdb");
+  auto  top_io = lib.create_io("empty");
+  auto  g      = top_io->create_graph();
 
   Eprp_var var;
   var.add(g);
   var.add("data", "hello");
 
-  EXPECT_FALSE(g->get_library().has_name("pass_sample"));
+  EXPECT_FALSE(static_cast<bool>(lib.find_graph("pass_sample")));
 
   Pass_sample::work(var);
 
-  EXPECT_TRUE(g->get_library().has_name("pass_sample"));
-
-  Graph_library::shutdown();  // needed to recycle pointers (AddressSanitizer will flag leak otherwise)
+  EXPECT_TRUE(static_cast<bool>(lib.find_graph("pass_sample")));
 }
