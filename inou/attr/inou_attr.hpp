@@ -2,12 +2,10 @@
 #pragma once
 
 #include <format>
+#include <string>
 
 #include "absl/container/flat_hash_map.h"
-#include "lgedgeiter.hpp"
-#include "lgraph.hpp"
-#include "lgraphbase.hpp"
-#include "node_pin.hpp"
+#include "hhds/graph.hpp"
 #include "pass.hpp"
 #include "perf_tracing.hpp"
 #include "rapidjson/document.h"
@@ -15,7 +13,6 @@
 #include "rapidjson/filereadstream.h"
 #include "rapidjson/filewritestream.h"
 #include "rapidjson/prettywriter.h"
-#include "sub_node.hpp"
 
 class SubGraph_color {
 public:
@@ -35,8 +32,8 @@ protected:
   static void set_color_to_lg(Eprp_var& var);
   static void get_color_from_lg(Eprp_var& var);
 
-  void read_json(const std::string& filename, Lgraph* lg);
-  void color_lg(Lgraph* lg);
+  void read_json(const std::string& filename, hhds::Graph* lg);
+  void color_lg(hhds::Graph* lg);
 
 public:
   Inou_attr(const Eprp_var& var);

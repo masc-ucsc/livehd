@@ -2,13 +2,18 @@
 
 #include "inou_liberty.hpp"
 
-#include "lgedgeiter.hpp"
-#include "lgraph.hpp"
+#include <format>
+
+#include "absl/strings/str_split.h"
+#include "graph_library_singleton.hpp"
+#include "hhds/graph.hpp"
 #include "ot/timer/timer.hpp"
 
 // WARNING: opentimer has a nasty "define has_member" that overlaps with perfetto methods
 #undef has_member
 #include "perf_tracing.hpp"
+
+using livehd::Hhds_graph_library;
 
 static Pass_plugin sample("inou_liberty", Inou_liberty::setup);
 
@@ -25,7 +30,7 @@ void Inou_liberty::liberty_open(Eprp_var& var) {
 
   Inou_liberty p(var);
 
-  auto* library = Graph_library::instance(p.path);
+  auto& library = Hhds_graph_library::instance(p.path);
 
   for (const auto f : absl::StrSplit(p.files, ',')) {
     std::print("reading liberty {}\n", f);
@@ -38,36 +43,38 @@ void Inou_liberty::liberty_open(Eprp_var& var) {
 
     const auto& cl = timer.celllib(ot::MAX);
     for (const auto& it : cl->cells) {
-      auto* sub = library->ref_or_create_sub(it.first);
-      sub->reset_pins();
+      // Find-or-create the GraphIO that represents this Liberty cell. Each
+      // pin in the cell becomes an input/output declaration; bits stay at 1
+      // (Liberty has no native multi-bit pin concept).
+      auto gio = library.find_io(it.first);
+      if (!gio) {
+        gio = library.create_io(it.first);
+      }
+      gio->reset_declarations();
 
-      bool has_clock = false;
+      hhds::Port_id next_in_pid  = 0;
+      hhds::Port_id next_out_pid = 0;
+      bool          has_clock    = false;
       for (const auto& pin : it.second.cellpins) {
-        if (pin.second.is_clock && *pin.second.is_clock) {
-          sub->set_loop_last();
+        bool is_clk = pin.second.is_clock && *pin.second.is_clock;
+        if (pin.second.direction) {
+          if (*pin.second.direction == ot::CellpinDirection::INPUT) {
+            gio->add_input(pin.first, next_in_pid, /*loop_last=*/is_clk);
+            gio->set_bits(pin.first, 1);
+            ++next_in_pid;
+          } else if (*pin.second.direction == ot::CellpinDirection::OUTPUT) {
+            gio->add_output(pin.first, next_out_pid, /*loop_last=*/is_clk);
+            gio->set_bits(pin.first, 1);
+            ++next_out_pid;
+          }
+        }
+
+        if (is_clk) {
           has_clock = true;
         }
-        if (pin.second.direction) {
-          Port_ID pid = 0;
-          if (*pin.second.direction == ot::CellpinDirection::INPUT) {
-            pid = sub->add_input_pin(pin.first);
-          } else if (*pin.second.direction == ot::CellpinDirection::OUTPUT) {
-            pid = sub->add_output_pin(pin.first);
-          }
-
-          if (pid) {
-            sub->set_bits(pid, 1);  // how does the liberty specify multiple bits?
-          }
-        }
-
-        if (pin.second.is_clock) {
-          has_clock |= *pin.second.is_clock;
-        }
       }
-
-      if (!has_clock) {
-        sub->clear_loop_last();
-      }
+      (void)has_clock;  // Liberty cells with no clock pin are pure-combinational; HHDS's per-pin loop_last flag captures the
+                       // clock-pin polarity directly.
     }
   }
 }

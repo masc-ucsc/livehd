@@ -3,18 +3,29 @@
 
 #include <cstddef>
 #include <cstdint>
+#include <memory>
 #include <optional>
 #include <string_view>
+#include <utility>
 #include <vector>
 
+#include "const.hpp"
+#include "hhds/graph.hpp"
 #include "ir_adapter.hpp"
-#include "lgedgeiter.hpp"
-#include "lgraph.hpp"
+#include "node_util.hpp"
 
 namespace upass {
 
-class Lgraph_manager final : public IR_adapter {
+// HHDS-graph manager used by the templated shared upass dataflow passes. Holds
+// a shared_ptr<hhds::Graph>; mutation methods (fold_sum_const, fold_neutral,
+// fold_sub_const, …) operate directly through HHDS APIs + graph_util helpers
+// — no //lgraph dependency.
+class Lgraph_manager final {
 public:
+  // Handles surfaced to the templated shared passes.
+  using Node  = hhds::Node_class;
+  using Input = hhds::Pin_class;
+
   struct Fold_scan_summary {
     std::size_t visited_nodes{0};
     std::size_t const_nodes{0};
@@ -54,14 +65,14 @@ public:
 
   // Summary for constant-multiplication folding on Mult nodes.
   struct Fold_mult_const_summary {
-    std::size_t const_mult_folded{0};  // c1 * c2 → (c1*c2)
+    std::size_t const_mult_folded{0};
     std::size_t rewired_edges{0};
     std::size_t new_const_nodes{0};
     std::size_t deleted_nodes{0};
   };
 
-  // Summary for subtraction-specific folds on Sum nodes that have both A (addend)
-  // and B (subtrahend) inputs.
+  // Summary for subtraction-specific folds on Sum nodes that have both A
+  // (addend) and B (subtrahend) inputs.
   struct Fold_sub_summary {
     std::size_t sub_zero_simplified{0};  // a - 0  → a
     std::size_t sub_self_simplified{0};  // a - a  → 0
@@ -73,109 +84,109 @@ public:
 
   // Summary for dead-code elimination.
   // A node is dead if it has no output consumers (out_edges is empty) and is
-  // not a graph IO node or a CompileErr marker.
+  // not a graph IO / CONST builtin or a CompileErr marker.
   struct Fold_dce_summary {
     std::size_t dead_nodes_removed{0};
-    std::size_t edges_freed{0};  // input edges disconnected when dead nodes are deleted
+    std::size_t edges_freed{0};
   };
 
-  explicit Lgraph_manager(Lgraph* graph) : lg(graph) {}
+  explicit Lgraph_manager(std::shared_ptr<hhds::Graph> g) : graph_(std::move(g)) {}
 
-  std::string_view kind() const override { return "lgraph"; }
-  std::size_t      node_count() const override {
-    if (lg == nullptr) {
+  std::string_view kind() const { return "lgraph"; }
+  bool             has_graph() const { return graph_ != nullptr; }
+
+  std::size_t node_count() const {
+    if (!graph_) {
       return 0;
     }
     std::size_t count = 0;
-    for (const auto& node : lg->fast()) {
-      (void)node;
+    for (const auto& n : graph_->fast_class()) {
+      (void)n;
       ++count;
     }
     return count;
   }
-  std::size_t const_count() const override {
-    if (lg == nullptr) {
+
+  std::size_t const_count() const {
+    if (!graph_) {
       return 0;
     }
     std::size_t count = 0;
-    for (const auto& node : lg->fast()) {
-      if (node.get_type_op() == Ntype_op::Nconst) {
+    for (const auto& n : graph_->fast_class()) {
+      if (livehd::graph_util::is_type_const(n) || livehd::graph_util::type_op_of(n) == Ntype_op::Nconst) {
         ++count;
       }
     }
     return count;
   }
-  std::size_t arithmetic_count() const override {
-    if (lg == nullptr) {
+
+  std::size_t arithmetic_count() const {
+    if (!graph_) {
       return 0;
     }
     std::size_t count = 0;
-    for (const auto& node : lg->fast()) {
-      if (is_foldable_op(node.get_type_op())) {
+    for (const auto& n : graph_->fast_class()) {
+      if (is_foldable_op(livehd::graph_util::type_op_of(n))) {
         ++count;
       }
     }
     return count;
   }
-  std::size_t fold_candidate_count() const override { return scan_fold_candidates().fold_candidate_nodes; }
 
-  // Streams every node through `fn` using `lg->fast()` directly — no
-  // intermediate vector of all-nodes is built. The Node_id passed to the
-  // callback is the per-class node index (Compact_class::nid), so it can
-  // be round-tripped back to a Node via `get_node(node_id)`.
-  void for_each_node(const Node_visitor& fn) const override {
-    if (lg == nullptr) {
+  std::size_t fold_candidate_count() const { return scan_fold_candidates().fold_candidate_nodes; }
+
+  // Streams every node through `fn` as an `hhds::Node_class`. Snapshots the
+  // node set first so the callback is free to delete the current node (the
+  // templated shared `replace_with_const` path does this).
+  template <typename Fn>
+  void for_each_node(Fn&& fn) const {
+    if (!graph_) {
       return;
     }
-    for (const auto& node : lg->fast()) {
-      fn(encode(node));
+    std::vector<hhds::Node_class> snapshot;
+    for (const auto& n : graph_->forward_class()) {
+      snapshot.push_back(n);
+    }
+    for (auto& n : snapshot) {
+      if (n.is_invalid()) {
+        continue;
+      }
+      std::forward<Fn>(fn)(n);
     }
   }
 
-  void for_each_input(Node_id node_id, const Node_visitor& fn) const override {
-    const auto node = get_node(node_id);
+  template <typename Fn>
+  void for_each_input(const Node& node, Fn&& fn) const {
     if (node.is_invalid()) {
       return;
     }
-    for (const auto& inp : node.inp_edges()) {
-      fn(encode(inp.driver.get_node()));
+    for (const auto& e : node.inp_edges()) {
+      std::forward<Fn>(fn)(e.driver);
     }
   }
 
-  bool is_sum_op(Node_id node_id) const override {
-    const auto node = get_node(node_id);
-    return !node.is_invalid() && node.get_type_op() == Ntype_op::Sum;
+  bool is_sum_op(const Node& node) const {
+    return !node.is_invalid() && livehd::graph_util::type_op_of(node) == Ntype_op::Sum;
   }
-  bool is_const(Node_id node_id) const override {
-    const auto node = get_node(node_id);
-    if (node.is_invalid()) {
-      return false;
-    }
-    return node.get_type_op() == Ntype_op::Nconst;
-  }
-  std::optional<std::int64_t> const_value(Node_id node_id) const override {
-    const auto node = get_node(node_id);
-    if (node.is_invalid() || node.get_type_op() != Ntype_op::Nconst) {
-      return std::nullopt;
-    }
 
-    const auto c = node.get_type_const();
-    if (!c.is_i()) {
+  bool is_const(const Input& pin) const { return livehd::graph_util::is_const_pin(pin); }
+
+  std::optional<Const> const_value(const Input& pin) const {
+    if (!is_const(pin)) {
       return std::nullopt;
     }
-    return c.to_i();
+    return livehd::graph_util::hydrate_const(pin);
   }
-  Replace_effect estimate_replace_with_const(Node_id node_id) const override {
+
+  Replace_effect estimate_replace_with_const(const Node& node) const {
     Replace_effect effect;
-    const auto     node = get_node(node_id);
-    if (node.is_invalid() || node.is_type_io()) {
+    if (node.is_invalid() || livehd::graph_util::is_builtin_node(node)) {
       return effect;
     }
-
-    if (node.get_type_op() == Ntype_op::Nconst) {
+    auto op = livehd::graph_util::type_op_of(node);
+    if (op == Ntype_op::Nconst) {
       return effect;
     }
-
     for (const auto& out : node.out_edges()) {
       (void)out;
       ++effect.rewired_edges;
@@ -184,54 +195,40 @@ public:
     effect.deleted_nodes   = 1;
     return effect;
   }
-  bool replace_with_const(Node_id node_id, std::int64_t value) override {
-    auto node = get_node(node_id);
-    if (node.is_invalid() || node.is_type_io()) {
+
+  bool replace_with_const(const Node& node_in, const Const& value) {
+    if (node_in.is_invalid() || !graph_ || livehd::graph_util::is_builtin_node(node_in)) {
       return false;
     }
-
-    if (node.get_type_op() == Ntype_op::Nconst) {
-      const auto cur = node.get_type_const();
-      if (cur.is_i() && cur.to_i() == value) {
+    auto node = node_in;  // local mutable copy
+    auto op   = livehd::graph_util::type_op_of(node);
+    if (op == Ntype_op::Nconst) {
+      auto cur = livehd::graph_util::hydrate_const(node);
+      if (cur.same_repr(value)) {
         return false;
       }
-      node.set_type_const(Dlop::create_integer(value));
+      node.attr(livehd::attrs::const_value).set(value.serialize());
       return true;
     }
-
-    auto                  node_out = node.setup_driver_pin();
-    std::vector<Node_pin> sinks;
-    for (const auto& out : node.out_edges()) {
-      sinks.emplace_back(out.sink);
-    }
-
-    auto new_c = lg->create_node_const(value);
-    auto dpin  = new_c.setup_driver_pin();
-    dpin.set_size(node_out);
-    for (const auto& sink : sinks) {
-      dpin.connect_sink(sink);
-    }
-    node.del_node();
+    rewire_to_const(node, value);
     return true;
   }
 
-  Lgraph* ref_lgraph() const { return lg; }
+  const std::shared_ptr<hhds::Graph>& ref_graph() const { return graph_; }
+  hhds::Graph*                        ref_graph_raw() const { return graph_.get(); }
 
-  Fold_scan_summary scan_fold_candidates(bool visit_sub = false) const {
+  Fold_scan_summary scan_fold_candidates() const {
     Fold_scan_summary summary;
-    if (lg == nullptr) {
+    if (!graph_) {
       return summary;
     }
-
-    for (const auto& node : lg->fast(visit_sub)) {
+    for (const auto& n : graph_->fast_class()) {
       ++summary.visited_nodes;
-
-      auto op = node.get_type_op();
+      auto op = livehd::graph_util::type_op_of(n);
       if (op == Ntype_op::Nconst) {
         ++summary.const_nodes;
         continue;
       }
-
       if (!is_foldable_op(op)) {
         continue;
       }
@@ -239,311 +236,268 @@ public:
 
       std::size_t input_count = 0;
       bool        all_const   = true;
-      for (const auto& inp : node.inp_edges()) {
+      for (const auto& inp : n.inp_edges()) {
         ++input_count;
-        if (!inp.driver.is_type(Ntype_op::Nconst)) {
+        if (!livehd::graph_util::is_const_pin(inp.driver)) {
           all_const = false;
           break;
         }
       }
-
       if (input_count > 0 && all_const) {
         ++summary.fold_candidate_nodes;
       }
     }
-
     return summary;
   }
 
-  // Counts Sum nodes that have a foldable subtraction pattern:
-  //   • B-port input is const(0)      → a - 0  (neutral element)
-  //   • A and B share the same driver → a - a  (self-cancellation)
-  //   • Both A and B are constants    → c1 - c2 (constant fold)
-  // Used as the guard predicate for fold_sub_const.
+  // Counts Sum nodes with a foldable subtraction pattern.
   std::size_t count_sub_candidates() const {
-    if (lg == nullptr) {
+    if (!graph_) {
       return 0;
     }
-
-    static constexpr Port_ID k_port_b = 1;
-    std::size_t              count    = 0;
-
-    for (const auto& node : lg->fast()) {
-      if (node.get_type_op() != Ntype_op::Sum) {
+    static constexpr hhds::Port_id k_port_b = 1;
+    std::size_t                    count    = 0;
+    for (const auto& n : graph_->fast_class()) {
+      if (livehd::graph_util::type_op_of(n) != Ntype_op::Sum) {
         continue;
       }
-
-      std::vector<XEdge> a_ins, b_ins;
-      for (const auto& inp : node.inp_edges()) {
-        if (inp.sink.get_pid() == k_port_b) {
-          b_ins.emplace_back(inp);
+      std::vector<hhds::Edge_class> a_ins, b_ins;
+      for (const auto& inp : n.inp_edges()) {
+        if (inp.sink.get_port_id() == k_port_b) {
+          b_ins.push_back(inp);
         } else {
-          a_ins.emplace_back(inp);
+          a_ins.push_back(inp);
         }
       }
-
       if (a_ins.size() != 1 || b_ins.size() != 1) {
         continue;
       }
-
       const auto& a_drv = a_ins[0].driver;
       const auto& b_drv = b_ins[0].driver;
-
-      // a - 0
-      if (b_drv.is_type(Ntype_op::Nconst) && b_drv.get_type_const().is_known_zero()) {
+      if (livehd::graph_util::is_const_pin(b_drv) && livehd::graph_util::hydrate_const(b_drv).is_known_zero()) {
         ++count;
         continue;
       }
-      // a - a
-      if (a_drv.get_compact_class_driver() == b_drv.get_compact_class_driver()) {
+      if (same_driver(a_drv, b_drv)) {
         ++count;
         continue;
       }
-      // c1 - c2
-      if (a_drv.is_type(Ntype_op::Nconst) && b_drv.is_type(Ntype_op::Nconst)) {
+      if (livehd::graph_util::is_const_pin(a_drv) && livehd::graph_util::is_const_pin(b_drv)) {
         ++count;
       }
     }
-
     return count;
   }
 
-  Fold_tag_summary tag_fold_candidates(int color = 7, bool visit_sub = false) const {
+  Fold_tag_summary tag_fold_candidates(int color = 7) const {
     Fold_tag_summary summary;
-    if (lg == nullptr) {
+    if (!graph_) {
       return summary;
     }
-
-    for (auto node : lg->fast(visit_sub)) {
-      auto op = node.get_type_op();
+    for (const auto& n : graph_->fast_class()) {
+      auto op = livehd::graph_util::type_op_of(n);
       if (!is_foldable_op(op)) {
         continue;
       }
-
       std::size_t input_count = 0;
       bool        all_const   = true;
-      for (const auto& inp : node.inp_edges()) {
+      for (const auto& inp : n.inp_edges()) {
         ++input_count;
-        if (!inp.driver.is_type(Ntype_op::Nconst)) {
+        if (!livehd::graph_util::is_const_pin(inp.driver)) {
           all_const = false;
           break;
         }
       }
-
       if (input_count == 0 || !all_const) {
         continue;
       }
-
-      if (!node.has_color() || node.get_color() != color) {
-        node.set_color(color);
+      if (!livehd::graph_util::has_color(n) || livehd::graph_util::color_of(n) != color) {
+        livehd::graph_util::set_color(n, color);
         ++summary.tagged_nodes;
       }
     }
-
     return summary;
   }
 
-  Fold_sum_const_summary fold_sum_const(bool visit_sub = false, bool dry_run = false) const {
+  Fold_sum_const_summary fold_sum_const(bool dry_run = false) const {
     Fold_sum_const_summary summary;
-    if (lg == nullptr) {
+    if (!graph_) {
       return summary;
     }
-
-    std::vector<Node> candidates;
-    for (const auto& node : lg->fast(visit_sub)) {
-      if (node.get_type_op() == Ntype_op::Sum) {
-        candidates.emplace_back(node);
+    std::vector<hhds::Node_class> candidates;
+    for (const auto& n : graph_->fast_class()) {
+      if (livehd::graph_util::type_op_of(n) == Ntype_op::Sum) {
+        candidates.push_back(n);
       }
     }
-
     for (auto& node : candidates) {
-      auto               node_out = node.setup_driver_pin();
-      std::vector<XEdge> inputs;
-      for (const auto& inp : node.inp_edges()) {
-        inputs.emplace_back(inp);
+      std::vector<hhds::Edge_class> inputs;
+      for (const auto& e : node.inp_edges()) {
+        inputs.push_back(e);
       }
-      // N-ary fold: skip nodes with no inputs; all inputs must be compile-time constants.
       if (inputs.empty()) {
         continue;
       }
-      if (!std::ranges::all_of(inputs, [](const XEdge& inp) { return inp.driver.is_type(Ntype_op::Nconst); })) {
+      bool all_const = true;
+      for (const auto& e : inputs) {
+        if (!livehd::graph_util::is_const_pin(e.driver)) {
+          all_const = false;
+          break;
+        }
+      }
+      if (!all_const) {
         continue;
       }
-
-      // Reduce-fold: accumulate the sum of all constant inputs.
-      Const result = inputs[0].driver.get_type_const();
+      Const result = livehd::graph_util::hydrate_const(inputs[0].driver);
       if (!result.is_i()) {
         continue;
       }
-      bool all_i = true;
+      bool ok = true;
       for (std::size_t i = 1; i < inputs.size(); ++i) {
-        const auto cn = inputs[i].driver.get_type_const();
-        if (!cn.is_i()) {
-          all_i = false;
+        auto c = livehd::graph_util::hydrate_const(inputs[i].driver);
+        if (!c.is_i()) {
+          ok = false;
           break;
         }
-        result = result.add_op(cn);
+        result = result.add_op(c);
       }
-      if (!all_i) {
+      if (!ok) {
         continue;
       }
-
-      std::vector<Node_pin> sinks;
-      for (const auto& out : node.out_edges()) {
-        sinks.emplace_back(out.sink);
-      }
+      auto sinks    = collect_sinks(node);
+      auto node_out = node.create_driver_pin(0);
 
       ++summary.new_const_nodes;
       if (!dry_run) {
-        auto new_c = lg->create_node_const(result);
-        auto dpin  = new_c.setup_driver_pin();
-        dpin.set_size(node_out);
+        auto dpin = livehd::graph_util::create_const(*graph_, result);
+        livehd::graph_util::set_bits(dpin, livehd::graph_util::bits_of(node_out));
         for (const auto& sink : sinks) {
           dpin.connect_sink(sink);
           ++summary.rewired_edges;
         }
+        node.del_node();
       } else {
         summary.rewired_edges += sinks.size();
-      }
-
-      if (!dry_run) {
-        node.del_node();
       }
       ++summary.folded_nodes;
       ++summary.deleted_nodes;
     }
-
     return summary;
   }
 
-  // Folds Mult nodes where both inputs are compile-time constants: c1 * c2 → (c1*c2).
-  // The neutral-element cases (n*0→0, n*1→n) are already handled by fold_neutral_const;
-  // this pass handles the remaining fully-constant multiplications.
-  Fold_mult_const_summary fold_mult_const(bool visit_sub = false, bool dry_run = false) const {
+  // Folds Mult nodes where all inputs are compile-time constants.
+  Fold_mult_const_summary fold_mult_const(bool dry_run = false) const {
     Fold_mult_const_summary summary;
-    if (lg == nullptr) {
+    if (!graph_) {
       return summary;
     }
-
-    std::vector<Node> candidates;
-    for (const auto& node : lg->fast(visit_sub)) {
-      if (node.get_type_op() == Ntype_op::Mult) {
-        candidates.emplace_back(node);
+    std::vector<hhds::Node_class> candidates;
+    for (const auto& n : graph_->fast_class()) {
+      if (livehd::graph_util::type_op_of(n) == Ntype_op::Mult) {
+        candidates.push_back(n);
       }
     }
-
     for (auto& node : candidates) {
-      auto               node_out = node.setup_driver_pin();
-      std::vector<XEdge> inputs;
-      for (const auto& inp : node.inp_edges()) {
-        inputs.emplace_back(inp);
+      std::vector<hhds::Edge_class> inputs;
+      for (const auto& e : node.inp_edges()) {
+        inputs.push_back(e);
       }
-      // N-ary fold: skip nodes with no inputs; all inputs must be compile-time constants.
       if (inputs.empty()) {
         continue;
       }
-      if (!std::ranges::all_of(inputs, [](const XEdge& inp) { return inp.driver.is_type(Ntype_op::Nconst); })) {
+      bool all_const = true;
+      for (const auto& e : inputs) {
+        if (!livehd::graph_util::is_const_pin(e.driver)) {
+          all_const = false;
+          break;
+        }
+      }
+      if (!all_const) {
         continue;
       }
-
-      // Reduce-fold: accumulate the product of all constant inputs.
-      // Uses mult_op() to match fold_sum_const's use of add_op() and preserve
-      // Const bit-width semantics rather than raw to_i() arithmetic.
-      Const result = inputs[0].driver.get_type_const();
+      Const result = livehd::graph_util::hydrate_const(inputs[0].driver);
       if (!result.is_i()) {
         continue;
       }
-      bool all_i = true;
+      bool ok = true;
       for (std::size_t i = 1; i < inputs.size(); ++i) {
-        const auto cn = inputs[i].driver.get_type_const();
-        if (!cn.is_i()) {
-          all_i = false;
+        auto c = livehd::graph_util::hydrate_const(inputs[i].driver);
+        if (!c.is_i()) {
+          ok = false;
           break;
         }
-        result = result.mult_op(cn);
+        result = result.mult_op(c);
       }
-      if (!all_i) {
+      if (!ok) {
         continue;
       }
-
-      std::vector<Node_pin> sinks;
-      for (const auto& out : node.out_edges()) {
-        sinks.emplace_back(out.sink);
-      }
+      auto sinks    = collect_sinks(node);
+      auto node_out = node.create_driver_pin(0);
 
       ++summary.new_const_nodes;
       if (!dry_run) {
-        auto new_c = lg->create_node_const(result);
-        auto dpin  = new_c.setup_driver_pin();
-        dpin.set_size(node_out);
+        auto dpin = livehd::graph_util::create_const(*graph_, result);
+        livehd::graph_util::set_bits(dpin, livehd::graph_util::bits_of(node_out));
         for (const auto& sink : sinks) {
           dpin.connect_sink(sink);
           ++summary.rewired_edges;
         }
+        node.del_node();
       } else {
         summary.rewired_edges += sinks.size();
       }
       ++summary.const_mult_folded;
       ++summary.deleted_nodes;
-      if (!dry_run) {
-        node.del_node();
-      }
     }
-
     return summary;
   }
 
-  Fold_neutral_summary fold_neutral_const(bool visit_sub = false, bool dry_run = false) const {
+  Fold_neutral_summary fold_neutral_const(bool dry_run = false) const {
     Fold_neutral_summary summary;
-    if (lg == nullptr) {
+    if (!graph_) {
       return summary;
     }
-
-    std::vector<Node> candidates;
-    for (const auto& node : lg->fast(visit_sub)) {
-      auto op = node.get_type_op();
+    std::vector<hhds::Node_class> candidates;
+    for (const auto& n : graph_->fast_class()) {
+      auto op = livehd::graph_util::type_op_of(n);
       if (op == Ntype_op::Sum || op == Ntype_op::Or || op == Ntype_op::Xor || op == Ntype_op::And || op == Ntype_op::Mult) {
-        candidates.emplace_back(node);
+        candidates.push_back(n);
       }
     }
-
     for (auto& node : candidates) {
-      auto               node_out = node.setup_driver_pin();
-      std::vector<XEdge> inputs;
-      for (const auto& inp : node.inp_edges()) {
-        inputs.emplace_back(inp);
+      std::vector<hhds::Edge_class> inputs;
+      for (const auto& e : node.inp_edges()) {
+        inputs.push_back(e);
       }
       if (inputs.size() != 2) {
         continue;
       }
+      auto sinks    = collect_sinks(node);
+      auto node_out = node.create_driver_pin(0);
+      auto op       = livehd::graph_util::type_op_of(node);
 
-      std::vector<Node_pin> sinks;
-      for (const auto& out : node.out_edges()) {
-        sinks.emplace_back(out.sink);
-      }
-
-      bool       rewritten            = false;
       const auto other_driver_is_1bit = [&](int const_pos) {
-        const auto& other = inputs[1 - const_pos].driver;
-        return other.get_bits() == 1;
+        return livehd::graph_util::bits_of(inputs[1 - const_pos].driver) == 1;
       };
+
+      bool rewritten = false;
 
       int const_zero_pos = -1;
       for (int i = 0; i < 2; ++i) {
-        if (inputs[i].driver.is_type(Ntype_op::Nconst) && inputs[i].driver.get_type_const().is_known_zero()) {
+        if (livehd::graph_util::is_const_pin(inputs[i].driver)
+            && livehd::graph_util::hydrate_const(inputs[i].driver).is_known_zero()) {
           const_zero_pos = i;
           break;
         }
       }
       if (const_zero_pos >= 0) {
-        if (node.get_type_op() == Ntype_op::And) {
+        if (op == Ntype_op::And) {
           ++summary.new_const_nodes;
           if (!dry_run) {
-            auto c0   = lg->create_node_const(0);
-            auto dpin = c0.setup_driver_pin();
-            dpin.set_size(node_out);
-            for (const auto& sink : sinks) {
-              dpin.connect_sink(sink);
+            auto dpin = livehd::graph_util::create_const(*graph_, *Dlop::create_integer(0));
+            livehd::graph_util::set_bits(dpin, livehd::graph_util::bits_of(node_out));
+            for (const auto& s : sinks) {
+              dpin.connect_sink(s);
               ++summary.rewired_edges;
             }
           } else {
@@ -554,8 +508,8 @@ public:
         } else {
           const auto& driver_keep = inputs[1 - const_zero_pos].driver;
           if (!dry_run) {
-            for (const auto& sink : sinks) {
-              driver_keep.connect_sink(sink);
+            for (const auto& s : sinks) {
+              driver_keep.connect_sink(s);
               ++summary.rewired_edges;
             }
           } else {
@@ -566,22 +520,22 @@ public:
         }
       }
 
-      if (!rewritten && node.get_type_op() == Ntype_op::Mult) {
-        int const_zero_pos_mul = -1;
+      if (!rewritten && op == Ntype_op::Mult) {
+        int zpos = -1;
         for (int i = 0; i < 2; ++i) {
-          if (inputs[i].driver.is_type(Ntype_op::Nconst) && inputs[i].driver.get_type_const().is_known_zero()) {
-            const_zero_pos_mul = i;
+          if (livehd::graph_util::is_const_pin(inputs[i].driver)
+              && livehd::graph_util::hydrate_const(inputs[i].driver).is_known_zero()) {
+            zpos = i;
             break;
           }
         }
-        if (const_zero_pos_mul >= 0) {
+        if (zpos >= 0) {
           ++summary.new_const_nodes;
           if (!dry_run) {
-            auto c0   = lg->create_node_const(0);
-            auto dpin = c0.setup_driver_pin();
-            dpin.set_size(node_out);
-            for (const auto& sink : sinks) {
-              dpin.connect_sink(sink);
+            auto dpin = livehd::graph_util::create_const(*graph_, *Dlop::create_integer(0));
+            livehd::graph_util::set_bits(dpin, livehd::graph_util::bits_of(node_out));
+            for (const auto& s : sinks) {
+              dpin.connect_sink(s);
               ++summary.rewired_edges;
             }
           } else {
@@ -592,108 +546,109 @@ public:
         }
       }
 
-      if (!rewritten && node.get_type_op() == Ntype_op::Mult) {
-        int const_one_pos = -1;
+      if (!rewritten && op == Ntype_op::Mult) {
+        int one_pos = -1;
         for (int i = 0; i < 2; ++i) {
-          if (inputs[i].driver.is_type(Ntype_op::Nconst) && inputs[i].driver.get_type_const().is_i()
-              && inputs[i].driver.get_type_const().to_i() == 1) {
-            const_one_pos = i;
-            break;
-          }
-        }
-        if (const_one_pos >= 0) {
-          const auto& driver_keep = inputs[1 - const_one_pos].driver;
-          if (!dry_run) {
-            for (const auto& sink : sinks) {
-              driver_keep.connect_sink(sink);
-              ++summary.rewired_edges;
-            }
-          } else {
-            summary.rewired_edges += sinks.size();
-          }
-          ++summary.simplified_to_driver;
-          rewritten = true;
-        }
-      }
-
-      if (!rewritten && node.get_type_op() == Ntype_op::And) {
-        int const_one_pos = -1;
-        for (int i = 0; i < 2; ++i) {
-          if (inputs[i].driver.is_type(Ntype_op::Nconst) && inputs[i].driver.get_type_const().is_i()
-              && inputs[i].driver.get_type_const().to_i() == 1) {
-            const_one_pos = i;
-            break;
-          }
-        }
-        if (const_one_pos >= 0 && other_driver_is_1bit(const_one_pos)) {
-          const auto& driver_keep = inputs[1 - const_one_pos].driver;
-          if (!dry_run) {
-            for (const auto& sink : sinks) {
-              driver_keep.connect_sink(sink);
-              ++summary.rewired_edges;
-            }
-          } else {
-            summary.rewired_edges += sinks.size();
-          }
-          ++summary.simplified_to_driver;
-          rewritten = true;
-        }
-      }
-
-      if (!rewritten && node.get_type_op() == Ntype_op::And) {
-        bool same_driver = inputs[0].driver.get_compact_class_driver() == inputs[1].driver.get_compact_class_driver();
-        if (same_driver) {
-          const auto& driver_keep = inputs[0].driver;
-          if (!dry_run) {
-            for (const auto& sink : sinks) {
-              driver_keep.connect_sink(sink);
-              ++summary.rewired_edges;
-            }
-          } else {
-            summary.rewired_edges += sinks.size();
-          }
-          ++summary.simplified_to_driver;
-          rewritten = true;
-        }
-      }
-
-      if (!rewritten && (node.get_type_op() == Ntype_op::Or || node.get_type_op() == Ntype_op::Xor)) {
-        if (node.get_type_op() == Ntype_op::Or) {
-          int const_one_pos = -1;
-          for (int i = 0; i < 2; ++i) {
-            if (inputs[i].driver.is_type(Ntype_op::Nconst) && inputs[i].driver.get_type_const().is_i()
-                && inputs[i].driver.get_type_const().to_i() == 1) {
-              const_one_pos = i;
+          if (livehd::graph_util::is_const_pin(inputs[i].driver)) {
+            auto c = livehd::graph_util::hydrate_const(inputs[i].driver);
+            if (c.is_i() && c.to_i() == 1) {
+              one_pos = i;
               break;
             }
           }
-          if (const_one_pos >= 0 && other_driver_is_1bit(const_one_pos)) {
-            ++summary.new_const_nodes;
-            if (!dry_run) {
-              auto c1   = lg->create_node_const(1);
-              auto dpin = c1.setup_driver_pin();
-              dpin.set_size(node_out);
-              for (const auto& sink : sinks) {
-                dpin.connect_sink(sink);
-                ++summary.rewired_edges;
-              }
-            } else {
-              summary.rewired_edges += sinks.size();
+        }
+        if (one_pos >= 0) {
+          const auto& driver_keep = inputs[1 - one_pos].driver;
+          if (!dry_run) {
+            for (const auto& s : sinks) {
+              driver_keep.connect_sink(s);
+              ++summary.rewired_edges;
             }
-            ++summary.simplified_to_const_one;
-            rewritten = true;
+          } else {
+            summary.rewired_edges += sinks.size();
           }
+          ++summary.simplified_to_driver;
+          rewritten = true;
         }
       }
 
-      if (!rewritten && (node.get_type_op() == Ntype_op::Or || node.get_type_op() == Ntype_op::Xor)) {
-        bool same_driver = inputs[0].driver.get_compact_class_driver() == inputs[1].driver.get_compact_class_driver();
-        if (same_driver) {
-          if (node.get_type_op() == Ntype_op::Or) {
+      if (!rewritten && op == Ntype_op::And) {
+        int one_pos = -1;
+        for (int i = 0; i < 2; ++i) {
+          if (livehd::graph_util::is_const_pin(inputs[i].driver)) {
+            auto c = livehd::graph_util::hydrate_const(inputs[i].driver);
+            if (c.is_i() && c.to_i() == 1) {
+              one_pos = i;
+              break;
+            }
+          }
+        }
+        if (one_pos >= 0 && other_driver_is_1bit(one_pos)) {
+          const auto& driver_keep = inputs[1 - one_pos].driver;
+          if (!dry_run) {
+            for (const auto& s : sinks) {
+              driver_keep.connect_sink(s);
+              ++summary.rewired_edges;
+            }
+          } else {
+            summary.rewired_edges += sinks.size();
+          }
+          ++summary.simplified_to_driver;
+          rewritten = true;
+        }
+      }
+
+      if (!rewritten && op == Ntype_op::And) {
+        if (same_driver(inputs[0].driver, inputs[1].driver)) {
+          const auto& driver_keep = inputs[0].driver;
+          if (!dry_run) {
+            for (const auto& s : sinks) {
+              driver_keep.connect_sink(s);
+              ++summary.rewired_edges;
+            }
+          } else {
+            summary.rewired_edges += sinks.size();
+          }
+          ++summary.simplified_to_driver;
+          rewritten = true;
+        }
+      }
+
+      if (!rewritten && op == Ntype_op::Or) {
+        int one_pos = -1;
+        for (int i = 0; i < 2; ++i) {
+          if (livehd::graph_util::is_const_pin(inputs[i].driver)) {
+            auto c = livehd::graph_util::hydrate_const(inputs[i].driver);
+            if (c.is_i() && c.to_i() == 1) {
+              one_pos = i;
+              break;
+            }
+          }
+        }
+        if (one_pos >= 0 && other_driver_is_1bit(one_pos)) {
+          ++summary.new_const_nodes;
+          if (!dry_run) {
+            auto dpin = livehd::graph_util::create_const(*graph_, *Dlop::create_integer(1));
+            livehd::graph_util::set_bits(dpin, livehd::graph_util::bits_of(node_out));
+            for (const auto& s : sinks) {
+              dpin.connect_sink(s);
+              ++summary.rewired_edges;
+            }
+          } else {
+            summary.rewired_edges += sinks.size();
+          }
+          ++summary.simplified_to_const_one;
+          rewritten = true;
+        }
+      }
+
+      if (!rewritten && (op == Ntype_op::Or || op == Ntype_op::Xor)) {
+        if (same_driver(inputs[0].driver, inputs[1].driver)) {
+          if (op == Ntype_op::Or) {
             const auto& driver_keep = inputs[0].driver;
             if (!dry_run) {
-              for (const auto& sink : sinks) {
-                driver_keep.connect_sink(sink);
+              for (const auto& s : sinks) {
+                driver_keep.connect_sink(s);
                 ++summary.rewired_edges;
               }
             } else {
@@ -703,11 +658,10 @@ public:
           } else {
             ++summary.new_const_nodes;
             if (!dry_run) {
-              auto c0   = lg->create_node_const(0);
-              auto dpin = c0.setup_driver_pin();
-              dpin.set_size(node_out);
-              for (const auto& sink : sinks) {
-                dpin.connect_sink(sink);
+              auto dpin = livehd::graph_util::create_const(*graph_, *Dlop::create_integer(0));
+              livehd::graph_util::set_bits(dpin, livehd::graph_util::bits_of(node_out));
+              for (const auto& s : sinks) {
+                dpin.connect_sink(s);
                 ++summary.rewired_edges;
               }
             } else {
@@ -727,52 +681,44 @@ public:
       }
       ++summary.deleted_nodes;
     }
-
     return summary;
   }
 
-  Fold_shift_div_summary fold_shift_div_const(bool visit_sub = false, bool dry_run = false) const {
+  Fold_shift_div_summary fold_shift_div_const(bool dry_run = false) const {
     Fold_shift_div_summary summary;
-    if (lg == nullptr) {
+    if (!graph_) {
       return summary;
     }
-
-    std::vector<Node> candidates;
-    for (const auto& node : lg->fast(visit_sub)) {
-      auto op = node.get_type_op();
+    std::vector<hhds::Node_class> candidates;
+    for (const auto& n : graph_->fast_class()) {
+      auto op = livehd::graph_util::type_op_of(n);
       if (op == Ntype_op::Div || op == Ntype_op::SHL || op == Ntype_op::SRA) {
-        candidates.emplace_back(node);
+        candidates.push_back(n);
       }
     }
-
     for (auto& node : candidates) {
-      auto               node_out = node.setup_driver_pin();
-      std::vector<XEdge> inputs;
-      for (const auto& inp : node.inp_edges()) {
-        inputs.emplace_back(inp);
+      std::vector<hhds::Edge_class> inputs;
+      for (const auto& e : node.inp_edges()) {
+        inputs.push_back(e);
       }
       if (inputs.size() != 2) {
         continue;
       }
-
-      const auto& lhs = inputs[0].driver;
-      const auto& rhs = inputs[1].driver;
-
-      std::vector<Node_pin> sinks;
-      for (const auto& out : node.out_edges()) {
-        sinks.emplace_back(out.sink);
-      }
+      const auto& lhs      = inputs[0].driver;
+      const auto& rhs      = inputs[1].driver;
+      auto        sinks    = collect_sinks(node);
+      auto        node_out = node.create_driver_pin(0);
+      auto        op       = livehd::graph_util::type_op_of(node);
 
       bool rewritten = false;
 
-      if ((node.get_type_op() == Ntype_op::Div || node.get_type_op() == Ntype_op::SHL || node.get_type_op() == Ntype_op::SRA)
-          && rhs.is_type(Ntype_op::Nconst) && rhs.get_type_const().is_known_zero()) {
-        if (node.get_type_op() == Ntype_op::Div) {
-          // Do not rewrite x/0
+      if (livehd::graph_util::is_const_pin(rhs) && livehd::graph_util::hydrate_const(rhs).is_known_zero()) {
+        if (op == Ntype_op::Div) {
+          // don't fold x/0
         } else {
           if (!dry_run) {
-            for (const auto& sink : sinks) {
-              lhs.connect_sink(sink);
+            for (const auto& s : sinks) {
+              lhs.connect_sink(s);
               ++summary.rewired_edges;
             }
           } else {
@@ -783,78 +729,69 @@ public:
         }
       }
 
-      if (!rewritten && node.get_type_op() == Ntype_op::Div && rhs.is_type(Ntype_op::Nconst) && rhs.get_type_const().is_i()
-          && rhs.get_type_const().to_i() == 1) {
-        if (!dry_run) {
-          for (const auto& sink : sinks) {
-            lhs.connect_sink(sink);
-            ++summary.rewired_edges;
-          }
-        } else {
-          summary.rewired_edges += sinks.size();
-        }
-        ++summary.simplified_to_driver;
-        rewritten = true;
-      }
-
-      if (!rewritten && node.get_type_op() == Ntype_op::Div && lhs.is_type(Ntype_op::Nconst) && lhs.get_type_const().is_known_zero()
-          && rhs.is_type(Ntype_op::Nconst) && rhs.get_type_const().is_known_zero() == false) {
-        ++summary.new_const_nodes;
-        if (!dry_run) {
-          auto c0   = lg->create_node_const(0);
-          auto dpin = c0.setup_driver_pin();
-          dpin.set_size(node_out);
-          for (const auto& sink : sinks) {
-            dpin.connect_sink(sink);
-            ++summary.rewired_edges;
-          }
-        } else {
-          summary.rewired_edges += sinks.size();
-        }
-        ++summary.simplified_to_const_zero;
-        rewritten = true;
-      }
-
-      if (!rewritten && node.get_type_op() == Ntype_op::Div && lhs.is_type(Ntype_op::Nconst) && rhs.is_type(Ntype_op::Nconst)
-          && lhs.get_type_const().same_repr(rhs.get_type_const()) && rhs.get_type_const().is_known_zero() == false) {
-        ++summary.new_const_nodes;
-        if (!dry_run) {
-          auto c1   = lg->create_node_const(1);
-          auto dpin = c1.setup_driver_pin();
-          dpin.set_size(node_out);
-          for (const auto& sink : sinks) {
-            dpin.connect_sink(sink);
-            ++summary.rewired_edges;
-          }
-        } else {
-          summary.rewired_edges += sinks.size();
-        }
-        ++summary.simplified_to_const_one;
-        rewritten = true;
-      }
-
-      if (!rewritten && node.get_type_op() == Ntype_op::Div && lhs.is_type(Ntype_op::Nconst) && rhs.is_type(Ntype_op::Nconst)
-          && rhs.get_type_const().is_known_zero() == false) {
-        const auto c_lhs = lhs.get_type_const();
-        const auto c_rhs = rhs.get_type_const();
-        if (c_lhs.is_i() && c_rhs.is_i()) {
-          const auto c_res = Dlop::create_integer(c_lhs.to_i() / c_rhs.to_i());
-          ++summary.new_const_nodes;
+      if (!rewritten && op == Ntype_op::Div && livehd::graph_util::is_const_pin(rhs)) {
+        auto crhs = livehd::graph_util::hydrate_const(rhs);
+        if (crhs.is_i() && crhs.to_i() == 1) {
           if (!dry_run) {
-            auto cnew = lg->create_node_const(c_res);
-            auto dpin = cnew.setup_driver_pin();
-            dpin.set_size(node_out);
-            for (const auto& sink : sinks) {
-              dpin.connect_sink(sink);
+            for (const auto& s : sinks) {
+              lhs.connect_sink(s);
               ++summary.rewired_edges;
             }
           } else {
             summary.rewired_edges += sinks.size();
           }
+          ++summary.simplified_to_driver;
+          rewritten = true;
+        }
+      }
 
-          if (c_res->is_known_zero()) {
+      if (!rewritten && op == Ntype_op::Div && livehd::graph_util::is_const_pin(lhs) && livehd::graph_util::is_const_pin(rhs)) {
+        auto clhs = livehd::graph_util::hydrate_const(lhs);
+        auto crhs = livehd::graph_util::hydrate_const(rhs);
+        if (clhs.is_known_zero() && !crhs.is_known_zero()) {
+          ++summary.new_const_nodes;
+          if (!dry_run) {
+            auto dpin = livehd::graph_util::create_const(*graph_, *Dlop::create_integer(0));
+            livehd::graph_util::set_bits(dpin, livehd::graph_util::bits_of(node_out));
+            for (const auto& s : sinks) {
+              dpin.connect_sink(s);
+              ++summary.rewired_edges;
+            }
+          } else {
+            summary.rewired_edges += sinks.size();
+          }
+          ++summary.simplified_to_const_zero;
+          rewritten = true;
+        } else if (clhs.same_repr(crhs) && !crhs.is_known_zero()) {
+          ++summary.new_const_nodes;
+          if (!dry_run) {
+            auto dpin = livehd::graph_util::create_const(*graph_, *Dlop::create_integer(1));
+            livehd::graph_util::set_bits(dpin, livehd::graph_util::bits_of(node_out));
+            for (const auto& s : sinks) {
+              dpin.connect_sink(s);
+              ++summary.rewired_edges;
+            }
+          } else {
+            summary.rewired_edges += sinks.size();
+          }
+          ++summary.simplified_to_const_one;
+          rewritten = true;
+        } else if (clhs.is_i() && crhs.is_i() && !crhs.is_known_zero()) {
+          auto res = Dlop::create_integer(clhs.to_i() / crhs.to_i());
+          ++summary.new_const_nodes;
+          if (!dry_run) {
+            auto dpin = livehd::graph_util::create_const(*graph_, *res);
+            livehd::graph_util::set_bits(dpin, livehd::graph_util::bits_of(node_out));
+            for (const auto& s : sinks) {
+              dpin.connect_sink(s);
+              ++summary.rewired_edges;
+            }
+          } else {
+            summary.rewired_edges += sinks.size();
+          }
+          if (res->is_known_zero()) {
             ++summary.simplified_to_const_zero;
-          } else if (c_res->is_i() && c_res->to_i() == 1) {
+          } else if (res->is_i() && res->to_i() == 1) {
             ++summary.simplified_to_const_one;
           } else {
             ++summary.simplified_to_const_other;
@@ -871,65 +808,46 @@ public:
       }
       ++summary.deleted_nodes;
     }
-
     return summary;
   }
 
-  // Folds Sum nodes that have mixed A (addend, pid=0) / B (subtrahend, pid=1) inputs.
-  // Three patterns are handled:
-  //   1. a - 0      → a          (neutral element: subtracting zero is identity)
-  //   2. a - a      → 0          (self-cancellation)
-  //   3. c1 - c2    → (c1-c2)    (fully-constant subtraction)
-  // Only 1-A / 1-B nodes are targeted; multi-input Sum nodes are left for later.
-  Fold_sub_summary fold_sub_const(bool visit_sub = false, bool dry_run = false) const {
+  // Folds Sum nodes that have mixed A (addend, pid=0) / B (subtrahend, pid=1)
+  // inputs in the simple 1-A / 1-B shape.
+  Fold_sub_summary fold_sub_const(bool dry_run = false) const {
     Fold_sub_summary summary;
-    if (lg == nullptr) {
+    if (!graph_) {
       return summary;
     }
-
-    // Port A (addend/positive) has sink pid 0; port B (subtrahend/negative) has pid 1.
-    static constexpr Port_ID k_port_b = 1;
-
-    std::vector<Node> candidates;
-    for (const auto& node : lg->fast(visit_sub)) {
-      if (node.get_type_op() == Ntype_op::Sum) {
-        candidates.emplace_back(node);
+    static constexpr hhds::Port_id k_port_b = 1;
+    std::vector<hhds::Node_class>  candidates;
+    for (const auto& n : graph_->fast_class()) {
+      if (livehd::graph_util::type_op_of(n) == Ntype_op::Sum) {
+        candidates.push_back(n);
       }
     }
-
     for (auto& node : candidates) {
-      auto node_out = node.setup_driver_pin();
-
-      std::vector<XEdge> a_inputs, b_inputs;
+      std::vector<hhds::Edge_class> a_in, b_in;
       for (const auto& inp : node.inp_edges()) {
-        if (inp.sink.get_pid() == k_port_b) {
-          b_inputs.emplace_back(inp);
+        if (inp.sink.get_port_id() == k_port_b) {
+          b_in.push_back(inp);
         } else {
-          a_inputs.emplace_back(inp);
+          a_in.push_back(inp);
         }
       }
-
-      // Only handle the simple 1-A / 1-B case; skip pure-addition nodes (no B)
-      // and multi-input nodes.
-      if (a_inputs.size() != 1 || b_inputs.size() != 1) {
+      if (a_in.size() != 1 || b_in.size() != 1) {
         continue;
       }
-
-      const auto& a_drv = a_inputs[0].driver;
-      const auto& b_drv = b_inputs[0].driver;
-
-      std::vector<Node_pin> sinks;
-      for (const auto& out : node.out_edges()) {
-        sinks.emplace_back(out.sink);
-      }
+      const auto& a_drv    = a_in[0].driver;
+      const auto& b_drv    = b_in[0].driver;
+      auto        sinks    = collect_sinks(node);
+      auto        node_out = node.create_driver_pin(0);
 
       bool rewritten = false;
 
-      // Case 1: a - 0 → a  (B input is the constant zero)
-      if (b_drv.is_type(Ntype_op::Nconst) && b_drv.get_type_const().is_known_zero()) {
+      if (livehd::graph_util::is_const_pin(b_drv) && livehd::graph_util::hydrate_const(b_drv).is_known_zero()) {
         if (!dry_run) {
-          for (const auto& sink : sinks) {
-            a_drv.connect_sink(sink);
+          for (const auto& s : sinks) {
+            a_drv.connect_sink(s);
             ++summary.rewired_edges;
           }
         } else {
@@ -939,15 +857,13 @@ public:
         rewritten = true;
       }
 
-      // Case 2: a - a → 0  (same driver feeds both A and B)
-      if (!rewritten && a_drv.get_compact_class_driver() == b_drv.get_compact_class_driver()) {
+      if (!rewritten && same_driver(a_drv, b_drv)) {
         ++summary.new_const_nodes;
         if (!dry_run) {
-          auto c0   = lg->create_node_const(0);
-          auto dpin = c0.setup_driver_pin();
-          dpin.set_size(node_out);
-          for (const auto& sink : sinks) {
-            dpin.connect_sink(sink);
+          auto dpin = livehd::graph_util::create_const(*graph_, *Dlop::create_integer(0));
+          livehd::graph_util::set_bits(dpin, livehd::graph_util::bits_of(node_out));
+          for (const auto& s : sinks) {
+            dpin.connect_sink(s);
             ++summary.rewired_edges;
           }
         } else {
@@ -957,19 +873,17 @@ public:
         rewritten = true;
       }
 
-      // Case 3: const_a - const_b → result  (both inputs are compile-time constants)
-      if (!rewritten && a_drv.is_type(Ntype_op::Nconst) && b_drv.is_type(Ntype_op::Nconst)) {
-        const auto ca = a_drv.get_type_const();
-        const auto cb = b_drv.get_type_const();
+      if (!rewritten && livehd::graph_util::is_const_pin(a_drv) && livehd::graph_util::is_const_pin(b_drv)) {
+        auto ca = livehd::graph_util::hydrate_const(a_drv);
+        auto cb = livehd::graph_util::hydrate_const(b_drv);
         if (ca.is_i() && cb.is_i()) {
-          const auto result = Dlop::create_integer(ca.to_i() - cb.to_i());
+          auto res = Dlop::create_integer(ca.to_i() - cb.to_i());
           ++summary.new_const_nodes;
           if (!dry_run) {
-            auto cnew = lg->create_node_const(result);
-            auto dpin = cnew.setup_driver_pin();
-            dpin.set_size(node_out);
-            for (const auto& sink : sinks) {
-              dpin.connect_sink(sink);
+            auto dpin = livehd::graph_util::create_const(*graph_, *res);
+            livehd::graph_util::set_bits(dpin, livehd::graph_util::bits_of(node_out));
+            for (const auto& s : sinks) {
+              dpin.connect_sink(s);
               ++summary.rewired_edges;
             }
           } else {
@@ -988,79 +902,39 @@ public:
       }
       ++summary.deleted_nodes;
     }
-
     return summary;
   }
 
-  // Removes nodes with no output consumers (dead-code elimination).
-  //
-  // A node is eligible for removal if:
-  //   • It is not a graph IO node (nid 1 = input, nid 2 = output).
-  //   • Its type is not CompileErr (error markers must be preserved).
-  //   • It has no out_edges (its driver pin feeds nothing).
-  //
-  // Runs one sweep per call; the fixed-point runner repeats until convergence
-  // so that transitive dead chains (A → B where B is dead) are fully pruned.
-  Fold_dce_summary fold_dce(bool visit_sub = false, bool dry_run = false) const {
+  // Dead-code elimination: remove nodes with no out-edges (skip builtins
+  // INPUT_NODE / OUTPUT_NODE / CONST_NODE and CompileErr markers).
+  Fold_dce_summary fold_dce(bool dry_run = false) const {
     Fold_dce_summary summary;
-    if (lg == nullptr) {
+    if (!graph_) {
       return summary;
     }
-
-    // --- Collect dead nodes (must NOT delete during fast() iteration) ---
-    std::vector<Node> dead_nodes;
-    for (const auto& node : lg->fast(visit_sub)) {
-      if (node.is_type_io()) {
-        continue;  // never delete graph input / output nodes
+    std::vector<hhds::Node_class> dead;
+    for (const auto& n : graph_->fast_class()) {
+      if (livehd::graph_util::is_builtin_node(n)) {
+        continue;
       }
-
-      bool has_consumers = false;
-      for (const auto& out : node.out_edges()) {
-        (void)out;
-        has_consumers = true;
-        break;
-      }
-      if (!has_consumers) {
-        dead_nodes.emplace_back(node);
+      if (!n.has_out_edges()) {
+        dead.push_back(n);
       }
     }
-
-    // --- Delete collected dead nodes ---
-    for (auto& node : dead_nodes) {
-      // Count input edges that will be freed when this node is deleted.
+    for (auto& node : dead) {
       for (const auto& inp : node.inp_edges()) {
         (void)inp;
         ++summary.edges_freed;
       }
       ++summary.dead_nodes_removed;
       if (!dry_run) {
-        node.del_node();  // removes the node and all its connected edges
+        node.del_node();
       }
     }
-
     return summary;
   }
 
 private:
-  // Node_id encoding uses the Compact_class handle (the class-index style
-  // accessor) rather than calling Node::get_nid() directly. The underlying
-  // value is the same Index_id, but routing through Compact_class keeps the
-  // adapter from depending on the legacy nid getter.
-  static Node_id encode(const Node& node) { return static_cast<Node_id>(node.get_compact_class().get_nid()); }
-
-  Node get_node(Node_id node_id) const {
-    if (lg == nullptr) {
-      return {};
-    }
-
-    const auto nid = static_cast<Index_id>(node_id);
-    if (nid == 0) {
-      return {};
-    }
-
-    return {lg, Node::Compact_class{nid}};
-  }
-
   static bool is_foldable_op(Ntype_op op) {
     switch (op) {
       case Ntype_op::Sum:
@@ -1075,7 +949,37 @@ private:
     }
   }
 
-  Lgraph* lg;
+  // Same driver identity check (master node + port id).
+  static bool same_driver(const hhds::Pin_class& a, const hhds::Pin_class& b) {
+    if (a.is_invalid() || b.is_invalid()) {
+      return false;
+    }
+    return a.get_master_node().get_debug_nid() == b.get_master_node().get_debug_nid()
+           && a.get_port_id() == b.get_port_id();
+  }
+
+  static std::vector<hhds::Pin_class> collect_sinks(const hhds::Node_class& node) {
+    std::vector<hhds::Pin_class> sinks;
+    for (const auto& out : node.out_edges()) {
+      sinks.push_back(out.sink);
+    }
+    return sinks;
+  }
+
+  // Replace a non-const node with a fresh CONST_NODE pin carrying `value`;
+  // rewires all out-edges and deletes the old node.
+  void rewire_to_const(hhds::Node_class& node, const Const& value) {
+    auto sinks    = collect_sinks(node);
+    auto node_out = node.create_driver_pin(0);
+    auto dpin     = livehd::graph_util::create_const(*graph_, value);
+    livehd::graph_util::set_bits(dpin, livehd::graph_util::bits_of(node_out));
+    for (const auto& s : sinks) {
+      dpin.connect_sink(s);
+    }
+    node.del_node();
+  }
+
+  std::shared_ptr<hhds::Graph> graph_;
 };
 
 }  // namespace upass
