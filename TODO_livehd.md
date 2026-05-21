@@ -67,6 +67,9 @@ complete before group N+1 starts. Group letters are shared across
   `docs/contracts/simulation.md`.
 - **5d** Test reorg per "Test Organization" below (`tests/` layout,
   `contracts/` split, `*_test.cpp` rules).
+- **5e** IDAP perf-sweep pass: hold correctness flags steady, drive each
+  optional pass on/off to measure marginal cost and find regressions —
+  see "IDAP perf-sweep pass" below.
 - **5f** Benchmark contracts (extend `benchmark/`): codegen throughput,
   simulation speed, agent-loop iteration latency — regression gates so the
   "seconds matter" promise of `docs/contracts/architecture.md §1` stays
@@ -274,6 +277,76 @@ Performance optimization; may require non-trivial code rewrite in pass
 plumbing. Tracked as **1j** so the cleanup lands before the upass cache
 (**2h**) and partition descriptor (**3c**) work bakes vector-copy
 assumptions into more APIs.
+
+## IDAP perf-sweep pass
+
+A correctness-preserving optimization/IDAP pass that toggles individual
+upass stages on and off while keeping correctness invariants in place, so
+we can attribute perf regressions to a specific pass and confirm each pass
+earns its runtime cost. Concretely, we want to drive runs like:
+
+```
+time lg "inou.prp files:xx.prp |> pass.upass verifier:0 max_iters:1 ssa:0 bitwidth:1 constprop:0 attributes:0"
+```
+
+and have the pass framework:
+
+- Enumerate the pass flag matrix (`verifier`, `ssa`, `bitwidth`,
+  `constprop`, `attributes`, `max_iters`, …) and run the user-selected
+  combinations.
+- Diff results against a reference run so disabling a pass that *must* run
+  for correctness fails loudly rather than silently miscompiling.
+- Emit per-pass wall-clock + allocation deltas into the JSONL results
+  stream (consumed by **5f** benchmark contracts).
+
+While building this pass, audit the hot upass plumbing for the
+performance anti-patterns we keep hitting. These are the same axes the
+sweep should report on, so callers can see which axis regressed:
+
+- **Repeated allocations.** No `new` / `make_unique` / `std::vector{}` in
+  inner loops. Hoist scratch buffers out of per-node code paths; reuse
+  per-pass arenas where lifetime allows. Look for `clear()` + refill
+  patterns and convert them into stable, reusable buffers.
+- **`std::vector` returns.** Replace "build vector, return vector" APIs
+  with iterators / ranges / output iterators. Where a concrete container
+  is unavoidable, take it by `&` from the caller so allocation lives at
+  the call site, not inside the helper. This is the broader scope of
+  **1j**; **5e** finishes the sweep across non-upass code.
+- **Small-vector hotspots.** When a container is known to be tiny in the
+  common case (≤8 elements: per-node fanin/fanout, per-cell port list,
+  pass-local work stack), use `absl::InlinedVector<T, N>` (or
+  `absl::FixedArray` when the size is known at the call) instead of
+  `std::vector` to keep the storage on the stack.
+- **String churn.** Hunt `std::string` temporaries on hot paths: prefer
+  `std::string_view`, `absl::string_view`, or pre-interned symbol handles
+  (we already have `mmap_lib::str` / interned IDs — use them). No
+  `to_string()` in inner loops; no `+` concatenation for log lines that
+  are then discarded; no `absl::StrCat` materialization when a
+  `string_view` would do.
+- **Tree / graph iteration without copying.** Iterate HHDS trees and
+  LGraph in place via the existing iterator APIs. Do not snapshot
+  `children`, `descendants`, `fanin`, or `fanout` into a `std::vector`
+  just to walk them. If a pass must mutate during traversal, use the
+  iterator invalidation-safe variants HHDS exposes rather than
+  materializing a copy. Forbid the "collect into vector, then iterate"
+  pattern in pass code; CI should grep for the usual offenders
+  (`get_children`, `get_fanin_nodes`, …) returning vectors and replace
+  them with range-returning siblings.
+
+Deliverables:
+
+- The sweep harness itself (driver + diff-vs-reference checker).
+- A short report contract under `docs/contracts/` describing the flag
+  matrix, what "correctness-preserving" means per flag, and the JSONL
+  schema for the per-pass timing/allocation rows.
+- One pass of cleanup across upass / lgraph passes hitting the
+  allocation, vector-return, small-vector, string, and copy-to-iterate
+  anti-patterns above — landed *with* the sweep so the regression gates
+  have something to lock in.
+
+Sequenced as **5e** so it lands after the upass cache (**2h**) and
+partition descriptor (**3c**) have stabilized — otherwise we'd be
+optimizing APIs that are still moving.
 
 ## simlib fixed-width int types
 
