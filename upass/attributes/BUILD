@@ -18,6 +18,9 @@ cc_library(
         "//lnast",
         "//upass/bitwidth:wrap_sat_hdr",
         "//upass/core:upass",
+        "@abseil-cpp//absl/container:flat_hash_map",
+        "@abseil-cpp//absl/container:flat_hash_set",
+        "@abseil-cpp//absl/container:inlined_vector",
     ],
     alwayslink = True,
 )

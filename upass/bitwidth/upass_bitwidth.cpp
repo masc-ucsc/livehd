@@ -69,7 +69,9 @@ Lnast_range uPass_bitwidth::read_range(std::string_view name) const {
   if (name.empty()) {
     return Lnast_range::unbounded();
   }
-  auto it = range_map_.find(std::string{name});
+  // Heterogeneous lookup: absl::flat_hash_map's transparent hashing accepts
+  // string_view without allocating a temporary std::string on every read.
+  auto it = range_map_.find(name);
   if (it != range_map_.end()) {
     return it->second;
   }
@@ -80,18 +82,17 @@ void uPass_bitwidth::set_range(std::string_view name, Lnast_range r) {
   if (name.empty()) {
     return;
   }
-  auto [it, inserted] = range_map_.emplace(std::string{name}, r);
-  if (inserted) {
-    // First time we've seen this name — only mark changed if we got a finite
-    // range (unbounded-first is not a useful narrowing event).
-    if (!r.is_unbounded()) {
+  // Probe with the string_view first to skip allocation on the common
+  // already-present path. Only materialize a std::string when we insert.
+  if (auto it = range_map_.find(name); it != range_map_.end()) {
+    if (r.is_narrower_than(it->second)) {
+      it->second = r;
       mark_changed();
     }
     return;
   }
-  // Already exists: only update and mark changed if strictly narrower.
-  if (r.is_narrower_than(it->second)) {
-    it->second = r;
+  range_map_.emplace(std::string{name}, r);
+  if (!r.is_unbounded()) {
     mark_changed();
   }
 }
@@ -140,22 +141,12 @@ static Lnast_range range_from_const_text(std::string_view text) {
   return Lnast_range::constant(negative ? -val : val);
 }
 
-// Strip a leading port sigil (`%` output, `$` input) so the bitwidth pass
-// uses the same canonical key on both write and read sides — matches
-// uPass_attributes::normalize_name. lnast_to_lgraph's apply_bw also uses
-// the unprefixed name when looking up bw_meta.
-static std::string normalize_name(std::string_view name) {
-  if (!name.empty() && (name.front() == '%' || name.front() == '$')) {
-    return std::string{name.substr(1)};
-  }
-  return std::string{name};
-}
-
 void uPass_bitwidth::clear_range(std::string_view name) {
   if (name.empty()) {
     return;
   }
-  if (range_map_.erase(normalize_name(name)) != 0) {
+  // Heterogeneous erase — no temporary std::string for the lookup.
+  if (range_map_.erase(name) != 0) {
     mark_changed();
   }
 }
@@ -167,13 +158,14 @@ uPass_bitwidth::Op_ranges uPass_bitwidth::scan_op() {
   }
 
   // First child: LHS (always a ref whose text is the destination name).
-  out.lhs = normalize_name(current_text());
+  out.lhs.assign(current_text());
 
-  // Remaining children: RHS operands.
+  // Remaining children: RHS operands. read_range takes string_view directly,
+  // so the ref branch no longer needs a temporary std::string.
   while (move_to_sibling()) {
     auto t = get_raw_ntype();
     if (Lnast_ntype::is_ref(t)) {
-      out.rhs.push_back(read_range(normalize_name(current_text())));
+      out.rhs.push_back(read_range(current_text()));
     } else if (Lnast_ntype::is_const(t)) {
       out.rhs.push_back(range_from_const_text(current_text()));
     } else {
@@ -189,7 +181,7 @@ std::string uPass_bitwidth::scan_lhs_only() {
   if (!move_to_child()) {
     return {};
   }
-  std::string lhs = normalize_name(current_text());
+  std::string lhs{current_text()};
   move_to_parent();
   return lhs;
 }
@@ -197,9 +189,7 @@ std::string uPass_bitwidth::scan_lhs_only() {
 // ── fold_ref ─────────────────────────────────────────────────────────────────
 
 std::optional<Const> uPass_bitwidth::fold_ref(std::string_view name) {
-  // Callers may pass either `%out` or `out`; normalize so we hit the same
-  // key the pass stored under (see normalize_name() above).
-  auto it = range_map_.find(normalize_name(name));
+  auto it = range_map_.find(name);
   if (it == range_map_.end()) {
     return std::nullopt;
   }
@@ -466,7 +456,7 @@ void uPass_bitwidth::process_attr_set() {
   if (!move_to_child()) {
     return;
   }
-  auto target = normalize_name(current_text());
+  std::string target{current_text()};
   if (!move_to_sibling()) {
     move_to_parent();
     return;

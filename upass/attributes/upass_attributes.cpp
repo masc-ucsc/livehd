@@ -53,12 +53,7 @@ void uPass_attributes::end_run() {
   reg.for_each_handler([this](upass::attributes::Attribute_handler& h) { h.end_run(*this); });
 }
 
-std::string uPass_attributes::normalize_name(std::string_view name) {
-  if (!name.empty() && (name.front() == '%' || name.front() == '$')) {
-    return std::string{name.substr(1)};
-  }
-  return std::string{name};
-}
+std::string uPass_attributes::normalize_name(std::string_view name) { return std::string{name}; }
 
 uPass_attributes::Op_view uPass_attributes::scan_op() {
   // Cursor is at the op node. First child is LHS; remaining children are
@@ -70,12 +65,13 @@ uPass_attributes::Op_view uPass_attributes::scan_op() {
   if (!move_to_child()) {
     return view;
   }
-  view.lhs = normalize_name(current_text());
+  view.lhs.assign(current_text());
 
   std::size_t ref_count = 0;
   while (move_to_sibling()) {
     if (Lnast_ntype::is_ref(get_raw_ntype())) {
-      view.rhs_refs.emplace_back(normalize_name(current_text()));
+      // Store a view into LNAST text — stable for the rest of the pass.
+      view.rhs_refs.emplace_back(current_text());
       ++ref_count;
     }
   }
@@ -210,7 +206,10 @@ void uPass_attributes::on_assign_like(bool is_assign_node) {
     // `lhs == k` (e.g. after `sat z = 3000` then `const m = z`) sees the
     // narrowed value via runner_fold_fn instead of the raw bundle in
     // constprop's symbol table.
-    if (auto it = tmp_fold.find(rhs); it != tmp_fold.end() && !it->second.is_invalid()) {
+    // tmp_fold is std::map<std::string, …> without transparent comparator —
+    // materialize one std::string here for the lookup. (The alias path is
+    // already off the hot 1M-ops loop; the n-ary path skips this entirely.)
+    if (auto it = tmp_fold.find(std::string{rhs}); it != tmp_fold.end() && !it->second.is_invalid()) {
       auto [m_it, inserted] = tmp_fold.emplace(view.lhs, it->second);
       if (!inserted && !m_it->second.same_repr(it->second)) {
         m_it->second = it->second;
@@ -223,12 +222,10 @@ void uPass_attributes::on_assign_like(bool is_assign_node) {
         [&](upass::attributes::Attribute_handler& h) { h.on_alias_assign(*this, view.lhs, view.rhs_refs.front()); });
     return;
   }
-  std::vector<std::string_view> refs;
-  refs.reserve(view.rhs_refs.size());
-  for (const auto& r : view.rhs_refs) {
-    refs.emplace_back(r);
-  }
-  reg.for_each_handler([&](upass::attributes::Attribute_handler& h) { h.on_expr_assign(*this, view.lhs, refs); });
+  // view.rhs_refs is already a contiguous span of string_views — pass
+  // straight through; no intermediate vector materialization.
+  reg.for_each_handler(
+      [&](upass::attributes::Attribute_handler& h) { h.on_expr_assign(*this, view.lhs, view.rhs_refs); });
 }
 
 void uPass_attributes::process_assign() { on_assign_like(/*is_assign_node=*/true); }

@@ -19,6 +19,8 @@ cc_library(
         "//lnast",
         "//pass/common:pass",
         "//upass/core:upass",
+        "@abseil-cpp//absl/container:flat_hash_map",
+        "@abseil-cpp//absl/container:inlined_vector",
     ],
     alwayslink = True,  # ensures the static plugin_bitwidth registration fires
 )

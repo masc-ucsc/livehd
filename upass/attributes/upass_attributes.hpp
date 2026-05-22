@@ -11,6 +11,9 @@
 #include <utility>
 #include <vector>
 
+#include "absl/container/flat_hash_map.h"
+#include "absl/container/flat_hash_set.h"
+#include "absl/container/inlined_vector.h"
 #include "const.hpp"
 #include "upass_attributes_handler.hpp"
 #include "upass_core.hpp"
@@ -111,10 +114,14 @@ private:
   // the LHS name and a vector of every `ref` operand text on the RHS.
   // is_alias is set true when the op is an `assign` whose single RHS
   // operand is also a ref (direct alias semantics).
+  // rhs_refs hold string_views into LNAST node text (mmap_lib::str storage,
+  // stable for the pass lifetime). InlinedVector keeps the typical ≤4-operand
+  // case off the heap. Avoid storing references to view.lhs in long-lived
+  // state — keep it owned.
   struct Op_view {
-    std::string              lhs;
-    std::vector<std::string> rhs_refs;
-    bool                     is_alias{false};
+    std::string                              lhs;
+    absl::InlinedVector<std::string_view, 4> rhs_refs;
+    bool                                     is_alias{false};
   };
   Op_view scan_op();
 
@@ -145,9 +152,7 @@ private:
   // recursive process_stmts walk.
   std::vector<uint64_t> active_arm_stack;
 
-  // Strip `%` / `$` IO direction prefixes from a name so handler buckets
-  // see the same identifier whether the LNAST happens to carry direction
-  // sigils on a particular reference or not.
+  // Canonicalize ref text before using it as a handler key.
   static std::string normalize_name(std::string_view name);
 
   // ── Phase 2 — attribute-read evaluation ────────────────────────────────────
@@ -277,11 +282,11 @@ public:
   // declaration vs. statement is "did this var already have an assign?"
   // The statement-level form narrows the in-flight value and leaves no
   // sticky attribute on the variable.
-  bool has_wrap_policy(std::string_view var) const { return wrap_policy.count(std::string{var}) != 0; }
-  bool has_sat_policy(std::string_view var) const { return sat_policy.count(std::string{var}) != 0; }
-  bool was_assigned(std::string_view var) const { return assigned_once.count(std::string{var}) != 0; }
-  void set_wrap_policy(std::string_view var) { wrap_policy.emplace(std::string{var}); }
-  void set_sat_policy(std::string_view var) { sat_policy.emplace(std::string{var}); }
+  bool has_wrap_policy(std::string_view var) const { return wrap_policy.contains(var); }
+  bool has_sat_policy(std::string_view var) const { return sat_policy.contains(var); }
+  bool was_assigned(std::string_view var) const { return assigned_once.contains(var); }
+  void set_wrap_policy(std::string_view var) { wrap_policy.emplace(var); }
+  void set_sat_policy(std::string_view var) { sat_policy.emplace(var); }
 
   // Resolve the value being narrowed (either the LHS's last-stored value if
   // it's already been assigned, or the RHS we are currently emitting) and
@@ -320,11 +325,14 @@ private:
   std::map<std::string, std::string> shape_source;     // var → source-tmp from `assign var src` (chained)
   std::map<std::string, std::string> direct_alias;     // Phase 4 — lhs → rhs for direct-ref `assign` aliases
 
-  // Phase 5 — overflow policy + assignment tracking.
-  std::set<std::string>      wrap_policy;
-  std::set<std::string>      sat_policy;
-  std::set<std::string>      assigned_once;       // any non-nil assign happened
-  std::map<std::string, int> const_assign_count;  // for const single-assign check
+  // Phase 5 — overflow policy + assignment tracking. flat_hash_* gives
+  // heterogeneous string_view lookup and O(1) inserts; assigned_once grows
+  // to ~one entry per assignment on bulk workloads, so the std::set's
+  // O(log N) per-insert allocator pressure was a visible bottleneck.
+  absl::flat_hash_set<std::string>      wrap_policy;
+  absl::flat_hash_set<std::string>      sat_policy;
+  absl::flat_hash_set<std::string>      assigned_once;       // any non-nil assign happened
+  absl::flat_hash_map<std::string, int> const_assign_count;  // for const single-assign check
 
   // Phase 2 evaluator: compute the attribute's value when possible, store it
   // in tmp_fold[dst] so downstream reads pick it up. base_text is the raw

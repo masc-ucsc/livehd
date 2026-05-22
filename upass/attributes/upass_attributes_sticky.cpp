@@ -7,6 +7,7 @@
 #include <string>
 #include <string_view>
 
+#include "absl/container/inlined_vector.h"
 #include "upass_attributes.hpp"
 
 namespace upass {
@@ -90,30 +91,36 @@ void Sticky_handler::on_attr_get(uPass_attributes& owner, std::string_view dst, 
     mark(dst, bucket);
   }
   // Control taint from enclosing if-arms still applies.
-  for (const auto& b : active_control_taint()) {
-    mark(dst, b);
+  if (!control_taint_stack.empty()) {
+    for (const auto& b : active_control_taint()) {
+      mark(dst, b);
+    }
   }
 }
 
 void Sticky_handler::on_alias_assign(uPass_attributes& /*owner*/, std::string_view lhs, std::string_view rhs) {
   merge_from(lhs, rhs);
-  for (const auto& bucket : active_control_taint()) {
-    mark(lhs, bucket);
+  if (!control_taint_stack.empty()) {
+    for (const auto& bucket : active_control_taint()) {
+      mark(lhs, bucket);
+    }
   }
 }
 
 void Sticky_handler::on_expr_assign(uPass_attributes& /*owner*/, std::string_view lhs,
-                                    const std::vector<std::string_view>& rhs_refs) {
+                                    std::span<const std::string_view> rhs_refs) {
   for (auto rhs : rhs_refs) {
     merge_from(lhs, rhs);
   }
-  for (const auto& bucket : active_control_taint()) {
-    mark(lhs, bucket);
+  if (!control_taint_stack.empty()) {
+    for (const auto& bucket : active_control_taint()) {
+      mark(lhs, bucket);
+    }
   }
 }
 
-void Sticky_handler::on_if_arm_enter(uPass_attributes& /*owner*/, const std::vector<std::string_view>& cond_refs,
-                                     const std::vector<std::pair<std::string_view, std::string_view>>& cond_attr_reads) {
+void Sticky_handler::on_if_arm_enter(uPass_attributes& /*owner*/, std::span<const std::string_view> cond_refs,
+                                     std::span<const std::pair<std::string_view, std::string_view>> cond_attr_reads) {
   // Build the taint set for this arm:
   //   - any sticky bucket already on a cond ref var (covers `if tmp {…}` where
   //     tmp came from `tmp = a.[_foo]`),
@@ -124,7 +131,7 @@ void Sticky_handler::on_if_arm_enter(uPass_attributes& /*owner*/, const std::vec
   // conditions OR their sticky contexts").
   std::set<std::string> arm_taint = active_control_taint();
   for (auto ref : cond_refs) {
-    auto it = acquired.find(std::string{ref});
+    auto it = acquired.find(ref);
     if (it != acquired.end()) {
       for (const auto& b : it->second) {
         arm_taint.insert(b);
@@ -146,7 +153,7 @@ void Sticky_handler::on_if_arm_exit(uPass_attributes& /*owner*/) {
 }
 
 bool Sticky_handler::has_sticky(std::string_view var, std::string_view bucket) const {
-  auto it = acquired.find(std::string{var});
+  auto it = acquired.find(var);
   if (it == acquired.end()) {
     return false;
   }
@@ -157,15 +164,27 @@ void Sticky_handler::mark(std::string_view var, std::string_view bucket) {
   if (var.empty() || bucket.empty()) {
     return;
   }
-  acquired[std::string{var}].insert(std::string{bucket});
+  // Heterogeneous probe first; only materialize a std::string when inserting.
+  auto it = acquired.find(var);
+  if (it == acquired.end()) {
+    it = acquired.emplace(std::string{var}, std::set<std::string>{}).first;
+  }
+  it->second.emplace(bucket);
 }
 
 void Sticky_handler::merge_from(std::string_view dst, std::string_view src) {
-  auto it = acquired.find(std::string{src});
+  // The common no-op path (1M+ ops on bulk arithmetic) hits this find and
+  // returns immediately — heterogeneous lookup avoids the string allocation.
+  auto it = acquired.find(src);
   if (it == acquired.end()) {
     return;
   }
-  for (const auto& b : it->second) {
+  // mark() may insert into `acquired` and trigger a rehash; flat_hash_map
+  // moves values on rehash, so iterating `it->second` while calling mark()
+  // is unsafe. Snapshot the bucket list (small in practice — typically ≤4
+  // attrs) into an owned local first.
+  absl::InlinedVector<std::string, 4> buckets(it->second.begin(), it->second.end());
+  for (const auto& b : buckets) {
     mark(dst, b);
   }
 }

@@ -124,12 +124,16 @@ void uPass_attributes::record_assign(std::string_view lhs, bool rhs_is_nil) {
   // Track that the var has been assigned at least once. Used by Phase 5 to
   // distinguish declaration-site `:[wrap]` (attr_set BEFORE first assign)
   // from statement-level `wrap x = ...` (attr_set AFTER an assign).
-  assigned_once.emplace(std::string{lhs});
+  assigned_once.emplace(lhs);
 
-  // Const single-bind enforcement.
+  // Const single-bind enforcement. Skip the const_assign_count lookup
+  // entirely when no type info exists for this var — the hot bulk-arithmetic
+  // path produces millions of fresh names with no associated type info, and
+  // touching const_assign_count for each one was a significant cost.
   const auto* ti = lookup_type_info(lhs);
   if (ti != nullptr && ti->decl == Decl_kind::const_kind) {
-    auto& count = const_assign_count[std::string{lhs}];
+    auto [it, inserted] = const_assign_count.try_emplace(std::string{lhs}, 0);
+    int& count          = it->second;
     ++count;
     if (count > 1) {
       upass::error("uPass_attributes: const `{}` rebind (assigned {} times)\n", lhs, count);

@@ -1,13 +1,14 @@
 //  This file is distributed under the BSD 3-Clause License. See LICENSE for details.
 #pragma once
 
-#include <map>
 #include <set>
+#include <span>
 #include <string>
 #include <string_view>
 #include <utility>
 #include <vector>
 
+#include "absl/container/flat_hash_map.h"
 #include "upass_attributes_handler.hpp"
 
 // Phase 1 — sticky attribute propagation (see attribute_todo.md §Phase 1).
@@ -38,10 +39,10 @@ public:
   void on_attr_get(uPass_attributes& owner, std::string_view dst, std::string_view base) override;
 
   void on_alias_assign(uPass_attributes& owner, std::string_view lhs, std::string_view rhs) override;
-  void on_expr_assign(uPass_attributes& owner, std::string_view lhs, const std::vector<std::string_view>& rhs_refs) override;
+  void on_expr_assign(uPass_attributes& owner, std::string_view lhs, std::span<const std::string_view> rhs_refs) override;
 
-  void on_if_arm_enter(uPass_attributes& owner, const std::vector<std::string_view>& cond_refs,
-                       const std::vector<std::pair<std::string_view, std::string_view>>& cond_attr_reads) override;
+  void on_if_arm_enter(uPass_attributes& owner, std::span<const std::string_view> cond_refs,
+                       std::span<const std::pair<std::string_view, std::string_view>> cond_attr_reads) override;
   void on_if_arm_exit(uPass_attributes& owner) override;
 
   // Pattern check: returns true for `debug`, `_debug`, and any name starting
@@ -64,7 +65,9 @@ public:
 private:
   // Per-variable acquired sticky attrs. Monotonic — entries are added but
   // never removed (later clean assignments cannot clear a sticky).
-  std::map<std::string, std::set<std::string>> acquired;
+  // flat_hash_map supports heterogeneous string_view lookup so the hot
+  // merge_from / mark / has_sticky paths skip per-call std::string temps.
+  absl::flat_hash_map<std::string, std::set<std::string>> acquired;
 
   // Per-arm control taint stack: each entry is the set of sticky bucket
   // names the current arm carries because its condition referenced sticky

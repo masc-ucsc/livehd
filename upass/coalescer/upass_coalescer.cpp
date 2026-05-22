@@ -32,8 +32,7 @@ void uPass_coalescer::handle_op() {
 
   // Walk children. Child 0 is the LHS (a ref). Subsequent children are
   // operands; each `ref` operand is a read of that name and triggers a
-  // pending flush. We don't strip I/O prefixes for the read trigger because
-  // pending keys are stored in the same prefixed form they were parked with.
+  // pending flush.
   bool        got = move_to_child();
   std::string lhs_text;
   bool        lhs_is_ref = false;
@@ -56,9 +55,7 @@ void uPass_coalescer::handle_op() {
     if (is_type(Lnast_ntype::Lnast_ntype_ref)) {
       auto             ref_text = current_text();
       std::string_view key      = strip_io_prefix(ref_text);
-      // Try the stripped key first (constprop's storage convention) and the
-      // raw text as a fallback. Pending uses raw LHS text so a `%out` write
-      // and a downstream `%out` read both match without the strip.
+      // Try the normalized key first and the raw text as a fallback.
       auto p = pending.find(std::string{ref_text});
       if (p == pending.end() && std::string{key} != std::string{ref_text}) {
         p = pending.find(std::string{key});
@@ -77,8 +74,8 @@ void uPass_coalescer::handle_op() {
     return;
   }
 
-  // Boundary signals (regs / inputs / outputs) carry timing & boundary
-  // semantics — never park; let the runner emit them normally.
+  // Boundary signals carry timing & boundary semantics — never park; let the
+  // runner emit them normally.
   if (is_boundary(lhs_text)) {
     return;
   }

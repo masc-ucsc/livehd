@@ -134,8 +134,8 @@ Bundle::Entries_view Bundle::get_attrs() const {
 Bundle::Top_levels_view Bundle::top_levels() const {
   // Walk non-attr entries in canonical order; group contiguous runs by
   // their first segment. Each run becomes one Top_level_entry.
-  auto            entries_view = non_attr_entries();
-  Top_levels_view tv;
+  auto             entries_view = non_attr_entries();
+  Top_levels_view  tv;
   std::string_view cur_seg;
   for (const auto& [k, ep] : entries_view.items_) {
     auto seg = first_segment_view(k);
@@ -416,10 +416,6 @@ std::string_view Bundle::get_all_but_first_level(std::string_view key) {
     return key.substr(n + 1);
   }
 
-  if (key.front() == '$' || key.front() == '%' || key.front() == '#') {
-    return key.substr(1);
-  }
-
   return std::string_view("");  // empty if no dot left
 }
 
@@ -659,7 +655,7 @@ void Bundle::set(std::string_view key_in, const Entry&& entry) {
       // If the promoted key collides with the incoming fixed_key, store
       // the new entry and skip the final emplace below.
       if (new_key == fixed_key) {
-        node.mapped() = entry;
+        node.mapped()     = entry;
         fixed_overwritten = true;
       }
       key_map.insert(std::move(node));
@@ -810,7 +806,7 @@ bool Bundle::concat(const std::shared_ptr<Bundle const>& tup) {
     if (it == key_map.end()) {
       return;
     }
-    auto node = key_map.extract(it);
+    auto node  = key_map.extract(it);
     node.key() = std::string(lhs_seg) + ".0";
     key_map.insert(std::move(node));
   };

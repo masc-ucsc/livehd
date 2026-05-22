@@ -157,13 +157,7 @@ std::string Cgen_verilog::get_scaped_name(std::string_view name) {
   if (name.empty()) {
     return res_name;
   }
-  if (name.front() == '%') {
-    if (name.size() > 1 && name[1] == '.') {
-      res_name = name.substr(2);
-    } else {
-      res_name = name.substr(1);
-    }
-  } else if (reserved_keyword.contains(name)) {
+  if (reserved_keyword.contains(name)) {
     return absl::StrCat("\\", name, " ");
   } else {
     res_name = name;
@@ -293,7 +287,9 @@ void Cgen_verilog::process_memory(std::shared_ptr<File_output> fout, const hhds:
       mem_type = hydrate_const(e.driver).to_i();
     } else if (pin_name == "wensize") {
       if (!is_const_pin(e.driver)) {
-        Pass::error("memory {} should have a constant for wensize not {}", debug_name(node), debug_name(e.driver.get_master_node()));
+        Pass::error("memory {} should have a constant for wensize not {}",
+                    debug_name(node),
+                    debug_name(e.driver.get_master_node()));
         return;
       }
       mem_wensize = hydrate_const(e.driver).to_i();
@@ -316,8 +312,8 @@ void Cgen_verilog::process_memory(std::shared_ptr<File_output> fout, const hhds:
         Pass::error("memory {} should have a constant rdport not {}", debug_name(node), debug_name(e.driver.get_master_node()));
         return;
       }
-      auto v      = hydrate_const(e.driver);
-      bool rdport = !v.is_known_false();
+      auto v                      = hydrate_const(e.driver);
+      bool rdport                 = !v.is_known_false();
       port_vector[port_id].rdport = rdport;
       if (rdport) {
         ++n_rd_ports;
@@ -380,8 +376,7 @@ void Cgen_verilog::process_memory(std::shared_ptr<File_output> fout, const hhds:
         if (p.addr.is_invalid() || p.enable.is_invalid() || p.clock.is_invalid()) {
           Pass::error("memory {} read port is not correctly configured\n", debug_name(node));
         }
-        fout->append(
-            absl::StrCat(first_entry ? "  .rd_addr_" : "  ,.rd_addr_", n_rd_pos, "(", get_wire_or_const(p.addr), ")\n"));
+        fout->append(absl::StrCat(first_entry ? "  .rd_addr_" : "  ,.rd_addr_", n_rd_pos, "(", get_wire_or_const(p.addr), ")\n"));
         first_entry = false;
 
         fout->append("  ,.rd_enable_", std::to_string(n_rd_pos), "(", get_wire_or_const(p.enable), ")\n");
@@ -681,9 +676,9 @@ void Cgen_verilog::process_simple_node(std::shared_ptr<File_output> fout, const 
       }
     }
   } else if (op == Ntype_op::Sext) {
-    auto lhs       = get_expression(get_driver(find_sink_pin(node, "a")));
-    auto pos_dpin  = get_driver(find_sink_pin(node, "b"));
-    auto pos_node  = pos_dpin.is_invalid() ? hhds::Node_class{} : pos_dpin.get_master_node();
+    auto lhs      = get_expression(get_driver(find_sink_pin(node, "a")));
+    auto pos_dpin = get_driver(find_sink_pin(node, "b"));
+    auto pos_node = pos_dpin.is_invalid() ? hhds::Node_class{} : pos_dpin.get_master_node();
     if (!pos_node.is_invalid() && is_type_const(pos_node)) {
       auto lpos = hydrate_const(pos_dpin);
       if (lpos.is_i()) {
@@ -885,8 +880,7 @@ void Cgen_verilog::create_subs(std::shared_ptr<File_output> fout, hhds::Graph* g
         }
       }
       if (!dpin.is_invalid()) {
-        fout->append(
-            absl::StrCat(first_entry ? "" : ",", ".", io.decl->name, "(", get_wire_or_const(dpin), ")\n"));
+        fout->append(absl::StrCat(first_entry ? "" : ",", ".", io.decl->name, "(", get_wire_or_const(dpin), ")\n"));
         first_entry = false;
       }
     }
@@ -954,12 +948,12 @@ void Cgen_verilog::create_registers(std::shared_ptr<File_output> fout, hhds::Gra
       continue;
     }
 
-    auto dpin = node.get_driver_pin(0);
+    auto        dpin      = node.get_driver_pin(0);
     std::string pin_name  = pin_wire_name(dpin);
     const auto  name      = get_scaped_name(pin_name);
     const auto  name_next = get_scaped_name(absl::StrCat("___next_", pin_name));
 
-    std::string edge = "posedge";
+    std::string edge        = "posedge";
     auto        posclk_sink = find_sink_pin(node, "posclk");
     auto        posclk_dpin = get_driver(posclk_sink);
     if (!posclk_dpin.is_invalid()) {
@@ -968,8 +962,8 @@ void Cgen_verilog::create_registers(std::shared_ptr<File_output> fout, hhds::Gra
         edge = "negedge";
       }
     }
-    auto clock_sink = find_sink_pin(node, "clock_pin");
-    std::string clock = get_scaped_name(pin_wire_name(get_driver(clock_sink)));
+    auto        clock_sink = find_sink_pin(node, "clock_pin");
+    std::string clock      = get_scaped_name(pin_wire_name(get_driver(clock_sink)));
 
     std::string reset_async;
     std::string reset;
@@ -1116,10 +1110,10 @@ void Cgen_verilog::create_locals(std::shared_ptr<File_output> fout, hhds::Graph*
       auto final_expr = hydrate_const(dpin).to_verilog();
       pin2expr.emplace(dpin.get_class_index(), Expr(final_expr, false));
     } else if (op == Ntype_op::Get_mask) {
-      auto a_spin = find_sink_pin(node, "a");
+      auto a_spin  = find_sink_pin(node, "a");
       name         = get_scaped_name(absl::StrCat(pin_wire_name(dpin), "_u"));
       out_unsigned = true;
-      auto a_dpin = get_driver(a_spin);
+      auto a_dpin  = get_driver(a_spin);
       if (!a_dpin.is_invalid() && !pin2var.contains(a_dpin.get_class_index())) {
         auto name2 = get_scaped_name(pin_wire_name(a_dpin));
         add_to_pin2var(fout, a_dpin, name2, false);

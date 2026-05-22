@@ -231,9 +231,6 @@ void Pass_opentimer::build_circuit(const std::shared_ptr<hhds::Graph>& g) {
   // 1st: primary inputs.
   if (gio) {
     for (const auto& d : gio->get_input_pin_decls()) {
-      if (d.name == "$") {
-        continue;
-      }
       auto pin = g->get_input_pin(d.name);
       if (pin.is_invalid()) {
         continue;
@@ -258,9 +255,6 @@ void Pass_opentimer::build_circuit(const std::shared_ptr<hhds::Graph>& g) {
   // 2nd: primary outputs.
   if (gio) {
     for (const auto& d : gio->get_output_pin_decls()) {
-      if (d.name == "%") {
-        continue;
-      }
       auto out_sink = g->get_output_pin(d.name);
       if (out_sink.is_invalid()) {
         continue;
@@ -437,9 +431,7 @@ void Pass_opentimer::build_circuit(const std::shared_ptr<hhds::Graph>& g) {
       continue;
     }
     if (op != Ntype_op::Sub) {
-      Pass::error("opentimer pass needs the lgraph to be tmap, found cell {} with type {}",
-                  debug_name(node),
-                  Ntype::get_name(op));
+      Pass::error("opentimer pass needs the lgraph to be tmap, found cell {} with type {}", debug_name(node), Ntype::get_name(op));
       return;
     }
 
@@ -472,9 +464,6 @@ void Pass_opentimer::build_circuit(const std::shared_ptr<hhds::Graph>& g) {
   // 5th: zero-default the inputs/outputs at the OT side.
   if (gio) {
     for (const auto& d : gio->get_input_pin_decls()) {
-      if (d.name == "$") {
-        continue;
-      }
       auto pin = g->get_input_pin(d.name);
       if (pin.is_invalid()) {
         continue;
@@ -490,9 +479,6 @@ void Pass_opentimer::build_circuit(const std::shared_ptr<hhds::Graph>& g) {
       }
     }
     for (const auto& d : gio->get_output_pin_decls()) {
-      if (d.name == "%") {
-        continue;
-      }
       auto pin = g->get_output_pin(d.name);
       if (pin.is_invalid()) {
         continue;

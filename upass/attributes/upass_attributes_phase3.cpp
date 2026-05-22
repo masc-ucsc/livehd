@@ -36,10 +36,6 @@ bool is_uppercase_first(std::string_view s) {
   if (s.empty()) {
     return false;
   }
-  // Strip optional `%`/`$` IO sigils.
-  if (s.front() == '%' || s.front() == '$') {
-    s.remove_prefix(1);
-  }
   return !s.empty() && std::isupper(static_cast<unsigned char>(s.front())) != 0;
 }
 

@@ -3,6 +3,7 @@
 
 #include <stack>
 
+#include "absl/container/flat_hash_set.h"
 #include "const.hpp"
 #include "lnast.hpp"
 
@@ -53,6 +54,7 @@ public:
   Lnast_node       mint_tmp_ref() { return Lnast_node::create_ref(create_lnast_tmp()); }
   std::string      get_lnast_name(std::string_view val, bool last_value);
   std::string_view get_lnast_lhs_name(std::string_view val);
+  void             mark_input_name(std::string_view lname) { input_lnames_.emplace(lname); }
 
   void new_lnast(std::string_view name);
 
@@ -98,5 +100,6 @@ private:
   std::string emit_unary_result(Lnast_ntype::Lnast_ntype_int op_type, std::string_view operand);
   std::string emit_binary_result(Lnast_ntype::Lnast_ntype_int op_type, std::string_view lhs, std::string_view rhs);
 
-  std::stack<Lnast_nid> stmts_stack_;
+  std::stack<Lnast_nid>            stmts_stack_;
+  absl::flat_hash_set<std::string> input_lnames_;
 };

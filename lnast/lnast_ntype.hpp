@@ -2,6 +2,7 @@
 #pragma once
 
 #include <array>
+#include <cstddef>
 #include <cstdint>
 #include <string_view>
 
@@ -9,19 +10,34 @@
 // directly in the HHDS tree slot via Lnast::set_type/get_type. Detached
 // Lnast_node values only represent ref/const/invalid leaves; structural nodes
 // should use this raw type value directly.
+//
+// Encoding invariant: bit 0 of the underlying value is reserved for
+// is_loop_last, matching Ntype_op in graph/cell.hpp. Current LNAST nodes are
+// all non-loop-last and therefore use even values; future loop-breaking LNAST
+// nodes should use the odd slot next to their non-loop-last form.
 class Lnast_ntype {
+private:
+  static constexpr int lnast_ntype_counter_base = __COUNTER__;
+
 public:
   enum Lnast_ntype_int : uint8_t {
-#define LNAST_NODE(NAME, VERBAL) Lnast_ntype_##NAME,
+#define LNAST_NODE(NAME, VERBAL) Lnast_ntype_##NAME = (__COUNTER__ - lnast_ntype_counter_base - 1) * 2,
+#define LNAST_LOOP_NODE(NAME, VERBAL) Lnast_ntype_##NAME = ((__COUNTER__ - lnast_ntype_counter_base - 1) * 2) | 1,
 #include "lnast_nodes.def"
     Lnast_ntype_last_invalid
   };
 
 private:
-  constexpr static std::array namemap{
-#define LNAST_NODE(NAME, VERBAL) #VERBAL,
+  inline constexpr static auto namemap = []() {
+    std::array<std::string_view, Lnast_ntype_last_invalid> a{};
+    for (auto& s : a) {
+      s = "invalid";
+    }
+#define LNAST_NODE(NAME, VERBAL) a[static_cast<size_t>(Lnast_ntype_##NAME)] = #VERBAL;
+#define LNAST_LOOP_NODE(NAME, VERBAL) a[static_cast<size_t>(Lnast_ntype_##NAME)] = #VERBAL;
 #include "lnast_nodes.def"
-  };
+    return a;
+  }();
 
 public:
   Lnast_ntype()                              = delete;
@@ -30,6 +46,9 @@ public:
 
   // Per-type creator + predicate.
 #define LNAST_NODE(NAME, VERBAL)                                                  \
+  static constexpr Lnast_ntype_int create_##NAME() { return Lnast_ntype_##NAME; } \
+  static constexpr bool            is_##NAME(Lnast_ntype_int v) { return v == Lnast_ntype_##NAME; }
+#define LNAST_LOOP_NODE(NAME, VERBAL)                                             \
   static constexpr Lnast_ntype_int create_##NAME() { return Lnast_ntype_##NAME; } \
   static constexpr bool            is_##NAME(Lnast_ntype_int v) { return v == Lnast_ntype_##NAME; }
 #include "lnast_nodes.def"
@@ -64,9 +83,13 @@ public:
   }
 
   static constexpr bool is_type(Lnast_ntype_int v) { return v >= Lnast_ntype_none_type && v <= Lnast_ntype_unknown_type; }
+  static constexpr bool is_loop_last(Lnast_ntype_int v) { return (static_cast<uint8_t>(v) & 1) != 0; }
 
   static std::string_view to_sv(Lnast_ntype_int v) { return namemap[v]; }
   static std::string_view debug_name(Lnast_ntype_int v) { return namemap[v]; }
 
   static_assert(namemap.size() == Lnast_ntype_last_invalid);
+  static_assert((static_cast<uint8_t>(Lnast_ntype_invalid) & 1) == 0);
+  static_assert((static_cast<uint8_t>(Lnast_ntype_top) & 1) == 0);
+  static_assert((static_cast<uint8_t>(Lnast_ntype_unknown_type) & 1) == 0);
 };

@@ -155,23 +155,13 @@ private:
   // `lhs` already exists, it is discarded (DSE).
   void park_current(const std::string& lhs);
 
-  // Boundary check: outputs (%), inputs ($), regs (#) carry semantics beyond
-  // value and are never parked.
+  // Boundary metadata is structural; textual ref prefixes are not recognized.
   static bool is_boundary(std::string_view name) {
-    if (name.empty()) {
-      return false;
-    }
-    const char c = name.front();
-    return c == '%' || c == '$' || c == '#';
+    (void)name;
+    return false;
   }
 
-  // Strip I/O prefix to match the symbol-table key constprop uses.
-  static std::string_view strip_io_prefix(std::string_view name) {
-    if (!name.empty() && (name.front() == '%' || name.front() == '$')) {
-      return name.substr(1);
-    }
-    return name;
-  }
+  static std::string_view strip_io_prefix(std::string_view name) { return name; }
 };
 
 // Plugin registration lives in upass_coalescer.cpp.

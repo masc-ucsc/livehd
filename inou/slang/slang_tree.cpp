@@ -78,16 +78,17 @@ bool Slang_tree::process_top_instance(const slang::ast::InstanceSymbol& symbol) 
       std::string var_name;
       if (port.direction == slang::ast::ArgumentDirection::In) {
 #ifdef LNAST_NODE_POS
-        var_name = absl::StrCat("$.:", decl_pos, ":", port.name);
+        var_name = absl::StrCat("p", decl_pos, "_", port.name);
 #else
-        var_name = absl::StrCat("$", port.name);
+        var_name = port.name;
 #endif
+        lnast_builder.mark_input_name(var_name);
         lnast_builder.vname2lname.emplace(port.name, var_name);
       } else {
 #ifdef LNAST_NODE_POS
-        var_name = absl::StrCat("%.:", decl_pos, ":", port.name);
+        var_name = absl::StrCat("p", decl_pos, "_", port.name);
 #else
-        var_name = absl::StrCat("%", port.name);
+        var_name = port.name;
 #endif
         lnast_builder.vname2lname.emplace(port.name, var_name);
       }

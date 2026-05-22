@@ -57,9 +57,8 @@ static std::string node_loc(const Lnast* ln, const Lnast_nid& it) {
 //                    (prp2lnast strips the escape).
 //   - dotted path  : `[$%#]?<id>(\.<id>)*` where `<id>` is
 //                    `[A-Za-z_][A-Za-z0-9_]*`. The optional leading `$`/`%`/`#`
-//                    is the port-direction/register prefix per
-//                    `lnast_todo.md` §12 — input/output/reg, not a free
-//                    "random identifier" form.
+//                    is not valid ref text; direction/storage lives in
+//                    structural metadata instead of a textual prefix.
 // Anything else (commas, spaces, colons, slashes, …) is a producer bug —
 // most often a `get_text(lvalue)` that swallowed surrounding syntax (type
 // cast, comma list, brackets) or a stale escape that wasn't stripped at
@@ -89,14 +88,6 @@ static bool is_valid_ref_text(std::string_view name) {
     return false;  // pure alnum/underscore — should have been stripped
   }
   size_t i = 0;
-  if (name[0] == '$' || name[0] == '%' || name[0] == '#') {
-    // Direction/storage prefix per `lnast_todo.md` §12: `$` input port,
-    // `%` output port, `#` register. The rest must be a normal identifier.
-    if (name.size() == 1) {
-      return false;
-    }
-    i = 1;
-  }
   // ___<digits> tmp form
   if (name.size() - i >= 4 && name.substr(i, 3) == "___") {
     for (size_t j = i + 3; j < name.size(); ++j) {
@@ -266,9 +257,7 @@ void Pass_lnastfmt::validate(const Lnast* ln) {
         }
       }
       if (io_count > 1) {
-        Pass::error("lnastfmt: {} top has {} io children — at most one is allowed",
-                    node_loc(ln, first_io),
-                    io_count);
+        Pass::error("lnastfmt: {} top has {} io children — at most one is allowed", node_loc(ln, first_io), io_count);
         return;
       }
       if (io_count == 1 && !first_seen) {
@@ -374,7 +363,7 @@ void Pass_lnastfmt::validate(const Lnast* ln) {
         // is a direct child of a func_def (pre-extraction shape) or io
         // (post-extraction shape), or a nested tuple-typed slot using the
         // same recursive shape (parent assign).
-        bool ok = false;
+        bool ok     = false;
         auto parent = ln->get_parent(it);
         if (!parent.is_invalid() && Lnast_ntype::is_tuple_add(ln->get_type(parent))) {
           auto gp = ln->get_parent(parent);

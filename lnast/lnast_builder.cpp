@@ -57,7 +57,7 @@ std::string Lnast_builder::get_lnast_name(std::string_view vname, bool last_valu
     lname = it->second;
   }
 
-  if (!last_value || Lnast::is_input(lname)) {  // global input
+  if (!last_value || input_lnames_.contains(lname)) {
     return std::string(lname);
   }
 
@@ -86,6 +86,7 @@ void Lnast_builder::new_lnast(std::string_view name) {
   idx_stmts     = lnast->add_child(root_nid, Lnast_ntype::create_stmts());
 
   vname2lname.clear();
+  input_lnames_.clear();
   tmp_var_cnt = 0;
 }
 
@@ -284,32 +285,13 @@ void Lnast_builder::create_assign_stmts(std::string_view lhs_var, std::string_vi
       add_ref_child(idx_assign, lhs_var);
       add_value_child(idx_assign, rhs_dest);
     } else {
-      std::vector<std::string> vec = absl::StrSplit(lhs_var, '.');
-
-      if (vec.size() == 2 && (vec[0] == "%" || vec[0] == "$")) {
-        return create_assign_stmts(absl::StrCat(vec[0], Bundle::get_first_level_name(vec[1])), rhs_var);
-      }
-
       auto idx_dot = lnast->add_child(idx_stmts, Lnast_ntype::create_tuple_set());
       lhs_dest     = create_lnast_tmp();
       add_ref_child(idx_dot, lhs_dest);
 
-      std::string io_declare;
-
       for (const auto& f : absl::StrSplit(lhs_var, '.')) {
-        if (f == "$" || f == "%") {
-          io_declare = f;
-          continue;
-        }
-
         auto strip_pos = Bundle::get_first_level_name(f);  // WARNING: This is wrong but lnast_tolg has bugs handling this
-
-        if (io_declare.empty()) {
-          add_const_child(idx_dot, strip_pos);
-        } else {
-          add_const_child(idx_dot, absl::StrCat(io_declare, strip_pos));
-          io_declare.clear();
-        }
+        add_const_child(idx_dot, strip_pos);
       }
       add_value_child(idx_dot, rhs_dest);
     }
@@ -329,27 +311,15 @@ void Lnast_builder::create_declare_bits_stmts(std::string_view a_var, bool is_si
 #ifdef LNASTOP_DONE
   add_ref_child(idx_dot, a_var);
 #else
-  bool        first = true;
-  std::string io_declare;
+  bool first = true;
 
   for (const auto& f : absl::StrSplit(a_var, '.')) {
     if (first) {
       first = false;
-      if (f == "$" || f == "%") {
-        io_declare = f;
-        continue;
-      }
       add_ref_child(idx_dot, f);
     } else {
-      if (io_declare.empty()) {
-        auto strip_pos = Bundle::get_first_level_name(f);  // WARNING: This is wrong but lnast_tolg has bugs handling this
-        add_const_child(idx_dot, strip_pos);
-      } else {
-        auto n = Bundle::get_first_level_name(f);
-        add_ref_child(idx_dot, absl::StrCat(io_declare, n));
-
-        io_declare.clear();
-      }
+      auto strip_pos = Bundle::get_first_level_name(f);  // WARNING: This is wrong but lnast_tolg has bugs handling this
+      add_const_child(idx_dot, strip_pos);
     }
   }
 #endif
@@ -412,22 +382,6 @@ std::string Lnast_builder::create_tuple_get(std::string_view var) {
 #else
   if (Bundle::is_single_level(var)) {
     return std::string(var);
-  }
-
-  auto first_level = Bundle::get_first_level(var);
-  if (first_level == "$" || first_level == "%") {
-    // fuse with next levels (bugs in lnast_opt otherwise)
-
-    auto f = Bundle::get_all_but_first_level(var);
-
-    auto n    = Bundle::get_first_level_name(f);
-    auto rest = Bundle::get_all_but_first_level(n);
-
-    if (rest.empty()) {
-      return absl::StrCat(first_level, n);
-    }
-
-    return create_tuple_get(absl::StrCat(first_level, n, ".", rest));
   }
 
   auto idx_dot = lnast->add_child(idx_stmts, Lnast_ntype::create_tuple_get());

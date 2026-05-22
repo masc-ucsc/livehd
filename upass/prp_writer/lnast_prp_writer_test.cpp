@@ -51,12 +51,10 @@ static std::shared_ptr<Lnast> make_assign_lnast(std::string_view lhs, std::strin
 
 // ── Test 1: plain assign survives and is emitted as `mut x = 3` ─────────────
 TEST(LnastPrpWriter, AssignEmittedAsMut) {
-  // Output port (%out) — upass keeps it; writer strips % prefix.
-  auto ln     = make_assign_lnast("%out", "3", "assign_test");
+  auto ln     = make_assign_lnast("out", "3", "assign_test");
   auto output = run_and_emit(ln, {"noop_shared"});
   EXPECT_NE(output.find("out"), std::string::npos) << output;
   EXPECT_NE(output.find("3"), std::string::npos) << output;
-  EXPECT_EQ(output.find('%'), std::string::npos) << "% prefix must be stripped: " << output;
 }
 
 // ── Test 2: add_trivial pattern — constprop DCEs all-tmp intermediates ───────
@@ -107,11 +105,11 @@ TEST(LnastPrpWriter, PlusEmittedAsInfix) {
   ln->set_root(Lnast_ntype::create_top());
   auto stmts = ln->add_child(ln->get_root(), Lnast_ntype::create_stmts());
 
-  // %out = %a + %b  — ports so upass keeps them
+  // out = a + b
   auto plus = ln->add_child(stmts, Lnast_ntype::create_plus());
-  ln->add_child(plus, Lnast_node::create_ref("%out"));
-  ln->add_child(plus, Lnast_node::create_ref("%a"));
-  ln->add_child(plus, Lnast_node::create_ref("%b"));
+  ln->add_child(plus, Lnast_node::create_ref("out"));
+  ln->add_child(plus, Lnast_node::create_ref("a"));
+  ln->add_child(plus, Lnast_node::create_ref("b"));
 
   auto output = run_and_emit(ln, {"noop_shared"});
   EXPECT_NE(output.find("out"), std::string::npos) << output;
@@ -128,11 +126,11 @@ TEST(LnastPrpWriter, EqEmittedAsDoubleEquals) {
   ln->set_root(Lnast_ntype::create_top());
   auto stmts = ln->add_child(ln->get_root(), Lnast_ntype::create_stmts());
 
-  // %out = %a == %b
+  // out = a == b
   auto eq = ln->add_child(stmts, Lnast_ntype::create_eq());
-  ln->add_child(eq, Lnast_node::create_ref("%out"));
-  ln->add_child(eq, Lnast_node::create_ref("%a"));
-  ln->add_child(eq, Lnast_node::create_ref("%b"));
+  ln->add_child(eq, Lnast_node::create_ref("out"));
+  ln->add_child(eq, Lnast_node::create_ref("a"));
+  ln->add_child(eq, Lnast_node::create_ref("b"));
 
   auto output = run_and_emit(ln, {"noop_shared"});
   EXPECT_NE(output.find("=="), std::string::npos) << output;
@@ -145,9 +143,8 @@ TEST(LnastPrpWriter, CassertHasNoParens) {
   ln->set_root(Lnast_ntype::create_top());
   auto stmts = ln->add_child(ln->get_root(), Lnast_ntype::create_stmts());
 
-  // %cond is a port — survives upass
   auto ca = ln->add_child(stmts, Lnast_ntype::create_cassert());
-  ln->add_child(ca, Lnast_node::create_ref("%cond"));
+  ln->add_child(ca, Lnast_node::create_ref("cond"));
 
   auto output = run_and_emit(ln, {"noop_shared"});
   EXPECT_NE(output.find("cassert"), std::string::npos) << output;
@@ -181,20 +178,17 @@ TEST(LnastPrpWriter, TrueIfPrunedInOutput) {
   EXPECT_NE(output.find("src"), std::string::npos) << output;
 }
 
-// ── Test 7: ref strips $ prefix (input port) ─────────────────────────────────
-TEST(LnastPrpWriter, InputPortPrefixStripped) {
-  auto ln = std::make_shared<Lnast>("prefix_test");
+// ── Test 7: bare ref names pass through ──────────────────────────────────────
+TEST(LnastPrpWriter, BarePortNamesPassThrough) {
+  auto ln = std::make_shared<Lnast>("bare_name_test");
   ln->set_root(Lnast_ntype::create_top());
   auto stmts = ln->add_child(ln->get_root(), Lnast_ntype::create_stmts());
 
-  // %out = $in   (output = input — port-to-port assign, always kept)
   auto asgn = ln->add_child(stmts, Lnast_ntype::create_assign());
-  ln->add_child(asgn, Lnast_node::create_ref("%out"));
-  ln->add_child(asgn, Lnast_node::create_ref("$in"));
+  ln->add_child(asgn, Lnast_node::create_ref("out"));
+  ln->add_child(asgn, Lnast_node::create_ref("in"));
 
   auto output = run_and_emit(ln, {"noop_shared"});
-  EXPECT_EQ(output.find('%'), std::string::npos) << "% must be stripped: " << output;
-  EXPECT_EQ(output.find('$'), std::string::npos) << "$ must be stripped: " << output;
   EXPECT_NE(output.find("out"), std::string::npos) << output;
   EXPECT_NE(output.find("in"), std::string::npos) << output;
 }
@@ -237,11 +231,11 @@ TEST(LnastPrpWriter, MultipleStatementsInOrder) {
   auto stmts = ln->add_child(ln->get_root(), Lnast_ntype::create_stmts());
 
   auto a1 = ln->add_child(stmts, Lnast_ntype::create_assign());
-  ln->add_child(a1, Lnast_node::create_ref("%x"));
+  ln->add_child(a1, Lnast_node::create_ref("x"));
   ln->add_child(a1, Lnast_node::create_const("1"));
 
   auto a2 = ln->add_child(stmts, Lnast_ntype::create_assign());
-  ln->add_child(a2, Lnast_node::create_ref("%y"));
+  ln->add_child(a2, Lnast_node::create_ref("y"));
   ln->add_child(a2, Lnast_node::create_const("2"));
 
   auto output = run_and_emit(ln, {"noop_shared"});
@@ -259,23 +253,23 @@ TEST(LnastPrpWriter, ArithmeticOperatorsInfix) {
   ln->set_root(Lnast_ntype::create_top());
   auto stmts = ln->add_child(ln->get_root(), Lnast_ntype::create_stmts());
 
-  // %r1 = %a - %b
+  // r1 = a - b
   auto minus = ln->add_child(stmts, Lnast_ntype::create_minus());
-  ln->add_child(minus, Lnast_node::create_ref("%r1"));
-  ln->add_child(minus, Lnast_node::create_ref("%a"));
-  ln->add_child(minus, Lnast_node::create_ref("%b"));
+  ln->add_child(minus, Lnast_node::create_ref("r1"));
+  ln->add_child(minus, Lnast_node::create_ref("a"));
+  ln->add_child(minus, Lnast_node::create_ref("b"));
 
-  // %r2 = %a * %b
+  // r2 = a * b
   auto mult = ln->add_child(stmts, Lnast_ntype::create_mult());
-  ln->add_child(mult, Lnast_node::create_ref("%r2"));
-  ln->add_child(mult, Lnast_node::create_ref("%a"));
-  ln->add_child(mult, Lnast_node::create_ref("%b"));
+  ln->add_child(mult, Lnast_node::create_ref("r2"));
+  ln->add_child(mult, Lnast_node::create_ref("a"));
+  ln->add_child(mult, Lnast_node::create_ref("b"));
 
-  // %r3 = %a / %b
+  // r3 = a / b
   auto divn = ln->add_child(stmts, Lnast_ntype::create_div());
-  ln->add_child(divn, Lnast_node::create_ref("%r3"));
-  ln->add_child(divn, Lnast_node::create_ref("%a"));
-  ln->add_child(divn, Lnast_node::create_ref("%b"));
+  ln->add_child(divn, Lnast_node::create_ref("r3"));
+  ln->add_child(divn, Lnast_node::create_ref("a"));
+  ln->add_child(divn, Lnast_node::create_ref("b"));
 
   auto output = run_and_emit(ln, {"noop_shared"});
   EXPECT_NE(output.find('-'), std::string::npos) << "minus missing: " << output;
@@ -293,23 +287,23 @@ TEST(LnastPrpWriter, BitwiseAndLogicalOperators) {
   ln->set_root(Lnast_ntype::create_top());
   auto stmts = ln->add_child(ln->get_root(), Lnast_ntype::create_stmts());
 
-  // %r1 = %a & %b
+  // r1 = a & b
   auto band = ln->add_child(stmts, Lnast_ntype::create_bit_and());
-  ln->add_child(band, Lnast_node::create_ref("%r1"));
-  ln->add_child(band, Lnast_node::create_ref("%a"));
-  ln->add_child(band, Lnast_node::create_ref("%b"));
+  ln->add_child(band, Lnast_node::create_ref("r1"));
+  ln->add_child(band, Lnast_node::create_ref("a"));
+  ln->add_child(band, Lnast_node::create_ref("b"));
 
-  // %r2 = %a | %b
+  // r2 = a | b
   auto bor = ln->add_child(stmts, Lnast_ntype::create_bit_or());
-  ln->add_child(bor, Lnast_node::create_ref("%r2"));
-  ln->add_child(bor, Lnast_node::create_ref("%a"));
-  ln->add_child(bor, Lnast_node::create_ref("%b"));
+  ln->add_child(bor, Lnast_node::create_ref("r2"));
+  ln->add_child(bor, Lnast_node::create_ref("a"));
+  ln->add_child(bor, Lnast_node::create_ref("b"));
 
-  // %r3 = %a and %b
+  // r3 = a and b
   auto land = ln->add_child(stmts, Lnast_ntype::create_log_and());
-  ln->add_child(land, Lnast_node::create_ref("%r3"));
-  ln->add_child(land, Lnast_node::create_ref("%a"));
-  ln->add_child(land, Lnast_node::create_ref("%b"));
+  ln->add_child(land, Lnast_node::create_ref("r3"));
+  ln->add_child(land, Lnast_node::create_ref("a"));
+  ln->add_child(land, Lnast_node::create_ref("b"));
 
   auto output = run_and_emit(ln, {"noop_shared"});
   EXPECT_NE(output.find('&'), std::string::npos) << "bit_and missing: " << output;
@@ -326,11 +320,11 @@ TEST(LnastPrpWriter, TupleAddEmitted) {
   ln->set_root(Lnast_ntype::create_top());
   auto stmts = ln->add_child(ln->get_root(), Lnast_ntype::create_stmts());
 
-  // %t = (%a, %b)
+  // t = (a, b)
   auto tadd = ln->add_child(stmts, Lnast_ntype::create_tuple_add());
-  ln->add_child(tadd, Lnast_node::create_ref("%t"));
-  ln->add_child(tadd, Lnast_node::create_ref("%a"));
-  ln->add_child(tadd, Lnast_node::create_ref("%b"));
+  ln->add_child(tadd, Lnast_node::create_ref("t"));
+  ln->add_child(tadd, Lnast_node::create_ref("a"));
+  ln->add_child(tadd, Lnast_node::create_ref("b"));
 
   auto output = run_and_emit(ln, {"noop_shared"});
   EXPECT_NE(output.find('('), std::string::npos) << "tuple parens missing: " << output;

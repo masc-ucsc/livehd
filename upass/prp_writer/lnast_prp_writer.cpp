@@ -81,12 +81,7 @@ std::string Lnast_prp_writer::take_decl_keyword(std::string_view lhs) {
   return kw;
 }
 
-std::string_view Lnast_prp_writer::strip_prefix(std::string_view name) {
-  if (!name.empty() && (name[0] == '%' || name[0] == '$')) {
-    return name.substr(1);
-  }
-  return name;
-}
+std::string_view Lnast_prp_writer::strip_prefix(std::string_view name) { return name; }
 
 // ── Main dispatch ─────────────────────────────────────────────────────────────
 

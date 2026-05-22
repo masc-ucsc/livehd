@@ -59,9 +59,8 @@ temporary stand-ins that go away as those tracks land.
   enforcement + side-map into upass. Slice 1 just pass-through-copies
   `attr_set`.
 - **`lnast_todo.md` §12 — `$`/`%`/`#` prefixes → ST-backed
-  direction/storage.** Slice 1 uses prefix checks (`name.front() == '#'`
-  for regs, etc.) as a pragmatic stand-in. Every such check in upass must
-  migrate to `st.is_reg(name)` / `st.is_input(name)` once §12 lands.
+  direction/storage.** The upass pipeline assumes ref text is already bare.
+  Direction/storage must be carried structurally, not encoded in the name.
 - **`lnast_todo.md` §13 — `Tree_index`-identity tmps.** Slice 1 uses
   `Lnast::is_tmp(text)` (string prefix). Migrate to `node.is_tmp()` when
   §13 lands. upass never tracks tmps by string outside of the classify
@@ -171,10 +170,7 @@ Runner protocol:
 
 An assignment `LHS = RHS` (or an op-result `op(LHS, …)`) is dropped iff:
 
-- LHS is not a register — today checked as `LHS.front() != '#'`; migrates
-  to `st.is_reg(LHS)` per `lnast_todo.md` §12.
-- LHS is not an input/output port — today `LHS.front() != '$' && != '%'`;
-  migrates to `st.is_input` / `st.is_output` per §12.
+- LHS is not a register, input, or output according to structural metadata.
 - LHS's resolved value in the symbol table is a known `Lconst` (not
   `invalid`, no unknowns).
 - LHS has no live downstream consumer that isn't itself comptime-
@@ -442,10 +438,8 @@ These must hold after every slice:
 
 ## 5. Known gotchas carried forward
 
-- `Symbol_table` keys strip `%`/`$` prefixes in `process_assign` (see
-  `upass_constprop.cpp:22`). Any new consumer of the symbol table must use
-  the stripped form. Removable once §12 lands (no more prefixes in ref
-  text).
+- `Symbol_table` keys assume canonical bare ref text. Legacy `$`/`%`/`#`
+  prefixes are producer bugs, not alternate spellings.
 - `Bundle::set` interns attr keys as `0.__attr`; `Symbol_table::has_trivial`
   does literal match. Don't round-trip attr set/get through the symbol
   table — Slice 5 side-map supersedes this.

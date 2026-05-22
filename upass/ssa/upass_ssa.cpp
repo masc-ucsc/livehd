@@ -4,9 +4,9 @@
 
 #include <format>
 #include <string>
-#include <unordered_map>
-#include <unordered_set>
 
+#include "absl/container/flat_hash_map.h"
+#include "absl/container/flat_hash_set.h"
 #include "lnast_ntype.hpp"
 
 namespace {
@@ -59,10 +59,6 @@ bool uPass_ssa::is_user_var(std::string_view name) {
   if (name.empty()) {
     return false;
   }
-  // Port sigils — pinned to graph I/O, never rename.
-  if (name[0] == '$' || name[0] == '%') {
-    return false;
-  }
   // Compiler-generated temporaries — already unique per func_extract.
   if (name.size() >= 3 && name[0] == '_' && name[1] == '_' && name[2] == '_') {
     return false;
@@ -91,14 +87,15 @@ void uPass_ssa::copy_subtree(const std::shared_ptr<Lnast>& src, const Lnast_nid&
 
 // ── copy_with_rename ─────────────────────────────────────────────────────────
 void uPass_ssa::copy_with_rename(const std::shared_ptr<Lnast>& src, const Lnast_nid& src_nid, const std::shared_ptr<Lnast>& dst,
-                                 const Lnast_nid& dst_parent, const std::unordered_map<std::string, std::string>& rename_map) {
+                                 const Lnast_nid& dst_parent, const absl::flat_hash_map<std::string, std::string>& rename_map) {
   auto      type = src->get_type(src_nid);
   Lnast_nid new_nid;
   if (Lnast_ntype::is_ref(type)) {
-    auto        name = std::string(src->get_name(src_nid));
-    auto        it   = rename_map.find(name);
-    const auto& out  = (it != rename_map.end()) ? it->second : name;
-    new_nid          = dst->add_child(dst_parent, Lnast_node::create_ref(out));
+    // Heterogeneous lookup: no temporary std::string allocation per ref.
+    std::string_view name = src->get_name(src_nid);
+    auto             it   = rename_map.find(name);
+    new_nid               = dst->add_child(
+        dst_parent, Lnast_node::create_ref(it != rename_map.end() ? std::string_view{it->second} : name));
   } else if (Lnast_ntype::is_const(type)) {
     new_nid = dst->add_child(dst_parent, Lnast_node::create_const(src->get_name(src_nid)));
   } else if (Lnast_ntype::is_invalid(type)) {
@@ -148,7 +145,7 @@ void uPass_ssa::run(const std::shared_ptr<Lnast>& lnast) {
   Lnast_nid in_tup_nid;
   Lnast_nid out_tup_nid;
   {
-    auto it = lnast->children(io_nid).begin();
+    auto it  = lnast->children(io_nid).begin();
     auto end = lnast->children(io_nid).end();
     if (it != end) {
       in_tup_nid = *it;
@@ -165,11 +162,10 @@ void uPass_ssa::run(const std::shared_ptr<Lnast>& lnast) {
   // when an assign's type slot is a `tuple_add`, expand each field with a
   // dotted-name prefix; otherwise emit one leaf entry.
   using Flat_field = Lnast_io_entry;
-  std::vector<Flat_field>      flat_inputs;
-  std::vector<Flat_field>      flat_outputs;
+  std::vector<Flat_field>                                                            flat_inputs;
+  std::vector<Flat_field>                                                            flat_outputs;
   std::function<void(Lnast_nid, const std::string&, bool, std::vector<Flat_field>&)> flatten_assign;
-  flatten_assign = [&](Lnast_nid assign_nid, const std::string& prefix, bool collect_is_ref,
-                       std::vector<Flat_field>& out) {
+  flatten_assign = [&](Lnast_nid assign_nid, const std::string& prefix, bool collect_is_ref, std::vector<Flat_field>& out) {
     if (!Lnast_ntype::is_assign(lnast->get_type(assign_nid))) {
       return;
     }
@@ -228,8 +224,7 @@ void uPass_ssa::run(const std::shared_ptr<Lnast>& lnast) {
       staging->add_child(a, Lnast_node::create_ref(f.name));
       staging->add_child(a, Lnast_node::create_const(is_input && f.is_ref ? "ref" : "nil"));
       if (f.bits > 0) {
-        auto ty = staging->add_child(a, f.is_signed ? Lnast_ntype::create_prim_type_sint()
-                                                    : Lnast_ntype::create_prim_type_uint());
+        auto ty = staging->add_child(a, f.is_signed ? Lnast_ntype::create_prim_type_sint() : Lnast_ntype::create_prim_type_uint());
         staging->add_child(ty, Lnast_node::create_const(std::to_string(f.bits)));
       }
     }
@@ -240,9 +235,12 @@ void uPass_ssa::run(const std::shared_ptr<Lnast>& lnast) {
   auto new_stmts = staging->add_child(new_root, Lnast_ntype::create_stmts());
 
   // SSA rename state (straight-line scope only; branches copied verbatim).
-  std::unordered_map<std::string, std::string> rename_map;  // base → current SSA name
-  std::unordered_map<std::string, int>         ssa_count;   // version counter
-  std::unordered_set<std::string>              seen_lhs;    // first-seen tracker
+  // absl::flat_hash_map<std::string, …> supports heterogeneous string_view
+  // lookup — the hot inner loop walks 1M+ refs and reads these via views,
+  // never paying for a std::string temporary on the read path.
+  absl::flat_hash_map<std::string, std::string> rename_map;  // base → current SSA name
+  absl::flat_hash_map<std::string, int>         ssa_count;   // version counter
+  absl::flat_hash_set<std::string>              seen_lhs;    // first-seen tracker
 
   for (auto child : lnast->children(stmts_nid)) {
     auto type = lnast->get_type(child);
@@ -261,24 +259,31 @@ void uPass_ssa::run(const std::shared_ptr<Lnast>& lnast) {
       for (auto sub : lnast->children(child)) {
         if (first) {
           // ── LHS ────────────────────────────────────────────────────────
-          auto        lhs_name = std::string(lnast->get_name(sub));
-          std::string out_name = lhs_name;
+          // Read via string_view; only materialize std::string when we have
+          // to insert into the rename/ssa maps.
+          std::string_view lhs_view = lnast->get_name(sub);
+          std::string      out_name;
 
-          if (is_user_var(lhs_name)) {
-            if (seen_lhs.count(lhs_name)) {
+          if (is_user_var(lhs_view)) {
+            if (auto seen_it = seen_lhs.find(lhs_view); seen_it != seen_lhs.end()) {
               // Preview next SSA version — do NOT touch rename_map yet.
-              int n       = ssa_count[lhs_name] + 1;
-              out_name    = lhs_name + "___ssa_" + std::to_string(n);
-              pending_lhs = lhs_name;
+              int n = ssa_count[*seen_it] + 1;
+              out_name.reserve(lhs_view.size() + 6 + 6);
+              out_name.assign(lhs_view);
+              out_name.append("___ssa_");
+              out_name.append(std::to_string(n));
+              pending_lhs.assign(lhs_view);
               pending_ssa = out_name;
             } else {
-              seen_lhs.insert(lhs_name);
+              std::string lhs_str{lhs_view};
+              seen_lhs.insert(lhs_str);
               // Initialise identity mapping so RHS reads work correctly
               // even before a rename is needed.
-              if (rename_map.find(lhs_name) == rename_map.end()) {
-                rename_map[lhs_name] = lhs_name;
-              }
+              rename_map.try_emplace(lhs_str, lhs_str);
+              out_name = std::move(lhs_str);
             }
+          } else {
+            out_name.assign(lhs_view);
           }
           staging->add_child(stmt_node, Lnast_node::create_ref(out_name));
           first = false;

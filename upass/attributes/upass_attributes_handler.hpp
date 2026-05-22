@@ -4,6 +4,7 @@
 #include <functional>
 #include <map>
 #include <memory>
+#include <span>
 #include <string>
 #include <string_view>
 #include <utility>
@@ -49,14 +50,16 @@ struct Attribute_handler {
 
   // Expression-result assign: `lhs = <expr involving rhs_refs...>`.
   // Sticky attrs migrate; non-sticky drop.
+  // `rhs_refs` is a span so callers can pass any contiguous storage (e.g.
+  // absl::InlinedVector) without materializing an intermediate std::vector.
   virtual void on_expr_assign(uPass_attributes& /*owner*/, std::string_view /*lhs*/,
-                              const std::vector<std::string_view>& /*rhs_refs*/) {}
+                              std::span<const std::string_view> /*rhs_refs*/) {}
 
   // Entering a conditional arm whose condition reads the listed refs (or
   // attribute-reads, encoded in cond_attr_reads). Sticky control taint flows
   // from these into any assignment performed inside the arm.
-  virtual void on_if_arm_enter(uPass_attributes& /*owner*/, const std::vector<std::string_view>& /*cond_refs*/,
-                               const std::vector<std::pair<std::string_view, std::string_view>>& /*cond_attr_reads*/) {}
+  virtual void on_if_arm_enter(uPass_attributes& /*owner*/, std::span<const std::string_view> /*cond_refs*/,
+                               std::span<const std::pair<std::string_view, std::string_view>> /*cond_attr_reads*/) {}
 
   // Leaving the arm. Used to pop scope-local taint and OR-merge into the
   // parent at runtime joins.

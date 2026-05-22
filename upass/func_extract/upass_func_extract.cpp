@@ -10,12 +10,7 @@ static upass::uPass_plugin plugin_func_extract("func_extract", upass::uPass_wrap
 
 uPass_func_extract::uPass_func_extract(std::shared_ptr<upass::Lnast_manager>& _lm) : uPass(_lm) {}
 
-std::string uPass_func_extract::strip_io_prefix(std::string_view name) {
-  if (!name.empty() && (name.front() == '$' || name.front() == '%')) {
-    name.remove_prefix(1);
-  }
-  return std::string(name);
-}
+std::string uPass_func_extract::strip_io_prefix(std::string_view name) { return std::string(name); }
 
 void uPass_func_extract::copy_current_subtree(const std::shared_ptr<Lnast>& dst, const Lnast_nid& parent) {
   const auto type       = lm->current_type();

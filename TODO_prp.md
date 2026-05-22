@@ -33,8 +33,6 @@ complete before group N+1 starts. Group letters are shared across
   on demand — `lnast_bitwidth.md`.
 - **2d** Unify `attr_set` / `tuple_set` variadic-path shape —
   `docs/contracts/lnast_spec.md §11`.
-- **2e** Replace `$ / % / #` prefixes with ST-backed direction/storage —
-  `docs/contracts/lnast_spec.md §12`.
 - **2f** `delay_assign` offsets (`0`=Q, `-1`=past, ref offsets, comptime
   const validation) — `docs/contracts/lnast_spec.md §15.2`.
 - **2i** Type-check pass (no int/bool mix; bitwidth size checks; tuple/enum

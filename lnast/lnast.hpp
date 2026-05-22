@@ -229,9 +229,6 @@ public:
   Lnast_bitwidth_meta&       bw_meta() noexcept { return bw_meta_; }
 
   // ── name predicates (work off the textual name only) ────────────────────
-  static bool is_register(std::string_view name) { return !name.empty() && name.front() == '#'; }
-  static bool is_output(std::string_view name) { return !name.empty() && name.front() == '%'; }
-  static bool is_input(std::string_view name) { return !name.empty() && name.front() == '$'; }
   static bool is_tmp(std::string_view name) { return name.size() >= 3 && name.substr(0, 3) == "___"; }
 
   // ── print / dump / read ────────────────────────────────────────────────

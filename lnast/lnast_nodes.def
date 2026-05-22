@@ -8,6 +8,10 @@
 #define LNAST_NODE( NAME, VERBAL )
 #endif
 
+#ifndef LNAST_LOOP_NODE
+#define LNAST_LOOP_NODE( NAME, VERBAL ) LNAST_NODE( NAME, VERBAL )
+#endif
+
 // Invalid
 LNAST_NODE( invalid, invalid )
 
@@ -123,3 +127,4 @@ LNAST_NODE( expr_type, expr_type )
 LNAST_NODE( unknown_type, unknown_type )
 
 #undef LNAST_NODE
+#undef LNAST_LOOP_NODE

@@ -4,8 +4,8 @@
 #include <memory>
 #include <string>
 #include <string_view>
-#include <unordered_map>
 
+#include "absl/container/flat_hash_map.h"
 #include "lnast.hpp"
 
 // Standalone pass that runs on a single Lnast (post-func_extract shape).
@@ -26,7 +26,7 @@
 // Slice 9: SSA renaming for straight-line code.
 // Multi-assigned user variables (`x = …; x = …`) are renamed to SSA-unique
 // names (`x`, `x___ssa_1`, …). Compiler-generated temporaries (prefix `___`)
-// and port sigils (`$`, `%`) are skipped — they are already unique.
+// are skipped — they are already unique.
 //
 // If/else branch bodies are copied verbatim (no SSA inside branches).
 // Post-branch join merging is left to lnast_to_lgraph's lower_branch()/Mux
@@ -48,10 +48,13 @@ private:
 
   // Recursively copy src_nid into dst under dst_parent, substituting any
   // ref whose base name appears in rename_map with its current SSA name.
+  // absl::flat_hash_map<std::string, std::string> supports heterogeneous
+  // string_view lookup so per-node copies skip the temporary std::string
+  // allocation that std::unordered_map would force.
   static void copy_with_rename(const std::shared_ptr<Lnast>& src, const Lnast_nid& src_nid, const std::shared_ptr<Lnast>& dst,
-                               const Lnast_nid& dst_parent, const std::unordered_map<std::string, std::string>& rename_map);
+                               const Lnast_nid& dst_parent, const absl::flat_hash_map<std::string, std::string>& rename_map);
 
   // Returns true when `name` is a user variable that should participate in
-  // SSA renaming (excludes compiler temps `___*` and port sigils `$`/`%`).
+  // SSA renaming (excludes compiler temps `___*`).
   static bool is_user_var(std::string_view name);
 };

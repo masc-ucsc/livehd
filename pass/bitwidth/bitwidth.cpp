@@ -404,14 +404,14 @@ void Bitwidth::process_sum(hhds::Node_class& node, std::vector<hhds::Edge_class>
 }
 
 void Bitwidth::process_memory(hhds::Node_class& node) {
-  int64_t                       mem_size              = 0;
-  Bits_t                        mem_bits              = 0;
-  Bits_t                        mem_din_bits          = 0;
-  bool                          mem_din_bits_missing  = false;
-  Bits_t                        mem_addr_bits         = 0;
-  bool                          mem_addr_bits_missing = false;
-  std::vector<hhds::Pin_class>  din_drivers;
-  std::vector<hhds::Pin_class>  addr_drivers;
+  int64_t                      mem_size              = 0;
+  Bits_t                       mem_bits              = 0;
+  Bits_t                       mem_din_bits          = 0;
+  bool                         mem_din_bits_missing  = false;
+  Bits_t                       mem_addr_bits         = 0;
+  bool                         mem_addr_bits_missing = false;
+  std::vector<hhds::Pin_class> din_drivers;
+  std::vector<hhds::Pin_class> addr_drivers;
 
   auto inp = node.inp_edges();
   sort_inp(inp);
@@ -983,9 +983,7 @@ void Bitwidth::process_bit_and(hhds::Node_class& node, std::vector<hhds::Edge_cl
   }
 
   if (!hier && mask_pos >= 0 && pos_min_sbits != Bits_max && pos_min_sbits_pos != mask_pos) {
-    auto v = Dlop::create_integer(1)
-                 ->lsh_op(pos_min_sbits - 1)
-                 ->sub_op(hydrate_const(inp_edges[mask_pos].driver));
+    auto v = Dlop::create_integer(1)->lsh_op(pos_min_sbits - 1)->sub_op(hydrate_const(inp_edges[mask_pos].driver));
     if (v->is_i() && v->to_i() == 1) {
       if (inp_edges.size() == 2) {
         int pos = mask_pos == 0 ? 1 : 0;
@@ -1201,8 +1199,8 @@ void Bitwidth::insert_tposs_nodes(hhds::Node_class& node_attr, Bits_t ubits) {
     }
 
     if (ntposs.is_invalid()) {
-      ntposs            = create_typed_node(*current_graph, Ntype_op::Get_mask);
-      auto mask_cnode   = create_const(*current_graph, *mask);
+      ntposs          = create_typed_node(*current_graph, Ntype_op::Get_mask);
+      auto mask_cnode = create_const(*current_graph, *mask);
       setup_sink_by_name(ntposs, "mask").connect_driver(mask_cnode);
       setup_sink_by_name(ntposs, "a").connect_driver(name_dpin);
     }
@@ -1269,7 +1267,7 @@ void Bitwidth::bw_pass(hhds::Graph* g) {
         }
         if (b) {
           Bitwidth_range bw;
-          bool unsign = livehd::graph_util::is_unsign(pin) || d.unsign;
+          bool           unsign = livehd::graph_util::is_unsign(pin) || d.unsign;
           if (unsign) {
             bw.set_ubits_range(b - 1);
           } else {
@@ -1381,9 +1379,6 @@ void Bitwidth::bw_pass(hhds::Graph* g) {
     // Update graph IO bits from final bwmap.
     if (gio) {
       for (const auto& d : gio->get_input_pin_decls()) {
-        if (d.name == "$") {
-          continue;
-        }
         auto pin = g->get_input_pin(d.name);
         if (pin.is_invalid()) {
           continue;
@@ -1394,9 +1389,6 @@ void Bitwidth::bw_pass(hhds::Graph* g) {
         }
       }
       for (const auto& d : gio->get_output_pin_decls()) {
-        if (d.name == "%") {
-          continue;
-        }
         auto out_sink = g->get_output_pin(d.name);
         if (out_sink.is_invalid()) {
           continue;
@@ -1430,9 +1422,6 @@ void Bitwidth::bw_pass(hhds::Graph* g) {
   // Propagate IO bits back to the GraphIO declarations.
   if (!hier && !not_finished && gio) {
     for (const auto& d : gio->get_input_pin_decls()) {
-      if (d.name == "$") {
-        continue;
-      }
       auto pin = g->get_input_pin(d.name);
       if (pin.is_invalid()) {
         continue;
@@ -1443,9 +1432,6 @@ void Bitwidth::bw_pass(hhds::Graph* g) {
       }
     }
     for (const auto& d : gio->get_output_pin_decls()) {
-      if (d.name == "%") {
-        continue;
-      }
       auto out_sink = g->get_output_pin(d.name);
       if (out_sink.is_invalid()) {
         continue;
@@ -1521,7 +1507,7 @@ void Bitwidth::try_delete_attr_node(hhds::Node_class& node) {
       auto mask_dpin = mask_node.create_driver_pin(0);
       set_bits(mask_dpin, bw_lhs_bits);
 
-      auto mask_const  = Dlop::get_mask_value(bw_lhs_bits);
+      auto mask_const   = Dlop::get_mask_value(bw_lhs_bits);
       auto all_one_dpin = create_const(*current_graph, *mask_const);
 
       bwmap.insert_or_assign(mask_dpin.get_class_index(), Bitwidth_range(Dlop::create_integer(0), mask_const));

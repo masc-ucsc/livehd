@@ -1,13 +1,13 @@
 //  This file is distributed under the BSD 3-Clause License. See LICENSE for details.
 #pragma once
 
-#include <map>
 #include <memory>
 #include <optional>
 #include <string>
 #include <string_view>
-#include <vector>
 
+#include "absl/container/flat_hash_map.h"
+#include "absl/container/inlined_vector.h"
 #include "const.hpp"
 #include "lnast_range.hpp"
 #include "upass_core.hpp"
@@ -24,8 +24,8 @@
 //
 // Key properties:
 //   * Boolean / comparison results always get the signed 1-bit range [-1, 0].
-//   * Compiler temps (___*) and port sigils ($, %) participate normally —
-//     there is no special exclusion.
+//   * Compiler temps (___*) participate normally — there is no special
+//     exclusion.
 //   * fold_ref() returns a concrete Const only when the range collapses to a
 //     single constant value, enabling constprop and verifier to fold it.
 //   * Arithmetic on unbounded ranges propagates unbounded conservatively.
@@ -80,7 +80,9 @@ public:
 
 private:
   // Per-variable range map. Persists across begin_iteration calls.
-  std::map<std::string, Lnast_range> range_map_;
+  // Heterogeneous lookup via string_view avoids std::string allocation on every
+  // read/set in hot per-statement paths.
+  absl::flat_hash_map<std::string, Lnast_range> range_map_;
 
   // Read range for `name` — returns unbounded() if not yet known.
   Lnast_range read_range(std::string_view name) const;
@@ -95,9 +97,10 @@ private:
 
   // Scan the current op node: walk first child (LHS name), remaining children
   // (RHS operands — ref or const), restore cursor on exit.
+  // Most LNAST ops have 1–3 operands; inline storage avoids per-statement heap.
   struct Op_ranges {
-    std::string              lhs;
-    std::vector<Lnast_range> rhs;
+    std::string                        lhs;
+    absl::InlinedVector<Lnast_range, 4> rhs;
   };
   Op_ranges scan_op();
 
