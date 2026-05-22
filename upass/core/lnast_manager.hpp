@@ -182,14 +182,22 @@ public:
   // mishandled its own move_to_* calls (e.g. an exception escaped before
   // move_to_parent). Not a replacement for correct balancing inside each
   // pass — it just keeps one buggy pass from corrupting the rest.
+  //
+  // We only snapshot `current_nid` and the stack depth: in the balanced
+  // (common) case both are unchanged across the pass, and on imbalance the
+  // pass can only have *pushed* further than where it started (move_to_parent
+  // asserts on underflow). Restore pops back to the saved depth, which is the
+  // cheap path — no deque copy per dispatch.
   struct Cursor_state {
-    Lnast_nid             current;
-    std::stack<Lnast_nid> stack;
+    Lnast_nid   current;
+    std::size_t depth;
   };
-  Cursor_state save_cursor() const { return {current_nid, nid_stack}; }
+  Cursor_state save_cursor() const { return {current_nid, nid_stack.size()}; }
   void         restore_cursor(const Cursor_state& s) {
     current_nid = s.current;
-    nid_stack   = s.stack;
+    while (nid_stack.size() > s.depth) {
+      nid_stack.pop();
+    }
   }
 
   // True iff the read cursor has at least one child. Does not move the

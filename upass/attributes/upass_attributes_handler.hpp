@@ -93,9 +93,14 @@ public:
   void for_each_handler(const std::function<void(Attribute_handler&)>& fn) const;
 
 private:
+  // Rebuilt by every register_* call. for_each_handler iterates this directly
+  // — hot path (~1 call per LNAST op) so it must avoid per-call allocations.
+  void rebuild_unique_handlers();
+
   std::map<std::string, std::shared_ptr<Attribute_handler>> exact;
   std::shared_ptr<Attribute_handler>                        sticky_pattern;  // for `_*`
   std::shared_ptr<Attribute_handler>                        default_handler;
+  std::vector<Attribute_handler*>                           unique_handlers;
 };
 
 }  // namespace attributes

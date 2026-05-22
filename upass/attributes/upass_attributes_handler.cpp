@@ -2,7 +2,7 @@
 
 #include "upass_attributes_handler.hpp"
 
-#include <set>
+#include <algorithm>
 #include <utility>
 
 #include "upass_attributes_sticky.hpp"
@@ -26,26 +26,42 @@ Attribute_handler* Handler_registry::lookup(std::string_view name) const {
 
 void Handler_registry::register_exact(std::string name, std::shared_ptr<Attribute_handler> h) {
   exact[std::move(name)] = std::move(h);
+  rebuild_unique_handlers();
 }
 
-void Handler_registry::register_sticky_pattern(std::shared_ptr<Attribute_handler> h) { sticky_pattern = std::move(h); }
+void Handler_registry::register_sticky_pattern(std::shared_ptr<Attribute_handler> h) {
+  sticky_pattern = std::move(h);
+  rebuild_unique_handlers();
+}
 
-void Handler_registry::register_default(std::shared_ptr<Attribute_handler> h) { default_handler = std::move(h); }
+void Handler_registry::register_default(std::shared_ptr<Attribute_handler> h) {
+  default_handler = std::move(h);
+  rebuild_unique_handlers();
+}
 
-void Handler_registry::for_each_handler(const std::function<void(Attribute_handler&)>& fn) const {
-  // Use a pointer-set so a handler shared across slots (or eventually the
-  // same instance registered for multiple exact names) is visited only once.
-  std::set<Attribute_handler*> seen;
-  auto                         visit = [&](Attribute_handler* h) {
-    if (h && seen.insert(h).second) {
-      fn(*h);
+void Handler_registry::rebuild_unique_handlers() {
+  unique_handlers.clear();
+  auto add = [&](Attribute_handler* h) {
+    if (!h) {
+      return;
+    }
+    if (std::find(unique_handlers.begin(), unique_handlers.end(), h) == unique_handlers.end()) {
+      unique_handlers.push_back(h);
     }
   };
   for (const auto& [_, h] : exact) {
-    visit(h.get());
+    add(h.get());
   }
-  visit(sticky_pattern.get());
-  visit(default_handler.get());
+  add(sticky_pattern.get());
+  add(default_handler.get());
+}
+
+void Handler_registry::for_each_handler(const std::function<void(Attribute_handler&)>& fn) const {
+  // unique_handlers is rebuilt by register_* calls — visiting it directly
+  // avoids per-invocation std::set allocation on the hot LNAST-op loop.
+  for (auto* h : unique_handlers) {
+    fn(*h);
+  }
 }
 
 }  // namespace attributes

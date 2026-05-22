@@ -82,6 +82,7 @@ void Pass_upass::setup() {
                         "rename multi-assigned user variables to SSA-unique names",
                         "true");
   m1.add_label_optional("assert", "enable assert test", "true");
+  m1.add_label_optional("func_extract", "enable func_extract upass (spawn helper lnasts for comb func_defs)", "true");
   m1.add_label_optional(
       "order",
       "comma-separated upass names; overrides verifier/constprop/assert toggles (example: verifier,constprop,verifier)",
@@ -182,6 +183,9 @@ Pass_upass::Pass_upass(const Eprp_var& var) : Pass("pass.upass", var) {
   bool do_ssa  = ssa_txt != "false" && ssa_txt != "0";
   run_ssa      = do_ssa;
 
+  auto func_extract_txt = get_label("func_extract");
+  bool do_func_extract  = func_extract_txt != "false" && func_extract_txt != "0";
+
   // The assert pass declares depends_on={"constprop"}, so the runner's
   // resolve_order will silently pull constprop back in if assert is enabled
   // — even when the user explicitly passed constprop:0. Honor the explicit
@@ -198,7 +202,9 @@ Pass_upass::Pass_upass(const Eprp_var& var) : Pass("pass.upass", var) {
     upass_order.emplace_back("verifier");
   }
 
-  upass_order.emplace_back("func_extract");
+  if (do_func_extract) {
+    upass_order.emplace_back("func_extract");
+  }
 
   // Phase 1 of the attribute pass runs before constprop so sticky/attribute
   // state is available when constprop folds `.[attr]` reads (Phase 2 in

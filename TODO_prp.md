@@ -17,6 +17,27 @@ complete before group N+1 starts. Group letters are shared across
 
 - **1b** Two-phase `upass/func_extract` (parallel per-LNAST, then top-down
   resolve) — `import.md`.
+  - Pending-import poison for the planned `bundle` pre-pass: when an `if`
+    condition (or any value sticky/attribute propagation reads) depends on
+    a name whose Bundle entry is still unresolved because of a pending
+    `import`, the entry must carry a `pending: ImportRef` marker. Bundle
+    pre-pass treats a pending-tainted cond as non-comptime *and* must NOT
+    propagate sticky/attribute state into the if's arms (the import may
+    still inject an `attr_set` or change the cond's comptime value).
+    Equivalent rule for attribute propagation through expression ops:
+    skip the migration when any RHS ref carries the pending marker, since
+    the import may change which `_*` attributes flow in. The pending
+    marker is propagated by bundle pre-pass through the same expression-op
+    migration path used for sticky `_*` attrs (functionally a second
+    sticky channel).
+  - SSA-flatten gate: the SSA post-pass owns the `tuple_*` → flat-name
+    lowering and rewrites the LNAST (the optimization passes need the
+    Bundle ptr during their loop, so flattening earlier would complicate
+    `does`/`==`/etc.). SSA must NOT flatten a Bundle whose entry carries
+    a pending-import marker — the import may still change the shape,
+    field values, or attached attributes. Such bundles stay as
+    `tuple_*` nodes for the next `pass.upass` invocation to revisit.
+    Re-runs of `pass.upass` after the import resolves clear the marker.
 
 - **1d** Source-derived SSA / tmp names (`foo_l42_a`, drop `___N`) —
   `docs/contracts/lnast_spec.md §13`.
@@ -37,6 +58,22 @@ complete before group N+1 starts. Group letters are shared across
   const validation) — `docs/contracts/lnast_spec.md §15.2`.
 - **2i** Type-check pass (no int/bool mix; bitwidth size checks; tuple/enum
   consistency).
+- **2j** Enforce function-scope closure-capture rule (depends on imports
+  landing in Group 1): a function body may reference an outer-scope name
+  **only** when that name's bundle entry is comptime-constant by the time
+  the bundle pre-pass reaches the function body. Three cases the scope
+  lookup must distinguish:
+  - Outer name is comptime → inline the constant at the use site
+    (bundle/constprop already does this for regular comptime refs, so
+    "captured from outer scope" needs no separate path).
+  - Outer name is tainted (pending import) → do NOT inline, leave the
+    ref intact, defer the function from func_extract spawn until a
+    re-run of `pass.upass` (after import resolves) clears the taint.
+  - Outer name exists but is non-comptime and not tainted → hard compile
+    error at the function body's read site (do not silently inline,
+    do not let func_extract spawn it).
+  Verifier should also catch any lingering outer-scope ref inside a
+  spawned function body that survived to the read-only phase.
 
 ## Group 3 — depends on Group 2
 
