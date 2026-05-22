@@ -123,6 +123,14 @@ protected:
   void emit_attribute_list(const Lnast_node& target, TSNode attribute_list_node);
   void emit_type_expr(const Lnast_nid& type_index, TSNode type_node);
 
+  // func_def input/output arg helpers. The arg shape is
+  //   assign(ref name, <default | const "nil" | const "ref">, [type-subtree])
+  // The type subtree is omitted when no `:Type` annotation is present. A
+  // composite tuple type `(a:T, b:U)` is encoded as a `tuple_add` whose
+  // children are recursive `assign` arg nodes.
+  void emit_arg_assign(const Lnast_nid& tuple_parent, TSNode typed_ident, TSNode definition_or_null, bool is_ref_mod);
+  void emit_arg_type(const Lnast_nid& assign_parent, TSNode type_node);
+
   struct Call_arg {
     bool        is_assign = false;
     bool        is_ref    = false;

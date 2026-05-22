@@ -1,0 +1,12 @@
+/*
+:name: trivial_if
+:type: equiv
+*/
+
+comb trivia_if(a:u3, b:u7, cond:boolean) -> (res:u4) {
+  if cond {
+    res = a + 1
+  }else{
+    res = b#[0..<4]
+  }
+}

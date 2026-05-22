@@ -31,6 +31,5 @@ private:
   void copy_current_subtree(const std::shared_ptr<Lnast>& dst, const Lnast_nid& parent);
   void copy_current_children(const std::shared_ptr<Lnast>& dst, const Lnast_nid& parent);
 
-  bool emit_io_tuple_from_decl(const std::shared_ptr<Lnast>& dst, const Lnast_nid& stmts, std::string_view tuple_name);
-  void emit_empty_tuple(const std::shared_ptr<Lnast>& dst, const Lnast_nid& stmts);
+  bool emit_io_tuple_from_decl(const std::shared_ptr<Lnast>& dst, const Lnast_nid& io_idx);
 };

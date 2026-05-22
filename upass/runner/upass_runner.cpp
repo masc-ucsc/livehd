@@ -326,15 +326,26 @@ void uPass_runner::run(std::size_t max_iters) {
   // with the tree-only Lnast wrapper; pass_upass.cpp then atomically swaps
   // it in via Lnast::replace_body so any holder of the input Lnast picks
   // up the new body without a shared_ptr swap.
-  auto staging_body    = lm->get_lnast()->forest()->create_tree_temp(std::format("staging-{}", lm->get_top_module_name()));
-  staging              = std::make_shared<Lnast>(staging_body, lm->get_top_module_name());
-  staging_parent       = staging->set_root(Lnast_ntype::create_top());
-  staging_parent_stack = {};
+  //
+  // A fresh staging tree is allocated at the START of each iteration so
+  // multi-iteration runs don't accumulate duplicate subtrees (process_top
+  // appends each input child into staging, so re-using the same staging
+  // across N iterations would multiply every subtree by N). The symbol
+  // tables that drive the fixed-point live on the per-pass state — they
+  // are NOT cleared between iterations.
+  auto fresh_staging = [&]() {
+    auto body            = lm->get_lnast()->forest()->create_tree_temp(std::format("staging-{}", lm->get_top_module_name()));
+    staging              = std::make_shared<Lnast>(body, lm->get_top_module_name());
+    staging_parent       = staging->set_root(Lnast_ntype::create_top());
+    staging_parent_stack = {};
+  };
+  fresh_staging();
 
   upass::Runner_fixed_point::run(
       "uPass",
       max_iters,
-      [this]() {
+      [this, &fresh_staging]() {
+        fresh_staging();
         for (auto& entry : upasses) {
           entry.pass->begin_iteration();
         }

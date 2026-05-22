@@ -196,6 +196,12 @@ protected:
     // body is folded. Empty when the actual is a const literal or named with
     // a non-ref value (write-back only happens when the param is `ref`).
     std::string var_name;
+    // When the actual is a tuple-typed value (passed by ref to a caller
+    // bundle), bundle_value carries the bundle's flat-keyed field values
+    // (e.g. {"x": 2, "y": 11}). Set together with is_bundle=true; `value`
+    // is then unused.
+    bool                                   is_bundle = false;
+    std::unordered_map<std::string, Const> bundle_value;
   };
 
   static inline std::unordered_map<std::string, std::shared_ptr<Lnast>> function_registry;

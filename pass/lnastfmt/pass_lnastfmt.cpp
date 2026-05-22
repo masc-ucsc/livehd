@@ -240,6 +240,47 @@ void Pass_lnastfmt::validate(const Lnast* ln) {
   // Validation-only pass. Any normalization (SSA stripping, tuple rebuild,
   // …) must be safe for every producer before it can run here — until then
   // lnastfmt only checks and leaves the LNAST untouched.
+
+  // ── top-level io-shape invariant ────────────────────────────────────────
+  // Each Lnast top may have at most ONE io child. When present, it must be
+  // the *first* child of top — downstream consumers (try_eval_comb_call,
+  // lnast.dump, codegen) assume io+stmts in that order. Zero io children is
+  // fine (signature-less callees, top-level module bodies).
+  {
+    const auto root = ln->get_root();
+    if (!root.is_invalid() && Lnast_ntype::is_top(ln->get_type(root))) {
+      int       io_count = 0;
+      Lnast_nid first_io;
+      bool      first_seen = false;
+      Lnast_nid first_child;
+      for (auto c : ln->children(root)) {
+        if (!first_seen) {
+          first_child = c;
+          first_seen  = true;
+        }
+        if (Lnast_ntype::is_io(ln->get_type(c))) {
+          if (io_count == 0) {
+            first_io = c;
+          }
+          ++io_count;
+        }
+      }
+      if (io_count > 1) {
+        Pass::error("lnastfmt: {} top has {} io children — at most one is allowed",
+                    node_loc(ln, first_io),
+                    io_count);
+        return;
+      }
+      if (io_count == 1 && !first_seen) {
+        // unreachable: io_count would have stayed 0
+      }
+      if (io_count == 1 && first_seen && !(first_io == first_child)) {
+        Pass::error("lnastfmt: {} io must be the first child of top", node_loc(ln, first_io));
+        return;
+      }
+    }
+  }
+
   for (const Lnast_nid& it : ln->depth_preorder()) {
     const auto type = ln->get_type(it);
 
@@ -326,12 +367,38 @@ void Pass_lnastfmt::validate(const Lnast* ln) {
                     ln->get_name(c0));
         return;
       }
-      if (!ln->get_sibling_next(c1).is_invalid()) {
-        Pass::error("lnastfmt: {} {} with LHS '{}' has more than 2 children",
-                    node_loc(ln, it),
-                    Lnast_ntype::debug_name(type),
-                    ln->get_name(c0));
-        return;
+      auto c2 = ln->get_sibling_next(c1);
+      if (!c2.is_invalid()) {
+        // The only legitimate 3-child `assign` is a signature entry:
+        // `(assign ref default type)` inside an inputs/outputs tuple_add that
+        // is a direct child of a func_def (pre-extraction shape) or io
+        // (post-extraction shape), or a nested tuple-typed slot using the
+        // same recursive shape (parent assign).
+        bool ok = false;
+        auto parent = ln->get_parent(it);
+        if (!parent.is_invalid() && Lnast_ntype::is_tuple_add(ln->get_type(parent))) {
+          auto gp = ln->get_parent(parent);
+          if (!gp.is_invalid()
+              && (Lnast_ntype::is_func_def(ln->get_type(gp)) || Lnast_ntype::is_io(ln->get_type(gp))
+                  || Lnast_ntype::is_assign(ln->get_type(gp)))) {
+            ok = true;
+          }
+        }
+        if (!ok) {
+          Pass::error("lnastfmt: {} {} with LHS '{}' has more than 2 children",
+                      node_loc(ln, it),
+                      Lnast_ntype::debug_name(type),
+                      ln->get_name(c0));
+          return;
+        }
+        // Trailing children beyond the type slot are not allowed.
+        if (!ln->get_sibling_next(c2).is_invalid()) {
+          Pass::error("lnastfmt: {} {} with LHS '{}' has more than 3 children in a signature position",
+                      node_loc(ln, it),
+                      Lnast_ntype::debug_name(type),
+                      ln->get_name(c0));
+          return;
+        }
       }
     }
   }

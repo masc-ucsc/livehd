@@ -1,0 +1,20 @@
+/*
+:name: tuple_expand
+:type: comptime
+:verifier_pass: 4
+:verifier_fail: 0
+*/
+
+const a1 = (a=(b=1,c=2), 7, 3, d=3)
+
+const a2 = (a.b=1, a.c=2, d=3, 7, 3)
+cassert a1 == a2
+
+const a3 = (7, a.c=2, a.b=1, d=3, 3)
+cassert a1 == a3
+
+const a4 = (d=3,7,3,a=(b=1,c=2))
+cassert a1 == a4
+
+const a5 = (a.c=2, 7, d=3, 3, a.b=1)
+cassert a1 == a5
