@@ -383,6 +383,16 @@ void uPass_runner::run(std::size_t max_iters) {
       [this]() { process_lnast(); },
       [this]() { return changed_passes(); });
 
+  // Step J — dest-walk finisher dispatch. Passes that want to inspect
+  // the freshly-built staging tree (verifier/assert cassert counts in
+  // the redesign) override walk_dest. Default no-op; today no pass
+  // uses this, but the hook is available for migration.
+  if (staging) {
+    for (auto& entry : upasses) {
+      entry.pass->walk_dest(staging);
+    }
+  }
+
   // Per-pass finalization. Runs after all iterations finish — passes use
   // this to emit summaries or enforce end-of-run invariants (see
   // uPass_verifier::end_run, which compares cassert tallies against

@@ -144,6 +144,14 @@ public:
   // tallies against expected counts).
   virtual void end_run() {}
 
+  // Step J — dest-walk finisher hook. Invoked by the runner after the
+  // source walk finishes but before end_run(), with a pointer to the
+  // freshly-built staging (dest) LNAST. Passes that want to act on the
+  // already-emitted output (verifier/assert cassert counts, etc.) read
+  // it here. Default no-op so passes that still use per-node dispatch
+  // are unaffected.
+  virtual void walk_dest(const std::shared_ptr<Lnast>& /*dest*/) {}
+
   // Side-output LNASTs produced by structural lowering passes. The runner
   // collects these after end_run() and hands them to pass.upass so they can be
   // appended to Eprp_var::lnasts.
