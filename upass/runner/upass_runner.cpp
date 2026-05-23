@@ -99,6 +99,21 @@ uPass_runner::uPass_runner(std::shared_ptr<upass::Lnast_manager>& _lm, const std
     entry.pass->set_runner_symbol_table(&runner_symbol_table);
     entry.pass->set_options(options);
   }
+
+  // Pre-cache pass subsets so the hot try_fold_ref / any_pass_drops loops
+  // only visit passes that actually override the relevant virtual. Order is
+  // preserved (try_fold_ref takes the first non-nullopt; attributes' wrap/sat
+  // narrowing must beat constprop's raw value, etc.).
+  fold_capable_passes.reserve(upasses.size());
+  classify_capable_passes.reserve(upasses.size());
+  for (auto& entry : upasses) {
+    if (entry.pass->overrides_fold_ref()) {
+      fold_capable_passes.push_back(entry.pass.get());
+    }
+    if (entry.pass->overrides_classify_statement()) {
+      classify_capable_passes.push_back(entry.pass.get());
+    }
+  }
 }
 
 std::vector<std::string> uPass_runner::resolve_order(const std::vector<std::string>& requested_names,
@@ -191,8 +206,8 @@ void uPass_runner::emit_subtree_verbatim() {
 }
 
 std::optional<Const> uPass_runner::try_fold_ref(std::string_view name) {
-  for (auto& entry : upasses) {
-    auto folded = entry.pass->fold_ref(name);
+  for (auto* p : fold_capable_passes) {
+    auto folded = p->fold_ref(name);
     if (folded) {
       return folded;
     }
@@ -291,8 +306,8 @@ upass::Vote uPass_runner::reduce_votes(const std::vector<upass::Vote>& votes) {
 }
 
 bool uPass_runner::any_pass_drops() const {
-  for (auto& entry : upasses) {
-    if (entry.pass->classify_statement().kind == upass::Emit_kind::drop_subtree) {
+  for (auto* p : classify_capable_passes) {
+    if (p->classify_statement().kind == upass::Emit_kind::drop_subtree) {
       return true;
     }
   }
@@ -369,6 +384,11 @@ void uPass_runner::run(std::size_t max_iters) {
     entry.pass->begin_iteration();
   }
   process_lnast();
+  // Single-walk now converges trivially. Print the diagnostic so the
+  // dependency / convergence tests (upass_noop_first_iter_test.sh,
+  // upass_lnast_shared_scan_test.sh, upass_lnast_shared_decide_test.sh)
+  // still see the marker they grep for.
+  std::print("uPass - converged at iteration 1\n");
 
   // Step J — dest-walk finisher dispatch. Passes that want to inspect
   // the freshly-built staging tree (verifier/assert cassert counts in

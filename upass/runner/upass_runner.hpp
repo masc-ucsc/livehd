@@ -41,6 +41,17 @@ protected:
 
   std::vector<Pass_entry> upasses;
 
+  // Perf: pre-cached subsets of `upasses`.
+  //   fold_capable_passes — passes that override fold_ref(). try_fold_ref
+  //     iterates only these instead of every pass.
+  //   classify_capable_passes — passes that override classify_statement().
+  //     any_pass_drops iterates only these instead of every pass.
+  // Populated in the constructor right after `upasses` is fully built. With
+  // 6 passes total and only 2–4 overriders, this cuts the per-node virtual
+  // dispatch count by 30–50% on the bulk arithmetic hot loop.
+  std::vector<upass::uPass*> fold_capable_passes;
+  std::vector<upass::uPass*> classify_capable_passes;
+
   // Step C of upass redesign — single shared symbol table owned by the
   // runner. Each pass receives a pointer to this via
   // set_runner_symbol_table(). Initially used as a wiring slot only;

@@ -45,9 +45,14 @@ void uPass_func_extract::copy_current_children(const std::shared_ptr<Lnast>& dst
 // of their assign. SSA will later expand those into flat dotted leaves.
 bool uPass_func_extract::emit_io_tuple_from_decl(const std::shared_ptr<Lnast>& dst, const Lnast_nid& io_idx) {
   if (!lm->has_child()) {
-    // Empty signature slot: emit an empty tuple_add so consumers can
-    // distinguish "no entry" from "missing".
-    dst->add_child(io_idx, Lnast_ntype::create_tuple_add());
+    // Empty signature slot. Emit `tuple_add(ref '__empty_tuple')` so
+    // constprop's inline path (which keys on the first-child ref name —
+    // __input_tuple_ref / __output_tuple_ref / __empty_tuple — to read
+    // signatures back) sees a marker rather than a shapeless tuple_add.
+    // Without it, callees with no inputs look identical to a malformed
+    // tuple_add and constprop falls through to its body-statement path.
+    auto tup_idx = dst->add_child(io_idx, Lnast_ntype::create_tuple_add());
+    dst->add_child(tup_idx, Lnast_node::create_ref("__empty_tuple"));
     return false;
   }
   auto tup_idx = dst->add_child(io_idx, Lnast_ntype::create_tuple_add());
@@ -111,9 +116,12 @@ void uPass_func_extract::process_func_def() {
   if (move_to_sibling()) {
     emit_io_tuple_from_decl(new_lnast, io_idx);
   } else {
-    // No outputs slot in the source func_def — emit an empty tuple_add
-    // anyway so io always has the [inputs, outputs] pair.
-    new_lnast->add_child(io_idx, Lnast_ntype::create_tuple_add());
+    // No outputs slot in the source func_def — emit
+    // `tuple_add(ref '__empty_tuple')` so io always has the
+    // [inputs, outputs] pair and downstream readers can distinguish
+    // "no slot" from "empty slot".
+    auto tup_idx = new_lnast->add_child(io_idx, Lnast_ntype::create_tuple_add());
+    new_lnast->add_child(tup_idx, Lnast_node::create_ref("__empty_tuple"));
   }
 
   if (move_to_sibling()) {

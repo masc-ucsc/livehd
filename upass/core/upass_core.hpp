@@ -107,6 +107,13 @@ public:
   // the ref. First non-nullopt wins.
   virtual std::optional<Const> fold_ref(std::string_view /*name*/) { return std::nullopt; }
 
+  // Perf hint to the runner. Overriding passes return true so the runner
+  // can skip them in the hot try_fold_ref / any_pass_drops loops. Default
+  // false matches the default no-op implementations above; passes that
+  // override fold_ref / classify_statement must also override these.
+  virtual bool overrides_fold_ref() const { return false; }
+  virtual bool overrides_classify_statement() const { return false; }
+
   // Runner-supplied helper that delegates to `try_fold_ref` across every
   // registered pass. Passes can use this to resolve a ref against the
   // aggregate symbol-table state (e.g. verifier consulting constprop's ST

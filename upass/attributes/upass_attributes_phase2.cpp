@@ -443,6 +443,12 @@ void uPass_attributes::evaluate_attr_get(std::string_view dst, std::string_view 
 }
 
 std::optional<Const> uPass_attributes::fold_ref(std::string_view name) {
+  // Hot path: tmp_fold is empty on bulk-arithmetic workloads — skip the
+  // std::string allocation that tmp_fold.find(std::string{name}) would
+  // otherwise force on every per-op runner_fold_fn call (xx.prp: 6M+ calls).
+  if (tmp_fold.empty()) {
+    return std::nullopt;
+  }
   auto it = tmp_fold.find(std::string{name});
   if (it == tmp_fold.end()) {
     return std::nullopt;

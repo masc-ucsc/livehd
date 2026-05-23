@@ -50,12 +50,18 @@ void uPass_coalescer::handle_op() {
     if (is_type(Lnast_ntype::Lnast_ntype_ref)) {
       auto             ref_text = current_text();
       std::string_view key      = strip_io_prefix(ref_text);
-      auto             p        = pending.find(std::string{ref_text});
-      if (p == pending.end() && std::string{key} != std::string{ref_text}) {
-        p = pending.find(std::string{key});
+      // Fast path: most refs have no pending entry — probe by string_view
+      // (absl's transparent hashing skips the std::string allocation).
+      // Avoids one allocation per ref read on the bulk-arithmetic loop.
+      auto p = pending.find(ref_text);
+      if (p == pending.end() && key != ref_text) {
+        p = pending.find(key);
       }
       if (p != pending.end()) {
-        flush_one(p->first);
+        // Copy the key out before flush_one erases the slot — flush_one
+        // takes by std::string& and we want a stable name to pass.
+        std::string name = p->first;
+        flush_one(name);
       }
     }
   }
@@ -138,14 +144,15 @@ void uPass_coalescer::flush_all() {
   if (pending.empty()) {
     return;
   }
-  // Snapshot keys first — flush_one mutates `pending`. Order: insertion order
-  // would be ideal but std::map gives us name order, which is stable and
-  // deterministic. Reorder is acceptable in hardware (no aliasing).
+  // Snapshot keys first — flush_one mutates `pending`. flat_hash_map gives
+  // unspecified iteration order, so sort the keys to keep the emitted order
+  // deterministic across runs (matches the std::map behavior this replaced).
   std::vector<std::string> keys;
   keys.reserve(pending.size());
   for (const auto& kv : pending) {
     keys.emplace_back(kv.first);
   }
+  std::sort(keys.begin(), keys.end());
   for (const auto& k : keys) {
     flush_one(k);
   }

@@ -77,6 +77,7 @@ public:
 
   // Returns Const(v) only when the stored range is a single-value constant.
   std::optional<Const> fold_ref(std::string_view name) override;
+  bool                 overrides_fold_ref() const override { return true; }
 
 private:
   // Per-variable range map. Persists across begin_iteration calls.

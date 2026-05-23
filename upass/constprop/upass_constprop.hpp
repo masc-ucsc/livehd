@@ -69,6 +69,8 @@ public:
 
   upass::Emit_decision classify_statement() override;
   std::optional<Const> fold_ref(std::string_view name) override;
+  bool                 overrides_fold_ref() const override { return true; }
+  bool                 overrides_classify_statement() const override { return true; }
 
   static void set_function_registry(const std::vector<std::shared_ptr<Lnast>>& lnasts);
 

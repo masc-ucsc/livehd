@@ -92,6 +92,11 @@ public:
   // a specific attribute name.
   void for_each_handler(const std::function<void(Attribute_handler&)>& fn) const;
 
+  // Returns the registered sticky-pattern handler (the `_*` matcher). Used
+  // by the on_assign_like fast-path to peek at sticky state and elide the
+  // operand walk when no sticky has been acquired anywhere yet.
+  Attribute_handler* sticky_handler() const { return sticky_pattern.get(); }
+
 private:
   // Rebuilt by every register_* call. for_each_handler iterates this directly
   // — hot path (~1 call per LNAST op) so it must avoid per-call allocations.

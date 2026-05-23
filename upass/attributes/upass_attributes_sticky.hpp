@@ -62,6 +62,12 @@ public:
   // through on_attr_set's value parsing.
   void mark(std::string_view var, std::string_view bucket);
 
+  // True iff no sticky state is in scope — no var has acquired a bucket and
+  // no control taint is active. Lets the on_assign_like fast-path elide its
+  // operand walk when the pass is functionally inert (the common case on
+  // bulk-arithmetic workloads with no `_*` attrs in flight).
+  bool is_inert() const { return acquired.empty() && control_taint_stack.empty(); }
+
 private:
   // Per-variable acquired sticky attrs. Monotonic — entries are added but
   // never removed (later clean assignments cannot clear a sticky).

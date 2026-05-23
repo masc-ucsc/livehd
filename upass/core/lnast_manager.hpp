@@ -204,13 +204,17 @@ public:
   // cursor — safe to call before deciding whether to recurse.
   bool has_child() const { return !lnast->get_child(current_nid).is_invalid(); }
 
-  virtual bool move_to_child() {
+  // Cursor moves are non-virtual: there are no subclasses of Lnast_manager
+  // in-tree, and these are on every per-op pass's hot loop (≈10M+ calls per
+  // pass.upass run on xx.prp). Devirtualizing lets the compiler inline the
+  // single-pointer body the rest of the codebase actually uses.
+  bool move_to_child() {
     nid_stack.push(current_nid);
     current_nid = lnast->get_child(current_nid);
     return !current_nid.is_invalid();
   }
 
-  virtual bool move_to_sibling() {
+  bool move_to_sibling() {
     if (current_nid.is_invalid()) {
       return false;
     }
@@ -218,7 +222,7 @@ public:
     return !current_nid.is_invalid();
   }
 
-  virtual void move_to_parent() {
+  void move_to_parent() {
     I(nid_stack.size() >= 1);
     current_nid = nid_stack.top();
     nid_stack.pop();

@@ -8,6 +8,8 @@
 #include <string_view>
 #include <unordered_set>
 
+#include "absl/container/flat_hash_map.h"
+
 #include "lnast.hpp"
 #include "lnast_ntype.hpp"
 #include "upass_core.hpp"
@@ -102,6 +104,8 @@ public:
   void process_attr_set() override { flush_all(); }
   void process_attr_get() override { flush_all(); }
 
+  bool overrides_classify_statement() const override { return true; }
+
   upass::Emit_decision classify_statement() override {
     if (parked_current_stmt) {
       parked_current_stmt = false;
@@ -119,10 +123,13 @@ public:
   std::size_t flushed_total() const { return stat_flushed; }
 
 private:
-  // Source LNAST nid of a parked stmt, keyed by LHS name. Ordered by name so
-  // end-of-scope flush has a stable order. Source-nid ordering would also
-  // work; nid order isn't lexicographically meaningful as a sort key.
-  std::map<std::string, Lnast_nid> pending;
+  // Source LNAST nid of a parked stmt, keyed by LHS name. flush_all sorts
+  // keys before flushing so end-of-scope flush has a stable, deterministic
+  // order across runs even though the hash map's own iteration is
+  // unspecified. flat_hash_map with absl's transparent string_hash gives us
+  // heterogeneous lookup so the hot handle_op path can probe with a
+  // string_view (no per-find std::string allocation).
+  absl::flat_hash_map<std::string, Lnast_nid> pending;
 
   // Set by handle_op when it parks the current stmt; consumed by
   // classify_statement to vote drop. One-shot per stmt.

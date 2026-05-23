@@ -63,7 +63,7 @@ uPass_attributes::Op_view uPass_attributes::scan_op() {
   if (!move_to_child()) {
     return view;
   }
-  view.lhs.assign(current_text());
+  view.lhs = current_text();
 
   std::size_t ref_count = 0;
   while (move_to_sibling()) {
@@ -101,6 +101,29 @@ void uPass_attributes::dispatch_attr_get(std::string_view attr_name, std::string
 }
 
 void uPass_attributes::on_assign_like(bool is_assign_node) {
+  // Hot-path fast exit for the bulk-arithmetic case (process_plus / minus /
+  // … on a tmp LHS with no narrowed/sticky/wrap/sat/type-info state in
+  // scope). All downstream branches in this function short-circuit when
+  // those state maps are empty, so the scan_op walk is wasted. Skipping it
+  // shaves ~10–15% off the xx.prp 1M-op run.
+  //
+  // Conditions for non-assign ops (process_plus / minus / eq / …):
+  //  - lhs is always a fresh tmp (e.g. `plus ___N a b`), so record_assign
+  //    short-circuits on the ti==nullptr fast-path and the alias branch
+  //    is unreachable (is_alias requires is_assign).
+  //  - sticky inert: on_expr_assign returns immediately when no var has
+  //    acquired a bucket and no control taint is active.
+  //  - tmp_fold empty: nothing for the alias-branch tmp_fold lookup to find
+  //    (the alias-branch is unreachable anyway since is_alias is false).
+  // Keep is_assign_node on the slow path — `assign a ___N` updates
+  // assigned_once for vars with type_info plus drives the alias-branch
+  // shape inheritance, neither of which is safe to elide.
+  if (!is_assign_node) {
+    auto* sticky = static_cast<upass::attributes::Sticky_handler*>(reg.sticky_handler());
+    if (sticky && sticky->is_inert() && tmp_fold.empty()) {
+      return;
+    }
+  }
   auto view = scan_op();
   if (view.lhs.empty()) {
     return;
@@ -154,7 +177,7 @@ void uPass_attributes::on_assign_like(bool is_assign_node) {
     // statement wrap/sat applied to the next attr_set picks up the fresh
     // constprop-stored RHS via runner_fold_fn instead of the previous
     // iteration's narrowed result.
-    tmp_fold.erase(view.lhs);
+    tmp_fold.erase(std::string{view.lhs});
   }
   if (rhs_value && !view.lhs.empty() && (has_wrap_policy(view.lhs) || has_sat_policy(view.lhs))) {
     Const out = narrow_for_lhs(view.lhs, *rhs_value);
@@ -197,7 +220,7 @@ void uPass_attributes::on_assign_like(bool is_assign_node) {
     bool        record_source = false;
     bool        gained_shape  = false;
     if (auto* sh = lookup_tuple_shape(rhs); sh) {
-      auto&      slot    = tuple_shapes[view.lhs];
+      auto&      slot    = tuple_shapes[std::string{view.lhs}];
       const bool changed = slot.fields != sh->fields || slot.from_range != sh->from_range;
       slot               = *sh;
       if (changed) {
