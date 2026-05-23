@@ -271,6 +271,35 @@ void uPass_runner::dispatch_to_passes(Pass_method fn) {
   }
 }
 
+upass::Vote uPass_runner::reduce_votes(const std::vector<upass::Vote>& votes) {
+  // Priority per docs/upass_redesign.md §G:
+  //   drop  > toconst > update > keep
+  // toconst values must agree across voters (sanity-checked).
+  upass::Vote out;
+  const upass::Vote* toconst_seen = nullptr;
+  const upass::Vote* update_seen  = nullptr;
+  for (const auto& v : votes) {
+    if (v.kind == upass::Vote_kind::drop) {
+      return upass::Vote::drop();
+    }
+    if (v.kind == upass::Vote_kind::toconst) {
+      if (toconst_seen && !toconst_seen->toconst_value.same_repr(v.toconst_value)) {
+        upass::error("uPass_runner: conflicting toconst votes for the same node\n");
+      }
+      toconst_seen = &v;
+    } else if (v.kind == upass::Vote_kind::update) {
+      update_seen = &v;
+    }
+  }
+  if (toconst_seen) {
+    return *toconst_seen;
+  }
+  if (update_seen) {
+    return *update_seen;
+  }
+  return upass::Vote::keep();
+}
+
 bool uPass_runner::any_pass_drops() const {
   for (auto& entry : upasses) {
     if (entry.pass->classify_statement().kind == upass::Emit_kind::drop_subtree) {
