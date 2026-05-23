@@ -56,6 +56,12 @@ protected:
   bool        configuration_error{false};
   std::string configuration_error_msg;
 
+  // Step H — runner-owned dest forest. Allocated lazily on first run();
+  // the staging tree below is created inside this forest. Conceptually
+  // the lgdb/optimized forest in the plan; not yet backed by an on-disk
+  // path.
+  std::shared_ptr<hhds::Forest> dest_forest_;
+
   // Staging tree being built during traversal. See upass.md §2.1.
   std::shared_ptr<Lnast>              staging;
   std::stack<Lnast_nid>               staging_parent_stack;

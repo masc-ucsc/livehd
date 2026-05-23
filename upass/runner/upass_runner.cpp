@@ -351,20 +351,18 @@ void uPass_runner::run(std::size_t max_iters) {
     return;
   }
 
-  // Allocate the staging body in the input Lnast's Forest as an unattached
-  // temp tree (HHDS Forest::create_tree_temp). The runner builds into it
-  // with the tree-only Lnast wrapper; pass_upass.cpp then atomically swaps
-  // it in via Lnast::replace_body so any holder of the input Lnast picks
-  // up the new body without a shared_ptr swap.
+  // Step H — allocate the dest (staging) body in a runner-owned Forest
+  // (conceptually the "lgdb/optimized" forest the plan describes; today
+  // it's in-memory only, no on-disk lgdb path resolution yet). pass_upass
+  // still picks the tree out via take_staging() and replace_body()s the
+  // input Lnast so any holder of the input picks up the new body.
   //
-  // A fresh staging tree is allocated at the START of each iteration so
-  // multi-iteration runs don't accumulate duplicate subtrees (process_top
-  // appends each input child into staging, so re-using the same staging
-  // across N iterations would multiply every subtree by N). The symbol
-  // tables that drive the fixed-point live on the per-pass state — they
-  // are NOT cleared between iterations.
+  // With single-walk dispatch (Step M) the lambda only runs once.
+  if (!dest_forest_) {
+    dest_forest_ = hhds::Forest::create();
+  }
   auto fresh_staging = [&]() {
-    auto body            = lm->get_lnast()->forest()->create_tree_temp(std::format("staging-{}", lm->get_top_module_name()));
+    auto body            = dest_forest_->create_tree_temp(std::format("optimized-{}", lm->get_top_module_name()));
     staging              = std::make_shared<Lnast>(body, lm->get_top_module_name());
     staging_parent       = staging->set_root(Lnast_ntype::create_top());
     staging_parent_stack = {};
