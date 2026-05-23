@@ -6,6 +6,7 @@
 #include <print>
 #include <vector>
 
+#include "absl/strings/str_cat.h"
 #include "const.hpp"
 
 class Bundle : std::enable_shared_from_this<Bundle> {
@@ -153,6 +154,31 @@ public:
 
   void set(const Const& trivial) {  // clear everything that is not 0.__attr. set 0
     return set("0", trivial);
+  }
+
+  // Direct attribute access — Step B of upass redesign. Wraps the legacy
+  // "__attr" key-prefix convention so passes can read/write attrs without
+  // hand-rolling the prefix dance. The bare attribute name (e.g. "bits",
+  // "type", "pending_import") routes to "__<name>" in the underlying
+  // key_map. Sub-fields can use "field.attr_name" form (e.g.
+  // set_attr("foo", "bits", …) → "foo.__bits").
+  bool has_attr(std::string_view attr_name) const {
+    return has_trivial(absl::StrCat("__", attr_name));
+  }
+  bool has_attr(std::string_view field, std::string_view attr_name) const {
+    return has_trivial(absl::StrCat(field, ".__", attr_name));
+  }
+  const Const& get_attr(std::string_view attr_name) const {
+    return get_trivial(absl::StrCat("__", attr_name));
+  }
+  const Const& get_attr(std::string_view field, std::string_view attr_name) const {
+    return get_trivial(absl::StrCat(field, ".__", attr_name));
+  }
+  void set_attr(std::string_view attr_name, const Const& v) {
+    set(absl::StrCat("__", attr_name), v);
+  }
+  void set_attr(std::string_view field, std::string_view attr_name, const Const& v) {
+    set(absl::StrCat(field, ".__", attr_name), v);
   }
 
   bool concat(const std::shared_ptr<Bundle const>& tup2);
