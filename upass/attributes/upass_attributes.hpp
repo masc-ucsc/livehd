@@ -20,16 +20,22 @@
 
 // uPass_attributes — Pyrope attribute pass.
 //
-// Implements the multi-phase plan described in attribute_todo.md. Phase 1
-// (sticky-attribute propagation) is wired here first; the remaining phases
-// (3 aggregate reads, 5 category-A consumption, 6 category-B wiring,
-// 7 pass-through hints/unknown) plug into the same handler registry as work
-// progresses.
+// Per-attribute semantics plug in via the Handler_registry (see
+// upass_attributes_handler.hpp). The pass itself drives the LNAST walk and
+// owns the side state every handler reads from / writes to. Concrete
+// handlers live in sibling files:
 //
-// Per attribute_todo.md §3, the pass participates in the normal upass node
-// walk — there is no separate fixed-point loop. For every node visited by
-// the runner, this pass updates its side state and lets the runner emit /
-// rewrite / drop the node.
+//   * upass_attributes_sticky.cpp   — `_*` / `debug` sticky propagation
+//   * upass_attributes_wrap_sat.cpp — category-A wrap / saturate / const
+//   * upass_attributes_wiring.cpp   — category-B LGraph-wiring attrs
+//   * upass_attributes_read.cpp     — `.[attr]` read evaluation
+//   * upass_attributes_tuple.cpp    — aggregate (tuple/array) shape tracking
+//   * upass_attributes_migrate.cpp  — per-field attr materialization
+//
+// The pass participates in the normal upass node walk — there is no
+// separate fixed-point loop. For every node visited by the runner, this
+// pass updates its side state and lets the runner emit / rewrite / drop
+// the node.
 struct uPass_attributes : public upass::uPass {
 public:
   uPass_attributes(std::shared_ptr<upass::Lnast_manager>& lm);
@@ -39,8 +45,7 @@ public:
   void end_run() override;
 
   // Sticky propagation needs a hook at every assignment-shaped op so it can
-  // observe RHS refs and mark the destination. Phase 1 only needs assign +
-  // expression ops; later phases will extend this list.
+  // observe RHS refs and mark the destination.
   void process_assign() override;
   void process_plus() override;
   void process_minus() override;
@@ -73,14 +78,15 @@ public:
   void process_attr_set() override;
   void process_attr_get() override;
 
-  // Phase 2 hooks — track type info, range bounds, value derivations.
+  // Type info, range bounds, value-derivation hooks (see
+  // upass_attributes_read.cpp).
   void process_type_spec() override;
   void process_range() override;
 
-  // Phase 3 hooks — aggregate tuple-attribute resolution. Track tuple shape
-  // (field count + field-name list) so .[size] / .[bits] / .[typename] / .[key]
-  // and category-D aggregate→field inheritance can resolve before Phase 4
-  // flattens the tuple away.
+  // Aggregate tuple-attribute resolution (see upass_attributes_tuple.cpp).
+  // Track tuple shape (field count + field-name list) so .[size] / .[bits] /
+  // .[typename] / .[key] and category-D aggregate→field inheritance can
+  // resolve before downstream lowering flattens the tuple away.
   void process_tuple_add() override;
   void process_tuple_concat() override;
   void process_tuple_set() override;
@@ -91,10 +97,10 @@ public:
   void process_stmts() override;
   void process_stmts_post() override;
 
-  // Phase 2 — fold the attr_get destination tmp to its computed Const so
-  // the runner's emit-time substitution picks it up and downstream passes
-  // (verifier cassert, constprop eq/ne via runner_fold_fn fallback) see the
-  // resolved value without an extra iteration.
+  // Fold the attr_get destination tmp to its computed Const so the runner's
+  // emit-time substitution picks it up and downstream passes (verifier
+  // cassert, constprop eq/ne via runner_fold_fn fallback) see the resolved
+  // value without an extra iteration. See upass_attributes_read.cpp.
   std::optional<Const> fold_ref(std::string_view name) override;
   bool                 overrides_fold_ref() const override { return true; }
 
@@ -131,7 +137,7 @@ private:
   Op_view scan_op();
 
   // Dispatch helper: route to every registered handler that claims the
-  // attribute name `attr_name`. Phase 1 only the sticky pattern is active.
+  // attribute name `attr_name`.
   void dispatch_attr_set(std::string_view attr_name, std::string_view lhs, std::string_view value_text);
   void dispatch_attr_get(std::string_view attr_name, std::string_view dst, std::string_view base);
 
@@ -160,7 +166,7 @@ private:
   // Canonicalize ref text before using it as a handler key.
   static std::string normalize_name(std::string_view name);
 
-  // ── Phase 2 — attribute-read evaluation ────────────────────────────────────
+  // ── Attribute-read evaluation (see upass_attributes_read.cpp) ─────────────
   //
   // Side state owned by the pass (rather than a single handler) because
   // multiple kinds of dispatch read/write the same maps:
@@ -217,12 +223,12 @@ private:
   std::map<std::string, Const>                              tmp_fold;      // attr_get dst → folded Const
 
 public:
-  // ── Phase 3 — tuple-shape side state ────────────────────────────────────
+  // ── Tuple-shape side state (see upass_attributes_tuple.cpp) ──────────────
   //
   // Tracked per tuple-typed variable so aggregate `.[size]` / `.[bits]` /
-  // `.[typename]` / `.[key]` reads can resolve before Phase 4 flattens the
-  // tuple away. Field list is in source order; `name` is empty for unnamed
-  // positional entries.
+  // `.[typename]` / `.[key]` reads can resolve before downstream lowering
+  // flattens the tuple away. Field list is in source order; `name` is empty
+  // for unnamed positional entries.
   struct Tuple_field {
     std::string positional;  // "0", "1", ...
     std::string name;        // "a", "xx", or empty for unnamed positional
@@ -257,10 +263,10 @@ public:
   // in generic cat-D aggregate→field inheritance).
   static bool is_builtin_attr(std::string_view name);
 
-  // ── Phase 4 — tuple expansion / array lowering ─────────────────────────
+  // ── Per-field attribute migration (see upass_attributes_migrate.cpp) ─────
   //
   // The structural lowering (tuple_add → field-vars, mixed-type split, multi-D
-  // flatten) is constprop's job (upass.md §Slice 6). Phase 4's *attribute*
+  // flatten) is constprop's job (upass.md §Slice 6). The attribute pass's
   // responsibility is "user-attr migration" — when fields/aliases come into
   // existence, the cat-D aggregate attrs must follow them so that LGraph
   // generation still sees the annotation after the tuple shape is gone, and
@@ -280,7 +286,7 @@ public:
   void migrate_aggregate_attrs_to_fields(std::string_view base);
   void migrate_alias(std::string_view lhs, std::string_view rhs);
 
-  // ── Phase 5 — overflow-policy state ───────────────────────────────────
+  // ── Overflow-policy state (see upass_attributes_wrap_sat.cpp) ─────────────
   //
   // wrap / saturate as declaration attributes set a persistent narrowing
   // policy on the target variable; subsequent assignments are narrowed in
@@ -321,7 +327,7 @@ public:
   // active or type info is missing.
   Const narrow_for_lhs(std::string_view lhs, const Const& v) const;
 
-  // ── Phase 5 — const single-assign tracking ─────────────────────────────
+  // ── const single-assign tracking ──────────────────────────────────────────
   //
   // A `const` declaration may receive at most one non-nil assignment per
   // cycle. record_assign() bumps the counter for the LHS; the second non-
@@ -332,9 +338,9 @@ private:
   std::map<std::string, Tuple_shape> tuple_shapes;     // var → shape
   std::map<std::string, Get_alias>   tuple_get_alias;  // tmp → resolved alias
   std::map<std::string, std::string> shape_source;     // var → source-tmp from `assign var src` (chained)
-  std::map<std::string, std::string> direct_alias;     // Phase 4 — lhs → rhs for direct-ref `assign` aliases
+  std::map<std::string, std::string> direct_alias;     // lhs → rhs for direct-ref `assign` aliases (migrate.cpp)
 
-  // Phase 5 — overflow policy + assignment tracking. flat_hash_* gives
+  // Overflow policy + assignment tracking (wrap_sat.cpp). flat_hash_* gives
   // heterogeneous string_view lookup and O(1) inserts; assigned_once grows
   // to ~one entry per assignment on bulk workloads, so the std::set's
   // O(log N) per-insert allocator pressure was a visible bottleneck.
@@ -343,7 +349,7 @@ private:
   absl::flat_hash_set<std::string>      assigned_once;       // any non-nil assign happened
   absl::flat_hash_map<std::string, int> const_assign_count;  // for const single-assign check
 
-  // Phase 2 evaluator: compute the attribute's value when possible, store it
+  // Read evaluator (read.cpp): compute the attribute's value when possible, store it
   // in tmp_fold[dst] so downstream reads pick it up. base_text is the raw
   // text of the base ref (before normalize_name); base is its normalized
   // form. attr is the attribute name (lower-case identifier).

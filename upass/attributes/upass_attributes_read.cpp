@@ -1,14 +1,14 @@
 //  This file is distributed under the BSD 3-Clause License. See LICENSE for details.
 
-// Phase 2 — constant-propagation-style evaluation of `.[attr]` reads.
+// Constant-propagation-style evaluation of `.[attr]` reads.
 //
-// Implements the rules from attribute_todo.md §Phase 2:
+// Rules implemented:
 //   * presence-only attr_set stores boolean true; explicit values
 //     (including `false`) round-trip as the explicit Const.
 //   * .[bits]/.[ubits]/.[sbits]/.[max]/.[min] derive from the base value or
 //     declared type when no explicit attr is on the side-map.
-//   * .[size] returns the field count (1 for scalars; aggregate cases are
-//     Phase 3's job).
+//   * .[size] returns the field count (1 for scalars; aggregate cases live
+//     in upass_attributes_tuple.cpp).
 //   * .[comptime] resolves true iff the base value (or declaration) is
 //     comptime-known.
 //   * unset ordinary reads return *Dlop::nil().

@@ -1,9 +1,9 @@
 //  This file is distributed under the BSD 3-Clause License. See LICENSE for details.
 
-// Phase 6 — category-B LGraph-wiring attribute handlers.
+// Category-B LGraph-wiring attribute handlers.
 //
-// Per attribute_todo.md §Phase 6 the attribute pass's job for cat-B is
-// "preserve / lower" rather than "consume". The bulk of the actual
+// The attribute pass's job for cat-B is "preserve / lower" rather than
+// "consume". The bulk of the actual
 // connection work happens at LGraph generation time (which reads
 // attr_set_values as the side-map). The attribute pass does the upass-
 // side bookkeeping:
@@ -38,8 +38,8 @@ namespace attributes {
 class Pin_handler : public Attribute_handler {};
 
 // Signal-classification handler: clock / reset. Same scaffold; LGraph
-// generation interprets the classification. Phase 1 already handles
-// `_*` sticky propagation; clock/reset are not sticky.
+// generation interprets the classification. The sticky handler already
+// covers `_*` sticky propagation; clock/reset are not sticky.
 class Signal_class_handler : public Attribute_handler {};
 
 // Mode-selection handler: posclk / async / negreset / type (memory) /
@@ -54,7 +54,7 @@ class Mode_handler : public Attribute_handler {};
 }  // namespace upass
 
 // Registration entry point — invoked from uPass_attributes' constructor.
-void uPass_attributes_register_phase6(uPass_attributes& self) {
+void uPass_attributes_register_wiring(uPass_attributes& self) {
   using namespace upass::attributes;
   auto  pin    = std::make_shared<Pin_handler>();
   auto  signal = std::make_shared<Signal_class_handler>();

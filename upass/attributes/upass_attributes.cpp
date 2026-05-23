@@ -9,36 +9,36 @@
 #include <utility>
 
 #include "lnast_ntype.hpp"
-#include "upass_attributes_phase5.hpp"
 #include "upass_attributes_sticky.hpp"
+#include "upass_attributes_wrap_sat.hpp"
 
 // Plugin registration. Name "attributes" is what pass_upass appends to the
 // default upass order.
 static upass::uPass_plugin plugin_attributes("attributes", upass::uPass_wrapper<uPass_attributes>::get_upass);
 
-// Defined in upass_attributes_phase6.cpp.
-void uPass_attributes_register_phase6(uPass_attributes& self);
+// Defined in upass_attributes_wiring.cpp.
+void uPass_attributes_register_wiring(uPass_attributes& self);
 
 uPass_attributes::uPass_attributes(std::shared_ptr<upass::Lnast_manager>& _lm) : upass::uPass(_lm) {
-  // Phase 1 — sticky `_*` / `debug` attribute pattern.
+  // Sticky `_*` / `debug` attribute pattern.
   reg.register_sticky_pattern(std::make_shared<upass::attributes::Sticky_handler>());
 
-  // Phase 5 — category-A consumption.
+  // Category-A consumption: wrap / saturate / sat policy + const single-bind.
   auto wrap_sat = std::make_shared<upass::attributes::Wrap_sat_handler>();
   reg.register_exact("wrap", wrap_sat);
   reg.register_exact("saturate", wrap_sat);
   reg.register_exact("sat", wrap_sat);
   reg.register_exact("type", std::make_shared<upass::attributes::Const_handler>());
 
-  // Phase 6 — category-B LGraph-wiring handlers (clock_pin, reset_pin,
-  // posclk, ...). Lives in its own translation unit so the table of
-  // pin/mode names doesn't clutter constructor logic.
-  uPass_attributes_register_phase6(*this);
+  // Category-B LGraph-wiring handlers (clock_pin, reset_pin, posclk, ...).
+  // Lives in its own translation unit so the table of pin/mode names doesn't
+  // clutter constructor logic.
+  uPass_attributes_register_wiring(*this);
 
-  // Phase 7 — default pass-through handler. Unknown attribute names land
-  // here. The handler is intentionally a no-op: process_attr_set already
-  // records every value into attr_set_values regardless of name, so cat-D
-  // attrs round-trip via the side-map for downstream LGraph generation.
+  // Default pass-through handler. Unknown attribute names land here. The
+  // handler is intentionally a no-op: process_attr_set already records every
+  // value into attr_set_values regardless of name, so cat-D attrs round-trip
+  // via the side-map for downstream LGraph generation.
   reg.register_default(std::make_shared<upass::attributes::Attribute_handler>());
 }
 

@@ -1,11 +1,14 @@
 //  This file is distributed under the BSD 3-Clause License. See LICENSE for details.
 
-// Phase 3 — aggregate tuple-attribute resolution.
+// Aggregate (tuple/array) shape tracking.
 //
-// Tracks tuple shapes (field count + per-field name) so that aggregate
-// attribute reads (`tup.[size]`, `tup.[bits]`, `tup.[typename]`,
-// `tup.[key]`) and category-D aggregate→field inheritance can resolve
-// before Phase 4 flattens the tuple away.
+// process_tuple_add/concat/set/get build the structural side state that lets
+// aggregate attribute reads (`tup.[size]`, `tup.[bits]`, `tup.[typename]`,
+// `tup.[key]`) and category-D aggregate→field inheritance resolve before
+// downstream lowering flattens the tuple away.
+//
+// Per-field attr materialization that pairs with this state lives in
+// upass_attributes_migrate.cpp.
 //
 // Side state populated here:
 //   * tuple_shapes[var]     — list of (positional, name) per field

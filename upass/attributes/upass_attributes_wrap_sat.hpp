@@ -7,9 +7,8 @@
 
 #include "upass_attributes_handler.hpp"
 
-// Phase 5 — category-A LNAST/upass attribute handlers (see
-// attribute_todo.md §Phase 5). Each handler enforces or lowers one named
-// attribute's semantics.
+// Category-A LNAST/upass attribute handlers. Each handler enforces or
+// lowers one named attribute's semantics.
 //
 //   * Wrap_sat_handler — `wrap`, `saturate`/`sat`. Distinguishes the
 //     declaration-site assignment policy (`mut w:u4:[wrap] = 0`) from the

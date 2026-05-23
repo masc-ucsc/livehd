@@ -1,10 +1,10 @@
 //  This file is distributed under the BSD 3-Clause License. See LICENSE for details.
 
-// Phase 4 — tuple expansion / array lowering (attribute side).
+// Per-field attribute migration when tuples expand / arrays lower.
 //
 // The structural lowering (tuple_add → field-vars, mixed-type split,
-// multi-D flatten) is the constprop / Slice 6 job. What lives here is the
-// attribute-pass's contribution per attribute_todo.md §Phase 4:
+// multi-D flatten) is constprop's job. What lives here is the attribute
+// pass's contribution:
 //
 //   * **User-attr migration.** When fields are split out, any category-D
 //     aggregate attribute that was not overridden at the field site must end
@@ -96,41 +96,31 @@ void uPass_attributes::migrate_aggregate_attrs_to_fields(std::string_view base) 
         }
       }
 
-      std::string field_path;
-      field_path.reserve(base.size() + 1 + key.size());
-      field_path.assign(base.data(), base.size());
-      field_path.push_back('.');
-      field_path.append(key);
-
-      auto& slot = attr_set_values[field_path];
-      auto  it   = slot.find(attr_name);
-      if (it == slot.end()) {
-        slot.emplace(attr_name, chosen_value);
-        mark_changed();
-      } else if (!it->second.same_repr(chosen_value)) {
-        // An earlier migration wrote the aggregate value here, but the
-        // source-tmp's override is more authoritative. Update.
-        it->second = chosen_value;
-        mark_changed();
-      }
-
+      // Write `base.<suffix>`'s `attr_name` slot, marking dirty only when
+      // the stored value actually changed. The aggregate-flow value may
+      // overwrite an earlier migration when the source-tmp's override turns
+      // out to be more authoritative.
+      auto write_field_attr = [&](std::string_view suffix) {
+        std::string field_path;
+        field_path.reserve(base.size() + 1 + suffix.size());
+        field_path.assign(base.data(), base.size());
+        field_path.push_back('.');
+        field_path.append(suffix);
+        auto& slot = attr_set_values[field_path];
+        auto  it   = slot.find(attr_name);
+        if (it == slot.end()) {
+          slot.emplace(attr_name, chosen_value);
+          mark_changed();
+        } else if (!it->second.same_repr(chosen_value)) {
+          it->second = chosen_value;
+          mark_changed();
+        }
+      };
+      write_field_attr(key);
       // Mirror the positional path too (so reads via positional index find
       // the inherited attr). Skip when name == positional.
       if (!f.name.empty() && f.name != f.positional && !f.positional.empty()) {
-        std::string pos_path;
-        pos_path.reserve(base.size() + 1 + f.positional.size());
-        pos_path.assign(base.data(), base.size());
-        pos_path.push_back('.');
-        pos_path.append(f.positional);
-        auto& pslot = attr_set_values[pos_path];
-        auto  pit   = pslot.find(attr_name);
-        if (pit == pslot.end()) {
-          pslot.emplace(attr_name, chosen_value);
-          mark_changed();
-        } else if (!pit->second.same_repr(chosen_value)) {
-          pit->second = chosen_value;
-          mark_changed();
-        }
+        write_field_attr(f.positional);
       }
     }
   }

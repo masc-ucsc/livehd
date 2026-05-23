@@ -1,6 +1,6 @@
 //  This file is distributed under the BSD 3-Clause License. See LICENSE for details.
 
-// Phase 5 — category-A LNAST/upass attribute consumption.
+// Category-A LNAST/upass attribute consumption.
 //
 // Implements:
 //   * `wrap` / `saturate` / `sat` (alias) — declaration-site assignment
@@ -15,14 +15,14 @@
 // declaration form *before* the assignment but the statement-level form
 // *after* the assignment, so this position check is sound.
 //
-// Narrowing math runs through tmp_fold (the same map Phase 2 publishes
-// derived attribute reads to) so cassert / eq consumers pick up the
-// narrowed value via runner_fold_fn. constprop's current_prim_value
-// consults runner_fold_fn before falling back to its own ST when no
-// stored value exists; we don't need to fight constprop for primary
-// binding.
+// Narrowing math runs through tmp_fold (the same map the attr-read
+// evaluator publishes derived attribute reads to) so cassert / eq
+// consumers pick up the narrowed value via runner_fold_fn. constprop's
+// current_prim_value consults runner_fold_fn before falling back to its
+// own ST when no stored value exists; we don't need to fight constprop
+// for primary binding.
 
-#include "upass_attributes_phase5.hpp"
+#include "upass_attributes_wrap_sat.hpp"
 
 #include <cstdint>
 #include <optional>
