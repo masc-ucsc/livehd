@@ -96,7 +96,6 @@ public:
   // (verifier cassert, constprop eq/ne via runner_fold_fn fallback) see the
   // resolved value without an extra iteration.
   std::optional<Const> fold_ref(std::string_view name) override;
-  bool                 overrides_fold_ref() const override { return true; }
 
   // Read-side accessor for tests / cross-handler queries.
   upass::attributes::Handler_registry& registry() { return reg; }

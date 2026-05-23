@@ -10,13 +10,11 @@
 #include <string_view>
 #include <vector>
 
-#include "absl/container/inlined_vector.h"
 #include "const.hpp"
 #include "lnast.hpp"
 #include "lnast_manager.hpp"
 #include "lnast_ntype.hpp"
 #include "lnast_writer.hpp"
-#include "upass_bundle.hpp"
 #include "upass_utils.hpp"
 
 namespace upass {
@@ -37,26 +35,6 @@ struct Emit_decision {
   static constexpr Emit_decision drop() { return Emit_decision{Emit_kind::drop_subtree}; }
 };
 
-// Runner-resolved operand list for the current source op node. Built once
-// per drop-candidate / verbatim op by the runner before dispatching to
-// passes; passes can consume it via runner_op_summary_fn instead of
-// walking children themselves. See docs/upass_redesign.md §6 (the future
-// shape uses {Runtime_trivial, Const, shared_ptr<Bundle>}; this is the
-// pre-Bundle landing zone using raw {text, ntype} pairs so existing passes
-// can adopt it without depending on the full Bundle migration).
-struct Op_operand {
-  std::string_view             text;
-  Lnast_ntype::Lnast_ntype_int kind;
-};
-
-struct Op_summary {
-  std::string_view                       lhs;
-  absl::InlinedVector<Op_operand, 4>     operands;     // every child after the LHS
-  std::size_t                            ref_count{0}; // ref-typed entries in `operands`
-  bool                                   is_assign{false};
-  bool                                   is_alias{false}; // assign with exactly one ref operand
-};
-
 struct uPass {
 public:
   uPass(std::shared_ptr<Lnast_manager>& _lm) : lm(_lm) {}
@@ -70,23 +48,12 @@ public:
   // tells the runner to omit the node (and its subtree) from the staging tree.
   // Default: always emit.
   virtual Emit_decision classify_statement() { return Emit_decision::emit_node(); }
-  // Self-declared capability: only the passes that actually return drop on
-  // some inputs need to be polled. The default-no-op overhead matters on
-  // bulk-arithmetic workloads where any_pass_drops() runs per emitted op.
-  virtual bool overrides_classify_statement() const { return false; }
 
   // Called by the runner for every `ref <name>` operand it is about to emit
   // (RHS of an op, condition of an `if`, cassert operand). If any pass
   // returns a concrete Const, the runner writes `const <value>` in place of
   // the ref. First non-nullopt wins.
   virtual std::optional<Const> fold_ref(std::string_view /*name*/) { return std::nullopt; }
-
-  // Self-declared capability: derived passes that override `fold_ref` return
-  // true so the runner can precompute the dispatch list and skip the no-op
-  // default for the others. On bulk-arithmetic workloads (1M+ refs), this
-  // eliminates ~5 virtual calls per fold attempt — measurable since
-  // `try_fold_ref` runs on every ref operand of every emitted op.
-  virtual bool overrides_fold_ref() const { return false; }
 
   // Runner-supplied helper that delegates to `try_fold_ref` across every
   // registered pass. Passes can use this to resolve a ref against the
@@ -108,15 +75,6 @@ public:
   // their process_* without disturbing the in-progress traversal.
   using Emit_at_fn = std::function<void(const Lnast_nid&)>;
   void set_runner_emit_at_fn(Emit_at_fn fn) { runner_emit_at_fn = std::move(fn); }
-
-  // Runner-supplied pointer to the operand summary of the *current* source
-  // op node (LHS string + every child operand with its LNAST type). The
-  // runner refills this before each drop-candidate / verbatim dispatch, so
-  // a pass can read the operand layout in O(1) instead of walking children
-  // itself. Direct pointer (not std::function) so the hot-path consumers
-  // pay no indirection cost — the underlying object stays valid for the
-  // pass lifetime. See §6.
-  void set_runner_op_summary_ptr(const Op_summary* p) { runner_op_summary = p; }
 
   // Consume per-pass options (see Options_map). Default: no-op. Passes
   // override to pull the keys they care about. Called once, before run().
@@ -247,7 +205,6 @@ protected:
   bool                            changed{false};
   Fold_fn                         runner_fold_fn;
   Emit_at_fn                      runner_emit_at_fn;
-  const Op_summary*               runner_op_summary{nullptr};
 
   void move_to_nid(const Lnast_nid& nid) { lm->move_to_nid(nid); }
   auto current_text() const { return lm->current_text(); }

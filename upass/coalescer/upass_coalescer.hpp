@@ -102,7 +102,6 @@ public:
   void process_attr_set() override { flush_all(); }
   void process_attr_get() override { flush_all(); }
 
-  bool                 overrides_classify_statement() const override { return true; }
   upass::Emit_decision classify_statement() override {
     if (parked_current_stmt) {
       parked_current_stmt = false;

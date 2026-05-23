@@ -154,22 +154,6 @@ void uPass_bitwidth::clear_range(std::string_view name) {
 uPass_bitwidth::Op_ranges uPass_bitwidth::scan_op() {
   Op_ranges out;
 
-  // Fast path: consume runner-pre-resolved operand layout.
-  if (runner_op_summary && !runner_op_summary->lhs.empty()) {
-    out.lhs = runner_op_summary->lhs;
-    for (const auto& op : runner_op_summary->operands) {
-      if (Lnast_ntype::is_ref(op.kind)) {
-        out.rhs.push_back(read_range(op.text));
-      } else if (Lnast_ntype::is_const(op.kind)) {
-        out.rhs.push_back(range_from_const_text(op.text));
-      } else {
-        out.rhs.push_back(Lnast_range::unbounded());
-      }
-    }
-    return out;
-  }
-
-  // Fallback walk.
   if (!move_to_child()) {
     return out;
   }

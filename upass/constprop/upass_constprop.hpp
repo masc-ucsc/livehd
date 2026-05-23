@@ -68,9 +68,7 @@ public:
   void process_range() override;
 
   upass::Emit_decision classify_statement() override;
-  bool                 overrides_classify_statement() const override { return true; }
   std::optional<Const> fold_ref(std::string_view name) override;
-  bool                 overrides_fold_ref() const override { return true; }
 
   static void set_function_registry(const std::vector<std::shared_ptr<Lnast>>& lnasts);
 
@@ -132,24 +130,6 @@ protected:
     }
     I(is_type(Lnast_ntype::Lnast_ntype_const));
     return *Dlop::from_pyrope(current_text());
-  }
-
-  // Same semantics as current_prim_value() but reads from a pre-resolved
-  // Op_operand instead of the read cursor — avoids the move_to_sibling
-  // walk that the runner has already performed and shared via
-  // runner_op_summary_fn. Hot path for the arithmetic op handlers.
-  Const prim_value_of(const upass::Op_operand& op) const {
-    if (Lnast_ntype::is_ref(op.kind)) {
-      if (runner_fold_fn) {
-        auto folded = runner_fold_fn(op.text);
-        if (folded && !folded->is_invalid()) {
-          return *folded;
-        }
-      }
-      return st.get_trivial(op.text);
-    }
-    I(Lnast_ntype::is_const(op.kind));
-    return *Dlop::from_pyrope(op.text);
   }
 
   // Predicates for the standard "is this value foldable?" guard. `is_numeric`

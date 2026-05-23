@@ -58,25 +58,6 @@ std::string uPass_attributes::normalize_name(std::string_view name) { return std
 uPass_attributes::Op_view uPass_attributes::scan_op() {
   Op_view view;
 
-  // Fast path: the runner pre-resolved the operand layout for this source
-  // node before dispatch. Copy the LHS into the owned std::string slot
-  // (downstream consumers store view.lhs into long-lived maps and need
-  // owning storage) and pick up the ref operands as string_views into
-  // LNAST text — identical to what the cursor walk produced, minus the
-  // cursor moves.
-  if (runner_op_summary && !runner_op_summary->lhs.empty()) {
-    view.lhs.assign(runner_op_summary->lhs);
-    for (const auto& op : runner_op_summary->operands) {
-      if (Lnast_ntype::is_ref(op.kind)) {
-        view.rhs_refs.emplace_back(op.text);
-      }
-    }
-    view.is_alias = runner_op_summary->is_alias;
-    return view;
-  }
-
-  // Fallback walk — kept for the tests that drive scan_op from a context
-  // where the runner hasn't filled the summary (e.g. nested dispatch).
   const bool is_assign = is_type(Lnast_ntype::Lnast_ntype_assign);
 
   if (!move_to_child()) {
@@ -130,41 +111,20 @@ void uPass_attributes::on_assign_like(bool is_assign_node) {
   bool                 rhs_is_nil = false;
   std::optional<Const> rhs_value;  // direct LNAST-source value, when scalar
 
-  // Fast nil check via op_summary alone — cheap, always available.
-  if (is_assign_node && runner_op_summary && !runner_op_summary->operands.empty()) {
-    rhs_is_nil = (runner_op_summary->operands[0].text == "nil");
-  }
-
   // rhs_value is only consumed by the wrap/sat narrowing block below, which
   // requires a policy on view.lhs. If no wrap/sat policy is in scope at all,
   // resolving rhs_value through runner_fold_fn is wasted work — skip the
   // Dlop parse / fold lookup on the bulk-arithmetic path.
-  const bool need_rhs_value = is_assign_node && !rhs_is_nil
+  const bool need_rhs_value = is_assign_node
                               && (!wrap_policy.empty() || !sat_policy.empty());
-  if (need_rhs_value) {
-    // Fast path: read the first RHS operand from the runner's pre-resolved
-    // summary instead of walking children again.
-    if (runner_op_summary && !runner_op_summary->operands.empty()) {
-      const auto& op  = runner_op_summary->operands[0];
-      const auto  txt = op.text;
-      if (Lnast_ntype::is_const(op.kind)) {
-        auto v = Dlop::from_pyrope(txt);
-        if (!v->is_invalid()) {
-          rhs_value = *v;
-        }
-      } else if (Lnast_ntype::is_ref(op.kind) && runner_fold_fn) {
-        auto folded = runner_fold_fn(txt);
-        if (folded && !folded->is_invalid()) {
-          rhs_value = *folded;
-        }
+  if (is_assign_node) {
+    move_to_child();
+    if (move_to_sibling()) {
+      auto txt = current_text();
+      if (txt == "nil") {
+        rhs_is_nil = true;
       }
-    } else {
-      move_to_child();
-      if (move_to_sibling()) {
-        auto txt = current_text();
-        if (txt == "nil") {
-          rhs_is_nil = true;
-        }
+      if (need_rhs_value && !rhs_is_nil) {
         if (Lnast_ntype::is_const(get_raw_ntype())) {
           auto v = Dlop::from_pyrope(txt);
           if (!v->is_invalid()) {
@@ -177,8 +137,8 @@ void uPass_attributes::on_assign_like(bool is_assign_node) {
           }
         }
       }
-      move_to_parent();
     }
+    move_to_parent();
   }
   // Phase 5 — apply wrap/sat narrowing eagerly when we have a fresh RHS
   // value in hand. record_assign also tries this via runner_fold_fn, but

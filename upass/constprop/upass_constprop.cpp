@@ -227,32 +227,6 @@ void uPass_constprop::process_assign() {
 
 template <typename F>
 void uPass_constprop::process_nary(F op) {
-  // Operand-vector dispatch: when the runner has pre-resolved the
-  // operands, skip the cursor walk entirely. This is the dominant
-  // win on bulk-arithmetic workloads (xx.prp 1M plus ops).
-  if (runner_op_summary && !runner_op_summary->lhs.empty() && !runner_op_summary->operands.empty()) {
-    const auto* sum = runner_op_summary;
-    {
-      auto var = sum->lhs;
-      Const r  = prim_value_of(sum->operands[0]);
-      if (!is_numeric(r)) {
-        return;
-      }
-      for (std::size_t i = 1; i < sum->operands.size(); ++i) {
-        Const operand = prim_value_of(sum->operands[i]);
-        if (!is_numeric(operand)) {
-          return;
-        }
-        op(r, operand);
-      }
-      if (!r.is_invalid()) {
-        store_trivial(var, r);
-      }
-      return;
-    }
-  }
-
-  // Fallback walk — kept for contexts where the summary isn't filled.
   move_to_child();
   auto var = current_text();
   move_to_sibling();
@@ -277,22 +251,6 @@ void uPass_constprop::process_nary(F op) {
 
 template <typename F>
 void uPass_constprop::process_binary(F op) {
-  if (runner_op_summary && runner_op_summary->operands.size() >= 2) {
-    const auto* sum = runner_op_summary;
-    {
-      Const n1 = prim_value_of(sum->operands[0]);
-      Const n2 = prim_value_of(sum->operands[1]);
-      if (!foldable(n1) || !foldable(n2)) {
-        return;
-      }
-      Const r = op(n1, n2);
-      if (!r.is_invalid()) {
-        store_trivial(sum->lhs, r);
-      }
-      return;
-    }
-  }
-
   move_to_child();
   auto var = current_text();
   move_to_sibling();
@@ -315,22 +273,6 @@ void uPass_constprop::process_binary(F op) {
 // raw operands through.
 template <typename F>
 void uPass_constprop::process_binary_passthrough(F op) {
-  if (runner_op_summary && runner_op_summary->operands.size() >= 2) {
-    const auto* sum = runner_op_summary;
-    {
-      Const n1 = prim_value_of(sum->operands[0]);
-      Const n2 = prim_value_of(sum->operands[1]);
-      if (!is_numeric(n1) || !is_numeric(n2)) {
-        return;
-      }
-      Const r = op(n1, n2);
-      if (!r.is_invalid()) {
-        store_trivial(sum->lhs, r);
-      }
-      return;
-    }
-  }
-
   move_to_child();
   auto var = current_text();
   move_to_sibling();
@@ -349,19 +291,6 @@ void uPass_constprop::process_binary_passthrough(F op) {
 
 template <typename F>
 void uPass_constprop::process_unary(F op) {
-  if (runner_op_summary && !runner_op_summary->lhs.empty() && !runner_op_summary->operands.empty()) {
-    const auto* sum = runner_op_summary;
-    {
-      Const r = prim_value_of(sum->operands[0]);
-      if (!foldable(r)) {
-        return;
-      }
-      op(r);
-      store_trivial(sum->lhs, r);
-      return;
-    }
-  }
-
   move_to_child();
   auto var = current_text();
   move_to_sibling();

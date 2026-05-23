@@ -18,7 +18,6 @@ public:
   void process_func_def() override;
 
   upass::Emit_decision                classify_statement() override;
-  bool                                overrides_classify_statement() const override { return true; }
   std::vector<std::shared_ptr<Lnast>> take_new_lnasts() override;
 
 private:
