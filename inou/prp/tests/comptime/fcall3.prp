@@ -1,0 +1,12 @@
+/*
+:name: fcall3
+:type: comptime
+:verifier_pass: 1
+:verifier_fail: 0
+*/
+mut b = 3
+comb fcall3(a:u3) -> (res:s4) {
+  res = a + b
+}
+b = 100
+cassert fcall3(a=1) == 4
