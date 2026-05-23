@@ -154,16 +154,6 @@ std::vector<std::string> uPass_runner::resolve_order(const std::vector<std::stri
   return ordered;
 }
 
-std::vector<std::string> uPass_runner::changed_passes() const {
-  std::vector<std::string> changed_list;
-  for (const auto& entry : upasses) {
-    if (entry.pass->has_changed()) {
-      changed_list.emplace_back(entry.name);
-    }
-  }
-  return changed_list;
-}
-
 // ── Staging emit helpers ──────────────────────────────────────────────────────
 
 void uPass_runner::emit_push(Lnast_ntype::Lnast_ntype_int type) {

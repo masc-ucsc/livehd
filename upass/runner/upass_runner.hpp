@@ -77,7 +77,6 @@ protected:
   std::vector<std::shared_ptr<Lnast>> new_lnasts;
 
   std::vector<std::string> resolve_order(const std::vector<std::string>& requested_names, std::string* error_msg = nullptr) const;
-  std::vector<std::string> changed_passes() const;
 
   // Staging emit helpers.
   void emit_push(Lnast_ntype::Lnast_ntype_int type);
