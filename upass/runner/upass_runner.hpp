@@ -11,6 +11,8 @@
 #include <string>
 #include <vector>
 
+#include "absl/container/flat_hash_map.h"
+
 #include "const.hpp"
 #include "lnast.hpp"
 #include "lnast_manager.hpp"
@@ -44,6 +46,12 @@ protected:
   // set_runner_symbol_table(). Initially used as a wiring slot only;
   // existing passes keep their private state until they migrate.
   Symbol_table runner_symbol_table;
+
+  // Step I of upass redesign — runner-owned SSA-version counters keyed
+  // by emitted name. Bumped on every mut reassignment when the runner
+  // takes over SSA at emit time (today still owned by uPass_ssa).
+  // Reserved here so the emit path can populate it without an API change.
+  absl::flat_hash_map<std::string, int> ssa_counters;
 
   bool        configuration_error{false};
   std::string configuration_error_msg;
