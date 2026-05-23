@@ -53,6 +53,14 @@ protected:
   // Reserved here so the emit path can populate it without an API change.
   absl::flat_hash_map<std::string, int> ssa_counters;
 
+  // Step L of upass redesign — function-body registry the runner owns
+  // once func_extract collapses into the main walk. Maps function name
+  // to its already-extracted dest Lnast (allocated in dest_forest_)
+  // so an fcall can switch the cursor into the callee instead of
+  // running the dedicated func_extract pre-pass. Empty today; the
+  // dedicated uPass_func_extract pass still populates Eprp_var::lnasts.
+  absl::flat_hash_map<std::string, std::shared_ptr<Lnast>> function_registry;
+
   bool        configuration_error{false};
   std::string configuration_error_msg;
 
