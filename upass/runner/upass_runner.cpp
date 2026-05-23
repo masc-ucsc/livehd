@@ -371,17 +371,16 @@ void uPass_runner::run(std::size_t max_iters) {
   };
   fresh_staging();
 
-  upass::Runner_fixed_point::run(
-      "uPass",
-      max_iters,
-      [this, &fresh_staging]() {
-        fresh_staging();
-        for (auto& entry : upasses) {
-          entry.pass->begin_iteration();
-        }
-      },
-      [this]() { process_lnast(); },
-      [this]() { return changed_passes(); });
+  // Step M — single walk per invocation. Runner_fixed_point is no longer
+  // invoked; the `max_iters` label on `pass.upass` still parses but is
+  // ignored (kept for backwards-compat with test drivers that pass
+  // max_iters:1). mark_changed() calls on passes still run for
+  // diagnostics but no second iteration follows.
+  (void)max_iters;
+  for (auto& entry : upasses) {
+    entry.pass->begin_iteration();
+  }
+  process_lnast();
 
   // Step J — dest-walk finisher dispatch. Passes that want to inspect
   // the freshly-built staging tree (verifier/assert cassert counts in
