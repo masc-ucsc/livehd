@@ -19,6 +19,7 @@ cc_library(
         "//upass/assert:upass_assert",
         "//upass/attributes:upass_attributes",
         "//upass/bitwidth:upass_bitwidth",
+        "//upass/bundle_pre:upass_bundle_pre",
         "//upass/coalescer:upass_coalescer",
         "//upass/constprop:upass_constprop",
         "//upass/core:upass",
