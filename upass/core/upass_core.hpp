@@ -59,6 +59,18 @@ enum class Vote_kind : uint8_t {
   update,   // emit a rewritten shape (carried in update_payload)
 };
 
+// Step K — pending_import poison marker.
+//
+// Presence-only Bundle attribute (Bundle::has_attr / Bundle::set_attr) used
+// to mark every name that depends on an unresolved import. Origination,
+// propagation, gating, and clearing rules live in:
+//   - runner (origination on `import` op, gating skip for non-constprop)
+//   - bundle_pre (propagation through operand bundles)
+//   - finisher (defer verifier/assert dest walk while any Bundle is marked)
+// All four sites read/write this name; the central definition keeps the
+// string consistent.
+inline constexpr std::string_view k_pending_import_attr = "pending_import";
+
 struct Vote {
   Vote_kind kind{Vote_kind::keep};
   // Folded value for kind == toconst (committed to dst->fields["0"] by
