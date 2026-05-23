@@ -31,6 +31,30 @@ complete before group N+1 starts. Group letters are shared across
   `docs/contracts/architecture.md §4`.
 - **2j** Hot-reload tier reporting in JSONL (`hot-debug` / `hot-approx` /
   `cold`) — `docs/contracts/architecture.md §8`.
+- **2k** Verifier `pending` counter + `:type: top` semantics. Once the
+  upass `pending_import` poison mechanism (see `docs/upass_redesign.md`)
+  is functional, the verifier needs a third disposition: a cassert whose
+  cond is still poisoned at end-of-walk is `pending` (not pass, not fail).
+  Add a `verifier_pending:N` counter alongside `verifier_pass` /
+  `verifier_fail`. For tests tagged `:type: top` (whole-program runs),
+  pending casserts are rolled into the pass count — the contract is "at
+  the top level all imports must resolve, so any surviving pending is a
+  bug." For non-top tests (libraries with deferred imports), `pending`
+  is a legitimate disposition. Complications worth working out:
+    - A cassert that started pending on invocation N and then proves
+      true on invocation N+1 should count once as pass, not once as
+      pending then again as pass. Tally lifetime is per-program, not
+      per-invocation.
+    - `:type: top` aggregation crosses LNASTs in `var.lnasts` (including
+      func_extract-spawned bodies) and the `verifier_include_funcs` knob
+      already in `pass.upass`. The pending→pass roll-up should respect
+      that scope.
+    - Reporting: an unresolved pending at `:type: top` end-of-run needs
+      a diagnostic naming the blocking `import`(s); requires keeping
+      enough info on the `__pending_import` marker to identify the
+      blocker (today the redesign uses a presence-only flag).
+    - A cassert that started pending and later proves false is a hard
+      error, same as any known-false cassert.
 
 ## Group 3 — depends on Group 2
 

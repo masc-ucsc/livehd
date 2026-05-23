@@ -56,10 +56,27 @@ void uPass_attributes::end_run() {
 std::string uPass_attributes::normalize_name(std::string_view name) { return std::string{name}; }
 
 uPass_attributes::Op_view uPass_attributes::scan_op() {
-  // Cursor is at the op node. First child is LHS; remaining children are
-  // operands. For an `assign` with exactly one ref operand, classify as
-  // alias (direct ref aliasing per the spec).
-  Op_view    view;
+  Op_view view;
+
+  // Fast path: the runner pre-resolved the operand layout for this source
+  // node before dispatch. Copy the LHS into the owned std::string slot
+  // (downstream consumers store view.lhs into long-lived maps and need
+  // owning storage) and pick up the ref operands as string_views into
+  // LNAST text — identical to what the cursor walk produced, minus the
+  // cursor moves.
+  if (runner_op_summary && !runner_op_summary->lhs.empty()) {
+    view.lhs.assign(runner_op_summary->lhs);
+    for (const auto& op : runner_op_summary->operands) {
+      if (Lnast_ntype::is_ref(op.kind)) {
+        view.rhs_refs.emplace_back(op.text);
+      }
+    }
+    view.is_alias = runner_op_summary->is_alias;
+    return view;
+  }
+
+  // Fallback walk — kept for the tests that drive scan_op from a context
+  // where the runner hasn't filled the summary (e.g. nested dispatch).
   const bool is_assign = is_type(Lnast_ntype::Lnast_ntype_assign);
 
   if (!move_to_child()) {
@@ -70,16 +87,12 @@ uPass_attributes::Op_view uPass_attributes::scan_op() {
   std::size_t ref_count = 0;
   while (move_to_sibling()) {
     if (Lnast_ntype::is_ref(get_raw_ntype())) {
-      // Store a view into LNAST text — stable for the rest of the pass.
       view.rhs_refs.emplace_back(current_text());
       ++ref_count;
     }
   }
   move_to_parent();
 
-  // Alias semantics: assign with a single ref RHS (e.g. `mut z = a`).
-  // assign(ref, const) and any expression-shaped node fall through to
-  // expression semantics (sticky-only migration).
   if (is_assign && view.rhs_refs.size() == 1 && ref_count == 1) {
     view.is_alias = true;
   }
@@ -116,26 +129,56 @@ void uPass_attributes::on_assign_like(bool is_assign_node) {
   // Detect by checking the single rhs ref or const text.
   bool                 rhs_is_nil = false;
   std::optional<Const> rhs_value;  // direct LNAST-source value, when scalar
-  if (is_assign_node) {
-    move_to_child();
-    if (move_to_sibling()) {
-      auto txt = current_text();
-      if (txt == "nil") {
-        rhs_is_nil = true;
-      }
-      if (Lnast_ntype::is_const(get_raw_ntype())) {
+
+  // Fast nil check via op_summary alone — cheap, always available.
+  if (is_assign_node && runner_op_summary && !runner_op_summary->operands.empty()) {
+    rhs_is_nil = (runner_op_summary->operands[0].text == "nil");
+  }
+
+  // rhs_value is only consumed by the wrap/sat narrowing block below, which
+  // requires a policy on view.lhs. If no wrap/sat policy is in scope at all,
+  // resolving rhs_value through runner_fold_fn is wasted work — skip the
+  // Dlop parse / fold lookup on the bulk-arithmetic path.
+  const bool need_rhs_value = is_assign_node && !rhs_is_nil
+                              && (!wrap_policy.empty() || !sat_policy.empty());
+  if (need_rhs_value) {
+    // Fast path: read the first RHS operand from the runner's pre-resolved
+    // summary instead of walking children again.
+    if (runner_op_summary && !runner_op_summary->operands.empty()) {
+      const auto& op  = runner_op_summary->operands[0];
+      const auto  txt = op.text;
+      if (Lnast_ntype::is_const(op.kind)) {
         auto v = Dlop::from_pyrope(txt);
         if (!v->is_invalid()) {
           rhs_value = *v;
         }
-      } else if (Lnast_ntype::is_ref(get_raw_ntype()) && runner_fold_fn) {
+      } else if (Lnast_ntype::is_ref(op.kind) && runner_fold_fn) {
         auto folded = runner_fold_fn(txt);
         if (folded && !folded->is_invalid()) {
           rhs_value = *folded;
         }
       }
+    } else {
+      move_to_child();
+      if (move_to_sibling()) {
+        auto txt = current_text();
+        if (txt == "nil") {
+          rhs_is_nil = true;
+        }
+        if (Lnast_ntype::is_const(get_raw_ntype())) {
+          auto v = Dlop::from_pyrope(txt);
+          if (!v->is_invalid()) {
+            rhs_value = *v;
+          }
+        } else if (Lnast_ntype::is_ref(get_raw_ntype()) && runner_fold_fn) {
+          auto folded = runner_fold_fn(txt);
+          if (folded && !folded->is_invalid()) {
+            rhs_value = *folded;
+          }
+        }
+      }
+      move_to_parent();
     }
-    move_to_parent();
   }
   // Phase 5 — apply wrap/sat narrowing eagerly when we have a fresh RHS
   // value in hand. record_assign also tries this via runner_fold_fn, but
@@ -143,7 +186,10 @@ void uPass_attributes::on_assign_like(bool is_assign_node) {
   // previous iteration's value at the moment our process_assign runs
   // (constprop's process_assign fires AFTER ours in pass order). Reading
   // the RHS directly from the LNAST gets us the right input.
-  if (!view.lhs.empty() && is_assign_node && !rhs_is_nil) {
+  // tmp_fold is empty on bulk-arithmetic workloads (no narrowing has fired
+  // yet). Cheap pre-check: skip the std::string{} alloc for erase() when
+  // the map is empty.
+  if (!view.lhs.empty() && is_assign_node && !rhs_is_nil && !tmp_fold.empty()) {
     // Drop any stale narrowed value from a previous assign so a per-
     // statement wrap/sat applied to the next attr_set picks up the fresh
     // constprop-stored RHS via runner_fold_fn instead of the previous
@@ -169,6 +215,25 @@ void uPass_attributes::on_assign_like(bool is_assign_node) {
     // When `assign foo bar` and bar carries a tuple shape (or range), foo
     // takes on the same shape so aggregate reads `foo.[size]` etc. resolve.
     const auto& rhs           = view.rhs_refs.front();
+    // Fast path: when the rhs has no tracked state anywhere AND sticky has
+    // nothing to propagate AND there's no chained narrowing value, every
+    // arm of the alias body is a no-op. Skip — saves the migrate_alias
+    // direct_alias.emplace + chained lookups on bulk `assign user_var
+    // ___N` workloads where ___N is a pure plus tmp.
+    const std::string rhs_s{rhs};
+    const bool rhs_has_state = tuple_shapes.contains(rhs_s)
+                               || range_bounds.contains(rhs_s)
+                               || tuple_get_alias.contains(rhs_s)
+                               || attr_set_values.contains(rhs_s)
+                               || shape_source.contains(rhs_s)
+                               || (!tmp_fold.empty() && tmp_fold.contains(rhs_s));
+    // Sticky's own fast-path will early-return on empty state, so we don't
+    // need a separate sticky probe here.
+    if (!rhs_has_state) {
+      reg.for_each_handler(
+          [&](upass::attributes::Attribute_handler& h) { h.on_alias_assign(*this, view.lhs, rhs); });
+      return;
+    }
     bool        record_source = false;
     bool        gained_shape  = false;
     if (auto* sh = lookup_tuple_shape(rhs); sh) {

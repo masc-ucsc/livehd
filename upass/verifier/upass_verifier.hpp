@@ -23,6 +23,7 @@ public:
   //   known-false → upass::error, increments fail_count
   //   unknown     → emit, increments unknown_count
   upass::Emit_decision classify_statement() override;
+  bool                 overrides_classify_statement() const override { return true; }
 
   // Reset counts so a re-entered iteration starts fresh. The final
   // iteration's counts are the ones compared in end_run.

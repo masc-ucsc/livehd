@@ -4,491 +4,507 @@
 is to **propagate compile-time-known values, dead-code-eliminate everything
 those values make redundant, and emit a new LNAST** that replaces the input.
 
-This document is the contract for how the rewrite works today and how the
-deferred pieces (func_call, func_def extraction, attr_set side-map, tuple
-flattening, if-branch pruning) plug in later. When a future change touches
-this area, update this doc first.
+This document is the contract for how the rewrite works. When a future change
+touches this area, update this doc first.
 
-## Roadmap — next phase (post-Slice-2)
-
-The inou/prp grammar and the upass micro-pipeline are advancing in lockstep.
-The next three milestones, in order, are:
-
-1. **Tighten expression / tuple lowering.** Patch the producer-side bugs
-   that surface when `lnastfmt` rejects malformed `ref` text. Examples
-   already landed: tuple-LHS `(a,b) = …`, tuple-field `(a:u4=1, …)`,
-   anonymous slot `(mut :u13 = 5)`, ``a`` ↔ `a` normalization (the
-   backtick escape only stays when the name actually carries a non-alnum
-   character). Continue this until every `ref` in every test pipeline is
-   a single name — a tmp `___N`, a dotted alnum/underscore identifier, or
-   a backtick-escaped form that genuinely needs the escape — `pass.lnastfmt`
-   is the canonical check. Each violation is a `prp2lnast` shape bug, not
-   a downstream concern.
-2. **Implement function input/output wiring.** Today `func_call` and
-   `func_def` are pass-throughs in the runner (Slice 1 / §3). The next step
-   is the calling-convention contract: bind caller-side argument bundles to
-   callee-side parameter names, and route the callee return tuple back to
-   the caller's symbol table. This is what unblocks Slice 3 (func_call
-   argument reconstruction) — the upass already documents the iteration
-   model for it.
-3. **Per-`func_def` LNAST extraction + recursive upass.** When `func_def`
-   appears inside an input LNAST, the runner allocates a fresh staging
-   LNAST for the callee body, registers it in `var.lnasts`, and runs the
-   full upass pipeline on it (Slice 4 / §3). N `func_def`s in 1 input
-   LNAST → up to N+1 output LNASTs, each independently const-propagated.
-
-Slices 5–7 (attr_set side-map, tuple flattening, if-branch pruning) follow
-on the same staging-tree machinery and are unblocked once #2 and #3 land.
+The full architectural rationale (alternatives weighed, why bundle pre-pass,
+why no `max_iter` for the current pass set, etc.) lives in
+[docs/upass_redesign.md](../docs/upass_redesign.md). This file is the
+day-to-day operational contract; the redesign doc is the rationale.
 
 ## 0. Context and scope
 
 upass lives downstream of `pass.lnastfmt` and consumes LNAST produced by
 `inou/prp` (new), `inou/pyrope` (legacy, sunsetting), and `inou/slang`.
-Several LNAST-wide cleanups in `lnast_todo.md` directly constrain upass.
-This doc commits to the **target** semantics; some Slice 1 checks are
-temporary stand-ins that go away as those tracks land.
+Several LNAST-wide cleanups in `lnast_todo.md` directly constrain upass:
 
-- **`lnast_todo.md` §10 — Symbol-table API + value-attr inference.**
-  lnastfmt owns `__min`/`__max` computation via interval arithmetic,
-  keyed per-SSA-version. upass **reads** these through the ST; it does
-  not derive them. Decl-only attrs (`storage`, `direction`, `reset_pin`,
-  user-asserted `max`/`min`) are read via `st.get_decl_attr`.
-- **`lnast_todo.md` §11 — unified `attr_set`/`tuple_set` shape,
-  write-once semantics, `assign` collapse.** upass must respect the
-  write-once / comptime-guarded rules; Slice 5 below folds the
-  enforcement + side-map into upass. Slice 1 just pass-through-copies
-  `attr_set`.
-- **`lnast_todo.md` §12 — `$`/`%`/`#` prefixes → ST-backed
-  direction/storage.** The upass pipeline assumes ref text is already bare.
-  Direction/storage must be carried structurally, not encoded in the name.
-- **`lnast_todo.md` §13 — `Tree_index`-identity tmps.** Slice 1 uses
-  `Lnast::is_tmp(text)` (string prefix). Migrate to `node.is_tmp()` when
-  §13 lands. upass never tracks tmps by string outside of the classify
-  hook; the symbol table already keys by name regardless.
-- **`lnast_todo.md` §15.2 — `delay_assign` offset extensions.** upass
-  never folds across a `delay_assign` (timing-carrying); emit verbatim.
-  The folding-validity check is "`delay_assign` reads a known reg Q
-  value" which is effectively never comptime-known, so Slice 1 treats
-  these as opaque side effects.
-- **`lnast_todo.md` §14 — migration rollout.** upass's ST consumer side
-  flips with §12 migration; until then, the prefix fallbacks documented
-  above are the contract.
+- **§10 — Symbol-table API + value-attr inference.** lnastfmt owns
+  `__min`/`__max` computation via interval arithmetic, keyed per-SSA-version.
+  upass **reads** these via the symbol table; it does not derive them.
+- **§11 — unified `attr_set`/`tuple_set` shape, write-once semantics.** upass
+  enforces write-once / comptime-guarded rules; the side-map for category-D
+  attributes lives in the Bundle (§5 below).
+- **§12 — `$`/`%`/`#` prefixes → ST-backed direction/storage.** upass assumes
+  ref text is already bare; direction/storage carried structurally, not
+  encoded in the name.
+- **§13 — `Tree_index`-identity tmps.** upass keys the symbol table by name
+  regardless; the tmp/named distinction never affects fold logic.
+- **§15.2 — `delay_assign` offset extensions.** upass never folds across a
+  `delay_assign`; emit verbatim.
 
-Keep section references here up to date when the todo sections renumber.
+Keep section references up to date when those sections renumber.
 
-## 1. Problem
+## 1. Pipeline shape
 
-The original uPass runner only read the LNAST — it walked it, populated
-`Symbol_table` in `uPass_constprop`, and left the tree unchanged. So:
+A single `pass.upass` invocation walks each LNAST in `var.lnasts` exactly
+once, depth-first, pre-order. For each source node:
 
 ```
-livehd "inou.prp files:…/add_trivial.prp |> pass.lnastfmt |> pass.upass |> lnast.dump"
+(1) bundle pre-pass          ─ once
+(2) opt passes               ─ each once, in fixed order
+                                (constprop, attributes, bitwidth,
+                                 coalescer, func_extract)
+                              ─ taint gate: if any operand vector entry
+                                carries a non-empty pending_import, ONLY
+                                constprop is called; the others skip.
+(3) vote resolution          ─ drop > toconst > update > keep
+(4) SSA post-pass            ─ once; may expand 1→N (tuple flatten,
+                                name versioning, dead-arm delete).
+                                Skipped on any node whose read-through
+                                Bundles carry pending_import.
+(5) emit 0..N nodes          ─ append to the dest LNAST.
 ```
 
-emits the original LNAST verbatim. Nothing is propagated into the IR that
-`lnast.dump` (or later stages) sees. The plan below fixes that: the runner
-owns a **staging LNAST** that it writes into while traversing the input, and
-swaps into `var.lnasts` at the end.
+After the source walk completes:
 
-## 2. Design
+- If **no** Bundle in the symbol table carries `pending_import`, the
+  read-only finishers run a separate walk over the dest LNAST:
+  `verifier`, then `assert`.
+- Otherwise the finishers defer to a later `pass.upass` invocation
+  (presumably after the blocking `import` resolves).
 
-### 2.1 Single runner, single staging tree
+### No max_iter for the current pass set
 
-- The **runner** (`uPass_runner`) owns a `std::shared_ptr<Lnast>` called
-  `staging` plus a write cursor (`staging_stack` of `Lnast_nid`). One tree,
-  one cursor — upasses never write directly.
-- Each uPass contributes a **classify-before-emit** decision on the current
-  read-side node. The runner aggregates decisions (first pass to say
-  `drop_subtree` wins) and, if the decision is `emit`, appends a copy of the
-  input node to `staging` at the current write cursor.
-- Structural nodes (`top`, `stmts`, `if`, future `func_def`) push a new parent
-  onto `staging_stack` before recursing and pop after.
-- At end-of-traversal, the runner replaces `var.lnasts[i]` (and `lm`'s
-  internal `lnast`) with `staging`. The old tree drops when refcount hits 0.
+With direct Bundle mutation in fixed pass order, one sweep per source node
+suffices. `max_iter` stays as a configuration knob (default 1) for future
+passes that genuinely chain (e.g. two strength-reductions). The current set
+does not need it; the runner picks the strongest vote and moves on.
 
-### 2.2 Iteration policy
+### Re-runs
 
-The runner does **a single tree walk per `pass.upass` call**. Inside that
-walk, multiple **step iterations** can fire on the same node:
+Each `pass.upass` invocation starts clean: symbol table rebuilt from scratch,
+scope stack empty. Re-runs (after another lowering stage, after an `import`
+resolves, etc.) get a fresh view.
 
-- At each node, every registered pass dispatches once.
-- If any pass calls `mark_changed()` (writes a new HHDS attr, rewrites
-  the node, etc.), the runner re-dispatches the **other** passes at
-  the same node. A pass does not re-dispatch itself unless a different
-  pass subsequently modifies state it reads.
-- `max_iters` bounds the per-node step loop (default 1; tests may
-  raise it). Convergence is expected in 0–3 steps in practice.
+## 2. Per-pass responsibilities
 
-A second `pass.upass` call ("**TOP-rooted, top-down**") is only
-required when an unresolved `import` function call remains in the
-staged LNAST. The TOP is the existing `top:xxx` entry-point convention
-(same as `inou.yosys.tolg top:foo …`). This second-call mode is **not
-yet implemented** — `import` does not exist yet, so today every
-program completes in a single sweep.
+### Bundle pre-pass (new)
 
-**Reader passes** (`verifier`, `assert`) attach only to the **final**
-outer `pass.upass` invocation. Since today every invocation is "final"
-(no second pass exists), readers run by default. When `import` lands,
-the driver must withhold readers from the non-final invocation and
-attach them only to the TOP-rooted sweep, which always runs a verifier
-and flags an error if it did not converge.
+Owns *structural* side state. Writes Bundle fields that describe a name's
+shape, type, sticky-attribute taint, pending-import poison, declared
+policies (wrap/sat), and aliasing. Never folds a scalar; never computes a
+value.
 
-The `changed` / `begin_iteration` hook in `uPass` stays — it is the
-signal the runner uses to detect convergence both at the per-node
-step level and at end-of-walk.
+Hooks at: every assignment-shaped op (sticky/pending-import migration),
+`type_spec`, `range` (records slot; does not fold start/end), `attr_set`
+(records `attr_values[name]` slot and policy bits), `tuple_add` /
+`tuple_concat` / `tuple_get` (shape, aliases), `assign` alias form
+(direct_alias, shape/sticky migration from RHS Bundle), `if`
+(cond-comptime check → mark dead arm), `stmts` (scope push/pop),
+`func_def` (function-body scope, closure rule).
 
-### 2.3 Classify-before-emit hook
+### constprop
+
+Owns *value* side state. Folds scalars using operand-vector entries;
+populates `Bundle.value` and `Bundle.range`'s start/end constants. Applies
+wrap/sat narrowing while writing `Bundle.value`. Votes **toconst** when
+LHS is fully comptime, **drop** when the assign would re-store the same
+value the Bundle already holds.
+
+constprop is the **only** opt pass that runs when an operand carries
+`pending_import` — it folds what it can without depending on
+attribute/sticky semantics.
+
+### attributes (shrunken)
+
+Owns `attr_set`/`attr_get` *semantics* only. Structural and sticky work
+moved to bundle pre-pass.
+
+- `attr_set`: dispatches to per-attribute handlers (category-A `wrap`/`sat`
+  policy already set by bundle pre-pass; this is where `type` consumption,
+  category-B clock/reset wiring, etc. happen). Votes **drop** when the
+  attribute fully lives in the Bundle now.
+- `attr_get`: looks up `Bundle.attr_values[name]`, chains through
+  `tuple_get_alias` / `direct_alias` / aggregate inheritance. Votes
+  **toconst** when the read resolves.
+
+### bitwidth
+
+Range inference using Bundle's type info + range slot + folded value.
+Publishes `bits` / `min` / `max` back into Bundle. Typically votes
+**keep**; rare **update** for strength-reduction-style cases.
+
+### coalescer
+
+Deferred-emit / DSE. Reads operand vector; uses Bundle's "consumed" bit
+(set by the emission walk for materialized refs) to spot dead writes.
+Votes **drop** when a write has no live downstream consumer.
+
+### func_extract
+
+Inline-vs-spawn decision at call sites. Inlinable callees (resolved,
+small enough, no recursion blowup): vote **update** with the inline body
+as the candidate shape; the runner switches its source-walk cursor into
+the body (see §4). Otherwise vote **keep** so the call survives and the
+callee body is spawned as a separate LNAST in `var.lnasts` for an
+independent `pass.upass` walk. `func_def` with no remaining call sites
+and no exported semantics → vote **drop**.
+
+### SSA (post-pass)
+
+- Flattens `tuple_*` aggregates into per-field flat names (uses
+  `Bundle.shape` and `tuple_get_alias`).
+- Renames multi-assigned source names into source-derived SSA names
+  (`TODO_prp.md §1d`).
+- Deletes dead arms flagged by bundle pre-pass when cond was comptime.
+- Skipped on nodes whose read-through Bundles carry `pending_import` —
+  those `tuple_*` / `if` nodes survive to the next invocation.
+
+### verifier / assert (read-only finishers)
+
+Walk the **dest** LNAST after the source walk completes. Do not see
+Bundle state. Tally and check from what's emitted:
+
+- Casserts are emitted with their cond simplified (`const(true)`,
+  `const(false)`, or surviving `ref...`). Verifier tallies
+  pass/fail/unknown by reading the cond's emitted form.
+- Comptime-false cassert (`const(false)`) → `upass::error` unless the
+  test header expects it (`verifier_fail:N`).
+- The cassert tally compares to the test header expectations:
+  | disposition  | trigger                                       | counter         |
+  |--------------|-----------------------------------------------|-----------------|
+  | known-true   | cond is `const_true`                          | `pass_count`    |
+  | known-false  | cond is `const_false`                         | `fail_count`    |
+  | unknown      | cond is a surviving `ref` or const w/ unknown | `unknown_count` |
+- `verifier_pass:N` / `verifier_fail:N` labels on `pass.upass` set the
+  expected counts; mismatch raises `upass::error`. `prplib.py` reads
+  these from the `.prp` header block (`:verifier_pass:`, `:verifier_fail:`)
+  and forwards them.
+- assume/cover use the same shape with variant-specific semantics
+  (future).
+
+**Test mode split** (driven by `prplib.py`):
+
+- `:type: upass` — pipeline smoke test, `pass.upass verifier:false`.
+  Asserts only that the pipeline doesn't crash.
+- `:type: comptime` — correctness check, verifier on. Every cassert
+  must discharge or be clearly unknown; known-false → test failure
+  unless expected.
+
+### Reader passes only on the final invocation
+
+When multiple `pass.upass` invocations exist (e.g. one before an
+`import` resolves, one after), verifier/assert attach only to the final
+one — driven by the pending-import gate described in §1. If the gate
+defers them, they run automatically on the next invocation that finds
+the symbol table clean of `pending_import`.
+
+## 3. Symbol table & scopes
+
+```
+SymbolTable: stack<Frame>
+Frame:       absl::flat_hash_map<string, Entry>
+Entry:       variant<Runtime_trivial, Const, shared_ptr<Bundle>>
+```
+
+- Every `{ }` (every `stmts` node) pushes a frame on entry, pops on exit.
+- Reads walk innermost → outermost.
+- Writes land in the top frame; subsequent assigns at the same level
+  mutate the same Bundle.
+- **If-arm merge**: each arm runs with a fresh frame on top of the
+  parent. After all arms processed, frames are merged into the parent:
+  - `sticky_taint`, `pending_import`: union.
+  - `value`: kept iff every arm wrote the same `Const`. Otherwise drops
+    to `Runtime_trivial`.
+  - `shape`: identical across arms, else hard error.
+  - `attr_values[k]`: union; conflicting `k` drops to unknown.
+  - `wrap_policy` / `sat_policy` / `decl_kind` / `num_kind` / `bits`:
+    arm-local change is a hard error.
+- **General `{ }` (not if-arm)**: pop with no merge — locals vanish.
+- **Function-body scope**: pop with no merge. Closure-capture rule on
+  reads:
+  - Outer entry comptime (Bundle has `value`, no `pending_import`) →
+    inline the constant at the use site (operand-vector entry is the
+    `Const`).
+  - Outer entry tainted (`pending_import` non-empty) → leave the ref;
+    defer this function's spawn/opt until next invocation.
+  - Outer entry non-comptime, untainted → **hard compile error** at the
+    read site. (See `TODO_prp.md §2j` for the enforcement work.)
+
+## 4. Inline (runner-level cursor switch)
+
+func_extract's `update` vote with an inline body becomes a runner
+mechanism, not an opt-pass concern. Concretely:
+
+- Runner maintains a stack of `(source-LNAST, cursor, scope_frame)`
+  records.
+- On `update + inline`: push the inline body's LNAST, switch cursor to
+  its first node, open a fresh function-body scope.
+- Synthesize `assign param_x = caller_arg_x` nodes at the head of the
+  inline body so bundle pre-pass sees them as normal assigns — uniform
+  pipeline, no special arg-binding path.
+- Opt passes see the inline body's nodes one at a time, identical to any
+  other source node. No awareness of being "inside" an inline.
+- Inline body is a clone of the callee's source LNAST per call site —
+  fresh walk every time so per-call-site context affects folding.
+- On body exit: pop frame, close scope, advance the caller cursor past
+  the original call node.
+- Nested inlines just push more frames.
+
+## 5. Bundle layout (per-name symbol-table entry)
+
+Lazily allocated — symbol-table entries default to `Runtime_trivial`;
+constprop alone installs a `Const`; bundle pre-pass or the attribute
+pass promotes to `Bundle` when *any* structural field needs a slot.
 
 ```cpp
-enum class Emit_decision {
-  emit,           // copy this node (and recurse into children normally)
-  drop_subtree,   // skip this node and all its children
-  fold_to_const,  // emit as `const <lconst>` instead of the original op
+struct Bundle {
+  // ── Structural — written by bundle pre-pass ────────────────────────
+  Decl_kind     decl_kind  : 4;   // mut / const / reg / await / let / unknown
+  Numeric_kind  num_kind   : 4;   // unsigned_int / signed_int / boolean / string / none
+  bool          wrap_policy : 1;
+  bool          sat_policy  : 1;
+  bool          is_comptime : 1;  // mirror of (value && !pending_import)
+  uint16_t      bits;             // 0 = unspecified
+  uint16_t      assign_count;     // pre-SSA, for const single-assign check
+  Tuple_shape   shape;            // empty for scalars
+
+  std::optional<std::pair<Const, Const>>          range;
+  absl::InlinedVector<std::string, 1>             sticky_taint;
+  absl::InlinedVector<ImportRef, 1>               pending_import;
+
+  // ── Value — written by constprop, narrowed by wrap/sat ─────────────
+  std::optional<Const>                            value;
+
+  // ── Attribute values — written by attributes (filled by constprop) ──
+  absl::flat_hash_map<std::string, Const>         attr_values;
+
+  // ── Aliasing — written by bundle pre-pass ──────────────────────────
+  std::shared_ptr<Bundle> direct_alias;
+  std::shared_ptr<Bundle> tuple_get_alias_base;
+  std::string             tuple_get_alias_field;
 };
 ```
 
-`uPass` gets one new virtual:
+Per-node `Vote_state` (runner-owned, transient to one source node):
 
 ```cpp
-virtual Emit_decision classify_before_emit() { return Emit_decision::emit; }
+struct Vote_state {
+  enum class Kind : uint8_t { keep, drop, toconst, update };
+  Kind          kind = Kind::keep;
+  Lnast_subtree update_shape;  // populated only when kind == update
+};
 ```
 
-Runner protocol:
+## 6. Operand vector & dispatch
 
-1. On each input node, the runner calls `classify_before_emit` on every
-   registered pass **in registration order**.
-2. `drop_subtree` short-circuits (skip node + children). `fold_to_const`
-   overrides `emit` but loses to a later `drop_subtree`.
-3. If no pass drops or folds, emit a copy of the input node and recurse.
-4. For statement-level op nodes (`plus`, `assign`, `eq`, …), a leading
-   `drop_subtree` from constprop means the whole statement (op + operand
-   children) is omitted from the staging tree.
-5. For `ref` operands **inside** an op that the runner is emitting, constprop
-   can rewrite the emitted child to `const <value>` via `fold_to_const`.
+The runner pre-resolves each source node's operands into a small vector
+of:
 
-### 2.4 What constprop drops (Slice 1)
-
-An assignment `LHS = RHS` (or an op-result `op(LHS, …)`) is dropped iff:
-
-- LHS is not a register, input, or output according to structural metadata.
-- LHS's resolved value in the symbol table is a known `Lconst` (not
-  `invalid`, no unknowns).
-- LHS has no live downstream consumer that isn't itself comptime-
-  resolvable (covered implicitly in Slice 1 because every comptime-
-  resolvable read folds at its use site — see below).
-
-Regs stay because their assignments carry timing semantics, not just value.
-Ports stay because later stages need them in the IR boundary.
-`delay_assign` stays unconditionally (per §0 / `lnast_todo.md` §15.2).
-
-A `ref X` operand gets folded to `const <v>` iff `st.get_trivial(X)` is a
-known `Lconst`. Temporaries (`___N` today, `Tree_index` tmps post-§13) and
-user-named comptime-known vars both qualify — they're interchangeable once
-folded. This is what makes the "drop the assignment" rule safe: every
-surviving read turns into a literal, so the binding is unreferenced after
-emission.
-
-**Absent vs. unknown.** Slice 1 treats `Lconst::invalid()` as "not
-comptime-known, emit the ref verbatim". Once §10 lands, the ST will
-distinguish "attr never set" (absent) from "value not yet inferred"
-(unknown) — upass will need both queries. Note this now so the query API
-added in Slice 1 is easy to extend (§ 5.a below).
-
-`cassert X` always emits in Slice 1. The **verifier** upass (separate pass,
-runs last) is responsible for:
-
-- `X` known true → drop the cassert.
-- `X` known false → hard error (comptime assertion failure).
-- `X` unknown → keep the cassert for runtime.
-
-Keeping this split matches the eventual `assume`/`cover` story, which will
-live in verifier too.
-
-## 3. Slice boundaries
-
-### Slice 1 (this change) — straight-line constprop+DCE
-
-- Staging tree, single traversal, runner-owned.
-- `Emit_decision::drop_subtree` and `fold_to_const` wired from
-  `uPass_constprop`.
-- `attr_set` **copied verbatim**. Not consumed, not dropped. Slice N will
-  move these into a side-map keyed by `lnast_nid`.
-- `func_call`, `func_def`: **copied verbatim**. No fan-out into separate
-  LNASTs yet.
-- Tuples: `tup_add`/`tup_get`/`tup_set` copied verbatim unless the whole
-  statement is comptime-known and DCE'd. No flattening.
-- `if`: both branches traversed. No dead-branch pruning (requires condition
-  to be comptime-known **and** both paths to have equivalent live-outs —
-  handled in a later slice).
-- Verifier: still passes through cassert. Dropping known-true cassert is
-  Slice 2.
-
-Expected behavior on `add_trivial.prp` after Slice 1:
-
-```
-const x = 1    → dropped
-const y = 2    → dropped
-mut c = x + y  → dropped (c comptime = 3)
-cassert c == 3 → cassert ___1   (still emitted; ___1 known true in symtab)
+```cpp
+struct Runtime_trivial {};  // explicit, self-documenting
+using Operand     = std::variant<Runtime_trivial, Const, std::shared_ptr<Bundle>>;
+using Operand_vec = absl::InlinedVector<Operand, 4>;
 ```
 
-After Slice 2 (verifier drops known-true cassert): empty `stmts`.
+- Built once per source node by per-op-kind helpers in the runner.
+- `ref` child → look up Bundle (or `Runtime_trivial` if absent), then
+  `Const` if the Bundle's `value` is set.
+- `const` child → stored directly as `Const`.
+- LHS is NOT in the operand vector; it is the destination `Bundle*`
+  passed separately to dispatch (`nullptr` for ops without one, e.g.
+  `cassert`).
 
-### Slice 2 — verifier resolves cassert at comptime (landed)
+Per-op-kind shape rules live in the runner:
 
-- `uPass_verifier::classify_statement` detects `cassert`, reads its single
-  operand, and resolves it via the **runner-backed fold callback** (see
-  §2.5 below). Disposition:
-  - known-true → `Emit_decision::drop()` (assertion discharged).
-  - known-false → `upass::error(...)` — propagates, pipeline rc becomes
-    non-zero. No strict/warn knob: this is the verifier's job. To opt out
-    for a specific pipeline, disable the verifier with
-    `pass.upass verifier:false`.
-  - unknown (operand still a ref after Slice 1 folding, or a const with
-    unknowns) → `emit_node()` — kept for downstream / runtime.
-- Pass order: optimizers (`func_extract`, `attributes`, `constprop`,
-  `coalescer`, `ssa`, future `bitwidth`) first, then readers
-  (`assert`, `verifier`) at the end. Readers run only in the final
-  outer `pass.upass` call. The verifier sees the optimizers' populated
-  ST through the fold callback and is the one that actually discharges
-  casserts. Shape checks that the old "first verifier" ran on every
-  operator are not needed — `pass.lnastfmt` is the well-formedness
-  gate before `pass.upass` starts, and the producer (`prp2lnast`)
-  is the right fix site for any shape bug that slips through.
+- **`process_arith`** (27 expr ops: plus, minus, mult, div, mod, shl,
+  sra, bit_{and,or,not,xor}, log_{and,or,not}, red_{or,and,xor}, eq,
+  ne, lt, le, gt, ge, sext, get_mask, set_mask, assign-non-alias):
+  LHS at child 0, operand vector = siblings 1..N.
+- **`attr_set`**: LHS = child 0; vector = `[const(attr_name), value]`.
+- **`attr_get`**: LHS (dst tmp) = child 0; vector = `[base, const(attr_name)]`.
+- **`tuple_add`**: LHS = child 0; vector entries one per field
+  (assign-sub-nodes contribute their key + value pair).
+- **`tuple_concat`**: LHS = child 0; vector = N refs/consts.
+- **`tuple_get`**: LHS = child 0; vector = `[base, field_key]`.
+- **`range`**: LHS = child 0; vector = `[start, end]`.
+- **`type_spec`**: LHS = child 0; vector = `[prim_type_node, …]`.
+- **`if`**: no LHS; vector = `[cond]`. Arm-body `stmts` are handled by
+  runner-level scope push/pop and recursion — not in the vector.
+- **`cassert`**: no LHS; vector = `[cond]`.
+- **`func_def`**: LHS (function name) = child 0; vector layout TBD.
 
-**Test mode split.** `prplib.py` distinguishes two test types that drive
-this pipeline:
+### Dispatch API
 
-- `:type: upass` — pipeline smoke test. Uses `pass.upass verifier:false`
-  so a false cassert in a case constprop can't handle (enum values,
-  tuple indexing, string ops, `__wrap`/`__ubits` attrs, …) doesn't
-  regress the suite. Asserts only that the pipeline doesn't crash.
-- `:type: comptime` — correctness check. Verifier on (default). Every
-  cassert must discharge or be clearly unknown; known-false → test
-  fails unless expected.
+```cpp
+struct uPass {
+  virtual void begin_iteration() {}
+  virtual void end_run() {}
 
-The list of features not yet foldable by constprop is the natural
-migration path: as Slices 3–6 and the value-attr inference pass (§10.2
-in `lnast_todo.md`) land, each `:type: upass` test becomes a candidate
-for promotion to `:type: comptime`.
+  // Hot path — 27 LNAST kinds, single dispatch.
+  virtual Vote process_arith(Lnast_ntype kind, Bundle* dst,
+                              const Operand_vec& ops) { return Vote::keep(); }
 
-### 2.6 Cassert tally / expected counts
+  // Genuinely-shaped ops (non-uniform child layout).
+  virtual Vote process_attr_set    (Bundle* dst, const Operand_vec& ops) { return Vote::keep(); }
+  virtual Vote process_attr_get    (Bundle* dst, const Operand_vec& ops) { return Vote::keep(); }
+  virtual Vote process_tuple_add   (Bundle* dst, const Operand_vec& ops) { return Vote::keep(); }
+  virtual Vote process_tuple_concat(Bundle* dst, const Operand_vec& ops) { return Vote::keep(); }
+  virtual Vote process_tuple_set   (Bundle* dst, const Operand_vec& ops) { return Vote::keep(); }
+  virtual Vote process_tuple_get   (Bundle* dst, const Operand_vec& ops) { return Vote::keep(); }
+  virtual Vote process_range       (Bundle* dst, const Operand_vec& ops) { return Vote::keep(); }
+  virtual Vote process_type_spec   (Bundle* dst, const Operand_vec& ops) { return Vote::keep(); }
+  virtual Vote process_if          (                  const Operand_vec& ops) { return Vote::keep(); }
+  virtual Vote process_cassert     (                  const Operand_vec& ops) { return Vote::keep(); }
+  virtual Vote process_func_def    (Bundle* dst, const Operand_vec& ops) { return Vote::keep(); }
 
-The verifier classifies every cassert into one of three buckets during
-the run:
-
-| disposition  | trigger                                                        | counter         |
-|--------------|----------------------------------------------------------------|-----------------|
-| known-true   | operand folds to a non-zero, no-unknowns `Lconst`              | `pass_count`    |
-| known-false  | operand folds to zero, no-unknowns                             | `fail_count`    |
-| unknown      | operand stays a ref, or const has unknowns                     | `unknown_count` |
-
-A comptime-false cassert is **counted, dropped from the output, and its
-source operand printed to stderr** — the actual error is raised later
-in `end_run` so tests can assert they expect a specific failure count.
-
-**Expected counts.** Two `pass.upass` labels control the assertion at
-`end_run`:
-
-- `verifier_pass:N` — expected number of discharged casserts. Unset
-  means "don't check". Mismatch → `upass::error`.
-- `verifier_fail:N` — expected number of known-false casserts. Unset
-  defaults to **0** (any unexpected failure errors). Mismatch →
-  `upass::error`.
-
-Mismatch reports include the breakdown and, if any casserts were
-unknown, the list of unresolved operand texts. prplib.py scrapes
-`:verifier_pass:` / `:verifier_fail:` from the `.prp` header block and
-forwards them, so a test file writes:
-
-```
-/*
-:type: comptime
-:verifier_pass: 3
-:verifier_fail: 0
-*/
+  // Scope hooks — runner-driven, no per-node vote.
+  virtual void process_stmts_enter() {}
+  virtual void process_stmts_exit () {}
+};
 ```
 
-and the harness builds `pass.upass ... verifier_pass:3 verifier_fail:0`.
-This is the primary lever for turning cassert coverage into a growable
-metric as constprop gaps close.
+Verifier / assert do **not** derive from `uPass`; they walk the dest
+LNAST after emission and own their own simple iterator.
 
-- **Future**: assume/cover have the same shape and will use the same
-  classify dispatch with variant-specific semantics.
+## 7. Vote resolution
 
-### 2.5 Runner-backed fold callback
+For each source node (no-taint case), after every opt pass has run:
 
-Passes cannot easily query each other's symbol tables directly. Rather
-than forcing a shared ST, the runner exposes a `Fold_fn` callback
-(`std::function<std::optional<Lconst>(std::string_view)>`) that aggregates
-every pass's `fold_ref` via the runner's `try_fold_ref`. After
-constructing the upass list, the runner wires the callback into each pass
-via `set_runner_fold_fn`. Today it is used by:
+```
+priority: drop > toconst > update > keep
+```
 
-- `uPass_verifier::classify_statement` — to resolve cassert operands.
+- Any `drop`     → emit nothing.
+- Else any `toconst` → emit nothing; `Bundle.value` is committed.
+  Downstream consumers materialise via the operand vector.
+- Else any `update` → emit the proposed shape from the latest `update`
+  vote's `update_shape` (pass order is the tiebreaker; for inline this
+  is func_extract's body).
+- Else (all `keep`) → emit the source op-kind with operand-vector
+  entries materialised:
+  - `Const` operand → emit as `const`.
+  - `Bundle` operand with `value` set → emit as `const(value)`.
+  - `Bundle` operand without `value` → emit as `ref(name)`.
+  - `Runtime_trivial` operand → emit as `ref(name)`.
 
-Any future pass that needs to consult cross-pass fold state uses the same
-callback. Do not invent parallel symbol tables for this — the fold
-callback is the single authority.
+All opt passes run unconditionally in the no-taint case — even if an
+earlier pass already voted drop — because later passes may still write
+useful state to the destination Bundle (other source nodes will read
+it). Vote priority only governs what gets *emitted* for this node.
 
-### Slice 3 — func_call argument reconstruction
+**Taint case**: when any operand vector entry's Bundle carries
+non-empty `pending_import`, only `constprop` runs; its vote (default
+`keep`) governs alone. SSA also skips this node.
 
-- When a `func_call` is emitted, constprop inspects each arg:
-  - Arg is a known scalar → emit `const` in place.
-  - Arg is a known tuple (bundle) → emit a fresh `tup_add` with
-    const/ref children per field, rooted at the arg slot.
-- Return tuple from `func_call`: treated as an opaque named var until a
-  downstream `tup_get` or single-field `assign` pulls fields out. When the
-  callee's LNAST has been processed, constprop re-seeds the symbol table
-  with return-value fields so the caller can continue folding — this is the
-  reason for iteration in the multi-module case.
+## 8. Pending-import poison
 
-### Slice 4 — func_def extraction
+A Bundle whose value or attribute state depends on an unresolved
+`import` carries one or more `ImportRef`s in `pending_import`. The
+marker is sticky-style: bundle pre-pass propagates it from operand
+Bundles into LHS Bundle through `process_arith` and every assignment-
+shaped op, the same path used for `sticky_taint`.
 
-- `func_def` inside an input LNAST → runner allocates a **new** staging
-  LNAST for the callee body, registers it in `var.lnasts`, and emits
-  nothing in place of the `func_def` node in the caller's tree (or a
-  lightweight marker — TBD; must round-trip through `lnast.dump`).
-- Each callee runs its own full upass pipeline. N func_defs in 1 input
-  LNAST → up to N+1 output LNASTs.
+Effect on each phase:
 
-### Slice 5 — attr_set side-map + §11 semantics
+- **Bundle pre-pass**: records structure normally; flags LHS pending if
+  any operand is.
+- **Opt passes**: only `constprop` runs on tainted-input nodes.
+- **SSA**: skips structural rewrites (tuple flatten, dead-arm delete)
+  on any node whose read-through Bundles include a pending marker.
+- **Verifier / assert**: skipped entirely if any Bundle still carries
+  `pending_import` at end of the source walk.
+- **Re-runs**: the next `pass.upass` invocation rebuilds the symbol
+  table; cleared pending markers (because the import has now resolved)
+  let the passes run.
 
-Gated on `lnast_todo.md` §10 (ST API) and §11 (unified `attr_set`
-shape). Pulls attributes out of the emitted LNAST into a side table the
-verifier / downstream consumers read via the ST.
+`TODO_prp.md §1b` and `§2j` track the import-side work this hooks into.
 
-- All `attr_set` nodes consumed; none remain in the emitted tree.
-- Side structure: `absl::flat_hash_map<decl_name, Attr_set>` keyed by
-  the pre-SSA declaration name. (Not keyed by `Lnast_nid` — attrs belong
-  to the declaration, not the node position, per §11's write-once
-  semantics.)
-- upass **enforces** the §11.2 rules at emission time, because it's the
-  single pass that visits everything in source order:
-  - **Write-once per `(decl, attr_key)`.** Second `attr_set` ⇒ error.
-  - **Comptime-guarded only.** Enclosing `if`/`for`/`while`/`match`
-    conditions must be comptime-resolvable; runtime-guarded
-    `attr_set` ⇒ error. Reuses the Slice 7 condition evaluator.
-  - **No `attr_set` after first read.** Tracks a "in use phase" bit per
-    decl; any `attr_set` after that bit is set ⇒ error. "Read" = RHS
-    of assign/tuple_set, operator arg, call-site arg, guard, or target
-    of `attr_get`.
-  - **Values must be comptime-resolvable.** Same symbol-table query the
-    Slice 1 classifier uses.
-- `attr_get` resolves from the side-map, not the LNAST. Unset key ⇒
-  "absent" return (not error); consumer decides meaning.
-- Derived `__min`/`__max` do **not** flow through this side-map —
-  lnastfmt (§10.2) writes them to the per-SSA ST table directly.
-- Requires the HHDS-based LNAST attribute work to land first.
+## 9. Invariants
 
-### Slice 6 — tuple flattening
+These must hold after every walk:
 
-- `tup_add`/`tup_get`/`tup_set` whose bundle is fully comptime-known and
-  whose consumers are all comptime-resolvable are removed; references fold
-  to field values directly.
-- Exception: tuples that cross a `func_call` boundary stay as `tup_add`
-  (Slice 3 emission pattern) — they encode ABI.
-
-### Slice 7 — if-branch pruning (landed)
-
-- If condition is comptime-known: emit only the taken branch's stmts,
-  spliced into the parent stmts block (no `if` node in the output).
-- Implemented in `uPass_runner::process_if()`: after dispatching to passes
-  so constprop's ST is populated, the runner folds the condition via
-  `try_fold_ref`. True → splice then-stmts; false → splice else-stmts (or
-  emit nothing when there is no else); unknown → emit full if node.
-- elif chains (condition false, next sibling is another condition) are not
-  yet pruned and fall through to full-if emit.
-  **Known ST side-effect limitation**: `dispatch_to_passes` runs before the
-  fold decision, so constprop has already walked the entire if subtree
-  (including the statically-dead then-branch) when the elif fallthrough
-  path calls `process_lnast()` recursively.  Writes from the dead branch
-  are in constprop's ST, which could cause `classify_statement` to
-  incorrectly DCE a live write in a later elif/else body whose LHS
-  collides with a dead-branch entry.  No current test triggers this; track
-  against the test suite as elif coverage grows.
-
-## 4. Invariants
-
-These must hold after every slice:
-
-1. **Every ref in the emitted tree is defined** — either by an emitted
+1. **Every ref in the dest LNAST is defined** — either by an emitted
    assignment, a port, a register, or it was folded to `const` at emit
    time. No dangling refs.
-2. **Regs are never dropped.** Reg assignments carry timing; constprop may
-   fold their RHS but not elide the assignment. "Is reg" check: prefix
-   today, `st.is_reg` post-§12.
-3. **Ports are preserved at the module boundary.** Input ports read, output
-   ports written — even if a constant flows through. Same prefix-vs-ST
-   migration as regs.
-4. **Deterministic emission order.** Children are emitted in input-tree
-   order; the staging tree is a topologically-consistent rewrite of the
-   input, not a re-scheduled one.
-5. **`begin_iteration` is called at the start of every sweep.** Upasses
-   that accumulate state (symbol tables) keep it across sweeps; upasses
-   that accumulate per-sweep diagnostics must clear in this hook.
-6. **`delay_assign` is emitted verbatim.** Offsets ≠ 0/1 are not yet
+2. **Regs are never dropped.** Reg assignments carry timing; constprop
+   may fold their RHS but not elide the assignment.
+3. **Ports are preserved at the module boundary** — input ports read,
+   output ports written — even when a constant flows through.
+4. **Deterministic emission order.** Children are emitted in source-tree
+   order; the dest LNAST is a topologically-consistent rewrite of the
+   source, not a re-scheduled one.
+5. **`delay_assign` is emitted verbatim.** Offsets ≠ 0/1 are not yet
    lowered (per `lnast_todo.md` §15.2); upass must not constant-fold
    across them regardless of symbol-table state.
-7. **No attribute derivation in upass.** `__min`/`__max` and other
-   value-level attrs are lnastfmt's responsibility (§10.2). upass reads,
-   does not write these. Decl attrs (§11) are written only by `attr_set`
-   in the input LNAST; upass validates and moves them to the side-map
-   in Slice 5.
+6. **No value-attribute derivation in upass.** `__min`/`__max` and other
+   value-level attrs are lnastfmt's responsibility (§10.2). upass reads
+   them, does not write. Decl attrs (§11) live in `Bundle.attr_values`
+   (written by bundle pre-pass / constprop / attributes per §2).
+7. **Spawned LNASTs are self-contained.** Outer-scope comptime values
+   are inlined at the use site by bundle pre-pass / constprop before
+   func_extract spawns the callee body; spawned LNASTs share no Bundle
+   state with their caller.
+8. **Single sweep per source node** in the current pass set. `max_iter`
+   defaults to 1; raising it is for forward-looking chained-rewrite
+   passes that don't exist yet.
 
-## 5. Known gotchas carried forward
+## 10. Known gotchas
 
-- `Symbol_table` keys assume canonical bare ref text. Legacy `$`/`%`/`#`
-  prefixes are producer bugs, not alternate spellings.
-- `Bundle::set` interns attr keys as `0.__attr`; `Symbol_table::has_trivial`
-  does literal match. Don't round-trip attr set/get through the symbol
-  table — Slice 5 side-map supersedes this.
-- `process_tuple_add` reuses an existing bundle on re-entry to keep
-  pointers stable across iterations. When Slice 3 adds iteration, preserve
-  this invariant or fold convergence will regress.
-- `if` cursor discipline: every pass's `process_if` must leave the cursor
-  at the if-node it entered. See comment at `upass_runner.cpp:278`.
-- **`Lconst::invalid()` overload.** Today it stands for "not tracked" and
-  "tracked but unknown" — upass treats both as "don't fold". After §10
-  introduces "absent" distinctly, revisit every `is_invalid()` call site
-  in `upass_constprop.cpp` to make sure it still means "don't fold".
+- **Canonical bare ref text.** Symbol table keys assume `$`/`%`/`#`
+  prefixes are already removed. Legacy prefixes from `inou/pyrope` are
+  producer bugs, not alternate spellings.
+- **`Const::invalid()` overload.** Today it stands for both "not
+  tracked" and "tracked but unknown". After `lnast_todo.md §10`
+  introduces "absent" distinctly, revisit every `is_invalid()` call
+  site in constprop to confirm it still means "don't fold".
 - **`assign` vs `tuple_set` collapse (§11.3).** When §11 lands and
-  producers emit `tuple_set a v` instead of `assign a v`, upass's
-  classify hook must recognize both shapes (or a single canonical shape
-  if `assign` is deleted). Today: only `assign`.
+  producers emit `tuple_set a v` instead of `assign a v`, the runner's
+  per-op-kind helpers must recognise both shapes (or the canonical
+  one if `assign` is deleted).
+- **Cursor discipline at `if`.** All cursor movement is runner-owned
+  via the operand-vector helpers; passes never call `move_to_child` /
+  `scan_op` directly. Any pass that does is a bug — it bypasses the
+  vector-resolution layer.
+- **Bundle direct_alias chains.** Reading through `direct_alias` is
+  one hop; chains (`c = b; b = a;` then `c.[size]`) walk multiple
+  hops. The bundle pre-pass keeps the chain shallow by collapsing on
+  the alias creation, but consumers should still tolerate one or two
+  hops.
 
-### 5.x Diagnostic channel (future slice)
+### 10.x Diagnostic channel (future)
 
-Open issue deferred from the prp2lnast chained-compare / ambiguity work:
+Open issue deferred from prp2lnast chained-compare / ambiguity work:
 
-- **`a and b or c` is ambiguous.** The updated tree-sitter-pyrope grammar
-  puts both tokens into a single `expression_item` at priority 5
-  (`binary_logical_op`). Mixing distinct operators at the same precedence
-  level without parens has no defensible associativity. Today prp2lnast
-  prints a bare `std::print` line and continues lowering as a left-fold,
-  which is *both* wrong and silent in tests. This should become a proper
-  compile error attached to the source range of the offending operator.
-- **What's missing to make it a real diagnostic:**
-  - prp2lnast has no diagnostics channel — errors currently go to stdout
-    mixed with tree-sitter-dump output.
-  - An accept-this-program invariant lives in the verifier pass, but the
-    parser-side ambiguity must reach the user *before* uPass runs.
-  - Natural design: plumb a shared `Diagnostics` object (with `.error`,
-    `.warn`, source-range support) through `Prp2lnast` and the uPass
-    runner; have `pass.upass` refuse to start if the diagnostics contain
-    errors.
-- **Scope cue.** Also applies to other same-priority mixes the grammar
-  permits but the language prohibits: e.g. `a implies b or c` would fall
-  under the same rule, and any future mixed-operator tier.
+- **`a and b or c` is ambiguous.** Mixing distinct operators at the
+  same precedence level without parens has no defensible
+  associativity. Today prp2lnast prints a bare `std::print` line and
+  continues lowering as a left-fold, which is wrong and silent in
+  tests. Needs a proper compile error attached to the source range.
+- **What's missing**: prp2lnast has no diagnostics channel; an
+  accept-this-program invariant lives in verifier; parser-side
+  ambiguities must reach the user before upass runs.
+- **Natural design**: plumb a shared `Diagnostics` object (with
+  `.error`, `.warn`, source-range support) through `Prp2lnast` and the
+  uPass runner; have `pass.upass` refuse to start if diagnostics
+  contain errors.
+- **Scope cue**: also applies to `a implies b or c` and any future
+  mixed-operator tier the grammar permits but the language prohibits.
 
-### 5.a ST query API additions expected from Slice 1
+## 11. Migration from the old runner
 
-To keep Slice 1 self-contained while setting up for future slices, the
-staging writer uses a thin adapter over `Symbol_table`:
+The previous design (staging tree, per-node `max_iter` step loop,
+`classify_before_emit` hooks, 27 separate virtual methods per arithmetic
+op, parallel side tables in each pass) is being replaced incrementally:
 
-- `st.is_known_const(name) -> bool` — returns true iff a `Lconst` is
-  stored and it has no unknowns. Used by the classifier.
-- `st.is_reg(name) / is_input(name) / is_output(name) -> bool` — Slice 1
-  implementation: prefix check on the raw name. Post-§12: ST lookup. All
-  call sites funnel through these two helpers so the §12 migration is
-  a one-file diff.
+1. **`Handler_registry` for_each_handler micro-fix** — landed as the
+   benchmark-driven cleanup (`std::set` per-call → pre-built vector).
+2. **`Cursor_state` lightweight save/restore** — landed (depth-only
+   snapshot in place of `std::stack` copy).
+3. **Bundle pre-pass** — to land: take over structural side state from
+   `upass/attributes` (sticky propagation, type_info, range_bounds,
+   tuple_shapes, wrap/sat policy, assigned_once).
+4. **Operand-vector dispatch** — to land: runner pre-resolves operands;
+   `process_*` hooks change signature to `(dst, ops)`. The 27 arithmetic
+   wrappers collapse to one `process_arith(kind, dst, ops)` virtual.
+5. **Vote resolution** — to land: replace `Emit_decision` enum with the
+   four-way `Vote` (drop/toconst/update/keep) and the priority rule.
+6. **Inline as runner-level cursor switch** — to land: func_extract's
+   `update + body` triggers a source-walk push, not a structural rewrite.
+7. **Pending-import poison** — to land alongside `TODO_prp.md §1b`.
+8. **Verifier/assert as dest-walk finishers** — to land: drop the
+   per-node verifier dispatch, run after the source walk completes when
+   the pending-import gate is clear.
+
+See [docs/upass_redesign.md](../docs/upass_redesign.md) for the
+end-to-end design these steps converge to.

@@ -118,7 +118,10 @@ std::optional<Const> uPass_attributes::lookup_attr_value(std::string_view var, s
 }
 
 const uPass_attributes::Type_info* uPass_attributes::lookup_type_info(std::string_view var) const {
-  auto it = type_info_map.find(std::string{var});
+  // Heterogeneous find on flat_hash_map<std::string, T>: no temporary
+  // std::string allocation. This sits on the per-op record_assign() path
+  // so the saving is multiplied across 1M+ ops on bulk-arithmetic inputs.
+  auto it = type_info_map.find(var);
   if (it == type_info_map.end()) {
     return nullptr;
   }

@@ -96,6 +96,7 @@ public:
   // (verifier cassert, constprop eq/ne via runner_fold_fn fallback) see the
   // resolved value without an extra iteration.
   std::optional<Const> fold_ref(std::string_view name) override;
+  bool                 overrides_fold_ref() const override { return true; }
 
   // Read-side accessor for tests / cross-handler queries.
   upass::attributes::Handler_registry& registry() { return reg; }
@@ -203,7 +204,11 @@ public:
 private:
   std::map<std::string, std::map<std::string, Const>>       attr_set_values;
   std::map<std::string, std::map<std::string, std::string>> attr_set_refs;  // (var, attr) → ref-text value
-  std::map<std::string, Type_info>                          type_info_map;
+  // type_info_map is on the hot record_assign() path — flat_hash_map gives
+  // heterogeneous string_view lookup so the per-op probe doesn't allocate.
+  // (The other maps remain std::map because their iteration order is
+  // observable via tuple shape / aggregate inheritance code paths.)
+  absl::flat_hash_map<std::string, Type_info>               type_info_map;
   std::map<std::string, std::pair<Const, Const>>            range_bounds;  // start, end keyed by tmp
   std::map<std::string, Const>                              tmp_fold;      // attr_get dst → folded Const
 

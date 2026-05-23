@@ -121,16 +121,33 @@ void uPass_attributes::record_assign(std::string_view lhs, bool rhs_is_nil) {
   if (rhs_is_nil) {
     return;  // nil invalidations don't count as a real binding (per spec)
   }
+
+  // The two consumers of record_assign's bookkeeping are gated on
+  // type_info being present for `lhs`:
+  //   * Wrap_sat_handler::on_attr_set reads was_assigned(lhs); it only
+  //     fires when `attr_set wrap`/`sat` runs on `lhs`, and that path
+  //     requires the user to declare `lhs` first (which writes a type
+  //     entry, even for a bare `mut x = …` → attr_set type=mut).
+  //   * The const-single-bind check is inside the `ti->decl == const_kind`
+  //     branch below, so it short-circuits on ti==nullptr anyway.
+  //   * apply_narrowing reads `has_wrap_policy` / `has_sat_policy`; those
+  //     are only set via Wrap_sat_handler, which only ran if `lhs` had
+  //     type_info beforehand.
+  // So when `lookup_type_info(lhs)` is null AND no wrap/sat policy exists
+  // for it, every side effect of record_assign is dead. Skip the work.
+  // This is the dominant savings on bulk-arithmetic workloads (xx.prp:
+  // 1M plus + 1M assign ops, mostly tmp LHS with no type_info).
+  const auto* ti = lookup_type_info(lhs);
+  if (ti == nullptr && !has_wrap_policy(lhs) && !has_sat_policy(lhs)) {
+    return;
+  }
+
   // Track that the var has been assigned at least once. Used by Phase 5 to
   // distinguish declaration-site `:[wrap]` (attr_set BEFORE first assign)
   // from statement-level `wrap x = ...` (attr_set AFTER an assign).
   assigned_once.emplace(lhs);
 
-  // Const single-bind enforcement. Skip the const_assign_count lookup
-  // entirely when no type info exists for this var — the hot bulk-arithmetic
-  // path produces millions of fresh names with no associated type info, and
-  // touching const_assign_count for each one was a significant cost.
-  const auto* ti = lookup_type_info(lhs);
+  // Const single-bind enforcement.
   if (ti != nullptr && ti->decl == Decl_kind::const_kind) {
     auto [it, inserted] = const_assign_count.try_emplace(std::string{lhs}, 0);
     int& count          = it->second;

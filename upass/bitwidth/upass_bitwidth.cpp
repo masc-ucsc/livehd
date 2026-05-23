@@ -153,15 +153,28 @@ void uPass_bitwidth::clear_range(std::string_view name) {
 
 uPass_bitwidth::Op_ranges uPass_bitwidth::scan_op() {
   Op_ranges out;
-  if (!move_to_child()) {
+
+  // Fast path: consume runner-pre-resolved operand layout.
+  if (runner_op_summary && !runner_op_summary->lhs.empty()) {
+    out.lhs = runner_op_summary->lhs;
+    for (const auto& op : runner_op_summary->operands) {
+      if (Lnast_ntype::is_ref(op.kind)) {
+        out.rhs.push_back(read_range(op.text));
+      } else if (Lnast_ntype::is_const(op.kind)) {
+        out.rhs.push_back(range_from_const_text(op.text));
+      } else {
+        out.rhs.push_back(Lnast_range::unbounded());
+      }
+    }
     return out;
   }
 
-  // First child: LHS (always a ref whose text is the destination name).
-  out.lhs.assign(current_text());
+  // Fallback walk.
+  if (!move_to_child()) {
+    return out;
+  }
+  out.lhs = current_text();
 
-  // Remaining children: RHS operands. read_range takes string_view directly,
-  // so the ref branch no longer needs a temporary std::string.
   while (move_to_sibling()) {
     auto t = get_raw_ntype();
     if (Lnast_ntype::is_ref(t)) {
@@ -169,7 +182,6 @@ uPass_bitwidth::Op_ranges uPass_bitwidth::scan_op() {
     } else if (Lnast_ntype::is_const(t)) {
       out.rhs.push_back(range_from_const_text(current_text()));
     } else {
-      // Structural child — skip, treat as unknown operand.
       out.rhs.push_back(Lnast_range::unbounded());
     }
   }

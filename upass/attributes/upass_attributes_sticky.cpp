@@ -99,6 +99,12 @@ void Sticky_handler::on_attr_get(uPass_attributes& owner, std::string_view dst, 
 }
 
 void Sticky_handler::on_alias_assign(uPass_attributes& /*owner*/, std::string_view lhs, std::string_view rhs) {
+  // Fast path: with empty sticky state and no control taint there is
+  // nothing to merge or mark. Returning here skips the find() probe on
+  // every alias-assign visit (1M+ on the bulk-arithmetic xx.prp run).
+  if (acquired.empty() && control_taint_stack.empty()) {
+    return;
+  }
   merge_from(lhs, rhs);
   if (!control_taint_stack.empty()) {
     for (const auto& bucket : active_control_taint()) {
@@ -109,6 +115,12 @@ void Sticky_handler::on_alias_assign(uPass_attributes& /*owner*/, std::string_vi
 
 void Sticky_handler::on_expr_assign(uPass_attributes& /*owner*/, std::string_view lhs,
                                     std::span<const std::string_view> rhs_refs) {
+  // Fast path: same skip rationale as on_alias_assign — when sticky is
+  // empty, merge_from returns immediately for every operand and the
+  // control-taint block is also empty.
+  if (acquired.empty() && control_taint_stack.empty()) {
+    return;
+  }
   for (auto rhs : rhs_refs) {
     merge_from(lhs, rhs);
   }

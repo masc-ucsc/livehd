@@ -77,6 +77,7 @@ public:
 
   // Returns Const(v) only when the stored range is a single-value constant.
   std::optional<Const> fold_ref(std::string_view name) override;
+  bool                 overrides_fold_ref() const override { return true; }
 
 private:
   // Per-variable range map. Persists across begin_iteration calls.
@@ -99,7 +100,10 @@ private:
   // (RHS operands — ref or const), restore cursor on exit.
   // Most LNAST ops have 1–3 operands; inline storage avoids per-statement heap.
   struct Op_ranges {
-    std::string                        lhs;
+    // lhs is a string_view into LNAST's persistent attribute store; no
+    // copy required since callers use it only for the lifetime of the
+    // per-op process_* call.
+    std::string_view                    lhs;
     absl::InlinedVector<Lnast_range, 4> rhs;
   };
   Op_ranges scan_op();

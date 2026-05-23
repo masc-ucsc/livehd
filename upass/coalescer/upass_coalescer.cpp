@@ -30,19 +30,61 @@ void uPass_coalescer::handle_op() {
     return;
   }
 
-  // Walk children. Child 0 is the LHS (a ref). Subsequent children are
-  // operands; each `ref` operand is a read of that name and triggers a
-  // pending flush.
-  bool        got = move_to_child();
   std::string lhs_text;
   bool        lhs_is_ref = false;
-  if (got) {
-    lhs_is_ref = is_type(Lnast_ntype::Lnast_ntype_ref);
-    if (lhs_is_ref) {
-      lhs_text = std::string{current_text()};
+
+  // Fast path: consume runner-pre-resolved operand summary if available
+  // (avoids the move_to_child / move_to_sibling walk on every emitted op).
+  // pending is empty on bulk-arithmetic workloads where no prior assign
+  // has been parked yet, so the inner find() loop becomes a no-op too.
+  if (runner_op_summary && !runner_op_summary->lhs.empty()) {
+    lhs_text   = std::string{runner_op_summary->lhs};
+    // LHS is always a ref in the A_OP family the coalescer handles.
+    lhs_is_ref = true;
+
+    if (!pending.empty()) {
+      for (const auto& op : runner_op_summary->operands) {
+        if (!Lnast_ntype::is_ref(op.kind)) {
+          continue;
+        }
+        std::string_view key = strip_io_prefix(op.text);
+        auto             p   = pending.find(std::string{op.text});
+        if (p == pending.end() && std::string{key} != std::string{op.text}) {
+          p = pending.find(std::string{key});
+        }
+        if (p != pending.end()) {
+          flush_one(p->first);
+        }
+      }
     }
   } else {
-    return;
+    // Walk children. Child 0 is the LHS (a ref). Subsequent children are
+    // operands; each `ref` operand is a read of that name and triggers a
+    // pending flush.
+    bool got = move_to_child();
+    if (got) {
+      lhs_is_ref = is_type(Lnast_ntype::Lnast_ntype_ref);
+      if (lhs_is_ref) {
+        lhs_text = std::string{current_text()};
+      }
+    } else {
+      return;
+    }
+
+    while (move_to_sibling()) {
+      if (is_type(Lnast_ntype::Lnast_ntype_ref)) {
+        auto             ref_text = current_text();
+        std::string_view key      = strip_io_prefix(ref_text);
+        auto             p        = pending.find(std::string{ref_text});
+        if (p == pending.end() && std::string{key} != std::string{ref_text}) {
+          p = pending.find(std::string{key});
+        }
+        if (p != pending.end()) {
+          flush_one(p->first);
+        }
+      }
+    }
+    move_to_parent();
   }
 
   // Self-read tracking: whether any ref operand in RHS reads the LHS name.
@@ -50,25 +92,6 @@ void uPass_coalescer::handle_op() {
   // correct value); after the flush, parking the new stmt is still legal
   // because the new stmt has its own materialized RHS.
   std::string lhs_strip{strip_io_prefix(lhs_text)};
-
-  while (move_to_sibling()) {
-    if (is_type(Lnast_ntype::Lnast_ntype_ref)) {
-      auto             ref_text = current_text();
-      std::string_view key      = strip_io_prefix(ref_text);
-      // Try the normalized key first and the raw text as a fallback.
-      auto p = pending.find(std::string{ref_text});
-      if (p == pending.end() && std::string{key} != std::string{ref_text}) {
-        p = pending.find(std::string{key});
-      }
-      if (p != pending.end()) {
-        flush_one(p->first);
-      }
-    }
-    // const operands and nested subtrees (e.g. tuple_add's assign children)
-    // don't trigger reads at this level. The runner's emit_op_with_fold
-    // handles them verbatim when the op finally emits.
-  }
-  move_to_parent();
 
   if (!lhs_is_ref || lhs_text.empty()) {
     return;

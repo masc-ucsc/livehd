@@ -38,6 +38,19 @@ protected:
   };
 
   std::vector<Pass_entry> upasses;
+  // Subset of `upasses` whose `overrides_fold_ref()` returned true at
+  // construction. try_fold_ref walks this list instead of `upasses` so it
+  // skips the virtual no-op fold_ref on every other pass — measurable on
+  // bulk-arithmetic workloads where try_fold_ref runs per ref operand.
+  std::vector<upass::uPass*> fold_ref_passes;
+  // Same idea for classify_statement — only passes that actually return
+  // drop on some inputs are polled; the default-no-op passes are skipped.
+  std::vector<upass::uPass*> classify_statement_passes;
+
+  // Pre-resolved operand summary for the current source op node. Filled by
+  // fill_op_summary() before every drop-candidate / verbatim dispatch and
+  // exposed to passes via runner_op_summary_fn. See docs/upass_redesign.md §6.
+  upass::Op_summary current_op_summary;
   bool                    configuration_error{false};
   std::string             configuration_error_msg;
 
@@ -98,4 +111,10 @@ private:
   // Verbatim path (category C): dispatch so passes see the node, then copy
   // the subtree without folding.
   void process_verbatim(Pass_method fn);
+
+  // Walks the current source op node's children once, populating
+  // current_op_summary so passes can skip their own scan_op. Cursor returns
+  // to the op node before the call returns. Cheap when called on every
+  // drop-candidate; passes opt in via runner_op_summary_fn.
+  void fill_op_summary();
 };

@@ -306,7 +306,7 @@ void uPass_attributes::process_tuple_get() {
       if (idx < sh->fields.size() && !sh->fields[idx].name.empty()) {
         alias.field_name = sh->fields[idx].name;
       }
-    } else if (auto src_it = shape_source.find(base); src_it != shape_source.end()) {
+    } else if (auto src_it = shape_source.find(std::string{base}); src_it != shape_source.end()) {
       if (auto* sh2 = lookup_tuple_shape(src_it->second); sh2) {
         auto idx = static_cast<size_t>(std::stoul(field_key));
         if (idx < sh2->fields.size() && !sh2->fields[idx].name.empty()) {

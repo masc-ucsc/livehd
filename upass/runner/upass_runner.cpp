@@ -91,12 +91,23 @@ uPass_runner::uPass_runner(std::shared_ptr<upass::Lnast_manager>& _lm, const std
   // Wire runner-backed fold callback + options into every pass. Done once,
   // after all passes are constructed, so the callback sees the full pass
   // list and each pass can pick the options it recognizes.
-  auto fold_fn    = [this](std::string_view name) { return try_fold_ref(name); };
-  auto emit_at_fn = [this](const Lnast_nid& src) { emit_op_with_fold_at(src); };
+  auto fold_fn       = [this](std::string_view name) { return try_fold_ref(name); };
+  auto emit_at_fn    = [this](const Lnast_nid& src) { emit_op_with_fold_at(src); };
   for (auto& entry : upasses) {
     entry.pass->set_runner_fold_fn(fold_fn);
     entry.pass->set_runner_emit_at_fn(emit_at_fn);
+    entry.pass->set_runner_op_summary_ptr(&current_op_summary);
     entry.pass->set_options(options);
+    // Hot-path optimization: passes that don't override fold_ref always
+    // return std::nullopt, so calling them is pure dispatch overhead. The
+    // ones that DO override (attributes / constprop / bitwidth) self-declare
+    // via overrides_fold_ref().
+    if (entry.pass->overrides_fold_ref()) {
+      fold_ref_passes.emplace_back(entry.pass.get());
+    }
+    if (entry.pass->overrides_classify_statement()) {
+      classify_statement_passes.emplace_back(entry.pass.get());
+    }
   }
 }
 
@@ -200,8 +211,11 @@ void uPass_runner::emit_subtree_verbatim() {
 }
 
 std::optional<Const> uPass_runner::try_fold_ref(std::string_view name) {
-  for (auto& entry : upasses) {
-    auto folded = entry.pass->fold_ref(name);
+  // Iterate only passes that self-declared `overrides_fold_ref() == true`.
+  // The other passes' fold_ref is the base-class no-op and would burn a
+  // virtual call per ref on every emit_op_with_fold path (1M+ per xx.prp).
+  for (auto* pass : fold_ref_passes) {
+    auto folded = pass->fold_ref(name);
     if (folded) {
       return folded;
     }
@@ -279,7 +293,44 @@ bool uPass_runner::any_pass_drops() const {
   return false;
 }
 
+void uPass_runner::fill_op_summary() {
+  current_op_summary.lhs       = {};
+  current_op_summary.ref_count = 0;
+  current_op_summary.is_assign = (lm->get_raw_ntype() == Lnast_ntype::Lnast_ntype_assign);
+  current_op_summary.is_alias  = false;
+  current_op_summary.operands.clear();
+
+  if (!lm->has_child()) {
+    return;
+  }
+
+  // Skip the explicit save/restore: move_to_child + move_to_parent are
+  // balanced (move_to_child pushes onto nid_stack; move_to_parent pops).
+  // Avoids the extra branch + struct copy per source op on the 1M-node path.
+  lm->move_to_child();
+  current_op_summary.lhs = lm->current_text();
+
+  while (lm->move_to_sibling()) {
+    const auto kind = lm->get_raw_ntype();
+    current_op_summary.operands.push_back({lm->current_text(), kind});
+    if (Lnast_ntype::is_ref(kind)) {
+      ++current_op_summary.ref_count;
+    }
+  }
+  lm->move_to_parent();
+
+  // Alias semantics match attributes' scan_op: assign with exactly one
+  // ref operand and no other operands. Passes that need this distinction
+  // (attributes' shape / typename / range inheritance) read is_alias.
+  if (current_op_summary.is_assign && current_op_summary.ref_count == 1 && current_op_summary.operands.size() == 1) {
+    current_op_summary.is_alias = true;
+  }
+}
+
 void uPass_runner::process_drop_candidate(Pass_method fn, bool fold_all) {
+  // 0. Pre-resolve operand layout once so opt-in passes can skip their
+  //    own scan_op walk. Cursor returns to the op node.
+  fill_op_summary();
   // 1. Run per-node process_* so symbol tables see the current statement.
   dispatch_to_passes(fn);
   // 2. Ask every pass whether to keep this statement; first drop wins.
@@ -290,6 +341,7 @@ void uPass_runner::process_drop_candidate(Pass_method fn, bool fold_all) {
 }
 
 void uPass_runner::process_drop_candidate_verbatim(Pass_method fn) {
+  fill_op_summary();
   dispatch_to_passes(fn);
   if (!any_pass_drops()) {
     emit_subtree_verbatim();
@@ -297,6 +349,7 @@ void uPass_runner::process_drop_candidate_verbatim(Pass_method fn) {
 }
 
 void uPass_runner::process_verbatim(Pass_method fn) {
+  fill_op_summary();
   dispatch_to_passes(fn);
   // Emit the op-node with operand folding (skipping LHS at child 0). This
   // matches A_OP behavior except we never drop the statement — verbatim
