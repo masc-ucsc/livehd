@@ -96,6 +96,7 @@ uPass_runner::uPass_runner(std::shared_ptr<upass::Lnast_manager>& _lm, const std
   for (auto& entry : upasses) {
     entry.pass->set_runner_fold_fn(fold_fn);
     entry.pass->set_runner_emit_at_fn(emit_at_fn);
+    entry.pass->set_runner_symbol_table(&runner_symbol_table);
     entry.pass->set_options(options);
   }
 }

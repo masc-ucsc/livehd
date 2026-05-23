@@ -39,6 +39,12 @@ protected:
 
   std::vector<Pass_entry> upasses;
 
+  // Step C of upass redesign — single shared symbol table owned by the
+  // runner. Each pass receives a pointer to this via
+  // set_runner_symbol_table(). Initially used as a wiring slot only;
+  // existing passes keep their private state until they migrate.
+  Symbol_table runner_symbol_table;
+
   bool        configuration_error{false};
   std::string configuration_error_msg;
 
