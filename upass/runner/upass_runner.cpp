@@ -530,18 +530,15 @@ void uPass_runner::process_top() {
 }
 
 void uPass_runner::process_stmts() {
-  // Step D — runner-owned block scope on the shared symbol table. Push
-  // before any pass observes the stmts node; pop after the post hook.
-  // Today no pass reads runner_symbol_table; the push/pop is the wiring
-  // for Step F (bundle pre-pass) which will populate per-name bundles
-  // here. The push key is the source stmts nid so subsequent iterations
-  // recover the same Scope (Symbol_table::block_scope semantics).
-  const auto stmts_nid = lm->get_current_nid();
-  runner_symbol_table.block_scope(static_cast<uint64_t>(stmts_nid.get_class_index().value));
   // Pre-dispatch lets passes push a block scope before children are
   // walked; post-dispatch (after emit_pop) lets them pop it. The cursor
   // is restored by dispatch_to_passes around each pass call, so passes
   // can move freely without disturbing the runner's traversal.
+  //
+  // Step D — the runner-owned symbol-table push/pop will land here once
+  // Step F's bundle pre-pass populates it. For now the runner-owned
+  // table sits idle (a pass that needs it can push/pop via the pointer
+  // returned by get_runner_symbol_table()).
   dispatch_to_passes(&upass::uPass::process_stmts);
   emit_push(lm->current_type());
   if (lm->has_child()) {
@@ -558,7 +555,6 @@ void uPass_runner::process_stmts() {
   dispatch_to_passes(&upass::uPass::process_stmts_pre_pop);
   emit_pop();
   dispatch_to_passes(&upass::uPass::process_stmts_post);
-  runner_symbol_table.leave_scope();
 }
 
 void uPass_runner::process_if() {
