@@ -1,0 +1,11 @@
+/*
+:name: fcall4
+:type: comptime
+:verifier_pass: 1
+:verifier_fail: 0
+*/
+comb step2(x) -> (r) { r = ((x * 3) + 1) & 0xFFFFFF }
+mut a = 1
+a = step2(a)
+a = step2(a)
+cassert(a == 13)

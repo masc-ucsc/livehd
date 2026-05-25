@@ -1731,6 +1731,18 @@ bool uPass_constprop::try_eval_comb_call(std::string_view dst, std::string_view 
     if (Lnast_ntype::is_mult(type)) {
       return eval_nary(stmt, [](Const a, Const b) { return a.mult_op(b); });
     }
+    if (Lnast_ntype::is_bit_and(type)) {
+      return eval_nary(stmt, [](Const a, Const b) { return a.and_op(b); });
+    }
+    if (Lnast_ntype::is_bit_or(type)) {
+      return eval_nary(stmt, [](Const a, Const b) { return a.or_op(b); });
+    }
+    if (Lnast_ntype::is_bit_xor(type)) {
+      return eval_nary(stmt, [](Const a, Const b) { return a.xor_op(b); });
+    }
+    if (Lnast_ntype::is_div(type)) {
+      return eval_nary(stmt, [](Const a, Const b) { return a.div_op(b); });
+    }
 
     if (Lnast_ntype::is_eq(type)) {
       return eval_compare(stmt, [](const Const& a, const Const& b) { return *a.eq_op(b); });
@@ -1803,8 +1815,31 @@ bool uPass_constprop::try_eval_comb_call(std::string_view dst, std::string_view 
     // (callee bodies use `tuple_get ___N src field` to access `src.field`
     // — when `src` was bound from a bundle actual or dotted-named actual,
     // the field's scalar is stored at "src.field" in local_values).
-    if (Lnast_ntype::is_tuple_add(type) || Lnast_ntype::is_tuple_set(type) || Lnast_ntype::is_attr_set(type)
-        || Lnast_ntype::is_attr_get(type)) {
+    //
+    // Single-positional-operand tuple_add (e.g. `tuple_add ___2 ___1`)
+    // is prp2lnast's wrapper for parenthesized scalar expressions —
+    // propagate the operand value to the LHS so downstream stmts that
+    // read the temp can fold. Anything richer (named fields, multiple
+    // entries, nested bundle) stays opaque to the inliner.
+    if (Lnast_ntype::is_tuple_add(type)) {
+      auto lhs = fn->get_child(stmt);
+      if (!lhs.is_invalid() && Lnast_ntype::is_ref(fn->get_type(lhs))) {
+        auto arg = fn->get_sibling_next(lhs);
+        if (!arg.is_invalid() && fn->get_sibling_next(arg).is_invalid()) {
+          const auto atype = fn->get_type(arg);
+          if (Lnast_ntype::is_ref(atype) || Lnast_ntype::is_const(atype)) {
+            auto val = resolve_local(arg);
+            if (!val.has_value() || val->is_invalid()) {
+              return Eval_result::deferred;
+            }
+            local_values[std::string(fn->get_name(lhs))] = *val;
+            return Eval_result::processed;
+          }
+        }
+      }
+      return Eval_result::processed;
+    }
+    if (Lnast_ntype::is_tuple_set(type) || Lnast_ntype::is_attr_set(type) || Lnast_ntype::is_attr_get(type)) {
       return Eval_result::processed;
     }
 
