@@ -1,0 +1,10 @@
+/*
+:name: cputs_basic
+:type: comptime
+:verifier_pass: 0
+:verifier_fail: 0
+*/
+
+a = 7
+cputs("a is {a}")
+cputs("plain")

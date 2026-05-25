@@ -14,19 +14,23 @@ static upass::uPass_plugin plugin_verifier("verifier", upass::uPass_wrapper<uPas
 std::size_t                     uPass_verifier::aggregate_pass_count    = 0;
 std::size_t                     uPass_verifier::aggregate_fail_count    = 0;
 std::size_t                     uPass_verifier::aggregate_unknown_count = 0;
+std::size_t                     uPass_verifier::aggregate_cputs_count  = 0;
 std::vector<std::string>        uPass_verifier::aggregate_unknown_operands;
 int                             uPass_verifier::aggregate_expected_pass = -1;
 int                             uPass_verifier::aggregate_expected_fail = -1;
 std::unordered_set<std::string> uPass_verifier::processed_cassert_keys;
+std::unordered_set<std::string> uPass_verifier::processed_cputs_keys;
 
 void uPass_verifier::reset_aggregate() {
   aggregate_pass_count    = 0;
   aggregate_fail_count    = 0;
   aggregate_unknown_count = 0;
+  aggregate_cputs_count   = 0;
   aggregate_unknown_operands.clear();
   aggregate_expected_pass = -1;
   aggregate_expected_fail = -1;
   processed_cassert_keys.clear();
+  processed_cputs_keys.clear();
 }
 
 void uPass_verifier::set_aggregate_expected(int expected_pass, int expected_fail) {
@@ -49,6 +53,9 @@ void uPass_verifier::mark_inlined_cassert_fail(std::string_view key) {
 }
 
 upass::Emit_decision uPass_verifier::classify_statement() {
+  if (is_type(Lnast_ntype::Lnast_ntype_func_call)) {
+    return classify_func_call();
+  }
   if (!is_type(Lnast_ntype::Lnast_ntype_cassert)) {
     return upass::Emit_decision::emit_node();
   }
@@ -116,8 +123,97 @@ upass::Emit_decision uPass_verifier::classify_statement() {
   return upass::Emit_decision::drop();
 }
 
+// Strip the surrounding single-quote wrappers that Lconst::to_pyrope adds
+// around string values. Mirrors strip_pyrope_quotes in upass_constprop.hpp
+// (kept inline here to avoid a header dependency on constprop).
+static std::string strip_pyrope_quotes(std::string s) {
+  if (s.size() >= 2 && s.front() == '\'' && s.back() == '\'') {
+    s = s.substr(1, s.size() - 2);
+  }
+  return s;
+}
+
+upass::Emit_decision uPass_verifier::classify_func_call() {
+  // Layout: func_call ref(___tmp) ref(<fname>) <arg0> <arg1> ...
+  // Inspect the function-name child; if it isn't "cputs", restore the
+  // cursor and let the runner emit the node unchanged.
+  if (!move_to_child()) {
+    return upass::Emit_decision::emit_node();
+  }
+  // First child is the dst tmp ref — skip past it.
+  if (!move_to_sibling()) {
+    move_to_parent();
+    return upass::Emit_decision::emit_node();
+  }
+  if (!is_type(Lnast_ntype::Lnast_ntype_ref)) {
+    move_to_parent();
+    return upass::Emit_decision::emit_node();
+  }
+  const auto fname = std::string{current_text()};
+  if (fname != "cputs") {
+    move_to_parent();
+    return upass::Emit_decision::emit_node();
+  }
+
+  // From here on this is a cputs call — any deviation from the expected
+  // shape is a compile error rather than "leave it for runtime".
+
+  // Dedup: a cputs inside a function body would otherwise reprint once
+  // per spawned-lnast walk. Key matches the cassert dedup pattern.
+  const auto fcall_nid = lm->get_current_nid();
+  const auto dedup_key
+      = std::format("{}:{}", lm->get_top_module_name(), fcall_nid.get_class_index().value);
+  move_to_parent();  // restore to func_call before re-entering
+  if (processed_cputs_keys.contains(dedup_key)) {
+    return upass::Emit_decision::drop();
+  }
+
+  // Re-descend to read the single argument.
+  if (!move_to_child()) {
+    upass::error("cputs malformed func_call (no dst)\n");
+  }
+  if (!move_to_sibling()) {
+    upass::error("cputs malformed func_call (no fname)\n");
+  }
+  if (!move_to_sibling()) {
+    upass::error("cputs requires exactly one argument\n");
+  }
+
+  std::optional<Const> val;
+  if (is_type(Lnast_ntype::Lnast_ntype_const)) {
+    val = *Dlop::from_pyrope(current_text());
+  } else if (is_type(Lnast_ntype::Lnast_ntype_ref) && runner_fold_fn) {
+    val = runner_fold_fn(current_text());
+  }
+
+  // Reject named or multi-argument forms in this slice. A trailing
+  // sibling means the user passed more than one operand.
+  const bool extra_args = !is_last_child();
+  move_to_parent();
+
+  if (extra_args) {
+    upass::error("cputs accepts exactly one argument\n");
+  }
+  if (!val || val->is_invalid() || val->has_unknowns()) {
+    upass::error("cputs operand not comptime-known\n");
+  }
+  if (!val->is_string()) {
+    upass::error("cputs operand must be a string\n");
+  }
+
+  processed_cputs_keys.insert(dedup_key);
+  ++cputs_count;
+  std::print(stderr, "\nprp:{}\n", strip_pyrope_quotes(val->to_pyrope()));
+  return upass::Emit_decision::drop();
+}
+
 void uPass_verifier::end_run() {
-  std::print(stderr, "uPass - verifier cassert counts: pass:{} fail:{} unknown:{}\n", pass_count, fail_count, unknown_count);
+  std::print(stderr,
+             "uPass - verifier cassert counts: pass:{} fail:{} unknown:{} cputs:{}\n",
+             pass_count,
+             fail_count,
+             unknown_count,
+             cputs_count);
 
   // Roll local counts into the test-level aggregate. The mismatch check
   // moved to finalize_aggregate so it runs once across the whole program
@@ -125,6 +221,7 @@ void uPass_verifier::end_run() {
   aggregate_pass_count += pass_count;
   aggregate_fail_count += fail_count;
   aggregate_unknown_count += unknown_count;
+  aggregate_cputs_count += cputs_count;
   for (auto& s : unknown_operands) {
     aggregate_unknown_operands.emplace_back(std::move(s));
   }
@@ -133,10 +230,11 @@ void uPass_verifier::end_run() {
 
 void uPass_verifier::finalize_aggregate() {
   std::print(stderr,
-             "uPass - verifier aggregate cassert counts: pass:{} fail:{} unknown:{}\n",
+             "uPass - verifier aggregate cassert counts: pass:{} fail:{} unknown:{} cputs:{}\n",
              aggregate_pass_count,
              aggregate_fail_count,
-             aggregate_unknown_count);
+             aggregate_unknown_count,
+             aggregate_cputs_count);
 
   bool mismatch = false;
   if (aggregate_expected_pass >= 0 && static_cast<int>(aggregate_pass_count) != aggregate_expected_pass) {

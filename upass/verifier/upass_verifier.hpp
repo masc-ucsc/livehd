@@ -32,6 +32,7 @@ public:
     pass_count    = 0;
     fail_count    = 0;
     unknown_count = 0;
+    cputs_count   = 0;
     unknown_operands.clear();
   }
 
@@ -106,6 +107,7 @@ private:
   std::size_t              pass_count{0};
   std::size_t              fail_count{0};
   std::size_t              unknown_count{0};
+  std::size_t              cputs_count{0};
   std::vector<std::string> unknown_operands;
 
   // Aggregate state shared across every verifier instance in a single
@@ -114,10 +116,17 @@ private:
   static std::size_t                     aggregate_pass_count;
   static std::size_t                     aggregate_fail_count;
   static std::size_t                     aggregate_unknown_count;
+  static std::size_t                     aggregate_cputs_count;
   static std::vector<std::string>        aggregate_unknown_operands;
   static int                             aggregate_expected_pass;
   static int                             aggregate_expected_fail;
   static std::unordered_set<std::string> processed_cassert_keys;
+  // Mirrors processed_cassert_keys: inliner-style dedup so a cputs inside
+  // a function body prints once even when constprop walks the same body
+  // again via spawned lnasts for each call site.
+  static std::unordered_set<std::string> processed_cputs_keys;
+
+  upass::Emit_decision classify_func_call();
 
   void check_binary() {
     move_to_child();
