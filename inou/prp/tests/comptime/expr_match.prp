@@ -12,17 +12,19 @@ const result = match sel {
   == 0b01 { 0b0010 }
   == 0b10 { 0b0100 }
   == 0b11 { 0b1000 }
+  else    { cassert(false); 0 }
 }
-cassert result == 4
+cassert(result == 4)
 const result2 = match sel {
   case 0b00 { 0b0001 }
   case 0b01 { 0b0010 }
   case 0b10 { 0b0100 }
   case 0b11 { 0b1000 }
+  else      { cassert(false); 0 }
 }
-cassert result == result2
+cassert(result == result2)
 
 const table = (1,2,4,8)
-cassert result == table[sel]
+cassert(result == table[sel])
 
-cassert result == 1 << sel
+cassert(result == 1 << sel)

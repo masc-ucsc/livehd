@@ -10,14 +10,14 @@
 // lowering. Comptime-checks the visible behavior, not the IR shape.
 
 const arr = (10, 20, 30, 40)
-cassert arr.[size] == 4
-cassert arr[0] == 10
-cassert arr[3] == 40
+cassert(arr.[size] == 4)
+cassert(arr[0] == 10)
+cassert(arr[3] == 40)
 
 const sum = arr[0] + arr[1] + arr[2] + arr[3]
-cassert sum == 100
+cassert(sum == 100)
 
 // Mixed-type unnamed tuple stays as separate vars (distinct shape, but
 // from comptime view the index access still reports the right values).
 const m = (1, true)
-cassert m[0] == 1
+cassert(m[0] == 1)

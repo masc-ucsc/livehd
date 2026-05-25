@@ -10,8 +10,8 @@ type Complex = (v1:string, v2:string)
 mut x1:Complex = (v1="", v2="")
 mut x2:Complex = (v1="", v2="")
 
-cassert x1.v1 == "" and x1.v2 == ""
+cassert(x1.v1 == "" and x1.v2 == "")
 
 x2.v2 = "hello"
 
-cassert x2.v2 == "hello"
+cassert(x2.v2 == "hello")

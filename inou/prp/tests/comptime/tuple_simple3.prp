@@ -7,15 +7,15 @@
 
 const x = 1
 
-cassert x == x.0 == 1
+cassert(x == x.0 == 1)
 
 const y = (foo=3)
 
-cassert y.foo == y == 3 == ((((3))))
+cassert(y.foo == y == 3 == ((((3)))))
 
 const z = (4,bar=true)
 
-cassert z.0 == 4 == (((4)))
-cassert z == (bar=true, 4)
-cassert z != (true, 4)
-cassert z != (4, true)
+cassert(z.0 == 4 == (((4))))
+cassert(z == (bar=true, 4))
+cassert(z != (true, 4))
+cassert(z != (4, true))

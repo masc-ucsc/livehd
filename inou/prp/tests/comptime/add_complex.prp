@@ -12,4 +12,4 @@ const vari = (c + 100)
         - (10-5-5)
         - 10-(5-(-5))
 
-cassert vari == 84
+cassert(vari == 84)

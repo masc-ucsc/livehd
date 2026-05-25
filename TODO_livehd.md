@@ -21,6 +21,9 @@ complete before group N+1 starts. Group letters are shared across
   — see "upass: prefer iterators over std::vector copies" below.
 - **1c** `pass.lnastfmt` validator (arity, SSA uniqueness, `delay_assign`
   rules, deprecation warnings) — `docs/contracts/lnast_spec.md §5`.
+- **1e** Drop `wrap`/`sat` as attributes; keep only the `wrap`/`sat`
+  *statement* form, lowered to a new LNAST `wrap`/`sat` op — see
+  "wrap/sat: statement-only via LNAST op" below.
 
 ## Group 2 — depends on Group 1
 
@@ -226,6 +229,42 @@ synthesized) point at one or more locations in that map (so an alias
   corresponding source-map slab get invalidated atomically?
 - Egress comment format: pick one (`// src: file:line:col`) and commit, so
   external LEC tooling can parse it reliably.
+
+## wrap/sat: statement-only via LNAST op
+
+Today `wrap` / `sat` can appear both as attributes on a variable and as
+prefix statements (`wrap a = x`, `sat a = x`). Collapse this to a single
+form: the statement, lowered through a new dedicated LNAST op so that the
+target variable's existing `max`/`min` (and bitwidth) drive the
+wrap/saturate computation.
+
+- Drop the attribute form (`a.[[wrap]] = ...` / `a.[[sat]] = ...`) from
+  the Pyrope frontend and from `pass.upass` attribute handling.
+- Add a new LNAST node kind `wrap` (and `sat`) with three children:
+  `(__tmp, a, x)`. The op *reads* `a` because `a`'s declared
+  `max`/`min`/`bits` is the input to the wrap/saturate range — not a
+  control-flow read of `a`'s current value, but a type-info read.
+- `wrap a = x` lowers to:
+  ```
+  wrap
+    __tmp
+    a
+    x
+  assign
+    a
+    __tmp
+  ```
+  (same shape for `sat`). The intermediate `__tmp` makes the dataflow
+  explicit and keeps the existing `assign` lowering path unchanged.
+- LGraph has no `wrap` / `sat` cell. The op gets converted at LNAST→LGraph
+  time to an equivalent `get_mask` (for `wrap`) or `mux + get_mask` (for
+  `sat`) using `a`'s `max`/`min` to compute the mask / saturation
+  comparators.
+- Update `pass.lnastfmt` (Group 1 **1c**) to validate the new node's
+  arity and SSA discipline so the rule lands with validator coverage.
+- Migrate any existing tests / `.prp` files that rely on the attribute
+  form to the statement form (or delete them if redundant with the
+  statement-form tests already in `inou/prp/tests/comptime/`).
 
 ## Bitwidth_range: replace int+overflow with Const min/max
 

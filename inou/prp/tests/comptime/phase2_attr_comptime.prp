@@ -10,14 +10,14 @@
 // behind FIXMEs.
 
 const a = 5
-cassert a.[comptime]
+cassert(a.[comptime])
 
 comptime mut b = 10
-cassert b.[comptime]
+cassert(b.[comptime])
 
-const X = 100               // implicit comptime: starts uppercase
-cassert X.[comptime]
+comptime const X = 100
+cassert(X.[comptime])
 
 const c = a + b + X
-cassert c.[comptime]
-cassert c == 115
+cassert(c.[comptime])
+cassert(c == 115)

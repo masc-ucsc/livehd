@@ -10,20 +10,20 @@
 // regardless of how the bounds were declared.
 
 mut a:u8 = nil
-cassert a.[max] == 255
-cassert a.[min] == 0
+cassert(a.[max] == 255)
+cassert(a.[min] == 0)
 
 mut b:s8 = nil
-cassert b.[max] == 127
-cassert b.[min] == -128
+cassert(b.[max] == 127)
+cassert(b.[min] == -128)
 
 mut c:int:[max=300, min=0] = nil
-cassert c.[max] == 300
-cassert c.[min] == 0
+cassert(c.[max] == 300)
+cassert(c.[min] == 0)
 
 mut d:int:[range=0..=300] = nil
-cassert d.[max] == 300
-cassert d.[min] == 0
+cassert(d.[max] == 300)
+cassert(d.[min] == 0)
 
 mut e:int:[range=-10..=10] = nil
-cassert e.[max] == 10
+cassert(e.[max] == 10)

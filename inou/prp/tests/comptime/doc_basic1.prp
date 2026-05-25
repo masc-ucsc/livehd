@@ -3,7 +3,7 @@
 :type: parsing lnast
 */
 
-cassert 1K == 1024
-cassert 1M == 1024*1024
-cassert 1G == 1024*1024*1024
-cassert 1T == 1024*1024*1024*1024
+cassert(1K == 1024)
+cassert(1M == 1024*1024)
+cassert(1G == 1024*1024*1024)
+cassert(1T == 1024*1024*1024*1024)

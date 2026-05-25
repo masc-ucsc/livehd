@@ -11,9 +11,9 @@ mut world = " world"
 
 const hw = hello ++ world ++ "!"
 
-cassert hw == 'hello world!'
+cassert(hw == 'hello world!')
 
 mut x = "cadena"
 
-cassert x[1..] == "adena"
-cassert x[1..=2] == "ad"
+cassert(x[1..] == "adena")
+cassert(x[1..=2] == "ad")

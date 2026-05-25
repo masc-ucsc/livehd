@@ -18,7 +18,7 @@ if false {
     c += 3
 }
 
-cassert c == 1
+cassert(c == 1)
 
 if false {
 }else{
@@ -29,17 +29,17 @@ if true {
     c += 3
 }
 
-cassert c == 5
+cassert(c == 5)
 
 c = 100 when false
-cassert c == 5
+cassert(c == 5)
 c = 100 unless true
-cassert c == 5
+cassert(c == 5)
 
 c = 100 when true
-cassert c == 100
+cassert(c == 100)
 c = 200 unless false
-cassert c == 200
+cassert(c == 200)
 
 comb no_know_input(a)->(r) {
   // Inner-scope folding under an uncertain cond: writes are visible while
@@ -50,9 +50,9 @@ comb no_know_input(a)->(r) {
   mut d = 2
   // FIXME: cassert c.[comptime]   (future, once attribute reads are supported)
   if a {
-    cassert c == 1
+    cassert(c == 1)
     c = d + 1
-    cassert c == 3
+    cassert(c == 3)
   }
   // FIXME: cassert !c.[comptime]  (future, once attribute reads are supported)
 
@@ -63,7 +63,7 @@ comb no_know_input(a)->(r) {
   }else{
     r = 100
   }
-  cassert r == 2
+  cassert(r == 2)
 
   if a { // NOT comptime - both branches converge, but invalidate-on-exit
          // gives up the convergent value. Convergent-branch path-merge is
@@ -82,7 +82,7 @@ comb no_know_input(a)->(r) {
   }else{
     r = 100
   }
-  cassert r == 1  // Discharged by nil-on-uncertain-exit: after the two
+  cassert(r == 1)  // Discharged by nil-on-uncertain-exit: after the two
                   // uncertain ifs, r reads as nil (Symbol_table::leave_scope
                   // re-pins modified vars to nil), so `r == 1` folds to nil
                   // and cassert nil passes per attributes_spec §Phase 2.

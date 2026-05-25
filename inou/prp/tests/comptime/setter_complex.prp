@@ -6,20 +6,20 @@
 */
 
 const fint:int = 0
-cassert fint == 0
+cassert(fint == 0)
 
 mut fbool:bool = false
-cassert fbool == 0
+cassert(fbool == 0)
 
-mod set_empty(ref self) {
-  cassert self.v == ""
+comb set_empty(ref self) {
+  cassert(self.v == "")
   self.v = "empty"
 }
 
-const Tup = (v = "", setter = set_empty)
+comptime const Tup = (v = "", setter = set_empty)
 
 mut x:Tup = (v = "")
-cassert x.v == "empty"
+cassert(x.v == "empty")
 
 x = "Padua"
-cassert x.v == "Padua"
+cassert(x.v == "Padua")

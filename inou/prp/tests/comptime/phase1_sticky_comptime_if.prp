@@ -21,8 +21,8 @@ if true {
 }else{
   a = p         // dead: would not have introduced 'debug'
 }
-cassert a == 101
-cassert a.[debug]
+cassert(a == 101)
+cassert(a.[debug])
 
 mut b = 0
 if false {
@@ -30,8 +30,8 @@ if false {
 }else{
   b = p + 1     // taken: no sticky
 }
-cassert b == 8
-cassert !b.[debug]
+cassert(b == 8)
+cassert(!b.[debug])
 
 mut c = 0
 if d > 0 {
@@ -39,13 +39,13 @@ if d > 0 {
 }else{
   c = p + 1
 }
-cassert c == 7
-cassert c.[debug]
+cassert(c == 7)
+cassert(c.[debug])
 
 const t::[_foo,foo] = true
 mut e = 0
 if t.[_foo] {
   e = p         // sticky attr read in condition taints the assignment
 }
-cassert e == 7
-cassert e.[_foo] and !e.[foo]
+cassert(e == 7)
+cassert(e.[_foo] and !e.[foo])

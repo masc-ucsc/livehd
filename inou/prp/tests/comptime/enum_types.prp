@@ -11,15 +11,16 @@ comb cyborg_consume() -> (s:string) { s = "cyborg consume" }
 comb cyborg_charge() -> (s:string) { s = "cyborg charge" }
 comb potato_consume() -> (s:string) { s = "potato consume" }
 
-const Robot = (charge = robot_charge)
-const Person = (consume = person_consume)
-const Cyborg = (consume = cyborg_consume, charge = cyborg_charge)
-const Potato = (consume = potato_consume)
+comptime const Robot = (charge = robot_charge)
+comptime const Person = (consume = person_consume)
+comptime const Cyborg = (consume = cyborg_consume, charge = cyborg_charge)
+comptime const Potato = (consume = potato_consume)
 
 comb nourish(x) -> (r:string) {
-  cassert (x does Person) or (x does Robot)
+  cassert((x does Person) or (x does Robot))
   r = match x {
     does Person { x.consume() }
     does Robot  { x.charge()  }
+    else        { cassert(false); "" }
   }
 }

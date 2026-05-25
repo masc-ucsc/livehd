@@ -17,15 +17,15 @@
 
 const t::[poison=42] = (a=1, b::[poison=99]=2, c=3)
 
-cassert t.[poison] == 42         // aggregate keeps its own value
-cassert t.b.[poison] == 99       // field-level override wins
-cassert t.a.[poison] == 42       // inherits from aggregate
-cassert t.c.[poison] == 42       // inherits from aggregate
+cassert(t.[poison] == 42)         // aggregate keeps its own value
+cassert(t.b.[poison] == 99)       // field-level override wins
+cassert(t.a.[poison] == 42)       // inherits from aggregate
+cassert(t.c.[poison] == 42)       // inherits from aggregate
 
 const u::[label="hot"] = (1, 2)
-cassert u.[label] == "hot"
-cassert u[0].[label] == "hot"    // index access also inherits
-cassert u[1].[label] == "hot"
+cassert(u.[label] == "hot")
+cassert(u[0].[label] == "hot")    // index access also inherits
+cassert(u[1].[label] == "hot")
 
 // Built-in aggregate read has dedicated semantics, not generic inheritance.
-cassert t.[size] == 3
+cassert(t.[size] == 3)

@@ -10,4 +10,4 @@ const y = 2
 
 mut c = x + y
 
-cassert c == 3
+cassert(c == 3)

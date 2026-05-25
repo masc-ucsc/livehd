@@ -17,4 +17,4 @@ if c {
   x = 2
 }
 
-cassert x==1 or x==2
+cassert(x==1 or x==2)

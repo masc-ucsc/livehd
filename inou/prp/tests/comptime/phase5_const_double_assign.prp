@@ -15,5 +15,5 @@
 // failures.
 
 const a = 5
-cassert a == 5
-cassert false
+cassert(a == 5)
+cassert(false)

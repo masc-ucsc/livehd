@@ -10,5 +10,5 @@ mut b:u2 = 1
 
 (a, b) = (b + 1, a)
 
-cassert b == 3
-cassert a == 2
+cassert(b == 3)
+cassert(a == 2)

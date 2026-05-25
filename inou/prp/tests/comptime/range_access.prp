@@ -6,9 +6,9 @@
 */
 
 const a = 2..=4
-cassert a == (2,3,4)
+cassert(a == (2,3,4))
 
 const b = 0xAB
-cassert b#[0..] == 0xAB
-cassert b#[4..] == 0xA == b#[4..<8]
-cassert b#[..=3] == 0xB == b[0..<4]
+cassert(b#[0..] == 0xAB)
+cassert(b#[4..] == 0xA == b#[4..<8])
+cassert(b#[..=3] == 0xB == b[0..<4])

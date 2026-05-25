@@ -10,15 +10,15 @@ enum X = (l0, l1, l2)
 const a = X.l0
 const b = X.l1
 
-cassert a != b
-cassert a == X.l0
-cassert b == X.l1
+cassert(a != b)
+cassert(a == X.l0)
+cassert(b == X.l1)
 
-cassert X.l0 == 0sb001
-cassert X.l1 == 0sb010
-cassert X.l2 == 0sb100
+cassert(X.l0 == 0sb001)
+cassert(X.l1 == 0sb010)
+cassert(X.l2 == 0sb100)
 
 enum V3 = (a, b=5, c)
-cassert V3.a == 0
-cassert V3.b == 5
-cassert V3.c == 6
+cassert(V3.a == 0)
+cassert(V3.b == 5)
+cassert(V3.c == 6)

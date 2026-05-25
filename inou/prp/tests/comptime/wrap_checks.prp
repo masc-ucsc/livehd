@@ -8,13 +8,13 @@
 mut x:s8 = 33
 
 x:u4:[wrap] = 0xCAFE
-cassert x == 0xE
+cassert(x == 0xE)
 
 x:u4:[wrap] = -1
-cassert x == 0xF
+cassert(x == 0xF)
 
 x:s4:[wrap] = 0xCAFE
-cassert x == 7
+cassert(x == 7)
 
 x:s4:[wrap] = -1
-cassert x == -8
+cassert(x == -8)

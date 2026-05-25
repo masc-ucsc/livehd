@@ -10,7 +10,7 @@ const foo = a + 1
 a[0] = 3
 const bar = a + 1
 
-cassert (foo+bar) == 7
+cassert((foo+bar) == 7)
 
 
 mut b = 2
@@ -19,7 +19,7 @@ b[0] = 3
 b = 4
 const dog = b + 1
 
-cassert cat+dog == 3+5 == 8
+cassert(cat+dog == 3+5 == 8)
 
 
 mut c = 2
@@ -28,7 +28,7 @@ c = 3
 c[0] = 5
 const fox = c + 1
 
-cassert eagle + fox == 3 + 6 == 9
+cassert(eagle + fox == 3 + 6 == 9)
 
 
 mut d = 2
@@ -39,32 +39,32 @@ d = d ++ 60
 d = d[0] + 1
 const horse = d + 1
 
-cassert goat + horse == 3 + 7 == 10
+cassert(goat + horse == 3 + 7 == 10)
 
 mut e = 1
 e = e ++ 3
 const f = e[1] + 4
 
-cassert f == 7
+cassert(f == 7)
 
 const t1 = (1,2)
 mut t2 = (3,4)
 const g = t1 ++ t2
 
-cassert g[1] + g[3] == 6
+cassert(g[1] + g[3] == 6)
 
 
 mut h = 2
 h.0 = 3
-cassert h   == 3
-cassert h[0] == 3
+cassert(h   == 3)
+cassert(h[0] == 3)
 
 
 mut i = 2
 i[0] = 3
 i[1] = 4
-cassert i[0] + i[1]  == 7
+cassert(i[0] + i[1]  == 7)
 
 
 const j = 2 + 3
-cassert j[0] == 5
+cassert(j[0] == 5)

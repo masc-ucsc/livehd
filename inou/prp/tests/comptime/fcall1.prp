@@ -14,12 +14,12 @@ comb fcall1(a:u3, b:u7, cond:boolean) -> (res:s4) {
 }
 
 const x1 = fcall1(a=1,b=4,cond=true)
-cassert x1 == 2
+cassert(x1 == 2)
 const x1b = fcall1(cond=true,a=1,b=4)
-cassert x1b == 2
+cassert(x1b == 2)
 
 const x2 = fcall1(a=3,b=7,true)
-cassert x2 == 4
+cassert(x2 == 4)
 
 const x3 = fcall1(a=1,b=0sb11011110,false)
-cassert x3 == 0sb1110 == -2
+cassert(x3 == 0sb1110 == -2)

@@ -9,4 +9,4 @@ mut x::[ubits=12] = 0
 
 wrap x = 0xFEAD
 
-cassert x == 0xEAD
+cassert(x == 0xEAD)

@@ -7,11 +7,11 @@
 
 {
   mut a = (r1 = (b=1,c=2), r2 = (3,4))
-  cassert a.r1 == (b=1,c=2) and a.r2 == (3,4)
-  cassert a.r1.c    == 2
-  cassert a.r1.b    == 1
-  cassert a.r2.0    == 3
-  cassert a.r2.1    == 4
+  cassert(a.r1 == (b=1,c=2) and a.r2 == (3,4))
+  cassert(a.r1.c    == 2)
+  cassert(a.r1.b    == 1)
+  cassert(a.r2.0    == 3)
+  cassert(a.r2.1    == 4)
   // Decision 1 (bundle_sorted §1.1): positional access on an all-named
   // tuple (`a.r1[1]`, `a[0]`) is no longer valid — named tuples are
   // name-access only, unnamed are decimal-index only.
@@ -19,9 +19,9 @@
 
 {
   mut a = (foo = 3)
-  cassert a has 'foo'
-  cassert !(a has 'bar')
-  cassert a !has 'bar'
+  cassert(a has 'foo')
+  cassert(!(a has 'bar'))
+  cassert(not (a has 'bar'))
 }
 
 {
@@ -29,8 +29,8 @@
 
   mut a = (xx, xx = 44, foo = 55)
   // Decision 1: drop `(3, 44, 55)` cross-match — named slots stay named.
-  cassert a == (xx, xx=44, foo=55)
-  cassert xx == 3
+  cassert(a == (xx, xx=44, foo=55))
+  cassert(xx == 3)
 }
 
 {
@@ -39,7 +39,7 @@
   mut c = 1
   mut d = (1,)
 
-  cassert a[0] == b[0] == c[0] == d[0]
-  cassert a != b
-  cassert b == c == d
+  cassert(a[0] == b[0] == c[0] == d[0])
+  cassert(a != b)
+  cassert(b == c == d)
 }

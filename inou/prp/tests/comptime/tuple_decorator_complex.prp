@@ -5,7 +5,7 @@
 :verifier_fail: 0
 */
 
-mod set_xy(ref self, x:int, y:int) {
+comb set_xy(ref self, x:int, y:int) {
   self._x = x
   self._y = y
 }
@@ -14,12 +14,13 @@ comb get_xy(self, idx:string) -> (r) {
   r = match idx {
     == 'x' { self._x }
     == 'y' { self._y }
+    else   { cassert(false); 0 }
   }
 }
 
-const Point = (_x = 0, _y = 0, setter = set_xy, getter = get_xy)
+comptime const Point = (_x = 0, _y = 0, setter = set_xy, getter = get_xy)
 
 const p:Point = (1, 2)
 
-cassert p['x'] == 1 and p['y'] == 2
-cassert p.x == 1 and p.y == 2
+cassert(p['x'] == 1 and p['y'] == 2)
+cassert(p.x == 1 and p.y == 2)

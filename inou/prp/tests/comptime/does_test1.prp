@@ -17,52 +17,52 @@ mut m3 = (b=2,a=0)
 const m4 = (c=2,b=0)
 const m5 = (a=2,b=20,c=100)
 
-cassert m1 does m2
-cassert m2 does m1
-cassert m3 does m1
-cassert m1 does m3
+cassert(m1 does m2)
+cassert(m2 does m1)
+cassert(m3 does m1)
+cassert(m1 does m3)
 
-cassert m4 !does m1
-cassert m4 !does m2
-cassert m4 !does m3
+cassert(not (m4 does m1))
+cassert(not (m4 does m2))
+cassert(not (m4 does m3))
 
-cassert m5 does m1
-cassert m5 does m2
-cassert m5 does m3
-cassert m5 does m4
+cassert(m5 does m1)
+cassert(m5 does m2)
+cassert(m5 does m3)
+cassert(m5 does m4)
 
-cassert m1 !does m5
-cassert m2 !does m5
-cassert m3 !does m5
-cassert m4 !does m5
+cassert(not (m1 does m5))
+cassert(not (m2 does m5))
+cassert(not (m3 does m5))
+cassert(not (m4 does m5))
 
 const b1 = true
 mut b2 = 100 < 30
 
-cassert b1 does true   // FIXME: scalar-vs-const literal — need type-aware fold
-cassert b2 does true   // FIXME: scalar-vs-const literal — need type-aware fold
-cassert b1 does b2     // FIXME: scalar-vs-scalar — bool/int indistinguishable in Lconst
-cassert b1 !does m1
+cassert(b1 does true)   // FIXME: scalar-vs-const literal — need type-aware fold
+cassert(b2 does true)   // FIXME: scalar-vs-const literal — need type-aware fold
+cassert(b1 does b2)     // FIXME: scalar-vs-scalar — bool/int indistinguishable in Lconst
+cassert(not (b1 does m1))
 
 mut i1 = 10
 const i2 = 0
 mut i3 = -1
-cassert i1 does i2     // FIXME: scalar-vs-scalar — needs type tracking
-cassert i1 does i3     // FIXME: scalar-vs-scalar — needs type tracking
-cassert i3 does 100    // FIXME: scalar-vs-const literal — need type-aware fold
-cassert i3 !does b1    // FIXME: int-vs-bool — needs type tracking
-cassert b1 !does i2    // FIXME: bool-vs-int — needs type tracking
+cassert(i1 does i2)     // FIXME: scalar-vs-scalar — needs type tracking
+cassert(i1 does i3)     // FIXME: scalar-vs-scalar — needs type tracking
+cassert(i3 does 100)    // FIXME: scalar-vs-const literal — need type-aware fold
+cassert(not (i3 does b1))    // FIXME: int-vs-bool — needs type tracking
+cassert(not (b1 does i2))    // FIXME: bool-vs-int — needs type tracking
 
-cassert 100 !does m1   // FIXME: const literal not bound in symbol table as bundle
-cassert m1 !does 100   // FIXME: const literal not bound in symbol table as bundle
+cassert(not (100 does m1))   // FIXME: const literal not bound in symbol table as bundle
+cassert(not (m1 does 100))   // FIXME: const literal not bound in symbol table as bundle
 
-  cassert (100,30) does 30   // FIXME: tuple-vs-const literal — const not bundle-resolved
-  cassert (a=3) !does (30,a=200)
-  cassert (a=3) !does (a=30,200)
+  cassert((100,30) does 30)   // FIXME: tuple-vs-const literal — const not bundle-resolved
+  cassert(not ((a=3) does (30,a=200)))
+  cassert(not ((a=3) does (a=30,200)))
 
-cassert 30 !does (30,200)   // FIXME: const literal not bound in symbol table as bundle
-cassert (3) !does (30,a=200)
-cassert (3) !does (a=30,200)
+cassert(not (30 does (30,200)))   // FIXME: const literal not bound in symbol table as bundle
+cassert(not ((3) does (30,a=200)))
+cassert(not ((3) does (a=30,200)))
 
 mut hit=0
 

@@ -11,10 +11,10 @@
 
 const a::[debug] = 3
 
-cassert a.[debug] != nil
-cassert a.[never_set] == nil
+cassert(a.[debug] != nil)
+cassert(a.[never_set] == nil)
 
 const b = 10                 // no attributes set
-cassert b.[debug] == nil
-cassert b.[anything] == nil
-cassert b.[max] != nil       // every integer has a max
+cassert(b.[debug] == nil)
+cassert(b.[anything] == nil)
+cassert(b.[max] != nil)       // every integer has a max

@@ -17,21 +17,22 @@ const b=300
 
 match const t = m2; t {
  case (a=33,b=0sb?)   { hit = 300 + t.a + t.b }
- case (a=2,b=0sb?)    { hit = 1000+t.a + m1.b; cassert m1 == t }
+ case (a=2,b=0sb?)    { hit = 1000+t.a + m1.b; cassert(m1 == t) }
  case (a=true,b=0sb?) { hit = if t.a { b+100 } else { b-100 } }
+ else                 { cassert(false) }
 }
-cassert t == nil  // t was in local match scope
-cassert hit == 1051
+cassert(t == nil)  // t was in local match scope
+cassert(hit == 1051)
 
-cassert (a=1,3)  case (a=0sb?,3)
-cassert (a=1,3)  case (a=1,0sb?)
-cassert (a=1,3)  case (a=1)
-cassert (a=1)   !case (a=1,3)
+cassert((a=1,3)  case (a=0sb?,3))
+cassert((a=1,3)  case (a=1,0sb?))
+cassert((a=1,3)  case (a=1))
+cassert(not ((a=1) case (a=1,3)))
 
-cassert (a=1,b=2) case (a=1)
-cassert (a=1,b=2) case (b=1)
-cassert (a=1,b=2) !case (b=1)
-cassert (b=2) !case (b=2,a=1)
-cassert (b=2) !case (b=2,1)
-cassert (b=2) !case (b=2,0sb?)
-cassert (b=2) !case (b=2,c=0sb?)
+cassert((a=1,b=2) case (a=1))
+cassert((a=1,b=2) case (b=1))
+cassert(not ((a=1,b=2) case (b=1)))
+cassert(not ((b=2) case (b=2,a=1)))
+cassert(not ((b=2) case (b=2,1)))
+cassert(not ((b=2) case (b=2,0sb?)))
+cassert(not ((b=2) case (b=2,c=0sb?)))

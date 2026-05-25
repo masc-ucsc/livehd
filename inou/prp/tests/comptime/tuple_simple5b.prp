@@ -6,4 +6,4 @@
 */
 
 mut case1:(x=3, y=4) = nil
-cassert case1.x==3 and case1.y==4
+cassert(case1.x==3 and case1.y==4)

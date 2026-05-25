@@ -10,14 +10,14 @@ for i in 0..<5 {
   if i != 3 { c = c ++ (i,) }
 }
 
-cassert c == (0,1,2,4)
+cassert(c == (0,1,2,4))
 
 mut d = ()
 for i in 0..<5 { d = d ++ (i,) }
-cassert d == (0,1,2,3,4)
+cassert(d == (0,1,2,3,4))
 
 for i in ref d {
   i += 10
 }
 
-cassert d == (10,11,12,13,14)
+cassert(d == (10,11,12,13,14))

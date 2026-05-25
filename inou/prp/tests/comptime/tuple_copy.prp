@@ -13,10 +13,10 @@ foo.a = 2
 foo.b = 3
 bar.c = 6
 
-cassert foo   == (a=2,b=3)
-cassert bar.c ==  6
-cassert xxx.0 == 60        == xxx
+cassert(foo   == (a=2,b=3))
+cassert(bar.c ==  6)
+cassert(xxx.0 == 60        == xxx)
 
 bar = foo
 
-cassert foo == bar == (a=2,b=3)
+cassert(foo == bar == (a=2,b=3))

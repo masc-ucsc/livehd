@@ -12,8 +12,8 @@ t.a += 3
 t.b.c += 5
 t.b.d += 5
 
-cassert t.a == 4
-cassert t.b.c == 38
-cassert t.b.d == 49
-cassert t.b == (c=38, d=49)
-cassert t == (b=(c=38, d=49), a=4)
+cassert(t.a == 4)
+cassert(t.b.c == 38)
+cassert(t.b.d == 49)
+cassert(t.b == (c=38, d=49))
+cassert(t == (b=(c=38, d=49), a=4))

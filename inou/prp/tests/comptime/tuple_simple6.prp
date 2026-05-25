@@ -7,10 +7,10 @@
 
 mut x = (a:u32 = 3, b = 4, mut 5)
 
-cassert x == (a=3,b=4,5)
-cassert x == (b=4,5,a=3)
-cassert x == (5) ++ (a=3,b=4)
-cassert x != (a=3,foo=4,5)
-cassert x == (5,a=3,b=4)
+cassert(x == (a=3,b=4,5))
+cassert(x == (b=4,5,a=3))
+cassert(x == (5) ++ (a=3,b=4))
+cassert(x != (a=3,foo=4,5))
+cassert(x == (5,a=3,b=4))
 x[0] += 5
-cassert x == (a=3,b=4,10)
+cassert(x == (a=3,b=4,10))

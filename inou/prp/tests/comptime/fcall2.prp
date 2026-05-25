@@ -14,10 +14,10 @@ comb fcall2(ar:(x:u3,y:s4), cond:boolean) -> (res:s5) {
 }
 
 const x1 = fcall2(ar.x=1,ar.y=10, cond=true)
-cassert x1.res == 2
+cassert(x1.res == 2)
 
 const x2 = fcall2(ar=(x=2,y=11), cond=true)
-cassert x2.res == 3
+cassert(x2.res == 3)
 
 const x3 = fcall2(ar=(y=0,x=3), cond=false)
-cassert x3.res == -1
+cassert(x3.res == -1)

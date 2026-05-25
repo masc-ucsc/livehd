@@ -10,15 +10,15 @@
 // counterpart (double-bind error) belongs in a verifier_fail:1 test.
 
 const a = 5
-cassert a == 5
+cassert(a == 5)
 
 // Comptime const used in a derived const: still single-assign, and the
 // derivation is comptime-resolvable.
 const b = a + 1
-cassert b == 6
+cassert(b == 6)
 
 // Tuple field declared const inside an aggregate.
 mut t = (mut x = 0, const y = 100)
 t.x = 7
-cassert t.x == 7
-cassert t.y == 100
+cassert(t.x == 7)
+cassert(t.y == 100)

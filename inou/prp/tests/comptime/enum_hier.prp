@@ -13,10 +13,10 @@ const h = Mammal.human
 
 const p = Bird.parroket
 
-cassert r != h
-cassert r in Mammal
-cassert h in Mammal
+cassert(r != h)
+cassert(r in Mammal)
+cassert(h in Mammal)
 
-cassert p !in Mammal
-cassert p in Bird
-cassert p == Bird.parroket
+cassert(not (p in Mammal))
+cassert(p in Bird)
+cassert(p == Bird.parroket)

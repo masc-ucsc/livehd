@@ -9,21 +9,21 @@ mut x::[sbits=8] = 0
 mut z::[ubits=8] = 0
 
 wrap x =0sb1001_0111_1111
-cassert x == 0sb0111_1111
+cassert(x == 0sb0111_1111)
 wrap z =0sb1001_0111_1111
-cassert z == 0sb0111_1111
+cassert(z == 0sb0111_1111)
 
 wrap x =0sb1001_1101_0011
-cassert x == 0sb1101_0011
+cassert(x == 0sb1101_0011)
 wrap z =0sb1001_1101_0011
-cassert z == 0sb01101_0011
+cassert(z == 0sb01101_0011)
 
 sat x =0sb1001_1101_0011
-cassert x == 0sb1000_0000
+cassert(x == 0sb1000_0000)
 sat z =0sb1001_1101_0011
-cassert z == 0
+cassert(z == 0)
 
 sat x =0sb0001_1101_0011
-cassert x == 0sb0111_1111
+cassert(x == 0sb0111_1111)
 sat z =0sb0001_1101_0011
-cassert z == 0sb0111_1111
+cassert(z == 0sb0111_1111)

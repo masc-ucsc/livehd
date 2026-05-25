@@ -7,4 +7,4 @@
 
 const a = 2
 const b = 2
-cassert 2 == a == b
+cassert(2 == a == b)

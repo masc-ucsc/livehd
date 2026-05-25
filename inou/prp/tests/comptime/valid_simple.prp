@@ -8,19 +8,19 @@
 mut v1:u32 = 0
 mut v2:u32 = 0
 
-cassert v1 == 0 and v2 == 0
+cassert(v1 == 0 and v2 == 0)
 
 v1 = 0sb?
 v2 = 0sb?
 
-cassert (v1 != 0) == 0sb?
-cassert (v2 != 0) == 0sb?
+cassert((v1 != 0) == 0sb?)
+cassert((v2 != 0) == 0sb?)
 
 const res1 = v1 + 0
 const res2 = v2 + 1
 
-cassert res1 == v1 == 0sb?  // 1 bit, unknown
-cassert res2 == 0sb??       // 2 bits, unknown both of them
+cassert(res1 == v1 == 0sb?)  // 1 bit, unknown
+cassert(res2 == 0sb??)       // 2 bits, unknown both of them
 
 v2 = 100
-cassert (v2 + 1) == 101
+cassert((v2 + 1) == 101)

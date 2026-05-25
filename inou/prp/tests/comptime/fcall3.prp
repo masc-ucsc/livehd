@@ -9,4 +9,4 @@ comb fcall3(a:u3) -> (res:s4) {
   res = a + b
 }
 b = 100
-cassert fcall3(a=1) == 4
+cassert(fcall3(a=1) == 4)

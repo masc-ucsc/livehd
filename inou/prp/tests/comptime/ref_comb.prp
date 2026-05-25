@@ -16,11 +16,11 @@ comb inline_ref(ref a)->(r) {
 }
 
 mut b = 1
-cassert b == 1
+cassert(b == 1)
 const d1 = inline_noref(b)
-cassert b == 1 and d1 == 104
+cassert(b == 1 and d1 == 104)
 
 mut c = 1
-cassert c == 1
+cassert(c == 1)
 const d2 = inline_ref(ref c)
-cassert c == 201 and d2 == 204
+cassert(c == 201 and d2 == 204)

@@ -12,11 +12,11 @@
 
 const buf = ((a=1, b=10), (a=2, b=20), (a=3, b=30))
 
-cassert buf.[size] == 3
-cassert buf[0].a == 1
-cassert buf[1].b == 20
-cassert buf[2].a == 3
-cassert buf[2].b == 30
+cassert(buf.[size] == 3)
+cassert(buf[0].a == 1)
+cassert(buf[1].b == 20)
+cassert(buf[2].a == 3)
+cassert(buf[2].b == 30)
 
 const total_a = buf[0].a + buf[1].a + buf[2].a
-cassert total_a == 6
+cassert(total_a == 6)

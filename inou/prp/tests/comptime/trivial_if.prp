@@ -11,22 +11,22 @@ mut c = 1
 if false {
     c = 2
 }
-cassert c == 1
+cassert(c == 1)
 c = 100 when false
-cassert c == 1
+cassert(c == 1)
 
 mut c2 = 3 when false
-cassert c2 == nil
+cassert(c2 == nil)
 
 mut c3 = 4 when true
-cassert c3 == 4
+cassert(c3 == 4)
 
 if false {
   mut d = 3
 }
-cassert d == nil
+cassert(d == nil)
 if true {
   mut d = 4
-  cassert d == 4
+  cassert(d == 4)
 }
-cassert d == nil
+cassert(d == nil)

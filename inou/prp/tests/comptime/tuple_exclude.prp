@@ -14,10 +14,10 @@ for (e, idx, key) in t1 {
   t2 ++= sing_tup
 }
 
-cassert t1 == t2
-cassert t1.a == t2.a
-cassert t1.b == t2.b
-cassert t1.c == t2.c
+cassert(t1 == t2)
+cassert(t1.a == t2.a)
+cassert(t1.b == t2.b)
+cassert(t1.c == t2.c)
 
 mut t3 = ()
 for (e, idx, key) in t1 {
@@ -26,6 +26,6 @@ for (e, idx, key) in t1 {
   t3 ++= sing_tup unless key == "b"
 }
 
-cassert t1 != t3
-cassert t3.a == t1.a == t2.a
-cassert t3.c == t1.c == t2.c
+cassert(t1 != t3)
+cassert(t3.a == t1.a == t2.a)
+cassert(t3.c == t1.c == t2.c)

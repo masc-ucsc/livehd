@@ -11,7 +11,7 @@ foo ++= (b = 1)
 
 foo ++= (const c::[ubits=5] = 2)
 
-cassert foo == (a=-1, b=1, c=2)
-cassert foo.c.[ubits] <= 5  // could be less if bitwidth proves that 2 only needs 2 bits
-cassert foo.[potato] == 4
-cassert foo.b.[potato] == 4
+cassert(foo == (a=-1, b=1, c=2))
+cassert(foo.c.[ubits] <= 5)  // could be less if bitwidth proves that 2 only needs 2 bits
+cassert(foo.[potato] == 4)
+cassert(foo.b.[potato] == 4)
