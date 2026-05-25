@@ -8,10 +8,10 @@
 comb top(a::[comptime], b::[comptime], c) -> (r) {
   mut x = 0
   r = (a.[comptime], b.[comptime], c.[comptime])
-  cassert (true, true, false) == r
+  cassert((true, true, false) == r)
 }
 
 reg x:u32
 
 const z = top(10, 30, x)
-cassert z == (true, true, false)
+cassert(z == (true, true, false))

@@ -274,8 +274,12 @@ void Lnast_prp_writer::write_cassert() {
   if (!move_to_child()) {
     return;
   }
-  print("cassert ");
+  // The new Pyrope grammar requires parens on every call, including
+  // `cassert`. Emit `cassert(<cond>)` so the round-trip output reparses
+  // under the current grammar.
+  print("cassert(");
   write_node();
+  print(")");
   move_to_parent();
 }
 

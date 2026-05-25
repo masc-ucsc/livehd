@@ -4,7 +4,7 @@
 */
 
 comb pick_max(a:u32, b:u32) -> (x:u32) {
-  assert a != b
+  assert(a != b)
 
   x = match (a<b, a>b) {
     == (true, false)  { a }
@@ -13,6 +13,6 @@ comb pick_max(a:u32, b:u32) -> (x:u32) {
 }
 
 test "works" {
-  assert pick_max(3,50) == 50
-  assert pick_max(0,5) == 5
+  assert(pick_max(3,50) == 50)
+  assert(pick_max(0,5) == 5)
 }

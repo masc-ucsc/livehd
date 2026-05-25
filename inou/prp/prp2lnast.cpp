@@ -138,6 +138,26 @@ void Prp2lnast::walk_statement_block(TSNode parent) {
   using namespace std::string_view_literals;
   const uint32_t   nc = ts_node_child_count(parent);
   std::string_view pending_overflow;
+  // Track the end byte of the previous processed child so we can scan the
+  // unparsed source span between siblings for the `wrap` / `sat` overflow
+  // prefix. The new grammar hides those tokens entirely (they are part of
+  // a hidden `_statement` seq with a field tag), so they no longer surface
+  // even as anonymous children.
+  uint32_t prev_end = ts_node_start_byte(parent);
+  auto scan_overflow_in_gap = [&](uint32_t gap_end) -> std::string_view {
+    if (prev_end >= gap_end) {
+      return {};
+    }
+    auto gap = text_between(prev_end, gap_end);
+    auto kw  = trim(gap);
+    if (kw == "wrap"sv) {
+      return "wrap"sv;
+    }
+    if (kw == "sat"sv) {
+      return "sat"sv;
+    }
+    return {};
+  };
   for (uint32_t i = 0; i < nc; i++) {
     TSNode           c = ts_node_child(parent, i);
     std::string_view t(ts_node_type(c));
@@ -160,6 +180,7 @@ void Prp2lnast::walk_statement_block(TSNode parent) {
     // stmts). See `consumed_lambda_body_starts`.
     if (consumed_lambda_body_starts.contains(ts_node_start_byte(c))) {
       pending_overflow = {};
+      prev_end         = ts_node_end_byte(c);
       continue;
     }
 
@@ -181,6 +202,11 @@ void Prp2lnast::walk_statement_block(TSNode parent) {
     }
 
     const bool is_assign = (t == "assignment"sv);
+    if (is_assign && pending_overflow.empty()) {
+      // Fallback: the grammar hides the `wrap`/`sat` token; recover it
+      // from the source text between the previous statement and this one.
+      pending_overflow = scan_overflow_in_gap(ts_node_start_byte(c));
+    }
     if (is_assign && !pending_overflow.empty()) {
       pending_overflow_kind = pending_overflow;
     }
@@ -191,6 +217,7 @@ void Prp2lnast::walk_statement_block(TSNode parent) {
     }
     pending_overflow_kind = {};
     pending_overflow      = {};
+    prev_end              = ts_node_end_byte(c);
   }
 }
 
@@ -230,6 +257,7 @@ void Prp2lnast::process_statement(TSNode n) {
       "identifier",
       "tuple",
       "tuple_sq",
+      "paren_group",
       "type_specification",
       "constant",
   };
@@ -259,6 +287,38 @@ void Prp2lnast::process_statement(TSNode n) {
   if (t == "match_expression") {
     (void)match_expr_to_node(n, /*need_result=*/false);
     return;
+  }
+  // `cassert(...)` / `assert(...)` are plain function calls in the new
+  // grammar (the dedicated `assert_statement` rule is gone). Detect them at
+  // statement position and emit a `cassert` LNAST node so the verifier
+  // counts the assertion. Other function calls fall through to the generic
+  // expr-as-statement path.
+  if (t == "function_call_expression") {
+    TSNode func = child_by_field(n, "function");
+    if (!ts_node_is_null(func)) {
+      auto fname = trim(get_text(func));
+      if (fname == "cassert" || fname == "assert") {
+        TSNode arg_tuple = child_by_field(n, "argument");
+        if (!ts_node_is_null(arg_tuple)) {
+          // The argument tuple is `(cond)` or `(cond, "msg")`. Lower the
+          // first arg as the condition; ignore the optional msg for now.
+          TSNode cond_node{};
+          uint32_t nnc = ts_node_named_child_count(arg_tuple);
+          if (nnc >= 1) {
+            cond_node = ts_node_named_child(arg_tuple, 0);
+          }
+          Lnast_node cond_ref;
+          if (ts_node_is_null(cond_node)) {
+            cond_ref = Lnast_node::create_const("true");
+          } else {
+            cond_ref = expr_to_node(cond_node);
+          }
+          auto idx = builder.add_child(Lnast_ntype::create_cassert());
+          lnast->add_child(idx, cond_ref);
+          return;
+        }
+      }
+    }
   }
   if (expr_stmt.contains(t)) {
     (void)expr_to_node(n);
@@ -539,15 +599,12 @@ Lnast_node Prp2lnast::process_lvalue_for_assign(TSNode lvalue, const Lnast_node&
           if (!ts_node_is_null(arg) && ts_node_eq(c, arg)) {
             continue;
           }
-          // Each `select` carries either a list of indices, or an
-          // open/from-zero range. Only the list form is supported as an
+          // Each `select` carries a single index expression, or an
+          // open/from-zero range. Only the index form is supported as an
           // lvalue path today.
-          TSNode list = child_by_field(c, "list");
-          if (!ts_node_is_null(list)) {
-            uint32_t lnnc = ts_node_named_child_count(list);
-            for (uint32_t j = 0; j < lnnc; j++) {
-              path.push_back(expr_to_node(ts_node_named_child(list, j)));
-            }
+          TSNode idx_node = child_by_field(c, "index");
+          if (!ts_node_is_null(idx_node)) {
+            path.push_back(expr_to_node(idx_node));
           }
         }
       } else if (t == "identifier") {
@@ -800,7 +857,11 @@ void Prp2lnast::process_assignment(TSNode n) {
 
   // The new grammar attaches a statement-level `wrap`/`sat` prefix as the
   // `overflow` field of the enclosing _statement. Lower it as an attr_set
-  // bound to the lvalue. Consumed once per assignment.
+  // bound to the lvalue. Emitted AFTER the assignment (below) to match the
+  // legacy `x::[wrap] = v` ordering the downstream `attributes` pass was
+  // validated against — overflow is treated as a sticky binding-level
+  // attribute, so the trailing position is observed by every later read of
+  // the lhs. Consumed once per assignment.
   const std::string_view overflow_kind = pending_overflow_kind;
   pending_overflow_kind                = {};
 
@@ -1801,6 +1862,16 @@ Lnast_node Prp2lnast::expr_to_node(TSNode n) {
   if (t == "tuple_sq") {
     return tuple_to_node(n, /*is_square=*/true);
   }
+  if (t == "paren_group") {
+    // Single-expression parenthesized grouping introduced in the new grammar
+    // (`(expr).foo`, `(expr)#[..]`, `(expr):type`). Pass through to the inner
+    // expression — the parens carry no value semantics on their own.
+    uint32_t nnc = ts_node_named_child_count(n);
+    if (nnc >= 1) {
+      return expr_to_node(ts_node_named_child(n, 0));
+    }
+    return Lnast_node::create_const("0");
+  }
   if (t == "typed_identifier") {
     TSNode id = child_by_field(n, "identifier");
     if (!ts_node_is_null(id)) {
@@ -1950,8 +2021,13 @@ Lnast_node Prp2lnast::type_specification_to_node(TSNode n) {
   // by walking children directly.
   uint32_t total = ts_node_child_count(n);
   for (uint32_t i = 0; i < total; i++) {
-    TSNode c = ts_node_child(n, i);
-    if (std::string_view(ts_node_type(c)) == "attribute_list") {
+    TSNode      c     = ts_node_child(n, i);
+    const char* fname = ts_node_field_name_for_child(n, i);
+    std::string_view ct(ts_node_type(c));
+    if (ct == "attribute_list") {
+      emit_attribute_list(aref, c);
+    } else if (ct == "tuple_sq" && fname && std::string_view(fname) == "attribute") {
+      // New grammar: write-side attribute carrier is a tuple_sq.
       emit_attribute_list(aref, c);
     }
   }
@@ -2013,8 +2089,12 @@ void Prp2lnast::emit_type_spec(const Lnast_node& target, TSNode type_cast_node) 
 attrs:
   uint32_t total = ts_node_child_count(type_cast_node);
   for (uint32_t i = 0; i < total; i++) {
-    TSNode c = ts_node_child(type_cast_node, i);
-    if (std::string_view(ts_node_type(c)) == "attribute_list") {
+    TSNode      c     = ts_node_child(type_cast_node, i);
+    const char* fname = ts_node_field_name_for_child(type_cast_node, i);
+    std::string_view ct(ts_node_type(c));
+    if (ct == "attribute_list") {
+      emit_attribute_list(target, c);
+    } else if (ct == "tuple_sq" && fname && std::string_view(fname) == "attribute") {
       emit_attribute_list(target, c);
     }
   }
@@ -2142,6 +2222,60 @@ void Prp2lnast::emit_arg_type(const Lnast_nid& assign_parent, TSNode type_node) 
 }
 
 void Prp2lnast::emit_attribute_list(const Lnast_node& target, TSNode attr_list_node) {
+  // Two shapes feed this function:
+  //   1. (legacy / read-side) `attribute_list` node: `[name (= value)?, ...]`.
+  //      The grammar wraps each item in an anonymous `seq(name, value?)`, so
+  //      `name` and `value` field tags appear directly on the parent.
+  //   2. (new write-side) `tuple_sq` node holding `[key=value, ...]`. Each
+  //      item is a named child — either `assignment` (key=value) or a bare
+  //      identifier (flag-only, value defaults to `true`).
+  std::string_view nt(ts_node_type(attr_list_node));
+  if (nt == "tuple_sq") {
+    uint32_t nnc = ts_node_named_child_count(attr_list_node);
+    for (uint32_t i = 0; i < nnc; ++i) {
+      TSNode           item = ts_node_named_child(attr_list_node, i);
+      std::string_view it(ts_node_type(item));
+      if (it == "assignment") {
+        TSNode lv = child_by_field(item, "lvalue");
+        TSNode rv = child_by_field(item, "rvalue");
+        if (ts_node_is_null(lv)) {
+          continue;
+        }
+        // Strip an optional `:Type` wrapper on the attribute key.
+        std::string_view key_txt;
+        std::string_view lvt(ts_node_type(lv));
+        if (lvt == "typed_identifier") {
+          TSNode id = child_by_field(lv, "identifier");
+          if (!ts_node_is_null(id)) {
+            key_txt = trim(get_text(id));
+          }
+        } else {
+          key_txt = trim(get_text(lv));
+        }
+        if (key_txt.empty()) {
+          continue;
+        }
+        auto idx = builder.add_child(Lnast_ntype::create_attr_set());
+        lnast->add_child(idx, target);
+        lnast->add_child(idx, Lnast_node::create_const(key_txt));
+        if (!ts_node_is_null(rv)) {
+          lnast->add_child(idx, expr_to_node(rv));
+        } else {
+          lnast->add_child(idx, Lnast_node::create_const("true"));
+        }
+      } else if (it == "identifier" || it == "ref_identifier") {
+        auto txt = trim(get_text(item));
+        if (txt.empty()) {
+          continue;
+        }
+        auto idx = builder.add_child(Lnast_ntype::create_attr_set());
+        lnast->add_child(idx, target);
+        lnast->add_child(idx, Lnast_node::create_const(txt));
+        lnast->add_child(idx, Lnast_node::create_const("true"));
+      }
+    }
+    return;
+  }
   // attribute_list: '[' (name (= value)?)*  ']'.
   // The grammar's `field('item', seq(field('name', ...), field('value', ...)))`
   // wraps an anonymous seq, so each item's inner field names appear directly
@@ -2650,6 +2784,7 @@ Lnast_node Prp2lnast::if_expr_to_node(TSNode n, bool need_result) {
       "identifier",
       "tuple",
       "tuple_sq",
+      "paren_group",
       "type_specification",
       "constant",
   };
@@ -2732,22 +2867,42 @@ Lnast_node Prp2lnast::match_expr_to_node(TSNode n, bool need_result) {
     result_outer = builder.mint_tmp_ref();
   }
 
-  // Wrap the entire match (init + compare nodes + if) in a private stmts
-  // scope so any local binding introduced by `init` (e.g.
-  // `match const t = m1; t { … }`) goes out of scope after the match
-  // exits. Without this t would leak into outer code and `cassert t == nil`
-  // post-match would observe the bound bundle instead of an undeclared ref.
-  auto match_scope_idx = builder.add_child(Lnast_ntype::create_stmts());
-  builder.push_stmts(match_scope_idx);
+  // Previously the match wrapped its init+compare+if in a private `stmts`
+  // scope so the `init` local (e.g. `match const t = m1; t { … }`'s `t`)
+  // could not leak after the match exited. That extra Block scope also
+  // isolated assignments to outer-scope `mut` vars from propagating after
+  // the match (e.g. `hit = …` inside an arm body). The arm bodies already
+  // run inside an `if` whose own `stmts` provides phi-merge for the outer
+  // vars; we leave the init+compare nodes at the enclosing stmts level so
+  // outer-var writes propagate correctly. `t` (or any init local) is
+  // released after the match by an explicit `assign t = nil` emitted below.
+  std::vector<std::string> init_locals;
 
   // Init: process every statement in the init list — they declare locals
-  // (typical: `const t = subject`) inside the match scope, where the arm
-  // bodies can still see them via lexical lookup.
+  // (typical: `const t = subject`) at the enclosing stmts level. Track the
+  // bound names so we can release them after the match exits.
   TSNode init = child_by_field(n, "init");
   if (!ts_node_is_null(init)) {
     uint32_t inc = ts_node_named_child_count(init);
     for (uint32_t i = 0; i < inc; i++) {
-      process_statement(ts_node_named_child(init, i));
+      TSNode           c = ts_node_named_child(init, i);
+      std::string_view ct(ts_node_type(c));
+      if (ct == "declaration_statement" || ct == "assignment") {
+        TSNode lv = child_by_field(c, "lvalue");
+        if (!ts_node_is_null(lv)) {
+          std::string_view lvt(ts_node_type(lv));
+          TSNode           id;
+          if (lvt == "typed_identifier") {
+            id = child_by_field(lv, "identifier");
+          } else if (lvt == "identifier") {
+            id = lv;
+          }
+          if (!ts_node_is_null(id)) {
+            init_locals.emplace_back(get_text(id));
+          }
+        }
+      }
+      process_statement(c);
     }
   }
 
@@ -2791,7 +2946,7 @@ Lnast_node Prp2lnast::match_expr_to_node(TSNode n, bool need_result) {
   std::vector<Arm> arms;
 
   bool             saw_first_condition = false;
-  TSNode           pending_expr_list   = {};
+  TSNode           pending_expr        = {};
   bool             have_pending        = false;
   bool             pending_is_else     = false;
   std::string_view pending_op          = "==";  // default per pyrope `match`
@@ -2802,6 +2957,11 @@ Lnast_node Prp2lnast::match_expr_to_node(TSNode n, bool need_result) {
     }
     std::string_view field(f);
     TSNode           c = child(n, i);
+    if (field == "else_code") {
+      // New grammar: the else body is its own field on match_expression.
+      else_code = c;
+      continue;
+    }
     if (field == "condition") {
       if (!saw_first_condition) {
         saw_first_condition = true;
@@ -2810,16 +2970,24 @@ Lnast_node Prp2lnast::match_expr_to_node(TSNode n, bool need_result) {
       std::string_view t(ts_node_type(c));
       std::string_view txt = trim(get_text(c));
       if (txt == "else") {
+        // Old grammar: 'else' keyword tagged with the same "condition" field.
         pending_is_else = true;
-      } else if (t == "expression_list") {
-        pending_expr_list = c;
-        have_pending      = true;
+      } else if (!ts_node_is_named(c)) {
+        // Anonymous op-token preceding the arm RHS (e.g. 'case', '!=', '<').
+        // Tree-sitter tags it with the same "condition" field because the
+        // grammar uses field('condition', seq(optional(op), _expression)).
+        // Remember it so the next arm-RHS knows which compare to emit.
+        pending_op = txt;
+      } else if (t == "expression_list" || t == "expression_item" || t == "constant" || t == "identifier"
+                 || t == "tuple" || t == "tuple_sq" || t == "paren_group" || t == "function_call_expression"
+                 || t == "member_selection" || t == "bit_selection" || t == "dot_expression"
+                 || t == "unary_expression" || t == "attribute_read" || t == "type_specification"
+                 || t == "if_expression" || t == "match_expression") {
+        // Any expression-typed named child is the arm RHS.
+        pending_expr = c;
+        have_pending = true;
       } else {
-        // Anonymous op-token preceding the expression_list (e.g. 'case',
-        // '!=', '<'). Tree-sitter tags it with the same "condition" field
-        // because the grammar uses field('condition', seq(optional(op),
-        // expression_list)). Remember it so the next expression_list knows
-        // which compare node to emit.
+        // Unknown — treat as an op-token text.
         pending_op = txt;
       }
     } else if (field == "code") {
@@ -2849,18 +3017,25 @@ Lnast_node Prp2lnast::match_expr_to_node(TSNode n, bool need_result) {
         };
 
         Lnast_node arm_cond;
-        uint32_t   nnc = ts_node_named_child_count(pending_expr_list);
-        if (nnc == 0) {
-          arm_cond = emit_compare(constant_text_to_node(trim(get_text(pending_expr_list))));
-        } else if (nnc == 1) {
-          arm_cond = emit_compare(expr_to_node(ts_node_named_child(pending_expr_list, 0)));
-        } else {
-          auto or_idx = builder.add_child(Lnast_ntype::create_log_or());
-          arm_cond    = builder.mint_tmp_ref();
-          lnast->add_child(or_idx, arm_cond);
-          for (uint32_t j = 0; j < nnc; j++) {
-            lnast->add_child(or_idx, emit_compare(expr_to_node(ts_node_named_child(pending_expr_list, j))));
+        // Legacy grammar emitted an `expression_list` wrapper (multi-RHS arms);
+        // the new grammar exposes the bare expression directly. Handle both.
+        std::string_view pet(ts_node_type(pending_expr));
+        if (pet == "expression_list") {
+          uint32_t nnc = ts_node_named_child_count(pending_expr);
+          if (nnc == 0) {
+            arm_cond = emit_compare(constant_text_to_node(trim(get_text(pending_expr))));
+          } else if (nnc == 1) {
+            arm_cond = emit_compare(expr_to_node(ts_node_named_child(pending_expr, 0)));
+          } else {
+            auto or_idx = builder.add_child(Lnast_ntype::create_log_or());
+            arm_cond    = builder.mint_tmp_ref();
+            lnast->add_child(or_idx, arm_cond);
+            for (uint32_t j = 0; j < nnc; j++) {
+              lnast->add_child(or_idx, emit_compare(expr_to_node(ts_node_named_child(pending_expr, j))));
+            }
           }
+        } else {
+          arm_cond = emit_compare(expr_to_node(pending_expr));
         }
         arms.push_back({arm_cond, c});
         have_pending = false;
@@ -2892,6 +3067,7 @@ Lnast_node Prp2lnast::match_expr_to_node(TSNode n, bool need_result) {
       "identifier",
       "tuple",
       "tuple_sq",
+      "paren_group",
       "type_specification",
       "constant",
   };
@@ -2945,9 +3121,16 @@ Lnast_node Prp2lnast::match_expr_to_node(TSNode n, bool need_result) {
     emit_body(else_code);
   }
 
-  // Exit the private match scope; any local declared in `init` (e.g.
-  // `const t = subject`) is now invisible to the surrounding code.
-  builder.pop_stmts();
+  // Release any local declared by the `init` clause (e.g.
+  // `match const t = subject; …` → `t`) so reads after the match observe
+  // it as nil instead of the still-live bundle. Emitted as plain
+  // `assign <name> = nil` at the enclosing stmts level since we no longer
+  // wrap the match in a private scope.
+  for (const auto& name : init_locals) {
+    auto idx = builder.add_child(Lnast_ntype::create_assign());
+    lnast->add_child(idx, Lnast_node::create_ref(name));
+    lnast->add_child(idx, Lnast_node::create_const("nil"));
+  }
 
   return need_result ? result : Lnast_node::create_const("0");
 }
@@ -3035,7 +3218,7 @@ Lnast_node Prp2lnast::bit_selection_to_node(TSNode n) {
 
   Lnast_node mask_ref = Lnast_node::create_const("-1");
   if (!ts_node_is_null(sel_node)) {
-    TSNode list  = child_by_field(sel_node, "list");
+    TSNode index_n = child_by_field(sel_node, "index");
     TSNode range = child_by_field(sel_node, "range");
 
     if (!ts_node_is_null(range)) {
@@ -3069,20 +3252,19 @@ Lnast_node Prp2lnast::bit_selection_to_node(TSNode n) {
         }
         mask_ref = emit_range(Lnast_node::create_const("0"), end_node);
       }
-    } else if (!ts_node_is_null(list) && ts_node_named_child_count(list) > 0) {
-      TSNode expr = ts_node_named_child(list, 0);
-      auto   et   = std::string_view(ts_node_type(expr));
+    } else if (!ts_node_is_null(index_n)) {
+      auto et = std::string_view(ts_node_type(index_n));
       if (et == "expression_item") {
-        if (auto const_mask = make_range_mask(expr)) {
+        if (auto const_mask = make_range_mask(index_n)) {
           mask_ref = *const_mask;
         } else {
-          mask_ref = expr_to_node(expr);
+          mask_ref = expr_to_node(index_n);
         }
       } else {
-        if (auto const_mask = make_const_mask(get_text(expr))) {
+        if (auto const_mask = make_const_mask(get_text(index_n))) {
           mask_ref = *const_mask;
         } else {
-          mask_ref = make_dynamic_mask(expr);
+          mask_ref = make_dynamic_mask(index_n);
         }
       }
     }
@@ -3140,12 +3322,9 @@ Lnast_node Prp2lnast::member_selection_to_node(TSNode n) {
   for (uint32_t i = 1; i < nnc; i++) {
     TSNode sel = ts_node_named_child(n, i);
 
-    TSNode list = child_by_field(sel, "list");
-    if (!ts_node_is_null(list)) {
-      uint32_t lnnc = ts_node_named_child_count(list);
-      for (uint32_t j = 0; j < lnnc; j++) {
-        fields.push_back(expr_to_node(ts_node_named_child(list, j)));
-      }
+    TSNode index_n = child_by_field(sel, "index");
+    if (!ts_node_is_null(index_n)) {
+      fields.push_back(expr_to_node(index_n));
       continue;
     }
 
@@ -3361,8 +3540,17 @@ Lnast_node Prp2lnast::tuple_to_node(TSNode n, bool /*is_square*/) {
         }
         uint32_t total = ts_node_child_count(parent_node);
         for (uint32_t k = 0; k < total; k++) {
-          TSNode kc = ts_node_child(parent_node, k);
-          if (std::string_view(ts_node_type(kc)) == "attribute_list") {
+          TSNode      kc    = ts_node_child(parent_node, k);
+          const char* kfn   = ts_node_field_name_for_child(parent_node, k);
+          std::string_view kt(ts_node_type(kc));
+          if (kt == "attribute_list") {
+            it.attr_list_node = kc;
+            it.has_attr_list  = true;
+            return;
+          }
+          // New grammar: the write-side `::[…]` attribute carrier is a
+          // `tuple_sq` tagged with the `attribute` field on a `type_cast`.
+          if (kt == "tuple_sq" && kfn && std::string_view(kfn) == "attribute") {
             it.attr_list_node = kc;
             it.has_attr_list  = true;
             return;
@@ -3380,8 +3568,15 @@ Lnast_node Prp2lnast::tuple_to_node(TSNode n, bool /*is_square*/) {
       if (!it.has_attr_list) {
         uint32_t total = ts_node_child_count(c);
         for (uint32_t k = 0; k < total; k++) {
-          TSNode kc = ts_node_child(c, k);
-          if (std::string_view(ts_node_type(kc)) == "attribute_list") {
+          TSNode      kc    = ts_node_child(c, k);
+          const char* kfn   = ts_node_field_name_for_child(c, k);
+          std::string_view kt(ts_node_type(kc));
+          if (kt == "attribute_list") {
+            it.attr_list_node = kc;
+            it.has_attr_list  = true;
+            break;
+          }
+          if (kt == "tuple_sq" && kfn && std::string_view(kfn) == "attribute") {
             it.attr_list_node = kc;
             it.has_attr_list  = true;
             break;

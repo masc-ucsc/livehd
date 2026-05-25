@@ -10,4 +10,4 @@ comb top() {
 
 const a = top()
 
-cassert a == (1,2,10) == (a=1, b=(c=2), 10)
+cassert(a == (1,2,10) == (a=1, b=(c=2), 10))

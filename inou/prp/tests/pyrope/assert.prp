@@ -8,7 +8,7 @@
 comb top() {
   mut a = 1
   mut b = 2
-  cassert a == b // bad assert, should fail
+  cassert(a == b) // bad assert, should fail
 }
 
 top()

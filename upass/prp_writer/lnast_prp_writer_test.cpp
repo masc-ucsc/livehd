@@ -137,8 +137,8 @@ TEST(LnastPrpWriter, EqEmittedAsDoubleEquals) {
   EXPECT_EQ(output.find("eq("), std::string::npos) << "Should be infix: " << output;
 }
 
-// ── Test 5: cassert emits without parentheses ─────────────────────────────────
-TEST(LnastPrpWriter, CassertHasNoParens) {
+// ── Test 5: cassert emits with parentheses (new grammar) ─────────────────────
+TEST(LnastPrpWriter, CassertHasParens) {
   auto ln = std::make_shared<Lnast>("cassert_test");
   ln->set_root(Lnast_ntype::create_top());
   auto stmts = ln->add_child(ln->get_root(), Lnast_ntype::create_stmts());
@@ -147,12 +147,7 @@ TEST(LnastPrpWriter, CassertHasNoParens) {
   ln->add_child(ca, Lnast_node::create_ref("cond"));
 
   auto output = run_and_emit(ln, {"noop_shared"});
-  EXPECT_NE(output.find("cassert"), std::string::npos) << output;
-  // cassert must not be followed by '('
-  auto pos = output.find("cassert");
-  ASSERT_NE(pos, std::string::npos);
-  ASSERT_LT(pos + 7, output.size()) << "output too short after 'cassert': " << output;
-  EXPECT_NE(output[pos + 7], '(') << "cassert must have no parens: " << output;
+  EXPECT_NE(output.find("cassert(cond)"), std::string::npos) << output;
 }
 
 // ── Test 6: if with const-true condition is pruned ───────────────────────────
@@ -399,7 +394,7 @@ TEST(LnastPrpWriter, RoundTripConstpropFoldsArith) {
   const char* src = R"prp(
 comb rt_fold() {
   const a = 2 + 3
-  cassert a == 5
+  cassert(a == 5)
 }
 rt_fold()
 )prp";

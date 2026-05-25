@@ -8,11 +8,11 @@ comb top(x) ->(x) {
   const b = (10 - 1) / 3
   const c = a + b + x
 
-  cassert c == 14
+  cassert(c == 14)
   x = 100
 }
 
 const y = top(1)
 
-cassert y   == 100
-cassert y.x == 100
+cassert(y   == 100)
+cassert(y.x == 100)

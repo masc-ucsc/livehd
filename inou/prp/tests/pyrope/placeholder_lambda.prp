@@ -10,7 +10,7 @@ comb top(a, b) -> (s, t) {
   t = a - b;
 }
 
-cassert add(1,2) == 3
-cassert inc(5) == 6
+cassert(add(1,2) == 3)
+cassert(inc(5) == 6)
 const z = top(11,7)
-cassert z.s == 18 and z.t == 4
+cassert(z.s == 18 and z.t == 4)

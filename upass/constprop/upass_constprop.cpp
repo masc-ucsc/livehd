@@ -390,26 +390,26 @@ void uPass_constprop::process_log_not() {
 // is_named_top forward-declared near the top of the file so
 // process_assign can call it during shape-preserving merge.
 
-// Bundle == result is *four-valued*:
+// Bundle == result is *three-valued*:
 //   - std::nullopt        → can't decide (operand has unknowns)
 //   - Const{create_bool}  → true / false (definite shape+value verdict)
-//   - Const{nil}          → shape (and named keys) match but at least one
-//                            named-entry value differs concretely
 //
-// The nil outcome mirrors `func_case`'s "structural-match with value
-// mismatch on a named entry" rule (see fold_case): it lets `cassert m1
-// == t` discharge as pass when m1 and t share their key set but the
-// payload differs — the contract is "this assertion is structurally
-// well-formed but value-divergent", not a hard error. Bundles whose
-// first-level *key sets* differ still fold to false, so existing
-// `(x=1,4) != (y=1,4)` tests keep their semantics.
+// Tuple equality is purely structural value comparison: attributes
+// (declared mut/const, type tags, user-set decorations) are NOT compared.
+// `non_attr_entries()` already strips attribute keys from both sides, so
+// only data fields participate. When both operands have concrete
+// (no-unknowns) values at the same key and those values differ, the
+// result is concrete `false` — there is no "nil-as-pass" softening for
+// named-key mismatches. (Earlier versions returned nil so that
+// `cassert m1 == t` would discharge as pass when m1 and t shared keys
+// but values diverged; that masked real comparison failures and broke
+// `match`/`case` folding because the resulting nil cond marked downstream
+// arms as uncertain.)
 static std::optional<Const> compare_bundles_eq(const std::shared_ptr<Bundle const>& a, const std::shared_ptr<Bundle const>& b) {
   // Walks `src` and inspects each entry in `other`. Returns:
-  //   - 'k' key-mismatch (other lacks an entry src has, OR positional
-  //          mismatch) — caller maps to false (structural inequality)
-  //   - 'v' value-mismatch (named-key present, eq known-false) — caller
-  //          maps to nil
-  //   - 't' all entries matched
+  //   - 'f' definite false (key missing on the other side, or concrete
+  //          values mismatch at a shared key)
+  //   - 't' all entries matched concretely
   //   - '?' undecidable (invalid scalar, or eq returned unknowns)
   auto walk = [](const std::shared_ptr<Bundle const>& src, const std::shared_ptr<Bundle const>& other) -> char {
     char worst = 't';
@@ -419,7 +419,7 @@ static std::optional<Const> compare_bundles_eq(const std::shared_ptr<Bundle cons
         continue;
       }
       if (!other->has_trivial(k)) {
-        return 'k';
+        return 'f';
       }
       const Const& ov = other->get_trivial(k);
       if (ov.is_invalid()) {
@@ -434,14 +434,7 @@ static std::optional<Const> compare_bundles_eq(const std::shared_ptr<Bundle cons
         continue;
       }
       if (eq.is_known_false()) {
-        auto first = Bundle::get_first_level(k);
-        if (is_named_top(first)) {
-          if (worst == 't') {
-            worst = 'v';
-          }
-          continue;
-        }
-        return 'k';  // positional value mismatch is a hard inequality
+        return 'f';  // concrete value mismatch — definite inequality
       }
       worst = '?';
     }
@@ -449,21 +442,18 @@ static std::optional<Const> compare_bundles_eq(const std::shared_ptr<Bundle cons
   };
 
   const char ab = walk(a, b);
-  if (ab == 'k') {
+  if (ab == 'f') {
     return *Dlop::create_bool(false);
   }
   if (ab == '?') {
     return std::nullopt;
   }
   const char ba = walk(b, a);
-  if (ba == 'k') {
+  if (ba == 'f') {
     return *Dlop::create_bool(false);
   }
   if (ba == '?') {
     return std::nullopt;
-  }
-  if (ab == 'v' || ba == 'v') {
-    return *Dlop::nil();
   }
   return *Dlop::create_bool(true);
 }
@@ -1282,14 +1272,14 @@ void uPass_constprop::fold_case(const std::string& dst) {
   auto lhs_flat = collect_first_level(ba);
   auto rhs_flat = collect_first_level(bb);
 
-  bool r_has_named = false;
-  for (const auto& re : rhs_flat) {
-    if (!re.name.empty()) {
-      r_has_named = true;
-      break;
-    }
-  }
-
+  // `case` is a structural value-match. Attributes (mut/const, type
+  // tags, decorations) are stripped by collect_first_level via
+  // top_levels(), so only data fields participate — exactly the same
+  // contract as `==`. For each rhs entry we find the matching lhs entry
+  // and compare values; rhs wildcards (`0sb?`, etc.) make that entry
+  // pass trivially. A concrete value mismatch at any rhs entry is a
+  // definite false (no "nil softening" — that masked real failures and
+  // poisoned downstream `if` cond folding).
   bool defer = false;
   for (const auto& re : rhs_flat) {
     if (re.is_sub_bundle || re.value.is_invalid()) {
@@ -1337,11 +1327,7 @@ void uPass_constprop::fold_case(const std::string& dst) {
       continue;
     }
     if (eq_result.is_known_false()) {
-      if (r_has_named) {
-        store_trivial(dst, *Dlop::nil());
-      } else {
-        store_trivial(dst, *Dlop::create_bool(false));
-      }
+      store_trivial(dst, *Dlop::create_bool(false));
       return;
     }
     defer = true;
