@@ -11,8 +11,12 @@ so cross-file dependencies stay visible.
 
 ## Group 3 — depends on Group 2
 
-- **3i** Finish `lnast_to_lgraph` and validate against a Verilog golden via
+- **3a** Finish `lnast_to_lgraph` and validate against a Verilog golden via
   `inou/cgen` round-trip (synthesis-path closure).
+
+- **3b** Use the stable Pyrope as example for LNAST generation, and migrate
+  inou.slang to use the same LNAST structures and keep adding verilog tests
+  (inou/prp/tests/equiv)
 
 ## Group 5 — polish / final
 
