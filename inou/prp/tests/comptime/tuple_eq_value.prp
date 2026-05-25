@@ -1,0 +1,62 @@
+/*
+:name: tuple_eq_value
+:type: parsing lnast comptime
+:verifier_pass: 13
+:verifier_fail: 0
+*/
+
+// Tuple `==` / `!=` / `case` compare *values* only — they MUST NOT take
+// the per-field attribute info (declared `mut` / `const`, type tags, or
+// any other decoration) into account. Two tuples with the same shape and
+// same concrete values must compare equal regardless of whether their
+// fields were declared `mut` or `const` on either side.
+
+const m_const_const = (a=2, b=60)
+mut   m_mut_const   = (a=2, b=60)
+
+// 1. Plain `==` literal vs declared bundle — should be true.
+cassert(m_const_const == (a=2, b=60))
+
+// 2. `==` between two distinct bundles with identical contents — true.
+cassert(m_const_const == m_mut_const)
+
+// 3. Reverse order of named fields (Pyrope tuple eq is set-based on
+//    named entries) — must still compare equal.
+cassert(m_const_const == (b=60, a=2))
+
+// 4. Different declared mutability should not affect `==`.
+const cc = (a=1, b=2)
+mut   mm = (a=1, b=2)
+cassert(cc == mm)
+cassert(mm == cc)
+
+// 5. Concrete value mismatch must fold to a definite `false`, not nil
+//    (which would otherwise mask the failure as a verifier "pass").
+cassert(not (m_const_const == (a=2, b=999)))
+cassert((a=1, b=2) != (a=1, b=3))
+
+// 6. `case` operator must also compare values only and fold concretely.
+const t = (a=2, b=60)
+cassert(    t case (a=2, b=0sb?))     // wildcard on b → match
+cassert(not(t case (a=33, b=0sb?)))   // a mismatch → definite false
+cassert(    t case (a=2))             // subset rhs → match
+cassert(not(t case (a=99)))           // subset value mismatch → false
+
+// 7. The fold must propagate through `if` so the taken arm is
+//    deterministic — this is the constprop regression that case_test1
+//    exercises end-to-end.
+mut hit = 0
+if t == (a=2, b=60) {
+  hit = 1052
+} else {
+  hit = 0
+}
+cassert(hit == 1052)
+
+mut hit2 = 0
+if t case (a=2, b=0sb?) {
+  hit2 = 7
+} else {
+  hit2 = 1
+}
+cassert(hit2 == 7)
