@@ -28,6 +28,13 @@ public:
   bool               has_configuration_error() const { return configuration_error; }
   const std::string& get_configuration_error() const { return configuration_error_msg; }
 
+  // Mark this runner as processing a function-body LNAST spawned by
+  // func_extract. The dead-code-elimination pass uses this to skip
+  // function bodies (their outputs are consumed by external callers
+  // and would look unreferenced from inside-the-body alone). pass_upass
+  // sets this flag for every LNAST past the original entry-point count.
+  void set_is_function_body(bool v) { is_function_body_ = v; }
+
   // Hands the freshly-built staging LNAST to the caller; after this the
   // runner no longer owns it. Call once per run(), after run() returns.
   std::shared_ptr<Lnast>              take_staging() { return std::move(staging); }
@@ -74,6 +81,7 @@ protected:
 
   bool        configuration_error{false};
   std::string configuration_error_msg;
+  bool        is_function_body_{false};
 
   // Step H — runner-owned dest forest. Allocated lazily on first run();
   // the staging tree below is created inside this forest. Conceptually
@@ -119,6 +127,16 @@ protected:
   void process_stmts() override;
   void process_if() override;
   void process_lnast();
+
+  // Post-walk DCE: scans the freshly-built staging tree, drops definition
+  // statements (assign / tuple_add / attr_set / etc.) whose dst name is
+  // never read elsewhere, and iterates to fixpoint. Constprop's
+  // classify_statement is conservative about multi-entry bundles (a tuple
+  // dst can't safely be inlined via fold_ref since fold_ref returns only
+  // the position-0 trivial), so it emits tuple_add+assign+attr_set chains
+  // for fully-constant tuples even when no downstream consumer survives.
+  // DCE cleans up those orphan chains.
+  void dead_code_eliminate_staging();
 
 private:
   using Pass_method = void (upass::uPass::*)();

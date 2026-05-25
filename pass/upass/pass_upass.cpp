@@ -319,10 +319,12 @@ void Pass_upass::work(Eprp_var& var) {
     // in try_eval_comb_call, so dropping the verifier here just avoids
     // double-walking unproven function bodies into the aggregate.
     auto order = up.upass_order;
-    if (idx >= original_lnast_count && !up.verifier_include_funcs) {
+    const bool is_function_body = idx >= original_lnast_count;
+    if (is_function_body && !up.verifier_include_funcs) {
       order.erase(std::remove(order.begin(), order.end(), "verifier"), order.end());
     }
     auto runner = uPass_runner(lm, order, up.pass_options);
+    runner.set_is_function_body(is_function_body);
     if (runner.has_configuration_error()) {
       fail_upass_runtime(std::format("pass.upass invalid pass configuration: {}", runner.get_configuration_error()));
     }

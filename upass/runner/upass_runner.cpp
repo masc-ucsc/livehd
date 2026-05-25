@@ -3,10 +3,13 @@
 #include "upass_runner.hpp"
 
 #include <algorithm>
+#include <format>
 #include <functional>
 #include <string>
 #include <unordered_map>
 #include <vector>
+
+#include "absl/container/flat_hash_set.h"
 
 #include "upass_runner_common.hpp"
 #include "upass_shared.hpp"
@@ -390,6 +393,15 @@ void uPass_runner::run(std::size_t max_iters) {
   // still see the marker they grep for.
   std::print("uPass - converged at iteration 1\n");
 
+  // Post-walk DCE on staging — removes definition statements (assign,
+  // tuple_add, attr_set, etc.) whose dst has no surviving downstream
+  // reader. Constprop is conservative about multi-entry tuple bundles
+  // (their dst can't fold via fold_ref's single-value return), so it
+  // emits orphan tuple_add+assign+attr_set chains for fully-constant
+  // tuples even when every consumer was already folded away. The DCE
+  // cleans those up.
+  dead_code_eliminate_staging();
+
   // Step J — dest-walk finisher dispatch. Passes that want to inspect
   // the freshly-built staging tree (verifier/assert cassert counts in
   // the redesign) override walk_dest. Default no-op; today no pass
@@ -409,6 +421,266 @@ void uPass_runner::run(std::size_t max_iters) {
     auto produced = entry.pass->take_new_lnasts();
     new_lnasts.insert(new_lnasts.end(), produced.begin(), produced.end());
   }
+}
+
+// ── Post-walk DCE ────────────────────────────────────────────────────────────
+
+namespace {
+
+// True iff `t` is a definition-producing op whose first child is a ref
+// to the value being defined. These are the ops eligible for DCE when
+// their dst is unused. attr_set is included because it "defines" the
+// attribute side-channel on its first-child target; an attr_set on a
+// dead name is itself dead.
+bool dce_is_def_producing(Lnast_ntype::Lnast_ntype_int t) {
+  using N = Lnast_ntype;
+  switch (t) {
+    case N::Lnast_ntype_assign:
+    case N::Lnast_ntype_dp_assign:
+    case N::Lnast_ntype_tuple_add:
+    case N::Lnast_ntype_tuple_concat:
+    case N::Lnast_ntype_tuple_get:
+    case N::Lnast_ntype_plus:
+    case N::Lnast_ntype_minus:
+    case N::Lnast_ntype_mult:
+    case N::Lnast_ntype_div:
+    case N::Lnast_ntype_mod:
+    case N::Lnast_ntype_shl:
+    case N::Lnast_ntype_sra:
+    case N::Lnast_ntype_sext:
+    case N::Lnast_ntype_set_mask:
+    case N::Lnast_ntype_get_mask:
+    case N::Lnast_ntype_bit_and:
+    case N::Lnast_ntype_bit_or:
+    case N::Lnast_ntype_bit_xor:
+    case N::Lnast_ntype_bit_not:
+    case N::Lnast_ntype_red_and:
+    case N::Lnast_ntype_red_or:
+    case N::Lnast_ntype_red_xor:
+    case N::Lnast_ntype_log_and:
+    case N::Lnast_ntype_log_or:
+    case N::Lnast_ntype_log_not:
+    case N::Lnast_ntype_eq:
+    case N::Lnast_ntype_ne:
+    case N::Lnast_ntype_lt:
+    case N::Lnast_ntype_le:
+    case N::Lnast_ntype_gt:
+    case N::Lnast_ntype_ge:
+    case N::Lnast_ntype_is:
+    case N::Lnast_ntype_func_call:
+    case N::Lnast_ntype_func_does:
+    case N::Lnast_ntype_func_equals:
+    case N::Lnast_ntype_func_in:
+    case N::Lnast_ntype_func_has:
+    case N::Lnast_ntype_func_case:
+    case N::Lnast_ntype_attr_set:
+    case N::Lnast_ntype_attr_get:
+      return true;
+    default:
+      return false;
+  }
+}
+
+// `attr_set TARGET 'type' 'mut'|'reg'` records a user-visible storage
+// class declaration; even when the name has no surviving readers, we
+// keep the declaration so downstream consumers (lnastfmt, bitwidth)
+// still see it.
+bool dce_is_keepalive_attr_set(const Lnast& staging, const Lnast_nid& node) {
+  if (staging.get_type(node) != Lnast_ntype::Lnast_ntype_attr_set) {
+    return false;
+  }
+  auto tgt = staging.get_first_child(node);
+  if (!tgt.is_valid()) {
+    return false;
+  }
+  auto key = staging.get_sibling_next(tgt);
+  if (!key.is_valid() || staging.get_type(key) != Lnast_ntype::Lnast_ntype_const) {
+    return false;
+  }
+  if (staging.get_name(key) != "type") {
+    return false;
+  }
+  auto val = staging.get_sibling_next(key);
+  if (!val.is_valid() || staging.get_type(val) != Lnast_ntype::Lnast_ntype_const) {
+    return false;
+  }
+  auto v = staging.get_name(val);
+  return v == "mut" || v == "reg";
+}
+
+}  // namespace
+
+void uPass_runner::dead_code_eliminate_staging() {
+  if (!staging) {
+    return;
+  }
+  // Only run DCE when constprop is active. DCE relies on its fold to
+  // settle if-bodies and tuple_get expansions; without it the runner's
+  // branch-elimination hasn't pruned dead arms and the use-count would
+  // be wildly off. Skip on func_extract-spawned function bodies: their
+  // outputs are consumed externally and would look unreferenced from
+  // inside-the-body alone.
+  bool has_constprop = false;
+  for (auto& e : upasses) {
+    if (e.name == "constprop") {
+      has_constprop = true;
+      break;
+    }
+  }
+  if (!has_constprop || is_function_body_) {
+    return;
+  }
+  using N = Lnast_ntype;
+
+  // Compute the live-statement set via iterative liveness on the
+  // staging tree, then rebuild a fresh tree containing only the live
+  // statements. Avoiding in-place delete_subtree dodges HHDS's
+  // pre-order iterator transiently yielding default-constructed
+  // Node_class instances for deleted slots — downstream lnastfmt walks
+  // would crash on the unchecked `get_type` that follows.
+
+  // Set of statement nids in the staging tree that should be dropped.
+  absl::flat_hash_set<int64_t> dead_stmts;
+
+  bool changed = true;
+  while (changed) {
+    changed = false;
+
+    // Pass 1: count uses (refs in non-LHS positions) for each name. Refs
+    // that live inside an already-dead statement don't count.
+    absl::flat_hash_map<std::string, int> use_count;
+    for (auto node : staging->depth_preorder(staging->get_root())) {
+      if (node.is_invalid()) {
+        continue;
+      }
+      if (staging->get_type(node) != N::Lnast_ntype_ref) {
+        continue;
+      }
+      auto parent = staging->get_parent(node);
+      if (!parent.is_valid()) {
+        continue;
+      }
+      bool inside_dead = false;
+      for (auto a = parent; a.is_valid(); a = staging->get_parent(a)) {
+        if (dead_stmts.contains(a.get_class_index().value)) {
+          inside_dead = true;
+          break;
+        }
+      }
+      if (inside_dead) {
+        continue;
+      }
+      const bool is_lhs = dce_is_def_producing(staging->get_type(parent)) && node.is_first_child();
+      if (!is_lhs) {
+        ++use_count[std::string(staging->get_name(node))];
+      }
+    }
+
+    // Pass 2: extend the dead set with statement-level defs whose dst
+    // is unused. A node is statement-level only when its direct parent
+    // is a `stmts` block — nested `assign` nodes living inside a
+    // tuple_add (field-label payload, not a real statement) must be
+    // skipped. attr_set with `type`=mut|reg is a keepalive marker
+    // (storage class declarations survive even when the name has no
+    // surviving readers). Empty stmts subtrees are also dropped
+    // (constprop's dead-branch elimination collapses if/else with
+    // known conds to an empty stmts node so block scope survives;
+    // once nothing in there had effects, the wrapper itself is noise).
+    for (auto node : staging->depth_preorder(staging->get_root())) {
+      if (node.is_invalid()) {
+        continue;
+      }
+      const auto key = node.get_class_index().value;
+      if (dead_stmts.contains(key)) {
+        continue;
+      }
+      auto parent = staging->get_parent(node);
+      if (!parent.is_valid()) {
+        continue;
+      }
+      const bool parent_is_stmts = staging->get_type(parent) == N::Lnast_ntype_stmts;
+      auto t = staging->get_type(node);
+
+      // Empty stmts subtree (other than the body shell directly under top).
+      if (t == N::Lnast_ntype_stmts) {
+        bool has_live_child = false;
+        for (auto c = node.first_child(); c.is_valid(); c = c.next_sibling()) {
+          if (!dead_stmts.contains(c.get_class_index().value)) {
+            has_live_child = true;
+            break;
+          }
+        }
+        if (!has_live_child && staging->get_type(parent) != N::Lnast_ntype_top) {
+          dead_stmts.insert(key);
+          changed = true;
+        }
+        continue;
+      }
+
+      if (!parent_is_stmts) {
+        continue;  // payload node inside an op (e.g. nested assign in tuple_add)
+      }
+      if (!dce_is_def_producing(t)) {
+        continue;
+      }
+      if (dce_is_keepalive_attr_set(*staging, node)) {
+        continue;
+      }
+      auto fc = staging->get_first_child(node);
+      if (!fc.is_valid() || staging->get_type(fc) != N::Lnast_ntype_ref) {
+        continue;
+      }
+      auto it = use_count.find(std::string(staging->get_name(fc)));
+      if (it == use_count.end() || it->second == 0) {
+        dead_stmts.insert(key);
+        changed = true;
+      }
+    }
+  }
+
+  if (dead_stmts.empty()) {
+    return;
+  }
+
+  // Rebuild staging into a fresh forest body, copying every live node.
+  // Once we descend into a non-structural op (anything that isn't
+  // top/stmts/if/while/for), every descendant is statement payload and
+  // is copied unconditionally — only structural-level statements get
+  // dead-checked.
+  auto fresh_body  = dest_forest_->create_tree_temp(std::format("optimized-{}", lm->get_top_module_name()));
+  auto new_staging = std::make_shared<Lnast>(fresh_body, lm->get_top_module_name());
+
+  auto src_root = staging->get_root();
+  auto dst_root = new_staging->set_root(staging->get_type(src_root));
+
+  auto is_structural = [](Lnast_ntype::Lnast_ntype_int t) {
+    return t == N::Lnast_ntype_top || t == N::Lnast_ntype_stmts || t == N::Lnast_ntype_if
+           || t == N::Lnast_ntype_while || t == N::Lnast_ntype_for;
+  };
+
+  std::function<void(const Lnast_nid&, const Lnast_nid&, bool)> copy_subtree;
+  copy_subtree = [&](const Lnast_nid& src, const Lnast_nid& dst, bool inside_payload) {
+    auto fc = src.first_child();
+    while (fc.is_valid()) {
+      const bool is_dead_stmt = !inside_payload && dead_stmts.contains(fc.get_class_index().value);
+      if (!is_dead_stmt) {
+        auto t = staging->get_type(fc);
+        Lnast_nid new_child;
+        if (t == N::Lnast_ntype_ref) {
+          new_child = new_staging->add_child(dst, Lnast_node::create_ref(staging->get_name(fc)));
+        } else if (t == N::Lnast_ntype_const) {
+          new_child = new_staging->add_child(dst, Lnast_node::create_const(staging->get_name(fc)));
+        } else {
+          new_child = new_staging->add_child(dst, t);
+          copy_subtree(fc, new_child, inside_payload || !is_structural(t));
+        }
+      }
+      fc = fc.next_sibling();
+    }
+  };
+  copy_subtree(src_root, dst_root, false);
+
+  staging = new_staging;
 }
 
 // ── Node dispatch ─────────────────────────────────────────────────────────────
