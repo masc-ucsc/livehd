@@ -1,0 +1,10 @@
+/*
+:name: string_hello
+:type: comptime
+:verifier_pass: 1
+:verifier_fail: 0
+*/
+const a = 1
+const msg = "Hello a is {a}"
+puts(msg)
+cassert(msg == "Hello a is 1")

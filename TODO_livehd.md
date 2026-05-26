@@ -12,23 +12,50 @@ complete before group N+1 starts. Group letters are shared across
 
 ## Group 1 — foundation
 
+- **1c** `pass.lnastfmt` validator (arity, SSA uniqueness, `delay_assign`
+  rules, deprecation warnings) — `docs/contracts/lnast_spec.md §5`.
+
+- **1g** Forest per-tree readiness for parallel func_extract —
+  `docs/contracts/hhds_migration.md §G6`. With two separate forests
+  now (`lgdb/parse` and `lgdb/optimized`), the simpler design may be
+  "return nullptr tree while still being populated if someone asks
+  for it" instead of an explicit ready bit. An atomic `local_done`
+  flag is still likely needed regardless, to gate phase-1
+  func_extract against in-flight publishing of `tree_ios`.
+  - Lives on the Forest slot, not on `hhds::Tree`, so
+    `Tree::clone()` / `TreeIO::replace()` don't have to preserve
+    it — they reset `local_done = false` until the new body
+    finishes its local upass.
+  - Unblocks [[2o]] (two-phase func_extract) in Group 2.
+
+## Group 1-complex — foundation, larger scope
+
+Tasks that are independent of other Group 1/2 work but are large enough
+that they warrant their own bucket. Can be done in parallel with regular
+Group 1 entries; downstream Groups treat them as Group 1 dependencies.
+
 - **1b** New CLI: `setup/run/status/list/describe`, TOML config, JSONL
   results, error classes — `docs/contracts/future_cli.md`.
 - **1f** Source-map indirection (LOC propagation: canonical map + per-cell
   index, alias multi-loc, partition-root fallback) — see "Source location
   (LOC) propagation strategy" below and `docs/contracts/sourcemap.md`.
-- **1j** upass: prefer iterators over `std::vector` copies in pass plumbing
-  — see "upass: prefer iterators over std::vector copies" below.
-- **1c** `pass.lnastfmt` validator (arity, SSA uniqueness, `delay_assign`
-  rules, deprecation warnings) — `docs/contracts/lnast_spec.md §5`.
-- **1e** Drop `wrap`/`sat` as attributes; keep only the `wrap`/`sat`
-  *statement* form, lowered to a new LNAST `wrap`/`sat` op — see
-  "wrap/sat: statement-only via LNAST op" below.
-
 ## Group 2 — depends on Group 1
 
-- **2a** Forest per-tree readiness (`local_done`) —
-  `docs/contracts/hhds_migration.md §8`.
+- **2m** Drop `wrap`/`sat` as attributes; keep only the `wrap`/`sat`
+  *statement* form, lowered to a new LNAST `wrap`/`sat` op — see
+  "wrap/sat: statement-only via LNAST op" below.
+  - Depends on [[1v]] (LNAST typesystem upass in TODO_prp.md): the
+    wrap/sat op reads the target's `bits`/`max`/`min`, which the type
+    system publishes (unless explicitly set as an attribute). Without
+    the typesystem in place, the op has no `max`/`min` to consume.
+  - Fixes failing comptime tests: `prp-wrap_checks` (re-type form
+    `x:u4:[wrap] = …`), `prp-wrap_complex` (`wrap x = …` and
+    `sat x = …` statements). Open question: `prp-wrap_checks`'s
+    `x:u4:[wrap] = …` syntax — is `[wrap]` on a type annotation
+    considered the kept statement form or the dropped attribute
+    form? Resolve before implementation; the test may need a rewrite
+    to `wrap x:u4 = …` if the latter.
+
 - **2h** Demand-driven incremental upass cache keyed on
   `(tree_body_hash, deps.interface_hash)` —
   `docs/contracts/architecture.md §4`.
@@ -318,28 +345,6 @@ The `GraphIO::DeclaredIoPin` graph-level bits + sign extension lands
 sooner (it's the immediate Sub_node-deletion unblocker, smaller scope,
 no PinEntry/NodeEntry surgery required).
 
-## upass: prefer iterators over std::vector copies
-
-`upass/` code paths build and pass `std::vector<...>` results all over the
-place (per-pass intermediate buffers, dependency lists, traversal results).
-This is convenient but forces materialization and copies even when the
-consumer only iterates once.
-
-Refactor toward iterator/range-based APIs:
-
-- Return ranges / lazy iterators instead of `std::vector` where the caller
-  only needs a single forward pass.
-- Where a concrete container is unavoidable, pass it by `const&` / move it
-  through, and avoid the "build vector, copy vector, return vector"
-  chains.
-- Audit hot upass paths (scheduler, dependency walking, per-tree work
-  queues) for accidental quadratic copies of vectors that just get fed
-  into the next pass.
-
-Performance optimization; may require non-trivial code rewrite in pass
-plumbing. Tracked as **1j** so the cleanup lands before the upass cache
-(**2h**) and partition descriptor (**3c**) work bakes vector-copy
-assumptions into more APIs.
 
 ## IDAP perf-sweep pass
 

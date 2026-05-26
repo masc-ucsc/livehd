@@ -1,0 +1,26 @@
+/*
+:name: matrix
+:type: comptime
+:verifier_pass: 9
+:verifier_fail: 0
+*/
+
+mut data:[4][2]u16 = 0
+
+mut counter = 1
+for a in 0..<4 {
+  for b in 0..<2 {
+    cassert(data[a][b] == 0)
+    data[a][b] = counter
+    counter += 1
+  }
+}
+
+mut counter = 1
+for a in (0,1,2,3) {
+  for b in (0,1) {
+    cassert(data[a][b] == counter)
+    counter += 1
+  }
+}
+cassert(counter==8)

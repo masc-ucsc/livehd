@@ -1,0 +1,63 @@
+/*
+:name: fcall5b
+:type: comptime
+:verifier_pass: 10
+:verifier_fail: 0
+*/
+// dox returns a nested tuple (foo has sub-fields bar and baz) plus a scalar c
+comb dox(a) -> (foo, c) {
+  foo = (bar = a + 1, baz = a + 2)
+  c   = a + 10
+}
+
+// whatever: same shape, different name — used to test rename of the whole
+// return tuple plus a sub-field in the same destructure
+comb whatever(a) -> (foo, c) {
+  foo = (bar = a + 100, baz = a + 200)
+  c   = a + 1000
+}
+
+// OK — local names match the return-field names; foo keeps its nested shape
+mut (foo, c) = dox(a=3)
+cassert(foo.bar == 4 and foo.baz == 5)
+cassert(c == 13)
+
+// OK — rename across nested paths: dox.foo.bar -> x, dox.foo.baz -> y, dox.c -> z
+mut (x = dox.foo.bar, y = dox.foo.baz, z = dox.c) = dox(a=10)
+cassert(x == 11 and y == 12 and z == 20)
+
+// OK — reassign with nested rename, order doesn't matter (bind by name)
+(z = dox.c, y = dox.foo.baz, x = dox.foo.bar) = dox(a=20)
+cassert(x == 21 and y == 22 and z == 30)
+
+// OK — discard the return value entirely (no capture on the LHS)
+dox(a=99)
+
+// match against a nested local tuple built from the call result
+const t = dox(a=5)
+mut hit = 0
+match t {
+  == (foo=(bar=0, baz=0), c=0)   { hit = 100 }
+  == (foo=(bar=6, baz=7), c=15)  { hit = 200 }
+  else                           { hit = 300 }
+}
+cassert(hit == 200)
+
+// match using `case` pattern with wildcards on the nested shape
+mut hit2 = 0
+match t {
+  case (foo=(bar=0sb?, baz=7), c=0sb?) { hit2 = 1 }
+  case (foo=(bar=0sb?, baz=0), c=0sb?) { hit2 = 2 }
+  else                                 { hit2 = 3 }
+}
+cassert(hit2 == 1)
+
+// rename whole-return + sub-field in the same destructure, using a different func name
+mut (zall = whatever, yfoo = whatever.foo) = whatever(a=20)
+cassert(zall.foo.bar == 120 and zall.foo.baz == 220 and zall.c == 1020)
+cassert(yfoo.bar == 120 and yfoo.baz == 220)
+
+// reassign (no mut) — order swapped, bind by name
+(yfoo = whatever.foo, zall = whatever) = whatever(a=30)
+cassert(zall == (foo=(bar=130, baz=230), c=1030))
+cassert(yfoo == (bar=130, baz=230))

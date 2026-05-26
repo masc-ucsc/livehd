@@ -1,0 +1,21 @@
+/*
+:name: fcall5
+:type: comptime
+:verifier_pass: 5
+:verifier_fail: 0
+*/
+comb dox(a) -> (b, c) { b = a + 1; c = a + 2 ; a = a + 1 }
+
+mut a = 100
+mut (b, c) = dox(a=3)        // OK — local names match return-field names
+cassert(b == 4 and c==5)
+cassert(a==100)
+a = 7
+(c, b) = dox(a)        // OK — order doesn't matter, bind by name
+cassert(b == 8 and c==9)
+
+mut (x=dox.b, y=dox.c) = dox(a=3)    // OK — rename: dox.b → x, dox.c → y
+cassert(x == 4 and y==5)
+
+(x=dox.b, y=dox.c) = dox(a=3)    // OK — rename: dox.b → x, dox.c → y
+cassert(x == 8 and y==9)

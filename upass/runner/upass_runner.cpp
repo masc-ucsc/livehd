@@ -630,7 +630,16 @@ void uPass_runner::dead_code_eliminate_staging() {
       if (!fc.is_valid() || staging->get_type(fc) != N::Lnast_ntype_ref) {
         continue;
       }
-      auto it = use_count.find(std::string(staging->get_name(fc)));
+      // Only DCE temporary defs (`___N`). User-named variables (out, tmp,
+      // alt …) may be observable outputs or have meaning to downstream
+      // consumers that DCE can't see (IO ports lose their `%`/`$` prefix
+      // by the time they hit staging). Dropping a user-named def with no
+      // in-tree readers would silently delete writes the user intended.
+      const auto fc_name = staging->get_name(fc);
+      if (!Lnast::is_tmp(fc_name)) {
+        continue;
+      }
+      auto it = use_count.find(std::string(fc_name));
       if (it == use_count.end() || it->second == 0) {
         dead_stmts.insert(key);
         changed = true;

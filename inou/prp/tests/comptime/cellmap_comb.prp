@@ -1,0 +1,201 @@
+/*
+:name: cellmap_comb
+:type: comptime
+:verifier_pass: 104
+:verifier_fail: 0
+*/
+
+// Trivial coverage for the stateless combinational cells declared in
+// graph/cell.hpp. Each cell is wrapped in a tiny `comb` lambda using
+// the corresponding Pyrope operator, then exercised with 2-4 cases.
+// Each case is also re-checked against the direct `__<cell>` call
+// (the library-level cell invocation, same style as `__hotmux` in
+// formux.prp). Direct cell call args are positional and follow the
+// pin order from cell.cpp / docs/contracts/lnast2lgraph.md.
+//
+// Stateful cells (Memory, Flop, Latch, Fflop) and Sub/IO/AttrSet are
+// out of scope. LUT has no direct Pyrope syntax (the compiler folds
+// small match/Mux into LUTs when profitable), so it is covered via Mux.
+
+// Ntype_op::Sum -- pins A (add) and B (subtract); only A used here.
+comb cell_sum(a:u32, b:u32) -> (y) { y = a + b }
+
+cassert(cell_sum(1, 2) == 3)
+cassert(  __sum(1, 2) == 3)
+cassert(cell_sum(100, 200) == 300)
+cassert(  __sum(100, 200) == 300)
+cassert(cell_sum(0, 0) == 0)
+cassert(  __sum(0, 0) == 0)
+
+// Ntype_op::Mult -- repeated A pin
+comb cell_mult(a:u32, b:u32) -> (y) { y = a * b }
+
+cassert(cell_mult(3, 4) == 12)
+cassert(  __mult(3, 4) == 12)
+cassert(cell_mult(0, 99) == 0)
+cassert(  __mult(0, 99) == 0)
+cassert(cell_mult(7, 7) == 49)
+cassert(  __mult(7, 7) == 49)
+
+// Ntype_op::Div
+comb cell_div(a:u32, b:u32) -> (y) { y = a / b }
+
+cassert(cell_div(10, 2) == 5)
+cassert(  __div(10, 2) == 5)
+cassert(cell_div(15, 4) == 3)
+cassert(  __div(15, 4) == 3)
+cassert(cell_div(0, 5) == 0)
+cassert(  __div(0, 5) == 0)
+
+// Ntype_op::And (bitwise) -- repeated A pin
+comb cell_and(a:u8, b:u8) -> (y) { y = a & b }
+
+cassert(cell_and(0ub1100, 0ub1010) == 0ub1000)
+cassert(  __and(0ub1100, 0ub1010) == 0ub1000)
+cassert(cell_and(0xff, 0x0f) == 0x0f)
+cassert(  __and(0xff, 0x0f) == 0x0f)
+cassert(cell_and(0, 0xff) == 0)
+cassert(  __and(0, 0xff) == 0)
+
+// Ntype_op::Or (bitwise) -- repeated A pin
+comb cell_or(a:u8, b:u8) -> (y) { y = a | b }
+
+cassert(cell_or(0ub1100, 0ub1010) == 0ub1110)
+cassert(   __or(0ub1100, 0ub1010) == 0ub1110)
+cassert(cell_or(0, 0xff) == 0xff)
+cassert(   __or(0, 0xff) == 0xff)
+cassert(cell_or(0x55, 0xaa) == 0xff)
+cassert(   __or(0x55, 0xaa) == 0xff)
+
+// Ntype_op::Xor -- repeated A pin
+comb cell_xor(a:u8, b:u8) -> (y) { y = a ^ b }
+
+cassert(cell_xor(0ub1100, 0ub1010) == 0ub0110)
+cassert(  __xor(0ub1100, 0ub1010) == 0ub0110)
+cassert(cell_xor(0xff, 0xff) == 0)
+cassert(  __xor(0xff, 0xff) == 0)
+cassert(cell_xor(0x55, 0xaa) == 0xff)
+cassert(  __xor(0x55, 0xaa) == 0xff)
+
+// Ntype_op::Ror (reduce OR) -- single input
+comb cell_ror(a:u8) -> (y) { y = a#|[..] }
+
+cassert(cell_ror(0) == 0)
+cassert(  __ror(0) == 0)
+cassert(cell_ror(0ub0001) == -1)
+cassert(  __ror(0ub0001) == -1)
+cassert(cell_ror(0xff) == -1)
+cassert(  __ror(0xff) == -1)
+
+// Ntype_op::Not (bitwise) -- single input pin a
+comb cell_not(a:u8) -> (y:u8) { y = ~a }
+
+cassert(cell_not(0) == 0xff)
+cassert(  __not(0) == 0xff)
+cassert(cell_not(0xff) == 0)
+cassert(  __not(0xff) == 0)
+cassert(cell_not(0x0f) == 0xf0)
+cassert(  __not(0x0f) == 0xf0)
+
+// Ntype_op::Get_mask -- pins a, mask
+comb cell_get_mask(a:u8) -> (y) { y = a#[0..=3] }
+
+cassert(cell_get_mask(0xab) == 0xb)
+cassert(  __get_mask(0xab, 0xf) == 0xb)
+cassert(cell_get_mask(0x0f) == 0xf)
+cassert(  __get_mask(0x0f, 0xf) == 0xf)
+cassert(cell_get_mask(0xf0) == 0)
+cassert(  __get_mask(0xf0, 0xf) == 0)
+
+// Ntype_op::Set_mask -- pins a, mask, value
+comb cell_set_mask(base:u8, lo:u4) -> (y:u8) {
+  mut t = base
+  t#[0..=3] = lo
+  y = t
+}
+
+cassert(cell_set_mask(0xf0, 0xa) == 0xfa)
+cassert(  __set_mask(0xf0, 0xf, 0xa) == 0xfa)
+cassert(cell_set_mask(0, 0x5) == 0x05)
+cassert(  __set_mask(0, 0xf, 0x5) == 0x05)
+cassert(cell_set_mask(0xff, 0) == 0xf0)
+cassert(  __set_mask(0xff, 0xf, 0) == 0xf0)
+
+// Ntype_op::Sext -- pins a, b (b is the sign-bit position)
+comb cell_sext(a:u8) -> (y:sint) { y = a#sext[0..=3] }
+
+cassert(cell_sext(0ub1010) == -6)
+cassert(  __sext(0ub1010, 3) == -6)
+cassert(cell_sext(0ub0111) == 7)
+cassert(  __sext(0ub0111, 3) == 7)
+cassert(cell_sext(0ub1111) == -1)
+cassert(  __sext(0ub1111, 3) == -1)
+
+// Ntype_op::LT -- pins A (left) and B (right)
+comb cell_lt(a:sint, b:sint) -> (y:bool) { y = a < b }
+
+cassert(cell_lt(1, 2) == true)
+cassert(   __lt(1, 2) == true)
+cassert(cell_lt(2, 1) == false)
+cassert(   __lt(2, 1) == false)
+cassert(cell_lt(-3, 0) == true)
+cassert(   __lt(-3, 0) == true)
+
+// Ntype_op::GT -- pins A (left) and B (right)
+comb cell_gt(a:sint, b:sint) -> (y:bool) { y = a > b }
+
+cassert(cell_gt(2, 1) == true)
+cassert(   __gt(2, 1) == true)
+cassert(cell_gt(1, 2) == false)
+cassert(   __gt(1, 2) == false)
+cassert(cell_gt(0, -3) == true)
+cassert(   __gt(0, -3) == true)
+
+// Ntype_op::EQ -- repeated A pin
+comb cell_eq(a:u32, b:u32) -> (y:bool) { y = a == b }
+
+cassert(cell_eq(3, 3) == true)
+cassert(   __eq(3, 3) == true)
+cassert(cell_eq(3, 4) == false)
+cassert(   __eq(3, 4) == false)
+cassert(cell_eq(0, 0) == true)
+cassert(   __eq(0, 0) == true)
+
+// Ntype_op::SHL -- pins a, B
+comb cell_shl(a:u32, n:u8) -> (y) { y = a << n }
+
+cassert(cell_shl(1, 0) == 1)
+cassert(  __shl(1, 0) == 1)
+cassert(cell_shl(1, 4) == 16)
+cassert(  __shl(1, 4) == 16)
+cassert(cell_shl(3, 2) == 12)
+cassert(  __shl(3, 2) == 12)
+
+// Ntype_op::SRA -- pins a, b
+comb cell_sra(a:sint, n:u8) -> (y:sint) { y = a >> n }
+
+cassert(cell_sra(16, 2) == 4)
+cassert(  __sra(16, 2) == 4)
+cassert(cell_sra(-8, 1) == -4)
+cassert(  __sra(-8, 1) == -4)
+cassert(cell_sra(1, 0) == 1)
+cassert(  __sra(1, 0) == 1)
+
+// Ntype_op::Mux -- pin 0 selector, pins 1..N values (positional like __hotmux)
+comb cell_mux(sel:u2, a:u8, b:u8, c:u8, d:u8) -> (y:u8) {
+  y = match sel {
+    == 0 { a }
+    == 1 { b }
+    == 2 { c }
+    else { d }
+  }
+}
+
+cassert(cell_mux(0, 10, 20, 30, 40) == 10)
+cassert(  __mux(0, 10, 20, 30, 40) == 10)
+cassert(cell_mux(1, 10, 20, 30, 40) == 20)
+cassert(  __mux(1, 10, 20, 30, 40) == 20)
+cassert(cell_mux(2, 10, 20, 30, 40) == 30)
+cassert(  __mux(2, 10, 20, 30, 40) == 30)
+cassert(cell_mux(3, 10, 20, 30, 40) == 40)
+cassert(  __mux(3, 10, 20, 30, 40) == 40)

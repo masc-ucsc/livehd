@@ -1,0 +1,40 @@
+/*
+:name: bitreduce
+:type: comptime
+:verifier_pass: 9
+:verifier_fail: 0
+*/
+
+mut value = 0ub10_101_100
+const vbits = value#[3..=6]     // Extract bits 3-6
+cassert(vbits == 0ub101 and vbits == 0sb0101)
+value#[3] = 0                   // Set 3rd bit to 0
+
+// Reduction operators
+mut or_reduce = value#|[..]     // OR-reduce all bits
+mut and_reduce = value#&[..]    // AND-reduce all bits
+mut xor_reduce = value#^[..]    // XOR-reduce (parity)
+mut pop_count = value#+[..]     // Population count
+
+// Sign/zero extension
+mut extended = value#sext[0..=3] // Sign extend bits 0-3 (3 is sign)
+mut zero_ext = value#zext[1..=5] // Zero extend bits 1-5 (no sign)
+
+mut sparse:u3 = nil
+sparse#[0] = value#[0]
+sparse#[1] = value#[3]
+sparse#[2] = value#[7]
+
+mut rparse:u3 = nil
+rparse#[0] = value#[7]
+rparse#[1] = value#[3]
+rparse#[2] = value#[0]
+
+cassert(value  == 0ub1010_0100) // bit 3 was cleared above
+cassert(sparse  == 0ub100)     // bit 7 of value is 1, bit 3 is 0, bit 0 is 0
+cassert(rparse  == 0ub001)     // bits placed in reverse order
+cassert(pop_count == 3)
+cassert(or_reduce  == -1)       // any bit set
+cassert(and_reduce ==  0)       // sign bit (MSB) is 0
+cassert(xor_reduce ==  0^ 1^0^0^ 1^0^ 1^0^0)
+cassert(xor_reduce ==  0^-1^0^0^-1^0^-1^0^0)
