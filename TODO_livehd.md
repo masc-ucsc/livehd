@@ -13,11 +13,25 @@ cross-file dependencies stay visible.
 
 ## Group 1 — foundation
 
-- **1c** `pass.lnastfmt` validator (arity, SSA uniqueness, `delay_assign`
-  rules, deprecation warnings) — `docs/contracts/lnast_spec.md §5`.
-  Designer-helper pass: opt-in, run after `inou.prp` or `pass.upass` to
-  check structural invariants (e.g., `IO` arity, op-dest is `__tmp`,
-  not a named variable) and catch bugs in the LNAST producers.
+- **1c** `pass.lnastfmt` validator — **deferred** (extensions only;
+  core is already substantive at `pass/lnastfmt/pass_lnastfmt.cpp`,
+  ~396 lines: ref text shape, `delay_assign` arity, `assign` arity,
+  tmp-ref unwritten detection, io-shape invariants).
+  - **Tried:** Diagnostic in the 2026-05-27 session. agent-types
+    confirmed the core validator already covers most §5 invariants.
+    Designer-helper pass: opt-in, run after `inou.prp` or
+    `pass.upass` to check structural invariants and catch bugs in
+    the LNAST producers.
+  - **Pending §11.5 extensions** (all gated on [[1w]] landing):
+    - Write-once tracking per `(target, attr_key)` for `attr_set`.
+    - `attr_set`-after-read freeze (reject `attr_set` once any
+      `attr_get` of the same target has emitted).
+    - Reject `attr_set` outside declaration scope (mid-body
+      `a.[foo] = bar` → hard compile error).
+    - Attr-key whitelist enforcement.
+  - **Needed for landing:** [[1w]] first (which itself needs the
+    §10 ST API rework). The §11.5 checks read post-constprop ST
+    state that doesn't exist yet.
 
 ## Group 1-complex — foundation, larger scope
 
