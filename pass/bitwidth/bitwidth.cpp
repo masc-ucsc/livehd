@@ -300,7 +300,7 @@ void Bitwidth::process_shl(hhds::Node_class& node, std::vector<hhds::Edge_class>
   Bitwidth_range n_bw{};
   bool           n_bw_initialized = false;
 
-  for (auto& n_dpin : inp_drivers_of(node, "B")) {
+  for (auto& n_dpin : inp_drivers_of(node, "b")) {
     auto n_it = bwmap.find(n_dpin.get_class_index());
     if (unlikely(n_it == bwmap.end())) {
       debug_unconstrained_msg(node, n_dpin);
@@ -390,7 +390,7 @@ void Bitwidth::process_sum(hhds::Node_class& node, std::vector<hhds::Edge_class>
       return;
     }
     auto pid = e.sink.get_port_id();
-    // Sum: sink "A" (pid 0) adds, sink "B" (pid 1) subtracts.
+    // Sum: sink "a" (pid 0) adds, sink "b" (pid 1) subtracts.
     if (pid == 0) {
       max_val = max_val.add_op(it->second.get_max());
       min_val = min_val.add_op(it->second.get_min());
@@ -1511,8 +1511,8 @@ void Bitwidth::try_delete_attr_node(hhds::Node_class& node) {
       auto all_one_dpin = create_const(*current_graph, *mask_const);
 
       bwmap.insert_or_assign(mask_dpin.get_class_index(), Bitwidth_range(Dlop::create_integer(0), mask_const));
-      dpin_rhs.connect_sink(setup_sink_by_name(mask_node, "A"));
-      all_one_dpin.connect_sink(setup_sink_by_name(mask_node, "A"));
+      dpin_rhs.connect_sink(setup_sink_by_name(mask_node, "a"));
+      all_one_dpin.connect_sink(setup_sink_by_name(mask_node, "a"));
       for (auto e : node.out_edges()) {
         mask_dpin.connect_sink(e.sink);
       }

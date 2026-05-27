@@ -6,8 +6,8 @@ that validates `lnast_to_lgraph` against a Verilog golden.
 
 Items use the same Group N letters as the master plan in [TODO.md](TODO.md).
 Group letters are shared across [TODO_prp.md](TODO_prp.md),
-[TODO_verilog.md](TODO_verilog.md), and [TODO_livehd.md](TODO_livehd.md),
-so cross-file dependencies stay visible.
+[TODO_verilog.md](TODO_verilog.md), [TODO_livehd.md](TODO_livehd.md),
+and [TODO_hhds.md](TODO_hhds.md), so cross-file dependencies stay visible.
 
 ## Group 3 — depends on Group 2
 

@@ -109,7 +109,7 @@ inline void  del_delay(const hhds::Pin_class& pin) {
 }
 
 // Drivers feeding a named sink port — like inp_drivers_of but returning the
-// (driver, edge) pairs in inp_edges order. opentimer iterates all "B" drivers
+// (driver, edge) pairs in inp_edges order. opentimer iterates all "b" drivers
 // of an SHL node.
 [[nodiscard]] std::vector<hhds::Edge_class> inp_edges_of_sink(const hhds::Node_class& node, std::string_view name) {
   std::vector<hhds::Edge_class> out;
@@ -354,7 +354,7 @@ void Pass_opentimer::build_circuit(const std::shared_ptr<hhds::Graph>& g) {
           Pass::error("Invalid corrupt SHL node {} (cprop should have deleted it)", debug_name(node));
           return;
         }
-        for (auto e : inp_edges_of_sink(node, "B")) {
+        for (auto e : inp_edges_of_sink(node, "b")) {
           if (!is_const_pin(e.driver)) {
             Pass::error("opentimer can not handle non-constant SHL on node {} (cprop/tmap first)", debug_name(node));
             return;

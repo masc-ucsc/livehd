@@ -11,11 +11,14 @@ High-level pending tasks for LiveHD, split by area:
 - [TODO_livehd.md](TODO_livehd.md) — LiveHD internal refactor: CLI, upass
   infrastructure, source-map machinery, LGraph cleanup, simulation/debug
   substrate, test reorg, benchmarks, HHDS-side optimizations.
+- [TODO_hhds.md](TODO_hhds.md) — Pending work in the sibling `../hhds`
+  repo that LiveHD depends on (forest API redesign, etc.). Implementation
+  lands in `../hhds`; tracked here so cross-repo dependencies stay visible.
 
 ## Grouping and dependencies
 
 Items are tagged with a Group N letter (e.g. **2b**, **3i**). The group
-letters are shared across all three files, so cross-area dependencies stay
+letters are shared across all four files, so cross-area dependencies stay
 visible. Items in the same group can be done in parallel; all letters in
 group N must complete before group N+1 starts.
 

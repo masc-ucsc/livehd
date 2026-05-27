@@ -415,7 +415,7 @@ static void append_to_or_node(hhds::Graph* g, const hhds::Node_class& or_node, c
   if (or_offset) {
     auto shl_node = create_typed_node(*g, Ntype_op::SHL, or_offset + bits_of(dpin));
     setup_sink_by_name(shl_node, "a").connect_driver(dpin);
-    setup_sink_by_name(shl_node, "B")
+    setup_sink_by_name(shl_node, "b")
         .connect_driver(create_const(*g, *Dlop::create_integer(or_offset)));
 
     set_bits(tposs_node.create_driver_pin(0), or_offset + bits_of(dpin) + 1);
@@ -1452,7 +1452,7 @@ static void process_partially_assigned_self_chains(hhds::Graph* g) {
         } else {
           auto shl_node = create_typed_node(*g, Ntype_op::SHL, wire->width);
           setup_sink_by_name(shl_node, "a").connect_driver(tposs_node.create_driver_pin(0));
-          setup_sink_by_name(shl_node, "B")
+          setup_sink_by_name(shl_node, "b")
               .connect_driver(create_const(*g, *Dlop::create_integer(shift)));
 
           master_or_node.create_sink_pin(0).connect_driver(shl_node.create_driver_pin(0));
@@ -1472,12 +1472,12 @@ static void connect_comparator(hhds::Node_class& exit_node, const RTLIL::Cell* c
   auto a_dpin = get_unsigned_dpin(g, cell, ID::A);
   auto b_dpin = get_unsigned_dpin(g, cell, ID::B);
 
-  setup_sink_by_name(exit_node, "A").connect_driver(a_dpin);
+  setup_sink_by_name(exit_node, "a").connect_driver(a_dpin);
 
   if (type_op_of(exit_node) == Ntype_op::EQ) {
-    setup_sink_by_name(exit_node, "A").connect_driver(b_dpin);
+    setup_sink_by_name(exit_node, "a").connect_driver(b_dpin);
   } else {
-    setup_sink_by_name(exit_node, "B").connect_driver(b_dpin);
+    setup_sink_by_name(exit_node, "b").connect_driver(b_dpin);
   }
 }
 
@@ -1948,8 +1948,8 @@ static void process_cells(RTLIL::Module* mod, hhds::Graph* g) {
       set_type_op(exit_node, Ntype_op::Sum);
       set_bits(exit_node.create_driver_pin(0), get_output_size(cell));
 
-      setup_sink_by_name(exit_node, "A").connect_driver(create_const(*g, *Dlop::create_integer(0)));
-      setup_sink_by_name(exit_node, "B").connect_driver(get_dpin(g, cell, ID::A));
+      setup_sink_by_name(exit_node, "a").connect_driver(create_const(*g, *Dlop::create_integer(0)));
+      setup_sink_by_name(exit_node, "b").connect_driver(get_dpin(g, cell, ID::A));
     } else if (std::strncmp(cell->type.c_str(), "$lt", 3) == 0 || std::strncmp(cell->type.c_str(), "$gt", 3) == 0
                || std::strncmp(cell->type.c_str(), "$eq", 3) == 0) {
       Ntype_op op = Ntype_op::LT;
@@ -2002,9 +2002,9 @@ static void process_cells(RTLIL::Module* mod, hhds::Graph* g) {
       set_type_op(exit_node, Ntype_op::Mux);
       set_bits(exit_node.create_driver_pin(0), get_output_size(cell));
 
-      setup_sink_by_name(exit_node, "0").connect_driver(get_dpin(g, cell, ID::S));
-      setup_sink_by_name(exit_node, "1").connect_driver(get_dpin(g, cell, ID::A));
-      setup_sink_by_name(exit_node, "2").connect_driver(get_dpin(g, cell, ID::B));
+      setup_sink_by_name(exit_node, "s").connect_driver(get_dpin(g, cell, ID::S));
+      setup_sink_by_name(exit_node, "p1").connect_driver(get_dpin(g, cell, ID::A));
+      setup_sink_by_name(exit_node, "p2").connect_driver(get_dpin(g, cell, ID::B));
     } else if (std::strncmp(cell->type.c_str(), "$add", 4) == 0 || std::strncmp(cell->type.c_str(), "$sub", 4) == 0) {
       bool a_sign = cell->getParam(ID::A_SIGNED).as_bool();
       bool b_sign = cell->getParam(ID::B_SIGNED).as_bool();
@@ -2026,20 +2026,20 @@ static void process_cells(RTLIL::Module* mod, hhds::Graph* g) {
         set_bits(exit_node.create_driver_pin(0), y_bits);
       }
 
-      std::string b{"A"};
+      std::string b{"a"};
       if (std::strncmp(cell->type.c_str(), "$sub", 4) == 0) {
-        b = "B";
+        b = "b";
       }
 
       if (a_sign && b_sign) {
         auto a_dpin = get_dpin(g, cell, ID::A);
         auto b_dpin = get_dpin(g, cell, ID::B);
-        setup_sink_by_name(sum_node, "A").connect_driver(a_dpin);
+        setup_sink_by_name(sum_node, "a").connect_driver(a_dpin);
         setup_sink_by_name(sum_node, b).connect_driver(b_dpin);
       } else {
         auto a_dpin = get_unsigned_dpin(g, cell, ID::A);
         auto b_dpin = get_unsigned_dpin(g, cell, ID::B);
-        setup_sink_by_name(sum_node, "A").connect_driver(a_dpin);
+        setup_sink_by_name(sum_node, "a").connect_driver(a_dpin);
         setup_sink_by_name(sum_node, b).connect_driver(b_dpin);
       }
     } else if (std::strncmp(cell->type.c_str(), "$mul", 4) == 0) {
@@ -2056,8 +2056,8 @@ static void process_cells(RTLIL::Module* mod, hhds::Graph* g) {
       set_bits(exit_node.create_driver_pin(0), y_bits);
       auto mul_node = exit_node;
 #endif
-      setup_sink_by_name(mul_node, "A").connect_driver(get_dpin(g, cell, ID::A));
-      setup_sink_by_name(mul_node, "A").connect_driver(get_dpin(g, cell, ID::B));
+      setup_sink_by_name(mul_node, "a").connect_driver(get_dpin(g, cell, ID::A));
+      setup_sink_by_name(mul_node, "a").connect_driver(get_dpin(g, cell, ID::B));
     } else if (std::strncmp(cell->type.c_str(), "$div", 4) == 0) {
       auto y_bits = cell->getParam(ID::Y_WIDTH).as_int();
 
@@ -2094,11 +2094,11 @@ static void process_cells(RTLIL::Module* mod, hhds::Graph* g) {
       setup_sink_by_name(div_node, "a").connect_driver(a_dpin);
       setup_sink_by_name(div_node, "b").connect_driver(b_dpin);
 
-      setup_sink_by_name(mul_node, "A").connect_driver(div_node.create_driver_pin(0));
-      setup_sink_by_name(mul_node, "A").connect_driver(b_dpin);
+      setup_sink_by_name(mul_node, "a").connect_driver(div_node.create_driver_pin(0));
+      setup_sink_by_name(mul_node, "a").connect_driver(b_dpin);
 
-      setup_sink_by_name(sub_node, "A").connect_driver(a_dpin);
-      setup_sink_by_name(sub_node, "B").connect_driver(mul_node.create_driver_pin(0));
+      setup_sink_by_name(sub_node, "a").connect_driver(a_dpin);
+      setup_sink_by_name(sub_node, "b").connect_driver(mul_node.create_driver_pin(0));
 
       exit_node.create_sink_pin(0).connect_driver(sub_node.create_driver_pin(0));
     } else if (std::strncmp(cell->type.c_str(), "$pos", 4) == 0) {
@@ -2142,18 +2142,18 @@ static void process_cells(RTLIL::Module* mod, hhds::Graph* g) {
       setup_sink_by_name(sra_node, "b").connect_driver(get_dpin(g, cell, ID::B));
       auto y0_dpin = sra_node.create_driver_pin(0);
 
-      setup_sink_by_name(neg_node, "A").connect_driver(create_const(*g, *Dlop::create_integer(0)));
-      setup_sink_by_name(neg_node, "B").connect_driver(b_dpin);
+      setup_sink_by_name(neg_node, "a").connect_driver(create_const(*g, *Dlop::create_integer(0)));
+      setup_sink_by_name(neg_node, "b").connect_driver(b_dpin);
       setup_sink_by_name(shl_node, "a").connect_driver(a_dpin);
-      setup_sink_by_name(shl_node, "B").connect_driver(neg_node.create_driver_pin(0));
+      setup_sink_by_name(shl_node, "b").connect_driver(neg_node.create_driver_pin(0));
       auto y1_dpin = shl_node.create_driver_pin(0);
 
-      setup_sink_by_name(lt_node, "A").connect_driver(b_dpin);
-      setup_sink_by_name(lt_node, "B").connect_driver(create_const(*g, *Dlop::create_integer(0)));
+      setup_sink_by_name(lt_node, "a").connect_driver(b_dpin);
+      setup_sink_by_name(lt_node, "b").connect_driver(create_const(*g, *Dlop::create_integer(0)));
 
-      setup_sink_by_name(mux_node, "0").connect_driver(lt_node.create_driver_pin(0));
-      setup_sink_by_name(mux_node, "1").connect_driver(y0_dpin);
-      setup_sink_by_name(mux_node, "2").connect_driver(y1_dpin);
+      setup_sink_by_name(mux_node, "s").connect_driver(lt_node.create_driver_pin(0));
+      setup_sink_by_name(mux_node, "p1").connect_driver(y0_dpin);
+      setup_sink_by_name(mux_node, "p2").connect_driver(y1_dpin);
       auto y2_dpin = mux_node.create_driver_pin(0);
 
       exit_node.create_sink_pin(0).connect_driver(y2_dpin);
@@ -2213,7 +2213,7 @@ static void process_cells(RTLIL::Module* mod, hhds::Graph* g) {
       set_bits(exit_node.create_driver_pin(0), get_output_size(cell));
 
       setup_sink_by_name(exit_node, "a").connect_driver(get_dpin(g, cell, ID::A));
-      setup_sink_by_name(exit_node, "B").connect_driver(get_dpin(g, cell, ID::B));
+      setup_sink_by_name(exit_node, "b").connect_driver(get_dpin(g, cell, ID::B));
     } else if (cell->type == "$mem" || cell->type == "$mem_v2") {
       set_type_op(exit_node, Ntype_op::Memory);
 

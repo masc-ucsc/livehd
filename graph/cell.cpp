@@ -136,9 +136,9 @@ constexpr std::string_view Ntype::get_sink_name_slow(Ntype_op op, hhds::Port_id 
     case Ntype_op::LT:
     case Ntype_op::GT:
       if (pid == 0) {
-        return "A";
+        return "a";
       } else if (pid == 1) {
-        return "B";
+        return "b";
       }
       return "invalid";
       break;
@@ -149,7 +149,7 @@ constexpr std::string_view Ntype::get_sink_name_slow(Ntype_op op, hhds::Port_id 
     case Ntype_op::Ror:
     case Ntype_op::EQ:
       if (pid == 0) {
-        return "A";
+        return "a";
       }
       return "invalid";
       break;
@@ -173,30 +173,33 @@ constexpr std::string_view Ntype::get_sink_name_slow(Ntype_op op, hhds::Port_id 
       if (pid == 0) {
         return "a";
       } else if (pid == 1) {
-        return "B";
+        return "b";
       }
       return "invalid";
       break;
     case Ntype_op::Nconst:  // No drivers to Constants
       return "invalid";
       break;
-    case Ntype_op::IO:
     case Ntype_op::Mux:  // unlimited case: 1,2,3,4,5.... // Y = (pid0 == true) ? pid2 : pid1
+      if (pid == 0) {
+        return "s";
+      }
+    case Ntype_op::IO:
     case Ntype_op::LUT:  // unlimited case: 1,2,3,4,5....
     case Ntype_op::Sub:  // unlimited case: 1,2,3,4,5....
       assert(is_unlimited_sink(op));
       switch (pid) {
-        case 0: return "0";
-        case 1: return "1";
-        case 2: return "2";
-        case 3: return "3";
-        case 4: return "4";
-        case 5: return "5";
-        case 6: return "6";
-        case 7: return "7";
-        case 8: return "8";
-        case 9: return "9";
-        case 10: return "10";  // >10 handled with loop at get_sink_pid
+        case 0: return "p0";
+        case 1: return "p1";
+        case 2: return "p2";
+        case 3: return "p3";
+        case 4: return "p4";
+        case 5: return "p5";
+        case 6: return "p6";
+        case 7: return "p7";
+        case 8: return "p8";
+        case 9: return "p9";
+        case 10: return "p10";  // >10 handled with loop at get_sink_pid
         default: return "invalid";
       }
       return "invalid";

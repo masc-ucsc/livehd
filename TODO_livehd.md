@@ -7,26 +7,17 @@ benchmarks, and HHDS-side optimizations.
 Items use the same Group N letters as the master plan in [TODO.md](TODO.md).
 Items in the same group can be done in parallel; all letters in group N must
 complete before group N+1 starts. Group letters are shared across
-[TODO_prp.md](TODO_prp.md), [TODO_verilog.md](TODO_verilog.md), and
-[TODO_livehd.md](TODO_livehd.md), so cross-file dependencies stay visible.
+[TODO_prp.md](TODO_prp.md), [TODO_verilog.md](TODO_verilog.md),
+[TODO_livehd.md](TODO_livehd.md), and [TODO_hhds.md](TODO_hhds.md), so
+cross-file dependencies stay visible.
 
 ## Group 1 — foundation
 
 - **1c** `pass.lnastfmt` validator (arity, SSA uniqueness, `delay_assign`
   rules, deprecation warnings) — `docs/contracts/lnast_spec.md §5`.
-
-- **1g** Forest per-tree readiness for parallel func_extract —
-  `docs/contracts/hhds_migration.md §G6`. With two separate forests
-  now (`lgdb/parse` and `lgdb/optimized`), the simpler design may be
-  "return nullptr tree while still being populated if someone asks
-  for it" instead of an explicit ready bit. An atomic `local_done`
-  flag is still likely needed regardless, to gate phase-1
-  func_extract against in-flight publishing of `tree_ios`.
-  - Lives on the Forest slot, not on `hhds::Tree`, so
-    `Tree::clone()` / `TreeIO::replace()` don't have to preserve
-    it — they reset `local_done = false` until the new body
-    finishes its local upass.
-  - Unblocks [[2o]] (two-phase func_extract) in Group 2.
+  Designer-helper pass: opt-in, run after `inou.prp` or `pass.upass` to
+  check structural invariants (e.g., `IO` arity, op-dest is `__tmp`,
+  not a named variable) and catch bugs in the LNAST producers.
 
 ## Group 1-complex — foundation, larger scope
 
@@ -40,6 +31,17 @@ Group 1 entries; downstream Groups treat them as Group 1 dependencies.
   index, alias multi-loc, partition-root fallback) — see "Source location
   (LOC) propagation strategy" below and `docs/contracts/sourcemap.md`.
 ## Group 2 — depends on Group 1
+
+- **1g** LiveHD-side migration to the new HHDS forest API
+  (`find_tree`/`find_graph` returning `shared_ptr<const>`,
+  gated `find_tree_rw`/`find_graph_rw`, slot-level `local_done`).
+  The API redesign lives in [TODO_hhds.md](TODO_hhds.md) **1g** —
+  this entry tracks the LiveHD-side adoption once that lands.
+  - Audit every existing `find_tree` / `find_graph` caller and split
+    into read-only vs read-write paths; route mutators through the
+    `_rw` variant and treat read-only nullptr as "not yet populated".
+  - Drop any local readiness/locking shims that pre-dated `local_done`.
+  - Unblocks [[2o]] (two-phase func_extract) once both sides land.
 
 - **2m** Drop `wrap`/`sat` as attributes; keep only the `wrap`/`sat`
   *statement* form, lowered to a new LNAST `wrap`/`sat` op — see

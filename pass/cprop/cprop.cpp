@@ -146,9 +146,9 @@ void Cprop::collapse_forward_sum(hhds::Node_class& node, std::vector<hhds::Edge_
       } else if (inp.sink.get_port_id() == 0 && out.sink.get_port_id() == 1) {
         out.sink.connect_driver(inp.driver);
       } else if (inp.sink.get_port_id() == 1 && out.sink.get_port_id() == 0) {
-        setup_sink_by_name(next_sum_node, "B").connect_driver(inp.driver);
+        setup_sink_by_name(next_sum_node, "b").connect_driver(inp.driver);
       } else {
-        setup_sink_by_name(next_sum_node, "A").connect_driver(inp.driver);
+        setup_sink_by_name(next_sum_node, "a").connect_driver(inp.driver);
       }
     }
     out.del_edge();
@@ -307,10 +307,10 @@ void Cprop::replace_part_inputs_const(hhds::Node_class& node, std::vector<hhds::
       ++nconstants;
 
       if (op == Ntype_op::Sum) {
-        if (sink_pin_name(i.sink) == "A") {
+        if (sink_pin_name(i.sink) == "a") {
           result = result.add_op(c);
         } else {
-          I(sink_pin_name(i.sink) == "B");
+          I(sink_pin_name(i.sink) == "b");
           result = result.sub_op(c);
         }
       } else if (op == Ntype_op::Or) {
@@ -332,9 +332,9 @@ void Cprop::replace_part_inputs_const(hhds::Node_class& node, std::vector<hhds::
       if (!result.is_known_zero()) {
         auto dpin = create_const(*current_graph, result);
         if (result.is_positive() || op == Ntype_op::Or) {
-          setup_sink_by_name(node, "A").connect_driver(dpin);
+          setup_sink_by_name(node, "a").connect_driver(dpin);
         } else {
-          setup_sink_by_name(node, "B").connect_driver(dpin);
+          setup_sink_by_name(node, "b").connect_driver(dpin);
         }
       } else if (npending == 1) {
         collapse_forward_always_pin0(node, edge_it2);
@@ -342,7 +342,7 @@ void Cprop::replace_part_inputs_const(hhds::Node_class& node, std::vector<hhds::
     } else if (npending == 0 && nconstants == 1) {
       collapse_forward_always_pin0(node, inp_edges_ordered);
     } else if (npending == 1 && nconstants == 0) {
-      if (!(op == Ntype_op::Sum && sink_pin_name(edge_it2[0].sink) == "B")) {
+      if (!(op == Ntype_op::Sum && sink_pin_name(edge_it2[0].sink) == "b")) {
         collapse_forward_always_pin0(node, edge_it2);
       }
     }
@@ -374,7 +374,7 @@ void Cprop::replace_all_inputs_const(hhds::Node_class& node, std::vector<hhds::E
     result = Dlop::create_integer(0);
 
     bool zero_shifts = true;
-    for (auto& amt_dpin : livehd::graph_util::inp_drivers_of(node, "B")) {
+    for (auto& amt_dpin : livehd::graph_util::inp_drivers_of(node, "b")) {
       Const amt   = hydrate_const(amt_dpin);
       result      = result.or_op(val.lsh_op(amt.to_i()));
       zero_shifts = false;

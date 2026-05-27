@@ -694,7 +694,7 @@ void Cgen_verilog::process_simple_node(std::shared_ptr<File_output> fout, const 
     std::vector<std::string> lhs;
     std::vector<std::string> rhs;
     for (const auto& e : node.inp_edges()) {
-      if (e.sink.get_pin_name() == "A") {
+      if (e.sink.get_pin_name() == "a") {
         lhs.emplace_back(get_expression(e.driver));
       } else {
         rhs.emplace_back(get_expression(e.driver));
@@ -713,12 +713,12 @@ void Cgen_verilog::process_simple_node(std::shared_ptr<File_output> fout, const 
   } else if (op == Ntype_op::SHL) {
     auto val_expr = get_expression(get_driver(find_sink_pin(node, "a")));
 
-    // SHL "B" is a multi-driver sink (LiveHD: all drivers represent one-hot
+    // SHL "b" is a multi-driver sink (LiveHD: all drivers represent one-hot
     // shift amounts ORed together). Walk inp_edges and filter by sink name.
     std::string onehot;
     bool        first = true;
     for (const auto& e : node.inp_edges()) {
-      if (e.sink.get_pin_name() != "B") {
+      if (e.sink.get_pin_name() != "b") {
         continue;
       }
       auto amt_expr = get_expression(e.driver);
