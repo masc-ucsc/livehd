@@ -59,6 +59,7 @@ public:
   void process_tuple_get() override;
   void process_tuple_add() override;
   void process_tuple_concat() override;
+  void process_attr_set() override;
   void process_func_call() override;
   void process_func_does() override;
   void process_func_equals() override;
@@ -96,6 +97,13 @@ protected:
   // index). process_tuple_get consults this map when the field operand is
   // a ref so it can fold string slicing like `x[1..]` and `x[1..=2]`.
   std::map<std::string, std::pair<Const, Const>> range_map;
+
+  // Typename of variables that were declared with an explicit `:Type`
+  // annotation (`attr_set var typename 'Type'` in the lnast). Used by the
+  // method-dispatch fallback so `p.method(args)` can resolve `method`
+  // through `Type`'s bundle when the instance bundle alone doesn't carry
+  // the method field.
+  std::unordered_map<std::string, std::string> typename_of_var;
 
   auto current_bundle() { return st.get_bundle(current_text()); }
 
@@ -211,6 +219,39 @@ protected:
   std::optional<Const>                    resolve_current_scalar() const;
   std::optional<std::vector<Call_actual>> collect_call_actuals();
   bool try_eval_comb_call(std::string_view dst, std::string_view fname, const std::vector<Call_actual>& actuals);
+  // Direct-cell call dispatch: `__sum(a, b)`, `__hotmux(sel, a, b, …)`, etc.
+  // Maps cell names (without the `__` prefix) to Ntype_op kernels and folds
+  // when all positional actuals are foldable constants. Returns true when
+  // dst was assigned a result; false when the fname is not a recognized
+  // cell or arguments aren't comptime.
+  bool try_eval_cell_call(std::string_view dst, std::string_view fname, const std::vector<Call_actual>& actuals);
+
+  // Evaluation result for a recursive inline call: outputs indexed by name
+  // plus any ref-param mutations to apply at the caller side. Used both by
+  // the top-level call site and by recursive calls inside other comb bodies.
+  struct Inline_result {
+    std::unordered_map<std::string, Const>           outputs;
+    std::unordered_map<std::string, Const>           ref_writebacks;
+    // For ref-param actuals that were caller-side bundle entries we still
+    // expose the qualified-flat writeback names (e.g. "self.x" -> Const).
+    std::unordered_map<std::string, Const>           ref_writeback_fields;
+  };
+
+  // Recursion-aware inline of `callee_name` with already-bound `actuals`.
+  // Returns nullopt when the callee can't be statically evaluated yet
+  // (unknown args, missing registry entry, depth exhausted, body shape we
+  // can't fold, etc.). The caller decides how to surface the outputs (write
+  // to the symbol table for outer calls; merge into local_values for nested
+  // calls).
+  std::optional<Inline_result> evaluate_callee_inline(std::string_view callee_name,
+                                                       const std::vector<Call_actual>& actuals,
+                                                       int depth);
+
+  // Per-elaboration recursive-inline depth cap. Comb recursion fully unrolls
+  // at constprop time, so a stuck/infinite recursion would never terminate.
+  // 10000 matches TODO_prp entry 1y's default; the offending call site is
+  // surfaced via Pass::warn before bailing.
+  static constexpr int kInlineMaxDepth = 10000;
 };
 
 // Plugin registration lives in upass_constprop.cpp to avoid duplicate

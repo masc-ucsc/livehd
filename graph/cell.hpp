@@ -44,9 +44,11 @@ inline constexpr hhds::Port_id Port_invalid = (hhds::Port_id{1} << hhds::Port_bi
 //  16  Not               17 unused
 //   ...
 //  36  Mux               37 unused
+//  38  Hotmux            -- one-hot select mux (non-loop-last; sits in the
+//                            even slot between Mux and IO).
 //
-//  39  IO  ← FIRST LOOP-LAST OP. Note the jump from 36→39 (skips even 38
-//                        which would have to be a non-loop-last op).
+//  39  IO  ← FIRST LOOP-LAST OP. Note the jump from 38→39 keeps the
+//                        even/odd bit-0 invariant.
 //  41  Memory   (loop_last)
 //  43  Flop     (loop_last)
 //  45  Latch    (loop_last)
@@ -57,62 +59,65 @@ inline constexpr hhds::Port_id Port_invalid = (hhds::Port_id{1} << hhds::Port_bi
 //   ...
 //  56  AttrSet           57 reserved for Last_invalid sentinel
 enum class Ntype_op : uint8_t {
-  Invalid = 0,  // Detect bugs/unset (not used anywhere). Bit 0 == 0.
-  Sum     = 2,
-  Mult    = 4,
-  Div     = 6,
+  Invalid    = 0,  // Detect bugs/unset (not used anywhere). Bit 0 == 0.
+  Sum        = 2,
+  Mult       = 4,
+  Div        = 6,
 
-  And = 8,
-  Or  = 10,
-  Xor = 12,
-  Ror = 14,  // Reduce OR (This is a bit different from the LNAST reduce_or (lnast uses mask)
+  And        = 8,
+  Or         = 10,
+  Xor        = 12,
+  Ror        = 14,  // Reduce OR (This is a bit different from the LNAST reduce_or (lnast uses mask)
 
-  Not      = 16,  // bitwise not
-  Get_mask = 18,  // To positive signed
-  Set_mask = 20,  // To positive signed
-  Sext     = 22,  // Sign extend from a given bit (b) position
+  Not        = 16,  // bitwise not
+  Get_mask   = 18,  // To positive signed
+  Set_mask   = 20,  // To positive signed
+  Sext       = 22,  // Sign extend from a given bit (b) position
 
-  LT = 24,  // Less Than   , also GE = !LT
-  GT = 26,  // Greater Than, also LE = !GT
-  EQ = 28,  // Equal       , also NE = !EQ
+  LT         = 24,  // Less Than   , also GE = !LT
+  GT         = 26,  // Greater Than, also LE = !GT
+  EQ         = 28,  // Equal       , also NE = !EQ
 
-  SHL = 30,  // Shift Left Logical
-  SRA = 32,  // Shift Right Arithmetic
+  SHL        = 30,  // Shift Left Logical
+  SRA        = 32,  // Shift Right Arithmetic
 
-  LUT = 34,  // LUT
-  Mux = 36,  // Multiplexor with many options
+  LUT        = 34,  // LUT
+  Mux        = 36,  // Multiplexor with many options
+  Hotmux     = 38,  // One-hot select mux (sel is 1-hot encoded; runtime
+                    // flags non-one-hot select as an error).
 
-  IO = 39,  // Graph Input or Output  -- loop_last (first odd slot)
+  IO         = 39,  // Graph Input or Output  -- loop_last (first odd slot)
 
   //------------------BEGIN PIPELINED (break LOOPS) -- all loop_last (odd)
-  Memory = 41,
+  Memory     = 41,
 
-  Flop  = 43,  // Asynchronous & sync reset flop
-  Latch = 45,  // Latch
-  Fflop = 47,  // Fluid flop
+  Flop       = 43,  // Asynchronous & sync reset flop
+  Latch      = 45,  // Latch
+  Fflop      = 47,  // Fluid flop
 
-  Sub = 49,  // Sub module instance
+  Sub        = 49,  // Sub module instance
   //------------------END PIPELINED (break LOOPS)
-  Nconst = 50,  // Constant -- non-loop-last; paired with IO via is_loop_first.
+  Nconst     = 50,  // Constant -- non-loop-last; paired with IO via is_loop_first.
 
   // High-level construct kept for bitwidth's leftover-AttrSet cleanup pass.
   // Tuple-related ops (TupAdd, TupGet) and AttrGet were dropped along with
   // cprop's tuple_pass; CompileErr was dropped (no producer post-migration).
-  AttrSet = 56,
+  AttrSet    = 56,
 
   Last_invalid = 57
 };
 
 // Encoding invariant: bit 0 == is_loop_last.
-static_assert((static_cast<uint8_t>(Ntype_op::IO) & 1) == 1);
+static_assert((static_cast<uint8_t>(Ntype_op::IO)     & 1) == 1);
 static_assert((static_cast<uint8_t>(Ntype_op::Memory) & 1) == 1);
-static_assert((static_cast<uint8_t>(Ntype_op::Flop) & 1) == 1);
-static_assert((static_cast<uint8_t>(Ntype_op::Latch) & 1) == 1);
-static_assert((static_cast<uint8_t>(Ntype_op::Fflop) & 1) == 1);
-static_assert((static_cast<uint8_t>(Ntype_op::Sub) & 1) == 1);
-static_assert((static_cast<uint8_t>(Ntype_op::Sum) & 1) == 0);
+static_assert((static_cast<uint8_t>(Ntype_op::Flop)   & 1) == 1);
+static_assert((static_cast<uint8_t>(Ntype_op::Latch)  & 1) == 1);
+static_assert((static_cast<uint8_t>(Ntype_op::Fflop)  & 1) == 1);
+static_assert((static_cast<uint8_t>(Ntype_op::Sub)    & 1) == 1);
+static_assert((static_cast<uint8_t>(Ntype_op::Sum)    & 1) == 0);
 static_assert((static_cast<uint8_t>(Ntype_op::Nconst) & 1) == 0);
-static_assert((static_cast<uint8_t>(Ntype_op::Invalid) & 1) == 0);
+static_assert((static_cast<uint8_t>(Ntype_op::Invalid)& 1) == 0);
+static_assert((static_cast<uint8_t>(Ntype_op::Hotmux) & 1) == 0);
 
 class Ntype {
 protected:
@@ -123,32 +128,33 @@ protected:
     for (auto& s : a) {
       s = "invalid";
     }
-    a[static_cast<size_t>(Ntype_op::Sum)]      = "sum";
-    a[static_cast<size_t>(Ntype_op::Mult)]     = "mult";
-    a[static_cast<size_t>(Ntype_op::Div)]      = "div";
-    a[static_cast<size_t>(Ntype_op::And)]      = "and";
-    a[static_cast<size_t>(Ntype_op::Or)]       = "or";
-    a[static_cast<size_t>(Ntype_op::Xor)]      = "xor";
-    a[static_cast<size_t>(Ntype_op::Ror)]      = "ror";
-    a[static_cast<size_t>(Ntype_op::Not)]      = "not";
-    a[static_cast<size_t>(Ntype_op::Get_mask)] = "get_mask";
-    a[static_cast<size_t>(Ntype_op::Set_mask)] = "set_mask";
-    a[static_cast<size_t>(Ntype_op::Sext)]     = "sext";
-    a[static_cast<size_t>(Ntype_op::LT)]       = "lt";
-    a[static_cast<size_t>(Ntype_op::GT)]       = "gt";
-    a[static_cast<size_t>(Ntype_op::EQ)]       = "eq";
-    a[static_cast<size_t>(Ntype_op::SHL)]      = "shl";
-    a[static_cast<size_t>(Ntype_op::SRA)]      = "sra";
-    a[static_cast<size_t>(Ntype_op::LUT)]      = "lut";
-    a[static_cast<size_t>(Ntype_op::Mux)]      = "mux";
-    a[static_cast<size_t>(Ntype_op::IO)]       = "io";
-    a[static_cast<size_t>(Ntype_op::Memory)]   = "memory";
-    a[static_cast<size_t>(Ntype_op::Flop)]     = "flop";
-    a[static_cast<size_t>(Ntype_op::Latch)]    = "latch";
-    a[static_cast<size_t>(Ntype_op::Fflop)]    = "fflop";
-    a[static_cast<size_t>(Ntype_op::Sub)]      = "sub";
-    a[static_cast<size_t>(Ntype_op::Nconst)]   = "const";
-    a[static_cast<size_t>(Ntype_op::AttrSet)]  = "attr_set";
+    a[static_cast<size_t>(Ntype_op::Sum)]        = "sum";
+    a[static_cast<size_t>(Ntype_op::Mult)]       = "mult";
+    a[static_cast<size_t>(Ntype_op::Div)]        = "div";
+    a[static_cast<size_t>(Ntype_op::And)]        = "and";
+    a[static_cast<size_t>(Ntype_op::Or)]         = "or";
+    a[static_cast<size_t>(Ntype_op::Xor)]        = "xor";
+    a[static_cast<size_t>(Ntype_op::Ror)]        = "ror";
+    a[static_cast<size_t>(Ntype_op::Not)]        = "not";
+    a[static_cast<size_t>(Ntype_op::Get_mask)]   = "get_mask";
+    a[static_cast<size_t>(Ntype_op::Set_mask)]   = "set_mask";
+    a[static_cast<size_t>(Ntype_op::Sext)]       = "sext";
+    a[static_cast<size_t>(Ntype_op::LT)]         = "lt";
+    a[static_cast<size_t>(Ntype_op::GT)]         = "gt";
+    a[static_cast<size_t>(Ntype_op::EQ)]         = "eq";
+    a[static_cast<size_t>(Ntype_op::SHL)]        = "shl";
+    a[static_cast<size_t>(Ntype_op::SRA)]        = "sra";
+    a[static_cast<size_t>(Ntype_op::LUT)]        = "lut";
+    a[static_cast<size_t>(Ntype_op::Mux)]        = "mux";
+    a[static_cast<size_t>(Ntype_op::Hotmux)]     = "hotmux";
+    a[static_cast<size_t>(Ntype_op::IO)]         = "io";
+    a[static_cast<size_t>(Ntype_op::Memory)]     = "memory";
+    a[static_cast<size_t>(Ntype_op::Flop)]       = "flop";
+    a[static_cast<size_t>(Ntype_op::Latch)]      = "latch";
+    a[static_cast<size_t>(Ntype_op::Fflop)]      = "fflop";
+    a[static_cast<size_t>(Ntype_op::Sub)]        = "sub";
+    a[static_cast<size_t>(Ntype_op::Nconst)]     = "const";
+    a[static_cast<size_t>(Ntype_op::AttrSet)]    = "attr_set";
     return a;
   }();
 
@@ -190,7 +196,8 @@ public:
   }
 
   static inline constexpr bool is_unlimited_sink(Ntype_op op) {
-    return op == Ntype_op::IO || op == Ntype_op::LUT || op == Ntype_op::Sub || op == Ntype_op::Memory || op == Ntype_op::Mux;
+    return op == Ntype_op::IO || op == Ntype_op::LUT || op == Ntype_op::Sub || op == Ntype_op::Memory || op == Ntype_op::Mux
+           || op == Ntype_op::Hotmux;
   }
   static inline constexpr bool is_unlimited_driver(Ntype_op op) {
     return op == Ntype_op::Memory || op == Ntype_op::Sub || op == Ntype_op::IO;
@@ -217,13 +224,25 @@ public:
       assert(get_sink_name(op, pid) == str);
       return pid;
     }
-    if (__builtin_expect(is_unlimited_sink(op) && str.size() > 1 && str.front() >= '0' && str.front() <= '9',
-                         0)) {  // pid>10 names: "<num><base>" (e.g. "11p0", "12clock_pin")
-      return static_cast<hhds::Port_id>(str_tools::to_i(str));
+    if (c == '$') {
+      assert(str.size() == 1);
+      assert(sink_name2pid[str.front()][static_cast<std::size_t>(op)] == 0);
+      return 0;
     }
-    if (__builtin_expect(is_unlimited_sink(op) && str.size() >= 2 && str.front() == 'p' && str[1] >= '0' && str[1] <= '9',
-                         0)) {  // unlimited-sink names "p0".."p10" collide on sink_name2pid['p']; parse digits.
-      return static_cast<hhds::Port_id>(str_tools::to_i(str.substr(1)));
+    if (c == 'A') {
+      assert(sink_name2pid[str.front()][static_cast<std::size_t>(op)] == 0);
+      assert(get_sink_name(op, 0) == str);
+      return 0;
+    }
+    if (c == 'B') {
+      assert(sink_name2pid[str.front()][static_cast<std::size_t>(op)] == 1);
+      assert(get_sink_name(op, 1) == str);
+      return 1;
+    }
+
+    if (__builtin_expect(is_unlimited_sink(op) && str.size() > 1 && str.front() >= '0' && str.front() <= '9',
+                         0)) {  // unlikely case
+      return static_cast<hhds::Port_id>(str_tools::to_i(str));
     }
 
     auto pid = sink_name2pid[str.front()][static_cast<std::size_t>(op)];

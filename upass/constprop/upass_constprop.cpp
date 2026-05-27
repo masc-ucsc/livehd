@@ -4,6 +4,7 @@
 
 #include <map>
 #include <optional>
+#include <print>
 #include <set>
 #include <unordered_map>
 
@@ -813,6 +814,19 @@ void uPass_constprop::process_tuple_add() {
   // from a true scalar). See process_tuple_concat.
   tuple_typed_names.insert(dst);
 
+  // Function-name detection helper: when a ref's text names a function in
+  // the registry, store the qualified function name as a string Const into
+  // the bundle slot so downstream method dispatch (x.method(...) where
+  // method is a tuple field) can look it up via tuple_get + fcall.
+  auto try_store_fn_name = [&](std::string_view key, std::string_view ref_text) -> bool {
+    std::string qualified = std::string(lm->get_top_module_name()) + "." + std::string(ref_text);
+    if (!function_registry.count(qualified)) {
+      return false;
+    }
+    bundle->set(key, *Dlop::from_string(qualified));
+    return true;
+  };
+
   int unnamed_pos = 0;  // advances only on unnamed entries
   while (move_to_sibling()) {
     if (is_type(Lnast_ntype::Lnast_ntype_const)) {
@@ -820,7 +834,11 @@ void uPass_constprop::process_tuple_add() {
       ++unnamed_pos;
 
     } else if (is_type(Lnast_ntype::Lnast_ntype_ref)) {
-      bundle->set(std::to_string(unnamed_pos), st.get_bundle(current_text()));
+      auto       slot = std::to_string(unnamed_pos);
+      const auto txt  = current_text();
+      if (!try_store_fn_name(slot, txt)) {
+        bundle->set(slot, st.get_bundle(txt));
+      }
       ++unnamed_pos;
 
     } else if (is_type(Lnast_ntype::Lnast_ntype_assign)) {
@@ -832,13 +850,49 @@ void uPass_constprop::process_tuple_add() {
       if (is_type(Lnast_ntype::Lnast_ntype_const)) {
         bundle->set(key, *Dlop::from_pyrope(current_text()));
       } else if (is_type(Lnast_ntype::Lnast_ntype_ref)) {
-        bundle->set(key, st.get_bundle(current_text()));
+        const auto txt = current_text();
+        if (!try_store_fn_name(key, txt)) {
+          bundle->set(key, st.get_bundle(txt));
+        }
       }
       move_to_parent();
     }
   }
   // Bundle was updated in-place; no mark_changed() — process_tuple_get drives convergence.
   move_to_parent();
+}
+
+// Track `attr_set var typename 'TypeName'` so method dispatch can look up
+// methods on the declared type when the instance bundle alone doesn't carry
+// them. Layout: ref(var), const('typename'), const('TypeName').
+void uPass_constprop::process_attr_set() {
+  move_to_child();
+  if (!is_type(Lnast_ntype::Lnast_ntype_ref)) {
+    move_to_parent();
+    return;
+  }
+  std::string var(current_text());
+  if (!move_to_sibling()) {
+    move_to_parent();
+    return;
+  }
+  if (!is_type(Lnast_ntype::Lnast_ntype_const) || current_text() != "typename") {
+    move_to_parent();
+    return;
+  }
+  if (!move_to_sibling()) {
+    move_to_parent();
+    return;
+  }
+  std::string raw(current_text());
+  move_to_parent();
+  // raw is a pyrope-quoted string like `'Pair'`. Strip the quotes.
+  if (raw.size() >= 2 && raw.front() == '\'' && raw.back() == '\'') {
+    raw = raw.substr(1, raw.size() - 2);
+  }
+  if (!raw.empty()) {
+    typename_of_var[var] = std::move(raw);
+  }
 }
 
 void uPass_constprop::process_tuple_concat() {
@@ -1257,20 +1311,49 @@ void uPass_constprop::fold_has(const std::string& dst) {
 // Cursor is left on whichever child we last visited; the caller
 // (process_func_case) restores via `move_to_parent`.
 void uPass_constprop::fold_case(const std::string& dst) {
+  // Resolve the operand at the current cursor to a flat-entry list. Refs to
+  // tracked bundles use the existing collect_first_level helper. Const
+  // literals and scalar refs degrade to a single unnamed scalar entry so
+  // `sel case 0b10` (scalar vs scalar literal) folds the same way as the
+  // bundle/bundle path. Returns nullopt when the value isn't decidable yet
+  // (undeclared ref / no trivial value) so we can defer.
+  auto resolve_flat = [this]() -> std::optional<std::vector<Bundle_flat_entry>> {
+    if (is_type(Lnast_ntype::Lnast_ntype_ref)) {
+      if (auto b = current_ref_bundle()) {
+        return collect_first_level(b);
+      }
+      auto name = current_text();
+      if (st.has_trivial(name)) {
+        Bundle_flat_entry e;
+        e.pos   = 0;
+        e.value = st.get_trivial(name);
+        return std::vector<Bundle_flat_entry>{std::move(e)};
+      }
+      return std::nullopt;
+    }
+    if (is_type(Lnast_ntype::Lnast_ntype_const)) {
+      Bundle_flat_entry e;
+      e.pos   = 0;
+      e.value = *Dlop::from_pyrope(current_text());
+      return std::vector<Bundle_flat_entry>{std::move(e)};
+    }
+    return std::nullopt;
+  };
+
   if (!move_to_sibling()) {
     return;
   }
-  auto ba = current_ref_bundle();
+  auto lhs_opt = resolve_flat();
   if (!move_to_sibling()) {
     return;
   }
-  auto bb = current_ref_bundle();
-  if (!ba || !bb) {
+  auto rhs_opt = resolve_flat();
+  if (!lhs_opt || !rhs_opt) {
     return;
   }
 
-  auto lhs_flat = collect_first_level(ba);
-  auto rhs_flat = collect_first_level(bb);
+  auto lhs_flat = std::move(*lhs_opt);
+  auto rhs_flat = std::move(*rhs_opt);
 
   // `case` is a structural value-match. Attributes (mut/const, type
   // tags, decorations) are stripped by collect_first_level via
@@ -1407,6 +1490,17 @@ std::optional<std::vector<uPass_constprop::Call_actual>> uPass_constprop::collec
           actuals.emplace_back(std::move(actual));
           continue;
         }
+        // Function-name actual (closure_capture, fcall6 style): when the
+        // referenced name resolves to a known function in the registry,
+        // surface the qualified function name as a string Const so the
+        // callee's body can dispatch through it via inner_fname lookup.
+        std::string qualified = std::string(lm->get_top_module_name()) + "." + actual.var_name;
+        if (function_registry.count(qualified)) {
+          actual.value = *Dlop::from_string(qualified);
+          move_to_parent();
+          actuals.emplace_back(std::move(actual));
+          continue;
+        }
       }
       auto value = resolve_current_scalar();
       move_to_parent();
@@ -1430,6 +1524,16 @@ std::optional<std::vector<uPass_constprop::Call_actual>> uPass_constprop::collec
         actuals.emplace_back(std::move(actual));
         continue;
       }
+      // Function-name actual.
+      std::string qualified = std::string(lm->get_top_module_name()) + "." + var_name;
+      if (function_registry.count(qualified)) {
+        Call_actual actual;
+        actual.is_named = false;
+        actual.var_name = std::move(var_name);
+        actual.value    = *Dlop::from_string(qualified);
+        actuals.emplace_back(std::move(actual));
+        continue;
+      }
     }
     auto value = resolve_current_scalar();
     if (!value.has_value() || value->is_invalid()) {
@@ -1447,14 +1551,135 @@ bool uPass_constprop::try_eval_comb_call(std::string_view dst, std::string_view 
     callee_name = std::string(lm->get_top_module_name()) + "." + callee_name;
   }
 
-  auto fit = function_registry.find(callee_name);
-  if (fit == function_registry.end()) {
+  // Method-dispatch fallback: if `fname` isn't a registered free function,
+  // but the first positional actual is a tuple whose `fname` field stores
+  // a function-name string, treat the call as `obj.fname(args)` and bind
+  // the receiver as `self`. The function may live on the receiver bundle
+  // directly OR on the receiver's declared typename bundle (Pair etc.).
+  // Mirrors entry 1k of TODO_prp (`self`/`ref self` in tuple methods).
+  std::vector<Call_actual> method_actuals;
+  auto lookup_method_in = [&](const std::shared_ptr<Bundle const>& b) -> std::string {
+    if (!b) {
+      return {};
+    }
+    if (b->has_trivial(fname)) {
+      const auto& v = b->get_trivial(fname);
+      if (v.is_string()) {
+        return strip_pyrope_quotes(v.to_pyrope());
+      }
+    }
+    return {};
+  };
+  if (!function_registry.count(callee_name) && !actuals.empty() && !actuals.front().is_named) {
+    const auto& recv = actuals.front();
+    std::string method_name;
+    if (recv.is_bundle) {
+      auto it = recv.bundle_value.find(std::string(fname));
+      if (it != recv.bundle_value.end() && it->second.is_string()) {
+        method_name = strip_pyrope_quotes(it->second.to_pyrope());
+      }
+    }
+    // Receiver-typename fallback: `p:Pair = (x=0,y=0)` puts no methods on
+    // `p`'s bundle. Look the method up on the Pair bundle attached via the
+    // `typename` attribute (tracked in typename_of_var by process_attr_set).
+    if (method_name.empty() && !recv.var_name.empty()) {
+      auto recv_bundle = st.get_bundle(recv.var_name);
+      if (recv_bundle) {
+        method_name = lookup_method_in(recv_bundle);
+      }
+      if (method_name.empty()) {
+        auto tn_it = typename_of_var.find(recv.var_name);
+        if (tn_it != typename_of_var.end()) {
+          auto type_bundle = st.get_bundle(tn_it->second);
+          method_name      = lookup_method_in(type_bundle);
+        }
+      }
+    }
+    if (!method_name.empty() && function_registry.count(method_name)) {
+      callee_name = method_name;
+      method_actuals.reserve(actuals.size());
+      Call_actual self_actual = recv;
+      self_actual.is_named    = true;
+      self_actual.name        = "self";
+      method_actuals.emplace_back(std::move(self_actual));
+      for (std::size_t i = 1; i < actuals.size(); ++i) {
+        method_actuals.emplace_back(actuals[i]);
+      }
+    }
+  }
+  const auto& effective_actuals = method_actuals.empty() ? actuals : method_actuals;
+
+  auto result = evaluate_callee_inline(callee_name, effective_actuals, 0);
+  if (!result.has_value()) {
     return false;
+  }
+
+  // Apply ref-param writebacks (scalar caller-side variables).
+  for (const auto& [caller_var, val] : result->ref_writebacks) {
+    store_trivial(caller_var, val);
+  }
+  // Apply ref-param field writebacks for bundle actuals (caller.x = …).
+  for (const auto& [path, val] : result->ref_writeback_fields) {
+    // path is "caller.field"; update the caller-side bundle.
+    auto dot = path.find('.');
+    if (dot == std::string::npos) {
+      continue;
+    }
+    std::string base(path.substr(0, dot));
+    std::string field(path.substr(dot + 1));
+    auto        b = st.get_bundle(base);
+    if (!b) {
+      b = std::make_shared<Bundle>(base);
+      st.set(base, b);
+    }
+    b->set(field, val);
+    mark_changed();
+  }
+
+  if (result->outputs.empty()) {
+    return false;
+  }
+
+  // Single scalar output: store_trivial. A single tuple-typed output is
+  // signaled by all keys sharing a `r.` prefix; in that case build a bundle.
+  if (result->outputs.size() == 1) {
+    const auto& [k, v] = *result->outputs.begin();
+    if (k.find('.') == std::string::npos) {
+      store_trivial(dst, v);
+      return true;
+    }
+  }
+  auto        out_bundle = std::make_shared<Bundle>(std::string(dst));
+  for (const auto& [k, v] : result->outputs) {
+    // Strip a uniform leading `<output_name>.` so callers see `pg.x` rather
+    // than `pg.r.x` (the inliner exposes dotted leaves under the declared
+    // output name).
+    auto dot = k.find('.');
+    if (dot != std::string::npos) {
+      out_bundle->set(k.substr(dot + 1), v);
+    } else {
+      out_bundle->set(k, v);
+    }
+  }
+  st.set(dst, out_bundle);
+  return true;
+}
+
+std::optional<uPass_constprop::Inline_result>
+uPass_constprop::evaluate_callee_inline(std::string_view callee_name, const std::vector<Call_actual>& actuals, int depth) {
+  if (depth >= kInlineMaxDepth) {
+    std::print("ERROR: constprop inline recursion depth exceeded {} at callee {}\n", kInlineMaxDepth, callee_name);
+    return std::nullopt;
+  }
+
+  auto fit = function_registry.find(std::string(callee_name));
+  if (fit == function_registry.end()) {
+    return std::nullopt;
   }
 
   const auto& fn = fit->second;
   if (!fn) {
-    return false;
+    return std::nullopt;
   }
 
   std::vector<std::string>               params;
@@ -1487,7 +1712,7 @@ bool uPass_constprop::try_eval_comb_call(std::string_view dst, std::string_view 
   const auto root        = fn->get_root();
   const auto first_child = fn->get_child(root);
   if (first_child.is_invalid()) {
-    return false;
+    return std::nullopt;
   }
 
   // top -> [io?, stmts]. io is optional (only present when the lambda has a
@@ -1504,7 +1729,7 @@ bool uPass_constprop::try_eval_comb_call(std::string_view dst, std::string_view 
     stmts = first_child;
   }
   if (stmts.is_invalid()) {
-    return false;
+    return std::nullopt;
   }
 
   const auto& io_meta       = fn->io_meta();
@@ -1714,12 +1939,31 @@ bool uPass_constprop::try_eval_comb_call(std::string_view dst, std::string_view 
       if (rhs.is_invalid()) {
         return Eval_result::processed;
       }
-      auto value = resolve_local(rhs);
-      if (!value.has_value() || value->is_invalid()) {
-        return Eval_result::deferred;
+      std::string lhs_name(fn->get_name(lhs));
+      auto        value = resolve_local(rhs);
+      if (value.has_value() && !value->is_invalid()) {
+        local_values[lhs_name] = *value;
+        return Eval_result::processed;
       }
-      local_values[std::string(fn->get_name(lhs))] = *value;
-      return Eval_result::processed;
+      // Bundle-rename path: if RHS has dotted leaves in local_values
+      // (e.g. `___3.x`, `___3.y`), aliasing copies them to lhs_name.<key>.
+      if (Lnast_ntype::is_ref(fn->get_type(rhs))) {
+        std::string rhs_name(fn->get_name(rhs));
+        std::string prefix = rhs_name + ".";
+        std::vector<std::pair<std::string, Const>> staged;
+        for (const auto& [k, v] : local_values) {
+          if (k.size() > prefix.size() && k.compare(0, prefix.size(), prefix) == 0 && !v.is_invalid()) {
+            staged.emplace_back(lhs_name + "." + k.substr(prefix.size()), v);
+          }
+        }
+        if (!staged.empty()) {
+          for (auto& [k, v] : staged) {
+            local_values[std::move(k)] = std::move(v);
+          }
+          return Eval_result::processed;
+        }
+      }
+      return Eval_result::deferred;
     }
 
     if (Lnast_ntype::is_plus(type)) {
@@ -1824,7 +2068,8 @@ bool uPass_constprop::try_eval_comb_call(std::string_view dst, std::string_view 
     if (Lnast_ntype::is_tuple_add(type)) {
       auto lhs = fn->get_child(stmt);
       if (!lhs.is_invalid() && Lnast_ntype::is_ref(fn->get_type(lhs))) {
-        auto arg = fn->get_sibling_next(lhs);
+        std::string lhs_name(fn->get_name(lhs));
+        auto        arg = fn->get_sibling_next(lhs);
         if (!arg.is_invalid() && fn->get_sibling_next(arg).is_invalid()) {
           const auto atype = fn->get_type(arg);
           if (Lnast_ntype::is_ref(atype) || Lnast_ntype::is_const(atype)) {
@@ -1832,14 +2077,90 @@ bool uPass_constprop::try_eval_comb_call(std::string_view dst, std::string_view 
             if (!val.has_value() || val->is_invalid()) {
               return Eval_result::deferred;
             }
-            local_values[std::string(fn->get_name(lhs))] = *val;
+            local_values[lhs_name] = *val;
             return Eval_result::processed;
+          }
+        }
+        // Multi-entry tuple_add: assemble dotted leaves so a downstream
+        // assign (`r = ___3`) can route via the bundle-rename path. Each
+        // child may be a const (unnamed positional), a ref (also unnamed,
+        // resolved through local_values), or an assign(ref(key), val)
+        // pair (named field).
+        int unnamed_pos = 0;
+        for (auto child = fn->get_sibling_next(lhs); !child.is_invalid(); child = fn->get_sibling_next(child)) {
+          const auto ctype = fn->get_type(child);
+          if (Lnast_ntype::is_const(ctype) || Lnast_ntype::is_ref(ctype)) {
+            auto v = resolve_local(child);
+            if (!v.has_value() || v->is_invalid()) {
+              return Eval_result::deferred;
+            }
+            local_values[lhs_name + "." + std::to_string(unnamed_pos)] = *v;
+            ++unnamed_pos;
+          } else if (Lnast_ntype::is_assign(ctype)) {
+            auto key_nid = fn->get_child(child);
+            if (key_nid.is_invalid() || !Lnast_ntype::is_ref(fn->get_type(key_nid))) {
+              return Eval_result::processed;
+            }
+            std::string key(fn->get_name(key_nid));
+            auto        val_nid = fn->get_sibling_next(key_nid);
+            if (val_nid.is_invalid()) {
+              return Eval_result::processed;
+            }
+            auto v = resolve_local(val_nid);
+            if (!v.has_value() || v->is_invalid()) {
+              return Eval_result::deferred;
+            }
+            local_values[lhs_name + "." + key] = *v;
           }
         }
       }
       return Eval_result::processed;
     }
-    if (Lnast_ntype::is_tuple_set(type) || Lnast_ntype::is_attr_set(type) || Lnast_ntype::is_attr_get(type)) {
+    if (Lnast_ntype::is_attr_set(type) || Lnast_ntype::is_attr_get(type)) {
+      return Eval_result::processed;
+    }
+
+    // tuple_set inside a callee body: when the receiver is a ref into
+    // local_values (typically `self` bound from a ref-param bundle), write
+    // the value into the flat-keyed slot so the ref-param writeback path
+    // sees the mutation. Layout: ref(tuple), (const|ref)(field)..., value.
+    if (Lnast_ntype::is_tuple_set(type)) {
+      auto tup = fn->get_child(stmt);
+      if (tup.is_invalid() || !Lnast_ntype::is_ref(fn->get_type(tup))) {
+        return Eval_result::processed;
+      }
+      std::string flat(fn->get_name(tup));
+      auto        last  = fn->get_sibling_next(tup);
+      auto        prior = tup;
+      for (auto fld = fn->get_sibling_next(tup); !fld.is_invalid(); fld = fn->get_sibling_next(fld)) {
+        prior = last;
+        last  = fld;
+      }
+      // `last` is now the value; walk from `tup` to last-but-one collecting segs.
+      for (auto fld = fn->get_sibling_next(tup); !fld.is_invalid() && fld != last; fld = fn->get_sibling_next(fld)) {
+        std::string seg;
+        if (Lnast_ntype::is_const(fn->get_type(fld))) {
+          seg = std::string(fn->get_name(fld));
+        } else if (Lnast_ntype::is_ref(fn->get_type(fld))) {
+          auto rv = local_values.find(std::string(fn->get_name(fld)));
+          if (rv == local_values.end() || rv->second.is_invalid()) {
+            return Eval_result::deferred;
+          }
+          seg = rv->second.to_pyrope();
+          // Strip quotes for string index → field-name form.
+          if (seg.size() >= 2 && seg.front() == '\'' && seg.back() == '\'') {
+            seg = seg.substr(1, seg.size() - 2);
+          }
+        } else {
+          return Eval_result::processed;
+        }
+        flat += "." + seg;
+      }
+      auto val = resolve_local(last);
+      if (!val.has_value() || val->is_invalid()) {
+        return Eval_result::deferred;
+      }
+      local_values[flat] = *val;
       return Eval_result::processed;
     }
 
@@ -1938,6 +2259,141 @@ bool uPass_constprop::try_eval_comb_call(std::string_view dst, std::string_view 
       return Eval_result::processed;
     }
 
+    // Inner func_call inside a comb body: recursive inline. Supports the
+    // comptime-bounded recursion patterns (fib, fact, tree_sum) described
+    // in TODO_prp entry 1y. Layout: `func_call(dst_ref, fname_ref, args…)`.
+    if (Lnast_ntype::is_func_call(type)) {
+      auto dst_nid = fn->get_child(stmt);
+      if (dst_nid.is_invalid() || !Lnast_ntype::is_ref(fn->get_type(dst_nid))) {
+        return Eval_result::aborted;
+      }
+      auto fname_nid = fn->get_sibling_next(dst_nid);
+      if (fname_nid.is_invalid() || !Lnast_ntype::is_ref(fn->get_type(fname_nid))) {
+        return Eval_result::aborted;
+      }
+      std::string inner_fname(fn->get_name(fname_nid));
+      // Re-qualify into the same module the outer caller was using.
+      std::string inner_callee = inner_fname;
+      if (inner_callee.find('.') == std::string::npos) {
+        // Higher-order: if fname is a local that binds to a function-name
+        // string (closure_capture / fcall6 style), use that. Otherwise fall
+        // back to the same-module qualified name.
+        auto local_it = local_values.find(inner_fname);
+        if (local_it != local_values.end() && local_it->second.is_string()) {
+          inner_callee = strip_pyrope_quotes(local_it->second.to_pyrope());
+        } else {
+          inner_callee = std::string(lm->get_top_module_name()) + "." + inner_callee;
+        }
+      }
+      // Collect actuals from the inner call's sibling chain.
+      std::vector<Call_actual> inner_actuals;
+      bool                     have_inner = true;
+      for (auto arg = fn->get_sibling_next(fname_nid); !arg.is_invalid(); arg = fn->get_sibling_next(arg)) {
+        Call_actual ca;
+        const auto  atype = fn->get_type(arg);
+        if (Lnast_ntype::is_assign(atype)) {
+          auto key = fn->get_child(arg);
+          if (key.is_invalid() || !Lnast_ntype::is_ref(fn->get_type(key))) {
+            have_inner = false;
+            break;
+          }
+          ca.is_named = true;
+          ca.name     = std::string(fn->get_name(key));
+          auto val    = fn->get_sibling_next(key);
+          if (val.is_invalid()) {
+            have_inner = false;
+            break;
+          }
+          auto v = resolve_local(val);
+          if (!v.has_value() || v->is_invalid()) {
+            // Bundle-typed value (e.g. `v = v` where v is a tuple param).
+            // Harvest the dotted leaves from local_values into a bundle_value
+            // map so the inner call's bind_named expands them again.
+            if (Lnast_ntype::is_ref(fn->get_type(val))) {
+              std::string vname(fn->get_name(val));
+              std::string prefix = vname + ".";
+              std::unordered_map<std::string, Const> fields;
+              for (const auto& [k, vv] : local_values) {
+                if (k.size() > prefix.size() && k.compare(0, prefix.size(), prefix) == 0 && !vv.is_invalid()) {
+                  fields[k.substr(prefix.size())] = vv;
+                }
+              }
+              if (!fields.empty()) {
+                ca.is_bundle    = true;
+                ca.bundle_value = std::move(fields);
+                inner_actuals.emplace_back(std::move(ca));
+                continue;
+              }
+            }
+            return Eval_result::deferred;
+          }
+          ca.value = *v;
+        } else if (Lnast_ntype::is_ref(atype) || Lnast_ntype::is_const(atype)) {
+          auto v = resolve_local(arg);
+          if (!v.has_value() || v->is_invalid()) {
+            // Could be a bundle actual (e.g. tree_sum's `v = v` carrying a
+            // tuple-typed local). Try expanding "<ref>." entries from
+            // local_values into a flat bundle_value map.
+            if (Lnast_ntype::is_ref(atype)) {
+              std::string vname(fn->get_name(arg));
+              std::string prefix = vname + ".";
+              std::unordered_map<std::string, Const> fields;
+              for (const auto& [k, vv] : local_values) {
+                if (k.size() > prefix.size() && k.compare(0, prefix.size(), prefix) == 0 && !vv.is_invalid()) {
+                  fields[k.substr(prefix.size())] = vv;
+                }
+              }
+              if (!fields.empty()) {
+                ca.is_named     = false;
+                ca.is_bundle    = true;
+                ca.bundle_value = std::move(fields);
+                inner_actuals.emplace_back(std::move(ca));
+                continue;
+              }
+            }
+            return Eval_result::deferred;
+          }
+          ca.is_named = false;
+          ca.value    = *v;
+        } else {
+          have_inner = false;
+          break;
+        }
+        inner_actuals.emplace_back(std::move(ca));
+      }
+      if (!have_inner) {
+        return Eval_result::aborted;
+      }
+      auto inner_result = evaluate_callee_inline(inner_callee, inner_actuals, depth + 1);
+      if (!inner_result.has_value()) {
+        return Eval_result::deferred;
+      }
+      // Bundle ref-writebacks against a positional bundle actual we
+      // synthesized here aren't representable in this scope; treat them
+      // as a soft abort if any appear.
+      if (!inner_result->ref_writeback_fields.empty()) {
+        return Eval_result::aborted;
+      }
+      // Scalar ref writebacks land back in the enclosing body's local_values.
+      for (const auto& [caller_var, val] : inner_result->ref_writebacks) {
+        local_values[caller_var] = val;
+      }
+      // Stash outputs. Single-output: bind to dst directly. Multi-output:
+      // bind each as dotted "dst.field" leaves so downstream tuple_get
+      // reads can route through resolve_local + dotted-path scan.
+      std::string dst_name(fn->get_name(dst_nid));
+      if (inner_result->outputs.size() == 1) {
+        local_values[dst_name] = inner_result->outputs.begin()->second;
+      } else if (!inner_result->outputs.empty()) {
+        for (const auto& [k, v] : inner_result->outputs) {
+          local_values[dst_name + "." + k] = v;
+        }
+      } else {
+        // Void callee — nothing to bind; processed (writebacks already applied).
+      }
+      return Eval_result::processed;
+    }
+
     return Eval_result::aborted;
   };
 
@@ -1987,7 +2443,7 @@ bool uPass_constprop::try_eval_comb_call(std::string_view dst, std::string_view 
       }
       const auto r = try_eval_stmt(body_stmts[i]);
       if (r == Eval_result::aborted) {
-        return false;
+        return std::nullopt;
       }
       if (r == Eval_result::processed) {
         processed[i] = true;
@@ -2000,31 +2456,16 @@ bool uPass_constprop::try_eval_comb_call(std::string_view dst, std::string_view 
   }
   for (auto p : processed) {
     if (!p) {
-      return false;
+      return std::nullopt;
     }
   }
 
-  // Write back `ref` params into the caller's scope. A `ref a` callee param
-  // behaves like a C++ reference: mutations inside the body must be visible
-  // at the call site. The write-back happens only when the body folded
-  // successfully so callers never see a half-applied update.
-  for (const auto& [param_name, caller_var] : ref_param_writeback) {
-    auto it = local_values.find(param_name);
-    if (it == local_values.end() || it->second.is_invalid()) {
-      return false;
-    }
-    store_trivial(caller_var, it->second);
-  }
-
-  if (outputs.empty()) {
-    return false;
-  }
-
-  // Apply the declared output type's sign / width. When io_meta records
-  // is_signed=true with an explicit bitwidth N, sign-extend the trivial
-  // from bit N-1 so a slice like `b#[0..<4]` declared as `:s4` returns
-  // -2 (signed bit pattern) instead of 14 (raw unsigned).
-  auto adjust_for_type = [&](Const val, std::size_t idx) {
+  // Build Inline_result for the caller. Ref writebacks: scalar refs are
+  // re-emitted under the caller variable's name; bundle refs surface as
+  // "caller.field" entries the wrapper writes back through the symbol-
+  // table bundle.
+  Inline_result result;
+  auto          adjust_for_type = [&](Const val, std::size_t idx) {
     if (use_io_meta && idx < io_meta.outputs.size()) {
       const auto& oe = io_meta.outputs[idx];
       if (oe.is_signed && oe.bits > 0) {
@@ -2034,30 +2475,45 @@ bool uPass_constprop::try_eval_comb_call(std::string_view dst, std::string_view 
     return val;
   };
 
-  if (outputs.size() == 1) {
-    auto it = local_values.find(outputs.front());
-    if (it == local_values.end() || it->second.is_invalid()) {
-      return false;
+  for (const auto& [param_name, caller_var] : ref_param_writeback) {
+    auto scalar_it = local_values.find(param_name);
+    if (scalar_it != local_values.end() && !scalar_it->second.is_invalid()) {
+      result.ref_writebacks.emplace(caller_var, scalar_it->second);
     }
-    Const out_val = adjust_for_type(it->second, 0);
-    // Single-output callees produce a trivial scalar: `x == 2` reads
-    // st.get_trivial(x). The dotted-form `x.res` is handled by a fallback
-    // in process_tuple_get that returns the trivial when the named lookup
-    // misses (treats a single-output result as its own field).
-    store_trivial(dst, out_val);
-    return true;
+    // Bundle-shaped writebacks: harvest every "param.field" entry, rewrite
+    // its prefix to point at the caller variable.
+    auto prefix = param_name + ".";
+    for (const auto& [k, v] : local_values) {
+      if (k.size() > prefix.size() && k.compare(0, prefix.size(), prefix) == 0 && !v.is_invalid()) {
+        std::string suffix = k.substr(prefix.size());
+        result.ref_writeback_fields.emplace(caller_var + "." + suffix, v);
+      }
+    }
   }
 
-  auto out_bundle = std::make_shared<Bundle>(std::string(dst));
   for (std::size_t i = 0; i < outputs.size(); ++i) {
     auto it = local_values.find(outputs[i]);
-    if (it == local_values.end() || it->second.is_invalid()) {
-      return false;
+    if (it != local_values.end() && !it->second.is_invalid()) {
+      result.outputs.emplace(outputs[i], adjust_for_type(it->second, i));
+      continue;
     }
-    out_bundle->set(outputs[i], adjust_for_type(it->second, i));
+    // Tuple-typed output: harvest dotted leaves (outputs[i].field) and
+    // expose each as `outputs[i].field` so the caller can splat them
+    // into its symbol-table bundle.
+    std::string prefix = outputs[i] + ".";
+    bool        found_any = false;
+    for (const auto& [k, v] : local_values) {
+      if (k.size() > prefix.size() && k.compare(0, prefix.size(), prefix) == 0 && !v.is_invalid()) {
+        result.outputs.emplace(k, v);
+        found_any = true;
+      }
+    }
+    if (!found_any) {
+      return std::nullopt;
+    }
   }
-  st.set(dst, out_bundle);
-  return true;
+
+  return result;
 }
 
 // Marker pseudo-function handlers. The runner has already moved the cursor
@@ -2112,6 +2568,206 @@ void uPass_constprop::process_func_case() {
   move_to_parent();
 }
 
+bool uPass_constprop::try_eval_cell_call(std::string_view dst, std::string_view fname, const std::vector<Call_actual>& actuals) {
+  // `__name(...)` direct cell-op call. Strip the `__` prefix and dispatch
+  // against the Ntype_op kernel set. Operands are positional and follow the
+  // pin order from cell.cpp (see also docs/contracts/lnast2lgraph.md).
+  if (fname.size() < 3 || fname[0] != '_' || fname[1] != '_') {
+    return false;
+  }
+  std::string_view op(fname.data() + 2, fname.size() - 2);
+
+  // All actuals must be positional and foldable (no unknown bits) — leave
+  // unknown-input folds for a later iteration once unknowns clear.
+  std::vector<Const> args;
+  args.reserve(actuals.size());
+  for (const auto& a : actuals) {
+    if (a.is_named || a.is_bundle || a.value.is_invalid() || a.value.has_unknowns()) {
+      return false;
+    }
+    args.emplace_back(a.value);
+  }
+
+  auto need_n = [&](std::size_t n) -> bool { return args.size() == n; };
+  auto need_min = [&](std::size_t n) -> bool { return args.size() >= n; };
+
+  Const result;
+  bool  matched = false;
+
+  if (op == "sum") {
+    // Pin a: add; pin b: subtract. Direct-call form uses pin a only.
+    if (need_min(1)) {
+      Const r = args[0];
+      for (std::size_t i = 1; i < args.size(); ++i) {
+        r = r.add_op(args[i]);
+      }
+      result  = r;
+      matched = true;
+    }
+  } else if (op == "mult") {
+    if (need_min(1)) {
+      Const r = args[0];
+      for (std::size_t i = 1; i < args.size(); ++i) {
+        r = r.mult_op(args[i]);
+      }
+      result  = r;
+      matched = true;
+    }
+  } else if (op == "div") {
+    if (need_n(2)) {
+      result  = *args[0].div_op(args[1]);
+      matched = true;
+    }
+  } else if (op == "mod") {
+    if (need_n(2)) {
+      result  = *args[0].mod_op(args[1]);
+      matched = true;
+    }
+  } else if (op == "and") {
+    if (need_min(1)) {
+      Const r = args[0];
+      for (std::size_t i = 1; i < args.size(); ++i) {
+        r = r.and_op(args[i]);
+      }
+      result  = r;
+      matched = true;
+    }
+  } else if (op == "or") {
+    if (need_min(1)) {
+      Const r = args[0];
+      for (std::size_t i = 1; i < args.size(); ++i) {
+        r = r.or_op(args[i]);
+      }
+      result  = r;
+      matched = true;
+    }
+  } else if (op == "xor") {
+    if (need_min(1)) {
+      Const r = args[0];
+      for (std::size_t i = 1; i < args.size(); ++i) {
+        r = r.xor_op(args[i]);
+      }
+      result  = r;
+      matched = true;
+    }
+  } else if (op == "not") {
+    if (need_n(1)) {
+      result  = args[0].not_op();
+      matched = true;
+    }
+  } else if (op == "ror") {
+    if (need_n(1)) {
+      result  = *args[0].ror_op();
+      matched = true;
+    }
+  } else if (op == "rand") {
+    if (need_n(1)) {
+      result  = *args[0].rand_op();
+      matched = true;
+    }
+  } else if (op == "rxor") {
+    if (need_n(1)) {
+      result  = *args[0].rxor_op();
+      matched = true;
+    }
+  } else if (op == "sext") {
+    // Pin a: value, pin b: sign-bit position.
+    if (need_n(2) && args[1].is_i()) {
+      result  = args[0].sext_op(static_cast<int>(args[1].to_i()));
+      matched = true;
+    }
+  } else if (op == "get_mask") {
+    if (need_n(2)) {
+      result  = *args[0].get_mask_op(args[1]);
+      matched = true;
+    }
+  } else if (op == "set_mask") {
+    if (need_n(3)) {
+      result  = *args[0].set_mask_op(args[1], args[2]);
+      matched = true;
+    }
+  } else if (op == "lt") {
+    if (need_n(2)) {
+      result  = *args[0].lt_op(args[1]);
+      matched = true;
+    }
+  } else if (op == "gt") {
+    if (need_n(2)) {
+      result  = *args[0].gt_op(args[1]);
+      matched = true;
+    }
+  } else if (op == "le") {
+    if (need_n(2)) {
+      result  = *args[0].le_op(args[1]);
+      matched = true;
+    }
+  } else if (op == "ge") {
+    if (need_n(2)) {
+      result  = *args[0].ge_op(args[1]);
+      matched = true;
+    }
+  } else if (op == "eq") {
+    if (need_n(2)) {
+      result  = *args[0].eq_op(args[1]);
+      matched = true;
+    }
+  } else if (op == "ne") {
+    if (need_n(2)) {
+      auto eq = args[0].eq_op(args[1]);
+      result  = eq->not_op();
+      matched = true;
+    }
+  } else if (op == "shl") {
+    if (need_n(2)) {
+      result  = *args[0].lsh_op(args[1]);
+      matched = true;
+    }
+  } else if (op == "sra") {
+    if (need_n(2)) {
+      result  = *args[0].rsh_op(args[1]);
+      matched = true;
+    }
+  } else if (op == "mux") {
+    // Pin 0 selector, pins 1..N values; pick args[1 + sel].
+    if (need_min(2) && args[0].is_i()) {
+      const auto idx = static_cast<int64_t>(args[0].to_i());
+      if (idx >= 0 && static_cast<std::size_t>(idx + 1) < args.size()) {
+        result  = args[1 + idx];
+        matched = true;
+      } else if (idx >= 0) {
+        // Out-of-range selector: pick the last value (Mux default-arm
+        // semantics — matches cell_mux's `else` arm in tests).
+        result  = args.back();
+        matched = true;
+      }
+    }
+  } else if (op == "hotmux") {
+    // Pin 0 one-hot sel, pins 1..N values. Each set bit `i` of sel picks
+    // value args[1 + i]. Folds only when exactly one bit of sel is set.
+    if (need_min(2) && args[0].is_i()) {
+      const auto sel = args[0].to_i();
+      if (sel != 0 && (sel & (sel - 1)) == 0) {
+        int bit = 0;
+        for (auto v = sel; (v & 1) == 0; v >>= 1) {
+          ++bit;
+        }
+        if (static_cast<std::size_t>(bit + 1) < args.size()) {
+          result  = args[1 + bit];
+          matched = true;
+        }
+      }
+    }
+  } else {
+    return false;
+  }
+
+  if (!matched || result.is_invalid()) {
+    return false;
+  }
+  store_trivial(dst, result);
+  return true;
+}
+
 void uPass_constprop::process_func_call() {
   // Layout: ref(dst), ref(func_name), (const|ref)(arg)...
   // Now strictly the ref-form (built-in typecast callables and user funcs).
@@ -2131,8 +2787,26 @@ void uPass_constprop::process_func_call() {
   }
   std::string fname(current_text());
 
+  // `optimize(<bool>)` — synthesis hint, parse-and-discard for now. Drop
+  // the call by binding dst to a constant true so the statement can be
+  // eliminated (no downstream consumers expect a meaningful value).
+  if (fname == "optimize") {
+    store_trivial(dst, Dlop::create_bool(true));
+    move_to_parent();
+    return;
+  }
+
   auto actuals = collect_call_actuals();
   if (actuals.has_value() && try_eval_comb_call(dst, fname, *actuals)) {
+    move_to_parent();
+    return;
+  }
+
+  // Direct cell-op call: `__sum(a, b)`, `__hotmux(sel, a, b, …)`, … —
+  // every Ntype_op cell can surface in Pyrope as `__name(...)` and gets
+  // folded here when all actuals are comptime-known. See cell.hpp for the
+  // canonical names.
+  if (actuals.has_value() && try_eval_cell_call(dst, fname, *actuals)) {
     move_to_parent();
     return;
   }

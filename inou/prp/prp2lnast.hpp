@@ -140,8 +140,12 @@ protected:
   std::vector<Call_arg> collect_call_args(TSNode arg_tuple);
   void                  add_call_args_to_fcall(const Lnast_nid& fcall_idx, const std::vector<Call_arg>& call_args);
 
-  // Lvalue helpers
-  Lnast_node process_lvalue_for_assign(TSNode lvalue, const Lnast_node& rvalue, TSNode decl_node, TSNode type_cast_node);
+  // Lvalue helpers. `rhs_is_fcall` tells the lvalue_list path to bind by
+  // name (return-field name) rather than position; otherwise positional
+  // binding is used (the right behaviour for tuple-literal RHS such as
+  // `(a, b) = (b+1, a)`).
+  Lnast_node process_lvalue_for_assign(TSNode lvalue, const Lnast_node& rvalue, TSNode decl_node, TSNode type_cast_node,
+                                       bool rhs_is_fcall = false);
 
   // Helpers
   std::string_view        get_text(const TSNode& n) const;

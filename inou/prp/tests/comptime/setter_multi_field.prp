@@ -1,7 +1,7 @@
 /*
 :name: setter_multi_field
 :type: comptime
-:verifier_pass: 8
+:verifier_pass: 7
 :verifier_fail: 0
 */
 

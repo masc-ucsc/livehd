@@ -455,16 +455,20 @@ void Prp2lnast::process_declaration_statement(TSNode n) {
   }
 }
 
-Lnast_node Prp2lnast::process_lvalue_for_assign(TSNode lvalue, const Lnast_node& rvalue, TSNode decl_node, TSNode type_cast_node) {
+Lnast_node Prp2lnast::process_lvalue_for_assign(TSNode lvalue, const Lnast_node& rvalue, TSNode decl_node, TSNode type_cast_node,
+                                                bool rhs_is_fcall) {
   std::string_view lvt(ts_node_type(lvalue));
   if (lvt == "lvalue_list") {
-    // Tuple lvalue: `(x0, x1, …) = rhs`. The grammar's `lvalue_list`
-    // children are `lvalue_item`s, each either a `typed_identifier` directly
-    // or a `(_complex_identifier, optional type_cast)` pair. For each item
-    // we extract the matching positional field from `rvalue` into a fresh
-    // tmp and recurse. The recursion lets nested cases (member_selection,
-    // dot_expression, even nested lvalue_lists) reuse the existing single-
-    // lvalue paths below.
+    // Tuple lvalue: `(x0, x1, …) = rhs`. Each item is an `lvalue_item`,
+    // which wraps either a `typed_identifier`, a `(_complex_identifier,
+    // optional type_cast)`, or a `named_lvalue` (rename form). When the
+    // item exposes a plain identifier name (typed_identifier or bare
+    // identifier), we bind BY NAME — `tuple_get` keyed by the local
+    // name, not by position. This matches the named-arg call rule:
+    // `(c, b) = dox(a)` picks field `c` and field `b` from the return
+    // bundle regardless of declaration order in the function's signature.
+    // For complex lvalues (member_selection, bit_selection, etc.) we
+    // fall back to positional binding since there's no name to use.
     uint32_t nnc = ts_node_named_child_count(lvalue);
     uint32_t pos = 0;
     for (uint32_t i = 0; i < nnc; i++) {
@@ -493,12 +497,38 @@ Lnast_node Prp2lnast::process_lvalue_for_assign(TSNode lvalue, const Lnast_node&
         ++pos;
         continue;
       }
-      // tuple_get tmp, rvalue, <pos>
+
+      // Decide between name-driven and positional tuple_get. When the RHS
+      // is a function call, the destructure binds by return-field name —
+      // so we key tuple_get by the local's identifier text. For tuple-
+      // literal RHS (e.g. `(a, b) = (b+1, a)`) positional binding is
+      // correct because the literal's slots are positional anyway.
+      std::string      key_text;
+      bool             use_name_key = false;
+      std::string_view inner_t(ts_node_type(inner));
+      if (rhs_is_fcall) {
+        if (inner_t == "identifier") {
+          key_text     = std::string(trim(get_text(inner)));
+          use_name_key = true;
+        } else if (inner_t == "typed_identifier") {
+          TSNode id = child_by_field(inner, "identifier");
+          if (!ts_node_is_null(id)) {
+            key_text     = std::string(trim(get_text(id)));
+            use_name_key = true;
+          }
+        }
+      }
+
+      // tuple_get tmp, rvalue, <key>
       auto       tg_idx = builder.add_child(Lnast_ntype::create_tuple_get());
       Lnast_node tmp    = builder.mint_tmp_ref();
       lnast->add_child(tg_idx, tmp);
       lnast->add_child(tg_idx, rvalue);
-      lnast->add_child(tg_idx, Lnast_node::create_const(std::to_string(pos)));
+      if (use_name_key) {
+        lnast->add_child(tg_idx, Lnast_node::create_const(key_text));
+      } else {
+        lnast->add_child(tg_idx, Lnast_node::create_const(std::to_string(pos)));
+      }
       // Recurse: the per-position tmp is the new "rvalue" for the inner lvalue.
       // `decl_node` propagates so `mut (a, b) = …` declares both items.
       (void)process_lvalue_for_assign(inner, tmp, decl_node, item_tc);
@@ -911,7 +941,8 @@ void Prp2lnast::process_assignment(TSNode n) {
     return;
   }
 
-  Lnast_node lhs_ref = process_lvalue_for_assign(lv, rvalue_node, decl, tc);
+  const bool rhs_is_fcall = !ts_node_is_null(rv) && std::string_view(ts_node_type(rv)) == "function_call_expression";
+  Lnast_node lhs_ref = process_lvalue_for_assign(lv, rvalue_node, decl, tc, rhs_is_fcall);
 
   if (!overflow_kind.empty()) {
     auto idx = builder.add_child(Lnast_ntype::create_attr_set());
@@ -1904,17 +1935,81 @@ Lnast_node Prp2lnast::expr_to_node(TSNode n) {
   return constant_text_to_node(trim(get_text(n)));
 }
 
+// Decode the cooked (double-quoted) escape set: \n, \t, \\, \", \xNN.
+// Anything else with a leading backslash is left as-is (the backslash and the
+// following char both survive). Single-quoted (raw) strings never reach here.
+static std::string unescape_cooked_string(std::string_view raw) {
+  auto hex_digit = [](char c) -> int {
+    if (c >= '0' && c <= '9') {
+      return c - '0';
+    }
+    if (c >= 'a' && c <= 'f') {
+      return 10 + (c - 'a');
+    }
+    if (c >= 'A' && c <= 'F') {
+      return 10 + (c - 'A');
+    }
+    return -1;
+  };
+  std::string out;
+  out.reserve(raw.size());
+  for (size_t i = 0; i < raw.size(); ++i) {
+    char c = raw[i];
+    if (c != '\\' || i + 1 >= raw.size()) {
+      out.push_back(c);
+      continue;
+    }
+    char next = raw[i + 1];
+    switch (next) {
+      case 'n':
+        out.push_back('\n');
+        ++i;
+        break;
+      case 't':
+        out.push_back('\t');
+        ++i;
+        break;
+      case '\\':
+        out.push_back('\\');
+        ++i;
+        break;
+      case '"':
+        out.push_back('"');
+        ++i;
+        break;
+      case 'x': {
+        int hi = (i + 2 < raw.size()) ? hex_digit(raw[i + 2]) : -1;
+        int lo = (i + 3 < raw.size()) ? hex_digit(raw[i + 3]) : -1;
+        if (hi >= 0 && lo >= 0) {
+          out.push_back(static_cast<char>((hi << 4) | lo));
+          i += 3;
+        } else {
+          out.push_back(c);  // malformed \x — keep verbatim
+        }
+        break;
+      }
+      default:
+        out.push_back(c);  // unknown escape — keep backslash
+        break;
+    }
+  }
+  return out;
+}
+
 Lnast_node Prp2lnast::interpolated_string_to_node(TSNode n) {
   // Double-quoted string body, possibly containing `{expr[:fmt]}` chunks.
   // With no interpolations the named-child list is empty (all quote/text
   // tokens are anonymous), so re-emit the body as a single-quoted pyrope
-  // string literal that `Dlop::from_pyrope` can round-trip.
+  // string literal that `Dlop::from_pyrope` can round-trip. Escape sequences
+  // (\n, \t, \\, \", \xNN) are processed here — the resulting bytes are
+  // embedded directly inside the single-quoted wrapper.
   uint32_t nnc        = ts_node_named_child_count(n);
   uint32_t body_start = ts_node_start_byte(n) + 1;
   uint32_t body_end   = ts_node_end_byte(n) - 1;
   if (nnc == 0) {
-    auto body = text_between(body_start, body_end);
-    return Lnast_node::create_const(absl::StrCat("'", body, "'"));
+    auto body    = text_between(body_start, body_end);
+    auto decoded = unescape_cooked_string(body);
+    return Lnast_node::create_const(absl::StrCat("'", decoded, "'"));
   }
 
   // Lower to `string("part0", expr0, "part1", expr1, ..., "partN")`. The
@@ -1939,7 +2034,8 @@ Lnast_node Prp2lnast::interpolated_string_to_node(TSNode n) {
     }
     auto pre = text_between(cursor, brace_open);
     if (!pre.empty()) {
-      args.push_back(Lnast_node::create_const(absl::StrCat("'", pre, "'")));
+      auto pre_decoded = unescape_cooked_string(pre);
+      args.push_back(Lnast_node::create_const(absl::StrCat("'", pre_decoded, "'")));
     }
 
     args.push_back(expr_to_node(expr));
@@ -1953,7 +2049,8 @@ Lnast_node Prp2lnast::interpolated_string_to_node(TSNode n) {
   if (cursor < body_end) {
     auto tail = text_between(cursor, body_end);
     if (!tail.empty()) {
-      args.push_back(Lnast_node::create_const(absl::StrCat("'", tail, "'")));
+      auto tail_decoded = unescape_cooked_string(tail);
+      args.push_back(Lnast_node::create_const(absl::StrCat("'", tail_decoded, "'")));
     }
   }
 

@@ -5,6 +5,6 @@
 :verifier_fail: 0
 */
 
-cassert("hello\n" == "\x68ello\x0d")
+cassert("hello\n" == "\x68ello\x0a")
 
 cassert('hello\n' == "hello\\n")
