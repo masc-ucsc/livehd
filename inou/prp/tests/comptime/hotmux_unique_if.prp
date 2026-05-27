@@ -1,0 +1,46 @@
+/*
+:name: hotmux_unique_if
+:type: comptime
+:verifier_pass: 8
+:verifier_fail: 0
+*/
+
+// Corner cases beyond formux.prp:
+//   - `unique if` with no `elif` (single guarded arm), default fall-through
+//   - `unique if` with three arms and an `else` (explicit default)
+//   - __hotmux with single 1-hot bit set per sel value (covers each slot)
+//   - optimize(<bool>) used as a parse-and-discard hint inside a comb
+//   - __mux (not __hotmux) compared against unique-if to confirm both fold
+
+// Single-arm unique if (no elif). When cond is false, res keeps init.
+comb code_single(cond:bool, a:u32, b:u32) -> (res:u32) {
+  mut res = a
+  unique if cond {
+    res = b
+  }
+}
+
+cassert(code_single(true,  100, 200) == 200)
+cassert(code_single(false, 100, 200) == 100)
+
+// Three-arm unique if with default else (mutually exclusive guaranteed).
+comb code_three(c0:bool, c1:bool, c2:bool, a:u8, b:u8, c:u8, d:u8) -> (res:u8) {
+  mut res = d
+  unique if c0 {
+    res = a
+  } elif c1 {
+    res = b
+  } elif c2 {
+    res = c
+  }
+  optimize(!((c0 and c1) or (c0 and c2) or (c1 and c2)))
+}
+
+cassert(code_three(true,  false, false, 1, 2, 3, 9) == 1)
+cassert(code_three(false, true,  false, 1, 2, 3, 9) == 2)
+cassert(code_three(false, false, true,  1, 2, 3, 9) == 3)
+cassert(code_three(false, false, false, 1, 2, 3, 9) == 9)
+
+// Direct __hotmux walk: one-hot sel sweeps each slot.
+cassert(__hotmux(s=0sb001, p1=10, p2=20, p3=30) == 10)
+cassert(__hotmux(s=0sb100, p1=10, p2=20, p3=30) == 30)

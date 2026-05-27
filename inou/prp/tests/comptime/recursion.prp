@@ -1,0 +1,75 @@
+/*
+:name: recursion
+:type: comptime
+:verifier_pass: 13
+:verifier_fail: 0
+*/
+
+// Comptime-bounded recursion: a comb may call itself recursively as long
+// as every call chain reaches a comptime-decidable base case. The
+// recursion fully unrolls at elaboration time (each call inlines into
+// its caller), so the call graph becomes the resulting LNAST/LGraph
+// shape. Two flavors are exercised:
+//   - pure value computation (fibonacci, factorial)
+//   - structural network instantiation (balanced reduction tree)
+// See TODO_prp.md [[1y]].
+
+// ---- Pure-value recursion: Fibonacci ----
+comb fib(n) -> (r) {
+  if n < 2 {
+    r = n
+  } else {
+    r = fib(n = n - 1) + fib(n = n - 2)
+  }
+}
+
+cassert(fib(n = 0)  == 0)
+cassert(fib(n = 1)  == 1)
+cassert(fib(n = 2)  == 1)
+cassert(fib(n = 8)  == 21)
+cassert(fib(n = 10) == 55)
+
+// ---- Pure-value recursion: factorial ----
+comb fact(n) -> (r) {
+  if n <= 1 {
+    r = 1
+  } else {
+    r = n * fact(n = n - 1)
+  }
+}
+
+cassert(fact(n = 0) == 1)
+cassert(fact(n = 5) == 120)
+cassert(fact(n = 6) == 720)
+
+// ---- Structural recursion: balanced binary reduction tree ----
+// tree_sum recursively splits the index range [lo..hi] in half and
+// instantiates an adder at every internal node. Because lo/hi are
+// comptime, the recursion fully unrolls into a balanced adder tree —
+// the topology *is* the call graph. Same idiom builds a tree of muxes,
+// comparators, or any other 2-input combinator by swapping `+`.
+comb tree_sum(v, lo, hi) -> (r) {
+  if lo == hi {
+    r = v[lo]
+  } else {
+    const mid = (lo + hi) / 2
+    r = tree_sum(v = v, lo = lo,      hi = mid)
+      + tree_sum(v = v, lo = mid + 1, hi = hi)
+  }
+}
+
+const data4 = (1, 2, 3, 4)
+cassert(tree_sum(v = data4, lo = 0, hi = 3) == 10)
+
+const data8 = (1, 2, 3, 4, 5, 6, 7, 8)
+cassert(tree_sum(v = data8, lo = 0, hi = 7) == 36)
+
+// Single-element range exercises the base case alone (no internal +).
+cassert(tree_sum(v = data8, lo = 3, hi = 3) == 4)
+
+// Asymmetric (non-power-of-two) range — midpoint floor-splits.
+cassert(tree_sum(v = (10, 20, 30), lo = 0, hi = 2) == 60)
+
+// Sub-range of a larger tuple — recursion shape is driven by (lo,hi),
+// not by the tuple size.
+cassert(tree_sum(v = data8, lo = 2, hi = 5) == 18)

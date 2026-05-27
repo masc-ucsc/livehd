@@ -1,0 +1,64 @@
+/*
+:name: match_arms_mixed
+:type: comptime
+:verifier_pass: 6
+:verifier_fail: 0
+*/
+
+// Corner cases beyond expr_match.prp:
+//   - mixed arm prefixes in the SAME match (case / == / bare expr)
+//   - match on a tuple comptime selector with `case` pattern
+//   - match producing a tuple from arms
+//   - match nested inside another match arm
+//   - selector taken from a comb-function comptime return
+
+const sel = 0b10
+
+// All three arm syntaxes in one match must produce the same outcome.
+const r1 = match sel {
+       0b00 { 0b0001 }   // bare-expr arm
+  == 0b01    { 0b0010 }   // ==-prefixed arm
+  case 0b10  { 0b0100 }   // case-prefixed arm
+  else       { cassert(false); 0 }
+}
+cassert(r1 == 0b0100)
+
+// Arm body returns a tuple value.
+const r2 = match sel {
+  case 0b00 { (lo=1, hi=0) }
+  case 0b10 { (lo=4, hi=2) }
+  else      { (lo=0, hi=0) }
+}
+cassert(r2.lo == 4 and r2.hi == 2)
+
+// Tuple selector, pattern-match on whole tuple via `case`.
+const tup = (a=1, b=2)
+const r3 = match tup {
+  case (a=0, b=0)   { 0 }
+  case (a=1, b=2)   { 99 }
+  else              { -1 }
+}
+cassert(r3 == 99)
+
+// Nested match: inner match in an arm body.
+const inner_sel = 1
+const r4 = match sel {
+  case 0b10 {
+    match inner_sel {
+      == 0 { 10 }
+      == 1 { 20 }
+      else { 30 }
+    }
+  }
+  else { 0 }
+}
+cassert(r4 == 20)
+
+// Selector returned by a comptime comb call.
+comb pick() -> (r) { r = 3 }
+const r5 = match pick() {
+  case 0 { 100 }
+  == 3   { 300 }
+  else   { 0 }
+}
+cassert(r5 == 300)

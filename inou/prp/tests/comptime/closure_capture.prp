@@ -1,0 +1,43 @@
+/*
+:name: closure_capture
+:type: comptime
+:verifier_pass: 6
+:verifier_fail: 0
+*/
+
+// Corner cases for entry 1x (function-scope closure-capture rule, no-import
+// case). fcall6.prp exercises functions-as-arguments; this file focuses on
+// the capture rule itself: a function body may only reference an outer-scope
+// name when that name's bundle entry is comptime-constant.
+
+// Bare comptime const captured directly in the body.
+const K = 100
+comb add_k(x) -> (r) { r = x + K }
+cassert(add_k(x = 5)  == 105)
+cassert(add_k(x = 20) == 120)
+
+// Multiple captures of different comptime values in the same body.
+const A = 3
+const B = 4
+comb axb_plus_c(c) -> (r) { r = A * c + B }
+cassert(axb_plus_c(c = 10) == 34)
+
+// Captured value used inside a comb that is then passed as a first-class
+// arg (cross-product with fcall6's higher-order test). The captured
+// constant must still resolve at the inner call site.
+mut STEP = 7
+comb step_up(x) -> (r) { r = x + STEP }
+STEP=100 // SHould not affect, already captured
+comb apply(x, f) -> (r) { r = f(x) }
+cassert(apply(x = 1, f = step_up) == 8)
+
+// Captured tuple field: capture into a comb body, read out by name.
+const CFG = (gain = 2, offset = 5)
+comb cfg_apply(x) -> (r) { r = x * CFG.gain + CFG.offset }
+cassert(cfg_apply(x = 10) == 25)
+
+// Captured comptime computed from other comptimes — still comptime, still
+// captureable.
+const DERIVED = K + A
+comb add_derived(x) -> (r) { r = x + DERIVED }
+cassert(add_derived(x = 0) == 103)

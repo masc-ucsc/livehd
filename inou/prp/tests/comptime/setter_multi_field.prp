@@ -1,0 +1,67 @@
+/*
+:name: setter_multi_field
+:type: comptime
+:verifier_pass: 8
+:verifier_fail: 0
+*/
+
+// Corner cases beyond setter_complex.prp and tuple_decorator_complex.prp:
+//   - multi-field setter (ref self mutates more than one field)
+//   - getter returning a TUPLE (not a scalar)
+//   - chained setter -> getter on the same instance
+//   - ref self method that conditionally mutates only some fields
+//   - method bound via tuple field captures `self` correctly when called
+//     through two different instances (no cross-talk)
+
+comb set_pair(ref self, a:int, b:int) {
+  self.x = a
+  self.y = b
+}
+
+comb get_pair(self) -> (r) {
+  r = (x = self.x, y = self.y)
+}
+
+// Conditional mutator: only updates `x` when `flag` is true.
+comb maybe_set_x(ref self, v:int, flag:bool) {
+  if flag {
+    self.x = v
+  }
+}
+
+comptime const Pair = (
+  mut x:int = 0,
+  mut y:int = 0,
+  set    = set_pair,
+  getter = get_pair,
+  upd    = maybe_set_x,
+)
+
+// Two independent instances: state must not leak between them.
+mut p:Pair = (x = 0, y = 0)
+mut q:Pair = (x = 0, y = 0)
+
+p.set(a = 1, b = 2)
+q.set(a = 10, b = 20)
+cassert(p.x == 1 and p.y == 2)
+cassert(q.x == 10 and q.y == 20)
+
+// Getter returning a tuple.
+const pg = p.getter()
+cassert(pg.x == 1 and pg.y == 2)
+
+// Chained setter -> getter in one statement chain.
+p.set(a = 100, b = 200)
+const pg2 = p.getter()
+cassert(pg2.x == 100 and pg2.y == 200)
+
+// Conditional setter: flag=false leaves x untouched.
+p.upd(v = 999, flag = false)
+cassert(p.x == 100)
+
+// Conditional setter: flag=true mutates x only (y stays).
+p.upd(v = 7, flag = true)
+cassert(p.x == 7 and p.y == 200)
+
+// q is independent — never touched after its initial set.
+cassert(q.x == 10 and q.y == 20)

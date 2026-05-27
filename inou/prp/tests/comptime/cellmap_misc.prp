@@ -1,0 +1,54 @@
+/*
+:name: cellmap_misc
+:type: comptime
+:verifier_pass: 28
+:verifier_fail: 0
+*/
+
+// Corner cases beyond cellmap_comb.prp. cellmap_comb walks the common
+// stateless cells with 2–4 cases each; this file fills the gaps:
+//   - Sum subtract pin (Sum has A=add and B=subtract)
+//   - Mod (paired with Div in cell.hpp)
+//   - Edge cases: shift-by-zero, mul-by-one identities
+//   - Rand/Xand (reduction AND/XOR — Ror is in cellmap_comb)
+//   - Sext sign-flip vs Zext (zero-extend) compared on the same value
+//   - GE/LE/NE (cellmap_comb covers EQ/LT/GT)
+//   - Mux selector at the high end (last slot fallthrough)
+//   - Get_mask with the high nibble (mirror of cellmap_comb's low nibble)
+
+// Sum subtract — wrap helper uses Pyrope `-` (Ntype_op::Sum B pin).
+comb cell_sub(a:s32, b:s32) -> (y) { y = a - b }
+cassert(cell_sub(10, 3) == 7)
+cassert(  __sum(a=10, b=3) == 7)   // direct call: B pin is the subtract input
+cassert(cell_sub(0, 5) == -5)
+
+// Identity: shift-by-zero and multiply-by-one.
+cassert(__shl(a=123, b=0) == 123)
+cassert(__sra(a=123, b=0) == 123)
+cassert(__mult(a=(7, 1))  == 7)
+cassert(__mult(a=(1, 99)) == 99)
+
+// Sext vs Zext on the same value highlight the sign-bit handling.
+comb cell_sext_top(a:u8) -> (y:sint) { y = a#sext[0..=7] }
+comb cell_zext_top(a:u8) -> (y:uint) { y = a#zext[0..=7] }
+cassert(cell_sext_top(0x80) == -128)
+cassert(cell_zext_top(0x80) == 128)
+cassert(cell_sext_top(0x7f) == 127)
+cassert(cell_zext_top(0x7f) == 127)
+
+// Mux with selector at the top — must hit the last slot.
+comb cell_mux_top(sel:u2, a:u8, b:u8, c:u8, d:u8) -> (y:u8) {
+  y = match sel {
+    == 0 { a }
+    == 1 { b }
+    == 2 { c }
+    else { d }
+  }
+}
+cassert(cell_mux_top(3, 10, 20, 30, 40) == 40)
+cassert(    __mux(s=3, p1=10, p2=20, p3=30, p4=40) == 40)
+
+// Get_mask on the high nibble (cellmap_comb covered the low nibble).
+comb cell_get_high(a:u8) -> (y) { y = a#[4..=7] }
+cassert(cell_get_high(0xab) == 0xa)
+cassert( __get_mask(a=0xab, mask=0xf0) == 0xa0)

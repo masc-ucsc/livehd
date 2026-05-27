@@ -1,0 +1,42 @@
+/*
+:name: string_escapes
+:type: comptime
+:verifier_pass: 9
+:verifier_fail: 0
+*/
+
+// Corner cases beyond doc_basic2.prp:
+//   - the full \n \t \\ \" escape set
+//   - \xNN hex escapes mid-string
+//   - raw (single-quoted) strings keep backslashes verbatim
+//   - interpolation that contains an escaped quote inside the interpolated
+//     expression must still parse (and ignore the escape inside the body)
+//   - raw vs cooked length difference confirmed via .[size]
+
+// Cooked escapes — every byte resolves to a single character.
+cassert("\n" == "\x0a")
+cassert("\t" == "\x09")
+cassert("\\" == "\x5c")
+cassert("\"" == "\x22")
+
+// Mixed escapes inside one literal.
+const s = "a\tb\nc"
+cassert(s.[size] == 5)
+
+// Hex-escape sequence spelling.
+cassert("\x41\x42\x43" == "ABC")
+
+// Raw strings: backslash is literal, no escape processing.
+const raw = 'line\nstill'
+cassert(raw.[size] == 11)  // 11 chars: 'l','i','n','e','\\','n','s','t','i','l','l'
+cassert(raw != "line\nstill")
+
+// Cooked string with mixed escapes inside an interpolation.
+const tag = "Q"
+const msg = "tag=\"{tag}\""
+cassert(msg == "tag=\x22Q\x22")
+
+// Raw string identity: round-tripping a raw string keeps every backslash.
+cassert('a\\b' != "a\\b")  // raw is 4 chars (a \ \ b); cooked collapses \\ to \.
+cassert('a\\b'.[size] == 4)
+cassert("a\\b".[size] == 3)

@@ -1,0 +1,52 @@
+/*
+:name: valid_unknown_bits
+:type: comptime
+:verifier_pass: 11
+:verifier_fail: 0
+*/
+
+// Corner cases beyond valid_simple.prp:
+//   - partially-unknown literals (specific bits unknown)
+//   - unknown bits surviving bitwise AND/OR with known masks
+//   - unknown that gets fully resolved by an AND with 0 (constant fold)
+//   - unknown that gets fully forced by an OR with all-ones mask
+//   - clearing unknowns when a known value is reassigned
+//   - unknown bits do NOT poison validity (value is still valid)
+
+mut v:u8 = 0sb1?01_?000
+
+// Partial unknown: known bits compare against masked extraction.
+cassert(v#[3..=6] == 0sb1?0)
+cassert(v#[7]    == 0sb1)    // top bit is known 1
+cassert(v#[0..=2] == 0)        // bottom three are known 0
+
+// AND with 0 collapses unknown to 0.
+const zeroed = v & 0
+cassert(zeroed == 0)
+
+// OR with all-ones forces all bits known.
+const ones = v | 0xff
+cassert(ones == 0xff)
+
+// AND/OR with a mask that touches only known bits preserves the unknown
+// in untouched positions but resolves the masked ones.
+const masked_low = v & 0ub0000_1111
+cassert(masked_low == 0ub0000_1000)  // bit 3 still unknown? — actually bit 3 was '1?', so:
+// (Re-evaluating: v#[3] is '1', v#[6] is '?' — the AND only keeps bits 0..3,
+//  whose pattern was 1_000 → just bit 3 set.)
+// We re-do the assertion to make the value precise:
+cassert((v & 0ub0000_0111) == 0)     // bits 0..2 are all known 0
+
+// Carry expansion: adding 1 may bump the unknown into a higher bit.
+mut w = 0sb??
+cassert((w + 1) == 0sb???)           // unknown grows by carry
+
+// Assigning a known value clears the unknown completely.
+v = 100
+cassert(v == 100)
+cassert(v.[bits] == 7)               // known again, normal bitwidth applies
+
+// Multi-step: become unknown, do arithmetic, then resolve.
+mut z = 0sb?
+z = z & 0  // forces z to known 0 even though z was fully unknown
+cassert(z == 0)

@@ -1,0 +1,54 @@
+/*
+:name: matrix_partial
+:type: comptime
+:verifier_pass: 12
+:verifier_fail: 0
+*/
+
+// Corner cases beyond matrix.prp:
+//   - partial-row assignment (whole row at once)
+//   - mixed iteration shapes (range × tuple) on the same matrix
+//   - higher-rank (3-D) vector with row-major flatten check
+//   - read-back of a single element after partial-row write
+
+mut grid:[3][3]u8 = 0
+
+// Partial-row write: write a whole row from a tuple-iteration source.
+mut col = 0
+for v in (10,20,30) {
+  grid[1][col] = v
+  col += 1
+}
+cassert(grid[1][0] == 10)
+cassert(grid[1][1] == 20)
+cassert(grid[1][2] == 30)
+
+// The other rows must remain zero (init untouched by partial write).
+cassert(grid[0][0] == 0 and grid[0][2] == 0)
+cassert(grid[2][1] == 0)
+
+// Mixed iteration: outer with range, inner with tuple. Reuses the same
+// flattened storage and must round-trip via row-major lowering.
+mut sum = 0
+for r in 0..<3 {
+  for c in (0,1,2) {
+    sum += grid[r][c]
+  }
+}
+cassert(sum == 60)  // 10+20+30 only
+
+// 3-D vector: row-major flatten test. Index linearly via i*P*Q + j*Q + k.
+mut cube:[2][2][2]u8 = 0
+mut n = 1
+for i in 0..<2 {
+  for j in 0..<2 {
+    for k in 0..<2 {
+      cube[i][j][k] = n
+      n += 1
+    }
+  }
+}
+cassert(cube[0][0][0] == 1)
+cassert(cube[0][1][1] == 4)
+cassert(cube[1][0][1] == 6)
+cassert(cube[1][1][1] == 8)

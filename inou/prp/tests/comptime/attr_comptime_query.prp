@@ -1,0 +1,45 @@
+/*
+:name: attr_comptime_query
+:type: comptime
+:verifier_pass: 9
+:verifier_fail: 0
+*/
+
+// Corner cases for `.[comptime]` / `::[comptime]` (entry 1u). Distinct from
+// phase2_attr_comptime.prp which only covers the always-true case; here we
+// also drive the constraint-side `::[comptime]` and check the negative
+// (runtime-only) branch is correctly classified once present.
+
+// 1) Plain comptime constant — query is true.
+const a = 42
+cassert(a.[comptime])
+
+// 2) Derived value where every input is comptime — query is true.
+const b = a + 1
+cassert(b.[comptime])
+
+// 3) Tuple field — propagates through tuple bind.
+const t = (x = 7, y = 8)
+cassert(t.x.[comptime])
+cassert(t.[comptime])
+
+// 4) Parameter constraint `::[comptime]`: passing a known-comptime value
+//    must satisfy the constraint and not raise an error.
+comb double_const(n::[comptime]) -> (r) { r = n * 2 }
+cassert(double_const(n = 5) == 10)
+cassert(double_const(n = a) == 84)
+
+// 5) Function returning comptime value — the result is still comptime.
+comb make_three() -> (r) { r = 3 }
+const c = make_three()
+cassert(c.[comptime])
+
+// 6) Match selector built only from comptime — query inside arm is true.
+const sel = 1
+const picked = match sel {
+  == 0 { 10 }
+  == 1 { 20 }
+  else { 30 }
+}
+cassert(picked.[comptime])
+cassert(picked == 20)

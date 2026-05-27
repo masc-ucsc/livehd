@@ -1,0 +1,50 @@
+/*
+:name: attr_set_path
+:type: comptime
+:verifier_pass: 7
+:verifier_fail: 0
+*/
+
+// Corner cases for entry 1w (unified attr_set / tuple_set variadic path):
+//   - attr_set with a 1-element path  (root.[attr] = value)
+//   - attr_set with a 2-element path (root.field.[attr] = value)
+//   - tuple_set with a deep path     (root.field.sub = value)
+//   - reading the attribute back from the deep path target
+//   - mixing the two ops in the same expression (path-shape parity)
+//   - user attributes propagate through assignment (existing sticky rule)
+
+// Single-level user attribute on a scalar.
+const a::[note = 1] = 7
+cassert(a.[note] == 1)
+cassert(a == 7)
+
+// User attribute on a tuple field via 2-element path.
+mut t = (x = 0, y = (lo = 0, hi = 0))
+t.x::[tag = 42] = 11
+cassert(t.x == 11)
+cassert(t.x.[tag] == 42)
+
+// tuple_set with a deep path: t.y.hi gets written via path of len 2.
+t.y.hi = 99
+cassert(t.y.hi == 99)
+cassert(t.y.lo == 0)
+
+// attr_set on the deep tuple slot — last child of attr_set is the attr key.
+t.y.hi::[bound = 100] = 50
+cassert(t.y.hi == 50)
+cassert(t.y.hi.[bound] == 100)
+
+// Sticky propagation through expression op (entry 1w validator surface):
+// the user attribute should ride along into a derived value.
+const x::[_special] = 4
+const y = x + 1
+cassert(y.[_special])
+
+// Reading an attribute that was never set returns nil (no spurious entries).
+cassert(t.y.lo.[bound] == nil)
+
+// Mixed shape: attr_set and tuple_set on the SAME root path in sequence.
+mut u = (v = 0)
+u.v = 5
+u.v::[unit = 10] = 6
+cassert(u.v == 6 and u.v.[unit] == 10)

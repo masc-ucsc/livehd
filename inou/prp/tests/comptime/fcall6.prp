@@ -1,0 +1,44 @@
+/*
+:name: fcall6
+:type: comptime
+:verifier_pass: 6
+:verifier_fail: 0
+*/
+
+// Simple unary functions used as first-class values
+comb add_1(x) -> (r) { r = x + 1 }
+comb dec_2(x) -> (r) { r = x - 2 }
+
+// `map` method body: applies the passed function `f` to each field in-place
+comb apply_each(ref self, f) {
+  self.a = f(self.a)
+  self.b = f(self.b)
+  self.c = f(self.c)
+}
+
+// Tuple type carrying `map` as a method that takes a function argument
+comptime const Triple = (
+  mut a:s32 = 0,
+  mut b:s32 = 0,
+  mut c:s32 = 0,
+  map = apply_each,
+)
+
+mut v:Triple = (a = 10, b = 20, c = 30)
+cassert(v.a == 10 and v.b == 20 and v.c == 30)
+
+// Pass `add_1` as the function argument to the map method
+v.map(f = add_1)
+cassert(v.a == 11 and v.b == 21 and v.c == 31)
+
+// Pass `dec_2` as the function argument to the map method
+v.map(f = dec_2)
+cassert(v.a == 9 and v.b == 19 and v.c == 29)
+
+// Non-method form: a plain function accepting another function as an argument
+comb apply(x, f) -> (r) { r = f(x) }
+cassert(apply(x = 5, f = add_1) == 6)
+cassert(apply(x = 5, f = dec_2) == 3)
+
+// Function-of-function chained through a function argument
+cassert(apply(x = apply(x = 100, f = add_1), f = dec_2) == 99)

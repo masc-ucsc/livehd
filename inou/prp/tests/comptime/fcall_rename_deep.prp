@@ -1,0 +1,51 @@
+/*
+:name: fcall_rename_deep
+:type: comptime
+:verifier_pass: 9
+:verifier_fail: 0
+*/
+
+// Corner cases beyond fcall5.prp / fcall5b.prp:
+//   - rename through THREE-level-deep return path
+//   - rename only some return fields, drop the others
+//   - reuse the same target name twice in different destructure forms
+//   - rename across two distinct functions in the same scope, no collision
+//   - rebind without mut after a previous mut destructure
+
+// Triple-nested return: dox.payload.inner.value
+comb deep(a) -> (payload, code) {
+  payload = (inner = (value = a + 1, tag = a + 2))
+  code    = a + 100
+}
+
+// Pull just the deepest field through a rename path.
+mut (v = deep.payload.inner.value) = deep(a = 10)
+cassert(v == 11)
+
+// Rebind without `mut`, this time keeping two deep fields and dropping `code`.
+(v = deep.payload.inner.value, tg = deep.payload.inner.tag) = deep(a = 20)
+cassert(v == 21 and tg == 22)
+
+// Pull the mid-level tuple under a new name (no further unpacking).
+mut (mid = deep.payload.inner) = deep(a = 5)
+cassert(mid.value == 6 and mid.tag == 7)
+
+// Two functions in the same scope — rename targets must not clash with
+// either function's local names.
+comb other(a) -> (payload, code) {
+  payload = (inner = (value = a - 1, tag = a - 2))
+  code    = a - 100
+}
+
+mut (dv = deep.payload.inner.value, ov = other.payload.inner.value) = (deep(a=50), other(a=50))
+cassert(dv == 51 and ov == 49)
+
+// Bind only the top-level shallow field, ignoring the deep tuple.
+mut (just_code = deep.code) = deep(a = 7)
+cassert(just_code == 107)
+
+// Plain (non-renamed) destructure of the same function still works.
+mut (payload, code) = deep(a = 0)
+cassert(payload.inner.value == 1)
+cassert(payload.inner.tag   == 2)
+cassert(code == 100)
