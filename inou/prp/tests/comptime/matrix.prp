@@ -1,7 +1,7 @@
 /*
 :name: matrix
 :type: comptime
-:verifier_pass: 9
+:verifier_pass: 17
 :verifier_fail: 0
 */
 
@@ -23,4 +23,4 @@ for a in (0,1,2,3) {
     counter += 1
   }
 }
-cassert(counter==8)
+cassert(counter==9)

@@ -313,6 +313,35 @@ std::optional<Const> uPass_attributes::derive_comptime(std::string_view base, st
   if (resolve_value(base).has_value()) {
     return *Dlop::create_integer(1);
   }
+  // Aggregate (tuple): comptime iff every field is comptime. This lets
+  // `cassert(t.[comptime])` resolve when `t` itself has no scalar, but each
+  // field does.
+  const Tuple_shape* sh = lookup_tuple_shape(base);
+  std::string        sh_base{base};
+  if (!sh) {
+    if (auto it = shape_source.find(sh_base); it != shape_source.end()) {
+      sh      = lookup_tuple_shape(it->second);
+      sh_base = it->second;
+    }
+  }
+  if (sh && !sh->fields.empty()) {
+    bool all_comptime = true;
+    for (const auto& f : sh->fields) {
+      std::string field_path;
+      field_path.reserve(sh_base.size() + 1 + std::max(f.name.size(), f.positional.size()));
+      field_path.assign(sh_base);
+      field_path.push_back('.');
+      field_path.append(f.name.empty() ? f.positional : f.name);
+      auto sub = derive_comptime(field_path, field_path);
+      if (!sub || sub->is_known_zero()) {
+        all_comptime = false;
+        break;
+      }
+    }
+    if (all_comptime) {
+      return *Dlop::create_integer(1);
+    }
+  }
   return *Dlop::create_integer(0);
 }
 

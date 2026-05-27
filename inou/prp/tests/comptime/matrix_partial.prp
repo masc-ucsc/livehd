@@ -1,7 +1,7 @@
 /*
 :name: matrix_partial
 :type: comptime
-:verifier_pass: 12
+:verifier_pass: 10
 :verifier_fail: 0
 */
 

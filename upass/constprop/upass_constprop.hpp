@@ -212,6 +212,12 @@ protected:
     // is then unused.
     bool                                   is_bundle = false;
     std::unordered_map<std::string, Const> bundle_value;
+    // True when the actual could not be folded to a concrete scalar/bundle
+    // (e.g. runtime-only Flop driver). The inliner binds nothing for these
+    // params but still folds body stmts that don't depend on them — used by
+    // entry 1u so an outer cassert against `(a.[comptime], …)` can resolve
+    // even when one arg is runtime.
+    bool is_unresolved = false;
   };
 
   static inline std::unordered_map<std::string, std::shared_ptr<Lnast>> function_registry;

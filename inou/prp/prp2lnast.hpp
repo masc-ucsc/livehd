@@ -122,13 +122,26 @@ protected:
   void emit_type_spec(const Lnast_node& target, TSNode type_cast_node);
   void emit_attribute_list(const Lnast_node& target, TSNode attribute_list_node);
   void emit_type_expr(const Lnast_nid& type_index, TSNode type_node);
+  // Comptime vector/matrix dimension extraction for a type_cast whose `type`
+  // field is an `array_type` chain (e.g. `:[N][M]T`). Returns dims outer→inner
+  // when every dimension is an integer-literal length; empty otherwise.
+  std::vector<int64_t> extract_array_dims(TSNode type_cast_node) const;
 
   // func_def input/output arg helpers. The arg shape is
   //   assign(ref name, <default | const "nil" | const "ref">, [type-subtree])
   // The type subtree is omitted when no `:Type` annotation is present. A
   // composite tuple type `(a:T, b:U)` is encoded as a `tuple_add` whose
   // children are recursive `assign` arg nodes.
-  void emit_arg_assign(const Lnast_nid& tuple_parent, TSNode typed_ident, TSNode definition_or_null, bool is_ref_mod);
+  // Parameter-attribute carrier (`a::[comptime]`) — captured during arg
+  // walking and replayed at body entry as `attr_set` (plus a `cassert` for
+  // `comptime`, which doubles as the parameter-constraint check).
+  struct Param_attr {
+    std::string param;
+    std::string key;
+    std::string value;  // empty -> "true"
+  };
+  void emit_arg_assign(const Lnast_nid& tuple_parent, TSNode typed_ident, TSNode definition_or_null, bool is_ref_mod,
+                       std::vector<Param_attr>* attrs_out = nullptr);
   void emit_arg_type(const Lnast_nid& assign_parent, TSNode type_node);
 
   struct Call_arg {
@@ -143,9 +156,11 @@ protected:
   // Lvalue helpers. `rhs_is_fcall` tells the lvalue_list path to bind by
   // name (return-field name) rather than position; otherwise positional
   // binding is used (the right behaviour for tuple-literal RHS such as
-  // `(a, b) = (b+1, a)`).
+  // `(a, b) = (b+1, a)`). `rhs_fcall_name` carries the RHS callee text so
+  // the rename form `(x = dox.b) = dox(...)` can validate the prefix
+  // before the dot matches the call's function name.
   Lnast_node process_lvalue_for_assign(TSNode lvalue, const Lnast_node& rvalue, TSNode decl_node, TSNode type_cast_node,
-                                       bool rhs_is_fcall = false);
+                                       bool rhs_is_fcall = false, std::string_view rhs_fcall_name = {});
 
   // Helpers
   std::string_view        get_text(const TSNode& n) const;

@@ -17,5 +17,5 @@ cassert(b == 8 and c==9)
 mut (x=dox.b, y=dox.c) = dox(a=3)    // OK — rename: dox.b → x, dox.c → y
 cassert(x == 4 and y==5)
 
-(x=dox.b, y=dox.c) = dox(a=3)    // OK — rename: dox.b → x, dox.c → y
+(x=dox.b, y=dox.c) = dox(a)      // OK — rename, uses a=7 from above
 cassert(x == 8 and y==9)

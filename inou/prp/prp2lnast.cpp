@@ -408,6 +408,43 @@ static std::pair<std::string_view, bool> decode_decl(TSNode decl) {
   return {kind, !ts_node_is_null(cpt)};
 }
 
+std::vector<int64_t> Prp2lnast::extract_array_dims(TSNode type_cast_node) const {
+  std::vector<int64_t> out;
+  if (ts_node_is_null(type_cast_node)) {
+    return out;
+  }
+  TSNode ty = ts_node_child_by_field_name(type_cast_node, "type", 4);
+  if (ts_node_is_null(ty) || std::string_view(ts_node_type(ty)) != "array_type") {
+    return out;
+  }
+  while (!ts_node_is_null(ty) && std::string_view(ts_node_type(ty)) == "array_type") {
+    TSNode len = ts_node_child_by_field_name(ty, "length", 6);
+    if (ts_node_is_null(len)) {
+      return {};
+    }
+    TSNode idx = ts_node_child_by_field_name(len, "index", 5);
+    if (ts_node_is_null(idx) || std::string_view(ts_node_type(idx)) != "constant") {
+      return {};
+    }
+    auto txt = trim(get_text(idx));
+    if (txt.empty()) {
+      return {};
+    }
+    try {
+      size_t  pos = 0;
+      int64_t v   = std::stoll(std::string(txt), &pos);
+      if (pos != txt.size() || v <= 0) {
+        return {};
+      }
+      out.push_back(v);
+    } catch (...) {
+      return {};
+    }
+    ty = ts_node_child_by_field_name(ty, "base", 4);
+  }
+  return out;
+}
+
 void Prp2lnast::process_declaration_statement(TSNode n) {
   // declaration_statement: var_or_let_or_reg + lvalue (typed_identifier or list)
   auto decl_node   = child_by_field(n, "decl");
@@ -456,7 +493,7 @@ void Prp2lnast::process_declaration_statement(TSNode n) {
 }
 
 Lnast_node Prp2lnast::process_lvalue_for_assign(TSNode lvalue, const Lnast_node& rvalue, TSNode decl_node, TSNode type_cast_node,
-                                                bool rhs_is_fcall) {
+                                                bool rhs_is_fcall, std::string_view rhs_fcall_name) {
   std::string_view lvt(ts_node_type(lvalue));
   if (lvt == "lvalue_list") {
     // Tuple lvalue: `(x0, x1, …) = rhs`. Each item is an `lvalue_item`,
@@ -498,6 +535,91 @@ Lnast_node Prp2lnast::process_lvalue_for_assign(TSNode lvalue, const Lnast_node&
         continue;
       }
 
+      std::string_view inner_t(ts_node_type(inner));
+
+      // Rename form: `(x = dox.b, y = dox.c) = dox(...)`. The `name` field
+      // is the local identifier to bind, the `lvalue` field is either a
+      // bare identifier (whole return tuple → name) or a `dot_expression`
+      // whose leading identifier identifies the source (callee name for a
+      // single fcall RHS, or positional slot for a tuple-of-fcalls RHS) —
+      // the trailing path picks the deep field.
+      if (inner_t == "named_lvalue") {
+        TSNode name_node = child_by_field(inner, "name");
+        TSNode src_node  = child_by_field(inner, "lvalue");
+        if (!ts_node_is_null(name_node) && !ts_node_is_null(src_node)) {
+          std::vector<std::string>    path_keys;
+          std::string                 prefix;
+          std::function<void(TSNode)> walk = [&](TSNode n) {
+            std::string_view t(ts_node_type(n));
+            if (t == "dot_expression") {
+              TSNode item = child_by_field(n, "item");
+              if (ts_node_is_null(item)) {
+                uint32_t nc = ts_node_named_child_count(n);
+                if (nc > 0) {
+                  walk(ts_node_named_child(n, 0));
+                }
+                for (uint32_t k = 1; k < nc; k++) {
+                  TSNode c = ts_node_named_child(n, k);
+                  path_keys.emplace_back(trim(get_text(c)));
+                }
+              } else {
+                walk(item);
+                uint32_t nc = ts_node_named_child_count(n);
+                for (uint32_t k = 0; k < nc; k++) {
+                  TSNode c = ts_node_named_child(n, k);
+                  if (ts_node_eq(c, item)) {
+                    continue;
+                  }
+                  path_keys.emplace_back(trim(get_text(c)));
+                }
+              }
+            } else if (t == "typed_identifier") {
+              TSNode id = child_by_field(n, "identifier");
+              if (!ts_node_is_null(id)) {
+                prefix = std::string(trim(get_text(id)));
+              }
+            } else if (t == "identifier") {
+              prefix = std::string(trim(get_text(n)));
+            }
+          };
+          walk(src_node);
+          if (rhs_is_fcall) {
+            // Single fcall RHS: prefix must match the callee. Hard error
+            // otherwise (cross-function reuse).
+            if (prefix != rhs_fcall_name) {
+              Pass::error("destructure rename prefix `{}` does not match call `{}` in `{}`", prefix, rhs_fcall_name,
+                          get_text(inner));
+            }
+          }
+          // Emit a chain of single-key tuple_gets — constprop chains tmp
+          // through each step, while a single multi-key tuple_get against a
+          // fcall return wasn't propagating through nested tuples. For
+          // tuple-of-fcalls RHS, prepend a positional tuple_get on the
+          // current lvalue_list slot so the prefix's path applies to the
+          // matching call's return.
+          Lnast_node tmp = rvalue;
+          if (!rhs_is_fcall) {
+            auto       tg_idx = builder.add_child(Lnast_ntype::create_tuple_get());
+            Lnast_node next   = builder.mint_tmp_ref();
+            lnast->add_child(tg_idx, next);
+            lnast->add_child(tg_idx, tmp);
+            lnast->add_child(tg_idx, Lnast_node::create_const(std::to_string(pos)));
+            tmp = next;
+          }
+          for (const auto& k : path_keys) {
+            auto       tg_idx = builder.add_child(Lnast_ntype::create_tuple_get());
+            Lnast_node next   = builder.mint_tmp_ref();
+            lnast->add_child(tg_idx, next);
+            lnast->add_child(tg_idx, tmp);
+            lnast->add_child(tg_idx, Lnast_node::create_const(k));
+            tmp = next;
+          }
+          (void)process_lvalue_for_assign(name_node, tmp, decl_node, item_tc);
+          ++pos;
+          continue;
+        }
+      }
+
       // Decide between name-driven and positional tuple_get. When the RHS
       // is a function call, the destructure binds by return-field name —
       // so we key tuple_get by the local's identifier text. For tuple-
@@ -505,7 +627,6 @@ Lnast_node Prp2lnast::process_lvalue_for_assign(TSNode lvalue, const Lnast_node&
       // correct because the literal's slots are positional anyway.
       std::string      key_text;
       bool             use_name_key = false;
-      std::string_view inner_t(ts_node_type(inner));
       if (rhs_is_fcall) {
         if (inner_t == "identifier") {
           key_text     = std::string(trim(get_text(inner)));
@@ -573,6 +694,39 @@ Lnast_node Prp2lnast::process_lvalue_for_assign(TSNode lvalue, const Lnast_node&
     auto aidx = builder.add_child(Lnast_ntype::create_assign());
     lnast->add_child(aidx, ref);
     lnast->add_child(aidx, rvalue);
+
+    // Comptime vector/matrix pre-fill: `mut data:[N][M]T = scalar` populates
+    // every flat slot so later element reads (`data[i][j]`) fold even though
+    // each `tuple_set data i j …` would otherwise erase the bare scalar
+    // trivial that `data = scalar` first stored.
+    if (has_decl && !ts_node_is_null(tc) && rvalue.is_const()) {
+      std::vector<int64_t> dims = extract_array_dims(tc);
+      if (!dims.empty()) {
+        std::string_view rv_text = rvalue.get_name();
+        if (rv_text != "nil") {
+          std::vector<int64_t> idx_v(dims.size(), 0);
+          while (true) {
+            auto ts_idx = builder.add_child(Lnast_ntype::create_tuple_set());
+            lnast->add_child(ts_idx, ref);
+            for (auto d : idx_v) {
+              lnast->add_child(ts_idx, Lnast_node::create_const(std::to_string(d)));
+            }
+            lnast->add_child(ts_idx, Lnast_node::create_const(rv_text));
+            int k = static_cast<int>(idx_v.size()) - 1;
+            while (k >= 0) {
+              if (++idx_v[k] < dims[k]) {
+                break;
+              }
+              idx_v[k] = 0;
+              --k;
+            }
+            if (k < 0) {
+              break;
+            }
+          }
+        }
+      }
+    }
     return ref;
   }
   if (lvt == "member_selection" || lvt == "dot_expression") {
@@ -942,7 +1096,14 @@ void Prp2lnast::process_assignment(TSNode n) {
   }
 
   const bool rhs_is_fcall = !ts_node_is_null(rv) && std::string_view(ts_node_type(rv)) == "function_call_expression";
-  Lnast_node lhs_ref = process_lvalue_for_assign(lv, rvalue_node, decl, tc, rhs_is_fcall);
+  std::string rhs_fcall_name;
+  if (rhs_is_fcall) {
+    TSNode fn = child_by_field(rv, "function");
+    if (!ts_node_is_null(fn)) {
+      rhs_fcall_name = std::string(trim(get_text(fn)));
+    }
+  }
+  Lnast_node lhs_ref = process_lvalue_for_assign(lv, rvalue_node, decl, tc, rhs_is_fcall, rhs_fcall_name);
 
   if (!overflow_kind.empty()) {
     auto idx = builder.add_child(Lnast_ntype::create_attr_set());
@@ -1374,6 +1535,79 @@ void Prp2lnast::process_for_statement(TSNode n) {
     }
   }
 
+  // Comptime inline-tuple unroll: `for v in (10,20,30)` lowers like a literal
+  // range — each entry becomes its own iteration with `assign v <const>` at
+  // entry. Only positional const entries are handled; everything else falls
+  // through to the placeholder while-loop.
+  if (!literal_range && !bind_ids.empty() && !ts_node_is_null(code) && !ts_node_is_null(data)) {
+    TSNode probe = data;
+    while (!ts_node_is_null(probe)) {
+      std::string_view pt(ts_node_type(probe));
+      if (pt == "tuple") {
+        break;
+      }
+      if (pt == "expression_list" || pt == "expression_item") {
+        if (ts_node_named_child_count(probe) == 1) {
+          probe = ts_node_named_child(probe, 0);
+          continue;
+        }
+      }
+      probe = TSNode{};
+      break;
+    }
+    if (!ts_node_is_null(probe) && std::string_view(ts_node_type(probe)) == "tuple") {
+      std::vector<std::string> values;
+      bool                     all_positional_const = true;
+      uint32_t                 nnc                  = ts_node_named_child_count(probe);
+      for (uint32_t i = 0; i < nnc && all_positional_const; i++) {
+        TSNode           c = ts_node_named_child(probe, i);
+        std::string_view ct(ts_node_type(c));
+        if (ct == "constant") {
+          values.emplace_back(trim(get_text(c)));
+        } else if (ct == "unary_expression") {
+          uint32_t uc = ts_node_named_child_count(c);
+          if (uc == 1) {
+            TSNode inner = ts_node_named_child(c, 0);
+            if (std::string_view(ts_node_type(inner)) == "constant") {
+              std::string txt = "-";
+              txt += trim(get_text(inner));
+              values.emplace_back(std::move(txt));
+              continue;
+            }
+          }
+          all_positional_const = false;
+        } else {
+          all_positional_const = false;
+        }
+      }
+      if (all_positional_const && !values.empty() && !ts_node_is_null(bind_id)) {
+        auto outer_idx = builder.add_child(Lnast_ntype::create_stmts());
+        builder.push_stmts(outer_idx);
+        Lnast_node iter_ref = identifier_to_node(bind_id, true);
+        {
+          auto attr = builder.add_child(Lnast_ntype::create_attr_set());
+          lnast->add_child(attr, iter_ref);
+          lnast->add_child(attr, Lnast_node::create_const("type"));
+          lnast->add_child(attr, Lnast_node::create_const("mut"));
+          auto a = builder.add_child(Lnast_ntype::create_assign());
+          lnast->add_child(a, iter_ref);
+          lnast->add_child(a, Lnast_node::create_const("nil"));
+        }
+        for (const auto& v : values) {
+          auto iter_stmts = builder.add_child(Lnast_ntype::create_stmts());
+          builder.push_stmts(iter_stmts);
+          auto a = builder.add_child(Lnast_ntype::create_assign());
+          lnast->add_child(a, iter_ref);
+          lnast->add_child(a, Lnast_node::create_const(v));
+          process_scope_statement(code, iter_stmts);
+          builder.pop_stmts();
+        }
+        builder.pop_stmts();
+        return;
+      }
+    }
+  }
+
   // Fallback: legacy placeholder while-loop. Keeps existing parser-only
   // tests building until we extend the unroll to range expressions whose
   // bounds need constprop folding to resolve.
@@ -1603,15 +1837,17 @@ void Prp2lnast::process_lambda_statement(TSNode n) {
   // they bracket. The `ref` mod is encoded as the assign's RHS const text
   // ("ref") when no explicit default is present; downstream passes
   // (func_extract, constprop) detect it without inventing a new ntype.
-  auto in_idx = lnast->add_child(fd_idx, Lnast_ntype::create_tuple_add());
-  auto collect_args = [&](TSNode container, const Lnast_nid& parent_tup, std::vector<std::string>* names_out) {
-    TSNode   pending_typed{};
-    TSNode   pending_def{};
-    bool     pending_is_ref = false;
-    bool     next_is_ref    = false;
-    auto     flush          = [&]() {
+  auto                    in_idx = lnast->add_child(fd_idx, Lnast_ntype::create_tuple_add());
+  std::vector<Param_attr> input_attrs;
+  auto collect_args = [&](TSNode container, const Lnast_nid& parent_tup, std::vector<std::string>* names_out,
+                          std::vector<Param_attr>* attrs_out) {
+    TSNode pending_typed{};
+    TSNode pending_def{};
+    bool   pending_is_ref = false;
+    bool   next_is_ref    = false;
+    auto   flush          = [&]() {
       if (!ts_node_is_null(pending_typed)) {
-        emit_arg_assign(parent_tup, pending_typed, pending_def, pending_is_ref);
+        emit_arg_assign(parent_tup, pending_typed, pending_def, pending_is_ref, attrs_out);
         if (names_out) {
           TSNode id = child_by_field(pending_typed, "identifier");
           if (!ts_node_is_null(id)) {
@@ -1653,7 +1889,7 @@ void Prp2lnast::process_lambda_statement(TSNode n) {
   if (!ts_node_is_null(fdef)) {
     TSNode inp = child_by_field(fdef, "input");
     if (!ts_node_is_null(inp)) {
-      collect_args(inp, in_idx, nullptr);
+      collect_args(inp, in_idx, nullptr, &input_attrs);
     }
   }
 
@@ -1670,7 +1906,7 @@ void Prp2lnast::process_lambda_statement(TSNode n) {
       TSNode           o = child(fdef, i);
       std::string_view ot(ts_node_type(o));
       if (ot == "arg_list") {
-        collect_args(o, out_idx, &output_refs);
+        collect_args(o, out_idx, &output_refs, nullptr);
       } else if (ot == "typed_identifier") {
         emit_arg_assign(out_idx, o, TSNode{}, /*is_ref_mod=*/false);
         TSNode id = child_by_field(o, "identifier");
@@ -1684,6 +1920,27 @@ void Prp2lnast::process_lambda_statement(TSNode n) {
   // Body
   auto body_idx = lnast->add_child(fd_idx, Lnast_ntype::create_stmts());
   builder.push_stmts(body_idx);
+  // Parameter-side attribute carriers (`a::[comptime]`, …) are sugar for an
+  // `attr_set(a, key, val)` + a `cassert(a.[key])` at body entry. The attr_set
+  // marks the local symbol so reads inside the body fold; for `comptime` the
+  // cassert enforces the constraint once function-call inlining substitutes
+  // the actual argument.
+  for (const auto& pa : input_attrs) {
+    auto sref  = Lnast_node::create_ref(pa.param);
+    auto setix = builder.add_child(Lnast_ntype::create_attr_set());
+    lnast->add_child(setix, sref);
+    lnast->add_child(setix, Lnast_node::create_const(pa.key));
+    lnast->add_child(setix, Lnast_node::create_const(pa.value.empty() ? std::string{"true"} : pa.value));
+    if (pa.key == "comptime") {
+      auto tmp = builder.mint_tmp_ref();
+      auto gix = builder.add_child(Lnast_ntype::create_attr_get());
+      lnast->add_child(gix, tmp);
+      lnast->add_child(gix, sref);
+      lnast->add_child(gix, Lnast_node::create_const("comptime"));
+      auto cix = builder.add_child(Lnast_ntype::create_cassert());
+      lnast->add_child(cix, tmp);
+    }
+  }
   if (!ts_node_is_null(code)) {
     // Placeholder lambda (06-functions.md "Output tuple"): when the body of
     // a single-output `comb` is a bare expression, the value is implicitly
@@ -2234,7 +2491,7 @@ void Prp2lnast::emit_type_expr(const Lnast_nid& parent, TSNode type_node) {
 }
 
 void Prp2lnast::emit_arg_assign(const Lnast_nid& tuple_parent, TSNode typed_ident, TSNode definition_or_null,
-                                bool is_ref_mod) {
+                                bool is_ref_mod, std::vector<Param_attr>* attrs_out) {
   TSNode id = child_by_field(typed_ident, "identifier");
   if (ts_node_is_null(id)) {
     return;
@@ -2258,6 +2515,57 @@ void Prp2lnast::emit_arg_assign(const Lnast_nid& tuple_parent, TSNode typed_iden
     TSNode ty = child_by_field(type_cast, "type");
     if (!ts_node_is_null(ty)) {
       emit_arg_type(aidx, ty);
+    }
+    // Parameter-side attribute carrier (`a::[comptime]`, `a:T::[debug=2]`).
+    // attribute_sq hangs off the type_cast with field "attribute"; collect
+    // (key, value) pairs into the out-vector. The lambda-def driver replays
+    // them as `attr_set` (+ a `cassert` for `comptime`) at body entry.
+    if (attrs_out) {
+      uint32_t total = ts_node_child_count(type_cast);
+      for (uint32_t i = 0; i < total; i++) {
+        TSNode           c     = ts_node_child(type_cast, i);
+        const char*      fname = ts_node_field_name_for_child(type_cast, i);
+        std::string_view ct(ts_node_type(c));
+        if (ct != "attribute_sq" && ct != "tuple_sq") {
+          continue;
+        }
+        if (!fname || std::string_view(fname) != "attribute") {
+          continue;
+        }
+        uint32_t nnc = ts_node_named_child_count(c);
+        for (uint32_t k = 0; k < nnc; ++k) {
+          TSNode           item = ts_node_named_child(c, k);
+          std::string_view it(ts_node_type(item));
+          if (it == "assignment" || it == "attribute_assignment") {
+            TSNode lv = child_by_field(item, "lvalue");
+            TSNode rv = child_by_field(item, "rvalue");
+            if (ts_node_is_null(lv)) {
+              continue;
+            }
+            std::string_view key_txt;
+            std::string_view lvt(ts_node_type(lv));
+            if (lvt == "typed_identifier") {
+              TSNode iid = child_by_field(lv, "identifier");
+              if (!ts_node_is_null(iid)) {
+                key_txt = trim(get_text(iid));
+              }
+            } else {
+              key_txt = trim(get_text(lv));
+            }
+            if (key_txt.empty()) {
+              continue;
+            }
+            std::string val_txt = ts_node_is_null(rv) ? std::string{} : std::string(trim(get_text(rv)));
+            attrs_out->push_back({std::string(get_text(id)), std::string(key_txt), std::move(val_txt)});
+          } else if (it == "identifier" || it == "ref_identifier") {
+            auto kt = trim(get_text(item));
+            if (kt.empty()) {
+              continue;
+            }
+            attrs_out->push_back({std::string(get_text(id)), std::string(kt), std::string{}});
+          }
+        }
+      }
     }
   }
 }

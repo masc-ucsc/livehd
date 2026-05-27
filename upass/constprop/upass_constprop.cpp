@@ -1505,7 +1505,12 @@ std::optional<std::vector<uPass_constprop::Call_actual>> uPass_constprop::collec
       auto value = resolve_current_scalar();
       move_to_parent();
       if (!value.has_value() || value->is_invalid()) {
-        return std::nullopt;
+        // Unresolved actual: still emit a slot so positional binding stays
+        // consistent. Body stmts that don't read this param will still fold;
+        // ones that do will defer/abort.
+        actual.is_unresolved = true;
+        actuals.emplace_back(std::move(actual));
+        continue;
       }
       actual.value = *value;
       actuals.emplace_back(std::move(actual));
@@ -1537,7 +1542,12 @@ std::optional<std::vector<uPass_constprop::Call_actual>> uPass_constprop::collec
     }
     auto value = resolve_current_scalar();
     if (!value.has_value() || value->is_invalid()) {
-      return std::nullopt;
+      Call_actual unres;
+      unres.is_named       = false;
+      unres.var_name       = std::move(var_name);
+      unres.is_unresolved  = true;
+      actuals.emplace_back(std::move(unres));
+      continue;
     }
     actuals.emplace_back(Call_actual{.is_named = false, .name = {}, .value = *value, .var_name = std::move(var_name)});
   }
@@ -1686,6 +1696,10 @@ uPass_constprop::evaluate_callee_inline(std::string_view callee_name, const std:
   std::vector<bool>                      params_is_ref;
   std::vector<std::string>               outputs;
   std::unordered_map<std::string, Const> local_values;
+  // Per-local attribute map (only entries set inside the callee). Keyed by
+  // (var_name, attr_name). Drives the inliner-local `attr_get` fold for
+  // entry 1u (`x.[comptime]`, parameter-side `::[comptime]`).
+  std::unordered_map<std::string, std::unordered_map<std::string, Const>> local_attrs;
   // Range entries (lo, hi) produced by `range` stmts; consumed by `get_mask`
   // for bit-slice ops like `b#[0..<4]` that appear in callee bodies.
   std::unordered_map<std::string, std::pair<Const, Const>> local_ranges;
@@ -1831,7 +1845,9 @@ uPass_constprop::evaluate_callee_inline(std::string_view callee_name, const std:
     std::size_t positional_idx = 0;
     for (const auto& actual : actuals) {
       if (actual.is_named) {
-        bind_named(actual.name, actual);
+        if (!actual.is_unresolved) {
+          bind_named(actual.name, actual);
+        }
         // Compute the param this name binds to: either an exact match
         // ("ar=…", "cond=…") or a dotted form whose top-level segment names
         // a param ("ar.x=…").
@@ -1848,7 +1864,9 @@ uPass_constprop::evaluate_callee_inline(std::string_view callee_name, const std:
       }
       if (positional_idx < params.size()) {
         const auto& pname = params[positional_idx];
-        bind_named(pname, actual);
+        if (!actual.is_unresolved) {
+          bind_named(pname, actual);
+        }
         if (positional_idx < params_is_ref.size() && params_is_ref[positional_idx] && !actual.var_name.empty()) {
           ref_param_writeback[pname] = actual.var_name;
         }
@@ -2116,7 +2134,79 @@ uPass_constprop::evaluate_callee_inline(std::string_view callee_name, const std:
       }
       return Eval_result::processed;
     }
-    if (Lnast_ntype::is_attr_set(type) || Lnast_ntype::is_attr_get(type)) {
+    if (Lnast_ntype::is_attr_set(type)) {
+      // Layout: ref(var), const(attr_name), <value>. Stash into local_attrs
+      // so a later attr_get on the same (var, attr) folds. Skip entries
+      // whose value isn't a fully-resolved const (the inliner has no
+      // partial-state slot for them).
+      auto v   = fn->get_child(stmt);
+      auto k   = v.is_invalid() ? v : fn->get_sibling_next(v);
+      auto val = k.is_invalid() ? k : fn->get_sibling_next(k);
+      if (!v.is_invalid() && !k.is_invalid() && !val.is_invalid() && Lnast_ntype::is_ref(fn->get_type(v))
+          && Lnast_ntype::is_const(fn->get_type(k))) {
+        auto resolved = resolve_local(val);
+        if (resolved.has_value() && !resolved->is_invalid()) {
+          local_attrs[std::string(fn->get_name(v))][std::string(fn->get_name(k))] = *resolved;
+        }
+      }
+      return Eval_result::processed;
+    }
+    if (Lnast_ntype::is_attr_get(type)) {
+      // Layout: ref(dst), ref(var), const(attr_name). For now only fold the
+      // `comptime` query — that's what entry 1u asks for. Result:
+      //   - explicit attr_set with `comptime` value -> that value
+      //   - var has a fully-resolved const in local_values -> 1
+      //   - otherwise (runtime / unbound) -> 0
+      auto dst = fn->get_child(stmt);
+      auto v   = dst.is_invalid() ? dst : fn->get_sibling_next(dst);
+      auto k   = v.is_invalid() ? v : fn->get_sibling_next(v);
+      if (dst.is_invalid() || v.is_invalid() || k.is_invalid()) {
+        return Eval_result::processed;
+      }
+      if (!Lnast_ntype::is_ref(fn->get_type(dst)) || !Lnast_ntype::is_ref(fn->get_type(v))
+          || !Lnast_ntype::is_const(fn->get_type(k))) {
+        return Eval_result::processed;
+      }
+      std::string var_name(fn->get_name(v));
+      std::string attr_name(fn->get_name(k));
+      if (attr_name == "comptime") {
+        // Explicit set on this var wins.
+        auto vit = local_attrs.find(var_name);
+        if (vit != local_attrs.end()) {
+          auto ait = vit->second.find("comptime");
+          if (ait != vit->second.end()) {
+            // Normalize boolean values to 1/0.
+            local_values[std::string(fn->get_name(dst))]
+                = ait->second.is_known_zero() ? *Dlop::create_integer(0) : *Dlop::create_integer(1);
+            return Eval_result::processed;
+          }
+        }
+        // No explicit attr: comptime iff the var has a resolved value.
+        auto lvit = local_values.find(var_name);
+        bool has_val = lvit != local_values.end() && !lvit->second.is_invalid() && !lvit->second.is_string();
+        // Bundle entries store as `var.field` — treat presence of any such
+        // entry as comptime too (a fully-resolved tuple actual).
+        if (!has_val) {
+          auto prefix = var_name + ".";
+          for (const auto& [k2, v2] : local_values) {
+            if (k2.size() > prefix.size() && k2.compare(0, prefix.size(), prefix) == 0 && !v2.is_invalid() && !v2.is_string()) {
+              has_val = true;
+              break;
+            }
+          }
+        }
+        local_values[std::string(fn->get_name(dst))]
+            = has_val ? *Dlop::create_integer(1) : *Dlop::create_integer(0);
+        return Eval_result::processed;
+      }
+      // Non-comptime attrs: read from local_attrs only.
+      auto vit = local_attrs.find(var_name);
+      if (vit != local_attrs.end()) {
+        auto ait = vit->second.find(attr_name);
+        if (ait != vit->second.end()) {
+          local_values[std::string(fn->get_name(dst))] = ait->second;
+        }
+      }
       return Eval_result::processed;
     }
 

@@ -1,7 +1,7 @@
 /*
 :name: attr_comptime_query
 :type: comptime
-:verifier_pass: 9
+:verifier_pass: 10
 :verifier_fail: 0
 */
 

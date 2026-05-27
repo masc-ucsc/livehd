@@ -1,7 +1,7 @@
 /*
 :name: attr_set_path
 :type: comptime
-:verifier_pass: 7
+:verifier_pass: 11
 :verifier_fail: 0
 */
 
