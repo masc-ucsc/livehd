@@ -20,6 +20,14 @@ public:
   void process_func_def() override;
   void process_stmts() override;
   void process_stmts_post() override;
+  void process_tuple_add() override;
+  void process_plus() override;
+  void process_minus() override;
+  void process_mult() override;
+  void process_div() override;
+  void process_bit_and() override;
+  void process_bit_or() override;
+  void process_bit_xor() override;
 
   upass::Emit_decision                classify_statement() override;
   bool                                overrides_classify_statement() const override { return true; }
@@ -41,6 +49,24 @@ private:
   // refs, runtime values) deliberately don't flow into the function — this
   // is the "non-trivial lookups stop at the function boundary" rule.
   std::unordered_map<std::string, Const> latest_outer_value;
+
+  // Bundle-valued outer-scope captures: for each outer name that holds a
+  // (statically-known) tuple, stores the flat field map (e.g.
+  // {"gain": 2, "offset": 5} for `const CFG = (gain=2, offset=5)`). The
+  // capture-prelude emitter materializes these as `assign <name>.<field>
+  // <const>` statements so callee bodies that do `tuple_get(CFG, gain)`
+  // resolve via the same flat-key path the inliner already uses.
+  std::unordered_map<std::string, std::unordered_map<std::string, Const>> latest_outer_bundle;
+
+  // Temporary (SSA ___N) value tracking for the outer walk. Captures the
+  // values produced by const-folded arithmetic and by tuple_add nodes so
+  // that a subsequent `assign <name> ___N` can recover the value. Without
+  // this, derived comptime values (`const DERIVED = K + A`) and bundle
+  // literals (`const CFG = (gain=2, offset=5)`) — both of which lower to
+  // `assign <name> <temp_ref>` in LNAST — can't be captured as outer-scope
+  // constants.
+  std::unordered_map<std::string, Const> temp_scalar_value;
+  std::unordered_map<std::string, std::unordered_map<std::string, Const>> temp_bundle_value;
 
   // Names that, at some point during the outer walk, were written under
   // conditions that make them non-constant (a nested-scope assign, a

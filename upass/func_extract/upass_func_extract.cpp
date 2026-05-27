@@ -66,6 +66,168 @@ void uPass_func_extract::process_stmts() { ++stmts_depth; }
 
 void uPass_func_extract::process_stmts_post() { --stmts_depth; }
 
+// Resolve a child cursor node to a Const. Const literals decode via
+// from_pyrope; refs resolve through latest_outer_value first (named outer
+// scalars), then temp_scalar_value (SSA temps). Returns nullopt on
+// anything we can't statically resolve.
+static std::optional<Const> resolve_child_scalar(const std::string& name, bool is_ref, bool is_const,
+                                                  const std::unordered_map<std::string, Const>& latest,
+                                                  const std::unordered_map<std::string, Const>& temps) {
+  if (is_const) {
+    try {
+      return *Dlop::from_pyrope(name);
+    } catch (...) {
+      return std::nullopt;
+    }
+  }
+  if (is_ref) {
+    auto it = latest.find(name);
+    if (it != latest.end()) {
+      return it->second;
+    }
+    auto it2 = temps.find(name);
+    if (it2 != temps.end()) {
+      return it2->second;
+    }
+  }
+  return std::nullopt;
+}
+
+// Walk a (lhs, args...) shaped stmt and fold via `op` if all args resolve to
+// scalars. Sets temp_scalar_value[lhs] on success. Captures from outer-scope
+// constants and prior temp folds; bails otherwise. Used by every binary/n-ary
+// arithmetic process_* hook (plus, minus, mult, ...) so derived comptime
+// values like `const DERIVED = K + A` survive the func_extract walk.
+template <typename Op>
+static void fold_temp_nary(upass::Lnast_manager* lm, Op op,
+                            const std::unordered_map<std::string, Const>& latest_outer_value,
+                            const std::unordered_map<std::string, Const>& temp_scalar_value,
+                            std::unordered_map<std::string, Const>&       out_temps) {
+  if (!lm->has_child()) {
+    return;
+  }
+  const auto saved = lm->save_cursor();
+  lm->move_to_child();
+  if (!Lnast_ntype::is_ref(lm->current_type())) {
+    lm->restore_cursor(saved);
+    return;
+  }
+  std::string lhs_name(lm->current_text());
+  if (!lm->move_to_sibling()) {
+    lm->restore_cursor(saved);
+    return;
+  }
+  std::optional<Const> acc = resolve_child_scalar(std::string(lm->current_text()),
+                                                   Lnast_ntype::is_ref(lm->current_type()),
+                                                   Lnast_ntype::is_const(lm->current_type()),
+                                                   latest_outer_value, temp_scalar_value);
+  if (!acc.has_value() || acc->is_invalid()) {
+    lm->restore_cursor(saved);
+    return;
+  }
+  while (lm->move_to_sibling()) {
+    auto rhs = resolve_child_scalar(std::string(lm->current_text()),
+                                     Lnast_ntype::is_ref(lm->current_type()),
+                                     Lnast_ntype::is_const(lm->current_type()),
+                                     latest_outer_value, temp_scalar_value);
+    if (!rhs.has_value() || rhs->is_invalid()) {
+      lm->restore_cursor(saved);
+      return;
+    }
+    try {
+      *acc = op(*acc, *rhs);
+    } catch (...) {
+      lm->restore_cursor(saved);
+      return;
+    }
+    if (acc->is_invalid()) {
+      lm->restore_cursor(saved);
+      return;
+    }
+  }
+  out_temps[lhs_name] = *acc;
+  lm->restore_cursor(saved);
+}
+
+void uPass_func_extract::process_plus() {
+  fold_temp_nary(lm.get(), [](const Const& a, const Const& b) { return *a.add_op(b); },
+                 latest_outer_value, temp_scalar_value, temp_scalar_value);
+}
+void uPass_func_extract::process_minus() {
+  fold_temp_nary(lm.get(), [](const Const& a, const Const& b) { return *a.sub_op(b); },
+                 latest_outer_value, temp_scalar_value, temp_scalar_value);
+}
+void uPass_func_extract::process_mult() {
+  fold_temp_nary(lm.get(), [](const Const& a, const Const& b) { return *a.mult_op(b); },
+                 latest_outer_value, temp_scalar_value, temp_scalar_value);
+}
+void uPass_func_extract::process_div() {
+  fold_temp_nary(lm.get(), [](const Const& a, const Const& b) { return *a.div_op(b); },
+                 latest_outer_value, temp_scalar_value, temp_scalar_value);
+}
+void uPass_func_extract::process_bit_and() {
+  fold_temp_nary(lm.get(), [](const Const& a, const Const& b) { return *a.and_op(b); },
+                 latest_outer_value, temp_scalar_value, temp_scalar_value);
+}
+void uPass_func_extract::process_bit_or() {
+  fold_temp_nary(lm.get(), [](const Const& a, const Const& b) { return *a.or_op(b); },
+                 latest_outer_value, temp_scalar_value, temp_scalar_value);
+}
+void uPass_func_extract::process_bit_xor() {
+  fold_temp_nary(lm.get(), [](const Const& a, const Const& b) { return *a.xor_op(b); },
+                 latest_outer_value, temp_scalar_value, temp_scalar_value);
+}
+
+// Capture tuple-literal bundles produced at the outer scope. Shape:
+//   tuple_add(ref ___N, assign(ref key, const|ref val) ...)
+// Only purely-named entries with const (or already-known temp) values
+// participate; anything positional/unresolved skips the temp.
+void uPass_func_extract::process_tuple_add() {
+  if (!lm->has_child()) {
+    return;
+  }
+  const auto saved = lm->save_cursor();
+  lm->move_to_child();
+  if (!Lnast_ntype::is_ref(lm->current_type())) {
+    lm->restore_cursor(saved);
+    return;
+  }
+  std::string lhs_name(lm->current_text());
+  std::unordered_map<std::string, Const> fields;
+  while (lm->move_to_sibling()) {
+    if (!Lnast_ntype::is_assign(lm->current_type()) || !lm->has_child()) {
+      lm->restore_cursor(saved);
+      return;
+    }
+    lm->move_to_child();
+    if (!Lnast_ntype::is_ref(lm->current_type())) {
+      lm->move_to_parent();
+      lm->restore_cursor(saved);
+      return;
+    }
+    std::string key(lm->current_text());
+    if (!lm->move_to_sibling()) {
+      lm->move_to_parent();
+      lm->restore_cursor(saved);
+      return;
+    }
+    auto val = resolve_child_scalar(std::string(lm->current_text()),
+                                    Lnast_ntype::is_ref(lm->current_type()),
+                                    Lnast_ntype::is_const(lm->current_type()),
+                                    latest_outer_value, temp_scalar_value);
+    lm->move_to_parent();
+    if (!val.has_value() || val->is_invalid()) {
+      lm->restore_cursor(saved);
+      return;
+    }
+    fields[key] = *val;
+  }
+  if (!fields.empty()) {
+    temp_bundle_value[lhs_name] = std::move(fields);
+  }
+  lm->restore_cursor(saved);
+}
+
 void uPass_func_extract::process_assign() {
   // Definition-time closure-capture tracking. A name is recorded as a
   // visible constant for any comb defined later in this scope IFF its
@@ -92,14 +254,16 @@ void uPass_func_extract::process_assign() {
     return;
   }
   const bool rhs_is_const = Lnast_ntype::is_const(lm->current_type());
+  const bool rhs_is_ref   = Lnast_ntype::is_ref(lm->current_type());
   std::string rhs_text;
-  if (rhs_is_const) {
+  if (rhs_is_const || rhs_is_ref) {
     rhs_text = std::string(lm->current_text());
   }
   lm->restore_cursor(saved);
 
   auto invalidate = [&]() {
     latest_outer_value.erase(lhs_name);
+    latest_outer_bundle.erase(lhs_name);
     outer_non_const.insert(lhs_name);
   };
 
@@ -107,19 +271,53 @@ void uPass_func_extract::process_assign() {
     return;
   }
   // Second write to the same name → no longer a stable constant.
-  if (latest_outer_value.contains(lhs_name)) {
+  if (latest_outer_value.contains(lhs_name) || latest_outer_bundle.contains(lhs_name)) {
     invalidate();
     return;
   }
-  if (!rhs_is_const || stmts_depth > 1) {
+  if (stmts_depth > 1) {
     invalidate();
     return;
   }
-  try {
-    latest_outer_value[lhs_name] = *Dlop::from_pyrope(rhs_text);
-  } catch (...) {
-    invalidate();
+  if (rhs_is_const) {
+    try {
+      latest_outer_value[lhs_name] = *Dlop::from_pyrope(rhs_text);
+    } catch (...) {
+      invalidate();
+    }
+    return;
   }
+  if (rhs_is_ref) {
+    // RHS is a ref to either a previously-folded scalar temp (DERIVED = ___2
+    // where ___2 came from `plus K A`) or a tuple-literal temp (CFG = ___1
+    // where ___1 came from `tuple_add(gain=2, offset=5)`). Both feed the
+    // capture prelude — scalars via latest_outer_value, bundles via
+    // latest_outer_bundle.
+    auto sit = temp_scalar_value.find(rhs_text);
+    if (sit != temp_scalar_value.end()) {
+      latest_outer_value[lhs_name] = sit->second;
+      return;
+    }
+    auto bit = temp_bundle_value.find(rhs_text);
+    if (bit != temp_bundle_value.end()) {
+      latest_outer_bundle[lhs_name] = bit->second;
+      return;
+    }
+    // Aliasing an existing outer-scope value (`COPY = K`) is also a
+    // legitimate comptime capture; propagate without re-reading the temp
+    // map. Bundle alias is rarer but handled symmetrically.
+    auto lvit = latest_outer_value.find(rhs_text);
+    if (lvit != latest_outer_value.end()) {
+      latest_outer_value[lhs_name] = lvit->second;
+      return;
+    }
+    auto lbit = latest_outer_bundle.find(rhs_text);
+    if (lbit != latest_outer_bundle.end()) {
+      latest_outer_bundle[lhs_name] = lbit->second;
+      return;
+    }
+  }
+  invalidate();
 }
 
 void uPass_func_extract::collect_body_refs(const std::shared_ptr<Lnast>& body, std::unordered_set<std::string>& refs) const {
@@ -217,7 +415,7 @@ void uPass_func_extract::process_func_def() {
     // construction, so they naturally don't cross the function boundary —
     // that's the "constants flow up, non-constants stop at the function
     // scope" rule, expressed structurally.
-    if (!latest_outer_value.empty()) {
+    if (!latest_outer_value.empty() || !latest_outer_bundle.empty()) {
       // Scan the SOURCE body (`lm` cursor is at the func_def's stmts) for
       // every name it reads, so we only inline captures the body actually
       // consumes.
@@ -240,12 +438,24 @@ void uPass_func_extract::process_func_def() {
       }
       for (const auto& name : body_refs) {
         auto it = latest_outer_value.find(name);
-        if (it == latest_outer_value.end()) {
+        if (it != latest_outer_value.end()) {
+          auto a_idx = new_lnast->add_child(stmts, Lnast_ntype::create_assign());
+          new_lnast->add_child(a_idx, Lnast_node::create_ref(name));
+          new_lnast->add_child(a_idx, Lnast_node::create_const(it->second.to_pyrope()));
           continue;
         }
-        auto a_idx = new_lnast->add_child(stmts, Lnast_ntype::create_assign());
-        new_lnast->add_child(a_idx, Lnast_node::create_ref(name));
-        new_lnast->add_child(a_idx, Lnast_node::create_const(it->second.to_pyrope()));
+        auto bit = latest_outer_bundle.find(name);
+        if (bit != latest_outer_bundle.end()) {
+          // Materialize the bundle as flat dotted-leaf assigns
+          // (`assign CFG.gain 2`). The inliner's local_values is already
+          // keyed by these dotted paths, so a downstream
+          // `tuple_get ___N CFG gain` resolves with no extra plumbing.
+          for (const auto& [field, val] : bit->second) {
+            auto a_idx = new_lnast->add_child(stmts, Lnast_ntype::create_assign());
+            new_lnast->add_child(a_idx, Lnast_node::create_ref(name + "." + field));
+            new_lnast->add_child(a_idx, Lnast_node::create_const(val.to_pyrope()));
+          }
+        }
       }
     }
     copy_current_children(new_lnast, stmts);
