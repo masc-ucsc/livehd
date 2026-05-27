@@ -113,9 +113,9 @@ git_override(
 http_archive(
     name = "tree-sitter-pyrope",
     build_file = "//packages:tree-sitter-pyrope.BUILD",
-    integrity = "sha256-Zwy61AS7j0KU47kF0bYRbX+jUYrcVaUggqf7+MRsZfA=",
-    strip_prefix = "tree-sitter-pyrope-cbe483d3754b5691eb4d0a0a693347c3545232eb",
-    urls = ["https://github.com/masc-ucsc/tree-sitter-pyrope/archive/cbe483d3754b5691eb4d0a0a693347c3545232eb.zip",
+    integrity = "sha256-XPiRr8o3aaOzXHakbGTO0K9/xHoOs//32+/QxqgOwX4=",
+    strip_prefix = "tree-sitter-pyrope-93ca07971d32ca546be0b9bcc7d508a64eb6686a",
+    urls = ["https://github.com/masc-ucsc/tree-sitter-pyrope/archive/93ca07971d32ca546be0b9bcc7d508a64eb6686a.zip",
     ],
 )
 

@@ -2123,7 +2123,7 @@ Lnast_node Prp2lnast::type_specification_to_node(TSNode n) {
     std::string_view ct(ts_node_type(c));
     if (ct == "attribute_list") {
       emit_attribute_list(aref, c);
-    } else if (ct == "tuple_sq" && fname && std::string_view(fname) == "attribute") {
+    } else if ((ct == "tuple_sq" || ct == "attribute_sq") && fname && std::string_view(fname) == "attribute") {
       // New grammar: write-side attribute carrier is a tuple_sq.
       emit_attribute_list(aref, c);
     }
@@ -2191,7 +2191,7 @@ attrs:
     std::string_view ct(ts_node_type(c));
     if (ct == "attribute_list") {
       emit_attribute_list(target, c);
-    } else if (ct == "tuple_sq" && fname && std::string_view(fname) == "attribute") {
+    } else if ((ct == "tuple_sq" || ct == "attribute_sq") && fname && std::string_view(fname) == "attribute") {
       emit_attribute_list(target, c);
     }
   }
@@ -2327,18 +2327,25 @@ void Prp2lnast::emit_attribute_list(const Lnast_node& target, TSNode attr_list_n
   //      item is a named child — either `assignment` (key=value) or a bare
   //      identifier (flag-only, value defaults to `true`).
   std::string_view nt(ts_node_type(attr_list_node));
-  if (nt == "tuple_sq") {
+  // `tuple_sq` (legacy) and `attribute_sq` (current grammar, commit 93ca079+)
+  // share the same item layout — only the item-node type names differ.
+  // tuple_sq holds `assignment` items (lvalue may be `typed_identifier`);
+  // attribute_sq holds `attribute_assignment` items (lvalue is a plain
+  // `identifier`). Both also accept bare identifier/ref_identifier flags.
+  if (nt == "tuple_sq" || nt == "attribute_sq") {
     uint32_t nnc = ts_node_named_child_count(attr_list_node);
     for (uint32_t i = 0; i < nnc; ++i) {
       TSNode           item = ts_node_named_child(attr_list_node, i);
       std::string_view it(ts_node_type(item));
-      if (it == "assignment") {
+      if (it == "assignment" || it == "attribute_assignment") {
         TSNode lv = child_by_field(item, "lvalue");
         TSNode rv = child_by_field(item, "rvalue");
         if (ts_node_is_null(lv)) {
           continue;
         }
-        // Strip an optional `:Type` wrapper on the attribute key.
+        // Strip an optional `:Type` wrapper on the attribute key (only
+        // applies to legacy `assignment` items; `attribute_assignment`
+        // already has a bare identifier lvalue).
         std::string_view key_txt;
         std::string_view lvt(ts_node_type(lv));
         if (lvt == "typed_identifier") {
@@ -3647,7 +3654,7 @@ Lnast_node Prp2lnast::tuple_to_node(TSNode n, bool /*is_square*/) {
           }
           // New grammar: the write-side `::[…]` attribute carrier is a
           // `tuple_sq` tagged with the `attribute` field on a `type_cast`.
-          if (kt == "tuple_sq" && kfn && std::string_view(kfn) == "attribute") {
+          if ((kt == "tuple_sq" || kt == "attribute_sq") && kfn && std::string_view(kfn) == "attribute") {
             it.attr_list_node = kc;
             it.has_attr_list  = true;
             return;
@@ -3673,7 +3680,7 @@ Lnast_node Prp2lnast::tuple_to_node(TSNode n, bool /*is_square*/) {
             it.has_attr_list  = true;
             break;
           }
-          if (kt == "tuple_sq" && kfn && std::string_view(kfn) == "attribute") {
+          if ((kt == "tuple_sq" || kt == "attribute_sq") && kfn && std::string_view(kfn) == "attribute") {
             it.attr_list_node = kc;
             it.has_attr_list  = true;
             break;
