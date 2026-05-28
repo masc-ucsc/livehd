@@ -27,6 +27,9 @@ cross-file dependencies stay visible.
     unknown-mask metadata to HLOP dlop/slop arithmetic ops so LiveHD
     consumes mask-aware results. The LiveHD-side literal + constprop
     surface is ready and waiting for the HLOP side to land.
+  - Detailed dlop op-by-op notes (which functions to tighten, what
+    each test wants folded, where to add hlop-local unit tests) live
+    in [hlop_todo.md](hlop_todo.md).
 
 - **1r** Function-call return destructuring with rename — **partial**.
   `(b, c) = dox(...)` name-driven binding and explicit rename

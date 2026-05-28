@@ -36,7 +36,12 @@ Lnast::Lnast(std::string_view _module_name, std::string_view _file_name)
   // the module name; the Tree body is created lazily here so that
   // get_root() works only after set_root() has stamped the top node.
   treeio_ = forest_->create_io(top_module_name);
-  tree_   = treeio_->create_tree();
+  // Take the writable handle only to transition the slot to Public, then
+  // hold the raw shared_ptr via get_tree(). Holding the writable handle
+  // long-term keeps the slot in SlotState::Writing, which blocks
+  // TreeIO::replace() and find_tree*/find_tree_rw queries.
+  { auto writable = treeio_->create_tree(); }
+  tree_ = treeio_->get_tree();
 }
 
 Lnast::Lnast(std::shared_ptr<hhds::Tree> body, std::string_view _module_name)
@@ -51,6 +56,9 @@ Lnast::~Lnast() = default;
 
 void Lnast::replace_body(std::shared_ptr<hhds::Tree> new_body) {
   I(treeio_, "replace_body: this Lnast was not constructed with a TreeIO");
+  // Drop our raw ref so the body's only owner is the slot (otherwise
+  // replace's keep_previous default-false path would still see refs).
+  tree_.reset();
   treeio_->replace(std::move(new_body));
   tree_ = treeio_->get_tree();
 }

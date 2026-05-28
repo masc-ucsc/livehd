@@ -46,17 +46,6 @@ Group 1 entries; downstream Groups treat them as Group 1 dependencies.
   (LOC) propagation strategy" below and `docs/contracts/sourcemap.md`.
 ## Group 2 — depends on Group 1
 
-- **1g** LiveHD-side migration to the new HHDS forest API
-  (`find_tree`/`find_graph` returning `shared_ptr<const>`,
-  gated `find_tree_rw`/`find_graph_rw`, slot-level `local_done`).
-  The API redesign lives in [TODO_hhds.md](TODO_hhds.md) **1g** —
-  this entry tracks the LiveHD-side adoption once that lands.
-  - Audit every existing `find_tree` / `find_graph` caller and split
-    into read-only vs read-write paths; route mutators through the
-    `_rw` variant and treat read-only nullptr as "not yet populated".
-  - Drop any local readiness/locking shims that pre-dated `local_done`.
-  - Unblocks [[2o]] (two-phase func_extract) once both sides land.
-
 - **2m** Drop `wrap`/`sat` as attributes; keep only the `wrap`/`sat`
   *statement* form, lowered to a new LNAST `wrap`/`sat` op — see
   "wrap/sat: statement-only via LNAST op" below.
