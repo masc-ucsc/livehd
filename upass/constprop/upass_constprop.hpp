@@ -40,6 +40,7 @@ public:
   void process_le() override;
   void process_gt() override;
   void process_ge() override;
+  void process_is() override;
   void process_if() override;
 
   // Bitwidth Insensitive Reduce

@@ -717,6 +717,12 @@ void uPass_constprop::process_ge() {
   process_binary_passthrough([](Const x, Const y) -> Const { return *x.ge_op(y); });
 }
 
+void uPass_constprop::process_is() {
+  // `is` is folded by upass_attributes (which has the typename data);
+  // constprop is a no-op for now beyond keeping the node alive so its
+  // dst tmp is still readable downstream.
+}
+
 void uPass_constprop::process_if() {
   // Observe the condition so the symbol table is populated before the runner
   // queries try_fold_ref(). The runner's process_if (Slice 7) performs the

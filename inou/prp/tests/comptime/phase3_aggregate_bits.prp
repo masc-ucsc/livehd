@@ -1,16 +1,16 @@
 /*
 :name: phase3_aggregate_bits
 :type: parsing lnast comptime
-:verifier_pass: 5
+:verifier_pass: 4
 :verifier_fail: 0
 */
 
-// Phase 3 — `tup.[bits]` on a tuple is the sum of the per-field `.[bits]`
-// (concatenation width). Resolved before flattening.
+// Phase 3 — under the typesystem redesign aggregates have no `.[bits]`
+// (only scalars do). Per-field `.[bits]` reads require an annotated
+// field; untyped fields read as nil.
 
-const t = (a=5, b=2, c=100)
-cassert(t.a.[bits] == 3)      // 0b101
-cassert(t.b.[bits] == 2)      // 0b10
-cassert(t.c.[bits] == 7)      // 0b1100100
-cassert(t.[bits] == t.a.[bits] + t.b.[bits] + t.c.[bits])
-cassert(t.[bits] == 12)
+const t = (a:u3=5, b:u2=2, c:u7=100)
+cassert(t.a.[bits] == 3)
+cassert(t.b.[bits] == 2)
+cassert(t.c.[bits] == 7)
+cassert(t.[bits] == nil)

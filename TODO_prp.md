@@ -21,8 +21,8 @@ cross-file dependencies stay visible.
     (`0sb1? > 0sb01` folds to `true`; `0sb?00 == 0sb?01` folds to
     `false`; `v + 1 == 0sb??` carry expansion). `prp-valid_unknown_bits`
     additionally exercises bit-range reads on partially-unknown values
-    (`v#[3..=6] == 0sb1?0`), so its full pass requires [[2q]] and
-    [[1v]] (`v.[bits]`) as well as this entry.
+    (`v#[3..=6] == 0sb1?0`), so its full pass requires [[2q]] as well
+    as this entry.
   - Hint: those kernels are in `../hlop`, not LiveHD. Add per-bit
     unknown-mask metadata to HLOP dlop/slop arithmetic ops so LiveHD
     consumes mask-aware results. The LiveHD-side literal + constprop
@@ -133,254 +133,6 @@ cross-file dependencies stay visible.
       post-constprop conditional declarations collapsing to one
       effective write.
 
-- **1v** LNAST basic typesystem redesign — **deferred**.
-  Replaces the existing `__type` mess (which redundantly tracked
-  `bits` / `pitch` / integer-set state, plus parallel signed/unsigned
-  bit fields) with a clean, declaration-driven design. Subsumes the old "bitwidth upass" and
-  "type-check pass" entries. Downstream consumers: bit-level ops
-  [[2q]], `tree_ios` [[2n]], wrap/sat [[2m]] all read from this
-  entry. Primary file: `lnast/bundle.hpp`.
-
-  - **Tried:** Three landing attempts in the 2026-05-27 session
-    (twice agent-typesys, once agent-1v-final). Each applied the
-    corpus rewrite + declared-type-only `derive_max`/`derive_min`/
-    `derive_bits` in `upass/attributes/upass_attributes_read.cpp`,
-    built clean, hit ≤29 failing on first run; all three got
-    reverted before committing. **Land atomically in a single
-    commit, with no concurrent agent activity in
-    `upass/attributes/` or the corpus `.prp` files** — the
-    persistent revert pattern is the reason this didn't land.
-
-  - **Core design** (user-confirmed via Q&A 2026-05-27, refined
-    via the type-system redesign note):
-
-    **Five basic types.** No implicit conversion across them;
-    explicit only.
-    - `integer`
-    - `boolean`
-    - `string`
-    - `complex` — a copied bundle / tuple type
-    - `enum` — 5th basic type, details deferred (stub the slot)
-
-    **Integer representation.** Store only the constrained `max`
-    and `min` from the declaration; drop tracking of "current"
-    max/min along the path (the old bitwidth pass that computed
-    current values becomes too complex — remove it).
-    - `s<N>` / `u<N>` shorthand expands at parse time:
-      `s5 → max=15, min=-16`; `u8 → max=255, min=0`.
-    - Bare `integer` → no bound stored (open integer).
-    - `.[bits]` is signed-bits-with-sign-bit-included, derived
-      from max/min on demand (not stored).
-    - **There is no `.[sbits]` / `.[ubits]`.** Signedness is
-      encoded by `min` being negative; size queries use
-      `.[bits]` only. Any legacy reads of those names must be
-      rewritten to `.[bits]` / `.[max]` / `.[min]`.
-    - Un-annotated declarations → `.[bits]`/`.[max]`/`.[min]`
-      all return `nil` (not a compile error). `int(max=3)` pins
-      only `max`; the other two stay nil.
-
-    **String.** Opaque, compile-time only. No max/min, no
-    length bound in the type.
-
-    **Complex (tuple) types.** When a bundle is promoted to a
-    type, **deep-copy** the entire bundle into `__type` — never
-    reference by id (the source can go out of scope). The copy
-    includes fields, attributes, default values, and methods
-    (setter, getter, eq, lt, ge, …). Recursion: bundles may
-    contain bundles; copy is fully recursive. Field-level
-    `mut`/`const` declarations inside the copied bundle are
-    preserved as authored — do not strip them, even when the
-    outer variable is `const`. Constraint enforcement happens
-    at **use**, not in the bundle.
-
-    `t.[bits]` on a heterogeneous aggregate (any field with no
-    numeric envelope, e.g. a string) is `nil`, not a partial
-    sum. Per-field queries `t.a.[bits]` work if the field is
-    annotated.
-
-    **Type names.** A type has a stable name only when declared
-    via `type Name = ...`. The name is stored inside the type
-    bundle and exposed as `.[typename]`. Anonymous tuples have
-    no typename. `typename` is **debug-only** — it affects
-    diagnostics (better warnings/errors) but never behavior.
-    Equality across two variables with different typenames but
-    identical structure (e.g. `a:xx == b:yy`) succeeds via
-    structural comparison; nominal identity is the job of `is`.
-
-    **Variable-level attributes** (stored outside `__type`,
-    four total): `mut`, `const`, `comptime`, `public`. No
-    `private` — absence of `public` is the default. Variable-
-    level attributes **dominate** field-level declarations: a
-    `const` outer freezes all nested fields at runtime, even
-    where they were declared `mut`. The reverse direction
-    (mut outer, const inner field) preserves the field's
-    const-ness — the field's mut/const lives in the type
-    bundle's stored field metadata and is consulted on
-    assignment.
-
-    Worked example (both directions):
-    ```
-    const a = (mut a:u3 = 0, const b:u5 = 1)
-    a.a = 7              // compile error: const outer freezes mut inner
-
-    mut b:a = (a=3)      // borrows a's type; outer mut
-    b.a = 7              // legal: mut outer + mut field
-    b.b = 7              // compile error: field declared const
-    ```
-
-    **Lambda / function types** (comb, pipe, mod). `__type`
-    stores only a reference to the LNAST tree (stream / node
-    identifier). The signature (inputs, outputs) is read from
-    that tree when needed — never duplicated inside the type.
-
-    **Storage layout — hot vs. attribute-map.** Per-Entry hot
-    fields are limited to the two slots the u-pass reads on
-    every assignment:
-    - `bool const_type` — outer mutability. Read on the
-      mutability-chain walk.
-    - `shared_ptr<Bundle const> type` — nullptr for basic
-      types; populated for complex (a single canonical
-      type-bundle borrowed by all `:Name` variables). Use
-      `shared_ptr` so assignment copies are O(1) (ptr copy,
-      no deep clone). The pointed-at bundle is treated as
-      immutable once stamped.
-
-    Everything else (`comptime`, `typename`, `max`, `min`,
-    `public`, user attrs) lives in the existing attribute map.
-    Two reasons:
-    - Most of those are **non-sticky on copy**: assigning
-      `mut x = comptime_y` must not make `x` comptime, and
-      `x:foo = y:bar` must not retag `x` with bar's typename.
-      Centralizing copy semantics in one place — the per-
-      attribute "carry / drop on copy" table in the
-      assignment helper — keeps that decision inspectable.
-    - The `nil` case (no type, no bound, no name) is just
-      "key absent" in the map, no `std::optional` plumbing.
-
-  - **Implementation tasks** (in `lnast/bundle.hpp` and friends):
-
-    1. **`lnast/bundle.hpp` — data structure.**
-       - Add two hot fields to `Entry`:
-         `bool const_type` (replaces / renames the existing
-         `immutable`) and
-         `std::shared_ptr<Bundle const> type` (nullptr for
-         basic types; one shared canonical bundle per named
-         complex type; immutable once stamped).
-       - Tag the type kind via the bundle pointed-at (or
-         nullptr for basic types). For basic types the
-         `typename` attribute identifies `integer` / `boolean` /
-         `string`; complex is "type ptr non-null"; enum and
-         lambda-ref are stub tags inside the type bundle for
-         now.
-       - For integer variables: store `max`/`min` in the
-         attribute map keyed at the variable's path; absent
-         means unbounded.
-       - Keep type metadata in the `.[attr]` namespace (which
-         is syntactically distinct from `.field`) so it cannot
-         collide with user field names.
-
-    2. **LNAST traversal — type building.**
-       - Build bundles as the tree is traversed.
-       - On `type Name = ...`: deep-copy the RHS bundle ONCE
-         into a freshly allocated canonical type-bundle
-         (`shared_ptr<Bundle const>`), stamp `.[typename] = Name`
-         inside it, and freeze it. Source may go out of scope —
-         the type-bundle is self-contained.
-       - On a typed declaration `mut x:Name = ...` /
-         `const x:Name = ...`: set `Entry.type` to a copy of
-         the shared_ptr to Name's canonical type-bundle. NO
-         deep clone — just refcount bump.
-       - On an anonymous-typed declaration `mut x:(a:u3,…) = …`:
-         build the structural type-bundle inline, but do not
-         set `typename`.
-       - Set integer `max`/`min` from `s<N>`/`u<N>` shorthand
-         or explicit `max=`/`min=` annotations. Leave both
-         absent if unannotated.
-
-    3. **New `upass/typesystem` pass — type/mut checking.**
-       New u-pass that traverses the LNAST and populates the
-       per-Entry hot fields (`const_type`, `type` ptr) plus
-       the relevant attribute-map entries (`comptime`,
-       `typename`, `max`, `min`). Subsumes the legacy bitwidth
-       upass.
-       - On every field assignment: walk the mutability chain
-         — read `const_type` on the outer Entry, then walk the
-         `type` bundle's stored field metadata along the dotted
-         path. Error if any `const` ancestor exists (outer or
-         field-level).
-       - On every assignment: check RHS type is compatible
-         with LHS via `does`.
-       - Implement the four comparison operators:
-         `does` (structural superset — ignores `typename`),
-         `equals` (mutual `does`),
-         `is` (nominal — compares `.[typename]`),
-         `case` (`does` plus value match).
-       - Assignment-copy semantics: copy `const_type` from
-         the LHS's own declaration (NOT from the RHS); copy
-         the `type` ptr if the LHS has no declared type;
-         consult the per-attribute carry/drop table for
-         `comptime`/`typename`/`max`/`min`/user attrs.
-         Default for `comptime` and `typename` is **drop**
-         (non-sticky); `max`/`min` follow the LHS type
-         declaration.
-
-    4. **Variable attributes.** Plumb `mut`/`const`/`comptime`/
-       `public` through declaration parsing.
-       - `const` → `Entry.const_type = true` (hot field).
-       - `comptime` and `public` → attribute-map entries
-         (non-sticky on copy; per-attribute rule in the
-         carry/drop table).
-       - `mut` is the absence of `const` — no separate slot.
-
-    5. **Attribute accessors (`.[attr]`).** At minimum support
-       reading:
-       - `.[typename]`
-       - `.[max]`, `.[min]` (integer; stored)
-       - `.[bits]` (derived on demand from max/min;
-         signed-bits-with-sign-bit-included). No `.[sbits]` or
-         `.[ubits]` — neither stored nor derived.
-       - `.[fields]`, `.[size]`, `.[id]` (introspection on
-         complex types; `.[size]` is entry count, NOT bit
-         width)
-
-    6. **Remove / migrate the legacy type system.**
-       - Sweep readers of legacy attributes (`__type` string
-         values, `__bits`, `__pitch`, the legacy parallel
-         signed/unsigned bit fields, …); list them.
-       - Migrate each impacted pass to the new attribute model.
-       - Remove the legacy bitwidth pass that computed current
-         max/min.
-       - Decide whether any narrowing/inference is still needed
-         for open integers under the new model.
-
-  - **Corpus rewrites** (must land in the same commit):
-    - Replace every legacy unsigned/signed-bits corpus read
-      with `.[bits]` / `.[max]` / `.[min]` as appropriate. Known
-      offenders (grep "ubits\|sbits"): `tuple_simple_attr.prp`,
-      `phase2_attr_bits.prp`, `phase2_attr_max_min.prp`,
-      `wrap_complex.prp`, `wrap_trivial.prp`, `typesys_range.prp`
-      comment text. Adjust expected values for the always-signed
-      `.[bits]` semantics; reads on unannotated decls become
-      `nil`.
-    - Drop the aggregate `t.[bits] == sum-of-fields` assertion
-      in `phase3_aggregate_bits.prp`; keep per-field queries
-      and add the heterogeneous-aggregate poison case.
-    - Wire tuple-literal per-field type info from
-      `(a:u3=5, b:u2=2, c:u7=100)` declarations through to
-      `t.a.[bits]` lookups (agent-typesys flagged this as the
-      `prp2lnast` gap that breaks `phase3_aggregate_bits`).
-    - New phase-8 test files already landed in
-      `inou/prp/tests/comptime/phase8_*.prp` (basic, partial,
-      size-vs-bits, typename+debug, untyped) — keep these
-      passing under the new derivation rules.
-    - Add a phase-9 corpus covering the const-outer / mut-inner
-      and the mut-outer / const-inner-field cases (the
-      `const a = (mut a:u3 = 0, const b:u5 = 1)` example),
-      plus the structural-equality case `a:xx == b:yy` across
-      different typenames.
-    - Tests this should fix once landed: `prp-typesys_range`,
-      `prp-wrap_checks`, `prp-wrap_complex`, `prp-bitreverse`.
-
 - **1k** `self` / `ref self` in tuple methods — **partial**. Basic
   `self`/`ref self` first-parameter binding and chained-receiver
   semantics (`x.a.b.method(...)` → `self = x.a.b`, `ref self` allows
@@ -412,9 +164,9 @@ cross-file dependencies stay visible.
   `r#[0..+1]=…`), reductions (`#|[..]`, `#&[..]`, `#^[..]`, `#+[..]`),
   sign/zero extension (`#sext[lo..=hi]`, `#zext[lo..=hi]`), and the
   `.[bits]` attribute query (e.g. `for i in 0..<x.[bits]`).
-  - Depends on [[1v]] (typesystem upass): `.[bits]`/`max`/`min` are
-    published by the typesystem; bit-range ops also need the target's
-    width to validate ranges.
+  - Reads `.[bits]`/`max`/`min` published by the typesystem (see
+    `upass/upass.md §2 Typesystem`); bit-range ops also need the
+    target's width to validate ranges.
   - Fixes failing comptime tests: `prp-bitreduce`, `prp-bitreverse`,
     `prp-bitset`, `prp-cellmap_comb` (`t#[0..=3]` bit-range read),
     `prp-cellmap_misc` (`a#sext[0..=7]`, `a#[4..=7]`), `prp-formux`
@@ -464,8 +216,8 @@ cross-file dependencies stay visible.
   mimicking `GraphIO` for consistency — `import.md §Function signatures`.
   Downstream upasses (func_extract, constprop) read leaf IO via the ABI
   rather than poking into each LNAST.
-  - Depends on [[1v]] (typesystem upass): typesystem publishes
-    `bits`/`min`/`max`/`sign`, which the ABI carries.
+  - Reads from the typesystem (`upass/upass.md §2 Typesystem`):
+    `bits`/`min`/`max`/`sign` are what the ABI carries.
 
 - **2l** Enum support: parse `enum X = (l0, l1, l2)` and `enum X:Base = (...)`,
   lower to LNAST as comptime-tagged tuples; value-assigned variants (`b=5`,
@@ -557,7 +309,7 @@ needs all of them.
 | Failing test | TODO entry | What it needs |
 | --- | --- | --- |
 | `prp-bitreduce` | [[2q]] | reductions `#\|`/`#&`/`#^`/`#+` |
-| `prp-bitreverse` | [[2q]], [[1v]] | bit-range read/write + `.[bits]` |
+| `prp-bitreverse` | [[2q]] | bit-range read/write (`t#[i]=…`) — frontend errors on the lvalue lowering |
 | `prp-bitset` | [[2q]] | bit-range write `r#[i]=…`, `r#[lo..=hi]=…` |
 | `prp-cellmap_comb` | [[2q]] | `t#[0..=3]` bit-range read (front-end currently errors `'t#[0..=3]' is not a valid identifier`) |
 | `prp-cellmap_misc` | [[2q]] | `a#sext[0..=7]`, `a#[4..=7]` plus comptime fold of `__mux`/`__hotmux`/`__get_mask` direct calls |
@@ -571,10 +323,8 @@ needs all of them.
 | `prp-hotmux_unique_if` | [[2r]] | comptime fold of `unique if` chain + `__hotmux` direct call |
 | `prp-match_arms_mixed` | [[2r]] | mixed match-arm prefixes + tuple `case` patterns (verifier count mismatch) |
 | `prp-setter_complex` | [[1k]] | decorator-init implicit setter dispatch on `x:Tup = (…)` |
-| `prp-string_escapes` | [[2r]] | `\xNN` hex, raw vs cooked, interpolation with escaped quote, `.[size]` |
 | `prp-tuple_decorator_complex` | [[1k]] | tuple-decorator init triggering setter |
-| `prp-typesys_range` | [[1v]] | typesystem `.[bits]`/`.[min]`/`.[max]` upass |
 | `prp-valid_simple` | [[1p]] | 3-valued comparison + carry-expanding arithmetic |
-| `prp-valid_unknown_bits` | [[1p]], [[2q]], [[1v]] | bit-range reads on partially-unknown values + carry expansion + `.[bits]` |
-| `prp-wrap_checks` | [[1v]] | min/max range checks |
-| `prp-wrap_complex` | [[1v]] | min/max wrap composition |
+| `prp-valid_unknown_bits` | [[1p]], [[2q]] | bit-range reads on partially-unknown values + carry expansion |
+| `prp-wrap_checks` | wrap-policy reassignment (`x:u4:[wrap] = …` sequential type-changing writes) |
+| `prp-wrap_complex` | wrap/sat policy fold on already-typed values |

@@ -1,7 +1,7 @@
 /*
 :name: string_escapes
 :type: comptime
-:verifier_pass: 9
+:verifier_pass: 12
 :verifier_fail: 0
 */
 
@@ -38,5 +38,7 @@ cassert(msg == "tag=\x22Q\x22")
 
 // Raw string identity: round-tripping a raw string keeps every backslash.
 cassert('a\\b' != "a\\b")  // raw is 4 chars (a \ \ b); cooked collapses \\ to \.
-cassert('a\\b'.[size] == 4)
-cassert("a\\b".[size] == 3)
+const raw_ab = 'a\\b'
+const cooked_ab = "a\\b"
+cassert(raw_ab.[size] == 4)
+cassert(cooked_ab.[size] == 3)

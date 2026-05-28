@@ -1,0 +1,21 @@
+/*
+:name: phase8_size_attrs_untyped
+:type: parsing lnast comptime
+:verifier_pass: 7
+:verifier_fail: 0
+*/
+
+// Phase 8 — an untyped literal has a known value but no envelope. The
+// envelope only appears once a concrete type pins it (e.g. via a typed
+// copy).
+
+const k = 3
+cassert(k.[bits] == nil)
+cassert(k.[max]  == nil)
+cassert(k.[min]  == nil)
+cassert(k == 3)
+
+const k2:u8 = k
+cassert(k2.[bits] == 8)
+cassert(k2.[min]  == 0)
+cassert(k2.[max]  == 255)

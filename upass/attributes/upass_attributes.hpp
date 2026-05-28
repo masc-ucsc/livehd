@@ -66,6 +66,7 @@ public:
   void process_red_xor() override;
   void process_ne() override;
   void process_eq() override;
+  void process_is() override;
   void process_lt() override;
   void process_le() override;
   void process_gt() override;
@@ -191,6 +192,11 @@ public:
     Numeric_kind kind{Numeric_kind::none};
     uint32_t     bits{0};
     bool         is_comptime{false};
+    // True when an explicit `:type` annotation was processed for this
+    // variable. Distinguishes `const a:int = 3` (annotated but unbounded —
+    // size attrs read as nil per the typesystem redesign) from
+    // `const b = 3` (no annotation — legacy value-based fallback).
+    bool         has_type_spec{false};
   };
 
   // Look up explicitly-stored attribute values (set by attr_set). Returns

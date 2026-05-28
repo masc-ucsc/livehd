@@ -5,23 +5,19 @@
 :verifier_fail: 0
 */
 
-// Phase 2 — `.[bits]` is derived from the *current* required width, not from
-// the declared type bound. Each assignment can change it.
+// Phase 2 — `.[bits]` reads under the typesystem redesign (entry 1v).
+// Declaration-driven: typed `:uN`/`:sN` → fixed envelope; untyped → nil.
+// `.[ubits]`/`.[sbits]` have been removed.
 
-mut a:uint:[max=300] = 0
-cassert(a.[ubits] == 0)      // value 0 fits in 0 bits
-
-a = 7
-cassert(a.[ubits] == 3)      // 0b111 → 3 bits
-
+mut a:u8 = 0
+cassert(a.[bits] == 8)
 a = 200
-cassert(a.[ubits] == 8)      // 0b11001000 → 8 bits
+cassert(a.[bits] == 8)        // bits is declared, not value-derived
 
-const c = 100
-cassert(c.[bits] == 7)       // 0b1100100
+const c:s4 = -1
+cassert(c.[bits] == 4)
+cassert(c.[min] == -8)
+cassert(c.[max] == 7)
 
-const d = -1
-cassert(d.[bits] == 1)       // sign bit only
-
-const e = 0
-cassert(e.[bits] == 0)
+const e = 0                   // untyped → nil
+cassert(e.[bits] == nil)

@@ -1,0 +1,43 @@
+/*
+:name: phase8_size_attrs_basic
+:type: parsing lnast comptime
+:verifier_pass: 20
+:verifier_fail: 0
+*/
+
+// Phase 8 — `bits`/`max`/`min` are the attributes that describe the
+// numeric envelope. Signedness is encoded by the value of `min`
+// (negative ⇒ signed). These attributes are populated only when a
+// concrete type pins them; otherwise they read nil.
+
+const a:int  = 3
+cassert(a.[bits] == nil)        // `int` is unbounded
+cassert(a.[max]  == nil)
+cassert(a.[min]  == nil)
+
+const b:u4   = 3
+cassert(b.[bits] == 4)
+cassert(b.[min]  == 0)
+cassert(b.[max]  == 15)
+
+const c:bool = true
+cassert(c.[bits] == 1)
+cassert(c.[min]  == -1)         // bool is a 1-bit signed envelope
+cassert(c.[max]  == 0)
+
+mut   d:s5   = 3
+cassert(d.[bits] == 5)
+cassert(d.[min]  == -16)
+cassert(d.[max]  == 15)
+
+comptime const e:s5 = 3
+cassert(e.[bits] == 5)
+cassert(e.[min]  == -16)
+cassert(e.[max]  == 15)
+cassert(e.[comptime])
+
+comptime mut f:string = "foo"
+cassert(f.[bits] == nil)        // string has no numeric envelope
+cassert(f.[max]  == nil)
+cassert(f.[min]  == nil)
+cassert(f.[comptime])

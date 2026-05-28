@@ -360,45 +360,12 @@ std::optional<Const> uPass_attributes::derive_aggregate_size(std::string_view ba
 }
 
 std::optional<Const> uPass_attributes::derive_aggregate_bits(std::string_view base) const {
-  const Tuple_shape* sh = lookup_tuple_shape(base);
-  std::string        bits_base{base};
-  if (!sh) {
-    if (auto it = shape_source.find(bits_base); it != shape_source.end()) {
-      sh        = lookup_tuple_shape(it->second);
-      bits_base = it->second;
-    }
-  }
-  if (!sh) {
-    return std::nullopt;
-  }
-  int64_t total = 0;
-  for (const auto& f : sh->fields) {
-    // Field path = "base.name" if named, else "base.positional".
-    std::string field_path;
-    field_path.reserve(base.size() + 1 + std::max(f.name.size(), f.positional.size()));
-    field_path.assign(base.data(), base.size());
-    field_path.push_back('.');
-    field_path.append(f.name.empty() ? f.positional : f.name);
-
-    auto bits = derive_bits(field_path, "bits");
-    if (!bits || !bits->is_i()) {
-      // Try the source-tmp form too (e.g. ___1.a) for fields not yet
-      // re-keyed under the user's name.
-      if (bits_base != std::string_view{base}) {
-        std::string alt_path;
-        alt_path.reserve(bits_base.size() + 1 + std::max(f.name.size(), f.positional.size()));
-        alt_path.assign(bits_base);
-        alt_path.push_back('.');
-        alt_path.append(f.name.empty() ? f.positional : f.name);
-        bits = derive_bits(alt_path, "bits");
-      }
-    }
-    if (!bits || !bits->is_i()) {
-      return std::nullopt;
-    }
-    total += bits->to_i();
-  }
-  return *Dlop::create_integer(total);
+  // Phase 8 typesystem redesign: aggregates (tuples / arrays) have no
+  // `.[bits]`. Only scalars do — per-field queries `t.a.[bits]` are
+  // handled by derive_bits, not here. The earlier sum-of-fields rule
+  // is intentionally removed (see TODO_prp.md task 1v corpus rewrite).
+  (void)base;
+  return std::nullopt;
 }
 
 std::optional<Const> uPass_attributes::derive_aggregate_typename(std::string_view base, std::string_view base_text) const {

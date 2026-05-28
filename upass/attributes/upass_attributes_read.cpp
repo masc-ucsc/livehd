@@ -121,11 +121,74 @@ const uPass_attributes::Type_info* uPass_attributes::lookup_type_info(std::strin
   // Heterogeneous find on flat_hash_map<std::string, T>: no temporary
   // std::string allocation. This sits on the per-op record_assign() path
   // so the saving is multiplied across 1M+ ops on bulk-arithmetic inputs.
-  auto it = type_info_map.find(var);
-  if (it == type_info_map.end()) {
+  if (auto it = type_info_map.find(var); it != type_info_map.end()) {
+    return &it->second;
+  }
+  // Phase 8 typesystem: when prp2lnast lowers a tuple literal with typed
+  // fields (`t = (a:u4=3, …)`), it emits `attr_set tg_ref "ubits" 4`
+  // against a `tuple_get` tmp. The type_info therefore lives on the
+  // tuple_get tmp, not on the dotted path. Two chains can land here:
+  //   1. The attr_get's base is itself a tuple_get tmp (`tuple_get ___9
+  //      t "a"; attr_get ___10 ___9 "bits"`). Follow the alias to
+  //      `t.a`, then a sibling tuple_get tmp's type_info, if any.
+  //   2. The base is already a dotted path like "t.a". Same final step.
+  std::string base;
+  std::string field;
+  if (auto a_it = tuple_get_alias.find(std::string{var}); a_it != tuple_get_alias.end()) {
+    base  = a_it->second.base;
+    field = a_it->second.field_name.empty() ? a_it->second.field_key : a_it->second.field_name;
+  } else {
+    auto dot = var.find('.');
+    if (dot == std::string_view::npos) {
+      return nullptr;
+    }
+    base  = std::string{var.substr(0, dot)};
+    field = std::string{var.substr(dot + 1)};
+  }
+  if (field.empty()) {
     return nullptr;
   }
-  return &it->second;
+  // Resolve `base` through direct_alias (e.g. `t` → `___1`) so the
+  // search hits the canonical tuple tmp the type-emission targeted.
+  std::string canonical_base = base;
+  if (auto da = direct_alias.find(canonical_base); da != direct_alias.end()) {
+    canonical_base = da->second;
+  }
+  // Field-aware migrated entry: if a prior migrate_alias copied the
+  // type_info onto `base.field`, return that.
+  {
+    std::string path;
+    path.reserve(base.size() + 1 + field.size());
+    path  = base;
+    path += '.';
+    path += field;
+    if (auto it = type_info_map.find(path); it != type_info_map.end()) {
+      return &it->second;
+    }
+  }
+  if (canonical_base != base) {
+    std::string path;
+    path.reserve(canonical_base.size() + 1 + field.size());
+    path  = canonical_base;
+    path += '.';
+    path += field;
+    if (auto it = type_info_map.find(path); it != type_info_map.end()) {
+      return &it->second;
+    }
+  }
+  // Fallback: scan tuple_get_alias for the sibling tmp whose base
+  // matches the canonical base and field matches.
+  for (const auto& [tmp, alias] : tuple_get_alias) {
+    if (alias.base != canonical_base && alias.base != base) {
+      continue;
+    }
+    if (alias.field_key == field || alias.field_name == field) {
+      if (auto it = type_info_map.find(tmp); it != type_info_map.end()) {
+        return &it->second;
+      }
+    }
+  }
+  return nullptr;
 }
 
 std::optional<std::pair<Const, Const>> uPass_attributes::lookup_range(std::string_view tmp) const {
@@ -166,7 +229,7 @@ std::optional<Const> uPass_attributes::resolve_value(std::string_view var) const
 }
 
 std::optional<Const> uPass_attributes::derive_max(std::string_view base) const {
-  // Explicit attr wins.
+  // Explicit attr wins (e.g. `:int:[max=N]` partial pinning).
   if (auto v = lookup_attr_value(base, "max"); v) {
     return v;
   }
@@ -177,32 +240,19 @@ std::optional<Const> uPass_attributes::derive_max(std::string_view base) const {
       return rb->second;
     }
   }
-  // Bitwidth-pass inferred range: takes precedence over type-derived bounds
-  // because the bitwidth pass may have proven a tighter range from data flow
-  // (e.g. `a:u8 = b & 0xF` → max=15 even though u8 type max is 255).
-  if (lm) {
-    const auto& meta = lm->get_lnast()->bw_meta();
-    auto        it   = meta.ranges.find(std::string{base});
-    if (it != meta.ranges.end() && !it->second.pos_inf) {
-      return *Dlop::create_integer(it->second.max);
-    }
-  }
-  // Type-derived.
-  if (auto* ti = lookup_type_info(base); ti && ti->bits != 0) {
-    if (ti->kind == Numeric_kind::unsigned_int) {
+  // Typesystem redesign (entry 1v): declaration-driven. A concrete uN/sN
+  // gives a value; bool has its own envelope; everything else (`:int`,
+  // `:string`, untyped) reads nil — no value-based fallback.
+  if (auto* ti = lookup_type_info(base); ti && ti->has_type_spec) {
+    if (ti->kind == Numeric_kind::unsigned_int && ti->bits != 0) {
       return max_unsigned(ti->bits);
     }
-    if (ti->kind == Numeric_kind::signed_int) {
+    if (ti->kind == Numeric_kind::signed_int && ti->bits != 0) {
       return max_signed(ti->bits);
     }
-  }
-  // Untyped int / no width: fall back to the current value's natural bound
-  // when available so `.[max] != nil` answers correctly.
-  if (auto v = resolve_value(base); v) {
-    if (v->is_negative()) {
-      return max_signed(bits_signed(*v));
+    if (ti->kind == Numeric_kind::boolean) {
+      return *Dlop::create_integer(0);
     }
-    return max_unsigned(bits_unsigned(*v));
   }
   return std::nullopt;
 }
@@ -216,74 +266,63 @@ std::optional<Const> uPass_attributes::derive_min(std::string_view base) const {
       return rb->first;
     }
   }
-  // Bitwidth-pass inferred range: see derive_max for rationale.
-  if (lm) {
-    const auto& meta = lm->get_lnast()->bw_meta();
-    auto        it   = meta.ranges.find(std::string{base});
-    if (it != meta.ranges.end() && !it->second.neg_inf) {
-      return *Dlop::create_integer(it->second.min);
-    }
-  }
-  if (auto* ti = lookup_type_info(base); ti && ti->bits != 0) {
-    if (ti->kind == Numeric_kind::unsigned_int) {
+  if (auto* ti = lookup_type_info(base); ti && ti->has_type_spec) {
+    if (ti->kind == Numeric_kind::unsigned_int && ti->bits != 0) {
       return *Dlop::create_integer(0);
     }
-    if (ti->kind == Numeric_kind::signed_int) {
+    if (ti->kind == Numeric_kind::signed_int && ti->bits != 0) {
       return min_signed(ti->bits);
     }
-  }
-  if (auto v = resolve_value(base); v) {
-    if (v->is_negative()) {
-      return min_signed(bits_signed(*v));
+    if (ti->kind == Numeric_kind::boolean) {
+      return *Dlop::create_integer(-1);
     }
-    return *Dlop::create_integer(0);
   }
   return std::nullopt;
 }
 
 std::optional<Const> uPass_attributes::derive_bits(std::string_view base, std::string_view variant) const {
-  // Concrete value (constprop already proved it) is the most precise source.
-  if (auto v = resolve_value(base); v) {
-    if (variant == "ubits") {
-      return *Dlop::create_integer(static_cast<int64_t>(bits_unsigned(*v)));
-    }
-    if (variant == "sbits") {
-      return *Dlop::create_integer(static_cast<int64_t>(bits_signed(*v)));
-    }
-    // "bits": the natural width — unsigned for non-negative values, signed
-    // (including the sign bit) for negative values, 0 for zero, 1 for -1.
-    return *Dlop::create_integer(static_cast<int64_t>(bits_natural(*v)));
+  // Explicit attr_set override (e.g. `:[bits=N]`).
+  if (auto v = lookup_attr_value(base, variant); v) {
+    return v;
   }
-  // No concrete value yet — try the bitwidth pass's inferred range. Same
-  // sbits-of-min-and-max convention as apply_bw() in lnast_to_lgraph.
-  if (lm) {
-    const auto& meta = lm->get_lnast()->bw_meta();
-    auto        it   = meta.ranges.find(std::string{base});
-    if (it != meta.ranges.end() && !it->second.is_unbounded()) {
-      const auto& e = it->second;
-      auto        sbits_for = [](int64_t x) -> int64_t {
-        if (x >= 0) {
-          return static_cast<int64_t>(std::bit_width(static_cast<uint64_t>(x))) + 1;
-        }
-        return static_cast<int64_t>(std::bit_width(static_cast<uint64_t>(-x - 1))) + 1;
-      };
-      const int64_t sbits = std::max(sbits_for(e.min), sbits_for(e.max));
-      if (variant == "sbits") {
-        return *Dlop::create_integer(sbits);
-      }
-      if (variant == "ubits") {
-        // ubits is only meaningful when the range is non-negative.
-        if (e.min < 0) {
-          return *Dlop::create_integer(0);
-        }
-        return *Dlop::create_integer(sbits - 1);  // drop sign bit
-      }
-      // "bits": unsigned width when non-negative, signed otherwise.
-      if (e.min >= 0) {
-        return *Dlop::create_integer(sbits - 1);
-      }
-      return *Dlop::create_integer(sbits);
+  // Typesystem redesign — declared-type authoritative; untyped → nil.
+  if (auto* ti = lookup_type_info(base); ti && ti->has_type_spec) {
+    if ((ti->kind == Numeric_kind::unsigned_int || ti->kind == Numeric_kind::signed_int) && ti->bits != 0) {
+      return *Dlop::create_integer(static_cast<int64_t>(ti->bits));
     }
+    if (ti->kind == Numeric_kind::boolean) {
+      return *Dlop::create_integer(1);
+    }
+  }
+  // Derive bits from explicit max/min (e.g. `:int:[range=0..=15]` →
+  // bits=4). Only fires when both bounds are pinned; otherwise the
+  // envelope is incomplete and bits stays nil per the design.
+  std::optional<Const> max_v = lookup_attr_value(base, "max");
+  std::optional<Const> min_v = lookup_attr_value(base, "min");
+  if (!max_v || !min_v) {
+    if (auto tmp = lookup_attr_ref(base, "range"); tmp) {
+      if (auto rb = lookup_range(*tmp); rb) {
+        if (!min_v && rb->first.is_i()) {
+          min_v = rb->first;
+        }
+        if (!max_v && rb->second.is_i()) {
+          max_v = rb->second;
+        }
+      }
+    }
+  }
+  if (max_v && min_v && max_v->is_i() && min_v->is_i()) {
+    const int64_t mx = max_v->to_i();
+    const int64_t mn = min_v->to_i();
+    int64_t       bits;
+    if (mn >= 0) {
+      bits = mx > 0 ? static_cast<int64_t>(std::bit_width(static_cast<uint64_t>(mx))) : 0;
+    } else {
+      const int64_t b_pos = mx >= 0 ? static_cast<int64_t>(std::bit_width(static_cast<uint64_t>(mx))) + 1 : 1;
+      const int64_t b_neg = static_cast<int64_t>(std::bit_width(static_cast<uint64_t>(-mn - 1))) + 1;
+      bits                = std::max(b_pos, b_neg);
+    }
+    return *Dlop::create_integer(bits);
   }
   return std::nullopt;
 }
@@ -309,7 +348,16 @@ std::optional<Const> uPass_attributes::derive_comptime(std::string_view base, st
       return *Dlop::create_integer(1);
     }
   }
-  // Fallback: any value that constprop has fully resolved is comptime.
+  // Phase 8: comptime is non-sticky on copy. A `mut` declaration is NOT
+  // comptime even if its value happens to be known — only explicit
+  // `comptime` markers or `const` (resolved) qualify. Mut variables with
+  // a known type decl read as not-comptime (returns 0); for a variable
+  // with no decl_kind at all, leave unresolved.
+  if (auto* ti = lookup_type_info(base); ti && ti->decl == Decl_kind::mut_kind) {
+    return *Dlop::create_integer(0);
+  }
+  // Fallback: any value that constprop has fully resolved is comptime
+  // (used for ref aliases / unnamed tmps that never got a decl_kind).
   if (resolve_value(base).has_value()) {
     return *Dlop::create_integer(1);
   }
@@ -389,10 +437,24 @@ void uPass_attributes::evaluate_attr_get(std::string_view dst, std::string_view 
       result = derive_bits(base, attr);
     } else if (attr == "size") {
       // Phase 3 — aggregate size first; scalar fallback gives 1 when the
-      // value is known.
+      // value is known. Phase 8: strings report their character count.
       result = derive_aggregate_size(base);
-      if (!result && resolve_value(base).has_value()) {
-        result = *Dlop::create_integer(1);
+      if (!result) {
+        if (auto v = resolve_value(base); v) {
+          if (v->is_string()) {
+            // to_pyrope wraps strings in single quotes; strip both.
+            auto repr = v->to_pyrope();
+            int64_t n = 0;
+            if (repr.size() >= 2 && repr.front() == '\'' && repr.back() == '\'') {
+              n = static_cast<int64_t>(repr.size() - 2);
+            } else {
+              n = static_cast<int64_t>(repr.size());
+            }
+            result = *Dlop::create_integer(n);
+          } else {
+            result = *Dlop::create_integer(1);
+          }
+        }
       }
     } else if (attr == "comptime") {
       result = derive_comptime(base, base_text);
@@ -444,18 +506,14 @@ void uPass_attributes::evaluate_attr_get(std::string_view dst, std::string_view 
   }
 
   // Unset / unresolved attrs: per spec (§Phase 2), an unset ordinary
-  // attribute reads as `nil`. Two classes of attribute fold here:
-  //   * Cat-D user/unknown names (`foo`, `poison`, …) — never set on this
-  //     variable and not inherited from an alias chain.
-  //   * Sticky names (`debug`, `_debug`, `_*`) — variable did not acquire
-  //     the bucket and no explicit attr_set value is on file.
-  // Folding to nil lets `cassert b.[foo] == nil` discharge, and lets
-  // `cassert !b.[debug]` discharge via log_not's nil-passthrough +
-  // verifier-treats-nil-as-pass behavior. Other builtins (`bits`, `size`,
-  // `max`, `comptime`, …) keep their "leave unresolved" behavior so a
-  // later iteration of the runner can still produce a value.
+  // attribute reads as `nil`. Phase 8 typesystem redesign extends this to
+  // the size-trio (`bits`/`max`/`min`) so an annotated-but-unbounded
+  // declaration (`a:int = 3`) folds to nil instead of staying unresolved
+  // — the new derive_* are declaration-driven and never depend on a
+  // later iteration of the runner.
   if (!result) {
-    if (sticky_pattern || !is_builtin_attr(attr)) {
+    if (sticky_pattern || !is_builtin_attr(attr) || attr == "bits" || attr == "ubits" || attr == "sbits"
+        || attr == "max" || attr == "min") {
       result = *Dlop::nil();
     } else {
       return;
@@ -531,7 +589,8 @@ void uPass_attributes::process_type_spec() {
   }
   move_to_parent();
 
-  auto& ti = type_info_map[target];
+  auto& ti         = type_info_map[target];
+  ti.has_type_spec = true;
   if (kind != Numeric_kind::none) {
     ti.kind = kind;
   }

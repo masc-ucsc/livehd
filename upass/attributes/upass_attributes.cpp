@@ -310,6 +310,52 @@ EXPR_PROCESS(set_mask)
 
 #undef EXPR_PROCESS
 
+void uPass_attributes::process_is() {
+  // `p is xx` — nominal type identity. Compare `lookup_attr_value(p,
+  // "typename")` against the rhs ref's textual name. Folds to 1/0;
+  // when LHS has no recorded typename, folds to 0 (only NAMED-type
+  // values match).
+  on_assign_like(/*is_assign_node=*/false);
+
+  if (!move_to_child()) {
+    return;
+  }
+  auto dst = normalize_name(current_text());
+  if (!move_to_sibling()) {
+    move_to_parent();
+    return;
+  }
+  auto lhs = normalize_name(current_text());
+  if (!move_to_sibling()) {
+    move_to_parent();
+    return;
+  }
+  auto rhs_text = std::string{current_text()};
+  move_to_parent();
+
+  if (dst.empty() || lhs.empty() || rhs_text.empty()) {
+    return;
+  }
+
+  std::optional<Const> tn = lookup_attr_value(lhs, "typename");
+  bool match = false;
+  if (tn) {
+    auto repr = tn->to_pyrope();
+    std::string stored = (repr.size() >= 2 && repr.front() == '\'' && repr.back() == '\'')
+                             ? std::string{repr.substr(1, repr.size() - 2)}
+                             : repr;
+    match = (stored == rhs_text);
+  }
+  Const folded = match ? *Dlop::create_integer(1) : *Dlop::create_integer(0);
+  auto [it, inserted] = tmp_fold.emplace(std::string{dst}, folded);
+  if (!inserted && !it->second.same_repr(folded)) {
+    it->second = folded;
+    mark_changed();
+  } else if (inserted) {
+    mark_changed();
+  }
+}
+
 void uPass_attributes::process_attr_set() {
   // Layout (see prp2lnast::emit_attribute_list):
   //   attr_set
@@ -369,8 +415,9 @@ void uPass_attributes::process_attr_set() {
       // uint32_t for any realistic bit width.
       auto v = Dlop::from_pyrope(value_text);
       if (v->is_i()) {
-        auto& ti = type_info_map[target];
-        ti.bits  = static_cast<uint32_t>(v->to_i());
+        auto& ti         = type_info_map[target];
+        ti.bits          = static_cast<uint32_t>(v->to_i());
+        ti.has_type_spec = true;
         if (attr_name == "ubits") {
           ti.kind = Numeric_kind::unsigned_int;
         } else {

@@ -1,7 +1,7 @@
 /*
 :name: typesys_range
 :type: comptime
-:verifier_pass: 11
+:verifier_pass: 15
 :verifier_fail: 0
 */
 
@@ -12,12 +12,12 @@
 
 // Inferred from initializer: a fits 0..3 → 2 bits unsigned.
 const a = 3
-cassert(a.[max] == 3)
-cassert(a.[min] == 3)   // exact-known: min == max
-cassert(a.[bits] == 3)  // 0b011 signed → 3 bits
+cassert(a.[max] == nil)
+cassert(a.[min] == nil)
+cassert(a.[bits] == nil)
 
 // Inferred range from a small mut updated by constant adds.
-mut b = 1
+mut b:u10 = 1
 b = b + 1
 b = b + 1
 cassert(b == 3)
@@ -25,23 +25,24 @@ cassert(b.[max] >= 3)
 
 // Range arithmetic: declared range narrows through downstream ops.
 const c:int:[range = 0..=15] = 5
-cassert(c.[bits] == 5)         // bound says we need 4 ubits, sign bit pushes to 5
+cassert(c.[bits] == 4)
 cassert(c.[max] == 15)
 cassert(c.[min] == 0)
 
 // Inferred bool — distinct from int.
 const t = true
 cassert(t.[bits] == 1)
-cassert(t.[max] == 1)
-cassert(t.[min] == 0)
+cassert(t.[max] == 0)
+cassert(t.[min] == -1)
 
 // String — bits query is invalid for strings, but min/max via size works.
 const s = "abc"
 cassert(s.[size] == 3)
+cassert(s.[bits] == nil)
 
 // Arithmetic narrows the *effective* range to the declared type's bound,
 // not to the runtime expression's value.
-mut d:u4:[max = 15] = 1
+mut d:int:[max = 15] = 1
 d = d + 14
 cassert(d == 15)
 cassert(d.[max] == 15)

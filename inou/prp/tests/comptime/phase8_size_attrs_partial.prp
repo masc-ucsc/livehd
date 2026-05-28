@@ -1,0 +1,24 @@
+/*
+:name: phase8_size_attrs_partial
+:type: parsing lnast comptime
+:verifier_pass: 6
+:verifier_fail: 0
+*/
+
+// Phase 8 — partial pinning. Only the attributes the type explicitly
+// constrains become readable; the rest stay nil. `:int:[max=N]` is the
+// canonical attribute-list syntax; the alternative `:int(max=N)` parses
+// today as a function-call-type and lowers to a tuple value, so it does
+// not partial-pin — use the `:[...]` form.
+
+const x:int:[max=3] = 2
+cassert(x.[max]  == 3)
+cassert(x.[min]  == nil)
+cassert(x.[bits] == nil)
+
+// Range without an explicit width: bits stays nil because the type did
+// not pin a concrete sN/uN.
+const y:int:[min=-8, max=7] = 0
+cassert(y.[min]  == -8)
+cassert(y.[max]  == 7)
+cassert(y.[bits] == nil)

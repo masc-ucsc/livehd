@@ -765,6 +765,7 @@ void uPass_runner::process_lnast() {
     A_OP(le)
     A_OP(gt)
     A_OP(ge)
+    A_OP(is)
 
     // Function Call — treated like arithmetic so constprop can fold the
     // built-in typecast calls (int/uint/string/uNN/sNN); anything constprop

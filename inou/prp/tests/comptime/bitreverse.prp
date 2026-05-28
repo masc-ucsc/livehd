@@ -5,33 +5,38 @@
 :verifier_fail: 0
 */
 
-comb sreverse(x:sint) -> (total:sint) {
-  mut t:sint = nil
+// Phase 8 typesystem: `.[bits]` is declared-type-driven, so the
+// reverse helpers take concrete widths. Untyped operands have nil
+// bits and can't drive the loop bound; reads on `:uN`/`:sN`-typed
+// values give the declared width.
+
+comb sreverse(x:s6) -> (total:s6) {
+  mut t:s6 = nil
   for i in 0..<x.[bits] {
     t#[i] = x#[x.[bits]-1-i]
   }
   total = t
 }
-comb reverse(x:uint) -> (total:uint) {
-  mut t:uint = nil
+comb reverse(x:u6) -> (total:u6) {
+  mut t:u6 = nil
   for i in 0..<x.[bits] {
     t#[i] = x#[x.[bits]-1-i]
   }
   total = t
 }
 
-mut x0 = 0ub00010110
-cassert(x0.[bits] == 6) // always signed bits
+mut x0:u6 = 0ub00010110
+cassert(x0.[bits] == 6)
 cassert(reverse(x0) == 0ub011010) // leading zeros do not affect bits
 cassert(sreverse(x0) == 0ub011010)
 cassert(sreverse(x0) == 0sb011010)
 
-const x1:uint = 0ub1011
-cassert(x1.[bits] == 5) // always signed bits
+const x1:u6 = 0ub1011
+cassert(x1.[bits] == 6)
 cassert(reverse(x1) == 0ub011010)
 cassert(sreverse(x1) == 0sb11010)
 
-mut x2 = 0sb1011 // negative number
+mut x2:s4 = 0sb1011 // negative number
 cassert(x2.[bits] == 4)
 cassert(reverse(x2) == 0ub011010)
 cassert(sreverse(x2) == 0sb1101)

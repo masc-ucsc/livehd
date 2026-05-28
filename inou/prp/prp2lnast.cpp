@@ -695,6 +695,20 @@ Lnast_node Prp2lnast::process_lvalue_for_assign(TSNode lvalue, const Lnast_node&
     lnast->add_child(aidx, ref);
     lnast->add_child(aidx, rvalue);
 
+    // Phase 8 typesystem: a bare `true`/`false` literal on the rvalue
+    // implies a `:bool` type. Inject a synthetic type_spec so the
+    // attribute upass records the boolean envelope without requiring
+    // the user to write `:bool` explicitly. Only fires when no explicit
+    // type cast was given (it would dominate).
+    if (ts_node_is_null(tc) && rvalue.is_const()) {
+      auto rv_text = rvalue.get_name();
+      if (rv_text == "true" || rv_text == "false") {
+        auto ts_idx = builder.add_child(Lnast_ntype::create_type_spec());
+        lnast->add_child(ts_idx, ref);
+        lnast->add_child(ts_idx, Lnast_ntype::create_prim_type_boolean());
+      }
+    }
+
     // Comptime vector/matrix pre-fill: `mut data:[N][M]T = scalar` populates
     // every flat slot so later element reads (`data[i][j]`) fold even though
     // each `tuple_set data i j …` would otherwise erase the bare scalar
@@ -3905,6 +3919,11 @@ Lnast_node Prp2lnast::tuple_to_node(TSNode n, bool /*is_square*/) {
     // resulting tuple field.
     TSNode attr_list_node{};
     bool   has_attr_list{false};
+    // Phase 8 typesystem: per-field type annotation on the lvalue
+    // (e.g. `(a:u4=3, b:u4=5)`). Lowered after the tuple_add as a
+    // `tuple_get` + `type_spec` pair so `t.a.[bits]` resolves.
+    TSNode type_cast_node{};
+    bool   has_type_cast{false};
   };
   std::vector<Item> items;
   items.reserve(nnc);
@@ -4012,6 +4031,13 @@ Lnast_node Prp2lnast::tuple_to_node(TSNode n, bool /*is_square*/) {
         TSNode id = child_by_field(lv, "identifier");
         if (!ts_node_is_null(id)) {
           it.assign_key = trim(get_text(id));
+        }
+        // Phase 8: capture the per-field type cast (`:u4`, `:s5`, …) so the
+        // post-tuple_add loop can emit a per-field type_spec.
+        TSNode tc = child_by_field(lv, "type");
+        if (!ts_node_is_null(tc)) {
+          it.type_cast_node = tc;
+          it.has_type_cast  = true;
         }
       } else {
         // `_complex_identifier` with optional sibling `type` field on the
@@ -4123,13 +4149,20 @@ Lnast_node Prp2lnast::tuple_to_node(TSNode n, bool /*is_square*/) {
         lnast->add_child(idx, it.value);
       }
     }
-    // Per-field attribute overrides (e.g. `b::[poison=99]=2`). Emit a
-    // tuple_get to introduce a tmp ref bound to the field, then attr_set
-    // each declared attribute against that tmp. The attribute pass tracks
-    // tuple_get aliases and migrates the attrs to the underlying path so
-    // `t.b.[poison]` reads find the override.
+    // Per-field attribute overrides (e.g. `b::[poison=99]=2`) and per-
+    // field type annotations (e.g. `a:u4=3`). Emit a tuple_get to
+    // introduce a tmp ref bound to the field, then attach decorations
+    // against that tmp. The attribute pass tracks tuple_get aliases and
+    // migrates the attrs to the underlying path so `t.b.[poison]` /
+    // `t.a.[bits]` reads find the override.
+    //
+    // Per-field types are emitted as `attr_set(tg_ref, "ubits"/"sbits",
+    // N)` — the attribute pass routes these into `type_info_map` (the
+    // same path `:[ubits=N]` decorations use). type_spec is NOT used
+    // here because lnastfmt rejects type_spec whose target is a
+    // tuple_get tmp ref (it requires an `assign`-written target).
     for (const auto& it : items) {
-      if (!it.has_attr_list || !it.is_assign) {
+      if ((!it.has_attr_list && !it.has_type_cast) || !it.is_assign) {
         continue;
       }
       auto tg_idx = builder.add_child(Lnast_ntype::create_tuple_get());
@@ -4137,7 +4170,24 @@ Lnast_node Prp2lnast::tuple_to_node(TSNode n, bool /*is_square*/) {
       lnast->add_child(tg_idx, tg_ref);
       lnast->add_child(tg_idx, ref);
       lnast->add_child(tg_idx, Lnast_node::create_const(it.assign_key));
-      emit_attribute_list(tg_ref, it.attr_list_node);
+      if (it.has_type_cast) {
+        TSNode ty = child_by_field(it.type_cast_node, "type");
+        if (!ts_node_is_null(ty)) {
+          std::string_view tt(ts_node_type(ty));
+          if (tt == "uint_type" || tt == "sint_type") {
+            std::string txt(trim(get_text(ty)));
+            if (!txt.empty() && std::isdigit(static_cast<unsigned char>(txt.back()))) {
+              auto as_idx = builder.add_child(Lnast_ntype::create_attr_set());
+              lnast->add_child(as_idx, tg_ref);
+              lnast->add_child(as_idx, Lnast_node::create_const(tt == "uint_type" ? "ubits" : "sbits"));
+              lnast->add_child(as_idx, Lnast_node::create_const(txt.substr(1)));
+            }
+          }
+        }
+      }
+      if (it.has_attr_list) {
+        emit_attribute_list(tg_ref, it.attr_list_node);
+      }
     }
     return ref;
   }

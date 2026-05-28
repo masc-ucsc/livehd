@@ -249,6 +249,9 @@ public:
   PROCESS_NODE(le)
   PROCESS_NODE(gt)
   PROCESS_NODE(ge)
+  // Nominal type identity (`p is xx`). Compares `p.[typename]` to the
+  // string-name of the rhs ref.
+  PROCESS_NODE(is)
 
   // Function Call
   PROCESS_NODE(func_call)

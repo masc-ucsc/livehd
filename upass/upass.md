@@ -150,6 +150,77 @@ and no exported semantics → vote **drop**.
 - Skipped on nodes whose read-through Bundles carry `pending_import` —
   those `tuple_*` / `if` nodes survive to the next invocation.
 
+### Typesystem (handled inside `attributes`)
+
+upass owns Pyrope's basic typesystem. The rules are **declaration-
+driven**: a value's size envelope and nominal identity come from the
+type that was declared on the binding (or implied by a literal), never
+from the value itself. There is no separate type-check pass; the
+attributes pass reads the type info as it walks and folds the relevant
+attribute queries (`bits`, `max`, `min`, `typename`, `size`, `comptime`,
+`is`).
+
+What upass guarantees, in plain terms:
+
+- **Size envelope (`bits` / `max` / `min`)** is determined by the
+  declared type:
+  - `:uN` / `:sN` set width and range; `:bool` is the 1-bit signed
+    envelope (`min=-1, max=0, bits=1`); `:string` has no numeric
+    envelope (reads as `nil`).
+  - When only `max`/`min` (or `range=lo..=hi`) is pinned, `bits` is
+    derived on demand from those bounds.
+  - **Unannotated → all three read as `nil`.** No value-based
+    fallback. A bare `true`/`false` literal is auto-typed `:bool`.
+- **Aggregates have no `.[bits]`.** Only scalars do. A tuple-typed
+  variable reads `.[bits] == nil`; per-field `t.a.[bits]` resolves
+  when the field carries a typed annotation.
+- **`size` is cardinality, not bit width.** `tup.[size]` /
+  `arr.[size]` is the entry count; `str.[size]` is the character
+  count.
+- **`typename`** is a debug/diagnostic attribute (not behavior-
+  affecting). It's set for named types declared via `type Name = …`;
+  anonymous tuples have no typename. Structural `==` ignores
+  `typename`; nominal identity is the job of `is`.
+- **`is`** folds at compile time when the LHS carries a `typename`
+  attribute: `p is Foo` is true iff `p.[typename] == "Foo"`.
+- **Comptime is non-sticky on copy.** A `mut` binding that happens
+  to hold a known value does *not* read as comptime; only `const`-
+  decl (with resolved value) or an explicit `comptime` marker does.
+
+Implementation notes (high level — see `upass/attributes/` for code):
+
+- The attributes pass attaches type info to each variable as
+  `Type_info { decl_kind, num_kind, bits, is_comptime, has_type_spec }`.
+  `has_type_spec` is set when the LNAST traversal sees either a
+  `type_spec` node or an attr_set that pins a width (`ubits`/`sbits`).
+- `derive_max` / `derive_min` / `derive_bits` are pure functions of
+  the stored type info plus any explicit `max`/`min`/`range`
+  attr_sets. They fold to `nil` when no envelope can be derived;
+  the runner emits `const(nil)` so consumers compare cleanly.
+- Per-field types on tuple literals (`(a:u4=3, …)`) lower as
+  `tuple_get` + `attr_set("ubits"/"sbits", N)` against a tmp;
+  `lookup_type_info` walks the `tuple_get_alias` and `direct_alias`
+  chains so `t.a.[bits]` finds the right entry. `migrate_alias`
+  mirrors the per-field type info onto `lhs.field` paths on
+  assignment.
+
+Residual follow-ups (deferred; not blocking the current invariants):
+
+- **Variable-as-type** (`mut b:a_var = (…)` borrowing field defaults
+  and field-level `mut`/`const` from a tuple variable `a_var`) is
+  not wired — needs the type-bundle deep-copy / shared-immutable-
+  bundle path from the design.
+- **`type Name = (…)` field metadata propagation.**
+  `process_type_statement` is still a stub; the RHS tuple isn't
+  walked to populate `Name.a`/`Name.b` type info, so
+  `g:Name = (a=…, b=…)` doesn't carry field types onto `g.a`/`g.b`.
+- **Field-level `const` enforcement on assignment** to a `mut`-outer
+  tuple is not raised as a compile error yet.
+- **`does` / `equals` / `case`** operators have no fold hooks; only
+  `is` lands today.
+- **Nil-overwrite-is-not-a-write** (allow `const x:u8 = nil; x = 42`)
+  isn't tracked.
+
 ### verifier / assert (read-only finishers)
 
 Walk the **dest** LNAST after the source walk completes. Do not see

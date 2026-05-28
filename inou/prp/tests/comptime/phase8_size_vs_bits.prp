@@ -1,0 +1,20 @@
+/*
+:name: phase8_size_vs_bits
+:type: parsing lnast comptime
+:verifier_pass: 6
+:verifier_fail: 0
+*/
+
+// Phase 8 — `size` is the entry count for tuples/arrays. It is NOT a bit
+// width. `bits` is the concat width (for a tuple) or the per-element
+// width (for an array).
+
+const t = (a:u4=3, b:u4=5, c:u4=7)
+cassert(t.[size] == 3)               // three entries
+cassert(t.[bits] == nil)             // no bits for structs
+cassert(t.a.[bits] == 4)
+
+const arr:[]u8 = (1, 2, 3, 4)
+cassert(arr.[size] == 4)             // four elements
+cassert(arr.[bits] == nil)           // no bits for arrays
+cassert(arr[0].[bits] == 8)

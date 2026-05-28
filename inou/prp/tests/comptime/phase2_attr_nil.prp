@@ -14,7 +14,7 @@ const a::[debug] = 3
 cassert(a.[debug] != nil)
 cassert(a.[never_set] == nil)
 
-const b = 10                 // no attributes set
+const b = 10                 // untyped — no envelope per phase-8 redesign
 cassert(b.[debug] == nil)
 cassert(b.[anything] == nil)
-cassert(b.[max] != nil)       // every integer has a max
+cassert(b.[max] == nil)       // untyped → nil (typesystem redesign)

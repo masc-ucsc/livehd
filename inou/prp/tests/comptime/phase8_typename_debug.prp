@@ -1,0 +1,27 @@
+/*
+:name: phase8_typename_debug
+:type: parsing lnast comptime
+:verifier_pass: 10
+:verifier_fail: 0
+*/
+
+// Phase 8 — non-size attributes. `typename` reports the user-type name
+// of an aggregate; `debug` and arbitrary user attrs round-trip with
+// whatever value they were given. A heterogeneous aggregate (one field
+// with no numeric envelope) reports `bits == nil`.
+
+type complex_t = (a:u32 = nil, b:string = "hello")
+
+const g:complex_t = (a=7, b="hi")
+cassert(g.[typename] == "complex_t")
+cassert(g.a.[bits]   == 32)
+cassert(g.a.[min]    == 0)
+cassert(g.a.[max]    == 4294967295)
+cassert(g.b.[bits]   == nil)         // string field — no numeric envelope
+cassert(g.[bits]     == nil)         // poisoned by the string field
+cassert(g.[size]     == 2)
+
+const p::[debug="trace", owner="alu"] :u8 = 42
+cassert(p.[bits]  == 8)
+cassert(p.[debug] == "trace")
+cassert(p.[owner] == "alu")

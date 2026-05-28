@@ -1,0 +1,121 @@
+/*
+:name: typesystem
+:type: parsing lnast comptime
+:verifier_pass: 29
+:verifier_fail: 0
+*/
+
+// Corner cases for the new typesystem (task 1v in TODO_prp.md). These
+// exercise behaviors NOT covered by the phase8_*.prp suite:
+//   - using a variable as a type (`mut b:a = ...`)
+//   - structural equality across different typenames
+//   - `is` (nominal) vs `==` (structural)
+//   - non-stickiness of `comptime` on copy
+//   - recursive bundle deep-copy with nested typenames
+//   - field-level `const` preserved under a `mut` outer
+//   - nil-overwrite-is-not-a-write
+//   - anonymous tuple → typename nil
+//   - heterogeneous bundle poison for `[bits]` (complex-typed field)
+//
+// Cases that would require a compile-error path (writing a `const`,
+// implicit basic-type conversion, writing a `const` field, value
+// outside `int(max=N)`) are described in comments but not exercised —
+// the test harness has no `:expect_fail:` flag yet, so each negative
+// path is left commented out next to the positive assertion it pairs
+// with.
+
+
+// ── 1. Variable used as a type. `mut b:a_type = (x=3)` borrows the
+//       type (fields, defaults, field-level const/mut) from `a_type`.
+const a_type = (mut x:u3 = 0, const y:u5 = 1)
+mut b:a_type = (x=3)
+cassert(b.x == 3)
+cassert(b.y == 1)              // default from the type-bundle
+b.x = 7                         // legal: mut outer + mut field
+cassert(b.x == 7)
+// b.y = 7                      // would compile error: field `y` is const
+
+
+// ── 2. Anonymous tuple has nil typename. Named tuple has stable typename.
+const anon = (p=1, q=2)
+cassert(anon.[typename] == nil)
+
+type named_t = (p:u4 = 0, q:u4 = 0)
+const n:named_t = (p=1, q=2)
+cassert(n.[typename] == "named_t")
+
+
+// ── 3. Structural equality across two named types with the same shape.
+//       `==` ignores typename; `is` checks it.
+type xx = (a:u3 = nil, b:u5 = 1)
+type yy = (a:u3 = nil, b:u5 = 1)
+const p:xx = (a=3, b=1)
+const q:yy = (a=3, b=1)
+cassert(p == q)                // structural — same field names + values
+cassert(p.[typename] == "xx")
+cassert(q.[typename] == "yy")
+cassert(p is xx)
+cassert(q is yy)
+cassert(!(p is yy))             // nominal — typenames differ
+cassert(!(q is xx))
+
+
+// ── 4. `comptime` is non-sticky on copy. Assigning a comptime value
+//       into a runtime mut variable drops the flag.
+comptime const k = 5
+cassert(k.[comptime])
+mut r:u4 = k
+cassert(r == 5)
+cassert(!(r.[comptime]))        // comptime not inherited
+
+
+// ── 5. Recursive bundle. Each nested complex type carries its own
+//       typename; the deep-copy is fully recursive.
+type inner_t = (x:u4 = 0)
+type outer_t = (inn:inner_t = nil, tag:u3 = 0)
+const o:outer_t = (inn=(x=5), tag=3)
+cassert(o.inn.x == 5)
+cassert(o.tag == 3)
+cassert(o.inn.[typename] == "inner_t")
+cassert(o.[typename]     == "outer_t")
+
+
+// ── 6. Field-level `const` inside an outer `mut` tuple is enforced at
+//       use site. Writing the const field via the outer is a compile
+//       error; writing the mut sibling is legal.
+type cfg_t = (mut count:u8 = 0, const name:string = "boot")
+mut cfg:cfg_t = (count=1, name="ok")
+cassert(cfg.count == 1)
+cassert(cfg.name  == "ok")
+cfg.count = 9                   // legal: field `count` is mut
+cassert(cfg.count == 9)
+// cfg.name = "no"              // would compile error: field `name` is const
+
+
+// ── 7. Nil overwrite is not a write. A `const` with initial nil can
+//       receive its first non-nil bind; the second non-nil bind errors.
+const lazy:u8 = nil
+lazy = 42                       // legal — overwriting nil doesn't count
+cassert(lazy == 42)
+// lazy = 43                    // would compile error: second non-nil bind of const
+
+
+// ── 8. Heterogeneous bundle — a complex-typed field (no numeric
+//       envelope) poisons aggregate `[bits]` to nil. Phase 8 covered
+//       the string-field case; this covers the complex-field case.
+type tag_t = (label:string = "")
+type rec_t = (n:u8 = 0, tg:tag_t = nil)
+const rec:rec_t = (n=5, tg=(label="hi"))
+cassert(rec.n.[bits]  == 8)
+cassert(rec.tg.[bits] == nil)   // complex field — no numeric envelope
+cassert(rec.[bits]    == nil)   // aggregate poisoned
+
+
+// ── 9. `int(max=N)` pins only `max`. `min` and `bits` stay nil. A
+//       value exceeding the bound would fail at use; we only assert
+//       the in-range case here.
+const bounded:int(max=3) = 2
+cassert(bounded.[max]  == 3)
+cassert(bounded.[min]  == nil)
+cassert(bounded.[bits] == nil)
+// const overflow:int(max=3) = 4   // would compile error: value > max

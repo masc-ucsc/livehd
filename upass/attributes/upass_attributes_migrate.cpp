@@ -175,4 +175,35 @@ void uPass_attributes::migrate_alias(std::string_view lhs, std::string_view rhs)
       }
     }
   }
+
+  // 4. Phase 8 typesystem: when the rhs is a tuple tmp whose fields have
+  //    recorded type_info (via per-field `tuple_get` + `attr_set
+  //    ubits/sbits` from prp2lnast), migrate the per-field type_info
+  //    onto the lhs.<field> paths so `lhs.field.[bits]` reads resolve
+  //    without walking the alias chain at lookup time.
+  for (const auto& [tmp, alias] : tuple_get_alias) {
+    if (alias.base != rhs_s) {
+      continue;
+    }
+    auto ti_it = type_info_map.find(tmp);
+    if (ti_it == type_info_map.end() || !ti_it->second.has_type_spec) {
+      continue;
+    }
+    const auto& field = alias.field_name.empty() ? alias.field_key : alias.field_name;
+    if (field.empty()) {
+      continue;
+    }
+    std::string field_path;
+    field_path.reserve(lhs_s.size() + 1 + field.size());
+    field_path = lhs_s;
+    field_path.push_back('.');
+    field_path += field;
+    auto [it, inserted] = type_info_map.emplace(std::move(field_path), ti_it->second);
+    if (inserted) {
+      mark_changed();
+    } else if (it->second.bits != ti_it->second.bits || it->second.kind != ti_it->second.kind) {
+      it->second = ti_it->second;
+      mark_changed();
+    }
+  }
 }

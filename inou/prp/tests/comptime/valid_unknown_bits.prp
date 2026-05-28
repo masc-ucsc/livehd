@@ -44,7 +44,7 @@ cassert((w + 1) == 0sb???)           // unknown grows by carry
 // Assigning a known value clears the unknown completely.
 v = 100
 cassert(v == 100)
-cassert(v.[bits] == 7)               // known again, normal bitwidth applies
+cassert(v.[bits] == 8)               // v:u8 → declared width is 8 (typesystem redesign)
 
 // Multi-step: become unknown, do arithmetic, then resolve.
 mut z = 0sb?
