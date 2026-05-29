@@ -1679,10 +1679,15 @@ void Prp2lnast::process_for_statement(TSNode n) {
       bool                     all_positional_const = true;
       uint32_t                 nnc                  = ts_node_named_child_count(probe);
       for (uint32_t i = 0; i < nnc && all_positional_const; i++) {
-        TSNode           c = ts_node_named_child(probe, i);
+        TSNode           c    = ts_node_named_child(probe, i);
         std::string_view ct(ts_node_type(c));
-        if (ct == "constant") {
-          values.emplace_back(trim(get_text(c)));
+        auto             text = trim(get_text(c));
+        // `true`/`false` are spelled as a `bool_literal` token in the grammar
+        // but surface as a bare `identifier` here (the literal token is hidden
+        // — see prp2lnast's tree-sitter notes). Either way the text is a valid
+        // LNAST const, so accept it alongside integer constants.
+        if (ct == "constant" || ct == "bool_literal" || (ct == "identifier" && (text == "true" || text == "false"))) {
+          values.emplace_back(std::string(text));
         } else if (ct == "unary_expression") {
           uint32_t uc = ts_node_named_child_count(c);
           if (uc == 1) {

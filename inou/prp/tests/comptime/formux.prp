@@ -20,7 +20,7 @@ comb code2(cond1:bool, cond2:bool, a:u32, , c:u32, b:u32) -> (res:u32) {
   sel#[0] = cond2
   sel#[1] = cond1
   sel#[2] = !cond1 and !cond2
-  mut res2 = __hotmux(s=sel, p1=a, p2=b, p3=c)
+  mut res = __hotmux(s=sel, p1=a, p2=b, p3=c)
   optimize(!(cond1 and cond2)) // one hot check
 }
 

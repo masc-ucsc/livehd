@@ -42,6 +42,21 @@ LNAST_NODE( func_return, return )
 LNAST_NODE( assign, assign )
 LNAST_NODE( dp_assign, dp_assign )  // FIXME: remove FUTURE
 
+// Task 1t — declaration + bare-write nodes (replace the statement-level
+// assign/tuple_set writes and the attr_set(type)+attr_set(comptime)+type_spec
+// declaration triple). Kept inside the is_primitive_op range, outside
+// is_direct_lgraph_op / is_type.
+//   declare( ref(var), type_decl, const(qualifier), [value] )
+//     - type_decl : a type node (prim_type_*/comp_type_*/expr_type/
+//                   unknown_type) or none_type when no `:type`.
+//     - qualifier : single const, space-joined tokens (storage first), e.g.
+//                   "mut", "const", "mut comptime", "mut wrap", "const".
+//     - value     : optional init (absent for bare `var x:u8`).
+//   store( ref(var), level0..levelN, value )
+//     - 0 levels  == old assign; N levels == old tuple_set path.
+LNAST_NODE( declare, declare )
+LNAST_NODE( store, store )
+
 // Deferred / past-cycle read:
 //   delay_assign dst src offset
 // - dst    : fresh tmp ref
@@ -111,6 +126,12 @@ LNAST_NODE( type_spec, type_spec )  // FIXME: change to type_check
 
 // Types
 LNAST_NODE( none_type, none_type )
+// Task 1t/typesystem: the canonical integer type — `prim_type_int( [max], [min] )`
+// with two OPTIONAL const children (absent ⇒ unbounded). Sign and bits are
+// DERIVED from the range, never stored. `prim_type_uint`/`prim_type_sint` are
+// the legacy width-based form, kept as aliases that normalize to this during
+// the T1 migration and deleted in T5. See docs/contracts/typesystem_clean_plan.md.
+LNAST_NODE( prim_type_int, prim_type_int )
 LNAST_NODE( prim_type_uint, prim_type_uint )
 LNAST_NODE( prim_type_sint, prim_type_sint )
 LNAST_NODE( prim_type_range, prim_type_range )

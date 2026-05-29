@@ -333,8 +333,8 @@ void Bitwidth::process_shl(hhds::Node_class& node, std::vector<hhds::Edge_class>
 
   auto max     = a_bw.get_max();
   auto min     = a_bw.get_min();
-  auto max_val = max.lsh_op(n_bw.get_max().to_i());
-  auto min_val = min.lsh_op(n_bw.get_min().to_i());
+  auto max_val = max.shl_op(n_bw.get_max().to_i());
+  auto min_val = min.shl_op(n_bw.get_min().to_i());
 
   Bitwidth_range bw(min_val, max_val);
   adjust_bw(node.create_driver_pin(0), bw);
@@ -365,7 +365,7 @@ void Bitwidth::process_sra(hhds::Node_class& node, std::vector<hhds::Edge_class>
   if (n_bw.get_min().is_positive() && n_bw.get_min().is_i()) {
     auto max     = a_bw.get_max();
     auto min     = a_bw.get_min();
-    auto amount  = Dlop::create_integer(1)->lsh_op(n_bw.get_min().to_i());
+    auto amount  = Dlop::create_integer(1)->shl_op(n_bw.get_min().to_i());
     auto max_val = max.div_op(*amount);
     auto min_val = min.div_op(*amount);
 
@@ -662,10 +662,10 @@ void Bitwidth::process_set_mask(hhds::Node_class& node) {
     auto mask_bits = mask.get_bits();
     if (!mask.is_negative()) {
       if (mask_bits < max_val.get_bits()) {
-        max_val = max_val.rsh_op(max_val.get_bits() - mask_bits);
+        max_val = max_val.sra_op(max_val.get_bits() - mask_bits);
       }
       if (mask_bits < min_val.get_bits()) {
-        min_val = min_val.rsh_op(min_val.get_bits() - mask_bits);
+        min_val = min_val.sra_op(min_val.get_bits() - mask_bits);
       }
     }
   }
@@ -678,8 +678,8 @@ void Bitwidth::process_set_mask(hhds::Node_class& node) {
     } else {
       n_zeroes_in_mask = mask.get_trailing_zeroes();
     }
-    max_val = max_val.lsh_op(n_zeroes_in_mask);
-    min_val = min_val.lsh_op(n_zeroes_in_mask);
+    max_val = max_val.shl_op(n_zeroes_in_mask);
+    min_val = min_val.shl_op(n_zeroes_in_mask);
   }
 
   if (mask.is_negative()) {
@@ -983,7 +983,7 @@ void Bitwidth::process_bit_and(hhds::Node_class& node, std::vector<hhds::Edge_cl
   }
 
   if (!hier && mask_pos >= 0 && pos_min_sbits != Bits_max && pos_min_sbits_pos != mask_pos) {
-    auto v = Dlop::create_integer(1)->lsh_op(pos_min_sbits - 1)->sub_op(hydrate_const(inp_edges[mask_pos].driver));
+    auto v = Dlop::create_integer(1)->shl_op(pos_min_sbits - 1)->sub_op(hydrate_const(inp_edges[mask_pos].driver));
     if (v->is_i() && v->to_i() == 1) {
       if (inp_edges.size() == 2) {
         int pos = mask_pos == 0 ? 1 : 0;

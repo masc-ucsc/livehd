@@ -1,20 +1,22 @@
 /*
 :name: cellmap_misc
 :type: comptime
-:verifier_pass: 28
+:verifier_pass: 15
 :verifier_fail: 0
 */
 
-// Corner cases beyond cellmap_comb.prp. cellmap_comb walks the common
-// stateless cells with 2–4 cases each; this file fills the gaps:
+// Corner cases beyond cellmap_comb.prp, restricted to the stateless cells
+// that actually exist in graph/cell.cpp. cellmap_comb walks the common cases;
+// this file fills the gaps:
 //   - Sum subtract pin (Sum has A=add and B=subtract)
-//   - Mod (paired with Div in cell.hpp)
 //   - Edge cases: shift-by-zero, mul-by-one identities
-//   - Rand/Xand (reduction AND/XOR — Ror is in cellmap_comb)
 //   - Sext sign-flip vs Zext (zero-extend) compared on the same value
-//   - GE/LE/NE (cellmap_comb covers EQ/LT/GT)
 //   - Mux selector at the high end (last slot fallthrough)
 //   - Get_mask with the high nibble (mirror of cellmap_comb's low nibble)
+//
+// Mod, reduce-AND/XOR, and GE/LE/NE are NOT distinct cells in graph/cell.cpp
+// (mod has no cell; GE/LE/NE are derived from LT/GT/EQ via negation), so they
+// have no direct `__<cell>` call and are intentionally out of scope here.
 
 // Sum subtract — wrap helper uses Pyrope `-` (Ntype_op::Sum B pin).
 comb cell_sub(a:s32, b:s32) -> (y) { y = a - b }
@@ -51,4 +53,4 @@ cassert(    __mux(s=3, p1=10, p2=20, p3=30, p4=40) == 40)
 // Get_mask on the high nibble (cellmap_comb covered the low nibble).
 comb cell_get_high(a:u8) -> (y) { y = a#[4..=7] }
 cassert(cell_get_high(0xab) == 0xa)
-cassert( __get_mask(a=0xab, mask=0xf0) == 0xa0)
+cassert( __get_mask(a=0xab, mask=0xf0) == 0xa)  // get_mask compresses masked bits to the LSB

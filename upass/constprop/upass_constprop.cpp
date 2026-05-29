@@ -2,12 +2,16 @@
 
 #include "upass_constprop.hpp"
 
+#include <algorithm>
+#include <charconv>
 #include <map>
 #include <optional>
 #include <print>
 #include <set>
+#include <span>
 #include <unordered_map>
 
+#include "cell.hpp"
 #include "lnast_ntype.hpp"
 #include "str_tools.hpp"
 #include "upass_verifier.hpp"
@@ -86,7 +90,7 @@ Const uPass_constprop::apply_range_mask(const Const& value, const Const& start, 
   // matches Pyrope's bit-slice semantics where `b#[lo..]` is the upper
   // bits of `b` packed LSB-first.
   if (end.is_nil()) {
-    return *value.rsh_op(lo);
+    return *value.sra_op(lo);
   }
   if (end.is_i()) {
     const auto hi = end.to_i();
@@ -345,11 +349,11 @@ void uPass_constprop::process_mod() {
 }
 
 void uPass_constprop::process_shl() {
-  process_binary_passthrough([](Const n1, Const n2) -> Const { return *n1.lsh_op(n2); });
+  process_binary_passthrough([](Const n1, Const n2) -> Const { return *n1.shl_op(n2); });
 }
 
 void uPass_constprop::process_sra() {
-  process_binary_passthrough([](Const n1, Const n2) -> Const { return *n1.rsh_op(n2); });
+  process_binary_passthrough([](Const n1, Const n2) -> Const { return *n1.sra_op(n2); });
 }
 
 void uPass_constprop::process_log_and() {
@@ -1629,6 +1633,130 @@ void uPass_constprop::process_func_case() {
   move_to_parent();
 }
 
+// Append a tuple/bundle pin's entries to `out` in positional field order
+// (bundle_value is keyed by the flat index "0","1",…). Returns false if a key
+// is not a plain index or a value isn't a foldable scalar.
+static bool ordered_bundle_scalars(const std::unordered_map<std::string, Const>& bv, std::vector<Const>& out) {
+  std::vector<std::pair<int, const Const*>> ordered;
+  ordered.reserve(bv.size());
+  for (const auto& [k, v] : bv) {
+    int         idx = 0;
+    const auto* b   = k.data();
+    const auto* e   = b + k.size();
+    auto [p, ec]    = std::from_chars(b, e, idx);
+    if (ec != std::errc{} || p != e || v.is_invalid() || v.is_string() || v.has_unknowns()) {
+      return false;
+    }
+    ordered.emplace_back(idx, &v);
+  }
+  std::sort(ordered.begin(), ordered.end(), [](const auto& l, const auto& r) { return l.first < r.first; });
+  for (const auto& [idx, v] : ordered) {
+    out.emplace_back(*v);
+  }
+  return true;
+}
+
+bool uPass_constprop::try_eval_sum_cell_call(std::string_view dst, const std::vector<Call_actual>& actuals) {
+  // Sum cell is not a plain positional add: pin a (pid 0) adds, pin b (pid 1)
+  // subtracts (`__sum(a=10, b=3)` == 7). Each pin may carry a tuple of values
+  // (`__sum(a=(1,2))` == 3). Collect the two pin groups and delegate to
+  // Dlop::sum_op (add-all-a, subtract-all-b), which owns the cell semantics.
+  std::vector<spool_ptr<Dlop>> a_vals, b_vals;
+  for (std::size_t i = 0; i < actuals.size(); ++i) {
+    const auto&   a   = actuals[i];
+    hhds::Port_id pid = a.is_named ? Ntype::get_sink_pid(Ntype_op::Sum, a.name) : static_cast<hhds::Port_id>(i);
+    if (pid != 0 && pid != 1) {
+      return false;  // Sum only has the add (a) and subtract (b) pins
+    }
+    auto&              group = (pid == 0) ? a_vals : b_vals;
+    std::vector<Const> vals;
+    if (a.is_bundle) {
+      if (!ordered_bundle_scalars(a.bundle_value, vals)) {
+        return false;
+      }
+    } else if (a.value.is_invalid() || a.value.is_string() || a.value.has_unknowns()) {
+      return false;
+    } else {
+      vals.push_back(a.value);
+    }
+    for (const auto& v : vals) {
+      group.emplace_back(Dlop::clone(v));
+    }
+  }
+
+  auto folded = Dlop::sum_op(std::span<const spool_ptr<Dlop>>(a_vals), std::span<const spool_ptr<Dlop>>(b_vals));
+  if (!folded || folded->is_invalid()) {
+    return false;
+  }
+  store_trivial(dst, folded);
+  return true;
+}
+
+bool uPass_constprop::try_eval_mux_cell_call(std::string_view dst, std::string_view op,
+                                             const std::vector<Call_actual>& actuals) {
+  // Unlimited-sink multiplexer / LUT cells. Pins are named (`s` = selector for
+  // mux/hotmux, `p1`..`pN` = ordered values; `p0`/`p1` = table/addr for lut)
+  // or positional. Map every actual onto its pid, then delegate to the
+  // matching Dlop kernel — which itself handles unknown selector/address bits
+  // (three-valued ternary merge), so unknowns are passed through rather than
+  // pre-filtered.
+  const Ntype_op nop = Ntype::get_op(op);
+
+  std::vector<const Const*> by_pid;  // indexed by sink pid (pid 0 = sel/table)
+  for (std::size_t i = 0; i < actuals.size(); ++i) {
+    const auto& a = actuals[i];
+    if (a.is_bundle || a.value.is_invalid() || a.value.is_string()) {
+      return false;  // unresolved / non-scalar actual: defer the fold
+    }
+    hhds::Port_id pid;
+    if (a.is_named) {
+      pid = Ntype::get_sink_pid(nop, a.name);
+      if (pid == livehd::Port_invalid) {
+        return false;
+      }
+    } else {
+      pid = static_cast<hhds::Port_id>(i);
+    }
+    if (pid >= by_pid.size()) {
+      by_pid.resize(pid + 1, nullptr);
+    }
+    by_pid[pid] = &a.value;
+  }
+
+  // Every pid slot must be filled (contiguous from 0).
+  for (const auto* p : by_pid) {
+    if (p == nullptr) {
+      return false;
+    }
+  }
+
+  spool_ptr<Dlop> folded;
+  if (op == "lut") {
+    if (by_pid.size() != 2) {
+      return false;
+    }
+    folded = Dlop::lut_op(*by_pid[0], *by_pid[1]);
+  } else {
+    // mux / hotmux: pid 0 is the selector, pid 1..N the ordered values.
+    if (by_pid.size() < 2) {
+      return false;
+    }
+    std::vector<spool_ptr<Dlop>> values;
+    values.reserve(by_pid.size() - 1);
+    for (std::size_t i = 1; i < by_pid.size(); ++i) {
+      values.emplace_back(Dlop::clone(*by_pid[i]));
+    }
+    std::span<const spool_ptr<Dlop>> vspan(values);
+    folded = (op == "hotmux") ? Dlop::hotmux_op(*by_pid[0], vspan) : Dlop::mux_op(*by_pid[0], vspan);
+  }
+
+  if (!folded || folded->is_invalid()) {
+    return false;
+  }
+  store_trivial(dst, folded);
+  return true;
+}
+
 bool uPass_constprop::try_eval_cell_call(std::string_view dst, std::string_view fname, const std::vector<Call_actual>& actuals) {
   // `__name(...)` direct cell-op call. Strip the `__` prefix and dispatch
   // against the Ntype_op kernel set. Operands are positional and follow the
@@ -1638,15 +1766,62 @@ bool uPass_constprop::try_eval_cell_call(std::string_view dst, std::string_view 
   }
   std::string_view op(fname.data() + 2, fname.size() - 2);
 
-  // All actuals must be positional and foldable (no unknown bits) — leave
-  // unknown-input folds for a later iteration once unknowns clear.
+  // Multiplexer / LUT cells (unlimited-sink) are addressed by pin name
+  // (`s`, `p1`, `p2`, …) rather than positionally, and their Dlop kernels
+  // fold even with unknown bits in the selector/address (three-valued ternary
+  // merge). Route them through a dedicated handler that maps named pins to pid
+  // positions and delegates to the matching Dlop static op.
+  if (op == "mux" || op == "hotmux" || op == "lut") {
+    return try_eval_mux_cell_call(dst, op, actuals);
+  }
+  // Sum needs pin-aware folding (a adds, b subtracts) — handled separately.
+  if (op == "sum") {
+    return try_eval_sum_cell_call(dst, actuals);
+  }
+
+  // Build the positional operand list the per-op kernels below expect.
+  // Actuals arrive either named (`__div(a=…, b=…)`) or as a single repeated
+  // pin carrying a tuple (`__mult(a=(7,1))`). Inputs must be foldable (no
+  // unknown bits) — the per-op kernels assume known operands; the
+  // mux/hotmux/lut path above is the one that folds unknowns.
+  const Ntype_op nop = Ntype::get_op(op);
   std::vector<Const> args;
-  args.reserve(actuals.size());
-  for (const auto& a : actuals) {
-    if (a.is_named || a.is_bundle || a.value.is_invalid() || a.value.has_unknowns()) {
+  if (actuals.size() == 1 && actuals[0].is_bundle) {
+    // Repeated single-pin tuple (`__mult(a=(7,1))`, `__and(a=(x,y))`, …): the
+    // tuple's ordered entries are the operands.
+    if (!ordered_bundle_scalars(actuals[0].bundle_value, args)) {
       return false;
     }
-    args.emplace_back(a.value);
+  } else {
+    // Scalar pins, named or positional. Order by sink pid (cell.cpp pin
+    // order) and pack densely — get_mask/set_mask number their pins with gaps
+    // (a=0, mask=2, value=4), but the kernels take a compact (a, mask[,
+    // value]) list, which the pid sort reproduces.
+    std::vector<std::pair<hhds::Port_id, const Const*>> slots;
+    slots.reserve(actuals.size());
+    for (std::size_t i = 0; i < actuals.size(); ++i) {
+      const auto& a = actuals[i];
+      if (a.is_bundle || a.value.is_invalid() || a.value.is_string() || a.value.has_unknowns()) {
+        return false;
+      }
+      hhds::Port_id pid;
+      if (a.is_named) {
+        if (nop == Ntype_op::Invalid) {
+          return false;
+        }
+        pid = Ntype::get_sink_pid(nop, a.name);
+        if (pid == livehd::Port_invalid) {
+          return false;
+        }
+      } else {
+        pid = static_cast<hhds::Port_id>(i);
+      }
+      slots.emplace_back(pid, &a.value);
+    }
+    std::stable_sort(slots.begin(), slots.end(), [](const auto& l, const auto& r) { return l.first < r.first; });
+    for (const auto& [pid, v] : slots) {
+      args.emplace_back(*v);
+    }
   }
 
   auto need_n = [&](std::size_t n) -> bool { return args.size() == n; };
@@ -1655,17 +1830,7 @@ bool uPass_constprop::try_eval_cell_call(std::string_view dst, std::string_view 
   Const result;
   bool  matched = false;
 
-  if (op == "sum") {
-    // Pin a: add; pin b: subtract. Direct-call form uses pin a only.
-    if (need_min(1)) {
-      Const r = args[0];
-      for (std::size_t i = 1; i < args.size(); ++i) {
-        r = r.add_op(args[i]);
-      }
-      result  = r;
-      matched = true;
-    }
-  } else if (op == "mult") {
+  if (op == "mult") {
     if (need_min(1)) {
       Const r = args[0];
       for (std::size_t i = 1; i < args.size(); ++i) {
@@ -1780,45 +1945,16 @@ bool uPass_constprop::try_eval_cell_call(std::string_view dst, std::string_view 
     }
   } else if (op == "shl") {
     if (need_n(2)) {
-      result  = *args[0].lsh_op(args[1]);
+      result  = *args[0].shl_op(args[1]);
       matched = true;
     }
   } else if (op == "sra") {
     if (need_n(2)) {
-      result  = *args[0].rsh_op(args[1]);
+      result  = *args[0].sra_op(args[1]);
       matched = true;
     }
-  } else if (op == "mux") {
-    // Pin 0 selector, pins 1..N values; pick args[1 + sel].
-    if (need_min(2) && args[0].is_i()) {
-      const auto idx = static_cast<int64_t>(args[0].to_i());
-      if (idx >= 0 && static_cast<std::size_t>(idx + 1) < args.size()) {
-        result  = args[1 + idx];
-        matched = true;
-      } else if (idx >= 0) {
-        // Out-of-range selector: pick the last value (Mux default-arm
-        // semantics — matches cell_mux's `else` arm in tests).
-        result  = args.back();
-        matched = true;
-      }
-    }
-  } else if (op == "hotmux") {
-    // Pin 0 one-hot sel, pins 1..N values. Each set bit `i` of sel picks
-    // value args[1 + i]. Folds only when exactly one bit of sel is set.
-    if (need_min(2) && args[0].is_i()) {
-      const auto sel = args[0].to_i();
-      if (sel != 0 && (sel & (sel - 1)) == 0) {
-        int bit = 0;
-        for (auto v = sel; (v & 1) == 0; v >>= 1) {
-          ++bit;
-        }
-        if (static_cast<std::size_t>(bit + 1) < args.size()) {
-          result  = args[1 + bit];
-          matched = true;
-        }
-      }
-    }
   } else {
+    // mux / hotmux / lut handled earlier in try_eval_mux_cell_call.
     return false;
   }
 
@@ -2463,7 +2599,7 @@ void uPass_constprop::process_get_mask() {
   //   - a `range` ref previously bound in range_map (`b#[lo..]`,
   //     `b#[lo..=hi]`, `b#[..=hi]`, etc.).
   // Range refs lower via apply_range_mask, which routes open-ended `lo..`
-  // through rsh_op (skipping get_mask_op's broken negative-mask path) and
+  // through sra_op (skipping get_mask_op's broken negative-mask path) and
   // closed `lo..=hi` through get_mask_op with the equivalent positive mask.
   move_to_child();
   auto var = std::string(current_text());

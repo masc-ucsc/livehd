@@ -1416,7 +1416,7 @@ static void process_partially_assigned_self_chains(hhds::Graph* g) {
         for (int pos = static_cast<int>(v.size()) - 1; pos >= 0; --pos) {
           auto i = v[pos];
           if (started) {
-            wr_mask = wr_mask.lsh_op(1);
+            wr_mask = wr_mask.shl_op(1);
           }
           started = true;
 
@@ -1426,9 +1426,9 @@ static void process_partially_assigned_self_chains(hhds::Graph* g) {
         }
         Dlop rd_mask;
         if (shift < 0) {
-          rd_mask = wr_mask.lsh_op(-shift)->adjust_bits(wire->width);
+          rd_mask = wr_mask.shl_op(-shift)->adjust_bits(wire->width);
         } else {
-          rd_mask = wr_mask.rsh_op(shift)->adjust_bits(wire->width);
+          rd_mask = wr_mask.sra_op(shift)->adjust_bits(wire->width);
         }
 
         auto and_node = create_typed_node(*g, Ntype_op::And, wire->width);

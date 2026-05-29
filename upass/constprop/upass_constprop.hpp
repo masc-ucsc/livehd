@@ -195,7 +195,7 @@ protected:
 
   // Apply a (start, end) bit-slice range to `value` and return the extracted
   // bits packed LSB-first. `end` may be `nil` for an open-ended `lo..` slice
-  // (lowered via rsh_op); a concrete `hi >= lo` lowers via get_mask_op with
+  // (lowered via sra_op); a concrete `hi >= lo` lowers via get_mask_op with
   // the closed mask. Returns invalid when bounds are not folded integers.
   static Const apply_range_mask(const Const& value, const Const& start, const Const& end);
 
@@ -267,6 +267,15 @@ protected:
   // dst was assigned a result; false when the fname is not a recognized
   // cell or arguments aren't comptime.
   bool try_eval_cell_call(std::string_view dst, std::string_view fname, const std::vector<Call_actual>& actuals);
+
+  // Unlimited-sink mux / hotmux / lut cells: pins are named (`s`, `p1`, …) or
+  // positional, so map each actual onto its sink pid and delegate to the
+  // matching Dlop kernel (which folds unknown selector/address bits too).
+  bool try_eval_mux_cell_call(std::string_view dst, std::string_view op, const std::vector<Call_actual>& actuals);
+
+  // Sum cell folding: pin a (pid 0) adds, pin b (pid 1) subtracts (no plain
+  // positional add, so it can't share the generic per-op flatten path).
+  bool try_eval_sum_cell_call(std::string_view dst, const std::vector<Call_actual>& actuals);
 };
 
 // Plugin registration lives in upass_constprop.cpp to avoid duplicate

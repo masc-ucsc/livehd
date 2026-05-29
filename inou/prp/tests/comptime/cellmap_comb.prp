@@ -87,15 +87,18 @@ cassert(  __ror(a=0ub0001) == -1)
 cassert(cell_ror(0xff) == -1)
 cassert(  __ror(a=0xff) == -1)
 
-// Ntype_op::Not (bitwise) -- single input pin a
-comb cell_not(a:u8) -> (y:u8) { y = ~a }
+// Ntype_op::Not (bitwise) -- single input pin a. Every dlop/cell const is a
+// signed integer (no unsigned const), so `~a == -a-1` with no implicit width
+// mask: `~0 == -1` (all ones), not 0xff. To get a finite 0xff you negate a
+// width-pinned negative, e.g. `~(0sb1_0000_0000) == 0xff` (= ~(-256)).
+comb cell_not(a:sint) -> (y:sint) { y = ~a }
 
-cassert(cell_not(0) == 0xff)
-cassert(  __not(a=0) == 0xff)
-cassert(cell_not(0xff) == 0)
-cassert(  __not(a=0xff) == 0)
-cassert(cell_not(0x0f) == 0xf0)
-cassert(  __not(a=0x0f) == 0xf0)
+cassert(cell_not(0) == -1)
+cassert(  __not(a=0) == -1)
+cassert(cell_not(0xff) == -256)
+cassert(  __not(a=0xff) == -256)
+cassert(cell_not(0sb1_0000_0000) == 0xff)
+cassert(  __not(a=0sb1_0000_0000) == 0xff)
 
 // Ntype_op::Get_mask -- pins a, mask
 comb cell_get_mask(a:u8) -> (y) { y = a#[0..=3] }

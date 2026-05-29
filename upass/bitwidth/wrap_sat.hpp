@@ -35,13 +35,15 @@ inline Const wrap_to_unsigned(const Const& v, uint32_t n) {
 }
 
 // Two's-complement wrap to `n` signed bits: take the low `n` bits, then
-// sign-extend if the (n-1)-th bit is set. Implemented via
-// `Const::adjust_bits` which already does exactly this for signed widths.
+// sign-extend from bit `n-1`. `Const::adjust_bits` only masks to the low
+// `n` bits (no sign extension), so e.g. `0xCAFE` wrapped to s4 would wrongly
+// yield 14 instead of -2; mask explicitly and sext from the sign bit.
 inline Const wrap_to_signed(const Const& v, uint32_t n) {
   if (n == 0 || v.is_invalid() || v.is_string() || v.has_unknowns() || v.is_nil()) {
     return v;
   }
-  return *v.adjust_bits(n);
+  Const masked = *v.and_op(*Dlop::get_mask_value(n));
+  return *masked.sext_op(static_cast<int>(n) - 1);
 }
 
 // Saturate an unsigned value to [0, 2^n − 1]. Negative inputs clamp to 0;

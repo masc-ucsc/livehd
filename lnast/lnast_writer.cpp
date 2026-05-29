@@ -202,6 +202,38 @@ void Lnast_writer::write_assign() {
 
 void Lnast_writer::write_dp_assign() {}
 
+// Task 1t. store( var, level0..levelN, value ) — 0 levels == old assign,
+// N levels == old tuple_set path. Same surface syntax as tuple_set/assign.
+void Lnast_writer::write_store() {
+  move_to_child();
+  write_lnast();  // var
+  while (move_to_sibling() && !is_last_child()) {
+    print("[");
+    write_lnast();  // level (field key / index)
+    print("]");
+  }
+  print(" = ");
+  write_lnast();  // value (cursor already on the last child)
+  move_to_parent();
+}
+
+// Task 1t. declare( var, type_decl, const(qualifier), [value] ).
+void Lnast_writer::write_declare() {
+  move_to_child();
+  write_lnast();  // var
+  print(" :: ");
+  move_to_sibling();
+  write_lnast();  // type_decl (#u(8) / #none / ...)
+  print(" ");
+  move_to_sibling();
+  write_lnast();  // qualifier const ("mut" / "const" / "mut comptime" / ...)
+  if (move_to_sibling()) {
+    print(" = ");
+    write_lnast();  // optional init value
+  }
+  move_to_parent();
+}
+
 void Lnast_writer::write_delay_assign() {
   move_to_child();
   write_lnast();
@@ -320,6 +352,29 @@ void Lnast_writer::write_prim_type_int(char sign) {
 
 void Lnast_writer::write_prim_type_uint() { write_prim_type_int('u'); }
 void Lnast_writer::write_prim_type_sint() { write_prim_type_int('s'); }
+
+// Task 1t/typesystem: the canonical integer type node (no-arg overload, invoked
+// by the dispatch switch). Children are the optional (max, min) range consts;
+// `#int` with none = unbounded, `#int(max)` = max only, `#int(max, min)` = both.
+void Lnast_writer::write_prim_type_int() {
+  print("#int");
+  move_to_child();
+  if (!is_invalid()) {
+    if (is_last_child()) {
+      print("(");
+      write_lnast();
+      print(")");
+    } else {
+      print("(");
+      write_lnast();  // max
+      print(", ");
+      move_to_sibling();
+      write_lnast();  // min
+      print(")");
+    }
+  }
+  move_to_parent();
+}
 
 void Lnast_writer::write_prim_type_range() { print("#range"); }
 void Lnast_writer::write_prim_type_string() { print("#string"); }
