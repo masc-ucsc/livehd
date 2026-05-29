@@ -3908,6 +3908,7 @@ Lnast_node Prp2lnast::bit_selection_to_node(TSNode n) {
     }
   }
   TSNode type_node = child_by_field(n, "reduction");
+  TSNode ext_node  = child_by_field(n, "extension");
 
   Lnast_node mask_ref = compute_bit_mask_ref(sel_node);
 
@@ -3929,7 +3930,6 @@ Lnast_node Prp2lnast::bit_selection_to_node(TSNode n) {
     } else if (rt == "reduction_popcount") {
       red_node = Lnast_ntype::create_popcount();
     } else {
-      // sign_extend / zero_extend not yet lowered.
       return ref;
     }
     auto r_idx = builder.add_child(red_node);
@@ -3937,6 +3937,35 @@ Lnast_node Prp2lnast::bit_selection_to_node(TSNode n) {
     lnast->add_child(r_idx, r_ref);
     lnast->add_child(r_idx, ref);
     return r_ref;
+  }
+
+  // Sign/zero extension (`#sext[lo..=hi]` / `#zext[lo..=hi]`). `get_mask`
+  // already produces the selected bits as an unsigned value packed LSB-first
+  // into positions 0..popcount(mask)-1, which IS the zero-extended result.
+  // For sext we additionally sign-extend from the top selected bit: the
+  // packed slice's sign bit sits at position popcount(mask)-1, so emit a
+  // `sext` whose position operand is that index (constprop folds it via
+  // Dlop::sext_op, matching the graph Sext cell).
+  if (!ts_node_is_null(ext_node)) {
+    std::string_view et(ts_node_type(ext_node));
+    if (et == "sign_extend" && mask_ref.is_const()) {
+      auto mv = Dlop::from_pyrope(mask_ref.get_name());
+      if (!mv->is_invalid() && mv->is_i()) {
+        int sign_bit = mv->popcount() - 1;
+        if (sign_bit < 0) {
+          sign_bit = 0;
+        }
+        auto s_idx = builder.add_child(Lnast_ntype::create_sext());
+        auto s_ref = builder.mint_tmp_ref();
+        lnast->add_child(s_idx, s_ref);
+        lnast->add_child(s_idx, ref);
+        lnast->add_child(s_idx, Lnast_node::create_const(sign_bit));
+        return s_ref;
+      }
+    }
+    // zext (and any sext whose width isn't statically known): the bare
+    // get_mask already zero-extends, so return it directly.
+    return ref;
   }
   return ref;
 }

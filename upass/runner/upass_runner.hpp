@@ -67,6 +67,9 @@ protected:
   // dispatch count by 30–50% on the bulk arithmetic hot loop.
   std::vector<upass::uPass*> fold_capable_passes;
   std::vector<upass::uPass*> classify_capable_passes;
+  // 1i Phase E — passes that expose shared-ST reads (provide_bundle_fields /
+  // provide_typename), consulted by try_bundle_fields / try_typename.
+  std::vector<upass::uPass*> shared_st_passes_;
 
   // Step C of upass redesign — single shared symbol table owned by the
   // runner. Each pass receives a pointer to this via
@@ -116,6 +119,14 @@ protected:
   // Returns the first non-nullopt result from any pass's fold_ref(name).
   std::optional<Const> try_fold_ref(std::string_view name);
 
+  // 1i Phase E shared-ST reads: the comb-call inliner uses these to introspect
+  // state it can't see through scalar fold_ref. try_bundle_fields returns the
+  // flat comptime-const fields behind a bundle ref (for tuple actuals);
+  // try_typename returns a var's declared typename (for method dispatch /
+  // setter-init). First pass that provides wins.
+  std::optional<std::vector<std::pair<std::string, Const>>> try_bundle_fields(std::string_view name);
+  std::string                                               try_typename(std::string_view name);
+
   // Emits either the folded value of `name` (when any pass returns a valid
   // Const) or the original ref node otherwise. Used by both emit_op_with_fold
   // and the statement-scope ref leaf case.
@@ -163,6 +174,11 @@ protected:
   // value and the assign is emitted/folded into the caller's staging).
   void emit_inline_binding(const std::string& lhs, const Lnast_node& rhs);
 
+  // Emits `dst = (k0=v0, …)` as a tuple_add through the walk so constprop
+  // builds dst's bundle — used to splat a multi-output callee's returns so
+  // the caller's destructuring tuple_gets fold.
+  void emit_inline_tuple(const std::string& dst, const std::vector<std::pair<std::string, Lnast_node>>& fields);
+
   // Emits `lhs : uN/sN` (a type_spec) the same way, so the attributes pass
   // records the inlined param/output's declared width — that's what lets
   // `<tag>param.[bits]` fold during the body walk (the callee's io widths
@@ -186,6 +202,9 @@ protected:
   // name, no placeholders; recursion allowed under fuel). All other callees
   // route to the evaluator. Computed in set_function_registry.
   absl::flat_hash_set<std::string> inlinable_callees_;
+  // Inlinable callees whose body uses positional placeholders (_0/_1/_); the
+  // prologue binds those aliases for these only.
+  absl::flat_hash_set<std::string> placeholder_callees_;
   // Phase D recursion fuel. Per-callee depth is capped at kInlineMaxDepth
   // (active frames of the same callee); inline_budget_ is a per-run total
   // splice cap so a non-terminating / exponential unroll bails instead of

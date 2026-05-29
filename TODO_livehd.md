@@ -283,11 +283,57 @@ cross-file dependencies stay visible.
   replacement. Per-instantiation cassert counting was adopted (decision
   this session); `scope2`/`attr_comptime_query`/`assert_ifelse2`
   expectations bumped with a count-note.
-    - **E–G remain.** Deleting `evaluate_callee_inline` (E) needs the
-      runner to handle what it currently bails: multi-output bundle
-      splat, method dispatch via typename, closures/function-name
-      actuals, positional placeholders / implicit return, `.[comptime]`
-      folding in the main walk, tuple actuals, and setter-init (F).
+    - **E reassessed (2026-05-29): deleting `evaluate_callee_inline` is a
+      MAJOR architectural effort, not 6 small features.** Measured it by
+      stubbing `try_eval_comb_call` to return false (forcing runner-only) and
+      running the comptime suite: **16 tests still depend on the evaluator**
+      beyond the 18 baseline — basic calls (`fcall1/2/3`, `simple`, `assert`),
+      `does_test1`, `paths_if`, `phase5_const_check`, `ref_comb`, recursion
+      (tree_sum), closures (`closure_capture`, `fcall6`), methods/setters
+      (`fcall5/5b`, `fcall_rename_deep`, `setter_complex`, `setter_multi_field`,
+      `tuple_decorator_complex`). The runner folds only a *subset* of casserts
+      per test; the residual unknowns need: bit-range/`get_mask` folding in
+      inlined bodies, multi-output **destructure** (`(b,c)=dox()` — the dst is
+      multiple refs, not a single bundle tmp, so the current `emit_inline_tuple`
+      path doesn't even fire), tuple actuals, method dispatch, closures,
+      setter-init. **Several of these need the runner to read constprop's
+      bundle/typename symbol-table state** (is a ref a const bundle? what's a
+      var's typename?) — i.e. the shared symbol table (Step C of the upass
+      redesign), a large prerequisite. **Key trap:** every step that makes the
+      runner inline *more* (e.g. resolving `comb fcall1` in module `fcall1`)
+      regresses tests, because the runner then *shadows* the working evaluator
+      for shapes it can't fully fold. So the evaluator can't be removed
+      incrementally without first making the runner fold each shape completely.
+        - **Landed (net-safe, 109/18 deterministic):** `emit_inline_tuple`
+          (single-bundle-tmp multi-output), positional-placeholder aliasing
+          (`placeholder_callees_`), and — the campaign foundation —
+          **shared-ST read access**: `uPass::provide_bundle_fields` /
+          `provide_typename` (constprop overrides) + runner
+          `try_bundle_fields` / `try_typename` (`shared_st_passes_`). Additive
+          /inert; gives the runner the bundle/typename introspection the
+          remaining feature ports need.
+        - **Decision (2026-05-29): committed to the campaign** (delete the
+          evaluator). Ordered next steps, each consuming the foundation and
+          validated by stubbing `try_eval_comb_call`→false:
+            1. tuple actuals (`try_bundle_fields` → bundle-param prologue via
+               `emit_inline_tuple`; also fixes the recursion const-arg gate for
+               bundle args → `tree_sum`).
+            2. bit-range/`get_mask` folding in inlined bodies (`fcall1/2`).
+            3. multi-output **destructure** `(b,c)=dox()` (dst is *multiple*
+               refs, not one bundle tmp — needs a distinct epilogue path).
+            4. method dispatch (`try_typename` → resolve `obj.method`, bind
+               `self`).
+            5. closures / function-name actuals.
+            6. setter-init (entry 1k) — `try_typename` + a runner first-assign
+               hook.
+          Delete `evaluate_callee_inline` + `try_eval_comb_call` only once
+          runner-only (stub) is fully green. **Trap to remember:** making the
+          runner inline more shadows the evaluator, so each shape must fold
+          *completely* before its bail is removed.
+        - **NOTE:** the "second flaky heap bug" seen mid-turn was a FALSE ALARM
+          (memory pressure from running sanitizer builds + tight loops
+          concurrently). Quiet machine + clean build = 0/30, suite deterministic
+          109/18. Don't judge flakiness under self-induced load.
     - **Phase D DONE (2026-05-28) — via a const-arg gate, NOT an iterative
       rewrite.** First diagnosis was wrong: the fib stack-overflow was not
       depth-driven. Root cause (found by tracing param bindings): the

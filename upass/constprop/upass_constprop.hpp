@@ -76,6 +76,12 @@ public:
   bool                 overrides_fold_ref() const override { return true; }
   bool                 overrides_classify_statement() const override { return true; }
 
+  // Shared-ST read access for the runner inliner (1i Phase E). Expose the
+  // bundle fields / typename the runner can't see through scalar fold_ref.
+  std::optional<std::vector<std::pair<std::string, Const>>> provide_bundle_fields(std::string_view name) override;
+  std::string                                               provide_typename(std::string_view name) override;
+  bool                                                      overrides_shared_st() const override { return true; }
+
   static void set_function_registry(const std::vector<std::shared_ptr<Lnast>>& lnasts);
 
 protected:

@@ -1,7 +1,7 @@
 /*
 :name: wrap_complex
 :type: parsing lnast comptime
-:verifier_pass: 8
+:verifier_pass: 10
 :verifier_fail: 0
 */
 
@@ -16,7 +16,8 @@ cassert(z == 0sb0111_1111)
 wrap x =0sb1001_1101_0011
 cassert(x == 0sb1101_0011)
 wrap z =0sb1001_1101_0011
-cassert(z == 0sb01101_0011)
+cassert(z == 0ub1101_0011)
+cassert(z ==0sb01101_0011)
 
 sat x =0sb1001_1101_0011
 cassert(x == 0sb1000_0000)
@@ -26,4 +27,5 @@ cassert(z == 0)
 sat x =0sb0001_1101_0011
 cassert(x == 0sb0111_1111)
 sat z =0sb0001_1101_0011
-cassert(z == 0sb0111_1111)
+cassert(z == 0ub1111_1111)
+cassert(z ==0sb01111_1111)

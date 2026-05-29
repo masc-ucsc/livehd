@@ -1,20 +1,16 @@
 /*
 :name: wrap_checks
 :type: parsing lnast comptime
-:verifier_pass: 4
+:verifier_pass: 2
 :verifier_fail: 0
 */
 
-mut x:s8 = 33
+mut x:u8 = 255
+cassert(x==255)
+wrap x = 0xCAFE
+cassert(x == 0xFE)
 
-x:u4:[wrap] = 0xCAFE
-cassert(x == 0xE)
-
-x:u4:[wrap] = -1
-cassert(x == 0xF)
-
-x:s4:[wrap] = 0xCAFE
-cassert(x == 7)
-
-x:s4:[wrap] = -1
-cassert(x == -8)
+mut y:s4 = -1
+cassert(y==-1)
+wrap y = 0xCAFE  // 0sb0..._1111_1110
+cassert(y == 0sb1110 == -2)

@@ -1,7 +1,7 @@
 /*
 :name: valid_unknown_bits
 :type: comptime
-:verifier_pass: 11
+:verifier_pass: 10
 :verifier_fail: 0
 */
 
@@ -16,7 +16,9 @@
 mut v:u8 = 0sb1?01_?000
 
 // Partial unknown: known bits compare against masked extraction.
-cassert(v#[3..=6] == 0sb1?0)
+// v = 0sb1?01_?000 → bit3=?, bit4=1, bit5=0, bit6=? (LSB-first). The slice
+// packs bit3..bit6 with bit3 at position 0, so v#[3..=6] == ?,1,0,? == 0sb?01?.
+cassert(v#[3..=6] == 0sb0?01?)
 cassert(v#[7]    == 0sb1)    // top bit is known 1
 cassert(v#[0..=2] == 0)        // bottom three are known 0
 
@@ -31,10 +33,6 @@ cassert(ones == 0xff)
 // AND/OR with a mask that touches only known bits preserves the unknown
 // in untouched positions but resolves the masked ones.
 const masked_low = v & 0ub0000_1111
-cassert(masked_low == 0ub0000_1000)  // bit 3 still unknown? — actually bit 3 was '1?', so:
-// (Re-evaluating: v#[3] is '1', v#[6] is '?' — the AND only keeps bits 0..3,
-//  whose pattern was 1_000 → just bit 3 set.)
-// We re-do the assertion to make the value precise:
 cassert((v & 0ub0000_0111) == 0)     // bits 0..2 are all known 0
 
 // Carry expansion: adding 1 may bump the unknown into a higher bit.

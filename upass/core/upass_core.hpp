@@ -114,6 +114,22 @@ public:
   virtual bool overrides_fold_ref() const { return false; }
   virtual bool overrides_classify_statement() const { return false; }
 
+  // ── Shared symbol-table read access (1i Phase E campaign) ────────────────
+  // The runner's comb-call inliner can introspect a scalar via fold_ref, but
+  // some inlinable shapes need more of the symbol-table state than a scalar:
+  //   - tuple actuals / tuple params  → the bundle fields behind a ref
+  //   - method dispatch / setter-init → the declared typename of a var
+  // A pass that owns that state (constprop) overrides these so the runner can
+  // read it without the full shared-ST migration. provide_bundle_fields
+  // returns the flat (field → comptime Const) entries of a bundle, or nullopt
+  // if `name` is not a known bundle. provide_typename returns the var's
+  // declared typename, or "" if none.
+  virtual std::optional<std::vector<std::pair<std::string, Const>>> provide_bundle_fields(std::string_view /*name*/) {
+    return std::nullopt;
+  }
+  virtual std::string provide_typename(std::string_view /*name*/) { return {}; }
+  virtual bool        overrides_shared_st() const { return false; }
+
   // Runner-supplied helper that delegates to `try_fold_ref` across every
   // registered pass. Passes can use this to resolve a ref against the
   // aggregate symbol-table state (e.g. verifier consulting constprop's ST

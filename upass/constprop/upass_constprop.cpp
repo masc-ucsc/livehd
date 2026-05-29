@@ -303,11 +303,15 @@ void uPass_constprop::process_unary(F op) {
   move_to_sibling();
   Const r = current_prim_value();
   move_to_parent();
-  if (!foldable(r)) {
+  // Delegate to Dlop: only skip non-values (invalid/string). Unknown (`?`)
+  // bits flow through — not_op et al. propagate them bit-precisely.
+  if (!is_numeric(r)) {
     return;
   }
   op(r);
-  store_trivial(var, r);
+  if (!r.is_invalid()) {
+    store_trivial(var, r);
+  }
 }
 
 void uPass_constprop::process_plus() {
@@ -3353,7 +3357,9 @@ void uPass_constprop::process_tuple_get() {
         }
       }
       // Integer bit-slice via the same range→value synthesis used by get_mask.
-      if (foldable(src_val)) {
+      // Delegate to Dlop (get_mask_op): unknown source bits are sliced
+      // bit-precisely, so only non-values (invalid/string) are skipped.
+      if (is_numeric(src_val)) {
         const Const result = apply_range_mask(src_val, start, end_lc);
         if (!result.is_invalid()) {
           store_trivial(dst, result);
@@ -3693,10 +3699,36 @@ std::optional<Const> uPass_constprop::fold_ref(std::string_view name) {
   return st.get_trivial(name);
 }
 
+std::optional<std::vector<std::pair<std::string, Const>>> uPass_constprop::provide_bundle_fields(std::string_view name) {
+  // 1i Phase E shared-ST read: hand the runner the flat comptime-const fields
+  // of `name`'s bundle so it can bind/propagate tuple actuals it can't reach
+  // through scalar fold_ref. Returns nullopt when `name` is not a bundle; a
+  // field whose value isn't a concrete Const is skipped (caller treats a
+  // partial result as "not fully comptime").
+  auto b = st.get_bundle(std::string(name));
+  if (!b) {
+    return std::nullopt;
+  }
+  std::vector<std::pair<std::string, Const>> out;
+  for (const auto& [k, ep] : b->non_attr_entries()) {
+    if (ep && !ep->trivial.is_invalid()) {
+      out.emplace_back(k, ep->trivial);
+    }
+  }
+  return out;
+}
+
+std::string uPass_constprop::provide_typename(std::string_view name) {
+  auto it = typename_of_var.find(std::string(name));
+  return it != typename_of_var.end() ? it->second : std::string{};
+}
+
 void uPass_constprop::process_sext() {
   // Sign-extend: [sext: ref(dst), ref_or_const(src), const(nbits)]
   // sext_op(ebits) interprets bit (ebits-1) of src as the sign bit.
-  // Skip folding if src is unfoldable or nbits is not a known integer.
+  // Delegate to Dlop: src may carry unknown bits (sext_op sign-extends the
+  // unknown sign too); skip only non-values. nbits is a host int, so it must
+  // be a concrete integer.
   move_to_child();
   auto var = current_text();
   move_to_sibling();
@@ -3704,7 +3736,7 @@ void uPass_constprop::process_sext() {
   move_to_sibling();
   const auto nbits_lc = current_prim_value();
   move_to_parent();
-  if (foldable(src) && !nbits_lc.is_invalid() && nbits_lc.is_i()) {
+  if (is_numeric(src) && !nbits_lc.is_invalid() && nbits_lc.is_i()) {
     store_trivial(var, src.sext_op(static_cast<int>(nbits_lc.to_i())));
   }
 }
@@ -3745,7 +3777,9 @@ void uPass_constprop::process_get_mask() {
 
   move_to_parent();
 
-  if (!foldable(value)) {
+  // Delegate to Dlop: a value with unknown bits is sliced bit-precisely by
+  // get_mask_op, so only non-values (invalid/string) are skipped here.
+  if (!is_numeric(value)) {
     return;
   }
 
@@ -3757,12 +3791,14 @@ void uPass_constprop::process_get_mask() {
     return;
   }
 
-  if (!foldable(mask)) {
+  // The mask may itself carry unknown bits — get_mask_op handles that
+  // (returns a sound bounded-width unknown), so don't pre-filter it.
+  if (!is_numeric(mask)) {
     return;
   }
   // Trust Dlop::get_mask_op — including the single-bit-mask → Bool rule. We
-  // store whatever it returns (invalid included): all inputs were known so
-  // the fold is real, and downstream code shouldn't silently drop it.
+  // store whatever it returns (invalid included): the fold is real and
+  // downstream code shouldn't silently drop it.
   store_trivial(var, *value.get_mask_op(mask));
 }
 
@@ -3803,7 +3839,10 @@ void uPass_constprop::process_set_mask() {
   Const new_val = current_prim_value();
   move_to_parent();
 
-  if (!foldable(input_val) || !foldable(new_val)) {
+  // Delegate to Dlop: both the input being written into and the value being
+  // written may carry unknown bits — set_mask_op tracks them bit-precisely.
+  // Only the *mask* (which bits to write) must be concrete (see below).
+  if (!is_numeric(input_val) || !is_numeric(new_val)) {
     return;
   }
 
@@ -3831,6 +3870,10 @@ void uPass_constprop::process_set_mask() {
     }
     final_mask = *Dlop::get_mask_value(static_cast<int>(hi), static_cast<int>(lo));
   } else {
+    // The mask selects *which* bits to overwrite; Dlop::set_mask_op requires
+    // it concrete (asserts on an unknown mask, unlike get_mask_op). This is a
+    // Dlop precondition on the bit-selection, not a value pre-filter — the
+    // data operands (input_val/new_val) above already pass unknowns through.
     if (!foldable(mask)) {
       return;
     }
