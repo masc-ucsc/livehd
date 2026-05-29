@@ -64,6 +64,7 @@ public:
   void process_red_or() override;
   void process_red_and() override;
   void process_red_xor() override;
+  void process_popcount() override;
   void process_ne() override;
   void process_eq() override;
   void process_is() override;

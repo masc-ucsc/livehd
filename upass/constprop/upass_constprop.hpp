@@ -47,6 +47,7 @@ public:
   void process_red_or() override;
   void process_red_and() override;
   void process_red_xor() override;
+  void process_popcount() override;
 
   // Bit Manipulation
   void process_sext() override;

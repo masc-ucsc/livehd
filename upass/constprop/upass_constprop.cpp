@@ -3614,6 +3614,12 @@ void uPass_constprop::process_red_xor() {
   process_reduction([](const Const& v) -> Const { return *v.rxor_op(); });
 }
 
+// popcount (`a#+[..]`): number of set bits, returned as an integer Const.
+// Const::popcount_op handles the unknown-bit and negative/unknown-sign cases.
+void uPass_constprop::process_popcount() {
+  process_reduction([](const Const& v) -> Const { return *v.popcount_op(); });
+}
+
 // ── Bit Manipulation ─────────────────────────────────────────────────────────
 
 // ── Emit classification (Slice 1 drop + fold rules) ─────────────────────────

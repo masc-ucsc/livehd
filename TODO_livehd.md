@@ -283,16 +283,37 @@ cross-file dependencies stay visible.
   replacement. Per-instantiation cassert counting was adopted (decision
   this session); `scope2`/`attr_comptime_query`/`assert_ifelse2`
   expectations bumped with a count-note.
-    - **D–G remain.** Deleting `evaluate_callee_inline` (E) needs the
+    - **E–G remain.** Deleting `evaluate_callee_inline` (E) needs the
       runner to handle what it currently bails: multi-output bundle
       splat, method dispatch via typename, closures/function-name
       actuals, positional placeholders / implicit return, `.[comptime]`
-      folding in the main walk, recursion (D), and setter-init (F).
-    - **NOT a 1i bug:** `string_interpolation` crashes nondeterministically
-      (heap corruption at exit). Bisected: clean HEAD is fine; the
-      uncommitted working-tree WIP crashes 3/12 *with the 1i mechanism
-      fully removed*. Pre-existing latent heap bug in the WIP
-      (constprop/attributes/bitwidth) — run under ASan to locate.
+      folding in the main walk, tuple actuals, and setter-init (F).
+    - **Phase D DONE (2026-05-28) — via a const-arg gate, NOT an iterative
+      rewrite.** First diagnosis was wrong: the fib stack-overflow was not
+      depth-driven. Root cause (found by tracing param bindings): the
+      *standalone* function body (`is_function_body`, param is an unbound
+      input) inlines its own recursive call with a non-const arg, so the
+      base-case cond never folds → unbounded unroll → stack overflow. The
+      call sites (const args) fold fine at natural shallow depth. Fix:
+      **a recursive callee is only spliced when every actual folds to a
+      comptime constant** (only then does `process_if` prune the base
+      case); non-const recursive calls (standalone bodies, runtime args)
+      stay a runtime func_call. recursion.prp now passes via the runner
+      (fib≤10, fact≤6) — stable 4/4. Kept: fuel (`inline_budget_` 200000 +
+      `kInlineMaxDepth` 256 backstop for pathological const-arg recursion
+      like f(n)=f(n+1)) and the tuple-param exclusion (`tree_sum` → still
+      evaluator, pending tuple-actual support in E). So the iterative
+      rewrite is unnecessary; recursion no longer needs the evaluator.
+    - **Heap UAF FIXED (2026-05-28).** The nondeterministic crashes
+      (string_interpolation etc.) were a heap-use-after-free in
+      `upass_attributes_migrate.cpp:201`: `type_info_map.emplace(path,
+      ti_it->second)` where `ti_it` is an iterator into the *same* map — the
+      emplace rehashes and invalidates it. Found via `--config=asan` (ASan
+      reported it deterministically on `fcall6.prp`). Fixed by copying the
+      `Type_info` out by value before the emplace. Suite is now
+      **deterministic: `//inou/prp:all` = 109 pass / 18 fail** across
+      repeated runs (was flaky 18↔20). This unblocks reliable Phase E
+      validation.
 
   **Open risks to watch.** (1) `current_text()` lifetime under rename
   (intern pool); (2) other passes (attributes/bitwidth) that key state

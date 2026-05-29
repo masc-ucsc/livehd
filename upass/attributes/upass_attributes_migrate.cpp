@@ -198,11 +198,16 @@ void uPass_attributes::migrate_alias(std::string_view lhs, std::string_view rhs)
     field_path = lhs_s;
     field_path.push_back('.');
     field_path += field;
-    auto [it, inserted] = type_info_map.emplace(std::move(field_path), ti_it->second);
+    // Copy the source Type_info out by value first: the emplace below can
+    // rehash type_info_map, which invalidates `ti_it` (a reference into the
+    // same map). Reading `ti_it->second` during/after the emplace is a
+    // heap-use-after-free (caught by ASan on fcall6.prp).
+    const Type_info src_ti = ti_it->second;
+    auto [it, inserted]    = type_info_map.emplace(std::move(field_path), src_ti);
     if (inserted) {
       mark_changed();
-    } else if (it->second.bits != ti_it->second.bits || it->second.kind != ti_it->second.kind) {
-      it->second = ti_it->second;
+    } else if (it->second.bits != src_ti.bits || it->second.kind != src_ti.kind) {
+      it->second = src_ti;
       mark_changed();
     }
   }

@@ -411,6 +411,22 @@ void uPass_bitwidth::process_red_xor() {
   set_range(lhs, Lnast_range::boolean());
 }
 
+// popcount (`a#+[..]`) — set-bit count, not boolean. Always in
+// [0, sbits(input)]: an n-bit value has at most n set bits.
+void uPass_bitwidth::process_popcount() {
+  auto [lhs, rhs] = scan_op();
+  if (rhs.empty()) {
+    set_range(lhs, Lnast_range::unbounded());
+    return;
+  }
+  Lnast_range result;
+  result.min     = 0;
+  result.max     = rhs[0].get_sbits();
+  result.neg_inf = false;
+  result.pos_inf = false;
+  set_range(lhs, result);
+}
+
 // Comparison ops — always boolean.
 void uPass_bitwidth::process_eq() {
   auto lhs = scan_lhs_only();

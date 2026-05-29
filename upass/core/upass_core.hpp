@@ -228,6 +228,7 @@ public:
   PROCESS_NODE(red_or)
   PROCESS_NODE(red_and)
   PROCESS_NODE(red_xor)
+  PROCESS_NODE(popcount)
 
   // Logical
   PROCESS_NODE(log_and)

@@ -67,6 +67,7 @@ public:
   void process_red_or() override { handle_op(); }
   void process_red_and() override { handle_op(); }
   void process_red_xor() override { handle_op(); }
+  void process_popcount() override { handle_op(); }
   void process_sext() override { handle_op(); }
   void process_get_mask() override { handle_op(); }
   void process_set_mask() override { handle_op(); }

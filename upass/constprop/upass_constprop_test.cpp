@@ -528,6 +528,28 @@ TEST(UpassConstprop, RedXorEvenParity) {
   EXPECT_TRUE(cp.get_result("a").is_known_false());  // popcount(10) = 2, even → false
 }
 
+// popcount: number of set bits, as an integer (not boolean like the reductions).
+TEST(UpassConstprop, PopcountSetBits) {
+  ConstpropFixture f;
+  // 0b1010_0100 = 0xa4: bits 2, 5, 7 set → popcount = 3.
+  auto              op = f.add_unary_node(Lnast_ntype::create_popcount(), "a", 0xa4);
+  TestableConstprop cp(f.lm);
+  cp.position(op);
+  cp.process_popcount();
+  EXPECT_TRUE(cp.has_changed());
+  EXPECT_EQ(cp.get_result("a").to_i(), 3);
+}
+
+TEST(UpassConstprop, PopcountZero) {
+  ConstpropFixture f;
+  auto              op = f.add_unary_node(Lnast_ntype::create_popcount(), "a", 0);
+  TestableConstprop cp(f.lm);
+  cp.position(op);
+  cp.process_popcount();
+  EXPECT_TRUE(cp.has_changed());
+  EXPECT_EQ(cp.get_result("a").to_i(), 0);
+}
+
 // ── sext ─────────────────────────────────────────────────────────────────────
 
 // Fixture helper: [sext: ref(dst), const_or_ref(src), const(nbits)]

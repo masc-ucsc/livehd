@@ -412,11 +412,23 @@ void uPass_runner::set_function_registry(const std::vector<std::shared_ptr<Lnast
   inlinable_callees_.clear();
   for (const auto& [name, ln] : function_registry) {
     const auto& io = ln->io_meta();
-    if (io.empty() || io.outputs.size() != 1 || recursive_callees_.contains(name)) {
+    // Recursion stays on the evaluator. Pure emit+fold recurses in the
+    // runner's own C++ call stack (process_lnast → try_inline → …), so deep
+    // comptime recursion (e.g. fib(10)) stack-overflows; the evaluator folds
+    // to a constant without emitting/recursing the runner. Revisit only with
+    // an iterative work-stack rewrite of process_lnast (see 1i Phase D note).
+    // Recursion is allowed here (gated at the call site on constant args, which
+    // is what lets the base case fold and terminate the unroll).
+    if (io.empty() || io.outputs.size() != 1) {
       continue;
+    }
+    absl::flat_hash_set<std::string> params;
+    for (const auto& e : io.inputs) {
+      params.insert(e.name);
     }
     absl::flat_hash_set<std::string> defined;
     bool                             has_placeholder = false;
+    bool                             tuple_param     = false;
     for (const auto& nid : ln->depth_preorder(ln->get_root())) {
       if (nid.is_invalid()) {
         continue;
@@ -428,8 +440,18 @@ void uPass_runner::set_function_registry(const std::vector<std::shared_ptr<Lnast
       if (fc.is_valid() && ln->get_type(fc) == Lnast_ntype::Lnast_ntype_ref) {
         defined.insert(std::string(ln->get_name(fc)));
       }
+      // A param read as a tuple_get source is a tuple-typed param — the runner
+      // can't bind/propagate bundle actuals yet (Phase E), so leave those to
+      // the evaluator. tuple_get layout: dst, src, field...
+      if (ln->get_type(nid) == Lnast_ntype::Lnast_ntype_tuple_get && fc.is_valid()) {
+        auto src = ln->get_sibling_next(fc);
+        if (src.is_valid() && ln->get_type(src) == Lnast_ntype::Lnast_ntype_ref
+            && params.contains(ln->get_name(src))) {
+          tuple_param = true;
+        }
+      }
     }
-    if (!has_placeholder && defined.contains(io.outputs[0].name)) {
+    if (!has_placeholder && !tuple_param && defined.contains(io.outputs[0].name)) {
       inlinable_callees_.insert(name);
     }
   }
@@ -519,19 +541,28 @@ bool uPass_runner::try_inline_func_call() {
     return false;  // not a known comb body → typecast / cell-op / marker path
   }
   // Single gate: only splice callees the runner fully supports today
-  // (precomputed in set_function_registry). Everything else — recursion,
-  // multi-output, placeholders/implicit-return, no-signature — routes to the
-  // evaluator. The active-callee scan is a runtime recursion backstop.
+  // (precomputed in set_function_registry). Everything else — multi-output,
+  // placeholders/implicit-return, no-signature — routes to the evaluator.
   if (!inlinable_callees_.contains(std::string(callee->get_top_module_name()))) {
     lm->restore_cursor(saved);
     return false;
   }
+  // Phase D — recursion fuel. Comptime-bounded recursion terminates via
+  // process_if dead-branch pruning; this is the backstop for unbounded or
+  // explosive recursion. Per-callee depth cap (active frames of this callee)
+  // plus a per-run total-inline budget. On exhaustion, bail (the call stays a
+  // runtime func_call / routes to the evaluator while it still exists).
+  std::size_t same_callee_depth = 0;
   for (const auto* c : active_inline_callees_) {
     if (c == callee.get()) {
-      lm->restore_cursor(saved);
-      return false;
+      ++same_callee_depth;
     }
   }
+  if (same_callee_depth >= kInlineMaxDepth || inline_budget_ == 0) {
+    lm->restore_cursor(saved);
+    return false;
+  }
+  --inline_budget_;
 
   struct Actual {
     bool        is_named{false};
@@ -624,6 +655,30 @@ bool uPass_runner::try_inline_func_call() {
       param_val[pos] = a.node;
       param_set[pos] = true;
       ++pos;
+    }
+  }
+
+  // Recursive callees may only be spliced when every actual is a comptime
+  // constant — only then does the body's base-case condition fold so
+  // process_if prunes the recursive arm and the unroll terminates. With a
+  // non-const arg (e.g. the standalone function body, where the param is an
+  // unbound input) the recursion would never bottom out and just runs to the
+  // fuel cap; leave those as a runtime func_call (→ evaluator / real call).
+  if (recursive_callees_.contains(std::string(callee->get_top_module_name()))) {
+    for (std::size_t i = 0; i < nparams; ++i) {
+      if (!param_set[i]) {
+        continue;
+      }
+      const auto& pv         = param_val[i];
+      bool        is_const_a = pv.is_const();
+      if (pv.is_ref()) {
+        auto fv    = try_fold_ref(pv.get_name());
+        is_const_a = fv && !fv->is_invalid() && !fv->has_unknowns();
+      }
+      if (!is_const_a) {
+        lm->restore_cursor(saved);
+        return false;
+      }
     }
   }
 
@@ -791,6 +846,7 @@ bool dce_is_def_producing(Lnast_ntype::Lnast_ntype_int t) {
     case N::Lnast_ntype_red_and:
     case N::Lnast_ntype_red_or:
     case N::Lnast_ntype_red_xor:
+    case N::Lnast_ntype_popcount:
     case N::Lnast_ntype_log_and:
     case N::Lnast_ntype_log_or:
     case N::Lnast_ntype_log_not:
@@ -1070,6 +1126,7 @@ void uPass_runner::process_lnast() {
     A_OP(red_or)
     A_OP(red_and)
     A_OP(red_xor)
+    A_OP(popcount)
 
     // Logical
     A_OP(log_and)

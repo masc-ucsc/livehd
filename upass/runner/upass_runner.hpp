@@ -183,9 +183,20 @@ protected:
   // set_function_registry.
   absl::flat_hash_set<std::string> recursive_callees_;
   // Registry keys the runner can fully splice today (single output written by
-  // name, non-recursive, no placeholders). All other callees route to the
-  // evaluator. Computed in set_function_registry.
+  // name, no placeholders; recursion allowed under fuel). All other callees
+  // route to the evaluator. Computed in set_function_registry.
   absl::flat_hash_set<std::string> inlinable_callees_;
+  // Phase D recursion fuel. Per-callee depth is capped at kInlineMaxDepth
+  // (active frames of the same callee); inline_budget_ is a per-run total
+  // splice cap so a non-terminating / exponential unroll bails instead of
+  // running away. Both generous — fib/fact/tree_sum stay well under.
+  // Per-callee recursion depth cap — a backstop for pathological const-arg
+  // recursion (e.g. f(n)=f(n+1)). Kept well below the C++ stack-overflow
+  // depth since each runner inline level consumes several KB of stack. Legit
+  // comptime recursion (fib/fact) is far shallower. inline_budget_ is a
+  // per-run total-splice cap for exponential fan-out.
+  static constexpr std::size_t kInlineMaxDepth = 256;
+  std::size_t                  inline_budget_{200000};
 
   // Post-walk DCE: scans the freshly-built staging tree, drops definition
   // statements (assign / tuple_add / attr_set / etc.) whose dst name is
