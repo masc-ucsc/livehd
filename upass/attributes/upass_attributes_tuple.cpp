@@ -74,6 +74,7 @@ bool uPass_attributes::is_builtin_attr(std::string_view name) {
       "typename",
       "private",
       "size",
+      "sign",
       "key",
       "crand",
       "rand",

@@ -472,6 +472,15 @@ void uPass_attributes::evaluate_attr_get(std::string_view dst, std::string_view 
           }
         }
       }
+    } else if (attr == "sign") {
+      // Derived read (typesystem redesign): signed ⇔ the declared min can be
+      // negative. Computed from the type's min (never a stored attr); nil when
+      // the type pins no min (unbounded / untyped), matching bits/max/min.
+      if (auto m = derive_min(base); m && !m->is_invalid() && !m->is_nil()) {
+        result = *Dlop::create_integer(m->is_negative() ? 1 : 0);
+      } else {
+        result = *Dlop::nil();
+      }
     } else if (attr == "comptime") {
       result = derive_comptime(base, base_text);
     } else if (attr == "wrap") {
