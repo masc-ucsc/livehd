@@ -13,32 +13,113 @@ cross-file dependencies stay visible.
 
 ## Group 1 — foundation
 
-- **1c** `pass.lnastfmt` validator — **deferred** (extensions only;
-  core is already substantive at `pass/lnastfmt/pass_lnastfmt.cpp`,
-  ~396 lines: ref text shape, `delay_assign` arity, `assign` arity,
-  tmp-ref unwritten detection, io-shape invariants).
-  - **Tried:** Diagnostic in the 2026-05-27 session. agent-types
-    confirmed the core validator already covers most §5 invariants.
-    Designer-helper pass: opt-in, run after `inou.prp` or
-    `pass.upass` to check structural invariants and catch bugs in
-    the LNAST producers.
-  - **Pending §11.5 extensions** (all gated on [[1w]] landing):
-    - Write-once tracking per `(target, attr_key)` for `attr_set`.
-    - `attr_set`-after-read freeze (reject `attr_set` once any
-      `attr_get` of the same target has emitted).
-    - Reject `attr_set` outside declaration scope (mid-body
-      `a.[foo] = bar` → hard compile error).
-    - Attr-key whitelist enforcement.
-  - **Needed for landing:** [[1w]] first (which itself needs the
-    §10 ST API rework). The §11.5 checks read post-constprop ST
-    state that doesn't exist yet.
+- **1t** Type declaration model + `wrap`/`sat` overflow enforcement.
+  **Goal 1.** Replaces the fragmented declaration encoding and the
+  `assign`/`tuple_set` split with two LNAST write nodes, and makes the
+  declared type's `max`/`min` actually *enforced* on every write. Merges
+  the former **2m** (wrap/sat statement), **1w** (`attr_set`/`tuple_set`
+  unify), **1c** §11.5 (validator extensions), TODO.md **Cluster F**
+  (storage-width enforcement), and the type-coupled remainder of **2q**.
+
+  **New LNAST nodes.**
+  - `declare` — declaration *and* `wrap`/`sat` writes (both need
+    type/policy info): `var, level0…levelN, type_decl,
+    qualifier(const|mut|comptime|wrap|sat), value`.
+  - `store` — bare write, replaces `assign` *and* `tuple_set`:
+    `var, level0…levelN, value`. No type slot. Migration name only:
+    rename `store` → `assign` once the old `assign`/`tuple_set` are
+    deleted (the throwaway name avoids colliding with the old `assign`
+    mid-migration). `declare` is the final name — adopt immediately
+    (no collision).
+
+  **Enforcement (the Cluster F bug).** A write whose value falls outside
+  the destination's declared `[min,max]` is a **hard compile error** —
+  *unless* the write carries `wrap`/`sat`, which mask/saturate to the
+  declared width. Today `v:u8 = 0sb1?01_?000` silently stores a
+  sign-extended value, so `v | 0xff` folds to `-1` instead of `0xff`
+  (`prp-typesystem`, `prp-valid_unknown_bits`'s `ones == 0xff`). The
+  `:uN`/`:sN` envelope is *published* by [[1v]] (Phase A landed) but
+  never *applied* to the stored value — 1t adds the application. The
+  `0sb…|0xff == -1` fold itself is correct (sign-extension OR); the bug
+  is purely that `:u8` must pin `v`'s range so it is non-negative.
+
+  **"Type only at declaration" is structural.** Only `declare` carries a
+  `type_decl`; `store` cannot retype; a second `declare` on a live var is
+  a redeclaration error (`x:u6 = …` after `x:u8` → error).
+
+  **`wrap`/`sat` are write qualifiers — not a separate op, not a sticky
+  attribute.** *Learned from 2m (dropped):* a dedicated `wrap`/`sat`
+  LNAST op was the old plan — superseded, because the info the op needs
+  (target `max`/`min`/`bits`) is exactly the `declare`-shaped info, so it
+  folds into the qualifier instead. Still carried over from 2m: the
+  qualifier is a *type-info* read of the target envelope (not a
+  control-flow value read); LGraph has no wrap/sat cell, so LNAST→LGraph
+  lowers `wrap` → `get_mask` and `sat` → `mux + get_mask` using the
+  target `max`/`min`. The attribute syntax `x:u4:[wrap] = …` is dropped →
+  write `wrap x:u4 = …` (qualifier on `declare`).
+
+  **Removes `attr_set` for declaration attrs.** *Learned from 1w
+  (deleted):* `type`/`mut`/`const`/`comptime`/`wrap`/`sat` move into
+  `declare`. 1w's locked rules become *structural* instead of
+  post-constprop ST checks: declaration-only (mid-body `a.[foo] = bar` is
+  a hard error), no re-type, **declare-once per target** — but
+  conditional/mutually-exclusive declarations can *textually* look like
+  multiple writes and collapse to one after constprop dead-branch fold,
+  so declare-once must still be checked **after constprop** (the §10 ST
+  API rework that blocked 1w is the same prerequisite). `store` writes
+  stay freely re-assignable. `attr_set`/`attr_get` survive only for
+  non-declaration attributes (`.[bits]`/`.[max]`/`.[min]` reads, user
+  `_debug`).
+
+  **Validator (former 1c §11.5).** The `pass.lnastfmt` core (~396 lines:
+  ref text shape, arity, tmp-ref unwritten detection, io-shape) stays;
+  its pending extensions retarget to the new nodes: type-only-on-
+  `declare`, no-retype-via-`store`, `wrap`/`sat`-only on `declare`-shaped
+  writes, value/level arity, declare-once. Re-gated on 1t (was gated on
+  the deleted 1w).
+
+  **Bit-op status (folded from 2q, deleted).** Bit-level operators
+  largely **landed** (2026-05-28/29): `get_mask`/`set_mask` folding incl.
+  unknown bits (constprop delegates to Dlop, no unknown pre-filter),
+  reductions `#|`/`#&`/`#^`/`#+` (+ `popcount`), and `#sext`/`#zext` for
+  **const inclusive** masks. Residual gaps tracked here because they are
+  typesystem-coupled:
+  - `#sext` for **non-const** masks (exclusive `[lo..<hi]`, open,
+    dynamic): the mask lowers as a `range`/`shl` node, so the
+    const-popcount sign-bit path doesn't fire and sign-extension is
+    dropped (falls back to `get_mask`-only).
+  - `.[bits]`-driven loop bounds + dynamic bit index in loops
+    (`t#[i] = x#[…]`), gated on [[1i]] (comb inline) and [[1v]]'s
+    published `.[bits]`.
+  - Direct builtin cell-call folding (`__sext`/`__get_mask`/`__set_mask`/
+    `__ror`/…) returns unknown — a separate cell-call evaluator, not
+    bit-op semantics (most of `cellmap_comb`'s unknowns).
+
+  **Impacted LNAST nodes.** Remove: `assign`, `tuple_set` (→ `store`),
+  `attr_set` decl-attrs, `type_spec`-as-declaration (keep the cast/check
+  role — the existing `// FIXME: type_check` rename). Re-parent
+  `prim_type_*` / `comp_type_*` / `expr_type` / `unknown_type` as the
+  `type_decl` payload of `declare`. `dp_assign` already slated for
+  removal. Open decisions: `tuple_add` (field-create — fold into
+  `declare`-with-levels vs keep) and `delay_assign` (timing write —
+  `store` flavor vs own node).
+
+  **Depends on** [[1v]] (typesystem envelope — Phase A landed; scalar
+  `bits`/`max`/`min` already available, which is why 1t can sit in Group
+  1 even though wrap/sat was Group 2 under 2m). Sibling of [[1d]]
+  (producer bit lowering) and [[1i]] (comb inline). **Blast radius:**
+  `inou/prp/prp2lnast.cpp` + all upasses (attributes biggest — deletes
+  the wrap/sat sticky logic and the 3-node
+  `attr_set`+`type_spec`+`assign` declaration correlation), runner
+  dispatch, `pass/lnastfmt`, `lnast/lnast_writer`, `lnast_to_lgraph`,
+  `inou/cgen`.
 
 - **1d** Bit-range / bit-selection lowering bugs in
   `inou/prp/prp2lnast.cpp`. Pyrope's `#[…]` syntax (bit read,
   bit write, bit reductions) is partially broken on the LNAST
   producer side — multiple cases silently emit wrong code instead
   of either a proper `get_mask`/`set_mask` or a hard error.
-  Sibling of [[2q]] (which adds the constprop/upass side); this
+  Sibling of [[1t]] (which adds the constprop/upass side); this
   entry covers the prp2lnast-only fixes that can land first.
   - **Symptoms** (observed via `inou.prp |> lnast.dump`):
     - `b#[1..<4] = 1` lowers to `assign ref('b#[1..<4]') 1` —
@@ -82,12 +163,32 @@ cross-file dependencies stay visible.
   - **Affects:** `prp-bitreverse`, `prp-bitset`, `prp-formux`,
     `prp-valid_unknown_bits` bit-range portion, and the
     `pp.prp` / `assert.prp` repros from the working tree. The
-    write-side fix is a prerequisite for [[2q]] (the constprop
+    write-side fix is a prerequisite for [[1t]] (the constprop
     bit-range work) — without it, set_mask never reaches
     constprop in the first place.
 
 - **1i** Comb-call inliner as a **virtual splice into the runner's
-  single linear traversal** — no deep copy. **Goal 1.**
+  single linear traversal** — no deep copy. **Goal 1. ✅ DONE 2026-05-29.**
+
+  **STATUS: COMPLETE.** `evaluate_callee_inline`, `try_eval_comb_call`, and
+  `maybe_fire_setter_init` were DELETED from constprop (~1285 lines). The runner
+  virtual-splice now handles every shape the evaluator did. Suite is back at the
+  exact baseline (109 pass / 18 fail; the 18 are identical preexisting failures
+  unrelated to inlining). The 13 evaluator-dependent tests that broke on deletion
+  were all recovered via runner fixes (see the per-test list at the end of this
+  entry / memory `task-1i-inliner-status`):
+  - multi-output scalar gate (tuple-VALUED-output detection, not "any tuple op");
+  - file-named combs (lookup prefers a real-signature body over the file module);
+  - signed-output sext in the epilogue + output pre-declaration in the inlined
+    top scope (branch-assigned outputs survive block-leave);
+  - ref-param writeback (`__ref_arg` marker → positional);
+  - void combs (cassert/cputs or ref-param side effect; guarded vs implicit-return);
+  - bundle/tuple actuals (recursion gate accepts const bundles; bundle-literal
+    expansion; tuple-param via bundle alias);
+  - closures (function-name actuals) + method dispatch (typename bundle → fn,
+    self = leading positional actual, bundle-aliased ref writeback);
+  - nested tuple-valued multi-output: `is_tuple_field_key()` keeps tuple-literal
+    KEYS raw under inlining + fold tuple-field VALUES in emit_op_with_fold.
 
   **Why.** Today `uPass_constprop::evaluate_callee_inline` is not an
   inliner: it's a *constant evaluator* — a second, partial
@@ -173,7 +274,7 @@ cross-file dependencies stay visible.
   rather than the evaluator's returned `Const`s.
 
   **Relationship.** Unblocks the general case behind the
-  bit-range/`set_mask` folding in [[2q]] and the `.[bits]`/`.[max]`/
+  bit-range/`set_mask` folding in [[1t]] and the `.[bits]`/`.[max]`/
   `.[min]` width reads that [[1v]] (typesystem) publishes — inlined
   bodies query the same type info as caller-scope code. Sibling of
   [[1d]] (producer-side bit lowering) only in that both feed the
@@ -384,21 +485,6 @@ Group 1 entries; downstream Groups treat them as Group 1 dependencies.
   (LOC) propagation strategy" below and `docs/contracts/sourcemap.md`.
 ## Group 2 — depends on Group 1
 
-- **2m** Drop `wrap`/`sat` as attributes; keep only the `wrap`/`sat`
-  *statement* form, lowered to a new LNAST `wrap`/`sat` op — see
-  "wrap/sat: statement-only via LNAST op" below.
-  - Depends on [[1v]] (LNAST typesystem upass in TODO_prp.md): the
-    wrap/sat op reads the target's `bits`/`max`/`min`, which the type
-    system publishes (unless explicitly set as an attribute). Without
-    the typesystem in place, the op has no `max`/`min` to consume.
-  - Fixes failing comptime tests: `prp-wrap_checks` (re-type form
-    `x:u4:[wrap] = …`), `prp-wrap_complex` (`wrap x = …` and
-    `sat x = …` statements). Open question: `prp-wrap_checks`'s
-    `x:u4:[wrap] = …` syntax — is `[wrap]` on a type annotation
-    considered the kept statement form or the dropped attribute
-    form? Resolve before implementation; the test may need a rewrite
-    to `wrap x:u4 = …` if the latter.
-
 - **2h** Demand-driven incremental upass cache keyed on
   `(tree_body_hash, deps.interface_hash)` —
   `docs/contracts/architecture.md §4`.
@@ -599,42 +685,6 @@ synthesized) point at one or more locations in that map (so an alias
   corresponding source-map slab get invalidated atomically?
 - Egress comment format: pick one (`// src: file:line:col`) and commit, so
   external LEC tooling can parse it reliably.
-
-## wrap/sat: statement-only via LNAST op
-
-Today `wrap` / `sat` can appear both as attributes on a variable and as
-prefix statements (`wrap a = x`, `sat a = x`). Collapse this to a single
-form: the statement, lowered through a new dedicated LNAST op so that the
-target variable's existing `max`/`min` (and bitwidth) drive the
-wrap/saturate computation.
-
-- Drop the attribute form (`a.[[wrap]] = ...` / `a.[[sat]] = ...`) from
-  the Pyrope frontend and from `pass.upass` attribute handling.
-- Add a new LNAST node kind `wrap` (and `sat`) with three children:
-  `(__tmp, a, x)`. The op *reads* `a` because `a`'s declared
-  `max`/`min`/`bits` is the input to the wrap/saturate range — not a
-  control-flow read of `a`'s current value, but a type-info read.
-- `wrap a = x` lowers to:
-  ```
-  wrap
-    __tmp
-    a
-    x
-  assign
-    a
-    __tmp
-  ```
-  (same shape for `sat`). The intermediate `__tmp` makes the dataflow
-  explicit and keeps the existing `assign` lowering path unchanged.
-- LGraph has no `wrap` / `sat` cell. The op gets converted at LNAST→LGraph
-  time to an equivalent `get_mask` (for `wrap`) or `mux + get_mask` (for
-  `sat`) using `a`'s `max`/`min` to compute the mask / saturation
-  comparators.
-- Update `pass.lnastfmt` (Group 1 **1c**) to validate the new node's
-  arity and SSA discipline so the rule lands with validator coverage.
-- Migrate any existing tests / `.prp` files that rely on the attribute
-  form to the statement form (or delete them if redundant with the
-  statement-form tests already in `inou/prp/tests/comptime/`).
 
 ## Bitwidth_range: replace int+overflow with Const min/max
 

@@ -269,9 +269,27 @@ void uPass_runner::emit_op_with_fold(bool fold_all) {
       const bool is_lhs = (idx == 0) && !fold_all;
       if (!is_lhs && lm->get_raw_ntype() == Lnast_ntype::Lnast_ntype_ref) {
         emit_ref_or_folded(lm->current_text());
+      } else if (!is_lhs && Lnast_ntype::is_assign(lm->get_raw_ntype())) {
+        // A tuple-field entry `assign(key, val)` (inside tuple_add/concat/set):
+        // the key is a structural label (kept raw by current_text), but the
+        // VALUE must fold — otherwise a value tmp whose producer was dropped
+        // (folded to a const) is emitted raw and dangles (lnastfmt rejects it).
+        emit_push(lm->current_type());
+        if (lm->move_to_child()) {
+          emit_subtree_verbatim();  // key — current_text keeps the field-key raw
+          while (lm->move_to_sibling()) {
+            if (lm->get_raw_ntype() == Lnast_ntype::Lnast_ntype_ref) {
+              emit_ref_or_folded(lm->current_text());
+            } else {
+              emit_subtree_verbatim();
+            }
+          }
+          lm->move_to_parent();
+        }
+        emit_pop();
       } else {
-        // Either the LHS (don't fold — it's a dst) or a non-ref child
-        // (const, or a nested subtree like tuple_add's assign(key, val)).
+        // Either the LHS (don't fold — it's a dst) or a non-ref child (const,
+        // or a nested subtree).
         emit_subtree_verbatim();
       }
       ++idx;
@@ -442,41 +460,113 @@ void uPass_runner::set_function_registry(const std::vector<std::shared_ptr<Lnast
     // Recursion is allowed here (gated at the call site on constant args, which
     // is what lets the base case fold and terminate the unroll). Multi-output
     // is allowed too (epilogue splats a bundle); require at least one output.
-    if (io.empty() || io.outputs.empty()) {
-      continue;
+    auto reg_stmts = ln->get_first_child(ln->get_root());
+    if (reg_stmts.is_valid() && ln->get_type(reg_stmts) == Lnast_ntype::Lnast_ntype_io) {
+      reg_stmts = ln->get_sibling_next(reg_stmts);
+    }
+    if (!reg_stmts.is_valid() || !ln->get_first_child(reg_stmts).is_valid()) {
+      continue;  // no body to inline
+    }
+    // A zero-output comb is only worth splicing when it has an observable side
+    // effect: a cassert/cputs (`comb top() { cassert(…) } top()`) OR a `ref`
+    // param it mutates (`comb set_pair(ref self, …) { self.x = … }`). Requiring
+    // one avoids mis-inlining an *implicit-return* comb whose result io_meta
+    // doesn't capture as a declared output (e.g. `comb top() { x = (…) }`
+    // consumed by `const a = top()` — see named_tuple.prp), binding nothing back.
+    if (io.outputs.empty()) {
+      bool has_side_effect = false;
+      for (const auto& e : io.inputs) {
+        if (e.is_ref) {
+          has_side_effect = true;
+          break;
+        }
+      }
+      for (const auto& nid : ln->depth_preorder(reg_stmts)) {
+        if (has_side_effect) {
+          break;
+        }
+        if (nid.is_invalid()) {
+          continue;
+        }
+        const auto nt = ln->get_type(nid);
+        if (nt == Lnast_ntype::Lnast_ntype_cassert) {
+          has_side_effect = true;
+          break;
+        }
+        if (nt == Lnast_ntype::Lnast_ntype_func_call) {
+          auto c0 = ln->get_first_child(nid);
+          auto c1 = c0.is_valid() ? ln->get_sibling_next(c0) : c0;
+          if (c1.is_valid() && ln->get_type(c1) == Lnast_ntype::Lnast_ntype_ref && ln->get_name(c1) == "cputs") {
+            has_side_effect = true;
+            break;
+          }
+        }
+      }
+      if (!has_side_effect) {
+        continue;  // pure / implicit-return zero-output comb — leave as a call
+      }
     }
     absl::flat_hash_set<std::string> params;
     for (const auto& e : io.inputs) {
       params.insert(e.name);
     }
+    // Scan the body STMTS only (skip the io node — its `-> (a,b)` output
+    // declaration is itself a tuple node and would otherwise mark every
+    // multi-output comb as touching a tuple).
+    auto stmts_nid = ln->get_first_child(ln->get_root());
+    if (stmts_nid.is_valid() && ln->get_type(stmts_nid) == Lnast_ntype::Lnast_ntype_io) {
+      stmts_nid = ln->get_sibling_next(stmts_nid);
+    }
     absl::flat_hash_set<std::string> defined;
+    absl::flat_hash_set<std::string> tuple_dsts;          // dsts assigned a tuple/bundle value
+    std::vector<std::pair<std::string, std::string>> ref_aliases;  // (lhs, rhs-ref) plain assigns
     bool                             has_placeholder = false;
     bool                             tuple_param     = false;
-    bool                             has_tuple_op    = false;
-    for (const auto& nid : ln->depth_preorder(ln->get_root())) {
-      if (nid.is_invalid()) {
-        continue;
+    if (stmts_nid.is_valid()) {
+      for (const auto& nid : ln->depth_preorder(stmts_nid)) {
+        if (nid.is_invalid()) {
+          continue;
+        }
+        const auto nt = ln->get_type(nid);
+        if (nt == Lnast_ntype::Lnast_ntype_ref && is_placeholder(ln->get_name(nid))) {
+          has_placeholder = true;
+        }
+        auto fc = ln->get_first_child(nid);
+        if (fc.is_valid() && ln->get_type(fc) == Lnast_ntype::Lnast_ntype_ref) {
+          defined.insert(std::string(ln->get_name(fc)));
+          // A tuple_add/concat dst is assigned a bundle value.
+          if (nt == Lnast_ntype::Lnast_ntype_tuple_add || nt == Lnast_ntype::Lnast_ntype_tuple_concat) {
+            tuple_dsts.insert(std::string(ln->get_name(fc)));
+          }
+          // Plain `lhs = rhs` (single ref rhs) — record for alias propagation
+          // so `foo = ___t` inherits ___t's tuple-valued-ness.
+          if (nt == Lnast_ntype::Lnast_ntype_assign) {
+            auto rhs = ln->get_sibling_next(fc);
+            if (rhs.is_valid() && ln->get_type(rhs) == Lnast_ntype::Lnast_ntype_ref) {
+              ref_aliases.emplace_back(std::string(ln->get_name(fc)), std::string(ln->get_name(rhs)));
+            }
+          }
+        }
+        // A param read as a tuple_get source is a tuple-typed param — the runner
+        // can't bind/propagate bundle actuals yet (Phase E), so leave those to
+        // the evaluator. tuple_get layout: dst, src, field...
+        if (nt == Lnast_ntype::Lnast_ntype_tuple_get && fc.is_valid()) {
+          auto src = ln->get_sibling_next(fc);
+          if (src.is_valid() && ln->get_type(src) == Lnast_ntype::Lnast_ntype_ref
+              && params.contains(ln->get_name(src))) {
+            tuple_param = true;
+          }
+        }
       }
-      const auto nt = ln->get_type(nid);
-      if (nt == Lnast_ntype::Lnast_ntype_ref && is_placeholder(ln->get_name(nid))) {
-        has_placeholder = true;
-      }
-      if (nt == Lnast_ntype::Lnast_ntype_tuple_add || nt == Lnast_ntype::Lnast_ntype_tuple_get
-          || nt == Lnast_ntype::Lnast_ntype_tuple_set || nt == Lnast_ntype::Lnast_ntype_tuple_concat) {
-        has_tuple_op = true;
-      }
-      auto fc = ln->get_first_child(nid);
-      if (fc.is_valid() && ln->get_type(fc) == Lnast_ntype::Lnast_ntype_ref) {
-        defined.insert(std::string(ln->get_name(fc)));
-      }
-      // A param read as a tuple_get source is a tuple-typed param — the runner
-      // can't bind/propagate bundle actuals yet (Phase E), so leave those to
-      // the evaluator. tuple_get layout: dst, src, field...
-      if (nt == Lnast_ntype::Lnast_ntype_tuple_get && fc.is_valid()) {
-        auto src = ln->get_sibling_next(fc);
-        if (src.is_valid() && ln->get_type(src) == Lnast_ntype::Lnast_ntype_ref
-            && params.contains(ln->get_name(src))) {
-          tuple_param = true;
+    }
+    // Propagate tuple-valued-ness across plain ref aliases to a fixpoint, so a
+    // post-SSA `___t = (…); foo = ___t` marks `foo` as tuple-valued.
+    bool grew = true;
+    while (grew) {
+      grew = false;
+      for (const auto& [lhs, rhs] : ref_aliases) {
+        if (tuple_dsts.contains(rhs) && tuple_dsts.insert(lhs).second) {
+          grew = true;
         }
       }
     }
@@ -487,13 +577,15 @@ void uPass_runner::set_function_registry(const std::vector<std::shared_ptr<Lnast
         break;
       }
     }
-    // Multi-output splat only handles scalar outputs today: an output that
-    // aliases a tuple (`foo = (bar=…)` → `___t=(…); foo=___t`) isn't
-    // reconstructed by the bundle splat, and the alias makes it hard to detect
-    // per-output, so conservatively route any multi-output callee that touches
-    // a tuple to the evaluator (fcall5b / fcall_rename_deep / tuple.prp).
-    const bool multi_tuple = io.outputs.size() > 1 && has_tuple_op;
-    if (!tuple_param && !multi_tuple && all_outputs_written) {
+    // A tuple-VALUED output (`foo = (bar=…)`, possibly through the SSA tmp
+    // alias `___t=(…); foo=___t`) is now handled: the epilogue splats it as a
+    // bundle-ref field and the field-key/value-fold emit rebuilds the nested
+    // shape (fcall5b / fcall_rename_deep). tuple_param (a param read as a
+    // bundle via tuple_get, e.g. tree_sum's `v[lo]`) is allowed too — a bundle
+    // actual binds via the bundle-alias assign path.
+    (void)tuple_param;
+    (void)tuple_dsts;
+    if (all_outputs_written) {
       inlinable_callees_.insert(name);
       // Positional-placeholder callees (body uses _0/_1/_) need the prologue to
       // bind those aliases too — record so try_inline only does that work when
@@ -506,24 +598,35 @@ void uPass_runner::set_function_registry(const std::vector<std::shared_ptr<Lnast
 }
 
 std::shared_ptr<Lnast> uPass_runner::lookup_callee(std::string_view name) const {
-  // Exact match wins. NOTE: for a comb named like its file (fcall1.prp's
-  // `comb fcall1`) this returns the top module (empty io), and try_inline then
-  // bails to the evaluator — intentional for now, since the runner can't yet
-  // fully fold those bodies (bit-ranges etc.); see the 1i Phase E note.
+  // Gather the exact-name module plus any unique "<module>.<name>" body.
+  std::shared_ptr<Lnast> exact;
   if (auto it = function_registry.find(std::string(name)); it != function_registry.end()) {
-    return it->second;
+    exact = it->second;
   }
-  // Unqualified callee: accept a unique "<module>.<name>" suffix match.
   const std::string      suffix = "." + std::string(name);
-  std::shared_ptr<Lnast> found;
-  int                    matches = 0;
+  std::shared_ptr<Lnast> suffix_body;
+  int                    suffix_matches = 0;
   for (const auto& [k, v] : function_registry) {
     if (k.size() > suffix.size() && k.compare(k.size() - suffix.size(), suffix.size(), suffix) == 0) {
-      found = v;
-      ++matches;
+      suffix_body = v;
+      ++suffix_matches;
     }
   }
-  return matches == 1 ? found : nullptr;
+  // Prefer a candidate carrying a real comb signature (non-empty io). When a
+  // file's top module shares the comb's name (fcall1.prp's `comb fcall1`), the
+  // registry holds an empty-io top module `fcall1` AND the actual extracted body
+  // `fcall1.fcall1`; the body must win or try_inline bails on the empty-io top.
+  auto has_sig = [](const std::shared_ptr<Lnast>& l) { return l && !l->io_meta().empty(); };
+  if (has_sig(exact)) {
+    return exact;
+  }
+  if (suffix_matches == 1 && has_sig(suffix_body)) {
+    return suffix_body;
+  }
+  if (exact) {
+    return exact;  // empty-io exact (e.g. void marker) — let try_inline decide
+  }
+  return suffix_matches == 1 ? suffix_body : nullptr;
 }
 
 void uPass_runner::flush_deferred_emits() { dispatch_to_passes(&upass::uPass::flush_deferred); }
@@ -588,6 +691,26 @@ void uPass_runner::emit_inline_typespec(const std::string& name, int bits, bool 
   lm->pop_source();
 }
 
+void uPass_runner::emit_inline_sext(const std::string& dst, const std::string& src, int sign_bit) {
+  if (sign_bit < 0) {
+    return;
+  }
+  if (!scratch_forest_) {
+    scratch_forest_ = hhds::Forest::create();
+  }
+  auto body = scratch_forest_->create_tree_temp("inl-sext");
+  auto s    = std::make_shared<Lnast>(body, "inl-sext");
+  auto root = s->set_root(Lnast_ntype::create_sext());
+  s->add_child(root, Lnast_node::create_ref(dst));
+  s->add_child(root, Lnast_node::create_ref(src));
+  s->add_child(root, Lnast_node::create_const(std::to_string(sign_bit)));
+  flush_deferred_emits();
+  lm->push_source(s, "", 0);
+  process_lnast();  // cursor at sext root → dispatch + emit/fold
+  flush_deferred_emits();
+  lm->pop_source();
+}
+
 bool uPass_runner::try_inline_func_call() {
   // Cursor at the func_call node. Layout: [dst(ref), callee(ref), actual...].
   if (!lm->has_child()) {
@@ -608,9 +731,48 @@ bool uPass_runner::try_inline_func_call() {
     lm->restore_cursor(saved);
     return false;
   }
-  const std::string callee_name(lm->current_raw_text());  // function id — never renamed
+  std::string callee_name(lm->current_raw_text());  // function id — never renamed
+
+  // Higher-order resolution: inside an inlined body, `f(x)` where `f` is a
+  // function-valued param resolves to the function bound at the outer call
+  // site (closure_capture / fcall6). func_param_bindings_ is keyed by the raw
+  // param name as it appears in the body.
+  if (auto fb = func_param_bindings_.find(callee_name); fb != func_param_bindings_.end()) {
+    callee_name = fb->second;
+  }
 
   auto callee = lookup_callee(callee_name);
+
+  // Method dispatch: `obj.method(args)` lowers to `func_call[dst, method, obj,
+  // args…]` — `method` is not itself a registry function, but obj's type
+  // bundle carries it as a function-name field. Resolve method → function via
+  // obj's typename (the next sibling is `obj`, which then naturally binds to
+  // the function's first `self` param as the leading positional actual).
+  if (!callee) {
+    const auto here = lm->save_cursor();
+    if (lm->move_to_sibling() && Lnast_ntype::is_ref(lm->get_raw_ntype())) {
+      const auto tn = try_typename(lm->current_text());
+      if (!tn.empty()) {
+        if (auto bf = try_bundle_fields(tn)) {
+          for (const auto& [fld, val] : *bf) {
+            if (fld == callee_name && val.is_string()) {
+              auto fn = val.to_pyrope();
+              if (fn.size() >= 2 && fn.front() == '\'' && fn.back() == '\'') {
+                fn = fn.substr(1, fn.size() - 2);  // strip pyrope quotes
+              }
+              if (auto m = lookup_callee(fn)) {
+                callee      = m;
+                callee_name = fn;
+              }
+              break;
+            }
+          }
+        }
+      }
+    }
+    lm->restore_cursor(here);
+  }
+
   if (!callee) {
     lm->restore_cursor(saved);
     return false;  // not a known comb body → typecast / cell-op / marker path
@@ -643,21 +805,24 @@ bool uPass_runner::try_inline_func_call() {
     bool        is_named{false};
     std::string key;
     Lnast_node  node{Lnast_node::create_invalid()};
+    std::string func_name;  // non-empty: this actual is a function value (closure)
   };
-  // A ref actual whose raw name is itself a registry function is a
-  // higher-order / closure argument — bail to the evaluator (Phase F).
-  auto is_func_actual = [&]() { return Lnast_ntype::is_ref(lm->get_raw_ntype()) && lookup_callee(lm->current_raw_text()) != nullptr; };
+  // A ref actual whose raw name is itself a registry function is a higher-order
+  // / closure argument: capture the function name so the body's `f(x)` can
+  // resolve to it (see func_param_bindings_).
+  auto func_actual_name = [&]() -> std::string {
+    if (Lnast_ntype::is_ref(lm->get_raw_ntype()) && lookup_callee(lm->current_raw_text()) != nullptr) {
+      return std::string(lm->current_raw_text());
+    }
+    return {};
+  };
 
   std::vector<Actual> actuals;
   bool                shape_ok = true;
   while (lm->move_to_sibling()) {
     const auto t = lm->get_raw_ntype();
     if (Lnast_ntype::is_ref(t) || Lnast_ntype::is_const(t)) {
-      if (is_func_actual()) {
-        shape_ok = false;
-        break;
-      }
-      actuals.push_back(Actual{.is_named = false, .key = {}, .node = lm->current_node()});
+      actuals.push_back(Actual{.is_named = false, .key = {}, .node = lm->current_node(), .func_name = func_actual_name()});
     } else if (Lnast_ntype::is_assign(t)) {
       Actual     a;
       a.is_named = true;
@@ -668,17 +833,20 @@ bool uPass_runner::try_inline_func_call() {
         break;
       }
       a.key = std::string(lm->current_raw_text());  // param name — not renamed
+      // `f(ref x)` lowers to `assign(__ref_arg, x)` — a POSITIONAL pass-by-ref
+      // actual, not a named one. Strip the marker so it binds by position and
+      // the `ref` param's write-back fires (see the io.is_ref check below).
+      if (a.key == "__ref_arg") {
+        a.is_named = false;
+        a.key.clear();
+      }
       if (!lm->move_to_sibling()) {
         shape_ok = false;
         lm->restore_cursor(here);
         break;
       }
-      if (is_func_actual()) {
-        shape_ok = false;
-        lm->restore_cursor(here);
-        break;
-      }
-      a.node = lm->current_node();
+      a.func_name = func_actual_name();
+      a.node      = lm->current_node();
       lm->restore_cursor(here);
       actuals.push_back(std::move(a));
     } else {
@@ -692,15 +860,16 @@ bool uPass_runner::try_inline_func_call() {
   }
 
   const auto& io = callee->io_meta();
-  if (io.empty()) {
-    return false;  // no signature (e.g. a void/top module) → not an inline target
-  }
+  // io.empty() is allowed: a void comb (`comb top() { … }`) has no signature
+  // but is a legitimate inline target (passed the inlinable_callees_ gate
+  // above). Its empty inputs/outputs make the prologue/epilogue no-ops.
 
   // ── Match actuals → params (positional + named) ──────────────────────────
-  const std::size_t       nparams = io.inputs.size();
-  std::vector<Lnast_node> param_val(nparams, Lnast_node::create_invalid());
-  std::vector<bool>       param_set(nparams, false);
-  auto                    param_index = [&](std::string_view k) -> std::size_t {
+  const std::size_t        nparams = io.inputs.size();
+  std::vector<Lnast_node>  param_val(nparams, Lnast_node::create_invalid());
+  std::vector<bool>        param_set(nparams, false);
+  std::vector<std::string> param_func(nparams);  // non-empty: function-valued param
+  auto                     param_index = [&](std::string_view k) -> std::size_t {
     for (std::size_t i = 0; i < nparams; ++i) {
       if (io.inputs[i].name == k) {
         return i;
@@ -713,10 +882,34 @@ bool uPass_runner::try_inline_func_call() {
     if (a.is_named) {
       const auto idx = param_index(a.key);
       if (idx >= nparams) {
-        return false;  // unknown named param
+        // A bundle-typed param is flattened in io_meta to dotted leaves
+        // (`ar` → `ar.x`, `ar.y`). A bundle-literal actual `ar=(x=2,y=11)`
+        // arrives under the un-flattened key `ar`; expand it into the leaf
+        // params from the caller-side bundle fields (shared ST).
+        bool expanded = false;
+        if (a.node.is_ref()) {
+          if (auto bf = try_bundle_fields(a.node.get_name()); bf && !bf->empty()) {
+            expanded = true;
+            for (const auto& [fld, val] : *bf) {
+              const auto leaf = a.key + "." + fld;
+              const auto lidx = param_index(leaf);
+              if (lidx >= nparams || val.is_invalid()) {
+                expanded = false;
+                break;
+              }
+              param_val[lidx] = Lnast_node::create_const(val.to_pyrope());
+              param_set[lidx] = true;
+            }
+          }
+        }
+        if (!expanded) {
+          return false;  // unknown named param
+        }
+        continue;
       }
-      param_val[idx] = a.node;
-      param_set[idx] = true;
+      param_val[idx]  = a.node;
+      param_set[idx]  = true;
+      param_func[idx] = a.func_name;
     } else {
       while (pos < nparams && param_set[pos]) {
         ++pos;
@@ -724,8 +917,9 @@ bool uPass_runner::try_inline_func_call() {
       if (pos >= nparams) {
         return false;  // too many positional actuals
       }
-      param_val[pos] = a.node;
-      param_set[pos] = true;
+      param_val[pos]  = a.node;
+      param_set[pos]  = true;
+      param_func[pos] = a.func_name;
       ++pos;
     }
   }
@@ -738,14 +932,28 @@ bool uPass_runner::try_inline_func_call() {
   // fuel cap; leave those as a runtime func_call (→ evaluator / real call).
   if (recursive_callees_.contains(std::string(callee->get_top_module_name()))) {
     for (std::size_t i = 0; i < nparams; ++i) {
-      if (!param_set[i]) {
-        continue;
+      if (!param_set[i] || !param_func[i].empty()) {
+        continue;  // unset or function-valued param — not a numeric base-case driver
       }
       const auto& pv         = param_val[i];
       bool        is_const_a = pv.is_const();
       if (pv.is_ref()) {
         auto fv    = try_fold_ref(pv.get_name());
         is_const_a = fv && !fv->is_invalid() && !fv->has_unknowns();
+        // A bundle actual (e.g. `tree_sum(v = data4, …)`) folds via the shared
+        // ST instead of scalar fold_ref: treat it as const when every field is
+        // a concrete comptime value so the recursion's base case still folds.
+        if (!is_const_a) {
+          if (auto bf = try_bundle_fields(pv.get_name()); bf && !bf->empty()) {
+            is_const_a = true;
+            for (const auto& [k, v] : *bf) {
+              if (v.is_invalid() || v.has_unknowns()) {
+                is_const_a = false;
+                break;
+              }
+            }
+          }
+        }
       }
       if (!is_const_a) {
         lm->restore_cursor(saved);
@@ -762,8 +970,19 @@ bool uPass_runner::try_inline_func_call() {
   // bind param values. Ref-param actuals are remembered for write-back.
   const bool uses_placeholders = placeholder_callees_.contains(std::string(callee->get_top_module_name()));
   std::vector<std::pair<std::string, Lnast_node>> writebacks;
+  // Function-valued params: record the body-local name → bound function so the
+  // body's `f(x)` resolves; restored after the body walk. No value is emitted.
+  std::vector<std::pair<std::string, std::optional<std::string>>> saved_func_bindings;
   for (std::size_t i = 0; i < nparams; ++i) {
     const auto& e     = io.inputs[i];
+    if (!param_func[i].empty()) {
+      auto it = func_param_bindings_.find(e.name);
+      saved_func_bindings.emplace_back(e.name, it == func_param_bindings_.end()
+                                                   ? std::nullopt
+                                                   : std::optional<std::string>(it->second));
+      func_param_bindings_[e.name] = param_func[i];
+      continue;  // function value — no width/value binding
+    }
     const auto  pname = upass::Lnast_manager::make_inlined_name(tag, e.name);
     emit_inline_typespec(pname, e.bits, e.is_signed);
     if (param_set[i]) {
@@ -783,7 +1002,14 @@ bool uPass_runner::try_inline_func_call() {
     }
   }
   for (const auto& o : io.outputs) {
-    emit_inline_typespec(upass::Lnast_manager::make_inlined_name(tag, o.name), o.bits, o.is_signed);
+    const auto oname = upass::Lnast_manager::make_inlined_name(tag, o.name);
+    emit_inline_typespec(oname, o.bits, o.is_signed);
+    // Declare the output in the inlined top scope (mirrors a real body's io
+    // `assign res = nil : T`). Without this, an output assigned inside a
+    // branch block (`if c { res = … }`) anchors to that block's scope and is
+    // discarded on block-leave — before the epilogue can read it. A nil init
+    // here is harmless: a taken branch overwrites it in this same top scope.
+    emit_inline_binding(oname, Lnast_node::create_const("nil"));
   }
 
   // Body: walk the callee stmts in place (names rewritten by the frame tag)
@@ -805,19 +1031,41 @@ bool uPass_runner::try_inline_func_call() {
   flush_deferred_emits();  // flush callee-tree parked writes before leaving
   lm->pop_source();
   active_inline_callees_.pop_back();
+  // Restore the func-param bindings shadowed by this frame.
+  for (const auto& [key, old] : saved_func_bindings) {
+    if (old) {
+      func_param_bindings_[key] = *old;
+    } else {
+      func_param_bindings_.erase(key);
+    }
+  }
 
   // Epilogue: map the callee outputs back to the caller's dst, then apply
   // ref-param write-backs.
   //   - single output  → `dst = <tag>out` (scalar or whole-bundle copy)
   //   - multiple outputs → `dst = (out0=<tag>out0, …)` so the caller's
   //     destructuring tuple_gets (`dst.out0`) fold (see fcall5.prp).
-  if (io.outputs.size() == 1) {
-    emit_inline_binding(dst_name, Lnast_node::create_ref(upass::Lnast_manager::make_inlined_name(tag, io.outputs[0].name)));
+  // A signed output is reinterpreted to its declared width first (mirrors the
+  // deleted evaluator's adjust_for_type): a bit-slice like `res:s4 = b#[0..<4]`
+  // yields the raw bits 0b1110 = 14, which as s4 must read back as -2.
+  auto output_ref = [&](const auto& o) -> Lnast_node {
+    const auto raw = upass::Lnast_manager::make_inlined_name(tag, o.name);
+    if (o.is_signed && o.bits > 0) {
+      const auto sx = upass::Lnast_manager::make_inlined_name(tag, o.name + "_sx");
+      emit_inline_sext(sx, raw, o.bits - 1);
+      return Lnast_node::create_ref(sx);
+    }
+    return Lnast_node::create_ref(raw);
+  };
+  if (io.outputs.empty()) {
+    // Void comb (e.g. `top()` called for its casserts) — nothing to bind back.
+  } else if (io.outputs.size() == 1) {
+    emit_inline_binding(dst_name, output_ref(io.outputs[0]));
   } else {
     std::vector<std::pair<std::string, Lnast_node>> fields;
     fields.reserve(io.outputs.size());
     for (const auto& o : io.outputs) {
-      fields.emplace_back(o.name, Lnast_node::create_ref(upass::Lnast_manager::make_inlined_name(tag, o.name)));
+      fields.emplace_back(o.name, output_ref(o));
     }
     emit_inline_tuple(dst_name, fields);
   }

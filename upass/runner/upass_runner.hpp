@@ -185,6 +185,12 @@ protected:
   // are otherwise lost once the signature is gone). No-op when bits<=0.
   void emit_inline_typespec(const std::string& name, int bits, bool is_signed);
 
+  // Emits `dst = sext(src, sign_bit)` through the walk so constprop folds it.
+  // Mirrors the deleted evaluator's adjust_for_type: a signed output's raw
+  // value (e.g. a get_mask bit-slice 0b1110 = 14) must be reinterpreted as its
+  // declared width (s4 → -2). sign_bit is the top bit index (bits-1).
+  void emit_inline_sext(const std::string& dst, const std::string& src, int sign_bit);
+
   absl::flat_hash_map<std::string, std::shared_ptr<Lnast>> &runner_function_registry() { return function_registry; }
 
   // Monotonic per-run counter giving each inline call site a unique rename
@@ -205,6 +211,12 @@ protected:
   // Inlinable callees whose body uses positional placeholders (_0/_1/_); the
   // prologue binds those aliases for these only.
   absl::flat_hash_set<std::string> placeholder_callees_;
+  // Higher-order / closure support: maps a function-valued param's RAW name
+  // (as read in the callee body, e.g. `f` in `r = f(x)`) to the registry
+  // function it is bound to at this call site (e.g. `step_up`). Saved/restored
+  // around each body walk so nested frames don't clobber each other. Consulted
+  // by try_inline_func_call when a callee name isn't itself a registry entry.
+  absl::flat_hash_map<std::string, std::string> func_param_bindings_;
   // Phase D recursion fuel. Per-callee depth is capped at kInlineMaxDepth
   // (active frames of the same callee); inline_budget_ is a per-run total
   // splice cap so a non-terminating / exponential unroll bails instead of

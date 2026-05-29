@@ -168,6 +168,13 @@ public:
     if (active_tag_.empty() || !Lnast_ntype::is_ref(lnast->get_type(current_nid))) {
       return raw;
     }
+    // A tuple-literal field key (`(x = …)` lowers to assign(ref 'x', val) under
+    // a tuple_add/concat/set) is a structural label, not a variable. Renaming
+    // it (x → <tag>x) would change the bundle's field name and break `t.x`
+    // lookups after inlining — leave it raw.
+    if (is_tuple_field_key(current_nid)) {
+      return raw;
+    }
     // Tmps (`___N`) must stay `___<digits>` tmps — several ops (attr_get dst,
     // etc.) and DCE require it — so remap to a fresh globally-unique tmp
     // number rather than `<tag>___N`. User vars get the readable `<tag>name`.
@@ -358,6 +365,26 @@ protected:
   mutable std::unordered_map<std::string, std::string> tmp_remap_;
   mutable uint32_t                                      tmp_counter_{0};
   static constexpr uint32_t                            kInlineTmpBase = 900000;
+
+  // True when `nid` is the key (child 0) of an `assign` that is a field entry
+  // of a tuple_add / tuple_concat / tuple_set — i.e. the `x` in `(x = v)`.
+  // Such refs are structural labels and must not be inline-renamed.
+  bool is_tuple_field_key(const Lnast_nid& nid) const {
+    auto parent = lnast->get_parent(nid);
+    if (parent.is_invalid() || !Lnast_ntype::is_assign(lnast->get_type(parent))) {
+      return false;
+    }
+    if (lnast->get_first_child(parent) != nid) {
+      return false;  // the value side, not the key
+    }
+    auto gp = lnast->get_parent(parent);
+    if (gp.is_invalid()) {
+      return false;
+    }
+    const auto gt = lnast->get_type(gp);
+    return gt == Lnast_ntype::Lnast_ntype_tuple_add || gt == Lnast_ntype::Lnast_ntype_tuple_concat
+           || gt == Lnast_ntype::Lnast_ntype_tuple_set;
+  }
 
   std::string_view rename_tmp(std::string_view raw) const {
     std::string key = std::to_string(active_salt_) + ":" + std::string(raw);

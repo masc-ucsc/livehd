@@ -260,45 +260,13 @@ protected:
 
   std::optional<Const>                    resolve_current_scalar() const;
   std::optional<std::vector<Call_actual>> collect_call_actuals();
-  bool try_eval_comb_call(std::string_view dst, std::string_view fname, const std::vector<Call_actual>& actuals);
 
-  // Entry 1k: fire the decorator-init setter for `var` if its declared
-  // typename carries a `setter` field and the setter hasn't fired before.
-  // Returns true if a setter was fired (writebacks already applied).
-  bool maybe_fire_setter_init(std::string_view var);
   // Direct-cell call dispatch: `__sum(a, b)`, `__hotmux(sel, a, b, …)`, etc.
   // Maps cell names (without the `__` prefix) to Ntype_op kernels and folds
   // when all positional actuals are foldable constants. Returns true when
   // dst was assigned a result; false when the fname is not a recognized
   // cell or arguments aren't comptime.
   bool try_eval_cell_call(std::string_view dst, std::string_view fname, const std::vector<Call_actual>& actuals);
-
-  // Evaluation result for a recursive inline call: outputs indexed by name
-  // plus any ref-param mutations to apply at the caller side. Used both by
-  // the top-level call site and by recursive calls inside other comb bodies.
-  struct Inline_result {
-    std::unordered_map<std::string, Const>           outputs;
-    std::unordered_map<std::string, Const>           ref_writebacks;
-    // For ref-param actuals that were caller-side bundle entries we still
-    // expose the qualified-flat writeback names (e.g. "self.x" -> Const).
-    std::unordered_map<std::string, Const>           ref_writeback_fields;
-  };
-
-  // Recursion-aware inline of `callee_name` with already-bound `actuals`.
-  // Returns nullopt when the callee can't be statically evaluated yet
-  // (unknown args, missing registry entry, depth exhausted, body shape we
-  // can't fold, etc.). The caller decides how to surface the outputs (write
-  // to the symbol table for outer calls; merge into local_values for nested
-  // calls).
-  std::optional<Inline_result> evaluate_callee_inline(std::string_view callee_name,
-                                                       const std::vector<Call_actual>& actuals,
-                                                       int depth);
-
-  // Per-elaboration recursive-inline depth cap. Comb recursion fully unrolls
-  // at constprop time, so a stuck/infinite recursion would never terminate.
-  // 10000 matches TODO_prp entry 1y's default; the offending call site is
-  // surfaced via Pass::warn before bailing.
-  static constexpr int kInlineMaxDepth = 10000;
 };
 
 // Plugin registration lives in upass_constprop.cpp to avoid duplicate

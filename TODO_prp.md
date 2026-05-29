@@ -86,38 +86,6 @@ cross-file dependencies stay visible.
        (how does `pub` mark Verilog-side exports, and how does the
        Pyrope side bind them — likely a `tree_ios` ABI variant or a
        sub-class of import that bypasses the second-phase path).
-- **1w** Unify `attr_set` / `tuple_set` variadic-path shape —
-  **deferred**. Documented at `docs/contracts/lnast_spec.md §11`.
-  Shared layout (root + path elements + terminal):
-  `tuple_set root p1…pN value` writes the tuple slot;
-  `attr_set root p1…pN attr_key value` writes the attribute.
-  `assign` stays distinct (§11.3 decision).
-  - **Tried:** Diagnostic only. agent-types confirmed the producer
-    side (`inou/prp/prp2lnast.cpp`) already emits the simple shape
-    (`attr_set root key value`, `tuple_set root p1..pN value`) for
-    the cases that exist in the test corpus; deep `attr_set` with
-    intermediate path elements has no test driving it.
-  - **Locked rules** (still apply):
-    - `attr_set` is declaration-only: `a.[foo] = bar` mid-body is
-      a hard compile error. `attr_get` reads are unrestricted.
-    - `tuple_set` is freely re-assignable.
-    - Write-once enforcement for `attr_set` runs **after** constprop
-      (conditional/mutually-exclusive declarations may textually
-      look like multiple writes but collapse to one once dead
-      branches fold).
-    - No `attr_set` after a read of the target.
-  - **Needed for landing:**
-    - **§10 ST API rework first.** lnastfmt-side enforcement of
-      "declaration-only", "no attr_set after read", and write-once-
-      per-`(target, attr_key)` all need post-constprop ST queries
-      that don't exist yet.
-    - Producer change in prp2lnast to emit the variadic
-      `attr_set root p1..pN attr_key value` shape for `a.b.[attr] =
-      value` declaration sites (only needed once a test drives it).
-    - Add `attr_set_path.prp` content that exercises deep paths +
-      post-constprop conditional declarations collapsing to one
-      effective write.
-
 - **1k** `self` / `ref self` in tuple methods — **partial**. Basic
   `self`/`ref self` first-parameter binding and chained-receiver
   semantics (`x.a.b.method(...)` → `self = x.a.b`, `ref self` allows
@@ -143,24 +111,6 @@ cross-file dependencies stay visible.
       init-tuple's named fields rebound to the setter's named args.
 
 ## Group 2 — depends on Group 1
-
-- **2q** Bit-level operators in LNAST + constprop: bit-range read
-  (`x#[3..=6]`), bit-range write (`r#[0]=…`, `r#[3..=6]=…`,
-  `r#[0..+1]=…`), reductions (`#|[..]`, `#&[..]`, `#^[..]`, `#+[..]`),
-  sign/zero extension (`#sext[lo..=hi]`, `#zext[lo..=hi]`), and the
-  `.[bits]` attribute query (e.g. `for i in 0..<x.[bits]`).
-  - Reads `.[bits]`/`max`/`min` published by the typesystem (see
-    `upass/upass.md §2 Typesystem`); bit-range ops also need the
-    target's width to validate ranges.
-  - Fixes failing comptime tests: `prp-bitreduce`, `prp-bitreverse`,
-    `prp-bitset`, `prp-cellmap_comb` (`t#[0..=3]` bit-range read),
-    `prp-cellmap_misc` (`a#sext[0..=7]`, `a#[4..=7]`), `prp-formux`
-    (`sel#[0]=…` bit-range write), and the bit-range portion of
-    `prp-valid_unknown_bits` (`v#[3..=6] == 0sb1?0`).
-  - Current frontend symptom on most of these is a `lnastfmt` ref-text
-    error (`'t#[0..=3]' is not a valid identifier`) — prp2lnast is
-    leaving the bit-range syntax inside the ref instead of lowering
-    to a dedicated bit-range op.
 
 - **2p** Source-derived SSA / tmp names (`foo_l42_a`, drop `___N`) —
   `docs/contracts/lnast_spec.md §13`. May reuse the source-map ID from
