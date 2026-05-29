@@ -8,6 +8,8 @@
 #include <memory>
 #include <optional>
 #include <stack>
+#include <string>
+#include <unordered_set>
 #include <utility>
 #include <vector>
 
@@ -156,8 +158,30 @@ public:
 
   // Returns a string_view backed by the persistent attribute store, so it
   // stays valid until the LNAST mutates that node's text. Cheaper than
-  auto current_text() const { return lnast->get_name(current_nid); }
+  // copying. While an inline frame is active (push_source) the name of a
+  // *ref* node is rewritten with the frame's per-call-site tag so callee
+  // variables don't collide with caller (or other call-site) names — see
+  // 1i in TODO_livehd.md. const names (literals / attr-keys) are never
+  // rewritten. The rewritten string is interned so the view stays valid.
+  std::string_view current_text() const {
+    auto raw = lnast->get_name(current_nid);
+    if (active_tag_.empty() || !Lnast_ntype::is_ref(lnast->get_type(current_nid))) {
+      return raw;
+    }
+    // Tmps (`___N`) must stay `___<digits>` tmps — several ops (attr_get dst,
+    // etc.) and DCE require it — so remap to a fresh globally-unique tmp
+    // number rather than `<tag>___N`. User vars get the readable `<tag>name`.
+    if (raw.size() >= 3 && raw[0] == '_' && raw[1] == '_' && raw[2] == '_') {
+      return rename_tmp(raw);
+    }
+    return intern(make_inlined_name(active_tag_, raw));
+  }
   auto current_type() const { return lnast->get_type(current_nid); }
+
+  // Un-renamed name of the current node — for reading a func_call's callee
+  // name (a function identifier, not a variable to rename) even inside an
+  // active inline frame.
+  std::string_view current_raw_text() const { return lnast->get_name(current_nid); }
 
   // Returns the Lnast_nid of the read cursor. Used by passes that need a
   // stable identity for the current node (e.g. for cross-pass cassert
@@ -169,7 +193,8 @@ public:
   Lnast_node current_node() const {
     const auto type = lnast->get_type(current_nid);
     if (Lnast_ntype::is_ref(type)) {
-      return Lnast_node::create_ref(lnast->get_name(current_nid));
+      // current_text() applies the inline-frame rename for refs.
+      return Lnast_node::create_ref(current_text());
     }
     if (Lnast_ntype::is_const(type)) {
       return Lnast_node::create_const(lnast->get_name(current_nid));
@@ -198,6 +223,54 @@ public:
     while (nid_stack.size() > s.depth) {
       nid_stack.pop();
     }
+  }
+
+  // ── Inline source frames (1i) ───────────────────────────────────────────
+  // push_source swaps the active read tree to `callee` (a body that lives in
+  // some other Lnast, e.g. a function_registry entry) with a fresh cursor at
+  // its root, and activates a per-call-site rename `tag` + `salt`. The caller
+  // tree/cursor/tag are saved and restored by pop_source. The callee body is
+  // read in place — never copied (see 1i in TODO_livehd.md).
+  void push_source(const std::shared_ptr<Lnast>& callee, std::string tag, uint32_t salt) {
+    frames_.push_back(Source_frame{lnast, current_nid, std::move(nid_stack), std::move(active_tag_), active_salt_});
+    lnast       = callee;
+    nid_stack   = std::stack<Lnast_nid>{};
+    current_nid = lnast->get_root();
+    active_tag_  = std::move(tag);
+    active_salt_ = salt;
+  }
+  void pop_source() {
+    I(!frames_.empty());
+    auto& f      = frames_.back();
+    lnast        = std::move(f.tree);
+    current_nid  = f.saved_cur;
+    nid_stack    = std::move(f.saved_stack);
+    active_tag_  = std::move(f.tag);
+    active_salt_ = f.salt;
+    frames_.pop_back();
+  }
+  bool        in_inline_frame() const { return !frames_.empty(); }
+  std::size_t inline_depth() const { return frames_.size(); }
+  std::string_view active_tag() const { return active_tag_; }
+
+  // Scope identity for nid-keyed pass state (constprop block scopes). Plain
+  // class_index collides across the caller/callee trees during a source
+  // swap; mixing the frame salt into the high bits keeps frames distinct.
+  // salt 0 (no active frame) reproduces the bare class_index.
+  uint64_t current_scope_uid() const {
+    const uint64_t ci = static_cast<uint64_t>(current_nid.get_class_index().value);
+    return (static_cast<uint64_t>(active_salt_) << 40) ^ ci;
+  }
+
+  // Builds the inlined name for `raw` under `tag` (refs only). Uniform
+  // `<tag><raw>` prefix — a plain [A-Za-z0-9_] identifier that lnastfmt
+  // accepts (the `___N` tmp form requires a pure-digit suffix, so a
+  // tmp-preserving scheme like `___<tag>N` would be rejected). Exposed
+  // static so the runner can synthesize prologue/epilogue binding names
+  // that match what current_text() emits for the body. Inlined names are
+  // therefore non-tmps; DCE-of-inlined-temporaries is a 1i follow-up.
+  static std::string make_inlined_name(std::string_view tag, std::string_view raw) {
+    return std::string(tag) + std::string(raw);
   }
 
   // True iff the read cursor has at least one child. Does not move the
@@ -249,10 +322,53 @@ public:
   }
 
 protected:
-  const std::shared_ptr<Lnast>& lnast;
-  std::stack<Lnast_nid>         nid_stack;
-  Lnast_nid                     current_nid;
-  Lnast_writer                  wr;
+  // Owned (was a const ref) so an inline frame can swap the active read tree
+  // to a callee body and restore the caller afterward (1i). Holding a
+  // shared_ptr copy is one refcount bump at construction — negligible.
+  std::shared_ptr<Lnast> lnast;
+  std::stack<Lnast_nid>  nid_stack;
+  Lnast_nid              current_nid;
+  Lnast_writer           wr;
+
+  // Saved caller state for one level of inline-source nesting.
+  struct Source_frame {
+    std::shared_ptr<Lnast> tree;
+    Lnast_nid              saved_cur;
+    std::stack<Lnast_nid>  saved_stack;
+    std::string            tag;
+    uint32_t               salt;
+  };
+  std::vector<Source_frame> frames_;
+  std::string               active_tag_;
+  uint32_t                  active_salt_{0};
+
+  // Stable storage for renamed names so current_text()'s string_view stays
+  // valid for the manager's lifetime. std::unordered_set is node-based, so
+  // element addresses stay stable across rehash and the view never dangles.
+  mutable std::unordered_set<std::string> intern_pool_;
+
+  std::string_view intern(std::string&& s) const {
+    auto it = intern_pool_.insert(std::move(s)).first;
+    return std::string_view(*it);
+  }
+
+  // Per-(frame, original-tmp) → fresh `___<N>` mapping, consistent within a
+  // frame so repeated reads of the same callee tmp resolve identically. The
+  // base is high to avoid colliding with caller tmps (which are small).
+  mutable std::unordered_map<std::string, std::string> tmp_remap_;
+  mutable uint32_t                                      tmp_counter_{0};
+  static constexpr uint32_t                            kInlineTmpBase = 900000;
+
+  std::string_view rename_tmp(std::string_view raw) const {
+    std::string key = std::to_string(active_salt_) + ":" + std::string(raw);
+    auto        it  = tmp_remap_.find(key);
+    if (it != tmp_remap_.end()) {
+      return std::string_view(it->second);
+    }
+    std::string fresh = "___" + std::to_string(kInlineTmpBase + (++tmp_counter_));
+    auto        ins   = tmp_remap_.emplace(std::move(key), std::move(fresh)).first;
+    return std::string_view(ins->second);
+  }
 };
 
 }  // namespace upass

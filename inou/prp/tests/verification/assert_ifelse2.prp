@@ -1,9 +1,13 @@
 /*
 :name: assert_ifelse2
 :type: parsing lnast comptime
-:verifier_pass: 3
+:verifier_pass: 4
 :verifier_fail: 0
 */
+
+// Count note (1i): +1 vs the old constprop evaluator — an inlined comb's
+// internal cassert now counts per call-site instantiation (runner emits the
+// body as real IR) rather than being deduped to once-per-source.
 
 comb pick_max(a:u32, b:u32) -> (x:u32) {
   cassert(a != b)

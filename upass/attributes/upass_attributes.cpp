@@ -529,8 +529,9 @@ void uPass_attributes::process_if() {
     const auto t = get_raw_ntype();
     if (Lnast_ntype::is_stmts(t)) {
       // This stmts is an arm body (then/else/elif). Record the most-recent
-      // cond's refs against this stmts nid.
-      const auto  nid_key = static_cast<uint64_t>(lm->get_current_nid().get_class_index().value);
+      // cond's refs against this stmts nid (1i: salt-qualified so callee
+      // arm bodies don't alias caller nids during a source-swap).
+      const auto  nid_key = lm->current_scope_uid();
       Pending_arm arm;
       arm.cond_refs = running_cond_refs;  // empty for bare-else stmts
       pending_arms.emplace(nid_key, std::move(arm));
@@ -552,7 +553,7 @@ void uPass_attributes::process_if() {
 }
 
 void uPass_attributes::process_stmts() {
-  const auto nid_key = static_cast<uint64_t>(lm->get_current_nid().get_class_index().value);
+  const auto nid_key = lm->current_scope_uid();
   auto       it      = pending_arms.find(nid_key);
   if (it == pending_arms.end()) {
     return;
@@ -572,7 +573,7 @@ void uPass_attributes::process_stmts() {
 }
 
 void uPass_attributes::process_stmts_post() {
-  const auto nid_key = static_cast<uint64_t>(lm->get_current_nid().get_class_index().value);
+  const auto nid_key = lm->current_scope_uid();
   if (active_arm_stack.empty() || active_arm_stack.back() != nid_key) {
     return;  // not an arm stmts
   }

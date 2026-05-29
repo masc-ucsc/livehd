@@ -90,6 +90,9 @@ public:
   void process_stmts_pre_pop() override { flush_all(); }
   void notify_uncertain_arm_begin() override { flush_all(); }
   void notify_uncertain_arm_end() override { flush_all(); }
+  // 1i: flush parked writes before an inline source-swap so their src nids
+  // are still relative to the active read tree (see uPass::flush_deferred).
+  void flush_deferred() override { flush_all(); }
 
   // Cassert reads its operand and is treated as a barrier — flush so the
   // operand reflects whatever value the parked producer would have emitted.

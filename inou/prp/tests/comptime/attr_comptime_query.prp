@@ -1,9 +1,13 @@
 /*
 :name: attr_comptime_query
 :type: comptime
-:verifier_pass: 10
+:verifier_pass: 11
 :verifier_fail: 0
 */
+
+// Count note (1i): +1 vs the old constprop evaluator — an inlined comb's
+// internal cassert is now counted per call-site instantiation (the runner
+// emits the body as real IR) instead of being deduped to once-per-source.
 
 // Corner cases for `.[comptime]` / `::[comptime]` (entry 1u). Distinct from
 // phase2_attr_comptime.prp which only covers the always-true case; here we

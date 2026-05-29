@@ -346,6 +346,340 @@ void uPass_runner::process_verbatim(Pass_method fn) {
   emit_op_with_fold(/*fold_all=*/false);
 }
 
+// ── 1i comb-call inliner ──────────────────────────────────────────────────────
+
+void uPass_runner::set_function_registry(const std::vector<std::shared_ptr<Lnast>>& lnasts) {
+  function_registry.clear();
+  for (const auto& ln : lnasts) {
+    if (ln) {
+      function_registry.emplace(std::string(ln->get_top_module_name()), ln);
+    }
+  }
+
+  // Build the call graph and mark callees that can reach themselves (direct or
+  // mutual recursion). 1i bails those to the evaluator, which fully unrolls
+  // comptime-bounded recursion; runner-side fuel-bounded recursion is Phase D.
+  recursive_callees_.clear();
+  absl::flat_hash_map<std::string, std::vector<std::string>> edges;
+  for (const auto& [name, ln] : function_registry) {
+    for (const auto& nid : ln->depth_preorder(ln->get_root())) {
+      if (nid.is_invalid() || ln->get_type(nid) != Lnast_ntype::Lnast_ntype_func_call) {
+        continue;
+      }
+      auto c0 = ln->get_first_child(nid);
+      if (!c0.is_valid()) {
+        continue;
+      }
+      auto c1 = ln->get_sibling_next(c0);  // callee-name child
+      if (!c1.is_valid() || ln->get_type(c1) != Lnast_ntype::Lnast_ntype_ref) {
+        continue;
+      }
+      if (auto tgt = lookup_callee(ln->get_name(c1))) {
+        edges[name].emplace_back(tgt->get_top_module_name());
+      }
+    }
+  }
+  for (const auto& [name, _] : function_registry) {
+    absl::flat_hash_set<std::string> seen;
+    std::vector<std::string>         stack;
+    if (auto it = edges.find(name); it != edges.end()) {
+      stack = it->second;
+    }
+    while (!stack.empty()) {
+      auto cur = std::move(stack.back());
+      stack.pop_back();
+      if (cur == name) {
+        recursive_callees_.insert(name);
+        break;
+      }
+      if (!seen.insert(cur).second) {
+        continue;
+      }
+      if (auto it = edges.find(cur); it != edges.end()) {
+        stack.insert(stack.end(), it->second.begin(), it->second.end());
+      }
+    }
+  }
+
+  // Mark which callees the runner can fully splice today (everything else is
+  // routed to the evaluator). Phase C supports: a real signature, exactly one
+  // output written by name in the body, non-recursive, and no positional
+  // placeholder params (`_`, `_0`…) / implicit returns. Multi-output, method
+  // dispatch, closures, and comptime-attr queries land in later phases.
+  auto is_placeholder = [](std::string_view n) {
+    return n == "_" || (n.size() >= 2 && n[0] == '_' && n[1] >= '0' && n[1] <= '9');
+  };
+  inlinable_callees_.clear();
+  for (const auto& [name, ln] : function_registry) {
+    const auto& io = ln->io_meta();
+    if (io.empty() || io.outputs.size() != 1 || recursive_callees_.contains(name)) {
+      continue;
+    }
+    absl::flat_hash_set<std::string> defined;
+    bool                             has_placeholder = false;
+    for (const auto& nid : ln->depth_preorder(ln->get_root())) {
+      if (nid.is_invalid()) {
+        continue;
+      }
+      if (ln->get_type(nid) == Lnast_ntype::Lnast_ntype_ref && is_placeholder(ln->get_name(nid))) {
+        has_placeholder = true;
+      }
+      auto fc = ln->get_first_child(nid);
+      if (fc.is_valid() && ln->get_type(fc) == Lnast_ntype::Lnast_ntype_ref) {
+        defined.insert(std::string(ln->get_name(fc)));
+      }
+    }
+    if (!has_placeholder && defined.contains(io.outputs[0].name)) {
+      inlinable_callees_.insert(name);
+    }
+  }
+}
+
+std::shared_ptr<Lnast> uPass_runner::lookup_callee(std::string_view name) const {
+  auto it = function_registry.find(std::string(name));
+  if (it != function_registry.end()) {
+    return it->second;
+  }
+  // Unqualified callee: accept a unique "<module>.<name>" suffix match.
+  const std::string      suffix = "." + std::string(name);
+  std::shared_ptr<Lnast> found;
+  int                    matches = 0;
+  for (const auto& [k, v] : function_registry) {
+    if (k.size() > suffix.size() && k.compare(k.size() - suffix.size(), suffix.size(), suffix) == 0) {
+      found = v;
+      ++matches;
+    }
+  }
+  return matches == 1 ? found : nullptr;
+}
+
+void uPass_runner::flush_deferred_emits() { dispatch_to_passes(&upass::uPass::flush_deferred); }
+
+void uPass_runner::emit_inline_binding(const std::string& lhs, const Lnast_node& rhs) {
+  if (!scratch_forest_) {
+    scratch_forest_ = hhds::Forest::create();
+  }
+  auto body = scratch_forest_->create_tree_temp("inl-bind");
+  auto s    = std::make_shared<Lnast>(body, "inl-bind");
+  auto root = s->set_root(Lnast_ntype::create_assign());
+  s->add_child(root, Lnast_node::create_ref(lhs));
+  s->add_child(root, rhs);
+  flush_deferred_emits();     // flush outer-tree parked writes before the swap
+  lm->push_source(s, "", 0);  // literal names; no rename for the binding
+  process_lnast();            // cursor at assign root → A_OP(assign): dispatch + emit
+  flush_deferred_emits();     // flush scratch-tree parked writes before swap-out
+  lm->pop_source();
+}
+
+void uPass_runner::emit_inline_typespec(const std::string& name, int bits, bool is_signed) {
+  if (bits <= 0) {
+    return;  // unknown width — nothing to declare
+  }
+  if (!scratch_forest_) {
+    scratch_forest_ = hhds::Forest::create();
+  }
+  auto body = scratch_forest_->create_tree_temp("inl-type");
+  auto s    = std::make_shared<Lnast>(body, "inl-type");
+  auto root = s->set_root(Lnast_ntype::create_type_spec());
+  s->add_child(root, Lnast_node::create_ref(name));
+  auto pt = s->add_child(root, is_signed ? Lnast_ntype::create_prim_type_sint() : Lnast_ntype::create_prim_type_uint());
+  s->add_child(pt, Lnast_node::create_const(std::to_string(bits)));
+  flush_deferred_emits();
+  lm->push_source(s, "", 0);
+  process_lnast();  // cursor at type_spec root → C_OP(type_spec): dispatch + emit
+  flush_deferred_emits();
+  lm->pop_source();
+}
+
+bool uPass_runner::try_inline_func_call() {
+  // Cursor at the func_call node. Layout: [dst(ref), callee(ref), actual...].
+  if (!lm->has_child()) {
+    return false;
+  }
+
+  // ── Gather the call shape without disturbing the outer cursor ─────────────
+  const auto saved = lm->save_cursor();
+
+  lm->move_to_child();  // dst
+  if (lm->get_raw_ntype() != Lnast_ntype::Lnast_ntype_ref) {
+    lm->restore_cursor(saved);
+    return false;
+  }
+  std::string dst_name(lm->current_text());  // dst lives in the caller/frame scope
+
+  if (!lm->move_to_sibling() || lm->get_raw_ntype() != Lnast_ntype::Lnast_ntype_ref) {
+    lm->restore_cursor(saved);
+    return false;
+  }
+  const std::string callee_name(lm->current_raw_text());  // function id — never renamed
+
+  auto callee = lookup_callee(callee_name);
+  if (!callee) {
+    lm->restore_cursor(saved);
+    return false;  // not a known comb body → typecast / cell-op / marker path
+  }
+  // Single gate: only splice callees the runner fully supports today
+  // (precomputed in set_function_registry). Everything else — recursion,
+  // multi-output, placeholders/implicit-return, no-signature — routes to the
+  // evaluator. The active-callee scan is a runtime recursion backstop.
+  if (!inlinable_callees_.contains(std::string(callee->get_top_module_name()))) {
+    lm->restore_cursor(saved);
+    return false;
+  }
+  for (const auto* c : active_inline_callees_) {
+    if (c == callee.get()) {
+      lm->restore_cursor(saved);
+      return false;
+    }
+  }
+
+  struct Actual {
+    bool        is_named{false};
+    std::string key;
+    Lnast_node  node{Lnast_node::create_invalid()};
+  };
+  // A ref actual whose raw name is itself a registry function is a
+  // higher-order / closure argument — bail to the evaluator (Phase F).
+  auto is_func_actual = [&]() { return Lnast_ntype::is_ref(lm->get_raw_ntype()) && lookup_callee(lm->current_raw_text()) != nullptr; };
+
+  std::vector<Actual> actuals;
+  bool                shape_ok = true;
+  while (lm->move_to_sibling()) {
+    const auto t = lm->get_raw_ntype();
+    if (Lnast_ntype::is_ref(t) || Lnast_ntype::is_const(t)) {
+      if (is_func_actual()) {
+        shape_ok = false;
+        break;
+      }
+      actuals.push_back(Actual{.is_named = false, .key = {}, .node = lm->current_node()});
+    } else if (Lnast_ntype::is_assign(t)) {
+      Actual     a;
+      a.is_named = true;
+      const auto here = lm->save_cursor();
+      if (!lm->move_to_child()) {
+        shape_ok = false;
+        lm->restore_cursor(here);
+        break;
+      }
+      a.key = std::string(lm->current_raw_text());  // param name — not renamed
+      if (!lm->move_to_sibling()) {
+        shape_ok = false;
+        lm->restore_cursor(here);
+        break;
+      }
+      if (is_func_actual()) {
+        shape_ok = false;
+        lm->restore_cursor(here);
+        break;
+      }
+      a.node = lm->current_node();
+      lm->restore_cursor(here);
+      actuals.push_back(std::move(a));
+    } else {
+      shape_ok = false;
+      break;
+    }
+  }
+  lm->restore_cursor(saved);  // back on the func_call node
+  if (!shape_ok) {
+    return false;
+  }
+
+  const auto& io = callee->io_meta();
+  if (io.empty()) {
+    return false;  // no signature (e.g. a void/top module) → not an inline target
+  }
+  if (io.outputs.size() > 1) {
+    return false;  // multi-output bundle splat is Phase F
+  }
+
+  // ── Match actuals → params (positional + named) ──────────────────────────
+  const std::size_t       nparams = io.inputs.size();
+  std::vector<Lnast_node> param_val(nparams, Lnast_node::create_invalid());
+  std::vector<bool>       param_set(nparams, false);
+  auto                    param_index = [&](std::string_view k) -> std::size_t {
+    for (std::size_t i = 0; i < nparams; ++i) {
+      if (io.inputs[i].name == k) {
+        return i;
+      }
+    }
+    return nparams;
+  };
+  std::size_t pos = 0;
+  for (auto& a : actuals) {
+    if (a.is_named) {
+      const auto idx = param_index(a.key);
+      if (idx >= nparams) {
+        return false;  // unknown named param
+      }
+      param_val[idx] = a.node;
+      param_set[idx] = true;
+    } else {
+      while (pos < nparams && param_set[pos]) {
+        ++pos;
+      }
+      if (pos >= nparams) {
+        return false;  // too many positional actuals
+      }
+      param_val[pos] = a.node;
+      param_set[pos] = true;
+      ++pos;
+    }
+  }
+
+  // ── Splice ───────────────────────────────────────────────────────────────
+  const uint32_t    salt = ++inline_seq_;
+  const std::string tag  = std::format("inl{}_", salt);
+
+  // Prologue: declare param + output widths (so `<tag>x.[bits]` folds), then
+  // bind param values. Ref-param actuals are remembered for write-back.
+  std::vector<std::pair<std::string, Lnast_node>> writebacks;
+  for (std::size_t i = 0; i < nparams; ++i) {
+    const auto& e     = io.inputs[i];
+    const auto  pname = upass::Lnast_manager::make_inlined_name(tag, e.name);
+    emit_inline_typespec(pname, e.bits, e.is_signed);
+    if (param_set[i]) {
+      emit_inline_binding(pname, param_val[i]);
+      if (e.is_ref && param_val[i].is_ref()) {
+        writebacks.emplace_back(std::string(param_val[i].get_name()), Lnast_node::create_ref(pname));
+      }
+    }
+  }
+  for (const auto& o : io.outputs) {
+    emit_inline_typespec(upass::Lnast_manager::make_inlined_name(tag, o.name), o.bits, o.is_signed);
+  }
+
+  // Body: walk the callee stmts in place (names rewritten by the frame tag)
+  // straight into the caller's current staging stmts. pop_source resets the
+  // cursor regardless of how the body walk left it.
+  active_inline_callees_.push_back(callee.get());
+  flush_deferred_emits();  // flush caller-tree parked writes before entering
+  lm->push_source(callee, tag, salt);
+  if (lm->move_to_child()) {
+    if (lm->get_raw_ntype() == Lnast_ntype::Lnast_ntype_io) {
+      lm->move_to_sibling();
+    }
+    if (lm->get_raw_ntype() == Lnast_ntype::Lnast_ntype_stmts && lm->move_to_child()) {
+      do {
+        process_lnast();
+      } while (lm->move_to_sibling());
+    }
+  }
+  flush_deferred_emits();  // flush callee-tree parked writes before leaving
+  lm->pop_source();
+  active_inline_callees_.pop_back();
+
+  // Epilogue: dst = <tag>output, then ref-param write-backs.
+  if (io.outputs.size() == 1) {
+    emit_inline_binding(dst_name, Lnast_node::create_ref(upass::Lnast_manager::make_inlined_name(tag, io.outputs[0].name)));
+  }
+  for (auto& [caller_var, src] : writebacks) {
+    emit_inline_binding(caller_var, src);
+  }
+
+  return true;
+}
+
 // ── Top-level run loop ────────────────────────────────────────────────────────
 
 void uPass_runner::run(std::size_t max_iters) {
@@ -767,10 +1101,16 @@ void uPass_runner::process_lnast() {
     A_OP(ge)
     A_OP(is)
 
-    // Function Call — treated like arithmetic so constprop can fold the
-    // built-in typecast calls (int/uint/string/uNN/sNN); anything constprop
-    // declines to handle stays un-folded and the statement is emitted.
-    A_OP(func_call)
+    // Function Call — 1i: if the callee is a comb body in the registry and
+    // the call shape is supported, virtually splice it (prologue / push_source
+    // body walk / epilogue). Otherwise fall back to the drop-candidate path so
+    // constprop can fold built-in typecasts (int/uint/uNN/sNN) and cell-ops;
+    // anything it declines stays un-folded and the statement is emitted.
+    case Ntype::Lnast_ntype_func_call:
+      if (!try_inline_func_call()) {
+        process_drop_candidate(&upass::uPass::process_func_call, /*fold_all=*/false);
+      }
+      break;
     // does/in/has/case fold to a known boolean (or nil) → drop-candidate.
     A_OP(func_does)
     A_OP(func_equals)

@@ -151,6 +151,14 @@ public:
   // tallies against expected counts).
   virtual void end_run() {}
 
+  // 1i — flush any deferred/parked emissions whose source nid is relative to
+  // the *currently active* read tree. The runner calls this immediately
+  // before every inline source-swap (push_source / pop_source) so a pass
+  // (e.g. the coalescer, which replays parked writes via emit_at_fn) never
+  // tries to re-read a nid against a tree that is no longer the active
+  // source. Default no-op for passes that don't defer.
+  virtual void flush_deferred() {}
+
   // Step J — dest-walk finisher hook. Invoked by the runner after the
   // source walk finishes but before end_run(), with a pointer to the
   // freshly-built staging (dest) LNAST. Passes that want to act on the

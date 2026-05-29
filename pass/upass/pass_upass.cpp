@@ -325,6 +325,7 @@ void Pass_upass::work(Eprp_var& var) {
     }
     auto runner = uPass_runner(lm, order, up.pass_options);
     runner.set_is_function_body(is_function_body);
+    runner.set_function_registry(var.lnasts);  // 1i: comb bodies to inline from
     if (runner.has_configuration_error()) {
       fail_upass_runtime(std::format("pass.upass invalid pass configuration: {}", runner.get_configuration_error()));
     }

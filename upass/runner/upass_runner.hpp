@@ -12,6 +12,7 @@
 #include <vector>
 
 #include "absl/container/flat_hash_map.h"
+#include "absl/container/flat_hash_set.h"
 
 #include "const.hpp"
 #include "lnast.hpp"
@@ -34,6 +35,14 @@ public:
   // and would look unreferenced from inside-the-body alone). pass_upass
   // sets this flag for every LNAST past the original entry-point count.
   void set_is_function_body(bool v) { is_function_body_ = v; }
+
+  // 1i — populate the comb-body registry the runner inlines from. Keyed by
+  // the body's top-module name (e.g. "pp3.count_bits"). pass_upass passes
+  // the same var.lnasts it hands constprop's set_function_registry; the
+  // runner picks the function bodies (everything past the entry points) and
+  // the top modules alike — only names that actually appear as a func_call
+  // callee are ever inlined.
+  void set_function_registry(const std::vector<std::shared_ptr<Lnast>>& lnasts);
 
   // Hands the freshly-built staging LNAST to the caller; after this the
   // runner no longer owns it. Call once per run(), after run() returns.
@@ -127,6 +136,56 @@ protected:
   void process_stmts() override;
   void process_if() override;
   void process_lnast();
+
+  // ── 1i comb-call inliner ────────────────────────────────────────────────
+  // Called from process_lnast's func_call case. If the callee resolves to a
+  // comb body in function_registry and the call shape is supported, performs
+  // a virtual splice — emit prologue param-binding assigns, push_source into
+  // the callee body and walk it (so every pass folds/observes and the
+  // renamed body is emitted into staging), then emit the epilogue (output +
+  // ref-param writeback) — and returns true. Returns false to fall back to
+  // the normal func_call emit/dispatch path (typecasts, cell-ops, markers,
+  // or call shapes 1i does not yet handle). The read cursor is left on the
+  // func_call node on every path. See 1i in TODO_livehd.md.
+  bool try_inline_func_call();
+
+  // Resolves a (possibly unqualified) callee name to a registry body. Tries
+  // the bare name, then the unique "<module>.<name>" suffix match.
+  std::shared_ptr<Lnast> lookup_callee(std::string_view name) const;
+
+  // Dispatches uPass::flush_deferred to every pass — used by the inliner to
+  // drain deferred/parked emits (coalescer) before each source-swap so their
+  // src nids stay valid against the active read tree.
+  void flush_deferred_emits();
+
+  // Emits one binding statement `lhs = rhs` by building a one-assign scratch
+  // tree and running it through the normal walk (so constprop records the
+  // value and the assign is emitted/folded into the caller's staging).
+  void emit_inline_binding(const std::string& lhs, const Lnast_node& rhs);
+
+  // Emits `lhs : uN/sN` (a type_spec) the same way, so the attributes pass
+  // records the inlined param/output's declared width — that's what lets
+  // `<tag>param.[bits]` fold during the body walk (the callee's io widths
+  // are otherwise lost once the signature is gone). No-op when bits<=0.
+  void emit_inline_typespec(const std::string& name, int bits, bool is_signed);
+
+  absl::flat_hash_map<std::string, std::shared_ptr<Lnast>> &runner_function_registry() { return function_registry; }
+
+  // Monotonic per-run counter giving each inline call site a unique rename
+  // tag/salt. Cross-pass idempotence is a documented 1i follow-up.
+  uint32_t                      inline_seq_{0};
+  std::shared_ptr<hhds::Forest> scratch_forest_;
+  // Callee bodies currently being spliced (innermost last). Re-entering one
+  // means recursion — bailed to the evaluator until Phase D adds fuel.
+  std::vector<const Lnast*> active_inline_callees_;
+  // Registry keys (qualified names) whose bodies can reach themselves
+  // (direct/mutual recursion). Bailed to the evaluator; computed in
+  // set_function_registry.
+  absl::flat_hash_set<std::string> recursive_callees_;
+  // Registry keys the runner can fully splice today (single output written by
+  // name, non-recursive, no placeholders). All other callees route to the
+  // evaluator. Computed in set_function_registry.
+  absl::flat_hash_set<std::string> inlinable_callees_;
 
   // Post-walk DCE: scans the freshly-built staging tree, drops definition
   // statements (assign / tuple_add / attr_set / etc.) whose dst name is

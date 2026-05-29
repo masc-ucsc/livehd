@@ -186,6 +186,124 @@ cross-file dependencies stay visible.
   body would produce, and that multi-call-site renaming stays
   collision-free.
 
+  ### Concrete design (grounded in `upass/runner/`, 2026-05-28)
+
+  **Locked decisions** (this session): **(1) full runner replacement** —
+  inlining moves out of constprop into the runner and
+  `evaluate_callee_inline` is deleted; **(2) pure emit+fold** — always
+  emit the inlined body and let constprop fold + `process_if`
+  dead-branch-prune; recursion terminates when a folded-false cond
+  prunes the recursive arm; a node-emit **fuel budget** is the safety
+  valve (exceed → emit the `func_call` verbatim as runtime + warn).
+
+  **Architecture facts that shape it.** The runner
+  (`upass/runner/upass_runner.cpp`) is a *single linear walk* where all
+  passes plug into `dispatch_to_passes`; it reads the source via an
+  `Lnast_manager` cursor (`upass/core/lnast_manager.hpp`) and emits a
+  staging tree with operand folding (`emit_op_with_fold`). It already
+  does **dead-branch elimination** in `process_if` (lines 888-1095) —
+  the recursion-termination primitive. Every main-walk pass reads names
+  *only* via the `lm` cursor (verified: 0 raw-`lnast` name reads outside
+  the to-be-deleted evaluator), so a rename applied inside
+  `Lnast_manager` is seen uniformly by every pass's symbol table **and**
+  the emit path — no per-pass edits. The runner already reserves an
+  (empty) `function_registry` field for exactly this (`upass_runner.hpp:74`).
+
+  **Core mechanism — source-swap + uniform rename (no deep copy).**
+  The `Lnast_manager` gains a frame stack. At an inlinable `func_call`
+  the runner: (a) reads actuals from the call node; (b) emits a
+  *prologue* of binding assigns `<tag>param = actual` (synthesized in a
+  scratch tree, processed through the normal walk so constprop folds
+  them and records `<tag>param` in its ST); (c) `push_source(callee,
+  tag)` — the manager swaps its active source tree to the callee body
+  and activates a per-call-site rename tag; (d) walks the callee `stmts`
+  via the ordinary `process_lnast`, so all passes fold/observe and the
+  renamed, folded body is emitted into the caller's staging; (e)
+  `pop_source`; (f) emits an *epilogue* mapping `dst = <tag>output` and
+  `caller_var = <tag>refparam` (scratch, processed normally). The
+  callee body is **read in place** — never copied.
+
+  **Rename scheme.** Applies to **ref** nodes only (variables), never
+  `const` (literals / attr-keys / the `comb` kind). Preserve tmp-ness:
+  `x → <tag>x`, but `___N → ___<tag>N` so `Lnast::is_tmp` /
+  `anchor_for`'s `___` special-case still hold. Per-call-site `tag` is
+  derived from the call-site source nid (stable across the optional 2nd
+  pass → idempotent). Renamed names are interned in a manager-owned pool
+  so `current_text()`'s `string_view` stays valid.
+
+  **Scope-key fix.** constprop keys `block_scope` by raw
+  `lm->get_current_nid().get_class_index()` (`upass_constprop.cpp:788`);
+  across the callee tree those indices collide with caller indices. Add
+  `Lnast_manager::current_scope_uid()` = `(frame_salt<<40)|class_index`
+  and have constprop (and any other nid-keyed pass) use it. Salt is 0
+  with no active frame → no behavior change off the inline path.
+
+  ### Phases (each keeps the suite green)
+
+  - **A — manager primitive.** `Lnast_manager`: `lnast` const-ref →
+    owned `shared_ptr`; add frame stack + `push_source/pop_source`,
+    tag-rename in `current_text()/current_node()`, intern pool,
+    `current_scope_uid()`. No caller pushes frames yet → no behavior
+    change. Add a focused unit test.
+  - **B — scope-key migration.** constprop `process_stmts` uses
+    `current_scope_uid()`; audit/migrate other nid-keyed passes. Still
+    inert (salt 0).
+  - **C — runner func_call splice (non-recursive).** Populate runner
+    `function_registry` (comb bodies). In `process_lnast` `func_call`
+    case: if callee ∈ comb registry → splice (prologue / push_source /
+    walk / pop / epilogue); else fall back to the existing `A_OP` path
+    (typecasts, cell-ops `__sum`, markers stay in constprop). Land
+    `pp3`/`forunrollbits` via the new path.
+  - **D — recursion + fuel.** Frame-stack cycle/depth guard + node-emit
+    fuel; exceed → verbatim runtime `func_call` + `log`. Lean on
+    `process_if` pruning for comptime-bounded recursion.
+  - **E — delete the evaluator.** Remove `try_eval_comb_call`,
+    `evaluate_callee_inline`, and the 2026-05-28 stopgap handlers.
+    `process_func_call` keeps only typecast/cell/marker folds.
+  - **F — setter-init / method-dispatch / closures / verifier.**
+    Route `maybe_fire_setter_init` (entry 1k) through the runner splice
+    (synthesize a `func_call` or a runner hook). Resolve `obj.method()`
+    to the qualified comb at the call site. Bind function-name actuals
+    (closures). Ensure inlined `cassert`s count once via the normal walk
+    (drop `mark_inlined_cassert_*` if redundant).
+  - **G — green + new tests.** Multi-call-site collision, recursion,
+    partial-fold (runtime body emits correct IR), parity vs hand-flatten.
+
+  **Status (2026-05-28): Phases A–C landed, zero net regression**
+  (`//inou/prp:all` = 109 pass / 18 fail, the same pre-existing baseline).
+  Implemented: `Lnast_manager` source-frame stack + uniform rename
+  (`push_source`/`pop_source`, user vars → `<tag>name`, tmps → fresh
+  `___<N>`, intern pool, `current_scope_uid`); constprop/attributes
+  block-scope keys on `current_scope_uid`; runner `try_inline_func_call`
+  (prologue type_spec+bind → body walk → epilogue); coalescer
+  `flush_deferred` before every source-swap (fixed a stale-nid crash);
+  recursion detection + precomputed `inlinable_callees_` gate. The
+  runner inlines the supported shape and **bails everything else to the
+  still-present evaluator** — so this is the foundation, not yet the full
+  replacement. Per-instantiation cassert counting was adopted (decision
+  this session); `scope2`/`attr_comptime_query`/`assert_ifelse2`
+  expectations bumped with a count-note.
+    - **D–G remain.** Deleting `evaluate_callee_inline` (E) needs the
+      runner to handle what it currently bails: multi-output bundle
+      splat, method dispatch via typename, closures/function-name
+      actuals, positional placeholders / implicit return, `.[comptime]`
+      folding in the main walk, recursion (D), and setter-init (F).
+    - **NOT a 1i bug:** `string_interpolation` crashes nondeterministically
+      (heap corruption at exit). Bisected: clean HEAD is fine; the
+      uncommitted working-tree WIP crashes 3/12 *with the 1i mechanism
+      fully removed*. Pre-existing latent heap bug in the WIP
+      (constprop/attributes/bitwidth) — run under ASan to locate.
+
+  **Open risks to watch.** (1) `current_text()` lifetime under rename
+  (intern pool); (2) other passes (attributes/bitwidth) that key state
+  by nid need the scope-uid too; (3) DCE (`dead_code_eliminate_staging`)
+  must still recognize renamed tmps (`___<tag>N`); (4) func_extract
+  still spawns standalone callee bodies — verifier must not double-count
+  casserts between the standalone body and the inlined copy
+  (`verifier_include_funcs`); (5) the `runner_symbol_table` (Step C) is
+  idle today — decide whether 1i finally activates it or stays on
+  constprop's private `st`.
+
 ## Group 1-complex — foundation, larger scope
 
 Tasks that are independent of other Group 1/2 work but are large enough

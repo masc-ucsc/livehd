@@ -785,7 +785,10 @@ void uPass_constprop::process_if() {
 // outermost stmts of every function body is itself wrapped here too;
 // the function_scope established in the constructor remains the parent.
 void uPass_constprop::process_stmts() {
-  st.block_scope(static_cast<uint64_t>(lm->get_current_nid().get_class_index().value));
+  // current_scope_uid() folds in the inline-frame salt so a callee body's
+  // block-scope keys don't collide with the caller's nids during a 1i
+  // source-swap (salt 0 with no active frame → plain class_index).
+  st.block_scope(lm->current_scope_uid());
   // The runner sets next_block_uncertain via notify_uncertain_arm_begin
   // immediately before descending into an if-arm whose cond didn't fold to
   // known-true/known-false. Mark the just-pushed scope so leave_scope can
