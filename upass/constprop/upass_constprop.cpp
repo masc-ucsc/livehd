@@ -224,6 +224,12 @@ void uPass_constprop::process_assign() {
   }
 
   move_to_parent();
+
+  // Entry 1k decorator-init: if this was the first assign to a typed var
+  // and the typename's bundle declares a `setter` field, fire the setter
+  // with the just-initialized bundle bound as `self`. setter_fired tracks
+  // first-vs-later assigns so plain `x = …` reassignments don't refire.
+  maybe_fire_setter_init(lhs_text);
 }
 
 template <typename F>
@@ -679,6 +685,15 @@ void uPass_constprop::process_eq_ne_impl() {
     // unknown inverted is still a 1-bit unknown.
     if (a.scalar.same_repr(b.scalar)) {
       result = *Dlop::create_bool(!Negate);
+    } else if (same_bits_ignore_type(a.scalar, b.scalar)) {
+      // Type-agnostic structural identity: a `(v != 0)` (Boolean
+      // unknown) compared against the literal `0sb?` (Integer unknown)
+      // is two values with the same bit pattern but differing Pyrope
+      // types. Constprop is type-agnostic; the typecheck pass flags
+      // illegal cross-type compares. Treat structurally identical bit
+      // patterns as known-equal regardless of type so `(v != 0) ==
+      // 0sb?` folds to true.
+      result = *Dlop::create_bool(!Negate);
     } else {
       // Defer to eq_op: types may differ (e.g. Bool vs Integer) but if the
       // bit patterns match it folds true. Constprop is type-agnostic — the
@@ -899,6 +914,90 @@ void uPass_constprop::process_attr_set() {
   if (!raw.empty()) {
     typename_of_var[var] = std::move(raw);
   }
+}
+
+bool uPass_constprop::maybe_fire_setter_init(std::string_view var) {
+  std::string var_s(var);
+  if (setter_fired.contains(var_s)) {
+    return false;
+  }
+  auto tn_it = typename_of_var.find(var_s);
+  if (tn_it == typename_of_var.end()) {
+    return false;
+  }
+  auto type_bundle = st.get_bundle(tn_it->second);
+  if (!type_bundle || !type_bundle->has_trivial("setter")) {
+    return false;
+  }
+  const auto& setter_val = type_bundle->get_trivial("setter");
+  if (setter_val.is_invalid() || !setter_val.is_string()) {
+    return false;
+  }
+  std::string setter_name = strip_pyrope_quotes(setter_val.to_pyrope());
+  if (setter_name.empty()) {
+    return false;
+  }
+  if (!function_registry.count(setter_name)) {
+    auto qn = std::string(lm->get_top_module_name()) + "." + setter_name;
+    if (!function_registry.count(qn)) {
+      return false;
+    }
+  }
+
+  // Build `self` actual from the current instance bundle. The merged init
+  // bundle (init fields merged onto type defaults) already lives at `var`
+  // after process_assign's shape-preserving merge ran.
+  auto cur_bundle = st.get_bundle(var_s);
+  if (!cur_bundle) {
+    return false;
+  }
+  Call_actual self_actual;
+  self_actual.is_named  = true;
+  self_actual.name      = "self";
+  self_actual.is_bundle = true;
+  self_actual.var_name  = var_s;
+  for (const auto& [k, e] : cur_bundle->non_attr_entries()) {
+    if (!e->trivial.is_invalid()) {
+      self_actual.bundle_value.emplace(k, e->trivial);
+    }
+  }
+
+  std::vector<Call_actual> actuals;
+  actuals.push_back(std::move(self_actual));
+
+  auto result = evaluate_callee_inline(setter_name, actuals, 0);
+  if (!result.has_value()) {
+    return false;
+  }
+
+  // Apply ref-param field writebacks targeting `var.field`. The inliner
+  // already routes `self.field = …` writes through ref_writeback_fields
+  // when the bound caller-side variable is `var`.
+  bool changed_any = false;
+  for (const auto& [path, val] : result->ref_writeback_fields) {
+    auto dot = path.find('.');
+    if (dot == std::string::npos) {
+      continue;
+    }
+    std::string base(path.substr(0, dot));
+    std::string field(path.substr(dot + 1));
+    if (base != var_s) {
+      continue;
+    }
+    auto b = st.get_bundle(base);
+    if (!b) {
+      b = std::make_shared<Bundle>(base);
+      st.set(base, b);
+    }
+    b->set(field, val);
+    changed_any = true;
+  }
+  if (changed_any) {
+    mark_changed();
+  }
+
+  setter_fired.insert(std::move(var_s));
+  return true;
 }
 
 void uPass_constprop::process_tuple_concat() {
@@ -1665,14 +1764,32 @@ bool uPass_constprop::try_eval_comb_call(std::string_view dst, std::string_view 
       return true;
     }
   }
-  auto        out_bundle = std::make_shared<Bundle>(std::string(dst));
+  auto out_bundle = std::make_shared<Bundle>(std::string(dst));
+  // Distinguish single-tuple-output (all keys share one top-level name —
+  // strip it so `pg = single_output_fn()` sees `pg.x`, not `pg.r.x`) from
+  // multi-output (`(foo, c) = dox(...)` where outputs are `foo.bar`,
+  // `foo.baz`, `c`). In the multi case the dotted keys carry the nesting
+  // that downstream `tuple_get out foo` resolves via Bundle::get_bundle.
+  std::string_view sole_prefix;
+  bool             uniform_prefix = true;
   for (const auto& [k, v] : result->outputs) {
-    // Strip a uniform leading `<output_name>.` so callers see `pg.x` rather
-    // than `pg.r.x` (the inliner exposes dotted leaves under the declared
-    // output name).
     auto dot = k.find('.');
-    if (dot != std::string::npos) {
-      out_bundle->set(k.substr(dot + 1), v);
+    std::string_view top = (dot == std::string::npos) ? std::string_view{k} : std::string_view{k.data(), dot};
+    if (sole_prefix.empty()) {
+      sole_prefix = top;
+    } else if (sole_prefix != top) {
+      uniform_prefix = false;
+      break;
+    }
+  }
+  for (const auto& [k, v] : result->outputs) {
+    if (uniform_prefix) {
+      auto dot = k.find('.');
+      if (dot != std::string::npos) {
+        out_bundle->set(k.substr(dot + 1), v);
+      } else {
+        out_bundle->set(k, v);
+      }
     } else {
       out_bundle->set(k, v);
     }
@@ -1709,6 +1826,10 @@ uPass_constprop::evaluate_callee_inline(std::string_view callee_name, const std:
   // Range entries (lo, hi) produced by `range` stmts; consumed by `get_mask`
   // for bit-slice ops like `b#[0..<4]` that appear in callee bodies.
   std::unordered_map<std::string, std::pair<Const, Const>> local_ranges;
+  // Declared width/signedness of a local introduced by a `type_spec` stmt
+  // (`mut acc:u32`). Drives `acc.[bits]`/`.[max]`/`.[min]` the same way
+  // io_meta drives the param/output case. {bits, is_signed}.
+  std::unordered_map<std::string, std::pair<int, bool>> local_decl_widths;
   // After binding, remembers which caller-side variable each ref param was
   // bound to so the post-fold write-back can find its destination. Keyed by
   // the formal param name (the local that the body mutates).
@@ -1768,6 +1889,23 @@ uPass_constprop::evaluate_callee_inline(std::string_view callee_name, const std:
       outputs.emplace_back(e.name);
     }
   }
+
+  // Declared width/signedness of a formal param or output, from io_meta. Drives
+  // the inliner-local `x.[bits]` / `.[max]` / `.[min]` fold: those queries read
+  // the *declared* type (e.g. `x:u6` → bits 6), not the bound value's bit count.
+  auto declared_io_entry = [&](std::string_view var) -> const Lnast_io_entry* {
+    for (const auto& e : io_meta.inputs) {
+      if (e.name == var) {
+        return &e;
+      }
+    }
+    for (const auto& e : io_meta.outputs) {
+      if (e.name == var) {
+        return &e;
+      }
+    }
+    return nullptr;
+  };
 
   // Phase 1 — partition stmts into body statements. After SSA the io
   // signature lives in io_meta (and a re-emitted io tree node), and the
@@ -1939,10 +2077,13 @@ uPass_constprop::evaluate_callee_inline(std::string_view callee_name, const std:
     }
     auto a_val = resolve_local(a_nid);
     auto b_val = resolve_local(b_nid);
-    if (!a_val.has_value() || a_val->is_invalid() || a_val->is_string() || !b_val.has_value() || b_val->is_invalid()
-        || b_val->is_string()) {
+    if (!a_val.has_value() || a_val->is_invalid() || !b_val.has_value() || b_val->is_invalid()) {
       return Eval_result::deferred;
     }
+    // Entry 1k: setter bodies often do `cassert(self.v == "")` (string
+    // equality), so eq/ne over strings must fold rather than defer.
+    // eq_op already compares bytes through base/extra; for safety on
+    // ordered compares (lt/le/gt/ge) the op() function is responsible.
     Const result = op(*a_val, *b_val);
     if (result.is_invalid()) {
       return Eval_result::deferred;
@@ -1953,6 +2094,13 @@ uPass_constprop::evaluate_callee_inline(std::string_view callee_name, const std:
 
   try_eval_stmt = [&](Lnast_nid stmt) -> Eval_result {
     const auto type = fn->get_type(stmt);
+
+    // A bare nested stmts block (e.g. an unrolled `for` body, or any explicit
+    // scope) evaluates as a sub-block over the shared local maps. Without this
+    // such a sibling aborts the whole inline (see forunrollbits.prp).
+    if (Lnast_ntype::is_stmts(type)) {
+      return try_eval_block(stmt);
+    }
 
     if (Lnast_ntype::is_assign(type)) {
       auto lhs = fn->get_child(stmt);
@@ -2131,10 +2279,40 @@ uPass_constprop::evaluate_callee_inline(std::string_view callee_name, const std:
               return Eval_result::processed;
             }
             auto v = resolve_local(val_nid);
-            if (!v.has_value() || v->is_invalid()) {
+            if (v.has_value() && !v->is_invalid()) {
+              local_values[lhs_name + "." + key] = *v;
+            } else if (Lnast_ntype::is_ref(fn->get_type(val_nid))) {
+              // Nested-bundle source: `___N = (inner=___3)` where ___3 is
+              // itself a previously-built bundle stored as dotted leaves
+              // (`___3.value`, `___3.tag`). resolve_local has no scalar for
+              // `___3`, but its dotted children carry the shape — copy them
+              // under the new prefix `lhs_name.key.<suffix>` so a downstream
+              // `assign payload ___N` reaches the deepest leaves.
+              std::string src(fn->get_name(val_nid));
+              std::string src_prefix = src + ".";
+              std::string dst_prefix = lhs_name + "." + key + ".";
+              bool        copied     = false;
+              for (const auto& [lk, lv] : local_values) {
+                if (lk.size() > src_prefix.size() && lk.compare(0, src_prefix.size(), src_prefix) == 0) {
+                  copied = true;
+                }
+              }
+              if (!copied) {
+                return Eval_result::deferred;
+              }
+              // Two-pass to avoid mutating local_values mid-iteration.
+              std::vector<std::pair<std::string, Const>> stage;
+              for (const auto& [lk, lv] : local_values) {
+                if (lk.size() > src_prefix.size() && lk.compare(0, src_prefix.size(), src_prefix) == 0) {
+                  stage.emplace_back(dst_prefix + lk.substr(src_prefix.size()), lv);
+                }
+              }
+              for (auto& [k2, v2] : stage) {
+                local_values[std::move(k2)] = std::move(v2);
+              }
+            } else {
               return Eval_result::deferred;
             }
-            local_values[lhs_name + "." + key] = *v;
           }
         }
       }
@@ -2205,12 +2383,72 @@ uPass_constprop::evaluate_callee_inline(std::string_view callee_name, const std:
             = has_val ? *Dlop::create_integer(1) : *Dlop::create_integer(0);
         return Eval_result::processed;
       }
-      // Non-comptime attrs: read from local_attrs only.
+      // Non-comptime attrs: an explicit attr_set inside the body wins.
       auto vit = local_attrs.find(var_name);
       if (vit != local_attrs.end()) {
         auto ait = vit->second.find(attr_name);
         if (ait != vit->second.end()) {
           local_values[std::string(fn->get_name(dst))] = ait->second;
+          return Eval_result::processed;
+        }
+      }
+      // Width queries (`x.[bits]`/`.[max]`/`.[min]`) on a typed formal param or
+      // output resolve from the declared type, not the bound value: `x:u6`
+      // yields bits=6 regardless of the actual `x`. Without this the attr_get
+      // never produces a value, so any stmt consuming it defers forever and the
+      // whole inline aborts (see forunrollbits.prp / pp3.prp).
+      if (attr_name == "bits" || attr_name == "max" || attr_name == "min") {
+        int  b      = 0;
+        bool is_sgn = false;
+        if (auto lit = local_decl_widths.find(var_name); lit != local_decl_widths.end()) {
+          b      = lit->second.first;
+          is_sgn = lit->second.second;
+        } else if (const Lnast_io_entry* ent = declared_io_entry(var_name); ent != nullptr) {
+          b      = ent->bits;
+          is_sgn = ent->is_signed;
+        }
+        if (b > 0) {
+          spool_ptr<Dlop> v;
+          if (attr_name == "bits") {
+            v = Dlop::create_integer(b);
+          } else if (attr_name == "max") {
+            // unsigned: 2^b - 1 (b ones); signed: 2^(b-1) - 1.
+            v = Dlop::get_mask_value(is_sgn ? b - 1 : b);
+          } else {  // min
+            // unsigned: 0; signed: -(2^(b-1)).
+            v = is_sgn ? Dlop::create_integer(0)->sub_op(*Dlop::get_mask_value(b - 1)->add_op(1))
+                       : Dlop::create_integer(0);
+          }
+          if (v && !v->is_invalid()) {
+            local_values[std::string(fn->get_name(dst))] = *v;
+          }
+        }
+      }
+      return Eval_result::processed;
+    }
+
+    if (Lnast_ntype::is_type_spec(type)) {
+      // Layout (prp2lnast::emit_type_spec): ref(target), prim_type_*[const width].
+      // A type annotation (`mut acc:u32`) declares width but produces no value;
+      // record the width so `acc.[bits]`/`.[max]`/`.[min]` fold, then treat as
+      // processed (aborting here would kill any inline of a function with a
+      // locally-typed variable — see forunrollbits.prp).
+      auto target = fn->get_child(stmt);
+      if (!target.is_invalid() && Lnast_ntype::is_ref(fn->get_type(target))) {
+        auto pt = fn->get_sibling_next(target);
+        if (!pt.is_invalid()) {
+          const auto ptt      = fn->get_type(pt);
+          const bool is_uint  = Lnast_ntype::is_prim_type_uint(ptt);
+          const bool is_sint  = Lnast_ntype::is_prim_type_sint(ptt);
+          if (is_uint || is_sint) {
+            auto wnid = fn->get_child(pt);
+            if (!wnid.is_invalid() && Lnast_ntype::is_const(fn->get_type(wnid))) {
+              auto wv = Dlop::from_pyrope(fn->get_name(wnid));
+              if (wv && wv->is_i() && wv->to_i() > 0) {
+                local_decl_widths[std::string(fn->get_name(target))] = {static_cast<int>(wv->to_i()), is_sint};
+              }
+            }
+          }
         }
       }
       return Eval_result::processed;
@@ -2550,8 +2788,8 @@ uPass_constprop::evaluate_callee_inline(std::string_view callee_name, const std:
       break;
     }
   }
-  for (auto p : processed) {
-    if (!p) {
+  for (std::size_t i = 0; i < processed.size(); ++i) {
+    if (!processed[i]) {
       return std::nullopt;
     }
   }
@@ -3517,4 +3755,78 @@ void uPass_constprop::process_get_mask() {
   // store whatever it returns (invalid included): all inputs were known so
   // the fold is real, and downstream code shouldn't silently drop it.
   store_trivial(var, *value.get_mask_op(mask));
+}
+
+void uPass_constprop::process_set_mask() {
+  // Layout: ref(dst), ref(input), (const|ref)(mask), (const|ref)(value)
+  // Mirrors process_get_mask but writes back via set_mask_op. The mask
+  // operand can be a constant integer (treated as a bitmask) or a `range`
+  // ref previously bound in range_map (lo..hi closed; `lo..` open).
+  move_to_child();
+  auto var = std::string(current_text());
+  move_to_sibling();
+  Const input_val = current_prim_value();
+  if (!move_to_sibling()) {
+    move_to_parent();
+    return;
+  }
+
+  bool  is_range = false;
+  Const range_start;
+  Const range_end;
+  Const mask;
+  if (is_type(Lnast_ntype::Lnast_ntype_ref)) {
+    if (auto rit = range_map.find(std::string(current_text())); rit != range_map.end()) {
+      is_range    = true;
+      range_start = rit->second.first;
+      range_end   = rit->second.second;
+    } else {
+      mask = current_prim_value();
+    }
+  } else {
+    mask = current_prim_value();
+  }
+
+  if (!move_to_sibling()) {
+    move_to_parent();
+    return;
+  }
+  Const new_val = current_prim_value();
+  move_to_parent();
+
+  if (!foldable(input_val) || !foldable(new_val)) {
+    return;
+  }
+
+  Const final_mask;
+  if (is_range) {
+    if (!range_start.is_i()) {
+      return;
+    }
+    const auto lo = range_start.to_i();
+    if (lo < 0) {
+      return;
+    }
+    if (range_end.is_nil()) {
+      // Open-ended `lo..`: bits lo and above. For set_mask we need a
+      // concrete bitmask, but the upper bound isn't fixed. Skip — let a
+      // later iteration with a pinned width resolve it.
+      return;
+    }
+    if (!range_end.is_i()) {
+      return;
+    }
+    const auto hi = range_end.to_i();
+    if (hi < lo) {
+      return;
+    }
+    final_mask = *Dlop::get_mask_value(static_cast<int>(hi), static_cast<int>(lo));
+  } else {
+    if (!foldable(mask)) {
+      return;
+    }
+    final_mask = mask;
+  }
+
+  store_trivial(var, *input_val.set_mask_op(final_mask, new_val));
 }

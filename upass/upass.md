@@ -519,10 +519,29 @@ These must hold after every walk:
   tracked" and "tracked but unknown". After `lnast_todo.md §10`
   introduces "absent" distinctly, revisit every `is_invalid()` call
   site in constprop to confirm it still means "don't fold".
-- **`assign` vs `tuple_set` collapse (§11.3).** When §11 lands and
-  producers emit `tuple_set a v` instead of `assign a v`, the runner's
-  per-op-kind helpers must recognise both shapes (or the canonical
-  one if `assign` is deleted).
+- **`assign` and `tuple_set` are sibling write ops (§11.3).** Per the
+  LNAST spec, `assign root v` and `tuple_set root p1..pN v` are kept as
+  distinct node kinds, but both are *writes through the root*: any
+  semantic check a pass runs on the LHS of `assign` (const-rebind tally,
+  type/bitwidth propagation, wrap/sat narrowing, type-mixing rejection)
+  must also fire from `process_tuple_set` on the same root. Producers
+  freely choose between the two — `a.b = 1` lowers to
+  `tuple_set a b 1`, not `assign a.b 1` — so any check living only on
+  the `assign` dispatch path is silently bypassed. Concrete rules for
+  new upasses:
+  1. If your pass overrides `process_assign`, also override
+     `process_tuple_set`. The terminal-value child is the RHS; path
+     elements identify the slot inside the root.
+  2. Nil-rvalue (`assign x nil` / `tuple_set t p... nil`) is
+     invalidation, not a binding — exclude both from bind tallies.
+  3. The current canonical example is `uPass_attributes::process_tuple_set`
+     (`upass/attributes/upass_attributes_tuple.cpp`), which calls
+     `record_assign(root, rhs_is_nil)` so the const-single-bind check
+     catches `tuple_set` writes (TODO_prp 1e). Mirror that pattern.
+  4. Known still-asymmetric passes: `upass_bitwidth` has no
+     `process_tuple_set` (slot writes don't propagate ranges) and
+     `pass_lnastfmt` validates `assign` arity but not `tuple_set`
+     arity (≥2 children: root + value). Fix when you touch either.
 - **Cursor discipline at `if`.** All cursor movement is runner-owned
   via the operand-vector helpers; passes never call `move_to_child` /
   `scan_op` directly. Any pass that does is a bug — it bypasses the

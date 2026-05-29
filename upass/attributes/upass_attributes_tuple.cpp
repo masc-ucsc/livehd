@@ -239,9 +239,27 @@ void uPass_attributes::process_tuple_concat() {
 }
 
 void uPass_attributes::process_tuple_set() {
-  // Layout: ref(tuple), field..., value. We don't change the field count,
-  // so re-touching shape is unnecessary; but for newly-introduced names we
-  // could grow the shape. Keep it simple: leave shape alone.
+  // Layout: ref(tuple), field..., value. `tuple_set t p... v` writes through
+  // the root `t`, so the const-rebind tally must count this write — otherwise
+  // a producer's choice of `tuple_set` for what is structurally `t.p... = v`
+  // bypasses the `assign`-only check in record_assign (TODO_prp 1e audit).
+  // A `nil` value is an invalidation, not a binding — same policy as assign.
+  if (!move_to_child()) {
+    return;
+  }
+  auto target = normalize_name(current_text());
+  bool rhs_is_nil = false;
+  while (move_to_sibling()) {
+    if (is_last_child()) {
+      if (current_text() == "nil") {
+        rhs_is_nil = true;
+      }
+      break;
+    }
+  }
+  move_to_parent();
+
+  record_assign(target, rhs_is_nil);
 }
 
 void uPass_attributes::process_tuple_get() {

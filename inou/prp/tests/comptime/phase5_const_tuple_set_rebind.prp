@@ -1,0 +1,24 @@
+/*
+:name: phase5_const_tuple_set_rebind
+:type: comptime
+:verifier_pass: 1
+:verifier_fail: 1
+*/
+
+// Phase 5 — negative test for `tuple_set` bypass of const single-bind
+// (TODO_prp.md 1e audit). `t.a = 7` lowers to `tuple_set t a 7`. Before the
+// fix, attributes::process_tuple_set was a structural no-op; the
+// const-rebind tally in record_assign never incremented, silently allowing
+// the write that a direct `assign t …` would reject. After the fix, the
+// second write through the root produces a `uPass_attributes: const `t`
+// rebind` error on stderr.
+//
+// Like phase5_const_double_assign, the test harness can't yet assert
+// pipeline-exit failures (no `:expect_fail:` flag), so `cassert false`
+// stands in as the negative path placeholder. Run manually and check
+// stderr for the rebind error.
+
+const t = (a = 5,)
+t.a = 7
+cassert(t.a == 7)
+cassert(false)

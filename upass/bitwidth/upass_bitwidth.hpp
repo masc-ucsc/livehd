@@ -92,6 +92,11 @@ private:
   // narrower than what was previously recorded.
   void set_range(std::string_view name, Lnast_range r);
 
+  // Replace `name`'s range with `r` regardless of relative width. Used by
+  // process_assign: a mut reassignment must overwrite the prior range so
+  // fold_ref doesn't keep returning the stale narrow constant.
+  void replace_range(std::string_view name, Lnast_range r);
+
   // Forget a value range after an opaque mutation point, such as passing a
   // variable as an explicit `ref` actual to a function call.
   void clear_range(std::string_view name);

@@ -333,6 +333,69 @@ void Pass_lnastfmt::validate(const Lnast* ln) {
       }
     }
 
+    // §11.5 (partial): structural shape of attr_set / attr_get. The full
+    // §11.5 semantic checks (write-once, attr-after-read freeze, mid-body
+    // declaration rejection) need post-constprop ST; this entry covers the
+    // shape-only invariants that prp2lnast must produce regardless.
+    if (Lnast_ntype::is_attr_set(type)) {
+      auto c0 = ln->get_first_child(it);
+      auto c1 = c0.is_invalid() ? c0 : ln->get_sibling_next(c0);
+      auto c2 = c1.is_invalid() ? c1 : ln->get_sibling_next(c1);
+      if (c0.is_invalid() || c1.is_invalid() || c2.is_invalid()) {
+        Pass::error("lnastfmt: {} attr_set must have at least 3 children (target, attr_key, value)", node_loc(ln, it));
+        return;
+      }
+      if (!Lnast_ntype::is_ref(ln->get_type(c0))) {
+        Pass::error("lnastfmt: {} attr_set child 0 {} must be a ref (target var), got {}",
+                    node_loc(ln, it),
+                    node_loc(ln, c0),
+                    Lnast_ntype::debug_name(ln->get_type(c0)));
+        return;
+      }
+      if (!Lnast_ntype::is_const(ln->get_type(c1))) {
+        Pass::error("lnastfmt: {} attr_set child 1 {} (attr_key) must be a const, got {}",
+                    node_loc(ln, it),
+                    node_loc(ln, c1),
+                    Lnast_ntype::debug_name(ln->get_type(c1)));
+        return;
+      }
+    }
+    if (Lnast_ntype::is_attr_get(type)) {
+      auto c0 = ln->get_first_child(it);
+      auto c1 = c0.is_invalid() ? c0 : ln->get_sibling_next(c0);
+      auto c2 = c1.is_invalid() ? c1 : ln->get_sibling_next(c1);
+      if (c0.is_invalid() || c1.is_invalid() || c2.is_invalid()) {
+        Pass::error("lnastfmt: {} attr_get must have at least 3 children (dst, target, attr_key)", node_loc(ln, it));
+        return;
+      }
+      if (!Lnast_ntype::is_ref(ln->get_type(c0)) || !Lnast::is_tmp(ln->get_name(c0))) {
+        Pass::error("lnastfmt: {} attr_get child 0 {} must be a tmp ref (___<n>), got {} '{}'",
+                    node_loc(ln, it),
+                    node_loc(ln, c0),
+                    Lnast_ntype::debug_name(ln->get_type(c0)),
+                    ln->get_name(c0));
+        return;
+      }
+      // child 1 (target) is normally a ref, but constprop / runner emit-with-
+      // fold may inline a const value (`a.[crand]` after `const a = false`
+      // becomes `false.[crand]`) before the post-pipeline lnastfmt runs. Both
+      // shapes are legal post-fold.
+      if (!Lnast_ntype::is_ref(ln->get_type(c1)) && !Lnast_ntype::is_const(ln->get_type(c1))) {
+        Pass::error("lnastfmt: {} attr_get child 1 {} (target) must be a ref or const, got {}",
+                    node_loc(ln, it),
+                    node_loc(ln, c1),
+                    Lnast_ntype::debug_name(ln->get_type(c1)));
+        return;
+      }
+      if (!Lnast_ntype::is_const(ln->get_type(c2))) {
+        Pass::error("lnastfmt: {} attr_get child 2 {} (attr_key) must be a const, got {}",
+                    node_loc(ln, it),
+                    node_loc(ln, c2),
+                    Lnast_ntype::debug_name(ln->get_type(c2)));
+        return;
+      }
+    }
+
     if (Lnast_ntype::is_assign(type) || Lnast_ntype::is_dp_assign(type)) {
       auto c0 = ln->get_first_child(it);
       if (c0.is_invalid() || !Lnast_ntype::is_ref(ln->get_type(c0))) {

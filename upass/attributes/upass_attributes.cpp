@@ -406,13 +406,13 @@ void uPass_attributes::process_attr_set() {
       // read returns the explicit answer.
       attr_set_values[target][attr_name]
           = (value_text == "false" || value_text == "0") ? Dlop::create_integer(0) : Dlop::create_integer(1);
-    } else if ((attr_name == "ubits" || attr_name == "sbits") && !value_is_ref) {
-      // Phase 5 — `[ubits=N]` / `[sbits=N]` are alternative type-info entry
-      // points (the user wrote `mut x::[ubits=12] = 0` rather than
-      // `mut x:u12 = 0`). Mirror them into type_info_map so wrap/sat
-      // narrowing has a width to clamp against. Dlop::from_pyrope on a
-      // numeric literal yields a foldable Const whose to_i fits in
-      // uint32_t for any realistic bit width.
+    } else if ((attr_name == "ubits" || attr_name == "sbits" || attr_name == "bits") && !value_is_ref) {
+      // `[bits=N]` / `[ubits=N]` / `[sbits=N]` are alternative type-info entry
+      // points (e.g. `mut x::[bits=12] = 0` instead of `mut x:u12 = 0`).
+      // Mirror them into type_info_map so wrap/sat narrowing has a width to
+      // clamp against. `bits=N` does not set signedness — it just records the
+      // width — so derive_max/derive_min stay nil unless the user also
+      // declares a numeric type via `:uN`/`:sN` or sets max/min explicitly.
       auto v = Dlop::from_pyrope(value_text);
       if (v->is_i()) {
         auto& ti         = type_info_map[target];
@@ -420,7 +420,7 @@ void uPass_attributes::process_attr_set() {
         ti.has_type_spec = true;
         if (attr_name == "ubits") {
           ti.kind = Numeric_kind::unsigned_int;
-        } else {
+        } else if (attr_name == "sbits") {
           ti.kind = Numeric_kind::signed_int;
         }
       }

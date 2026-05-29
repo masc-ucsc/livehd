@@ -97,6 +97,25 @@ void uPass_bitwidth::set_range(std::string_view name, Lnast_range r) {
   }
 }
 
+void uPass_bitwidth::replace_range(std::string_view name, Lnast_range r) {
+  if (name.empty()) {
+    return;
+  }
+  auto it = range_map_.find(name);
+  if (it != range_map_.end()) {
+    const Lnast_range& cur = it->second;
+    if (cur.min != r.min || cur.max != r.max || cur.neg_inf != r.neg_inf || cur.pos_inf != r.pos_inf) {
+      it->second = r;
+      mark_changed();
+    }
+    return;
+  }
+  range_map_.emplace(std::string{name}, r);
+  if (!r.is_unbounded()) {
+    mark_changed();
+  }
+}
+
 // Try to parse a Pyrope constant text to int64_t.  Handles decimal,
 // "0x..." (hex), "0b..." (binary).  Returns Lnast_range::unbounded() on
 // failure (e.g. Pyrope unknown-bits constants like "0sb1?").
@@ -211,12 +230,12 @@ std::optional<Const> uPass_bitwidth::fold_ref(std::string_view name) {
 
 void uPass_bitwidth::process_assign() {
   auto [lhs, rhs] = scan_op();
-  if (rhs.empty()) {
-    set_range(lhs, Lnast_range::unbounded());
-  } else {
-    // Direct assignment propagates the range of the RHS operand.
-    set_range(lhs, rhs[0]);
-  }
+  // Direct assignment to a mut var must REPLACE the lhs range, not narrow it.
+  // set_range's monotonic-narrow policy is meant for iterative refinement of a
+  // single producer's tmp; for mut reassignment (`v1 = 0` then `v1 = 0sb?`)
+  // narrowing leaves a stale `{0,0}` range and fold_ref hands back the stale
+  // constant to constprop's reads.
+  replace_range(lhs, rhs.empty() ? Lnast_range::unbounded() : rhs[0]);
 }
 
 void uPass_bitwidth::process_func_call() {

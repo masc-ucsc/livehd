@@ -33,6 +33,159 @@ cross-file dependencies stay visible.
     §10 ST API rework). The §11.5 checks read post-constprop ST
     state that doesn't exist yet.
 
+- **1d** Bit-range / bit-selection lowering bugs in
+  `inou/prp/prp2lnast.cpp`. Pyrope's `#[…]` syntax (bit read,
+  bit write, bit reductions) is partially broken on the LNAST
+  producer side — multiple cases silently emit wrong code instead
+  of either a proper `get_mask`/`set_mask` or a hard error.
+  Sibling of [[2q]] (which adds the constprop/upass side); this
+  entry covers the prp2lnast-only fixes that can land first.
+  - **Symptoms** (observed via `inou.prp |> lnast.dump`):
+    - `b#[1..<4] = 1` lowers to `assign ref('b#[1..<4]') 1` —
+      bit-range syntax leaks into the ref text. Cause:
+      `process_lvalue_for_assign` has no `bit_selection` arm and
+      falls through to the text-fallback at `prp2lnast.cpp:827`.
+      Expected: a `range` / `minus` setup matching the read path,
+      then `set_mask new_word b mask 1`, then plain `assign b
+      new_word`. Mirrors how `member_selection` lvalues already
+      emit `tuple_set`.
+    - `const a.b:u3 = 1` silently lowers to `tuple_set a b 1`,
+      dropping the `const` decl and the `:u3` type cast. Cause:
+      `process_lvalue_for_assign`'s `member_selection` arm ignores
+      `decl_node` and `type_cast_node`. Pyrope has no syntax for
+      "declare new tuple field via path" — this must be a hard
+      compile error. Same fix applies if the LHS is a
+      `bit_selection`.
+    - `r = b#[1,4]` silently drops the `,4` in
+      `bit_selection_to_node`. Cause: index walker treats the first
+      child as the entire mask. Reject comma-lists inside `#[…]`
+      (tuple indices are not supported; if we later want them, lower
+      to a bitmask OR — but error first).
+  - **Plan:**
+    1. Lift `make_const_mask` / `make_range_mask` / `emit_range`
+       out of `bit_selection_to_node` into a shared helper so both
+       read and write paths reuse the same mask synthesis.
+    2. Add a `bit_selection` arm to
+       `process_lvalue_for_assign`. Shape: walk the bit_selection
+       to recover `base` and the `select` subtree, compute
+       `mask_ref` via the shared helper, emit
+       `set_mask new_word base mask_ref rvalue` followed by
+       `assign base new_word`. `set_mask` stays pure-functional
+       (matches LGraph Dlop shape: `set_mask dest input mask
+       value`), `assign` writes the result back.
+    3. In both the `member_selection` and (new) `bit_selection`
+       arms, hard-error if `decl_node` or `type_cast_node` is
+       non-null: `const`/`mut`/`:type` are only legal on bare
+       identifiers.
+    4. In `bit_selection_to_node`, error on a comma-list inside
+       the `#[…]` index node.
+  - **Affects:** `prp-bitreverse`, `prp-bitset`, `prp-formux`,
+    `prp-valid_unknown_bits` bit-range portion, and the
+    `pp.prp` / `assert.prp` repros from the working tree. The
+    write-side fix is a prerequisite for [[2q]] (the constprop
+    bit-range work) — without it, set_mask never reaches
+    constprop in the first place.
+
+- **1i** Comb-call inliner as a **virtual splice into the runner's
+  single linear traversal** — no deep copy. **Goal 1.**
+
+  **Why.** Today `uPass_constprop::evaluate_callee_inline` is not an
+  inliner: it's a *constant evaluator* — a second, partial
+  reimplementation of the runner's statement semantics over its own
+  side maps (`local_values`, `local_attrs`, `local_ranges`,
+  `local_decl_widths`). It binds actuals→params, runs a fixed-point
+  sweep, and returns the **output `Const`s**. It is **all-or-nothing**:
+  if any statement can't fold to a constant it aborts and the `fcall`
+  stays runtime. That design (a) duplicates the real `process_*`
+  handlers — every construct must be hand-coded twice (the
+  2026-05-28 session had to add `attr_get [bits]`, `type_spec`, and
+  nested-`stmts` support just to inline `forunrollbits.prp`), and
+  (b) can never emit *partially*-folded hardware. The recent fixes are
+  a stopgap; 1i supersedes the mini-interpreter.
+
+  **Decision: no deep copy.** The upass is a **single linear pass**
+  (an optional 2nd pass runs only when the 1st couldn't because an
+  `import` LNAST wasn't ready). Deep-copying the callee body into the
+  caller tree would require re-traversing the generated code and
+  re-running passes to stabilize — many passes until fixpoint. We do
+  not want that. Instead the runner, on hitting an `fcall` whose comb
+  LNAST is in `function_registry`, **descends its cursor into the
+  callee's stmts as part of the same walk**, so the existing
+  `process_*` handlers process the inlined body in-order, once.
+  Whatever folds, folds; whatever stays runtime becomes real IR at the
+  call site. No second implementation, no all-or-nothing.
+
+  **Mechanism.**
+  1. **Inline-frame stack.** Add a stack of frames to the runner;
+     each frame = `{const Lnast* callee, rename_prefix,
+     return_target(s), ref_writeback_map, depth}`. The tree cursor
+     (`move_to_child/sibling/parent`) gains a thin redirection layer:
+     when the walk would step past an inlinable `fcall`, push a frame
+     and redirect subsequent stepping into `callee`'s `stmts` child;
+     when that body is exhausted, run the epilogue and pop, resuming
+     the caller at the `fcall`'s next sibling. This is a *virtual*
+     splice — the callee tree is read in place, never copied or
+     mutated.
+  2. **Fake-assign prologue (arg binding).** Before descending, bind
+     each actual to its formal as a synthesized `assign`
+     (`<prefix>param = actual`), field-wise for tuple/bundle args and
+     positional-or-named matching the existing `Call_actual` logic.
+     These bindings feed the *same* symbol-table path `process_assign`
+     uses — no special evaluator. A `ref` param records a writeback
+     entry so the epilogue copies `<prefix>param` back to the caller
+     variable.
+  3. **α-rename / aliasing (the crux).** Because nothing is copied, the
+     callee nodes keep their original names (`x`, `n`, `___1`…). Every
+     name read/written while a frame is active must be namespaced by
+     that frame's `rename_prefix` so it can't collide with caller
+     temporaries or with other call sites of the same callee. Resolve
+     names through the frame stack (innermost-first); the prologue's
+     RHS actuals resolve in the *enclosing* frame's namespace, the
+     LHS params in the *new* frame's. Pick a prefix scheme that's
+     stable per call site (e.g. `<callee>$<callsite_id>$`) so a 2nd
+     upass pass reproduces the same names.
+  4. **Epilogue (output + ref writeback).** Map the callee's declared
+     outputs back to the `fcall` destination(s): `dst = <prefix>out`
+     (single), or field-wise (`dst.field = <prefix>out.field`) for
+     tuple / multi-output, mirroring `try_eval_comb_call`'s current
+     bundle splat. Apply `ref` writebacks (`caller_var =
+     <prefix>param`). Then pop the frame.
+
+  **Constraints / guards.**
+  - **comb only.** Skip `pipe[N]` / `mod` / anything stateful — their
+    state/timing is instance-specific and can't be naively spliced.
+  - **Depth / cycle guard.** Reuse the `kInlineMaxDepth` seed; detect
+    direct/indirect recursion via the frame stack and refuse (a
+    recursive comb without a static bound can't inline).
+  - **Import not ready.** If the callee LNAST isn't in
+    `function_registry` yet (pending `import`), do **not** inline this
+    pass — leave the `fcall`; the existing 2nd-pass-after-import
+    mechanism picks it up. Ties into the `pending_import` poison work
+    ([[2k]] / `docs/upass_redesign.md`).
+  - **Idempotence across the optional 2nd pass.** Same call site must
+    produce the same rename prefix and the same bindings so a re-run is
+    a no-op where the 1st pass already inlined.
+
+  **Retire / fold in.** Once 1i lands, `evaluate_callee_inline` and its
+  duplicate handlers go away (or shrink to a thin pure-constant fast
+  path for cassert discharge if profiling shows it's worth keeping).
+  The verifier's cassert discharge then rides on the normal folded IR
+  rather than the evaluator's returned `Const`s.
+
+  **Relationship.** Unblocks the general case behind the
+  bit-range/`set_mask` folding in [[2q]] and the `.[bits]`/`.[max]`/
+  `.[min]` width reads that [[1v]] (typesystem) publishes — inlined
+  bodies query the same type info as caller-scope code. Sibling of
+  [[1d]] (producer-side bit lowering) only in that both feed the
+  runner clean IR.
+
+  **Affects.** `forunrollbits.prp`, `pp/pp2/pp3.prp` repros, and any
+  comptime test that calls a comb with non-constant-foldable internals
+  (those abort under the current evaluator and would instead inline to
+  real IR). Validate that the inlined IR matches what a hand-flattened
+  body would produce, and that multi-call-site renaming stays
+  collision-free.
+
 ## Group 1-complex — foundation, larger scope
 
 Tasks that are independent of other Group 1/2 work but are large enough

@@ -1,0 +1,40 @@
+/*
+:name: forunrollbits
+:type: comptime
+:verifier_pass: 4
+:verifier_fail: 0
+*/
+
+// Producer-side unroll of `for i in 0..<arg.[bits]` when arg is a typed
+// formal parameter (so the width is known at parse time). Pre-fix the
+// producer's parse_int_const only accepted literal integers, so this fell
+// back to the placeholder while-true that never unrolls. After the fix
+// the body lowers to N nested stmts blocks identical to a literal range.
+//
+// The test drives the fold end-to-end: the function returns the total,
+// the caller compares against the expected sum. This also exercises the
+// fcall inliner's ability to propagate a return value through a mutated
+// local — that path is currently a separate gap (see [[bit-range-lhs-landed]]).
+
+comb count_bits(x:u6) -> (n:u32) {
+  mut acc:u32 = 0
+  for i in 0..<x.[bits] {
+    acc = acc + 1
+  }
+  n = acc
+}
+
+cassert(count_bits(0)  == 6)
+cassert(count_bits(1)  == 6)
+cassert(count_bits(63) == 6)
+
+// Per-iteration `i` substitution: 0+1+2+3+4+5 = 15.
+comb sum_indices(x:u6) -> (s:u32) {
+  mut acc:u32 = 0
+  for i in 0..<x.[bits] {
+    acc = acc + i
+  }
+  s = acc
+}
+
+cassert(sum_indices(0) == 15)

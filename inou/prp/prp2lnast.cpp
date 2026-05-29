@@ -743,7 +743,67 @@ Lnast_node Prp2lnast::process_lvalue_for_assign(TSNode lvalue, const Lnast_node&
     }
     return ref;
   }
+  if (lvt == "bit_selection") {
+    // `b#[range] = rhs` lowers to a read-modify-write:
+    //   - `set_mask new_word base mask rhs` synthesizes the updated word
+    //     (pure-functional; matches LGraph Dlop set_mask_op shape).
+    //   - The write-back is delegated to a recursive process_lvalue_for_assign
+    //     on the argument lvalue, so nested forms like `a.b#[range] = rhs`
+    //     reuse the member_selection arm and lower to a proper `tuple_set`.
+    // No syntax for declaring/typing through a bit-range — reject decl/type
+    // alongside the member_selection arm below.
+    if (!ts_node_is_null(decl_node)) {
+      Pass::error("cannot declare a bit-range lvalue: `{}` (the base must be declared first)", get_text(lvalue));
+    }
+    if (!ts_node_is_null(type_cast_node)) {
+      Pass::error("cannot type-annotate a bit-range lvalue: `{}` (the base carries the type)", get_text(lvalue));
+    }
+
+    TSNode arg_n = child_by_field(lvalue, "argument");
+    if (ts_node_is_null(arg_n)) {
+      arg_n = ts_node_named_child(lvalue, 0);
+    }
+    TSNode sel_node{};
+    for (uint32_t i = 0; i < child_count(lvalue); i++) {
+      TSNode           c = child(lvalue, i);
+      std::string_view ct(ts_node_type(c));
+      if (ct == "select") {
+        sel_node = c;
+        break;
+      }
+    }
+
+    // Read the argument's current value via the expression path. For a plain
+    // identifier this is just a ref; for `a.b` this emits a tuple_get into a
+    // tmp, which is exactly the old-value input we want feeding set_mask.
+    Lnast_node cur_val  = expr_to_node(arg_n);
+    Lnast_node mask_ref = compute_bit_mask_ref(sel_node);
+
+    // set_mask new_word cur_val mask_ref rvalue
+    auto       sm_idx   = builder.add_child(Lnast_ntype::create_set_mask());
+    Lnast_node new_word = builder.mint_tmp_ref();
+    lnast->add_child(sm_idx, new_word);
+    lnast->add_child(sm_idx, cur_val);
+    lnast->add_child(sm_idx, mask_ref);
+    lnast->add_child(sm_idx, rvalue);
+
+    // Write the updated word back to the argument lvalue. Recursing keeps the
+    // member_selection / dot_expression handling in one place; passing null
+    // decl/type because they were already rejected (and don't apply to the
+    // inner lvalue either — it's a re-bind, not a declaration).
+    return process_lvalue_for_assign(arg_n, new_word, TSNode{}, TSNode{}, false, {});
+  }
   if (lvt == "member_selection" || lvt == "dot_expression") {
+    // Path-rooted lvalues can't carry a declaration or type cast: Pyrope has
+    // no syntax for "declare new field through a path". Reject so we don't
+    // silently drop the decl/type and emit a misleading `tuple_set`.
+    if (!ts_node_is_null(decl_node)) {
+      Pass::error("cannot declare a tuple-path lvalue: `{}` (declare the base instead)", get_text(lvalue));
+    }
+    if (!ts_node_is_null(type_cast_node)) {
+      Pass::error("cannot type-annotate a tuple-path lvalue: `{}` (annotate the field at the base's declaration)",
+                  get_text(lvalue));
+    }
     // Extract a deep path so `t.b[0] = …` lowers to `tuple_set t b 0 …`
     // (one tuple_set rooted on the actual variable) instead of going
     // through `tuple_get tmp t b; tuple_set tmp 0 …` — the tmp would not
@@ -1245,29 +1305,74 @@ void Prp2lnast::process_for_statement(TSNode n) {
   // shaped as `<int_const> ..<|..= <int_const>` (possibly nested in an
   // expression_list/expression_item). Returns the (start, end_inclusive)
   // pair on success.
+  // Lexical lookup of a captured formal-parameter width, innermost-first.
+  auto lookup_param_bits = [&](std::string_view name) -> std::optional<int64_t> {
+    for (auto it = param_bits_stack_.rbegin(); it != param_bits_stack_.rend(); ++it) {
+      auto match = it->find(std::string(name));
+      if (match != it->end()) {
+        return match->second;
+      }
+    }
+    return std::nullopt;
+  };
+
   auto parse_int_const = [&](TSNode c) -> std::optional<int64_t> {
     if (ts_node_is_null(c)) {
       return std::nullopt;
     }
     std::string_view t(ts_node_type(c));
-    if (t != "constant") {
-      return std::nullopt;
-    }
-    auto txt = trim(get_text(c));
-    if (txt.empty()) {
-      return std::nullopt;
-    }
-    try {
-      size_t  pos = 0;
-      int64_t v   = std::stoll(std::string(txt), &pos);
-      // Reject suffixes / non-decimal forms; we only handle plain ints.
-      if (pos != txt.size()) {
+    if (t == "constant") {
+      auto txt = trim(get_text(c));
+      if (txt.empty()) {
         return std::nullopt;
       }
-      return v;
-    } catch (...) {
-      return std::nullopt;
+      try {
+        size_t  pos = 0;
+        int64_t v   = std::stoll(std::string(txt), &pos);
+        // Reject suffixes / non-decimal forms; we only handle plain ints.
+        if (pos != txt.size()) {
+          return std::nullopt;
+        }
+        return v;
+      } catch (...) {
+        return std::nullopt;
+      }
     }
+    // `x.[bits]` against a typed formal parameter currently in scope. The
+    // type is known at parse time, so the producer can substitute the width
+    // here even though `x.[bits]` isn't a literal in the source.
+    if (t == "attribute_read") {
+      TSNode arg = child_by_field(c, "argument");
+      if (ts_node_is_null(arg) || std::string_view(ts_node_type(arg)) != "identifier") {
+        return std::nullopt;
+      }
+      // Verify the attribute key is `bits`. attribute_read carries one or
+      // more `attribute_list` children (a single identifier under `name`).
+      bool     is_bits = false;
+      uint32_t nnc     = ts_node_named_child_count(c);
+      for (uint32_t i = 0; i < nnc; i++) {
+        TSNode           ch = ts_node_named_child(c, i);
+        std::string_view ct(ts_node_type(ch));
+        if (ct == "attribute_list") {
+          uint32_t alc = ts_node_named_child_count(ch);
+          for (uint32_t k = 0; k < alc; k++) {
+            TSNode item = ts_node_named_child(ch, k);
+            if (std::string_view(ts_node_type(item)) == "identifier" && trim(get_text(item)) == "bits") {
+              is_bits = true;
+              break;
+            }
+          }
+          if (is_bits) {
+            break;
+          }
+        }
+      }
+      if (!is_bits) {
+        return std::nullopt;
+      }
+      return lookup_param_bits(trim(get_text(arg)));
+    }
+    return std::nullopt;
   };
 
   // Walk a data expression looking for the literal-range pattern. Accepts
@@ -1955,6 +2060,76 @@ void Prp2lnast::process_lambda_statement(TSNode n) {
       lnast->add_child(cix, tmp);
     }
   }
+  // Capture formal-parameter widths so parse_int_const can resolve
+  // `x.[bits]` while processing the body (see param_bits_stack_).
+  // Walk the input arg container looking for typed_identifier nodes whose
+  // type carries a concrete uint_type/sint_type width. Each frame is a
+  // lexical scope; outer scopes remain visible for nested lambdas.
+  std::unordered_map<std::string, int64_t> body_param_bits;
+  std::function<void(TSNode)> capture_param_bits = [&](TSNode node) {
+    if (ts_node_is_null(node)) {
+      return;
+    }
+    std::string_view nt(ts_node_type(node));
+    if (nt == "typed_identifier") {
+      TSNode id = child_by_field(node, "identifier");
+      TSNode tc = child_by_field(node, "type");
+      if (!ts_node_is_null(id) && !ts_node_is_null(tc)) {
+        std::string nm(trim(get_text(id)));
+        // Walk the type_cast subtree for a uint_type/sint_type carrying a
+        // concrete width as its first integer-literal child.
+        std::function<std::optional<int64_t>(TSNode)> find_width = [&](TSNode t) -> std::optional<int64_t> {
+          if (ts_node_is_null(t)) {
+            return std::nullopt;
+          }
+          std::string_view tt(ts_node_type(t));
+          // uint_type / sint_type carry their width as a HIDDEN integer token
+          // (per [[tree_sitter_pyrope_hidden_tokens]]), so ts_node_named_child
+          // returns nothing — extract the width from the node's TEXT instead.
+          // `u6` → strip leading `u` → "6"; `s12` → strip `s` → "12".
+          if (tt == "uint_type" || tt == "sint_type") {
+            auto txt = trim(get_text(t));
+            if (txt.size() >= 2 && (txt.front() == 'u' || txt.front() == 's')) {
+              auto digits = txt.substr(1);
+              try {
+                size_t  pos = 0;
+                int64_t v   = std::stoll(std::string(digits), &pos);
+                if (pos == digits.size() && v > 0) {
+                  return v;
+                }
+              } catch (...) {
+              }
+            }
+            return std::nullopt;
+          }
+          if (tt == "bool_type") {
+            return 1;
+          }
+          uint32_t cnc = ts_node_named_child_count(t);
+          for (uint32_t j = 0; j < cnc; j++) {
+            if (auto v = find_width(ts_node_named_child(t, j))) {
+              return v;
+            }
+          }
+          return std::nullopt;
+        };
+        if (auto w = find_width(tc)) {
+          body_param_bits[nm] = *w;
+        }
+      }
+    }
+    uint32_t cnc = ts_node_named_child_count(node);
+    for (uint32_t j = 0; j < cnc; j++) {
+      capture_param_bits(ts_node_named_child(node, j));
+    }
+  };
+  // Inputs: walk the lambda's arg_list / typed_identifier_list. Easier and
+  // safer than reconstructing from the collect_args call — that path also
+  // walks `mod`/`definition` siblings we don't care about here. Just look
+  // through every TS child of the lambda node for typed_identifiers.
+  capture_param_bits(n);
+  param_bits_stack_.push_back(std::move(body_param_bits));
+
   if (!ts_node_is_null(code)) {
     // Placeholder lambda (06-functions.md "Output tuple"): when the body of
     // a single-output `comb` is a bare expression, the value is implicitly
@@ -2016,6 +2191,11 @@ void Prp2lnast::process_lambda_statement(TSNode n) {
     } else {
       process_scope_statement(code, body_idx);
     }
+  }
+  // Drop the body's param-bits frame even if there was no `code` (defensive:
+  // we pushed unconditionally above).
+  if (!param_bits_stack_.empty()) {
+    param_bits_stack_.pop_back();
   }
   builder.pop_stmts();
 }
@@ -3561,35 +3741,56 @@ Lnast_node Prp2lnast::match_expr_to_node(TSNode n, bool need_result) {
   return need_result ? result : Lnast_node::create_const("0");
 }
 
-Lnast_node Prp2lnast::bit_selection_to_node(TSNode n) {
-  // bit_selection: argument '#' [reduction] select
-  // LNAST get_mask expects a bitmask, not the selected bit position/range.
-  TSNode arg = child_by_field(n, "argument");
-  if (ts_node_is_null(arg)) {
-    arg = ts_node_named_child(n, 0);
-  }
-  Lnast_node base = expr_to_node(arg);
+Lnast_node Prp2lnast::emit_range_node(const Lnast_node& start, const Lnast_node& end) {
+  // Emit a `range` LNAST node (start, end) and return its ref. Used by the
+  // open-end and from-zero forms of `#[...]`; constprop's process_get_mask /
+  // process_set_mask consult range_map to synthesize the mask integer (closed
+  // `lo..=hi` → bits-lo..hi mask; open `lo..` → -(1<<lo)).
+  auto rng_idx = builder.add_child(Lnast_ntype::create_range());
+  auto rng_ref = builder.mint_tmp_ref();
+  lnast->add_child(rng_idx, rng_ref);
+  lnast->add_child(rng_idx, start);
+  lnast->add_child(rng_idx, end);
+  return rng_ref;
+}
 
-  // The `select` field is `multiple: true` (covers the `#` token, optional
-  // reduction, and the inner select node) — `child_by_field` returns the
-  // first match (the `#` token). Walk children for the actual select node.
-  TSNode sel_node{};
-  for (uint32_t i = 0; i < child_count(n); i++) {
-    TSNode           c = child(n, i);
-    std::string_view ct(ts_node_type(c));
-    if (ct == "select") {
-      sel_node = c;
-      break;
-    }
+Lnast_node Prp2lnast::compute_bit_mask_ref(TSNode sel_node) {
+  // The grammar's `select` admits exactly one of `index` (single expression)
+  // or `range` (a selection_range form). Tuple/comma indices like `#[1,4]`
+  // aren't accepted by the grammar; tree-sitter error-recovers them silently
+  // and just keeps the first expression — so flag any parse error on the
+  // select node as a hard compile error rather than emitting wrong code.
+  if (ts_node_is_null(sel_node)) {
+    Pass::error("missing select node in bit selection");
+    return Lnast_node::create_const("-1");
   }
-  TSNode type_node = child_by_field(n, "reduction");
+  if (ts_node_has_error(sel_node)) {
+    Pass::error("invalid bit-range index `{}` (tuple/comma indices not supported in `#[...]`)", get_text(sel_node));
+    return Lnast_node::create_const("-1");
+  }
 
   auto make_const_mask = [](std::string_view text) -> std::optional<Lnast_node> {
+    // Only accept actual numeric source literals here. Identifier text like
+    // `i` must NOT be reinterpreted as a Pyrope constant — Dlop::from_pyrope
+    // happily parses single letters as character literals (`"i"` → 105),
+    // which would silently produce a bit-105 mask for `t#[i]`.
+    if (text.empty()) {
+      return std::nullopt;
+    }
+    char c0 = text.front();
+    if (!(c0 >= '0' && c0 <= '9') && c0 != '-' && c0 != '+') {
+      return std::nullopt;
+    }
     auto v = Dlop::from_pyrope(text);
     if (v->is_invalid() || !v->is_i()) {
       return std::nullopt;
     }
-    return Lnast_node::create_const(Dlop::get_mask_value(static_cast<int>(v->to_i()))->to_pyrope());
+    // `#[N]` selects bit position N (single-bit mask = 1<<N). The 2-arg
+    // form `get_mask_value(N, N)` handles that case; the 1-arg form returns
+    // the lowest-N-bits mask instead (`get_mask_value(3)` = 0b0111, not
+    // 0b1000), which is the wrong semantic for a single-position select.
+    auto pos = static_cast<int>(v->to_i());
+    return Lnast_node::create_const(Dlop::get_mask_value(pos, pos)->to_pyrope());
   };
 
   auto make_range_mask = [&](TSNode expr_item) -> std::optional<Lnast_node> {
@@ -3629,74 +3830,86 @@ Lnast_node Prp2lnast::bit_selection_to_node(TSNode n) {
     return ref;
   };
 
-  // Helper: emit a `range` LNAST node (start, end) and return its ref.
-  // Used by the open-end and from-zero forms below; constprop's
-  // process_get_mask consults range_map to synthesize the mask integer
-  // (closed `lo..=hi` → bits-lo..hi mask; open `lo..` → -(1<<lo)).
-  auto emit_range = [&](const Lnast_node& start, const Lnast_node& end) {
-    auto rng_idx = builder.add_child(Lnast_ntype::create_range());
-    auto rng_ref = builder.mint_tmp_ref();
-    lnast->add_child(rng_idx, rng_ref);
-    lnast->add_child(rng_idx, start);
-    lnast->add_child(rng_idx, end);
-    return rng_ref;
-  };
+  TSNode index_n = child_by_field(sel_node, "index");
+  TSNode range   = child_by_field(sel_node, "range");
 
-  Lnast_node mask_ref = Lnast_node::create_const("-1");
-  if (!ts_node_is_null(sel_node)) {
-    TSNode index_n = child_by_field(sel_node, "index");
-    TSNode range = child_by_field(sel_node, "range");
-
-    if (!ts_node_is_null(range)) {
-      // selection_range carries one of:
-      //   open_all              — bare `..`
-      //   open_from: <expr>     — `expr..`
-      //   from_zero_inclusive   — `..=expr`
-      //   from_zero_exclusive   — `..<expr`
-      TSNode open_all  = ts_node_child_by_field_name(range, "open_all", 8);
-      TSNode open_from = ts_node_child_by_field_name(range, "open_from", 9);
-      TSNode fz_incl   = ts_node_child_by_field_name(range, "from_zero_inclusive", 19);
-      TSNode fz_excl   = ts_node_child_by_field_name(range, "from_zero_exclusive", 19);
-      if (!ts_node_is_null(open_all)) {
-        mask_ref = emit_range(Lnast_node::create_const("0"), Lnast_node::create_const("nil"));
-      } else if (!ts_node_is_null(open_from)) {
-        mask_ref = emit_range(expr_to_node(open_from), Lnast_node::create_const("nil"));
-      } else if (!ts_node_is_null(fz_incl) || !ts_node_is_null(fz_excl)) {
-        bool       is_lt    = !ts_node_is_null(fz_excl);
-        TSNode     expr_n   = is_lt ? fz_excl : fz_incl;
-        Lnast_node end_expr = expr_to_node(expr_n);
-        Lnast_node end_node = end_expr;
-        if (is_lt) {
-          // `..<n` is exclusive: end = n - 1 (matches the inclusive form
-          // stored on the range node downstream).
-          auto m    = builder.add_child(Lnast_ntype::create_minus());
-          auto mref = builder.mint_tmp_ref();
-          lnast->add_child(m, mref);
-          lnast->add_child(m, end_expr);
-          lnast->add_child(m, Lnast_node::create_const("1"));
-          end_node = mref;
-        }
-        mask_ref = emit_range(Lnast_node::create_const("0"), end_node);
-      }
-    } else if (!ts_node_is_null(index_n)) {
-      auto et = std::string_view(ts_node_type(index_n));
-      if (et == "expression_item") {
-        if (auto const_mask = make_range_mask(index_n)) {
-          mask_ref = *const_mask;
-        } else {
-          mask_ref = expr_to_node(index_n);
-        }
-      } else {
-        if (auto const_mask = make_const_mask(get_text(index_n))) {
-          mask_ref = *const_mask;
-        } else {
-          mask_ref = make_dynamic_mask(index_n);
-        }
-      }
+  if (!ts_node_is_null(range)) {
+    // selection_range carries one of:
+    //   open_all              — bare `..`
+    //   open_from: <expr>     — `expr..`
+    //   from_zero_inclusive   — `..=expr`
+    //   from_zero_exclusive   — `..<expr`
+    TSNode open_all  = ts_node_child_by_field_name(range, "open_all", 8);
+    TSNode open_from = ts_node_child_by_field_name(range, "open_from", 9);
+    TSNode fz_incl   = ts_node_child_by_field_name(range, "from_zero_inclusive", 19);
+    TSNode fz_excl   = ts_node_child_by_field_name(range, "from_zero_exclusive", 19);
+    if (!ts_node_is_null(open_all)) {
+      return emit_range_node(Lnast_node::create_const("0"), Lnast_node::create_const("nil"));
     }
-  } else {
-    Pass::error("missing select node in bit selection `{}`", get_text(n));
+    if (!ts_node_is_null(open_from)) {
+      return emit_range_node(expr_to_node(open_from), Lnast_node::create_const("nil"));
+    }
+    if (!ts_node_is_null(fz_incl) || !ts_node_is_null(fz_excl)) {
+      bool       is_lt    = !ts_node_is_null(fz_excl);
+      TSNode     expr_n   = is_lt ? fz_excl : fz_incl;
+      Lnast_node end_expr = expr_to_node(expr_n);
+      Lnast_node end_node = end_expr;
+      if (is_lt) {
+        // `..<n` is exclusive: end = n - 1 (matches the inclusive form
+        // stored on the range node downstream).
+        auto m    = builder.add_child(Lnast_ntype::create_minus());
+        auto mref = builder.mint_tmp_ref();
+        lnast->add_child(m, mref);
+        lnast->add_child(m, end_expr);
+        lnast->add_child(m, Lnast_node::create_const("1"));
+        end_node = mref;
+      }
+      return emit_range_node(Lnast_node::create_const("0"), end_node);
+    }
+    return Lnast_node::create_const("-1");
   }
+
+  if (!ts_node_is_null(index_n)) {
+    auto et = std::string_view(ts_node_type(index_n));
+    if (et == "expression_item") {
+      if (auto const_mask = make_range_mask(index_n)) {
+        return *const_mask;
+      }
+      return expr_to_node(index_n);
+    }
+    if (auto const_mask = make_const_mask(get_text(index_n))) {
+      return *const_mask;
+    }
+    return make_dynamic_mask(index_n);
+  }
+
+  return Lnast_node::create_const("-1");
+}
+
+Lnast_node Prp2lnast::bit_selection_to_node(TSNode n) {
+  // bit_selection: argument '#' [reduction] select
+  // LNAST get_mask expects a bitmask, not the selected bit position/range.
+  TSNode arg = child_by_field(n, "argument");
+  if (ts_node_is_null(arg)) {
+    arg = ts_node_named_child(n, 0);
+  }
+  Lnast_node base = expr_to_node(arg);
+
+  // The `select` field is `multiple: true` (covers the `#` token, optional
+  // reduction, and the inner select node) — `child_by_field` returns the
+  // first match (the `#` token). Walk children for the actual select node.
+  TSNode sel_node{};
+  for (uint32_t i = 0; i < child_count(n); i++) {
+    TSNode           c = child(n, i);
+    std::string_view ct(ts_node_type(c));
+    if (ct == "select") {
+      sel_node = c;
+      break;
+    }
+  }
+  TSNode type_node = child_by_field(n, "reduction");
+
+  Lnast_node mask_ref = compute_bit_mask_ref(sel_node);
 
   auto idx = builder.add_child(Lnast_ntype::create_get_mask());
   auto ref = builder.mint_tmp_ref();

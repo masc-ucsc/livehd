@@ -228,6 +228,22 @@ std::optional<Const> uPass_attributes::resolve_value(std::string_view var) const
   return std::nullopt;
 }
 
+// 1v locked policy: declared-type-only. `.[max]`/`.[min]`/`.[bits]` derive
+// from explicit type annotations (uN, sN, bool, uint:[max=K],
+// int:[max=K, min=L], or `:[range=...]`). Un-annotated values return nil.
+// Tuple aggregates return nil for `.[bits]`. The `.[ubits]`/`.[sbits]`
+// queries no longer exist; the dispatcher forwards `.[bits]` through here.
+
+namespace {
+// ceil_log2(x) for x >= 1. Returns 0 for x==0.
+uint32_t ceil_log2_u64(uint64_t x) {
+  if (x <= 1) {
+    return 0;
+  }
+  return static_cast<uint32_t>(64 - std::countl_zero(static_cast<uint64_t>(x - 1)));
+}
+}  // namespace
+
 std::optional<Const> uPass_attributes::derive_max(std::string_view base) const {
   // Explicit attr wins (e.g. `:int:[max=N]` partial pinning).
   if (auto v = lookup_attr_value(base, "max"); v) {

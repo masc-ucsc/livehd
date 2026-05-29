@@ -51,6 +51,7 @@ public:
   // Bit Manipulation
   void process_sext() override;
   void process_get_mask() override;
+  void process_set_mask() override;
 
   void process_stmts() override;
   void process_stmts_post() override;
@@ -106,6 +107,11 @@ protected:
   // the method field.
   std::unordered_map<std::string, std::string> typename_of_var;
 
+  // Variables whose decorator-init setter has already fired. Entry 1k:
+  // `mut x:Tup = (v="")` triggers Tup.setter once at construction time;
+  // a later `x = ...` is a plain reassign and must NOT refire the setter.
+  std::unordered_set<std::string> setter_fired;
+
   auto current_bundle() { return st.get_bundle(current_text()); }
 
   // Bundle iff the cursor is on a ref. Returns nullptr otherwise — used by
@@ -148,6 +154,28 @@ protected:
   // `foldable` is the strict version used everywhere else.
   static bool is_numeric(const Const& v) { return !v.is_invalid() && !v.is_string(); }
   static bool foldable(const Const& v) { return is_numeric(v) && !v.has_unknowns(); }
+
+  // Type-agnostic structural identity: same base+extra+size, but type may
+  // differ. Used by process_eq_ne to fold `(v != 0) == 0sb?` (Boolean unknown
+  // vs Integer unknown with identical bit patterns) to known-true. Dlop's
+  // same_repr requires matching `type`, so it can't catch this case.
+  static bool same_bits_ignore_type(const Const& a, const Const& b) {
+    if (a.is_invalid() || b.is_invalid()) {
+      return false;
+    }
+    if (a.size != b.size) {
+      return false;
+    }
+    for (int i = 0; i < a.size; ++i) {
+      if (a.base()[i] != b.base()[i]) {
+        return false;
+      }
+      if (a.extra()[i] != b.extra()[i]) {
+        return false;
+      }
+    }
+    return true;
+  }
 
   // Strip the single-quote wrapping `Lconst::to_pyrope` adds around string
   // values so the bare contents can be re-parsed or compared.
@@ -226,6 +254,11 @@ protected:
   std::optional<Const>                    resolve_current_scalar() const;
   std::optional<std::vector<Call_actual>> collect_call_actuals();
   bool try_eval_comb_call(std::string_view dst, std::string_view fname, const std::vector<Call_actual>& actuals);
+
+  // Entry 1k: fire the decorator-init setter for `var` if its declared
+  // typename carries a `setter` field and the setter hasn't fired before.
+  // Returns true if a setter was fired (writebacks already applied).
+  bool maybe_fire_setter_init(std::string_view var);
   // Direct-cell call dispatch: `__sum(a, b)`, `__hotmux(sel, a, b, …)`, etc.
   // Maps cell names (without the `__` prefix) to Ntype_op kernels and folds
   // when all positional actuals are foldable constants. Returns true when

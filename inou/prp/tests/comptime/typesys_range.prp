@@ -6,9 +6,8 @@
 */
 
 // Corner cases for entry 1v (LNAST basic typesystem + min/max upass).
-// Beyond phase2_attr_max_min/phase2_attr_bits which only check declared
-// types: here we exercise *inferred* ranges, range-narrowing through
-// arithmetic, and the bits query against the inferred max.
+// Declared-type-only policy: `.[bits]`/`.[max]`/`.[min]` derive from the
+// declared type. Un-annotated values return nil for all three.
 
 // Inferred from initializer: a fits 0..3 → 2 bits unsigned.
 const a = 3
@@ -29,13 +28,13 @@ cassert(c.[bits] == 4)
 cassert(c.[max] == 15)
 cassert(c.[min] == 0)
 
-// Inferred bool — distinct from int.
-const t = true
+// Bool: bits=1, max=1, min=0.
+const t:bool = true
 cassert(t.[bits] == 1)
 cassert(t.[max] == 0)
 cassert(t.[min] == -1)
 
-// String — bits query is invalid for strings, but min/max via size works.
+// String: size works.
 const s = "abc"
 cassert(s.[size] == 3)
 cassert(s.[bits] == nil)

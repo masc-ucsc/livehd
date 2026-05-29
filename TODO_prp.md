@@ -13,24 +13,6 @@ cross-file dependencies stay visible.
 
 ## Group 1 — foundation
 
-- **1p** Unknown bits in literals + constprop propagation — **partial**.
-  LiveHD-side literal parsing (`0sb?`, `0sb1?01?`, `0ub?1?0`) and AND/OR
-  identity folds landed (commit fbbe938fa).
-  - **Pending:** `prp-valid_simple` and `prp-valid_unknown_bits` still
-    fail — need 3-valued comparison and carry-expanding arithmetic
-    (`0sb1? > 0sb01` folds to `true`; `0sb?00 == 0sb?01` folds to
-    `false`; `v + 1 == 0sb??` carry expansion). `prp-valid_unknown_bits`
-    additionally exercises bit-range reads on partially-unknown values
-    (`v#[3..=6] == 0sb1?0`), so its full pass requires [[2q]] as well
-    as this entry.
-  - Hint: those kernels are in `../hlop`, not LiveHD. Add per-bit
-    unknown-mask metadata to HLOP dlop/slop arithmetic ops so LiveHD
-    consumes mask-aware results. The LiveHD-side literal + constprop
-    surface is ready and waiting for the HLOP side to land.
-  - Detailed dlop op-by-op notes (which functions to tighten, what
-    each test wants folded, where to add hlop-local unit tests) live
-    in [hlop_todo.md](hlop_todo.md).
-
 - **1r** Function-call return destructuring with rename — **partial**.
   `(b, c) = dox(...)` name-driven binding and explicit rename
   `(x=dox.b, y=dox.c) = dox(...)` both lower correctly via a chained
@@ -327,7 +309,6 @@ needs all of them.
 | `prp-match_arms_mixed` | [[2r]] | mixed match-arm prefixes + tuple `case` patterns (verifier count mismatch) |
 | `prp-setter_complex` | [[1k]] | decorator-init implicit setter dispatch on `x:Tup = (…)` |
 | `prp-tuple_decorator_complex` | [[1k]] | tuple-decorator init triggering setter |
-| `prp-valid_simple` | [[1p]] | 3-valued comparison + carry-expanding arithmetic |
-| `prp-valid_unknown_bits` | [[1p]], [[2q]] | bit-range reads on partially-unknown values + carry expansion |
+| `prp-valid_unknown_bits` | [[2q]] + typesystem | bit-range reads + u8 storage width enforcement (for `ones = v\|0xff`); 1p HLOP arithmetic itself has landed |
 | `prp-wrap_checks` | wrap-policy reassignment (`x:u4:[wrap] = …` sequential type-changing writes) |
 | `prp-wrap_complex` | wrap/sat policy fold on already-typed values |

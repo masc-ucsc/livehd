@@ -1,7 +1,7 @@
 /*
 :name: fcall_rename_deep
 :type: comptime
-:verifier_pass: 9
+:verifier_pass: 8
 :verifier_fail: 0
 */
 

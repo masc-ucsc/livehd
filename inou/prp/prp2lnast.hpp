@@ -70,6 +70,15 @@ protected:
   };
   std::unordered_map<std::string, std::vector<Comptime_tuple_entry>> comptime_tuples_;
 
+  // Stack of "formal parameter widths in scope" — pushed by process_lambda_statement
+  // before emitting the body, popped after. Each frame maps a typed argument
+  // name (`x:u6`, `y:s8`, …) to its declared bits. parse_int_const consults
+  // this so `for i in 0..<x.[bits]` can unroll at parse time even though
+  // `x.[bits]` isn't a literal in the source — the producer knows the width
+  // from the formal-parameter type. Outer frames are visible to inner scopes
+  // (lexical lookup); inner frames shadow on name collision.
+  std::vector<std::unordered_map<std::string, int64_t>> param_bits_stack_;
+
   // Top
   void process_description();
 
@@ -109,6 +118,16 @@ protected:
   Lnast_node match_expr_to_node(TSNode n, bool need_result = true);
   Lnast_node bit_selection_to_node(TSNode n);
   Lnast_node member_selection_to_node(TSNode n);
+
+  // Bit-range mask synthesis shared between bit_selection reads
+  // (`bit_selection_to_node`) and bit-range writes (the `bit_selection` arm of
+  // `process_lvalue_for_assign`). `sel_node` is the `select` TS child of a
+  // `bit_selection`. Returns the Lnast_node to use as the mask operand of
+  // `get_mask` / `set_mask`: a `Const` when both range endpoints are
+  // integer-literal (encoded as a bitmask via `Dlop::get_mask_value`), or a
+  // ref to a freshly-emitted `range` / `shl` LNAST stmt for dynamic cases.
+  Lnast_node compute_bit_mask_ref(TSNode sel_node);
+  Lnast_node emit_range_node(const Lnast_node& start, const Lnast_node& end);
   Lnast_node attribute_read_to_node(TSNode n);
   Lnast_node dot_expression_to_node(TSNode n);
   Lnast_node function_call_expr_to_node(TSNode n);
