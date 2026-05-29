@@ -201,6 +201,27 @@ cross-file dependencies stay visible.
     strings tolerating an escaped quote inside the body
     (`"tag=\"{tag}\""`); (d) `.[size]` attribute on string values.
 
+- **2s** Comptime-fold direct builtin cell calls — **needs hlop sync**
+  (stub; flesh out before implementation). The library-level cell
+  invocation form `__sum`/`__sub`/`__mult`/`__and`/`__or`/`__xor`/
+  `__shl`/`__sra`/`__get_mask`/`__set_mask`/`__sext`/`__zext`/`__ror`/
+  `__rand`/`__rxor`/`__mux`/… currently returns `unknown` in constprop:
+  the `#`-syntax LNAST ops fold, but the explicit `__cell(args)`
+  func-call form is not evaluated.
+  - **hlop sync is the crux.** The fold must mirror each cell's exact
+    `Dlop::*_op` semantics (single source of truth — do not reimplement;
+    cf. [[constprop_delegate_to_dlop]] rule), and the `__cell`
+    name↔Dlop-op mapping plus the arg/pin ABI must stay in lockstep
+    with hlop's cell definitions. Pin the hlop commit when this lands.
+  - Reads the typesystem envelope ([[1t]]/[[1v]]) for width-correct
+    results.
+  - Fixes the bulk of `prp-cellmap_comb` / `prp-cellmap_misc` `unknown`s
+    (the `cell_*` wrapper-comb halves are [[1i]]; this owns the direct
+    `__cell` calls).
+  - **Overlap to coordinate:** `__hotmux` is also named under [[2r]]
+    (unique-if/hotmux dispatch). Decide which task owns `__hotmux` so it
+    isn't double-implemented.
+
 ## Group 3 — depends on Group 2
 
 - **3k** Automate doc-example ingestion: `extract.rb` (or equivalent)
@@ -235,30 +256,31 @@ cross-file dependencies stay visible.
   `inou/prp`, upass, and lgraph-pass diagnostics from
   [TODO_livehd.md](TODO_livehd.md) **3f**.
 
-## Failing-test → TODO mapping (snapshot 2026-05-27)
+## Failing-test → TODO mapping (snapshot 2026-05-29)
 
 Each `bazel test -c dbg //...` failure mapped to the TODO entry whose
 landing should fix it. When more than one entry is listed, the test
-needs all of them.
+needs all of them. Current verifier tally is shown as `pass/fail/unknown`.
 
-| Failing test | TODO entry | What it needs |
-| --- | --- | --- |
-| `prp-bitreduce` | [[2q]] | reductions `#\|`/`#&`/`#^`/`#+` |
-| `prp-bitreverse` | [[2q]] | bit-range read/write (`t#[i]=…`) — frontend errors on the lvalue lowering |
-| `prp-bitset` | [[2q]] | bit-range write `r#[i]=…`, `r#[lo..=hi]=…` |
-| `prp-cellmap_comb` | [[2q]] | `t#[0..=3]` bit-range read (front-end currently errors `'t#[0..=3]' is not a valid identifier`) |
-| `prp-cellmap_misc` | [[2q]] | `a#sext[0..=7]`, `a#[4..=7]` plus comptime fold of `__mux`/`__hotmux`/`__get_mask` direct calls |
-| `prp-enum_color` | [[2l]], [[1k]] | enum with associated setters/methods |
-| `prp-enum_hier` | [[2l]] | nested / hierarchical enums |
-| `prp-enum_simple` | [[2l]] | base enum parsing + comptime tags |
-| `prp-enum_types` | [[2l]] | typed enum interplay with `does` |
-| `prp-fcall5b` | [[1r]] | nested fcall-return bundle unwrap (non-rename) |
-| `prp-fcall_rename_deep` | [[1r]] | rename through deep fcall-return bundles |
-| `prp-formux` | [[2q]] | `sel#[0]=…` bit-range write |
-| `prp-hotmux_unique_if` | [[2r]] | comptime fold of `unique if` chain + `__hotmux` direct call |
-| `prp-match_arms_mixed` | [[2r]] | mixed match-arm prefixes + tuple `case` patterns (verifier count mismatch) |
-| `prp-setter_complex` | [[1k]] | decorator-init implicit setter dispatch on `x:Tup = (…)` |
-| `prp-tuple_decorator_complex` | [[1k]] | tuple-decorator init triggering setter |
-| `prp-valid_unknown_bits` | [[2q]] + typesystem | bit-range reads + u8 storage width enforcement (for `ones = v\|0xff`); 1p HLOP arithmetic itself has landed |
-| `prp-wrap_checks` | wrap-policy reassignment (`x:u4:[wrap] = …` sequential type-changing writes) |
-| `prp-wrap_complex` | wrap/sat policy fold on already-typed values |
+**Landed since the 2026-05-27 snapshot (removed from the list):**
+`prp-bitreduce`, `prp-bitset` (bit-range read/write, reductions,
+popcount), `prp-fcall5b`, `prp-fcall_rename_deep` ([[1r]] fcall-return
+unwrap). Their bit ops landed via the work folded into [[1t]].
+
+| Failing test | now | TODO entry | What it still needs |
+| --- | --- | --- | --- |
+| `prp-bitreverse` | 3/7/0 | [[1i]] + [[1t]] | comb-inline of `reverse()`/`sreverse()` + `for i in 0..<x.[bits]` unroll; bit ops themselves fold once the index is constant |
+| `prp-cellmap_comb` | 49/3/52 | [[1i]] + [[2s]] + [[1t]] | comb-inline (`cell_*`) + direct builtin `__cell` fold ([[2s]], hlop sync); the 3 **fails** are `~a` on `:u8` not masked to width ([[1t]]) |
+| `prp-cellmap_misc` | 8/0/7 | [[1i]] + [[2s]] | comb-inline (`cell_*`) + direct builtin `__cell` fold ([[2s]], hlop sync); no fails left, 7 unknown |
+| `prp-enum_color` | 0/1/2 | [[2l]], [[1k]] | enum with associated setters/methods |
+| `prp-enum_hier` | 0/0/6 | [[2l]] | nested / hierarchical enums |
+| `prp-enum_simple` | 0/0/9 | [[2l]] | base enum parsing + comptime tags |
+| `prp-enum_types` | 0/0/0 | [[2l]] | typed enum interplay with `does` (casserts unreached) |
+| `prp-formux` | 0/0/0 | [[1i]], [[2r]] | comb-inline + `for…in (tuple)` unroll + `__hotmux` fold (casserts unreached) |
+| `prp-hotmux_unique_if` | 6/0/2 | [[2r]] | comptime fold of `unique if` chain + `__hotmux` direct call |
+| `prp-match_arms_mixed` | 5/0/0 | [[2r]] | mixed match-arm prefixes + tuple `case` patterns (one cassert not counted) |
+| `prp-setter_complex` | 2/2/0 | [[1k]] | decorator-init implicit setter dispatch on `x:Tup = (…)` |
+| `prp-tuple_decorator_complex` | 0/2/0 | [[1k]] | tuple-decorator init triggering setter |
+| `prp-valid_unknown_bits` | 9/1/0 | [[1t]] | `:u8` storage-width enforcement for `ones = v\|0xff` (the bit-range casserts now pass) |
+| `prp-wrap_checks` | 3/1/0 | [[1t]] | `wrap`-policy reassignment + masking to declared width (test's `verifier_pass` may also need a refresh) |
+| `prp-wrap_complex` | 9/1/0 | [[1t]] | `wrap`/`sat` fold on already-typed values |

@@ -35,13 +35,12 @@ failures cluster by root cause:
 
 | Cluster | Tests | Root cause | Blocker / task |
 |---|---|---|---|
-| **A. Bit-range / bit-level ops** | `prp-bitreduce`, `prp-bitreverse`, `prp-bitset`, `prp-cellmap_comb`, `prp-cellmap_misc`, `prp-formux`, `prp-valid_unknown_bits` | prp2lnast leaves `t#[0..=3]`, `a#sext[0..=7]`, `sel#[0]=…` etc. as raw text inside refs (`lnastfmt` flags `'t#[0..=3]' is not a valid identifier`); no LNAST bit-range read/write/reduce/extend ops yet | **2q** (Group 2) |
+| **A. Bit-range / bit-level ops** | `prp-bitreduce` ✓, `prp-bitset` ✓, `prp-cellmap_comb`, `prp-cellmap_misc`, `prp-formux`, `prp-bitreverse`, `prp-valid_unknown_bits` | Bit-range read/write, reductions, popcount, and const-mask `#sext`/`#zext` **landed** (2026-05-28/29). Residual: non-const-mask `#sext` + storage width (**1t**), `.[bits]`-driven loops / comb-inline (**1i**), direct builtin `__cell` fold (**2s**, hlop sync) | **1t** + **1i** + **2s** |
 | **B. Enum semantics** | `prp-enum_color`, `prp-enum_hier`, `prp-enum_simple`, `prp-enum_types` | Enum declarations / typed-variant matching / hierarchical enum scoping not implemented in prp2lnast or constprop | New entry (not in current TODO_prp.md Group 1); track separately |
 | **C. Match / hotmux dispatch** | `prp-hotmux_unique_if`, `prp-match_arms_mixed` | Comptime fold of `unique if` chains + direct `__hotmux(...)` call; mixed match-arm prefixes (`case`+`==` mix) + tuple `case` patterns; verifier count mismatch | **2r** (Group 2) |
 | **D. Decorator-init / setter** | `prp-setter_complex`, `prp-tuple_decorator_complex` | 1k partial landed (setter dispatch infrastructure + `cassert(self.v == "")` body folds). Missing: (1) scalar-to-tuple coercion for `x = "Padua"` on a `:Tup` var; (2) positional setter args routed from init tuple `(1, 2)` to setter params `(x, y)`; (3) getter dispatch for `p['x']` and `p.x` field access | **1k** extension (more invasive) |
-| **E. Wrap / sat / typed reassignment** | `prp-wrap_checks`, `prp-wrap_complex` | wrap-policy on sequential type-changing writes (`x:u4:[wrap] = …`); wrap/sat fold on already-typed values | New entry (not labeled in current TODO_prp.md) |
-| **F. Typesystem storage width** | `prp-typesystem`, `prp-valid_unknown_bits` (`ones == 0xff` cassert) | `v:u8` declaration doesn't constrain storage width — `v` stays sign-extended, so `v \| 0xff` produces `-1` instead of `0xff`; typesystem-storage enforcement missing | New entry; called out in `TODO_prp.md` 1p footnote |
+| **E. Wrap / sat / typed reassignment + storage width** | `prp-wrap_checks`, `prp-wrap_complex`, `prp-typesystem`, `prp-valid_unknown_bits` (`ones == 0xff`) | `wrap`/`sat` on typed writes; `:uN`/`:sN` declarations don't enforce storage width — `v:u8` stays sign-extended so `v \| 0xff` → `-1` not `0xff`. (Former clusters E + F.) | **1t** |
 
-`prp-valid_unknown_bits` appears in clusters **A** *and* **F** — its
-remaining 4 unresolved casserts split: 3 are 2q-gated bit-ranges, 1 is
-the u8 storage-width issue.
+`prp-valid_unknown_bits`'s bit-range casserts now pass (cluster A landed);
+its one remaining fail is the `ones == 0xff` storage-width issue under
+**1t**.
