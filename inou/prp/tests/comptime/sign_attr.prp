@@ -1,0 +1,21 @@
+/*
+:name: sign_attr
+:type: parsing lnast comptime
+:verifier_pass: 4
+:verifier_fail: 0
+*/
+
+// Typesystem redesign: `.[sign]` is a derived read (signed ⇔ declared min < 0),
+// computed from the type — never a stored attribute.
+
+const a:u8 = 5
+cassert(!a.[sign])      // unsigned → not signed
+
+const b:s4 = -1
+cassert(b.[sign])        // signed → signed
+
+const c:bool = true
+cassert(c.[sign])        // bool is a 1-bit signed value (min=-1) → signed
+
+const d:u3 = 2
+cassert(!d.[sign])
