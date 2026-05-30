@@ -250,7 +250,7 @@ void uPass_bitwidth::process_func_call() {
   }
 
   while (move_to_sibling()) {
-    if (!is_type(Lnast_ntype::Lnast_ntype_assign)) {
+    if (!is_type(Lnast_ntype::Lnast_ntype_store)) {
       continue;
     }
     if (!move_to_child()) {

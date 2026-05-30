@@ -58,7 +58,9 @@ std::string uPass_attributes::normalize_name(std::string_view name) { return std
 uPass_attributes::Op_view uPass_attributes::scan_op() {
   Op_view view;
 
-  const bool is_assign = is_type(Lnast_ntype::Lnast_ntype_assign);
+  // Task 1t — a 0-level `store` reaching here (routed through process_assign)
+  // is the scalar-write/alias shape, exactly like `assign`.
+  const bool is_assign = is_type(Lnast_ntype::Lnast_ntype_store) || is_type(Lnast_ntype::Lnast_ntype_store);
 
   if (!move_to_child()) {
     return view;
@@ -138,8 +140,15 @@ void uPass_attributes::on_assign_like(bool is_assign_node) {
   // requires a policy on view.lhs. If no wrap/sat policy is in scope at all,
   // resolving rhs_value through runner_fold_fn is wasted work — skip the
   // Dlop parse / fold lookup on the bulk-arithmetic path.
+  // Task 1t — also materialize the RHS value when the LHS has an unsigned
+  // declared type, so a known-negative comptime literal can be coerced to its
+  // unsigned bit pattern (e.g. `v:u8 = 0sb1001_0111` ⇒ 151). Checked via the
+  // already-resolved view.lhs; null/typed-tmp LHS keeps the bulk fast path.
+  const auto* lhs_ti_for_coerce = is_assign_node ? lookup_type_info(view.lhs) : nullptr;
+  const bool  lhs_unsigned      = lhs_ti_for_coerce != nullptr && lhs_ti_for_coerce->has_type_spec
+                            && lhs_ti_for_coerce->kind == Numeric_kind::unsigned_int && lhs_ti_for_coerce->bits != 0;
   const bool need_rhs_value = is_assign_node
-                              && (!wrap_policy.empty() || !sat_policy.empty());
+                              && (!wrap_policy.empty() || !sat_policy.empty() || lhs_unsigned);
   if (is_assign_node) {
     move_to_child();
     if (move_to_sibling()) {
@@ -189,6 +198,48 @@ void uPass_attributes::on_assign_like(bool is_assign_node) {
       } else if (inserted) {
         mark_changed();
       }
+    }
+  } else if (lhs_unsigned && !was_assigned(view.lhs) && rhs_value
+             && rhs_value->bit_test(static_cast<int>(lhs_ti_for_coerce->bits))
+             && !rhs_value->unknown_bit_test(static_cast<int>(lhs_ti_for_coerce->bits))) {
+    // `!was_assigned` restricts this to the FIRST write (the declaration's
+    // initializer). Per-statement `wrap x = …` / `sat x = …` are always
+    // reassignments (x was declared+initialized first) and emit their
+    // wrap/sat attr_set AFTER this store — so coercing here would pre-mask the
+    // value out from under sat (e.g. `sat z = <neg>` must clamp to 0, not mask
+    // to its low bits). Skipping reassignments leaves wrap/sat in control.
+    // Task 1t — implicit type coercion: a comptime value that sign-extends a
+    // KNOWN 1 past the declared width (i.e. a known-negative bit pattern, even
+    // with interior unknowns) stored to an unsigned-typed var reads as its
+    // unsigned N-bit pattern. `v:u8 = 0sb1001_0111` ⇒ 151, and
+    // `v:u8 = 0sb1?01_?000` ⇒ 0ub1?01?000 (so `v | 0xff == 0xff`).
+    //   * `bit_test(bits)` true + `unknown_bit_test(bits)` false = the
+    //     sign-extension past width N is a known 1. An unknown sign bit
+    //     (`0sb?` → `v1:u32`) has `unknown_bit_test` true and is SKIPPED, so a
+    //     deliberate 1-bit unknown keeps its natural width (see valid_simple).
+    //   * Uses and_op (NOT wrap_to_unsigned, which bails on any unknown) so the
+    //     interior-unknown case coerces while the known sign bits clear.
+    // Wrap/sat policy takes precedence (handled above).
+    if (rhs_value->is_negative()) {
+      // Known-negative bit pattern → reinterpret as the unsigned N-bit value.
+      Const out = *rhs_value->and_op(*Dlop::get_mask_value(static_cast<int>(lhs_ti_for_coerce->bits)));
+      if (!out.is_invalid() && !out.same_repr(*rhs_value)) {
+        auto [iter, inserted] = tmp_fold.emplace(view.lhs, out);
+        if (!inserted && !iter->second.same_repr(out)) {
+          iter->second = out;
+          mark_changed();
+        } else if (inserted) {
+          mark_changed();
+        }
+      }
+    } else if (!rhs_value->has_unknowns()) {
+      // Task 1t Cluster-F — a KNOWN positive comptime value whose magnitude
+      // exceeds the declared unsigned width (bit `bits` is set ⇒ value ≥ 2^N >
+      // max) with no `wrap`/`sat` qualifier is a hard compile error (overflow
+      // must be explicit). The negative case above is a legal reinterpretation,
+      // not an overflow; values that fit (bit `bits` clear) never reach here.
+      upass::error("uPass_attributes: comptime write to `{}` overflows its declared {}-bit width without wrap/sat\n",
+                   view.lhs, lhs_ti_for_coerce->bits);
     }
   }
   record_assign(view.lhs, rhs_is_nil);

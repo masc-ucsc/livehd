@@ -81,6 +81,13 @@ protected:
 
   // Top
   void process_description();
+  // Task 1t — post-build pass: rewrite statement-level assign/tuple_set → store.
+  // Task 1t — post-build pass: merge the declaration cluster
+  // (attr_set(type)+attr_set(comptime)+type_spec) into one `declare(var, TYPE,
+  // const(mode))`. Rebuilds the body into a fresh tree (replace_body) since
+  // in-place subtree deletion is avoided on the LNAST tree. The value (if any)
+  // stays a separate `store`.
+  void rewrite_decls_to_declare();
 
   // Statements
   void process_statement(TSNode n);
@@ -141,6 +148,14 @@ protected:
   void emit_type_spec(const Lnast_node& target, TSNode type_cast_node);
   void emit_attribute_list(const Lnast_node& target, TSNode attribute_list_node);
   void emit_type_expr(const Lnast_nid& type_index, TSNode type_node);
+  // Task 1t — the integer type-call `int(max=,min=,bits=)` / `uint(bits=)`.
+  // Today the grammar lexes `int`/`uint`/`uN` as keyword tokens, so a
+  // parenthesized argument list does NOT match `function_call_type`; it lands
+  // as an ERROR node wrapping the keyword plus a bare `(…)` tuple. This helper
+  // recognizes that shape on a type_cast and emits a single
+  // `type_spec(target, prim_type_int(max,min))`, the canonical integer type.
+  // Returns true when it handled the type (caller skips the legacy lowering).
+  bool emit_int_type_call(const Lnast_node& target, TSNode type_cast_node);
   // Comptime vector/matrix dimension extraction for a type_cast whose `type`
   // field is an `array_type` chain (e.g. `:[N][M]T`). Returns dims outer→inner
   // when every dimension is an integer-literal length; empty otherwise.

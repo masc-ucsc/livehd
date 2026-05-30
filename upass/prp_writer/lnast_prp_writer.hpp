@@ -58,7 +58,7 @@ private:
   void write_top();
   void write_stmts();
   void write_if();
-  void write_assign();
+  void write_store();  // task 1t — store(var, level0..levelN, value)
   void write_ref();
   void write_const();
   void write_cassert();
@@ -66,7 +66,6 @@ private:
   void write_func_def();
   void write_tuple_add();
   void write_tuple_get();
-  void write_tuple_set();
   void write_attr_set();
   void write_attr_get();
   void write_delay_assign();

@@ -260,6 +260,10 @@ std::optional<Const> uPass_attributes::derive_max(std::string_view base) const {
   // gives a value; bool has its own envelope; everything else (`:int`,
   // `:string`, untyped) reads nil — no value-based fallback.
   if (auto* ti = lookup_type_info(base); ti && ti->has_type_spec) {
+    // Task 1t — prim_type_int range is the single source of truth.
+    if (ti->range_max) {
+      return *ti->range_max;
+    }
     if (ti->kind == Numeric_kind::unsigned_int && ti->bits != 0) {
       return max_unsigned(ti->bits);
     }
@@ -283,6 +287,15 @@ std::optional<Const> uPass_attributes::derive_min(std::string_view base) const {
     }
   }
   if (auto* ti = lookup_type_info(base); ti && ti->has_type_spec) {
+    // Task 1t — prim_type_int range is the single source of truth.
+    if (ti->range_min) {
+      return *ti->range_min;
+    }
+    // A prim_type_int with only `max` pinned (e.g. `int(max=3)`) leaves min
+    // unbounded ⇒ nil, even though a legacy uN/sN kind may also be recorded.
+    if (ti->range_max && !ti->range_min) {
+      return std::nullopt;
+    }
     if (ti->kind == Numeric_kind::unsigned_int && ti->bits != 0) {
       return *Dlop::create_integer(0);
     }
@@ -572,12 +585,13 @@ void uPass_attributes::process_type_spec() {
   // Layout (prp2lnast::emit_type_spec):
   //   type_spec
   //     ref(target)
-  //     <prim_type_uint | prim_type_sint | prim_type_boolean | … |
-  //      comp_type_array | unknown_type>
-  //       [ const(width) ]            // primitive only
+  //     <prim_type_int | prim_type_uint | prim_type_sint | prim_type_boolean |
+  //      … | comp_type_array | unknown_type>
+  //       [ const(width) ]                // prim_type_uint/sint (legacy)
+  //       [ const(max) const(min) ]       // prim_type_int (task 1t); "nil" = unbounded
   //
-  // We extract the kind and (when present) the explicit width, then merge
-  // it into type_info_map for the target.
+  // We extract the kind and (when present) the explicit width or range, then
+  // merge it into type_info_map for the target.
   if (!move_to_child()) {
     return;
   }
@@ -586,31 +600,13 @@ void uPass_attributes::process_type_spec() {
     move_to_parent();
     return;
   }
-  Numeric_kind kind = Numeric_kind::none;
-  uint32_t     bits = 0;
+  Numeric_kind         kind = Numeric_kind::none;
+  uint32_t             bits = 0;
+  std::optional<Const> range_max;
+  std::optional<Const> range_min;
+  bool                 is_real_type = false;
   if (move_to_sibling()) {
-    auto t = get_raw_ntype();
-    if (Lnast_ntype::is_prim_type_uint(t)) {
-      kind = Numeric_kind::unsigned_int;
-    } else if (Lnast_ntype::is_prim_type_sint(t)) {
-      kind = Numeric_kind::signed_int;
-    } else if (Lnast_ntype::is_prim_type_boolean(t)) {
-      kind = Numeric_kind::boolean;
-    } else if (Lnast_ntype::is_prim_type_string(t)) {
-      kind = Numeric_kind::string;
-    }
-    if (kind == Numeric_kind::unsigned_int || kind == Numeric_kind::signed_int) {
-      // The width const is a child of the prim_type_* node.
-      if (move_to_child()) {
-        if (Lnast_ntype::is_const(get_raw_ntype())) {
-          auto v = Dlop::from_pyrope(current_text());
-          if (v->is_i()) {
-            bits = static_cast<uint32_t>(v->to_i());
-          }
-        }
-        move_to_parent();
-      }
-    }
+    read_scalar_type_at_cursor(kind, bits, range_max, range_min, is_real_type);
   }
   move_to_parent();
 
@@ -621,6 +617,162 @@ void uPass_attributes::process_type_spec() {
   }
   if (bits != 0) {
     ti.bits = bits;
+  }
+  if (range_max) {
+    ti.range_max = range_max;
+  }
+  if (range_min) {
+    ti.range_min = range_min;
+  }
+}
+
+void uPass_attributes::read_scalar_type_at_cursor(Numeric_kind& kind, uint32_t& bits, std::optional<Const>& range_max,
+                                                  std::optional<Const>& range_min, bool& is_real_type) {
+  auto t = get_raw_ntype();
+  if (Lnast_ntype::is_prim_type_int(t)) {
+    // Task 1t — the canonical integer type carries its `(max,min)` range as
+    // up to two const children; a "nil" (non-integer) child means that bound
+    // is unbounded. (uN/sN now lower to this too — the legacy
+    // prim_type_uint/sint width form is gone.)
+    is_real_type = true;
+    if (move_to_child()) {
+      if (Lnast_ntype::is_const(get_raw_ntype())) {
+        auto v = Dlop::from_pyrope(current_text());
+        if (v->is_i()) {
+          range_max = *v;
+        }
+      }
+      if (move_to_sibling() && Lnast_ntype::is_const(get_raw_ntype())) {
+        auto v = Dlop::from_pyrope(current_text());
+        if (v->is_i()) {
+          range_min = *v;
+        }
+      }
+      move_to_parent();
+    }
+    // Recover the legacy kind/bits view from the range so wrap/sat narrowing
+    // (which reads `kind`+`bits`) keeps working. Signedness ⇐ min<0; bits ⇐
+    // both bounds known.
+    if (range_min) {
+      kind = range_min->is_negative() ? Numeric_kind::signed_int : Numeric_kind::unsigned_int;
+    }
+    if (range_max && range_min && range_max->is_i() && range_min->is_i()) {
+      const int64_t mx = range_max->to_i();
+      const int64_t mn = range_min->to_i();
+      if (mn >= 0) {
+        bits = mx > 0 ? static_cast<uint32_t>(std::bit_width(static_cast<uint64_t>(mx))) : 0;
+      } else {
+        const uint32_t b_pos = mx >= 0 ? static_cast<uint32_t>(std::bit_width(static_cast<uint64_t>(mx))) + 1 : 1;
+        const uint32_t b_neg = static_cast<uint32_t>(std::bit_width(static_cast<uint64_t>(-mn - 1))) + 1;
+        bits                 = std::max(b_pos, b_neg);
+      }
+    }
+  } else if (Lnast_ntype::is_prim_type_bool(t)) {
+    kind         = Numeric_kind::boolean;
+    is_real_type = true;
+  } else if (Lnast_ntype::is_prim_type_string(t)) {
+    kind         = Numeric_kind::string;
+    is_real_type = true;
+  }
+}
+
+void uPass_attributes::process_declare() {
+  // Layout (task 1t): declare( ref(var), TYPE, const(mode) [, value] )
+  //   TYPE  : prim_type_int/uint/sint/boolean/string / comp_type_* /
+  //           none_type (no `:type` annotation).
+  //   mode  : space-joined tokens, storage first: "mut" | "const" | "reg" |
+  //           "await" | "" + optional " comptime".  Mirrors the old
+  //           attr_set(type,KIND) + attr_set(comptime,true) pair.
+  //   value : optional init — IGNORED here (it stays a separate `store`; the
+  //           value/range are recorded by constprop/bitwidth on that store).
+  if (!move_to_child()) {
+    return;
+  }
+  auto target = normalize_name(current_text());
+  if (target.empty()) {
+    move_to_parent();
+    return;
+  }
+  Numeric_kind         kind = Numeric_kind::none;
+  uint32_t             bits = 0;
+  std::optional<Const> range_max;
+  std::optional<Const> range_min;
+  bool                 is_real_type = false;
+  Decl_kind            decl         = Decl_kind::unknown;
+  bool                 comptime     = false;
+  bool                 want_wrap    = false;
+  bool                 want_sat     = false;
+  if (move_to_sibling()) {  // TYPE
+    read_scalar_type_at_cursor(kind, bits, range_max, range_min, is_real_type);
+    if (move_to_sibling() && Lnast_ntype::is_const(get_raw_ntype())) {  // mode
+      auto mode = current_text();
+      // Split on spaces; storage token first, optional "comptime"/"wrap"/"sat".
+      size_t start = 0;
+      while (start <= mode.size()) {
+        size_t sp  = mode.find(' ', start);
+        auto   tok = mode.substr(start, sp == std::string_view::npos ? std::string_view::npos : sp - start);
+        if (tok == "mut") {
+          decl = Decl_kind::mut_kind;
+        } else if (tok == "const") {
+          decl = Decl_kind::const_kind;
+        } else if (tok == "reg") {
+          decl = Decl_kind::reg_kind;
+        } else if (tok == "await") {
+          decl = Decl_kind::await_kind;
+        } else if (tok == "comptime") {
+          comptime = true;
+        } else if (tok == "wrap") {
+          want_wrap = true;
+        } else if (tok == "sat") {
+          want_sat = true;
+        }
+        if (sp == std::string_view::npos) {
+          break;
+        }
+        start = sp + 1;
+      }
+    }
+  }
+  move_to_parent();
+
+  auto& ti = type_info_map[target];
+  // has_type_spec gates the declared-type-authoritative derive paths; only a
+  // concrete numeric/string type counts (matches the legacy behavior where an
+  // un-annotated decl emitted no type_spec).
+  if (is_real_type) {
+    ti.has_type_spec = true;
+  }
+  if (kind != Numeric_kind::none) {
+    ti.kind = kind;
+  }
+  if (bits != 0) {
+    ti.bits = bits;
+  }
+  if (range_max) {
+    ti.range_max = range_max;
+  }
+  if (range_min) {
+    ti.range_min = range_min;
+  }
+  if (decl != Decl_kind::unknown) {
+    ti.decl = decl;
+  }
+  if (comptime) {
+    ti.is_comptime = true;
+    attr_set_values[std::string(target)]["comptime"] = *Dlop::create_integer(1);
+  }
+  // Task 1t — a declaration-site `wrap`/`sat` in the mode is the STICKY overflow
+  // policy (every store to this var narrows). Set it directly from the declare
+  // node (replaces the old attr_set(wrap)-before-first-store + `was_assigned`
+  // sticky path). Per-statement `wrap x = v` still arrives as an after-store
+  // attr_set (one-shot, handled by Wrap_sat_handler).
+  if (want_wrap) {
+    set_wrap_policy(target);
+    attr_set_values[std::string(target)]["wrap"] = *Dlop::create_integer(1);
+  }
+  if (want_sat) {
+    set_sat_policy(target);
+    attr_set_values[std::string(target)]["saturate"] = *Dlop::create_integer(1);
   }
 }
 

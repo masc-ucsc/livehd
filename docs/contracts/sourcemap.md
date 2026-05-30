@@ -8,8 +8,10 @@ locations on every LNAST or LGraph node.
 
 The design goal is useful, stable source attribution for diagnostics,
 `sigref`, waveform click-through, hot-probe insertion, generated Verilog
-comments, and agent-editable debug output. It is not a promise of exact
-LLVM-style debug info after every optimization.
+comments, agent-editable debug output, and conversion to standard
+ECMA-426 source maps for tools that already understand JavaScript and
+TypeScript source maps. It is not a promise of exact LLVM-style debug
+info after every optimization.
 
 ## Core invariants
 
@@ -266,6 +268,275 @@ source map. The same machinery applies:
 Generated Verilog can emit source-map comments or sidecar references
 from these IDs.
 
+## Serialized sidecars
+
+The canonical serialized format is a LiveHD source-map sidecar, written
+next to each emitted artifact that needs persistent provenance. Use the
+extension `.lhsm.json` until the format is compacted or versioned
+elsewhere.
+
+The canonical sidecar stores the full LiveHD model:
+
+- File table: `FileId`, canonical path, optional content hash, optional
+  embedded content.
+- Scope table: `ScopeId` and interned lexical scope path.
+- Symbol table: `SymbolId`, source-level name, kind, declaration
+  `SourceId` when known.
+- Source entries: `SourceId`, original anchor or derived parent list,
+  derivation kind, query quality, optional `SymbolId`.
+- Artifact maps: textual generated spans or IR handles mapped to
+  `SourceId`.
+
+Field names should stay close to the ECMA-426 terminology where the
+meaning overlaps: `sources`, `sourcesContent`, `names`, `mappings`,
+`line`, and `column`. LiveHD-specific identity fields keep their LiveHD
+names: `source_id`, `file_id`, `scope_id`, `symbol_id`, `parents`,
+`kind`, and `quality`. Keeping the shared names aligned makes conversion
+mechanical and avoids inventing a second vocabulary for the same
+concepts.
+
+Line and column values in serialized text-facing records follow
+ECMA-426/source-map conventions: generated and original lines are
+0-based, columns are 0-based UTF-16 code-unit offsets. Canonical anchors
+still store byte offsets; line/column values are derived from each
+file's line table when exporting. Human-facing diagnostics can convert
+these to the usual 1-based line display at presentation time.
+
+## ECMA-426 interchange
+
+[ECMA-426](https://tc39.es/ecma426/) source maps are the standard
+interchange format for JavaScript and TypeScript tooling. LiveHD should
+emit them as a derived view for textual artifacts, not as the canonical
+store, because ECMA-426 maps a generated position to a single original
+position and optional name. It does not directly model multi-parent
+derivations, alias chains, optimized-away values, tombstones, or
+source-quality markers.
+
+For every textual egress artifact that is intended for humans or
+external tooling, emit both:
+
+```text
+top.v
+top.v.map
+top.v.lhsm.json
+```
+
+The `.map` file is an ECMA-426 source map. The `.lhsm.json` file is the
+canonical LiveHD sidecar. The generated artifact should include a
+source-map URL comment when the output language can carry comments
+without changing semantics:
+
+```verilog
+//# sourceMappingURL=top.v.map
+```
+
+The ECMA-426 map should contain only the lossy, broadly compatible
+projection:
+
+```json
+{
+  "version": 3,
+  "file": "top.v",
+  "sources": ["src/foo.prp"],
+  "sourcesContent": [null],
+  "names": ["alu.flag_z"],
+  "mappings": "...",
+  "x_livehd": {
+    "schema": 1,
+    "source_map": "top.v.lhsm.json",
+    "compilation_unit": "sha256:...",
+    "artifact": "top.v"
+  }
+}
+```
+
+All LiveHD-only metadata in an ECMA-426 map must live under
+`x_livehd`. Generic source-map consumers can ignore this extension, while
+LiveHD-aware tools can use it to open the canonical sidecar.
+
+Conversion from the canonical LiveHD sidecar to ECMA-426 follows these
+rules:
+
+- Exact original anchors export directly to `sources`, `mappings`, and
+  `names`.
+- Derived, alias, inline, and fallback entries choose one display anchor
+  for the ECMA-426 segment. The ranking is the same one used by source
+  queries: prefer `exact`, then closest user-visible `alias` or
+  `derived`, then `fallback`, then `unknown`.
+- Full parent lists, derivation kind, query quality, tombstones, and
+  reverse-query data stay in `.lhsm.json`; they are not encoded into
+  `names`.
+- `names` contains source-level names such as symbols, ports, registers,
+  memories, or user-visible generated names. It must not use `SourceId`
+  as the primary name encoding.
+- `sources` uses stable repo-relative or input-package-relative paths
+  when possible. Absolute paths are avoided unless the input itself was
+  absolute and no stable workspace-relative root is known.
+- `sourcesContent` is optional and defaults to `null` for persistent
+  build artifacts. Tools may opt in to embedding content for hermetic
+  debug bundles.
+- Concatenated outputs use an ECMA-426 index source map with `sections`
+  when preserving per-file offsets is clearer than flattening all
+  mappings into one artifact map.
+
+Conversion in the other direction is intentionally partial. Importing a
+plain ECMA-426 map can recover file, line, column, source content, and
+optional names, but it cannot reconstruct LiveHD derivation metadata.
+Such imported entries get `quality: exact` for direct mappings and
+`kind: external` unless an `x_livehd.source_map` extension points to a
+canonical sidecar.
+
+## Worked Pyrope example
+
+This example shows how original Pyrope parsed by tree-sitter can map
+back from a final generated Pyrope artifact after LiveHD transformations.
+
+Original input, `orig.prp`:
+
+```pyrope
+comb inc(a) -> (y) {
+  y = a + 1
+}
+
+comb top(a) -> (z) {
+  z = inc(a)
+}
+```
+
+At ingress, tree-sitter gives byte ranges for the definitions. LiveHD
+creates original source entries once:
+
+```json
+{
+  "sources": [
+    {
+      "file_id": 1,
+      "path": "orig.prp",
+      "content_hash": "sha256:..."
+    }
+  ],
+  "entries": [
+    {
+      "source_id": 100,
+      "kind": "partition",
+      "file_id": 1,
+      "span": {
+        "start_byte": "<comb inc start>",
+        "end_byte": "<comb inc end>"
+      },
+      "name": "inc"
+    },
+    {
+      "source_id": 101,
+      "kind": "assignment",
+      "file_id": 1,
+      "span": {
+        "start_byte": "<y = a + 1 start>",
+        "end_byte": "<y = a + 1 end>"
+      },
+      "symbol_id": 10,
+      "name": "inc.y"
+    },
+    {
+      "source_id": 200,
+      "kind": "partition",
+      "file_id": 1,
+      "span": {
+        "start_byte": "<comb top start>",
+        "end_byte": "<comb top end>"
+      },
+      "name": "top"
+    },
+    {
+      "source_id": 201,
+      "kind": "assignment",
+      "file_id": 1,
+      "span": {
+        "start_byte": "<z = inc(a) start>",
+        "end_byte": "<z = inc(a) end>"
+      },
+      "symbol_id": 20,
+      "name": "top.z"
+    }
+  ]
+}
+```
+
+After inlining `inc` into `top`, a final Pyrope writer may emit:
+
+```pyrope
+comb top(a) -> (z) {
+  z = a + 1
+}
+```
+
+The final assignment is not a brand-new unrelated source location. It is
+a derived definition: the expression body comes from `inc.y`, and the
+placement/name comes from the call site assigning `top.z`.
+
+```json
+{
+  "entries": [
+    {
+      "source_id": 300,
+      "kind": "inline",
+      "quality": "derived",
+      "parents": [101, 201],
+      "symbol_id": 20,
+      "name": "top.z"
+    }
+  ],
+  "artifact_maps": [
+    {
+      "artifact": "final.prp",
+      "generated": {
+        "line": 1,
+        "column": 2,
+        "end_line": 1,
+        "end_column": 11
+      },
+      "source_id": 300
+    }
+  ]
+}
+```
+
+A LiveHD-aware query on `final.prp:2:3` resolves `source_id: 300`,
+then walks the parent list:
+
+```text
+final.prp:2:3  z = a + 1
+  derived inline result for top.z
+  call site: orig.prp:6  z = inc(a)
+  inlined body: orig.prp:2  y = a + 1
+```
+
+The ECMA-426 projection for the same final Pyrope keeps only one display
+anchor, because standard source maps cannot encode the full parent list.
+For this example, the display anchor is the call site, and the LiveHD
+extension points to the canonical sidecar:
+
+```json
+{
+  "version": 3,
+  "file": "final.prp",
+  "sources": ["orig.prp"],
+  "sourcesContent": [null],
+  "names": ["top.z"],
+  "mappings": "...",
+  "x_livehd": {
+    "schema": 1,
+    "source_map": "final.prp.lhsm.json",
+    "artifact": "final.prp"
+  }
+}
+```
+
+So generic source-map tooling can still jump from generated
+`final.prp` back to `orig.prp` at the selected display location, while
+LiveHD tooling can open `final.prp.lhsm.json` and recover both original
+parents.
+
 ## Runtime debug artifacts
 
 Runtime debug artifacts derived from the IR should carry a SourceId so
@@ -335,12 +606,15 @@ Rules:
 
 ## Open implementation choices
 
-- Exact serialized source-map format and on-disk layout.
+- Exact canonical `.lhsm.json` schema details and whether it stays JSON
+  or grows a compact binary encoding.
 - Implementation of the global source-map side maps (hash map keyed on
   HHDS position vs. flat_storage backing — `flat_storage` is reasonable
   here since SourceIds are persistent provenance, not pass-local
   transient state).
 - How LGraph names scope source-map lookup after hierarchy flattening.
 - Alias-closure query cap and ranking rules.
+- Exact ECMA-426 segment-density policy for generated Verilog: per
+  definition, per emitted statement, or per assign/wire declaration.
 - CI checks that every def-bearing node in a transformed tree or LGraph
   resolves to a SourceId.

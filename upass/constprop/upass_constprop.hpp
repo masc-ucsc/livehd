@@ -58,6 +58,7 @@ public:
   void process_stmts_post() override;
   void notify_uncertain_arm_begin() override { next_block_uncertain = true; }
   void notify_uncertain_arm_end() override { next_block_uncertain = false; }
+  void process_declare() override;
   void process_tuple_set() override;
   void process_tuple_get() override;
   void process_tuple_add() override;
@@ -118,6 +119,16 @@ protected:
   // `mut x:Tup = (v="")` triggers Tup.setter once at construction time;
   // a later `x = ...` is a plain reassign and must NOT refire the setter.
   std::unordered_set<std::string> setter_fired;
+
+  // Task 1t — declared UNSIGNED bit-width per var, recorded by process_declare
+  // from `declare(var, prim_type_uint(N) | prim_type_int(max,min≥0), …)`. Used
+  // to coerce a known-negative comptime literal to its unsigned N-bit pattern
+  // at the var's FIRST scalar write (`v:u8 = 0sb1001_0111` ⇒ 151), so
+  // constprop's OWN folding of later reads (`v | 0xff`) sees the unsigned
+  // value — not the raw signed literal. (Mirrors the attributes-side coercion
+  // in tmp_fold, but here it lands in constprop's symbol table where its own
+  // op-folding reads operands.) Signed/none-typed decls are not recorded.
+  std::unordered_map<std::string, uint32_t> decl_unsigned_bits_;
 
   auto current_bundle() { return st.get_bundle(current_text()); }
 

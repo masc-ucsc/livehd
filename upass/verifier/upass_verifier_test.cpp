@@ -96,7 +96,7 @@ TEST(UpassVerifier, BinaryWrongDestTypeThrows) {
 TEST(UpassVerifier, WellFormedUnaryNoThrow) {
   VerifierFixture f;
   // assign ref("dst") const(5)   ← exactly 2 children
-  auto op = f.ln->add_child(f.stmts_nid, Lnast_ntype::create_assign());
+  auto op = f.ln->add_child(f.stmts_nid, Lnast_ntype::create_store());
   f.ln->add_child(op, Lnast_node::create_ref("dst"));
   f.ln->add_child(op, Lnast_node::create_const(int64_t(5)));
 
@@ -110,7 +110,7 @@ TEST(UpassVerifier, WellFormedUnaryNoThrow) {
 TEST(UpassVerifier, UnaryExtraChildThrows) {
   VerifierFixture f;
   // assign ref("dst") const(5) const(6)   ← 3 children — extra
-  auto op = f.ln->add_child(f.stmts_nid, Lnast_ntype::create_assign());
+  auto op = f.ln->add_child(f.stmts_nid, Lnast_ntype::create_store());
   f.ln->add_child(op, Lnast_node::create_ref("dst"));
   f.ln->add_child(op, Lnast_node::create_const(int64_t(5)));
   f.ln->add_child(op, Lnast_node::create_const(int64_t(6)));

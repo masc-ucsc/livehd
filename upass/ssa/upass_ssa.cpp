@@ -2,22 +2,27 @@
 
 #include "upass_ssa.hpp"
 
+#include <bit>
 #include <format>
+#include <optional>
 #include <string>
 
 #include "absl/container/flat_hash_map.h"
 #include "absl/container/flat_hash_set.h"
+#include "const.hpp"
 #include "lnast_ntype.hpp"
 
 namespace {
 // Returns true for LNAST statement types whose first child is the write
 // destination (LHS) and whose remaining children are read operands (RHS).
-// This range covers: assign, dp_assign, delay_assign, all arithmetic/logic/
-// comparison/shift/bit-manipulation ops up to `ge` inclusive.
+// This range covers: dp_assign, declare, store, delay_assign, all arithmetic/
+// logic/comparison/shift/bit-manipulation ops up to `ge` inclusive. (Task 1t —
+// `assign` was deleted; `dp_assign` is now the low anchor. store/declare are in
+// range; the caller excludes declare + store-as-tuple_set from versioning.)
 // Excluded: if, for, while, func_*, stmts, io, top, ref, const, tuple_*,
 // attr_*, cassert, type_*, and all type-leaf nodes.
 constexpr bool stmt_has_dest(Lnast_ntype::Lnast_ntype_int t) {
-  return t >= Lnast_ntype::Lnast_ntype_assign && t <= Lnast_ntype::Lnast_ntype_ge;
+  return t >= Lnast_ntype::Lnast_ntype_dp_assign && t <= Lnast_ntype::Lnast_ntype_ge;
 }
 
 // Parse the bits/is_signed from a prim_type_uint/prim_type_sint subtree
@@ -32,22 +37,36 @@ Type_info type_info_from(const std::shared_ptr<Lnast>& lnast, Lnast_nid type_nid
     return ti;
   }
   const auto tty = lnast->get_type(type_nid);
-  if (Lnast_ntype::is_prim_type_uint(tty)) {
-    ti.is_signed = false;
-  }
-  if (Lnast_ntype::is_prim_type_uint(tty) || Lnast_ntype::is_prim_type_sint(tty)) {
-    auto wnid = lnast->get_first_child(type_nid);
-    if (!wnid.is_invalid() && Lnast_ntype::is_const(lnast->get_type(wnid))) {
-      auto    txt    = lnast->get_name(wnid);
-      int32_t parsed = 0;
-      for (char c : txt) {
-        if (c < '0' || c > '9') {
-          parsed = 0;
-          break;
-        }
-        parsed = parsed * 10 + (c - '0');
+  if (Lnast_ntype::is_prim_type_int(tty)) {
+    // Task 1t — canonical integer: derive bits/signed from the (max,min)
+    // range children ("nil" = unbounded). signed ⇐ min<0; bits ⇐ both known.
+    auto                 max_nid = lnast->get_first_child(type_nid);
+    std::optional<Const> max_v;
+    std::optional<Const> min_v;
+    if (!max_nid.is_invalid() && Lnast_ntype::is_const(lnast->get_type(max_nid))) {
+      auto v = Dlop::from_pyrope(lnast->get_name(max_nid));
+      if (v->is_i()) {
+        max_v = *v;
       }
-      ti.bits = parsed;
+      auto min_nid = lnast->get_sibling_next(max_nid);
+      if (!min_nid.is_invalid() && Lnast_ntype::is_const(lnast->get_type(min_nid))) {
+        auto mv = Dlop::from_pyrope(lnast->get_name(min_nid));
+        if (mv->is_i()) {
+          min_v = *mv;
+        }
+      }
+    }
+    ti.is_signed = !(min_v && !min_v->is_negative());  // unsigned only when min known ≥ 0
+    if (max_v && min_v && max_v->is_i() && min_v->is_i()) {
+      const int64_t mx = max_v->to_i();
+      const int64_t mn = min_v->to_i();
+      if (mn >= 0) {
+        ti.bits = mx > 0 ? static_cast<int32_t>(std::bit_width(static_cast<uint64_t>(mx))) : 0;
+      } else {
+        const int32_t b_pos = mx >= 0 ? static_cast<int32_t>(std::bit_width(static_cast<uint64_t>(mx))) + 1 : 1;
+        const int32_t b_neg = static_cast<int32_t>(std::bit_width(static_cast<uint64_t>(-mn - 1))) + 1;
+        ti.bits             = std::max(b_pos, b_neg);
+      }
     }
   }
   return ti;
@@ -166,7 +185,7 @@ void uPass_ssa::run(const std::shared_ptr<Lnast>& lnast) {
   std::vector<Flat_field>                                                            flat_outputs;
   std::function<void(Lnast_nid, const std::string&, bool, std::vector<Flat_field>&)> flatten_assign;
   flatten_assign = [&](Lnast_nid assign_nid, const std::string& prefix, bool collect_is_ref, std::vector<Flat_field>& out) {
-    if (!Lnast_ntype::is_assign(lnast->get_type(assign_nid))) {
+    if (!Lnast_ntype::is_store(lnast->get_type(assign_nid))) {
       return;
     }
     auto name_nid = lnast->get_first_child(assign_nid);
@@ -220,12 +239,20 @@ void uPass_ssa::run(const std::shared_ptr<Lnast>& lnast) {
   auto emit_section = [&](const std::vector<Flat_field>& fields, bool is_input) {
     auto tup = staging->add_child(new_io, Lnast_ntype::create_tuple_add());
     for (const auto& f : fields) {
-      auto a = staging->add_child(tup, Lnast_ntype::create_assign());
+      auto a = staging->add_child(tup, Lnast_ntype::create_store());
       staging->add_child(a, Lnast_node::create_ref(f.name));
       staging->add_child(a, Lnast_node::create_const(is_input && f.is_ref ? "ref" : "nil"));
       if (f.bits > 0) {
-        auto ty = staging->add_child(a, f.is_signed ? Lnast_ntype::create_prim_type_sint() : Lnast_ntype::create_prim_type_uint());
-        staging->add_child(ty, Lnast_node::create_const(std::to_string(f.bits)));
+        // Task 1t — re-emit the canonical prim_type_int(max,min) from the
+        // flat field's (bits, signed).
+        auto ty = staging->add_child(a, Lnast_ntype::create_prim_type_int());
+        if (f.is_signed) {
+          staging->add_child(ty, Lnast_node::create_const(std::string(Dlop::get_mask_value(f.bits - 1)->to_pyrope())));
+          staging->add_child(ty, Lnast_node::create_const(std::string(Dlop::get_neg_mask_value(f.bits - 1)->to_pyrope())));
+        } else {
+          staging->add_child(ty, Lnast_node::create_const(std::string(Dlop::get_mask_value(f.bits)->to_pyrope())));
+          staging->add_child(ty, Lnast_node::create_const("0"));
+        }
       }
     }
   };
@@ -245,8 +272,34 @@ void uPass_ssa::run(const std::shared_ptr<Lnast>& lnast) {
   for (auto child : lnast->children(stmts_nid)) {
     auto type = lnast->get_type(child);
 
+    // Task 1t — a `store` with ≥3 children is the tuple_set form (an in-place
+    // field write `t.f = v`), which must NOT be SSA-versioned: both `t.x = …`
+    // and `t.y = …` mutate the same bundle version. Only a 2-child store (the
+    // scalar/wire write) versions like `assign`. (tuple_set itself is excluded
+    // by stmt_has_dest's enum range; store falls inside it, hence this guard.)
+    bool has_dest = stmt_has_dest(type);
+    if (has_dest && Lnast_ntype::is_store(type)) {
+      size_t nchild = 0;
+      for (auto sub : lnast->children(child)) {
+        (void)sub;
+        if (++nchild > 2) {
+          break;
+        }
+      }
+      has_dest = (nchild <= 2);
+    }
+    // Task 1t — a `declare(var, type, mode)` introduces a name + type but is
+    // NOT a value write (the value is a separate `store`). It must not be
+    // SSA-versioned, and must not mark the var as "seen" — otherwise the
+    // first value store becomes a spurious reassignment (var → var___ssa_1),
+    // diverging the declaration from its value. (declare falls inside
+    // stmt_has_dest's enum range, hence this guard.) Copy it verbatim.
+    if (has_dest && Lnast_ntype::is_declare(type)) {
+      has_dest = false;
+    }
+
     // ── Statements with a write dest as first child: apply SSA renaming ────
-    if (stmt_has_dest(type)) {
+    if (has_dest) {
       auto stmt_node = staging->add_child(new_stmts, type);
 
       // Defer rename_map update until after RHS is fully copied so that a

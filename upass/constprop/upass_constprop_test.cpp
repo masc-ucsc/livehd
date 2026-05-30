@@ -135,7 +135,7 @@ struct ConstpropFixture {
   // Build: [tuple_set: ref(tuple_var), const(field), const(value)]
   // field is a string key; value is a compile-time integer.
   Lnast_nid add_tuple_set_node(std::string_view tuple_var, std::string_view field, int64_t value) {
-    auto op = ln->add_child(stmts_nid, Lnast_ntype::create_tuple_set());
+    auto op = ln->add_child(stmts_nid, Lnast_ntype::create_store());
     ln->add_child(op, Lnast_node::create_ref(tuple_var));
     ln->add_child(op, Lnast_node::create_const(field));
     ln->add_child(op, Lnast_node::create_const(value));
@@ -773,7 +773,7 @@ TEST(UpassConstpropST, ClassifyDropsKnownConstTemp) {
   ConstpropFixture f;
 
   // Build:  ___tmp = 7
-  auto assign_op = f.ln->add_child(f.stmts_nid, Lnast_ntype::create_assign());
+  auto assign_op = f.ln->add_child(f.stmts_nid, Lnast_ntype::create_store());
   f.ln->add_child(assign_op, Lnast_node::create_ref("___tmp"));
   f.ln->add_child(assign_op, Lnast_node::create_const("7"));
 

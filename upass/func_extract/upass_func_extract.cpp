@@ -195,7 +195,7 @@ void uPass_func_extract::process_tuple_add() {
   std::string lhs_name(lm->current_text());
   std::unordered_map<std::string, Const> fields;
   while (lm->move_to_sibling()) {
-    if (!Lnast_ntype::is_assign(lm->current_type()) || !lm->has_child()) {
+    if (!Lnast_ntype::is_store(lm->current_type()) || !lm->has_child()) {
       lm->restore_cursor(saved);
       return;
     }
@@ -439,7 +439,7 @@ void uPass_func_extract::process_func_def() {
       for (const auto& name : body_refs) {
         auto it = latest_outer_value.find(name);
         if (it != latest_outer_value.end()) {
-          auto a_idx = new_lnast->add_child(stmts, Lnast_ntype::create_assign());
+          auto a_idx = new_lnast->add_child(stmts, Lnast_ntype::create_store());
           new_lnast->add_child(a_idx, Lnast_node::create_ref(name));
           new_lnast->add_child(a_idx, Lnast_node::create_const(it->second.to_pyrope()));
           continue;
@@ -451,7 +451,7 @@ void uPass_func_extract::process_func_def() {
           // keyed by these dotted paths, so a downstream
           // `tuple_get ___N CFG gain` resolves with no extra plumbing.
           for (const auto& [field, val] : bit->second) {
-            auto a_idx = new_lnast->add_child(stmts, Lnast_ntype::create_assign());
+            auto a_idx = new_lnast->add_child(stmts, Lnast_ntype::create_store());
             new_lnast->add_child(a_idx, Lnast_node::create_ref(name + "." + field));
             new_lnast->add_child(a_idx, Lnast_node::create_const(val.to_pyrope()));
           }

@@ -65,6 +65,7 @@ TOKEN_KW(while)
 
 // Types
 TOKEN_TY(none)
+TOKEN_TY(int)
 TOKEN_TY(s)
 TOKEN_TY(u)
 TOKEN_TY(sint)

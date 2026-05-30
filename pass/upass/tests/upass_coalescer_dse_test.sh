@@ -38,8 +38,10 @@ run_pipeline 1 "${OUT1}"
 # candidates. coalescer:0 should see >=3 (one per source-level `tmp = …`);
 # coalescer:1 should see exactly 1 (only the live store before %out reads tmp).
 count_tmp_assigns() {
+  # Task 1t — statement-level writes lower to `store` (formerly `assign`); the
+  # dead-store behavior is unchanged, only the node name in the dump.
   awk '
-    /assign$/ { in_assign = 1; next }
+    /store$/ { in_assign = 1; next }
     in_assign {
       if ($0 ~ /ref '\''tmp'\''$/) count++
       in_assign = 0

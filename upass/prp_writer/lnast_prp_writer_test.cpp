@@ -41,7 +41,7 @@ static std::shared_ptr<Lnast> make_assign_lnast(std::string_view lhs, std::strin
   auto ln = std::make_shared<Lnast>(std::string(top_name));
   ln->set_root(Lnast_ntype::create_top());
   auto stmts = ln->add_child(ln->get_root(), Lnast_ntype::create_stmts());
-  auto asgn  = ln->add_child(stmts, Lnast_ntype::create_assign());
+  auto asgn  = ln->add_child(stmts, Lnast_ntype::create_store());
   ln->add_child(asgn, Lnast_node::create_ref(lhs));
   ln->add_child(asgn, Lnast_node::create_const(rhs_val));
   return ln;
@@ -68,12 +68,12 @@ TEST(LnastPrpWriter, TmpsAreDCEdByConstprop) {
   auto stmts = ln->add_child(ln->get_root(), Lnast_ntype::create_stmts());
 
   // x = 1
-  auto ax = ln->add_child(stmts, Lnast_ntype::create_assign());
+  auto ax = ln->add_child(stmts, Lnast_ntype::create_store());
   ln->add_child(ax, Lnast_node::create_ref("x"));
   ln->add_child(ax, Lnast_node::create_const("1"));
 
   // y = 2
-  auto ay = ln->add_child(stmts, Lnast_ntype::create_assign());
+  auto ay = ln->add_child(stmts, Lnast_ntype::create_store());
   ln->add_child(ay, Lnast_node::create_ref("y"));
   ln->add_child(ay, Lnast_node::create_const("2"));
 
@@ -161,7 +161,7 @@ TEST(LnastPrpWriter, TrueIfPrunedInOutput) {
   auto if_nid = ln->add_child(stmts, Lnast_ntype::create_if());
   ln->add_child(if_nid, Lnast_node::create_const("true"));
   auto then_s = ln->add_child(if_nid, Lnast_ntype::create_stmts());
-  auto asgn   = ln->add_child(then_s, Lnast_ntype::create_assign());
+  auto asgn   = ln->add_child(then_s, Lnast_ntype::create_store());
   ln->add_child(asgn, Lnast_node::create_ref("out"));
   ln->add_child(asgn, Lnast_node::create_ref("src"));
 
@@ -179,7 +179,7 @@ TEST(LnastPrpWriter, BarePortNamesPassThrough) {
   ln->set_root(Lnast_ntype::create_top());
   auto stmts = ln->add_child(ln->get_root(), Lnast_ntype::create_stmts());
 
-  auto asgn = ln->add_child(stmts, Lnast_ntype::create_assign());
+  auto asgn = ln->add_child(stmts, Lnast_ntype::create_store());
   ln->add_child(asgn, Lnast_node::create_ref("out"));
   ln->add_child(asgn, Lnast_node::create_ref("in"));
 
@@ -201,12 +201,12 @@ TEST(LnastPrpWriter, UnknownCondIfElsePreserved) {
   ln->add_child(if_nid, Lnast_node::create_ref("cond"));
 
   auto then_s = ln->add_child(if_nid, Lnast_ntype::create_stmts());
-  auto asgn1  = ln->add_child(then_s, Lnast_ntype::create_assign());
+  auto asgn1  = ln->add_child(then_s, Lnast_ntype::create_store());
   ln->add_child(asgn1, Lnast_node::create_ref("out"));
   ln->add_child(asgn1, Lnast_node::create_ref("then_v"));
 
   auto else_s = ln->add_child(if_nid, Lnast_ntype::create_stmts());
-  auto asgn2  = ln->add_child(else_s, Lnast_ntype::create_assign());
+  auto asgn2  = ln->add_child(else_s, Lnast_ntype::create_store());
   ln->add_child(asgn2, Lnast_node::create_ref("out"));
   ln->add_child(asgn2, Lnast_node::create_ref("else_v"));
 
@@ -225,11 +225,11 @@ TEST(LnastPrpWriter, MultipleStatementsInOrder) {
   ln->set_root(Lnast_ntype::create_top());
   auto stmts = ln->add_child(ln->get_root(), Lnast_ntype::create_stmts());
 
-  auto a1 = ln->add_child(stmts, Lnast_ntype::create_assign());
+  auto a1 = ln->add_child(stmts, Lnast_ntype::create_store());
   ln->add_child(a1, Lnast_node::create_ref("x"));
   ln->add_child(a1, Lnast_node::create_const("1"));
 
-  auto a2 = ln->add_child(stmts, Lnast_ntype::create_assign());
+  auto a2 = ln->add_child(stmts, Lnast_ntype::create_store());
   ln->add_child(a2, Lnast_node::create_ref("y"));
   ln->add_child(a2, Lnast_node::create_const("2"));
 

@@ -27,8 +27,11 @@ const zeroed = v & 0
 cassert(zeroed == 0)
 
 // OR with all-ones forces all bits known.
+// `v` is u8 (unsigned), so `v | 0xff` forces every bit to 1 → the *value* 255,
+// not -1: `==` compares integer values, not bit patterns (0sb1111_1111 is the
+// signed value -1). Use the unsigned all-ones literal to match the value.
 const ones = v | 0xff
-cassert(ones == 0xff)
+cassert(ones == 0ub1111_1111)
 
 // AND/OR with a mask that touches only known bits preserves the unknown
 // in untouched positions but resolves the masked ones.

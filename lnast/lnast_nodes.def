@@ -39,16 +39,19 @@ LNAST_NODE( func_continue, continue )
 LNAST_NODE( func_return, return )
 
 // Assignment
-LNAST_NODE( assign, assign )
+// Task 1t — `assign` was DELETED. The single `store` node below is now the one
+// write/bind node: statement scalar writes, field-path writes (old tuple_set),
+// tuple-literal field payloads `(x=v)`, func_def/io signature params, and typed
+// binds `name=value:type` are ALL `store`, disambiguated by parent context
+// (only `store` STATEMENTS — direct stmts children — are arity-dispatched).
 LNAST_NODE( dp_assign, dp_assign )  // FIXME: remove FUTURE
 
 // Task 1t — declaration + bare-write nodes (replace the statement-level
 // assign/tuple_set writes and the attr_set(type)+attr_set(comptime)+type_spec
-// declaration triple). Kept inside the is_primitive_op range, outside
-// is_direct_lgraph_op / is_type.
+// declaration triple). `dp_assign` is now the low anchor of is_primitive_op.
 //   declare( ref(var), type_decl, const(qualifier), [value] )
-//     - type_decl : a type node (prim_type_*/comp_type_*/expr_type/
-//                   unknown_type) or none_type when no `:type`.
+//     - type_decl : a type node (prim_type_*/comp_type_*) or a `ref` to a
+//                   named type, or prim_type_none when no `:type`.
 //     - qualifier : single const, space-joined tokens (storage first), e.g.
 //                   "mut", "const", "mut comptime", "mut wrap", "const".
 //     - value     : optional init (absent for bare `var x:u8`).
@@ -108,10 +111,12 @@ LNAST_NODE( const, const )
 LNAST_NODE( range, range )
 
 // Tuple Statements
+// Task 1t — `tuple_set` deleted: statement-level field writes are now `store`
+// (the same node that subsumed the statement-level scalar `assign`). A `store`
+// with ≥3 children walks the old tuple_set path; with ≤2 it is a scalar write.
 LNAST_NODE( tuple_concat, tuple_concat )
 LNAST_NODE( tuple_add, tuple_add )
 LNAST_NODE( tuple_get, tuple_get )
-LNAST_NODE( tuple_set, tuple_set )
 
 // Attribute Statements
 LNAST_NODE( attr_set, attr_set )
@@ -121,31 +126,32 @@ LNAST_NODE( attr_get, attr_get )
 LNAST_NODE( cassert, cassert )
 
 // Type Statements
-LNAST_NODE( type_def, type_def )    // FIXME: change to type_bind
+// Task 1t — `type_def` deleted: `type Foo = …` lowers to `declare(mode=="type")`.
 LNAST_NODE( type_spec, type_spec )  // FIXME: change to type_check
 
 // Types
-LNAST_NODE( none_type, none_type )
+// Task 1t — the single "no/inferred/unresolved type" sentinel (unifies the
+// former none_type + unknown_type).
+LNAST_NODE( prim_type_none, prim_type_none )
 // Task 1t/typesystem: the canonical integer type — `prim_type_int( [max], [min] )`
 // with two OPTIONAL const children (absent ⇒ unbounded). Sign and bits are
-// DERIVED from the range, never stored. `prim_type_uint`/`prim_type_sint` are
-// the legacy width-based form, kept as aliases that normalize to this during
-// the T1 migration and deleted in T5. See docs/contracts/typesystem_clean_plan.md.
+// DERIVED from the range, never stored. The legacy width-based
+// `prim_type_uint`/`prim_type_sint` were deleted in T5 (everything — uN/sN
+// sugar, the inliner, ssa — now emits prim_type_int). See
+// docs/contracts/typesystem_clean_plan.md.
 LNAST_NODE( prim_type_int, prim_type_int )
-LNAST_NODE( prim_type_uint, prim_type_uint )
-LNAST_NODE( prim_type_sint, prim_type_sint )
 LNAST_NODE( prim_type_range, prim_type_range )
 LNAST_NODE( prim_type_string, prim_type_string )
-LNAST_NODE( prim_type_boolean, prim_type_boolean )
-LNAST_NODE( prim_type_type, prim_type_type )
-LNAST_NODE( prim_type_ref, prim_type_ref )
+LNAST_NODE( prim_type_bool, prim_type_bool )
 LNAST_NODE( comp_type_tuple, comp_type_tuple )
 LNAST_NODE( comp_type_array, comp_type_array )
-LNAST_NODE( comp_type_mixin, comp_type_mixin )    // FIXME: remove
 LNAST_NODE( comp_type_lambda, comp_type_lambda )
-LNAST_NODE( expr_type, expr_type )
+// Task 1t — DELETED: `prim_type_type`/`prim_type_ref` (moved into the declare
+// `mode` enum), `comp_type_mixin` (FIXME stub), `unknown_type` (folded into the
+// `prim_type_none` sentinel above), `type_def` (→ declare mode==type), and
+// `expr_type` (a named type is now a `ref` in the type slot). `comp_type_lambda`
+// is now the last type node (is_type upper bound).
 // FIXME: add union
-LNAST_NODE( unknown_type, unknown_type )
 
 #undef LNAST_NODE
 #undef LNAST_LOOP_NODE

@@ -1,18 +1,18 @@
 {
   %{a} : #none
-  %{b} : #sint
-  %{c} : #uint
-  %{d} : #s(8)
-  %{e} : #u(%{x})
+  %{b} : #int
+  %{c} : #int
+  %{d} : #int(8)
+  %{e} : #int(%{x})
   %{f} : #range
   %{g} : #string
   %{h} : #boolean
-  %{i} : #type
-  %{j} : #ref
-  %{k} : #tuple(#sint, #tuple(#boolean, #s(8)))
+  %{i} : #none
+  %{j} : #none
+  %{k} : #tuple(#int, #tuple(#boolean, #int(8)))
   %{l} : #array(#tuple(#boolean, #boolean), %{x})
-  %{m} : #mixin(#array(#uint, 8), #expr(%{b}))
-  %{n} : #lambda(#tuple(#boolean, #s(4), #ref), #u(8))
-  %{o} : #expr(%{x})
-  %{p} : #unknown
+  %{m} : #tuple(#array(#int, 8), #none)
+  %{n} : #lambda(#tuple(#boolean, #int(4), #none), #int(8))
+  %{o} : #none
+  %{p} : #none
 }

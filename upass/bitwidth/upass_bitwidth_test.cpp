@@ -145,7 +145,7 @@ static std::shared_ptr<Lnast> make_simple_assign(const std::string& lhs, const s
   auto ln    = std::make_shared<Lnast>("bw_test");
   auto root  = ln->set_root(Lnast_ntype::create_top());
   auto stmts = ln->add_child(root, Lnast_ntype::create_stmts());
-  auto asgn  = ln->add_child(stmts, Lnast_ntype::create_assign());
+  auto asgn  = ln->add_child(stmts, Lnast_ntype::create_store());
   ln->add_child(asgn, Lnast_node::create_ref(lhs));
   if (rhs_is_const) {
     ln->add_child(asgn, Lnast_node::create_const(rhs));
@@ -254,11 +254,11 @@ TEST(BitwidthIntegration, PropagateConst) {
   auto root  = ln->set_root(Lnast_ntype::create_top());
   auto stmts = ln->add_child(root, Lnast_ntype::create_stmts());
 
-  auto asgn1 = ln->add_child(stmts, Lnast_ntype::create_assign());
+  auto asgn1 = ln->add_child(stmts, Lnast_ntype::create_store());
   ln->add_child(asgn1, Lnast_node::create_ref("tmp"));
   ln->add_child(asgn1, Lnast_node::create_const("3"));
 
-  auto asgn2 = ln->add_child(stmts, Lnast_ntype::create_assign());
+  auto asgn2 = ln->add_child(stmts, Lnast_ntype::create_store());
   ln->add_child(asgn2, Lnast_node::create_ref("c"));
   ln->add_child(asgn2, Lnast_node::create_ref("tmp"));
 
@@ -281,14 +281,14 @@ TEST(BitwidthIntegration, RefCallArgClearsRange) {
   auto root  = ln->set_root(Lnast_ntype::create_top());
   auto stmts = ln->add_child(root, Lnast_ntype::create_stmts());
 
-  auto asgn = ln->add_child(stmts, Lnast_ntype::create_assign());
+  auto asgn = ln->add_child(stmts, Lnast_ntype::create_store());
   ln->add_child(asgn, Lnast_node::create_ref("c"));
   ln->add_child(asgn, Lnast_node::create_const("1"));
 
   auto fcall = ln->add_child(stmts, Lnast_ntype::create_func_call());
   ln->add_child(fcall, Lnast_node::create_ref("out"));
   ln->add_child(fcall, Lnast_node::create_ref("opaque"));
-  auto ref_arg = ln->add_child(fcall, Lnast_ntype::create_assign());
+  auto ref_arg = ln->add_child(fcall, Lnast_ntype::create_store());
   ln->add_child(ref_arg, Lnast_node::create_ref("__ref_arg"));
   ln->add_child(ref_arg, Lnast_node::create_ref("c"));
 
@@ -382,7 +382,7 @@ TEST(BitwidthAttrSet, FitsAfterAssign) {
   auto ln    = std::make_shared<Lnast>("bw_attr_fits");
   auto root  = ln->set_root(Lnast_ntype::create_top());
   auto stmts = ln->add_child(root, Lnast_ntype::create_stmts());
-  auto asgn  = ln->add_child(stmts, Lnast_ntype::create_assign());
+  auto asgn  = ln->add_child(stmts, Lnast_ntype::create_store());
   ln->add_child(asgn, Lnast_node::create_ref("x"));
   ln->add_child(asgn, Lnast_node::create_const("7"));
   add_attr_set(ln, stmts, "x", "ubits", "4");
@@ -402,7 +402,7 @@ TEST(BitwidthAttrSet, ConflictWarnsAndKeepsOriginal) {
   auto ln    = std::make_shared<Lnast>("bw_attr_conflict");
   auto root  = ln->set_root(Lnast_ntype::create_top());
   auto stmts = ln->add_child(root, Lnast_ntype::create_stmts());
-  auto asgn  = ln->add_child(stmts, Lnast_ntype::create_assign());
+  auto asgn  = ln->add_child(stmts, Lnast_ntype::create_store());
   ln->add_child(asgn, Lnast_node::create_ref("x"));
   ln->add_child(asgn, Lnast_node::create_const("100"));
   add_attr_set(ln, stmts, "x", "ubits", "3");

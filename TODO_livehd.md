@@ -55,14 +55,26 @@ cross-file dependencies stay visible.
     new `prim_type_memory`/`prim_type_register` nodes mirroring `graph/cell.hpp`
     `Memory`/`Flop`/`Latch`/`Fflop` pins (later phase).
 
-  **Status (2026-05-29) — foundation landed, green (suite 117/11):**
-  `declare`/`store`/`prim_type_int` node types added to `lnast/lnast_nodes.def`
-  (inert) + writer + round-trip test
-  (`lnast/tests/parser_writer_test.cpp::declare_store_dump_read_roundtrip`);
-  `wrap_to_signed` sext bug fixed in `upass/bitwidth/wrap_sat.hpp`
-  (`prp-wrap_checks`/`prp-wrap_complex` pass); `.[sign]` derived read landed
-  (`upass/attributes` + `is_builtin_attr`; `inou/prp/tests/comptime/sign_attr.prp`).
-  Nothing git-committed.
+  **Status (2026-05-30) — T1-T5 STRUCTURAL DONE; green (suite 244 pass / 10 fail
+  across //inou //upass //lnast //pass = baseline +1; full `bazel build //...`
+  green; NOT git-committed).** `declare`/`store`/`prim_type_int` are live in the
+  producer + all upasses; the type-call + uN/sN sizing, store arity dispatch, the
+  decl-cluster→`declare` merge, wrap/sat-as-declare-mode + the Cluster-F unsigned
+  coercion all landed. **10 legacy nodes DELETED** (`prim_type_uint`/`sint`/
+  `type`/`ref`, `comp_type_mixin`, `unknown_type`, `type_def`, `expr_type`,
+  `tuple_set`, and **`assign`**) + `prim_type_boolean`→`prim_type_bool`. Every
+  write/bind is now the single `store` node (statement scalar, field-path,
+  tuple-literal field payload, func/io signature param, typed `name=value:type`),
+  disambiguated by parent context. **4 lnastfmt validators**: store/declare
+  shape, type-only-on-declare, no-`attr_set`-of-derived, and **declare-once**
+  (const-redeclare per scope, `mut` reset legal, nested-scope shadowing).
+  `valid_unknown_bits` GREEN (the `ones == 0sb1111_1111` cassert was a
+  value-vs-bitpattern test bug → corrected to `0ub1111_1111`). Full detail in
+  `docs/contracts/typesystem_clean_plan.md`.
+  **Only non-green 1t item:** `typesystem` test's 5 unfoldable casserts = task-1v
+  named-type *semantics* (default borrowing, typename propagation, comptime
+  non-stickiness, recursive typenames, complex-field `[bits]`), NOT 1t structural
+  work — high regression risk to constprop bundle machinery; left for a 1v pass.
 
   **Phases (each keeps `//inou/prp:all` green).**
   - **T1** — producer recognizes the type-call `int/uint/uN/sN(max=,min=,bits=)`

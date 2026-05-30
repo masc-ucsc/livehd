@@ -232,6 +232,11 @@ public:
 
   // Assignment
   PROCESS_NODE(assign)
+  // Task 1t — declare(var, type, mode[, value]): replaces the
+  // attr_set(type)+attr_set(comptime)+type_spec declaration cluster. Only the
+  // attributes pass overrides it (type_info + decl_kind + comptime); the value
+  // (when present) stays a separate `store`.
+  PROCESS_NODE(declare)
   PROCESS_NODE(delay_assign)
 
   // Bitwidth

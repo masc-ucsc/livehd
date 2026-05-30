@@ -220,7 +220,20 @@ void uPass_constprop::process_assign() {
       store_trivial(lhs_text, st.get_trivial(current_text()));
     }
   } else if (is_type(Lnast_ntype::Lnast_ntype_const)) {
-    store_trivial(lhs_text, current_pyrope_value());
+    Const v = current_pyrope_value();
+    // Task 1t — coerce a known-negative literal to its unsigned N-bit pattern
+    // on the var's FIRST scalar write (the declaration's initializer), so
+    // constprop's own folding of later reads sees the unsigned value. The
+    // gate mirrors the attributes side: the value must sign-extend a KNOWN 1
+    // past the declared width (`bit_test`+!`unknown_bit_test` — `0sb?` keeps
+    // its natural width), and `!st.has_trivial` restricts it to the first
+    // write so per-statement wrap/sat reassignments stay in control.
+    if (auto it = decl_unsigned_bits_.find(std::string(lhs_text));
+        it != decl_unsigned_bits_.end() && !st.has_trivial(lhs_text)
+        && v.bit_test(static_cast<int>(it->second)) && !v.unknown_bit_test(static_cast<int>(it->second))) {
+      v = *v.and_op(*Dlop::get_mask_value(static_cast<int>(it->second)));
+    }
+    store_trivial(lhs_text, v);
   } else {
     // RHS is a compound expression (tuple_get, tuple_set, func_call, attr_get, attr_set, etc.)
     // Not yet handled by constprop.  Skip this assignment to avoid crashes.
@@ -228,6 +241,54 @@ void uPass_constprop::process_assign() {
   }
 
   move_to_parent();
+}
+
+void uPass_constprop::process_declare() {
+  // declare(ref(var), TYPE, const(mode), [value]). Record the declared
+  // UNSIGNED width (uN, or int(max,min≥0)) so the var's first scalar write can
+  // coerce a known-negative literal to its unsigned N-bit pattern (see the
+  // const path of process_assign). Signed / none-typed decls are ignored.
+  if (!move_to_child()) {
+    return;
+  }
+  auto var = std::string(current_text());
+  if (!move_to_sibling()) {
+    move_to_parent();
+    return;
+  }
+  uint32_t   bits          = 0;
+  bool       unsigned_type = false;
+  const auto t             = get_raw_ntype();
+  if (Lnast_ntype::is_prim_type_int(t)) {
+    // prim_type_int(max, min): unsigned iff min is known and ≥ 0; bits derives
+    // from the known max ("nil" children leave the bound unset → skip).
+    std::optional<Const> max_v;
+    std::optional<Const> min_v;
+    if (move_to_child()) {
+      if (Lnast_ntype::is_const(get_raw_ntype())) {
+        auto v = Dlop::from_pyrope(current_text());
+        if (v->is_i()) {
+          max_v = *v;
+        }
+      }
+      if (move_to_sibling() && Lnast_ntype::is_const(get_raw_ntype())) {
+        auto v = Dlop::from_pyrope(current_text());
+        if (v->is_i()) {
+          min_v = *v;
+        }
+      }
+      move_to_parent();
+    }
+    if (min_v && !min_v->is_negative() && max_v && max_v->is_i()) {
+      const int64_t mx = max_v->to_i();
+      unsigned_type    = true;
+      bits             = mx > 0 ? static_cast<uint32_t>(std::bit_width(static_cast<uint64_t>(mx))) : 0;
+    }
+  }
+  move_to_parent();
+  if (unsigned_type && bits != 0) {
+    decl_unsigned_bits_[var] = bits;
+  }
 }
 
 template <typename F>
@@ -867,7 +928,7 @@ void uPass_constprop::process_tuple_add() {
       }
       ++unnamed_pos;
 
-    } else if (is_type(Lnast_ntype::Lnast_ntype_assign)) {
+    } else if (is_type(Lnast_ntype::Lnast_ntype_store)) {
       // Named field: assign(ref(key), const/ref(val)). Stored under the
       // bare name — named slots don't advance unnamed_pos.
       move_to_child();
@@ -1491,7 +1552,7 @@ std::optional<std::vector<uPass_constprop::Call_actual>> uPass_constprop::collec
   };
 
   while (move_to_sibling()) {
-    if (is_type(Lnast_ntype::Lnast_ntype_assign)) {
+    if (is_type(Lnast_ntype::Lnast_ntype_store)) {
       if (!move_to_child()) {
         continue;
       }

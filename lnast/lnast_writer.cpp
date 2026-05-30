@@ -186,34 +186,44 @@ void Lnast_writer::write_func_break() { write_func_marker("break"); }
 void Lnast_writer::write_func_continue() { write_func_marker("continue"); }
 void Lnast_writer::write_func_return() { write_func_marker("return"); }
 
-void Lnast_writer::write_assign() {
-  move_to_child();
-  write_lnast();
-  print(" = ");
-  move_to_sibling();
-  write_lnast();
-  if (!is_last_child()) {
-    move_to_sibling();
-    print(" : ");
-    write_lnast();
-  }
-  move_to_parent();
-}
-
 void Lnast_writer::write_dp_assign() {}
 
-// Task 1t. store( var, level0..levelN, value ) — 0 levels == old assign,
-// N levels == old tuple_set path. Same surface syntax as tuple_set/assign.
+// Task 1t. store( var, level0..levelN, value ) — the unified write/bind node:
+//   * 0 levels                → `var = value`        (old scalar assign)
+//   * N levels                → `var[l0]…[lN] = value` (old tuple_set path)
+//   * typed bind (exactly 3   → `name = value : type`  (old `assign` signature /
+//     children, last a TYPE)    typed tuple-field payload `name=value:type`)
+// The typed form keeps the value in the MIDDLE and the type LAST, so it cannot
+// be distinguished from a field-path store by arity alone — detect it by a
+// type-node last child.
 void Lnast_writer::write_store() {
-  move_to_child();
-  write_lnast();  // var
-  while (move_to_sibling() && !is_last_child()) {
-    print("[");
-    write_lnast();  // level (field key / index)
-    print("]");
+  bool typed = false;
+  if (auto c0 = lnast->get_first_child(current_nid); !c0.is_invalid()) {
+    if (auto c1 = lnast->get_sibling_next(c0); !c1.is_invalid()) {
+      if (auto c2 = lnast->get_sibling_next(c1);
+          !c2.is_invalid() && lnast->get_sibling_next(c2).is_invalid() && Lnast_ntype::is_type(lnast->get_type(c2))) {
+        typed = true;
+      }
+    }
   }
-  print(" = ");
-  write_lnast();  // value (cursor already on the last child)
+  move_to_child();
+  write_lnast();  // var / name
+  if (typed) {
+    move_to_sibling();
+    print(" = ");
+    write_lnast();  // value
+    move_to_sibling();
+    print(" : ");
+    write_lnast();  // type
+  } else {
+    while (move_to_sibling() && !is_last_child()) {
+      print("[");
+      write_lnast();  // level (field key / index)
+      print("]");
+    }
+    print(" = ");
+    write_lnast();  // value (cursor already on the last child)
+  }
   move_to_parent();
 }
 
@@ -310,15 +320,6 @@ void Lnast_writer::write_const() {
 
 void Lnast_writer::write_range() { write_n_ary("range"); }
 
-void Lnast_writer::write_type_def() {
-  move_to_child();
-  write_lnast();
-  print(" = ");
-  move_to_sibling();
-  write_lnast();
-  move_to_parent();
-}
-
 void Lnast_writer::write_type_spec() {
   move_to_child();
   write_lnast();
@@ -328,30 +329,8 @@ void Lnast_writer::write_type_spec() {
   move_to_parent();
 }
 
-void Lnast_writer::write_none_type() { print("#none"); }
+void Lnast_writer::write_prim_type_none() { print("#none"); }
 
-void Lnast_writer::write_prim_type_int(char sign) {
-  print("#{}", sign);
-  move_to_child();
-  if (is_invalid()) {
-    print("int");
-  } else if (is_last_child()) {
-    print("(");
-    write_lnast();
-    print(")");
-  } else {
-    print("(");
-    write_lnast();
-    print(", ");
-    move_to_sibling();
-    write_lnast();
-    print(")");
-  }
-  move_to_parent();
-}
-
-void Lnast_writer::write_prim_type_uint() { write_prim_type_int('u'); }
-void Lnast_writer::write_prim_type_sint() { write_prim_type_int('s'); }
 
 // Task 1t/typesystem: the canonical integer type node (no-arg overload, invoked
 // by the dispatch switch). Children are the optional (max, min) range consts;
@@ -378,9 +357,7 @@ void Lnast_writer::write_prim_type_int() {
 
 void Lnast_writer::write_prim_type_range() { print("#range"); }
 void Lnast_writer::write_prim_type_string() { print("#string"); }
-void Lnast_writer::write_prim_type_boolean() { print("#boolean"); }
-void Lnast_writer::write_prim_type_type() { print("#type"); }
-void Lnast_writer::write_prim_type_ref() { print("#ref"); }
+void Lnast_writer::write_prim_type_bool() { print("#boolean"); }
 
 void Lnast_writer::write_comp_type_tuple() {
   print("#tuple(");
@@ -409,21 +386,6 @@ void Lnast_writer::write_comp_type_array() {
   move_to_parent();
 }
 
-void Lnast_writer::write_comp_type_mixin() {
-  print("#mixin(");
-  move_to_child();
-  ++depth;
-  while (!is_invalid()) {
-    write_lnast();
-    if (!is_last_child()) {
-      print(", ");
-    }
-    move_to_sibling();
-  }
-  --depth;
-  print(")");
-  move_to_parent();
-}
 
 void Lnast_writer::write_comp_type_lambda() {
   print("#lambda(");
@@ -435,16 +397,6 @@ void Lnast_writer::write_comp_type_lambda() {
   print(")");
   move_to_parent();
 }
-
-void Lnast_writer::write_expr_type() {
-  print("#expr(");
-  move_to_child();
-  write_lnast();
-  print(")");
-  move_to_parent();
-}
-
-void Lnast_writer::write_unknown_type() { print("#unknown"); }
 
 void Lnast_writer::write_tuple_concat() {}
 
@@ -475,19 +427,6 @@ void Lnast_writer::write_tuple_get() {
     write_lnast();
     print("]");
   }
-  move_to_parent();
-}
-
-void Lnast_writer::write_tuple_set() {
-  move_to_child();
-  write_lnast();
-  while (move_to_sibling() && !is_last_child()) {
-    print("[");
-    write_lnast();
-    print("]");
-  }
-  print(" = ");
-  write_lnast();
   move_to_parent();
 }
 

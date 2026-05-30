@@ -1,8 +1,8 @@
 {
   %{_tuple_type} : #tuple(
-    %{a}=1:#uint,
+    %{a}=1:#int,
     %{b}=%{x}:#boolean,
-    3:#s(8),
+    3:#int(8),
     #string
   )
   %{_tuple_variale} = (

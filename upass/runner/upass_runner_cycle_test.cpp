@@ -141,14 +141,14 @@ static std::shared_ptr<Lnast> make_if_lnast(std::string_view cond_text, std::str
 
   // Then-stmts: assigns `out = <then_ref>` where `then_ref` is undeclared.
   auto then_s = ln->add_child(if_nid, Lnast_ntype::create_stmts());
-  auto asgn1  = ln->add_child(then_s, Lnast_ntype::create_assign());
+  auto asgn1  = ln->add_child(then_s, Lnast_ntype::create_store());
   ln->add_child(asgn1, Lnast_node::create_ref("out"));
   ln->add_child(asgn1, Lnast_node::create_ref(then_ref));
 
   // Optional else-stmts: assigns `alt = <else_ref>` (distinct variable).
   if (!else_ref.empty()) {
     auto else_s = ln->add_child(if_nid, Lnast_ntype::create_stmts());
-    auto asgn2  = ln->add_child(else_s, Lnast_ntype::create_assign());
+    auto asgn2  = ln->add_child(else_s, Lnast_ntype::create_store());
     ln->add_child(asgn2, Lnast_node::create_ref("alt"));
     ln->add_child(asgn2, Lnast_node::create_ref(else_ref));
   }
@@ -179,9 +179,10 @@ TEST(UpassRunnerIfPrune, FalseConditionPrunesIfNodeNoElse) {
   runner.run();
   auto staging = runner.take_staging();
   ASSERT_NE(staging, nullptr);
-  // No if-node and no assign — the entire if was dropped (no else branch).
+  // No if-node and no store — the entire if was dropped (no else branch).
+  // (Task 1t — the in-branch writes are `store` now; `assign` was deleted.)
   EXPECT_EQ(count_ntype(*staging, Lnast_ntype::Lnast_ntype_if), 0U);
-  EXPECT_EQ(count_ntype(*staging, Lnast_ntype::Lnast_ntype_assign), 0U);
+  EXPECT_EQ(count_ntype(*staging, Lnast_ntype::Lnast_ntype_store), 0U);
 }
 
 // ── Test 3: condition false + else branch → else-stmts spliced into parent ──
@@ -231,7 +232,7 @@ TEST(UpassRunnerIfPrune, RefCondResolvedByConstpropPrunesIfNode) {
   auto stmts = ln->add_child(ln->get_root(), Lnast_ntype::create_stmts());
 
   // assign ___x = 3
-  auto asgn_x = ln->add_child(stmts, Lnast_ntype::create_assign());
+  auto asgn_x = ln->add_child(stmts, Lnast_ntype::create_store());
   ln->add_child(asgn_x, Lnast_node::create_ref("___x"));
   ln->add_child(asgn_x, Lnast_node::create_const("3"));
 
@@ -245,7 +246,7 @@ TEST(UpassRunnerIfPrune, RefCondResolvedByConstpropPrunesIfNode) {
   auto if_nid = ln->add_child(stmts, Lnast_ntype::create_if());
   ln->add_child(if_nid, Lnast_node::create_ref("___cond"));
   auto then_s = ln->add_child(if_nid, Lnast_ntype::create_stmts());
-  auto asgn_a = ln->add_child(then_s, Lnast_ntype::create_assign());
+  auto asgn_a = ln->add_child(then_s, Lnast_ntype::create_store());
   ln->add_child(asgn_a, Lnast_node::create_ref("___a"));
   ln->add_child(asgn_a, Lnast_node::create_const("4"));
 

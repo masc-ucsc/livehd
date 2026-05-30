@@ -91,7 +91,7 @@ void Lnast_prp_writer::write_node() {
     case N::Lnast_ntype_top: write_top(); break;
     case N::Lnast_ntype_stmts: write_stmts(); break;
     case N::Lnast_ntype_if: write_if(); break;
-    case N::Lnast_ntype_assign: write_assign(); break;
+    case N::Lnast_ntype_store: write_store(); break;
     case N::Lnast_ntype_ref: write_ref(); break;
     case N::Lnast_ntype_const: write_const(); break;
     case N::Lnast_ntype_cassert: write_cassert(); break;
@@ -99,7 +99,6 @@ void Lnast_prp_writer::write_node() {
     case N::Lnast_ntype_func_def: write_func_def(); break;
     case N::Lnast_ntype_tuple_add: write_tuple_add(); break;
     case N::Lnast_ntype_tuple_get: write_tuple_get(); break;
-    case N::Lnast_ntype_tuple_set: write_tuple_set(); break;
     case N::Lnast_ntype_attr_set: write_attr_set(); break;
     case N::Lnast_ntype_attr_get: write_attr_get(); break;
     case N::Lnast_ntype_delay_assign: write_delay_assign(); break;
@@ -213,7 +212,11 @@ void Lnast_prp_writer::write_if() {
 
 // ── assign ────────────────────────────────────────────────────────────────────
 
-void Lnast_prp_writer::write_assign() {
+// Task 1t — `store(var, level0..levelN, value)`. 0 levels → `var = value`
+// (the old assign spelling, decl keyword preserved); ≥1 level →
+// `var[level0]…[levelN] = value` (the old tuple_set spelling). The level-walk
+// loop handles both: with no middle siblings it emits just `var = value`.
+void Lnast_prp_writer::write_store() {
   if (!move_to_child()) {
     return;
   }
@@ -224,8 +227,12 @@ void Lnast_prp_writer::write_assign() {
     print(" ");
   }
   print(lhs);
+  while (move_to_sibling() && !is_last_child()) {
+    print("[");
+    write_node();
+    print("]");
+  }
   print(" = ");
-  move_to_sibling();
   write_node();
   move_to_parent();
 }
@@ -309,7 +316,7 @@ void Lnast_prp_writer::write_func_call() {
     if (!first) {
       print(", ");
     }
-    if (current_ntype() == Lnast_ntype::Lnast_ntype_assign) {
+    if (current_ntype() == Lnast_ntype::Lnast_ntype_store) {
       // Named actual: emit as  name = value  (no "mut").
       if (move_to_child()) {
         print(strip_prefix(current_text()));  // argument name
@@ -380,23 +387,6 @@ void Lnast_prp_writer::write_tuple_get() {
     write_node();
     print("]");
   }
-  move_to_parent();
-}
-
-void Lnast_prp_writer::write_tuple_set() {
-  if (!move_to_child()) {
-    return;
-  }
-  auto lhs = strip_prefix(current_text());
-  take_decl_keyword(lhs);  // consume any pending decl so it doesn't leak
-  print(lhs);
-  while (move_to_sibling() && !is_last_child()) {
-    print("[");
-    write_node();
-    print("]");
-  }
-  print(" = ");
-  write_node();
   move_to_parent();
 }
 

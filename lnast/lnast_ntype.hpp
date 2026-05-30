@@ -54,17 +54,17 @@ public:
 #include "lnast_nodes.def"
 
   static constexpr bool is_tuple_attr(Lnast_ntype_int v) {
-    return v == Lnast_ntype_tuple_add || v == Lnast_ntype_tuple_get || v == Lnast_ntype_tuple_set || v == Lnast_ntype_attr_set
+    return v == Lnast_ntype_tuple_add || v == Lnast_ntype_tuple_get || v == Lnast_ntype_attr_set
            || v == Lnast_ntype_attr_get;
   }
 
   // Super types
-  static constexpr bool is_primitive_op(Lnast_ntype_int v) { return v >= Lnast_ntype_assign && v <= Lnast_ntype_attr_get; }
+  static constexpr bool is_primitive_op(Lnast_ntype_int v) { return v >= Lnast_ntype_dp_assign && v <= Lnast_ntype_attr_get; }
   static constexpr bool is_logical_op(Lnast_ntype_int v) {
     return v == Lnast_ntype_log_and || v == Lnast_ntype_log_or || v == Lnast_ntype_log_not;
   }
   static constexpr bool is_unary_op(Lnast_ntype_int v) {
-    return v == Lnast_ntype_bit_not || v == Lnast_ntype_log_not || v == Lnast_ntype_assign || v == Lnast_ntype_dp_assign;
+    return v == Lnast_ntype_bit_not || v == Lnast_ntype_log_not || v == Lnast_ntype_store || v == Lnast_ntype_dp_assign;
   }
   static constexpr bool is_binary_op(Lnast_ntype_int v) {
     return v == Lnast_ntype_shl || v == Lnast_ntype_sra || v == Lnast_ntype_sext;
@@ -82,7 +82,9 @@ public:
            && v != Lnast_ntype_le && v != Lnast_ntype_ge;
   }
 
-  static constexpr bool is_type(Lnast_ntype_int v) { return v >= Lnast_ntype_none_type && v <= Lnast_ntype_unknown_type; }
+  static constexpr bool is_type(Lnast_ntype_int v) {
+    return v >= Lnast_ntype_prim_type_none && v <= Lnast_ntype_comp_type_lambda;
+  }
   static constexpr bool is_loop_last(Lnast_ntype_int v) { return (static_cast<uint8_t>(v) & 1) != 0; }
 
   static std::string_view to_sv(Lnast_ntype_int v) { return namemap[v]; }
@@ -91,5 +93,5 @@ public:
   static_assert(namemap.size() == Lnast_ntype_last_invalid);
   static_assert((static_cast<uint8_t>(Lnast_ntype_invalid) & 1) == 0);
   static_assert((static_cast<uint8_t>(Lnast_ntype_top) & 1) == 0);
-  static_assert((static_cast<uint8_t>(Lnast_ntype_unknown_type) & 1) == 0);
+  static_assert((static_cast<uint8_t>(Lnast_ntype_comp_type_lambda) & 1) == 0);
 };

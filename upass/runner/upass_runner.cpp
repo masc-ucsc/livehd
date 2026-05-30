@@ -260,16 +260,24 @@ void uPass_runner::emit_ref_or_folded(std::string_view name) {
 }
 
 void uPass_runner::emit_op_with_fold(bool fold_all) {
-  emit_push(lm->current_type());
+  const auto op_ntype = lm->current_type();
+  emit_push(op_ntype);
+
+  // Task 1t — a `declare`/`type_spec` whose type slot (child 1) is a named-type
+  // `ref` must NOT be folded: the ref names a TYPE, not a value, so folding it
+  // through the symbol table (e.g. `const a = …; const x:a = …`) would replace
+  // the type with `a`'s value. Keep child 1 verbatim for these op-nodes.
+  const bool type_slot_at_1 =
+      Lnast_ntype::is_declare(op_ntype) || Lnast_ntype::is_type_spec(op_ntype);
 
   if (lm->has_child()) {
     lm->move_to_child();
     int idx = 0;
     do {
-      const bool is_lhs = (idx == 0) && !fold_all;
+      const bool is_lhs = ((idx == 0) && !fold_all) || (idx == 1 && type_slot_at_1);
       if (!is_lhs && lm->get_raw_ntype() == Lnast_ntype::Lnast_ntype_ref) {
         emit_ref_or_folded(lm->current_text());
-      } else if (!is_lhs && Lnast_ntype::is_assign(lm->get_raw_ntype())) {
+      } else if (!is_lhs && Lnast_ntype::is_store(lm->get_raw_ntype())) {
         // A tuple-field entry `assign(key, val)` (inside tuple_add/concat/set):
         // the key is a structural label (kept raw by current_text), but the
         // VALUE must fold — otherwise a value tmp whose producer was dropped
@@ -539,8 +547,10 @@ void uPass_runner::set_function_registry(const std::vector<std::shared_ptr<Lnast
             tuple_dsts.insert(std::string(ln->get_name(fc)));
           }
           // Plain `lhs = rhs` (single ref rhs) — record for alias propagation
-          // so `foo = ___t` inherits ___t's tuple-valued-ness.
-          if (nt == Lnast_ntype::Lnast_ntype_assign) {
+          // so `foo = ___t` inherits ___t's tuple-valued-ness. Task 1t — this is
+          // a 0-level `store` (exactly ref+value children; `assign` was deleted).
+          if (nt == Lnast_ntype::Lnast_ntype_store && ln->get_sibling_next(fc).is_valid()
+              && !ln->get_sibling_next(ln->get_sibling_next(fc)).is_valid()) {
             auto rhs = ln->get_sibling_next(fc);
             if (rhs.is_valid() && ln->get_type(rhs) == Lnast_ntype::Lnast_ntype_ref) {
               ref_aliases.emplace_back(std::string(ln->get_name(fc)), std::string(ln->get_name(rhs)));
@@ -637,7 +647,7 @@ void uPass_runner::emit_inline_binding(const std::string& lhs, const Lnast_node&
   }
   auto body = scratch_forest_->create_tree_temp("inl-bind");
   auto s    = std::make_shared<Lnast>(body, "inl-bind");
-  auto root = s->set_root(Lnast_ntype::create_assign());
+  auto root = s->set_root(Lnast_ntype::create_store());
   s->add_child(root, Lnast_node::create_ref(lhs));
   s->add_child(root, rhs);
   flush_deferred_emits();     // flush outer-tree parked writes before the swap
@@ -660,7 +670,7 @@ void uPass_runner::emit_inline_tuple(const std::string&                         
   auto root = s->set_root(Lnast_ntype::create_tuple_add());
   s->add_child(root, Lnast_node::create_ref(dst));
   for (const auto& [k, v] : fields) {
-    auto a = s->add_child(root, Lnast_ntype::create_assign());
+    auto a = s->add_child(root, Lnast_ntype::create_store());
     s->add_child(a, Lnast_node::create_ref(k));
     s->add_child(a, v);
   }
@@ -682,8 +692,18 @@ void uPass_runner::emit_inline_typespec(const std::string& name, int bits, bool 
   auto s    = std::make_shared<Lnast>(body, "inl-type");
   auto root = s->set_root(Lnast_ntype::create_type_spec());
   s->add_child(root, Lnast_node::create_ref(name));
-  auto pt = s->add_child(root, is_signed ? Lnast_ntype::create_prim_type_sint() : Lnast_ntype::create_prim_type_uint());
-  s->add_child(pt, Lnast_node::create_const(std::to_string(bits)));
+  // Task 1t — emit the canonical prim_type_int(max,min) from (bits, signed).
+  auto pt = s->add_child(root, Lnast_ntype::create_prim_type_int());
+  if (bits > 0 && is_signed) {
+    s->add_child(pt, Lnast_node::create_const(std::string(Dlop::get_mask_value(static_cast<int>(bits) - 1)->to_pyrope())));
+    s->add_child(pt, Lnast_node::create_const(std::string(Dlop::get_neg_mask_value(static_cast<int>(bits) - 1)->to_pyrope())));
+  } else if (bits > 0) {
+    s->add_child(pt, Lnast_node::create_const(std::string(Dlop::get_mask_value(static_cast<int>(bits))->to_pyrope())));
+    s->add_child(pt, Lnast_node::create_const("0"));
+  } else {
+    s->add_child(pt, Lnast_node::create_const("nil"));
+    s->add_child(pt, Lnast_node::create_const("nil"));
+  }
   flush_deferred_emits();
   lm->push_source(s, "", 0);
   process_lnast();  // cursor at type_spec root → C_OP(type_spec): dispatch + emit
@@ -823,7 +843,7 @@ bool uPass_runner::try_inline_func_call() {
     const auto t = lm->get_raw_ntype();
     if (Lnast_ntype::is_ref(t) || Lnast_ntype::is_const(t)) {
       actuals.push_back(Actual{.is_named = false, .key = {}, .node = lm->current_node(), .func_name = func_actual_name()});
-    } else if (Lnast_ntype::is_assign(t)) {
+    } else if (Lnast_ntype::is_store(t)) {
       Actual     a;
       a.is_named = true;
       const auto here = lm->save_cursor();
@@ -1165,7 +1185,7 @@ namespace {
 bool dce_is_def_producing(Lnast_ntype::Lnast_ntype_int t) {
   using N = Lnast_ntype;
   switch (t) {
-    case N::Lnast_ntype_assign:
+    case N::Lnast_ntype_store:  // task 1t — store defines its first-child target (the unified write node)
     case N::Lnast_ntype_dp_assign:
     case N::Lnast_ntype_tuple_add:
     case N::Lnast_ntype_tuple_concat:
@@ -1454,8 +1474,25 @@ void uPass_runner::process_lnast() {
       emit_leaf(lm->current_node());
       break;
 
-    // Assignment
-    A_OP(assign)
+    // Assignment — Task 1t — `store` is the one write/bind node (`assign` was
+    // deleted). Branch on arity: a 2-child store is a scalar/wire
+    // write (route to process_assign, drop-candidate); a ≥3-child store is a
+    // tuple-field write (route to process_tuple_set, verbatim — the bundle
+    // mutation is the point, never drop). The pass methods walk children by
+    // position, not by node type, so they handle a `store` node unchanged.
+    case Ntype::Lnast_ntype_store:
+      if (lm->current_num_children() <= 2) {
+        process_drop_candidate(&upass::uPass::process_assign, /*fold_all=*/false);
+      } else {
+        process_verbatim(&upass::uPass::process_tuple_set);
+      }
+      break;
+
+    // Task 1t — declare carries type/mode metadata downstream passes still
+    // need (like type_spec/attr_set); emit verbatim, never drop. child0 is the
+    // declared var (LHS, not folded); child1 the type subtree; child2 the mode
+    // const; optional child3 an init value (folded if a ref).
+    C_OP(declare)
 
     // Bitwidth
     A_OP(bit_and)
@@ -1536,9 +1573,8 @@ void uPass_runner::process_lnast() {
     // consumers got dropped, producing dead code with dangling tmp refs.
     A_OP(tuple_get)
     A_OP(tuple_add)
-    // tuple_set mutates its LHS bundle in place — never drop; the side
-    // effect on the bundle is the whole point.
-    C_OP(tuple_set)
+    // Task 1t — the tuple_set node was deleted; field writes are now `store`
+    // (≥3 children → process_tuple_set, handled in the store case above).
     // tuple_concat folds when every operand is a known scalar (string/int
     // concat via Lconst::concat_op); treat like arithmetic so classify can
     // drop the statement once the destination is resolved.
@@ -1553,9 +1589,9 @@ void uPass_runner::process_lnast() {
     C_OP(attr_get)
 
     // Type metadata — emit verbatim, but dispatch so the attribute pass
-    // observes type_spec / type_def for max/min/bits derivation.
+    // observes type_spec for max/min/bits derivation. (type_def was deleted —
+    // `type Foo = …` now lowers to `declare(mode=="type")`, handled above.)
     C_OP(type_spec)
-    C_OP(type_def)
 
     // Cassert — emit with all operand refs folded (Slice 2 gives this to
     // verifier so known-true cassert gets dropped).

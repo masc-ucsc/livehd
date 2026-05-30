@@ -83,6 +83,9 @@ public:
   // Type info, range bounds, value-derivation hooks (see
   // upass_attributes_read.cpp).
   void process_type_spec() override;
+  // Task 1t — declare(var, TYPE, const(mode)[, value]) unifies the
+  // attr_set(type)+attr_set(comptime)+type_spec declaration cluster.
+  void process_declare() override;
   void process_range() override;
 
   // Aggregate tuple-attribute resolution (see upass_attributes_tuple.cpp).
@@ -198,6 +201,14 @@ public:
     // size attrs read as nil per the typesystem redesign) from
     // `const b = 3` (no annotation — legacy value-based fallback).
     bool         has_type_spec{false};
+    // Task 1t — the integer `(max,min)` range carried by a `prim_type_int`
+    // node (`int(max=,min=)` / `uint(bits=)` type-call). When set, these are
+    // the single source of truth for max/min/bits/sign derivation. Either
+    // may stay unset (unbounded): `int(max=3)` pins only `max`. uN/sN sugar
+    // still flows through `kind`+`bits` (legacy path) until T5 consolidates
+    // every integer onto `prim_type_int`.
+    std::optional<Const> range_max;
+    std::optional<Const> range_min;
   };
 
   // Look up explicitly-stored attribute values (set by attr_set). Returns
@@ -367,6 +378,15 @@ private:
   std::optional<Const> derive_min(std::string_view base) const;
   std::optional<Const> derive_bits(std::string_view base, std::string_view variant) const;  // "bits"/"ubits"/"sbits"
   std::optional<Const> derive_comptime(std::string_view base, std::string_view base_text) const;
+
+  // Task 1t — read a scalar TYPE node at the cursor (prim_type_int/uint/sint/
+  // boolean/string), filling kind/bits and the (max,min) range. The cursor is
+  // expected to be positioned AT the type node and is left there (balanced).
+  // `is_real_type` is set true for a concrete numeric/string type (so the
+  // caller marks has_type_spec), false for none/unknown. Shared by
+  // process_type_spec and process_declare.
+  void read_scalar_type_at_cursor(Numeric_kind& kind, uint32_t& bits, std::optional<Const>& range_max,
+                                   std::optional<Const>& range_min, bool& is_real_type);
 
   // Best-effort comptime value for `var` — consults runner_fold_fn (which
   // aggregates every pass's fold_ref) and our own tmp_fold, returning the

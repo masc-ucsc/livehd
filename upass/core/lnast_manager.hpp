@@ -284,6 +284,17 @@ public:
   // cursor — safe to call before deciding whether to recurse.
   bool has_child() const { return !lnast->get_child(current_nid).is_invalid(); }
 
+  // Number of direct children of the cursor node. Does not move the cursor.
+  // Used by the `store` dispatch arity branch (0 levels ⇒ 2 children ⇒ assign
+  // path; ≥1 level ⇒ ≥3 children ⇒ tuple_set path).
+  size_t current_num_children() const {
+    size_t n = 0;
+    for (auto c = lnast->get_child(current_nid); !c.is_invalid(); c = lnast->get_sibling_next(c)) {
+      ++n;
+    }
+    return n;
+  }
+
   // Cursor moves are non-virtual: there are no subclasses of Lnast_manager
   // in-tree, and these are on every per-op pass's hot loop (≈10M+ calls per
   // pass.upass run on xx.prp). Devirtualizing lets the compiler inline the
@@ -367,11 +378,11 @@ protected:
   static constexpr uint32_t                            kInlineTmpBase = 900000;
 
   // True when `nid` is the key (child 0) of an `assign` that is a field entry
-  // of a tuple_add / tuple_concat / tuple_set — i.e. the `x` in `(x = v)`.
+  // of a tuple_add / tuple_concat — i.e. the `x` in `(x = v)`.
   // Such refs are structural labels and must not be inline-renamed.
   bool is_tuple_field_key(const Lnast_nid& nid) const {
     auto parent = lnast->get_parent(nid);
-    if (parent.is_invalid() || !Lnast_ntype::is_assign(lnast->get_type(parent))) {
+    if (parent.is_invalid() || !Lnast_ntype::is_store(lnast->get_type(parent))) {
       return false;
     }
     if (lnast->get_first_child(parent) != nid) {
@@ -382,8 +393,7 @@ protected:
       return false;
     }
     const auto gt = lnast->get_type(gp);
-    return gt == Lnast_ntype::Lnast_ntype_tuple_add || gt == Lnast_ntype::Lnast_ntype_tuple_concat
-           || gt == Lnast_ntype::Lnast_ntype_tuple_set;
+    return gt == Lnast_ntype::Lnast_ntype_tuple_add || gt == Lnast_ntype::Lnast_ntype_tuple_concat;
   }
 
   std::string_view rename_tmp(std::string_view raw) const {

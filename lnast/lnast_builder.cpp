@@ -281,11 +281,11 @@ void Lnast_builder::create_assign_stmts(std::string_view lhs_var, std::string_vi
     auto rhs_dest = create_tuple_get(rhs_var);
 
     if (Bundle::is_single_level(lhs_var)) {
-      auto idx_assign = lnast->add_child(idx_stmts, Lnast_ntype::create_assign());
+      auto idx_assign = lnast->add_child(idx_stmts, Lnast_ntype::create_store());
       add_ref_child(idx_assign, lhs_var);
       add_value_child(idx_assign, rhs_dest);
     } else {
-      auto idx_dot = lnast->add_child(idx_stmts, Lnast_ntype::create_tuple_set());
+      auto idx_dot = lnast->add_child(idx_stmts, Lnast_ntype::create_store());
       lhs_dest     = create_lnast_tmp();
       add_ref_child(idx_dot, lhs_dest);
 
@@ -300,13 +300,13 @@ void Lnast_builder::create_assign_stmts(std::string_view lhs_var, std::string_vi
   }
 #endif
 
-  auto idx_assign = lnast->add_child(idx_stmts, Lnast_ntype::create_assign());
+  auto idx_assign = lnast->add_child(idx_stmts, Lnast_ntype::create_store());
   add_ref_child(idx_assign, lhs_var);
   add_value_child(idx_assign, rhs_var);
 }
 
 void Lnast_builder::create_declare_bits_stmts(std::string_view a_var, bool is_signed, int bits) {
-  auto idx_dot = lnast->add_child(idx_stmts, Lnast_ntype::create_tuple_set());
+  auto idx_dot = lnast->add_child(idx_stmts, Lnast_ntype::create_store());
 
 #ifdef LNASTOP_DONE
   add_ref_child(idx_dot, a_var);
@@ -347,7 +347,7 @@ void Lnast_builder::create_named_tuple(std::string_view lhs_var, const std::vect
   add_ref_child(idx_dot, lhs_var);
 
   for (const auto& it : rhs) {
-    auto idx_assign = lnast->add_child(idx_dot, Lnast_ntype::create_assign());
+    auto idx_assign = lnast->add_child(idx_dot, Lnast_ntype::create_store());
     add_ref_child(idx_assign, it.first);
     add_value_child(idx_assign, it.second);
   }
@@ -369,7 +369,7 @@ void Lnast_builder::create_named_tuple(std::string_view lhs_var, const std::vect
   add_ref_child(idx_dot, lhs_var);
 
   for (const auto& it : tup_expanded_rhs) {
-    auto idx_assign = lnast->add_child(idx_dot, Lnast_ntype::create_assign());
+    auto idx_assign = lnast->add_child(idx_dot, Lnast_ntype::create_store());
     add_ref_child(idx_assign, it.first);
     add_value_child(idx_assign, it.second);
   }

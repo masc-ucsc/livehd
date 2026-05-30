@@ -159,7 +159,7 @@ void uPass_attributes::process_tuple_add() {
   while (move_to_sibling()) {
     Tuple_field field;
     field.positional = std::to_string(pos);
-    if (is_type(Lnast_ntype::Lnast_ntype_assign)) {
+    if (is_type(Lnast_ntype::Lnast_ntype_store)) {
       // Named field: read the assign's first child for the key.
       if (move_to_child()) {
         field.name = std::string{current_text()};

@@ -134,7 +134,8 @@ static bool is_valid_ref_text(std::string_view name) {
 //   - `if` / `while` / `cassert`: ALL ref children are reads (no write at
 //     position 0), so this returns false for those — handled by the caller.
 static bool parent_writes_pos0(Lnast_ntype::Lnast_ntype_int pt) {
-  return Lnast_ntype::is_assign(pt) || Lnast_ntype::is_dp_assign(pt) || Lnast_ntype::is_delay_assign(pt)
+  return Lnast_ntype::is_store(pt) || Lnast_ntype::is_declare(pt) || Lnast_ntype::is_dp_assign(pt)
+         || Lnast_ntype::is_delay_assign(pt)
          || Lnast_ntype::is_log_and(pt) || Lnast_ntype::is_log_or(pt) || Lnast_ntype::is_log_not(pt) || Lnast_ntype::is_bit_and(pt)
          || Lnast_ntype::is_bit_or(pt) || Lnast_ntype::is_bit_not(pt) || Lnast_ntype::is_bit_xor(pt) || Lnast_ntype::is_red_and(pt)
          || Lnast_ntype::is_red_or(pt) || Lnast_ntype::is_red_xor(pt) || Lnast_ntype::is_popcount(pt) || Lnast_ntype::is_plus(pt)
@@ -142,7 +143,7 @@ static bool parent_writes_pos0(Lnast_ntype::Lnast_ntype_int pt) {
          || Lnast_ntype::is_shl(pt) || Lnast_ntype::is_sra(pt) || Lnast_ntype::is_sext(pt) || Lnast_ntype::is_set_mask(pt)
          || Lnast_ntype::is_get_mask(pt) || Lnast_ntype::is_eq(pt) || Lnast_ntype::is_ne(pt) || Lnast_ntype::is_lt(pt)
          || Lnast_ntype::is_le(pt) || Lnast_ntype::is_gt(pt) || Lnast_ntype::is_ge(pt) || Lnast_ntype::is_is(pt)
-         || Lnast_ntype::is_tuple_add(pt) || Lnast_ntype::is_tuple_get(pt) || Lnast_ntype::is_tuple_set(pt)
+         || Lnast_ntype::is_tuple_add(pt) || Lnast_ntype::is_tuple_get(pt)
          || Lnast_ntype::is_tuple_concat(pt) || Lnast_ntype::is_attr_set(pt) || Lnast_ntype::is_attr_get(pt)
          || Lnast_ntype::is_func_call(pt) || Lnast_ntype::is_func_def(pt) || Lnast_ntype::is_range(pt)
          || Lnast_ntype::is_func_does(pt) || Lnast_ntype::is_func_equals(pt) || Lnast_ntype::is_func_in(pt)
@@ -181,14 +182,14 @@ static void check_unwritten_tmps(const Lnast* ln) {
     bool is_first_child = (ln->get_first_child(parent) == it);
     auto pt             = ln->get_type(parent);
 
-    // tuple_add / tuple_set entry-form: an inner `assign(ref:key, val)` whose
-    // child[0] is a *field name*, not a variable. A tmp shouldn't appear as
-    // a key in practice, but skip just in case so we don't over-flag.
-    if (Lnast_ntype::is_assign(pt) && is_first_child) {
+    // tuple_add entry-form: an inner `store(ref:key, val)` whose child[0] is a
+    // *field name*, not a variable. A tmp shouldn't appear as a key in practice,
+    // but skip just in case so we don't over-flag.
+    if (Lnast_ntype::is_store(pt) && is_first_child) {
       auto grand = ln->get_parent(parent);
       if (!grand.is_invalid()) {
         auto gt = ln->get_type(grand);
-        if (Lnast_ntype::is_tuple_add(gt) || Lnast_ntype::is_tuple_set(gt)) {
+        if (Lnast_ntype::is_tuple_add(gt)) {
           continue;
         }
       }
@@ -224,6 +225,51 @@ static void check_unwritten_tmps(const Lnast* ln) {
         name,
         info.second);
     return;
+  }
+}
+
+// Task 1t — declare-once. The storage kind of a `declare` is the FIRST
+// space-separated token of its mode const ("const", "mut", "reg", "type", …).
+static bool declare_mode_is_const_storage(std::string_view mode) {
+  auto sp  = mode.find(' ');
+  auto tok = (sp == std::string_view::npos) ? mode : mode.substr(0, sp);
+  return tok == "const";
+}
+
+// A `const`-storage variable may be `declare`d only once per lexical scope (one
+// `stmts` block). `mut`/`reg` redeclares are legal — they reset the binding
+// (e.g. `mut counter = 1` appearing before each loop in matrix.prp) — and nested
+// scopes (if/for/while/func_def bodies) each get a fresh frame so an inner
+// declare may shadow an outer one (scope_simple.prp). The check runs on the live
+// tree (constprop has already pruned dead branches), so only reachable
+// redeclares are seen — a `const x` in a then-branch and a separate `const x` in
+// the else-branch live in distinct frames and are not flagged.
+static void check_declare_once(const Lnast* ln, const Lnast_nid& scope_stmts) {
+  std::unordered_set<std::string> const_here;
+  for (auto c = ln->get_first_child(scope_stmts); !c.is_invalid(); c = ln->get_sibling_next(c)) {
+    if (Lnast_ntype::is_declare(ln->get_type(c))) {
+      auto c0 = ln->get_first_child(c);
+      auto c1 = c0.is_invalid() ? c0 : ln->get_sibling_next(c0);
+      auto c2 = c1.is_invalid() ? c1 : ln->get_sibling_next(c1);
+      if (!c0.is_invalid() && !c2.is_invalid() && Lnast_ntype::is_ref(ln->get_type(c0))
+          && Lnast_ntype::is_const(ln->get_type(c2)) && declare_mode_is_const_storage(ln->get_name(c2))) {
+        auto name = std::string(ln->get_name(c0));
+        if (const_here.contains(name)) {
+          Pass::error("lnastfmt: {} redeclaration of `const` variable '{}' in the same scope (a const may be declared only once)",
+                      node_loc(ln, c),
+                      name);
+          return;
+        }
+        const_here.insert(name);
+      }
+    }
+    // Recurse into nested scopes: any `stmts` child of a control-flow statement
+    // (if/for/while/func_def) starts a fresh frame.
+    for (auto cc = ln->get_first_child(c); !cc.is_invalid(); cc = ln->get_sibling_next(cc)) {
+      if (Lnast_ntype::is_stmts(ln->get_type(cc))) {
+        check_declare_once(ln, cc);
+      }
+    }
   }
 }
 
@@ -396,7 +442,64 @@ void Pass_lnastfmt::validate(const Lnast* ln) {
       }
     }
 
-    if (Lnast_ntype::is_assign(type) || Lnast_ntype::is_dp_assign(type)) {
+    // Task 1t — store(var, level0..levelN, value): child 0 is the LHS var
+    // (a ref), and there is at least one more child (the value). No type slot
+    // (a store can never retype — "type only at declaration").
+    if (Lnast_ntype::is_store(type)) {
+      auto c0 = ln->get_first_child(it);
+      if (c0.is_invalid() || ln->get_sibling_next(c0).is_invalid()) {
+        Pass::error("lnastfmt: {} store must have at least 2 children (var, value)", node_loc(ln, it));
+        return;
+      }
+      if (!Lnast_ntype::is_ref(ln->get_type(c0))) {
+        Pass::error("lnastfmt: {} store child 0 {} (var) must be a ref, got {}",
+                    node_loc(ln, it),
+                    node_loc(ln, c0),
+                    Lnast_ntype::debug_name(ln->get_type(c0)));
+        return;
+      }
+    }
+
+    // Task 1t — declare(var, type, const(mode), [value]): child 0 a ref (var),
+    // child 1 a type node (prim_type_*/comp_type_*/expr_type/none_type), child
+    // 2 a const (the mode). An optional 4th child is the init value.
+    if (Lnast_ntype::is_declare(type)) {
+      auto c0 = ln->get_first_child(it);
+      auto c1 = c0.is_invalid() ? c0 : ln->get_sibling_next(c0);
+      auto c2 = c1.is_invalid() ? c1 : ln->get_sibling_next(c1);
+      if (c0.is_invalid() || c1.is_invalid() || c2.is_invalid()) {
+        Pass::error("lnastfmt: {} declare must have at least 3 children (var, type, mode)", node_loc(ln, it));
+        return;
+      }
+      if (!Lnast_ntype::is_ref(ln->get_type(c0))) {
+        Pass::error("lnastfmt: {} declare child 0 {} (var) must be a ref, got {}",
+                    node_loc(ln, it),
+                    node_loc(ln, c0),
+                    Lnast_ntype::debug_name(ln->get_type(c0)));
+        return;
+      }
+      // child 1 is a type node, or a `ref` (a named type — task 1t, the ref
+      // resolves to the named type's symbol-table binding).
+      if (!Lnast_ntype::is_type(ln->get_type(c1)) && !Lnast_ntype::is_ref(ln->get_type(c1))) {
+        Pass::error("lnastfmt: {} declare child 1 {} (type) must be a type node or named-type ref, got {}",
+                    node_loc(ln, it),
+                    node_loc(ln, c1),
+                    Lnast_ntype::debug_name(ln->get_type(c1)));
+        return;
+      }
+      if (!Lnast_ntype::is_const(ln->get_type(c2))) {
+        Pass::error("lnastfmt: {} declare child 2 {} (mode) must be a const, got {}",
+                    node_loc(ln, it),
+                    node_loc(ln, c2),
+                    Lnast_ntype::debug_name(ln->get_type(c2)));
+        return;
+      }
+    }
+
+    // Task 1t — `assign` was deleted; statement/field/signature writes are all
+    // `store` (validated leniently above: child0=ref, ≥2 children, any arity).
+    // Only `dp_assign` keeps the strict 2-child (+ legacy 3-child) shape here.
+    if (Lnast_ntype::is_dp_assign(type)) {
       auto c0 = ln->get_first_child(it);
       if (c0.is_invalid() || !Lnast_ntype::is_ref(ln->get_type(c0))) {
         if (c0.is_invalid()) {
@@ -432,7 +535,7 @@ void Pass_lnastfmt::validate(const Lnast* ln) {
           auto gp = ln->get_parent(parent);
           if (!gp.is_invalid()
               && (Lnast_ntype::is_func_def(ln->get_type(gp)) || Lnast_ntype::is_io(ln->get_type(gp))
-                  || Lnast_ntype::is_assign(ln->get_type(gp)))) {
+                  || Lnast_ntype::is_store(ln->get_type(gp)))) {
             ok = true;
           }
         }
@@ -456,4 +559,12 @@ void Pass_lnastfmt::validate(const Lnast* ln) {
   }
 
   check_unwritten_tmps(ln);
+
+  // Task 1t — declare-once: a `const` variable cannot be redeclared in the same
+  // scope. Walk each top-level `stmts` block; nested scopes recurse.
+  for (auto c = ln->get_first_child(ln->get_root()); !c.is_invalid(); c = ln->get_sibling_next(c)) {
+    if (Lnast_ntype::is_stmts(ln->get_type(c))) {
+      check_declare_once(ln, c);
+    }
+  }
 }

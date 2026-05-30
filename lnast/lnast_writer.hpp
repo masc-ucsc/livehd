@@ -72,7 +72,6 @@ protected:
 
   void write_n_ary(std::string_view op);
   void write_func_marker(std::string_view name);
-  void write_prim_type_int(char sign);
 
 #define LNAST_NODE(NAME, VERBAL) void write_##NAME();
 #include "lnast_nodes.def"

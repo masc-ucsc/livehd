@@ -81,7 +81,7 @@ void Lnast_parser::parse_var_stmt() {
             end_tree();
           } else {
             // LNAST - assign
-            start_tree(Lnast_ntype::create_assign());
+            start_tree(Lnast_ntype::create_store());
             add_leaf(lhs_node);
             add_leaf(rhs_node);
             end_tree();
@@ -112,7 +112,7 @@ void Lnast_parser::parse_var_stmt() {
             end_tree();
           } else {
             // LNAST - assign
-            start_tree(Lnast_ntype::create_assign());
+            start_tree(Lnast_ntype::create_store());
             add_leaf(lhs_node);
             add_leaf(rhs_node);
             end_tree();
@@ -135,7 +135,7 @@ void Lnast_parser::parse_var_stmt() {
     }
     case Lnast_token::lbrack: {
       // LNAST - tuple_set
-      start_tree(Lnast_ntype::create_tuple_set());
+      start_tree(Lnast_ntype::create_store());
       add_leaf(lhs_node);
       parse_selects();
       if (cur_kind() != Lnast_token::equal) {
@@ -189,7 +189,7 @@ void Lnast_parser::parse_list() {
         if (cur_kind() == Lnast_token::equal) {
           has_value = true;
           forward_token();
-          start_tree(Lnast_ntype::create_assign());
+          start_tree(Lnast_ntype::create_store());
           add_leaf(Lnast_node::create_ref(name));
           parse_prim();
         }
@@ -274,15 +274,25 @@ void Lnast_parser::parse_type() {
   // std::cout << "parse_type\n";
   switch (cur_kind()) {
     case Lnast_token::ty_none:
-      add_leaf(Lnast_ntype::create_none_type());
+      add_leaf(Lnast_ntype::create_prim_type_none());
       forward_token();
       break;
+    // Task 1t — the canonical integer type: `#int` (unbounded) or
+    // `#int(max[, min])` (range children).
+    case Lnast_token::ty_int: {
+      start_tree(Lnast_ntype::create_prim_type_int());
+      forward_token();
+      if (cur_kind() == Lnast_token::lparen) {
+        parse_list();
+      }
+      end_tree();
+      break;
+    }
+    // Task 1t — legacy unbounded int/uint tokens map to the canonical
+    // prim_type_int (unbounded; bounds derived elsewhere).
     case Lnast_token::ty_sint:
-      add_leaf(Lnast_ntype::create_prim_type_sint());
-      forward_token();
-      break;
     case Lnast_token::ty_uint:
-      add_leaf(Lnast_ntype::create_prim_type_uint());
+      add_leaf(Lnast_ntype::create_prim_type_int());
       forward_token();
       break;
     case Lnast_token::ty_range:
@@ -294,30 +304,26 @@ void Lnast_parser::parse_type() {
       forward_token();
       break;
     case Lnast_token::ty_boolean:
-      add_leaf(Lnast_ntype::create_prim_type_boolean());
+      add_leaf(Lnast_ntype::create_prim_type_bool());
       forward_token();
       break;
+    // Task 1t — `type`/`ref` are no longer types (they moved into the declare
+    // mode enum); legacy tokens map to the none sentinel.
     case Lnast_token::ty_type:
-      add_leaf(Lnast_ntype::create_prim_type_type());
-      forward_token();
-      break;
     case Lnast_token::ty_ref:
-      add_leaf(Lnast_ntype::create_prim_type_ref());
+      add_leaf(Lnast_ntype::create_prim_type_none());
       forward_token();
       break;
     case Lnast_token::ty_unknown:
-      add_leaf(Lnast_ntype::create_unknown_type());
+      add_leaf(Lnast_ntype::create_prim_type_none());
       forward_token();
       break;
-    case Lnast_token::ty_s: {
-      start_tree(Lnast_ntype::create_prim_type_sint());
-      forward_token();
-      parse_list();
-      end_tree();
-      break;
-    }
+    // Task 1t — legacy `#s(...)` / `#u(...)` width forms map to the canonical
+    // prim_type_int subtree (the children carry the range; producer no longer
+    // emits these forms).
+    case Lnast_token::ty_s:
     case Lnast_token::ty_u: {
-      start_tree(Lnast_ntype::create_prim_type_uint());
+      start_tree(Lnast_ntype::create_prim_type_int());
       forward_token();
       parse_list();
       end_tree();
@@ -350,8 +356,9 @@ void Lnast_parser::parse_type() {
       forward_token();
       break;
     }
+    // Task 1t — comp_type_mixin removed; legacy token maps to a tuple type.
     case Lnast_token::ty_mixin: {
-      start_tree(Lnast_ntype::create_comp_type_mixin());
+      start_tree(Lnast_ntype::create_comp_type_tuple());
       forward_token();
       parse_list();
       end_tree();
@@ -364,8 +371,10 @@ void Lnast_parser::parse_type() {
       end_tree();
       break;
     }
+    // Task 1t — expr_type deleted (named types are a `ref` in the type slot).
+    // The legacy `#expr(...)` text token maps to the none sentinel.
     case Lnast_token::ty_expr: {
-      start_tree(Lnast_ntype::create_expr_type());
+      start_tree(Lnast_ntype::create_prim_type_none());
       forward_token();
       parse_list();
       end_tree();
