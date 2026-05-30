@@ -82,8 +82,8 @@ public:
         case Lnast_ntype::Lnast_ntype_lt:
         case Lnast_ntype::Lnast_ntype_le:
         case Lnast_ntype::Lnast_ntype_gt:
-        case Lnast_ntype::Lnast_ntype_ge: ++count; break;
-        default: break;
+        case Lnast_ntype::Lnast_ntype_ge     : ++count; break;
+        default                              : break;
       }
     }
     return count;
@@ -240,9 +240,9 @@ public:
   // read in place — never copied (see 1i in TODO_livehd.md).
   void push_source(const std::shared_ptr<Lnast>& callee, std::string tag, uint32_t salt) {
     frames_.push_back(Source_frame{lnast, current_nid, std::move(nid_stack), std::move(active_tag_), active_salt_});
-    lnast       = callee;
-    nid_stack   = std::stack<Lnast_nid>{};
-    current_nid = lnast->get_root();
+    lnast        = callee;
+    nid_stack    = std::stack<Lnast_nid>{};
+    current_nid  = lnast->get_root();
     active_tag_  = std::move(tag);
     active_salt_ = salt;
   }
@@ -256,8 +256,8 @@ public:
     active_salt_ = f.salt;
     frames_.pop_back();
   }
-  bool        in_inline_frame() const { return !frames_.empty(); }
-  std::size_t inline_depth() const { return frames_.size(); }
+  bool             in_inline_frame() const { return !frames_.empty(); }
+  std::size_t      inline_depth() const { return frames_.size(); }
   std::string_view active_tag() const { return active_tag_; }
 
   // Scope identity for nid-keyed pass state (constprop block scopes). Plain
@@ -276,9 +276,7 @@ public:
   // static so the runner can synthesize prologue/epilogue binding names
   // that match what current_text() emits for the body. Inlined names are
   // therefore non-tmps; DCE-of-inlined-temporaries is a 1i follow-up.
-  static std::string make_inlined_name(std::string_view tag, std::string_view raw) {
-    return std::string(tag) + std::string(raw);
-  }
+  static std::string make_inlined_name(std::string_view tag, std::string_view raw) { return std::string(tag) + std::string(raw); }
 
   // True iff the read cursor has at least one child. Does not move the
   // cursor — safe to call before deciding whether to recurse.
@@ -374,7 +372,7 @@ protected:
   // frame so repeated reads of the same callee tmp resolve identically. The
   // base is high to avoid colliding with caller tmps (which are small).
   mutable std::unordered_map<std::string, std::string> tmp_remap_;
-  mutable uint32_t                                      tmp_counter_{0};
+  mutable uint32_t                                     tmp_counter_{0};
   static constexpr uint32_t                            kInlineTmpBase = 900000;
 
   // True when `nid` is the key (child 0) of an `assign` that is a field entry

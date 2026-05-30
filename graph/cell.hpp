@@ -81,7 +81,7 @@ enum class Ntype_op : uint8_t {
   SHL = 30,  // Shift Left Logical
   SRA = 32,  // Shift Right Arithmetic
 
-  LUT = 34,  // LUT
+  LUT    = 34,  // LUT
   Mux    = 36,  // Multiplexor with many options
   Hotmux = 38,  // One-hot select mux (sel is 1-hot encoded; runtime flags
                 // non-one-hot select as an error).
@@ -95,7 +95,7 @@ enum class Ntype_op : uint8_t {
   Latch = 45,  // Latch
   Fflop = 47,  // Fluid flop
 
-  Sub = 49,  // Sub module instance
+  Sub    = 49,  // Sub module instance
   //------------------END PIPELINED (break LOOPS)
   Nconst = 50,  // Constant -- non-loop-last; paired with IO via is_loop_first.
 

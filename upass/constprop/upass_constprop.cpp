@@ -147,7 +147,60 @@ void uPass_constprop::process_assign() {
       // shape, and the user expects subsequent assignments to fully
       // replace. Also skip when RHS carries names of its own (full copy).
       auto existing = st.get_bundle(lhs_text);
-      bool do_merge = false;
+
+      // Task 1t — named-type default materialization. When LHS was declared with
+      // a named type `ref(NAMED)` and has no value yet, use NAMED's resolved
+      // bundle (its default field values + per-field types) as the base, then
+      // overlay the init bundle: named init fields override by name; positional
+      // init entries bind to NAMED's named slots in canonical order. NAMED may
+      // be declared via `type T=(…)` or `const T=(…)` — both leave T's bundle in
+      // the symbol table. Example:
+      //   const v_type=(x:u3=nil, b:string="foo"); mut c:v_type=(x=3) → c={x:3, b:"foo"}.
+      if (!existing || existing->non_attr_entries().empty()) {
+        if (auto nt = decl_named_type_.find(std::string(lhs_text)); nt != decl_named_type_.end()) {
+          auto base = st.get_bundle(nt->second);
+          if (base && base.get() != rhs_bundle.get() && !base->non_attr_entries().empty()) {
+            auto merged = std::make_shared<Bundle>(std::string(lhs_text));
+            for (const auto& [bk, bep] : base->non_attr_entries()) {
+              merged->set(bk, *bep);  // the named type's default fields/values
+            }
+            std::vector<std::string> base_named;  // canonical-order named slots
+            for (const auto& tl : base->top_levels()) {
+              if (tl.pos < 0) {
+                base_named.emplace_back(tl.name);
+              }
+            }
+            size_t pidx = 0;
+            for (const auto& [rk, rep] : rhs_bundle->non_attr_entries()) {
+              bool numeric = !rk.empty();
+              for (char ch : rk) {
+                if (ch < '0' || ch > '9') {
+                  numeric = false;
+                  break;
+                }
+              }
+              if (numeric) {  // positional init entry → bind to next named slot
+                if (pidx < base_named.size()) {
+                  merged->set(base_named[pidx], *rep);
+                  ++pidx;
+                } else {
+                  merged->set(rk, *rep);
+                }
+              } else {  // named init field → overlay by name
+                merged->set(rk, *rep);
+              }
+            }
+            st.set(lhs_text, merged);
+            if (tuple_typed_names.contains(std::string(current_text()))) {
+              tuple_typed_names.insert(std::string(lhs_text));
+            }
+            move_to_parent();
+            return;
+          }
+        }
+      }
+
+      bool                     do_merge = false;
       // LHS named slots in canonical (alphabetical) order via top_levels().
       // Nested entries (`x.b`, `x.c`) collapse to one Top_level_entry by
       // construction, so no manual de-duplication is needed.
@@ -228,9 +281,9 @@ void uPass_constprop::process_assign() {
     // past the declared width (`bit_test`+!`unknown_bit_test` — `0sb?` keeps
     // its natural width), and `!st.has_trivial` restricts it to the first
     // write so per-statement wrap/sat reassignments stay in control.
-    if (auto it = decl_unsigned_bits_.find(std::string(lhs_text));
-        it != decl_unsigned_bits_.end() && !st.has_trivial(lhs_text)
-        && v.bit_test(static_cast<int>(it->second)) && !v.unknown_bit_test(static_cast<int>(it->second))) {
+    if (auto it = decl_unsigned_bits_.find(std::string(lhs_text)); it != decl_unsigned_bits_.end() && !st.has_trivial(lhs_text)
+                                                                   && v.bit_test(static_cast<int>(it->second))
+                                                                   && !v.unknown_bit_test(static_cast<int>(it->second))) {
       v = *v.and_op(*Dlop::get_mask_value(static_cast<int>(it->second)));
     }
     store_trivial(lhs_text, v);
@@ -259,7 +312,11 @@ void uPass_constprop::process_declare() {
   uint32_t   bits          = 0;
   bool       unsigned_type = false;
   const auto t             = get_raw_ntype();
-  if (Lnast_ntype::is_prim_type_int(t)) {
+  if (Lnast_ntype::is_ref(t)) {
+    // Task 1t — named type: the type slot is a `ref(NAMED)`. Record it so the
+    // var's init write materializes NAMED's default fields (see process_assign).
+    decl_named_type_[var] = std::string(current_text());
+  } else if (Lnast_ntype::is_prim_type_int(t)) {
     // prim_type_int(max, min): unsigned iff min is known and ≥ 0; bits derives
     // from the known max ("nil" children leave the bound unset → skip).
     std::optional<Const> max_v;
@@ -720,9 +777,8 @@ void uPass_constprop::process_eq_ne_impl() {
   // `v`. Without this case `(1,2) != (1,)` (where Symbol_table::set wraps
   // the 1-tuple as a scalar at position 0) hits neither the bundle-eq
   // nor scalar-eq paths and stays unfolded.
-  auto bundle_count_non_attr = [](const std::shared_ptr<Bundle const>& b) {
-    return static_cast<int>(b->non_attr_entries().size());
-  };
+  auto                 bundle_count_non_attr
+      = [](const std::shared_ptr<Bundle const>& b) { return static_cast<int>(b->non_attr_entries().size()); };
   if (a.bundle && b.bundle) {
     if (auto eq = compare_bundles_eq(a.bundle, b.bundle); eq.has_value()) {
       // Tri-state: nil propagates verbatim (the
@@ -1630,9 +1686,9 @@ std::optional<std::vector<uPass_constprop::Call_actual>> uPass_constprop::collec
     auto value = resolve_current_scalar();
     if (!value.has_value() || value->is_invalid()) {
       Call_actual unres;
-      unres.is_named       = false;
-      unres.var_name       = std::move(var_name);
-      unres.is_unresolved  = true;
+      unres.is_named      = false;
+      unres.var_name      = std::move(var_name);
+      unres.is_unresolved = true;
       actuals.emplace_back(std::move(unres));
       continue;
     }
@@ -1753,8 +1809,7 @@ bool uPass_constprop::try_eval_sum_cell_call(std::string_view dst, const std::ve
   return true;
 }
 
-bool uPass_constprop::try_eval_mux_cell_call(std::string_view dst, std::string_view op,
-                                             const std::vector<Call_actual>& actuals) {
+bool uPass_constprop::try_eval_mux_cell_call(std::string_view dst, std::string_view op, const std::vector<Call_actual>& actuals) {
   // Unlimited-sink multiplexer / LUT cells. Pins are named (`s` = selector for
   // mux/hotmux, `p1`..`pN` = ordered values; `p0`/`p1` = table/addr for lut)
   // or positional. Map every actual onto its pid, then delegate to the
@@ -1845,7 +1900,7 @@ bool uPass_constprop::try_eval_cell_call(std::string_view dst, std::string_view 
   // pin carrying a tuple (`__mult(a=(7,1))`). Inputs must be foldable (no
   // unknown bits) — the per-op kernels assume known operands; the
   // mux/hotmux/lut path above is the one that folds unknowns.
-  const Ntype_op nop = Ntype::get_op(op);
+  const Ntype_op     nop = Ntype::get_op(op);
   std::vector<Const> args;
   if (actuals.size() == 1 && actuals[0].is_bundle) {
     // Repeated single-pin tuple (`__mult(a=(7,1))`, `__and(a=(x,y))`, …): the
@@ -1885,7 +1940,7 @@ bool uPass_constprop::try_eval_cell_call(std::string_view dst, std::string_view 
     }
   }
 
-  auto need_n = [&](std::size_t n) -> bool { return args.size() == n; };
+  auto need_n   = [&](std::size_t n) -> bool { return args.size() == n; };
   auto need_min = [&](std::size_t n) -> bool { return args.size() >= n; };
 
   Const result;

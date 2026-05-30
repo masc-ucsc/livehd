@@ -30,8 +30,8 @@ public:
     // On leave_scope, every var listed in modified_under_uncertainty is
     // invalidated in its declaring scope so the unknown side-effects of the
     // arm don't leak out. See record_uncertain_modification().
-    bool                     uncertain_cond{false};
-    std::vector<std::string> modified_under_uncertainty;
+    bool                                                      uncertain_cond{false};
+    std::vector<std::string>                                  modified_under_uncertainty;
   };
 
   static inline Const invalid_lconst{};  // default Dlop is Type::Invalid
@@ -43,9 +43,9 @@ public:
   // Active scope chain: innermost at back(). Pointers refer into scope_storage.
   std::vector<Scope*> stack;
 
-  void function_scope(std::string_view func_id);
-  void always_scope();
-  void conditional_scope();
+  void                    function_scope(std::string_view func_id);
+  void                    always_scope();
+  void                    conditional_scope();
   // Push a block scope keyed by `key` (e.g. an LNAST nid hash). Re-entering
   // the same `key` on a subsequent iteration restores the same Scope object,
   // so per-iteration state (declarations, values) persists across the upass

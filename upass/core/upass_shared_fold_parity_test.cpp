@@ -44,8 +44,8 @@ TEST(UpassSharedFoldParity, FoldSumConstAcrossLnastAndGraph) {
   c0.connect_sink(s0.create_sink_pin(0));
   c1.connect_sink(s0.create_sink_pin(1));
 
-  auto gm         = std::make_shared<upass::Lgraph_manager>(g);
-  auto graph_rep  = upass::run_fold_sum_const_shared(*gm, "test-graph", false);
+  auto gm        = std::make_shared<upass::Lgraph_manager>(g);
+  auto graph_rep = upass::run_fold_sum_const_shared(*gm, "test-graph", false);
   EXPECT_EQ(graph_rep.folded_nodes, 1U);
   EXPECT_EQ(graph_rep.rewired_edges, 0U);
   EXPECT_EQ(graph_rep.new_const_nodes, 1U);

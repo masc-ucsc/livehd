@@ -17,12 +17,12 @@ Lnast_token Lnast_lexer::lex_token() {
       return form_token(Lnast_token::eof);
     }
     switch (ch) {
-      case 0: return form_token(Lnast_token::eof);
-      case ' ':
+      case 0   : return form_token(Lnast_token::eof);
+      case ' ' :
       case '\t':
       case '\r':
       case '\n': continue;
-      case '/': lex_comment(); continue;
+      case '/' : lex_comment(); continue;
 #define TOKEN_PN(NAME, SPELLING) \
   case SPELLING: return form_token(Lnast_token::NAME);
 #include "lnast_tokens.def"
@@ -40,7 +40,7 @@ Lnast_token Lnast_lexer::lex_token() {
       case '8':
       case '9': return lex_number(ch);
       case '"': return lex_string();
-      default: return lex_keyword_or_function_or_identifier(ch);
+      default : return lex_keyword_or_function_or_identifier(ch);
     }
   }
 }

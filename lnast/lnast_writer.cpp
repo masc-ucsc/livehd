@@ -331,7 +331,6 @@ void Lnast_writer::write_type_spec() {
 
 void Lnast_writer::write_prim_type_none() { print("#none"); }
 
-
 // Task 1t/typesystem: the canonical integer type node (no-arg overload, invoked
 // by the dispatch switch). Children are the optional (max, min) range consts;
 // `#int` with none = unbounded, `#int(max)` = max only, `#int(max, min)` = both.
@@ -385,7 +384,6 @@ void Lnast_writer::write_comp_type_array() {
   print(")");
   move_to_parent();
 }
-
 
 void Lnast_writer::write_comp_type_lambda() {
   print("#lambda(");

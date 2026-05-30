@@ -55,8 +55,8 @@ public:
 
   Lnast_ntype::Lnast_ntype_int get_type() const {
     switch (kind) {
-      case Kind::invalid: return Lnast_ntype::create_invalid();
-      case Kind::ref: return Lnast_ntype::create_ref();
+      case Kind::invalid : return Lnast_ntype::create_invalid();
+      case Kind::ref     : return Lnast_ntype::create_ref();
       case Kind::constant: return Lnast_ntype::create_const();
     }
     return Lnast_ntype::create_invalid();
@@ -118,10 +118,10 @@ private:
   Lnast_nid                     undefined_var_nid;
   // I/O metadata populated by the SSA upass (ssa:1).  Empty unless the SSA
   // pass has run on this LNAST.
-  Lnast_tree_io io_meta_;
+  Lnast_tree_io                 io_meta_;
   // Bitwidth metadata populated by uPass_bitwidth::end_run().  Empty unless
   // the bitwidth pass has run on this LNAST.
-  Lnast_bitwidth_meta bw_meta_;
+  Lnast_bitwidth_meta           bw_meta_;
 
 public:
   static constexpr char version[] = "0.1.0";

@@ -71,8 +71,8 @@ void uPass_func_extract::process_stmts_post() { --stmts_depth; }
 // scalars), then temp_scalar_value (SSA temps). Returns nullopt on
 // anything we can't statically resolve.
 static std::optional<Const> resolve_child_scalar(const std::string& name, bool is_ref, bool is_const,
-                                                  const std::unordered_map<std::string, Const>& latest,
-                                                  const std::unordered_map<std::string, Const>& temps) {
+                                                 const std::unordered_map<std::string, Const>& latest,
+                                                 const std::unordered_map<std::string, Const>& temps) {
   if (is_const) {
     try {
       return *Dlop::from_pyrope(name);
@@ -99,10 +99,9 @@ static std::optional<Const> resolve_child_scalar(const std::string& name, bool i
 // arithmetic process_* hook (plus, minus, mult, ...) so derived comptime
 // values like `const DERIVED = K + A` survive the func_extract walk.
 template <typename Op>
-static void fold_temp_nary(upass::Lnast_manager* lm, Op op,
-                            const std::unordered_map<std::string, Const>& latest_outer_value,
-                            const std::unordered_map<std::string, Const>& temp_scalar_value,
-                            std::unordered_map<std::string, Const>&       out_temps) {
+static void fold_temp_nary(upass::Lnast_manager* lm, Op op, const std::unordered_map<std::string, Const>& latest_outer_value,
+                           const std::unordered_map<std::string, Const>& temp_scalar_value,
+                           std::unordered_map<std::string, Const>&       out_temps) {
   if (!lm->has_child()) {
     return;
   }
@@ -118,18 +117,20 @@ static void fold_temp_nary(upass::Lnast_manager* lm, Op op,
     return;
   }
   std::optional<Const> acc = resolve_child_scalar(std::string(lm->current_text()),
-                                                   Lnast_ntype::is_ref(lm->current_type()),
-                                                   Lnast_ntype::is_const(lm->current_type()),
-                                                   latest_outer_value, temp_scalar_value);
+                                                  Lnast_ntype::is_ref(lm->current_type()),
+                                                  Lnast_ntype::is_const(lm->current_type()),
+                                                  latest_outer_value,
+                                                  temp_scalar_value);
   if (!acc.has_value() || acc->is_invalid()) {
     lm->restore_cursor(saved);
     return;
   }
   while (lm->move_to_sibling()) {
     auto rhs = resolve_child_scalar(std::string(lm->current_text()),
-                                     Lnast_ntype::is_ref(lm->current_type()),
-                                     Lnast_ntype::is_const(lm->current_type()),
-                                     latest_outer_value, temp_scalar_value);
+                                    Lnast_ntype::is_ref(lm->current_type()),
+                                    Lnast_ntype::is_const(lm->current_type()),
+                                    latest_outer_value,
+                                    temp_scalar_value);
     if (!rhs.has_value() || rhs->is_invalid()) {
       lm->restore_cursor(saved);
       return;
@@ -150,32 +151,60 @@ static void fold_temp_nary(upass::Lnast_manager* lm, Op op,
 }
 
 void uPass_func_extract::process_plus() {
-  fold_temp_nary(lm.get(), [](const Const& a, const Const& b) { return *a.add_op(b); },
-                 latest_outer_value, temp_scalar_value, temp_scalar_value);
+  fold_temp_nary(
+      lm.get(),
+      [](const Const& a, const Const& b) { return *a.add_op(b); },
+      latest_outer_value,
+      temp_scalar_value,
+      temp_scalar_value);
 }
 void uPass_func_extract::process_minus() {
-  fold_temp_nary(lm.get(), [](const Const& a, const Const& b) { return *a.sub_op(b); },
-                 latest_outer_value, temp_scalar_value, temp_scalar_value);
+  fold_temp_nary(
+      lm.get(),
+      [](const Const& a, const Const& b) { return *a.sub_op(b); },
+      latest_outer_value,
+      temp_scalar_value,
+      temp_scalar_value);
 }
 void uPass_func_extract::process_mult() {
-  fold_temp_nary(lm.get(), [](const Const& a, const Const& b) { return *a.mult_op(b); },
-                 latest_outer_value, temp_scalar_value, temp_scalar_value);
+  fold_temp_nary(
+      lm.get(),
+      [](const Const& a, const Const& b) { return *a.mult_op(b); },
+      latest_outer_value,
+      temp_scalar_value,
+      temp_scalar_value);
 }
 void uPass_func_extract::process_div() {
-  fold_temp_nary(lm.get(), [](const Const& a, const Const& b) { return *a.div_op(b); },
-                 latest_outer_value, temp_scalar_value, temp_scalar_value);
+  fold_temp_nary(
+      lm.get(),
+      [](const Const& a, const Const& b) { return *a.div_op(b); },
+      latest_outer_value,
+      temp_scalar_value,
+      temp_scalar_value);
 }
 void uPass_func_extract::process_bit_and() {
-  fold_temp_nary(lm.get(), [](const Const& a, const Const& b) { return *a.and_op(b); },
-                 latest_outer_value, temp_scalar_value, temp_scalar_value);
+  fold_temp_nary(
+      lm.get(),
+      [](const Const& a, const Const& b) { return *a.and_op(b); },
+      latest_outer_value,
+      temp_scalar_value,
+      temp_scalar_value);
 }
 void uPass_func_extract::process_bit_or() {
-  fold_temp_nary(lm.get(), [](const Const& a, const Const& b) { return *a.or_op(b); },
-                 latest_outer_value, temp_scalar_value, temp_scalar_value);
+  fold_temp_nary(
+      lm.get(),
+      [](const Const& a, const Const& b) { return *a.or_op(b); },
+      latest_outer_value,
+      temp_scalar_value,
+      temp_scalar_value);
 }
 void uPass_func_extract::process_bit_xor() {
-  fold_temp_nary(lm.get(), [](const Const& a, const Const& b) { return *a.xor_op(b); },
-                 latest_outer_value, temp_scalar_value, temp_scalar_value);
+  fold_temp_nary(
+      lm.get(),
+      [](const Const& a, const Const& b) { return *a.xor_op(b); },
+      latest_outer_value,
+      temp_scalar_value,
+      temp_scalar_value);
 }
 
 // Capture tuple-literal bundles produced at the outer scope. Shape:
@@ -192,7 +221,7 @@ void uPass_func_extract::process_tuple_add() {
     lm->restore_cursor(saved);
     return;
   }
-  std::string lhs_name(lm->current_text());
+  std::string                            lhs_name(lm->current_text());
   std::unordered_map<std::string, Const> fields;
   while (lm->move_to_sibling()) {
     if (!Lnast_ntype::is_store(lm->current_type()) || !lm->has_child()) {
@@ -214,7 +243,8 @@ void uPass_func_extract::process_tuple_add() {
     auto val = resolve_child_scalar(std::string(lm->current_text()),
                                     Lnast_ntype::is_ref(lm->current_type()),
                                     Lnast_ntype::is_const(lm->current_type()),
-                                    latest_outer_value, temp_scalar_value);
+                                    latest_outer_value,
+                                    temp_scalar_value);
     lm->move_to_parent();
     if (!val.has_value() || val->is_invalid()) {
       lm->restore_cursor(saved);
@@ -253,8 +283,8 @@ void uPass_func_extract::process_assign() {
     lm->restore_cursor(saved);
     return;
   }
-  const bool rhs_is_const = Lnast_ntype::is_const(lm->current_type());
-  const bool rhs_is_ref   = Lnast_ntype::is_ref(lm->current_type());
+  const bool  rhs_is_const = Lnast_ntype::is_const(lm->current_type());
+  const bool  rhs_is_ref   = Lnast_ntype::is_ref(lm->current_type());
   std::string rhs_text;
   if (rhs_is_const || rhs_is_ref) {
     rhs_text = std::string(lm->current_text());
@@ -338,7 +368,6 @@ void uPass_func_extract::collect_body_refs(const std::shared_ptr<Lnast>& body, s
   walk(body->get_root());
 }
 
-
 void uPass_func_extract::process_func_def() {
   drop_current_func_def = false;
 
@@ -421,9 +450,9 @@ void uPass_func_extract::process_func_def() {
       // consumes.
       std::unordered_set<std::string> body_refs;
       {
-        const auto& src      = lm->get_lnast();
-        const auto  body_nid = lm->get_current_nid();
-        std::function<void(const Lnast_nid&)> walk = [&](const Lnast_nid& nid) {
+        const auto&                           src      = lm->get_lnast();
+        const auto                            body_nid = lm->get_current_nid();
+        std::function<void(const Lnast_nid&)> walk     = [&](const Lnast_nid& nid) {
           if (nid.is_invalid()) {
             return;
           }

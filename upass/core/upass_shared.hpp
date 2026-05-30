@@ -131,9 +131,9 @@ inline Shared_fold_sum_const_report run_fold_sum_const_shared(Adapter& adapter, 
     }
 
     ++report.folded_nodes;
-    report.rewired_edges += effect.rewired_edges;
+    report.rewired_edges   += effect.rewired_edges;
     report.new_const_nodes += effect.new_const_nodes;
-    report.deleted_nodes += effect.deleted_nodes;
+    report.deleted_nodes   += effect.deleted_nodes;
   });
 
   std::print("{} - shared sum_const on {} folded:{} dry_run:{}\n",

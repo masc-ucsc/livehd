@@ -472,8 +472,8 @@ void uPass_attributes::evaluate_attr_get(std::string_view dst, std::string_view 
         if (auto v = resolve_value(base); v) {
           if (v->is_string()) {
             // to_pyrope wraps strings in single quotes; strip both.
-            auto repr = v->to_pyrope();
-            int64_t n = 0;
+            auto    repr = v->to_pyrope();
+            int64_t n    = 0;
             if (repr.size() >= 2 && repr.front() == '\'' && repr.back() == '\'') {
               n = static_cast<int64_t>(repr.size() - 2);
             } else {
@@ -550,8 +550,8 @@ void uPass_attributes::evaluate_attr_get(std::string_view dst, std::string_view 
   // — the new derive_* are declaration-driven and never depend on a
   // later iteration of the runner.
   if (!result) {
-    if (sticky_pattern || !is_builtin_attr(attr) || attr == "bits" || attr == "ubits" || attr == "sbits"
-        || attr == "max" || attr == "min") {
+    if (sticky_pattern || !is_builtin_attr(attr) || attr == "bits" || attr == "ubits" || attr == "sbits" || attr == "max"
+        || attr == "min") {
       result = *Dlop::nil();
     } else {
       return;
@@ -705,7 +705,7 @@ void uPass_attributes::process_declare() {
   if (move_to_sibling()) {  // TYPE
     read_scalar_type_at_cursor(kind, bits, range_max, range_min, is_real_type);
     if (move_to_sibling() && Lnast_ntype::is_const(get_raw_ntype())) {  // mode
-      auto mode = current_text();
+      auto   mode  = current_text();
       // Split on spaces; storage token first, optional "comptime"/"wrap"/"sat".
       size_t start = 0;
       while (start <= mode.size()) {
@@ -758,7 +758,7 @@ void uPass_attributes::process_declare() {
     ti.decl = decl;
   }
   if (comptime) {
-    ti.is_comptime = true;
+    ti.is_comptime                                   = true;
     attr_set_values[std::string(target)]["comptime"] = *Dlop::create_integer(1);
   }
   // Task 1t — a declaration-site `wrap`/`sat` in the mode is the STICKY overflow

@@ -10,7 +10,6 @@
 #include <vector>
 
 #include "absl/container/flat_hash_set.h"
-
 #include "upass_runner_common.hpp"
 #include "upass_shared.hpp"
 
@@ -267,8 +266,7 @@ void uPass_runner::emit_op_with_fold(bool fold_all) {
   // `ref` must NOT be folded: the ref names a TYPE, not a value, so folding it
   // through the symbol table (e.g. `const a = …; const x:a = …`) would replace
   // the type with `a`'s value. Keep child 1 verbatim for these op-nodes.
-  const bool type_slot_at_1 =
-      Lnast_ntype::is_declare(op_ntype) || Lnast_ntype::is_type_spec(op_ntype);
+  const bool type_slot_at_1 = Lnast_ntype::is_declare(op_ntype) || Lnast_ntype::is_type_spec(op_ntype);
 
   if (lm->has_child()) {
     lm->move_to_child();
@@ -330,7 +328,7 @@ upass::Vote uPass_runner::reduce_votes(const std::vector<upass::Vote>& votes) {
   // Priority per docs/upass_redesign.md §G:
   //   drop  > toconst > update > keep
   // toconst values must agree across voters (sanity-checked).
-  upass::Vote out;
+  upass::Vote        out;
   const upass::Vote* toconst_seen = nullptr;
   const upass::Vote* update_seen  = nullptr;
   for (const auto& v : votes) {
@@ -453,13 +451,11 @@ void uPass_runner::set_function_registry(const std::vector<std::shared_ptr<Lnast
   // output written by name in the body, non-recursive, and no positional
   // placeholder params (`_`, `_0`…) / implicit returns. Multi-output, method
   // dispatch, closures, and comptime-attr queries land in later phases.
-  auto is_placeholder = [](std::string_view n) {
-    return n == "_" || (n.size() >= 2 && n[0] == '_' && n[1] >= '0' && n[1] <= '9');
-  };
+  auto is_placeholder = [](std::string_view n) { return n == "_" || (n.size() >= 2 && n[0] == '_' && n[1] >= '0' && n[1] <= '9'); };
   inlinable_callees_.clear();
   placeholder_callees_.clear();
   for (const auto& [name, ln] : function_registry) {
-    const auto& io = ln->io_meta();
+    const auto& io        = ln->io_meta();
     // Recursion stays on the evaluator. Pure emit+fold recurses in the
     // runner's own C++ call stack (process_lnast → try_inline → …), so deep
     // comptime recursion (e.g. fib(10)) stack-overflows; the evaluator folds
@@ -468,7 +464,7 @@ void uPass_runner::set_function_registry(const std::vector<std::shared_ptr<Lnast
     // Recursion is allowed here (gated at the call site on constant args, which
     // is what lets the base case fold and terminate the unroll). Multi-output
     // is allowed too (epilogue splats a bundle); require at least one output.
-    auto reg_stmts = ln->get_first_child(ln->get_root());
+    auto        reg_stmts = ln->get_first_child(ln->get_root());
     if (reg_stmts.is_valid() && ln->get_type(reg_stmts) == Lnast_ntype::Lnast_ntype_io) {
       reg_stmts = ln->get_sibling_next(reg_stmts);
     }
@@ -525,11 +521,11 @@ void uPass_runner::set_function_registry(const std::vector<std::shared_ptr<Lnast
     if (stmts_nid.is_valid() && ln->get_type(stmts_nid) == Lnast_ntype::Lnast_ntype_io) {
       stmts_nid = ln->get_sibling_next(stmts_nid);
     }
-    absl::flat_hash_set<std::string> defined;
-    absl::flat_hash_set<std::string> tuple_dsts;          // dsts assigned a tuple/bundle value
+    absl::flat_hash_set<std::string>                 defined;
+    absl::flat_hash_set<std::string>                 tuple_dsts;   // dsts assigned a tuple/bundle value
     std::vector<std::pair<std::string, std::string>> ref_aliases;  // (lhs, rhs-ref) plain assigns
-    bool                             has_placeholder = false;
-    bool                             tuple_param     = false;
+    bool                                             has_placeholder = false;
+    bool                                             tuple_param     = false;
     if (stmts_nid.is_valid()) {
       for (const auto& nid : ln->depth_preorder(stmts_nid)) {
         if (nid.is_invalid()) {
@@ -562,8 +558,7 @@ void uPass_runner::set_function_registry(const std::vector<std::shared_ptr<Lnast
         // the evaluator. tuple_get layout: dst, src, field...
         if (nt == Lnast_ntype::Lnast_ntype_tuple_get && fc.is_valid()) {
           auto src = ln->get_sibling_next(fc);
-          if (src.is_valid() && ln->get_type(src) == Lnast_ntype::Lnast_ntype_ref
-              && params.contains(ln->get_name(src))) {
+          if (src.is_valid() && ln->get_type(src) == Lnast_ntype::Lnast_ntype_ref && params.contains(ln->get_name(src))) {
             tuple_param = true;
           }
         }
@@ -657,8 +652,7 @@ void uPass_runner::emit_inline_binding(const std::string& lhs, const Lnast_node&
   lm->pop_source();
 }
 
-void uPass_runner::emit_inline_tuple(const std::string&                                             dst,
-                                    const std::vector<std::pair<std::string, Lnast_node>>& fields) {
+void uPass_runner::emit_inline_tuple(const std::string& dst, const std::vector<std::pair<std::string, Lnast_node>>& fields) {
   // Build `dst = (k0=v0, k1=v1, …)` as a tuple_add and run it through the walk
   // so constprop builds dst's bundle (multi-output return splat). Layout:
   //   tuple_add ref(dst) assign(ref(key), val)...
@@ -844,8 +838,8 @@ bool uPass_runner::try_inline_func_call() {
     if (Lnast_ntype::is_ref(t) || Lnast_ntype::is_const(t)) {
       actuals.push_back(Actual{.is_named = false, .key = {}, .node = lm->current_node(), .func_name = func_actual_name()});
     } else if (Lnast_ntype::is_store(t)) {
-      Actual     a;
-      a.is_named = true;
+      Actual a;
+      a.is_named      = true;
       const auto here = lm->save_cursor();
       if (!lm->move_to_child()) {
         shape_ok = false;
@@ -989,21 +983,20 @@ bool uPass_runner::try_inline_func_call() {
   // Prologue: declare param + output widths (so `<tag>x.[bits]` folds), then
   // bind param values. Ref-param actuals are remembered for write-back.
   const bool uses_placeholders = placeholder_callees_.contains(std::string(callee->get_top_module_name()));
-  std::vector<std::pair<std::string, Lnast_node>> writebacks;
+  std::vector<std::pair<std::string, Lnast_node>>                 writebacks;
   // Function-valued params: record the body-local name → bound function so the
   // body's `f(x)` resolves; restored after the body walk. No value is emitted.
   std::vector<std::pair<std::string, std::optional<std::string>>> saved_func_bindings;
   for (std::size_t i = 0; i < nparams; ++i) {
-    const auto& e     = io.inputs[i];
+    const auto& e = io.inputs[i];
     if (!param_func[i].empty()) {
       auto it = func_param_bindings_.find(e.name);
-      saved_func_bindings.emplace_back(e.name, it == func_param_bindings_.end()
-                                                   ? std::nullopt
-                                                   : std::optional<std::string>(it->second));
+      saved_func_bindings.emplace_back(e.name,
+                                       it == func_param_bindings_.end() ? std::nullopt : std::optional<std::string>(it->second));
       func_param_bindings_[e.name] = param_func[i];
       continue;  // function value — no width/value binding
     }
-    const auto  pname = upass::Lnast_manager::make_inlined_name(tag, e.name);
+    const auto pname = upass::Lnast_manager::make_inlined_name(tag, e.name);
     emit_inline_typespec(pname, e.bits, e.is_signed);
     if (param_set[i]) {
       emit_inline_binding(pname, param_val[i]);
@@ -1013,8 +1006,7 @@ bool uPass_runner::try_inline_func_call() {
       // Positional-placeholder bodies read params as `_i` (and `_` for a single
       // param) instead of by name — bind those aliases so the body folds.
       if (uses_placeholders) {
-        emit_inline_binding(upass::Lnast_manager::make_inlined_name(tag, "_" + std::to_string(i)),
-                            Lnast_node::create_ref(pname));
+        emit_inline_binding(upass::Lnast_manager::make_inlined_name(tag, "_" + std::to_string(i)), Lnast_node::create_ref(pname));
         if (nparams == 1) {
           emit_inline_binding(upass::Lnast_manager::make_inlined_name(tag, "_"), Lnast_node::create_ref(pname));
         }
@@ -1225,10 +1217,8 @@ bool dce_is_def_producing(Lnast_ntype::Lnast_ntype_int t) {
     case N::Lnast_ntype_func_has:
     case N::Lnast_ntype_func_case:
     case N::Lnast_ntype_attr_set:
-    case N::Lnast_ntype_attr_get:
-      return true;
-    default:
-      return false;
+    case N::Lnast_ntype_attr_get    : return true;
+    default                         : return false;
   }
 }
 
@@ -1350,7 +1340,7 @@ void uPass_runner::dead_code_eliminate_staging() {
         continue;
       }
       const bool parent_is_stmts = staging->get_type(parent) == N::Lnast_ntype_stmts;
-      auto t = staging->get_type(node);
+      auto       t               = staging->get_type(node);
 
       // Empty stmts subtree (other than the body shell directly under top).
       if (t == N::Lnast_ntype_stmts) {
@@ -1414,8 +1404,8 @@ void uPass_runner::dead_code_eliminate_staging() {
   auto dst_root = new_staging->set_root(staging->get_type(src_root));
 
   auto is_structural = [](Lnast_ntype::Lnast_ntype_int t) {
-    return t == N::Lnast_ntype_top || t == N::Lnast_ntype_stmts || t == N::Lnast_ntype_if
-           || t == N::Lnast_ntype_while || t == N::Lnast_ntype_for;
+    return t == N::Lnast_ntype_top || t == N::Lnast_ntype_stmts || t == N::Lnast_ntype_if || t == N::Lnast_ntype_while
+           || t == N::Lnast_ntype_for;
   };
 
   std::function<void(const Lnast_nid&, const Lnast_nid&, bool)> copy_subtree;
@@ -1424,7 +1414,7 @@ void uPass_runner::dead_code_eliminate_staging() {
     while (fc.is_valid()) {
       const bool is_dead_stmt = !inside_payload && dead_stmts.contains(fc.get_class_index().value);
       if (!is_dead_stmt) {
-        auto t = staging->get_type(fc);
+        auto      t = staging->get_type(fc);
         Lnast_nid new_child;
         if (t == N::Lnast_ntype_ref) {
           new_child = new_staging->add_child(dst, Lnast_node::create_ref(staging->get_name(fc)));
@@ -1810,7 +1800,7 @@ void uPass_runner::process_if() {
         // Body for the prior cond, or the trailing else (no prior cond
         // this round). Dead iff a prior arm has already fired, or the
         // immediate cond just folded to false.
-        const bool dead = already_matched || (last_was_cond && last_cond_false);
+        const bool dead         = already_matched || (last_was_cond && last_cond_false);
         // `just_matched` only fires when no earlier arm was uncertain — if
         // a prior cond was undecided at comptime (nil/unknown) the runtime
         // ordering may still pick *that* arm, so a later concrete-true
@@ -1826,8 +1816,8 @@ void uPass_runner::process_if() {
         // wasn't known-false). Trailing else with no preceding cond: only
         // uncertain when some prior arm's cond didn't fold either way; if
         // every prior cond folded to known-false the else *is* guaranteed.
-        const bool uncertain = last_was_cond ? !just_matched : any_prior_uncertain;
-        last_was_cond        = false;
+        const bool uncertain    = last_was_cond ? !just_matched : any_prior_uncertain;
+        last_was_cond           = false;
         if (dead) {
           emit_subtree_verbatim();
           continue;
@@ -1849,7 +1839,7 @@ void uPass_runner::process_if() {
       }
 
       // Non-stmts child — must be a cond (ref/const).
-      auto val = cond_value();
+      auto       val        = cond_value();
       // nil cond models "comptime can't decide" (e.g. a `case` whose values
       // didn't match but whose runtime predicate might still fire). Treat
       // it the same as has_unknowns(): not known-true and not known-false,

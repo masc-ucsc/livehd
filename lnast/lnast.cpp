@@ -40,7 +40,9 @@ Lnast::Lnast(std::string_view _module_name, std::string_view _file_name)
   // hold the raw shared_ptr via get_tree(). Holding the writable handle
   // long-term keeps the slot in SlotState::Writing, which blocks
   // TreeIO::replace() and find_tree*/find_tree_rw queries.
-  { auto writable = treeio_->create_tree(); }
+  {
+    auto writable = treeio_->create_tree();
+  }
   tree_ = treeio_->get_tree();
 }
 
@@ -275,7 +277,7 @@ void Lnast::dump(std::ostream& os) const {
   // the lnast type). hhds write_dump suppresses node_text only when it
   // equals the type name, so we echo the type name back for unnamed nodes
   // — that prints as bare "assign" instead of "assign ''".
-  opts.node_text = [this](const hhds::Tree::Node_class& node) -> std::string {
+  opts.node_text  = [this](const hhds::Tree::Node_class& node) -> std::string {
     auto n = get_name(node);
     if (n.empty()) {
       return std::string(Lnast_ntype::to_sv(get_type(node)));

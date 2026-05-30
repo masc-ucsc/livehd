@@ -113,8 +113,7 @@ void Sticky_handler::on_alias_assign(uPass_attributes& /*owner*/, std::string_vi
   }
 }
 
-void Sticky_handler::on_expr_assign(uPass_attributes& /*owner*/, std::string_view lhs,
-                                    std::span<const std::string_view> rhs_refs) {
+void Sticky_handler::on_expr_assign(uPass_attributes& /*owner*/, std::string_view lhs, std::span<const std::string_view> rhs_refs) {
   // Fast path: same skip rationale as on_alias_assign — when sticky is
   // empty, merge_from returns immediately for every operand and the
   // control-taint block is also empty.

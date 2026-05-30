@@ -228,6 +228,33 @@ static void check_unwritten_tmps(const Lnast* ln) {
   }
 }
 
+// Task 1t — derived / read-only attributes. These are READ-ONLY views computed
+// from the type or bundle (see docs/contracts/typesystem_clean_plan.md and
+// upass/attributes is_builtin_attr Category A) — an `attr_set` of any is a
+// compile error: read them with `.[attr]` (attr_get), never write them.
+//   * `max`/`min` are additionally settable, but ONLY through a *type*
+//     (`:int(max=N,min=M)`, `:uN`/`:sN`), never via attr_set.
+//   * `bits`/`size`/`sign`/`key` are pure reads — there is no way to set them.
+// Returns a human-readable reason when `attr` is one of these, else "".
+//
+// NOTE — deliberately NOT listed (yet): `ubits`/`sbits` (the producer emits
+// attr_set for these as a transient width mechanism on tuple_get bit-range
+// writes), `typename` (the producer sets a named type's identity via attr_set),
+// `comptime`/`type`/`wrap`/`sat` (decl mode + per-write overflow). Those are
+// also derived/mode and SHOULD become attr_set errors once T3/T6 stop the
+// producer from emitting them; flagging them now would reject the compiler's own
+// output. The six below are never emitted by the producer, so they are safe to
+// enforce today.
+static std::string_view derived_attr_violation(std::string_view attr) {
+  if (attr == "max" || attr == "min") {
+    return "settable only through a type (`:int(max=,min=)`, `:uN`/`:sN`), never via attr_set";
+  }
+  if (attr == "bits" || attr == "size" || attr == "sign" || attr == "key") {
+    return "a derived read-only attribute (computed from the type/bundle); it can be read but not set";
+  }
+  return {};
+}
+
 // Task 1t — declare-once. The storage kind of a `declare` is the FIRST
 // space-separated token of its mode const ("const", "mut", "reg", "type", …).
 static bool declare_mode_is_const_storage(std::string_view mode) {
@@ -404,6 +431,28 @@ void Pass_lnastfmt::validate(const Lnast* ln) {
                     node_loc(ln, c1),
                     Lnast_ntype::debug_name(ln->get_type(c1)));
         return;
+      }
+      // Task 1t — reject `attr_set` of a derived / read-only attribute. The
+      // attribute being written is the LAST selector — the child immediately
+      // before the value (the value is always the last child; an attribute path
+      // `a.b."attr"` lowers to attr_set(a, "b", "attr", value), so walk to the
+      // second-to-last child rather than assuming child 1).
+      auto attr_nid  = c1;
+      auto value_nid = c2;
+      for (auto n = ln->get_sibling_next(c2); !n.is_invalid(); n = ln->get_sibling_next(n)) {
+        attr_nid  = value_nid;
+        value_nid = n;
+      }
+      if (Lnast_ntype::is_const(ln->get_type(attr_nid))) {
+        auto attr = ln->get_name(attr_nid);
+        if (auto why = derived_attr_violation(attr); !why.empty()) {
+          Pass::error("lnastfmt: {} `attr_set` of `.[{}]` is not allowed — `{}` is {}",
+                      node_loc(ln, it),
+                      attr,
+                      attr,
+                      why);
+          return;
+        }
       }
     }
     if (Lnast_ntype::is_attr_get(type)) {

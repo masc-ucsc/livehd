@@ -248,7 +248,7 @@ void uPass_attributes::process_tuple_set() {
   if (!move_to_child()) {
     return;
   }
-  auto target = normalize_name(current_text());
+  auto target     = normalize_name(current_text());
   bool rhs_is_nil = false;
   while (move_to_sibling()) {
     if (is_last_child()) {

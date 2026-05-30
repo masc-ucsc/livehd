@@ -65,7 +65,7 @@ private:
   // literals (`const CFG = (gain=2, offset=5)`) — both of which lower to
   // `assign <name> <temp_ref>` in LNAST — can't be captured as outer-scope
   // constants.
-  std::unordered_map<std::string, Const> temp_scalar_value;
+  std::unordered_map<std::string, Const>                                  temp_scalar_value;
   std::unordered_map<std::string, std::unordered_map<std::string, Const>> temp_bundle_value;
 
   // Names that, at some point during the outer walk, were written under

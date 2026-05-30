@@ -53,7 +53,7 @@ void uPass_coalescer::handle_op() {
       // Fast path: most refs have no pending entry — probe by string_view
       // (absl's transparent hashing skips the std::string allocation).
       // Avoids one allocation per ref read on the bulk-arithmetic loop.
-      auto p = pending.find(ref_text);
+      auto             p        = pending.find(ref_text);
       if (p == pending.end() && key != ref_text) {
         p = pending.find(key);
       }

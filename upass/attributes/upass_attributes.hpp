@@ -166,7 +166,7 @@ private:
   // Stack of stmts nids whose on_if_arm_enter was fired and is awaiting
   // its on_if_arm_exit. Used to balance the enter/exit pair across the
   // recursive process_stmts walk.
-  std::vector<uint64_t> active_arm_stack;
+  std::vector<uint64_t>           active_arm_stack;
 
   // Canonicalize ref text before using it as a handler key.
   static std::string normalize_name(std::string_view name);
@@ -192,15 +192,15 @@ public:
   // bits via the trailing const child of prim_type_uint/sint.
   enum class Numeric_kind : uint8_t { none, unsigned_int, signed_int, boolean, string };
   struct Type_info {
-    Decl_kind    decl{Decl_kind::unknown};
-    Numeric_kind kind{Numeric_kind::none};
-    uint32_t     bits{0};
-    bool         is_comptime{false};
+    Decl_kind            decl{Decl_kind::unknown};
+    Numeric_kind         kind{Numeric_kind::none};
+    uint32_t             bits{0};
+    bool                 is_comptime{false};
     // True when an explicit `:type` annotation was processed for this
     // variable. Distinguishes `const a:int = 3` (annotated but unbounded —
     // size attrs read as nil per the typesystem redesign) from
     // `const b = 3` (no annotation — legacy value-based fallback).
-    bool         has_type_spec{false};
+    bool                 has_type_spec{false};
     // Task 1t — the integer `(max,min)` range carried by a `prim_type_int`
     // node (`int(max=,min=)` / `uint(bits=)` type-call). When set, these are
     // the single source of truth for max/min/bits/sign derivation. Either
@@ -386,7 +386,7 @@ private:
   // caller marks has_type_spec), false for none/unknown. Shared by
   // process_type_spec and process_declare.
   void read_scalar_type_at_cursor(Numeric_kind& kind, uint32_t& bits, std::optional<Const>& range_max,
-                                   std::optional<Const>& range_min, bool& is_real_type);
+                                  std::optional<Const>& range_min, bool& is_real_type);
 
   // Best-effort comptime value for `var` — consults runner_fold_fn (which
   // aggregates every pass's fold_ref) and our own tmp_fold, returning the

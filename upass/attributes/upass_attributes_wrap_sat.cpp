@@ -47,10 +47,10 @@ bool is_truthy(std::string_view v) {
 // Re-export under the same names so the rest of this file's call sites
 // stay unchanged and policy/trigger semantics here remain isolated from
 // the value-math.
-using upass::bitwidth::wrap_to_unsigned;
-using upass::bitwidth::wrap_to_signed;
-using upass::bitwidth::saturate_unsigned;
 using upass::bitwidth::saturate_signed;
+using upass::bitwidth::saturate_unsigned;
+using upass::bitwidth::wrap_to_signed;
+using upass::bitwidth::wrap_to_unsigned;
 
 }  // namespace
 

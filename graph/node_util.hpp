@@ -213,7 +213,7 @@ inline constexpr hhds::Port_id Const_small_pid_count = 32;
 
 // LiveHD's `debug_name` (cell+nid+name) — used in error messages.
 [[nodiscard]] inline std::string debug_name(const hhds::Node_class& node) {
-  auto n = node_name_of(node);
+  auto n    = node_name_of(node);
   auto base = std::string{Ntype::get_name(type_op_of(node))} + "_" + std::to_string(static_cast<uint64_t>(node.get_debug_nid()));
   if (!n.empty()) {
     base.append(":").append(n);
@@ -232,11 +232,11 @@ inline constexpr hhds::Port_id Const_small_pid_count = 32;
   if (pin.is_invalid()) {
     return {};
   }
-  auto master = pin.get_master_node();
+  auto master  = pin.get_master_node();
   // Graph-IO pins carry their declared name on GraphIO; cgen handles those via
   // its IO-walk path before falling through here. For internal pins we generate
   // a synthetic name from the master node + port_id.
-  auto base = default_instance_name(master);
+  auto base    = default_instance_name(master);
   auto port_id = pin.get_port_id();
   if (port_id == 0) {
     return base;
@@ -443,7 +443,7 @@ inline void set_loc1(const hhds::Node_class& node, uint64_t line) {
   if (node.is_invalid()) {
     return result;
   }
-  auto op = type_op_of(node);
+  auto          op = type_op_of(node);
   hhds::Port_id target;
   if (op == Ntype_op::Sub) {
     auto pin = node.get_sink_pin(name);

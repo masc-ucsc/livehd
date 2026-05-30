@@ -248,7 +248,7 @@ Symbol_table::Scope* Symbol_table::block_scope(uint64_t key) {
   // different lexical position (e.g. when an outer scope is itself a block
   // pushed during this iteration). Parent at push-time is what the lookup
   // walk needs.
-  s->parent = stack.back();
+  s->parent         = stack.back();
   // Reset uncertainty bookkeeping per entry — the same Scope object is
   // reused across upass iterations, but the uncertainty bit is set by the
   // runner each time and the modification list is rebuilt each time.

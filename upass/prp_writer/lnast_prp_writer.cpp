@@ -88,42 +88,42 @@ std::string_view Lnast_prp_writer::strip_prefix(std::string_view name) { return 
 void Lnast_prp_writer::write_node() {
   using N = Lnast_ntype;
   switch (current_ntype()) {
-    case N::Lnast_ntype_top: write_top(); break;
-    case N::Lnast_ntype_stmts: write_stmts(); break;
-    case N::Lnast_ntype_if: write_if(); break;
-    case N::Lnast_ntype_store: write_store(); break;
-    case N::Lnast_ntype_ref: write_ref(); break;
-    case N::Lnast_ntype_const: write_const(); break;
-    case N::Lnast_ntype_cassert: write_cassert(); break;
-    case N::Lnast_ntype_func_call: write_func_call(); break;
-    case N::Lnast_ntype_func_def: write_func_def(); break;
-    case N::Lnast_ntype_tuple_add: write_tuple_add(); break;
-    case N::Lnast_ntype_tuple_get: write_tuple_get(); break;
-    case N::Lnast_ntype_attr_set: write_attr_set(); break;
-    case N::Lnast_ntype_attr_get: write_attr_get(); break;
+    case N::Lnast_ntype_top         : write_top(); break;
+    case N::Lnast_ntype_stmts       : write_stmts(); break;
+    case N::Lnast_ntype_if          : write_if(); break;
+    case N::Lnast_ntype_store       : write_store(); break;
+    case N::Lnast_ntype_ref         : write_ref(); break;
+    case N::Lnast_ntype_const       : write_const(); break;
+    case N::Lnast_ntype_cassert     : write_cassert(); break;
+    case N::Lnast_ntype_func_call   : write_func_call(); break;
+    case N::Lnast_ntype_func_def    : write_func_def(); break;
+    case N::Lnast_ntype_tuple_add   : write_tuple_add(); break;
+    case N::Lnast_ntype_tuple_get   : write_tuple_get(); break;
+    case N::Lnast_ntype_attr_set    : write_attr_set(); break;
+    case N::Lnast_ntype_attr_get    : write_attr_get(); break;
     case N::Lnast_ntype_delay_assign: write_delay_assign(); break;
-    case N::Lnast_ntype_plus: write_infix("+"); break;
-    case N::Lnast_ntype_minus: write_infix("-"); break;
-    case N::Lnast_ntype_mult: write_infix("*"); break;
-    case N::Lnast_ntype_div: write_infix("/"); break;
-    case N::Lnast_ntype_mod: write_infix("%"); break;
-    case N::Lnast_ntype_shl: write_infix("<<"); break;
-    case N::Lnast_ntype_sra: write_infix(">>"); break;
-    case N::Lnast_ntype_sext: write_sext(); break;
-    case N::Lnast_ntype_eq: write_infix("=="); break;
-    case N::Lnast_ntype_ne: write_infix("!="); break;
-    case N::Lnast_ntype_lt: write_infix("<"); break;
-    case N::Lnast_ntype_le: write_infix("<="); break;
-    case N::Lnast_ntype_gt: write_infix(">"); break;
-    case N::Lnast_ntype_ge: write_infix(">="); break;
-    case N::Lnast_ntype_log_and: write_infix("and"); break;
-    case N::Lnast_ntype_log_or: write_infix("or"); break;
-    case N::Lnast_ntype_log_not: write_prefix_unary("not "); break;
-    case N::Lnast_ntype_bit_and: write_infix("&"); break;
-    case N::Lnast_ntype_bit_or: write_infix("|"); break;
-    case N::Lnast_ntype_bit_xor: write_infix("^"); break;
-    case N::Lnast_ntype_bit_not: write_prefix_unary("~"); break;
-    default: {
+    case N::Lnast_ntype_plus        : write_infix("+"); break;
+    case N::Lnast_ntype_minus       : write_infix("-"); break;
+    case N::Lnast_ntype_mult        : write_infix("*"); break;
+    case N::Lnast_ntype_div         : write_infix("/"); break;
+    case N::Lnast_ntype_mod         : write_infix("%"); break;
+    case N::Lnast_ntype_shl         : write_infix("<<"); break;
+    case N::Lnast_ntype_sra         : write_infix(">>"); break;
+    case N::Lnast_ntype_sext        : write_sext(); break;
+    case N::Lnast_ntype_eq          : write_infix("=="); break;
+    case N::Lnast_ntype_ne          : write_infix("!="); break;
+    case N::Lnast_ntype_lt          : write_infix("<"); break;
+    case N::Lnast_ntype_le          : write_infix("<="); break;
+    case N::Lnast_ntype_gt          : write_infix(">"); break;
+    case N::Lnast_ntype_ge          : write_infix(">="); break;
+    case N::Lnast_ntype_log_and     : write_infix("and"); break;
+    case N::Lnast_ntype_log_or      : write_infix("or"); break;
+    case N::Lnast_ntype_log_not     : write_prefix_unary("not "); break;
+    case N::Lnast_ntype_bit_and     : write_infix("&"); break;
+    case N::Lnast_ntype_bit_or      : write_infix("|"); break;
+    case N::Lnast_ntype_bit_xor     : write_infix("^"); break;
+    case N::Lnast_ntype_bit_not     : write_prefix_unary("~"); break;
+    default                         : {
       // Unknown node — emit a comment so the output stays parseable.
       println(std::format("/* TODO: unhandled node type {} */", static_cast<int>(current_ntype())));
       break;
@@ -248,7 +248,7 @@ static std::string escape_string(std::string_view s) {
   for (unsigned char c : s) {
     switch (c) {
       case '\\': out += "\\\\"; break;
-      case '"': out += "\\\""; break;
+      case '"' : out += "\\\""; break;
       case '\n': out += "\\n"; break;
       case '\r': out += "\\r"; break;
       case '\t': out += "\\t"; break;

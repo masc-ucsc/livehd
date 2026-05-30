@@ -72,10 +72,10 @@ enum class Vote_kind : uint8_t {
 inline constexpr std::string_view k_pending_import_attr = "pending_import";
 
 struct Vote {
-  Vote_kind kind{Vote_kind::keep};
+  Vote_kind            kind{Vote_kind::keep};
   // Folded value for kind == toconst (committed to dst->fields["0"] by
   // the runner during vote resolution). Ignored otherwise.
-  Const toconst_value;
+  Const                toconst_value;
   // Placeholder for the update shape (Step E doesn't yet ship a concrete
   // representation; populated by passes that need rewrites — e.g. fcall
   // inlining in Step L).
@@ -154,8 +154,8 @@ public:
   // Runner-owned symbol table (step C of upass redesign). Set once at
   // construction. Passes that migrate to the shared symbol table read/write
   // through this pointer; passes that still use private state ignore it.
-  void           set_runner_symbol_table(Symbol_table* st) { runner_st = st; }
-  Symbol_table*  get_runner_symbol_table() const { return runner_st; }
+  void          set_runner_symbol_table(Symbol_table* st) { runner_st = st; }
+  Symbol_table* get_runner_symbol_table() const { return runner_st; }
 
   // Consume per-pass options (see Options_map). Default: no-op. Passes
   // override to pull the keys they care about. Called once, before run().

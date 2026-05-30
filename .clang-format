@@ -1,11 +1,26 @@
 ---
 BasedOnStyle: Google
 ColumnLimit: '132'
-AlignConsecutiveAssignments: 'true'
-AlignConsecutiveDeclarations: 'true'
-#ArrayInitializerAlignmentStyle: 'Right'
-#AlignConsecutiveBitFields: 'true'
-AlignConsecutiveMacros: 'true'
+AlignConsecutiveAssignments:
+  Enabled: true
+  AcrossEmptyLines: false
+  AcrossComments: true
+  AlignCompound: true
+  PadOperators: true
+AlignConsecutiveDeclarations:
+  Enabled: true
+  AcrossComments: true
+AlignArrayOfStructures: Right
+AlignConsecutiveBitFields:
+  Enabled: true
+  AcrossComments: true
+AlignConsecutiveMacros:
+  Enabled: true
+  AcrossComments: true
+AlignConsecutiveShortCaseStatements:
+  Enabled: true
+  AcrossComments: true
+  AlignCaseColons: true
 AlignTrailingComments: 'true'
 AlignEscapedNewlines: 'true'
 AlignAfterOpenBracket: 'Align'

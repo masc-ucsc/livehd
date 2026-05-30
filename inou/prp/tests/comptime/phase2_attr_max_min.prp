@@ -17,7 +17,7 @@ mut b:s8 = nil
 cassert(b.[max] == 127)
 cassert(b.[min] == -128)
 
-mut c:int:[max=300, min=0] = nil
+mut c:int(max=300, min=0) = nil
 cassert(c.[max] == 300)
 cassert(c.[min] == 0)
 

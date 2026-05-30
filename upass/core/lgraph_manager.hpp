@@ -165,9 +165,7 @@ public:
     }
   }
 
-  bool is_sum_op(const Node& node) const {
-    return !node.is_invalid() && livehd::graph_util::type_op_of(node) == Ntype_op::Sum;
-  }
+  bool is_sum_op(const Node& node) const { return !node.is_invalid() && livehd::graph_util::type_op_of(node) == Ntype_op::Sum; }
 
   bool is_const(const Input& pin) const { return livehd::graph_util::is_const_pin(pin); }
 
@@ -476,9 +474,8 @@ public:
       auto node_out = node.create_driver_pin(0);
       auto op       = livehd::graph_util::type_op_of(node);
 
-      const auto other_driver_is_1bit = [&](int const_pos) {
-        return livehd::graph_util::bits_of(inputs[1 - const_pos].driver) == 1;
-      };
+      const auto other_driver_is_1bit
+          = [&](int const_pos) { return livehd::graph_util::bits_of(inputs[1 - const_pos].driver) == 1; };
 
       bool rewritten = false;
 
@@ -944,8 +941,8 @@ private:
       case Ntype_op::Or:
       case Ntype_op::Xor:
       case Ntype_op::SHL:
-      case Ntype_op::SRA: return true;
-      default: return false;
+      case Ntype_op::SRA : return true;
+      default            : return false;
     }
   }
 
@@ -954,8 +951,7 @@ private:
     if (a.is_invalid() || b.is_invalid()) {
       return false;
     }
-    return a.get_master_node().get_debug_nid() == b.get_master_node().get_debug_nid()
-           && a.get_port_id() == b.get_port_id();
+    return a.get_master_node().get_debug_nid() == b.get_master_node().get_debug_nid() && a.get_port_id() == b.get_port_id();
   }
 
   static std::vector<hhds::Pin_class> collect_sinks(const hhds::Node_class& node) {

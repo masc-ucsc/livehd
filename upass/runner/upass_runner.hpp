@@ -13,7 +13,6 @@
 
 #include "absl/container/flat_hash_map.h"
 #include "absl/container/flat_hash_set.h"
-
 #include "const.hpp"
 #include "lnast.hpp"
 #include "lnast_manager.hpp"
@@ -191,26 +190,26 @@ protected:
   // declared width (s4 → -2). sign_bit is the top bit index (bits-1).
   void emit_inline_sext(const std::string& dst, const std::string& src, int sign_bit);
 
-  absl::flat_hash_map<std::string, std::shared_ptr<Lnast>> &runner_function_registry() { return function_registry; }
+  absl::flat_hash_map<std::string, std::shared_ptr<Lnast>>& runner_function_registry() { return function_registry; }
 
   // Monotonic per-run counter giving each inline call site a unique rename
   // tag/salt. Cross-pass idempotence is a documented 1i follow-up.
-  uint32_t                      inline_seq_{0};
-  std::shared_ptr<hhds::Forest> scratch_forest_;
+  uint32_t                                      inline_seq_{0};
+  std::shared_ptr<hhds::Forest>                 scratch_forest_;
   // Callee bodies currently being spliced (innermost last). Re-entering one
   // means recursion — bailed to the evaluator until Phase D adds fuel.
-  std::vector<const Lnast*> active_inline_callees_;
+  std::vector<const Lnast*>                     active_inline_callees_;
   // Registry keys (qualified names) whose bodies can reach themselves
   // (direct/mutual recursion). Bailed to the evaluator; computed in
   // set_function_registry.
-  absl::flat_hash_set<std::string> recursive_callees_;
+  absl::flat_hash_set<std::string>              recursive_callees_;
   // Registry keys the runner can fully splice today (single output written by
   // name, no placeholders; recursion allowed under fuel). All other callees
   // route to the evaluator. Computed in set_function_registry.
-  absl::flat_hash_set<std::string> inlinable_callees_;
+  absl::flat_hash_set<std::string>              inlinable_callees_;
   // Inlinable callees whose body uses positional placeholders (_0/_1/_); the
   // prologue binds those aliases for these only.
-  absl::flat_hash_set<std::string> placeholder_callees_;
+  absl::flat_hash_set<std::string>              placeholder_callees_;
   // Higher-order / closure support: maps a function-valued param's RAW name
   // (as read in the callee body, e.g. `f` in `r = f(x)`) to the registry
   // function it is bound to at this call site (e.g. `step_up`). Saved/restored
@@ -226,8 +225,8 @@ protected:
   // depth since each runner inline level consumes several KB of stack. Legit
   // comptime recursion (fib/fact) is far shallower. inline_budget_ is a
   // per-run total-splice cap for exponential fan-out.
-  static constexpr std::size_t kInlineMaxDepth = 256;
-  std::size_t                  inline_budget_{200000};
+  static constexpr std::size_t                  kInlineMaxDepth = 256;
+  std::size_t                                   inline_budget_{200000};
 
   // Post-walk DCE: scans the freshly-built staging tree, drops definition
   // statements (assign / tuple_add / attr_set / etc.) whose dst name is

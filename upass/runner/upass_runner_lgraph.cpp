@@ -344,17 +344,17 @@ uPass_runner_lgraph::uPass_runner_lgraph(std::shared_ptr<upass::Lgraph_manager> 
   // rest fall back to the plugin's default setup_fn.
   using Dry_factory = std::unique_ptr<upass::uPass_lgraph> (*)(std::shared_ptr<upass::Lgraph_manager>&, bool);
   static const absl::flat_hash_map<std::string_view, Dry_factory> dry_factory = {
-      {"fold_sum_const",
-       [](auto& g, bool d) -> std::unique_ptr<upass::uPass_lgraph> { return std::make_unique<Lgraph_pass_fold_sum_const>(g, d); }},
-      {"fold_neutral",
-       [](auto& g, bool d) -> std::unique_ptr<upass::uPass_lgraph> { return std::make_unique<Lgraph_pass_fold_neutral>(g, d); }},
-      {"fold_shift_div",
-       [](auto& g, bool d) -> std::unique_ptr<upass::uPass_lgraph> { return std::make_unique<Lgraph_pass_fold_shift_div>(g, d); }},
-      {"fold_sub_const",
-       [](auto& g, bool d) -> std::unique_ptr<upass::uPass_lgraph> { return std::make_unique<Lgraph_pass_fold_sub_const>(g, d); }},
+      { "fold_sum_const",
+       [](auto& g,  bool d) -> std::unique_ptr<upass::uPass_lgraph> { return std::make_unique<Lgraph_pass_fold_sum_const>(g, d); }                   },
+      {   "fold_neutral",
+       [](auto& g,    bool d) -> std::unique_ptr<upass::uPass_lgraph> { return std::make_unique<Lgraph_pass_fold_neutral>(g, d); }                   },
+      { "fold_shift_div",
+       [](auto& g,  bool d) -> std::unique_ptr<upass::uPass_lgraph> { return std::make_unique<Lgraph_pass_fold_shift_div>(g, d); }                   },
+      { "fold_sub_const",
+       [](auto& g,  bool d) -> std::unique_ptr<upass::uPass_lgraph> { return std::make_unique<Lgraph_pass_fold_sub_const>(g, d); }                   },
       {"fold_mult_const",
-       [](auto& g, bool d) -> std::unique_ptr<upass::uPass_lgraph> { return std::make_unique<Lgraph_pass_fold_mult_const>(g, d); }},
-      {"dce", [](auto& g, bool d) -> std::unique_ptr<upass::uPass_lgraph> { return std::make_unique<Lgraph_pass_dce>(g, d); }},
+       [](auto& g, bool d) -> std::unique_ptr<upass::uPass_lgraph> { return std::make_unique<Lgraph_pass_fold_mult_const>(g, d); }                   },
+      {            "dce", [](auto& g,             bool d) -> std::unique_ptr<upass::uPass_lgraph> { return std::make_unique<Lgraph_pass_dce>(g, d); }},
   };
 
   const auto& registry = upass::uPass_lgraph_plugin::get_registry();

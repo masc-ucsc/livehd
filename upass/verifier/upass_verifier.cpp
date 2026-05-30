@@ -14,7 +14,7 @@ static upass::uPass_plugin plugin_verifier("verifier", upass::uPass_wrapper<uPas
 std::size_t                     uPass_verifier::aggregate_pass_count    = 0;
 std::size_t                     uPass_verifier::aggregate_fail_count    = 0;
 std::size_t                     uPass_verifier::aggregate_unknown_count = 0;
-std::size_t                     uPass_verifier::aggregate_cputs_count  = 0;
+std::size_t                     uPass_verifier::aggregate_cputs_count   = 0;
 std::vector<std::string>        uPass_verifier::aggregate_unknown_operands;
 int                             uPass_verifier::aggregate_expected_pass = -1;
 int                             uPass_verifier::aggregate_expected_fail = -1;
@@ -66,7 +66,7 @@ upass::Emit_decision uPass_verifier::classify_statement() {
   const auto cassert_nid = lm->get_current_nid();
   // class_index().value is unique per node within a tree, so module-qualifying
   // it gives a stable cassert key without paying for a parent walk.
-  const auto dedup_key = std::format("{}:{}", lm->get_top_module_name(), cassert_nid.get_class_index().value);
+  const auto dedup_key   = std::format("{}:{}", lm->get_top_module_name(), cassert_nid.get_class_index().value);
   if (processed_cassert_keys.contains(dedup_key)) {
     return upass::Emit_decision::drop();
   }
@@ -161,8 +161,7 @@ upass::Emit_decision uPass_verifier::classify_func_call() {
   // Dedup: a cputs inside a function body would otherwise reprint once
   // per spawned-lnast walk. Key matches the cassert dedup pattern.
   const auto fcall_nid = lm->get_current_nid();
-  const auto dedup_key
-      = std::format("{}:{}", lm->get_top_module_name(), fcall_nid.get_class_index().value);
+  const auto dedup_key = std::format("{}:{}", lm->get_top_module_name(), fcall_nid.get_class_index().value);
   move_to_parent();  // restore to func_call before re-entering
   if (processed_cputs_keys.contains(dedup_key)) {
     return upass::Emit_decision::drop();
@@ -218,10 +217,10 @@ void uPass_verifier::end_run() {
   // Roll local counts into the test-level aggregate. The mismatch check
   // moved to finalize_aggregate so it runs once across the whole program
   // (top lnast + any lnasts spawned by func_extract).
-  aggregate_pass_count += pass_count;
-  aggregate_fail_count += fail_count;
+  aggregate_pass_count    += pass_count;
+  aggregate_fail_count    += fail_count;
   aggregate_unknown_count += unknown_count;
-  aggregate_cputs_count += cputs_count;
+  aggregate_cputs_count   += cputs_count;
   for (auto& s : unknown_operands) {
     aggregate_unknown_operands.emplace_back(std::move(s));
   }

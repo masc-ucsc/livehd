@@ -41,7 +41,7 @@ cassert(s.[bits] == nil)
 
 // Arithmetic narrows the *effective* range to the declared type's bound,
 // not to the runtime expression's value.
-mut d:int:[max = 15] = 1
+mut d:int(max = 15) = 1
 d = d + 14
 cassert(d == 15)
 cassert(d.[max] == 15)

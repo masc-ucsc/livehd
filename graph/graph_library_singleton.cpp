@@ -44,7 +44,7 @@ hhds::GraphLibrary& Hhds_graph_library::instance(std::string_view path) {
     return *it->second;
   }
 
-  auto lib = std::make_unique<hhds::GraphLibrary>();
+  auto            lib = std::make_unique<hhds::GraphLibrary>();
   // Lazy load from disk if a prior save exists for this path.
   std::error_code ec;
   auto            library_txt = std::filesystem::path{key} / "library.txt";

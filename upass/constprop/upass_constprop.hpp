@@ -130,6 +130,15 @@ protected:
   // op-folding reads operands.) Signed/none-typed decls are not recorded.
   std::unordered_map<std::string, uint32_t> decl_unsigned_bits_;
 
+  // Task 1t — named type per var, recorded by process_declare when the declare's
+  // type slot is a `ref(NAMED)` (a named type, e.g. `mut c:v_type = …`). At the
+  // var's init bundle write, process_assign materializes NAMED's resolved bundle
+  // (its default field values + per-field types) and overlays the init fields,
+  // so `const v_type=(x:u3=nil, b:string="foo"); mut c:v_type=(x=3)` yields
+  // c={x:3, b:"foo"}. NAMED may be declared via `type T=(…)` or `const T=(…)`;
+  // both leave T's bundle in the symbol table.
+  std::unordered_map<std::string, std::string> decl_named_type_;
+
   auto current_bundle() { return st.get_bundle(current_text()); }
 
   // Bundle iff the cursor is on a ref. Returns nullptr otherwise — used by
@@ -245,14 +254,14 @@ protected:
   void fold_case(const std::string& dst);
 
   struct Call_actual {
-    bool        is_named = false;
-    std::string name;
-    Const       value;
+    bool                                   is_named = false;
+    std::string                            name;
+    Const                                  value;
     // When the actual is a bare ref to a caller variable, remember the name
     // so a `ref` param can write back into the caller's scope after the
     // body is folded. Empty when the actual is a const literal or named with
     // a non-ref value (write-back only happens when the param is `ref`).
-    std::string var_name;
+    std::string                            var_name;
     // When the actual is a tuple-typed value (passed by ref to a caller
     // bundle), bundle_value carries the bundle's flat-keyed field values
     // (e.g. {"x": 2, "y": 11}). Set together with is_bundle=true; `value`
@@ -264,7 +273,7 @@ protected:
     // params but still folds body stmts that don't depend on them — used by
     // entry 1u so an outer cassert against `(a.[comptime], …)` can resolve
     // even when one arg is runtime.
-    bool is_unresolved = false;
+    bool                                   is_unresolved = false;
   };
 
   static inline std::unordered_map<std::string, std::shared_ptr<Lnast>> function_registry;

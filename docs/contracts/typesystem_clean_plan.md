@@ -247,6 +247,22 @@ baseline, 0 regressions, full build). wrap/sat-qualifier-on-node deferred.**
     (constprop pruned dead branches → only reachable redeclares seen; then-branch
     `const x` and else-branch `const x` live in distinct frames). Verified: `const
     x=1; const x=2` errors; `mut y=1; mut y=2` is allowed. 0 regressions.
+  - **no-`attr_set`-of-derived-reads validator — LANDED (2026-05-30).** lnastfmt
+    rejects an `attr_set` whose attribute (the last selector, i.e. the child
+    before the value — robust to attribute paths `a.b."attr"`) is one of the
+    derived / read-only attributes `bits`/`size`/`sign`/`key` ("a derived
+    read-only attribute … read but not set") or `max`/`min` ("settable only
+    through a type `:int(max=,min=)`, `:uN`/`:sN`, never via attr_set"). This
+    enforces the plan's "no `:[…]` size attributes" rule. The producer's
+    `:int:[max=N]`/`::[bits=N]` size-attribute syntax (which lowered to
+    `attr_set(max/min/bits)`) was the only source of these, so 4 tests were
+    migrated to the type-call/sugar form: `phase2_attr_max_min`,
+    `phase8_size_attrs_partial`, `typesys_range` (`:int:[max=N,min=M]`→
+    `:int(max=N,min=M)`) and `tuple_simple_attr` (`::[bits=5]`→`:u5`). NOT yet
+    rejected (producer still emits them internally, pending T3/T6): `ubits`/
+    `sbits` (bit-range write width on tmps + decl width), `typename` (named-type
+    identity), `comptime`/`type`/`wrap`/`sat` (decl mode + per-write overflow);
+    `range` stays (it is a type, not a derived read). 0 regressions (244/10).
   - **`assign` node DELETED (2026-05-30) — 10 legacy nodes gone total.** Every
     write/bind is now `store`: statement scalar writes, field-path writes,
     tuple-literal field payloads `(x=v)`, func_def/io signature params, and typed

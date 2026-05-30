@@ -41,8 +41,8 @@ void Lnast_parser::parse_stmt() {
   switch (cur_kind()) {
     case Lnast_token::id_var: return parse_var_stmt();
     case Lnast_token::id_fun: return parse_fun_stmt();
-    case Lnast_token::kw_if: return parse_if_stmt();
-    default: error();
+    case Lnast_token::kw_if : return parse_if_stmt();
+    default                 : error();
   }
 }
 

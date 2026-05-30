@@ -102,7 +102,7 @@ TEST(UpassRunnerLgraphResolve, DetectMissingDependency) {
 }
 
 TEST(UpassRunnerLgraphResolve, SharedNoopResolvesAndRuns) {
-  auto                  g  = make_graph("lgdb_upass_runner_lgraph_shared_noop", "upass_runner_lgraph_shared_noop");
+  auto g = make_graph("lgdb_upass_runner_lgraph_shared_noop", "upass_runner_lgraph_shared_noop");
   (void)livehd::graph_util::create_const(*g, *Dlop::create_integer(1));
   auto                  gm = std::make_shared<upass::Lgraph_manager>(g);
   Exposed_runner_lgraph runner(gm, {"noop_shared"});
@@ -143,7 +143,7 @@ TEST(UpassRunnerLgraph, FoldSumConstMutation) {
 }
 
 TEST(UpassRunnerLgraph, FoldDceRemovesIsolatedNode) {
-  auto g  = make_graph("lgdb_upass_runner_lgraph_dce", "upass_runner_lgraph_dce");
+  auto g = make_graph("lgdb_upass_runner_lgraph_dce", "upass_runner_lgraph_dce");
   // Create a Sum node with no consumers and no input edges — pure dead.
   (void)livehd::graph_util::create_typed_node(*g, Ntype_op::Sum);
   auto gm = std::make_shared<upass::Lgraph_manager>(g);

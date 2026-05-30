@@ -146,9 +146,8 @@ void uPass_attributes::on_assign_like(bool is_assign_node) {
   // already-resolved view.lhs; null/typed-tmp LHS keeps the bulk fast path.
   const auto* lhs_ti_for_coerce = is_assign_node ? lookup_type_info(view.lhs) : nullptr;
   const bool  lhs_unsigned      = lhs_ti_for_coerce != nullptr && lhs_ti_for_coerce->has_type_spec
-                            && lhs_ti_for_coerce->kind == Numeric_kind::unsigned_int && lhs_ti_for_coerce->bits != 0;
-  const bool need_rhs_value = is_assign_node
-                              && (!wrap_policy.empty() || !sat_policy.empty() || lhs_unsigned);
+                                  && lhs_ti_for_coerce->kind == Numeric_kind::unsigned_int && lhs_ti_for_coerce->bits != 0;
+  const bool  need_rhs_value    = is_assign_node && (!wrap_policy.empty() || !sat_policy.empty() || lhs_unsigned);
   if (is_assign_node) {
     move_to_child();
     if (move_to_sibling()) {
@@ -199,8 +198,7 @@ void uPass_attributes::on_assign_like(bool is_assign_node) {
         mark_changed();
       }
     }
-  } else if (lhs_unsigned && !was_assigned(view.lhs) && rhs_value
-             && rhs_value->bit_test(static_cast<int>(lhs_ti_for_coerce->bits))
+  } else if (lhs_unsigned && !was_assigned(view.lhs) && rhs_value && rhs_value->bit_test(static_cast<int>(lhs_ti_for_coerce->bits))
              && !rhs_value->unknown_bit_test(static_cast<int>(lhs_ti_for_coerce->bits))) {
     // `!was_assigned` restricts this to the FIRST write (the declaration's
     // initializer). Per-statement `wrap x = …` / `sat x = …` are always
@@ -239,7 +237,8 @@ void uPass_attributes::on_assign_like(bool is_assign_node) {
       // must be explicit). The negative case above is a legal reinterpretation,
       // not an overflow; values that fit (bit `bits` clear) never reach here.
       upass::error("uPass_attributes: comptime write to `{}` overflows its declared {}-bit width without wrap/sat\n",
-                   view.lhs, lhs_ti_for_coerce->bits);
+                   view.lhs,
+                   lhs_ti_for_coerce->bits);
     }
   }
   record_assign(view.lhs, rhs_is_nil);
@@ -248,28 +247,24 @@ void uPass_attributes::on_assign_like(bool is_assign_node) {
     // Phase 3 — shape / typename / range inheritance through direct aliases.
     // When `assign foo bar` and bar carries a tuple shape (or range), foo
     // takes on the same shape so aggregate reads `foo.[size]` etc. resolve.
-    const auto& rhs           = view.rhs_refs.front();
+    const auto&       rhs = view.rhs_refs.front();
     // Fast path: when the rhs has no tracked state anywhere AND sticky has
     // nothing to propagate AND there's no chained narrowing value, every
     // arm of the alias body is a no-op. Skip — saves the migrate_alias
     // direct_alias.emplace + chained lookups on bulk `assign user_var
     // ___N` workloads where ___N is a pure plus tmp.
     const std::string rhs_s{rhs};
-    const bool rhs_has_state = tuple_shapes.contains(rhs_s)
-                               || range_bounds.contains(rhs_s)
-                               || tuple_get_alias.contains(rhs_s)
-                               || attr_set_values.contains(rhs_s)
-                               || shape_source.contains(rhs_s)
+    const bool rhs_has_state = tuple_shapes.contains(rhs_s) || range_bounds.contains(rhs_s) || tuple_get_alias.contains(rhs_s)
+                               || attr_set_values.contains(rhs_s) || shape_source.contains(rhs_s)
                                || (!tmp_fold.empty() && tmp_fold.contains(rhs_s));
     // Sticky's own fast-path will early-return on empty state, so we don't
     // need a separate sticky probe here.
     if (!rhs_has_state) {
-      reg.for_each_handler(
-          [&](upass::attributes::Attribute_handler& h) { h.on_alias_assign(*this, view.lhs, rhs); });
+      reg.for_each_handler([&](upass::attributes::Attribute_handler& h) { h.on_alias_assign(*this, view.lhs, rhs); });
       return;
     }
-    bool        record_source = false;
-    bool        gained_shape  = false;
+    bool record_source = false;
+    bool gained_shape  = false;
     if (auto* sh = lookup_tuple_shape(rhs); sh) {
       auto&      slot    = tuple_shapes[std::string{view.lhs}];
       const bool changed = slot.fields != sh->fields || slot.from_range != sh->from_range;
@@ -323,8 +318,7 @@ void uPass_attributes::on_assign_like(bool is_assign_node) {
   }
   // view.rhs_refs is already a contiguous span of string_views — pass
   // straight through; no intermediate vector materialization.
-  reg.for_each_handler(
-      [&](upass::attributes::Attribute_handler& h) { h.on_expr_assign(*this, view.lhs, view.rhs_refs); });
+  reg.for_each_handler([&](upass::attributes::Attribute_handler& h) { h.on_expr_assign(*this, view.lhs, view.rhs_refs); });
 }
 
 void uPass_attributes::process_assign() { on_assign_like(/*is_assign_node=*/true); }
@@ -389,16 +383,15 @@ void uPass_attributes::process_is() {
     return;
   }
 
-  std::optional<Const> tn = lookup_attr_value(lhs, "typename");
-  bool match = false;
+  std::optional<Const> tn    = lookup_attr_value(lhs, "typename");
+  bool                 match = false;
   if (tn) {
-    auto repr = tn->to_pyrope();
-    std::string stored = (repr.size() >= 2 && repr.front() == '\'' && repr.back() == '\'')
-                             ? std::string{repr.substr(1, repr.size() - 2)}
-                             : repr;
+    auto        repr = tn->to_pyrope();
+    std::string stored
+        = (repr.size() >= 2 && repr.front() == '\'' && repr.back() == '\'') ? std::string{repr.substr(1, repr.size() - 2)} : repr;
     match = (stored == rhs_text);
   }
-  Const folded = match ? *Dlop::create_integer(1) : *Dlop::create_integer(0);
+  Const folded        = match ? *Dlop::create_integer(1) : *Dlop::create_integer(0);
   auto [it, inserted] = tmp_fold.emplace(std::string{dst}, folded);
   if (!inserted && !it->second.same_repr(folded)) {
     it->second = folded;

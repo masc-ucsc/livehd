@@ -2373,13 +2373,44 @@ void Prp2lnast::process_type_statement(TSNode n) {
     return;
   }
   // Task 1t — `type Foo = …` is a declaration whose mode is `type` (replaces
-  // the former type_def node). The structure body isn't lowered yet (was a
-  // simplified stub), so the type slot is `prim_type_none` and the mode const
-  // carries "type".
+  // the former type_def node). The type slot is `prim_type_none` and the mode
+  // const carries "type".
   auto idx = builder.add_child(Lnast_ntype::create_declare());
   lnast->add_child(idx, Lnast_node::create_ref(get_text(name)));
   lnast->add_child(idx, Lnast_ntype::create_prim_type_none());
   lnast->add_child(idx, Lnast_node::create_const("type"));
+
+  // Task 1t — keep the type's bundle as a VALUE in the symbol table so a later
+  // `mut v:Foo = (…)` can materialize Foo's default fields/values (named-type
+  // borrowing — see upass_constprop process_assign). `type Foo = (tuple)` puts
+  // the tuple in the `alias` field (the `= _type` form) or `definition` (the
+  // no-`=` `type Foo(…)` trait form). A `type Foo = OtherType` alias (an
+  // identifier/scalar type, not a tuple) carries no field bundle, so we only
+  // store a tuple RHS. Mirrors the `const Foo = (…)` lowering.
+  TSNode rhs = child_by_field(n, "definition");  // `type Foo ( … )` trait form
+  if (ts_node_is_null(rhs)) {
+    rhs = child_by_field(n, "alias");  // `type Foo = …` form (an expression_type)
+  }
+  // `type Foo = (…)` lands the tuple inside an `expression_type` wrapper; unwrap
+  // to the inner `tuple`. (`type Foo = OtherType` wraps a scalar/identifier type
+  // with no field bundle — skipped below since it is not a tuple.)
+  if (!ts_node_is_null(rhs) && std::string_view(ts_node_type(rhs)) == "expression_type") {
+    for (uint32_t i = 0, nc = ts_node_child_count(rhs); i < nc; i++) {
+      TSNode c = ts_node_child(rhs, i);
+      if (std::string_view(ts_node_type(c)) == "tuple") {
+        rhs = c;
+        break;
+      }
+    }
+  }
+  if (!ts_node_is_null(rhs) && std::string_view(ts_node_type(rhs)) == "tuple") {
+    // Lower the bundle FIRST (emits the tuple_add statement), then build the
+    // store referencing its result — so the producer precedes the consumer.
+    auto rhs_val = expr_to_node(rhs);
+    auto sidx    = builder.add_child(Lnast_ntype::create_store());
+    lnast->add_child(sidx, Lnast_node::create_ref(get_text(name)));
+    lnast->add_child(sidx, rhs_val);
+  }
 }
 
 void Prp2lnast::process_import_statement(TSNode n) {

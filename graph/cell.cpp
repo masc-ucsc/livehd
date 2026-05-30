@@ -190,16 +190,16 @@ constexpr std::string_view Ntype::get_sink_name_slow(Ntype_op op, hhds::Port_id 
     case Ntype_op::Sub:  // unlimited case: 1,2,3,4,5....
       assert(is_unlimited_sink(op));
       switch (pid) {
-        case 0: return "p0";
-        case 1: return "p1";
-        case 2: return "p2";
-        case 3: return "p3";
-        case 4: return "p4";
-        case 5: return "p5";
-        case 6: return "p6";
-        case 7: return "p7";
-        case 8: return "p8";
-        case 9: return "p9";
+        case 0 : return "p0";
+        case 1 : return "p1";
+        case 2 : return "p2";
+        case 3 : return "p3";
+        case 4 : return "p4";
+        case 5 : return "p5";
+        case 6 : return "p6";
+        case 7 : return "p7";
+        case 8 : return "p8";
+        case 9 : return "p9";
         case 10: return "p10";  // >10 handled with loop at get_sink_pid
         default: return "invalid";
       }
@@ -207,73 +207,73 @@ constexpr std::string_view Ntype::get_sink_name_slow(Ntype_op op, hhds::Port_id 
       break;
     case Ntype_op::Memory:
       switch (pid) {
-        case 0: return "addr";       // runtime  x n_ports
-        case 1: return "bits";       // comptime x 1
-        case 2: return "clock_pin";  // runtime  x 1 or n_ports
-        case 3: return "din";        // runtime  x n_ports
-        case 4: return "enable";     // runtime  x n_ports
-        case 5: return "fwd";        // comptime x 1
-        case 6: return "posclk";     // comptime x 1
-        case 7: return "type";       // comptime x 1 (0:async, 1:sync: 2:array)
-        case 8: return "wensize";    // comptime x 1  -- number of Write Enable bits
-        case 9: return "size";       // comptime x 1
-        case 10: return "rdport";    // comptime x n_ports (1 rd, 0 wr)
+        case 0 : return "addr";       // runtime  x n_ports
+        case 1 : return "bits";       // comptime x 1
+        case 2 : return "clock_pin";  // runtime  x 1 or n_ports
+        case 3 : return "din";        // runtime  x n_ports
+        case 4 : return "enable";     // runtime  x n_ports
+        case 5 : return "fwd";        // comptime x 1
+        case 6 : return "posclk";     // comptime x 1
+        case 7 : return "type";       // comptime x 1 (0:async, 1:sync: 2:array)
+        case 8 : return "wensize";    // comptime x 1  -- number of Write Enable bits
+        case 9 : return "size";       // comptime x 1
+        case 10: return "rdport";     // comptime x n_ports (1 rd, 0 wr)
         default: return "invalid";
       }
       break;
     case Ntype_op::Flop:
       switch (pid) {
-        case 0: return "async";
-        case 1: return "initial";  // reset value
-        case 2: return "clock_pin";
-        case 3: return "din";
-        case 4: return "enable";
-        case 5: return "negreset";
-        case 6: return "posclk";
-        case 7: return "reset_pin";
+        case 0 : return "async";
+        case 1 : return "initial";  // reset value
+        case 2 : return "clock_pin";
+        case 3 : return "din";
+        case 4 : return "enable";
+        case 5 : return "negreset";
+        case 6 : return "posclk";
+        case 7 : return "reset_pin";
         default: return "invalid";
       }
       break;
     case Ntype_op::Latch:
       switch (pid) {
           // No 1 to keep din at pos 3 (a,b,c)
-        case 3: return "din";
-        case 4: return "enable";
-        case 6: return "posclk";
+        case 3 : return "din";
+        case 4 : return "enable";
+        case 6 : return "posclk";
         default: return "invalid";
       }
       break;
     case Ntype_op::Fflop:  // Fluid-flop
       switch (pid) {
-        case 0: return "valid";
-        case 1: return "initial";  // reset value
-        case 2: return "clock_pin";
-        case 3: return "din";
-        case 5: return "stop";  // stop from next cycle
-        case 7: return "reset_pin";
+        case 0 : return "valid";
+        case 1 : return "initial";  // reset value
+        case 2 : return "clock_pin";
+        case 3 : return "din";
+        case 5 : return "stop";  // stop from next cycle
+        case 7 : return "reset_pin";
         default: return "invalid";
       }
       break;
     case Ntype_op::Get_mask:
       switch (pid) {
-        case 0: return "a";     // input net to get bits
-        case 2: return "mask";  // bit position
+        case 0 : return "a";     // input net to get bits
+        case 2 : return "mask";  // bit position
         default: return "invalid";
       }
       break;
     case Ntype_op::Set_mask:
       switch (pid) {
-        case 0: return "a";     // input net to set bits
-        case 2: return "mask";  // bit position
-        case 4: return "value";
+        case 0 : return "a";     // input net to set bits
+        case 2 : return "mask";  // bit position
+        case 4 : return "value";
         default: return "invalid";
       }
       break;
     case Ntype_op::AttrSet:
       switch (pid) {
-        case 0: return "parent";
-        case 4: return "value";
-        case 5: return "field";
+        case 0 : return "parent";
+        case 4 : return "value";
+        case 5 : return "field";
         default: return "invalid";
       }
       break;

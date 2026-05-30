@@ -113,8 +113,7 @@ void uPass_ssa::copy_with_rename(const std::shared_ptr<Lnast>& src, const Lnast_
     // Heterogeneous lookup: no temporary std::string allocation per ref.
     std::string_view name = src->get_name(src_nid);
     auto             it   = rename_map.find(name);
-    new_nid               = dst->add_child(
-        dst_parent, Lnast_node::create_ref(it != rename_map.end() ? std::string_view{it->second} : name));
+    new_nid = dst->add_child(dst_parent, Lnast_node::create_ref(it != rename_map.end() ? std::string_view{it->second} : name));
   } else if (Lnast_ntype::is_const(type)) {
     new_nid = dst->add_child(dst_parent, Lnast_node::create_const(src->get_name(src_nid)));
   } else if (Lnast_ntype::is_invalid(type)) {

@@ -9,7 +9,6 @@
 #include <unordered_set>
 
 #include "absl/container/flat_hash_map.h"
-
 #include "lnast.hpp"
 #include "lnast_ntype.hpp"
 #include "upass_core.hpp"

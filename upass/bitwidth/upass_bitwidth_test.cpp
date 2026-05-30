@@ -469,18 +469,18 @@ TEST(BitwidthCrossInvocation, TightenAfterReseed) {
 
   // Inject ranges for a and b into bw_meta — what a prior pass.upass call
   // would have left behind for an earlier-bounded register.
-  auto& meta_w  = ln->bw_meta();
+  auto&         meta_w = ln->bw_meta();
   BitwidthEntry ea{};
-  ea.min     = 0;
-  ea.max     = 7;
-  ea.neg_inf = false;
-  ea.pos_inf = false;
+  ea.min             = 0;
+  ea.max             = 7;
+  ea.neg_inf         = false;
+  ea.pos_inf         = false;
   meta_w.ranges["a"] = ea;
   BitwidthEntry eb{};
-  eb.min     = 1;
-  eb.max     = 2;
-  eb.neg_inf = false;
-  eb.pos_inf = false;
+  eb.min             = 1;
+  eb.max             = 2;
+  eb.neg_inf         = false;
+  eb.pos_inf         = false;
   meta_w.ranges["b"] = eb;
 
   // Second pass: begin_iteration reloads a,b into range_map_; plus computes

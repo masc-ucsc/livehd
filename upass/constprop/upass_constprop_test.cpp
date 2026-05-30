@@ -220,7 +220,7 @@ TEST(UpassConstprop, FoldsSra) {
 // ── Bitwise ──────────────────────────────────────────────────────────────────
 
 TEST(UpassConstprop, FoldsBitAnd) {
-  ConstpropFixture f;
+  ConstpropFixture  f;
   // 0b1010 & 0b1100 = 0b1000 = 8
   auto              op = f.add_binary_node(Lnast_ntype::create_bit_and(), "a", 0b1010, 0b1100);
   TestableConstprop cp(f.lm);
@@ -231,7 +231,7 @@ TEST(UpassConstprop, FoldsBitAnd) {
 }
 
 TEST(UpassConstprop, FoldsBitOr) {
-  ConstpropFixture f;
+  ConstpropFixture  f;
   // 0b1010 | 0b0101 = 0b1111 = 15
   auto              op = f.add_binary_node(Lnast_ntype::create_bit_or(), "a", 0b1010, 0b0101);
   TestableConstprop cp(f.lm);
@@ -242,7 +242,7 @@ TEST(UpassConstprop, FoldsBitOr) {
 }
 
 TEST(UpassConstprop, FoldsBitXor) {
-  ConstpropFixture f;
+  ConstpropFixture  f;
   // 0b1010 ^ 0b1100 = 0b0110 = 6
   auto              op = f.add_binary_node(Lnast_ntype::create_bit_xor(), "a", 0b1010, 0b1100);
   TestableConstprop cp(f.lm);
@@ -264,7 +264,7 @@ TEST(UpassConstprop, FoldsBitNot) {
 }
 
 TEST(UpassConstprop, FoldsGetMask) {
-  ConstpropFixture f;
+  ConstpropFixture  f;
   // 0x12345678#[0..=7] = 0x78
   auto              op = f.add_binary_node(Lnast_ntype::create_get_mask(), "a", 0x12345678, 0xff);
   TestableConstprop cp(f.lm);
@@ -434,7 +434,7 @@ TEST(UpassConstpropIf, KnownFalseConditionWithElse) {
 TEST(UpassConstpropIf, ConstConditionNoElse) {
   ConstpropFixture f;
   // Build [if: [const:1], [stmts:...]] — constant-true condition literal.
-  auto if_nid = f.ln->add_child(f.stmts_nid, Lnast_ntype::create_if());
+  auto             if_nid = f.ln->add_child(f.stmts_nid, Lnast_ntype::create_if());
   f.ln->add_child(if_nid, Lnast_node::create_const(1));
   auto then_stmts = f.ln->add_child(if_nid, Lnast_ntype::create_stmts());
   f.add_binary_under(then_stmts, Lnast_ntype::create_plus(), "z", 7, 8);
@@ -483,7 +483,7 @@ TEST(UpassConstprop, RedOrUnknownInputNoStore) {
 
 // red_and: 1 only when all bits are 1 (value is all-ones mask).
 TEST(UpassConstprop, RedAndAllOnes) {
-  ConstpropFixture f;
+  ConstpropFixture  f;
   // 0b111 = 7: all bits set → red_and = true.
   auto              op = f.add_unary_node(Lnast_ntype::create_red_and(), "a", 0b111);
   TestableConstprop cp(f.lm);
@@ -494,7 +494,7 @@ TEST(UpassConstprop, RedAndAllOnes) {
 }
 
 TEST(UpassConstprop, RedAndNotAllOnes) {
-  ConstpropFixture f;
+  ConstpropFixture  f;
   // 0b101 = 5: bit 1 is clear → red_and = false.
   auto              op = f.add_unary_node(Lnast_ntype::create_red_and(), "a", 0b101);
   TestableConstprop cp(f.lm);
@@ -506,7 +506,7 @@ TEST(UpassConstprop, RedAndNotAllOnes) {
 
 // red_xor: parity of set bits (true if popcount is odd).
 TEST(UpassConstprop, RedXorOddParity) {
-  ConstpropFixture f;
+  ConstpropFixture  f;
   // 0b101 = 5: popcount = 2 (even) → red_xor = false
   // Let's use 0b111 = 7: popcount = 3 (odd) → red_xor = true.
   auto              op = f.add_unary_node(Lnast_ntype::create_red_xor(), "a", 0b111);
@@ -518,7 +518,7 @@ TEST(UpassConstprop, RedXorOddParity) {
 }
 
 TEST(UpassConstprop, RedXorEvenParity) {
-  ConstpropFixture f;
+  ConstpropFixture  f;
   // 0b1010 = 10: popcount = 2 (even) → red_xor = false.
   auto              op = f.add_unary_node(Lnast_ntype::create_red_xor(), "a", 0b1010);
   TestableConstprop cp(f.lm);
@@ -530,7 +530,7 @@ TEST(UpassConstprop, RedXorEvenParity) {
 
 // popcount: number of set bits, as an integer (not boolean like the reductions).
 TEST(UpassConstprop, PopcountSetBits) {
-  ConstpropFixture f;
+  ConstpropFixture  f;
   // 0b1010_0100 = 0xa4: bits 2, 5, 7 set → popcount = 3.
   auto              op = f.add_unary_node(Lnast_ntype::create_popcount(), "a", 0xa4);
   TestableConstprop cp(f.lm);
@@ -541,7 +541,7 @@ TEST(UpassConstprop, PopcountSetBits) {
 }
 
 TEST(UpassConstprop, PopcountZero) {
-  ConstpropFixture f;
+  ConstpropFixture  f;
   auto              op = f.add_unary_node(Lnast_ntype::create_popcount(), "a", 0);
   TestableConstprop cp(f.lm);
   cp.position(op);
@@ -563,7 +563,7 @@ static Lnast_nid add_sext_node(ConstpropFixture& f, std::string_view dst, int64_
 }
 
 TEST(UpassConstprop, SextNoTruncation) {
-  ConstpropFixture f;
+  ConstpropFixture  f;
   // src = 3 (0b011), ebits = 10 → ebits >= bits, so no change: result = 3.
   auto              op = add_sext_node(f, "a", 3, 10);
   TestableConstprop cp(f.lm);
@@ -574,7 +574,7 @@ TEST(UpassConstprop, SextNoTruncation) {
 }
 
 TEST(UpassConstprop, SextSignExtendNarrows) {
-  ConstpropFixture f;
+  ConstpropFixture  f;
   // src = 4 (0b100, 4 bits), ebits = 2.
   // sext_op(2): tests bit 2 of 4 (0b100) = 1 → sign bit is set → negative.
   // Lower bits (0,1) of 4 are 00 → signed 3-bit 0b100 = -4.

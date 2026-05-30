@@ -58,23 +58,23 @@ public:
   // (Phase 1: adapters over the underlying key_map storage). Cheap value
   // semantics; callers typically range-for or read by index.
   class Entries_view {
-   public:
+  public:
     using Item           = std::pair<std::string_view, const Entry*>;
     using const_iterator = std::vector<Item>::const_iterator;
-    const_iterator begin() const { return items_.begin(); }
-    const_iterator end()   const { return items_.end();   }
-    bool           empty() const { return items_.empty(); }
-    size_t         size()  const { return items_.size();  }
+    const_iterator    begin() const { return items_.begin(); }
+    const_iterator    end() const { return items_.end(); }
+    bool              empty() const { return items_.empty(); }
+    size_t            size() const { return items_.size(); }
     std::vector<Item> items_;
   };
 
   class Top_levels_view {
-   public:
+  public:
     using const_iterator = std::vector<Top_level_entry>::const_iterator;
-    const_iterator begin() const { return items_.begin(); }
-    const_iterator end()   const { return items_.end();   }
-    bool           empty() const { return items_.empty(); }
-    size_t         size()  const { return items_.size();  }
+    const_iterator               begin() const { return items_.begin(); }
+    const_iterator               end() const { return items_.end(); }
+    bool                         empty() const { return items_.empty(); }
+    size_t                       size() const { return items_.size(); }
     std::vector<Top_level_entry> items_;
   };
 
@@ -162,21 +162,15 @@ public:
   // "type", "pending_import") routes to "__<name>" in the underlying
   // key_map. Sub-fields can use "field.attr_name" form (e.g.
   // set_attr("foo", "bits", …) → "foo.__bits").
-  bool has_attr(std::string_view attr_name) const {
-    return has_trivial(absl::StrCat("__", attr_name));
-  }
+  bool has_attr(std::string_view attr_name) const { return has_trivial(absl::StrCat("__", attr_name)); }
   bool has_attr(std::string_view field, std::string_view attr_name) const {
     return has_trivial(absl::StrCat(field, ".__", attr_name));
   }
-  const Const& get_attr(std::string_view attr_name) const {
-    return get_trivial(absl::StrCat("__", attr_name));
-  }
+  const Const& get_attr(std::string_view attr_name) const { return get_trivial(absl::StrCat("__", attr_name)); }
   const Const& get_attr(std::string_view field, std::string_view attr_name) const {
     return get_trivial(absl::StrCat(field, ".__", attr_name));
   }
-  void set_attr(std::string_view attr_name, const Const& v) {
-    set(absl::StrCat("__", attr_name), v);
-  }
+  void set_attr(std::string_view attr_name, const Const& v) { set(absl::StrCat("__", attr_name), v); }
   void set_attr(std::string_view field, std::string_view attr_name, const Const& v) {
     set(absl::StrCat(field, ".__", attr_name), v);
   }
@@ -209,10 +203,10 @@ public:
   //   get_attrs()        — attribute leaves only, sorted
   //   top_levels()       — one Top_level_entry per distinct top-level
   //                        segment of non-attr data, in canonical order
-  Entries_view    entries()          const;
+  Entries_view    entries() const;
   Entries_view    non_attr_entries() const;
-  Entries_view    get_attrs()        const;
-  Top_levels_view top_levels()       const;
+  Entries_view    get_attrs() const;
+  Top_levels_view top_levels() const;
 
   // Top-level membership queries. has_top_named checks whether any
   // non-attribute leaf has the given top-level NAME. has_top_unnamed
