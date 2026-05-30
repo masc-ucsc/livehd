@@ -147,7 +147,7 @@ cross-file dependencies stay visible.
     `tuple_*` nodes for the next `pass.upass` invocation to revisit.
     Re-runs of `pass.upass` after the import resolves clear the marker.
 
-- **2n** `tree_ios` leaf ABI with `bits`/`min`/`max`/`signed` slots,
+- **2n** `tree_ios` leaf ABI with `min`/`max` slots,
   mimicking `GraphIO` for consistency — `import.md §Function signatures`.
   Downstream upasses (func_extract, constprop) read leaf IO via the ABI
   rather than poking into each LNAST.

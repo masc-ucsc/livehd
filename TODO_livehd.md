@@ -13,106 +13,105 @@ cross-file dependencies stay visible.
 
 ## Group 1 — foundation
 
-- **1t** Type declaration model + `wrap`/`sat` overflow enforcement.
-  **Goal 1.** Replaces the fragmented declaration encoding and the
-  `assign`/`tuple_set` split with two LNAST write nodes, and makes the
-  declared type's `max`/`min` actually *enforced* on every write. Merges
-  the former **2m** (wrap/sat statement), **1w** (`attr_set`/`tuple_set`
-  unify), **1c** §11.5 (validator extensions), TODO.md **Cluster F**
-  (storage-width enforcement), and the type-coupled remainder of **2q**.
+- **1t** Clean type / declaration / write model for LNAST. **Goal 1.**
+  **★ Full spec + all locked decisions + worked examples live in
+  [`docs/contracts/typesystem_clean_plan.md`](docs/contracts/typesystem_clean_plan.md)
+  — read it first; this entry is the implementation checklist.** Supersedes the
+  original `1t` declare/store sketch and folds in [[1v]]'s envelope, the wrap/sat
+  `2m`, `1w` (`attr_set`/`tuple_set` unify), `1c` §11.5 (validator), TODO.md
+  **Cluster F**, and the type-coupled remainder of `2q`. Removes three
+  conflations: (a) `assign` vs `tuple_set` → **one `store`**; (b) the
+  `attr_set`+`type_spec`+`assign` declaration cluster → **one `declare`**;
+  (c) types-as-attributes → a clean **TYPE / MODE / OVERFLOW / ATTRIBUTE** split.
+  `lnast_spec.md §11.3` (no-assign-collapse) is **superseded** by the `store`
+  unification (decision 2026-05-29).
 
-  **New LNAST nodes.**
-  - `declare` — declaration *and* `wrap`/`sat` writes (both need
-    type/policy info): `var, level0…levelN, type_decl,
-    qualifier(const|mut|comptime|wrap|sat), value`.
-  - `store` — bare write, replaces `assign` *and* `tuple_set`:
-    `var, level0…levelN, value`. No type slot. Migration name only:
-    rename `store` → `assign` once the old `assign`/`tuple_set` are
-    deleted (the throwaway name avoids colliding with the old `assign`
-    mid-migration). `declare` is the final name — adopt immediately
-    (no collision).
+  **Model (locked — see the spec for detail).**
+  - Scalar kinds are only `prim_type_int`(+`(max,min)` range) / `prim_type_bool`
+    / `prim_type_string` / `prim_type_range` / `prim_type_none` (last unifies
+    `none_type`+`unknown_type`). `bits`/`sign` **derived** from the range, never
+    stored (`sign = min < 0`); `ubits`/`sbits`/stored-`bits` cease to exist.
+    Aligns with `lnast2lgraph.md §7-8` + the `Dlop` value model.
+  - Type sizing only via the **type-call** `int(max=,min=,bits=)` + `uN`/`sN`
+    sugar (params refine sugar bounds; `bits=` reconciles to the range); **no
+    `:[…]` size attributes**.
+  - `declare( var, <type>, const(mode), [value] )` — universal bind node
+    (statement, typed `tuple_add` field payload, `comp_type_tuple` field).
+    `<type>` ∈ `prim_type_*` / `comp_type_*` / **`ref(NamedType)`** (named type =
+    `ref` to its symbol-table bundle — no `expr_type`). `mode` = **`Lnast_mode`
+    enum** `{mut, const, reg, mut_comptime, const_comptime, type, ref}` (one
+    canonical token + `from_sv`/`to_sv`, mirrors `Lnast_ntype`; `mode==type`
+    replaces `type_def`; `ref` = param modifier, encoding TBD; NO `await`/`stage`).
+  - `store( var, level0..levelN, value )` — replaces `assign`+`tuple_set`
+    (0 levels = scalar→wire; N = path→flatten pre-LGraph). One `process_store`
+    branches on arity.
+  - Derived reads (`bits`/`ubits`/`sbits`/`max`/`min`/`size`/`sign`/`typename`/
+    `key`/`comptime`) computed from the type/bundle; `attr_set` of any = compile
+    error. `attr_set`/`attr_get` survive only for hardware/synthesis/user attrs.
+  - `stage`/`await` are NOT typesystem (await deprecated): `stage[a..=b] foo:T =…`
+    = a normal `declare` + a separate timing check
+    (`range`/`get_time`/`in`/`cassert`; needs a future `get_time` op).
+  - Memory/flop config (`rdport`/`wensize`/`clock_pin`/`reset_pin`/…) folds into
+    new `prim_type_memory`/`prim_type_register` nodes mirroring `graph/cell.hpp`
+    `Memory`/`Flop`/`Latch`/`Fflop` pins (later phase).
 
-  **Enforcement (the Cluster F bug).** A write whose value falls outside
-  the destination's declared `[min,max]` is a **hard compile error** —
-  *unless* the write carries `wrap`/`sat`, which mask/saturate to the
-  declared width. Today `v:u8 = 0sb1?01_?000` silently stores a
-  sign-extended value, so `v | 0xff` folds to `-1` instead of `0xff`
-  (`prp-typesystem`, `prp-valid_unknown_bits`'s `ones == 0xff`). The
-  `:uN`/`:sN` envelope is *published* by [[1v]] (Phase A landed) but
-  never *applied* to the stored value — 1t adds the application. The
-  `0sb…|0xff == -1` fold itself is correct (sign-extension OR); the bug
-  is purely that `:u8` must pin `v`'s range so it is non-negative.
+  **Status (2026-05-29) — foundation landed, green (suite 117/11):**
+  `declare`/`store`/`prim_type_int` node types added to `lnast/lnast_nodes.def`
+  (inert) + writer + round-trip test
+  (`lnast/tests/parser_writer_test.cpp::declare_store_dump_read_roundtrip`);
+  `wrap_to_signed` sext bug fixed in `upass/bitwidth/wrap_sat.hpp`
+  (`prp-wrap_checks`/`prp-wrap_complex` pass); `.[sign]` derived read landed
+  (`upass/attributes` + `is_builtin_attr`; `inou/prp/tests/comptime/sign_attr.prp`).
+  Nothing git-committed.
 
-  **"Type only at declaration" is structural.** Only `declare` carries a
-  `type_decl`; `store` cannot retype; a second `declare` on a live var is
-  a redeclaration error (`x:u6 = …` after `x:u8` → error).
+  **Phases (each keeps `//inou/prp:all` green).**
+  - **T1** — producer recognizes the type-call `int/uint/uN/sN(max=,min=,bits=)`
+    (`function_call_type` callee = type keyword; today `int(max=3)` mis-lowers to
+    a tuple) → `prim_type_int(max,min)`; extend
+    `uPass_attributes::Type_info` to carry the `(max,min)` range (today
+    `kind`+`bits`); teach `process_type_spec` + `derive_bits/max/min` to consume
+    `prim_type_int`; `bits`/`sign` purely range-derived; switch `uN`/`sN`
+    emission to `prim_type_int`. **Migrate the 6 size-attr tests** off `:[…]`/
+    `::[…]`: `wrap_complex` (`::[sbits=8]`→`:s8`, `::[ubits=8]`→`:u8`),
+    `wrap_trivial` (`::[ubits=12]`→`:u12`), `tuple_simple_attr`
+    (`::[bits=5]`→`:uint(bits=5)`), `phase2_attr_max_min` +
+    `phase8_size_attrs_partial` (`:int:[max=N,min=M]`→`:int(max=N,min=M)`).
+  - **T2** — `store`: producer statement `assign`/`tuple_set`→`store`; runner
+    `process_store` (arity branch); update the ~15 structural sites (DCE
+    `dce_is_def_producing`, ssa `stmt_has_dest`, coalescer barriers,
+    `upass/core/lnast_manager.hpp::is_tuple_field_key`, `pass/lnastfmt`
+    `parent_writes_pos0`, `upass/prp_writer`, runner `set_function_registry`);
+    tuple-literal field payloads → `store`.
+  - **T3** — `declare`: producer decl-cluster→`declare`; typed tuple fields→
+    nested `declare`; named types→`comp_type_tuple` of field declares; `type
+    Foo`→`declare(mode==type)`. `process_declare` in `upass/attributes`
+    (type_info+mode+comptime), `upass/constprop` (value + shape-merge over
+    declare/store payloads), `upass/bitwidth` (range). Stop emitting
+    `attr_set(type/comptime/ubits/sbits)` + `tuple_get`-for-field-type; update
+    `is_tuple_field_key`/shape-merge to read `declare`/`store`; `declare` always
+    live in DCE; `inou/slang/slang_tree.cpp` (`create_declare_bits_stmts`) emits
+    the type node, not `__ubits`.
+  - **T4** — wrap/sat-as-qualifier + Cluster-F: narrowing reads the range at the
+    write; out-of-range comptime write without wrap/sat = hard error. Targets
+    `prp-valid_unknown_bits`, `prp-typesystem`. (The earlier surgical constprop
+    pin was reverted — it conflicts with `sat`/unknown-width because the
+    qualifier wasn't on the node; this phase puts it on the write.)
+  - **T5** — validator + cleanup: `pass.lnastfmt` enforces store/declare shape,
+    type-only-on-declare, declare-once (post-constprop, dead-branch aware),
+    no-`attr_set`-of-derived-reads. Delete `assign`/`tuple_set`/`prim_type_uint`/
+    `sint`/`type_def`/`prim_type_type`/`prim_type_ref`/`expr_type`/
+    `comp_type_mixin`/`unknown_type`; rename `prim_type_boolean`→`prim_type_bool`.
+  - **T6** (deferred) — LGraph lowering: derive sign/bits from the range at cell
+    creation (`lnast2lgraph.md §7`); `wrap`→`get_mask`, `sat`→`mux+get_mask`;
+    flatten N-level `store`; `prim_type_memory`/`register` + `ref`/`get_time`
+    follow-ups.
 
-  **`wrap`/`sat` are write qualifiers — not a separate op, not a sticky
-  attribute.** *Learned from 2m (dropped):* a dedicated `wrap`/`sat`
-  LNAST op was the old plan — superseded, because the info the op needs
-  (target `max`/`min`/`bits`) is exactly the `declare`-shaped info, so it
-  folds into the qualifier instead. Still carried over from 2m: the
-  qualifier is a *type-info* read of the target envelope (not a
-  control-flow value read); LGraph has no wrap/sat cell, so LNAST→LGraph
-  lowers `wrap` → `get_mask` and `sat` → `mux + get_mask` using the
-  target `max`/`min`. The attribute syntax `x:u4:[wrap] = …` is dropped →
-  write `wrap x:u4 = …` (qualifier on `declare`).
-
-  **Removes `attr_set` for declaration attrs.** *Learned from 1w
-  (deleted):* `type`/`mut`/`const`/`comptime`/`wrap`/`sat` move into
-  `declare`. 1w's locked rules become *structural* instead of
-  post-constprop ST checks: declaration-only (mid-body `a.[foo] = bar` is
-  a hard error), no re-type, **declare-once per target** — but
-  conditional/mutually-exclusive declarations can *textually* look like
-  multiple writes and collapse to one after constprop dead-branch fold,
-  so declare-once must still be checked **after constprop** (the §10 ST
-  API rework that blocked 1w is the same prerequisite). `store` writes
-  stay freely re-assignable. `attr_set`/`attr_get` survive only for
-  non-declaration attributes (`.[bits]`/`.[max]`/`.[min]` reads, user
-  `_debug`).
-
-  **Validator (former 1c §11.5).** The `pass.lnastfmt` core (~396 lines:
-  ref text shape, arity, tmp-ref unwritten detection, io-shape) stays;
-  its pending extensions retarget to the new nodes: type-only-on-
-  `declare`, no-retype-via-`store`, `wrap`/`sat`-only on `declare`-shaped
-  writes, value/level arity, declare-once. Re-gated on 1t (was gated on
-  the deleted 1w).
-
-  **Bit-op status (folded from 2q, deleted).** Bit-level operators
-  largely **landed** (2026-05-28/29): `get_mask`/`set_mask` folding incl.
-  unknown bits (constprop delegates to Dlop, no unknown pre-filter),
-  reductions `#|`/`#&`/`#^`/`#+` (+ `popcount`), and `#sext`/`#zext` for
-  **const inclusive** masks. Residual gaps tracked here because they are
-  typesystem-coupled:
-  - `#sext` for **non-const** masks (exclusive `[lo..<hi]`, open,
-    dynamic): the mask lowers as a `range`/`shl` node, so the
-    const-popcount sign-bit path doesn't fire and sign-extension is
-    dropped (falls back to `get_mask`-only).
-  - `.[bits]`-driven loop bounds + dynamic bit index in loops
-    (`t#[i] = x#[…]`), gated on [[1i]] (comb inline) and [[1v]]'s
-    published `.[bits]`.
-  - Direct builtin cell-call folding (`__sext`/`__get_mask`/`__set_mask`/
-    `__ror`/…) returns unknown — a separate cell-call evaluator, not
-    bit-op semantics (most of `cellmap_comb`'s unknowns).
-
-  **Impacted LNAST nodes.** Remove: `assign`, `tuple_set` (→ `store`),
-  `attr_set` decl-attrs, `type_spec`-as-declaration (keep the cast/check
-  role — the existing `// FIXME: type_check` rename). Re-parent
-  `prim_type_*` / `comp_type_*` / `expr_type` / `unknown_type` as the
-  `type_decl` payload of `declare`. `dp_assign` already slated for
-  removal. Open decisions: `tuple_add` (field-create — fold into
-  `declare`-with-levels vs keep) and `delay_assign` (timing write —
-  `store` flavor vs own node).
-
-  **Depends on** [[1v]] (typesystem envelope — Phase A landed; scalar
-  `bits`/`max`/`min` already available, which is why 1t can sit in Group
-  1 even though wrap/sat was Group 2 under 2m). Sibling of [[1d]]
-  (producer bit lowering) and [[1i]] (comb inline). **Blast radius:**
-  `inou/prp/prp2lnast.cpp` + all upasses (attributes biggest — deletes
-  the wrap/sat sticky logic and the 3-node
-  `attr_set`+`type_spec`+`assign` declaration correlation), runner
-  dispatch, `pass/lnastfmt`, `lnast/lnast_writer`, `lnast_to_lgraph`,
-  `inou/cgen`.
+  **Depends on** [[1v]] (envelope — Phase A landed). Sibling of [[1d]] (producer
+  bit lowering) and [[1i]] (comb inline, done). **Blast radius:**
+  `lnast/lnast_nodes.def` + `lnast_writer`/`lnast_parser`, `inou/prp/prp2lnast.cpp`,
+  all upasses (attributes biggest — deletes wrap/sat sticky logic + the 3-node
+  declaration correlation), runner dispatch, `pass/lnastfmt`,
+  `inou/slang/slang_tree.cpp`, `lnast_to_lgraph`, `inou/cgen`.
 
 - **1d** Bit-range / bit-selection lowering bugs in
   `inou/prp/prp2lnast.cpp`. Pyrope's `#[…]` syntax (bit read,
