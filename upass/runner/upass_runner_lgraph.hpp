@@ -14,7 +14,7 @@ public:
   uPass_runner_lgraph(std::shared_ptr<upass::Lgraph_manager> _gm, const std::vector<std::string>& upass_names = {},
                       bool _dry_run = false);
 
-  void                                     run(std::size_t max_iters = 1);
+  void                                     run();
   bool                                     has_configuration_error() const { return configuration_error; }
   const std::string&                       get_configuration_error() const { return configuration_error_msg; }
   std::size_t                              visit_fast(bool visit_sub = false) const;
@@ -38,6 +38,5 @@ private:
 
 protected:
   std::vector<std::string> resolve_order(const std::vector<std::string>& requested_names, std::string* error_msg = nullptr) const;
-  std::vector<std::string> changed_passes() const;
   void                     execute_passes();
 };

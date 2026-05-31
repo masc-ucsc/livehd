@@ -352,10 +352,20 @@ int main(int argc, char** argv) {
 
   if (!cmd.empty()) {
     std::print("livehd cmd {}\n", cmd);
-    for (const auto line : absl::StrSplit(cmd, '\n')) {
-      Main_api::parse_inline(line);
+    bool failed = false;
+    try {
+      for (const auto line : absl::StrSplit(cmd, '\n')) {
+        Main_api::parse_inline(line);
+      }
+    } catch (const std::exception& ex) {
+      // The diagnostic was already reported (livehd: error: …, see diag sink);
+      // a compile error stops the run and exits non-zero in any build mode.
+      err_tracker::logger("ERROR: {}", ex.what());
+      failed = true;
+    } catch (...) {
+      failed = true;
     }
-    return 0;
+    return (failed || Main_api::has_errors()) ? 1 : 0;
   }
 
   using cl = Replxx::Color;

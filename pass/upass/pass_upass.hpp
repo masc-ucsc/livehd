@@ -11,7 +11,6 @@
 class Pass_upass : public Pass {
 protected:
   std::vector<std::string> upass_order;
-  std::size_t              max_iters{1};
   bool                     inherit_labels{true};
   bool                     verifier_include_funcs{false};
   bool                     run_ssa{false};

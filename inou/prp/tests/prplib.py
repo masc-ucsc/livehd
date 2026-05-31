@@ -1,6 +1,7 @@
 #!/usr/bin/env python3
 
 import argparse
+import json
 import os
 import re
 import subprocess
@@ -82,7 +83,7 @@ class PrpRunner:
         lg_cmd = self.lgshell_lnast(test)
 
         lg_cmd.append('|>')
-        lg_cmd.append('pass.upass constprop:1 verifier:false max_iters:1')
+        lg_cmd.append('pass.upass constprop:1 verifier:false')
 
         lg_cmd.append('|>')
         lg_cmd.append('pass.lnastfmt')
@@ -102,7 +103,7 @@ class PrpRunner:
         # test if they don't match. -1 or absent disables the check.
         lg_cmd = self.lgshell_lnast(test)
 
-        upass_args = 'pass.upass constprop:1 max_iters:1'
+        upass_args = 'pass.upass constprop:1'
         if 'verifier_pass' in test.params:
             upass_args += ' verifier_pass:' + test.params['verifier_pass']
         if 'verifier_fail' in test.params:
@@ -112,6 +113,21 @@ class PrpRunner:
 
         lg_cmd.append('|>')
         lg_cmd.append(upass_args)
+
+        lg_cmd.append('|>')
+        lg_cmd.append('pass.lnastfmt')
+
+        return lg_cmd
+
+    def lgshell_error(self, test):
+        # Expected-failure test: the program must trigger a compile error. The
+        # header's :error: / :help: regexes are matched against the emitted
+        # diagnostic's message / hint (see run()). Runs the full prp->upass
+        # pipeline so an error at any stage (parse, upass) is caught.
+        lg_cmd = self.lgshell_lnast(test)
+
+        lg_cmd.append('|>')
+        lg_cmd.append('pass.upass constprop:1')
 
         lg_cmd.append('|>')
         lg_cmd.append('pass.lnastfmt')
@@ -146,6 +162,7 @@ class PrpRunner:
             'lnast'    : self.lgshell_lnast,
             'upass'    : self.lgshell_upass,
             'comptime' : self.lgshell_comptime,
+            'error'    : self.lgshell_error,
             'lgraph'   : self.lgshell_lgraph,
             'compile'  : self.lgshell_lg_compile
         }
@@ -156,11 +173,113 @@ class PrpRunner:
 
         return cmd
 
+    @staticmethod
+    def _pattern_matches(pattern, text):
+        # The header :error:/:help: value is a regex (re.search). If it is not a
+        # valid regex (e.g. `')'` has an unbalanced paren), fall back to a literal
+        # substring match so authors can write the offending token verbatim.
+        try:
+            return re.search(pattern, text) is not None
+        except re.error:
+            return re.search(re.escape(pattern), text) is not None
+
+    def run_error(self, tmp_dir, test: PrpTest):
+        # Expected-failure test: the program MUST emit a compile error whose
+        # message/hint match the header :error:/:help: regexes. Diagnostics are
+        # read from a JSONL file (LIVEHD_DIAG) — structured + crash-safe, so it
+        # survives the dbg abort that a fatal error triggers.
+        cmd       = self.gen_lgshell_cmd(test, 'error')
+        safe_name = re.sub(r'\W+', '_', test.params['name'])
+        diag_path = os.path.join(tmp_dir, 'diag_{}.jsonl'.format(safe_name))
+        if os.path.exists(diag_path):
+            os.remove(diag_path)
+
+        env = dict(os.environ, LIVEHD_DIAG=diag_path)
+        proc = subprocess.Popen(cmd, cwd=tmp_dir, stdout=subprocess.PIPE, stderr=subprocess.STDOUT, env=env)
+        try:
+            log, _ = proc.communicate()
+        except Exception:
+            proc.kill()
+            log = b''
+
+        errors = []
+        if os.path.exists(diag_path):
+            with open(diag_path) as f:
+                for line in f:
+                    line = line.strip()
+                    if not line:
+                        continue
+                    try:
+                        rec = json.loads(line)
+                    except ValueError:
+                        continue
+                    if rec.get('severity') == 'error':
+                        errors.append(rec)
+
+        name = test.params['name']
+        if not errors:
+            print('{} - error - FAILED: expected a compile error, none was emitted'.format(name))
+            print(log.decode('utf-8', 'ignore'))
+            return 1
+
+        messages = ' || '.join(e.get('message', '') for e in errors)
+        hints    = ' || '.join(e.get('hint', '') for e in errors)
+
+        epat = test.params.get('error')
+        if epat is not None and not self._pattern_matches(epat, messages):
+            print('{} - error - FAILED: :error: /{}/ did not match emitted error(s):'.format(name, epat))
+            print('  emitted: {}'.format(messages))
+            return 1
+
+        hpat = test.params.get('help')
+        if hpat is not None and not self._pattern_matches(hpat, hints):
+            print('{} - error - FAILED: :help: /{}/ did not match emitted hint(s):'.format(name, hpat))
+            print('  emitted: {}'.format(hints))
+            return 1
+
+        # Optional line check: a comment containing `locate_error_here` marks the
+        # line where the error is expected. Using a marker (instead of a hard-coded
+        # line number) keeps the test correct when lines are added/removed above.
+        marker_lines = self._find_marker_lines(test)
+        if marker_lines:
+            error_lines = set()
+            for e in errors:
+                span = e.get('span') or {}
+                if isinstance(span, dict) and span.get('start_line') is not None:
+                    error_lines.add(span['start_line'])
+            missing = [ln for ln in marker_lines if ln not in error_lines]
+            if missing:
+                print('{} - error - FAILED: locate_error_here at line(s) {} but error(s) reported at {}'.format(
+                    name, missing, sorted(error_lines) if error_lines else '(no located error)'))
+                return 1
+
+        print('{} - error - success (matched: {})'.format(name, messages))
+        return 0
+
+    @staticmethod
+    def _find_marker_lines(test: PrpTest):
+        # 1-based line numbers of any comment containing `locate_error_here`.
+        marker = 'locate_error_here'
+        lines = []
+        for path in test.params['files']:
+            try:
+                with open(path) as f:
+                    for idx, line in enumerate(f, start=1):
+                        if marker in line:
+                            lines.append(idx)
+            except OSError:
+                pass
+        return lines
+
     def run(self, tmp_dir, test: PrpTest):
 
+        rc = 0
         for mode in test.params['type']:
-            cmd = []
+            if mode == 'error':
+                rc = self.run_error(tmp_dir, test)
+                continue
 
+            cmd = []
             if mode == 'simulation':
                 pass
             else:

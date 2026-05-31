@@ -49,6 +49,12 @@ Prp2lnast::Prp2lnast(std::string_view filename, std::string_view module_name, bo
 
   // dump();  // tree-sitter parse tree; enable for debugging the grammar
 
+  // Stop before analyzing a file that did not parse. A MISSING node (a token the
+  // parser had to insert to recover, e.g. an unbalanced `)`/`}`) is an
+  // unambiguous syntax error — unlike ERROR nodes, which the pyrope grammar also
+  // emits for valid `uint`/`sint` constructs, so a MISSING check is quirk-safe.
+  check_parse_errors();
+
   if (parse_only) {
     return;
   }
@@ -99,6 +105,43 @@ void Prp2lnast::report_error(const TSNode& node, std::string_view code, std::str
                                                       .span     = std::move(span),
                                                       .hint     = std::string(hint)});
   throw Eprp::parser_error(Pass::eprp, msg_copy);
+}
+
+namespace {
+// First MISSING node in DFS order (a token the parser inserted to recover), or a
+// null node. Prunes clean subtrees via ts_node_has_error (which is set whenever a
+// descendant is an ERROR or a MISSING node).
+TSNode find_first_missing(TSNode n) {
+  if (ts_node_is_missing(n)) {
+    return n;
+  }
+  uint32_t cnt = ts_node_child_count(n);
+  for (uint32_t i = 0; i < cnt; i++) {
+    TSNode c = ts_node_child(n, i);
+    if (ts_node_has_error(c) || ts_node_is_missing(c)) {
+      TSNode r = find_first_missing(c);
+      if (!ts_node_is_null(r)) {
+        return r;
+      }
+    }
+  }
+  return TSNode{};
+}
+}  // namespace
+
+void Prp2lnast::check_parse_errors() const {
+  if (!ts_node_has_error(ts_root_node)) {
+    return;  // clean parse
+  }
+  TSNode miss = find_first_missing(ts_root_node);
+  if (ts_node_is_null(miss)) {
+    return;  // only ERROR nodes (e.g. the uint/sint grammar quirk, or a construct
+             // a specific handler rejects downstream) — not a MISSING-token error
+  }
+  // ts_node_type of a MISSING node is the expected symbol (e.g. `)`), so name it.
+  auto expected = std::string_view(ts_node_type(miss));
+  report_error(miss, "missing-token", "syntax", std::format("syntax error: expected '{}'", expected),
+               "the file does not parse — check for an unbalanced '(' / ')', '[' / ']', '{' / '}', or a dropped token");
 }
 
 void Prp2lnast::report_error(std::string_view code, std::string_view category, std::string message,

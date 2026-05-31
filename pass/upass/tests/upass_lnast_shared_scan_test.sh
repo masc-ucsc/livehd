@@ -6,7 +6,7 @@ LGSHELL="${TEST_SRCDIR}/${TEST_WORKSPACE}/main/lgshell"
 PRP_FILE="${TEST_SRCDIR}/${TEST_WORKSPACE}/inou/prp/tests/pyrope/simple.prp"
 OUT_FILE="${TEST_TMPDIR}/upass_lnast_shared_scan.out"
 
-printf 'inou.prp files:%s |> pass.upass order:scan_shared max_iters:1\nquit\n' "${PRP_FILE}" \
+printf 'inou.prp files:%s |> pass.upass order:scan_shared\nquit\n' "${PRP_FILE}" \
   | HOME="${TEST_TMPDIR}" "${LGSHELL}" >"${OUT_FILE}" 2>&1
 
 if ! grep -q "uPass - resolved order: scan_shared" "${OUT_FILE}"; then
@@ -33,8 +33,8 @@ if ! grep -Eq "shared scan summary nodes:[1-9][0-9]* const:[0-9]+ arith:[0-9]+" 
   exit 4
 fi
 
-if ! grep -q "uPass - converged at iteration 1" "${OUT_FILE}"; then
-  echo "FAIL: expected lnast shared scan convergence message not found"
+if ! grep -q "uPass - walk complete" "${OUT_FILE}"; then
+  echo "FAIL: expected lnast shared scan walk-complete marker not found"
   cat "${OUT_FILE}"
   exit 5
 fi

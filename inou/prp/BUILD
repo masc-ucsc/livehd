@@ -58,5 +58,6 @@ cc_binary(
         "tests/pyrope/*.prp",
         "tests/comptime/*.prp",
         "tests/verification/*.prp",
+        "tests/errors/*.prp",
     ])
 ]

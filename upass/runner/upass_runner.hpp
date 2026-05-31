@@ -24,7 +24,7 @@ public:
   uPass_runner(std::shared_ptr<upass::Lnast_manager>& _lm, const std::vector<std::string>& upass_names,
                upass::Options_map options = {});
 
-  void               run(std::size_t max_iters = 1);
+  void               run();
   bool               has_configuration_error() const { return configuration_error; }
   const std::string& get_configuration_error() const { return configuration_error_msg; }
 

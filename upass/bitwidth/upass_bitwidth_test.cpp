@@ -206,7 +206,7 @@ static std::shared_ptr<Lnast> make_plus(const std::string& lhs, const std::strin
 static void run_bw(const std::shared_ptr<Lnast>& ln) {
   auto         lm = std::make_shared<upass::Lnast_manager>(ln);
   uPass_runner runner(lm, {"bitwidth"});
-  runner.run(/*max_iters=*/3);
+  runner.run();
   // Commit the staging tree back.
   ln->replace_body(runner.take_staging()->tree_ptr());
 }

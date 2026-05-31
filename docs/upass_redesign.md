@@ -28,7 +28,7 @@ priority (`drop > toconst > update > keep`), emits 0..N nodes into a
 fresh dest LNAST that lives in a new forest (`lgdb/optimized`), and
 replaces the entry in `Eprp_var::lnasts`. Verifier and assert run as
 read-only finishers walking the dest LNAST after the source walk
-completes, gated by `pending_import`. No `max_iters` loop; one walk per
+completes, gated by `pending_import`. No iteration loop; one walk per
 invocation. `func_extract` collapses into runner machinery
 (`fdef` extracts the body into a new LNAST with closure-captured outer
 Consts; `fcall` inlines by switching the cursor into that LNAST).
@@ -42,7 +42,7 @@ runner walks source LNAST depth-first, pre-order:
     for each source node:
         (0) build operand vector + resolve LHS Bundle*
         (1) bundle pre-pass     (one pass, runs first)
-        (2) opt passes          (constprop, attributes, bitwidth, coalescer)
+        (2) opt passes          (constprop, attributes, coalescer)
                                 (if any operand has pending_import:
                                  only constprop runs; others skip)
         (3) vote resolution     (drop > toconst > update > keep)
@@ -60,6 +60,16 @@ after the source walk completes:
 
 `func_extract`/`fcall` cursor moves and `fdef` extraction are runner
 mechanics (see §9). They are not opt passes.
+
+> **Revised (2026-05):** `bitwidth` is no longer an opt pass — it moved
+> to a standalone **read-only finalization pass** that runs *after* the
+> source walk and *after* SSA rename/flatten, gated on `pending_import`
+> and on generic (un-inlined) function bodies (no `fold_ref`; exact
+> `Dlop` `max`/`min`, no `+inf`/`-inf`). Authority: `upass/upass.md` §2
+> "bitwidth" + §8. Step I below (runner-owned SSA) is orthogonal: SSA
+> naming — whether a separate pass or folded into the runner's emit —
+> must complete *before* bitwidth, on the tree `lnast_to_lgraph`
+> consumes.
 
 ---
 
@@ -613,19 +623,23 @@ start passing once this step lands.
 
 ---
 
-### Step M — Drop `max_iters`; keep per-pass enable/disable
+### Step M — Drop `max_iters`; keep per-pass enable/disable — **DONE**
 
 **Why**: single walk per invocation (one of the redesign's primary
 guarantees). Per-pass toggles stay because they are useful for debug
 (`pass.upass verifier:0 constprop:0 attributes:0 …`).
 
-**Do**:
+**Done**:
 
-1. Delete the `max_iters` label from `Pass_upass::setup` in
-   `pass_upass.cpp`. Delete the runner's `Runner_fixed_point` invocation
-   loop and the `mark_changed` machinery. The runner just runs once.
-2. Delete `uPass::mark_changed` / `uPass::has_changed` / `changed_passes`
-   and the `Runner_fixed_point` helper.
+1. Deleted the `max_iters` label from `Pass_upass::setup` (and the
+   constructor's parse/validate block + the `max_iters` member) in
+   `pass_upass.cpp`/`.hpp`. Both runners' `run()` take no argument and
+   do a single walk; `pass.upass` no longer accepts a `max_iters` label.
+2. Deleted the `Runner_fixed_point` helper (`upass_runner_common.hpp`)
+   and the lgraph runner's `changed_passes()` convergence check. The
+   lgraph runner now does a single walk like the lnast runner.
+   `uPass::mark_changed` / `has_changed` / `begin_iteration` are kept as
+   diagnostic no-ops — nothing re-dispatches on them.
 3. Keep `verifier:0/1`, `constprop:0/1`, `attributes:0/1`,
    `bitwidth:0/1`, `coalescer:0/1`, `func_extract:0/1`, `ssa:0/1`
    labels. After Step I `ssa:0/1` no longer disables a pass — repurpose
@@ -637,8 +651,10 @@ guarantees). Per-pass toggles stay because they are useful for debug
 4. Keep the `order=...` debug label that lets the user spell out the
    exact pass list to run (still useful for testing).
 
-**Test invariant**: 11 failing tests. The `prplib.py` test driver
-must not pass `max_iters:1` anymore — update its `lgshell_*` builders.
+**Test invariant**: 11 failing tests. The `prplib.py` test driver and
+all `pass/upass/tests/*.sh` no longer pass `max_iters:…`; the runner's
+completion marker is now `uPass - walk complete` (was `converged at
+iteration 1`).
 
 ---
 

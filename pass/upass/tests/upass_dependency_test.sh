@@ -6,7 +6,7 @@ LGSHELL="${TEST_SRCDIR}/${TEST_WORKSPACE}/main/lgshell"
 PRP_FILE="${TEST_SRCDIR}/${TEST_WORKSPACE}/inou/prp/tests/pyrope/simple.prp"
 OUT_FILE="${TEST_TMPDIR}/upass_dependency.out"
 
-printf 'inou.prp files:%s |> pass.upass order:assert max_iters:2\nquit\n' "${PRP_FILE}" \
+printf 'inou.prp files:%s |> pass.upass order:assert\nquit\n' "${PRP_FILE}" \
   | HOME="${TEST_TMPDIR}" "${LGSHELL}" >"${OUT_FILE}" 2>&1
 
 if ! grep -q "uPass - resolved order: constprop assert" "${OUT_FILE}"; then

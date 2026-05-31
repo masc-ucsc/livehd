@@ -34,6 +34,10 @@ protected:
   [[noreturn]] void report_error(std::string_view code, std::string_view category, std::string message,
                                  std::string_view hint = {}) const;
 
+  // If the tree-sitter parse produced a MISSING node (genuine syntax error),
+  // report it and abort (does not return); a clean parse returns normally.
+  void check_parse_errors() const;
+
   // LNAST output. `builder` co-owns `lnast` and is the canonical home for
   // the current `idx_stmts` cursor, tmp-ref minting, and frontend-agnostic
   // stmt emitters (cleanup_todo §3.4).

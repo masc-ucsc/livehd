@@ -7,7 +7,7 @@ PRP_FILE="${TEST_SRCDIR}/${TEST_WORKSPACE}/inou/prp/tests/pyrope/simple.prp"
 OUT_FILE="${TEST_TMPDIR}/upass_order_parse.out"
 
 set +e
-printf 'inou.prp files:%s |> pass.upass order:,,constprop,,assert,, max_iters:2\nquit\n' "${PRP_FILE}" \
+printf 'inou.prp files:%s |> pass.upass order:,,constprop,,assert,,\nquit\n' "${PRP_FILE}" \
   | HOME="${TEST_TMPDIR}" "${LGSHELL}" >"${OUT_FILE}" 2>&1
 STATUS=$?
 set -e

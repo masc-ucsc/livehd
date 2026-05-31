@@ -10,7 +10,6 @@
 #include <vector>
 
 #include "absl/container/flat_hash_set.h"
-#include "upass_runner_common.hpp"
 #include "upass_shared.hpp"
 
 namespace {
@@ -1090,7 +1089,7 @@ bool uPass_runner::try_inline_func_call() {
 
 // ── Top-level run loop ────────────────────────────────────────────────────────
 
-void uPass_runner::run(std::size_t max_iters) {
+void uPass_runner::run() {
   if (configuration_error) {
     std::print("uPass - invalid configuration: {}\n", configuration_error_msg);
     return;
@@ -1119,21 +1118,16 @@ void uPass_runner::run(std::size_t max_iters) {
   };
   fresh_staging();
 
-  // Step M — single walk per invocation. Runner_fixed_point is no longer
-  // invoked; the `max_iters` label on `pass.upass` still parses but is
-  // ignored (kept for backwards-compat with test drivers that pass
-  // max_iters:1). mark_changed() calls on passes still run for
-  // diagnostics but no second iteration follows.
-  (void)max_iters;
+  // Single walk per invocation. begin_iteration() is the per-run setup hook
+  // (e.g. bitwidth seeds its range map); there is no iteration loop.
   for (auto& entry : upasses) {
     entry.pass->begin_iteration();
   }
   process_lnast();
-  // Single-walk now converges trivially. Print the diagnostic so the
-  // dependency / convergence tests (upass_noop_first_iter_test.sh,
-  // upass_lnast_shared_scan_test.sh, upass_lnast_shared_decide_test.sh)
-  // still see the marker they grep for.
-  std::print("uPass - converged at iteration 1\n");
+  // Print the completion marker the dependency / shared-pass tests
+  // (upass_noop_first_iter_test.sh, upass_lnast_shared_scan_test.sh,
+  // upass_lnast_shared_decide_test.sh) grep for.
+  std::print("uPass - walk complete\n");
 
   // Post-walk DCE on staging — removes definition statements (assign,
   // tuple_add, attr_set, etc.) whose dst has no surviving downstream

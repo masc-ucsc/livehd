@@ -1,13 +1,25 @@
 # LNAST Bitwidth Upass Plan
 
+> **Revised (2026-05) — authority is now `upass/upass.md` §2 "bitwidth"
+> + §8.** The plan below predates the relocation decision. Two things
+> changed: (1) `bitwidth` is **not** an iterative optimizer — it is a
+> standalone **read-only finalization pass** that runs *after* the runner
+> and *after* SSA rename/flatten, with **no `fold_ref`** participation;
+> (2) ranges are exact `Dlop` `max`/`min` with **no `+inf`/`-inf`** flags
+> (unbounded = absent). It is gated: skipped under unresolved
+> `pending_import` and for generic (un-inlined) function bodies. The
+> max/min-as-HHDS-attrs and derive-bits-from-max/min parts below still
+> hold.
+
 ## Summary
 
-Add a new LNAST `bitwidth` upass that registers as a regular
-`uPass_plugin` and runs as an **optimizer** step in `pass.upass`,
-alongside `attributes`, `constprop`, `coalescer`, `func_extract`, and
-`ssa`. It computes value ranges (`max`/`min`) on LNAST before
-`pass.lnast_to_lgraph`, using the existing LGraph bitwidth pass only as
-behavioral inspiration.
+Add a new LNAST `bitwidth` upass that runs as a standalone **read-only
+finalization pass** in `pass.upass`, *after* the iterative opt passes
+(`attributes`, `constprop`, `coalescer`, `func_extract`) and *after* SSA
+rename/flatten, immediately before `pass.lnast_to_lgraph`. It does not
+const-fold (no `fold_ref`) and does not rewrite nodes. It computes value
+ranges (`max`/`min`) on LNAST, using the existing LGraph bitwidth pass
+only as behavioral inspiration.
 
 The pass publishes `max`/`min` as HHDS attributes on LNAST nodes/results.
 `bits` and `signed` are derived from `max`/`min` on demand — they are
@@ -29,11 +41,10 @@ the moment this pass lands — the contract flips at that cutover.
   `pass.upass` invocation. While `import` is unimplemented, every
   invocation is "final" by definition, so they run by default today.
 - The runner does a single tree walk per `pass.upass` call. At each
-  node, every registered pass dispatches; if any pass `mark_changed`s,
-  the runner re-dispatches the *other* passes on the same node, bounded
-  by `max_iters` (expected 0–3 iterations). A pass does not re-dispatch
-  itself unless a different pass subsequently modifies state it depends
-  on.
+  node, every registered pass dispatches exactly once, in registration
+  order. `mark_changed` is still recorded for diagnostics, but it does
+  not trigger any re-dispatch — there is no per-node or whole-tree
+  iteration loop.
 - A second `pass.upass` call (TOP-rooted, top-down) is only required
   when an unresolved `import` function call remains in the staged
   LNAST. The "TOP" is the existing `top:xxx` entry-point convention
@@ -52,14 +63,15 @@ the moment this pass lands — the contract flips at that cutover.
 
 - Add `upass/bitwidth` as a new registered upass plugin.
 - HHDS attributes published on LNAST nodes/results:
-  - `max` and `min` (signed unlimited-precision integers, with
-    explicit `+inf` / `-inf` flags for the unbounded ends of the
-    lattice).
+  - `max` and `min` (signed unlimited-precision `Dlop` integers). There
+    are **no `+inf`/`-inf` flags**: Dlop is unlimited precision, so
+    finite bounds never overflow, and a value with no derivable bound is
+    simply *absent* from the annotation (distinct from a concrete
+    `[min,max]`).
   - `bits` / `signed` are **not** stored — they are derived from
-    `max`/`min` on demand. Single source of truth; lets a later
-    iteration tighten without invalidating cached views.
-- Use an internal LNAST range lattice with finite `min`/`max` plus
-  `-inf` / `+inf`, rather than reusing `Bitwidth_range::overflow`.
+    `max`/`min` on demand. Single source of truth.
+- Use an internal LNAST range lattice over exact `Dlop` `min`/`max`
+  (absent = unbounded), rather than reusing `Bitwidth_range::overflow`.
 - Boolean / logical / comparison results use signed one-bit semantics:
   range `[-1, 0]`.
 - Explicit type/bit/range attributes narrow inferred ranges. If a value
@@ -91,17 +103,13 @@ the moment this pass lands — the contract flips at that cutover.
 ## Iteration and mark_changed
 
 - A pass calls `mark_changed()` when it writes a new HHDS attr or
-  rewrites a node.
-- After a step at node N, if any pass marked changed, every *other*
-  registered pass re-dispatches at N. The marking pass itself
-  re-dispatches only if another pass subsequently modifies state it
-  reads.
-- `max_iters` bounds the per-node loop (default 1; tests can raise
-  it for diagnostics). Convergence is expected in 0–3 steps in
-  practice.
-- HHDS `max`/`min` annotations persist across the per-node loop and
-  across outer `pass.upass` invocations. They are intentionally not
-  cleared at the end of a pass.
+  rewrites a node. This is recorded for diagnostics only; it does not
+  cause any pass to re-dispatch at the same node.
+- Each node dispatches every registered pass exactly once, in
+  registration order — there is no per-node iteration loop.
+- HHDS `max`/`min` annotations persist across the walk and across outer
+  `pass.upass` invocations. They are intentionally not cleared at the
+  end of a pass.
 
 ## Test plan
 

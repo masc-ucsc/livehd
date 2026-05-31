@@ -75,7 +75,7 @@ do
   mkdir -p tmp_slang
 
   lnast_file="tmp_slang/${base}.lnast"
-  cmd_parse="inou.slang files:${full_input} |> pass.lnastfmt |> pass.upass constprop:1 verifier:0 max_iters:1 |> pass.lnastfmt |> lnast.dump file:${lnast_file}"
+  cmd_parse="inou.slang files:${full_input} |> pass.lnastfmt |> pass.upass constprop:1 verifier:0 |> pass.lnastfmt |> lnast.dump file:${lnast_file}"
   echo "${cmd_parse}" | ${LGSHELL} -q >tmp_slang/${input}.log 2>tmp_slang/${input}.err
   echo "CMD: ${cmd_parse}"
   if [ $? -eq 0 ]; then
@@ -110,7 +110,7 @@ do
     continue
   fi
 
-  cmd_read="lnast.read file:${lnast_file} |> pass.lnastfmt |> pass.upass constprop:1 verifier:0 max_iters:1 |> pass.lnastfmt"
+  cmd_read="lnast.read file:${lnast_file} |> pass.lnastfmt |> pass.upass constprop:1 verifier:0 |> pass.lnastfmt"
   echo "${cmd_read}" | ${LGSHELL} -q >tmp_slang/${input}.reload.log 2>tmp_slang/${input}.reload.err
   echo "CMD: ${cmd_read}"
   if [ $? -eq 0 ]; then

@@ -109,7 +109,7 @@ def main() -> int:
     ).encode()
     prp_full = (
         f"inou.prp files:{prp_path} |> pass.lnastfmt "
-        f"|> pass.upass constprop:1 verifier:false max_iters:1\nquit\n"
+        f"|> pass.upass constprop:1 verifier:false\nquit\n"
     ).encode()
     yosys_parse_cmd = [
         str(yosys), "-Q", "-T", "-q",

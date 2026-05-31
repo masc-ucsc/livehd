@@ -6,7 +6,7 @@ LGSHELL="${TEST_SRCDIR}/${TEST_WORKSPACE}/main/lgshell"
 PRP_FILE="${TEST_SRCDIR}/${TEST_WORKSPACE}/inou/prp/tests/pyrope/simple.prp"
 OUT_FILE="${TEST_TMPDIR}/upass_cycle_cmd.out"
 
-printf 'inou.prp files:%s |> pass.upass order:__upass_cycle_cmd_a max_iters:3\nquit\n' "${PRP_FILE}" \
+printf 'inou.prp files:%s |> pass.upass order:__upass_cycle_cmd_a\nquit\n' "${PRP_FILE}" \
   | HOME="${TEST_TMPDIR}" "${LGSHELL}" >"${OUT_FILE}" 2>&1
 
 if ! grep -q "uPass dependency cycle detected at __upass_cycle_cmd_a" "${OUT_FILE}"; then

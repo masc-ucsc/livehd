@@ -76,7 +76,9 @@ void Pass_upass::setup() {
   m1.add_label_optional("constprop", "enable constant propagation upass", "true");
   m1.add_label_optional("coalescer", "enable deferred-emit / DSE coalescer upass", "true");
   m1.add_label_optional("attributes", "enable Pyrope attribute upass (sticky propagation, comptime checks)", "true");
-  m1.add_label_optional("bitwidth", "enable LNAST bitwidth optimizer (range inference; publishes max/min into bw_meta)", "true");
+  m1.add_label_optional("bitwidth",
+                        "enable LNAST bitwidth range inference (publishes max/min for lnast_to_lgraph; see upass/upass.md §2)",
+                        "true");
   m1.add_label_optional("ssa",
                         "enable SSA normalisation: harvest I/O metadata into tree_io, expand I/O tuple nodes, "
                         "rename multi-assigned user variables to SSA-unique names",
@@ -87,7 +89,6 @@ void Pass_upass::setup() {
       "order",
       "comma-separated upass names; overrides verifier/constprop/assert toggles (example: verifier,constprop,verifier)",
       "");
-  m1.add_label_optional("max_iters", "maximum upass iterations to run", "1");
   m1.add_label_optional("inherit",
                         "inherit labels from prior pipeline stages (default true); false resets sticky upass options",
                         "true");
@@ -117,22 +118,6 @@ Pass_upass::Pass_upass(const Eprp_var& var) : Pass("pass.upass", var) {
     }
     return var.get_stage(label, default_value);
   };
-
-  auto max_iters_txt = get_label("max_iters");
-  if (!max_iters_txt.empty()) {
-    try {
-      auto parsed = std::stoul(std::string(max_iters_txt));
-      if (parsed == 0) {
-        Pass::warn("pass.upass max_iters=0 is invalid, forcing 1");
-        max_iters = 1;
-      } else {
-        max_iters = parsed;
-      }
-    } catch (...) {
-      Pass::warn("pass.upass invalid max_iters:{} (using 1)", max_iters_txt);
-      max_iters = 1;
-    }
-  }
 
   auto order_txt = get_label("order");
   if (!order_txt.empty()) {
@@ -270,7 +255,7 @@ void Pass_upass::work(Eprp_var& var) {
       if (runner.has_configuration_error()) {
         fail_upass_runtime(std::format("pass.upass invalid pass configuration: {}", runner.get_configuration_error()));
       }
-      runner.run(up.max_iters);
+      runner.run();
 
       auto staged = runner.take_staging();
       if (staged) {
@@ -329,7 +314,7 @@ void Pass_upass::work(Eprp_var& var) {
     if (runner.has_configuration_error()) {
       fail_upass_runtime(std::format("pass.upass invalid pass configuration: {}", runner.get_configuration_error()));
     }
-    runner.run(up.max_iters);
+    runner.run();
 
     // Swap the rewritten staging tree into the existing Lnast so downstream
     // passes (lnast.dump, …) see the folded/DCE'd IR. Slot identity (the

@@ -8,7 +8,7 @@ This document is the contract for how the rewrite works. When a future change
 touches this area, update this doc first.
 
 The full architectural rationale (alternatives weighed, why bundle pre-pass,
-why no `max_iter` for the current pass set, etc.) lives in
+why a single walk per invocation, etc.) lives in
 [docs/upass_redesign.md](../docs/upass_redesign.md). This file is the
 day-to-day operational contract; the redesign doc is the rationale.
 
@@ -18,9 +18,13 @@ upass lives downstream of `pass.lnastfmt` and consumes LNAST produced by
 `inou/prp` (new), `inou/pyrope` (legacy, sunsetting), and `inou/slang`.
 Several LNAST-wide cleanups in `lnast_todo.md` directly constrain upass:
 
-- **§10 — Symbol-table API + value-attr inference.** lnastfmt owns
-  `__min`/`__max` computation via interval arithmetic, keyed per-SSA-version.
-  upass **reads** these via the symbol table; it does not derive them.
+- **§10 — Symbol-table API + value-attr inference.** Value ranges
+  (`max`/`min`) are **owned by the standalone `bitwidth` finalization
+  pass** (§2 "bitwidth", §8), which derives them by walking the
+  optimized LNAST after the runner. This supersedes the older plan in
+  which `lnastfmt` computed `__min`/`__max` via interval arithmetic; the
+  iterative opt passes neither derive nor depend on ranges (invariant
+  #6). See `docs/contracts/lnast_spec.md §10.2`, now redirected here.
 - **§11 — unified `attr_set`/`tuple_set` shape, write-once semantics.** upass
   enforces write-once / comptime-guarded rules; the side-map for category-D
   attributes lives in the Bundle (§5 below).
@@ -42,8 +46,9 @@ once, depth-first, pre-order. For each source node:
 ```
 (1) bundle pre-pass          ─ once
 (2) opt passes               ─ each once, in fixed order
-                                (constprop, attributes, bitwidth,
-                                 coalescer, func_extract)
+                                (constprop, attributes, coalescer,
+                                 func_extract).  bitwidth is NOT here —
+                                 it is a post-walk finalization pass (§2).
                               ─ taint gate: if any operand vector entry
                                 carries a non-empty pending_import, ONLY
                                 constprop is called; the others skip.
@@ -55,20 +60,47 @@ once, depth-first, pre-order. For each source node:
 (5) emit 0..N nodes          ─ append to the dest LNAST.
 ```
 
-After the source walk completes:
+After the source walk completes, a **finalization phase** runs over the
+freshly-built dest LNAST. It is gated per-LNAST (§8):
 
-- If **no** Bundle in the symbol table carries `pending_import`, the
-  read-only finishers run a separate walk over the dest LNAST:
-  `verifier`, then `assert`.
-- Otherwise the finishers defer to a later `pass.upass` invocation
-  (presumably after the blocking `import` resolves).
+- **Gate A — unresolved `pending_import`.** If any Bundle still carries
+  `pending_import`, finalization is **deferred entirely** to a later
+  `pass.upass` invocation (after the blocking `import` resolves). None of
+  the steps below run — running SSA/bitwidth under an unresolved import
+  is wasted work (it must be redone once the import resolves) and risks
+  import-resolution-order non-determinism.
+- **Gate B — generic (un-inlined) function body.** A function body whose
+  inputs have no declared type has no width envelope and no concrete
+  operand ranges, so it cannot be SSA-named, range-analyzed, or lowered
+  on its own. It is **skipped** here (for that LNAST only; its
+  fully-typed siblings proceed). It is realized solely by inlining into a
+  caller, where the call site supplies concrete argument types and the
+  inlined copy is range-analyzed in the caller. A generic callee that
+  survives un-inlined at a real call site is a compile error — "generic
+  callee must be inlined" — per `docs/contracts/lnast2lgraph.md`.
 
-### No max_iter for the current pass set
+When neither gate fires, finalization runs in order:
+
+  1. **SSA rename/flatten** — rename multi-assigned names and flatten
+     `tuple_*` aggregates to per-field flat names. This is the second
+     half of the split `uPass_ssa`; the first half (I/O-metadata harvest)
+     runs *before* the runner because the comb-call inliner needs
+     `io_meta` mid-walk (see §2).
+  2. **bitwidth** — the standalone, **read-only** range pass (§2):
+     derive each result's exact `max`/`min`, check declared-type
+     envelopes (compile error on *provable* overflow), and publish
+     `max`/`min` as per-node HHDS tree attrs for `lnast_to_lgraph`.
+  3. **read-only finishers** — `verifier`, then `assert`, walk the dest
+     LNAST and tally casserts.
+  4. handoff to `pass.lnast_to_lgraph`, which reads the `max`/`min` tree
+     attrs at node creation to set bits/sign.
+
+### No iteration loop
 
 With direct Bundle mutation in fixed pass order, one sweep per source node
-suffices. `max_iter` stays as a configuration knob (default 1) for future
-passes that genuinely chain (e.g. two strength-reductions). The current set
-does not need it; the runner picks the strongest vote and moves on.
+suffices. The runner does exactly one walk per `pass.upass` invocation — there
+is no iteration knob and no fixed-point loop. The runner picks the strongest
+vote at each node and moves on.
 
 ### Re-runs
 
@@ -118,11 +150,51 @@ moved to bundle pre-pass.
   `tuple_get_alias` / `direct_alias` / aggregate inheritance. Votes
   **toconst** when the read resolves.
 
-### bitwidth
+### bitwidth (standalone finalization pass — not an iterative opt pass)
 
-Range inference using Bundle's type info + range slot + folded value.
-Publishes `bits` / `min` / `max` back into Bundle. Typically votes
-**keep**; rare **update** for strength-reduction-style cases.
+`bitwidth` is **not** part of the per-node opt-pass walk and does **not**
+participate in const-folding (no `fold_ref`). It runs once, in the
+finalization phase (§1), over the optimized dest LNAST after SSA
+rename/flatten, gated per §8.
+
+- **Read-only.** It never rewrites nodes and never alters declared types
+  (`prim_type_int(max,min)`); it only *reads* the tree and *annotates*
+  it.
+- **Exact `max`/`min` only.** Each result's range is an exact
+  arbitrary-precision (`Dlop`) `[min, max]` — no `+inf`/`-inf` flags
+  (Dlop is unlimited precision, so finite bounds never overflow; a value
+  with no derivable bound is simply *absent*). `bits` and `signed` are
+  **derived on demand from `max`/`min`**, never stored.
+- **Output = per-node HHDS tree attrs.** It attaches each result's
+  `(max, min)` as an HHDS `flat_storage` tree attribute keyed by the
+  result node — a persistent node→data map, distinct from Pyrope
+  attributes — which `lnast_to_lgraph` reads at node creation to set
+  bits/sign. This replaces the old name-keyed `lnast->bw_meta()` side
+  map (which had no consumer and could not survive SSA renaming).
+- **Overflow = compile error, but only when provable.** For a typed
+  target, error iff the result's range *provably* exceeds the declared
+  envelope and the write carries no `wrap`/`sat` policy. An unknown /
+  unbounded result into a typed target is **not** an error — the
+  declared type is the width. Errors go through the `core/diag` channel
+  (stable `code`, `category=source`, source span; collect-and-continue).
+- **Declared envelope is itself `max`/`min`.** `uN` lowers to `min>=0` +
+  a max; `sN`/`bool` to a signed range; the runner already emits the
+  canonical `prim_type_int(max,min)` and never drops it
+  (`upass_runner.cpp` — type_spec/attr_set "emit verbatim, never drop"),
+  so the envelope survives into the tree bitwidth reads.
+- **Wrap/sat narrowing math lives here** (moved out of `attributes`,
+  which keeps only the *policy* bit; see
+  `upass/attributes/upass_attributes_wrap_sat.cpp`, math now under
+  `//upass/bitwidth`).
+- **Lattice completeness.** For the overflow check to be both sound and
+  free of false positives, range ops must be tightened where derivable
+  (`a/d ≤ a`, `a%d < d`, `sext`, `set_mask`); ops that return
+  `unbounded` today are a known follow-up.
+
+> **Status:** the *current* code still registers `bitwidth` as an
+> iterative `fold_ref`-capable plugin that flushes `lnast->bw_meta()`
+> (`upass/bitwidth/upass_bitwidth.*`). The contract above is the target;
+> the relocation is tracked in §11 step 9.
 
 ### coalescer
 
@@ -140,15 +212,28 @@ callee body is spawned as a separate LNAST in `var.lnasts` for an
 independent `pass.upass` walk. `func_def` with no remaining call sites
 and no exported semantics → vote **drop**.
 
-### SSA (post-pass)
+### SSA (split: pre-runner harvest + post-runner rename/flatten)
 
-- Flattens `tuple_*` aggregates into per-field flat names (uses
-  `Bundle.shape` and `tuple_get_alias`).
-- Renames multi-assigned source names into source-derived SSA names
-  (`TODO_prp.md §1d`).
-- Deletes dead arms flagged by bundle pre-pass when cond was comptime.
-- Skipped on nodes whose read-through Bundles carry `pending_import` —
-  those `tuple_*` / `if` nodes survive to the next invocation.
+SSA does two jobs with different timing requirements, so it is split:
+
+- **I/O-metadata harvest — *before* the runner.** Harvests port
+  names/widths into `lnast->io_meta()`. Must run before the runner
+  because the comb-call inliner reads `io_meta` mid-walk
+  (`upass_runner.cpp`). It is also how Gate B (§8) is detected: an input
+  with unknown width (`bits==0`) marks a generic function body.
+- **Rename + flatten — *after* the runner, in finalization (§1).**
+  Renames multi-assigned names to SSA-unique names, flattens `tuple_*`
+  aggregates into per-field flat names (uses `Bundle.shape` and
+  `tuple_get_alias`), and deletes dead arms flagged when a cond was
+  comptime. Runs only when neither §8 gate fires, immediately before
+  `bitwidth`, so bitwidth and `lnast_to_lgraph` see the final
+  single-assignment names.
+
+> The long-term redesign (`docs/upass_redesign.md` Step I) folds the
+> rename/flatten half into the runner's *emit* step (so the dest LNAST is
+> already SSA-named). Either mechanism satisfies the same invariant: SSA
+> naming is complete **before** bitwidth, on the tree `lnast_to_lgraph`
+> consumes.
 
 ### Typesystem (handled inside `attributes`)
 
@@ -473,11 +558,19 @@ Effect on each phase:
 - **Opt passes**: only `constprop` runs on tainted-input nodes.
 - **SSA**: skips structural rewrites (tuple flatten, dead-arm delete)
   on any node whose read-through Bundles include a pending marker.
-- **Verifier / assert**: skipped entirely if any Bundle still carries
-  `pending_import` at end of the source walk.
+- **Finalization (Gate A)**: the entire finalization phase (§1) — SSA
+  rename/flatten, **bitwidth**, verifier/assert, and the handoff to
+  `lnast_to_lgraph` — is skipped if *any* Bundle still carries
+  `pending_import` at end of the source walk. The whole program defers to
+  a later invocation; see §1 for why (wasted rework + non-determinism).
+- **Generic function bodies (Gate B)**: independent of imports, a
+  function body whose inputs have no declared type is removed from
+  finalization for *that LNAST only* (fully-typed siblings proceed). It
+  is realized solely by inlining into callers; an un-inlined survivor at
+  a real call site is a compile error.
 - **Re-runs**: the next `pass.upass` invocation rebuilds the symbol
   table; cleared pending markers (because the import has now resolved)
-  let the passes run.
+  let finalization run.
 
 `TODO_prp.md §1b` and `§2j` track the import-side work this hooks into.
 
@@ -498,17 +591,20 @@ These must hold after every walk:
 5. **`delay_assign` is emitted verbatim.** Offsets ≠ 0/1 are not yet
    lowered (per `lnast_todo.md` §15.2); upass must not constant-fold
    across them regardless of symbol-table state.
-6. **No value-attribute derivation in upass.** `__min`/`__max` and other
-   value-level attrs are lnastfmt's responsibility (§10.2). upass reads
-   them, does not write. Decl attrs (§11) live in `Bundle.attr_values`
-   (written by bundle pre-pass / constprop / attributes per §2).
+6. **The iterative opt passes do not derive or depend on value ranges.**
+   `max`/`min` are derived exclusively by the standalone `bitwidth`
+   finalization pass (§2), after the opt-pass walk, and are consumed only
+   by `lnast_to_lgraph`. constprop/attributes/coalescer neither read nor
+   write ranges, and nothing folds on a range (bitwidth has no
+   `fold_ref`). Decl attrs live in `Bundle.attr_values` (written by
+   bundle pre-pass / constprop / attributes per §2). This supersedes the
+   older "lnastfmt owns `__min`/`__max`" rule.
 7. **Spawned LNASTs are self-contained.** Outer-scope comptime values
    are inlined at the use site by bundle pre-pass / constprop before
    func_extract spawns the callee body; spawned LNASTs share no Bundle
    state with their caller.
-8. **Single sweep per source node** in the current pass set. `max_iter`
-   defaults to 1; raising it is for forward-looking chained-rewrite
-   passes that don't exist yet.
+8. **Single sweep per source node.** The runner does exactly one walk per
+   invocation; there is no iteration knob or fixed-point loop.
 
 ## 10. Known gotchas
 
@@ -538,10 +634,12 @@ These must hold after every walk:
      (`upass/attributes/upass_attributes_tuple.cpp`), which calls
      `record_assign(root, rhs_is_nil)` so the const-single-bind check
      catches `tuple_set` writes (TODO_prp 1e). Mirror that pattern.
-  4. Known still-asymmetric passes: `upass_bitwidth` has no
-     `process_tuple_set` (slot writes don't propagate ranges) and
-     `pass_lnastfmt` validates `assign` arity but not `tuple_set`
-     arity (≥2 children: root + value). Fix when you touch either.
+  4. Known still-asymmetric pass: `pass_lnastfmt` validates `assign`
+     arity but not `tuple_set` arity (≥2 children: root + value). Fix
+     when you touch it. (`upass_bitwidth` is being reworked into a
+     read-only whole-tree finalization pass — §2 — that observes both
+     write forms uniformly during its own walk, so its old "no
+     `process_tuple_set`" asymmetry goes away with the relocation.)
 - **Cursor discipline at `if`.** All cursor movement is runner-owned
   via the operand-vector helpers; passes never call `move_to_child` /
   `scan_op` directly. Any pass that does is a bug — it bypasses the
@@ -573,7 +671,7 @@ Open issue deferred from prp2lnast chained-compare / ambiguity work:
 
 ## 11. Migration from the old runner
 
-The previous design (staging tree, per-node `max_iter` step loop,
+The previous design (staging tree, per-node iteration step loop,
 `classify_before_emit` hooks, 27 separate virtual methods per arithmetic
 op, parallel side tables in each pass) is being replaced incrementally:
 
@@ -595,6 +693,20 @@ op, parallel side tables in each pass) is being replaced incrementally:
 8. **Verifier/assert as dest-walk finishers** — to land: drop the
    per-node verifier dispatch, run after the source walk completes when
    the pending-import gate is clear.
+9. **bitwidth → read-only finalization pass** — to land. Concretely:
+   (a) remove `bitwidth` from the runner's pass list and from
+   `fold_capable_passes` (delete `overrides_fold_ref`/`fold_ref` on
+   `uPass_bitwidth`); (b) run it as a standalone whole-tree pass in the
+   finalization phase (§1), after SSA rename/flatten, behind both §8
+   gates; (c) replace the name-keyed `lnast->bw_meta()` flush with
+   per-node HHDS `(max,min)` tree attrs; (d) drop the `neg_inf`/`pos_inf`
+   lattice flags — store exact `Dlop` `max`/`min`, absent when unbounded;
+   (e) promote the unsatisfiable-constraint `Pass::warn`
+   (`upass_bitwidth.cpp`) to a `core/diag` compile error fired only on
+   *provable* envelope overflow (unless `wrap`/`sat`); (f) tighten the
+   `div`/`mod`/`sext`/`set_mask` lattice entries so the check is sound
+   without false positives. `pass/bitwidth` (the LGraph-level MIT pass)
+   is untouched — it remains the Verilog-ingress fallback.
 
 See [docs/upass_redesign.md](../docs/upass_redesign.md) for the
 end-to-end design these steps converge to.

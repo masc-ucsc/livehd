@@ -177,6 +177,81 @@ cross-file dependencies stay visible.
     left on `to_i`. Until those compile, the full `lgshell`/comptime build is
     blocked (verify uPass via `//upass/...` unit tests meanwhile).
 
+- **1n** Relocate `upass/bitwidth` from an iterative fold-pass to a standalone
+  **read-only finalization pass**. **Goal 1.** **★ Authority = `upass/upass.md`
+  §2 "bitwidth" + §1 finalization phase + §8 gates + §11 step 9 — read those
+  first; this entry is the implementation checklist.** Today `bitwidth` is a
+  `fold_ref`-capable plugin interleaved in the runner walk that flushes a
+  name-keyed `lnast->bw_meta()` side map with **no consumer**, and reports
+  out-of-range only via `Pass::warn`. Target: a single whole-tree pass that runs
+  *after* the runner and *after* SSA rename/flatten, derives exact `Dlop`
+  `max`/`min` per result, errors on **provable** type-envelope overflow, and
+  publishes `max`/`min` as **per-node HHDS tree attrs** for `lnast_to_lgraph`.
+
+  **Model (locked 2026-05-31, confirmed with the user).**
+  - **Read-only.** Never rewrites nodes / never alters declared
+    `prim_type_int(max,min)`; only annotates. **No `fold_ref`** (drop
+    `overrides_fold_ref`) — removes the stale-narrow-range-overrides-constprop
+    bug class (mut-var widening); constprop already folds its own consts.
+  - **Exact `max`/`min` only — no `+inf`/`-inf`.** `Dlop` is unlimited precision,
+    so finite bounds never overflow; "no derivable bound" = **absent** (distinct
+    from a concrete `[min,max]`). `bits`/`sign` derived on demand (`sign = min<0`),
+    never stored. Aligns with [[1t]]'s range model + `lnast2lgraph.md §7-8`.
+  - **Output = per-node HHDS `flat_storage` tree attr** keyed by the result node
+    (a node→data map, NOT a Pyrope attr), replacing `lnast->bw_meta()`.
+    Annotating the *final* (post-runner, post-SSA) tree is what makes per-node
+    keying viable — node identity is stable because no rewrite follows.
+  - **Overflow = compile error only when provable.** Typed target: error iff the
+    result range *provably* exceeds the declared envelope AND the write carries no
+    `wrap`/`sat` policy; unknown/unbounded into a typed target is **not** an error
+    (the declared type is the width). Via `core/diag` ([[1z]]): stable `code`,
+    `category=source`, source span, collect-and-continue.
+  - **Gated finalization** (`upass/upass.md` §8): **Gate A** — skip *all*
+    finalization (SSA rename/flatten + bitwidth + readers + lower) for the whole
+    program if any bundle carries `pending_import` (avoids rework +
+    import-resolution-order non-determinism); **Gate B** — skip *this LNAST* if it
+    is a generic (untyped-input) function body, realized only by inlining into
+    callers; an un-inlined survivor at a real call site is a compile error.
+
+  **Phases (each keeps `//upass/...` unit tests green).**
+  - **N1** — decouple from the fold loop: delete `overrides_fold_ref`/`fold_ref`
+    on `uPass_bitwidth`; remove `bitwidth` from the `pass_upass.cpp` runner order
+    and the runner's `fold_capable_passes`; confirm the suite is net-neutral
+    (constprop's own folding covers what bitwidth's `fold_ref` fell back to).
+  - **N2** — run standalone in the finalization phase: invoke after the runner +
+    after SSA rename/flatten over each `ln` in `pass_upass.cpp`, behind Gate A
+    (pending_import — stub until poison lands, migration step 7) and Gate B
+    (generic fn body, detected via `io_meta` `bits==0`).
+  - **N3** — data model: drop `neg_inf`/`pos_inf` from
+    `Lnast_range`/`BitwidthEntry`; store exact `Dlop` `max`/`min` (absent =
+    unbounded). Delete `lnast->bw_meta()`; emit per-node HHDS tree attrs that
+    `lnast_to_lgraph` reads at node creation to set bits/sign.
+  - **N4** — overflow error: promote the unsatisfiable-constraint `Pass::warn`
+    (`upass_bitwidth.cpp:592`) to a `core/diag` error fired only on *provable*
+    envelope overflow (unless `wrap`/`sat`).
+  - **N5** — lattice completeness: tighten `div`/`mod`/`sext`/`set_mask` (and any
+    op returning `unbounded` today) to real bounds where derivable (`a/d ≤ a`,
+    `a%d < d`, …) so the N4 check is sound without false positives.
+
+  **SSA split (prereq, `upass/upass.md` §2 "SSA").** I/O-metadata harvest stays
+  *before* the runner (the comb inliner reads `io_meta` mid-walk; also detects
+  Gate B via `bits==0`); rename/flatten moves *after* the runner into the gated
+  block, immediately before bitwidth. (`docs/upass_redesign.md` Step I's long-term
+  goal folds rename/flatten into the runner emit; either satisfies "SSA naming
+  complete before bitwidth, on the tree `lnast_to_lgraph` consumes".)
+
+  **Depends on** [[1t]] (`prim_type_int(max,min)` envelope — structural done),
+  [[1z]] (diagnostics surface — foundation done), the comb inliner (1i — landed)
+  for Gate B, and the pending-import poison (migration step 7) for Gate A.
+  **Untouched:** `pass/bitwidth` (the LGraph-level MIT pass) stays as the
+  Verilog-ingress fallback — different path, only shares the name (see [[1g]]
+  build note: "leave `pass/bitwidth` alone"). **Blast radius:**
+  `upass/bitwidth/upass_bitwidth.{hpp,cpp}` + `lnast_range.hpp`, `lnast/lnast.hpp`
+  (`bw_meta`/`BitwidthEntry` removal), `pass/upass/pass_upass.cpp` (order +
+  finalization sequencing + gates), `upass/runner` (drop `bitwidth` from
+  `fold_capable_passes`), `upass/ssa` (split), and the future `lnast_to_lgraph`
+  (consumes the tree attrs).
+
 ## Group 1-complex — foundation, larger scope
 
 Tasks that are independent of other Group 1/2 work but are large enough
@@ -229,12 +304,19 @@ Group 1 entries; downstream Groups treat them as Group 1 dependencies.
        `bit-range-type`/`tuple-path-type` (`type`) — each with a span + hint.
        The rich-emit path (`report_error` / `diag::sink().emit`) is the template
        for migrating the remaining sites incrementally.
-  - **NOTE — general malformed-parse detection is NOT 1z.** A root-level
-    `ts_node_has_error` check can't distinguish real syntax errors from the
-    tree-sitter-pyrope grammar quirk that emits `ERROR` nodes for valid
-    `uint`/`sint` constructs (confirmed: a valid `let x:uint=3` trips
-    `process_statement`'s `unhandled statement type ERROR`). Clean malformed-input
-    detection is a grammar fix in `../tree-sitter-pyrope`, tracked separately.
+    6. ✅ **LANDED 2026-05-31 — root parse-error check.** `Prp2lnast::
+       check_parse_errors()` (called in the ctor right after `ts_tree_root_node`,
+       before `process_description`) finds the first **MISSING** node (a token
+       the parser inserted to recover, e.g. an unbalanced `)`) and reports
+       `code:missing-token, category:syntax` with its span, then aborts — so a
+       file that does not parse is no longer silently analyzed. **MISSING-only is
+       deliberate:** the tree-sitter-pyrope grammar emits `ERROR` nodes for *valid*
+       `uint`/`sint` constructs, so a broad `ERROR` check would break ~40 passing
+       tests; `MISSING` is quirk-free (verified: 0 passing tests carry MISSING
+       nodes). Broad non-quirk-`ERROR` detection (the discriminator = "ERROR with
+       a `uint_type`/`sint_type` child is the quirk") is the remaining gap — best
+       done after the grammar is fixed in `../tree-sitter-pyrope` so `ERROR` is
+       unambiguous; until then specific handlers (bit-range) cover their cases.
   - **Status (2026-05-31): foundation + prp syntax/name/type diagnostics DONE;
     suite green at 249 pass / 8 fail (= prior 248 baseline + `diag_test`, same 8
     pre-existing fails, zero new); NOT git-committed.** The earlier `pass/bitwidth`
@@ -534,13 +616,13 @@ we can attribute perf regressions to a specific pass and confirm each pass
 earns its runtime cost. Concretely, we want to drive runs like:
 
 ```
-time lg "inou.prp files:xx.prp |> pass.upass verifier:0 max_iters:1 ssa:0 bitwidth:1 constprop:0 attributes:0"
+time lg "inou.prp files:xx.prp |> pass.upass verifier:0 ssa:0 bitwidth:1 constprop:0 attributes:0"
 ```
 
 and have the pass framework:
 
 - Enumerate the pass flag matrix (`verifier`, `ssa`, `bitwidth`,
-  `constprop`, `attributes`, `max_iters`, …) and run the user-selected
+  `constprop`, `attributes`, …) and run the user-selected
   combinations.
 - Diff results against a reference run so disabling a pass that *must* run
   for correctness fails loudly rather than silently miscompiling.

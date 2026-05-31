@@ -6,7 +6,7 @@ LGSHELL="${TEST_SRCDIR}/${TEST_WORKSPACE}/main/lgshell"
 PRP_FILE="${TEST_SRCDIR}/${TEST_WORKSPACE}/inou/prp/tests/pyrope/simple.prp"
 OUT_FILE="${TEST_TMPDIR}/upass_lnast_shared_decide.out"
 
-printf 'inou.prp files:%s |> pass.upass order:decide_shared max_iters:1\nquit\n' "${PRP_FILE}" \
+printf 'inou.prp files:%s |> pass.upass order:decide_shared\nquit\n' "${PRP_FILE}" \
   | HOME="${TEST_TMPDIR}" "${LGSHELL}" >"${OUT_FILE}" 2>&1
 
 if ! grep -q "uPass - resolved order: decide_shared" "${OUT_FILE}"; then
@@ -27,8 +27,8 @@ if ! grep -Eq "shared decide summary fold_candidates:[1-9][0-9]* has_fold_candid
   exit 3
 fi
 
-if ! grep -q "uPass - converged at iteration 1" "${OUT_FILE}"; then
-  echo "FAIL: expected lnast shared decide convergence message not found"
+if ! grep -q "uPass - walk complete" "${OUT_FILE}"; then
+  echo "FAIL: expected lnast shared decide walk-complete marker not found"
   cat "${OUT_FILE}"
   exit 4
 fi

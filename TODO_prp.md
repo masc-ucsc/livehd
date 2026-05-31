@@ -351,7 +351,7 @@ Each `bazel test -c dbg //...` failure mapped to the TODO entry whose
 landing should fix it. When more than one entry is listed, the test
 needs all of them. Current verifier tally is shown as `pass/fail/unknown`.
 Tallies re-measured via the `prplib.py` comptime pipeline
-(`pass.upass constprop:1 max_iters:1 verifier_pass:N verifier_fail:N
+(`pass.upass constprop:1 verifier_pass:N verifier_fail:N
 [verifier_include_funcs:true]`).
 
 **Landed since the original snapshot (removed from the list):**

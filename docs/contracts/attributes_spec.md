@@ -688,18 +688,14 @@ without per-attribute logic.
   convergence loop; if an attribute requires a value/check that cannot be
   resolved when required, that attribute's semantics decide whether to emit a
   compile error or leave the node for a later consumer.
-- **Iteration model — two levers.** The runner supports a whole-tree fixed
-  point (capped by `pass.upass max_iters`). Attribute handlers cooperate
-  at two granularities:
-  - *Per-node (intra-iteration).* When a handler folds an attr read to a
-    known constant (e.g. `.[bits]`, `.[size]`), it surfaces the value
-    through the runner's fold side-channel so constprop/verifier pick it
-    up at the use site without another whole-tree walk.
-  - *Whole-tree fixed point (inter-iteration).* When an attribute
-    resolution flips a value an *earlier* node depended on, the handler
-    marks the runner changed and the next sweep re-walks. `max_iters=1`
-    is fine for sticky propagation; raise it once `.[bits]`/`.[max]`
-    folding feeds new constants into constprop.
+- **Iteration model — single walk.** The runner does one tree walk per
+  `pass.upass` call; there is no whole-tree or per-node fixed-point loop.
+  When a handler folds an attr read to a known constant (e.g. `.[bits]`,
+  `.[size]`), it surfaces the value through the runner's fold side-channel
+  so constprop/verifier pick it up at the use site during the same walk.
+  A handler may still call `mark_changed` for diagnostics, but nothing
+  re-walks — values an *earlier* node depended on are resolved by source
+  order, not by re-sweeping.
 - **Attribute syntax cleanup.** `::[...]` is only the declaration-site set
   form after `mut`, `const`, `reg`, tuple field introduction, etc. Attribute
   reads are always `a.[attr]`. Old tests that used `a::[attr]` as an

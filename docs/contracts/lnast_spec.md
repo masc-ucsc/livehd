@@ -561,11 +561,19 @@ restatement.)
 
 ### 10.2 Value-attr inference pass (eager)
 
-- Runs as part of `pass.lnastfmt` (or a dedicated sub-pass invoked by
-  lnastfmt) **after** SSA, **before** any consumer that needs widths.
-- Walks LNAST once; for each SSA definition computes `__min`/`__max` from
-  the RHS using interval arithmetic. Writes the result into the per-SSA
-  ST entry.
+> **Ownership note (revised 2026-05):** range (`max`/`min`) derivation is
+> owned by the standalone **`bitwidth` finalization upass**, not
+> `lnastfmt` — see `upass/upass.md` §2 "bitwidth" + §8. It runs after the
+> upass runner and after SSA rename/flatten, publishes `max`/`min` as
+> per-node HHDS tree attrs (no `+inf`/`-inf`; unbounded = absent), and is
+> read-only. The eager-`lnastfmt` description below is retained for
+> historical context but is superseded.
+
+- Runs as the `bitwidth` finalization upass, **after** SSA, **before**
+  any consumer that needs widths (`lnast_to_lgraph`).
+- Walks LNAST once; for each definition computes `max`/`min` from the RHS
+  using range arithmetic. Publishes the result as a per-node HHDS tree
+  attr.
 - For regs: fixed-point over all RHS expressions assigned to the reg's SSA
   versions, unioned with the declared `initial` value. Converges quickly
   because the reg decl provides a user-asserted bound (or widens until the
@@ -581,8 +589,10 @@ restatement.)
   SSA version.
 - Derived `__max` is per-SSA-version, computed by §10.2.
 - After each assignment, the inference pass must check:
-  `a___i.__max <= a.max_asserted` and symmetric for min. Violations are
-  lnastfmt errors (with source location from the LNAST token).
+  `a___i.__max <= a.max_asserted` and symmetric for min. A **provable**
+  violation (and no `wrap`/`sat` policy) is a `bitwidth` compile error
+  via `core/diag` (with source location); an unknown/unbounded result
+  into a typed target is not an error — the declared type is the width.
 - Keep them as separate keys in the ST (`max_asserted` vs `__max`) to
   avoid ambiguity.
 

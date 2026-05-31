@@ -15,7 +15,6 @@
 #include "cell.hpp"
 #include "hhds/graph.hpp"
 #include "node_util.hpp"
-#include "upass_runner_common.hpp"
 #include "upass_shared.hpp"
 
 namespace {
@@ -65,9 +64,6 @@ struct Lgraph_pass_fold_tag final : public upass::uPass_lgraph {
     }
     const auto s = gm->tag_fold_candidates();
     std::print("uPass(lgraph) - tag fold_candidates:{}\n", s.tagged_nodes);
-    if (s.tagged_nodes > 0) {
-      mark_changed();
-    }
   }
 };
 
@@ -88,9 +84,6 @@ struct Lgraph_pass_fold_sum_const final : public upass::uPass_lgraph {
                s.new_const_nodes,
                s.deleted_nodes,
                dry_run ? "true" : "false");
-    if (!dry_run && s.folded_nodes > 0) {
-      mark_changed();
-    }
   }
 
 private:
@@ -120,9 +113,6 @@ struct Lgraph_pass_fold_neutral final : public upass::uPass_lgraph {
         s.new_const_nodes,
         s.deleted_nodes,
         dry_run ? "true" : "false");
-    if (!dry_run && total > 0) {
-      mark_changed();
-    }
   }
 
 private:
@@ -154,9 +144,6 @@ struct Lgraph_pass_fold_shift_div final : public upass::uPass_lgraph {
         s.new_const_nodes,
         s.deleted_nodes,
         dry_run ? "true" : "false");
-    if (!dry_run && total > 0) {
-      mark_changed();
-    }
   }
 
 private:
@@ -185,9 +172,6 @@ struct Lgraph_pass_fold_sub_const final : public upass::uPass_lgraph {
         s.new_const_nodes,
         s.deleted_nodes,
         dry_run ? "true" : "false");
-    if (!dry_run && total > 0) {
-      mark_changed();
-    }
   }
 
 private:
@@ -211,9 +195,6 @@ struct Lgraph_pass_fold_mult_const final : public upass::uPass_lgraph {
                s.new_const_nodes,
                s.deleted_nodes,
                dry_run ? "true" : "false");
-    if (!dry_run && s.const_mult_folded > 0) {
-      mark_changed();
-    }
   }
 
 private:
@@ -235,9 +216,6 @@ struct Lgraph_pass_dce final : public upass::uPass_lgraph {
                s.dead_nodes_removed,
                s.edges_freed,
                dry_run ? "true" : "false");
-    if (!dry_run && s.dead_nodes_removed > 0) {
-      mark_changed();
-    }
   }
 
 private:
@@ -425,16 +403,6 @@ std::vector<std::string> uPass_runner_lgraph::resolve_order(const std::vector<st
   return ordered;
 }
 
-std::vector<std::string> uPass_runner_lgraph::changed_passes() const {
-  std::vector<std::string> changed;
-  for (const auto& entry : upasses) {
-    if (entry.pass->has_changed()) {
-      changed.emplace_back(entry.name);
-    }
-  }
-  return changed;
-}
-
 void uPass_runner_lgraph::execute_passes() {
   // fold_tag, fold_sum_const, and fold_mult_const are gated by the general
   // "all-inputs-const" scan (they only fire when every input is a constant).
@@ -480,7 +448,7 @@ void uPass_runner_lgraph::execute_passes() {
   }
 }
 
-void uPass_runner_lgraph::run(std::size_t max_iters) {
+void uPass_runner_lgraph::run() {
   if (configuration_error) {
     std::print("uPass(lgraph) - invalid configuration: {}\n", configuration_error_msg);
     return;
@@ -496,20 +464,14 @@ void uPass_runner_lgraph::run(std::size_t max_iters) {
     return;
   }
 
-  upass::Runner_fixed_point::run(
-      "uPass(lgraph)",
-      max_iters,
-      [this]() {
-        for (auto& entry : upasses) {
-          entry.pass->begin_iteration();
-        }
-      },
-      [this]() {
-        execute_passes();
-        last_visited_count = collect_type_names().size();
-        last_scan_summary  = gm->scan_fold_candidates();
-      },
-      [this]() { return changed_passes(); });
+  // Single walk per invocation.
+  for (auto& entry : upasses) {
+    entry.pass->begin_iteration();
+  }
+  execute_passes();
+  last_visited_count = collect_type_names().size();
+  last_scan_summary  = gm->scan_fold_candidates();
+  std::print("uPass(lgraph) - walk complete\n");
 }
 
 std::size_t uPass_runner_lgraph::visit_fast(bool visit_sub) const {

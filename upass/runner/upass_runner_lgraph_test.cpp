@@ -82,7 +82,7 @@ TEST(UpassRunnerLgraph, VisitsFastNodesAndCollectsTypes) {
 
   uPass_runner_lgraph runner(gm);
   EXPECT_GE(runner.visit_fast(), 2U);
-  runner.run(2);
+  runner.run();
 }
 
 TEST(UpassRunnerLgraphResolve, DetectCycle) {
@@ -110,7 +110,7 @@ TEST(UpassRunnerLgraphResolve, SharedNoopResolvesAndRuns) {
   ASSERT_EQ(ordered.size(), 1U);
   EXPECT_EQ(ordered[0], "noop_shared");
   EXPECT_FALSE(runner.has_configuration_error());
-  runner.run(1);
+  runner.run();
 }
 
 TEST(UpassRunnerLgraphResolve, SharedDecideResolvesAndRuns) {
@@ -121,7 +121,7 @@ TEST(UpassRunnerLgraphResolve, SharedDecideResolvesAndRuns) {
   ASSERT_EQ(ordered.size(), 1U);
   EXPECT_EQ(ordered[0], "decide_shared");
   EXPECT_FALSE(runner.has_configuration_error());
-  runner.run(1);
+  runner.run();
 }
 
 TEST(UpassRunnerLgraph, FoldSumConstMutation) {
