@@ -51,10 +51,10 @@ static Const stringify_one(const Const& v) {
     return v;
   }
   // Render the value to a string Const (the result feeds a TEXT concat in
-  // stringify_concat_trivials — returning `v` itself would bit-concat). Use
-  // to_pyrope() (the codegen renderer) — width-safe for >64-bit values, unlike
-  // std::to_string(to_i()) which overflows.
-  return *Dlop::from_string(std::string(v.to_pyrope()));
+  // stringify_concat_trivials — returning `v` itself would bit-concat). The
+  // `string()` cast wants decimal text; to_decimal_string is width-safe for
+  // >64-bit values, unlike std::to_string(to_i()) which overflows.
+  return *Dlop::from_string(std::string(v.to_decimal_string()));
 }
 
 // Stringify each entry in `vals` and text-concat them. Returns nullopt if any

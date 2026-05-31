@@ -189,6 +189,32 @@ Group 1 entries; downstream Groups treat them as Group 1 dependencies.
 - **1f** Source-map indirection (LOC propagation: canonical map + per-cell
   index, alias multi-loc, partition-root fallback) — see "Source location
   (LOC) propagation strategy" below and `docs/contracts/sourcemap.md`.
+- **1z** Error-notification foundation: a unified diagnostic surface emitting
+  one JSONL record per compile error/warning, plus a `text` renderer/filter.
+  **Goal 1.** Full design in
+  [`docs/contracts/diagnostics.md`](docs/contracts/diagnostics.md). Pulled
+  forward from **3f** because it is decoupled from sourcemap — diagnostics ship
+  now with `span: null` (or best-effort tree-sitter byte ranges in `inou/prp`)
+  and get full-fidelity spans when [[1f]] lands (that's what **3f** finishes).
+  - **Why now.** Errors today are throw-and-die with a bare string
+    (`Pass::error`→`Eprp::parser_error` `pass/common/pass.hpp:39`;
+    `upass::error` `[[noreturn]]` throw, ~24 sites; `inou/prp` `Pass::error` ×7)
+    — no severity, no class, no location, no collect-and-continue, nothing an
+    agent can parse. The only piece blocked on [[1f]] is the `span` field.
+  - **Scope (this entry).**
+    1. `livehd::diag` — `Severity`/`Span`/`Diagnostic`/`Sink` + JSONL serializer
+       + active-sink plumbing (mirrors `Pass::eprp`).
+    2. Route `Pass::error`/`Pass::warn`/`upass::error` through the sink (keep
+       throw-on-fatal); all ~30 sites keep working, spans `null`.
+    3. `inou/prp` best-effort raw `TSNode` byte spans.
+    4. The JSONL→text renderer (clang/rust-style; degrades to one line when
+       `span` is null) + `--format text` wiring stub.
+    5. Stable `code`/`category` on the highest-value diagnostics first
+       (range-fit, declare-once, unknown-node, unsupported); long tail defaults
+       to `category:internal`, migrated incrementally.
+  - **Relationship.** Foundation for **3f** (full-fidelity spans via [[1f]] +
+    lgraph-pass coverage + CLI roll-up) and **4h** (golden-error harness keys on
+    the stable `code`/`category`); the CLI [[1y]] consumes the JSONL.
 ## Group 2 — depends on Group 1
 
 - **2t** Finish removing `Dlop`/`Slop` `is_i()`/`to_i()` from the value layer
@@ -245,7 +271,11 @@ Group 1 entries; downstream Groups treat them as Group 1 dependencies.
 - **3d** New upass `lnast_to_slop` (parallel to `lnast_to_lgraph`) producing
   executable slop.
 - **3f** Unified compile error/warning surface from `inou/prp`, upass,
-  lgraph passes (+ tests for expected diagnostics).
+  lgraph passes (+ tests for expected diagnostics). **Foundation landed in
+  [[1z]]** (record schema + emitter + sink + JSONL + text renderer, spans
+  `null`); this entry finishes full-fidelity `source_id` spans (via [[1f]]),
+  lgraph-pass coverage, line/col resolution, and the CLI roll-up. Design:
+  `docs/contracts/diagnostics.md`.
 - **3h** `Bitwidth_range` → `Const min/max` (drop `int+overflow`) once Dlop
   migration is stable — see "Bitwidth_range" section below.
 
