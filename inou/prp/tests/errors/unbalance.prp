@@ -1,0 +1,13 @@
+/*
+:name: unbalance
+:type: error
+:verifier_pass: 0
+:verifier_fail: 0
+:error: ')'
+:help: unbalance
+*/
+
+comb foo( -> (z) { // locate_error_here
+  b = 0x5a
+  z = b#[1,4]
+}

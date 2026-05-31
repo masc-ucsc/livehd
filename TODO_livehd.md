@@ -252,6 +252,47 @@ cross-file dependencies stay visible.
   `fold_capable_passes`), `upass/ssa` (split), and the future `lnast_to_lgraph`
   (consumes the tree attrs).
 
+- **1s** Sanitizer pass — chase a nondeterministic memory bug in the
+  comptime/string path. **Goal 1.** **Run on Linux (macOS can't do MSan).**
+  - **Symptom.** `string_hello` (and likely other comptime/string tests)
+    crash *intermittently* — `Bus error (SIGBUS)` or `Killed (SIGKILL/137)`,
+    sometimes `exit 1` after a full dump — at a **few-percent rate with fixed
+    input**. Fixed input + nondeterministic crash ⇒ an **uninitialized-memory
+    read** (value depends on heap garbage), not a UAF.
+  - **It is NOT in committed HEAD.** Pure `HEAD` ran **0/100**. The bug lives in
+    the current **working-tree WIP**: the `inou/prp/prp2lnast.cpp` `declare`/
+    `store` frontend work + the error-handling changes in `main/main.cpp`
+    (catch→`has_errors()`→exit 1) and `parser/elab_scanner.cpp` (dropped the
+    dbg-only `I(false)` abort). Crashes ~2–6% even with those two error-handling
+    files reverted, so the root is most likely in the `prp2lnast` string /
+    interpolation lowering (`"Hello a is {a}"`) — an uninitialized field on a
+    node/span/string emitted there.
+  - **Amplifier (why this blocks cleanup).** Removing the dead `changed` flag
+    (`uPass::mark_changed`/`has_changed`; no production reader — see commit that
+    dropped `max_iters`) is **blocked on this**. Editing `store_trivial`
+    (`upass/constprop/upass_constprop.hpp`, a hot inlined helper) is provably
+    behavior-identical (`Symbol_table::set` always returns `true`) yet perturbs
+    codegen/heap layout enough to push the crash rate ~5% → ~20%. So the flag
+    removal was reverted; redo it once this is fixed.
+  - **ASan does NOT catch it** (built `--config=asan`, ran clean — its redzones
+    change layout and it doesn't detect uninitialized reads). Needs **MSan**.
+  - **Reproduce.**
+    ```
+    bazel test //inou/prp:prp-string_hello --runs_per_test=60   # expect a few FAILs
+    # or, against a built binary, loop the comptime pipeline:
+    for i in $(seq 1 60); do rm -rf /tmp/shh; mkdir -p /tmp/shh; \
+      HOME=/tmp/shh bazel-bin/main/lgshell \
+      "inou.prp files:$PWD/inou/prp/tests/comptime/string_hello.prp |> pass.lnastfmt \
+       |> pass.upass constprop:1 verifier_pass:1 verifier_fail:0 |> pass.lnastfmt |> lnast.dump" \
+      >/dev/null 2>&1 || echo "FAIL $i"; done
+    ```
+  - **MSan setup.** Add an `msan` config to `.bazelrc` mirroring the existing
+    `asan` block (`-fsanitize=memory -fsanitize-memory-track-origins=2
+    -fno-omit-frame-pointer`); build `--config=msan //main:lgshell` and run the
+    loop above. Origins tracking should point straight at the uninitialized
+    field. Relates to [[1z]] (the error-handling path is half the WIP) and the
+    `prp2lnast` frontend.
+
 ## Group 1-complex — foundation, larger scope
 
 Tasks that are independent of other Group 1/2 work but are large enough
