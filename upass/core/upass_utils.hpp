@@ -5,12 +5,22 @@
 #include <print>
 #include <stdexcept>
 
+#include "diag.hpp"
+
 namespace upass {
 
 template <typename... Args>
 [[noreturn]] void error(std::format_string<Args...> format, Args&&... args) {
-  std::print(stderr, format, std::forward<Args>(args)...);
-  throw std::runtime_error(std::format(format, std::forward<Args>(args)...));
+  auto msg = std::format(format, std::forward<Args>(args)...);
+  // Emit directly (this path throws std::runtime_error, not Eprp::parser_error,
+  // so it does not pass through parser_error_int's flush). The sink prints the
+  // `livehd: error:` line when the human channel is on.
+  livehd::diag::sink().emit(livehd::diag::Diagnostic{.severity = livehd::diag::Severity::error,
+                                                     .code     = "upass-error",
+                                                     .category = "internal",
+                                                     .pass     = "upass",
+                                                     .message  = msg});
+  throw std::runtime_error(msg);
 }
 
 }  // namespace upass

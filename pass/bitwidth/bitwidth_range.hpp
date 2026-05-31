@@ -109,7 +109,7 @@ public:
   Bits_t get_sbits() const;
   Const  get_range() const {
     if (overflow) {
-      return *Dlop::create_integer(1)->shl_op(get_sbits());
+      return *Dlop::create_integer(1)->shl_op(*Dlop::create_integer(get_sbits()));
     }
     return *Dlop::create_integer(max - min + 1);
   }

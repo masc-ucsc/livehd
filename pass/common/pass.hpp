@@ -7,6 +7,7 @@
 #include <string>
 
 #include "absl/strings/str_split.h"
+#include "diag.hpp"
 #include "eprp.hpp"
 #include "err_tracker.hpp"
 #include "iassert.hpp"
@@ -36,6 +37,8 @@ protected:
 public:
   static inline Eprp eprp;
 
+  // The diag record is emitted downstream by Elab_scanner::parser_error_int /
+  // parser_warn_int (the single throw path), so these stay thin.
   static void error(std::string_view msg) { throw Eprp::parser_error(eprp, msg); }
   static void warn(std::string_view msg) { eprp.parser_warn(msg); }
   static void info(std::string_view msg) {
@@ -57,7 +60,7 @@ public:
   static void warn(std::format_string<Args...> format, Args&&... args) {
     auto tmp = std::format(format, std::forward<Args>(args)...);
     err_tracker::logger(tmp);
-    eprp.parser_warn(tmp);
+    warn(std::string_view(tmp));
   }
 
   template <typename... Args>

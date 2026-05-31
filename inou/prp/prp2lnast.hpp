@@ -21,8 +21,18 @@ class Prp2lnast {
 protected:
   // TS Parsing
   std::string prp_file;
+  std::string src_filename;  // source path, for diagnostic spans
   TSParser*   parser;
   TSNode      ts_root_node;
+
+  // Emit a structured diagnostic (docs/contracts/diagnostics.md §3) anchored at
+  // `node`'s source span (best-effort byte + line/col, pre-sourcemap), then
+  // abort the parse. `category` per §4 (e.g. "syntax", "name", "type").
+  [[noreturn]] void report_error(const TSNode& node, std::string_view code, std::string_view category,
+                                 std::string message, std::string_view hint = {}) const;
+  // Location-less variant (span = null) for defensive sites with no TS node.
+  [[noreturn]] void report_error(std::string_view code, std::string_view category, std::string message,
+                                 std::string_view hint = {}) const;
 
   // LNAST output. `builder` co-owns `lnast` and is the canonical home for
   // the current `idx_stmts` cursor, tmp-ref minting, and frontend-agnostic

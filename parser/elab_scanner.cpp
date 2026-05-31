@@ -14,6 +14,7 @@
 #include <print>
 #include <string>
 
+#include "diag.hpp"
 #include "err_tracker.hpp"
 #include "iassert.hpp"
 #include "likely.hpp"
@@ -466,19 +467,20 @@ void Elab_scanner::parser_info_int(std::string_view text) const {
 
 void Elab_scanner::parser_error_int(std::string_view text) const {
   err_tracker::logger(text);
-  scan_raw_msg("error", text, false);
+  // Human + JSONL output go through the diag sink (livehd: error: …). A rich
+  // diagnostic staged at the call site is emitted here; otherwise a generic one.
+  livehd::diag::sink().flush(livehd::diag::Severity::error, text);
   n_errors++;
   // if (n_errors > max_errors) exit(-3);
 #ifndef NDEBUG
   // only for bazel debug mode, better swift gdb debug for developers
-  std::print("Pass::Error: {}\n", text);
   I(false, "Compiler pass error! debug with gdb");
 #endif
 }
 
 void Elab_scanner::parser_warn_int(std::string_view text) const {
   err_tracker::logger(text);
-  scan_raw_msg("warning", text, false);
+  livehd::diag::sink().flush(livehd::diag::Severity::warning, text);
   n_warnings++;
   if (max_warnings && n_warnings > max_warnings) {
     throw parser_error(*this, "too many warnings");

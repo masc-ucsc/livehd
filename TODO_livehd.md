@@ -202,16 +202,51 @@ Group 1 entries; downstream Groups treat them as Group 1 dependencies.
     — no severity, no class, no location, no collect-and-continue, nothing an
     agent can parse. The only piece blocked on [[1f]] is the `span` field.
   - **Scope (this entry).**
-    1. `livehd::diag` — `Severity`/`Span`/`Diagnostic`/`Sink` + JSONL serializer
-       + active-sink plumbing (mirrors `Pass::eprp`).
-    2. Route `Pass::error`/`Pass::warn`/`upass::error` through the sink (keep
-       throw-on-fatal); all ~30 sites keep working, spans `null`.
-    3. `inou/prp` best-effort raw `TSNode` byte spans.
-    4. The JSONL→text renderer (clang/rust-style; degrades to one line when
-       `span` is null) + `--format text` wiring stub.
-    5. Stable `code`/`category` on the highest-value diagnostics first
-       (range-fit, declare-once, unknown-node, unsupported); long tail defaults
-       to `category:internal`, migrated incrementally.
+    1. ✅ **LANDED 2026-05-30.** `livehd::diag` — `Severity`/`Span`/`Diagnostic`/
+       `Sink` + JSONL serializer + active-sink plumbing (`core/diag.{hpp,cpp}`,
+       joins the `//core` glob so every consumer reaches it with no BUILD churn).
+       **Output (env `LIVEHD_DIAG`, pre-CLI):** unset/`both` → stderr human **+**
+       `diag.jsonl` (default); `jsonl` → file only; `stderr`/`-` → human only;
+       `off` → silent; `<path>` → both with custom file. Truncated per process,
+       flushed per record (crash-safe). Sink dedups `(code,span,message)` per
+       step. Unit test `core/tests/diag_test.cpp` green.
+    2. ✅ **LANDED.** `Pass::error`/`Pass::warn` (`pass/common/pass.hpp`) +
+       `upass::error` (`upass/core/upass_utils.hpp`) now `emit` a structured
+       record before the **unchanged** throw/print (exact prior behavior kept;
+       `category:internal`, spans `null`). Validated via `eprp_test`,
+       `upass_constprop_test`, `upass_bitwidth_test`, `upass_verifier_test`.
+    3. ✅ **LANDED 2026-05-31** (at the highest-value sites). `Prp2lnast::
+       report_error(TSNode, code, category, msg, hint)` builds a real `Span`
+       (file + byte + line/col) from the offending tree-sitter node; a node-less
+       overload covers defensive sites. Long tail (other passes) still `null`.
+    4. ✅ **LANDED.** `to_text` renderer (clang/rust-style; degrades to one line
+       when `span` is null). `--format text` CLI wiring is part of [[1y]]; a
+       JSONL→text *read-side* filter needs a JSON parser → deferred to 1y/3f.
+       (For now `jq` renders the JSONL — see demo below.)
+    5. ✅ **LANDED 2026-05-31** for the unambiguous `inou/prp` rejection sites:
+       `bit-range-index`/`bit-range-empty` (`category:syntax`),
+       `bit-range-decl`/`tuple-path-decl` (`name`),
+       `bit-range-type`/`tuple-path-type` (`type`) — each with a span + hint.
+       The rich-emit path (`report_error` / `diag::sink().emit`) is the template
+       for migrating the remaining sites incrementally.
+  - **NOTE — general malformed-parse detection is NOT 1z.** A root-level
+    `ts_node_has_error` check can't distinguish real syntax errors from the
+    tree-sitter-pyrope grammar quirk that emits `ERROR` nodes for valid
+    `uint`/`sint` constructs (confirmed: a valid `let x:uint=3` trips
+    `process_statement`'s `unhandled statement type ERROR`). Clean malformed-input
+    detection is a grammar fix in `../tree-sitter-pyrope`, tracked separately.
+  - **Status (2026-05-31): foundation + prp syntax/name/type diagnostics DONE;
+    suite green at 249 pass / 8 fail (= prior 248 baseline + `diag_test`, same 8
+    pre-existing fails, zero new); NOT git-committed.** The earlier `pass/bitwidth`
+    /`Dlop::shl_op` blocker is resolved ([[1g]] progressed), so `lgshell` builds
+    and the end-to-end demo works:
+    ```
+    $ printf 'comb foo()->(z){\n b=0x5a\n z=b#[1,4]\n}\n' > /tmp/x.prp
+    $ LIVEHD_DIAG=stderr lgshell "inou.prp files:/tmp/x.prp |> lnast.dump"
+    {"schema_version":1,"severity":"error","code":"bit-range-index","category":"syntax",
+     "pass":"inou.prp","message":"invalid bit-range index `[1,4]` …","span":{"file":"/tmp/x.prp",
+     "start_byte":39,"end_byte":44,"start_line":3,"start_col":9,…},"hint":"…","seq":0}
+    ```
   - **Relationship.** Foundation for **3f** (full-fidelity spans via [[1f]] +
     lgraph-pass coverage + CLI roll-up) and **4h** (golden-error harness keys on
     the stable `code`/`category`); the CLI [[1y]] consumes the JSONL.

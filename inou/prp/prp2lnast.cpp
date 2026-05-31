@@ -15,6 +15,7 @@
 #include "absl/container/flat_hash_map.h"
 #include "absl/container/flat_hash_set.h"
 #include "absl/strings/str_cat.h"
+#include "diag.hpp"
 #include "pass.hpp"
 #include "str_tools.hpp"
 
@@ -31,6 +32,7 @@ Prp2lnast::Prp2lnast(std::string_view filename, std::string_view module_name, bo
   // same tree Prp2lnast is mutating directly.
   builder.lnast = lnast;
 
+  src_filename = std::string(filename);
   {
     std::string   fname(filename);
     auto          ss = std::ostringstream{};
@@ -71,6 +73,44 @@ std::string_view Prp2lnast::text_between(uint32_t start, uint32_t end) const {
   }
   I(end <= prp_file.size());
   return std::string_view(prp_file).substr(start, end - start);
+}
+
+void Prp2lnast::report_error(const TSNode& node, std::string_view code, std::string_view category,
+                             std::string message, std::string_view hint) const {
+  livehd::diag::Span span;
+  span.file       = src_filename;
+  span.start_byte = ts_node_start_byte(node);
+  span.end_byte   = ts_node_end_byte(node);
+  auto sp         = ts_node_start_point(node);
+  auto ep         = ts_node_end_point(node);
+  span.start_line = sp.row + 1;
+  span.start_col  = sp.column + 1;
+  span.end_line   = ep.row + 1;
+  span.end_col    = ep.column + 1;
+
+  auto msg_copy = message;
+  // Stage the rich record; the throw path (parser_error_int -> sink.flush) emits
+  // it exactly once and prints the `livehd: error:` line.
+  livehd::diag::sink().stage(livehd::diag::Diagnostic{.severity = livehd::diag::Severity::error,
+                                                      .code     = std::string(code),
+                                                      .category = std::string(category),
+                                                      .pass     = "inou.prp",
+                                                      .message  = std::move(message),
+                                                      .span     = std::move(span),
+                                                      .hint     = std::string(hint)});
+  throw Eprp::parser_error(Pass::eprp, msg_copy);
+}
+
+void Prp2lnast::report_error(std::string_view code, std::string_view category, std::string message,
+                             std::string_view hint) const {
+  auto msg_copy = message;
+  livehd::diag::sink().stage(livehd::diag::Diagnostic{.severity = livehd::diag::Severity::error,
+                                                      .code     = std::string(code),
+                                                      .category = std::string(category),
+                                                      .pass     = "inou.prp",
+                                                      .message  = std::move(message),
+                                                      .hint     = std::string(hint)});
+  throw Eprp::parser_error(Pass::eprp, msg_copy);
 }
 
 std::string_view Prp2lnast::trim(std::string_view s) {
@@ -899,10 +939,14 @@ Lnast_node Prp2lnast::process_lvalue_for_assign(TSNode lvalue, const Lnast_node&
     // No syntax for declaring/typing through a bit-range — reject decl/type
     // alongside the member_selection arm below.
     if (!ts_node_is_null(decl_node)) {
-      Pass::error("cannot declare a bit-range lvalue: `{}` (the base must be declared first)", get_text(lvalue));
+      report_error(lvalue, "bit-range-decl", "name",
+                   std::format("cannot declare a bit-range lvalue: `{}`", get_text(lvalue)),
+                   "declare the base variable first, then write the bit range");
     }
     if (!ts_node_is_null(type_cast_node)) {
-      Pass::error("cannot type-annotate a bit-range lvalue: `{}` (the base carries the type)", get_text(lvalue));
+      report_error(lvalue, "bit-range-type", "type",
+                   std::format("cannot type-annotate a bit-range lvalue: `{}`", get_text(lvalue)),
+                   "the base carries the type; annotate it at the base's declaration");
     }
 
     TSNode arg_n = child_by_field(lvalue, "argument");
@@ -944,11 +988,14 @@ Lnast_node Prp2lnast::process_lvalue_for_assign(TSNode lvalue, const Lnast_node&
     // no syntax for "declare new field through a path". Reject so we don't
     // silently drop the decl/type and emit a misleading `tuple_set`.
     if (!ts_node_is_null(decl_node)) {
-      Pass::error("cannot declare a tuple-path lvalue: `{}` (declare the base instead)", get_text(lvalue));
+      report_error(lvalue, "tuple-path-decl", "name",
+                   std::format("cannot declare a tuple-path lvalue: `{}`", get_text(lvalue)),
+                   "declare the base tuple instead");
     }
     if (!ts_node_is_null(type_cast_node)) {
-      Pass::error("cannot type-annotate a tuple-path lvalue: `{}` (annotate the field at the base's declaration)",
-                  get_text(lvalue));
+      report_error(lvalue, "tuple-path-type", "type",
+                   std::format("cannot type-annotate a tuple-path lvalue: `{}`", get_text(lvalue)),
+                   "annotate the field at the base's declaration");
     }
     // Extract a deep path so `t.b[0] = …` lowers to `tuple_set t b 0 …`
     // (one tuple_set rooted on the actual variable) instead of going
@@ -4086,12 +4133,14 @@ Lnast_node Prp2lnast::compute_bit_mask_ref(TSNode sel_node) {
   // and just keeps the first expression — so flag any parse error on the
   // select node as a hard compile error rather than emitting wrong code.
   if (ts_node_is_null(sel_node)) {
-    Pass::error("missing select node in bit selection");
-    return Lnast_node::create_const("-1");
+    report_error("bit-range-empty", "syntax", "empty bit selection `#[]` (expected an index or range)",
+                 "write a single bit `#[3]` or a range `#[0..=3]`");
   }
   if (ts_node_has_error(sel_node)) {
-    Pass::error("invalid bit-range index `{}` (tuple/comma indices not supported in `#[...]`)", get_text(sel_node));
-    return Lnast_node::create_const("-1");
+    report_error(sel_node, "bit-range-index", "syntax",
+                 std::format("invalid bit-range index `{}` (tuple/comma indices not supported in `#[...]`)",
+                             get_text(sel_node)),
+                 "use a single index `#[3]` or a range `#[0..=3]`; OR them for a multi-bit mask");
   }
 
   auto make_const_mask = [](std::string_view text) -> std::optional<Lnast_node> {

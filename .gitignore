@@ -42,3 +42,4 @@ livehd_regression
 *.lock
 pp*
 .sdd/runtime/
+diag.jsonl
