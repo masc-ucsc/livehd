@@ -79,11 +79,10 @@ private:
 struct BitwidthEntry {
   int64_t min{0};
   int64_t max{0};
-  bool    neg_inf{true};  // min = −∞ (unbounded below)
-  bool    pos_inf{true};  // max = +∞ (unbounded above)
+  bool    unbounded{true};  // no derivable [min,max] (Goal 1n N3: no +inf/-inf)
 
-  bool is_unbounded() const noexcept { return neg_inf || pos_inf; }
-  bool is_constant() const noexcept { return !neg_inf && !pos_inf && min == max; }
+  bool is_unbounded() const noexcept { return unbounded; }
+  bool is_constant() const noexcept { return !unbounded && min == max; }
 };
 
 struct Lnast_bitwidth_meta {

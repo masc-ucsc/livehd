@@ -14,6 +14,7 @@ protected:
   bool                     inherit_labels{true};
   bool                     verifier_include_funcs{false};
   bool                     run_ssa{false};
+  bool                     run_bitwidth{false};
   upass::Options_map       pass_options;
 
 public:

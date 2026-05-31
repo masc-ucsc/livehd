@@ -191,10 +191,18 @@ rename/flatten, gated per §8.
   (`a/d ≤ a`, `a%d < d`, `sext`, `set_mask`); ops that return
   `unbounded` today are a known follow-up.
 
-> **Status:** the *current* code still registers `bitwidth` as an
-> iterative `fold_ref`-capable plugin that flushes `lnast->bw_meta()`
-> (`upass/bitwidth/upass_bitwidth.*`). The contract above is the target;
-> the relocation is tracked in §11 step 9.
+> **Status (2026-05-31):** Goal 1n N1–N5 landed (green, net-neutral).
+> `bitwidth` is out of the runner order and out of `fold_capable_passes` (no
+> `fold_ref`); `pass.upass` runs it standalone after the runner + SSA, read-only
+> (discards its staging tree). The lattice/`BitwidthEntry` dropped the
+> `neg_inf`/`pos_inf` flags for a single `unbounded` flag (no half-bounded);
+> `div`/`mod`/`sext` ranges are tightened; the unsatisfiable-envelope case now
+> emits a `core/diag` `bitwidth-overflow` error. Two residuals (TODO_livehd 1n):
+> bounds are still int64 (exact-`Dlop` swap deferred — no >64-bit path, and
+> `lnast.hpp` stays `Dlop`-free) and the channel is still the name-keyed
+> `bw_meta` member (per-node re-keying waits on the `lnast_to_lgraph` consumer);
+> the fuller typed-store overflow check waits on a `process_declare` + wrap/sat
+> policy read (overlaps 1t T6).
 
 ### coalescer
 

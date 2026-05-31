@@ -9,6 +9,7 @@
 #include <string_view>
 #include <system_error>
 
+#include "diag.hpp"
 #include "lnast.hpp"
 #include "lnast_ntype.hpp"
 #include "pass.hpp"
@@ -41,10 +42,9 @@ void uPass_bitwidth::begin_iteration() {
     const auto& meta = lm->get_lnast()->bw_meta();
     for (const auto& [name, e] : meta.ranges) {
       Lnast_range r;
-      r.min     = e.min;
-      r.max     = e.max;
-      r.neg_inf = e.neg_inf;
-      r.pos_inf = e.pos_inf;
+      r.min       = e.min;
+      r.max       = e.max;
+      r.unbounded = e.unbounded;
       range_map_.emplace(name, r);
     }
   }
@@ -56,10 +56,9 @@ void uPass_bitwidth::end_run() {
   meta.ranges.clear();
   for (const auto& [name, rng] : range_map_) {
     BitwidthEntry e;
-    e.min     = rng.min;
-    e.max     = rng.max;
-    e.neg_inf = rng.neg_inf;
-    e.pos_inf = rng.pos_inf;
+    e.min       = rng.min;
+    e.max       = rng.max;
+    e.unbounded = rng.unbounded;
     meta.ranges.emplace(name, e);
   }
 }
@@ -68,7 +67,7 @@ void uPass_bitwidth::end_run() {
 
 Lnast_range uPass_bitwidth::read_range(std::string_view name) const {
   if (name.empty()) {
-    return Lnast_range::unbounded();
+    return Lnast_range::make_unbounded();
   }
   // Heterogeneous lookup: absl::flat_hash_map's transparent hashing accepts
   // string_view without allocating a temporary std::string on every read.
@@ -76,7 +75,7 @@ Lnast_range uPass_bitwidth::read_range(std::string_view name) const {
   if (it != range_map_.end()) {
     return it->second;
   }
-  return Lnast_range::unbounded();
+  return Lnast_range::make_unbounded();
 }
 
 void uPass_bitwidth::set_range(std::string_view name, Lnast_range r) {
@@ -105,7 +104,7 @@ void uPass_bitwidth::replace_range(std::string_view name, Lnast_range r) {
   auto it = range_map_.find(name);
   if (it != range_map_.end()) {
     const Lnast_range& cur = it->second;
-    if (cur.min != r.min || cur.max != r.max || cur.neg_inf != r.neg_inf || cur.pos_inf != r.pos_inf) {
+    if (cur.min != r.min || cur.max != r.max || cur.unbounded != r.unbounded) {
       it->second = r;
       mark_changed();
     }
@@ -118,11 +117,11 @@ void uPass_bitwidth::replace_range(std::string_view name, Lnast_range r) {
 }
 
 // Try to parse a Pyrope constant text to int64_t.  Handles decimal,
-// "0x..." (hex), "0b..." (binary).  Returns Lnast_range::unbounded() on
+// "0x..." (hex), "0b..." (binary).  Returns Lnast_range::make_unbounded() on
 // failure (e.g. Pyrope unknown-bits constants like "0sb1?").
 static Lnast_range range_from_const_text(std::string_view text) {
   if (text.empty()) {
-    return Lnast_range::unbounded();
+    return Lnast_range::make_unbounded();
   }
   // Strip a leading minus sign.
   bool negative = (text[0] == '-');
@@ -130,7 +129,7 @@ static Lnast_range range_from_const_text(std::string_view text) {
     text.remove_prefix(1);
   }
   if (text.empty()) {
-    return Lnast_range::unbounded();
+    return Lnast_range::make_unbounded();
   }
 
   uint64_t uval   = 0;
@@ -147,15 +146,15 @@ static Lnast_range range_from_const_text(std::string_view text) {
     if (res.ec == std::errc{} && res.ptr == text.data() + text.size()) {
       return Lnast_range::constant(negative ? -sval : sval);
     }
-    return Lnast_range::unbounded();
+    return Lnast_range::make_unbounded();
   }
 
   if (!parsed) {
-    return Lnast_range::unbounded();
+    return Lnast_range::make_unbounded();
   }
   // Unsigned value: fit into int64_t or give up.
   if (uval > static_cast<uint64_t>(std::numeric_limits<int64_t>::max())) {
-    return Lnast_range::unbounded();
+    return Lnast_range::make_unbounded();
   }
   int64_t val = static_cast<int64_t>(uval);
   return Lnast_range::constant(negative ? -val : val);
@@ -186,7 +185,7 @@ uPass_bitwidth::Op_ranges uPass_bitwidth::scan_op() {
     } else if (Lnast_ntype::is_const(t)) {
       out.rhs.push_back(range_from_const_text(current_text()));
     } else {
-      out.rhs.push_back(Lnast_range::unbounded());
+      out.rhs.push_back(Lnast_range::make_unbounded());
     }
   }
   move_to_parent();
@@ -200,19 +199,6 @@ std::string uPass_bitwidth::scan_lhs_only() {
   std::string lhs{current_text()};
   move_to_parent();
   return lhs;
-}
-
-// ── fold_ref ─────────────────────────────────────────────────────────────────
-
-std::optional<Const> uPass_bitwidth::fold_ref(std::string_view name) {
-  auto it = range_map_.find(name);
-  if (it == range_map_.end()) {
-    return std::nullopt;
-  }
-  if (!it->second.is_constant()) {
-    return std::nullopt;
-  }
-  return *Dlop::create_integer(it->second.min);
 }
 
 // ── Process hooks ─────────────────────────────────────────────────────────────
@@ -236,7 +222,7 @@ void uPass_bitwidth::process_assign() {
   // single producer's tmp; for mut reassignment (`v1 = 0` then `v1 = 0sb?`)
   // narrowing leaves a stale `{0,0}` range and fold_ref hands back the stale
   // constant to constprop's reads.
-  replace_range(lhs, rhs.empty() ? Lnast_range::unbounded() : rhs[0]);
+  replace_range(lhs, rhs.empty() ? Lnast_range::make_unbounded() : rhs[0]);
 }
 
 void uPass_bitwidth::process_func_call() {
@@ -270,7 +256,7 @@ void uPass_bitwidth::process_func_call() {
 void uPass_bitwidth::process_plus() {
   auto [lhs, rhs] = scan_op();
   if (rhs.empty()) {
-    set_range(lhs, Lnast_range::unbounded());
+    set_range(lhs, Lnast_range::make_unbounded());
     return;
   }
   Lnast_range result = rhs[0];
@@ -283,7 +269,7 @@ void uPass_bitwidth::process_plus() {
 void uPass_bitwidth::process_minus() {
   auto [lhs, rhs] = scan_op();
   if (rhs.size() < 2) {
-    set_range(lhs, Lnast_range::unbounded());
+    set_range(lhs, Lnast_range::make_unbounded());
     return;
   }
   Lnast_range result = rhs[0].sub(rhs[1]);
@@ -293,7 +279,7 @@ void uPass_bitwidth::process_minus() {
 void uPass_bitwidth::process_mult() {
   auto [lhs, rhs] = scan_op();
   if (rhs.empty()) {
-    set_range(lhs, Lnast_range::unbounded());
+    set_range(lhs, Lnast_range::make_unbounded());
     return;
   }
   Lnast_range result = rhs[0];
@@ -304,22 +290,29 @@ void uPass_bitwidth::process_mult() {
 }
 
 void uPass_bitwidth::process_div() {
-  // Quotient range is conservative — don't try to invert divisor range.
+  // |a / d| <= |a| for any integer |d| >= 1 (Goal 1n N5).
   auto [lhs, rhs] = scan_op();
-  (void)rhs;
-  set_range(lhs, Lnast_range::unbounded());
+  if (rhs.size() < 2) {
+    set_range(lhs, Lnast_range::make_unbounded());
+    return;
+  }
+  set_range(lhs, rhs[0].div(rhs[1]));
 }
 
 void uPass_bitwidth::process_mod() {
+  // |a % d| < |d| and <= |a|; sign follows the dividend (Goal 1n N5).
   auto [lhs, rhs] = scan_op();
-  (void)rhs;
-  set_range(lhs, Lnast_range::unbounded());
+  if (rhs.size() < 2) {
+    set_range(lhs, Lnast_range::make_unbounded());
+    return;
+  }
+  set_range(lhs, rhs[0].mod(rhs[1]));
 }
 
 void uPass_bitwidth::process_shl() {
   auto [lhs, rhs] = scan_op();
   if (rhs.size() < 2) {
-    set_range(lhs, Lnast_range::unbounded());
+    set_range(lhs, Lnast_range::make_unbounded());
     return;
   }
   set_range(lhs, rhs[0].shl(rhs[1]));
@@ -328,7 +321,7 @@ void uPass_bitwidth::process_shl() {
 void uPass_bitwidth::process_sra() {
   auto [lhs, rhs] = scan_op();
   if (rhs.size() < 2) {
-    set_range(lhs, Lnast_range::unbounded());
+    set_range(lhs, Lnast_range::make_unbounded());
     return;
   }
   set_range(lhs, rhs[0].sra(rhs[1]));
@@ -338,7 +331,7 @@ void uPass_bitwidth::process_sra() {
 void uPass_bitwidth::process_bit_and() {
   auto [lhs, rhs] = scan_op();
   if (rhs.empty()) {
-    set_range(lhs, Lnast_range::unbounded());
+    set_range(lhs, Lnast_range::make_unbounded());
     return;
   }
   Lnast_range result = rhs[0];
@@ -351,7 +344,7 @@ void uPass_bitwidth::process_bit_and() {
 void uPass_bitwidth::process_bit_or() {
   auto [lhs, rhs] = scan_op();
   if (rhs.empty()) {
-    set_range(lhs, Lnast_range::unbounded());
+    set_range(lhs, Lnast_range::make_unbounded());
     return;
   }
   Lnast_range result = rhs[0];
@@ -364,7 +357,7 @@ void uPass_bitwidth::process_bit_or() {
 void uPass_bitwidth::process_bit_xor() {
   auto [lhs, rhs] = scan_op();
   if (rhs.empty()) {
-    set_range(lhs, Lnast_range::unbounded());
+    set_range(lhs, Lnast_range::make_unbounded());
     return;
   }
   Lnast_range result = rhs[0];
@@ -378,7 +371,7 @@ void uPass_bitwidth::process_bit_not() {
   auto [lhs, rhs] = scan_op();
   // ~x = -x - 1; propagate negated range conservatively.
   if (rhs.empty()) {
-    set_range(lhs, Lnast_range::unbounded());
+    set_range(lhs, Lnast_range::make_unbounded());
     return;
   }
   set_range(lhs, rhs[0].neg());
@@ -417,14 +410,13 @@ void uPass_bitwidth::process_red_xor() {
 void uPass_bitwidth::process_popcount() {
   auto [lhs, rhs] = scan_op();
   if (rhs.empty()) {
-    set_range(lhs, Lnast_range::unbounded());
+    set_range(lhs, Lnast_range::make_unbounded());
     return;
   }
   Lnast_range result;
-  result.min     = 0;
-  result.max     = rhs[0].get_sbits();
-  result.neg_inf = false;
-  result.pos_inf = false;
+  result.min       = 0;
+  result.max       = rhs[0].get_sbits();
+  result.unbounded = false;
   set_range(lhs, result);
 }
 
@@ -456,9 +448,14 @@ void uPass_bitwidth::process_ge() {
 
 // Bit-manipulation ops — conservative unbounded for now.
 void uPass_bitwidth::process_sext() {
+  // sext(value, sign_bit_pos): result in [-2^p, 2^p - 1] for a constant
+  // position p (Goal 1n N5). rhs[1] is the sign-bit POSITION (0-indexed).
   auto [lhs, rhs] = scan_op();
-  (void)rhs;
-  set_range(lhs, Lnast_range::unbounded());
+  if (rhs.size() < 2 || !rhs[1].is_constant()) {
+    set_range(lhs, Lnast_range::make_unbounded());
+    return;
+  }
+  set_range(lhs, Lnast_range::sext_to(rhs[1].min));
 }
 // get_mask(base, mask) — the selected bits packed LSB-first as an UNSIGNED
 // value (task 1b: this is the "force" operator). For a known non-negative mask
@@ -469,7 +466,7 @@ void uPass_bitwidth::process_sext() {
 void uPass_bitwidth::process_get_mask() {
   auto [lhs, rhs] = scan_op();
   if (rhs.size() < 2 || !rhs[1].is_constant() || rhs[1].min < 0) {
-    set_range(lhs, Lnast_range::unbounded());
+    set_range(lhs, Lnast_range::make_unbounded());
     return;
   }
   int w = std::popcount(static_cast<uint64_t>(rhs[1].min));
@@ -478,20 +475,19 @@ void uPass_bitwidth::process_get_mask() {
   } else if (w == 1) {
     set_range(lhs, Lnast_range::boolean());  // signed 1-bit [-1, 0]
   } else if (w >= 63) {
-    set_range(lhs, Lnast_range::unbounded());
+    set_range(lhs, Lnast_range::make_unbounded());
   } else {
     Lnast_range r;
-    r.min     = 0;
-    r.max     = (int64_t{1} << w) - 1;
-    r.neg_inf = false;
-    r.pos_inf = false;
+    r.min       = 0;
+    r.max       = (int64_t{1} << w) - 1;
+    r.unbounded = false;
     set_range(lhs, r);
   }
 }
 void uPass_bitwidth::process_set_mask() {
   auto [lhs, rhs] = scan_op();
   (void)rhs;
-  set_range(lhs, Lnast_range::unbounded());
+  set_range(lhs, Lnast_range::make_unbounded());
 }
 
 // ── process_attr_set ─────────────────────────────────────────────────────────
@@ -537,66 +533,61 @@ void uPass_bitwidth::process_attr_set() {
   }
   int64_t n = val_range.min;
 
-  // Build the implied range from this attribute.
+  // Build the bounded envelope implied by this attribute. Only the width
+  // attrs (`ubits`/`sbits`) supply BOTH bounds; under the clean type model a
+  // declared envelope is `prim_type_int(max,min)` and always carries both, so a
+  // lone `max`/`min` attr no longer occurs and is ignored here. Non-bitwidth
+  // attrs (`comptime`, `type`, …) are owned by uPass_attributes.
   Lnast_range narrow;
+  narrow.unbounded = false;
   if (attr_name == "ubits") {
     if (n <= 0 || n >= 63) {
       return;  // sanity: 1..62 representable in int64_t
     }
-    narrow.min     = 0;
-    narrow.max     = (int64_t{1} << n) - 1;
-    narrow.neg_inf = false;
-    narrow.pos_inf = false;
+    narrow.min = 0;
+    narrow.max = (int64_t{1} << n) - 1;
   } else if (attr_name == "sbits") {
     if (n <= 1 || n >= 63) {
       return;  // sanity: 2..62 (1 bit = single sign)
     }
-    narrow.min     = -(int64_t{1} << (n - 1));
-    narrow.max     = (int64_t{1} << (n - 1)) - 1;
-    narrow.neg_inf = false;
-    narrow.pos_inf = false;
-  } else if (attr_name == "max") {
-    narrow.max     = n;
-    narrow.neg_inf = true;  // only constrains upper bound
-    narrow.pos_inf = false;
-  } else if (attr_name == "min") {
-    narrow.min     = n;
-    narrow.neg_inf = false;  // only constrains lower bound
-    narrow.pos_inf = true;
+    narrow.min = -(int64_t{1} << (n - 1));
+    narrow.max = (int64_t{1} << (n - 1)) - 1;
   } else {
-    return;  // not a bitwidth-owned attribute
+    return;  // not a bitwidth-owned width attribute
   }
 
-  // Compute the meet of `current` and `narrow` manually. We can't use
-  // Lnast_range::meet here: it short-circuits to the other operand whenever
-  // either side is half-bounded (e.g. `(-inf, 10]`), which is too coarse for
-  // attribute narrowing. Per-side merge: take the tighter of the two bounds,
-  // respecting infinity flags.
-  auto        current = read_range(target);
-  Lnast_range merged;
-  merged.neg_inf = current.neg_inf && narrow.neg_inf;
-  merged.pos_inf = current.pos_inf && narrow.pos_inf;
-  if (!merged.neg_inf) {
-    int64_t lo = current.neg_inf ? narrow.min : (narrow.neg_inf ? current.min : std::max(current.min, narrow.min));
-    merged.min = lo;
-  }
-  if (!merged.pos_inf) {
-    int64_t hi = current.pos_inf ? narrow.max : (narrow.pos_inf ? current.max : std::min(current.max, narrow.max));
-    merged.max = hi;
-  }
-
-  // Hard contradiction (e.g. `x = 100; x.[ubits] = 3` → meet is empty).
-  if (!merged.neg_inf && !merged.pos_inf && merged.min > merged.max) {
-    // Warn for now; once wrap/saturate policy migrates here (T2 #7) this
-    // promotes to upass::error unless the target has [wrap] or [saturate].
-    Pass::warn(
-        std::format("uPass_bitwidth: explicit `[{}]` constraint on `{}` is unsatisfiable "
-                    "(current range does not fit declared bounds)",
-                    attr_name,
-                    target));
+  auto current = read_range(target);
+  if (current.is_unbounded()) {
+    set_range(target, narrow);
     return;
   }
 
+  // Per-side meet of two bounded ranges (no half-bounded states exist now).
+  const int64_t lo = std::max(current.min, narrow.min);
+  const int64_t hi = std::min(current.max, narrow.max);
+  if (lo > hi) {
+    // Goal 1n N4: the value provably does not fit the declared envelope. The
+    // range math lives here; the wrap/saturate POLICY lives in uPass_attributes
+    // — once that policy is readable here a `[wrap]`/`[sat]` target will be
+    // exempted. Until then (no policy visible) this is a hard compile error via
+    // the unified diagnostic channel; the original range is left intact so
+    // later passes still see a value.
+    livehd::diag::Diagnostic d;
+    d.severity = livehd::diag::Severity::error;
+    d.code     = "bitwidth-overflow";
+    d.category = "bitwidth";
+    d.pass     = "upass.bitwidth";
+    d.message  = std::format("`{}` does not fit its declared `[{}]` envelope", target, attr_name);
+    d.hint     = "widen the declared type, or apply a wrap/saturate policy";
+    d.see.emplace_back("upass/upass.md §2 \"bitwidth\"");
+    livehd::diag::sink().emit(std::move(d));
+    return;
+  }
+
+  Lnast_range merged;
+  merged.min       = lo;
+  merged.max       = hi;
+  merged.unbounded = false;
   // set_range only updates if `merged` is strictly narrower than `current`.
   set_range(target, merged);
 }

@@ -14,20 +14,25 @@
 
 // uPass_bitwidth — LNAST bitwidth / value-range analysis.
 //
-// Registers as a "bitwidth" uPass_plugin optimizer. For every assignment-shaped
-// LNAST statement it computes the min/max value range of the result and stores
-// it in an internal map keyed by the LHS variable name.  Ranges persist across
-// per-node mark_changed iterations and across outer pass.upass re-invocations.
+// Registers as a "bitwidth" uPass_plugin, but (Goal 1n) it is a standalone
+// READ-ONLY FINALIZATION analysis: pass.upass runs it on its own
+// (`uPass_runner(lm, {"bitwidth"})`) *after* the main opt runner + SSA, never
+// interleaved with constprop, and discards the staging tree. For every
+// assignment-shaped LNAST statement it computes the min/max value range of the
+// result and stores it in an internal map keyed by the LHS variable name.
+// Ranges persist across outer pass.upass re-invocations.
 //
 // After the run completes, end_run() flushes the computed ranges into
-// lnast->bw_meta() so downstream passes (lnast_to_lgraph) can read them.
+// lnast->bw_meta() so the future lnast_to_lgraph can read them and set
+// bits/sign (see upass/upass.md §2 "bitwidth"; the per-node-HHDS-tree-attr +
+// Dlop-max/min migration is TODO_livehd 1n phases N3/N5).
 //
 // Key properties:
+//   * It does NOT participate in const-folding (no fold_ref) — constprop owns
+//     value folding; this removes the stale-narrow-range bug class.
 //   * Boolean / comparison results always get the signed 1-bit range [-1, 0].
 //   * Compiler temps (___*) participate normally — there is no special
 //     exclusion.
-//   * fold_ref() returns a concrete Const only when the range collapses to a
-//     single constant value, enabling constprop and verifier to fold it.
 //   * Arithmetic on unbounded ranges propagates unbounded conservatively.
 struct uPass_bitwidth : public upass::uPass {
 public:
@@ -75,10 +80,6 @@ public:
   // saturate policy is owned by uPass_attributes today); a hard error will
   // land once the wrap/sat math migrates here per the spec.
   void process_attr_set() override;
-
-  // Returns Const(v) only when the stored range is a single-value constant.
-  std::optional<Const> fold_ref(std::string_view name) override;
-  bool                 overrides_fold_ref() const override { return true; }
 
 private:
   // Per-variable range map. Persists across begin_iteration calls.

@@ -15,7 +15,7 @@
 // ── Part 1: Lattice unit tests ────────────────────────────────────────────────
 
 TEST(LnastRangeLattice, Unbounded) {
-  auto r = Lnast_range::unbounded();
+  auto r = Lnast_range::make_unbounded();
   EXPECT_TRUE(r.is_unbounded());
   EXPECT_FALSE(r.is_constant());
 }
@@ -46,16 +46,15 @@ TEST(LnastRangeLattice, SbitsConstantNeg1) { EXPECT_EQ(Lnast_range::constant(-1)
 
 TEST(LnastRangeLattice, SbitsRange0To15) {
   Lnast_range r;
-  r.min     = 0;
-  r.max     = 15;
-  r.neg_inf = false;
-  r.pos_inf = false;
+  r.min       = 0;
+  r.max       = 15;
+  r.unbounded = false;
   EXPECT_EQ(r.get_sbits(), 5);
 }
 
 TEST(LnastRangeLattice, SbitsBoolean) { EXPECT_EQ(Lnast_range::boolean().get_sbits(), 1); }
 
-TEST(LnastRangeLattice, SbitsUnbounded) { EXPECT_EQ(Lnast_range::unbounded().get_sbits(), 64); }
+TEST(LnastRangeLattice, SbitsUnbounded) { EXPECT_EQ(Lnast_range::make_unbounded().get_sbits(), 64); }
 
 // ── Arithmetic ────────────────────────────────────────────────────────────────
 
@@ -66,7 +65,7 @@ TEST(LnastRangeLattice, AddConstants) {
 }
 
 TEST(LnastRangeLattice, AddUnbounded) {
-  auto r = Lnast_range::unbounded().add(Lnast_range::constant(5));
+  auto r = Lnast_range::make_unbounded().add(Lnast_range::constant(5));
   EXPECT_TRUE(r.is_unbounded());
 }
 
@@ -98,22 +97,20 @@ TEST(LnastRangeLattice, Join) {
 }
 
 TEST(LnastRangeLattice, JoinWithUnbounded) {
-  auto r = Lnast_range::constant(2).join(Lnast_range::unbounded());
+  auto r = Lnast_range::constant(2).join(Lnast_range::make_unbounded());
   EXPECT_TRUE(r.is_unbounded());
 }
 
 TEST(LnastRangeLattice, Meet) {
   Lnast_range a;
-  a.min     = 1;
-  a.max     = 10;
-  a.neg_inf = false;
-  a.pos_inf = false;
+  a.min       = 1;
+  a.max       = 10;
+  a.unbounded = false;
   Lnast_range b;
-  b.min     = 5;
-  b.max     = 20;
-  b.neg_inf = false;
-  b.pos_inf = false;
-  auto r    = a.meet(b);
+  b.min       = 5;
+  b.max       = 20;
+  b.unbounded = false;
+  auto r      = a.meet(b);
   EXPECT_FALSE(r.is_unbounded());
   EXPECT_EQ(r.min, 5);
   EXPECT_EQ(r.max, 10);
@@ -123,11 +120,10 @@ TEST(LnastRangeLattice, Meet) {
 
 TEST(LnastRangeLattice, NarrowerThan) {
   Lnast_range wide;
-  wide.min     = 0;
-  wide.max     = 100;
-  wide.neg_inf = false;
-  wide.pos_inf = false;
-  auto narrow  = Lnast_range::constant(42);
+  wide.min       = 0;
+  wide.max       = 100;
+  wide.unbounded = false;
+  auto narrow    = Lnast_range::constant(42);
   EXPECT_TRUE(narrow.is_narrower_than(wide));
   EXPECT_FALSE(wide.is_narrower_than(narrow));
 }
@@ -136,10 +132,9 @@ TEST(LnastRangeLattice, NarrowerThan) {
 
 TEST(LnastRangeLattice, ContainsBounded) {
   Lnast_range u8;  // envelope [0, 255]
-  u8.min     = 0;
-  u8.max     = 255;
-  u8.neg_inf = false;
-  u8.pos_inf = false;
+  u8.min       = 0;
+  u8.max       = 255;
+  u8.unbounded = false;
   // A non-negative 9-bit-signed value (255) is contained despite its signed
   // width exceeding 8 — the check is sign-agnostic range containment.
   EXPECT_TRUE(u8.contains(Lnast_range::constant(255)));
@@ -150,12 +145,12 @@ TEST(LnastRangeLattice, ContainsBounded) {
 }
 
 TEST(LnastRangeLattice, ContainsUnbounded) {
-  EXPECT_TRUE(Lnast_range::unbounded().contains(Lnast_range::constant(1000)));
-  EXPECT_TRUE(Lnast_range::unbounded().contains(Lnast_range::boolean()));
+  EXPECT_TRUE(Lnast_range::make_unbounded().contains(Lnast_range::constant(1000)));
+  EXPECT_TRUE(Lnast_range::make_unbounded().contains(Lnast_range::boolean()));
   // A bounded envelope never contains an unbounded value range.
   Lnast_range u8;
-  u8.min = 0; u8.max = 255; u8.neg_inf = false; u8.pos_inf = false;
-  EXPECT_FALSE(u8.contains(Lnast_range::unbounded()));
+  u8.min = 0; u8.max = 255; u8.unbounded = false;
+  EXPECT_FALSE(u8.contains(Lnast_range::make_unbounded()));
 }
 
 // ── Part 2: Integration tests using the uPass_runner ─────────────────────────
@@ -220,8 +215,7 @@ TEST(BitwidthIntegration, ConstAssign) {
   const auto& meta = ln->bw_meta().ranges;
   auto        it   = meta.find("c");
   ASSERT_NE(it, meta.end()) << "Expected 'c' in bw_meta";
-  EXPECT_FALSE(it->second.neg_inf);
-  EXPECT_FALSE(it->second.pos_inf);
+  EXPECT_FALSE(it->second.unbounded);
   EXPECT_EQ(it->second.min, 3);
   EXPECT_EQ(it->second.max, 3);
 }
@@ -233,8 +227,7 @@ TEST(BitwidthIntegration, PlusTwoConsts) {
   const auto& meta = ln->bw_meta().ranges;
   auto        it   = meta.find("c");
   ASSERT_NE(it, meta.end()) << "Expected 'c' in bw_meta after plus(3,5)";
-  EXPECT_FALSE(it->second.neg_inf);
-  EXPECT_FALSE(it->second.pos_inf);
+  EXPECT_FALSE(it->second.unbounded);
   EXPECT_EQ(it->second.min, 8);
   EXPECT_EQ(it->second.max, 8);
 }
@@ -247,7 +240,7 @@ TEST(BitwidthIntegration, PlusUnknownRef) {
   auto        it   = meta.find("c");
   // c may be absent (unbounded = never stored) or explicitly unbounded.
   if (it != meta.end()) {
-    EXPECT_TRUE(it->second.neg_inf || it->second.pos_inf) << "c should be unbounded";
+    EXPECT_TRUE(it->second.unbounded) << "c should be unbounded";
   }
   // Either way: not a concrete finite range.
 }
@@ -268,8 +261,7 @@ TEST(BitwidthIntegration, EqResultBoolean) {
   ASSERT_NE(it, meta.end()) << "Expected 'x' in bw_meta after eq";
   EXPECT_EQ(it->second.min, -1);
   EXPECT_EQ(it->second.max, 0);
-  EXPECT_FALSE(it->second.neg_inf);
-  EXPECT_FALSE(it->second.pos_inf);
+  EXPECT_FALSE(it->second.unbounded);
 }
 
 // Test: assign propagates range: assign c = 3 (const) → fold_ref("c") = 3
@@ -348,8 +340,7 @@ TEST(BitwidthAttrSet, UbitsAlone) {
   const auto& meta = ln->bw_meta().ranges;
   auto        it   = meta.find("x");
   ASSERT_NE(it, meta.end());
-  EXPECT_FALSE(it->second.neg_inf);
-  EXPECT_FALSE(it->second.pos_inf);
+  EXPECT_FALSE(it->second.unbounded);
   EXPECT_EQ(it->second.min, 0);
   EXPECT_EQ(it->second.max, 15);
 }
@@ -365,43 +356,15 @@ TEST(BitwidthAttrSet, SbitsAlone) {
   const auto& meta = ln->bw_meta().ranges;
   auto        it   = meta.find("x");
   ASSERT_NE(it, meta.end());
-  EXPECT_FALSE(it->second.neg_inf);
-  EXPECT_FALSE(it->second.pos_inf);
+  EXPECT_FALSE(it->second.unbounded);
   EXPECT_EQ(it->second.min, -8);
   EXPECT_EQ(it->second.max, 7);
 }
 
-// `x.[max] = 100` → range = (-inf, 100]
-TEST(BitwidthAttrSet, MaxAlone) {
-  auto ln    = std::make_shared<Lnast>("bw_attr_max");
-  auto root  = ln->set_root(Lnast_ntype::create_top());
-  auto stmts = ln->add_child(root, Lnast_ntype::create_stmts());
-  add_attr_set(ln, stmts, "x", "max", "100");
-
-  run_bw(ln);
-  const auto& meta = ln->bw_meta().ranges;
-  auto        it   = meta.find("x");
-  ASSERT_NE(it, meta.end());
-  EXPECT_TRUE(it->second.neg_inf);
-  EXPECT_FALSE(it->second.pos_inf);
-  EXPECT_EQ(it->second.max, 100);
-}
-
-// `x.[min] = -5` → range = [-5, +inf)
-TEST(BitwidthAttrSet, MinAlone) {
-  auto ln    = std::make_shared<Lnast>("bw_attr_min");
-  auto root  = ln->set_root(Lnast_ntype::create_top());
-  auto stmts = ln->add_child(root, Lnast_ntype::create_stmts());
-  add_attr_set(ln, stmts, "x", "min", "-5");
-
-  run_bw(ln);
-  const auto& meta = ln->bw_meta().ranges;
-  auto        it   = meta.find("x");
-  ASSERT_NE(it, meta.end());
-  EXPECT_FALSE(it->second.neg_inf);
-  EXPECT_TRUE(it->second.pos_inf);
-  EXPECT_EQ(it->second.min, -5);
-}
+// (Goal 1n N3) Bare `x.[max]`/`x.[min]` are no longer modeled by bitwidth: the
+// no-inf lattice has no half-bounded state, and under the clean type model a
+// declared envelope arrives as `prim_type_int(max,min)` carrying BOTH bounds.
+// The former MaxAlone / MinAlone tests were removed accordingly.
 
 // `x = 7; x.[ubits] = 4` → fits; range stays [7,7] (meet with [0,15]).
 TEST(BitwidthAttrSet, FitsAfterAssign) {
@@ -421,10 +384,11 @@ TEST(BitwidthAttrSet, FitsAfterAssign) {
   EXPECT_EQ(it->second.max, 7);
 }
 
-// `x = 100; x.[ubits] = 3` → 100 cannot fit in [0,7]. Pass warns and leaves
-// the original range alone (does not narrow). Test that the original range
-// is preserved and no crash occurs.
-TEST(BitwidthAttrSet, ConflictWarnsAndKeepsOriginal) {
+// `x = 100; x.[ubits] = 3` → 100 cannot fit in [0,7]. (Goal 1n N4) the pass
+// emits a `bitwidth-overflow` diagnostic and leaves the original range alone
+// (does not narrow). Test that the original range is preserved and no crash
+// occurs (the diagnostic is non-fatal).
+TEST(BitwidthAttrSet, ConflictErrorsAndKeepsOriginal) {
   auto ln    = std::make_shared<Lnast>("bw_attr_conflict");
   auto root  = ln->set_root(Lnast_ntype::create_top());
   auto stmts = ln->add_child(root, Lnast_ntype::create_stmts());
@@ -442,23 +406,9 @@ TEST(BitwidthAttrSet, ConflictWarnsAndKeepsOriginal) {
   EXPECT_EQ(it->second.max, 100);
 }
 
-// `x.[ubits] = 4; x.[max] = 10` → meet of [0,15] and (-inf,10] = [0,10].
-TEST(BitwidthAttrSet, ChainedNarrowing) {
-  auto ln    = std::make_shared<Lnast>("bw_attr_chain");
-  auto root  = ln->set_root(Lnast_ntype::create_top());
-  auto stmts = ln->add_child(root, Lnast_ntype::create_stmts());
-  add_attr_set(ln, stmts, "x", "ubits", "4");
-  add_attr_set(ln, stmts, "x", "max", "10");
-
-  run_bw(ln);
-  const auto& meta = ln->bw_meta().ranges;
-  auto        it   = meta.find("x");
-  ASSERT_NE(it, meta.end());
-  EXPECT_FALSE(it->second.neg_inf);
-  EXPECT_FALSE(it->second.pos_inf);
-  EXPECT_EQ(it->second.min, 0);
-  EXPECT_EQ(it->second.max, 10);
-}
+// (Goal 1n N3/1t) bare `.[max]`/`.[min]` are not modeled (and `attr_set` of a
+// derived read is itself illegal under the clean type model), so the former
+// ChainedNarrowing test (which relied on `x.[max] = 10` narrowing) was removed.
 
 // Non-bitwidth attributes (e.g. `comptime`) are ignored — no range stored.
 TEST(BitwidthAttrSet, NonBitwidthAttrIgnored) {
@@ -489,7 +439,7 @@ TEST(BitwidthCrossInvocation, TightenAfterReseed) {
     const auto& meta = ln->bw_meta().ranges;
     auto        it   = meta.find("c");
     if (it != meta.end()) {
-      EXPECT_TRUE(it->second.neg_inf || it->second.pos_inf) << "c should still be unbounded after first sweep";
+      EXPECT_TRUE(it->second.unbounded) << "c should still be unbounded after first sweep";
     }
   }
 
@@ -499,14 +449,12 @@ TEST(BitwidthCrossInvocation, TightenAfterReseed) {
   BitwidthEntry ea{};
   ea.min             = 0;
   ea.max             = 7;
-  ea.neg_inf         = false;
-  ea.pos_inf         = false;
+  ea.unbounded       = false;
   meta_w.ranges["a"] = ea;
   BitwidthEntry eb{};
   eb.min             = 1;
   eb.max             = 2;
-  eb.neg_inf         = false;
-  eb.pos_inf         = false;
+  eb.unbounded       = false;
   meta_w.ranges["b"] = eb;
 
   // Second pass: begin_iteration reloads a,b into range_map_; plus computes
@@ -516,8 +464,7 @@ TEST(BitwidthCrossInvocation, TightenAfterReseed) {
   const auto& meta = ln->bw_meta().ranges;
   auto        it_c = meta.find("c");
   ASSERT_NE(it_c, meta.end()) << "c should be proven finite after re-seed";
-  EXPECT_FALSE(it_c->second.neg_inf);
-  EXPECT_FALSE(it_c->second.pos_inf);
+  EXPECT_FALSE(it_c->second.unbounded);
   EXPECT_EQ(it_c->second.min, 1);
   EXPECT_EQ(it_c->second.max, 9);
   // Re-seeded inputs are preserved across end_run (write-clear-rewrite).

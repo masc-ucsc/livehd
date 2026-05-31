@@ -188,6 +188,43 @@ cross-file dependencies stay visible.
   `max`/`min` per result, errors on **provable** type-envelope overflow, and
   publishes `max`/`min` as **per-node HHDS tree attrs** for `lnast_to_lgraph`.
 
+  **Status (2026-05-31) — N1–N5 LANDED (green, net-neutral; NOT git-committed),
+  two documented residuals.** Full `bazel build //...` green; `//upass/...` 9/9;
+  `//inou/prp` 126 pass / 8 fail = the same pre-existing feature-gap set
+  (`enum_*`, `match_arms_mixed`, `setter_complex`, `tuple_decorator_complex`,
+  `bitreverse`) → zero new regressions across all five phases. Changes touch only
+  `pass/upass/pass_upass.{cpp,hpp}`, `upass/bitwidth/{upass_bitwidth.cpp,
+  upass_bitwidth.hpp,lnast_range.hpp,upass_bitwidth_test.cpp}`, and
+  `lnast/lnast.hpp` (`BitwidthEntry`).
+  - **N1** ✓ removed from the runner order + `fold_capable_passes`; `fold_ref` /
+    `overrides_fold_ref` deleted (kills the stale-narrow-range bug class; the
+    suite confirms constprop's own folding covered the fallback).
+  - **N2** ✓ standalone run after runner + SSA via `uPass_runner(lm,{"bitwidth"})`
+    in `pass_upass.cpp::work()`, **read-only** (populates `ln->bw_meta()`, discards
+    the staging tree), behind Gate B (generic fn body via `io_meta bits==0`) and
+    a Gate-A stub (pending_import poison not landed).
+  - **N3** ✓ (no-inf) `neg_inf`/`pos_inf` collapsed to a single `unbounded` flag
+    in `Lnast_range` + `BitwidthEntry`; no half-bounded state (bare `.[max]`/
+    `.[min]` dropped — `attr_set` of a derived read is illegal under 1t anyway);
+    arithmetic overflow → unbounded keeps soundness. **Residual:** (a) bounds are
+    still int64 — the exact-`Dlop` storage swap is deferred (only matters for
+    >2^63 envelopes, which no path produces, and `lnast.hpp` deliberately holds
+    no `Dlop` dep); (b) the channel stays the name-keyed `bw_meta` Lnast member
+    (io_meta precedent; side-map > flat_storage per the HHDS-attr memory) —
+    per-node re-keying is immaterial until `lnast_to_lgraph` exists to consume it.
+  - **N4** ✓ the unsatisfiable width-envelope contradiction now emits a
+    `core/diag` error (`code=bitwidth-overflow`, `category=bitwidth`, non-fatal,
+    original range kept) in place of `Pass::warn`. **Residual:** the fuller
+    "provable overflow on a typed store" check needs bitwidth to read the
+    `prim_type_int(max,min)` envelope (a `process_declare`) AND the wrap/sat
+    policy; that wiring overlaps 1t T6 and is deferred so it can't false-positive
+    on `wrap_checks`/`wrap_complex`/`valid_unknown_bits`.
+  - **N5** ✓ `div`/`mod`/`sext` tightened to real bounds (`|a/d| ≤ |a|`,
+    `|a%d| < |d|`, `sext → [-2^p, 2^p-1]`); `set_mask` stays conservative (not
+    cleanly derivable — "where derivable").
+  - SSA harvest/rename split remains a cleanup, not a correctness gate (SSA runs
+    whole before the runner today, so bitwidth is already after SSA).
+
   **Model (locked 2026-05-31, confirmed with the user).**
   - **Read-only.** Never rewrites nodes / never alters declared
     `prim_type_int(max,min)`; only annotates. **No `fold_ref`** (drop
