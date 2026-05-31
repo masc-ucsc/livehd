@@ -49,7 +49,7 @@ bazel_dep(name = "hlop", version = "0.2.0")
 git_override(
     module_name = "hlop",
     remote = "https://github.com/masc-ucsc/hlop.git",
-    commit = "f9c71bfede6312d0cf77f4be98cd216fd45fe3d9",
+    commit = "4608e474dd72521efcbe62e7821706d49de2d3e2",
 )
 # For local debug/testing, swap the git_override above for:
 # local_path_override(module_name = "hlop", path = "../hlop")

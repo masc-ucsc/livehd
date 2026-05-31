@@ -147,7 +147,18 @@ void uPass_attributes::on_assign_like(bool is_assign_node) {
   const auto* lhs_ti_for_coerce = is_assign_node ? lookup_type_info(view.lhs) : nullptr;
   const bool  lhs_unsigned      = lhs_ti_for_coerce != nullptr && lhs_ti_for_coerce->has_type_spec
                                   && lhs_ti_for_coerce->kind == Numeric_kind::unsigned_int && lhs_ti_for_coerce->bits != 0;
-  const bool  need_rhs_value    = is_assign_node && (!wrap_policy.empty() || !sat_policy.empty() || lhs_unsigned);
+  // Task 1b — also materialize the RHS for a SIGNED-int / bounded LHS so the
+  // first-write range-fit check (below) can run on it. An unbounded `int`/
+  // `uint` (no concrete width or range) has no envelope, so it stays on the
+  // fast path (and a present-but-nil range Const must not be treated as a
+  // bound — that crashes Dlop arithmetic).
+  const bool  lhs_signed_bounded = lhs_ti_for_coerce != nullptr && lhs_ti_for_coerce->has_type_spec
+                                   && lhs_ti_for_coerce->kind == Numeric_kind::signed_int
+                                   && (lhs_ti_for_coerce->bits != 0
+                                       || (lhs_ti_for_coerce->range_max && lhs_ti_for_coerce->range_max->is_integer())
+                                       || (lhs_ti_for_coerce->range_min && lhs_ti_for_coerce->range_min->is_integer()));
+  const bool  need_rhs_value    = is_assign_node
+                                  && (!wrap_policy.empty() || !sat_policy.empty() || lhs_unsigned || lhs_signed_bounded);
   if (is_assign_node) {
     move_to_child();
     if (move_to_sibling()) {
@@ -198,7 +209,8 @@ void uPass_attributes::on_assign_like(bool is_assign_node) {
         mark_changed();
       }
     }
-  } else if (lhs_unsigned && !was_assigned(view.lhs) && rhs_value && rhs_value->bit_test(static_cast<int>(lhs_ti_for_coerce->bits))
+  } else if (lhs_unsigned && !was_assigned(view.lhs) && rhs_value
+             && rhs_value->bit_test(static_cast<int>(lhs_ti_for_coerce->bits))
              && !rhs_value->unknown_bit_test(static_cast<int>(lhs_ti_for_coerce->bits))) {
     // `!was_assigned` restricts this to the FIRST write (the declaration's
     // initializer). Per-statement `wrap x = …` / `sat x = …` are always
@@ -210,7 +222,9 @@ void uPass_attributes::on_assign_like(bool is_assign_node) {
     // KNOWN 1 past the declared width (i.e. a known-negative bit pattern, even
     // with interior unknowns) stored to an unsigned-typed var reads as its
     // unsigned N-bit pattern. `v:u8 = 0sb1001_0111` ⇒ 151, and
-    // `v:u8 = 0sb1?01_?000` ⇒ 0ub1?01?000 (so `v | 0xff == 0xff`).
+    // `v:u8 = 0sb1?01_?000` ⇒ 0ub1?01?000 (so `v | 0xff == 0xff`). This is the
+    // implicit (sign-dropping) "force"; task 1b prefers the explicit bit-select
+    // spelling `v:u8 = e#[0..=7]`.
     //   * `bit_test(bits)` true + `unknown_bit_test(bits)` false = the
     //     sign-extension past width N is a known 1. An unknown sign bit
     //     (`0sb?` → `v1:u32`) has `unknown_bit_test` true and is SKIPPED, so a
@@ -231,7 +245,7 @@ void uPass_attributes::on_assign_like(bool is_assign_node) {
         }
       }
     } else if (!rhs_value->has_unknowns()) {
-      // Task 1t Cluster-F — a KNOWN positive comptime value whose magnitude
+      // Task 1t/1b Cluster-F — a KNOWN positive comptime value whose magnitude
       // exceeds the declared unsigned width (bit `bits` is set ⇒ value ≥ 2^N >
       // max) with no `wrap`/`sat` qualifier is a hard compile error (overflow
       // must be explicit). The negative case above is a legal reinterpretation,
@@ -239,6 +253,31 @@ void uPass_attributes::on_assign_like(bool is_assign_node) {
       upass::error("uPass_attributes: comptime write to `{}` overflows its declared {}-bit width without wrap/sat\n",
                    view.lhs,
                    lhs_ti_for_coerce->bits);
+    }
+  } else if (lhs_signed_bounded && !was_assigned(view.lhs) && rhs_value && !rhs_value->has_unknowns()) {
+    // Task 1b — first-write range-fit enforcement for a SIGNED-int LHS with a
+    // concrete envelope (sN, `int(max=…,min=…)`). Signed types were previously
+    // unchecked. The test is sign-agnostic range containment against the
+    // declared (max,min) — derive_max/derive_min, the single source. There is
+    // NO reinterpret for signed (a signed overflow is a genuine error, not a
+    // bit reinterpretation); the fix is wrap/sat or an explicit bit-select.
+    // A bound may be present-but-nil (unbounded side stores a nil Const whose
+    // is_i() is true) — reject it via is_nil() before any Dlop arithmetic.
+    auto       emax    = derive_max(view.lhs);
+    auto       emin    = derive_min(view.lhs);
+    const bool has_max = emax && emax->is_integer();
+    const bool has_min = emin && emin->is_integer();
+    const bool over    = has_max && rhs_value->sub_op(*emax)->is_positive() && !rhs_value->same_repr(*emax);
+    const bool under   = has_min && emin->sub_op(*rhs_value)->is_positive() && !rhs_value->same_repr(*emin);
+    if (over || under) {
+      upass::error(
+          "uPass_attributes: comptime write to `{}` (value {}) does not fit its declared range [{}, {}] "
+          "without wrap/sat (force the bits with a bit-select `{}#[0..]` if intended)\n",
+          view.lhs,
+          std::string(rhs_value->to_pyrope()),
+          has_min ? std::string(emin->to_pyrope()) : std::string("-inf"),
+          has_max ? std::string(emax->to_pyrope()) : std::string("+inf"),
+          view.lhs);
     }
   }
   record_assign(view.lhs, rhs_is_nil);

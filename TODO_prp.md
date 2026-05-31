@@ -13,23 +13,112 @@ cross-file dependencies stay visible.
 
 ## Group 1 — foundation
 
-- **1r** Function-call return destructuring with rename — **partial**.
-  `(b, c) = dox(...)` name-driven binding and explicit rename
-  `(x=dox.b, y=dox.c) = dox(...)` both lower correctly via a chained
-  `tuple_get` emission in prp2lnast (commit 054f78060); `prp-fcall5`
-  passes.
-  - **Pending:** `prp-fcall5b` and `prp-fcall_rename_deep` still fail.
-    LNAST emission is correct (verified via `lnast.dump`) but
-    constprop / `upass/func_extract` can't unwrap nested fcall-return
-    bundles. Even the non-rename case `(foo, c) = dox(a=3)` then
-    `cassert(foo.bar == 4)` ends with `foo.bar` unresolved — the
-    fcall result gets flattened (`var:t key:bar key:baz key:c`)
-    instead of nesting `foo`'s sub-bundle.
-  - Hint: model fcall returns as proper nested tuples in
-    `upass/func_extract` so `tuple_get fcall_result foo` resolves to
-    the nested bundle. The chained `tuple_get` emission in
-    `inou/prp/prp2lnast.cpp::process_lvalue_for_assign` already
-    produces what constprop should consume.
+- **1b** Range-fit enforcement + bit-select/bit-set as the "force" operator —
+  **PARTIAL, landed 2026-05-30** (depends conceptually on [[1t]]'s `(max,min)`
+  envelope). Example:
+  [inou/prp/tests/comptime/range_force.prp](inou/prp/tests/comptime/range_force.prp)
+  (7/0). Design: `docs/contracts/typesystem_clean_plan.md` (T4).
+  - **Landed (no regressions; full comptime sweep = documented baseline only):**
+    - `Lnast_range::contains` — the sign-agnostic fit predicate
+      (`upass/bitwidth/lnast_range.hpp`; unit tests in `upass_bitwidth_test.cpp`).
+    - `process_get_mask` range = `[0, 2^w-1]` (w = popcount of the const mask;
+      single bit → signed `[-1,0]`), so the bit-select **force** operator is
+      range-tracked (`upass/bitwidth/upass_bitwidth.cpp`). Strict improvement
+      over the old conservative `unbounded()`.
+    - **Signed range-fit enforcement** in `attributes::on_assign_like`: a
+      first-write comptime value to a concretely-bounded SIGNED LHS (sN /
+      `int(max,min)`) that escapes `derive_max`/`derive_min` is now a hard
+      `upass::error` (`const x:s4 = 200` → error). Signed types were previously
+      unchecked. There is NO reinterpret for signed (genuine overflow).
+    - The unsigned side already had (T4, kept unchanged): negative-pattern →
+      unsigned reinterpret (implicit force) + positive-overflow error (the
+      `bit_test(bits)` heuristic).
+  - **Architecture note:** the fit-check lives in `attributes` (where value +
+    declared envelope + wrap/sat policy + `was_assigned` all coexist), NOT in
+    `bitwidth` as the T4 sketch proposed — that avoids the constprop/attributes
+    value-coherence gap. The `bw_meta().type_ranges` plumbing is therefore NOT
+    needed and was dropped from the plan.
+  - **Gotchas hit (documented so the next agent doesn't):** (1) an unbounded
+    `int`/`uint` stores a *present-but-nil* `Const` for max/min whose `is_i()`
+    is true — treating it as a bound calls `sub_op(nil)` and aborts in hlop
+    `blop.hpp::negn`; guard every bound with `is_i() && !is_nil()`. (2) The
+    range-fit block must NOT broaden the UNSIGNED gating — entering it (even as
+    a no-op) for an unsigned LHS perturbed comptime-ref folding
+    (`comptime const k=5; mut r:u4=k`); keep the unsigned path byte-identical
+    to T4 and add signed as a separate branch.
+  - **Deferred:** full unsigned positive-overflow generalization (the
+    `bit_test` heuristic still misses magnitudes ≥ 2^(N+1)); reassignment
+    enforcement (only the declaration's first write is checked); pinning the
+    compile-errors as golden diagnostics ([[4h]] — no `:expect_fail:` harness).
+  - **Problem.** `@graph/cell*` always operates on SIGNED values (and, except
+    `get_mask`, produces signed values). So `0xFF` is `0sb0_1111_1111` = **+255**,
+    but `0sb1111_1111` = **-1**, and a sign bit propagates through bitwise ops:
+    `v|0xff` with `v` negative is **-1**, not 255. Storing such a value into an
+    unsigned destination must be a compile error, but a 9-bit *signed* positive
+    (e.g. `0|0xFF` = 255 = `0sb0_1111_1111`) must still fit `u8` — so the check
+    can NOT be a bit-width comparison.
+  - **The check (two ranges, not one).** Each typed var carries BOTH a fixed
+    **type envelope** `[Tmin,Tmax]` (from `declare`'s `prim_type_int(max,min)`,
+    never narrowed by propagation) and the tightening **actual** range (today's
+    `upass_bitwidth` `range_map_`). Keep propagating actuals (they are tighter →
+    drive constprop / narrower cells); do NOT replace them with type ranges. At
+    every `store`/`assign` to a typed var, assert the SIGN-AGNOSTIC containment
+    `Tmin <= vmin && vmax <= Tmax`; on failure (and no force/wrap/sat) →
+    `upass::error`. Set the lhs actual to `actual ∩ envelope`. This dissolves the
+    signed/unsigned confusion: `u8 = 0xFF` → `[255,255]⊆[0,255]` ✓;
+    `u8 = 0sb1111_1111` → `[-1,-1]⊄[0,255]` ✗.
+  - **The force operator (this is the new idea).** When you DO mean the bits,
+    spell it as an explicit **bit-select** `e#[lo..=hi]` (read, lowers to
+    `get_mask` — the one unsigned-producing cell) or a **bit-set** field write
+    `v#[lo..=hi] = e` (lowers to `set_mask`). A select's result range is
+    `[0, 2^(hi-lo+1)-1]` by construction, so it fits the destination iff the
+    width fits — "force" reinterprets the SIGN but is still range-checked
+    (`u8 = ones#[0..=9]` still errors). No node-qualifier slot is needed (the
+    invasive part of T4) — `get_mask`/`set_mask` already exist. `wrap`/`sat`
+    remain only for modulo / clamp, where the value is not a fixed bit pattern.
+  - **upass/ plumbing.**
+    - `upass/attributes` flushes the declared `Type_info` range into a new
+      `bw_meta().type_ranges` map from `process_declare`; `upass_bitwidth`
+      seeds a fixed `type_range_map_` from it in `begin_iteration` (mirrors how
+      `range_map_` is seeded from `bw_meta().ranges`,
+      `upass_bitwidth.cpp:39-49`). Single parser of `prim_type_int`.
+    - Add `Lnast_range::contains(other)` (`upass/bitwidth/lnast_range.hpp`); the
+      fit-check + clamp at the store is the existing `meet`/`is_narrower_than`
+      machinery. The contradiction block in `process_attr_set`
+      (`upass_bitwidth.cpp:486-578`) is the prototype — lift it onto
+      `declare`/`store`, flip its `Pass::warn` → `upass::error`, gate on the
+      force/wrap/sat presence.
+    - Teach `process_get_mask`/`process_set_mask` (`upass_bitwidth.cpp:462-471`,
+      currently `unbounded()`) to emit `[0, 2^width-1]` from the const range arg
+      — this is what makes the force-operator casserts pass the check
+      automatically (strict improvement over today's conservative unbounded).
+    - **Read-side force on a negative source — FIXED in hlop (2026-05-30).**
+      `ones#[0..=7]` where `ones == -1` was folding to `1`, not `255`:
+      `Dlop::get_mask_op` capped extraction at the source's minimal signed width
+      (`src_bits`), and a negative const's minimal width is a single sign bit, so
+      only bit0 survived (`-2` → 2, etc.). Fixed by extending extraction to the
+      positive mask width, reading out-of-word bits as the sign, and sizing the
+      output by the mask width (`../hlop` `dlop.cpp::get_mask_op`, commit
+      `e970b7c`, pinned in `MODULE.bazel`; regression
+      `dlop_test::get_mask_op_negative_source_sign_extends`). `get_mask` returns
+      UNSIGNED (matching `#[..]`); `#sext[..]` keeps it signed — cf.
+      [[sext_bitrange_lowering]]. So `(-1)#[0..=7] == 255` now folds and the
+      example exercises read-side force on the signed value directly.
+    - **Source the actual from constprop's folded `Const`, not the text
+      parser.** `range_from_const_text` (`upass_bitwidth.cpp:122`) only handles
+      `0x`/`0b`/decimal — `0sb…` and unknown-bits literals fall through to
+      `unbounded()`, so the check can't even see `v:u8 = 0sb1111_1111` = -1.
+      constprop/Dlop already know the true signed value; bridging that closes
+      this gap and the `valid_unknown_bits` `v|0xff` value-coherence gap together.
+  - **Error message** prints decimal value + both ranges + the sign diagnosis
+    (so an agent sees `-1` vs `255` immediately) — see the comments in the
+    example for the exact wording 1b should emit.
+  - **Compile-error cases are comments in the example** (the harness has no
+    `:expect_fail:` yet — [[4h]]). When [[4h]] lands, promote the four
+    `FUTURE COMPILE ERROR` blocks in `range_force.prp` to pinned diagnostics.
+  - **Fixes / unblocks:** the `:u8` storage-width enforcement noted for
+    `prp-valid_unknown_bits` (9/1) and the `wrap`/masking gaps in
+    `prp-wrap_checks` / `prp-wrap_complex` — all currently mapped to [[1t]].
 
 - **1m** Pyrope `import` statement — **deferred**. Substantial new
   infra; not attempted in the 2026-05-27 session.
@@ -216,8 +305,8 @@ cross-file dependencies stay visible.
   - Reads the typesystem envelope ([[1t]]/[[1v]]) for width-correct
     results.
   - Fixes the bulk of `prp-cellmap_comb` / `prp-cellmap_misc` `unknown`s
-    (the `cell_*` wrapper-comb halves are [[1i]]; this owns the direct
-    `__cell` calls).
+    (the `cell_*` wrapper-comb halves landed via the comb inliner 1i; this
+    owns the direct `__cell` calls).
   - **Overlap to coordinate:** `__hotmux` is also named under [[2r]]
     (unique-if/hotmux dispatch). Decide which task owns `__hotmux` so it
     isn't double-implemented.
@@ -256,31 +345,32 @@ cross-file dependencies stay visible.
   `inou/prp`, upass, and lgraph-pass diagnostics from
   [TODO_livehd.md](TODO_livehd.md) **3f**.
 
-## Failing-test → TODO mapping (snapshot 2026-05-29)
+## Failing-test → TODO mapping (snapshot 2026-05-30)
 
 Each `bazel test -c dbg //...` failure mapped to the TODO entry whose
 landing should fix it. When more than one entry is listed, the test
 needs all of them. Current verifier tally is shown as `pass/fail/unknown`.
+Tallies re-measured via the `prplib.py` comptime pipeline
+(`pass.upass constprop:1 max_iters:1 verifier_pass:N verifier_fail:N
+[verifier_include_funcs:true]`).
 
-**Landed since the 2026-05-27 snapshot (removed from the list):**
-`prp-bitreduce`, `prp-bitset` (bit-range read/write, reductions,
-popcount), `prp-fcall5b`, `prp-fcall_rename_deep` ([[1r]] fcall-return
-unwrap). Their bit ops landed via the work folded into [[1t]].
+**Landed since the original snapshot (removed from the list):**
+`prp-bitreduce`, `prp-bitset` (bit-range read/write, reductions, popcount),
+`prp-fcall5b`, `prp-fcall_rename_deep` (1r fcall-return unwrap, now landed),
+and — re-verified live 2026-05-30 — the whole wrap/sat/typed-storage cluster
+(`prp-wrap_checks`, `prp-wrap_complex`, `prp-valid_unknown_bits`), the direct
+`__cell`/cellmap tests (`prp-cellmap_comb`, `prp-cellmap_misc`, `prp-formux`),
+`prp-hotmux_unique_if`, `prp-paths_if`, and `prp-typesystem` (26/0/3, green —
+its 3 residual unknowns are 1v named-type semantics, tracked under [[1t]]).
+**Live suite = 8 fails / 248 pass** across `//inou //upass //lnast //pass`.
 
 | Failing test | now | TODO entry | What it still needs |
 | --- | --- | --- | --- |
-| `prp-bitreverse` | 3/7/0 | [[1i]] + [[1t]] | comb-inline of `reverse()`/`sreverse()` + `for i in 0..<x.[bits]` unroll; bit ops themselves fold once the index is constant |
-| `prp-cellmap_comb` | 49/3/52 | [[1i]] + [[2s]] + [[1t]] | comb-inline (`cell_*`) + direct builtin `__cell` fold ([[2s]], hlop sync); the 3 **fails** are `~a` on `:u8` not masked to width ([[1t]]) |
-| `prp-cellmap_misc` | 8/0/7 | [[1i]] + [[2s]] | comb-inline (`cell_*`) + direct builtin `__cell` fold ([[2s]], hlop sync); no fails left, 7 unknown |
+| `prp-bitreverse` | 3/7/0 | [[1t]] | comb-inline (`reverse()`/`sreverse()`) landed via 1i; residual is the `for i in 0..<x.[bits]` unroll (needs comptime `.[bits]`) + bit / storage-width fold under 1t |
 | `prp-enum_color` | 0/1/2 | [[2l]], [[1k]] | enum with associated setters/methods |
 | `prp-enum_hier` | 0/0/6 | [[2l]] | nested / hierarchical enums |
 | `prp-enum_simple` | 0/0/9 | [[2l]] | base enum parsing + comptime tags |
 | `prp-enum_types` | 0/0/0 | [[2l]] | typed enum interplay with `does` (casserts unreached) |
-| `prp-formux` | 0/0/0 | [[1i]], [[2r]] | comb-inline + `for…in (tuple)` unroll + `__hotmux` fold (casserts unreached) |
-| `prp-hotmux_unique_if` | 6/0/2 | [[2r]] | comptime fold of `unique if` chain + `__hotmux` direct call |
 | `prp-match_arms_mixed` | 5/0/0 | [[2r]] | mixed match-arm prefixes + tuple `case` patterns (one cassert not counted) |
 | `prp-setter_complex` | 2/2/0 | [[1k]] | decorator-init implicit setter dispatch on `x:Tup = (…)` |
-| `prp-tuple_decorator_complex` | 0/2/0 | [[1k]] | tuple-decorator init triggering setter |
-| `prp-valid_unknown_bits` | 9/1/0 | [[1t]] | `:u8` storage-width enforcement for `ones = v\|0xff` (the bit-range casserts now pass) |
-| `prp-wrap_checks` | 3/1/0 | [[1t]] | `wrap`-policy reassignment + masking to declared width (test's `verifier_pass` may also need a refresh) |
-| `prp-wrap_complex` | 9/1/0 | [[1t]] | `wrap`/`sat` fold on already-typed values |
+| `prp-tuple_decorator_complex` | 0/0/2 | [[1k]] | tuple-decorator init triggering setter |

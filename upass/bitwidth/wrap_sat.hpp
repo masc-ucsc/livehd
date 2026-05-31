@@ -43,7 +43,7 @@ inline Const wrap_to_signed(const Const& v, uint32_t n) {
     return v;
   }
   Const masked = *v.and_op(*Dlop::get_mask_value(n));
-  return *masked.sext_op(static_cast<int>(n) - 1);
+  return *masked.sext_op(*Dlop::create_integer(static_cast<int>(n) - 1));
 }
 
 // Saturate an unsigned value to [0, 2^n − 1]. Negative inputs clamp to 0;

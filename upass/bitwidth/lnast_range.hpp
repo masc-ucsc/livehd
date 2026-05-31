@@ -67,6 +67,17 @@ struct Lnast_range {
     return min > other.min || max < other.max;
   }
 
+  // True iff every value representable by `other` is also representable by
+  // *this — i.e. set containment *this ⊇ other. This is the type-envelope
+  // fit predicate (task 1b): `envelope.contains(value_range)`. Sign-agnostic
+  // (compares the signed bounds directly), so a non-negative 9-bit value like
+  // 255 is contained by u8's [0,255] even though its signed width is 9.
+  bool contains(const Lnast_range& other) const noexcept {
+    const bool lo_ok = neg_inf || (!other.neg_inf && min <= other.min);
+    const bool hi_ok = pos_inf || (!other.pos_inf && max >= other.max);
+    return lo_ok && hi_ok;
+  }
+
   // True iff all representable values are ≥ 0.
   bool is_always_positive() const noexcept { return !neg_inf && min >= 0; }
   // True iff all representable values are < 0.

@@ -376,7 +376,7 @@ void Cprop::replace_all_inputs_const(hhds::Node_class& node, std::vector<hhds::E
     bool zero_shifts = true;
     for (auto& amt_dpin : livehd::graph_util::inp_drivers_of(node, "b")) {
       Const amt   = hydrate_const(amt_dpin);
-      result      = result.or_op(val.shl_op(amt.to_i()));
+      result      = result.or_op(val.shl_op(amt));  // pass the Const shift amount
       zero_shifts = false;
     }
 

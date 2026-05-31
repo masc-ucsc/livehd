@@ -368,10 +368,11 @@ std::optional<Const> uPass_attributes::derive_aggregate_size(std::string_view ba
     range_key = it->second;
   }
   if (auto rb = lookup_range(range_key); rb) {
-    if (rb->first.is_i() && rb->second.is_i()) {
-      const auto sz = rb->second.to_i() - rb->first.to_i() + 1;
-      if (sz > 0) {
-        return *Dlop::create_integer(static_cast<int64_t>(sz));
+    if (rb->first.is_integer() && rb->second.is_integer()) {
+      // size = end - start + 1 (bundle cardinality), in Const arithmetic.
+      auto sz = rb->second.sub_op(rb->first)->add_op(*Dlop::create_integer(1));
+      if (!sz->is_negative() && !sz->is_known_zero()) {
+        return *sz;
       }
     }
   }
@@ -395,6 +396,60 @@ std::optional<Const> uPass_attributes::derive_aggregate_typename(std::string_vie
   // Uppercase-named variable → its own name is the typename.
   if (is_uppercase_first(base) || is_uppercase_first(base_text)) {
     return pyrope_string(base);
+  }
+  // Task 1t — named-type FIELD typename. A typed field `inn:inner_t` records its
+  // typename on a `tuple_get` tmp (see prp2lnast typed-field lowering); resolve
+  // base = "X.inn" (or a tuple_get tmp aliasing it) to that tmp and read its
+  // typename. The container X is searched directly, through `direct_alias`, and
+  // through X's OWN named type — so `o.inn` where `o:outer_t` reaches
+  // `outer_t.inn`'s field typename. Mirrors lookup_type_info for numeric types.
+  std::string parent;
+  std::string field;
+  if (const auto* a = lookup_get_alias(base); a) {
+    parent = a->base;
+    field  = a->field_name.empty() ? a->field_key : a->field_name;
+  } else if (auto dot = base.rfind('.'); dot != std::string_view::npos) {
+    parent = std::string{base.substr(0, dot)};
+    field  = std::string{base.substr(dot + 1)};
+  } else {
+    return std::nullopt;
+  }
+  if (field.empty()) {
+    return std::nullopt;
+  }
+  auto field_typename = [&](const std::string& container) -> std::optional<Const> {
+    std::vector<std::string> bases{container};
+    if (auto da = direct_alias.find(container); da != direct_alias.end()) {
+      bases.push_back(da->second);
+    }
+    for (const auto& b : bases) {
+      if (auto v = lookup_attr_value(b + "." + field, "typename"); v) {
+        return v;
+      }
+      // The field's type was recorded on a sibling tuple_get tmp of `b`.
+      for (const auto& [tmp, al] : tuple_get_alias) {
+        if (al.base == b && (al.field_key == field || al.field_name == field)) {
+          if (auto v = lookup_attr_value(tmp, "typename"); v) {
+            return v;
+          }
+        }
+      }
+    }
+    return std::nullopt;
+  };
+  // 1. The field typename recorded directly on `parent`'s bundle.
+  if (auto v = field_typename(parent); v) {
+    return v;
+  }
+  // 2. Via parent's own named type (`o:outer_t` → `outer_t.inn`).
+  if (auto pt = derive_aggregate_typename(parent, parent); pt) {
+    auto repr = pt->to_pyrope();
+    std::string type_name
+        = (repr.size() >= 2 && repr.front() == '\'' && repr.back() == '\'') ? std::string{repr.substr(1, repr.size() - 2)}
+                                                                            : std::string{repr};
+    if (auto v = field_typename(type_name); v) {
+      return v;
+    }
   }
   return std::nullopt;
 }

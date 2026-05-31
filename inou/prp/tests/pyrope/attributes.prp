@@ -1,13 +1,15 @@
 /*
 :name: attributes
 :type: parsing lnast comptime
-:verifier_pass: 2
+:verifier_pass: 4
 :verifier_fail: 0
 */
 
 comb top(a::[comptime], b::[comptime], c) -> (r) {
   mut x = 0
-  r = (a.[comptime], b.[comptime], c.[comptime])
+  // `.[comptime]` is an integer (1/0); convert with `!= 0` to compare against
+  // boolean literals — mixing types in a comparison is a compile error.
+  r = (a.[comptime] != 0, b.[comptime] != 0, c.[comptime] != 0)
   cassert((true, true, false) == r)
 }
 

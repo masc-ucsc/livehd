@@ -4107,15 +4107,12 @@ Lnast_node Prp2lnast::compute_bit_mask_ref(TSNode sel_node) {
       return std::nullopt;
     }
     auto v = Dlop::from_pyrope(text);
-    if (v->is_invalid() || !v->is_i()) {
+    if (v->is_invalid() || !v->is_integer()) {
       return std::nullopt;
     }
-    // `#[N]` selects bit position N (single-bit mask = 1<<N). The 2-arg
-    // form `get_mask_value(N, N)` handles that case; the 1-arg form returns
-    // the lowest-N-bits mask instead (`get_mask_value(3)` = 0b0111, not
-    // 0b1000), which is the wrong semantic for a single-position select.
-    auto pos = static_cast<int>(v->to_i());
-    return Lnast_node::create_const(Dlop::get_mask_value(pos, pos)->to_pyrope());
+    // `#[N]` selects bit position N → single-bit mask `1 << N`. Pure Const
+    // arithmetic (no to_i; works for any position width).
+    return Lnast_node::create_const(Dlop::create_integer(1)->shl_op(*v)->to_pyrope());
   };
 
   auto make_range_mask = [&](TSNode expr_item) -> std::optional<Lnast_node> {
@@ -4137,12 +4134,14 @@ Lnast_node Prp2lnast::compute_bit_mask_ref(TSNode sel_node) {
 
     auto lo_v = Dlop::from_pyrope(get_text(lo));
     auto hi_v = Dlop::from_pyrope(get_text(hi));
-    if (lo_v->is_invalid() || hi_v->is_invalid() || !lo_v->is_i() || !hi_v->is_i()) {
+    if (lo_v->is_invalid() || hi_v->is_invalid() || !lo_v->is_integer() || !hi_v->is_integer()) {
       return std::nullopt;
     }
-
-    return Lnast_node::create_const(
-        Dlop::get_mask_value(static_cast<int>(hi_v->to_i()), static_cast<int>(lo_v->to_i()))->to_pyrope());
+    // `#[lo..=hi]` → contiguous mask `((1 << (hi-lo+1)) - 1) << lo`, all Const
+    // arithmetic (no to_i; any width).
+    auto one   = Dlop::create_integer(1);
+    auto width = hi_v->sub_op(*lo_v)->add_op(*one);
+    return Lnast_node::create_const(one->shl_op(*width)->sub_op(*one)->shl_op(*lo_v)->to_pyrope());
   };
 
   auto make_dynamic_mask = [&](TSNode expr) {
@@ -4275,7 +4274,7 @@ Lnast_node Prp2lnast::bit_selection_to_node(TSNode n) {
     std::string_view et(ts_node_type(ext_node));
     if (et == "sign_extend" && mask_ref.is_const()) {
       auto mv = Dlop::from_pyrope(mask_ref.get_name());
-      if (!mv->is_invalid() && mv->is_i()) {
+      if (!mv->is_invalid() && mv->is_integer()) {
         int sign_bit = mv->popcount() - 1;
         if (sign_bit < 0) {
           sign_bit = 0;
@@ -4748,6 +4747,23 @@ Lnast_node Prp2lnast::tuple_to_node(TSNode n, bool /*is_square*/) {
               lnast->add_child(as_idx, tg_ref);
               lnast->add_child(as_idx, Lnast_node::create_const(tt == "uint_type" ? "ubits" : "sbits"));
               lnast->add_child(as_idx, Lnast_node::create_const(txt.substr(1)));
+            }
+          } else if (tt == "expression_type" || tt == "dot_expression_type" || tt == "function_call_type") {
+            // Named-type field (`inn:inner_t`): record its typename so a later
+            // `o.inn.[typename]` resolves — mirrors the top-level `:Type` case in
+            // emit_type_spec. The attribute pass migrates this tuple_get-tmp attr
+            // onto the underlying field path (same as the ubits/sbits case).
+            auto raw = trim(get_text(ty));
+            if (!raw.empty()) {
+              auto as_idx = builder.add_child(Lnast_ntype::create_attr_set());
+              lnast->add_child(as_idx, tg_ref);
+              lnast->add_child(as_idx, Lnast_node::create_const("typename"));
+              std::string quoted;
+              quoted.reserve(raw.size() + 2);
+              quoted.push_back('\'');
+              quoted.append(raw);
+              quoted.push_back('\'');
+              lnast->add_child(as_idx, Lnast_node::create_const(quoted));
             }
           }
         }

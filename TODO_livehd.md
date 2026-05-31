@@ -118,370 +118,64 @@ cross-file dependencies stay visible.
     flatten N-level `store`; `prim_type_memory`/`register` + `ref`/`get_time`
     follow-ups.
 
-  **Depends on** [[1v]] (envelope — Phase A landed). Sibling of [[1d]] (producer
-  bit lowering) and [[1i]] (comb inline, done). **Blast radius:**
+  **Depends on** [[1v]] (envelope — Phase A landed). Sibling of the now-landed
+  producer bit lowering (1d) and comb inliner (1i). **Blast radius:**
   `lnast/lnast_nodes.def` + `lnast_writer`/`lnast_parser`, `inou/prp/prp2lnast.cpp`,
   all upasses (attributes biggest — deletes wrap/sat sticky logic + the 3-node
   declaration correlation), runner dispatch, `pass/lnastfmt`,
   `inou/slang/slang_tree.cpp`, `lnast_to_lgraph`, `inou/cgen`.
 
-- **1d** Bit-range / bit-selection lowering bugs in
-  `inou/prp/prp2lnast.cpp`. Pyrope's `#[…]` syntax (bit read,
-  bit write, bit reductions) is partially broken on the LNAST
-  producer side — multiple cases silently emit wrong code instead
-  of either a proper `get_mask`/`set_mask` or a hard error.
-  Sibling of [[1t]] (which adds the constprop/upass side); this
-  entry covers the prp2lnast-only fixes that can land first.
-  - **Symptoms** (observed via `inou.prp |> lnast.dump`):
-    - `b#[1..<4] = 1` lowers to `assign ref('b#[1..<4]') 1` —
-      bit-range syntax leaks into the ref text. Cause:
-      `process_lvalue_for_assign` has no `bit_selection` arm and
-      falls through to the text-fallback at `prp2lnast.cpp:827`.
-      Expected: a `range` / `minus` setup matching the read path,
-      then `set_mask new_word b mask 1`, then plain `assign b
-      new_word`. Mirrors how `member_selection` lvalues already
-      emit `tuple_set`.
-    - `const a.b:u3 = 1` silently lowers to `tuple_set a b 1`,
-      dropping the `const` decl and the `:u3` type cast. Cause:
-      `process_lvalue_for_assign`'s `member_selection` arm ignores
-      `decl_node` and `type_cast_node`. Pyrope has no syntax for
-      "declare new tuple field via path" — this must be a hard
-      compile error. Same fix applies if the LHS is a
-      `bit_selection`.
-    - `r = b#[1,4]` silently drops the `,4` in
-      `bit_selection_to_node`. Cause: index walker treats the first
-      child as the entire mask. Reject comma-lists inside `#[…]`
-      (tuple indices are not supported; if we later want them, lower
-      to a bitmask OR — but error first).
-  - **Plan:**
-    1. Lift `make_const_mask` / `make_range_mask` / `emit_range`
-       out of `bit_selection_to_node` into a shared helper so both
-       read and write paths reuse the same mask synthesis.
-    2. Add a `bit_selection` arm to
-       `process_lvalue_for_assign`. Shape: walk the bit_selection
-       to recover `base` and the `select` subtree, compute
-       `mask_ref` via the shared helper, emit
-       `set_mask new_word base mask_ref rvalue` followed by
-       `assign base new_word`. `set_mask` stays pure-functional
-       (matches LGraph Dlop shape: `set_mask dest input mask
-       value`), `assign` writes the result back.
-    3. In both the `member_selection` and (new) `bit_selection`
-       arms, hard-error if `decl_node` or `type_cast_node` is
-       non-null: `const`/`mut`/`:type` are only legal on bare
-       identifiers.
-    4. In `bit_selection_to_node`, error on a comma-list inside
-       the `#[…]` index node.
-  - **Affects:** `prp-bitreverse`, `prp-bitset`, `prp-formux`,
-    `prp-valid_unknown_bits` bit-range portion, and the
-    `pp.prp` / `assert.prp` repros from the working tree. The
-    write-side fix is a prerequisite for [[1t]] (the constprop
-    bit-range work) — without it, set_mask never reaches
-    constprop in the first place.
-
-- **1i** Comb-call inliner as a **virtual splice into the runner's
-  single linear traversal** — no deep copy. **Goal 1. ✅ DONE 2026-05-29.**
-
-  **STATUS: COMPLETE.** `evaluate_callee_inline`, `try_eval_comb_call`, and
-  `maybe_fire_setter_init` were DELETED from constprop (~1285 lines). The runner
-  virtual-splice now handles every shape the evaluator did. Suite is back at the
-  exact baseline (109 pass / 18 fail; the 18 are identical preexisting failures
-  unrelated to inlining). The 13 evaluator-dependent tests that broke on deletion
-  were all recovered via runner fixes (see the per-test list at the end of this
-  entry / memory `task-1i-inliner-status`):
-  - multi-output scalar gate (tuple-VALUED-output detection, not "any tuple op");
-  - file-named combs (lookup prefers a real-signature body over the file module);
-  - signed-output sext in the epilogue + output pre-declaration in the inlined
-    top scope (branch-assigned outputs survive block-leave);
-  - ref-param writeback (`__ref_arg` marker → positional);
-  - void combs (cassert/cputs or ref-param side effect; guarded vs implicit-return);
-  - bundle/tuple actuals (recursion gate accepts const bundles; bundle-literal
-    expansion; tuple-param via bundle alias);
-  - closures (function-name actuals) + method dispatch (typename bundle → fn,
-    self = leading positional actual, bundle-aliased ref writeback);
-  - nested tuple-valued multi-output: `is_tuple_field_key()` keeps tuple-literal
-    KEYS raw under inlining + fold tuple-field VALUES in emit_op_with_fold.
-
-  **Why.** Today `uPass_constprop::evaluate_callee_inline` is not an
-  inliner: it's a *constant evaluator* — a second, partial
-  reimplementation of the runner's statement semantics over its own
-  side maps (`local_values`, `local_attrs`, `local_ranges`,
-  `local_decl_widths`). It binds actuals→params, runs a fixed-point
-  sweep, and returns the **output `Const`s**. It is **all-or-nothing**:
-  if any statement can't fold to a constant it aborts and the `fcall`
-  stays runtime. That design (a) duplicates the real `process_*`
-  handlers — every construct must be hand-coded twice (the
-  2026-05-28 session had to add `attr_get [bits]`, `type_spec`, and
-  nested-`stmts` support just to inline `forunrollbits.prp`), and
-  (b) can never emit *partially*-folded hardware. The recent fixes are
-  a stopgap; 1i supersedes the mini-interpreter.
-
-  **Decision: no deep copy.** The upass is a **single linear pass**
-  (an optional 2nd pass runs only when the 1st couldn't because an
-  `import` LNAST wasn't ready). Deep-copying the callee body into the
-  caller tree would require re-traversing the generated code and
-  re-running passes to stabilize — many passes until fixpoint. We do
-  not want that. Instead the runner, on hitting an `fcall` whose comb
-  LNAST is in `function_registry`, **descends its cursor into the
-  callee's stmts as part of the same walk**, so the existing
-  `process_*` handlers process the inlined body in-order, once.
-  Whatever folds, folds; whatever stays runtime becomes real IR at the
-  call site. No second implementation, no all-or-nothing.
-
-  **Mechanism.**
-  1. **Inline-frame stack.** Add a stack of frames to the runner;
-     each frame = `{const Lnast* callee, rename_prefix,
-     return_target(s), ref_writeback_map, depth}`. The tree cursor
-     (`move_to_child/sibling/parent`) gains a thin redirection layer:
-     when the walk would step past an inlinable `fcall`, push a frame
-     and redirect subsequent stepping into `callee`'s `stmts` child;
-     when that body is exhausted, run the epilogue and pop, resuming
-     the caller at the `fcall`'s next sibling. This is a *virtual*
-     splice — the callee tree is read in place, never copied or
-     mutated.
-  2. **Fake-assign prologue (arg binding).** Before descending, bind
-     each actual to its formal as a synthesized `assign`
-     (`<prefix>param = actual`), field-wise for tuple/bundle args and
-     positional-or-named matching the existing `Call_actual` logic.
-     These bindings feed the *same* symbol-table path `process_assign`
-     uses — no special evaluator. A `ref` param records a writeback
-     entry so the epilogue copies `<prefix>param` back to the caller
-     variable.
-  3. **α-rename / aliasing (the crux).** Because nothing is copied, the
-     callee nodes keep their original names (`x`, `n`, `___1`…). Every
-     name read/written while a frame is active must be namespaced by
-     that frame's `rename_prefix` so it can't collide with caller
-     temporaries or with other call sites of the same callee. Resolve
-     names through the frame stack (innermost-first); the prologue's
-     RHS actuals resolve in the *enclosing* frame's namespace, the
-     LHS params in the *new* frame's. Pick a prefix scheme that's
-     stable per call site (e.g. `<callee>$<callsite_id>$`) so a 2nd
-     upass pass reproduces the same names.
-  4. **Epilogue (output + ref writeback).** Map the callee's declared
-     outputs back to the `fcall` destination(s): `dst = <prefix>out`
-     (single), or field-wise (`dst.field = <prefix>out.field`) for
-     tuple / multi-output, mirroring `try_eval_comb_call`'s current
-     bundle splat. Apply `ref` writebacks (`caller_var =
-     <prefix>param`). Then pop the frame.
-
-  **Constraints / guards.**
-  - **comb only.** Skip `pipe[N]` / `mod` / anything stateful — their
-    state/timing is instance-specific and can't be naively spliced.
-  - **Depth / cycle guard.** Reuse the `kInlineMaxDepth` seed; detect
-    direct/indirect recursion via the frame stack and refuse (a
-    recursive comb without a static bound can't inline).
-  - **Import not ready.** If the callee LNAST isn't in
-    `function_registry` yet (pending `import`), do **not** inline this
-    pass — leave the `fcall`; the existing 2nd-pass-after-import
-    mechanism picks it up. Ties into the `pending_import` poison work
-    ([[2k]] / `docs/upass_redesign.md`).
-  - **Idempotence across the optional 2nd pass.** Same call site must
-    produce the same rename prefix and the same bindings so a re-run is
-    a no-op where the 1st pass already inlined.
-
-  **Retire / fold in.** Once 1i lands, `evaluate_callee_inline` and its
-  duplicate handlers go away (or shrink to a thin pure-constant fast
-  path for cassert discharge if profiling shows it's worth keeping).
-  The verifier's cassert discharge then rides on the normal folded IR
-  rather than the evaluator's returned `Const`s.
-
-  **Relationship.** Unblocks the general case behind the
-  bit-range/`set_mask` folding in [[1t]] and the `.[bits]`/`.[max]`/
-  `.[min]` width reads that [[1v]] (typesystem) publishes — inlined
-  bodies query the same type info as caller-scope code. Sibling of
-  [[1d]] (producer-side bit lowering) only in that both feed the
-  runner clean IR.
-
-  **Affects.** `forunrollbits.prp`, `pp/pp2/pp3.prp` repros, and any
-  comptime test that calls a comb with non-constant-foldable internals
-  (those abort under the current evaluator and would instead inline to
-  real IR). Validate that the inlined IR matches what a hand-flattened
-  body would produce, and that multi-call-site renaming stays
-  collision-free.
-
-  ### Concrete design (grounded in `upass/runner/`, 2026-05-28)
-
-  **Locked decisions** (this session): **(1) full runner replacement** —
-  inlining moves out of constprop into the runner and
-  `evaluate_callee_inline` is deleted; **(2) pure emit+fold** — always
-  emit the inlined body and let constprop fold + `process_if`
-  dead-branch-prune; recursion terminates when a folded-false cond
-  prunes the recursive arm; a node-emit **fuel budget** is the safety
-  valve (exceed → emit the `func_call` verbatim as runtime + warn).
-
-  **Architecture facts that shape it.** The runner
-  (`upass/runner/upass_runner.cpp`) is a *single linear walk* where all
-  passes plug into `dispatch_to_passes`; it reads the source via an
-  `Lnast_manager` cursor (`upass/core/lnast_manager.hpp`) and emits a
-  staging tree with operand folding (`emit_op_with_fold`). It already
-  does **dead-branch elimination** in `process_if` (lines 888-1095) —
-  the recursion-termination primitive. Every main-walk pass reads names
-  *only* via the `lm` cursor (verified: 0 raw-`lnast` name reads outside
-  the to-be-deleted evaluator), so a rename applied inside
-  `Lnast_manager` is seen uniformly by every pass's symbol table **and**
-  the emit path — no per-pass edits. The runner already reserves an
-  (empty) `function_registry` field for exactly this (`upass_runner.hpp:74`).
-
-  **Core mechanism — source-swap + uniform rename (no deep copy).**
-  The `Lnast_manager` gains a frame stack. At an inlinable `func_call`
-  the runner: (a) reads actuals from the call node; (b) emits a
-  *prologue* of binding assigns `<tag>param = actual` (synthesized in a
-  scratch tree, processed through the normal walk so constprop folds
-  them and records `<tag>param` in its ST); (c) `push_source(callee,
-  tag)` — the manager swaps its active source tree to the callee body
-  and activates a per-call-site rename tag; (d) walks the callee `stmts`
-  via the ordinary `process_lnast`, so all passes fold/observe and the
-  renamed, folded body is emitted into the caller's staging; (e)
-  `pop_source`; (f) emits an *epilogue* mapping `dst = <tag>output` and
-  `caller_var = <tag>refparam` (scratch, processed normally). The
-  callee body is **read in place** — never copied.
-
-  **Rename scheme.** Applies to **ref** nodes only (variables), never
-  `const` (literals / attr-keys / the `comb` kind). Preserve tmp-ness:
-  `x → <tag>x`, but `___N → ___<tag>N` so `Lnast::is_tmp` /
-  `anchor_for`'s `___` special-case still hold. Per-call-site `tag` is
-  derived from the call-site source nid (stable across the optional 2nd
-  pass → idempotent). Renamed names are interned in a manager-owned pool
-  so `current_text()`'s `string_view` stays valid.
-
-  **Scope-key fix.** constprop keys `block_scope` by raw
-  `lm->get_current_nid().get_class_index()` (`upass_constprop.cpp:788`);
-  across the callee tree those indices collide with caller indices. Add
-  `Lnast_manager::current_scope_uid()` = `(frame_salt<<40)|class_index`
-  and have constprop (and any other nid-keyed pass) use it. Salt is 0
-  with no active frame → no behavior change off the inline path.
-
-  ### Phases (each keeps the suite green)
-
-  - **A — manager primitive.** `Lnast_manager`: `lnast` const-ref →
-    owned `shared_ptr`; add frame stack + `push_source/pop_source`,
-    tag-rename in `current_text()/current_node()`, intern pool,
-    `current_scope_uid()`. No caller pushes frames yet → no behavior
-    change. Add a focused unit test.
-  - **B — scope-key migration.** constprop `process_stmts` uses
-    `current_scope_uid()`; audit/migrate other nid-keyed passes. Still
-    inert (salt 0).
-  - **C — runner func_call splice (non-recursive).** Populate runner
-    `function_registry` (comb bodies). In `process_lnast` `func_call`
-    case: if callee ∈ comb registry → splice (prologue / push_source /
-    walk / pop / epilogue); else fall back to the existing `A_OP` path
-    (typecasts, cell-ops `__sum`, markers stay in constprop). Land
-    `pp3`/`forunrollbits` via the new path.
-  - **D — recursion + fuel.** Frame-stack cycle/depth guard + node-emit
-    fuel; exceed → verbatim runtime `func_call` + `log`. Lean on
-    `process_if` pruning for comptime-bounded recursion.
-  - **E — delete the evaluator.** Remove `try_eval_comb_call`,
-    `evaluate_callee_inline`, and the 2026-05-28 stopgap handlers.
-    `process_func_call` keeps only typecast/cell/marker folds.
-  - **F — setter-init / method-dispatch / closures / verifier.**
-    Route `maybe_fire_setter_init` (entry 1k) through the runner splice
-    (synthesize a `func_call` or a runner hook). Resolve `obj.method()`
-    to the qualified comb at the call site. Bind function-name actuals
-    (closures). Ensure inlined `cassert`s count once via the normal walk
-    (drop `mark_inlined_cassert_*` if redundant).
-  - **G — green + new tests.** Multi-call-site collision, recursion,
-    partial-fold (runtime body emits correct IR), parity vs hand-flatten.
-
-  **Status (2026-05-28): Phases A–C landed, zero net regression**
-  (`//inou/prp:all` = 109 pass / 18 fail, the same pre-existing baseline).
-  Implemented: `Lnast_manager` source-frame stack + uniform rename
-  (`push_source`/`pop_source`, user vars → `<tag>name`, tmps → fresh
-  `___<N>`, intern pool, `current_scope_uid`); constprop/attributes
-  block-scope keys on `current_scope_uid`; runner `try_inline_func_call`
-  (prologue type_spec+bind → body walk → epilogue); coalescer
-  `flush_deferred` before every source-swap (fixed a stale-nid crash);
-  recursion detection + precomputed `inlinable_callees_` gate. The
-  runner inlines the supported shape and **bails everything else to the
-  still-present evaluator** — so this is the foundation, not yet the full
-  replacement. Per-instantiation cassert counting was adopted (decision
-  this session); `scope2`/`attr_comptime_query`/`assert_ifelse2`
-  expectations bumped with a count-note.
-    - **E reassessed (2026-05-29): deleting `evaluate_callee_inline` is a
-      MAJOR architectural effort, not 6 small features.** Measured it by
-      stubbing `try_eval_comb_call` to return false (forcing runner-only) and
-      running the comptime suite: **16 tests still depend on the evaluator**
-      beyond the 18 baseline — basic calls (`fcall1/2/3`, `simple`, `assert`),
-      `does_test1`, `paths_if`, `phase5_const_check`, `ref_comb`, recursion
-      (tree_sum), closures (`closure_capture`, `fcall6`), methods/setters
-      (`fcall5/5b`, `fcall_rename_deep`, `setter_complex`, `setter_multi_field`,
-      `tuple_decorator_complex`). The runner folds only a *subset* of casserts
-      per test; the residual unknowns need: bit-range/`get_mask` folding in
-      inlined bodies, multi-output **destructure** (`(b,c)=dox()` — the dst is
-      multiple refs, not a single bundle tmp, so the current `emit_inline_tuple`
-      path doesn't even fire), tuple actuals, method dispatch, closures,
-      setter-init. **Several of these need the runner to read constprop's
-      bundle/typename symbol-table state** (is a ref a const bundle? what's a
-      var's typename?) — i.e. the shared symbol table (Step C of the upass
-      redesign), a large prerequisite. **Key trap:** every step that makes the
-      runner inline *more* (e.g. resolving `comb fcall1` in module `fcall1`)
-      regresses tests, because the runner then *shadows* the working evaluator
-      for shapes it can't fully fold. So the evaluator can't be removed
-      incrementally without first making the runner fold each shape completely.
-        - **Landed (net-safe, 109/18 deterministic):** `emit_inline_tuple`
-          (single-bundle-tmp multi-output), positional-placeholder aliasing
-          (`placeholder_callees_`), and — the campaign foundation —
-          **shared-ST read access**: `uPass::provide_bundle_fields` /
-          `provide_typename` (constprop overrides) + runner
-          `try_bundle_fields` / `try_typename` (`shared_st_passes_`). Additive
-          /inert; gives the runner the bundle/typename introspection the
-          remaining feature ports need.
-        - **Decision (2026-05-29): committed to the campaign** (delete the
-          evaluator). Ordered next steps, each consuming the foundation and
-          validated by stubbing `try_eval_comb_call`→false:
-            1. tuple actuals (`try_bundle_fields` → bundle-param prologue via
-               `emit_inline_tuple`; also fixes the recursion const-arg gate for
-               bundle args → `tree_sum`).
-            2. bit-range/`get_mask` folding in inlined bodies (`fcall1/2`).
-            3. multi-output **destructure** `(b,c)=dox()` (dst is *multiple*
-               refs, not one bundle tmp — needs a distinct epilogue path).
-            4. method dispatch (`try_typename` → resolve `obj.method`, bind
-               `self`).
-            5. closures / function-name actuals.
-            6. setter-init (entry 1k) — `try_typename` + a runner first-assign
-               hook.
-          Delete `evaluate_callee_inline` + `try_eval_comb_call` only once
-          runner-only (stub) is fully green. **Trap to remember:** making the
-          runner inline more shadows the evaluator, so each shape must fold
-          *completely* before its bail is removed.
-        - **NOTE:** the "second flaky heap bug" seen mid-turn was a FALSE ALARM
-          (memory pressure from running sanitizer builds + tight loops
-          concurrently). Quiet machine + clean build = 0/30, suite deterministic
-          109/18. Don't judge flakiness under self-induced load.
-    - **Phase D DONE (2026-05-28) — via a const-arg gate, NOT an iterative
-      rewrite.** First diagnosis was wrong: the fib stack-overflow was not
-      depth-driven. Root cause (found by tracing param bindings): the
-      *standalone* function body (`is_function_body`, param is an unbound
-      input) inlines its own recursive call with a non-const arg, so the
-      base-case cond never folds → unbounded unroll → stack overflow. The
-      call sites (const args) fold fine at natural shallow depth. Fix:
-      **a recursive callee is only spliced when every actual folds to a
-      comptime constant** (only then does `process_if` prune the base
-      case); non-const recursive calls (standalone bodies, runtime args)
-      stay a runtime func_call. recursion.prp now passes via the runner
-      (fib≤10, fact≤6) — stable 4/4. Kept: fuel (`inline_budget_` 200000 +
-      `kInlineMaxDepth` 256 backstop for pathological const-arg recursion
-      like f(n)=f(n+1)) and the tuple-param exclusion (`tree_sum` → still
-      evaluator, pending tuple-actual support in E). So the iterative
-      rewrite is unnecessary; recursion no longer needs the evaluator.
-    - **Heap UAF FIXED (2026-05-28).** The nondeterministic crashes
-      (string_interpolation etc.) were a heap-use-after-free in
-      `upass_attributes_migrate.cpp:201`: `type_info_map.emplace(path,
-      ti_it->second)` where `ti_it` is an iterator into the *same* map — the
-      emplace rehashes and invalidates it. Found via `--config=asan` (ASan
-      reported it deterministically on `fcall6.prp`). Fixed by copying the
-      `Type_info` out by value before the emplace. Suite is now
-      **deterministic: `//inou/prp:all` = 109 pass / 18 fail** across
-      repeated runs (was flaky 18↔20). This unblocks reliable Phase E
-      validation.
-
-  **Open risks to watch.** (1) `current_text()` lifetime under rename
-  (intern pool); (2) other passes (attributes/bitwidth) that key state
-  by nid need the scope-uid too; (3) DCE (`dead_code_eliminate_staging`)
-  must still recognize renamed tmps (`___<tag>N`); (4) func_extract
-  still spawns standalone callee bodies — verifier must not double-count
-  casserts between the standalone body and the inlined copy
-  (`verifier_include_funcs`); (5) the `runner_symbol_table` (Step C) is
-  idle today — decide whether 1i finally activates it or stays on
-  constprop's private `st`.
+- **1g** Stop converting `Const`→`int` (`to_i`/`is_i`) in the **uPass passes** —
+  do all numeric/bit work in `Const`, on `hlop` top-of-tree where the `int`
+  shift/sext overloads are now **protected**. **PARTIAL, 2026-05-30. Goal 1.**
+  Broader value-layer cleanup (legacy LGraph path + symbol deletion) is [[2t]].
+  - **Design (confirmed with the user 2026-05-30).** `to_i`/`is_i` collapse a
+    `Const` to one `int64_t`, so they break on >64-bit values and the
+    present-but-nil sentinel ([[1b]] hit the nil case → abort in
+    `blop.hpp::negn`). Rules:
+    1. **Op arguments stay `Const`.** hlop made `shl_op(int)`/`sra_op(int)`/
+       `sext_op(int)` protected; call the `const Dlop&` overloads — pass the
+       value through (`args[0].sext_op(args[1])`). For a genuinely computed
+       width (e.g. `n-1` in `wrap_to_signed`), wrap with `Dlop::create_integer`.
+    2. **Bit ranges → `Const` mask arithmetic.** `foo#[start..=end]` builds the
+       mask `((1<<(end-start+1))-1)<<start` from the `start`/`end` `Const`s, then
+       `value.get_mask_op(mask)`; open `start..` → `value.sra_op(start)`. No
+       `to_i`, no `lo<0`/`hi<lo` guards (a nonsense range yields a degenerate
+       mask). (`apply_range_mask`, constprop `process_set_mask`, prp2lnast.)
+    3. **Unsigned coercion → store the declared max `Const`, mask with it.** For
+       `uN`, `max == 2^N−1 ==` the N-bit mask, so the first-write reinterpret is
+       `v.is_negative() ? v.and_op(max) : v` — no width/`bit_test(N)`/`to_i`.
+       (constprop `process_declare`→`decl_unsigned_max_`, `process_assign`.)
+    4. **Ranges/derivation carry max/min `Const`s** (never bits): upass/bitwidth
+       computes the possible `max`/`min` value per op (`a+b` ⇒ `a.max+b.max`,
+       `a.min+b.min`; const ⇒ `max==min`); `.[bits]` derives from the `Const`
+       (`get_bits`), not from `to_i`+`bit_width`. (This is the model — unlike
+       pass/bitwidth which is intentionally max/min-**bits**-based and keeps
+       `to_i`; **leave pass/bitwidth alone**.)
+    5. **External-table indexing is a fair `to_i` exception.** Indexing a C++
+       container (string `substr`, bundle/tuple key index, building a bounded
+       range bundle, LNAST node int payload) genuinely needs an `int` — and an
+       index ≥ 2^64 is physically impossible, so `to_i` is fine there. Sites:
+       constprop string-slice (`:2327`), tuple-key (`:1435`), key-string
+       (`:2379`), range→bundle build (`:2285`).
+  - **Landed (all green; `upass_constprop_test` passes):**
+    `lgraph_manager.hpp` (div/sub folds → `div_op`/`sub_op` = the real overflow
+    fix; `==1` → `same_repr`; guards → `is_integer`); constprop `sext` (pass
+    `Const`), `apply_range_mask` + `process_set_mask` (`Const` mask),
+    `process_declare`/`process_assign` coercion (`decl_unsigned_max_`);
+    `wrap_sat.hpp` `sext_op(create_integer(n-1))`; `attributes_read:53`
+    (`same_repr(-1)`).
+  - **Remaining uPass numeric sites:** `attributes_read` derive-bits + range
+    guards (×~7), `attributes.cpp` [[1b]] range guards (`is_i`→`is_integer`) +
+    bits-attr read, `ssa` derive-bits (×4), `prp2lnast` mask positions +
+    `bits_to_bounds`, `lnast_manager:150` (value→const-node ⇒ `to_pyrope`).
+    `stringify_one` (`string()` cast, `:53`) needs an arbitrary-precision
+    **decimal** formatter in hlop (`to_pyrope` is hex >63) — FLAGGED.
+  - **Build note:** the new hlop pin also breaks the non-uPass `int`-overload
+    callers — `pass/cprop` (`:379`), `inou/yosys` (×3), `inou/cgen` — which must
+    move to `Const` args too ("other passes"); `pass/bitwidth` is intentionally
+    left on `to_i`. Until those compile, the full `lgshell`/comptime build is
+    blocked (verify uPass via `//upass/...` unit tests meanwhile).
 
 ## Group 1-complex — foundation, larger scope
 
@@ -489,12 +183,29 @@ Tasks that are independent of other Group 1/2 work but are large enough
 that they warrant their own bucket. Can be done in parallel with regular
 Group 1 entries; downstream Groups treat them as Group 1 dependencies.
 
-- **1b** New CLI: `setup/run/status/list/describe`, TOML config, JSONL
-  results, error classes — `docs/contracts/future_cli.md`.
+- **1y** New CLI: `setup/run/status/list/describe`, TOML config, JSONL
+  results, error classes — `docs/contracts/future_cli.md`. (Renamed from
+  `1b` — that letter is the Pyrope range-fit task in TODO_prp.md.)
 - **1f** Source-map indirection (LOC propagation: canonical map + per-cell
   index, alias multi-loc, partition-root fallback) — see "Source location
   (LOC) propagation strategy" below and `docs/contracts/sourcemap.md`.
 ## Group 2 — depends on Group 1
+
+- **2t** Finish removing `Dlop`/`Slop` `is_i()`/`to_i()` from the value layer
+  (and delete the symbols) — **not started.** Depends on [[1g]] (the uPass passes
+  + `inou/prp` already migrated to `to_index()`, and `to_index` landed in hlop).
+  - Migrate the **legacy LGraph path** to `to_index()` / `Const` ops:
+    `pass/bitwidth/bitwidth.cpp` (13), `pass/bitwidth/bitwidth_range.cpp` (6),
+    `pass/cprop/cprop.cpp` (11), `inou/cgen/cgen_verilog.cpp` (11),
+    `core/pin_tracker.hpp` (3), `graph/const_pin.cpp` (2).
+  - Migrate the **hlop internals**: `eval.hpp` (shl/sra/mux/mem),
+    `dlop.cpp` (shl/sra/mux/lut/mem). The `to_pyrope`/`to_string`/`to_verilog`
+    formatting fast-paths read `base()` directly behind an internal
+    `get_bits()<=62 && !has_unknowns()` check (no public accessor needed). Plus
+    the 5 hlop test files (`dlop_test`, `slop_test`, `eval_test`,
+    `slop_dlop_diff_test`, `slop_sint_diff_test`).
+  - Then **delete** `Dlop::is_i`/`to_i` (`dlop.hpp`/`dlop.cpp`) and
+    `Slop::is_i`/`to_i` (`slop.hpp`). Push + pin-bump. Keep both repos green.
 
 - **2h** Demand-driven incremental upass cache keyed on
   `(tree_body_hash, deps.interface_hash)` —

@@ -45,27 +45,25 @@ Type_info type_info_from(const std::shared_ptr<Lnast>& lnast, Lnast_nid type_nid
     std::optional<Const> min_v;
     if (!max_nid.is_invalid() && Lnast_ntype::is_const(lnast->get_type(max_nid))) {
       auto v = Dlop::from_pyrope(lnast->get_name(max_nid));
-      if (v->is_i()) {
+      if (v->is_integer()) {
         max_v = *v;
       }
       auto min_nid = lnast->get_sibling_next(max_nid);
       if (!min_nid.is_invalid() && Lnast_ntype::is_const(lnast->get_type(min_nid))) {
         auto mv = Dlop::from_pyrope(lnast->get_name(min_nid));
-        if (mv->is_i()) {
+        if (mv->is_integer()) {
           min_v = *mv;
         }
       }
     }
     ti.is_signed = !(min_v && !min_v->is_negative());  // unsigned only when min known ≥ 0
-    if (max_v && min_v && max_v->is_i() && min_v->is_i()) {
-      const int64_t mx = max_v->to_i();
-      const int64_t mn = min_v->to_i();
-      if (mn >= 0) {
-        ti.bits = mx > 0 ? static_cast<int32_t>(std::bit_width(static_cast<uint64_t>(mx))) : 0;
+    // bits from the bound Consts via get_bits() (signed width; drop the sign
+    // bit when unsigned) — no to_i, handles >64-bit bounds.
+    if (max_v && min_v && max_v->is_integer() && min_v->is_integer()) {
+      if (!min_v->is_negative()) {
+        ti.bits = max_v->is_known_zero() ? 0 : static_cast<int32_t>(max_v->get_bits() - 1);
       } else {
-        const int32_t b_pos = mx >= 0 ? static_cast<int32_t>(std::bit_width(static_cast<uint64_t>(mx))) + 1 : 1;
-        const int32_t b_neg = static_cast<int32_t>(std::bit_width(static_cast<uint64_t>(-mn - 1))) + 1;
-        ti.bits             = std::max(b_pos, b_neg);
+        ti.bits = static_cast<int32_t>(std::max<int64_t>(max_v->get_bits(), min_v->get_bits()));
       }
     }
   }

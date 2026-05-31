@@ -50,7 +50,11 @@ static Const stringify_one(const Const& v) {
   if (v.is_string()) {
     return v;
   }
-  return *Dlop::from_string(std::to_string(v.to_i()));
+  // Render the value to a string Const (the result feeds a TEXT concat in
+  // stringify_concat_trivials — returning `v` itself would bit-concat). Use
+  // to_pyrope() (the codegen renderer) — width-safe for >64-bit values, unlike
+  // std::to_string(to_i()) which overflows.
+  return *Dlop::from_string(std::string(v.to_pyrope()));
 }
 
 // Stringify each entry in `vals` and text-concat them. Returns nullopt if any
@@ -77,30 +81,22 @@ static std::optional<Const> stringify_concat_trivials(const std::vector<Const>& 
 }
 
 Const uPass_constprop::apply_range_mask(const Const& value, const Const& start, const Const& end) {
-  if (!start.is_i()) {
-    return *Dlop::invalid();
-  }
-  const auto lo = start.to_i();
-  if (lo < 0) {
-    return *Dlop::invalid();
-  }
-  // Open-ended `lo..` (end == nil): right-shift by lo. This dodges the
-  // negative-mask path of get_mask_op (whose `bits<=1 → 1` legacy in
-  // get_neg_mask_value silently breaks the lo==0 "all bits" case), and
-  // matches Pyrope's bit-slice semantics where `b#[lo..]` is the upper
-  // bits of `b` packed LSB-first.
+  // Bit-slice `value#[start..=end]` (and the open `value#[start..]` when `end`
+  // is nil). Everything stays in Const arithmetic — no is_i/to_i, no int round-
+  // trip, no width/limit guards (a nonsense range just yields a degenerate
+  // mask). This handles arbitrary-precision values that would overflow int64.
+  //
+  // Open-ended `start..`: right-shift by `start` (upper bits packed LSB-first).
   if (end.is_nil()) {
-    return *value.sra_op(lo);
+    return *value.sra_op(start);
   }
-  if (end.is_i()) {
-    const auto hi = end.to_i();
-    if (hi < lo) {
-      return *Dlop::invalid();
-    }
-    const auto mask = Dlop::get_mask_value(static_cast<int>(hi), static_cast<int>(lo));
-    return *value.get_mask_op(*mask);
-  }
-  return *Dlop::invalid();
+  // Closed `start..=end`: build a contiguous mask of (end-start+1) ones at
+  // position `start`, then get_mask_op selects+packs those bits to bit 0.
+  //   mask = ((1 << (end - start + 1)) - 1) << start
+  auto one   = Dlop::create_integer(1);
+  auto width = end.sub_op(start)->add_op(*one);  // end - start + 1
+  auto mask  = one->shl_op(*width)->sub_op(*one)->shl_op(start);
+  return *value.get_mask_op(*mask);
 }
 
 uPass_constprop::uPass_constprop(std::shared_ptr<upass::Lnast_manager>& _lm) : uPass(_lm) {
@@ -281,10 +277,14 @@ void uPass_constprop::process_assign() {
     // past the declared width (`bit_test`+!`unknown_bit_test` — `0sb?` keeps
     // its natural width), and `!st.has_trivial` restricts it to the first
     // write so per-statement wrap/sat reassignments stay in control.
-    if (auto it = decl_unsigned_bits_.find(std::string(lhs_text)); it != decl_unsigned_bits_.end() && !st.has_trivial(lhs_text)
-                                                                   && v.bit_test(static_cast<int>(it->second))
-                                                                   && !v.unknown_bit_test(static_cast<int>(it->second))) {
-      v = *v.and_op(*Dlop::get_mask_value(static_cast<int>(it->second)));
+    // Task 1b — reinterpret a known-negative first-write literal to its
+    // unsigned pattern via `v & max` (for uN, max is the N-bit all-ones mask).
+    // No width/to_i. `is_negative()` is false for an unknown sign bit (`0sb?`),
+    // so that case keeps its natural width (see valid_simple); a known-1 sign
+    // bit (incl. interior-unknown patterns like `0sb1?01_?000`) is reinterpreted.
+    if (auto it = decl_unsigned_max_.find(std::string(lhs_text));
+        it != decl_unsigned_max_.end() && !st.has_trivial(lhs_text) && v.is_negative()) {
+      v = *v.and_op(it->second);
     }
     store_trivial(lhs_text, v);
   } else {
@@ -309,43 +309,41 @@ void uPass_constprop::process_declare() {
     move_to_parent();
     return;
   }
-  uint32_t   bits          = 0;
-  bool       unsigned_type = false;
-  const auto t             = get_raw_ntype();
+  const auto t = get_raw_ntype();
   if (Lnast_ntype::is_ref(t)) {
     // Task 1t — named type: the type slot is a `ref(NAMED)`. Record it so the
     // var's init write materializes NAMED's default fields (see process_assign).
     decl_named_type_[var] = std::string(current_text());
   } else if (Lnast_ntype::is_prim_type_int(t)) {
-    // prim_type_int(max, min): unsigned iff min is known and ≥ 0; bits derives
-    // from the known max ("nil" children leave the bound unset → skip).
+    // prim_type_int(max, min): unsigned iff min is known and ≥ 0. Record the
+    // declared MAX as a Const (for uN this IS the N-bit all-ones mask) so the
+    // var's first scalar write can reinterpret a negative literal to its
+    // unsigned pattern via `v & max` (see process_assign). No bits/to_i — works
+    // for arbitrarily wide maxes. ("nil" children parse non-integer → unset.)
     std::optional<Const> max_v;
     std::optional<Const> min_v;
     if (move_to_child()) {
       if (Lnast_ntype::is_const(get_raw_ntype())) {
         auto v = Dlop::from_pyrope(current_text());
-        if (v->is_i()) {
+        if (v->is_integer()) {
           max_v = *v;
         }
       }
       if (move_to_sibling() && Lnast_ntype::is_const(get_raw_ntype())) {
         auto v = Dlop::from_pyrope(current_text());
-        if (v->is_i()) {
+        if (v->is_integer()) {
           min_v = *v;
         }
       }
       move_to_parent();
     }
-    if (min_v && !min_v->is_negative() && max_v && max_v->is_i()) {
-      const int64_t mx = max_v->to_i();
-      unsigned_type    = true;
-      bits             = mx > 0 ? static_cast<uint32_t>(std::bit_width(static_cast<uint64_t>(mx))) : 0;
+    if (min_v && !min_v->is_negative() && max_v && !max_v->is_negative()) {
+      move_to_parent();
+      decl_unsigned_max_[var] = *max_v;
+      return;
     }
   }
   move_to_parent();
-  if (unsigned_type && bits != 0) {
-    decl_unsigned_bits_[var] = bits;
-  }
 }
 
 template <typename F>
@@ -555,6 +553,16 @@ static std::optional<Const> compare_bundles_eq(const std::shared_ptr<Bundle cons
       }
       if (ov.same_repr(ep->trivial)) {
         continue;
+      }
+      // Pyrope forbids MIXING TYPES across a comparison (like `bool + int`):
+      // comparing a KNOWN `bool` to a known non-bool (or string vs number) is a
+      // COMPILE ERROR, not an implicit convert — write it explicitly, e.g.
+      // `(x != 0) == b`. Gated on both-known + non-nil (nil = `x == nil` idiom;
+      // an unknown cross-type compare falls through to eq_op's tri-state).
+      if (!ov.is_nil() && !ep->trivial.is_nil() && !ov.has_unknowns() && !ep->trivial.has_unknowns()
+          && (ov.is_bool() != ep->trivial.is_bool() || ov.is_string() != ep->trivial.is_string())) {
+        upass::error(
+            "uPass_constprop: comparison mixes types (bool vs int/string) — convert explicitly, e.g. `(x != 0) == b`\n");
       }
       const Const eq = *ov.eq_op(ep->trivial);
       if (eq.is_known_true()) {
@@ -805,19 +813,16 @@ void uPass_constprop::process_eq_ne_impl() {
     if (a.scalar.same_repr(b.scalar)) {
       result = *Dlop::create_bool(!Negate);
     } else if (same_bits_ignore_type(a.scalar, b.scalar)) {
-      // Type-agnostic structural identity: a `(v != 0)` (Boolean
-      // unknown) compared against the literal `0sb?` (Integer unknown)
-      // is two values with the same bit pattern but differing Pyrope
-      // types. Constprop is type-agnostic; the typecheck pass flags
-      // illegal cross-type compares. Treat structurally identical bit
-      // patterns as known-equal regardless of type so `(v != 0) ==
-      // 0sb?` folds to true.
+      // Type-agnostic structural identity (same bit pattern, differing Pyrope
+      // type). NOTE: a strict "mixing types in a comparison is a compile error"
+      // rule belongs here for the SCALAR path too, but enforcing it currently
+      // breaks bit_select/bitreduce/cellmap_comb, which intentionally compare
+      // bool-vs-int (and mix bool/int inside `^`/`|`), so the strict scalar +
+      // all-operator typecheck is a separate pass. The mixed-type error IS
+      // enforced for TUPLE comparisons (see the bundle `walk` above).
       result = *Dlop::create_bool(!Negate);
     } else {
-      // Defer to eq_op: types may differ (e.g. Bool vs Integer) but if the
-      // bit patterns match it folds true. Constprop is type-agnostic — the
-      // separate typecheck pass flags illegal cross-type comparisons; here
-      // we just take whatever eq_op decides.
+      // Same type (both int / both string), or one side unknown: fold via eq_op.
       const Const eq = *a.scalar.eq_op(b.scalar);
       if (eq.is_known_true()) {
         result = *Dlop::create_bool(!Negate);
@@ -980,7 +985,23 @@ void uPass_constprop::process_tuple_add() {
       auto       slot = std::to_string(unnamed_pos);
       const auto txt  = current_text();
       if (!try_store_fn_name(slot, txt)) {
-        bundle->set(slot, st.get_bundle(txt));
+        // A parenthesized scalar `(expr)` lowers to a 1-element tuple_add. When
+        // the element is an attributes-pass cross-pass fold (an `is`/`.[comptime]`
+        // result — constprop never assigns it, so st.get_bundle()=null), store
+        // that scalar so `!(p is yy)` folds over the 1-element bundle. Only
+        // runner_fold_fn (NOT st.has_trivial), so constprop's own trivials keep
+        // their original bundle-only behavior.
+        std::optional<Const> xfold;
+        if (!st.get_bundle(txt) && runner_fold_fn) {
+          if (auto f = runner_fold_fn(txt); f && !f->is_invalid()) {
+            xfold = *f;
+          }
+        }
+        if (xfold) {
+          bundle->set(slot, *xfold);
+        } else {
+          bundle->set(slot, st.get_bundle(txt));
+        }
       }
       ++unnamed_pos;
 
@@ -2013,9 +2034,9 @@ bool uPass_constprop::try_eval_cell_call(std::string_view dst, std::string_view 
       matched = true;
     }
   } else if (op == "sext") {
-    // Pin a: value, pin b: sign-bit position.
-    if (need_n(2) && args[1].is_i()) {
-      result  = args[0].sext_op(static_cast<int>(args[1].to_i()));
+    // Pin a: value, pin b: sign-bit position (passed through as a Const).
+    if (need_n(2)) {
+      result  = args[0].sext_op(args[1]);
       matched = true;
     }
   } else if (op == "get_mask") {
@@ -2703,8 +2724,8 @@ void uPass_constprop::process_sext() {
   move_to_sibling();
   const auto nbits_lc = current_prim_value();
   move_to_parent();
-  if (is_numeric(src) && !nbits_lc.is_invalid() && nbits_lc.is_i()) {
-    store_trivial(var, src.sext_op(static_cast<int>(nbits_lc.to_i())));
+  if (is_numeric(src) && nbits_lc.is_integer() && !nbits_lc.has_unknowns()) {
+    store_trivial(var, src.sext_op(nbits_lc));
   }
 }
 
@@ -2815,27 +2836,17 @@ void uPass_constprop::process_set_mask() {
 
   Const final_mask;
   if (is_range) {
-    if (!range_start.is_i()) {
-      return;
-    }
-    const auto lo = range_start.to_i();
-    if (lo < 0) {
-      return;
-    }
     if (range_end.is_nil()) {
-      // Open-ended `lo..`: bits lo and above. For set_mask we need a
-      // concrete bitmask, but the upper bound isn't fixed. Skip — let a
-      // later iteration with a pinned width resolve it.
+      // Open-ended `lo..`: bits lo and above. For set_mask we need a concrete
+      // bitmask, but the upper bound isn't fixed. Skip — let a later iteration
+      // with a pinned width resolve it.
       return;
     }
-    if (!range_end.is_i()) {
-      return;
-    }
-    const auto hi = range_end.to_i();
-    if (hi < lo) {
-      return;
-    }
-    final_mask = *Dlop::get_mask_value(static_cast<int>(hi), static_cast<int>(lo));
+    // mask = ((1 << (end - start + 1)) - 1) << start — all Const arithmetic,
+    // no to_i / width / range guards (task 1g; mirrors apply_range_mask).
+    auto one   = Dlop::create_integer(1);
+    auto width = range_end.sub_op(range_start)->add_op(*one);
+    final_mask = *one->shl_op(*width)->sub_op(*one)->shl_op(range_start);
   } else {
     // The mask selects *which* bits to overwrite; Dlop::set_mask_op requires
     // it concrete (asserts on an unknown mask, unlike get_mask_op). This is a

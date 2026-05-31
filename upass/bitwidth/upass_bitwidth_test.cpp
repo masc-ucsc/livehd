@@ -132,6 +132,32 @@ TEST(LnastRangeLattice, NarrowerThan) {
   EXPECT_FALSE(wide.is_narrower_than(narrow));
 }
 
+// ── contains (task 1b type-envelope fit predicate) ───────────────────────────
+
+TEST(LnastRangeLattice, ContainsBounded) {
+  Lnast_range u8;  // envelope [0, 255]
+  u8.min     = 0;
+  u8.max     = 255;
+  u8.neg_inf = false;
+  u8.pos_inf = false;
+  // A non-negative 9-bit-signed value (255) is contained despite its signed
+  // width exceeding 8 — the check is sign-agnostic range containment.
+  EXPECT_TRUE(u8.contains(Lnast_range::constant(255)));
+  EXPECT_TRUE(u8.contains(Lnast_range::constant(0)));
+  EXPECT_FALSE(u8.contains(Lnast_range::constant(256)));  // over max
+  EXPECT_FALSE(u8.contains(Lnast_range::constant(-1)));   // under min (signed -1)
+  EXPECT_FALSE(u8.contains(Lnast_range::boolean()));      // [-1,0] not ⊆ [0,255]
+}
+
+TEST(LnastRangeLattice, ContainsUnbounded) {
+  EXPECT_TRUE(Lnast_range::unbounded().contains(Lnast_range::constant(1000)));
+  EXPECT_TRUE(Lnast_range::unbounded().contains(Lnast_range::boolean()));
+  // A bounded envelope never contains an unbounded value range.
+  Lnast_range u8;
+  u8.min = 0; u8.max = 255; u8.neg_inf = false; u8.pos_inf = false;
+  EXPECT_FALSE(u8.contains(Lnast_range::unbounded()));
+}
+
 // ── Part 2: Integration tests using the uPass_runner ─────────────────────────
 
 // Build a minimal post-upass LNAST:

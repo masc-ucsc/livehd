@@ -2,6 +2,7 @@
 
 #include "upass_bitwidth.hpp"
 
+#include <bit>
 #include <charconv>
 #include <limits>
 #include <string>
@@ -459,10 +460,33 @@ void uPass_bitwidth::process_sext() {
   (void)rhs;
   set_range(lhs, Lnast_range::unbounded());
 }
+// get_mask(base, mask) — the selected bits packed LSB-first as an UNSIGNED
+// value (task 1b: this is the "force" operator). For a known non-negative mask
+// of width w = popcount(mask), the result lies in [0, 2^w − 1]. A single
+// selected bit yields the signed 1-bit value (-1/0), matching Dlop::get_mask_op
+// and the `x#[i]` semantics. Negative (carve-out) or unknown masks stay
+// conservative — their width depends on the source, unknown here.
 void uPass_bitwidth::process_get_mask() {
   auto [lhs, rhs] = scan_op();
-  (void)rhs;
-  set_range(lhs, Lnast_range::unbounded());
+  if (rhs.size() < 2 || !rhs[1].is_constant() || rhs[1].min < 0) {
+    set_range(lhs, Lnast_range::unbounded());
+    return;
+  }
+  int w = std::popcount(static_cast<uint64_t>(rhs[1].min));
+  if (w == 0) {
+    set_range(lhs, Lnast_range::constant(0));
+  } else if (w == 1) {
+    set_range(lhs, Lnast_range::boolean());  // signed 1-bit [-1, 0]
+  } else if (w >= 63) {
+    set_range(lhs, Lnast_range::unbounded());
+  } else {
+    Lnast_range r;
+    r.min     = 0;
+    r.max     = (int64_t{1} << w) - 1;
+    r.neg_inf = false;
+    r.pos_inf = false;
+    set_range(lhs, r);
+  }
 }
 void uPass_bitwidth::process_set_mask() {
   auto [lhs, rhs] = scan_op();

@@ -147,7 +147,7 @@ public:
     }
     // Keep subtree structure intact for now; shared transform passes will own any
     // operand cleanup when they start mutating LNAST through this API.
-    lnast->set_data(node, Lnast_node::create_const(value.to_i()));
+    lnast->set_data(node, Lnast_node::create_const(value.to_pyrope()));  // pyrope text; width-safe, no to_i
     return true;
   }
 

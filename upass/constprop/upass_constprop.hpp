@@ -128,7 +128,9 @@ protected:
   // value — not the raw signed literal. (Mirrors the attributes-side coercion
   // in tmp_fold, but here it lands in constprop's symbol table where its own
   // op-folding reads operands.) Signed/none-typed decls are not recorded.
-  std::unordered_map<std::string, uint32_t> decl_unsigned_bits_;
+  // Stores the declared MAX as a Const (for uN this is the N-bit all-ones
+  // mask); the first-write coercion is `v & max`. No width/to_i — task 1g.
+  std::unordered_map<std::string, Const> decl_unsigned_max_;
 
   // Task 1t — named type per var, recorded by process_declare when the declare's
   // type slot is a `ref(NAMED)` (a named type, e.g. `mut c:v_type = …`). At the
@@ -167,6 +169,14 @@ protected:
         auto folded = runner_fold_fn(name);
         if (folded && !folded->is_invalid()) {
           return *folded;
+        }
+      }
+      // Single-entry bundle: a parenthesized scalar `(expr)` lowers to a
+      // 1-element tuple_add (e.g. `!(p is yy)`); flatten to its lone value so
+      // unary/nary ops fold over it (mirrors process_eq_ne_impl::resolve).
+      if (auto b = st.get_bundle(name); b && b->is_scalar()) {
+        if (auto bv = b->get_trivial(); !bv.is_invalid()) {
+          return bv;
         }
       }
       const auto v = st.get_trivial(name);

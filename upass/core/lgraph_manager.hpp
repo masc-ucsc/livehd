@@ -347,13 +347,13 @@ public:
         continue;
       }
       Const result = livehd::graph_util::hydrate_const(inputs[0].driver);
-      if (!result.is_i()) {
+      if (!result.is_integer()) {
         continue;
       }
       bool ok = true;
       for (std::size_t i = 1; i < inputs.size(); ++i) {
         auto c = livehd::graph_util::hydrate_const(inputs[i].driver);
-        if (!c.is_i()) {
+        if (!c.is_integer()) {
           ok = false;
           break;
         }
@@ -414,13 +414,13 @@ public:
         continue;
       }
       Const result = livehd::graph_util::hydrate_const(inputs[0].driver);
-      if (!result.is_i()) {
+      if (!result.is_integer()) {
         continue;
       }
       bool ok = true;
       for (std::size_t i = 1; i < inputs.size(); ++i) {
         auto c = livehd::graph_util::hydrate_const(inputs[i].driver);
-        if (!c.is_i()) {
+        if (!c.is_integer()) {
           ok = false;
           break;
         }
@@ -548,7 +548,7 @@ public:
         for (int i = 0; i < 2; ++i) {
           if (livehd::graph_util::is_const_pin(inputs[i].driver)) {
             auto c = livehd::graph_util::hydrate_const(inputs[i].driver);
-            if (c.is_i() && c.to_i() == 1) {
+            if (c.same_repr(*Dlop::create_integer(1))) {
               one_pos = i;
               break;
             }
@@ -574,7 +574,7 @@ public:
         for (int i = 0; i < 2; ++i) {
           if (livehd::graph_util::is_const_pin(inputs[i].driver)) {
             auto c = livehd::graph_util::hydrate_const(inputs[i].driver);
-            if (c.is_i() && c.to_i() == 1) {
+            if (c.same_repr(*Dlop::create_integer(1))) {
               one_pos = i;
               break;
             }
@@ -616,7 +616,7 @@ public:
         for (int i = 0; i < 2; ++i) {
           if (livehd::graph_util::is_const_pin(inputs[i].driver)) {
             auto c = livehd::graph_util::hydrate_const(inputs[i].driver);
-            if (c.is_i() && c.to_i() == 1) {
+            if (c.same_repr(*Dlop::create_integer(1))) {
               one_pos = i;
               break;
             }
@@ -728,7 +728,7 @@ public:
 
       if (!rewritten && op == Ntype_op::Div && livehd::graph_util::is_const_pin(rhs)) {
         auto crhs = livehd::graph_util::hydrate_const(rhs);
-        if (crhs.is_i() && crhs.to_i() == 1) {
+        if (crhs.same_repr(*Dlop::create_integer(1))) {
           if (!dry_run) {
             for (const auto& s : sinks) {
               lhs.connect_sink(s);
@@ -773,8 +773,8 @@ public:
           }
           ++summary.simplified_to_const_one;
           rewritten = true;
-        } else if (clhs.is_i() && crhs.is_i() && !crhs.is_known_zero()) {
-          auto res = Dlop::create_integer(clhs.to_i() / crhs.to_i());
+        } else if (clhs.is_integer() && crhs.is_integer() && !crhs.is_known_zero()) {
+          auto res = clhs.div_op(crhs);  // width-safe Const division (no int round-trip)
           ++summary.new_const_nodes;
           if (!dry_run) {
             auto dpin = livehd::graph_util::create_const(*graph_, *res);
@@ -788,7 +788,7 @@ public:
           }
           if (res->is_known_zero()) {
             ++summary.simplified_to_const_zero;
-          } else if (res->is_i() && res->to_i() == 1) {
+          } else if (res->same_repr(*Dlop::create_integer(1))) {
             ++summary.simplified_to_const_one;
           } else {
             ++summary.simplified_to_const_other;
@@ -873,8 +873,8 @@ public:
       if (!rewritten && livehd::graph_util::is_const_pin(a_drv) && livehd::graph_util::is_const_pin(b_drv)) {
         auto ca = livehd::graph_util::hydrate_const(a_drv);
         auto cb = livehd::graph_util::hydrate_const(b_drv);
-        if (ca.is_i() && cb.is_i()) {
-          auto res = Dlop::create_integer(ca.to_i() - cb.to_i());
+        if (ca.is_integer() && cb.is_integer()) {
+          auto res = ca.sub_op(cb);  // width-safe Const subtraction (no int round-trip)
           ++summary.new_const_nodes;
           if (!dry_run) {
             auto dpin = livehd::graph_util::create_const(*graph_, *res);

@@ -50,7 +50,7 @@ uint32_t bits_natural(const Const& v) {
   if (v.is_known_zero()) {
     return 0;
   }
-  if (v.is_i() && v.to_i() == -1) {
+  if (v.same_repr(*Dlop::create_integer(-1))) {  // exactly -1 → 1 bit (width-safe, no int round-trip)
     return 1;
   }
   if (v.is_negative()) {
@@ -252,7 +252,7 @@ std::optional<Const> uPass_attributes::derive_max(std::string_view base) const {
   // `range` lowering: an attr_set(var, "range", tmp) recorded the tmp ref
   // text; pair with range_bounds to materialize max.
   if (auto tmp = lookup_attr_ref(base, "range"); tmp) {
-    if (auto rb = lookup_range(*tmp); rb && rb->second.is_i()) {
+    if (auto rb = lookup_range(*tmp); rb && rb->second.is_integer()) {
       return rb->second;
     }
   }
@@ -282,7 +282,7 @@ std::optional<Const> uPass_attributes::derive_min(std::string_view base) const {
     return v;
   }
   if (auto tmp = lookup_attr_ref(base, "range"); tmp) {
-    if (auto rb = lookup_range(*tmp); rb && rb->first.is_i()) {
+    if (auto rb = lookup_range(*tmp); rb && rb->first.is_integer()) {
       return rb->first;
     }
   }
@@ -331,25 +331,24 @@ std::optional<Const> uPass_attributes::derive_bits(std::string_view base, std::s
   if (!max_v || !min_v) {
     if (auto tmp = lookup_attr_ref(base, "range"); tmp) {
       if (auto rb = lookup_range(*tmp); rb) {
-        if (!min_v && rb->first.is_i()) {
+        if (!min_v && rb->first.is_integer()) {
           min_v = rb->first;
         }
-        if (!max_v && rb->second.is_i()) {
+        if (!max_v && rb->second.is_integer()) {
           max_v = rb->second;
         }
       }
     }
   }
-  if (max_v && min_v && max_v->is_i() && min_v->is_i()) {
-    const int64_t mx = max_v->to_i();
-    const int64_t mn = min_v->to_i();
-    int64_t       bits;
-    if (mn >= 0) {
-      bits = mx > 0 ? static_cast<int64_t>(std::bit_width(static_cast<uint64_t>(mx))) : 0;
+  if (max_v && min_v && max_v->is_integer() && min_v->is_integer()) {
+    // Derive bits from the bound Consts directly (handles >64-bit, no to_i).
+    // get_bits() is the SIGNED width; for an unsigned range (min ≥ 0) drop the
+    // sign bit, for a signed range take the widest signed bound.
+    int64_t bits;
+    if (!min_v->is_negative()) {
+      bits = max_v->is_known_zero() ? 0 : static_cast<int64_t>(max_v->get_bits() - 1);
     } else {
-      const int64_t b_pos = mx >= 0 ? static_cast<int64_t>(std::bit_width(static_cast<uint64_t>(mx))) + 1 : 1;
-      const int64_t b_neg = static_cast<int64_t>(std::bit_width(static_cast<uint64_t>(-mn - 1))) + 1;
-      bits                = std::max(b_pos, b_neg);
+      bits = std::max<int64_t>(max_v->get_bits(), min_v->get_bits());
     }
     return *Dlop::create_integer(bits);
   }
@@ -638,33 +637,30 @@ void uPass_attributes::read_scalar_type_at_cursor(Numeric_kind& kind, uint32_t& 
     if (move_to_child()) {
       if (Lnast_ntype::is_const(get_raw_ntype())) {
         auto v = Dlop::from_pyrope(current_text());
-        if (v->is_i()) {
+        if (v->is_integer()) {
           range_max = *v;
         }
       }
       if (move_to_sibling() && Lnast_ntype::is_const(get_raw_ntype())) {
         auto v = Dlop::from_pyrope(current_text());
-        if (v->is_i()) {
+        if (v->is_integer()) {
           range_min = *v;
         }
       }
       move_to_parent();
     }
     // Recover the legacy kind/bits view from the range so wrap/sat narrowing
-    // (which reads `kind`+`bits`) keeps working. Signedness ⇐ min<0; bits ⇐
-    // both bounds known.
+    // (which reads `kind`+`bits`) keeps working. Signedness from min<0; bits
+    // derived from the bound Consts via get_bits() (signed width; drop the sign
+    // bit for unsigned) — no to_i, handles >64-bit bounds.
     if (range_min) {
       kind = range_min->is_negative() ? Numeric_kind::signed_int : Numeric_kind::unsigned_int;
     }
-    if (range_max && range_min && range_max->is_i() && range_min->is_i()) {
-      const int64_t mx = range_max->to_i();
-      const int64_t mn = range_min->to_i();
-      if (mn >= 0) {
-        bits = mx > 0 ? static_cast<uint32_t>(std::bit_width(static_cast<uint64_t>(mx))) : 0;
+    if (range_max && range_min && range_max->is_integer() && range_min->is_integer()) {
+      if (!range_min->is_negative()) {
+        bits = range_max->is_known_zero() ? 0 : static_cast<uint32_t>(range_max->get_bits() - 1);
       } else {
-        const uint32_t b_pos = mx >= 0 ? static_cast<uint32_t>(std::bit_width(static_cast<uint64_t>(mx))) + 1 : 1;
-        const uint32_t b_neg = static_cast<uint32_t>(std::bit_width(static_cast<uint64_t>(-mn - 1))) + 1;
-        bits                 = std::max(b_pos, b_neg);
+        bits = static_cast<uint32_t>(std::max<int64_t>(range_max->get_bits(), range_min->get_bits()));
       }
     }
   } else if (Lnast_ntype::is_prim_type_bool(t)) {
