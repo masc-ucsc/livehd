@@ -1,0 +1,30 @@
+/*
+:name: named_type_borrow
+:type: comptime
+:verifier_pass: 6
+:verifier_fail: 0
+*/
+
+// Named-type borrowing: declaring `mut v:NAME = (…)` resolves NAME in the
+// symbol table and uses its bundle as the type — the named type's default
+// field values fill in fields the initializer omits, and supplied fields
+// override the defaults. NAME may be declared with `type` (type-only) or with
+// `const` (a value that can also be read); both behave identically as a type.
+
+// `type` form: a_type can only be used as a type.
+type a_type = (x:u3 = nil, b:string = "foo")
+mut b:a_type = (x = 3)
+cassert(b.x == 3)        // supplied field overrides the default
+cassert(b.b == "foo")    // omitted field inherits a_type's default
+
+// `const` form: v_type is an ordinary value that doubles as a type.
+const v_type = (x:u3 = nil, b:string = "foo")
+mut c:v_type = (x = 3)
+cassert(c.x == 3)
+cassert(c.b == "foo")
+
+// Overriding a field that has a non-nil default.
+type cfg_t = (count:u8 = 0, name:string = "boot")
+mut cfg:cfg_t = (count = 9)
+cassert(cfg.count == 9)  // override
+cassert(cfg.name == "boot")  // default inherited

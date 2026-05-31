@@ -1,0 +1,79 @@
+/*
+:name: range_force
+:type: comptime
+:verifier_pass: 7
+:verifier_fail: 0
+*/
+
+// Goal-1 1b — range-fit enforcement + bit-select as the "force" operator.
+//
+// Internally every value is a SIGNED arbitrary-precision integer; the type's
+// (max,min) range is the authoritative envelope and bits/sign are DERIVED. A
+// write whose actual value-range escapes the declared envelope must become a
+// COMPILE ERROR.
+//
+// The escape hatch is NOT a flag that suppresses the check: it is an explicit
+// bit-select / bit-set, which reinterprets the chosen bits as an UNSIGNED,
+// width-bounded value (get_mask / set_mask — the unsigned-producing cells).
+// Because a select's result range is [0, 2^width-1] by construction, it fits
+// the destination iff the width fits — so "force" still gets range-checked, it
+// only opts out of the SIGN interpretation. wrap/sat stay for the genuinely
+// different modulo / clamp semantics.
+//
+// See docs/contracts/typesystem_clean_plan.md (T4) and TODO_prp.md [[1b]].
+// The compile-error cases below cannot be exercised yet (no :expect_fail:
+// harness — TODO_prp.md/TODO.md [[4h]]); they are kept as comments describing
+// the diagnostic 1b must add.
+
+// ── a SIGNED value that does not fit an unsigned destination ─────────────────
+// 0xFF is +255 (an implicit leading sign-0); ORing it onto a negative value
+// sign-extends through `|`, so the result is signed -1, NOT 255.
+mut v8:s8 = -1
+const ones = v8 | 0xff
+cassert(ones == 0sb1111_1111)        // == -1, signed
+
+// FUTURE COMPILE ERROR (1b — keep as comment until [[4h]] lands):
+//   w_bad:u8 = ones
+//   error: value -1 (range [-1,-1], signed) does not fit u8 (range [0,255]);
+//          force the bits — ones#[0..=7] == 255 — or use `wrap`.
+
+// ── read-side force: bit-select #[lo..=hi] (get_mask → unsigned, [0,2^w-1]) ───
+// get_mask sign-extends the (signed) source to the select width, so the low 8
+// bits of -1 are 0xff = 255, reinterpreted as an unsigned value. `#sext[..]`
+// would instead keep it signed (-1). (The sign-extension fix landed in hlop
+// get_mask_op — see [[1b]].)
+const forced = ones#[0..=7]          // low 8 bits of -1, unsigned → 255
+cassert(forced == 255)
+w_ok:u8 = ones#[0..=7]               // fits [0,255] by construction
+cassert(w_ok == 255)
+
+// The select width is itself range-checked — force is NOT blanket-ignore.
+// FUTURE COMPILE ERROR (1b):
+//   w_wide:u8 = ones#[0..=9]        // [0,1023] does not fit u8 (range [0,255])
+
+// An OVER-RANGE positive value forces the same way (high bits dropped).
+const big = 0x1ff                    // 511, range [511,511] — 9 bits
+// FUTURE COMPILE ERROR (1b):  w_over:u8 = big   // 511 ⊄ [0,255]
+cassert(big#[0..=7] == 255)          // low 8 bits
+
+// ── write-side force: bit-set field write (set_mask bounds to the field) ──────
+mut z:u8 = 0
+z#[0..=7] = ones                     // -1 pattern into the 8-bit field → 255
+cassert(z == 255)
+
+// FUTURE COMPILE ERROR (1b): out-of-width field write
+//   z#[0..=9] = 0                   // 10-bit field write into a u8 var
+
+// ── a literal pattern that genuinely fits needs no force ─────────────────────
+const ab     = 0xab                  // 0b1010_1011
+const lownib = ab#[0..=3]            // low nibble = 0xb
+cassert(lownib == 11)
+
+// ── signed range-fit enforcement (task 1b, LANDED): in-range fits silently;
+//    a SIGNED overflow is a hard error (no reinterpret — unlike the unsigned
+//    negative-pattern coercion above). ────────────────────────────────────────
+const sfit:s8 = -100                 // fits [-128, 127]
+cassert(sfit == -100)
+// NOW A COMPILE ERROR (1b — uPass_attributes range-fit check):
+//   const sbad:s8 = 200             // 200 does not fit declared range [-128, 127]
+//   error: comptime write to `sbad` (value 0xc8) does not fit its declared range [-128, 127]
