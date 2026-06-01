@@ -72,6 +72,12 @@ public:
   void process_func_case() override;
   void process_range() override;
 
+  // Bundle-access check (optable.md): a comptime-known tuple access whose key
+  // is out of bounds (positional) or names a non-existent field is a compile
+  // error. Only fires when `base`'s bundle shape is resolved (non-empty,
+  // non-scalar) — a runtime index or an unresolved/partial base is skipped.
+  void check_tuple_access(const std::string& base, const std::string& seg, bool is_index);
+
   upass::Emit_decision classify_statement() override;
   std::optional<Const> fold_ref(std::string_view name) override;
   bool                 overrides_fold_ref() const override { return true; }

@@ -4,6 +4,7 @@
 
 #include <algorithm>
 #include <charconv>
+#include <format>
 #include <map>
 #include <optional>
 #include <print>
@@ -12,6 +13,7 @@
 #include <unordered_map>
 
 #include "cell.hpp"
+#include "diag.hpp"
 #include "lnast_ntype.hpp"
 #include "str_tools.hpp"
 #include "upass_verifier.hpp"
@@ -2365,31 +2367,51 @@ void uPass_constprop::process_tuple_get() {
   // `t[0]`, `t['b']` and `t["foo"]` resolve uniformly to the bare-name
   // stored key in the bundle.
   std::string key = src;
+  std::string first_seg;       // first (top-level) field segment, canonicalized
+  bool        first_is_index = false;  // numeric (positional) vs named
+  bool        first_captured = false;
   do {
+    std::string seg;
     if (is_type(Lnast_ntype::Lnast_ntype_const)) {
       auto v = Dlop::from_pyrope(current_text());
       if (!v || v->is_invalid()) {
         move_to_parent();
         return;
       }
-      key += '.';
-      key += v->to_field();
+      seg = v->to_field();
     } else if (is_type(Lnast_ntype::Lnast_ntype_ref)) {
       // Runtime index: must be a known constant to fold statically.
       const auto idx = st.get_trivial(current_text());
       if (idx.is_invalid()) {
         move_to_parent();
-        return;  // can't fold unknown index
+        return;  // can't fold unknown index — leave runtime accesses unchecked
       }
-      key += '.';
-      key += std::to_string(idx.to_i());
+      seg = std::to_string(idx.to_i());
     } else {
       move_to_parent();
       return;  // unhandled field type
     }
+    // Positional iff the canonical key is a decimal (`t[0]` → "0"); a name like
+    // `t.b` canonicalizes to "b" (NOT a digit) even though a 1-char literal
+    // parses as a char-integer. The bundle key is the discriminator.
+    const bool seg_is_index = !seg.empty() && seg.find_first_not_of("0123456789") == std::string::npos;
+    if (!first_captured) {
+      first_seg      = seg;
+      first_is_index = seg_is_index;
+      first_captured = true;
+    }
+    key += '.';
+    key += seg;
   } while (!is_last_child() && move_to_sibling());
 
   move_to_parent();
+
+  // Bundle-access check: the (comptime-known) top-level key must be a valid
+  // index/field of `src`'s bundle. Only the first segment is checked here;
+  // nested-level checks are a later phase.
+  if (first_captured) {
+    check_tuple_access(src, first_seg, first_is_index);
+  }
 
   // Propagate trivial value if available; fall back to bundle propagation.
   if (st.has_trivial(key)) {
@@ -2410,6 +2432,56 @@ void uPass_constprop::process_tuple_get() {
     // the source's trivial value so the named-field reader and the bare
     // scalar reader converge on the same answer.
     store_trivial(dst, st.get_trivial(src));
+  }
+}
+
+void uPass_constprop::check_tuple_access(const std::string& base, const std::string& seg, bool is_index) {
+  // Only POSITIONAL access is checked. A NAMED access of an absent field reads
+  // as `nil` (a legal existence probe — e.g. `tup0['y'] == nil`), and typed
+  // tuples name positional fields through their type (not the raw shape), so a
+  // missing-named-field read is NOT an error here.
+  if (!is_index) {
+    return;
+  }
+  auto base_b = st.get_bundle(base);
+  // Skip unless the base shape is resolved: a null/empty bundle is an early
+  // fixpoint iteration (the shape may fill in later — flagging now would be a
+  // false positive); a bare scalar is `x[0]` sugar / a single-output fallback.
+  if (!base_b || base_b->is_empty() || base_b->is_scalar()) {
+    return;
+  }
+  const size_t n_unnamed = base_b->unnamed_top_count();
+  const size_t n_named   = base_b->named_top_count();
+  if (n_unnamed == 0 && n_named == 0) {
+    return;  // no resolved top-level fields — nothing to check
+  }
+  int  idx     = 0;
+  auto [p, ec] = std::from_chars(seg.data(), seg.data() + seg.size(), idx);
+  if (ec != std::errc{}) {
+    return;  // unparseable index — skip
+  }
+  // Positional access is valid ONLY for unnamed entries: a named tuple is
+  // name-access only (`(b=1, c=2)[0]` is an error — use `.b`).
+  if (n_unnamed == 0) {
+    livehd::diag::sink().emit(livehd::diag::Diagnostic{
+        .severity = livehd::diag::Severity::error,
+        .code     = "index-out-of-bounds",
+        .category = "type",
+        .pass     = "upass.constprop",
+        .message  = std::format("tuple `{}` is name-access only; positional index `{}` is not allowed", base, idx),
+        .hint     = "access named fields by name (e.g. `t.field`)",
+    });
+    return;
+  }
+  if (!base_b->has_top_unnamed(idx)) {
+    livehd::diag::sink().emit(livehd::diag::Diagnostic{
+        .severity = livehd::diag::Severity::error,
+        .code     = "index-out-of-bounds",
+        .category = "type",
+        .pass     = "upass.constprop",
+        .message  = std::format("out of bounds access: index {} on tuple `{}` of size {}", idx, base, n_unnamed),
+        .hint     = std::format("valid index range is [0, {}]", n_unnamed - 1),
+    });
   }
 }
 

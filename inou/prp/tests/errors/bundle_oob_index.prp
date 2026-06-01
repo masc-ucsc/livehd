@@ -1,0 +1,12 @@
+/*
+:name: bundle_oob_index
+:type: error
+:error: out of bounds access
+*/
+
+// A comptime-known index past the end of an unnamed tuple is a compile error.
+// Doc: ../docs/docs/pyrope/03-bundle.md "The Pyrope compile will trigger compile
+// errors for out-of-bound access". `(1,2)` has indices 0..1, so [3] is OOB.
+
+const x = (1, 2)
+const y = x[3]
