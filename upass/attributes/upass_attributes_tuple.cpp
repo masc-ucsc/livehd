@@ -172,12 +172,8 @@ void uPass_attributes::process_tuple_add() {
   move_to_parent();
 
   // Replace any existing shape for dst — tuple_add is the (re)build site.
-  auto&      slot    = tuple_shapes[dst];
-  const bool changed = slot.fields != shape.fields || slot.from_range != shape.from_range;
-  slot               = std::move(shape);
-  if (changed) {
-    mark_changed();
-  }
+  auto& slot = tuple_shapes[dst];
+  slot       = std::move(shape);
 
   // Phase 4 — once dst has a shape, eagerly materialize any aggregate cat-D
   // attrs onto each field's flattened path so downstream LGraph generation
@@ -230,12 +226,8 @@ void uPass_attributes::process_tuple_concat() {
   move_to_parent();
 
   if (!shape.fields.empty()) {
-    auto&      slot    = tuple_shapes[dst];
-    const bool changed = slot.fields != shape.fields || slot.from_range != shape.from_range;
-    slot               = std::move(shape);
-    if (changed) {
-      mark_changed();
-    }
+    auto& slot = tuple_shapes[dst];
+    slot       = std::move(shape);
   }
 }
 
@@ -339,13 +331,9 @@ void uPass_attributes::process_tuple_get() {
   }
 
   auto [it, inserted] = tuple_get_alias.emplace(dst, std::move(alias));
-  if (!inserted) {
-    if (it->second.base != alias.base || it->second.field_key != alias.field_key || it->second.field_name != alias.field_name) {
-      it->second = std::move(alias);
-      mark_changed();
-    }
-  } else {
-    mark_changed();
+  if (!inserted
+      && (it->second.base != alias.base || it->second.field_key != alias.field_key || it->second.field_name != alias.field_name)) {
+    it->second = std::move(alias);
   }
 }
 
@@ -519,8 +507,7 @@ std::optional<Const> uPass_attributes::lookup_attr_with_inheritance(std::string_
   // Phase 4 — chain through direct-ref aliases (`const v = t`,
   // `mut u = a`). Walk the chain so attrs landed at any level of the
   // aliasing hierarchy are visible to comptime reads on the surface name.
-  // Bounded walk avoids any pathological loop introduced by mark_changed
-  // re-running the pass on iterating constprop convergence.
+  // Bounded walk (cap the hops) avoids any pathological alias-chain cycle.
   {
     std::string cursor{base};
     for (int hops = 0; hops < 8; ++hops) {

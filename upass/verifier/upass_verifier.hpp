@@ -25,10 +25,8 @@ public:
   upass::Emit_decision classify_statement() override;
   bool                 overrides_classify_statement() const override { return true; }
 
-  // Reset counts so a re-entered iteration starts fresh. The final
-  // iteration's counts are the ones compared in end_run.
+  // Reset counts for the single walk; these counts are compared in end_run.
   void begin_iteration() override {
-    upass::uPass::begin_iteration();
     pass_count    = 0;
     fail_count    = 0;
     unknown_count = 0;

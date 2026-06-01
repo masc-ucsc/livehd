@@ -32,10 +32,7 @@ public:
   // literal `0sb?`/`0ub?` (could be bool or int). `nil` is poison.
   enum class Kind : uint8_t { unknown, integer, boolean, string, range, tuple, nil };
 
-  void begin_iteration() override {
-    changed = false;
-    kind_map.clear();
-  }
+  void begin_iteration() override { kind_map.clear(); }
 
   // Declarations record a variable's declared kind.
   void process_declare() override;

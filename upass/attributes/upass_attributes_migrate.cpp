@@ -110,10 +110,8 @@ void uPass_attributes::migrate_aggregate_attrs_to_fields(std::string_view base) 
         auto  it   = slot.find(attr_name);
         if (it == slot.end()) {
           slot.emplace(attr_name, chosen_value);
-          mark_changed();
         } else if (!it->second.same_repr(chosen_value)) {
           it->second = chosen_value;
-          mark_changed();
         }
       };
       write_field_attr(key);
@@ -138,9 +136,6 @@ void uPass_attributes::migrate_alias(std::string_view lhs, std::string_view rhs)
     auto [it, inserted] = direct_alias.emplace(lhs_s, rhs_s);
     if (!inserted && it->second != rhs_s) {
       it->second = rhs_s;
-      mark_changed();
-    } else if (inserted) {
-      mark_changed();
     }
   }
 
@@ -150,13 +145,9 @@ void uPass_attributes::migrate_alias(std::string_view lhs, std::string_view rhs)
   //    would lose the inheritance link from v to t.
   if (auto* a = lookup_get_alias(rhs); a) {
     auto [it, inserted] = tuple_get_alias.emplace(lhs_s, *a);
-    if (!inserted) {
-      if (it->second.base != a->base || it->second.field_key != a->field_key || it->second.field_name != a->field_name) {
-        it->second = *a;
-        mark_changed();
-      }
-    } else {
-      mark_changed();
+    if (!inserted
+        && (it->second.base != a->base || it->second.field_key != a->field_key || it->second.field_name != a->field_name)) {
+      it->second = *a;
     }
   }
 
@@ -171,7 +162,6 @@ void uPass_attributes::migrate_alias(std::string_view lhs, std::string_view rhs)
       auto existing = lhs_slot.find(attr_name);
       if (existing == lhs_slot.end()) {
         lhs_slot.emplace(attr_name, attr_value);
-        mark_changed();
       }
     }
   }
@@ -204,11 +194,8 @@ void uPass_attributes::migrate_alias(std::string_view lhs, std::string_view rhs)
     // heap-use-after-free (caught by ASan on fcall6.prp).
     const Type_info src_ti  = ti_it->second;
     auto [it, inserted]     = type_info_map.emplace(std::move(field_path), src_ti);
-    if (inserted) {
-      mark_changed();
-    } else if (it->second.bits != src_ti.bits || it->second.kind != src_ti.kind) {
+    if (!inserted && (it->second.bits != src_ti.bits || it->second.kind != src_ti.kind)) {
       it->second = src_ti;
-      mark_changed();
     }
   }
 }

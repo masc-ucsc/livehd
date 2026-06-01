@@ -18,16 +18,10 @@ public:
   explicit uPass_lgraph(std::shared_ptr<Lgraph_manager>& _gm) : gm(_gm) {}
   virtual ~uPass_lgraph() = default;
 
-  void begin_iteration() { changed = false; }
-  bool has_changed() const { return changed; }
-
   virtual void run_once() {}
 
 protected:
   std::shared_ptr<Lgraph_manager>& gm;
-  bool                             changed{false};
-
-  void mark_changed() { changed = true; }
 };
 
 template <class T>

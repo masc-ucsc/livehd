@@ -30,11 +30,10 @@ std::string Sticky_handler::canonical_bucket(std::string_view name) {
 }
 
 void Sticky_handler::begin_iteration(uPass_attributes& /*owner*/) {
-  // `acquired` is monotonic across iterations per attribute_todo.md §Phase 1
-  // implementation note: a variable that earned a sticky attr in iteration N
-  // still has it in iteration N+1, so the runner's whole-tree fixed point
-  // doesn't unwind sticky propagation. Only the per-arm taint stack resets,
-  // since the runner re-walks every if-arm each sweep.
+  // `acquired` is monotonic per attribute_todo.md §Phase 1: once a variable
+  // earns a sticky attr it keeps it for the rest of the walk — begin_iteration
+  // does NOT clear it. Only the per-arm control taint stack resets here; the
+  // runner re-walks each if-arm within the single walk.
   control_taint_stack.clear();
 }
 

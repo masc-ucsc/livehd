@@ -151,7 +151,6 @@ TEST(UpassConstprop, FoldsPlus) {
   TestableConstprop cp(f.lm);
   cp.position(op);
   cp.process_plus();
-  EXPECT_TRUE(cp.has_changed());
   EXPECT_EQ(cp.get_result("a").to_i(), 5);
 }
 
@@ -161,7 +160,6 @@ TEST(UpassConstprop, FoldsMinus) {
   TestableConstprop cp(f.lm);
   cp.position(op);
   cp.process_minus();
-  EXPECT_TRUE(cp.has_changed());
   EXPECT_EQ(cp.get_result("a").to_i(), 7);
 }
 
@@ -171,7 +169,6 @@ TEST(UpassConstprop, FoldsMult) {
   TestableConstprop cp(f.lm);
   cp.position(op);
   cp.process_mult();
-  EXPECT_TRUE(cp.has_changed());
   EXPECT_EQ(cp.get_result("a").to_i(), 12);
 }
 
@@ -181,7 +178,6 @@ TEST(UpassConstprop, FoldsDiv) {
   TestableConstprop cp(f.lm);
   cp.position(op);
   cp.process_div();
-  EXPECT_TRUE(cp.has_changed());
   EXPECT_EQ(cp.get_result("a").to_i(), 4);
 }
 
@@ -191,7 +187,6 @@ TEST(UpassConstprop, FoldsMod) {
   TestableConstprop cp(f.lm);
   cp.position(op);
   cp.process_mod();
-  EXPECT_TRUE(cp.has_changed());
   EXPECT_EQ(cp.get_result("a").to_i(), 1);
 }
 
@@ -203,7 +198,6 @@ TEST(UpassConstprop, FoldsShl) {
   TestableConstprop cp(f.lm);
   cp.position(op);
   cp.process_shl();
-  EXPECT_TRUE(cp.has_changed());
   EXPECT_EQ(cp.get_result("a").to_i(), 8);  // 1 << 3 = 8
 }
 
@@ -213,7 +207,6 @@ TEST(UpassConstprop, FoldsSra) {
   TestableConstprop cp(f.lm);
   cp.position(op);
   cp.process_sra();
-  EXPECT_TRUE(cp.has_changed());
   EXPECT_EQ(cp.get_result("a").to_i(), 4);  // 16 >> 2 = 4
 }
 
@@ -226,7 +219,6 @@ TEST(UpassConstprop, FoldsBitAnd) {
   TestableConstprop cp(f.lm);
   cp.position(op);
   cp.process_bit_and();
-  EXPECT_TRUE(cp.has_changed());
   EXPECT_EQ(cp.get_result("a").to_i(), 0b1000);
 }
 
@@ -237,7 +229,6 @@ TEST(UpassConstprop, FoldsBitOr) {
   TestableConstprop cp(f.lm);
   cp.position(op);
   cp.process_bit_or();
-  EXPECT_TRUE(cp.has_changed());
   EXPECT_EQ(cp.get_result("a").to_i(), 0b1111);
 }
 
@@ -248,7 +239,6 @@ TEST(UpassConstprop, FoldsBitXor) {
   TestableConstprop cp(f.lm);
   cp.position(op);
   cp.process_bit_xor();
-  EXPECT_TRUE(cp.has_changed());
   EXPECT_EQ(cp.get_result("a").to_i(), 0b0110);
 }
 
@@ -258,7 +248,6 @@ TEST(UpassConstprop, FoldsBitNot) {
   TestableConstprop cp(f.lm);
   cp.position(op);
   cp.process_bit_not();
-  EXPECT_TRUE(cp.has_changed());
   // ~0 = -1 in two's complement
   EXPECT_EQ(cp.get_result("a").to_i(), -1);
 }
@@ -270,7 +259,6 @@ TEST(UpassConstprop, FoldsGetMask) {
   TestableConstprop cp(f.lm);
   cp.position(op);
   cp.process_get_mask();
-  EXPECT_TRUE(cp.has_changed());
   EXPECT_EQ(cp.get_result("a").to_i(), 0x78);
 }
 
@@ -288,7 +276,6 @@ TEST(UpassConstprop, FoldsLogAndBothTrue) {
   TestableConstprop cp(f.lm);
   cp.position(op);
   cp.process_log_and();
-  EXPECT_TRUE(cp.has_changed());
   EXPECT_TRUE(cp.get_result("a").is_known_true());
 }
 
@@ -298,7 +285,6 @@ TEST(UpassConstprop, FoldsLogAndOneFalse) {
   TestableConstprop cp(f.lm);
   cp.position(op);
   cp.process_log_and();
-  EXPECT_TRUE(cp.has_changed());
   EXPECT_TRUE(cp.get_result("a").is_known_false());
 }
 
@@ -308,7 +294,6 @@ TEST(UpassConstprop, FoldsLogOrOneFalse) {
   TestableConstprop cp(f.lm);
   cp.position(op);
   cp.process_log_or();
-  EXPECT_TRUE(cp.has_changed());
   EXPECT_TRUE(cp.get_result("a").is_known_true());
 }
 
@@ -318,7 +303,6 @@ TEST(UpassConstprop, FoldsLogOrBothFalse) {
   TestableConstprop cp(f.lm);
   cp.position(op);
   cp.process_log_or();
-  EXPECT_TRUE(cp.has_changed());
   EXPECT_TRUE(cp.get_result("a").is_known_false());
 }
 
@@ -328,7 +312,6 @@ TEST(UpassConstprop, FoldsLogNotFalse) {
   TestableConstprop cp(f.lm);
   cp.position(op);
   cp.process_log_not();
-  EXPECT_TRUE(cp.has_changed());
   EXPECT_TRUE(cp.get_result("a").is_known_true());  // !0 = true
 }
 
@@ -342,25 +325,24 @@ TEST(UpassConstprop, FoldsLogNotTrue) {
   TestableConstprop cp(f.lm);
   cp.position(op);
   cp.process_log_not();
-  EXPECT_TRUE(cp.has_changed());
   EXPECT_TRUE(cp.get_result("a").is_known_false());  // !true = false
 }
 
 // ── Convergence ──────────────────────────────────────────────────────────────
 
-// Running the same fold a second time should not mark changed (value already in st).
+// Re-running the same fold is idempotent: the value already in the symbol
+// table is recomputed to the same constant.
 TEST(UpassConstprop, SecondRunConverges) {
   ConstpropFixture  f;
   auto              op = f.add_binary_node(Lnast_ntype::create_plus(), "a", 2, 3);
   TestableConstprop cp(f.lm);
   cp.position(op);
   cp.process_plus();
-  ASSERT_TRUE(cp.has_changed());  // first run
+  ASSERT_EQ(cp.get_result("a").to_i(), 5);
 
-  cp.begin_iteration();  // reset changed flag
   cp.position(op);
   cp.process_plus();
-  EXPECT_FALSE(cp.has_changed());  // second run: value unchanged
+  EXPECT_EQ(cp.get_result("a").to_i(), 5);
 }
 
 // ── process_if: conservative condition inspection ─────────────────────────────
@@ -452,7 +434,6 @@ TEST(UpassConstprop, RedOrNonZero) {
   TestableConstprop cp(f.lm);
   cp.position(op);
   cp.process_red_or();
-  EXPECT_TRUE(cp.has_changed());
   EXPECT_TRUE(cp.get_result("a").is_known_true());  // 5 != 0 → true
 }
 
@@ -462,7 +443,6 @@ TEST(UpassConstprop, RedOrZero) {
   TestableConstprop cp(f.lm);
   cp.position(op);
   cp.process_red_or();
-  EXPECT_TRUE(cp.has_changed());
   EXPECT_TRUE(cp.get_result("a").is_known_false());  // 0 == 0 → false
 }
 
@@ -478,7 +458,6 @@ TEST(UpassConstprop, RedOrUnknownInputNoStore) {
   cp.process_red_or();
   // "b" must not appear in the symbol table.
   EXPECT_TRUE(cp.get_result("b").is_invalid());
-  EXPECT_FALSE(cp.has_changed());
 }
 
 // red_and: 1 only when all bits are 1 (value is all-ones mask).
@@ -489,7 +468,6 @@ TEST(UpassConstprop, RedAndAllOnes) {
   TestableConstprop cp(f.lm);
   cp.position(op);
   cp.process_red_and();
-  EXPECT_TRUE(cp.has_changed());
   EXPECT_TRUE(cp.get_result("a").is_known_true());
 }
 
@@ -500,7 +478,6 @@ TEST(UpassConstprop, RedAndNotAllOnes) {
   TestableConstprop cp(f.lm);
   cp.position(op);
   cp.process_red_and();
-  EXPECT_TRUE(cp.has_changed());
   EXPECT_TRUE(cp.get_result("a").is_known_false());
 }
 
@@ -513,7 +490,6 @@ TEST(UpassConstprop, RedXorOddParity) {
   TestableConstprop cp(f.lm);
   cp.position(op);
   cp.process_red_xor();
-  EXPECT_TRUE(cp.has_changed());
   EXPECT_TRUE(cp.get_result("a").is_known_true());  // popcount(7) = 3, odd → true
 }
 
@@ -524,7 +500,6 @@ TEST(UpassConstprop, RedXorEvenParity) {
   TestableConstprop cp(f.lm);
   cp.position(op);
   cp.process_red_xor();
-  EXPECT_TRUE(cp.has_changed());
   EXPECT_TRUE(cp.get_result("a").is_known_false());  // popcount(10) = 2, even → false
 }
 
@@ -536,7 +511,6 @@ TEST(UpassConstprop, PopcountSetBits) {
   TestableConstprop cp(f.lm);
   cp.position(op);
   cp.process_popcount();
-  EXPECT_TRUE(cp.has_changed());
   EXPECT_EQ(cp.get_result("a").to_i(), 3);
 }
 
@@ -546,7 +520,6 @@ TEST(UpassConstprop, PopcountZero) {
   TestableConstprop cp(f.lm);
   cp.position(op);
   cp.process_popcount();
-  EXPECT_TRUE(cp.has_changed());
   EXPECT_EQ(cp.get_result("a").to_i(), 0);
 }
 
@@ -569,7 +542,6 @@ TEST(UpassConstprop, SextNoTruncation) {
   TestableConstprop cp(f.lm);
   cp.position(op);
   cp.process_sext();
-  EXPECT_TRUE(cp.has_changed());
   EXPECT_EQ(cp.get_result("a").to_i(), 3);
 }
 
@@ -582,7 +554,6 @@ TEST(UpassConstprop, SextSignExtendNarrows) {
   TestableConstprop cp(f.lm);
   cp.position(op);
   cp.process_sext();
-  EXPECT_TRUE(cp.has_changed());
   EXPECT_EQ(cp.get_result("a").to_i(), -4);  // 3-bit 0b100 sign-extended = -4
 }
 
@@ -605,7 +576,6 @@ TEST(UpassConstpropTuple, TupleAddAndGetFirstField) {
   cp.position(get_op);
   cp.process_tuple_get();  // dst = ___t0[0] = 3
 
-  EXPECT_TRUE(cp.has_changed());
   EXPECT_EQ(cp.get_result("dst").to_i(), 3);
 }
 
@@ -622,11 +592,10 @@ TEST(UpassConstpropTuple, TupleAddAndGetSecondField) {
   cp.position(get_op);
   cp.process_tuple_get();  // dst = ___t0[1] = 7
 
-  EXPECT_TRUE(cp.has_changed());
   EXPECT_EQ(cp.get_result("dst").to_i(), 7);
 }
 
-// tuple_get on a source variable not in the symbol table: no store, no mark_changed.
+// tuple_get on a source variable not in the symbol table: nothing is stored.
 TEST(UpassConstpropTuple, TupleGetMissingSourceNoStore) {
   ConstpropFixture f;
   auto             get_op = f.add_tuple_get_node("dst", "undefined_tuple", "0");
@@ -636,7 +605,6 @@ TEST(UpassConstpropTuple, TupleGetMissingSourceNoStore) {
   cp.process_tuple_get();
 
   EXPECT_TRUE(cp.get_result("dst").is_invalid());
-  EXPECT_FALSE(cp.has_changed());
 }
 
 // tuple_get with a runtime ref index not in the symbol table: can't fold → no store.
@@ -649,15 +617,13 @@ TEST(UpassConstpropTuple, TupleGetUnknownRuntimeIndexNoStore) {
   cp.position(add_op);
   cp.process_tuple_add();  // ___t0 = (42) — bundle populated
 
-  cp.begin_iteration();  // reset changed flag
   cp.position(get_op);
   cp.process_tuple_get();  // runtime_idx not in st → cannot fold
 
   EXPECT_TRUE(cp.get_result("dst").is_invalid());
-  EXPECT_FALSE(cp.has_changed());
 }
 
-// Second run of tuple_add + tuple_get must not fire mark_changed (convergence).
+// Re-running tuple_add + tuple_get is idempotent: the field value is stable.
 TEST(UpassConstpropTuple, TupleGetConvergesOnRepeat) {
   ConstpropFixture f;
   auto             add_op = f.add_tuple_add_node("___t0", {5});
@@ -669,16 +635,14 @@ TEST(UpassConstpropTuple, TupleGetConvergesOnRepeat) {
 
   cp.position(get_op);
   cp.process_tuple_get();
-  ASSERT_TRUE(cp.has_changed());
   ASSERT_EQ(cp.get_result("dst").to_i(), 5);
 
-  // Second iteration: same nodes, same values → no change.
-  cp.begin_iteration();
+  // Second run: same nodes, same values → same result.
   cp.position(add_op);
   cp.process_tuple_add();
   cp.position(get_op);
   cp.process_tuple_get();
-  EXPECT_FALSE(cp.has_changed());
+  EXPECT_EQ(cp.get_result("dst").to_i(), 5);
 }
 
 // tuple_set writes a scalar value into the bundle and marks changed.
@@ -690,13 +654,12 @@ TEST(UpassConstpropTuple, TupleSetWritesField) {
   cp.position(set_op);
   cp.process_tuple_set();
 
-  EXPECT_TRUE(cp.has_changed());
   // The symbol table key "___t0.0" should now hold 99.
   EXPECT_EQ(cp.get_result("___t0.0").to_i(), 99);
 }
 
-// tuple_set with a __bits attribute field must be silently skipped (no mark_changed).
-// Attribute nodes begin with "__" and must not trigger infinite convergence loops.
+// tuple_set with a __bits attribute field must be silently skipped — the
+// attribute field is not written into the value bundle.
 TEST(UpassConstpropTuple, TupleSetAttributeFieldSkipped) {
   ConstpropFixture f;
   auto             set_op = f.add_tuple_set_node("x", "__bits", 8);
@@ -705,10 +668,10 @@ TEST(UpassConstpropTuple, TupleSetAttributeFieldSkipped) {
   cp.position(set_op);
   cp.process_tuple_set();
 
-  EXPECT_FALSE(cp.has_changed());
+  EXPECT_TRUE(cp.get_result("x.__bits").is_invalid());
 }
 
-// Second run of tuple_set with an identical value must not fire mark_changed.
+// Re-running tuple_set with an identical value is idempotent.
 TEST(UpassConstpropTuple, TupleSetConvergesOnRepeat) {
   ConstpropFixture f;
   auto             set_op = f.add_tuple_set_node("___t0", "0", 42);
@@ -716,12 +679,11 @@ TEST(UpassConstpropTuple, TupleSetConvergesOnRepeat) {
   TestableConstprop cp(f.lm);
   cp.position(set_op);
   cp.process_tuple_set();
-  ASSERT_TRUE(cp.has_changed());
+  ASSERT_EQ(cp.get_result("___t0.0").to_i(), 42);
 
-  cp.begin_iteration();
   cp.position(set_op);
   cp.process_tuple_set();
-  EXPECT_FALSE(cp.has_changed());  // value unchanged → no mark_changed
+  EXPECT_EQ(cp.get_result("___t0.0").to_i(), 42);
 }
 
 // tuple_set followed by tuple_get propagates the written value end-to-end.

@@ -32,16 +32,12 @@ uPass_bitwidth::uPass_bitwidth(std::shared_ptr<upass::Lnast_manager>& lm) : upas
 // ── Lifecycle ────────────────────────────────────────────────────────────────
 
 void uPass_bitwidth::begin_iteration() {
-  // Reset the changed flag only — ranges accumulate across iterations so a
-  // second sweep can tighten what was unbounded in the first.
-  changed = false;
-
-  // Cross-invocation persistence: a fresh uPass_bitwidth instance starts
-  // with empty range_map_, but the previous pass.upass call may have left
-  // ranges in lnast->bw_meta(). Seed range_map_ from bw_meta so a second
-  // sweep can tighten what was unbounded before. Only do this once per run
-  // (when range_map_ is empty); subsequent begin_iteration calls inside the
-  // same run leave the accumulated state alone.
+  // Per-run setup hook (the runner does a single walk — no fixed-point loop).
+  // Cross-invocation persistence: a fresh uPass_bitwidth instance starts with
+  // an empty range_map_, but a previous pass.upass invocation may have left
+  // ranges in lnast->bw_meta(). Seed range_map_ from bw_meta so a later
+  // invocation can tighten what was unbounded before. Only seed once (when
+  // range_map_ is empty); a re-entry with state already present leaves it be.
   if (range_map_.empty()) {
     const auto& meta = lm->get_lnast()->bw_meta();
     for (const auto& [name, e] : meta.ranges) {
@@ -151,14 +147,10 @@ void uPass_bitwidth::set_range(std::string_view name, Lnast_range r) {
   if (auto it = range_map_.find(name); it != range_map_.end()) {
     if (r.is_narrower_than(it->second)) {
       it->second = r;
-      mark_changed();
     }
     return;
   }
   range_map_.emplace(std::string{name}, r);
-  if (!r.is_unbounded()) {
-    mark_changed();
-  }
 }
 
 void uPass_bitwidth::replace_range(std::string_view name, Lnast_range r) {
@@ -170,14 +162,10 @@ void uPass_bitwidth::replace_range(std::string_view name, Lnast_range r) {
     const Lnast_range& cur = it->second;
     if (cur.min != r.min || cur.max != r.max || cur.unbounded != r.unbounded) {
       it->second = r;
-      mark_changed();
     }
     return;
   }
   range_map_.emplace(std::string{name}, r);
-  if (!r.is_unbounded()) {
-    mark_changed();
-  }
 }
 
 // Try to parse a Pyrope constant text to int64_t.  Handles decimal,
@@ -229,9 +217,7 @@ void uPass_bitwidth::clear_range(std::string_view name) {
     return;
   }
   // Heterogeneous erase — no temporary std::string for the lookup.
-  if (range_map_.erase(name) != 0) {
-    mark_changed();
-  }
+  range_map_.erase(name);
 }
 
 uPass_bitwidth::Op_ranges uPass_bitwidth::scan_op() {

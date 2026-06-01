@@ -29,11 +29,11 @@ namespace attributes {
 struct Attribute_handler {
   virtual ~Attribute_handler() = default;
 
-  // Called once at the start of each upass iteration so the handler can reset
-  // any per-pass state.
+  // Called once at the start of the run so the handler can reset any
+  // per-run state.
   virtual void begin_iteration(uPass_attributes& /*owner*/) {}
 
-  // Called once at the end of an iteration so the handler can finalize
+  // Called once at the end of the run so the handler can finalize
   // diagnostics (e.g. report unresolved comptime attrs).
   virtual void end_run(uPass_attributes& /*owner*/) {}
 

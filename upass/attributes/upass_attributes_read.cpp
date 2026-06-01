@@ -547,7 +547,7 @@ void uPass_attributes::evaluate_attr_get(std::string_view dst, std::string_view 
   // the size-trio (`bits`/`max`/`min`) so an annotated-but-unbounded
   // declaration (`a:int = 3`) folds to nil instead of staying unresolved
   // — the new derive_* are declaration-driven and never depend on a
-  // later iteration of the runner.
+  // second walk over the tree.
   if (!result) {
     if (sticky_pattern || !is_builtin_attr(attr) || attr == "bits" || attr == "ubits" || attr == "sbits" || attr == "max"
         || attr == "min") {
@@ -560,9 +560,6 @@ void uPass_attributes::evaluate_attr_get(std::string_view dst, std::string_view 
   auto [it, inserted] = tmp_fold.emplace(std::string{dst}, *result);
   if (!inserted && !it->second.same_repr(*result)) {
     it->second = *result;
-    mark_changed();
-  } else if (inserted) {
-    mark_changed();
   }
 }
 
@@ -813,8 +810,5 @@ void uPass_attributes::process_range() {
   auto [it, inserted] = range_bounds.emplace(dst, std::make_pair(start, end));
   if (!inserted && (!it->second.first.same_repr(start) || !it->second.second.same_repr(end))) {
     it->second = {start, end};
-    mark_changed();
-  } else if (inserted) {
-    mark_changed();
   }
 }

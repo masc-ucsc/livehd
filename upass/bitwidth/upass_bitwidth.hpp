@@ -40,7 +40,8 @@ public:
   explicit uPass_bitwidth(std::shared_ptr<upass::Lnast_manager>& lm);
   ~uPass_bitwidth() override = default;
 
-  // Keep ranges across iterations — only reset the changed flag.
+  // Per-run setup hook: seed range_map_ from bw_meta on the first invocation
+  // (cross-pass.upass persistence). The runner walks once — no iteration loop.
   void begin_iteration() override;
   // Flush computed ranges into lnast->bw_meta().
   void end_run() override;
@@ -117,8 +118,8 @@ private:
   // Read range for `name` — returns unbounded() if not yet known.
   Lnast_range read_range(std::string_view name) const;
 
-  // Store `r` for `name`. Calls mark_changed() iff the range is strictly
-  // narrower than what was previously recorded.
+  // Store `r` for `name`, narrowing monotonically: an existing range is
+  // overwritten only when `r` is strictly narrower than what was recorded.
   void set_range(std::string_view name, Lnast_range r);
 
   // Replace `name`'s range with `r` regardless of relative width. Used by

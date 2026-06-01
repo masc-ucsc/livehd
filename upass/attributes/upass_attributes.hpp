@@ -105,7 +105,7 @@ public:
   // Fold the attr_get destination tmp to its computed Const so the runner's
   // emit-time substitution picks it up and downstream passes (verifier
   // cassert, constprop eq/ne via runner_fold_fn fallback) see the resolved
-  // value without an extra iteration. See upass_attributes_read.cpp.
+  // value within the same walk. See upass_attributes_read.cpp.
   std::optional<Const> fold_ref(std::string_view name) override;
   bool                 overrides_fold_ref() const override { return true; }
 

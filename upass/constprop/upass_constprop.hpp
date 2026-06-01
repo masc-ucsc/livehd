@@ -235,12 +235,12 @@ protected:
   // the closed mask. Returns invalid when bounds are not folded integers.
   static Const apply_range_mask(const Const& value, const Const& start, const Const& end);
 
-  // Single-shot "store result, mark_changed if value actually changed".
-  // The has_trivial/get_trivial!=/set+mark_changed dance was repeated at
-  // every fold site; centralising it kills a bug-prone pattern.
+  // Single-shot "store result only when the value actually changed".
+  // The has_trivial/get_trivial!=/set dance was repeated at every fold site;
+  // centralising it kills a bug-prone pattern.
   void store_trivial(std::string_view name, const Const& v) {
-    if ((!st.has_trivial(name) || !st.get_trivial(name).same_repr(v)) && st.set(name, v)) {
-      mark_changed();
+    if (!st.has_trivial(name) || !st.get_trivial(name).same_repr(v)) {
+      st.set(name, v);
     }
   }
   void store_trivial(std::string_view name, const spool_ptr<Dlop>& v) { store_trivial(name, *v); }

@@ -1148,7 +1148,7 @@ void uPass_runner::run() {
     }
   }
 
-  // Per-pass finalization. Runs after all iterations finish — passes use
+  // Per-pass finalization. Runs after the walk finishes — passes use
   // this to emit summaries or enforce end-of-run invariants (see
   // uPass_verifier::end_run, which compares cassert tallies against
   // expected counts).

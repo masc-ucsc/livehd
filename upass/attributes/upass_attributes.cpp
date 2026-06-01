@@ -43,7 +43,6 @@ uPass_attributes::uPass_attributes(std::shared_ptr<upass::Lnast_manager>& _lm) :
 }
 
 void uPass_attributes::begin_iteration() {
-  upass::uPass::begin_iteration();
   pending_arms.clear();
   active_arm_stack.clear();
   reg.for_each_handler([this](upass::attributes::Attribute_handler& h) { h.begin_iteration(*this); });
@@ -184,8 +183,8 @@ void uPass_attributes::on_assign_like(bool is_assign_node) {
   }
   // Phase 5 — apply wrap/sat narrowing eagerly when we have a fresh RHS
   // value in hand. record_assign also tries this via runner_fold_fn, but
-  // that lookup falls back to constprop's ST which still holds the
-  // previous iteration's value at the moment our process_assign runs
+  // that lookup falls back to constprop's ST which has not yet seen this
+  // statement's RHS at the moment our process_assign runs
   // (constprop's process_assign fires AFTER ours in pass order). Reading
   // the RHS directly from the LNAST gets us the right input.
   // tmp_fold is empty on bulk-arithmetic workloads (no narrowing has fired
@@ -194,8 +193,8 @@ void uPass_attributes::on_assign_like(bool is_assign_node) {
   if (!view.lhs.empty() && is_assign_node && !rhs_is_nil && !tmp_fold.empty()) {
     // Drop any stale narrowed value from a previous assign so a per-
     // statement wrap/sat applied to the next attr_set picks up the fresh
-    // constprop-stored RHS via runner_fold_fn instead of the previous
-    // iteration's narrowed result.
+    // constprop-stored RHS via runner_fold_fn instead of a stale narrowed
+    // result from an earlier assign.
     tmp_fold.erase(std::string{view.lhs});
   }
   if (rhs_value && !view.lhs.empty() && (has_wrap_policy(view.lhs) || has_sat_policy(view.lhs))) {
@@ -204,9 +203,6 @@ void uPass_attributes::on_assign_like(bool is_assign_node) {
       auto [iter, inserted] = tmp_fold.emplace(view.lhs, out);
       if (!inserted && !iter->second.same_repr(out)) {
         iter->second = out;
-        mark_changed();
-      } else if (inserted) {
-        mark_changed();
       }
     }
   } else if (lhs_unsigned && !was_assigned(view.lhs) && rhs_value
@@ -239,9 +235,6 @@ void uPass_attributes::on_assign_like(bool is_assign_node) {
         auto [iter, inserted] = tmp_fold.emplace(view.lhs, out);
         if (!inserted && !iter->second.same_repr(out)) {
           iter->second = out;
-          mark_changed();
-        } else if (inserted) {
-          mark_changed();
         }
       }
     }
@@ -278,12 +271,8 @@ void uPass_attributes::on_assign_like(bool is_assign_node) {
     bool record_source = false;
     bool gained_shape  = false;
     if (auto* sh = lookup_tuple_shape(rhs); sh) {
-      auto&      slot    = tuple_shapes[std::string{view.lhs}];
-      const bool changed = slot.fields != sh->fields || slot.from_range != sh->from_range;
-      slot               = *sh;
-      if (changed) {
-        mark_changed();
-      }
+      auto& slot    = tuple_shapes[std::string{view.lhs}];
+      slot          = *sh;
       record_source = true;
       gained_shape  = true;
     } else if (lookup_range(rhs)) {
@@ -295,9 +284,6 @@ void uPass_attributes::on_assign_like(bool is_assign_node) {
       auto [it, inserted] = shape_source.emplace(view.lhs, rhs);
       if (!inserted && it->second != rhs) {
         it->second = rhs;
-        mark_changed();
-      } else if (inserted) {
-        mark_changed();
       }
     }
     // Phase 4 — alias attribute migration. Copy direct attrs and any
@@ -319,9 +305,6 @@ void uPass_attributes::on_assign_like(bool is_assign_node) {
       auto [m_it, inserted] = tmp_fold.emplace(view.lhs, it->second);
       if (!inserted && !m_it->second.same_repr(it->second)) {
         m_it->second = it->second;
-        mark_changed();
-      } else if (inserted) {
-        mark_changed();
       }
     }
     reg.for_each_handler(
@@ -407,9 +390,6 @@ void uPass_attributes::process_is() {
   auto [it, inserted] = tmp_fold.emplace(std::string{dst}, folded);
   if (!inserted && !it->second.same_repr(folded)) {
     it->second = folded;
-    mark_changed();
-  } else if (inserted) {
-    mark_changed();
   }
 }
 

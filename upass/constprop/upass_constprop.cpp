@@ -123,12 +123,8 @@ void uPass_constprop::process_assign() {
 
   if (is_type(Lnast_ntype::Lnast_ntype_ref)) {
     // RHS is a variable reference: alias the bundle in the symbol table.
-    // We do NOT call mark_changed here — bundle aliasing (A = ___t1) is just
-    // pointer bookkeeping and doesn't create new scalar information.
-    // Convergence is driven exclusively by process_tuple_get propagating scalar
-    // values.  Marking changed for bundle pointers causes infinite loops when
-    // the same variable is reassigned multiple times per iteration (e.g. SSA-
-    // form append:  A = ___t1, A = ___t2, A = ___t3).
+    // Bundle aliasing (A = ___t1) is just pointer bookkeeping — the scalar
+    // values it carries are propagated by process_tuple_get, not here.
     auto rhs_bundle = current_bundle();
     if (rhs_bundle) {
       // Type-shape preservation: when LHS is a *purely-named* bundle
@@ -260,7 +256,7 @@ void uPass_constprop::process_assign() {
       }
       // Propagate the tuple-typed flag across aliasing assigns. `c = ___4`
       // where ___4 came from a tuple_concat keeps c marked as a tuple, so
-      // the next iteration's tuple_concat reads c via bundle mode rather
+      // a later tuple_concat in this walk reads c via bundle mode rather
       // than mis-classifying it as a scalar wrapper.
       if (tuple_typed_names.contains(std::string(current_text()))) {
         tuple_typed_names.insert(std::string(lhs_text));
@@ -729,7 +725,7 @@ void uPass_constprop::process_eq_ne_impl() {
         // Cross-pass fallback: another pass (e.g. uPass_attributes folding
         // an `attr_get` destination) may have a concrete value for this
         // ref even though constprop never assigned it. Consult before
-        // marking undeclared so eq/ne fold in the same iteration the
+        // marking undeclared so eq/ne fold in the same walk the
         // attribute pass produces the value.
         auto v = runner_fold_fn(name);
         if (v && !v->is_invalid()) {
@@ -903,8 +899,8 @@ void uPass_constprop::process_if() {
 }
 // Block scope push/pop. Each `stmts` LNAST node gets its own persistent
 // scope keyed by its nid hash, so a `mut b = 2` inside `{ … }` is invisible
-// outside the block, but state still survives across the upass fixed-point
-// iterations (see Symbol_table::block_scope).
+// outside the block, but its state persists for the rest of the walk
+// (see Symbol_table::block_scope).
 //
 // The runner calls process_stmts BEFORE descending into children and
 // process_stmts_post AFTER, mirroring the pattern used for `if`. The
@@ -946,9 +942,8 @@ void uPass_constprop::process_stmts_post() { st.leave_scope(); }
 
 void uPass_constprop::process_tuple_add() {
   // Build (or update in-place) a Bundle for the destination from each entry.
-  // We reuse the existing Bundle object if one already exists so that the
-  // pointer stored in process_assign ("A = ___t1") stays stable across
-  // iterations and does not trigger spurious mark_changed().
+  // We reuse the existing Bundle object if one already exists so the pointer
+  // stored in process_assign ("A = ___t1") stays stable.
   move_to_child();
   auto dst = std::string(current_text());
 
@@ -1024,7 +1019,7 @@ void uPass_constprop::process_tuple_add() {
       move_to_parent();
     }
   }
-  // Bundle was updated in-place; no mark_changed() — process_tuple_get drives convergence.
+  // Bundle was updated in-place; scalar values are propagated by process_tuple_get.
   move_to_parent();
 }
 
@@ -1072,8 +1067,8 @@ void uPass_constprop::process_tuple_concat() {
   //     `string(1, "2", 3) == "123"`). The collapse needs every entry to be
   //     a single-level trivial — a nested sub-bundle means we can't decide
   //     yet, so we keep the bundle.
-  //   - Bail (no store) on unknowns / invalid operands; a later iteration
-  //     of the upass fixed-point may resolve them.
+  //   - Bail (no store) on unknowns / invalid operands; the value stays
+  //     unresolved for this walk (the op emits verbatim, unfolded).
   // Layout: ref(dst), (const|ref)...
   move_to_child();
   auto dst = std::string(current_text());
@@ -1135,7 +1130,7 @@ void uPass_constprop::process_tuple_concat() {
 
   // Any-string → stringify all. Mirrors the `string()` cast rule. Aborts the
   // collapse if any first-level entry is a sub-bundle or carries unknowns —
-  // the bundle stays, and a later iteration retries.
+  // the bundle stays unfolded.
   auto try_stringify = [&]() -> std::optional<Const> {
     std::vector<Const> entries;
     bool               any_string = false;
@@ -1472,7 +1467,7 @@ void uPass_constprop::fold_has(const std::string& dst) {
 //       known-false, so scalar match arms (e.g. `match sel { case 0b00
 //       {…} }`) still let dead-branch elimination prune the arm.
 //   - Sub-bundles or undecidable comparisons (unknowns on the L side) →
-//     leave dst unfolded so a later iteration can decide.
+//     leave dst unfolded (undecidable this walk).
 //
 // Cursor is left on whichever child we last visited; the caller
 // (process_func_case) restores via `move_to_parent`.
@@ -2208,7 +2203,7 @@ void uPass_constprop::process_func_call() {
   if (kind == Cast::to_string) {
     auto stringified = stringify_concat_trivials(args);
     if (!stringified.has_value()) {
-      return;  // unknown bits in some arg — leave dst unset for next iteration
+      return;  // unknown bits in some arg — leave dst unset (unresolved this walk)
     }
     result = *stringified;
   } else {
@@ -2248,7 +2243,7 @@ void uPass_constprop::process_func_call() {
 void uPass_constprop::process_range() {
   // Layout: ref(dst), (const|ref)(start), (const|ref)(end)
   // Resolve start/end and stash in range_map keyed by dst. When either side
-  // is unknown, leave the entry absent so a later iteration can retry. For
+  // is unknown, leave the entry absent (unresolved this walk). For
   // `x[a..]` / `x[..]`, prp2lnast emits the open end as the literal pyrope
   // `nil`, which round-trips as a string Const — process_tuple_get treats
   // that sentinel as "to source's last index".
@@ -2275,14 +2270,11 @@ void uPass_constprop::process_range() {
     return;
   }
 
-  auto it      = range_map.find(dst);
-  bool changed = false;
+  auto it = range_map.find(dst);
   if (it == range_map.end()) {
     range_map.emplace(dst, std::make_pair(start, end));
-    changed = true;
   } else if (!it->second.first.same_repr(start) || !it->second.second.same_repr(end)) {
     it->second = {start, end};
-    changed    = true;
   }
 
   // Materialize a tuple bundle for closed integer ranges so eq/tuple_get can
@@ -2299,10 +2291,6 @@ void uPass_constprop::process_range() {
       }
       st.set(dst, bundle);
     }
-  }
-
-  if (changed) {
-    mark_changed();
   }
 }
 
@@ -2420,8 +2408,8 @@ void uPass_constprop::process_tuple_get() {
     auto sub_bundle = st.get_bundle(key);
     if (sub_bundle) {
       bool local_changed = !st.has_bundle(dst) || st.get_bundle(dst) != sub_bundle;
-      if (local_changed && st.set(dst, sub_bundle)) {
-        mark_changed();
+      if (local_changed) {
+        st.set(dst, sub_bundle);
       }
     }
   } else if (st.has_trivial(src)) {
@@ -2444,8 +2432,8 @@ void uPass_constprop::check_tuple_access(const std::string& base, const std::str
     return;
   }
   auto base_b = st.get_bundle(base);
-  // Skip unless the base shape is resolved: a null/empty bundle is an early
-  // fixpoint iteration (the shape may fill in later — flagging now would be a
+  // Skip unless the base shape is resolved: a null/empty bundle means the
+  // shape isn't built yet at this point in the walk (flagging now would be a
   // false positive); a bare scalar is `x[0]` sugar / a single-output fallback.
   if (!base_b || base_b->is_empty() || base_b->is_scalar()) {
     return;
@@ -2491,11 +2479,9 @@ void uPass_constprop::process_tuple_set() {
   // We handle the simple one-field case: tuple.field = value.
   //
   // IMPORTANT: Attribute assignments (e.g. x["__bits"] = 2, x["__signed"] = 1)
-  // must be skipped.  Bundle::set() interns attribute keys as "0.__attr"
-  // while Symbol_table::has_trivial() does a literal match, so the round-trip
-  // "set then has_trivial" always returns false → mark_changed on every
-  // iteration → non-convergence.  Attribute annotations are not values that
-  // constprop needs to propagate.
+  // must be skipped.  Bundle::set() interns attribute keys as "0.__attr" while
+  // Symbol_table::has_trivial() does a literal match, so the round-trip never
+  // resolves.  Attribute annotations are not values that constprop propagates.
   move_to_child();
   auto tuple_var = std::string(current_text());
 
@@ -2546,8 +2532,8 @@ void uPass_constprop::process_tuple_set() {
   //   - ref:   variable whose value names the field (`sing_tup[key] = e`).
   //            Resolve through the symbol table; a trivial string yields its
   //            content (no quotes), a trivial int its decimal text. If the
-  //            ref has no trivial yet, fall back to the variable name so
-  //            convergence can still happen on a later iteration.
+  //            ref has no trivial yet, fall back to the variable name (it
+  //            stays unresolved as a literal path element for this walk).
   std::vector<std::string> path;
   path.reserve(path_and_val.size() - 1);
   for (std::size_t i = 0; i + 1 < path_and_val.size(); ++i) {
@@ -2607,8 +2593,7 @@ void uPass_constprop::process_tuple_set() {
 
     auto v = resolve_value();
     if (v) {
-      // Update bundle in place. mark_changed is driven by tuple_get; matching
-      // process_tuple_add's no-mark policy here keeps convergence behavior.
+      // Update bundle in place; scalar values are propagated by tuple_get.
       bundle->set(name, *v);
     } else if (val_child.is_ref && st.has_bundle(val_child.text)) {
       auto sub = st.get_bundle(val_child.text);
@@ -2633,7 +2618,7 @@ void uPass_constprop::process_tuple_set() {
     } else if (st.has_bundle(val_child.text)) {
       auto b = st.get_bundle(val_child.text);
       if (b) {
-        st.set(key, b);  // bundle comparison not value-based; don't mark_changed
+        st.set(key, b);  // bundle pointer store (not a scalar value)
       }
     }
   } else {
@@ -2910,8 +2895,8 @@ void uPass_constprop::process_set_mask() {
   if (is_range) {
     if (range_end.is_nil()) {
       // Open-ended `lo..`: bits lo and above. For set_mask we need a concrete
-      // bitmask, but the upper bound isn't fixed. Skip — let a later iteration
-      // with a pinned width resolve it.
+      // bitmask, but the upper bound isn't fixed. Skip — without a pinned
+      // width there's no concrete mask to emit.
       return;
     }
     // mask = ((1 << (end - start + 1)) - 1) << start — all Const arithmetic,

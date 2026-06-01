@@ -122,7 +122,7 @@ bool uPass_coalescer::flush_one(const std::string& name) {
   pending.erase(it);
 
   // If by the time we flush, the LHS has become comptime-known (for example,
-  // a downstream constprop iteration folded it through), drop instead of
+  // a later constprop fold in this walk resolved it), drop instead of
   // emit — matches what constprop's classify_statement would have voted on
   // the original emit path.
   if (runner_fold_fn) {

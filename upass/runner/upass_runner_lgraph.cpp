@@ -465,9 +465,6 @@ void uPass_runner_lgraph::run() {
   }
 
   // Single walk per invocation.
-  for (auto& entry : upasses) {
-    entry.pass->begin_iteration();
-  }
   execute_passes();
   last_visited_count = collect_type_names().size();
   last_scan_summary  = gm->scan_fold_candidates();

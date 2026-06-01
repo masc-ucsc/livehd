@@ -92,8 +92,9 @@ public:
   uPass(std::shared_ptr<Lnast_manager>& _lm) : lm(_lm) {}
   virtual ~uPass() = default;
 
-  virtual void begin_iteration() { changed = false; }
-  bool         has_changed() const { return changed; }
+  // Per-run setup hook. The runner does a single walk per invocation (no
+  // fixed-point loop); passes override this to seed/reset per-run state.
+  virtual void begin_iteration() {}
 
   // Called by the runner on every drop-candidate op-node (assign, plus, eq, …)
   // after its per-node process_* has populated any ST state. Returning `drop`
@@ -161,10 +162,10 @@ public:
   // override to pull the keys they care about. Called once, before run().
   virtual void set_options(const Options_map& /*opts*/) {}
 
-  // Called once after the last iteration of the run completes. Passes can
-  // use it to emit summaries or assert invariants that only make sense
-  // once the full traversal is done (e.g. verifier comparing its cassert
-  // tallies against expected counts).
+  // Called once after the single walk completes. Passes use it to emit
+  // summaries or assert invariants that only make sense once the full
+  // traversal is done (e.g. verifier comparing its cassert tallies against
+  // expected counts).
   virtual void end_run() {}
 
   // 1i — flush any deferred/parked emissions whose source nid is relative to
@@ -340,7 +341,6 @@ public:
 
 protected:
   std::shared_ptr<Lnast_manager>& lm;
-  bool                            changed{false};
   Fold_fn                         runner_fold_fn;
   Emit_at_fn                      runner_emit_at_fn;
   Symbol_table*                   runner_st{nullptr};
@@ -355,7 +355,6 @@ protected:
   bool is_invalid() const { return lm->is_invalid(); }
   bool is_last_child() const { return lm->is_last_child(); }
   void write_node() { lm->write_node(); }
-  void mark_changed() { changed = true; }
 
   // Per-write overflow tag (wrap/sat) on the node the cursor is parked on
   // (a `store` or `declare`). Overflow::none when untagged. Task 1t/T4.

@@ -108,9 +108,6 @@ void uPass_attributes::apply_narrowing(std::string_view lhs, bool is_wrap, bool 
   auto [iter, inserted] = tmp_fold.emplace(std::string{lhs}, out);
   if (!inserted && !iter->second.same_repr(out)) {
     iter->second = out;
-    mark_changed();
-  } else if (inserted) {
-    mark_changed();
   }
 }
 
