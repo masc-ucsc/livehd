@@ -559,8 +559,7 @@ static std::optional<Const> compare_bundles_eq(const std::shared_ptr<Bundle cons
       // an unknown cross-type compare falls through to eq_op's tri-state).
       if (!ov.is_nil() && !ep->trivial.is_nil() && !ov.has_unknowns() && !ep->trivial.has_unknowns()
           && (ov.is_bool() != ep->trivial.is_bool() || ov.is_string() != ep->trivial.is_string())) {
-        upass::error(
-            "uPass_constprop: comparison mixes types (bool vs int/string) — convert explicitly, e.g. `(x != 0) == b`\n");
+        upass::error("uPass_constprop: comparison mixes types (bool vs int/string) — convert explicitly, e.g. `(x != 0) == b`\n");
       }
       const Const eq = *ov.eq_op(ep->trivial);
       if (eq.is_known_true()) {
@@ -2355,7 +2354,7 @@ void uPass_constprop::process_tuple_get() {
   // `t[0]`, `t['b']` and `t["foo"]` resolve uniformly to the bare-name
   // stored key in the bundle.
   std::string key = src;
-  std::string first_seg;       // first (top-level) field segment, canonicalized
+  std::string first_seg;               // first (top-level) field segment, canonicalized
   bool        first_is_index = false;  // numeric (positional) vs named
   bool        first_captured = false;
   do {
@@ -2443,7 +2442,7 @@ void uPass_constprop::check_tuple_access(const std::string& base, const std::str
   if (n_unnamed == 0 && n_named == 0) {
     return;  // no resolved top-level fields — nothing to check
   }
-  int  idx     = 0;
+  int idx      = 0;
   auto [p, ec] = std::from_chars(seg.data(), seg.data() + seg.size(), idx);
   if (ec != std::errc{}) {
     return;  // unparseable index — skip

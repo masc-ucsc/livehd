@@ -151,13 +151,11 @@ void uPass_attributes::on_assign_like(bool is_assign_node) {
   // `uint` (no concrete width or range) has no envelope, so it stays on the
   // fast path (and a present-but-nil range Const must not be treated as a
   // bound — that crashes Dlop arithmetic).
-  const bool  lhs_signed_bounded = lhs_ti_for_coerce != nullptr && lhs_ti_for_coerce->has_type_spec
-                                   && lhs_ti_for_coerce->kind == Numeric_kind::signed_int
-                                   && (lhs_ti_for_coerce->bits != 0
-                                       || (lhs_ti_for_coerce->range_max && lhs_ti_for_coerce->range_max->is_integer())
-                                       || (lhs_ti_for_coerce->range_min && lhs_ti_for_coerce->range_min->is_integer()));
-  const bool  need_rhs_value    = is_assign_node
-                                  && (!wrap_policy.empty() || !sat_policy.empty() || lhs_unsigned || lhs_signed_bounded);
+  const bool  lhs_signed_bounded
+      = lhs_ti_for_coerce != nullptr && lhs_ti_for_coerce->has_type_spec && lhs_ti_for_coerce->kind == Numeric_kind::signed_int
+        && (lhs_ti_for_coerce->bits != 0 || (lhs_ti_for_coerce->range_max && lhs_ti_for_coerce->range_max->is_integer())
+            || (lhs_ti_for_coerce->range_min && lhs_ti_for_coerce->range_min->is_integer()));
+  const bool need_rhs_value = is_assign_node && (!wrap_policy.empty() || !sat_policy.empty() || lhs_unsigned || lhs_signed_bounded);
   if (is_assign_node) {
     move_to_child();
     if (move_to_sibling()) {
@@ -205,8 +203,7 @@ void uPass_attributes::on_assign_like(bool is_assign_node) {
         iter->second = out;
       }
     }
-  } else if (lhs_unsigned && !was_assigned(view.lhs) && rhs_value
-             && rhs_value->bit_test(static_cast<int>(lhs_ti_for_coerce->bits))
+  } else if (lhs_unsigned && !was_assigned(view.lhs) && rhs_value && rhs_value->bit_test(static_cast<int>(lhs_ti_for_coerce->bits))
              && !rhs_value->unknown_bit_test(static_cast<int>(lhs_ti_for_coerce->bits))) {
     // `!was_assigned` restricts this to the FIRST write (the declaration's
     // initializer). Per-statement `wrap x = …` / `sat x = …` are always

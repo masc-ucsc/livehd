@@ -149,7 +149,9 @@ TEST(LnastRangeLattice, ContainsUnbounded) {
   EXPECT_TRUE(Lnast_range::make_unbounded().contains(Lnast_range::boolean()));
   // A bounded envelope never contains an unbounded value range.
   Lnast_range u8;
-  u8.min = 0; u8.max = 255; u8.unbounded = false;
+  u8.min       = 0;
+  u8.max       = 255;
+  u8.unbounded = false;
   EXPECT_FALSE(u8.contains(Lnast_range::make_unbounded()));
 }
 

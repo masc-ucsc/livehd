@@ -99,7 +99,7 @@ private:
   // Equality / assignment compatibility class: int / bool / string distinct;
   // range and tuple share a class (`range == flat tuple` is legal); -1 for
   // unknown/nil (no concrete class — the check is skipped).
-  static int eq_class(Kind k);
+  static int         eq_class(Kind k);
 
   Kind kind_of(std::string_view name) const;
   void set_kind(std::string_view name, Kind k);

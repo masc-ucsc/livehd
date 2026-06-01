@@ -84,8 +84,8 @@ void uPass_bitwidth::end_run() {
       if (it == range_map_.end() || it->second.is_unbounded()) {
         continue;  // no tracked value / not provable
       }
-      const Lnast_range& val = it->second;
-      const Lnast_range& env = decl_envelope_.find(var)->second;
+      const Lnast_range& val             = it->second;
+      const Lnast_range& env             = decl_envelope_.find(var)->second;
       const bool         is_unsigned_env = !env.is_signed();  // env.min >= 0
       // Does-not-fit on the ACTUAL inferred range: positive overflow (above
       // max) OR underflow (the range can dip below the declared min — for an
@@ -698,7 +698,7 @@ void uPass_bitwidth::process_attr_set() {
   // — the value is left intact so end_run reports the overflow uniformly with
   // the declare/type_spec path.
   decl_envelope_[target] = narrow;
-  auto current = read_range(target);
+  auto current           = read_range(target);
   if (current.is_unbounded()) {
     set_range(target, narrow);
     return;

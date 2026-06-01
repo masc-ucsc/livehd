@@ -431,10 +431,10 @@ std::optional<Const> uPass_attributes::derive_aggregate_typename(std::string_vie
   }
   // 2. Via parent's own named type (`o:outer_t` → `outer_t.inn`).
   if (auto pt = derive_aggregate_typename(parent, parent); pt) {
-    auto repr = pt->to_pyrope();
-    std::string type_name
-        = (repr.size() >= 2 && repr.front() == '\'' && repr.back() == '\'') ? std::string{repr.substr(1, repr.size() - 2)}
-                                                                            : std::string{repr};
+    auto        repr      = pt->to_pyrope();
+    std::string type_name = (repr.size() >= 2 && repr.front() == '\'' && repr.back() == '\'')
+                                ? std::string{repr.substr(1, repr.size() - 2)}
+                                : std::string{repr};
     if (auto v = field_typename(type_name); v) {
       return v;
     }

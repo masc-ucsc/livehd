@@ -22,11 +22,11 @@ const char* uPass_typecheck::kind_name(Kind k) {
   switch (k) {
     case Kind::integer: return "integer";
     case Kind::boolean: return "boolean";
-    case Kind::string: return "string";
-    case Kind::range: return "range";
-    case Kind::tuple: return "tuple";
-    case Kind::nil: return "nil";
-    default: return "unknown";
+    case Kind::string : return "string";
+    case Kind::range  : return "range";
+    case Kind::tuple  : return "tuple";
+    case Kind::nil    : return "nil";
+    default           : return "unknown";
   }
 }
 
@@ -40,10 +40,10 @@ int uPass_typecheck::eq_class(Kind k) {
   switch (k) {
     case Kind::integer:
     case Kind::range:
-    case Kind::tuple: return 0;
+    case Kind::tuple  : return 0;
     case Kind::boolean: return 1;
-    case Kind::string: return 2;
-    default: return -1;
+    case Kind::string : return 2;
+    default           : return -1;
   }
 }
 
@@ -131,7 +131,7 @@ void uPass_typecheck::emit_type_error(std::string_view code, const std::string& 
 
 void uPass_typecheck::require_all(Kind required, Kind result, std::string_view sym, std::string_view code, bool allow_nil) {
   std::string dst;
-  auto        ks = collect_operands(dst);
+  auto        ks      = collect_operands(dst);
   bool        has_nil = false;
   bool        bad     = false;
   for (auto k : ks) {
@@ -161,7 +161,7 @@ void uPass_typecheck::require_all(Kind required, Kind result, std::string_view s
 
 void uPass_typecheck::require_same(Kind result, std::string_view sym, std::string_view code) {
   std::string dst;
-  auto        ks = collect_operands(dst);
+  auto        ks      = collect_operands(dst);
   bool        any_nil = false;
   for (auto k : ks) {
     if (k == Kind::nil) {
@@ -184,7 +184,8 @@ void uPass_typecheck::require_same(Kind result, std::string_view sym, std::strin
       }
     }
     if (bad) {
-      emit_type_error(code, std::format("`{}` requires both operands to be the same type", sym),
+      emit_type_error(code,
+                      std::format("`{}` requires both operands to be the same type", sym),
                       "no implicit conversion — cast explicitly (e.g. `int(b)`, `x == false`)");
     }
   }
@@ -259,7 +260,9 @@ void uPass_typecheck::process_assign() {
   if (rhs != Kind::unknown && rhs != cur) {
     emit_type_error("assign-type-mismatch",
                     std::format("cannot assign {} value to `{}` (it is {}); a variable's type cannot change",
-                                kind_name(rhs), dst, kind_name(cur)),
+                                kind_name(rhs),
+                                dst,
+                                kind_name(cur)),
                     "use a new variable, or cast explicitly (e.g. `int(x)`)");
   }
 }
@@ -280,7 +283,8 @@ void uPass_typecheck::process_if() {
       if (k == Kind::nil) {
         emit_type_error("nil-operand", "`nil` is invalid as a condition (only copy, `==nil`/`!=nil`, `.[valid]`)");
       } else if (k != Kind::unknown && k != Kind::boolean) {
-        emit_type_error("cond-not-bool", std::format("condition must be boolean, got {}", kind_name(k)),
+        emit_type_error("cond-not-bool",
+                        std::format("condition must be boolean, got {}", kind_name(k)),
                         "compare explicitly, e.g. `if x != 0`");
       }
     }
@@ -299,7 +303,8 @@ void uPass_typecheck::process_while() {
     if (k == Kind::nil) {
       emit_type_error("nil-operand", "`nil` is invalid as a condition (only copy, `==nil`/`!=nil`, `.[valid]`)");
     } else if (k != Kind::unknown && k != Kind::boolean) {
-      emit_type_error("cond-not-bool", std::format("while condition must be boolean, got {}", kind_name(k)),
+      emit_type_error("cond-not-bool",
+                      std::format("while condition must be boolean, got {}", kind_name(k)),
                       "compare explicitly, e.g. `while x != 0`");
     }
   }
@@ -354,7 +359,7 @@ void uPass_typecheck::process_tuple_add() {
   // the inner kind so `x and (y or z)` keeps its kind. Multiple operands (or a
   // structured/keyed field payload) is a real tuple.
   std::string dst;
-  auto        ks = collect_operands(dst);
+  auto        ks  = collect_operands(dst);
   Kind        res = (ks.size() == 1) ? ks[0] : Kind::tuple;
   set_kind(dst, res);
 }
@@ -364,8 +369,8 @@ void uPass_typecheck::process_tuple_concat() {
   // `++` → tuple, or string when every known operand is a string, or range when
   // every known operand is a range (optable.md). Not homogeneity-checked.
   std::string dst;
-  auto        ks = collect_operands(dst);
-  bool        any_known = false;
+  auto        ks         = collect_operands(dst);
+  bool        any_known  = false;
   bool        all_string = true;
   bool        all_range  = true;
   for (auto k : ks) {
