@@ -495,34 +495,6 @@ void uPass_attributes::evaluate_attr_get(std::string_view dst, std::string_view 
       }
     } else if (attr == "comptime") {
       result = derive_comptime(base, base_text);
-    } else if (attr == "wrap") {
-      // Built-in overflow-policy attribute: presence-only on declaration
-      // (`x::[wrap]`) → true; an explicit `[wrap=false]` returns false; an
-      // active policy without an explicit attr_set value returns true.
-      // Otherwise the attr was never present on this var (statement-level
-      // `wrap x = ...` erases any pre-recorded value), and per spec the
-      // read is nil.
-      if (auto v = lookup_attr_value(base, attr); v) {
-        result = *v;
-      } else if (has_wrap_policy(base)) {
-        result = *Dlop::create_integer(1);
-      } else {
-        result = *Dlop::nil();
-      }
-    } else if (attr == "saturate" || attr == "sat") {
-      // `sat` is shorthand for `saturate`; both names alias to the same
-      // policy slot. Same nil-when-unset semantics as `wrap` above.
-      auto v = lookup_attr_value(base, "saturate");
-      if (!v) {
-        v = lookup_attr_value(base, "sat");
-      }
-      if (v) {
-        result = *v;
-      } else if (has_sat_policy(base)) {
-        result = *Dlop::create_integer(1);
-      } else {
-        result = *Dlop::nil();
-      }
     } else if (attr == "typename") {
       result = derive_aggregate_typename(base, base_text);
     } else if (attr == "key") {
@@ -693,13 +665,11 @@ void uPass_attributes::process_declare() {
   bool                 is_real_type = false;
   Decl_kind            decl         = Decl_kind::unknown;
   bool                 comptime     = false;
-  bool                 want_wrap    = false;
-  bool                 want_sat     = false;
   if (move_to_sibling()) {  // TYPE
     read_scalar_type_at_cursor(kind, bits, range_max, range_min, is_real_type);
     if (move_to_sibling() && Lnast_ntype::is_const(get_raw_ntype())) {  // mode
       auto   mode  = current_text();
-      // Split on spaces; storage token first, optional "comptime"/"wrap"/"sat".
+      // Split on spaces; storage token first, optional "comptime".
       size_t start = 0;
       while (start <= mode.size()) {
         size_t sp  = mode.find(' ', start);
@@ -714,10 +684,6 @@ void uPass_attributes::process_declare() {
           decl = Decl_kind::await_kind;
         } else if (tok == "comptime") {
           comptime = true;
-        } else if (tok == "wrap") {
-          want_wrap = true;
-        } else if (tok == "sat") {
-          want_sat = true;
         }
         if (sp == std::string_view::npos) {
           break;
@@ -753,17 +719,6 @@ void uPass_attributes::process_declare() {
   if (comptime) {
     ti.is_comptime                                   = true;
     attr_set_values[std::string(target)]["comptime"] = *Dlop::create_integer(1);
-  }
-  // Task 1t — a declaration-site `wrap`/`sat` in the mode is the STICKY overflow
-  // policy (every store to this var narrows). Set it directly from the declare
-  // node. Per-statement `wrap x = v` arrives as an after-store attr_set.
-  if (want_wrap) {
-    set_wrap_policy(target);
-    attr_set_values[std::string(target)]["wrap"] = *Dlop::create_integer(1);
-  }
-  if (want_sat) {
-    set_sat_policy(target);
-    attr_set_values[std::string(target)]["saturate"] = *Dlop::create_integer(1);
   }
 }
 

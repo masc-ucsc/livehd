@@ -36,13 +36,6 @@
 
 namespace {
 
-bool is_truthy(std::string_view v) {
-  if (v.empty() || v == "true") {
-    return true;
-  }
-  return v != "false" && v != "0";
-}
-
 // Wrap / saturate narrowing math moved to upass/bitwidth/wrap_sat.hpp.
 // Re-export under the same names so the rest of this file's call sites
 // stay unchanged and policy/trigger semantics here remain isolated from
@@ -54,60 +47,85 @@ using upass::bitwidth::wrap_to_unsigned;
 
 }  // namespace
 
-Const uPass_attributes::narrow_for_lhs(std::string_view lhs, const Const& v) const {
-  const bool wrap = has_wrap_policy(lhs);
-  const bool sat  = has_sat_policy(lhs);
-  if (!wrap && !sat) {
+Const uPass_attributes::narrow_for_lhs(std::string_view type_src, const Const& v, bool is_wrap, bool is_sat) const {
+  if (!is_wrap && !is_sat) {
     return v;
   }
-  const auto* ti = lookup_type_info(lhs);
+  const auto* ti = lookup_type_info(type_src);
   if (ti == nullptr || ti->bits == 0) {
     return v;
   }
   const bool is_signed = ti->kind == Numeric_kind::signed_int;
-  if (wrap) {
+  if (is_wrap) {
     return is_signed ? wrap_to_signed(v, ti->bits) : wrap_to_unsigned(v, ti->bits);
   }
   return is_signed ? saturate_signed(v, ti->bits) : saturate_unsigned(v, ti->bits);
 }
 
-void uPass_attributes::apply_narrowing(std::string_view lhs, bool is_wrap, bool is_sat) {
+// Task 1t — `wrap`/`sat` lower to a library call
+//   func_call(dst, ref("wrap"|"sat"), store(ref("v"), value), store(ref("type"), ref(lhs)))
+// Narrow the value to the lhs's declared type (read via the `type=` arg) and
+// publish it on the call's dst tmp; the following `store(lhs, dst)` then
+// alias-propagates the narrowed value into lhs (consumers read it via
+// runner_fold_fn). A no-op narrowing is left to constprop's copy-through.
+void uPass_attributes::process_func_call() {
+  if (!move_to_child()) {
+    return;
+  }
+  std::string dst(current_text());
+  if (!move_to_sibling()) {
+    move_to_parent();
+    return;
+  }
+  const auto callee  = current_text();
+  const bool is_wrap = callee == "wrap";
+  const bool is_sat  = callee == "sat" || callee == "saturate";
   if (!is_wrap && !is_sat) {
+    move_to_parent();
     return;
   }
-  const auto* ti = lookup_type_info(lhs);
-  if (ti == nullptr || ti->bits == 0) {
-    return;
-  }
-  // Resolve the current value: tmp_fold first (so chained narrowings see
-  // the previous narrowing), then runner_fold_fn (constprop's ST + every
-  // other pass's fold contribution).
-  std::optional<Const> cur;
-  auto                 it = tmp_fold.find(std::string{lhs});
-  if (it != tmp_fold.end() && !it->second.is_invalid()) {
-    cur = it->second;
-  } else if (runner_fold_fn) {
-    auto v = runner_fold_fn(lhs);
-    if (v && !v->is_invalid()) {
-      cur = *v;
+
+  std::optional<Const> value;
+  std::string          type_src;
+  while (move_to_sibling()) {
+    if (!is_type(Lnast_ntype::Lnast_ntype_store)) {
+      continue;
     }
+    if (!move_to_child()) {
+      continue;
+    }
+    const std::string key(current_text());
+    if (move_to_sibling()) {
+      if (key == "v") {
+        if (Lnast_ntype::is_const(get_raw_ntype())) {
+          auto v = Dlop::from_pyrope(current_text());
+          if (!v->is_invalid()) {
+            value = *v;
+          }
+        } else if (Lnast_ntype::is_ref(get_raw_ntype()) && runner_fold_fn) {
+          auto folded = runner_fold_fn(current_text());
+          if (folded && !folded->is_invalid()) {
+            value = *folded;
+          }
+        }
+      } else if (key == "type" && Lnast_ntype::is_ref(get_raw_ntype())) {
+        type_src = std::string(current_text());
+      }
+    }
+    move_to_parent();
   }
-  if (!cur) {
+  move_to_parent();
+
+  if (!value || type_src.empty()) {
     return;
   }
-  const bool is_signed = ti->kind == Numeric_kind::signed_int;
-  Const      out;
-  if (is_wrap) {
-    out = is_signed ? wrap_to_signed(*cur, ti->bits) : wrap_to_unsigned(*cur, ti->bits);
-  } else {
-    out = is_signed ? saturate_signed(*cur, ti->bits) : saturate_unsigned(*cur, ti->bits);
+  Const out = narrow_for_lhs(type_src, *value, is_wrap, is_sat);
+  if (out.is_invalid() || out.same_repr(*value)) {
+    return;  // narrowing is a no-op; constprop's copy-through carries the value
   }
-  if (out.is_invalid() || out.same_repr(*cur)) {
-    return;
-  }
-  auto [iter, inserted] = tmp_fold.emplace(std::string{lhs}, out);
-  if (!inserted && !iter->second.same_repr(out)) {
-    iter->second = out;
+  auto [it, inserted] = tmp_fold.emplace(dst, out);
+  if (!inserted && !it->second.same_repr(out)) {
+    it->second = out;
   }
 }
 
@@ -119,33 +137,25 @@ void uPass_attributes::record_assign(std::string_view lhs, bool rhs_is_nil) {
     return;  // nil invalidations don't count as a real binding (per spec)
   }
 
-  // The two consumers of record_assign's bookkeeping are gated on
-  // type_info being present for `lhs`:
-  //   * Wrap_sat_handler::on_attr_set reads was_assigned(lhs); it only
-  //     fires when `attr_set wrap`/`sat` runs on `lhs`, and that path
-  //     requires the user to declare `lhs` first (which writes a type
-  //     entry, even for a bare `mut x = …` → attr_set type=mut).
-  //   * The const-single-bind check is inside the `ti->decl == const_kind`
-  //     branch below, so it short-circuits on ti==nullptr anyway.
-  //   * apply_narrowing reads `has_wrap_policy` / `has_sat_policy`; those
-  //     are only set via Wrap_sat_handler, which only ran if `lhs` had
-  //     type_info beforehand.
-  // So when `lookup_type_info(lhs)` is null AND no wrap/sat policy exists
-  // for it, every side effect of record_assign is dead. Skip the work.
-  // This is the dominant savings on bulk-arithmetic workloads (xx.prp:
-  // 1M plus + 1M assign ops, mostly tmp LHS with no type_info).
+  // record_assign's only remaining side effects need type_info for `lhs`:
+  //   * assigned_once gates the unsigned first-write coercion in on_assign_like
+  //     (only typed unsigned LHS reach it).
+  //   * the const-single-bind check is inside the `ti->decl == const_kind`
+  //     branch below.
+  // When `lookup_type_info(lhs)` is null, both are dead — skip the work. This
+  // is the dominant savings on bulk-arithmetic workloads (xx.prp: 1M plus + 1M
+  // assign ops, mostly tmp LHS with no type_info).
   const auto* ti = lookup_type_info(lhs);
-  if (ti == nullptr && !has_wrap_policy(lhs) && !has_sat_policy(lhs)) {
+  if (ti == nullptr) {
     return;
   }
 
-  // Track that the var has been assigned at least once. Used by Phase 5 to
-  // distinguish declaration-site `:[wrap]` (attr_set BEFORE first assign)
-  // from statement-level `wrap x = ...` (attr_set AFTER an assign).
+  // Track that the var has been assigned at least once (the unsigned
+  // first-write coercion in on_assign_like gates on `!was_assigned`).
   assigned_once.emplace(lhs);
 
   // Const single-bind enforcement.
-  if (ti != nullptr && ti->decl == Decl_kind::const_kind) {
+  if (ti->decl == Decl_kind::const_kind) {
     auto [it, inserted] = const_assign_count.try_emplace(std::string{lhs}, 0);
     int& count          = it->second;
     ++count;
@@ -153,56 +163,10 @@ void uPass_attributes::record_assign(std::string_view lhs, bool rhs_is_nil) {
       upass::error("uPass_attributes: const `{}` rebind (assigned {} times)\n", lhs, count);
     }
   }
-
-  // If a wrap/sat policy is in effect for this lhs, narrow the value the
-  // moment it's stored so later reads via runner_fold_fn pick up the
-  // narrowed result.
-  if (has_wrap_policy(lhs)) {
-    apply_narrowing(lhs, /*wrap=*/true, /*sat=*/false);
-  } else if (has_sat_policy(lhs)) {
-    apply_narrowing(lhs, /*wrap=*/false, /*sat=*/true);
-  }
 }
 
 namespace upass {
 namespace attributes {
-
-void Wrap_sat_handler::on_attr_set(uPass_attributes& owner, std::string_view lhs, std::string_view value_text) {
-  const bool         active  = is_truthy(value_text);
-  const std::string& bucket  = owner.current_dispatch_bucket();
-  const bool         is_wrap = (bucket == "wrap");
-  const bool         is_sat  = (bucket == "saturate") || (bucket == "sat");
-  if (!is_wrap && !is_sat) {
-    return;
-  }
-
-  if (!active) {
-    return;  // explicit false: present-but-inactive, no policy, no narrowing.
-  }
-
-  if (!owner.was_assigned(lhs)) {
-    // Declaration-site form: persist as policy. Future assigns to lhs go
-    // through narrowing in record_assign. The presence-true value is
-    // already stored in attr_set_values by the dispatcher's caller, so
-    // .[wrap] / .[saturate] reads return true.
-    if (is_wrap) {
-      owner.set_wrap_policy(lhs);
-    } else {
-      owner.set_sat_policy(lhs);
-    }
-    return;
-  }
-
-  // Statement-level form: narrow the in-flight value once and don't leave
-  // a sticky policy. The dispatcher's caller already wrote the attr value
-  // to attr_set_values; remove every wrap/saturate alias for the target so
-  // a follow-up `.[wrap]` / `.[saturate]` read does not see the
-  // pre-recorded `true`.
-  owner.apply_narrowing(lhs, is_wrap, is_sat);
-  owner.erase_attr_value(lhs, "wrap");
-  owner.erase_attr_value(lhs, "saturate");
-  owner.erase_attr_value(lhs, "sat");
-}
 
 void Const_handler::on_attr_set(uPass_attributes& owner, std::string_view lhs, std::string_view value_text) {
   // attr_set type=const is the canonical signal. The actual single-bind

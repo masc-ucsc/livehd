@@ -7,6 +7,13 @@
 #include <string>
 #include <string_view>
 
+#include "diag.hpp"
+
+// Strip the single-quote wrappers Lconst::to_pyrope adds around strings.
+// Defined below; forward-declared so both classify_statement (cassert message)
+// and classify_func_call (cputs operand) can use it.
+static std::string strip_pyrope_quotes(std::string s);
+
 // Registered once here (not in the header) to avoid the registration being
 // dropped when no TU in the final binary includes upass_verifier.hpp.
 static upass::uPass_plugin plugin_verifier("verifier", upass::uPass_wrapper<uPass_verifier>::get_upass);
@@ -52,6 +59,51 @@ void uPass_verifier::mark_inlined_cassert_fail(std::string_view key) {
   }
 }
 
+// Report one comptime-false cassert through the unified diagnostic surface
+// (docs/contracts/diagnostics.md). The fatal abort still happens once, in
+// finalize_aggregate, when the fail tally doesn't match `verifier_fail:N`;
+// this record is the per-assertion breadcrumb that makes the failure
+// debuggable. `operand_text` is the (usually folded-to-a-temp) condition ref,
+// `value` is what it evaluated to, and `msg` is the optional user string.
+void uPass_verifier::emit_false_cassert_diag(const Lnast_nid&   cassert_nid,
+                                             const std::string& operand_text,
+                                             const std::string& value,
+                                             const std::string& msg) {
+  livehd::diag::Span span;
+  if (const auto& ln = lm->get_lnast()) {
+    const auto loc   = ln->get_loc(cassert_nid);
+    const auto fname = ln->get_fname(cassert_nid);
+    if (!fname.empty()) {
+      span.file = std::string{fname};
+    }
+    if (loc.line != 0) {
+      span.start_line = loc.line;
+    }
+  }
+
+  // The message line leads with the user-supplied text when present (that is
+  // the human-readable identity of the assertion); the folded operand ref is
+  // appended so the record is unique per cassert even when several share the
+  // same message (the sink dedups on code+span+message).
+  std::string message;
+  if (msg.empty()) {
+    message = std::format("comptime cassert is false (`{}` evaluated to {})", operand_text, value);
+  } else {
+    message = std::format("comptime cassert is false: {} (`{}` evaluated to {})", msg, operand_text, value);
+  }
+
+  livehd::diag::sink().emit(livehd::diag::Diagnostic{
+      .severity = livehd::diag::Severity::error,
+      .code     = "cassert-false",
+      .category = "type",
+      .pass     = "upass.verifier",
+      .message  = std::move(message),
+      .span     = std::move(span),
+      .hint     = msg.empty() ? "pass a message as cassert's 2nd argument (cassert(cond, \"why\")) to label this assertion"
+                              : std::string{},
+  });
+}
+
 upass::Emit_decision uPass_verifier::classify_statement() {
   if (is_type(Lnast_ntype::Lnast_ntype_func_call)) {
     return classify_func_call();
@@ -71,11 +123,15 @@ upass::Emit_decision uPass_verifier::classify_statement() {
     return upass::Emit_decision::drop();
   }
 
-  // Cassert has a single child — a ref or a const (post-Slice-1 fold).
-  // Resolve it through the runner's aggregated fold_ref so we see whatever
+  // Cassert layout is `cassert(<cond>)` or `cassert(<cond>, <msg>)`:
+  //   child 0 — the condition (a ref or a const, post-Slice-1 fold)
+  //   child 1 — an optional comptime message string (prp2lnast lowers the
+  //             user's `cassert(cond, "msg")` second argument here)
+  // Resolve both through the runner's aggregated fold_ref so we see whatever
   // constprop (or any future pass) knows.
   std::optional<Const> val;
   std::string          operand_text;
+  std::string          assert_msg;  // user-supplied message (cassert's 2nd arg), if any
   bool                 got_child = move_to_child();
   if (got_child) {
     operand_text = std::string{current_text()};
@@ -83,6 +139,21 @@ upass::Emit_decision uPass_verifier::classify_statement() {
       val = *Dlop::from_pyrope(current_text());
     } else if (is_type(Lnast_ntype::Lnast_ntype_ref) && runner_fold_fn) {
       val = runner_fold_fn(current_text());
+    }
+    // Optional message child. Resolve it the same way cputs resolves its
+    // operand: a folded string literal becomes a const, an interpolated
+    // string a ref the runner can fold. Only a comptime-known string is
+    // surfaced; anything else is dropped (the diag still reports without it).
+    if (move_to_sibling()) {
+      std::optional<Const> mval;
+      if (is_type(Lnast_ntype::Lnast_ntype_const)) {
+        mval = *Dlop::from_pyrope(current_text());
+      } else if (is_type(Lnast_ntype::Lnast_ntype_ref) && runner_fold_fn) {
+        mval = runner_fold_fn(current_text());
+      }
+      if (mval && !mval->is_invalid() && mval->is_string()) {
+        assert_msg = strip_pyrope_quotes(mval->to_pyrope());
+      }
     }
   }
   move_to_parent();
@@ -109,12 +180,15 @@ upass::Emit_decision uPass_verifier::classify_statement() {
   }
 
   if (val->is_known_false()) {
-    // Count it and drop from the output — deferring the error to end_run
-    // lets a test assert "I expect exactly N false casserts" via
-    // `verifier_fail:N`. The end_run handler raises if the tally doesn't
-    // match expectations, so misaligned expectations still make rc != 0.
+    // Count it and drop from the output — deferring the *fatal* error to
+    // finalize_aggregate lets a test assert "I expect exactly N false
+    // casserts" via `verifier_fail:N` without aborting on the first one. We
+    // still emit one non-fatal diagnostic per failing assertion so the cause
+    // is visible: the folded operand text is just a temp (`___N`), so the
+    // user-supplied message (cassert's 2nd argument) is what actually points
+    // at the failing assertion.
     ++fail_count;
-    std::print(stderr, "uPass - verifier comptime cassert failed (operand evaluated to {})\n", val->to_pyrope());
+    emit_false_cassert_diag(cassert_nid, operand_text, val->to_pyrope(), assert_msg);
     return upass::Emit_decision::drop();
   }
 

@@ -125,13 +125,13 @@ can be migrated later or retired with their `//lgraph` dep.
   `lgraph/ann_place.hpp`, that one is gone.
 - `graph/attrs.hpp` — every LiveHD per-node / per-pin attribute tag
   backed by `hhds::flat_storage`: `bits`, `pin_offset`, `pin_name`,
-  `pin_delay`, `pin_unsigned`, `color`, `place`, `loc`, `source`,
+  `pin_delay`, `pin_signed`, `color`, `place`, `loc`, `source`,
   `subid`, `const_value`, `lut`. **Canonical** — previously duplicated
   in `lgraph/lgraph_attrs.hpp`, that one is gone. Pre-registered at
   static-init in `graph/cell.cpp` (avoids the registry race documented
-  in `hhds_migration.md §3.1`). One rename: `livehd::attrs::sign` →
-  `livehd::attrs::pin_unsigned` (semantics unchanged; 1 = unsigned,
-  absent = signed).
+  in `hhds_migration.md §3.1`). One rename/remodel:
+  `livehd::attrs::sign` → `livehd::attrs::pin_signed` (presence =
+  signed, absent = unsigned).
 - `graph/BUILD` — `cc_library "graph"`, deps `//core` +
   `@hhds//hhds:graph` (notably **not** `//lgraph`).
 
@@ -582,13 +582,10 @@ This is the biggest single change. Strategy:
     can be retired in Phase G6.
 
 20. [x] **Per-pin sign mirror + is_unsign reader (LANDED).** Pin sign
-    is a small boolean (unsigned == 1, signed == 0). New helper
-    `mirror_set_pin_sign_hhds(nid_master, pid, unsigned_flag)` calls
-    `attr().set(1)` on set_unsign / `attr().del()` on set_sign so the
-    absence-of-attribute case matches the signed default. Threaded
-    through `Node_pin::set_unsign`/`set_sign`. `Node_pin::is_unsign`
-    consults shadow first, falls back to the legacy
-    `node_pin_unsigned_map` on shadow miss.
+    is a presence marker: `livehd::attrs::pin_signed` present means
+    signed, absent means unsigned. Threaded through
+    `Node_pin::set_unsign`/`set_sign`. `Node_pin::is_unsign` returns
+    true when the marker is absent.
 
 21. [x] **Node color mirror + get_color/has_color (LANDED).** Color
     is a small int taint used by pass diagnostics. New
@@ -805,7 +802,7 @@ document. To pick up:
      `dpin.attr(livehd::attrs::bits).has() ? dpin.attr(livehd::attrs::bits).get() : 0`.
    - `node.set_color(c)` → `node.attr(livehd::attrs::color).set(c)`.
    - Other per-pin / per-node attrs: `livehd::attrs::pin_name`,
-     `pin_offset`, `pin_delay`, `pin_unsigned`, `place`, `loc`,
+     `pin_offset`, `pin_delay`, `pin_signed`, `place`, `loc`,
      `source`, `subid`, `const_value`, `lut`. All defined in
      `graph/attrs.hpp`.
    - For Verilog positional argument order, use HHDS `port_id` (it
@@ -819,7 +816,7 @@ document. To pick up:
      User specifically called this out as a candidate addition.
    - PinEntry/NodeEntry native `bits` (24 bits) + `sign` (1 bit) —
      layout overhaul documented in `TODO.md`. Drops the
-     `livehd::attrs::bits` / `livehd::attrs::pin_unsigned`
+     `livehd::attrs::bits` / `livehd::attrs::pin_signed`
      flat_storage attrs in favor of indexed loads. Its own multi-commit
      campaign; do *after* the per-pass migrations are done so the
      attribute-tag side is well-validated.

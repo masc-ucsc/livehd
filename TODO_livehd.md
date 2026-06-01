@@ -23,117 +23,40 @@ cross-file dependencies stay visible.
   (`sign = min<0`), never stored. Type sizing only via the type-call
   `int(max=,min=,bits=)` + `uN`/`sN` sugar.
 
-  **STRUCTURAL WORK DONE — T1–T5 landed (2026-05-30; green, suite baseline +1,
-  full `bazel build //...` green; NOT git-committed).** `declare`/`store`/
-  `prim_type_int` live in the producer + all upasses; the type-call + `uN`/`sN`
-  sizing, `store` arity dispatch, decl-cluster→`declare` merge, and the Cluster-F
-  unsigned coercion all landed. **10 legacy nodes DELETED** (`prim_type_uint`/
-  `sint`/`type`/`ref`, `comp_type_mixin`, `unknown_type`, `type_def`, `expr_type`,
-  `tuple_set`, `assign`) + `prim_type_boolean`→`prim_type_bool`. **4 lnastfmt
-  validators** (store/declare shape, type-only-on-declare, no-`attr_set`-of-derived,
-  declare-once). `valid_unknown_bits` GREEN. Full detail in
-  `docs/contracts/typesystem_clean_plan.md`.
+  Structural model, declare/store, `prim_type_int`+`uN/sN` sizing, the validators,
+  and wrap/sat-as-func-call have all landed (green). What remains:
 
-  **REMAINING — three pieces (implement later).**
+  - **(A) `ubits`/`sbits` legacy removal — needs the typed-field representation
+    rework (NOT a producer swap).** The bare `ubits`/`sbits` has exactly one live
+    producer: typed tuple fields (`t = (a:u4=3)`) lower to
+    `attr_set(tuple_get_tmp, "ubits"/"sbits", N)` (`prp2lnast.cpp` ~4950); the
+    upass `ubits`/`sbits` read/derive path (`attributes` derive_bits + process_attr_set,
+    `bitwidth` process_attr_set) consumes it. **Tried + reverted 2026-06-01:**
+    swapping that emission to `type_spec(tuple_get_tmp, prim_type_int)` breaks 11
+    tuple tests — `pass.lnastfmt::check_unwritten_tmps` flags the tmp as
+    "read-under-`type_spec` but never written" because `attr_set` counts as a pos-0
+    write (`parent_writes_pos0`) and survives upass DCE, whereas a `type_spec` does
+    not, and the producing `tuple_get` is DCE'd post-upass. The correct fix is
+    T3's **typed-tuple-field → nested `declare`** representation (carry the field
+    type inside the `tuple_add` as a `declare`, not an attr on a transient
+    tuple_get tmp) + teaching the constprop bundle/shape machinery + bitwidth to
+    read it — substantial, high-regression-risk. The slang `__ubits`/`__sbits`
+    (`create_declare_bits_stmts`) is a SEPARATE legacy `pass/bitwidth` path — leave
+    it. Related: `bitreverse` (the only 1t-attributed failing prp test) needs
+    comptime `.[bits]` on typed values so `for i in 0..<x.[bits]` unrolls.
 
-  - **(A) wrap/sat as a func-call — NEW goal, replaces the reverted node-tag /
-    declare-mode attempts.** Lower the per-statement `wrap`/`sat` modifier in the
-    producer to a recognizable library call (NOT a node attribute):
-      - `wrap foo:bar = xxx` → `foo = wrap(v=xxx, type=bar)`
-      - `wrap foo = xxx`     → `foo = wrap(v=xxx, type=foo)`  (dst's own type)
-      - `sat …`              → `foo = sat(v=…, type=…)`       likewise.
-    Consumers recognize the `wrap`/`sat` callee:
-      - `upass/attributes` → `narrow_for_lhs(dst, arg)` (narrow the value to dst's
-        type).
-      - `upass/bitwidth`   → `wrap_sat_exempt_.insert(dst)` (skip the does-not-fit
-        error; out-of-range comptime write *without* wrap/sat stays a hard error).
-      - codegen / LGraph (T6) → `get_mask` (wrap) / `mux+get_mask` (sat) when the
-        value's range exceeds the dst type.
-    **REMOVE the old/invalid forms** (migrate the tests that use them, e.g.
-    `phase5_wrap_sticky`): the `:[wrap]`/`::[wrap]` size-attribute, the per-statement
-    `attr_set(c,'wrap')` lowering, the decl-mode `mut wrap` fold, and the
-    `.[wrap]`/`.[saturate]` READS. Also delete the now-inert Phase-0 `Overflow`
-    flat_storage tag (`lnast_attrs.hpp`, `lnast.cpp` `get/set_overflow` + its
-    dump/read + the round-trip assertions in `parser_writer_test.cpp`, and
-    `upass/core` `node_overflow`). **Rationale:** a `func_call` survives the whole
-    pipeline; the flat_storage `Overflow` tag attempted earlier was LOST across
-    `prp2lnast`'s `replace_body` into the upass (`prp_copy_one_node` / runner
-    `copy_subtree` / ssa-emit copy only type + name, never flat_storage attrs), so
-    every consumer read `overflow=none` — confirmed via trace, then reverted to the
-    green Phase-0+1 state. Targets `prp-wrap_checks`, `prp-wrap_complex`,
-    `prp-valid_unknown_bits`.
+  - **(B) T6 (deferred) — LGraph lowering:** derive sign/bits from the range at
+    cell creation (`lnast2lgraph.md §7`); `wrap`→`get_mask`, `sat`→`mux+get_mask`
+    (the wrap/sat func_call has no LGraph lowering yet); flatten N-level `store`;
+    `prim_type_memory`/`prim_type_register` (mirror `graph/cell.hpp`
+    `Memory`/`Flop`/`Latch`/`Fflop`; absent from `lnast_nodes.def`) + `ref`/`get_time`
+    (`stage`/`await` timing). Perf/doc deferrals: `derive_bits` wide-type caching;
+    `lnast_spec.md §11.3/§11.4` store-unification update. (NOTE: task-1v named-type
+    *semantics* is NOT a 1t blocker — `typesystem.prp` is GREEN 29/29; the deeper 1v
+    work is tracked under [[1v]].)
 
-  - **(B) task-1v named-type SEMANTICS — the only non-green 1t item.** The
-    `typesystem` test's 5 unfoldable casserts (default borrowing, typename
-    propagation, comptime non-stickiness, recursive typenames, complex-field
-    `[bits]`) are 1v *semantics*, NOT 1t structural work — high regression risk to
-    the constprop bundle machinery; tracked under [[1v]].
-
-  - **(C) T6 (deferred) — LGraph lowering:** derive sign/bits from the range at
-    cell creation (`lnast2lgraph.md §7`); `wrap`→`get_mask`, `sat`→`mux+get_mask`;
-    flatten N-level `store`; `prim_type_memory`/`prim_type_register` (mirror
-    `graph/cell.hpp` `Memory`/`Flop`/`Latch`/`Fflop`) + `ref`/`get_time`
-    (`stage`/`await` timing) follow-ups.
-
-  **Depends on** [[1v]] (envelope — Phase A landed). Sibling of the now-landed
-  producer bit lowering (1d) and comb inliner (1i). **Blast radius
-  (wrap/sat-as-call):** `inou/prp/prp2lnast.cpp` (lower the modifier → call; drop
-  the attr_set + mode-fold), `upass/attributes` (recognize callee → narrow; delete
-  the sticky wrap/sat logic + `.[wrap]` reads), `upass/bitwidth` (recognize callee →
-  exempt), `lnast` (remove the inert `Overflow` tag), `lnast_to_lgraph`/`inou/cgen`
-  (T6 `get_mask`).
-
-- **1g** Stop converting `Const`→`int` (`to_i`/`is_i`) in the **uPass passes** —
-  do all numeric/bit work in `Const`, on `hlop` top-of-tree where the `int`
-  shift/sext overloads are now **protected**. **PARTIAL, 2026-05-30. Goal 1.**
-  Broader value-layer cleanup (legacy LGraph path + symbol deletion) is [[2t]].
-  - **Design (confirmed with the user 2026-05-30).** `to_i`/`is_i` collapse a
-    `Const` to one `int64_t`, so they break on >64-bit values and the
-    present-but-nil sentinel ([[1b]] hit the nil case → abort in
-    `blop.hpp::negn`). Rules:
-    1. **Op arguments stay `Const`.** hlop made `shl_op(int)`/`sra_op(int)`/
-       `sext_op(int)` protected; call the `const Dlop&` overloads — pass the
-       value through (`args[0].sext_op(args[1])`). For a genuinely computed
-       width (e.g. `n-1` in `wrap_to_signed`), wrap with `Dlop::create_integer`.
-    2. **Bit ranges → `Const` mask arithmetic.** `foo#[start..=end]` builds the
-       mask `((1<<(end-start+1))-1)<<start` from the `start`/`end` `Const`s, then
-       `value.get_mask_op(mask)`; open `start..` → `value.sra_op(start)`. No
-       `to_i`, no `lo<0`/`hi<lo` guards (a nonsense range yields a degenerate
-       mask). (`apply_range_mask`, constprop `process_set_mask`, prp2lnast.)
-    3. **Unsigned coercion → store the declared max `Const`, mask with it.** For
-       `uN`, `max == 2^N−1 ==` the N-bit mask, so the first-write reinterpret is
-       `v.is_negative() ? v.and_op(max) : v` — no width/`bit_test(N)`/`to_i`.
-       (constprop `process_declare`→`decl_unsigned_max_`, `process_assign`.)
-    4. **Ranges/derivation carry max/min `Const`s** (never bits): upass/bitwidth
-       computes the possible `max`/`min` value per op (`a+b` ⇒ `a.max+b.max`,
-       `a.min+b.min`; const ⇒ `max==min`); `.[bits]` derives from the `Const`
-       (`get_bits`), not from `to_i`+`bit_width`. (This is the model — unlike
-       pass/bitwidth which is intentionally max/min-**bits**-based and keeps
-       `to_i`; **leave pass/bitwidth alone**.)
-    5. **External-table indexing is a fair `to_i` exception.** Indexing a C++
-       container (string `substr`, bundle/tuple key index, building a bounded
-       range bundle, LNAST node int payload) genuinely needs an `int` — and an
-       index ≥ 2^64 is physically impossible, so `to_i` is fine there. Sites:
-       constprop string-slice (`:2327`), tuple-key (`:1435`), key-string
-       (`:2379`), range→bundle build (`:2285`).
-  - **Landed (all green; `upass_constprop_test` passes):**
-    `lgraph_manager.hpp` (div/sub folds → `div_op`/`sub_op` = the real overflow
-    fix; `==1` → `same_repr`; guards → `is_integer`); constprop `sext` (pass
-    `Const`), `apply_range_mask` + `process_set_mask` (`Const` mask),
-    `process_declare`/`process_assign` coercion (`decl_unsigned_max_`);
-    `wrap_sat.hpp` `sext_op(create_integer(n-1))`; `attributes_read:53`
-    (`same_repr(-1)`).
-  - **Remaining uPass numeric sites:** `attributes_read` derive-bits + range
-    guards (×~7), `attributes.cpp` [[1b]] range guards (`is_i`→`is_integer`) +
-    bits-attr read, `ssa` derive-bits (×4), `prp2lnast` mask positions +
-    `bits_to_bounds`, `lnast_manager:150` (value→const-node ⇒ `to_pyrope`).
-    `stringify_one` (`string()` cast, `:53`) needs an arbitrary-precision
-    **decimal** formatter in hlop (`to_pyrope` is hex >63) — FLAGGED.
-  - **Build note:** the new hlop pin also breaks the non-uPass `int`-overload
-    callers — `pass/cprop` (`:379`), `inou/yosys` (×3), `inou/cgen` — which must
-    move to `Const` args too ("other passes"); `pass/bitwidth` is intentionally
-    left on `to_i`. Until those compile, the full `lgshell`/comptime build is
-    blocked (verify uPass via `//upass/...` unit tests meanwhile).
+  **Depends on** [[1v]] (envelope landed). Sibling of producer bit lowering (1d)
+  and the comb inliner (1i).
 
 - **1n** Relocate `upass/bitwidth` from an iterative fold-pass to a standalone
   **read-only finalization pass**. **Goal 1.** **★ Authority = `upass/upass.md`
@@ -146,120 +69,14 @@ cross-file dependencies stay visible.
   `max`/`min` per result, errors on **provable** type-envelope overflow, and
   publishes `max`/`min` as **per-node HHDS tree attrs** for `lnast_to_lgraph`.
 
-  **Status (2026-05-31) — N1–N5 LANDED + overflow capture centralized (green,
-  net-neutral; NOT git-committed).** Full `bazel build //...` green; `//upass/...`
-  9/9. `//inou/prp` is **net-neutral** verified by stashing the change set and
-  running uncached: my-change failure set ⊆ baseline failure set (zero new
-  failures; the 4 overflow tests + wrap/reinterpret tests pass). NOTE: the prp
-  suite is currently flaky — absolute counts bounce (8→16) because of a
-  pre-existing latent uninitialized-memory issue on the comptime/string path
-  (goal 1s) surfacing as spurious "undeclared variable" validator errors
-  (`cputs_basic`, `crand_test1`, `named_tuple`, `range_force`,
-  `string_interpolation`, `trivial_if2`, `attr_size`); the stable feature-gap
-  fails are `enum_*`, `match_arms_mixed`, `setter_complex`,
-  `tuple_decorator_complex`, `bitreverse`. Files: `pass/upass/pass_upass.{cpp,hpp}`,
-  `upass/bitwidth/{upass_bitwidth.cpp,upass_bitwidth.hpp,lnast_range.hpp,
-  upass_bitwidth_test.cpp,BUILD}`, `upass/attributes/upass_attributes.cpp`,
-  `lnast/lnast.hpp`, + 3 new `inou/prp/tests/errors/overflow_{func,unroll,unsigned}.prp`.
-  - **N1** ✓ `fold_ref`/`overrides_fold_ref` deleted (out of `fold_capable_passes`)
-    — kills the stale-narrow-range bug class; constprop's own folding covers it.
-  - **N2** ✓ **Reconsidered:** bitwidth runs as the **LAST opt pass in the runner
-    walk** (read-only / votes keep), NOT a separate post-runner runner. Reason
-    (discovered during overflow work): a typed declaration's init value is a
-    SEPARATE `store` that DCE removes for unused vars, so a post-DCE pass can't
-    see it — only an in-walk pass observes the store PRE-DCE, which is required to
-    catch overflow on a dead comptime const (`const x:s4=200`). `fold_ref` removal
-    still gives the decoupling. (The earlier separate-runner impl + Gate A/B were
-    reverted.)
-  - **N3** ✓ (no-inf) `neg_inf`/`pos_inf` collapsed to a single `unbounded` flag
-    in `Lnast_range` + `BitwidthEntry`; no half-bounded state. **Residual:** int64
-    bounds (exact-`Dlop` swap deferred — `lnast.hpp` stays `Dlop`-free, no >64-bit
-    path) and name-keyed `bw_meta` (per-node HHDS-attr re-keying waits on the
-    `lnast_to_lgraph` consumer).
-  - **N4** ✓ **overflow capture centralized in bitwidth.** `process_declare`/
-    `process_type_spec` record the `prim_type_int(max,min)` scalar envelope; an
-    `end_run` range-vs-envelope check emits `core/diag` `bitwidth-overflow`
-    ("does not fit", throws → non-zero exit). Signedness-aware (unsigned negatives
-    reinterpret/force, only positive-beyond-max errors; signed = strict
-    containment); deferred to end_run so a per-statement `wrap`/`sat` marker
-    emitted AFTER its store still exempts the var (decl-mode wrap/sat also
-    exempts). The two `uPass_attributes` overflow `upass::error`s were REMOVED
-    (the negative→unsigned reinterpret, which rewrites the value, stays). **Scope:
-    scalars only** — dotted tuple-field names (`ar.y`) are skipped (avoids the
-    fcall2 false positive on an out-of-range param-field binding); per-field
-    overflow is a future refinement (1t per-field types). Tests:
-    `overflow_signed` (now via bitwidth), `overflow_unsigned` (u3=100),
-    `overflow_func` (s4 acc=7+7 inside an inlined comb), `overflow_unroll`
-    (u4 acc sums to 45).
-  - **N5** ✓ `div`/`mod`/`sext` tightened (`|a/d| ≤ |a|`, `|a%d| < |d|`,
-    `sext → [-2^p, 2^p-1]`); `set_mask` stays conservative ("where derivable").
-  - SSA stays a whole pass before the runner (so bitwidth, last opt pass, is
-    already after SSA); the harvest/rename split is moot under the in-walk design.
-
-  **Model (locked 2026-05-31, confirmed with the user).**
-  - **Read-only.** Never rewrites nodes / never alters declared
-    `prim_type_int(max,min)`; only annotates. **No `fold_ref`** (drop
-    `overrides_fold_ref`) — removes the stale-narrow-range-overrides-constprop
-    bug class (mut-var widening); constprop already folds its own consts.
-  - **Exact `max`/`min` only — no `+inf`/`-inf`.** `Dlop` is unlimited precision,
-    so finite bounds never overflow; "no derivable bound" = **absent** (distinct
-    from a concrete `[min,max]`). `bits`/`sign` derived on demand (`sign = min<0`),
-    never stored. Aligns with [[1t]]'s range model + `lnast2lgraph.md §7-8`.
-  - **Output = per-node HHDS `flat_storage` tree attr** keyed by the result node
-    (a node→data map, NOT a Pyrope attr), replacing `lnast->bw_meta()`.
-    Annotating the *final* (post-runner, post-SSA) tree is what makes per-node
-    keying viable — node identity is stable because no rewrite follows.
-  - **Overflow = compile error only when provable.** Typed target: error iff the
-    result range *provably* exceeds the declared envelope AND the write carries no
-    `wrap`/`sat` policy; unknown/unbounded into a typed target is **not** an error
-    (the declared type is the width). Via `core/diag` (diagnostics foundation,
-    landed): stable `code`,
-    `category=source`, source span, collect-and-continue.
-  - **Gated finalization** (`upass/upass.md` §8): **Gate A** — skip *all*
-    finalization (SSA rename/flatten + bitwidth + readers + lower) for the whole
-    program if any bundle carries `pending_import` (avoids rework +
-    import-resolution-order non-determinism); **Gate B** — skip *this LNAST* if it
-    is a generic (untyped-input) function body, realized only by inlining into
-    callers; an un-inlined survivor at a real call site is a compile error.
-
-  **Phases (each keeps `//upass/...` unit tests green).**
-  - **N1** — decouple from the fold loop: delete `overrides_fold_ref`/`fold_ref`
-    on `uPass_bitwidth`; remove `bitwidth` from the `pass_upass.cpp` runner order
-    and the runner's `fold_capable_passes`; confirm the suite is net-neutral
-    (constprop's own folding covers what bitwidth's `fold_ref` fell back to).
-  - **N2** — run standalone in the finalization phase: invoke after the runner +
-    after SSA rename/flatten over each `ln` in `pass_upass.cpp`, behind Gate A
-    (pending_import — stub until poison lands, migration step 7) and Gate B
-    (generic fn body, detected via `io_meta` `bits==0`).
-  - **N3** — data model: drop `neg_inf`/`pos_inf` from
-    `Lnast_range`/`BitwidthEntry`; store exact `Dlop` `max`/`min` (absent =
-    unbounded). Delete `lnast->bw_meta()`; emit per-node HHDS tree attrs that
-    `lnast_to_lgraph` reads at node creation to set bits/sign.
-  - **N4** — overflow error: promote the unsatisfiable-constraint `Pass::warn`
-    (`upass_bitwidth.cpp:592`) to a `core/diag` error fired only on *provable*
-    envelope overflow (unless `wrap`/`sat`).
-  - **N5** — lattice completeness: tighten `div`/`mod`/`sext`/`set_mask` (and any
-    op returning `unbounded` today) to real bounds where derivable (`a/d ≤ a`,
-    `a%d < d`, …) so the N4 check is sound without false positives.
-
-  **SSA split (prereq, `upass/upass.md` §2 "SSA").** I/O-metadata harvest stays
-  *before* the runner (the comb inliner reads `io_meta` mid-walk; also detects
-  Gate B via `bits==0`); rename/flatten moves *after* the runner into the gated
-  block, immediately before bitwidth. (`docs/upass_redesign.md` Step I's long-term
-  goal folds rename/flatten into the runner emit; either satisfies "SSA naming
-  complete before bitwidth, on the tree `lnast_to_lgraph` consumes".)
-
-  **Depends on** [[1t]] (`prim_type_int(max,min)` envelope — structural done),
-  the `core/diag` diagnostics surface (foundation landed), the comb inliner (1i — landed)
-  for Gate B, and the pending-import poison (migration step 7) for Gate A.
-  **Untouched:** `pass/bitwidth` (the LGraph-level MIT pass) stays as the
-  Verilog-ingress fallback — different path, only shares the name (see [[1g]]
-  build note: "leave `pass/bitwidth` alone"). **Blast radius:**
-  `upass/bitwidth/upass_bitwidth.{hpp,cpp}` + `lnast_range.hpp`, `lnast/lnast.hpp`
-  (`bw_meta`/`BitwidthEntry` removal), `pass/upass/pass_upass.cpp` (order +
-  finalization sequencing + gates), `upass/runner` (drop `bitwidth` from
-  `fold_capable_passes`), `upass/ssa` (split), and the future `lnast_to_lgraph`
-  (consumes the tree attrs).
+  **N1–N5 landed** (green, net-neutral): decoupled from the fold loop (`fold_ref`
+  removed), runs as the LAST in-walk opt pass (after SSA), exact-`max`/`min` no-inf
+  range model, centralized `core/diag` `bitwidth-overflow` error, tightened
+  `div`/`mod`/`sext` lattice. **Remaining (deferred until `lnast_to_lgraph` exists —
+  see 1t-(B)):** replace the name-keyed `bw_meta` side map with per-node HHDS tree
+  attrs the LGraph lowering reads at node creation; swap int64 range bounds for
+  exact `Dlop` (>64-bit path). **Untouched:** `pass/bitwidth` (the LGraph-level
+  Verilog-ingress pass) stays — same name, different path.
 
 - **1s** Sanitizer pass — chase a nondeterministic memory bug in the
   comptime/string path. **Goal 1.** **Run on Linux (macOS can't do MSan).**

@@ -107,18 +107,12 @@ TEST_F(Lnast_parser_writer_test, declare_store_dump_read_roundtrip) {
   ln->add_child(s2, Lnast_node::create_const("a"));
   ln->add_child(s2, Lnast_node::create_const("7"));
 
-  // T4 — per-node overflow tag on declare/store must round-trip.
-  ln->set_overflow(d, Lnast::Overflow::wrap);
-  ln->set_overflow(s, Lnast::Overflow::sat);
-  EXPECT_EQ(ln->get_overflow(d), Lnast::Overflow::wrap);
-  EXPECT_EQ(ln->get_overflow(s), Lnast::Overflow::sat);
-  EXPECT_EQ(ln->get_overflow(s2), Lnast::Overflow::none);
+  (void)s2;
 
   std::stringstream first;
   ln->dump(first);
   EXPECT_NE(first.str().find("declare"), std::string::npos) << "dump missing declare node:\n" << first.str();
   EXPECT_NE(first.str().find("store"), std::string::npos) << "dump missing store node:\n" << first.str();
-  EXPECT_NE(first.str().find("overflow"), std::string::npos) << "dump missing overflow tag:\n" << first.str();
 
   std::stringstream first_in(first.str());
   auto              loaded = Lnast::read(first_in);

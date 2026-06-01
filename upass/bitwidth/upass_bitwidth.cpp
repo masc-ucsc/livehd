@@ -286,6 +286,12 @@ void uPass_bitwidth::process_func_call() {
     return;
   }
 
+  // Task 1t — a `wrap`/`sat` narrowing call. The `type=` arg names the target
+  // var whose declared envelope is intentionally overflowed; exempt it from
+  // the end_run does-not-fit check.
+  const auto callee      = current_text();
+  const bool is_wrap_sat = callee == "wrap" || callee == "sat" || callee == "saturate";
+
   while (move_to_sibling()) {
     if (!is_type(Lnast_ntype::Lnast_ntype_store)) {
       continue;
@@ -293,9 +299,12 @@ void uPass_bitwidth::process_func_call() {
     if (!move_to_child()) {
       continue;
     }
-    const bool is_ref_arg = current_text() == call_ref_arg_marker;
+    const bool is_ref_arg  = current_text() == call_ref_arg_marker;
+    const bool is_type_arg = is_wrap_sat && current_text() == "type";
     if (is_ref_arg && move_to_sibling() && is_type(Lnast_ntype::Lnast_ntype_ref)) {
       clear_range(current_text());
+    } else if (is_type_arg && move_to_sibling() && is_type(Lnast_ntype::Lnast_ntype_ref)) {
+      wrap_sat_exempt_.insert(std::string{current_text()});
     }
     move_to_parent();
   }
@@ -592,12 +601,6 @@ void uPass_bitwidth::process_declare() {
       decl_envelope_[var] = *env;
     }
   }
-  if (move_to_sibling()) {  // mode const (mut / const / "mut wrap" / …)
-    auto mode = current_text();
-    if (mode.find("wrap") != std::string_view::npos || mode.find("sat") != std::string_view::npos) {
-      wrap_sat_exempt_.insert(var);
-    }
-  }
   move_to_parent();
 }
 
@@ -647,16 +650,6 @@ void uPass_bitwidth::process_attr_set() {
   move_to_parent();
 
   if (target.empty() || attr_name.empty()) {
-    return;
-  }
-
-  // Per-statement wrap/sat marker (`attr_set(t,"wrap"|"sat",true)`): exempt the
-  // target from the end_run overflow check — its overflow is intentional
-  // truncation/clamp, not an error.
-  if (attr_name == "wrap" || attr_name == "sat" || attr_name == "saturate") {
-    if (value_text != "false" && value_text != "0") {
-      wrap_sat_exempt_.insert(target);
-    }
     return;
   }
 

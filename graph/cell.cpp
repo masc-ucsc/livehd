@@ -19,7 +19,7 @@ struct Livehd_attr_init {
     hhds::register_attr_tag<livehd::attrs::pin_offset_t>("livehd::attrs::pin_offset");
     hhds::register_attr_tag<livehd::attrs::pin_name_t>("livehd::attrs::pin_name");
     hhds::register_attr_tag<livehd::attrs::pin_delay_t>("livehd::attrs::pin_delay");
-    hhds::register_attr_tag<livehd::attrs::pin_unsigned_t>("livehd::attrs::pin_unsigned");
+    hhds::register_attr_tag<livehd::attrs::pin_signed_t>("livehd::attrs::pin_signed");
     hhds::register_attr_tag<livehd::attrs::color_t>("livehd::attrs::color");
     hhds::register_attr_tag<livehd::attrs::place_t>("livehd::attrs::place");
     hhds::register_attr_tag<livehd::attrs::loc_t>("livehd::attrs::loc");

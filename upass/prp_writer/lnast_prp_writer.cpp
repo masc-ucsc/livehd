@@ -286,6 +286,11 @@ void Lnast_prp_writer::write_cassert() {
   // under the current grammar.
   print("cassert(");
   write_node();
+  // Optional 2nd child: a comptime message string (cassert(cond, "msg")).
+  if (move_to_sibling()) {
+    print(", ");
+    write_node();
+  }
   print(")");
   move_to_parent();
 }

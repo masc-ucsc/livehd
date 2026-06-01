@@ -47,7 +47,9 @@ using livehd::graph_util::set_bits;
 using livehd::graph_util::set_loc1;
 using livehd::graph_util::set_pin_name;
 using livehd::graph_util::set_pin_offset;
+using livehd::graph_util::set_sign;
 using livehd::graph_util::set_source;
+using livehd::graph_util::set_unsign;
 using livehd::graph_util::set_type_op;
 using livehd::graph_util::setup_sink_by_name;
 using livehd::graph_util::type_op_of;
@@ -204,6 +206,13 @@ static void look_for_wire(hhds::Graph* g, const RTLIL::Wire* wire) {
     }
     if (wire->start_offset) {
       set_pin_offset(pin, wire->start_offset);
+    }
+    // Carry the RTLIL signedness onto the graph-input driver pin. Bits are
+    // declared on the GraphIO (set in add_graph_input); sign lives per-pin.
+    if (wire->is_signed) {
+      set_sign(pin);
+    } else {
+      set_unsign(pin);
     }
     auto node = pin.get_master_node();
     set_loc(node, wire->get_src_attribute());
@@ -2374,6 +2383,46 @@ static void process_cells(RTLIL::Module* mod, hhds::Graph* g) {
   }
 }
 
+// Populate per-driver-pin sign and verify bits on every materialised driver
+// pin once the body is fully built.
+//
+// RTLIL records width and signedness per wire/cell; the body we just built must
+// carry that onto its driver pins so downstream consumers (cgen, bitwidth) read
+// the sign without re-deriving it. LiveHD's structural convention is "a value is
+// unsigned iff it flows through a Get_mask (to_positive) node, which appends a
+// zero MSB; every other driver is signed". We make that explicit here as a
+// pin_signed attribute so cgen's is_unsign() reflects the real sign instead of
+// defaulting every driver pin to unsigned. Graph-input pin signs were already
+// set from wire->is_signed in look_for_wire(); sink pins are intentionally left
+// untouched (their sign is the driver's).
+static void finalize_module(hhds::Graph* g) {
+  for (auto node : g->fast_class()) {
+    auto op = type_op_of(node);
+    if (op == Ntype_op::Invalid || Ntype::is_multi_driver(op) || op == Ntype_op::Nconst) {
+      // Invalid: untyped placeholder (no real driver). Sub/Memory: per-port
+      // driver pins whose sign comes from the callee. Nconst: sign + width are
+      // carried in the serialized const value, not the pin attr.
+      continue;
+    }
+
+    auto dpin = node.create_driver_pin(0);
+    if (dpin.is_invalid() || is_const_pin(dpin)) {
+      continue;
+    }
+
+    if (op == Ntype_op::Get_mask) {
+      set_unsign(dpin);
+    } else {
+      set_sign(dpin);
+    }
+
+    // Every RTLIL-derived single-driver pin must carry its width here. Get_mask
+    // (to_positive) and Sext widths are intentionally left for the bitwidth
+    // pass to back-fill, so they are exempt from this invariant.
+    GI(op != Ntype_op::Get_mask && op != Ntype_op::Sext, bits_of(dpin) > 0);
+  }
+}
+
 struct Yosys2lg_Pass : public Yosys::Pass {
   Yosys2lg_Pass() : Pass("yosys2lg") {}
   virtual void help() {
@@ -2512,6 +2561,7 @@ struct Yosys2lg_Pass : public Yosys::Pass {
         process_cells(mod, g);
         process_partially_assigned(g);
         process_connect_outputs(mod, g);
+        finalize_module(g);
 
         wire2pin.clear();
         cell2node.clear();

@@ -78,12 +78,8 @@ trustworthy.
 ## Failing comptime tests — cluster snapshot (2026-05-30, live-verified)
 
 `bazel test -c dbg //inou/... //upass/... //lnast/... //pass/...` sits at
-**8 failures / 248 pass**, all in the `//inou/prp` comptime suite. Since the
-prior snapshot, cluster **E** (wrap/sat/typed storage — `prp-wrap_checks`,
-`prp-wrap_complex`, `prp-typesystem`, `prp-valid_unknown_bits`), most of
-cluster **A** (`prp-bitreduce`, `prp-bitset`, `prp-cellmap_comb`,
-`prp-cellmap_misc`, `prp-formux`), and cluster **C**'s `prp-hotmux_unique_if`
-have all gone green. The residual failures cluster by root cause:
+**8 failures / 248 pass**, all in the `//inou/prp` comptime suite. The residual
+failures cluster by root cause:
 
 | Cluster | Tests | Root cause | Blocker / task |
 |---|---|---|---|

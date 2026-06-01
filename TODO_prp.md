@@ -18,21 +18,6 @@ cross-file dependencies stay visible.
   envelope). Example:
   [inou/prp/tests/comptime/range_force.prp](inou/prp/tests/comptime/range_force.prp)
   (7/0). Design: `docs/contracts/typesystem_clean_plan.md` (T4).
-  - **Landed (no regressions; full comptime sweep = documented baseline only):**
-    - `Lnast_range::contains` — the sign-agnostic fit predicate
-      (`upass/bitwidth/lnast_range.hpp`; unit tests in `upass_bitwidth_test.cpp`).
-    - `process_get_mask` range = `[0, 2^w-1]` (w = popcount of the const mask;
-      single bit → signed `[-1,0]`), so the bit-select **force** operator is
-      range-tracked (`upass/bitwidth/upass_bitwidth.cpp`). Strict improvement
-      over the old conservative `unbounded()`.
-    - **Signed range-fit enforcement** in `attributes::on_assign_like`: a
-      first-write comptime value to a concretely-bounded SIGNED LHS (sN /
-      `int(max,min)`) that escapes `derive_max`/`derive_min` is now a hard
-      `upass::error` (`const x:s4 = 200` → error). Signed types were previously
-      unchecked. There is NO reinterpret for signed (genuine overflow).
-    - The unsigned side already had (T4, kept unchanged): negative-pattern →
-      unsigned reinterpret (implicit force) + positive-overflow error (the
-      `bit_test(bits)` heuristic).
   - **Architecture note:** the fit-check lives in `attributes` (where value +
     declared envelope + wrap/sat policy + `was_assigned` all coexist), NOT in
     `bitwidth` as the T4 sketch proposed — that avoids the constprop/attributes
@@ -374,14 +359,6 @@ Tallies re-measured via the `prplib.py` comptime pipeline
 (`pass.upass constprop:1 verifier_pass:N verifier_fail:N
 [verifier_include_funcs:true]`).
 
-**Landed since the original snapshot (removed from the list):**
-`prp-bitreduce`, `prp-bitset` (bit-range read/write, reductions, popcount),
-`prp-fcall5b`, `prp-fcall_rename_deep` (1r fcall-return unwrap, now landed),
-and — re-verified live 2026-05-30 — the whole wrap/sat/typed-storage cluster
-(`prp-wrap_checks`, `prp-wrap_complex`, `prp-valid_unknown_bits`), the direct
-`__cell`/cellmap tests (`prp-cellmap_comb`, `prp-cellmap_misc`, `prp-formux`),
-`prp-hotmux_unique_if`, `prp-paths_if`, and `prp-typesystem` (26/0/3, green —
-its 3 residual unknowns are 1v named-type semantics, tracked under [[1t]]).
 **Live suite = 8 fails / 248 pass** across `//inou //upass //lnast //pass`.
 
 | Failing test | now | TODO entry | What it still needs |

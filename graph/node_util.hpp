@@ -115,13 +115,13 @@ inline constexpr hhds::Port_id Const_small_pid_count = 32;
   return static_cast<Bits_t>(gio.get_bits(io_name));
 }
 
-// Per-pin sign hint. 1 = unsigned, absent = signed (mirrors LiveHD's `is_unsign`).
+// Per-pin sign hint. Default is unsigned; an explicit pin_signed attr marks
+// signed pins.
 [[nodiscard]] inline bool is_unsign(const hhds::Pin_class& pin) {
   if (pin.is_invalid()) {
     return false;
   }
-  auto a = pin.attr(livehd::attrs::pin_unsigned);
-  return a.has() && a.get() != 0;
+  return !pin.attr(livehd::attrs::pin_signed).has();
 }
 
 // Per-node color taint (set by pass diagnostics).
@@ -270,20 +270,20 @@ inline void clear_bits(const hhds::Pin_class& pin) {
   pin.attr(livehd::attrs::bits).del();
 }
 
-// Per-pin sign hint. 1 = unsigned, absent = signed. Mirrors LiveHD's
+// Per-pin sign hint. Presence means signed; absence means unsigned. Mirrors
 // `Node_pin::set_sign` / `set_unsign`.
 inline void set_unsign(const hhds::Pin_class& pin) {
   if (pin.is_invalid()) {
     return;
   }
-  pin.attr(livehd::attrs::pin_unsigned).set(1);
+  pin.attr(livehd::attrs::pin_signed).del();
 }
 
 inline void set_sign(const hhds::Pin_class& pin) {
   if (pin.is_invalid()) {
     return;
   }
-  pin.attr(livehd::attrs::pin_unsigned).del();
+  pin.attr(livehd::attrs::pin_signed).set(livehd::attrs::pin_signed_t::value_type{});
 }
 
 // Per-node color taint.

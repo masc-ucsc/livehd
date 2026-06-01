@@ -957,7 +957,7 @@ void Cgen_verilog::create_registers(std::shared_ptr<File_output> fout, hhds::Gra
     auto        posclk_sink = find_sink_pin(node, "posclk");
     auto        posclk_dpin = get_driver(posclk_sink);
     if (!posclk_dpin.is_invalid()) {
-      auto v = hydrate_const(posclk_dpin).to_i() != 0;
+      auto v = !hydrate_const(posclk_dpin).is_known_false();
       if (!v) {
         edge = "negedge";
       }
@@ -982,11 +982,11 @@ void Cgen_verilog::create_registers(std::shared_ptr<File_output> fout, hhds::Gra
 
         auto negreset_dpin = get_driver(find_sink_pin(node, "negreset"));
         if (!negreset_dpin.is_invalid()) {
-          negreset = hydrate_const(negreset_dpin).to_i() != 0;
+          negreset = !hydrate_const(negreset_dpin).is_known_false();
         }
         auto async_dpin = get_driver(find_sink_pin(node, "async"));
         if (!async_dpin.is_invalid()) {
-          auto v = hydrate_const(async_dpin).to_i() != 0;
+          auto v = !hydrate_const(async_dpin).is_known_false();
           if (v) {
             reset_async = absl::StrCat(negreset ? " or negedge " : " or posedge ", reset);
           }

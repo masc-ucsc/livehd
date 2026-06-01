@@ -23,11 +23,9 @@ uPass_attributes::uPass_attributes(std::shared_ptr<upass::Lnast_manager>& _lm) :
   // Sticky `_*` / `debug` attribute pattern.
   reg.register_sticky_pattern(std::make_shared<upass::attributes::Sticky_handler>());
 
-  // Category-A consumption: wrap / saturate / sat policy + const single-bind.
-  auto wrap_sat = std::make_shared<upass::attributes::Wrap_sat_handler>();
-  reg.register_exact("wrap", wrap_sat);
-  reg.register_exact("saturate", wrap_sat);
-  reg.register_exact("sat", wrap_sat);
+  // Category-A consumption: const single-bind enforcement (type=const).
+  // wrap/sat are no longer attributes — Task 1t lowers them to a
+  // `wrap|sat(v=…, type=…)` call handled in process_func_call.
   reg.register_exact("type", std::make_shared<upass::attributes::Const_handler>());
 
   // Category-B LGraph-wiring handlers (clock_pin, reset_pin, posclk, ...).
@@ -155,7 +153,7 @@ void uPass_attributes::on_assign_like(bool is_assign_node) {
       = lhs_ti_for_coerce != nullptr && lhs_ti_for_coerce->has_type_spec && lhs_ti_for_coerce->kind == Numeric_kind::signed_int
         && (lhs_ti_for_coerce->bits != 0 || (lhs_ti_for_coerce->range_max && lhs_ti_for_coerce->range_max->is_integer())
             || (lhs_ti_for_coerce->range_min && lhs_ti_for_coerce->range_min->is_integer()));
-  const bool need_rhs_value = is_assign_node && (!wrap_policy.empty() || !sat_policy.empty() || lhs_unsigned || lhs_signed_bounded);
+  const bool need_rhs_value = is_assign_node && (lhs_unsigned || lhs_signed_bounded);
   if (is_assign_node) {
     move_to_child();
     if (move_to_sibling()) {
@@ -195,16 +193,8 @@ void uPass_attributes::on_assign_like(bool is_assign_node) {
     // result from an earlier assign.
     tmp_fold.erase(std::string{view.lhs});
   }
-  if (rhs_value && !view.lhs.empty() && (has_wrap_policy(view.lhs) || has_sat_policy(view.lhs))) {
-    Const out = narrow_for_lhs(view.lhs, *rhs_value);
-    if (!out.is_invalid()) {
-      auto [iter, inserted] = tmp_fold.emplace(view.lhs, out);
-      if (!inserted && !iter->second.same_repr(out)) {
-        iter->second = out;
-      }
-    }
-  } else if (lhs_unsigned && !was_assigned(view.lhs) && rhs_value && rhs_value->bit_test(static_cast<int>(lhs_ti_for_coerce->bits))
-             && !rhs_value->unknown_bit_test(static_cast<int>(lhs_ti_for_coerce->bits))) {
+  if (lhs_unsigned && !was_assigned(view.lhs) && rhs_value && rhs_value->bit_test(static_cast<int>(lhs_ti_for_coerce->bits))
+      && !rhs_value->unknown_bit_test(static_cast<int>(lhs_ti_for_coerce->bits))) {
     // `!was_assigned` restricts this to the FIRST write (the declaration's
     // initializer). Per-statement `wrap x = …` / `sat x = …` are always
     // reassignments (x was declared+initialized first) and emit their

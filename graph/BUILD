@@ -8,7 +8,7 @@ load("//tools:copt_default.bzl", "COPTS")
 #     loop_first/loop_last classification, multi-driver/sink predicates).
 #     Used as the Type payload on hhds::NodeEntry.
 #   - attrs.hpp       → All LiveHD per-node / per-pin attribute tags backed
-#     by hhds::flat_storage (bits, pin_name, pin_delay, color, loc, place,
+#     by hhds::flat_storage (bits, pin_name, pin_delay, pin_signed, color, loc, place,
 #     source, subid, const_value, lut, etc.). Replaces the dense maps that
 #     used to live on Lgraph_attributes.
 #   - ann_place.hpp   → Ann_place value type used by livehd::attrs::place.

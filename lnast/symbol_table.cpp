@@ -328,9 +328,10 @@ std::shared_ptr<Bundle> Symbol_table::leave_scope() {
     }
   }
 
-#ifndef NDEBUG
-  dump();
-#endif
+  // (Per-scope symbol-table dump is available via dump() for ad-hoc debugging
+  // but is intentionally NOT called here: in -c dbg builds it floods the log
+  // on every scope exit and drowns out the verifier's cassert diagnostics,
+  // which are what actually point at a failing assertion.)
 
   // Pop the active pointer; the underlying Scope stays in scope_storage so
   // the next iteration can re-enter it (block_scope) and accumulated state

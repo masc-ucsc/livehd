@@ -212,13 +212,15 @@ protected:
   // binding is used (the right behaviour for tuple-literal RHS such as
   // `(a, b) = (b+1, a)`). `rhs_fcall_name` carries the RHS callee text so
   // the rename form `(x = dox.b) = dox(...)` can validate the prefix
-  // before the dot matches the call's function name. `retype_via_overflow`
-  // is true when the enclosing assignment carries a `wrap`/`sat` modifier —
-  // the only context where a type cast on a non-declaring lvalue (`wrap
-  // c:u4 = v`) is legal; otherwise a type on a re-assignment is rejected.
+  // before the dot matches the call's function name. `overflow_kind` is
+  // "wrap"/"sat" when the enclosing assignment carries that modifier — the
+  // only context where a type cast on a non-declaring lvalue (`wrap c:u4 = v`)
+  // is legal; otherwise a type on a re-assignment is rejected. When set, the
+  // scalar leaf lowers the value through a `wrap|sat(v=…, type=<lhs>)` library
+  // call before the store (Task 1t — replaces the old attr_set(wrap) tag).
   Lnast_node process_lvalue_for_assign(TSNode lvalue, const Lnast_node& rvalue, TSNode decl_node, TSNode type_cast_node,
                                        bool rhs_is_fcall = false, std::string_view rhs_fcall_name = {},
-                                       bool retype_via_overflow = false);
+                                       std::string_view overflow_kind = {});
 
   // Helpers
   std::string_view        get_text(const TSNode& n) const;

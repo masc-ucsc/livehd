@@ -36,7 +36,7 @@ cassert(z.[potato] == nil)
 cassert(z.[debug] and z.[_foo] and z.[foo])
 
 sat z:u4 = 3000
-cassert(z.[saturate] == nil and z == 15)
+cassert(z == 15)
 cassert(z.[debug] and z.[_foo] and z.[foo])
 
 const l = 1 + if z.[_foo] { 200 } else {300}

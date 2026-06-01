@@ -126,6 +126,13 @@ private:
 
   upass::Emit_decision classify_func_call();
 
+  // Emit one non-fatal diagnostic for a comptime-false cassert (the fatal
+  // abort still happens once in finalize_aggregate). `msg` is the optional
+  // user-supplied message (cassert's 2nd argument); when empty the diag hints
+  // at adding one. See upass_verifier.cpp.
+  void emit_false_cassert_diag(const Lnast_nid& cassert_nid, const std::string& operand_text, const std::string& value,
+                               const std::string& msg);
+
   void check_binary() {
     move_to_child();
 

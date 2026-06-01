@@ -60,14 +60,17 @@ struct pin_delay_t {
 };
 inline constexpr pin_delay_t pin_delay{};
 
-// Per-pin "is unsigned" flag (1 = unsigned, absent = signed).
-// Replaces Lgraph_attributes::node_pin_unsigned_map. Stored as int8_t for
-// flat_storage's trivially-copyable requirement.
-struct pin_unsigned_t {
-  using value_type = int8_t;
-  using storage    = hhds::flat_storage;
+// Per-pin "is signed" marker (present = signed, absent = unsigned).
+// Stored as a marker value because HHDS attributes currently require a
+// value_type; callers should use graph_util::set_sign/set_unsign instead of
+// setting this attr directly.
+struct pin_signed_t {
+  struct value_type {
+    uint8_t marker = 1;
+  };
+  using storage = hhds::flat_storage;
 };
-inline constexpr pin_unsigned_t pin_unsigned{};
+inline constexpr pin_signed_t pin_signed{};
 
 // Per-node color (small int taint used by pass/label and pass diagnostics).
 // Replaces Lgraph_attributes::node_color_map.
@@ -150,8 +153,8 @@ template <>
   return "livehd::attrs::pin_delay";
 }
 template <>
-[[nodiscard]] inline std::string attr_tag_name<livehd::attrs::pin_unsigned_t>() {
-  return "livehd::attrs::pin_unsigned";
+[[nodiscard]] inline std::string attr_tag_name<livehd::attrs::pin_signed_t>() {
+  return "livehd::attrs::pin_signed";
 }
 template <>
 [[nodiscard]] inline std::string attr_tag_name<livehd::attrs::color_t>() {

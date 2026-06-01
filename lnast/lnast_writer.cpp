@@ -459,6 +459,11 @@ void Lnast_writer::write_cassert() {
   move_to_child();
   print("cassert(");
   write_lnast();
+  // Optional 2nd child: a comptime message string (cassert(cond, "msg")).
+  if (move_to_sibling()) {
+    print(", ");
+    write_lnast();
+  }
   print(")");
   move_to_parent();
 }

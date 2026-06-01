@@ -10,7 +10,9 @@
 #include <vector>
 
 #include "absl/strings/match.h"
+#include "absl/strings/str_cat.h"
 #include "bitwidth_range.hpp"
+#include "diag.hpp"
 #include "hhds/graph.hpp"
 #include "hlop/dlop.hpp"
 #include "node_util.hpp"
@@ -1455,6 +1457,66 @@ void Bitwidth::bw_pass(hhds::Graph* g) {
       }
     }
   }
+
+  report_unbounded(g);
+}
+
+// After the iteration budget is spent, every materialised driver pin should
+// carry a bounded width (bits>0) and, with it, a resolved sign. Anything still
+// at bits==0 means the fixed point could not bound that pin; surface it as a
+// diag warning so the user knows a type/width annotation (or a cprop pass) is
+// needed. Hierarchical runs intentionally defer some widths to a later global
+// pass, so they are exempt. Get_mask/Sext placeholder pins inserted by this
+// pass with no resolved width are likewise skipped (consts and multi-driver
+// Sub/Memory carry their width elsewhere).
+void Bitwidth::report_unbounded(hhds::Graph* g) {
+  if (hier) {
+    return;
+  }
+
+  std::vector<std::string> unbounded;
+  for (auto node : g->fast_class()) {
+    auto op = type_op_of(node);
+    if (op == Ntype_op::Invalid || op == Ntype_op::Nconst || Ntype::is_multi_driver(op)) {
+      continue;
+    }
+
+    auto dpin = node.create_driver_pin(0);
+    if (dpin.is_invalid() || is_const_pin(dpin)) {
+      continue;
+    }
+
+    if (bits_of(dpin) == 0) {
+      unbounded.emplace_back(debug_name(node));
+    }
+  }
+
+  if (unbounded.empty()) {
+    return;
+  }
+
+  constexpr size_t max_listed = 8;
+  std::string      list;
+  for (size_t i = 0; i < unbounded.size() && i < max_listed; ++i) {
+    absl::StrAppend(&list, i ? ", " : "", unbounded[i]);
+  }
+  if (unbounded.size() > max_listed) {
+    absl::StrAppend(&list, ", (+", unbounded.size() - max_listed, " more)");
+  }
+
+  auto msg = std::format("bitwidth could not bound bits/sign for {} driver pin(s) after {} iteration(s): {}",
+                         unbounded.size(),
+                         max_iterations,
+                         list);
+
+  livehd::diag::sink().emit(livehd::diag::Diagnostic{
+      .severity = livehd::diag::Severity::warning,
+      .code     = "bitwidth-unbounded",
+      .category = "bitwidth",
+      .pass     = "pass.bitwidth",
+      .message  = msg,
+      .hint     = "annotate the value's width/type, or run a cprop pass before bitwidth to resolve constants",
+  });
 }
 
 void Bitwidth::dump(hhds::Graph* g) {

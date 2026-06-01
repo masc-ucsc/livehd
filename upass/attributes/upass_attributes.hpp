@@ -88,6 +88,12 @@ public:
   void process_declare() override;
   void process_range() override;
 
+  // Task 1t — `wrap`/`sat` lower to a `wrap|sat(v=<value>, type=<lhs>)`
+  // library call (not an attr_set/policy). Recognize the callee and narrow
+  // the value to the lhs's declared type, publishing the result on the call's
+  // dst tmp so the following `store(lhs, tmp)` alias-propagates it.
+  void process_func_call() override;
+
   // Aggregate tuple-attribute resolution (see upass_attributes_tuple.cpp).
   // Track tuple shape (field count + field-name list) so .[size] / .[bits] /
   // .[typename] / .[key] and category-D aggregate→field inheritance can
@@ -304,46 +310,15 @@ public:
   void migrate_aggregate_attrs_to_fields(std::string_view base);
   void migrate_alias(std::string_view lhs, std::string_view rhs);
 
-  // ── Overflow-policy state (see upass_attributes_wrap_sat.cpp) ─────────────
-  //
-  // wrap / saturate as declaration attributes set a persistent narrowing
-  // policy on the target variable; subsequent assignments are narrowed in
-  // place via tmp_fold so consumers (verifier cassert, constprop's eq/ne
-  // fallback) see the post-narrowed value through runner_fold_fn. The
-  // statement-level form (`wrap x = ...` / `sat x = ...`) lowers to the
-  // same attr_set but is emitted *after* the assign — distinguishing
-  // declaration vs. statement is "did this var already have an assign?"
-  // The statement-level form narrows the in-flight value and leaves no
-  // sticky attribute on the variable.
-  bool has_wrap_policy(std::string_view var) const { return wrap_policy.contains(var); }
-  bool has_sat_policy(std::string_view var) const { return sat_policy.contains(var); }
+  // Was `var` assigned a non-nil value at least once? Gates the unsigned
+  // first-write coercion in on_assign_like.
   bool was_assigned(std::string_view var) const { return assigned_once.contains(var); }
-  void set_wrap_policy(std::string_view var) { wrap_policy.emplace(var); }
-  void set_sat_policy(std::string_view var) { sat_policy.emplace(var); }
 
-  // Resolve the value being narrowed (either the LHS's last-stored value if
-  // it's already been assigned, or the RHS we are currently emitting) and
-  // overwrite tmp_fold[lhs] with the policy-narrowed result.
-  void apply_narrowing(std::string_view lhs, bool is_wrap, bool is_sat);
-
-  // Erase a stored attr value (used by the wrap/sat handler to drop the
-  // per-statement attr — process_attr_set always pre-records, but
-  // statement-level wrap/sat must not leave a sticky entry).
-  void erase_attr_value(std::string_view var, std::string_view attr) {
-    auto it = attr_set_values.find(std::string{var});
-    if (it == attr_set_values.end()) {
-      return;
-    }
-    it->second.erase(std::string{attr});
-    if (it->second.empty()) {
-      attr_set_values.erase(it);
-    }
-  }
-
-  // Fold a value through the wrap/sat policy on `lhs` if any. Returns the
-  // possibly-narrowed value; returns the input untouched when no policy is
-  // active or type info is missing.
-  Const narrow_for_lhs(std::string_view lhs, const Const& v) const;
+  // Narrow a value to `type_src`'s declared type using the wrap (modulo) or
+  // sat (clamp) rule. `type_src` is the variable whose type envelope to use
+  // (the `type=` arg of a wrap/sat call). Returns the input untouched when
+  // neither flag is set or type info is missing. Driven by process_func_call.
+  Const narrow_for_lhs(std::string_view type_src, const Const& v, bool is_wrap, bool is_sat) const;
 
   // ── const single-assign tracking ──────────────────────────────────────────
   //
@@ -358,12 +333,10 @@ private:
   std::map<std::string, std::string> shape_source;     // var → source-tmp from `assign var src` (chained)
   std::map<std::string, std::string> direct_alias;     // lhs → rhs for direct-ref `assign` aliases (migrate.cpp)
 
-  // Overflow policy + assignment tracking (wrap_sat.cpp). flat_hash_* gives
-  // heterogeneous string_view lookup and O(1) inserts; assigned_once grows
-  // to ~one entry per assignment on bulk workloads, so the std::set's
-  // O(log N) per-insert allocator pressure was a visible bottleneck.
-  absl::flat_hash_set<std::string>      wrap_policy;
-  absl::flat_hash_set<std::string>      sat_policy;
+  // Assignment tracking (wrap_sat.cpp). flat_hash_* gives heterogeneous
+  // string_view lookup and O(1) inserts; assigned_once grows to ~one entry per
+  // assignment on bulk workloads, so the std::set's O(log N) per-insert
+  // allocator pressure was a visible bottleneck.
   absl::flat_hash_set<std::string>      assigned_once;       // any non-nil assign happened
   absl::flat_hash_map<std::string, int> const_assign_count;  // for const single-assign check
 

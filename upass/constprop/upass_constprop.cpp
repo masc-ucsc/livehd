@@ -2126,6 +2126,25 @@ void uPass_constprop::process_func_call() {
     return;
   }
 
+  // Task 1t — `wrap`/`sat` narrowing call: copy the `v=` arg value through to
+  // the dst tmp. The following `store(lhs, dst)` then carries it to lhs. When
+  // narrowing actually changes the value, attributes publishes the narrowed
+  // result via runner_fold_fn (which current_prim_value consults first), so
+  // this copy-through only matters for the no-op-narrowing case. bitwidth
+  // exempts lhs from the overflow check. Codegen (T6) emits get_mask / mux.
+  if (fname == "wrap" || fname == "sat" || fname == "saturate") {
+    if (auto acts = collect_call_actuals()) {
+      for (const auto& a : *acts) {
+        if (a.is_named && a.name == "v" && !a.value.is_invalid()) {
+          store_trivial(dst, a.value);
+          break;
+        }
+      }
+    }
+    move_to_parent();
+    return;
+  }
+
   auto actuals = collect_call_actuals();
   // Direct cell-op call: `__sum(a, b)`, `__hotmux(sel, a, b, …)`, … —
   // every Ntype_op cell can surface in Pyrope as `__name(...)` and gets

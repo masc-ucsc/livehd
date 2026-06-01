@@ -385,23 +385,8 @@ void Prp2lnast::rewrite_decls_to_declare() {
     for (size_t i = 0; i < kids.size();) {
       const auto& k = kids[i];
       if (!is_type_attr_set(k)) {
-        auto copied = copy_merge(k, nn);
+        copy_merge(k, nn);
         ++i;
-        // T4 — per-statement `wrap x = v` / `sat x = v`: the store is followed
-        // by a contiguous `attr_set(x, "wrap"/"sat", true)`. Tag the copied
-        // store node with the overflow modifier. (Phase 1: the attr_set is
-        // still copied for parity; consumers migrate to the tag next.)
-        if (Lnast_ntype::is_store(lnast->get_type(k)) && i < kids.size()) {
-          const auto& nxt = kids[i];
-          if (Lnast_ntype::is_attr_set(lnast->get_type(nxt))
-              && prp_child_name(*lnast, nxt, 0) == prp_child_name(*lnast, k, 0)) {
-            auto akey = prp_child_name(*lnast, nxt, 1);
-            auto aval = prp_child_name(*lnast, nxt, 2);
-            if ((akey == "wrap" || akey == "sat" || akey == "saturate") && aval != "false" && aval != "0") {
-              staging->set_overflow(copied, akey == "wrap" ? Lnast::Overflow::wrap : Lnast::Overflow::sat);
-            }
-          }
-        }
         continue;
       }
       // Cluster head: attr_set(t, "type", KIND).
@@ -420,21 +405,6 @@ void Prp2lnast::rewrite_decls_to_declare() {
         type_node = kids[j];
         ++j;
       }
-      // Task 1t — a contiguous decl-site `attr_set(t, "wrap"|"sat", true)` is
-      // the sticky OVERFLOW qualifier (`var:u4:[wrap]`). Fold it into the
-      // declare mode so wrap/sat lives ON the declare node (replacing the
-      // sticky-attr_set + `was_assigned` heuristic for the decl-site case).
-      // Per-statement `wrap x = v` keeps its after-store attr_set (one-shot).
-      std::string overflow;
-      if (j < kids.size() && Lnast_ntype::is_attr_set(lnast->get_type(kids[j]))
-          && prp_child_name(*lnast, kids[j], 0) == target) {
-        auto akey = prp_child_name(*lnast, kids[j], 1);
-        auto aval = prp_child_name(*lnast, kids[j], 2);
-        if ((akey == "wrap" || akey == "sat" || akey == "saturate") && aval != "false" && aval != "0") {
-          overflow = (akey == "wrap") ? "wrap" : "sat";
-          ++j;
-        }
-      }
       // Emit declare(ref(t), TYPE|none_type, const(mode)).
       auto d = staging->add_child(nn, Lnast_ntype::create_declare());
       staging->add_child(d, Lnast_node::create_ref(target));
@@ -451,18 +421,7 @@ void Prp2lnast::rewrite_decls_to_declare() {
         }
         mode += "comptime";
       }
-      if (!overflow.empty()) {
-        if (!mode.empty()) {
-          mode.push_back(' ');
-        }
-        mode += overflow;
-      }
       staging->add_child(d, Lnast_node::create_const(mode));
-      // T4 — also tag the declare node with the overflow modifier (Phase 1:
-      // mode string still carries it for parity; consumers migrate next).
-      if (!overflow.empty()) {
-        staging->set_overflow(d, overflow == "wrap" ? Lnast::Overflow::wrap : Lnast::Overflow::sat);
-      }
       i = j;
     }
     return nn;
@@ -649,20 +608,30 @@ void Prp2lnast::process_statement(TSNode n) {
         TSNode arg_tuple = child_by_field(n, "argument");
         if (!ts_node_is_null(arg_tuple)) {
           // The argument tuple is `(cond)` or `(cond, "msg")`. Lower the
-          // first arg as the condition; ignore the optional msg for now.
-          TSNode cond_node{};
-          uint32_t nnc = ts_node_named_child_count(arg_tuple);
-          if (nnc >= 1) {
-            cond_node = ts_node_named_child(arg_tuple, 0);
-          }
-          Lnast_node cond_ref;
-          if (ts_node_is_null(cond_node)) {
-            cond_ref = Lnast_node::create_const("true");
-          } else {
-            cond_ref = expr_to_node(cond_node);
+          // first arg as the condition and the optional second arg as a
+          // diagnostic message: a `cassert` node becomes
+          //   cassert(<cond>)            — no message
+          //   cassert(<cond>, <msg>)     — message read by the verifier when
+          //                                the assertion is statically false
+          // (see uPass_verifier::classify_statement). The message is any
+          // expression that resolves to a comptime string (a string literal or
+          // an interpolated string), lowered the same way as the condition.
+          uint32_t   nnc       = ts_node_named_child_count(arg_tuple);
+          TSNode     cond_node = nnc >= 1 ? ts_node_named_child(arg_tuple, 0) : TSNode{};
+          Lnast_node cond_ref  = ts_node_is_null(cond_node) ? Lnast_node::create_const("true") : expr_to_node(cond_node);
+          // Lower the message (if any) BEFORE creating the cassert node so the
+          // helper statements an interpolated string emits land ahead of the
+          // assertion in source order (otherwise the message ref would dangle).
+          bool       have_msg = nnc >= 2;
+          Lnast_node msg_ref;
+          if (have_msg) {
+            msg_ref = expr_to_node(ts_node_named_child(arg_tuple, 1));
           }
           auto idx = builder.add_child(Lnast_ntype::create_cassert());
           lnast->add_child(idx, cond_ref);
+          if (have_msg) {
+            lnast->add_child(idx, msg_ref);
+          }
           return;
         }
       }
@@ -841,7 +810,7 @@ void Prp2lnast::process_declaration_statement(TSNode n) {
 }
 
 Lnast_node Prp2lnast::process_lvalue_for_assign(TSNode lvalue, const Lnast_node& rvalue, TSNode decl_node, TSNode type_cast_node,
-                                                bool rhs_is_fcall, std::string_view rhs_fcall_name, bool retype_via_overflow) {
+                                                bool rhs_is_fcall, std::string_view rhs_fcall_name, std::string_view overflow_kind) {
   std::string_view lvt(ts_node_type(lvalue));
   if (lvt == "lvalue_list") {
     // Tuple lvalue: `(x0, x1, …) = rhs`. Each item is an `lvalue_item`,
@@ -962,7 +931,7 @@ Lnast_node Prp2lnast::process_lvalue_for_assign(TSNode lvalue, const Lnast_node&
             lnast->add_child(tg_idx, Lnast_node::create_const(k));
             tmp = next;
           }
-          (void)process_lvalue_for_assign(name_node, tmp, decl_node, item_tc, false, {}, retype_via_overflow);
+          (void)process_lvalue_for_assign(name_node, tmp, decl_node, item_tc, false, {}, overflow_kind);
           ++pos;
           continue;
         }
@@ -1000,7 +969,7 @@ Lnast_node Prp2lnast::process_lvalue_for_assign(TSNode lvalue, const Lnast_node&
       }
       // Recurse: the per-position tmp is the new "rvalue" for the inner lvalue.
       // `decl_node` propagates so `mut (a, b) = …` declares both items.
-      (void)process_lvalue_for_assign(inner, tmp, decl_node, item_tc, false, {}, retype_via_overflow);
+      (void)process_lvalue_for_assign(inner, tmp, decl_node, item_tc, false, {}, overflow_kind);
       ++pos;
     }
     return rvalue;
@@ -1041,7 +1010,7 @@ Lnast_node Prp2lnast::process_lvalue_for_assign(TSNode lvalue, const Lnast_node&
       // `c:u4 = …` re-assignment would otherwise emit a stmts-level
       // `type_spec` that silently re-types an existing variable — reject it
       // and point the user at wrap/sat for an intentional downcast.
-      if (!has_decl && !retype_via_overflow) {
+      if (!has_decl && overflow_kind.empty()) {
         std::string name(trim(get_text(id)));
         report_error(tc, "assign-retype", "type",
                      std::format("cannot change the type of `{}` in an assignment", name),
@@ -1052,10 +1021,29 @@ Lnast_node Prp2lnast::process_lvalue_for_assign(TSNode lvalue, const Lnast_node&
       emit_type_spec(ref, tc);
     }
 
-    // Emit assign
+    // Emit assign. Task 1t — a `wrap`/`sat` write lowers the value through a
+    // `wrap|sat(v=<value>, type=<lhs>)` library call first; the call result
+    // then binds the lvalue. attributes narrows the value to the lhs's declared
+    // type (read via the `type=` arg), bitwidth exempts the lhs from the
+    // overflow check, and codegen emits get_mask / mux+get_mask. The type_spec
+    // above runs first so the lhs's type is known when the call is processed.
+    Lnast_node store_value = rvalue;
+    if (!overflow_kind.empty()) {
+      Lnast_node wrapped = builder.mint_tmp_ref();
+      auto       fc      = builder.add_child(Lnast_ntype::create_func_call());
+      lnast->add_child(fc, wrapped);                                 // dst tmp
+      lnast->add_child(fc, Lnast_node::create_ref(overflow_kind));   // callee: wrap | sat
+      auto va = lnast->add_child(fc, Lnast_ntype::create_store());   // v = <value>
+      lnast->add_child(va, Lnast_node::create_ref("v"));
+      lnast->add_child(va, rvalue);
+      auto ta = lnast->add_child(fc, Lnast_ntype::create_store());   // type = <lhs> (its declared type)
+      lnast->add_child(ta, Lnast_node::create_ref("type"));
+      lnast->add_child(ta, ref);
+      store_value = wrapped;
+    }
     auto aidx = builder.add_child(Lnast_ntype::create_store());
     lnast->add_child(aidx, ref);
-    lnast->add_child(aidx, rvalue);
+    lnast->add_child(aidx, store_value);
 
     // Phase 8 typesystem: a bare `true`/`false` literal on the rvalue
     // implies a `:bool` type. Inject a synthetic type_spec so the
@@ -1482,13 +1470,11 @@ void Prp2lnast::process_assignment(TSNode n) {
     }
   }
 
-  // The new grammar attaches a statement-level `wrap`/`sat` prefix as the
-  // `overflow` field of the enclosing _statement. Lower it as an attr_set
-  // bound to the lvalue. Emitted AFTER the assignment (below) to match the
-  // legacy `x::[wrap] = v` ordering the downstream `attributes` pass was
-  // validated against — overflow is treated as a sticky binding-level
-  // attribute, so the trailing position is observed by every later read of
-  // the lhs. Consumed once per assignment.
+  // The grammar attaches a statement-level `wrap`/`sat` prefix as the
+  // `overflow` field of the enclosing _statement. Passed to
+  // process_lvalue_for_assign, which lowers the scalar write through a
+  // `wrap|sat(v=<value>, type=<lhs>)` library call (Task 1t). Consumed once
+  // per assignment.
   const std::string_view overflow_kind = pending_overflow_kind;
   pending_overflow_kind                = {};
 
@@ -1534,7 +1520,7 @@ void Prp2lnast::process_assignment(TSNode n) {
     lnast->add_child(idx, result);
     lnast->add_child(idx, left_ref);
     lnast->add_child(idx, rvalue_node);
-    (void)process_lvalue_for_assign(lv, result, decl, tc, false, {}, !overflow_kind.empty());
+    (void)process_lvalue_for_assign(lv, result, decl, tc, false, {}, overflow_kind);
     return;
   }
 
@@ -1546,14 +1532,7 @@ void Prp2lnast::process_assignment(TSNode n) {
       rhs_fcall_name = std::string(trim(get_text(fn)));
     }
   }
-  Lnast_node lhs_ref = process_lvalue_for_assign(lv, rvalue_node, decl, tc, rhs_is_fcall, rhs_fcall_name, !overflow_kind.empty());
-
-  if (!overflow_kind.empty()) {
-    auto idx = builder.add_child(Lnast_ntype::create_attr_set());
-    lnast->add_child(idx, lhs_ref);
-    lnast->add_child(idx, Lnast_node::create_const(overflow_kind));
-    lnast->add_child(idx, Lnast_node::create_const("true"));
-  }
+  (void)process_lvalue_for_assign(lv, rvalue_node, decl, tc, rhs_is_fcall, rhs_fcall_name, overflow_kind);
 }
 
 // ---------------- Assert ----------------

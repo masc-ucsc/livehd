@@ -1,34 +1,31 @@
 /*
 :name: phase5_wrap_sticky
 :type: parsing lnast comptime
-:verifier_pass: 9
+:verifier_pass: 6
 :verifier_fail: 0
 */
 
-// Phase 5 — declaration `[wrap]` is an assignment policy: every assignment
-// to that variable wraps automatically. Per-statement `wrap` / `sat` prefix
-// modifiers control a single assignment. The operation itself does not leave
-// a sticky `[wrap]` / `[saturate]` attribute on the result.
+// Task 1t — `wrap` / `sat` are per-statement prefix modifiers: each one
+// narrows a single assignment to the lhs's declared type. They lower to a
+// `wrap|sat(v=…, type=<lhs>)` library call (no sticky `:[wrap]` attribute and
+// no `.[wrap]` / `.[saturate]` read form).
 
-mut w:u4:[wrap] = 0          // policy: wraps every store
-cassert(w.[wrap])
-w = 0xFF
+mut w:u4 = 0
+wrap w = 0xFF
 cassert(w == 0xF)
-w = 0x10
+wrap w = 0x10
 cassert(w == 0)
 
 mut x:u4 = 0
-wrap x = 0xFF                // per-statement
+wrap x = 0xFF                // per-statement wrap
 cassert(x == 0xF)
-cassert(!x.[wrap])
 
 sat x = 0xFF                 // per-statement saturate
-cassert(x == 0xF)             // 0xF is u4 max
-cassert(!x.[saturate])
+cassert(x == 0xF)            // 0xF is u4 max
 
 mut y:s4 = 0
 sat y = 100
-cassert(y == 7)               // s4 max
+cassert(y == 7)              // s4 max
 
 sat y = -100
-cassert(y == -8)              // s4 min
+cassert(y == -8)             // s4 min

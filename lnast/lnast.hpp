@@ -209,12 +209,6 @@ public:
   std::string_view get_fname(const Lnast_nid& nid) const;
   void             set_fname(const Lnast_nid& nid, std::string_view fname);
 
-  // Per-write overflow narrowing qualifier (`wrap`/`sat` modifier) on a
-  // `store`/`declare` node. Absent tag ⇒ Overflow::none.
-  using Overflow = lnast::attrs::Overflow;
-  Overflow get_overflow(const Lnast_nid& nid) const;
-  void     set_overflow(const Lnast_nid& nid, Overflow ov);
-
   // set_data: write-side helpers used by add_child / set_root /
   // append_sibling. On the read side, callers go through get_type/get_name.
   void set_data(const Lnast_nid& nid, Lnast_ntype::Lnast_ntype_int type);

@@ -64,6 +64,10 @@ protected:
   void set_subgraph_boundary_bw(hhds::Node_class& node);
   void dump(hhds::Graph* g);
 
+  // After the iteration budget is spent, warn (via diag) for every driver pin
+  // whose bits/sign could not be bounded.
+  void report_unbounded(hhds::Graph* g);
+
   void bw_pass(hhds::Graph* g);
 
 public:

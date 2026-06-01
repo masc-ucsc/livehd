@@ -142,7 +142,7 @@ node.set_color(c);
 pin.attr(livehd::attrs::pin_offset).set(off);
 pin.attr(livehd::attrs::pin_name).set(std::string{wname});
 pin.attr(livehd::attrs::bits).set(w);
-pin.attr(livehd::attrs::pin_unsigned).set(int8_t{1});
+pin.attr(livehd::attrs::pin_signed).del();  // unsigned/default
 node.attr(livehd::attrs::source).set(std::string{fname});
 node.attr(livehd::attrs::loc).set(livehd::attrs::loc_t::value_type{line, 0});
 node.attr(livehd::attrs::color).set(c);
