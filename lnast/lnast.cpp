@@ -23,6 +23,7 @@ struct Lnast_attr_init {
     hhds::register_attr_tag<hhds::attrs::name_t>("hhds::attrs::name");
     hhds::register_attr_tag<lnast::attrs::loc_t>("lnast.loc");
     hhds::register_attr_tag<lnast::attrs::fname_t>("lnast.fname");
+    hhds::register_attr_tag<lnast::attrs::overflow_t>("lnast.overflow");
   }
 };
 [[maybe_unused]] const Lnast_attr_init lnast_attr_init_{};
@@ -175,6 +176,25 @@ void Lnast::set_fname(const Lnast_nid& nid, std::string_view fname) {
   nid.attr(lnast::attrs::fname).set(std::string(fname));
 }
 
+Lnast::Overflow Lnast::get_overflow(const Lnast_nid& nid) const {
+  auto ref = nid.attr(lnast::attrs::overflow);
+  if (!ref.has()) {
+    return Overflow::none;
+  }
+  return ref.get();
+}
+
+void Lnast::set_overflow(const Lnast_nid& nid, Overflow ov) {
+  if (ov == Overflow::none) {
+    auto ref = nid.attr(lnast::attrs::overflow);
+    if (ref.has()) {
+      ref.del();
+    }
+    return;
+  }
+  nid.attr(lnast::attrs::overflow).set(ov);
+}
+
 void Lnast::set_data(const Lnast_nid& nid, Lnast_ntype::Lnast_ntype_int type) {
   set_type(nid, type);
   set_name(nid, {});
@@ -298,6 +318,13 @@ void Lnast::dump(std::ostream& os) const {
     }
     return std::string(f);
   });
+  opts.attributes.emplace_back("overflow", [this](const hhds::Tree::Node_class& node) -> std::optional<std::string> {
+    switch (get_overflow(node)) {
+      case Overflow::wrap: return std::string("wrap");
+      case Overflow::sat: return std::string("sat");
+      default: return std::nullopt;  // omit when none
+    }
+  });
   tree_->write_dump(os, opts);
 }
 
@@ -344,6 +371,12 @@ std::shared_ptr<Lnast> finish_read(hhds::Tree::ReadDumpResult result) {
         }
       } else if (k == "fname") {
         lnast->set_fname(node, v);
+      } else if (k == "overflow") {
+        if (v == "wrap") {
+          lnast->set_overflow(node, Lnast::Overflow::wrap);
+        } else if (v == "sat") {
+          lnast->set_overflow(node, Lnast::Overflow::sat);
+        }
       }
     }
   }

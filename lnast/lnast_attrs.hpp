@@ -30,6 +30,16 @@ struct fname_t {
 };
 inline constexpr fname_t fname{};
 
+// Per-write overflow narrowing qualifier on a `store`/`declare` node (the
+// `wrap c = …` / `sat c = …` statement modifier). Only allocated when set; a
+// node with no tag means `none`. POD enum → trivially copyable for flat_storage.
+enum class Overflow : uint8_t { none = 0, wrap = 1, sat = 2 };
+struct overflow_t {
+  using value_type = Overflow;
+  using storage    = hhds::flat_storage;
+};
+inline constexpr overflow_t overflow{};
+
 }  // namespace lnast::attrs
 
 namespace hhds {
@@ -42,6 +52,11 @@ template <>
 template <>
 [[nodiscard]] inline std::string attr_tag_name<lnast::attrs::fname_t>() {
   return "lnast.fname";
+}
+
+template <>
+[[nodiscard]] inline std::string attr_tag_name<lnast::attrs::overflow_t>() {
+  return "lnast.overflow";
 }
 
 }  // namespace hhds

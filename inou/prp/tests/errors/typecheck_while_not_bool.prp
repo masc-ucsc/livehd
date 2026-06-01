@@ -1,0 +1,13 @@
+/*
+:name: typecheck_while_not_bool
+:type: error
+:error: while condition must be boolean
+*/
+
+// A `while` condition must be boolean — no implicit int->bool.
+// Doc: skills gotcha "if 5 { } is a type error" (same rule for while).
+
+mut i = 5
+while i {
+  i = i - 1
+}

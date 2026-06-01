@@ -357,6 +357,10 @@ protected:
   void write_node() { lm->write_node(); }
   void mark_changed() { changed = true; }
 
+  // Per-write overflow tag (wrap/sat) on the node the cursor is parked on
+  // (a `store` or `declare`). Overflow::none when untagged. Task 1t/T4.
+  Lnast::Overflow node_overflow() const { return lm->get_lnast()->get_overflow(lm->get_current_nid()); }
+
   template <class... Lnast_ntype_int>
   bool is_type(Lnast_ntype_int... ty) const {
     auto n = get_raw_ntype();

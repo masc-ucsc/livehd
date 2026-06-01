@@ -1,0 +1,16 @@
+/*
+:name: assign_retype
+:type: error
+:error: cannot change the type
+:help: wrap
+*/
+
+// A type cast on the lvalue of a plain assignment is illegal: it would
+// silently re-type an already-declared variable. The type belongs at the
+// declaration; an intentional narrowing write must spell out `wrap`/`sat`
+// so the overflow behaviour is explicit (`wrap c:u4 = 4`).
+// Without this check, prp2lnast emitted a stray stmts-level `type_spec`
+// that rebound `c`'s type behind the user's back.
+
+mut c:u8 = nil
+c:u4 = 4   // locate_error_here

@@ -324,6 +324,26 @@ cross-file dependencies stay visible.
 - **3j** Pyrope Memory / `Fflop` / clock-reset end-to-end: declaration
   syntax, lowering to LGraph `Memory` cell, multi-clock-domain checks,
   sync/async reset trees.
+  - **Declare-folding — bind the initial/reset value ON the `declare`.** A
+    declaration with an initializer currently lowers to `declare(var, type,
+    mode)` *followed by a separate* `store(var, value)` (e.g. `mut c:u8 = nil`
+    → `declare(c, u8, mut)` then `store(c, nil)`; confirmed 2026-06-01). For a
+    register/flop this split loses the "this is the value bound *at
+    declaration*" relationship: a later same-name `store` is structurally
+    indistinguishable from the initializer, so the power-on / reset value
+    can't be reliably recovered when the `declare` lowers to `Fflop` / `Latch`
+    (and `prim_type_register`'s `reset_pin` needs exactly that value). Fold the
+    initializer into the optional 4th `[value]` child of `declare` — the slot
+    already sketched in [[1t]]'s `declare( var, <type>, const(mode), [value] )`
+    — so the init rides on the declare node and only genuine *re-assignments*
+    emit a trailing `store`. Producer: `rewrite_decls_to_declare` /
+    `process_lvalue_for_assign` in `inou/prp/prp2lnast.cpp` (the decl-cluster
+    merge already has both the `declare` and its value `store` in hand);
+    consumers `process_declare` in `upass/attributes` + `upass/bitwidth` and
+    the lnastfmt declare-shape validator must accept the 4th child. (Context:
+    the `assign-retype` guard landed 2026-06-01 already establishes that a type
+    cast may ride only a `declare` or a `wrap`/`sat` write — see
+    `inou/prp/tests/errors/assign_retype.prp`.)
 
 ## Group 4 — depends on Group 3
 

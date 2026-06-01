@@ -1586,6 +1586,15 @@ void uPass_runner::process_lnast() {
     // Delay-assign carries timing; emit verbatim (see upass.md invariant 6).
     C_OP(delay_assign)
 
+    // While — not unrolled by upass; the body is emitted verbatim. Dispatch so
+    // passes can OBSERVE it (typecheck's bool-condition check on the cond child;
+    // coalescer flushes deferred emits at the loop boundary). Cursor returns to
+    // the while node after dispatch, so the verbatim copy below is unchanged.
+    case Ntype::Lnast_ntype_while:
+      dispatch_to_passes(&upass::uPass::process_while);
+      emit_subtree_verbatim();
+      break;
+
     default:
       // Unknown / not-yet-handled node type: copy its subtree verbatim so
       // nothing silently disappears from the output tree. Add an explicit

@@ -44,6 +44,8 @@ public:
   void process_assign() override;
   // if / elif / when / unless conditions must be boolean.
   void process_if() override;
+  // while condition must be boolean.
+  void process_while() override;
 
   // Arithmetic / bitwise / shift — int operands, int result.
   void process_plus() override;

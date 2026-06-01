@@ -1,0 +1,13 @@
+/*
+:name: underflow_unsigned
+:type: error
+:error: does not fit
+*/
+
+// Underflow: a value/range that dips below an unsigned type's minimum (here a
+// negative value into u4) does not fit. The escape is an explicit wrap/sat or a
+// cast. Doc/decision (2026-05-31): all negatives into unsigned are an error,
+// judged on the actual inferred range (so `u4 = a-b` is fine when the range is
+// provably non-negative).
+
+const c:u4 = -1

@@ -364,15 +364,15 @@ void Prp2lnast::rewrite_decls_to_declare() {
   // into one `declare(ref(t), TYPE|none_type, const(mode))`. Everything else —
   // including the value `store`, the `typename` attr_set, and nested blocks —
   // is copied verbatim (recursing so nested stmts merge too).
-  std::function<void(const Lnast_nid&, const Lnast_nid&)> copy_merge = [&](const Lnast_nid& src_nid,
-                                                                           const Lnast_nid& dst_parent) {
+  std::function<Lnast_nid(const Lnast_nid&, const Lnast_nid&)> copy_merge = [&](const Lnast_nid& src_nid,
+                                                                               const Lnast_nid& dst_parent) -> Lnast_nid {
     auto nn   = prp_copy_one_node(*lnast, src_nid, *staging, dst_parent);
     auto type = lnast->get_type(src_nid);
     if (!Lnast_ntype::is_stmts(type)) {
       for (auto c : lnast->children(src_nid)) {
         copy_merge(c, nn);
       }
-      return;
+      return nn;
     }
     // stmts block — scan children with cluster lookahead.
     std::vector<Lnast_nid> kids;
@@ -385,8 +385,23 @@ void Prp2lnast::rewrite_decls_to_declare() {
     for (size_t i = 0; i < kids.size();) {
       const auto& k = kids[i];
       if (!is_type_attr_set(k)) {
-        copy_merge(k, nn);
+        auto copied = copy_merge(k, nn);
         ++i;
+        // T4 — per-statement `wrap x = v` / `sat x = v`: the store is followed
+        // by a contiguous `attr_set(x, "wrap"/"sat", true)`. Tag the copied
+        // store node with the overflow modifier. (Phase 1: the attr_set is
+        // still copied for parity; consumers migrate to the tag next.)
+        if (Lnast_ntype::is_store(lnast->get_type(k)) && i < kids.size()) {
+          const auto& nxt = kids[i];
+          if (Lnast_ntype::is_attr_set(lnast->get_type(nxt))
+              && prp_child_name(*lnast, nxt, 0) == prp_child_name(*lnast, k, 0)) {
+            auto akey = prp_child_name(*lnast, nxt, 1);
+            auto aval = prp_child_name(*lnast, nxt, 2);
+            if ((akey == "wrap" || akey == "sat" || akey == "saturate") && aval != "false" && aval != "0") {
+              staging->set_overflow(copied, akey == "wrap" ? Lnast::Overflow::wrap : Lnast::Overflow::sat);
+            }
+          }
+        }
         continue;
       }
       // Cluster head: attr_set(t, "type", KIND).
@@ -443,8 +458,14 @@ void Prp2lnast::rewrite_decls_to_declare() {
         mode += overflow;
       }
       staging->add_child(d, Lnast_node::create_const(mode));
+      // T4 — also tag the declare node with the overflow modifier (Phase 1:
+      // mode string still carries it for parity; consumers migrate next).
+      if (!overflow.empty()) {
+        staging->set_overflow(d, overflow == "wrap" ? Lnast::Overflow::wrap : Lnast::Overflow::sat);
+      }
       i = j;
     }
+    return nn;
   };
 
   auto src_root = lnast->get_root();
@@ -820,7 +841,7 @@ void Prp2lnast::process_declaration_statement(TSNode n) {
 }
 
 Lnast_node Prp2lnast::process_lvalue_for_assign(TSNode lvalue, const Lnast_node& rvalue, TSNode decl_node, TSNode type_cast_node,
-                                                bool rhs_is_fcall, std::string_view rhs_fcall_name) {
+                                                bool rhs_is_fcall, std::string_view rhs_fcall_name, bool retype_via_overflow) {
   std::string_view lvt(ts_node_type(lvalue));
   if (lvt == "lvalue_list") {
     // Tuple lvalue: `(x0, x1, …) = rhs`. Each item is an `lvalue_item`,
@@ -941,7 +962,7 @@ Lnast_node Prp2lnast::process_lvalue_for_assign(TSNode lvalue, const Lnast_node&
             lnast->add_child(tg_idx, Lnast_node::create_const(k));
             tmp = next;
           }
-          (void)process_lvalue_for_assign(name_node, tmp, decl_node, item_tc);
+          (void)process_lvalue_for_assign(name_node, tmp, decl_node, item_tc, false, {}, retype_via_overflow);
           ++pos;
           continue;
         }
@@ -979,7 +1000,7 @@ Lnast_node Prp2lnast::process_lvalue_for_assign(TSNode lvalue, const Lnast_node&
       }
       // Recurse: the per-position tmp is the new "rvalue" for the inner lvalue.
       // `decl_node` propagates so `mut (a, b) = …` declares both items.
-      (void)process_lvalue_for_assign(inner, tmp, decl_node, item_tc);
+      (void)process_lvalue_for_assign(inner, tmp, decl_node, item_tc, false, {}, retype_via_overflow);
       ++pos;
     }
     return rvalue;
@@ -1014,6 +1035,20 @@ Lnast_node Prp2lnast::process_lvalue_for_assign(TSNode lvalue, const Lnast_node&
       lnast->add_child(idx, Lnast_node::create_const("true"));
     }
     if (!ts_node_is_null(tc)) {
+      // A type cast on the lvalue is only legal when it (a) declares the
+      // variable (`var c:u4 = …`, decl_node present) or (b) is the cast
+      // target of a `wrap`/`sat` write (`wrap c:u4 = …`). A bare
+      // `c:u4 = …` re-assignment would otherwise emit a stmts-level
+      // `type_spec` that silently re-types an existing variable — reject it
+      // and point the user at wrap/sat for an intentional downcast.
+      if (!has_decl && !retype_via_overflow) {
+        std::string name(trim(get_text(id)));
+        report_error(tc, "assign-retype", "type",
+                     std::format("cannot change the type of `{}` in an assignment", name),
+                     std::format("annotate the type at the declaration, or use `wrap`/`sat` to downcast "
+                                 "(e.g. `wrap {}{} = …`)",
+                                 name, std::string_view(get_text(tc))));
+      }
       emit_type_spec(ref, tc);
     }
 
@@ -1499,7 +1534,7 @@ void Prp2lnast::process_assignment(TSNode n) {
     lnast->add_child(idx, result);
     lnast->add_child(idx, left_ref);
     lnast->add_child(idx, rvalue_node);
-    (void)process_lvalue_for_assign(lv, result, decl, tc);
+    (void)process_lvalue_for_assign(lv, result, decl, tc, false, {}, !overflow_kind.empty());
     return;
   }
 
@@ -1511,7 +1546,7 @@ void Prp2lnast::process_assignment(TSNode n) {
       rhs_fcall_name = std::string(trim(get_text(fn)));
     }
   }
-  Lnast_node lhs_ref = process_lvalue_for_assign(lv, rvalue_node, decl, tc, rhs_is_fcall, rhs_fcall_name);
+  Lnast_node lhs_ref = process_lvalue_for_assign(lv, rvalue_node, decl, tc, rhs_is_fcall, rhs_fcall_name, !overflow_kind.empty());
 
   if (!overflow_kind.empty()) {
     auto idx = builder.add_child(Lnast_ntype::create_attr_set());

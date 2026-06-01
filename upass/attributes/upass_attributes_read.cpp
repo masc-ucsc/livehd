@@ -759,9 +759,7 @@ void uPass_attributes::process_declare() {
   }
   // Task 1t — a declaration-site `wrap`/`sat` in the mode is the STICKY overflow
   // policy (every store to this var narrows). Set it directly from the declare
-  // node (replaces the old attr_set(wrap)-before-first-store + `was_assigned`
-  // sticky path). Per-statement `wrap x = v` still arrives as an after-store
-  // attr_set (one-shot, handled by Wrap_sat_handler).
+  // node. Per-statement `wrap x = v` arrives as an after-store attr_set.
   if (want_wrap) {
     set_wrap_policy(target);
     attr_set_values[std::string(target)]["wrap"] = *Dlop::create_integer(1);

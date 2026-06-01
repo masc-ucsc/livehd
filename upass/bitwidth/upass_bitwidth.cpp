@@ -91,7 +91,11 @@ void uPass_bitwidth::end_run() {
       const Lnast_range& val = it->second;
       const Lnast_range& env = decl_envelope_.find(var)->second;
       const bool         is_unsigned_env = !env.is_signed();  // env.min >= 0
-      const bool         over            = is_unsigned_env ? (val.min > env.max) : !env.contains(val);
+      // Does-not-fit on the ACTUAL inferred range: positive overflow (above
+      // max) OR underflow (the range can dip below the declared min — for an
+      // unsigned type that means it can go negative). `wrap`/`sat`/cast is the
+      // remedy. The signed path's `contains` already checks both bounds.
+      const bool         over            = is_unsigned_env ? (val.min > env.max || val.min < env.min) : !env.contains(val);
       if (over) {
         auto msg = std::format("`{}` (value {}) does not fit its declared range [{}, {}]", var, val.min, env.min, env.max);
         // Mirror upass::error: emit the structured diagnostic (so the JSONL /

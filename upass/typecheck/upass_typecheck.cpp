@@ -288,6 +288,24 @@ void uPass_typecheck::process_if() {
   move_to_parent();
 }
 
+void uPass_typecheck::process_while() {
+  // `while(cond, stmts)` — child0 is the condition (a ref/const); it must be
+  // boolean. Restore the cursor to the while node before returning.
+  if (!move_to_child()) {
+    return;
+  }
+  if (!Lnast_ntype::is_stmts(get_raw_ntype())) {
+    Kind k = kind_of_operand_at_cursor();
+    if (k == Kind::nil) {
+      emit_type_error("nil-operand", "`nil` is invalid as a condition (only copy, `==nil`/`!=nil`, `.[valid]`)");
+    } else if (k != Kind::unknown && k != Kind::boolean) {
+      emit_type_error("cond-not-bool", std::format("while condition must be boolean, got {}", kind_name(k)),
+                      "compare explicitly, e.g. `while x != 0`");
+    }
+  }
+  move_to_parent();
+}
+
 // ── arithmetic / bitwise / shift: int operands → int (NO bool) ──────────────
 void uPass_typecheck::process_plus() { require_all(Kind::integer, Kind::integer, "+", "type-mismatch-arith"); }
 void uPass_typecheck::process_minus() { require_all(Kind::integer, Kind::integer, "-", "type-mismatch-arith"); }
