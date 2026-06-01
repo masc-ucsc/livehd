@@ -60,6 +60,7 @@ Prp2lnast::Prp2lnast(std::string_view filename, std::string_view module_name, bo
   }
 
   process_description();
+  check_undeclared_writes();
 }
 
 Prp2lnast::~Prp2lnast() { ts_parser_delete(parser); }
@@ -154,6 +155,103 @@ void Prp2lnast::report_error(std::string_view code, std::string_view category, s
                                                       .message  = std::move(message),
                                                       .hint     = std::string(hint)});
   throw Eprp::parser_error(Pass::eprp, msg_copy);
+}
+
+namespace {
+bool prp_name_is_tmp(std::string_view n) { return n.size() >= 3 && n[0] == '_' && n[1] == '_' && n[2] == '_'; }
+
+// Collect store/declare TARGET ref names within a func_def signature (the
+// func_def children other than the body `stmts`) — its params and outputs.
+void prp_collect_sig_targets(const Lnast* ln, const Lnast_nid& node, std::unordered_set<std::string>& out) {
+  auto t = ln->get_type(node);
+  if (Lnast_ntype::is_store(t) || Lnast_ntype::is_declare(t)) {
+    auto v = ln->get_first_child(node);
+    if (!v.is_invalid() && Lnast_ntype::is_ref(ln->get_type(v))) {
+      out.insert(std::string(ln->get_name(v)));
+    }
+    return;
+  }
+  for (auto c = ln->get_first_child(node); !c.is_invalid(); c = ln->get_sibling_next(c)) {
+    if (Lnast_ntype::is_stmts(ln->get_type(c))) {
+      continue;  // never descend into the body
+    }
+    prp_collect_sig_targets(ln, c, out);
+  }
+}
+}  // namespace
+
+void Prp2lnast::check_undeclared_writes() const {
+  for (auto c = lnast->get_first_child(lnast->get_root()); !c.is_invalid(); c = lnast->get_sibling_next(c)) {
+    if (Lnast_ntype::is_stmts(lnast->get_type(c))) {
+      check_writes_in_scope(c, {});
+    }
+  }
+}
+
+// A statement-level `store` to a non-tmp name with no `mut`/`const`/declare (or
+// param/output) visible in scope is `a = 3` with no prior declaration — an error.
+// `visible` carries names declared in enclosing frames; a func body is a fresh
+// namespace seeded with its params/outputs.
+void Prp2lnast::check_writes_in_scope(const Lnast_nid& scope_stmts, const std::unordered_set<std::string>& visible) const {
+  std::unordered_set<std::string> here;
+  for (auto c = lnast->get_first_child(scope_stmts); !c.is_invalid(); c = lnast->get_sibling_next(c)) {
+    const auto ct = lnast->get_type(c);
+
+    // A bare `stmts` block (e.g. the for-loop unroll wrapper) is a nested scope.
+    if (Lnast_ntype::is_stmts(ct)) {
+      std::unordered_set<std::string> combined = visible;
+      combined.insert(here.begin(), here.end());
+      check_writes_in_scope(c, combined);
+      continue;
+    }
+
+    auto first_ref_name = [&](const Lnast_nid& node) -> std::string {
+      auto c0 = lnast->get_first_child(node);
+      if (!c0.is_invalid() && Lnast_ntype::is_ref(lnast->get_type(c0))) {
+        return std::string(lnast->get_name(c0));
+      }
+      return {};
+    };
+
+    if (Lnast_ntype::is_declare(ct)) {
+      auto name = first_ref_name(c);
+      if (!name.empty()) {
+        here.insert(name);
+      }
+    } else if (Lnast_ntype::is_attr_set(ct)) {
+      // Legacy declaration form still emitted by some lowerings (e.g. the
+      // for-loop iter var): attr_set(var, "type", <mode>) declares `var`.
+      auto c0 = lnast->get_first_child(c);
+      auto c1 = c0.is_invalid() ? c0 : lnast->get_sibling_next(c0);
+      if (!c0.is_invalid() && Lnast_ntype::is_ref(lnast->get_type(c0)) && !c1.is_invalid()
+          && lnast->get_name(c1) == "type") {
+        here.insert(std::string(lnast->get_name(c0)));
+      }
+    } else if (Lnast_ntype::is_store(ct)) {
+      auto name = first_ref_name(c);
+      if (!name.empty() && !prp_name_is_tmp(name) && !here.contains(name) && !visible.contains(name)) {
+        report_error("assign-no-decl", "name",
+                     std::format("assignment to undeclared variable '{}' (declare it with `mut`/`const` first)", name));
+      }
+    }
+
+    const bool is_func_body = Lnast_ntype::is_func_def(ct);
+    std::unordered_set<std::string> sig;
+    if (is_func_body) {
+      prp_collect_sig_targets(lnast.get(), c, sig);
+    }
+    for (auto cc = lnast->get_first_child(c); !cc.is_invalid(); cc = lnast->get_sibling_next(cc)) {
+      if (Lnast_ntype::is_stmts(lnast->get_type(cc))) {
+        if (is_func_body) {
+          check_writes_in_scope(cc, sig);
+        } else {
+          std::unordered_set<std::string> combined = visible;
+          combined.insert(here.begin(), here.end());
+          check_writes_in_scope(cc, combined);
+        }
+      }
+    }
+  }
 }
 
 std::string_view Prp2lnast::trim(std::string_view s) {

@@ -7,6 +7,7 @@
 #include <string_view>
 
 #include "absl/container/flat_hash_map.h"
+#include "absl/container/flat_hash_set.h"
 #include "absl/container/inlined_vector.h"
 #include "const.hpp"
 #include "lnast_range.hpp"
@@ -81,11 +82,37 @@ public:
   // land once the wrap/sat math migrates here per the spec.
   void process_attr_set() override;
 
+  // Goal 1n N4 — overflow capture. `declare(var, prim_type_int(max,min),
+  // const(mode))` / `type_spec(var, prim_type_int(max,min))` record the
+  // declared value envelope for `var`; the matching `store`/assign value is
+  // range-checked against it at end_run (the value lives in a SEPARATE store
+  // node, so the check cannot be node-local). A wrap/sat mode/attr exempts the
+  // var (overflow is then intentional truncation/clamp).
+  void process_declare() override;
+  void process_type_spec() override;
+
 private:
   // Per-variable range map. Persists across begin_iteration calls.
   // Heterogeneous lookup via string_view avoids std::string allocation on every
   // read/set in hot per-statement paths.
   absl::flat_hash_map<std::string, Lnast_range> range_map_;
+
+  // Goal 1n N4 — declared value envelope per variable (from prim_type_int's
+  // (max,min) on a `declare`/`type_spec`). Checked against range_map_ at
+  // end_run: a bounded value range that provably escapes the envelope (and is
+  // not wrap/sat-exempt) is a "does not fit" compile error.
+  absl::flat_hash_map<std::string, Lnast_range> decl_envelope_;
+
+  // Variables whose writes carry a wrap/sat policy (declare mode token contains
+  // "wrap"/"sat", or a per-statement `attr_set(var,"wrap"|"sat",true)`); their
+  // overflow is intentional, so they are exempt from the envelope check.
+  absl::flat_hash_set<std::string> wrap_sat_exempt_;
+
+  // Read a `prim_type_int(const max, const min)` envelope assuming the cursor is
+  // ON the prim_type_int node; restores the cursor. Returns nullopt unless both
+  // bounds are integer consts (a "nil" / non-integer bound = unbounded side =
+  // no envelope check). Used by process_declare / process_type_spec.
+  std::optional<Lnast_range> read_prim_type_int_envelope();
 
   // Read range for `name` — returns unbounded() if not yet known.
   Lnast_range read_range(std::string_view name) const;

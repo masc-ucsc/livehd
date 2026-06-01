@@ -188,42 +188,55 @@ cross-file dependencies stay visible.
   `max`/`min` per result, errors on **provable** type-envelope overflow, and
   publishes `max`/`min` as **per-node HHDS tree attrs** for `lnast_to_lgraph`.
 
-  **Status (2026-05-31) — N1–N5 LANDED (green, net-neutral; NOT git-committed),
-  two documented residuals.** Full `bazel build //...` green; `//upass/...` 9/9;
-  `//inou/prp` 126 pass / 8 fail = the same pre-existing feature-gap set
-  (`enum_*`, `match_arms_mixed`, `setter_complex`, `tuple_decorator_complex`,
-  `bitreverse`) → zero new regressions across all five phases. Changes touch only
-  `pass/upass/pass_upass.{cpp,hpp}`, `upass/bitwidth/{upass_bitwidth.cpp,
-  upass_bitwidth.hpp,lnast_range.hpp,upass_bitwidth_test.cpp}`, and
-  `lnast/lnast.hpp` (`BitwidthEntry`).
-  - **N1** ✓ removed from the runner order + `fold_capable_passes`; `fold_ref` /
-    `overrides_fold_ref` deleted (kills the stale-narrow-range bug class; the
-    suite confirms constprop's own folding covered the fallback).
-  - **N2** ✓ standalone run after runner + SSA via `uPass_runner(lm,{"bitwidth"})`
-    in `pass_upass.cpp::work()`, **read-only** (populates `ln->bw_meta()`, discards
-    the staging tree), behind Gate B (generic fn body via `io_meta bits==0`) and
-    a Gate-A stub (pending_import poison not landed).
+  **Status (2026-05-31) — N1–N5 LANDED + overflow capture centralized (green,
+  net-neutral; NOT git-committed).** Full `bazel build //...` green; `//upass/...`
+  9/9. `//inou/prp` is **net-neutral** verified by stashing the change set and
+  running uncached: my-change failure set ⊆ baseline failure set (zero new
+  failures; the 4 overflow tests + wrap/reinterpret tests pass). NOTE: the prp
+  suite is currently flaky — absolute counts bounce (8→16) because of a
+  pre-existing latent uninitialized-memory issue on the comptime/string path
+  (goal 1s) surfacing as spurious "undeclared variable" validator errors
+  (`cputs_basic`, `crand_test1`, `named_tuple`, `range_force`,
+  `string_interpolation`, `trivial_if2`, `attr_size`); the stable feature-gap
+  fails are `enum_*`, `match_arms_mixed`, `setter_complex`,
+  `tuple_decorator_complex`, `bitreverse`. Files: `pass/upass/pass_upass.{cpp,hpp}`,
+  `upass/bitwidth/{upass_bitwidth.cpp,upass_bitwidth.hpp,lnast_range.hpp,
+  upass_bitwidth_test.cpp,BUILD}`, `upass/attributes/upass_attributes.cpp`,
+  `lnast/lnast.hpp`, + 3 new `inou/prp/tests/errors/overflow_{func,unroll,unsigned}.prp`.
+  - **N1** ✓ `fold_ref`/`overrides_fold_ref` deleted (out of `fold_capable_passes`)
+    — kills the stale-narrow-range bug class; constprop's own folding covers it.
+  - **N2** ✓ **Reconsidered:** bitwidth runs as the **LAST opt pass in the runner
+    walk** (read-only / votes keep), NOT a separate post-runner runner. Reason
+    (discovered during overflow work): a typed declaration's init value is a
+    SEPARATE `store` that DCE removes for unused vars, so a post-DCE pass can't
+    see it — only an in-walk pass observes the store PRE-DCE, which is required to
+    catch overflow on a dead comptime const (`const x:s4=200`). `fold_ref` removal
+    still gives the decoupling. (The earlier separate-runner impl + Gate A/B were
+    reverted.)
   - **N3** ✓ (no-inf) `neg_inf`/`pos_inf` collapsed to a single `unbounded` flag
-    in `Lnast_range` + `BitwidthEntry`; no half-bounded state (bare `.[max]`/
-    `.[min]` dropped — `attr_set` of a derived read is illegal under 1t anyway);
-    arithmetic overflow → unbounded keeps soundness. **Residual:** (a) bounds are
-    still int64 — the exact-`Dlop` storage swap is deferred (only matters for
-    >2^63 envelopes, which no path produces, and `lnast.hpp` deliberately holds
-    no `Dlop` dep); (b) the channel stays the name-keyed `bw_meta` Lnast member
-    (io_meta precedent; side-map > flat_storage per the HHDS-attr memory) —
-    per-node re-keying is immaterial until `lnast_to_lgraph` exists to consume it.
-  - **N4** ✓ the unsatisfiable width-envelope contradiction now emits a
-    `core/diag` error (`code=bitwidth-overflow`, `category=bitwidth`, non-fatal,
-    original range kept) in place of `Pass::warn`. **Residual:** the fuller
-    "provable overflow on a typed store" check needs bitwidth to read the
-    `prim_type_int(max,min)` envelope (a `process_declare`) AND the wrap/sat
-    policy; that wiring overlaps 1t T6 and is deferred so it can't false-positive
-    on `wrap_checks`/`wrap_complex`/`valid_unknown_bits`.
-  - **N5** ✓ `div`/`mod`/`sext` tightened to real bounds (`|a/d| ≤ |a|`,
-    `|a%d| < |d|`, `sext → [-2^p, 2^p-1]`); `set_mask` stays conservative (not
-    cleanly derivable — "where derivable").
-  - SSA harvest/rename split remains a cleanup, not a correctness gate (SSA runs
-    whole before the runner today, so bitwidth is already after SSA).
+    in `Lnast_range` + `BitwidthEntry`; no half-bounded state. **Residual:** int64
+    bounds (exact-`Dlop` swap deferred — `lnast.hpp` stays `Dlop`-free, no >64-bit
+    path) and name-keyed `bw_meta` (per-node HHDS-attr re-keying waits on the
+    `lnast_to_lgraph` consumer).
+  - **N4** ✓ **overflow capture centralized in bitwidth.** `process_declare`/
+    `process_type_spec` record the `prim_type_int(max,min)` scalar envelope; an
+    `end_run` range-vs-envelope check emits `core/diag` `bitwidth-overflow`
+    ("does not fit", throws → non-zero exit). Signedness-aware (unsigned negatives
+    reinterpret/force, only positive-beyond-max errors; signed = strict
+    containment); deferred to end_run so a per-statement `wrap`/`sat` marker
+    emitted AFTER its store still exempts the var (decl-mode wrap/sat also
+    exempts). The two `uPass_attributes` overflow `upass::error`s were REMOVED
+    (the negative→unsigned reinterpret, which rewrites the value, stays). **Scope:
+    scalars only** — dotted tuple-field names (`ar.y`) are skipped (avoids the
+    fcall2 false positive on an out-of-range param-field binding); per-field
+    overflow is a future refinement (1t per-field types). Tests:
+    `overflow_signed` (now via bitwidth), `overflow_unsigned` (u3=100),
+    `overflow_func` (s4 acc=7+7 inside an inlined comb), `overflow_unroll`
+    (u4 acc sums to 45).
+  - **N5** ✓ `div`/`mod`/`sext` tightened (`|a/d| ≤ |a|`, `|a%d| < |d|`,
+    `sext → [-2^p, 2^p-1]`); `set_mask` stays conservative ("where derivable").
+  - SSA stays a whole pass before the runner (so bitwidth, last opt pass, is
+    already after SSA); the harvest/rename split is moot under the in-walk design.
 
   **Model (locked 2026-05-31, confirmed with the user).**
   - **Read-only.** Never rewrites nodes / never alters declared

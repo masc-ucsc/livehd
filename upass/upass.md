@@ -45,55 +45,33 @@ once, depth-first, pre-order. For each source node:
 
 ```
 (1) bundle pre-pass          ─ once
-(2) opt passes               ─ each once, in fixed order
-                                (constprop, attributes, coalescer,
-                                 func_extract).  bitwidth is NOT here —
-                                 it is a post-walk finalization pass (§2).
+(2) opt passes               ─ each once, in fixed order (attributes,
+                                constprop, coalescer, func_extract, and
+                                **bitwidth LAST**). bitwidth has no
+                                `fold_ref` (decoupled from the iterative
+                                fold) and is read-only; it observes stores
+                                pre-DCE and emits overflow + publishes
+                                max/min at end_run (§2 "bitwidth").
                               ─ taint gate: if any operand vector entry
                                 carries a non-empty pending_import, ONLY
                                 constprop is called; the others skip.
 (3) vote resolution          ─ drop > toconst > update > keep
-(4) SSA post-pass            ─ once; may expand 1→N (tuple flatten,
-                                name versioning, dead-arm delete).
-                                Skipped on any node whose read-through
-                                Bundles carry pending_import.
-(5) emit 0..N nodes          ─ append to the dest LNAST.
+(4) emit 0..N nodes          ─ append to the dest LNAST.
 ```
 
-After the source walk completes, a **finalization phase** runs over the
-freshly-built dest LNAST. It is gated per-LNAST (§8):
+SSA naming runs as a **whole-tree pass before** this runner walk
+(`uPass_ssa::run` — harvests `io_meta` for the inliner and renames
+multi-assigned vars), so the walk and the emitted tree already carry SSA
+names; bitwidth (last opt pass) therefore sees post-SSA names.
 
-- **Gate A — unresolved `pending_import`.** If any Bundle still carries
-  `pending_import`, finalization is **deferred entirely** to a later
-  `pass.upass` invocation (after the blocking `import` resolves). None of
-  the steps below run — running SSA/bitwidth under an unresolved import
-  is wasted work (it must be redone once the import resolves) and risks
-  import-resolution-order non-determinism.
-- **Gate B — generic (un-inlined) function body.** A function body whose
-  inputs have no declared type has no width envelope and no concrete
-  operand ranges, so it cannot be SSA-named, range-analyzed, or lowered
-  on its own. It is **skipped** here (for that LNAST only; its
-  fully-typed siblings proceed). It is realized solely by inlining into a
-  caller, where the call site supplies concrete argument types and the
-  inlined copy is range-analyzed in the caller. A generic callee that
-  survives un-inlined at a real call site is a compile error — "generic
-  callee must be inlined" — per `docs/contracts/lnast2lgraph.md`.
+After the source walk + post-walk DCE complete:
 
-When neither gate fires, finalization runs in order:
-
-  1. **SSA rename/flatten** — rename multi-assigned names and flatten
-     `tuple_*` aggregates to per-field flat names. This is the second
-     half of the split `uPass_ssa`; the first half (I/O-metadata harvest)
-     runs *before* the runner because the comb-call inliner needs
-     `io_meta` mid-walk (see §2).
-  2. **bitwidth** — the standalone, **read-only** range pass (§2):
-     derive each result's exact `max`/`min`, check declared-type
-     envelopes (compile error on *provable* overflow), and publish
-     `max`/`min` as per-node HHDS tree attrs for `lnast_to_lgraph`.
-  3. **read-only finishers** — `verifier`, then `assert`, walk the dest
-     LNAST and tally casserts.
-  4. handoff to `pass.lnast_to_lgraph`, which reads the `max`/`min` tree
-     attrs at node creation to set bits/sign.
+- If **no** Bundle carries `pending_import`, the read-only finishers
+  (`verifier`, then `assert`) tally casserts, and the optimized LNAST —
+  with `bw_meta` `max`/`min` populated by bitwidth at end_run — is handed
+  to `pass.lnast_to_lgraph`.
+- Otherwise the finishers defer to a later `pass.upass` invocation
+  (presumably after the blocking `import` resolves).
 
 ### No iteration loop
 
@@ -150,59 +128,64 @@ moved to bundle pre-pass.
   `tuple_get_alias` / `direct_alias` / aggregate inheritance. Votes
   **toconst** when the read resolves.
 
-### bitwidth (standalone finalization pass — not an iterative opt pass)
+### bitwidth (last opt pass in the runner walk — read-only, no fold_ref)
 
-`bitwidth` is **not** part of the per-node opt-pass walk and does **not**
-participate in const-folding (no `fold_ref`). It runs once, in the
-finalization phase (§1), over the optimized dest LNAST after SSA
-rename/flatten, gated per §8.
+`bitwidth` is the **last opt pass** in the single runner walk (after
+constprop). It does **not** participate in const-folding (no `fold_ref`, so
+it never feeds — or corrupts — constprop) and is **read-only** (votes keep;
+never rewrites a node or alters a declared `prim_type_int(max,min)`).
+Running inside the walk lets it observe every store **before DCE**. At
+`end_run` it (a) emits any overflow compile error and (b) publishes
+`max`/`min` for the future `lnast_to_lgraph`.
 
-- **Read-only.** It never rewrites nodes and never alters declared types
-  (`prim_type_int(max,min)`); it only *reads* the tree and *annotates*
-  it.
-- **Exact `max`/`min` only.** Each result's range is an exact
-  arbitrary-precision (`Dlop`) `[min, max]` — no `+inf`/`-inf` flags
-  (Dlop is unlimited precision, so finite bounds never overflow; a value
-  with no derivable bound is simply *absent*). `bits` and `signed` are
-  **derived on demand from `max`/`min`**, never stored.
-- **Output = per-node HHDS tree attrs.** It attaches each result's
-  `(max, min)` as an HHDS `flat_storage` tree attribute keyed by the
-  result node — a persistent node→data map, distinct from Pyrope
-  attributes — which `lnast_to_lgraph` reads at node creation to set
-  bits/sign. This replaces the old name-keyed `lnast->bw_meta()` side
-  map (which had no consumer and could not survive SSA renaming).
-- **Overflow = compile error, but only when provable.** For a typed
-  target, error iff the result's range *provably* exceeds the declared
-  envelope and the write carries no `wrap`/`sat` policy. An unknown /
-  unbounded result into a typed target is **not** an error — the
-  declared type is the width. Errors go through the `core/diag` channel
-  (stable `code`, `category=source`, source span; collect-and-continue).
-- **Declared envelope is itself `max`/`min`.** `uN` lowers to `min>=0` +
-  a max; `sN`/`bool` to a signed range; the runner already emits the
-  canonical `prim_type_int(max,min)` and never drops it
-  (`upass_runner.cpp` — type_spec/attr_set "emit verbatim, never drop"),
-  so the envelope survives into the tree bitwidth reads.
-- **Wrap/sat narrowing math lives here** (moved out of `attributes`,
-  which keeps only the *policy* bit; see
-  `upass/attributes/upass_attributes_wrap_sat.cpp`, math now under
-  `//upass/bitwidth`).
-- **Lattice completeness.** For the overflow check to be both sound and
-  free of false positives, range ops must be tightened where derivable
-  (`a/d ≤ a`, `a%d < d`, `sext`, `set_mask`); ops that return
-  `unbounded` today are a known follow-up.
+- **Why in the walk, not a separate post-runner pass.** The init value of a
+  typed declaration lives in a *separate* `store` node that DCE removes when
+  the var is unused (`const x:s4 = 200` ⇒ `declare(x,…)` survives,
+  `store(x,200)` is DCE'd). A post-DCE pass would not see the value, so an
+  overflow on a dead comptime const would be missed; the in-walk pass
+  observes the store first. (`fold_ref` removal still gives the decoupling
+  Goal 1n wanted — the runner is a single, non-iterative walk.)
+- **Exact `max`/`min` ranges.** Each result's range is `[min, max]` with a
+  single `unbounded` flag — no `+inf`/`-inf`, no half-bounded state; a value
+  with no derivable bound is *unbounded*. `bits`/`sign` are derived on
+  demand (`sign = min < 0`), never stored. (Bounds are int64 today; the
+  exact-`Dlop` swap is a residual — TODO_livehd 1n N3.)
+- **Overflow capture (centralized here).** `process_declare` /
+  `process_type_spec` record each **scalar** var's declared envelope from
+  `prim_type_int(max,min)`; `process_assign`/store track the value range;
+  at `end_run` a var whose value range *provably* escapes its envelope —
+  with no `wrap`/`sat` policy — is a **`bitwidth-overflow` compile error**
+  (`core/diag`, message contains "does not fit", throws → non-zero exit).
+  Semantics match the type model: an **unsigned** envelope flags only a
+  value provably *above* max (a negative value is a legal unsigned
+  reinterpret/"force", not overflow); a **signed** envelope is strict
+  containment. The check is **deferred to `end_run`** so a per-statement
+  `wrap`/`sat` marker emitted *after* its store still exempts the var. This
+  replaces the former checks in `uPass_attributes` (the negative→unsigned
+  reinterpret, which rewrites the value so it fits, **stays** in attributes).
+  Scope: **scalars only** today — tuple-field envelopes (`ar.y`) are skipped
+  pending per-field types (1t), so an out-of-range param-field binding is
+  not flagged.
+- **Publishes `max`/`min`** into `lnast->bw_meta()` at `end_run` for the
+  future `lnast_to_lgraph` (the per-node HHDS tree-attr re-keying waits on
+  that consumer — TODO_livehd 1n N3).
+- **Wrap/sat narrowing math lives here** (moved out of `attributes`, which
+  keeps only the *policy* bit; see
+  `upass/attributes/upass_attributes_wrap_sat.cpp`).
+- **Lattice tightening.** `div`/`mod`/`sext` are bounded (`a/d ≤ a`,
+  `a%d < d`, `sext → [-2^p, 2^p-1]`); `set_mask` stays conservative.
 
-> **Status (2026-05-31):** Goal 1n N1–N5 landed (green, net-neutral).
-> `bitwidth` is out of the runner order and out of `fold_capable_passes` (no
-> `fold_ref`); `pass.upass` runs it standalone after the runner + SSA, read-only
-> (discards its staging tree). The lattice/`BitwidthEntry` dropped the
-> `neg_inf`/`pos_inf` flags for a single `unbounded` flag (no half-bounded);
-> `div`/`mod`/`sext` ranges are tightened; the unsatisfiable-envelope case now
-> emits a `core/diag` `bitwidth-overflow` error. Two residuals (TODO_livehd 1n):
-> bounds are still int64 (exact-`Dlop` swap deferred — no >64-bit path, and
-> `lnast.hpp` stays `Dlop`-free) and the channel is still the name-keyed
-> `bw_meta` member (per-node re-keying waits on the `lnast_to_lgraph` consumer);
-> the fuller typed-store overflow check waits on a `process_declare` + wrap/sat
-> policy read (overlaps 1t T6).
+> **Status (2026-05-31):** Goal 1n landed green + net-neutral (`//upass` 9/9,
+> full `bazel build //...` green; `//inou/prp` net-neutral — my-change failure
+> set ⊆ baseline, verified by stashing + uncached run; the suite is flaky from a
+> pre-existing latent uninitialized-memory issue, goal 1s, unrelated to this
+> change). `bitwidth` is the last opt pass in the walk, no `fold_ref`,
+> read-only; overflow capture is centralized here (signed + unsigned,
+> wrap/sat-exempt, scalar scope) and reports "does not fit" via `core/diag`
+> — covered by `inou/prp/tests/errors/overflow_{signed,unsigned,func,unroll}.prp`.
+> Residuals (TODO_livehd 1n): int64 bounds (exact-`Dlop` swap), name-keyed
+> `bw_meta` (per-node re-keying), and tuple-field overflow — all gated on the
+> `lnast_to_lgraph` consumer / per-field types.
 
 ### coalescer
 
@@ -220,28 +203,20 @@ callee body is spawned as a separate LNAST in `var.lnasts` for an
 independent `pass.upass` walk. `func_def` with no remaining call sites
 and no exported semantics → vote **drop**.
 
-### SSA (split: pre-runner harvest + post-runner rename/flatten)
+### SSA (whole-tree pass, before the runner)
 
-SSA does two jobs with different timing requirements, so it is split:
+`uPass_ssa::run` runs once over each LNAST **before** the main runner
+(`pass_upass.cpp::work`). It harvests port names/widths into
+`lnast->io_meta()` (the comb-call inliner reads `io_meta` mid-walk, so this
+must precede the runner) and renames multi-assigned user vars to SSA-unique
+names. The runner therefore walks — and emits — post-SSA names, so the
+last opt pass `bitwidth` and the downstream `lnast_to_lgraph` both see
+single-assignment names.
 
-- **I/O-metadata harvest — *before* the runner.** Harvests port
-  names/widths into `lnast->io_meta()`. Must run before the runner
-  because the comb-call inliner reads `io_meta` mid-walk
-  (`upass_runner.cpp`). It is also how Gate B (§8) is detected: an input
-  with unknown width (`bits==0`) marks a generic function body.
-- **Rename + flatten — *after* the runner, in finalization (§1).**
-  Renames multi-assigned names to SSA-unique names, flattens `tuple_*`
-  aggregates into per-field flat names (uses `Bundle.shape` and
-  `tuple_get_alias`), and deletes dead arms flagged when a cond was
-  comptime. Runs only when neither §8 gate fires, immediately before
-  `bitwidth`, so bitwidth and `lnast_to_lgraph` see the final
-  single-assignment names.
-
-> The long-term redesign (`docs/upass_redesign.md` Step I) folds the
-> rename/flatten half into the runner's *emit* step (so the dest LNAST is
-> already SSA-named). Either mechanism satisfies the same invariant: SSA
-> naming is complete **before** bitwidth, on the tree `lnast_to_lgraph`
-> consumes.
+> The long-term redesign (`docs/upass_redesign.md` Step I) folds the SSA
+> rename into the runner's *emit* step (so the runner itself produces the
+> SSA-named tree). Either mechanism satisfies the same invariant: SSA naming
+> is complete **before** bitwidth, on the tree `lnast_to_lgraph` consumes.
 
 ### Typesystem (handled inside `attributes`)
 
@@ -566,19 +541,16 @@ Effect on each phase:
 - **Opt passes**: only `constprop` runs on tainted-input nodes.
 - **SSA**: skips structural rewrites (tuple flatten, dead-arm delete)
   on any node whose read-through Bundles include a pending marker.
-- **Finalization (Gate A)**: the entire finalization phase (§1) — SSA
-  rename/flatten, **bitwidth**, verifier/assert, and the handoff to
-  `lnast_to_lgraph` — is skipped if *any* Bundle still carries
-  `pending_import` at end of the source walk. The whole program defers to
-  a later invocation; see §1 for why (wasted rework + non-determinism).
-- **Generic function bodies (Gate B)**: independent of imports, a
-  function body whose inputs have no declared type is removed from
-  finalization for *that LNAST only* (fully-typed siblings proceed). It
-  is realized solely by inlining into callers; an un-inlined survivor at
-  a real call site is a compile error.
+- **bitwidth**: a tainted value has no provable range (it reads as
+  *unbounded*), so the overflow check naturally fires on nothing — no
+  explicit gate needed. (A generic, un-inlined function body likewise has
+  untyped inputs ⇒ no envelope ⇒ no overflow check; it is realized only by
+  inlining into a caller, where the concretely-typed copy is checked.)
+- **Verifier / assert**: skipped entirely if any Bundle still carries
+  `pending_import` at end of the source walk.
 - **Re-runs**: the next `pass.upass` invocation rebuilds the symbol
   table; cleared pending markers (because the import has now resolved)
-  let finalization run.
+  let the passes run.
 
 `TODO_prp.md §1b` and `§2j` track the import-side work this hooks into.
 
@@ -599,14 +571,15 @@ These must hold after every walk:
 5. **`delay_assign` is emitted verbatim.** Offsets ≠ 0/1 are not yet
    lowered (per `lnast_todo.md` §15.2); upass must not constant-fold
    across them regardless of symbol-table state.
-6. **The iterative opt passes do not derive or depend on value ranges.**
-   `max`/`min` are derived exclusively by the standalone `bitwidth`
-   finalization pass (§2), after the opt-pass walk, and are consumed only
-   by `lnast_to_lgraph`. constprop/attributes/coalescer neither read nor
-   write ranges, and nothing folds on a range (bitwidth has no
-   `fold_ref`). Decl attrs live in `Bundle.attr_values` (written by
-   bundle pre-pass / constprop / attributes per §2). This supersedes the
-   older "lnastfmt owns `__min`/`__max`" rule.
+6. **Only `bitwidth` derives value ranges; the other passes never fold on
+   them.** `max`/`min` are derived exclusively by `bitwidth` (the last opt
+   pass, §2) and consumed only by `lnast_to_lgraph`.
+   constprop/attributes/coalescer neither read nor write ranges, and
+   nothing folds on a range (bitwidth has no `fold_ref`). bitwidth is also
+   the sole owner of overflow (range-vs-declared-envelope) errors. Decl
+   attrs live in `Bundle.attr_values` (written by bundle pre-pass /
+   constprop / attributes per §2). This supersedes the older "lnastfmt owns
+   `__min`/`__max`" rule.
 7. **Spawned LNASTs are self-contained.** Outer-scope comptime values
    are inlined at the use site by bundle pre-pass / constprop before
    func_extract spawns the callee body; spawned LNASTs share no Bundle
@@ -701,20 +674,24 @@ op, parallel side tables in each pass) is being replaced incrementally:
 8. **Verifier/assert as dest-walk finishers** — to land: drop the
    per-node verifier dispatch, run after the source walk completes when
    the pending-import gate is clear.
-9. **bitwidth → read-only finalization pass** — to land. Concretely:
-   (a) remove `bitwidth` from the runner's pass list and from
-   `fold_capable_passes` (delete `overrides_fold_ref`/`fold_ref` on
-   `uPass_bitwidth`); (b) run it as a standalone whole-tree pass in the
-   finalization phase (§1), after SSA rename/flatten, behind both §8
-   gates; (c) replace the name-keyed `lnast->bw_meta()` flush with
-   per-node HHDS `(max,min)` tree attrs; (d) drop the `neg_inf`/`pos_inf`
-   lattice flags — store exact `Dlop` `max`/`min`, absent when unbounded;
-   (e) promote the unsatisfiable-constraint `Pass::warn`
-   (`upass_bitwidth.cpp`) to a `core/diag` compile error fired only on
-   *provable* envelope overflow (unless `wrap`/`sat`); (f) tighten the
-   `div`/`mod`/`sext`/`set_mask` lattice entries so the check is sound
-   without false positives. `pass/bitwidth` (the LGraph-level MIT pass)
-   is untouched — it remains the Verilog-ingress fallback.
+9. **bitwidth → read-only, no-fold, last-opt-pass + overflow capture** —
+   LANDED (Goal 1n). (a) `overrides_fold_ref`/`fold_ref` deleted (out of
+   `fold_capable_passes`) — decoupled from the iterative fold; (b) it stays
+   the **last opt pass in the runner walk** (read-only / votes keep) rather
+   than a separate post-runner pass, because the typed-declaration value is
+   a separate `store` that DCE removes for unused vars — only an in-walk
+   pass sees it pre-DCE (so dead comptime overflow is still caught);
+   (c) `neg_inf`/`pos_inf` collapsed to one `unbounded` flag (no
+   half-bounded); (d) overflow capture centralized here via
+   `process_declare`/`process_type_spec` (envelope) + an `end_run`
+   range-vs-envelope check → `core/diag` `bitwidth-overflow` ("does not
+   fit"), signedness-aware, wrap/sat-exempt, **scalars only**; the former
+   `uPass_attributes` checks were removed (negative→unsigned reinterpret
+   stays there); (e) `div`/`mod`/`sext` lattice tightened. `pass/bitwidth`
+   (the LGraph-level MIT pass) is untouched — Verilog-ingress fallback.
+   **Residuals** (TODO_livehd 1n): exact-`Dlop` bound storage, per-node
+   HHDS-tree-attr re-keying of `bw_meta`, and tuple-field overflow — all
+   gated on the `lnast_to_lgraph` consumer / per-field types.
 
 See [docs/upass_redesign.md](../docs/upass_redesign.md) for the
 end-to-end design these steps converge to.

@@ -7,7 +7,7 @@
 
 mut x = 2
 
-mut y = if mut z = 1; (x+z) == 3 {
+mut y = if mut zc = 1; (x+zc) == 3 {
   4
 } else {
   5

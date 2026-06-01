@@ -16,7 +16,7 @@ for a in 0..<4 {
   }
 }
 
-mut counter = 1
+counter = 1   // reassign (declared above); re-`mut` would be a redeclaration error
 for a in (0,1,2,3) {
   for b in (0,1) {
     cassert(data[a][b] == counter)

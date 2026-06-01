@@ -38,6 +38,12 @@ protected:
   // report it and abort (does not return); a clean parse returns normally.
   void check_parse_errors() const;
 
+  // Reject `a = 3` with no prior `mut`/`const`/declare (or param/output) visible
+  // in scope. Runs on the producer tree (pre-upass), so it sees only source-level
+  // declarations — no inliner/SSA-synthesized stores to false-positive on.
+  void check_undeclared_writes() const;
+  void check_writes_in_scope(const Lnast_nid& scope_stmts, const std::unordered_set<std::string>& visible) const;
+
   // LNAST output. `builder` co-owns `lnast` and is the canonical home for
   // the current `idx_stmts` cursor, tmp-ref minting, and frontend-agnostic
   // stmt emitters (cleanup_todo §3.4).

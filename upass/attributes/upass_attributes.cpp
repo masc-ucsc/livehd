@@ -244,41 +244,14 @@ void uPass_attributes::on_assign_like(bool is_assign_node) {
           mark_changed();
         }
       }
-    } else if (!rhs_value->has_unknowns()) {
-      // Task 1t/1b Cluster-F — a KNOWN positive comptime value whose magnitude
-      // exceeds the declared unsigned width (bit `bits` is set ⇒ value ≥ 2^N >
-      // max) with no `wrap`/`sat` qualifier is a hard compile error (overflow
-      // must be explicit). The negative case above is a legal reinterpretation,
-      // not an overflow; values that fit (bit `bits` clear) never reach here.
-      upass::error("uPass_attributes: comptime write to `{}` overflows its declared {}-bit width without wrap/sat\n",
-                   view.lhs,
-                   lhs_ti_for_coerce->bits);
     }
-  } else if (lhs_signed_bounded && !was_assigned(view.lhs) && rhs_value && !rhs_value->has_unknowns()) {
-    // Task 1b — first-write range-fit enforcement for a SIGNED-int LHS with a
-    // concrete envelope (sN, `int(max=…,min=…)`). Signed types were previously
-    // unchecked. The test is sign-agnostic range containment against the
-    // declared (max,min) — derive_max/derive_min, the single source. There is
-    // NO reinterpret for signed (a signed overflow is a genuine error, not a
-    // bit reinterpretation); the fix is wrap/sat or an explicit bit-select.
-    // A bound may be present-but-nil (unbounded side stores a nil Const whose
-    // is_i() is true) — reject it via is_nil() before any Dlop arithmetic.
-    auto       emax    = derive_max(view.lhs);
-    auto       emin    = derive_min(view.lhs);
-    const bool has_max = emax && emax->is_integer();
-    const bool has_min = emin && emin->is_integer();
-    const bool over    = has_max && rhs_value->sub_op(*emax)->is_positive() && !rhs_value->same_repr(*emax);
-    const bool under   = has_min && emin->sub_op(*rhs_value)->is_positive() && !rhs_value->same_repr(*emin);
-    if (over || under) {
-      upass::error(
-          "uPass_attributes: comptime write to `{}` (value {}) does not fit its declared range [{}, {}] "
-          "without wrap/sat (force the bits with a bit-select `{}#[0..]` if intended)\n",
-          view.lhs,
-          std::string(rhs_value->to_pyrope()),
-          has_min ? std::string(emin->to_pyrope()) : std::string("-inf"),
-          has_max ? std::string(emax->to_pyrope()) : std::string("+inf"),
-          view.lhs);
-    }
+    // (Goal 1n) Overflow capture moved to upass/bitwidth (centralized): bitwidth
+    // checks the value range against the declared envelope at end_run, for both
+    // signed and unsigned types. The two former checks here — a positive
+    // comptime value exceeding an unsigned width, and a signed value outside its
+    // declared (max,min) range — are gone. The negative-bit-pattern → unsigned
+    // reinterpret above STAYS (it rewrites the value to its unsigned form, which
+    // then fits the envelope and is not an overflow).
   }
   record_assign(view.lhs, rhs_is_nil);
 

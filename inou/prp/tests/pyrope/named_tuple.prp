@@ -5,7 +5,7 @@
 
 comb top() {
   const c = 10
-  x = (a=1, mut b = (c=2), mut c)
+  mut x = (a=1, mut b = (c=2), mut c)
 }
 
 const a = top()

@@ -384,11 +384,11 @@ TEST(BitwidthAttrSet, FitsAfterAssign) {
   EXPECT_EQ(it->second.max, 7);
 }
 
-// `x = 100; x.[ubits] = 3` → 100 cannot fit in [0,7]. (Goal 1n N4) the pass
-// emits a `bitwidth-overflow` diagnostic and leaves the original range alone
-// (does not narrow). Test that the original range is preserved and no crash
-// occurs (the diagnostic is non-fatal).
-TEST(BitwidthAttrSet, ConflictErrorsAndKeepsOriginal) {
+// `x = 100; x.[ubits] = 3` → 100 cannot fit in u3 [0,7]. (Goal 1n N4) bitwidth
+// records the [0,7] envelope from the ubits attr, then at end_run finds the
+// stored value 100 provably above max → emits a `bitwidth-overflow` diagnostic
+// and throws to abort (a compile error).
+TEST(BitwidthAttrSet, ConflictErrors) {
   auto ln    = std::make_shared<Lnast>("bw_attr_conflict");
   auto root  = ln->set_root(Lnast_ntype::create_top());
   auto stmts = ln->add_child(root, Lnast_ntype::create_stmts());
@@ -397,13 +397,7 @@ TEST(BitwidthAttrSet, ConflictErrorsAndKeepsOriginal) {
   ln->add_child(asgn, Lnast_node::create_const("100"));
   add_attr_set(ln, stmts, "x", "ubits", "3");
 
-  run_bw(ln);
-  const auto& meta = ln->bw_meta().ranges;
-  auto        it   = meta.find("x");
-  ASSERT_NE(it, meta.end());
-  // Original assignment of 100 still recorded; constraint was rejected.
-  EXPECT_EQ(it->second.min, 100);
-  EXPECT_EQ(it->second.max, 100);
+  EXPECT_ANY_THROW(run_bw(ln));
 }
 
 // (Goal 1n N3/1t) bare `.[max]`/`.[min]` are not modeled (and `attr_set` of a

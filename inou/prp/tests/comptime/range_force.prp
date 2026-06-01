@@ -44,7 +44,7 @@ cassert(ones == 0sb1111_1111)        // == -1, signed
 // get_mask_op — see [[1b]].)
 const forced = ones#[0..=7]          // low 8 bits of -1, unsigned → 255
 cassert(forced == 255)
-w_ok:u8 = ones#[0..=7]               // fits [0,255] by construction
+mut w_ok:u8 = ones#[0..=7]               // fits [0,255] by construction
 cassert(w_ok == 255)
 
 // The select width is itself range-checked — force is NOT blanket-ignore.

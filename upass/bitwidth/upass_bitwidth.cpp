@@ -2,12 +2,16 @@
 
 #include "upass_bitwidth.hpp"
 
+#include <algorithm>
 #include <bit>
 #include <charconv>
 #include <limits>
+#include <optional>
+#include <stdexcept>
 #include <string>
 #include <string_view>
 #include <system_error>
+#include <vector>
 
 #include "diag.hpp"
 #include "lnast.hpp"
@@ -51,6 +55,62 @@ void uPass_bitwidth::begin_iteration() {
 }
 
 void uPass_bitwidth::end_run() {
+  // ── Goal 1n N4 — overflow capture (centralized in bitwidth) ────────────────
+  // For each declared envelope, if the var's final value range provably escapes
+  // it and the var carries no wrap/sat policy, it is a "does not fit" compile
+  // error. Deferring to end_run (rather than checking at each store) lets a
+  // per-statement `wrap`/`sat` marker emitted AFTER its store still exempt the
+  // var. Semantics mirror the type model: an UNSIGNED envelope only flags a
+  // value provably ABOVE max (a negative value is a legal unsigned reinterpret /
+  // "force", not overflow); a SIGNED envelope is strict containment. Sorted
+  // iteration so the first reported overflow is deterministic.
+  {
+    std::vector<std::string_view> names;
+    names.reserve(decl_envelope_.size());
+    for (const auto& [var, env] : decl_envelope_) {
+      names.emplace_back(var);
+    }
+    std::sort(names.begin(), names.end());
+    for (const auto& var : names) {
+      if (wrap_sat_exempt_.contains(var)) {
+        continue;
+      }
+      // Scalars only: a dotted name is a tuple FIELD (e.g. `ar.y`, or an inlined
+      // `inl1_ar.y`). Per-field envelope checking needs the comp_type_tuple
+      // per-field types and the call-boundary cast semantics (binding an
+      // out-of-range value to a param field is not necessarily an error) — that
+      // is a future refinement (ties to 1t per-field types). Skip dotted names
+      // so a field binding never trips the scalar overflow check.
+      if (var.find('.') != std::string_view::npos) {
+        continue;
+      }
+      auto it = range_map_.find(var);
+      if (it == range_map_.end() || it->second.is_unbounded()) {
+        continue;  // no tracked value / not provable
+      }
+      const Lnast_range& val = it->second;
+      const Lnast_range& env = decl_envelope_.find(var)->second;
+      const bool         is_unsigned_env = !env.is_signed();  // env.min >= 0
+      const bool         over            = is_unsigned_env ? (val.min > env.max) : !env.contains(val);
+      if (over) {
+        auto msg = std::format("`{}` (value {}) does not fit its declared range [{}, {}]", var, val.min, env.min, env.max);
+        // Mirror upass::error: emit the structured diagnostic (so the JSONL /
+        // error-test harness sees it) then throw to abort with a non-zero exit.
+        // category=bitwidth (a source error the user must fix), not internal.
+        livehd::diag::sink().emit(livehd::diag::Diagnostic{
+            .severity = livehd::diag::Severity::error,
+            .code     = "bitwidth-overflow",
+            .category = "bitwidth",
+            .pass     = "upass.bitwidth",
+            .message  = msg,
+            .hint     = "widen the declared type, force the bits with a bit-select (e.g. `x#[0..]`), or "
+                        "apply a wrap/saturate policy",
+        });
+        throw std::runtime_error(msg);
+      }
+    }
+  }
+
   // Flush range_map_ into lnast->bw_meta() so lnast_to_lgraph can read them.
   auto& meta = lm->get_lnast()->bw_meta();
   meta.ranges.clear();
@@ -490,6 +550,81 @@ void uPass_bitwidth::process_set_mask() {
   set_range(lhs, Lnast_range::make_unbounded());
 }
 
+// ── Declared-envelope capture (Goal 1n N4) ───────────────────────────────────
+
+std::optional<Lnast_range> uPass_bitwidth::read_prim_type_int_envelope() {
+  // Cursor is ON the prim_type_int node: children are const(max), const(min).
+  // A "nil" / non-integer / too-wide-for-int64 bound = unbounded side ⇒ no
+  // envelope (we don't range-check against a half-known type today; that's the
+  // exact-Dlop residual, TODO_livehd 1n N3).
+  auto to_i64 = [](const Const& v) -> std::optional<int64_t> {
+    if (!v.is_integer() || v.get_bits() > 62) {
+      return std::nullopt;
+    }
+    return v.to_i();
+  };
+  if (!move_to_child()) {
+    return std::nullopt;
+  }
+  std::optional<int64_t> max_v;
+  std::optional<int64_t> min_v;
+  if (Lnast_ntype::is_const(get_raw_ntype())) {
+    max_v = to_i64(*Dlop::from_pyrope(current_text()));
+  }
+  if (move_to_sibling() && Lnast_ntype::is_const(get_raw_ntype())) {
+    min_v = to_i64(*Dlop::from_pyrope(current_text()));
+  }
+  move_to_parent();
+  if (!max_v || !min_v) {
+    return std::nullopt;
+  }
+  Lnast_range env;
+  env.min       = *min_v;
+  env.max       = *max_v;
+  env.unbounded = false;
+  return env;
+}
+
+void uPass_bitwidth::process_declare() {
+  // declare(ref(var), TYPE, const(mode)). Record the prim_type_int envelope and
+  // note a wrap/sat mode. The init value is a SEPARATE store node, so it is
+  // range-checked later (at end_run, against this envelope).
+  if (!move_to_child()) {
+    return;
+  }
+  std::string var{current_text()};
+  if (!move_to_sibling()) {
+    move_to_parent();
+    return;
+  }
+  if (Lnast_ntype::is_prim_type_int(get_raw_ntype())) {
+    if (auto env = read_prim_type_int_envelope()) {
+      decl_envelope_[var] = *env;
+    }
+  }
+  if (move_to_sibling()) {  // mode const (mut / const / "mut wrap" / …)
+    auto mode = current_text();
+    if (mode.find("wrap") != std::string_view::npos || mode.find("sat") != std::string_view::npos) {
+      wrap_sat_exempt_.insert(var);
+    }
+  }
+  move_to_parent();
+}
+
+void uPass_bitwidth::process_type_spec() {
+  // type_spec(ref(var), TYPE) — same envelope capture as declare, no mode slot.
+  if (!move_to_child()) {
+    return;
+  }
+  std::string var{current_text()};
+  if (move_to_sibling() && Lnast_ntype::is_prim_type_int(get_raw_ntype())) {
+    if (auto env = read_prim_type_int_envelope()) {
+      decl_envelope_[var] = *env;
+    }
+  }
+  move_to_parent();
+}
+
 // ── process_attr_set ─────────────────────────────────────────────────────────
 //
 // LNAST shape (mirrors uPass_attributes::process_attr_set):
@@ -521,10 +656,23 @@ void uPass_bitwidth::process_attr_set() {
   }
   move_to_parent();
 
-  if (target.empty() || attr_name.empty() || !value_is_const) {
+  if (target.empty() || attr_name.empty()) {
     return;
   }
 
+  // Per-statement wrap/sat marker (`attr_set(t,"wrap"|"sat",true)`): exempt the
+  // target from the end_run overflow check — its overflow is intentional
+  // truncation/clamp, not an error.
+  if (attr_name == "wrap" || attr_name == "sat" || attr_name == "saturate") {
+    if (value_text != "false" && value_text != "0") {
+      wrap_sat_exempt_.insert(target);
+    }
+    return;
+  }
+
+  if (!value_is_const) {
+    return;
+  }
   // Parse value text to int64_t (handles dec / 0x / 0b, returns unbounded on
   // unparseable inputs like Pyrope-unknown-bits constants).
   auto val_range = range_from_const_text(value_text);
@@ -533,11 +681,10 @@ void uPass_bitwidth::process_attr_set() {
   }
   int64_t n = val_range.min;
 
-  // Build the bounded envelope implied by this attribute. Only the width
-  // attrs (`ubits`/`sbits`) supply BOTH bounds; under the clean type model a
-  // declared envelope is `prim_type_int(max,min)` and always carries both, so a
-  // lone `max`/`min` attr no longer occurs and is ignored here. Non-bitwidth
-  // attrs (`comptime`, `type`, …) are owned by uPass_attributes.
+  // Build the bounded envelope implied by a width attribute. Only `ubits`/
+  // `sbits` supply BOTH bounds; under the clean type model a declared envelope
+  // is `prim_type_int(max,min)` and carries both, so a lone `max`/`min` attr no
+  // longer occurs and is ignored. Non-width attrs are owned by uPass_attributes.
   Lnast_range narrow;
   narrow.unbounded = false;
   if (attr_name == "ubits") {
@@ -556,38 +703,24 @@ void uPass_bitwidth::process_attr_set() {
     return;  // not a bitwidth-owned width attribute
   }
 
+  // Record the envelope for the uniform end_run overflow check, and narrow the
+  // tracked range when the meet is non-empty. An EMPTY meet is NOT flagged here
+  // — the value is left intact so end_run reports the overflow uniformly with
+  // the declare/type_spec path.
+  decl_envelope_[target] = narrow;
   auto current = read_range(target);
   if (current.is_unbounded()) {
     set_range(target, narrow);
     return;
   }
-
-  // Per-side meet of two bounded ranges (no half-bounded states exist now).
   const int64_t lo = std::max(current.min, narrow.min);
   const int64_t hi = std::min(current.max, narrow.max);
-  if (lo > hi) {
-    // Goal 1n N4: the value provably does not fit the declared envelope. The
-    // range math lives here; the wrap/saturate POLICY lives in uPass_attributes
-    // — once that policy is readable here a `[wrap]`/`[sat]` target will be
-    // exempted. Until then (no policy visible) this is a hard compile error via
-    // the unified diagnostic channel; the original range is left intact so
-    // later passes still see a value.
-    livehd::diag::Diagnostic d;
-    d.severity = livehd::diag::Severity::error;
-    d.code     = "bitwidth-overflow";
-    d.category = "bitwidth";
-    d.pass     = "upass.bitwidth";
-    d.message  = std::format("`{}` does not fit its declared `[{}]` envelope", target, attr_name);
-    d.hint     = "widen the declared type, or apply a wrap/saturate policy";
-    d.see.emplace_back("upass/upass.md §2 \"bitwidth\"");
-    livehd::diag::sink().emit(std::move(d));
-    return;
+  if (lo <= hi) {
+    Lnast_range merged;
+    merged.min       = lo;
+    merged.max       = hi;
+    merged.unbounded = false;
+    // set_range only updates if `merged` is strictly narrower than `current`.
+    set_range(target, merged);
   }
-
-  Lnast_range merged;
-  merged.min       = lo;
-  merged.max       = hi;
-  merged.unbounded = false;
-  // set_range only updates if `merged` is strictly narrower than `current`.
-  set_range(target, merged);
 }

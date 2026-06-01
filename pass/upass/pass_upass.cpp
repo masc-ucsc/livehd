@@ -202,10 +202,14 @@ Pass_upass::Pass_upass(const Eprp_var& var) : Pass("pass.upass", var) {
   if (do_constprop) {
     upass_order.emplace_back("constprop");
   }
-  // Bitwidth is NOT in the main runner order (Goal 1n). It is a standalone,
-  // read-only finalization pass run *after* the runner + SSA — see work() and
-  // upass/upass.md §2 "bitwidth". Record the toggle for that finalization step.
-  run_bitwidth = do_bitwidth;
+  // Bitwidth is the LAST opt pass in the single runner walk (Goal 1n): it has
+  // no fold_ref (decoupled from the iterative const-fold), is read-only (votes
+  // keep), observes every store PRE-DCE so it can capture overflow even on dead
+  // comptime consts, and publishes max/min into bw_meta at end_run for the
+  // future lnast_to_lgraph. See upass/upass.md §2 "bitwidth".
+  if (do_bitwidth) {
+    upass_order.emplace_back("bitwidth");
+  }
   // Coalescer runs after constprop so its handle_op sees an up-to-date
   // runner_fold_fn — the known-const guard skips parking when constprop has
   // already proven the LHS comptime, letting constprop's classify drop fire.
@@ -324,49 +328,6 @@ void Pass_upass::work(Eprp_var& var) {
     auto new_lnasts = runner.take_new_lnasts();
     for (const auto& new_ln : new_lnasts) {
       var.add(new_ln);
-    }
-  }
-
-  // ── Bitwidth finalization (Goal 1n) ──────────────────────────────────────
-  // Standalone, read-only, *after* the runner + SSA. bitwidth is no longer
-  // interleaved in the main runner order and no longer feeds constprop via
-  // fold_ref. It walks each optimized LNAST, derives per-name max/min, and
-  // publishes them into ln->bw_meta() for the future lnast_to_lgraph. The
-  // bitwidth runner's staging tree is discarded: the analysis is read-only
-  // w.r.t. the LNAST body (we never replace_body from it).
-  //
-  // Gated per upass/upass.md §8:
-  //   Gate A — unresolved pending_import: defer the whole finalization. The
-  //            pending-import poison machinery is not landed yet (TODO_livehd
-  //            1n / upass.md §11 step 7), so this gate is a no-op today.
-  //   Gate B — generic (untyped-input) function body: skip. It is realized only
-  //            by inlining into a caller, where the concretely-typed copy is
-  //            range-analyzed. Detected via io_meta inputs with bits==0.
-  if (up.run_bitwidth) {
-    for (std::size_t idx = 0; idx < var.lnasts.size(); ++idx) {
-      const auto ln = var.lnasts.at(idx);
-
-      // Gate B: skip generic function bodies (any untyped input).
-      const bool is_function_body = idx >= original_lnast_count;
-      if (is_function_body) {
-        bool generic = false;
-        for (const auto& in : ln->io_meta().inputs) {
-          if (in.bits == 0) {
-            generic = true;
-            break;
-          }
-        }
-        if (generic) {
-          continue;
-        }
-      }
-
-      auto lm        = std::make_shared<upass::Lnast_manager>(ln);
-      auto bw_runner = uPass_runner(lm, {"bitwidth"}, up.pass_options);
-      if (bw_runner.has_configuration_error()) {
-        fail_upass_runtime(std::format("pass.upass invalid bitwidth configuration: {}", bw_runner.get_configuration_error()));
-      }
-      bw_runner.run();  // populates ln->bw_meta(); staging discarded (read-only)
     }
   }
 

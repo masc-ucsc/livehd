@@ -263,38 +263,48 @@ static bool declare_mode_is_const_storage(std::string_view mode) {
   return tok == "const";
 }
 
-// A `const`-storage variable may be `declare`d only once per lexical scope (one
-// `stmts` block). `mut`/`reg` redeclares are legal — they reset the binding
-// (e.g. `mut counter = 1` appearing before each loop in matrix.prp) — and nested
-// scopes (if/for/while/func_def bodies) each get a fresh frame so an inner
-// declare may shadow an outer one (scope_simple.prp). The check runs on the live
-// tree (constprop has already pruned dead branches), so only reachable
-// redeclares are seen — a `const x` in a then-branch and a separate `const x` in
-// the else-branch live in distinct frames and are not flagged.
-static void check_declare_once(const Lnast* ln, const Lnast_nid& scope_stmts) {
-  std::unordered_set<std::string> const_here;
+// Declare-once + no-shadowing on the live (post-constprop) tree. A `declare`
+// colliding with the current frame is a redeclaration; with an enclosing frame
+// is shadowing. Sibling frames are independent; a function body is a fresh
+// namespace (outer locals are not visible inside a comb — the Pyrope closure
+// rule).
+//
+// NOTE: assign-before-declare (`a = 3` with no prior declaration) is NOT checked
+// here. Post-upass the tree carries inliner/SSA-synthesized stores with no
+// matching declare (e.g. `inl262_v`), which would false-positive; that check
+// runs PRE-upass on the producer tree (see Prp2lnast::check_undeclared_writes).
+static void check_scope(const Lnast* ln, const Lnast_nid& scope_stmts,
+                        const std::unordered_set<std::string>& visible) {
+  std::unordered_set<std::string> here;
   for (auto c = ln->get_first_child(scope_stmts); !c.is_invalid(); c = ln->get_sibling_next(c)) {
-    if (Lnast_ntype::is_declare(ln->get_type(c))) {
+    const auto ct = ln->get_type(c);
+    if (Lnast_ntype::is_declare(ct)) {
       auto c0 = ln->get_first_child(c);
-      auto c1 = c0.is_invalid() ? c0 : ln->get_sibling_next(c0);
-      auto c2 = c1.is_invalid() ? c1 : ln->get_sibling_next(c1);
-      if (!c0.is_invalid() && !c2.is_invalid() && Lnast_ntype::is_ref(ln->get_type(c0))
-          && Lnast_ntype::is_const(ln->get_type(c2)) && declare_mode_is_const_storage(ln->get_name(c2))) {
+      if (!c0.is_invalid() && Lnast_ntype::is_ref(ln->get_type(c0))) {
         auto name = std::string(ln->get_name(c0));
-        if (const_here.contains(name)) {
-          Pass::error("lnastfmt: {} redeclaration of `const` variable '{}' in the same scope (a const may be declared only once)",
-                      node_loc(ln, c),
-                      name);
+        if (here.contains(name)) {
+          Pass::error("lnastfmt: {} redeclaration of variable '{}' in the same scope (declare it only once)",
+                      node_loc(ln, c), name);
           return;
         }
-        const_here.insert(name);
+        if (visible.contains(name)) {
+          Pass::error("lnastfmt: {} declaration of '{}' shadows an outer-scope variable (variable shadowing is not allowed)",
+                      node_loc(ln, c), name);
+          return;
+        }
+        here.insert(name);
       }
     }
-    // Recurse into nested scopes: any `stmts` child of a control-flow statement
-    // (if/for/while/func_def) starts a fresh frame.
+    const bool is_func_body = Lnast_ntype::is_func_def(ct);
     for (auto cc = ln->get_first_child(c); !cc.is_invalid(); cc = ln->get_sibling_next(cc)) {
       if (Lnast_ntype::is_stmts(ln->get_type(cc))) {
-        check_declare_once(ln, cc);
+        if (is_func_body) {
+          check_scope(ln, cc, {});
+        } else {
+          std::unordered_set<std::string> combined = visible;
+          combined.insert(here.begin(), here.end());
+          check_scope(ln, cc, combined);
+        }
       }
     }
   }
@@ -609,11 +619,11 @@ void Pass_lnastfmt::validate(const Lnast* ln) {
 
   check_unwritten_tmps(ln);
 
-  // Task 1t — declare-once: a `const` variable cannot be redeclared in the same
-  // scope. Walk each top-level `stmts` block; nested scopes recurse.
+  // Declare-once + no-shadowing + assign-before-declare. Walk each top-level
+  // `stmts` block; nested scopes recurse with the enclosing visible names.
   for (auto c = ln->get_first_child(ln->get_root()); !c.is_invalid(); c = ln->get_sibling_next(c)) {
     if (Lnast_ntype::is_stmts(ln->get_type(c))) {
-      check_declare_once(ln, c);
+      check_scope(ln, c, {});
     }
   }
 }

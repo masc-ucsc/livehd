@@ -23,6 +23,7 @@ mut (v = deep.payload.inner.value) = deep(a = 10)
 cassert(v == 11)
 
 // Rebind without `mut`, this time keeping two deep fields and dropping `code`.
+mut tg = nil   // `tg` is new here; declare it (v was declared above)
 (v = deep.payload.inner.value, tg = deep.payload.inner.tag) = deep(a = 20)
 cassert(v == 21 and tg == 22)
 
