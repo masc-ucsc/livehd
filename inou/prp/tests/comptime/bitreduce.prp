@@ -34,11 +34,11 @@ cassert(value  == 0ub1010_0100) // bit 3 was cleared above
 cassert(sparse  == 0ub100)     // bit 7 of value is 1, bit 3 is 0, bit 0 is 0
 cassert(rparse  == 0ub001)     // bits placed in reverse order
 cassert(pop_count == 3)
-cassert(or_reduce  == -1)       // any bit set
-cassert(and_reduce ==  0)       // sign bit (MSB) is 0
+cassert(or_reduce  == true)     // any bit set (reductions are boolean)
+cassert(and_reduce == false)    // sign bit (MSB) is 0
 cassert(xor_reduce == ((0^ 1^0^0^ 1^0^ 1^0^0)!=0))
 //cputs("bit_red1:{0^ 1^0^0^ 1^0^ 1^0^0}")
 //cputs("bit_red1:{(0^ 1^0^0^ 1^0^ 1^0^0)!=0}")
 //cputs("bit_red2:{0^-1^0^0^-1^0^-1^0^0}")
 //cputs("bit_red3:{xor_reduce}")
-cassert(xor_reduce ==  0^-1^0^0^-1^0^-1^0^0)
+cassert(xor_reduce == true)     // parity of 0ub1010_0100 (three 1s) is odd

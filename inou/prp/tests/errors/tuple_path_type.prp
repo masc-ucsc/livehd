@@ -1,0 +1,16 @@
+/*
+:name: tuple_path_type
+:type: error
+:error: cannot type-annotate a tuple-path
+:help: annotate the field
+*/
+
+// A path-rooted lvalue (`a.b`) cannot carry a type cast: the field type is
+// fixed where the base tuple is declared, not re-annotated through a later
+// write. Annotate the field at the base's declaration instead.
+// Doc: ../docs/docs/pyrope/04-variables.md — tuple field name/types are
+// immutable and introduced with the tuple literal (kind keyword + type), so a
+// `a.b:u3 = ...` write has nowhere to attach the type.
+
+mut a = (b = 1)
+a.b:u3 = 2   // locate_error_here

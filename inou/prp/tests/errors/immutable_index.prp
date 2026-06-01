@@ -1,0 +1,15 @@
+/*
+:name: immutable_index
+:type: error
+:error: rebind
+*/
+
+// Writing an element of a `const` tuple is a compile error: the whole binding
+// is immutable, so the indexed write counts as a second assignment to `x`.
+// Doc: ../docs/docs/pyrope/03-bundle.md  `x[0] = 3 // error: 'x' is immutable`
+// Emitted: "uPass_attributes: const `x` rebind (assigned 2 times)".
+// (No line marker: this upass diagnostic currently carries no source span —
+//  same as reassign_const.)
+
+const x = (1, 2)
+x[0] = 3

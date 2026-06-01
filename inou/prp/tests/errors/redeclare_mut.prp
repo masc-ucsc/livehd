@@ -1,0 +1,12 @@
+/*
+:name: redeclare_mut
+:type: error
+:error: redeclaration
+*/
+
+// Declaring the same variable twice in one scope is a compile error (any kind).
+// Doc: ../docs/docs/pyrope/02-basics.md  `mut d = "bar" // error: 'd' already declared`
+// To reset a `mut`, reassign (`d = 2`) instead of re-declaring.
+
+mut d = 1
+mut d = 2

@@ -1,0 +1,11 @@
+/*
+:name: typecheck_eq_bool_int
+:type: error
+:error: same type
+*/
+
+// `==` between a bool and an int is a type error (bool is NOT an int). Compare
+// to a bool literal (`b == true`) or cast (`int(b) == 1`).
+
+mut b:bool = true
+mut c = b == 1

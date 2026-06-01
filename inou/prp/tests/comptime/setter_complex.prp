@@ -9,7 +9,7 @@ const fint:int = 0
 cassert(fint == 0)
 
 mut fbool:bool = false
-cassert(fbool == 0)
+cassert(fbool == false)
 
 comb set_empty(ref self) {
   cassert(self.v == "")

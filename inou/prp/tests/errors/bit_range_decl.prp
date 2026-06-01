@@ -1,0 +1,14 @@
+/*
+:name: bit_range_decl
+:type: error
+:error: cannot declare a bit-range
+:help: declare the base
+*/
+
+// A bit-range lvalue cannot carry a declaration: there is no syntax for
+// "declare a new variable through a bit slice". Declare the base first, then
+// write the slice (`mut a:u8 = 0; a#[0] = 1`).
+// Doc: ../docs/docs/pyrope/04b-attributes.md (bit-select writes) — the base
+// carries the declaration/type, never the `#[..]` slice.
+
+mut a#[0] = 1   // locate_error_here

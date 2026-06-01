@@ -1,0 +1,12 @@
+/*
+:name: typecheck_bool_int_bitwise
+:type: error
+:error: operator `\^` requires integer operands
+*/
+
+// bool and int do NOT interoperate (zero implicit conversions). A boolean
+// operand in a bitwise op is a type error — write `int(true) ^ 1`.
+// Doc: ../docs/docs/pyrope/04-variables.md "logical and arithmetic … can not mix".
+
+mut b = true
+mut x = b ^ 1

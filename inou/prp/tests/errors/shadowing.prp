@@ -1,0 +1,15 @@
+/*
+:name: shadowing
+:type: error
+:error: shadow
+*/
+
+// Declaring a variable that shadows an outer-scope variable is a compile error.
+// Doc: ../docs/docs/pyrope/04-variables.md  `const a = 3333 // error: variable shadowing`
+// (A function body is a fresh namespace, so this only applies within one
+//  scope chain — a comb's local may reuse a top-level name.)
+
+mut x = 1
+if x == 1 {
+  mut x = 2
+}

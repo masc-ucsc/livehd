@@ -1,0 +1,11 @@
+/*
+:name: overflow_unsigned
+:type: error
+:error: does not fit
+*/
+
+// Unsigned positive overflow. A negative literal to an unsigned type is a legal
+// reinterpret ("force"), but a positive comptime value above the declared max
+// is an overflow — now captured by upass.bitwidth (100 does not fit u3 [0, 7]).
+
+const c:u3 = 100

@@ -1,0 +1,13 @@
+/*
+:name: typecheck_cond_not_bool
+:type: error
+:error: condition must be boolean
+*/
+
+// An `if`/`while`/`when` condition must be boolean — no implicit int->bool.
+// Doc: skills gotcha "`if 5 { ... }` is a type error. Write `if 5 != 0`".
+
+mut x = 5
+if x {
+  mut z = 1
+}

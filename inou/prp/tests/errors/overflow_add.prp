@@ -1,0 +1,16 @@
+/*
+:name: overflow_add
+:type: error
+:error: does not fit
+*/
+
+// An addition whose comptime-known result exceeds the destination type is a
+// compile error unless narrowed with `wrap`/`sat`. Here c==31 (u5 max), so
+// c + 1 == 32 does not fit d's u5 range [0, 31]. upass.bitwidth tracks the
+// folded value of the sum and reports the overflow.
+// Doc: ../docs/docs/pyrope/04b-attributes.md  `d = c + 1 // error: '32'
+// overflows the maximum value of 'd'` (the `wrap d = c+1` / `sat d = c+1`
+// forms are the documented fixes).
+
+const c:u5 = 31
+const d:u5 = c + 1

@@ -1,0 +1,17 @@
+/*
+:name: tuple_path_decl
+:type: error
+:error: cannot declare a tuple-path
+:help: declare the base tuple
+*/
+
+// A path-rooted lvalue (`t.c`) cannot carry a declaration: Pyrope has no syntax
+// for "declare a new field through a path". Declare the base tuple with the
+// field instead. Without this check the decl would be silently dropped and a
+// misleading `tuple_set` emitted.
+// Doc: ../docs/docs/pyrope/04-variables.md  `const r3 = (a = 1) // error: tuple
+// field missing kind keyword` — fields are introduced at the tuple literal, not
+// through a later `mut t.field = ...`.
+
+mut t = (b = 1)
+mut t.c = 2   // locate_error_here

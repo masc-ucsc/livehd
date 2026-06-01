@@ -1,0 +1,10 @@
+/*
+:name: assign_no_decl
+:type: error
+:error: undeclared variable 'a'
+*/
+
+// Assigning to a name with no prior `mut`/`const`/declare is a compile error.
+// Doc: ../docs/docs/pyrope/02-basics.md  `a = 3 // error: no previous const or mut`
+
+a = 3

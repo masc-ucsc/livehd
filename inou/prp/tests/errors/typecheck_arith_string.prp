@@ -1,0 +1,11 @@
+/*
+:name: typecheck_arith_string
+:type: error
+:error: operator `\+` requires integer operands
+*/
+
+// Arithmetic requires integer operands; a string operand is a type error
+// (no implicit conversion). `++` is the string/tuple concat operator, not `+`.
+
+mut s:string = "hi"
+mut x = s + 1

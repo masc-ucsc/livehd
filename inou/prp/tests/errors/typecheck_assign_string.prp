@@ -1,0 +1,11 @@
+/*
+:name: typecheck_assign_string
+:type: error
+:error: cannot assign
+*/
+
+// Assigning an integer to an explicitly string-typed variable is an
+// implicit-conversion error (zero implicit conversions). Cast with `string(..)`.
+
+mut s:string = "x"
+s = 3

@@ -1,0 +1,20 @@
+/*
+:name: overflow_unroll
+:type: error
+:error: does not fit
+*/
+
+// Accumulation that overflows a small unsigned type. This is the body a
+// `for i in 0..<4 { acc = acc + 5 }` loop unrolls to (loops are unrolled
+// before bitwidth). upass.bitwidth tracks acc's range climbing across the
+// unrolled stores to 20, which does not fit u4 [0, 15].
+//
+// (The `for` sugar itself is written out by hand here: the loop iter-var
+// currently trips a pre-existing declare-once validator issue — the same one
+// behind the bitreverse failure — unrelated to this overflow check.)
+
+mut acc:u4 = 0
+acc = acc + 5
+acc = acc + 5
+acc = acc + 5
+acc = acc + 5

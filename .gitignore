@@ -43,3 +43,4 @@ livehd_regression
 pp*
 .sdd/runtime/
 diag.jsonl
+diag*.jsonl

@@ -1,0 +1,12 @@
+/*
+:name: redeclare_const
+:type: error
+:error: redeclaration
+*/
+
+// Declaring the same `const` twice in one scope is a compile error.
+// Doc: ../docs/docs/pyrope/02-basics.md  `Foo = 33 // error: already declared`
+// Emitted (lnastfmt): "redeclaration of `const` variable 'd' in the same scope".
+
+const d = 1
+const d = 2

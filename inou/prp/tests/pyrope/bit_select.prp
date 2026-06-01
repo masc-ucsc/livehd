@@ -15,14 +15,16 @@ const y5 = x#^[0..=3]
 cassert(y1 == 0)
 cassert(y2 == 0x78)
 
-cassert(y3 == (true ^ true ^ 0 ^ 0))
-cassert(y3 == (1 ^ 1 ^ 0 ^ 0))
+// reductions are boolean; bitwise `^`/`|` need integer operands (no bool/int
+// mix), so cast with `int(true)` and turn the integer back into a bool with `!=0`.
+cassert(y3 == ((int(true) ^ int(true) ^ 0 ^ 0) != 0))
+cassert(y3 == ((1 ^ 1 ^ 0 ^ 0) != 0))
 cassert(y3 == (1 ^ 1 ^ 0 ^ 0)#[0])
 
-cassert(y4 == (true | 0 | 0 | 0))
+cassert(y4 == ((int(true) | 0 | 0 | 0) != 0))
 
-cassert(y5 == (true ^ 0 ^ 0 ^ 0))
-cassert(y5 != (1 ^ 0 ^ 0 ^ 0))      // WEIRD, but -1 != 1
+cassert(y5 == ((int(true) ^ 0 ^ 0 ^ 0) != 0))
+cassert(y5 != y3)                   // the two reductions differ (true != false)
 cassert(y5 == (1 ^ 0 ^ 0 ^ 0)#[0])
 
 cassert(false)

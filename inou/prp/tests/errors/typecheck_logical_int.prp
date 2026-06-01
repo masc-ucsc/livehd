@@ -1,0 +1,13 @@
+/*
+:name: typecheck_logical_int
+:type: error
+:error: requires boolean operands
+*/
+
+// Logical `and`/`or`/`not` require boolean operands — no implicit int->bool.
+// Doc: ../docs/docs/pyrope/04-variables.md `c or false // error: 'c' is not a boolean`.
+// Fix: write `(a != 0) and (b != 0)`.
+
+mut a = 3
+mut b = 4
+mut c = a and b

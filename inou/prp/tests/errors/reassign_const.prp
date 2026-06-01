@@ -1,0 +1,13 @@
+/*
+:name: reassign_const
+:type: error
+:error: rebind
+*/
+
+// Reassigning a `const` is a compile error (immutability).
+// Doc: ../docs/docs/pyrope/02-basics.md  `d = "bar" // error: 'd' is immutable`
+// Emitted: "uPass_attributes: const `d` rebind (assigned 2 times)".
+// (No line marker: this upass diagnostic currently carries no source span.)
+
+const d = "foo"
+d = "bar"

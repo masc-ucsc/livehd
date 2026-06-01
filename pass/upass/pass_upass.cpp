@@ -18,6 +18,7 @@
 #include "upass_constprop.hpp"
 #include "upass_runner.hpp"
 #include "upass_ssa.hpp"
+#include "upass_typecheck.hpp"  // NOLINT: ensures plugin "typecheck" is linked
 #include "upass_verifier.hpp"
 
 static Pass_plugin sample("pass.upass", Pass_upass::setup);
@@ -85,6 +86,7 @@ void Pass_upass::setup() {
                         "true");
   m1.add_label_optional("assert", "enable assert test", "true");
   m1.add_label_optional("func_extract", "enable func_extract upass (spawn helper lnasts for comb func_defs)", "true");
+  m1.add_label_optional("typecheck", "enable typecheck upass (kind/operator/nil checks; runs after attributes)", "true");
   m1.add_label_optional(
       "order",
       "comma-separated upass names; overrides verifier/constprop/assert toggles (example: verifier,constprop,verifier)",
@@ -171,6 +173,9 @@ Pass_upass::Pass_upass(const Eprp_var& var) : Pass("pass.upass", var) {
   auto func_extract_txt = get_label("func_extract");
   bool do_func_extract  = func_extract_txt != "false" && func_extract_txt != "0";
 
+  auto typecheck_txt = get_label("typecheck");
+  bool do_typecheck  = typecheck_txt != "false" && typecheck_txt != "0";
+
   // The assert pass declares depends_on={"constprop"}, so the runner's
   // resolve_order will silently pull constprop back in if assert is enabled
   // — even when the user explicitly passed constprop:0. Honor the explicit
@@ -197,6 +202,13 @@ Pass_upass::Pass_upass(const Eprp_var& var) : Pass("pass.upass", var) {
   // they share the same `attributes` plugin and are toggled internally.
   if (do_attrs) {
     upass_order.emplace_back("attributes");
+  }
+
+  // typecheck (kind-only) runs after attributes (declared kinds available) and
+  // before constprop (sees original ops + dead branches; fails fast on a type
+  // error before the value passes do work).
+  if (do_typecheck) {
+    upass_order.emplace_back("typecheck");
   }
 
   if (do_constprop) {

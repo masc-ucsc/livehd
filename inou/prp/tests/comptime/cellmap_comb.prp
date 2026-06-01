@@ -80,12 +80,12 @@ cassert(  __xor(a=(0x55, 0xaa)) == 0xff)
 // Ntype_op::Ror (reduce OR) -- single input pin a
 comb cell_ror(a:u8) -> (y) { y = a#|[..] }
 
-cassert(cell_ror(0) == 0)
-cassert(  __ror(a=0) == 0)
-cassert(cell_ror(0ub0001) == -1)
-cassert(  __ror(a=0ub0001) == -1)
-cassert(cell_ror(0xff) == -1)
-cassert(  __ror(a=0xff) == -1)
+cassert(cell_ror(0) == false)
+cassert(  __ror(a=0) == false)
+cassert(cell_ror(0ub0001) == true)
+cassert(  __ror(a=0ub0001) == true)
+cassert(cell_ror(0xff) == true)
+cassert(  __ror(a=0xff) == true)
 
 // Ntype_op::Not (bitwise) -- single input pin a. Every dlop/cell const is a
 // signed integer (no unsigned const), so `~a == -a-1` with no implicit width

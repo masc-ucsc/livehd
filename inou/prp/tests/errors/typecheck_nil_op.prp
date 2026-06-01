@@ -1,0 +1,11 @@
+/*
+:name: typecheck_nil_op
+:type: error
+:error: `nil` is invalid
+*/
+
+// Any operation on `nil` (other than copy / ==nil / !=nil / .[valid]) is a
+// compile error. Doc: ../docs/docs/pyrope/02-basics.md `nil | 1 // error: nil
+// is invalid, not unknown` (contrast `0sb? | 1 == 1`, which is legal).
+
+mut x = nil | 1

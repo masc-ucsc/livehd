@@ -1,0 +1,19 @@
+/*
+:name: bit_range_index
+:type: error
+:error: tuple/comma indices not supported
+:help: single index
+*/
+
+// `#[...]` admits exactly one index or one range — a comma/tuple index like
+// `#[1,4]` is not valid. tree-sitter error-recovers it silently (keeping only
+// the first expression), so prp2lnast flags the parse error rather than
+// emitting a wrong single-bit mask.
+// Doc: skills gotcha "Tuple/comma indices like #[1,4] aren't accepted by the
+// grammar". For a multi-bit mask, OR single selects or use a range `#[0..=3]`.
+// (The pre-existing unbalance.prp also contains `#[1,4]`, but there the error
+//  is shadowed by an earlier unbalanced `)`; this is the first standalone test
+//  of the bit-range-index diagnostic.)
+
+mut a:u8 = 0
+a#[1,4] = 1   // locate_error_here

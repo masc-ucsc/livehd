@@ -254,7 +254,8 @@ cross-file dependencies stay visible.
   - **Overflow = compile error only when provable.** Typed target: error iff the
     result range *provably* exceeds the declared envelope AND the write carries no
     `wrap`/`sat` policy; unknown/unbounded into a typed target is **not** an error
-    (the declared type is the width). Via `core/diag` ([[1z]]): stable `code`,
+    (the declared type is the width). Via `core/diag` (diagnostics foundation,
+    landed): stable `code`,
     `category=source`, source span, collect-and-continue.
   - **Gated finalization** (`upass/upass.md` §8): **Gate A** — skip *all*
     finalization (SSA rename/flatten + bitwidth + readers + lower) for the whole
@@ -291,7 +292,7 @@ cross-file dependencies stay visible.
   complete before bitwidth, on the tree `lnast_to_lgraph` consumes".)
 
   **Depends on** [[1t]] (`prim_type_int(max,min)` envelope — structural done),
-  [[1z]] (diagnostics surface — foundation done), the comb inliner (1i — landed)
+  the `core/diag` diagnostics surface (foundation landed), the comb inliner (1i — landed)
   for Gate B, and the pending-import poison (migration step 7) for Gate A.
   **Untouched:** `pass/bitwidth` (the LGraph-level MIT pass) stays as the
   Verilog-ingress fallback — different path, only shares the name (see [[1g]]
@@ -340,7 +341,8 @@ cross-file dependencies stay visible.
     `asan` block (`-fsanitize=memory -fsanitize-memory-track-origins=2
     -fno-omit-frame-pointer`); build `--config=msan //main:lgshell` and run the
     loop above. Origins tracking should point straight at the uninitialized
-    field. Relates to [[1z]] (the error-handling path is half the WIP) and the
+    field. Relates to the `core/diag` diagnostics foundation (landed; the
+    error-handling path is half the WIP) and the
     `prp2lnast` frontend.
 
 ## Group 1-complex — foundation, larger scope
@@ -355,74 +357,7 @@ Group 1 entries; downstream Groups treat them as Group 1 dependencies.
 - **1f** Source-map indirection (LOC propagation: canonical map + per-cell
   index, alias multi-loc, partition-root fallback) — see "Source location
   (LOC) propagation strategy" below and `docs/contracts/sourcemap.md`.
-- **1z** Error-notification foundation: a unified diagnostic surface emitting
-  one JSONL record per compile error/warning, plus a `text` renderer/filter.
-  **Goal 1.** Full design in
-  [`docs/contracts/diagnostics.md`](docs/contracts/diagnostics.md). Pulled
-  forward from **3f** because it is decoupled from sourcemap — diagnostics ship
-  now with `span: null` (or best-effort tree-sitter byte ranges in `inou/prp`)
-  and get full-fidelity spans when [[1f]] lands (that's what **3f** finishes).
-  - **Why now.** Errors today are throw-and-die with a bare string
-    (`Pass::error`→`Eprp::parser_error` `pass/common/pass.hpp:39`;
-    `upass::error` `[[noreturn]]` throw, ~24 sites; `inou/prp` `Pass::error` ×7)
-    — no severity, no class, no location, no collect-and-continue, nothing an
-    agent can parse. The only piece blocked on [[1f]] is the `span` field.
-  - **Scope (this entry).**
-    1. ✅ **LANDED 2026-05-30.** `livehd::diag` — `Severity`/`Span`/`Diagnostic`/
-       `Sink` + JSONL serializer + active-sink plumbing (`core/diag.{hpp,cpp}`,
-       joins the `//core` glob so every consumer reaches it with no BUILD churn).
-       **Output (env `LIVEHD_DIAG`, pre-CLI):** unset/`both` → stderr human **+**
-       `diag.jsonl` (default); `jsonl` → file only; `stderr`/`-` → human only;
-       `off` → silent; `<path>` → both with custom file. Truncated per process,
-       flushed per record (crash-safe). Sink dedups `(code,span,message)` per
-       step. Unit test `core/tests/diag_test.cpp` green.
-    2. ✅ **LANDED.** `Pass::error`/`Pass::warn` (`pass/common/pass.hpp`) +
-       `upass::error` (`upass/core/upass_utils.hpp`) now `emit` a structured
-       record before the **unchanged** throw/print (exact prior behavior kept;
-       `category:internal`, spans `null`). Validated via `eprp_test`,
-       `upass_constprop_test`, `upass_bitwidth_test`, `upass_verifier_test`.
-    3. ✅ **LANDED 2026-05-31** (at the highest-value sites). `Prp2lnast::
-       report_error(TSNode, code, category, msg, hint)` builds a real `Span`
-       (file + byte + line/col) from the offending tree-sitter node; a node-less
-       overload covers defensive sites. Long tail (other passes) still `null`.
-    4. ✅ **LANDED.** `to_text` renderer (clang/rust-style; degrades to one line
-       when `span` is null). `--format text` CLI wiring is part of [[1y]]; a
-       JSONL→text *read-side* filter needs a JSON parser → deferred to 1y/3f.
-       (For now `jq` renders the JSONL — see demo below.)
-    5. ✅ **LANDED 2026-05-31** for the unambiguous `inou/prp` rejection sites:
-       `bit-range-index`/`bit-range-empty` (`category:syntax`),
-       `bit-range-decl`/`tuple-path-decl` (`name`),
-       `bit-range-type`/`tuple-path-type` (`type`) — each with a span + hint.
-       The rich-emit path (`report_error` / `diag::sink().emit`) is the template
-       for migrating the remaining sites incrementally.
-    6. ✅ **LANDED 2026-05-31 — root parse-error check.** `Prp2lnast::
-       check_parse_errors()` (called in the ctor right after `ts_tree_root_node`,
-       before `process_description`) finds the first **MISSING** node (a token
-       the parser inserted to recover, e.g. an unbalanced `)`) and reports
-       `code:missing-token, category:syntax` with its span, then aborts — so a
-       file that does not parse is no longer silently analyzed. **MISSING-only is
-       deliberate:** the tree-sitter-pyrope grammar emits `ERROR` nodes for *valid*
-       `uint`/`sint` constructs, so a broad `ERROR` check would break ~40 passing
-       tests; `MISSING` is quirk-free (verified: 0 passing tests carry MISSING
-       nodes). Broad non-quirk-`ERROR` detection (the discriminator = "ERROR with
-       a `uint_type`/`sint_type` child is the quirk") is the remaining gap — best
-       done after the grammar is fixed in `../tree-sitter-pyrope` so `ERROR` is
-       unambiguous; until then specific handlers (bit-range) cover their cases.
-  - **Status (2026-05-31): foundation + prp syntax/name/type diagnostics DONE;
-    suite green at 249 pass / 8 fail (= prior 248 baseline + `diag_test`, same 8
-    pre-existing fails, zero new); NOT git-committed.** The earlier `pass/bitwidth`
-    /`Dlop::shl_op` blocker is resolved ([[1g]] progressed), so `lgshell` builds
-    and the end-to-end demo works:
-    ```
-    $ printf 'comb foo()->(z){\n b=0x5a\n z=b#[1,4]\n}\n' > /tmp/x.prp
-    $ LIVEHD_DIAG=stderr lgshell "inou.prp files:/tmp/x.prp |> lnast.dump"
-    {"schema_version":1,"severity":"error","code":"bit-range-index","category":"syntax",
-     "pass":"inou.prp","message":"invalid bit-range index `[1,4]` …","span":{"file":"/tmp/x.prp",
-     "start_byte":39,"end_byte":44,"start_line":3,"start_col":9,…},"hint":"…","seq":0}
-    ```
-  - **Relationship.** Foundation for **3f** (full-fidelity spans via [[1f]] +
-    lgraph-pass coverage + CLI roll-up) and **4h** (golden-error harness keys on
-    the stable `code`/`category`); the CLI [[1y]] consumes the JSONL.
+
 ## Group 2 — depends on Group 1
 
 - **2t** Finish removing `Dlop`/`Slop` `is_i()`/`to_i()` from the value layer
@@ -479,9 +414,10 @@ Group 1 entries; downstream Groups treat them as Group 1 dependencies.
 - **3d** New upass `lnast_to_slop` (parallel to `lnast_to_lgraph`) producing
   executable slop.
 - **3f** Unified compile error/warning surface from `inou/prp`, upass,
-  lgraph passes (+ tests for expected diagnostics). **Foundation landed in
-  [[1z]]** (record schema + emitter + sink + JSONL + text renderer, spans
-  `null`); this entry finishes full-fidelity `source_id` spans (via [[1f]]),
+  lgraph passes (+ tests for expected diagnostics). **Foundation landed** (the
+  former 1z `core/diag` task: record schema + emitter + sink + JSONL + text
+  renderer, spans `null`); this entry finishes full-fidelity `source_id` spans
+  (via [[1f]]),
   lgraph-pass coverage, line/col resolution, and the CLI roll-up. Design:
   `docs/contracts/diagnostics.md`.
 - **3h** `Bitwidth_range` → `Const min/max` (drop `int+overflow`) once Dlop
