@@ -1,0 +1,14 @@
+/*
+:name: mixed_precedence
+:type: error
+:error: parenth|precedence|mixed
+*/
+
+// Mixed arithmetic and bitwise precedence must be explicit.
+// Doc: ../docs/docs/pyrope/04-variables.md `b = 3 & 4 * 4 // error: use parenthesis`
+
+mut a = 1
+mut b = 2
+mut c = 3
+mut d = 4
+mut x = a * b + c & d // locate_error_here

@@ -1,0 +1,13 @@
+/*
+:name: fcall_arg_unnamed_wrong_var_names
+:type: error
+:error: named|ambiguous|argument|parameter
+*/
+
+// Bare variables can omit argument names only when the variable names match the
+// formal parameter names. Otherwise same-type arguments are ambiguous.
+
+comb diff(a, b) -> (r) { r = a - b }
+const x = 5
+const y = 3
+cassert(diff(x, y) == 2) // locate_error_here

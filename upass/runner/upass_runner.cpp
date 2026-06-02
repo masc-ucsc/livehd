@@ -1,5 +1,54 @@
 //  This file is distributed under the BSD 3-Clause License. See LICENSE for details.
 
+// ── Design note: dead-code elimination & (future) demand-driven emit ─────────
+//
+// The post-walk DCE below (dead_code_eliminate_staging) is textbook aggressive
+// dead-code elimination on SSA: mark live from a fixed set of roots, sweep the
+// rest. Roots are the nodes that cannot be dropped or reordered away — function
+// IO (declared at the function boundary, not via variable writes), side-effecting
+// statements (cassert always; cputs/func_call unless their dst const-folds), and
+// state elements (attr_set type='reg'|'mut'). Everything else — every pure value
+// def, named or temporary — is dead unless transitively demanded by a root.
+//
+// The intended evolution is to compute that liveness *demand-first* instead of
+// mark-then-sweep, and to materialize each pure def lazily at its use site
+// (folding to a const when possible, else copying the node from the source
+// tree). That merges constprop's emit, the const-at-use fold, and this DCE into
+// one pass and yields free sinking. In compiler terms this is late scheduling of
+// a sea-of-nodes: "roots" are pinned nodes, pure value defs float and are
+// scheduled near their uses, and an unscheduled (undemanded) node is simply
+// never emitted. Place a floated def at the dominator-tree LCA of all its uses
+// (then sink as deep as legal) — NOT at the textual first use, which is wrong for
+// a value consumed in multiple branches.
+//
+// Why total reorder is safe here: our side effects are clean. There are no
+// memory references or aliasing, so every read-after-write dependence is visible
+// through SSA names (upass/ssa renames mut writes apart). That is what licenses
+// free code motion of pure defs. CAUTION: when arrays land, an array index
+// reintroduces alias/ordering that resembles a memory access — write a[i] vs read
+// a[j] cannot be reordered without proving i != j. Treat aliasing array ops as
+// pinned/ordered and revisit this assumption before relying on total reorder for
+// array-bearing code.
+//
+// References:
+//   Click & Paleczny, "A Simple Graph-Based Intermediate Representation"
+//     (sea of nodes), ACM SIGPLAN Workshop on IR (IR'95).
+//   Click, "Global Code Motion / Global Value Numbering", PLDI'95 (schedule
+//     floating nodes at the dominator LCA of uses, then sink out of loops).
+//   Knoop, Rüthing & Steffen, "Partial Dead Code Elimination", PLDI'94 (sink
+//     assignments toward uses; eliminate on paths that never use them).
+//   Knoop, Rüthing & Steffen, "Lazy Code Motion", PLDI'92 (as-late-as-possible
+//     placement machinery).
+//   Cytron, Ferrante, Rosen, Wegman & Zadeck, "Efficiently Computing SSA Form
+//     and the Control Dependence Graph", ACM TOPLAS 1991 (SSA + basis for SSA DCE).
+//   Wegman & Zadeck, "Constant Propagation with Conditional Branches" (SCCP),
+//     ACM TOPLAS 1991 (const-fold lattice paired with the DCE sweep).
+//   Weise, Crew, Ernst & Steensgaard, "Value Dependence Graphs: Representation
+//     Without Taxation", POPL'94 (codegen = scheduling a demand graph).
+//   Cooper & Torczon, "Engineering a Compiler", ch. 10 (mark-sweep aggressive
+//     DCE with side-effect roots).
+// ─────────────────────────────────────────────────────────────────────────────
+
 #include "upass_runner.hpp"
 
 #include <algorithm>
@@ -235,6 +284,24 @@ std::string uPass_runner::try_typename(std::string_view name) {
     }
   }
   return {};
+}
+
+std::optional<upass::uPass::Decl_scalar_type> uPass_runner::try_decl_type(std::string_view name) {
+  for (auto* p : shared_st_passes_) {
+    if (auto dt = p->provide_decl_type(name)) {
+      return dt;
+    }
+  }
+  return std::nullopt;
+}
+
+std::optional<std::pair<Const, Const>> uPass_runner::try_range(std::string_view name) {
+  for (auto* p : shared_st_passes_) {
+    if (auto r = p->provide_range(name)) {
+      return r;
+    }
+  }
+  return std::nullopt;
 }
 
 void uPass_runner::emit_op_with_fold_at(const Lnast_nid& src) {
@@ -722,6 +789,30 @@ void uPass_runner::emit_inline_typespec(const std::string& name, int bits, bool 
   lm->pop_source();
 }
 
+void uPass_runner::emit_inline_typespec_range(const std::string& name, const std::optional<Const>& range_max,
+                                              const std::optional<Const>& range_min) {
+  if (!range_max && !range_min) {
+    return;  // fully unbounded — nothing concrete to declare
+  }
+  if (!scratch_forest_) {
+    scratch_forest_ = hhds::Forest::create();
+  }
+  auto body = scratch_forest_->create_tree_temp("inl-type");
+  auto s    = std::make_shared<Lnast>(body, "inl-type");
+  auto root = s->set_root(Lnast_ntype::create_type_spec());
+  s->add_child(root, Lnast_node::create_ref(name));
+  // Mirror read_scalar_type_at_cursor's prim_type_int(max,min) layout: an
+  // unset bound is the "nil" (unbounded) child.
+  auto pt = s->add_child(root, Lnast_ntype::create_prim_type_int());
+  s->add_child(pt, Lnast_node::create_const(range_max ? std::string(range_max->to_pyrope()) : std::string("nil")));
+  s->add_child(pt, Lnast_node::create_const(range_min ? std::string(range_min->to_pyrope()) : std::string("nil")));
+  flush_deferred_emits();
+  lm->push_source(s, "", 0);
+  process_lnast();  // cursor at type_spec root → C_OP(type_spec): dispatch + emit
+  flush_deferred_emits();
+  lm->pop_source();
+}
+
 void uPass_runner::emit_inline_sext(const std::string& dst, const std::string& src, int sign_bit) {
   if (sign_bit < 0) {
     return;
@@ -1014,7 +1105,21 @@ bool uPass_runner::try_inline_func_call() {
       continue;  // function value — no width/value binding
     }
     const auto pname = upass::Lnast_manager::make_inlined_name(tag, e.name);
-    emit_inline_typespec(pname, e.bits, e.is_signed);
+    if (e.bits > 0) {
+      emit_inline_typespec(pname, e.bits, e.is_signed);
+    } else if (param_set[i] && param_val[i].is_ref()) {
+      // Untyped param (`comb reverse(x)`): the signature carries no width, so
+      // adopt the actual argument's declared type at this call site — the
+      // param's type is fixed by the caller variable (`reverse(x0:u6)` → x:u6,
+      // `reverse(x2:s4)` → x:s4). Without this the inlined body's `.[bits]`/
+      // `.[max]`/`.[min]` (declared-type-driven) fold to nil even though the
+      // value is bound, so a loop like `for i in 0..<x.[bits]` never runs.
+      // The declared range comes from the attributes pass (shared-ST); the
+      // walk has already processed the actual's declaration by this point.
+      if (auto dt = try_decl_type(param_val[i].get_name())) {
+        emit_inline_typespec_range(pname, dt->range_max, dt->range_min);
+      }
+    }
     if (param_set[i]) {
       emit_inline_binding(pname, param_val[i]);
       if (e.is_ref && param_val[i].is_ref()) {
@@ -1103,6 +1208,160 @@ bool uPass_runner::try_inline_func_call() {
   }
 
   return true;
+}
+
+// ── Comptime loop unroll (range `for` + `while`/`loop`) ───────────────────────
+
+bool uPass_runner::walk_loop_iteration(const std::vector<std::pair<std::string, Const>>& binds) {
+  // Precondition: the read cursor is on the loop body `stmts` node.
+  if (inline_budget_ == 0 || loop_depth_ > static_cast<int>(kInlineMaxDepth)) {
+    return false;  // fuel / depth guard — a non-terminating comptime loop bails (like recursion)
+  }
+  --inline_budget_;
+  const uint32_t iter_salt = ++inline_seq_;
+
+  flush_deferred_emits();         // flush outer parked writes before the iteration frame
+  lm->push_iteration(iter_salt);  // fresh salt → fresh tmp namespace + block-scope id; cursor + tag kept
+  dispatch_to_passes(&upass::uPass::process_stmts);  // passes open a block scope (scope_uid uses iter_salt)
+  emit_push(Lnast_ntype::create_stmts());            // staging block for this iteration
+
+  // Bind the iteration variable(s) into this scope so the body's reads fold.
+  for (const auto& [name, val] : binds) {
+    emit_inline_binding(name, Lnast_node::create_const(std::string(val.to_pyrope())));
+  }
+
+  if (lm->move_to_child()) {
+    do {
+      process_lnast();
+      if (loop_break_hit_) {
+        break;  // a comptime `break` fired — skip the rest of this iteration's body
+      }
+    } while (lm->move_to_sibling());
+    lm->move_to_parent();
+  }
+
+  dispatch_to_passes(&upass::uPass::process_stmts_pre_pop);  // coalescer flushes this iteration's writes
+  emit_pop();
+  dispatch_to_passes(&upass::uPass::process_stmts_post);
+  lm->pop_source();  // restore cursor (body stmts), outer salt/stack/tag
+  return true;
+}
+
+void uPass_runner::unroll_for() {
+  // Cursor on the `for` node. Range-for layout (prp2lnast):
+  //   for( ref(i), <iterable-ref>, stmts(body) )
+  // The iterable is a `range` tmp whose (lo, hi_inclusive) bounds constprop
+  // recorded (process_range) when the preceding sibling range statement walked.
+  // Tuple-iteration for-loops are unrolled by prp2lnast and never reach here.
+  if (!lm->has_child()) {
+    emit_subtree_verbatim();
+    return;
+  }
+  lm->move_to_child();  // child0: iter-var ref
+  const std::string ivar = std::string(lm->current_text());
+  if (!lm->move_to_sibling()) {
+    lm->move_to_parent();
+    emit_subtree_verbatim();
+    return;
+  }
+  const std::string iterable  = std::string(lm->current_text());  // child1: iterable ref
+  const bool        have_body = lm->move_to_sibling();            // child2: body stmts
+  lm->move_to_parent();                                           // back to for-node
+  if (!have_body) {
+    emit_subtree_verbatim();
+    return;
+  }
+
+  auto rng = try_range(iterable);
+  if (!rng || !rng->first.is_i() || !rng->second.is_i()) {
+    // `for` is comptime-only; a non-foldable bound is a build error reported
+    // elsewhere. Leave the node verbatim rather than silently dropping the body.
+    emit_subtree_verbatim();
+    return;
+  }
+  const int64_t lo = rng->first.to_i();
+  const int64_t hi = rng->second.to_i();  // inclusive
+
+  // `ivar` was read via current_text(), so it is ALREADY the frame-renamed name
+  // the body's reads of the iteration variable resolve to (under the same tag).
+  // Bind it directly each iteration — do NOT re-tag (that would double-prefix).
+  const std::string& tagged_i = ivar;
+
+  const auto for_bm      = lm->save_cursor();  // on the for-node
+  const bool saved_break = loop_break_hit_;
+  loop_break_hit_        = false;
+  ++loop_depth_;
+  for (int64_t v = lo; v <= hi; ++v) {
+    lm->restore_cursor(for_bm);  // back to for-node
+    lm->move_to_child();         // child0
+    lm->move_to_sibling();       // child1
+    lm->move_to_sibling();       // child2 (body stmts)
+    std::vector<std::pair<std::string, Const>> binds;
+    binds.emplace_back(tagged_i, *Dlop::create_integer(v));
+    if (!walk_loop_iteration(binds)) {
+      break;  // fuel exhausted
+    }
+    if (loop_break_hit_) {
+      break;
+    }
+  }
+  --loop_depth_;
+  loop_break_hit_ = saved_break;
+  lm->restore_cursor(for_bm);  // leave cursor on the for-node (no node emitted for it)
+}
+
+void uPass_runner::unroll_while() {
+  // Cursor on the `while` node: child0 = condition (ref/const), child1 = body.
+  // `loop {}` lowers to `while(const "true")`. Comptime-unroll only the
+  // statically-true infinite form (terminated by a comptime `break`); a
+  // known-false condition drops the loop; anything else (data-dependent /
+  // non-bool) is emitted verbatim so typecheck flags a non-bool condition and
+  // codegen keeps a real runtime loop.
+  if (!lm->has_child()) {
+    emit_subtree_verbatim();
+    return;
+  }
+  const auto while_bm = lm->save_cursor();
+  lm->move_to_child();  // condition
+  const auto        cond_type = lm->get_raw_ntype();
+  const std::string cond_text = std::string(lm->current_text());
+  std::optional<Const> cval;
+  if (Lnast_ntype::is_ref(cond_type)) {
+    cval = try_fold_ref(cond_text);
+  }
+  const bool have_body = lm->move_to_sibling();  // body stmts
+  lm->move_to_parent();                          // back to while
+
+  const bool cond_is_true_literal  = (cond_type == Lnast_ntype::Lnast_ntype_const && cond_text == "true");
+  const bool cond_is_false_literal = (cond_type == Lnast_ntype::Lnast_ntype_const && cond_text == "false");
+  const bool cond_folds_false
+      = cond_is_false_literal || (cval && !cval->is_invalid() && !cval->has_unknowns() && cval->is_known_false());
+
+  if (have_body && cond_folds_false) {
+    return;  // `while false` — loop never runs; emit nothing
+  }
+  if (!have_body || !cond_is_true_literal) {
+    emit_subtree_verbatim();  // runtime / non-comptime loop — leave to typecheck/codegen
+    return;
+  }
+
+  const bool saved_break = loop_break_hit_;
+  loop_break_hit_        = false;
+  ++loop_depth_;
+  while (true) {
+    lm->restore_cursor(while_bm);
+    lm->move_to_child();    // condition
+    lm->move_to_sibling();  // body stmts
+    if (!walk_loop_iteration({})) {
+      break;  // fuel
+    }
+    if (loop_break_hit_) {
+      break;
+    }
+  }
+  --loop_depth_;
+  loop_break_hit_ = saved_break;
+  lm->restore_cursor(while_bm);  // leave cursor on the while-node
 }
 
 // ── Top-level run loop ────────────────────────────────────────────────────────
@@ -1554,8 +1813,18 @@ void uPass_runner::process_lnast() {
     A_OP(func_in)
     A_OP(func_has)
     A_OP(func_case)
-    // break/continue/return have no comptime fold yet — emit verbatim.
-    C_OP(func_break)
+    // break/continue/return. During a comptime loop unroll a `func_break`
+    // reached on the taken path (process_if pruned to it) terminates the loop:
+    // flag it and consume the node (don't emit) so no stray break lands in
+    // staging. Outside a loop, emit verbatim as before.
+    case Ntype::Lnast_ntype_func_break:
+      dispatch_to_passes(&upass::uPass::process_func_break);
+      if (loop_depth_ > 0) {
+        loop_break_hit_ = true;  // checked by unroll_for/unroll_while after the iteration
+      } else {
+        emit_subtree_verbatim();
+      }
+      break;
     C_OP(func_continue)
     C_OP(func_return)
     case Ntype::Lnast_ntype_func_def:
@@ -1604,13 +1873,20 @@ void uPass_runner::process_lnast() {
     // Delay-assign carries timing; emit verbatim (see upass.md invariant 6).
     C_OP(delay_assign)
 
-    // While — not unrolled by upass; the body is emitted verbatim. Dispatch so
-    // passes can OBSERVE it (typecheck's bool-condition check on the cond child;
-    // coalescer flushes deferred emits at the loop boundary). Cursor returns to
-    // the while node after dispatch, so the verbatim copy below is unchanged.
+    // For — comptime range-loop unroll (tuple-iteration for-loops are still
+    // unrolled by prp2lnast and never emit a `for` node). The body is re-walked
+    // once per iteration with the iter var bound; see unroll_for.
+    case Ntype::Lnast_ntype_for:
+      unroll_for();
+      break;
+
+    // While / loop — comptime unroll the statically-true infinite form (until a
+    // `break`), drop a known-false loop, and leave any data-dependent /
+    // non-bool condition verbatim (typecheck flags it; codegen keeps a runtime
+    // loop). Dispatch still happens inside unroll_while's verbatim path.
     case Ntype::Lnast_ntype_while:
       dispatch_to_passes(&upass::uPass::process_while);
-      emit_subtree_verbatim();
+      unroll_while();
       break;
 
     default:

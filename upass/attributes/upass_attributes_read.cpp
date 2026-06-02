@@ -200,6 +200,19 @@ std::optional<std::pair<Const, Const>> uPass_attributes::lookup_range(std::strin
   return it->second;
 }
 
+std::optional<uPass_attributes::Decl_scalar_type> uPass_attributes::provide_decl_type(std::string_view name) {
+  // 1i inliner shared-ST read: surface a variable's declared integer range so
+  // an untyped inlined param can adopt the actual argument's type. Only a real
+  // `:type` annotation with a concrete prim_type_int range qualifies (the same
+  // gate derive_bits/derive_max use). bool/string/unbounded-int carry no range
+  // and read nullopt → the inliner leaves the param untyped (status quo).
+  const auto* ti = lookup_type_info(name);
+  if (!ti || !ti->has_type_spec || (!ti->range_max && !ti->range_min)) {
+    return std::nullopt;
+  }
+  return Decl_scalar_type{.range_max = ti->range_max, .range_min = ti->range_min};
+}
+
 std::optional<std::string> uPass_attributes::lookup_attr_ref(std::string_view var, std::string_view attr) const {
   auto it = attr_set_refs.find(std::string{var});
   if (it == attr_set_refs.end()) {

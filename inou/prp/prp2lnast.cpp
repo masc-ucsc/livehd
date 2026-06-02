@@ -1858,6 +1858,79 @@ void Prp2lnast::process_for_statement(TSNode n) {
     bind_id = bind_ids.front();
   }
 
+  // Is the iterable a range expression (`a..b`, `a..<b`, `a..+n`)? Detected
+  // syntactically — independent of whether the bounds resolve at parse time —
+  // so a bound like `x.[bits]` on an *untyped* parameter (known only after the
+  // caller's type flows in during inlining) is still recognized as a range.
+  auto is_range_data = [&](TSNode d) -> bool {
+    if (ts_node_is_null(d)) {
+      return false;
+    }
+    TSNode           inner = d;
+    std::string_view dt(ts_node_type(d));
+    if (dt == "expression_list") {
+      uint32_t count = 0;
+      TSNode   first{};
+      for (uint32_t i = 0; i < child_count(d); i++) {
+        const char* fn = ts_node_field_name_for_child(d, i);
+        if (fn && std::string_view(fn) == "item") {
+          if (count == 0) {
+            first = child(d, i);
+          }
+          ++count;
+        }
+      }
+      if (count != 1) {
+        return false;
+      }
+      inner = first;
+      dt    = std::string_view(ts_node_type(inner));
+    }
+    if (dt != "expression_item") {
+      return false;
+    }
+    for (uint32_t i = 0; i < ts_node_named_child_count(inner); i++) {
+      TSNode c = ts_node_named_child(inner, i);
+      if (std::string_view(ts_node_type(c)) != "binary_other_op") {
+        continue;
+      }
+      TSNode op_inner = ts_node_named_child(c, 0);
+      if (ts_node_is_null(op_inner)) {
+        continue;
+      }
+      std::string_view k(ts_node_type(op_inner));
+      if (k == "op_range_inclusive" || k == "op_range_exclusive" || k == "op_range_count") {
+        return true;
+      }
+    }
+    return false;
+  };
+
+  // Range-based for-loops whose bound is NOT resolvable at parse time (e.g.
+  // `for i in 0..<x.[bits]` where `x` is an *untyped* parameter — the width is
+  // known only after the caller's type flows in during inlining) are unrolled
+  // by the upass runner at comptime. Emit a `for` node:
+  //   for( ref(i), <range-ref>, stmts(body) )
+  // expr_to_node lowers the range to a `range` tmp, emitting its
+  // range/attr_get/minus statements as siblings *before* the for node;
+  // constprop records the bounds (process_range) and the runner folds + iterates
+  // (uPass_runner::unroll_for). Parse-time-resolvable ranges (literal bounds, or
+  // `x.[bits]` on a *typed* parameter) keep the parse-time unroll below — it
+  // tracks tuple growth in comptime_tuples_ that a later tuple-iteration loop
+  // (`for e in NAME`) depends on, which the runner does not feed.
+  if (!literal_range && is_range_data(data) && !ts_node_is_null(bind_id) && !ts_node_is_null(code)) {
+    Lnast_node iter_ref  = identifier_to_node(bind_id, true);
+    Lnast_node range_ref = expr_to_node(data);  // emits range stmts before the for; returns the range tmp
+    auto       for_idx   = builder.add_child(Lnast_ntype::create_for());
+    lnast->add_child(for_idx, iter_ref);
+    lnast->add_child(for_idx, range_ref);
+    auto body_idx = lnast->add_child(for_idx, Lnast_ntype::create_stmts());
+    builder.push_stmts(body_idx);
+    process_scope_statement(code, body_idx);
+    builder.pop_stmts();
+    return;
+  }
+
   if (literal_range && !ts_node_is_null(bind_id) && !ts_node_is_null(code)) {
     auto [lo, hi_incl, ok] = *literal_range;
     (void)ok;
@@ -2905,12 +2978,36 @@ Lnast_node Prp2lnast::interpolated_string_to_node(TSNode n) {
       args.push_back(Lnast_node::create_const(absl::StrCat("'", pre_decoded, "'")));
     }
 
-    args.push_back(expr_to_node(expr));
-
+    // The closing `}` sits past an optional `:fmt` format spec, which is
+    // anonymous in the grammar (`_format_spec` is a hidden rule). Find the
+    // brace, then read the spec text sitting between the expression and it.
     uint32_t brace_close = expr_end;
     while (brace_close < body_end && prp_file[brace_close] != '}') {
       ++brace_close;
     }
+    auto             gap = text_between(expr_end, brace_close);  // e.g. ":b", " : b", ""
+    std::string_view spec;
+    if (auto colon = gap.find(':'); colon != std::string_view::npos) {
+      spec = trim(gap.substr(colon + 1));
+    }
+
+    auto value_node = expr_to_node(expr);
+    if (spec.empty()) {
+      args.push_back(value_node);
+    } else {
+      // `{expr:fmt}` → render `expr` through `__fmt(expr, 'fmt')`, an internal
+      // cast that constprop folds into a string (e.g. `:b` → binary digits).
+      // The enclosing `string(...)` then concatenates the rendered text. Emit
+      // it here (before the outer string() call) so its tmp folds first.
+      auto fidx = builder.add_child(Lnast_ntype::create_func_call());
+      auto fref = builder.mint_tmp_ref();
+      lnast->add_child(fidx, fref);
+      lnast->add_child(fidx, Lnast_node::create_ref("__fmt"));
+      lnast->add_child(fidx, value_node);
+      lnast->add_child(fidx, Lnast_node::create_const(absl::StrCat("'", spec, "'")));
+      args.push_back(fref);
+    }
+
     cursor = brace_close < body_end ? brace_close + 1 : body_end;
   }
   if (cursor < body_end) {

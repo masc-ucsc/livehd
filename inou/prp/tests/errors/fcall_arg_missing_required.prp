@@ -1,0 +1,10 @@
+/*
+:name: fcall_arg_missing_required
+:type: error
+:error: missing|required|argument|parameter|b
+*/
+
+// All required formal arguments must be provided.
+
+comb mix(a, b) -> (r) { r = a + b }
+cassert(mix(a = 1) == 1) // locate_error_here

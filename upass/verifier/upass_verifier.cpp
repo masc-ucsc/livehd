@@ -14,6 +14,12 @@
 // and classify_func_call (cputs operand) can use it.
 static std::string strip_pyrope_quotes(std::string s);
 
+// Build a best-effort diagnostic span from an LNAST node. Pre-sourcemap
+// ([[1f]]) upass nodes only carry a file path + line, so that is all we
+// populate; a node with no loc yields a null span (the renderer degrades to a
+// single line). Shared by the cassert and cputs diagnostics below.
+static livehd::diag::Span span_from_nid(const std::shared_ptr<upass::Lnast_manager>& lm, const Lnast_nid& nid);
+
 // Registered once here (not in the header) to avoid the registration being
 // dropped when no TU in the final binary includes upass_verifier.hpp.
 static upass::uPass_plugin plugin_verifier("verifier", upass::uPass_wrapper<uPass_verifier>::get_upass);
@@ -69,17 +75,7 @@ void uPass_verifier::emit_false_cassert_diag(const Lnast_nid&   cassert_nid,
                                              const std::string& operand_text,
                                              const std::string& value,
                                              const std::string& msg) {
-  livehd::diag::Span span;
-  if (const auto& ln = lm->get_lnast()) {
-    const auto loc   = ln->get_loc(cassert_nid);
-    const auto fname = ln->get_fname(cassert_nid);
-    if (!fname.empty()) {
-      span.file = std::string{fname};
-    }
-    if (loc.line != 0) {
-      span.start_line = loc.line;
-    }
-  }
+  livehd::diag::Span span = span_from_nid(lm, cassert_nid);
 
   // The message line leads with the user-supplied text when present (that is
   // the human-readable identity of the assertion); the folded operand ref is
@@ -104,6 +100,27 @@ void uPass_verifier::emit_false_cassert_diag(const Lnast_nid&   cassert_nid,
   });
 }
 
+// Report a cputs that cannot be discharged at compile time through the unified
+// diagnostic surface (docs/contracts/diagnostics.md) instead of upass::error —
+// the latter throws std::runtime_error, which unwinds the whole pipeline and
+// surfaces as a bare `ERROR: …` line from main.cpp's top-level catch. A cputs
+// whose operand isn't comptime-known (or isn't a string, or has the wrong arg
+// count) is a Pyrope-source mistake, not an internal invariant violation, so it
+// gets a located, non-fatal diagnostic and the node is simply dropped (there is
+// no runtime equivalent of a comptime print to fall back to).
+void uPass_verifier::emit_cputs_diag(const Lnast_nid& fcall_nid, const std::string& code, const std::string& message,
+                                     const std::string& hint) {
+  livehd::diag::sink().emit(livehd::diag::Diagnostic{
+      .severity = livehd::diag::Severity::error,
+      .code     = code,
+      .category = "type",
+      .pass     = "upass.verifier",
+      .message  = message,
+      .span     = span_from_nid(lm, fcall_nid),
+      .hint     = hint,
+  });
+}
+
 upass::Emit_decision uPass_verifier::classify_statement() {
   if (is_type(Lnast_ntype::Lnast_ntype_func_call)) {
     return classify_func_call();
@@ -116,9 +133,13 @@ upass::Emit_decision uPass_verifier::classify_statement() {
   // call site of the enclosing function, drop it without re-counting. The
   // key matches what mark_inlined_cassert_* uses (lnast top-name + nid).
   const auto cassert_nid = lm->get_current_nid();
-  // class_index().value is unique per node within a tree, so module-qualifying
-  // it gives a stable cassert key without paying for a parent walk.
-  const auto dedup_key   = std::format("{}:{}", lm->get_top_module_name(), cassert_nid.get_class_index().value);
+  // Key by current_scope_uid() (frame salt ⊕ class_index), so a cassert
+  // re-walked per comptime-loop iteration / per inlined call site counts as a
+  // DISTINCT assertion (matching the parse-time unroll, where each was its own
+  // node) instead of deduping to one. salt 0 (top level) reduces to the bare
+  // class_index, so non-inlined/non-loop casserts are unchanged.
+  const auto dedup_key   = std::format("{}:{}", lm->get_top_module_name(), lm->current_scope_uid());
+  (void)cassert_nid;
   if (processed_cassert_keys.contains(dedup_key)) {
     return upass::Emit_decision::drop();
   }
@@ -207,6 +228,21 @@ static std::string strip_pyrope_quotes(std::string s) {
   return s;
 }
 
+static livehd::diag::Span span_from_nid(const std::shared_ptr<upass::Lnast_manager>& lm, const Lnast_nid& nid) {
+  livehd::diag::Span span;
+  if (const auto& ln = lm->get_lnast()) {
+    const auto loc   = ln->get_loc(nid);
+    const auto fname = ln->get_fname(nid);
+    if (!fname.empty()) {
+      span.file = std::string{fname};
+    }
+    if (loc.line != 0) {
+      span.start_line = loc.line;
+    }
+  }
+  return span;
+}
+
 upass::Emit_decision uPass_verifier::classify_func_call() {
   // Layout: func_call ref(___tmp) ref(<fname>) <arg0> <arg1> ...
   // Inspect the function-name child; if it isn't "cputs", restore the
@@ -237,16 +273,26 @@ upass::Emit_decision uPass_verifier::classify_func_call() {
   // From here on this is a cputs call — any deviation from the expected
   // shape is a compile error rather than "leave it for runtime".
 
-  // Dedup: a cputs inside a function body would otherwise reprint once
-  // per spawned-lnast walk. Key matches the cassert dedup pattern.
-  const auto fcall_nid = lm->get_current_nid();
-  const auto dedup_key = std::format("{}:{}", lm->get_top_module_name(), fcall_nid.get_class_index().value);
+  // Dedup: a cputs inside a function body would otherwise reprint on a
+  // truly-redundant re-walk of the SAME instance. Key by current_scope_uid()
+  // (frame salt ⊕ class_index), NOT bare class_index: a comptime loop
+  // iteration and an inlined call site are DISTINCT executions (different
+  // values) that each get a fresh salt (push_iteration / push_source), so they
+  // must print/count separately — matching the parse-time unroll, where each
+  // iteration was a distinct node. salt 0 (top level) reduces to class_index.
+  const auto dedup_key = std::format("{}:{}", lm->get_top_module_name(), lm->current_scope_uid());
   move_to_parent();  // restore to func_call before re-entering
+  // Anchor diagnostics at the func_call node (cursor is here after the parent
+  // restore) so emit_cputs_diag can attach a source span.
+  const auto fcall_nid = lm->get_current_nid();
   if (processed_cputs_keys.contains(dedup_key)) {
     return upass::Emit_decision::drop();
   }
 
-  // Re-descend to read the single argument.
+  // Re-descend to read the single argument. A missing dst/fname is a malformed
+  // func_call (a structural invariant prp2lnast should never break) — keep
+  // upass::error there. A missing argument (`cputs()`) is a user mistake, so it
+  // reports through the diagnostic surface like the operand checks below.
   if (!move_to_child()) {
     upass::error("cputs malformed func_call (no dst)\n");
   }
@@ -254,7 +300,12 @@ upass::Emit_decision uPass_verifier::classify_func_call() {
     upass::error("cputs malformed func_call (no fname)\n");
   }
   if (!move_to_sibling()) {
-    upass::error("cputs requires exactly one argument\n");
+    move_to_parent();
+    emit_cputs_diag(fcall_nid,
+                    "cputs-arg-count",
+                    "cputs requires exactly one argument",
+                    "call cputs with a single comptime string operand");
+    return upass::Emit_decision::drop();
   }
 
   std::optional<Const> val;
@@ -270,18 +321,30 @@ upass::Emit_decision uPass_verifier::classify_func_call() {
   move_to_parent();
 
   if (extra_args) {
-    upass::error("cputs accepts exactly one argument\n");
+    emit_cputs_diag(fcall_nid,
+                    "cputs-arg-count",
+                    "cputs accepts exactly one argument",
+                    "call cputs with a single comptime string operand");
+    return upass::Emit_decision::drop();
   }
   if (!val || val->is_invalid() || val->has_unknowns()) {
-    upass::error("cputs operand not comptime-known\n");
+    emit_cputs_diag(fcall_nid,
+                    "cputs-not-comptime",
+                    "cputs operand is not comptime-known",
+                    "cputs prints at compile time, so its operand must fold to a comptime constant");
+    return upass::Emit_decision::drop();
   }
   if (!val->is_string()) {
-    upass::error("cputs operand must be a string\n");
+    emit_cputs_diag(fcall_nid,
+                    "cputs-not-string",
+                    "cputs operand must be a string",
+                    "pass a string literal or interpolated string to cputs");
+    return upass::Emit_decision::drop();
   }
 
   processed_cputs_keys.insert(dedup_key);
   ++cputs_count;
-  std::print(stderr, "\nprp:{}\n", strip_pyrope_quotes(val->to_pyrope()));
+  std::print(stderr, "prp:{}\n", strip_pyrope_quotes(val->to_pyrope()));
   return upass::Emit_decision::drop();
 }
 

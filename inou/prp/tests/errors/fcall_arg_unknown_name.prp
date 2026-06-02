@@ -1,0 +1,10 @@
+/*
+:name: fcall_arg_unknown_name
+:type: error
+:error: unknown|undefined|argument|parameter|c
+*/
+
+// Named call arguments must match a formal parameter.
+
+comb mix(a, b) -> (r) { r = a + b }
+cassert(mix(a = 1, c = 2) == 3) // locate_error_here

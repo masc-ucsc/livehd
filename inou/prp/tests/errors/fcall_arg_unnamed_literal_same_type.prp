@@ -1,0 +1,11 @@
+/*
+:name: fcall_arg_unnamed_literal_same_type
+:type: error
+:error: named|ambiguous|argument|parameter
+*/
+
+// Same-type literals do not identify which formal parameter they bind to, so
+// the call must use named arguments.
+
+comb diff(a, b) -> (r) { r = a - b }
+cassert(diff(5, 3) == 2) // locate_error_here

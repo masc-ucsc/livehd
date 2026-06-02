@@ -1,0 +1,10 @@
+/*
+:name: tuple_rhs_requires_parens
+:type: error
+:error: tuple|right-hand-side|parenth|syntax
+*/
+
+// Multi-value assignment requires an explicit tuple on the rhs.
+// Doc: ../docs/docs/pyrope/03-bundle.md `mut (a,b) = 2,3 // error`
+
+mut (a,b) = 2,3 // locate_error_here

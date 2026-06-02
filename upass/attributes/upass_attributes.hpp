@@ -225,6 +225,12 @@ public:
   // decl-attrs. Returns nullopt when nothing is known.
   const Type_info* lookup_type_info(std::string_view var) const;
 
+  // Shared-ST read (1i inliner): hand the runner a declared variable's integer
+  // (max,min) range so it can re-type an untyped inlined parameter from the
+  // actual at the call site. See uPass::provide_decl_type.
+  std::optional<Decl_scalar_type> provide_decl_type(std::string_view name) override;
+  bool                            overrides_shared_st() const override { return true; }
+
   // Range bounds previously recorded by process_range, keyed by the range
   // op's destination tmp ref (so attr_set with a `range` value pointing to
   // that tmp can lower to max/min).

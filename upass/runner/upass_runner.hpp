@@ -125,6 +125,13 @@ protected:
   // setter-init). First pass that provides wins.
   std::optional<std::vector<std::pair<std::string, Const>>> try_bundle_fields(std::string_view name);
   std::string                                               try_typename(std::string_view name);
+  // Declared integer (max,min) range of a variable (for re-typing an untyped
+  // inlined param from the actual at the call site). First pass that provides
+  // wins. See uPass::provide_decl_type.
+  std::optional<upass::uPass::Decl_scalar_type>             try_decl_type(std::string_view name);
+  // Folded (start, end_inclusive) bounds of a `range` tmp (comptime for-loop
+  // iterable). First pass that provides wins. See uPass::provide_range.
+  std::optional<std::pair<Const, Const>>                    try_range(std::string_view name);
 
   // Emits either the folded value of `name` (when any pass returns a valid
   // Const) or the original ref node otherwise. Used by both emit_op_with_fold
@@ -146,6 +153,26 @@ protected:
   void process_stmts() override;
   void process_if() override;
   void process_lnast();
+
+  // ── Comptime loop unroll (range `for` + `while`/`loop`) ─────────────────────
+  // Pyrope loops are comptime-only; like recursion, the runner evaluates them
+  // by re-walking the body until the bound/condition is exhausted, bounded by
+  // the recursion fuel. unroll_for handles `for i in lo..hi` (the iterable is a
+  // `range` tmp folded via try_range); tuple-iteration for-loops are still
+  // unrolled by prp2lnast and never reach here. unroll_while handles
+  // `while cond`/`loop` (cond folded each iteration; non-comptime → verbatim so
+  // typecheck still flags a non-bool condition). Each iteration re-walks the
+  // body under a fresh salt + block scope (push_iteration) so tmps/locals don't
+  // collide. Cursor is left on the loop node on every path.
+  void unroll_for();
+  void unroll_while();
+  // Re-walk ONE loop iteration. Precondition: the read cursor is on the loop's
+  // body `stmts` node. Opens a fresh iteration scope (fresh salt + staging/pass
+  // block scope), emits the given pre-bindings (iter var = value) into it,
+  // re-walks the body's statements, then closes the scope and restores the
+  // cursor to the body `stmts` node. Returns false if the fuel/depth guard
+  // tripped (caller stops iterating).
+  bool walk_loop_iteration(const std::vector<std::pair<std::string, Const>>& binds);
 
   // ── 1i comb-call inliner ────────────────────────────────────────────────
   // Called from process_lnast's func_call case. If the callee resolves to a
@@ -184,6 +211,14 @@ protected:
   // are otherwise lost once the signature is gone). No-op when bits<=0.
   void emit_inline_typespec(const std::string& name, int bits, bool is_signed);
 
+  // Same, but from an explicit prim_type_int `(max,min)` range — used to
+  // re-type an untyped param from the actual's declared range (preserves
+  // non-pow2 / partial ranges exactly, where bits alone would round up the
+  // envelope). An unset bound emits the `nil` (unbounded) child. No-op when
+  // both bounds are unset.
+  void emit_inline_typespec_range(const std::string& name, const std::optional<Const>& range_max,
+                                  const std::optional<Const>& range_min);
+
   // Emits `dst = sext(src, sign_bit)` through the walk so constprop folds it.
   // Mirrors the deleted evaluator's adjust_for_type: a signed output's raw
   // value (e.g. a get_mask bit-slice 0b1110 = 14) must be reinterpreted as its
@@ -193,8 +228,17 @@ protected:
   absl::flat_hash_map<std::string, std::shared_ptr<Lnast>>& runner_function_registry() { return function_registry; }
 
   // Monotonic per-run counter giving each inline call site a unique rename
-  // tag/salt. Cross-pass idempotence is a documented 1i follow-up.
+  // tag/salt. Cross-pass idempotence is a documented 1i follow-up. Also used
+  // per comptime loop iteration (unroll_for/unroll_while) so each iteration's
+  // re-walk gets a fresh tmp-rename namespace + block-scope id.
   uint32_t                                      inline_seq_{0};
+  // Comptime loop unroll state. loop_break_hit_ is set by a `func_break`
+  // reached on a comptime-taken path during a loop body re-walk; the unroller
+  // checks it after each iteration and stops. loop_depth_ counts active
+  // (nested) unrolls so the fuel/depth guard bounds non-terminating loops the
+  // same way recursion is bounded.
+  bool                                          loop_break_hit_{false};
+  int                                           loop_depth_{0};
   std::shared_ptr<hhds::Forest>                 scratch_forest_;
   // Callee bodies currently being spliced (innermost last). Re-entering one
   // means recursion — bailed to the evaluator until Phase D adds fuel.

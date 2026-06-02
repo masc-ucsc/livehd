@@ -1,0 +1,10 @@
+/*
+:name: invalid_descending_range
+:type: error
+:error: range|never reaches|invalid
+*/
+
+// A closed ascending range whose start is already past the end is invalid.
+// Doc: ../docs/docs/pyrope/04-variables.md `assert(5..=0) // error: 5 + 1 never reaches 0`
+
+assert(5..=0) // locate_error_here

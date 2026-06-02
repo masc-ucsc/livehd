@@ -1,0 +1,10 @@
+/*
+:name: tuple_lhs_requires_parens
+:type: error
+:error: tuple|left-hand-side|parenth|syntax
+*/
+
+// Multi-target assignment requires an explicit tuple on the lhs.
+// Doc: ../docs/docs/pyrope/03-bundle.md `mut a,b = (2,3) // error`
+
+mut a,b = (2,3) // locate_error_here

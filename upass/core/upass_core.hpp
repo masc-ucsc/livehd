@@ -129,7 +129,28 @@ public:
     return std::nullopt;
   }
   virtual std::string provide_typename(std::string_view /*name*/) { return {}; }
-  virtual bool        overrides_shared_st() const { return false; }
+
+  // Declared scalar (integer) type of a variable, as its authoritative
+  // prim_type_int `(max,min)` range. Exposed so the comb-call inliner can
+  // propagate an *untyped* parameter's type from the actual argument at the
+  // call site: `comb reverse(x) { … x.[bits] … }` invoked as `reverse(x0:u6)`
+  // must see `x:u6` inside the inlined body, because `.[bits]`/`.[max]`/
+  // `.[min]` are declared-type-driven (not value-driven) — an untyped param
+  // bound only to a value reads nil for all three. Either bound may be unset
+  // (unbounded). Returns nullopt when `name` has no concrete declared integer
+  // type (untyped / `:int` unbounded / non-numeric). See bitreverse.prp.
+  struct Decl_scalar_type {
+    std::optional<Const> range_max;
+    std::optional<Const> range_min;
+  };
+  virtual std::optional<Decl_scalar_type> provide_decl_type(std::string_view /*name*/) { return std::nullopt; }
+
+  // Folded `(start, end_inclusive)` bounds of a `range` tmp (the iterable of a
+  // comptime `for i in lo..hi` loop), exposed so the runner's loop unroller can
+  // iterate. nullopt when `name` is not a known range. A bound that has not
+  // folded to a concrete integer is returned as-is (the runner checks).
+  virtual std::optional<std::pair<Const, Const>> provide_range(std::string_view /*name*/) { return std::nullopt; }
+  virtual bool                                   overrides_shared_st() const { return false; }
 
   // Runner-supplied helper that delegates to `try_fold_ref` across every
   // registered pass. Passes can use this to resolve a ref against the

@@ -165,7 +165,19 @@ public:
   // rewritten. The rewritten string is interned so the view stays valid.
   std::string_view current_text() const {
     auto raw = lnast->get_name(current_nid);
-    if (active_tag_.empty() || !Lnast_ntype::is_ref(lnast->get_type(current_nid))) {
+    if (!Lnast_ntype::is_ref(lnast->get_type(current_nid))) {
+      return raw;
+    }
+    if (active_tag_.empty()) {
+      // No tag → normally raw (the common, non-inlined case). Exception: a
+      // *top-level* loop iteration frame (push_iteration) keeps the tag empty
+      // but sets a fresh per-iteration salt so the body can be re-walked once
+      // per iteration. Rename tmps under that salt so iterations don't collide
+      // on `___N`; user vars stay raw (they resolve to the enclosing scope).
+      if (active_salt_ != 0 && raw.size() >= 3 && raw[0] == '_' && raw[1] == '_' && raw[2] == '_'
+          && !is_tuple_field_key(current_nid)) {
+        return rename_tmp(raw);
+      }
       return raw;
     }
     // A tuple-literal field key (`(x = …)` lowers to assign(ref 'x', val) under
@@ -178,6 +190,8 @@ public:
     // Tmps (`___N`) must stay `___<digits>` tmps — several ops (attr_get dst,
     // etc.) and DCE require it — so remap to a fresh globally-unique tmp
     // number rather than `<tag>___N`. User vars get the readable `<tag>name`.
+    // (The salt keys rename_tmp, so a fresh per-iteration salt under the same
+    // tag — push_iteration inside an inlined body — also gives fresh tmps.)
     if (raw.size() >= 3 && raw[0] == '_' && raw[1] == '_' && raw[2] == '_') {
       return rename_tmp(raw);
     }
@@ -255,6 +269,22 @@ public:
     active_tag_  = std::move(f.tag);
     active_salt_ = f.salt;
     frames_.pop_back();
+  }
+
+  // Re-enter the CURRENT tree at the CURRENT cursor under a fresh rename salt,
+  // keeping the active tag — used by the runner's comptime loop unroller to
+  // re-walk a loop body once per iteration. The fresh salt gives each
+  // iteration its own tmp-rename namespace and block-scope ids (current_text /
+  // current_scope_uid key off the salt), so re-walks of the same subtree don't
+  // collide; the unchanged tag keeps the body's user/outer vars resolving to
+  // the enclosing scope. Balanced by pop_source (restores tree/cursor/tag/salt
+  // and the saved nid-stack). The salt should come from `++inline_seq_` so it
+  // never collides with an inline frame's salt and is never 0.
+  void push_iteration(uint32_t salt) {
+    frames_.push_back(Source_frame{lnast, current_nid, std::move(nid_stack), active_tag_, active_salt_});
+    nid_stack    = std::stack<Lnast_nid>{};
+    active_salt_ = salt;
+    // lnast, current_nid, active_tag_ deliberately unchanged.
   }
   bool             in_inline_frame() const { return !frames_.empty(); }
   std::size_t      inline_depth() const { return frames_.size(); }

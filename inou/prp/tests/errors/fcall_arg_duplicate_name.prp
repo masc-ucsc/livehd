@@ -1,0 +1,10 @@
+/*
+:name: fcall_arg_duplicate_name
+:type: error
+:error: duplicate|already|argument|parameter
+*/
+
+// A function call can bind each formal argument only once.
+
+comb mix(a, b) -> (r) { r = a + b }
+cassert(mix(a = 1, a = 2) == 3) // locate_error_here

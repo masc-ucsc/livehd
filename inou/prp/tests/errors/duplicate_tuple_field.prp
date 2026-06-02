@@ -1,0 +1,13 @@
+/*
+:name: duplicate_tuple_field
+:type: error
+:error: duplicate|already exists|already declared|field
+*/
+
+// Duplicate tuple field names should be rejected.
+// Doc: ../docs/docs/pyrope/03-bundle.md `,ff = 2 // error:`
+
+mut x = (
+  ,ff = 1
+  ,ff = 2 // locate_error_here
+)

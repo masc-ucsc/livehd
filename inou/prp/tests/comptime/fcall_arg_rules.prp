@@ -1,0 +1,33 @@
+/*
+:name: fcall_arg_rules
+:type: comptime
+:verifier_pass: 5
+:verifier_fail: 0
+*/
+
+// Valid function call argument forms:
+// - bare variables whose names match parameter names
+// - explicit named arguments when local names differ
+// - unnamed arguments when their types uniquely identify the parameters
+
+comb mix(a, b) -> (r) { r = a * 10 + b }
+
+const a = 2
+const b = 3
+cassert(mix(a, b) == 23)
+
+const x = 4
+const y = 5
+cassert(mix(a = x, b = y) == 45)
+cassert(mix(b = y, a = x) == 45)
+
+comb typed(n:u8, flag:bool) -> (r) {
+  if flag {
+    r = n + 1
+  } else {
+    r = n + 2
+  }
+}
+
+cassert(typed(7, true) == 8)
+cassert(typed(flag = false, n = 8) == 10)

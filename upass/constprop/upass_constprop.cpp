@@ -82,12 +82,69 @@ static std::optional<Const> stringify_concat_trivials(const std::vector<Const>& 
   return acc;
 }
 
+// Group an MSB-first binary string (from Dlop::to_binary) into a power-of-two
+// base, `bpd` bits per digit, dropping leading zeros. Used by the `:b`/`:o`/
+// `:x`/`:X` interpolation specs so they share one two's-complement bit view.
+static std::string bits_to_grouped(std::string_view bits, int bpd, bool upper) {
+  static constexpr std::string_view lo = "0123456789abcdef";
+  static constexpr std::string_view hi = "0123456789ABCDEF";
+  std::string_view                  digits = upper ? hi : lo;
+  std::string                       padded;  // left-pad to a multiple of bpd
+  if (int rem = static_cast<int>(bits.size()) % bpd; rem != 0) {
+    padded.assign(static_cast<size_t>(bpd - rem), '0');
+  }
+  padded.append(bits);
+  std::string out;
+  for (size_t i = 0; i < padded.size(); i += static_cast<size_t>(bpd)) {
+    unsigned v = 0;
+    for (int k = 0; k < bpd; ++k) {
+      v = (v << 1) | (padded[i + static_cast<size_t>(k)] == '1' ? 1U : 0U);
+    }
+    out.push_back(digits[v]);
+  }
+  auto first = out.find_first_not_of('0');
+  return first == std::string::npos ? std::string("0") : out.substr(first);
+}
+
+// Render `v` per a std::format-style presentation spec for `"{expr:spec}"`
+// interpolation (the `__fmt(value, 'spec')` cast emitted by prp2lnast). b/o/x/X
+// share the two's-complement bit view (no prefix; matches std::format for
+// non-negative values, e.g. 16 → "10000"/"20"/"10"); d (or empty) is signed
+// decimal. Strings/nil keep their stringify_one rendering. Unsupported specs
+// raise a compile error rather than silently mis-rendering.
+static std::string format_interp_value(const Const& v, std::string_view spec) {
+  if (v.is_nil()) {
+    return "nil";
+  }
+  if (v.is_string()) {
+    upass::error("string-interpolation format spec ':{}' cannot apply to a string value\n", spec);
+  }
+  if (spec.size() > 1) {
+    upass::error("unsupported string-interpolation format spec ':{}' (expected one of b/o/x/X/d)\n", spec);
+  }
+  switch (spec.empty() ? 'd' : spec.front()) {
+    case 'd': return std::string(v.to_decimal_string());
+    case 'b': return bits_to_grouped(v.to_binary(), 1, false);
+    case 'o': return bits_to_grouped(v.to_binary(), 3, false);
+    case 'x': return bits_to_grouped(v.to_binary(), 4, false);
+    case 'X': return bits_to_grouped(v.to_binary(), 4, true);
+    default: upass::error("unsupported string-interpolation format spec ':{}' (expected one of b/o/x/X/d)\n", spec);
+  }
+}
+
 Const uPass_constprop::apply_range_mask(const Const& value, const Const& start, const Const& end) {
   // Bit-slice `value#[start..=end]` (and the open `value#[start..]` when `end`
   // is nil). Everything stays in Const arithmetic — no is_i/to_i, no int round-
   // trip, no width/limit guards (a nonsense range just yields a degenerate
   // mask). This handles arbitrary-precision values that would overflow int64.
   //
+  // A concrete negative `start` (or negative width below) would hard-assert in
+  // Dlop::shln / sra. This only happens for a nonsense range — e.g. folding a
+  // still-parametric body (`x#[x.[bits]-1-i]` with `x` unbound) — so yield a
+  // degenerate empty slice (0) rather than crash; real bound sites are valid.
+  if (start.is_i() && start.to_i() < 0) {
+    return *Dlop::create_integer(0);
+  }
   // Open-ended `start..`: right-shift by `start` (upper bits packed LSB-first).
   if (end.is_nil()) {
     return *value.sra_op(start);
@@ -97,6 +154,9 @@ Const uPass_constprop::apply_range_mask(const Const& value, const Const& start, 
   //   mask = ((1 << (end - start + 1)) - 1) << start
   auto one   = Dlop::create_integer(1);
   auto width = end.sub_op(start)->add_op(*one);  // end - start + 1
+  if (width->is_i() && width->to_i() < 0) {
+    return *Dlop::create_integer(0);  // negative-width (empty) slice — degenerate
+  }
   auto mask  = one->shl_op(*width)->sub_op(*one)->shl_op(start);
   return *value.get_mask_op(*mask);
 }
@@ -463,7 +523,31 @@ void uPass_constprop::process_mod() {
 }
 
 void uPass_constprop::process_shl() {
-  process_binary_passthrough([](Const n1, Const n2) -> Const { return *n1.shl_op(n2); });
+  // A negative shift amount would hard-assert in Dlop::shln (src2 >= 0). It can
+  // arise when folding a still-parametric body — e.g. evaluating the extracted
+  // standalone copy of `comb f(x){ … x.[bits]-1-i … }` whose param is unbound,
+  // so the index folds to a bogus negative. Leave the shl unresolved instead of
+  // crashing; real (bound) call sites always fold a non-negative shift.
+  move_to_child();
+  auto var = current_text();
+  move_to_sibling();
+  Const n1 = current_prim_value();
+  move_to_sibling();
+  Const n2 = current_prim_value();
+  move_to_parent();
+  if (!is_numeric(n1) || !is_numeric(n2)) {
+    return;
+  }
+  if (n2.is_i() && n2.to_i() < 0) {
+    std::fprintf(stderr, "[DBG shl-neg] top=%s var=%s n1=%s n2=%s\n",
+                 std::string(lm->get_top_module_name()).c_str(), std::string(var).c_str(),
+                 std::string(n1.to_pyrope()).c_str(), std::string(n2.to_pyrope()).c_str());
+    return;  // invalid (negative) shift — do not fold
+  }
+  Const r = *n1.shl_op(n2);
+  if (!r.is_invalid()) {
+    store_trivial(var, r);
+  }
 }
 
 void uPass_constprop::process_sra() {
@@ -2152,6 +2236,24 @@ void uPass_constprop::process_func_call() {
   }
 
   auto actuals = collect_call_actuals();
+
+  // String-interpolation format directive `__fmt(value, 'spec')`: render
+  // `value` per a std::format-style presentation spec (b/o/x/X/d) into a
+  // string Const. Emitted by prp2lnast for `"{expr:spec}"` chunks and then
+  // concatenated by the enclosing `string(...)` call. Defer (leave dst unset)
+  // when the value isn't comptime-known yet.
+  if (fname == "__fmt") {
+    if (actuals.has_value() && actuals->size() == 2 && !(*actuals)[0].is_named && !(*actuals)[1].is_named) {
+      const Const& val  = (*actuals)[0].value;
+      const Const& spec = (*actuals)[1].value;
+      if (!val.is_invalid() && !val.has_unknowns() && spec.is_string()) {
+        store_trivial(dst, *Dlop::from_string(format_interp_value(val, spec.to_string())));
+      }
+    }
+    move_to_parent();
+    return;
+  }
+
   // Direct cell-op call: `__sum(a, b)`, `__hotmux(sel, a, b, …)`, … —
   // every Ntype_op cell can surface in Pyrope as `__name(...)` and gets
   // folded here when all actuals are comptime-known. See cell.hpp for the
@@ -2790,6 +2892,18 @@ std::optional<std::vector<std::pair<std::string, Const>>> uPass_constprop::provi
 std::string uPass_constprop::provide_typename(std::string_view name) {
   auto it = typename_of_var.find(std::string(name));
   return it != typename_of_var.end() ? it->second : std::string{};
+}
+
+std::optional<std::pair<Const, Const>> uPass_constprop::provide_range(std::string_view name) {
+  // Comptime for-loop unroll (runner): a `for i in lo..hi` iterable lowers to a
+  // `range` tmp that process_range recorded as (start, end_inclusive). Hand the
+  // runner those folded bounds so it can iterate. The runner checks both are
+  // concrete integers before unrolling.
+  auto it = range_map.find(std::string(name));
+  if (it == range_map.end()) {
+    return std::nullopt;
+  }
+  return it->second;
 }
 
 void uPass_constprop::process_sext() {

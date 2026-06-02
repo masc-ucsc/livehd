@@ -1,0 +1,10 @@
+/*
+:name: undefined_read
+:type: error
+:error: undefined|undeclared|not visible|out of scope
+*/
+
+// Reading an undeclared name should be rejected.
+// Doc: ../docs/docs/pyrope/04-variables.md `assert(a == 3) // error: undefined variable 'a'`
+
+const y = x // locate_error_here

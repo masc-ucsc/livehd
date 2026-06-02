@@ -1,0 +1,12 @@
+/*
+:name: drop_tuple_parens_assert
+:type: error
+:error: expected string|string
+*/
+
+// Tuple parentheses must not be dropped inside assertion expressions. This is
+// parsed like `cassert((2 in 1), 2)`, so the diagnostic should reject the
+// numeric assertion message argument.
+// Doc: ../docs/docs/pyrope/10-internals.md `assert(2 in 1,2) // error`
+
+cassert(2 in 1,2) // locate_error_here

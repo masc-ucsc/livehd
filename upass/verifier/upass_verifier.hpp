@@ -133,6 +133,13 @@ private:
   void emit_false_cassert_diag(const Lnast_nid& cassert_nid, const std::string& operand_text, const std::string& value,
                                const std::string& msg);
 
+  // Report a malformed cputs (operand not comptime-known, not a string, or wrong
+  // argument count) as a located, non-fatal diagnostic instead of throwing via
+  // upass::error — a cputs mistake is a Pyrope-source error, not an internal
+  // invariant violation that should unwind the pipeline. See upass_verifier.cpp.
+  void emit_cputs_diag(const Lnast_nid& fcall_nid, const std::string& code, const std::string& message,
+                       const std::string& hint);
+
   void check_binary() {
     move_to_child();
 

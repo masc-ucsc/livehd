@@ -87,6 +87,10 @@ public:
   // bundle fields / typename the runner can't see through scalar fold_ref.
   std::optional<std::vector<std::pair<std::string, Const>>> provide_bundle_fields(std::string_view name) override;
   std::string                                               provide_typename(std::string_view name) override;
+  // Comptime for-loop unroll (runner): expose the folded (start, end_inclusive)
+  // bounds of a `range` tmp so the runner can iterate. nullopt when `name` is
+  // not a recorded range.
+  std::optional<std::pair<Const, Const>>                    provide_range(std::string_view name) override;
   bool                                                      overrides_shared_st() const override { return true; }
 
   static void set_function_registry(const std::vector<std::shared_ptr<Lnast>>& lnasts);

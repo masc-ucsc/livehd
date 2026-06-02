@@ -1,0 +1,10 @@
+/*
+:name: invalid_binary_prefix
+:type: error
+:error: binary|invalid|0b|use 0ub|use 0sb
+*/
+
+// Binary integer constants must use explicit signedness.
+// Doc: ../docs/docs/pyrope/02-basics.md `0b1100 // error: use 0ub1100 or 0sb1100`
+
+cassert(0b1100 == 12) // locate_error_here

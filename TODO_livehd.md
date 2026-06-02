@@ -41,8 +41,7 @@ cross-file dependencies stay visible.
     `__ubits`/`__sbits` via `create_declare_bits_stmts` is a SEPARATE legacy
     `pass/bitwidth` path — left alone.)
 
-  **Depends on** [[1v]] (envelope landed). Sibling of producer bit lowering (1d)
-  and the comb inliner (1i).
+  **Depends on** [[1v]] (envelope landed). Sibling of the comb inliner (1i).
 
 - **1n** Relocate `upass/bitwidth` from an iterative fold-pass to a standalone
   **read-only finalization pass**. **Goal 1.** **★ Authority = `upass/upass.md`
@@ -105,6 +104,114 @@ cross-file dependencies stay visible.
     field. Relates to the `core/diag` diagnostics foundation (landed; the
     error-handling path is half the WIP) and the
     `prp2lnast` frontend.
+
+- **1d** Demand-driven (lazy) emit + dead-code elimination for upass. **Goal 1.**
+  **★ Design rationale + literature references live in the header comment block
+  at the top of [`upass/runner/upass_runner.cpp`](upass/runner/upass_runner.cpp)
+  — read that first; this entry is the implementation plan.** Replace today's
+  *emit-everything-then-mark-sweep* DCE with *demand-first* emission that
+  materializes each pure value def at its use site (folding to a `const` when
+  possible, else copying the def subtree from the source tree), drops undemanded
+  defs for free, and sinks defs near their uses. In compiler terms this is late
+  scheduling of a sea-of-nodes / partial dead-code elimination (refs in the
+  comment block: Click GCM, Knoop-Rüthing-Steffen PDE/LCM, SSA-DCE, SCCP, VDG).
+
+  **Motivating symptom.** A comptime bit-range write leaks an unresolved `range`
+  into `lnast.dump`:
+  ```
+  inou.prp files:inou/prp/tests/comptime/bitset.prp |> pass.upass |> lnast.dump
+  ...
+  ├── range
+  │   ├── ref '___22'      # from x#[5..+5]  ⇒ bits 5..=9
+  │   ├── const '5'
+  │   └── const '9'
+  ```
+  `range` (and `declare`) are not in `dce_is_def_producing`, so an unused comptime
+  one is never swept; more fundamentally we emit eagerly and sweep afterward
+  instead of emitting on demand.
+
+  **Current state (what to evolve).**
+  - Eager emit in constprop/runner (`emit_op_with_fold*` in `upass_runner.cpp`).
+  - Scalar const-at-use fold already exists: `fold_ref` + `emit_ref_or_folded`
+    (`upass_constprop.cpp`) — inline `const zz` for a `ref xx` when `xx` is a known
+    trivial scalar. **This is the model to generalize.**
+  - Post-walk mark-sweep DCE: `dead_code_eliminate_staging` (`upass_runner.cpp`),
+    runs only when constprop is active; touches **temps only** (`Lnast::is_tmp`,
+    `___` prefix); `dce_is_def_producing` lists the eligible ops — `range`/`declare`
+    are **absent**; `attr_set type='reg'|'mut'` is keepalive
+    (`dce_is_keepalive_attr_set`).
+  - IR is **SSA** at constprop time (`upass/ssa` renames `mut` writes apart, e.g.
+    `x` / `x___ssa_1`) but **straight-line only** — branches are copied verbatim,
+    no φ; the lowerer's Mux merges later.
+
+  **Target model — demand-driven liveness from roots.**
+  - **Roots (pinned; always emitted, order preserved):** function IO (declared at
+    the function boundary via the `io` node — *variables cannot declare outputs*,
+    so the IO set is knowable and is the only named-var exception), side-effecting
+    statements (`cassert` always; `cputs`/`func_call` unless their dst const-folds),
+    and state elements (`attr_set type='reg'|'mut'`).
+  - **Floating (deferred):** every pure value def, named or temp. Emitted only when
+    transitively demanded by a root. Undemanded ⇒ never emitted (= free DCE).
+  - **Materialize at use:** known-const scalar ⇒ inline the `const` (existing
+    `fold_ref`); otherwise copy the def subtree from the source ("shadow") tree via
+    `emit_subtree_verbatim`. `range` / `declare` / all-const-field statements fall
+    out of this one rule uniformly.
+  - **Placement:** at the **dominator-tree LCA of all uses** (then sink as deep/late
+    as legal), NOT the textual first use — correct when a value is consumed in
+    multiple branches. Within a straight-line SSA region, first-use == LCA.
+
+  **Safety property.** Total reorder of pure defs is sound *here* because our side
+  effects are clean: no memory references / aliasing, so every read-after-write is
+  visible through SSA names. CAUTION (future arrays): an array index reintroduces
+  may-alias ordering — `a[i]=` vs `=a[j]` cannot be reordered without proving
+  `i != j`; treat aliasing array ops as pinned/ordered when arrays land (D4).
+
+  **Data structures.**
+  - Pending map: output-name → handle (source nid) into the shadow tree, stored
+    **in the scoped `Symbol_table` entry** so `Symbol_table::leave_scope` recycles
+    dead pendings automatically — no parallel map lifecycle, no unbounded growth.
+  - Emitted mark: once materialized, record the emitted staging nid so later refs
+    dedupe (a shared subexpr emits once — preserves CSE, avoids duplicate work).
+  - Transitive demand: resolving a `ref` emits its def first, post-order over
+    dependency edges; bounded by #pending-in-scope (the "chain of inserts" — bounded
+    but must be deduped via the emitted-mark and LCA-placed).
+
+  **Phases (land in order).**
+  - **D1 — interim, proven machinery (do first):** add `range` to
+    `dce_is_def_producing` (pure, no side channel) so unused comptime ranges are
+    swept by the existing mark-sweep; give `declare` a keepalive guard mirroring
+    `attr_set reg/mut` (declare is a *type carrier* consumed by bitwidth/lnastfmt —
+    never blanket-drop). Kills the bitset symptom with no architecture change.
+  - **D2 — prototype demand-driven on the comptime subset:** statements whose
+    fields are all const / const-type (`range`, const `declare`, scalar const
+    assign), scoped to temps within one `stmts` block. Validate pending-in-symtab,
+    transitive resolution, and shadow-tree copy. Eager emit + post-walk DCE stay in
+    place for everything else (both models coexist; the subset is just not emitted
+    eagerly).
+  - **D3 — generalize:** all pure SSA-temp defs float; add LCA placement for
+    cross-branch uses; extend to droppable named vars (non-IO, non-state) using the
+    `io`-node root set; then **retire the separate post-walk rebuild** by folding
+    DCE into demand-driven emission.
+  - **D4 — arrays (future-gated):** classify aliasing array-index ops as
+    pinned/ordered; revisit the total-reorder assumption above.
+
+  **Files.** `upass/runner/upass_runner.cpp` (DCE section + emit path),
+  `upass/constprop/upass_constprop.{cpp,hpp}` (`fold_ref`, `emit_ref_or_folded`,
+  `process_range`, `process_declare`, `classify_statement`), and the scoped
+  `Symbol_table` (attach a pending source-nid per scope entry).
+
+  **Validation.** `bitset.prp`: no `range ___22` in `lnast.dump`, results still
+  correct (verifier 4/0). Full upass + comptime suites green, net-neutral. New
+  tests: unused comptime range dropped; used comptime range folds to a mask const;
+  `declare` with no readers kept iff reg/mut/IO else dropped; multi-branch shared
+  temp emitted once at the dominator LCA and dominating both uses.
+
+  **Relationships.** Generalizes constprop's scalar `fold_ref`. Sibling of the
+  declare/store node work [[1t]] (the `declare` handling must match the post-1t node
+  shape) and the bit-range LHS producer lowering (landed — the comptime bit-ranges
+  it emits, e.g. `x#[5..+5]`, are the motivating case). Must keep [[1n]] bitwidth
+  (read-only, runs after SSA) able to see `declare` type info — hence D1's declare
+  keepalive.
 
 ## Group 1-complex — foundation, larger scope
 
