@@ -7,6 +7,7 @@
 #include <vector>
 
 #include "absl/container/flat_hash_map.h"
+#include "diag.hpp"  // livehd::diag::Span — located diagnostics for builtins (cassert)
 #include "upass_core.hpp"
 
 // uPass_typecheck — read-only KIND checker (see /Users/renau/projs/livehd/optable.md).
@@ -43,6 +44,11 @@ public:
   void process_if() override;
   // while condition must be boolean.
   void process_while() override;
+  // Builtin `cassert(cond:bool=nil, msg:string="")` — type-check the optional
+  // diagnostic-message argument (must be a string). Builtins bypass the comb
+  // inliner's argument-type binding, so this is the only kind check the message
+  // gets. The cassert node carries a source loc, so the diag points at the call.
+  void process_cassert() override;
 
   // Arithmetic / bitwise / shift — int operands, int result.
   void process_plus() override;
@@ -119,5 +125,12 @@ private:
   void require_same(Kind result, std::string_view sym, std::string_view code);
   void stamp_result(Kind result);
 
-  void emit_type_error(std::string_view code, const std::string& msg, std::string_view hint = {});
+  // `span` is optional: most nodes carry no source loc (only cassert/func_call
+  // do — see the loc-carry chain), so a null span degrades the diag to a single
+  // line. When non-null it points the error at the offending source line.
+  void emit_type_error(std::string_view code, const std::string& msg, std::string_view hint = {},
+                       livehd::diag::Span span = {});
+
+  // Source span for an nid that carries a loc (cassert/func_call). Null otherwise.
+  livehd::diag::Span span_from_nid(const Lnast_nid& nid) const;
 };

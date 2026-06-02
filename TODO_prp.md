@@ -92,6 +92,33 @@ cross-file dependencies stay visible.
     - Dispatch through the existing method-call inliner with the
       init-tuple's named fields rebound to the setter's named args.
 
+- **1e** Documented-error detection coverage for the `inou/prp/tests/errors/`
+  negative-test suite (47 tests; **9 currently failing** because the compiler
+  emits no `error`-severity diagnostic at the `locate_error_here` line). These
+  are the *detection* gaps the [[prp_error_test_coverage]] note flagged — the
+  diagnostics *surface* ([[3f]]) and the golden-error *harness* ([[4h]]) are
+  downstream of this and don't supply the missing checks. Each diagnostic must
+  be emitted at the marked line and match the header `:error:` regex. The 9 fall
+  into three mechanisms:
+  - **Frontend grammar / lexical (prp2lnast + tree-sitter-pyrope).**
+    - `invalid_binary_prefix` — bare `0b1100` must error (require `0ub`/`0sb`).
+    - `mixed_precedence` — mixed arith+bitwise (`a*b+c & d`) must require parens.
+    - `tuple_lhs_requires_parens` — `mut a,b = (2,3)` (lhs tuple needs parens).
+    - `tuple_rhs_requires_parens` — `mut (a,b) = 2,3` (rhs tuple needs parens).
+    - `drop_tuple_parens_assert` — `cassert(2 in 1,2)` parses as a 2-arg call;
+      reject the non-string assertion message (ties to the `cassert(cond,"msg")`
+      message arg — see [[cassert_message_and_verifier_diag]]).
+  - **Tuple / scope semantics (typecheck pass — landed, extend detection).**
+    - `duplicate_tuple_field` — duplicate field name in a tuple literal.
+    - `undefined_read` — read of an undeclared name (`const y = x`).
+  - **Range / value-fit (bitwidth + typecheck; extends the landed [[1b]]
+    range-force).**
+    - `invalid_descending_range` — `5..=0` closed range that never reaches its
+      end is invalid.
+    - `underflow_unsigned_expr` — a signed-negative expression assigned to an
+      unsigned dest (`const c:u8 = ones`) must error `does not fit`; [[1b]]
+      enforces the declared-literal case but not this expression-level one.
+
 ## Group 2 — depends on Group 1
 
 - **2p** Source-derived SSA / tmp names (`foo_l42_a`, drop `___N`) —
@@ -218,7 +245,9 @@ Tallies re-measured via the `prplib.py` comptime pipeline
 (`pass.upass constprop:1 verifier_pass:N verifier_fail:N
 [verifier_include_funcs:true]`).
 
-**Live suite = 6 fails / 250 pass** across `//inou //upass //lnast //pass`.
+**Live suite = 15 fails** across `//inou //upass //lnast //pass`: 6 comptime
+(enum + decorator) + 9 `tests/errors/` negative tests. The error tests fail
+because no matching `error`-severity diagnostic is emitted at the marked line.
 
 | Failing test | now | TODO entry | What it still needs |
 | --- | --- | --- | --- |
@@ -228,3 +257,12 @@ Tallies re-measured via the `prplib.py` comptime pipeline
 | `prp-enum_types` | 0/0/0 | [[2l]] | typed enum interplay with `does` (casserts unreached) |
 | `prp-setter_complex` | 2/2/0 | [[1k]] | decorator-init implicit setter dispatch on `x:Tup = (…)` |
 | `prp-tuple_decorator_complex` | 0/0/2 | [[1k]] | tuple-decorator init triggering setter |
+| `prp-invalid_binary_prefix` | error | [[1e]] | reject bare `0b…` (require `0ub`/`0sb`) — grammar/lexical |
+| `prp-mixed_precedence` | error | [[1e]] | require parens on mixed arith+bitwise — grammar |
+| `prp-tuple_lhs_requires_parens` | error | [[1e]] | `mut a,b = …` lhs tuple needs parens — grammar |
+| `prp-tuple_rhs_requires_parens` | error | [[1e]] | `mut (a,b) = 2,3` rhs tuple needs parens — grammar |
+| `prp-drop_tuple_parens_assert` | error | [[1e]] | reject non-string `cassert` message arg |
+| `prp-duplicate_tuple_field` | error | [[1e]] | duplicate tuple field name — typecheck |
+| `prp-undefined_read` | error | [[1e]] | read of undeclared name — typecheck/scope |
+| `prp-invalid_descending_range` | error | [[1e]] | `5..=0` empty/invalid range |
+| `prp-underflow_unsigned_expr` | error | [[1e]] | signed-neg expr into unsigned dest `does not fit` (extends [[1b]]) |

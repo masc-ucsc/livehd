@@ -4850,9 +4850,20 @@ Lnast_node Prp2lnast::tuple_to_node(TSNode n, bool /*is_square*/) {
   };
   std::vector<Item> items;
   items.reserve(nnc);
+  // Track named-field keys so a bundle literal that repeats a field name is
+  // rejected: "each tuple field must be unique" (docs/docs/pyrope/03-bundle.md
+  // "Concatenate fields"). Concatenation must be a separate post-declaration
+  // statement (`y.ff ++= 2`), never a second field in the literal.
+  absl::flat_hash_set<std::string> seen_field_keys;
   for (uint32_t i = 0; i < nnc; i++) {
     TSNode           c = ts_node_named_child(n, i);
     std::string_view t(ts_node_type(c));
+    if (t == "comment") {
+      // Comments are tree-sitter `extras`, so they surface as named children
+      // even inside a tuple. Skip them — otherwise the generic `else` branch
+      // below would lower a comment into a spurious positional const field.
+      continue;
+    }
     if (t == "unary_expression") {
       // Spread (`...inner`) is the only positional unary in a tuple item that
       // needs to flatten — every other unary just becomes a regular value.
@@ -4873,6 +4884,26 @@ Lnast_node Prp2lnast::tuple_to_node(TSNode n, bool /*is_square*/) {
     if (t == "assignment") {
       Item it;
       it.is_assign = true;
+      // A bundle-literal field may only be introduced with plain `=`. A
+      // compound operator (`++=`, `+=`, …) here is a compile error: declare
+      // the field with `=`, then mutate it with `name OP= …` as a separate
+      // statement (the variable must be `mut`). The grammar makes the
+      // `operator` field a required `assignment_operator` whose single named
+      // child names the aliased op kind (`assign`, `assign_tuple_concat`, …).
+      {
+        TSNode op_node = child_by_field(c, "operator");
+        if (!ts_node_is_null(op_node)) {
+          TSNode           op_inner = ts_node_named_child(op_node, 0);
+          std::string_view op_k = ts_node_is_null(op_inner) ? std::string_view{} : std::string_view(ts_node_type(op_inner));
+          if (!op_k.empty() && op_k != "assign") {
+            report_error(c,
+                         "bundle-compound-assign",
+                         "syntax",
+                         std::format("compound assignment `{}` is not allowed inside a bundle literal", trim(get_text(op_node))),
+                         "set the field with `=` here, then concatenate/update it with a separate `name OP= …` statement");
+          }
+        }
+      }
       TSNode lv    = child_by_field(c, "lvalue");
       TSNode rv    = child_by_field(c, "rvalue");
       // The lvalue may carry a type_cast (`(a:u4=1, …)` parses lv as a
@@ -4968,7 +4999,19 @@ Lnast_node Prp2lnast::tuple_to_node(TSNode n, bool /*is_square*/) {
         // identifiers it's already clean.
         it.assign_key = trim(get_text(lv));
       }
-      if (it.assign_key.empty()) {
+      if (!it.assign_key.empty()) {
+        // A named field that repeats an earlier one in the same bundle literal
+        // is a duplicate — reject it (each tuple field must be unique). The
+        // span points at this (the second) field so `locate_error_here` lands
+        // on the offending line.
+        if (!seen_field_keys.insert(it.assign_key).second) {
+          report_error(c,
+                       "duplicate-tuple-field",
+                       "name",
+                       std::format("duplicate field `{}` in bundle literal (each field name must be unique)", it.assign_key),
+                       "rename or remove the duplicate field");
+        }
+      } else {
         // Anonymous slot (e.g. `(mut :u13 = 5)`) — synthesize a tmp name so
         // we don't emit an empty `ref` (lnastfmt would reject it).
         it.assign_key = builder.create_lnast_tmp();

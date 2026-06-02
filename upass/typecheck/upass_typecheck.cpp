@@ -118,13 +118,15 @@ std::vector<uPass_typecheck::Kind> uPass_typecheck::collect_operands(std::string
   return ks;
 }
 
-void uPass_typecheck::emit_type_error(std::string_view code, const std::string& msg, std::string_view hint) {
+void uPass_typecheck::emit_type_error(std::string_view code, const std::string& msg, std::string_view hint,
+                                      livehd::diag::Span span) {
   livehd::diag::sink().emit(livehd::diag::Diagnostic{
       .severity = livehd::diag::Severity::error,
       .code     = std::string{code},
       .category = "type",
       .pass     = "upass.typecheck",
       .message  = msg,
+      .span     = std::move(span),
       .hint     = std::string{hint},
   });
 }
@@ -309,6 +311,52 @@ void uPass_typecheck::process_while() {
     }
   }
   move_to_parent();
+}
+
+// ── builtin cassert: type-check the optional message argument ───────────────
+void uPass_typecheck::process_cassert() {
+  // cassert(<cond>[, <msg>]) — the builtin signature is
+  //   comb cassert(cond:bool=nil, msg:string="")
+  // Unnamed builtin arguments bind by type, so the 2nd argument is the
+  // diagnostic MESSAGE and must be a string. `cassert(2 in 1, 2)` parses as
+  // `cassert((2 in 1), 2)` (the tuple parens are NOT dropped — see
+  // 10-internals.md), passing an integer where a string is required.
+  //
+  // The condition (child0) is intentionally NOT kind-checked here: it is usually
+  // an `in`/`does`/comparison fold temp whose kind this pass does not stamp, so
+  // it reads as `unknown` and a bool check would only ever false-negative.
+  // Folding/verification of the condition is constprop + verifier's job.
+  const auto nid = lm->get_current_nid();  // cassert nodes carry a source loc
+  if (!move_to_child()) {
+    return;  // malformed cassert (no operands) — nothing to check
+  }
+  if (move_to_sibling()) {  // child1 = optional message
+    Kind mk = kind_of_operand_at_cursor();
+    if (mk != Kind::unknown && mk != Kind::string) {
+      emit_type_error("cassert-msg-not-string",
+                      std::format("cassert message must be a string, got {} (expected string)", kind_name(mk)),
+                      "cassert's second argument is a diagnostic message string; remove it or quote it",
+                      span_from_nid(nid));
+    }
+  }
+  move_to_parent();  // restore cursor to the cassert node
+}
+
+// Build a located Span from an LNAST nid that carries a source loc (cassert /
+// func_call — the loc-carry chain). Mirrors uPass_verifier::span_from_nid.
+livehd::diag::Span uPass_typecheck::span_from_nid(const Lnast_nid& nid) const {
+  livehd::diag::Span span;
+  if (const auto& ln = lm->get_lnast()) {
+    const auto loc   = ln->get_loc(nid);
+    const auto fname = ln->get_fname(nid);
+    if (!fname.empty()) {
+      span.file = std::string{fname};
+    }
+    if (loc.line != 0) {
+      span.start_line = loc.line;
+    }
+  }
+  return span;
 }
 
 // ── arithmetic / bitwise / shift: int operands → int (NO bool) ──────────────

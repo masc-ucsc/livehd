@@ -38,13 +38,14 @@ recorded (cluster snapshot below), and the [[1g]] value-layer derive +
 `prp2lnast`, `inou/cgen`, and `pass/cprop`. No open items; any residual
 `to_i()` cleanup at the next hlop pin bump rides under [[1g]] (Goal 1).
 
-## Failing comptime tests — cluster snapshot (2026-06-01, live-verified)
+## Failing tests — cluster snapshot (2026-06-02)
 
-`bazel test -c dbg //inou/... //upass/... //lnast/... //pass/...` sits at
-**6 failures / 250 pass**, all in the `//inou/prp` comptime suite. The residual
-failures cluster by root cause:
+`bazel test //inou/prp:...` shows **15 failures**: 6 in the comptime suite
+(enum + decorator) and 9 in the `tests/errors/` negative suite (expected
+diagnostic never emitted). The failures cluster by root cause:
 
 | Cluster | Tests | Root cause | Blocker / task |
 |---|---|---|---|
 | **A. Enum semantics** | `prp-enum_color`, `prp-enum_hier`, `prp-enum_simple`, `prp-enum_types` | enum declarations / typed-variant matching / hierarchical scoping not implemented in prp2lnast or constprop | **2l** (`enum_color` also **1k**) |
 | **B. Decorator-init / setter** | `prp-setter_complex`, `prp-tuple_decorator_complex` | decorator-init implicit setter dispatch on `x:Tup = (…)`: scalar→tuple coercion, positional setter-arg routing, `p.x`/`p['x']` getter dispatch | **1k** |
+| **C. Error detection** | `prp-invalid_binary_prefix`, `prp-mixed_precedence`, `prp-tuple_lhs_requires_parens`, `prp-tuple_rhs_requires_parens`, `prp-drop_tuple_parens_assert`, `prp-duplicate_tuple_field`, `prp-undefined_read`, `prp-invalid_descending_range`, `prp-underflow_unsigned_expr` | documented Pyrope errors not yet detected: grammar/lexical (`0b`, precedence, tuple parens, `cassert` msg), tuple/scope typecheck (dup field, undefined read), range/value-fit (`5..=0`, signed-neg into unsigned) | **1e** (`underflow_unsigned_expr` extends **1b**) |
