@@ -31,14 +31,14 @@ cassert(a != nil)
   mut b = 2
   cassert(a == 1 and b == 2)
 
-  mut z = mytest(10+a,10+b)
+  mut z = mytest(a=10+a,b=10+b)
 
   cassert(z == 123)
   cassert(a == 1 and b == 2)
 }
 
 cassert(b == nil) // out of scope
-mut z = mytest(10+a,b=12)
+mut z = mytest(a=10+a,b=12)
 cassert(z == 123)
 cassert(a == 1)
 cassert(b == nil) // out of scope

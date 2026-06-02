@@ -32,8 +32,8 @@ referencing existing tasks.
 ## Group 0 — stabilize the base (prerequisite for the lnast→lgraph push)
 
 Group 0 is the stabilization gate that must close before the LNAST→LGraph
-synthesis-path build-out (TODO_verilog.md **3a** + the deferred [[1t]] T6
-lowering) starts. These are not new features — they get the tree committed,
+synthesis-path build-out (TODO_verilog.md **3a**, which owns the type/declare
+LGraph lowering) starts. These are not new features — they get the tree committed,
 green, and on the clean value layer so the new translator builds on solid
 ground. The `inou/cgen` Verilog round-trip is the translator's validator, so it
 must be trustworthy first.
@@ -60,7 +60,7 @@ must be trustworthy first.
   the hlop pin is bumped to the version that protects the `int` shift/sext
   overloads (current pin `6a4ff795`). Migrate cgen onto the clean `Const` /
   `to_index` value layer *before* the translator leans on the cgen Verilog
-  round-trip. Tail of [[1g]] (Goal 1); overlaps [[2t]].
+  round-trip. Tail of [[1g]] (Goal 1).
 
 - **0d** Confirm / migrate the remaining [[1g]] value-layer derive sites that
   feed bits/sign at cell creation: `upass/attributes/upass_attributes_read.cpp`
@@ -75,15 +75,13 @@ must be trustworthy first.
 and `inou/cgen` on the clean value layer (0c) so the round-trip harness is
 trustworthy.
 
-## Failing comptime tests — cluster snapshot (2026-05-30, live-verified)
+## Failing comptime tests — cluster snapshot (2026-06-01, live-verified)
 
 `bazel test -c dbg //inou/... //upass/... //lnast/... //pass/...` sits at
-**8 failures / 248 pass**, all in the `//inou/prp` comptime suite. The residual
+**6 failures / 250 pass**, all in the `//inou/prp` comptime suite. The residual
 failures cluster by root cause:
 
 | Cluster | Tests | Root cause | Blocker / task |
 |---|---|---|---|
-| **A. Bit-range / bit-level ops** | `prp-bitreverse` | comb-inline landed (1i); residual is the `for i in 0..<x.[bits]` unroll (comptime `.[bits]`) + bit / storage-width fold | **1t** |
-| **B. Enum semantics** | `prp-enum_color`, `prp-enum_hier`, `prp-enum_simple`, `prp-enum_types` | enum declarations / typed-variant matching / hierarchical scoping not implemented in prp2lnast or constprop | **2l** (`enum_color` also **1k**) |
-| **C. Match / hotmux dispatch** | `prp-match_arms_mixed` | mixed match-arm prefixes (`case`+`==`) + tuple `case` patterns; one cassert not counted | **2r** |
-| **D. Decorator-init / setter** | `prp-setter_complex`, `prp-tuple_decorator_complex` | decorator-init implicit setter dispatch on `x:Tup = (…)`: scalar→tuple coercion, positional setter-arg routing, `p.x`/`p['x']` getter dispatch | **1k** |
+| **A. Enum semantics** | `prp-enum_color`, `prp-enum_hier`, `prp-enum_simple`, `prp-enum_types` | enum declarations / typed-variant matching / hierarchical scoping not implemented in prp2lnast or constprop | **2l** (`enum_color` also **1k**) |
+| **B. Decorator-init / setter** | `prp-setter_complex`, `prp-tuple_decorator_complex` | decorator-init implicit setter dispatch on `x:Tup = (…)`: scalar→tuple coercion, positional setter-arg routing, `p.x`/`p['x']` getter dispatch | **1k** |

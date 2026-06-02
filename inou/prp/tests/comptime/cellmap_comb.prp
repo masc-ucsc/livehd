@@ -20,61 +20,61 @@
 // Ntype_op::Sum -- pins A (add) and B (subtract); only A used here.
 comb cell_sum(a:u32, b:u32) -> (y) { y = a + b }
 
-cassert(cell_sum(1, 2) == 3)
+cassert(cell_sum(a=1, b=2) == 3)
 cassert(  __sum(a=(1, 2)) == 3)
-cassert(cell_sum(100, 200) == 300)
+cassert(cell_sum(a=100, b=200) == 300)
 cassert(  __sum(a=(100, 200)) == 300)
-cassert(cell_sum(0, 0) == 0)
+cassert(cell_sum(a=0, b=0) == 0)
 cassert(  __sum(a=(0, 0)) == 0)
 
 // Ntype_op::Mult -- repeated A pin
 comb cell_mult(a:u32, b:u32) -> (y) { y = a * b }
 
-cassert(cell_mult(3, 4) == 12)
+cassert(cell_mult(a=3, b=4) == 12)
 cassert(  __mult(a=(3, 4)) == 12)
-cassert(cell_mult(0, 99) == 0)
+cassert(cell_mult(a=0, b=99) == 0)
 cassert(  __mult(a=(0, 99)) == 0)
-cassert(cell_mult(7, 7) == 49)
+cassert(cell_mult(a=7, b=7) == 49)
 cassert(  __mult(a=(7, 7)) == 49)
 
 // Ntype_op::Div -- pins a, b
 comb cell_div(a:u32, b:u32) -> (y) { y = a / b }
 
-cassert(cell_div(10, 2) == 5)
+cassert(cell_div(a=10, b=2) == 5)
 cassert(  __div(a=10, b=2) == 5)
-cassert(cell_div(15, 4) == 3)
+cassert(cell_div(a=15, b=4) == 3)
 cassert(  __div(a=15, b=4) == 3)
-cassert(cell_div(0, 5) == 0)
+cassert(cell_div(a=0, b=5) == 0)
 cassert(  __div(a=0, b=5) == 0)
 
 // Ntype_op::And (bitwise) -- repeated A pin
 comb cell_and(a:u8, b:u8) -> (y) { y = a & b }
 
-cassert(cell_and(0ub1100, 0ub1010) == 0ub1000)
+cassert(cell_and(a=0ub1100, b=0ub1010) == 0ub1000)
 cassert(  __and(a=(0ub1100, 0ub1010)) == 0ub1000)
-cassert(cell_and(0xff, 0x0f) == 0x0f)
+cassert(cell_and(a=0xff, b=0x0f) == 0x0f)
 cassert(  __and(a=(0xff, 0x0f)) == 0x0f)
-cassert(cell_and(0, 0xff) == 0)
+cassert(cell_and(a=0, b=0xff) == 0)
 cassert(  __and(a=(0, 0xff)) == 0)
 
 // Ntype_op::Or (bitwise) -- repeated A pin
 comb cell_or(a:u8, b:u8) -> (y) { y = a | b }
 
-cassert(cell_or(0ub1100, 0ub1010) == 0ub1110)
+cassert(cell_or(a=0ub1100, b=0ub1010) == 0ub1110)
 cassert(   __or(a=(0ub1100, 0ub1010)) == 0ub1110)
-cassert(cell_or(0, 0xff) == 0xff)
+cassert(cell_or(a=0, b=0xff) == 0xff)
 cassert(   __or(a=(0, 0xff)) == 0xff)
-cassert(cell_or(0x55, 0xaa) == 0xff)
+cassert(cell_or(a=0x55, b=0xaa) == 0xff)
 cassert(   __or(a=(0x55, 0xaa)) == 0xff)
 
 // Ntype_op::Xor -- repeated A pin
 comb cell_xor(a:u8, b:u8) -> (y) { y = a ^ b }
 
-cassert(cell_xor(0ub1100, 0ub1010) == 0ub0110)
+cassert(cell_xor(a=0ub1100, b=0ub1010) == 0ub0110)
 cassert(  __xor(a=(0ub1100, 0ub1010)) == 0ub0110)
-cassert(cell_xor(0xff, 0xff) == 0)
+cassert(cell_xor(a=0xff, b=0xff) == 0)
 cassert(  __xor(a=(0xff, 0xff)) == 0)
-cassert(cell_xor(0x55, 0xaa) == 0xff)
+cassert(cell_xor(a=0x55, b=0xaa) == 0xff)
 cassert(  __xor(a=(0x55, 0xaa)) == 0xff)
 
 // Ntype_op::Ror (reduce OR) -- single input pin a
@@ -117,11 +117,11 @@ comb cell_set_mask(base:u8, lo:u4) -> (y:u8) {
   y = t
 }
 
-cassert(cell_set_mask(0xf0, 0xa) == 0xfa)
+cassert(cell_set_mask(base=0xf0, lo=0xa) == 0xfa)
 cassert(  __set_mask(a=0xf0, mask=0xf, value=0xa) == 0xfa)
-cassert(cell_set_mask(0, 0x5) == 0x05)
+cassert(cell_set_mask(base=0, lo=0x5) == 0x05)
 cassert(  __set_mask(a=0, mask=0xf, value=0x5) == 0x05)
-cassert(cell_set_mask(0xff, 0) == 0xf0)
+cassert(cell_set_mask(base=0xff, lo=0) == 0xf0)
 cassert(  __set_mask(a=0xff, mask=0xf, value=0) == 0xf0)
 
 // Ntype_op::Sext -- pins a, b (b is the sign-bit position)
@@ -137,51 +137,51 @@ cassert(  __sext(a=0ub1111, b=3) == -1)
 // Ntype_op::LT -- pins a (left) and b (right)
 comb cell_lt(a:sint, b:sint) -> (y:bool) { y = a < b }
 
-cassert(cell_lt(1, 2) == true)
+cassert(cell_lt(a=1, b=2) == true)
 cassert(   __lt(a=1, b=2) == true)
-cassert(cell_lt(2, 1) == false)
+cassert(cell_lt(a=2, b=1) == false)
 cassert(   __lt(a=2, b=1) == false)
-cassert(cell_lt(-3, 0) == true)
+cassert(cell_lt(a=-3, b=0) == true)
 cassert(   __lt(a=-3, b=0) == true)
 
 // Ntype_op::GT -- pins a (left) and b (right)
 comb cell_gt(a:sint, b:sint) -> (y:bool) { y = a > b }
 
-cassert(cell_gt(2, 1) == true)
+cassert(cell_gt(a=2, b=1) == true)
 cassert(   __gt(a=2, b=1) == true)
-cassert(cell_gt(1, 2) == false)
+cassert(cell_gt(a=1, b=2) == false)
 cassert(   __gt(a=1, b=2) == false)
-cassert(cell_gt(0, -3) == true)
+cassert(cell_gt(a=0, b=-3) == true)
 cassert(   __gt(a=0, b=-3) == true)
 
 // Ntype_op::EQ -- repeated A pin
 comb cell_eq(a:u32, b:u32) -> (y:bool) { y = a == b }
 
-cassert(cell_eq(3, 3) == true)
+cassert(cell_eq(a=3, b=3) == true)
 cassert(   __eq(a=(3, 3)) == true)
-cassert(cell_eq(3, 4) == false)
+cassert(cell_eq(a=3, b=4) == false)
 cassert(   __eq(a=(3, 4)) == false)
-cassert(cell_eq(0, 0) == true)
+cassert(cell_eq(a=0, b=0) == true)
 cassert(   __eq(a=(0, 0)) == true)
 
 // Ntype_op::SHL -- pins a, b
 comb cell_shl(a:u32, n:u8) -> (y) { y = a << n }
 
-cassert(cell_shl(1, 0) == 1)
+cassert(cell_shl(a=1, n=0) == 1)
 cassert(  __shl(a=1, b=0) == 1)
-cassert(cell_shl(1, 4) == 16)
+cassert(cell_shl(a=1, n=4) == 16)
 cassert(  __shl(a=1, b=4) == 16)
-cassert(cell_shl(3, 2) == 12)
+cassert(cell_shl(a=3, n=2) == 12)
 cassert(  __shl(a=3, b=2) == 12)
 
 // Ntype_op::SRA -- pins a, b
 comb cell_sra(a:sint, n:u8) -> (y:sint) { y = a >> n }
 
-cassert(cell_sra(16, 2) == 4)
+cassert(cell_sra(a=16, n=2) == 4)
 cassert(  __sra(a=16, b=2) == 4)
-cassert(cell_sra(-8, 1) == -4)
+cassert(cell_sra(a=-8, n=1) == -4)
 cassert(  __sra(a=-8, b=1) == -4)
-cassert(cell_sra(1, 0) == 1)
+cassert(cell_sra(a=1, n=0) == 1)
 cassert(  __sra(a=1, b=0) == 1)
 
 // Ntype_op::Mux -- pin s (selector), pins p1..pN values
@@ -194,11 +194,11 @@ comb cell_mux(sel:u2, a:u8, b:u8, c:u8, d:u8) -> (y:u8) {
   }
 }
 
-cassert(cell_mux(0, 10, 20, 30, 40) == 10)
+cassert(cell_mux(sel=0, a=10, b=20, c=30, d=40) == 10)
 cassert(  __mux(s=0, p1=10, p2=20, p3=30, p4=40) == 10)
-cassert(cell_mux(1, 10, 20, 30, 40) == 20)
+cassert(cell_mux(sel=1, a=10, b=20, c=30, d=40) == 20)
 cassert(  __mux(s=1, p1=10, p2=20, p3=30, p4=40) == 20)
-cassert(cell_mux(2, 10, 20, 30, 40) == 30)
+cassert(cell_mux(sel=2, a=10, b=20, c=30, d=40) == 30)
 cassert(  __mux(s=2, p1=10, p2=20, p3=30, p4=40) == 30)
-cassert(cell_mux(3, 10, 20, 30, 40) == 40)
+cassert(cell_mux(sel=3, a=10, b=20, c=30, d=40) == 40)
 cassert(  __mux(s=3, p1=10, p2=20, p3=30, p4=40) == 40)

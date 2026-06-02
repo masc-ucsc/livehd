@@ -28,8 +28,9 @@ constexpr bool stmt_has_dest(Lnast_ntype::Lnast_ntype_int t) {
 // Parse the bits/is_signed from a prim_type_uint/prim_type_sint subtree
 // (or any other type ntype). Returns {bits=0, is_signed=true} on miss.
 struct Type_info {
-  int32_t bits      = 0;
-  bool    is_signed = true;
+  int32_t      bits      = 0;
+  bool         is_signed = true;
+  Io_kind kind   = Io_kind::none;
 };
 Type_info type_info_from(const std::shared_ptr<Lnast>& lnast, Lnast_nid type_nid) {
   Type_info ti;
@@ -37,7 +38,16 @@ Type_info type_info_from(const std::shared_ptr<Lnast>& lnast, Lnast_nid type_nid
     return ti;
   }
   const auto tty = lnast->get_type(type_nid);
+  if (Lnast_ntype::is_prim_type_bool(tty)) {
+    ti.kind = Io_kind::boolean;
+    return ti;
+  }
+  if (Lnast_ntype::is_prim_type_string(tty)) {
+    ti.kind = Io_kind::string;
+    return ti;
+  }
   if (Lnast_ntype::is_prim_type_int(tty)) {
+    ti.kind = Io_kind::integer;
     // Task 1t — canonical integer: derive bits/signed from the (max,min)
     // range children ("nil" = unbounded). signed ⇐ min<0; bits ⇐ both known.
     auto                 max_nid = lnast->get_first_child(type_nid);
@@ -209,7 +219,7 @@ void uPass_ssa::run(const std::shared_ptr<Lnast>& lnast) {
       is_ref = true;
     }
     auto ti = type_info_from(lnast, type_nid);
-    out.push_back({full, ti.bits, ti.is_signed, is_ref});
+    out.push_back({full, ti.bits, ti.is_signed, is_ref, ti.kind});
   };
 
   if (!in_tup_nid.is_invalid()) {

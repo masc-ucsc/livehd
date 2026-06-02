@@ -334,10 +334,11 @@ Lnast_nid prp_copy_one_node(const Lnast& src, const Lnast_nid& src_nid, Lnast& d
     nn = dst.add_child(dst_parent, t);
   }
   // Preserve the source location across the decl-merge rebuild. Only cassert
-  // nodes carry one today (see attach_loc); gating on the type keeps this off
-  // the per-node hot path (no get_loc lookup for the many string/ref/const
-  // nodes a string-heavy tree copies).
-  if (t == Lnast_ntype::Lnast_ntype_cassert) {
+  // and func_call nodes carry one today (see attach_loc); gating on the type
+  // keeps this off the per-node hot path (no get_loc lookup for the many
+  // string/ref/const nodes a string-heavy tree copies). func_call carries it so
+  // the upass argument-naming diagnostics can point at the call site.
+  if (t == Lnast_ntype::Lnast_ntype_cassert || t == Lnast_ntype::Lnast_ntype_func_call) {
     const auto loc = src.get_loc(src_nid);
     if (loc.pos1 != 0 || loc.pos2 != 0 || loc.line != 0 || loc.tok != 0) {
       dst.set_loc(nn, loc);
@@ -4821,6 +4822,7 @@ Lnast_node Prp2lnast::function_call_expr_to_node(TSNode n) {
   lnast->add_child(idx, ref);
   lnast->add_child(idx, func_ref);
   add_call_args_to_fcall(idx, call_args);
+  attach_loc(idx, n);  // call-site span → upass argument-naming diagnostics point here
   return ref;
 }
 

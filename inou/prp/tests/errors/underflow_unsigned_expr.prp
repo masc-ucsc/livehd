@@ -1,0 +1,12 @@
+/*
+:name: underflow_unsigned_expr
+:type: error
+:error: does not fit
+*/
+
+// A signed expression whose value is negative does not fit an unsigned
+// destination. Use an explicit bit-select to force the bit pattern.
+
+mut v8:s8 = -1
+const ones = v8 | 0xff
+const c:u8 = ones

@@ -92,11 +92,18 @@ struct Lnast_bitwidth_meta {
 
 // ── I/O metadata side-channel (populated by upass/ssa when ssa:1 is set) ────
 // Separate from hhds::TreeIO (which is tree-replacement plumbing).
+// Scalar type kind of an I/O leaf, used for call-site argument disambiguation
+// (06-functions.md §"Argument naming"): a positional actual may bind to a
+// parameter when their kinds make the mapping unique. `none` = untyped (the
+// param must then be named unless it is the only argument).
+enum class Io_kind : uint8_t { none, integer, boolean, string };
+
 struct Lnast_io_entry {
-  std::string name;           // field name, no $ / % prefix
-  int32_t     bits      = 0;  // 0 = unknown / infer from context
+  std::string name;                    // field name, no $ / % prefix
+  int32_t     bits      = 0;           // 0 = unknown / infer from context
   bool        is_signed = true;
-  bool        is_ref    = false;  // input declared with `ref` → write-back on inline
+  bool        is_ref    = false;       // input declared with `ref` → write-back on inline
+  Io_kind     kind      = Io_kind::none;  // scalar kind from the param's prim_type
 };
 struct Lnast_tree_io {
   std::vector<Lnast_io_entry> inputs;

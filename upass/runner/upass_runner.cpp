@@ -59,9 +59,26 @@
 #include <vector>
 
 #include "absl/container/flat_hash_set.h"
+#include "diag.hpp"
 #include "upass_shared.hpp"
 
 namespace {
+
+// Emit a function-call argument diagnostic (06-functions.md §"Argument naming")
+// and abort the walk. The record is flushed to the JSONL sink crash-safe before
+// the throw unwinds up to main's top-level catch, so the error-test harness sees
+// it even though the throw aborts the remaining pipeline stages.
+[[noreturn]] void fcall_arg_fail(const livehd::diag::Span& span, std::string_view code, const std::string& msg,
+                                 std::string_view hint) {
+  livehd::diag::sink().emit(livehd::diag::Diagnostic{.severity = livehd::diag::Severity::error,
+                                                     .code     = std::string{code},
+                                                     .category = "name",
+                                                     .pass     = "upass.runner",
+                                                     .message  = msg,
+                                                     .span     = span,
+                                                     .hint     = std::string{hint}});
+  throw std::runtime_error(msg);
+}
 
 struct Lnast_pass_noop_shared final : public upass::uPass {
   using upass::uPass::uPass;
@@ -328,12 +345,14 @@ void uPass_runner::emit_op_with_fold(bool fold_all) {
   const auto op_ntype = lm->current_type();
   emit_push(op_ntype);
 
-  // Carry a cassert's source span across the staging rebuild. prp2lnast records
-  // it (attach_loc) so the verifier can point at a comptime-false assertion, but
-  // a func_extract / constprop rebuild re-creates the node via emit_push, which
-  // doesn't copy loc. Scoped to cassert to avoid perturbing other nodes' dumps;
-  // the general per-node carry is the sourcemap work (task 1f).
-  if (op_ntype == Lnast_ntype::Lnast_ntype_cassert) {
+  // Carry a cassert's / func_call's source span across the staging rebuild.
+  // prp2lnast records it (attach_loc) so the verifier can point at a
+  // comptime-false assertion and the inliner can point at an argument-naming
+  // error, but a func_extract / constprop rebuild re-creates the node via
+  // emit_push, which doesn't copy loc. Scoped to these two op kinds to avoid
+  // perturbing other nodes' dumps; the general per-node carry is the sourcemap
+  // work (task 1f).
+  if (op_ntype == Lnast_ntype::Lnast_ntype_cassert || op_ntype == Lnast_ntype::Lnast_ntype_func_call) {
     const auto& src_ln  = lm->get_lnast();
     const auto  src_nid = lm->get_current_nid();
     const auto  loc     = src_ln->get_loc(src_nid);
@@ -842,6 +861,26 @@ bool uPass_runner::try_inline_func_call() {
   // ── Gather the call shape without disturbing the outer cursor ─────────────
   const auto saved = lm->save_cursor();
 
+  // Snapshot the call-site source span (cursor is on the func_call node) so the
+  // argument-naming diagnostics below can point at the call line. Read from the
+  // source tree (prp2lnast's attach_loc survives the lnastfmt round-trip).
+  livehd::diag::Span call_span;
+  {
+    const auto& src_ln = lm->get_lnast();
+    const auto  loc    = src_ln->get_loc(lm->get_current_nid());
+    const auto  fn     = src_ln->get_fname(lm->get_current_nid());
+    if (!fn.empty()) {
+      call_span.file = std::string(fn);
+    }
+    if (loc.line != 0) {
+      call_span.start_line = loc.line;
+    }
+    if (loc.pos1 != 0 || loc.pos2 != 0) {
+      call_span.start_byte = loc.pos1;
+      call_span.end_byte   = loc.pos2;
+    }
+  }
+
   lm->move_to_child();  // dst
   if (lm->get_raw_ntype() != Lnast_ntype::Lnast_ntype_ref) {
     lm->restore_cursor(saved);
@@ -925,6 +964,7 @@ bool uPass_runner::try_inline_func_call() {
 
   struct Actual {
     bool        is_named{false};
+    bool        is_ref_pass{false};  // `f(ref x)` — positional by design, exempt from naming rules
     std::string key;
     Lnast_node  node{Lnast_node::create_invalid()};
     std::string func_name;  // non-empty: this actual is a function value (closure)
@@ -959,7 +999,8 @@ bool uPass_runner::try_inline_func_call() {
       // actual, not a named one. Strip the marker so it binds by position and
       // the `ref` param's write-back fires (see the io.is_ref check below).
       if (a.key == "__ref_arg") {
-        a.is_named = false;
+        a.is_named    = false;
+        a.is_ref_pass = true;
         a.key.clear();
       }
       if (!lm->move_to_sibling()) {
@@ -999,9 +1040,50 @@ bool uPass_runner::try_inline_func_call() {
     }
     return nparams;
   };
-  std::size_t pos = 0;
+  // 06-functions.md §"Argument naming": every input must be named at the call
+  // site. Unnamed (positional) actuals are allowed only under narrow exceptions:
+  //   (1) exactly one non-self parameter (nothing to disambiguate),
+  //   (2) the actual is a bare variable whose name matches the parameter name,
+  //   (3) the actual's type uniquely identifies one parameter by kind (e.g.
+  //       `f(true, 7)` for `f(flag:bool, n:int)`). An untyped (kind=none) param
+  //       does NOT participate — it must be named unless it is the only arg.
+  // `self` (io.inputs[0] for a method) is always bound positionally by the UFCS
+  // receiver and is never named; pass-by-ref actuals (`f(ref x)`) are positional
+  // by design.
+  const bool        has_self       = nparams > 0 && io.inputs[0].name == "self";
+  const std::size_t n_named_params = nparams - (has_self ? 1 : 0);
+  // Classify a positional actual's scalar kind for exception (3). Const literals
+  // carry their kind verbatim; a typed `ref` whose declared range is known is an
+  // integer. Anything else is `none` (can't drive type-based disambiguation).
+  auto actual_kind = [&](const Lnast_node& node) -> Io_kind {
+    if (node.is_const()) {
+      const auto t = node.get_name();
+      if (t == "true" || t == "false") {
+        return Io_kind::boolean;
+      }
+      if (!t.empty() && (t.front() == '\'' || t.front() == '"')) {
+        return Io_kind::string;
+      }
+      if (t == "nil") {
+        return Io_kind::none;
+      }
+      if (auto v = Dlop::from_pyrope(t); v && v->is_integer()) {
+        return Io_kind::integer;
+      }
+      return Io_kind::none;
+    }
+    if (node.is_ref() && try_decl_type(node.get_name()).has_value()) {
+      return Io_kind::integer;  // typed scalar var (range carrier)
+    }
+    return Io_kind::none;
+  };
   for (auto& a : actuals) {
     if (a.is_named) {
+      if (a.key == "self") {
+        fcall_arg_fail(call_span, "fcall-self-named",
+                       std::format("`self` cannot be passed as a named argument to `{}`", callee_name),
+                       "self is bound positionally by the UFCS receiver (`value.method(...)`)");
+      }
       const auto idx = param_index(a.key);
       if (idx >= nparams) {
         // A bundle-typed param is flattened in io_meta to dotted leaves
@@ -1025,24 +1107,110 @@ bool uPass_runner::try_inline_func_call() {
           }
         }
         if (!expanded) {
-          return false;  // unknown named param
+          fcall_arg_fail(call_span, "fcall-unknown-arg",
+                         std::format("unknown argument `{}` in call to `{}`", a.key, callee_name),
+                         "remove it or rename it to a declared parameter");
         }
         continue;
+      }
+      if (param_set[idx]) {
+        fcall_arg_fail(call_span, "fcall-duplicate-arg",
+                       std::format("duplicate argument `{}` in call to `{}`", a.key, callee_name),
+                       "each parameter may be bound only once");
       }
       param_val[idx]  = a.node;
       param_set[idx]  = true;
       param_func[idx] = a.func_name;
     } else {
-      while (pos < nparams && param_set[pos]) {
-        ++pos;
+      // Positional actual. Bind it, honoring the naming exceptions.
+      auto bind = [&](std::size_t i) {
+        param_val[i]  = a.node;
+        param_set[i]  = true;
+        param_func[i] = a.func_name;
+      };
+      const auto next_unset = [&](std::size_t from) -> std::size_t {
+        for (std::size_t i = from; i < nparams; ++i) {
+          if (!param_set[i]) {
+            return i;
+          }
+        }
+        return nparams;
+      };
+      // Pass-by-ref (`f(ref x)`) binds positionally by design — exempt from the
+      // naming rules — and so does the UFCS receiver bound to `self` (the first
+      // positional actual when the callee declares self).
+      if (a.is_ref_pass) {
+        const auto slot = next_unset(0);
+        if (slot >= nparams) {
+          fcall_arg_fail(call_span, "fcall-too-many-args",
+                         std::format("too many positional arguments in call to `{}`", callee_name),
+                         "remove the extra argument(s) or pass them by name");
+        }
+        bind(slot);
+        continue;
       }
-      if (pos >= nparams) {
-        return false;  // too many positional actuals
+      if (has_self && !param_set[0]) {
+        bind(0);  // self ← UFCS receiver
+        continue;
       }
-      param_val[pos]  = a.node;
-      param_set[pos]  = true;
-      param_func[pos] = a.func_name;
-      ++pos;
+      // Exception 2: a bare variable whose name matches an unset, non-self
+      // parameter binds to THAT parameter — so reordered calls like `f(b, a)`
+      // bind by name, not position.
+      if (a.node.is_ref()) {
+        const auto nidx = param_index(a.node.get_name());
+        if (nidx < nparams && nidx >= (has_self ? 1u : 0u) && !param_set[nidx]) {
+          bind(nidx);
+          continue;
+        }
+      }
+      // Exception 1: exactly one non-self parameter — a single positional value
+      // (literal, expression, or non-matching variable) maps unambiguously.
+      if (n_named_params == 1) {
+        const auto slot = next_unset(has_self ? 1 : 0);
+        if (slot < nparams) {
+          bind(slot);
+          continue;
+        }
+      }
+      // Exception 3: the actual's kind uniquely identifies one unset, typed,
+      // non-self parameter (`f(true, 7)` → bool→flag, int→n). Untyped params
+      // (kind=none) never match, so an unnamed value beside an untyped param is
+      // still ambiguous and must be named.
+      if (const auto k = actual_kind(a.node); k != Io_kind::none) {
+        std::size_t match = nparams;
+        std::size_t count = 0;
+        for (std::size_t i = (has_self ? 1u : 0u); i < nparams; ++i) {
+          if (!param_set[i] && io.inputs[i].kind == k) {
+            match = i;
+            ++count;
+          }
+        }
+        if (count == 1) {
+          bind(match);
+          continue;
+        }
+      }
+      // Otherwise the positional argument is ambiguous and must be named.
+      const auto slot  = next_unset(has_self ? 1 : 0);
+      std::string pname = slot < nparams ? io.inputs[slot].name : std::string{"argument"};
+      if (slot >= nparams) {
+        fcall_arg_fail(call_span, "fcall-too-many-args",
+                       std::format("too many positional arguments in call to `{}`", callee_name),
+                       "remove the extra argument(s) or pass them by name");
+      }
+      fcall_arg_fail(call_span, "fcall-unnamed-arg",
+                     std::format("argument `{}` must be named (`{}=...`) in call to `{}`", pname, pname, callee_name),
+                     "name the argument, or pass a variable whose name matches the parameter");
+    }
+  }
+
+  // Every non-self parameter must be bound — io_meta carries no defaults, so an
+  // unset input means the caller omitted a required argument.
+  for (std::size_t i = (has_self ? 1 : 0); i < nparams; ++i) {
+    if (!param_set[i]) {
+      fcall_arg_fail(call_span, "fcall-missing-arg",
+                     std::format("missing required argument `{}` in call to `{}`", io.inputs[i].name, callee_name),
+                     "provide the argument by name");
     }
   }
 

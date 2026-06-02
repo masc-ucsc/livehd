@@ -1,0 +1,11 @@
+/*
+:name: overflow_force_set_wide
+:type: error
+:error: does not fit
+*/
+
+// A bit-set is an explicit force, but the selected field must still fit in the
+// destination object. A 10-bit field write is outside u8's 8-bit envelope.
+
+mut z:u8 = 0
+z#[0..=9] = 0

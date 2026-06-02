@@ -155,55 +155,6 @@ cross-file dependencies stay visible.
   (after import resolves) clears the taint. Depends on [[1m]] (import)
   and [[2o]] (pending-import poison + bundle pre-pass).
 
-- **2r** Pyrope comptime corner-case gaps surfaced by the test corpus —
-  small features that don't fit the larger Group-1/Group-2 entries but
-  each currently break one test.
-  - **`unique if` comptime fold + `__hotmux` direct call** — fixes
-    `prp-hotmux_unique_if`. Constprop currently leaves `__hotmux`
-    direct calls and `unique if` chains unresolved (verifier log:
-    `pass:2 fail:0 unknown:6`). Needs: (a) constprop recognition of
-    `__hotmux(s=<comptime onehot>, p1=…)` so the matching slot is
-    selected at comptime; (b) `unique if` chain folding when all guards
-    are comptime-known including the sticky-init fall-through path
-    when no guard fires.
-  - **Mixed match-arm prefixes + tuple `case` patterns** — fixes
-    `prp-match_arms_mixed`. Verifier log shows `pass:5` against the
-    declared `:verifier_pass: 6`; one cassert is not being counted.
-    Two candidate causes worth confirming: (1) the dead-`else` arm's
-    `cassert(false)` is correctly eliminated and the header should be
-    `:verifier_pass: 5`; (2) tuple-`case` pattern `case (a=1, b=2) {…}`
-    against a tuple selector isn't yet a comptime equality test. Audit
-    expected vs. emitted cassert count, then either fix the test
-    header or wire the tuple-`case` lowering.
-  - **String escapes / hex / raw / interpolation with escaped quote** —
-    fixes `prp-string_escapes`. Verifier log: `pass:8 fail:2 unknown:2`.
-    Needs scanner/lowering: (a) `\xNN` hex escapes inside cooked
-    strings; (b) raw (single-quoted) strings preserving backslashes
-    literally so `'line\nstill'.[size] == 11`; (c) interpolated cooked
-    strings tolerating an escaped quote inside the body
-    (`"tag=\"{tag}\""`); (d) `.[size]` attribute on string values.
-
-- **2s** Comptime-fold direct builtin cell calls — **needs hlop sync**
-  (stub; flesh out before implementation). The library-level cell
-  invocation form `__sum`/`__sub`/`__mult`/`__and`/`__or`/`__xor`/
-  `__shl`/`__sra`/`__get_mask`/`__set_mask`/`__sext`/`__zext`/`__ror`/
-  `__rand`/`__rxor`/`__mux`/… currently returns `unknown` in constprop:
-  the `#`-syntax LNAST ops fold, but the explicit `__cell(args)`
-  func-call form is not evaluated.
-  - **hlop sync is the crux.** The fold must mirror each cell's exact
-    `Dlop::*_op` semantics (single source of truth — do not reimplement;
-    cf. [[constprop_delegate_to_dlop]] rule), and the `__cell`
-    name↔Dlop-op mapping plus the arg/pin ABI must stay in lockstep
-    with hlop's cell definitions. Pin the hlop commit when this lands.
-  - Reads the typesystem envelope ([[1t]]/[[1v]]) for width-correct
-    results.
-  - Fixes the bulk of `prp-cellmap_comb` / `prp-cellmap_misc` `unknown`s
-    (the `cell_*` wrapper-comb halves landed via the comb inliner 1i; this
-    owns the direct `__cell` calls).
-  - **Overlap to coordinate:** `__hotmux` is also named under [[2r]]
-    (unique-if/hotmux dispatch). Decide which task owns `__hotmux` so it
-    isn't double-implemented.
-
 ## Group 3 — depends on Group 2
 
 - **3k** Automate doc-example ingestion: `extract.rb` (or equivalent)
@@ -227,7 +178,7 @@ cross-file dependencies stay visible.
     can't be reliably recovered when the `declare` lowers to `Fflop` / `Latch`
     (and `prim_type_register`'s `reset_pin` needs exactly that value). Fold the
     initializer into the optional 4th `[value]` child of `declare` — the slot
-    already sketched in [[1t]]'s `declare( var, <type>, const(mode), [value] )`
+    already sketched in the landed `declare( var, <type>, const(mode), [value] )`
     — so the init rides on the declare node and only genuine *re-assignments*
     emit a trailing `store`. Producer: `rewrite_decls_to_declare` /
     `process_lvalue_for_assign` in `inou/prp/prp2lnast.cpp` (the decl-cluster
@@ -258,7 +209,7 @@ cross-file dependencies stay visible.
   `inou/prp`, upass, and lgraph-pass diagnostics from
   [TODO_livehd.md](TODO_livehd.md) **3f**.
 
-## Failing-test → TODO mapping (snapshot 2026-05-30)
+## Failing-test → TODO mapping (snapshot 2026-06-01)
 
 Each `bazel test -c dbg //...` failure mapped to the TODO entry whose
 landing should fix it. When more than one entry is listed, the test
@@ -267,15 +218,13 @@ Tallies re-measured via the `prplib.py` comptime pipeline
 (`pass.upass constprop:1 verifier_pass:N verifier_fail:N
 [verifier_include_funcs:true]`).
 
-**Live suite = 8 fails / 248 pass** across `//inou //upass //lnast //pass`.
+**Live suite = 6 fails / 250 pass** across `//inou //upass //lnast //pass`.
 
 | Failing test | now | TODO entry | What it still needs |
 | --- | --- | --- | --- |
-| `prp-bitreverse` | 3/7/0 | [[1t]] | comb-inline (`reverse()`/`sreverse()`) landed via 1i; residual is the `for i in 0..<x.[bits]` unroll (needs comptime `.[bits]`) + bit / storage-width fold under 1t |
 | `prp-enum_color` | 0/1/2 | [[2l]], [[1k]] | enum with associated setters/methods |
 | `prp-enum_hier` | 0/0/6 | [[2l]] | nested / hierarchical enums |
 | `prp-enum_simple` | 0/0/9 | [[2l]] | base enum parsing + comptime tags |
 | `prp-enum_types` | 0/0/0 | [[2l]] | typed enum interplay with `does` (casserts unreached) |
-| `prp-match_arms_mixed` | 5/0/0 | [[2r]] | mixed match-arm prefixes + tuple `case` patterns (one cassert not counted) |
 | `prp-setter_complex` | 2/2/0 | [[1k]] | decorator-init implicit setter dispatch on `x:Tup = (…)` |
 | `prp-tuple_decorator_complex` | 0/0/2 | [[1k]] | tuple-decorator init triggering setter |

@@ -10,6 +10,6 @@ comb top(a, b) -> (c, d) {
   d = a - b;
 }
 
-const x = top(7,3)
+const x = top(a=7,b=3)
 cassert(x == (c=10, d=4))
 cassert(x.c == 10 and x.d == 4)

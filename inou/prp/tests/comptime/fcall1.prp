@@ -5,7 +5,7 @@
 :verifier_fail: 0
 */
 
-comb fcall1(a:u3, b:u7, cond:boolean) -> (res:s4) {
+comb fcall1(a:u3, b:u7, cond:bool) -> (res:s4) {
   if cond {
     res = a + 1
   }else{

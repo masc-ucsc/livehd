@@ -19,5 +19,5 @@ comb pick_max(a:u32, b:u32) -> (x:u32) {
   }
 }
 
-cassert(pick_max(3,50) == 50)
-cassert(pick_max(0,5) == 5)
+cassert(pick_max(a=3,b=50) == 50)
+cassert(pick_max(a=0,b=5) == 5)

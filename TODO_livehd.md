@@ -13,56 +13,6 @@ cross-file dependencies stay visible.
 
 ## Group 1 — foundation
 
-- **1t** Clean type / declaration / write model for LNAST. **Goal 1.**
-  **★ Full spec + all locked decisions + worked examples live in
-  [`docs/contracts/typesystem_clean_plan.md`](docs/contracts/typesystem_clean_plan.md).**
-  One `store` (replaces `assign`+`tuple_set`), one `declare` (replaces the
-  `attr_set`+`type_spec`+`assign` cluster), and a clean TYPE / MODE / OVERFLOW /
-  ATTRIBUTE split. Scalar kinds: `prim_type_int`(+`(max,min)`) / `_bool` /
-  `_string` / `_range` / `_none`; `bits`/`sign` **derived** from the range
-  (`sign = min<0`), never stored. Type sizing only via the type-call
-  `int(max=,min=,bits=)` + `uN`/`sN` sugar.
-
-  Structural model, declare/store, `prim_type_int` + `uN/sN` sizing (incl. typed
-  tuple fields — `a:u4` lowers to `prim_type_int(max,min)`; no `ubits`/`sbits` in
-  the producer or upasses), the validators, and wrap/sat-as-func-call have all
-  landed (green). The remaining piece:
-
-  - **T6 (deferred) — LGraph lowering:** derive sign/bits from the range at
-    cell creation (`lnast2lgraph.md §7`); `wrap`→`get_mask`, `sat`→`mux+get_mask`
-    (the wrap/sat func_call has no LGraph lowering yet); flatten N-level `store`;
-    `prim_type_memory`/`prim_type_register` (mirror `graph/cell.hpp`
-    `Memory`/`Flop`/`Latch`/`Fflop`; absent from `lnast_nodes.def`) + `ref`/`get_time`
-    (`stage`/`await` timing). Perf/doc deferrals: `derive_bits` wide-type caching;
-    `lnast_spec.md §11.3/§11.4` store-unification update. (NOTEs: `bitreverse` — the
-    only 1t-attributed failing prp test — needs comptime `.[bits]` on typed values
-    so `for i in 0..<x.[bits]` unrolls; task-1v named-type *semantics* is NOT a 1t
-    blocker — `typesystem.prp` is GREEN 29/29, tracked under [[1v]]. The slang
-    `__ubits`/`__sbits` via `create_declare_bits_stmts` is a SEPARATE legacy
-    `pass/bitwidth` path — left alone.)
-
-  **Depends on** [[1v]] (envelope landed). Sibling of the comb inliner (1i).
-
-- **1n** Relocate `upass/bitwidth` from an iterative fold-pass to a standalone
-  **read-only finalization pass**. **Goal 1.** **★ Authority = `upass/upass.md`
-  §2 "bitwidth" + §1 finalization phase + §8 gates + §11 step 9 — read those
-  first; this entry is the implementation checklist.** Today `bitwidth` is a
-  `fold_ref`-capable plugin interleaved in the runner walk that flushes a
-  name-keyed `lnast->bw_meta()` side map with **no consumer**, and reports
-  out-of-range only via `Pass::warn`. Target: a single whole-tree pass that runs
-  *after* the runner and *after* SSA rename/flatten, derives exact `Dlop`
-  `max`/`min` per result, errors on **provable** type-envelope overflow, and
-  publishes `max`/`min` as **per-node HHDS tree attrs** for `lnast_to_lgraph`.
-
-  **N1–N5 landed** (green, net-neutral): decoupled from the fold loop (`fold_ref`
-  removed), runs as the LAST in-walk opt pass (after SSA), exact-`max`/`min` no-inf
-  range model, centralized `core/diag` `bitwidth-overflow` error, tightened
-  `div`/`mod`/`sext` lattice. **Remaining (deferred until `lnast_to_lgraph` exists —
-  see 1t-(B)):** replace the name-keyed `bw_meta` side map with per-node HHDS tree
-  attrs the LGraph lowering reads at node creation; swap int64 range bounds for
-  exact `Dlop` (>64-bit path). **Untouched:** `pass/bitwidth` (the LGraph-level
-  Verilog-ingress pass) stays — same name, different path.
-
 - **1s** Sanitizer pass — chase a nondeterministic memory bug in the
   comptime/string path. **Goal 1.** **Run on Linux (macOS can't do MSan).**
   - **Symptom.** `string_hello` (and likely other comptime/string tests)
@@ -206,11 +156,11 @@ cross-file dependencies stay visible.
   `declare` with no readers kept iff reg/mut/IO else dropped; multi-branch shared
   temp emitted once at the dominator LCA and dominating both uses.
 
-  **Relationships.** Generalizes constprop's scalar `fold_ref`. Sibling of the
-  declare/store node work [[1t]] (the `declare` handling must match the post-1t node
-  shape) and the bit-range LHS producer lowering (landed — the comptime bit-ranges
-  it emits, e.g. `x#[5..+5]`, are the motivating case). Must keep [[1n]] bitwidth
-  (read-only, runs after SSA) able to see `declare` type info — hence D1's declare
+  **Relationships.** Generalizes constprop's scalar `fold_ref`. The `declare`
+  handling must match the landed declare/store node shape, and the bit-range LHS
+  producer lowering (landed — the comptime bit-ranges it emits, e.g. `x#[5..+5]`,
+  are the motivating case). Must keep the landed read-only bitwidth finalization
+  pass (runs after SSA) able to see `declare` type info — hence D1's declare
   keepalive.
 
 ## Group 1-complex — foundation, larger scope
@@ -227,51 +177,7 @@ Group 1 entries; downstream Groups treat them as Group 1 dependencies.
 
 ## Group 2 — depends on Group 1
 
-- **2t** Finish removing `Dlop`/`Slop` `is_i()`/`to_i()` from the value layer
-  (and delete the symbols) — **not started.** Depends on [[1g]] (the uPass passes
-  + `inou/prp` already migrated to `to_index()`, and `to_index` landed in hlop).
-  - Migrate the **legacy LGraph path** to `to_index()` / `Const` ops:
-    `pass/bitwidth/bitwidth.cpp` (13), `pass/bitwidth/bitwidth_range.cpp` (6),
-    `pass/cprop/cprop.cpp` (11), `inou/cgen/cgen_verilog.cpp` (11),
-    `core/pin_tracker.hpp` (3), `graph/const_pin.cpp` (2).
-  - Migrate the **hlop internals**: `eval.hpp` (shl/sra/mux/mem),
-    `dlop.cpp` (shl/sra/mux/lut/mem). The `to_pyrope`/`to_string`/`to_verilog`
-    formatting fast-paths read `base()` directly behind an internal
-    `get_bits()<=62 && !has_unknowns()` check (no public accessor needed). Plus
-    the 5 hlop test files (`dlop_test`, `slop_test`, `eval_test`,
-    `slop_dlop_diff_test`, `slop_sint_diff_test`).
-  - Then **delete** `Dlop::is_i`/`to_i` (`dlop.hpp`/`dlop.cpp`) and
-    `Slop::is_i`/`to_i` (`slop.hpp`). Push + pin-bump. Keep both repos green.
-
-- **2h** Demand-driven incremental upass cache keyed on
-  `(tree_body_hash, deps.interface_hash)` —
-  `docs/contracts/architecture.md §4`.
-- **2j** Hot-reload tier reporting in JSONL (`hot-debug` / `hot-approx` /
-  `cold`) — `docs/contracts/architecture.md §8`.
-- **2k** Verifier `pending` counter + `:type: top` semantics. Once the
-  upass `pending_import` poison mechanism (see `docs/upass_redesign.md`)
-  is functional, the verifier needs a third disposition: a cassert whose
-  cond is still poisoned at end-of-walk is `pending` (not pass, not fail).
-  Add a `verifier_pending:N` counter alongside `verifier_pass` /
-  `verifier_fail`. For tests tagged `:type: top` (whole-program runs),
-  pending casserts are rolled into the pass count — the contract is "at
-  the top level all imports must resolve, so any surviving pending is a
-  bug." For non-top tests (libraries with deferred imports), `pending`
-  is a legitimate disposition. Complications worth working out:
-    - A cassert that started pending on invocation N and then proves
-      true on invocation N+1 should count once as pass, not once as
-      pending then again as pass. Tally lifetime is per-program, not
-      per-invocation.
-    - `:type: top` aggregation crosses LNASTs in `var.lnasts` (including
-      func_extract-spawned bodies) and the `verifier_include_funcs` knob
-      already in `pass.upass`. The pending→pass roll-up should respect
-      that scope.
-    - Reporting: an unresolved pending at `:type: top` end-of-run needs
-      a diagnostic naming the blocking `import`(s); requires keeping
-      enough info on the `__pending_import` marker to identify the
-      blocker (today the redesign uses a presence-only flag).
-    - A cassert that started pending and later proves false is a hard
-      error, same as any known-false cassert.
+(none — prior LiveHD-internal Group 2 items completed or descoped.)
 
 ## Group 3 — depends on Group 2
 
@@ -568,9 +474,8 @@ Deliverables:
   anti-patterns above — landed *with* the sweep so the regression gates
   have something to lock in.
 
-Sequenced as **5e** so it lands after the upass cache (**2h**) and
-partition descriptor (**3c**) have stabilized — otherwise we'd be
-optimizing APIs that are still moving.
+Sequenced as **5e** so it lands after the partition descriptor (**3c**)
+has stabilized — otherwise we'd be optimizing APIs that are still moving.
 
 ## simlib fixed-width int types
 

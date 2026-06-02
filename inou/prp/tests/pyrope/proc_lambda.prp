@@ -11,4 +11,4 @@ comb do_thing(a, b) -> (r) {
 
 cassert(do_thing(a=5,b=2) == 3)
 cassert(do_thing(b=2,a=5) == 3)
-cassert(do_thing(7,2) == 5)
+cassert(do_thing(a=7,b=2) == 5)
