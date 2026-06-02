@@ -101,7 +101,7 @@ cross-file dependencies stay visible.
     reference the source-map ID rather than re-encoding `file:line:col`
     in every temp name.
   - Cascades into golden-file updates ([[1h]] and TODO_verilog.md
-    [[3a]]); land before those goldens are taken.
+    [[2d]]); land before those goldens are taken.
 
 - **2o** Two-phase `upass/func_extract` (parallel per-LNAST, then top-down
   resolve) — `import.md`. Depends on the `import` feature landing (no
@@ -193,7 +193,7 @@ cross-file dependencies stay visible.
 
 - **4i** Golden-output baseline in `inou/prp/tests/equiv/`: feature-broad
   equiv tests with LNAST/LGraph golden dumps so semantic regressions
-  surface as diffs. Depends on TODO_verilog.md [[3a]]
+  surface as diffs. Depends on TODO_verilog.md [[2d]]
   (`lnast_to_lgraph` finished + Verilog round-trip), since these are
   equiv tests for the lnast→lgraph path, not compile-time-constant
   checks. Each failing-comptime-test category (enums, bits, wrap/sat,

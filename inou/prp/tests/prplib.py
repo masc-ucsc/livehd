@@ -1,9 +1,11 @@
 #!/usr/bin/env python3
 
 import argparse
+import glob
 import json
 import os
 import re
+import shutil
 import subprocess
 import sys
 
@@ -135,13 +137,15 @@ class PrpRunner:
         return lg_cmd
 
     def lgshell_lgraph(self, test):
-        lg_cmd = self.lgshell_upass(test)
+        # LNAST->LGraph: the terminal `tolg` sub-pass of pass.upass lowers each
+        # fully-specified function tree to an LGraph and leaves it on the pass
+        # var (var.graphs) for downstream LGraph passes / cgen. There is no
+        # separate pass.lnastopt / pass.lnast_tolg (those were placeholders).
+        # No trailing pass.lnastfmt: after tolg the var carries graphs, not LNAST.
+        lg_cmd = self.lgshell_lnast(test)
 
         lg_cmd.append('|>')
-        lg_cmd.append('pass.lnastopt')
-
-        lg_cmd.append('|>')
-        lg_cmd.append('pass.lnast_tolg')
+        lg_cmd.append('pass.upass constprop:1 verifier:false tolg:1')
 
         return lg_cmd
 
@@ -153,6 +157,17 @@ class PrpRunner:
 
         lg_cmd.append('|>')
         lg_cmd.append('pass.bitwidth')
+
+        return lg_cmd
+
+    def lgshell_equiv(self, test, odir):
+        # Equivalence test: lower to LGraph (tolg) then emit Verilog into `odir`.
+        # run_equiv() then LECs the generated Verilog against the sibling golden
+        # `.v` via inou/yosys/lgcheck.
+        lg_cmd = self.lgshell_lgraph(test)
+
+        lg_cmd.append('|>')
+        lg_cmd.append('inou.cgen.verilog odir:{}'.format(odir))
 
         return lg_cmd
 
@@ -257,6 +272,113 @@ class PrpRunner:
         return 0
 
     @staticmethod
+    def _verilog_modules(vpath):
+        # Names (unescaped, without the leading `\`) of all modules declared in
+        # a verilog file, in declaration order. Stops the name at whitespace or
+        # `(` so `module \foo.bar(` and `module foo (` both yield `foo.bar`/`foo`.
+        try:
+            with open(vpath) as f:
+                text = f.read()
+        except OSError:
+            return []
+        return re.findall(r'\bmodule\s+\\?([^\s(]+)', text)
+
+    @staticmethod
+    def _verilog_top_module(vpath):
+        # Name (unescaped) of the first module declared in a verilog file.
+        mods = PrpRunner._verilog_modules(vpath)
+        return mods[0] if mods else None
+
+    def run_equiv(self, tmp_dir, test: PrpTest):
+        # Lower each .prp function to Verilog (inou.prp -> pass.upass tolg:1 ->
+        # inou.cgen.verilog) and prove it equivalent to its sibling golden .v
+        # via inou/yosys/lgcheck (formal LEC). The generated module names are
+        # the function-tree names (e.g. trivial_if.fun3); the golden must
+        # declare the same module name so lgcheck --top matches.
+        name = test.params['name']
+        prp  = test.params['files'][0]
+        gold = os.path.splitext(prp)[0] + '.v'
+        gold_abs = gold if os.path.isabs(gold) else os.path.join(tmp_dir, gold)
+
+        if not os.path.exists(gold_abs):
+            print('{} - equiv - FAILED: no golden verilog {}'.format(name, gold))
+            return 1
+
+        safe_name = re.sub(r'\W+', '_', name)
+        # `tmp*` prefix so the generated dir is covered by the repo .gitignore
+        # when the harness is run manually from the repo root.
+        odir = os.path.join(tmp_dir, 'tmp_equiv_' + safe_name)
+        shutil.rmtree(odir, ignore_errors=True)
+        os.makedirs(odir, exist_ok=True)
+
+        cmd  = [self.lgshell, ' '.join(self.lgshell_equiv(test, odir))]
+        proc = subprocess.Popen(cmd, cwd=tmp_dir, stdout=subprocess.PIPE, stderr=subprocess.STDOUT)
+        try:
+            log, _ = proc.communicate()
+            rc = proc.returncode
+        except Exception:
+            proc.kill()
+            rc, log = 1, b''
+        if rc != 0:
+            print('{} - equiv - FAILED: prp->verilog pipeline rc={}'.format(name, rc))
+            print(log.decode('utf-8', 'ignore'))
+            return 1
+
+        gen_vs = sorted(v for v in glob.glob(os.path.join(odir, '*.v')))
+        if not gen_vs:
+            print('{} - equiv - FAILED: no verilog generated in {}'.format(name, odir))
+            print(log.decode('utf-8', 'ignore'))
+            return 1
+
+        impl = os.path.join(odir, 'all_' + safe_name + '_impl.v')
+        with open(impl, 'w') as out:
+            for v in gen_vs:
+                with open(v) as f:
+                    out.write(f.read())
+                    out.write('\n')
+
+        # The reference (golden .v) and implementation (pyrope-generated .v) may
+        # use DIFFERENT module names, and a .prp may generate several modules.
+        # The header pins which module to compare on each side:
+        #   :verilog_top:  module name in the golden .v   (reference side)
+        #   :pyrope_top:   generated module name to check (implementation side)
+        # Defaults: verilog_top = first module in the golden; pyrope_top = the
+        # generated module (when unique) or the one matching verilog_top.
+        verilog_top = (test.params.get('verilog_top') or '').strip() or self._verilog_top_module(gold_abs)
+        if not verilog_top:
+            print('{} - equiv - FAILED: no reference top (set :verilog_top: or declare a module in {})'.format(name, gold))
+            return 1
+
+        pyrope_top = (test.params.get('pyrope_top') or '').strip()
+        if not pyrope_top:
+            gen_mods = self._verilog_modules(impl)
+            if len(gen_mods) == 1:
+                pyrope_top = gen_mods[0]
+            elif verilog_top in gen_mods:
+                pyrope_top = verilog_top
+            else:
+                print('{} - equiv - FAILED: {} generated modules {}; set :pyrope_top:'.format(name, len(gen_mods), gen_mods))
+                return 1
+
+        check = subprocess.Popen(
+            ['./inou/yosys/lgcheck', '--reference', gold, '--implementation', impl,
+             '--reference_top', verilog_top, '--implementation_top', pyrope_top],
+            cwd=tmp_dir, stdout=subprocess.PIPE, stderr=subprocess.STDOUT)
+        try:
+            clog, _ = check.communicate()
+            crc = check.returncode
+        except Exception:
+            check.kill()
+            crc, clog = 1, b''
+
+        if crc == 0:
+            print('{} - equiv - success (verilog_top:{} pyrope_top:{})'.format(name, verilog_top, pyrope_top))
+            return 0
+        print('{} - equiv - FAILED: lgcheck not equivalent (verilog_top:{} pyrope_top:{})'.format(name, verilog_top, pyrope_top))
+        print(clog.decode('utf-8', 'ignore'))
+        return 1
+
+    @staticmethod
     def _find_marker_lines(test: PrpTest):
         # 1-based line numbers of any comment containing `locate_error_here`.
         marker = 'locate_error_here'
@@ -277,6 +399,9 @@ class PrpRunner:
         for mode in test.params['type']:
             if mode == 'error':
                 rc = self.run_error(tmp_dir, test)
+                continue
+            if mode == 'equiv':
+                rc = self.run_equiv(tmp_dir, test)
                 continue
 
             cmd = []

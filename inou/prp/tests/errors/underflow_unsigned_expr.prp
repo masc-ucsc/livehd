@@ -9,4 +9,9 @@
 
 mut v8:s8 = -1
 const ones = v8 | 0xff
-const c:u8 = ones
+
+//mut c_ok:u8 = nil
+//wrap c_ok = ones
+//cassert(c_ok == 255)
+
+const c:u8 = ones  // locate_error_here

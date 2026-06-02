@@ -28,6 +28,7 @@ cc_library(
         "//upass/noop:upass_noop",
         "//upass/runner:upass_runner",
         "//upass/ssa:upass_ssa",
+        "//upass/tolg:upass_tolg",
         "//upass/typecheck:upass_typecheck",
         "//upass/verifier:upass_verifier",
     ],

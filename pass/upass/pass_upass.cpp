@@ -18,6 +18,7 @@
 #include "upass_constprop.hpp"
 #include "upass_runner.hpp"
 #include "upass_ssa.hpp"
+#include "upass_tolg.hpp"
 #include "upass_typecheck.hpp"  // NOLINT: ensures plugin "typecheck" is linked
 #include "upass_verifier.hpp"
 
@@ -87,6 +88,10 @@ void Pass_upass::setup() {
   m1.add_label_optional("assert", "enable assert test", "true");
   m1.add_label_optional("func_extract", "enable func_extract upass (spawn helper lnasts for comb func_defs)", "true");
   m1.add_label_optional("typecheck", "enable typecheck upass (kind/operator/nil checks; runs after attributes)", "true");
+  m1.add_label_optional("tolg",
+                        "lower each fully-specified function tree to an LGraph (task 1l); leaves graphs on the pass var "
+                        "for inou.cgen.verilog. Terminal step: runs after ssa+bitwidth. Default off.",
+                        "false");
   m1.add_label_optional(
       "order",
       "comma-separated upass names; overrides verifier/constprop/assert toggles (example: verifier,constprop,verifier)",
@@ -169,6 +174,12 @@ Pass_upass::Pass_upass(const Eprp_var& var) : Pass("pass.upass", var) {
   auto ssa_txt = get_label("ssa");
   bool do_ssa  = ssa_txt != "false" && ssa_txt != "0";
   run_ssa      = do_ssa;
+
+  // tolg is a terminal LNAST->LGraph step (task 1l), not part of the runner
+  // order. Default off; enabled with tolg:1. Runs after the main walk so
+  // ssa (io_meta) and bitwidth (bw_meta) have populated their side-channels.
+  auto tolg_txt = get_label("tolg");
+  run_tolg      = tolg_txt != "false" && tolg_txt != "0";
 
   auto func_extract_txt = get_label("func_extract");
   bool do_func_extract  = func_extract_txt != "false" && func_extract_txt != "0";
@@ -340,6 +351,19 @@ void Pass_upass::work(Eprp_var& var) {
     auto new_lnasts = runner.take_new_lnasts();
     for (const auto& new_ln : new_lnasts) {
       var.add(new_ln);
+    }
+  }
+
+  // ── Terminal LNAST->LGraph lowering (tolg:1, task 1l). Runs last, after
+  // ssa populated io_meta() and bitwidth populated bw_meta() for every lnast.
+  // Each fully-specified function tree becomes one hhds::Graph pushed onto the
+  // pass var so a downstream inou.cgen.verilog stage can emit it.
+  if (up.run_tolg) {
+    for (const auto& ln : var.lnasts) {
+      auto g = uPass_tolg::run(ln, "lgdb_tolg");
+      if (g) {
+        var.add(g);
+      }
     }
   }
 

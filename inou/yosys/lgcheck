@@ -17,6 +17,8 @@ fi
 
 CELLLIB=""
 OPT_TOP=""
+GOLD_TOP=""
+GATE_TOP=""
 GOLD=""
 GATE=""
 while true; do
@@ -66,6 +68,26 @@ while true; do
       ;;
     esac
     ;;
+  --reference_top | --gold_top)
+    # top module name to select on the reference/gold side (overrides --top)
+    case "$2" in
+    "") shift 2 ;;
+    *)
+      GOLD_TOP=$2
+      shift 2
+      ;;
+    esac
+    ;;
+  --implementation_top | --gate_top)
+    # top module name to select on the implementation/gate side (overrides --top)
+    case "$2" in
+    "") shift 2 ;;
+    *)
+      GATE_TOP=$2
+      shift 2
+      ;;
+    esac
+    ;;
   "") break ;;
   *)
     argument=$1
@@ -106,7 +128,15 @@ if [ ! -f "${YOSYS}" ]; then
   fi
 fi
 
+# Per-side top defaults: an unset --reference_top/--implementation_top falls
+# back to the shared --top, so plain `--top X` keeps working unchanged.
+if [ "${GOLD_TOP}" == "" ]; then GOLD_TOP=$OPT_TOP; fi
+if [ "${GATE_TOP}" == "" ]; then GATE_TOP=$OPT_TOP; fi
+
 fm_top=$OPT_TOP
+if [ "${fm_top}" == "" ]; then
+  fm_top=$GATE_TOP
+fi
 if [ "${fm_top}" == "" ]; then
   filename=$(basename -- "$GATE")
   fm_top="${filename%.*}"
@@ -129,9 +159,9 @@ if [ -x "${FM_SHELL}" ]; then
   set_app_var hdlin_ignore_parallel_case false
   set_app_var hdlin_ignore_full_case false
   read_sverilog -r  \"${GOLD}\"
-  set_top ${fm_top}
+  set_top ${GOLD_TOP:-$fm_top}
   read_sverilog -i  \"${GATE}\"
-  set_top ${fm_top}
+  set_top ${GATE_TOP:-$fm_top}
   match
   report_unmatched_points >> \"fm_${fm_top}_error.log\"
   if { ![verify] }  {
@@ -158,12 +188,18 @@ if [ ! -f ${YOSYS} ]; then
   exit 1
 fi
 
-TOP_STR="-auto-top"
-if [ "${OPT_TOP}" != "" ]; then
-  TOP_STR="-top $OPT_TOP"
+# Select each side's top independently so the reference and implementation may
+# use DIFFERENT module names (both are renamed to gold/gate before comparison).
+GOLD_TOP_STR="-auto-top"
+if [ "${GOLD_TOP}" != "" ]; then
+  GOLD_TOP_STR="-top $GOLD_TOP"
+fi
+GATE_TOP_STR="-auto-top"
+if [ "${GATE_TOP}" != "" ]; then
+  GATE_TOP_STR="-top $GATE_TOP"
 fi
 
-echo "checking GATE:$GATE vs GOLD:$GOLD with top:$OPT_TOP directory:$PWD"
+echo "checking GATE:$GATE (top:${GATE_TOP}) vs GOLD:$GOLD (top:${GOLD_TOP}) directory:$PWD"
 
 if [ "${CELLLIB}" != "" ]; then
   if [ ! -f ${CELLLIB} ]; then
@@ -176,8 +212,8 @@ fi
 
 #exit 2
 
-yosys_read="read_verilog -sv ${GOLD}; hierarchy ${TOP_STR}; proc; flatten; rename -top gold; design -stash gold;
-            read_verilog -sv ${GATE}; hierarchy ${TOP_STR}; proc; flatten; rename -top gate; design -stash gate;
+yosys_read="read_verilog -sv ${GOLD}; hierarchy ${GOLD_TOP_STR}; proc; flatten; rename -top gold; design -stash gold;
+            read_verilog -sv ${GATE}; hierarchy ${GATE_TOP_STR}; proc; flatten; rename -top gate; design -stash gate;
             design -copy-from gold -as gold gold; design -copy-from gate -as gate gate; ${lib};"
 
 yosys_prep="proc; memory -nomap; write_verilog trace0.v ; equiv_make gold gate equiv; write_verilog trace0b.v ; prep -flatten -top equiv; hierarchy -top equiv; hierarchy -check; flatten; proc; opt_clean;"
@@ -214,8 +250,8 @@ else
   RESET_STMT=""
 fi
 
-${YOSYS} -p " read_verilog -sv ${GOLD}; hierarchy ${TOP_STR}; proc; opt; flatten ; rename -top gold; prep -top gold ; design -stash gold;
-              read_verilog -sv ${GATE}; hierarchy ${TOP_STR}; proc; opt; flatten ; rename -top gate; prep -top gate ; design -stash gate;
+${YOSYS} -p " read_verilog -sv ${GOLD}; hierarchy ${GOLD_TOP_STR}; proc; opt; flatten ; rename -top gold; prep -top gold ; design -stash gold;
+              read_verilog -sv ${GATE}; hierarchy ${GATE_TOP_STR}; proc; opt; flatten ; rename -top gate; prep -top gate ; design -stash gate;
               design -copy-from gold -as gold gold
               design -copy-from gate -as gate gate
 
@@ -260,8 +296,8 @@ if [[ "${LGCHECK_BMC_STEPS}" =~ ^[0-9]+$ ]] && [ "${LGCHECK_BMC_STEPS}" -gt 0 ];
     bmc_sat_cmds+="sat -seq ${t} -set-init-zero -set-def-inputs -set-at ${t} trigger 1 -show-ports miter; "
   done
 
-  ${YOSYS} -q -p "read_verilog -sv ${GOLD}; hierarchy ${TOP_STR}; proc; memory; opt; flatten ; rename -top gold; prep -top gold ; design -stash gold;
-                  read_verilog -sv ${GATE}; hierarchy ${TOP_STR}; proc; memory; opt; flatten ; rename -top gate; prep -top gate ; design -stash gate;
+  ${YOSYS} -q -p "read_verilog -sv ${GOLD}; hierarchy ${GOLD_TOP_STR}; proc; memory; opt; flatten ; rename -top gold; prep -top gold ; design -stash gold;
+                  read_verilog -sv ${GATE}; hierarchy ${GATE_TOP_STR}; proc; memory; opt; flatten ; rename -top gate; prep -top gate ; design -stash gate;
                   design -copy-from gold -as gold gold
                   design -copy-from gate -as gate gate
                   miter -equiv -flatten -make_outputs gold gate miter

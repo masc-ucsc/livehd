@@ -1,9 +1,11 @@
 /*
 :name: trivial_if
 :type: equiv
+:verilog_top: trivial_if.fun3
+:pyrope_top: trivial_if.fun3
 */
 
-comb trivia_if(a:u3, b:u7, cond:boolean) -> (res:u4) {
+comb fun3(a:u3, b:u7, cond:boolean) -> (res:u4) {
   if cond {
     res = a + 1
   }else{

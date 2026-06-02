@@ -1,4 +1,4 @@
-module trivia_if(
+module \trivial_if.fun3 (
   input  [2:0] a,
   input  [6:0] b,
   input        cond,
