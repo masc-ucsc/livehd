@@ -5,9 +5,12 @@ set -eu
 LGSHELL="${TEST_SRCDIR}/${TEST_WORKSPACE}/main/lgshell"
 
 # Pyrope source: write `tmp` three times before its first read, with each RHS
-# referencing an input port (`$a`) so constprop cannot fold it. coalescer:1
-# should drop the first two `tmp = ___N` assigns (dead stores); coalescer:0
-# should keep all three.
+# referencing an unknown-bit value (`a = 0ub?`) so constprop cannot fold it.
+# coalescer:1 should drop the first two `tmp = ___N` assigns (dead stores);
+# coalescer:0 should keep all three. Keep these as bare top-level statements
+# (no `comb`/`mod` wrapper): a lambda body would be SSA-renamed (`tmp`,
+# `tmp___ssa_1`, …) and the same-name DSE the coalescer performs would no
+# longer be observable in the dump.
 
 PRP="${TEST_TMPDIR}/coalescer_dse.prp"
 cat >"${PRP}" <<'EOF'
@@ -16,10 +19,11 @@ cat >"${PRP}" <<'EOF'
 :type: upass
 */
 
-mut tmp = $a + 1
-tmp = $a + 2
-tmp = $a + 3
-%out = tmp
+mut a = 0ub?
+mut tmp = a + 1
+tmp = a + 2
+tmp = a + 3
+mut out = tmp
 EOF
 
 run_pipeline() {
@@ -36,7 +40,7 @@ run_pipeline 1 "${OUT1}"
 
 # Count `assign:` stmts whose first child is `tmp` — these are the dead-store
 # candidates. coalescer:0 should see >=3 (one per source-level `tmp = …`);
-# coalescer:1 should see exactly 1 (only the live store before %out reads tmp).
+# coalescer:1 should see exactly 1 (only the live store before `out` reads tmp).
 count_tmp_assigns() {
   # Task 1t — statement-level writes lower to `store` (formerly `assign`); the
   # dead-store behavior is unchanged, only the node name in the dump.
