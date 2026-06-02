@@ -23,37 +23,23 @@ cross-file dependencies stay visible.
   (`sign = min<0`), never stored. Type sizing only via the type-call
   `int(max=,min=,bits=)` + `uN`/`sN` sugar.
 
-  Structural model, declare/store, `prim_type_int`+`uN/sN` sizing, the validators,
-  and wrap/sat-as-func-call have all landed (green). What remains:
+  Structural model, declare/store, `prim_type_int` + `uN/sN` sizing (incl. typed
+  tuple fields — `a:u4` lowers to `prim_type_int(max,min)`; no `ubits`/`sbits` in
+  the producer or upasses), the validators, and wrap/sat-as-func-call have all
+  landed (green). The remaining piece:
 
-  - **(A) `ubits`/`sbits` legacy removal — needs the typed-field representation
-    rework (NOT a producer swap).** The bare `ubits`/`sbits` has exactly one live
-    producer: typed tuple fields (`t = (a:u4=3)`) lower to
-    `attr_set(tuple_get_tmp, "ubits"/"sbits", N)` (`prp2lnast.cpp` ~4950); the
-    upass `ubits`/`sbits` read/derive path (`attributes` derive_bits + process_attr_set,
-    `bitwidth` process_attr_set) consumes it. **Tried + reverted 2026-06-01:**
-    swapping that emission to `type_spec(tuple_get_tmp, prim_type_int)` breaks 11
-    tuple tests — `pass.lnastfmt::check_unwritten_tmps` flags the tmp as
-    "read-under-`type_spec` but never written" because `attr_set` counts as a pos-0
-    write (`parent_writes_pos0`) and survives upass DCE, whereas a `type_spec` does
-    not, and the producing `tuple_get` is DCE'd post-upass. The correct fix is
-    T3's **typed-tuple-field → nested `declare`** representation (carry the field
-    type inside the `tuple_add` as a `declare`, not an attr on a transient
-    tuple_get tmp) + teaching the constprop bundle/shape machinery + bitwidth to
-    read it — substantial, high-regression-risk. The slang `__ubits`/`__sbits`
-    (`create_declare_bits_stmts`) is a SEPARATE legacy `pass/bitwidth` path — leave
-    it. Related: `bitreverse` (the only 1t-attributed failing prp test) needs
-    comptime `.[bits]` on typed values so `for i in 0..<x.[bits]` unrolls.
-
-  - **(B) T6 (deferred) — LGraph lowering:** derive sign/bits from the range at
+  - **T6 (deferred) — LGraph lowering:** derive sign/bits from the range at
     cell creation (`lnast2lgraph.md §7`); `wrap`→`get_mask`, `sat`→`mux+get_mask`
     (the wrap/sat func_call has no LGraph lowering yet); flatten N-level `store`;
     `prim_type_memory`/`prim_type_register` (mirror `graph/cell.hpp`
     `Memory`/`Flop`/`Latch`/`Fflop`; absent from `lnast_nodes.def`) + `ref`/`get_time`
     (`stage`/`await` timing). Perf/doc deferrals: `derive_bits` wide-type caching;
-    `lnast_spec.md §11.3/§11.4` store-unification update. (NOTE: task-1v named-type
-    *semantics* is NOT a 1t blocker — `typesystem.prp` is GREEN 29/29; the deeper 1v
-    work is tracked under [[1v]].)
+    `lnast_spec.md §11.3/§11.4` store-unification update. (NOTEs: `bitreverse` — the
+    only 1t-attributed failing prp test — needs comptime `.[bits]` on typed values
+    so `for i in 0..<x.[bits]` unrolls; task-1v named-type *semantics* is NOT a 1t
+    blocker — `typesystem.prp` is GREEN 29/29, tracked under [[1v]]. The slang
+    `__ubits`/`__sbits` via `create_declare_bits_stmts` is a SEPARATE legacy
+    `pass/bitwidth` path — left alone.)
 
   **Depends on** [[1v]] (envelope landed). Sibling of producer bit lowering (1d)
   and the comb inliner (1i).

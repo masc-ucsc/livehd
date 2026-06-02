@@ -5,8 +5,8 @@
 :verifier_fail: 0
 */
 
-mut x::[sbits=8] = 0
-mut z::[ubits=8] = 0
+mut x:s8 = 0
+mut z:u8 = 0
 
 wrap x =0sb1001_0111_1111
 cassert(x == 0sb0111_1111)

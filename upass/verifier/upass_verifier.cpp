@@ -223,7 +223,12 @@ upass::Emit_decision uPass_verifier::classify_func_call() {
     move_to_parent();
     return upass::Emit_decision::emit_node();
   }
-  const auto fname = std::string{current_text()};
+  // The function-name child is a global identifier ("cputs"), not a local
+  // variable, so read it RAW. While an inline frame is active, current_text()
+  // would prepend the frame tag (cputs → inlN_cputs) and this match would fail,
+  // silently dropping the cputs to emit_node — so a cputs inside an inlined comb
+  // never printed. (cassert dodges this: it's matched by node type, not name.)
+  const auto fname = std::string{lm->current_raw_text()};
   if (fname != "cputs") {
     move_to_parent();
     return upass::Emit_decision::emit_node();

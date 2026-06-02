@@ -5,7 +5,7 @@
 :verifier_fail: 0
 */
 
-mut x::[ubits=12] = 0
+mut x:u12 = 0
 
 wrap x = 0xFEAD
 

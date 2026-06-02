@@ -125,9 +125,10 @@ const uPass_attributes::Type_info* uPass_attributes::lookup_type_info(std::strin
     return &it->second;
   }
   // Phase 8 typesystem: when prp2lnast lowers a tuple literal with typed
-  // fields (`t = (a:u4=3, …)`), it emits `attr_set tg_ref "ubits" 4`
-  // against a `tuple_get` tmp. The type_info therefore lives on the
-  // tuple_get tmp, not on the dotted path. Two chains can land here:
+  // fields (`t = (a:u4=3, …)`), it emits `type_spec(tg_ref, prim_type_int)`
+  // against a `tuple_get` tmp (`u4` = sugar for `int(max=15,min=0)`). The
+  // type_info therefore lives on the tuple_get tmp, not on the dotted path
+  // (process_type_spec records it). Two chains can land here:
   //   1. The attr_get's base is itself a tuple_get tmp (`tuple_get ___9
   //      t "a"; attr_get ___10 ___9 "bits"`). Follow the alias to
   //      `t.a`, then a sibling tuple_get tmp's type_info, if any.
@@ -461,8 +462,6 @@ void uPass_attributes::evaluate_attr_get(std::string_view dst, std::string_view 
       if (!result) {
         result = derive_bits(base, attr);
       }
-    } else if (attr == "ubits" || attr == "sbits") {
-      result = derive_bits(base, attr);
     } else if (attr == "size") {
       // Phase 3 — aggregate size first; scalar fallback gives 1 when the
       // value is known. Phase 8: strings report their character count.
@@ -521,8 +520,7 @@ void uPass_attributes::evaluate_attr_get(std::string_view dst, std::string_view 
   // — the new derive_* are declaration-driven and never depend on a
   // second walk over the tree.
   if (!result) {
-    if (sticky_pattern || !is_builtin_attr(attr) || attr == "bits" || attr == "ubits" || attr == "sbits" || attr == "max"
-        || attr == "min") {
+    if (sticky_pattern || !is_builtin_attr(attr) || attr == "bits" || attr == "max" || attr == "min") {
       result = *Dlop::nil();
     } else {
       return;

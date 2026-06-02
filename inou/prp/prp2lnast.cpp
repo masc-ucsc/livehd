@@ -108,6 +108,16 @@ void Prp2lnast::report_error(const TSNode& node, std::string_view code, std::str
   throw Eprp::parser_error(Pass::eprp, msg_copy);
 }
 
+void Prp2lnast::attach_loc(const Lnast_nid& idx, const TSNode& node) {
+  if (idx.is_invalid() || ts_node_is_null(node)) {
+    return;
+  }
+  const auto sp = ts_node_start_point(node);
+  lnast->set_loc(idx,
+                 Lnast::Loc{.pos1 = ts_node_start_byte(node), .pos2 = ts_node_end_byte(node), .line = sp.row + 1, .tok = 0});
+  lnast->set_fname(idx, src_filename);
+}
+
 namespace {
 // First MISSING node in DFS order (a token the parser inserted to recover), or a
 // null node. Prunes clean subtrees via ts_node_has_error (which is set whenever a
@@ -315,13 +325,28 @@ namespace {
 // Copy one LNAST node (preserving ref/const text) under dst_parent.
 Lnast_nid prp_copy_one_node(const Lnast& src, const Lnast_nid& src_nid, Lnast& dst, const Lnast_nid& dst_parent) {
   const auto t = src.get_type(src_nid);
+  Lnast_nid  nn;
   if (Lnast_ntype::is_ref(t)) {
-    return dst.add_child(dst_parent, Lnast_node::create_ref(src.get_name(src_nid)));
+    nn = dst.add_child(dst_parent, Lnast_node::create_ref(src.get_name(src_nid)));
+  } else if (Lnast_ntype::is_const(t)) {
+    nn = dst.add_child(dst_parent, Lnast_node::create_const(src.get_name(src_nid)));
+  } else {
+    nn = dst.add_child(dst_parent, t);
   }
-  if (Lnast_ntype::is_const(t)) {
-    return dst.add_child(dst_parent, Lnast_node::create_const(src.get_name(src_nid)));
+  // Preserve the source location across the decl-merge rebuild. Only cassert
+  // nodes carry one today (see attach_loc); gating on the type keeps this off
+  // the per-node hot path (no get_loc lookup for the many string/ref/const
+  // nodes a string-heavy tree copies).
+  if (t == Lnast_ntype::Lnast_ntype_cassert) {
+    const auto loc = src.get_loc(src_nid);
+    if (loc.pos1 != 0 || loc.pos2 != 0 || loc.line != 0 || loc.tok != 0) {
+      dst.set_loc(nn, loc);
+      if (auto fn = src.get_fname(src_nid); !fn.empty()) {
+        dst.set_fname(nn, fn);
+      }
+    }
   }
-  return dst.add_child(dst_parent, t);
+  return nn;
 }
 
 // Faithful recursive subtree copy (no merging) — used for the TYPE subtree.
@@ -628,6 +653,7 @@ void Prp2lnast::process_statement(TSNode n) {
             msg_ref = expr_to_node(ts_node_named_child(arg_tuple, 1));
           }
           auto idx = builder.add_child(Lnast_ntype::create_cassert());
+          attach_loc(idx, n);  // source span → verifier can point at this assertion
           lnast->add_child(idx, cond_ref);
           if (have_msg) {
             lnast->add_child(idx, msg_ref);
@@ -1554,11 +1580,13 @@ void Prp2lnast::process_assert_statement(TSNode n) {
     }
     auto txt = trim(text_between(start, ts_node_end_byte(n)));
     auto idx = builder.add_child(Lnast_ntype::create_cassert());
+    attach_loc(idx, n);
     lnast->add_child(idx, constant_text_to_node(txt));
     return;
   }
   Lnast_node cond_ref = expr_to_node(cond);
   auto       idx      = builder.add_child(Lnast_ntype::create_cassert());
+  attach_loc(idx, n);
   lnast->add_child(idx, cond_ref);
 }
 
@@ -2662,9 +2690,10 @@ void Prp2lnast::process_spawn_statement(TSNode n) {
   lnast->add_child(aidx, Lnast_node::create_const("true"));
 }
 
-void Prp2lnast::process_impl_statement(TSNode /*n*/) {
+void Prp2lnast::process_impl_statement(TSNode n) {
   // Simplified: emit as a placeholder assert to preserve node count.
   auto idx = builder.add_child(Lnast_ntype::create_cassert());
+  attach_loc(idx, n);
   lnast->add_child(idx, Lnast_node::create_const("true"));
 }
 
@@ -4358,6 +4387,28 @@ Lnast_node Prp2lnast::compute_bit_mask_ref(TSNode sel_node) {
     return ref;
   };
 
+  // True when an `expression_item` is a range form (`lo..=hi`, `lo..<hi`,
+  // `lo..+n`) rather than a single-bit index. A range lowers (via expr_to_node)
+  // to a `range` LNAST node that constprop turns into a contiguous mask; a plain
+  // index must instead become the single-bit mask `1 << index` (make_dynamic_mask).
+  // Without this split, `b#[lo+1]` would pass `lo+1` straight to get_mask as a
+  // literal bitmask — e.g. `#[5]` → mask 0b101 selects bits {0,2}, not bit 5.
+  auto expr_item_is_range = [](TSNode expr_item) -> bool {
+    if (ts_node_named_child_count(expr_item) != 3) {
+      return false;
+    }
+    TSNode op = ts_node_named_child(expr_item, 1);
+    if (std::string_view(ts_node_type(op)) != "binary_other_op") {
+      return false;
+    }
+    TSNode op_inner = ts_node_named_child(op, 0);
+    if (ts_node_is_null(op_inner)) {
+      return false;
+    }
+    auto k = std::string_view(ts_node_type(op_inner));
+    return k == "op_range_inclusive" || k == "op_range_exclusive" || k == "op_range_count";
+  };
+
   TSNode index_n = child_by_field(sel_node, "index");
   TSNode range   = child_by_field(sel_node, "range");
 
@@ -4401,9 +4452,12 @@ Lnast_node Prp2lnast::compute_bit_mask_ref(TSNode sel_node) {
     auto et = std::string_view(ts_node_type(index_n));
     if (et == "expression_item") {
       if (auto const_mask = make_range_mask(index_n)) {
-        return *const_mask;
+        return *const_mask;  // inclusive `lo..=hi` with const endpoints → folded mask
       }
-      return expr_to_node(index_n);
+      if (expr_item_is_range(index_n)) {
+        return expr_to_node(index_n);  // dynamic/exclusive range → `range` node (range_map)
+      }
+      return make_dynamic_mask(index_n);  // plain single-bit index expr → `1 << index`
     }
     if (auto const_mask = make_const_mask(get_text(index_n))) {
       return *const_mask;
@@ -4926,11 +4980,12 @@ Lnast_node Prp2lnast::tuple_to_node(TSNode n, bool /*is_square*/) {
     // migrates the attrs to the underlying path so `t.b.[poison]` /
     // `t.a.[bits]` reads find the override.
     //
-    // Per-field types are emitted as `attr_set(tg_ref, "ubits"/"sbits",
-    // N)` — the attribute pass routes these into `type_info_map` (the
-    // same path `:[ubits=N]` decorations use). type_spec is NOT used
-    // here because lnastfmt rejects type_spec whose target is a
-    // tuple_get tmp ref (it requires an `assign`-written target).
+    // Per-field types: `a:u4` is sugar for `a:int(max=15,min=0)`, so emit the
+    // canonical `prim_type_int(max,min)` via a `type_spec` on the field's
+    // tuple_get tmp (Task 1t — was a bare `ubits`/`sbits` attr_set). Downstream
+    // passes only ever see `prim_type_int`; `bits`/`sign` derive from the range.
+    // (`type_spec` is in `parent_writes_pos0` so lnastfmt's unwritten-tmp check
+    // accepts the tmp once the producing `tuple_get` is DCE'd.)
     for (const auto& it : items) {
       if ((!it.has_attr_list && !it.has_type_cast) || !it.is_assign) {
         continue;
@@ -4945,13 +5000,14 @@ Lnast_node Prp2lnast::tuple_to_node(TSNode n, bool /*is_square*/) {
         if (!ts_node_is_null(ty)) {
           std::string_view tt(ts_node_type(ty));
           if (tt == "uint_type" || tt == "sint_type") {
-            std::string txt(trim(get_text(ty)));
-            if (!txt.empty() && std::isdigit(static_cast<unsigned char>(txt.back()))) {
-              auto as_idx = builder.add_child(Lnast_ntype::create_attr_set());
-              lnast->add_child(as_idx, tg_ref);
-              lnast->add_child(as_idx, Lnast_node::create_const(tt == "uint_type" ? "ubits" : "sbits"));
-              lnast->add_child(as_idx, Lnast_node::create_const(txt.substr(1)));
-            }
+            // Task 1t — `a:u4` is sugar for `a:int(max=15,min=0)`. Emit the
+            // canonical `prim_type_int(max,min)` type node via a `type_spec` on
+            // the field's tuple_get tmp (was a bare `ubits`/`sbits` attr_set).
+            // Downstream passes only ever see `prim_type_int`; `bits`/`sign`
+            // derive from the range.
+            auto ts_idx = builder.add_child(Lnast_ntype::create_type_spec());
+            lnast->add_child(ts_idx, tg_ref);
+            emit_type_expr(ts_idx, ty);
           } else if (tt == "expression_type" || tt == "dot_expression_type" || tt == "function_call_type") {
             // Named-type field (`inn:inner_t`): record its typename so a later
             // `o.inn.[typename]` resolves — mirrors the top-level `:Type` case in

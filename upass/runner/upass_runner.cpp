@@ -261,6 +261,24 @@ void uPass_runner::emit_op_with_fold(bool fold_all) {
   const auto op_ntype = lm->current_type();
   emit_push(op_ntype);
 
+  // Carry a cassert's source span across the staging rebuild. prp2lnast records
+  // it (attach_loc) so the verifier can point at a comptime-false assertion, but
+  // a func_extract / constprop rebuild re-creates the node via emit_push, which
+  // doesn't copy loc. Scoped to cassert to avoid perturbing other nodes' dumps;
+  // the general per-node carry is the sourcemap work (task 1f).
+  if (op_ntype == Lnast_ntype::Lnast_ntype_cassert) {
+    const auto& src_ln  = lm->get_lnast();
+    const auto  src_nid = lm->get_current_nid();
+    const auto  loc     = src_ln->get_loc(src_nid);
+    if (loc.pos1 != 0 || loc.pos2 != 0 || loc.line != 0 || loc.tok != 0) {
+      staging->set_loc(staging_parent, loc);
+    }
+    const auto fn = src_ln->get_fname(src_nid);
+    if (!fn.empty()) {
+      staging->set_fname(staging_parent, fn);
+    }
+  }
+
   // Task 1t — a `declare`/`type_spec` whose type slot (child 1) is a named-type
   // `ref` must NOT be folded: the ref names a TYPE, not a value, so folding it
   // through the symbol table (e.g. `const a = …; const x:a = …`) would replace

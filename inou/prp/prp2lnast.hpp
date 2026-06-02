@@ -34,6 +34,13 @@ protected:
   [[noreturn]] void report_error(std::string_view code, std::string_view category, std::string message,
                                  std::string_view hint = {}) const;
 
+  // Persist `node`'s source span (byte range + 1-based line) and the source
+  // filename onto the LNAST node at `idx`, so downstream passes (e.g. the upass
+  // verifier reporting a comptime-false cassert) can point at the assertion.
+  // No-op when `node` is null. This is the pre-sourcemap, per-node best-effort
+  // location; the general mechanism is task 1f. See docs/contracts/diagnostics.md.
+  void attach_loc(const Lnast_nid& idx, const TSNode& node);
+
   // If the tree-sitter parse produced a MISSING node (genuine syntax error),
   // report it and abort (does not return); a clean parse returns normally.
   void check_parse_errors() const;

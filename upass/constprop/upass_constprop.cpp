@@ -2115,7 +2115,13 @@ void uPass_constprop::process_func_call() {
     move_to_parent();
     return;
   }
-  std::string fname(current_text());
+  // Read the callee identifier RAW. It is a global function name (a builtin
+  // typecast like `string`/`int`/`u8`, a cell op `__sum`, or a registry comb),
+  // not a local variable, so it must not pick up the inline-frame rename:
+  // current_text() would turn `string` into `inlN_string` while folding an
+  // inlined body, and none of the casts/cell-ops below would match — leaving
+  // the result tmp unfolded (e.g. an inlined `cputs("…{x}")`'s string() arg).
+  std::string fname(lm->current_raw_text());
 
   // `optimize(<bool>)` — synthesis hint, parse-and-discard for now. Drop
   // the call by binding dst to a constant true so the statement can be

@@ -26,9 +26,10 @@ already specifies the backend wants exactly this: *"bits and signed are derived
 on demand from max/min"* and *"booleans are 1-bit signed integers (0=false,
 -1=true)"*. The LNAST layer is being brought in line.
 
-> **Status:** the structural model (declare/store, `prim_type_int`, validators)
-> and wrap/sat-as-func-call have landed (green). Remaining: `ubits`/`sbits`
-> cleanup + LGraph lowering — tracked in `TODO_livehd.md` **1t**.
+> **Status:** the structural model (declare/store, `prim_type_int`, validators),
+> wrap/sat-as-func-call, and the `ubits`/`sbits` removal (`uN`/`sN` — incl. typed
+> tuple fields — lower to `prim_type_int(max,min)`) have all landed (green).
+> Remaining: LGraph lowering — tracked in `TODO_livehd.md` **1t**.
 
 ## Types
 

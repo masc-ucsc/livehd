@@ -77,12 +77,6 @@ public:
   void process_set_mask() override;
   void process_func_call() override;
 
-  // Explicit constraints: `[ubits]`, `[sbits]`, `[max]`, `[min]` narrow the
-  // target's inferred range. Conflict reporting is best-effort here (wrap /
-  // saturate policy is owned by uPass_attributes today); a hard error will
-  // land once the wrap/sat math migrates here per the spec.
-  void process_attr_set() override;
-
   // Goal 1n N4 — overflow capture. `declare(var, prim_type_int(max,min),
   // const(mode))` / `type_spec(var, prim_type_int(max,min))` record the
   // declared value envelope for `var`; the matching `store`/assign value is
