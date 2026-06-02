@@ -1284,6 +1284,49 @@ void Prp2lnast::process_assignment(TSNode n) {
   TSNode rv   = child_by_field(n, "rvalue");
   TSNode tc   = child_by_field(n, "type");  // outer type_cast on complex lvalue
 
+  // ── Reject an unparenthesized multi-element tuple on either side ──────────
+  //
+  // A multi-target assignment requires explicit parentheses around the tuple:
+  // `(a, b) = (2, 3)` is legal, but `mut a,b = (2,3)` and `(a,b) = 2,3` are not.
+  // Without the parens the grammar can only consume the FIRST element as the
+  // lvalue/rvalue and parks the remaining comma-separated element(s) in an
+  // ERROR node that is a direct child of the `assignment` — which the rest of
+  // this function would otherwise silently drop (e.g. lowering `mut a,b=(2,3)`
+  // to just `a = (2,3)`, dropping `b`).
+  //
+  // The pyrope grammar also emits ERROR nodes for benign quirks (a `uint`/`sint`
+  // type inside a `type_cast`, or the stray `:` in `const p::[attr] :u8`); those
+  // carry NO comma, so a direct `,` child of the ERROR is the unambiguous
+  // tell-tale of a dropped tuple slot. See prp2lnast's tree-sitter notes /
+  // check_parse_errors (ERROR nodes are otherwise tolerated).
+  {
+    uint32_t nc = ts_node_child_count(n);
+    for (uint32_t i = 0; i < nc; i++) {
+      TSNode c = ts_node_child(n, i);
+      if (std::string_view(ts_node_type(c)) != "ERROR") {
+        continue;
+      }
+      bool     has_comma = false;
+      uint32_t ec        = ts_node_child_count(c);
+      for (uint32_t j = 0; j < ec; j++) {
+        if (std::string_view(ts_node_type(ts_node_child(c, j))) == ",") {
+          has_comma = true;
+          break;
+        }
+      }
+      if (!has_comma) {
+        continue;  // benign grammar quirk (uint/sint type_cast, `::[attr] :T`), not a dropped tuple
+      }
+      // lhs vs rhs: the dropped element sits before the `=` for an
+      // unparenthesized lhs tuple, after it for an unparenthesized rhs tuple.
+      const bool before_op = ts_node_is_null(op) || ts_node_start_byte(c) < ts_node_start_byte(op);
+      report_error(c, "tuple-requires-parens", "syntax",
+                   std::format("a multi-element tuple on the {} of an assignment requires explicit parentheses",
+                               before_op ? "left-hand-side" : "right-hand-side"),
+                   "wrap the targets in parentheses, e.g. `(a, b) = (2, 3)`");
+    }
+  }
+
   // ── Comptime tuple-shape tracking ─────────────────────────────────────
   //
   // Used by process_for_statement to unroll `for (…) in NAME` (with values)

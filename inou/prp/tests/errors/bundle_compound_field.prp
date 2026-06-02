@@ -1,0 +1,14 @@
+/*
+:name: bundle_compound_field
+:type: error
+:error: compound assignment|not allowed|bundle
+*/
+
+// A bundle literal field may only be introduced with plain `=`. Concatenating
+// (or otherwise compound-assigning) a field inside the literal is rejected;
+// do it as a separate statement after declaration, e.g. `y.zz ++= 3`.
+// Doc: ../docs/docs/pyrope/03-bundle.md `,ff ++= 2 // error:`
+
+mut y = (
+  ,zz ++= 3 // locate_error_here
+)
