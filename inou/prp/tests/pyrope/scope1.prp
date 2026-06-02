@@ -1,12 +1,11 @@
 /*
 :name: scope1
 :type: comptime
-:verifier_pass: 5
+:verifier_pass: 4
 :verifier_fail: 0
 */
 
-cassert(a == nil) // Still not defined, not in scope is nil
-cassert(undefined_whatever == nil)
+cassert(a == nil) // declared later in this scope, reads nil before the declaration
 
 mut a = 1
 cassert(a != nil)

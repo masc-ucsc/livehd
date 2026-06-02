@@ -1,7 +1,7 @@
 /*
 :name: scope2
 :type: comptime
-:verifier_pass: 14
+:verifier_pass: 13
 :verifier_fail: 0
 */
 
@@ -10,8 +10,7 @@
 // by the old constprop evaluator). Per-instantiation counting is intentional —
 // each inlined copy is a distinct compile-time check.
 
-cassert(a == nil) // Still not defined, not in scope is nil
-cassert(undefined_whatever == nil)
+cassert(a == nil) // declared later in this scope, reads nil before the declaration
 
 comb mytest(a,b)->(r) {
   cassert(a == 11)

@@ -51,6 +51,17 @@ protected:
   void check_undeclared_writes() const;
   void check_writes_in_scope(const Lnast_nid& scope_stmts, const std::unordered_set<std::string>& visible) const;
 
+  // Reject reading a name that is never defined ANYWHERE in the file (e.g.
+  // `const y = x`). A GLOBAL check (scope-order agnostic): a name that is a
+  // declare/store/attr_set target somewhere — a local, a function/type/enum
+  // name, or a param/output — is "defined". `read_sites_` is populated by
+  // `identifier_to_node` on the value (for_lvalue=false) path, so it records
+  // only genuine reads with their source TSNode (→ located diagnostic); the
+  // func_call callee name uses `create_ref` directly, so builtins like `cputs`
+  // are never recorded. Runs on the producer tree, after the LNAST is built.
+  void check_undefined_reads() const;
+  void collect_defined_names(const Lnast_nid& node, std::unordered_set<std::string>& defined) const;
+
   // LNAST output. `builder` co-owns `lnast` and is the canonical home for
   // the current `idx_stmts` cursor, tmp-ref minting, and frontend-agnostic
   // stmt emitters (cleanup_todo §3.4).
@@ -96,6 +107,11 @@ protected:
     bool        value_known = false;
   };
   std::unordered_map<std::string, std::vector<Comptime_tuple_entry>> comptime_tuples_;
+
+  // Every variable READ lowered by `identifier_to_node` (for_lvalue=false),
+  // paired with its source TSNode. check_undefined_reads (after the LNAST is
+  // built) reports any whose name is never defined anywhere in the file.
+  std::vector<std::pair<std::string, TSNode>> read_sites_;
 
   // Stack of "formal parameter widths in scope" — pushed by process_lambda_statement
   // before emitting the body, popped after. Each frame maps a typed argument

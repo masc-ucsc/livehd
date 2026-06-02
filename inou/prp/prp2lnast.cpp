@@ -61,6 +61,7 @@ Prp2lnast::Prp2lnast(std::string_view filename, std::string_view module_name, bo
 
   process_description();
   check_undeclared_writes();
+  check_undefined_reads();
 }
 
 Prp2lnast::~Prp2lnast() { ts_parser_delete(parser); }
@@ -170,6 +171,26 @@ void Prp2lnast::report_error(std::string_view code, std::string_view category, s
 namespace {
 bool prp_name_is_tmp(std::string_view n) { return n.size() >= 3 && n[0] == '_' && n[1] == '_' && n[2] == '_'; }
 
+// `_` (sole arg) and `_0`/`_1`/… (positional args) are the implicit
+// placeholder-lambda parameters (`comb add(a,b){ _0 + _1 }`). They are never
+// declared yet are valid reads, so they are not "undefined". (A regular
+// leading-underscore name like `_val` has a non-digit tail and is NOT a
+// placeholder — it must be declared like any other variable.)
+bool prp_name_is_placeholder_arg(std::string_view n) {
+  if (n == "_") {
+    return true;
+  }
+  if (n.size() < 2 || n[0] != '_') {
+    return false;
+  }
+  for (size_t i = 1; i < n.size(); ++i) {
+    if (n[i] < '0' || n[i] > '9') {
+      return false;
+    }
+  }
+  return true;
+}
+
 // Collect store/declare TARGET ref names within a func_def signature (the
 // func_def children other than the body `stmts`) — its params and outputs.
 void prp_collect_sig_targets(const Lnast* ln, const Lnast_nid& node, std::unordered_set<std::string>& out) {
@@ -261,6 +282,44 @@ void Prp2lnast::check_writes_in_scope(const Lnast_nid& scope_stmts, const std::u
         }
       }
     }
+  }
+}
+
+// Collect every name that is a definition target anywhere in the file: child0
+// of a declare/store/attr_set. Covers locals, function names (comb/pipe/mod →
+// `declare NAME const <kind>`), type/enum names, and function params/outputs.
+void Prp2lnast::collect_defined_names(const Lnast_nid& node, std::unordered_set<std::string>& defined) const {
+  const auto t = lnast->get_type(node);
+  // child0 is the defined name for: declare (vars/types/enums), store
+  // (assignments + func params/outputs), attr_set (legacy decl form), and
+  // func_def (`comb/pipe/mod NAME(...)` — the function name, used as a value in
+  // higher-order calls like `apply_each(add_1)`).
+  if (Lnast_ntype::is_declare(t) || Lnast_ntype::is_store(t) || Lnast_ntype::is_attr_set(t)
+      || Lnast_ntype::is_func_def(t)) {
+    auto c0 = lnast->get_first_child(node);
+    if (!c0.is_invalid() && Lnast_ntype::is_ref(lnast->get_type(c0))) {
+      defined.insert(std::string(lnast->get_name(c0)));
+    }
+  }
+  for (auto c = lnast->get_first_child(node); !c.is_invalid(); c = lnast->get_sibling_next(c)) {
+    collect_defined_names(c, defined);
+  }
+}
+
+void Prp2lnast::check_undefined_reads() const {
+  std::unordered_set<std::string> defined;
+  defined.insert("self");  // implicit method receiver — not a declare/store target
+  collect_defined_names(lnast->get_root(), defined);
+
+  for (const auto& [name, tsn] : read_sites_) {
+    if (name.empty() || prp_name_is_tmp(name) || prp_name_is_placeholder_arg(name) || defined.contains(name)) {
+      continue;
+    }
+    // report_error throws — the first never-defined read aborts the parse. The
+    // TSNode gives a located diagnostic (the read site).
+    report_error(tsn, "undefined-read", "name",
+                 std::format("read of undefined variable '{}' (it is never declared anywhere)", name),
+                 "declare it with `mut`/`const`/`reg` before use, or fix the typo");
   }
 }
 
@@ -3108,6 +3167,9 @@ Lnast_node Prp2lnast::identifier_to_node(TSNode n, bool for_lvalue) {
   if (for_lvalue) {
     return Lnast_node::create_ref(name);
   }
+  // Value (read) context: record the source site so check_undefined_reads can
+  // reject a read of a name that is never defined anywhere (e.g. `const y = x`).
+  read_sites_.emplace_back(std::string{name}, n);
   return Lnast_node::create_ref(name);
 }
 
