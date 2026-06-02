@@ -98,9 +98,9 @@ private:
   // not wrap/sat-exempt) is a "does not fit" compile error.
   absl::flat_hash_map<std::string, Lnast_range> decl_envelope_;
 
-  // Variables whose writes carry a wrap/sat policy (declare mode token contains
-  // "wrap"/"sat", or a per-statement `attr_set(var,"wrap"|"sat",true)`); their
-  // overflow is intentional, so they are exempt from the envelope check.
+  // Variables whose next write carries a wrap/sat policy. A wrap/sat call is
+  // emitted immediately before the store to its `type` argument; consume the
+  // exemption at that store so later ordinary writes are checked normally.
   absl::flat_hash_set<std::string> wrap_sat_exempt_;
 
   // Read a `prim_type_int(const max, const min)` envelope assuming the cursor is
@@ -124,6 +124,18 @@ private:
   // Forget a value range after an opaque mutation point, such as passing a
   // variable as an explicit `ref` actual to a function call.
   void clear_range(std::string_view name);
+
+  // Check this write against the declared envelope for `name`, if any.
+  void check_declared_fit(std::string_view name, const Lnast_range& r);
+
+  // Emit the common diagnostic and remember that this run must fail. Used by
+  // per-node checks because the runner catches process_* exceptions.
+  void record_overflow(std::string_view name, const Lnast_range& value, const Lnast_range& env);
+
+  // Emit the common "does not fit" diagnostic and abort the pass.
+  [[noreturn]] void report_overflow(std::string_view name, const Lnast_range& value, const Lnast_range& env);
+
+  std::optional<std::string> pending_overflow_msg_;
 
   // Scan the current op node: walk first child (LHS name), remaining children
   // (RHS operands — ref or const), restore cursor on exit.

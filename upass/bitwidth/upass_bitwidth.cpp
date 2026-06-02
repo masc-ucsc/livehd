@@ -25,6 +25,39 @@ static upass::uPass_plugin plugin_bitwidth("bitwidth", upass::uPass_wrapper<uPas
 
 static constexpr std::string_view call_ref_arg_marker = "__ref_arg";
 
+namespace {
+std::string_view ssa_base_name(std::string_view name) {
+  const auto pos = name.find("___ssa_");
+  if (pos == std::string_view::npos) {
+    return name;
+  }
+  return name.substr(0, pos);
+}
+
+int64_t storage_bits_for_env(const Lnast_range& env) {
+  if (env.is_unbounded()) {
+    return 64;
+  }
+  if (env.min >= 0) {
+    return env.max == 0 ? 0 : static_cast<int64_t>(std::bit_width(static_cast<uint64_t>(env.max)));
+  }
+  return env.get_sbits();
+}
+
+bool mask_touches_outside_bits(int64_t mask, int64_t storage_bits) {
+  if (mask <= 0) {
+    return false;
+  }
+  if (storage_bits <= 0) {
+    return mask != 0;
+  }
+  if (storage_bits >= 63) {
+    return false;
+  }
+  return (static_cast<uint64_t>(mask) >> storage_bits) != 0;
+}
+}  // namespace
+
 // ── Constructor ──────────────────────────────────────────────────────────────
 
 uPass_bitwidth::uPass_bitwidth(std::shared_ptr<upass::Lnast_manager>& lm) : upass::uPass(lm) {}
@@ -51,6 +84,10 @@ void uPass_bitwidth::begin_iteration() {
 }
 
 void uPass_bitwidth::end_run() {
+  if (pending_overflow_msg_) {
+    throw std::runtime_error(*pending_overflow_msg_);
+  }
+
   // ── Goal 1n N4 — overflow capture (centralized in bitwidth) ────────────────
   // For each declared envelope, if the var's final value range provably escapes
   // it and the var carries no wrap/sat policy, it is a "does not fit" compile
@@ -68,9 +105,6 @@ void uPass_bitwidth::end_run() {
     }
     std::sort(names.begin(), names.end());
     for (const auto& var : names) {
-      if (wrap_sat_exempt_.contains(var)) {
-        continue;
-      }
       // Scalars only: a dotted name is a tuple FIELD (e.g. `ar.y`, or an inlined
       // `inl1_ar.y`). Per-field envelope checking needs the comp_type_tuple
       // per-field types and the call-boundary cast semantics (binding an
@@ -93,20 +127,7 @@ void uPass_bitwidth::end_run() {
       // remedy. The signed path's `contains` already checks both bounds.
       const bool         over            = is_unsigned_env ? (val.min > env.max || val.min < env.min) : !env.contains(val);
       if (over) {
-        auto msg = std::format("`{}` (value {}) does not fit its declared range [{}, {}]", var, val.min, env.min, env.max);
-        // Mirror upass::error: emit the structured diagnostic (so the JSONL /
-        // error-test harness sees it) then throw to abort with a non-zero exit.
-        // category=bitwidth (a source error the user must fix), not internal.
-        livehd::diag::sink().emit(livehd::diag::Diagnostic{
-            .severity = livehd::diag::Severity::error,
-            .code     = "bitwidth-overflow",
-            .category = "bitwidth",
-            .pass     = "upass.bitwidth",
-            .message  = msg,
-            .hint     = "widen the declared type, force the bits with a bit-select (e.g. `x#[0..]`), or "
-                        "apply a wrap/saturate policy",
-        });
-        throw std::runtime_error(msg);
+        report_overflow(var, val, env);
       }
     }
   }
@@ -142,6 +163,7 @@ void uPass_bitwidth::set_range(std::string_view name, Lnast_range r) {
   if (name.empty()) {
     return;
   }
+  check_declared_fit(name, r);
   // Probe with the string_view first to skip allocation on the common
   // already-present path. Only materialize a std::string when we insert.
   if (auto it = range_map_.find(name); it != range_map_.end()) {
@@ -157,6 +179,7 @@ void uPass_bitwidth::replace_range(std::string_view name, Lnast_range r) {
   if (name.empty()) {
     return;
   }
+  check_declared_fit(name, r);
   auto it = range_map_.find(name);
   if (it != range_map_.end()) {
     const Lnast_range& cur = it->second;
@@ -218,6 +241,56 @@ void uPass_bitwidth::clear_range(std::string_view name) {
   }
   // Heterogeneous erase — no temporary std::string for the lookup.
   range_map_.erase(name);
+}
+
+void uPass_bitwidth::check_declared_fit(std::string_view name, const Lnast_range& r) {
+  if (name.empty()) {
+    return;
+  }
+  const std::string_view base = ssa_base_name(name);
+  if (wrap_sat_exempt_.erase(name) != 0 || (base != name && wrap_sat_exempt_.erase(base) != 0)) {
+    return;
+  }
+  if (base.find('.') != std::string_view::npos || r.is_unbounded()) {
+    return;
+  }
+  const auto it = decl_envelope_.find(base);
+  if (it == decl_envelope_.end()) {
+    return;
+  }
+
+  const Lnast_range& env             = it->second;
+  const bool         is_unsigned_env = !env.is_signed();
+  const bool         over            = is_unsigned_env ? (r.min > env.max || r.min < env.min) : !env.contains(r);
+  if (over) {
+    record_overflow(base, r, env);
+  }
+}
+
+void uPass_bitwidth::record_overflow(std::string_view name, const Lnast_range& value, const Lnast_range& env) {
+  auto msg = std::format("`{}` (value {}) does not fit its declared range [{}, {}]", name, value.min, env.min, env.max);
+  if (!pending_overflow_msg_) {
+    pending_overflow_msg_ = msg;
+  }
+  // Mirror upass::error: emit the structured diagnostic (so the JSONL /
+  // error-test harness sees it). process_* exceptions are caught by the
+  // runner, so end_run throws pending_overflow_msg_ on the non-swallowed path.
+  // category=bitwidth (a source error the user must fix), not internal.
+  livehd::diag::sink().emit(livehd::diag::Diagnostic{
+      .severity = livehd::diag::Severity::error,
+      .code     = "bitwidth-overflow",
+      .category = "bitwidth",
+      .pass     = "upass.bitwidth",
+      .message  = msg,
+      .hint     = "widen the declared type, force the bits with a bit-select (e.g. `x#[0..]`), or "
+                  "apply a wrap/saturate policy",
+  });
+}
+
+void uPass_bitwidth::report_overflow(std::string_view name, const Lnast_range& value, const Lnast_range& env) {
+  record_overflow(name, value, env);
+  const auto msg = *pending_overflow_msg_;
+  throw std::runtime_error(msg);
 }
 
 uPass_bitwidth::Op_ranges uPass_bitwidth::scan_op() {
@@ -544,8 +617,37 @@ void uPass_bitwidth::process_get_mask() {
   }
 }
 void uPass_bitwidth::process_set_mask() {
-  auto [lhs, rhs] = scan_op();
-  (void)rhs;
+  if (!move_to_child()) {
+    return;
+  }
+  std::string lhs{current_text()};
+  if (!move_to_sibling()) {
+    move_to_parent();
+    return;
+  }
+
+  std::string base_name;
+  if (Lnast_ntype::is_ref(get_raw_ntype())) {
+    base_name = current_text();
+  }
+
+  std::optional<Lnast_range> mask_range;
+  if (move_to_sibling()) {
+    if (Lnast_ntype::is_const(get_raw_ntype())) {
+      mask_range = range_from_const_text(current_text());
+    }
+  }
+  move_to_parent();
+
+  if (!base_name.empty() && mask_range && mask_range->is_constant() && mask_range->min >= 0) {
+    const auto base = ssa_base_name(base_name);
+    if (auto env_it = decl_envelope_.find(base); env_it != decl_envelope_.end()) {
+      if (mask_touches_outside_bits(mask_range->min, storage_bits_for_env(env_it->second))) {
+        record_overflow(base, *mask_range, env_it->second);
+      }
+    }
+  }
+
   set_range(lhs, Lnast_range::make_unbounded());
 }
 

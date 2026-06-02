@@ -694,7 +694,7 @@ void Cgen_verilog::process_simple_node(std::shared_ptr<File_output> fout, const 
     std::vector<std::string> lhs;
     std::vector<std::string> rhs;
     for (const auto& e : node.inp_edges()) {
-      if (e.sink.get_pin_name() == "a") {
+      if (Ntype::get_sink_name(op, e.sink.get_port_id()) == "a") {
         lhs.emplace_back(get_expression(e.driver));
       } else {
         rhs.emplace_back(get_expression(e.driver));
@@ -718,7 +718,7 @@ void Cgen_verilog::process_simple_node(std::shared_ptr<File_output> fout, const 
     std::string onehot;
     bool        first = true;
     for (const auto& e : node.inp_edges()) {
-      if (e.sink.get_pin_name() != "b") {
+      if (Ntype::get_sink_name(op, e.sink.get_port_id()) != "b") {
         continue;
       }
       auto amt_expr = get_expression(e.driver);

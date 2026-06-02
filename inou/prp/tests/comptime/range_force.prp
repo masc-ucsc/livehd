@@ -61,7 +61,7 @@ mut z:u8 = 0
 z#[0..=7] = ones                     // -1 pattern into the 8-bit field → 255
 cassert(z == 255)
 
-// FUTURE COMPILE ERROR (1b): out-of-width field write
+// COMPILE ERROR pinned in errors/overflow_force_set_wide.prp:
 //   z#[0..=9] = 0                   // 10-bit field write into a u8 var
 
 // ── a literal pattern that genuinely fits needs no force ─────────────────────

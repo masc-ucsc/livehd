@@ -4,6 +4,7 @@
 #include <format>
 #include <map>
 #include <memory>
+#include <optional>
 #include <string>
 #include <unordered_map>
 #include <vector>
@@ -71,6 +72,7 @@ public:
   void process_func_has() override;
   void process_func_case() override;
   void process_range() override;
+  void end_run() override;
 
   // Bundle-access check (optable.md): a comptime-known tuple access whose key
   // is out of bounds (positional) or names a non-existent field is a compile
@@ -141,6 +143,7 @@ protected:
   // Stores the declared MAX as a Const (for uN this is the N-bit all-ones
   // mask); the first-write coercion is `v & max`. No width/to_i — task 1g.
   std::unordered_map<std::string, Const> decl_unsigned_max_;
+  std::optional<std::string>             pending_unsigned_overflow_msg_;
 
   // Task 1t — named type per var, recorded by process_declare when the declare's
   // type slot is a `ref(NAMED)` (a named type, e.g. `mut c:v_type = …`). At the
@@ -163,6 +166,8 @@ protected:
   }
 
   Const current_pyrope_value() { return *Dlop::from_pyrope(current_text()); }
+
+  void check_unsigned_positive_overflow(std::string_view lhs, const Const& value);
 
   auto current_prim_value() const {
     if (is_type(Lnast_ntype::Lnast_ntype_ref)) {

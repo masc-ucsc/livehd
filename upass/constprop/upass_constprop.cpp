@@ -165,6 +165,39 @@ uPass_constprop::uPass_constprop(std::shared_ptr<upass::Lnast_manager>& _lm) : u
   st.function_scope(_lm->get_top_module_name());
 }
 
+void uPass_constprop::end_run() {
+  if (pending_unsigned_overflow_msg_) {
+    throw std::runtime_error(*pending_unsigned_overflow_msg_);
+  }
+}
+
+void uPass_constprop::check_unsigned_positive_overflow(std::string_view lhs, const Const& value) {
+  if (value.is_invalid() || value.is_nil() || value.is_string() || value.has_unknowns() || value.is_negative()) {
+    return;
+  }
+  auto it = decl_unsigned_max_.find(std::string(lhs));
+  if (it == decl_unsigned_max_.end()) {
+    return;
+  }
+  const auto delta = value.sub_op(it->second);
+  if (!delta || delta->is_invalid() || delta->has_unknowns() || delta->is_known_zero() || !delta->is_positive()) {
+    return;
+  }
+
+  auto msg = std::format("`{}` (value {}) does not fit its declared range [0, {}]", lhs, value.to_decimal_string(), it->second.to_decimal_string());
+  if (!pending_unsigned_overflow_msg_) {
+    pending_unsigned_overflow_msg_ = msg;
+  }
+  livehd::diag::sink().emit(livehd::diag::Diagnostic{
+      .severity = livehd::diag::Severity::error,
+      .code     = "bitwidth-overflow",
+      .category = "bitwidth",
+      .pass     = "upass.constprop",
+      .message  = msg,
+      .hint     = "widen the declared type, force fewer bits with a bit-select, or apply a wrap/saturate policy",
+  });
+}
+
 void uPass_constprop::set_function_registry(const std::vector<std::shared_ptr<Lnast>>& lnasts) {
   function_registry.clear();
   for (const auto& ln : lnasts) {
@@ -324,7 +357,11 @@ void uPass_constprop::process_assign() {
     } else if (st.has_trivial(current_text())) {
       // Scalar RHS (stored as trivial, not a bundle). Propagate the value so
       // subsequent uses of `lhs_text` resolve.
-      store_trivial(lhs_text, st.get_trivial(current_text()));
+      const auto value = st.get_trivial(current_text());
+      if (!st.has_trivial(lhs_text)) {
+        check_unsigned_positive_overflow(lhs_text, value);
+      }
+      store_trivial(lhs_text, value);
     }
   } else if (is_type(Lnast_ntype::Lnast_ntype_const)) {
     Const v = current_pyrope_value();
@@ -343,6 +380,9 @@ void uPass_constprop::process_assign() {
     if (auto it = decl_unsigned_max_.find(std::string(lhs_text));
         it != decl_unsigned_max_.end() && !st.has_trivial(lhs_text) && v.is_negative()) {
       v = *v.and_op(it->second);
+    }
+    if (!st.has_trivial(lhs_text)) {
+      check_unsigned_positive_overflow(lhs_text, v);
     }
     store_trivial(lhs_text, v);
   } else {

@@ -6,6 +6,6 @@
 
 // A comptime value that exceeds a SIGNED type's declared range is a compile error.
 // Doc: ../docs/docs/pyrope/04-variables.md  `c = a // error: 100 overflows the maximum value of 'c'`
-// (Note: the UNSIGNED case `c:u3 = 100` is NOT yet caught — task 1b bit_test gap.)
+// The unsigned counterpart is pinned in overflow_unsigned.prp.
 
 const x:s4 = 200

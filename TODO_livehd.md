@@ -220,8 +220,7 @@ that they warrant their own bucket. Can be done in parallel with regular
 Group 1 entries; downstream Groups treat them as Group 1 dependencies.
 
 - **1y** New CLI: `setup/run/status/list/describe`, TOML config, JSONL
-  results, error classes — `docs/contracts/future_cli.md`. (Renamed from
-  `1b` — that letter is the Pyrope range-fit task in TODO_prp.md.)
+  results, error classes — `docs/contracts/future_cli.md`.
 - **1f** Source-map indirection (LOC propagation: canonical map + per-cell
   index, alias multi-loc, partition-root fallback) — see "Source location
   (LOC) propagation strategy" below and `docs/contracts/sourcemap.md`.
