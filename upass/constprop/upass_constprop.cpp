@@ -539,9 +539,35 @@ void uPass_constprop::process_shl() {
     return;
   }
   if (n2.is_i() && n2.to_i() < 0) {
-    std::fprintf(stderr, "[DBG shl-neg] top=%s var=%s n1=%s n2=%s\n",
-                 std::string(lm->get_top_module_name()).c_str(), std::string(var).c_str(),
-                 std::string(n1.to_pyrope()).c_str(), std::string(n2.to_pyrope()).c_str());
+    // A negative shift amount is a comptime error (it would also hard-assert in
+    // Dlop::shln). Diagnose it — but only in a real top module, not when folding
+    // an EXTRACTED parametric function body (named "<top>.<fn>"): there the
+    // params are unbound, so an index like `x.[bits]-1-i` can fold bogus-
+    // negative as an optimization artifact, not a user mistake. A genuine
+    // in-function negative shift still surfaces via the body's inlined copy,
+    // which folds under the real (dot-less) top module.
+    if (lm->get_top_module_name().find('.') == std::string_view::npos) {
+      livehd::diag::Span span;
+      if (const auto& ln = lm->get_lnast()) {
+        const auto loc = ln->get_loc(lm->get_current_nid());
+        const auto fn  = ln->get_fname(lm->get_current_nid());
+        if (!fn.empty()) {
+          span.file = std::string{fn};
+        }
+        if (loc.line != 0) {
+          span.start_line = loc.line;
+        }
+      }
+      livehd::diag::sink().emit(livehd::diag::Diagnostic{
+          .severity = livehd::diag::Severity::error,
+          .code     = "negative-shift",
+          .category = "type",
+          .pass     = "upass.constprop",
+          .message  = std::format("shift amount is negative ({})", std::string(n2.to_pyrope())),
+          .span     = std::move(span),
+          .hint     = "a shift / bit-select count must be >= 0",
+      });
+    }
     return;  // invalid (negative) shift — do not fold
   }
   Const r = *n1.shl_op(n2);

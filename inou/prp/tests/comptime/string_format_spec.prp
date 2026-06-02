@@ -1,0 +1,24 @@
+/*
+:name: string_format_spec
+:type: parsing lnast comptime
+:verifier_pass: 8
+:verifier_fail: 0
+*/
+
+const x = 13
+
+// `:b` renders the interpolated value in binary (no prefix, leading zeros
+// dropped). 13+3 == 16 == 0b10000.
+cassert("{x+3:b}" == "10000")
+cputs("x={x+3:b}")
+
+// Other presentation specs share the same two's-complement bit view; `:d`
+// (or no spec) is signed decimal.
+cassert("{x+3:x}" == "10")
+cassert("{x+3:o}" == "20")
+cassert("{x+3:d}" == "16")
+cassert("{x+3}" == "16")
+
+cassert("{255:x}" == "ff")
+cassert("{255:X}" == "FF")
+cassert("{5:b}" == "101")
