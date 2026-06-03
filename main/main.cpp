@@ -20,6 +20,7 @@
 #include "graph_library_singleton.hpp"
 #include "hhds/graph.hpp"
 #include "iassert.hpp"
+#include "livehd_lsp.hpp"
 #include "main_api.hpp"
 #include "meta_api.hpp"
 #include "perf_tracing.hpp"
@@ -313,21 +314,25 @@ int main(int argc, char** argv) {
   I_setup();
 
   bool option_quiet = false;
+  bool option_lsp   = false;
 
   std::string cmd;
 
   int c;
   int option_index = 0;
 
+  enum { OPT_LSP = 1000 };
   struct option longopts[] = {{"version", no_argument, nullptr, 'v'},
                               {"quiet", no_argument, nullptr, 0},
                               {"command", required_argument, nullptr, 'c'},
+                              {"lsp", no_argument, nullptr, OPT_LSP},
                               {0, 0, 0, 0}};
 
   while ((c = getopt_long(argc, argv, "qvc:", longopts, &option_index)) != -1) {
     switch (c) {
       case 'q': option_quiet = true; break;
       case 'v': std::print("lgshell, version {}.{}", major_version, minor_version); return 0;
+      case OPT_LSP: option_lsp = true; break;
       case 'c':
         if (cmd.empty()) {
           cmd.append(optarg);
@@ -338,6 +343,12 @@ int main(int argc, char** argv) {
       case '?': break;
       default:;
     }
+  }
+
+  // Run as a Pyrope LSP server (task 1n): speak JSON-RPC over stdio and never
+  // start the REPL. See docs/contracts/pyrope_lsp.md.
+  if (option_lsp) {
+    return livehd::lsp::run_stdio();
   }
 
   for (int i = std::max(optind, 1); i < argc; ++i) {

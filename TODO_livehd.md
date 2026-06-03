@@ -182,8 +182,10 @@ Group 1 entries; downstream Groups treat them as Group 1 dependencies.
   **secondary neovim**. Reuses the shared `tree-sitter-pyrope` grammar and the
   prp2lnast name maps. Ephemeral, per-buffer, no `lgdb`. **Scope = the semantic
   server only**; the tree-sitter grammar/neovim queries and the `prpfmt` formatter
-  (incl. `textDocument/formatting`) are a separate project. Can start now (deps
-  landed); spans sharpen with [[1f]]/[[3f]] — `docs/contracts/pyrope_lsp.md`.
+  (incl. `textDocument/formatting`) are a separate project. **Phase A landed
+  2026-06-02**: `lgshell --lsp` (lib `lsp/`) — lifecycle + diagnostics over stdio.
+  Phases B–E (hover/nav/workspace) remain; spans sharpen with [[1f]]/[[3f]] —
+  `docs/contracts/pyrope_lsp.md`.
 
 ## Group 2 — depends on Group 1
 

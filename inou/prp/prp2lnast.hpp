@@ -22,7 +22,8 @@ protected:
   // TS Parsing
   std::string prp_file;
   std::string src_filename;  // source path, for diagnostic spans
-  TSParser*   parser;
+  TSParser*   parser   = nullptr;
+  TSTree*     ts_tree  = nullptr;  // owned; freed in the dtor (and on ctor throw)
   TSNode      ts_root_node;
 
   // Emit a structured diagnostic (docs/contracts/diagnostics.md §3) anchored at
@@ -274,6 +275,11 @@ protected:
 
 public:
   Prp2lnast(std::string_view filename, std::string_view module_name, bool parse_only);
+
+  // Analyze an in-memory buffer (e.g. an editor's unsaved buffer / LSP request).
+  // `filename` is a virtual path used only for diagnostic spans; `source` is the
+  // buffer text (read verbatim — the file at `filename` is NOT opened).
+  Prp2lnast(std::string_view filename, std::string_view module_name, bool parse_only, std::string_view source);
 
   ~Prp2lnast();
 

@@ -245,6 +245,25 @@ void uPass_runner::emit_push(Lnast_ntype::Lnast_ntype_int type) {
   auto nid = staging->add_child(staging_parent, type);
   staging_parent_stack.push(staging_parent);
   staging_parent = nid;
+
+  // Carry an if/while source span across the staging rebuild so upass/typecheck's
+  // cond-not-bool can point at the condition. prp2lnast records it (attach_loc) but
+  // a func_extract / constprop rebuild re-creates the node via emit_push, which
+  // doesn't otherwise copy loc. cassert / func_call are carried at their own emit
+  // sites (emit_op_with_fold, try_inline_func_call). Gate on the current source
+  // node actually being this control node so a synthetic block (e.g. a for-unroll
+  // `create_stmts`) emitted with a literal type doesn't grab an unrelated loc.
+  if ((type == Lnast_ntype::Lnast_ntype_if || type == Lnast_ntype::Lnast_ntype_while) && lm->current_type() == type) {
+    const auto& src_ln  = lm->get_lnast();
+    const auto  src_nid = lm->get_current_nid();
+    const auto  loc     = src_ln->get_loc(src_nid);
+    if (loc.pos1 != 0 || loc.pos2 != 0 || loc.line != 0 || loc.tok != 0) {
+      staging->set_loc(nid, loc);
+      if (auto fn = src_ln->get_fname(src_nid); !fn.empty()) {
+        staging->set_fname(nid, fn);
+      }
+    }
+  }
 }
 
 void uPass_runner::emit_pop() {
@@ -1055,7 +1074,7 @@ bool uPass_runner::try_inline_func_call() {
   // Classify a positional actual's scalar kind for exception (3). Const literals
   // carry their kind verbatim; a typed `ref` whose declared range is known is an
   // integer. Anything else is `none` (can't drive type-based disambiguation).
-  auto actual_kind = [&](const Lnast_node& node) -> Io_kind {
+  auto              actual_kind    = [&](const Lnast_node& node) -> Io_kind {
     if (node.is_const()) {
       const auto t = node.get_name();
       if (t == "true" || t == "false") {
@@ -1080,7 +1099,8 @@ bool uPass_runner::try_inline_func_call() {
   for (auto& a : actuals) {
     if (a.is_named) {
       if (a.key == "self") {
-        fcall_arg_fail(call_span, "fcall-self-named",
+        fcall_arg_fail(call_span,
+                       "fcall-self-named",
                        std::format("`self` cannot be passed as a named argument to `{}`", callee_name),
                        "self is bound positionally by the UFCS receiver (`value.method(...)`)");
       }
@@ -1107,14 +1127,16 @@ bool uPass_runner::try_inline_func_call() {
           }
         }
         if (!expanded) {
-          fcall_arg_fail(call_span, "fcall-unknown-arg",
+          fcall_arg_fail(call_span,
+                         "fcall-unknown-arg",
                          std::format("unknown argument `{}` in call to `{}`", a.key, callee_name),
                          "remove it or rename it to a declared parameter");
         }
         continue;
       }
       if (param_set[idx]) {
-        fcall_arg_fail(call_span, "fcall-duplicate-arg",
+        fcall_arg_fail(call_span,
+                       "fcall-duplicate-arg",
                        std::format("duplicate argument `{}` in call to `{}`", a.key, callee_name),
                        "each parameter may be bound only once");
       }
@@ -1142,7 +1164,8 @@ bool uPass_runner::try_inline_func_call() {
       if (a.is_ref_pass) {
         const auto slot = next_unset(0);
         if (slot >= nparams) {
-          fcall_arg_fail(call_span, "fcall-too-many-args",
+          fcall_arg_fail(call_span,
+                         "fcall-too-many-args",
                          std::format("too many positional arguments in call to `{}`", callee_name),
                          "remove the extra argument(s) or pass them by name");
         }
@@ -1191,14 +1214,16 @@ bool uPass_runner::try_inline_func_call() {
         }
       }
       // Otherwise the positional argument is ambiguous and must be named.
-      const auto slot  = next_unset(has_self ? 1 : 0);
+      const auto  slot  = next_unset(has_self ? 1 : 0);
       std::string pname = slot < nparams ? io.inputs[slot].name : std::string{"argument"};
       if (slot >= nparams) {
-        fcall_arg_fail(call_span, "fcall-too-many-args",
+        fcall_arg_fail(call_span,
+                       "fcall-too-many-args",
                        std::format("too many positional arguments in call to `{}`", callee_name),
                        "remove the extra argument(s) or pass them by name");
       }
-      fcall_arg_fail(call_span, "fcall-unnamed-arg",
+      fcall_arg_fail(call_span,
+                     "fcall-unnamed-arg",
                      std::format("argument `{}` must be named (`{}=...`) in call to `{}`", pname, pname, callee_name),
                      "name the argument, or pass a variable whose name matches the parameter");
     }
@@ -1208,7 +1233,8 @@ bool uPass_runner::try_inline_func_call() {
   // unset input means the caller omitted a required argument.
   for (std::size_t i = (has_self ? 1 : 0); i < nparams; ++i) {
     if (!param_set[i]) {
-      fcall_arg_fail(call_span, "fcall-missing-arg",
+      fcall_arg_fail(call_span,
+                     "fcall-missing-arg",
                      std::format("missing required argument `{}` in call to `{}`", io.inputs[i].name, callee_name),
                      "provide the argument by name");
     }
@@ -1388,8 +1414,8 @@ bool uPass_runner::walk_loop_iteration(const std::vector<std::pair<std::string, 
   --inline_budget_;
   const uint32_t iter_salt = ++inline_seq_;
 
-  flush_deferred_emits();         // flush outer parked writes before the iteration frame
-  lm->push_iteration(iter_salt);  // fresh salt → fresh tmp namespace + block-scope id; cursor + tag kept
+  flush_deferred_emits();                            // flush outer parked writes before the iteration frame
+  lm->push_iteration(iter_salt);                     // fresh salt → fresh tmp namespace + block-scope id; cursor + tag kept
   dispatch_to_passes(&upass::uPass::process_stmts);  // passes open a block scope (scope_uid uses iter_salt)
   emit_push(Lnast_ntype::create_stmts());            // staging block for this iteration
 
@@ -1491,8 +1517,8 @@ void uPass_runner::unroll_while() {
   }
   const auto while_bm = lm->save_cursor();
   lm->move_to_child();  // condition
-  const auto        cond_type = lm->get_raw_ntype();
-  const std::string cond_text = std::string(lm->current_text());
+  const auto           cond_type = lm->get_raw_ntype();
+  const std::string    cond_text = std::string(lm->current_text());
   std::optional<Const> cval;
   if (Lnast_ntype::is_ref(cond_type)) {
     cval = try_fold_ref(cond_text);

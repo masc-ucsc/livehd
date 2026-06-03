@@ -246,7 +246,7 @@ static hhds::Pin_class resolve_constant(hhds::Graph* g, const std::vector<RTLIL:
   if (is_signed) {
     val = "0sb";
   } else {
-    val = "0b";
+    val = "0ub";
   }
 
   for (size_t i = data.size(); i > 0; i--) {
@@ -502,7 +502,7 @@ static hhds::Pin_class get_dpin(hhds::Graph* g, const RTLIL::Cell* cell, const R
     if (v.is_fully_def() && v.size() < 30) {
       return create_const(*g, *Dlop::create_integer(v.as_int()));
     }
-    auto v_str = absl::StrCat("0b", v.as_string());
+    auto v_str = absl::StrCat("0ub", v.as_string());
     return create_const(*g, *Dlop::from_pyrope(v_str));
   }
   bool is_signed = true;
@@ -1322,7 +1322,7 @@ static void connect_partial_dpin(hhds::Graph* g, hhds::Node_class& or_node, uint
     auto n_z = bits_of(current_dpin);
 
     auto local_or_node = create_typed_node(*g, Ntype_op::Or, nbits);
-    std::string mask("0b");
+    std::string mask("0ub");
     mask = mask.append(n_x, '?');
     mask = mask.append(n_z, '0');
 

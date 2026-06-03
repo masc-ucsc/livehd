@@ -112,3 +112,93 @@ to LiveHD, please send us a notification, we are glad to add your paper.
    (WOSET), 2019.
 
 
+# Pyrope
+
+[Pyrope](https://masc.soe.ucsc.edu/pyrope.html) is the primary HDL for LiveHD.
+LiveHD ships a **Pyrope language server (LSP)** so editors and coding agents get
+live compile diagnostics (syntax, name, type, bit-width) on `.prp` files. See
+the design at [docs/contracts/pyrope_lsp.md](docs/contracts/pyrope_lsp.md).
+
+## Language server
+
+The server is built into the main `lgshell` binary and runs over stdio (JSON-RPC)
+when invoked with `--lsp`. It is Pyrope-only (`.prp`); it never touches the
+Verilog/Yosys path.
+
+Build it once:
+
+```bash
+bazel build -c dbg //main:lgshell
+# binary at: bazel-bin/main/lgshell
+```
+
+Quick sanity check (it should print a framed JSON-RPC reply, then exit):
+
+```bash
+printf 'Content-Length: 58\r\n\r\n{"jsonrpc":"2.0","id":1,"method":"initialize","params":{}}' \
+  | ./bazel-bin/main/lgshell --lsp
+```
+
+What it provides today (Phase A): real-time diagnostics via
+`textDocument/publishDiagnostics` (and the LSP 3.17 pull model). Hover, go-to
+definition/references, and document symbols are planned (see the contract).
+
+
+### Claude Code
+
+Claude Code consumes LSP servers through a plugin's `.lsp.json`. Create a small
+plugin directory (the LSP schema is evolving — verify against the current
+[plugin reference](https://code.claude.com/docs/en/plugins-reference)):
+
+```
+pyrope-lsp-plugin/
+  plugin.json      # { "name": "pyrope-lsp", "version": "0.1.0" }
+  .lsp.json
+```
+
+`.lsp.json`:
+
+```json
+{
+  "pyrope": {
+    "command": "/ABS/PATH/TO/livehd/bazel-bin/main/lgshell",
+    "args": ["--lsp"],
+    "transport": "stdio",
+    "extensionToLanguage": { ".prp": "pyrope" }
+  }
+}
+```
+
+Then load it for development with `claude --plugin-dir ./pyrope-lsp-plugin` (or
+install it via `/plugin install`) and `/reload-plugins`. Editing a `.prp` file
+will then surface Pyrope diagnostics to Claude. For an in-IDE session (VS Code /
+JetBrains), Claude reads the editor's Problems panel via the built-in `ide` MCP
+server instead, so point your IDE's Pyrope LSP at the same binary.
+
+### Neovim (0.11+)
+
+Register the `.prp` filetype and start the server with the built-in LSP client:
+
+```lua
+vim.filetype.add({ extension = { prp = "pyrope" } })
+
+vim.api.nvim_create_autocmd("FileType", {
+  pattern = "pyrope",
+  callback = function(args)
+    vim.lsp.start({
+      name      = "livehd",
+      cmd       = { "lgshell", "--lsp" },  -- or the absolute path + "--lsp"
+      root_dir  = vim.fn.getcwd(),
+    })
+  end,
+})
+```
+
+Diagnostics appear through Neovim's built-in `vim.diagnostic` UI (`:lua
+vim.diagnostic.setqflist()` to list them).
+
+> Syntax highlighting, indentation, folding, and `prpfmt` auto-formatting come
+> from the separate
+> [tree-sitter-pyrope](https://github.com/masc-ucsc/tree-sitter-pyrope) project
+> (register its grammar with `nvim-treesitter` and wire `prpfmt` via
+> `conform.nvim`) — the language server above is independent of it.

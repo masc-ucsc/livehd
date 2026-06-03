@@ -276,6 +276,7 @@ void uPass_typecheck::process_if() {
   // Shape: (cond, stmts, [cond, stmts]…, [stmts]) scoped, or (cond, stmt…) flat.
   // Every NON-stmts child is a condition operand (a ref or const); a stmts child
   // is a branch body. Restore the cursor to the if-node before returning.
+  const auto if_nid = lm->get_current_nid();  // if node carries the source loc
   if (!move_to_child()) {
     return;
   }
@@ -283,11 +284,15 @@ void uPass_typecheck::process_if() {
     if (!Lnast_ntype::is_stmts(get_raw_ntype())) {
       Kind k = kind_of_operand_at_cursor();
       if (k == Kind::nil) {
-        emit_type_error("nil-operand", "`nil` is invalid as a condition (only copy, `==nil`/`!=nil`, `.[valid]`)");
+        emit_type_error("nil-operand",
+                        "`nil` is invalid as a condition (only copy, `==nil`/`!=nil`, `.[valid]`)",
+                        "",
+                        span_from_nid(if_nid));
       } else if (k != Kind::unknown && k != Kind::boolean) {
         emit_type_error("cond-not-bool",
                         std::format("condition must be boolean, got {}", kind_name(k)),
-                        "compare explicitly, e.g. `if x != 0`");
+                        "compare explicitly, e.g. `if x != 0`",
+                        span_from_nid(if_nid));
       }
     }
   } while (move_to_sibling());
@@ -297,17 +302,22 @@ void uPass_typecheck::process_if() {
 void uPass_typecheck::process_while() {
   // `while(cond, stmts)` — child0 is the condition (a ref/const); it must be
   // boolean. Restore the cursor to the while node before returning.
+  const auto while_nid = lm->get_current_nid();  // while node carries the source loc
   if (!move_to_child()) {
     return;
   }
   if (!Lnast_ntype::is_stmts(get_raw_ntype())) {
     Kind k = kind_of_operand_at_cursor();
     if (k == Kind::nil) {
-      emit_type_error("nil-operand", "`nil` is invalid as a condition (only copy, `==nil`/`!=nil`, `.[valid]`)");
+      emit_type_error("nil-operand",
+                      "`nil` is invalid as a condition (only copy, `==nil`/`!=nil`, `.[valid]`)",
+                      "",
+                      span_from_nid(while_nid));
     } else if (k != Kind::unknown && k != Kind::boolean) {
       emit_type_error("cond-not-bool",
                       std::format("while condition must be boolean, got {}", kind_name(k)),
-                      "compare explicitly, e.g. `while x != 0`");
+                      "compare explicitly, e.g. `while x != 0`",
+                      span_from_nid(while_nid));
     }
   }
   move_to_parent();

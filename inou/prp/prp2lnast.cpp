@@ -23,7 +23,22 @@ extern "C" TSLanguage* tree_sitter_pyrope();
 
 static constexpr std::string_view call_ref_arg_marker = "__ref_arg";
 
-Prp2lnast::Prp2lnast(std::string_view filename, std::string_view module_name, bool parse_only = false) {
+namespace {
+std::string slurp_file(std::string_view filename) {
+  std::string   fname(filename);
+  auto          ss = std::ostringstream{};
+  std::ifstream file(fname);
+  ss << file.rdbuf();
+  return ss.str();
+}
+}  // namespace
+
+// File-backed entry: read `filename` from disk, then delegate to the buffer ctor.
+Prp2lnast::Prp2lnast(std::string_view filename, std::string_view module_name, bool parse_only = false)
+    : Prp2lnast(filename, module_name, parse_only, slurp_file(filename)) {}
+
+// Buffer-backed entry (LSP / unsaved buffers): analyze `source` verbatim.
+Prp2lnast::Prp2lnast(std::string_view filename, std::string_view module_name, bool parse_only, std::string_view source) {
   lnast = std::make_shared<Lnast>(module_name);
 
   lnast->set_root(Lnast_ntype::create_top());
@@ -33,38 +48,50 @@ Prp2lnast::Prp2lnast(std::string_view filename, std::string_view module_name, bo
   builder.lnast = lnast;
 
   src_filename = std::string(filename);
-  {
-    std::string   fname(filename);
-    auto          ss = std::ostringstream{};
-    std::ifstream file(fname);
-    ss << file.rdbuf();
-    prp_file = ss.str();
-  }
+  prp_file     = std::string(source);
 
   parser = ts_parser_new();
   ts_parser_set_language(parser, tree_sitter_pyrope());
 
-  TSTree* tst_tree = ts_parser_parse_string(parser, NULL, prp_file.data(), prp_file.size());
-  ts_root_node     = ts_tree_root_node(tst_tree);
+  ts_tree      = ts_parser_parse_string(parser, NULL, prp_file.data(), prp_file.size());
+  ts_root_node = ts_tree_root_node(ts_tree);
 
   // dump();  // tree-sitter parse tree; enable for debugging the grammar
 
-  // Stop before analyzing a file that did not parse. A MISSING node (a token the
-  // parser had to insert to recover, e.g. an unbalanced `)`/`}`) is an
-  // unambiguous syntax error — unlike ERROR nodes, which the pyrope grammar also
-  // emits for valid `uint`/`sint` constructs, so a MISSING check is quirk-safe.
-  check_parse_errors();
+  // A throwing constructor does NOT run the destructor, so the TS resources would
+  // leak on every reported error — which matters for the long-running LSP daemon
+  // that re-parses on each keystroke. Clean up explicitly before rethrowing.
+  try {
+    // Stop before analyzing a file that did not parse. A MISSING node (a token the
+    // parser had to insert to recover, e.g. an unbalanced `)`/`}`) is an
+    // unambiguous syntax error — unlike ERROR nodes, which the pyrope grammar also
+    // emits for valid `uint`/`sint` constructs, so a MISSING check is quirk-safe.
+    check_parse_errors();
 
-  if (parse_only) {
-    return;
+    if (parse_only) {
+      return;
+    }
+
+    process_description();
+    check_undeclared_writes();
+    check_undefined_reads();
+  } catch (...) {
+    ts_tree_delete(ts_tree);
+    ts_parser_delete(parser);
+    ts_tree = nullptr;
+    parser  = nullptr;
+    throw;
   }
-
-  process_description();
-  check_undeclared_writes();
-  check_undefined_reads();
 }
 
-Prp2lnast::~Prp2lnast() { ts_parser_delete(parser); }
+Prp2lnast::~Prp2lnast() {
+  if (ts_tree != nullptr) {
+    ts_tree_delete(ts_tree);
+  }
+  if (parser != nullptr) {
+    ts_parser_delete(parser);
+  }
+}
 
 std::string_view Prp2lnast::get_text(const TSNode& node) const {
   auto start  = ts_node_start_byte(node);
@@ -83,8 +110,8 @@ std::string_view Prp2lnast::text_between(uint32_t start, uint32_t end) const {
   return std::string_view(prp_file).substr(start, end - start);
 }
 
-void Prp2lnast::report_error(const TSNode& node, std::string_view code, std::string_view category,
-                             std::string message, std::string_view hint) const {
+void Prp2lnast::report_error(const TSNode& node, std::string_view code, std::string_view category, std::string message,
+                             std::string_view hint) const {
   livehd::diag::Span span;
   span.file       = src_filename;
   span.start_byte = ts_node_start_byte(node);
@@ -114,8 +141,7 @@ void Prp2lnast::attach_loc(const Lnast_nid& idx, const TSNode& node) {
     return;
   }
   const auto sp = ts_node_start_point(node);
-  lnast->set_loc(idx,
-                 Lnast::Loc{.pos1 = ts_node_start_byte(node), .pos2 = ts_node_end_byte(node), .line = sp.row + 1, .tok = 0});
+  lnast->set_loc(idx, Lnast::Loc{.pos1 = ts_node_start_byte(node), .pos2 = ts_node_end_byte(node), .line = sp.row + 1, .tok = 0});
   lnast->set_fname(idx, src_filename);
 }
 
@@ -139,25 +165,72 @@ TSNode find_first_missing(TSNode n) {
   }
   return TSNode{};
 }
+
+// First ERROR node at *statement position* — a direct child of a statement list
+// (`description` or `scope_statement`) — in DFS order, or a null node. Such an
+// ERROR is a genuine syntax error: stray tokens the parser could not attach to
+// any statement (e.g. `i c { … }`, junk before a block). The pyrope grammar also
+// emits ERROR nodes for benign quirks (uint/sint type-calls, `::[attr]:T`, an
+// unparenthesized multi-target tuple, an anonymous `comb`/`pipe` lambda), but
+// those always nest inside an `assignment`/`type_cast` and never surface at
+// statement position, so they are skipped. Prunes clean subtrees via
+// ts_node_has_error.
+TSNode find_first_error_statement(TSNode n) {
+  std::string_view t(ts_node_type(n));
+  const bool       is_stmt_list = (t == "description" || t == "scope_statement");
+  uint32_t         cnt          = ts_node_child_count(n);
+  for (uint32_t i = 0; i < cnt; i++) {
+    TSNode c = ts_node_child(n, i);
+    if (is_stmt_list && std::string_view(ts_node_type(c)) == "ERROR") {
+      return c;
+    }
+    if (ts_node_has_error(c)) {
+      TSNode r = find_first_error_statement(c);
+      if (!ts_node_is_null(r)) {
+        return r;
+      }
+    }
+  }
+  return TSNode{};
+}
 }  // namespace
 
 void Prp2lnast::check_parse_errors() const {
   if (!ts_node_has_error(ts_root_node)) {
     return;  // clean parse
   }
+  // A MISSING node (a token the parser had to insert to recover) is the most
+  // unambiguous syntax error, so prefer it.
   TSNode miss = find_first_missing(ts_root_node);
-  if (ts_node_is_null(miss)) {
-    return;  // only ERROR nodes (e.g. the uint/sint grammar quirk, or a construct
-             // a specific handler rejects downstream) — not a MISSING-token error
+  if (!ts_node_is_null(miss)) {
+    // ts_node_type of a MISSING node is the expected symbol (e.g. `)`), so name it.
+    auto expected = std::string_view(ts_node_type(miss));
+    report_error(miss,
+                 "missing-token",
+                 "syntax",
+                 std::format("syntax error: expected '{}'", expected),
+                 "the file does not parse — check for an unbalanced '(' / ')', '[' / ']', '{' / '}', or a dropped token");
   }
-  // ts_node_type of a MISSING node is the expected symbol (e.g. `)`), so name it.
-  auto expected = std::string_view(ts_node_type(miss));
-  report_error(miss, "missing-token", "syntax", std::format("syntax error: expected '{}'", expected),
-               "the file does not parse — check for an unbalanced '(' / ')', '[' / ']', '{' / '}', or a dropped token");
+  // No inserted token, but the parser may have parked stray tokens in an ERROR
+  // node at statement position (e.g. `i c { … }` — junk before a block). Report
+  // it with a hint tailored to what follows. Benign grammar quirks nest their
+  // ERROR inside an `assignment`/`type_cast` (never at statement position), so
+  // `find_first_error_statement` skips them and they stay tolerated.
+  TSNode err = find_first_error_statement(ts_root_node);
+  if (!ts_node_is_null(err)) {
+    auto       stray        = trim(get_text(err));
+    TSNode     nxt          = ts_node_next_named_sibling(err);
+    const bool before_block = !ts_node_is_null(nxt) && std::string_view(ts_node_type(nxt)) == "scope_statement";
+    std::string_view hint
+        = before_block ? "stray tokens before a `{ … }` block — did you mean a control statement "
+                         "(`if`/`for`/`while`/`match`/`loop`) or a lambda (`comb`/`pipe`/`mod`)?"
+                       : "the file does not parse — remove the unexpected token(s) or check for a dropped keyword/operator";
+    report_error(err, "syntax-error", "syntax", std::format("syntax error: unexpected `{}`", stray), hint);
+  }
+  // else: only benign ERROR nodes (uint/sint type-calls, `::[attr]:T`, …) — tolerated.
 }
 
-void Prp2lnast::report_error(std::string_view code, std::string_view category, std::string message,
-                             std::string_view hint) const {
+void Prp2lnast::report_error(std::string_view code, std::string_view category, std::string message, std::string_view hint) const {
   auto msg_copy = message;
   livehd::diag::sink().stage(livehd::diag::Diagnostic{.severity = livehd::diag::Severity::error,
                                                       .code     = std::string(code),
@@ -254,19 +327,19 @@ void Prp2lnast::check_writes_in_scope(const Lnast_nid& scope_stmts, const std::u
       // for-loop iter var): attr_set(var, "type", <mode>) declares `var`.
       auto c0 = lnast->get_first_child(c);
       auto c1 = c0.is_invalid() ? c0 : lnast->get_sibling_next(c0);
-      if (!c0.is_invalid() && Lnast_ntype::is_ref(lnast->get_type(c0)) && !c1.is_invalid()
-          && lnast->get_name(c1) == "type") {
+      if (!c0.is_invalid() && Lnast_ntype::is_ref(lnast->get_type(c0)) && !c1.is_invalid() && lnast->get_name(c1) == "type") {
         here.insert(std::string(lnast->get_name(c0)));
       }
     } else if (Lnast_ntype::is_store(ct)) {
       auto name = first_ref_name(c);
       if (!name.empty() && !prp_name_is_tmp(name) && !here.contains(name) && !visible.contains(name)) {
-        report_error("assign-no-decl", "name",
+        report_error("assign-no-decl",
+                     "name",
                      std::format("assignment to undeclared variable '{}' (declare it with `mut`/`const` first)", name));
       }
     }
 
-    const bool is_func_body = Lnast_ntype::is_func_def(ct);
+    const bool                      is_func_body = Lnast_ntype::is_func_def(ct);
     std::unordered_set<std::string> sig;
     if (is_func_body) {
       prp_collect_sig_targets(lnast.get(), c, sig);
@@ -294,8 +367,7 @@ void Prp2lnast::collect_defined_names(const Lnast_nid& node, std::unordered_set<
   // (assignments + func params/outputs), attr_set (legacy decl form), and
   // func_def (`comb/pipe/mod NAME(...)` — the function name, used as a value in
   // higher-order calls like `apply_each(add_1)`).
-  if (Lnast_ntype::is_declare(t) || Lnast_ntype::is_store(t) || Lnast_ntype::is_attr_set(t)
-      || Lnast_ntype::is_func_def(t)) {
+  if (Lnast_ntype::is_declare(t) || Lnast_ntype::is_store(t) || Lnast_ntype::is_attr_set(t) || Lnast_ntype::is_func_def(t)) {
     auto c0 = lnast->get_first_child(node);
     if (!c0.is_invalid() && Lnast_ntype::is_ref(lnast->get_type(c0))) {
       defined.insert(std::string(lnast->get_name(c0)));
@@ -317,7 +389,9 @@ void Prp2lnast::check_undefined_reads() const {
     }
     // report_error throws — the first never-defined read aborts the parse. The
     // TSNode gives a located diagnostic (the read site).
-    report_error(tsn, "undefined-read", "name",
+    report_error(tsn,
+                 "undefined-read",
+                 "name",
                  std::format("read of undefined variable '{}' (it is never declared anywhere)", name),
                  "declare it with `mut`/`const`/`reg` before use, or fix the typo");
   }
@@ -392,12 +466,14 @@ Lnast_nid prp_copy_one_node(const Lnast& src, const Lnast_nid& src_nid, Lnast& d
   } else {
     nn = dst.add_child(dst_parent, t);
   }
-  // Preserve the source location across the decl-merge rebuild. Only cassert
-  // and func_call nodes carry one today (see attach_loc); gating on the type
-  // keeps this off the per-node hot path (no get_loc lookup for the many
+  // Preserve the source location across the decl-merge rebuild. Only cassert,
+  // func_call, if and while nodes carry one today (see attach_loc); gating on the
+  // type keeps this off the per-node hot path (no get_loc lookup for the many
   // string/ref/const nodes a string-heavy tree copies). func_call carries it so
-  // the upass argument-naming diagnostics can point at the call site.
-  if (t == Lnast_ntype::Lnast_ntype_cassert || t == Lnast_ntype::Lnast_ntype_func_call) {
+  // the upass argument-naming diagnostics can point at the call site; if/while
+  // carry it so upass/typecheck's cond-not-bool can point at the condition.
+  if (t == Lnast_ntype::Lnast_ntype_cassert || t == Lnast_ntype::Lnast_ntype_func_call || t == Lnast_ntype::Lnast_ntype_if
+      || t == Lnast_ntype::Lnast_ntype_while) {
     const auto loc = src.get_loc(src_nid);
     if (loc.pos1 != 0 || loc.pos2 != 0 || loc.line != 0 || loc.tok != 0) {
       dst.set_loc(nn, loc);
@@ -419,7 +495,7 @@ void prp_copy_subtree(const Lnast& src, const Lnast_nid& src_nid, Lnast& dst, co
 
 // Name of the Nth child of `nid` (0-based), or "" if absent.
 std::string_view prp_child_name(const Lnast& src, const Lnast_nid& nid, int n) {
-  int  i = 0;
+  int i = 0;
   for (auto c : src.children(nid)) {
     if (i == n) {
       return src.get_name(c);
@@ -449,8 +525,8 @@ void Prp2lnast::rewrite_decls_to_declare() {
   // into one `declare(ref(t), TYPE|none_type, const(mode))`. Everything else —
   // including the value `store`, the `typename` attr_set, and nested blocks —
   // is copied verbatim (recursing so nested stmts merge too).
-  std::function<Lnast_nid(const Lnast_nid&, const Lnast_nid&)> copy_merge = [&](const Lnast_nid& src_nid,
-                                                                               const Lnast_nid& dst_parent) -> Lnast_nid {
+  std::function<Lnast_nid(const Lnast_nid&, const Lnast_nid&)> copy_merge
+      = [&](const Lnast_nid& src_nid, const Lnast_nid& dst_parent) -> Lnast_nid {
     auto nn   = prp_copy_one_node(*lnast, src_nid, *staging, dst_parent);
     auto type = lnast->get_type(src_nid);
     if (!Lnast_ntype::is_stmts(type)) {
@@ -480,13 +556,12 @@ void Prp2lnast::rewrite_decls_to_declare() {
       bool        comptime  = false;
       Lnast_nid   type_node = {};
       size_t      j         = i + 1;
-      if (j < kids.size() && Lnast_ntype::is_attr_set(lnast->get_type(kids[j]))
-          && prp_child_name(*lnast, kids[j], 1) == "comptime" && prp_child_name(*lnast, kids[j], 0) == target) {
+      if (j < kids.size() && Lnast_ntype::is_attr_set(lnast->get_type(kids[j])) && prp_child_name(*lnast, kids[j], 1) == "comptime"
+          && prp_child_name(*lnast, kids[j], 0) == target) {
         comptime = true;
         ++j;
       }
-      if (j < kids.size() && Lnast_ntype::is_type_spec(lnast->get_type(kids[j]))
-          && prp_child_name(*lnast, kids[j], 0) == target) {
+      if (j < kids.size() && Lnast_ntype::is_type_spec(lnast->get_type(kids[j])) && prp_child_name(*lnast, kids[j], 0) == target) {
         type_node = kids[j];
         ++j;
       }
@@ -535,8 +610,8 @@ void Prp2lnast::walk_statement_block(TSNode parent) {
   // prefix. The new grammar hides those tokens entirely (they are part of
   // a hidden `_statement` seq with a field tag), so they no longer surface
   // even as anonymous children.
-  uint32_t prev_end = ts_node_start_byte(parent);
-  auto scan_overflow_in_gap = [&](uint32_t gap_end) -> std::string_view {
+  uint32_t         prev_end             = ts_node_start_byte(parent);
+  auto             scan_overflow_in_gap = [&](uint32_t gap_end) -> std::string_view {
     if (prev_end >= gap_end) {
       return {};
     }
@@ -619,21 +694,21 @@ void Prp2lnast::process_statement(TSNode n) {
   }
   using Handler                                                             = void (Prp2lnast::*)(TSNode);
   static const absl::flat_hash_map<std::string_view, Handler> stmt_dispatch = {
-      {"declaration_statement", &Prp2lnast::process_declaration_statement},
-      {"assignment", &Prp2lnast::process_assignment},
-      {"assert_statement", &Prp2lnast::process_assert_statement},
-      {"while_statement", &Prp2lnast::process_while_statement},
-      {"for_statement", &Prp2lnast::process_for_statement},
-      {"loop_statement", &Prp2lnast::process_loop_statement},
-      {"control_statement", &Prp2lnast::process_control_statement},
+      {  "declaration_statement",   &Prp2lnast::process_declaration_statement},
+      {             "assignment",              &Prp2lnast::process_assignment},
+      {       "assert_statement",        &Prp2lnast::process_assert_statement},
+      {        "while_statement",         &Prp2lnast::process_while_statement},
+      {          "for_statement",           &Prp2lnast::process_for_statement},
+      {         "loop_statement",          &Prp2lnast::process_loop_statement},
+      {      "control_statement",       &Prp2lnast::process_control_statement},
       {"function_call_statement", &Prp2lnast::process_function_call_statement},
-      {"lambda", &Prp2lnast::process_lambda_statement},
-      {"enum_assignment", &Prp2lnast::process_enum_assignment},
-      {"type_statement", &Prp2lnast::process_type_statement},
-      {"import_statement", &Prp2lnast::process_import_statement},
-      {"test_statement", &Prp2lnast::process_test_statement},
-      {"spawn_statement", &Prp2lnast::process_spawn_statement},
-      {"impl_statement", &Prp2lnast::process_impl_statement},
+      {                 "lambda",        &Prp2lnast::process_lambda_statement},
+      {        "enum_assignment",         &Prp2lnast::process_enum_assignment},
+      {         "type_statement",          &Prp2lnast::process_type_statement},
+      {       "import_statement",        &Prp2lnast::process_import_statement},
+      {         "test_statement",          &Prp2lnast::process_test_statement},
+      {        "spawn_statement",         &Prp2lnast::process_spawn_statement},
+      {         "impl_statement",          &Prp2lnast::process_impl_statement},
   };
   // Expression-as-statement node kinds (lowered for side effects).
   static const absl::flat_hash_set<std::string_view> expr_stmt = {
@@ -707,7 +782,7 @@ void Prp2lnast::process_statement(TSNode n) {
           // Lower the message (if any) BEFORE creating the cassert node so the
           // helper statements an interpolated string emits land ahead of the
           // assertion in source order (otherwise the message ref would dangle).
-          bool       have_msg = nnc >= 2;
+          bool       have_msg  = nnc >= 2;
           Lnast_node msg_ref;
           if (have_msg) {
             msg_ref = expr_to_node(ts_node_named_child(arg_tuple, 1));
@@ -896,7 +971,8 @@ void Prp2lnast::process_declaration_statement(TSNode n) {
 }
 
 Lnast_node Prp2lnast::process_lvalue_for_assign(TSNode lvalue, const Lnast_node& rvalue, TSNode decl_node, TSNode type_cast_node,
-                                                bool rhs_is_fcall, std::string_view rhs_fcall_name, std::string_view overflow_kind) {
+                                                bool rhs_is_fcall, std::string_view rhs_fcall_name,
+                                                std::string_view overflow_kind) {
   std::string_view lvt(ts_node_type(lvalue));
   if (lvt == "lvalue_list") {
     // Tuple lvalue: `(x0, x1, …) = rhs`. Each item is an `lvalue_item`,
@@ -990,7 +1066,9 @@ Lnast_node Prp2lnast::process_lvalue_for_assign(TSNode lvalue, const Lnast_node&
             // Single fcall RHS: prefix must match the callee. Hard error
             // otherwise (cross-function reuse).
             if (prefix != rhs_fcall_name) {
-              Pass::error("destructure rename prefix `{}` does not match call `{}` in `{}`", prefix, rhs_fcall_name,
+              Pass::error("destructure rename prefix `{}` does not match call `{}` in `{}`",
+                          prefix,
+                          rhs_fcall_name,
                           get_text(inner));
             }
           }
@@ -1028,8 +1106,8 @@ Lnast_node Prp2lnast::process_lvalue_for_assign(TSNode lvalue, const Lnast_node&
       // so we key tuple_get by the local's identifier text. For tuple-
       // literal RHS (e.g. `(a, b) = (b+1, a)`) positional binding is
       // correct because the literal's slots are positional anyway.
-      std::string      key_text;
-      bool             use_name_key = false;
+      std::string key_text;
+      bool        use_name_key = false;
       if (rhs_is_fcall) {
         if (inner_t == "identifier") {
           key_text     = std::string(trim(get_text(inner)));
@@ -1098,11 +1176,14 @@ Lnast_node Prp2lnast::process_lvalue_for_assign(TSNode lvalue, const Lnast_node&
       // and point the user at wrap/sat for an intentional downcast.
       if (!has_decl && overflow_kind.empty()) {
         std::string name(trim(get_text(id)));
-        report_error(tc, "assign-retype", "type",
+        report_error(tc,
+                     "assign-retype",
+                     "type",
                      std::format("cannot change the type of `{}` in an assignment", name),
                      std::format("annotate the type at the declaration, or use `wrap`/`sat` to downcast "
                                  "(e.g. `wrap {}{} = …`)",
-                                 name, std::string_view(get_text(tc))));
+                                 name,
+                                 std::string_view(get_text(tc))));
       }
       emit_type_spec(ref, tc);
     }
@@ -1117,12 +1198,12 @@ Lnast_node Prp2lnast::process_lvalue_for_assign(TSNode lvalue, const Lnast_node&
     if (!overflow_kind.empty()) {
       Lnast_node wrapped = builder.mint_tmp_ref();
       auto       fc      = builder.add_child(Lnast_ntype::create_func_call());
-      lnast->add_child(fc, wrapped);                                 // dst tmp
-      lnast->add_child(fc, Lnast_node::create_ref(overflow_kind));   // callee: wrap | sat
-      auto va = lnast->add_child(fc, Lnast_ntype::create_store());   // v = <value>
+      lnast->add_child(fc, wrapped);                                // dst tmp
+      lnast->add_child(fc, Lnast_node::create_ref(overflow_kind));  // callee: wrap | sat
+      auto va = lnast->add_child(fc, Lnast_ntype::create_store());  // v = <value>
       lnast->add_child(va, Lnast_node::create_ref("v"));
       lnast->add_child(va, rvalue);
-      auto ta = lnast->add_child(fc, Lnast_ntype::create_store());   // type = <lhs> (its declared type)
+      auto ta = lnast->add_child(fc, Lnast_ntype::create_store());  // type = <lhs> (its declared type)
       lnast->add_child(ta, Lnast_node::create_ref("type"));
       lnast->add_child(ta, ref);
       store_value = wrapped;
@@ -1189,12 +1270,16 @@ Lnast_node Prp2lnast::process_lvalue_for_assign(TSNode lvalue, const Lnast_node&
     // No syntax for declaring/typing through a bit-range — reject decl/type
     // alongside the member_selection arm below.
     if (!ts_node_is_null(decl_node)) {
-      report_error(lvalue, "bit-range-decl", "name",
+      report_error(lvalue,
+                   "bit-range-decl",
+                   "name",
                    std::format("cannot declare a bit-range lvalue: `{}`", get_text(lvalue)),
                    "declare the base variable first, then write the bit range");
     }
     if (!ts_node_is_null(type_cast_node)) {
-      report_error(lvalue, "bit-range-type", "type",
+      report_error(lvalue,
+                   "bit-range-type",
+                   "type",
                    std::format("cannot type-annotate a bit-range lvalue: `{}`", get_text(lvalue)),
                    "the base carries the type; annotate it at the base's declaration");
     }
@@ -1238,12 +1323,16 @@ Lnast_node Prp2lnast::process_lvalue_for_assign(TSNode lvalue, const Lnast_node&
     // no syntax for "declare new field through a path". Reject so we don't
     // silently drop the decl/type and emit a misleading `tuple_set`.
     if (!ts_node_is_null(decl_node)) {
-      report_error(lvalue, "tuple-path-decl", "name",
+      report_error(lvalue,
+                   "tuple-path-decl",
+                   "name",
                    std::format("cannot declare a tuple-path lvalue: `{}`", get_text(lvalue)),
                    "declare the base tuple instead");
     }
     if (!ts_node_is_null(type_cast_node)) {
-      report_error(lvalue, "tuple-path-type", "type",
+      report_error(lvalue,
+                   "tuple-path-type",
+                   "type",
                    std::format("cannot type-annotate a tuple-path lvalue: `{}`", get_text(lvalue)),
                    "annotate the field at the base's declaration");
     }
@@ -1379,7 +1468,9 @@ void Prp2lnast::process_assignment(TSNode n) {
       // lhs vs rhs: the dropped element sits before the `=` for an
       // unparenthesized lhs tuple, after it for an unparenthesized rhs tuple.
       const bool before_op = ts_node_is_null(op) || ts_node_start_byte(c) < ts_node_start_byte(op);
-      report_error(c, "tuple-requires-parens", "syntax",
+      report_error(c,
+                   "tuple-requires-parens",
+                   "syntax",
                    std::format("a multi-element tuple on the {} of an assignment requires explicit parentheses",
                                before_op ? "left-hand-side" : "right-hand-side"),
                    "wrap the targets in parentheses, e.g. `(a, b) = (2, 3)`");
@@ -1624,18 +1715,18 @@ void Prp2lnast::process_assignment(TSNode n) {
   if (op_kind != "assign") {
     using Factory                                                                = Lnast_ntype::Lnast_ntype_int (*)();
     static const absl::flat_hash_map<std::string_view, Factory> compound_factory = {
-        {"assign_add", [] { return Lnast_ntype::create_plus(); }},
-        {"assign_sub", [] { return Lnast_ntype::create_minus(); }},
-        {"assign_mul", [] { return Lnast_ntype::create_mult(); }},
-        {"assign_div", [] { return Lnast_ntype::create_div(); }},
-        {"assign_bit_or", [] { return Lnast_ntype::create_bit_or(); }},
-        {"assign_bit_and", [] { return Lnast_ntype::create_bit_and(); }},
-        {"assign_bit_xor", [] { return Lnast_ntype::create_bit_xor(); }},
-        {"assign_shl", [] { return Lnast_ntype::create_shl(); }},
-        {"assign_sra", [] { return Lnast_ntype::create_sra(); }},
+        {         "assign_add",         [] { return Lnast_ntype::create_plus(); }},
+        {         "assign_sub",        [] { return Lnast_ntype::create_minus(); }},
+        {         "assign_mul",         [] { return Lnast_ntype::create_mult(); }},
+        {         "assign_div",          [] { return Lnast_ntype::create_div(); }},
+        {      "assign_bit_or",       [] { return Lnast_ntype::create_bit_or(); }},
+        {     "assign_bit_and",      [] { return Lnast_ntype::create_bit_and(); }},
+        {     "assign_bit_xor",      [] { return Lnast_ntype::create_bit_xor(); }},
+        {         "assign_shl",          [] { return Lnast_ntype::create_shl(); }},
+        {         "assign_sra",          [] { return Lnast_ntype::create_sra(); }},
         {"assign_tuple_concat", [] { return Lnast_ntype::create_tuple_concat(); }},
-        {"assign_log_or", [] { return Lnast_ntype::create_log_or(); }},
-        {"assign_log_and", [] { return Lnast_ntype::create_log_and(); }},
+        {      "assign_log_or",       [] { return Lnast_ntype::create_log_or(); }},
+        {     "assign_log_and",      [] { return Lnast_ntype::create_log_and(); }},
     };
     auto fit              = compound_factory.find(op_kind);
     auto compound_op_type = (fit == compound_factory.end()) ? Lnast_ntype::create_invalid() : fit->second();
@@ -1653,7 +1744,7 @@ void Prp2lnast::process_assignment(TSNode n) {
     return;
   }
 
-  const bool rhs_is_fcall = !ts_node_is_null(rv) && std::string_view(ts_node_type(rv)) == "function_call_expression";
+  const bool  rhs_is_fcall = !ts_node_is_null(rv) && std::string_view(ts_node_type(rv)) == "function_call_expression";
   std::string rhs_fcall_name;
   if (rhs_is_fcall) {
     TSNode fn = child_by_field(rv, "function");
@@ -1715,6 +1806,7 @@ void Prp2lnast::process_while_statement(TSNode n) {
     cond_ref = expr_to_node(cond);
   }
   auto while_idx = builder.add_child(Lnast_ntype::create_while());
+  attach_loc(while_idx, n);  // span → upass/typecheck cond-not-bool can point here
   lnast->add_child(while_idx, cond_ref);
   auto body_idx = lnast->add_child(while_idx, Lnast_ntype::create_stmts());
   builder.push_stmts(body_idx);
@@ -2231,7 +2323,7 @@ void Prp2lnast::process_for_statement(TSNode n) {
       bool                     all_positional_const = true;
       uint32_t                 nnc                  = ts_node_named_child_count(probe);
       for (uint32_t i = 0; i < nnc && all_positional_const; i++) {
-        TSNode           c    = ts_node_named_child(probe, i);
+        TSNode           c = ts_node_named_child(probe, i);
         std::string_view ct(ts_node_type(c));
         auto             text = trim(get_text(c));
         // `true`/`false` are spelled as a `bool_literal` token in the grammar
@@ -2245,8 +2337,8 @@ void Prp2lnast::process_for_statement(TSNode n) {
           if (uc == 1) {
             TSNode inner = ts_node_named_child(c, 0);
             if (std::string_view(ts_node_type(inner)) == "constant") {
-              std::string txt = "-";
-              txt += trim(get_text(inner));
+              std::string txt  = "-";
+              txt             += trim(get_text(inner));
               values.emplace_back(std::move(txt));
               continue;
             }
@@ -2515,53 +2607,53 @@ void Prp2lnast::process_lambda_statement(TSNode n) {
   // (func_extract, constprop) detect it without inventing a new ntype.
   auto                    in_idx = lnast->add_child(fd_idx, Lnast_ntype::create_tuple_add());
   std::vector<Param_attr> input_attrs;
-  auto collect_args = [&](TSNode container, const Lnast_nid& parent_tup, std::vector<std::string>* names_out,
-                          std::vector<Param_attr>* attrs_out) {
-    TSNode pending_typed{};
-    TSNode pending_def{};
-    bool   pending_is_ref = false;
-    bool   next_is_ref    = false;
-    auto   flush          = [&]() {
-      if (!ts_node_is_null(pending_typed)) {
-        emit_arg_assign(parent_tup, pending_typed, pending_def, pending_is_ref, attrs_out);
-        if (names_out) {
-          TSNode id = child_by_field(pending_typed, "identifier");
-          if (!ts_node_is_null(id)) {
-            names_out->emplace_back(get_text(id));
+  auto                    collect_args =
+      [&](TSNode container, const Lnast_nid& parent_tup, std::vector<std::string>* names_out, std::vector<Param_attr>* attrs_out) {
+        TSNode pending_typed{};
+        TSNode pending_def{};
+        bool   pending_is_ref = false;
+        bool   next_is_ref    = false;
+        auto   flush          = [&]() {
+          if (!ts_node_is_null(pending_typed)) {
+            emit_arg_assign(parent_tup, pending_typed, pending_def, pending_is_ref, attrs_out);
+            if (names_out) {
+              TSNode id = child_by_field(pending_typed, "identifier");
+              if (!ts_node_is_null(id)) {
+                names_out->emplace_back(get_text(id));
+              }
+            }
+          }
+          pending_typed  = TSNode{};
+          pending_def    = TSNode{};
+          pending_is_ref = false;
+        };
+        uint32_t nc = child_count(container);
+        for (uint32_t i = 0; i < nc; i++) {
+          TSNode           ci    = child(container, i);
+          const char*      fname = ts_node_field_name_for_child(container, i);
+          std::string_view ct(ts_node_type(ci));
+          if (fname && std::string_view(fname) == "mod") {
+            next_is_ref = (ct == "ref");
+            continue;
+          }
+          if (ct == "typed_identifier") {
+            flush();
+            pending_typed  = ci;
+            pending_is_ref = next_is_ref;
+            next_is_ref    = false;
+            continue;
+          }
+          if (fname && std::string_view(fname) == "definition") {
+            // The `definition` field wraps `= expr`; the `=` token also carries
+            // the field tag. Skip the `=` token and keep the expression.
+            if (ct != "=") {
+              pending_def = ci;
+            }
+            continue;
           }
         }
-      }
-      pending_typed  = TSNode{};
-      pending_def    = TSNode{};
-      pending_is_ref = false;
-    };
-    uint32_t nc = child_count(container);
-    for (uint32_t i = 0; i < nc; i++) {
-      TSNode           ci    = child(container, i);
-      const char*      fname = ts_node_field_name_for_child(container, i);
-      std::string_view ct(ts_node_type(ci));
-      if (fname && std::string_view(fname) == "mod") {
-        next_is_ref = (ct == "ref");
-        continue;
-      }
-      if (ct == "typed_identifier") {
         flush();
-        pending_typed  = ci;
-        pending_is_ref = next_is_ref;
-        next_is_ref    = false;
-        continue;
-      }
-      if (fname && std::string_view(fname) == "definition") {
-        // The `definition` field wraps `= expr`; the `=` token also carries
-        // the field tag. Skip the `=` token and keep the expression.
-        if (ct != "=") {
-          pending_def = ci;
-        }
-        continue;
-      }
-    }
-    flush();
-  };
+      };
   if (!ts_node_is_null(fdef)) {
     TSNode inp = child_by_field(fdef, "input");
     if (!ts_node_is_null(inp)) {
@@ -2623,7 +2715,7 @@ void Prp2lnast::process_lambda_statement(TSNode n) {
   // type carries a concrete uint_type/sint_type width. Each frame is a
   // lexical scope; outer scopes remain visible for nested lambdas.
   std::unordered_map<std::string, int64_t> body_param_bits;
-  std::function<void(TSNode)> capture_param_bits = [&](TSNode node) {
+  std::function<void(TSNode)>              capture_param_bits = [&](TSNode node) {
     if (ts_node_is_null(node)) {
       return;
     }
@@ -2632,7 +2724,7 @@ void Prp2lnast::process_lambda_statement(TSNode n) {
       TSNode id = child_by_field(node, "identifier");
       TSNode tc = child_by_field(node, "type");
       if (!ts_node_is_null(id) && !ts_node_is_null(tc)) {
-        std::string nm(trim(get_text(id)));
+        std::string                                   nm(trim(get_text(id)));
         // Walk the type_cast subtree for a uint_type/sint_type carrying a
         // concrete width as its first integer-literal child.
         std::function<std::optional<int64_t>(TSNode)> find_width = [&](TSNode t) -> std::optional<int64_t> {
@@ -2721,9 +2813,8 @@ void Prp2lnast::process_lambda_statement(TSNode n) {
             return false;
           }
           std::string_view tt(ts_node_type(n));
-          if (tt == "assignment" || tt == "declaration_statement" || tt == "control_statement"
-              || tt == "while_statement" || tt == "for_statement" || tt == "loop_statement"
-              || tt == "assert_statement" || tt == "function_call_statement") {
+          if (tt == "assignment" || tt == "declaration_statement" || tt == "control_statement" || tt == "while_statement"
+              || tt == "for_statement" || tt == "loop_statement" || tt == "assert_statement" || tt == "function_call_statement") {
             return true;
           }
           uint32_t cnc = ts_node_named_child_count(n);
@@ -2765,7 +2856,7 @@ void Prp2lnast::process_enum_assignment(TSNode n) {
   Lnast_node ref = Lnast_node::create_ref(get_text(name));
   // LNAST ntype predates an `enum_add` primitive; reuse `tuple_add` plus an
   // `attr_set` marking the value as an enum.
-  auto idx = builder.add_child(Lnast_ntype::create_tuple_add());
+  auto       idx = builder.add_child(Lnast_ntype::create_tuple_add());
   lnast->add_child(idx, ref);
   auto aidx = builder.add_child(Lnast_ntype::create_attr_set());
   lnast->add_child(aidx, ref);
@@ -3211,8 +3302,8 @@ Lnast_node Prp2lnast::type_specification_to_node(TSNode n) {
   // by walking children directly.
   uint32_t total = ts_node_child_count(n);
   for (uint32_t i = 0; i < total; i++) {
-    TSNode      c     = ts_node_child(n, i);
-    const char* fname = ts_node_field_name_for_child(n, i);
+    TSNode           c     = ts_node_child(n, i);
+    const char*      fname = ts_node_field_name_for_child(n, i);
     std::string_view ct(ts_node_type(c));
     if (ct == "attribute_list") {
       emit_attribute_list(aref, c);
@@ -3406,8 +3497,8 @@ void Prp2lnast::emit_type_spec(const Lnast_node& target, TSNode type_cast_node) 
 attrs:
   uint32_t total = ts_node_child_count(type_cast_node);
   for (uint32_t i = 0; i < total; i++) {
-    TSNode      c     = ts_node_child(type_cast_node, i);
-    const char* fname = ts_node_field_name_for_child(type_cast_node, i);
+    TSNode           c     = ts_node_child(type_cast_node, i);
+    const char*      fname = ts_node_field_name_for_child(type_cast_node, i);
     std::string_view ct(ts_node_type(c));
     if (ct == "attribute_list") {
       emit_attribute_list(target, c);
@@ -3466,8 +3557,8 @@ void Prp2lnast::emit_type_expr(const Lnast_nid& parent, TSNode type_node) {
   }
 }
 
-void Prp2lnast::emit_arg_assign(const Lnast_nid& tuple_parent, TSNode typed_ident, TSNode definition_or_null,
-                                bool is_ref_mod, std::vector<Param_attr>* attrs_out) {
+void Prp2lnast::emit_arg_assign(const Lnast_nid& tuple_parent, TSNode typed_ident, TSNode definition_or_null, bool is_ref_mod,
+                                std::vector<Param_attr>* attrs_out) {
   TSNode id = child_by_field(typed_ident, "identifier");
   if (ts_node_is_null(id)) {
     return;
@@ -3586,8 +3677,8 @@ void Prp2lnast::emit_arg_type(const Lnast_nid& assign_parent, TSNode type_node) 
         } else if (it == "assignment") {
           // `name:T = default` field. Lvalue can be typed_identifier or a
           // bare identifier with optional type. Rvalue is the default.
-          TSNode lv  = child_by_field(item, "lvalue");
-          TSNode rv  = child_by_field(item, "rvalue");
+          TSNode lv = child_by_field(item, "lvalue");
+          TSNode rv = child_by_field(item, "rvalue");
           if (ts_node_is_null(lv)) {
             continue;
           }
@@ -4009,10 +4100,10 @@ Lnast_node Prp2lnast::binary_expr_to_node(TSNode n) {
   Lnast_node acc = operands.front();
   for (size_t i = 0; i < ops.size(); ++i) {
     switch (ops[i].tier) {
-      case Tier::times: acc = emit_times(ops[i].kind, acc, operands[i + 1]); break;
-      case Tier::other: acc = emit_other(ops[i].kind, acc, operands[i + 1]); break;
+      case Tier::times  : acc = emit_times(ops[i].kind, acc, operands[i + 1]); break;
+      case Tier::other  : acc = emit_other(ops[i].kind, acc, operands[i + 1]); break;
       case Tier::logical: acc = emit_logical(ops[i].kind, acc, operands[i + 1]); break;
-      default: std::print("prp2lnast: unknown op kind `{}`\n", ops[i].kind); return builder.mint_tmp_ref();
+      default           : std::print("prp2lnast: unknown op kind `{}`\n", ops[i].kind); return builder.mint_tmp_ref();
     }
   }
   return acc;
@@ -4156,6 +4247,7 @@ Lnast_node Prp2lnast::if_expr_to_node(TSNode n, bool need_result) {
   // All cond stmts (and init) have now been emitted to builder.idx_stmts. Add the
   // `if` here so it follows its producers in source order.
   auto if_idx = builder.add_child(Lnast_ntype::create_if());
+  attach_loc(if_idx, n);  // span → upass/typecheck cond-not-bool can point here
 
   // Set of named-child node kinds that are expression-typed and can serve
   // as the value of an arm body. Mirrors `expr_stmt` in process_statement.
@@ -4366,11 +4458,10 @@ Lnast_node Prp2lnast::match_expr_to_node(TSNode n, bool need_result) {
         // grammar uses field('condition', seq(optional(op), _expression)).
         // Remember it so the next arm-RHS knows which compare to emit.
         pending_op = txt;
-      } else if (t == "expression_list" || t == "expression_item" || t == "constant" || t == "identifier"
-                 || t == "tuple" || t == "tuple_sq" || t == "paren_group" || t == "function_call_expression"
-                 || t == "member_selection" || t == "bit_selection" || t == "dot_expression"
-                 || t == "unary_expression" || t == "attribute_read" || t == "type_specification"
-                 || t == "if_expression" || t == "match_expression") {
+      } else if (t == "expression_list" || t == "expression_item" || t == "constant" || t == "identifier" || t == "tuple"
+                 || t == "tuple_sq" || t == "paren_group" || t == "function_call_expression" || t == "member_selection"
+                 || t == "bit_selection" || t == "dot_expression" || t == "unary_expression" || t == "attribute_read"
+                 || t == "type_specification" || t == "if_expression" || t == "match_expression") {
         // Any expression-typed named child is the arm RHS.
         pending_expr = c;
         have_pending = true;
@@ -4383,11 +4474,11 @@ Lnast_node Prp2lnast::match_expr_to_node(TSNode n, bool need_result) {
         else_code       = c;
         pending_is_else = false;
       } else if (have_pending) {
-        const bool use_case = (pending_op == "case" || pending_op == "!case");
-        const bool negate   = (pending_op == "!case" || pending_op == "!=");
+        const bool use_case     = (pending_op == "case" || pending_op == "!case");
+        const bool negate       = (pending_op == "!case" || pending_op == "!=");
         // Emit `<compare> tmp = subject_ref rhs` and return the tmp ref,
         // wrapping in log_not when the operator is the negated form.
-        auto emit_compare = [&](const Lnast_node& rhs) {
+        auto       emit_compare = [&](const Lnast_node& rhs) {
           auto compare_ntype = use_case ? Lnast_ntype::create_func_case() : Lnast_ntype::create_eq();
           auto idx           = builder.add_child(compare_ntype);
           auto ref           = builder.mint_tmp_ref();
@@ -4404,7 +4495,7 @@ Lnast_node Prp2lnast::match_expr_to_node(TSNode n, bool need_result) {
           return neg_ref;
         };
 
-        Lnast_node arm_cond;
+        Lnast_node       arm_cond;
         // Legacy grammar emitted an `expression_list` wrapper (multi-RHS arms);
         // the new grammar exposes the bare expression directly. Handle both.
         std::string_view pet(ts_node_type(pending_expr));
@@ -4543,13 +4634,16 @@ Lnast_node Prp2lnast::compute_bit_mask_ref(TSNode sel_node) {
   // and just keeps the first expression — so flag any parse error on the
   // select node as a hard compile error rather than emitting wrong code.
   if (ts_node_is_null(sel_node)) {
-    report_error("bit-range-empty", "syntax", "empty bit selection `#[]` (expected an index or range)",
+    report_error("bit-range-empty",
+                 "syntax",
+                 "empty bit selection `#[]` (expected an index or range)",
                  "write a single bit `#[3]` or a range `#[0..=3]`");
   }
   if (ts_node_has_error(sel_node)) {
-    report_error(sel_node, "bit-range-index", "syntax",
-                 std::format("invalid bit-range index `{}` (tuple/comma indices not supported in `#[...]`)",
-                             get_text(sel_node)),
+    report_error(sel_node,
+                 "bit-range-index",
+                 "syntax",
+                 std::format("invalid bit-range index `{}` (tuple/comma indices not supported in `#[...]`)", get_text(sel_node)),
                  "use a single index `#[3]` or a range `#[0..=3]`; OR them for a multi-bit mask");
   }
 
@@ -4779,13 +4873,13 @@ Lnast_node Prp2lnast::bit_selection_to_node(TSNode n) {
 }
 
 Lnast_node Prp2lnast::member_selection_to_node(TSNode n) {
-  TSNode     arg  = child_by_field(n, "argument");
-  Lnast_node base = expr_to_node(arg);
+  TSNode     arg        = child_by_field(n, "argument");
+  Lnast_node base       = expr_to_node(arg);
   // Collect field nodes first — each may emit auxiliary stmts (range, minus)
   // that must precede the tuple_get so single-pass constprop can resolve the
   // field's value before consuming it. Adding the tuple_get last keeps the
   // dependency order without a post-hoc reordering pass.
-  auto emit_range = [&](const Lnast_node& start, const Lnast_node& end) {
+  auto       emit_range = [&](const Lnast_node& start, const Lnast_node& end) {
     auto rng_idx = builder.add_child(Lnast_ntype::create_range());
     auto rng_ref = builder.mint_tmp_ref();
     lnast->add_child(rng_idx, rng_ref);
@@ -4968,13 +5062,13 @@ Lnast_node Prp2lnast::tuple_to_node(TSNode n, bool /*is_square*/) {
     // (e.g. `b::[poison=99]=2`). Lowered after the tuple_add as a
     // `tuple_get` + `attr_set` pair so the override is observable on the
     // resulting tuple field.
-    TSNode attr_list_node{};
-    bool   has_attr_list{false};
+    TSNode      attr_list_node{};
+    bool        has_attr_list{false};
     // Phase 8 typesystem: per-field type annotation on the lvalue
     // (e.g. `(a:u4=3, b:u4=5)`). Lowered after the tuple_add as a
     // `tuple_get` + `type_spec` pair so `t.a.[bits]` resolves.
-    TSNode type_cast_node{};
-    bool   has_type_cast{false};
+    TSNode      type_cast_node{};
+    bool        has_type_cast{false};
   };
   std::vector<Item> items;
   items.reserve(nnc);
@@ -5022,7 +5116,7 @@ Lnast_node Prp2lnast::tuple_to_node(TSNode n, bool /*is_square*/) {
         TSNode op_node = child_by_field(c, "operator");
         if (!ts_node_is_null(op_node)) {
           TSNode           op_inner = ts_node_named_child(op_node, 0);
-          std::string_view op_k = ts_node_is_null(op_inner) ? std::string_view{} : std::string_view(ts_node_type(op_inner));
+          std::string_view op_k     = ts_node_is_null(op_inner) ? std::string_view{} : std::string_view(ts_node_type(op_inner));
           if (!op_k.empty() && op_k != "assign") {
             report_error(c,
                          "bundle-compound-assign",
@@ -5032,12 +5126,12 @@ Lnast_node Prp2lnast::tuple_to_node(TSNode n, bool /*is_square*/) {
           }
         }
       }
-      TSNode lv    = child_by_field(c, "lvalue");
-      TSNode rv    = child_by_field(c, "rvalue");
+      TSNode                      lv = child_by_field(c, "lvalue");
+      TSNode                      rv = child_by_field(c, "rvalue");
       // The lvalue may carry a type_cast (`(a:u4=1, …)` parses lv as a
       // `typed_identifier`). Strip it: the ref text must be a bare
       // identifier; otherwise lnastfmt rejects the LNAST.
-      std::string_view lvt2(ts_node_type(lv));
+      std::string_view            lvt2(ts_node_type(lv));
       // Phase 3 — capture any per-field attribute_list (`b::[poison=99]=2`)
       // wherever the grammar attaches it so we can lower it as a post-tuple
       // attr_set. The attribute_list may live under a `type_specification`
@@ -5053,8 +5147,8 @@ Lnast_node Prp2lnast::tuple_to_node(TSNode n, bool /*is_square*/) {
         }
         uint32_t total = ts_node_child_count(parent_node);
         for (uint32_t k = 0; k < total; k++) {
-          TSNode      kc    = ts_node_child(parent_node, k);
-          const char* kfn   = ts_node_field_name_for_child(parent_node, k);
+          TSNode           kc  = ts_node_child(parent_node, k);
+          const char*      kfn = ts_node_field_name_for_child(parent_node, k);
           std::string_view kt(ts_node_type(kc));
           if (kt == "attribute_list") {
             it.attr_list_node = kc;
@@ -5081,8 +5175,8 @@ Lnast_node Prp2lnast::tuple_to_node(TSNode n, bool /*is_square*/) {
       if (!it.has_attr_list) {
         uint32_t total = ts_node_child_count(c);
         for (uint32_t k = 0; k < total; k++) {
-          TSNode      kc    = ts_node_child(c, k);
-          const char* kfn   = ts_node_field_name_for_child(c, k);
+          TSNode           kc  = ts_node_child(c, k);
+          const char*      kfn = ts_node_field_name_for_child(c, k);
           std::string_view kt(ts_node_type(kc));
           if (kt == "attribute_list") {
             it.attr_list_node = kc;

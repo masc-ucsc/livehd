@@ -7,7 +7,7 @@ mod multiply_add(in1, in2) -> (out) {
   stage[1] out@[4] = add(tmp@[3], in1_d@[3]) // adder takes 1 stage; out@[4] typechecks
 }
 
-pub mod accum(in1, in2) -> (out) {
+mod accum(in1, in2) -> (out) {
   reg total = 0                             // mod can use reg
   stage[3] tmp = mul(in1, in2)
   total = add(total, tmp@[3])

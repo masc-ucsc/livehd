@@ -52,6 +52,7 @@ cc_library(
         "//inou/liberty:inou_liberty",
         "//inou/prp:inou_prp",
         "//inou/slang:inou_slang",
+        "//lsp",
         "//inou/yosys:lgyosys",
         "//pass/bitwidth:pass_bitwidth",
         "//pass/common:pass",
