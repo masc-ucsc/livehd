@@ -2901,10 +2901,14 @@ Lnast_node Prp2lnast::expr_to_node(TSNode n) {
         return expr_to_node(c);
       }
     }
-    return constant_text_to_node(trim(get_text(n)));
+    auto txt = trim(get_text(n));
+    check_binary_literal_sign(txt, n);
+    return constant_text_to_node(txt);
   }
   if (t == "integer_literal" || t == "bool_literal" || t == "unknown_literal" || t == "string_literal") {
-    return constant_text_to_node(trim(get_text(n)));
+    auto txt = trim(get_text(n));
+    check_binary_literal_sign(txt, n);
+    return constant_text_to_node(txt);
   }
   if (t == "unary_expression") {
     return unary_expr_to_node(n);
@@ -3129,6 +3133,25 @@ Lnast_node Prp2lnast::interpolated_string_to_node(TSNode n) {
     lnast->add_child(idx, a);
   }
   return ref;
+}
+
+void Prp2lnast::check_binary_literal_sign(std::string_view text, const TSNode& node) const {
+  // Binary literals must carry an explicit sign: `0ub…` (unsigned) or `0sb…`
+  // (signed). The bare `0b…` form is no longer valid — it left the signedness
+  // ambiguous. Detect `0` immediately followed by `b`/`B` (skipping an optional
+  // leading `-`/`+`); a valid binary has `s`/`u` between the `0` and the `b`.
+  size_t i = 0;
+  if (i < text.size() && (text[i] == '-' || text[i] == '+')) {
+    ++i;
+  }
+  if (i + 1 < text.size() && text[i] == '0' && (text[i + 1] == 'b' || text[i + 1] == 'B')) {
+    auto bits = text.substr(i + 2);
+    report_error(node,
+                 "invalid-binary-prefix",
+                 "syntax",
+                 std::format("binary literal `0b…` is missing its sign: use `0ub{}` (unsigned) or `0sb{}` (signed)", bits, bits),
+                 "prefix binary constants with 0ub (unsigned) or 0sb (signed)");
+  }
 }
 
 Lnast_node Prp2lnast::constant_text_to_node(std::string_view text) {

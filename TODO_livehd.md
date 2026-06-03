@@ -174,6 +174,16 @@ Group 1 entries; downstream Groups treat them as Group 1 dependencies.
 - **1f** Source-map indirection (LOC propagation: canonical map + per-cell
   index, alias multi-loc, partition-root fallback) — see "Source location
   (LOC) propagation strategy" below and `docs/contracts/sourcemap.md`.
+- **1n** Pyrope LSP server (`.prp` only — never Verilog): one copyable binary
+  (`livehd-lsp`, later a `livehd lsp` subcommand of [[1y]]) over LiveHD's
+  front-end (`prp2lnast` + `upass` typecheck/bitwidth + `core/diag` [[1z]]).
+  **Primary consumer Claude Code's `LSP` tool** — implement its exact op subset
+  first (diagnostics + hover + documentSymbol, then definition/references);
+  **secondary neovim**. Reuses the shared `tree-sitter-pyrope` grammar and the
+  prp2lnast name maps. Ephemeral, per-buffer, no `lgdb`. **Scope = the semantic
+  server only**; the tree-sitter grammar/neovim queries and the `prpfmt` formatter
+  (incl. `textDocument/formatting`) are a separate project. Can start now (deps
+  landed); spans sharpen with [[1f]]/[[3f]] — `docs/contracts/pyrope_lsp.md`.
 
 ## Group 2 — depends on Group 1
 

@@ -6,6 +6,14 @@
 
 // A signed expression whose value is negative does not fit an unsigned
 // destination. Use an explicit bit-select to force the bit pattern.
+//
+// KNOWN-FAILING (location only): the bitwidth/constprop "does not fit" error is
+// emitted with the correct message (so `:error:` matches), but with NO source
+// span yet — declare/store LNAST nodes don't carry a source loc (only cassert/
+// func_call do). So the source-line marker check below fails. Fixing it needs
+// the loc-carry chain extended to declare/store + threading the nid into the
+// bitwidth overflow path; tracked as the broader source-location work. Left
+// failing intentionally until that lands.
 
 mut v8:s8 = -1
 const ones = v8 | 0xff

@@ -513,7 +513,7 @@ static hhds::Pin_class get_dpin(hhds::Graph* g, const RTLIL::Cell* cell, const R
   }
 
   if (!cell->hasPort(name)) {
-    return create_const(*g, *Dlop::from_pyrope("0b?"));
+    return create_const(*g, *Dlop::from_pyrope("0ub?"));
   }
 
   return create_pick_concat_dpin(g, cell->getPort(name), is_signed);

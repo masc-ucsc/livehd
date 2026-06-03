@@ -12,21 +12,21 @@
 //   - match nested inside another match arm
 //   - selector taken from a comb-function comptime return
 
-const sel = 0b10
+const sel = 0ub10
 
 // All three arm syntaxes in one match must produce the same outcome.
 const r1 = match sel {
-       0b00 { 0b0001 }   // bare-expr arm
-  == 0b01    { 0b0010 }   // ==-prefixed arm
-  case 0b10  { 0b0100 }   // case-prefixed arm
+       0ub00 { 0ub0001 }   // bare-expr arm
+  == 0ub01    { 0ub0010 }   // ==-prefixed arm
+  case 0ub10  { 0ub0100 }   // case-prefixed arm
   else       { cassert(false); 0 }
 }
-cassert(r1 == 0b0100)
+cassert(r1 == 0ub0100)
 
 // Arm body returns a tuple value.
 const r2 = match sel {
-  case 0b00 { (lo=1, hi=0) }
-  case 0b10 { (lo=4, hi=2) }
+  case 0ub00 { (lo=1, hi=0) }
+  case 0ub10 { (lo=4, hi=2) }
   else      { (lo=0, hi=0) }
 }
 cassert(r2.lo == 4 and r2.hi == 2)
@@ -43,7 +43,7 @@ cassert(r3 == 99)
 // Nested match: inner match in an arm body.
 const inner_sel = 1
 const r4 = match sel {
-  case 0b10 {
+  case 0ub10 {
     match inner_sel {
       == 0 { 10 }
       == 1 { 20 }

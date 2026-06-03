@@ -45,6 +45,11 @@ protected:
   // report it and abort (does not return); a clean parse returns normally.
   void check_parse_errors() const;
 
+  // Reject a bare-`0b…` binary literal: Pyrope requires an explicit sign on
+  // binary constants (`0ub…` unsigned / `0sb…` signed). `text` is the literal
+  // source text; `node` anchors the diagnostic span. No-op for any other text.
+  void check_binary_literal_sign(std::string_view text, const TSNode& node) const;
+
   // Reject `a = 3` with no prior `mut`/`const`/declare (or param/output) visible
   // in scope. Runs on the producer tree (pre-upass), so it sees only source-level
   // declarations — no inliner/SSA-synthesized stores to false-positive on.
