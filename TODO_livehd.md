@@ -15,6 +15,21 @@ cross-file dependencies stay visible.
 
 - **1s** Sanitizer pass — chase a nondeterministic memory bug in the
   comptime/string path. **Goal 1.** **Run on Linux (macOS can't do MSan).**
+  - **Status (2026-06-02): RESOLVED.** Chased on Linux with Valgrind memcheck
+    (`--track-origins=yes`), which detects uninitialized reads deterministically
+    on an uninstrumented `--config=debug` binary (MSan would need an instrumented
+    libc++ — config added to `.bazelrc` for later, see below). The *only*
+    uninitialized read in the comptime/string pipeline was in **iassert**:
+    `I_setup()` stack-allocated `struct sigaction` and called `sigaction(SIGSEGV,…)`
+    with `sa_mask` (and padding) never initialized. Fixed upstream
+    (`iassert` commit `b18182f` "fix un-initialized access": value-init the
+    struct + `sigemptyset(&sa.sa_mask)`); LiveHD's `MODULE.bazel` pin bumped
+    `0460fbd8` → `b18182f`. After the bump, Valgrind reports **0 errors / 0
+    contexts** on the comptime/string pipeline, and `string_hello` runs
+    **0 failures / 300 opt + 60 debug** invocations (the prp2lnast-string-WIP
+    hypothesis below did **not** reproduce at current committed HEAD — the WIP
+    landed without the latent read). An `msan` config now exists in `.bazelrc`
+    (caveat: needs an instrumented libc++ before it is false-positive-free).
   - **Symptom.** `string_hello` (and likely other comptime/string tests)
     crash *intermittently* — `Bus error (SIGBUS)` or `Killed (SIGKILL/137)`,
     sometimes `exit 1` after a full dump — at a **few-percent rate with fixed

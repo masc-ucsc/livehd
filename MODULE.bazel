@@ -39,7 +39,7 @@ bazel_dep(name = "iassert", version = "0.1.0")
 git_override(
     module_name = "iassert",
     remote = "https://github.com/masc-ucsc/iassert.git",
-    commit = "0460fbd8405a96b3615be425df9066eba835fcf0",
+    commit = "b18182f668ff42b0f96c3a1e3e6deee4e6da221f",  # "fix un-initialized access": sigaction sa_mask (TODO_livehd 1s)
 )
 # For local debug/testing, swap the git_override above for:
 # local_path_override(module_name = "iassert", path = "../iassert")
