@@ -191,7 +191,102 @@ TSNode find_first_error_statement(TSNode n) {
   }
   return TSNode{};
 }
+
+// ── Typed-declaration initializer kind check (shared by variables & params) ──
+// A typed scalar declaration (`mut c:bool = …`, or a function parameter
+// `b:bool = …`) constrains the initializer's kind: bool/int/string are distinct
+// with NO implicit conversion. These mirror the upass `uPass_typecheck` kind
+// model so prp2lnast can reject a literal initializer whose kind contradicts the
+// declared type at parse time, identically for both declaration forms.
+enum class Scalar_kind { unknown, integer, boolean, string };
+
+const char* scalar_kind_name(Scalar_kind k) {
+  switch (k) {
+    case Scalar_kind::integer: return "integer";
+    case Scalar_kind::boolean: return "boolean";
+    case Scalar_kind::string : return "string";
+    default                  : return "unknown";
+  }
+}
+
+// Classify a literal initializer's scalar kind. Mirrors
+// uPass_typecheck::seed_kind_from_const — keep the two in sync. A non-const, a
+// `nil` copy, or the typeless single-bit unknown wildcard returns `unknown` (no
+// static kind ⇒ no check; runtime/flow cases stay the upass pass's job).
+Scalar_kind literal_scalar_kind(const Lnast_node& v) {
+  if (!v.is_const()) {
+    return Scalar_kind::unknown;
+  }
+  std::string_view t = v.get_name();
+  if (t == "nil") {
+    return Scalar_kind::unknown;  // `nil` is a legal initializer for any type
+  }
+  if (t == "true" || t == "false") {
+    return Scalar_kind::boolean;
+  }
+  if (t == "0sb?" || t == "0ub?") {
+    return Scalar_kind::unknown;  // single unknown bit is typeless (bool or int)
+  }
+  if (!t.empty() && t.front() == '"') {
+    return Scalar_kind::string;  // double-quoted string literal
+  }
+  try {
+    auto c = Dlop::from_pyrope(t);
+    if (c && c->is_integer()) {
+      return Scalar_kind::integer;  // numeric / char literal
+    }
+  } catch (...) {
+  }
+  return Scalar_kind::unknown;
+}
+
+// Declared scalar kind of a type node (`bool_type` / `string_type` /
+// `uint_type` / `sint_type`). Composite/named/none types do not constrain the
+// scalar kind here, so they read as `unknown` (check skipped).
+Scalar_kind declared_scalar_kind(TSNode ty) {
+  if (ts_node_is_null(ty)) {
+    return Scalar_kind::unknown;
+  }
+  std::string_view t(ts_node_type(ty));
+  if (t == "bool_type") {
+    return Scalar_kind::boolean;
+  }
+  if (t == "string_type") {
+    return Scalar_kind::string;
+  }
+  if (t == "uint_type" || t == "sint_type") {
+    return Scalar_kind::integer;
+  }
+  return Scalar_kind::unknown;
+}
 }  // namespace
+
+void Prp2lnast::check_decl_init_kind(std::string_view name, const Lnast_node& value, TSNode inner_type,
+                                     const TSNode& anchor) const {
+  // Shared by the variable-declaration arm of process_lvalue_for_assign and the
+  // function-parameter emit_arg_assign: a typed scalar declaration's literal
+  // initializer must match the declared kind (bool/int/string are distinct, no
+  // implicit conversion). Both `mut c:bool = 10` and `comb f(b:bool = 3)` reach
+  // here, so the diagnostic is identical for variables and parameters.
+  Scalar_kind dk = declared_scalar_kind(inner_type);
+  if (dk == Scalar_kind::unknown) {
+    return;  // named/composite/unsized-named type — kind not constrained here
+  }
+  Scalar_kind vk = literal_scalar_kind(value);
+  if (vk == Scalar_kind::unknown || vk == dk) {
+    return;  // no static initializer kind, or kinds already agree
+  }
+  report_error(anchor,
+               "decl-init-type-mismatch",
+               "type",
+               std::format("cannot initialize `{}` (declared {}) with {} value `{}`",
+                           name,
+                           scalar_kind_name(dk),
+                           scalar_kind_name(vk),
+                           value.get_name()),
+               "no implicit conversion — the initializer must match the declared type, or cast explicitly "
+               "(e.g. `int(x)`, `x == false`)");
+}
 
 void Prp2lnast::check_parse_errors() const {
   if (!ts_node_has_error(ts_root_node)) {
@@ -1258,6 +1353,9 @@ Lnast_node Prp2lnast::process_lvalue_for_assign(TSNode lvalue, const Lnast_node&
                                  name,
                                  std::string_view(get_text(tc))));
       }
+      // A literal initializer must match the declared scalar kind (same check as
+      // a function parameter `b:bool = 3` — see emit_arg_assign / check_decl_init_kind).
+      check_decl_init_kind(trim(get_text(id)), rvalue, child_by_field(tc, "type"), tc);
       emit_type_spec(ref, tc);
     }
 
@@ -1883,9 +1981,41 @@ void Prp2lnast::process_while_statement(TSNode n) {
   lnast->add_child(while_idx, cond_ref);
   auto body_idx = lnast->add_child(while_idx, Lnast_ntype::create_stmts());
   builder.push_stmts(body_idx);
-  if (!ts_node_is_null(code)) {
-    process_scope_statement(code, body_idx);
+
+  if (ts_node_is_null(cond)) {
+    // `while { … }` (no condition, like `loop {}`): the body must `break`.
+    if (!ts_node_is_null(code)) {
+      process_scope_statement(code, body_idx);
+    }
+  } else {
+    // Pyrope loops are comptime-only — a `while` must fully unroll (codegen has
+    // no runtime-loop lowering). The runner only unrolls the infinite form
+    // `while true { … break }`, re-walking the body each iteration. So lower
+    //   while cond { body }  ≡  while cond { if cond { body } else { break } }
+    // The condition re-lowered INSIDE the body is re-evaluated every iteration
+    // (the unroll re-walks the body), and the synthesized `break` terminates
+    // the loop when it turns false. The outer `while` keeps the real condition
+    // so typecheck still bool-checks it and a statically-false condition drops
+    // the loop (zero iterations) without entering the body.
+    Lnast_node inner_cond = expr_to_node(cond);  // emitted into the body → recomputed per iteration
+    auto       if_idx     = builder.add_child(Lnast_ntype::create_if());
+    attach_loc(if_idx, cond);
+    lnast->add_child(if_idx, inner_cond);
+
+    auto then_idx = lnast->add_child(if_idx, Lnast_ntype::create_stmts());
+    builder.push_stmts(then_idx);
+    if (!ts_node_is_null(code)) {
+      process_scope_statement(code, then_idx);
+    }
+    builder.pop_stmts();
+
+    auto else_idx = lnast->add_child(if_idx, Lnast_ntype::create_stmts());
+    builder.push_stmts(else_idx);
+    auto brk = builder.add_child(Lnast_ntype::create_func_break());
+    lnast->add_child(brk, builder.mint_tmp_ref());
+    builder.pop_stmts();
   }
+
   builder.pop_stmts();
 }
 
@@ -3663,16 +3793,17 @@ void Prp2lnast::emit_arg_assign(const Lnast_nid& tuple_parent, TSNode typed_iden
   //   explicit default   -> expr_to_node(definition)
   // expr_to_node may emit tmp statements; for literal defaults (the common
   // case) it returns a const node and has no side effect.
-  if (!ts_node_is_null(definition_or_null)) {
-    lnast->add_child(aidx, expr_to_node(definition_or_null));
-  } else {
-    lnast->add_child(aidx, Lnast_node::create_const(is_ref_mod ? "ref" : "nil"));
-  }
+  Lnast_node arg_val = !ts_node_is_null(definition_or_null) ? expr_to_node(definition_or_null)
+                                                            : Lnast_node::create_const(is_ref_mod ? "ref" : "nil");
+  lnast->add_child(aidx, arg_val);
   // Optional type subtree (3rd child).
   TSNode type_cast = child_by_field(typed_ident, "type");
   if (!ts_node_is_null(type_cast)) {
     TSNode ty = child_by_field(type_cast, "type");
     if (!ts_node_is_null(ty)) {
+      // A literal default must match the declared scalar kind, exactly as a
+      // variable declaration `mut b:bool = 3` would (shared check).
+      check_decl_init_kind(trim(get_text(id)), arg_val, ty, type_cast);
       emit_arg_type(aidx, ty);
     }
     // Parameter-side attribute carrier (`a::[comptime]`, `a:T::[debug=2]`).

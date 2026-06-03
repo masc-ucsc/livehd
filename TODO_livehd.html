@@ -1,0 +1,609 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>TODO — LiveHD internal refactor</title>
+<style>
+:root {
+  --bg:#ffffff; --fg:#24292f; --muted:#57606a; --border:#d0d7de;
+  --soft:#f6f8fa; --accent:#0969da; --accent-bg:#ddf4ff;
+  --idbg:#0969da; --idfg:#ffffff; --notebg:#fff8c5; --notefg:#7d4e00;
+  --codefg:#1f2328;
+}
+@media (prefers-color-scheme: dark) {
+  :root {
+    --bg:#0d1117; --fg:#e6edf3; --muted:#8b949e; --border:#30363d;
+    --soft:#161b22; --accent:#58a6ff; --accent-bg:#13233b;
+    --idbg:#1f6feb; --idfg:#ffffff; --notebg:#3b2f00; --notefg:#f2cc60;
+    --codefg:#e6edf3;
+  }
+}
+* { box-sizing:border-box; }
+html { scroll-behavior:smooth; }
+body {
+  margin:0; background:var(--bg); color:var(--fg);
+  font:16px/1.6 -apple-system,BlinkMacSystemFont,"Segoe UI",Helvetica,Arial,sans-serif;
+}
+nav {
+  position:sticky; top:0; z-index:10; background:var(--soft);
+  border-bottom:1px solid var(--border); padding:.55rem 1rem;
+  display:flex; gap:.4rem; flex-wrap:wrap; align-items:center;
+  backdrop-filter:saturate(180%) blur(6px);
+}
+nav .brand { font-weight:700; margin-right:.6rem; color:var(--muted); }
+nav a {
+  text-decoration:none; color:var(--fg); padding:.25rem .7rem;
+  border-radius:6px; border:1px solid transparent; font-size:.92rem;
+}
+nav a:hover { background:var(--accent-bg); }
+nav a.active { background:var(--accent); color:#fff; border-color:var(--accent); }
+main { max-width:920px; margin:0 auto; padding:2rem 1.25rem 5rem; }
+h1,h2,h3,h4 { line-height:1.25; font-weight:600; }
+h1 { font-size:1.9rem; padding-bottom:.3em; border-bottom:1px solid var(--border); }
+h2 { font-size:1.45rem; margin-top:2.2rem; padding-bottom:.3em; border-bottom:1px solid var(--border); }
+h3 { font-size:1.2rem; margin-top:1.6rem; }
+a { color:var(--accent); }
+ul { padding-left:1.4rem; }
+li { margin:.28rem 0; }
+li > ul { margin-top:.28rem; }
+code {
+  background:var(--soft); color:var(--codefg); padding:.12em .4em;
+  border-radius:5px; font-size:.88em;
+  font-family:ui-monospace,SFMono-Regular,"SF Mono",Menlo,Consolas,monospace;
+}
+pre {
+  background:var(--soft); border:1px solid var(--border); border-radius:8px;
+  padding:1rem; overflow:auto; line-height:1.45;
+}
+pre code { background:none; padding:0; font-size:.85em; }
+table { border-collapse:collapse; width:100%; margin:1rem 0; font-size:.94rem; }
+th,td { border:1px solid var(--border); padding:.45rem .7rem; text-align:left; vertical-align:top; }
+th { background:var(--soft); }
+tr:nth-child(even) td { background:var(--soft); }
+blockquote { margin:1rem 0; padding:.2rem 1rem; color:var(--muted); border-left:4px solid var(--border); }
+/* task-id markers */
+strong.item-id {
+  display:inline-block; background:var(--idbg); color:var(--idfg);
+  font-weight:700; padding:.02em .5em; border-radius:6px; font-size:.82em;
+  letter-spacing:.02em; scroll-margin-top:4rem;
+}
+strong.item-id::before { content:"#"; opacity:.55; margin-right:.08em; }
+li:target { background:var(--accent-bg); border-radius:6px;
+  box-shadow:0 0 0 .5rem var(--accent-bg); }
+strong.item-id:target { outline:2px solid var(--accent); }
+/* cross-reference links */
+a.xref {
+  text-decoration:none; background:var(--accent-bg); color:var(--accent);
+  font-weight:600; padding:.02em .45em; border-radius:6px; font-size:.85em;
+  border:1px solid transparent;
+}
+a.xref:hover { border-color:var(--accent); }
+a.xref::before { content:"→ "; opacity:.6; }
+.xref-note {
+  background:var(--notebg); color:var(--notefg); font-weight:600;
+  padding:.02em .45em; border-radius:6px; font-size:.8em; cursor:help;
+}
+.xref-note::before { content:"✎ "; opacity:.7; }
+footer { max-width:920px; margin:0 auto; padding:0 1.25rem 3rem;
+  color:var(--muted); font-size:.85rem; }
+</style>
+</head>
+<body>
+<nav><span class="brand">LiveHD TODO</span><a class="" href="TODO.html">Overview</a><a class="" href="TODO_prp.html">Pyrope</a><a class="" href="TODO_verilog.html">Verilog</a><a class="active" href="TODO_livehd.html">LiveHD</a><a class="" href="TODO_hhds.html">HHDS</a></nav>
+<main>
+<h1 id="todo-livehd-internal-refactor">TODO — LiveHD internal refactor</h1>
+<p>Pending work on LiveHD internals: CLI, upass infrastructure, source-map
+machinery, LGraph cleanup, simulation/debug substrate, test reorg,
+benchmarks, and HHDS-side optimizations.</p>
+<p>Items use the same Group N letters as the master plan in <a href="TODO.html">TODO.md</a>.
+Items in the same group can be done in parallel; all letters in group N must
+complete before group N+1 starts. Group letters are shared across
+<a href="TODO_prp.html">TODO_prp.md</a>, <a href="TODO_verilog.html">TODO_verilog.md</a>,
+<a href="TODO_livehd.html">TODO_livehd.md</a>, and <a href="TODO_hhds.html">TODO_hhds.md</a>, so
+cross-file dependencies stay visible.</p>
+<h2 id="group-1-foundation">Group 1 — foundation</h2>
+<ul>
+<li>
+<p><strong id="item-1d" class="item-id">1d</strong> Demand-driven (lazy) emit + dead-code elimination for upass. <strong>Goal 1.</strong>
+  <strong>★ Design rationale + literature references live in the header comment block
+  at the top of <a href="upass/runner/upass_runner.cpp"><code>upass/runner/upass_runner.cpp</code></a>
+  — read that first; this entry is the implementation plan.</strong> Replace today's
+  <em>emit-everything-then-mark-sweep</em> DCE with <em>demand-first</em> emission that
+  materializes each pure value def at its use site (folding to a <code>const</code> when
+  possible, else copying the def subtree from the source tree), drops undemanded
+  defs for free, and sinks defs near their uses. In compiler terms this is late
+  scheduling of a sea-of-nodes / partial dead-code elimination (refs in the
+  comment block: Click GCM, Knoop-Rüthing-Steffen PDE/LCM, SSA-DCE, SCCP, VDG).</p>
+</li>
+</ul>
+<p><strong>Motivating symptom.</strong> A comptime bit-range write leaks an unresolved <code>range</code>
+  into <code>lnast.dump</code>:
+  <div class="highlight"><pre><span></span><code>inou.prp files:inou/prp/tests/comptime/bitset.prp |&gt; pass.upass |&gt; lnast.dump
+...
+├── range
+│   ├── ref &#39;___22&#39;      # from x#[5..+5]  ⇒ bits 5..=9
+│   ├── const &#39;5&#39;
+│   └── const &#39;9&#39;
+</code></pre></div>
+  <code>range</code> (and <code>declare</code>) are not in <code>dce_is_def_producing</code>, so an unused comptime
+  one is never swept; more fundamentally we emit eagerly and sweep afterward
+  instead of emitting on demand.</p>
+<p><strong>Current state (what to evolve).</strong>
+  - Eager emit in constprop/runner (<code>emit_op_with_fold*</code> in <code>upass_runner.cpp</code>).
+  - Scalar const-at-use fold already exists: <code>fold_ref</code> + <code>emit_ref_or_folded</code>
+    (<code>upass_constprop.cpp</code>) — inline <code>const zz</code> for a <code>ref xx</code> when <code>xx</code> is a known
+    trivial scalar. <strong>This is the model to generalize.</strong>
+  - Post-walk mark-sweep DCE: <code>dead_code_eliminate_staging</code> (<code>upass_runner.cpp</code>),
+    runs only when constprop is active; touches <strong>temps only</strong> (<code>Lnast::is_tmp</code>,
+    <code>___</code> prefix); <code>dce_is_def_producing</code> lists the eligible ops — <code>range</code>/<code>declare</code>
+    are <strong>absent</strong>; <code>attr_set type='reg'|'mut'</code> is keepalive
+    (<code>dce_is_keepalive_attr_set</code>).
+  - IR is <strong>SSA</strong> at constprop time (<code>upass/ssa</code> renames <code>mut</code> writes apart, e.g.
+    <code>x</code> / <code>x___ssa_1</code>) but <strong>straight-line only</strong> — branches are copied verbatim,
+    no φ; the lowerer's Mux merges later.</p>
+<p><strong>Target model — demand-driven liveness from roots.</strong>
+  - <strong>Roots (pinned; always emitted, order preserved):</strong> function IO (declared at
+    the function boundary via the <code>io</code> node — <em>variables cannot declare outputs</em>,
+    so the IO set is knowable and is the only named-var exception), side-effecting
+    statements (<code>cassert</code> always; <code>cputs</code>/<code>func_call</code> unless their dst const-folds),
+    and state elements (<code>attr_set type='reg'|'mut'</code>).
+  - <strong>Floating (deferred):</strong> every pure value def, named or temp. Emitted only when
+    transitively demanded by a root. Undemanded ⇒ never emitted (= free DCE).
+  - <strong>Materialize at use:</strong> known-const scalar ⇒ inline the <code>const</code> (existing
+    <code>fold_ref</code>); otherwise copy the def subtree from the source ("shadow") tree via
+    <code>emit_subtree_verbatim</code>. <code>range</code> / <code>declare</code> / all-const-field statements fall
+    out of this one rule uniformly.
+  - <strong>Placement:</strong> at the <strong>dominator-tree LCA of all uses</strong> (then sink as deep/late
+    as legal), NOT the textual first use — correct when a value is consumed in
+    multiple branches. Within a straight-line SSA region, first-use == LCA.</p>
+<p><strong>Safety property.</strong> Total reorder of pure defs is sound <em>here</em> because our side
+  effects are clean: no memory references / aliasing, so every read-after-write is
+  visible through SSA names. CAUTION (future arrays): an array index reintroduces
+  may-alias ordering — <code>a[i]=</code> vs <code>=a[j]</code> cannot be reordered without proving
+  <code>i != j</code>; treat aliasing array ops as pinned/ordered when arrays land (D4).</p>
+<p><strong>Data structures.</strong>
+  - Pending map: output-name → handle (source nid) into the shadow tree, stored
+    <strong>in the scoped <code>Symbol_table</code> entry</strong> so <code>Symbol_table::leave_scope</code> recycles
+    dead pendings automatically — no parallel map lifecycle, no unbounded growth.
+  - Emitted mark: once materialized, record the emitted staging nid so later refs
+    dedupe (a shared subexpr emits once — preserves CSE, avoids duplicate work).
+  - Transitive demand: resolving a <code>ref</code> emits its def first, post-order over
+    dependency edges; bounded by #pending-in-scope (the "chain of inserts" — bounded
+    but must be deduped via the emitted-mark and LCA-placed).</p>
+<p><strong>Phases (land in order).</strong>
+  - <strong>D1 — interim, proven machinery (do first):</strong> add <code>range</code> to
+    <code>dce_is_def_producing</code> (pure, no side channel) so unused comptime ranges are
+    swept by the existing mark-sweep; give <code>declare</code> a keepalive guard mirroring
+    <code>attr_set reg/mut</code> (declare is a <em>type carrier</em> consumed by bitwidth/lnastfmt —
+    never blanket-drop). Kills the bitset symptom with no architecture change.
+  - <strong>D2 — prototype demand-driven on the comptime subset:</strong> statements whose
+    fields are all const / const-type (<code>range</code>, const <code>declare</code>, scalar const
+    assign), scoped to temps within one <code>stmts</code> block. Validate pending-in-symtab,
+    transitive resolution, and shadow-tree copy. Eager emit + post-walk DCE stay in
+    place for everything else (both models coexist; the subset is just not emitted
+    eagerly).
+  - <strong>D3 — generalize:</strong> all pure SSA-temp defs float; add LCA placement for
+    cross-branch uses; extend to droppable named vars (non-IO, non-state) using the
+    <code>io</code>-node root set; then <strong>retire the separate post-walk rebuild</strong> by folding
+    DCE into demand-driven emission.
+  - <strong>D4 — arrays (future-gated):</strong> classify aliasing array-index ops as
+    pinned/ordered; revisit the total-reorder assumption above.</p>
+<p><strong>Files.</strong> <code>upass/runner/upass_runner.cpp</code> (DCE section + emit path),
+  <code>upass/constprop/upass_constprop.{cpp,hpp}</code> (<code>fold_ref</code>, <code>emit_ref_or_folded</code>,
+  <code>process_range</code>, <code>process_declare</code>, <code>classify_statement</code>), and the scoped
+  <code>Symbol_table</code> (attach a pending source-nid per scope entry).</p>
+<p><strong>Validation.</strong> <code>bitset.prp</code>: no <code>range ___22</code> in <code>lnast.dump</code>, results still
+  correct (verifier 4/0). Full upass + comptime suites green, net-neutral. New
+  tests: unused comptime range dropped; used comptime range folds to a mask const;
+  <code>declare</code> with no readers kept iff reg/mut/IO else dropped; multi-branch shared
+  temp emitted once at the dominator LCA and dominating both uses.</p>
+<p><strong>Relationships.</strong> Generalizes constprop's scalar <code>fold_ref</code>. The <code>declare</code>
+  handling must match the landed declare/store node shape, and the bit-range LHS
+  producer lowering (landed — the comptime bit-ranges it emits, e.g. <code>x#[5..+5]</code>,
+  are the motivating case). Must keep the landed read-only bitwidth finalization
+  pass (runs after SSA) able to see <code>declare</code> type info — hence D1's declare
+  keepalive.</p>
+<ul>
+<li><strong id="item-1h" class="item-id">1h</strong> New <code>upass/semacheck</code> pass + demote <code>lnastfmt</code> to compiler-debug-only +
+  trim the LSP pipeline. <strong>Goal 1.</strong> Today <code>pass.lnastfmt</code> mixes two unrelated
+  jobs: (a) compiler-internal <em>structural</em> validation that only fires when a
+  producer built a malformed tree (a compiler bug, never user input), and (b) a
+  small set of genuine <em>user-facing</em> semantic errors. The LSP <code>analyze()</code>
+  (<code>lsp/livehd_lsp.cpp:233</code>) runs <code>prp2lnast |&gt; upass |&gt; lnastfmt</code>, so an end
+  user editing <code>.prp</code> can be shown developer-facing messages like "fix prp2lnast
+  to emit the cond's compute statements before the <code>if</code>" as editor squiggles —
+  wrong audience. Split (b) into a dedicated semantic-legality pass, leave (a) in
+  lnastfmt as a debug/CI-only validator, and drop lnastfmt from the LSP path.</li>
+</ul>
+<p><strong>Pipeline fact to respect (do NOT truncate the LSP before SSA).</strong> <code>uPass_ssa</code>
+  runs <strong>early</strong> — <code>Pass_upass::work</code> calls it at <code>pass/upass/pass_upass.cpp:310</code>,
+  <em>before</em> the main runner loop at <code>:321</code>. It is a prerequisite for constprop's
+  free reordering (renames multi-assigned <code>mut</code> writes apart) plus I/O-metadata
+  harvest, not a late codegen step. Every user-facing diagnostic is emitted by a
+  pass that runs <strong>after</strong> ssa: typecheck, constprop, bitwidth, verifier (assert/
+  coalescer/attributes emit none). So the LSP must run the <em>whole</em> runner; the
+  only transform-only tail it can skip is <code>tolg</code> (already off — default labels →
+  <code>run_tolg=false</code>) and optionally <code>coalescer</code> (pure DSE, 0 diagnostics). The
+  LNAST itself is <strong>mandatory</strong> (it is upass's input IR), so "skip LNAST
+  generation" is not an option.</p>
+<p><strong>The two user-facing checks to relocate (the only non-internal emits in
+  <code>pass/lnastfmt/pass_lnastfmt.cpp</code>).</strong>
+  - <strong>Write to a read-only / derived attribute</strong> — <code>derived_attr_violation</code>
+    (<code>:248</code>, fires at <code>:458</code>): rejects <code>x.[bits]=</code>, <code>.[size]=</code>, <code>.[sign]=</code>,
+    <code>.[key]=</code>, and <code>max</code>/<code>min</code> written via <code>attr_set</code>. <strong>This is the ONLY
+    enforcement site in the whole codebase</strong> (grep-confirmed) — losing it would
+    silently accept those writes. Must move, not delete.
+  - <strong>Variable redeclaration + shadowing</strong> — <code>check_scope</code> (<code>:276</code>, fires at
+    <code>:286</code>/<code>:291</code>). NOTE: no-shadowing is <em>already</em> enforced earlier and better in
+    prp2lnast (<code>inou/prp/prp2lnast.cpp:367</code>, code <code>variable-shadowing</code>, with a
+    real located <code>Span</code>); the lnastfmt copy is a post-constprop recheck with no
+    Span. So <strong>redeclaration in the same scope</strong> is the genuinely-homeless check;
+    confirm whether the post-constprop shadowing recheck still catches anything
+    prp2lnast doesn't (it would only matter if constprop/the inliner <em>introduces</em>
+    a shadow — i.e. a compiler bug) and, if not, drop it as redundant.</p>
+<p><strong>New pass <code>upass/semacheck</code></strong> (deliberately separate from <code>typecheck</code>, per the
+  partition-by-functionality decision: scope/declaration legality is conceptually
+  distinct from kind/operator/nil inference). Owns the relocated user-facing
+  checks and emits <strong>located</strong> <code>core/diag</code> diagnostics (carry a <code>Span</code> so the
+  <code>tests/errors/</code> harness can pin a line via <code>locate_error_here</code> — today's
+  lnastfmt bakes location into the message text, no Span). Default home for <em>both</em>
+  relocated checks is semacheck; the read-only-attr-write check may alternatively
+  live in <code>typecheck</code> (it is attribute-kind reasoning) — implementer's call, but
+  prefer semacheck to keep the partition clean.</p>
+<p><strong>Placement.</strong> Run semacheck <strong>early</strong> — right after ssa's I/O normalization and
+  before <code>typecheck</code> (fail fast on a scope error before the value passes work).
+  Scope/declaration checks want the tree closest to user source; post-constprop is
+  wrong because the inliner/SSA synthesize stores+declares with no matching
+  declare (the same reason the existing assign-before-declare check is forced
+  pre-upass — see the <code>check_scope</code> comment at <code>pass_lnastfmt.cpp:272-275</code>).</p>
+<p><strong>lnastfmt → debug-only.</strong> After the move, <code>validate()</code> is pure structural
+  validation (io-shape, <code>is_valid_ref_text</code>, node-shape invariants for
+  delay_assign/attr_set/attr_get/store/declare/dp_assign, <code>check_unwritten_tmps</code>)
+  — all "the compiler built a malformed tree" assertions. Make it <strong>default-off in
+  the codegen pipeline</strong> (a small wall-clock save, but mainly a UX/architecture
+  boundary), still runnable explicitly (the test pipelines invoke <code>pass.lnastfmt</code>
+  directly — keep that working) and on by default in CI/dbg. Then <strong>remove the
+  <code>Pass_lnastfmt::fmt_begin</code> call from the LSP <code>analyze()</code></strong> (<code>lsp/livehd_lsp.cpp:
+  273-278</code>).</p>
+<p><strong>Files.</strong> New <code>upass/semacheck/upass_semacheck.{cpp,hpp}</code> + <code>BUILD</code> (register a
+  <code>Pass_plugin</code> like the sibling passes). <code>pass/upass/pass_upass.cpp</code> — add a
+  <code>semacheck</code> label (default <code>true</code>), <code>#include</code> the header for plugin linkage,
+  and <code>emplace_back("semacheck")</code> early in <code>upass_order</code> (before <code>typecheck</code>).
+  <code>pass/lnastfmt/pass_lnastfmt.cpp</code> — delete <code>derived_attr_violation</code> + the
+  <code>check_scope</code> user-facing emits (relocated), keep the structural checks, add the
+  default-off gate. <code>lsp/livehd_lsp.cpp</code> — drop the lnastfmt stage; optionally pass
+  <code>coalescer:0</code>. <code>inou/prp/prp2lnast.cpp</code> — confirm shadowing stays put; decide
+  redeclaration ownership (prp2lnast vs semacheck).</p>
+<p><strong>Validation.</strong> Identify the <code>tests/errors/*.prp</code> negatives that currently rely
+  on lnastfmt's user-facing errors (read-only-attr-write, redeclaration) and
+  ensure they still pass with the checks in semacheck — now with a <code>Span</code>, so add
+  <code>locate_error_here</code> markers. Full upass + comptime + <code>tests/errors</code> suites green,
+  net-neutral. LSP smoke: a buffer with <code>x.[bits]=3</code> and one with a redeclaration
+  still surface a diagnostic via the LSP (now from semacheck, not lnastfmt).
+  Confirm lnastfmt-default-off drops no coverage (explicit <code>pass.lnastfmt</code> in test
+  pipelines unaffected).</p>
+<p><strong>Relationships.</strong> Builds on the LSP <a class="xref" href="TODO_livehd.html#item-1n">1n</a>. Complements the unified-diagnostics
+  surface (<strong>3f</strong>) — semacheck emits via <code>core/diag</code>; spans sharpen with the
+  source-map work <a class="xref" href="TODO_livehd.html#item-1f">1f</a>. The "SSA is early" fact above is load-bearing: do not
+  try to make the LSP stop before SSA.</p>
+<h2 id="group-1-complex-foundation-larger-scope">Group 1-complex — foundation, larger scope</h2>
+<p>Tasks that are independent of other Group 1/2 work but are large enough
+that they warrant their own bucket. Can be done in parallel with regular
+Group 1 entries; downstream Groups treat them as Group 1 dependencies.</p>
+<ul>
+<li><strong id="item-1y" class="item-id">1y</strong> New CLI: <code>setup/run/status/list/describe</code>, TOML config, JSONL
+  results, error classes — <code>docs/contracts/future_cli.md</code>.</li>
+<li><strong id="item-1f" class="item-id">1f</strong> Source-map indirection (LOC propagation: canonical map + per-cell
+  index, alias multi-loc, partition-root fallback) — see "Source location
+  (LOC) propagation strategy" below and <code>docs/contracts/sourcemap.md</code>.</li>
+<li><strong id="item-1n" class="item-id">1n</strong> Pyrope LSP server (<code>.prp</code> only — never Verilog): one copyable binary
+  (<code>livehd-lsp</code>, later a <code>livehd lsp</code> subcommand of <a class="xref" href="TODO_livehd.html#item-1y">1y</a>) over LiveHD's
+  front-end (<code>prp2lnast</code> + <code>upass</code> typecheck/bitwidth + <code>core/diag</code> <span class="xref xref-note" title="note: 1z">1z</span>).
+  <strong>Primary consumer Claude Code's <code>LSP</code> tool</strong> — implement its exact op subset
+  first (diagnostics + hover + documentSymbol, then definition/references);
+  <strong>secondary neovim</strong>. Reuses the shared <code>tree-sitter-pyrope</code> grammar and the
+  prp2lnast name maps. Ephemeral, per-buffer, no <code>lgdb</code>. <strong>Scope = the semantic
+  server only</strong>; the tree-sitter grammar/neovim queries and the <code>prpfmt</code> formatter
+  (incl. <code>textDocument/formatting</code>) are a separate project. <strong>Phase A landed
+  2026-06-02</strong>: <code>lgshell --lsp</code> (lib <code>lsp/</code>) — lifecycle + diagnostics over stdio.
+  Phases B–E (hover/nav/workspace) remain; spans sharpen with <a class="xref" href="TODO_livehd.html#item-1f">1f</a>/<a class="xref" href="TODO_livehd.html#item-3f">3f</a> —
+  <code>docs/contracts/pyrope_lsp.md</code>.</li>
+</ul>
+<h2 id="group-2-depends-on-group-1">Group 2 — depends on Group 1</h2>
+<p>(none — prior LiveHD-internal Group 2 items completed or descoped.)</p>
+<h2 id="group-3-depends-on-group-2">Group 3 — depends on Group 2</h2>
+<ul>
+<li><strong id="item-3c" class="item-id">3c</strong> <code>Partition</code> descriptor as a tree-level HHDS attribute (<code>kind</code>,
+  <code>latency_range</code>, ports, <code>ext</code>, <code>interface_hash</code>, <code>state_shape_hash</code>) —
+  <code>docs/contracts/architecture.md §3</code>.</li>
+<li><strong id="item-3d" class="item-id">3d</strong> New upass <code>lnast_to_slop</code> (parallel to <code>lnast_to_lgraph</code>) producing
+  executable slop.</li>
+<li><strong id="item-3f" class="item-id">3f</strong> Unified compile error/warning surface from <code>inou/prp</code>, upass,
+  lgraph passes (+ tests for expected diagnostics). <strong>Foundation landed</strong> (the
+  former 1z <code>core/diag</code> task: record schema + emitter + sink + JSONL + text
+  renderer, spans <code>null</code>); this entry finishes full-fidelity <code>source_id</code> spans
+  (via <a class="xref" href="TODO_livehd.html#item-1f">1f</a>),
+  lgraph-pass coverage, line/col resolution, and the CLI roll-up. Design:
+  <code>docs/contracts/diagnostics.md</code>.</li>
+<li><strong id="item-3h" class="item-id">3h</strong> <code>Bitwidth_range</code> → <code>Const min/max</code> (drop <code>int+overflow</code>) once Dlop
+  migration is stable — see "Bitwidth_range" section below.</li>
+</ul>
+<h2 id="group-4-depends-on-group-3">Group 4 — depends on Group 3</h2>
+<ul>
+<li><strong id="item-4c" class="item-id">4c</strong> Hot-probe injection at checkpoint replay (no recompile) —
+  <code>docs/contracts/simulation.md</code>.</li>
+<li><strong id="item-4d" class="item-id">4d</strong> What-if <code>poke(signal, value)</code> engine with safety semantics.</li>
+<li><strong id="item-4e" class="item-id">4e</strong> Queryable indexed trace store (slice, transition, distribution
+  queries).</li>
+<li><strong id="item-4f" class="item-id">4f</strong> Invariant-detector codegen → emits <code>debug.prp</code> the agent can edit.</li>
+<li><strong id="item-4g" class="item-id">4g</strong> Checkpoint format + reload validator (after slop codegen lands in
+  <a href="TODO_livehd.html">TODO_livehd.md</a> <strong>3d</strong>); partition-keyed via
+  <code>state_shape_hash</code>, covers memories and registers for large simulation —
+  <code>docs/contracts/architecture.md §9</code>.</li>
+</ul>
+<h2 id="group-5-polish-final">Group 5 — polish / final</h2>
+<ul>
+<li><strong id="item-5a" class="item-id">5a</strong> Rewrite <code>simlib/{uint,sint}.hpp</code> as part of the HLOP runtime;
+  retire <code>firrtl-sig</code> attribution — see "simlib fixed-width int types"
+  below.</li>
+<li><strong id="item-5b" class="item-id">5b</strong> Attribute hot-path benchmark (flat_storage vs lhtree regression
+  check) — <code>docs/contracts/hhds_migration.md §8</code>.</li>
+<li><strong id="item-5c" class="item-id">5c</strong> Agent-legible globally-unique, optimization-stable signal names —
+  <code>docs/contracts/simulation.md</code>.</li>
+<li><strong id="item-5d" class="item-id">5d</strong> Test reorg per "Test Organization" below (<code>tests/</code> layout,
+  <code>contracts/</code> split, <code>*_test.cpp</code> rules).</li>
+<li><strong id="item-5e" class="item-id">5e</strong> IDAP perf-sweep pass: hold correctness flags steady, drive each
+  optional pass on/off to measure marginal cost and find regressions —
+  see "IDAP perf-sweep pass" below.</li>
+<li><strong id="item-5f" class="item-id">5f</strong> Benchmark contracts (extend <code>benchmark/</code>): codegen throughput,
+  simulation speed, agent-loop iteration latency — regression gates so the
+  "seconds matter" promise of <code>docs/contracts/architecture.md §1</code> stays
+  measurable.</li>
+</ul>
+<h2 id="test-organization">Test Organization</h2>
+<p>Tests are scattered across the codebase. Some subsystems place tests in
+dedicated <code>tests/</code> directories (core, lgraph, lnast, inou/pyrope) while others
+have test files alongside source code (upass, pass/label, pass/mockturtle,
+main, inou/lefdef, inou/liveparse).</p>
+<p>Rules to enforce:</p>
+<ul>
+<li>
+<p>All main C++ tests must live in a <code>tests/</code> subdirectory under each component.</p>
+</li>
+<li>
+<p>A file should only use the <code>_test.cpp</code> suffix (e.g., <code>foo_test.cpp</code>) when
+  there is a corresponding <code>foo.cpp</code> in the parent directory. Otherwise it is
+  just a standalone test and should not carry the <code>_test</code> suffix.</p>
+</li>
+<li>
+<p>When the <code>_test</code> convention is used, it must be a suffix, never a prefix
+  (<code>foo_test.cpp</code>, not <code>test_foo.cpp</code>).</p>
+</li>
+<li>
+<p>Create a separate <code>contracts/</code> directory (per component or top-level) for
+  higher-level integration and API tests. Contracts test only public/high-level
+  APIs and overall integration. Agents should not edit contract tests directly;
+  they are maintained by hand to guarantee stable interface behavior.</p>
+</li>
+<li>
+<p>Treat compile-driver scripts as contracts, not ordinary tests. Move
+  <code>yosys_compile.sh</code>, <code>slang_compile.sh</code>, and the other <code>*_compile.sh</code> scripts
+  out of <code>tests/</code> directories and place them under a consistent <code>contracts/</code>
+  structure.</p>
+</li>
+</ul>
+<h2 id="source-location-loc-propagation-strategy">Source location (LOC) propagation strategy</h2>
+<p>Decide how LOC anchors (<code>file:line:col</code>, module, pipeline-stage) flow through
+LNAST and LGraph so that <code>sigref("alu.flag_z")</code>, hot-probe injection
+(<code>docs/contracts/simulation.md</code>), waveform-to-source mapping, and the
+invariant-detector code generator can all map an internal signal back to
+agent-editable Pyrope without best-effort heuristics.</p>
+<h3 id="hard-commitments-not-in-scope-for-this-decision">Hard commitments (not in scope for this decision)</h3>
+<ul>
+<li>Every <code>Partition</code> (<code>comb</code> / <code>pipe[N]</code> / <code>mod</code>) keeps its declaration LOC.</li>
+<li>Every port (input/output of a partition) keeps its declaration LOC.</li>
+<li>Every register and memory declaration keeps its LOC.</li>
+</ul>
+<p>These ride on the partition descriptor / port struct and are mandatory
+through every pass.</p>
+<h3 id="open-how-to-handle-everything-else-internal-wires-ssa-temps-synthesized-cells">Open: how to handle everything else (internal wires, SSA temps, synthesized cells)</h3>
+<p>The naive "anchor on every value" approach is expensive and brittle in practice.
+The favored direction is a <strong>source-map indirection</strong>: build one canonical
+source map from the original Pyrope, and let internal names (SSA / temp /
+synthesized) point at one or more locations in that map (so an alias
+<code>a = b</code> can legitimately reference both <code>a</code>'s and <code>b</code>'s sites).</p>
+<h4 id="issues-to-resolve">Issues to resolve</h4>
+<ul>
+<li>Alias chains (<code>a = b; c = a</code>): does <code>c</code> map to <code>{a, b}</code>, <code>{a, b, c}</code>, or
+  follow transitive closure? Closure could explode on deeply aliased SSA.</li>
+<li>Synthesized cells with no surface name (e.g., a <code>Mux</code> born from an
+  <code>if/elif</code> lowering, a <code>Sum</code> materialized during slice/concat lowering):
+  which source location is the "right" one — the condition, the join, the
+  containing statement, or the partition root as a fallback?</li>
+<li>Optimization passes that drop a name entirely (constprop folding,
+  cell-removal): the indirection handle disappears; what does <code>sigref</code> on
+  that name return after optimization?</li>
+<li>Round-trip through external Verilog + LEC must not lose the source map.
+  Emit <code>// src: file:line:col</code> comments at egress? A sidecar <code>.srcmap</code>
+  file? Both?</li>
+<li>Pass discipline: with per-cell LOC, every pass must remember to set
+  anchors and CI catches misses. With a source map, pass authors mostly
+  don't think about LOC, but a pass that <em>renames</em> an SSA value must
+  update its indirection — quiet failure mode if forgotten.</li>
+</ul>
+<h4 id="pros-of-source-map-indirection">Pros of source-map indirection</h4>
+<ul>
+<li>One canonical store; cells carry a small index, not 8+ bytes of anchor.</li>
+<li>Multiple-location attribution is natural (alias case).</li>
+<li>Source-derived SSA names (<code>foo_l42_b</code> per <code>lnast_spec.md §13</code>) already
+  encode source by construction — the source map is a formal version of
+  that scheme.</li>
+<li>Verilog egress emits source-map references rather than duplicating LOC
+  per wire.</li>
+<li>Pass surface is smaller; LOC-propagation logic is centralized.</li>
+</ul>
+<h4 id="cons-of-source-map-indirection">Cons of source-map indirection</h4>
+<ul>
+<li>Indirection adds a lookup at every debug query (<code>sigref</code>, waveform
+  click-through, LEC failure attribution). Hot-probe injection needs fast
+  resolution.</li>
+<li>Synthesized cells still need <em>some</em> attribution rule — falling back to
+  the partition root is honest but coarse.</li>
+<li>Tools outside LiveHD (waveform viewers, external LEC) must learn the
+  source-map format or rely on the Verilog-egress sidecar.</li>
+<li>Optimization that removes the last reference to a name loses the link;
+  recovering it requires the optimization to log a "removed: <name> -&gt;
+  <loc>" entry into the source map, which is a discipline issue too.</li>
+</ul>
+<h4 id="alternatives-considered">Alternatives considered</h4>
+<ol>
+<li><strong>Per-cell LOC (full anchor on every value).</strong> Matches the aspirational
+   wording in <code>docs/contracts/simulation.md</code>. Maximum fidelity but every
+   pass becomes responsible for LOC propagation; quiet failure mode when a
+   pass forgets; memory cost on every cell.</li>
+<li><strong>Boundary-only LOC.</strong> Only the hard-commitment list above carries LOC.
+   Internal signals return "no source mapping" when probed. Simplest
+   contract; weakest UX for <code>sigref</code> on internal wires.</li>
+<li><strong>Source-map indirection with multi-location names</strong> <em>(favored)</em>. One
+   source store; names index in; 1-to-many supported for aliases.
+   Synthesized cells without a surface name fall back to the enclosing
+   partition's anchor.</li>
+<li><strong>LOC-on-LNAST-only, drop at LGraph.</strong> Let LGraph be LOC-free; resolve
+   through <code>LGraph cell -&gt; LNAST node -&gt; LOC</code> indirection at debug time.
+   Requires LNAST to be retained alongside LGraph for the lifetime of a
+   debug session; works only if the upass cache keeps LNAST around.</li>
+<li><strong>Hybrid (the working assumption).</strong> Hard commitments above + source
+   map for the rest, with partition-root fallback. Verilog egress emits
+   <code>// src:</code> comments derived from the source map.</li>
+</ol>
+<h4 id="to-decide-before-implementation">To decide before implementation</h4>
+<ul>
+<li>Source-map storage: in-memory only, on-disk sidecar, or both? On-disk is
+  needed for the <code>runs/&lt;test&gt;/vN/</code> workflow in <code>simulation.md</code>.</li>
+<li>Lookup API surface: what does <code>sigref(name).source()</code> return when the
+  name has 0, 1, or N locations?</li>
+<li>Lifetime: when an upass invalidates a tree's cache, does the
+  corresponding source-map slab get invalidated atomically?</li>
+<li>Egress comment format: pick one (<code>// src: file:line:col</code>) and commit, so
+  external LEC tooling can parse it reliably.</li>
+</ul>
+<h2 id="bitwidth_range-replace-intoverflow-with-const-minmax">Bitwidth_range: replace int+overflow with Const min/max</h2>
+<p><code>pass/bitwidth/bitwidth_range.{hpp,cpp}</code> currently stores <code>int min, max</code>
+plus an <code>overflow</code> flag, then materializes a <code>Const</code> from those when the
+value escapes the range representable in <code>int</code>. This was a workaround for
+when the constant value type was expensive to allocate.</p>
+<p>With <code>Const = Dlop</code> (inline storage for size &lt;= 1, pool storage above), the
+internal <code>int+overflow</code> representation is largely redundant — <code>Dlop</code>
+already handles arbitrary widths efficiently. Refactor to store <code>Const
+min; Const max;</code> directly and drop the <code>overflow</code> bookkeeping. Expected
+benefits:</p>
+<ul>
+<li>Fewer materialize/round-trip conversions per query (<code>get_max</code>/<code>get_min</code>
+  currently rebuilds a <code>Const</code> every call; storing it eliminates the
+  reconstruction).</li>
+<li>Cleaner arithmetic in callers — no need to branch on <code>is_overflow()</code> or
+  to special-case the int-fits path; the same <code>Dlop</code> ops cover both.</li>
+<li>One representation for the value, simpler invariants
+  (<code>min &lt;= max</code> becomes a single <code>Dlop</code> comparison).</li>
+</ul>
+<p>Deferred until after the lconst-to-Dlop migration stabilizes so that the
+churn lands in one focused commit.</p>
+<h2 id="hhds-pinentrynodeentry-native-bits-sign-storage">HHDS PinEntry/NodeEntry: native bits + sign storage</h2>
+<p>LiveHD currently stores per-pin <code>bits</code> (Bits_t / 23-bit) and <code>sign</code> (1 bit)
+as HHDS attributes (<code>livehd::attrs::bits</code> / <code>livehd::attrs::sign</code>) — see
+<code>docs/contracts/hhds_graph_migration_plan.md §G3</code>. Attributes are
+flat_storage hashmaps; fine for correctness, but every read does a hash
+lookup.</p>
+<p>Native fields on <code>PinEntry</code> / <code>NodeEntry</code> would be one indexed load. The
+proposed layout (keeps both classes at 32 bytes by dropping <code>ledge1</code> and
+widening <code>Nid_bits</code> from 42 to 48, and port_id:23):</p>
+<ul>
+<li><strong>PinEntry</strong> — `master_nid:48 + next_pin_id:48 + ledge0:48</li>
+<li>port_id:23 + use_overflow:1 + sign:1 + bits:23 + sedges_/overflow_idx:64`</li>
+<li><strong>NodeEntry</strong> — `type:16 + next_pin_id:48 + ledge0:48 + use_overflow:1</li>
+<li>alive:1 + pad:6 + sign:1 + bits:23 + sedges_extra:48 + sedges_:64`</li>
+</ul>
+<p>Touches every overflow/edge code path in <code>hhds/graph.cpp</code> (single-ledge
+fast path, EdgeRange <code>kInlineMax</code> constants, NodeEntry edge accounting).
+Worth its own focused multi-commit campaign in <code>../hhds</code>. Once landed,
+LiveHD drops <code>livehd::attrs::bits</code> / <code>livehd::attrs::sign</code> and the
+<code>mirror_set_pin_bits_hhds</code> / <code>mirror_set_pin_sign_hhds</code> helpers, reading
+<code>bits()</code> / <code>is_unsign()</code> directly off the HHDS pin/node handle.</p>
+<p>The <code>GraphIO::DeclaredIoPin</code> graph-level bits + sign extension lands
+sooner (it's the immediate Sub_node-deletion unblocker, smaller scope,
+no PinEntry/NodeEntry surgery required).</p>
+<h2 id="idap-perf-sweep-pass">IDAP perf-sweep pass</h2>
+<p>A correctness-preserving optimization/IDAP pass that toggles individual
+upass stages on and off while keeping correctness invariants in place, so
+we can attribute perf regressions to a specific pass and confirm each pass
+earns its runtime cost. Concretely, we want to drive runs like:</p>
+<div class="highlight"><pre><span></span><code>time lg &quot;inou.prp files:xx.prp |&gt; pass.upass verifier:0 ssa:0 bitwidth:1 constprop:0 attributes:0&quot;
+</code></pre></div>
+<p>and have the pass framework:</p>
+<ul>
+<li>Enumerate the pass flag matrix (<code>verifier</code>, <code>ssa</code>, <code>bitwidth</code>,
+  <code>constprop</code>, <code>attributes</code>, …) and run the user-selected
+  combinations.</li>
+<li>Diff results against a reference run so disabling a pass that <em>must</em> run
+  for correctness fails loudly rather than silently miscompiling.</li>
+<li>Emit per-pass wall-clock + allocation deltas into the JSONL results
+  stream (consumed by <strong>5f</strong> benchmark contracts).</li>
+</ul>
+<p>While building this pass, audit the hot upass plumbing for the
+performance anti-patterns we keep hitting. These are the same axes the
+sweep should report on, so callers can see which axis regressed:</p>
+<ul>
+<li><strong>Repeated allocations.</strong> No <code>new</code> / <code>make_unique</code> / <code>std::vector{}</code> in
+  inner loops. Hoist scratch buffers out of per-node code paths; reuse
+  per-pass arenas where lifetime allows. Look for <code>clear()</code> + refill
+  patterns and convert them into stable, reusable buffers.</li>
+<li><strong><code>std::vector</code> returns.</strong> Replace "build vector, return vector" APIs
+  with iterators / ranges / output iterators. Where a concrete container
+  is unavoidable, take it by <code>&amp;</code> from the caller so allocation lives at
+  the call site, not inside the helper. This is the broader scope of
+  <strong>1j</strong>; <strong>5e</strong> finishes the sweep across non-upass code.</li>
+<li><strong>Small-vector hotspots.</strong> When a container is known to be tiny in the
+  common case (≤8 elements: per-node fanin/fanout, per-cell port list,
+  pass-local work stack), use <code>absl::InlinedVector&lt;T, N&gt;</code> (or
+  <code>absl::FixedArray</code> when the size is known at the call) instead of
+  <code>std::vector</code> to keep the storage on the stack.</li>
+<li><strong>String churn.</strong> Hunt <code>std::string</code> temporaries on hot paths: prefer
+  <code>std::string_view</code>, <code>absl::string_view</code>, or pre-interned symbol handles
+  (we already have <code>mmap_lib::str</code> / interned IDs — use them). No
+  <code>to_string()</code> in inner loops; no <code>+</code> concatenation for log lines that
+  are then discarded; no <code>absl::StrCat</code> materialization when a
+  <code>string_view</code> would do.</li>
+<li><strong>Tree / graph iteration without copying.</strong> Iterate HHDS trees and
+  LGraph in place via the existing iterator APIs. Do not snapshot
+  <code>children</code>, <code>descendants</code>, <code>fanin</code>, or <code>fanout</code> into a <code>std::vector</code>
+  just to walk them. If a pass must mutate during traversal, use the
+  iterator invalidation-safe variants HHDS exposes rather than
+  materializing a copy. Forbid the "collect into vector, then iterate"
+  pattern in pass code; CI should grep for the usual offenders
+  (<code>get_children</code>, <code>get_fanin_nodes</code>, …) returning vectors and replace
+  them with range-returning siblings.</li>
+</ul>
+<p>Deliverables:</p>
+<ul>
+<li>The sweep harness itself (driver + diff-vs-reference checker).</li>
+<li>A short report contract under <code>docs/contracts/</code> describing the flag
+  matrix, what "correctness-preserving" means per flag, and the JSONL
+  schema for the per-pass timing/allocation rows.</li>
+<li>One pass of cleanup across upass / lgraph passes hitting the
+  allocation, vector-return, small-vector, string, and copy-to-iterate
+  anti-patterns above — landed <em>with</em> the sweep so the regression gates
+  have something to lock in.</li>
+</ul>
+<p>Sequenced as <strong>5e</strong> so it lands after the partition descriptor (<strong>3c</strong>)
+has stabilized — otherwise we'd be optimizing APIs that are still moving.</p>
+<h2 id="simlib-fixed-width-int-types">simlib fixed-width int types</h2>
+<p><code>simlib/uint.hpp</code> and <code>simlib/sint.hpp</code> (extracted from the <code>firrtl-sig</code>
+upstream project, kept under <code>simlib/LICENSE.firrtl-sig</code>) are still used by
+<code>core/tests/lconst_test.cpp</code> and the simlib examples. Once HLOP lands, these
+types will be replaced/rewritten as part of the HLOP simulation runtime —
+revisit the simlib int surface and the <code>firrtl-sig</code> attribution at that point.</p>
+</main>
+<footer>Generated from <code>TODO_livehd.md</code> — task badges link across files; ✎ marks reference notes.</footer>
+</body>
+</html>

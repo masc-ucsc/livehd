@@ -57,6 +57,15 @@ protected:
   // source text; `node` anchors the diagnostic span. No-op for any other text.
   void check_binary_literal_sign(std::string_view text, const TSNode& node) const;
 
+  // Reject a typed scalar declaration whose literal initializer's kind
+  // contradicts the declared type (bool/int/string are distinct — no implicit
+  // conversion). Shared by variable declarations (`mut c:bool = 10`) and
+  // function parameters (`comb f(b:bool = 3)`) so both report identically.
+  // `inner_type` is the type node (bool_type/uint_type/…); `anchor` pins the
+  // span. No-op (returns) unless both kinds are statically known and differ;
+  // when they differ it reports and aborts (does not return).
+  void check_decl_init_kind(std::string_view name, const Lnast_node& value, TSNode inner_type, const TSNode& anchor) const;
+
   // Reject `a = 3` with no prior `mut`/`const`/declare (or param/output) visible
   // in scope. Runs on the producer tree (pre-upass), so it sees only source-level
   // declarations — no inliner/SSA-synthesized stores to false-positive on.

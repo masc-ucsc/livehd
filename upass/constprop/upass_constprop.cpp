@@ -384,6 +384,22 @@ void uPass_constprop::process_assign() {
     if (!st.has_trivial(lhs_text)) {
       check_unsigned_positive_overflow(lhs_text, v);
     }
+    // Whole-var scalar (re)assignment replaces any prior tuple shape. A bare
+    // `store_trivial` only writes field "0", so if `lhs_text` currently holds a
+    // multi-field bundle (e.g. the match-local `t = (a=2,b=60)` released via the
+    // synthesized `t = nil` after the match block) its other fields stay live and
+    // `t` keeps reading as a tuple. Replace the bundle wholesale (st.set with a
+    // bare-var key swaps the whole bundle) so `t == nil` sees nil. Bare-var LHS
+    // only (no '.') — a field write like `t.0 = …` must keep the surrounding shape.
+    if (lhs_text.find('.') == std::string_view::npos) {
+      if (auto b = st.get_bundle(lhs_text); b && !b->is_empty() && !b->is_scalar()) {
+        auto fresh = std::make_shared<Bundle>(std::string(lhs_text));
+        fresh->set(v);
+        st.set(lhs_text, fresh);
+        move_to_parent();
+        return;
+      }
+    }
     store_trivial(lhs_text, v);
   } else {
     // RHS is a compound expression (tuple_get, tuple_set, func_call, attr_get, attr_set, etc.)
@@ -919,7 +935,16 @@ void uPass_constprop::process_eq_ne_impl() {
   const bool a_concrete_other = (a.bundle != nullptr) || (!a.scalar.is_invalid() && !a.scalar.is_nil());
   const bool b_concrete_other = (b.bundle != nullptr) || (!b.scalar.is_invalid() && !b.scalar.is_nil());
   if ((a_nil && b_concrete_other) || (b_nil && a_concrete_other)) {
-    store_trivial(var, *Dlop::nil());
+    // A *literal* `nil` compared against a concrete value is decidable, not
+    // indeterminate: a real value (int, string, or bundle) is never the nil
+    // literal, so `x == nil` folds to known-false and `x != nil` to known-true
+    // — there is nothing special about `nil` on the RHS of an `==`. Only an
+    // *indeterminate* nil (a var re-pinned to nil by Symbol_table::leave_scope
+    // under an uncertain arm, which carries no is_const_nil flag) stays nil so
+    // the cassert discharges as pass (see the verifier nil branch /
+    // attributes_spec §Phase 2).
+    const bool literal_nil_cmp = (a_nil && a.is_const_nil) || (b_nil && b.is_const_nil);
+    store_trivial(var, literal_nil_cmp ? *Dlop::create_bool(Negate) : *Dlop::nil());
     return;
   }
 
@@ -2593,6 +2618,13 @@ void uPass_constprop::process_tuple_get() {
     check_tuple_access(src, first_seg, first_is_index);
   }
 
+  // For a NAMED access, capture src's bundle so we can tell "absent named field
+  // on a resolved multi-field tuple → nil" apart from the single-output-callee
+  // scalar fallback further below.
+  const auto src_bundle = (first_captured && !first_is_index) ? st.get_bundle(src) : nullptr;
+  const bool named_field_absent
+      = src_bundle && !src_bundle->is_empty() && !src_bundle->is_scalar() && !src_bundle->has_top_named(first_seg);
+
   // Propagate trivial value if available; fall back to bundle propagation.
   if (st.has_trivial(key)) {
     store_trivial(dst, st.get_trivial(key));
@@ -2604,6 +2636,13 @@ void uPass_constprop::process_tuple_get() {
         st.set(dst, sub_bundle);
       }
     }
+  } else if (named_field_absent) {
+    // Named access of an absent field on a resolved multi-field tuple reads as
+    // nil (a legal existence probe, e.g. `tup0['y'] == nil` once tup0 became
+    // positional `(55,66)`). Must precede the single-output-callee fallback,
+    // which would otherwise hand back src's position-0 scalar for the missing
+    // named field.
+    store_trivial(dst, *Dlop::nil());
   } else if (st.has_trivial(src)) {
     // Single-output callee fallback: an inliner result like
     // `comb f(...) -> (res:T) { res = ... }` is stored as a trivial scalar

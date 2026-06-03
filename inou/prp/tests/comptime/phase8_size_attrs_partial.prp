@@ -16,9 +16,10 @@ cassert(x.[max]  == 3)
 cassert(x.[min]  == nil)
 cassert(x.[bits] == nil)
 
-// Range without an explicit width: bits stays nil because the type did
-// not pin a concrete sN/uN.
+// Fully-bounded range: `int(min=-8, max=7)` is exactly `s4`, so the width is
+// derivable and `.[bits]` reports it. (Contrast the half-bounded `int(max=3)`
+// above, whose envelope is incomplete, so its `.[bits]` stays nil.)
 const y:int(min=-8, max=7) = 0
 cassert(y.[min]  == -8)
 cassert(y.[max]  == 7)
-cassert(y.[bits] == nil)
+cassert(y.[bits] == 4)

@@ -80,6 +80,69 @@ namespace {
   throw std::runtime_error(msg);
 }
 
+bool prp_is_tmp_name(std::string_view n) { return n.size() >= 3 && n[0] == '_' && n[1] == '_' && n[2] == '_'; }
+
+// Collect the NON-temporary variables that the `while` CONDITION reads
+// (transitively). `cond_ref` is the while's child-0 ref name; we trace its
+// definition backward through the while's preceding siblings (the cond
+// computation `ne ___1 c 0`, `and ___3 ___1 ___2`, …), gathering every non-temp
+// operand. These are exactly the variables that decide termination: if they
+// recur with the same values, the condition recurs and the loop can never exit.
+//
+// Tracking ONLY the condition's inputs (rather than every loop variable) is
+// deliberate: (1) it catches a frozen condition even when other vars diverge
+// (`while c != 0 { d += 1 }`), and (2) it never folds an accumulator at the loop
+// boundary — folding a built-up accumulator there perturbs constprop's deferred
+// writes and can drop the real loop-carried update.
+void collect_cond_vars(const Lnast& ln, const Lnast_nid& while_nid, std::string_view cond_ref, bool cond_is_ref,
+                       absl::flat_hash_set<std::string>& out) {
+  if (!cond_is_ref || cond_ref.empty()) {
+    return;  // literal condition (`while true`/`false`) — no input vars to track
+  }
+  if (!prp_is_tmp_name(cond_ref)) {
+    out.emplace(cond_ref);  // `while flag { … }` — the bare var is the only input
+    return;
+  }
+  absl::flat_hash_set<std::string> needed;
+  needed.emplace(cond_ref);
+  for (auto s = ln.get_sibling_prev(while_nid); !s.is_invalid(); s = ln.get_sibling_prev(s)) {
+    const auto def = ln.get_first_child(s);
+    if (def.is_invalid() || !Lnast_ntype::is_ref(ln.get_type(def)) || !needed.contains(std::string(ln.get_name(def)))) {
+      continue;  // this statement does not define a temp the condition (transitively) needs
+    }
+    const bool is_call = Lnast_ntype::is_func_call(ln.get_type(s));
+    int        idx     = 0;
+    for (auto c : ln.children(s)) {
+      // operands are children after the def (child 0); skip a func_call callee (child 1)
+      if (idx >= 1 && !(is_call && idx == 1) && Lnast_ntype::is_ref(ln.get_type(c))) {
+        const auto nm = ln.get_name(c);
+        if (!nm.empty()) {
+          if (prp_is_tmp_name(nm)) {
+            needed.emplace(nm);  // chase this temp's own definition further back
+          } else {
+            out.emplace(nm);
+          }
+        }
+      }
+      ++idx;
+    }
+  }
+}
+
+// Emit a fatal comptime-loop diagnostic anchored at the `while` node's source
+// span (prp2lnast's attach_loc survives the lnastfmt round-trip), then abort the
+// walk — mirrors fcall_arg_fail's crash-safe flush-before-throw.
+[[noreturn]] void loop_fail(const livehd::diag::Span& span, std::string_view code, const std::string& msg, std::string_view hint) {
+  livehd::diag::sink().emit(livehd::diag::Diagnostic{.severity = livehd::diag::Severity::error,
+                                                     .code     = std::string{code},
+                                                     .category = "comptime",
+                                                     .pass     = "upass.runner",
+                                                     .message  = msg,
+                                                     .span     = span,
+                                                     .hint     = std::string{hint}});
+  throw std::runtime_error(msg);
+}
+
 struct Lnast_pass_noop_shared final : public upass::uPass {
   using upass::uPass::uPass;
 
@@ -1530,24 +1593,125 @@ void uPass_runner::unroll_while() {
   const bool cond_is_false_literal = (cond_type == Lnast_ntype::Lnast_ntype_const && cond_text == "false");
   const bool cond_folds_false
       = cond_is_false_literal || (cval && !cval->is_invalid() && !cval->has_unknowns() && cval->is_known_false());
+  // A data-dependent `while cond { … }` is lowered by prp2lnast to
+  // `while cond { if cond { … } else { break } }`, so the body always carries
+  // a per-iteration termination guard. The outer condition here is just the
+  // entry gate: enter the comptime unroll whenever it folds to a known-true
+  // value (the literal `true`/`loop {}` form, or a folding ref like `c != 0`
+  // with c known at entry). The inner `if cond … else break` then ends the
+  // unroll when the condition turns false. A non-folding (genuinely runtime)
+  // condition stays verbatim — typecheck rejects it (loops must be comptime).
+  const bool cond_folds_true
+      = cond_is_true_literal || (cval && !cval->is_invalid() && !cval->has_unknowns() && cval->is_known_true());
 
   if (have_body && cond_folds_false) {
     return;  // `while false` — loop never runs; emit nothing
   }
-  if (!have_body || !cond_is_true_literal) {
+  if (!have_body || !cond_folds_true) {
     emit_subtree_verbatim();  // runtime / non-comptime loop — leave to typecheck/codegen
     return;
   }
 
+  // Progress guard. A Pyrope loop is comptime-only and must make progress toward
+  // its exit; otherwise the unroll runs to the fuel cap (spamming output) and
+  // then silently bails. Snapshot the loop's variable state at the start of each
+  // iteration: if a state recurs, the loop is deterministic and would reproduce
+  // that iteration forever (e.g. `while c != 0 { cputs(c) }` with no update to
+  // `c`) — report it. This is the loop analogue of recursion's progress: "if the
+  // inputs are already seen, it can never converge".
+  absl::flat_hash_set<std::string> cond_var_set;
+  collect_cond_vars(*lm->get_lnast(), lm->get_current_nid(), cond_text, Lnast_ntype::is_ref(cond_type), cond_var_set);
+  const std::vector<std::string>   loop_vars(cond_var_set.begin(), cond_var_set.end());
+  absl::flat_hash_set<std::string> seen_states;
+
+  // Span for any loop diagnostic below — the `while` node carries the source loc.
+  auto while_span = [&]() {
+    livehd::diag::Span span;
+    const auto&        s   = lm->get_lnast();
+    const auto         nid = lm->get_current_nid();
+    const auto         loc = s->get_loc(nid);
+    if (const auto fn = s->get_fname(nid); !fn.empty()) {
+      span.file = std::string(fn);
+    }
+    if (loc.line != 0) {
+      span.start_line = loc.line;
+    }
+    if (loc.pos1 != 0 || loc.pos2 != 0) {
+      span.start_byte = loc.pos1;
+      span.end_byte   = loc.pos2;
+    }
+    return span;
+  };
+
   const bool saved_break = loop_break_hit_;
   loop_break_hit_        = false;
   ++loop_depth_;
+  // Per-loop unroll cap. State-repeat (below) catches a frozen/cyclic condition
+  // in O(1) iterations, but a DIVERGENT loop whose condition variable keeps
+  // changing yet never reaches the exit (`while c != 10 { c -= 1 }` from below)
+  // never repeats a state. This bounds such loops to a prompt error rather than
+  // grinding to the shared fuel cap. 100k body-copies is already absurd for a
+  // comptime unroll (it lowers to that many hardware copies), so no real loop
+  // hits it.
+  constexpr std::size_t kMaxLoopUnroll = 100000;
+  std::size_t           loop_iters     = 0;
   while (true) {
-    lm->restore_cursor(while_bm);
-    lm->move_to_child();    // condition
-    lm->move_to_sibling();  // body stmts
+    lm->restore_cursor(while_bm);  // cursor on the while node — the scope where the condition folds
+
+    if (++loop_iters > kMaxLoopUnroll) {
+      --loop_depth_;
+      loop_break_hit_ = saved_break;
+      loop_fail(while_span(),
+                "loop-unbounded",
+                "comptime loop did not terminate within the unroll limit (it may never converge)",
+                "ensure the loop is comptime-bounded and its exit condition is eventually reached");
+    }
+
+    // State-repeat check: fold the condition's input variables at the iteration
+    // boundary. Only conclude when they ALL fold to known constants (an unknown
+    // means we can't prove non-progress → fall back to the fuel cap). When the
+    // condition has no tracked vars (`loop {}` / `while true`), skip this and
+    // rely on the body's `break` (and the fuel cap) instead.
+    if (!loop_vars.empty()) {
+      std::string sig;
+      bool        all_known = true;
+      for (const auto& v : loop_vars) {
+        auto cv = try_fold_ref(v);
+        if (!cv || cv->is_invalid() || cv->has_unknowns()) {
+          all_known = false;
+          break;
+        }
+        sig += v;
+        sig.push_back('=');
+        sig += cv->to_pyrope();
+        sig.push_back(';');
+      }
+      if (all_known && !seen_states.insert(sig).second) {
+        --loop_depth_;
+        loop_break_hit_ = saved_break;
+        lm->restore_cursor(while_bm);  // try_fold_ref above may have moved the cursor; reset for the span
+        loop_fail(while_span(),
+                  "loop-no-progress",
+                  "comptime loop cannot terminate: its condition variables repeat with no progress toward the exit",
+                  "update a condition variable each iteration so the loop can exit (e.g. add `c -= 1`)");
+      }
+    }
+
+    lm->restore_cursor(while_bm);  // try_fold_ref above can move the cursor; reset before the body walk
+    lm->move_to_child();           // condition
+    lm->move_to_sibling();         // body stmts
     if (!walk_loop_iteration({})) {
-      break;  // fuel
+      // Fuel/depth cap hit without the state ever repeating — a diverging loop
+      // (e.g. an unbounded counter that never satisfies the exit). Pyrope loops
+      // must be comptime-bounded, so this is a build error rather than a silent
+      // partial unroll.
+      --loop_depth_;
+      loop_break_hit_ = saved_break;
+      lm->restore_cursor(while_bm);
+      loop_fail(while_span(),
+                "loop-unbounded",
+                "comptime loop did not terminate within the unroll budget (it may never converge)",
+                "ensure the loop is comptime-bounded and its exit condition is eventually reached");
     }
     if (loop_break_hit_) {
       break;
@@ -2128,6 +2292,9 @@ void uPass_runner::process_stmts() {
     lm->move_to_child();
     do {
       process_lnast();
+      if (loop_break_hit_) {
+        break;  // a comptime `break` fired in a nested block — stop emitting the rest
+      }
     } while (lm->move_to_sibling());
     lm->move_to_parent();
   }
@@ -2197,6 +2364,9 @@ void uPass_runner::process_if() {
           if (taken) {
             while (lm->move_to_sibling()) {
               process_lnast();
+              if (loop_break_hit_) {
+                break;  // a comptime `break` fired — stop emitting the rest of this flat body
+              }
             }
           }
           lm->move_to_parent();

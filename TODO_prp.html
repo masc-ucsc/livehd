@@ -1,0 +1,477 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>TODO — Pyrope semantics</title>
+<style>
+:root {
+  --bg:#ffffff; --fg:#24292f; --muted:#57606a; --border:#d0d7de;
+  --soft:#f6f8fa; --accent:#0969da; --accent-bg:#ddf4ff;
+  --idbg:#0969da; --idfg:#ffffff; --notebg:#fff8c5; --notefg:#7d4e00;
+  --codefg:#1f2328;
+}
+@media (prefers-color-scheme: dark) {
+  :root {
+    --bg:#0d1117; --fg:#e6edf3; --muted:#8b949e; --border:#30363d;
+    --soft:#161b22; --accent:#58a6ff; --accent-bg:#13233b;
+    --idbg:#1f6feb; --idfg:#ffffff; --notebg:#3b2f00; --notefg:#f2cc60;
+    --codefg:#e6edf3;
+  }
+}
+* { box-sizing:border-box; }
+html { scroll-behavior:smooth; }
+body {
+  margin:0; background:var(--bg); color:var(--fg);
+  font:16px/1.6 -apple-system,BlinkMacSystemFont,"Segoe UI",Helvetica,Arial,sans-serif;
+}
+nav {
+  position:sticky; top:0; z-index:10; background:var(--soft);
+  border-bottom:1px solid var(--border); padding:.55rem 1rem;
+  display:flex; gap:.4rem; flex-wrap:wrap; align-items:center;
+  backdrop-filter:saturate(180%) blur(6px);
+}
+nav .brand { font-weight:700; margin-right:.6rem; color:var(--muted); }
+nav a {
+  text-decoration:none; color:var(--fg); padding:.25rem .7rem;
+  border-radius:6px; border:1px solid transparent; font-size:.92rem;
+}
+nav a:hover { background:var(--accent-bg); }
+nav a.active { background:var(--accent); color:#fff; border-color:var(--accent); }
+main { max-width:920px; margin:0 auto; padding:2rem 1.25rem 5rem; }
+h1,h2,h3,h4 { line-height:1.25; font-weight:600; }
+h1 { font-size:1.9rem; padding-bottom:.3em; border-bottom:1px solid var(--border); }
+h2 { font-size:1.45rem; margin-top:2.2rem; padding-bottom:.3em; border-bottom:1px solid var(--border); }
+h3 { font-size:1.2rem; margin-top:1.6rem; }
+a { color:var(--accent); }
+ul { padding-left:1.4rem; }
+li { margin:.28rem 0; }
+li > ul { margin-top:.28rem; }
+code {
+  background:var(--soft); color:var(--codefg); padding:.12em .4em;
+  border-radius:5px; font-size:.88em;
+  font-family:ui-monospace,SFMono-Regular,"SF Mono",Menlo,Consolas,monospace;
+}
+pre {
+  background:var(--soft); border:1px solid var(--border); border-radius:8px;
+  padding:1rem; overflow:auto; line-height:1.45;
+}
+pre code { background:none; padding:0; font-size:.85em; }
+table { border-collapse:collapse; width:100%; margin:1rem 0; font-size:.94rem; }
+th,td { border:1px solid var(--border); padding:.45rem .7rem; text-align:left; vertical-align:top; }
+th { background:var(--soft); }
+tr:nth-child(even) td { background:var(--soft); }
+blockquote { margin:1rem 0; padding:.2rem 1rem; color:var(--muted); border-left:4px solid var(--border); }
+/* task-id markers */
+strong.item-id {
+  display:inline-block; background:var(--idbg); color:var(--idfg);
+  font-weight:700; padding:.02em .5em; border-radius:6px; font-size:.82em;
+  letter-spacing:.02em; scroll-margin-top:4rem;
+}
+strong.item-id::before { content:"#"; opacity:.55; margin-right:.08em; }
+li:target { background:var(--accent-bg); border-radius:6px;
+  box-shadow:0 0 0 .5rem var(--accent-bg); }
+strong.item-id:target { outline:2px solid var(--accent); }
+/* cross-reference links */
+a.xref {
+  text-decoration:none; background:var(--accent-bg); color:var(--accent);
+  font-weight:600; padding:.02em .45em; border-radius:6px; font-size:.85em;
+  border:1px solid transparent;
+}
+a.xref:hover { border-color:var(--accent); }
+a.xref::before { content:"→ "; opacity:.6; }
+.xref-note {
+  background:var(--notebg); color:var(--notefg); font-weight:600;
+  padding:.02em .45em; border-radius:6px; font-size:.8em; cursor:help;
+}
+.xref-note::before { content:"✎ "; opacity:.7; }
+footer { max-width:920px; margin:0 auto; padding:0 1.25rem 3rem;
+  color:var(--muted); font-size:.85rem; }
+</style>
+</head>
+<body>
+<nav><span class="brand">LiveHD TODO</span><a class="" href="TODO.html">Overview</a><a class="active" href="TODO_prp.html">Pyrope</a><a class="" href="TODO_verilog.html">Verilog</a><a class="" href="TODO_livehd.html">LiveHD</a><a class="" href="TODO_hhds.html">HHDS</a></nav>
+<main>
+<h1 id="todo-pyrope-semantics">TODO — Pyrope semantics</h1>
+<p>Pending work to finish correct Pyrope language handling: frontend, LNAST
+production, attribute/type semantics, memory/register lowering, and test
+infrastructure for the Pyrope path.</p>
+<p>Items use the same Group N letters as the master plan in <a href="TODO.html">TODO.md</a>.
+Items in the same group can be done in parallel; all letters in group N must
+complete before group N+1 starts. Group letters are shared across
+<a href="TODO_prp.html">TODO_prp.md</a>, <a href="TODO_verilog.html">TODO_verilog.md</a>,
+<a href="TODO_livehd.html">TODO_livehd.md</a>, and <a href="TODO_hhds.html">TODO_hhds.md</a>, so
+cross-file dependencies stay visible.</p>
+<h2 id="group-1-foundation">Group 1 — foundation</h2>
+<ul>
+<li><strong id="item-1m" class="item-id">1m</strong> Pyrope <code>import</code> statement — <strong>deferred</strong>. Substantial new
+  infra; not attempted in the 2026-05-27 session.</li>
+<li><strong>Tried:</strong> Nothing. Scope was assessed (substantial new
+    infrastructure: grammar, prp2lnast lowering, file-wrapper LNAST
+    tree synthesis, cross-tree <code>find_tree</code> resolution) and skipped
+    in favor of other landings.</li>
+<li><strong>Tree-naming convention:</strong> for a file <code>foo/bar.prp</code>, every
+    <code>comb</code>/<code>pipe</code>/<code>mod</code> defined inside gets its own LNAST tree
+    named <code>foo/bar.&lt;entity&gt;</code> (e.g. <code>comb xx() …</code> → tree name
+    <code>foo/bar.xx</code>). Trees are created for <strong>both</strong> <code>pub</code> and
+    non-<code>pub</code> definitions — every entity always gets a tree
+    because every <code>comb</code>/<code>pipe</code>/<code>mod</code> needs one. The <code>pub</code> keyword
+    controls <em>exportability</em>: only <code>pub</code>-marked entities can be
+    named by <code>import("foo/bar.xx")</code> from another file.</li>
+<li><strong>Pub constants / tuples</strong> at file scope (<code>pub const yy = 33</code>)
+    can't ride a per-entity tree, so the import machinery
+    synthesizes a single "file wrapper" LNAST tree per source file
+    that returns all of that file's <code>pub</code> non-function values.
+    Roughly equivalent to writing:
+    <div class="highlight"><pre><span></span><code>comb bar() -&gt; (yy, other_pub_var) {
+    yy = 33
+    other_pub_var = 44
+    xx = import(&quot;foo/bar.xx&quot;)  // only if `pub comb xx ...`
+}
+</code></pre></div>
+    Result is read-only at the import site (matches the "imports
+    are constants" semantics).</li>
+<li><strong>Needed for next attempt:</strong><ul>
+<li><code>import path</code> / <code>import path as alias</code> grammar in
+  tree-sitter-pyrope.</li>
+<li>prp2lnast lowering: emit a <code>func_call</code>-style ref against
+  the imported tree name, resolved via <code>find_tree</code>.</li>
+<li>File-wrapper LNAST tree synthesizer for <code>pub</code> file-scope
+  values that have no associated <code>comb</code>/<code>pipe</code>/<code>mod</code> tree.</li>
+<li>For Group-1 tests, explicit phase ordering — <code>import_phase1</code>
+  / <code>import_phase2</code> test directives, hand-ordering which files
+  are processed in which phase. The pending-import / second-
+  phase resolution loop belongs to Group-2 <a class="xref" href="TODO_prp.html#item-2o">2o</a> and depends
+  on this entry landing first.</li>
+</ul>
+</li>
+<li><strong>Tests to add when landing:</strong><ol>
+<li>Import a remote already-resolved <code>comb</code>/<code>pipe</code>/<code>mod</code> function
+   (single-phase happy path — importer sees a fully-typed
+   <code>tree_ios</code> ABI from the imported module).</li>
+<li>Import a remote <code>comb</code>/<code>pipe</code>/<code>mod</code> that needs the second
+   phase (pending-import marker is set, importer can't comptime
+   its <code>if</code>/sticky propagation until the import resolves on the
+   next <code>pass.upass</code>). Pairs with <a class="xref" href="TODO_prp.html#item-2o">2o</a>.</li>
+<li>Import a constant (no <code>tree_ios</code> ABI, just a bundle entry
+   with a comptime value — via the synthesized file-wrapper
+   tree).</li>
+<li>Import a "flat" Verilog module via <code>pub</code>-keyword exports
+   (how does <code>pub</code> mark Verilog-side exports, and how does the
+   Pyrope side bind them — likely a <code>tree_ios</code> ABI variant or a
+   sub-class of import that bypasses the second-phase path).</li>
+</ol>
+</li>
+<li><strong id="item-1k" class="item-id">1k</strong> <code>self</code> / <code>ref self</code> in tuple methods — <strong>partial</strong>. Basic
+  <code>self</code>/<code>ref self</code> first-parameter binding and chained-receiver
+  semantics (<code>x.a.b.method(...)</code> → <code>self = x.a.b</code>, <code>ref self</code> allows
+  mutation of self's own fields only) landed (commit fbbe938fa);
+  <code>prp-setter_multi_field</code> passes.</li>
+<li><strong>Pending:</strong> <code>prp-setter_complex</code> and <code>prp-tuple_decorator_complex</code>
+    still fail. Both require <strong>decorator-init semantics</strong>: when
+    <code>x:Tup = (v="")</code> runs and <code>Tup</code> carries a <code>setter</code> field, the
+    setter should fire implicitly at instance construction with the
+    init values as named actuals. No existing infra hooks the
+    tuple-typed init to the setter dispatch.</li>
+<li>
+<p>Hint: agent-decorator scaffolded a <code>pending_setter_init</code> map +
+    <code>maybe_fire_setter_init</code> method declaration in
+    <code>upass/constprop/upass_constprop.hpp</code> during the 2026-05-27
+    session; the header-only orphan was reverted to keep master
+    clean. Real landing needs the .cpp side:</p>
+<ul>
+<li>Tuple-init detection in <code>process_assignment</code> when the RHS is
+  a tuple literal and the LHS has a <code>:Tup</code> annotation.</li>
+<li><code>pending_setter_init</code> bookkeeping when the <code>:Type</code> annotation
+  lands (record the variable + its declared type); clear at
+  the first assign so a later <code>x = …</code> doesn't refire.</li>
+<li>Dispatch through the existing method-call inliner with the
+  init-tuple's named fields rebound to the setter's named args.</li>
+</ul>
+</li>
+<li>
+<p><strong id="item-1e" class="item-id">1e</strong> Documented-error detection coverage for the <code>inou/prp/tests/errors/</code>
+  negative-test suite (47 tests; <strong>9 currently failing</strong> because the compiler
+  emits no <code>error</code>-severity diagnostic at the <code>locate_error_here</code> line). These
+  are the <em>detection</em> gaps the <span class="xref xref-note" title="note: prp_error_test_coverage">prp_error_test_coverage</span> note flagged — the
+  diagnostics <em>surface</em> (<a class="xref" href="TODO_livehd.html#item-3f">3f</a>) and the golden-error <em>harness</em> (<a class="xref" href="TODO_prp.html#item-4h">4h</a>) are
+  downstream of this and don't supply the missing checks. Each diagnostic must
+  be emitted at the marked line and match the header <code>:error:</code> regex. The 9 fall
+  into three mechanisms:</p>
+</li>
+<li><strong>Frontend grammar / lexical (prp2lnast + tree-sitter-pyrope).</strong><ul>
+<li><code>invalid_binary_prefix</code> — bare <code>0b1100</code> must error (require <code>0ub</code>/<code>0sb</code>).</li>
+<li><code>mixed_precedence</code> — mixed arith+bitwise (<code>a*b+c &amp; d</code>) must require parens.</li>
+<li><code>tuple_lhs_requires_parens</code> — <code>mut a,b = (2,3)</code> (lhs tuple needs parens).</li>
+<li><code>tuple_rhs_requires_parens</code> — <code>mut (a,b) = 2,3</code> (rhs tuple needs parens).</li>
+<li><code>drop_tuple_parens_assert</code> — <code>cassert(2 in 1,2)</code> parses as a 2-arg call;
+  reject the non-string assertion message (ties to the <code>cassert(cond,"msg")</code>
+  message arg — see <span class="xref xref-note" title="note: cassert_message_and_verifier_diag">cassert_message_and_verifier_diag</span>).</li>
+</ul>
+</li>
+<li><strong>Tuple / scope semantics (typecheck pass — landed, extend detection).</strong><ul>
+<li><code>duplicate_tuple_field</code> — duplicate field name in a tuple literal.</li>
+<li><code>undefined_read</code> — read of an undeclared name (<code>const y = x</code>).</li>
+</ul>
+</li>
+<li><strong>Range / value-fit (bitwidth + typecheck; extends the landed <span class="xref xref-note" title="note: 1b">1b</span>
+    range-force).</strong><ul>
+<li><code>invalid_descending_range</code> — <code>5..=0</code> closed range that never reaches its
+  end is invalid.</li>
+<li><code>underflow_unsigned_expr</code> — a signed-negative expression assigned to an
+  unsigned dest (<code>const c:u8 = ones</code>) must error <code>does not fit</code>; <span class="xref xref-note" title="note: 1b">1b</span>
+  enforces the declared-literal case but not this expression-level one.</li>
+</ul>
+</li>
+</ul>
+<h2 id="group-2-depends-on-group-1">Group 2 — depends on Group 1</h2>
+<ul>
+<li><strong id="item-2p" class="item-id">2p</strong> Source-derived SSA / tmp names (<code>foo_l42_a</code>, drop <code>___N</code>) —
+  <code>docs/contracts/lnast_spec.md §13</code>. May reuse the source-map ID from
+  TODO_livehd.md <a class="xref" href="TODO_livehd.html#item-1f">1f</a> as the encoded location handle.</li>
+<li>Depends on <a class="xref" href="TODO_livehd.html#item-1f">1f</a> (source-map indirection): the naming scheme can
+    reference the source-map ID rather than re-encoding <code>file:line:col</code>
+    in every temp name.</li>
+<li>
+<p>Cascades into golden-file updates (<a class="xref" href="TODO_livehd.html#item-1h">1h</a> and TODO_verilog.md
+    <a class="xref" href="TODO_verilog.html#item-2d">2d</a>); land before those goldens are taken.</p>
+</li>
+<li>
+<p><strong id="item-2o" class="item-id">2o</strong> Two-phase <code>upass/func_extract</code> (parallel per-LNAST, then top-down
+  resolve) — <code>import.md</code>. Depends on the <code>import</code> feature landing (no
+  standalone entry yet — likely needs one); without imports the
+  pending-marker machinery has nothing to gate on.</p>
+</li>
+<li>Pending-import poison for the planned <code>bundle</code> pre-pass: when an <code>if</code>
+    condition (or any value sticky/attribute propagation reads) depends on
+    a name whose Bundle entry is still unresolved because of a pending
+    <code>import</code>, the entry must carry a <code>pending: ImportRef</code> marker. Bundle
+    pre-pass treats a pending-tainted cond as non-comptime <em>and</em> must NOT
+    propagate sticky/attribute state into the if's arms (the import may
+    still inject an <code>attr_set</code> or change the cond's comptime value).
+    Equivalent rule for attribute propagation through expression ops:
+    skip the migration when any RHS ref carries the pending marker, since
+    the import may change which <code>_*</code> attributes flow in. The pending
+    marker is propagated by bundle pre-pass through the same expression-op
+    migration path used for sticky <code>_*</code> attrs (functionally a second
+    sticky channel).</li>
+<li>
+<p>SSA-flatten gate: the SSA post-pass owns the <code>tuple_*</code> → flat-name
+    lowering and rewrites the LNAST (the optimization passes need the
+    Bundle ptr during their loop, so flattening earlier would complicate
+    <code>does</code>/<code>==</code>/etc.). SSA must NOT flatten a Bundle whose entry carries
+    a pending-import marker — the import may still change the shape,
+    field values, or attached attributes. Such bundles stay as
+    <code>tuple_*</code> nodes for the next <code>pass.upass</code> invocation to revisit.
+    Re-runs of <code>pass.upass</code> after the import resolves clear the marker.</p>
+</li>
+<li>
+<p><strong id="item-2n" class="item-id">2n</strong> <code>tree_ios</code> leaf ABI with <code>min</code>/<code>max</code> slots,
+  mimicking <code>GraphIO</code> for consistency — <code>import.md §Function signatures</code>.
+  Downstream upasses (func_extract, constprop) read leaf IO via the ABI
+  rather than poking into each LNAST.</p>
+</li>
+<li>
+<p>Reads from the typesystem (<code>upass/upass.md §2 Typesystem</code>):
+    <code>bits</code>/<code>min</code>/<code>max</code>/<code>sign</code> are what the ABI carries.</p>
+</li>
+<li>
+<p><strong id="item-2l" class="item-id">2l</strong> Enum support: parse <code>enum X = (l0, l1, l2)</code> and <code>enum X:Base = (...)</code>,
+  lower to LNAST as comptime-tagged tuples; value-assigned variants (<code>b=5</code>,
+  auto-increment after), the <code>in</code> operator (<code>x in Enum</code>), typed associated
+  values, and the inline-decl form (<code>const Color = enum(...)</code>).</p>
+</li>
+<li>Basic enums are nearly independent, but complex enums depend on
+    <a class="xref" href="TODO_prp.html#item-1k">1k</a> (<code>self</code> / <code>ref self</code>) since associated tuples carry
+    setters/methods — so this lands in Group 2.</li>
+<li>
+<p>Fixes failing comptime tests: <code>prp-enum_simple</code>, <code>prp-enum_hier</code>,
+    <code>prp-enum_color</code> (depends on <a class="xref" href="TODO_prp.html#item-1k">1k</a>), <code>prp-enum_types</code> (interplay
+    with <code>does</code>).</p>
+</li>
+<li>
+<p><strong id="item-2j" class="item-id">2j</strong> Function-scope closure-capture rule, <strong>import-aware case</strong>.
+  Companion to Group 1 <span class="xref xref-note" title="note: 1x">1x</span> which handles the no-import portion. The
+  pending-import path: when a referenced outer-scope name is tainted
+  by a pending import, do NOT inline; leave the ref intact and defer
+  the function from func_extract spawn until a re-run of <code>pass.upass</code>
+  (after import resolves) clears the taint. Depends on <a class="xref" href="TODO_prp.html#item-1m">1m</a> (import)
+  and <a class="xref" href="TODO_prp.html#item-2o">2o</a> (pending-import poison + bundle pre-pass).</p>
+</li>
+</ul>
+<h2 id="group-3-depends-on-group-2">Group 3 — depends on Group 2</h2>
+<ul>
+<li>
+<p><strong id="item-3k" class="item-id">3k</strong> Automate doc-example ingestion: <code>extract.rb</code> (or equivalent)
+  pulling <code>cassert</code> examples from <code>docs/docs/pyrope</code> into
+  <code>inou/prp/tests/docs/</code>, with CI iteration until they pass. Most have
+  been imported manually already; this entry is the remaining
+  automation + ongoing sync, not urgent.</p>
+</li>
+<li>
+<p><strong id="item-3g" class="item-id">3g</strong> Memory port tuple semantics + <code>pipestage</code> <code>lat</code>/<code>num</code> —
+  <code>docs/contracts/attributes_spec.md §6</code>.</p>
+</li>
+<li><strong id="item-3j" class="item-id">3j</strong> Pyrope Memory / <code>Fflop</code> / clock-reset end-to-end: declaration
+  syntax, lowering to LGraph <code>Memory</code> cell, multi-clock-domain checks,
+  sync/async reset trees.</li>
+<li><strong>Declare-folding — bind the initial/reset value ON the <code>declare</code>.</strong> A
+    declaration with an initializer currently lowers to <code>declare(var, type,
+    mode)</code> <em>followed by a separate</em> <code>store(var, value)</code> (e.g. <code>mut c:u8 = nil</code>
+    → <code>declare(c, u8, mut)</code> then <code>store(c, nil)</code>; confirmed 2026-06-01). For a
+    register/flop this split loses the "this is the value bound <em>at
+    declaration</em>" relationship: a later same-name <code>store</code> is structurally
+    indistinguishable from the initializer, so the power-on / reset value
+    can't be reliably recovered when the <code>declare</code> lowers to <code>Fflop</code> / <code>Latch</code>
+    (and <code>prim_type_register</code>'s <code>reset_pin</code> needs exactly that value). Fold the
+    initializer into the optional 4th <code>[value]</code> child of <code>declare</code> — the slot
+    already sketched in the landed <code>declare( var, &lt;type&gt;, const(mode), [value] )</code>
+    — so the init rides on the declare node and only genuine <em>re-assignments</em>
+    emit a trailing <code>store</code>. Producer: <code>rewrite_decls_to_declare</code> /
+    <code>process_lvalue_for_assign</code> in <code>inou/prp/prp2lnast.cpp</code> (the decl-cluster
+    merge already has both the <code>declare</code> and its value <code>store</code> in hand);
+    consumers <code>process_declare</code> in <code>upass/attributes</code> + <code>upass/bitwidth</code> and
+    the lnastfmt declare-shape validator must accept the 4th child. (Context:
+    the <code>assign-retype</code> guard landed 2026-06-01 already establishes that a type
+    cast may ride only a <code>declare</code> or a <code>wrap</code>/<code>sat</code> write — see
+    <code>inou/prp/tests/errors/assign_retype.prp</code>.)</li>
+</ul>
+<h2 id="group-4-depends-on-group-3">Group 4 — depends on Group 3</h2>
+<ul>
+<li>
+<p><strong id="item-4i" class="item-id">4i</strong> Golden-output baseline in <code>inou/prp/tests/equiv/</code>: feature-broad
+  equiv tests with LNAST/LGraph golden dumps so semantic regressions
+  surface as diffs. Depends on TODO_verilog.md <a class="xref" href="TODO_verilog.html#item-2d">2d</a>
+  (<code>lnast_to_lgraph</code> finished + Verilog round-trip), since these are
+  equiv tests for the lnast→lgraph path, not compile-time-constant
+  checks. Each failing-comptime-test category (enums, bits, wrap/sat,
+  matrix, valid, strings, match-case, fcall-rename, mux/unique-if,
+  comptime attribute) gets at least one equiv counterpart added once
+  its feature entry lands.</p>
+</li>
+<li>
+<p><strong id="item-4a" class="item-id">4a</strong> Test functionality on top of slop generation (<code>test::[…]</code> blocks,
+  runtime harness).</p>
+</li>
+<li><strong id="item-4b" class="item-id">4b</strong> Emit <code>assert</code> / <code>assume</code> / <code>coverpoint</code> into slop.</li>
+<li><strong id="item-4h" class="item-id">4h</strong> Compile-error test infrastructure: harness that pins expected errors
+  / warnings to expected source spans (golden-error files), consumed by
+  <code>inou/prp</code>, upass, and lgraph-pass diagnostics from
+  <a href="TODO_livehd.html">TODO_livehd.md</a> <strong>3f</strong>.</li>
+</ul>
+<h2 id="failing-test-todo-mapping-snapshot-2026-06-01">Failing-test → TODO mapping (snapshot 2026-06-01)</h2>
+<p>Each <code>bazel test -c dbg //...</code> failure mapped to the TODO entry whose
+landing should fix it. When more than one entry is listed, the test
+needs all of them. Current verifier tally is shown as <code>pass/fail/unknown</code>.
+Tallies re-measured via the <code>prplib.py</code> comptime pipeline
+(<code>pass.upass constprop:1 verifier_pass:N verifier_fail:N
+[verifier_include_funcs:true]</code>).</p>
+<p><strong>Live suite = 15 fails</strong> across <code>//inou //upass //lnast //pass</code>: 6 comptime
+(enum + decorator) + 9 <code>tests/errors/</code> negative tests. The error tests fail
+because no matching <code>error</code>-severity diagnostic is emitted at the marked line.</p>
+<table>
+<thead>
+<tr>
+<th>Failing test</th>
+<th>now</th>
+<th>TODO entry</th>
+<th>What it still needs</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>prp-enum_color</code></td>
+<td>0/1/2</td>
+<td><a class="xref" href="TODO_prp.html#item-2l">2l</a>, <a class="xref" href="TODO_prp.html#item-1k">1k</a></td>
+<td>enum with associated setters/methods</td>
+</tr>
+<tr>
+<td><code>prp-enum_hier</code></td>
+<td>0/0/6</td>
+<td><a class="xref" href="TODO_prp.html#item-2l">2l</a></td>
+<td>nested / hierarchical enums</td>
+</tr>
+<tr>
+<td><code>prp-enum_simple</code></td>
+<td>0/0/9</td>
+<td><a class="xref" href="TODO_prp.html#item-2l">2l</a></td>
+<td>base enum parsing + comptime tags</td>
+</tr>
+<tr>
+<td><code>prp-enum_types</code></td>
+<td>0/0/0</td>
+<td><a class="xref" href="TODO_prp.html#item-2l">2l</a></td>
+<td>typed enum interplay with <code>does</code> (casserts unreached)</td>
+</tr>
+<tr>
+<td><code>prp-setter_complex</code></td>
+<td>2/2/0</td>
+<td><a class="xref" href="TODO_prp.html#item-1k">1k</a></td>
+<td>decorator-init implicit setter dispatch on <code>x:Tup = (…)</code></td>
+</tr>
+<tr>
+<td><code>prp-tuple_decorator_complex</code></td>
+<td>0/0/2</td>
+<td><a class="xref" href="TODO_prp.html#item-1k">1k</a></td>
+<td>tuple-decorator init triggering setter</td>
+</tr>
+<tr>
+<td><code>prp-invalid_binary_prefix</code></td>
+<td>error</td>
+<td><a class="xref" href="TODO_prp.html#item-1e">1e</a></td>
+<td>reject bare <code>0b…</code> (require <code>0ub</code>/<code>0sb</code>) — grammar/lexical</td>
+</tr>
+<tr>
+<td><code>prp-mixed_precedence</code></td>
+<td>error</td>
+<td><a class="xref" href="TODO_prp.html#item-1e">1e</a></td>
+<td>require parens on mixed arith+bitwise — grammar</td>
+</tr>
+<tr>
+<td><code>prp-tuple_lhs_requires_parens</code></td>
+<td>error</td>
+<td><a class="xref" href="TODO_prp.html#item-1e">1e</a></td>
+<td><code>mut a,b = …</code> lhs tuple needs parens — grammar</td>
+</tr>
+<tr>
+<td><code>prp-tuple_rhs_requires_parens</code></td>
+<td>error</td>
+<td><a class="xref" href="TODO_prp.html#item-1e">1e</a></td>
+<td><code>mut (a,b) = 2,3</code> rhs tuple needs parens — grammar</td>
+</tr>
+<tr>
+<td><code>prp-drop_tuple_parens_assert</code></td>
+<td>error</td>
+<td><a class="xref" href="TODO_prp.html#item-1e">1e</a></td>
+<td>reject non-string <code>cassert</code> message arg</td>
+</tr>
+<tr>
+<td><code>prp-duplicate_tuple_field</code></td>
+<td>error</td>
+<td><a class="xref" href="TODO_prp.html#item-1e">1e</a></td>
+<td>duplicate tuple field name — typecheck</td>
+</tr>
+<tr>
+<td><code>prp-undefined_read</code></td>
+<td>error</td>
+<td><a class="xref" href="TODO_prp.html#item-1e">1e</a></td>
+<td>read of undeclared name — typecheck/scope</td>
+</tr>
+<tr>
+<td><code>prp-invalid_descending_range</code></td>
+<td>error</td>
+<td><a class="xref" href="TODO_prp.html#item-1e">1e</a></td>
+<td><code>5..=0</code> empty/invalid range</td>
+</tr>
+<tr>
+<td><code>prp-underflow_unsigned_expr</code></td>
+<td>error</td>
+<td><a class="xref" href="TODO_prp.html#item-1e">1e</a></td>
+<td>signed-neg expr into unsigned dest <code>does not fit</code> (extends <span class="xref xref-note" title="note: 1b">1b</span>)</td>
+</tr>
+</tbody>
+</table>
+</main>
+<footer>Generated from <code>TODO_prp.md</code> — task badges link across files; ✎ marks reference notes.</footer>
+</body>
+</html>

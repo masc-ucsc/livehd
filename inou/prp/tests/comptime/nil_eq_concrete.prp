@@ -1,0 +1,17 @@
+/*
+:name: nil_eq_concrete
+:type: parsing lnast comptime
+:verifier_pass: 1
+:verifier_fail: 1
+*/
+
+// Regression: `==nil` is NOT special. Comparing a concrete value to the `nil`
+// literal is decidable, not indeterminate — `5 == nil` is false, so a cassert
+// on it must be caught as a comptime failure. The bug this guards against:
+// `concrete == nil` folded to nil and the verifier discharged the cassert as a
+// pass, so a clearly-false `cassert(c == nil)` silently "passed". `!= nil`
+// stays true for a concrete value.
+
+const c = 5
+cassert(c != nil)   // 5 != nil → true  → pass
+cassert(c == nil)   // 5 == nil → false → comptime cassert failure

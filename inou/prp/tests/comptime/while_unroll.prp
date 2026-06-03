@@ -1,0 +1,39 @@
+/*
+:name: while_unroll
+:type: comptime
+:verifier_pass: 4
+:verifier_fail: 0
+*/
+
+// A data-dependent `while` must comptime-unroll like a `for` (Pyrope loops are
+// comptime-only). The condition is re-evaluated every iteration and the loop
+// terminates when it turns false.
+
+// Counting-down accumulator.
+mut sum = 0
+mut c = 5
+while c != 0 {
+  sum = sum + c
+  c -= 1
+}
+cassert(sum == 15)  // 5+4+3+2+1
+cassert(c == 0)     // loop ran until the condition turned false
+
+// `break` ends the loop early.
+mut n = 0
+mut i = 10
+while i != 0 {
+  if i == 7 {
+    break
+  }
+  n += 1
+  i -= 1
+}
+cassert(n == 3)     // i = 10, 9, 8 → then i==7 breaks
+
+// A statically-false condition runs zero iterations.
+mut z = 100
+while false {
+  z = 0
+}
+cassert(z == 100)

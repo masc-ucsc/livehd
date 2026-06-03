@@ -1,0 +1,16 @@
+/*
+:name: while_no_progress
+:type: error
+:error: cannot terminate
+:help: condition variable
+*/
+
+// A comptime `while` must make progress toward its exit. Here `c` is never
+// updated, so the loop state repeats forever — the runner detects the recurring
+// state (analogous to recursion that revisits its arguments) and reports it
+// instead of unrolling to the fuel cap.
+
+mut c = 10
+while c != 0 {        // locate_error_here
+  cputs("hello {c}")
+}
