@@ -72,9 +72,7 @@ Prp2lnast::Prp2lnast(std::string_view filename, std::string_view module_name, bo
       return;
     }
 
-    process_description();
-    check_undeclared_writes();
-    check_undefined_reads();
+    process_description();  // runs the scope checks internally, before rewrite_decls_to_declare
   } catch (...) {
     ts_tree_delete(ts_tree);
     ts_parser_delete(parser);
@@ -241,6 +239,33 @@ void Prp2lnast::report_error(std::string_view code, std::string_view category, s
   throw Eprp::parser_error(Pass::eprp, msg_copy);
 }
 
+void Prp2lnast::report_error(const Lnast_nid& nid, std::string_view code, std::string_view category, std::string message,
+                             std::string_view hint) const {
+  const auto loc = nid.is_invalid() ? Lnast::Loc{} : lnast->get_loc(nid);
+  if (loc.line == 0) {
+    report_error(code, category, std::move(message), hint);  // no attached span — fall back to location-less
+  }
+  livehd::diag::Span span;
+  auto               fn = lnast->get_fname(nid);
+  span.file             = fn.empty() ? src_filename : std::string(fn);
+  span.start_byte       = loc.pos1;
+  span.end_byte         = loc.pos2;
+  span.start_line       = loc.line;
+  span.start_col        = 1;  // pre-sourcemap: column not recovered from the LNAST loc
+  span.end_line         = loc.line;
+  span.end_col          = 1;
+
+  auto msg_copy = message;
+  livehd::diag::sink().stage(livehd::diag::Diagnostic{.severity = livehd::diag::Severity::error,
+                                                      .code     = std::string(code),
+                                                      .category = std::string(category),
+                                                      .pass     = "inou.prp",
+                                                      .message  = std::move(message),
+                                                      .span     = std::move(span),
+                                                      .hint     = std::string(hint)});
+  throw Eprp::parser_error(Pass::eprp, msg_copy);
+}
+
 namespace {
 bool prp_name_is_tmp(std::string_view n) { return n.size() >= 3 && n[0] == '_' && n[1] == '_' && n[2] == '_'; }
 
@@ -296,8 +321,9 @@ void Prp2lnast::check_undeclared_writes() const {
 // param/output) visible in scope is `a = 3` with no prior declaration — an error.
 // `visible` carries names declared in enclosing frames; a func body is a fresh
 // namespace seeded with its params/outputs.
-void Prp2lnast::check_writes_in_scope(const Lnast_nid& scope_stmts, const std::unordered_set<std::string>& visible) const {
-  std::unordered_set<std::string> here;
+void Prp2lnast::check_writes_in_scope(const Lnast_nid& scope_stmts, const std::unordered_set<std::string>& visible,
+                                      const std::unordered_set<std::string>& seed_here) const {
+  std::unordered_set<std::string> here = seed_here;
   for (auto c = lnast->get_first_child(scope_stmts); !c.is_invalid(); c = lnast->get_sibling_next(c)) {
     const auto ct = lnast->get_type(c);
 
@@ -317,9 +343,41 @@ void Prp2lnast::check_writes_in_scope(const Lnast_nid& scope_stmts, const std::u
       return {};
     };
 
+    // The declaration mode (child2 of `declare`/`attr_set`-type): "mut" / "const"
+    // / "reg" for a variable, vs "type" / enum / func kinds we do not shadow-check.
+    auto third_child_name = [&](const Lnast_nid& node) -> std::string_view {
+      auto a = lnast->get_first_child(node);
+      if (a.is_invalid()) {
+        return {};
+      }
+      auto b = lnast->get_sibling_next(a);
+      if (b.is_invalid()) {
+        return {};
+      }
+      auto d = lnast->get_sibling_next(b);
+      return d.is_invalid() ? std::string_view{} : lnast->get_name(d);
+    };
+    auto is_var_mode = [](std::string_view m) { return m == "mut" || m == "const" || m == "reg"; };
+
+    // No-shadowing rule (04-variables.md "Variable scope"): a `mut`/`const`/`reg`
+    // declaration — including a `for` loop iterator — may NOT reuse a name that is
+    // already visible in an enclosing scope. (Plain re-assignment `a = e` is fine;
+    // it is a `store`, not a declaration. `type`/enum/func declarations are not
+    // shadow-checked here.) Located via the span attached to the declaring node.
+    auto check_shadowing = [&](const Lnast_nid& node, const std::string& name) {
+      if (!name.empty() && is_var_mode(third_child_name(node)) && visible.contains(name)) {
+        report_error(node,
+                     "variable-shadowing",
+                     "name",
+                     std::format("variable shadowing: '{}' is already declared in an enclosing scope", name),
+                     "rename the inner/loop variable, or assign without a new `mut`/`const`/`reg` to reuse the outer one");
+      }
+    };
+
     if (Lnast_ntype::is_declare(ct)) {
       auto name = first_ref_name(c);
       if (!name.empty()) {
+        check_shadowing(c, name);
         here.insert(name);
       }
     } else if (Lnast_ntype::is_attr_set(ct)) {
@@ -328,7 +386,9 @@ void Prp2lnast::check_writes_in_scope(const Lnast_nid& scope_stmts, const std::u
       auto c0 = lnast->get_first_child(c);
       auto c1 = c0.is_invalid() ? c0 : lnast->get_sibling_next(c0);
       if (!c0.is_invalid() && Lnast_ntype::is_ref(lnast->get_type(c0)) && !c1.is_invalid() && lnast->get_name(c1) == "type") {
-        here.insert(std::string(lnast->get_name(c0)));
+        auto name = std::string(lnast->get_name(c0));
+        check_shadowing(c, name);
+        here.insert(name);
       }
     } else if (Lnast_ntype::is_store(ct)) {
       auto name = first_ref_name(c);
@@ -347,7 +407,11 @@ void Prp2lnast::check_writes_in_scope(const Lnast_nid& scope_stmts, const std::u
     for (auto cc = lnast->get_first_child(c); !cc.is_invalid(); cc = lnast->get_sibling_next(cc)) {
       if (Lnast_ntype::is_stmts(lnast->get_type(cc))) {
         if (is_func_body) {
-          check_writes_in_scope(cc, sig);
+          // Params/outputs belong to the body's OWN scope: seed `here` (so a
+          // body-level `mut res = …` initializing an output is not shadowing),
+          // with no enclosing `visible` (a lambda does not see outer runtime
+          // vars). A NESTED re-declaration still shadows — `here` flows down.
+          check_writes_in_scope(cc, {}, sig);
         } else {
           std::unordered_set<std::string> combined = visible;
           combined.insert(here.begin(), here.end());
@@ -451,6 +515,15 @@ inline TSNode Prp2lnast::child_by_field(const TSNode& node, const char* field) c
 void Prp2lnast::process_description() {
   builder.idx_stmts = lnast->add_child(lnast->get_root(), Lnast_ntype::create_stmts());
   walk_statement_block(ts_root_node);
+  // Run the scope checks on the PRE-rewrite tree: declarations are still in
+  // their `attr_set(t,"type",K)` form here, with their source spans intact and
+  // each scope's declarations un-merged. rewrite_decls_to_declare folds
+  // same-name declaration clusters and does not preserve declare-node locs, so
+  // running the no-shadowing / undeclared / undefined-read checks afterward
+  // would both lose the diagnostic location and miss a `for c` iterator that
+  // shadows an outer `mut c` (the merge collapses them).
+  check_undeclared_writes();
+  check_undefined_reads();
   rewrite_decls_to_declare();
 }
 
@@ -1955,8 +2028,10 @@ void Prp2lnast::process_for_statement(TSNode n) {
     }
     std::string_view dt(ts_node_type(d));
     TSNode           inner = d;
-    if (dt == "expression_list") {
-      // Reject multi-item lists — `for i in a, b` isn't a range.
+    if (dt == "expression_list" || dt == "tuple") {
+      // Reject multi-item lists/tuples — `for i in a, b` and `for i in (a, b)`
+      // aren't ranges. A single-item `tuple` is the parenthesized form of a
+      // range, e.g. `for c in (0..=9)`; unwrap it like an expression_list.
       uint32_t count = 0;
       TSNode   first;
       for (uint32_t i = 0; i < child_count(d); i++) {
@@ -2063,7 +2138,9 @@ void Prp2lnast::process_for_statement(TSNode n) {
     }
     TSNode           inner = d;
     std::string_view dt(ts_node_type(d));
-    if (dt == "expression_list") {
+    if (dt == "expression_list" || dt == "tuple") {
+      // Single-item `tuple` is the parenthesized range form, e.g.
+      // `for i in (0..<x.[bits])`; unwrap it like an expression_list.
       uint32_t count = 0;
       TSNode   first{};
       for (uint32_t i = 0; i < child_count(d); i++) {
@@ -2114,8 +2191,25 @@ void Prp2lnast::process_for_statement(TSNode n) {
   // tracks tuple growth in comptime_tuples_ that a later tuple-iteration loop
   // (`for e in NAME`) depends on, which the runner does not feed.
   if (!literal_range && is_range_data(data) && !ts_node_is_null(bind_id) && !ts_node_is_null(code)) {
+    // A parenthesized range (`for i in (0..<x.[bits])`) arrives as a
+    // single-item `tuple`; the no-paren form is a bare expression_item.
+    // Unwrap to the inner range expression so expr_to_node lowers a range tmp
+    // rather than building a 1-tuple.
+    TSNode range_src = data;
+    {
+      std::string_view rt(ts_node_type(range_src));
+      if (rt == "tuple" || rt == "expression_list") {
+        for (uint32_t i = 0; i < child_count(range_src); i++) {
+          const char* fn = ts_node_field_name_for_child(range_src, i);
+          if (fn && std::string_view(fn) == "item") {
+            range_src = child(range_src, i);
+            break;
+          }
+        }
+      }
+    }
     Lnast_node iter_ref  = identifier_to_node(bind_id, true);
-    Lnast_node range_ref = expr_to_node(data);  // emits range stmts before the for; returns the range tmp
+    Lnast_node range_ref = expr_to_node(range_src);  // emits range stmts before the for; returns the range tmp
     auto       for_idx   = builder.add_child(Lnast_ntype::create_for());
     lnast->add_child(for_idx, iter_ref);
     lnast->add_child(for_idx, range_ref);
@@ -2129,30 +2223,26 @@ void Prp2lnast::process_for_statement(TSNode n) {
   if (literal_range && !ts_node_is_null(bind_id) && !ts_node_is_null(code)) {
     auto [lo, hi_incl, ok] = *literal_range;
     (void)ok;
-    // Outer wrap stmts so the iter mut isn't visible to siblings.
+    // Outer wrap stmts so the iter variable isn't visible to siblings.
     auto outer_idx = builder.add_child(Lnast_ntype::create_stmts());
     builder.push_stmts(outer_idx);
 
     Lnast_node iter_ref = identifier_to_node(bind_id, true);
-    {
+
+    // Empty range (lo > hi_incl) emits no iteration blocks.
+    for (int64_t k = lo; k <= hi_incl; ++k) {
+      auto iter_stmts = builder.add_child(Lnast_ntype::create_stmts());
+      builder.push_stmts(iter_stmts);
+      // The iter variable is implicitly declared fresh in *each* iteration's
+      // scope — the source needs no prior `mut c` declaration, and a body
+      // write to it can't leak into the next iteration. Declaring it `mut`
+      // (rather than const) keeps body reassignment legal; the value seen at
+      // the top of each iteration is pinned by the `store` below regardless.
       auto attr = builder.add_child(Lnast_ntype::create_attr_set());
       lnast->add_child(attr, iter_ref);
       lnast->add_child(attr, Lnast_node::create_const("type"));
       lnast->add_child(attr, Lnast_node::create_const("mut"));
-      auto a = builder.add_child(Lnast_ntype::create_store());
-      lnast->add_child(a, iter_ref);
-      lnast->add_child(a, Lnast_node::create_const("nil"));
-    }
-
-    // Empty range (lo > hi_incl) emits no iteration blocks. We still
-    // declare the iter mut so the wrap remains a valid stmts.
-    for (int64_t k = lo; k <= hi_incl; ++k) {
-      auto iter_stmts = builder.add_child(Lnast_ntype::create_stmts());
-      builder.push_stmts(iter_stmts);
-      // Bare `i = k` — Symbol_table::set walks up to the outer mut declared
-      // above, so each iteration overwrites the same slot rather than
-      // shadowing. Emitting `assign` (no attr_set) keeps the resolution
-      // out-of-scope rather than re-declaring locally.
+      attach_loc(attr, bind_id);  // span → check_writes_in_scope can locate a shadowing error at the for-loop
       auto a = builder.add_child(Lnast_ntype::create_store());
       lnast->add_child(a, iter_ref);
       lnast->add_child(a, Lnast_node::create_const(std::to_string(k)));
@@ -2233,6 +2323,7 @@ void Prp2lnast::process_for_statement(TSNode n) {
         lnast->add_child(attr, r);
         lnast->add_child(attr, Lnast_node::create_const("type"));
         lnast->add_child(attr, Lnast_node::create_const("mut"));
+        attach_loc(attr, bid);  // span → locate a shadowing error at the for-loop binding
         auto a = builder.add_child(Lnast_ntype::create_store());
         lnast->add_child(a, r);
         lnast->add_child(a, Lnast_node::create_const("nil"));
@@ -2357,6 +2448,7 @@ void Prp2lnast::process_for_statement(TSNode n) {
           lnast->add_child(attr, iter_ref);
           lnast->add_child(attr, Lnast_node::create_const("type"));
           lnast->add_child(attr, Lnast_node::create_const("mut"));
+          attach_loc(attr, bind_id);  // span → locate a shadowing error at the for-loop binding
           auto a = builder.add_child(Lnast_ntype::create_store());
           lnast->add_child(a, iter_ref);
           lnast->add_child(a, Lnast_node::create_const("nil"));

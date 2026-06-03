@@ -132,11 +132,29 @@ bazel build -c dbg //main:lgshell
 # binary at: bazel-bin/main/lgshell
 ```
 
+#### `prplsp` launcher
+
+Rather than hard-code a path, point your editor at the
+[`scripts/prplsp`](scripts/prplsp) wrapper. It runs `lgshell --lsp`, but picks
+*which* `lgshell` based on the directory the editor launched in:
+
+- **Inside a livehd checkout** → that checkout's freshly-built
+  `bazel-bin/main/lgshell`, so iterating on the LSP needs no copy/reinstall.
+- **Anywhere else** → the `lgshell` found on your `$PATH` (the default install).
+
+So you keep one editor config everywhere. Install both `prplsp` and a default
+`lgshell` on your `$PATH` — e.g. into `~/bin` or `~/.local/bin`:
+
+```bash
+cp scripts/prplsp ~/.local/bin/prplsp          # or: ln -s "$PWD/scripts/prplsp" ~/.local/bin/
+cp bazel-bin/main/lgshell ~/.local/bin/lgshell # the fallback used outside a checkout
+```
+
 Quick sanity check (it should print a framed JSON-RPC reply, then exit):
 
 ```bash
 printf 'Content-Length: 58\r\n\r\n{"jsonrpc":"2.0","id":1,"method":"initialize","params":{}}' \
-  | ./bazel-bin/main/lgshell --lsp
+  | ./scripts/prplsp
 ```
 
 What it provides today (Phase A): real-time diagnostics via
@@ -161,8 +179,8 @@ pyrope-lsp-plugin/
 ```json
 {
   "pyrope": {
-    "command": "/ABS/PATH/TO/livehd/bazel-bin/main/lgshell",
-    "args": ["--lsp"],
+    "command": "prplsp",
+    "args": [],
     "transport": "stdio",
     "extensionToLanguage": { ".prp": "pyrope" }
   }
@@ -173,11 +191,23 @@ Then load it for development with `claude --plugin-dir ./pyrope-lsp-plugin` (or
 install it via `/plugin install`) and `/reload-plugins`. Editing a `.prp` file
 will then surface Pyrope diagnostics to Claude. For an in-IDE session (VS Code /
 JetBrains), Claude reads the editor's Problems panel via the built-in `ide` MCP
-server instead, so point your IDE's Pyrope LSP at the same binary.
+server instead, so point your IDE's Pyrope LSP at `prplsp` too.
 
 ### Neovim (0.11+)
 
-Register the `.prp` filetype and start the server with the built-in LSP client:
+[`scripts/pyrope.lua`](scripts/pyrope.lua) is a ready-made
+[lazy.nvim](https://github.com/folke/lazy.nvim) plugin spec that wires up the
+whole experience: the `.prp` filetype, tree-sitter syntax highlighting (via
+[tree-sitter-pyrope](https://github.com/masc-ucsc/tree-sitter-pyrope)), `//`
+comment support, and the `prplsp` language server. Drop it into your plugins
+directory, restart, and run `:TSInstall pyrope` once:
+
+```bash
+cp scripts/pyrope.lua ~/.config/nvim/lua/plugins/pyrope.lua
+```
+
+If you don't use lazy.nvim (or only want the language server), the minimal
+wiring is just:
 
 ```lua
 vim.filetype.add({ extension = { prp = "pyrope" } })
@@ -187,7 +217,9 @@ vim.api.nvim_create_autocmd("FileType", {
   callback = function(args)
     vim.lsp.start({
       name      = "livehd",
-      cmd       = { "lgshell", "--lsp" },  -- or the absolute path + "--lsp"
+      cmd       = { "prplsp" },  -- on $PATH; uses the in-checkout build when editing livehd
+      -- launch in the file's dir so prplsp detects an enclosing livehd checkout
+      cmd_cwd   = vim.fn.fnamemodify(args.file, ":h"),
       root_dir  = vim.fn.getcwd(),
     })
   end,
@@ -197,8 +229,5 @@ vim.api.nvim_create_autocmd("FileType", {
 Diagnostics appear through Neovim's built-in `vim.diagnostic` UI (`:lua
 vim.diagnostic.setqflist()` to list them).
 
-> Syntax highlighting, indentation, folding, and `prpfmt` auto-formatting come
-> from the separate
-> [tree-sitter-pyrope](https://github.com/masc-ucsc/tree-sitter-pyrope) project
-> (register its grammar with `nvim-treesitter` and wire `prpfmt` via
-> `conform.nvim`) — the language server above is independent of it.
+> `prpfmt` auto-formatting is independent of the language server above — wire it
+> up separately via [`conform.nvim`](https://github.com/stevearc/conform.nvim).

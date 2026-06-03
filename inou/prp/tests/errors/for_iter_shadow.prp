@@ -1,0 +1,16 @@
+/*
+:name: for_iter_shadow
+:type: error
+:error: shadow
+:help: rename
+*/
+
+// A `for` iterator is implicitly declared in the loop scope, so it may not
+// reuse a name already visible in an enclosing scope — that is variable
+// shadowing, which Pyrope forbids in code blocks and lambdas.
+// Doc: ../docs/docs/pyrope/04-variables.md "Variable scope".
+
+mut c:u10 = 0
+for c in 0..=9 {   // locate_error_here  (iterator `c` shadows the outer `mut c`)
+  cputs("hello {c}")
+}

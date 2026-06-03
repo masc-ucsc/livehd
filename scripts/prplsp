@@ -1,0 +1,53 @@
+#!/usr/bin/env bash
+# prplsp -- launch the Pyrope/LiveHD LSP server (lgshell --lsp)
+#
+# Picks which lgshell to run based on the CURRENT WORKING DIRECTORY (the dir the
+# editor launched in), so neovim can use a single command everywhere:
+#
+#   1. If $PWD is inside a livehd checkout, use that repo's freshly-built
+#      bazel-bin/main/lgshell -- no copying/installing while hacking on the LSP.
+#   2. Otherwise fall back to the `lgshell` found in $PATH (the default install).
+#
+# A livehd checkout is identified by an ancestor MODULE.bazel declaring
+# name = "livehd". Extra arguments are forwarded to lgshell after --lsp.
+
+set -euo pipefail
+
+# Walk up from $PWD looking for the livehd repo root (MODULE.bazel naming the
+# "livehd" module). Prints the root on success; empty if not inside a checkout.
+find_livehd_root() {
+  local dir
+  dir=$(pwd -P)
+  while [[ -n "${dir}" ]]; do
+    if [[ -f "${dir}/MODULE.bazel" ]] \
+       && grep -Eq 'name[[:space:]]*=[[:space:]]*"livehd"' "${dir}/MODULE.bazel"; then
+      printf '%s\n' "${dir}"
+      return 0
+    fi
+    [[ "${dir}" == "/" ]] && break
+    dir=$(dirname "${dir}")
+  done
+  return 1
+}
+
+if repo_root=$(find_livehd_root); then
+  repo_lgshell="${repo_root}/bazel-bin/main/lgshell"
+  if [[ -x "${repo_lgshell}" ]]; then
+    lgshell="${repo_lgshell}"
+  else
+    echo "prplsp: inside livehd (${repo_root}) but no built lgshell at" >&2
+    echo "  ${repo_lgshell}" >&2
+    echo "  build it with: bazel build //main:lgshell" >&2
+    echo "  falling back to 'lgshell' in \$PATH" >&2
+  fi
+fi
+
+# Fall back to PATH if not inside a checkout, or inside but not yet built.
+if [[ -z "${lgshell:-}" ]]; then
+  if ! lgshell=$(command -v lgshell 2>/dev/null); then
+    echo "prplsp: could not find lgshell (not in a livehd checkout, and none in \$PATH)" >&2
+    exit 1
+  fi
+fi
+
+exec "${lgshell}" --lsp "$@"

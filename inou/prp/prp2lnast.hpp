@@ -34,6 +34,12 @@ protected:
   // Location-less variant (span = null) for defensive sites with no TS node.
   [[noreturn]] void report_error(std::string_view code, std::string_view category, std::string message,
                                  std::string_view hint = {}) const;
+  // Variant anchored at the source span previously attached (via `attach_loc`)
+  // to an LNAST node — for post-build checks that walk the tree and no longer
+  // hold the originating TSNode. Falls back to the location-less form when the
+  // node carries no loc.
+  [[noreturn]] void report_error(const Lnast_nid& nid, std::string_view code, std::string_view category,
+                                 std::string message, std::string_view hint = {}) const;
 
   // Persist `node`'s source span (byte range + 1-based line) and the source
   // filename onto the LNAST node at `idx`, so downstream passes (e.g. the upass
@@ -55,7 +61,12 @@ protected:
   // in scope. Runs on the producer tree (pre-upass), so it sees only source-level
   // declarations — no inliner/SSA-synthesized stores to false-positive on.
   void check_undeclared_writes() const;
-  void check_writes_in_scope(const Lnast_nid& scope_stmts, const std::unordered_set<std::string>& visible) const;
+  // `visible` carries names declared in ENCLOSING scopes (re-declaring one of
+  // them here is shadowing); `seed_here` pre-populates the CURRENT scope (a func
+  // body seeds its params/outputs — re-declaring those at the body top level is
+  // the normal output-init pattern, not shadowing).
+  void check_writes_in_scope(const Lnast_nid& scope_stmts, const std::unordered_set<std::string>& visible,
+                             const std::unordered_set<std::string>& seed_here = {}) const;
 
   // Reject reading a name that is never defined ANYWHERE in the file (e.g.
   // `const y = x`). A GLOBAL check (scope-order agnostic): a name that is a

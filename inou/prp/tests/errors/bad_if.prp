@@ -1,0 +1,14 @@
+/*
+:name: bad_if
+:type: error
+:error: syntax|unexpected
+:help: block|control statement
+*/
+
+// `i c` is junk before a `{ … }` block — almost certainly a typo for an `if`
+// (`if c { … }`). tree-sitter parks `i c` in an ERROR node and recovers at the
+// `{`, so the file used to "parse fine" and silently drop the stray tokens.
+// A statement-position ERROR node must be reported as a syntax error.
+i c { // locate_error_here
+  cputs("hello {c}")
+}
