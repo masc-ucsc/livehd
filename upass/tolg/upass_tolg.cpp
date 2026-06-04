@@ -72,6 +72,14 @@ public:
         set_sign(raw);
         record(e.name, raw, mw);
       } else {
+        // Stamp width AND sign on the raw pin too: passes may reconnect
+        // consumers straight to the port (cprop mask folds), and a bits-less
+        // pin miscompiles in cgen (b[-1] sign-replicate). The raw port reads
+        // SIGNED (cgen declares every port signed) — only the to-positive
+        // wrapper provides the unsigned view, so mark raw signed to keep
+        // sign-sensitive folds (cprop get_mask rule 4) away from it.
+        set_bits(raw, mw);
+        set_sign(raw);
         record(e.name, to_positive(raw, mw), mw);  // unsigned -> positive
       }
     }

@@ -339,6 +339,17 @@ void Cprop::replace_part_inputs_const(hhds::Node_class& node, std::vector<hhds::
       } else if (npending == 1) {
         collapse_forward_always_pin0(node, edge_it2);
       }
+    } else if (nconstants == 1 && npending >= 1
+               && ((op == Ntype_op::And && result.is_i() && result.to_i() == -1)
+                   || (op == Ntype_op::Or && result.is_known_zero()))) {
+      // Identity element: and(x.., -1) == and(x..), or(x.., 0) == or(x..).
+      // Dropping it matters for codegen too: cgen renders -1 as `1'sh1`,
+      // which only sign-extends in an all-signed Verilog expression — in a
+      // mixed/unsigned context it reads as +1 and masks everything away.
+      first_const_edge.del_edge();
+      if (npending == 1) {
+        collapse_forward_always_pin0(node, edge_it2);
+      }
     } else if (npending == 0 && nconstants == 1) {
       collapse_forward_always_pin0(node, inp_edges_ordered);
     } else if (npending == 1 && nconstants == 0) {
@@ -683,8 +694,30 @@ bool Cprop::scalar_get_mask(hhds::Node_class& node) {
 
   auto mask_const = hydrate_const(mask_pin);
 
-  // Rule 4: get_mask(a, -1) == a
+  // Rule 4: get_mask(a, -1) == a — only when `a` is provably non-negative.
+  // get_mask always yields a non-negative value (it zero-extends the selected
+  // bits), so it is the to-positive wrapper for signed-read pins (e.g. module
+  // ports, which cgen declares `signed`). Bypassing it around a pin that can
+  // go negative changes the value: u3 a=0b101 must read 5, not -3 (caught by
+  // LEC once the lgcheck BMC stage became sound).
   if (mask_const.is_i() && mask_const.to_i() == -1) {
+    bool nonneg = false;
+    if (is_const_pin(a_pin)) {
+      auto v = hydrate_const(a_pin);
+      nonneg = v.is_i() && v.to_i() >= 0;
+    } else if (is_graph_input_pin(a_pin)) {
+      // A module port always reads SIGNED in the LGraph/cgen model; its
+      // unsign attr (when present) is source-interface metadata, not a
+      // value-range guarantee. Never bypass the to-positive wrapper here.
+      nonneg = false;
+    } else {
+      auto a_master = a_pin.get_master_node();
+      nonneg        = (!a_master.is_invalid() && type_op_of(a_master) == Ntype_op::Get_mask)
+               || livehd::graph_util::is_unsign(a_pin);
+    }
+    if (!nonneg) {
+      return false;
+    }
     collapse_forward_for_pin(node, a_pin);
     return true;
   }

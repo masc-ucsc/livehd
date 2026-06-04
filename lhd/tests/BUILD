@@ -1,0 +1,78 @@
+# This file is distributed under the BSD 3-Clause License. See LICENSE for details.
+
+# lhd kernel tests (task 1y-bazel):
+#  - trivial_net: the //tools:lhd.bzl ruleset driving `lhd compile verilog`
+#    as a hermetic genrule action.
+#  - lhd_flow-<in>-to-<out>: the full (input x output) kind matrix on the
+#    inou/prp/tests/equiv trivial_if pyrope/verilog golden pair. Supported
+#    cells run the flow and validate the artifact; the rest lock the
+#    documented `unsupported` v0 contract. verilog/pyrope inputs emit
+#    lnast/pyrope as --emit-dir (variable cardinality); lgraph is always the
+#    lgdb directory blob.
+#  - lhd_equiv_test: prp->ln->lg->v1, prp->lg->v2, verilog0->lg->v3, then
+#    LEC of each against the golden verilog0.
+
+load("@rules_shell//shell:sh_test.bzl", "sh_test")
+load("//tools:lhd.bzl", "lhd_verilog")
+
+lhd_verilog(
+    name = "trivial_net",
+    srcs = ["trivial.v"],
+    out = "trivial.gen.v",
+    recipe = "O1",
+    top = "trivial",
+)
+
+_FLOW_DATA = [
+    "//lhd",
+    "//inou/prp:equiv_tests",
+    "//inou/yosys:scripts",
+]
+
+# (input kind, output kind, expectation). ln: = Forest save dir (LNAST
+# units), lg: = GraphLibrary save dir (LGraphs).
+_FLOWS = [
+    ("pyrope", "verilog", "pass"),
+    ("pyrope", "pyrope", "pass"),
+    ("pyrope", "ln", "pass"),
+    ("pyrope", "lg", "pass"),
+    ("verilog", "verilog", "pass"),
+    ("verilog", "pyrope", "unsupported"),  # no LGraph -> LNAST decompiler
+    ("verilog", "ln", "unsupported"),  # verilog elaborates to LGraphs
+    ("verilog", "lg", "pass"),
+    ("ln", "verilog", "pass"),
+    ("ln", "pyrope", "pass"),
+    ("ln", "ln", "pass"),
+    ("ln", "lg", "pass"),
+    ("lg", "verilog", "pass"),
+    ("lg", "pyrope", "unsupported"),  # no LGraph -> LNAST decompiler
+    ("lg", "ln", "unsupported"),  # no LGraph -> LNAST decompiler
+    ("lg", "lg", "pass"),
+]
+
+[
+    sh_test(
+        name = "lhd_flow-{}-to-{}".format(in_kind, out_kind),
+        srcs = ["lhd_flow_test.sh"],
+        args = [
+            in_kind,
+            out_kind,
+            expect,
+        ],
+        data = _FLOW_DATA,
+    )
+    for (in_kind, out_kind, expect) in _FLOWS
+]
+
+sh_test(
+    name = "lhd_equiv_test",
+    size = "large",
+    srcs = ["lhd_equiv_test.sh"],
+    data = _FLOW_DATA,
+)
+
+sh_test(
+    name = "lhd_scan_test",
+    srcs = ["lhd_scan_test.sh"],
+    data = _FLOW_DATA + ["scan_imports.prp"],
+)

@@ -291,29 +291,52 @@ LGCHECK_BMC_STEPS="${LGCHECK_BMC_STEPS:-5}"
 if [[ "${LGCHECK_BMC_STEPS}" =~ ^[0-9]+$ ]] && [ "${LGCHECK_BMC_STEPS}" -gt 0 ]; then
   echo "INFO: running bounded miter check (LGCHECK_BMC_STEPS=${LGCHECK_BMC_STEPS})"
 
+  # `sat -prove trigger 0` (formulation borrowed from hagent/tool/
+  # equiv_check.py) emits an explicit marker in BOTH directions:
+  #   not equivalent -> "SAT proof finished - model found: FAIL!"
+  #   equivalent     -> "SAT proof finished - no model found: SUCCESS!"
+  # One query per depth 1..N so transient (init-dependent) mismatches at
+  # shallow depths are not masked by the deepest step.
   bmc_sat_cmds=""
   for ((t = 1; t <= LGCHECK_BMC_STEPS; t++)); do
-    bmc_sat_cmds+="sat -seq ${t} -set-init-zero -set-def-inputs -set-at ${t} trigger 1 -show-ports miter; "
+    bmc_sat_cmds+="sat -ignore_unknown_cells -seq ${t} -set-at ${t} trigger 1 -prove trigger 0 -set-init-zero -set-def-inputs -show-ports miter; "
   done
 
-  ${YOSYS} -q -p "read_verilog -sv ${GOLD}; hierarchy ${GOLD_TOP_STR}; proc; memory; opt; flatten ; rename -top gold; prep -top gold ; design -stash gold;
-                  read_verilog -sv ${GATE}; hierarchy ${GATE_TOP_STR}; proc; memory; opt; flatten ; rename -top gate; prep -top gate ; design -stash gate;
-                  design -copy-from gold -as gold gold
-                  design -copy-from gate -as gate gate
-                  miter -equiv -flatten -make_outputs gold gate miter
-                  hierarchy -top miter
-                  ${bmc_sat_cmds}
-                  " \
+  # No -q: yosys -q suppresses the SAT report itself, so the log would always
+  # be empty and the greps below would vacuously "pass" any pair of designs.
+  ${YOSYS} -p "read_verilog -sv ${GOLD}; hierarchy ${GOLD_TOP_STR}; proc; memory; opt; flatten ; rename -top gold; prep -top gold ; design -stash gold;
+               read_verilog -sv ${GATE}; hierarchy ${GATE_TOP_STR}; proc; memory; opt; flatten ; rename -top gate; prep -top gate ; design -stash gate;
+               design -copy-from gold -as gold gold
+               design -copy-from gate -as gate gate
+               miter -equiv -flatten -make_outputs -ignore_gold_x gold gate miter
+               async2sync
+               hierarchy -top miter
+               ${bmc_sat_cmds}
+               " \
     2>lgcheck_bmc.err >lgcheck_bmc.log
 
-  if grep -q "SAT solving finished - model found:" lgcheck_bmc.log; then
+  if grep -q "model found: FAIL" lgcheck_bmc.log; then
     echo "WARN: bounded check found a mismatch within ${LGCHECK_BMC_STEPS} steps (see lgcheck_bmc.log)."
     echo "FAIL: circuits are not equivalent ${GATE} vs ${GOLD} with top:${fm_top}"
     exit 1
   fi
 
-  echo "BMC.Successfully matched ${GATE} with ${GOLD} within ${LGCHECK_BMC_STEPS} steps top:${fm_top}"
-  exit 0
+  # A hard yosys error here (port-list mismatch in `miter`, parse error, bad
+  # top) means the designs cannot even be compared: report non-equivalent,
+  # never a silent pass (same policy as hagent/tool/equiv_check.py).
+  if grep -q "^ERROR" lgcheck_bmc.err; then
+    echo "WARN: bounded miter check failed: $(grep -m1 '^ERROR' lgcheck_bmc.err)"
+    echo "FAIL: circuits are not equivalent ${GATE} vs ${GOLD} with top:${fm_top}"
+    exit 1
+  fi
+
+  # Sound pass requires the explicit SUCCESS marker from every bounded depth.
+  if [ "$(grep -c 'no model found: SUCCESS' lgcheck_bmc.log)" -eq "${LGCHECK_BMC_STEPS}" ]; then
+    echo "BMC.Successfully matched ${GATE} with ${GOLD} within ${LGCHECK_BMC_STEPS} steps top:${fm_top}"
+    exit 0
+  fi
+
+  echo "WARN: bounded miter check did not run to completion (see lgcheck_bmc.err); inconclusive."
 fi
 
 echo "WARN: Yosys failed to prove equivalency."

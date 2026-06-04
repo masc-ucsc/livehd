@@ -388,10 +388,7 @@ void Elab_scanner::parse_step() {
 
 Elab_scanner::Elab_scanner() {
   setup_translate();
-  max_errors = 1;
-#ifndef NDEBUG
-  std::cout << "\n Warning: max_warnings changed from 1024 to 10240 to enable RocketTile LG generation.\n";
-#endif
+  max_errors   = 1;
   max_warnings = 0;  // 0 disables max_warnings
   n_errors     = 0;
   n_warnings   = 0;

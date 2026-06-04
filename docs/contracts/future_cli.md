@@ -311,6 +311,100 @@ Deferred to follow-ups (the kernel ships without them): `--recipe-file` TOML
 (no TOML dep in `MODULE.bazel` yet — built-in recipes ship first);
 `--emit-dir`+manifest hashes (need [3c]); sharper diag/depfile spans (need [1f]).
 
+### Implementation status (1y-bazel v0, landed)
+
+The kernel lives in `lhd/` (`bazel build //lhd:lhd` → `bazel-bin/lhd/lhd`);
+`lgshell` is untouched. It drives the registered EPRP methods programmatically
+(`Eprp::run_method_now`, no `|>` strings, stdout captured per step into
+`--workdir/logs/`) plus the direct C++ seams (`Lnast::export_into`/`adopt`,
+`uPass_tolg::run`, `hhds::Forest::save/load`, `livehd::Hhds_graph_library`).
+
+**Kind vocabulary (revised 2026-06-04):** the IR kinds are `ln:` (the
+design's LNAST units — an `hhds::Forest::save` directory: `forest.txt` +
+binary tree bodies, attrs included, plus an lhd `manifest.json` unit index)
+and `lg:` (the design's LGraphs — an `hhds::GraphLibrary::save` directory:
+`library.txt` + binary graph bodies). `lnast:`/`design:` remain accepted as
+aliases. Because a design always holds *many* units/graphs, `ln:`/`lg:`/
+`pyrope:` are directory containers (`--emit-dir` only — no single-file form);
+`--emit verilog:PATH` stays as the one single-file output (the name-sorted
+netlist concatenation). The language word on `elaborate`/`compile` is
+optional (inferred from `.prp` vs `.v`/`.sv`), and `ln:`/`lg:` inputs may be
+given positionally. The canonical per-file → top flow:
+
+```bash
+# per pyrope file, in parallel (no imports)
+lhd elaborate f1.prp --emit-dir ln:f1_lns/ --emit-dir lg:f1_lgs/
+# a file importing f1: its pre-elaborated ln: rides along
+lhd elaborate f2.prp ln:f1_lns/ --emit-dir ln:f2_lns/ --emit-dir lg:f2_lgs/
+# top target: aggregate ln: units into ONE library (gid-consistent), then synth
+lhd elaborate ln:f1_lns/ ln:f2_lns/ --top foo --emit-dir lg:top_lgs/
+lhd synth lg:top_lgs/ --recipe O1 --emit-dir lg:top_opt_lgs/ --emit verilog:top.v
+```
+
+**Dependency discovery:** `lhd scan f1.prp f2.prp` parses each file and
+reports its `import(...)` strings in the result's `"scan"` member — imports
+are comptime string literals (import.md), so the list is exact without
+elaborating. Raw strings today; resolved paths land with the import resolver,
+which will also feed `--depfile` (Make/Ninja) and an `unused_inputs_list`
+Bazel rule so BUILD dep chains are machine-maintained, never hand-edited.
+
+**Emit-driven lowering:** the kernel derives the tolg gate from the requested
+emits — `--emit-dir lg:` / `--emit verilog:` run the LNAST→LGraph lowering,
+anything else skips it (the CLI-level `tolg:0|1`). The symmetric
+`pass.upass toln:false` (don't materialize the post-upass LNAST when nothing
+consumes it) is tracked as TODO_livehd 1y-toln.
+
+Validated flows (all covered by `//lhd/tests`):
+
+- The full 4×4 (input × output) kind matrix over the `inou/prp/tests/equiv`
+  golden pair (`lhd_flow-<in>-to-<out>`): supported cells run end-to-end,
+  impossible cells (`lg→ln`, `lg→pyrope`, `verilog→ln/pyrope`: no
+  LGraph→LNAST decompiler) are locked to the `unsupported` error contract.
+- `lhd_equiv_test`: `prp→ln→lg→v1`, `prp→lg→v2`, `verilog0→lg→v3`, each
+  LEC-equivalent (lgcheck) to the golden verilog0.
+- Reloaded `ln:` units re-run upass (io_meta/bw_meta are not serialized) and
+  produce byte-identical Verilog vs. the in-memory pipeline; same inputs →
+  same `run_id` (content hash); timestamps only from `SOURCE_DATE_EPOCH`.
+- `//tools:lhd.bzl` (`lhd_verilog`, `lhd_pyrope_lnast`) runs the kernel as a
+  hermetic genrule action (smoke target `//lhd/tests:trivial_net`). The lhd
+  binary rides in `srcs` (target config) because the exec config lacks the
+  repo's `-std=c++23`.
+
+v0 deviations (beyond the deferrals above): Pyrope units are per-*file*
+today, not per-function (`inou.prp` yields one LNAST per file; function-level
+splitting wants the func_extract seam); `--emit graphviz|metadata` answer
+`unsupported`; `--emit-dir pyrope:DIR/` re-emits post-upass LNAST units as
+`.prp` via `pass.prp_writer` (needs ln:/pyrope inputs); **linking multiple
+`lg:` libraries is `unsupported`** (gids are library-scoped and live inside
+`body.bin` — a real gid-remapping linker is future work; aggregate from `ln:`
+units instead, which re-lowers everything into one fresh library and so
+discards any per-file local synthesis — the derivation-hash manifest plan
+above is the path to keeping it); `elaborate f.prp ln:imports/` makes the
+imported units visible on the pipe, with resolution fidelity tracking the
+import work (`import.md`); `check` shells out to `inou/yosys/lgcheck` (repo
+root, runfiles, or `LHD_LGCHECK`; run from `--workdir` with an absolute
+`--yosys` so lgcheck's trace/log droppings stay out of the caller's cwd);
+`--set pass.idx.flag` index addressing is rejected until a recipe repeats a
+pass.
+
+The full (input kind × output kind) flow matrix — supported cells end-to-end,
+unsupported cells locked to the `unsupported` error contract — is covered by
+`//lhd/tests:lhd_flow-<in>-to-<out>`, and `//lhd/tests:lhd_equiv_test` proves
+`prp→ln→lg→v1`, `prp→lg→v2`, and `verilog0→lg→v3` all LEC-equivalent to the
+golden verilog of the `inou/prp/tests/equiv` pair.
+
+Note on `check` soundness (2026-06-04): lgcheck's terminal bounded-miter
+stage had run `yosys -q`, which silences the SAT report — the result grep saw
+an empty log and *any* design pair "passed" once the proof stages were
+inconclusive. The stage now uses the `sat … -prove trigger 0` formulation
+(after `hagent/tool/equiv_check.py`) with explicit FAIL/SUCCESS markers, treats
+a yosys hard error as non-equivalent, and never passes on an inconclusive run.
+This unmasked pre-existing verilog→LGraph→verilog miscompiles (28
+`yosys_compile.sh` tests; `0sb?` unknown-const leaks and unset-width wrapper
+truncation in cgen) that are tracked as engine follow-up work, plus a real
+cprop/tolg sign bug in the pyrope flow that is fixed (`get_mask(a,-1)` tposs
+bypass).
+
 ## Tag workspace mode (1y-agent)
 
 Everything below is the agent layer. It is sugar over the kernel above: a

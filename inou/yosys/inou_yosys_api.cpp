@@ -45,6 +45,8 @@ void Inou_yosys_api::set_script_yosys(const Eprp_var& var, bool do_read) {
                                      "/verilog.sh-long.runfiles/livehd/inou/yosys/",
                                      "/lgshell.runfiles/livehd/inou/yosys/",
                                      "/lgshell.runfiles/_main/inou/yosys/",
+                                     "/lhd.runfiles/livehd/inou/yosys/",
+                                     "/lhd.runfiles/_main/inou/yosys/",
                                      "/../share/livehd/inou/yosys/",
                                      "/../inou/yosys/",
                                      "/inou/yosys/"};
@@ -233,7 +235,9 @@ void Inou_yosys_api::do_tolg(Eprp_var& var) {
   auto        exe_path = file_utils::get_exe_path();
   std::string slang_plugin_path;
   for (const auto& candidate : {absl::StrCat(exe_path, "/../external/+_repo_rules+yosys_slang/slang.so"),
-                                absl::StrCat(exe_path, "/lgshell.runfiles/+http_archive+yosys_slang/slang.so")}) {
+                                absl::StrCat(exe_path, "/../external/+http_archive+yosys_slang/slang.so"),
+                                absl::StrCat(exe_path, "/lgshell.runfiles/+http_archive+yosys_slang/slang.so"),
+                                absl::StrCat(exe_path, "/lhd.runfiles/+http_archive+yosys_slang/slang.so")}) {
     if (access(candidate.c_str(), R_OK) != -1) {
       slang_plugin_path = candidate;
       break;
@@ -288,8 +292,12 @@ void Inou_yosys_api::do_tolg(Eprp_var& var) {
 
     const auto slang_flags{var.get("slang_flags")};
     if (!slang_flags.empty()) {
+      // Comma-separated by convention (lgshell labels). A '\x1f' (ASCII unit
+      // separator) delimiter is also accepted so callers like lhd can pass
+      // flags that themselves contain commas (e.g. +incdir+a,b) losslessly.
+      const char  sep = slang_flags.find('\x1f') != std::string_view::npos ? '\x1f' : ',';
       std::string flags_str;
-      for (const auto& f : absl::StrSplit(slang_flags, ',')) {
+      for (const auto& f : absl::StrSplit(slang_flags, sep)) {
         if (!flags_str.empty()) {
           flags_str += " ";
         }
@@ -415,7 +423,7 @@ void Inou_yosys_api::setup() {
   m1.add_label_optional("filelist_file", "path to filelist file (.f/.F) containing additional source files for read_slang", "");
   m1.add_label_optional("path", "path to build the lgraph[s]", "lgdb");
   m1.add_label_optional("frontend", "frontend to use: verilog or slang", "verilog");
-  m1.add_label_optional("slang_flags", "comma-separated flags for read_slang command", "");
+  m1.add_label_optional("slang_flags", "comma- (or \\x1f-) separated flags for read_slang command", "");
   m1.add_label_optional("techmap", "Either full or alumac techmap or none from yosys. Cannot be used with liberty", "");
   m1.add_label_optional("liberty", "Liberty file for technology mapping. Cannot be used with techmap, will call abc for tmap", "");
   m1.add_label_optional("abc", "run ABC inside yosys before loading lgraph", "false");

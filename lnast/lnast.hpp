@@ -142,6 +142,16 @@ public:
   Lnast(std::shared_ptr<hhds::Tree> body, std::string_view _module_name);
   ~Lnast();
 
+  // ── forest interchange (the lhd `ln:` directory = hhds::Forest::save) ───
+  // Clone this Lnast's tree (attrs included) into `forest` as a tree named
+  // by top_module_name, so N units can ride one Forest::save directory.
+  void export_into(hhds::Forest& forest) const;
+  // Wrap one tree of an externally loaded Forest (hhds::Forest::load). The
+  // returned Lnast shares ownership of `forest`; replace_body() works (the
+  // TreeIO is present). io_meta/bw_meta start empty — re-run the upasses.
+  // Returns nullptr when `module_name` is not in the forest.
+  static std::shared_ptr<Lnast> adopt(std::shared_ptr<hhds::Forest> forest, std::string_view module_name);
+
   // ── tree access ─────────────────────────────────────────────────────────
   hhds::Tree&                          tree() noexcept { return *tree_; }
   const hhds::Tree&                    tree() const noexcept { return *tree_; }

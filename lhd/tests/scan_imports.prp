@@ -1,0 +1,7 @@
+// Fixture for the lhd scan test: two imports + one comb (see import.md).
+const b = import("some/bar")
+const f = import("xxx/zzz/yyy.foo")
+
+comb top(a:u3) -> (z:u4) {
+  z = a + 1
+}

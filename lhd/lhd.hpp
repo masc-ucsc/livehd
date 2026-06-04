@@ -1,0 +1,119 @@
+//  This file is distributed under the BSD 3-Clause License. See LICENSE for details.
+#pragma once
+
+// lhd — the stateless, hermetic LiveHD CLI kernel (task 1y-bazel).
+// Contract: docs/contracts/future_cli.md ("Stateless build-system mode").
+//
+// One invocation = one step: (declared inputs, config) -> (declared outputs,
+// exit code). No @tag, no ~/.cache, no lock, no `latest` symlink. The legacy
+// lgshell REPL is untouched; lhd drives the same registered EPRP methods
+// programmatically (Eprp::run_method_now) plus the direct C++ entry points
+// (Lnast::dump/read_all, uPass_tolg::run, livehd::Hhds_graph_library).
+
+#include <string>
+#include <string_view>
+#include <utility>
+#include <vector>
+
+namespace lhd {
+
+inline constexpr std::string_view kVersion = "0.1.0";
+
+// One typed I/O slot: --in KIND:PATH / --emit KIND:PATH / --emit-dir KIND:DIR/
+struct Typed_path {
+  std::string kind;
+  std::string path;
+};
+
+struct Options {
+  std::string command;   // elaborate|synth|check|compile|list|describe|version|help
+  std::string language;  // verilog|pyrope ("" for the IR/meta commands)
+
+  std::vector<std::string> files;  // positional: source files / list pattern / describe name
+
+  std::vector<Typed_path> emits;
+  std::vector<Typed_path> emit_dirs;
+  std::vector<Typed_path> ins;
+  std::vector<Typed_path> in_dirs;
+
+  std::string top;
+  std::string reader = "slang";  // elaborate verilog: slang|yosys
+  std::string depfile;
+  std::string recipe;       // resolved per-command default in the kernel
+  std::string recipe_file;  // deferred (unsupported)
+
+  std::vector<std::pair<std::string, std::string>> sets;  // --set pass[.idx].flag=value
+
+  std::string impl_kind, impl_path, impl_top;  // check
+  std::string ref_kind, ref_path, ref_top;     // check
+
+  std::string result_json;
+  std::string workdir;
+
+  std::vector<std::string> raw_args;  // after `--` (elaborate verilog: raw slang args)
+
+  int  jobs    = 0;
+  bool quiet   = false;
+  bool verbose = false;
+};
+
+// The structured result envelope (future_cli.md "Result schema"). Written as
+// one JSON object to --result-json (else stdout).
+struct Result {
+  std::string command;          // e.g. "elaborate verilog"
+  std::string status = "pass";  // pass|fail
+  std::string run_id;           // content hash (deterministic, never wall clock)
+  int         exit_code = 0;
+
+  std::vector<std::string> inputs;
+  std::vector<std::string> outputs;
+  std::vector<std::string> recipe_steps;  // the expanded steps that actually ran
+
+  // `lhd scan` payload: a pre-serialized JSON array of per-file import lists,
+  // embedded verbatim as the result's "scan" member.
+  std::string scan_json;
+
+  std::string error_class;  // empty when status == pass (future_cli.md taxonomy)
+  std::string error_message;
+  std::string error_hint;
+
+  size_t n_errors   = 0;
+  size_t n_warnings = 0;
+};
+
+// Failure the kernel detects itself (usage/missing_file/config/unsupported/
+// dependency/equiv_fail). Pass failures (std::exception out of Eprp/upass)
+// are classified via the diag sink category instead.
+struct Lhd_error {
+  std::string cls;
+  std::string msg;
+  std::string hint;
+};
+
+// argv -> Options. Throws Lhd_error{usage,...} on malformed input.
+Options parse_args(int argc, char** argv);
+
+// Meta commands need no engine init (list/describe/version/help).
+bool is_meta_command(const Options& opts);
+int  run_meta_command(const Options& opts);
+
+// Engine commands (elaborate/synth/check/compile). Requires the pass registry
+// to be initialized. Throws Lhd_error or std::exception on failure.
+void run_engine_command(Options& opts, Result& res);
+
+// Map an engine failure to the error.class taxonomy via the diag sink (the
+// most recent error-severity record); falls back to `internal`.
+Lhd_error classify_engine_failure(std::string_view fallback_msg);
+
+// Initialize the pass/inou registry (what Main_api::init does for lgshell,
+// minus the REPL-only Top/Meta/Cloud command surface).
+void init_engine();
+
+// Deterministic content-hash run_id over (tool version + command + resolved
+// config + input bytes).
+std::string compute_run_id(const Options& opts);
+
+// Serialize the result envelope (single JSON line) to --result-json or stdout.
+void write_result(const Options& opts, const Result& res);
+
+}  // namespace lhd

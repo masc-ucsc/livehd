@@ -122,7 +122,13 @@ namespace {
     gio->add_input(name, port_id);
   }
   gio->set_bits(name, bits);
-  return g->get_input_pin(name);
+  auto pin = g->get_input_pin(name);
+  // Stamp the width on the body pin attr too (not only the GraphIO decl):
+  // downstream consumers size derived nodes from bits_of(pin) — e.g. the
+  // tposs wrappers below use bits_of(dpin)+1, which read 0 (a 1-bit reg in
+  // cgen, truncating the port) when only the GraphIO carried the width.
+  set_bits(pin, static_cast<Bits_t>(bits));
+  return pin;
 }
 
 [[nodiscard]] hhds::Pin_class add_graph_output(hhds::Graph* g, std::string_view name, hhds::Port_id port_id, uint32_t bits) {
@@ -201,6 +207,10 @@ static void look_for_wire(hhds::Graph* g, const RTLIL::Wire* wire) {
     if (has_graph_input(g, wname)) {
       pin = g->get_input_pin(wname);
       I(static_cast<int>(bits_of(pin, *g->get_io(), wname)) == wire->width);
+      // The port may have been declared on the GraphIO before this wire was
+      // seen; make sure the body pin attr carries the width as well (the
+      // tposs wrappers size themselves from bits_of(pin)).
+      set_bits(pin, static_cast<Bits_t>(wire->width));
     } else {
       pin = add_graph_input(g, wname, wire->port_id, wire->width);
     }

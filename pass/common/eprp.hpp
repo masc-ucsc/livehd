@@ -60,6 +60,12 @@ public:
 
   void run_cmd(std::string_view cmd, const Eprp_var& cmd_var_fields);
 
+  // Run one registered method synchronously on `var` (no pipe, no text
+  // parsing). Mirrors Pipe_step::run: set the per-stage labels, merge them
+  // into the var, fill in label defaults, check required labels, call the
+  // method. Used by the lhd CLI (task 1y) to drive passes programmatically.
+  void run_method_now(std::string_view cmd, Eprp_var& var, const Eprp_var::Eprp_dict& step_labels);
+
   bool readline(const char* line);
 
   std::string_view get_command_help(std::string_view cmd) const;

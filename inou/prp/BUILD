@@ -10,6 +10,13 @@ exports_files([
     "tests/comptime/trivial_if.prp",
 ])
 
+# The pyrope/verilog golden pairs (used by the lhd flow-matrix tests).
+filegroup(
+    name = "equiv_tests",
+    srcs = glob(["tests/equiv/*"]),
+    visibility = ["//visibility:public"],
+)
+
 cc_library(
     name = "inou_prp",
     srcs = glob(

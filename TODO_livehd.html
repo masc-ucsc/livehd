@@ -328,6 +328,16 @@ Group 1 entries; downstream Groups treat them as Group 1 dependencies.</p>
   taxonomy. Each <code>run &lt;step&gt; @tag</code> desugars to a kernel call (resolve the
   tag's inputs/config/workdir → run the pure step → append the result + advance
   <code>latest</code>). Optimized for LLM coding agents. — <code>docs/contracts/future_cli.md</code>.</li>
+<li><strong id="item-1y-toln" class="item-id">1y-toln</strong> <code>pass.upass toln:true|false</code> flag —
+  skip materializing the post-upass LNAST when nothing will consume it (the dual of
+  <code>tolg:0|1</code>). The <code>lhd</code> kernel already derives the tolg gate from its emits
+  (<code>--emit-dir lg:</code>/<code>--emit verilog:</code> ⇒ lower, else skip the tolg step) and would set
+  <code>toln:false</code> when no <code>--emit-dir ln:/pyrope:</code> is requested. Today the runner always
+  produces the rewritten LNAST (<code>toln:1</code> with <code>tolg:0|1</code> works); <code>tolg:1</code> +
+  <code>toln:0</code> may need runner changes (the tolg sub-pass reads the post-upass tree, so "no LNAST"
+  really means "don't keep/stage the rewritten tree once tolg consumed it" — check
+  <code>uPass_runner</code> staging/replace_body and the func_extract spawn list before assuming it is
+  just a flag). Win: skip the staging rebuild + tree copy on pure <code>prp→lg</code> compiles.</li>
 <li><strong id="item-1f" class="item-id">1f</strong> Source-map indirection (LOC propagation: canonical map + per-cell
   index, alias multi-loc, partition-root fallback) — see "Source location
   (LOC) propagation strategy" below and <code>docs/contracts/sourcemap.md</code>.</li>

@@ -577,7 +577,7 @@ void Cgen_verilog::process_simple_node(std::shared_ptr<File_output> fout, const 
       auto value_dpin = get_driver(find_sink_pin(node, "value"));
       auto value      = get_expression(value_dpin);
 
-      if (range_begin > static_cast<int>(a_bits)) {
+      if (a_bits > 0 && range_begin > static_cast<int>(a_bits)) {
         final_expr = a;
       } else if (range_begin < 0 || range_end < 0) {
         std::string sel;
@@ -662,9 +662,12 @@ void Cgen_verilog::process_simple_node(std::shared_ptr<File_output> fout, const 
           }
         }
         final_expr = absl::StrCat("{", sel, "}");
-      } else if (range_begin >= static_cast<int>(a_bits)) {
+        // a_bits == 0 means the driver width is unknown (no bits attr): the
+        // sign-replicate / extend forms below would fabricate a[-1]. Fall
+        // through to the width-agnostic part-select forms instead.
+      } else if (a_bits > 0 && range_begin >= static_cast<int>(a_bits)) {
         final_expr = absl::StrCat("{", range_end - range_begin, "{", a, "[", a_bits - 1, "]}}");
-      } else if (range_end > static_cast<int>(a_bits)) {
+      } else if (a_bits > 0 && range_end > static_cast<int>(a_bits)) {
         auto top   = absl::StrCat("{{", range_end - a_bits, "{", a, "[", a_bits - 1, "]}}");
         final_expr = absl::StrCat(top, ",", a, "[", a_bits - 1, ":", range_begin, "]}");
       } else if (range_begin == 0 && range_end >= out_bits) {

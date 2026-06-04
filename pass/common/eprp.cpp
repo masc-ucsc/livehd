@@ -311,6 +311,32 @@ void Eprp::run_cmd(std::string_view cmd, const Eprp_var& cmd_var_fields) {
   pipe.add_command(it->second, cmd_var_fields);
 }
 
+void Eprp::run_method_now(std::string_view cmd, Eprp_var& var, const Eprp_var::Eprp_dict& step_labels) {
+  const auto& it = methods.find(std::string(cmd));
+  if (it == methods.end()) {
+    throw parser_error(*this, "method {} not registered", cmd);
+  }
+  const auto& m = it->second;
+
+  var.set_stage_labels(step_labels);
+  for (const auto& label : step_labels) {
+    var.add(label.first, label.second);
+  }
+
+  for (const auto& label : m.labels) {
+    if (!label.second.default_value.empty() && !var.has_label(label.first)) {
+      var.add(label.first, label.second.default_value);
+    }
+  }
+
+  auto [err, err_msg] = m.check_labels(var);
+  if (err) {
+    throw parser_error(*this, "{}", err_msg);
+  }
+
+  m.method(var);
+}
+
 std::string_view Eprp::get_command_help(std::string_view cmd) const {
   const auto it = methods.find(std::string(cmd));
   if (it == methods.end()) {

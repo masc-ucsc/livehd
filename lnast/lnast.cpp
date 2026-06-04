@@ -65,6 +65,34 @@ void Lnast::replace_body(std::shared_ptr<hhds::Tree> new_body) {
   tree_ = treeio_->get_tree();
 }
 
+void Lnast::export_into(hhds::Forest& forest) const {
+  auto tio = forest.find_io(top_module_name);
+  if (!tio) {
+    tio = forest.create_io(top_module_name);
+    // Materialize the slot so it is Public and replace() below can swap it.
+    auto writable = tio->create_tree();
+  }
+  // clone() deep-copies the body INCLUDING the flat-storage attribute stores
+  // (name/loc/fname), so the exported unit is a faithful copy.
+  tio->replace(tree_->clone());
+}
+
+std::shared_ptr<Lnast> Lnast::adopt(std::shared_ptr<hhds::Forest> forest, std::string_view module_name) {
+  if (!forest) {
+    return nullptr;
+  }
+  auto tio = forest->find_io(module_name);
+  if (!tio) {
+    return nullptr;
+  }
+  auto lnast              = std::make_shared<Lnast>(module_name, "");
+  lnast->forest_          = std::move(forest);
+  lnast->treeio_          = std::move(tio);
+  lnast->tree_            = lnast->treeio_->get_tree();
+  lnast->top_module_name  = std::string{module_name};
+  return lnast;
+}
+
 // ─────────────────────────────────────────────────────────────────────────
 // Mutation
 // ─────────────────────────────────────────────────────────────────────────
@@ -303,7 +331,11 @@ void Lnast::dump(std::ostream& os) const {
 
 void Lnast::dump(const std::string& filename) const {
   std::ofstream ofs(filename);
-  I(ofs.is_open(), "lnast.dump: cannot open {} for writing", filename);
+  if (!ofs.is_open()) {
+    // iassert's I() has no formatted 3-arg form; report like every other
+    // recoverable error path (a std::runtime_error the caller classifies).
+    throw std::runtime_error(std::format("lnast.dump: cannot open {} for writing", filename));
+  }
   dump(ofs);
 }
 
@@ -372,7 +404,9 @@ std::shared_ptr<Lnast> Lnast::read(std::istream& is) {
 
 std::shared_ptr<Lnast> Lnast::read(const std::string& filename) {
   std::ifstream ifs(filename);
-  I(ifs.is_open(), "lnast.read: cannot open {} for reading", filename);
+  if (!ifs.is_open()) {
+    throw std::runtime_error(std::format("lnast.read: cannot open {} for reading", filename));
+  }
   return read(ifs);
 }
 
@@ -403,6 +437,8 @@ std::vector<std::shared_ptr<Lnast>> Lnast::read_all(std::istream& is) {
 
 std::vector<std::shared_ptr<Lnast>> Lnast::read_all(const std::string& filename) {
   std::ifstream ifs(filename);
-  I(ifs.is_open(), "lnast.read: cannot open {} for reading", filename);
+  if (!ifs.is_open()) {
+    throw std::runtime_error(std::format("lnast.read: cannot open {} for reading", filename));
+  }
   return read_all(ifs);
 }
