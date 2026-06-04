@@ -292,17 +292,35 @@ cross-file dependencies stay visible.</p>
 that they warrant their own bucket. Can be done in parallel with regular
 Group 1 entries; downstream Groups treat them as Group 1 dependencies.</p>
 <ul>
-<li><strong id="item-1y-bazel" class="item-id">1y-bazel</strong> New CLI — stateless hermetic kernel. <strong>Goal 1.</strong>
-  A single one-shot invocation that is a pure function <code>(declared inputs, config)
-  → (declared outputs, exit code)</code>: no <code>@tag</code>, no <code>~/.cache</code>, no lock, no
-  <code>latest</code> symlink. <code>livehd compile --top foo --files … --emit verilog:PATH
-  --depfile PATH --result-json PATH --workdir DIR --deterministic</code>. Deterministic
-  <code>run_id</code> = content hash (not timestamp+random); <code>--emit KIND:PATH</code> for
-  caller-declared outputs (replaces <code>odir:</code>); <code>--depfile</code> (Make-syntax,
-  gcc <code>-MMD</code>-style) so build systems see transitive <code>import</code>/<code>`include</code> edges;
-  <code>--hermetic</code> fails loud on undeclared imports; clean stdout (no REPL chatter).
-  Callable from a Bazel rule (<code>//tools:livehd.bzl</code>) or a Makefile. This is the
-  subset both consumers share — land it first. — <code>docs/contracts/future_cli.md</code>.</li>
+<li><strong id="item-1y-bazel" class="item-id">1y-bazel</strong> New <code>lhd</code> CLI — stateless hermetic kernel. <strong>Goal 1.</strong>
+  The <code>lhd</code> binary as a pure function <code>(declared inputs, config) → (declared
+  outputs, exit code)</code>: no <code>@tag</code>, no <code>~/.cache</code>, no lock, no <code>latest</code>
+  symlink. <strong>Always deterministic</strong> (content-hash <code>run_id</code>, stable ordering,
+  honors <code>SOURCE_DATE_EPOCH</code>) and <strong>always hermetic</strong> (undeclared import ⇒
+  <code>missing_file</code>) — invariants, not flags. <strong>Commands:</strong> <code>elaborate verilog</code>
+  (slang: <code>--reader</code>, <code>--top</code>, <code>--depfile</code>, <code>-- &lt;raw slang args&gt;</code>),
+  <code>elaborate pyrope</code> (filelist; <code>import</code> resolves within it), <code>synth</code>
+  (<code>--in design:…</code>, <code>--top</code>→LTO, <code>--recipe</code>/<code>--recipe-file</code>/<code>--set</code>),
+  <code>check</code> (<code>--impl</code>/<code>--ref</code> with separate tops), <code>compile verilog|pyrope</code>
+  (fused), <code>list</code>/<code>describe</code>/<code>version</code>/<code>help</code>. <strong>Source-ingesting verbs are
+  language-qualified; IR verbs are not.</strong> <strong>I/O:</strong> symmetric typed slots
+  <code>--in KIND:PATH</code> / <code>--emit KIND:PATH</code> (+ <code>--emit-dir KIND:DIR/</code> + <code>manifest.json</code>
+  for variable cardinality, read back via <code>--in-dir</code>); one interchange format —
+  a serialized partition container (<code>design:foo.lhd</code> = file form of <code>lgdb</code>);
+  blob default for Verilog/whole-design stages (OpenROAD/ORFS <code>.odb</code> model);
+  Pyrope defaults to exploded per-function lnast units (one <code>.ln</code> per function
+  + <code>manifest.json</code> — function count per <code>.prp</code> is unknowable ahead of time). <code>--depfile</code> is
+  Verilog-frontend only (slang <code>`include</code>/<code>+incdir</code> reads off the command line;
+  Pyrope <code>import</code> is filelist-resolved). <strong>Reuses</strong> <code>inou/slang</code>, <code>inou/prp</code>,
+  <code>inou/yosys</code> tolg, <code>pass.upass</code>/<code>pass.cprop</code>, <code>inou.cgen.verilog</code>,
+  <code>inou/yosys/lgcheck</code>, and <code>core/diag</code> (JSONL sink → <code>--emit diagnostics:</code> +
+  <code>--result-json</code>); the build blob is the existing <code>lgraph.save</code>/<code>match</code> lgdb dir
+  redirected to <code>--workdir</code>. Replaces the <code>printf '… |&gt; …' | lgshell</code> pattern in
+  the <code>*_compile.sh</code> / <code>pyrope_test.py</code> scripts. Ship a Starlark ruleset
+  <code>//tools:lhd.bzl</code>. <strong>No hard blocker</strong> — land built-in recipes first; defer
+  <code>--recipe-file</code> TOML (no dep yet), <code>--emit-dir</code> manifest hashes (needs
+  <a class="xref" href="TODO_livehd.html#item-3c">3c</a>), and sharper spans (needs
+  <a class="xref" href="TODO_livehd.html#item-1f">1f</a>). — <code>docs/contracts/future_cli.md</code>.</li>
 <li><strong id="item-1y-agent" class="item-id">1y-agent</strong> New CLI — stateful tag workspace on top of the
   <a class="xref" href="TODO_livehd.html#item-1y-bazel">1y-bazel</a> kernel. <strong>Goal 1.</strong>
   <code>setup/run/status/list/describe</code>, <code>@tag</code> directories, <code>livehd.toml</code> config,

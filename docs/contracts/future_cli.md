@@ -47,33 +47,13 @@ Principles (shared by both layers):
 
 ## Stateless build-system mode (1y-bazel)
 
-This is the kernel: a single hermetic invocation that behaves as a pure
-function `(declared inputs, config) → (declared outputs, exit code)`. It is
-what a Bazel rule or a Makefile recipe calls. It never reads or writes ambient
-state — no `@tag`, no `~/.cache/livehd`, no history file, no lock, no `latest`
-symlink.
+This is the kernel: the `lhd` binary, invoked as a pure function
+`(declared inputs, config) → (declared outputs, exit code)`. It is what a Bazel
+rule or a Makefile recipe calls — never the `lgshell` REPL. It reads and writes
+no ambient state: no `@tag`, no `~/.cache`, no history file, no lock, no
+`latest` symlink.
 
-### One-shot invocation
-
-```bash
-livehd compile \
-  --top foo \
-  --files foo.v bar.v \
-  --include-dir rtl/inc \
-  --emit verilog:$(RULEDIR)/foo.gen.v \
-  --emit diagnostics:$(RULEDIR)/foo.diag.jsonl \
-  --depfile $(RULEDIR)/foo.d \
-  --result-json $(RULEDIR)/foo.result.json \
-  --workdir $(TMPDIR) \
-  --deterministic
-```
-
-`compile` is the stateless form of `recipe:compile`: the whole front-end runs
-in one action. Individual steps (`parse`, `cprop`, `cgen-verilog`, …) are also
-callable directly in this mode with the same flags; the step vocabulary is
-identical to the tag layer.
-
-### Why a build system needs this (and rejects the tag layer)
+### Why a build system rejects the tag layer
 
 A Bazel action must be hermetic, deterministic, and parallel-safe. The
 agent-oriented features documented later are exactly what it cannot tolerate,
@@ -82,133 +62,267 @@ so the kernel omits them:
 | Tag-layer feature         | Why a build action rejects it                       |
 |---------------------------|-----------------------------------------------------|
 | `run_id` = timestamp+rand | Non-deterministic → defeats the action/remote cache |
-| `~/.cache/livehd` tag dir | Not hermetic — reads state outside declared inputs  |
+| `~/.cache` tag dir        | Not hermetic — reads state outside declared inputs  |
 | `latest ->` symlink       | Bazel forbids mutable/dangling symlinks in outputs  |
 | per-tag `lock` file       | Fights Bazel's sandboxed parallelism                |
 | `odir:` tool-named files  | Bazel must predeclare every output path             |
 
-### Flags specific to the kernel
+### Two invariants (not flags)
 
-- `--emit KIND:PATH` (repeatable). Produce exactly the named artifact at the
-  caller-chosen path. Replaces the tag layer's `odir:` (tool-chosen filenames
-  a build rule cannot predeclare). Emit kinds map to declared Bazel outputs:
-  `verilog`, `lnast`, `graphviz`, `diagnostics`, `netlist-json`, … The tool
-  writes *only* to these paths (plus `--workdir`); an unknown kind is a
-  `usage` error.
-- `--result-json PATH`. Write the structured result object (same schema as a
-  JSONL line) to a declared file rather than stdout. Build actions read a
-  declared output far more cleanly than captured stdout.
-- `--workdir PATH`. All scratch — including the ephemeral lgdb — lives here,
-  never the global cache. Bazel passes `$(RULEDIR)` or a sandbox `TMPDIR`.
-  Each invocation is self-contained in its own workdir, so N actions run in
-  parallel with zero contention and no lock.
-- `--deterministic` (and honor `SOURCE_DATE_EPOCH`). Make output bytes a pure
-  function of inputs:
-  - `run_id` becomes a content hash of (tool version + input bytes + resolved
-    config), not wall-clock + random.
-  - No embedded timestamps in emitted Verilog/JSON; gate any "generated at"
-    header behind the epoch.
-  - Stable ordering everywhere (module emit order, JSON key order).
-  This is the single most important departure from today's schema: the
-  timestamp+random `run_id` must become *optional*, not mandatory.
-- `--include-dir DIR` (repeatable, `-I`). Search path for Verilog `` `include ``
-  and Pyrope `import`. See *Dependency files* below.
-- `--depfile PATH`. Emit a Make-syntax dependency file. See *Dependency files*.
-- `--hermetic` (implied by `--deterministic`). Resolve `import`/`include`
-  *only* within `--files` + `--include-dir`; reaching a file outside the
-  declared set is a `missing_file` error, not a silent filesystem read.
+The kernel is **always deterministic** and **always hermetic** — properties of
+the binary, not opt-in switches:
 
-### Exit-code contract
+- **Deterministic.** Output bytes are a pure function of inputs. `run_id` is a
+  content hash of (tool version + input bytes + resolved config), never
+  wall-clock+random. Iteration order is stable (module emit order, JSON key
+  order); no PID, hostname, or absolute path leaks into an artifact. If a
+  timestamp must be embedded it comes from `SOURCE_DATE_EPOCH` — the cross-tool
+  [reproducible-builds](https://reproducible-builds.org/specs/source-date-epoch/)
+  convention: one Unix-epoch env var that replaces the wall clock so two builds
+  of the same inputs are byte-identical — and is omitted/zero when that is
+  unset. (The agent layer keeps a timestamp+random `run_id` so concurrent
+  run-dirs never collide; the kernel does not.)
+- **Hermetic.** A source file the frontend cannot find within its declared
+  inputs is a `missing_file` error, never a silent reach into the filesystem.
 
-For a build action, success is *only* the process exit code:
+### Commands
 
-- `0` — `pass`.
-- non-zero — `fail`; `error.class` in the result / `--result-json` disambiguates.
+Ten commands. The split rule: **commands that ingest source are
+language-qualified; commands that operate on IR are language-agnostic.**
 
-No partial success: `compile` exits 0 only if every constituent step is
-`pass`. This is the same policy recipes use in the tag layer, restated here
-because a build rule keys on nothing else.
+| Command | Stage | Specific arguments |
+|---|---|---|
+| `lhd elaborate verilog` | frontend (whole-design, one action) | `--reader slang\|yosys` (default `slang`); `--top <name>` (optional); `--depfile PATH`; `-- <raw slang args>` |
+| `lhd elaborate pyrope` | frontend (per-function LNAST units) | positional `*.prp` (filelist; `import` resolves within it); `--top <name>` (optional) |
+| `lhd synth` | transform / optimize / codegen | `--in design:PATH` (repeat) or positional units; `--top <name>` (optional → cross-unit/LTO); `--recipe <name>`; `--recipe-file <path>`; `--set <pass[.idx].flag>=<val>` (repeat) |
+| `lhd check` | equivalence (LEC) | `--impl KIND:PATH [--impl-top <name>]`; `--ref KIND:PATH [--ref-top <name>]` |
+| `lhd compile verilog` | fused elaborate+synth | = `elaborate verilog` args ＋ `synth` args |
+| `lhd compile pyrope` | fused elaborate+synth | = `elaborate pyrope` args ＋ `synth` args |
+| `lhd list` | discovery | positional pattern: `steps`\|`recipes`\|`emit-kinds`\|`error-classes` |
+| `lhd describe` | discovery | positional name: command / recipe / emit-kind |
+| `lhd version` | meta | — |
+| `lhd help` | meta | optional positional: a command name |
 
-### Clean stdout / no REPL chatter
+Shared arguments (the I/O contract; honored by every execution command):
 
-In this mode the binary emits nothing on stdout except the selected protocol
-(or nothing at all when `--result-json` is given). The legacy `lgshell` path
-that prints `livehd cmd …`, `Welcome to livehd!`, echoes the input line, and
-`command aborted…` must not run here. Diagnostics go to the `diagnostics`
-emit, the `--result-json` error block, and/or stderr — never intermixed on
-stdout.
+| Argument | Applies to | Meaning |
+|---|---|---|
+| `--emit KIND:PATH` (repeat) | elaborate · synth · compile | declared typed output (the KIND fixes the format) |
+| `--emit-dir KIND:DIR/` (repeat) | elaborate · synth · compile | variable-cardinality output → a TreeArtifact dir + `manifest.json` |
+| `--in KIND:PATH` (repeat) | synth · check | declared typed IR input (source commands use their filelist) |
+| `--in-dir KIND:DIR/` (repeat) | synth · check | all units in a directory, indexed by its `manifest.json` (counterpart of `--emit-dir`) |
+| `--result-json PATH` | all execution | the structured result object (JSON) → a declared file (else stdout) |
+| `--workdir DIR` | all execution | scratch + ephemeral lgdb; never the global cache |
+| `-j`/`--jobs N` | elaborate · synth · compile | intra-action parallelism |
+| `-q`/`--quiet`, `--verbose` | all execution | stderr verbosity; never pollutes the stdout protocol |
+| `-h`/`--help`, `--version` | global | help / version on any command |
 
-### Bazel integration
+`--depfile` is **not** shared: it lives only on the Verilog frontend, because
+only Verilog `` `include `` + `+incdir` reads files off the command line (see
+*Depfiles*). Pyrope `import` is a module import resolved against the explicit
+filelist — no hidden inputs. `synth`/`check` consume self-contained blobs.
 
-Ship a thin Starlark ruleset in-repo (`//tools:livehd.bzl`) so users write:
+### I/O model — one interchange format, two granularities
 
-```python
-load("//tools:livehd.bzl", "livehd_verilog")
+There is **one interchange format**: a serialized container of partitions — the
+file form of today's `lgdb`, written as `--emit design:foo.lhd`. How many
+partitions go in one file is a build-time choice, not a format change:
 
-livehd_verilog(
-    name = "foo_compiled",
-    top  = "foo",
-    srcs = ["foo.v", "bar.v"],
-    out  = "foo.gen.v",
-)
+- **Blob — the default for Verilog and whole-design synth stages.** One
+  `design` file per stage; N partitions live inside it. Every action is
+  one-file-in, one-file-out → trivially declarable and cacheable. This is the
+  model OpenROAD/ORFS uses (it passes the whole design as one serialized
+  `.odb` between stages), and it fits Verilog elaboration, which *must* see
+  all files at once and emits a single blob. In Bazel a blob is a normal file
+  — or, since `lgdb` is a directory today, a single `declare_directory`
+  reusing the existing save/load.
+- **Exploded — the default for Pyrope.** A `.prp` file defines an unknown
+  number of functions, and each function elaborates to its own LNAST — so
+  `elaborate pyrope` emits one unit file per function (named by the function)
+  via `--emit-dir lnast:DIR/`. The directory is a Bazel TreeArtifact; a
+  `manifest.json` inside enumerates each entry (kind, logical name,
+  `interface_hash`/`state_shape_hash` once [3c] lands, source map once [1f]
+  lands, content hash). Downstream commands take the directory back with the
+  symmetric `--in-dir KIND:DIR/` (the manifest is the index); an LTO `synth`
+  reads it to pick the units it co-optimizes. Per-function units are also the
+  caching win: an unchanged function cache-hits downstream even when a sibling
+  in the same file changed.
+
+Multiple typed inputs/outputs of different kinds is just repeating the typed
+slots: `--in design:a.lhd --in design:b.lhd … --emit verilog:net.v --emit
+metadata:net.meta.json --emit results:r.json`. Variable *cardinality* is the
+only thing that needs `--emit-dir`+manifest; the blob default avoids it for
+whole-design stages.
+
+KIND vocabulary — inputs: `design`, `lnast`, `verilog`, `pyrope`; outputs:
+those plus `graphviz`, `metadata`, `results`, `diagnostics`. An unknown kind is
+a `usage` error. `check`'s `--impl`/`--ref` accept any input kind (a `design`
+blob or a `verilog` file).
+
+#### Worked example — unknown output cardinality (the Pyrope default)
+
+Two Pyrope files that together define four functions; the caller cannot know
+the count or names ahead of time (how many functions a `.prp` file holds is a
+property of its contents). A fixed-path `--emit lnast:PATH` cannot express
+that, so `elaborate pyrope` defaults to the exploded form — one LNAST file per
+function, plus the index:
+
+```bash
+lhd elaborate pyrope file1.prp file2.prp --emit-dir lnast:out/ \
+    --workdir tmp --result-json r.json
+#   out/{fn_a.ln, fn_b.ln, fn_c.ln, fn_d.ln, manifest.json}
+
+# downstream takes the directory back via the symmetric input slot
+lhd synth --in-dir lnast:out/ --top fn_a --recipe O1 --emit verilog:net.v
+
+# blob alternative: one file out, the four LNASTs inside it
+lhd elaborate pyrope file1.prp file2.prp --emit design:out.lhd
 ```
 
-The macro sets `--deterministic`, `--workdir`, `--depfile`, and `--emit`
-correctly so callers don't reconstruct the hermetic contract by hand. A
-`--print-inputs` / `--dry-run` mode lets a Starlark aspect discover the
-transitive input set when sources are not all listed up front.
+The produced names are discovered *after* the run: `manifest.json` enumerates
+them and the result's `outputs` array repeats them. In Bazel the exploded form
+is one `declare_directory` TreeArtifact (never four files the rule cannot
+name); the blob is one declared file. When one *known* function is wanted, a
+fixed path works again because `--top` makes the cardinality 1:
 
-## Dependency files (--depfile)
+```bash
+lhd elaborate pyrope file1.prp file2.prp --top fn_c --emit lnast:fn_c.ln
+```
 
-Pyrope (`import`) and Verilog (`` `include ``, package imports) pull in files
-that are *not* named on the command line. `--files foo.prp` may transitively
-read `bar.prp` and `baz.prp`. A build system must know those edges, for two
-independent reasons:
+Both `.prp` files go in one invocation: `import` resolves against the explicit
+filelist, so files related by import must be elaborated together — the
+parallel fan-out applies only to files with no import relationship.
 
-1. **Incrementality.** If `foo.prp` imports `bar.prp`, editing `bar.prp` must
-   rebuild the target — even though `bar.prp` never appeared on the command
-   line. Without the edge, Make/Bazel rebuild only when `foo.prp` changes and
-   silently serve stale output.
-2. **Hermeticity (Bazel).** Bazel runs the action in a sandbox containing only
-   declared inputs. If `bar.prp` is read but undeclared, the build either
-   fails in the sandbox or "works" locally and breaks on a clean / remote
-   build.
+### Recipes — the transform pipeline, defined as data
 
-This is the same problem C compilers solve with `.d` files: `gcc -MMD -MF foo.d`
-emits the set of headers `foo.c` actually `#include`d, and the build system
-feeds that back in. LiveHD adopts the identical mechanism.
+A recipe is the ordered pass chain (with per-pass flags) between the frontend
+and the terminal `--emit`. It is named — not a `|>` string, not C++ control
+flow:
 
-`--depfile PATH` writes a **Make-syntax** dependency file: the primary
-`--emit` output(s) as target(s), and every file actually opened (top `--files`
-plus everything transitively imported/included) as prerequisites:
+- `--recipe NAME` — a built-in recipe (ships with the binary, versioned with
+  it: e.g. `O0`/`O1`/`O2`, `roundtrip`). Stable public API, decoupled from
+  internal pass names (which churn). Introspect via `lhd describe recipe:O2`
+  (prints the expanded pass list) and `lhd list recipes`.
+- `--recipe-file PATH` — a custom recipe as a small TOML file. Under Bazel this
+  is a *declared input*, so a custom pipeline stays hermetic and reproducible:
+
+  ```toml
+  [recipe.O2]
+  description = "aggressive: double cprop with bitwidth refinement"
+  passes = [
+    { pass = "upass" },
+    { pass = "cprop" },
+    { pass = "cprop", args = { flag = 3 } },
+  ]
+  ```
+- `--set pass[.idx].flag=value` (repeat) — override one knob without forking the
+  recipe (gcc's `-O2 -fno-inline`); a repeated pass is addressed by index
+  (`cprop.1.flag=5`).
+
+`--recipe`/`--set` apply only to commands that run passes (`synth`, `compile`);
+`elaborate` has a fixed frontend. The result records the **expanded** recipe
+(the passes+flags that actually ran), so an artifact is self-describing even if
+`O2` is later redefined.
+
+### Depfiles (Verilog frontend only)
+
+Verilog `` `include "x.vh" `` resolved through `+incdir` reads files that are
+**not** on the command line. The blob bakes them in and is self-contained for
+downstream `synth`, but the *build system* still needs to know `x.vh` was read —
+to rebuild `elaborate` when `x.vh` changes (incrementality) and to declare it in
+a sandbox (hermeticity). This is the gcc split exactly: the `.o`/blob is
+self-contained for the linker/synth, but you still need the `.d`/depfile so the
+build planner sees the frontend's hidden header reads.
+
+`--depfile PATH` writes a **Make-syntax** file — the primary `--emit` output(s)
+as target(s), every file the frontend actually opened as prerequisites:
 
 ```make
 foo.gen.v: foo.v bar.v rtl/inc/defs.vh
 ```
 
-Consumption:
+Consumed by Make (`-include foo.d`), Ninja (`depfile =`), or a Bazel `cc_*`-style
+rule. Content is deterministic (sorted, workdir/exec-root-relative). Pyrope
+needs no depfile (`import` is filelist-resolved); neither do `synth`/`check`
+(self-contained blob inputs).
 
-- **Make**: `-include foo.d` — the standard auto-dependency pattern.
-- **Ninja**: declare `depfile = foo.d` on the rule.
-- **Bazel**: a custom rule consumes it for include-scanning / input
-  validation, the same way `cc_*` actions consume compiler `.d` output.
+### Exit-code contract
 
-Under `--deterministic`, the depfile content is itself stable: prerequisites
-sorted, paths relative to `--workdir` / the exec root, no absolute or
-timestamped entries.
+A build action's success is *only* the process exit code:
 
-Relationship to `--hermetic`: the depfile *reports* what was read; `--hermetic`
-*enforces* that everything read was declared. Emit the depfile in every build;
-turn on `--hermetic` under Bazel so an undeclared import fails loudly
-(`missing_file`) instead of silently widening the input set.
+- `0` — pass.
+- non-zero — fail; the `error.class` in the result / `--result-json`
+  disambiguates (`usage`, `syntax`, `missing_file`, `equiv_fail`, `internal`,
+  `unsupported`, …).
+
+No partial success: a fused `compile` exits 0 only if every constituent step is
+`pass`.
+
+### Clean stdout / no REPL chatter
+
+The `lhd` binary emits nothing on stdout except the selected protocol (or
+nothing at all when `--result-json` is given). The `lgshell` REPL chatter
+(welcome banner, echoed input line, `command aborted…`) does not exist on this
+path. Diagnostics go to the `diagnostics` emit, the `--result-json` error
+block, and/or stderr — never intermixed on stdout.
+
+### Bazel integration
+
+Ship a thin Starlark ruleset (`//tools:lhd.bzl`). Blob targets chain as plain
+declared-file deps (exactly how HighTide/ORFS chains `.odb` between OpenROAD
+stages); exploded targets carry a provider (`LhdDesignInfo { units: depset,
+manifest, top, hashes }`) over TreeArtifact directories.
+
+```python
+load("//tools:lhd.bzl", "lhd_verilog")
+
+lhd_verilog(
+    name    = "foo_net",
+    top     = "foo",
+    srcs    = ["foo.v", "bar.v"],
+    incdirs = ["rtl/inc"],
+    recipe  = "O2",
+    out     = "foo.gen.v",     # also writes foo.d (depfile) + foo.result.json
+)
+```
+
+The macro sets `--workdir`, `--depfile`, `--recipe`, and `--emit` so callers
+don't reconstruct the contract by hand. A `--print-inputs` / `--dry-run` mode
+lets a Starlark aspect discover the input set when sources are not all listed.
+
+### What this reuses (already in tree)
+
+The kernel is new argv plumbing over existing machinery, not new compiler
+internals:
+
+- **Frontends** — `inou/slang` (`elaborate verilog`), `inou/prp` prp2lnast
+  (`elaborate pyrope`), `inou/yosys` tolg (`--reader yosys`).
+- **Passes / recipes** — `pass.upass`, `pass.cprop`, `upass/*`.
+- **Codegen** — `inou.cgen.verilog`, `pass.prp_writer` (the `--emit` kinds).
+- **Equivalence** — `inou/yosys/lgcheck` (`lhd check`).
+- **Diagnostics / results** — `core/diag` (JSONL `Sink` with a settable path,
+  stable `code`/`category`, text renderer) backs `--emit diagnostics:` and the
+  `--result-json` error block; the CLI adds the process-level `error.class`.
+- **Blob I/O** — the existing `lgraph.save`/`lgraph.match` with a caller-set
+  `path:` (today `path:lgdb_yosys`) redirected to `--workdir`; the lgdb
+  directory *is* the `design` blob.
+
+Deferred to follow-ups (the kernel ships without them): `--recipe-file` TOML
+(no TOML dep in `MODULE.bazel` yet — built-in recipes ship first);
+`--emit-dir`+manifest hashes (need [3c]); sharper diag/depfile spans (need [1f]).
 
 ## Tag workspace mode (1y-agent)
 
 Everything below is the agent layer. It is sugar over the kernel above: a
 `@tag` is a named, persistent bundle of (inputs, config, workdir, outputs),
-and `livehd run <step> @tag` resolves that bundle and calls the same stateless
+and `lhd run <step> @tag` resolves that bundle and calls the same stateless
 step engine, then records the result in the tag's run log. An agent can always
 drop to the kernel for a quick one-shot.
+
+The `<step>` vocabulary is the kernel's (`elaborate`/`synth`/`check`/`compile`).
+The `parse` / `cprop` / `cgen-verilog` step names in the examples that follow
+predate the kernel design and are illustrative only; they will be reconciled to
+the kernel verbs when 1y-agent lands.
 
 ## @tag Sigil
 
@@ -228,17 +342,17 @@ Plain tag names must not contain `.` or `/`.
 ### setup — create or modify a tag
 
 ```bash
-livehd setup @tst1 --top foo --files foo.v bar.v
-livehd setup @tst1 --set top=bar                    # modify existing
-livehd setup @tst2 --top foo --files foo.v --input original=@tst1
-livehd setup @tst1 --reuse                           # reuse if compatible
+lhd setup @tst1 --top foo --files foo.v bar.v
+lhd setup @tst1 --set top=bar                    # modify existing
+lhd setup @tst2 --top foo --files foo.v --input original=@tst1
+lhd setup @tst1 --reuse                           # reuse if compatible
 ```
 
 `setup` is create-or-update and must not destroy an existing tag by default.
 Destructive recreation is explicit:
 
 ```bash
-livehd tag reset @tst1 --yes
+lhd tag reset @tst1 --yes
 ```
 
 Agents should prefer non-destructive updates through `setup` or `config set`.
@@ -246,20 +360,20 @@ Agents should prefer non-destructive updates through `setup` or `config set`.
 ### run — execute a step or recipe
 
 ```bash
-livehd run parse @tst1
-livehd run cprop @tst1
-livehd run cgen-verilog @tst1
-livehd run check @tst1 --reference @tst2
-livehd run recipe:roundtrip @tst1
-livehd run recipe:roundtrip @tst1 --stop-after cprop
-livehd run recipe:roundtrip @tst1 --dry-run
+lhd run parse @tst1
+lhd run cprop @tst1
+lhd run cgen-verilog @tst1
+lhd run check @tst1 --reference @tst2
+lhd run recipe:roundtrip @tst1
+lhd run recipe:roundtrip @tst1 --stop-after cprop
+lhd run recipe:roundtrip @tst1 --dry-run
 ```
 
 Step-specific options:
 
 ```bash
-livehd run cprop @tst1 --set aggressive=true
-livehd run cgen-verilog @tst1 --set odir=custom_out
+lhd run cprop @tst1 --set aggressive=true
+lhd run cgen-verilog @tst1 --set odir=custom_out
 ```
 
 `--dry-run` emits a machine-readable plan without changing the tag. The plan
@@ -269,17 +383,17 @@ cache/skip decisions, and the exact commands that would run.
 ### status — inspect a tag
 
 ```bash
-livehd status @tst1
+lhd status @tst1
 ```
 
 ### config — inspect, edit, and validate tag config
 
 ```bash
-livehd config show @tst1
-livehd config set @tst1 top=bar
-livehd config set @tst1 steps.cprop.aggressive=true
-livehd config validate @tst1
-livehd config schema
+lhd config show @tst1
+lhd config set @tst1 top=bar
+lhd config set @tst1 steps.cprop.aggressive=true
+lhd config validate @tst1
+lhd config schema
 ```
 
 `setup --set key=value` is allowed as convenience sugar, but `config` is the
@@ -288,29 +402,29 @@ canonical agent API for config edits and validation.
 ### list — discover patterns or inspect tag-scoped design data
 
 ```bash
-livehd list
-livehd list steps
-livehd list recipes
-livehd list modules @tst1
-livehd list hierarchy @tst1 --top foo
-livehd list modules @tst1 --from original
+lhd list
+lhd list steps
+lhd list recipes
+lhd list modules @tst1
+lhd list hierarchy @tst1 --top foo
+lhd list modules @tst1 --from original
 ```
 
 ### describe — get step or list-pattern details (JSON)
 
 ```bash
-livehd describe parse
-livehd describe cprop
-livehd describe recipe:roundtrip
-livehd describe modules
-livehd describe hierarchy
+lhd describe parse
+lhd describe cprop
+lhd describe recipe:roundtrip
+lhd describe modules
+lhd describe hierarchy
 ```
 
 ### help — human-readable (calls describe internally)
 
 ```bash
-livehd run parse --help
-livehd --help
+lhd run parse --help
+lhd --help
 ```
 
 Machine-readable commands support `--format json|jsonl|text`. Agent defaults
@@ -319,14 +433,14 @@ are JSON for single-object commands (`list`, `describe`, `status`,
 
 ## Tag Directory Structure
 
-A tag directory is shared between runner and livehd. Each tool prefixes
+A tag directory is shared between runner and lhd. Each tool prefixes
 its own logs and results to avoid collisions. Runs are stored under unique
 run directories so concurrent agents do not race on log names or JSONL
 append order.
 
 ```
 tst1/
-  livehd.toml                      # livehd config — agent-editable
+  lhd.toml                      # lhd config — agent-editable
   runner.toml                      # runner config — agent-editable
   lgdb/                            # LGraph database (LiveHD internal state)
   out/                             # generated outputs (verilog, reports, etc.)
@@ -334,13 +448,13 @@ tst1/
   latest -> runs/20260409T100000Z_7f3a
   runs/
     20260409T100000Z_7f3a/
-      livehd_results.jsonl          # livehd structured results for this run
+      lhd_results.jsonl          # lhd structured results for this run
       runner_results.jsonl          # runner structured results for this run
       logs/
-        001_livehd_parse.log        # livehd step 1
-        002_livehd_cprop.log        # livehd step 2
+        001_lhd_parse.log        # lhd step 1
+        002_lhd_cprop.log        # lhd step 2
         001_runner_synth.log        # runner step 1
-        003_livehd_cgen-verilog.log # livehd step 3
+        003_lhd_cgen-verilog.log # lhd step 3
         002_runner_sim.log          # runner step 2
 ```
 
@@ -348,10 +462,10 @@ tst1/
 
 Files under a run's `logs/` use the pattern `NNN_<tool>_<step>.log`:
 
-- Counter is per-tool (livehd and runner each maintain their own sequence)
+- Counter is per-tool (lhd and runner each maintain their own sequence)
 - `ls logs/ | sort` gives a useful view; tool prefix disambiguates origin
-- Running the same step twice increments the counter: `002_livehd_cprop.log`,
-  `004_livehd_cprop.log`
+- Running the same step twice increments the counter: `002_lhd_cprop.log`,
+  `004_lhd_cprop.log`
 
 ### Locking
 
@@ -361,10 +475,10 @@ per-tag lock. Read-only commands (`status`, `list`, `describe`, `config show`,
 consistent snapshot while a run is active. Lock failures return a structured
 `lock_timeout` error with the owning `run_id` when known.
 
-## Config: livehd.toml
+## Config: lhd.toml
 
-The tag config is TOML. It is created by `livehd setup` and can be edited
-directly by agents or modified via `livehd config set @tag key=value`.
+The tag config is TOML. It is created by `lhd setup` and can be edited
+directly by agents or modified via `lhd config set @tag key=value`.
 
 ```toml
 top = "foo"
@@ -386,16 +500,16 @@ steps = ["parse", "cprop", "cgen-verilog"]
 ### Config precedence
 
 1. CLI `--set key=value` (ephemeral, not written to toml)
-2. `livehd.toml` in the tag directory
+2. `lhd.toml` in the tag directory
 3. Built-in defaults
 
 ### Setup snapshotting
 
-`livehd setup` is a snapshot. Once a tag is created, changes to
-project-level defaults do not affect it. The tag's `livehd.toml` is
+`lhd setup` is a snapshot. Once a tag is created, changes to
+project-level defaults do not affect it. The tag's `lhd.toml` is
 self-contained.
 
-## Output: livehd_results.jsonl
+## Output: lhd_results.jsonl
 
 One JSON object per line, appended after each step in the current run
 directory. JSONL format: append-only, crash-safe, agents read individual
@@ -408,7 +522,7 @@ Every result object includes a stable core envelope:
 ```json
 {
   "schema_version": 1,
-  "tool": "livehd",
+  "tool": "lhd",
   "command": "run",
   "step": "parse",
   "status": "pass",
@@ -422,7 +536,7 @@ Every result object includes a stable core envelope:
   "elapsed_ms": 1200,
   "inputs": ["foo.v"],
   "outputs": ["lgdb"],
-  "log": "runs/20260409T100000Z_7f3a/logs/001_livehd_parse.log"
+  "log": "runs/20260409T100000Z_7f3a/logs/001_lhd_parse.log"
 }
 ```
 
@@ -445,13 +559,13 @@ command explicitly documents a different policy.
 ### Successful step
 
 ```json
-{"schema_version":1,"seq":1,"tool":"livehd","command":"run","step":"parse","status":"pass","tag":"@tst1","run_id":"20260409T100000Z_7f3a","invocation_id":"7f3a8e6c","exit_code":0,"started_at":"2026-04-09T10:00:00Z","ended_at":"2026-04-09T10:00:01Z","elapsed_ms":1200,"args":{"files":["foo.v"],"top":"foo"},"log":"runs/20260409T100000Z_7f3a/logs/001_livehd_parse.log","inputs":["foo.v"],"outputs":["lgdb"]}
+{"schema_version":1,"seq":1,"tool":"lhd","command":"run","step":"parse","status":"pass","tag":"@tst1","run_id":"20260409T100000Z_7f3a","invocation_id":"7f3a8e6c","exit_code":0,"started_at":"2026-04-09T10:00:00Z","ended_at":"2026-04-09T10:00:01Z","elapsed_ms":1200,"args":{"files":["foo.v"],"top":"foo"},"log":"runs/20260409T100000Z_7f3a/logs/001_lhd_parse.log","inputs":["foo.v"],"outputs":["lgdb"]}
 ```
 
 ### Failed step
 
 ```json
-{"schema_version":1,"seq":3,"tool":"livehd","command":"run","step":"cgen-verilog","status":"fail","tag":"@tst1","run_id":"20260409T100000Z_7f3a","invocation_id":"7f3a8e6c","exit_code":1,"started_at":"2026-04-09T10:00:06Z","ended_at":"2026-04-09T10:00:06Z","elapsed_ms":300,"error":{"class":"internal","message":"unknown node type Flop_async","hint":"check the full log for the producer of this node","tail":["cgen_verilog.cpp:142: unknown node type Flop_async","  in module: foo"],"repro":"livehd run cgen-verilog @tst1"},"log":"runs/20260409T100000Z_7f3a/logs/003_livehd_cgen-verilog.log"}
+{"schema_version":1,"seq":3,"tool":"lhd","command":"run","step":"cgen-verilog","status":"fail","tag":"@tst1","run_id":"20260409T100000Z_7f3a","invocation_id":"7f3a8e6c","exit_code":1,"started_at":"2026-04-09T10:00:06Z","ended_at":"2026-04-09T10:00:06Z","elapsed_ms":300,"error":{"class":"internal","message":"unknown node type Flop_async","hint":"check the full log for the producer of this node","tail":["cgen_verilog.cpp:142: unknown node type Flop_async","  in module: foo"],"repro":"lhd run cgen-verilog @tst1"},"log":"runs/20260409T100000Z_7f3a/logs/003_lhd_cgen-verilog.log"}
 ```
 
 ### Error classification
@@ -485,7 +599,7 @@ On failure, the JSONL entry includes an `error` object:
 - `repro` — exact command to reproduce
 
 ```json
-{"schema_version":1,"seq":2,"tool":"livehd","command":"run","step":"parse","status":"fail","tag":"@tst1","run_id":"20260409T100000Z_7f3a","exit_code":1,"elapsed_ms":100,"error":{"class":"missing_file","message":"file not found: missing.v","hint":"check files list in livehd.toml","tail":["Error: cannot open missing.v: No such file or directory"],"repro":"livehd run parse @tst1"},"log":"runs/20260409T100000Z_7f3a/logs/002_livehd_parse.log"}
+{"schema_version":1,"seq":2,"tool":"lhd","command":"run","step":"parse","status":"fail","tag":"@tst1","run_id":"20260409T100000Z_7f3a","exit_code":1,"elapsed_ms":100,"error":{"class":"missing_file","message":"file not found: missing.v","hint":"check files list in lhd.toml","tail":["Error: cannot open missing.v: No such file or directory"],"repro":"lhd run parse @tst1"},"log":"runs/20260409T100000Z_7f3a/logs/002_lhd_parse.log"}
 ```
 
 ## CLI stdout
@@ -495,14 +609,14 @@ messages, raw tool logs, or human commentary are written to stdout in JSON or
 JSONL mode. Raw output goes to log files; `--verbose` may mirror raw output to
 stderr only.
 
-`livehd run` prints the JSONL line(s) to stdout. For single steps, one line.
+`lhd run` prints the JSONL line(s) to stdout. For single steps, one line.
 For recipes, one line per step as it completes (streaming):
 
 ```bash
-$ livehd run recipe:roundtrip @tst1
-{"schema_version":1,"seq":1,"tool":"livehd","step":"parse","status":"pass","elapsed_ms":1200,"log":"runs/20260409T100000Z_7f3a/logs/001_livehd_parse.log"}
-{"schema_version":1,"seq":2,"tool":"livehd","step":"cprop","status":"pass","elapsed_ms":2100,"log":"runs/20260409T100000Z_7f3a/logs/002_livehd_cprop.log"}
-{"schema_version":1,"seq":3,"tool":"livehd","step":"cgen-verilog","status":"fail","elapsed_ms":300,"error":{"class":"internal","message":"..."},"log":"runs/20260409T100000Z_7f3a/logs/003_livehd_cgen-verilog.log"}
+$ lhd run recipe:roundtrip @tst1
+{"schema_version":1,"seq":1,"tool":"lhd","step":"parse","status":"pass","elapsed_ms":1200,"log":"runs/20260409T100000Z_7f3a/logs/001_lhd_parse.log"}
+{"schema_version":1,"seq":2,"tool":"lhd","step":"cprop","status":"pass","elapsed_ms":2100,"log":"runs/20260409T100000Z_7f3a/logs/002_lhd_cprop.log"}
+{"schema_version":1,"seq":3,"tool":"lhd","step":"cgen-verilog","status":"fail","elapsed_ms":300,"error":{"class":"internal","message":"..."},"log":"runs/20260409T100000Z_7f3a/logs/003_lhd_cgen-verilog.log"}
 ```
 
 `--format text` is the human-friendly mode and may print summaries, progress,
@@ -510,7 +624,7 @@ and abbreviated diagnostics to stdout.
 
 ## List Patterns
 
-`livehd list` is the single entrypoint for enumeration. It can either:
+`lhd list` is the single entrypoint for enumeration. It can either:
 
 - enumerate what patterns exist
 - enumerate objects inside a specific tag
@@ -526,7 +640,7 @@ This keeps the meaning clean:
 Examples:
 
 ```bash
-$ livehd list
+$ lhd list
 {"schema_version":1,"patterns":[
   {"name":"steps","scope":"global"},
   {"name":"recipes","scope":"global"},
@@ -536,25 +650,25 @@ $ livehd list
   {"name":"history","scope":"tag"}
 ]}
 
-$ livehd list steps
+$ lhd list steps
 {"schema_version":1,"pattern":"steps","items":["parse","cprop","cgen-verilog","check","lnast-tolg","lnast-fromlg","graphviz"],"aliases":{"parse":"parse.verilog","cprop":"pass.cprop","cgen-verilog":"emit.verilog","check":"check.equiv"}}
 
-$ livehd list recipes
+$ lhd list recipes
 {"schema_version":1,"pattern":"recipes","items":["roundtrip","compile"]}
 
-$ livehd list modules @tst1
+$ lhd list modules @tst1
 {"schema_version":1,"pattern":"modules","tag":"@tst1","items":["foo","alu","regfile"]}
 
-$ livehd list hierarchy @tst1
+$ lhd list hierarchy @tst1
 {"schema_version":1,"pattern":"hierarchy","tag":"@tst1","top":"foo","tree":{"name":"foo","children":[{"name":"alu"},{"name":"regfile"}]}}
 
-$ livehd list hierarchy @tst1 --top alu
+$ lhd list hierarchy @tst1 --top alu
 {"schema_version":1,"pattern":"hierarchy","tag":"@tst1","top":"alu","tree":{"name":"alu","children":[]}}
 
-$ livehd list modules @tst1 --from original
+$ lhd list modules @tst1 --from original
 {"schema_version":1,"pattern":"modules","tag":"@tst1","source":"input:original","items":["foo","alu","regfile"]}
 
-$ livehd list partitions @tst1
+$ lhd list partitions @tst1
 {"schema_version":1,"pattern":"partitions","tag":"@tst1","items":[
   {"name":"add","kind":"comb","latency":0,"interface_hash":"0x1a2b…",
    "state_shape_hash":"0x0","clock":null},
@@ -596,7 +710,7 @@ Agents use `list` and `describe`:
 ### Step 1: list
 
 ```bash
-$ livehd list
+$ lhd list
 {"schema_version":1,"patterns":[
   {"name":"steps","scope":"global"},
   {"name":"recipes","scope":"global"},
@@ -606,32 +720,32 @@ $ livehd list
   {"name":"history","scope":"tag"}
 ]}
 
-$ livehd list steps
+$ lhd list steps
 {"schema_version":1,"pattern":"steps","items":["parse","cprop","cgen-verilog","check","lnast-tolg","lnast-fromlg","graphviz"],"aliases":{"parse":"parse.verilog","cprop":"pass.cprop","cgen-verilog":"emit.verilog","check":"check.equiv"}}
 
-$ livehd list recipes
+$ lhd list recipes
 {"schema_version":1,"pattern":"recipes","items":["roundtrip","compile"]}
 ```
 
 ### Step 2: describe
 
 ```bash
-$ livehd describe parse
-{"schema_version":1,"name":"parse","canonical":"parse.verilog","description":"Parse Verilog/SystemVerilog into LGraph via Yosys","args":{"required":[{"name":"files","type":"path[]","repeatable":true},{"name":"top","type":"string"}],"optional":[{"name":"path","type":"path","default":"lgdb"}]},"inputs":["verilog"],"outputs":["lgdb"],"cache":"writes-tag-state","examples":["livehd run parse @tst1"]}
+$ lhd describe parse
+{"schema_version":1,"name":"parse","canonical":"parse.verilog","description":"Parse Verilog/SystemVerilog into LGraph via Yosys","args":{"required":[{"name":"files","type":"path[]","repeatable":true},{"name":"top","type":"string"}],"optional":[{"name":"path","type":"path","default":"lgdb"}]},"inputs":["verilog"],"outputs":["lgdb"],"cache":"writes-tag-state","examples":["lhd run parse @tst1"]}
 
-$ livehd describe cprop
-{"schema_version":1,"name":"cprop","canonical":"pass.cprop","description":"Constant propagation and optimization pass","args":{"required":[],"optional":[{"name":"aggressive","type":"bool","default":false},{"name":"max_iterations","type":"integer","default":10}]},"inputs":["lgdb"],"outputs":["lgdb"],"cache":"mutates-tag-state","examples":["livehd run cprop @tst1 --set aggressive=true"]}
+$ lhd describe cprop
+{"schema_version":1,"name":"cprop","canonical":"pass.cprop","description":"Constant propagation and optimization pass","args":{"required":[],"optional":[{"name":"aggressive","type":"bool","default":false},{"name":"max_iterations","type":"integer","default":10}]},"inputs":["lgdb"],"outputs":["lgdb"],"cache":"mutates-tag-state","examples":["lhd run cprop @tst1 --set aggressive=true"]}
 
-$ livehd describe recipe:roundtrip
+$ lhd describe recipe:roundtrip
 {"schema_version":1,"name":"recipe:roundtrip","steps":["parse","cprop","cgen-verilog","check"],"description":"Full compile + equivalence check","supports_dry_run":true}
 
-$ livehd describe modules
+$ lhd describe modules
 {"schema_version":1,"name":"modules","description":"List module names available from a tag","scope":"tag","selectors":{"optional":[{"name":"from","type":"string"}]},"outputs":["items"]}
 
-$ livehd describe hierarchy
+$ lhd describe hierarchy
 {"schema_version":1,"name":"hierarchy","description":"Return module/instance hierarchy top at top or --top","scope":"tag","selectors":{"optional":[{"name":"top","type":"string"},{"name":"from","type":"string"},{"name":"format","type":"enum","values":["tree","flat"],"default":"tree"}]},"outputs":["tree"]}
 
-$ livehd describe partitions
+$ lhd describe partitions
 {"schema_version":1,"name":"partitions","description":"List partitions with kind, latency, clock domain, and content hashes","scope":"tag","selectors":{"optional":[{"name":"kind","type":"enum","values":["comb","pipe","mod"]},{"name":"top","type":"string"},{"name":"from","type":"string"}]},"outputs":["items"]}
 ```
 
@@ -648,15 +762,15 @@ the JSONL result (`simulation.md` hot-reload tiers). Agents read
 exploration-only:
 
 ```jsonl
-{"schema_version":1,"seq":4,"tool":"livehd","step":"sim","status":"pass","tier":"hot-debug","elapsed_ms":200,"at":"…"}
-{"schema_version":1,"seq":5,"tool":"livehd","step":"sim","status":"pass","tier":"hot-approx","warning":"checkpoint stale; not for LEC","elapsed_ms":300,"at":"…"}
-{"schema_version":1,"seq":6,"tool":"livehd","step":"sim","status":"pass","tier":"cold","reason":"state_shape_hash changed","elapsed_ms":4100,"at":"…"}
+{"schema_version":1,"seq":4,"tool":"lhd","step":"sim","status":"pass","tier":"hot-debug","elapsed_ms":200,"at":"…"}
+{"schema_version":1,"seq":5,"tool":"lhd","step":"sim","status":"pass","tier":"hot-approx","warning":"checkpoint stale; not for LEC","elapsed_ms":300,"at":"…"}
+{"schema_version":1,"seq":6,"tool":"lhd","step":"sim","status":"pass","tier":"cold","reason":"state_shape_hash changed","elapsed_ms":4100,"at":"…"}
 ```
 
 ### --help (human rendering of describe)
 
 ```
-$ livehd run cprop --help
+$ lhd run cprop --help
 cprop — Constant propagation and optimization pass
 
 Optional:
@@ -673,22 +787,22 @@ Using `@tag` references, agents compose multi-tag flows:
 
 ```bash
 # Compile original
-livehd setup @orig --top foo --files foo.v
-livehd run recipe:compile @orig
+lhd setup @orig --top foo --files foo.v
+lhd run recipe:compile @orig
 
 # Experiment with different optimization
-livehd setup @opt_exp --top foo --files foo.v --input baseline=@orig
-livehd run parse @opt_exp
-livehd run cprop @opt_exp --set aggressive=true
-livehd run cgen-verilog @opt_exp
+lhd setup @opt_exp --top foo --files foo.v --input baseline=@orig
+lhd run parse @opt_exp
+lhd run cprop @opt_exp --set aggressive=true
+lhd run cgen-verilog @opt_exp
 
 # Compare outputs
-livehd run check @opt_exp --reference @orig
+lhd run check @opt_exp --reference @orig
 ```
 
 ## Relationship to lgshell / EPRP
 
-The new `livehd` CLI is a structured argv-based frontend. It may call the
+The new `lhd` CLI is a structured argv-based frontend. It may call the
 existing EPRP/pass machinery internally, but agents should not need to quote or
 generate `|>` command strings. The legacy `lgshell` REPL remains useful for
 interactive humans and debugging.
@@ -697,12 +811,12 @@ The stateless kernel also replaces the `printf 'inou.prp files:… |> pass.upass
 …' | lgshell` pattern that test and `*_compile.sh` scripts use today (e.g.
 `pass/prp_writer/tests/prp_writer_roundtrip_test.sh`,
 `inou/yosys/tests/yosys_compile.sh`): those pipe a `|>` string into stdin and
-grep stdout for success/error markers. A hermetic `livehd compile … --emit …
+grep stdout for success/error markers. A hermetic `lhd compile … --emit …
 --result-json …` invocation gives those scripts (and any Bazel rule that
 wraps them) declared outputs and a parseable result instead of grepping mixed
 stdout.
 
-Implementation rule: the agent-facing `livehd` binary must not print existing
+Implementation rule: the agent-facing `lhd` binary must not print existing
 REPL banners, prompts, command echoes, or raw pass output on stdout in JSON or
 JSONL mode. Current EPRP labels can seed `describe`, but the metadata needs to
 grow beyond `required/default/help` to include typed arguments and artifacts.
@@ -711,16 +825,16 @@ grow beyond `required/default/help` to include typed arguments and artifacts.
 
 LiveHD's CLI follows the same tag-based model as `hagent/runner/`. The
 key difference: runner orchestrates external tools (build systems, simulators),
-while livehd wraps internal compiler passes. Both can share a tag directory.
+while lhd wraps internal compiler passes. Both can share a tag directory.
 
-| Concept             | runner                        | livehd                        |
+| Concept             | runner                        | lhd                        |
 |---------------------|-------------------------------|-------------------------------|
-| Tag creation        | `runner setup @tag`           | `livehd setup @tag`           |
-| Step execution      | `runner run <api> @tag`       | `livehd run <step> @tag`      |
-| Config file         | `runner.toml`                 | `livehd.toml`                 |
-| Results file        | `runner_results.jsonl`        | `livehd_results.jsonl`        |
-| Log naming          | `NNN_runner_<step>.log`       | `NNN_livehd_<step>.log`       |
+| Tag creation        | `runner setup @tag`           | `lhd setup @tag`           |
+| Step execution      | `runner run <api> @tag`       | `lhd run <step> @tag`      |
+| Config file         | `runner.toml`                 | `lhd.toml`                 |
+| Results file        | `runner_results.jsonl`        | `lhd_results.jsonl`        |
+| Log naming          | `NNN_runner_<step>.log`       | `NNN_lhd_<step>.log`       |
 | Tag sigil           | `@tag`                        | `@tag`                        |
-| Discovery           | `runner list` / `describe`    | `livehd list` / `describe`    |
-| Tag introspection   | not defined yet               | `livehd list <pattern> @tag`  |
-| Test orchestration  | `runner run @tag` (parallel)  | `livehd run recipe:X @tag`    |
+| Discovery           | `runner list` / `describe`    | `lhd list` / `describe`    |
+| Tag introspection   | not defined yet               | `lhd list <pattern> @tag`  |
+| Test orchestration  | `runner run @tag` (parallel)  | `lhd run recipe:X @tag`    |
