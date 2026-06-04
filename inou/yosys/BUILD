@@ -35,6 +35,9 @@ sh_library(
         ":inou_yosys_scripts",
         ":yosys2",
     ],
+    data = [
+        "//ware:cgen_memory_rtl",
+    ],
     visibility = ["//visibility:public"],
 )
 

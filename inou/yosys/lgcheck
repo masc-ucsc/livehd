@@ -201,6 +201,18 @@ fi
 
 echo "checking GATE:$GATE (top:${GATE_TOP}) vs GOLD:$GOLD (top:${GOLD_TOP}) directory:$PWD"
 
+# cgen output `include`s memory models (cgen_memory_*.v) that live in
+# ware/rtl. Resolve the directory relative to this script (works both in a
+# repo checkout and inside bazel runfiles) with a cwd-relative fallback.
+SELF_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" >/dev/null 2>&1 && pwd)"
+VLG_INC=""
+for d in "${SELF_DIR}/../../ware/rtl" "ware/rtl"; do
+  if [ -d "$d" ]; then
+    VLG_INC="-I$d"
+    break
+  fi
+done
+
 if [ "${CELLLIB}" != "" ]; then
   if [ ! -f ${CELLLIB} ]; then
     echo "cell library ${CELLLIB} not found"
@@ -213,7 +225,7 @@ fi
 #exit 2
 
 yosys_read="read_verilog -sv ${GOLD}; hierarchy ${GOLD_TOP_STR}; proc; flatten; rename -top gold; design -stash gold;
-            read_verilog -sv ${GATE}; hierarchy ${GATE_TOP_STR}; proc; flatten; rename -top gate; design -stash gate;
+            read_verilog -sv ${VLG_INC} ${GATE}; hierarchy ${GATE_TOP_STR}; proc; flatten; rename -top gate; design -stash gate;
             design -copy-from gold -as gold gold; design -copy-from gate -as gate gate; ${lib};"
 
 yosys_prep="proc; memory -nomap; write_verilog trace0.v ; equiv_make gold gate equiv; write_verilog trace0b.v ; prep -flatten -top equiv; hierarchy -top equiv; hierarchy -check; flatten; proc; opt_clean;"
@@ -231,7 +243,7 @@ if [ $? -eq 0 ]; then
 fi
 
 #${YOSYS} -p " read_verilog -sv ${GOLD}; hierarchy ${TOP_STR}; opt ; prep; memory; rename -top gold; design -stash gold;
-#read_verilog -sv ${GATE}; hierarchy ${TOP_STR}; opt ; prep; memory; rename -top gate; design -stash gate;
+#read_verilog -sv ${VLG_INC} ${GATE}; hierarchy ${TOP_STR}; opt ; prep; memory; rename -top gate; design -stash gate;
 #design -copy-from gold -as gold gold
 #design -copy-from gate -as gate gate
 #
@@ -251,7 +263,7 @@ else
 fi
 
 ${YOSYS} -p " read_verilog -sv ${GOLD}; hierarchy ${GOLD_TOP_STR}; proc; opt; flatten ; rename -top gold; prep -top gold ; design -stash gold;
-              read_verilog -sv ${GATE}; hierarchy ${GATE_TOP_STR}; proc; opt; flatten ; rename -top gate; prep -top gate ; design -stash gate;
+              read_verilog -sv ${VLG_INC} ${GATE}; hierarchy ${GATE_TOP_STR}; proc; opt; flatten ; rename -top gate; prep -top gate ; design -stash gate;
               design -copy-from gold -as gold gold
               design -copy-from gate -as gate gate
 
@@ -305,7 +317,7 @@ if [[ "${LGCHECK_BMC_STEPS}" =~ ^[0-9]+$ ]] && [ "${LGCHECK_BMC_STEPS}" -gt 0 ];
   # No -q: yosys -q suppresses the SAT report itself, so the log would always
   # be empty and the greps below would vacuously "pass" any pair of designs.
   ${YOSYS} -p "read_verilog -sv ${GOLD}; hierarchy ${GOLD_TOP_STR}; proc; memory; opt; flatten ; rename -top gold; prep -top gold ; design -stash gold;
-               read_verilog -sv ${GATE}; hierarchy ${GATE_TOP_STR}; proc; memory; opt; flatten ; rename -top gate; prep -top gate ; design -stash gate;
+               read_verilog -sv ${VLG_INC} ${GATE}; hierarchy ${GATE_TOP_STR}; proc; memory; opt; flatten ; rename -top gate; prep -top gate ; design -stash gate;
                design -copy-from gold -as gold gold
                design -copy-from gate -as gate gate
                miter -equiv -flatten -make_outputs -ignore_gold_x gold gate miter

@@ -558,40 +558,21 @@ bool Cprop::scalar_mux(hhds::Node_class& node, std::vector<hhds::Edge_class>& in
   }
 
   bool false_path_zero = false;
-  bool false_path_one  = false;
   if (is_const_pin(inp_edges_ordered[1].driver)) {
     auto v          = hydrate_const(inp_edges_ordered[1].driver);
     false_path_zero = v.is_known_zero() || v.is_string();
-    false_path_one  = v.is_i() && v.to_i() == -1;
   }
 
-  bool true_path_zero = false;
-  bool true_path_one  = false;
-  if (is_const_pin(inp_edges_ordered[2].driver)) {
-    auto v         = hydrate_const(inp_edges_ordered[2].driver);
-    true_path_zero = v.is_known_zero() || v.is_string();
-    true_path_one  = v.is_i() && v.to_i() == -1;
-  }
+  bool true_path_sel = inp_edges_ordered[0].driver == inp_edges_ordered[2].driver;
 
-  bool false_path_sel = inp_edges_ordered[0].driver == inp_edges_ordered[1].driver;
-  bool true_path_sel  = inp_edges_ordered[0].driver == inp_edges_ordered[2].driver;
-
-  if ((false_path_zero && true_path_sel) || (false_path_sel && true_path_one) || (false_path_zero && true_path_one)) {
+  // Mux selectors are 0/1 (port = sel+1), so mux(s,0,s) == s. The old
+  // -1-as-true folds (mux(s,0,-1)->s, mux(s,s,-1)->s, mux(s,-1,s)->-1,
+  // mux(s,s,0)->Not(s)) are only bit-accurate when the consumer reads a
+  // single bit; for wider consumers they swap -1 (all ones) for 1 — e.g. a
+  // yosys-consolidated 8-bit write-enable mux(reset,0,-1) must yield 0xff,
+  // not 1 (caught by lgcheck BMC on mem_reset). Keep only the sound rule.
+  if (false_path_zero && true_path_sel) {
     collapse_forward_for_pin(node, inp_edges_ordered[0].driver);
-    return true;
-  }
-
-  if (false_path_sel && true_path_zero) {
-    auto not_node = create_typed_node(*current_graph, Ntype_op::Not);
-    auto not_spin = not_node.create_sink_pin(0);
-    not_spin.connect_driver(inp_edges_ordered[0].driver);
-    auto not_dpin = not_node.create_driver_pin(0);
-    collapse_forward_for_pin(node, not_dpin);
-    return true;
-  }
-
-  if (false_path_one && true_path_sel) {
-    collapse_forward_for_pin(node, inp_edges_ordered[1].driver);
     return true;
   }
 

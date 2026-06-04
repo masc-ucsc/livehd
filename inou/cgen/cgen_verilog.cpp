@@ -383,15 +383,12 @@ void Cgen_verilog::process_memory(std::shared_ptr<File_output> fout, const hhds:
         if (!single_clock) {
           fout->append("  ,.rd_clock_", std::to_string(n_rd_pos), "(", get_wire_or_const(p.clock), ")\n");
         }
-        // Read data-out pins are driver pins on the node; HHDS doesn't have a
-        // direct "out_connected_pins" so we enumerate out_pins and skip the
-        // ones with no edges.
-        for (auto& dpin2 : node.out_pins()) {
-          if (dpin2.out_edges().empty()) {
-            continue;
-          }
-          auto name2 = get_scaped_name(pin_wire_name(dpin2));
-          fout->append("  ,.rd_dout_", std::to_string(n_rd_pos), "(", name2, ")\n");
+        // The dout driver pin for read port N is pid (n_wr_ports + N) — the
+        // convention resolve_memory uses in lgyosys_tolg (`wrports + rdport`).
+        // Enumerating all out pins here would wire every dout to every port.
+        auto dout_dpin = node.create_driver_pin(static_cast<hhds::Port_id>(n_wr_ports + n_rd_pos));  // find-or-create
+        if (!dout_dpin.out_edges().empty()) {
+          fout->append("  ,.rd_dout_", std::to_string(n_rd_pos), "(", get_wire_or_const(dout_dpin), ")\n");
         }
         ++n_rd_pos;
       } else {
@@ -1085,6 +1082,30 @@ void Cgen_verilog::create_locals(std::shared_ptr<File_output> fout, hhds::Graph*
         }
         for (auto& dpin2 : node.out_pins()) {
           if (dpin2.out_edges().empty()) {
+            continue;
+          }
+          if (op == Ntype_op::Memory) {
+            // Instance outputs must land on a dedicated net: the dout pin is
+            // usually named after the module output it drives (e.g. "q0"), so
+            // reusing that name re-declares the port (and an instance output
+            // cannot legally drive an `output reg` anyway). create_outputs
+            // then emits `q0 = <iname>_dout_<pid>;` like any other driver.
+            //
+            // NOTE: out_pins() handles encode pins WITHOUT the driver bit, so
+            // their class_index never matches edge.driver / create_driver_pin
+            // handles. Re-fetch the canonical driver handle for keying.
+            auto dout  = node.create_driver_pin(dpin2.get_port_id());
+            auto iname = get_scaped_name(default_instance_name(node));
+            auto name2 = absl::StrCat(iname, "_dout_", dpin2.get_port_id());
+            auto [it2, inserted] = pin2var.insert({dout.get_class_index(), name2});
+            if (inserted) {
+              int bits2 = bits_of(dout);
+              if (bits2 <= 1) {
+                fout->append("wire signed ", name2, ";\n");
+              } else {
+                fout->append("wire signed [", std::to_string(bits2 - 1), ":0] ", name2, ";\n");
+              }
+            }
             continue;
           }
           auto name2 = get_scaped_name(pin_wire_name(dpin2));

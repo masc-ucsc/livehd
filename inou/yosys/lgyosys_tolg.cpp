@@ -2279,10 +2279,27 @@ static void process_cells(RTLIL::Module* mod, hhds::Graph* g) {
             .connect_driver(create_const(*g, *Dlop::create_integer(0)));
         exit_node.create_sink_pin(static_cast<hhds::Port_id>(3 + port_n))
             .connect_driver(create_pick_concat_dpin(g, cell->getPort(ID::WR_DATA).extract(i * width, width), false));
-        exit_node.create_sink_pin(static_cast<hhds::Port_id>(4 + port_n))
-            .connect_driver(create_pick_concat_dpin(g, cell->getPort(ID::WR_EN).extract(i * width, width), false));
-        exit_node.create_sink_pin(static_cast<hhds::Port_id>(0 + port_n))
-            .connect_driver(create_pick_concat_dpin(g, cell->getPort(ID::WR_ADDR).extract(i * abits, abits), false));
+
+        auto wr_addr_dpin = create_pick_concat_dpin(g, cell->getPort(ID::WR_ADDR).extract(i * abits, abits), false);
+        auto wr_en_dpin   = create_pick_concat_dpin(g, cell->getPort(ID::WR_EN).extract(i * width, width), false);
+        if (depth < (1u << abits)) {
+          // $mem semantics drop out-of-range writes (Verilog OOB array write
+          // is a no-op), but the cgen memory model's addr port is only
+          // log2(SIZE) wide, so a wider address would alias in-range words.
+          // Gate the per-bit enables with (addr < depth). Exact-width
+          // memories (2^abits == depth) skip this entirely.
+          auto lt_node = create_typed_node(*g, Ntype_op::LT, 1);
+          setup_sink_by_name(lt_node, "a").connect_driver(wr_addr_dpin);
+          setup_sink_by_name(lt_node, "b").connect_driver(create_const(*g, *Dlop::create_integer(depth)));
+
+          auto en_mux = create_typed_node(*g, Ntype_op::Mux, width);
+          setup_sink_by_name(en_mux, "s").connect_driver(lt_node.create_driver_pin(0));
+          setup_sink_by_name(en_mux, "p1").connect_driver(create_const(*g, *Dlop::create_integer(0)));
+          setup_sink_by_name(en_mux, "p2").connect_driver(wr_en_dpin);
+          wr_en_dpin = en_mux.create_driver_pin(0);
+        }
+        exit_node.create_sink_pin(static_cast<hhds::Port_id>(4 + port_n)).connect_driver(wr_en_dpin);
+        exit_node.create_sink_pin(static_cast<hhds::Port_id>(0 + port_n)).connect_driver(wr_addr_dpin);
         exit_node.create_sink_pin(static_cast<hhds::Port_id>(2 + port_n))
             .connect_driver(create_pick_concat_dpin(g, cell->getPort(ID::WR_CLK).extract(i, 1), false));
       }
