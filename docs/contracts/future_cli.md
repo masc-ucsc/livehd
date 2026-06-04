@@ -2,20 +2,213 @@
 
 ## Goals
 
-Design a CLI for LiveHD that is optimized for LLM coding agents as primary
-users. Humans remain supported but are not the design priority.
+LiveHD's CLI serves two consumers from one engine:
 
-Principles:
+1. **Build systems** (Bazel, Make, Ninja) that call LiveHD as a hermetic
+   compilation/elaboration action — declared inputs in, declared outputs out,
+   deterministic, no ambient state.
+2. **LLM coding agents** that drive LiveHD interactively — create a workspace,
+   run steps incrementally, inspect intermediate state, re-run with tweaks,
+   compare experiments.
+
+These pull in opposite directions: a build action wants *no* persistent state,
+while an agent wants persistent, inspectable state. The design reconciles them
+with one rule: **the stateless invocation is the kernel; the `@tag` workspace
+is sugar on top of it.** Both share the step vocabulary, the `--set key=value`
+override syntax, the JSON result schema, the `error.class` taxonomy, and the
+`list`/`describe` self-documentation. They differ only in *where state lives*
+(argv vs. tag directory) and in *determinism defaults* (hermetic vs.
+convenience).
+
+### Two layers, build-first
+
+Implementation order: ship the stateless kernel first (it is the subset both
+consumers share), then layer the tag workspace on top.
+
+- **1y-bazel** — the stateless, hermetic kernel: direct invocation with
+  explicit inputs/outputs, deterministic results, depfile emission, clean
+  stdout. Callable from a Bazel rule or a Makefile. Specified in
+  *Stateless build-system mode* and *Dependency files* below.
+- **1y-agent** — the stateful workspace: `@tag` directories, `setup/run/
+  status/list/describe`, JSONL run logs, multi-tag experiments. Each
+  `run <step> @tag` desugars to a kernel call. Specified in *Tag workspace
+  mode* and everything after it.
+
+Principles (shared by both layers):
 
 - One command = one step (no implicit multi-step pipelines)
-- Structured JSON/JSONL output on stdout (agents parse it directly)
-- Stdout is a protocol stream: raw logs and human chatter never appear there
-- TOML config per tag (agents read and edit it)
-- Explicit state via `@tag` references (no in-memory-only state)
-- Self-documenting API (`list`, `describe`) for both capability discovery and
+- Structured JSON/JSONL output on a clean protocol stream — no banners, no
+  human chatter, no raw pass logs intermixed on stdout
+- `--set key=value` config overrides; TOML config where state persists
+- Self-documenting API (`list`, `describe`) for capability discovery and
   tag-scoped introspection
 - Raw logs separate from structured results
 - Stable schema versions for every machine-readable object
+
+## Stateless build-system mode (1y-bazel)
+
+This is the kernel: a single hermetic invocation that behaves as a pure
+function `(declared inputs, config) → (declared outputs, exit code)`. It is
+what a Bazel rule or a Makefile recipe calls. It never reads or writes ambient
+state — no `@tag`, no `~/.cache/livehd`, no history file, no lock, no `latest`
+symlink.
+
+### One-shot invocation
+
+```bash
+livehd compile \
+  --top foo \
+  --files foo.v bar.v \
+  --include-dir rtl/inc \
+  --emit verilog:$(RULEDIR)/foo.gen.v \
+  --emit diagnostics:$(RULEDIR)/foo.diag.jsonl \
+  --depfile $(RULEDIR)/foo.d \
+  --result-json $(RULEDIR)/foo.result.json \
+  --workdir $(TMPDIR) \
+  --deterministic
+```
+
+`compile` is the stateless form of `recipe:compile`: the whole front-end runs
+in one action. Individual steps (`parse`, `cprop`, `cgen-verilog`, …) are also
+callable directly in this mode with the same flags; the step vocabulary is
+identical to the tag layer.
+
+### Why a build system needs this (and rejects the tag layer)
+
+A Bazel action must be hermetic, deterministic, and parallel-safe. The
+agent-oriented features documented later are exactly what it cannot tolerate,
+so the kernel omits them:
+
+| Tag-layer feature         | Why a build action rejects it                       |
+|---------------------------|-----------------------------------------------------|
+| `run_id` = timestamp+rand | Non-deterministic → defeats the action/remote cache |
+| `~/.cache/livehd` tag dir | Not hermetic — reads state outside declared inputs  |
+| `latest ->` symlink       | Bazel forbids mutable/dangling symlinks in outputs  |
+| per-tag `lock` file       | Fights Bazel's sandboxed parallelism                |
+| `odir:` tool-named files  | Bazel must predeclare every output path             |
+
+### Flags specific to the kernel
+
+- `--emit KIND:PATH` (repeatable). Produce exactly the named artifact at the
+  caller-chosen path. Replaces the tag layer's `odir:` (tool-chosen filenames
+  a build rule cannot predeclare). Emit kinds map to declared Bazel outputs:
+  `verilog`, `lnast`, `graphviz`, `diagnostics`, `netlist-json`, … The tool
+  writes *only* to these paths (plus `--workdir`); an unknown kind is a
+  `usage` error.
+- `--result-json PATH`. Write the structured result object (same schema as a
+  JSONL line) to a declared file rather than stdout. Build actions read a
+  declared output far more cleanly than captured stdout.
+- `--workdir PATH`. All scratch — including the ephemeral lgdb — lives here,
+  never the global cache. Bazel passes `$(RULEDIR)` or a sandbox `TMPDIR`.
+  Each invocation is self-contained in its own workdir, so N actions run in
+  parallel with zero contention and no lock.
+- `--deterministic` (and honor `SOURCE_DATE_EPOCH`). Make output bytes a pure
+  function of inputs:
+  - `run_id` becomes a content hash of (tool version + input bytes + resolved
+    config), not wall-clock + random.
+  - No embedded timestamps in emitted Verilog/JSON; gate any "generated at"
+    header behind the epoch.
+  - Stable ordering everywhere (module emit order, JSON key order).
+  This is the single most important departure from today's schema: the
+  timestamp+random `run_id` must become *optional*, not mandatory.
+- `--include-dir DIR` (repeatable, `-I`). Search path for Verilog `` `include ``
+  and Pyrope `import`. See *Dependency files* below.
+- `--depfile PATH`. Emit a Make-syntax dependency file. See *Dependency files*.
+- `--hermetic` (implied by `--deterministic`). Resolve `import`/`include`
+  *only* within `--files` + `--include-dir`; reaching a file outside the
+  declared set is a `missing_file` error, not a silent filesystem read.
+
+### Exit-code contract
+
+For a build action, success is *only* the process exit code:
+
+- `0` — `pass`.
+- non-zero — `fail`; `error.class` in the result / `--result-json` disambiguates.
+
+No partial success: `compile` exits 0 only if every constituent step is
+`pass`. This is the same policy recipes use in the tag layer, restated here
+because a build rule keys on nothing else.
+
+### Clean stdout / no REPL chatter
+
+In this mode the binary emits nothing on stdout except the selected protocol
+(or nothing at all when `--result-json` is given). The legacy `lgshell` path
+that prints `livehd cmd …`, `Welcome to livehd!`, echoes the input line, and
+`command aborted…` must not run here. Diagnostics go to the `diagnostics`
+emit, the `--result-json` error block, and/or stderr — never intermixed on
+stdout.
+
+### Bazel integration
+
+Ship a thin Starlark ruleset in-repo (`//tools:livehd.bzl`) so users write:
+
+```python
+load("//tools:livehd.bzl", "livehd_verilog")
+
+livehd_verilog(
+    name = "foo_compiled",
+    top  = "foo",
+    srcs = ["foo.v", "bar.v"],
+    out  = "foo.gen.v",
+)
+```
+
+The macro sets `--deterministic`, `--workdir`, `--depfile`, and `--emit`
+correctly so callers don't reconstruct the hermetic contract by hand. A
+`--print-inputs` / `--dry-run` mode lets a Starlark aspect discover the
+transitive input set when sources are not all listed up front.
+
+## Dependency files (--depfile)
+
+Pyrope (`import`) and Verilog (`` `include ``, package imports) pull in files
+that are *not* named on the command line. `--files foo.prp` may transitively
+read `bar.prp` and `baz.prp`. A build system must know those edges, for two
+independent reasons:
+
+1. **Incrementality.** If `foo.prp` imports `bar.prp`, editing `bar.prp` must
+   rebuild the target — even though `bar.prp` never appeared on the command
+   line. Without the edge, Make/Bazel rebuild only when `foo.prp` changes and
+   silently serve stale output.
+2. **Hermeticity (Bazel).** Bazel runs the action in a sandbox containing only
+   declared inputs. If `bar.prp` is read but undeclared, the build either
+   fails in the sandbox or "works" locally and breaks on a clean / remote
+   build.
+
+This is the same problem C compilers solve with `.d` files: `gcc -MMD -MF foo.d`
+emits the set of headers `foo.c` actually `#include`d, and the build system
+feeds that back in. LiveHD adopts the identical mechanism.
+
+`--depfile PATH` writes a **Make-syntax** dependency file: the primary
+`--emit` output(s) as target(s), and every file actually opened (top `--files`
+plus everything transitively imported/included) as prerequisites:
+
+```make
+foo.gen.v: foo.v bar.v rtl/inc/defs.vh
+```
+
+Consumption:
+
+- **Make**: `-include foo.d` — the standard auto-dependency pattern.
+- **Ninja**: declare `depfile = foo.d` on the rule.
+- **Bazel**: a custom rule consumes it for include-scanning / input
+  validation, the same way `cc_*` actions consume compiler `.d` output.
+
+Under `--deterministic`, the depfile content is itself stable: prerequisites
+sorted, paths relative to `--workdir` / the exec root, no absolute or
+timestamped entries.
+
+Relationship to `--hermetic`: the depfile *reports* what was read; `--hermetic`
+*enforces* that everything read was declared. Emit the depfile in every build;
+turn on `--hermetic` under Bazel so an undeclared import fails loudly
+(`missing_file`) instead of silently widening the input set.
+
+## Tag workspace mode (1y-agent)
+
+Everything below is the agent layer. It is sugar over the kernel above: a
+`@tag` is a named, persistent bundle of (inputs, config, workdir, outputs),
+and `livehd run <step> @tag` resolves that bundle and calls the same stateless
+step engine, then records the result in the tag's run log. An agent can always
+drop to the kernel for a quick one-shot.
 
 ## @tag Sigil
 
@@ -236,6 +429,13 @@ Every result object includes a stable core envelope:
 Step-specific fields are allowed, but the core keys above are stable. New
 fields may be added under the same `schema_version`; incompatible changes
 require a new `schema_version`.
+
+Under `--deterministic` (the build-system default), the non-reproducible
+envelope fields change: `run_id` is a content hash of (tool version + input
+bytes + resolved config) rather than `<timestamp>_<rand>`, and `started_at` /
+`ended_at` are either omitted or pinned to `SOURCE_DATE_EPOCH`. Everything else
+in the object is already a pure function of inputs. The tag layer keeps the
+timestamp+random `run_id` so concurrent agents never collide on a run dir.
 
 Valid `status` values are `pass`, `fail`, `skipped`, and `pending`. A single
 step exits 0 only for `pass`. A recipe exits 0 only when every emitted step is
@@ -492,6 +692,15 @@ The new `livehd` CLI is a structured argv-based frontend. It may call the
 existing EPRP/pass machinery internally, but agents should not need to quote or
 generate `|>` command strings. The legacy `lgshell` REPL remains useful for
 interactive humans and debugging.
+
+The stateless kernel also replaces the `printf 'inou.prp files:… |> pass.upass
+…' | lgshell` pattern that test and `*_compile.sh` scripts use today (e.g.
+`pass/prp_writer/tests/prp_writer_roundtrip_test.sh`,
+`inou/yosys/tests/yosys_compile.sh`): those pipe a `|>` string into stdin and
+grep stdout for success/error markers. A hermetic `livehd compile … --emit …
+--result-json …` invocation gives those scripts (and any Bazel rule that
+wraps them) declared outputs and a parseable result instead of grepping mixed
+stdout.
 
 Implementation rule: the agent-facing `livehd` binary must not print existing
 REPL banners, prompts, command echoes, or raw pass output on stdout in JSON or

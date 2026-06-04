@@ -292,13 +292,29 @@ cross-file dependencies stay visible.</p>
 that they warrant their own bucket. Can be done in parallel with regular
 Group 1 entries; downstream Groups treat them as Group 1 dependencies.</p>
 <ul>
-<li><strong id="item-1y" class="item-id">1y</strong> New CLI: <code>setup/run/status/list/describe</code>, TOML config, JSONL
-  results, error classes — <code>docs/contracts/future_cli.md</code>.</li>
+<li><strong id="item-1y-bazel" class="item-id">1y-bazel</strong> New CLI — stateless hermetic kernel. <strong>Goal 1.</strong>
+  A single one-shot invocation that is a pure function <code>(declared inputs, config)
+  → (declared outputs, exit code)</code>: no <code>@tag</code>, no <code>~/.cache</code>, no lock, no
+  <code>latest</code> symlink. <code>livehd compile --top foo --files … --emit verilog:PATH
+  --depfile PATH --result-json PATH --workdir DIR --deterministic</code>. Deterministic
+  <code>run_id</code> = content hash (not timestamp+random); <code>--emit KIND:PATH</code> for
+  caller-declared outputs (replaces <code>odir:</code>); <code>--depfile</code> (Make-syntax,
+  gcc <code>-MMD</code>-style) so build systems see transitive <code>import</code>/<code>`include</code> edges;
+  <code>--hermetic</code> fails loud on undeclared imports; clean stdout (no REPL chatter).
+  Callable from a Bazel rule (<code>//tools:livehd.bzl</code>) or a Makefile. This is the
+  subset both consumers share — land it first. — <code>docs/contracts/future_cli.md</code>.</li>
+<li><strong id="item-1y-agent" class="item-id">1y-agent</strong> New CLI — stateful tag workspace on top of the
+  <a class="xref" href="TODO_livehd.html#item-1y-bazel">1y-bazel</a> kernel. <strong>Goal 1.</strong>
+  <code>setup/run/status/list/describe</code>, <code>@tag</code> directories, <code>livehd.toml</code> config,
+  append-only JSONL run logs, per-tag lock, multi-tag experiments, error-class
+  taxonomy. Each <code>run &lt;step&gt; @tag</code> desugars to a kernel call (resolve the
+  tag's inputs/config/workdir → run the pure step → append the result + advance
+  <code>latest</code>). Optimized for LLM coding agents. — <code>docs/contracts/future_cli.md</code>.</li>
 <li><strong id="item-1f" class="item-id">1f</strong> Source-map indirection (LOC propagation: canonical map + per-cell
   index, alias multi-loc, partition-root fallback) — see "Source location
   (LOC) propagation strategy" below and <code>docs/contracts/sourcemap.md</code>.</li>
 <li><strong id="item-1n" class="item-id">1n</strong> Pyrope LSP server (<code>.prp</code> only — never Verilog): one copyable binary
-  (<code>livehd-lsp</code>, later a <code>livehd lsp</code> subcommand of <a class="xref" href="TODO_livehd.html#item-1y">1y</a>) over LiveHD's
+  (<code>livehd-lsp</code>, later a <code>livehd lsp</code> subcommand of <a class="xref" href="TODO_livehd.html#item-1y-agent">1y-agent</a>) over LiveHD's
   front-end (<code>prp2lnast</code> + <code>upass</code> typecheck/bitwidth + <code>core/diag</code> <span class="xref xref-note" title="note: 1z">1z</span>).
   <strong>Primary consumer Claude Code's <code>LSP</code> tool</strong> — implement its exact op subset
   first (diagnostics + hover + documentSymbol, then definition/references);

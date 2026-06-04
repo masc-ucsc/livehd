@@ -4061,10 +4061,13 @@ Lnast_node Prp2lnast::binary_expr_to_node(TSNode n) {
   struct Op {
     Tier             tier = Tier::unknown;
     std::string_view kind;  // points into ts_node_type's static string for the inner aliased op
+    TSNode           node{};  // the binary_*_op wrapper node, for diagnostic spans
   };
   std::vector<Lnast_node> operands;
+  std::vector<TSNode>     operand_nodes;  // parallel to `operands`, source TSNodes (for precedence checks)
   std::vector<Op>         ops;
   operands.reserve(nnc / 2 + 1);
+  operand_nodes.reserve(nnc / 2 + 1);
   ops.reserve(nnc / 2);
   for (uint32_t i = 0; i < nnc; i++) {
     TSNode           c = ts_node_named_child(n, i);
@@ -4082,8 +4085,9 @@ Lnast_node Prp2lnast::binary_expr_to_node(TSNode n) {
     if (tier != Tier::unknown) {
       // The wrapper has a single named child of the aliased op kind.
       TSNode inner = ts_node_named_child(c, 0);
-      ops.push_back({tier, ts_node_is_null(inner) ? std::string_view{} : std::string_view(ts_node_type(inner))});
+      ops.push_back({tier, ts_node_is_null(inner) ? std::string_view{} : std::string_view(ts_node_type(inner)), c});
     } else {
+      operand_nodes.push_back(c);
       operands.push_back(expr_to_node(c));
     }
   }
@@ -4092,6 +4096,99 @@ Lnast_node Prp2lnast::binary_expr_to_node(TSNode n) {
     return operands.front();
   }
   I(operands.size() == ops.size() + 1);
+
+  // --- Precedence-mixing check (docs/docs/pyrope/04-variables.md "Precedence").
+  // Pyrope has very shallow precedence: parentheses may be omitted only when an
+  // expression evaluated left-to-right gives the same result as right-to-left.
+  // The grammar flattens each priority tier into one chain, so the operator
+  // structure that proves (or disproves) order-independence survives only here —
+  // lowering below collapses it into nested tmp refs. Flag the ambiguous mixes
+  // now, while we still can.
+  //
+  //   tier 3 "other" (+ - ++ << >> & | ^ !& !| !^ ..= ..< ..+ step):
+  //     distinct operators may be mixed only when they are all additive (+,-)
+  //     or all the same associative operator (& | ^ ++). In addition, a bare
+  //     mult/div operand (`a*b`, not the parenthesized `(a*b)`) may sit only
+  //     next to + or - ("mult/div precedence is only against +,- operators").
+  //   tier 5 "logical" (and or implies): distinct operators may not be mixed.
+  {
+    auto is_additive    = [](std::string_view k) { return k == "op_add" || k == "op_sub"; };
+    auto is_assoc_other = [](std::string_view k) {
+      return k == "op_bit_and" || k == "op_bit_or" || k == "op_bit_xor" || k == "op_tuple_concat";
+    };
+    // An unparenthesized priority-2 (`*` `/` `%`) operand. `(a*b)` parses as a
+    // `tuple`, not an `expression_item`, so parentheses make this return false.
+    auto is_bare_times = [](TSNode c) {
+      if (std::string_view(ts_node_type(c)) != "expression_item") {
+        return false;
+      }
+      uint32_t cc = ts_node_named_child_count(c);
+      for (uint32_t i = 0; i < cc; ++i) {
+        if (std::string_view(ts_node_type(ts_node_named_child(c, i))) == "binary_times_op") {
+          return true;
+        }
+      }
+      return false;
+    };
+
+    const Tier tier = ops.front().tier;  // a chain is homogeneous: one grammar tier
+    if (tier == Tier::other) {
+      // mult/div precedence is defined only against +/-.
+      for (size_t i = 0; i < operand_nodes.size(); ++i) {
+        if (!is_bare_times(operand_nodes[i])) {
+          continue;
+        }
+        bool left_bad  = i > 0 && !is_additive(ops[i - 1].kind);
+        bool right_bad = i < ops.size() && !is_additive(ops[i].kind);
+        if (left_bad || right_bad) {
+          report_error(left_bad ? ops[i - 1].node : ops[i].node,
+                       "mixed-precedence",
+                       "syntax",
+                       "mult/div precedence is defined only against `+`/`-`: add parentheses around the "
+                       "`*`/`/` sub-expression to make the precedence explicit",
+                       "wrap the multiply/divide in parentheses, e.g. `a & (b * c)`");
+        }
+      }
+      // Distinct same-tier operators only mix when all additive or all the same
+      // associative operator.
+      if (ops.size() >= 2) {
+        bool all_additive = true;
+        bool all_same     = true;
+        for (const auto& o : ops) {
+          all_additive = all_additive && is_additive(o.kind);
+          all_same     = all_same && (o.kind == ops.front().kind);
+        }
+        if (!all_additive && !(all_same && is_assoc_other(ops.front().kind))) {
+          // Blame the first operator that breaks homogeneity (or the second
+          // operator for a repeated non-associative one like `<<`).
+          size_t blame = 1;
+          for (size_t i = 1; i < ops.size(); ++i) {
+            if (ops[i].kind != ops.front().kind) {
+              blame = i;
+              break;
+            }
+          }
+          report_error(ops[blame].node,
+                       "mixed-precedence",
+                       "syntax",
+                       "operators at the same precedence cannot be mixed without parentheses — the result "
+                       "depends on evaluation order; add parentheses to make the grouping explicit",
+                       "add parentheses to group the sub-expressions");
+        }
+      }
+    } else if (tier == Tier::logical && ops.size() >= 2) {
+      for (size_t i = 1; i < ops.size(); ++i) {
+        if (ops[i].kind != ops.front().kind) {
+          report_error(ops[i].node,
+                       "mixed-precedence",
+                       "syntax",
+                       "logical operators `and`/`or`/`implies` at the same precedence cannot be mixed "
+                       "without parentheses; add parentheses to make the grouping explicit",
+                       "add parentheses, e.g. `(x or y) and z`");
+        }
+      }
+    }
+  }
 
   // Emit `head(ref(tmp), l, r)` and return the tmp ref. Used both for plain
   // binary ops (eq/lt/plus/...) and for typed pseudo-calls (func_has, func_in)
@@ -4302,24 +4399,10 @@ Lnast_node Prp2lnast::binary_expr_to_node(TSNode n) {
     return acc;
   }
 
-  // Logical tier: mixing distinct operators (`a and b or c`) is ambiguous —
-  // same precedence, different semantics. Require explicit parens.
-  // TODO(upass.md): turn this into a proper diagnostic with source range
-  // once the pass gains a diagnostics channel.
-  if (first_tier == Tier::logical) {
-    for (size_t i = 1; i < ops.size(); ++i) {
-      if (ops[i].kind != ops[0].kind) {
-        std::print(
-            "prp2lnast: mixed `{}` and `{}` at the same precedence — add "
-            "parentheses to disambiguate\n",
-            ops[0].kind,
-            ops[i].kind);
-        break;
-      }
-    }
-  }
+  // Logical-tier mixing (`a and b or c`) was already rejected by the
+  // precedence-mixing check above, so the chain here is homogeneous.
 
-  // All other tiers (and logical after the ambiguity warning): left-fold.
+  // All other tiers: left-fold.
   Lnast_node acc = operands.front();
   for (size_t i = 0; i < ops.size(); ++i) {
     switch (ops[i].tier) {
