@@ -635,7 +635,20 @@ void Cgen_verilog::process_simple_node(std::shared_ptr<File_output> fout, const 
     auto a_bits = bits_of(a_dpin);
     auto a      = get_expression(a_dpin);
     if (mask_v.is_i() && mask_v.to_i() == -1) {
-      final_expr = a;
+      if (a_bits > 0 && !is_unsign(a_dpin)) {
+        // To-positive of a signed driver: a plain copy sign-extends when the
+        // unsigned LHS is wider (e.g. 1-bit signed ~(|b) into a 2-bit reg).
+        // AND with an unsigned mask of the driver's width so the expression
+        // turns unsigned and zero-extends — get_mask(a,-1) == zext(a).
+        std::string m;
+        if (auto rem = a_bits % 4; rem != 0) {
+          m += absl::StrCat((1 << rem) - 1);
+        }
+        m.append(a_bits / 4, 'f');
+        final_expr = absl::StrCat("(", a, " & ", a_bits, "'h", m, ")");
+      } else {
+        final_expr = a;
+      }
     } else {
       auto [range_begin, range_end] = mask_v.get_mask_range();
       Bits_t a_bits_to_use          = static_cast<Bits_t>(range_end - range_begin);

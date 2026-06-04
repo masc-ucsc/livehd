@@ -279,6 +279,21 @@ void Graphviz::populate_lg_data(hhds::Graph* g, std::string_view dot_postfix) {
     for (const auto& out : node.out_edges()) {
       populate_lg_handle_xedge(node, out, data, verbose);
     }
+
+    if (verbose) {
+      // CONST_NODE is a builtin singleton skipped by fast_class(), so const
+      // edges are invisible from the driver side. Show them from the sink.
+      for (const auto& inp : node.inp_edges()) {
+        if (!is_const_pin(inp.driver)) {
+          continue;
+        }
+        auto v = hydrate_const(inp.driver);
+        data += std::format(" const_{} [ label = <{}> ];\n", graphviz_legalize_name(v.to_pyrope()),
+                            graphviz_legalize_name(v.to_pyrope()));
+        data += std::format(" const_{} -> {} [ label = <{}b:(,{})> ];\n", graphviz_legalize_name(v.to_pyrope()), gv_name,
+                            bits_of(inp.driver), graphviz_legalize_name(pin_name_of(inp.sink)));
+      }
+    }
   }
 
   auto gio = g->get_io();
@@ -298,6 +313,18 @@ void Graphviz::populate_lg_data(hhds::Graph* g, std::string_view dot_postfix) {
       data += std::format(" {} -> {} [ label = <{}b> ];\n", graphviz_legalize_name(decl.name), dst_str, dbits);
       for (const auto& out : pin.out_edges()) {
         populate_lg_handle_xedge(pin.get_master_node(), out, data, verbose);
+      }
+      if (verbose) {
+        for (const auto& inp : pin.inp_edges()) {
+          if (!is_const_pin(inp.driver)) {
+            continue;
+          }
+          auto v = hydrate_const(inp.driver);
+          data += std::format(" const_{} [ label = <{}> ];\n", graphviz_legalize_name(v.to_pyrope()),
+                              graphviz_legalize_name(v.to_pyrope()));
+          data += std::format(" const_{} -> {} [ label = <{}b> ];\n", graphviz_legalize_name(v.to_pyrope()),
+                              graphviz_legalize_name(decl.name), bits_of(inp.driver));
+        }
       }
     }
   }

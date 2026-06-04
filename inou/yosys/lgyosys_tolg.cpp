@@ -33,7 +33,6 @@
 
 using livehd::Hhds_graph_library;
 using livehd::graph_util::bits_of;
-using livehd::graph_util::const_value_of;
 using livehd::graph_util::create_const;
 using livehd::graph_util::create_typed_node;
 using livehd::graph_util::debug_name;
@@ -82,19 +81,10 @@ static std::vector<const RTLIL::Wire*> pending_outputs;
 namespace {
 
 [[nodiscard]] Dlop hydrate_const_pin(const hhds::Pin_class& pin) {
-  if (pin.is_invalid()) {
-    return *Dlop::create_integer(0);
-  }
-  auto master = pin.get_master_node();
-  auto s      = const_value_of(master);
-  if (s.empty()) {
-    return *Dlop::create_integer(0);
-  }
-  auto p = Dlop::unserialize(s);
-  if (!p) {
-    return *Dlop::create_integer(0);
-  }
-  return *p;
+  // Delegate to the canonical decoder: small ints in [-16,15] are pid-encoded
+  // on CONST_NODE with no payload, so reading const_value_of(master) directly
+  // misreads them as 0 (e.g. dropping a const concat chunk as "known zero").
+  return livehd::graph_util::hydrate_const(pin);
 }
 
 [[nodiscard]] hhds::Node_class master_node(const hhds::Pin_class& pin) { return pin.get_master_node(); }
@@ -419,6 +409,17 @@ static hhds::Pin_class create_pick_operator(hhds::Graph* g, const RTLIL::Wire* w
   return create_pick_operator(get_edge_pin(g, wire, is_signed), offset, width, is_signed);
 }
 
+// bits_of() reads the pin attr, which is 0 for const pins (the value implies
+// the width). Undersizing matters: cprop's replace_node truncates folded
+// constants to the driver-pin bits, so shl(9,4) on a 4-bit pin becomes 0.
+[[nodiscard]] static Bits_t dpin_width(const hhds::Pin_class& dpin) {
+  auto w = bits_of(dpin);
+  if (w == 0 && is_const_pin(dpin)) {
+    w = static_cast<Bits_t>(hydrate_const_pin(dpin).get_bits());
+  }
+  return w;
+}
+
 static void append_to_or_node(hhds::Graph* g, const hhds::Node_class& or_node, const hhds::Pin_class& dpin, int or_offset) {
   if (or_node.has_inp_edges() && is_const_pin(dpin)) {
     auto val = hydrate_const_pin(dpin);
@@ -432,15 +433,15 @@ static void append_to_or_node(hhds::Graph* g, const hhds::Node_class& or_node, c
   auto tposs_node = create_typed_node(*g, Ntype_op::Get_mask);
 
   if (or_offset) {
-    auto shl_node = create_typed_node(*g, Ntype_op::SHL, or_offset + bits_of(dpin));
+    auto shl_node = create_typed_node(*g, Ntype_op::SHL, or_offset + dpin_width(dpin));
     setup_sink_by_name(shl_node, "a").connect_driver(dpin);
     setup_sink_by_name(shl_node, "b")
         .connect_driver(create_const(*g, *Dlop::create_integer(or_offset)));
 
-    set_bits(tposs_node.create_driver_pin(0), or_offset + bits_of(dpin) + 1);
+    set_bits(tposs_node.create_driver_pin(0), or_offset + dpin_width(dpin) + 1);
     setup_sink_by_name(tposs_node, "a").connect_driver(shl_node.create_driver_pin(0));
   } else {
-    set_bits(tposs_node.create_driver_pin(0), bits_of(dpin) + 1);
+    set_bits(tposs_node.create_driver_pin(0), dpin_width(dpin) + 1);
     setup_sink_by_name(tposs_node, "a").connect_driver(dpin);
   }
 
@@ -476,11 +477,13 @@ static hhds::Pin_class create_pick_concat_dpin(hhds::Graph* g, const RTLIL::SigS
           inp_pin = inp_pins[i];
         } else if (type_op_of(master_node(inp_pins[i])) == Ntype_op::Get_mask) {
           inp_pin = inp_pins[i];
+        } else if (is_const_pin(inp_pins[i]) && !hydrate_const_pin(inp_pins[i]).is_negative()) {
+          inp_pin = inp_pins[i];  // already non-negative; to-positive wrap is a no-op
         } else {
           if (chunk_list[i].wire) {
             set_loc(or_node, chunk_list[i].wire->get_src_attribute());
           }
-          auto tposs_node = create_typed_node(*g, Ntype_op::Get_mask, bits_of(inp_pins[i]) + 1);
+          auto tposs_node = create_typed_node(*g, Ntype_op::Get_mask, dpin_width(inp_pins[i]) + 1);
           setup_sink_by_name(tposs_node, "a").connect_driver(inp_pins[i]);
           setup_sink_by_name(tposs_node, "mask")
               .connect_driver(create_const(*g, *Dlop::create_integer(-1)));
@@ -1074,7 +1077,12 @@ static void process_assigns(RTLIL::Module* mod, hhds::Graph* g) {
           const std::vector<RTLIL::SigChunk> chunks(ss.chunks().begin(), ss.chunks().end());
           int                                bit_offset = 0;
           for (const auto& chunk : chunks) {
-            if (chunk.wire) {
+            // Cosmetic only: name internal temp wires after the lhs bus. Port
+            // wires keep their own names, and an undriven placeholder Or must
+            // not be wrapped/remapped — the real driver hooks into it later
+            // via the `is_placeholder` checks, which an alias node defeats
+            // (the output then reads an empty Or and cgen emits 'hx).
+            if (chunk.wire && !chunk.wire->port_input && !chunk.wire->port_output) {
               auto it     = wire2pin.find(chunk.wire);
               bool in_w2p = (it != wire2pin.end());
               if (in_w2p) {
@@ -1089,11 +1097,15 @@ static void process_assigns(RTLIL::Module* mod, hhds::Graph* g) {
                 if (pn.empty() || pn[0] == '_') {
                   set_driver_name_if_free(chunk_pin, bit_name);
                 } else if (pn != bit_name) {
-                  auto or_node = create_typed_node(*g, Ntype_op::Or, chunk.width);
-                  auto or_dpin = or_node.create_driver_pin(0);
-                  set_driver_name_if_free(or_dpin, bit_name);
-                  or_node.create_sink_pin(0).connect_driver(chunk_pin);
-                  wire2pin[chunk.wire] = or_dpin;
+                  auto chunk_master  = master_node(chunk_pin);
+                  bool is_placeholder = type_op_of(chunk_master) == Ntype_op::Or && !chunk_master.has_inp_edges();
+                  if (!is_placeholder && !is_graph_input_pin(chunk_pin) && !is_graph_output_pin(chunk_pin)) {
+                    auto or_node = create_typed_node(*g, Ntype_op::Or, chunk.width);
+                    auto or_dpin = or_node.create_driver_pin(0);
+                    set_driver_name_if_free(or_dpin, bit_name);
+                    or_node.create_sink_pin(0).connect_driver(chunk_pin);
+                    wire2pin[chunk.wire] = or_dpin;
+                  }
                 }
               }
             }
@@ -1317,7 +1329,10 @@ static void connect_partial_dpin(hhds::Graph* g, hhds::Node_class& or_node, uint
                                  const hhds::Pin_class& current_dpin) {
   I(type_op_of(or_node) == Ntype_op::Or);
 
-  if (type_op_of(master_node(current_dpin)) == Ntype_op::Nconst) {
+  // NOTE: is_const_pin, not Ntype_op::Nconst — consts are CONST_NODE pins now.
+  // A const falling through used to hit the bits_of()==0 padding branch below
+  // and OR an all-'?' mask into the wire (x-leak on partially assigned bits).
+  if (is_const_pin(current_dpin)) {
     append_to_or_node(g, or_node, current_dpin, or_offset);
   } else if (bits_of(current_dpin) > nbits) {
     auto and_node = create_typed_node(*g, Ntype_op::And, nbits);
