@@ -104,6 +104,13 @@ struct Lnast_io_entry {
   bool        is_signed = true;
   bool        is_ref    = false;       // input declared with `ref` → write-back on inline
   Io_kind     kind      = Io_kind::none;  // scalar kind from the param's prim_type
+  // Task 1q — pipe stages annotation (outputs of a `pipe` func_def only).
+  // From the trailing `stages(min,max)` io node: min 0 = absent (comb/mod),
+  // max 0 with min>0 = unconstrained (bare `pipe`). The LN pipe upass keys
+  // its output-flop insertion off these; the declared range rides verbatim
+  // (LG pass1 narrows by sigma later, never here).
+  int32_t     stages_min = 0;
+  int32_t     stages_max = 0;
 };
 struct Lnast_tree_io {
   std::vector<Lnast_io_entry> inputs;

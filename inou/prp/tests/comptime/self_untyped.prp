@@ -1,0 +1,24 @@
+/*
+:name: self_untyped
+:type: comptime
+:verifier_pass: 4
+:verifier_fail: 0
+*/
+
+type t1 = (a:u32=nil, b:string="")
+type t2 = (b:string="")
+
+comb set_string(ref self) {
+  self.b = "foo"
+}
+
+mut x:t1 = nil
+mut y:t2 = nil
+
+x.set_string()
+y.set_string()
+
+cassert(x.b == "foo")
+cassert(y.b == "foo")
+cassert(x.a == nil)   // untouched sibling field
+cassert(x.b == y.b)   // same method, different receiver types

@@ -188,10 +188,35 @@ void uPass_ssa::run(const std::shared_ptr<Lnast>& lnast) {
   // when an assign's type slot is a `tuple_add`, expand each field with a
   // dotted-name prefix; otherwise emit one leaf entry.
   using Flat_field = Lnast_io_entry;
-  std::vector<Flat_field>                                                            flat_inputs;
-  std::vector<Flat_field>                                                            flat_outputs;
-  std::function<void(Lnast_nid, const std::string&, bool, std::vector<Flat_field>&)> flatten_assign;
-  flatten_assign = [&](Lnast_nid assign_nid, const std::string& prefix, bool collect_is_ref, std::vector<Flat_field>& out) {
+  std::vector<Flat_field> flat_inputs;
+  std::vector<Flat_field> flat_outputs;
+
+  // Task 1q — read a `stages(min,max)` node's two const children.
+  auto read_stages = [&](Lnast_nid st_nid) -> std::pair<int32_t, int32_t> {
+    int32_t smin = 0;
+    int32_t smax = 0;
+    auto    c    = lnast->get_first_child(st_nid);
+    if (!c.is_invalid() && Lnast_ntype::is_const(lnast->get_type(c))) {
+      if (auto v = Dlop::from_pyrope(lnast->get_name(c)); v && v->is_integer()) {
+        smin = static_cast<int32_t>(v->to_i());
+      }
+      auto c2 = lnast->get_sibling_next(c);
+      if (!c2.is_invalid() && Lnast_ntype::is_const(lnast->get_type(c2))) {
+        if (auto v2 = Dlop::from_pyrope(lnast->get_name(c2)); v2 && v2->is_integer()) {
+          smax = static_cast<int32_t>(v2->to_i());
+        }
+      }
+    }
+    return {smin, smax};
+  };
+
+  std::function<void(Lnast_nid, const std::string&, bool, std::vector<Flat_field>&, int32_t, int32_t)> flatten_assign;
+  flatten_assign = [&](Lnast_nid                assign_nid,
+                       const std::string&       prefix,
+                       bool                     collect_is_ref,
+                       std::vector<Flat_field>& out,
+                       int32_t                  inh_smin,
+                       int32_t                  inh_smax) {
     if (!Lnast_ntype::is_store(lnast->get_type(assign_nid))) {
       return;
     }
@@ -205,10 +230,27 @@ void uPass_ssa::run(const std::shared_ptr<Lnast>& lnast) {
     auto rhs_nid  = lnast->get_sibling_next(name_nid);
     auto type_nid = rhs_nid.is_invalid() ? rhs_nid : lnast->get_sibling_next(rhs_nid);
 
+    // Task 1q — the trailing stages(min,max) annotation either follows the
+    // optional type child or stands in its place (untyped entry). Identify
+    // by ntype, harvest, and drop it from the type slot. A composite entry's
+    // stages propagates to every flattened leaf (each leaf is one output
+    // flop at the same depth).
+    int32_t smin = inh_smin;
+    int32_t smax = inh_smax;
+    if (!type_nid.is_invalid() && Lnast_ntype::is_stages(lnast->get_type(type_nid))) {
+      std::tie(smin, smax) = read_stages(type_nid);
+      type_nid             = Lnast_nid();  // no real type child
+    } else if (!type_nid.is_invalid()) {
+      auto st_nid = lnast->get_sibling_next(type_nid);
+      if (!st_nid.is_invalid() && Lnast_ntype::is_stages(lnast->get_type(st_nid))) {
+        std::tie(smin, smax) = read_stages(st_nid);
+      }
+    }
+
     // Composite tuple type → recurse on each inner assign with a dotted prefix.
     if (!type_nid.is_invalid() && Lnast_ntype::is_tuple_add(lnast->get_type(type_nid))) {
       for (auto inner : lnast->children(type_nid)) {
-        flatten_assign(inner, full, collect_is_ref, out);
+        flatten_assign(inner, full, collect_is_ref, out, smin, smax);
       }
       return;
     }
@@ -219,17 +261,17 @@ void uPass_ssa::run(const std::shared_ptr<Lnast>& lnast) {
       is_ref = true;
     }
     auto ti = type_info_from(lnast, type_nid);
-    out.push_back({full, ti.bits, ti.is_signed, is_ref, ti.kind});
+    out.push_back({full, ti.bits, ti.is_signed, is_ref, ti.kind, smin, smax});
   };
 
   if (!in_tup_nid.is_invalid()) {
     for (auto entry : lnast->children(in_tup_nid)) {
-      flatten_assign(entry, std::string{}, /*collect_is_ref=*/true, flat_inputs);
+      flatten_assign(entry, std::string{}, /*collect_is_ref=*/true, flat_inputs, 0, 0);
     }
   }
   if (!out_tup_nid.is_invalid()) {
     for (auto entry : lnast->children(out_tup_nid)) {
-      flatten_assign(entry, std::string{}, /*collect_is_ref=*/false, flat_outputs);
+      flatten_assign(entry, std::string{}, /*collect_is_ref=*/false, flat_outputs, 0, 0);
     }
   }
   meta.inputs  = flat_inputs;
@@ -260,6 +302,14 @@ void uPass_ssa::run(const std::shared_ptr<Lnast>& lnast) {
           staging->add_child(ty, Lnast_node::create_const(std::string(Dlop::get_mask_value(f.bits)->to_pyrope())));
           staging->add_child(ty, Lnast_node::create_const("0"));
         }
+      }
+      // Task 1q — re-emit the trailing stages(min,max) annotation so the
+      // post-SSA io tree keeps the pipe contract visible (the LN pipe upass
+      // and lnast_to_slop read io_meta, but the dump stays source-of-truth).
+      if (!is_input && f.stages_min > 0) {
+        auto st = staging->add_child(a, Lnast_ntype::create_stages());
+        staging->add_child(st, Lnast_node::create_const(std::to_string(f.stages_min)));
+        staging->add_child(st, Lnast_node::create_const(std::to_string(f.stages_max)));
       }
     }
   };

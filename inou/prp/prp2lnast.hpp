@@ -247,6 +247,12 @@ protected:
                        std::vector<Param_attr>* attrs_out = nullptr);
   void emit_arg_type(const Lnast_nid& assign_parent, TSNode type_node);
 
+  // Task 1q — resolve a `pipe_lambda` node's `depth` field to the (min,max)
+  // stages pair: pipe[N] -> (N,N); pipe[A..=B] -> (A,B); pipe[A..<B] ->
+  // (A,B-1); bare pipe -> (1,0) (max 0 = unconstrained). pipe[0], zero-min
+  // ranges, descending ranges and non-literal depths are compile errors.
+  std::pair<int64_t, int64_t> parse_pipe_depth(TSNode pipe_lambda_node);
+
   struct Call_arg {
     bool        is_assign = false;
     bool        is_ref    = false;

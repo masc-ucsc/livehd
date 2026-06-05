@@ -213,9 +213,11 @@ public:
 
   // Returns the hhds::Port_id for a LiveHD sink name on the given op, or
   // livehd::Port_invalid when the name is not a valid sink for this op.
-  // The round-trip asserts (name → pid → name) stay enabled in debug builds
-  // for the recognised-name paths.
-  static inline constexpr hhds::Port_id get_sink_pid(Ntype_op op, std::string_view str) {
+  // The per-op first-char table is the fast path; same-op sink names that
+  // share a leading char (e.g. Flop posclk/pipe_min/pipe_max, all 'p')
+  // resolve through the global name2pid map with a per-op verify — the
+  // first-char slot keeps the first-declared (lowest-pid) name.
+  static inline hhds::Port_id get_sink_pid(Ntype_op op, std::string_view str) {
     auto c = str.front();
     // Common case speedup
     if (c >= 'a' && c <= 'f') {
@@ -234,11 +236,15 @@ public:
     }
 
     auto pid = sink_name2pid[str.front()][static_cast<std::size_t>(op)];
-    if (pid == livehd::Port_invalid) {
-      return livehd::Port_invalid;
+    if (pid != livehd::Port_invalid && sink_pid2name[pid][static_cast<std::size_t>(op)] == str) {
+      return pid;
     }
-    assert(get_sink_name(op, pid) == str);
-    return pid;
+    // Slow path: first-char miss or a same-first-char sibling pin.
+    auto it = name2pid.find(str);
+    if (it != name2pid.end() && sink_pid2name[it->second][static_cast<std::size_t>(op)] == str) {
+      return it->second;
+    }
+    return livehd::Port_invalid;
   }
 
   static inline std::string get_sink_name(Ntype_op op, hhds::Port_id pid) {

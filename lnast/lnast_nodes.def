@@ -110,6 +110,17 @@ LNAST_NODE( ref, ref )
 LNAST_NODE( const, const )
 LNAST_NODE( range, range )
 
+// Task 1q — pipeline stage annotation: stages( const(min), const(max) ).
+// Attached as the TRAILING child (identify by ntype, not position — the type
+// child is optional) of each OUTPUT io `store` entry of a `pipe` func_def,
+// and of the output reg `declare` the LN pipe upass inserts. Encoding:
+//   pipe[N]     -> (N, N)        pipe[A..=B] -> (A, B)
+//   pipe[A..<B] -> (A, B-1)      bare pipe   -> (1, 0)  max 0 = unconstrained
+// comb/mod outputs carry no stages node (absent == (0,0)). Values are the
+// SCC/sigma stage depth contract of 06c-pipelining.md; see
+// docs/contracts/task_1q_plan.md.
+LNAST_NODE( stages, stages )
+
 // Tuple Statements
 // Task 1t — `tuple_set` deleted: statement-level field writes are now `store`
 // (the same node that subsumed the statement-level scalar `assign`). A `store`

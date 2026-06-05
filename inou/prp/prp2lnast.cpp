@@ -8,6 +8,7 @@
 #include <fstream>
 #include <functional>
 #include <iostream>
+#include <limits>
 #include <sstream>
 #include <string>
 #include <vector>
@@ -2821,10 +2822,17 @@ void Prp2lnast::process_lambda_statement(TSNode n) {
   TSNode code = child_by_field(n, "code");
 
   std::string_view kind = ts_node_is_null(func_type_node) ? std::string_view{"comb"} : trim(get_text(func_type_node));
-  // Strip optional pipe[N] attribute. The new grammar adds `proc` as a
-  // recognized lambda kind; treat it as-is (no normalization).
-  if (kind.size() >= 4 && kind.substr(0, 4) == "pipe") {
-    kind = "pipe";
+  // Task 1q — a pipe lambda's depth attribute (`pipe[3]`, `pipe[2..=5]`,
+  // `pipe[1..<4]`, bare `pipe`) resolves to a per-output stages(min,max)
+  // annotation stamped on the io list below; the kind const stays the plain
+  // string "pipe". The grammar exposes the depth as the pipe_lambda node's
+  // `depth` field (a `select`).
+  bool             is_pipe    = kind.size() >= 4 && kind.substr(0, 4) == "pipe";
+  int64_t          stages_min = 0;
+  int64_t          stages_max = 0;
+  if (is_pipe) {
+    std::tie(stages_min, stages_max) = parse_pipe_depth(func_type_node);
+    kind                             = "pipe";
   }
 
   // Workaround for tree-sitter not always attaching the body to `code`:
@@ -2938,6 +2946,20 @@ void Prp2lnast::process_lambda_statement(TSNode n) {
           output_refs.emplace_back(get_text(id));
         }
       }
+    }
+  }
+
+  // Task 1q — stamp stages(min,max) as the TRAILING child of every OUTPUT io
+  // store entry (after the optional type subtree; downstream identifies it by
+  // ntype, never by position). Inputs never carry the annotation.
+  if (is_pipe) {
+    for (auto c = lnast->get_first_child(out_idx); !c.is_invalid(); c = lnast->get_sibling_next(c)) {
+      if (!Lnast_ntype::is_store(lnast->get_type(c))) {
+        continue;
+      }
+      auto st = lnast->add_child(c, Lnast_ntype::create_stages());
+      lnast->add_child(st, Lnast_node::create_const(std::to_string(stages_min)));
+      lnast->add_child(st, Lnast_node::create_const(std::to_string(stages_max)));
     }
   }
 
@@ -3102,6 +3124,112 @@ void Prp2lnast::process_lambda_statement(TSNode n) {
     param_bits_stack_.pop_back();
   }
   builder.pop_stmts();
+}
+
+// Task 1q — resolve the pipe_lambda `depth` field to the (min,max) stages
+// pair (see hpp). 06c-pipelining.md admits `pipe[N]`, `pipe[A..=B]`,
+// `pipe[A..<B]` and bare `pipe` — open-ended ranges (`pipe[2..]`) and
+// non-literal depths are rejected.
+std::pair<int64_t, int64_t> Prp2lnast::parse_pipe_depth(TSNode pipe_lambda_node) {
+  TSNode depth = child_by_field(pipe_lambda_node, "depth");
+  if (ts_node_is_null(depth)) {
+    return {1, 0};  // bare `pipe`: min 1 (contract: N >= 1), max 0 = unconstrained
+  }
+
+  // Literal integer from a `constant` CST node. The integer_literal child is
+  // a hidden token, so read the enclosing node's text. Goes through the
+  // Pyrope literal parser so hex/octal/underscore-grouped forms (`0x3`,
+  // `1_0`) work like every other integer literal.
+  auto lit_int = [&](TSNode c) -> std::optional<int64_t> {
+    if (ts_node_is_null(c) || std::string_view(ts_node_type(c)) != "constant") {
+      return std::nullopt;
+    }
+    auto txt = trim(get_text(c));
+    if (txt.empty()) {
+      return std::nullopt;
+    }
+    auto cst = Dlop::from_pyrope(txt);
+    if (cst && cst->is_integer() && cst->is_i()) {
+      return cst->to_i();
+    }
+    return std::nullopt;
+  };
+
+  // Depths ride int32 fields downstream (Lnast_io_entry::stages_min/max);
+  // diagnose anything beyond instead of silently truncating.
+  constexpr int64_t k_max_depth = std::numeric_limits<int32_t>::max();
+  auto              check_max   = [&](int64_t v, TSNode anchor) {
+    if (v > k_max_depth) {
+      report_error(anchor,
+                   "invalid-pipe-depth",
+                   "type",
+                   std::format("invalid pipe depth {}: exceeds the maximum of {}", v, k_max_depth),
+                   "use a realistic stage count");
+    }
+  };
+
+  TSNode index_n = child_by_field(depth, "index");
+
+  // `pipe[N]` — a single integer literal.
+  if (auto v = lit_int(index_n)) {
+    if (*v < 1) {
+      report_error(index_n,
+                   "invalid-pipe-depth",
+                   "type",
+                   std::format("invalid pipe depth {}: a pipe has at least one stage", *v),
+                   "use `pipe[1]` for a single-stage pipe, or `comb` for pure combinational logic");
+    }
+    check_max(*v, index_n);
+    return {*v, *v};
+  }
+
+  // `pipe[A..=B]` / `pipe[A..<B]` — closed literal ranges parse as an
+  // expression_item (const, binary_other_op(op_range_inclusive|exclusive),
+  // const). The select's `range` field only carries open-ended forms, which
+  // are not valid pipe depths.
+  if (!ts_node_is_null(index_n) && std::string_view(ts_node_type(index_n)) == "expression_item"
+      && ts_node_named_child_count(index_n) == 3) {
+    TSNode lhs = ts_node_named_child(index_n, 0);
+    TSNode op  = ts_node_named_child(index_n, 1);
+    TSNode rhs = ts_node_named_child(index_n, 2);
+    if (std::string_view(ts_node_type(op)) == "binary_other_op") {
+      TSNode op_inner = ts_node_named_child(op, 0);
+      if (!ts_node_is_null(op_inner)) {
+        std::string_view op_kind(ts_node_type(op_inner));
+        bool             inclusive = op_kind == "op_range_inclusive";
+        if (inclusive || op_kind == "op_range_exclusive") {
+          auto lo = lit_int(lhs);
+          auto hi = lit_int(rhs);
+          if (lo && hi) {
+            if (*lo < 1) {
+              report_error(lhs,
+                           "invalid-pipe-depth",
+                           "type",
+                           std::format("invalid pipe depth range minimum {}: a pipe has at least one stage", *lo),
+                           "start the range at 1 or higher, e.g. `pipe[1..=4]`");
+            }
+            int64_t max = inclusive ? *hi : *hi - 1;
+            if (max < *lo) {
+              report_error(
+                  op,
+                  "invalid-pipe-depth",
+                  "type",
+                  std::format("invalid pipe depth range: {} never reaches {} (only ascending ranges are allowed)", *lo, *hi),
+                  "swap the bounds so the range ascends, e.g. `pipe[2..=5]`");
+            }
+            check_max(max, rhs);
+            return {*lo, max};
+          }
+        }
+      }
+    }
+  }
+
+  report_error(depth,
+               "invalid-pipe-depth",
+               "type",
+               "pipe depth must be a literal integer or a literal ascending range",
+               "write `pipe[3]`, `pipe[2..=5]`, `pipe[1..<4]`, or bare `pipe`");
 }
 
 void Prp2lnast::process_enum_assignment(TSNode n) {

@@ -1013,19 +1013,87 @@ void Cgen_verilog::create_registers(std::shared_ptr<File_output> fout, hhds::Gra
       reset_initial = get_wire_or_const(initial_dpin);
     }
 
+    // Task 1q — pipeline depth: the pipe_min/pipe_max comptime pins make one
+    // Flop cell model a whole depth-d shift register. Unset pins => depth 1
+    // (today's single flop, bit-for-bit). For a ranged depth (min<max) the
+    // realization default at Verilog emission is the declared MINIMUM (the
+    // LG pass2 knob picks differently later); pipe_max is for the checker
+    // and the slop simulation, never read here.
+    int64_t depth = 1;
+    {
+      auto pm_dpin = get_driver(find_sink_pin(node, "pipe_min"));
+      if (!pm_dpin.is_invalid() && is_const_pin(pm_dpin)) {
+        depth = hydrate_const(pm_dpin).to_i();
+      }
+    }
+
+    if (depth <= 1) {
+      // Depth 1 (or unset): today's single-flop emission, unchanged.
+      fout->append("always @(", edge, " ", clock, reset_async, " ) begin\n");
+
+      if (reset.empty()) {
+        fout->append(name, " <= ", name_next, ";\n");
+      } else {
+        if (negreset) {
+          fout->append("if (!", reset, ") begin\n");
+        } else {
+          fout->append("if (", reset, ") begin\n");
+        }
+        fout->append(name, " <= ", reset_initial, ";\n");
+        fout->append("end else begin\n");
+        fout->append(name, " <= ", name_next, ";\n");
+        fout->append("end\n");
+      }
+
+      fout->append("end\n");
+      continue;
+    }
+
+    // depth >= 2: declare the d-1 intermediate stage regs (q itself is the
+    // last stage) and emit one clocked block chaining them. Every stage
+    // replicates the SAME clock/reset configuration — the inserted-flop
+    // contract forbids inventing a different reset style per stage.
+    int  bits    = bits_of(dpin);
+    bool out_uns = is_unsign(dpin);
+    if (out_uns) {
+      --bits;
+    }
+    std::vector<std::string> stage_names;
+    stage_names.reserve(static_cast<size_t>(depth) - 1);
+    for (int64_t i = 0; i < depth - 1; ++i) {
+      auto sname = get_append_to_name(name, absl::StrCat("___pipe", i, "_"));
+      if (bits <= 1) {
+        fout->append(out_uns ? "reg " : "reg signed ", sname, ";\n");
+      } else {
+        fout->append(out_uns ? "reg " : "reg signed ", "[", std::to_string(bits - 1), ":0] ", sname, ";\n");
+      }
+      stage_names.emplace_back(std::move(sname));
+    }
+
     fout->append("always @(", edge, " ", clock, reset_async, " ) begin\n");
 
+    auto emit_chain = [&]() {
+      fout->append(stage_names.front(), " <= ", name_next, ";\n");
+      for (size_t i = 1; i < stage_names.size(); ++i) {
+        fout->append(stage_names[i], " <= ", stage_names[i - 1], ";\n");
+      }
+      fout->append(name, " <= ", stage_names.back(), ";\n");
+    };
+
     if (reset.empty()) {
-      fout->append(name, " <= ", name_next, ";\n");
+      emit_chain();
     } else {
       if (negreset) {
         fout->append("if (!", reset, ") begin\n");
       } else {
         fout->append("if (", reset, ") begin\n");
       }
+      for (const auto& sname : stage_names) {
+        fout->append(sname, " <= ", reset_initial, ";\n");
+      }
       fout->append(name, " <= ", reset_initial, ";\n");
       fout->append("end else begin\n");
-      fout->append(name, " <= ", name_next, ";\n");
+      emit_chain();
       fout->append("end\n");
     }
 

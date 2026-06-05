@@ -68,3 +68,33 @@ cc_binary(
         "tests/errors/*.prp",
     ])
 ]
+
+# Equivalence pairs (tests/equiv/<name>.prp + golden <name>.v): the harness
+# lowers the .prp to Verilog (tolg path) and formally LECs it against the
+# golden via inou/yosys/lgcheck, so these need the yosys scripts/binary on
+# top of the plain-prp data. Distinct `prp-equiv-` prefix: equiv/trivial_if
+# would otherwise collide with the comptime/trivial_if target name.
+[
+    sh_test(
+        name = "prp-equiv-%s" % prp_file.split("/")[-1].split(".")[0],
+        srcs = ["tests/pyrope_test.py"],
+        args = [
+            "-i",
+            "$(location //inou/prp:%s)" % prp_file,
+        ],
+        data = [
+            "//inou/prp:tests/prplib.py",
+            "//inou/prp:tests/pyrope_test.py",
+            "//inou/prp:%s" % prp_file,
+            "//inou/prp:%s" % (prp_file[:-len(".prp")] + ".v"),
+            "//lhd",
+        ],
+        deps = ["//inou/yosys:scripts"],
+    )
+    for prp_file in glob(
+        ["tests/equiv/*.prp"],
+        # accum.prp is the aspirational call-site-phase file (stage[N]/@[N]):
+        # no test header, no golden .v — it goes live with the call-site phase.
+        exclude = ["tests/equiv/accum.prp"],
+    )
+]

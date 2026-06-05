@@ -383,7 +383,11 @@ void uPass_func_extract::process_func_def() {
   }
   const auto func_kind = std::string(current_text());
 
-  if (func_kind != "comb" || func_name.empty()) {
+  // Task 1q — `pipe` lambdas extract like `comb`: the spawned io-form LNAST
+  // carries the per-output stages(min,max) annotation (copied verbatim with
+  // the signature below), the LN pipe upass inserts the output flop, and
+  // tolg lowers it. `mod` stays embedded (later phase).
+  if ((func_kind != "comb" && func_kind != "pipe") || func_name.empty()) {
     move_to_parent();
     return;
   }

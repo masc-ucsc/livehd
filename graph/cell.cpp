@@ -59,9 +59,6 @@ Ntype::_init::_init() {
 
       ++n_sinks;
 
-      assert(is_unlimited_sink(static_cast<Ntype_op>(op)) || pid > 10 || sink_name2pid[pin_name[0]][op] == livehd::Port_invalid
-             || sink_name2pid[pin_name[0]][op] == pid);  // No double assign
-
       sink_pid2name[pid][op] = pin_name;
 
       auto [it, inserted] = name2pid.emplace(pin_name, pid);
@@ -73,7 +70,13 @@ Ntype::_init::_init() {
         continue;
       }
 
-      sink_name2pid[pin_name[0]][op] = pid;
+      // First-claim-wins on the per-op first-char slot: two sink names of the
+      // same op may share a leading char (Flop posclk/pipe_min/pipe_max all
+      // start with 'p'); the later pins resolve through get_sink_pid's slow
+      // path (global name2pid + per-op verify) instead of this table.
+      if (sink_name2pid[pin_name[0]][op] == livehd::Port_invalid) {
+        sink_name2pid[pin_name[0]][op] = pid;
+      }
       assert(pid == Ntype::get_sink_pid(static_cast<Ntype_op>(op), pin_name));
       assert(pin_name == Ntype::get_sink_name(static_cast<Ntype_op>(op), pid));
     }
@@ -231,6 +234,16 @@ constexpr std::string_view Ntype::get_sink_name_slow(Ntype_op op, hhds::Port_id 
         case 5 : return "negreset";
         case 6 : return "posclk";
         case 7 : return "reset_pin";
+        // Task 1q — pipeline depth range (comptime const pins). Unset =>
+        // depth 1 / don't check (today's behavior bit-for-bit). One Flop
+        // cell models the whole N-deep shift register — depth is a cell
+        // PARAMETER, never replicated cells. min==max==d => fixed depth-d;
+        // min<max => the tool owns the choice within the range (cgen
+        // realizes `pipe_min` stages; LG pass1 narrows by sigma; slop
+        // re-rolls per seed). Both names share posclk's leading 'p' — the
+        // get_sink_pid slow path resolves them via the global name table.
+        case 8 : return "pipe_min";  // comptime x 1
+        case 9 : return "pipe_max";  // comptime x 1
         default: return "invalid";
       }
       break;

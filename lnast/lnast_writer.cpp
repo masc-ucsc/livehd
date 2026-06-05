@@ -197,15 +197,35 @@ void Lnast_writer::write_dp_assign() {}
 // be distinguished from a field-path store by arity alone — detect it by a
 // type-node last child.
 void Lnast_writer::write_store() {
-  bool typed = false;
-  if (auto c0 = lnast->get_first_child(current_nid); !c0.is_invalid()) {
-    if (auto c1 = lnast->get_sibling_next(c0); !c1.is_invalid()) {
-      if (auto c2 = lnast->get_sibling_next(c1);
-          !c2.is_invalid() && lnast->get_sibling_next(c2).is_invalid() && Lnast_ntype::is_type(lnast->get_type(c2))) {
-        typed = true;
-      }
+  // Task 1q — an io-entry store may carry a trailing `stages(min,max)`
+  // annotation (identified by ntype). Exclude it from the value/type walk
+  // and print it as a suffix.
+  bool has_stages = false;
+  bool typed      = false;
+  {
+    Lnast_nid last;
+    size_t    n = 0;
+    for (auto c = lnast->get_first_child(current_nid); !c.is_invalid(); c = lnast->get_sibling_next(c)) {
+      last = c;
+      ++n;
+    }
+    if (!last.is_invalid() && Lnast_ntype::is_stages(lnast->get_type(last))) {
+      has_stages = true;
+      --n;
+    }
+    if (n == 3) {
+      // Third payload child a type node => typed bind `name = value : type`.
+      auto c2 = lnast->get_sibling_next(lnast->get_sibling_next(lnast->get_first_child(current_nid)));
+      typed   = Lnast_ntype::is_type(lnast->get_type(c2));
     }
   }
+  auto is_payload_last = [&]() {
+    if (is_last_child()) {
+      return true;
+    }
+    auto next = lnast->get_sibling_next(current_nid);
+    return has_stages && Lnast_ntype::is_stages(lnast->get_type(next));
+  };
   move_to_child();
   write_lnast();  // var / name
   if (typed) {
@@ -216,13 +236,18 @@ void Lnast_writer::write_store() {
     print(" : ");
     write_lnast();  // type
   } else {
-    while (move_to_sibling() && !is_last_child()) {
+    while (move_to_sibling() && !is_payload_last()) {
       print("[");
       write_lnast();  // level (field key / index)
       print("]");
     }
     print(" = ");
-    write_lnast();  // value (cursor already on the last child)
+    write_lnast();  // value (cursor already on the last payload child)
+  }
+  if (has_stages) {
+    move_to_sibling();
+    print(" ");
+    write_lnast();  // stages(min, max)
   }
   move_to_parent();
 }
@@ -319,6 +344,20 @@ void Lnast_writer::write_const() {
 }
 
 void Lnast_writer::write_range() { write_n_ary("range"); }
+
+// Task 1q — stages(min, max) pipeline annotation. Unlike the n-ary ops it has
+// no destination child: both children are payload consts.
+void Lnast_writer::write_stages() {
+  print("stages(");
+  move_to_child();
+  write_lnast();  // min
+  while (move_to_sibling()) {
+    print(", ");
+    write_lnast();  // max
+  }
+  print(")");
+  move_to_parent();
+}
 
 void Lnast_writer::write_type_spec() {
   move_to_child();

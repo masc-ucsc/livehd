@@ -1,0 +1,8 @@
+/*
+:name: pipe_zero_depth
+:type: error
+:error: a pipe has at least one stage
+:help: single-stage
+*/
+
+pipe[0] f(a:u8) -> (c:u8) { c = a }   // locate_error_here

@@ -26,6 +26,7 @@ cc_library(
         "//upass/cyclecmd:upass_cyclecmd",
         "//upass/func_extract:upass_func_extract",
         "//upass/noop:upass_noop",
+        "//upass/pipe:upass_pipe",
         "//upass/runner:upass_runner",
         "//upass/semacheck:upass_semacheck",
         "//upass/ssa:upass_ssa",

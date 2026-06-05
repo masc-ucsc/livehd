@@ -1140,6 +1140,16 @@ bool uPass_runner::try_inline_func_call() {
   // but is a legitimate inline target (passed the inlinable_callees_ gate
   // above). Its empty inputs/outputs make the prologue/epilogue no-ops.
 
+  // Task 1q — a `pipe` callee (any output carries a stages annotation) is
+  // never comb-inlined: its outputs are flopped, and a call site must consume
+  // it via `await[N]` (later phase). Decline so the call surfaces unresolved
+  // instead of silently dropping the latency.
+  for (const auto& oe : io.outputs) {
+    if (oe.stages_min > 0) {
+      return false;
+    }
+  }
+
   // ── Match actuals → params (positional + named) ──────────────────────────
   const std::size_t        nparams = io.inputs.size();
   std::vector<Lnast_node>  param_val(nparams, Lnast_node::create_invalid());

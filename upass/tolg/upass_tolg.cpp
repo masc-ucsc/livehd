@@ -4,6 +4,7 @@
 
 #include <bit>
 #include <cstdint>
+#include <functional>
 #include <string>
 #include <string_view>
 #include <utility>
@@ -50,7 +51,13 @@ struct Val {
 // Builds one hhds::Graph from one post-upass / post-SSA function-tree Lnast.
 class Tolg {
 public:
-  Tolg(const std::shared_ptr<Lnast>& lnast, hhds::Graph* g) : lnast_(lnast), g_(g) {}
+  // `clock_name` is the graph input driving every flop's clock_pin (the
+  // declared clk/clock input, or the implicit "clock" run() minted —
+  // `clock_minted` distinguishes them so only the minted pin gets its
+  // width/sign stamped here; a reused declared input was already stamped by
+  // the io loop). Empty when the tree has no regs.
+  Tolg(const std::shared_ptr<Lnast>& lnast, hhds::Graph* g, std::string clock_name, bool clock_minted)
+      : lnast_(lnast), g_(g), clock_name_(std::move(clock_name)), clock_minted_(clock_minted) {}
 
   void build() {
     // Inputs: from io_meta(). Unsigned inputs are wrapped in a to-positive
@@ -198,6 +205,8 @@ private:
       lower_if(nid);
     } else if (N::is_store(t)) {
       lower_store(nid);
+    } else if (N::is_declare(t)) {
+      lower_declare(nid);
     } else if (N::is_range(t)) {
       lower_range(nid);
     } else if (N::is_get_mask(t)) {
@@ -239,7 +248,9 @@ private:
     }
   }
 
-  // store(ref(lhs), value) — scalar assignment / alias.
+  // store(ref(lhs), value) — scalar assignment / alias. A store whose lhs is
+  // a declared reg connects the value to the Flop's din instead of rebinding
+  // the name (reads keep seeing the q pin — Verilog `<=` semantics).
   void lower_store(const Lnast_nid& nid) {
     auto lhs = lnast_->get_first_child(nid);
     if (lhs.is_invalid()) {
@@ -253,8 +264,95 @@ private:
       Pass::warn("upass.tolg: tuple/field store not handled yet (lhs '{}')", lnast_->get_name(lhs));
       return;
     }
+    auto lhs_name = lnast_->get_name(lhs);
+    if (auto rit = reg_map_.find(lhs_name); rit != reg_map_.end()) {
+      if (!reg_din_connected_.insert(std::string(lhs_name)).second) {
+        // Conditional / multiple reg writes are the 2d milestone (they need
+        // the enable/mux lowering); the pipe upass emits exactly one.
+        Pass::warn("upass.tolg: multiple writes to reg '{}' not handled yet — keeping the first", lhs_name);
+        return;
+      }
+      auto v = leaf(rhs);
+      setup_sink_by_name(rit->second, "din").connect_driver(v.pin);
+      // The q pin mirrors din's width/sign convention (mw+1 unsigned bits).
+      auto q = rit->second.create_driver_pin(0);
+      set_bits(q, v.mw + 1);
+      set_unsign(q);
+      mw_map_[std::string(lhs_name)] = v.mw;
+      return;
+    }
     auto v = leaf(rhs);
-    record(lnast_->get_name(lhs), v.pin, v.mw);
+    record(lhs_name, v.pin, v.mw);
+  }
+
+  // Task 1q — declare(ref(name), type, const("reg")) [+ stages(min,max)]:
+  // create the Flop cell (the first Flop on the Pyrope->LG path). The name
+  // binds to the q pin so subsequent READS see q; the din store above wires
+  // the input. Inserted pipeline flops carry the declared stages range on
+  // the pipe_min/pipe_max comptime pins (LG pass1 narrows them by sigma
+  // later). A pure-comb partition's flop is the no-reset shape — reset_pin/
+  // initial/async/enable stay unconnected; posclk unset reads as posedge.
+  void lower_declare(const Lnast_nid& nid) {
+    auto name_nid = lnast_->get_first_child(nid);
+    if (name_nid.is_invalid()) {
+      return;
+    }
+    auto type_nid = lnast_->get_sibling_next(name_nid);
+    auto mode_nid = type_nid.is_invalid() ? type_nid : lnast_->get_sibling_next(type_nid);
+    auto mode     = mode_nid.is_invalid() || !Lnast_ntype::is_const(lnast_->get_type(mode_nid))
+                        ? std::string_view{}
+                        : std::string_view(lnast_->get_name(mode_nid));
+    if (mode != "reg" && !mode.starts_with("reg ")) {
+      // mut/const/type declares carry no graph payload here (values arrive
+      // via their stores); nothing to lower.
+      return;
+    }
+
+    auto flop = create_typed_node(*g_, Ntype_op::Flop);
+
+    // stages(min,max) trailing child -> pipe_min/pipe_max comptime pins.
+    for (auto c = lnast_->get_sibling_next(mode_nid); !c.is_invalid(); c = lnast_->get_sibling_next(c)) {
+      if (!Lnast_ntype::is_stages(lnast_->get_type(c))) {
+        continue;
+      }
+      auto mn = lnast_->get_first_child(c);
+      if (mn.is_invalid()) {
+        break;
+      }
+      auto mx = lnast_->get_sibling_next(mn);
+      setup_sink_by_name(flop, "pipe_min").connect_driver(create_const(*g_, *Const::create_integer(const_val(mn))));
+      if (!mx.is_invalid()) {
+        setup_sink_by_name(flop, "pipe_max").connect_driver(create_const(*g_, *Const::create_integer(const_val(mx))));
+      }
+      break;
+    }
+
+    if (!clock_name_.empty()) {
+      setup_sink_by_name(flop, "clock_pin").connect_driver(clock_pin());
+    } else {
+      Pass::warn("upass.tolg: reg '{}' has no clock input to bind", lnast_->get_name(name_nid));
+    }
+
+    auto name = lnast_->get_name(name_nid);
+    auto q    = flop.create_driver_pin(0);
+    reg_map_.emplace(std::string(name), flop);
+    record(name, q, 1);  // provisional width; the din store restamps it
+  }
+
+  // The clock graph-input pin. A minted implicit clock gets stamped 1-bit
+  // unsigned on first use; a reused declared clk/clock input keeps the
+  // width/sign the io loop already stamped.
+  [[nodiscard]] Pin clock_pin() {
+    if (!clock_pin_valid_) {
+      auto p = g_->get_input_pin(clock_name_);
+      if (clock_minted_) {
+        set_bits(p, 1);
+        set_unsign(p);
+      }
+      clock_pin_       = p;
+      clock_pin_valid_ = true;
+    }
+    return clock_pin_;
   }
 
   // range(ref(dst), lo, hi) — record [lo,hi] for a later get_mask; no node.
@@ -524,6 +622,16 @@ private:
   std::vector<WriteMap>                                         branch_writes_;
   std::vector<std::string>                                      out_names_;
   WriteMap                                                      empty_writes_;
+
+  // Task 1q — reg lowering state. reg_map_ holds each declared reg's Flop
+  // node (reads resolve to its q via pin_map_; the din store connects through
+  // the node handle here). clock_* lazily binds the clock graph input.
+  absl::flat_hash_map<std::string, hhds::Node_class> reg_map_;
+  absl::flat_hash_set<std::string>                   reg_din_connected_;
+  std::string                                        clock_name_;
+  bool                                               clock_minted_ = false;
+  Pin                                                clock_pin_;
+  bool                                               clock_pin_valid_ = false;
 };
 
 }  // namespace
@@ -567,9 +675,77 @@ std::shared_ptr<hhds::Graph> uPass_tolg::run(const std::shared_ptr<Lnast>& lnast
     declare(e, /*is_input=*/false);
   }
 
+  // Task 1q — implicit clock (shared with the 2d reg milestone): when the
+  // tree declares a reg and the partition has no clk/clock input, mint a
+  // 1-bit unsigned "clock" graph input for the flops' clock_pin.
+  std::string clock_name;
+  bool        clock_minted = false;
+  {
+    std::function<bool(const Lnast_nid&)> has_reg = [&](const Lnast_nid& nid) -> bool {
+      if (Lnast_ntype::is_declare(lnast->get_type(nid))) {
+        auto c0 = lnast->get_first_child(nid);
+        if (!c0.is_invalid()) {
+          auto c1 = lnast->get_sibling_next(c0);
+          if (!c1.is_invalid()) {
+            auto c2 = lnast->get_sibling_next(c1);
+            if (!c2.is_invalid() && Lnast_ntype::is_const(lnast->get_type(c2))) {
+              auto mode = lnast->get_name(c2);
+              if (mode == "reg" || mode.starts_with("reg ")) {
+                return true;
+              }
+            }
+          }
+        }
+      }
+      for (auto c = lnast->get_first_child(nid); !c.is_invalid(); c = lnast->get_sibling_next(c)) {
+        if (has_reg(c)) {
+          return true;
+        }
+      }
+      return false;
+    };
+    if (has_reg(lnast->get_root())) {
+      // Reuse a declared clk/clock input only when it can actually be a
+      // clock (bool or <=1-bit; untyped bits==0 included) — a multi-bit
+      // DATA port that happens to be named clk/clock must not be hijacked
+      // as the flop clock.
+      for (const auto& e : lnast->io_meta().inputs) {
+        if ((e.name == "clk" || e.name == "clock") && (e.kind == Io_kind::boolean || e.bits <= 1)) {
+          clock_name = e.name;
+          break;
+        }
+      }
+      if (clock_name.empty()) {
+        // Minting the implicit "clock" input collides with any existing
+        // multi-bit clock-named port — diagnose instead of double-driving.
+        for (const auto& e : lnast->io_meta().inputs) {
+          if (e.name == "clock") {
+            Pass::error(
+                "upass.tolg: input 'clock' of '{}' is not usable as the pipeline clock (multi-bit data port) "
+                "and collides with the implicit clock — rename it or declare it 1-bit",
+                mod_name);
+          }
+        }
+        for (const auto& e : lnast->io_meta().outputs) {
+          if (e.name == "clock") {
+            Pass::error("upass.tolg: output 'clock' of '{}' collides with the implicit pipeline clock — rename it", mod_name);
+          }
+        }
+        clock_name = "clock";
+        if (!gio->has_input(clock_name) && !gio->has_output(clock_name)) {
+          gio->add_input(clock_name, pid);
+          ++pid;
+        }
+        gio->set_bits(clock_name, 1);
+        gio->set_unsign(clock_name, true);
+        clock_minted = true;
+      }
+    }
+  }
+
   auto g_shared = gio->has_graph() ? gio->get_graph() : gio->create_graph();
 
-  Tolg builder(lnast, g_shared.get());
+  Tolg builder(lnast, g_shared.get(), clock_name, clock_minted);
   builder.build();
 
   g_shared->commit();

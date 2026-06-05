@@ -1,0 +1,34 @@
+/*
+:name: tup_method
+:type: comptime
+:verifier_pass: 11
+:verifier_fail: 0
+*/
+
+mut p1 = (
+  mut found_once:bool = false,
+  comb call(ref self, a) -> (result) {
+    self.found_once or= (a == 0)
+    result = a + 1
+  },
+  comb call2(self, a) -> (result) { // no ref, read-only method
+    result = a + int(self.found_once)
+  }
+)
+
+mut p2 = p1       // copy
+
+cassert(p1.found_once == false)
+cassert(p2.found_once == false)
+
+cassert(p1.call(3) == 4)
+cassert(p1.found_once == false)
+cassert(p1.call2(10) == 10)
+
+cassert(p1.call(0) == 1)
+cassert(p1.found_once == true)
+cassert(p1.call2(10) == 11)
+
+cassert(p1.call(50) == 51)
+cassert(p1.found_once == true)
+cassert(p2.found_once == false)

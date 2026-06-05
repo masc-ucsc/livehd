@@ -1,0 +1,8 @@
+/*
+:name: pipe_descending_range
+:type: error
+:error: never reaches
+:help: ascends
+*/
+
+pipe[3..=2] g(a:u8) -> (c:u8) { c = a }   // locate_error_here

@@ -16,6 +16,7 @@
 #include "upass_attributes.hpp"  // NOLINT: ensures plugin "attributes" is linked
 #include "upass_bitwidth.hpp"    // NOLINT: ensures plugin "bitwidth" is linked
 #include "upass_constprop.hpp"
+#include "upass_pipe.hpp"
 #include "upass_runner.hpp"
 #include "upass_semacheck.hpp"  // NOLINT: ensures plugin "semacheck" is linked
 #include "upass_ssa.hpp"
@@ -403,6 +404,19 @@ void Pass_upass::work(Eprp_var& var) {
     auto new_lnasts = runner.take_new_lnasts();
     for (const auto& new_ln : new_lnasts) {
       var.add(new_ln);
+    }
+  }
+
+  // ── LN pipe upass (task 1q). Inserts the per-output pipeline flop —
+  // declare(reg)+stages plus the din/q rebind stores — into every `pipe`
+  // function tree (io_meta outputs with stages_min >= 1; comb trees no-op).
+  // Runs AFTER the main walk so constprop never folds the reg loop away,
+  // and BEFORE the terminal consumers so both see the inserted reg: tolg
+  // below, and the future lnast_to_slop. toln:0 (diagnostics-only, e.g. the
+  // LSP) skips it along with everything else that shapes the output tree.
+  if (up.run_toln) {
+    for (const auto& ln : var.lnasts) {
+      uPass_pipe::run(ln);
     }
   }
 
