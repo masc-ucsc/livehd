@@ -246,11 +246,11 @@ std::vector<livehd::diag::Diagnostic> analyze(std::string_view virtual_path, std
   // and a stage failure stops the chain exactly as the `|>` pipeline would.
   std::shared_ptr<Lnast> lnast;
   try {
-    // Full front-end (not parse_only) so name/type diagnostics surface too. The
+    // Full front-end so name/type diagnostics surface too. The
     // first reported PARSE error still aborts the front-end (collect-and-continue
     // is future work per docs/contracts/diagnostics.md); upass/lnastfmt below run
     // only when the front-end produced a usable tree.
-    Prp2lnast converter(virtual_path, module_name_of(virtual_path), /*parse_only=*/false, text);
+    Prp2lnast converter(virtual_path, module_name_of(virtual_path), text);
     lnast = converter.get_lnast();
   } catch (const std::exception&) {
     // The diagnostic was already flushed into records() by the parser_error

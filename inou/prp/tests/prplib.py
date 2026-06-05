@@ -59,10 +59,12 @@ class PrpRunner:
             sys.exit(3)
 
     def lgshell_parse(self, test):
+        # Front-end only (parse + LNAST translation, no upass). The old
+        # parse_only:true flag (skip LNAST translation) was removed.
         lg_cmd = []
 
         lg_cmd.append('inou.prp')
-        lg_cmd.append('files:{} parse_only:true'.format(','.join(test.params['files'])))
+        lg_cmd.append('files:{}'.format(','.join(test.params['files'])))
 
         return lg_cmd
 

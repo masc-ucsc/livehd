@@ -746,7 +746,7 @@ void scan_command(Options& opts, Result& res) {
     std::shared_ptr<Lnast> ln;
     {
       Stdout_to_log redirect(next_log_path(opts, "scan.prp"));
-      Prp2lnast     conv(f, base, /*parse_only=*/false);
+      Prp2lnast     conv(f, base);
       ln = conv.get_lnast();
     }
     if (livehd::diag::sink().has_errors()) {

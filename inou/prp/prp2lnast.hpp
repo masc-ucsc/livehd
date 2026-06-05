@@ -294,12 +294,12 @@ protected:
   inline uint32_t named_child_count(const TSNode& n) const { return ts_node_named_child_count(n); }
 
 public:
-  Prp2lnast(std::string_view filename, std::string_view module_name, bool parse_only);
+  Prp2lnast(std::string_view filename, std::string_view module_name);
 
   // Analyze an in-memory buffer (e.g. an editor's unsaved buffer / LSP request).
   // `filename` is a virtual path used only for diagnostic spans; `source` is the
   // buffer text (read verbatim — the file at `filename` is NOT opened).
-  Prp2lnast(std::string_view filename, std::string_view module_name, bool parse_only, std::string_view source);
+  Prp2lnast(std::string_view filename, std::string_view module_name, std::string_view source);
 
   ~Prp2lnast();
 

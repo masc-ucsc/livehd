@@ -101,33 +101,20 @@ def main() -> int:
 
     env = {**os.environ, "HOME": str(tmpdir)}
 
-    # Four measurements: parse-only and parse+constfold on each side. The
-    # parse-only baselines isolate frontend cost from IR-level fold cost,
-    # so a regression in one stage is diagnosable from the other.
-    prp_parse_only = (
-        f"inou.prp files:{prp_path} parse_only:true\nquit\n"
-    ).encode()
+    # One measurement per side: the full parse+constfold pipeline. (There
+    # used to be parse-only legs via `inou.prp parse_only:true`, but that
+    # flag was a development-debug aid and has been removed.)
     prp_full = (
         f"inou.prp files:{prp_path} |> pass.lnastfmt "
         f"|> pass.upass constprop:1 verifier:false\nquit\n"
     ).encode()
-    yosys_parse_cmd = [
-        str(yosys), "-Q", "-T", "-q",
-        "-p", f"read_verilog {v_path}",
-    ]
     yosys_full_cmd = [
         str(yosys), "-Q", "-T", "-q",
         "-p", f"read_verilog {v_path}; opt",
     ]
 
-    print("\n[prp parse] inou.prp parse_only:true", flush=True)
-    t_prp_parse = measure("prp_parse", [str(lgshell)], prp_parse_only, env)
-
     print("\n[prp full] inou.prp |> pass.lnastfmt |> pass.upass constprop:1", flush=True)
     t_prp_full = measure("prp_full", [str(lgshell)], prp_full, env)
-
-    print("\n[yosys parse] read_verilog", flush=True)
-    t_yosys_parse = measure("yosys_parse", yosys_parse_cmd, None, env)
 
     print("\n[yosys full] read_verilog ; opt", flush=True)
     t_yosys_full = measure("yosys_full", yosys_full_cmd, None, env)
@@ -156,13 +143,11 @@ def main() -> int:
     else:
         print("\n[cxx] no C++ compiler found; skipping reference", flush=True)
 
-    ratio_parse = t_prp_parse / t_yosys_parse
     ratio_full = t_prp_full / t_yosys_full
     cxx_o0_str = f"{t_cxx_o0:.4f}s" if t_cxx_o0 is not None else "n/a"
     cxx_o2_str = f"{t_cxx_o2:.4f}s" if t_cxx_o2 is not None else "n/a"
     print(
         f"\nresult:"
-        f"\n  parse-only:  T_prp={t_prp_parse:.4f}s T_yosys={t_yosys_parse:.4f}s ratio={ratio_parse:.3f}"
         f"\n  full:        T_prp={t_prp_full:.4f}s T_yosys={t_yosys_full:.4f}s ratio={ratio_full:.3f}"
         f"\n  cxx-ref:     T_O0={cxx_o0_str} T_O2={cxx_o2_str} (report-only, not enforced)"
         f"\n  contract:    full ratio must be < {MAX_RATIO}",

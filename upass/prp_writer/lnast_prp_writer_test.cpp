@@ -350,7 +350,7 @@ static std::string write_prp(std::string_view name, std::string_view src) {
 static std::string round_trip(std::string_view name, std::string_view src,
                               const std::vector<std::string>& passes = {"noop_shared"}) {
   auto      path = write_prp(name, src);
-  Prp2lnast converter(path, std::string(name), /*parse_only=*/false);
+  Prp2lnast converter(path, std::string(name));
   auto      ln = converter.get_lnast();
 
   auto         lm = std::make_shared<upass::Lnast_manager>(ln);

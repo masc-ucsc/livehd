@@ -34,11 +34,11 @@ std::string slurp_file(std::string_view filename) {
 }  // namespace
 
 // File-backed entry: read `filename` from disk, then delegate to the buffer ctor.
-Prp2lnast::Prp2lnast(std::string_view filename, std::string_view module_name, bool parse_only = false)
-    : Prp2lnast(filename, module_name, parse_only, slurp_file(filename)) {}
+Prp2lnast::Prp2lnast(std::string_view filename, std::string_view module_name)
+    : Prp2lnast(filename, module_name, slurp_file(filename)) {}
 
 // Buffer-backed entry (LSP / unsaved buffers): analyze `source` verbatim.
-Prp2lnast::Prp2lnast(std::string_view filename, std::string_view module_name, bool parse_only, std::string_view source) {
+Prp2lnast::Prp2lnast(std::string_view filename, std::string_view module_name, std::string_view source) {
   lnast = std::make_shared<Lnast>(module_name);
 
   lnast->set_root(Lnast_ntype::create_top());
@@ -67,10 +67,6 @@ Prp2lnast::Prp2lnast(std::string_view filename, std::string_view module_name, bo
     // unambiguous syntax error — unlike ERROR nodes, which the pyrope grammar also
     // emits for valid `uint`/`sint` constructs, so a MISSING check is quirk-safe.
     check_parse_errors();
-
-    if (parse_only) {
-      return;
-    }
 
     process_description();  // runs the scope checks internally, before rewrite_decls_to_declare
   } catch (...) {
