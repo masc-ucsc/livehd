@@ -2451,6 +2451,12 @@ static void finalize_module(hhds::Graph* g) {
     if (dpin.is_invalid() || is_const_pin(dpin)) {
       continue;
     }
+    if (is_graph_input_pin(dpin)) {
+      // Graph-input signedness was already copied from the RTLIL port wire in
+      // look_for_wire(). Do not overwrite unsigned source ports such as clock
+      // and reset with LiveHD's internal signed-by-default convention.
+      continue;
+    }
 
     if (op == Ntype_op::Get_mask) {
       set_unsign(dpin);

@@ -13,6 +13,7 @@
 #include <stdexcept>
 
 #include "file_utils.hpp"
+#include "cgen_verilog.hpp"
 #include "inou_yosys_api.hpp"
 #ifdef I
 #undef I
@@ -382,35 +383,12 @@ void Inou_yosys_api::do_tolg(Eprp_var& var) {
 void Inou_yosys_api::fromlg(Eprp_var& var) {
   Inou_yosys_api p(var, false);
 
-  Yosys::yosys_setup();
-
   for (const auto& g : var.graphs) {
     if (!g) {
       continue;
     }
-    auto gio = g->get_io();
-    if (!gio) {
-      continue;
-    }
-    std::string name{gio->get_name()};
-
-    mustache::data vars;
-
-    vars.set("path", p.path);
-    vars.set("odir", p.odir);
-
-    auto file = absl::StrCat(p.odir, "/", name, ".v");
-    vars.set("file", file);
-    vars.set("name", name);
-
-    auto hier = var.get("hier");
-    if (!hier.empty() && (hier == "1" || hier == "true")) {
-      vars.set("hier", mustache::data::type::bool_true);
-    } else {
-      vars.set("hier", mustache::data::type::bool_false);
-    }
-
-    p.call_yosys(vars);
+    Cgen_verilog cgen(false, p.odir);
+    cgen.do_from_graph(g);
   }
 }
 
@@ -432,7 +410,7 @@ void Inou_yosys_api::setup() {
 
   register_inou("yosys", m1);
 
-  Eprp_method m2("inou.yosys.fromlg", "write verilog using yosys from lgraph", &Inou_yosys_api::fromlg);
+  Eprp_method m2("inou.yosys.fromlg", "write verilog from lgraph", &Inou_yosys_api::fromlg);
   m2.add_label_optional("path", "path to read the lgraph[s]", "lgdb");
   m2.add_label_optional("odir", "output directory for generated verilog files", ".");
   m2.add_label_optional("script", "alternative custom inou_yosys_write.ys command");

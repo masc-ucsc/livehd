@@ -820,7 +820,12 @@ void Cgen_verilog::create_module_io(std::shared_ptr<File_output> fout, hhds::Gra
     }
 
     const auto name = get_scaped_name(e.name);
-    const auto bits = e.bits;
+
+    // Prefer the concrete HHDS pin width when present. Some imported GraphIO
+    // declarations can retain stale placeholder widths, while the graph pin
+    // has already been fixed by bitwidth propagation.
+    hhds::Pin_class pin = e.is_input ? graph->get_input_pin(e.name) : graph->get_output_pin(e.name);
+    const auto      bits = pin.is_invalid() ? e.bits : livehd::graph_util::bits_of(pin, *gio, e.name);
 
     if (bits > 1) {
       fout->append("[", std::to_string(bits - 1), ":0] ", name, "\n");
@@ -829,7 +834,6 @@ void Cgen_verilog::create_module_io(std::shared_ptr<File_output> fout, hhds::Gra
     }
 
     // Map the corresponding HHDS pin (driver for inputs, sink for outputs) into pin2var.
-    hhds::Pin_class pin = e.is_input ? graph->get_input_pin(e.name) : graph->get_output_pin(e.name);
     if (!pin.is_invalid()) {
       pin2var.emplace(pin.get_class_index(), name);
     }

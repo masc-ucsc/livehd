@@ -30,6 +30,7 @@ cc_library(
         "//pass/bitwidth:pass_bitwidth",
         "//pass/common:pass",
         "//pass/cprop:pass_cprop",
+        "//pass/isabelle:pass_isabelle",
         "//pass/lnastfmt:pass_lnastfmt",
         "//pass/prp_writer:pass_prp_writer",
         "//pass/upass:pass_upass",

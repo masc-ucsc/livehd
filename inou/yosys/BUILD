@@ -19,6 +19,7 @@ cc_library(
     visibility = ["//visibility:public"],
     deps = [
         "//graph",
+        "//inou/cgen:inou_cgen",
         "//pass/common:pass",
         "@at_clifford_yosys2//:kernel",
         "@at_clifford_yosys2//:version",
