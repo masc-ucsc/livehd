@@ -43,7 +43,7 @@ void Inou_slang::work(Eprp_var& var) {
 
   std::vector<char*> argv;
 
-  argv.push_back(strdup("lgshell"));
+  argv.push_back(strdup("lhd"));  // argv[0] placeholder for the slang driver
 
   // #ifdef NDEBUG
   argv.push_back(strdup("--quiet"));

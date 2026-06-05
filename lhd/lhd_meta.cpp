@@ -130,7 +130,7 @@ int describe_command(const Options& opts) {
   }
   if (name == "lnast-dump") {
     print_json_line(
-        R"json({"schema_version":1,"name":"lnast-dump","description":"Round-trippable textual LNAST dump (the lgshell lnast.dump printer), one <unit>.lnast per unit. A debug/test observable; the binary interchange form is ln:. From elaborate: post-parse; from synth/compile: post-upass","direction":"out"})json");
+        R"json({"schema_version":1,"name":"lnast-dump","description":"Round-trippable textual LNAST dump (the Lnast::dump text form), one <unit>.lnast per unit. A debug/test observable; the binary interchange form is ln:. From elaborate: post-parse; from synth/compile: post-upass","direction":"out"})json");
     return 0;
   }
   if (name == "config") {
@@ -173,8 +173,7 @@ int help_command(const Options& opts) {
         "        --workdir DIR -q --verbose   (`lhd describe config` for the lhd.toml schema)\n"
         "\n"
         "The kernel is always deterministic (content-hash run_id, SOURCE_DATE_EPOCH)\n"
-        "and always hermetic (undeclared input => missing_file). The lgshell REPL is\n"
-        "unchanged and remains available for interactive use.\n");
+        "and always hermetic (undeclared input => missing_file).\n");
     return 0;
   }
   Options d;

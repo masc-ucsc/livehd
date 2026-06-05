@@ -1,8 +1,8 @@
 # This file is distributed under the BSD 3-Clause License. See LICENSE for details.
 
 # lhd — the stateless, hermetic LiveHD CLI kernel (task 1y-bazel).
-# Contract: docs/contracts/future_cli.md. The lgshell REPL (//main:lgshell)
-# is untouched; lhd links the same pass/inou registry and drives it via argv.
+# Contract: docs/contracts/future_cli.md. lhd links the pass/inou registry
+# and drives it via argv; the legacy lgshell REPL was removed 2026-06-04.
 
 load("@rules_cc//cc:defs.bzl", "cc_binary", "cc_library")
 load("//tools:copt_default.bzl", "COPTS")

@@ -348,8 +348,8 @@ void emit_ln_outputs(const std::vector<std::shared_ptr<Lnast>>& units, Options& 
   }
 }
 
-// `--emit-dir lnast-dump:DIR/` — the round-trippable textual LNAST dump (the
-// same printer as lgshell's `lnast.dump`), one <unit>.lnast per unit. A debug/
+// `--emit-dir lnast-dump:DIR/` — the round-trippable textual LNAST dump
+// (Lnast::dump text form), one <unit>.lnast per unit. A debug/
 // test observable: the binary interchange form stays `ln:`.
 void emit_lnast_dump_outputs(const std::vector<std::shared_ptr<Lnast>>& units, Options& opts, Result& res) {
   for (const auto& e : opts.emit_dirs) {

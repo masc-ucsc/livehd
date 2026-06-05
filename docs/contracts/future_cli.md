@@ -49,7 +49,7 @@ Principles (shared by both layers):
 
 This is the kernel: the `lhd` binary, invoked as a pure function
 `(declared inputs, config) → (declared outputs, exit code)`. It is what a Bazel
-rule or a Makefile recipe calls — never the `lgshell` REPL. It reads and writes
+rule or a Makefile recipe calls — never a REPL. It reads and writes
 no ambient state: no `@tag`, no `~/.cache`, no history file, no lock, no
 `latest` symlink.
 
@@ -261,7 +261,7 @@ No partial success: a fused `compile` exits 0 only if every constituent step is
 ### Clean stdout / no REPL chatter
 
 The `lhd` binary emits nothing on stdout except the selected protocol (or
-nothing at all when `--result-json` is given). The `lgshell` REPL chatter
+nothing at all when `--result-json` is given). REPL-style chatter
 (welcome banner, echoed input line, `command aborted…`) does not exist on this
 path. Diagnostics go to the `diagnostics` emit, the `--result-json` error
 block, and/or stderr — never intermixed on stdout.
@@ -315,8 +315,8 @@ Deferred to follow-ups (the kernel ships without them): `--recipe-file` TOML
 
 ### Implementation status (1y-bazel v0, landed)
 
-The kernel lives in `lhd/` (`bazel build //lhd:lhd` → `bazel-bin/lhd/lhd`);
-`lgshell` is untouched. It drives the registered EPRP methods programmatically
+The kernel lives in `lhd/` (`bazel build //lhd:lhd` → `bazel-bin/lhd/lhd`).
+It drives the registered EPRP methods programmatically
 (`Eprp::run_method_now`, no `|>` strings, stdout captured per step into
 `--workdir/logs/`) plus the direct C++ seams (`Lnast::export_into`/`adopt`,
 `uPass_tolg::run`, `hhds::Forest::save/load`, `livehd::Hhds_graph_library`).
@@ -368,19 +368,20 @@ tolg cannot lower — modernizing inou.slang is the prerequisite engine work
 (also what a `slang_compile.sh` migration needs). Default is `yosys-slang`
 (unchanged behavior). `//lhd/tests:lhd_reader_test` locks the contract.
 
-**Test/script drivers migrated; lgshell deprecated (2026-06-04):** every
+**Test/script drivers migrated; lgshell REMOVED (2026-06-04):** every
 sh/py harness that drove flows through the lgshell REPL now drives the kernel
 (`prplib.py`, `yosys_compile.sh`, `slang_compile.sh`, the `pass/upass` +
 `prp_writer` sh tests, `check_doc.sh`, `constprop_contract.py`,
 `bench_upass.sh`). **`lhd lsp`** serves the Pyrope LSP (the `lsp/` lib's
 `run_stdio()`; no result envelope — stdio belongs to JSON-RPC; the
-`scripts/prplsp` wrapper execs it). No test depends on `//main:lgshell`
-anymore and the REPL prints a deprecation notice on start; it remains only
-for interactive exploration and the liberty/opentimer power flow
-(docs/power.md) that the CLI verbs don't expose yet. The old
-`upass_order_parse_test` (the REPL scanner's label-value validation, which
-`run_method_now` bypasses) was removed as superseded; lhd's own usage
-validation is covered by `lhd_reader_test` / `lhd_config_test`.
+`scripts/prplsp` wrapper execs it). With nothing left depending on it, the
+`main/` REPL (and its `@replxx` terminal dependency) was **deleted**; lhd is
+the only driver. Casualty to revive: the liberty/opentimer power flow
+(docs/power.md) needs an lhd verb — `inou.liberty`/`pass.opentimer` stay in
+the tree but no binary links them. The old `upass_order_parse_test` (the REPL
+scanner's label-value validation, which `run_method_now` bypassed) was
+removed as superseded; lhd's own usage validation is covered by
+`lhd_reader_test` / `lhd_config_test`.
 
 **`--config lhd.toml` (2026-06-04):** pass-flag defaults as a declared input
 file — a strict TOML *subset* (`#` comments, `[upass]/[cprop]/[bitwidth]`
@@ -937,13 +938,13 @@ lhd run check @opt_exp --reference @orig
 
 ## Relationship to lgshell / EPRP
 
-The new `lhd` CLI is a structured argv-based frontend. It may call the
-existing EPRP/pass machinery internally, but agents should not need to quote or
-generate `|>` command strings. The legacy `lgshell` REPL remains useful for
-interactive humans and debugging.
+The `lhd` CLI is a structured argv-based frontend. It calls the
+existing EPRP/pass machinery internally, but agents never need to quote or
+generate `|>` command strings. The legacy `lgshell` REPL (and its replxx
+terminal dependency) was **removed 2026-06-04** — lhd is the only driver.
 
-The stateless kernel also replaces the `printf 'inou.prp files:… |> pass.upass
-…' | lgshell` pattern that test and `*_compile.sh` scripts use today (e.g.
+The stateless kernel replaced the `printf 'inou.prp files:… |> pass.upass
+…' | lgshell` pattern that test and `*_compile.sh` scripts used (e.g.
 `pass/prp_writer/tests/prp_writer_roundtrip_test.sh`,
 `inou/yosys/tests/yosys_compile.sh`): those pipe a `|>` string into stdin and
 grep stdout for success/error markers. A hermetic `lhd compile … --emit …

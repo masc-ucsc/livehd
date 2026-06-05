@@ -109,7 +109,8 @@ int main() {
 //
 // ./obj_dir/Vtest_and2
 //
-// lgshell> inou.verilog files:pass/opentimer/tests/test_and2.v |> pass.compiler |> pass.opentimer.power
+// EPRP pipe (no CLI driver since the lgshell REPL was removed; pending an lhd verb for liberty/opentimer):
+//   inou.verilog files:pass/opentimer/tests/test_and2.v |> pass.compiler |> pass.opentimer.power
 // files:sky130_fd_sc_hd__ff_100C_1v95.lib,output.vcd
 //
 // ....

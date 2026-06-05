@@ -218,11 +218,6 @@ This project is mostly done, the idea is to add some testing and complete whatev
 We have a tree-sitter pyrope grammar. We use neovim, we should have a clean
 setup and populate most packages on github to include Pyrope by default. 
 
-## [easy] lgshell autocompletion
-
-Upgrade lgshell to latest version. Fix auto-completion for path: files: src_path: odir:....
-
-
 ## [hard] Jupyter or Polybook for LiveHD
 
 Create a jupyter app that allows to run livehd against a server or local
@@ -311,21 +306,16 @@ switch. If valid exists and data switches,.... )
 We have several dockers for testing, a simple vagrant (ubuntu based?) for most users may
 be nice to have. Maybe based on https://github.com/VLSIDA/openram-vagrant-image
 
-## [simple] lgshell ctrl+C
-
-* Intercept the CTRL+C and finish the current command. Do not kill/terminate the lgshell
-* This may require to spawn the commands as threads and kill them for ctrl+c
-
 ## [medium] LNAST Fuzzer
 
 Randomly create valid LNAST statements. No matter the LNAST (as long as it is
 valid), it should not crash/fail.
 
-## [medium] Query shell (not lgshell) to query graphs
+## [medium] Query shell to query graphs
 
 Dependence: Coordinate with termwave
 
-* Based on replxx (like lgshell)
+* Based on a line-editor library (e.g. replxx)
 * Query bits, ports...  like
     * https://github.com/rubund/netlist-analyzer
     * https://www.jameswhanlon.com/querying-logical-paths-in-a-verilog-design.html

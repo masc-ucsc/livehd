@@ -122,8 +122,7 @@ the design at [docs/contracts/pyrope_lsp.md](docs/contracts/pyrope_lsp.md).
 ## Language server
 
 The server runs as `lhd lsp` over stdio (JSON-RPC). It is Pyrope-only
-(`.prp`); it never touches the Verilog/Yosys path. (The deprecated
-`lgshell --lsp` spelling still works during the transition.)
+(`.prp`); it never touches the Verilog/Yosys path.
 
 Build it once:
 
@@ -141,7 +140,7 @@ Rather than hard-code a path, point your editor at the
 - **Inside a livehd checkout** → that checkout's freshly-built
   `bazel-bin/lhd/lhd`, so iterating on the LSP needs no copy/reinstall.
 - **Anywhere else** → the `lhd` found on your `$PATH` (the default install;
-  a legacy `lgshell` on `$PATH` still works as a deprecated fallback).
+  an old `lgshell` install on `$PATH` still works as a legacy fallback).
 
 So you keep one editor config everywhere. Install both `prplsp` and a default
 `lhd` on your `$PATH` — e.g. into `~/bin` or `~/.local/bin`:

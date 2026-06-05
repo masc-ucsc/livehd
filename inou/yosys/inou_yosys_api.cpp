@@ -43,8 +43,6 @@ void Inou_yosys_api::set_script_yosys(const Eprp_var& var, bool do_read) {
                                      "/main_test.runfiles/livehd/inou/yosys/",
                                      "/verilog.sh.runfiles/livehd/inou/yosys/",
                                      "/verilog.sh-long.runfiles/livehd/inou/yosys/",
-                                     "/lgshell.runfiles/livehd/inou/yosys/",
-                                     "/lgshell.runfiles/_main/inou/yosys/",
                                      "/lhd.runfiles/livehd/inou/yosys/",
                                      "/lhd.runfiles/_main/inou/yosys/",
                                      "/../share/livehd/inou/yosys/",
@@ -236,7 +234,6 @@ void Inou_yosys_api::do_tolg(Eprp_var& var) {
   std::string slang_plugin_path;
   for (const auto& candidate : {absl::StrCat(exe_path, "/../external/+_repo_rules+yosys_slang/slang.so"),
                                 absl::StrCat(exe_path, "/../external/+http_archive+yosys_slang/slang.so"),
-                                absl::StrCat(exe_path, "/lgshell.runfiles/+http_archive+yosys_slang/slang.so"),
                                 absl::StrCat(exe_path, "/lhd.runfiles/+http_archive+yosys_slang/slang.so")}) {
     if (access(candidate.c_str(), R_OK) != -1) {
       slang_plugin_path = candidate;
@@ -292,7 +289,7 @@ void Inou_yosys_api::do_tolg(Eprp_var& var) {
 
     const auto slang_flags{var.get("slang_flags")};
     if (!slang_flags.empty()) {
-      // Comma-separated by convention (lgshell labels). A '\x1f' (ASCII unit
+      // Comma-separated by convention (EPRP labels). A '\x1f' (ASCII unit
       // separator) delimiter is also accepted so callers like lhd can pass
       // flags that themselves contain commas (e.g. +incdir+a,b) losslessly.
       const char  sep = slang_flags.find('\x1f') != std::string_view::npos ? '\x1f' : ',';

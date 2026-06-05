@@ -103,11 +103,6 @@ Option 2 may be fine, but option 1 should be the same
 ### pass.compile
 
 
-### lgshell
-
-- autocompletion for LGDB names. E.g: lgraph.open name:a<TAB> should match any module starting with a
-- fuzzy backward search
-
 ### lnast-ssa
 
 - Clean up analysis based on dot, now the lnast should contains select [] only.

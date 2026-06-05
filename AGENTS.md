@@ -4,10 +4,9 @@
 
 - **Build**: `bazel build -c dbg //...`
 - **Test**: `bazel test //...`
-- **lhd CLI**: `./bazel-bin/lhd/lhd` — the stateless driver for all flows
+- **lhd CLI**: `./bazel-bin/lhd/lhd` — the only driver, for all flows
   (`lhd help`, `lhd describe <cmd>`); `lhd lsp` serves the Pyrope LSP. The
-  `lgshell` REPL is **deprecated** (still builds for interactive use; no test
-  or doc flow depends on it)
+  old `lgshell` REPL was **removed** (2026-06-04)
 - C++ formatted with `clang-format`
 - **Contract tests/benchmarks**: Any test or benchmark file whose name contains the word `contract` is immutable to the coding agent. Do NOT modify these files — they define the expected behavior contract. If a contract test fails, fix the implementation, not the test.
 
@@ -52,10 +51,9 @@ lhd compile foo.v --reader yosys-verilog --top foo --recipe O1 --emit verilog:ou
 lhd compile foo.prp --emit-dir lg:foo_lgs/ --emit-dir lnast-dump:dumps/
 lhd check --impl verilog:out.v --ref verilog:foo.v --top foo
 ```
-Internally lhd drives the same registered EPRP methods that the lgshell REPL
-pipes with `command |> next_command` (e.g. `inou.yosys.tolg |> pass.cprop |>
-inou.cgen.verilog`); pass/inou names in `--set` and step logs use that
-vocabulary.
+Internally lhd drives the registered EPRP methods (conceptually the pipe
+`inou.yosys.tolg |> pass.cprop |> inou.cgen.verilog`); pass/inou names in
+`--set` and the step logs use that vocabulary.
 
 ## Compiler Warnings Policy
 

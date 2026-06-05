@@ -154,7 +154,7 @@ Main features:
     * Live binary format with mmaps that allow the simulation to run and the console to monitor the values
     * Capacity to generate LXT2 (gtkwave). (wave.lxt2 command)
 * Console
-    * Use replxx for the console (same as lgshell)
+    * Use a line-editor library (e.g. replxx) for the console
     * A gdb-like deamon (remote zero-MQ?) and console to debug hardware
     * The console is a chaiscript language with extensions for the auto-complete
     * autocomplete in variables/wires

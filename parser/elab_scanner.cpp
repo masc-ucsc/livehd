@@ -468,8 +468,8 @@ void Elab_scanner::parser_error_int(std::string_view text) const {
   // diagnostic staged at the call site is emitted here; otherwise a generic one.
   livehd::diag::sink().flush(livehd::diag::Severity::error, text);
   n_errors++;
-  // The exception (Eprp::parser_error) propagates to the lgshell command
-  // handler, which reports + exits non-zero in every build mode. (Previously a
+  // The exception (Eprp::parser_error) propagates to the EPRP command
+  // handler (the lhd kernel), which reports + exits non-zero in every build mode. (Previously a
   // dbg-only `I(false)` aborted here as a gdb aid; that crashed the process on
   // an ordinary user compile error, so it was removed.)
 }

@@ -151,18 +151,6 @@ http_archive(
     urls = ["https://github.com/google/perfetto/archive/refs/tags/v50.1.tar.gz"],
 )
 
-# replxx
-http_archive(
-    name = "replxx",
-    build_file = "//packages:replxx.BUILD",
-    patches = ["//packages:replxx.patch"],
-    sha256 = "3f97bc606c26778c6e88041afe5912f395308811476c4b3094c514665013bcd8",
-    strip_prefix = "replxx-dea4b7c724a2ec41d078383ccf0ebeedfaebaeea",
-    urls = [
-        "https://github.com/ClickHouse/replxx/archive/dea4b7c724a2ec41d078383ccf0ebeedfaebaeea.zip",
-    ],
-)
-
 new_git_repository(
     name = "abc",
     build_file = "//packages:abc.BUILD",  # relative to external path

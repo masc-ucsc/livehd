@@ -5,10 +5,11 @@
 // Contract: docs/contracts/future_cli.md ("Stateless build-system mode").
 //
 // One invocation = one step: (declared inputs, config) -> (declared outputs,
-// exit code). No @tag, no ~/.cache, no lock, no `latest` symlink. The legacy
-// lgshell REPL is untouched; lhd drives the same registered EPRP methods
-// programmatically (Eprp::run_method_now) plus the direct C++ entry points
-// (Lnast::dump/read_all, uPass_tolg::run, livehd::Hhds_graph_library).
+// exit code). No @tag, no ~/.cache, no lock, no `latest` symlink. lhd drives
+// the registered EPRP methods programmatically (Eprp::run_method_now) plus
+// the direct C++ entry points (Lnast::dump/read_all, uPass_tolg::run,
+// livehd::Hhds_graph_library). The legacy lgshell REPL was removed
+// 2026-06-04 (lhd is the only driver; `lhd lsp` serves the LSP).
 
 #include <string>
 #include <string_view>
@@ -108,8 +109,8 @@ void run_engine_command(Options& opts, Result& res);
 // most recent error-severity record); falls back to `internal`.
 Lhd_error classify_engine_failure(std::string_view fallback_msg);
 
-// Initialize the pass/inou registry (what Main_api::init does for lgshell,
-// minus the REPL-only Top/Meta/Cloud command surface).
+// Initialize the pass/inou registry: every static Pass_plugin plus
+// setup_inou_yosys() (no REPL-style Top/Meta command surface).
 void init_engine();
 
 // Deterministic content-hash run_id over (tool version + command + resolved
