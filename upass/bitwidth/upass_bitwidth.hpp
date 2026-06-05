@@ -10,6 +10,7 @@
 #include "absl/container/flat_hash_set.h"
 #include "absl/container/inlined_vector.h"
 #include "const.hpp"
+#include "diag.hpp"
 #include "lnast_range.hpp"
 #include "upass_core.hpp"
 
@@ -136,6 +137,16 @@ private:
   [[noreturn]] void report_overflow(std::string_view name, const Lnast_range& value, const Lnast_range& env);
 
   std::optional<std::string> pending_overflow_msg_;
+
+  // Last located write site per base variable (from the store node's loc —
+  // the prp2lnast declare/store loc-carry chain). Lets record_overflow point
+  // at the offending write even from end_run's deferred envelope check,
+  // where no walk cursor exists.
+  absl::flat_hash_map<std::string, livehd::diag::Span> write_site_;
+
+  // Record the current node's source span as `name`'s write site (keyed by
+  // SSA base name). Call with the cursor ON the store node.
+  void note_write_site(std::string_view name);
 
   // Scan the current op node: walk first child (LHS name), remaining children
   // (RHS operands — ref or const), restore cursor on exit.

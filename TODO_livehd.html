@@ -292,27 +292,6 @@ cross-file dependencies stay visible.</p>
 that they warrant their own bucket. Can be done in parallel with regular
 Group 1 entries; downstream Groups treat them as Group 1 dependencies.</p>
 <ul>
-<li><strong id="item-1y-agent" class="item-id">1y-agent</strong> New CLI — stateful tag workspace on top of the
-  <strong>landed</strong> <code>lhd</code> stateless kernel (1y-bazel: <code>elaborate</code>/<code>synth</code>/<code>check</code>/
-  <code>compile</code>/<code>scan</code>, typed <code>ln:</code>/<code>lg:</code>/<code>verilog:</code>/<code>pyrope:</code>/<code>lnast-dump:</code> slots,
-  <code>--reader yosys-verilog|yosys-slang|slang</code>, <code>--config lhd.toml</code>,
-  <code>//tools:lhd.bzl</code>; every sh/py test harness now drives it — see the status
-  section of <code>docs/contracts/future_cli.md</code>). <strong>Goal 1.</strong>
-  <code>setup/run/status/list/describe</code>, <code>@tag</code> directories, <code>livehd.toml</code> config,
-  append-only JSONL run logs, per-tag lock, multi-tag experiments, error-class
-  taxonomy. Each <code>run &lt;step&gt; @tag</code> desugars to a kernel call (resolve the
-  tag's inputs/config/workdir → run the pure step → append the result + advance
-  <code>latest</code>). Optimized for LLM coding agents. — <code>docs/contracts/future_cli.md</code>.</li>
-<li><strong id="item-1y-toln" class="item-id">1y-toln</strong> <code>pass.upass toln:true|false</code> flag —
-  skip materializing the post-upass LNAST when nothing will consume it (the dual of
-  <code>tolg:0|1</code>). The <code>lhd</code> kernel already derives the tolg gate from its emits
-  (<code>--emit-dir lg:</code>/<code>--emit verilog:</code> ⇒ lower, else skip the tolg step) and would set
-  <code>toln:false</code> when no <code>--emit-dir ln:/pyrope:</code> is requested. Today the runner always
-  produces the rewritten LNAST (<code>toln:1</code> with <code>tolg:0|1</code> works); <code>tolg:1</code> +
-  <code>toln:0</code> may need runner changes (the tolg sub-pass reads the post-upass tree, so "no LNAST"
-  really means "don't keep/stage the rewritten tree once tolg consumed it" — check
-  <code>uPass_runner</code> staging/replace_body and the func_extract spawn list before assuming it is
-  just a flag). Win: skip the staging rebuild + tree copy on pure <code>prp→lg</code> compiles.</li>
 <li><strong id="item-1f" class="item-id">1f</strong> Source-map indirection (LOC propagation: canonical map + per-cell
   index, alias multi-loc, partition-root fallback) — see "Source location
   (LOC) propagation strategy" below and <code>docs/contracts/sourcemap.md</code>.</li>
@@ -331,7 +310,46 @@ Group 1 entries; downstream Groups treat them as Group 1 dependencies.</p>
   <code>docs/contracts/pyrope_lsp.md</code>.</li>
 </ul>
 <h2 id="group-2-depends-on-group-1">Group 2 — depends on Group 1</h2>
-<p>(none — prior LiveHD-internal Group 2 items completed or descoped.)</p>
+<ul>
+<li><strong id="item-2y-agent" class="item-id">2y-agent</strong> <code>lhd</code> agent layer + kernel follow-ups
+  (renamed from 1y-agent; demoted from Group 1-complex — the landed 1y-bazel
+  kernel already covers every test/build flow, so none of this is critical).
+  <strong>Agent <code>@tag</code> workspace</strong>: <code>setup/run/status/list/describe</code>, <code>@tag</code>
+  directories, persistent <code>lhd.toml</code> config, append-only JSONL run logs,
+  per-tag lock, multi-tag experiments, error-class taxonomy. Each
+  <code>run &lt;step&gt; @tag</code> desugars to a kernel call (resolve the tag's
+  inputs/config/workdir → run the pure step → append the result + advance
+  <code>latest</code>). Optimized for LLM coding agents. — <code>docs/contracts/future_cli.md</code>.
+  <p><strong>Deferred kernel follow-ups</strong> (the pending remainder of the landed
+  1y-bazel; pick up alongside or before the agent layer):</p>
+  <ul>
+  <li><strong>toln gate</strong> (was 1y-toln): <code>pass.upass toln:true|false</code> — skip
+    materializing the post-upass LNAST when nothing consumes it (the dual of
+    <code>tolg:0|1</code>; the kernel would set <code>toln:false</code> when no
+    <code>--emit-dir ln:/pyrope:/lnast-dump:</code> is requested). <code>tolg:1</code> + <code>toln:0</code>
+    may need runner changes (check <code>uPass_runner</code> staging/replace_body and
+    the func_extract spawn list before assuming it is just a flag). Win: skip
+    the staging rebuild + tree copy on pure <code>prp→lg</code> compiles.</li>
+  <li><strong>Multi-<code>lg:</code> linking</strong>: gids are library-scoped inside
+    <code>body.bin</code>, so linking needs a gid-remapping linker (today: aggregate
+    from <code>ln:</code> units, which re-lowers into one fresh library and discards
+    per-file local synthesis; the derivation-hash manifest plan is the path
+    to keeping it).</li>
+  <li><strong>Per-function Pyrope units</strong>: <code>inou.prp</code> yields one LNAST per
+    <em>file</em>; function-level splitting wants the func_extract seam.</li>
+  <li><strong>Import resolver feed</strong>: <code>lhd scan</code> emits raw import strings;
+    resolved paths, <code>--depfile</code> (Make/Ninja), and the
+    <code>unused_inputs_list</code> Bazel rule land with the <a href="TODO_prp.html#item-1m">1m</a> import work.</li>
+  <li><strong>Missing emits/flags</strong>: <code>--emit graphviz|metadata</code>, a textual
+    <code>lgraph-dump:</code> debug emit (twin of <code>lnast-dump:</code> — the REPL's
+    <code>lgraph.dump</code> died with lgshell), <code>--recipe-file</code> TOML, repeated-pass
+    <code>--set pass.idx.flag</code> index addressing.</li>
+  <li><strong>liberty/opentimer verb</strong>: <code>inou.liberty</code>/<code>pass.opentimer</code> have no
+    driver since the lgshell REPL was deleted — the docs/power.md flow needs
+    an lhd verb (or recipe) to be revived.</li>
+  </ul>
+</li>
+</ul>
 <h2 id="group-3-depends-on-group-2">Group 3 — depends on Group 2</h2>
 <ul>
 <li><strong id="item-3c" class="item-id">3c</strong> <code>Partition</code> descriptor as a tree-level HHDS attribute (<code>kind</code>,

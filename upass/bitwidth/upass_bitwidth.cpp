@@ -267,10 +267,39 @@ void uPass_bitwidth::check_declared_fit(std::string_view name, const Lnast_range
   }
 }
 
+void uPass_bitwidth::note_write_site(std::string_view name) {
+  if (name.empty()) {
+    return;
+  }
+  const auto& ln = lm->get_lnast();
+  if (!ln) {
+    return;
+  }
+  const auto nid = lm->get_current_nid();
+  const auto loc = ln->get_loc(nid);
+  if (loc.line == 0) {
+    return;  // store carries no span (synthesized by SSA/inliner) — keep the last located one
+  }
+  livehd::diag::Span span;
+  span.start_line = loc.line;
+  if (auto fn = ln->get_fname(nid); !fn.empty()) {
+    span.file = std::string{fn};
+  }
+  write_site_[std::string(ssa_base_name(name))] = std::move(span);
+}
+
 void uPass_bitwidth::record_overflow(std::string_view name, const Lnast_range& value, const Lnast_range& env) {
   auto msg = std::format("`{}` (value {}) does not fit its declared range [{}, {}]", name, value.min, env.min, env.max);
   if (!pending_overflow_msg_) {
     pending_overflow_msg_ = msg;
+  }
+  // The offending write's span, when the store carried one (the declare/store
+  // loc-carry chain). Walk-time and end_run emissions resolve to the SAME span
+  // through write_site_, so the sink's (code, span, message) dedup collapses
+  // the double report into one located record.
+  livehd::diag::Span span;
+  if (auto it = write_site_.find(name); it != write_site_.end()) {
+    span = it->second;
   }
   // Mirror upass::error: emit the structured diagnostic (so the JSONL /
   // error-test harness sees it). process_* exceptions are caught by the
@@ -282,6 +311,7 @@ void uPass_bitwidth::record_overflow(std::string_view name, const Lnast_range& v
       .category = "bitwidth",
       .pass     = "upass.bitwidth",
       .message  = msg,
+      .span     = std::move(span),
       .hint     = "widen the declared type, force the bits with a bit-select (e.g. `x#[0..]`), or "
                   "apply a wrap/saturate policy",
   });
@@ -340,6 +370,9 @@ std::string uPass_bitwidth::scan_lhs_only() {
 
 void uPass_bitwidth::process_assign() {
   auto [lhs, rhs] = scan_op();
+  // Remember the write's source span (cursor is back on the store node after
+  // scan_op) BEFORE the envelope check below can fire record_overflow.
+  note_write_site(lhs);
   // Direct assignment to a mut var must REPLACE the lhs range, not narrow it.
   // set_range's monotonic-narrow policy is meant for iterative refinement of a
   // single producer's tmp; for mut reassignment (`v1 = 0` then `v1 = 0sb?`)

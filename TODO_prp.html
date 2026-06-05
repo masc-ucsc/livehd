@@ -191,12 +191,14 @@ cross-file dependencies stay visible.</p>
 </li>
 <li>
 <p><strong id="item-1e" class="item-id">1e</strong> Documented-error detection coverage for the <code>inou/prp/tests/errors/</code>
-  negative-test suite (47 tests; <strong>9 currently failing</strong> because the compiler
-  emits no <code>error</code>-severity diagnostic at the <code>locate_error_here</code> line). These
-  are the <em>detection</em> gaps the <span class="xref xref-note" title="note: prp_error_test_coverage">prp_error_test_coverage</span> note flagged — the
-  diagnostics <em>surface</em> (<a class="xref" href="TODO_livehd.html#item-3f">3f</a>) and the golden-error <em>harness</em> (<a class="xref" href="TODO_prp.html#item-4h">4h</a>) are
-  downstream of this and don't supply the missing checks. Each diagnostic must
-  be emitted at the marked line and match the header <code>:error:</code> regex. The 9 fall
+  negative-test suite — <strong>complete 2026-06-05</strong>; the whole <code>tests/errors/</code> suite
+  passes. The last two landed together: <code>invalid_descending_range</code> (descending
+  ranges banned outright — incl. <code>step -1</code> forms — in constprop's
+  <code>process_range</code> + the parse-time literal <code>for</code>-range unroll; non-positive
+  <code>step</code> also errors; doc updated) and <code>underflow_unsigned_expr</code> (declare/store
+  loc-carry chain + bitwidth per-var write-site map so the "does not fit"
+  diagnostic carries the store line's span). Each diagnostic is emitted at the
+  marked line and matches the header <code>:error:</code> regex. The 9 fell
   into three mechanisms:</p>
 </li>
 <li><strong>Frontend grammar / lexical (prp2lnast + tree-sitter-pyrope).</strong><ul>
@@ -214,13 +216,16 @@ cross-file dependencies stay visible.</p>
 <li><code>undefined_read</code> — read of an undeclared name (<code>const y = x</code>).</li>
 </ul>
 </li>
-<li><strong>Range / value-fit (bitwidth + typecheck; extends the landed <span class="xref xref-note" title="note: 1b">1b</span>
-    range-force).</strong><ul>
+<li><strong>Range / value-fit (bitwidth + constprop; extends the landed <span class="xref xref-note" title="note: 1b">1b</span>
+    range-force) — landed 2026-06-05.</strong><ul>
 <li><code>invalid_descending_range</code> — <code>5..=0</code> closed range that never reaches its
-  end is invalid.</li>
+  end is invalid. Descending is banned outright (no <code>step -1</code> escape); the
+  check fires in <code>process_range</code> on comptime bounds (<code>is_integer()</code> gate —
+  the open-end <code>nil</code> sentinel satisfies <code>is_i()</code>) and at the parse-time
+  literal <code>for</code>-range unroll, which never emits a <code>range</code> node.</li>
 <li><code>underflow_unsigned_expr</code> — a signed-negative expression assigned to an
-  unsigned dest (<code>const c:u8 = ones</code>) must error <code>does not fit</code>; <span class="xref xref-note" title="note: 1b">1b</span>
-  enforces the declared-literal case but not this expression-level one.</li>
+  unsigned dest (<code>const c:u8 = ones</code>) errors <code>does not fit</code> with the store
+  line's span (declare/store loc-carry + bitwidth <code>note_write_site</code>).</li>
 </ul>
 </li>
 </ul>
@@ -359,16 +364,17 @@ cross-file dependencies stay visible.</p>
   <code>inou/prp</code>, upass, and lgraph-pass diagnostics from
   <a href="TODO_livehd.html">TODO_livehd.md</a> <strong>3f</strong>.</li>
 </ul>
-<h2 id="failing-test-todo-mapping-snapshot-2026-06-01">Failing-test → TODO mapping (snapshot 2026-06-01)</h2>
+<h2 id="failing-test-todo-mapping-snapshot-2026-06-01">Failing-test → TODO mapping (snapshot 2026-06-05)</h2>
 <p>Each <code>bazel test -c dbg //...</code> failure mapped to the TODO entry whose
 landing should fix it. When more than one entry is listed, the test
 needs all of them. Current verifier tally is shown as <code>pass/fail/unknown</code>.
 Tallies re-measured via the <code>prplib.py</code> comptime pipeline
 (<code>pass.upass constprop:1 verifier_pass:N verifier_fail:N
 [verifier_include_funcs:true]</code>).</p>
-<p><strong>Live suite = 15 fails</strong> across <code>//inou //upass //lnast //pass</code>: 6 comptime
-(enum + decorator) + 9 <code>tests/errors/</code> negative tests. The error tests fail
-because no matching <code>error</code>-severity diagnostic is emitted at the marked line.</p>
+<p><strong>Live suite = 6 fails</strong> across <code>//inou //upass //lnast //pass</code>, all comptime
+(enum + decorator + const-tuple-mut-field). The <code>tests/errors/</code> negative suite is
+fully green as of 2026-06-05 (<a class="xref" href="TODO_prp.html#item-1e">1e</a> complete — the rows below
+that listed error tests are resolved and removed).</p>
 <table>
 <thead>
 <tr>
@@ -410,64 +416,11 @@ because no matching <code>error</code>-severity diagnostic is emitted at the mar
 <td>decorator-init implicit setter dispatch on <code>x:Tup = (…)</code></td>
 </tr>
 <tr>
-<td><code>prp-tuple_decorator_complex</code></td>
-<td>0/0/2</td>
-<td><a class="xref" href="TODO_prp.html#item-1k">1k</a></td>
-<td>tuple-decorator init triggering setter</td>
-</tr>
-<tr>
-<td><code>prp-invalid_binary_prefix</code></td>
-<td>error</td>
-<td><a class="xref" href="TODO_prp.html#item-1e">1e</a></td>
-<td>reject bare <code>0b…</code> (require <code>0ub</code>/<code>0sb</code>) — grammar/lexical</td>
-</tr>
-<tr>
-<td><code>prp-mixed_precedence</code></td>
-<td>error</td>
-<td><a class="xref" href="TODO_prp.html#item-1e">1e</a></td>
-<td>require parens on mixed arith+bitwise — grammar</td>
-</tr>
-<tr>
-<td><code>prp-tuple_lhs_requires_parens</code></td>
-<td>error</td>
-<td><a class="xref" href="TODO_prp.html#item-1e">1e</a></td>
-<td><code>mut a,b = …</code> lhs tuple needs parens — grammar</td>
-</tr>
-<tr>
-<td><code>prp-tuple_rhs_requires_parens</code></td>
-<td>error</td>
-<td><a class="xref" href="TODO_prp.html#item-1e">1e</a></td>
-<td><code>mut (a,b) = 2,3</code> rhs tuple needs parens — grammar</td>
-</tr>
-<tr>
-<td><code>prp-drop_tuple_parens_assert</code></td>
-<td>error</td>
-<td><a class="xref" href="TODO_prp.html#item-1e">1e</a></td>
-<td>reject non-string <code>cassert</code> message arg</td>
-</tr>
-<tr>
-<td><code>prp-duplicate_tuple_field</code></td>
-<td>error</td>
-<td><a class="xref" href="TODO_prp.html#item-1e">1e</a></td>
-<td>duplicate tuple field name — typecheck</td>
-</tr>
-<tr>
-<td><code>prp-undefined_read</code></td>
-<td>error</td>
-<td><a class="xref" href="TODO_prp.html#item-1e">1e</a></td>
-<td>read of undeclared name — typecheck/scope</td>
-</tr>
-<tr>
-<td><code>prp-invalid_descending_range</code></td>
-<td>error</td>
-<td><a class="xref" href="TODO_prp.html#item-1e">1e</a></td>
-<td><code>5..=0</code> empty/invalid range</td>
-</tr>
-<tr>
-<td><code>prp-underflow_unsigned_expr</code></td>
-<td>error</td>
-<td><a class="xref" href="TODO_prp.html#item-1e">1e</a></td>
-<td>signed-neg expr into unsigned dest <code>does not fit</code> (extends <span class="xref xref-note" title="note: 1b">1b</span>)</td>
+<td><code>prp-tuple_simple7</code></td>
+<td>—</td>
+<td>task 1t per-field modes</td>
+<td><code>tuple_set</code> tallies legal <code>mut</code>-field writes against the <code>const</code>
+  tuple root; needs <code>comp_type_tuple</code> per-field decl modes</td>
 </tr>
 </tbody>
 </table>

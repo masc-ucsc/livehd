@@ -29,8 +29,12 @@ consumers share), then layer the tag workspace on top.
   explicit inputs/outputs, deterministic results, depfile emission, clean
   stdout. Callable from a Bazel rule or a Makefile. Specified in
   *Stateless build-system mode* and *Dependency files* below.
-- **1y-agent** — the stateful workspace: `@tag` directories, `setup/run/
-  status/list/describe`, JSONL run logs, multi-tag experiments. Each
+- **2y-agent** (renamed from 1y-agent; demoted to Group 2 — the landed
+  kernel covers every test/build flow) — the stateful workspace: `@tag`
+  directories, `setup/run/status/list/describe`, JSONL run logs, multi-tag
+  experiments, plus the deferred kernel follow-ups (toln gate, multi-`lg:`
+  linker, per-function units, graphviz/lgraph-dump emits, import-resolver
+  depfile, liberty/opentimer verb — see TODO_livehd 2y-agent). Each
   `run <step> @tag` desugars to a kernel call. Specified in *Tag workspace
   mode* and everything after it.
 
@@ -354,7 +358,7 @@ Bazel rule so BUILD dep chains are machine-maintained, never hand-edited.
 emits — `--emit-dir lg:` / `--emit verilog:` run the LNAST→LGraph lowering,
 anything else skips it (the CLI-level `tolg:0|1`). The symmetric
 `pass.upass toln:false` (don't materialize the post-upass LNAST when nothing
-consumes it) is tracked as TODO_livehd 1y-toln.
+consumes it) is tracked under TODO_livehd 2y-agent (kernel follow-ups; was 1y-toln).
 
 **Reader trichotomy (2026-06-04):** `--reader yosys-verilog|yosys-slang|slang`
 (old `yosys|slang` two-value spelling rejected). The `yosys-*` readers go
@@ -394,7 +398,7 @@ before run_id hashing, so a config file and the equivalent explicit flags
 hash identically. No third-party TOML dep (`lhd describe config` documents
 the schema); `//lhd/tests:lhd_config_test` locks it. This is kernel-level
 per-invocation config — the *persistent tag* `lhd.toml` of the agent layer
-below remains 1y-agent work.
+below remains 2y-agent work.
 
 Validated flows (all covered by `//lhd/tests`):
 
@@ -447,7 +451,7 @@ truncation in cgen) that are tracked as engine follow-up work, plus a real
 cprop/tolg sign bug in the pyrope flow that is fixed (`get_mask(a,-1)` tposs
 bypass).
 
-## Tag workspace mode (1y-agent)
+## Tag workspace mode (2y-agent)
 
 Everything below is the agent layer. It is sugar over the kernel above: a
 `@tag` is a named, persistent bundle of (inputs, config, workdir, outputs),
@@ -458,7 +462,7 @@ drop to the kernel for a quick one-shot.
 The `<step>` vocabulary is the kernel's (`elaborate`/`synth`/`check`/`compile`).
 The `parse` / `cprop` / `cgen-verilog` step names in the examples that follow
 predate the kernel design and are illustrative only; they will be reconciled to
-the kernel verbs when 1y-agent lands.
+the kernel verbs when 2y-agent lands.
 
 ## @tag Sigil
 

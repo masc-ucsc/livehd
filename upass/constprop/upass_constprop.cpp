@@ -2287,6 +2287,28 @@ void uPass_constprop::process_func_call() {
   }
 
   if (!is_type(Lnast_ntype::Lnast_ntype_ref)) {
+    // Const-form callee (`import`, `step`, `implies` — see prp2lnast's
+    // make_call). `a..=b step s` has no dedicated LNAST op yet; its step
+    // amount must be a positive integer (ranges only ascend — see the
+    // descending-range check in process_range), so diagnose a comptime
+    // non-positive step here even though the call itself stays unfolded.
+    // Layout: ref(dst), const("step"), (const|ref)(range), (const|ref)(amount).
+    if (lm->current_raw_text() == "step" && lm->get_top_module_name().find('.') == std::string_view::npos) {
+      if (move_to_sibling() && move_to_sibling()) {
+        Const amount = current_prim_value();
+        // is_integer() first: nil/string satisfy is_i() (width-only check).
+        if (amount.is_integer() && amount.is_i() && amount.to_i() <= 0) {
+          livehd::diag::sink().emit(livehd::diag::Diagnostic{
+              .severity = livehd::diag::Severity::error,
+              .code     = "invalid-range-step",
+              .category = "type",
+              .pass     = "upass.constprop",
+              .message  = std::format("range step must be a positive integer (got {})", amount.to_i()),
+              .hint     = "ranges only ascend; use a positive step, e.g. `0..=10 step 2`",
+          });
+        }
+      }
+    }
     move_to_parent();
     return;
   }
@@ -2485,6 +2507,45 @@ void uPass_constprop::process_range() {
 
   if (start.is_invalid() || end.is_invalid()) {
     return;
+  }
+
+  // Pyrope ranges must ascend (04-variables.md): a descending range is a
+  // compile error ("5 never reaches 0" — `5..=0` can't count up to its end).
+  // `..<` / `..+` lower to an inclusive end before this node, so every
+  // descending source form lands here as end < start. is_integer() is the
+  // load-bearing gate: the open-end sentinel (`x[a..]` → nil end) and string
+  // bounds satisfy is_i() (it only checks width), and nil reads as 0 — which
+  // would flag every `a..` with a > 0. Same top-module gate as the
+  // negative-shift diagnostic above: inside an EXTRACTED parametric body
+  // ("<top>.<fn>") unbound params can fold a bogus descending range as an
+  // optimization artifact, not a user mistake — the genuine error still
+  // surfaces via the body's inlined copy under the real (dot-less) top.
+  if (start.is_integer() && end.is_integer() && start.is_i() && end.is_i() && end.to_i() < start.to_i()) {
+    if (lm->get_top_module_name().find('.') == std::string_view::npos) {
+      livehd::diag::Span span;
+      if (const auto& ln = lm->get_lnast()) {
+        const auto loc = ln->get_loc(lm->get_current_nid());
+        const auto fn  = ln->get_fname(lm->get_current_nid());
+        if (!fn.empty()) {
+          span.file = std::string{fn};
+        }
+        if (loc.line != 0) {
+          span.start_line = loc.line;
+        }
+      }
+      livehd::diag::sink().emit(livehd::diag::Diagnostic{
+          .severity = livehd::diag::Severity::error,
+          .code     = "invalid-descending-range",
+          .category = "type",
+          .pass     = "upass.constprop",
+          .message  = std::format("invalid descending range: {} never reaches {} (only ascending ranges are allowed)",
+                                  start.to_i(),
+                                  end.to_i()),
+          .span     = std::move(span),
+          .hint     = "swap the bounds so the range ascends, e.g. `0..=5`",
+      });
+    }
+    return;  // do not register the bounds — downstream folds would be nonsense
   }
 
   auto it = range_map.find(dst);

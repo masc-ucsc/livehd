@@ -631,13 +631,17 @@ Lnast_nid prp_copy_one_node(const Lnast& src, const Lnast_nid& src_nid, Lnast& d
     nn = dst.add_child(dst_parent, t);
   }
   // Preserve the source location across the decl-merge rebuild. Only cassert,
-  // func_call, if and while nodes carry one today (see attach_loc); gating on the
-  // type keeps this off the per-node hot path (no get_loc lookup for the many
-  // string/ref/const nodes a string-heavy tree copies). func_call carries it so
-  // the upass argument-naming diagnostics can point at the call site; if/while
-  // carry it so upass/typecheck's cond-not-bool can point at the condition.
+  // func_call, if, while, store, declare and range nodes carry one today (see
+  // attach_loc); gating on the type keeps this off the per-node hot path (no
+  // get_loc lookup for the many string/ref/const nodes a string-heavy tree
+  // copies). func_call carries it so the upass argument-naming diagnostics can
+  // point at the call site; if/while carry it so upass/typecheck's
+  // cond-not-bool can point at the condition; store/declare carry it so
+  // bitwidth's "does not fit" can point at the write; range carries it so
+  // constprop's descending-range error can point at the `a..=b`.
   if (t == Lnast_ntype::Lnast_ntype_cassert || t == Lnast_ntype::Lnast_ntype_func_call || t == Lnast_ntype::Lnast_ntype_if
-      || t == Lnast_ntype::Lnast_ntype_while) {
+      || t == Lnast_ntype::Lnast_ntype_while || t == Lnast_ntype::Lnast_ntype_store || t == Lnast_ntype::Lnast_ntype_declare
+      || t == Lnast_ntype::Lnast_ntype_range) {
     const auto loc = src.get_loc(src_nid);
     if (loc.pos1 != 0 || loc.pos2 != 0 || loc.line != 0 || loc.tok != 0) {
       dst.set_loc(nn, loc);
@@ -731,6 +735,17 @@ void Prp2lnast::rewrite_decls_to_declare() {
       }
       // Emit declare(ref(t), TYPE|none_type, const(mode)).
       auto d = staging->add_child(nn, Lnast_ntype::create_declare());
+      // Carry the cluster head's source span (attached at the attr_set
+      // creation) so declaration-site diagnostics stay located post-merge.
+      {
+        const auto loc = lnast->get_loc(k);
+        if (loc.pos1 != 0 || loc.pos2 != 0 || loc.line != 0 || loc.tok != 0) {
+          staging->set_loc(d, loc);
+          if (auto fn = lnast->get_fname(k); !fn.empty()) {
+            staging->set_fname(d, fn);
+          }
+        }
+      }
       staging->add_child(d, Lnast_node::create_ref(target));
       Lnast_nid tnid = type_node.is_invalid() ? Lnast_nid{} : prp_child_nid(*lnast, type_node, 1);
       if (!tnid.is_invalid()) {
@@ -1324,6 +1339,9 @@ Lnast_node Prp2lnast::process_lvalue_for_assign(TSNode lvalue, const Lnast_node&
       lnast->add_child(idx, ref);
       lnast->add_child(idx, Lnast_node::create_const("type"));
       lnast->add_child(idx, Lnast_node::create_const(kind_sv));
+      // Span → the decl-merge copies this onto the synthesized `declare` so
+      // declaration-site diagnostics can point at the `mut/const x` line.
+      attach_loc(idx, id);
     }
     if (has_cpt) {
       auto idx = builder.add_child(Lnast_ntype::create_attr_set());
@@ -1378,6 +1396,10 @@ Lnast_node Prp2lnast::process_lvalue_for_assign(TSNode lvalue, const Lnast_node&
     auto aidx = builder.add_child(Lnast_ntype::create_store());
     lnast->add_child(aidx, ref);
     lnast->add_child(aidx, store_value);
+    // Span → bitwidth's "does not fit" overflow diagnostic can point at the
+    // write site (the declare/store loc-carry chain: here, prp_copy_one_node,
+    // and the runner's emit_push).
+    attach_loc(aidx, id);
 
     // Phase 8 typesystem: a bare `true`/`false` literal on the rvalue
     // implies a `:bool` type. Inject a synthetic type_spec so the
@@ -2217,6 +2239,18 @@ void Prp2lnast::process_for_statement(TSNode n) {
     auto hi = parse_int_const(rhs);
     if (!lo || !hi) {
       return std::nullopt;
+    }
+    // Descending literal range: compile error (ranges only ascend —
+    // 04-variables.md). This parse-time unroll path never emits a `range`
+    // LNAST node, so constprop's descending check can't see it; diagnose
+    // here instead. `0..<0` (lo == hi, exclusive) is empty-but-ascending in
+    // source form and stays legal (zero iterations).
+    if (*lo > *hi) {
+      report_error(op,
+                   "invalid-descending-range",
+                   "type",
+                   std::format("invalid descending range: {} never reaches {} (only ascending ranges are allowed)", *lo, *hi),
+                   "swap the bounds so the range ascends, e.g. `0..=5`");
     }
     int64_t end_incl = inclusive ? *hi : (*hi - 1);
     return std::make_tuple(*lo, end_incl, true);
@@ -4275,7 +4309,20 @@ Lnast_node Prp2lnast::binary_expr_to_node(TSNode n) {
     return builder.mint_tmp_ref();
   };
 
-  auto emit_other = [&](std::string_view kind, const Lnast_node& l, const Lnast_node& r) -> Lnast_node {
+  // Range nodes carry a source span (attach_loc) so constprop's
+  // descending-range diagnostic can point at the offending `a..=b`. The
+  // operator wrapper TSNode is threaded in via emit_other's `opn`.
+  auto make_range = [&](const Lnast_node& l, const Lnast_node& r, const TSNode& opn) {
+    auto idx = builder.add_child(Lnast_ntype::create_range());
+    auto ref = builder.mint_tmp_ref();
+    lnast->add_child(idx, ref);
+    lnast->add_child(idx, l);
+    lnast->add_child(idx, r);
+    attach_loc(idx, opn);
+    return ref;
+  };
+
+  auto emit_other = [&](std::string_view kind, const Lnast_node& l, const Lnast_node& r, const TSNode& opn) -> Lnast_node {
     if (kind == "op_add") {
       return make_binop(Lnast_ntype::create_plus(), l, r);
     }
@@ -4310,7 +4357,7 @@ Lnast_node Prp2lnast::binary_expr_to_node(TSNode n) {
       return wrap_not(make_binop(Lnast_ntype::create_bit_xor(), l, r));
     }
     if (kind == "op_range_inclusive") {
-      return make_binop(Lnast_ntype::create_range(), l, r);
+      return make_range(l, r, opn);
     }
     if (kind == "op_range_exclusive") {
       auto m    = builder.add_child(Lnast_ntype::create_minus());
@@ -4318,7 +4365,7 @@ Lnast_node Prp2lnast::binary_expr_to_node(TSNode n) {
       lnast->add_child(m, mref);
       lnast->add_child(m, r);
       lnast->add_child(m, Lnast_node::create_const("1"));
-      return make_binop(Lnast_ntype::create_range(), l, mref);
+      return make_range(l, mref, opn);
     }
     if (kind == "op_range_count") {
       auto p    = builder.add_child(Lnast_ntype::create_plus());
@@ -4331,7 +4378,7 @@ Lnast_node Prp2lnast::binary_expr_to_node(TSNode n) {
       lnast->add_child(mm, mref);
       lnast->add_child(mm, pref);
       lnast->add_child(mm, Lnast_node::create_const("1"));
-      return make_binop(Lnast_ntype::create_range(), l, mref);
+      return make_range(l, mref, opn);
     }
     // `step` has no dedicated LNAST op; lower as a two-arg call for now.
     if (kind == "op_step") {
@@ -4403,7 +4450,7 @@ Lnast_node Prp2lnast::binary_expr_to_node(TSNode n) {
   for (size_t i = 0; i < ops.size(); ++i) {
     switch (ops[i].tier) {
       case Tier::times  : acc = emit_times(ops[i].kind, acc, operands[i + 1]); break;
-      case Tier::other  : acc = emit_other(ops[i].kind, acc, operands[i + 1]); break;
+      case Tier::other  : acc = emit_other(ops[i].kind, acc, operands[i + 1], ops[i].node); break;
       case Tier::logical: acc = emit_logical(ops[i].kind, acc, operands[i + 1]); break;
       default           : std::print("prp2lnast: unknown op kind `{}`\n", ops[i].kind); return builder.mint_tmp_ref();
     }

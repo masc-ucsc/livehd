@@ -101,7 +101,6 @@ N. Each badge links to the full entry. <strong>HHDS has no open goals.</strong><
 <li><em>Group 1:</em><ul>
 <li><a class="xref" href="TODO_prp.html#item-1m">1m</a> Pyrope <code>import</code> statement — <strong>deferred</strong> (substantial new infra: grammar, lowering, file-wrapper trees, <code>find_tree</code> resolution).</li>
 <li><a class="xref" href="TODO_prp.html#item-1k">1k</a> <code>self</code>/<code>ref self</code> in tuple methods — <strong>partial</strong>; remaining: decorator-init implicit setter dispatch on <code>x:Tup = (…)</code>.</li>
-<li><a class="xref" href="TODO_prp.html#item-1e">1e</a> Documented-error detection for the <code>tests/errors/</code> negatives (binary-prefix, mixed precedence, tuple-parens, duplicate field, undefined read, descending range, unsigned underflow).</li>
 </ul></li>
 <li><em>Group 2:</em><ul>
 <li><a class="xref" href="TODO_prp.html#item-2p">2p</a> Source-derived SSA / tmp names (<code>foo_l42_a</code>, drop <code>___N</code>).</li>
@@ -142,10 +141,11 @@ N. Each badge links to the full entry. <strong>HHDS has no open goals.</strong><
 <li><a class="xref" href="TODO_livehd.html#item-1h">1h</a> New <code>upass/semacheck</code> pass + demote <code>lnastfmt</code> to debug-only + trim the LSP pipeline.</li>
 </ul></li>
 <li><em>Group 1-complex:</em><ul>
-<li><a class="xref" href="TODO_livehd.html#item-1y-agent">1y-agent</a> <code>lhd</code> agent <code>@tag</code> workspace (<code>setup/run/status/list/describe</code>, TOML, JSONL) on top of the <strong>landed</strong> stateless kernel (1y-bazel done — every test harness drives <code>lhd</code> now).</li>
-<li><a class="xref" href="TODO_livehd.html#item-1y-toln">1y-toln</a> <code>pass.upass toln:false</code> — skip materializing the post-upass LNAST when nothing consumes it (dual of the kernel's emit-derived <code>tolg</code> gate).</li>
 <li><a class="xref" href="TODO_livehd.html#item-1f">1f</a> Source-map indirection (LOC propagation: canonical map, per-cell index, multi-loc aliases).</li>
 <li><a class="xref" href="TODO_livehd.html#item-1n">1n</a> Pyrope LSP server — <strong>Phase A landed</strong> (lifecycle + diagnostics); Phases B–E (hover/nav/workspace) remain.</li>
+</ul></li>
+<li><em>Group 2:</em><ul>
+<li><a class="xref" href="TODO_livehd.html#item-2y-agent">2y-agent</a> <code>lhd</code> agent <code>@tag</code> workspace (<code>setup/run/status/list/describe</code>, TOML, JSONL) + the deferred kernel follow-ups (toln gate, multi-<code>lg:</code> linker, per-function units, graphviz/lgraph-dump emits, import-resolver depfile, liberty/opentimer verb). The 1y-bazel kernel itself is <strong>done</strong> — every flow drives <code>lhd</code>.</li>
 </ul></li>
 <li><em>Group 3:</em><ul>
 <li><a class="xref" href="TODO_livehd.html#item-3c">3c</a> <code>Partition</code> descriptor as a tree-level HHDS attribute.</li>
@@ -182,10 +182,10 @@ recorded (cluster snapshot below), and the <span class="xref xref-note" title="n
 <code>Const</code>-args migration is done across <code>upass/attributes/*</code>, <code>upass/ssa</code>,
 <code>prp2lnast</code>, <code>inou/cgen</code>, and <code>pass/cprop</code>. No open items; any residual
 <code>to_i()</code> cleanup at the next hlop pin bump rides under <span class="xref xref-note" title="note: 1g">1g</span> (Goal 1).</p>
-<h2 id="failing-tests-cluster-snapshot-2026-06-04">Failing tests — cluster snapshot (2026-06-04)</h2>
-<p><code>bazel test //inou/prp:...</code> shows <strong>8 failures</strong>: 6 in the comptime suite
-and 2 in the <code>tests/errors/</code> negative suite (expected diagnostic never
-emitted). The failures cluster by root cause:</p>
+<h2 id="failing-tests-cluster-snapshot-2026-06-04">Failing tests — cluster snapshot (2026-06-05)</h2>
+<p><code>bazel test //inou/prp:...</code> shows <strong>6 failures</strong>, all in the comptime suite —
+the <code>tests/errors/</code> negative suite is fully green (<strong>1e</strong> complete 2026-06-05).
+The failures cluster by root cause:</p>
 <table>
 <thead>
 <tr>
@@ -209,12 +209,6 @@ emitted). The failures cluster by root cause:</p>
 <td><strong>1k</strong></td>
 </tr>
 <tr>
-<td><strong>C. Error detection</strong></td>
-<td><code>prp-invalid_descending_range</code>, <code>prp-underflow_unsigned_expr</code></td>
-<td>documented Pyrope errors not yet detected: descending range (<code>5..=0</code>), signed-negative-into-unsigned value-fit</td>
-<td><strong>1e</strong> (<code>underflow_unsigned_expr</code> extends <strong>1b</strong>)</td>
-</tr>
-<tr>
 <td><strong>D. Const tuple, mut fields</strong></td>
 <td><code>prp-tuple_simple7</code></td>
 <td>surfaced by <code>lhd</code> (emit-only sink errors now fail the run): <code>tuple_set</code> tallies legal <code>mut</code>-<em>field</em> writes against the <code>const</code> tuple <em>root</em>; needs per-field decl modes (task 1t <code>comp_type_tuple</code>)</td>
@@ -222,8 +216,13 @@ emitted). The failures cluster by root cause:</p>
 </tr>
 </tbody>
 </table>
-<p>Cluster C shrank 9→3 (2026-06-03) →2 (2026-06-04: <code>mixed_precedence</code> now
-detected; <code>tuple_decorator_complex</code> also passes, shrinking B to one). Earlier
+<p>Cluster C (error detection, <strong>1e</strong>) shrank 9→3 (2026-06-03) →2 (2026-06-04:
+<code>mixed_precedence</code> now detected; <code>tuple_decorator_complex</code> also passes,
+shrinking B to one) →<strong>0 (2026-06-05)</strong>: <code>invalid_descending_range</code> (descending
+ranges banned outright, incl. <code>step -1</code> forms; non-positive <code>step</code> errors too;
+constprop <code>process_range</code> + parse-time literal <code>for</code>-range) and
+<code>underflow_unsigned_expr</code> (declare/store loc-carry chain + bitwidth write-site
+map gives "does not fit" a real span) both pass. Earlier
 wave: tuple-parens detection
 (<code>tuple_lhs_requires_parens</code>, <code>tuple_rhs_requires_parens</code>, <code>drop_tuple_parens_assert</code>),
 <code>duplicate_tuple_field</code>, <code>undefined_read</code>, and <code>invalid_binary_prefix</code> now pass.

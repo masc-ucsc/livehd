@@ -46,9 +46,11 @@ run_pipeline 1 "${DUMP1}"
 # coalescer:1 should see exactly 1 (only the live store before `out` reads tmp).
 count_tmp_assigns() {
   # Task 1t — statement-level writes lower to `store` (formerly `assign`); the
-  # dead-store behavior is unchanged, only the node name in the dump.
+  # dead-store behavior is unchanged, only the node name in the dump. A store
+  # may carry a source span (`store @(loc=…)` — the declare/store loc-carry
+  # chain), so match both the bare and the loc-annotated form.
   cat "$1"/*.lnast | awk '
-    /store$/ { in_assign = 1; next }
+    /store$/ || /store @\(loc=/ { in_assign = 1; next }
     in_assign {
       if ($0 ~ /ref '\''tmp'\''$/) count++
       in_assign = 0

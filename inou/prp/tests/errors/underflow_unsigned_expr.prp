@@ -7,13 +7,10 @@
 // A signed expression whose value is negative does not fit an unsigned
 // destination. Use an explicit bit-select to force the bit pattern.
 //
-// KNOWN-FAILING (location only): the bitwidth/constprop "does not fit" error is
-// emitted with the correct message (so `:error:` matches), but with NO source
-// span yet — declare/store LNAST nodes don't carry a source loc (only cassert/
-// func_call do). So the source-line marker check below fails. Fixing it needs
-// the loc-carry chain extended to declare/store + threading the nid into the
-// bitwidth overflow path; tracked as the broader source-location work. Left
-// failing intentionally until that lands.
+// The "does not fit" diagnostic is located via the declare/store loc-carry
+// chain (prp2lnast attach_loc -> prp_copy_one_node -> runner emit_push) plus
+// bitwidth's per-var write-site map (note_write_site), which lets even the
+// end_run deferred envelope check point at the offending store line.
 
 mut v8:s8 = -1
 const ones = v8 | 0xff

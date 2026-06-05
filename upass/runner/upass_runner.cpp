@@ -310,13 +310,18 @@ void uPass_runner::emit_push(Lnast_ntype::Lnast_ntype_int type) {
   staging_parent = nid;
 
   // Carry an if/while source span across the staging rebuild so upass/typecheck's
-  // cond-not-bool can point at the condition. prp2lnast records it (attach_loc) but
-  // a func_extract / constprop rebuild re-creates the node via emit_push, which
-  // doesn't otherwise copy loc. cassert / func_call are carried at their own emit
-  // sites (emit_op_with_fold, try_inline_func_call). Gate on the current source
-  // node actually being this control node so a synthetic block (e.g. a for-unroll
-  // `create_stmts`) emitted with a literal type doesn't grab an unrelated loc.
-  if ((type == Lnast_ntype::Lnast_ntype_if || type == Lnast_ntype::Lnast_ntype_while) && lm->current_type() == type) {
+  // cond-not-bool can point at the condition; same for store/declare (bitwidth's
+  // "does not fit" points at the write/declaration) and range (constprop's
+  // descending-range error points at the `a..=b`). prp2lnast records it
+  // (attach_loc) but a func_extract / constprop rebuild re-creates the node via
+  // emit_push, which doesn't otherwise copy loc. cassert / func_call are carried
+  // at their own emit sites (emit_op_with_fold, try_inline_func_call). Gate on
+  // the current source node actually being this node kind so a synthetic block
+  // (e.g. a for-unroll `create_stmts`) emitted with a literal type doesn't grab
+  // an unrelated loc.
+  if ((type == Lnast_ntype::Lnast_ntype_if || type == Lnast_ntype::Lnast_ntype_while || type == Lnast_ntype::Lnast_ntype_store
+       || type == Lnast_ntype::Lnast_ntype_declare || type == Lnast_ntype::Lnast_ntype_range)
+      && lm->current_type() == type) {
     const auto& src_ln  = lm->get_lnast();
     const auto  src_nid = lm->get_current_nid();
     const auto  loc     = src_ln->get_loc(src_nid);
