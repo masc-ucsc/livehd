@@ -612,37 +612,57 @@ Reset rules:
 
 ### 12.1 Pipe output flops (task 1q)
 
-Lowering a `kind=pipe` tree, tolg inserts **exactly one** `Flop` cell in
-front of each graph output and stamps the new attribute pair
-`pipe_min` / `pipe_max` **on the flop dpin**:
+**Flop depth is a cell parameter — there is no replication.** A depth-N
+pipeline flop is one `Flop` cell with const-tied `pipe_min` / `pipe_max`
+input pins (same style as `posclk`/`async`). Unset ⇒ depth 1, don't
+check; `min==max==d` ⇒ fixed depth-d shift; `min<max` ⇒ the tool owns the
+depth choice in the range (a chosen depth of 0 resolves to a wire). The
+slop simulation cell carries the same parameter (efficient N-deep shift,
+seed-rolled ranged depth); `inou/cgen` emits the d-stage shift register
+from the single cell (range realization default at Verilog emission:
+`min`); LG passes may materialize/move stages later (retiming). We
+*indicate* depth; we never cut&paste flops.
 
-- The annotation must NOT live on the graph-output dpin: graph IOs are
-  hidden during forward traversal, so passes would never see it. The flop
-  dpin is the carrier.
-- Unset (or zero) attribute ⇒ ordinary flop, don't check.
-- The value is the SCC/σ stage depth from the partition inputs up to that
-  flop (`06c-pipelining.md` stage inference). `pipe[3]` → `(3,3)`,
-  `pipe[2..=5]` → `(2,5)`, bare `pipe` → `(1,0)` (max 0 = unconstrained).
-- Storage: flat_storage dpin attributes, same mechanism as bits/sign
-  (persistent graph state, not pass-local).
+Responsibility split across the flow:
 
-Flop configuration: when the body has an existing flop, an added pipeline
-flop is a **replica** of it — copy the full config verbatim (async/sync
-reset, none, clock, posclk) and move it; never invent a new reset style.
-A pure-comb body has nothing to replicate, so the inserted flop is the
-no-reset shape (`reset_pin` unconnected, `initial=0sb?`, `async=false` —
-the `reg a = nil` rules above). Clock follows the §12 defaults; if the
-partition declares no `clk`/`clock` input, tolg creates an implicit
-`clock` graph input.
+- **LN pipe upass** inserts the output flop — a `stages`-annotated reg —
+  when needed (skipped when the output is directly a `reg`, the counter
+  idiom), with the *provisional* declared range `(min..=max)`. Insertion
+  happens at LN so both consumers see it: tolg→LG→Verilog and
+  `lnast_to_slop`→simulation.
+- **tolg** lowers that reg to the parameterized `Flop` (this subsection's
+  pin rules) like any other reg.
+- **LG pass1 (check)** runs right after tolg, while name→pin maps are
+  alive for diagnostics; read-only except narrowing:
+    1. Tarjan SCC (flop din→q edges included): SCC with no flop ⇒
+       combinational-loop error; flop whose din→q edge is in an SCC ⇒
+       **state**; flop with `enable` ≠ const-true ⇒ **state**
+       (conditional write = enable-encoded hold feedback, invisible to
+       SCC); else **stage**.
+    2. Forward σ per dpin: input 0, const ⊥ (unifies), comb cell = meet
+       of operands (all non-⊥ must be EQUAL, else error at that node),
+       stage flop σ(q)=σ(din)+1, state flop σ(q)=σ(din) (pinned). σ
+       excludes the LN-inserted flop (identified by its pipe pins).
+    3. Per output: state-reg-as-output needs home stage == min−1
+       (min==max required); otherwise σ ≤ min required (declared-range
+       honesty — a caller may rely on any value in `[min,max]`), and the
+       inserted flop's pins are **narrowed** to `(min−σ, max−σ)` —
+       `(0,0)` is realized as a wire. Body flops are never touched.
+- **LG pass2 (realize)** picks the final depth within the narrowed range
+  before Verilog emission (default `min`; future retiming/PPA knob).
+- **`lnast_to_slop`** (future) seed-picks one valid realization (total
+  `T ∈ [min,max]`, inserted depth `T−σ`) per simulation seed.
 
-Stage **expansion is not done at LNAST/tolg level** — they only ever
-produce the single annotated flop. `pass.pipe` (LG level) replaces it
-with a chain of `depth` identical replicas and clears the annotation;
-default `depth = min`, and the choice within `[min,max]` is an
-optimization knob (retiming, or slop-sim seed randomization to flush
-caller latency-alignment bugs). The Verilog-emit path runs `pass.pipe`
-for all recipes (legalization, not optimization); `lg:` dumps keep the
-compact annotated form. Plan: `task_1q_plan.md`.
+Bare `pipe` (declared `(1,0)`, max 0 = unbounded) skips the σ>min error —
+the body raises the effective minimum to `max(σ,1)` for the call-site
+phase.
+
+Inserted-flop configuration: replica of an existing body flop when one
+exists (copy config verbatim — async/sync reset, none, clock, posclk);
+otherwise the no-reset shape (`reset_pin` unconnected, `initial=0sb?`,
+`async=false` — the `reg a = nil` rules above). Clock follows the §12
+defaults; if the partition declares no `clk`/`clock` input, tolg creates
+an implicit `clock` graph input. Plan: `task_1q_plan.md`.
 
 ## 13. Memory lowering
 

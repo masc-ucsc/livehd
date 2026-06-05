@@ -267,7 +267,9 @@ Options parse_args(int argc, char** argv) {
       }
     }
   } else if (cmd == "synth" || cmd == "check" || cmd == "scan" || cmd == "lsp" || cmd == "list" || cmd == "describe"
-             || cmd == "version" || cmd == "help") {
+             || cmd == "version" || cmd == "help" || cmd == "ln.cat" || cmd == "ln.diff") {
+    // ln.cat/ln.diff keep their positionals raw and ORDERED in opts.files
+    // (an ln:DIR token must keep its place — ln.diff sides are positional).
     opts.command = cmd;
     ++i;
   } else {
@@ -319,6 +321,27 @@ Options parse_args(int argc, char** argv) {
         throw Lhd_error{"usage", std::format("--set expects pass[.idx].flag=value, got '{}'", kv), ""};
       }
       opts.sets.emplace_back(kv.substr(0, pos), kv.substr(pos + 1));
+    } else if (a == "--dump") {
+      // Repeatable, comma-separable: --dump parse --dump lg == --dump parse,lg
+      std::string v{need_value(a, i, argc, argv)};
+      size_t      start = 0;
+      while (start <= v.size()) {
+        auto        end  = v.find(',', start);
+        std::string what = v.substr(start, end == std::string::npos ? std::string::npos : end - start);
+        if (what == "lgraph") {  // mirror the lg: kind alias
+          what = "lg";
+        }
+        if (what != "parse" && what != "lnast" && what != "lg") {
+          throw Lhd_error{"usage",
+                          std::format("--dump expects parse|lnast|lg, got '{}'", what),
+                          "parse = post-frontend LNAST, lnast = post-upass LNAST, lg = textual LGraph dump (all to stderr)"};
+        }
+        opts.dumps.push_back(what);
+        if (end == std::string::npos) {
+          break;
+        }
+        start = end + 1;
+      }
     } else if (a == "--impl") {
       auto tp        = parse_typed(a, need_value(a, i, argc, argv), false);
       opts.impl_kind = tp.kind;

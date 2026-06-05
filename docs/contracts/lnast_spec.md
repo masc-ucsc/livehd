@@ -263,10 +263,10 @@ see `architecture.md §3` for the full struct. Concretely:
   stages node (absent ≡ `(0,0)`); a `mod` output (later) may carry a
   different value per output. The value is the SCC/σ stage depth from the
   partition inputs to that output flop (`06c-pipelining.md`). `pipe[N]`
-  is a **hard contract** (exact); ranges are also hard (the tool picks
-  any value in the closed range, but the body must be retimeable to
-  *some* value in it). `pipe[0]` is a compile error. Plan:
-  `task_1q_plan.md`.
+  is a **hard contract** (exact); ranges are also hard — the body must
+  support the **entire** declared range (intrinsic σ ≤ range minimum), so
+  a caller may rely on any value in it; the tool picks. `pipe[0]` is a
+  compile error. Plan: `task_1q_plan.md`.
 - Input and output lists are **flat, named, typed port lists** — not
   tuple types. Each port has its own bits/sign/role/`decl_loc`. The
   body may still construct tuples internally (`out = (sum, carry)`);

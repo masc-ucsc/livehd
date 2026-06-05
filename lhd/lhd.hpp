@@ -48,6 +48,13 @@ struct Options {
 
   std::vector<std::pair<std::string, std::string>> sets;  // --set pass[.idx].flag=value
 
+  // --dump WHAT (repeat or comma-separated): debug observables printed to
+  // stderr at the named pipeline stage. parse = post-frontend LNAST,
+  // lnast = post-upass LNAST, lg = textual LGraph node/edge dump. A dump
+  // forces the stage that produces it (the screen twin of --emit-dir
+  // lnast-dump:/lg:).
+  std::vector<std::string> dumps;
+
   std::string impl_kind, impl_path, impl_top;  // check
   std::string ref_kind, ref_path, ref_top;     // check
 

@@ -91,3 +91,17 @@ sh_test(
     srcs = ["lhd_config_test.sh"],
     data = _FLOW_DATA,
 )
+
+# --dump parse|lnast|lg screen debug observables (stderr; stage-forcing).
+sh_test(
+    name = "lhd_dump_test",
+    srcs = ["lhd_dump_test.sh"],
+    data = _FLOW_DATA,
+)
+
+# ln.cat / ln.diff LNAST debug tools (stdout payload; hhds tree edit distance).
+sh_test(
+    name = "lhd_ln_tools_test",
+    srcs = ["lhd_ln_tools_test.sh"],
+    data = _FLOW_DATA,
+)

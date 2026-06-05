@@ -34,6 +34,7 @@ cc_library(
         "//pass/prp_writer:pass_prp_writer",
         "//pass/upass:pass_upass",
         "//upass/tolg:upass_tolg",
+        "@hhds//hhds:tree_edit_distance",
         "@rapidjson",
     ],
 )

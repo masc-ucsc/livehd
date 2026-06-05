@@ -109,7 +109,9 @@ struct Port {
 
 `pipe[N]` is a **hard contract**: Pyrope refuses to compile a body that
 cannot be retimed to N cycles. `pipe[1..<N]` is also hard — the body
-must be retimeable to *some* value in the range; the tool picks.
+must support the **entire** declared range (its intrinsic stage depth σ
+must be ≤ the range minimum, task 1q), so a caller may rely on any value
+in the range without knowing the body; the tool picks.
 
 ### 3.2 I/O is a flat, named, typed port list
 

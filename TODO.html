@@ -99,7 +99,7 @@ N. Each badge links to the full entry. <strong>HHDS has no open goals.</strong><
 <h3 id="pending-pyrope">Pyrope — <a href="TODO_prp.html">TODO_prp.html</a></h3>
 <ul>
 <li><em>Group 1:</em><ul>
-<li><a class="xref" href="TODO_prp.html#item-1q">1q</a> Pyrope <code>pipe</code> construct — Phase 1: declaration → flopped outputs (per-output <code>stages(min,max)</code> io annotation, tolg single annotated Flop, <code>pass.pipe</code> LG expansion knob, equiv vs golden Verilog).</li>
+<li><a class="xref" href="TODO_prp.html#item-1q">1q</a> Pyrope <code>pipe</code> construct — Phase 1: declaration → flopped outputs (Flop depth = cell parameter, no replication; LN inserts, LG checks). Phases: <a class="xref" href="TODO_prp.html#item-1q-A">1q-A</a> LNAST <code>stages</code> node + depth parse, <a class="xref" href="TODO_prp.html#item-1q-B">1q-B</a> Flop <code>pipe_min</code>/<code>pipe_max</code> pins + cgen shifter, <a class="xref" href="TODO_prp.html#item-1q-C">1q-C</a> LN insert upass + tolg lowering, <a class="xref" href="TODO_prp.html#item-1q-D">1q-D</a> LG pass1 σ/Tarjan check + narrowing, <a class="xref" href="TODO_prp.html#item-1q-E">1q-E</a> equiv/error tests vs golden Verilog.</li>
 <li><a class="xref" href="TODO_prp.html#item-1m">1m</a> Pyrope <code>import</code> statement — <strong>deferred</strong> (substantial new infra: grammar, lowering, file-wrapper trees, <code>find_tree</code> resolution).</li>
 <li><a class="xref" href="TODO_prp.html#item-1k">1k</a> <code>self</code>/<code>ref self</code> in tuple methods — <strong>partial</strong>; remaining: decorator-init implicit setter dispatch on <code>x:Tup = (…)</code>.</li>
 </ul></li>

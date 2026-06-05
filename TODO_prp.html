@@ -117,20 +117,64 @@ cross-file dependencies stay visible.</p>
     output. Value = SCC/σ depth from inputs to that output flop.
     prp2lnast parses the <code>depth</code> field it currently strips
     (<code>prp2lnast.cpp:2822</code>); <code>pipe[0]</code> is a compile error.</li>
-<li><strong>tolg:</strong> first Flop creation on the Pyrope→LG path (shares the
-    2d register milestone): insert exactly <em>one</em> no-reset Flop per
-    output, stamp <code>pipe_min</code>/<code>pipe_max</code> on the <em>flop</em> dpin (graph-IO
-    dpins are hidden in forward traversal); implicit <code>clock</code> input when
-    none declared. Phase-1 guard: <code>reg</code> inside a <code>pipe</code> body errors
-    (stage inference is a later phase).</li>
-<li><strong>LG expansion knob:</strong> <code>pass.pipe</code> replaces the annotated flop
-    with <code>depth</code> identical replicas (copy config verbatim — async/sync/no
-    reset); default <code>depth=min</code>; runs on the Verilog-emit path for all
-    recipes. <code>lg:</code> dumps keep the compact annotated form.</li>
-<li><strong>Later phases:</strong> call sites (<code>stage[N]</code>/<code>@[N]</code> in <code>mod</code> —
-    makes <code>tests/equiv/accum.prp</code> live), Tarjan-SCC stage inference for
-    reg-in-pipe bodies, slop pipe flop with seed-randomized depth in
-    [min,max] to flush caller alignment bugs.</li>
+<li><strong>Flop depth = cell parameter (no replication):</strong> <code>Flop</code> (and
+    the slop cell) gain const-tied <code>pipe_min</code>/<code>pipe_max</code> pins (unset ⇒
+    depth 1 / don't check); one cell whatever the depth — cgen emits the
+    d-stage shifter (range realization default min), slop picks ranged
+    depth per seed, LG may retime later.</li>
+<li><strong>Responsibility split:</strong> LN pipe upass <em>inserts</em> the
+    output flop (a <code>stages</code>-annotated reg, provisional declared range;
+    skip reg-as-output) so both consumers see it (tolg→LG→Verilog and
+    <code>lnast_to_slop</code>→sim); tolg lowers it to the parameterized Flop
+    (first Flop creation on the Pyrope→LG path, shares 2d; implicit
+    <code>clock</code> input); LG <em>pass1</em> checks SCC/Tarjan + forward σ with
+    equal-operand meet (mismatch = error at the node; state regs:
+    <code>enable</code>≠true or din→q in SCC, σ(q)=σ(din); σ ≤ min honesty so
+    callers may rely on any value in [min,max]; reg-as-output home =
+    min−1) and <em>narrows</em> the inserted flop to (min−σ, max−σ) — body
+    flops never touched; LG <em>pass2</em> picks the final realization depth
+    (default min); slop seed-picks total T ∈ [min,max], depth T−σ.</li>
+<li><strong>Phases</strong> (each lands green; details in
+    <code>docs/contracts/task_1q_plan.md</code>):<ul>
+<li><strong id="item-1q-A" class="item-id">1q-A</strong> LNAST <code>stages</code> node +
+    prp2lnast depth parse: add <code>stages</code> to <code>lnast_nodes.def</code>
+    (writer/parser/builder round-trip); read the <code>depth</code> field off
+    <code>pipe_lambda</code> (<code>N</code>, <code>A..=B</code>, <code>A..&lt;B</code>, absent); errors on
+    <code>pipe[0]</code> / zero-min ranges / min&gt;max; stamp <code>stages(min,max)</code>
+    on every output io entry. Inert downstream.</li>
+<li><strong id="item-1q-B" class="item-id">1q-B</strong> Flop depth parameter +
+    cgen: <code>pipe_min</code>/<code>pipe_max</code> const-tied pins on the <code>Flop</code> cell;
+    <code>cgen</code> <code>process_flop</code> emits the d-stage shift register when set
+    (range realization = min). Unset pins keep today's behavior
+    bit-for-bit (yosys path unaffected).</li>
+<li><strong id="item-1q-C" class="item-id">1q-C</strong> LN pipe upass + tolg
+    lowering: insert the <code>stages</code>-annotated output reg (skip
+    reg-as-output, the counter idiom); tolg lowers it to the
+    parameterized Flop — first Flop creation on the Pyrope→LG path
+    (shares the 2d register milestone); implicit <code>clock</code> input
+    creation.</li>
+<li><strong id="item-1q-D" class="item-id">1q-D</strong> LG pass1 checker: the
+    SCC/Tarjan + σ pass (classify state/stage, equal-operand meet,
+    σ ≤ min honesty, narrow the inserted flop to (min−σ, max−σ)). With
+    comb-only bodies (until 2d lands) every output is σ=0, so it
+    verifies trivially and narrows nothing — the machinery is written
+    general. LG pass2 in Phase 1 = the min-realization default in
+    cgen.</li>
+<li><strong id="item-1q-E" class="item-id">1q-E</strong> Tests:
+    <code>inou/prp/tests/equiv</code> — <code>pipe1_pass</code>, <code>pipe3_mul</code> (the 06c
+    canonical), <code>pipe2_two_out</code>, <code>pipe_range</code> (golden .v at min
+    depth), <code>pipe_bare</code> (golden at 1 stage);
+    <code>inou/prp/tests/errors</code> — <code>pipe[0]</code>, <code>pipe[3..=2]</code>. Post-2d
+    additions: body-stage-reg narrowing, <code>bad_mix</code>, <code>too_deep</code>,
+    <code>acc_mix</code>/<code>counter</code> state-reg accepts.</li>
+</ul>
+</li>
+<li><strong>Later phases (separate tasks):</strong> call sites
+    (<code>stage[N]</code>/<code>@[N]</code> in <code>mod</code> — makes
+    <code>tests/equiv/accum.prp</code> live); state/stage σ machinery exercised
+    on real reg bodies once 2d reg lowering lands; <code>lnast_to_slop</code>
+    pipe cell (seed-picked total T ∈ [min,max], inserted depth T−σ);
+    LG pass2 retiming/PPA realization knob.</li>
 </ul>
 </li>
 <li><strong id="item-1m" class="item-id">1m</strong> Pyrope <code>import</code> statement — <strong>deferred</strong>. Substantial new

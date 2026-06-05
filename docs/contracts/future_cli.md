@@ -103,6 +103,8 @@ language-qualified; commands that operate on IR are language-agnostic.**
 | `lhd check` | equivalence (LEC) | `--impl KIND:PATH [--impl-top <name>]`; `--ref KIND:PATH [--ref-top <name>]` |
 | `lhd compile verilog` | fused elaborate+synth | = `elaborate verilog` args ＋ `synth` args |
 | `lhd compile pyrope` | fused elaborate+synth | = `elaborate pyrope` args ＋ `synth` args |
+| `lhd ln.cat` | LNAST debug view (stdout) | positional `.prp`/`.v`/`.sv` (elaborated through `pass.upass`) and/or `ln:DIR` (printed as stored); `--top <name>`; payload owns stdout — envelope only to `--result-json` |
+| `lhd ln.diff` | LNAST tree diff (stdout) | two positionals (each `.prp`/`.v`/`.sv` or `ln:DIR`); line diff + hhds tree edit distance (`hhds/tree_edit_distance.hpp`, type+name cost, loc/fname ignored); `--top <name>` selects one unit per side |
 | `lhd list` | discovery | positional pattern: `steps`\|`recipes`\|`emit-kinds`\|`error-classes` |
 | `lhd describe` | discovery | positional name: command / recipe / emit-kind |
 | `lhd version` | meta | — |
@@ -120,6 +122,7 @@ Shared arguments (the I/O contract; honored by every execution command):
 | `--workdir DIR` | all execution | scratch + ephemeral lgdb; never the global cache |
 | `-j`/`--jobs N` | elaborate · synth · compile | intra-action parallelism |
 | `-q`/`--quiet`, `--verbose` | all execution | stderr verbosity; never pollutes the stdout protocol |
+| `--dump parse\|lnast\|lg` (repeat) | elaborate · synth · compile | debug observable → stderr (post-parse LNAST, post-upass LNAST, textual LGraph node/edge dump); forces the stage that produces it; never pollutes the stdout protocol |
 | `-h`/`--help`, `--version` | global | help / version on any command |
 
 `--depfile` is **not** shared: it lives only on the Verilog frontend, because

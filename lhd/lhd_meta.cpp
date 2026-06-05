@@ -12,7 +12,8 @@ namespace lhd {
 
 namespace {
 
-constexpr std::string_view kSteps = R"json(["elaborate verilog","elaborate pyrope","synth","check","scan","compile verilog","compile pyrope"])json";
+constexpr std::string_view kSteps =
+    R"json(["elaborate verilog","elaborate pyrope","synth","check","scan","compile verilog","compile pyrope","ln.cat","ln.diff"])json";
 constexpr std::string_view kRecipes = R"json(["O0","O1","O2"])json";
 constexpr std::string_view kEmitKinds =
     R"json(["ln","lg","verilog","pyrope","lnast-dump","graphviz","metadata","results","diagnostics"])json";
@@ -133,6 +134,21 @@ int describe_command(const Options& opts) {
         R"json({"schema_version":1,"name":"lnast-dump","description":"Round-trippable textual LNAST dump (the Lnast::dump text form), one <unit>.lnast per unit. A debug/test observable; the binary interchange form is ln:. From elaborate: post-parse; from synth/compile: post-upass","direction":"out"})json");
     return 0;
   }
+  if (name == "ln.cat") {
+    print_json_line(
+        R"json({"schema_version":1,"name":"ln.cat","description":"Print LNAST trees to stdout (the Lnast::dump text form, pipe-friendly; no result envelope unless --result-json). Sources (.prp, or .v/.sv via the direct inou.slang front-end) are elaborated through pass.upass first (the --dump lnast tree); ln:DIR forests print as stored. --top filters units","args":{"required":[{"name":"inputs","type":".prp|.v|.sv|ln:DIR","positional":true,"repeatable":true}],"optional":[{"name":"top","type":"string"}]},"inputs":["pyrope","verilog","ln"],"outputs":["stdout"],"examples":["lhd ln.cat x.prp","lhd ln.cat ln:x_lns/ --top x"]})json");
+    return 0;
+  }
+  if (name == "ln.diff") {
+    print_json_line(
+        R"json({"schema_version":1,"name":"ln.diff","description":"Diff two LNAST trees on stdout: a line diff of the dump texts plus the hhds tree edit distance (Zhang-Shasha via hhds/tree_edit_distance.hpp; nodes match on lnast type + name, loc/fname attrs are ignored). Each side is one .prp/.v/.sv source (elaborated through pass.upass) or one ln:DIR forest; multi-unit sides pair sorted-by-name (use --top to select one unit)","args":{"required":[{"name":"a","type":".prp|.v|.sv|ln:DIR","positional":true},{"name":"b","type":".prp|.v|.sv|ln:DIR","positional":true}],"optional":[{"name":"top","type":"string"}]},"inputs":["pyrope","verilog","ln"],"outputs":["stdout"],"examples":["lhd ln.diff old.prp new.prp","lhd ln.diff ln:before/ x.prp --top x"]})json");
+    return 0;
+  }
+  if (name == "dump") {
+    print_json_line(
+        R"json({"schema_version":1,"name":"dump","description":"--dump parse|lnast|lg (repeatable, comma-separable): print a debug observable to stderr. parse = the LNAST right after the front-end parse (inou.prp/inou.slang + lnastfmt), lnast = the LNAST right after pass.upass, lg = a textual node/edge dump of the LGraphs (post-tolg from elaborate, post-recipe from synth/compile). A dump forces the pipeline stage that produces it (e.g. `elaborate --dump lnast` runs pass.upass). The screen twin of --emit-dir lnast-dump:DIR/; stdout stays protocol-clean","examples":["lhd elaborate x.prp --dump parse,lnast","lhd compile x.prp --recipe O0 --dump lg"]})json");
+    return 0;
+  }
   if (name == "config") {
     print_json_line(
         R"json({"schema_version":1,"name":"config","description":"--config lhd.toml: pass-flag defaults as a declared input file. Strict TOML subset: # comments, [pass] tables (upass|cprop|bitwidth), key = value with quoted strings / true|false / integers; top level takes only `recipe`. Explicit --set/--recipe always win","example":"recipe = \"O2\"\n[upass]\nconstprop = true\nverifier = false"})json");
@@ -147,33 +163,52 @@ int help_command(const Options& opts) {
   std::string topic = opts.files.empty() ? "" : opts.files.front();
   if (topic.empty() || topic == "help") {
     std::print(
-        "lhd — LiveHD stateless CLI kernel (task 1y-bazel; docs/contracts/future_cli.md)\n"
+        "lhd — LiveHD stateless CLI kernel (docs/contracts/future_cli.md)\n"
         "\n"
         "usage: lhd <command> [args]\n"
+        "  the language word is optional (inferred from .prp/.v/.sv); ln:/lg: IR inputs are positional\n"
         "\n"
-        "commands (language word optional - inferred from .prp/.v/.sv):\n"
-        "  elaborate SRCS... [ln:DIR...]      [--top T] --emit-dir ln:DIR/ --emit-dir lg:DIR/\n"
-        "            (pyrope; positional ln: dirs supply pre-elaborated imports)\n"
-        "  elaborate SRCS.v --top T [--reader yosys-verilog|yosys-slang|slang] [--depfile D]\n"
-        "            --emit-dir lg:DIR/   (--reader slang: SV->LNAST, ln:/pyrope: emits)\n"
-        "  elaborate ln:DIR... | lg:DIR       aggregate into one ln:/lg: container\n"
-        "  synth     ln:DIR|lg:DIR [--recipe O0|O1|O2] [--set pass.flag=value]\n"
-        "            --emit-dir lg:DIR/|ln:DIR/|pyrope:DIR/ | --emit verilog:PATH\n"
-        "  check     --impl verilog:PATH|lg:DIR --ref verilog:PATH|lg:DIR [--impl-top T] [--ref-top T]\n"
-        "  scan      FILES.prp...   report each file's import strings (result \"scan\" member)\n"
-        "  lsp       Pyrope LSP server over stdio (JSON-RPC; .prp only)\n"
-        "  compile   SRCS...   (fused elaborate + synth)\n"
-        "  list      steps|recipes|emit-kinds|error-classes\n"
-        "  describe  <command|recipe:NAME|emit-kind>\n"
+        "commands:\n"
+        "  elaborate  sources (+ positional ln: imports) -> ln:/lg: IR; ln:/lg:-only inputs aggregate\n"
+        "               lhd elaborate x.prp --emit-dir ln:x_lns/\n"
+        "               lhd elaborate foo.v --top foo --emit-dir lg:foo_lgs/\n"
+        "  synth      transform / optimize / codegen over IR inputs (takes no sources)\n"
+        "               lhd synth ln:x_lns/ --recipe O1 --emit verilog:net.v\n"
+        "               lhd synth lg:foo_lgs/ --emit-dir lg:foo_opt_lgs/\n"
+        "  compile    fused elaborate + synth\n"
+        "               lhd compile x.prp --emit verilog:net.v\n"
+        "               lhd compile foo.v --top foo --recipe O2 --emit verilog:net.v\n"
+        "  check      logic equivalence (LEC) via inou/yosys/lgcheck\n"
+        "               lhd check --impl verilog:net.v --ref verilog:gold.v --top foo\n"
+        "  scan       report each .prp file's import strings (the result's \"scan\" member)\n"
+        "               lhd scan x.prp y.prp\n"
+        "  ln.cat     print LNAST to stdout: sources elaborate through upass, ln: dirs print as stored\n"
+        "               lhd ln.cat x.prp\n"
+        "               lhd ln.cat ln:x_lns/ --top x\n"
+        "  ln.diff    diff two LNAST trees: line diff + hhds tree edit distance, on stdout\n"
+        "               lhd ln.diff old.prp new.prp\n"
+        "               lhd ln.diff ln:before/ x.prp\n"
+        "  lsp        Pyrope LSP server over stdio (JSON-RPC; .prp only)\n"
+        "  list       steps | recipes | emit-kinds | error-classes\n"
+        "  describe   <command | recipe:NAME | emit-kind | dump | config>\n"
         "  version | help [command]\n"
         "\n"
-        "kinds: ln: = hhds::Forest save dir (LNAST units)  lg: = hhds::GraphLibrary save dir (LGraphs)\n"
-        "       ln:/lg:/pyrope: are directory containers (--emit-dir only)\n"
-        "shared: --emit KIND:PATH --emit-dir KIND:DIR/ --config lhd.toml --result-json PATH\n"
-        "        --workdir DIR -q --verbose   (`lhd describe config` for the lhd.toml schema)\n"
+        "typed I/O (KIND:PATH):  ln: = Forest dir (LNAST units)   lg: = GraphLibrary dir (LGraphs)\n"
+        "  ln:/lg:/pyrope:/lnast-dump: are directory containers (--emit-dir only);\n"
+        "  verilog: is --emit (one netlist file) or --emit-dir (one .v per module)\n"
         "\n"
-        "The kernel is always deterministic (content-hash run_id, SOURCE_DATE_EPOCH)\n"
-        "and always hermetic (undeclared input => missing_file).\n");
+        "debug dumps (printed to stderr; a dump forces the stage that produces it):\n"
+        "  --dump parse|lnast|lg   post-parse LNAST | post-upass LNAST | textual LGraph\n"
+        "               lhd elaborate x.prp --dump parse,lnast\n"
+        "               lhd compile x.prp --recipe O0 --dump lg\n"
+        "\n"
+        "shared flags:\n"
+        "  --top T   --reader yosys-verilog|yosys-slang|slang   --recipe O0|O1|O2\n"
+        "  --set pass.flag=value   --config lhd.toml   --workdir DIR   --result-json PATH\n"
+        "  -q (quiet stderr)   --verbose (mirror step logs)   (`lhd describe config` for lhd.toml)\n"
+        "\n"
+        "Deterministic (content-hash run_id) and hermetic (undeclared input => missing_file)\n"
+        "by contract.\n");
     return 0;
   }
   Options d;
