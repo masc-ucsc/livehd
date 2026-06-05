@@ -204,89 +204,6 @@ cross-file dependencies stay visible.</p>
   are the motivating case). Must keep the landed read-only bitwidth finalization
   pass (runs after SSA) able to see <code>declare</code> type info — hence D1's declare
   keepalive.</p>
-<ul>
-<li><strong id="item-1h" class="item-id">1h</strong> New <code>upass/semacheck</code> pass + demote <code>lnastfmt</code> to compiler-debug-only +
-  trim the LSP pipeline. <strong>Goal 1.</strong> Today <code>pass.lnastfmt</code> mixes two unrelated
-  jobs: (a) compiler-internal <em>structural</em> validation that only fires when a
-  producer built a malformed tree (a compiler bug, never user input), and (b) a
-  small set of genuine <em>user-facing</em> semantic errors. The LSP <code>analyze()</code>
-  (<code>lsp/livehd_lsp.cpp:233</code>) runs <code>prp2lnast |&gt; upass |&gt; lnastfmt</code>, so an end
-  user editing <code>.prp</code> can be shown developer-facing messages like "fix prp2lnast
-  to emit the cond's compute statements before the <code>if</code>" as editor squiggles —
-  wrong audience. Split (b) into a dedicated semantic-legality pass, leave (a) in
-  lnastfmt as a debug/CI-only validator, and drop lnastfmt from the LSP path.</li>
-</ul>
-<p><strong>Pipeline fact to respect (do NOT truncate the LSP before SSA).</strong> <code>uPass_ssa</code>
-  runs <strong>early</strong> — <code>Pass_upass::work</code> calls it at <code>pass/upass/pass_upass.cpp:310</code>,
-  <em>before</em> the main runner loop at <code>:321</code>. It is a prerequisite for constprop's
-  free reordering (renames multi-assigned <code>mut</code> writes apart) plus I/O-metadata
-  harvest, not a late codegen step. Every user-facing diagnostic is emitted by a
-  pass that runs <strong>after</strong> ssa: typecheck, constprop, bitwidth, verifier (assert/
-  coalescer/attributes emit none). So the LSP must run the <em>whole</em> runner; the
-  only transform-only tail it can skip is <code>tolg</code> (already off — default labels →
-  <code>run_tolg=false</code>) and optionally <code>coalescer</code> (pure DSE, 0 diagnostics). The
-  LNAST itself is <strong>mandatory</strong> (it is upass's input IR), so "skip LNAST
-  generation" is not an option.</p>
-<p><strong>The two user-facing checks to relocate (the only non-internal emits in
-  <code>pass/lnastfmt/pass_lnastfmt.cpp</code>).</strong>
-  - <strong>Write to a read-only / derived attribute</strong> — <code>derived_attr_violation</code>
-    (<code>:248</code>, fires at <code>:458</code>): rejects <code>x.[bits]=</code>, <code>.[size]=</code>, <code>.[sign]=</code>,
-    <code>.[key]=</code>, and <code>max</code>/<code>min</code> written via <code>attr_set</code>. <strong>This is the ONLY
-    enforcement site in the whole codebase</strong> (grep-confirmed) — losing it would
-    silently accept those writes. Must move, not delete.
-  - <strong>Variable redeclaration + shadowing</strong> — <code>check_scope</code> (<code>:276</code>, fires at
-    <code>:286</code>/<code>:291</code>). NOTE: no-shadowing is <em>already</em> enforced earlier and better in
-    prp2lnast (<code>inou/prp/prp2lnast.cpp:367</code>, code <code>variable-shadowing</code>, with a
-    real located <code>Span</code>); the lnastfmt copy is a post-constprop recheck with no
-    Span. So <strong>redeclaration in the same scope</strong> is the genuinely-homeless check;
-    confirm whether the post-constprop shadowing recheck still catches anything
-    prp2lnast doesn't (it would only matter if constprop/the inliner <em>introduces</em>
-    a shadow — i.e. a compiler bug) and, if not, drop it as redundant.</p>
-<p><strong>New pass <code>upass/semacheck</code></strong> (deliberately separate from <code>typecheck</code>, per the
-  partition-by-functionality decision: scope/declaration legality is conceptually
-  distinct from kind/operator/nil inference). Owns the relocated user-facing
-  checks and emits <strong>located</strong> <code>core/diag</code> diagnostics (carry a <code>Span</code> so the
-  <code>tests/errors/</code> harness can pin a line via <code>locate_error_here</code> — today's
-  lnastfmt bakes location into the message text, no Span). Default home for <em>both</em>
-  relocated checks is semacheck; the read-only-attr-write check may alternatively
-  live in <code>typecheck</code> (it is attribute-kind reasoning) — implementer's call, but
-  prefer semacheck to keep the partition clean.</p>
-<p><strong>Placement.</strong> Run semacheck <strong>early</strong> — right after ssa's I/O normalization and
-  before <code>typecheck</code> (fail fast on a scope error before the value passes work).
-  Scope/declaration checks want the tree closest to user source; post-constprop is
-  wrong because the inliner/SSA synthesize stores+declares with no matching
-  declare (the same reason the existing assign-before-declare check is forced
-  pre-upass — see the <code>check_scope</code> comment at <code>pass_lnastfmt.cpp:272-275</code>).</p>
-<p><strong>lnastfmt → debug-only.</strong> After the move, <code>validate()</code> is pure structural
-  validation (io-shape, <code>is_valid_ref_text</code>, node-shape invariants for
-  delay_assign/attr_set/attr_get/store/declare/dp_assign, <code>check_unwritten_tmps</code>)
-  — all "the compiler built a malformed tree" assertions. Make it <strong>default-off in
-  the codegen pipeline</strong> (a small wall-clock save, but mainly a UX/architecture
-  boundary), still runnable explicitly (the test pipelines invoke <code>pass.lnastfmt</code>
-  directly — keep that working) and on by default in CI/dbg. Then <strong>remove the
-  <code>Pass_lnastfmt::fmt_begin</code> call from the LSP <code>analyze()</code></strong> (<code>lsp/livehd_lsp.cpp:
-  273-278</code>).</p>
-<p><strong>Files.</strong> New <code>upass/semacheck/upass_semacheck.{cpp,hpp}</code> + <code>BUILD</code> (register a
-  <code>Pass_plugin</code> like the sibling passes). <code>pass/upass/pass_upass.cpp</code> — add a
-  <code>semacheck</code> label (default <code>true</code>), <code>#include</code> the header for plugin linkage,
-  and <code>emplace_back("semacheck")</code> early in <code>upass_order</code> (before <code>typecheck</code>).
-  <code>pass/lnastfmt/pass_lnastfmt.cpp</code> — delete <code>derived_attr_violation</code> + the
-  <code>check_scope</code> user-facing emits (relocated), keep the structural checks, add the
-  default-off gate. <code>lsp/livehd_lsp.cpp</code> — drop the lnastfmt stage; optionally pass
-  <code>coalescer:0</code>. <code>inou/prp/prp2lnast.cpp</code> — confirm shadowing stays put; decide
-  redeclaration ownership (prp2lnast vs semacheck).</p>
-<p><strong>Validation.</strong> Identify the <code>tests/errors/*.prp</code> negatives that currently rely
-  on lnastfmt's user-facing errors (read-only-attr-write, redeclaration) and
-  ensure they still pass with the checks in semacheck — now with a <code>Span</code>, so add
-  <code>locate_error_here</code> markers. Full upass + comptime + <code>tests/errors</code> suites green,
-  net-neutral. LSP smoke: a buffer with <code>x.[bits]=3</code> and one with a redeclaration
-  still surface a diagnostic via the LSP (now from semacheck, not lnastfmt).
-  Confirm lnastfmt-default-off drops no coverage (explicit <code>pass.lnastfmt</code> in test
-  pipelines unaffected).</p>
-<p><strong>Relationships.</strong> Builds on the LSP <a class="xref" href="TODO_livehd.html#item-1n">1n</a>. Complements the unified-diagnostics
-  surface (<strong>3f</strong>) — semacheck emits via <code>core/diag</code>; spans sharpen with the
-  source-map work <a class="xref" href="TODO_livehd.html#item-1f">1f</a>. The "SSA is early" fact above is load-bearing: do not
-  try to make the LSP stop before SSA.</p>
 <h2 id="group-1-complex-foundation-larger-scope">Group 1-complex — foundation, larger scope</h2>
 <p>Tasks that are independent of other Group 1/2 work but are large enough
 that they warrant their own bucket. Can be done in parallel with regular
@@ -323,13 +240,6 @@ Group 1 entries; downstream Groups treat them as Group 1 dependencies.</p>
   <p><strong>Deferred kernel follow-ups</strong> (the pending remainder of the landed
   1y-bazel; pick up alongside or before the agent layer):</p>
   <ul>
-  <li><strong>toln gate</strong> (was 1y-toln): <code>pass.upass toln:true|false</code> — skip
-    materializing the post-upass LNAST when nothing consumes it (the dual of
-    <code>tolg:0|1</code>; the kernel would set <code>toln:false</code> when no
-    <code>--emit-dir ln:/pyrope:/lnast-dump:</code> is requested). <code>tolg:1</code> + <code>toln:0</code>
-    may need runner changes (check <code>uPass_runner</code> staging/replace_body and
-    the func_extract spawn list before assuming it is just a flag). Win: skip
-    the staging rebuild + tree copy on pure <code>prp→lg</code> compiles.</li>
   <li><strong>Multi-<code>lg:</code> linking</strong>: gids are library-scoped inside
     <code>body.bin</code>, so linking needs a gid-remapping linker (today: aggregate
     from <code>ln:</code> units, which re-lowers into one fresh library and discards

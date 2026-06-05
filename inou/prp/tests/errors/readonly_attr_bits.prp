@@ -1,0 +1,12 @@
+/*
+:name: readonly_attr_bits
+:type: error
+:error: read-only|derived|cannot write
+*/
+
+// `bits` (like `size`/`sign`/`key`) is a derived read-only attribute —
+// computed from the type/bundle, readable with `.[bits]` but never settable.
+// Enforced by upass/semacheck (relocated from pass.lnastfmt — goal 1h).
+
+mut x:u8:[bits=3] = 1 // locate_error_here
+cassert(x == 1)

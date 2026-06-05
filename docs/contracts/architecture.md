@@ -67,7 +67,10 @@ struct Partition {
   uint16_t latency;          // pipe: N. comb: 0. mod: variable.
   Latency_range latency_range; // pipe[1..<N] form; tool may pick any
                                // value in the closed range. Equal to
-                               // {N,N} for plain pipe[N].
+                               // {N,N} for plain pipe[N]. Summary of the
+                               // per-output Port::stages (1q) — for pipe
+                               // all outputs agree; mod may differ
+                               // per output.
   Clock_id clock;            // partition-level clock domain
   Reset_id reset;            // partition-level reset
   std::vector<Port> inputs;
@@ -85,6 +88,13 @@ struct Port {
   bool             is_signed;
   Loc              decl_loc;
   std::optional<Role> role;  // clock | reset | valid | ready | data
+  Latency_range    stages;   // per-OUTPUT pipe stages {min,max} (1q):
+                             // pipe[N]={N,N}, pipe[2..=5]={2,5}, bare
+                             // pipe={1,0} (max 0 = unconstrained),
+                             // comb={0,0}; a mod output may carry a
+                             // different value per output. Semantics:
+                             // SCC/σ depth from inputs to that output
+                             // flop (06c-pipelining.md). Inputs: {0,0}.
 };
 ```
 

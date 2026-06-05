@@ -305,6 +305,12 @@ std::vector<std::string> uPass_runner::resolve_order(const std::vector<std::stri
 // ── Staging emit helpers ──────────────────────────────────────────────────────
 
 void uPass_runner::emit_push(Lnast_ntype::Lnast_ntype_int type) {
+  if (!materialize_) {
+    // No staging build (toln:0 && tolg:0): keep the parent stack balanced for
+    // the matching emit_pop, but append nothing.
+    staging_parent_stack.push(staging_parent);
+    return;
+  }
   auto nid = staging->add_child(staging_parent, type);
   staging_parent_stack.push(staging_parent);
   staging_parent = nid;
@@ -320,7 +326,8 @@ void uPass_runner::emit_push(Lnast_ntype::Lnast_ntype_int type) {
   // (e.g. a for-unroll `create_stmts`) emitted with a literal type doesn't grab
   // an unrelated loc.
   if ((type == Lnast_ntype::Lnast_ntype_if || type == Lnast_ntype::Lnast_ntype_while || type == Lnast_ntype::Lnast_ntype_store
-       || type == Lnast_ntype::Lnast_ntype_declare || type == Lnast_ntype::Lnast_ntype_range)
+       || type == Lnast_ntype::Lnast_ntype_declare || type == Lnast_ntype::Lnast_ntype_range
+       || type == Lnast_ntype::Lnast_ntype_attr_set)
       && lm->current_type() == type) {
     const auto& src_ln  = lm->get_lnast();
     const auto  src_nid = lm->get_current_nid();
@@ -339,11 +346,24 @@ void uPass_runner::emit_pop() {
   staging_parent_stack.pop();
 }
 
-void uPass_runner::emit_leaf(Lnast_ntype::Lnast_ntype_int type) { staging->add_child(staging_parent, type); }
+void uPass_runner::emit_leaf(Lnast_ntype::Lnast_ntype_int type) {
+  if (!materialize_) {
+    return;
+  }
+  staging->add_child(staging_parent, type);
+}
 
-void uPass_runner::emit_leaf(const Lnast_node& node) { staging->add_child(staging_parent, node); }
+void uPass_runner::emit_leaf(const Lnast_node& node) {
+  if (!materialize_) {
+    return;
+  }
+  staging->add_child(staging_parent, node);
+}
 
 void uPass_runner::emit_subtree_verbatim() {
+  if (!materialize_) {
+    return;  // pure emission, no dispatch — cursor untouched (the walk is balanced)
+  }
   auto type = lm->current_type();
   if (lm->has_child()) {
     emit_push(type);
@@ -420,6 +440,9 @@ void uPass_runner::emit_op_with_fold_at(const Lnast_nid& src) {
 }
 
 void uPass_runner::emit_ref_or_folded(std::string_view name) {
+  if (!materialize_) {
+    return;
+  }
   auto folded = try_fold_ref(name);
   if (folded && !folded->is_invalid()) {
     emit_leaf(Lnast_node::create_const(folded->to_pyrope()));
@@ -429,6 +452,9 @@ void uPass_runner::emit_ref_or_folded(std::string_view name) {
 }
 
 void uPass_runner::emit_op_with_fold(bool fold_all) {
+  if (!materialize_) {
+    return;  // pure emission (dispatch happened in the caller); cursor untouched
+  }
   const auto op_ntype = lm->current_type();
   emit_push(op_ntype);
 
@@ -1775,8 +1801,11 @@ void uPass_runner::run() {
   // (their dst can't fold via fold_ref's single-value return), so it
   // emits orphan tuple_add+assign+attr_set chains for fully-constant
   // tuples even when every consumer was already folded away. The DCE
-  // cleans those up.
-  dead_code_eliminate_staging();
+  // cleans those up. Skipped (with the whole staging build) when nothing
+  // consumes the rewritten LNAST — see set_materialize().
+  if (materialize_) {
+    dead_code_eliminate_staging();
+  }
 
   // Step J — dest-walk finisher dispatch. Passes that want to inspect
   // the freshly-built staging tree (verifier/assert cassert counts in
@@ -2270,7 +2299,9 @@ void uPass_runner::process_lnast() {
 void uPass_runner::process_top() {
   // staging_parent is the already-materialized root slot; overwrite its
   // data with the input top node (preserves the correct text/token).
-  staging->set_data(staging_parent, lm->current_type());
+  if (materialize_) {
+    staging->set_data(staging_parent, lm->current_type());
+  }
 
   if (lm->has_child()) {
     lm->move_to_child();

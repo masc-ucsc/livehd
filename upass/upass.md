@@ -88,6 +88,19 @@ resolves, etc.) get a fresh view.
 
 ## 2. Per-pass responsibilities
 
+### semacheck (goal 1h — semantic legality, ex-lnastfmt)
+
+Owns the user-facing checks relocated out of `pass.lnastfmt` (which is now a
+compiler-internal structural validator): write to a read-only / derived
+attribute (`:[bits=]`, `:[max=]`, size/sign/key — the only enforcement site),
+declare-once (same-scope redeclaration), and a shadowing backstop (prp2lnast
+enforces no-shadowing first, with a sharper span). One-shot
+`begin_iteration()` walk over the source tree — runs before the walk mutates
+anything, so diagnostics point at what the user wrote (located via the
+declare/attr_set loc-carry chain). Read-only; emits `core/diag` records
+(codes `read-only-attr-write`, `redeclaration`, `variable-shadowing`).
+Label `semacheck` (default on), ordered right after the first verifier.
+
 ### Bundle pre-pass (new)
 
 Owns *structural* side state. Writes Bundle fields that describe a name's

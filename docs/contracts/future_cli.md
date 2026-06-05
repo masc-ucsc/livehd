@@ -32,9 +32,10 @@ consumers share), then layer the tag workspace on top.
 - **2y-agent** (renamed from 1y-agent; demoted to Group 2 — the landed
   kernel covers every test/build flow) — the stateful workspace: `@tag`
   directories, `setup/run/status/list/describe`, JSONL run logs, multi-tag
-  experiments, plus the deferred kernel follow-ups (toln gate, multi-`lg:`
+  experiments, plus the deferred kernel follow-ups (multi-`lg:`
   linker, per-function units, graphviz/lgraph-dump emits, import-resolver
-  depfile, liberty/opentimer verb — see TODO_livehd 2y-agent). Each
+  depfile, liberty/opentimer verb — see TODO_livehd 2y-agent; the toln
+  gate + its emit-derivation landed 2026-06-05). Each
   `run <step> @tag` desugars to a kernel call. Specified in *Tag workspace
   mode* and everything after it.
 
@@ -356,9 +357,13 @@ Bazel rule so BUILD dep chains are machine-maintained, never hand-edited.
 
 **Emit-driven lowering:** the kernel derives the tolg gate from the requested
 emits — `--emit-dir lg:` / `--emit verilog:` run the LNAST→LGraph lowering,
-anything else skips it (the CLI-level `tolg:0|1`). The symmetric
-`pass.upass toln:false` (don't materialize the post-upass LNAST when nothing
-consumes it) is tracked under TODO_livehd 2y-agent (kernel follow-ups; was 1y-toln).
+anything else skips it (the CLI-level `tolg:0|1`). The symmetric toln gate is
+also derived (2026-06-05): when neither the tolg lowering nor any post-upass
+LNAST emit (`--emit-dir ln:/pyrope:/lnast-dump:`) consumes the rewritten tree,
+the kernel passes `pass.upass toln:0` — the runner then skips the whole
+staging build, the post-walk DCE, and the coalescer (every pass still
+dispatches, so diagnostics are unchanged). An explicit `--set upass.toln=…`
+overrides the derivation.
 
 **Reader trichotomy (2026-06-04):** `--reader yosys-verilog|yosys-slang|slang`
 (old `yosys|slang` two-value spelling rejected). The `yosys-*` readers go

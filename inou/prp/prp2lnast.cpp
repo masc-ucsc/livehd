@@ -641,7 +641,7 @@ Lnast_nid prp_copy_one_node(const Lnast& src, const Lnast_nid& src_nid, Lnast& d
   // constprop's descending-range error can point at the `a..=b`.
   if (t == Lnast_ntype::Lnast_ntype_cassert || t == Lnast_ntype::Lnast_ntype_func_call || t == Lnast_ntype::Lnast_ntype_if
       || t == Lnast_ntype::Lnast_ntype_while || t == Lnast_ntype::Lnast_ntype_store || t == Lnast_ntype::Lnast_ntype_declare
-      || t == Lnast_ntype::Lnast_ntype_range) {
+      || t == Lnast_ntype::Lnast_ntype_range || t == Lnast_ntype::Lnast_ntype_attr_set) {
     const auto loc = src.get_loc(src_nid);
     if (loc.pos1 != 0 || loc.pos2 != 0 || loc.line != 0 || loc.tok != 0) {
       dst.set_loc(nn, loc);
@@ -1125,6 +1125,10 @@ void Prp2lnast::process_declaration_statement(TSNode n) {
       lnast->add_child(idx, ref);
       lnast->add_child(idx, Lnast_node::create_const("type"));
       lnast->add_child(idx, Lnast_node::create_const(kind));
+      // Span → the decl-merge copies this onto the synthesized `declare` so
+      // declaration-site diagnostics (semacheck redeclaration/shadowing) can
+      // point at the `mut/const x` line. Mirrors the assignment-form site.
+      attach_loc(idx, id);
     }
     if (has_comptime) {
       auto idx = builder.add_child(Lnast_ntype::create_attr_set());
@@ -3995,6 +3999,7 @@ void Prp2lnast::emit_attribute_list(const Lnast_node& target, TSNode attr_list_n
         } else {
           lnast->add_child(idx, Lnast_node::create_const("true"));
         }
+        attach_loc(idx, item);  // span → semacheck's read-only-attr-write can point here
       } else if (it == "identifier" || it == "ref_identifier") {
         auto txt = trim(get_text(item));
         if (txt.empty()) {
@@ -4004,6 +4009,7 @@ void Prp2lnast::emit_attribute_list(const Lnast_node& target, TSNode attr_list_n
         lnast->add_child(idx, target);
         lnast->add_child(idx, Lnast_node::create_const(txt));
         lnast->add_child(idx, Lnast_node::create_const("true"));
+        attach_loc(idx, item);
       }
     }
     return;
@@ -4055,6 +4061,7 @@ void Prp2lnast::emit_attribute_list(const Lnast_node& target, TSNode attr_list_n
     } else {
       lnast->add_child(idx, Lnast_node::create_const("true"));
     }
+    attach_loc(idx, name_n);  // span → semacheck's read-only-attr-write can point here
   }
 }
 

@@ -17,6 +17,7 @@
 #include "upass_bitwidth.hpp"    // NOLINT: ensures plugin "bitwidth" is linked
 #include "upass_constprop.hpp"
 #include "upass_runner.hpp"
+#include "upass_semacheck.hpp"  // NOLINT: ensures plugin "semacheck" is linked
 #include "upass_ssa.hpp"
 #include "upass_tolg.hpp"
 #include "upass_typecheck.hpp"  // NOLINT: ensures plugin "typecheck" is linked
@@ -88,10 +89,21 @@ void Pass_upass::setup() {
   m1.add_label_optional("assert", "enable assert test", "true");
   m1.add_label_optional("func_extract", "enable func_extract upass (spawn helper lnasts for comb func_defs)", "true");
   m1.add_label_optional("typecheck", "enable typecheck upass (kind/operator/nil checks; runs after attributes)", "true");
+  m1.add_label_optional("semacheck",
+                        "enable semacheck upass (semantic legality: read-only-attr writes, declare-once/shadowing; "
+                        "the user-facing checks formerly in pass.lnastfmt)",
+                        "true");
   m1.add_label_optional("tolg",
                         "lower each fully-specified function tree to an LGraph (task 1l); leaves graphs on the pass var "
                         "for inou.cgen.verilog. Terminal step: runs after ssa+bitwidth. Default off.",
                         "false");
+  m1.add_label_optional("toln",
+                        "materialize the rewritten post-upass LNAST. toln:0 skips the whole staging build (emit_* "
+                        "no-ops), the post-walk DCE, the coalescer, and the body swap when nothing downstream consumes "
+                        "the LNAST (diagnostics-only runs, e.g. the LSP) — every pass still dispatches, so diagnostics "
+                        "and io/bw side-channels are unchanged; forced back on while tolg:1 needs the rewritten tree. "
+                        "Default on.",
+                        "true");
   m1.add_label_optional(
       "order",
       "comma-separated upass names; overrides verifier/constprop/assert toggles (example: verifier,constprop,verifier)",
@@ -181,6 +193,16 @@ Pass_upass::Pass_upass(const Eprp_var& var) : Pass("pass.upass", var) {
   auto tolg_txt = get_label("tolg");
   run_tolg      = tolg_txt != "false" && tolg_txt != "0";
 
+  // toln gates materializing the rewritten LNAST (the staging→replace_body
+  // swap after each tree's walk). toln:0 skips it for diagnostics-only runs
+  // (the LSP passes tolg:0 toln:0); the tolg sub-pass reads the post-upass
+  // tree, so tolg:1 forces the swap regardless. Default on.
+  auto toln_txt = get_label("toln");
+  run_toln      = (toln_txt != "false" && toln_txt != "0") || run_tolg;
+
+  auto semacheck_txt = get_label("semacheck");
+  bool do_semacheck  = semacheck_txt != "false" && semacheck_txt != "0";
+
   auto func_extract_txt = get_label("func_extract");
   bool do_func_extract  = func_extract_txt != "false" && func_extract_txt != "0";
 
@@ -203,6 +225,15 @@ Pass_upass::Pass_upass(const Eprp_var& var) : Pass("pass.upass", var) {
     upass_order.emplace_back("verifier");
   }
 
+  // semacheck runs first among the semantic passes (goal 1h): its checks
+  // (read-only-attr writes, declare-once/shadowing) want the tree closest to
+  // user source and fail fast before the value passes do work. It is a
+  // one-shot begin_iteration walk, so its slot in the per-node dispatch order
+  // is irrelevant — only that it is registered before the walk starts.
+  if (do_semacheck) {
+    upass_order.emplace_back("semacheck");
+  }
+
   if (do_func_extract) {
     upass_order.emplace_back("func_extract");
   }
@@ -220,6 +251,15 @@ Pass_upass::Pass_upass(const Eprp_var& var) : Pass("pass.upass", var) {
   // error before the value passes do work).
   if (do_typecheck) {
     upass_order.emplace_back("typecheck");
+  }
+
+  // With no consumer of the rewritten LNAST (toln:0 && tolg:0 — run_toln
+  // already folds tolg in), the coalescer has nothing to do: it is pure
+  // deferred-emit / dead-store elimination with zero diagnostics, and the
+  // tree it shapes is never materialized. Drop it from the default order
+  // (an explicit order=… csv is honored untouched).
+  if (!run_toln) {
+    do_coalescer = false;
   }
 
   if (do_constprop) {
@@ -334,6 +374,12 @@ void Pass_upass::work(Eprp_var& var) {
       order.erase(std::remove(order.begin(), order.end(), "verifier"), order.end());
     }
     auto runner = uPass_runner(lm, order, up.pass_options);
+    // toln:0 && tolg:0: nothing consumes the rewritten LNAST, so skip building
+    // the staging tree (emit_* no-ops) and the post-walk DCE entirely — the
+    // walk still dispatches every pass, so diagnostics and side-channels
+    // (io_meta/bw_meta) are unchanged. The func_extract pre-loop above keeps
+    // materializing (the main walk consumes its rewrite).
+    runner.set_materialize(up.run_toln);
     runner.set_is_function_body(is_function_body);
     runner.set_function_registry(var.lnasts);  // 1i: comb bodies to inline from
     if (runner.has_configuration_error()) {
@@ -344,9 +390,15 @@ void Pass_upass::work(Eprp_var& var) {
     // Swap the rewritten staging tree into the existing Lnast so downstream
     // passes (lnast.dump, …) see the folded/DCE'd IR. Slot identity (the
     // shared_ptr in var.lnasts and the underlying TreeIO Tid) is preserved.
-    auto staged = runner.take_staging();
-    if (staged) {
-      ln->replace_body(staged->tree_ptr());
+    // toln:0 (diagnostics-only runs, e.g. the LSP) skips the swap — nothing
+    // downstream reads the rewritten tree, so the original body stays put and
+    // the staging rebuild is dropped. run_toln is forced on while tolg:1 (the
+    // tolg sub-pass below reads the post-upass tree).
+    if (up.run_toln) {
+      auto staged = runner.take_staging();
+      if (staged) {
+        ln->replace_body(staged->tree_ptr());
+      }
     }
     auto new_lnasts = runner.take_new_lnasts();
     for (const auto& new_ln : new_lnasts) {

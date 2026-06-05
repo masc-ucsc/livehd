@@ -254,11 +254,19 @@ see `architecture.md §3` for the full struct. Concretely:
 
 - `kind` ∈ {`comb`, `pipe`, `mod`} stored as an attribute on the node
   (`flow` is deferred).
-- `latency_range` = `{lo, hi}`. Plain `pipe[N]` has `lo == hi == N`.
-  `pipe[1..<N]` has `lo == 1, hi == N-1`. `pipe[N]` is a **hard
-  contract** (exact); `pipe[1..<N]` is also hard (the tool picks any
-  value in the closed range, but the body must be retimeable to *some*
-  value in it).
+- Latency is **per-output**, on the `func_def` io list (task **1q**): each
+  output io entry (`store(ref, default-or-nil, [type])`) may carry a
+  trailing `stages` node with two `const` children `(min, max)`.
+  `pipe[N]` → `stages(N,N)` on every output; `pipe[2..=5]` →
+  `stages(2,5)`; `pipe[1..<N]` → `stages(1,N-1)` (closed range); bare
+  `pipe` → `stages(1,0)` (min 1, max 0 = unconstrained); `comb` carries no
+  stages node (absent ≡ `(0,0)`); a `mod` output (later) may carry a
+  different value per output. The value is the SCC/σ stage depth from the
+  partition inputs to that output flop (`06c-pipelining.md`). `pipe[N]`
+  is a **hard contract** (exact); ranges are also hard (the tool picks
+  any value in the closed range, but the body must be retimeable to
+  *some* value in it). `pipe[0]` is a compile error. Plan:
+  `task_1q_plan.md`.
 - Input and output lists are **flat, named, typed port lists** — not
   tuple types. Each port has its own bits/sign/role/`decl_loc`. The
   body may still construct tuples internally (`out = (sum, carry)`);

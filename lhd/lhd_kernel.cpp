@@ -752,6 +752,13 @@ bool emits_need_graphs(const Options& opts) {
          || find_slot(opts.emit_dirs, "verilog") != nullptr;
 }
 
+// True when any requested emit consumes the post-upass LNAST (gates the toln
+// materialization — the dual of emits_need_graphs for pass.upass's toln:0|1).
+bool emits_need_lnast(const Options& opts) {
+  return find_slot(opts.emit_dirs, "ln") != nullptr || find_slot(opts.emit_dirs, "pyrope") != nullptr
+         || find_slot(opts.emit_dirs, "lnast-dump") != nullptr;
+}
+
 // ---- scan (pyrope import/dependency discovery) -------------------------------
 
 // Imports are comptime string literals (see import.md), so the dependency
@@ -977,6 +984,15 @@ void lower_lnasts(Options& opts, Result& res, Eprp_var& var, const std::string& 
   run_step("pass.lnastfmt", var, {}, opts, res);
 
   Eprp_var::Eprp_dict up{{"constprop", "1"}, {"verifier", "false"}};
+  // Derived toln gate (the dual of the emit-derived tolg gate): when neither
+  // the lnast.tolg stage below (need_graphs) nor any post-upass LNAST emit
+  // (ln:/pyrope:/lnast-dump:) consumes the rewritten tree, skip materializing
+  // it — pass.upass toln:0 drops the whole staging build, the post-walk DCE,
+  // and the coalescer; every pass still dispatches, so diagnostics are
+  // unchanged. An explicit `--set upass.toln=…` (merged below) overrides.
+  if (!need_graphs && !emits_need_lnast(opts)) {
+    up["toln"] = "0";
+  }
   merge_sets(opts, "upass", up);
   run_step("pass.upass", var, up, opts, res);
 

@@ -48,6 +48,14 @@ public:
   std::shared_ptr<Lnast>              take_staging() { return std::move(staging); }
   std::vector<std::shared_ptr<Lnast>> take_new_lnasts() override { return std::move(new_lnasts); }
 
+  // toln:0 && tolg:0 (diagnostics-only runs, e.g. the LSP): skip building the
+  // staging tree entirely. The walk still dispatches every pass (all
+  // diagnostics, symbol-table state, io/bw side-channels are unchanged) but
+  // the emit_* family becomes a no-op and the post-walk DCE is skipped —
+  // nothing downstream consumes the rewritten LNAST. Default on. Must stay on
+  // for the func_extract pre-loop and whenever take_staging() is consumed.
+  void set_materialize(bool m) { materialize_ = m; }
+
 protected:
   struct Pass_entry {
     std::string                   name;
@@ -105,6 +113,7 @@ protected:
   std::stack<Lnast_nid>               staging_parent_stack;
   Lnast_nid                           staging_parent;
   std::vector<std::shared_ptr<Lnast>> new_lnasts;
+  bool                                materialize_{true};  // see set_materialize()
 
   std::vector<std::string> resolve_order(const std::vector<std::string>& requested_names, std::string* error_msg = nullptr) const;
 

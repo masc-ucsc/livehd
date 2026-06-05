@@ -610,6 +610,40 @@ Reset rules:
   `initial=0sb?`; unknown reset value is still meaningful.
 - `clock_pin=false`: compile error for storage.
 
+### 12.1 Pipe output flops (task 1q)
+
+Lowering a `kind=pipe` tree, tolg inserts **exactly one** `Flop` cell in
+front of each graph output and stamps the new attribute pair
+`pipe_min` / `pipe_max` **on the flop dpin**:
+
+- The annotation must NOT live on the graph-output dpin: graph IOs are
+  hidden during forward traversal, so passes would never see it. The flop
+  dpin is the carrier.
+- Unset (or zero) attribute ⇒ ordinary flop, don't check.
+- The value is the SCC/σ stage depth from the partition inputs up to that
+  flop (`06c-pipelining.md` stage inference). `pipe[3]` → `(3,3)`,
+  `pipe[2..=5]` → `(2,5)`, bare `pipe` → `(1,0)` (max 0 = unconstrained).
+- Storage: flat_storage dpin attributes, same mechanism as bits/sign
+  (persistent graph state, not pass-local).
+
+Flop configuration: when the body has an existing flop, an added pipeline
+flop is a **replica** of it — copy the full config verbatim (async/sync
+reset, none, clock, posclk) and move it; never invent a new reset style.
+A pure-comb body has nothing to replicate, so the inserted flop is the
+no-reset shape (`reset_pin` unconnected, `initial=0sb?`, `async=false` —
+the `reg a = nil` rules above). Clock follows the §12 defaults; if the
+partition declares no `clk`/`clock` input, tolg creates an implicit
+`clock` graph input.
+
+Stage **expansion is not done at LNAST/tolg level** — they only ever
+produce the single annotated flop. `pass.pipe` (LG level) replaces it
+with a chain of `depth` identical replicas and clears the annotation;
+default `depth = min`, and the choice within `[min,max]` is an
+optimization knob (retiming, or slop-sim seed randomization to flush
+caller latency-alignment bugs). The Verilog-emit path runs `pass.pipe`
+for all recipes (legalization, not optimization); `lg:` dumps keep the
+compact annotated form. Plan: `task_1q_plan.md`.
+
 ## 13. Memory lowering
 
 Persistent indexed `reg` arrays lower to one LGraph `Memory` node per logical

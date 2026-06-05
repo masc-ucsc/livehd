@@ -27,6 +27,7 @@ cc_library(
         "//upass/func_extract:upass_func_extract",
         "//upass/noop:upass_noop",
         "//upass/runner:upass_runner",
+        "//upass/semacheck:upass_semacheck",
         "//upass/ssa:upass_ssa",
         "//upass/tolg:upass_tolg",
         "//upass/typecheck:upass_typecheck",

@@ -1,0 +1,11 @@
+/*
+:name: readonly_attr_max
+:type: error
+:error: settable only through a type|cannot write
+*/
+
+// `max`/`min` may only be set through a TYPE (`:int(max=,min=)`, `:uN`/`:sN`),
+// never via an attribute write. Enforced by upass/semacheck (goal 1h).
+
+mut x:int:[max=3] = 1 // locate_error_here
+cassert(x == 1)

@@ -9,4 +9,4 @@
 // To reset a `mut`, reassign (`d = 2`) instead of re-declaring.
 
 mut d = 1
-mut d = 2
+mut d = 2 // locate_error_here

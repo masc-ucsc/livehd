@@ -17,7 +17,6 @@
 #include "diag.hpp"
 #include "eprp_var.hpp"
 #include "lnast.hpp"
-#include "pass_lnastfmt.hpp"
 #include "pass_upass.hpp"
 #include "prp2lnast.hpp"
 #include "rapidjson/document.h"
@@ -237,18 +236,19 @@ std::vector<livehd::diag::Diagnostic> analyze(std::string_view virtual_path, std
   sink.set_jsonl_path("off");    // in-memory only
   sink.set_step("lsp");
 
-  // Mirror the `inou.prp |> pass.upass |> pass.lnastfmt` shell pipeline so the
-  // LSP surfaces every diagnostic those three stages produce, not just the
-  // front-end's. All three emit into the shared core/diag sink (typecheck via
-  // sink().emit(); lnastfmt/verifier via Pass::error/warn -> parser_error_int ->
-  // sink().flush()), so collecting sink.records() after the run captures them.
-  // Each stage is wrapped: a thrown error has already recorded its diagnostic,
-  // and a stage failure stops the chain exactly as the `|>` pipeline would.
+  // Run `inou.prp |> pass.upass` — no lnastfmt stage (goal 1h: its user-facing
+  // checks moved into upass/semacheck, so lnastfmt is a compiler-internal
+  // structural validator with nothing to tell an end user). Every diagnostic
+  // producer (prp2lnast, semacheck, typecheck, constprop, bitwidth, verifier)
+  // emits into the shared core/diag sink, so collecting sink.records() after
+  // the run captures them. Each stage is wrapped: a thrown error has already
+  // recorded its diagnostic, and a stage failure stops the chain exactly as
+  // the `|>` pipeline would.
   std::shared_ptr<Lnast> lnast;
   try {
     // Full front-end so name/type diagnostics surface too. The
     // first reported PARSE error still aborts the front-end (collect-and-continue
-    // is future work per docs/contracts/diagnostics.md); upass/lnastfmt below run
+    // is future work per docs/contracts/diagnostics.md); upass below runs
     // only when the front-end produced a usable tree.
     Prp2lnast converter(virtual_path, module_name_of(virtual_path), text);
     lnast = converter.get_lnast();
@@ -261,20 +261,17 @@ std::vector<livehd::diag::Diagnostic> analyze(std::string_view virtual_path, std
   if (lnast) {
     Eprp_var var;
     var.add(lnast);
+    // Diagnostics-only run: tolg:0 (no LNAST→LGraph lowering — also the label
+    // default, set explicitly for clarity) and toln:0 (don't materialize the
+    // rewritten post-upass LNAST; nothing here consumes it).
+    var.add("tolg", "false");
+    var.add("toln", "false");
 
-    bool upass_ok = false;
     try {
-      Pass_upass::work(var);  // typecheck / constprop / bitwidth / verifier / assert / …
-      upass_ok = true;
+      Pass_upass::work(var);  // semacheck / typecheck / constprop / bitwidth / verifier / assert / …
     } catch (...) {
       // upass aborted (a Pass::error throw or config error); its diagnostic is
-      // already in the sink. Skip lnastfmt — the `|>` pipeline would stop here.
-    }
-    if (upass_ok) {
-      try {
-        Pass_lnastfmt::fmt_begin(var);  // LNAST structural validation
-      } catch (...) {
-      }
+      // already in the sink — the `|>` pipeline would stop here too.
     }
   }
 

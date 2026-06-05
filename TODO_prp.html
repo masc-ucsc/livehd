@@ -104,6 +104,35 @@ complete before group N+1 starts. Group letters are shared across
 cross-file dependencies stay visible.</p>
 <h2 id="group-1-foundation">Group 1 — foundation</h2>
 <ul>
+<li><strong id="item-1q" class="item-id">1q</strong> Pyrope <code>pipe</code> construct — <strong>Phase 1: declaration</strong>.
+  A <code>pipe[N]</code> lambda produces an LGraph with flopped outputs whose latency
+  is respected, verified against golden Verilog via
+  <code>inou/prp/tests/equiv</code> (latency is a runtime property — not
+  comptime-checkable). Spec: <code>../docs/docs/pyrope/06c-pipelining.md</code>;
+  plan: <code>docs/contracts/task_1q_plan.md</code>.<ul>
+<li><strong>LNAST:</strong> new <code>stages</code> node — per-<em>output</em> io annotation
+    <code>stages(min,max)</code> on the <code>func_def</code> io list. <code>pipe[3]</code>→(3,3),
+    <code>pipe[2..=5]</code>→(2,5), bare <code>pipe</code>→(1,0) (max 0 = unconstrained),
+    <code>comb</code>≡(0,0) (absent); a <code>mod</code> output (later) may differ per
+    output. Value = SCC/σ depth from inputs to that output flop.
+    prp2lnast parses the <code>depth</code> field it currently strips
+    (<code>prp2lnast.cpp:2822</code>); <code>pipe[0]</code> is a compile error.</li>
+<li><strong>tolg:</strong> first Flop creation on the Pyrope→LG path (shares the
+    2d register milestone): insert exactly <em>one</em> no-reset Flop per
+    output, stamp <code>pipe_min</code>/<code>pipe_max</code> on the <em>flop</em> dpin (graph-IO
+    dpins are hidden in forward traversal); implicit <code>clock</code> input when
+    none declared. Phase-1 guard: <code>reg</code> inside a <code>pipe</code> body errors
+    (stage inference is a later phase).</li>
+<li><strong>LG expansion knob:</strong> <code>pass.pipe</code> replaces the annotated flop
+    with <code>depth</code> identical replicas (copy config verbatim — async/sync/no
+    reset); default <code>depth=min</code>; runs on the Verilog-emit path for all
+    recipes. <code>lg:</code> dumps keep the compact annotated form.</li>
+<li><strong>Later phases:</strong> call sites (<code>stage[N]</code>/<code>@[N]</code> in <code>mod</code> —
+    makes <code>tests/equiv/accum.prp</code> live), Tarjan-SCC stage inference for
+    reg-in-pipe bodies, slop pipe flop with seed-randomized depth in
+    [min,max] to flush caller alignment bugs.</li>
+</ul>
+</li>
 <li><strong id="item-1m" class="item-id">1m</strong> Pyrope <code>import</code> statement — <strong>deferred</strong>. Substantial new
   infra; not attempted in the 2026-05-27 session.</li>
 <li><strong>Tried:</strong> Nothing. Scope was assessed (substantial new
@@ -189,45 +218,6 @@ cross-file dependencies stay visible.</p>
   init-tuple's named fields rebound to the setter's named args.</li>
 </ul>
 </li>
-<li>
-<p><strong id="item-1e" class="item-id">1e</strong> Documented-error detection coverage for the <code>inou/prp/tests/errors/</code>
-  negative-test suite — <strong>complete 2026-06-05</strong>; the whole <code>tests/errors/</code> suite
-  passes. The last two landed together: <code>invalid_descending_range</code> (descending
-  ranges banned outright — incl. <code>step -1</code> forms — in constprop's
-  <code>process_range</code> + the parse-time literal <code>for</code>-range unroll; non-positive
-  <code>step</code> also errors; doc updated) and <code>underflow_unsigned_expr</code> (declare/store
-  loc-carry chain + bitwidth per-var write-site map so the "does not fit"
-  diagnostic carries the store line's span). Each diagnostic is emitted at the
-  marked line and matches the header <code>:error:</code> regex. The 9 fell
-  into three mechanisms:</p>
-</li>
-<li><strong>Frontend grammar / lexical (prp2lnast + tree-sitter-pyrope).</strong><ul>
-<li><code>invalid_binary_prefix</code> — bare <code>0b1100</code> must error (require <code>0ub</code>/<code>0sb</code>).</li>
-<li><code>mixed_precedence</code> — mixed arith+bitwise (<code>a*b+c &amp; d</code>) must require parens.</li>
-<li><code>tuple_lhs_requires_parens</code> — <code>mut a,b = (2,3)</code> (lhs tuple needs parens).</li>
-<li><code>tuple_rhs_requires_parens</code> — <code>mut (a,b) = 2,3</code> (rhs tuple needs parens).</li>
-<li><code>drop_tuple_parens_assert</code> — <code>cassert(2 in 1,2)</code> parses as a 2-arg call;
-  reject the non-string assertion message (ties to the <code>cassert(cond,"msg")</code>
-  message arg — see <span class="xref xref-note" title="note: cassert_message_and_verifier_diag">cassert_message_and_verifier_diag</span>).</li>
-</ul>
-</li>
-<li><strong>Tuple / scope semantics (typecheck pass — landed, extend detection).</strong><ul>
-<li><code>duplicate_tuple_field</code> — duplicate field name in a tuple literal.</li>
-<li><code>undefined_read</code> — read of an undeclared name (<code>const y = x</code>).</li>
-</ul>
-</li>
-<li><strong>Range / value-fit (bitwidth + constprop; extends the landed <span class="xref xref-note" title="note: 1b">1b</span>
-    range-force) — landed 2026-06-05.</strong><ul>
-<li><code>invalid_descending_range</code> — <code>5..=0</code> closed range that never reaches its
-  end is invalid. Descending is banned outright (no <code>step -1</code> escape); the
-  check fires in <code>process_range</code> on comptime bounds (<code>is_integer()</code> gate —
-  the open-end <code>nil</code> sentinel satisfies <code>is_i()</code>) and at the parse-time
-  literal <code>for</code>-range unroll, which never emits a <code>range</code> node.</li>
-<li><code>underflow_unsigned_expr</code> — a signed-negative expression assigned to an
-  unsigned dest (<code>const c:u8 = ones</code>) errors <code>does not fit</code> with the store
-  line's span (declare/store loc-carry + bitwidth <code>note_write_site</code>).</li>
-</ul>
-</li>
 </ul>
 <h2 id="group-2-depends-on-group-1">Group 2 — depends on Group 1</h2>
 <ul>
@@ -238,7 +228,7 @@ cross-file dependencies stay visible.</p>
     reference the source-map ID rather than re-encoding <code>file:line:col</code>
     in every temp name.</li>
 <li>
-<p>Cascades into golden-file updates (<a class="xref" href="TODO_livehd.html#item-1h">1h</a> and TODO_verilog.md
+<p>Cascades into golden-file updates (TODO_verilog.md
     <a class="xref" href="TODO_verilog.html#item-2d">2d</a>); land before those goldens are taken.</p>
 </li>
 <li>
@@ -373,8 +363,7 @@ Tallies re-measured via the <code>prplib.py</code> comptime pipeline
 [verifier_include_funcs:true]</code>).</p>
 <p><strong>Live suite = 6 fails</strong> across <code>//inou //upass //lnast //pass</code>, all comptime
 (enum + decorator + const-tuple-mut-field). The <code>tests/errors/</code> negative suite is
-fully green as of 2026-06-05 (<a class="xref" href="TODO_prp.html#item-1e">1e</a> complete — the rows below
-that listed error tests are resolved and removed).</p>
+fully green as of 2026-06-05 (<strong>1e</strong> complete and removed from Group 1).</p>
 <table>
 <thead>
 <tr>
