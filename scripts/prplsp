@@ -1,15 +1,17 @@
 #!/usr/bin/env bash
-# prplsp -- launch the Pyrope/LiveHD LSP server (lgshell --lsp)
+# prplsp -- launch the Pyrope/LiveHD LSP server (lhd lsp)
 #
-# Picks which lgshell to run based on the CURRENT WORKING DIRECTORY (the dir the
+# Picks which lhd to run based on the CURRENT WORKING DIRECTORY (the dir the
 # editor launched in), so neovim can use a single command everywhere:
 #
 #   1. If $PWD is inside a livehd checkout, use that repo's freshly-built
-#      bazel-bin/main/lgshell -- no copying/installing while hacking on the LSP.
-#   2. Otherwise fall back to the `lgshell` found in $PATH (the default install).
+#      bazel-bin/lhd/lhd -- no copying/installing while hacking on the LSP.
+#   2. Otherwise fall back to the `lhd` found in $PATH (the default install).
+#   3. Legacy fallback: a `lgshell` in $PATH still serves via `lgshell --lsp`
+#      (deprecated -- install lhd instead).
 #
 # A livehd checkout is identified by an ancestor MODULE.bazel declaring
-# name = "livehd". Extra arguments are forwarded to lgshell after --lsp.
+# name = "livehd". Extra arguments are forwarded after `lsp`.
 
 set -euo pipefail
 
@@ -31,23 +33,28 @@ find_livehd_root() {
 }
 
 if repo_root=$(find_livehd_root); then
-  repo_lgshell="${repo_root}/bazel-bin/main/lgshell"
-  if [[ -x "${repo_lgshell}" ]]; then
-    lgshell="${repo_lgshell}"
+  repo_lhd="${repo_root}/bazel-bin/lhd/lhd"
+  if [[ -x "${repo_lhd}" ]]; then
+    lhd="${repo_lhd}"
   else
-    echo "prplsp: inside livehd (${repo_root}) but no built lgshell at" >&2
-    echo "  ${repo_lgshell}" >&2
-    echo "  build it with: bazel build //main:lgshell" >&2
-    echo "  falling back to 'lgshell' in \$PATH" >&2
+    echo "prplsp: inside livehd (${repo_root}) but no built lhd at" >&2
+    echo "  ${repo_lhd}" >&2
+    echo "  build it with: bazel build //lhd:lhd" >&2
+    echo "  falling back to 'lhd' in \$PATH" >&2
   fi
 fi
 
 # Fall back to PATH if not inside a checkout, or inside but not yet built.
-if [[ -z "${lgshell:-}" ]]; then
-  if ! lgshell=$(command -v lgshell 2>/dev/null); then
-    echo "prplsp: could not find lgshell (not in a livehd checkout, and none in \$PATH)" >&2
+if [[ -z "${lhd:-}" ]]; then
+  if lhd=$(command -v lhd 2>/dev/null); then
+    :
+  elif lgshell=$(command -v lgshell 2>/dev/null); then
+    echo "prplsp: no lhd found; using deprecated 'lgshell --lsp' from \$PATH" >&2
+    exec "${lgshell}" --lsp "$@"
+  else
+    echo "prplsp: could not find lhd (not in a livehd checkout, and none in \$PATH)" >&2
     exit 1
   fi
 fi
 
-exec "${lgshell}" --lsp "$@"
+exec "${lhd}" lsp "$@"

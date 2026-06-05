@@ -266,8 +266,8 @@ Options parse_args(int argc, char** argv) {
         ++i;
       }
     }
-  } else if (cmd == "synth" || cmd == "check" || cmd == "scan" || cmd == "list" || cmd == "describe" || cmd == "version"
-             || cmd == "help") {
+  } else if (cmd == "synth" || cmd == "check" || cmd == "scan" || cmd == "lsp" || cmd == "list" || cmd == "describe"
+             || cmd == "version" || cmd == "help") {
     opts.command = cmd;
     ++i;
   } else {

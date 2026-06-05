@@ -346,10 +346,18 @@ int main(int argc, char** argv) {
   }
 
   // Run as a Pyrope LSP server (task 1n): speak JSON-RPC over stdio and never
-  // start the REPL. See docs/contracts/pyrope_lsp.md.
+  // start the REPL. See docs/contracts/pyrope_lsp.md. DEPRECATED spelling —
+  // `lhd lsp` is the supported entry (kept silent here: stdio belongs to the
+  // JSON-RPC protocol and stderr is the editor's log).
   if (option_lsp) {
     return livehd::lsp::run_stdio();
   }
+
+  // The whole lgshell REPL is deprecated: every flow is driven by the
+  // stateless `lhd` CLI (docs/contracts/future_cli.md); no test depends on
+  // lgshell anymore. Kept for interactive exploration until lhd's agent
+  // layer (1y-agent) covers it.
+  std::print(stderr, "lgshell is DEPRECATED: use ./bazel-bin/lhd/lhd (lhd help) for all flows\n");
 
   for (int i = std::max(optind, 1); i < argc; ++i) {
     if (cmd.empty()) {

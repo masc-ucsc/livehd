@@ -121,33 +121,34 @@ the design at [docs/contracts/pyrope_lsp.md](docs/contracts/pyrope_lsp.md).
 
 ## Language server
 
-The server is built into the main `lgshell` binary and runs over stdio (JSON-RPC)
-when invoked with `--lsp`. It is Pyrope-only (`.prp`); it never touches the
-Verilog/Yosys path.
+The server runs as `lhd lsp` over stdio (JSON-RPC). It is Pyrope-only
+(`.prp`); it never touches the Verilog/Yosys path. (The deprecated
+`lgshell --lsp` spelling still works during the transition.)
 
 Build it once:
 
 ```bash
-bazel build -c dbg //main:lgshell
-# binary at: bazel-bin/main/lgshell
+bazel build -c dbg //lhd:lhd
+# binary at: bazel-bin/lhd/lhd
 ```
 
 #### `prplsp` launcher
 
 Rather than hard-code a path, point your editor at the
-[`scripts/prplsp`](scripts/prplsp) wrapper. It runs `lgshell --lsp`, but picks
-*which* `lgshell` based on the directory the editor launched in:
+[`scripts/prplsp`](scripts/prplsp) wrapper. It runs `lhd lsp`, but picks
+*which* `lhd` based on the directory the editor launched in:
 
 - **Inside a livehd checkout** → that checkout's freshly-built
-  `bazel-bin/main/lgshell`, so iterating on the LSP needs no copy/reinstall.
-- **Anywhere else** → the `lgshell` found on your `$PATH` (the default install).
+  `bazel-bin/lhd/lhd`, so iterating on the LSP needs no copy/reinstall.
+- **Anywhere else** → the `lhd` found on your `$PATH` (the default install;
+  a legacy `lgshell` on `$PATH` still works as a deprecated fallback).
 
 So you keep one editor config everywhere. Install both `prplsp` and a default
-`lgshell` on your `$PATH` — e.g. into `~/bin` or `~/.local/bin`:
+`lhd` on your `$PATH` — e.g. into `~/bin` or `~/.local/bin`:
 
 ```bash
-cp scripts/prplsp ~/.local/bin/prplsp          # or: ln -s "$PWD/scripts/prplsp" ~/.local/bin/
-cp bazel-bin/main/lgshell ~/.local/bin/lgshell # the fallback used outside a checkout
+cp scripts/prplsp ~/.local/bin/prplsp    # or: ln -s "$PWD/scripts/prplsp" ~/.local/bin/
+cp bazel-bin/lhd/lhd ~/.local/bin/lhd    # the fallback used outside a checkout
 ```
 
 Quick sanity check (it should print a framed JSON-RPC reply, then exit):

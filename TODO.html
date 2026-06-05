@@ -142,7 +142,8 @@ N. Each badge links to the full entry. <strong>HHDS has no open goals.</strong><
 <li><a class="xref" href="TODO_livehd.html#item-1h">1h</a> New <code>upass/semacheck</code> pass + demote <code>lnastfmt</code> to debug-only + trim the LSP pipeline.</li>
 </ul></li>
 <li><em>Group 1-complex:</em><ul>
-<li><a class="xref" href="TODO_livehd.html#item-1y-bazel">1y-bazel</a> / <a class="xref" href="TODO_livehd.html#item-1y-agent">1y-agent</a> New <code>lhd</code> CLI — stateless hermetic kernel first (<code>elaborate verilog|pyrope</code> / <code>synth</code> / <code>check</code> / <code>compile</code>, typed <code>--in</code>/<code>--emit</code> slots, Bazel/Make-callable), then the agent <code>@tag</code> workspace (<code>setup/run/status/list/describe</code>, TOML, JSONL) on top.</li>
+<li><a class="xref" href="TODO_livehd.html#item-1y-agent">1y-agent</a> <code>lhd</code> agent <code>@tag</code> workspace (<code>setup/run/status/list/describe</code>, TOML, JSONL) on top of the <strong>landed</strong> stateless kernel (1y-bazel done — every test harness drives <code>lhd</code> now).</li>
+<li><a class="xref" href="TODO_livehd.html#item-1y-toln">1y-toln</a> <code>pass.upass toln:false</code> — skip materializing the post-upass LNAST when nothing consumes it (dual of the kernel's emit-derived <code>tolg</code> gate).</li>
 <li><a class="xref" href="TODO_livehd.html#item-1f">1f</a> Source-map indirection (LOC propagation: canonical map, per-cell index, multi-loc aliases).</li>
 <li><a class="xref" href="TODO_livehd.html#item-1n">1n</a> Pyrope LSP server — <strong>Phase A landed</strong> (lifecycle + diagnostics); Phases B–E (hover/nav/workspace) remain.</li>
 </ul></li>
@@ -181,10 +182,10 @@ recorded (cluster snapshot below), and the <span class="xref xref-note" title="n
 <code>Const</code>-args migration is done across <code>upass/attributes/*</code>, <code>upass/ssa</code>,
 <code>prp2lnast</code>, <code>inou/cgen</code>, and <code>pass/cprop</code>. No open items; any residual
 <code>to_i()</code> cleanup at the next hlop pin bump rides under <span class="xref xref-note" title="note: 1g">1g</span> (Goal 1).</p>
-<h2 id="failing-tests-cluster-snapshot-2026-06-03">Failing tests — cluster snapshot (2026-06-03)</h2>
-<p><code>bazel test //inou/prp:...</code> shows <strong>9 failures</strong>: 6 in the comptime suite
-(enum + decorator) and 3 in the <code>tests/errors/</code> negative suite (expected
-diagnostic never emitted). The failures cluster by root cause:</p>
+<h2 id="failing-tests-cluster-snapshot-2026-06-04">Failing tests — cluster snapshot (2026-06-04)</h2>
+<p><code>bazel test //inou/prp:...</code> shows <strong>8 failures</strong>: 6 in the comptime suite
+and 2 in the <code>tests/errors/</code> negative suite (expected diagnostic never
+emitted). The failures cluster by root cause:</p>
 <table>
 <thead>
 <tr>
@@ -203,19 +204,27 @@ diagnostic never emitted). The failures cluster by root cause:</p>
 </tr>
 <tr>
 <td><strong>B. Decorator-init / setter</strong></td>
-<td><code>prp-setter_complex</code>, <code>prp-tuple_decorator_complex</code></td>
+<td><code>prp-setter_complex</code></td>
 <td>decorator-init implicit setter dispatch on <code>x:Tup = (…)</code>: scalar→tuple coercion, positional setter-arg routing, <code>p.x</code>/<code>p['x']</code> getter dispatch</td>
 <td><strong>1k</strong></td>
 </tr>
 <tr>
 <td><strong>C. Error detection</strong></td>
-<td><code>prp-mixed_precedence</code>, <code>prp-invalid_descending_range</code>, <code>prp-underflow_unsigned_expr</code></td>
-<td>documented Pyrope errors not yet detected: operator precedence (<code>3 &amp; 4 * 4</code>), descending range (<code>5..=0</code>), signed-negative-into-unsigned value-fit</td>
+<td><code>prp-invalid_descending_range</code>, <code>prp-underflow_unsigned_expr</code></td>
+<td>documented Pyrope errors not yet detected: descending range (<code>5..=0</code>), signed-negative-into-unsigned value-fit</td>
 <td><strong>1e</strong> (<code>underflow_unsigned_expr</code> extends <strong>1b</strong>)</td>
+</tr>
+<tr>
+<td><strong>D. Const tuple, mut fields</strong></td>
+<td><code>prp-tuple_simple7</code></td>
+<td>surfaced by <code>lhd</code> (emit-only sink errors now fail the run): <code>tuple_set</code> tallies legal <code>mut</code>-<em>field</em> writes against the <code>const</code> tuple <em>root</em>; needs per-field decl modes (task 1t <code>comp_type_tuple</code>)</td>
+<td>task 1t per-field modes</td>
 </tr>
 </tbody>
 </table>
-<p>Cluster C shrank from 9→3 since the 2026-06-02 snapshot: tuple-parens detection
+<p>Cluster C shrank 9→3 (2026-06-03) →2 (2026-06-04: <code>mixed_precedence</code> now
+detected; <code>tuple_decorator_complex</code> also passes, shrinking B to one). Earlier
+wave: tuple-parens detection
 (<code>tuple_lhs_requires_parens</code>, <code>tuple_rhs_requires_parens</code>, <code>drop_tuple_parens_assert</code>),
 <code>duplicate_tuple_field</code>, <code>undefined_read</code>, and <code>invalid_binary_prefix</code> now pass.
 <code>check_parse_errors</code> also now reports statement-position <code>ERROR</code> nodes (stray tokens

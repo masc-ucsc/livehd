@@ -368,17 +368,19 @@ tolg cannot lower — modernizing inou.slang is the prerequisite engine work
 (also what a `slang_compile.sh` migration needs). Default is `yosys-slang`
 (unchanged behavior). `//lhd/tests:lhd_reader_test` locks the contract.
 
-**Test/script drivers migrated (2026-06-04):** every sh/py harness that drove
-flows through the lgshell REPL now drives the kernel (`prplib.py`,
-`yosys_compile.sh`, `slang_compile.sh`, the `pass/upass` + `prp_writer` sh
-tests, `check_doc.sh`, `constprop_contract.py`; `bench_upass.sh` is hybrid —
-its LSP legs stay on `lgshell --lsp`, which *is* the LSP server). No test
-depends on `//main:lgshell` anymore; the REPL remains for interactive use,
-the LSP, and the liberty/opentimer power flow (docs/power.md) that the CLI
-verbs don't expose yet. The old `upass_order_parse_test` (the REPL scanner's
-label-value validation, which `run_method_now` bypasses) was removed as
-superseded; lhd's own usage validation is covered by `lhd_reader_test` /
-`lhd_config_test`.
+**Test/script drivers migrated; lgshell deprecated (2026-06-04):** every
+sh/py harness that drove flows through the lgshell REPL now drives the kernel
+(`prplib.py`, `yosys_compile.sh`, `slang_compile.sh`, the `pass/upass` +
+`prp_writer` sh tests, `check_doc.sh`, `constprop_contract.py`,
+`bench_upass.sh`). **`lhd lsp`** serves the Pyrope LSP (the `lsp/` lib's
+`run_stdio()`; no result envelope — stdio belongs to JSON-RPC; the
+`scripts/prplsp` wrapper execs it). No test depends on `//main:lgshell`
+anymore and the REPL prints a deprecation notice on start; it remains only
+for interactive exploration and the liberty/opentimer power flow
+(docs/power.md) that the CLI verbs don't expose yet. The old
+`upass_order_parse_test` (the REPL scanner's label-value validation, which
+`run_method_now` bypasses) was removed as superseded; lhd's own usage
+validation is covered by `lhd_reader_test` / `lhd_config_test`.
 
 **`--config lhd.toml` (2026-06-04):** pass-flag defaults as a declared input
 file — a strict TOML *subset* (`#` comments, `[upass]/[cprop]/[bitwidth]`

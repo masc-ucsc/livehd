@@ -5,8 +5,9 @@
 - **Build**: `bazel build -c dbg //...`
 - **Test**: `bazel test //...`
 - **lhd CLI**: `./bazel-bin/lhd/lhd` — the stateless driver for all flows
-  (`lhd help`, `lhd describe <cmd>`); the legacy `lgshell` REPL still builds
-  but tests/docs no longer use it
+  (`lhd help`, `lhd describe <cmd>`); `lhd lsp` serves the Pyrope LSP. The
+  `lgshell` REPL is **deprecated** (still builds for interactive use; no test
+  or doc flow depends on it)
 - C++ formatted with `clang-format`
 - **Contract tests/benchmarks**: Any test or benchmark file whose name contains the word `contract` is immutable to the coding agent. Do NOT modify these files — they define the expected behavior contract. If a contract test fails, fix the implementation, not the test.
 

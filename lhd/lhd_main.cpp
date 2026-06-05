@@ -8,6 +8,7 @@
 #include "diag.hpp"
 #include "iassert.hpp"
 #include "lhd.hpp"
+#include "livehd_lsp.hpp"
 
 namespace {
 
@@ -39,6 +40,13 @@ int main(int argc, char** argv) {
     mark_failed(res, lhd::Lhd_error{"usage", e.what(), ""});
     lhd::write_result(opts, res);
     return res.exit_code;
+  }
+
+  // `lhd lsp` — the Pyrope LSP server (task 1n). JSON-RPC owns stdio, so no
+  // result envelope is written; run_stdio() reassigns fd 1 internally and
+  // drives the front-end passes directly (no engine/registry init needed).
+  if (opts.command == "lsp") {
+    return livehd::lsp::run_stdio();
   }
 
   if (lhd::is_meta_command(opts)) {

@@ -123,6 +123,11 @@ int describe_command(const Options& opts) {
         R"json({"schema_version":1,"name":"verilog","description":"Verilog source; as --emit a deterministic name-sorted concatenation of per-module cgen output","direction":"in/out"})json");
     return 0;
   }
+  if (name == "lsp") {
+    print_json_line(
+        R"json({"schema_version":1,"name":"lsp","description":"Pyrope LSP server (task 1n): JSON-RPC over stdio, Content-Length framed. Drives prp2lnast + pass.upass + core/diag per buffer; .prp only, ephemeral, no lgdb. stdio belongs to the protocol, so no result JSON is written","args":{},"examples":["lhd lsp"]})json");
+    return 0;
+  }
   if (name == "lnast-dump") {
     print_json_line(
         R"json({"schema_version":1,"name":"lnast-dump","description":"Round-trippable textual LNAST dump (the lgshell lnast.dump printer), one <unit>.lnast per unit. A debug/test observable; the binary interchange form is ln:. From elaborate: post-parse; from synth/compile: post-upass","direction":"out"})json");
@@ -156,6 +161,7 @@ int help_command(const Options& opts) {
         "            --emit-dir lg:DIR/|ln:DIR/|pyrope:DIR/ | --emit verilog:PATH\n"
         "  check     --impl verilog:PATH|lg:DIR --ref verilog:PATH|lg:DIR [--impl-top T] [--ref-top T]\n"
         "  scan      FILES.prp...   report each file's import strings (result \"scan\" member)\n"
+        "  lsp       Pyrope LSP server over stdio (JSON-RPC; .prp only)\n"
         "  compile   SRCS...   (fused elaborate + synth)\n"
         "  list      steps|recipes|emit-kinds|error-classes\n"
         "  describe  <command|recipe:NAME|emit-kind>\n"

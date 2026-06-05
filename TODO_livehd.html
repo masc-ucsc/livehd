@@ -119,7 +119,7 @@ cross-file dependencies stay visible.</p>
 </ul>
 <p><strong>Motivating symptom.</strong> A comptime bit-range write leaks an unresolved <code>range</code>
   into <code>lnast.dump</code>:
-  <div class="highlight"><pre><span></span><code>inou.prp files:inou/prp/tests/comptime/bitset.prp |&gt; pass.upass |&gt; lnast.dump
+  <div class="highlight"><pre><span></span><code>lhd compile inou/prp/tests/comptime/bitset.prp --emit-dir lnast-dump:d/
 ...
 ├── range
 │   ├── ref &#39;___22&#39;      # from x#[5..+5]  ⇒ bits 5..=9
@@ -292,37 +292,12 @@ cross-file dependencies stay visible.</p>
 that they warrant their own bucket. Can be done in parallel with regular
 Group 1 entries; downstream Groups treat them as Group 1 dependencies.</p>
 <ul>
-<li><strong id="item-1y-bazel" class="item-id">1y-bazel</strong> New <code>lhd</code> CLI — stateless hermetic kernel. <strong>Goal 1.</strong>
-  The <code>lhd</code> binary as a pure function <code>(declared inputs, config) → (declared
-  outputs, exit code)</code>: no <code>@tag</code>, no <code>~/.cache</code>, no lock, no <code>latest</code>
-  symlink. <strong>Always deterministic</strong> (content-hash <code>run_id</code>, stable ordering,
-  honors <code>SOURCE_DATE_EPOCH</code>) and <strong>always hermetic</strong> (undeclared import ⇒
-  <code>missing_file</code>) — invariants, not flags. <strong>Commands:</strong> <code>elaborate verilog</code>
-  (slang: <code>--reader</code>, <code>--top</code>, <code>--depfile</code>, <code>-- &lt;raw slang args&gt;</code>),
-  <code>elaborate pyrope</code> (filelist; <code>import</code> resolves within it), <code>synth</code>
-  (<code>--in design:…</code>, <code>--top</code>→LTO, <code>--recipe</code>/<code>--recipe-file</code>/<code>--set</code>),
-  <code>check</code> (<code>--impl</code>/<code>--ref</code> with separate tops), <code>compile verilog|pyrope</code>
-  (fused), <code>list</code>/<code>describe</code>/<code>version</code>/<code>help</code>. <strong>Source-ingesting verbs are
-  language-qualified; IR verbs are not.</strong> <strong>I/O:</strong> symmetric typed slots
-  <code>--in KIND:PATH</code> / <code>--emit KIND:PATH</code> (+ <code>--emit-dir KIND:DIR/</code> + <code>manifest.json</code>
-  for variable cardinality, read back via <code>--in-dir</code>); one interchange format —
-  a serialized partition container (<code>design:foo.lhd</code> = file form of <code>lgdb</code>);
-  blob default for Verilog/whole-design stages (OpenROAD/ORFS <code>.odb</code> model);
-  Pyrope defaults to exploded per-function lnast units (one <code>.ln</code> per function
-  + <code>manifest.json</code> — function count per <code>.prp</code> is unknowable ahead of time). <code>--depfile</code> is
-  Verilog-frontend only (slang <code>`include</code>/<code>+incdir</code> reads off the command line;
-  Pyrope <code>import</code> is filelist-resolved). <strong>Reuses</strong> <code>inou/slang</code>, <code>inou/prp</code>,
-  <code>inou/yosys</code> tolg, <code>pass.upass</code>/<code>pass.cprop</code>, <code>inou.cgen.verilog</code>,
-  <code>inou/yosys/lgcheck</code>, and <code>core/diag</code> (JSONL sink → <code>--emit diagnostics:</code> +
-  <code>--result-json</code>); the build blob is the existing <code>lgraph.save</code>/<code>match</code> lgdb dir
-  redirected to <code>--workdir</code>. Replaces the <code>printf '… |&gt; …' | lgshell</code> pattern in
-  the <code>*_compile.sh</code> / <code>pyrope_test.py</code> scripts. Ship a Starlark ruleset
-  <code>//tools:lhd.bzl</code>. <strong>No hard blocker</strong> — land built-in recipes first; defer
-  <code>--recipe-file</code> TOML (no dep yet), <code>--emit-dir</code> manifest hashes (needs
-  <a class="xref" href="TODO_livehd.html#item-3c">3c</a>), and sharper spans (needs
-  <a class="xref" href="TODO_livehd.html#item-1f">1f</a>). — <code>docs/contracts/future_cli.md</code>.</li>
 <li><strong id="item-1y-agent" class="item-id">1y-agent</strong> New CLI — stateful tag workspace on top of the
-  <a class="xref" href="TODO_livehd.html#item-1y-bazel">1y-bazel</a> kernel. <strong>Goal 1.</strong>
+  <strong>landed</strong> <code>lhd</code> stateless kernel (1y-bazel: <code>elaborate</code>/<code>synth</code>/<code>check</code>/
+  <code>compile</code>/<code>scan</code>, typed <code>ln:</code>/<code>lg:</code>/<code>verilog:</code>/<code>pyrope:</code>/<code>lnast-dump:</code> slots,
+  <code>--reader yosys-verilog|yosys-slang|slang</code>, <code>--config lhd.toml</code>,
+  <code>//tools:lhd.bzl</code>; every sh/py test harness now drives it — see the status
+  section of <code>docs/contracts/future_cli.md</code>). <strong>Goal 1.</strong>
   <code>setup/run/status/list/describe</code>, <code>@tag</code> directories, <code>livehd.toml</code> config,
   append-only JSONL run logs, per-tag lock, multi-tag experiments, error-class
   taxonomy. Each <code>run &lt;step&gt; @tag</code> desugars to a kernel call (resolve the
@@ -341,8 +316,8 @@ Group 1 entries; downstream Groups treat them as Group 1 dependencies.</p>
 <li><strong id="item-1f" class="item-id">1f</strong> Source-map indirection (LOC propagation: canonical map + per-cell
   index, alias multi-loc, partition-root fallback) — see "Source location
   (LOC) propagation strategy" below and <code>docs/contracts/sourcemap.md</code>.</li>
-<li><strong id="item-1n" class="item-id">1n</strong> Pyrope LSP server (<code>.prp</code> only — never Verilog): one copyable binary
-  (<code>livehd-lsp</code>, later a <code>livehd lsp</code> subcommand of <a class="xref" href="TODO_livehd.html#item-1y-agent">1y-agent</a>) over LiveHD's
+<li><strong id="item-1n" class="item-id">1n</strong> Pyrope LSP server (<code>.prp</code> only — never Verilog): the <code>lhd lsp</code>
+  subcommand over LiveHD's
   front-end (<code>prp2lnast</code> + <code>upass</code> typecheck/bitwidth + <code>core/diag</code> <span class="xref xref-note" title="note: 1z">1z</span>).
   <strong>Primary consumer Claude Code's <code>LSP</code> tool</strong> — implement its exact op subset
   first (diagnostics + hover + documentSymbol, then definition/references);
@@ -350,7 +325,8 @@ Group 1 entries; downstream Groups treat them as Group 1 dependencies.</p>
   prp2lnast name maps. Ephemeral, per-buffer, no <code>lgdb</code>. <strong>Scope = the semantic
   server only</strong>; the tree-sitter grammar/neovim queries and the <code>prpfmt</code> formatter
   (incl. <code>textDocument/formatting</code>) are a separate project. <strong>Phase A landed
-  2026-06-02</strong>: <code>lgshell --lsp</code> (lib <code>lsp/</code>) — lifecycle + diagnostics over stdio.
+  2026-06-02</strong> (lib <code>lsp/</code>) — lifecycle + diagnostics over stdio, served by
+  <code>lhd lsp</code> (2026-06-04; formerly <code>lgshell --lsp</code>).
   Phases B–E (hover/nav/workspace) remain; spans sharpen with <a class="xref" href="TODO_livehd.html#item-1f">1f</a>/<a class="xref" href="TODO_livehd.html#item-3f">3f</a> —
   <code>docs/contracts/pyrope_lsp.md</code>.</li>
 </ul>
@@ -582,7 +558,7 @@ no PinEntry/NodeEntry surgery required).</p>
 upass stages on and off while keeping correctness invariants in place, so
 we can attribute perf regressions to a specific pass and confirm each pass
 earns its runtime cost. Concretely, we want to drive runs like:</p>
-<div class="highlight"><pre><span></span><code>time lg &quot;inou.prp files:xx.prp |&gt; pass.upass verifier:0 ssa:0 bitwidth:1 constprop:0 attributes:0&quot;
+<div class="highlight"><pre><span></span><code>time lhd compile xx.prp --set upass.verifier=0 --set upass.ssa=0 --set upass.bitwidth=1 --set upass.constprop=0 --set upass.attributes=0
 </code></pre></div>
 <p>and have the pass framework:</p>
 <ul>
