@@ -67,8 +67,10 @@ step-level `error.class`), plus a pointer and counts:
          "diagnostics_count":{"error":1,"warning":2}}
 ```
 
-A non-CLI run (unit test, `lgshell` one-liner) writes the same `diagnostics.jsonl`
-records. Nothing about the record schema depends on the CLI being present.
+A non-CLI run (unit test, legacy `lgshell` REPL one-liner) writes the same
+`diagnostics.jsonl` records. Nothing about the record schema depends on the
+CLI being present — under `lhd` the file path is the declared
+`--emit diagnostics:PATH` slot (the kernel ignores the `LIVEHD_DIAG` env).
 
 ### 2.1 Output model (pre-CLI, env-controlled)
 
@@ -232,9 +234,9 @@ struct Diagnostic {
   absl::InlinedVector<Note, 1> notes;
 };
 
-// Process-global, mirrors `Pass::eprp`. The CLI (1y) points it at the run
-// dir's diagnostics.jsonl; tests point it at an in-memory buffer; lgshell
-// points it at stderr.
+// Process-global, mirrors `Pass::eprp`. The CLI (1y = lhd) points it at the
+// declared --emit diagnostics: path; tests point it at an in-memory buffer;
+// the legacy lgshell REPL points it at stderr.
 class Sink {
 public:
   void   emit(Diagnostic&&);                  // serialize one JSONL line + accumulate

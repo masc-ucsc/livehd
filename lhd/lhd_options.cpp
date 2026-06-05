@@ -1,6 +1,8 @@
 //  This file is distributed under the BSD 3-Clause License. See LICENSE for details.
 #include <algorithm>
+#include <cctype>
 #include <format>
+#include <fstream>
 #include <string>
 #include <string_view>
 #include <vector>
@@ -19,6 +21,7 @@ const std::vector<std::string_view> kOutputKinds{"ln",
                                                  "lg",
                                                  "verilog",
                                                  "pyrope",
+                                                 "lnast-dump",
                                                  "graphviz",
                                                  "metadata",
                                                  "results",
@@ -92,6 +95,140 @@ bool ends_with(std::string_view s, std::string_view suffix) {
   return s.size() >= suffix.size() && s.substr(s.size() - suffix.size()) == suffix;
 }
 
+// ---- --config lhd.toml --------------------------------------------------------
+// A strict TOML *subset*: `#` comments, `[pass]` tables, and `key = value`
+// where value is a quoted string, a boolean, or an integer. Each table entry
+// becomes a `--set pass.flag=value` default (prepended, so an explicit CLI
+// --set always wins); the only top-level key is `recipe` (CLI --recipe wins).
+// Anything outside the subset is a config error — reject rather than misread.
+
+std::string_view trim(std::string_view s) {
+  while (!s.empty() && (s.front() == ' ' || s.front() == '\t' || s.front() == '\r')) {
+    s.remove_prefix(1);
+  }
+  while (!s.empty() && (s.back() == ' ' || s.back() == '\t' || s.back() == '\r')) {
+    s.remove_suffix(1);
+  }
+  return s;
+}
+
+bool is_bare_key(std::string_view s) {
+  if (s.empty()) {
+    return false;
+  }
+  for (char c : s) {
+    if (!(std::isalnum(static_cast<unsigned char>(c)) || c == '_' || c == '-')) {
+      return false;
+    }
+  }
+  return true;
+}
+
+// "value" -> value; true/false; integer. Throws on anything else.
+std::string toml_value(const std::string& file, int lineno, std::string_view raw) {
+  if (raw.size() >= 2 && raw.front() == '"' && raw.back() == '"') {
+    auto body = raw.substr(1, raw.size() - 2);
+    if (body.find('"') != std::string_view::npos || body.find('\\') != std::string_view::npos) {
+      throw Lhd_error{"config", std::format("{}:{}: escapes are not supported in config strings", file, lineno), ""};
+    }
+    return std::string{body};
+  }
+  if (raw == "true" || raw == "false") {
+    return std::string{raw};
+  }
+  auto digits = raw;
+  if (!digits.empty() && digits.front() == '-') {
+    digits.remove_prefix(1);
+  }
+  if (!digits.empty() && std::all_of(digits.begin(), digits.end(), [](char c) {
+        return std::isdigit(static_cast<unsigned char>(c));
+      })) {
+    return std::string{raw};
+  }
+  throw Lhd_error{"config",
+                  std::format("{}:{}: unsupported value '{}'", file, lineno, raw),
+                  "config values are \"quoted strings\", true/false, or integers"};
+}
+
+// Read `opts.config` and fold it into opts (sets/recipe). Strict subset; see
+// the comment block above. Runs before run_id hashing, so a config file and
+// the equivalent explicit flags produce the same run_id.
+void load_config(Options& opts) {
+  if (opts.config.empty()) {
+    return;
+  }
+  std::ifstream ifs(opts.config);
+  if (!ifs.is_open()) {
+    throw Lhd_error{"missing_file", std::format("config file not found: {}", opts.config), ""};
+  }
+
+  std::vector<std::pair<std::string, std::string>> file_sets;
+  std::string                                      file_recipe;
+  std::string                                      table;  // current [pass] table ("" = top level)
+  std::string                                      line;
+  int                                              lineno = 0;
+  while (std::getline(ifs, line)) {
+    ++lineno;
+    // Strip comments. The subset has no '#' inside strings to worry about
+    // beyond quoted values, so scan outside quotes only.
+    bool in_str = false;
+    for (size_t p = 0; p < line.size(); ++p) {
+      if (line[p] == '"') {
+        in_str = !in_str;
+      } else if (line[p] == '#' && !in_str) {
+        line.resize(p);
+        break;
+      }
+    }
+    auto t = trim(line);
+    if (t.empty()) {
+      continue;
+    }
+    if (t.front() == '[') {
+      if (t.back() != ']') {
+        throw Lhd_error{"config", std::format("{}:{}: malformed table header '{}'", opts.config, lineno, t), ""};
+      }
+      auto name = trim(t.substr(1, t.size() - 2));
+      if (!is_bare_key(name)) {
+        throw Lhd_error{"config",
+                        std::format("{}:{}: unsupported table '[{}]'", opts.config, lineno, name),
+                        "config tables are pass names: [upass], [cprop], [bitwidth]"};
+      }
+      table = name;
+      continue;
+    }
+    auto eq = t.find('=');
+    if (eq == std::string_view::npos) {
+      throw Lhd_error{"config", std::format("{}:{}: expected key = value, got '{}'", opts.config, lineno, t), ""};
+    }
+    auto key = trim(t.substr(0, eq));
+    if (!is_bare_key(key)) {
+      throw Lhd_error{"config", std::format("{}:{}: malformed key '{}'", opts.config, lineno, key), ""};
+    }
+    auto value = toml_value(opts.config, lineno, trim(t.substr(eq + 1)));
+    if (table.empty()) {
+      if (key != "recipe") {
+        throw Lhd_error{"config",
+                        std::format("{}:{}: unknown top-level key '{}'", opts.config, lineno, key),
+                        "top level takes only `recipe`; pass flags go under [upass]/[cprop]/[bitwidth]"};
+      }
+      file_recipe = value;
+      continue;
+    }
+    file_sets.emplace_back(std::format("{}.{}", table, key), value);
+  }
+
+  // File entries are defaults: prepend so later (CLI) --set entries overwrite
+  // them in merge_sets; --recipe wins over the file's recipe. And unlike an
+  // explicit --recipe, a default that the command has no slot for is simply
+  // ignored (one lhd.toml can serve every step of a flow), so only the
+  // recipe-consuming commands pick it up.
+  opts.sets.insert(opts.sets.begin(), file_sets.begin(), file_sets.end());
+  if (opts.recipe.empty() && (opts.command == "synth" || opts.command == "compile")) {
+    opts.recipe = file_recipe;
+  }
+}
+
 }  // namespace
 
 Options parse_args(int argc, char** argv) {
@@ -162,9 +299,13 @@ Options parse_args(int argc, char** argv) {
       opts.top = need_value(a, i, argc, argv);
     } else if (a == "--reader") {
       opts.reader = need_value(a, i, argc, argv);
-      if (opts.reader != "slang" && opts.reader != "yosys") {
-        throw Lhd_error{"usage", std::format("--reader must be slang or yosys, got '{}'", opts.reader), ""};
+      if (opts.reader != "yosys-verilog" && opts.reader != "yosys-slang" && opts.reader != "slang") {
+        throw Lhd_error{"usage",
+                        std::format("--reader must be yosys-verilog, yosys-slang, or slang, got '{}'", opts.reader),
+                        "yosys-* elaborate to LGraphs via yosys; slang is the direct SV -> LNAST front-end"};
       }
+    } else if (a == "--config") {
+      opts.config = need_value(a, i, argc, argv);
     } else if (a == "--depfile") {
       opts.depfile = need_value(a, i, argc, argv);
     } else if (a == "--recipe") {
@@ -228,8 +369,13 @@ Options parse_args(int argc, char** argv) {
   if (!opts.recipe_file.empty()) {
     throw Lhd_error{"unsupported",
                     "--recipe-file is not implemented yet (built-in recipes ship first)",
-                    "use --recipe O0|O1|O2 and --set pass.flag=value"};
+                    "use --recipe O0|O1|O2 and --set pass.flag=value (or --config lhd.toml)"};
   }
+
+  // Fold --config file defaults into sets/recipe BEFORE anything hashes or
+  // consumes the resolved config (a config file and the equivalent explicit
+  // flags must be indistinguishable downstream).
+  load_config(opts);
 
   // Infer the source language from the file extensions when not given.
   if ((opts.command == "elaborate" || opts.command == "compile") && opts.language.empty() && !opts.files.empty()) {

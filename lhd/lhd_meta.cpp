@@ -15,7 +15,7 @@ namespace {
 constexpr std::string_view kSteps = R"json(["elaborate verilog","elaborate pyrope","synth","check","scan","compile verilog","compile pyrope"])json";
 constexpr std::string_view kRecipes = R"json(["O0","O1","O2"])json";
 constexpr std::string_view kEmitKinds =
-    R"json(["ln","lg","verilog","pyrope","graphviz","metadata","results","diagnostics"])json";
+    R"json(["ln","lg","verilog","pyrope","lnast-dump","graphviz","metadata","results","diagnostics"])json";
 constexpr std::string_view kErrorClasses =
     R"json(["usage","syntax","internal","equiv_fail","signal","timeout","missing_file","config","dependency","unsupported"])json";
 
@@ -61,7 +61,7 @@ int describe_command(const Options& opts) {
 
   if (name == "elaborate" || name == "elaborate verilog") {
     print_json_line(
-        R"json({"schema_version":1,"name":"elaborate verilog","description":"Elaborate (System)Verilog into an lg: graph library via yosys (language word optional: inferred from .v/.sv)","args":{"required":[{"name":"files","type":"path[]","positional":true}],"optional":[{"name":"top","type":"string","default":"-auto-top"},{"name":"reader","type":"enum","values":["slang","yosys"],"default":"slang"},{"name":"depfile","type":"path"},{"name":"emit-dir","type":"lg:DIR/"},{"name":"workdir","type":"path"},{"name":"result-json","type":"path"}]},"inputs":["verilog"],"outputs":["lg"],"examples":["lhd elaborate foo.v --top foo --emit-dir lg:foo_lgs/"]})json");
+        R"json({"schema_version":1,"name":"elaborate verilog","description":"Elaborate (System)Verilog (language word optional: inferred from .v/.sv). Readers: yosys-verilog/yosys-slang go through yosys into an lg: graph library; slang is the direct inou.slang SV -> LNAST front-end (ln:/lg: emits, the pyrope flow)","args":{"required":[{"name":"files","type":"path[]","positional":true}],"optional":[{"name":"top","type":"string","default":"-auto-top"},{"name":"reader","type":"enum","values":["yosys-verilog","yosys-slang","slang"],"default":"yosys-slang"},{"name":"depfile","type":"path"},{"name":"emit-dir","type":"lg:DIR/ (+ln:DIR/ with --reader slang)"},{"name":"workdir","type":"path"},{"name":"result-json","type":"path"}]},"inputs":["verilog"],"outputs":["lg","ln"],"examples":["lhd elaborate foo.v --top foo --emit-dir lg:foo_lgs/","lhd elaborate foo.sv --reader slang --emit-dir ln:foo_lns/"]})json");
     return 0;
   }
   if (name == "elaborate pyrope") {
@@ -123,6 +123,16 @@ int describe_command(const Options& opts) {
         R"json({"schema_version":1,"name":"verilog","description":"Verilog source; as --emit a deterministic name-sorted concatenation of per-module cgen output","direction":"in/out"})json");
     return 0;
   }
+  if (name == "lnast-dump") {
+    print_json_line(
+        R"json({"schema_version":1,"name":"lnast-dump","description":"Round-trippable textual LNAST dump (the lgshell lnast.dump printer), one <unit>.lnast per unit. A debug/test observable; the binary interchange form is ln:. From elaborate: post-parse; from synth/compile: post-upass","direction":"out"})json");
+    return 0;
+  }
+  if (name == "config") {
+    print_json_line(
+        R"json({"schema_version":1,"name":"config","description":"--config lhd.toml: pass-flag defaults as a declared input file. Strict TOML subset: # comments, [pass] tables (upass|cprop|bitwidth), key = value with quoted strings / true|false / integers; top level takes only `recipe`. Explicit --set/--recipe always win","example":"recipe = \"O2\"\n[upass]\nconstprop = true\nverifier = false"})json");
+    return 0;
+  }
 
   std::print(stderr, "lhd describe: unknown name '{}'\n", name);
   return 1;
@@ -139,7 +149,8 @@ int help_command(const Options& opts) {
         "commands (language word optional - inferred from .prp/.v/.sv):\n"
         "  elaborate SRCS... [ln:DIR...]      [--top T] --emit-dir ln:DIR/ --emit-dir lg:DIR/\n"
         "            (pyrope; positional ln: dirs supply pre-elaborated imports)\n"
-        "  elaborate SRCS.v --top T [--reader slang|yosys] [--depfile D] --emit-dir lg:DIR/\n"
+        "  elaborate SRCS.v --top T [--reader yosys-verilog|yosys-slang|slang] [--depfile D]\n"
+        "            --emit-dir lg:DIR/   (--reader slang: SV->LNAST, ln:/pyrope: emits)\n"
         "  elaborate ln:DIR... | lg:DIR       aggregate into one ln:/lg: container\n"
         "  synth     ln:DIR|lg:DIR [--recipe O0|O1|O2] [--set pass.flag=value]\n"
         "            --emit-dir lg:DIR/|ln:DIR/|pyrope:DIR/ | --emit verilog:PATH\n"
@@ -152,7 +163,8 @@ int help_command(const Options& opts) {
         "\n"
         "kinds: ln: = hhds::Forest save dir (LNAST units)  lg: = hhds::GraphLibrary save dir (LGraphs)\n"
         "       ln:/lg:/pyrope: are directory containers (--emit-dir only)\n"
-        "shared: --emit KIND:PATH --emit-dir KIND:DIR/ --result-json PATH --workdir DIR -q --verbose\n"
+        "shared: --emit KIND:PATH --emit-dir KIND:DIR/ --config lhd.toml --result-json PATH\n"
+        "        --workdir DIR -q --verbose   (`lhd describe config` for the lhd.toml schema)\n"
         "\n"
         "The kernel is always deterministic (content-hash run_id, SOURCE_DATE_EPOCH)\n"
         "and always hermetic (undeclared input => missing_file). The lgshell REPL is\n"

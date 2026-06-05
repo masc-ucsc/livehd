@@ -40,7 +40,7 @@ run elaborate "$PRP" --emit-dir lg:"$W/lg2/" --workdir "$W/w3"
 run synth lg:"$W/lg2/" --emit verilog:"$W/v2.v" --workdir "$W/w4"
 
 # leg 3: verilog0 -> lg -> verilog3 (through the lg: serialization seam)
-run elaborate "$V0" --reader yosys --top "$TOP" --emit-dir lg:"$W/lg3/" --workdir "$W/w5"
+run elaborate "$V0" --reader yosys-verilog --top "$TOP" --emit-dir lg:"$W/lg3/" --workdir "$W/w5"
 run synth lg:"$W/lg3/" --emit verilog:"$W/v3.v" --workdir "$W/w6"
 
 for i in 1 2 3; do

@@ -50,145 +50,114 @@ class PrpRunner:
     """
 
     def __init__(self):
-        if os.path.exists("./bazel-bin/main/lgshell"):
-            self.lgshell = "./bazel-bin/main/lgshell"
-        elif os.path.exists("./main/lgshell"):
-            self.lgshell = "./main/lgshell"
+        # Tests drive the lhd kernel (one stateless invocation per mode); the
+        # lgshell REPL is no longer involved.
+        if os.path.exists("./bazel-bin/lhd/lhd"):
+            self.lhd = "./bazel-bin/lhd/lhd"
+        elif os.path.exists("./lhd/lhd"):
+            self.lhd = "./lhd/lhd"
         else:
-            print('Failed to find lgshell binary')
+            print('Failed to find the lhd binary')
             sys.exit(3)
 
-    def lgshell_parse(self, test):
-        # Front-end only (parse + LNAST translation, no upass). The old
-        # parse_only:true flag (skip LNAST translation) was removed.
-        lg_cmd = []
+    @staticmethod
+    def _safe_name(test):
+        return re.sub(r'\W+', '_', test.params['name'])
 
-        lg_cmd.append('inou.prp')
-        lg_cmd.append('files:{}'.format(','.join(test.params['files'])))
+    def _scratch(self, test, mode, suffix=''):
+        # `tmp*` prefix so the dirs are .gitignore-covered when the harness is
+        # run manually from the repo root (they are created under cwd).
+        path = 'tmp_lhd_{}_{}{}'.format(self._safe_name(test), mode, suffix)
+        shutil.rmtree(path, ignore_errors=True)
+        return path
 
-        return lg_cmd
+    def lhd_parse(self, test, mode):
+        # Front-end only: inou.prp + pass.lnastfmt, no upass ('parsing' and
+        # 'lnast' are the same surface; the old parse_only flag was removed).
+        cmd = [self.lhd, 'elaborate']
+        cmd += test.params['files']
+        cmd += ['--workdir', self._scratch(test, mode), '-q']
+        return cmd
 
-    def lgshell_lnast(self, test):
-        lg_cmd = []
+    def lhd_upass(self, test, mode):
+        # Pipeline smoke-test: runs constprop only (verifier:false — exactly
+        # lhd compile's upass defaults). Exists because constprop has known
+        # gaps (tuple index, enum values, string ops, __wrap/__ubits attrs,
+        # ...) that would cause the verifier to hard-error on casserts
+        # constprop folds incorrectly. These tests just assert the pipeline
+        # doesn't crash. For correctness checking, use `:type: comptime`.
+        # No emits -> inou.prp + lnastfmt + pass.upass, tolg skipped.
+        cmd = [self.lhd, 'compile']
+        cmd += test.params['files']
+        cmd += ['--workdir', self._scratch(test, mode), '-q']
+        return cmd
 
-        lg_cmd.append('inou.prp')
-        lg_cmd.append('files:{}'.format(','.join(test.params['files'])))
-        lg_cmd.append('|> pass.lnastfmt')
-
-        return lg_cmd
-
-    def lgshell_upass(self, test):
-        # Pipeline smoke-test: runs constprop only (verifier:false). Exists
-        # because constprop has known gaps (tuple index, enum values, string
-        # ops, __wrap/__ubits attrs, ...) that would cause the verifier to
-        # hard-error on casserts constprop folds incorrectly. These tests
-        # just assert the pipeline doesn't crash. For correctness checking,
-        # use `:type: comptime`.
-        lg_cmd = self.lgshell_lnast(test)
-
-        lg_cmd.append('|>')
-        lg_cmd.append('pass.upass constprop:1 verifier:false')
-
-        lg_cmd.append('|>')
-        lg_cmd.append('pass.lnastfmt')
-
-        return lg_cmd
-
-    def lgshell_comptime(self, test):
-        # Pure compile-time program: every cassert must resolve. Default
-        # pass.upass pipeline runs the verifier, which hard-errors on
-        # known-false cassert and discharges known-true. To opt out for a
-        # specific case, drop `:type: comptime` back to `:type: upass`.
+    def lhd_comptime(self, test, mode):
+        # Pure compile-time program: every cassert must resolve. The verifier
+        # (lhd default: off) is turned ON, mirroring the old bare pass.upass
+        # default; it hard-errors on known-false cassert and discharges
+        # known-true. To opt out for a specific case, drop `:type: comptime`
+        # back to `:type: upass`.
         #
         # Optional header tags (read via PrpTest.params):
         #   :verifier_pass: N   — expected count of discharged casserts
         #   :verifier_fail: N   — expected count of known-false casserts
         # When set, the verifier end_run compares its tally and fails the
         # test if they don't match. -1 or absent disables the check.
-        lg_cmd = self.lgshell_lnast(test)
+        cmd = self.lhd_upass(test, mode)
+        cmd += ['--set', 'upass.verifier=true']
+        for tag in ('verifier_pass', 'verifier_fail', 'verifier_include_funcs'):
+            if tag in test.params:
+                cmd += ['--set', 'upass.{}={}'.format(tag, test.params[tag])]
+        return cmd
 
-        upass_args = 'pass.upass constprop:1'
-        if 'verifier_pass' in test.params:
-            upass_args += ' verifier_pass:' + test.params['verifier_pass']
-        if 'verifier_fail' in test.params:
-            upass_args += ' verifier_fail:' + test.params['verifier_fail']
-        if 'verifier_include_funcs' in test.params:
-            upass_args += ' verifier_include_funcs:' + test.params['verifier_include_funcs']
-
-        lg_cmd.append('|>')
-        lg_cmd.append(upass_args)
-
-        lg_cmd.append('|>')
-        lg_cmd.append('pass.lnastfmt')
-
-        return lg_cmd
-
-    def lgshell_error(self, test):
+    def lhd_error(self, test, mode):
         # Expected-failure test: the program must trigger a compile error. The
         # header's :error: / :help: regexes are matched against the emitted
-        # diagnostic's message / hint (see run()). Runs the full prp->upass
-        # pipeline so an error at any stage (parse, upass) is caught.
-        lg_cmd = self.lgshell_lnast(test)
+        # diagnostic's message / hint (see run_error()). Runs the full
+        # prp->upass pipeline (verifier on, as the old bare pass.upass default)
+        # so an error at any stage (parse, upass) is caught. run_error() adds
+        # the --emit diagnostics: slot itself.
+        cmd = self.lhd_upass(test, mode)
+        cmd += ['--set', 'upass.verifier=true']
+        return cmd
 
-        lg_cmd.append('|>')
-        lg_cmd.append('pass.upass constprop:1')
+    def lhd_lgraph(self, test, mode):
+        # LNAST->LGraph: the lg: emit gates the kernel's standalone tolg
+        # lowering (the CLI-level tolg:1); --recipe O0 keeps the graph passes
+        # out, matching the old `pass.upass ... tolg:1` pipeline tail.
+        cmd = self.lhd_upass(test, mode)
+        cmd += ['--recipe', 'O0', '--emit-dir',
+                'lg:{}/'.format(self._scratch(test, mode, '_lg'))]
+        return cmd
 
-        lg_cmd.append('|>')
-        lg_cmd.append('pass.lnastfmt')
+    def lhd_lg_compile(self, test, mode):
+        # tolg + pass.cprop + pass.bitwidth == recipe O2 over the lg: emit.
+        cmd = self.lhd_upass(test, mode)
+        cmd += ['--recipe', 'O2', '--emit-dir',
+                'lg:{}/'.format(self._scratch(test, mode, '_lg'))]
+        return cmd
 
-        return lg_cmd
+    def lhd_equiv(self, test, odir):
+        # Equivalence test: lower to LGraph (tolg, no graph passes) and emit
+        # per-module Verilog into `odir`. run_equiv() then LECs the generated
+        # Verilog against the sibling golden `.v` via inou/yosys/lgcheck.
+        cmd = self.lhd_upass(test, 'equiv')
+        cmd += ['--recipe', 'O0', '--emit-dir', 'verilog:{}/'.format(odir)]
+        return cmd
 
-    def lgshell_lgraph(self, test):
-        # LNAST->LGraph: the terminal `tolg` sub-pass of pass.upass lowers each
-        # fully-specified function tree to an LGraph and leaves it on the pass
-        # var (var.graphs) for downstream LGraph passes / cgen. There is no
-        # separate pass.lnastopt / pass.lnast_tolg (those were placeholders).
-        # No trailing pass.lnastfmt: after tolg the var carries graphs, not LNAST.
-        lg_cmd = self.lgshell_lnast(test)
-
-        lg_cmd.append('|>')
-        lg_cmd.append('pass.upass constprop:1 verifier:false tolg:1')
-
-        return lg_cmd
-
-    def lgshell_lg_compile(self, test):
-        lg_cmd = self.lgshell_lgraph(test)
-
-        lg_cmd.append('|>')
-        lg_cmd.append('pass.cprop')
-
-        lg_cmd.append('|>')
-        lg_cmd.append('pass.bitwidth')
-
-        return lg_cmd
-
-    def lgshell_equiv(self, test, odir):
-        # Equivalence test: lower to LGraph (tolg) then emit Verilog into `odir`.
-        # run_equiv() then LECs the generated Verilog against the sibling golden
-        # `.v` via inou/yosys/lgcheck.
-        lg_cmd = self.lgshell_lgraph(test)
-
-        lg_cmd.append('|>')
-        lg_cmd.append('inou.cgen.verilog odir:{}'.format(odir))
-
-        return lg_cmd
-
-    def gen_lgshell_cmd(self, test, mode):
-        gen_lg_cmd = {
-            'parsing'  : self.lgshell_parse,
-            'lnast'    : self.lgshell_lnast,
-            'upass'    : self.lgshell_upass,
-            'comptime' : self.lgshell_comptime,
-            'error'    : self.lgshell_error,
-            'lgraph'   : self.lgshell_lgraph,
-            'compile'  : self.lgshell_lg_compile
+    def gen_lhd_cmd(self, test, mode):
+        gen_cmd = {
+            'parsing'  : self.lhd_parse,
+            'lnast'    : self.lhd_parse,
+            'upass'    : self.lhd_upass,
+            'comptime' : self.lhd_comptime,
+            'error'    : self.lhd_error,
+            'lgraph'   : self.lhd_lgraph,
+            'compile'  : self.lhd_lg_compile
         }
 
-        cmd = []
-        cmd.append(self.lgshell)
-        cmd.append(' '.join(gen_lg_cmd[mode](test)))
-
-        return cmd
+        return gen_cmd[mode](test, mode)
 
     @staticmethod
     def _pattern_matches(pattern, text):
@@ -202,17 +171,19 @@ class PrpRunner:
 
     def run_error(self, tmp_dir, test: PrpTest):
         # Expected-failure test: the program MUST emit a compile error whose
-        # message/hint match the header :error:/:help: regexes. Diagnostics are
-        # read from a JSONL file (LIVEHD_DIAG) — structured + crash-safe, so it
-        # survives the dbg abort that a fatal error triggers.
-        cmd       = self.gen_lgshell_cmd(test, 'error')
-        safe_name = re.sub(r'\W+', '_', test.params['name'])
+        # message/hint match the header :error:/:help: regexes. Diagnostics
+        # are read from a JSONL file — structured + crash-safe, so it survives
+        # the dbg abort that a fatal error triggers. Under lhd the sink path
+        # is the declared `--emit diagnostics:` slot (the kernel ignores the
+        # old LIVEHD_DIAG env: no ambient state).
+        cmd       = self.gen_lhd_cmd(test, 'error')
+        safe_name = self._safe_name(test)
         diag_path = os.path.join(tmp_dir, 'diag_{}.jsonl'.format(safe_name))
         if os.path.exists(diag_path):
             os.remove(diag_path)
+        cmd += ['--emit', 'diagnostics:' + diag_path]
 
-        env = dict(os.environ, LIVEHD_DIAG=diag_path)
-        proc = subprocess.Popen(cmd, cwd=tmp_dir, stdout=subprocess.PIPE, stderr=subprocess.STDOUT, env=env)
+        proc = subprocess.Popen(cmd, cwd=tmp_dir, stdout=subprocess.PIPE, stderr=subprocess.STDOUT)
         try:
             log, _ = proc.communicate()
         except Exception:
@@ -313,7 +284,7 @@ class PrpRunner:
         shutil.rmtree(odir, ignore_errors=True)
         os.makedirs(odir, exist_ok=True)
 
-        cmd  = [self.lgshell, ' '.join(self.lgshell_equiv(test, odir))]
+        cmd  = self.lhd_equiv(test, odir)
         proc = subprocess.Popen(cmd, cwd=tmp_dir, stdout=subprocess.PIPE, stderr=subprocess.STDOUT)
         try:
             log, _ = proc.communicate()
@@ -395,6 +366,34 @@ class PrpRunner:
                 pass
         return lines
 
+    def _comptime_expected_fail_ok(self, test, log, rc):
+        # A comptime test with :verifier_fail: N>0 EXPECTS N known-false
+        # casserts. The verifier reports each as an emit-only `cassert-false`
+        # diagnostic; lgshell ignored emit-only errors, but lhd (by design)
+        # fails the run on ANY sink error. Accept the non-zero exit iff the
+        # surfaced error is the expected cassert-false — a tally mismatch
+        # ("verifier expected ... but saw") or any other pass error surfaces
+        # a different message and still fails the test.
+        try:
+            expected_fail = int(test.params.get('verifier_fail', '0'))
+        except ValueError:
+            return rc
+        if expected_fail <= 0:
+            return rc
+        for line in reversed(log.decode('utf-8', 'ignore').splitlines()):
+            line = line.strip()
+            if not line.startswith('{'):
+                continue
+            try:
+                rec = json.loads(line)
+            except ValueError:
+                continue
+            msg = (rec.get('error') or {}).get('message', '')
+            if 'cassert is false' in msg:
+                return 0
+            return rc
+        return rc
+
     def run(self, tmp_dir, test: PrpTest):
 
         rc = 0
@@ -410,7 +409,7 @@ class PrpRunner:
             if mode == 'simulation':
                 pass
             else:
-                cmd = self.gen_lgshell_cmd(test, mode)
+                cmd = self.gen_lhd_cmd(test, mode)
 
             proc = subprocess.Popen(
                 cmd,
@@ -424,6 +423,9 @@ class PrpRunner:
                 rc = proc.returncode
             except:
                 proc.kill()
+
+            if mode == 'comptime' and rc != 0:
+                rc = self._comptime_expected_fail_ok(test, log, rc)
 
             if rc == 0:
                 print('{} - {} - success'.format(test.params['name'], mode))

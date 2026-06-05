@@ -87,34 +87,40 @@ def main() -> int:
     cpp_path = tmpdir / f"bench_{N}.cpp"
 
     print(f"Generating synthetics N={N} ...", flush=True)
-    constprop_gen.emit_prp(N, prp_path)
-    constprop_gen.emit_verilog(N, v_path)
-    constprop_gen.emit_cpp(N, cpp_path)
+    # The flat `a += 1` chain (the original contract pattern) from the
+    # variant-based generator API.
+    prp_fn, v_fn, cpp_fn = constprop_gen._EMITTERS["constprop"]
+    prp_path.write_text("".join(prp_fn(N)))
+    v_path.write_text("".join(v_fn(N)))
+    cpp_path.write_text("".join(cpp_fn(N)))
 
-    lgshell = runfile("main/lgshell")
+    lhd = runfile("lhd/lhd")
     yosys = runfile("inou/yosys/yosys2")
 
-    for binary in (lgshell, yosys):
+    for binary in (lhd, yosys):
         if not binary.is_file() or not os.access(binary, os.X_OK):
             sys.stderr.write(f"binary not found or not executable: {binary}\n")
             return 1
 
     env = {**os.environ, "HOME": str(tmpdir)}
 
-    # One measurement per side: the full parse+constfold pipeline. (There
-    # used to be parse-only legs via `inou.prp parse_only:true`, but that
-    # flag was a development-debug aid and has been removed.)
-    prp_full = (
-        f"inou.prp files:{prp_path} |> pass.lnastfmt "
-        f"|> pass.upass constprop:1 verifier:false\nquit\n"
-    ).encode()
+    # One measurement per side: the full parse+constfold pipeline. The prp
+    # side runs through the lhd kernel: `lhd compile` with no emits is
+    # inou.prp + lnastfmt + pass.upass (constprop:1 verifier:false), with the
+    # tolg lowering skipped (no lg/verilog emit requested). (There used to be
+    # parse-only legs via `inou.prp parse_only:true`, but that flag was a
+    # development-debug aid and has been removed.)
+    prp_full_cmd = [
+        str(lhd), "compile", str(prp_path),
+        "--workdir", str(tmpdir / "lhd_work"), "-q",
+    ]
     yosys_full_cmd = [
         str(yosys), "-Q", "-T", "-q",
         "-p", f"read_verilog {v_path}; opt",
     ]
 
-    print("\n[prp full] inou.prp |> pass.lnastfmt |> pass.upass constprop:1", flush=True)
-    t_prp_full = measure("prp_full", [str(lgshell)], prp_full, env)
+    print("\n[prp full] lhd compile (inou.prp + lnastfmt + upass constprop:1)", flush=True)
+    t_prp_full = measure("prp_full", prp_full_cmd, None, env)
 
     print("\n[yosys full] read_verilog ; opt", flush=True)
     t_yosys_full = measure("yosys_full", yosys_full_cmd, None, env)

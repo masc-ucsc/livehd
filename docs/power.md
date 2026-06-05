@@ -2,6 +2,11 @@
 
 LiveHD is starting to generate power. Use it at your own risk.
 
+> NOTE: this walkthrough uses the interactive `lgshell` REPL because the
+> liberty/opentimer passes (`inou.liberty`, `pass.opentimer`) are not exposed
+> through the `lhd` CLI verbs yet. Everything else in the repo is driven via
+> `./bazel-bin/lhd/lhd` (see AGENTS.md).
+
 
 
 # Using bazel_rules_hdl_test

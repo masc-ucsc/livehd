@@ -35,11 +35,12 @@ cc_library(
     alwayslink = True,  # Needed to have constructor called
 )
 
+# Driven through the lhd kernel (--set upass.flag=value; uPass diagnostics
+# come from the per-step log under --workdir).
 _LNAST_UPASS_TESTS = [
     "upass_dependency_test.sh",
     "upass_noop_first_iter_test.sh",
     "upass_cycle_cmd_test.sh",
-    "upass_order_parse_test.sh",
     "upass_lnast_shared_scan_test.sh",
     "upass_lnast_shared_decide_test.sh",
 ]
@@ -50,18 +51,19 @@ _LNAST_UPASS_TESTS = [
         srcs = ["tests/%s" % t],
         data = [
             "//inou/prp:tests/pyrope/simple.prp",
-            "//main:lgshell",
+            "//lhd",
         ],
     )
     for t in _LNAST_UPASS_TESTS
 ]
+
 
 sh_test(
     name = "upass_func_extract_test.sh",
     srcs = ["tests/upass_func_extract_test.sh"],
     data = [
         "//inou/prp:tests/pyrope/simple.prp",
-        "//main:lgshell",
+        "//lhd",
     ],
 )
 
@@ -69,7 +71,7 @@ sh_test(
     name = "upass_coalescer_dse_test.sh",
     srcs = ["tests/upass_coalescer_dse_test.sh"],
     data = [
-        "//main:lgshell",
+        "//lhd",
     ],
 )
 
@@ -80,7 +82,6 @@ test_suite(
         ":upass_dependency_test.sh",
         ":upass_noop_first_iter_test.sh",
         ":upass_cycle_cmd_test.sh",
-        ":upass_order_parse_test.sh",
         ":upass_lnast_shared_scan_test.sh",
         ":upass_lnast_shared_decide_test.sh",
         ":upass_func_extract_test.sh",

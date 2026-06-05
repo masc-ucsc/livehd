@@ -1,13 +1,18 @@
 #!/bin/sh
+# pass.upass order:decide_shared via the lhd kernel: the shared decide pass
+# runs over the LNAST and reports fold candidates in the per-step log.
 
 set -eu
 
-LGSHELL="${TEST_SRCDIR}/${TEST_WORKSPACE}/main/lgshell"
+LHD="${TEST_SRCDIR}/${TEST_WORKSPACE}/lhd/lhd"
 PRP_FILE="${TEST_SRCDIR}/${TEST_WORKSPACE}/inou/prp/tests/pyrope/simple.prp"
+W="${TEST_TMPDIR}/w"
 OUT_FILE="${TEST_TMPDIR}/upass_lnast_shared_decide.out"
 
-printf 'inou.prp files:%s |> pass.upass order:decide_shared\nquit\n' "${PRP_FILE}" \
-  | HOME="${TEST_TMPDIR}" "${LGSHELL}" >"${OUT_FILE}" 2>&1
+"${LHD}" compile "${PRP_FILE}" --set upass.order=decide_shared --workdir "${W}" -q \
+  --result-json "${TEST_TMPDIR}/result.json" >/dev/null 2>&1
+
+cat "${W}"/logs/*pass_upass*.log >"${OUT_FILE}"
 
 if ! grep -q "uPass - resolved order: decide_shared" "${OUT_FILE}"; then
   echo "FAIL: expected lnast shared decide order log not found"
@@ -33,4 +38,4 @@ if ! grep -q "uPass - walk complete" "${OUT_FILE}"; then
   exit 4
 fi
 
-echo "PASS: lnast shared decide pass runs and reports fold-candidate decision"
+echo "PASS: lnast shared decide pass runs and reports fold candidates"

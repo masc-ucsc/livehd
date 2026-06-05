@@ -31,7 +31,7 @@ _LHD = "//lhd"
 def _src_locations(srcs):
     return " ".join(["$(locations %s)" % s for s in srcs])
 
-def lhd_verilog(name, top, srcs, out, recipe = "O1", reader = "yosys", visibility = None):
+def lhd_verilog(name, top, srcs, out, recipe = "O1", reader = "yosys-verilog", visibility = None):
     """Compile Verilog sources to optimized Verilog through the lhd kernel."""
     result = out + ".result.json"
     native.genrule(

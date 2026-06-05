@@ -1,40 +1,40 @@
 #!/bin/sh
-# Round-trip test: Pyrope -> LNAST -> uPass -> Pyrope -> uPass
-# Verifies that pass.prp_writer produces valid Pyrope that can be re-parsed.
+# Round-trip test via the lhd kernel: Pyrope -> LNAST -> uPass -> Pyrope -> uPass
+# Verifies that pass.prp_writer (--emit-dir pyrope:) produces valid Pyrope that
+# can be re-parsed. lhd checks the diag sink after every step, so "no errors"
+# is simply exit code 0.
 
 set -eu
 
-LGSHELL="${TEST_SRCDIR}/${TEST_WORKSPACE}/main/lgshell"
+LHD="${TEST_SRCDIR}/${TEST_WORKSPACE}/lhd/lhd"
 PRP_FILE="${TEST_SRCDIR}/${TEST_WORKSPACE}/inou/prp/tests/comptime/trivial_if.prp"
 ODIR="${TEST_TMPDIR}/prp_out"
-OUT1="${TEST_TMPDIR}/pass1.out"
-OUT2="${TEST_TMPDIR}/pass2.out"
 
-mkdir -p "${ODIR}"
-
-# Pass 1: read -> upass -> emit Pyrope
-printf 'inou.prp files:%s |> pass.upass |> pass.lnastfmt |> pass.prp_writer odir:%s\nquit\n' \
-  "${PRP_FILE}" "${ODIR}" \
-  | HOME="${TEST_TMPDIR}" "${LGSHELL}" >"${OUT1}" 2>&1
+# Pass 1: read -> upass (verifier on, as the lgshell default pipeline ran) ->
+# emit Pyrope through pass.prp_writer.
+"${LHD}" compile "${PRP_FILE}" --set upass.verifier=true \
+  --emit-dir pyrope:"${ODIR}/" --workdir "${TEST_TMPDIR}/w1" -q \
+  --result-json "${TEST_TMPDIR}/r1.json" || {
+  echo "FAIL: pass 1 exited non-zero"
+  cat "${TEST_TMPDIR}/r1.json"
+  exit 1
+}
 
 if [ ! -f "${ODIR}/trivial_if.prp" ]; then
   echo "FAIL: pass 1 did not produce ${ODIR}/trivial_if.prp"
-  cat "${OUT1}"
+  cat "${TEST_TMPDIR}/r1.json"
   exit 1
 fi
 
 echo "Pass 1 output:"
 cat "${ODIR}/trivial_if.prp"
 
-# Pass 2: re-read the emitted Pyrope -> upass (should succeed with no errors)
-printf 'inou.prp files:%s |> pass.upass |> pass.lnastfmt\nquit\n' \
-  "${ODIR}/trivial_if.prp" \
-  | HOME="${TEST_TMPDIR}" "${LGSHELL}" >"${OUT2}" 2>&1
-
-if grep -v "cassert counts" "${OUT2}" | grep -qi "error\|fail\|exception"; then
+# Pass 2: re-read the emitted Pyrope -> upass (must succeed with no errors).
+"${LHD}" compile "${ODIR}/trivial_if.prp" --set upass.verifier=true \
+  --workdir "${TEST_TMPDIR}/w2" -q --result-json "${TEST_TMPDIR}/r2.json" || {
   echo "FAIL: pass 2 produced errors when re-parsing the emitted Pyrope"
-  cat "${OUT2}"
+  cat "${TEST_TMPDIR}/r2.json"
   exit 2
-fi
+}
 
 echo "PASS: trivial_if round-trip succeeded"

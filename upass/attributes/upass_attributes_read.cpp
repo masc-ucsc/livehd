@@ -727,6 +727,14 @@ void uPass_attributes::process_declare() {
   if (decl != Decl_kind::unknown) {
     ti.decl = decl;
   }
+  if (decl == Decl_kind::const_kind) {
+    // A re-`declare` of a const can only be compiler-generated (comptime loop
+    // unrolling / inliner clones) — the front-end rejects same-name
+    // redeclaration at parse time. Each clone opens a fresh binding, so the
+    // single-bind tally restarts here; counting across clones flagged
+    // spurious "const rebind" on unrolled `for` bodies (formux, tuple_doc2).
+    const_assign_count.erase(std::string(target));
+  }
   if (comptime) {
     ti.is_comptime                                   = true;
     attr_set_values[std::string(target)]["comptime"] = *Dlop::create_integer(1);

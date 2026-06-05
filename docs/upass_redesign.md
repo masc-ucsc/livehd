@@ -751,8 +751,8 @@ failures gets reverted, root-caused, or both before continuing.
 Performance gate (Step H or later, once the dest LNAST is real):
 
 ```
-bazel build -c opt //main:all
-time ./bazel-bin/main/lgshell "inou.prp files:xx.prp |> pass.upass"
+bazel build -c opt //lhd:lhd
+time ./bazel-bin/lhd/lhd compile xx.prp --workdir /tmp/w -q
 ```
 
 must be at least as fast as today (~10.0s median on the 1M-op

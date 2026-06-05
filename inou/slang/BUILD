@@ -60,15 +60,10 @@ sh_test(
     args = ["$(location //inou/yosys:tests/%s.v)" % t],
     data = [
         "//inou/yosys:tests/%s.v" % t,
-        "//inou/yosys:scripts",
-        "//main:lgshell",
+        "//lhd",
     ],
     tags = [
         "slang_compile",
-    ],
-    deps = [
-        "//inou/yosys:scripts",
-        #"//inou/yosys:verilog_tests",
     ],
 ) for t in [
     "add",

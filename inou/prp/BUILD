@@ -58,7 +58,7 @@ cc_binary(
             "//inou/prp:tests/prplib.py",
             "//inou/prp:tests/pyrope_test.py",
             "//inou/prp:%s" % prp_file,
-            "//main:lgshell",
+            "//lhd",
         ],
     )
     for prp_file in glob([

@@ -24,7 +24,7 @@ py_test(
     srcs = ["constprop_contract.py"],
     deps = [":constprop_gen"],
     data = [
-        "//main:lgshell",
+        "//lhd",
         "//inou/yosys:yosys2",
     ],
     target_compatible_with = select({

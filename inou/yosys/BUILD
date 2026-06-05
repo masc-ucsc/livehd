@@ -94,7 +94,7 @@ YOSYS_COMPILE_TESTS = [
     args = ["$(location %s)" % t[1]],
     data = [
         t[1],
-        "//main:lgshell",
+        "//lhd",
     ],
     tags = [
     ],

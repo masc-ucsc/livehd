@@ -1,20 +1,27 @@
 #!/bin/bash
 # This file is distributed under the BSD 3-Clause License. See LICENSE for details.
+#
+# Verilog round-trip via the lhd kernel: each test compiles
+# verilog -> LGraph (yosys-verilog reader) -> cprop (O1) -> cgen verilog,
+# then LECs the generated netlist against the original with `lhd check`
+# (inou/yosys/lgcheck underneath). One `lhd compile` replaces the old
+# tolg|>lgraph.save + lgraph.match|>cprop|>cgen lgshell pipelines; the
+# stderr-grep heuristics are gone because lhd checks the diag sink after
+# every step and reflects it in the exit code.
 
-echo "verilog.sh running in "$(pwd)
+echo "yosys_compile.sh running in "$(pwd)
 
-LGSHELL=./bazel-bin/main/lgshell
+LHD=./bazel-bin/lhd/lhd
 
-if [ ! -x $LGSHELL ]; then
-  if [ -x ./main/lgshell ]; then
-    LGSHELL=./main/lgshell
-    echo "lgshell is in $(pwd)"
+if [ ! -x $LHD ]; then
+  if [ -x ./lhd/lhd ]; then
+    LHD=./lhd/lhd
+    echo "lhd is in $(pwd)"
   else
-    echo "FAILED: verilog.sh could not find lgshell binary in $(pwd)";
+    echo "FAILED: yosys_compile.sh could not find the lhd binary in $(pwd)";
+    exit 1
   fi
 fi
-
-LGCHECK=./inou/yosys/lgcheck
 
 rm -rf ./logs
 
@@ -33,7 +40,7 @@ if [ "$1" != "" ]; then
     inputs+=" "$1
     shift
   done
-  echo "verilog.sh inputs: ${inputs}"
+  echo "yosys_compile.sh inputs: ${inputs}"
 fi
 
 pass=0
@@ -42,11 +49,9 @@ fail_list=""
 pass_list=""
 rm -rf tmp_yosys_mix
 mkdir -p tmp_yosys_mix
-#cp inou/yosys/tests/cgen* tmp_yosys_mix
 for full_input in ${inputs}
 do
   STARTTIME=$SECONDS
-  #echo "starting test "${input}" at "$(/usr/bin/date)
   input=$(basename ${full_input})
   echo ${full_input}
   base=${input%.*}
@@ -75,69 +80,26 @@ do
     base=${base:8}
   fi
 
-  rm -rf lgdb_yosys tmp_yosys
+  rm -rf tmp_yosys
   mkdir -p tmp_yosys
 
-  echo "inou.yosys.tolg path:lgdb_yosys top:${base} files:${full_input} |> lgraph.save" | ${LGSHELL} -q >tmp_yosys/${input}.log 2>tmp_yosys/${input}.err
-  tolg_rc=$?
-  #echo "inou.verilog path:lgdb_yosys top:${base} files:${full_input} |> pass.compiler "  | ${LGSHELL} -q >tmp_yosys/${input}.log 2>tmp_yosys/${input}.err
-  if [ $tolg_rc -eq 0 ]; then
-    echo "Successfully created graph from ${input}"
+  # verilog -> lg -> cprop -> verilog, one stateless action. The per-step
+  # logs (yosys chatter included) land under the --workdir.
+  ${LHD} compile ${full_input} --reader yosys-verilog --top ${base} --recipe O1 \
+    --emit verilog:tmp_yosys_mix/all_${base}.v \
+    --workdir tmp_yosys/${base} -q --result-json tmp_yosys/${input}.result.json \
+    >tmp_yosys/${input}.log 2>tmp_yosys/${input}.err
+  compile_rc=$?
+  if [ $compile_rc -eq 0 ]; then
+    echo "Successfully created verilog from ${input}"
   else
-    echo "FAIL: lgyosys parsing terminated with an error rc=$tolg_rc (testcase ${input})"
-    cat tmp_yosys/${input}.log
+    echo "FAIL: lhd compile terminated with an error rc=$compile_rc (testcase ${input})"
+    cat tmp_yosys/${input}.result.json 2>/dev/null
     cat tmp_yosys/${input}.err
     ((fail++))
     fail_list+=" "$base
     continue
   fi
-  LC=$(grep -iv Warning tmp_yosys/${input}.err | grep -v perf_event | grep -v "recommended to use " | wc -l | cut -d" " -f1)
-  if [[ $LC -gt 0 ]]; then
-    echo "FAIL: Faulty $LC err verilog file tmp_yosys/${input}.err"
-    cat tmp_yosys/${input}.err
-    ((fail++))
-    fail_list+=" "$base
-    continue
-  fi
-  LC=$(grep -i signal tmp_yosys/${input}.log | wc -l | cut -d" " -f1)
-  if [[ $LC -gt 0 ]]; then
-    echo "FAIL: Faulty $LC log verilog file tmp_yosys/${input}.log"
-    ((fail++))
-    fail_list+=" "$base
-    continue
-  fi
-
-  rm -f tmp_yosys/*.v
-  echo "lgraph.match path:lgdb_yosys |> pass.cprop |> inou.cgen.verilog odir:tmp_yosys" | ${LGSHELL} -q 2>tmp_yosys/${input}.err
-  cgen_rc=$?
-  #echo "lgraph.match path:lgdb_yosys |> pass.cprop |> inou.yosys.fromlg odir:tmp_yosys" | ${LGSHELL} -q 2>tmp_yosys/${input}.err
-  if [ $cgen_rc -ne 0 ]; then
-    echo "FAIL: verilog generation terminated with an error rc=$cgen_rc (testcase ${input})"
-    cat tmp_yosys/${input}.err
-    ((fail++))
-    fail_list+=" "$base
-    continue
-  fi
-  LC=$(grep -iv Warning tmp_yosys/${input}.err | grep -v perf_event | grep -v "recommended to use " | grep -v "IPC=" | wc -l | cut -d" " -f1)
-  if [[ $LC -gt 0 ]]; then
-    echo "FAIL: Faulty $LC err verilog file tmp_yosys/${input}.err"
-    cat tmp_yosys/${input}.err
-    ((fail++))
-    fail_list+=" "$base
-    continue
-  fi
-  echo "Successfully created verilog from graph ${input}"
-
-  shopt -s nullglob
-  gen_v_files=(tmp_yosys/*.v)
-  shopt -u nullglob
-  if [ ${#gen_v_files[@]} -eq 0 ]; then
-    echo "FAIL: no verilog generated in tmp_yosys/ for (testcase ${input})"
-    ((fail++))
-    fail_list+=" "$base
-    continue
-  fi
-  cat "${gen_v_files[@]}" >tmp_yosys_mix/all_${base}.v
   if [ ! -s tmp_yosys_mix/all_${base}.v ]; then
     echo "FAIL: generated verilog tmp_yosys_mix/all_${base}.v is empty (testcase ${input})"
     ((fail++))
@@ -155,11 +117,14 @@ do
       continue
     fi
   else
-    ${LGCHECK} --implementation tmp_yosys_mix/all_${base}.v --reference ${full_input} --top ${base}
+    ${LHD} check --impl verilog:tmp_yosys_mix/all_${base}.v --ref verilog:${full_input} \
+      --top ${base} --workdir tmp_yosys/${base}_check -q \
+      --result-json tmp_yosys/${input}.check.json >/dev/null 2>&1
     if [ $? -eq 0 ]; then
       echo "Successfully matched generated verilog with original verilog (${full_input})"
     else
       echo "FAIL: circuits are not equivalent (${full_input})"
+      cat tmp_yosys/${input}.check.json 2>/dev/null
       ((fail++))
       fail_list+=" "$base
       continue
@@ -188,4 +153,3 @@ else
   echo "FAIL: ${fail} tests failed: ${fail_list}"
   exit 1
 fi
-

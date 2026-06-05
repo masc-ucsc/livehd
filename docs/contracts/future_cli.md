@@ -92,7 +92,7 @@ language-qualified; commands that operate on IR are language-agnostic.**
 
 | Command | Stage | Specific arguments |
 |---|---|---|
-| `lhd elaborate verilog` | frontend (whole-design, one action) | `--reader slang\|yosys` (default `slang`); `--top <name>` (optional); `--depfile PATH`; `-- <raw slang args>` |
+| `lhd elaborate verilog` | frontend (whole-design, one action) | `--reader yosys-verilog\|yosys-slang\|slang` (default `yosys-slang`; `yosys-*` go through yosys into LGraphs, `slang` is the direct `inou.slang` SV→LNAST front-end); `--top <name>` (optional); `--depfile PATH`; `-- <raw slang args>` (yosys readers only) |
 | `lhd elaborate pyrope` | frontend (per-function LNAST units) | positional `*.prp` (filelist; `import` resolves within it); `--top <name>` (optional) |
 | `lhd synth` | transform / optimize / codegen | `--in design:PATH` (repeat) or positional units; `--top <name>` (optional → cross-unit/LTO); `--recipe <name>`; `--recipe-file <path>`; `--set <pass[.idx].flag>=<val>` (repeat) |
 | `lhd check` | equivalence (LEC) | `--impl KIND:PATH [--impl-top <name>]`; `--ref KIND:PATH [--ref-top <name>]` |
@@ -295,8 +295,10 @@ lets a Starlark aspect discover the input set when sources are not all listed.
 The kernel is new argv plumbing over existing machinery, not new compiler
 internals:
 
-- **Frontends** — `inou/slang` (`elaborate verilog`), `inou/prp` prp2lnast
-  (`elaborate pyrope`), `inou/yosys` tolg (`--reader yosys`).
+- **Frontends** — `inou/yosys` tolg (`--reader yosys-verilog` native,
+  `--reader yosys-slang` via the slang.so plugin — both to LGraphs),
+  `inou/slang` (`--reader slang`, direct SV→LNAST), `inou/prp` prp2lnast
+  (`elaborate pyrope`).
 - **Passes / recipes** — `pass.upass`, `pass.cprop`, `upass/*`.
 - **Codegen** — `inou.cgen.verilog`, `pass.prp_writer` (the `--emit` kinds).
 - **Equivalence** — `inou/yosys/lgcheck` (`lhd check`).
@@ -353,6 +355,43 @@ emits — `--emit-dir lg:` / `--emit verilog:` run the LNAST→LGraph lowering,
 anything else skips it (the CLI-level `tolg:0|1`). The symmetric
 `pass.upass toln:false` (don't materialize the post-upass LNAST when nothing
 consumes it) is tracked as TODO_livehd 1y-toln.
+
+**Reader trichotomy (2026-06-04):** `--reader yosys-verilog|yosys-slang|slang`
+(old `yosys|slang` two-value spelling rejected). The `yosys-*` readers go
+through yosys (native verilog frontend / the slang.so plugin) into LGraphs;
+`--reader slang` is the **direct `inou.slang` SV→LNAST front-end** — the
+design becomes LNAST units and the rest of the flow is the pyrope one, so
+`.sv → ln:/pyrope:` are now supported matrix cells. Its `lg:/verilog:` emits
+stay locked `unsupported`: inou.slang still emits the pre-typesystem LNAST
+conventions (module-level `__ubits` stores, no comb-lambda io_meta), which
+tolg cannot lower — modernizing inou.slang is the prerequisite engine work
+(also what a `slang_compile.sh` migration needs). Default is `yosys-slang`
+(unchanged behavior). `//lhd/tests:lhd_reader_test` locks the contract.
+
+**Test/script drivers migrated (2026-06-04):** every sh/py harness that drove
+flows through the lgshell REPL now drives the kernel (`prplib.py`,
+`yosys_compile.sh`, `slang_compile.sh`, the `pass/upass` + `prp_writer` sh
+tests, `check_doc.sh`, `constprop_contract.py`; `bench_upass.sh` is hybrid —
+its LSP legs stay on `lgshell --lsp`, which *is* the LSP server). No test
+depends on `//main:lgshell` anymore; the REPL remains for interactive use,
+the LSP, and the liberty/opentimer power flow (docs/power.md) that the CLI
+verbs don't expose yet. The old `upass_order_parse_test` (the REPL scanner's
+label-value validation, which `run_method_now` bypasses) was removed as
+superseded; lhd's own usage validation is covered by `lhd_reader_test` /
+`lhd_config_test`.
+
+**`--config lhd.toml` (2026-06-04):** pass-flag defaults as a declared input
+file — a strict TOML *subset* (`#` comments, `[upass]/[cprop]/[bitwidth]`
+tables, `key = value` with quoted strings / booleans / integers; top level
+takes only `recipe`); anything else is a `config` error, and a typo'd pass
+table errors rather than no-ops. File entries are defaults: explicit
+`--set`/`--recipe` always win, and the `recipe` key is ignored by commands
+with no recipe slot (one lhd.toml can serve every step of a flow). Folded in
+before run_id hashing, so a config file and the equivalent explicit flags
+hash identically. No third-party TOML dep (`lhd describe config` documents
+the schema); `//lhd/tests:lhd_config_test` locks it. This is kernel-level
+per-invocation config — the *persistent tag* `lhd.toml` of the agent layer
+below remains 1y-agent work.
 
 Validated flows (all covered by `//lhd/tests`):
 

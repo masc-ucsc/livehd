@@ -23,6 +23,6 @@ sh_test(
     srcs = ["tests/prp_writer_roundtrip_test.sh"],
     data = [
         "//inou/prp:tests/comptime/trivial_if.prp",
-        "//main:lgshell",
+        "//lhd",
     ],
 )

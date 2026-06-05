@@ -1,13 +1,19 @@
 #!/bin/sh
+# pass.upass dependency resolution via the lhd kernel: order:assert must pull
+# in constprop (assert depends_on constprop). The uPass stdout diagnostics
+# land in the per-step log under --workdir.
 
 set -eu
 
-LGSHELL="${TEST_SRCDIR}/${TEST_WORKSPACE}/main/lgshell"
+LHD="${TEST_SRCDIR}/${TEST_WORKSPACE}/lhd/lhd"
 PRP_FILE="${TEST_SRCDIR}/${TEST_WORKSPACE}/inou/prp/tests/pyrope/simple.prp"
+W="${TEST_TMPDIR}/w"
 OUT_FILE="${TEST_TMPDIR}/upass_dependency.out"
 
-printf 'inou.prp files:%s |> pass.upass order:assert\nquit\n' "${PRP_FILE}" \
-  | HOME="${TEST_TMPDIR}" "${LGSHELL}" >"${OUT_FILE}" 2>&1
+"${LHD}" compile "${PRP_FILE}" --set upass.order=assert --workdir "${W}" -q \
+  --result-json "${TEST_TMPDIR}/result.json" >/dev/null 2>&1
+
+cat "${W}"/logs/*pass_upass*.log >"${OUT_FILE}"
 
 if ! grep -q "uPass - resolved order: constprop assert" "${OUT_FILE}"; then
   echo "FAIL: expected resolved dependency order not found"

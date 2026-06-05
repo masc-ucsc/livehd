@@ -76,3 +76,18 @@ sh_test(
     srcs = ["lhd_scan_test.sh"],
     data = _FLOW_DATA + ["scan_imports.prp"],
 )
+
+# --reader yosys-verilog|yosys-slang|slang trichotomy (slang = direct
+# inou.slang SV->LNAST front-end: ln:/pyrope: only until tolg can lower it).
+sh_test(
+    name = "lhd_reader_test",
+    srcs = ["lhd_reader_test.sh"],
+    data = _FLOW_DATA + ["trivial.v"],
+)
+
+# --config lhd.toml pass-flag defaults (strict TOML subset; CLI flags win).
+sh_test(
+    name = "lhd_config_test",
+    srcs = ["lhd_config_test.sh"],
+    data = _FLOW_DATA,
+)

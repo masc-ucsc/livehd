@@ -24,6 +24,7 @@ cc_library(
         "//graph",
         "//inou/cgen:inou_cgen",
         "//inou/prp:inou_prp",
+        "//inou/slang:inou_slang",
         "//inou/yosys:lgyosys",
         "//lnast",
         "//pass/bitwidth:pass_bitwidth",

@@ -37,10 +37,13 @@ struct Options {
   std::vector<Typed_path> in_dirs;
 
   std::string top;
-  std::string reader = "slang";  // elaborate verilog: slang|yosys
+  // elaborate verilog: yosys-verilog|yosys-slang (yosys -> LGraphs) or
+  // slang (the direct inou.slang SV -> LNAST front-end).
+  std::string reader = "yosys-slang";
   std::string depfile;
   std::string recipe;       // resolved per-command default in the kernel
   std::string recipe_file;  // deferred (unsupported)
+  std::string config;       // --config lhd.toml: pass-flag defaults (CLI --set/--recipe win)
 
   std::vector<std::pair<std::string, std::string>> sets;  // --set pass[.idx].flag=value
 

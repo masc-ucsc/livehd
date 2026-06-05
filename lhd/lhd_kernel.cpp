@@ -217,7 +217,7 @@ void check_known_set_passes(const Options& opts) {
     auto pass = key.substr(0, key.find('.'));
     if (pass != "upass" && pass != "cprop" && pass != "bitwidth") {
       throw Lhd_error{"usage",
-                      std::format("--set references unknown pass '{}'", pass),
+                      std::format("--set/--config references unknown pass '{}'", pass),
                       "known passes: upass, cprop, bitwidth (see `lhd describe recipe:O2`)"};
     }
   }
@@ -249,7 +249,7 @@ void write_manifest(const std::string& dir, std::string_view kind, const std::ve
   }
   // `ln:` units live inside the hhds::Forest save (no per-unit file); the
   // per-unit file kinds carry a "file" entry.
-  std::string_view ext = kind == "pyrope" ? ".prp" : (kind == "verilog" ? ".v" : "");
+  std::string_view ext = kind == "pyrope" ? ".prp" : (kind == "verilog" ? ".v" : (kind == "lnast-dump" ? ".lnast" : ""));
   ofs << "{\"schema_version\":1,\"kind\":\"" << kind << "\",\"units\":[";
   bool first = true;
   for (const auto& [name, hash] : units) {
@@ -345,6 +345,43 @@ void emit_ln_outputs(const std::vector<std::shared_ptr<Lnast>>& units, Options& 
       continue;
     }
     save_ln_dir(opts, res, units, e.path);
+  }
+}
+
+// `--emit-dir lnast-dump:DIR/` — the round-trippable textual LNAST dump (the
+// same printer as lgshell's `lnast.dump`), one <unit>.lnast per unit. A debug/
+// test observable: the binary interchange form stays `ln:`.
+void emit_lnast_dump_outputs(const std::vector<std::shared_ptr<Lnast>>& units, Options& opts, Result& res) {
+  for (const auto& e : opts.emit_dirs) {
+    if (e.kind != "lnast-dump") {
+      continue;
+    }
+    if (units.empty()) {
+      throw Lhd_error{"config", "no LNAST units to emit as lnast-dump:", ""};
+    }
+    ensure_dir(e.path);
+
+    auto sorted = units;
+    std::sort(sorted.begin(), sorted.end(), [](const auto& a, const auto& b) {
+      return a->get_top_module_name() < b->get_top_module_name();
+    });
+    std::vector<std::pair<std::string, uint64_t>> manifest;
+    for (const auto& ln : sorted) {
+      std::string name{ln->get_top_module_name()};
+      if (!manifest.empty() && manifest.back().first == name) {
+        throw Lhd_error{"config", std::format("duplicate LNAST unit name '{}'", name), ""};
+      }
+      std::ostringstream oss;
+      ln->dump(oss);
+      std::ofstream ofs(std::format("{}/{}.lnast", e.path, name));
+      if (!ofs.is_open()) {
+        throw Lhd_error{"config", std::format("could not write {}/{}.lnast", e.path, name), ""};
+      }
+      ofs << oss.str();
+      manifest.emplace_back(name, hash_bytes(oss.str()));
+    }
+    write_manifest(e.path, "lnast-dump", manifest);
+    res.outputs.push_back(e.path);
   }
 }
 
@@ -512,13 +549,14 @@ void validate_emits(const Options& opts) {
   reject_emit_kind(opts, "graphviz", {"unsupported", "--emit graphviz: is not implemented yet", ""});
   reject_emit_kind(opts, "metadata", {"unsupported", "--emit metadata: is not implemented yet (needs [3c] hashes)", ""});
 
-  // ln:/lg:/pyrope: outputs are containers (a Forest dir, a GraphLibrary
-  // dir, one .prp per unit) — directory form only, never a single file.
+  // ln:/lg:/pyrope:/lnast-dump: outputs are containers (a Forest dir, a
+  // GraphLibrary dir, one file per unit) — directory form only, never a
+  // single file.
   for (const auto& e : opts.emits) {
-    if (e.kind == "ln" || e.kind == "lg" || e.kind == "pyrope") {
+    if (e.kind == "ln" || e.kind == "lg" || e.kind == "pyrope" || e.kind == "lnast-dump") {
       throw Lhd_error{"usage",
                       std::format("--emit {0}:PATH is a directory container; use --emit-dir {0}:DIR/", e.kind),
-                      "ln: is a Forest save dir, lg: a GraphLibrary save dir, pyrope: one .prp per unit"};
+                      "ln: is a Forest save dir, lg: a GraphLibrary save dir, pyrope:/lnast-dump: one file per unit"};
     }
   }
 
@@ -535,30 +573,53 @@ void validate_emits(const Options& opts) {
                      {"unsupported",
                       "pyrope re-emission needs the post-upass LNAST",
                       "use `lhd compile --emit-dir pyrope:DIR/` (or synth from ln: inputs)"});
-    if (opts.language == "verilog") {
-      reject_emit_kind(opts,
-                       "ln",
-                       {"unsupported", "the verilog frontend elaborates to LGraphs (lg:), not LNAST", "use --emit-dir lg:DIR/"});
+    if (opts.language == "verilog" && opts.reader != "slang") {
+      for (const char* k : {"ln", "lnast-dump"}) {
+        reject_emit_kind(opts,
+                         k,
+                         {"unsupported",
+                          "the yosys-* readers elaborate to LGraphs (lg:), not LNAST",
+                          "use --emit-dir lg:DIR/, or --reader slang (the direct SV -> LNAST front-end)"});
+      }
     }
   }
-  if (opts.command == "compile" && opts.language == "verilog") {
-    reject_emit_kind(opts,
-                     "ln",
-                     {"unsupported", "the verilog frontend elaborates to LGraphs (lg:), not LNAST", "use --emit-dir lg:DIR/"});
+  if (opts.language == "verilog" && opts.reader == "slang") {
+    // inou.slang still emits the pre-typesystem LNAST conventions (module-level
+    // `__ubits` stores, no comb lambda io_meta), which tolg cannot lower yet.
+    for (const char* k : {"lg", "verilog"}) {
+      reject_emit_kind(opts,
+                       k,
+                       {"unsupported",
+                        "--reader slang stops at LNAST today (inou.slang predates the current io/typesystem conventions)",
+                        "emit ln:/pyrope: from --reader slang, or use --reader yosys-slang for lg:/verilog:"});
+    }
+  }
+  if (opts.command == "compile" && opts.language == "verilog" && opts.reader != "slang") {
+    for (const char* k : {"ln", "lnast-dump"}) {
+      reject_emit_kind(opts,
+                       k,
+                       {"unsupported",
+                        "the yosys-* readers elaborate to LGraphs (lg:), not LNAST",
+                        "use --emit-dir lg:DIR/, or --reader slang (the direct SV -> LNAST front-end)"});
+    }
     reject_emit_kind(opts,
                      "pyrope",
-                     {"unsupported", "there is no LGraph -> LNAST decompiler, so verilog cannot re-emit as pyrope", ""});
+                     {"unsupported",
+                      "there is no LGraph -> LNAST decompiler, so the yosys-* readers cannot re-emit pyrope",
+                      "--reader slang elaborates SV to LNAST, which can"});
   }
   if (opts.command == "synth" && !has_ln_inputs && !has_sources) {
-    // ln/pyrope outputs need LNAST units on the pipe; an lg (LGraph) input
-    // has none and there is no decompiler.
-    reject_emit_kind(opts, "ln", {"unsupported", "there is no LGraph -> LNAST decompiler", "ln: outputs need ln: inputs"});
+    // ln/pyrope/lnast-dump outputs need LNAST units on the pipe; an lg
+    // (LGraph) input has none and there is no decompiler.
+    for (const char* k : {"ln", "lnast-dump"}) {
+      reject_emit_kind(opts, k, {"unsupported", "there is no LGraph -> LNAST decompiler", "ln: outputs need ln: inputs"});
+    }
     reject_emit_kind(opts,
                      "pyrope",
                      {"unsupported", "there is no LGraph -> LNAST decompiler", "pyrope outputs need ln:/pyrope inputs"});
   }
   if (opts.command == "check") {
-    for (const char* k : {"lg", "verilog", "ln", "pyrope"}) {
+    for (const char* k : {"lg", "verilog", "ln", "pyrope", "lnast-dump"}) {
       reject_emit_kind(opts, k, {"usage", "check has no outputs beyond the result", ""});
     }
   }
@@ -644,7 +705,7 @@ std::string verilog_frontend(Options& opts, Result& res, Eprp_var& var) {
   Eprp_var::Eprp_dict labels{{"files", join_csv(opts.files)},
                              {"path", lib_path},
                              {"top", opts.top.empty() ? std::string{"-auto-top"} : opts.top},
-                             {"frontend", opts.reader == "yosys" ? std::string{"verilog"} : std::string{"slang"}}};
+                             {"frontend", opts.reader == "yosys-verilog" ? std::string{"verilog"} : std::string{"slang"}}};
   if (!opts.raw_args.empty()) {
     // Join with '\x1f' (ASCII unit separator) — a comma is lossy for shell
     // argv tokens like +incdir+a,b; inou_yosys_api splits on '\x1f' when seen.
@@ -664,6 +725,22 @@ std::string verilog_frontend(Options& opts, Result& res, Eprp_var& var) {
     throw Lhd_error{"internal", "verilog elaboration produced no graphs", "check the step log in --workdir"};
   }
   return lib_path;
+}
+
+// --reader slang: the direct inou.slang SV -> LNAST front-end. From here the
+// design is LNAST units, so the rest of the flow is the pyrope one (lnastfmt,
+// upass, emit-gated tolg). The yosys-* readers above elaborate to LGraphs.
+void slang_parse(Options& opts, Result& res, Eprp_var& var) {
+  if (!opts.raw_args.empty()) {
+    throw Lhd_error{"unsupported",
+                    "raw `--` args are yosys-reader only (inou.slang takes no flag string)",
+                    "use --reader yosys-slang, or file an inou.slang labels request"};
+  }
+  check_inputs_exist(opts.files);
+  res.inputs = opts.files;
+
+  run_step("inou.slang", var, {{"files", join_csv(opts.files)}}, opts, res);
+  run_step("pass.lnastfmt", var, {}, opts, res);
 }
 
 void lower_lnasts(Options& opts, Result& res, Eprp_var& var, const std::string& lib_path, bool need_graphs);  // fwd
@@ -787,7 +864,21 @@ void elaborate_command(Options& opts, Result& res) {
     }
     setup_diag(opts, "elaborate.verilog");
     Eprp_var var;
-    auto     lib_path = verilog_frontend(opts, res, var);
+    if (opts.reader == "slang") {  // direct SV -> LNAST: the pyrope flow from here
+      slang_parse(opts, res, var);
+      if (ln_out != nullptr) {
+        save_ln_dir(opts, res, filter_top(var.lnasts, opts.top), ln_out->path);
+      }
+      emit_lnast_dump_outputs(filter_top(var.lnasts, opts.top), opts, res);  // post-parse dump
+      if (lg_out != nullptr) {
+        lower_lnasts(opts, res, var, lg_out->path, /*need_graphs=*/true);
+        livehd::Hhds_graph_library::save(lg_out->path);
+        res.outputs.push_back(lg_out->path);
+      }
+      write_depfile(opts, res);
+      return;
+    }
+    auto lib_path = verilog_frontend(opts, res, var);
     if (lg_out != nullptr) {
       livehd::Hhds_graph_library::save(lib_path);
       res.outputs.push_back(lg_out->path);
@@ -804,12 +895,13 @@ void elaborate_command(Options& opts, Result& res) {
     Eprp_var var;
     auto     n_imports = pyrope_parse(opts, res, var, ir.ln_dirs);
 
+    // Emit only THIS invocation's source units (imports have their own
+    // elaboration step and ln: directory).
+    std::vector<std::shared_ptr<Lnast>> source_units(var.lnasts.begin() + static_cast<long>(n_imports), var.lnasts.end());
     if (ln_out != nullptr) {
-      // Emit only THIS invocation's source units (imports have their own
-      // elaboration step and ln: directory).
-      std::vector<std::shared_ptr<Lnast>> source_units(var.lnasts.begin() + static_cast<long>(n_imports), var.lnasts.end());
       save_ln_dir(opts, res, filter_top(source_units, opts.top), ln_out->path);
     }
+    emit_lnast_dump_outputs(filter_top(source_units, opts.top), opts, res);  // post-parse dump
     if (lg_out != nullptr) {
       // Lower onto LGraphs (imports stay on the pipe for call resolution).
       lower_lnasts(opts, res, var, lg_out->path, /*need_graphs=*/true);
@@ -836,6 +928,7 @@ void elaborate_command(Options& opts, Result& res) {
     if (ln_out != nullptr) {
       save_ln_dir(opts, res, var.lnasts, ln_out->path);
     }
+    emit_lnast_dump_outputs(var.lnasts, opts, res);
     if (lg_out != nullptr) {
       // Re-lowering all units into ONE fresh library is the v0 aggregation:
       // gids stay consistent by construction.
@@ -843,7 +936,7 @@ void elaborate_command(Options& opts, Result& res) {
       livehd::Hhds_graph_library::save(lg_out->path);
       res.outputs.push_back(lg_out->path);
     }
-    if (ln_out == nullptr && lg_out == nullptr) {
+    if (ln_out == nullptr && lg_out == nullptr && find_slot(opts.emit_dirs, "lnast-dump") == nullptr) {
       throw Lhd_error{"usage", "aggregation needs --emit-dir ln:DIR/ and/or --emit-dir lg:DIR/", ""};
     }
     return;
@@ -933,8 +1026,9 @@ void graph_pipeline_and_emits(Options& opts, Result& res, Eprp_var& var, const s
   }
 
   emit_verilog_outputs(opts, res, var);
-  emit_ln_outputs(var.lnasts, opts, res);  // post-upass forest (synth from ln: inputs)
-  emit_pyrope_outputs(opts, res, var);     // post-upass .prp re-emission (pass.prp_writer)
+  emit_ln_outputs(var.lnasts, opts, res);          // post-upass forest (synth from ln: inputs)
+  emit_pyrope_outputs(opts, res, var);             // post-upass .prp re-emission (pass.prp_writer)
+  emit_lnast_dump_outputs(var.lnasts, opts, res);  // post-upass textual dump (debug/test observable)
 }
 
 void synth_command(Options& opts, Result& res) {
@@ -1032,8 +1126,16 @@ void compile_command(Options& opts, Result& res) {
     if (!ir.ln_dirs.empty() || !ir.lg_dirs.empty()) {
       throw Lhd_error{"usage", "compile verilog takes no ln:/lg: inputs", ""};
     }
-    auto lib_path = verilog_frontend(opts, res, var);
-    graph_pipeline_and_emits(opts, res, var, lib_path);
+    if (opts.reader == "slang") {  // direct SV -> LNAST: the pyrope flow from here
+      slang_parse(opts, res, var);
+      const auto* lg_out   = find_slot(opts.emit_dirs, "lg");
+      std::string lib_path = lg_out ? lg_out->path : workdir(opts) + "/lgdb";
+      lower_lnasts(opts, res, var, lib_path, emits_need_graphs(opts));
+      graph_pipeline_and_emits(opts, res, var, lib_path);
+    } else {
+      auto lib_path = verilog_frontend(opts, res, var);
+      graph_pipeline_and_emits(opts, res, var, lib_path);
+    }
   }
   write_depfile(opts, res);
 }
@@ -1200,6 +1302,7 @@ void init_engine() {
 
 void run_engine_command(Options& opts, Result& res) {
   validate_emits(opts);
+  check_known_set_passes(opts);  // --set AND --config table names: a typo'd pass must error, not no-op
 
   if (!opts.depfile.empty() && !(opts.language == "verilog")) {
     throw Lhd_error{"usage",

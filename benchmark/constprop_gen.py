@@ -67,7 +67,7 @@ def _value_condtuple(n: int) -> int:
 def _prp_constprop(n: int) -> list[str]:
     out = ["mut a = 1\n"]
     out.extend(["a += 1\n"] * n)
-    out.append(f"cassert a == {_value_constprop(n)}\n")
+    out.append(f"cassert(a == {_value_constprop(n)})\n")
     return out
 
 
@@ -77,7 +77,7 @@ def _prp_funcchain(n: int) -> list[str]:
         "mut a = 1\n",
     ]
     out.extend(["a = step2(a)\n"] * n)
-    out.append(f"cassert a == {_value_funcchain(n)}\n")
+    out.append(f"cassert(a == {_value_funcchain(n)})\n")
     return out
 
 
@@ -96,7 +96,7 @@ _MIXED_PRP = (
 def _prp_mixedops(n: int) -> list[str]:
     out = ["mut a = 1\n"]
     out.extend(_MIXED_PRP[i % 8] for i in range(n))
-    out.append(f"cassert a == {_value_mixedops(n)}\n")
+    out.append(f"cassert(a == {_value_mixedops(n)})\n")
     return out
 
 
@@ -110,7 +110,7 @@ def _prp_condtuple(n: int) -> list[str]:
             f"if t_{i}.0 < 0x1000 {{ a = t_{i}.1 }}"
             f" else {{ a = (t_{i}.2 ^ 0x5A) & 0x{MASK:X} }}\n"
         )
-    out.append(f"cassert a == {_value_condtuple(n)}\n")
+    out.append(f"cassert(a == {_value_condtuple(n)})\n")
     return out
 
 
