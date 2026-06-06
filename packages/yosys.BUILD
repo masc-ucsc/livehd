@@ -236,10 +236,16 @@ cc_library(
         # "@edu_berkeley_abc//:abc-lib",
         "@abc",
         #"@edu_berkeley_abc//:abc-lib",
-        "@flex//:headers",
         "@libffi//:libffi",
         #"@tk_tcl_tcl//:tcl",
-    ],
+    ] + select({
+        # On macOS the SDK ships a size_t-signature FlexLexer.h, which Yosys's
+        # verilog_lexer.h __APPLE__ branch (and the Darwin sed in
+        # yosys_utils.bzl) expect; the hermetic vanilla-2.6.4 header uses int
+        # signatures and would clash, so only use it off-Darwin.
+        "@platforms//os:osx": [],
+        "//conditions:default": ["@flex//:headers"],
+    }),
     linkopts = ["-ldl"],
     alwayslink = True,
 )
