@@ -386,8 +386,28 @@ void uPass_func_extract::process_func_def() {
   // Task 1q — `pipe` lambdas extract like `comb`: the spawned io-form LNAST
   // carries the per-output stages(min,max) annotation (copied verbatim with
   // the signature below), the LN pipe upass inserts the output flop, and
-  // tolg lowers it. `mod` stays embedded (later phase).
-  if ((func_kind != "comb" && func_kind != "pipe") || func_name.empty()) {
+  // tolg lowers it. `mod` stays embedded (later phase) — EXCEPT a `ref self`
+  // mod: that is a method / mod-init constructor (`mod mix_tup_init(ref
+  // self:Mix_tup)`, 06b-instantiation.md), not a standalone hardware module,
+  // and the runner's inliner needs it in the registry to splice
+  // `mut y:Mix_tup = mix_tup_init` (and explicit `y.method(...)` calls).
+  bool is_ref_self_mod = false;
+  if (func_kind == "mod") {
+    const auto here = lm->save_cursor();
+    // func_def(name, kind, generics, inputs, …) — two siblings to inputs.
+    if (move_to_sibling() && move_to_sibling() && lm->has_child()) {
+      move_to_child();  // first input: store(ref self, const 'ref'[, type])
+      if (Lnast_ntype::is_store(get_raw_ntype()) && lm->has_child()) {
+        move_to_child();
+        if (Lnast_ntype::is_ref(get_raw_ntype()) && current_text() == "self" && move_to_sibling()
+            && Lnast_ntype::is_const(get_raw_ntype()) && current_text() == "ref") {
+          is_ref_self_mod = true;
+        }
+      }
+    }
+    lm->restore_cursor(here);
+  }
+  if ((func_kind != "comb" && func_kind != "pipe" && !is_ref_self_mod) || func_name.empty()) {
     move_to_parent();
     return;
   }

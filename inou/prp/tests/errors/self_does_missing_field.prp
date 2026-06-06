@@ -1,0 +1,19 @@
+/*
+:name: self_does_missing_field
+:type: error
+:error: does not satisfy.*missing field `a`
+:help: structurally provide every field
+*/
+
+// Task 1k — typed self is a structural `does` check: every field of the
+// declared self type must exist on the receiver. t2 lacks `a`.
+
+type t1 = (a:u32=nil, b:string="")
+type t2 = (b:string="")
+
+comb set_b(ref self:t1) {
+  self.b = "foo"
+}
+
+mut y:t2 = nil
+y.set_b() // locate_error_here

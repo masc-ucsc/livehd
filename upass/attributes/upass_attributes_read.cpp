@@ -213,6 +213,52 @@ std::optional<uPass_attributes::Decl_scalar_type> uPass_attributes::provide_decl
   return Decl_scalar_type{.range_max = ti->range_max, .range_min = ti->range_min};
 }
 
+std::optional<uPass_attributes::Field_decl_type> uPass_attributes::provide_field_type(std::string_view name) {
+  // Task 1k typed-self does-check: declared kind + range of a dotted field
+  // path (`t1.a` chases direct_alias / tuple_get_alias inside
+  // lookup_type_info). Unlike provide_decl_type, a missing range is fine —
+  // bool/string fields carry only their kind.
+  const auto* ti = lookup_type_info(name);
+  if (!ti || !ti->has_type_spec) {
+    return std::nullopt;
+  }
+  Field_decl_type ft;
+  switch (ti->kind) {
+    case Numeric_kind::unsigned_int:
+    case Numeric_kind::signed_int  : ft.kind = Io_kind::integer; break;
+    case Numeric_kind::boolean     : ft.kind = Io_kind::boolean; break;
+    case Numeric_kind::string      : ft.kind = Io_kind::string; break;
+    case Numeric_kind::none        : ft.kind = Io_kind::none; break;
+  }
+  // An integer type_spec whose range is unbounded keeps kind none in
+  // read_scalar_type_at_cursor (kind derives from range_min); a recorded
+  // range without a kind still identifies an integer.
+  if (ft.kind == Io_kind::none && (ti->range_max || ti->range_min)) {
+    ft.kind = Io_kind::integer;
+  }
+  ft.range_max = ti->range_max;
+  ft.range_min = ti->range_min;
+  return ft;
+}
+
+uPass_attributes::Decl_storage uPass_attributes::provide_decl_storage(std::string_view name) {
+  // Task 1k ref-actual mutability: surface the declared storage class so the
+  // inliner can reject const/type bindings bound to `ref` params.
+  const auto* ti = lookup_type_info(name);
+  if (ti == nullptr) {
+    return Decl_storage::unknown;
+  }
+  switch (ti->decl) {
+    case Decl_kind::mut_kind  : return Decl_storage::mut_storage;
+    case Decl_kind::const_kind: return Decl_storage::const_storage;
+    case Decl_kind::reg_kind  : return Decl_storage::reg_storage;
+    case Decl_kind::await_kind: return Decl_storage::await_storage;
+    case Decl_kind::type_kind : return Decl_storage::type_storage;
+    case Decl_kind::unknown   : break;
+  }
+  return Decl_storage::unknown;
+}
+
 std::optional<std::string> uPass_attributes::lookup_attr_ref(std::string_view var, std::string_view attr) const {
   auto it = attr_set_refs.find(std::string{var});
   if (it == attr_set_refs.end()) {
@@ -693,6 +739,10 @@ void uPass_attributes::process_declare() {
           decl = Decl_kind::reg_kind;
         } else if (tok == "await") {
           decl = Decl_kind::await_kind;
+        } else if (tok == "type") {
+          // Task 1k — a `type X = …` binding; the inliner rejects it as a
+          // `ref` actual (ref-self methods need a mut value receiver).
+          decl = Decl_kind::type_kind;
         } else if (tok == "comptime") {
           comptime = true;
         }

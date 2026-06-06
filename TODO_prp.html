@@ -104,24 +104,11 @@ complete before group N+1 starts. Group letters are shared across
 cross-file dependencies stay visible.</p>
 <h2 id="group-1-foundation">Group 1 — foundation</h2>
 <ul>
-<li><strong id="item-1q" class="item-id">1q</strong> Pyrope <code>pipe</code> construct — <strong>Phase 1: declaration;
-  phases A/B/C/E landed 2026-06-05</strong> (suite green, latency LEC-verified
-  vs golden Verilog incl. negative controls). Landed: LNAST <code>stages(min,max)</code>
-  per-output io node + prp2lnast depth parse/errors (<code>invalid-pipe-depth</code>);
-  Flop <code>pipe_min</code>/<code>pipe_max</code> comptime pins (needed a <code>get_sink_pid</code>
-  same-first-char slow path — posclk/pipe_min/pipe_max all 'p') + cgen
-  d-stage shifter (unset pins = today's emission bit-for-bit); LN pipe upass
-  (post-runner, pre-tolg) inserts the output reg; tolg lowers it to the
-  parameterized Flop — <strong>first Flop on the Pyrope→LG path</strong> — with
-  implicit <code>clock</code> input (1-bit <code>clk</code>/<code>clock</code> reuse only; a
-  multi-bit <code>clock</code> data port is a hard error); func_extract extracts
-  <code>pipe</code>, the inliner declines pipe callees. Tests:
-  <code>inou/prp/tests/equiv/pipe{1_pass,3_mul,2_two_out,_range,_bare}</code>
-  (bazel <code>prp-equiv-*</code> targets — the equiv glob is now wired, incl.
-  <code>trivial_if</code>) + <code>tests/errors/pipe_{zero_depth,descending_range}</code>.
-  Spec: <code>../docs/docs/pyrope/06c-pipelining.md</code>; plan + landed details:
-  <code>docs/contracts/task_1q_plan.md</code>.<ul>
-<li><strong id="item-1q-D" class="item-id">1q-D</strong> LG pass1 checker (REMAINING): the
+<li><strong id="item-1q" class="item-id">1q</strong> Pyrope <code>pipe</code> construct — Phase 1
+  (declaration → flopped outputs). Spec:
+  <code>../docs/docs/pyrope/06c-pipelining.md</code>; plan + landed details:
+  <code>docs/contracts/task_1q_plan.md</code>. Remaining:<ul>
+<li><strong id="item-1q-D" class="item-id">1q-D</strong> LG pass1 checker: the
     SCC/Tarjan + σ pass — classify state/stage regs (state: <code>enable</code>≠true
     or din→q in SCC, σ(q)=σ(din)), forward σ with equal-operand meet
     (mismatch = error at the node), σ ≤ min honesty (callers may rely on any
@@ -198,70 +185,22 @@ cross-file dependencies stay visible.</p>
    sub-class of import that bypasses the second-phase path).</li>
 </ol>
 </li>
-<li><strong id="item-1k" class="item-id">1k</strong> <code>self</code> / <code>ref self</code> in tuple methods — <strong>contract agreed
-  2026-06-05</strong>; plan: <code>docs/contracts/task_1k_plan.md</code>. Basic untyped
-  <code>self</code>/<code>ref self</code> binding, chained receivers, write-back, and the
-  direct positional call <code>method(obj, …)</code> already work (commit
-  fbbe938fa; baseline <code>prp-self_untyped</code> landed green 2026-06-05).
-  Remaining = typed-self type check, call-form enforcement, mut-receiver
-  enforcement, doc fixes, decorator-init.<ul>
-<li><strong>Agreed semantics:</strong> typed <code>self:T</code> check =
-    <strong>receiver <code>does</code> declared</strong> — structural only (per-field
-    name presence + kind match + integer range-subset receiver ⊆
-    declared, recursive; extra receiver fields OK; NEVER typename or
-    strict equivalence). The <code>does</code>-check applies to <code>self</code> ONLY;
-    other arguments keep the normal method-call argument rules.
-    <code>self</code> declared ⇒ BOTH <code>obj.f(…)</code> and <code>f(obj, …)</code> are valid
-    (<code>self</code> binds only as first positional; named <code>self=</code> stays
-    rejected); no <code>self</code> ⇒ UFCS is a compile error (tightening —
-    today <code>v.f()</code> on a self-less comb silently binds). <code>ref self</code>
-    requires a <code>mut</code> value receiver (<code>type</code>/const receiver ⇒
-    const-to-ref error); non-ref <code>self</code> is callable on a <code>type</code>
-    binding (read-only over defaults). Named self types only for now
-    (an inline tuple type on <code>self</code> flattens it to dotted io leaves
-    and breaks <code>has_self</code> ⇒ clean error). Overloads impossible
-    (same-name = shadowing error); future = function arrays
-    <code>fun = (f1, f2)</code> dispatched first-match.</li>
-<li><strong>Phases</strong> (each lands green; details in
-    <code>docs/contracts/task_1k_plan.md</code>):<ul>
-<li><strong id="item-1k-A" class="item-id">1k-A</strong> Plumb the self typename: add
-    <code>type_name</code> to <code>Lnast_io_entry</code> (<code>lnast.hpp</code>); populate in the
-    SSA io flatten (<code>upass_ssa.cpp</code> <code>flatten_assign</code>) when the type
-    child is a <code>ref</code> node — today the typename is dropped, which is
-    why <code>self:t1</code> mismatches silently pass; reject inline tuple
-    types on <code>self</code>.</li>
-<li><strong id="item-1k-B" class="item-id">1k-B</strong> <code>does</code>-check at the inliner
-    self-bind (<code>upass_runner.cpp</code> <code>bind(0)</code> sites): when
-    <code>io.inputs[0].type_name</code> is set, resolve declared fields
-    (<code>try_bundle_fields(type_name)</code> + per-field types) vs receiver
-    fields; recursive name/kind/range-subset check; new diag
-    <code>fcall-self-does</code> naming the first failing field. Covers both
-    call forms and the tuple-field method-dispatch path.</li>
-<li><strong id="item-1k-C" class="item-id">1k-C</strong> UFCS marker + no-self
-    enforcement: prp2lnast method-call lowering
-    (<code>prp2lnast.cpp:5474</code>) marks UFCS-originated <code>func_call</code>s
-    (UFCS and direct calls currently lower to identical LNAST);
-    runner errors <code>fcall-ufcs-no-self</code> when a marked call resolves
-    to a self-less callee. Audit existing tests for
-    UFCS-on-non-self fallout before flipping.</li>
-<li><strong id="item-1k-D" class="item-id">1k-D</strong> ref-receiver mutability:
-    error when a <code>ref</code> actual (incl. the UFCS receiver for
-    <code>ref self</code>) is a <code>type</code> binding or const.</li>
-<li><strong id="item-1k-E" class="item-id">1k-E</strong> Tests: comptime
-    <code>self_typed.prp</code> (exact <code>t1</code>, superset <code>t3</code>, narrower-range
-    field u8 ⊆ u32, direct-call form); errors
-    <code>self_does_missing_field</code> (the <code>t2</code> case),
-    <code>self_does_range</code>, <code>ufcs_no_self</code>, <code>self_named_arg</code>,
-    <code>ref_self_const_receiver</code>. (<code>self_untyped.prp</code> already
-    landed.)</li>
-<li><strong id="item-1k-F" class="item-id">1k-F</strong> Doc fixes in
-    <code>../docs/docs/pyrope</code> (ref/self evolved; stale points flagged):
-    <code>06-functions.md</code> "UFCS-only / direct form rejected" → both
-    forms + no-self ⇒ no-UFCS; <code>07b-structtype.md</code> self-typing
-    wording → receiver-<code>does</code>-declared with the t1/t2/t3 example;
-    grep the rest for contradicting self/UFCS/method statements.</li>
-</ul>
-</li>
+<li><strong id="item-1k" class="item-id">1k</strong> <code>self</code> / <code>ref self</code> in tuple methods — remaining
+  pieces (the core contract — typed-self <code>does</code>-check, call-form +
+  mut-receiver enforcement, tests, docs — is in
+  <code>docs/contracts/task_1k_plan.md</code>):<ul>
+<li><strong>In-tuple inline-lambda extraction</strong> (<code>prp-tup_method</code> fails):
+    a lambda defined INSIDE a tuple literal
+    (<code>mut p = (…, comb call(ref self, a) -&gt; (result) {…})</code>) is never
+    extracted — <code>tuple_to_node</code>'s generic else branch lowers it to raw
+    const text, the field name is lost, and <code>p.call(…)</code> cannot resolve.
+    Needs func_extract integration from expression context + a
+    <code>call = 'fname'</code> string-field store (the shape the method-dispatch
+    path already consumes).</li>
+<li><strong>Comptime <code>mod</code>-init folding</strong> (<code>prp-mix_tup</code> fails):
+    <code>mut y:Mix_tup = mix_tup_init</code> (mod instantiation as the
+    initializer) does not comptime-fold the receiver fields, so
+    <code>cassert(y.flag …)</code> stays unresolved.</li>
 <li><strong>Trailing piece — decorator-init semantics</strong> (kept from the
     earlier 1k scope; excluded from the 2026-06-05 contract):
     <code>prp-setter_complex</code> and <code>prp-tuple_decorator_complex</code> still

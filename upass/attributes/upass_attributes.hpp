@@ -115,6 +115,12 @@ public:
   std::optional<Const> fold_ref(std::string_view name) override;
   bool                 overrides_fold_ref() const override { return true; }
 
+  // Init-construction window: the runner's synthesized constructor stores
+  // (type-defaults bind + ref-self write-back) are not user re-binds, so the
+  // const single-bind tally in record_assign pauses while the window is open.
+  void notify_init_construction_begin() override { ++init_construction_depth_; }
+  void notify_init_construction_end() override { --init_construction_depth_; }
+
   // Read-side accessor for tests / cross-handler queries.
   upass::attributes::Handler_registry& registry() { return reg; }
 
@@ -191,7 +197,7 @@ private:
 public:
   // Storage classification recorded by the `type` decl-attr that prp2lnast
   // emits (`mut`/`const`/`reg`/`await`).
-  enum class Decl_kind : uint8_t { unknown, mut_kind, const_kind, reg_kind, await_kind };
+  enum class Decl_kind : uint8_t { unknown, mut_kind, const_kind, reg_kind, await_kind, type_kind };
 
   // Numeric type carried by a type_spec node. Width 0 means the declaration
   // omitted the bit count (e.g. `int` / `uint`); concrete widths populate
@@ -230,6 +236,16 @@ public:
   // actual at the call site. See uPass::provide_decl_type.
   std::optional<Decl_scalar_type> provide_decl_type(std::string_view name) override;
   bool                            overrides_shared_st() const override { return true; }
+
+  // Task 1k — declared field type of a dotted path (`t1.a`) for the inliner's
+  // typed-self `does`-check. Same lookup_type_info chase as provide_decl_type
+  // but surfaces the scalar KIND too (and tolerates a missing range, so bool/
+  // string fields still report their kind). See uPass::provide_field_type.
+  std::optional<Field_decl_type> provide_field_type(std::string_view name) override;
+
+  // Task 1k — declared storage class (mut/const/reg/type) so the inliner can
+  // reject const/type bindings as `ref` actuals. See uPass::provide_decl_storage.
+  Decl_storage provide_decl_storage(std::string_view name) override;
 
   // Range bounds previously recorded by process_range, keyed by the range
   // op's destination tmp ref (so attr_set with a `range` value pointing to
@@ -345,6 +361,10 @@ private:
   // allocator pressure was a visible bottleneck.
   absl::flat_hash_set<std::string>      assigned_once;       // any non-nil assign happened
   absl::flat_hash_map<std::string, int> const_assign_count;  // for const single-assign check
+  // >0 while the runner's init-construction window is open (see the
+  // notify_init_construction_* overrides) — record_assign skips the const
+  // single-bind tally for the synthesized constructor stores.
+  int init_construction_depth_ = 0;
 
   // Read evaluator (read.cpp): compute the attribute's value when possible, store it
   // in tmp_fold[dst] so downstream reads pick it up. base_text is the raw

@@ -238,8 +238,9 @@ void uPass_attributes::process_tuple_set() {
   if (!move_to_child()) {
     return;
   }
-  auto target     = normalize_name(current_text());
-  bool rhs_is_nil = false;
+  auto        target     = normalize_name(current_text());
+  bool        rhs_is_nil = false;
+  std::string first_field;
   while (move_to_sibling()) {
     if (is_last_child()) {
       if (current_text() == "nil") {
@@ -247,8 +248,27 @@ void uPass_attributes::process_tuple_set() {
       }
       break;
     }
+    if (first_field.empty()) {
+      first_field = std::string(current_text());
+    }
   }
   move_to_parent();
+
+  // A write through an explicitly-`mut` field is the FIELD's binding, not a
+  // root rebind: `const t = (mut a:u4=1, …); t.a += 3` is legal (the const
+  // applies to the binding of t, mut fields stay mutable — 04-variables.md).
+  // prp2lnast records the marker as Decl_kind::mut_kind on the field path
+  // (declare on the field's tuple_get tmp; lookup_type_info alias-chases).
+  if (!first_field.empty()) {
+    std::string field_path;
+    field_path.reserve(target.size() + 1 + first_field.size());
+    field_path = target;
+    field_path.push_back('.');
+    field_path += first_field;
+    if (const auto* fti = lookup_type_info(field_path); fti != nullptr && fti->decl == Decl_kind::mut_kind) {
+      return;
+    }
+  }
 
   record_assign(target, rhs_is_nil);
 }

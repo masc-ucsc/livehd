@@ -69,6 +69,22 @@ bool Symbol_table::var(std::string_view key) {
   return true;
 }
 
+// Pyrope has value semantics: `p2 = p1` copies. Whole-bundle assignment
+// stores the SAME shared_ptr for cheapness (see set(key, bundle) with
+// var==key), so before any in-place field mutation the map slot must be
+// un-shared — otherwise the write leaks into every variable still holding
+// the old pointer (tup_method: `mut p2 = p1` then `p1.call(…)` mutating
+// p2's view of found_once). Bundle storage is a flat key→Entry map, so a
+// copy is a plain deep clone. use_count()>1 over-approximates "shared"
+// (transient locals inflate it); a spurious clone is safe, a missed one
+// is not.
+static std::shared_ptr<Bundle>& unshare_for_write(std::shared_ptr<Bundle>& slot) {
+  if (slot.use_count() > 1) {
+    slot = std::make_shared<Bundle>(*slot);
+  }
+  return slot;
+}
+
 // Tmp refs (`___N`) are LNAST-internal SSA-style values, not user variables.
 // They have no real "scope" — a producer in a nested block (e.g. inside an
 // if-stmts) writes a tmp that an outer-block consumer reads. If we stored
@@ -119,7 +135,7 @@ bool Symbol_table::set(std::string_view key, std::shared_ptr<Bundle> bundle) {
       it->second = bundle;
       return true;
     }
-    var_bundle = it->second;
+    var_bundle = unshare_for_write(it->second);
   }
 
   var_bundle->set(field, bundle);
@@ -145,7 +161,7 @@ bool Symbol_table::set(std::string_view key, const Const& trivial) {
     bundle = std::make_shared<Bundle>(var);
     target->varmap.emplace(std::string(var), bundle);
   } else {
-    bundle = it->second;
+    bundle = unshare_for_write(it->second);
   }
 
   bundle->set(field, trivial);
@@ -171,7 +187,7 @@ bool Symbol_table::mut(std::string_view key, const Const& trivial) {
     return false;
   }
 
-  it->second->mut(field, trivial);
+  unshare_for_write(it->second)->mut(field, trivial);
   record_uncertain_modification(var);
 
   return true;
@@ -383,6 +399,20 @@ std::shared_ptr<Bundle> Symbol_table::get_bundle(std::string_view key) const {
     return it->second;
   }
   return it->second->get_bundle(field);
+}
+
+std::shared_ptr<Bundle> Symbol_table::get_bundle_for_write(std::string_view var) {
+  // COW companion to get_bundle for callers that mutate the returned bundle
+  // in place (e.g. constprop's named field store). Un-shares the varmap slot
+  // first so the mutation never leaks into aliases created by whole-bundle
+  // assignment (`p2 = p1`). Bare-var keys only — a dotted key would return a
+  // sub-bundle whose mutation wouldn't write back into the flat parent map.
+  I(var.find('.') == std::string_view::npos);
+  auto* s = find_decl_scope(var);
+  if (s == nullptr) {
+    return nullptr;
+  }
+  return unshare_for_write(s->varmap.find(var)->second);
 }
 
 bool Symbol_table::has_bundle(std::string_view key) const {

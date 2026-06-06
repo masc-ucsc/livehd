@@ -109,6 +109,12 @@ protected:
   // this, the body content would also emit as an orphan top-level stmts.
   std::unordered_set<uint32_t> consumed_lambda_body_starts;
 
+  // Counter for file-unique hoisted in-tuple method names (`call` →
+  // `call__t1`). The bundle field keeps the source name; the func_def (and
+  // hence the registry unit) gets the unique one, so two bundles may both
+  // define `call` without colliding.
+  int hoisted_lambda_count_ = 0;
+
   // Comptime-known tuples used by process_for_statement to unroll
   //   `for (e[, idx[, key]]) in NAME { … }` over a static shape, and to size
   //   `for i in ref NAME { … }` ref-iterations (write-back unroll).
@@ -178,8 +184,32 @@ protected:
   void process_loop_statement(TSNode n);
   void process_control_statement(TSNode n);
   void process_function_call_statement(TSNode n);
+  // Statement-table entry point (the table needs the plain `void(TSNode)`
+  // member signature); forwards to the named variant with no override.
   void process_lambda_statement(TSNode n);
+  // `hoist_name` (when non-empty) overrides the func_def's emitted name —
+  // used by tuple_to_node to hoist an in-tuple method (`comb call(ref
+  // self,…){…}` inside a bundle literal) under a file-unique name while the
+  // bundle field keeps the source method name.
+  void process_lambda_statement_named(TSNode n, std::string_view hoist_name);
   void process_enum_assignment(TSNode n);
+  // One parsed entry of an enum definition (either source form).
+  struct Enum_entry {
+    std::string name;
+    TSNode      type_node{};   // per-entry payload type (`Yellow:Rgb`); null when none
+    TSNode      value_node{};  // explicit value expression; null when none
+    bool        has_type  = false;
+    bool        has_value = false;
+  };
+  // Shared lowering for `enum NAME[:T] = (…)` and `const NAME = enum(…)`.
+  // Emits one value-carrier bundle per entry — the auto/explicit ordinal
+  // (one-hot when no entry is explicit, sequential otherwise; 03-bundle.md
+  // "Enumerate") or the constructed payload (`Yellow:Rgb = v` → `Rgb(v)`,
+  // resolved by the runner's init-construction hook) — each tagged with a
+  // `__enumentry` identity attr ('NAME.entry') that powers enum-aware `in`,
+  // `string()` and interpolation. Returns the ref of the enum-type bundle
+  // (entry name → carrier).
+  Lnast_node lower_enum_def(std::string_view enum_name, TSNode enum_level_type, const std::vector<Enum_entry>& entries);
   void process_type_statement(TSNode n);
   void process_import_statement(TSNode n);
   void process_test_statement(TSNode n);
@@ -256,6 +286,7 @@ protected:
   struct Call_arg {
     bool        is_assign = false;
     bool        is_ref    = false;
+    bool        is_ufcs   = false;  // task 1k — the receiver of `obj.method(...)`
     std::string assign_key;
     Lnast_node  value;
   };

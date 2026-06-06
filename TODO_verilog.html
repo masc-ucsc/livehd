@@ -103,15 +103,10 @@ and <a href="TODO_hhds.html">TODO_hhds.md</a>, so cross-file dependencies stay v
 <h2 id="group-2-depends-on-group-1">Group 2 — depends on Group 1</h2>
 <ul>
 <li><strong id="item-2d" class="item-id">2d</strong> Finish the LNAST→LGraph synthesis closure (the rest of <code>lnast_to_lgraph</code>
-  beyond the combinational milestone). The terminal <code>tolg</code> sub-pass + the
-  <code>:type: equiv</code> harness landed 2026-06-02 and <code>trivial_if</code> LEC-matches its
-  golden; this entry tracks the <strong>remaining functional phases</strong> (the original
-  Group-3 <code>3a</code> work, re-homed here). The how-to-lower spec is
+  beyond the combinational milestone) — the <strong>remaining functional phases</strong>
+  (the original Group-3 <code>3a</code> work, re-homed here). The how-to-lower spec is
   <code>docs/contracts/lnast2lgraph.md</code> (cell vocabulary, pin conventions, nil/bool
-  model, reg/flop + memory wiring, attributes; phases 4–11). What's already
-  done: graph IO, <code>Sum</code>/<code>const</code>, <code>Get_mask</code> bit-slices, <code>if</code>/<code>elif</code>/<code>else</code> →
-  binary <code>Mux</code>, and the per-function-tree → one-LGraph model (graph/module name
-  = <code>&lt;file-stem&gt;.&lt;entity&gt;</code>, every function assumed <code>pub</code>; see <a class="xref" href="TODO_prp.html#item-1m">1m</a>).</li>
+  model, reg/flop + memory wiring, attributes; phases 4–11).</li>
 </ul>
 <p><strong>Remaining slices</strong> (roughly the contract phase order):
   - <strong>Registers / <code>defer</code></strong> → <code>Flop</code> (reset/clock pin defaults, last-write-wins
@@ -129,14 +124,9 @@ and <a href="TODO_hhds.html">TODO_hhds.md</a>, so cross-file dependencies stay v
     path); diagnose leftover LNAST-only attrs.
   - Optional cross-module global/specialization pass (contract phase 10) — the
     natural tail; may split into its own entry if it grows.</p>
-<p><strong>Test-infra follow-ups</strong>: (a) a bazel CI target for <code>tests/equiv/*.prp</code> —
-  needs a non-colliding name vs the existing comptime <code>prp-trivial_if</code>, and
-  <code>inou/yosys/lgcheck</code> + <code>yosys2</code> reachable from the test sandbox (Yosys may be
-  absent there; the manual <code>pyrope_test.py -i</code> harness is the runner until
-  then). (b) Reconcile <code>lnast2lgraph.md §1</code>/<code>§16</code>, which still describe a
-  standalone <code>pass.lnast_to_lgraph</code>, to the landed terminal-<code>tolg</code>-sub-pass
-  packaging. Implementation notes for the landed milestone live in the memory
-  note <code>task_1l_tolg_landed.md</code>.</p>
+<p><strong>Test-infra follow-up</strong>: reconcile <code>lnast2lgraph.md §1</code>/<code>§16</code>, which
+  still describe a standalone <code>pass.lnast_to_lgraph</code>, to the
+  terminal-<code>tolg</code>-sub-pass packaging.</p>
 <h2 id="group-3-depends-on-group-2">Group 3 — depends on Group 2</h2>
 <ul>
 <li><strong id="item-3b" class="item-id">3b</strong> Use the stable Pyrope as example for LNAST generation, and migrate
@@ -153,9 +143,9 @@ and <a href="TODO_hhds.html">TODO_hhds.md</a>, so cross-file dependencies stay v
 <p>The yosys-side import (<code>inou/yosys</code>) still rides on <code>@hif</code> /
 <code>Sub_node</code>-based Lgraph. The per-file migration plan is in
 <code>docs/contracts/yosys_migration_skeleton.md</code>: <code>lgyosys_tolg.cpp</code>,
-<code>lgyosys_dump</code>, <code>lgyosys_fromlg</code>, <code>inou_yosys_api</code>, <code>yosys_driver</code>. Gated
-on <code>pass/cprop</code> having landed on the HHDS substrate; cprop is done, yosys
-migration is the next per-pass bite.</p>
+<code>lgyosys_dump</code>, <code>lgyosys_fromlg</code>, <code>inou_yosys_api</code>, <code>yosys_driver</code>.
+<code>pass/cprop</code> already rides the HHDS substrate; yosys migration is the
+next per-pass bite.</p>
 </main>
 <footer>Generated from <code>TODO_verilog.md</code> — task badges link across files; ✎ marks reference notes.</footer>
 </body>

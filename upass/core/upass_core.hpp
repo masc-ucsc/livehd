@@ -145,6 +145,26 @@ public:
   };
   virtual std::optional<Decl_scalar_type> provide_decl_type(std::string_view /*name*/) { return std::nullopt; }
 
+  // Task 1k — declared type (scalar kind + optional integer range) of a
+  // DOTTED field path such as `t1.a` (per-field types of a type/tuple bundle
+  // live on tuple_get tmps in the attributes pass; lookup_type_info chases
+  // the alias chain). The inliner's typed-self `does`-check uses this to
+  // compare the declared self type's fields against the receiver's. Returns
+  // nullopt when no declared type is recorded for the path.
+  struct Field_decl_type {
+    Io_kind              kind{Io_kind::none};
+    std::optional<Const> range_max;
+    std::optional<Const> range_min;
+  };
+  virtual std::optional<Field_decl_type> provide_field_type(std::string_view /*name*/) { return std::nullopt; }
+
+  // Task 1k — declared storage class of a variable. The inliner uses this to
+  // reject a `const` or `type` binding as a `ref` actual (incl. the UFCS
+  // receiver of a `ref self` method): a ref param writes back, so the actual
+  // must be a mut value. `unknown` = no declaration seen (temps, expressions).
+  enum class Decl_storage : uint8_t { unknown, mut_storage, const_storage, reg_storage, await_storage, type_storage };
+  virtual Decl_storage provide_decl_storage(std::string_view /*name*/) { return Decl_storage::unknown; }
+
   // Folded `(start, end_inclusive)` bounds of a `range` tmp (the iterable of a
   // comptime `for i in lo..hi` loop), exposed so the runner's loop unroller can
   // iterate. nullopt when `name` is not a known range. A bound that has not
@@ -216,6 +236,16 @@ public:
   // gets invalidated when the arm exits. Default: no-op.
   virtual void notify_uncertain_arm_begin() {}
   virtual void notify_uncertain_arm_end() {}
+
+  // Init-construction window. The runner synthesizes the `init(ref x, …)`
+  // constructor call (plus the type-defaults bind) for `mut x:T = v` /
+  // `x = T(v)` / `mut x:T = some_mod_init`. While the window is open the
+  // attributes pass must not count the synthesized stores toward the const
+  // single-bind tally — construction of a `const x:T = v` legitimately
+  // emits the defaults bind followed by the ref-self write-back. Default:
+  // no-op.
+  virtual void notify_init_construction_begin() {}
+  virtual void notify_init_construction_end() {}
 
   // ── Step E new dispatch surface (per docs/upass_redesign.md §E) ──
   //

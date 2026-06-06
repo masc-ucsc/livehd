@@ -54,6 +54,7 @@
 #include <algorithm>
 #include <format>
 #include <functional>
+#include <map>
 #include <string>
 #include <unordered_map>
 #include <vector>
@@ -81,6 +82,11 @@ namespace {
 }
 
 bool prp_is_tmp_name(std::string_view n) { return n.size() >= 3 && n[0] == '_' && n[1] == '_' && n[2] == '_'; }
+
+// Task 1k — prp2lnast wraps the UFCS receiver of `obj.method(...)` in a
+// `store(__ufcs_arg, obj)` marker (positional, like __ref_arg) so the runner
+// can reject the UFCS form when the callee declares no `self`.
+constexpr std::string_view call_ufcs_arg_marker = "__ufcs_arg";
 
 // Collect the NON-temporary variables that the `while` CONDITION reads
 // (transitively). `cond_ref` is the while's child-0 ref name; we trace its
@@ -426,6 +432,143 @@ std::optional<std::pair<Const, Const>> uPass_runner::try_range(std::string_view 
     }
   }
   return std::nullopt;
+}
+
+std::optional<upass::uPass::Field_decl_type> uPass_runner::try_field_type(std::string_view name) {
+  for (auto* p : shared_st_passes_) {
+    if (auto ft = p->provide_field_type(name)) {
+      return ft;
+    }
+  }
+  return std::nullopt;
+}
+
+upass::uPass::Decl_storage uPass_runner::try_decl_storage(std::string_view name) {
+  for (auto* p : shared_st_passes_) {
+    if (auto s = p->provide_decl_storage(name); s != upass::uPass::Decl_storage::unknown) {
+      return s;
+    }
+  }
+  return upass::uPass::Decl_storage::unknown;
+}
+
+void uPass_runner::check_self_does(const livehd::diag::Span& span, std::string_view callee_name, std::string_view decl_tn,
+                                   const Lnast_node& receiver) {
+  // Structural `does`-check (task 1k, 07b-structtype.md): every field of the
+  // declared self type must exist on the receiver with a matching scalar kind;
+  // integer fields additionally need receiver-range ⊆ declared-range. Checks
+  // run per flat dotted leaf (bundle keys are canonical dotted paths), which
+  // makes the recursion over tuple fields implicit. NEVER a typename
+  // comparison — a superset receiver passes.
+  auto decl_fields = try_bundle_fields(decl_tn);
+  if (!decl_fields || decl_fields->empty()) {
+    return;  // unknown / scalar named type — nothing structural to check
+  }
+
+  const std::string                                         recv_name(receiver.is_ref() ? receiver.get_name() : std::string_view{});
+  const std::string                                         recv_tn = recv_name.empty() ? std::string{} : try_typename(recv_name);
+  std::optional<std::vector<std::pair<std::string, Const>>> recv_fields;
+  if (!recv_name.empty()) {
+    recv_fields = try_bundle_fields(recv_name);
+  }
+  // The receiver's own TYPE bundle (when it has a declared typename) is the
+  // reliable field directory: its defaults are always comptime, while a
+  // receiver field holding a non-comptime value is skipped by
+  // provide_bundle_fields and would otherwise read as "missing".
+  std::optional<std::vector<std::pair<std::string, Const>>> recv_type_fields;
+  if (!recv_tn.empty()) {
+    recv_type_fields = try_bundle_fields(recv_tn);
+  }
+
+  auto fail = [&](const std::string& why) {
+    const std::string recv_disp = recv_name.empty() ? std::string{"<expression>"} : recv_name;
+    fcall_arg_fail(span,
+                   "fcall-self-does",
+                   std::format("receiver `{}`{} does not satisfy `self:{}` in call to `{}`: {}",
+                               recv_disp,
+                               recv_tn.empty() ? std::string{} : std::format(" (type `{}`)", recv_tn),
+                               decl_tn,
+                               callee_name,
+                               why),
+                   "the receiver must structurally provide every field of the declared self type (`does`: same field "
+                   "names, matching kinds, integer ranges within the declared bounds)");
+  };
+
+  auto find_field
+      = [](const std::optional<std::vector<std::pair<std::string, Const>>>& fields, std::string_view key) -> const Const* {
+    if (!fields) {
+      return nullptr;
+    }
+    for (const auto& [k, v] : *fields) {
+      if (k == key) {
+        return &v;
+      }
+    }
+    return nullptr;
+  };
+
+  for (const auto& [fld, dval] : *decl_fields) {
+    const Const* rv = find_field(recv_fields, fld);
+    if (rv == nullptr && find_field(recv_type_fields, fld) == nullptr) {
+      fail(std::format("missing field `{}`", fld));
+    }
+
+    // Declared field type — absent (untyped field) means presence suffices.
+    const auto dft = try_field_type(std::format("{}.{}", decl_tn, fld));
+    if (!dft || dft->kind == Io_kind::none) {
+      continue;
+    }
+    // Receiver field type: an inline-typed receiver records it on the var
+    // path; a named-typed receiver on its typename path.
+    std::optional<upass::uPass::Field_decl_type> rft;
+    if (!recv_name.empty()) {
+      rft = try_field_type(std::format("{}.{}", recv_name, fld));
+    }
+    if (!rft && !recv_tn.empty()) {
+      rft = try_field_type(std::format("{}.{}", recv_tn, fld));
+    }
+    // Kind: prefer the receiver's declared kind; fall back to the comptime
+    // value's kind. Unknown on both → lenient (presence already verified).
+    Io_kind rkind = rft ? rft->kind : Io_kind::none;
+    if (rkind == Io_kind::none && rv != nullptr) {
+      if (rv->is_string()) {
+        rkind = Io_kind::string;
+      } else if (rv->is_bool()) {
+        rkind = Io_kind::boolean;
+      } else if (rv->is_integer()) {
+        rkind = Io_kind::integer;
+      }
+    }
+    auto kind_name = [](Io_kind k) -> std::string_view {
+      switch (k) {
+        case Io_kind::integer: return "integer";
+        case Io_kind::boolean: return "bool";
+        case Io_kind::string : return "string";
+        case Io_kind::none   : break;
+      }
+      return "untyped";
+    };
+    if (rkind != Io_kind::none && rkind != dft->kind) {
+      fail(std::format("field `{}` kind mismatch (declared {}, receiver has {})", fld, kind_name(dft->kind), kind_name(rkind)));
+    }
+    // Integer range-subset: receiver ⊆ declared, checked bound-by-bound when
+    // both sides are known. An unbounded declared side accepts anything; an
+    // unknown receiver range is lenient (no declared type to compare).
+    if (dft->kind == Io_kind::integer && rft && rft->kind == Io_kind::integer) {
+      if (dft->range_max && rft->range_max && rft->range_max->gt_op(*dft->range_max)->is_known_true()) {
+        fail(std::format("field `{}` range exceeds declared (max {} > {})",
+                         fld,
+                         rft->range_max->to_pyrope(),
+                         dft->range_max->to_pyrope()));
+      }
+      if (dft->range_min && rft->range_min && rft->range_min->lt_op(*dft->range_min)->is_known_true()) {
+        fail(std::format("field `{}` range exceeds declared (min {} < {})",
+                         fld,
+                         rft->range_min->to_pyrope(),
+                         dft->range_min->to_pyrope()));
+      }
+    }
+  }
 }
 
 void uPass_runner::emit_op_with_fold_at(const Lnast_nid& src) {
@@ -966,6 +1109,11 @@ void uPass_runner::emit_inline_sext(const std::string& dst, const std::string& s
 }
 
 bool uPass_runner::try_inline_func_call() {
+  // One-shot ctor marker (see splice_init_call): true only for the
+  // synthesized constructor call itself, never for calls nested inside the
+  // spliced init body.
+  const bool is_ctor_call = ctor_call_pending_;
+  ctor_call_pending_      = false;
   // Cursor at the func_call node. Layout: [dst(ref), callee(ref), actual...].
   if (!lm->has_child()) {
     return false;
@@ -1017,17 +1165,36 @@ bool uPass_runner::try_inline_func_call() {
 
   auto callee = lookup_callee(callee_name);
 
-  // Method dispatch: `obj.method(args)` lowers to `func_call[dst, method, obj,
-  // args…]` — `method` is not itself a registry function, but obj's type
-  // bundle carries it as a function-name field. Resolve method → function via
-  // obj's typename (the next sibling is `obj`, which then naturally binds to
-  // the function's first `self` param as the leading positional actual).
+  // Method dispatch: `obj.method(args)` lowers to `func_call[dst, method,
+  // store(__ufcs_arg, obj), args…]` — `method` is not itself a registry
+  // function, but obj's type bundle carries it as a function-name field.
+  // Resolve method → function via obj's typename (the receiver then naturally
+  // binds to the function's first `self` param as the leading positional
+  // actual). The receiver rides inside the task-1k UFCS marker store; unwrap
+  // it to read the obj ref (a bare ref sibling is the legacy/direct shape).
   if (!callee) {
-    const auto here = lm->save_cursor();
-    if (lm->move_to_sibling() && Lnast_ntype::is_ref(lm->get_raw_ntype())) {
-      const auto tn = try_typename(lm->current_text());
-      if (!tn.empty()) {
-        if (auto bf = try_bundle_fields(tn)) {
+    const auto here     = lm->save_cursor();
+    bool       have_obj = false;
+    if (lm->move_to_sibling()) {
+      if (Lnast_ntype::is_ref(lm->get_raw_ntype())) {
+        have_obj = true;
+      } else if (Lnast_ntype::is_store(lm->get_raw_ntype()) && lm->move_to_child() && lm->current_raw_text() == call_ufcs_arg_marker
+                 && lm->move_to_sibling() && Lnast_ntype::is_ref(lm->get_raw_ntype())) {
+        have_obj = true;  // cursor now on the receiver ref inside the marker store
+      }
+    }
+    if (have_obj) {
+      // Candidate bundles, most-specific first: the receiver's own value
+      // bundle (an untyped tuple literal carries its methods directly —
+      // tup_method), then its declared typename's bundle (the decorator
+      // pattern: methods live on the comptime type tuple).
+      const std::string recv(lm->current_text());
+      const auto        tn = try_typename(recv);
+      for (const auto& bundle_name : {recv, std::string(tn)}) {
+        if (bundle_name.empty() || callee) {
+          continue;
+        }
+        if (auto bf = try_bundle_fields(bundle_name)) {
           for (const auto& [fld, val] : *bf) {
             if (fld == callee_name && val.is_string()) {
               auto fn = val.to_pyrope();
@@ -1050,6 +1217,29 @@ bool uPass_runner::try_inline_func_call() {
   if (!callee) {
     lm->restore_cursor(saved);
     return false;  // not a known comb body → typecast / cell-op / marker path
+  }
+
+  // Task 1k — call-form enforcement: the UFCS form `obj.f(...)` is only valid
+  // when the callee declares `self` (as its first input). The direct form
+  // `f(obj, ...)` carries no marker and stays subject to the normal argument
+  // rules. Checked here — before the inlinable/fuel gates — so a marked call
+  // can never silently fall through to the evaluator path.
+  {
+    const auto here        = lm->save_cursor();
+    bool       ufcs_marked = false;
+    if (lm->move_to_sibling() && Lnast_ntype::is_store(lm->get_raw_ntype()) && lm->move_to_child()) {
+      ufcs_marked = lm->current_raw_text() == call_ufcs_arg_marker;
+    }
+    lm->restore_cursor(here);
+    if (ufcs_marked) {
+      const auto& cio = callee->io_meta();
+      if (cio.inputs.empty() || cio.inputs[0].name != "self") {
+        fcall_arg_fail(call_span,
+                       "fcall-ufcs-no-self",
+                       std::format("`{}` does not declare `self`; it cannot be called as a method", callee_name),
+                       "use the direct call form `f(args...)`, or declare `self` as the first parameter");
+      }
+    }
   }
   // Single gate: only splice callees the runner fully supports today
   // (precomputed in set_function_registry). Everything else — multi-output,
@@ -1114,6 +1304,13 @@ bool uPass_runner::try_inline_func_call() {
       if (a.key == "__ref_arg") {
         a.is_named    = false;
         a.is_ref_pass = true;
+        a.key.clear();
+      }
+      // Task 1k — the UFCS receiver marker is positional too; the receiver
+      // binds to `self` via the has_self branch below (the no-self UFCS error
+      // already fired right after callee resolution).
+      if (a.key == call_ufcs_arg_marker) {
+        a.is_named = false;
         a.key.clear();
       }
       if (!lm->move_to_sibling()) {
@@ -1280,6 +1477,20 @@ bool uPass_runner::try_inline_func_call() {
         bind(0);  // self ← UFCS receiver
         continue;
       }
+      // Constructor call (synthesized — no user-written call site to hold to
+      // the naming rules): construction args bind in tuple order, mirroring
+      // `init(ref y, "hello", 44)` in 07-typesystem.md.
+      if (is_ctor_call) {
+        const auto slot = next_unset(has_self ? 1 : 0);
+        if (slot >= nparams) {
+          fcall_arg_fail(call_span,
+                         "fcall-too-many-args",
+                         std::format("too many constructor arguments for `{}`", callee_name),
+                         "the construction value has more entries than the init overload's parameters");
+        }
+        bind(slot);
+        continue;
+      }
       // Exception 2: a bare variable whose name matches an unset, non-self
       // parameter binds to THAT parameter — so reordered calls like `f(b, a)`
       // bind by name, not position.
@@ -1342,6 +1553,42 @@ bool uPass_runner::try_inline_func_call() {
                      std::format("missing required argument `{}` in call to `{}`", io.inputs[i].name, callee_name),
                      "provide the argument by name");
     }
+  }
+
+  // Task 1k — typed `self:T`: the bound receiver must satisfy `receiver does
+  // T` (structural; both call forms and the tuple-field method dispatch land
+  // here). Untyped self skips the check entirely.
+  if (has_self && param_set[0] && !io.inputs[0].type_name.empty()) {
+    check_self_does(call_span, callee_name, io.inputs[0].type_name, param_val[0]);
+  }
+
+  // Task 1k — ref-actual mutability: a `ref` param (incl. `ref self`, whose
+  // actual is the receiver on either call form) writes back into the caller's
+  // variable, so a `const` or `type` binding can never be the actual. Non-ref
+  // `self` stays callable on a type binding (read-only over the defaults).
+  for (std::size_t i = 0; i < nparams; ++i) {
+    if (!io.inputs[i].is_ref || !param_set[i] || !param_val[i].is_ref()) {
+      continue;
+    }
+    const bool is_self_param = has_self && i == 0;
+    if (is_self_param && is_ctor_call) {
+      continue;  // the constructor is the one legal `ref self` writer of a const receiver
+    }
+    const auto storage = try_decl_storage(param_val[i].get_name());
+    if (storage != upass::uPass::Decl_storage::const_storage && storage != upass::uPass::Decl_storage::type_storage) {
+      continue;
+    }
+    const std::string_view what = storage == upass::uPass::Decl_storage::type_storage ? "type binding" : "const";
+    fcall_arg_fail(call_span,
+                   "fcall-ref-const",
+                   is_self_param
+                       ? std::format("cannot call `ref self` method `{}` on {} `{}`", callee_name, what, param_val[i].get_name())
+                       : std::format("cannot pass {} `{}` to `ref` parameter `{}` of `{}`",
+                                     what,
+                                     param_val[i].get_name(),
+                                     io.inputs[i].name,
+                                     callee_name),
+                   "a `ref` parameter writes back into the caller's variable; use a `mut` value");
   }
 
   // Recursive callees may only be spliced when every actual is a comptime
@@ -1505,6 +1752,286 @@ bool uPass_runner::try_inline_func_call() {
     emit_inline_binding(caller_var, src);
   }
 
+  return true;
+}
+
+// ── init constructor hook ─────────────────────────────────────────────────────
+
+std::vector<std::string> uPass_runner::init_candidates_of(std::string_view tn) {
+  // The type bundle records `init` either as one function-name string or as
+  // an `init.N` overload list (`init = [init_empty, init_v]`). Bundle keys
+  // are canonical dotted leaves, so the list arrives as init.0, init.1, …
+  std::vector<std::string> out;
+  if (tn.empty()) {
+    return out;
+  }
+  auto bf = try_bundle_fields(tn);
+  if (!bf) {
+    return out;
+  }
+  auto unquote = [](std::string s) {
+    if (s.size() >= 2 && s.front() == '\'' && s.back() == '\'') {
+      return s.substr(1, s.size() - 2);
+    }
+    return s;
+  };
+  std::map<int, std::string> ordered;
+  for (const auto& [key, val] : *bf) {
+    if (!val.is_string()) {
+      continue;
+    }
+    if (key == "init") {
+      out.push_back(unquote(val.to_pyrope()));
+    } else if (key.size() > 5 && key.compare(0, 5, "init.") == 0) {
+      const auto idx = key.substr(5);
+      if (!idx.empty() && idx.find_first_not_of("0123456789") == std::string::npos) {
+        ordered[std::stoi(idx)] = unquote(val.to_pyrope());
+      }
+    }
+  }
+  for (auto& [i, fn] : ordered) {
+    out.push_back(std::move(fn));
+  }
+  return out;
+}
+
+std::string uPass_runner::select_init_overload(const std::vector<std::string>& candidates, const std::vector<Ctor_arg>& args) {
+  // Tuple-order priority (07b-structtype.md "Lambda overloading"): first
+  // candidate whose non-self formals fit the args wins. Arity for
+  // positional; full key-coverage for named.
+  for (const auto& fn : candidates) {
+    auto callee = lookup_callee(fn);
+    if (!callee) {
+      continue;
+    }
+    const auto& cio = callee->io_meta();
+    if (cio.inputs.empty() || cio.inputs[0].name != "self") {
+      continue;  // init must be a method (ref self first)
+    }
+    const std::size_t formal = cio.inputs.size() - 1;
+    if (args.size() != formal) {
+      continue;
+    }
+    bool names_ok = true;
+    for (const auto& a : args) {
+      if (a.key.empty()) {
+        continue;
+      }
+      bool found = false;
+      for (std::size_t i = 1; i < cio.inputs.size(); ++i) {
+        if (cio.inputs[i].name == a.key) {
+          found = true;
+          break;
+        }
+      }
+      if (!found) {
+        names_ok = false;
+        break;
+      }
+    }
+    if (names_ok) {
+      return fn;
+    }
+  }
+  return {};
+}
+
+void uPass_runner::splice_init_call(const std::string& receiver, const std::string& tn, const std::string& init_fn,
+                                    const std::vector<Ctor_arg>& args) {
+  ++init_construction_depth_;
+  constructing_vars_.insert(receiver);
+  dispatch_to_passes(&upass::uPass::notify_init_construction_begin);
+
+  // 1) Bind the receiver to the type's defaults (whole-bundle alias; the
+  //    symbol table's COW keeps the type bundle itself immutable). The
+  //    mod-init form has no type-side init and may come typename-less.
+  if (!tn.empty()) {
+    emit_inline_binding(receiver, Lnast_node::create_ref(tn));
+  }
+
+  // 2) Synthesize `init_fn(__ufcs_arg=receiver, args…)` on a scratch tree and
+  //    run it through the normal walk — try_inline_func_call splices it with
+  //    the receiver bound to `ref self` and the write-back restoring the
+  //    constructed value into the receiver.
+  if (!scratch_forest_) {
+    scratch_forest_ = hhds::Forest::create();
+  }
+  auto body = scratch_forest_->create_tree_temp("init-call");
+  auto s    = std::make_shared<Lnast>(body, "init-call");
+  auto root = s->set_root(Lnast_ntype::create_func_call());
+  s->add_child(root, Lnast_node::create_ref(std::format("___ctor{}", ++inline_seq_)));
+  s->add_child(root, Lnast_node::create_ref(init_fn));
+  auto recv = s->add_child(root, Lnast_ntype::create_store());
+  s->add_child(recv, Lnast_node::create_ref(call_ufcs_arg_marker));
+  s->add_child(recv, Lnast_node::create_ref(receiver));
+  for (const auto& a : args) {
+    if (a.key.empty()) {
+      s->add_child(root, a.node);
+    } else {
+      auto st = s->add_child(root, Lnast_ntype::create_store());
+      s->add_child(st, Lnast_node::create_ref(a.key));
+      s->add_child(st, a.node);
+    }
+  }
+  flush_deferred_emits();
+  lm->push_source(s, "", 0);
+  ctor_call_pending_ = true;  // the next try_inline entry is the ctor call
+  process_lnast();
+  ctor_call_pending_ = false;
+  flush_deferred_emits();
+  lm->pop_source();
+
+  dispatch_to_passes(&upass::uPass::notify_init_construction_end);
+  constructing_vars_.erase(receiver);
+  --init_construction_depth_;
+}
+
+bool uPass_runner::try_init_construction() {
+  // Cursor on a 2-child `store(x, V)`. Only the DECLARATION store may
+  // construct (init runs once); pending_ctor_store_ was armed by the
+  // preceding `declare`.
+  const auto saved = lm->save_cursor();
+  if (!lm->move_to_child() || !Lnast_ntype::is_ref(lm->get_raw_ntype())) {
+    lm->restore_cursor(saved);
+    return false;
+  }
+  const std::string x(lm->current_text());
+  if (!lm->move_to_sibling()) {
+    lm->restore_cursor(saved);
+    return false;
+  }
+  const bool        v_is_ref   = Lnast_ntype::is_ref(lm->get_raw_ntype());
+  const bool        v_is_const = Lnast_ntype::is_const(lm->get_raw_ntype());
+  const std::string v_text(lm->current_text());
+  const std::string v_raw(v_is_ref ? std::string(lm->current_raw_text()) : std::string{});
+  lm->restore_cursor(saved);
+
+  if (constructing_vars_.contains(x)) {
+    return false;  // the synthesized defaults-bind / write-back of this very construction
+  }
+  if (x.find('.') != std::string::npos || prp_is_tmp_name(x)) {
+    return false;
+  }
+  if (!pending_ctor_store_.erase(x)) {
+    return false;  // re-assignment, not the declaration initializer
+  }
+  if (!v_is_ref && !v_is_const) {
+    return false;
+  }
+
+  const auto tn = try_typename(x);
+
+  // Mod-init form: `mut y:Mix_tup = mix_tup_init` — the value names a
+  // registry function whose first input is `ref self`. The function IS the
+  // constructor; T needs no `init` field. Requires the typename so a plain
+  // function-value alias (`mut f = somefunc`) stays an alias.
+  if (v_is_ref && !v_raw.empty()) {
+    if (auto fc = lookup_callee(v_raw)) {
+      const auto& cio = fc->io_meta();
+      if (!tn.empty() && !cio.inputs.empty() && cio.inputs[0].name == "self" && cio.inputs[0].is_ref) {
+        splice_init_call(x, tn, v_raw, {});
+        return true;
+      }
+      return false;  // function value, but not a ctor shape — plain alias
+    }
+  }
+
+  const auto candidates = init_candidates_of(tn);
+  if (candidates.empty()) {
+    return false;
+  }
+
+  // Explode V into constructor args. Everything must be comptime-resolvable
+  // (construction is a comptime affair in this walk); otherwise fall back to
+  // the structural store.
+  std::vector<Ctor_arg> args;
+  if (v_is_const) {
+    if (v_text != "nil") {
+      args.push_back(Ctor_arg{.key = {}, .node = Lnast_node::create_const(v_text)});
+    }
+  } else if (auto fv = try_fold_ref(v_text); fv && !fv->is_invalid()) {
+    args.push_back(Ctor_arg{.key = {}, .node = Lnast_node::create_const(fv->to_pyrope())});
+  } else if (auto vb = try_bundle_fields(v_text); vb && !vb->empty()) {
+    for (const auto& [key, val] : *vb) {
+      if (key.find('.') != std::string::npos || val.is_invalid()) {
+        return false;  // nested / non-comptime field — structural fallback
+      }
+      const bool positional = key.find_first_not_of("0123456789") == std::string::npos;
+      args.push_back(Ctor_arg{.key = positional ? std::string{} : key, .node = Lnast_node::create_const(val.to_pyrope())});
+    }
+  } else {
+    return false;  // unresolved value — structural fallback
+  }
+
+  const auto chosen = select_init_overload(candidates, args);
+  if (chosen.empty()) {
+    return false;  // no overload fits (e.g. nil decl without a 0-arg init) — structural
+  }
+
+  splice_init_call(x, tn, chosen, args);
+  return true;
+}
+
+bool uPass_runner::try_construct_call() {
+  // Cursor on `func_call(dst, NAME, args…)` that try_inline_func_call
+  // declined. When NAME is a type bundle carrying `init`, this is the
+  // explicit construction form `x = T(args…)` (07-typesystem.md): bind dst
+  // to T's defaults and splice init with dst as the receiver.
+  const auto saved = lm->save_cursor();
+  if (!lm->move_to_child() || !Lnast_ntype::is_ref(lm->get_raw_ntype())) {
+    lm->restore_cursor(saved);
+    return false;
+  }
+  const std::string dst(lm->current_text());
+  if (!lm->move_to_sibling() || !Lnast_ntype::is_ref(lm->get_raw_ntype())) {
+    lm->restore_cursor(saved);
+    return false;
+  }
+  const std::string tn(lm->current_raw_text());
+  if (lookup_callee(tn)) {
+    lm->restore_cursor(saved);
+    return false;  // a real function — not a type construction
+  }
+  const auto candidates = init_candidates_of(tn);
+  if (candidates.empty()) {
+    lm->restore_cursor(saved);
+    return false;
+  }
+  // Collect args verbatim (refs/consts positional, store(key,val) named).
+  std::vector<Ctor_arg> args;
+  bool                  shape_ok = true;
+  while (lm->move_to_sibling()) {
+    const auto t = lm->get_raw_ntype();
+    if (Lnast_ntype::is_ref(t) || Lnast_ntype::is_const(t)) {
+      args.push_back(Ctor_arg{.key = {}, .node = lm->current_node()});
+    } else if (Lnast_ntype::is_store(t)) {
+      const auto here = lm->save_cursor();
+      if (!lm->move_to_child()) {
+        shape_ok = false;
+        break;
+      }
+      std::string key(lm->current_raw_text());
+      if (!lm->move_to_sibling()) {
+        shape_ok = false;
+        lm->restore_cursor(here);
+        break;
+      }
+      args.push_back(Ctor_arg{.key = std::move(key), .node = lm->current_node()});
+      lm->restore_cursor(here);
+    } else {
+      shape_ok = false;
+      break;
+    }
+  }
+  lm->restore_cursor(saved);
+  if (!shape_ok) {
+    return false;
+  }
+  const auto chosen = select_init_overload(candidates, args);
+  if (chosen.empty()) {
+    return false;
+  }
+  splice_init_call(dst, tn, chosen, args);
   return true;
 }
 
@@ -2145,7 +2672,13 @@ void uPass_runner::process_lnast() {
     // position, not by node type, so they handle a `store` node unchanged.
     case Ntype::Lnast_ntype_store:
       if (lm->current_num_children() <= 2) {
-        process_drop_candidate(&upass::uPass::process_assign, /*fold_all=*/false);
+        // init constructor hook: the DECLARATION store of a typed var whose
+        // type carries `init` (or whose value is a ref-self mod/comb) becomes
+        // a defaults-bind + spliced constructor call instead of a structural
+        // assign. Re-assignment stores never construct (init runs once).
+        if (!try_init_construction()) {
+          process_drop_candidate(&upass::uPass::process_assign, /*fold_all=*/false);
+        }
       } else {
         process_verbatim(&upass::uPass::process_tuple_set);
       }
@@ -2155,7 +2688,19 @@ void uPass_runner::process_lnast() {
     // need (like type_spec/attr_set); emit verbatim, never drop. child0 is the
     // declared var (LHS, not folded); child1 the type subtree; child2 the mode
     // const; optional child3 an init value (folded if a ref).
-    C_OP(declare)
+    case Ntype::Lnast_ntype_declare:
+      // Remember that the NEXT store to this var is its declaration
+      // initializer — the only store where the init constructor may run.
+      if (lm->has_child()) {
+        const auto here = lm->save_cursor();
+        lm->move_to_child();
+        if (Lnast_ntype::is_ref(lm->get_raw_ntype())) {
+          pending_ctor_store_.insert(std::string(lm->current_text()));
+        }
+        lm->restore_cursor(here);
+      }
+      process_verbatim(&upass::uPass::process_declare);
+      break;
 
     // Bitwidth
     A_OP(bit_and)
@@ -2205,7 +2750,7 @@ void uPass_runner::process_lnast() {
     // constprop can fold built-in typecasts (int/uint/uNN/sNN) and cell-ops;
     // anything it declines stays un-folded and the statement is emitted.
     case Ntype::Lnast_ntype_func_call:
-      if (!try_inline_func_call()) {
+      if (!try_inline_func_call() && !try_construct_call()) {
         process_drop_candidate(&upass::uPass::process_func_call, /*fold_all=*/false);
       }
       break;

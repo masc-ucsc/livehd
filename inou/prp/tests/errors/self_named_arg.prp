@@ -1,0 +1,18 @@
+/*
+:name: self_named_arg
+:type: error
+:error: `self` cannot be passed as a named argument
+:help: bound positionally
+*/
+
+// Task 1k — `self` binds only as the first positional actual (the UFCS
+// receiver or the direct form's first argument); `self=` is rejected.
+
+type t1 = (a:u32=nil, b:string="")
+
+comb set_b(ref self:t1) {
+  self.b = "foo"
+}
+
+mut x:t1 = nil
+const r = set_b(self = x) // locate_error_here

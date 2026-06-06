@@ -89,6 +89,10 @@ public:
   // Const can be 0sb? or 123 or string or bool or nil or runtime (0sb? and runtime?)
   const Const&            get_trivial(std::string_view key) const;
   std::shared_ptr<Bundle> get_bundle(std::string_view key) const;
+  // COW variant for in-place mutation: un-shares the varmap slot before
+  // returning it, so writes don't leak into whole-bundle-assignment aliases
+  // (`p2 = p1` stores the same pointer). Bare variable names only.
+  std::shared_ptr<Bundle> get_bundle_for_write(std::string_view var);
 
   void dump() const;
 

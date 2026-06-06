@@ -10,6 +10,7 @@
 #include "absl/container/flat_hash_map.h"
 #include "absl/container/flat_hash_set.h"
 #include "const.hpp"
+#include "diag.hpp"
 #include "lnast_ntype.hpp"
 
 namespace {
@@ -249,6 +250,21 @@ void uPass_ssa::run(const std::shared_ptr<Lnast>& lnast) {
 
     // Composite tuple type → recurse on each inner assign with a dotted prefix.
     if (!type_nid.is_invalid() && Lnast_ntype::is_tuple_add(lnast->get_type(type_nid))) {
+      // Task 1k — an INLINE tuple type on `self` would flatten it into dotted
+      // leaves (`self.a`, `self.b`) and break the inliner's `has_self`
+      // detection (io.inputs[0].name == "self"). Only named self types are
+      // supported; reject with a clean error instead of mis-binding later.
+      if (collect_is_ref && prefix.empty() && leaf_name == "self") {
+        const auto msg = std::format("`self` cannot use an inline tuple type in `{}`", lnast->get_top_module_name());
+        livehd::diag::sink().emit(livehd::diag::Diagnostic{.severity = livehd::diag::Severity::error,
+                                                           .code     = "self-inline-type",
+                                                           .category = "type",
+                                                           .pass     = "upass.ssa",
+                                                           .message  = msg,
+                                                           .span     = {.file = std::string(lnast->get_source())},
+                                                           .hint     = "declare the tuple as a named type and use `self:Name`"});
+        throw std::runtime_error(msg);
+      }
       for (auto inner : lnast->children(type_nid)) {
         flatten_assign(inner, full, collect_is_ref, out, smin, smax);
       }
@@ -260,8 +276,15 @@ void uPass_ssa::run(const std::shared_ptr<Lnast>& lnast) {
         && lnast->get_name(rhs_nid) == "ref") {
       is_ref = true;
     }
+    // Task 1k — a NAMED type annotation (`self:t1`, `x:Point`) arrives as a
+    // `ref` type child (prp2lnast emit_type_expr). Record the typename so the
+    // inliner's typed-self does-check can resolve the declared fields.
+    std::string type_name;
+    if (!type_nid.is_invalid() && Lnast_ntype::is_ref(lnast->get_type(type_nid))) {
+      type_name = std::string(lnast->get_name(type_nid));
+    }
     auto ti = type_info_from(lnast, type_nid);
-    out.push_back({full, ti.bits, ti.is_signed, is_ref, ti.kind, smin, smax});
+    out.push_back({full, ti.bits, ti.is_signed, is_ref, ti.kind, smin, smax, std::move(type_name)});
   };
 
   if (!in_tup_nid.is_invalid()) {

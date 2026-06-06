@@ -1,0 +1,36 @@
+/*
+:name: self_typed
+:type: comptime
+:verifier_pass: 6
+:verifier_fail: 0
+*/
+
+// Task 1k — typed self: `receiver does declared` (structural, never typename
+// equality). Exact type, superset receiver, and a narrower integer field all
+// pass; both call forms (UFCS + direct positional) bind the same way.
+
+type t1 = (a:u32=nil, b:string="")
+type t3 = (a:u32=nil, b:string="", c:bool=false)  // superset of t1
+type tn = (a:u8=nil, b:string="")                 // a:u8 range ⊆ a:u32
+
+comb set_b(ref self:t1) {
+  self.b = "foo"
+}
+
+mut x:t1 = nil
+mut z:t3 = nil
+mut w:tn = nil
+
+x.set_b()        // exact type
+z.set_b()        // superset receiver (extra field c) is fine
+w.set_b()        // narrower integer field range is fine
+cassert(x.b == "foo")
+cassert(z.b == "foo")
+cassert(w.b == "foo")
+
+x.b = "reset"
+set_b(x)         // direct positional call form binds self the same way
+cassert(x.b == "foo")
+
+cassert(z.c == false)  // untouched sibling field
+cassert(w.a == nil)    // untouched sibling field

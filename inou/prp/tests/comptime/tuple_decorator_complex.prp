@@ -5,7 +5,7 @@
 :verifier_fail: 0
 */
 
-comb set_xy(ref self, x:int, y:int) {
+comb init_xy(ref self, x:int, y:int) {
   self._x = x
   self._y = y
 }
@@ -18,9 +18,9 @@ comb get_xy(self, idx:string) -> (r) {
   }
 }
 
-comptime const Point = (_x = 0, _y = 0, setter = set_xy, getter = get_xy)
+comptime const Point = (_x = 0, _y = 0, init = init_xy, get = get_xy)
 
-const p:Point = (1, 2)
+const p:Point = (1, 2)   // init runs at construction
 
-cassert(p['x'] == 1 and p['y'] == 2)
-cassert(p.x == 1 and p.y == 2)
+cassert(p.get('x') == 1)
+cassert(p.get('y') == 2)

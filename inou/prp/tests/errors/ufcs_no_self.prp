@@ -1,0 +1,15 @@
+/*
+:name: ufcs_no_self
+:type: error
+:error: does not declare `self`.*cannot be called as a method
+:help: declare `self` as the first parameter
+*/
+
+// Task 1k — call-form enforcement: the UFCS form `obj.f(...)` is only valid
+// when `f` declares `self`. A self-less comb must use the direct form.
+
+comb plain(a:u8) -> (r:u8) { r = a + 1 }
+
+mut v:u8 = 3
+const x = v.plain() // locate_error_here
+cassert(x == 4)

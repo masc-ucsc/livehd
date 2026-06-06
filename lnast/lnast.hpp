@@ -111,6 +111,10 @@ struct Lnast_io_entry {
   // (LG pass1 narrows by sigma later, never here).
   int32_t     stages_min = 0;
   int32_t     stages_max = 0;
+  // Task 1k — declared NAMED type of the param (`self:t1` → "t1"); empty when
+  // untyped or annotated with a primitive type. The inliner's typed-self
+  // `does`-check keys off inputs[0].type_name.
+  std::string type_name;
 };
 struct Lnast_tree_io {
   std::vector<Lnast_io_entry> inputs;

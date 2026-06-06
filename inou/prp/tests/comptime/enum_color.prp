@@ -7,7 +7,7 @@
 
 const Rgb = (
   mut c:u24,
-  comb setter(ref self, c) { self.c = c }
+  comb init(ref self, c) { self.c = c }
 )
 
 const Color = enum(
@@ -20,16 +20,16 @@ const Color = enum(
 enum Color2:Rgb = (
   Yellow = 0xff_ff_00,
   Red = 0xff____0000,
-  Green = Rgb(0x00FF00)
+  Green = Rgb(0x00FF00),
   Blue = Rgb(0x0000Ff)
 )
 
-myt x:Color2 = Color2.Green
+mut x:Color2 = Color2.Green
 mut y:Color = Color.Red
 
 cassert( x == Color2.Green and y == Color.Red)
 if y == Color.Red {
-  const msg = ("c1:{y} c2:{y.c}\n", y, y.c)  // prints: c1:Color.Red c2:0xff0000
+  const msg = "c1:{y} c2:0x{y.c:X}"  // c1:Color.Red c2:0xFF0000
   cassert(msg == "c1:Color.Red c2:0xFF0000")
 
   x = Color.Red

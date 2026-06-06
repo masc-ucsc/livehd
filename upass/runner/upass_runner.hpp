@@ -141,6 +141,21 @@ protected:
   // Folded (start, end_inclusive) bounds of a `range` tmp (comptime for-loop
   // iterable). First pass that provides wins. See uPass::provide_range.
   std::optional<std::pair<Const, Const>>                    try_range(std::string_view name);
+  // Declared kind + range of a dotted field path (`t1.a`). First pass that
+  // provides wins. See uPass::provide_field_type (task 1k).
+  std::optional<upass::uPass::Field_decl_type>              try_field_type(std::string_view name);
+  // Declared storage class (mut/const/reg/type) of a variable. First pass
+  // that provides a non-unknown answer wins. See uPass::provide_decl_storage
+  // (task 1k ref-actual mutability).
+  upass::uPass::Decl_storage                                try_decl_storage(std::string_view name);
+
+  // Task 1k — typed-self `does`-check: the receiver bound to `self:T` must
+  // structurally satisfy T (per declared field: same-name receiver field
+  // present, scalar kinds match, integer range receiver ⊆ declared). Extra
+  // receiver fields are fine. Emits a fatal `fcall-self-does` diagnostic on
+  // the first failing field.
+  void check_self_does(const livehd::diag::Span& span, std::string_view callee_name, std::string_view decl_tn,
+                       const Lnast_node& receiver);
 
   // Emits either the folded value of `name` (when any pass returns a valid
   // Const) or the original ref node otherwise. Used by both emit_op_with_fold
@@ -194,6 +209,57 @@ protected:
   // or call shapes 1i does not yet handle). The read cursor is left on the
   // func_call node on every path. See 1i in TODO_livehd.md.
   bool try_inline_func_call();
+
+  // ── init constructor hook ───────────────────────────────────────────────
+  // One named argument of a synthesized constructor call (positional when
+  // `key` is empty).
+  struct Ctor_arg {
+    std::string key;
+    Lnast_node  node{Lnast_node::create_invalid()};
+  };
+  // Called from process_lnast's 2-child `store` case BEFORE the normal
+  // assign dispatch. Recognizes the construction forms on `store(x, V)`:
+  //   * x has a declared typename T whose bundle carries an `init` field
+  //     (one function-name string, or an `init.N` overload list) — the
+  //     typed-decl (`mut x:T = value`) and nil-decl (`mut x:T = nil`) forms.
+  //   * V is itself a registry function whose first input is `ref self` —
+  //     the mod-init form (`mut y:Mix_tup = mix_tup_init`).
+  // On a match: binds x to T's defaults, splices `init(ref x, args…)`
+  // (args exploded from V), consumes the store, and returns true. Returns
+  // false (caller proceeds structurally) when there is no init, the value
+  // isn't comptime-resolvable, or no overload matches the argument count.
+  bool try_init_construction();
+  // Same recognition for the explicit call form `x = T(args…)`: called from
+  // the func_call case when try_inline_func_call declined. The callee name
+  // is not a registry function but a type bundle with `init`.
+  bool try_construct_call();
+  // Shared splice: emit `receiver = <defaults of tn>` (when tn non-empty),
+  // then synthesize and walk `init_fn(__ufcs_arg=receiver, args…)` inside an
+  // init-construction window (attributes tally paused, ref-self-on-const
+  // admitted, construction args bind positionally in tuple order).
+  void splice_init_call(const std::string& receiver, const std::string& tn, const std::string& init_fn,
+                        const std::vector<Ctor_arg>& args);
+  // Selects the first init overload (tuple order) whose non-self formals
+  // match the args (by count; named keys must all exist). Empty when none.
+  std::string select_init_overload(const std::vector<std::string>& candidates, const std::vector<Ctor_arg>& args);
+  // Collects the init candidates recorded on type bundle `tn`: the single
+  // `init` function-name string or the `init.N` overload list, tuple order.
+  std::vector<std::string> init_candidates_of(std::string_view tn);
+  // >0 while a synthesized constructor call is being spliced.
+  int init_construction_depth_ = 0;
+  // Vars whose `declare` has been walked but whose declaration store hasn't
+  // arrived yet — the only store where construction may run.
+  absl::flat_hash_set<std::string> pending_ctor_store_;
+  // Receivers currently mid-construction: their synthesized defaults-bind /
+  // ref-self write-back stores must not re-enter try_init_construction
+  // (nested constructions of OTHER vars inside an init body stay allowed).
+  absl::flat_hash_set<std::string> constructing_vars_;
+  // One-shot: armed right before walking the synthesized ctor fcall so the
+  // FIRST try_inline entry (the ctor itself, not calls nested in its body)
+  // relaxes the arg-naming rules (construction args bind in tuple order) and
+  // admits a const receiver on `ref self` (the constructor is the one legal
+  // writer of a const).
+  bool ctor_call_pending_ = false;
 
   // Resolves a (possibly unqualified) callee name to a registry body. Tries
   // the bare name, then the unique "<module>.<name>" suffix match.

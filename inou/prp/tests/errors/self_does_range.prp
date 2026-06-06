@@ -1,0 +1,20 @@
+/*
+:name: self_does_range
+:type: error
+:error: does not satisfy.*field `a` range exceeds declared
+:help: integer ranges within the declared bounds
+*/
+
+// Task 1k — typed self range-subset: a same-name integer field whose declared
+// range is NOT contained in the self type's declared range is rejected
+// (u32 receiver field on a u8 declared field).
+
+type t1 = (a:u8=nil, b:string="")
+type tw = (a:u32=nil, b:string="")
+
+comb set_b(ref self:t1) {
+  self.b = "foo"
+}
+
+mut w:tw = nil
+w.set_b() // locate_error_here

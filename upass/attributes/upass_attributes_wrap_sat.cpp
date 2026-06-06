@@ -154,8 +154,10 @@ void uPass_attributes::record_assign(std::string_view lhs, bool rhs_is_nil) {
   // first-write coercion in on_assign_like gates on `!was_assigned`).
   assigned_once.emplace(lhs);
 
-  // Const single-bind enforcement.
-  if (ti->decl == Decl_kind::const_kind) {
+  // Const single-bind enforcement. Skipped inside an init-construction
+  // window: the runner's synthesized constructor stores (defaults bind +
+  // ref-self write-back) are one logical binding, not user re-binds.
+  if (ti->decl == Decl_kind::const_kind && init_construction_depth_ == 0) {
     auto [it, inserted] = const_assign_count.try_emplace(std::string{lhs}, 0);
     int& count          = it->second;
     ++count;

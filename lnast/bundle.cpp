@@ -310,6 +310,15 @@ void Bundle::add_int(std::string_view key, const std::shared_ptr<Bundle const> t
   if (tup->is_scalar()) {
     I(!has_trivial(key));  // It was deleted before
     key_map.insert_or_assign(std::string(key), Entry(tup->is_immutable(), tup->get_trivial()));
+    // A scalar carrier may still hold attribute leaves (e.g. the parse-time
+    // `__enumentry` enum-identity tag). Copy them under the key so
+    // get_bundle(key) round-trips them — is_scalar() ignores attrs, so the
+    // scalar fast path above would otherwise silently drop them.
+    for (const auto& ent : tup->key_map) {
+      if (is_attribute(ent.first)) {
+        key_map.insert_or_assign(absl::StrCat(key, ".", ent.first), ent.second);
+      }
+    }
     return;
   }
 

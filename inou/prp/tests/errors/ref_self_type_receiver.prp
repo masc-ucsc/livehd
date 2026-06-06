@@ -1,0 +1,18 @@
+/*
+:name: ref_self_type_receiver
+:type: error
+:error: cannot call `ref self` method.*on type binding
+:help: writes back into the caller's variable
+*/
+
+// Task 1k — calling a `ref self` method directly on a `type` binding is a
+// const-to-ref error (non-ref `self` methods ARE callable on a type binding,
+// read-only over the defaults).
+
+type t1 = (a:u32=nil, b:string="")
+
+comb set_b(ref self:t1) {
+  self.b = "foo"
+}
+
+t1.set_b() // locate_error_here

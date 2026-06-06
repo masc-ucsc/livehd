@@ -23,6 +23,10 @@
 extern "C" TSLanguage* tree_sitter_pyrope();
 
 static constexpr std::string_view call_ref_arg_marker = "__ref_arg";
+// Task 1k — marks the receiver actual of a UFCS method call `obj.method(...)`
+// so the runner can reject UFCS onto a self-less callee (the direct call form
+// `method(obj, ...)` lowers without it). Positional, like __ref_arg.
+static constexpr std::string_view call_ufcs_arg_marker = "__ufcs_arg";
 
 namespace {
 std::string slurp_file(std::string_view filename) {
@@ -2776,7 +2780,11 @@ std::vector<Prp2lnast::Call_arg> Prp2lnast::collect_call_args(TSNode arg_tuple) 
 
 void Prp2lnast::add_call_args_to_fcall(const Lnast_nid& fcall_idx, const std::vector<Call_arg>& call_args) {
   for (const auto& arg : call_args) {
-    if (arg.is_ref) {
+    if (arg.is_ufcs) {
+      auto aidx = lnast->add_child(fcall_idx, Lnast_ntype::create_store());
+      lnast->add_child(aidx, Lnast_node::create_ref(call_ufcs_arg_marker));
+      lnast->add_child(aidx, arg.value);
+    } else if (arg.is_ref) {
       auto aidx = lnast->add_child(fcall_idx, Lnast_ntype::create_store());
       lnast->add_child(aidx, Lnast_node::create_ref(call_ref_arg_marker));
       lnast->add_child(aidx, arg.value);
@@ -2806,7 +2814,9 @@ void Prp2lnast::process_function_call_statement(TSNode n) {
   add_call_args_to_fcall(idx, collect_call_args(args));
 }
 
-void Prp2lnast::process_lambda_statement(TSNode n) {
+void Prp2lnast::process_lambda_statement(TSNode n) { process_lambda_statement_named(n, {}); }
+
+void Prp2lnast::process_lambda_statement_named(TSNode n, std::string_view hoist_name) {
   TSNode func_type_node = child_by_field(n, "func_type");
   TSNode name_node      = child_by_field(n, "name");
   // function_definition_decl is a named child that isn't directly a field
@@ -2855,7 +2865,9 @@ void Prp2lnast::process_lambda_statement(TSNode n) {
     }
   }
 
-  Lnast_node lambda_ref = ts_node_is_null(name_node) ? builder.mint_tmp_ref() : Lnast_node::create_ref(get_text(name_node));
+  Lnast_node lambda_ref = !hoist_name.empty()        ? Lnast_node::create_ref(hoist_name)
+                          : ts_node_is_null(name_node) ? builder.mint_tmp_ref()
+                                                       : Lnast_node::create_ref(get_text(name_node));
 
   auto fd_idx = builder.add_child(Lnast_ntype::create_func_def());
   lnast->add_child(fd_idx, lambda_ref);
@@ -3232,20 +3244,187 @@ std::pair<int64_t, int64_t> Prp2lnast::parse_pipe_depth(TSNode pipe_lambda_node)
                "write `pipe[3]`, `pipe[2..=5]`, `pipe[1..<4]`, or bare `pipe`");
 }
 
+Lnast_node Prp2lnast::lower_enum_def(std::string_view enum_name, TSNode enum_level_type, const std::vector<Enum_entry>& entries) {
+  // Payload type text of a type_cast / expression_type / bare identifier.
+  auto type_text_of = [&](TSNode tc) -> std::string {
+    if (ts_node_is_null(tc)) {
+      return {};
+    }
+    if (TSNode ty = child_by_field(tc, "type"); !ts_node_is_null(ty)) {
+      tc = ty;
+    }
+    return std::string(trim(get_text(tc)));
+  };
+  const std::string level_pt = type_text_of(enum_level_type);
+
+  // Ordinal mode (payload-less): one-hot when NO entry is explicit, else a
+  // traditional sequence (explicit value resets the counter) — 03-bundle.md.
+  bool any_explicit = false;
+  for (const auto& e : entries) {
+    if (e.has_value && !e.has_type && level_pt.empty()) {
+      any_explicit = true;
+      break;
+    }
+  }
+  // Literal decimal parse for explicit ordinal values (underscores allowed).
+  auto parse_ordinal = [&](TSNode v) -> std::optional<int64_t> {
+    if (ts_node_is_null(v)) {
+      return std::nullopt;
+    }
+    std::string txt(trim(get_text(v)));
+    std::erase(txt, '_');
+    try {
+      size_t  pos = 0;
+      int64_t r   = std::stoll(txt, &pos);
+      if (pos == txt.size()) {
+        return r;
+      }
+    } catch (...) {
+    }
+    return std::nullopt;
+  };
+
+  std::vector<std::pair<std::string, Lnast_node>> fields;
+  fields.reserve(entries.size());
+  int64_t seq_next = 0;
+  for (std::size_t i = 0; i < entries.size(); ++i) {
+    const auto&       e    = entries[i];
+    const std::string pt   = e.has_type ? type_text_of(e.type_node) : level_pt;
+    const std::string full = absl::StrCat(enum_name, ".", e.name);
+    Lnast_node        carrier{Lnast_node::create_invalid()};
+
+    if (!pt.empty() && e.has_value) {
+      // Typed payload entry (`Yellow:Rgb = 0xff_ff00`): construct `Rgb(v)`.
+      // The runner's init-construction hook splices the payload type's init.
+      auto val  = expr_to_node(e.value_node);
+      auto fidx = builder.add_child(Lnast_ntype::create_func_call());
+      carrier   = builder.mint_tmp_ref();
+      lnast->add_child(fidx, carrier);
+      lnast->add_child(fidx, Lnast_node::create_ref(pt));
+      lnast->add_child(fidx, val);
+    } else if (e.has_value) {
+      if (auto ov = parse_ordinal(e.value_node); ov.has_value() && level_pt.empty() && !e.has_type) {
+        // Explicit ordinal literal (`b=5`) — resets the sequence counter.
+        seq_next  = *ov + 1;
+        auto tidx = builder.add_child(Lnast_ntype::create_tuple_add());
+        carrier   = builder.mint_tmp_ref();
+        lnast->add_child(tidx, carrier);
+        lnast->add_child(tidx, Lnast_node::create_const(std::to_string(*ov)));
+      } else {
+        // Expression value (`Green = Rgb(0x00FF00)`, `a = c`): the lowered
+        // expr is the carrier when it is already a bundle-producing ref;
+        // otherwise wrap the scalar into a one-slot bundle.
+        auto val = expr_to_node(e.value_node);
+        if (val.is_ref()) {
+          carrier = val;
+        } else {
+          auto tidx = builder.add_child(Lnast_ntype::create_tuple_add());
+          carrier   = builder.mint_tmp_ref();
+          lnast->add_child(tidx, carrier);
+          lnast->add_child(tidx, val);
+        }
+      }
+    } else {
+      // Auto ordinal: one-hot bit i, or the running sequence value.
+      const int64_t v = any_explicit ? seq_next : (int64_t(1) << i);
+      seq_next        = v + 1;
+      auto tidx       = builder.add_child(Lnast_ntype::create_tuple_add());
+      carrier         = builder.mint_tmp_ref();
+      lnast->add_child(tidx, carrier);
+      lnast->add_child(tidx, Lnast_node::create_const(std::to_string(v)));
+    }
+
+    // Identity tag: `carrier.__enumentry = 'NAME.entry'` (a 3-child store —
+    // the `__`-prefixed key lands as a bundle ATTR leaf, so value compares
+    // ignore it while enum-aware `in`/`string()` read it).
+    auto sidx = builder.add_child(Lnast_ntype::create_store());
+    lnast->add_child(sidx, carrier);
+    lnast->add_child(sidx, Lnast_node::create_const("__enumentry"));
+    lnast->add_child(sidx, Lnast_node::create_const(absl::StrCat("'", full, "'")));
+
+    fields.emplace_back(e.name, carrier);
+  }
+
+  // The enum-type bundle: entry name → carrier.
+  auto bidx = builder.add_child(Lnast_ntype::create_tuple_add());
+  auto bref = builder.mint_tmp_ref();
+  lnast->add_child(bidx, bref);
+  for (const auto& [k, v] : fields) {
+    auto aidx = lnast->add_child(bidx, Lnast_ntype::create_store());
+    lnast->add_child(aidx, Lnast_node::create_ref(k));
+    lnast->add_child(aidx, v);
+  }
+  return bref;
+}
+
 void Prp2lnast::process_enum_assignment(TSNode n) {
   TSNode name = child_by_field(n, "name");
   if (ts_node_is_null(name)) {
     return;
   }
-  Lnast_node ref = Lnast_node::create_ref(get_text(name));
-  // LNAST ntype predates an `enum_add` primitive; reuse `tuple_add` plus an
-  // `attr_set` marking the value as an enum.
-  auto       idx = builder.add_child(Lnast_ntype::create_tuple_add());
-  lnast->add_child(idx, ref);
-  auto aidx = builder.add_child(Lnast_ntype::create_attr_set());
-  lnast->add_child(aidx, ref);
-  lnast->add_child(aidx, Lnast_node::create_const("type"));
-  lnast->add_child(aidx, Lnast_node::create_const("enum"));
+  TSNode etype  = child_by_field(n, "type");    // `enum Color2:Rgb = (…)` payload type
+  TSNode values = child_by_field(n, "values");  // the entries tuple
+
+  std::vector<Enum_entry> entries;
+  if (!ts_node_is_null(values)) {
+    for (uint32_t i = 0, nnc = ts_node_named_child_count(values); i < nnc; ++i) {
+      TSNode           c = ts_node_named_child(values, i);
+      std::string_view t(ts_node_type(c));
+      if (t == "comment") {
+        continue;
+      }
+      Enum_entry e;
+      if (t == "identifier") {
+        e.name = trim(get_text(c));
+      } else if (t == "typed_identifier") {
+        TSNode id = child_by_field(c, "identifier");
+        e.name    = trim(get_text(ts_node_is_null(id) ? c : id));
+        if (TSNode tc = child_by_field(c, "type"); !ts_node_is_null(tc)) {
+          e.type_node = tc;
+          e.has_type  = true;
+        }
+      } else if (t == "assignment") {
+        TSNode lv = child_by_field(c, "lvalue");
+        TSNode rv = child_by_field(c, "rvalue");
+        if (ts_node_is_null(lv)) {
+          continue;
+        }
+        if (std::string_view(ts_node_type(lv)) == "typed_identifier") {
+          TSNode id = child_by_field(lv, "identifier");
+          e.name    = trim(get_text(ts_node_is_null(id) ? lv : id));
+          if (TSNode tc = child_by_field(lv, "type"); !ts_node_is_null(tc)) {
+            e.type_node = tc;
+            e.has_type  = true;
+          }
+        } else {
+          e.name = trim(get_text(lv));
+        }
+        if (!ts_node_is_null(rv)) {
+          e.value_node = rv;
+          e.has_value  = true;
+        }
+      } else {
+        continue;  // spreads / exotic items: not lowered yet
+      }
+      if (!e.name.empty()) {
+        entries.push_back(std::move(e));
+      }
+    }
+  }
+
+  auto bref = lower_enum_def(get_text(name), etype, entries);
+
+  // Mirror `type Foo = (…)`: declare with mode `type`, then bind the bundle —
+  // so `mut x:Color2 = …` resolves the typename and `Color2.Green` folds.
+  auto didx = builder.add_child(Lnast_ntype::create_declare());
+  attach_loc(didx, n);
+  lnast->add_child(didx, Lnast_node::create_ref(get_text(name)));
+  lnast->add_child(didx, Lnast_ntype::create_prim_type_none());
+  lnast->add_child(didx, Lnast_node::create_const("type"));
+  auto sidx = builder.add_child(Lnast_ntype::create_store());
+  attach_loc(sidx, n);
+  lnast->add_child(sidx, Lnast_node::create_ref(get_text(name)));
+  lnast->add_child(sidx, bref);
 }
 
 void Prp2lnast::process_type_statement(TSNode n) {
@@ -3360,6 +3539,50 @@ Lnast_node Prp2lnast::expr_to_node(TSNode n) {
   }
   if (t == "expression_item") {
     return binary_expr_to_node(n);
+  }
+  if (t == "enum_definition") {
+    // `const Color = enum(Yellow:Rgb = …, Green = Rgb(…))`. The entry-name
+    // prefix ("Color.Yellow") comes from the enclosing assignment's lvalue.
+    std::string ename;
+    for (TSNode p = ts_node_parent(n); !ts_node_is_null(p); p = ts_node_parent(p)) {
+      if (std::string_view(ts_node_type(p)) != "assignment") {
+        continue;
+      }
+      TSNode lv = child_by_field(p, "lvalue");
+      if (!ts_node_is_null(lv)) {
+        TSNode id = std::string_view(ts_node_type(lv)) == "typed_identifier" ? child_by_field(lv, "identifier") : TSNode{};
+        ename     = trim(get_text(ts_node_is_null(id) ? lv : id));
+      }
+      break;
+    }
+    // Entries ride in the `input` arg_list as lambda-style pairs: a
+    // `typed_identifier` (name + optional payload type) optionally followed
+    // by a `definition`-tagged value expression.
+    std::vector<Enum_entry> entries;
+    if (TSNode args = child_by_field(n, "input"); !ts_node_is_null(args)) {
+      for (uint32_t i = 0, nc = child_count(args); i < nc; ++i) {
+        TSNode           c     = child(args, i);
+        const char*      fname = ts_node_field_name_for_child(args, i);
+        std::string_view ct(ts_node_type(c));
+        if (ct == "comment") {
+          continue;
+        }
+        if (ct == "typed_identifier") {
+          Enum_entry e;
+          TSNode     id = child_by_field(c, "identifier");
+          e.name        = trim(get_text(ts_node_is_null(id) ? c : id));
+          if (TSNode tc = child_by_field(c, "type"); !ts_node_is_null(tc)) {
+            e.type_node = tc;
+            e.has_type  = true;
+          }
+          entries.push_back(std::move(e));
+        } else if (fname && std::string_view(fname) == "definition" && ct != "=" && !entries.empty()) {
+          entries.back().value_node = c;
+          entries.back().has_value  = true;
+        }
+      }
+    }
+    return lower_enum_def(ename, TSNode{}, entries);
   }
   if (t == "constant") {
     // `constant` wraps one of: integer_literal, bool_literal, unknown_literal,
@@ -4959,11 +5182,19 @@ Lnast_node Prp2lnast::match_expr_to_node(TSNode n, bool need_result) {
         pending_is_else = false;
       } else if (have_pending) {
         const bool use_case     = (pending_op == "case" || pending_op == "!case");
-        const bool negate       = (pending_op == "!case" || pending_op == "!=");
+        // Structural / membership arm operators get their dedicated ops —
+        // `does Person { … }` must lower to func_does (a superset receiver
+        // satisfies `does` but never `eq`), `in (…)` to func_in.
+        const bool use_does     = (pending_op == "does" || pending_op == "!does");
+        const bool use_in       = (pending_op == "in" || pending_op == "!in");
+        const bool negate       = (pending_op == "!case" || pending_op == "!=" || pending_op == "!does" || pending_op == "!in");
         // Emit `<compare> tmp = subject_ref rhs` and return the tmp ref,
         // wrapping in log_not when the operator is the negated form.
         auto       emit_compare = [&](const Lnast_node& rhs) {
-          auto compare_ntype = use_case ? Lnast_ntype::create_func_case() : Lnast_ntype::create_eq();
+          auto compare_ntype = use_case   ? Lnast_ntype::create_func_case()
+                               : use_does ? Lnast_ntype::create_func_does()
+                               : use_in   ? Lnast_ntype::create_func_in()
+                                          : Lnast_ntype::create_eq();
           auto idx           = builder.add_child(compare_ntype);
           auto ref           = builder.mint_tmp_ref();
           lnast->add_child(idx, ref);
@@ -5519,7 +5750,8 @@ Lnast_node Prp2lnast::function_call_expr_to_node(TSNode n) {
   auto call_args = collect_call_args(arg);
   if (has_receiver) {
     Call_arg receiver_arg;
-    receiver_arg.value = receiver_ref;
+    receiver_arg.value   = receiver_ref;
+    receiver_arg.is_ufcs = true;  // task 1k — UFCS receiver marker (no self ⇒ compile error)
     call_args.insert(call_args.begin(), receiver_arg);
   }
 
@@ -5553,6 +5785,11 @@ Lnast_node Prp2lnast::tuple_to_node(TSNode n, bool /*is_square*/) {
     // `tuple_get` + `type_spec` pair so `t.a.[bits]` resolves.
     TSNode      type_cast_node{};
     bool        has_type_cast{false};
+    // Field declared with an explicit `mut` marker (`const t = (mut a:u4=1)`).
+    // Lowered after the tuple_add as a `declare(tg_tmp, prim_type_none, mut)`
+    // so the attributes pass records Decl_kind::mut_kind on the field path —
+    // writes through a mut field of a const tuple are legal, not a rebind.
+    bool        is_mut{false};
   };
   std::vector<Item> items;
   items.reserve(nnc);
@@ -5590,6 +5827,15 @@ Lnast_node Prp2lnast::tuple_to_node(TSNode n, bool /*is_square*/) {
     if (t == "assignment") {
       Item it;
       it.is_assign = true;
+      // Per-field storage marker: `mut a:u4=1` carries a `decl` field with a
+      // mut_decl storage child. Captured so the post-tuple_add decoration
+      // loop can record the field's mutability (see Item::is_mut).
+      if (TSNode dn = child_by_field(c, "decl"); !ts_node_is_null(dn)) {
+        TSNode storage = child_by_field(dn, "storage");
+        if (!ts_node_is_null(storage) && std::string_view(ts_node_type(storage)) == "mut_decl") {
+          it.is_mut = true;
+        }
+      }
       // A bundle-literal field may only be introduced with plain `=`. A
       // compound operator (`++=`, `+=`, …) here is a compile error: declare
       // the field with `=`, then mutate it with `name OP= …` as a separate
@@ -5763,6 +6009,29 @@ Lnast_node Prp2lnast::tuple_to_node(TSNode n, bool /*is_square*/) {
       TSNode id = child_by_field(c, "identifier");
       it.value  = ts_node_is_null(id) ? builder.mint_tmp_ref() : identifier_to_node(id, true);
       items.push_back(std::move(it));
+    } else if (t == "lambda" && !ts_node_is_null(child_by_field(c, "name"))) {
+      // In-tuple method definition (`comb call(ref self, a) -> (r) { … }`).
+      // Hoist the lambda to a top-level func_def under a file-unique name and
+      // bind it as a named field holding the function ref — the exact shape
+      // of the decorator pattern (`call = docall`), so constprop records the
+      // qualified function name and the runner's method dispatch resolves it
+      // through the receiver's bundle.
+      TSNode      name_node = child_by_field(c, "name");
+      std::string mname(trim(get_text(name_node)));
+      std::string uniq = std::format("{}__t{}", mname, ++hoisted_lambda_count_);
+      process_lambda_statement_named(c, uniq);
+      Item it;
+      it.is_assign  = true;
+      it.assign_key = mname;
+      it.value      = Lnast_node::create_ref(uniq);
+      if (!seen_field_keys.insert(it.assign_key).second) {
+        report_error(c,
+                     "duplicate-tuple-field",
+                     "name",
+                     std::format("duplicate field `{}` in bundle literal (each field name must be unique)", it.assign_key),
+                     "rename or remove the duplicate method");
+      }
+      items.push_back(std::move(it));
     } else {
       Item it;
       it.value = expr_to_node(c);
@@ -5835,7 +6104,7 @@ Lnast_node Prp2lnast::tuple_to_node(TSNode n, bool /*is_square*/) {
     // (`type_spec` is in `parent_writes_pos0` so lnastfmt's unwritten-tmp check
     // accepts the tmp once the producing `tuple_get` is DCE'd.)
     for (const auto& it : items) {
-      if ((!it.has_attr_list && !it.has_type_cast) || !it.is_assign) {
+      if ((!it.has_attr_list && !it.has_type_cast && !it.is_mut) || !it.is_assign) {
         continue;
       }
       auto tg_idx = builder.add_child(Lnast_ntype::create_tuple_get());
@@ -5843,6 +6112,15 @@ Lnast_node Prp2lnast::tuple_to_node(TSNode n, bool /*is_square*/) {
       lnast->add_child(tg_idx, tg_ref);
       lnast->add_child(tg_idx, ref);
       lnast->add_child(tg_idx, Lnast_node::create_const(it.assign_key));
+      if (it.is_mut) {
+        // Record the field's `mut` marker on the tuple_get tmp (alias-chased
+        // by attributes' lookup_type_info onto `t.field`): a write through a
+        // mut field of a `const` tuple is legal, not a const rebind.
+        auto d_idx = builder.add_child(Lnast_ntype::create_declare());
+        lnast->add_child(d_idx, tg_ref);
+        lnast->add_child(d_idx, Lnast_ntype::create_prim_type_none());
+        lnast->add_child(d_idx, Lnast_node::create_const("mut"));
+      }
       if (it.has_type_cast) {
         TSNode ty = child_by_field(it.type_cast_node, "type");
         if (!ts_node_is_null(ty)) {

@@ -23,6 +23,8 @@
 static upass::uPass_plugin cprop("constprop", upass::uPass_wrapper<uPass_constprop>::get_upass);
 
 static constexpr std::string_view call_ref_arg_marker = "__ref_arg";
+// Task 1k — positional UFCS-receiver marker (see prp2lnast / upass_runner).
+static constexpr std::string_view call_ufcs_arg_marker = "__ufcs_arg";
 
 // Canonical-key shape detection after the bundle_sorted refactor. Defined
 // here (forward) so process_assign can use it for shape-preserving merge.
@@ -112,6 +114,37 @@ static std::string bits_to_grouped(std::string_view bits, int bpd, bool upper) {
 // non-negative values, e.g. 16 → "10000"/"20"/"10"); d (or empty) is signed
 // decimal. Strings/nil keep their stringify_one rendering. Unsupported specs
 // raise a compile error rather than silently mis-rendering.
+// Enum identity tag of a bundle, or nullptr. The parse-time `__enumentry`
+// attr (lower_enum_def) interns as "__enumentry" on a named-payload carrier
+// but as "0.__enumentry" once a scalar carrier round-trips through
+// Bundle::set/get_bundle — accept both spellings.
+static const Const* enum_identity_of(const std::shared_ptr<Bundle const>& b) {
+  if (!b) {
+    return nullptr;
+  }
+  for (const auto& [k, ep] : b->get_attrs()) {
+    if (Bundle::get_last_level(k) != "__enumentry") {
+      continue;
+    }
+    // Top-level identity only. Scalar-carrier canonicalization may intern the
+    // tag under one or more positional layers ("0.__enumentry",
+    // "0.0.__enumentry"); an ENTRY tag of an enum-TYPE bundle
+    // ("Red.__enumentry") has a named prefix and is NOT this bundle's own.
+    auto             prefix     = Bundle::get_all_but_last_level(k);
+    bool             zeros_only = true;
+    std::string_view rest{prefix};
+    while (!rest.empty() && zeros_only) {
+      auto seg   = Bundle::get_first_level(rest);
+      zeros_only = (seg == "0");
+      rest       = Bundle::get_all_but_first_level(rest);
+    }
+    if (zeros_only && !ep->trivial.is_invalid()) {
+      return &ep->trivial;
+    }
+  }
+  return nullptr;
+}
+
 static std::string format_interp_value(const Const& v, std::string_view spec) {
   if (v.is_nil()) {
     return "nil";
@@ -243,7 +276,12 @@ void uPass_constprop::process_assign() {
       // be declared via `type T=(…)` or `const T=(…)` — both leave T's bundle in
       // the symbol table. Example:
       //   const v_type=(x:u3=nil, b:string="foo"); mut c:v_type=(x=3) → c={x:3, b:"foo"}.
-      if (!existing || existing->non_attr_entries().empty()) {
+      // An ENUM VALUE rhs (carries the parse-time __enumentry identity attr)
+      // binds whole — never merged over the named type's defaults: for
+      // `mut y:Color = Color.Red` the named type IS the enum-type bundle
+      // (all entries), and overlaying the value onto it would turn y into
+      // the whole enum table.
+      if ((!existing || existing->non_attr_entries().empty()) && enum_identity_of(rhs_bundle) == nullptr) {
         if (auto nt = decl_named_type_.find(std::string(lhs_text)); nt != decl_named_type_.end()) {
           auto base = st.get_bundle(nt->second);
           if (base && base.get() != rhs_bundle.get() && !base->non_attr_entries().empty()) {
@@ -636,18 +674,29 @@ void uPass_constprop::process_sra() {
   process_binary_passthrough([](Const n1, Const n2) -> Const { return *n1.sra_op(n2); });
 }
 
+// log_* results are bool-TYPED in Pyrope; Dlop's bitwise ops return integer
+// payloads (true == ~0 == -1). Re-type a known result so downstream
+// bool-sensitive folds (`int(true) == 1`, bool-typed bundle fields) see a
+// real bool instead of `-1`. Unknown/invalid/nil results pass through.
+static Const log_result_as_bool(const Const& r) {
+  if (r.is_invalid() || r.is_nil() || r.has_unknowns()) {
+    return r;
+  }
+  return *Dlop::from_pyrope(r.is_known_true() ? "true" : "false");
+}
+
 void uPass_constprop::process_log_and() {
   // Pyrope's type rule (future type-check): `and` operands must already be
   // bool — non-bool sources are required to write `foo != 0 and bar != 0`.
   // With bool operands, bitwise AND equals logical AND, so we just call
   // Dlop::and_op and let it deal with unknowns.
-  process_binary_passthrough([](Const n1, Const n2) -> Const { return *n1.and_op(n2); });
+  process_binary_passthrough([](Const n1, Const n2) -> Const { return log_result_as_bool(*n1.and_op(n2)); });
 }
 
 void uPass_constprop::process_log_or() {
   // Same rationale as process_log_and: assume bool operands; bitwise OR over
   // bool values equals logical OR.
-  process_binary_passthrough([](Const n1, Const n2) -> Const { return *n1.or_op(n2); });
+  process_binary_passthrough([](Const n1, Const n2) -> Const { return log_result_as_bool(*n1.or_op(n2)); });
 }
 
 void uPass_constprop::process_log_not() {
@@ -659,7 +708,7 @@ void uPass_constprop::process_log_not() {
     if (r.is_nil()) {
       return;
     }
-    r = r.not_op();
+    r = log_result_as_bool(*r.not_op());
   });
 }
 
@@ -704,6 +753,12 @@ static std::optional<Const> compare_bundles_eq(const std::shared_ptr<Bundle cons
     char worst = 't';
     for (const auto& [k, ep] : src->non_attr_entries()) {
       if (ep->trivial.is_invalid()) {
+        // Both sides agreeing a slot is undefined (e.g. the value-less
+        // `mut c:u24` field of a payload type) is a match on that key, not
+        // an undecidable — payload-enum compares would otherwise never fold.
+        if (other->has_trivial(k) && other->get_trivial(k).is_invalid()) {
+          continue;
+        }
         worst = '?';
         continue;
       }
@@ -960,6 +1015,12 @@ void uPass_constprop::process_eq_ne_impl() {
   auto                 bundle_count_non_attr
       = [](const std::shared_ptr<Bundle const>& b) { return static_cast<int>(b->non_attr_entries().size()); };
   if (a.bundle && b.bundle) {
+    // Same bundle object (whole-bundle alias, e.g. `mut y:Color = Color.Red`)
+    // is equal by identity — even when entries carry undefined slots.
+    if (a.bundle.get() == b.bundle.get()) {
+      store_trivial(var, *Dlop::create_bool(!Negate));
+      return;
+    }
     if (auto eq = compare_bundles_eq(a.bundle, b.bundle); eq.has_value()) {
       // Tri-state: nil propagates verbatim (the
       // structural-match-with-value-mismatch case discharges as pass via
@@ -1470,6 +1531,31 @@ void uPass_constprop::fold_in(const std::string& dst) {
     return;  // need both sides as known bundles
   }
 
+  // Enum membership: `r in Mammal` — enum VALUES carry a parse-time
+  // `__enumentry` identity attr ('Mammal.rat'), and the enum-TYPE bundle's
+  // entries each carry theirs as a dotted attr leaf ('rat.__enumentry').
+  // Membership is identity-based, never raw-value-based: one-hot encodings
+  // collide across enums (Bird.parroket == Mammal.rat == 1), so a value
+  // compare would claim cross-enum membership (enum_hier).
+  if (const auto* lid_p = enum_identity_of(ba); lid_p != nullptr) {
+    const Const& lid   = *lid_p;
+    bool         found = false;
+    for (const auto& [k, ep] : bb->get_attrs()) {
+      if (Bundle::get_last_level(k) != "__enumentry") {
+        continue;
+      }
+      if (Bundle::get_first_level(k) == k) {
+        continue;  // the rhs bundle's own top-level tag, not a member entry's
+      }
+      if (!ep->trivial.is_invalid() && ep->trivial.same_repr(lid)) {
+        found = true;
+        break;
+      }
+    }
+    store_trivial(dst, *Dlop::create_bool(found));
+    return;
+  }
+
   auto lhs_flat = collect_first_level(ba);
   auto rhs_flat = collect_first_level(bb);
 
@@ -1806,7 +1892,9 @@ std::optional<std::vector<uPass_constprop::Call_actual>> uPass_constprop::collec
       }
       Call_actual actual;
       const auto  key = current_text();
-      actual.is_named = key != call_ref_arg_marker;
+      // __ref_arg (pass-by-ref) and __ufcs_arg (task 1k UFCS receiver) are
+      // POSITIONAL markers, not named arguments.
+      actual.is_named = key != call_ref_arg_marker && key != call_ufcs_arg_marker;
       if (actual.is_named) {
         actual.name = std::string(key);
       }
@@ -2414,7 +2502,19 @@ void uPass_constprop::process_func_call() {
   }
   args.reserve(actuals->size());
   for (const auto& actual : *actuals) {
-    if (actual.is_named || actual.value.is_invalid()) {
+    if (actual.is_named) {
+      move_to_parent();
+      return;
+    }
+    // An enum-value actual stringifies as its identity name ("Color.Red"),
+    // never its raw encoding — `string(E3.l1)` and `"{y}"` interpolation.
+    if (kind == Cast::to_string && !actual.var_name.empty()) {
+      if (const auto* id = enum_identity_of(st.get_bundle(actual.var_name)); id != nullptr) {
+        args.push_back(*id);
+        continue;
+      }
+    }
+    if (actual.value.is_invalid()) {
       move_to_parent();
       return;
     }
@@ -2462,6 +2562,9 @@ void uPass_constprop::process_func_call() {
     } else if (kind == Cast::to_int) {
       if (v.is_string()) {
         v = Dlop::nil();
+      } else if (v.is_bool() && !v.has_unknowns()) {
+        // `int(true)` is 1, never the bool's all-ones payload (~0 == -1).
+        v = *Dlop::from_pyrope(v.is_known_true() ? "1" : "0");
       }
       result = v;
     } else {
@@ -2686,6 +2789,20 @@ void uPass_constprop::process_tuple_get() {
   const bool named_field_absent
       = src_bundle && !src_bundle->is_empty() && !src_bundle->is_scalar() && !src_bundle->has_top_named(first_seg);
 
+  // Enum entry read (`Mammal.rat`, `Color.Red`): alias the CARRIER bundle —
+  // its `__enumentry` identity attr is what enum-aware `in` / `string()` /
+  // interpolation read. The trivial path below would copy only the raw
+  // encoding and lose the identity (one-hot values collide across enums).
+  if (st.has_bundle(key)) {
+    if (auto sub_bundle = st.get_bundle(key); enum_identity_of(sub_bundle) != nullptr) {
+      bool local_changed = !st.has_bundle(dst) || st.get_bundle(dst) != sub_bundle;
+      if (local_changed) {
+        st.set(dst, sub_bundle);
+      }
+      return;
+    }
+  }
+
   // Propagate trivial value if available; fall back to bundle propagation.
   if (st.has_trivial(key)) {
     store_trivial(dst, st.get_trivial(key));
@@ -2808,6 +2925,21 @@ void uPass_constprop::process_tuple_set() {
     return;
   }
 
+  // `__enumentry` is the parse-time enum identity tag (prp2lnast's
+  // lower_enum_def): land it as a real attr leaf on the carrier bundle so
+  // enum-aware `in` / `string()` / interpolation read it back. All OTHER
+  // `__attr` writes stay skipped below (they belong to the attributes pass).
+  if (path_and_val.size() == 2 && path_and_val[0].text == "__enumentry" && !path_and_val[1].is_ref) {
+    auto bundle = tuple_var.find('.') == std::string::npos ? st.get_bundle_for_write(tuple_var) : st.get_bundle(tuple_var);
+    if (!bundle) {
+      bundle = std::make_shared<Bundle>(tuple_var);
+      st.set(tuple_var, bundle);
+    }
+    bundle->set("__enumentry", *Dlop::from_pyrope(path_and_val[1].text));
+    move_to_parent();
+    return;
+  }
+
   // Skip attribute assignments (e.g. x["__bits"] = 2).
   // Any field component that begins with "__" and whose third char is not '_'
   // is a Pyrope bitwidth/signed attribute — not a propagatable value.
@@ -2875,8 +3007,10 @@ void uPass_constprop::process_tuple_set() {
   if (use_named_positional) {
     // Place the entry into tuple_var's bundle under the bare name. Named
     // and unnamed slots live in separate key spaces after the bundle_sorted
-    // refactor — no position prefix to compute or reuse.
-    auto bundle = st.get_bundle(tuple_var);
+    // refactor — no position prefix to compute or reuse. Mutated in place
+    // below, so take the COW (un-shared) slot — a plain get_bundle would
+    // leak the write into whole-bundle-assignment aliases (`p2 = p1`).
+    auto bundle = tuple_var.find('.') == std::string::npos ? st.get_bundle_for_write(tuple_var) : st.get_bundle(tuple_var);
     if (!bundle) {
       bundle = std::make_shared<Bundle>(tuple_var);
       st.set(tuple_var, bundle);

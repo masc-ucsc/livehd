@@ -144,29 +144,39 @@ TEST_F(Symbol_table_test, ordered_check) {
   // bundle), so is_ordered("foo") is vacuously true.
   EXPECT_TRUE(bundle->is_ordered("foo"));
 
+  // Copy-on-write field stores (Pyrope value semantics — `p2 = p1` copies):
+  // a dotted st.set un-shares the varmap slot when the bundle pointer is
+  // held elsewhere, so a previously fetched shared_ptr no longer observes
+  // later ST writes. Re-fetch after each mutation batch.
   st.set("foo.bar", Dlop::create_integer(4));  // replace stored "bar"
+  bundle = st.get_bundle("foo");
   EXPECT_DLOP_EQ(bundle->get_trivial("bar"), Dlop::create_integer(4));
   // Bundle now mixes named ("bar", "xxx") and unnamed ("2", "99") — no
   // longer a pure positional list, so is_ordered("") is false.
   EXPECT_FALSE(bundle->is_ordered(""));
 
   st.set("foo.nothere", Dlop::create_integer(4));
+  bundle = st.get_bundle("foo");
   EXPECT_FALSE(bundle->is_ordered(""));
 
   // is_ordered("nothere") inspects the "nothere" sub-bundle's first-segment
   // pos; a leaf entry has no sub-positions so it's vacuously true.
   EXPECT_TRUE(bundle->is_ordered("nothere"));
   st.set("foo.nothere.2", Dlop::create_integer(4));
+  bundle = st.get_bundle("foo");
   EXPECT_TRUE(bundle->is_ordered("nothere"));
   st.set("foo.nothere.x", Dlop::create_integer(4));
+  bundle = st.get_bundle("foo");
   EXPECT_FALSE(bundle->is_ordered("nothere"));
 
   st.set("foo.bar.0.xx", Dlop::create_integer(10));
   st.set("foo.bar.1.yy", Dlop::create_integer(11));
   st.set("foo.bar.2.xx", Dlop::create_integer(12));
   st.set("foo.bar.8.zz", Dlop::create_integer(13));
+  bundle = st.get_bundle("foo");
   EXPECT_TRUE(bundle->is_ordered("bar"));
   st.set("foo.bar.NOT.zz", Dlop::create_integer(13));
+  bundle = st.get_bundle("foo");
   EXPECT_FALSE(bundle->is_ordered("bar"));
 
   st.leave_scope();

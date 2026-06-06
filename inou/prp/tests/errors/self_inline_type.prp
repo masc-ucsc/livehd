@@ -1,0 +1,17 @@
+/*
+:name: self_inline_type
+:type: error
+:error: `self` cannot use an inline tuple type
+:help: named type
+*/
+
+// Task 1k — only NAMED self types are supported: an inline tuple type on
+// `self` would flatten it into dotted io leaves and break method binding.
+
+comb set_b(ref self:(a:u32=nil, b:string="")) {
+  self.b = "foo"
+}
+
+mut x = (a=1, b="")
+x.set_b()
+cassert(x.b == "foo")

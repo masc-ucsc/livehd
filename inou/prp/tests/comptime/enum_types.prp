@@ -1,15 +1,15 @@
 /*
 :name: enum_types
 :type: parsing lnast comptime
-:verifier_pass: 1
+:verifier_pass: 4
 :verifier_fail: 0
 */
 
-comb robot_charge() -> (s:string) { s = "robot charge" }
-comb person_consume() -> (s:string) { s = "person consume" }
-comb cyborg_consume() -> (s:string) { s = "cyborg consume" }
-comb cyborg_charge() -> (s:string) { s = "cyborg charge" }
-comb potato_consume() -> (s:string) { s = "potato consume" }
+comb robot_charge(self) -> (s:string) { s = "robot charge" }
+comb person_consume(self) -> (s:string) { s = "person consume" }
+comb cyborg_consume(self) -> (s:string) { s = "cyborg consume" }
+comb cyborg_charge(self) -> (s:string) { s = "cyborg charge" }
+comb potato_consume(self) -> (s:string) { s = "potato consume" }
 
 comptime const Robot = (charge = robot_charge)
 comptime const Person = (consume = person_consume)
@@ -24,3 +24,10 @@ comb nourish(x) -> (r:string) {
     else        { cassert(false); "" }
   }
 }
+
+const r = nourish(Robot)
+cputs("r:{r}")
+cassert(r == "robot charge")
+
+const p = nourish(Person)
+cassert(p == "person consume")

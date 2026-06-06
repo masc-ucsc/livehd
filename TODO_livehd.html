@@ -220,16 +220,14 @@ Group 1 entries; downstream Groups treat them as Group 1 dependencies.</p>
   <strong>secondary neovim</strong>. Reuses the shared <code>tree-sitter-pyrope</code> grammar and the
   prp2lnast name maps. Ephemeral, per-buffer, no <code>lgdb</code>. <strong>Scope = the semantic
   server only</strong>; the tree-sitter grammar/neovim queries and the <code>prpfmt</code> formatter
-  (incl. <code>textDocument/formatting</code>) are a separate project. <strong>Phase A landed
-  2026-06-02</strong> (lib <code>lsp/</code>) — lifecycle + diagnostics over stdio, served by
-  <code>lhd lsp</code> (2026-06-04; formerly <code>lgshell --lsp</code>).
-  Phases B–E (hover/nav/workspace) remain; spans sharpen with <a class="xref" href="TODO_livehd.html#item-1f">1f</a>/<a class="xref" href="TODO_livehd.html#item-3f">3f</a> —
+  (incl. <code>textDocument/formatting</code>) are a separate project.
+  Remaining: Phases B–E (hover/nav/workspace); spans sharpen with <a class="xref" href="TODO_livehd.html#item-1f">1f</a>/<a class="xref" href="TODO_livehd.html#item-3f">3f</a> —
   <code>docs/contracts/pyrope_lsp.md</code>.</li>
 </ul>
 <h2 id="group-2-depends-on-group-1">Group 2 — depends on Group 1</h2>
 <ul>
 <li><strong id="item-2y-agent" class="item-id">2y-agent</strong> <code>lhd</code> agent layer + kernel follow-ups
-  (renamed from 1y-agent; demoted from Group 1-complex — the landed 1y-bazel
+  (renamed from 1y-agent; demoted from Group 1-complex — the <code>lhd</code>
   kernel already covers every test/build flow, so none of this is critical).
   <strong>Agent <code>@tag</code> workspace</strong>: <code>setup/run/status/list/describe</code>, <code>@tag</code>
   directories, persistent <code>lhd.toml</code> config, append-only JSONL run logs,
@@ -237,8 +235,8 @@ Group 1 entries; downstream Groups treat them as Group 1 dependencies.</p>
   <code>run &lt;step&gt; @tag</code> desugars to a kernel call (resolve the tag's
   inputs/config/workdir → run the pure step → append the result + advance
   <code>latest</code>). Optimized for LLM coding agents. — <code>docs/contracts/future_cli.md</code>.
-  <p><strong>Deferred kernel follow-ups</strong> (the pending remainder of the landed
-  1y-bazel; pick up alongside or before the agent layer):</p>
+  <p><strong>Deferred kernel follow-ups</strong> (pick up alongside or before the agent
+  layer):</p>
   <ul>
   <li><strong>Multi-<code>lg:</code> linking</strong>: gids are library-scoped inside
     <code>body.bin</code>, so linking needs a gid-remapping linker (today: aggregate
@@ -268,9 +266,8 @@ Group 1 entries; downstream Groups treat them as Group 1 dependencies.</p>
 <li><strong id="item-3d" class="item-id">3d</strong> New upass <code>lnast_to_slop</code> (parallel to <code>lnast_to_lgraph</code>) producing
   executable slop.</li>
 <li><strong id="item-3f" class="item-id">3f</strong> Unified compile error/warning surface from <code>inou/prp</code>, upass,
-  lgraph passes (+ tests for expected diagnostics). <strong>Foundation landed</strong> (the
-  former 1z <code>core/diag</code> task: record schema + emitter + sink + JSONL + text
-  renderer, spans <code>null</code>); this entry finishes full-fidelity <code>source_id</code> spans
+  lgraph passes (+ tests for expected diagnostics). On top of the
+  <code>core/diag</code> foundation, this entry finishes full-fidelity <code>source_id</code> spans
   (via <a class="xref" href="TODO_livehd.html#item-1f">1f</a>),
   lgraph-pass coverage, line/col resolution, and the CLI roll-up. Design:
   <code>docs/contracts/diagnostics.md</code>.</li>

@@ -99,9 +99,9 @@ N. Each badge links to the full entry. <strong>HHDS has no open goals.</strong><
 <h3 id="pending-pyrope">Pyrope — <a href="TODO_prp.html">TODO_prp.html</a></h3>
 <ul>
 <li><em>Group 1:</em><ul>
-<li><a class="xref" href="TODO_prp.html#item-1q">1q</a> Pyrope <code>pipe</code> construct — Phase 1: declaration → flopped outputs (Flop depth = cell parameter, no replication; LN inserts, LG checks). <strong>1q-A/B/C/E landed 2026-06-05</strong> (stages node + depth parse; <code>pipe_min</code>/<code>pipe_max</code> pins + cgen shifter; pipe upass + tolg first-Flop + implicit clock; equiv/error tests LEC-green under bazel). Remaining: <a class="xref" href="TODO_prp.html#item-1q-D">1q-D</a> LG pass1 σ/Tarjan check + narrowing.</li>
+<li><a class="xref" href="TODO_prp.html#item-1q">1q</a> Pyrope <code>pipe</code> construct — Phase 1: declaration → flopped outputs. Remaining: <a class="xref" href="TODO_prp.html#item-1q-D">1q-D</a> LG pass1 σ/Tarjan check + narrowing.</li>
 <li><a class="xref" href="TODO_prp.html#item-1m">1m</a> Pyrope <code>import</code> statement — <strong>deferred</strong> (substantial new infra: grammar, lowering, file-wrapper trees, <code>find_tree</code> resolution).</li>
-<li><a class="xref" href="TODO_prp.html#item-1k">1k</a> <code>self</code>/<code>ref self</code> in tuple methods — contract agreed 2026-06-05 (<code>docs/contracts/task_1k_plan.md</code>): typed-self receiver-<code>does</code>-declared check, both call forms when <code>self</code> declared / no-self ⇒ no UFCS, <code>mut</code>-receiver enforcement, doc fixes. Phases: <a class="xref" href="TODO_prp.html#item-1k-A">1k-A</a> io_meta <code>type_name</code> plumb, <a class="xref" href="TODO_prp.html#item-1k-B">1k-B</a> inliner <code>does</code>-check, <a class="xref" href="TODO_prp.html#item-1k-C">1k-C</a> UFCS marker + no-self error, <a class="xref" href="TODO_prp.html#item-1k-D">1k-D</a> ref-receiver mutability, <a class="xref" href="TODO_prp.html#item-1k-E">1k-E</a> tests, <a class="xref" href="TODO_prp.html#item-1k-F">1k-F</a> <code>../docs</code> fixes; decorator-init implicit setter dispatch on <code>x:Tup = (…)</code> stays as the trailing piece.</li>
+<li><a class="xref" href="TODO_prp.html#item-1k">1k</a> <code>self</code>/<code>ref self</code> in tuple methods — remaining: in-tuple inline-lambda extraction (<code>prp-tup_method</code>), comptime <code>mod</code>-init folding (<code>prp-mix_tup</code>), and the decorator-init implicit setter dispatch on <code>x:Tup = (…)</code> trailing piece.</li>
 </ul></li>
 <li><em>Group 2:</em><ul>
 <li><a class="xref" href="TODO_prp.html#item-2p">2p</a> Source-derived SSA / tmp names (<code>foo_l42_a</code>, drop <code>___N</code>).</li>
@@ -125,7 +125,7 @@ N. Each badge links to the full entry. <strong>HHDS has no open goals.</strong><
 <h3 id="pending-verilog">Verilog — <a href="TODO_verilog.html">TODO_verilog.html</a></h3>
 <ul>
 <li><em>Group 2:</em><ul>
-<li><a class="xref" href="TODO_verilog.html#item-2d">2d</a> Finish the LNAST→LGraph synthesis closure — <strong>partial</strong> (combinational milestone landed); remaining: registers/<code>Flop</code>, <code>Memory</code>, high-level op lowering, <code>uif</code> chains, <code>Sub</code> submodule calls, attributes.</li>
+<li><a class="xref" href="TODO_verilog.html#item-2d">2d</a> Finish the LNAST→LGraph synthesis closure — remaining: registers/<code>Flop</code>, <code>Memory</code>, high-level op lowering, <code>uif</code> chains, <code>Sub</code> submodule calls, attributes.</li>
 </ul></li>
 <li><em>Group 3:</em><ul>
 <li><a class="xref" href="TODO_verilog.html#item-3b">3b</a> Migrate <code>inou.slang</code> to the shared LNAST structures; keep adding Verilog equiv tests.</li>
@@ -142,15 +142,15 @@ N. Each badge links to the full entry. <strong>HHDS has no open goals.</strong><
 </ul></li>
 <li><em>Group 1-complex:</em><ul>
 <li><a class="xref" href="TODO_livehd.html#item-1f">1f</a> Source-map indirection (LOC propagation: canonical map, per-cell index, multi-loc aliases).</li>
-<li><a class="xref" href="TODO_livehd.html#item-1n">1n</a> Pyrope LSP server — <strong>Phase A landed</strong> (lifecycle + diagnostics); Phases B–E (hover/nav/workspace) remain.</li>
+<li><a class="xref" href="TODO_livehd.html#item-1n">1n</a> Pyrope LSP server — Phases B–E (hover/nav/workspace) remain.</li>
 </ul></li>
 <li><em>Group 2:</em><ul>
-<li><a class="xref" href="TODO_livehd.html#item-2y-agent">2y-agent</a> <code>lhd</code> agent <code>@tag</code> workspace (<code>setup/run/status/list/describe</code>, TOML, JSONL) + the deferred kernel follow-ups (multi-<code>lg:</code> linker, per-function units, graphviz/lgraph-dump emits, import-resolver depfile, liberty/opentimer verb). The 1y-bazel kernel itself is <strong>done</strong> — every flow drives <code>lhd</code>.</li>
+<li><a class="xref" href="TODO_livehd.html#item-2y-agent">2y-agent</a> <code>lhd</code> agent <code>@tag</code> workspace (<code>setup/run/status/list/describe</code>, TOML, JSONL) + the deferred kernel follow-ups (multi-<code>lg:</code> linker, per-function units, graphviz/lgraph-dump emits, import-resolver depfile, liberty/opentimer verb).</li>
 </ul></li>
 <li><em>Group 3:</em><ul>
 <li><a class="xref" href="TODO_livehd.html#item-3c">3c</a> <code>Partition</code> descriptor as a tree-level HHDS attribute.</li>
 <li><a class="xref" href="TODO_livehd.html#item-3d">3d</a> New upass <code>lnast_to_slop</code> producing executable slop.</li>
-<li><a class="xref" href="TODO_livehd.html#item-3f">3f</a> Unified compile error/warning surface — <strong>foundation landed</strong>; remaining: full-fidelity spans, lgraph-pass coverage, CLI roll-up.</li>
+<li><a class="xref" href="TODO_livehd.html#item-3f">3f</a> Unified compile error/warning surface — remaining: full-fidelity spans, lgraph-pass coverage, CLI roll-up.</li>
 <li><a class="xref" href="TODO_livehd.html#item-3h">3h</a> <code>Bitwidth_range</code> → <code>Const min/max</code> (drop <code>int+overflow</code>).</li>
 </ul></li>
 <li><em>Group 4:</em><ul>

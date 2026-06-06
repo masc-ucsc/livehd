@@ -417,6 +417,8 @@ void uPass_attributes::process_attr_set() {
         kind = Decl_kind::reg_kind;
       } else if (value_text == "await") {
         kind = Decl_kind::await_kind;
+      } else if (value_text == "type") {
+        kind = Decl_kind::type_kind;  // task 1k — see Decl_kind::type_kind
       }
       if (kind != Decl_kind::unknown) {
         ti.decl = kind;

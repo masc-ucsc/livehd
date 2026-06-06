@@ -14,9 +14,9 @@ cassert(a != b)
 cassert(a == X.l0)
 cassert(b == X.l1)
 
-cassert(X.l0 == 0sb001)
-cassert(X.l1 == 0sb010)
-cassert(X.l2 == 0sb100)
+cassert(X.l0 == 0ub001)
+cassert(X.l1 == 0ub010)
+cassert(X.l2 == 0ub100)
 
 enum V3 = (a, b=5, c)
 cassert(V3.a == 0)

@@ -160,7 +160,19 @@ protected:
   // marker-fold helpers that walk const/ref siblings.
   std::shared_ptr<Bundle const> current_ref_bundle() const {
     if (is_type(Lnast_ntype::Lnast_ntype_ref)) {
-      return st.get_bundle(current_text());
+      if (auto b = st.get_bundle(current_text()); b) {
+        return b;
+      }
+      // Inline-frame fallback: inside a spliced body every ref is tag-renamed
+      // (`Person` → `inlN_Person`), but a global comptime binding — e.g. the
+      // type tuple of `x does Person` (enum_types) — lives in the ST under
+      // its raw name. Reads a lambda body may not see were already rejected
+      // at parse time (semacheck lambda-visibility), so the raw lookup only
+      // resolves legal lexical globals.
+      const auto raw = lm->current_raw_text();
+      if (raw != current_text()) {
+        return st.get_bundle(raw);
+      }
     }
     return nullptr;
   }
