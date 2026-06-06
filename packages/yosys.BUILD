@@ -236,6 +236,7 @@ cc_library(
         # "@edu_berkeley_abc//:abc-lib",
         "@abc",
         #"@edu_berkeley_abc//:abc-lib",
+        "@flex//:headers",
         "@libffi//:libffi",
         #"@tk_tcl_tcl//:tcl",
     ],
