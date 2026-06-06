@@ -185,44 +185,6 @@ cross-file dependencies stay visible.</p>
    sub-class of import that bypasses the second-phase path).</li>
 </ol>
 </li>
-<li><strong id="item-1k" class="item-id">1k</strong> <code>self</code> / <code>ref self</code> in tuple methods — remaining
-  pieces (the core contract — typed-self <code>does</code>-check, call-form +
-  mut-receiver enforcement, tests, docs — is in
-  <code>docs/contracts/task_1k_plan.md</code>):<ul>
-<li><strong>In-tuple inline-lambda extraction</strong> (<code>prp-tup_method</code> fails):
-    a lambda defined INSIDE a tuple literal
-    (<code>mut p = (…, comb call(ref self, a) -&gt; (result) {…})</code>) is never
-    extracted — <code>tuple_to_node</code>'s generic else branch lowers it to raw
-    const text, the field name is lost, and <code>p.call(…)</code> cannot resolve.
-    Needs func_extract integration from expression context + a
-    <code>call = 'fname'</code> string-field store (the shape the method-dispatch
-    path already consumes).</li>
-<li><strong>Comptime <code>mod</code>-init folding</strong> (<code>prp-mix_tup</code> fails):
-    <code>mut y:Mix_tup = mix_tup_init</code> (mod instantiation as the
-    initializer) does not comptime-fold the receiver fields, so
-    <code>cassert(y.flag …)</code> stays unresolved.</li>
-<li><strong>Trailing piece — decorator-init semantics</strong> (kept from the
-    earlier 1k scope; excluded from the 2026-06-05 contract):
-    <code>prp-setter_complex</code> and <code>prp-tuple_decorator_complex</code> still
-    fail. When <code>x:Tup = (v="")</code> runs and <code>Tup</code> carries a
-    <code>setter</code> field, the setter should fire implicitly at instance
-    construction with the init values as named actuals. No existing
-    infra hooks the tuple-typed init to the setter dispatch. Hint:
-    agent-decorator scaffolded a <code>pending_setter_init</code> map +
-    <code>maybe_fire_setter_init</code> declaration in
-    <code>upass/constprop/upass_constprop.hpp</code> (2026-05-27 session;
-    header-only orphan reverted). Real landing needs the .cpp side:<ul>
-<li>Tuple-init detection in <code>process_assignment</code> when the RHS is
-  a tuple literal and the LHS has a <code>:Tup</code> annotation.</li>
-<li><code>pending_setter_init</code> bookkeeping when the <code>:Type</code> annotation
-  lands (record the variable + its declared type); clear at
-  the first assign so a later <code>x = …</code> doesn't refire.</li>
-<li>Dispatch through the existing method-call inliner with the
-  init-tuple's named fields rebound to the setter's named args.</li>
-</ul>
-</li>
-</ul>
-</li>
 </ul>
 <h2 id="group-2-depends-on-group-1">Group 2 — depends on Group 1</h2>
 <ul>
@@ -274,20 +236,6 @@ cross-file dependencies stay visible.</p>
 <li>
 <p>Reads from the typesystem (<code>upass/upass.md §2 Typesystem</code>):
     <code>bits</code>/<code>min</code>/<code>max</code>/<code>sign</code> are what the ABI carries.</p>
-</li>
-<li>
-<p><strong id="item-2l" class="item-id">2l</strong> Enum support: parse <code>enum X = (l0, l1, l2)</code> and <code>enum X:Base = (...)</code>,
-  lower to LNAST as comptime-tagged tuples; value-assigned variants (<code>b=5</code>,
-  auto-increment after), the <code>in</code> operator (<code>x in Enum</code>), typed associated
-  values, and the inline-decl form (<code>const Color = enum(...)</code>).</p>
-</li>
-<li>Basic enums are nearly independent, but complex enums depend on
-    <a class="xref" href="TODO_prp.html#item-1k">1k</a> (<code>self</code> / <code>ref self</code>) since associated tuples carry
-    setters/methods — so this lands in Group 2.</li>
-<li>
-<p>Fixes failing comptime tests: <code>prp-enum_simple</code>, <code>prp-enum_hier</code>,
-    <code>prp-enum_color</code> (depends on <a class="xref" href="TODO_prp.html#item-1k">1k</a>), <code>prp-enum_types</code> (interplay
-    with <code>does</code>).</p>
 </li>
 <li>
 <p><strong id="item-2j" class="item-id">2j</strong> Function-scope closure-capture rule, <strong>import-aware case</strong>.
@@ -359,65 +307,13 @@ cross-file dependencies stay visible.</p>
   <code>inou/prp</code>, upass, and lgraph-pass diagnostics from
   <a href="TODO_livehd.html">TODO_livehd.md</a> <strong>3f</strong>.</li>
 </ul>
-<h2 id="failing-test-todo-mapping-snapshot-2026-06-01">Failing-test → TODO mapping (snapshot 2026-06-05)</h2>
-<p>Each <code>bazel test -c dbg //...</code> failure mapped to the TODO entry whose
-landing should fix it. When more than one entry is listed, the test
-needs all of them. Current verifier tally is shown as <code>pass/fail/unknown</code>.
-Tallies re-measured via the <code>prplib.py</code> comptime pipeline
-(<code>pass.upass constprop:1 verifier_pass:N verifier_fail:N
-[verifier_include_funcs:true]</code>).</p>
-<p><strong>Live suite = 6 fails</strong> across <code>//inou //upass //lnast //pass</code>, all comptime
-(enum + decorator + const-tuple-mut-field). The <code>tests/errors/</code> negative suite is
-fully green as of 2026-06-05 (<strong>1e</strong> complete and removed from Group 1).</p>
-<table>
-<thead>
-<tr>
-<th>Failing test</th>
-<th>now</th>
-<th>TODO entry</th>
-<th>What it still needs</th>
-</tr>
-</thead>
-<tbody>
-<tr>
-<td><code>prp-enum_color</code></td>
-<td>0/1/2</td>
-<td><a class="xref" href="TODO_prp.html#item-2l">2l</a>, <a class="xref" href="TODO_prp.html#item-1k">1k</a></td>
-<td>enum with associated setters/methods</td>
-</tr>
-<tr>
-<td><code>prp-enum_hier</code></td>
-<td>0/0/6</td>
-<td><a class="xref" href="TODO_prp.html#item-2l">2l</a></td>
-<td>nested / hierarchical enums</td>
-</tr>
-<tr>
-<td><code>prp-enum_simple</code></td>
-<td>0/0/9</td>
-<td><a class="xref" href="TODO_prp.html#item-2l">2l</a></td>
-<td>base enum parsing + comptime tags</td>
-</tr>
-<tr>
-<td><code>prp-enum_types</code></td>
-<td>0/0/0</td>
-<td><a class="xref" href="TODO_prp.html#item-2l">2l</a></td>
-<td>typed enum interplay with <code>does</code> (casserts unreached)</td>
-</tr>
-<tr>
-<td><code>prp-setter_complex</code></td>
-<td>2/2/0</td>
-<td><a class="xref" href="TODO_prp.html#item-1k">1k</a></td>
-<td>decorator-init implicit setter dispatch on <code>x:Tup = (…)</code></td>
-</tr>
-<tr>
-<td><code>prp-tuple_simple7</code></td>
-<td>—</td>
-<td>task 1t per-field modes</td>
-<td><code>tuple_set</code> tallies legal <code>mut</code>-field writes against the <code>const</code>
-  tuple root; needs <code>comp_type_tuple</code> per-field decl modes</td>
-</tr>
-</tbody>
-</table>
+<h2 id="failing-test-todo-mapping-snapshot-2026-06-06">Failing-test → TODO mapping (snapshot 2026-06-06)</h2>
+<p><strong>Live suite = fully green</strong> across <code>//inou //upass //lnast //pass</code>
+(237/237). The 2026-06-05 cluster — enum semantics (<strong>2l</strong>), decorator-init /
+<code>self</code> (<strong>1k</strong>), const-tuple-mut-field (<code>prp-tuple_simple7</code>) — has landed;
+both entries are complete and removed from Groups 1/2. The
+<code>tests/errors/</code> negative suite is also fully green
+(<strong>1e</strong> complete and removed from Group 1).</p>
 </main>
 <footer>Generated from <code>TODO_prp.md</code> — task badges link across files; ✎ marks reference notes.</footer>
 </body>

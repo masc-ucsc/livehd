@@ -101,13 +101,11 @@ N. Each badge links to the full entry. <strong>HHDS has no open goals.</strong><
 <li><em>Group 1:</em><ul>
 <li><a class="xref" href="TODO_prp.html#item-1q">1q</a> Pyrope <code>pipe</code> construct — Phase 1: declaration → flopped outputs. Remaining: <a class="xref" href="TODO_prp.html#item-1q-D">1q-D</a> LG pass1 σ/Tarjan check + narrowing.</li>
 <li><a class="xref" href="TODO_prp.html#item-1m">1m</a> Pyrope <code>import</code> statement — <strong>deferred</strong> (substantial new infra: grammar, lowering, file-wrapper trees, <code>find_tree</code> resolution).</li>
-<li><a class="xref" href="TODO_prp.html#item-1k">1k</a> <code>self</code>/<code>ref self</code> in tuple methods — remaining: in-tuple inline-lambda extraction (<code>prp-tup_method</code>), comptime <code>mod</code>-init folding (<code>prp-mix_tup</code>), and the decorator-init implicit setter dispatch on <code>x:Tup = (…)</code> trailing piece.</li>
 </ul></li>
 <li><em>Group 2:</em><ul>
 <li><a class="xref" href="TODO_prp.html#item-2p">2p</a> Source-derived SSA / tmp names (<code>foo_l42_a</code>, drop <code>___N</code>).</li>
 <li><a class="xref" href="TODO_prp.html#item-2o">2o</a> Two-phase <code>upass/func_extract</code> (pending-import poison + bundle pre-pass).</li>
 <li><a class="xref" href="TODO_prp.html#item-2n">2n</a> <code>tree_ios</code> leaf ABI with <code>min</code>/<code>max</code> slots (mimics <code>GraphIO</code>).</li>
-<li><a class="xref" href="TODO_prp.html#item-2l">2l</a> Enum support — parse <code>enum X = (…)</code>, lower to comptime-tagged tuples (fixes the enum comptime tests).</li>
 <li><a class="xref" href="TODO_prp.html#item-2j">2j</a> Function-scope closure-capture, import-aware case.</li>
 </ul></li>
 <li><em>Group 3:</em><ul>
@@ -174,40 +172,12 @@ N. Each badge links to the full entry. <strong>HHDS has no open goals.</strong><
 <ul>
 <li>No open goals — Group 2 HHDS-side work will be added as it surfaces during the LiveHD migration.</li>
 </ul>
-<h2 id="failing-tests-cluster-snapshot-2026-06-05">Failing tests — cluster snapshot (2026-06-05)</h2>
-<p><code>bazel test //inou/prp:...</code> shows <strong>6 failures</strong>, all in the comptime suite —
-the <code>tests/errors/</code> negative suite is fully green.
-The failures cluster by root cause:</p>
-<table>
-<thead>
-<tr>
-<th>Cluster</th>
-<th>Tests</th>
-<th>Root cause</th>
-<th>Blocker / task</th>
-</tr>
-</thead>
-<tbody>
-<tr>
-<td><strong>A. Enum semantics</strong></td>
-<td><code>prp-enum_color</code>, <code>prp-enum_hier</code>, <code>prp-enum_simple</code>, <code>prp-enum_types</code></td>
-<td>enum declarations / typed-variant matching / hierarchical scoping not implemented in prp2lnast or constprop</td>
-<td><strong>2l</strong> (<code>enum_color</code> also <strong>1k</strong>)</td>
-</tr>
-<tr>
-<td><strong>B. Decorator-init / setter</strong></td>
-<td><code>prp-setter_complex</code></td>
-<td>decorator-init implicit setter dispatch on <code>x:Tup = (…)</code>: scalar→tuple coercion, positional setter-arg routing, <code>p.x</code>/<code>p['x']</code> getter dispatch</td>
-<td><strong>1k</strong></td>
-</tr>
-<tr>
-<td><strong>C. Const tuple, mut fields</strong></td>
-<td><code>prp-tuple_simple7</code></td>
-<td>surfaced by <code>lhd</code> (emit-only sink errors now fail the run): <code>tuple_set</code> tallies legal <code>mut</code>-<em>field</em> writes against the <code>const</code> tuple <em>root</em>; needs per-field decl modes (task 1t <code>comp_type_tuple</code>)</td>
-<td>task 1t per-field modes</td>
-</tr>
-</tbody>
-</table>
+<h2 id="failing-tests-cluster-snapshot-2026-06-06">Failing tests — cluster snapshot (2026-06-06)</h2>
+<p><code>bazel test //inou/prp/... //upass/... //lnast/... //pass/...</code> is
+<strong>fully green</strong> (237/237) — both the comptime suite and the
+<code>tests/errors/</code> negative suite. The previous snapshot's clusters
+(enum semantics <strong>2l</strong>, decorator-init / <code>self</code> <strong>1k</strong>,
+const-tuple-mut-field <code>prp-tuple_simple7</code>) have all landed.</p>
 <p>Doc-described errors that have no negative test yet are tracked in the
 <span class="xref xref-note" title="note: prp_error_test_coverage">prp_error_test_coverage</span> note.</p>
 </main>
