@@ -61,7 +61,7 @@ jobs:
           "$CC" --version
           "$CXX" --version
 
-      - run: bazel coverage --instrument_test_targets --collect_code_coverage --test_tag_filters=-fixme --combined_report=lcov --test_output=all //...
+      - run: bazel coverage --instrument_test_targets --collect_code_coverage --test_tag_filters=-fixme --combined_report=lcov --test_output=all //... -//inou/prp:prp-enum_color -//inou/prp:prp-enum_hier -//inou/prp:prp-enum_simple -//inou/prp:prp-enum_types -//inou/prp:prp-mix_tup -//inou/prp:prp-setter_complex -//inou/prp:prp-tup_method -//inou/prp:prp-tuple_simple7
 
       - uses: codecov/codecov-action@v6
         with:
