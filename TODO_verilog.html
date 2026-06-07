@@ -109,11 +109,12 @@ and <a href="TODO_hhds.html">TODO_hhds.md</a>, so cross-file dependencies stay v
   model, reg/flop + memory wiring, attributes; phases 4–11).</li>
 </ul>
 <p><strong>Remaining slices</strong> (roughly the contract phase order):
-  - <strong>Registers / <code>defer</code></strong> → <code>Flop</code> (reset/clock pin defaults, last-write-wins
-    <code>din</code> + OR-of-conditions <code>enable</code>). Needs <a class="xref" href="TODO_prp.html#item-3j">3j</a>'s declare-folding (init/reset
-    value bound on the <code>declare</code> node so it survives to <code>Flop</code>/<code>Memory</code>).
-    The register slice is planned in detail as <a class="xref" href="TODO_mod.html#item-2d-reg">2d-reg</a>
-    (decided 2026-06-07; <code>defer</code>/<code>past[n]</code> stay here).
+  - <strong><code>defer</code> / <code>past[n]</code></strong> temporal reads → <code>Flop</code>. The
+    register slice (reg→<code>Flop</code>: reset/clock pin defaults, last-write-wins
+    <code>din</code> + OR-of-conditions <code>enable</code>, init/reset value folded on the
+    <code>declare</code> node per <a class="xref" href="TODO_prp.html#item-3j">3j</a>)
+    <strong>LANDED 2026-06-07</strong> as <a class="xref" href="TODO_mod.html#item-2d-reg">2d-reg</a>;
+    <code>defer</code>/<code>past[n]</code> stay here.
   - <strong><code>Memory</code></strong> for persistent indexed <code>reg</code> arrays (one Memory per logical
     storage, 11-pin port stride).
   - <strong>High-level op lowering</strong>: slice/concat, <code>!=</code>/<code>&lt;=</code>/<code>&gt;=</code>, div/mod

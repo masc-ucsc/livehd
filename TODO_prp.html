@@ -216,90 +216,13 @@ cross-file dependencies stay visible.</p>
   lands, no extra producer work.</li>
 <li>
 <p><strong id="item-1g" class="item-id">1g</strong> Type-aware <code>does</code> / <code>equals</code> / <code>case</code> —
-  <strong>spec'd 2026-06-07</strong>. When <code>does</code> first landed there was no type
-  system; now there is (1t/1v typesystem + <code>upass/typecheck</code> kinds +
-  <code>upass/attributes</code> <code>Type_info</code> envelopes), so the scalar/type half can
-  fold. Raises <code>inou/prp/tests/comptime/does_test1.prp</code> back from the
-  lowered <code>:verifier_pass: 20</code>.</p>
-</li>
-<li><strong>Semantic ruling (2026-06-07):</strong><ul>
-<li><strong>Within integers</strong> the range decides: <code>a does b</code> ⇔ envelope
-  superset <code>a.max&gt;=b.max and a.min&lt;=b.min</code> (07-typesystem.md rule).
-  <code>c:u10 does c:u5</code> true; <code>c:u5 does c:u10</code> <strong>false</strong>. This
-  <strong>supersedes</strong> <code>04-variables.md:193,650</code> and
-  <code>07b-structtype.md:69,108</code> ("<code>u32 does u16</code> and <code>u16 does u32</code>
-  both true") — those docs and their extracted samples must be
-  rewritten (phase E).</li>
-<li><strong>Across kinds</strong> (<code>boolean</code>/<code>integer</code>/<code>string</code>/…) the kind is a
-  difference flag → false; when a side's type is <em>not set</em> (kind
-  unknown), the kind half is skipped and only structure/range is
-  checked.</li>
-<li><strong>Envelopes:</strong> literal <code>v</code> → <code>[v,v]</code>; declared type → its
-  envelope; untyped <code>mut</code>/<code>const</code> var → unbounded (superset of any
-  int). <code>bool</code> ≡ envelope <code>(min=-1,max=0)</code>, so <code>1 does true</code> and
-  <code>10 does true</code> are <strong>false</strong> (kind mismatch; the range view
-  agrees — 1 ∉ [-1,0]).</li>
-<li><strong><code>nil</code> special case:</strong> <code>x does nil</code> → true for any non-tuple
-  <code>x</code>. (tuple-vs-nil and nil-on-LHS: pin when implementing.)</li>
-<li><code>equals</code> = <code>(a does b) and (b does a)</code> <strong>including types</strong>;
-  <code>case</code> = <code>does</code> + value match (<code>nil</code>/<code>0sb?</code> wildcards) — both
-  currently fold structure/value only, types ignored.</li>
-</ul>
-</li>
-<li><strong>Current state (verified 2026-06-07 against <code>lhd</code>):</strong><ul>
-<li><em>Works:</em> tuple-vs-tuple structural <code>does</code>/<code>equals</code>/<code>case</code>
-  (<code>upass/constprop</code> <code>structural_does</code>/<code>structural_equals</code>/<code>fold_case</code>);
-  <strong>match-arm <code>does</code></strong> — prp2lnast emits <code>func_does</code> per arm, so the
-  <code>does_test1.prp:69</code> FIXME comment is <strong>stale</strong>: all three
-  commented-out <code>match</code> blocks pass today; <code>is</code> nominal check
-  (<code>upass_attributes::process_is</code>, typename-based).</li>
-<li><em>Unresolved (unknown):</em> every scalar-vs-scalar / scalar-vs-literal
-  <code>does</code> (<code>b1 does true</code>, <code>u10</code>-vs-<code>u5</code> vars) — <code>fold_does</code> requires
-  a tuple-shaped side because Lconst can't tell bool from int;
-  literal-vs-bundle (<code>100 does m1</code>, <code>(100,30) does 30</code>,
-  <code>30 does (30,200)</code>) — literals not bundle-bound in the ST.</li>
-<li><em>Hard error:</em> bare primitive type-name operand — <code>a does u32</code>,
-  <code>u32 does u16</code>, <code>if d does int</code> → "read of undefined variable
-  'u32'" from the prp2lnast undefined-read check. This is the
-  headline doc form (07-typesystem.md:66-73, 04-variables.md:650).</li>
-</ul>
-</li>
-<li><strong>Implementation phases:</strong><ul>
-<li><strong>A — type-name operands.</strong> prp2lnast lowers primitive type tokens
-  (<code>uN</code>/<code>sN</code>/<code>int</code>/<code>unsigned</code>/<code>bool</code>/<code>string</code> +
-  <code>int(max=,min=)</code> calls) in <code>does</code>/<code>equals</code>/<code>case</code> operand position
-  to a type-literal payload (reuse the declare-side <code>prim_type_*</code>
-  encoding), exempt from <code>collect_defined_names</code> undefined-read; the
-  fold decodes it to kind+envelope. User-defined type refs
-  (<code>x does Person</code>) already resolve as refs.</li>
-<li><strong>B — kind+envelope scalar fold.</strong> <code>fold_does</code> drops the
-  <code>is_tuple_shaped</code> gate; per operand pull kind+envelope — declared
-  vars via shared-ST <code>provide_decl_type</code>/<code>provide_field_type</code>
-  (attributes <code>Type_info</code>: <code>Numeric_kind</code> + <code>range_max/min</code>, the
-  same seam the 1k typed-self does-check uses), literals → <code>[v,v]</code>,
-  untyped → unbounded + kind-unset. Apply the ruling above incl. the
-  <code>nil</code> rule. Fold lives in constprop (it owns bundles + the
-  <code>func_does</code> dispatch); <code>upass/typecheck</code> stays read-only.</li>
-<li><strong>C — literal-as-bundle.</strong> const operands of
-  <code>does</code>/<code>equals</code>/<code>case</code> resolve scalars / tuple-literals not bound
-  in the ST: <code>100 does m1</code>, <code>m1 does 100</code>, <code>(100,30) does 30</code>,
-  <code>30 does (30,200)</code>.</li>
-<li><strong>D — typed <code>equals</code>/<code>case</code> + per-field types.</strong> Per-field types
-  ride <code>comp_type_tuple</code> (<code>docs/contracts/typesystem_clean_plan.md</code>)
-  and are checked field-wise; <code>equals</code> = does-both-ways incl. types
-  (07-typesystem.md:100-113); typed <code>case</code> patterns
-  (07-typesystem.md:235-240). Today
-  <code>(a=1) does (a:u32=…)</code> folds with <code>:u32</code> silently ignored.</li>
-<li><strong>E — docs + tests.</strong> Rewrite <code>04-variables.md:193,650</code>,
-  <code>07b-structtype.md:69,108</code>, <code>14b-small_pyrope_todo.md:80</code> to the
-  superset rule and refresh extracted samples (<code>full_pyrope/file85</code>,
-  <code>file291</code>); <code>does_test1.prp</code>: delete the stale match-arm comment,
-  re-enable the FIXME casserts per phase, raise
-  <code>:verifier_pass:</code> 20 → 35+; new tests: envelope (<code>u10</code>/<code>u5</code>),
-  bool literals (<code>1 does true</code>, <code>0 does true</code> both false),
-  type-name forms (<code>a does u32</code>, <code>not (u32 does string)</code>), typed
-  <code>case</code>/<code>equals</code>, <code>nil</code> rule.</li>
-</ul>
+  <strong>LANDED 2026-06-07</strong> (phases A–E): int envelope-superset rule
+  (<code>a does b</code> ⇔ <code>a.max&gt;=b.max and a.min&lt;=b.min</code>), cross-kind
+  difference flag, bare type-name operands (<code>a does u32</code>),
+  literal-as-bundle, per-field types, <code>equals</code> = does-both-ways, typed
+  <code>case</code>. <code>does_test1.prp</code> raised <code>:verifier_pass:</code> 20→35;
+  new <code>does_test2.prp</code>; docs rewritten to the superset rule
+  (04-variables, 07b-structtype, 14b; <code>full_pyrope/file85</code>). prp suite 224/224.</p>
 </li>
 <li><strong>Deferred (future item, out of scope here):</strong> lambda <code>does</code> rules
   (<code>_:T_complex does _:T_simple</code>, <code>f.[inp] does args</code> —

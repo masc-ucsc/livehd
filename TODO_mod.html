@@ -1,0 +1,214 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>TODO — Pyrope mod construct</title>
+<style>
+:root {
+  --bg:#ffffff; --fg:#24292f; --muted:#57606a; --border:#d0d7de;
+  --soft:#f6f8fa; --accent:#0969da; --accent-bg:#ddf4ff;
+  --idbg:#0969da; --idfg:#ffffff; --notebg:#fff8c5; --notefg:#7d4e00;
+  --codefg:#1f2328;
+}
+@media (prefers-color-scheme: dark) {
+  :root {
+    --bg:#0d1117; --fg:#e6edf3; --muted:#8b949e; --border:#30363d;
+    --soft:#161b22; --accent:#58a6ff; --accent-bg:#13233b;
+    --idbg:#1f6feb; --idfg:#ffffff; --notebg:#3b2f00; --notefg:#f2cc60;
+    --codefg:#e6edf3;
+  }
+}
+* { box-sizing:border-box; }
+html { scroll-behavior:smooth; }
+body {
+  margin:0; background:var(--bg); color:var(--fg);
+  font:16px/1.6 -apple-system,BlinkMacSystemFont,"Segoe UI",Helvetica,Arial,sans-serif;
+}
+nav {
+  position:sticky; top:0; z-index:10; background:var(--soft);
+  border-bottom:1px solid var(--border); padding:.55rem 1rem;
+  display:flex; gap:.4rem; flex-wrap:wrap; align-items:center;
+  backdrop-filter:saturate(180%) blur(6px);
+}
+nav .brand { font-weight:700; margin-right:.6rem; color:var(--muted); }
+nav a {
+  text-decoration:none; color:var(--fg); padding:.25rem .7rem;
+  border-radius:6px; border:1px solid transparent; font-size:.92rem;
+}
+nav a:hover { background:var(--accent-bg); }
+nav a.active { background:var(--accent); color:#fff; border-color:var(--accent); }
+main { max-width:920px; margin:0 auto; padding:2rem 1.25rem 5rem; }
+h1,h2,h3,h4 { line-height:1.25; font-weight:600; }
+h1 { font-size:1.9rem; padding-bottom:.3em; border-bottom:1px solid var(--border); }
+h2 { font-size:1.45rem; margin-top:2.2rem; padding-bottom:.3em; border-bottom:1px solid var(--border); }
+h3 { font-size:1.2rem; margin-top:1.6rem; }
+a { color:var(--accent); }
+ul { padding-left:1.4rem; }
+li { margin:.28rem 0; }
+li > ul { margin-top:.28rem; }
+code {
+  background:var(--soft); color:var(--codefg); padding:.12em .4em;
+  border-radius:5px; font-size:.88em;
+  font-family:ui-monospace,SFMono-Regular,"SF Mono",Menlo,Consolas,monospace;
+}
+pre {
+  background:var(--soft); border:1px solid var(--border); border-radius:8px;
+  padding:1rem; overflow:auto; line-height:1.45;
+}
+pre code { background:none; padding:0; font-size:.85em; }
+table { border-collapse:collapse; width:100%; margin:1rem 0; font-size:.94rem; }
+th,td { border:1px solid var(--border); padding:.45rem .7rem; text-align:left; vertical-align:top; }
+th { background:var(--soft); }
+tr:nth-child(even) td { background:var(--soft); }
+blockquote { margin:1rem 0; padding:.2rem 1rem; color:var(--muted); border-left:4px solid var(--border); }
+/* task-id markers */
+strong.item-id {
+  display:inline-block; background:var(--idbg); color:var(--idfg);
+  font-weight:700; padding:.02em .5em; border-radius:6px; font-size:.82em;
+  letter-spacing:.02em; scroll-margin-top:4rem;
+}
+strong.item-id::before { content:"#"; opacity:.55; margin-right:.08em; }
+li:target { background:var(--accent-bg); border-radius:6px;
+  box-shadow:0 0 0 .5rem var(--accent-bg); }
+strong.item-id:target { outline:2px solid var(--accent); }
+/* cross-reference links */
+a.xref {
+  text-decoration:none; background:var(--accent-bg); color:var(--accent);
+  font-weight:600; padding:.02em .45em; border-radius:6px; font-size:.85em;
+  border:1px solid transparent;
+}
+a.xref:hover { border-color:var(--accent); }
+a.xref::before { content:"→ "; opacity:.6; }
+.xref-note {
+  background:var(--notebg); color:var(--notefg); font-weight:600;
+  padding:.02em .45em; border-radius:6px; font-size:.8em; cursor:help;
+}
+.xref-note::before { content:"✎ "; opacity:.7; }
+footer { max-width:920px; margin:0 auto; padding:0 1.25rem 3rem;
+  color:var(--muted); font-size:.85rem; }
+</style>
+</head>
+<body>
+<nav><span class="brand">LiveHD TODO</span><a class="" href="TODO.html">Overview</a><a class="" href="TODO_prp.html">Pyrope</a><a class="active" href="TODO_mod.html">Mod</a><a class="" href="TODO_verilog.html">Verilog</a><a class="" href="TODO_livehd.html">LiveHD</a><a class="" href="TODO_hhds.html">HHDS</a></nav>
+<main>
+<h1 id="todo-pyrope-mod"><strong id="item-1r" class="item-id">1r</strong> TODO — Pyrope <code>mod</code> construct (follow-ups)</h1>
+
+<p>The structural phase is <strong>DONE</strong>: 1r A–F and 1u A–E landed
+2026-06-06 (suite 354/354; 7 LEC equiv pairs + 18 timing error tests,
+non-vacuity proven) — interface contract + per-output <code>stages</code>
+stamping, <code>stage[N]</code>/<code>timecheck</code> lowering, mod extraction
++ durable <code>Lnast::lambda_kind_</code>,
+<code>func_call</code>→<code>Ntype_op::Sub</code> instances, the
+<code>upass/timecheck</code> discharge pass, the LG
+<code>time_range</code>/<code>pending_time</code> attrs, and the combined
+pipe/mod Time_checker at the tolg seam (the ex-1q-D σ checker was absorbed
+here — no pipe-only checker exists or is needed). The
+<code>../docs/docs/pyrope</code> spec and the livehd contracts
+(<code>architecture.md §3</code>, <code>lnast_spec.md §3.9/§3.11</code>,
+<code>lnast2lgraph.md §12.1</code>) are consistent with the contract since the
+2026-06-06 doc pass. This page tracks <strong>what remains</strong>.</p>
+
+<h2 id="contract">Contract summary (decisions 2026-06-06 — implemented)</h2>
+
+<table>
+<tr><th>Kind</th><th>Output latency</th><th>Feedthrough</th><th>May call</th><th>IO typing</th><th>Lowering</th></tr>
+<tr><td><code>comb</code></td><td>all 0</td><td>yes (is comb)</td><td><code>comb</code></td><td>optional</td><td>inlined; own LGraph allowed when fully typed</td></tr>
+<tr><td><code>pipe</code></td><td>uniform, declared <code>pipe[N]</code>/<code>[A..=B]</code>/bare, N ≥ 1</td><td>never</td><td><code>comb</code></td><td><strong>required</strong></td><td>always own LGraph</td></tr>
+<tr><td><code>mod</code></td><td><strong>per-output, declared, 0..n</strong></td><td>allowed (a cycle-0 output)</td><td><code>comb</code>/<code>pipe</code>/<code>mod</code></td><td><strong>required</strong></td><td>always own LGraph; callees become instances</td></tr>
+</table>
+
+<p>The full normative rules (declared-not-inferred <code>@[N]</code>, reg
+home-stage outputs, fully-typed rule, instance lowering,
+<code>stage[N]</code>-is-the-action/<code>@[N]</code>-is-the-check split,
+<code>@[]</code> explicit opt-out, phase-1 min realization + caller-side
+deficit flop) are stated in the pyrope spec docs and the livehd contracts
+listed above — they are no longer repeated here.</p>
+
+<h2 id="pending">Pending work</h2>
+<ul>
+<li><strong id="item-2d-reg" class="item-id">2d-reg</strong> <strong>LANDED
+  2026-06-07 — the register slice of
+  <a class="xref" href="TODO_verilog.html#item-2d">2d</a></strong>
+  (suite 254/254 incl. 9 new LEC equiv pairs + 5 timing/legality error tests;
+  Memory/op-lowering/uif/runtime-wrap stay later slices).
+  <em>Landed:</em> reg-init folded onto the <code>declare</code>'s 4th
+  <code>[value]</code> child (3j slice, reg-mode only); SSA + constprop +
+  timecheck no longer version/fold/bind reg-declared names (reads are runtime
+  q reads, stores are next-state din writes); tolg state-reg lowering
+  (per-reg shadow din/enable keys → last-write-wins din + OR-of-conditions
+  enable via the branch-mux machinery, q bound from the declared type);
+  implicit <code>reset</code> minted from a non-nil init (bind-before-mint
+  over reset/rst/reset_n/rst_n, transitive callee forwarding), with
+  <code>upass.reset_style=sync|async</code> flag (default sync) and per-reg
+  <code>:[sync=…, reset_pin=…, negreset, initial=N]</code> overrides
+  (reset_pin=false + non-nil init = error); <code>reg foo = nil</code> = no
+  reset; <code>-&gt; (reg q:T@[N])</code> output registers (q is the output);
+  pipe upass skips the inserted output flop for a reg-as-output; cgen Flop
+  enable emission (<code>if (en) q &lt;= next</code>, no din=q hold mux);
+  Time_checker Tarjan-SCC state classification (state = SCC-member flop OR
+  driven-enable flop; σ(q)=σ(din) pinned, two-pass propagation), real
+  inserted-flop narrowing ((min−σ, max−σ); (0,0)→wire, bypassed+deleted),
+  state-reg-as-output home==declared−1 check; "a <code>comb</code> may not
+  declare a <code>reg</code>" enforced in prp2lnast. Fixed a runner constprop
+  defect (a runtime-rhs write inside an uncertain if-arm now invalidates the
+  lhs's stale comptime value — previously dropped the post-if read) and the
+  lgcheck reset auto-assert (was <code>-set in_reset 1</code> = reset pinned
+  high at every induction step → ANY two reset-bearing circuits matched
+  vacuously; now per-cycle <code>-set-at</code> for cycles 0/1 only).
+  <em>Deferred (unchanged):</em> runtime <code>wrap</code>/<code>sat</code>
+  LG lowering (still blocks <code>accum</code> and the doc-canonical add),
+  <code>.[defer]</code>/<code>past[n]</code>, multi-output callees,
+  <code>stage[]</code>/ranged stage picks, Memory/array regs.
+  </li>
+<li><strong>Remaining mod work (independent of the now-landed 2d-reg):</strong>
+  <ul>
+  <li>Runtime <code>wrap</code>/<code>sat</code> LG lowering (hard error at
+    tolg today; blocks <code>accum</code> and the doc-canonical add —
+    <code>mod_mul_add</code> uses a u33 workaround).</li>
+  <li>Multi-output callees at call sites (clean error today; needs
+    tuple-result handling in tolg).</li>
+  <li><code>stage[]</code> / ranged stage picks on calls + the LG pass2
+    realization knob (retiming/PPA depth pick replacing the min default).</li>
+  <li><code>lnast_to_slop</code> pipe/mod cell (seed-picked latency).</li>
+  <li>io_meta nil ambiguity: <code>stages(nil,nil)</code> harvests as (0,0)
+    in the int fields (<code>@[]</code> ≡ <code>@[0]</code> at the ABI; the
+    LNAST tree keeps the truth) — fold a tri-state into
+    <a class="xref" href="TODO_prp.html#item-2n">2n</a>.</li>
+  <li><strong>P1 — comptime <code>mut</code>-tuple value tracking:</strong>
+    <code>comptime_tuples_</code> (<code>prp2lnast.cpp</code> ~1958) only
+    records tuples whose fields are const literals. Decl-time-known
+    <code>mut</code> tuples should track their values with the same
+    UPDATE/ERASE rules — record on the <code>mut</code> decl, UPDATE on an
+    unconditional statement-level plain re-assign, ERASE on any other write
+    (non-literal field, compound op, or a write nested in an if/for/while/
+    match/lambda body). Same family as <code>const_int_bindings_</code>
+    (which already tracks decl-time-known <code>mut</code> integers this way).</li>
+  </ul></li>
+</ul>
+
+<h2 id="deps">Out of scope (explicitly)</h2>
+<ul>
+<li><code>fluid</code>;
+  <code>ext:</code> external memory/submodule boundaries (architecture §3.3);
+  foreign-Verilog opaque-mod ingress (architecture §7); cross-clock mods;
+  conditional-instance hoisting via <code>.[valid]</code>
+  (06b-instantiation §Lambda calls); <code>stage[]</code>/<code>@[]</code>
+  tool-picked defaults; <code>lnast_to_slop</code> mod simulation;
+  LG pass2 retiming/PPA realization knob.</li>
+</ul>
+
+<h2 id="open-questions">Open questions (flagged, non-blocking)</h2>
+<ul>
+<li>Ranged mod outputs (<code>x:u8@[2..=4]</code>): rejected in 1r-A; revisit
+  if a use case appears (a mod wrapping a ranged pipe wants to re-export the
+  range).</li>
+<li>A <code>ref self</code> mod that also instantiates pipes: method splice vs
+  partition extraction — settled in 1r-C, may need revisiting for tuple
+  methods (<a class="xref" href="TODO_prp.html#item-1m">1m</a>-adjacent).</li>
+</ul>
+
+</main>
+<footer>Generated from <code>TODO_mod.md</code> — task badges link across files; ✎ marks reference notes.</footer>
+</body>
+</html>

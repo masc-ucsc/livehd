@@ -99,9 +99,8 @@ N. Each badge links to the full entry. <strong>HHDS has no open goals.</strong><
 <h3 id="pending-pyrope">Pyrope — <a href="TODO_prp.html">TODO_prp.html</a></h3>
 <ul>
 <li><em>Group 1:</em><ul>
-<li><a class="xref" href="TODO_mod.html#item-2d-reg">2d-reg</a> <strong>NEXT</strong> — register slice of <a class="xref" href="TODO_verilog.html#item-2d">2d</a> (reg→Flop lowering: enable/din, init→implicit reset + <code>reset_style</code> flag, runner branch-store fix, Time_checker state regs). 1r/1u <code>pipe</code>+<code>mod</code> structural machinery is DONE 2026-06-06; remaining non-2d follow-ups (wrap/sat LG lowering, multi-output callees, <code>stage[]</code> picks) in <a href="TODO_mod.html">TODO_mod.html</a> §Pending.</li>
+<li><strong>mod follow-ups</strong> — remaining slices in <a href="TODO_mod.html#pending">TODO_mod.html §Pending</a>: runtime wrap/sat LG lowering, multi-output callees, <code>stage[]</code>/ranged picks, <code>.[defer]</code>/<code>past[n]</code>. (Register slice <a class="xref" href="TODO_mod.html#item-2d-reg">2d-reg</a> + 1r/1u <code>pipe</code>+<code>mod</code> structural machinery LANDED.)</li>
 <li><a class="xref" href="TODO_prp.html#item-1m">1m</a> Pyrope <code>pub</code> exports + <code>import()</code> — core <strong>landed 2026-06-07</strong>; pending: unknown-tuple-field error (in <code>upass/typecheck</code>), ambiguous-<code>ln:</code> error, <code>lg:</code> Sub wiring (blocked on multi-<code>lg:</code> linker). Done since: <code>pub reg</code>→<code>regref</code> friendly error (no grammar change). See <code>docs/contracts/task_1m_plan.md</code>.</li>
-<li><a class="xref" href="TODO_prp.html#item-1g">1g</a> Type-aware <code>does</code>/<code>equals</code>/<code>case</code> — <strong>spec'd 2026-06-07</strong> (int envelope-superset rule, kind flag across types, type-name operands, literal-as-bundle; raises <code>does_test1.prp</code> back from <code>:verifier_pass: 20</code>).</li>
 <li><a class="xref" href="TODO_prp.html#item-1p">1p</a> Deferred lambda templates: var-args + call-site specialization — <strong>spec'd 2026-06-07</strong> (<code>docs/contracts/task_1p_plan.md</code>: not-fully-typed lambda = template, no LGraph at def time; <code>comb</code> inlines, <code>pipe</code>/<code>mod</code>/<code>fluid</code> specialize per signature into a <code>Sub</code>; readable-suffix mangling; deletes the <code>lambda-needs-types</code> error; generics seam, impl deferred).</li>
 </ul></li>
 <li><em>Group 2:</em><ul>
@@ -124,7 +123,7 @@ N. Each badge links to the full entry. <strong>HHDS has no open goals.</strong><
 <h3 id="pending-verilog">Verilog — <a href="TODO_verilog.html">TODO_verilog.html</a></h3>
 <ul>
 <li><em>Group 2:</em><ul>
-<li><a class="xref" href="TODO_verilog.html#item-2d">2d</a> Finish the LNAST→LGraph synthesis closure — remaining: registers/<code>Flop</code>, <code>Memory</code>, high-level op lowering, <code>uif</code> chains, <code>Sub</code> submodule calls, attributes.</li>
+<li><a class="xref" href="TODO_verilog.html#item-2d">2d</a> Finish the LNAST→LGraph synthesis closure — remaining: <code>Memory</code>, <code>.[defer]</code>/<code>past[n]</code>, high-level op lowering, <code>uif</code> chains, <code>Sub</code> submodule calls, attributes. (Register/<code>Flop</code> slice landed 2026-06-07 — <a class="xref" href="TODO_mod.html#item-2d-reg">2d-reg</a>.)</li>
 </ul></li>
 <li><em>Group 3:</em><ul>
 <li><a class="xref" href="TODO_verilog.html#item-3b">3b</a> Migrate <code>inou.slang</code> to the shared LNAST structures; keep adding Verilog equiv tests.</li>
