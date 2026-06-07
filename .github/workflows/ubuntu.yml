@@ -68,7 +68,7 @@ jobs:
         continue-on-error: true
         run: bazel coverage --keep_going --instrument_test_targets --collect_code_coverage --test_tag_filters=-fixme --combined_report=lcov --test_output=all //...
 
-      - uses: codecov/codecov-action@v6
+      - uses: codecov/codecov-action@v7
         with:
           slug: masc-ucsc/livehd
           token: ${{ secrets.CODECOV_TOKEN }}
