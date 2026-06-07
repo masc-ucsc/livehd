@@ -172,12 +172,14 @@ N. Each badge links to the full entry. <strong>HHDS has no open goals.</strong><
 <ul>
 <li>No open goals — Group 2 HHDS-side work will be added as it surfaces during the LiveHD migration.</li>
 </ul>
-<h2 id="failing-tests-cluster-snapshot-2026-06-06">Failing tests — cluster snapshot (2026-06-06)</h2>
+<h2 id="failing-tests-cluster-snapshot-2026-06-07">Failing tests — cluster snapshot (2026-06-07)</h2>
 <p><code>bazel test //inou/prp/... //upass/... //lnast/... //pass/...</code> is
-<strong>fully green</strong> (237/237) — both the comptime suite and the
+<strong>fully green</strong> (299/299) — both the comptime suite and the
 <code>tests/errors/</code> negative suite. The previous snapshot's clusters
 (enum semantics <strong>2l</strong>, decorator-init / <code>self</code> <strong>1k</strong>,
-const-tuple-mut-field <code>prp-tuple_simple7</code>) have all landed.</p>
+const-tuple-mut-field <code>prp-tuple_simple7</code>) have all landed, as have
+this morning's merges (<strong>1g</strong> type-aware <code>does</code>, <strong>2d-reg</strong>
+reg→Flop, the mandatory <code>-&gt; ()</code> output clause).</p>
 <p>Doc-described errors that have no negative test yet are tracked in the
 <span class="xref xref-note" title="note: prp_error_test_coverage">prp_error_test_coverage</span> note.</p>
 </main>
