@@ -5,9 +5,11 @@
 :pyrope_top: mod_mixed_out.mix
 */
 
-// Task 1r — the mod-vs-pipe distinction: each output declares its OWN
-// landing cycle. x is a cycle-0 feedthrough; y lands two cycles later.
-mod mix(a:u8) -> (x:u8@[0], y:u8@[2]) {
-  x = a
-  stage[2] y = a
+const capture_val = 1
+
+const capture_delay = 2
+
+mod mix(a:u8) -> (x:u8@[0], y:u8@[capture_delay]) {
+  x = a + capture_val
+  stage[capture_delay] y = a
 }

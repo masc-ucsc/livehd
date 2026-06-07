@@ -1,7 +1,7 @@
 /*
 :name: mod_cycle_range
 :type: error
-:error: single literal landing cycle
+:error: must declare a single landing cycle
 :help: opt out with
 */
 

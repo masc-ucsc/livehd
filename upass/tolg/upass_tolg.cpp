@@ -189,6 +189,14 @@ public:
 
     // Task 1u-C — lower the declared per-output intervals as pendings.
     stamp_output_pendings();
+
+    // 2d-reg guard — a stage declare whose din store never arrived would
+    // silently drop the delay (and the value): hard error, never nil.
+    if (!pending_stage_.empty()) {
+      Pass::error("upass.tolg: stage reg '{}' in '{}' was declared but never stored — its delay would be silently lost",
+                  pending_stage_.begin()->first,
+                  lnast_->get_top_module_name());
+    }
   }
 
 private:

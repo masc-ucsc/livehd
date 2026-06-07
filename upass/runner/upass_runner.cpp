@@ -542,7 +542,16 @@ void uPass_runner::emit_ref_or_folded(std::string_view name) {
     return;
   }
   auto folded = try_fold_ref(name);
-  if (folded && !folded->is_invalid()) {
+  // Substitute only a genuine folded constant. A `nil` value is an
+  // unset/poison marker (not is_invalid, so it slips past the check below, but
+  // its to_pyrope() is the placeholder `0`); emitting it would replace a live
+  // operand with `0` in the materialized tree. This is the tail of the 1i
+  // comb-inliner bug: a runtime-valued output stays nil-seeded in the ST, so
+  // the kept `store(out, ___ret)` would otherwise fold to `store(out, 0)` and
+  // the output reads 0 instead of the real value. Keep the ref so the runtime
+  // producer drives it. (Materialize-only: comptime folding never reaches here
+  // — it reads the ST directly via current_prim_value.)
+  if (folded && !folded->is_invalid() && !folded->is_nil()) {
     emit_leaf(Lnast_node::create_const(folded->to_pyrope()));
   } else {
     emit_leaf(lm->current_node());

@@ -1385,6 +1385,19 @@ Lnast_node Prp2lnast::process_lvalue_for_assign(TSNode lvalue, const Lnast_node&
       has_cpt = pr.second;
     }
 
+    // Task 1r/1q — record `const NAME = <int literal>` so a later `@[NAME]`,
+    // `stage[NAME]`, or `pipe[NAME]` timing slot can resolve it at compile
+    // time (see resolve_cycle_value). No-shadowing is already enforced, so a
+    // fresh binding may safely overwrite an earlier same-name one. Only a
+    // const initialized to a parseable integer literal is recorded; non-int
+    // or non-const initializers are left out (resolve_cycle_value then misses
+    // and the timing-slot site emits its own diagnostic).
+    if (has_decl && kind_sv == "const" && rvalue.is_const()) {
+      if (auto cst = Dlop::from_pyrope(rvalue.get_name()); cst && cst->is_integer() && cst->is_i()) {
+        const_int_bindings_[std::string(trim(get_text(id)))] = cst->to_i();
+      }
+    }
+
     Lnast_node ref = identifier_to_node(id, /*for_lvalue=*/true);
     if (has_decl) {
       auto idx = builder.add_child(Lnast_ntype::create_attr_set());
@@ -3207,6 +3220,37 @@ void Prp2lnast::process_lambda_statement_named(TSNode n, std::string_view hoist_
   builder.pop_stmts();
 }
 
+// Task 1r/1q — resolve a timing-index node to a compile-time integer. A
+// `constant` CST node parses through the Pyrope literal parser (so hex/octal/
+// underscore-grouped forms work); an `identifier` looks up a recorded
+// `const NAME = <int literal>` binding (see const_int_bindings_). Anything
+// else (a mut/input/runtime ref, a non-integer const, a too-wide literal) is
+// std::nullopt so the caller can emit its own diagnostic.
+std::optional<int64_t> Prp2lnast::resolve_cycle_value(TSNode n) const {
+  if (ts_node_is_null(n)) {
+    return std::nullopt;
+  }
+  std::string_view t(ts_node_type(n));
+  if (t == "constant") {
+    auto txt = trim(get_text(n));
+    if (txt.empty()) {
+      return std::nullopt;
+    }
+    if (auto cst = Dlop::from_pyrope(txt); cst && cst->is_integer() && cst->is_i()) {
+      return cst->to_i();
+    }
+    return std::nullopt;
+  }
+  if (t == "identifier") {
+    auto it = const_int_bindings_.find(std::string(trim(get_text(n))));
+    if (it != const_int_bindings_.end()) {
+      return it->second;
+    }
+    return std::nullopt;
+  }
+  return std::nullopt;
+}
+
 // Task 1q — resolve the pipe_lambda `depth` field to the (min,max) stages
 // pair (see hpp). 06c-pipelining.md admits `pipe[N]`, `pipe[A..=B]`,
 // `pipe[A..<B]` and bare `pipe` — open-ended ranges (`pipe[2..]`) and
@@ -3217,24 +3261,11 @@ std::pair<int64_t, int64_t> Prp2lnast::parse_pipe_depth(TSNode pipe_lambda_node)
     return {1, 0};  // bare `pipe`: min 1 (contract: N >= 1), max 0 = unconstrained
   }
 
-  // Literal integer from a `constant` CST node. The integer_literal child is
-  // a hidden token, so read the enclosing node's text. Goes through the
-  // Pyrope literal parser so hex/octal/underscore-grouped forms (`0x3`,
-  // `1_0`) work like every other integer literal.
-  auto lit_int = [&](TSNode c) -> std::optional<int64_t> {
-    if (ts_node_is_null(c) || std::string_view(ts_node_type(c)) != "constant") {
-      return std::nullopt;
-    }
-    auto txt = trim(get_text(c));
-    if (txt.empty()) {
-      return std::nullopt;
-    }
-    auto cst = Dlop::from_pyrope(txt);
-    if (cst && cst->is_integer() && cst->is_i()) {
-      return cst->to_i();
-    }
-    return std::nullopt;
-  };
+  // A `constant` literal goes through the Pyrope literal parser (so hex/octal/
+  // underscore-grouped forms like `0x3` / `1_0` work), or a compile-time-
+  // resolvable `const NAME` is looked up — the same helper as the @[N] /
+  // stage[N] timing slots.
+  auto lit_int = [&](TSNode c) -> std::optional<int64_t> { return resolve_cycle_value(c); };
 
   // Depths ride int32 fields downstream (Lnast_io_entry::stages_min/max);
   // diagnose anything beyond instead of silently truncating.
@@ -3309,7 +3340,7 @@ std::pair<int64_t, int64_t> Prp2lnast::parse_pipe_depth(TSNode pipe_lambda_node)
   report_error(depth,
                "invalid-pipe-depth",
                "type",
-               "pipe depth must be a literal integer or a literal ascending range",
+               "pipe depth must be a literal integer (or a compile-time constant) or a literal ascending range",
                "write `pipe[3]`, `pipe[2..=5]`, `pipe[1..<4]`, or bare `pipe`");
 }
 
@@ -3341,15 +3372,8 @@ std::pair<std::string, std::string> Prp2lnast::parse_stage_slot(TSNode storage_n
     return {"nil", "nil"};
   }
 
-  auto lit_int = [&](TSNode c) -> std::optional<int64_t> {
-    if (ts_node_is_null(c) || std::string_view(ts_node_type(c)) != "constant") {
-      return std::nullopt;
-    }
-    if (auto cst = Dlop::from_pyrope(trim(get_text(c))); cst && cst->is_integer() && cst->is_i()) {
-      return cst->to_i();
-    }
-    return std::nullopt;
-  };
+  // `constant` literal or a compile-time-resolvable `const NAME`.
+  auto lit_int = [&](TSNode c) -> std::optional<int64_t> { return resolve_cycle_value(c); };
 
   // `stage[N]` — a single literal.
   if (auto v = lit_int(index_n)) {
@@ -3403,7 +3427,7 @@ std::pair<std::string, std::string> Prp2lnast::parse_stage_slot(TSNode storage_n
   report_error(index_n,
                "invalid-stage-count",
                "type",
-               "stage count must be a literal integer or a literal ascending closed range",
+               "stage count must be a literal integer (or a compile-time constant) or a literal ascending closed range",
                "write `stage[3]`, `stage[2..=5]`, or `stage[]` to let the toolchain pick");
 }
 
@@ -3430,18 +3454,14 @@ void Prp2lnast::maybe_emit_timecheck(TSNode timing_slot, TSNode id_node) {
     }
     return;  // `@[]` — explicit opt-out, nothing recorded
   }
-  std::optional<int64_t> lit;
-  if (std::string_view(ts_node_type(index_n)) == "constant") {
-    if (auto cst = Dlop::from_pyrope(trim(get_text(index_n))); cst && cst->is_integer() && cst->is_i()) {
-      lit = cst->to_i();
-    }
-  }
+  std::optional<int64_t> lit = resolve_cycle_value(index_n);
   if (!lit || *lit < 0) {
     report_error(index_n,
                  "invalid-cycle-check",
                  "type",
-                 "a cycle check must be a literal cycle >= 0 (counted from the enclosing lambda's inputs)",
-                 "write `@[N]` with a literal N, or opt out with `@[]`");
+                 "a cycle check must resolve to a cycle >= 0 (a literal or compile-time constant, counted from the "
+                 "enclosing lambda's inputs)",
+                 "write `@[N]` with a literal N (or a `const` resolvable to one), or opt out with `@[]`");
   }
   auto txt  = std::to_string(*lit);
   auto tcix = builder.add_child(Lnast_ntype::create_timecheck());
@@ -4528,18 +4548,14 @@ void Prp2lnast::emit_arg_assign(const Lnast_nid& tuple_parent, TSNode typed_iden
       }
       TSNode index_n = child_by_field(timing, "index");
       if (!ts_node_is_null(index_n)) {
-        std::optional<int64_t> lit;
-        if (std::string_view(ts_node_type(index_n)) == "constant") {
-          if (auto cst = Dlop::from_pyrope(trim(get_text(index_n))); cst && cst->is_integer() && cst->is_i()) {
-            lit = cst->to_i();
-          }
-        }
+        std::optional<int64_t> lit = resolve_cycle_value(index_n);
         if (!lit) {
           report_error(index_n,
                        "invalid-mod-cycle",
                        "type",
-                       std::format("mod output '{}' must declare a single literal landing cycle", arg_name),
-                       "write `@[N]` with a literal N, or opt out with `@[]`");
+                       std::format("mod output '{}' must declare a single landing cycle (a literal or compile-time constant)",
+                                   arg_name),
+                       "write `@[N]` with a literal N (or a `const` resolvable to one), or opt out with `@[]`");
         }
         if (*lit < 0) {
           report_error(index_n,

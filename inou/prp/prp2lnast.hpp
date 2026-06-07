@@ -3,6 +3,7 @@
 #pragma once
 
 #include <functional>
+#include <optional>
 #include <stack>
 #include <string>
 #include <string_view>
@@ -305,6 +306,20 @@ protected:
   // (A,B-1); bare pipe -> (1,0) (max 0 = unconstrained). pipe[0], zero-min
   // ranges, descending ranges and non-literal depths are compile errors.
   std::pair<int64_t, int64_t> parse_pipe_depth(TSNode pipe_lambda_node);
+
+  // Task 1r/1q — file-/body-scope `const NAME = <int literal>` bindings,
+  // recorded as the declaration is lowered (process_lvalue_for_assign scalar
+  // branch). Lets `@[NAME]`, `stage[NAME]`, and `pipe[NAME]` timing slots
+  // accept a compile-time-resolvable const in place of a bare literal.
+  // No-shadowing is already enforced, so a name is unambiguous along the
+  // visible chain; a later binding may overwrite an earlier same-name one.
+  std::unordered_map<std::string, int64_t> const_int_bindings_;
+
+  // Resolve a timing-index CST node to a compile-time integer: a `constant`
+  // node parses via Dlop::from_pyrope (is_integer + is_i); an `identifier`
+  // node looks up const_int_bindings_; anything else is std::nullopt (the
+  // caller emits its own "literal or compile-time constant" diagnostic).
+  std::optional<int64_t> resolve_cycle_value(TSNode n) const;
 
   struct Call_arg {
     bool        is_assign = false;

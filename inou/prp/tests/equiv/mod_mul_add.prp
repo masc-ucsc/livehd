@@ -13,6 +13,6 @@ pipe add(a:u32, b:u32) -> (c:u33) { c = a + b }
 
 mod multiply_add(in1:u16, in2:u16) -> (out:u33@[4]) {
   stage[3] tmp     = mul(in1, in2)
-  stage[3] in1_d   = in1
-  stage[1] out@[4] = add(tmp@[3], in1_d@[3])
+  stage[3] in1_d   = in1                     // OK but verbose to say: stage[3] in1_d@[3] = in1
+  stage[1] out@[4] = add(tmp@[3], in1_d@[3]) // OK to say stage[1] out = add....
 }

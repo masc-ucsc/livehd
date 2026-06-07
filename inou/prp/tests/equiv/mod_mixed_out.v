@@ -7,7 +7,7 @@ module \mod_mixed_out.mix (
 
   reg [7:0] d0;
 
-  assign x = a;
+  assign x = a+1;
 
   always @(posedge clock) begin
     d0 <= a;

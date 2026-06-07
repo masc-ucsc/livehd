@@ -3118,6 +3118,37 @@ upass::Emit_decision uPass_constprop::classify_statement() {
     return upass::Emit_decision::emit_node();
   }
 
+  // RHS-aware guard: keep a 2-child `store(lhs, rhs)` whose RHS is a ref that
+  // is NOT a genuine folded constant — i.e. either has no comptime value (a
+  // runtime producer) or holds `nil` (an unset/poison marker). process_assign
+  // cannot propagate such a RHS, so `lhs` keeps whatever it held before, and
+  // the is_known_const check above may be true only because of a *stale* value
+  // this very store was meant to overwrite. Dropping the store then loses the
+  // write. This is the 1i comb-inliner bug: the inliner seeds a scalar output
+  // `<tag>out = nil`, the body assigns it a runtime value (`store(<tag>out,
+  // ___mult)`, ___mult = `a*b` over module inputs), so both stay nil; the seed
+  // is then aliased down the epilogue chain (`___ret = <tag>out`) and into the
+  // caller's `store(out, ___ret)` (out a reg/boundary write). is_nil() passes
+  // is_known_const (it is neither invalid nor unknown, to_pyrope() `0`), so
+  // every link looked "known" and was dropped — leaving the output undriven
+  // (`out = 0`). Keeping the store wherever the RHS is nil-flavored or
+  // runtime preserves the chain so the real value lands. A genuine non-nil
+  // folded RHS is faithfully recovered by fold_ref at the consumer, so
+  // dropping it stays safe (and comptime nil==nil folding is untouched: that
+  // happens in fold_ref, not here).
+  {
+    const auto here = lm->save_cursor();
+    bool       keep = false;
+    if (lm->current_num_children() == 2 && move_to_child() && move_to_sibling() && is_type(Lnast_ntype::Lnast_ntype_ref)) {
+      const auto rhs = current_text();
+      keep           = !st.is_known_const(rhs) || (st.has_trivial(rhs) && st.get_trivial(rhs).is_nil());
+    }
+    lm->restore_cursor(here);
+    if (keep) {
+      return upass::Emit_decision::emit_node();
+    }
+  }
+
   // Bundle-shape guard. is_known_const returns true as soon as the bundle's
   // position-0 entry is a concrete Const, but that's also true for:
   //   - multi-entry tuples: `(1,2)` — two non-attribute entries
