@@ -20,6 +20,8 @@ namespace {
 // compile error: read them with `.[attr]` (attr_get), never write them.
 //   * `max`/`min` are additionally settable, but ONLY through a *type*
 //     (`:int(max=N,min=M)`, `:uN`/`:sN`), never via attr_set.
+//   * `range` is not an attribute at all — `:[range=0..=15]` was legacy sugar
+//     for max/min and is now rejected the same way (declare a type instead).
 //   * `bits`/`size`/`sign`/`key` are pure reads — there is no way to set them.
 // Returns a human-readable reason when `attr` is one of these, else "".
 //
@@ -29,11 +31,14 @@ namespace {
 // `comptime`/`type`/`wrap`/`sat` (decl mode + per-write overflow). Those are
 // also derived/mode and SHOULD become attr_set errors once T3/T6 stop the
 // producer from emitting them; flagging them now would reject the compiler's
-// own output. The six below are never emitted by the producer, so they are
+// own output. The seven below are never emitted by the producer, so they are
 // safe to enforce today.
 std::string_view derived_attr_violation(std::string_view attr) {
   if (attr == "max" || attr == "min") {
     return "settable only through a type (`:int(max=,min=)`, `:uN`/`:sN`), never via an attribute write";
+  }
+  if (attr == "range") {
+    return "not an attribute; declare the bounds through a type instead (`:int(max=,min=)`, `:uN`/`:sN`)";
   }
   if (attr == "bits" || attr == "size" || attr == "sign" || attr == "key") {
     return "a derived read-only attribute (computed from the type/bundle); it can be read but not set";

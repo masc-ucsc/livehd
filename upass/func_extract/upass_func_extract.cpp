@@ -258,6 +258,26 @@ void uPass_func_extract::process_tuple_add() {
   lm->restore_cursor(saved);
 }
 
+// Task 1m — record `fcall(___N, 'import', '<str>')` so a following
+// `store NAME ___N` can promote NAME to an import-binding capture
+// (latest_outer_import). Only the canonical const-callee shape matches.
+void uPass_func_extract::process_func_call() {
+  if (!lm->has_child()) {
+    return;
+  }
+  const auto saved = lm->save_cursor();
+  lm->move_to_child();
+  std::string dst;
+  if (Lnast_ntype::is_ref(lm->current_type())) {
+    dst = std::string(lm->current_text());
+  }
+  if (!dst.empty() && lm->move_to_sibling() && Lnast_ntype::is_const(lm->current_type()) && lm->current_raw_text() == "import"
+      && lm->move_to_sibling() && Lnast_ntype::is_const(lm->current_type())) {
+    temp_import_text[dst] = std::string(lm->current_raw_text());
+  }
+  lm->restore_cursor(saved);
+}
+
 void uPass_func_extract::process_assign() {
   // Definition-time closure-capture tracking. A name is recorded as a
   // visible constant for any comb defined later in this scope IFF its
@@ -294,6 +314,7 @@ void uPass_func_extract::process_assign() {
   auto invalidate = [&]() {
     latest_outer_value.erase(lhs_name);
     latest_outer_bundle.erase(lhs_name);
+    latest_outer_import.erase(lhs_name);
     outer_non_const.insert(lhs_name);
   };
 
@@ -301,7 +322,7 @@ void uPass_func_extract::process_assign() {
     return;
   }
   // Second write to the same name → no longer a stable constant.
-  if (latest_outer_value.contains(lhs_name) || latest_outer_bundle.contains(lhs_name)) {
+  if (latest_outer_value.contains(lhs_name) || latest_outer_bundle.contains(lhs_name) || latest_outer_import.contains(lhs_name)) {
     invalidate();
     return;
   }
@@ -331,6 +352,13 @@ void uPass_func_extract::process_assign() {
     auto bit = temp_bundle_value.find(rhs_text);
     if (bit != temp_bundle_value.end()) {
       latest_outer_bundle[lhs_name] = bit->second;
+      return;
+    }
+    // Task 1m — `store b ___N` where ___N is an import-call dst: capture the
+    // import string so bodies reading `b` get the call replicated.
+    auto imit = temp_import_text.find(rhs_text);
+    if (imit != temp_import_text.end()) {
+      latest_outer_import[lhs_name] = imit->second;
       return;
     }
     // Aliasing an existing outer-scope value (`COPY = K`) is also a
@@ -461,7 +489,7 @@ void uPass_func_extract::process_func_def() {
     // construction, so they naturally don't cross the function boundary —
     // that's the "constants flow up, non-constants stop at the function
     // scope" rule, expressed structurally.
-    if (!latest_outer_value.empty() || !latest_outer_bundle.empty()) {
+    if (!latest_outer_value.empty() || !latest_outer_bundle.empty() || !latest_outer_import.empty()) {
       // Scan the SOURCE body (`lm` cursor is at the func_def's stmts) for
       // every name it reads, so we only inline captures the body actually
       // consumes.
@@ -488,6 +516,17 @@ void uPass_func_extract::process_func_def() {
           auto a_idx = new_lnast->add_child(stmts, Lnast_ntype::create_store());
           new_lnast->add_child(a_idx, Lnast_node::create_ref(name));
           new_lnast->add_child(a_idx, Lnast_node::create_const(it->second.to_pyrope()));
+          continue;
+        }
+        // Task 1m — import bindings replicate as the import CALL itself
+        // (resolution happens later, in constprop, against the registry):
+        // `fcall(ref name, 'import', '<str>')` binds the namespace bundle /
+        // lambda ref inside this body exactly like at file scope.
+        if (auto iit = latest_outer_import.find(name); iit != latest_outer_import.end()) {
+          auto f_idx = new_lnast->add_child(stmts, Lnast_ntype::create_func_call());
+          new_lnast->add_child(f_idx, Lnast_node::create_ref(name));
+          new_lnast->add_child(f_idx, Lnast_node::create_const("import"));
+          new_lnast->add_child(f_idx, Lnast_node::create_const(iit->second));
           continue;
         }
         auto bit = latest_outer_bundle.find(name);

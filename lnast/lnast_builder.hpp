@@ -48,6 +48,9 @@ public:
     idx_stmts = stmts_stack_.top();
     stmts_stack_.pop();
   }
+  // True while the cursor is the top-level (file-scope) stmts — nothing has
+  // been pushed. Task 1m uses this to validate `pub` placement.
+  bool at_top_stmts() const { return stmts_stack_.empty(); }
 
   // ── naming ───────────────────────────────────────────────────────────────
   std::string      create_lnast_tmp();

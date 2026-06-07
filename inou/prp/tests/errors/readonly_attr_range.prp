@@ -1,0 +1,12 @@
+/*
+:name: readonly_attr_range
+:type: error
+:error: not an attribute|cannot write
+*/
+
+// `range` is not an attribute: bounds are declared through a TYPE
+// (`:int(max=,min=)`, `:uN`/`:sN`). `:[range=…]` was legacy sugar for
+// max/min and is rejected the same way as `:[max=]`/`:[min=]`.
+
+mut x:int:[range = 0..=15] = 1 // locate_error_here
+cassert(x == 1)

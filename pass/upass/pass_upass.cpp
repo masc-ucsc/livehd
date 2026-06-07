@@ -8,10 +8,13 @@
 #include <format>
 #include <memory>
 #include <print>
+#include <set>
 #include <stdexcept>
 #include <string>
 #include <string_view>
 #include <vector>
+
+#include "diag.hpp"
 
 #include "upass_attributes.hpp"  // NOLINT: ensures plugin "attributes" is linked
 #include "upass_bitwidth.hpp"    // NOLINT: ensures plugin "bitwidth" is linked
@@ -122,6 +125,10 @@ void Pass_upass::setup() {
   m1.add_label_optional("verifier_include_funcs",
                         "verifier: also tally casserts inside func_extract-spawned function bodies (default false)",
                         "false");
+  m1.add_label_optional("import_defer",
+                        "task 1m: surface unresolved live imports on the pass var (kernel iterate loop) instead of "
+                        "hard-erroring (default false)",
+                        "false");
   register_pass(m1);
 }
 
@@ -162,6 +169,7 @@ Pass_upass::Pass_upass(const Eprp_var& var) : Pass("pass.upass", var) {
   capture_opt("verifier_pass");
   capture_opt("verifier_fail");
   capture_opt("coalescer");
+  capture_opt("import_defer");
 
   if (!upass_order.empty()) {
     return;
@@ -306,6 +314,10 @@ void Pass_upass::work(Eprp_var& var) {
   uPass_verifier::set_aggregate_expected(parse_expected_count(up.pass_options, "verifier_pass"),
                                          parse_expected_count(up.pass_options, "verifier_fail"));
 
+  // Task 1m — fresh unresolved-import slate for this invocation.
+  uPass_constprop::reset_pending_imports();
+  var.unresolved_imports.clear();
+
   // Capture original entry-point count BEFORE func_extract spawns helper
   // lnasts. Anything appended past this index in the func_extract loop is
   // a function-body spawn — used below to gate the verifier off for
@@ -444,6 +456,53 @@ void Pass_upass::work(Eprp_var& var) {
       if (g) {
         var.add(g);
       }
+    }
+  }
+
+  // ── Task 1m — unresolved live imports. With import_defer:1 the kernel's
+  // iterate loop consumes them via var.unresolved_imports (whole-file retry
+  // once the exporter publishes); standalone, they are hard errors listing
+  // the import string and the searched inputs.
+  if (const auto& pend = uPass_constprop::pending_imports(); !pend.empty()) {
+    const auto defer_txt = [&]() -> std::string {
+      auto it = up.pass_options.find("import_defer");
+      return it != up.pass_options.end() ? it->second : "";
+    }();
+    const bool defer = !(defer_txt.empty() || defer_txt == "0" || defer_txt == "false");
+    if (defer) {
+      for (const auto& p : pend) {
+        var.unresolved_imports.emplace_back(p.unit, p.text);
+      }
+      // Deferred round: blocked files retry wholesale next round, so the
+      // verifier tallies of this round are partial — don't enforce the
+      // expected counts (the converged round does).
+      return;
+    } else {
+      std::set<std::pair<std::string, std::string>> seen;
+      std::string                                   searched;
+      for (const auto& ln : var.lnasts) {
+        const auto name = std::string(ln->get_top_module_name());
+        if (name.find('.') != std::string::npos) {
+          continue;  // derived trees — list file-level units only
+        }
+        if (!searched.empty()) {
+          searched += ", ";
+        }
+        searched += name;
+      }
+      for (const auto& p : pend) {
+        if (!seen.emplace(p.unit, p.text).second) {
+          continue;
+        }
+        livehd::diag::sink().emit(
+            livehd::diag::Diagnostic{.severity = livehd::diag::Severity::error,
+                                     .code     = "import-unresolved",
+                                     .category = "name",
+                                     .pass     = "pass.upass",
+                                     .message  = std::format("unit `{}`: unresolved import \"{}\"", p.unit, p.text),
+                                     .hint     = std::format("searched inputs: {}", searched.empty() ? "(none)" : searched)});
+      }
+      fail_upass_runtime(std::format("{} unresolved import(s)", seen.size()));
     }
   }
 

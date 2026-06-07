@@ -1129,7 +1129,88 @@ void uPass_constprop::process_stmts() {
   }
 }
 
-void uPass_constprop::process_stmts_post() { st.leave_scope(); }
+void uPass_constprop::process_stmts_post() {
+  // Task 1m — when the FILE-scope block is about to pop (stack is exactly
+  // [function, top-block]; nested arms/loops/inline frames sit deeper),
+  // capture the folded value of every `pub` value export into the Lnast's
+  // pub-values side channel. The kernel synthesizes the `<unit>.__pub`
+  // wrapper from it — the symbol table is the only place a fully-folded
+  // scalar lives (its const store is dropped from the materialized tree).
+  //
+  // Skipped when the unit is already published (a `<unit>.__pub` wrapper
+  // rides the loaded ln: dir — re-elaborating a loaded post-upass tree
+  // cannot re-fold values whose stores were dropped) and when THIS unit hit
+  // an unresolved import (it defers wholesale; erroring on a pub value that
+  // depends on the missing import would mask the defer).
+  if (st.stack.size() == 2 && !lm->get_lnast()->get_pub_list().empty()) {
+    const auto unit = std::string(lm->get_top_module_name());
+    // Already published: a loaded ln: dir carries the `<unit>.__pub` wrapper;
+    // an in-invocation completed unit carries stamped pub_values_. Either way
+    // a LATER round re-walks the materialized tree, where fully-folded const
+    // stores no longer exist — re-harvesting would spuriously fail.
+    bool skip = function_registry.contains(unit + ".__pub") || !lm->get_lnast()->get_pub_values().empty();
+    if (!skip) {
+      for (const auto& p : pending_imports_) {
+        if (p.unit == unit) {
+          skip = true;
+          break;
+        }
+      }
+    }
+    if (!skip) {
+      harvest_pub_values();
+    }
+  }
+  st.leave_scope();
+}
+
+void uPass_constprop::harvest_pub_values() {
+  const auto& ln = lm->get_lnast();
+
+  // A pub value must fold to a comptime constant when its file is elaborated
+  // (docs/contracts/task_1m_plan.md §1) — reject at the exporting side.
+  auto fail = [&](std::string_view name, std::string_view why) {
+    auto msg = std::format("pub `{}` of unit `{}` is not comptime-foldable ({})", name, ln->get_top_module_name(), why);
+    livehd::diag::sink().emit(livehd::diag::Diagnostic{.severity = livehd::diag::Severity::error,
+                                                       .code     = "pub-not-comptime",
+                                                       .category = "type",
+                                                       .pass     = "upass.constprop",
+                                                       .message  = msg,
+                                                       .hint = "a `pub const` initializer must fold to a comptime constant"});
+    throw std::runtime_error(msg);
+  };
+
+  std::vector<std::pair<std::string, std::string>> leaves;
+  for (const auto& p : ln->get_pub_list()) {
+    if (p.kind != "value") {
+      continue;  // lambda exports carry a tree url; nothing to fold
+    }
+    if (st.is_known_const(p.name)) {
+      leaves.emplace_back(p.name, st.get_trivial(p.name).to_pyrope());
+      continue;
+    }
+    if (st.has_bundle(p.name)) {
+      const auto b = st.get_bundle(p.name);
+      if (!b || b->non_attr_entries().empty()) {
+        fail(p.name, "empty or unresolved bundle");
+      }
+      for (const auto& [key, ep] : b->non_attr_entries()) {
+        const auto& v = ep->trivial;
+        if (v.is_invalid() || v.has_unknowns()) {
+          fail(p.name, key == "0" ? "not a known constant" : std::format("field `{}` is not a known constant", key));
+        }
+        if (key == "0") {  // trivial scalar slot — export under the bare name
+          leaves.emplace_back(p.name, v.to_pyrope());
+        } else {
+          leaves.emplace_back(absl::StrCat(p.name, ".", key), v.to_pyrope());
+        }
+      }
+      continue;
+    }
+    fail(p.name, "no comptime value");
+  }
+  lm->get_lnast()->set_pub_values(std::move(leaves));
+}
 
 // ── Tuple Operations ─────────────────────────────────────────────────────────
 //
@@ -2332,6 +2413,147 @@ bool uPass_constprop::try_eval_cell_call(std::string_view dst, std::string_view 
   return true;
 }
 
+// Task 1m — resolve a live `import("…")` call against the function registry
+// (docs/contracts/task_1m_plan.md §1/§2). The cursor sits on the const
+// "import" callee; the next sibling is the const import string.
+//
+//   import("unit")        — the whole pub tuple: bind `dst` to a namespace
+//                           bundle (value leaves + lambda tree-name strings,
+//                           each lambda field carrying a `__pub` kind attr).
+//   import("ln:u.tree")   — direct tree ref: bind `dst` to the tree-name
+//                           string 'u.tree' (the fcall-ref-const lambda-value
+//                           form; `equals` compares these strings — tree-url
+//                           identity).
+//   import("lg:graph")    — black-box graph ref (task 1m-E lowers the call
+//                           sites at tolg); bound as the string 'lg:graph'.
+//
+// Resolution consults only the registry (completed in-invocation units +
+// loaded ln: forests). A miss records a pending import — pass.upass either
+// errors (standalone) or defers the file to the kernel's iterate loop.
+void uPass_constprop::process_import_call(const std::string& dst) {
+  if (!move_to_sibling()) {
+    return;  // malformed call (no argument) — leave unfolded
+  }
+  std::string text(lm->current_raw_text());
+  if (text.size() >= 2 && (text.front() == '\'' || text.front() == '"') && text.back() == text.front()) {
+    text = text.substr(1, text.size() - 2);
+  }
+  if (text.empty()) {
+    return;
+  }
+  auto pend = [&]() { pending_imports_.push_back({std::string(lm->get_top_module_name()), text}); };
+  auto str_const = [](std::string_view s) { return *Dlop::from_pyrope(absl::StrCat("'", s, "'")); };
+
+  if (text.starts_with("ln:")) {
+    // Whole remaining string = the tree name, verbatim (may contain dots).
+    const std::string tree = text.substr(3);
+    if (!function_registry.count(tree)) {
+      pend();
+      return;
+    }
+    store_trivial(dst, str_const(tree));
+    return;
+  }
+  if (text.starts_with("lg:")) {
+    // Bind the url itself; the call sites lower to Sub instances at tolg
+    // (task 1m-E wires the GraphLibrary lookup + missing-graph diagnostics).
+    store_trivial(dst, str_const(text));
+    return;
+  }
+
+  // Tuple form — the unit's whole pub namespace.
+  auto build_namespace = [&](std::string_view                                        unit,
+                             const std::vector<std::pair<std::string, std::string>>& values,
+                             const std::vector<Lnast_pub_entry>&                     pubs) {
+    auto b = std::make_shared<Bundle>(dst);
+    for (const auto& [path, val_text] : values) {
+      b->set(path, *Dlop::from_pyrope(val_text));
+    }
+    for (const auto& p : pubs) {
+      if (p.kind == "value") {
+        continue;
+      }
+      b->set(p.name, str_const(absl::StrCat(unit, ".", p.name)));
+      b->set_attr(p.name, "pub", str_const(p.kind));
+    }
+    // Marks "import namespace" (the runner's UFCS check exempts these; the
+    // read-only guarantee rides the importing `const` declaration).
+    b->set_attr("pub_unit", str_const(unit));
+    st.set(dst, b);
+  };
+
+  // Cross-invocation: a loaded `<unit>.__pub` wrapper tree (the durable pub
+  // list). Walk its synthesized shape: store(ref path, const text) leaves +
+  // attr_set(ref name, '__pub', '<kind>') lambda markers.
+  if (auto wit = function_registry.find(text + ".__pub"); wit != function_registry.end()) {
+    const auto&                                      w = wit->second;
+    std::vector<std::pair<std::string, std::string>> values;
+    std::vector<Lnast_pub_entry>                     pubs;
+    auto                                             root = w->get_root();
+    for (auto stmts : w->children(root)) {
+      if (!Lnast_ntype::is_stmts(w->get_type(stmts))) {
+        continue;
+      }
+      for (auto stmt : w->children(stmts)) {
+        auto c0 = w->get_first_child(stmt);
+        if (c0.is_invalid()) {
+          continue;
+        }
+        auto c1 = w->get_sibling_next(c0);
+        if (c1.is_invalid()) {
+          continue;
+        }
+        if (Lnast_ntype::is_attr_set(w->get_type(stmt)) && w->get_name(c1) == "__pub") {
+          auto c2 = w->get_sibling_next(c1);
+          if (!c2.is_invalid()) {
+            std::string kind(w->get_name(c2));
+            if (kind.size() >= 2 && kind.front() == '\'' && kind.back() == '\'') {
+              kind = kind.substr(1, kind.size() - 2);
+            }
+            pubs.push_back({std::string(w->get_name(c0)), kind});
+          }
+          continue;
+        }
+        if (Lnast_ntype::is_store(w->get_type(stmt))) {
+          std::string val(w->get_name(c1));
+          // A lambda url leaf ('ln:u.tree') is re-bound by the pubs loop
+          // (tree-name string); skip it here.
+          if (val.starts_with("'ln:")) {
+            continue;
+          }
+          values.emplace_back(std::string(w->get_name(c0)), std::move(val));
+        }
+      }
+    }
+    build_namespace(text, values, pubs);
+    return;
+  }
+
+  // Same-invocation: the source unit publishes through its Lnast side
+  // channels — pub_list_ from the parse, pub_values_ stamped by THIS pass
+  // when the unit's file-scope walk completed. Values still pending →
+  // defer (whole-file retry once the exporter finishes).
+  if (auto uit = function_registry.find(text); uit != function_registry.end() && uit->second->get_lambda_kind().empty()) {
+    const auto& src  = uit->second;
+    const auto& pubs = src->get_pub_list();
+    bool        needs_values = false;
+    for (const auto& p : pubs) {
+      if (p.kind == "value") {
+        needs_values = true;
+        break;
+      }
+    }
+    if (needs_values && src->get_pub_values().empty()) {
+      pend();  // exporter not yet completed this invocation
+      return;
+    }
+    build_namespace(text, src->get_pub_values(), pubs);
+    return;
+  }
+
+  pend();  // no matching unit among the explicit inputs
+}
+
 void uPass_constprop::process_func_call() {
   // Layout: ref(dst), ref(func_name), (const|ref)(arg)...
   // Now strictly the ref-form (built-in typecast callables and user funcs).
@@ -2347,7 +2569,18 @@ void uPass_constprop::process_func_call() {
 
   if (!is_type(Lnast_ntype::Lnast_ntype_ref)) {
     // Const-form callee (`import`, `step`, `implies` — see prp2lnast's
-    // make_call). `a..=b step s` has no dedicated LNAST op yet; its step
+    // make_call).
+    //
+    // Task 1m — a live `import("…")` resolves here (dead branches never
+    // dispatch, so liveness is exactly "we got here"): the tuple form binds
+    // a pub-namespace bundle, the `ln:` url form a lambda tree-name string.
+    // Unresolved → recorded for pass.upass (error or kernel defer).
+    if (lm->current_raw_text() == "import") {
+      process_import_call(dst);
+      move_to_parent();
+      return;
+    }
+    // `a..=b step s` has no dedicated LNAST op yet; its step
     // amount must be a positive integer (ranges only ascend — see the
     // descending-range check in process_range), so diagnose a comptime
     // non-positive step here even though the call itself stays unfolded.

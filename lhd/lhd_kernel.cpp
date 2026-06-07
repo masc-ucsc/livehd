@@ -9,10 +9,13 @@
 #include <format>
 #include <fstream>
 #include <iostream>
+#include <map>
+#include <set>
 #include <sstream>
 #include <string>
 #include <vector>
 
+#include "absl/container/flat_hash_set.h"
 #include "diag.hpp"
 #include "eprp.hpp"
 #include "file_utils.hpp"
@@ -353,7 +356,29 @@ uint64_t hash_bytes(const std::string& bytes) { return lh::woothash64(bytes.data
 
 // ---- typed-emit helpers -----------------------------------------------------
 
-void write_manifest(const std::string& dir, std::string_view kind, const std::vector<std::pair<std::string, uint64_t>>& units) {
+std::string json_escape_min(std::string_view s);  // defined with the scan command below
+
+// Task 1m — one `pub` export in a unit's manifest entry. `url` only for
+// lambda exports (`ln:<unit>.<name>`); values live in the `<unit>.__pub`
+// wrapper tree.
+struct Manifest_pub {
+  std::string name;
+  std::string kind;  // value|comb|mod|pipe|fluid
+  std::string url;
+};
+
+// One manifest unit entry. `unit_kind` distinguishes file-level units
+// ("file"), extracted lambdas (their durable lambda kind — restored onto the
+// Lnast on load, the in-memory member doesn't ride the forest save), and the
+// synthesized pub wrapper ("pub"). Empty = omit (non-ln emit kinds).
+struct Manifest_unit {
+  std::string               name;
+  uint64_t                  hash{0};
+  std::string               unit_kind;
+  std::vector<Manifest_pub> pubs;  // file units only (the pub index)
+};
+
+void write_manifest(const std::string& dir, std::string_view kind, const std::vector<Manifest_unit>& units) {
   std::ofstream ofs(dir + "/manifest.json");
   if (!ofs.is_open()) {
     throw Lhd_error{"config", std::format("could not write {}/manifest.json", dir), ""};
@@ -363,18 +388,49 @@ void write_manifest(const std::string& dir, std::string_view kind, const std::ve
   std::string_view ext = kind == "pyrope" ? ".prp" : (kind == "verilog" ? ".v" : (kind == "lnast-dump" ? ".lnast" : ""));
   ofs << "{\"schema_version\":1,\"kind\":\"" << kind << "\",\"units\":[";
   bool first = true;
-  for (const auto& [name, hash] : units) {
+  for (const auto& u : units) {
     if (!first) {
       ofs << ',';
     }
     first = false;
-    ofs << "{\"name\":\"" << name << "\"";
+    ofs << "{\"name\":\"" << json_escape_min(u.name) << "\"";
     if (!ext.empty()) {
-      ofs << ",\"file\":\"" << name << ext << "\"";
+      ofs << ",\"file\":\"" << json_escape_min(u.name) << ext << "\"";
     }
-    ofs << ",\"content_hash\":\"" << std::format("{:016x}", hash) << "\"}";
+    ofs << ",\"content_hash\":\"" << std::format("{:016x}", u.hash) << "\"";
+    if (!u.unit_kind.empty()) {
+      ofs << ",\"unit_kind\":\"" << json_escape_min(u.unit_kind) << "\"";
+    }
+    if (!u.pubs.empty()) {
+      ofs << ",\"pub\":[";
+      bool pfirst = true;
+      for (const auto& p : u.pubs) {
+        if (!pfirst) {
+          ofs << ',';
+        }
+        pfirst = false;
+        ofs << "{\"name\":\"" << json_escape_min(p.name) << "\",\"kind\":\"" << json_escape_min(p.kind) << "\"";
+        if (!p.url.empty()) {
+          ofs << ",\"url\":\"" << json_escape_min(p.url) << "\"";
+        }
+        ofs << "}";
+      }
+      ofs << "]";
+    }
+    ofs << "}";
   }
   ofs << "]}\n";
+}
+
+// Pair-form adapter for the per-unit-file emit kinds (pyrope/verilog/
+// lnast-dump), which carry no unit_kind/pub metadata.
+void write_manifest(const std::string& dir, std::string_view kind, const std::vector<std::pair<std::string, uint64_t>>& units) {
+  std::vector<Manifest_unit> rich;
+  rich.reserve(units.size());
+  for (const auto& [name, hash] : units) {
+    rich.push_back({name, hash, "", {}});
+  }
+  write_manifest(dir, kind, rich);
 }
 
 // ---- ln: directories (hhds::Forest::save + manifest.json) -------------------
@@ -395,16 +451,37 @@ void save_ln_dir(Options& opts, Result& res, const std::vector<std::shared_ptr<L
   });
 
   auto forest = hhds::Forest::create();
-  std::vector<std::pair<std::string, uint64_t>> manifest;
+  std::vector<Manifest_unit> manifest;
   for (const auto& ln : sorted) {
     std::string name{ln->get_top_module_name()};
-    if (!manifest.empty() && manifest.back().first == name) {
+    if (!manifest.empty() && manifest.back().name == name) {
       throw Lhd_error{"config", std::format("duplicate LNAST unit name '{}'", name), ""};
     }
     ln->export_into(*forest);
     std::ostringstream oss;
     ln->dump(oss);  // hash the canonical text form (deterministic)
-    manifest.emplace_back(name, hash_bytes(oss.str()));
+    Manifest_unit u;
+    u.name = name;
+    u.hash = hash_bytes(oss.str());
+    // Task 1m — durable unit metadata: the lambda kind (an in-memory Lnast
+    // member, lost across the forest save) and the file unit's pub index.
+    if (name.size() > 6 && name.ends_with(".__pub")) {
+      u.unit_kind = "pub";
+    } else if (!ln->get_lambda_kind().empty()) {
+      u.unit_kind = std::string(ln->get_lambda_kind());
+    } else {
+      u.unit_kind = "file";
+    }
+    for (const auto& p : ln->get_pub_list()) {
+      Manifest_pub mp;
+      mp.name = p.name;
+      mp.kind = p.kind;
+      if (p.kind != "value") {
+        mp.url = std::format("ln:{}.{}", name, p.name);
+      }
+      u.pubs.push_back(std::move(mp));
+    }
+    manifest.push_back(std::move(u));
   }
   forest->save(dir);
   write_manifest(dir, "ln", manifest);
@@ -441,6 +518,21 @@ std::vector<std::shared_ptr<Lnast>> load_ln_dir(const std::string& dir) {
     auto ln = Lnast::adopt(forest, u["name"].GetString());
     if (!ln) {
       throw Lhd_error{"config", std::format("unit '{}' listed in manifest but missing from the forest", u["name"].GetString()), ""};
+    }
+    // Task 1m — restore the durable unit metadata the forest save doesn't
+    // carry: the lambda kind (inliner/tolg gate on it) and the pub index.
+    if (u.HasMember("unit_kind") && u["unit_kind"].IsString()) {
+      std::string_view uk = u["unit_kind"].GetString();
+      if (uk != "file" && uk != "pub") {
+        ln->set_lambda_kind(uk);
+      }
+    }
+    if (u.HasMember("pub") && u["pub"].IsArray()) {
+      for (const auto& p : u["pub"].GetArray()) {
+        if (p.IsObject() && p.HasMember("name") && p["name"].IsString() && p.HasMember("kind") && p["kind"].IsString()) {
+          ln->add_pub(p["name"].GetString(), p["kind"].GetString());
+        }
+      }
     }
     out.push_back(std::move(ln));
   }
@@ -799,6 +891,71 @@ std::vector<std::shared_ptr<Lnast>> filter_top(const std::vector<std::shared_ptr
     throw Lhd_error{"config",
                     std::format("--top {} not found among elaborated units", top),
                     std::format("available units: {}", join_csv(names))};
+  }
+  return out;
+}
+
+// Task 1m §4 — synthesize the `<unit>.__pub` wrapper tree: the durable,
+// atomically-published pub list of a file unit. Self-describing body shape
+// (walkable without evaluation; valid plain LNAST):
+//   value leaves: store(ref '<name>[.field]', const <pyrope-text>)
+//                 — the folded comptime leaves stamped by uPass_constprop
+//   lambdas:      attr_set(ref '<name>', const '__pub', const '<kind>')
+//                 store(ref '<name>', const 'ln:<unit>.<name>')
+// Returns nullptr when the unit exports nothing.
+std::shared_ptr<Lnast> synthesize_pub_wrapper(const std::shared_ptr<Lnast>& ln) {
+  const auto& pubs = ln->get_pub_list();
+  if (pubs.empty()) {
+    return nullptr;
+  }
+  const std::string unit{ln->get_top_module_name()};
+  auto              w     = std::make_shared<Lnast>(unit + ".__pub");
+  auto              root  = w->set_root(Lnast_ntype::create_top());
+  auto              stmts = w->add_child(root, Lnast_ntype::create_stmts());
+  for (const auto& [path, text] : ln->get_pub_values()) {
+    auto s = w->add_child(stmts, Lnast_ntype::create_store());
+    w->add_child(s, Lnast_node::create_ref(path));
+    w->add_child(s, Lnast_node::create_const(text));
+  }
+  for (const auto& p : pubs) {
+    if (p.kind == "value") {
+      continue;
+    }
+    auto a = w->add_child(stmts, Lnast_ntype::create_attr_set());
+    w->add_child(a, Lnast_node::create_ref(p.name));
+    w->add_child(a, Lnast_node::create_const("__pub"));
+    w->add_child(a, Lnast_node::create_const(std::format("'{}'", p.kind)));
+    auto s = w->add_child(stmts, Lnast_ntype::create_store());
+    w->add_child(s, Lnast_node::create_ref(p.name));
+    w->add_child(s, Lnast_node::create_const(std::format("'ln:{}.{}'", unit, p.name)));
+  }
+  return w;
+}
+
+// Task 1m — the publishable unit set of the given source units: each source
+// plus every derived tree named "<src>.<entity>" (func_extract naming —
+// extracted lambdas, and the `.__pub` wrapper once synthesized).
+std::vector<std::shared_ptr<Lnast>> collect_source_derived(const std::vector<std::shared_ptr<Lnast>>& all,
+                                                           const std::vector<std::shared_ptr<Lnast>>& sources) {
+  absl::flat_hash_set<std::string> roots;
+  for (const auto& ln : sources) {
+    roots.emplace(ln->get_top_module_name());
+  }
+  std::vector<std::shared_ptr<Lnast>> out;
+  for (const auto& ln : all) {
+    std::string name{ln->get_top_module_name()};
+    if (roots.contains(name)) {
+      out.push_back(ln);
+      continue;
+    }
+    // "<src>.<entity>" — match against every root (a unit name may itself
+    // contain dots, so a single find('.') split would mis-bucket).
+    for (const auto& r : roots) {
+      if (name.size() > r.size() + 1 && name.compare(0, r.size(), r) == 0 && name[r.size()] == '.') {
+        out.push_back(ln);
+        break;
+      }
+    }
   }
   return out;
 }
@@ -1328,12 +1485,13 @@ void elaborate_command(Options& opts, Result& res) {
     // Emit only THIS invocation's source units (imports have their own
     // elaboration step and ln: directory).
     std::vector<std::shared_ptr<Lnast>> source_units(var.lnasts.begin() + static_cast<long>(n_imports), var.lnasts.end());
-    if (ln_out != nullptr) {
-      save_ln_dir(opts, res, filter_top(source_units, opts.top), ln_out->path);
-    }
     emit_lnast_dump_outputs(filter_top(source_units, opts.top), opts, res);  // post-parse dump
-    if (lg_out != nullptr || wants_dump(opts, "lnast") || wants_dump(opts, "lg")) {
-      // Lower onto LGraphs (imports stay on the pipe for call resolution).
+    if (ln_out != nullptr || lg_out != nullptr || wants_dump(opts, "lnast") || wants_dump(opts, "lg")) {
+      // Task 1m — elaboration is parse + pass.upass: the `ln:` emit publishes
+      // the POST-upass units (pre-elaborated for importers), each file unit's
+      // extracted lambdas (`<unit>.<entity>` — the `ln:` url targets), and a
+      // synthesized `<unit>.__pub` wrapper per pub-exporting file. A bare
+      // `lhd elaborate x.prp` (no IR emits) stays front-end-only.
       lower_lnasts(opts, res, var, lg_out ? lg_out->path : workdir(opts) + "/lgdb",
                    /*need_graphs=*/lg_out != nullptr || wants_dump(opts, "lg"));
       if (wants_dump(opts, "lg")) {
@@ -1342,6 +1500,21 @@ void elaborate_command(Options& opts, Result& res) {
       if (lg_out != nullptr) {
         livehd::Hhds_graph_library::save(lg_out->path);
         res.outputs.push_back(lg_out->path);
+      }
+      if (ln_out != nullptr) {
+        auto publish = collect_source_derived(var.lnasts, filter_top(source_units, opts.top));
+        // Publication happens at completion (never a partial pub list): the
+        // upass above either finished every unit or threw.
+        std::vector<std::shared_ptr<Lnast>> wrappers;
+        for (const auto& ln : publish) {
+          if (ln->get_lambda_kind().empty() && !ln->get_top_module_name().ends_with(".__pub")) {
+            if (auto w = synthesize_pub_wrapper(ln)) {
+              wrappers.push_back(std::move(w));
+            }
+          }
+        }
+        publish.insert(publish.end(), wrappers.begin(), wrappers.end());
+        save_ln_dir(opts, res, publish, ln_out->path);
       }
     }
     return;
@@ -1432,7 +1605,102 @@ void lower_lnasts(Options& opts, Result& res, Eprp_var& var, const std::string& 
     up["toln"] = "0";
   }
   merge_sets(opts, "upass", up);
-  run_step("pass.upass", var, up, opts, res);
+
+  // Task 1m §5 — iterate until converged. Units may import each other in any
+  // order (no topological pre-ordering; liveness needs constprop), so:
+  // each round runs pass.upass over everything; a file whose walk hit an
+  // unresolved LIVE import retries WHOLESALE next round from its pristine
+  // post-lnastfmt body — by then the exporter has published (its folded pub
+  // values ride its Lnast). A round with no progress fails, listing every
+  // blocked file with its unresolved import strings (covers both true
+  // cycles and missing units). Import-free invocations take the single-pass
+  // fast path (no clones, no defer mode).
+  bool imports_present = false;
+  for (const auto& ln : var.lnasts) {
+    if (!collect_imports(ln).empty()) {
+      imports_present = true;
+      break;
+    }
+  }
+  if (!imports_present) {
+    run_step("pass.upass", var, up, opts, res);
+  } else {
+    up["import_defer"] = "1";
+    // Pristine (post-lnastfmt, pre-upass) bodies for the whole-file retry.
+    absl::flat_hash_map<std::string, std::shared_ptr<hhds::Tree>> pristine;
+    for (const auto& ln : var.lnasts) {
+      pristine.emplace(std::string(ln->get_top_module_name()), ln->tree_ptr()->clone());
+    }
+    std::map<std::string, std::set<std::string>> prev_blocked;
+    while (true) {
+      run_step("pass.upass", var, up, opts, res);
+      if (var.unresolved_imports.empty()) {
+        break;
+      }
+      // Map each blocked unit (possibly an extracted body `file.fn`) to its
+      // retryable file-level unit — the longest pristine name prefixing it.
+      std::map<std::string, std::set<std::string>> blocked;
+      for (const auto& [unit, text] : var.unresolved_imports) {
+        std::string file;
+        for (const auto& [pname, _] : pristine) {
+          const bool prefix = unit == pname
+                              || (unit.size() > pname.size() + 1 && unit.compare(0, pname.size(), pname) == 0
+                                  && unit[pname.size()] == '.');
+          if (prefix && pname.size() > file.size()) {
+            file = pname;
+          }
+        }
+        blocked[file.empty() ? unit : file].insert(text);
+      }
+      if (blocked == prev_blocked) {
+        std::string units_avail;
+        for (const auto& [pname, _] : pristine) {
+          if (!units_avail.empty()) {
+            units_avail += ", ";
+          }
+          units_avail += pname;
+        }
+        for (const auto& [file, texts] : blocked) {
+          std::string list;
+          for (const auto& t : texts) {
+            if (!list.empty()) {
+              list += ", ";
+            }
+            list += '"' + t + '"';
+          }
+          livehd::diag::sink().emit(livehd::diag::Diagnostic{
+              .severity = livehd::diag::Severity::error,
+              .code     = "import-no-progress",
+              .category = "name",
+              .pass     = "lhd.elaborate",
+              .message  = std::format("unit `{}` is blocked on unresolved import(s): {}", file, list),
+              .hint     = std::format("an import cycle or a missing unit; available units: {}", units_avail)});
+        }
+        throw classify_engine_failure("import resolution made no progress");
+      }
+      prev_blocked = std::move(blocked);
+      // Whole-file retry: restore each blocked file's pristine body and drop
+      // its round-derived trees so re-extraction doesn't duplicate units.
+      for (const auto& [file, _] : prev_blocked) {
+        auto pit = pristine.find(file);
+        if (pit == pristine.end()) {
+          continue;
+        }
+        for (const auto& ln : var.lnasts) {
+          if (ln->get_top_module_name() == file) {
+            ln->replace_body(pit->second->clone());
+            ln->set_pub_values({});
+            break;
+          }
+        }
+        std::erase_if(var.lnasts, [&](const std::shared_ptr<Lnast>& ln) {
+          std::string name{ln->get_top_module_name()};
+          return name.size() > file.size() + 1 && name.compare(0, file.size(), file) == 0 && name[file.size()] == '.'
+                 && !pristine.contains(name);  // derived this invocation, not a loaded unit
+        });
+      }
+    }
+  }
 
   if (wants_dump(opts, "lnast")) {
     screen_dump_lnasts(var.lnasts, "post-upass");

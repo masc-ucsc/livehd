@@ -122,6 +122,14 @@ struct Lnast_tree_io {
   bool                        empty() const noexcept { return inputs.empty() && outputs.empty(); }
 };
 
+// Task 1m — one `pub` export of a file unit (docs/contracts/task_1m_plan.md).
+// kind: "value" (comptime/const declaration) | "comb" | "mod" | "pipe" |
+// "fluid" (exported definition; its tree url is `<unit>.<name>`).
+struct Lnast_pub_entry {
+  std::string name;
+  std::string kind;
+};
+
 class Lnast {
 private:
   // Forest must outlive the tree — HHDS Tree::forest_ptr is a raw pointer
@@ -139,6 +147,19 @@ private:
   // stages_min>0 — a mod output legitimately stamps stages(0,0) or
   // stages(nil,nil) and a mod tree must not be mistaken for a pipe.
   std::string                   lambda_kind_;
+  // Task 1m — the file's `pub` export list, recorded by prp2lnast on the
+  // file-level (top) Lnast. kind is "value" for `pub const`/`pub comptime`
+  // declarations or the lambda kind ("comb"/"mod"/"pipe"/"fluid") for
+  // exported definitions. In-memory only (like lambda_kind_): the durable
+  // forms are the `<unit>.__pub` wrapper tree and the manifest pub index.
+  std::vector<Lnast_pub_entry>  pub_list_;
+  // Task 1m — folded comptime leaves of the pub VALUE exports, stamped by
+  // uPass_constprop when the file-scope walk completes: (flat dotted path,
+  // pyrope const text) pairs — a scalar contributes ("name", "12"), a bundle
+  // one pair per data leaf ("cfg.gain", "2"). The kernel synthesizes the
+  // `<unit>.__pub` wrapper from this (the materialized tree can't be used:
+  // a fully-folded scalar const store is dropped from it).
+  std::vector<std::pair<std::string, std::string>> pub_values_;
   // I/O metadata populated by the SSA upass (ssa:1).  Empty unless the SSA
   // pass has run on this LNAST.
   Lnast_tree_io                 io_meta_;
@@ -256,6 +277,13 @@ public:
   // ── lambda kind (Task 1r; stamped by func_extract on extracted trees) ───
   std::string_view get_lambda_kind() const noexcept { return lambda_kind_; }
   void             set_lambda_kind(std::string_view kind) { lambda_kind_ = kind; }
+
+  // ── pub export list (Task 1m; recorded by prp2lnast on file-level trees) ─
+  const std::vector<Lnast_pub_entry>& get_pub_list() const noexcept { return pub_list_; }
+  void add_pub(std::string_view name, std::string_view kind) { pub_list_.push_back({std::string(name), std::string(kind)}); }
+  // Folded pub-value leaves (set by uPass_constprop at file-walk completion).
+  const std::vector<std::pair<std::string, std::string>>& get_pub_values() const noexcept { return pub_values_; }
+  void set_pub_values(std::vector<std::pair<std::string, std::string>> v) { pub_values_ = std::move(v); }
 
   // ── I/O metadata side-channel (set by the SSA upass when ssa:1) ─────────
   const Lnast_tree_io& io_meta() const noexcept { return io_meta_; }

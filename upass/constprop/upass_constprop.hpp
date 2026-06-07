@@ -57,6 +57,9 @@ public:
 
   void process_stmts() override;
   void process_stmts_post() override;
+  // Task 1m — at file-scope completion, fold every `pub` value export into
+  // the Lnast's pub-values side channel (errors when not comptime-foldable).
+  void harvest_pub_values();
   void notify_uncertain_arm_begin() override { next_block_uncertain = true; }
   void notify_uncertain_arm_end() override { next_block_uncertain = false; }
   void process_declare() override;
@@ -97,7 +100,25 @@ public:
 
   static void set_function_registry(const std::vector<std::shared_ptr<Lnast>>& lnasts);
 
+  // Task 1m — unresolved live imports recorded during the walk: (unit that
+  // hit the import, import string as written). pass.upass either surfaces
+  // them as errors or hands them to the kernel's iterate loop (import_defer).
+  struct Pending_import {
+    std::string unit;
+    std::string text;
+  };
+  static void                               reset_pending_imports() { pending_imports_.clear(); }
+  static const std::vector<Pending_import>& pending_imports() { return pending_imports_; }
+
 protected:
+  static inline std::vector<Pending_import> pending_imports_;
+
+  // Task 1m — resolve a live `import` call (docs/contracts/task_1m_plan.md):
+  // cursor sits on the const "import" callee; binds `dst` (tuple form → pub
+  // namespace bundle; `ln:` url → lambda tree-name string) or records a
+  // pending import and leaves the call unfolded.
+  void process_import_call(const std::string& dst);
+
   Symbol_table st;
 
   // Set by notify_uncertain_arm_begin (the runner calls this just before we

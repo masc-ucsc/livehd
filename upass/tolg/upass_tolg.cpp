@@ -570,6 +570,14 @@ private:
     }
     std::string callee_name(lnast_->get_name(callee_n));
 
+    // Task 1m — a resolved `import` call is comptime scaffolding: constprop
+    // bound its namespace bundle / lambda ref and every consumer folded (an
+    // UNRESOLVED live import never reaches tolg — pass.upass errors or the
+    // kernel defers). Nothing lowers to hardware here.
+    if (Lnast_ntype::is_const(lnast_->get_type(callee_n)) && callee_name == "import") {
+      return;
+    }
+
     std::shared_ptr<Lnast> callee;
     if (registry_ != nullptr) {
       callee = resolve_callee_lnast(callee_name, *registry_);
@@ -638,6 +646,14 @@ private:
         pname = std::string(lnast_->get_name(an));
         val   = lnast_->get_sibling_next(an);
         if (val.is_invalid()) {
+          continue;
+        }
+        // Task 1m — namespace receiver marker: `lib.scale(args)` through an
+        // import tuple carries the receiver in a `__ufcs_arg` store, but the
+        // receiver names the NAMESPACE — it is not an argument of a no-self
+        // callee. (A true `ref self` mod method splices in the runner and
+        // never reaches the Sub path.)
+        if (pname == "__ufcs_arg" && (cio.inputs.empty() || cio.inputs[0].name != "self")) {
           continue;
         }
       } else {

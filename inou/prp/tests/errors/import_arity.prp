@@ -1,0 +1,11 @@
+/*
+:name: import_arity
+:type: error
+:error: exactly one argument
+:help: ln:unit.tree
+*/
+
+// Task 1m — `import` takes a single unit string
+// (docs/contracts/task_1m_plan.md §1).
+
+const b = import("file1", "file2")  // locate_error_here

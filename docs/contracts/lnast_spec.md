@@ -558,7 +558,7 @@ restatement.)
   written is at the declaration site (`let`, `mut`, `const`, `reg`,
   `comptime`, port, lambda arg, tuple literal field). Examples of decl-only
   attrs: `storage` (const/mut/reg/comptime), `direction` (in/out),
-  `reset_pin`, `clock_pin`, `initial`, `pipeline_depth`, `debug`, user-
+  `reset_pin`, `clock_pin`, `init`, `pipeline_depth`, `debug`, user-
   asserted bounds (`max=N`, `min=N`).
 - **Declaration-with-init copies sticky only.** `const y = x`, `mut y = x`
   declare `y`; sticky `_*` / `debug` attrs on `x` propagate, non-sticky
@@ -605,7 +605,7 @@ restatement.)
   using range arithmetic. Publishes the result as a per-node HHDS tree
   attr.
 - For regs: fixed-point over all RHS expressions assigned to the reg's SSA
-  versions, unioned with the declared `initial` value. Converges quickly
+  versions, unioned with the declared `init` value. Converges quickly
   because the reg decl provides a user-asserted bound (or widens until the
   bound is hit, at which point lnastfmt errors if assigned values exceed
   the assertion).
@@ -793,14 +793,14 @@ tuple_set config clock freq 100_000_000
 **Register with reset pin:**
 
 ```pyrope
-reg counter:u8:[reset_pin=rst, initial=0] = 0
+reg counter:u8:[reset_pin=rst, init=0] = 0
 ```
 
 ```
 attr_set counter storage reg
 attr_set counter bits 8
 attr_set counter reset_pin rst
-attr_set counter initial 0
+attr_set counter init 0
 assign   counter 0
 ```
 

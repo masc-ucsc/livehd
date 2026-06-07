@@ -1097,6 +1097,9 @@ bool uPass_runner::try_inline_func_call() {
   if (auto fb = func_param_bindings_.find(callee_name); fb != func_param_bindings_.end()) {
     callee_name = fb->second;
   }
+  // The callee identifier as written at the call site (method dispatch and
+  // the import-namespace exemption below need it after callee_name rebinds).
+  const std::string source_callee_name(callee_name);
 
   auto callee = lookup_callee(callee_name);
 
@@ -1149,6 +1152,26 @@ bool uPass_runner::try_inline_func_call() {
     lm->restore_cursor(here);
   }
 
+  // Task 1m — call through a lambda-ref binding: `const f = b.add1` or
+  // `const f = import("ln:u.g")` bind `f` to the callee's TREE NAME as a
+  // string (the fcall-ref-const lambda-value form). Resolve it like the
+  // bundle-field method path above.
+  if (!callee) {
+    if (auto fv = try_fold_ref(callee_name); fv && fv->is_string()) {
+      auto fn = fv->to_pyrope();
+      if (fn.size() >= 2 && fn.front() == '\'' && fn.back() == '\'') {
+        fn = fn.substr(1, fn.size() - 2);
+      }
+      if (fn.starts_with("ln:")) {
+        fn = fn.substr(3);
+      }
+      if (auto m = lookup_callee(fn)) {
+        callee      = m;
+        callee_name = fn;
+      }
+    }
+  }
+
   if (!callee) {
     lm->restore_cursor(saved);
     return false;  // not a known comb body → typecast / cell-op / marker path
@@ -1159,20 +1182,56 @@ bool uPass_runner::try_inline_func_call() {
   // `f(obj, ...)` carries no marker and stays subject to the normal argument
   // rules. Checked here — before the inlinable/fuel gates — so a marked call
   // can never silently fall through to the evaluator path.
+  //
+  // Task 1m exemption — namespace access through an import tuple:
+  // `b.add1(args)` where `b = import("unit")` and b's field `add1` is a
+  // lambda ref (a string naming this callee's tree). The receiver is a
+  // namespace, not a method receiver: drop it from the actuals instead of
+  // requiring `self`.
+  bool drop_ufcs_receiver = false;
   {
-    const auto here        = lm->save_cursor();
-    bool       ufcs_marked = false;
+    const auto  here        = lm->save_cursor();
+    bool        ufcs_marked = false;
+    std::string recv_name;
     if (lm->move_to_sibling() && Lnast_ntype::is_store(lm->get_raw_ntype()) && lm->move_to_child()) {
       ufcs_marked = lm->current_raw_text() == call_ufcs_arg_marker;
+      if (ufcs_marked && lm->move_to_sibling() && Lnast_ntype::is_ref(lm->get_raw_ntype())) {
+        recv_name = std::string(lm->current_text());
+      }
     }
     lm->restore_cursor(here);
     if (ufcs_marked) {
       const auto& cio = callee->io_meta();
       if (cio.inputs.empty() || cio.inputs[0].name != "self") {
-        fcall_arg_fail(call_span,
-                       "fcall-ufcs-no-self",
-                       std::format("`{}` does not declare `self`; it cannot be called as a method", callee_name),
-                       "use the direct call form `f(args...)`, or declare `self` as the first parameter");
+        bool namespace_access = false;
+        if (!recv_name.empty()) {
+          if (auto bf = try_bundle_fields(recv_name)) {
+            for (const auto& [fld, val] : *bf) {
+              if (fld != source_callee_name || !val.is_string()) {
+                continue;
+              }
+              auto fn = val.to_pyrope();
+              if (fn.size() >= 2 && fn.front() == '\'' && fn.back() == '\'') {
+                fn = fn.substr(1, fn.size() - 2);
+              }
+              if (fn == callee->get_top_module_name() || lookup_callee(fn) == callee) {
+                namespace_access = true;
+              }
+              break;
+            }
+          }
+        }
+        if (!namespace_access) {
+          fcall_arg_fail(call_span,
+                         "fcall-ufcs-no-self",
+                         std::format("`{}` does not declare `self`; it cannot be called as a method", callee_name),
+                         "use the direct call form `f(args...)`, or declare `self` as the first parameter");
+        }
+        // Reached only on a namespace access (the no-self error above is
+        // [[noreturn]]); set the flag explicitly under the same condition so
+        // the receiver-drop never decouples from namespace detection if the
+        // error path ever stops being fatal.
+        drop_ufcs_receiver = namespace_access;
       }
     }
   }
@@ -1243,8 +1302,14 @@ bool uPass_runner::try_inline_func_call() {
       }
       // Task 1k — the UFCS receiver marker is positional too; the receiver
       // binds to `self` via the has_self branch below (the no-self UFCS error
-      // already fired right after callee resolution).
+      // already fired right after callee resolution). Task 1m — a namespace
+      // access (`b.add1(...)` through an import tuple) drops the receiver
+      // entirely: it names the namespace, it is not an argument.
       if (a.key == call_ufcs_arg_marker) {
+        if (drop_ufcs_receiver) {
+          lm->restore_cursor(here);
+          continue;
+        }
         a.is_named = false;
         a.key.clear();
       }

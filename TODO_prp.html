@@ -104,63 +104,208 @@ complete before group N+1 starts. Group letters are shared across
 cross-file dependencies stay visible.</p>
 <h2 id="group-1-foundation">Group 1 — foundation</h2>
 <ul>
-<li><strong id="item-1m" class="item-id">1m</strong> Pyrope <code>pub</code> exports + <code>import()</code> — <strong>spec'd 2026-06-07</strong>,
-  design contract in <code>docs/contracts/task_1m_plan.md</code> (supersedes the
-  deleted root <code>import.md</code>; absorbs ex-<span class="xref xref-note" title="folded into 1m">2o</span> — the two-phase
-  <code>func_extract</code> / <code>Inline_reason</code> / pending-import-poison model is dead).</li>
-<li><strong>Design summary:</strong><ul>
-<li><code>pub</code> legal on file-scope <code>comptime</code>/<code>const</code> values (initializer
-  must fold comptime at elaboration, else error) and on
-  <code>comb</code>/<code>mod</code>/<code>pipe</code>/<code>fluid</code>. <code>pub mut</code>/<code>pub reg</code> = error. Every
-  entity still gets its own tree (<code>foo.prp</code> → unit <code>foo</code>, entity
-  <code>bar</code> → tree <code>foo.bar</code>, the existing func_extract convention);
-  <code>pub</code> only controls membership in the file's pub list.</li>
-<li><code>import("file1")</code> = the whole pub tuple (values + lambda tree-url
-  refs), <strong>read-only always</strong>; no dot selector — pick fields with
-  normal dot access. Direct access via urls:
-  <code>import("ln:file1.bar")</code> (any tree, pub not required) and
-  <code>import("lg:any.graph.name")</code> (any graph; black box at LNAST,
-  Sub-wired by GraphIO at <code>tolg</code>). Statement form kept as sugar:
-  <code>import "file1" as b</code> ≡ <code>const b = import("file1")</code>
-  (string-literal module only — dotted-identifier choice removed).</li>
-<li>Resolution against <strong>explicit inputs only</strong>: the invocation's other
-  <code>.prp</code> files + loaded <code>ln:</code>/<code>lg:</code> dirs (manifest pub index;
-  search crosses forests). No filesystem discovery. Missing = error,
-  ambiguous across inputs = error.</li>
-<li>Pub persistence = synthesized <code>foo.__pub</code> wrapper tree (arbitrary
-  comptime values ride LNAST serialization) + <code>manifest.json</code> pub
-  index per unit.</li>
-<li>Orchestration: bazel runs one <code>lhd elaborate</code> per file in
-  parallel (<code>ln:</code> deps ride along); a multi-file invocation
-  <strong>iterates</strong> — any order, whole-file retry when a <em>live</em> import
-  is unresolved (liveness needs constprop: <code>if cond { import }</code>),
-  pub list published atomically at file completion, no-progress
-  round = error. No topological pre-ordering, no pending markers.</li>
+<li><strong id="item-1m" class="item-id">1m</strong> Pyrope <code>pub</code> exports + <code>import()</code> —
+  core <strong>landed 2026-06-07</strong> (contract <code>docs/contracts/task_1m_plan.md</code>;
+  pub recording/validation, <code>__pub</code> wrapper + manifest publication,
+  tuple/<code>ln:</code> resolution, <code>equals</code> tree-url identity, read-only bind,
+  iterate-until-converged kernel loop, mod/pipe instantiation through imports
+  to Verilog). <strong>Pending parts only:</strong></li>
+<li><strong>1m-pending:</strong><ul>
+<li><strong>Unknown tuple field → error</strong> (decided: <strong>global</strong>). Reading a
+  field absent from <em>any</em> tuple (<code>b.not_a_pub</code> on an import namespace,
+  or a plain <code>t.missing</code>) must be a compile error — not just the import
+  namespace. Today it does NOT error: it rides constprop's general lenient
+  missing-field fold (a plain <code>t.missing == 7</code> vacuously discharges; not a
+  value leak). Expect fallout — existing code/tests that lean on the lenient
+  nil-fold will need fixing (same direction as the <code>==nil</code> tightening
+  that already caught 3 should-be-nil bugs). <strong>Owned by
+  <code>upass/typecheck</code></strong> (handles types / sees the field set; not
+  constprop). Spec §9.</li>
+<li><strong>Ambiguous <code>ln:</code> match → error</strong> (decided). The same unit name in
+  two loaded <code>ln:</code> inputs must be an ambiguity error listing the
+  candidates — NOT the current silent first-wins (registry is name-keyed).
+  Implementable now without the linker: duplicate-name check at registry
+  load. Spec §2/§9.</li>
+<li><strong><code>pub reg</code> → <code>regref</code> friendly error</strong> — <strong>DONE</strong>
+  (no grammar change). prp2lnast emits <code>pub-reg-use-regref</code> for
+  <code>pub reg</code>/<code>pub stage</code> pointing at <code>regref</code>;
+  <code>pub mut</code> keeps the generic read-only hint. The separate
+  <code>regref</code> mechanism itself (cross-module register sharing) is still
+  unspecced. (Earlier grammar-constraining idea dropped — prp2lnast already
+  rejects <code>pub reg</code> and the dotted import form, so no pin bump.)</li>
+<li><strong><code>lg:</code> black-box Sub wiring at tolg</strong> (E back half) — blocked on the
+  multi-<code>lg:</code> gid-remapping linker. Today <code>import("lg:g")</code> binds the url
+  string and a call through it fails cleanly at tolg; the <code>ln:</code> half is done.</li>
+</ul></li>
+<li>
+<p><strong id="item-1p" class="item-id">1p</strong> Deferred lambda templates: var-args + call-site
+  specialization — <strong>spec'd 2026-06-07</strong> (contract
+  <code>docs/contracts/task_1p_plan.md</code>). A not-fully-typed lambda — untyped
+  non-<code>self</code> input, a <code>(...args)</code> var-arg, or an unbound generic
+  <code>&lt;T&gt;</code> — becomes a <strong>template</strong>: kept as LNAST, lowered to
+  <strong>no LGraph</strong> at definition time; the concrete form is produced
+  <strong>per call site</strong>. This unifies the two existing paths: <code>comb</code>
+  templates <strong>inline</strong> (the 1i path, extended to bind <code>...args</code>),
+  <code>pipe</code>/<code>mod</code>/<code>fluid</code> templates <strong>specialize</strong> into a concrete
+  module per signature and instantiate as a <code>Sub</code> (1u-A). Removes the
+  <code>lambda-needs-types</code> definition-time error (<code>prp2lnast.cpp:4837</code>) so
+  var-args/generics work on a module boundary.</p>
+</li>
+<li><strong>Decisions (locked 2026-06-07):</strong><ul>
+<li><strong>Scope.</strong> This goal builds the deferred-template + call-site
+  specialization mechanism with <strong>var-args</strong> as the driving use case
+  (<code>comb</code> inline + <code>pipe</code>/<code>mod</code>/<code>fluid</code> specialize). Generics
+  <code>&lt;T&gt;</code> get a designed-for seam (markers + mangling reservation)
+  but per-<code>T</code> body substitution is a <strong>separate follow-up goal</strong>.</li>
+<li><strong>Naming = readable suffix.</strong> Specialized modules get a
+  human-readable suffix from the concrete arg types/shape, counter on
+  collision: <code>foo(u8)</code>→<code>foo__u8</code>, <code>foo(u16)</code>→<code>foo__u16</code>,
+  <code>add1(a,b,c:u8)</code>→<code>add1__3xu8</code>, generic <code>T=u22</code>→<code>add6__T_u22</code>,
+  collision→<code>foo__u8_1</code>. Same signature → same name → <strong>natural
+  dedup</strong> (one shared module, each call its own <code>Sub</code> instance).</li>
+<li><strong>No in-unit call site = template-only.</strong> A <code>pub</code> export or
+  top-level template never specialized in its own file stays a deferred LNAST
+  template and produces <strong>no LGraph</strong> — <strong>no error</strong>; it
+  materializes only when an importer/caller specializes it. The old
+  <code>lambda-needs-types</code> error is deleted.</li>
+<li><strong>Specialize early, keyed on the actual's DECLARED type.</strong>
+  <code>pipe</code>/<code>mod</code>/<code>fluid</code> specialization runs at the call site
+  during the runner walk (beside the 1i inliner), keyed on each actual's
+  declared type — no dependence on late width inference, no pipeline re-entry.
+  An <strong>untyped actual</strong> feeding an untyped/var-args boundary port is a
+  <strong>call-site error</strong> ("annotate the actual"). <code>comb</code> is
+  unaffected (always inlines). Inferred-width support, if ever wanted, layers
+  on as a deferred late-specialize pass.</li>
+</ul></li>
+<li><strong>Implementation phases:</strong><ul>
+<li><strong>A — Producer.</strong> Delete the <code>lambda-needs-types</code> error; encode
+  the <code>...</code> var-arg marker on the input io entry (mirror the
+  <code>ref</code>-as-RHS-const convention, no new ntype); populate the <code>func_def</code>
+  generics tuple from <code>&lt;...&gt;</code> (seam). Retire/repurpose
+  <code>tests/errors/{mod_untyped_io,pipe_untyped_io}.prp</code> (now legal
+  templates).</li>
+<li><strong>B — Template flag + extraction.</strong> Add durable in-memory
+  <code>template_</code> to <code>Lnast</code> (sibling to <code>lambda_kind_</code>,
+  <code>lnast.hpp:149</code>); func_extract stamps it when the signature is not
+  fully typed and copies generics + var-arg markers into the extracted
+  signature; tolg + a runner gate skip emitting an LGraph for a
+  <code>template</code> tree.</li>
+<li><strong>C — <code>comb</code> var-args inlining.</strong> Extend the 1i inliner to
+  gather leftover actuals into a synthesized <code>args</code> tuple (named →
+  fields, positional → indices: <code>foo(b=3,10)</code> ⇒ <code>args.b==3</code>,
+  <code>args[0]==10</code>) and resolve <code>args[i]</code> / <code>args.NAME</code> /
+  <code>for x in args</code>. Reuses the untyped-param inlining seam.</li>
+<li><strong>D — <code>pipe</code>/<code>mod</code>/<code>fluid</code> specialization.</strong> At each call
+  site clone+specialize+mangle the template, append it to <code>var.lnasts</code>
+  (the queue walk at <code>pass_upass.cpp:375</code>/<code>:415</code> already lowers
+  appended trees through the full pipeline), and rewrite the call's callee to
+  the mangled name so tolg's <code>lower_func_call</code> resolves the <code>Sub</code>.
+  Dedup by mangled name. Error <strong>at the call site</strong> only when a
+  template genuinely cannot be specialized (width depends on a runtime-only
+  value, not a comptime shape).</li>
+<li><strong>E — Docs + tests.</strong> Rewrite <code>06-functions.md</code> (drop "never
+  type-inferred from call sites" for templates; document specialization +
+  naming). LEC tests: <code>add1(...x)</code> var-args; <code>mod foo(a)</code>
+  specialized two ways → two <code>Sub</code> modules; dedup (two identical calls →
+  one module, two instances); error tests for unresolvable cases.</li>
+</ul></li>
+<li><strong>Deferred (follow-up, out of scope here):</strong> generics
+  <code>&lt;T&gt;</code> binding/substitution (layers on phase D); the closure-capture
+  companion is <strong>1x</strong> (the <strong>2j</strong> note). <code>fluid</code> has no
+  LGraph lowering yet — the template rule applies the moment fluid lowering
+  lands, no extra producer work.</li>
+<li>
+<p><strong id="item-1g" class="item-id">1g</strong> Type-aware <code>does</code> / <code>equals</code> / <code>case</code> —
+  <strong>spec'd 2026-06-07</strong>. When <code>does</code> first landed there was no type
+  system; now there is (1t/1v typesystem + <code>upass/typecheck</code> kinds +
+  <code>upass/attributes</code> <code>Type_info</code> envelopes), so the scalar/type half can
+  fold. Raises <code>inou/prp/tests/comptime/does_test1.prp</code> back from the
+  lowered <code>:verifier_pass: 20</code>.</p>
+</li>
+<li><strong>Semantic ruling (2026-06-07):</strong><ul>
+<li><strong>Within integers</strong> the range decides: <code>a does b</code> ⇔ envelope
+  superset <code>a.max&gt;=b.max and a.min&lt;=b.min</code> (07-typesystem.md rule).
+  <code>c:u10 does c:u5</code> true; <code>c:u5 does c:u10</code> <strong>false</strong>. This
+  <strong>supersedes</strong> <code>04-variables.md:193,650</code> and
+  <code>07b-structtype.md:69,108</code> ("<code>u32 does u16</code> and <code>u16 does u32</code>
+  both true") — those docs and their extracted samples must be
+  rewritten (phase E).</li>
+<li><strong>Across kinds</strong> (<code>boolean</code>/<code>integer</code>/<code>string</code>/…) the kind is a
+  difference flag → false; when a side's type is <em>not set</em> (kind
+  unknown), the kind half is skipped and only structure/range is
+  checked.</li>
+<li><strong>Envelopes:</strong> literal <code>v</code> → <code>[v,v]</code>; declared type → its
+  envelope; untyped <code>mut</code>/<code>const</code> var → unbounded (superset of any
+  int). <code>bool</code> ≡ envelope <code>(min=-1,max=0)</code>, so <code>1 does true</code> and
+  <code>10 does true</code> are <strong>false</strong> (kind mismatch; the range view
+  agrees — 1 ∉ [-1,0]).</li>
+<li><strong><code>nil</code> special case:</strong> <code>x does nil</code> → true for any non-tuple
+  <code>x</code>. (tuple-vs-nil and nil-on-LHS: pin when implementing.)</li>
+<li><code>equals</code> = <code>(a does b) and (b does a)</code> <strong>including types</strong>;
+  <code>case</code> = <code>does</code> + value match (<code>nil</code>/<code>0sb?</code> wildcards) — both
+  currently fold structure/value only, types ignored.</li>
 </ul>
 </li>
-<li><strong>Implementation phases</strong> (detail in the contract): A front-end
-  (<code>pub</code> recording, <code>pub mut/reg</code> errors, <code>import</code> lowering);
-  B export side (wrapper tree + manifest pub index); C import side
-  (resolution at the constprop/runner seam, read-only bind, defer
-  signal, <code>equals</code> = tree-url identity); D kernel iterate loop +
-  registry + diagnostics; E <code>lg:</code> black-box Sub wiring; F tests.</li>
-<li><strong>Tests to add when landing:</strong><ol>
-<li>Pub-value import, same invocation: <code>pub comptime foo = 3</code> →
-   <code>cassert(x.foo == 3)</code>; read-only (write to <code>x.foo</code> errors).</li>
-<li>Lambda import + call: <code>comb</code> via tuple field and via
-   <code>ln:</code> url (inline splice); <code>mod</code>/<code>pipe</code> → Sub instance;
-   <code>cassert(x.bar equals bar2)</code> tree-url identity.</li>
-<li>Two-invocation flow through <code>lhd</code>: elaborate exporter to
-   <code>ln:dir</code>, then importer with <code>ln:dir</code> riding along.</li>
-<li>Verilog-derived <code>lg:</code> import (black box; no Verilog-side
-   <code>pub</code> needed — <code>lg:</code> is unrestricted).</li>
-<li>Conditional import: dead-branch import of a missing unit is
-   not an error; live one resolves.</li>
-<li>Diagnostics: missing unit, ambiguous unit across two inputs,
-   unknown (non-pub) field on the pub tuple, <code>pub mut</code>/<code>pub reg</code>,
-   non-foldable pub value, import cycle (no-progress).</li>
-</ol>
+<li><strong>Current state (verified 2026-06-07 against <code>lhd</code>):</strong><ul>
+<li><em>Works:</em> tuple-vs-tuple structural <code>does</code>/<code>equals</code>/<code>case</code>
+  (<code>upass/constprop</code> <code>structural_does</code>/<code>structural_equals</code>/<code>fold_case</code>);
+  <strong>match-arm <code>does</code></strong> — prp2lnast emits <code>func_does</code> per arm, so the
+  <code>does_test1.prp:69</code> FIXME comment is <strong>stale</strong>: all three
+  commented-out <code>match</code> blocks pass today; <code>is</code> nominal check
+  (<code>upass_attributes::process_is</code>, typename-based).</li>
+<li><em>Unresolved (unknown):</em> every scalar-vs-scalar / scalar-vs-literal
+  <code>does</code> (<code>b1 does true</code>, <code>u10</code>-vs-<code>u5</code> vars) — <code>fold_does</code> requires
+  a tuple-shaped side because Lconst can't tell bool from int;
+  literal-vs-bundle (<code>100 does m1</code>, <code>(100,30) does 30</code>,
+  <code>30 does (30,200)</code>) — literals not bundle-bound in the ST.</li>
+<li><em>Hard error:</em> bare primitive type-name operand — <code>a does u32</code>,
+  <code>u32 does u16</code>, <code>if d does int</code> → "read of undefined variable
+  'u32'" from the prp2lnast undefined-read check. This is the
+  headline doc form (07-typesystem.md:66-73, 04-variables.md:650).</li>
+</ul>
 </li>
+<li><strong>Implementation phases:</strong><ul>
+<li><strong>A — type-name operands.</strong> prp2lnast lowers primitive type tokens
+  (<code>uN</code>/<code>sN</code>/<code>int</code>/<code>unsigned</code>/<code>bool</code>/<code>string</code> +
+  <code>int(max=,min=)</code> calls) in <code>does</code>/<code>equals</code>/<code>case</code> operand position
+  to a type-literal payload (reuse the declare-side <code>prim_type_*</code>
+  encoding), exempt from <code>collect_defined_names</code> undefined-read; the
+  fold decodes it to kind+envelope. User-defined type refs
+  (<code>x does Person</code>) already resolve as refs.</li>
+<li><strong>B — kind+envelope scalar fold.</strong> <code>fold_does</code> drops the
+  <code>is_tuple_shaped</code> gate; per operand pull kind+envelope — declared
+  vars via shared-ST <code>provide_decl_type</code>/<code>provide_field_type</code>
+  (attributes <code>Type_info</code>: <code>Numeric_kind</code> + <code>range_max/min</code>, the
+  same seam the 1k typed-self does-check uses), literals → <code>[v,v]</code>,
+  untyped → unbounded + kind-unset. Apply the ruling above incl. the
+  <code>nil</code> rule. Fold lives in constprop (it owns bundles + the
+  <code>func_does</code> dispatch); <code>upass/typecheck</code> stays read-only.</li>
+<li><strong>C — literal-as-bundle.</strong> const operands of
+  <code>does</code>/<code>equals</code>/<code>case</code> resolve scalars / tuple-literals not bound
+  in the ST: <code>100 does m1</code>, <code>m1 does 100</code>, <code>(100,30) does 30</code>,
+  <code>30 does (30,200)</code>.</li>
+<li><strong>D — typed <code>equals</code>/<code>case</code> + per-field types.</strong> Per-field types
+  ride <code>comp_type_tuple</code> (<code>docs/contracts/typesystem_clean_plan.md</code>)
+  and are checked field-wise; <code>equals</code> = does-both-ways incl. types
+  (07-typesystem.md:100-113); typed <code>case</code> patterns
+  (07-typesystem.md:235-240). Today
+  <code>(a=1) does (a:u32=…)</code> folds with <code>:u32</code> silently ignored.</li>
+<li><strong>E — docs + tests.</strong> Rewrite <code>04-variables.md:193,650</code>,
+  <code>07b-structtype.md:69,108</code>, <code>14b-small_pyrope_todo.md:80</code> to the
+  superset rule and refresh extracted samples (<code>full_pyrope/file85</code>,
+  <code>file291</code>); <code>does_test1.prp</code>: delete the stale match-arm comment,
+  re-enable the FIXME casserts per phase, raise
+  <code>:verifier_pass:</code> 20 → 35+; new tests: envelope (<code>u10</code>/<code>u5</code>),
+  bool literals (<code>1 does true</code>, <code>0 does true</code> both false),
+  type-name forms (<code>a does u32</code>, <code>not (u32 does string)</code>), typed
+  <code>case</code>/<code>equals</code>, <code>nil</code> rule.</li>
+</ul>
+</li>
+<li><strong>Deferred (future item, out of scope here):</strong> lambda <code>does</code> rules
+  (<code>_:T_complex does _:T_simple</code>, <code>f.[inp] does args</code> —
+  <code>full_pyrope/file259</code>), array <code>does</code>/variance (<code>_:[]x does _:[]y</code>,
+  <code>[?]Animal</code> — <code>file285</code>/<code>file286</code>), and <code>_:T</code> type-only operand
+  forms (<code>_:f1 equals t1</code>).</li>
 </ul>
 <h2 id="group-2-depends-on-group-1">Group 2 — depends on Group 1</h2>
 <ul>

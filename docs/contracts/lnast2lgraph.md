@@ -517,7 +517,7 @@ f1 = 400          // discarded if f1 is not otherwise read; if f1 feeds a
 For scalar `reg r = init`:
 
 - create one `Flop` node;
-- connect `initial` to `init` (`0sb?` for nil);
+- connect Pyrope/LNAST `init` to the LGraph `initial` pin (`0sb?` for nil);
 - connect normal `r` reads to the flop output;
 - connect the final deferred/next-state value to `din`;
 - connect `enable` to true if always written;
@@ -583,24 +583,25 @@ Defaults:
   `negreset` accordingly). If more than one matches or none does, an
   explicit `reset_pin` is required when the reg has a non-nil initial
   value.
-- `initial`: explicit init value, or `0sb?` for nil/no explicit init.
+- `init`: explicit init value, or `0sb?` for nil/no explicit init; maps to
+  the LGraph `initial` pin.
 - `posclk`: true.
 - `async`: false.
 - `negreset`: false.
 
 Reset rules:
 
-- `reg a = nil`: `reset_pin=false`, `initial=0sb?`.
+- `reg a = nil`: `reset_pin=false`, `init=0sb?`.
 - `reg a = 0` with exactly one implicit reset input (`reset` / `rst` /
   `reset_n` / `rst_n`): connect that wire to `reset_pin` (set `negreset` for
-  `_n` variants), `initial=0`.
+  `_n` variants), `init=0`.
 - `reg a = 0` with multiple implicit reset candidates: compile error
   (require explicit `reset_pin`).
 - `reg a = 0` with no implicit/explicit reset: compile error.
 - `reg a:[reset_pin=false] = 0`: compile error.
 - `reg a:[reset_pin=false] = nil`: valid.
 - explicit `reset_pin=ref rst` with `reg a = nil`: connect reset and
-  `initial=0sb?`; unknown reset value is still meaningful.
+  `init=0sb?`; unknown reset value is still meaningful.
 - `clock_pin=false`: compile error for storage.
 
 ### 12.1 Pipe output flops (task 1q)
@@ -652,7 +653,7 @@ phase.
 
 Inserted-flop configuration: replica of an existing body flop when one
 exists (copy config verbatim — async/sync reset, none, clock, posclk);
-otherwise the no-reset shape (`reset_pin` unconnected, `initial=0sb?`,
+otherwise the no-reset shape (`reset_pin` unconnected, `init=0sb?`,
 `async=false` — the `reg a = nil` rules above). Clock follows the §12
 defaults; if the partition declares no `clk`/`clock` input, tolg creates
 an implicit `clock` graph input. Plan: `task_1q_plan.md`.

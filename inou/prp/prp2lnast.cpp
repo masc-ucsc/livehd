@@ -1129,9 +1129,16 @@ void Prp2lnast::process_scope_statement(TSNode n, Lnast_nid /*target_stmts*/) {
   walk_statement_block(n);
 }
 
-// Resolve (storage-kind, has-comptime) for a `var_or_let_or_reg` decl node
-// (defined with the declaration helpers below).
-static std::pair<std::string_view, bool> decode_decl(TSNode decl);
+// Resolved modifiers of a `var_or_let_or_reg` decl node.
+struct Decl_mods {
+  std::string_view kind;  // storage kind ("mut"/"const"/"reg"/"stage"/…; empty = none)
+  bool             has_comptime{false};
+  bool             has_pub{false};  // task 1m — `pub` export modifier
+};
+// Resolve a `var_or_let_or_reg` decl node's modifiers. Defined below with the
+// declaration helpers (needs storage_kind_from_node_type); forward-declared
+// here because process_gated_statement calls it earlier in the file.
+static Decl_mods decode_decl(TSNode decl);
 
 void Prp2lnast::process_gated_statement(TSNode stmt, TSNode gate) {
   // gate is a `when_unless_cond` node:
@@ -1187,7 +1194,8 @@ void Prp2lnast::process_gated_statement(TSNode stmt, TSNode gate) {
       TSNode           id = lvt == "typed_identifier" ? child_by_field(lv, "identifier") : lv;
       TSNode           tc = lvt == "typed_identifier" ? child_by_field(lv, "type") : TSNode{};
       if (!ts_node_is_null(id) && std::string_view(ts_node_type(id)) == "identifier") {
-        auto [kind, has_cpt] = decode_decl(decl_node);
+        auto [kind, has_cpt, has_pub] = decode_decl(decl_node);
+        (void)has_pub;  // gated-decl hoist doesn't act on `pub` (handled in process_lvalue_for_assign)
         // Already-declared name (`mut c2 = 100; mut c2 = 3 when false`): the
         // gated re-decl must be a complete no-op when the gate is false —
         // hoisting a nil store would clobber the prior binding. Keep the old
@@ -1278,15 +1286,17 @@ static std::string_view storage_kind_from_node_type(std::string_view t) {
   return {};
 }
 
-// Resolve (storage-kind, has-comptime) for a `var_or_let_or_reg` decl node.
-static std::pair<std::string_view, bool> decode_decl(TSNode decl) {
+// Resolve (storage-kind, has-comptime, has-pub) for a `var_or_let_or_reg` decl
+// node (struct + forward decl are up near process_gated_statement).
+static Decl_mods decode_decl(TSNode decl) {
   if (ts_node_is_null(decl)) {
-    return {{}, false};
+    return {};
   }
   TSNode           storage = ts_node_child_by_field_name(decl, "storage", 7);
   TSNode           cpt     = ts_node_child_by_field_name(decl, "comptime", 8);
+  TSNode           pub     = ts_node_child_by_field_name(decl, "pub", 3);
   std::string_view kind    = ts_node_is_null(storage) ? std::string_view{} : storage_kind_from_node_type(ts_node_type(storage));
-  return {kind, !ts_node_is_null(cpt)};
+  return {kind, !ts_node_is_null(cpt), !ts_node_is_null(pub)};
 }
 
 std::vector<int64_t> Prp2lnast::extract_array_dims(TSNode type_cast_node) const {
@@ -1319,6 +1329,38 @@ std::vector<int64_t> Prp2lnast::extract_array_dims(TSNode type_cast_node) const 
   return out;
 }
 
+// Task 1m — validate a `pub` value declaration (docs/contracts/task_1m_plan.md
+// §1): only file-scope `const` (optionally `comptime`) declarations are
+// exportable. `pub mut`/`pub reg` contradict the read-only export semantics.
+void Prp2lnast::check_pub_value_decl(TSNode decl_node, std::string_view kind) {
+  if (!builder.at_top_stmts() || !lambda_kind_stack_.empty() || conditional_depth_ > 0) {
+    report_error(decl_node,
+                 "pub-not-file-scope",
+                 "syntax",
+                 "`pub` is only valid on file-scope declarations",
+                 "move the declaration to the file's top level");
+  }
+  if (kind != "const") {
+    // `pub reg`/`pub stage` is a likely-common mistake: registers ARE shared
+    // across modules, just not via `pub` (a read-only value/lambda export).
+    // Point at the dedicated `regref` mechanism rather than the generic
+    // "use pub const" hint. The grammar still parses `pub reg`; this
+    // prp2lnast check is the single enforcement point (no grammar change).
+    if (kind == "reg" || kind == "stage") {
+      report_error(decl_node,
+                   "pub-reg-use-regref",
+                   "type",
+                   std::format("cannot export `pub {}`: a register cannot be a `pub` export", kind),
+                   "to share a register across modules use `regref`, not `pub reg`");
+    }
+    report_error(decl_node,
+                 "pub-requires-const",
+                 "type",
+                 std::format("cannot export `pub {}`: exported state must be read-only", kind.empty() ? "fluid" : kind),
+                 "use `pub const` for values, or export a `comb`/`mod`/`pipe`/`fluid` definition");
+  }
+}
+
 void Prp2lnast::process_declaration_statement(TSNode n) {
   // declaration_statement: var_or_let_or_reg + lvalue (typed_identifier or list)
   auto decl_node   = child_by_field(n, "decl");
@@ -1327,8 +1369,8 @@ void Prp2lnast::process_declaration_statement(TSNode n) {
     return;
   }
 
-  // Decode storage class + comptime modifier from the decl's structured fields.
-  auto [kind, has_comptime] = decode_decl(decl_node);
+  // Decode storage class + comptime/pub modifiers from the decl's structured fields.
+  auto [kind, has_comptime, has_pub] = decode_decl(decl_node);
 
   // Task 1r — a stage decl without an initializer has no value to deliver.
   if (kind == "stage") {
@@ -1339,11 +1381,19 @@ void Prp2lnast::process_declaration_statement(TSNode n) {
                  "write `stage[N] name = value`");
   }
 
+  // Task 1m — `pub` marks a file-scope const value declaration exportable.
+  if (has_pub) {
+    check_pub_value_decl(decl_node, kind);
+  }
+
   // For each typed_identifier in the lvalue, emit: attr_set <ref> "type" kind
   auto emit_decl_attrs = [&](TSNode ti) {
     TSNode id = child_by_field(ti, "identifier");
     if (ts_node_is_null(id)) {
       return;
+    }
+    if (has_pub) {
+      lnast->add_pub(trim(get_text(id)), "value");
     }
     Lnast_node ref = identifier_to_node(id, /*for_lvalue=*/true);
     {
@@ -1577,10 +1627,20 @@ Lnast_node Prp2lnast::process_lvalue_for_assign(TSNode lvalue, const Lnast_node&
     bool             has_decl = !ts_node_is_null(decl_node);
     std::string_view kind_sv;
     bool             has_cpt = false;
+    bool             has_pub = false;
     if (has_decl) {
-      auto pr = decode_decl(decl_node);
-      kind_sv = pr.first;
-      has_cpt = pr.second;
+      auto pr  = decode_decl(decl_node);
+      kind_sv  = pr.kind;
+      has_cpt  = pr.has_comptime;
+      has_pub  = pr.has_pub;
+    }
+
+    // Task 1m — `pub const x = …` marks the value exportable (validated:
+    // file-scope, const storage). Destructuring (`pub const (a,b) = t`)
+    // records each item — decl_node propagates through the recursion.
+    if (has_pub) {
+      check_pub_value_decl(decl_node, kind_sv);
+      lnast->add_pub(trim(get_text(id)), "value");
     }
 
     // Task 1r/1q — track compile-time-resolvable integer bindings so a later
@@ -3163,6 +3223,28 @@ void Prp2lnast::process_lambda_statement_named(TSNode n, std::string_view hoist_
     kind                             = "pipe";
   }
 
+  // Task 1m — `pub comb/mod/pipe/fluid name …` marks the definition
+  // exportable. Only file-scope named definitions may be pub.
+  if (TSNode pub_node = child_by_field(n, "pub"); !ts_node_is_null(pub_node)) {
+    if (!builder.at_top_stmts() || !lambda_kind_stack_.empty() || conditional_depth_ > 0) {
+      report_error(pub_node,
+                   "pub-not-file-scope",
+                   "syntax",
+                   "`pub` is only valid on file-scope definitions",
+                   "move the definition to the file's top level");
+    }
+    if (ts_node_is_null(name_node)) {
+      report_error(pub_node,
+                   "pub-needs-name",
+                   "syntax",
+                   "`pub` requires a named definition",
+                   "anonymous lambdas cannot be exported");
+    }
+    // Normalize the fluid kind text ("fluid …" variants) to the bare kind.
+    std::string_view pub_kind = kind.size() >= 5 && kind.substr(0, 5) == "fluid" ? "fluid" : kind;
+    lnast->add_pub(trim(get_text(name_node)), pub_kind);
+  }
+
   // Workaround for tree-sitter not always attaching the body to `code`:
   // `comb mytest(a,b) -> (r) { ... }` parses as a `lambda` node followed
   // by a sibling `scope_statement` instead of attaching the block to the
@@ -3963,14 +4045,126 @@ void Prp2lnast::process_type_statement(TSNode n) {
   }
 }
 
-void Prp2lnast::process_import_statement(TSNode n) {
-  TSNode     alias  = child_by_field(n, "alias");
-  TSNode     mod    = child_by_field(n, "module");
-  Lnast_node target = ts_node_is_null(alias) ? builder.mint_tmp_ref() : Lnast_node::create_ref(get_text(alias));
-  auto       idx    = builder.add_child(Lnast_ntype::create_func_call());
+// Defined with the interpolated-string lowering below; needed early by the
+// import-argument validation.
+static std::string unescape_cooked_string(std::string_view raw);
+
+// Task 1m — the `import` builtin (docs/contracts/task_1m_plan.md §1).
+// Returns the unquoted body when `n` is a plain comptime string literal
+// expression — `'…'` (raw) or `"…"` with no `{…}` interpolation — else nullopt.
+std::optional<std::string> Prp2lnast::plain_string_literal_text(TSNode n) {
+  if (ts_node_is_null(n)) {
+    return std::nullopt;
+  }
+  std::string_view t(ts_node_type(n));
+  if ((t == "constant" || t == "paren_group") && ts_node_named_child_count(n) == 1) {
+    return plain_string_literal_text(ts_node_named_child(n, 0));
+  }
+  if (t == "string_literal") {  // single-quoted raw literal: '…'
+    auto txt = trim(get_text(n));
+    if (txt.size() >= 2) {
+      return std::string(txt.substr(1, txt.size() - 2));
+    }
+    return std::nullopt;
+  }
+  if (t == "interpolated_string_literal") {  // double-quoted; reject `{expr}` parts
+    if (ts_node_named_child_count(n) != 0) {
+      return std::nullopt;
+    }
+    if (ts_node_end_byte(n) < ts_node_start_byte(n) + 2) {
+      return std::nullopt;
+    }
+    auto body = text_between(ts_node_start_byte(n) + 1, ts_node_end_byte(n) - 1);
+    return unescape_cooked_string(body);
+  }
+  return std::nullopt;
+}
+
+// The canonical marked-builtin call shape:
+//   func_call(target, const "import", const '<unit>')
+// — exactly what `lhd scan` (collect_imports) matches and the upass resolver
+// (task 1m phase C) folds. The callee is a CONST (not a ref) so constprop
+// leaves it unfolded and no user `import` definition can capture it.
+void Prp2lnast::emit_import_call(const Lnast_node& target, std::string_view unit, TSNode loc_node) {
+  auto idx = builder.add_child(Lnast_ntype::create_func_call());
   lnast->add_child(idx, target);
   lnast->add_child(idx, Lnast_node::create_const("import"));
-  lnast->add_child(idx, Lnast_node::create_const(ts_node_is_null(mod) ? std::string_view{} : get_text(mod)));
+  lnast->add_child(idx, Lnast_node::create_const(absl::StrCat("'", unit, "'")));
+  attach_loc(idx, loc_node);  // → resolution diagnostics point at the call site
+}
+
+// Expression form `import("unit")`: validate the argument (exactly one, a
+// comptime string literal — imports resolve statically, so computed strings
+// cannot name a unit) and lower to the canonical call.
+void Prp2lnast::lower_import_call(TSNode call_node, TSNode arg_tuple, const Lnast_node& target) {
+  std::vector<TSNode> items;
+  if (!ts_node_is_null(arg_tuple)) {
+    for (uint32_t i = 0, nc = ts_node_named_child_count(arg_tuple); i < nc; ++i) {
+      TSNode c = ts_node_named_child(arg_tuple, i);
+      if (std::string_view(ts_node_type(c)) == "comment") {
+        continue;
+      }
+      items.push_back(c);
+    }
+  }
+  if (items.size() != 1) {
+    report_error(call_node,
+                 "import-arity",
+                 "syntax",
+                 "`import` takes exactly one argument",
+                 "write `import(\"unit\")`, `import(\"ln:unit.tree\")`, or `import(\"lg:graph\")`");
+  }
+  auto text = plain_string_literal_text(items.front());
+  if (!text || text->empty()) {
+    report_error(items.front(),
+                 "import-not-literal",
+                 "syntax",
+                 "the `import` argument must be a comptime string literal",
+                 "imports resolve statically — a computed string cannot name a unit");
+  }
+  emit_import_call(target, *text, call_node);
+}
+
+// Statement form `import "unit" as b` — exact sugar for
+// `const b = import("unit")`: a const DECLARATION (declare via the decl-merge
+// + store), so read-only-always and the normal no-shadowing / redeclaration
+// rules apply unchanged.
+void Prp2lnast::process_import_statement(TSNode n) {
+  TSNode alias = child_by_field(n, "alias");
+  TSNode mod   = child_by_field(n, "module");
+  // String-literal-only (task 1m): the old dotted-identifier grammar form
+  // (`import a.b.c as x`) is rejected.
+  auto text = plain_string_literal_text(mod);
+  if (!text || text->empty()) {
+    report_error(ts_node_is_null(mod) ? n : mod,
+                 "import-not-literal",
+                 "syntax",
+                 "the imported unit must be a comptime string literal",
+                 "write `import \"unit\" as name`");
+  }
+  if (ts_node_is_null(alias)) {
+    report_error(n, "import-needs-alias", "syntax", "`import … as <name>` requires an alias", "write `import \"unit\" as name`");
+  }
+
+  Lnast_node tmp = builder.mint_tmp_ref();
+  emit_import_call(tmp, *text, n);
+
+  Lnast_node ref = Lnast_node::create_ref(get_text(alias));
+  {
+    auto idx = builder.add_child(Lnast_ntype::create_attr_set());
+    lnast->add_child(idx, ref);
+    lnast->add_child(idx, Lnast_node::create_const("type"));
+    lnast->add_child(idx, Lnast_node::create_const("const"));
+    // Span → the decl-merge copies this onto the synthesized `declare` so
+    // declaration-site diagnostics point at the alias.
+    attach_loc(idx, alias);
+  }
+  {
+    auto idx = builder.add_child(Lnast_ntype::create_store());
+    lnast->add_child(idx, ref);
+    lnast->add_child(idx, tmp);
+    attach_loc(idx, alias);
+  }
 }
 
 void Prp2lnast::process_test_statement(TSNode n) {
@@ -4532,6 +4726,15 @@ bool Prp2lnast::emit_int_type_call(const Lnast_node& target, TSNode type_cast_no
     }
     std::string key(trim(get_text(lv)));
     std::string val(trim(get_text(rv)));
+    if (key == "range") {
+      // No `range` type argument — it would be pure sugar for max/min, so it
+      // is rejected to keep a single way to bound an integer type.
+      report_error(item,
+                   "int-type-range",
+                   "type",
+                   std::format("`{}(range=…)` is not a valid integer type bound", kw),
+                   "bound the type with `max=`/`min=` (e.g. `int(max=15, min=0)`) or a width type `u4`/`s5`");
+    }
     if (key == "max") {
       max_txt = val;
     } else if (key == "min") {
@@ -4670,6 +4873,87 @@ void Prp2lnast::emit_type_expr(const Lnast_nid& parent, TSNode type_node) {
   }
 }
 
+void Prp2lnast::reject_common_mistakes_attr_name(TSNode node, std::string_view name, bool has_value) const {
+  // Unknown attribute names are normally pass-through (user extensibility —
+  // attributes_spec.md §1.D), so this only errors on a curated list of
+  // popular mistakes plus singular/plural near-misses of the built-in
+  // vocabulary. Anything else is silently accepted as a user attribute.
+
+  // Pyrope-source attribute vocabulary. Kept in sync with
+  // uPass_attributes::is_builtin_attr (inou/prp cannot depend on upass);
+  // `ubits`/`sbits` are added because attribute reads support them.
+  static constexpr std::string_view known_attrs[] = {
+      // Category A — LNAST/upass attrs
+      "max", "min", "bits", "ubits", "sbits", "wrap", "saturate", "sat", "comptime", "const", "mut", "typename", "private",
+      "size", "sign", "key", "crand", "rand", "loc", "file", "type",
+      // Category B — LGraph wiring attrs
+      "clock", "reset", "debug", "_debug", "async", "init", "clock_pin", "din", "enable", "negreset", "posclk", "reset_pin",
+      "valid", "stop", "lat", "num", "addr", "fwd", "wensize", "rdport", "defer", "inputs", "outputs",
+      // Category C — synthesis hints
+      "critical", "delay", "donttouch", "keep", "inp_delay", "out_delay", "max_delay", "min_delay", "max_load", "max_fanout",
+      "max_cap", "left_of", "right_of", "top_of", "bottom_of", "align_with",
+  };
+  auto is_known = [](std::string_view n) {
+    return std::find(std::begin(known_attrs), std::end(known_attrs), n) != std::end(known_attrs);
+  };
+
+  if (is_known(name)) {
+    // `clock`/`reset` are valid only as flag-only signal classifications
+    // (`clk::[clock]`). With `=value` the user almost surely meant the
+    // per-register pin override.
+    if (has_value && (name == "clock" || name == "reset")) {
+      report_error(node,
+                   "attr-name-mistake",
+                   "syntax",
+                   std::format("attribute `{}` does not take a value — it marks a declared signal as a {}", name, name),
+                   std::format("to pick a register's {0} use `{0}_pin=ref <wire>`", name));
+    }
+    return;
+  }
+
+  // Popular renames — habits from Verilog/other HDLs or the LGraph pin names.
+  struct Mistake {
+    std::string_view wrong;
+    std::string_view hint;
+  };
+  static constexpr Mistake mistakes[] = {
+      {"initial", "use `init`"},  // LGraph's Flop pin is `initial`; the Pyrope attribute is `init`
+      {"clk", "use `clock_pin=ref <wire>` to pick a register's clock, or `clock` to classify a signal (`clk::[clock]`)"},
+      {"rst", "use `reset_pin=ref <wire>` to pick a register's reset, or `reset` to classify a signal (`rst::[reset]`)"},
+      {"width", "use `bits` to read a width (`x.[bits]`); to set a width declare a type, e.g. `:u8`"},
+      {"en", "use `enable`"},
+      {"posedge", "use `posclk` (`posclk=true`)"},
+      {"negedge", "use `posclk=false`"},
+      {"signed", "signedness is derived from the type — declare `:sN` (read it with `x.[sign]`)"},
+      {"unsigned", "signedness is derived from the type — declare `:uN` (read it with `x.[sign]`)"},
+  };
+  for (const auto& m : mistakes) {
+    if (name == m.wrong) {
+      report_error(node,
+                   "attr-name-mistake",
+                   "syntax",
+                   std::format("`{}` is not a Pyrope attribute name", name),
+                   m.hint);
+    }
+  }
+
+  // Singular/plural near-miss of a built-in name (`bit`→`bits`, `keys`→`key`).
+  if (is_known(std::string(name) + "s")) {
+    report_error(node,
+                 "attr-name-mistake",
+                 "syntax",
+                 std::format("`{}` is not a Pyrope attribute name", name),
+                 std::format("did you mean `{}s`?", name));
+  }
+  if (name.size() > 1 && name.back() == 's' && is_known(name.substr(0, name.size() - 1))) {
+    report_error(node,
+                 "attr-name-mistake",
+                 "syntax",
+                 std::format("`{}` is not a Pyrope attribute name", name),
+                 std::format("did you mean `{}`?", name.substr(0, name.size() - 1)));
+  }
+}
+
 void Prp2lnast::emit_arg_assign(const Lnast_nid& tuple_parent, TSNode typed_ident, TSNode definition_or_null, bool is_ref_mod,
                                 std::vector<Param_attr>* attrs_out, std::string_view lambda_kind, bool is_io_output) {
   TSNode id = child_by_field(typed_ident, "identifier");
@@ -4737,12 +5021,14 @@ void Prp2lnast::emit_arg_assign(const Lnast_nid& tuple_parent, TSNode typed_iden
               continue;
             }
             std::string val_txt = ts_node_is_null(rv) ? std::string{} : std::string(trim(get_text(rv)));
+            reject_common_mistakes_attr_name(lv, key_txt, !ts_node_is_null(rv));
             attrs_out->push_back({std::string(get_text(id)), std::string(key_txt), std::move(val_txt)});
           } else if (it == "identifier" || it == "ref_identifier") {
             auto kt = trim(get_text(item));
             if (kt.empty()) {
               continue;
             }
+            reject_common_mistakes_attr_name(item, kt, false);
             attrs_out->push_back({std::string(get_text(id)), std::string(kt), std::string{}});
           }
         }
@@ -4951,6 +5237,7 @@ void Prp2lnast::emit_attribute_list(const Lnast_node& target, TSNode attr_list_n
         if (key_txt.empty()) {
           continue;
         }
+        reject_common_mistakes_attr_name(lv, key_txt, !ts_node_is_null(rv));
         auto idx = builder.add_child(Lnast_ntype::create_attr_set());
         lnast->add_child(idx, target);
         lnast->add_child(idx, Lnast_node::create_const(key_txt));
@@ -4965,6 +5252,7 @@ void Prp2lnast::emit_attribute_list(const Lnast_node& target, TSNode attr_list_n
         if (txt.empty()) {
           continue;
         }
+        reject_common_mistakes_attr_name(item, txt, false);
         auto idx = builder.add_child(Lnast_ntype::create_attr_set());
         lnast->add_child(idx, target);
         lnast->add_child(idx, Lnast_node::create_const(txt));
@@ -5013,6 +5301,7 @@ void Prp2lnast::emit_attribute_list(const Lnast_node& target, TSNode attr_list_n
         break;
       }
     }
+    reject_common_mistakes_attr_name(name_n, get_text(name_n), have_val);
     auto idx = builder.add_child(Lnast_ntype::create_attr_set());
     lnast->add_child(idx, target);
     lnast->add_child(idx, Lnast_node::create_const(get_text(name_n)));
@@ -6289,6 +6578,7 @@ Lnast_node Prp2lnast::attribute_read_to_node(TSNode n) {
         continue;
       }
       TSNode name_n = ts_node_child(al, j);
+      reject_common_mistakes_attr_name(name_n, get_text(name_n), false);
       auto   idx    = builder.add_child(Lnast_ntype::create_attr_get());
       auto   ref    = builder.mint_tmp_ref();
       lnast->add_child(idx, ref);
@@ -6355,6 +6645,15 @@ Lnast_node Prp2lnast::function_call_expr_to_node(TSNode n) {
   } else {
     func_ref = Lnast_node::create_ref(trim(get_text(func)));
   }
+
+  // Task 1m — `import("unit")` is a comptime builtin with its own canonical
+  // lowering (validated string-literal argument; const-form callee).
+  if (!has_receiver && func_ref.is_ref() && func_ref.get_name() == "import") {
+    auto ref = builder.mint_tmp_ref();
+    lower_import_call(n, arg, ref);
+    return ref;
+  }
+
   auto call_args = collect_call_args(arg);
   if (has_receiver) {
     Call_arg receiver_arg;

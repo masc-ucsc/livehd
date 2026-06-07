@@ -1,0 +1,11 @@
+/*
+:name: attribute_bit_singular
+:type: error
+:error: not a Pyrope attribute name
+:help: did you mean `bits`
+*/
+
+// Singular/plural near-miss of a built-in attribute name.
+
+mut x:u8 = 1
+const b = x.[bit]  // locate_error_here

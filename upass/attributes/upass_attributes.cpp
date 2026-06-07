@@ -444,8 +444,8 @@ void uPass_attributes::process_attr_set() {
       }
       attr_set_values[target][attr_name] = v;
     } else if (value_is_ref) {
-      // Refs (e.g. range tmp, or a runtime wire ref for clock_pin) are
-      // stored separately so derive_max can chain through range_bounds.
+      // Refs (e.g. a runtime wire ref for clock_pin) are stored separately
+      // so the LGraph wiring pass can resolve them by name.
       attr_set_refs[target][attr_name] = normalize_name(value_text);
     } else {
       Const stored;

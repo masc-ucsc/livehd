@@ -240,11 +240,25 @@ protected:
   // `string()` and interpolation. Returns the ref of the enum-type bundle
   // (entry name → carrier).
   Lnast_node lower_enum_def(std::string_view enum_name, TSNode enum_level_type, const std::vector<Enum_entry>& entries);
-  void       process_type_statement(TSNode n);
-  void       process_import_statement(TSNode n);
-  void       process_test_statement(TSNode n);
-  void       process_spawn_statement(TSNode n);
-  void       process_impl_statement(TSNode n);
+  void process_type_statement(TSNode n);
+  void process_import_statement(TSNode n);
+
+  // Task 1m — `pub` exports + the `import` builtin (task_1m_plan.md §1).
+  // check_pub_value_decl: a `pub` value declaration must be file-scope `const`.
+  void check_pub_value_decl(TSNode decl_node, std::string_view kind);
+  // plain_string_literal_text: unquoted body of a plain comptime string
+  // literal expression ('…' raw, or "…" with no interpolation); nullopt else.
+  std::optional<std::string> plain_string_literal_text(TSNode n);
+  // emit_import_call: the canonical marked-builtin call shape
+  // `func_call(target, const "import", const '<unit>')` — what `lhd scan`
+  // (collect_imports) matches and the upass resolver folds.
+  void emit_import_call(const Lnast_node& target, std::string_view unit, TSNode loc_node);
+  // lower_import_call: validate + lower the expression form `import("unit")`.
+  void lower_import_call(TSNode call_node, TSNode arg_tuple, const Lnast_node& target);
+
+  void process_test_statement(TSNode n);
+  void process_spawn_statement(TSNode n);
+  void process_impl_statement(TSNode n);
 
   // Expressions: returns an Lnast_node (ref or const) naming the result
   Lnast_node expr_to_node(TSNode n);
@@ -274,9 +288,14 @@ protected:
   Lnast_node type_specification_to_node(TSNode n);
 
   // Type handling
-  void                 emit_type_spec(const Lnast_node& target, TSNode type_cast_node);
-  void                 emit_attribute_list(const Lnast_node& target, TSNode attribute_list_node);
-  void                 emit_type_expr(const Lnast_nid& type_index, TSNode type_node);
+  void emit_type_spec(const Lnast_node& target, TSNode type_cast_node);
+  void emit_attribute_list(const Lnast_node& target, TSNode attribute_list_node);
+  // Catch typical attribute-name mistakes (`initial`→`init`, `clk`→`clock_pin`,
+  // `bit`→`bits`, …) at parse time with a targeted hint. `has_value` is true
+  // when the attribute carries `=value` — it disambiguates `[clock=x]` (meant
+  // `clock_pin`) from the valid flag-only classification `clk::[clock]`.
+  void reject_common_mistakes_attr_name(TSNode node, std::string_view name, bool has_value) const;
+  void emit_type_expr(const Lnast_nid& type_index, TSNode type_node);
   // Task 1t — the integer type-call `int(max=,min=,bits=)` / `uint(bits=)`.
   // Today the grammar lexes `int`/`uint`/`uN` as keyword tokens, so a
   // parenthesized argument list does NOT match `function_call_type`; it lands

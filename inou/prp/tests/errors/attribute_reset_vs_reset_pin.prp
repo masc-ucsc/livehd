@@ -1,0 +1,13 @@
+/*
+:name: attribute_reset_vs_reset_pin
+:type: error
+:error: does not take a value
+:help: reset_pin=ref
+*/
+
+// `reset` (like `clock`) is a flag-only signal classification
+// (`rst::[reset]`). With `=value` the user almost surely meant the
+// per-register pin override `reset_pin=ref <wire>`.
+
+mut rst = false
+reg r:u8:[reset=ref rst] = 0  // locate_error_here

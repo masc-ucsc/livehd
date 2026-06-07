@@ -253,8 +253,7 @@ public:
   std::optional<std::pair<Const, Const>> lookup_range(std::string_view tmp) const;
 
   // Ref-text value recorded for an attr_set whose value was a ref (e.g.
-  // `attr_set d "range" tmp_1`). Used to chain into range_bounds for
-  // max/min derivation.
+  // `attr_set f "clock_pin" my_clk` — a runtime wire ref for LGraph wiring).
   std::optional<std::string> lookup_attr_ref(std::string_view var, std::string_view attr) const;
 
 private:
