@@ -6,5 +6,5 @@
 
 // Named call arguments must match a formal parameter.
 
-comb mix(a, b) -> (r) { r = a + b }
-cassert(mix(a = 1, c = 2) == 3) // locate_error_here
+pipe[1] mix(a:u8, b:u8) -> (r:u9) { r = a + b }
+assert(mix(a = 1, c = 2) == 3) // locate_error_here

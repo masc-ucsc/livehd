@@ -14,10 +14,8 @@ cc_library(
     includes = ["."],
     visibility = ["//visibility:public"],
     deps = [
-        "//graph",
         "//lnast",
         "//upass/core:upass",
-        "@hhds//hhds:graph",
     ],
     alwayslink = True,
 )
@@ -29,19 +27,8 @@ cc_test(
     deps = [
         ":upass_runner",
         "//upass/constprop:upass_constprop",
+        "//upass/noop:upass_noop",
         "@googletest//:gtest_main",
     ],
 )
 
-cc_test(
-    name = "upass_runner_lgraph_test",
-    srcs = ["upass_runner_lgraph_test.cpp"],
-    copts = COPTS,
-    deps = [
-        ":upass_runner",
-        "//core",
-        "//graph",
-        "@googletest//:gtest_main",
-        "@hhds//hhds:graph",
-    ],
-)

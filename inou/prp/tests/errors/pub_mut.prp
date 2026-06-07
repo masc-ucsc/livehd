@@ -1,0 +1,11 @@
+/*
+:name: pub_mut
+:type: error
+:error: cannot export `pub mut`
+:help: pub const
+*/
+
+// Task 1m — exported mutable state contradicts the read-only import
+// semantics (docs/contracts/task_1m_plan.md §1).
+
+pub mut y = 3  // locate_error_here

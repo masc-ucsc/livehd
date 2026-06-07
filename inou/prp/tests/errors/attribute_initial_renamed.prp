@@ -1,0 +1,8 @@
+/*
+:name: attribute_initial_renamed
+:type: error
+:error: not a Pyrope attribute name
+:help: use `init`
+*/
+
+reg r:u8:[initial=0] = 0  // locate_error_here

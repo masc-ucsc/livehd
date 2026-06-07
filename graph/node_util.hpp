@@ -72,7 +72,17 @@ inline constexpr hhds::Port_id Const_small_pid_count = 32;
 // is_loop_last (see cell.hpp), so the stored HHDS type round-trips
 // directly into an Ntype_op without any shift. Returns Ntype_op::Invalid
 // (== 0) for nodes that were never typed.
+//
+// Task 1u-A gotcha: `Graph::set_subnode` RE-STAMPS the raw type to HHDS's
+// own 2/3 loop-last-hint encoding (graph.cpp), silently overwriting the
+// Ntype_op::Sub a caller stored — and 2 collides with Ntype_op::Sum. The
+// authoritative Sub discriminator is therefore the subnode LINK, not the
+// stored type. Every Sub on every path (yosys + Pyrope tolg) goes through
+// set_subnode, so this check is complete.
 [[nodiscard]] inline Ntype_op type_op_of(const hhds::Node_class& node) {
+  if (node.get_subnode_gid() != hhds::Gid_invalid) {
+    return Ntype_op::Sub;
+  }
   return static_cast<Ntype_op>(static_cast<uint16_t>(node.get_type()));
 }
 

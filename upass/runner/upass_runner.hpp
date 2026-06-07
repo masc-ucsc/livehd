@@ -144,6 +144,10 @@ protected:
   // Declared kind + range of a dotted field path (`t1.a`). First pass that
   // provides wins. See uPass::provide_field_type (task 1k).
   std::optional<upass::uPass::Field_decl_type>              try_field_type(std::string_view name);
+  // Task 1g — inferred scalar kind of a variable (bool vs int even when
+  // un-annotated). First pass returning a non-none kind wins (typecheck).
+  // See uPass::provide_scalar_kind.
+  Io_kind                                                   try_scalar_kind(std::string_view name);
   // Declared storage class (mut/const/reg/type) of a variable. First pass
   // that provides a non-unknown answer wins. See uPass::provide_decl_storage
   // (task 1k ref-actual mutability).
@@ -370,12 +374,6 @@ private:
   void process_drop_candidate(Pass_method fn, bool fold_all);
   void process_drop_candidate_verbatim(Pass_method fn);
   bool any_pass_drops() const;
-
-  // Step G — reduce a sequence of Votes by priority drop > toconst > update
-  // > keep. Used by the new-surface dispatch path once passes migrate to
-  // the Vote-returning hooks. Today this is a free helper called by
-  // nothing in the legacy dispatch.
-  static upass::Vote reduce_votes(const std::vector<upass::Vote>& votes);
 
   // Verbatim path (category C): dispatch so passes see the node, then copy
   // the subtree without folding.

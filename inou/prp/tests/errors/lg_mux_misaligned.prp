@@ -1,0 +1,21 @@
+/*
+:name: lg_mux_misaligned
+:type: error
+:tolg: 1
+:error: mixes values at different cycles
+*/
+
+// 2d-reg — the misaligned variant of mod_mux_aligned: the selector is the
+// RAW cycle-0 input while both data legs are stage[1]-delayed, so the Mux
+// cell meets operands from different cycles.
+mod pick(sel:bool, a:u8, b:u8) -> (out:u9@[1]) {
+  stage[1] ad = a
+  stage[1] bd = b
+  mut r:u9 = 0
+  if sel {
+    r = ad + 1
+  } else {
+    r = bd + 2
+  }
+  out = r
+}

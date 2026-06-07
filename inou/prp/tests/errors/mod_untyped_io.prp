@@ -1,0 +1,8 @@
+/*
+:name: mod_untyped_io
+:type: error
+:error: has no explicit type
+:help: declare an explicit type
+*/
+
+mod f(a) -> (x:u8@[0]) { x = a }   // locate_error_here

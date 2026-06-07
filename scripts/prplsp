@@ -7,11 +7,9 @@
 #   1. If $PWD is inside a livehd checkout, use that repo's freshly-built
 #      bazel-bin/lhd/lhd -- no copying/installing while hacking on the LSP.
 #   2. Otherwise fall back to the `lhd` found in $PATH (the default install).
-#   3. Legacy fallback: a `lgshell` in $PATH still serves via `lgshell --lsp`
-#      (deprecated -- install lhd instead).
 #
 # A livehd checkout is identified by an ancestor MODULE.bazel declaring
-# name = "livehd". Extra arguments are forwarded after `lsp`.
+# name = "livehd". Extra arguments are forwarded to lhd after lsp.
 
 set -euo pipefail
 
@@ -21,8 +19,8 @@ find_livehd_root() {
   local dir
   dir=$(pwd -P)
   while [[ -n "${dir}" ]]; do
-    if [[ -f "${dir}/MODULE.bazel" ]] \
-       && grep -Eq 'name[[:space:]]*=[[:space:]]*"livehd"' "${dir}/MODULE.bazel"; then
+    if [[ -f "${dir}/MODULE.bazel" ]] &&
+      grep -Eq 'name[[:space:]]*=[[:space:]]*"livehd"' "${dir}/MODULE.bazel"; then
       printf '%s\n' "${dir}"
       return 0
     fi
@@ -46,12 +44,7 @@ fi
 
 # Fall back to PATH if not inside a checkout, or inside but not yet built.
 if [[ -z "${lhd:-}" ]]; then
-  if lhd=$(command -v lhd 2>/dev/null); then
-    :
-  elif lgshell=$(command -v lgshell 2>/dev/null); then
-    echo "prplsp: no lhd found; using deprecated 'lgshell --lsp' from \$PATH" >&2
-    exec "${lgshell}" --lsp "$@"
-  else
+  if ! lhd=$(command -v lhd 2>/dev/null); then
     echo "prplsp: could not find lhd (not in a livehd checkout, and none in \$PATH)" >&2
     exit 1
   fi

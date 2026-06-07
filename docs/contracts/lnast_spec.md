@@ -252,21 +252,33 @@ mod cpu(
 **Resolution.** `comp_type_lambda` carries a `Partition` descriptor —
 see `architecture.md §3` for the full struct. Concretely:
 
-- `kind` ∈ {`comb`, `pipe`, `mod`} stored as an attribute on the node
-  (`flow` is deferred).
+- `kind` ∈ {`comb`, `pipe`, `mod`} — the second child (const) of the
+  `func_def` node in the embedded form; once func_extract spawns the
+  standalone tree, the kind is the **durable `Lnast::lambda_kind_` field**
+  (`get_lambda_kind()` / `set_lambda_kind()`, stamped at extraction —
+  landed 1r-C). Consumers gate on it, NEVER on `stages_min>0`: a mod
+  output legitimately stamps `stages(0,0)`/`stages(nil,nil)` and must not
+  be mistaken for a pipe (`uPass_pipe` and the runner's mod-decline both
+  gate on the kind). A `ref self` mod keeps kind `mod` but is recognized
+  as a METHOD by its `self` io entry — it stays on the inliner splice
+  path; only plain mods are partitions. (`fluid` is deferred.)
 - Latency is **per-output**, on the `func_def` io list (task **1q**): each
   output io entry (`store(ref, default-or-nil, [type])`) may carry a
   trailing `stages` node with two `const` children `(min, max)`.
   `pipe[N]` → `stages(N,N)` on every output; `pipe[2..=5]` →
   `stages(2,5)`; `pipe[1..<N]` → `stages(1,N-1)` (closed range); bare
   `pipe` → `stages(1,0)` (min 1, max 0 = unconstrained); `comb` carries no
-  stages node (absent ≡ `(0,0)`); a `mod` output (later) may carry a
-  different value per output. The value is the SCC/σ stage depth from the
-  partition inputs to that output flop (`06c-pipelining.md`). `pipe[N]`
-  is a **hard contract** (exact); ranges are also hard — the body must
-  support the **entire** declared range (intrinsic σ ≤ range minimum), so
-  a caller may rely on any value in it; the tool picks. `pipe[0]` is a
-  compile error. Plan: `task_1q_plan.md`.
+  stages node (absent ≡ `(0,0)`); a `mod` output carries its own DECLARED
+  value per output (landed 1r-A): `x:T@[N]` → `stages(N,N)` including
+  `(0,0)` feedthrough, `@[]` → `stages(nil,nil)` (slot present,
+  unconstrained — the foreign-Verilog ingest form), and omitting `@[...]`
+  on a mod output is a compile error. The value is the SCC/σ stage depth
+  from the partition inputs to that output flop (`06c-pipelining.md`).
+  `pipe[N]` is a **hard contract** (exact); ranges are also hard — the
+  body must support the **entire** declared range (intrinsic σ ≤ range
+  minimum), so a caller may rely on any value in it; the tool picks.
+  `pipe[0]` is a compile error. Plan: `task_1q_plan.md`; mod phases:
+  `TODO_mod.html` (1r).
 - Input and output lists are **flat, named, typed port lists** — not
   tuple types. Each port has its own bits/sign/role/`decl_loc`. The
   body may still construct tuples internally (`out = (sum, carry)`);
@@ -284,15 +296,25 @@ This name collision will bite when implementing argument passing.
 
 ### 3.11 Timed identifier `@[...]`
 
-```pyrope
-counter@[] += 1     // deferred
-a@[-1]              // previous cycle
-:@[N]               // timing type check on LHS
-```
+**`@[N]` is a pure cycle CHECK, never a value move** (06c-pipelining.md:
+"`foo@[N]` never inserts flops — it is *only* an alignment assertion").
+Task 1r split the two concerns that this section previously conflated:
 
-The `delay_assign` node added in §15.2 covers the offset semantics. Still
-needed: a producer emission for each surface form in `inou/prp` (none of
-`@[N]`, `@[-1]`, `@[]`, `.[defer]` produce LNAST today).
+- `x@[N]` (body use, LHS or RHS, N >= 0) → a `timecheck(ref x, const N,
+  const N)` STATEMENT (landed 1r-B, `inou/prp/prp2lnast.cpp
+  maybe_emit_timecheck`). Flop-free and inert — the value lowering is the
+  plain identifier read/write; the timecheck is consumed by the future
+  pipe/mod typecheck pass. `x@[]` is the explicit opt-out and emits
+  nothing. Legal in `mod` and `pipe` bodies; a compile error in `comb`.
+  On a `mod` OUTPUT declaration (`-> (x:u8@[N])`) the same surface form
+  is the interface latency contract and stamps the io `stages(N,N)`
+  annotation instead (landed 1r-A; `@[]` → `stages(nil,nil)`).
+- `a@[-1]` (past cycle) and `a.[defer]` (end-of-cycle wiring) MOVE values
+  in time — only these belong to `delay_assign` (§15.2). Do NOT lower
+  `@[N]` with N >= 0 to `delay_assign`.
+
+Still needed: producer emission for `@[-1]` / `.[defer]` (`delay_assign`;
+neither produces LNAST today).
 
 ### 3.12 Enums / variants / `impl` / `type` statements
 
@@ -536,7 +558,7 @@ restatement.)
   written is at the declaration site (`let`, `mut`, `const`, `reg`,
   `comptime`, port, lambda arg, tuple literal field). Examples of decl-only
   attrs: `storage` (const/mut/reg/comptime), `direction` (in/out),
-  `reset_pin`, `clock_pin`, `initial`, `pipeline_depth`, `debug`, user-
+  `reset_pin`, `clock_pin`, `init`, `pipeline_depth`, `debug`, user-
   asserted bounds (`max=N`, `min=N`).
 - **Declaration-with-init copies sticky only.** `const y = x`, `mut y = x`
   declare `y`; sticky `_*` / `debug` attrs on `x` propagate, non-sticky
@@ -583,7 +605,7 @@ restatement.)
   using range arithmetic. Publishes the result as a per-node HHDS tree
   attr.
 - For regs: fixed-point over all RHS expressions assigned to the reg's SSA
-  versions, unioned with the declared `initial` value. Converges quickly
+  versions, unioned with the declared `init` value. Converges quickly
   because the reg decl provides a user-asserted bound (or widens until the
   bound is hit, at which point lnastfmt errors if assigned values exceed
   the assertion).
@@ -771,14 +793,14 @@ tuple_set config clock freq 100_000_000
 **Register with reset pin:**
 
 ```pyrope
-reg counter:u8:[reset_pin=rst, initial=0] = 0
+reg counter:u8:[reset_pin=rst, init=0] = 0
 ```
 
 ```
 attr_set counter storage reg
 attr_set counter bits 8
 attr_set counter reset_pin rst
-attr_set counter initial 0
+attr_set counter init 0
 assign   counter 0
 ```
 
@@ -1098,11 +1120,11 @@ delay_assign:
   variable (e.g., `xx = 3; a@[xx]`), but must *not* depend on runtime input.
   Resolution happens during constant folding; lnastfmt flags if the offset
   is still non-const after folding.
-- Surface mapping:
+- Surface mapping (rev 1r: `@[N]`/`@[]` with N >= 0 are NOT delay_assign —
+  they are pure cycle checks lowered to the `timecheck` statement / io
+  `stages` annotation, see §3.11; only value-moving forms remain here):
   - `a.[defer]`   → `delay_assign tmp a 1` (non-reg) or `1` (reg = next-cycle D)
-  - `a@[N]`       → `delay_assign tmp a N`
   - `a@[-1]`      → `delay_assign tmp a -1`
-  - `a@[]`        → `delay_assign tmp a 1`  (shorthand for defer)
 
 **Semantics (currently implemented):**
 

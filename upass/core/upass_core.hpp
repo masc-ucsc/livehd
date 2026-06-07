@@ -8,10 +8,8 @@
 #include <stack>
 #include <string>
 #include <string_view>
-#include <variant>
 #include <vector>
 
-#include "absl/container/inlined_vector.h"
 #include "bundle.hpp"
 #include "const.hpp"
 #include "lnast.hpp"
@@ -39,53 +37,16 @@ struct Emit_decision {
   static constexpr Emit_decision drop() { return Emit_decision{Emit_kind::drop_subtree}; }
 };
 
-// ── Step E: Operand vector + Vote dispatch (docs/upass_redesign.md §E) ──
-//
-// Runtime_trivial marks an operand that has no usable comptime value at
-// this site (a ref whose Bundle is empty or whose value bits are unknown).
-// Const carries a parsed pyrope literal or a folded value. shared_ptr<Bundle>
-// hands the pass a pointer to the per-name Bundle the runner already
-// resolved — passes read its `fields["0"]` for scalars, or its tuple
-// structure / attrs for richer queries.
-struct Runtime_trivial {};
-
-using Operand     = std::variant<Runtime_trivial, Const, std::shared_ptr<Bundle>>;
-using Operand_vec = absl::InlinedVector<Operand, 4>;
-
-enum class Vote_kind : uint8_t {
-  keep,     // emit source op verbatim (with operand folding)
-  drop,     // emit nothing
-  toconst,  // emit nothing; LHS Bundle's scalar holds the folded value
-  update,   // emit a rewritten shape (carried in update_payload)
-};
-
 // Step K — pending_import poison marker.
 //
 // Presence-only Bundle attribute (Bundle::has_attr / Bundle::set_attr) used
 // to mark every name that depends on an unresolved import. Origination,
 // propagation, gating, and clearing rules live in:
 //   - runner (origination on `import` op, gating skip for non-constprop)
-//   - bundle_pre (propagation through operand bundles)
 //   - finisher (defer verifier/assert dest walk while any Bundle is marked)
-// All four sites read/write this name; the central definition keeps the
+// All sites read/write this name; the central definition keeps the
 // string consistent.
 inline constexpr std::string_view k_pending_import_attr = "pending_import";
-
-struct Vote {
-  Vote_kind            kind{Vote_kind::keep};
-  // Folded value for kind == toconst (committed to dst->fields["0"] by
-  // the runner during vote resolution). Ignored otherwise.
-  Const                toconst_value;
-  // Placeholder for the update shape (Step E doesn't yet ship a concrete
-  // representation; populated by passes that need rewrites — e.g. fcall
-  // inlining in Step L).
-  std::vector<uint8_t> update_payload;
-
-  static Vote keep() { return {}; }
-  static Vote drop() { return {Vote_kind::drop, {}, {}}; }
-  static Vote toconst(const Const& v) { return {Vote_kind::toconst, v, {}}; }
-  static Vote update(std::vector<uint8_t> payload) { return {Vote_kind::update, {}, std::move(payload)}; }
-};
 
 struct uPass {
 public:
@@ -158,6 +119,16 @@ public:
   };
   virtual std::optional<Field_decl_type> provide_field_type(std::string_view /*name*/) { return std::nullopt; }
 
+  // Task 1g — inferred scalar KIND of a variable (integer/boolean/string),
+  // even when it carries no explicit `:type` annotation. uPass_typecheck owns
+  // the kind lattice (it infers `const b = true` as boolean, `mut i = 10` as
+  // integer — a distinction Lconst cannot make, since `true` stores as the
+  // integer 1). constprop's type-aware `does`/`equals` fold consults this to
+  // reject cross-kind comparisons (`int does bool` → false). Returns
+  // `Io_kind::none` when the kind is not (yet) known. See uPass::provide_field_type
+  // for the declared-range half.
+  virtual Io_kind provide_scalar_kind(std::string_view /*name*/) { return Io_kind::none; }
+
   // Task 1k — declared storage class of a variable. The inliner uses this to
   // reject a `const` or `type` binding as a `ref` actual (incl. the UFCS
   // receiver of a `ref self` method): a ref param writes back, so the actual
@@ -192,6 +163,25 @@ public:
   // their process_* without disturbing the in-progress traversal.
   using Emit_at_fn = std::function<void(const Lnast_nid&)>;
   void set_runner_emit_at_fn(Emit_at_fn fn) { runner_emit_at_fn = std::move(fn); }
+
+  // Task 1g — runner-supplied combined scalar-type query for a variable name,
+  // aggregating the two shared-ST seams so a single pass (constprop's
+  // type-aware `does`/`equals` fold) sees both halves without reaching across
+  // passes itself: KIND from uPass_typecheck (`provide_scalar_kind` — infers
+  // bool vs int even for un-annotated vars) and the declared integer ENVELOPE
+  // from uPass_attributes (`provide_field_type` — `range_max`/`range_min`,
+  // present only for explicitly-typed vars). `annotated` is true when an
+  // explicit `:type` pinned a finite bound. An un-annotated integer var thus
+  // reads kind=integer with annotated=false → the fold treats it as an
+  // unbounded envelope (superset of any int), matching the 1g ruling.
+  struct Scalar_type_query {
+    Io_kind              kind{Io_kind::none};
+    std::optional<Const> range_max;
+    std::optional<Const> range_min;
+    bool                 annotated{false};
+  };
+  using Type_query_fn = std::function<Scalar_type_query(std::string_view)>;
+  void set_runner_type_query_fn(Type_query_fn fn) { runner_type_query_fn = std::move(fn); }
 
   // Runner-owned symbol table (step C of upass redesign). Set once at
   // construction. Passes that migrate to the shared symbol table read/write
@@ -246,38 +236,6 @@ public:
   // no-op.
   virtual void notify_init_construction_begin() {}
   virtual void notify_init_construction_end() {}
-
-  // ── Step E new dispatch surface (per docs/upass_redesign.md §E) ──
-  //
-  // The redesign replaces the per-op virtual void process_* family with a
-  // single arith hook (for the 27 arithmetic/logic/comparison/bit ops)
-  // plus shaped hooks for ops whose operand layout is distinctive. Each
-  // hook receives a runner-resolved Operand_vec and a Bundle* for the LHS
-  // (nullptr for ops with no LHS like `if`/`cassert`). The pass returns
-  // a Vote; the runner reduces votes (drop > toconst > update > keep) and
-  // emits accordingly.
-  //
-  // Migration is staged: today the runner still drives the old
-  // `process_<op>()` virtuals. As each pass moves to the new surface, the
-  // runner will route that op kind through process_arith / shaped hooks
-  // and the pass will override these instead. Default implementations
-  // return Vote::keep() so a pass that hasn't migrated is a no-op for
-  // these hooks.
-  virtual Vote process_arith(Lnast_ntype::Lnast_ntype_int /*kind*/, Bundle* /*dst*/, const Operand_vec& /*ops*/) {
-    return Vote::keep();
-  }
-  virtual Vote process_attr_set_v(Bundle* /*dst*/, const Operand_vec& /*ops*/) { return Vote::keep(); }
-  virtual Vote process_attr_get_v(Bundle* /*dst*/, const Operand_vec& /*ops*/) { return Vote::keep(); }
-  virtual Vote process_tuple_add_v(Bundle* /*dst*/, const Operand_vec& /*ops*/) { return Vote::keep(); }
-  virtual Vote process_tuple_concat_v(Bundle* /*dst*/, const Operand_vec& /*ops*/) { return Vote::keep(); }
-  virtual Vote process_tuple_set_v(Bundle* /*dst*/, const Operand_vec& /*ops*/) { return Vote::keep(); }
-  virtual Vote process_tuple_get_v(Bundle* /*dst*/, const Operand_vec& /*ops*/) { return Vote::keep(); }
-  virtual Vote process_range_v(Bundle* /*dst*/, const Operand_vec& /*ops*/) { return Vote::keep(); }
-  virtual Vote process_type_spec_v(Bundle* /*dst*/, const Operand_vec& /*ops*/) { return Vote::keep(); }
-  virtual Vote process_if_v(const Operand_vec& /*ops*/) { return Vote::keep(); }
-  virtual Vote process_cassert_v(const Operand_vec& /*ops*/) { return Vote::keep(); }
-  virtual Vote process_func_def_v(Bundle* /*dst*/, const Operand_vec& /*ops*/) { return Vote::keep(); }
-  virtual Vote process_func_call_v(Bundle* /*dst*/, const Operand_vec& /*ops*/) { return Vote::keep(); }
 
 #define PROCESS_NODE(NAME) \
   virtual void process_##NAME() {}
@@ -394,6 +352,7 @@ protected:
   std::shared_ptr<Lnast_manager>& lm;
   Fold_fn                         runner_fold_fn;
   Emit_at_fn                      runner_emit_at_fn;
+  Type_query_fn                   runner_type_query_fn;
   Symbol_table*                   runner_st{nullptr};
 
   void move_to_nid(const Lnast_nid& nid) { lm->move_to_nid(nid); }

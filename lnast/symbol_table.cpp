@@ -426,12 +426,6 @@ bool Symbol_table::has_bundle(std::string_view key) const {
   return var == key || it->second->has_bundle(field);
 }
 
-bool Symbol_table::is_declared(std::string_view key) const {
-  auto [var, field] = get_var_field(key);
-  (void)field;
-  return find_decl_scope(var) != nullptr;
-}
-
 void Symbol_table::dump() const {
   if (stack.empty()) {
     return;

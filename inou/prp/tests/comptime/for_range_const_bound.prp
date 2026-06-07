@@ -1,0 +1,37 @@
+/*
+:name: for_range_const_bound
+:type: comptime
+:verifier_pass: 3
+:verifier_fail: 0
+*/
+
+// Producer-side unroll of `for i in 0..=BOUND` when BOUND is a plain
+// identifier resolved at the use point through const_int_bindings_
+// (resolve_cycle_value). Pre-fix parse_int_const only accepted a literal
+// `constant`, so a named bound fell back to the placeholder while-true that
+// never unrolls. Both `const N` and decl-time-known `mut M` resolve.
+
+// const bound: 0+1+2+3 = 6.
+const N = 3
+mut acc = 0
+for i in 0..=N {
+  acc = acc + i
+}
+cassert(acc == 6)
+
+// mut bound (decl-time-known): 0+1+2 = 3.
+mut M = 2
+mut acc2 = 0
+for i in 0..=M {
+  acc2 = acc2 + i
+}
+cassert(acc2 == 3)
+
+// statement-level plain re-assignment UPDATEs the mut binding, so the third
+// loop unrolls with the NEW value: 0+1+2+3+4 = 10.
+M = 4
+mut acc3 = 0
+for i in 0..=M {
+  acc3 = acc3 + i
+}
+cassert(acc3 == 10)

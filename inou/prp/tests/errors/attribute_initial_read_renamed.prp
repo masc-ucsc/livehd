@@ -1,0 +1,9 @@
+/*
+:name: attribute_initial_read_renamed
+:type: error
+:error: not a Pyrope attribute name
+:help: use `init`
+*/
+
+mut x = 0
+const y = x.[initial]  // locate_error_here

@@ -257,7 +257,18 @@ fi
 #fi
 
 if grep -q reset ${GOLD}; then
-  RESET_STMT="-set in_reset 1 -set-at 2 in_reset 0"
+  # Assert the miter's reset (the `in_`-prefixed gold/gate shared input) for
+  # the first two cycles, then release it from cycle 2 — a deterministic LEC
+  # start that brings both sides through their reset path to a known state.
+  #
+  # 2d-reg fix: the prior `-set in_reset 1` applied the constraint to EVERY
+  # temporal-induction timestep (not just cycle 0/1), pinning reset high
+  # forever — so every reset-bearing register stayed at its reset value and
+  # ANY two such circuits proved trivially equivalent (a vacuous pass:
+  # add-vs-sub "matched"). Use per-cycle `-set-at` so reset is high only at
+  # cycles 0 and 1 and the induction step runs with reset free (normal
+  # operation), where a real difference is actually observable.
+  RESET_STMT="-set-at 0 in_reset 1 -set-at 1 in_reset 1 -set-at 2 in_reset 0"
 else
   RESET_STMT=""
 fi

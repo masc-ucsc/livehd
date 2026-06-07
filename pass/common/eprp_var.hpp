@@ -34,6 +34,12 @@ public:
   Eprp_graphs graphs;
   Eprp_lnasts lnasts;
 
+  // Task 1m — unresolved live imports surfaced by pass.upass when invoked
+  // with import_defer:1 (the kernel's iterate-until-converged loop consumes
+  // them): (unit that hit the import, import string as written). Empty after
+  // a fully-resolved run.
+  std::vector<std::pair<std::string, std::string>> unresolved_imports;
+
   Eprp_var() {
     dict.clear();
     stage_dict.clear();

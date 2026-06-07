@@ -1,0 +1,11 @@
+/*
+:name: stage_in_pipe
+:type: error
+:error: only valid inside `mod` bodies
+:help: stage inference
+*/
+
+pipe[2] f(a:u8) -> (c:u8) {
+  stage[2] x = a   // locate_error_here
+  c = x
+}

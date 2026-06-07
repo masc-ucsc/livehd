@@ -1,0 +1,14 @@
+/*
+:name: mod_call_pipe
+:type: equiv
+:verilog_top: mod_call_pipe.top
+:pyrope_top: mod_call_pipe.top
+*/
+
+// WORKS: pipe[1..=10] mul(a:u16, b:u16) -> (c:u32) { c = a * b }
+comb mul(a:u16, b:u16) -> (c:u32) { c = a * b }
+
+mod top(in1:u16, in2:u16) -> (out:u32@[3]) {
+  stage[3] out = mul(a=in1, b=in2)
+  //out = tmp
+}

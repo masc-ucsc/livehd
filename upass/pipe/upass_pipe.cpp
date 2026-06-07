@@ -4,10 +4,19 @@
 
 #include <string>
 
+#include "absl/container/flat_hash_set.h"
 #include "lnast_ntype.hpp"
 
 void uPass_pipe::run(const std::shared_ptr<Lnast>& lnast) {
   if (!lnast) {
+    return;
+  }
+  // Task 1r — gate on the durable lambda kind, NOT on stages_min>0: a mod
+  // output legitimately carries a declared stages(N,N) (its interface
+  // landing cycle) and must never get a pipe output flop appended — a mod's
+  // structural latency comes from its body (stage decls / callee
+  // instances); `@[N]` never inserts flops.
+  if (lnast->get_lambda_kind() != "pipe") {
     return;
   }
   const auto& outs = lnast->io_meta().outputs;
@@ -19,7 +28,7 @@ void uPass_pipe::run(const std::shared_ptr<Lnast>& lnast) {
     }
   }
   if (!any) {
-    return;  // comb/mod tree (or pre-ssa shape): nothing to insert
+    return;  // pre-ssa shape: nothing to insert
   }
 
   // Locate the top-level stmts (post-SSA shape: top -> stmts).
@@ -35,14 +44,47 @@ void uPass_pipe::run(const std::shared_ptr<Lnast>& lnast) {
     return;
   }
 
+  // 2d-reg — collect reg-declared names (declare mode `reg`, no stages
+  // child): a reg-as-output (the counter idiom) must NOT get a second flop —
+  // the reg itself is the pipeline stage (home stage min−1, checked by the
+  // tolg Time_checker).
+  absl::flat_hash_set<std::string> reg_decls;
+  for (const auto& nid : lnast->depth_preorder(root)) {
+    if (nid.is_invalid() || !Lnast_ntype::is_declare(lnast->get_type(nid))) {
+      continue;
+    }
+    auto c0 = lnast->get_first_child(nid);
+    if (c0.is_invalid()) {
+      continue;
+    }
+    auto c1 = lnast->get_sibling_next(c0);
+    auto c2 = c1.is_invalid() ? c1 : lnast->get_sibling_next(c1);
+    if (c2.is_invalid() || !Lnast_ntype::is_const(lnast->get_type(c2))) {
+      continue;
+    }
+    auto mode = lnast->get_name(c2);
+    if (mode != "reg" && !mode.starts_with("reg ")) {
+      continue;
+    }
+    bool has_stages = false;
+    for (auto c = lnast->get_sibling_next(c2); !c.is_invalid(); c = lnast->get_sibling_next(c)) {
+      if (Lnast_ntype::is_stages(lnast->get_type(c))) {
+        has_stages = true;
+        break;
+      }
+    }
+    if (!has_stages) {
+      reg_decls.emplace(lnast->get_name(c0));
+    }
+  }
+
   for (const auto& e : outs) {
     if (e.stages_min <= 0) {
       continue;
     }
-    // Reg-as-output (the counter idiom) must NOT get a second flop — the reg
-    // itself is the pipeline stage (home stage min-1, checked by LG pass1).
-    // The Pyrope->LG path cannot declare reg outputs yet, so every output
-    // reaching here is comb-driven; the guard lands with the 2d milestone.
+    if (reg_decls.contains(e.name)) {
+      continue;  // reg-as-output: the reg IS the pipeline stage
+    }
 
     const std::string reg_name = "___pipe_" + e.name;
 

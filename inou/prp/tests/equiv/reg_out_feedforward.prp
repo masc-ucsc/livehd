@@ -1,0 +1,14 @@
+/*
+:name: reg_out_feedforward
+:type: equiv
+:verilog_top: reg_out_feedforward.addreg
+:pyrope_top: reg_out_feedforward.addreg
+*/
+
+// 2d-reg — a feedforward register OUTPUT on a mod (`-> (reg q:u9@[1])`):
+// the q pin is the output; the unconditional write makes it a stage
+// crossing, so sigma(q) = 1 matches the declared landing cycle. No init =>
+// NO reset input is minted.
+mod addreg(a:u8, b:u8) -> (reg q:u9@[1]) {
+  q = a + b
+}

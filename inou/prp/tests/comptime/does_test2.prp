@@ -1,0 +1,51 @@
+/*
+:name: does_test2
+:type: parsing lnast comptime
+:verifier_pass: 24
+:verifier_fail: 0
+*/
+
+// Task 1g — type-aware `does`/`equals`/`case`: envelope rule, bool literals,
+// primitive type-name operands, typed equals/case, and the `nil` rule.
+
+// ── integer envelope (superset rule) ────────────────────────────────────
+mut c10:u10 = 0
+mut c5:u5   = 0
+cassert(c10 does c5)         // u10 ⊇ u5
+cassert(not (c5 does c10))   // u5 ⊉ u10
+
+// ── bool literals are NOT integers (kind is a hard difference) ───────────
+cassert(not (1 does true))   // int literal [1,1] vs bool → kind mismatch
+cassert(not (0 does true))   // 0 ∉ bool either — still a kind mismatch
+cassert(not (10 does true))
+
+// ── primitive type-name operands (the headline doc form) ────────────────
+mut a:u32 = 0
+cassert(a does u32)
+cassert(not (a does string))
+cassert(not (a does bool))
+cassert(u32 does u16)         // u32 ⊇ u16
+cassert(not (u16 does u32))   // u16 ⊉ u32
+cassert(not (u32 does string))
+cassert(int does u32)         // unbounded signed ⊇ u32
+cassert(not (u32 does int))   // u32 ⊉ unbounded
+cassert(a does int(max=0xffffffff, min=0))  // int-call type literal
+
+// ── typed equals (does both ways, types included) ───────────────────────
+cassert(u32 equals u32)
+cassert(not (u32 equals u16))
+cassert(bool equals bool)
+cassert(not (u32 equals bool))
+
+// ── typed case (kind mismatch on a field rejects) ───────────────────────
+const s = (a:u32=0, b:bool=false)
+cassert(not (s case (a:bool=nil)))   // field a: u32 vs bool → false
+cassert(s case (a=0))                // untyped value pattern matches
+cassert(not (s case (a=1)))          // value mismatch
+
+// ── nil rule: `x does nil` is true for any non-tuple x ───────────────────
+mut x:u8 = 5
+cassert(x does nil)
+cassert(true does nil)
+const yy = 3
+cassert(yy does nil)

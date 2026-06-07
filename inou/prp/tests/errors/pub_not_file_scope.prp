@@ -1,0 +1,14 @@
+/*
+:name: pub_not_file_scope
+:type: error
+:error: file-scope declarations
+:help: top level
+*/
+
+// Task 1m — `pub` is only legal on file-scope declarations
+// (docs/contracts/task_1m_plan.md §1).
+
+comb f(a:u8) -> (r:u8) {
+  pub const x = 1  // locate_error_here
+  r = a
+}

@@ -1,15 +1,20 @@
-pipe mul(a, b) -> (c) { c = a * b }
-pipe add(a, b) -> (c) { c = a + b }
+// Aspirational call-site file (no test header yet) — goes live once 1r-D
+// (Sub-instance call sites) and 2d (reg lowering, for accum) land.
+// Interfaces follow the 1r contract: fully-typed pipe/mod, every mod output
+// declares its landing cycle at the interface.
 
-mod multiply_add(in1, in2) -> (out) {
-  stage[3] tmp     = mul(in1, in2)         // mul picks 3 stages
-  stage[3] in1_d   = in1                   // delay in1 by 3
-  stage[1] out@[4] = add(tmp@[3], in1_d@[3]) // adder takes 1 stage; out@[4] typechecks
+pipe mul(a:u16, b:u16) -> (c:u32) { c = a * b }
+pipe add(a:u32, b:u32) -> (c:u32) { wrap c = a + b }
+
+mod multiply_add(in1:u16, in2:u16) -> (out:u32@[4]) {
+  stage[3] tmp     = mul(a=in1, b=in2)       // mul picks 3 stages
+  stage[3] in1_d   = in1                     // delay in1 by 3
+  stage[1] out@[4] = add(a=tmp@[3], b=in1_d@[3]) // adder takes 1 stage; out@[4] typechecks
 }
 
-mod accum(in1, in2) -> (out) {
-  reg total = 0                             // mod can use reg
-  stage[3] tmp = mul(in1, in2)
-  total = add(total, tmp@[3])
-  out = total
+mod accum(in1:u16, in2:u16) -> (out:u32@[3]) {
+  reg total:u32 = 0                 // mod can use reg (state, home stage 3)
+  stage[3] tmp = mul(a=in1, b=in2)
+  wrap total = total + tmp@[3]      // state q + stage-3 value: coherent
+  out = total                       // q read; out lands at cycle 3
 }

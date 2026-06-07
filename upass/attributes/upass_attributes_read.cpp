@@ -289,10 +289,11 @@ std::optional<Const> uPass_attributes::resolve_value(std::string_view var) const
 }
 
 // 1v locked policy: declared-type-only. `.[max]`/`.[min]`/`.[bits]` derive
-// from explicit type annotations (uN, sN, bool, uint:[max=K],
-// int:[max=K, min=L], or `:[range=...]`). Un-annotated values return nil.
-// Tuple aggregates return nil for `.[bits]`. The `.[ubits]`/`.[sbits]`
-// queries no longer exist; the dispatcher forwards `.[bits]` through here.
+// from explicit type annotations (uN, sN, bool, `int(max=K, min=L)`).
+// Un-annotated values return nil. Tuple aggregates return nil for `.[bits]`.
+// The `.[ubits]`/`.[sbits]` queries no longer exist; the dispatcher forwards
+// `.[bits]` through here. (`:[range=…]` sugar was removed — semacheck rejects
+// it like any other `:[max=]`/`:[min=]` attribute write.)
 
 namespace {
 // ceil_log2(x) for x >= 1. Returns 0 for x==0.
@@ -308,13 +309,6 @@ std::optional<Const> uPass_attributes::derive_max(std::string_view base) const {
   // Explicit attr wins (e.g. `:int:[max=N]` partial pinning).
   if (auto v = lookup_attr_value(base, "max"); v) {
     return v;
-  }
-  // `range` lowering: an attr_set(var, "range", tmp) recorded the tmp ref
-  // text; pair with range_bounds to materialize max.
-  if (auto tmp = lookup_attr_ref(base, "range"); tmp) {
-    if (auto rb = lookup_range(*tmp); rb && rb->second.is_integer()) {
-      return rb->second;
-    }
   }
   // Typesystem redesign (entry 1v): declaration-driven. A concrete uN/sN
   // gives a value; bool has its own envelope; everything else (`:int`,
@@ -340,11 +334,6 @@ std::optional<Const> uPass_attributes::derive_max(std::string_view base) const {
 std::optional<Const> uPass_attributes::derive_min(std::string_view base) const {
   if (auto v = lookup_attr_value(base, "min"); v) {
     return v;
-  }
-  if (auto tmp = lookup_attr_ref(base, "range"); tmp) {
-    if (auto rb = lookup_range(*tmp); rb && rb->first.is_integer()) {
-      return rb->first;
-    }
   }
   if (auto* ti = lookup_type_info(base); ti && ti->has_type_spec) {
     // Task 1t — prim_type_int range is the single source of truth.
@@ -383,23 +372,11 @@ std::optional<Const> uPass_attributes::derive_bits(std::string_view base, std::s
       return *Dlop::create_integer(1);
     }
   }
-  // Derive bits from explicit max/min (e.g. `:int:[range=0..=15]` →
-  // bits=4). Only fires when both bounds are pinned; otherwise the
-  // envelope is incomplete and bits stays nil per the design.
+  // Derive bits from explicit max/min. Only fires when both bounds are
+  // pinned; otherwise the envelope is incomplete and bits stays nil per the
+  // design.
   std::optional<Const> max_v = lookup_attr_value(base, "max");
   std::optional<Const> min_v = lookup_attr_value(base, "min");
-  if (!max_v || !min_v) {
-    if (auto tmp = lookup_attr_ref(base, "range"); tmp) {
-      if (auto rb = lookup_range(*tmp); rb) {
-        if (!min_v && rb->first.is_integer()) {
-          min_v = rb->first;
-        }
-        if (!max_v && rb->second.is_integer()) {
-          max_v = rb->second;
-        }
-      }
-    }
-  }
   if (max_v && min_v && max_v->is_integer() && min_v->is_integer()) {
     // Derive bits from the bound Consts directly (handles >64-bit, no to_i).
     // get_bits() is the SIGNED width; for an unsigned range (min ≥ 0) drop the
@@ -577,9 +554,12 @@ void uPass_attributes::evaluate_attr_get(std::string_view dst, std::string_view 
   // the size-trio (`bits`/`max`/`min`) so an annotated-but-unbounded
   // declaration (`a:int = 3`) folds to nil instead of staying unresolved
   // — the new derive_* are declaration-driven and never depend on a
-  // second walk over the tree.
+  // second walk over the tree. `typename` joins them: an anonymous
+  // aggregate has no typename, which reads as nil (typesystem.prp §2) —
+  // previously this leaned on constprop's undeclared-reads-as-nil fold,
+  // now removed (undeclared reads are a prp2lnast compile error).
   if (!result) {
-    if (sticky_pattern || !is_builtin_attr(attr) || attr == "bits" || attr == "max" || attr == "min") {
+    if (sticky_pattern || !is_builtin_attr(attr) || attr == "bits" || attr == "max" || attr == "min" || attr == "typename") {
       result = *Dlop::nil();
     } else {
       return;

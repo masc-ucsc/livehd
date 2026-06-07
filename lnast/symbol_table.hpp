@@ -60,6 +60,20 @@ public:
   // declaring scope.
   void mark_current_uncertain();
 
+  // True when any active scope is an uncertain if-arm — i.e. the statement
+  // being processed is not guaranteed to execute. 2d-reg: a RUNTIME-rhs
+  // write under uncertainty must invalidate the lhs's stale comptime value
+  // (comptime writes get this via record_uncertain_modification; runtime
+  // writes never touch the varmap, so the caller checks this explicitly).
+  [[nodiscard]] bool in_uncertain_scope() const {
+    for (const auto* s : stack) {
+      if (s->uncertain_cond) {
+        return true;
+      }
+    }
+    return false;
+  }
+
   bool var(std::string_view key);
 
   bool mut(std::string_view key, std::shared_ptr<Bundle> bundle);
@@ -76,12 +90,6 @@ public:
   bool has_trivial(std::string_view key) const;
   bool has_bundle(std::string_view key) const;
   bool has_known(std::string_view key) const { return has_trivial(key) || has_bundle(key); }
-
-  // True iff `name` is declared in any reachable scope (walks the parent
-  // chain, stopping at and including the nearest Function-typed scope).
-  // The eq path uses this to distinguish "never declared anywhere" — which
-  // folds to nil — from "declared but unresolved" (stays unfolded).
-  bool is_declared(std::string_view key) const;
 
   /// Returns true iff `name` holds a concrete Const with no unknown bits.
   bool is_known_const(std::string_view name) const;

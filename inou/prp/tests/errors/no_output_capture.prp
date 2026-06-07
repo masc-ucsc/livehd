@@ -1,0 +1,17 @@
+/*
+:name: no_output_capture
+:type: error
+:error: returns nothing
+:help: drop the result binding
+*/
+
+// A lambda declared with `-> ()` produces no value: binding its call result
+// is a compile error. There is no implicit "last expression / local scope"
+// return (the old named_tuple.prp relied on that removed sugar).
+
+comb top() -> () {
+  const c = 10
+  mut x = (a=1, mut b = (c=2), mut c)
+}
+
+const a = top()   // locate_error_here

@@ -1,0 +1,10 @@
+/*
+:name: cycle_check_in_comb
+:type: error
+:error: only meaningful inside `mod` and `pipe` bodies
+:help: cycle 0 by definition
+*/
+
+comb f(a) -> (r) {
+  r = a@[1]   // locate_error_here
+}

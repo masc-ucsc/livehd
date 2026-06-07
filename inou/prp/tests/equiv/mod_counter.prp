@@ -1,0 +1,18 @@
+/*
+:name: mod_counter
+:type: equiv
+:verilog_top: mod_counter.counter
+:pyrope_top: mod_counter.counter
+*/
+
+// 2d-reg — the counter idiom in a mod: a state register (conditional write
+// => OR-of-conditions enable + last-write-wins din), home stage 0 feeding a
+// cycle-0 output, implicit sync reset from the non-nil init. Wrap-free by
+// bounding: count_r < 200 keeps count_r + 1 inside u8.
+mod counter(enable:bool) -> (count:u8@[0]) {
+  reg count_r:u8 = 0
+  if enable and count_r < 200 {
+    count_r = count_r + 1
+  }
+  count = count_r
+}

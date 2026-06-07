@@ -8,15 +8,19 @@
 #include <format>
 #include <memory>
 #include <print>
+#include <set>
 #include <stdexcept>
 #include <string>
 #include <string_view>
 #include <vector>
 
+#include "diag.hpp"
+
 #include "upass_attributes.hpp"  // NOLINT: ensures plugin "attributes" is linked
 #include "upass_bitwidth.hpp"    // NOLINT: ensures plugin "bitwidth" is linked
 #include "upass_constprop.hpp"
 #include "upass_pipe.hpp"
+#include "upass_timecheck.hpp"
 #include "upass_runner.hpp"
 #include "upass_semacheck.hpp"  // NOLINT: ensures plugin "semacheck" is linked
 #include "upass_ssa.hpp"
@@ -105,6 +109,10 @@ void Pass_upass::setup() {
                         "and io/bw side-channels are unchanged; forced back on while tolg:1 needs the rewritten tree. "
                         "Default on.",
                         "true");
+  m1.add_label_optional("reset_style",
+                        "2d-reg elaboration flag: sync|async reset wiring for implicit-reset flops (default sync — "
+                        "target-dependent, FPGA-typical). A per-reg `:[sync=…]` attr beats the flag.",
+                        "sync");
   m1.add_label_optional(
       "order",
       "comma-separated upass names; overrides verifier/constprop/assert toggles (example: verifier,constprop,verifier)",
@@ -120,6 +128,10 @@ void Pass_upass::setup() {
                         "");
   m1.add_label_optional("verifier_include_funcs",
                         "verifier: also tally casserts inside func_extract-spawned function bodies (default false)",
+                        "false");
+  m1.add_label_optional("import_defer",
+                        "task 1m: surface unresolved live imports on the pass var (kernel iterate loop) instead of "
+                        "hard-erroring (default false)",
                         "false");
   register_pass(m1);
 }
@@ -161,6 +173,7 @@ Pass_upass::Pass_upass(const Eprp_var& var) : Pass("pass.upass", var) {
   capture_opt("verifier_pass");
   capture_opt("verifier_fail");
   capture_opt("coalescer");
+  capture_opt("import_defer");
 
   if (!upass_order.empty()) {
     return;
@@ -200,6 +213,9 @@ Pass_upass::Pass_upass(const Eprp_var& var) : Pass("pass.upass", var) {
   // tree, so tolg:1 forces the swap regardless. Default on.
   auto toln_txt = get_label("toln");
   run_toln      = (toln_txt != "false" && toln_txt != "0") || run_tolg;
+
+  // 2d-reg — sync|async reset wiring for implicit-reset flops (tolg-only).
+  reset_style = std::string(get_label("reset_style", "sync"));
 
   auto semacheck_txt = get_label("semacheck");
   bool do_semacheck  = semacheck_txt != "false" && semacheck_txt != "0";
@@ -305,6 +321,10 @@ void Pass_upass::work(Eprp_var& var) {
   uPass_verifier::set_aggregate_expected(parse_expected_count(up.pass_options, "verifier_pass"),
                                          parse_expected_count(up.pass_options, "verifier_fail"));
 
+  // Task 1m — fresh unresolved-import slate for this invocation.
+  uPass_constprop::reset_pending_imports();
+  var.unresolved_imports.clear();
+
   // Capture original entry-point count BEFORE func_extract spawns helper
   // lnasts. Anything appended past this index in the func_extract loop is
   // a function-body spawn — used below to gate the verifier off for
@@ -365,9 +385,7 @@ void Pass_upass::work(Eprp_var& var) {
 
     // For func_extract-spawned lnasts (idx beyond the original entry-point
     // count), strip the verifier from the order unless the test opted in
-    // via verifier_include_funcs:true. Function-body casserts that constprop
-    // already proved at call sites still get tallied via mark_inlined_cassert_*
-    // in try_eval_comb_call, so dropping the verifier here just avoids
+    // via verifier_include_funcs:true — dropping the verifier here avoids
     // double-walking unproven function bodies into the aggregate.
     auto order = up.upass_order;
     const bool is_function_body = idx >= original_lnast_count;
@@ -407,6 +425,16 @@ void Pass_upass::work(Eprp_var& var) {
     }
   }
 
+  // ── LNAST timecheck discharge (task 1u-B). Verifies + marks-checked every
+  // statically-derivable `@[N]` obligation (and the mod declared-output /
+  // pipe sigma<=min checks) with located diagnostics. Runs BEFORE uPass_pipe
+  // so a pipe body's sigma excludes the inserted output flop, and UNGATED by
+  // toln so the LSP pipeline gets the errors too. Whatever stays underived
+  // lowers into the LG pending checks (1u-C).
+  for (const auto& ln : var.lnasts) {
+    uPass_timecheck::run(ln, var.lnasts);
+  }
+
   // ── LN pipe upass (task 1q). Inserts the per-output pipeline flop —
   // declare(reg)+stages plus the din/q rebind stores — into every `pipe`
   // function tree (io_meta outputs with stages_min >= 1; comb trees no-op).
@@ -424,12 +452,64 @@ void Pass_upass::work(Eprp_var& var) {
   // ssa populated io_meta() and bitwidth populated bw_meta() for every lnast.
   // Each fully-specified function tree becomes one hhds::Graph pushed onto the
   // pass var so a downstream inou.cgen.verilog stage can emit it.
+  // Task 1u-A — two-phase: register every module's GraphIO first so call
+  // sites can bind callee GraphIOs (Sub instances) regardless of build order.
   if (up.run_tolg) {
     for (const auto& ln : var.lnasts) {
-      auto g = uPass_tolg::run(ln, "lgdb_tolg");
+      uPass_tolg::register_io(ln, "lgdb_tolg", var.lnasts);
+    }
+    for (const auto& ln : var.lnasts) {
+      auto g = uPass_tolg::run(ln, "lgdb_tolg", var.lnasts, up.reset_style);
       if (g) {
         var.add(g);
       }
+    }
+  }
+
+  // ── Task 1m — unresolved live imports. With import_defer:1 the kernel's
+  // iterate loop consumes them via var.unresolved_imports (whole-file retry
+  // once the exporter publishes); standalone, they are hard errors listing
+  // the import string and the searched inputs.
+  if (const auto& pend = uPass_constprop::pending_imports(); !pend.empty()) {
+    const auto defer_txt = [&]() -> std::string {
+      auto it = up.pass_options.find("import_defer");
+      return it != up.pass_options.end() ? it->second : "";
+    }();
+    const bool defer = !(defer_txt.empty() || defer_txt == "0" || defer_txt == "false");
+    if (defer) {
+      for (const auto& p : pend) {
+        var.unresolved_imports.emplace_back(p.unit, p.text);
+      }
+      // Deferred round: blocked files retry wholesale next round, so the
+      // verifier tallies of this round are partial — don't enforce the
+      // expected counts (the converged round does).
+      return;
+    } else {
+      std::set<std::pair<std::string, std::string>> seen;
+      std::string                                   searched;
+      for (const auto& ln : var.lnasts) {
+        const auto name = std::string(ln->get_top_module_name());
+        if (name.find('.') != std::string::npos) {
+          continue;  // derived trees — list file-level units only
+        }
+        if (!searched.empty()) {
+          searched += ", ";
+        }
+        searched += name;
+      }
+      for (const auto& p : pend) {
+        if (!seen.emplace(p.unit, p.text).second) {
+          continue;
+        }
+        livehd::diag::sink().emit(
+            livehd::diag::Diagnostic{.severity = livehd::diag::Severity::error,
+                                     .code     = "import-unresolved",
+                                     .category = "name",
+                                     .pass     = "pass.upass",
+                                     .message  = std::format("unit `{}`: unresolved import \"{}\"", p.unit, p.text),
+                                     .hint     = std::format("searched inputs: {}", searched.empty() ? "(none)" : searched)});
+      }
+      fail_upass_runtime(std::format("{} unresolved import(s)", seen.size()));
     }
   }
 

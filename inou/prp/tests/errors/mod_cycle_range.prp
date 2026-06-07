@@ -1,0 +1,8 @@
+/*
+:name: mod_cycle_range
+:type: error
+:error: must declare a single landing cycle
+:help: opt out with
+*/
+
+mod f(a:u8) -> (x:u8@[1..=2]) { x = a }   // locate_error_here

@@ -1,0 +1,12 @@
+/*
+:name: int_type_call_range
+:type: error
+:error: not a valid integer type bound
+:help: max=
+*/
+
+// `int(range=…)` would be pure sugar for `int(max=,min=)`, so it is not a
+// type argument — one way to bound an integer type.
+
+const c:int(range = 0..=15) = 5 // locate_error_here
+cassert(c == 5)

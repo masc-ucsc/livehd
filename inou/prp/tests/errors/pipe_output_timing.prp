@@ -1,0 +1,8 @@
+/*
+:name: pipe_output_timing
+:type: error
+:error: per-output cycles are a `mod` feature
+:help: uniform latency
+*/
+
+pipe[2] f(a:u8) -> (c:u8@[2]) { c = a }   // locate_error_here

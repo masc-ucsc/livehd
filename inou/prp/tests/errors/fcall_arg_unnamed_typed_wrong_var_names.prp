@@ -1,0 +1,16 @@
+/*
+:name: fcall_arg_unnamed_typed_wrong_var_names
+:type: error
+:error: named|ambiguous|argument|parameter
+*/
+
+// Typed same-width arguments still do not identify which formal parameter they
+// bind to when both formals have the same type. Bare variables can omit argument
+// names only when the variable names match the formal parameter names.
+
+comb method(a:u16, b:u16) -> (r:u17) { r = a + b }
+
+const in1:u16 = 1
+const in2:u16 = 2
+
+cassert(method(in1, in2) == 3) // locate_error_here

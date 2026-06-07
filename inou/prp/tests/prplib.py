@@ -118,8 +118,16 @@ class PrpRunner:
         # prp->upass pipeline (verifier on, as the old bare pass.upass default)
         # so an error at any stage (parse, upass) is caught. run_error() adds
         # the --emit diagnostics: slot itself.
+        #
+        # Optional `:tolg: 1` header tag (task 1r): extend the pipeline with
+        # the LNAST->LGraph lowering (recipe O0 + lg: emit) so errors that
+        # only fire at tolg (e.g. a func_call with no hardware lowering) are
+        # exercisable as error tests.
         cmd = self.lhd_upass(test, mode)
         cmd += ['--set', 'upass.verifier=true']
+        if test.params.get('tolg'):
+            cmd += ['--recipe', 'O0', '--emit-dir',
+                    'lg:{}/'.format(self._scratch(test, mode, '_lg'))]
         return cmd
 
     def lhd_lgraph(self, test, mode):
@@ -142,7 +150,13 @@ class PrpRunner:
         # Equivalence test: lower to LGraph (tolg, no graph passes) and emit
         # per-module Verilog into `odir`. run_equiv() then LECs the generated
         # Verilog against the sibling golden `.v` via inou/yosys/lgcheck.
+        #
+        # Optional `:reset_style: async` header tag (task 2d-reg): set the
+        # upass.reset_style elaboration flag so the implicit-reset flops wire
+        # an async reset and the golden can assert the async always-block.
         cmd = self.lhd_upass(test, 'equiv')
+        if 'reset_style' in test.params:
+            cmd += ['--set', 'upass.reset_style={}'.format(test.params['reset_style'])]
         cmd += ['--recipe', 'O0', '--emit-dir', 'verilog:{}/'.format(odir)]
         return cmd
 

@@ -3,6 +3,7 @@
 #pragma once
 
 #include <functional>
+#include <optional>
 #include <stack>
 #include <string>
 #include <string_view>
@@ -22,15 +23,15 @@ protected:
   // TS Parsing
   std::string prp_file;
   std::string src_filename;  // source path, for diagnostic spans
-  TSParser*   parser   = nullptr;
-  TSTree*     ts_tree  = nullptr;  // owned; freed in the dtor (and on ctor throw)
+  TSParser*   parser  = nullptr;
+  TSTree*     ts_tree = nullptr;  // owned; freed in the dtor (and on ctor throw)
   TSNode      ts_root_node;
 
   // Emit a structured diagnostic (docs/contracts/diagnostics.md §3) anchored at
   // `node`'s source span (best-effort byte + line/col, pre-sourcemap), then
   // abort the parse. `category` per §4 (e.g. "syntax", "name", "type").
-  [[noreturn]] void report_error(const TSNode& node, std::string_view code, std::string_view category,
-                                 std::string message, std::string_view hint = {}) const;
+  [[noreturn]] void report_error(const TSNode& node, std::string_view code, std::string_view category, std::string message,
+                                 std::string_view hint = {}) const;
   // Location-less variant (span = null) for defensive sites with no TS node.
   [[noreturn]] void report_error(std::string_view code, std::string_view category, std::string message,
                                  std::string_view hint = {}) const;
@@ -38,8 +39,8 @@ protected:
   // to an LNAST node — for post-build checks that walk the tree and no longer
   // hold the originating TSNode. Falls back to the location-less form when the
   // node carries no loc.
-  [[noreturn]] void report_error(const Lnast_nid& nid, std::string_view code, std::string_view category,
-                                 std::string message, std::string_view hint = {}) const;
+  [[noreturn]] void report_error(const Lnast_nid& nid, std::string_view code, std::string_view category, std::string message,
+                                 std::string_view hint = {}) const;
 
   // Persist `node`'s source span (byte range + 1-based line) and the source
   // filename onto the LNAST node at `idx`, so downstream passes (e.g. the upass
@@ -66,6 +67,25 @@ protected:
   // when they differ it reports and aborts (does not return).
   void check_decl_init_kind(std::string_view name, const Lnast_node& value, TSNode inner_type, const TSNode& anchor) const;
 
+  // 1g — primitive type token (`u32`/`s8`/`i4`/`int`/`integer`/`uint`/
+  // `unsigned`/`bool`/`string`) as it appears in does/equals/case operand
+  // position (plain `identifier` there — the grammar's *_type nodes only
+  // exist in type contexts).
+  static bool is_prim_type_token(std::string_view txt);
+  // 1g — lower one `does`/`equals`/`case` operand. An integer type-call
+  // (`int(max=…,min=…)` / `u8(min=…)`) lowers to a
+  // `declare(tmp, prim_type_int(max,min), 'type')` and returns the tmp ref; a
+  // bare type-token identifier returns a ref WITHOUT registering a read site
+  // (constprop decodes the name to kind+envelope; a real variable of that
+  // name — e.g. `i2` — still wins because the fold consults the symbol
+  // table / type-info first). Anything else falls through to expr_to_node.
+  Lnast_node does_operand_to_node(TSNode n);
+  // 1g — shared by emit_int_type_call (declare side) and does_operand_to_node
+  // (operand side): classify an integer type keyword and refine its (max,min)
+  // bounds from a `(max=…, min=…, bits=…)` argument tuple. Returns false when
+  // `kw` is not an integer type keyword.
+  bool int_type_call_bounds(std::string_view kw, TSNode tup, std::string& max_txt, std::string& min_txt);
+
   // Reject `a = 3` with no prior `mut`/`const`/declare (or param/output) visible
   // in scope. Runs on the producer tree (pre-upass), so it sees only source-level
   // declarations — no inliner/SSA-synthesized stores to false-positive on.
@@ -77,16 +97,21 @@ protected:
   void check_writes_in_scope(const Lnast_nid& scope_stmts, const std::unordered_set<std::string>& visible,
                              const std::unordered_set<std::string>& seed_here = {}) const;
 
-  // Reject reading a name that is never defined ANYWHERE in the file (e.g.
-  // `const y = x`). A GLOBAL check (scope-order agnostic): a name that is a
-  // declare/store/attr_set target somewhere — a local, a function/type/enum
-  // name, or a param/output — is "defined". `read_sites_` is populated by
-  // `identifier_to_node` on the value (for_lvalue=false) path, so it records
-  // only genuine reads with their source TSNode (→ located diagnostic); the
-  // func_call callee name uses `create_ref` directly, so builtins like `cputs`
-  // are never recorded. Runs on the producer tree, after the LNAST is built.
+  // Reject reading a name that is not visible at the read site (04-variables.md
+  // "Variable scope": a variable is visible from its declaration to the end of
+  // its scope, in program order — so a read before the declaration, after the
+  // declaring block closed, or of a never-declared name is a compile error).
+  // `read_sites_` is populated by `identifier_to_node` on the value
+  // (for_lvalue=false) path, so it records only genuine reads with their
+  // source TSNode (→ located diagnostic) plus the stmts frame being built at
+  // read time (→ scope resolution); the func_call callee name uses
+  // `create_ref` directly, so builtins like `cputs` are never recorded. Runs
+  // on the producer tree, after the LNAST is built.
   void check_undefined_reads() const;
-  void collect_defined_names(const Lnast_nid& node, std::unordered_set<std::string>& defined) const;
+  // Names readable anywhere regardless of program order: function names
+  // (func_def) and type/enum declarations — comptime entities, forward
+  // references allowed.
+  void collect_hoisted_names(const Lnast_nid& node, std::unordered_set<std::string>& hoisted) const;
 
   // LNAST output. `builder` co-owns `lnast` and is the canonical home for
   // the current `idx_stmts` cursor, tmp-ref minting, and frontend-agnostic
@@ -140,10 +165,34 @@ protected:
   };
   std::unordered_map<std::string, std::vector<Comptime_tuple_entry>> comptime_tuples_;
 
-  // Every variable READ lowered by `identifier_to_node` (for_lvalue=false),
-  // paired with its source TSNode. check_undefined_reads (after the LNAST is
-  // built) reports any whose name is never defined anywhere in the file.
-  std::vector<std::pair<std::string, TSNode>> read_sites_;
+  // Every variable READ lowered by `identifier_to_node` (for_lvalue=false):
+  // the name, its source TSNode (diagnostic span), and the position the
+  // builder was at — `scope` is the stmts frame being appended to and
+  // `before` its last statement at read time (invalid = frame still empty).
+  // check_undefined_reads (after the LNAST is built) resolves each site
+  // lexically: declarations at/before `before` in `scope`, then outward
+  // through the enclosing frames (a func_def boundary switches to its
+  // params/outputs + enclosing comptime bindings only).
+  struct Read_site {
+    std::string name;
+    TSNode      node;
+    Lnast_nid   scope;
+    Lnast_nid   before;
+  };
+  std::vector<Read_site> read_sites_;
+  // True iff `rs.name` is visible at the recorded site (see Read_site).
+  bool                   read_is_visible(const Read_site& rs) const;
+
+  // Names introduced by in-flight constructs whose declarations are not
+  // statement-level LNAST nodes, readable from the point they are pushed:
+  // tuple-literal fields (a field initializer can read EARLIER fields of the
+  // same literal — 04-variables.md "Tuple scope") and lambda signature
+  // params/outputs (a default value can read EARLIER params — `comb f(a,
+  // b=a+5)`). identifier_to_node skips recording reads of these names.
+  // Suspended (std::exchange) while a lambda BODY is processed: bodies see
+  // params via the func_def signature in read_is_visible, not this stack.
+  std::vector<std::vector<std::string>> inflight_name_scopes_;
+  bool                                  name_in_inflight_scope(std::string_view name) const;
 
   // Stack of "formal parameter widths in scope" — pushed by process_lambda_statement
   // before emitting the body, popped after. Each frame maps a typed argument
@@ -212,6 +261,20 @@ protected:
   Lnast_node lower_enum_def(std::string_view enum_name, TSNode enum_level_type, const std::vector<Enum_entry>& entries);
   void process_type_statement(TSNode n);
   void process_import_statement(TSNode n);
+
+  // Task 1m — `pub` exports + the `import` builtin (task_1m_plan.md §1).
+  // check_pub_value_decl: a `pub` value declaration must be file-scope `const`.
+  void check_pub_value_decl(TSNode decl_node, std::string_view kind);
+  // plain_string_literal_text: unquoted body of a plain comptime string
+  // literal expression ('…' raw, or "…" with no interpolation); nullopt else.
+  std::optional<std::string> plain_string_literal_text(TSNode n);
+  // emit_import_call: the canonical marked-builtin call shape
+  // `func_call(target, const "import", const '<unit>')` — what `lhd scan`
+  // (collect_imports) matches and the upass resolver folds.
+  void emit_import_call(const Lnast_node& target, std::string_view unit, TSNode loc_node);
+  // lower_import_call: validate + lower the expression form `import("unit")`.
+  void lower_import_call(TSNode call_node, TSNode arg_tuple, const Lnast_node& target);
+
   void process_test_statement(TSNode n);
   void process_spawn_statement(TSNode n);
   void process_impl_statement(TSNode n);
@@ -246,6 +309,11 @@ protected:
   // Type handling
   void emit_type_spec(const Lnast_node& target, TSNode type_cast_node);
   void emit_attribute_list(const Lnast_node& target, TSNode attribute_list_node);
+  // Catch typical attribute-name mistakes (`initial`→`init`, `clk`→`clock_pin`,
+  // `bit`→`bits`, …) at parse time with a targeted hint. `has_value` is true
+  // when the attribute carries `=value` — it disambiguates `[clock=x]` (meant
+  // `clock_pin`) from the valid flag-only classification `clk::[clock]`.
+  void reject_common_mistakes_attr_name(TSNode node, std::string_view name, bool has_value) const;
   void emit_type_expr(const Lnast_nid& type_index, TSNode type_node);
   // Task 1t — the integer type-call `int(max=,min=,bits=)` / `uint(bits=)`.
   // Today the grammar lexes `int`/`uint`/`uN` as keyword tokens, so a
@@ -254,7 +322,7 @@ protected:
   // recognizes that shape on a type_cast and emits a single
   // `type_spec(target, prim_type_int(max,min))`, the canonical integer type.
   // Returns true when it handled the type (caller skips the legacy lowering).
-  bool emit_int_type_call(const Lnast_node& target, TSNode type_cast_node);
+  bool                 emit_int_type_call(const Lnast_node& target, TSNode type_cast_node);
   // Comptime vector/matrix dimension extraction for a type_cast whose `type`
   // field is an `array_type` chain (e.g. `:[N][M]T`). Returns dims outer→inner
   // when every dimension is an integer-literal length; empty otherwise.
@@ -273,15 +341,74 @@ protected:
     std::string key;
     std::string value;  // empty -> "true"
   };
+  // lambda_kind/is_io_output: set only when called from the lambda io driver
+  // (Task 1r-A interface contract — fully-typed pipe/mod ios, per-output
+  // declared landing cycle on mod). Tuple-literal contexts leave them unset
+  // and skip every interface check.
   void emit_arg_assign(const Lnast_nid& tuple_parent, TSNode typed_ident, TSNode definition_or_null, bool is_ref_mod,
-                       std::vector<Param_attr>* attrs_out = nullptr);
+                       std::vector<Param_attr>* attrs_out = nullptr, std::string_view lambda_kind = {}, bool is_io_output = false);
   void emit_arg_type(const Lnast_nid& assign_parent, TSNode type_node);
+
+  // Task 1r — current lambda-kind context while processing a body ("comb" /
+  // "pipe" / "mod" / ...; empty stack = file scope). Gates `stage[N]`
+  // declarations (mod-only) and `x@[N]` timecheck emission (mod/pipe only).
+  std::vector<std::string> lambda_kind_stack_;
+
+  // Task 1r — parse a stage_decl's optional timing_slot to the (min,max)
+  // stages const texts: stage[N] -> ("N","N") with N >= 1; stage[A..=B] /
+  // stage[A..<B] -> ascending literal range; bare `stage` / `stage[]` ->
+  // ("nil","nil") (toolchain picks). Anything else is a compile error.
+  std::pair<std::string, std::string> parse_stage_slot(TSNode storage_node);
+
+  // Task 1r — emit `timecheck(ref name, const N, const N)` recording an
+  // `x@[N]` cycle check (flop-free, inert — consumed by the future pipe/mod
+  // typecheck pass). `x@[]` emits nothing (explicit opt-out). Errors when the
+  // enclosing lambda is a comb (every comb value is at cycle 0) or the slot
+  // is not a literal N >= 0.
+  void maybe_emit_timecheck(TSNode timing_slot, TSNode id_node);
 
   // Task 1q — resolve a `pipe_lambda` node's `depth` field to the (min,max)
   // stages pair: pipe[N] -> (N,N); pipe[A..=B] -> (A,B); pipe[A..<B] ->
   // (A,B-1); bare pipe -> (1,0) (max 0 = unconstrained). pipe[0], zero-min
   // ranges, descending ranges and non-literal depths are compile errors.
   std::pair<int64_t, int64_t> parse_pipe_depth(TSNode pipe_lambda_node);
+
+  // Task 1r/1q — file-/body-scope `const NAME = <int literal>` bindings,
+  // recorded as the declaration is lowered (process_lvalue_for_assign scalar
+  // branch). Lets `@[NAME]`, `stage[NAME]`, and `pipe[NAME]` timing slots
+  // accept a compile-time-resolvable const in place of a bare literal.
+  // No-shadowing is already enforced, so a name is unambiguous along the
+  // visible chain; a later binding may overwrite an earlier same-name one.
+  //
+  // ALSO tracks `mut NAME = <int literal>` with declaration-time-capture
+  // semantics (mirrors comptime_tuples_): record on the `mut` decl, UPDATE on
+  // a later statement-level plain `NAME = <int literal>`, and ERASE on any
+  // other write (non-literal rhs, compound op, or any write inside an if/for/
+  // while/match/lambda body — see conditional_depth_). A timing slot then
+  // resolves the value that was statically known AT THE LAMBDA DECLARATION
+  // POINT; a mut that has since gone runtime is erased and the slot errors.
+  std::unordered_map<std::string, int64_t> const_int_bindings_;
+
+  // Nesting depth of conditional / loop / nested-lambda bodies currently being
+  // lowered. >0 means writes are not unconditional statement-level writes, so
+  // they must not record or update const_int_bindings_ (a conditional re-bind
+  // makes a mut runtime-valued). Bumped via a Conditional_scope RAII guard
+  // around if/for/while/match arm bodies and lambda bodies.
+  uint32_t conditional_depth_ = 0;
+
+  struct Conditional_scope {
+    uint32_t* d;
+    explicit Conditional_scope(uint32_t* dd) : d(dd) { ++*d; }
+    ~Conditional_scope() { --*d; }
+    Conditional_scope(const Conditional_scope&)            = delete;
+    Conditional_scope& operator=(const Conditional_scope&) = delete;
+  };
+
+  // Resolve a timing-index CST node to a compile-time integer: a `constant`
+  // node parses via Dlop::from_pyrope (is_integer + is_i); an `identifier`
+  // node looks up const_int_bindings_; anything else is std::nullopt (the
+  // caller emits its own "literal or compile-time constant" diagnostic).
+  std::optional<int64_t> resolve_cycle_value(TSNode n) const;
 
   struct Call_arg {
     bool        is_assign = false;

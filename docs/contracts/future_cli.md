@@ -98,7 +98,7 @@ language-qualified; commands that operate on IR are language-agnostic.**
 | Command | Stage | Specific arguments |
 |---|---|---|
 | `lhd elaborate verilog` | frontend (whole-design, one action) | `--reader yosys-verilog\|yosys-slang\|slang` (default `yosys-slang`; `yosys-*` go through yosys into LGraphs, `slang` is the direct `inou.slang` SV→LNAST front-end); `--top <name>` (optional); `--depfile PATH`; `-- <raw slang args>` (yosys readers only) |
-| `lhd elaborate pyrope` | frontend (per-function LNAST units) | positional `*.prp` (filelist; `import` resolves within it); `--top <name>` (optional) |
+| `lhd elaborate pyrope` | frontend (per-function LNAST units) | positional `*.prp` and/or `ln:`/`lg:` dirs (`import` resolves within these explicit inputs, iterating until converged — `task_1m_plan.md`); `--top <name>` (optional) |
 | `lhd synth` | transform / optimize / codegen | `--in design:PATH` (repeat) or positional units; `--top <name>` (optional → cross-unit/LTO); `--recipe <name>`; `--recipe-file <path>`; `--set <pass[.idx].flag>=<val>` (repeat) |
 | `lhd check` | equivalence (LEC) | `--impl KIND:PATH [--impl-top <name>]`; `--ref KIND:PATH [--ref-top <name>]` |
 | `lhd compile verilog` | fused elaborate+synth | = `elaborate verilog` args ＋ `synth` args |
@@ -127,8 +127,9 @@ Shared arguments (the I/O contract; honored by every execution command):
 
 `--depfile` is **not** shared: it lives only on the Verilog frontend, because
 only Verilog `` `include `` + `+incdir` reads files off the command line (see
-*Depfiles*). Pyrope `import` is a module import resolved against the explicit
-filelist — no hidden inputs. `synth`/`check` consume self-contained blobs.
+*Depfiles*). Pyrope `import` resolves against the explicit inputs only (the
+filelist + positional `ln:`/`lg:` dirs) — no hidden inputs. `synth`/`check`
+consume self-contained blobs.
 
 ### I/O model — one interchange format, two granularities
 
@@ -197,9 +198,13 @@ fixed path works again because `--top` makes the cardinality 1:
 lhd elaborate pyrope file1.prp file2.prp --top fn_c --emit lnast:fn_c.ln
 ```
 
-Both `.prp` files go in one invocation: `import` resolves against the explicit
-filelist, so files related by import must be elaborated together — the
-parallel fan-out applies only to files with no import relationship.
+Both `.prp` files go in one invocation here, but files related by import need
+**not** be elaborated together: a dependency can instead ride along as a
+pre-elaborated positional `ln:` dir (the bazel per-file flow). Within a
+multi-file invocation, `import` resolves against the explicit inputs (other
+`.prp` files + loaded `ln:`/`lg:` dirs) with **no ordering requirement** —
+the kernel iterates, retrying any file blocked on an unresolved live import
+until convergence (`task_1m_plan.md §5`).
 
 ### Recipes — the transform pipeline, defined as data
 
@@ -251,8 +256,9 @@ foo.gen.v: foo.v bar.v rtl/inc/defs.vh
 
 Consumed by Make (`-include foo.d`), Ninja (`depfile =`), or a Bazel `cc_*`-style
 rule. Content is deterministic (sorted, workdir/exec-root-relative). Pyrope
-needs no depfile (`import` is filelist-resolved); neither do `synth`/`check`
-(self-contained blob inputs).
+needs no depfile (`import` resolves against explicit inputs only — the
+filelist plus positional `ln:`/`lg:` dirs, no hidden files); neither do
+`synth`/`check` (self-contained blob inputs).
 
 ### Exit-code contract
 
@@ -353,8 +359,10 @@ lhd synth lg:top_lgs/ --recipe O1 --emit-dir lg:top_opt_lgs/ --emit verilog:top.
 
 **Dependency discovery:** `lhd scan f1.prp f2.prp` parses each file and
 reports its `import(...)` strings in the result's `"scan"` member — imports
-are comptime string literals (import.md), so the list is exact without
-elaborating. Raw strings today; resolved paths land with the import resolver,
+are comptime string literals (`task_1m_plan.md`), so the strings themselves
+are exact without elaborating; the list is a conservative over-approximation,
+though, because an import under `if cond` may be constprop-dead (liveness
+needs elaboration). Raw strings today; resolved paths land with the import resolver,
 which will also feed `--depfile` (Make/Ninja) and an `unused_inputs_list`
 Bazel rule so BUILD dep chains are machine-maintained, never hand-edited.
 
@@ -435,7 +443,7 @@ units instead, which re-lowers everything into one fresh library and so
 discards any per-file local synthesis — the derivation-hash manifest plan
 above is the path to keeping it); `elaborate f.prp ln:imports/` makes the
 imported units visible on the pipe, with resolution fidelity tracking the
-import work (`import.md`); `check` shells out to `inou/yosys/lgcheck` (repo
+import work (`task_1m_plan.md`); `check` shells out to `inou/yosys/lgcheck` (repo
 root, runfiles, or `LHD_LGCHECK`; run from `--workdir` with an absolute
 `--yosys` so lgcheck's trace/log droppings stay out of the caller's cwd);
 `--set pass.idx.flag` index addressing is rejected until a recipe repeats a

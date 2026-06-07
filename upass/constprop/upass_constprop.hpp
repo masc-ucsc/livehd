@@ -57,6 +57,9 @@ public:
 
   void process_stmts() override;
   void process_stmts_post() override;
+  // Task 1m — at file-scope completion, fold every `pub` value export into
+  // the Lnast's pub-values side channel (errors when not comptime-foldable).
+  void harvest_pub_values();
   void notify_uncertain_arm_begin() override { next_block_uncertain = true; }
   void notify_uncertain_arm_end() override { next_block_uncertain = false; }
   void process_declare() override;
@@ -97,7 +100,25 @@ public:
 
   static void set_function_registry(const std::vector<std::shared_ptr<Lnast>>& lnasts);
 
+  // Task 1m — unresolved live imports recorded during the walk: (unit that
+  // hit the import, import string as written). pass.upass either surfaces
+  // them as errors or hands them to the kernel's iterate loop (import_defer).
+  struct Pending_import {
+    std::string unit;
+    std::string text;
+  };
+  static void                               reset_pending_imports() { pending_imports_.clear(); }
+  static const std::vector<Pending_import>& pending_imports() { return pending_imports_; }
+
 protected:
+  static inline std::vector<Pending_import> pending_imports_;
+
+  // Task 1m — resolve a live `import` call (docs/contracts/task_1m_plan.md):
+  // cursor sits on the const "import" callee; binds `dst` (tuple form → pub
+  // namespace bundle; `ln:` url → lambda tree-name string) or records a
+  // pending import and leaves the call unfolded.
+  void process_import_call(const std::string& dst);
+
   Symbol_table st;
 
   // Set by notify_uncertain_arm_begin (the runner calls this just before we
@@ -153,6 +174,12 @@ protected:
   // c={x:3, b:"foo"}. NAMED may be declared via `type T=(…)` or `const T=(…)`;
   // both leave T's bundle in the symbol table.
   std::unordered_map<std::string, std::string> decl_named_type_;
+
+  // 2d-reg — names declared with mode `reg` (incl. stage-synthesized regs).
+  // Their reads are RUNTIME q reads (never fold through the symbol table)
+  // and their stores are next-state din writes (never bound, never dropped):
+  // Verilog `<=` semantics — a read after a write still sees the flop's q.
+  std::unordered_set<std::string> reg_decl_names_;
 
   auto current_bundle() { return st.get_bundle(current_text()); }
 
@@ -289,6 +316,51 @@ protected:
   void fold_in(const std::string& dst);
   void fold_has(const std::string& dst);
   void fold_case(const std::string& dst);
+
+  // Task 1g — type-aware `does`/`equals`. A resolved operand carries its scalar
+  // KIND plus, for integers, a (max,min) ENVELOPE (with explicit unbounded
+  // flags) and — when it has a concrete value — the literal/folded Const used
+  // to coerce a scalar into a single-positional bundle for the structural
+  // (tuple) path. `bundle` is set only for real tuples.
+  struct Does_operand {
+    enum class Kind : uint8_t { integer, boolean, string, tuple, nil, unknown };
+    Kind                          kind = Kind::unknown;
+    bool                          max_inf = false;  // envelope max is +∞
+    bool                          min_inf = false;  // envelope min is −∞
+    Const                         max;
+    Const                         min;
+    bool                          has_value = false;
+    Const                         value;  // valid when has_value
+    std::shared_ptr<Bundle const> bundle;  // set when kind==tuple
+  };
+  // Resolve the `does`/`equals`/`case` operand at the current cursor (a ref or
+  // const). nullopt when undecidable this walk (defer the fold).
+  std::optional<Does_operand> resolve_does_operand();
+  // Build a scalar Does_operand from a declared type query plus an optional
+  // folded value (shared by the ref-operand and per-field paths).
+  static Does_operand build_scalar_operand(const upass::uPass::Scalar_type_query& q, const Const& folded);
+  // Resolve one named/positional field of a bundle to a Does_operand for the
+  // per-field type check (1g-D): declared type via the dotted query
+  // (`bundle.field`), value via the bundle entry, sub-bundle for nested tuples.
+  // `declared_only` (used by the per-field type check) returns nullopt for a
+  // scalar field with NO explicit declared type — an untyped field imposes no
+  // type constraint (`m1 does (a:u32)` passes; `s case (a=0)` stays a value
+  // pattern), so the check runs only when BOTH sides are declared-typed.
+  std::optional<Does_operand> resolve_field_operand(const Bundle& b, std::string_view field, bool declared_only);
+  // Decode a primitive type token (`u32`/`s8`/`int`/`bool`/`string`/…) in
+  // operand position to its kind+envelope. Returns nullopt if `name` is not a
+  // type token.
+  static std::optional<Does_operand> decode_prim_type_token(std::string_view name);
+  // Build a one-entry positional bundle {0: value} so a scalar operand can take
+  // the structural path against a real tuple (`(100,30) does 30`).
+  static std::shared_ptr<Bundle> single_positional_bundle(const Const& v);
+  // Tri-state kind+envelope `a does b` for two NON-tuple operands. nullopt =
+  // undecidable.
+  static std::optional<bool> scalar_does(const Does_operand& a, const Does_operand& b);
+  // Tri-state `a does b` for any two resolved operands: structural (tuple)
+  // path when a side is a real tuple (plus per-field type checks, 1g-D), else
+  // scalar_does. nullopt = undecidable. `equals` is this both ways.
+  std::optional<bool> compute_does(const Does_operand& a, const Does_operand& b);
 
   struct Call_actual {
     bool                                   is_named = false;

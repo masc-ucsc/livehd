@@ -17,6 +17,7 @@ public:
   ~uPass_func_extract() override = default;
 
   void process_assign() override;
+  void process_func_call() override;
   void process_func_def() override;
   void process_stmts() override;
   void process_stmts_post() override;
@@ -67,6 +68,15 @@ private:
   // constants.
   std::unordered_map<std::string, Const>                                  temp_scalar_value;
   std::unordered_map<std::string, std::unordered_map<std::string, Const>> temp_bundle_value;
+
+  // Task 1m — import-binding captures. `fcall(___N, 'import', '<str>')`
+  // records ___N → raw import-string const text here; a subsequent
+  // unconditional `store NAME ___N` promotes it to latest_outer_import.
+  // The capture prelude then REPLICATES the import call at the head of any
+  // extracted body that reads NAME (resolution happens during constprop —
+  // after this pass — so the value can't be captured; the call can).
+  std::unordered_map<std::string, std::string> temp_import_text;
+  std::unordered_map<std::string, std::string> latest_outer_import;
 
   // Names that, at some point during the outer walk, were written under
   // conditions that make them non-constant (a nested-scope assign, a

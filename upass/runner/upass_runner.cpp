@@ -61,7 +61,6 @@
 
 #include "absl/container/flat_hash_set.h"
 #include "diag.hpp"
-#include "upass_shared.hpp"
 
 namespace {
 
@@ -149,50 +148,6 @@ void collect_cond_vars(const Lnast& ln, const Lnast_nid& while_nid, std::string_
   throw std::runtime_error(msg);
 }
 
-struct Lnast_pass_noop_shared final : public upass::uPass {
-  using upass::uPass::uPass;
-
-  void process_top() override { upass::run_noop_shared(*lm, "uPass"); }
-};
-
-struct Lnast_pass_scan_shared final : public upass::uPass {
-  using upass::uPass::uPass;
-
-  void process_assign() override {
-    if (emitted) {
-      return;
-    }
-    const auto rep = upass::run_scan_shared(*lm, "uPass");
-    std::print("uPass - shared scan summary nodes:{} const:{} arith:{}\n", rep.node_count, rep.const_count, rep.arithmetic_count);
-    emitted = true;
-  }
-
-private:
-  bool emitted{false};
-};
-
-struct Lnast_pass_decide_shared final : public upass::uPass {
-  using upass::uPass::uPass;
-
-  void process_assign() override {
-    if (emitted) {
-      return;
-    }
-    const auto rep = upass::run_decide_shared(*lm, "uPass");
-    std::print("uPass - shared decide summary fold_candidates:{} has_fold_candidates:{}\n",
-               rep.fold_candidate_count,
-               rep.has_fold_candidates ? "true" : "false");
-    emitted = true;
-  }
-
-private:
-  bool emitted{false};
-};
-
-static upass::uPass_plugin plugin_noop_shared("noop_shared", upass::uPass_wrapper<Lnast_pass_noop_shared>::get_upass);
-static upass::uPass_plugin plugin_scan_shared("scan_shared", upass::uPass_wrapper<Lnast_pass_scan_shared>::get_upass);
-static upass::uPass_plugin plugin_decide_shared("decide_shared", upass::uPass_wrapper<Lnast_pass_decide_shared>::get_upass);
-
 }  // namespace
 
 uPass_runner::uPass_runner(std::shared_ptr<upass::Lnast_manager>& _lm, const std::vector<std::string>& upass_names,
@@ -229,9 +184,28 @@ uPass_runner::uPass_runner(std::shared_ptr<upass::Lnast_manager>& _lm, const std
   // list and each pass can pick the options it recognizes.
   auto fold_fn    = [this](std::string_view name) { return try_fold_ref(name); };
   auto emit_at_fn = [this](const Lnast_nid& src) { emit_op_with_fold_at(src); };
+  // Task 1g — combined scalar-type query: KIND from typecheck (handles
+  // un-annotated vars), declared integer ENVELOPE from attributes. Evaluated
+  // lazily (during the walk), so shared_st_passes_ — populated by the loop
+  // just below — is already complete by the time constprop's `does` fold
+  // invokes it.
+  auto type_query_fn = [this](std::string_view name) {
+    upass::uPass::Scalar_type_query q;
+    q.kind = try_scalar_kind(name);
+    if (auto ft = try_field_type(name)) {
+      if (q.kind == Io_kind::none) {
+        q.kind = ft->kind;
+      }
+      q.range_max = ft->range_max;
+      q.range_min = ft->range_min;
+      q.annotated = ft->range_max.has_value() || ft->range_min.has_value();
+    }
+    return q;
+  };
   for (auto& entry : upasses) {
     entry.pass->set_runner_fold_fn(fold_fn);
     entry.pass->set_runner_emit_at_fn(emit_at_fn);
+    entry.pass->set_runner_type_query_fn(type_query_fn);
     entry.pass->set_runner_symbol_table(&runner_symbol_table);
     entry.pass->set_options(options);
   }
@@ -443,6 +417,15 @@ std::optional<upass::uPass::Field_decl_type> uPass_runner::try_field_type(std::s
   return std::nullopt;
 }
 
+Io_kind uPass_runner::try_scalar_kind(std::string_view name) {
+  for (auto* p : shared_st_passes_) {
+    if (auto k = p->provide_scalar_kind(name); k != Io_kind::none) {
+      return k;
+    }
+  }
+  return Io_kind::none;
+}
+
 upass::uPass::Decl_storage uPass_runner::try_decl_storage(std::string_view name) {
   for (auto* p : shared_st_passes_) {
     if (auto s = p->provide_decl_storage(name); s != upass::uPass::Decl_storage::unknown) {
@@ -587,7 +570,16 @@ void uPass_runner::emit_ref_or_folded(std::string_view name) {
     return;
   }
   auto folded = try_fold_ref(name);
-  if (folded && !folded->is_invalid()) {
+  // Substitute only a genuine folded constant. A `nil` value is an
+  // unset/poison marker (not is_invalid, so it slips past the check below, but
+  // its to_pyrope() is the placeholder `0`); emitting it would replace a live
+  // operand with `0` in the materialized tree. This is the tail of the 1i
+  // comb-inliner bug: a runtime-valued output stays nil-seeded in the ST, so
+  // the kept `store(out, ___ret)` would otherwise fold to `store(out, 0)` and
+  // the output reads 0 instead of the real value. Keep the ref so the runtime
+  // producer drives it. (Materialize-only: comptime folding never reaches here
+  // — it reads the ST directly via current_prim_value.)
+  if (folded && !folded->is_invalid() && !folded->is_nil()) {
     emit_leaf(Lnast_node::create_const(folded->to_pyrope()));
   } else {
     emit_leaf(lm->current_node());
@@ -681,35 +673,6 @@ void uPass_runner::dispatch_to_passes(Pass_method fn) {
     }
     lm->restore_cursor(saved);
   }
-}
-
-upass::Vote uPass_runner::reduce_votes(const std::vector<upass::Vote>& votes) {
-  // Priority per docs/upass_redesign.md §G:
-  //   drop  > toconst > update > keep
-  // toconst values must agree across voters (sanity-checked).
-  upass::Vote        out;
-  const upass::Vote* toconst_seen = nullptr;
-  const upass::Vote* update_seen  = nullptr;
-  for (const auto& v : votes) {
-    if (v.kind == upass::Vote_kind::drop) {
-      return upass::Vote::drop();
-    }
-    if (v.kind == upass::Vote_kind::toconst) {
-      if (toconst_seen && !toconst_seen->toconst_value.same_repr(v.toconst_value)) {
-        upass::error("uPass_runner: conflicting toconst votes for the same node\n");
-      }
-      toconst_seen = &v;
-    } else if (v.kind == upass::Vote_kind::update) {
-      update_seen = &v;
-    }
-  }
-  if (toconst_seen) {
-    return *toconst_seen;
-  }
-  if (update_seen) {
-    return *update_seen;
-  }
-  return upass::Vote::keep();
 }
 
 bool uPass_runner::any_pass_drops() const {
@@ -1125,6 +1088,7 @@ bool uPass_runner::try_inline_func_call() {
   // Snapshot the call-site source span (cursor is on the func_call node) so the
   // argument-naming diagnostics below can point at the call line. Read from the
   // source tree (prp2lnast's attach_loc survives the lnastfmt round-trip).
+  const auto         call_nid = lm->get_current_nid();  // func_call node in the source tree
   livehd::diag::Span call_span;
   {
     const auto& src_ln = lm->get_lnast();
@@ -1162,6 +1126,9 @@ bool uPass_runner::try_inline_func_call() {
   if (auto fb = func_param_bindings_.find(callee_name); fb != func_param_bindings_.end()) {
     callee_name = fb->second;
   }
+  // The callee identifier as written at the call site (method dispatch and
+  // the import-namespace exemption below need it after callee_name rebinds).
+  const std::string source_callee_name(callee_name);
 
   auto callee = lookup_callee(callee_name);
 
@@ -1214,6 +1181,26 @@ bool uPass_runner::try_inline_func_call() {
     lm->restore_cursor(here);
   }
 
+  // Task 1m — call through a lambda-ref binding: `const f = b.add1` or
+  // `const f = import("ln:u.g")` bind `f` to the callee's TREE NAME as a
+  // string (the fcall-ref-const lambda-value form). Resolve it like the
+  // bundle-field method path above.
+  if (!callee) {
+    if (auto fv = try_fold_ref(callee_name); fv && fv->is_string()) {
+      auto fn = fv->to_pyrope();
+      if (fn.size() >= 2 && fn.front() == '\'' && fn.back() == '\'') {
+        fn = fn.substr(1, fn.size() - 2);
+      }
+      if (fn.starts_with("ln:")) {
+        fn = fn.substr(3);
+      }
+      if (auto m = lookup_callee(fn)) {
+        callee      = m;
+        callee_name = fn;
+      }
+    }
+  }
+
   if (!callee) {
     lm->restore_cursor(saved);
     return false;  // not a known comb body → typecast / cell-op / marker path
@@ -1224,20 +1211,103 @@ bool uPass_runner::try_inline_func_call() {
   // `f(obj, ...)` carries no marker and stays subject to the normal argument
   // rules. Checked here — before the inlinable/fuel gates — so a marked call
   // can never silently fall through to the evaluator path.
+  //
+  // Task 1m exemption — namespace access through an import tuple:
+  // `b.add1(args)` where `b = import("unit")` and b's field `add1` is a
+  // lambda ref (a string naming this callee's tree). The receiver is a
+  // namespace, not a method receiver: drop it from the actuals instead of
+  // requiring `self`.
+  bool drop_ufcs_receiver = false;
   {
-    const auto here        = lm->save_cursor();
-    bool       ufcs_marked = false;
+    const auto  here        = lm->save_cursor();
+    bool        ufcs_marked = false;
+    std::string recv_name;
     if (lm->move_to_sibling() && Lnast_ntype::is_store(lm->get_raw_ntype()) && lm->move_to_child()) {
       ufcs_marked = lm->current_raw_text() == call_ufcs_arg_marker;
+      if (ufcs_marked && lm->move_to_sibling() && Lnast_ntype::is_ref(lm->get_raw_ntype())) {
+        recv_name = std::string(lm->current_text());
+      }
     }
     lm->restore_cursor(here);
     if (ufcs_marked) {
       const auto& cio = callee->io_meta();
       if (cio.inputs.empty() || cio.inputs[0].name != "self") {
+        bool namespace_access = false;
+        if (!recv_name.empty()) {
+          if (auto bf = try_bundle_fields(recv_name)) {
+            for (const auto& [fld, val] : *bf) {
+              if (fld != source_callee_name || !val.is_string()) {
+                continue;
+              }
+              auto fn = val.to_pyrope();
+              if (fn.size() >= 2 && fn.front() == '\'' && fn.back() == '\'') {
+                fn = fn.substr(1, fn.size() - 2);
+              }
+              if (fn == callee->get_top_module_name() || lookup_callee(fn) == callee) {
+                namespace_access = true;
+              }
+              break;
+            }
+          }
+        }
+        if (!namespace_access) {
+          fcall_arg_fail(call_span,
+                         "fcall-ufcs-no-self",
+                         std::format("`{}` does not declare `self`; it cannot be called as a method", callee_name),
+                         "use the direct call form `f(args...)`, or declare `self` as the first parameter");
+        }
+        // Reached only on a namespace access (the no-self error above is
+        // [[noreturn]]); set the flag explicitly under the same condition so
+        // the receiver-drop never decouples from namespace detection if the
+        // error path ever stops being fatal.
+        drop_ufcs_receiver = namespace_access;
+      }
+    }
+  }
+  // A callee with no declared outputs (`-> ()`) produces no value, so its call
+  // result must not be consumed (`const a = top()` — the named_tuple.prp bug:
+  // the old implicit-return sugar made the body's locals leak out as a return
+  // tuple). Detect consumption by scanning the call's following siblings in
+  // the SOURCE tree for a read of the dst tmp. Checked here — before the
+  // inlinable/fuel gates — so pure zero-output callees that are never spliced
+  // error too. Only prp2lnast's `___N` call tmps are checked (hand-built .ln
+  // trees may bind named dsts); the ctor splice synthesizes a never-read dst.
+  // Read the outputs off the callee's io NODE, not io_meta — io_meta is only
+  // populated by the SSA upass, so it is indistinguishably empty when SSA is
+  // disabled (upass.ssa=false dev/test runs would mis-flag every callee).
+  const auto callee_has_no_outputs = [&]() -> bool {
+    const auto io_nid = callee->get_first_child(callee->get_root());
+    if (io_nid.is_invalid() || !Lnast_ntype::is_io(callee->get_type(io_nid))) {
+      return false;  // no io node (hand-built tree) — outputs unknown, don't flag
+    }
+    const auto in_tup = callee->get_first_child(io_nid);
+    if (in_tup.is_invalid()) {
+      return false;  // malformed io — don't flag
+    }
+    const auto out_tup = callee->get_sibling_next(in_tup);
+    return out_tup.is_invalid() || callee->get_first_child(out_tup).is_invalid();
+  };
+  if (!is_ctor_call && callee_has_no_outputs()) {
+    const auto& src_ln  = lm->get_lnast();
+    const auto  dst_raw = src_ln->get_name(src_ln->get_first_child(call_nid));
+    if (prp_is_tmp_name(dst_raw)) {
+      bool consumed = false;
+      for (auto sib = src_ln->get_sibling_next(call_nid); sib.is_valid() && !consumed; sib = src_ln->get_sibling_next(sib)) {
+        for (const auto& nid : src_ln->depth_preorder(sib)) {
+          if (nid.is_invalid()) {
+            continue;
+          }
+          if (Lnast_ntype::is_ref(src_ln->get_type(nid)) && src_ln->get_name(nid) == dst_raw) {
+            consumed = true;
+            break;
+          }
+        }
+      }
+      if (consumed) {
         fcall_arg_fail(call_span,
-                       "fcall-ufcs-no-self",
-                       std::format("`{}` does not declare `self`; it cannot be called as a method", callee_name),
-                       "use the direct call form `f(args...)`, or declare `self` as the first parameter");
+                       "fcall-no-output",
+                       std::format("`{}` declares no outputs (`-> ()`); its call returns nothing to bind", callee_name),
+                       "drop the result binding, or declare outputs in the callee: `-> (res)`");
       }
     }
   }
@@ -1308,8 +1378,14 @@ bool uPass_runner::try_inline_func_call() {
       }
       // Task 1k — the UFCS receiver marker is positional too; the receiver
       // binds to `self` via the has_self branch below (the no-self UFCS error
-      // already fired right after callee resolution).
+      // already fired right after callee resolution). Task 1m — a namespace
+      // access (`b.add1(...)` through an import tuple) drops the receiver
+      // entirely: it names the namespace, it is not an argument.
       if (a.key == call_ufcs_arg_marker) {
+        if (drop_ufcs_receiver) {
+          lm->restore_cursor(here);
+          continue;
+        }
         a.is_named = false;
         a.key.clear();
       }
@@ -1337,15 +1413,12 @@ bool uPass_runner::try_inline_func_call() {
   // but is a legitimate inline target (passed the inlinable_callees_ gate
   // above). Its empty inputs/outputs make the prologue/epilogue no-ops.
 
-  // Task 1q — a `pipe` callee (any output carries a stages annotation) is
-  // never comb-inlined: its outputs are flopped, and a call site must consume
-  // it via `await[N]` (later phase). Decline so the call surfaces unresolved
-  // instead of silently dropping the latency.
-  for (const auto& oe : io.outputs) {
-    if (oe.stages_min > 0) {
-      return false;
-    }
-  }
+  // NOTE: the `pipe`/`mod` declines below run AFTER the argument-naming
+  // validation loop (not here). 06-functions.md §"Argument naming" applies to
+  // EVERY resolvable callee regardless of kind, so the same naming check must
+  // fire for pipe/mod call sites before we bail out to the Sub-instance / pipe
+  // path — otherwise an unnamed `diff(x, y)` would compile for a `mod` while
+  // erroring for the identical `comb`. The callee + io are already resolved.
 
   // ── Match actuals → params (positional + named) ──────────────────────────
   const std::size_t        nparams = io.inputs.size();
@@ -1541,6 +1614,40 @@ bool uPass_runner::try_inline_func_call() {
                      "fcall-unnamed-arg",
                      std::format("argument `{}` must be named (`{}=...`) in call to `{}`", pname, pname, callee_name),
                      "name the argument, or pass a variable whose name matches the parameter");
+    }
+  }
+
+  // ── pipe/mod declines ─────────────────────────────────────────────────────
+  // These run AFTER the argument-naming validation above (06-functions.md
+  // §"Argument naming" applies to every resolvable callee regardless of kind),
+  // and BEFORE the binding/splice — so a pipe/mod call site is held to the same
+  // naming rule as a comb, then routed to its own lowering path.
+
+  // Task 1q — a `pipe` callee (any output carries a stages annotation) is
+  // never comb-inlined: its outputs are flopped, and a call site must consume
+  // it via `stage[N]` (later phase). Decline so the call surfaces unresolved
+  // instead of silently dropping the latency.
+  for (const auto& oe : io.outputs) {
+    if (oe.stages_min > 0) {
+      return false;
+    }
+  }
+
+  // Task 1r — a plain `mod` callee is its own module: the call becomes a
+  // Sub instance (1r-D), never a comb splice — even when every declared
+  // output cycle is 0, a mod may hold state. A `ref self` mod METHOD keeps
+  // the splice path (mod-init constructors, `y.method(...)`): recognized by
+  // its `self` io entry.
+  if (callee->get_lambda_kind() == "mod") {
+    bool has_self_input = false;
+    for (const auto& ie : io.inputs) {
+      if (ie.name == "self") {
+        has_self_input = true;
+        break;
+      }
+    }
+    if (!has_self_input) {
+      return false;
     }
   }
 

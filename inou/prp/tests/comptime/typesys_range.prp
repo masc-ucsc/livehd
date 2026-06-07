@@ -22,8 +22,9 @@ b = b + 1
 cassert(b == 3)
 cassert(b.[max] >= 3)
 
-// Range arithmetic: declared range narrows through downstream ops.
-const c:int:[range = 0..=15] = 5
+// Bounded type: declared max/min envelope derives bits.
+// (`:[range=…]`/`int(range=…)` are compile errors — see errors/readonly_attr_range.)
+const c:int(max=15, min=0) = 5
 cassert(c.[bits] == 4)
 cassert(c.[max] == 15)
 cassert(c.[min] == 0)

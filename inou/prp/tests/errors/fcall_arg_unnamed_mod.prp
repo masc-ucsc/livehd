@@ -1,0 +1,16 @@
+/*
+:name: fcall_arg_unnamed_mod
+:type: error
+:error: named|ambiguous|argument|parameter
+*/
+
+// 06-functions.md §"Argument naming" applies to EVERY resolvable callee
+// regardless of kind. A `mod` call site with two same-type, non-matching
+// positional actuals is just as ambiguous as the identical `comb` — it must
+// error ("argument `a` must be named"), even though the mod is lowered to a
+// Sub instance instead of being comb-inlined.
+
+mod diff(a:u8, b:u8) -> (r:u8@[0]) { r = a - b }
+const x = 5
+const y = 3
+cassert(diff(x, y) == 2) // locate_error_here

@@ -1,0 +1,12 @@
+/*
+:name: import_not_literal
+:type: error
+:error: comptime string literal
+:help: computed string
+*/
+
+// Task 1m — the `import` argument must be a comptime string literal:
+// imports resolve statically (docs/contracts/task_1m_plan.md §1).
+
+const name = "file1"
+const b = import(name)  // locate_error_here

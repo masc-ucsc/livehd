@@ -1,0 +1,15 @@
+/*
+:name: if_arm_scope_read
+:type: error
+:error: undefined|undeclared|not visible|out of scope
+*/
+
+// A declaration inside an if-arm is scoped to that arm — reading it after
+// the `if` is a compile error (it does NOT read as nil). The gated form
+// (`mut x = e when c`) is the way to conditionally declare into the
+// surrounding scope.
+
+if false {
+  mut d = 3
+}
+cassert(d == nil) // locate_error_here

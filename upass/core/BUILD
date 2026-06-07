@@ -15,23 +15,7 @@ cc_library(
     visibility = ["//visibility:public"],
     deps = [
         "//core",
-        "//graph",
         "//lnast",
-        "@hhds//hhds:graph",
     ],
     alwayslink = True,
-)
-
-cc_test(
-    name = "upass_shared_fold_parity_test",
-    srcs = ["upass_shared_fold_parity_test.cpp"],
-    copts = COPTS,
-    deps = [
-        "//core",
-        ":upass",
-        "//graph",
-        "//lnast",
-        "@googletest//:gtest_main",
-        "@hhds//hhds:graph",
-    ],
 )

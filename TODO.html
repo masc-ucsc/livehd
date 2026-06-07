@@ -90,7 +90,7 @@ footer { max-width:920px; margin:0 auto; padding:0 1.25rem 3rem;
 </style>
 </head>
 <body>
-<nav><span class="brand">LiveHD TODO</span><a class="active" href="TODO.html">Overview</a><a class="" href="TODO_prp.html">Pyrope</a><a class="" href="TODO_verilog.html">Verilog</a><a class="" href="TODO_livehd.html">LiveHD</a><a class="" href="TODO_hhds.html">HHDS</a></nav>
+<nav><span class="brand">LiveHD TODO</span><a class="active" href="TODO.html">Overview</a><a class="" href="TODO_prp.html">Pyrope</a><a class="" href="TODO_mod.html">Mod</a><a class="" href="TODO_verilog.html">Verilog</a><a class="" href="TODO_livehd.html">LiveHD</a><a class="" href="TODO_hhds.html">HHDS</a></nav>
 <main>
 <h1 id="todo">TODO</h1>
 <h2 id="pending-goals-at-a-glance">Pending goals at a glance</h2>
@@ -99,15 +99,14 @@ N. Each badge links to the full entry. <strong>HHDS has no open goals.</strong><
 <h3 id="pending-pyrope">Pyrope — <a href="TODO_prp.html">TODO_prp.html</a></h3>
 <ul>
 <li><em>Group 1:</em><ul>
-<li><a class="xref" href="TODO_prp.html#item-1q">1q</a> Pyrope <code>pipe</code> construct — Phase 1: declaration → flopped outputs. Remaining: <a class="xref" href="TODO_prp.html#item-1q-D">1q-D</a> LG pass1 σ/Tarjan check + narrowing.</li>
-<li><a class="xref" href="TODO_prp.html#item-1m">1m</a> Pyrope <code>import</code> statement — <strong>deferred</strong> (substantial new infra: grammar, lowering, file-wrapper trees, <code>find_tree</code> resolution).</li>
-<li><a class="xref" href="TODO_prp.html#item-1k">1k</a> <code>self</code>/<code>ref self</code> in tuple methods — remaining: in-tuple inline-lambda extraction (<code>prp-tup_method</code>), comptime <code>mod</code>-init folding (<code>prp-mix_tup</code>), and the decorator-init implicit setter dispatch on <code>x:Tup = (…)</code> trailing piece.</li>
+<li><a class="xref" href="TODO_mod.html#item-2d-reg">2d-reg</a> <strong>NEXT</strong> — register slice of <a class="xref" href="TODO_verilog.html#item-2d">2d</a> (reg→Flop lowering: enable/din, init→implicit reset + <code>reset_style</code> flag, runner branch-store fix, Time_checker state regs). 1r/1u <code>pipe</code>+<code>mod</code> structural machinery is DONE 2026-06-06; remaining non-2d follow-ups (wrap/sat LG lowering, multi-output callees, <code>stage[]</code> picks) in <a href="TODO_mod.html">TODO_mod.html</a> §Pending.</li>
+<li><a class="xref" href="TODO_prp.html#item-1m">1m</a> Pyrope <code>pub</code> exports + <code>import()</code> — core <strong>landed 2026-06-07</strong>; pending: unknown-tuple-field error (in <code>upass/typecheck</code>), ambiguous-<code>ln:</code> error, <code>lg:</code> Sub wiring (blocked on multi-<code>lg:</code> linker). Done since: <code>pub reg</code>→<code>regref</code> friendly error (no grammar change). See <code>docs/contracts/task_1m_plan.md</code>.</li>
+<li><a class="xref" href="TODO_prp.html#item-1g">1g</a> Type-aware <code>does</code>/<code>equals</code>/<code>case</code> — <strong>spec'd 2026-06-07</strong> (int envelope-superset rule, kind flag across types, type-name operands, literal-as-bundle; raises <code>does_test1.prp</code> back from <code>:verifier_pass: 20</code>).</li>
+<li><a class="xref" href="TODO_prp.html#item-1p">1p</a> Deferred lambda templates: var-args + call-site specialization — <strong>spec'd 2026-06-07</strong> (<code>docs/contracts/task_1p_plan.md</code>: not-fully-typed lambda = template, no LGraph at def time; <code>comb</code> inlines, <code>pipe</code>/<code>mod</code>/<code>fluid</code> specialize per signature into a <code>Sub</code>; readable-suffix mangling; deletes the <code>lambda-needs-types</code> error; generics seam, impl deferred).</li>
 </ul></li>
 <li><em>Group 2:</em><ul>
 <li><a class="xref" href="TODO_prp.html#item-2p">2p</a> Source-derived SSA / tmp names (<code>foo_l42_a</code>, drop <code>___N</code>).</li>
-<li><a class="xref" href="TODO_prp.html#item-2o">2o</a> Two-phase <code>upass/func_extract</code> (pending-import poison + bundle pre-pass).</li>
 <li><a class="xref" href="TODO_prp.html#item-2n">2n</a> <code>tree_ios</code> leaf ABI with <code>min</code>/<code>max</code> slots (mimics <code>GraphIO</code>).</li>
-<li><a class="xref" href="TODO_prp.html#item-2l">2l</a> Enum support — parse <code>enum X = (…)</code>, lower to comptime-tagged tuples (fixes the enum comptime tests).</li>
 <li><a class="xref" href="TODO_prp.html#item-2j">2j</a> Function-scope closure-capture, import-aware case.</li>
 </ul></li>
 <li><em>Group 3:</em><ul>
@@ -174,40 +173,12 @@ N. Each badge links to the full entry. <strong>HHDS has no open goals.</strong><
 <ul>
 <li>No open goals — Group 2 HHDS-side work will be added as it surfaces during the LiveHD migration.</li>
 </ul>
-<h2 id="failing-tests-cluster-snapshot-2026-06-05">Failing tests — cluster snapshot (2026-06-05)</h2>
-<p><code>bazel test //inou/prp:...</code> shows <strong>6 failures</strong>, all in the comptime suite —
-the <code>tests/errors/</code> negative suite is fully green.
-The failures cluster by root cause:</p>
-<table>
-<thead>
-<tr>
-<th>Cluster</th>
-<th>Tests</th>
-<th>Root cause</th>
-<th>Blocker / task</th>
-</tr>
-</thead>
-<tbody>
-<tr>
-<td><strong>A. Enum semantics</strong></td>
-<td><code>prp-enum_color</code>, <code>prp-enum_hier</code>, <code>prp-enum_simple</code>, <code>prp-enum_types</code></td>
-<td>enum declarations / typed-variant matching / hierarchical scoping not implemented in prp2lnast or constprop</td>
-<td><strong>2l</strong> (<code>enum_color</code> also <strong>1k</strong>)</td>
-</tr>
-<tr>
-<td><strong>B. Decorator-init / setter</strong></td>
-<td><code>prp-setter_complex</code></td>
-<td>decorator-init implicit setter dispatch on <code>x:Tup = (…)</code>: scalar→tuple coercion, positional setter-arg routing, <code>p.x</code>/<code>p['x']</code> getter dispatch</td>
-<td><strong>1k</strong></td>
-</tr>
-<tr>
-<td><strong>C. Const tuple, mut fields</strong></td>
-<td><code>prp-tuple_simple7</code></td>
-<td>surfaced by <code>lhd</code> (emit-only sink errors now fail the run): <code>tuple_set</code> tallies legal <code>mut</code>-<em>field</em> writes against the <code>const</code> tuple <em>root</em>; needs per-field decl modes (task 1t <code>comp_type_tuple</code>)</td>
-<td>task 1t per-field modes</td>
-</tr>
-</tbody>
-</table>
+<h2 id="failing-tests-cluster-snapshot-2026-06-06">Failing tests — cluster snapshot (2026-06-06)</h2>
+<p><code>bazel test //inou/prp/... //upass/... //lnast/... //pass/...</code> is
+<strong>fully green</strong> (237/237) — both the comptime suite and the
+<code>tests/errors/</code> negative suite. The previous snapshot's clusters
+(enum semantics <strong>2l</strong>, decorator-init / <code>self</code> <strong>1k</strong>,
+const-tuple-mut-field <code>prp-tuple_simple7</code>) have all landed.</p>
 <p>Doc-described errors that have no negative test yet are tracked in the
 <span class="xref xref-note" title="note: prp_error_test_coverage">prp_error_test_coverage</span> note.</p>
 </main>

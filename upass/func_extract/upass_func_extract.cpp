@@ -258,6 +258,26 @@ void uPass_func_extract::process_tuple_add() {
   lm->restore_cursor(saved);
 }
 
+// Task 1m — record `fcall(___N, 'import', '<str>')` so a following
+// `store NAME ___N` can promote NAME to an import-binding capture
+// (latest_outer_import). Only the canonical const-callee shape matches.
+void uPass_func_extract::process_func_call() {
+  if (!lm->has_child()) {
+    return;
+  }
+  const auto saved = lm->save_cursor();
+  lm->move_to_child();
+  std::string dst;
+  if (Lnast_ntype::is_ref(lm->current_type())) {
+    dst = std::string(lm->current_text());
+  }
+  if (!dst.empty() && lm->move_to_sibling() && Lnast_ntype::is_const(lm->current_type()) && lm->current_raw_text() == "import"
+      && lm->move_to_sibling() && Lnast_ntype::is_const(lm->current_type())) {
+    temp_import_text[dst] = std::string(lm->current_raw_text());
+  }
+  lm->restore_cursor(saved);
+}
+
 void uPass_func_extract::process_assign() {
   // Definition-time closure-capture tracking. A name is recorded as a
   // visible constant for any comb defined later in this scope IFF its
@@ -294,6 +314,7 @@ void uPass_func_extract::process_assign() {
   auto invalidate = [&]() {
     latest_outer_value.erase(lhs_name);
     latest_outer_bundle.erase(lhs_name);
+    latest_outer_import.erase(lhs_name);
     outer_non_const.insert(lhs_name);
   };
 
@@ -301,7 +322,7 @@ void uPass_func_extract::process_assign() {
     return;
   }
   // Second write to the same name → no longer a stable constant.
-  if (latest_outer_value.contains(lhs_name) || latest_outer_bundle.contains(lhs_name)) {
+  if (latest_outer_value.contains(lhs_name) || latest_outer_bundle.contains(lhs_name) || latest_outer_import.contains(lhs_name)) {
     invalidate();
     return;
   }
@@ -331,6 +352,13 @@ void uPass_func_extract::process_assign() {
     auto bit = temp_bundle_value.find(rhs_text);
     if (bit != temp_bundle_value.end()) {
       latest_outer_bundle[lhs_name] = bit->second;
+      return;
+    }
+    // Task 1m — `store b ___N` where ___N is an import-call dst: capture the
+    // import string so bodies reading `b` get the call replicated.
+    auto imit = temp_import_text.find(rhs_text);
+    if (imit != temp_import_text.end()) {
+      latest_outer_import[lhs_name] = imit->second;
       return;
     }
     // Aliasing an existing outer-scope value (`COPY = K`) is also a
@@ -386,28 +414,16 @@ void uPass_func_extract::process_func_def() {
   // Task 1q — `pipe` lambdas extract like `comb`: the spawned io-form LNAST
   // carries the per-output stages(min,max) annotation (copied verbatim with
   // the signature below), the LN pipe upass inserts the output flop, and
-  // tolg lowers it. `mod` stays embedded (later phase) — EXCEPT a `ref self`
-  // mod: that is a method / mod-init constructor (`mod mix_tup_init(ref
-  // self:Mix_tup)`, 06b-instantiation.md), not a standalone hardware module,
-  // and the runner's inliner needs it in the registry to splice
-  // `mut y:Mix_tup = mix_tup_init` (and explicit `y.method(...)` calls).
-  bool is_ref_self_mod = false;
-  if (func_kind == "mod") {
-    const auto here = lm->save_cursor();
-    // func_def(name, kind, generics, inputs, …) — two siblings to inputs.
-    if (move_to_sibling() && move_to_sibling() && lm->has_child()) {
-      move_to_child();  // first input: store(ref self, const 'ref'[, type])
-      if (Lnast_ntype::is_store(get_raw_ntype()) && lm->has_child()) {
-        move_to_child();
-        if (Lnast_ntype::is_ref(get_raw_ntype()) && current_text() == "self" && move_to_sibling()
-            && Lnast_ntype::is_const(get_raw_ntype()) && current_text() == "ref") {
-          is_ref_self_mod = true;
-        }
-      }
-    }
-    lm->restore_cursor(here);
-  }
-  if ((func_kind != "comb" && func_kind != "pipe" && !is_ref_self_mod) || func_name.empty()) {
+  // tolg lowers it. Task 1r — plain `mod` lambdas extract too (each mod is
+  // its own module/partition; calls to it lower to instances in a later
+  // phase). A `ref self` mod is DIFFERENT: that is a method / mod-init
+  // constructor (`mod mix_tup_init(ref self:Mix_tup)`,
+  // 06b-instantiation.md), not a standalone hardware module — it keeps the
+  // method-splice path: the runner's inliner needs it in the registry to
+  // splice `mut y:Mix_tup = mix_tup_init` (and explicit `y.method(...)`
+  // calls). Both stamp the durable lambda kind on the extracted Lnast; the
+  // ref-self method shape is recognized downstream by its `self` io entry.
+  if ((func_kind != "comb" && func_kind != "pipe" && func_kind != "mod") || func_name.empty()) {
     move_to_parent();
     return;
   }
@@ -422,6 +438,11 @@ void uPass_func_extract::process_func_def() {
   extracted_names.insert(extracted_name);
 
   auto new_lnast = std::make_shared<Lnast>(extracted_name);
+  // Task 1r — durable kind: downstream consumers (uPass_pipe, the inliner's
+  // mod decline, the future Sub-instance lowering) gate on this, never on
+  // stages_min>0. A ref-self mod keeps kind "mod" but is recognized as a
+  // method by its `self` io entry.
+  new_lnast->set_lambda_kind(func_kind);
   auto root_nid  = new_lnast->set_root(Lnast_ntype::create_top());
 
   // Skip generics for this first comb-only extraction slice. The func_def
@@ -468,7 +489,7 @@ void uPass_func_extract::process_func_def() {
     // construction, so they naturally don't cross the function boundary —
     // that's the "constants flow up, non-constants stop at the function
     // scope" rule, expressed structurally.
-    if (!latest_outer_value.empty() || !latest_outer_bundle.empty()) {
+    if (!latest_outer_value.empty() || !latest_outer_bundle.empty() || !latest_outer_import.empty()) {
       // Scan the SOURCE body (`lm` cursor is at the func_def's stmts) for
       // every name it reads, so we only inline captures the body actually
       // consumes.
@@ -495,6 +516,17 @@ void uPass_func_extract::process_func_def() {
           auto a_idx = new_lnast->add_child(stmts, Lnast_ntype::create_store());
           new_lnast->add_child(a_idx, Lnast_node::create_ref(name));
           new_lnast->add_child(a_idx, Lnast_node::create_const(it->second.to_pyrope()));
+          continue;
+        }
+        // Task 1m — import bindings replicate as the import CALL itself
+        // (resolution happens later, in constprop, against the registry):
+        // `fcall(ref name, 'import', '<str>')` binds the namespace bundle /
+        // lambda ref inside this body exactly like at file scope.
+        if (auto iit = latest_outer_import.find(name); iit != latest_outer_import.end()) {
+          auto f_idx = new_lnast->add_child(stmts, Lnast_ntype::create_func_call());
+          new_lnast->add_child(f_idx, Lnast_node::create_ref(name));
+          new_lnast->add_child(f_idx, Lnast_node::create_const("import"));
+          new_lnast->add_child(f_idx, Lnast_node::create_const(iit->second));
           continue;
         }
         auto bit = latest_outer_bundle.find(name);

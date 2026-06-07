@@ -1,0 +1,19 @@
+/*
+:name: mut_cycle_rebind
+:type: comptime
+:verifier_pass: 1
+:verifier_fail: 0
+*/
+
+// Task 1r/1q — a `mut` integer feeding a `@[NAME]` timing slot is captured at
+// the lambda declaration point with declaration-time-capture semantics. `f`
+// sees runtime_delay==2, then a statement-level plain re-assignment UPDATEs it
+// to 3, so the later `g` sees runtime_delay==3. Both `@[runtime_delay]` slots
+// resolve to a compile-time integer (no "literal or compile-time constant"
+// error). The cassert keeps the verifier honest about a discharged check.
+mut runtime_delay = 2
+mod f(a:u8) -> (x:u8@[runtime_delay]) { stage[2] x = a }
+runtime_delay = 3
+mod g(a:u8) -> (x:u8@[runtime_delay]) { stage[3] x = a }
+
+cassert(runtime_delay == 3)

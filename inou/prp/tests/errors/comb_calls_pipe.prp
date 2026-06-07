@@ -1,0 +1,12 @@
+/*
+:name: comb_calls_pipe
+:type: error
+:tolg: 1
+:error: only `mod` bodies may instantiate
+*/
+
+pipe[2] mul(a:u8, b:u8) -> (c:u16) { c = a * b }
+
+comb bad(a:u8) -> (x:u16) {
+  x = mul(a=a, b=a)
+}

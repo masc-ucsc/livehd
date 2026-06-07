@@ -1,0 +1,12 @@
+/*
+:name: pub_reg
+:type: error
+:error: cannot export `pub reg`
+:help: regref
+*/
+
+// Task 1m — a register cannot be a `pub` export (read-only value/lambda
+// semantics); cross-module register sharing uses `regref`. The friendly
+// hint is emitted by prp2lnast (no grammar change). (task_1m_plan.md §1)
+
+pub reg q:u8 = 0  // locate_error_here

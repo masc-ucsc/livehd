@@ -1,0 +1,12 @@
+/*
+:name: read_before_decl
+:type: error
+:error: undefined|undeclared|not visible|out of scope
+*/
+
+// 04-variables.md "Variable scope": a variable is visible from its
+// declaration to the end of its scope, in program order — reading it
+// earlier is a compile error (it does NOT read as nil).
+
+cassert(a == nil) // locate_error_here
+mut a = 1

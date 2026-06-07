@@ -52,7 +52,7 @@ static std::shared_ptr<Lnast> make_assign_lnast(std::string_view lhs, std::strin
 // ── Test 1: plain assign survives and is emitted as `mut x = 3` ─────────────
 TEST(LnastPrpWriter, AssignEmittedAsMut) {
   auto ln     = make_assign_lnast("out", "3", "assign_test");
-  auto output = run_and_emit(ln, {"noop_shared"});
+  auto output = run_and_emit(ln, {"noop"});
   EXPECT_NE(output.find("out"), std::string::npos) << output;
   EXPECT_NE(output.find("3"), std::string::npos) << output;
 }
@@ -111,7 +111,7 @@ TEST(LnastPrpWriter, PlusEmittedAsInfix) {
   ln->add_child(plus, Lnast_node::create_ref("a"));
   ln->add_child(plus, Lnast_node::create_ref("b"));
 
-  auto output = run_and_emit(ln, {"noop_shared"});
+  auto output = run_and_emit(ln, {"noop"});
   EXPECT_NE(output.find("out"), std::string::npos) << output;
   EXPECT_NE(output.find('+'), std::string::npos) << output;
   EXPECT_NE(output.find('a'), std::string::npos) << output;
@@ -132,7 +132,7 @@ TEST(LnastPrpWriter, EqEmittedAsDoubleEquals) {
   ln->add_child(eq, Lnast_node::create_ref("a"));
   ln->add_child(eq, Lnast_node::create_ref("b"));
 
-  auto output = run_and_emit(ln, {"noop_shared"});
+  auto output = run_and_emit(ln, {"noop"});
   EXPECT_NE(output.find("=="), std::string::npos) << output;
   EXPECT_EQ(output.find("eq("), std::string::npos) << "Should be infix: " << output;
 }
@@ -146,7 +146,7 @@ TEST(LnastPrpWriter, CassertHasParens) {
   auto ca = ln->add_child(stmts, Lnast_ntype::create_cassert());
   ln->add_child(ca, Lnast_node::create_ref("cond"));
 
-  auto output = run_and_emit(ln, {"noop_shared"});
+  auto output = run_and_emit(ln, {"noop"});
   EXPECT_NE(output.find("cassert(cond)"), std::string::npos) << output;
 }
 
@@ -183,7 +183,7 @@ TEST(LnastPrpWriter, BarePortNamesPassThrough) {
   ln->add_child(asgn, Lnast_node::create_ref("out"));
   ln->add_child(asgn, Lnast_node::create_ref("in"));
 
-  auto output = run_and_emit(ln, {"noop_shared"});
+  auto output = run_and_emit(ln, {"noop"});
   EXPECT_NE(output.find("out"), std::string::npos) << output;
   EXPECT_NE(output.find("in"), std::string::npos) << output;
 }
@@ -233,7 +233,7 @@ TEST(LnastPrpWriter, MultipleStatementsInOrder) {
   ln->add_child(a2, Lnast_node::create_ref("y"));
   ln->add_child(a2, Lnast_node::create_const("2"));
 
-  auto output = run_and_emit(ln, {"noop_shared"});
+  auto output = run_and_emit(ln, {"noop"});
   auto px     = output.find("x");
   auto py     = output.find("y");
   EXPECT_NE(px, std::string::npos) << output;
@@ -266,7 +266,7 @@ TEST(LnastPrpWriter, ArithmeticOperatorsInfix) {
   ln->add_child(divn, Lnast_node::create_ref("a"));
   ln->add_child(divn, Lnast_node::create_ref("b"));
 
-  auto output = run_and_emit(ln, {"noop_shared"});
+  auto output = run_and_emit(ln, {"noop"});
   EXPECT_NE(output.find('-'), std::string::npos) << "minus missing: " << output;
   EXPECT_NE(output.find('*'), std::string::npos) << "mult missing: " << output;
   EXPECT_NE(output.find('/'), std::string::npos) << "div missing: " << output;
@@ -300,7 +300,7 @@ TEST(LnastPrpWriter, BitwiseAndLogicalOperators) {
   ln->add_child(land, Lnast_node::create_ref("a"));
   ln->add_child(land, Lnast_node::create_ref("b"));
 
-  auto output = run_and_emit(ln, {"noop_shared"});
+  auto output = run_and_emit(ln, {"noop"});
   EXPECT_NE(output.find('&'), std::string::npos) << "bit_and missing: " << output;
   EXPECT_NE(output.find('|'), std::string::npos) << "bit_or missing: " << output;
   EXPECT_NE(output.find(" and "), std::string::npos) << "log_and missing: " << output;
@@ -321,7 +321,7 @@ TEST(LnastPrpWriter, TupleAddEmitted) {
   ln->add_child(tadd, Lnast_node::create_ref("a"));
   ln->add_child(tadd, Lnast_node::create_ref("b"));
 
-  auto output = run_and_emit(ln, {"noop_shared"});
+  auto output = run_and_emit(ln, {"noop"});
   EXPECT_NE(output.find('('), std::string::npos) << "tuple parens missing: " << output;
   EXPECT_NE(output.find('a'), std::string::npos) << output;
   EXPECT_NE(output.find('b'), std::string::npos) << output;
@@ -348,7 +348,7 @@ static std::string write_prp(std::string_view name, std::string_view src) {
 
 // Parse a .prp file → run uPass → emit Pyrope 3.0 text.
 static std::string round_trip(std::string_view name, std::string_view src,
-                              const std::vector<std::string>& passes = {"noop_shared"}) {
+                              const std::vector<std::string>& passes = {"noop"}) {
   auto      path = write_prp(name, src);
   Prp2lnast converter(path, std::string(name));
   auto      ln = converter.get_lnast();
@@ -381,7 +381,7 @@ comb rt_simple(a) -> (out) {
 }
 )prp";
 
-  auto output = round_trip("rt_simple", src, {"noop_shared"});
+  auto output = round_trip("rt_simple", src, {"noop"});
   ASSERT_FALSE(output.empty()) << "round-trip produced no output";
   // func_def bodies are not yet serialised (Slice 4); the writer emits a TODO.
   EXPECT_NE(output.find("TODO: func_def"), std::string::npos) << "expected func_def TODO comment:\n" << output;
@@ -392,7 +392,7 @@ comb rt_simple(a) -> (out) {
 // The emitted Pyrope must not contain a bare `+` operator (folded away).
 TEST(LnastPrpWriter, RoundTripConstpropFoldsArith) {
   const char* src = R"prp(
-comb rt_fold() {
+comb rt_fold() -> () {
   const a = 2 + 3
   cassert(a == 5)
 }
@@ -419,7 +419,7 @@ TEST(LnastPrpWriter, AttrSetTypeAnnotationSuppressed) {
   ln->add_child(aset, Lnast_node::create_const("type"));
   ln->add_child(aset, Lnast_node::create_const("mut"));
 
-  auto output = run_and_emit(ln, {"noop_shared"});
+  auto output = run_and_emit(ln, {"noop"});
   // Must not emit x.type = mut — that is not valid Pyrope.
   EXPECT_EQ(output.find("x.type"), std::string::npos) << "attr_set type annotation leaked into output:\n" << output;
   EXPECT_EQ(output.find("= mut"), std::string::npos) << "attr_set type annotation leaked into output:\n" << output;

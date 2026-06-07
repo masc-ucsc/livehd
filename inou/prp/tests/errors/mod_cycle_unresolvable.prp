@@ -1,0 +1,18 @@
+/*
+:name: mod_cycle_unresolvable
+:type: error
+:error: literal or compile-time constant
+:help: resolvable to one
+*/
+
+// A `mut` whose value depends on a CONDITIONAL write is not statically known at
+// the lambda declaration point: the re-assignment inside the `if` body erases
+// the declaration-time capture (see const_int_bindings_ / conditional_depth_),
+// so `@[runtime_delay]` can no longer resolve to a single landing cycle.
+mut runtime_delay = 2
+mut sel:bool = true
+if sel {
+  runtime_delay = 3
+}
+
+mod f(a:u8) -> (x:u8@[runtime_delay]) { x = a }   // locate_error_here

@@ -90,7 +90,7 @@ footer { max-width:920px; margin:0 auto; padding:0 1.25rem 3rem;
 </style>
 </head>
 <body>
-<nav><span class="brand">LiveHD TODO</span><a class="" href="TODO.html">Overview</a><a class="active" href="TODO_prp.html">Pyrope</a><a class="" href="TODO_verilog.html">Verilog</a><a class="" href="TODO_livehd.html">LiveHD</a><a class="" href="TODO_hhds.html">HHDS</a></nav>
+<nav><span class="brand">LiveHD TODO</span><a class="" href="TODO.html">Overview</a><a class="active" href="TODO_prp.html">Pyrope</a><a class="" href="TODO_mod.html">Mod</a><a class="" href="TODO_verilog.html">Verilog</a><a class="" href="TODO_livehd.html">LiveHD</a><a class="" href="TODO_hhds.html">HHDS</a></nav>
 <main>
 <h1 id="todo-pyrope-semantics">TODO — Pyrope semantics</h1>
 <p>Pending work to finish correct Pyrope language handling: frontend, LNAST
@@ -104,125 +104,208 @@ complete before group N+1 starts. Group letters are shared across
 cross-file dependencies stay visible.</p>
 <h2 id="group-1-foundation">Group 1 — foundation</h2>
 <ul>
-<li><strong id="item-1q" class="item-id">1q</strong> Pyrope <code>pipe</code> construct — Phase 1
-  (declaration → flopped outputs). Spec:
-  <code>../docs/docs/pyrope/06c-pipelining.md</code>; plan + landed details:
-  <code>docs/contracts/task_1q_plan.md</code>. Remaining:<ul>
-<li><strong id="item-1q-D" class="item-id">1q-D</strong> LG pass1 checker: the
-    SCC/Tarjan + σ pass — classify state/stage regs (state: <code>enable</code>≠true
-    or din→q in SCC, σ(q)=σ(din)), forward σ with equal-operand meet
-    (mismatch = error at the node), σ ≤ min honesty (callers may rely on any
-    value in [min,max]; reg-as-output home = min−1), narrow the inserted
-    flop to (min−σ, max−σ) — body flops never touched. With comb-only
-    bodies (until 2d lands) every output is σ=0, so it verifies trivially
-    and narrows nothing — the machinery is written general. LG pass2 in
-    Phase 1 = the min-realization default in cgen. Post-2d test additions:
-    body-stage-reg narrowing, <code>bad_mix</code>, <code>too_deep</code>,
-    <code>acc_mix</code>/<code>counter</code> state-reg accepts.</li>
-<li><strong>Later phases (separate tasks):</strong> call sites
-    (<code>stage[N]</code>/<code>@[N]</code> in <code>mod</code> — makes
-    <code>tests/equiv/accum.prp</code> live); state/stage σ machinery exercised
-    on real reg bodies once 2d reg lowering lands; <code>lnast_to_slop</code>
-    pipe cell (seed-picked total T ∈ [min,max], inserted depth T−σ);
-    LG pass2 retiming/PPA realization knob.</li>
+<li><strong id="item-1m" class="item-id">1m</strong> Pyrope <code>pub</code> exports + <code>import()</code> —
+  core <strong>landed 2026-06-07</strong> (contract <code>docs/contracts/task_1m_plan.md</code>;
+  pub recording/validation, <code>__pub</code> wrapper + manifest publication,
+  tuple/<code>ln:</code> resolution, <code>equals</code> tree-url identity, read-only bind,
+  iterate-until-converged kernel loop, mod/pipe instantiation through imports
+  to Verilog). <strong>Pending parts only:</strong></li>
+<li><strong>1m-pending:</strong><ul>
+<li><strong>Unknown tuple field → error</strong> (decided: <strong>global</strong>). Reading a
+  field absent from <em>any</em> tuple (<code>b.not_a_pub</code> on an import namespace,
+  or a plain <code>t.missing</code>) must be a compile error — not just the import
+  namespace. Today it does NOT error: it rides constprop's general lenient
+  missing-field fold (a plain <code>t.missing == 7</code> vacuously discharges; not a
+  value leak). Expect fallout — existing code/tests that lean on the lenient
+  nil-fold will need fixing (same direction as the <code>==nil</code> tightening
+  that already caught 3 should-be-nil bugs). <strong>Owned by
+  <code>upass/typecheck</code></strong> (handles types / sees the field set; not
+  constprop). Spec §9.</li>
+<li><strong>Ambiguous <code>ln:</code> match → error</strong> (decided). The same unit name in
+  two loaded <code>ln:</code> inputs must be an ambiguity error listing the
+  candidates — NOT the current silent first-wins (registry is name-keyed).
+  Implementable now without the linker: duplicate-name check at registry
+  load. Spec §2/§9.</li>
+<li><strong><code>pub reg</code> → <code>regref</code> friendly error</strong> — <strong>DONE</strong>
+  (no grammar change). prp2lnast emits <code>pub-reg-use-regref</code> for
+  <code>pub reg</code>/<code>pub stage</code> pointing at <code>regref</code>;
+  <code>pub mut</code> keeps the generic read-only hint. The separate
+  <code>regref</code> mechanism itself (cross-module register sharing) is still
+  unspecced. (Earlier grammar-constraining idea dropped — prp2lnast already
+  rejects <code>pub reg</code> and the dotted import form, so no pin bump.)</li>
+<li><strong><code>lg:</code> black-box Sub wiring at tolg</strong> (E back half) — blocked on the
+  multi-<code>lg:</code> gid-remapping linker. Today <code>import("lg:g")</code> binds the url
+  string and a call through it fails cleanly at tolg; the <code>ln:</code> half is done.</li>
+</ul></li>
+<li>
+<p><strong id="item-1p" class="item-id">1p</strong> Deferred lambda templates: var-args + call-site
+  specialization — <strong>spec'd 2026-06-07</strong> (contract
+  <code>docs/contracts/task_1p_plan.md</code>). A not-fully-typed lambda — untyped
+  non-<code>self</code> input, a <code>(...args)</code> var-arg, or an unbound generic
+  <code>&lt;T&gt;</code> — becomes a <strong>template</strong>: kept as LNAST, lowered to
+  <strong>no LGraph</strong> at definition time; the concrete form is produced
+  <strong>per call site</strong>. This unifies the two existing paths: <code>comb</code>
+  templates <strong>inline</strong> (the 1i path, extended to bind <code>...args</code>),
+  <code>pipe</code>/<code>mod</code>/<code>fluid</code> templates <strong>specialize</strong> into a concrete
+  module per signature and instantiate as a <code>Sub</code> (1u-A). Removes the
+  <code>lambda-needs-types</code> definition-time error (<code>prp2lnast.cpp:4837</code>) so
+  var-args/generics work on a module boundary.</p>
+</li>
+<li><strong>Decisions (locked 2026-06-07):</strong><ul>
+<li><strong>Scope.</strong> This goal builds the deferred-template + call-site
+  specialization mechanism with <strong>var-args</strong> as the driving use case
+  (<code>comb</code> inline + <code>pipe</code>/<code>mod</code>/<code>fluid</code> specialize). Generics
+  <code>&lt;T&gt;</code> get a designed-for seam (markers + mangling reservation)
+  but per-<code>T</code> body substitution is a <strong>separate follow-up goal</strong>.</li>
+<li><strong>Naming = readable suffix.</strong> Specialized modules get a
+  human-readable suffix from the concrete arg types/shape, counter on
+  collision: <code>foo(u8)</code>→<code>foo__u8</code>, <code>foo(u16)</code>→<code>foo__u16</code>,
+  <code>add1(a,b,c:u8)</code>→<code>add1__3xu8</code>, generic <code>T=u22</code>→<code>add6__T_u22</code>,
+  collision→<code>foo__u8_1</code>. Same signature → same name → <strong>natural
+  dedup</strong> (one shared module, each call its own <code>Sub</code> instance).</li>
+<li><strong>No in-unit call site = template-only.</strong> A <code>pub</code> export or
+  top-level template never specialized in its own file stays a deferred LNAST
+  template and produces <strong>no LGraph</strong> — <strong>no error</strong>; it
+  materializes only when an importer/caller specializes it. The old
+  <code>lambda-needs-types</code> error is deleted.</li>
+<li><strong>Specialize early, keyed on the actual's DECLARED type.</strong>
+  <code>pipe</code>/<code>mod</code>/<code>fluid</code> specialization runs at the call site
+  during the runner walk (beside the 1i inliner), keyed on each actual's
+  declared type — no dependence on late width inference, no pipeline re-entry.
+  An <strong>untyped actual</strong> feeding an untyped/var-args boundary port is a
+  <strong>call-site error</strong> ("annotate the actual"). <code>comb</code> is
+  unaffected (always inlines). Inferred-width support, if ever wanted, layers
+  on as a deferred late-specialize pass.</li>
+</ul></li>
+<li><strong>Implementation phases:</strong><ul>
+<li><strong>A — Producer.</strong> Delete the <code>lambda-needs-types</code> error; encode
+  the <code>...</code> var-arg marker on the input io entry (mirror the
+  <code>ref</code>-as-RHS-const convention, no new ntype); populate the <code>func_def</code>
+  generics tuple from <code>&lt;...&gt;</code> (seam). Retire/repurpose
+  <code>tests/errors/{mod_untyped_io,pipe_untyped_io}.prp</code> (now legal
+  templates).</li>
+<li><strong>B — Template flag + extraction.</strong> Add durable in-memory
+  <code>template_</code> to <code>Lnast</code> (sibling to <code>lambda_kind_</code>,
+  <code>lnast.hpp:149</code>); func_extract stamps it when the signature is not
+  fully typed and copies generics + var-arg markers into the extracted
+  signature; tolg + a runner gate skip emitting an LGraph for a
+  <code>template</code> tree.</li>
+<li><strong>C — <code>comb</code> var-args inlining.</strong> Extend the 1i inliner to
+  gather leftover actuals into a synthesized <code>args</code> tuple (named →
+  fields, positional → indices: <code>foo(b=3,10)</code> ⇒ <code>args.b==3</code>,
+  <code>args[0]==10</code>) and resolve <code>args[i]</code> / <code>args.NAME</code> /
+  <code>for x in args</code>. Reuses the untyped-param inlining seam.</li>
+<li><strong>D — <code>pipe</code>/<code>mod</code>/<code>fluid</code> specialization.</strong> At each call
+  site clone+specialize+mangle the template, append it to <code>var.lnasts</code>
+  (the queue walk at <code>pass_upass.cpp:375</code>/<code>:415</code> already lowers
+  appended trees through the full pipeline), and rewrite the call's callee to
+  the mangled name so tolg's <code>lower_func_call</code> resolves the <code>Sub</code>.
+  Dedup by mangled name. Error <strong>at the call site</strong> only when a
+  template genuinely cannot be specialized (width depends on a runtime-only
+  value, not a comptime shape).</li>
+<li><strong>E — Docs + tests.</strong> Rewrite <code>06-functions.md</code> (drop "never
+  type-inferred from call sites" for templates; document specialization +
+  naming). LEC tests: <code>add1(...x)</code> var-args; <code>mod foo(a)</code>
+  specialized two ways → two <code>Sub</code> modules; dedup (two identical calls →
+  one module, two instances); error tests for unresolvable cases.</li>
+</ul></li>
+<li><strong>Deferred (follow-up, out of scope here):</strong> generics
+  <code>&lt;T&gt;</code> binding/substitution (layers on phase D); the closure-capture
+  companion is <strong>1x</strong> (the <strong>2j</strong> note). <code>fluid</code> has no
+  LGraph lowering yet — the template rule applies the moment fluid lowering
+  lands, no extra producer work.</li>
+<li>
+<p><strong id="item-1g" class="item-id">1g</strong> Type-aware <code>does</code> / <code>equals</code> / <code>case</code> —
+  <strong>spec'd 2026-06-07</strong>. When <code>does</code> first landed there was no type
+  system; now there is (1t/1v typesystem + <code>upass/typecheck</code> kinds +
+  <code>upass/attributes</code> <code>Type_info</code> envelopes), so the scalar/type half can
+  fold. Raises <code>inou/prp/tests/comptime/does_test1.prp</code> back from the
+  lowered <code>:verifier_pass: 20</code>.</p>
+</li>
+<li><strong>Semantic ruling (2026-06-07):</strong><ul>
+<li><strong>Within integers</strong> the range decides: <code>a does b</code> ⇔ envelope
+  superset <code>a.max&gt;=b.max and a.min&lt;=b.min</code> (07-typesystem.md rule).
+  <code>c:u10 does c:u5</code> true; <code>c:u5 does c:u10</code> <strong>false</strong>. This
+  <strong>supersedes</strong> <code>04-variables.md:193,650</code> and
+  <code>07b-structtype.md:69,108</code> ("<code>u32 does u16</code> and <code>u16 does u32</code>
+  both true") — those docs and their extracted samples must be
+  rewritten (phase E).</li>
+<li><strong>Across kinds</strong> (<code>boolean</code>/<code>integer</code>/<code>string</code>/…) the kind is a
+  difference flag → false; when a side's type is <em>not set</em> (kind
+  unknown), the kind half is skipped and only structure/range is
+  checked.</li>
+<li><strong>Envelopes:</strong> literal <code>v</code> → <code>[v,v]</code>; declared type → its
+  envelope; untyped <code>mut</code>/<code>const</code> var → unbounded (superset of any
+  int). <code>bool</code> ≡ envelope <code>(min=-1,max=0)</code>, so <code>1 does true</code> and
+  <code>10 does true</code> are <strong>false</strong> (kind mismatch; the range view
+  agrees — 1 ∉ [-1,0]).</li>
+<li><strong><code>nil</code> special case:</strong> <code>x does nil</code> → true for any non-tuple
+  <code>x</code>. (tuple-vs-nil and nil-on-LHS: pin when implementing.)</li>
+<li><code>equals</code> = <code>(a does b) and (b does a)</code> <strong>including types</strong>;
+  <code>case</code> = <code>does</code> + value match (<code>nil</code>/<code>0sb?</code> wildcards) — both
+  currently fold structure/value only, types ignored.</li>
 </ul>
 </li>
-<li><strong id="item-1m" class="item-id">1m</strong> Pyrope <code>import</code> statement — <strong>deferred</strong>. Substantial new
-  infra; not attempted in the 2026-05-27 session.</li>
-<li><strong>Tried:</strong> Nothing. Scope was assessed (substantial new
-    infrastructure: grammar, prp2lnast lowering, file-wrapper LNAST
-    tree synthesis, cross-tree <code>find_tree</code> resolution) and skipped
-    in favor of other landings.</li>
-<li><strong>Tree-naming convention:</strong> for a file <code>foo/bar.prp</code>, every
-    <code>comb</code>/<code>pipe</code>/<code>mod</code> defined inside gets its own LNAST tree
-    named <code>foo/bar.&lt;entity&gt;</code> (e.g. <code>comb xx() …</code> → tree name
-    <code>foo/bar.xx</code>). Trees are created for <strong>both</strong> <code>pub</code> and
-    non-<code>pub</code> definitions — every entity always gets a tree
-    because every <code>comb</code>/<code>pipe</code>/<code>mod</code> needs one. The <code>pub</code> keyword
-    controls <em>exportability</em>: only <code>pub</code>-marked entities can be
-    named by <code>import("foo/bar.xx")</code> from another file.</li>
-<li><strong>Pub constants / tuples</strong> at file scope (<code>pub const yy = 33</code>)
-    can't ride a per-entity tree, so the import machinery
-    synthesizes a single "file wrapper" LNAST tree per source file
-    that returns all of that file's <code>pub</code> non-function values.
-    Roughly equivalent to writing:
-    <div class="highlight"><pre><span></span><code>comb bar() -&gt; (yy, other_pub_var) {
-    yy = 33
-    other_pub_var = 44
-    xx = import(&quot;foo/bar.xx&quot;)  // only if `pub comb xx ...`
-}
-</code></pre></div>
-    Result is read-only at the import site (matches the "imports
-    are constants" semantics).</li>
-<li><strong>Needed for next attempt:</strong><ul>
-<li><code>import path</code> / <code>import path as alias</code> grammar in
-  tree-sitter-pyrope.</li>
-<li>prp2lnast lowering: emit a <code>func_call</code>-style ref against
-  the imported tree name, resolved via <code>find_tree</code>.</li>
-<li>File-wrapper LNAST tree synthesizer for <code>pub</code> file-scope
-  values that have no associated <code>comb</code>/<code>pipe</code>/<code>mod</code> tree.</li>
-<li>For Group-1 tests, explicit phase ordering — <code>import_phase1</code>
-  / <code>import_phase2</code> test directives, hand-ordering which files
-  are processed in which phase. The pending-import / second-
-  phase resolution loop belongs to Group-2 <a class="xref" href="TODO_prp.html#item-2o">2o</a> and depends
-  on this entry landing first.</li>
+<li><strong>Current state (verified 2026-06-07 against <code>lhd</code>):</strong><ul>
+<li><em>Works:</em> tuple-vs-tuple structural <code>does</code>/<code>equals</code>/<code>case</code>
+  (<code>upass/constprop</code> <code>structural_does</code>/<code>structural_equals</code>/<code>fold_case</code>);
+  <strong>match-arm <code>does</code></strong> — prp2lnast emits <code>func_does</code> per arm, so the
+  <code>does_test1.prp:69</code> FIXME comment is <strong>stale</strong>: all three
+  commented-out <code>match</code> blocks pass today; <code>is</code> nominal check
+  (<code>upass_attributes::process_is</code>, typename-based).</li>
+<li><em>Unresolved (unknown):</em> every scalar-vs-scalar / scalar-vs-literal
+  <code>does</code> (<code>b1 does true</code>, <code>u10</code>-vs-<code>u5</code> vars) — <code>fold_does</code> requires
+  a tuple-shaped side because Lconst can't tell bool from int;
+  literal-vs-bundle (<code>100 does m1</code>, <code>(100,30) does 30</code>,
+  <code>30 does (30,200)</code>) — literals not bundle-bound in the ST.</li>
+<li><em>Hard error:</em> bare primitive type-name operand — <code>a does u32</code>,
+  <code>u32 does u16</code>, <code>if d does int</code> → "read of undefined variable
+  'u32'" from the prp2lnast undefined-read check. This is the
+  headline doc form (07-typesystem.md:66-73, 04-variables.md:650).</li>
 </ul>
 </li>
-<li><strong>Tests to add when landing:</strong><ol>
-<li>Import a remote already-resolved <code>comb</code>/<code>pipe</code>/<code>mod</code> function
-   (single-phase happy path — importer sees a fully-typed
-   <code>tree_ios</code> ABI from the imported module).</li>
-<li>Import a remote <code>comb</code>/<code>pipe</code>/<code>mod</code> that needs the second
-   phase (pending-import marker is set, importer can't comptime
-   its <code>if</code>/sticky propagation until the import resolves on the
-   next <code>pass.upass</code>). Pairs with <a class="xref" href="TODO_prp.html#item-2o">2o</a>.</li>
-<li>Import a constant (no <code>tree_ios</code> ABI, just a bundle entry
-   with a comptime value — via the synthesized file-wrapper
-   tree).</li>
-<li>Import a "flat" Verilog module via <code>pub</code>-keyword exports
-   (how does <code>pub</code> mark Verilog-side exports, and how does the
-   Pyrope side bind them — likely a <code>tree_ios</code> ABI variant or a
-   sub-class of import that bypasses the second-phase path).</li>
-</ol>
-</li>
-<li><strong id="item-1k" class="item-id">1k</strong> <code>self</code> / <code>ref self</code> in tuple methods — remaining
-  pieces (the core contract — typed-self <code>does</code>-check, call-form +
-  mut-receiver enforcement, tests, docs — is in
-  <code>docs/contracts/task_1k_plan.md</code>):<ul>
-<li><strong>In-tuple inline-lambda extraction</strong> (<code>prp-tup_method</code> fails):
-    a lambda defined INSIDE a tuple literal
-    (<code>mut p = (…, comb call(ref self, a) -&gt; (result) {…})</code>) is never
-    extracted — <code>tuple_to_node</code>'s generic else branch lowers it to raw
-    const text, the field name is lost, and <code>p.call(…)</code> cannot resolve.
-    Needs func_extract integration from expression context + a
-    <code>call = 'fname'</code> string-field store (the shape the method-dispatch
-    path already consumes).</li>
-<li><strong>Comptime <code>mod</code>-init folding</strong> (<code>prp-mix_tup</code> fails):
-    <code>mut y:Mix_tup = mix_tup_init</code> (mod instantiation as the
-    initializer) does not comptime-fold the receiver fields, so
-    <code>cassert(y.flag …)</code> stays unresolved.</li>
-<li><strong>Trailing piece — decorator-init semantics</strong> (kept from the
-    earlier 1k scope; excluded from the 2026-06-05 contract):
-    <code>prp-setter_complex</code> and <code>prp-tuple_decorator_complex</code> still
-    fail. When <code>x:Tup = (v="")</code> runs and <code>Tup</code> carries a
-    <code>setter</code> field, the setter should fire implicitly at instance
-    construction with the init values as named actuals. No existing
-    infra hooks the tuple-typed init to the setter dispatch. Hint:
-    agent-decorator scaffolded a <code>pending_setter_init</code> map +
-    <code>maybe_fire_setter_init</code> declaration in
-    <code>upass/constprop/upass_constprop.hpp</code> (2026-05-27 session;
-    header-only orphan reverted). Real landing needs the .cpp side:<ul>
-<li>Tuple-init detection in <code>process_assignment</code> when the RHS is
-  a tuple literal and the LHS has a <code>:Tup</code> annotation.</li>
-<li><code>pending_setter_init</code> bookkeeping when the <code>:Type</code> annotation
-  lands (record the variable + its declared type); clear at
-  the first assign so a later <code>x = …</code> doesn't refire.</li>
-<li>Dispatch through the existing method-call inliner with the
-  init-tuple's named fields rebound to the setter's named args.</li>
+<li><strong>Implementation phases:</strong><ul>
+<li><strong>A — type-name operands.</strong> prp2lnast lowers primitive type tokens
+  (<code>uN</code>/<code>sN</code>/<code>int</code>/<code>unsigned</code>/<code>bool</code>/<code>string</code> +
+  <code>int(max=,min=)</code> calls) in <code>does</code>/<code>equals</code>/<code>case</code> operand position
+  to a type-literal payload (reuse the declare-side <code>prim_type_*</code>
+  encoding), exempt from <code>collect_defined_names</code> undefined-read; the
+  fold decodes it to kind+envelope. User-defined type refs
+  (<code>x does Person</code>) already resolve as refs.</li>
+<li><strong>B — kind+envelope scalar fold.</strong> <code>fold_does</code> drops the
+  <code>is_tuple_shaped</code> gate; per operand pull kind+envelope — declared
+  vars via shared-ST <code>provide_decl_type</code>/<code>provide_field_type</code>
+  (attributes <code>Type_info</code>: <code>Numeric_kind</code> + <code>range_max/min</code>, the
+  same seam the 1k typed-self does-check uses), literals → <code>[v,v]</code>,
+  untyped → unbounded + kind-unset. Apply the ruling above incl. the
+  <code>nil</code> rule. Fold lives in constprop (it owns bundles + the
+  <code>func_does</code> dispatch); <code>upass/typecheck</code> stays read-only.</li>
+<li><strong>C — literal-as-bundle.</strong> const operands of
+  <code>does</code>/<code>equals</code>/<code>case</code> resolve scalars / tuple-literals not bound
+  in the ST: <code>100 does m1</code>, <code>m1 does 100</code>, <code>(100,30) does 30</code>,
+  <code>30 does (30,200)</code>.</li>
+<li><strong>D — typed <code>equals</code>/<code>case</code> + per-field types.</strong> Per-field types
+  ride <code>comp_type_tuple</code> (<code>docs/contracts/typesystem_clean_plan.md</code>)
+  and are checked field-wise; <code>equals</code> = does-both-ways incl. types
+  (07-typesystem.md:100-113); typed <code>case</code> patterns
+  (07-typesystem.md:235-240). Today
+  <code>(a=1) does (a:u32=…)</code> folds with <code>:u32</code> silently ignored.</li>
+<li><strong>E — docs + tests.</strong> Rewrite <code>04-variables.md:193,650</code>,
+  <code>07b-structtype.md:69,108</code>, <code>14b-small_pyrope_todo.md:80</code> to the
+  superset rule and refresh extracted samples (<code>full_pyrope/file85</code>,
+  <code>file291</code>); <code>does_test1.prp</code>: delete the stale match-arm comment,
+  re-enable the FIXME casserts per phase, raise
+  <code>:verifier_pass:</code> 20 → 35+; new tests: envelope (<code>u10</code>/<code>u5</code>),
+  bool literals (<code>1 does true</code>, <code>0 does true</code> both false),
+  type-name forms (<code>a does u32</code>, <code>not (u32 does string)</code>), typed
+  <code>case</code>/<code>equals</code>, <code>nil</code> rule.</li>
 </ul>
 </li>
-</ul>
-</li>
+<li><strong>Deferred (future item, out of scope here):</strong> lambda <code>does</code> rules
+  (<code>_:T_complex does _:T_simple</code>, <code>f.[inp] does args</code> —
+  <code>full_pyrope/file259</code>), array <code>does</code>/variance (<code>_:[]x does _:[]y</code>,
+  <code>[?]Animal</code> — <code>file285</code>/<code>file286</code>), and <code>_:T</code> type-only operand
+  forms (<code>_:f1 equals t1</code>).</li>
 </ul>
 <h2 id="group-2-depends-on-group-1">Group 2 — depends on Group 1</h2>
 <ul>
@@ -237,37 +320,18 @@ cross-file dependencies stay visible.</p>
     <a class="xref" href="TODO_verilog.html#item-2d">2d</a>); land before those goldens are taken.</p>
 </li>
 <li>
-<p><strong id="item-2o" class="item-id">2o</strong> Two-phase <code>upass/func_extract</code> (parallel per-LNAST, then top-down
-  resolve) — <code>import.md</code>. Depends on the <code>import</code> feature landing (no
-  standalone entry yet — likely needs one); without imports the
-  pending-marker machinery has nothing to gate on.</p>
-</li>
-<li>Pending-import poison for the planned <code>bundle</code> pre-pass: when an <code>if</code>
-    condition (or any value sticky/attribute propagation reads) depends on
-    a name whose Bundle entry is still unresolved because of a pending
-    <code>import</code>, the entry must carry a <code>pending: ImportRef</code> marker. Bundle
-    pre-pass treats a pending-tainted cond as non-comptime <em>and</em> must NOT
-    propagate sticky/attribute state into the if's arms (the import may
-    still inject an <code>attr_set</code> or change the cond's comptime value).
-    Equivalent rule for attribute propagation through expression ops:
-    skip the migration when any RHS ref carries the pending marker, since
-    the import may change which <code>_*</code> attributes flow in. The pending
-    marker is propagated by bundle pre-pass through the same expression-op
-    migration path used for sticky <code>_*</code> attrs (functionally a second
-    sticky channel).</li>
-<li>
-<p>SSA-flatten gate: the SSA post-pass owns the <code>tuple_*</code> → flat-name
-    lowering and rewrites the LNAST (the optimization passes need the
-    Bundle ptr during their loop, so flattening earlier would complicate
-    <code>does</code>/<code>==</code>/etc.). SSA must NOT flatten a Bundle whose entry carries
-    a pending-import marker — the import may still change the shape,
-    field values, or attached attributes. Such bundles stay as
-    <code>tuple_*</code> nodes for the next <code>pass.upass</code> invocation to revisit.
-    Re-runs of <code>pass.upass</code> after the import resolves clear the marker.</p>
+<p><em>(ex-<strong>2o</strong> — folded into <a class="xref" href="TODO_prp.html#item-1m">1m</a>, 2026-06-07.
+  The two-phase <code>upass/func_extract</code> + pending-import-poison +
+  SSA-flatten-gate machinery is dead: imports resolve only against
+  <em>completed</em> units in the export registry, and an unresolved live
+  import defers the <strong>whole file</strong> for an idempotent retry — no
+  partial-resolution state ever reaches bundle pre-pass or SSA.)</em></p>
 </li>
 <li>
 <p><strong id="item-2n" class="item-id">2n</strong> <code>tree_ios</code> leaf ABI with <code>min</code>/<code>max</code> slots,
-  mimicking <code>GraphIO</code> for consistency — <code>import.md §Function signatures</code>.
+  mimicking <code>GraphIO</code> for consistency — consumed by <code>tolg</code> Sub
+  instances (the 1u-A Pyrope-path Subs) and by import-bound
+  <code>mod</code>/<code>pipe</code>/non-inlined calls (<code>docs/contracts/task_1m_plan.md</code>).
   Downstream upasses (func_extract, constprop) read leaf IO via the ABI
   rather than poking into each LNAST.</p>
 </li>
@@ -276,27 +340,14 @@ cross-file dependencies stay visible.</p>
     <code>bits</code>/<code>min</code>/<code>max</code>/<code>sign</code> are what the ABI carries.</p>
 </li>
 <li>
-<p><strong id="item-2l" class="item-id">2l</strong> Enum support: parse <code>enum X = (l0, l1, l2)</code> and <code>enum X:Base = (...)</code>,
-  lower to LNAST as comptime-tagged tuples; value-assigned variants (<code>b=5</code>,
-  auto-increment after), the <code>in</code> operator (<code>x in Enum</code>), typed associated
-  values, and the inline-decl form (<code>const Color = enum(...)</code>).</p>
-</li>
-<li>Basic enums are nearly independent, but complex enums depend on
-    <a class="xref" href="TODO_prp.html#item-1k">1k</a> (<code>self</code> / <code>ref self</code>) since associated tuples carry
-    setters/methods — so this lands in Group 2.</li>
-<li>
-<p>Fixes failing comptime tests: <code>prp-enum_simple</code>, <code>prp-enum_hier</code>,
-    <code>prp-enum_color</code> (depends on <a class="xref" href="TODO_prp.html#item-1k">1k</a>), <code>prp-enum_types</code> (interplay
-    with <code>does</code>).</p>
-</li>
-<li>
 <p><strong id="item-2j" class="item-id">2j</strong> Function-scope closure-capture rule, <strong>import-aware case</strong>.
-  Companion to Group 1 <span class="xref xref-note" title="note: 1x">1x</span> which handles the no-import portion. The
-  pending-import path: when a referenced outer-scope name is tainted
-  by a pending import, do NOT inline; leave the ref intact and defer
-  the function from func_extract spawn until a re-run of <code>pass.upass</code>
-  (after import resolves) clears the taint. Depends on <a class="xref" href="TODO_prp.html#item-1m">1m</a> (import)
-  and <a class="xref" href="TODO_prp.html#item-2o">2o</a> (pending-import poison + bundle pre-pass).</p>
+  Companion to Group 1 <span class="xref xref-note" title="note: 1x">1x</span> which handles the no-import portion.
+  Under the 1m whole-file-retry model, func_extract never sees an
+  unresolved import (the file defers first), so the remaining work is
+  the capture rule itself: a nested function referencing an
+  outer-scope name bound to an imported read-only tuple captures it
+  like any const capture (value snapshot at extraction). Depends on
+  <a class="xref" href="TODO_prp.html#item-1m">1m</a> (import).</p>
 </li>
 </ul>
 <h2 id="group-3-depends-on-group-2">Group 3 — depends on Group 2</h2>
@@ -359,65 +410,13 @@ cross-file dependencies stay visible.</p>
   <code>inou/prp</code>, upass, and lgraph-pass diagnostics from
   <a href="TODO_livehd.html">TODO_livehd.md</a> <strong>3f</strong>.</li>
 </ul>
-<h2 id="failing-test-todo-mapping-snapshot-2026-06-01">Failing-test → TODO mapping (snapshot 2026-06-05)</h2>
-<p>Each <code>bazel test -c dbg //...</code> failure mapped to the TODO entry whose
-landing should fix it. When more than one entry is listed, the test
-needs all of them. Current verifier tally is shown as <code>pass/fail/unknown</code>.
-Tallies re-measured via the <code>prplib.py</code> comptime pipeline
-(<code>pass.upass constprop:1 verifier_pass:N verifier_fail:N
-[verifier_include_funcs:true]</code>).</p>
-<p><strong>Live suite = 6 fails</strong> across <code>//inou //upass //lnast //pass</code>, all comptime
-(enum + decorator + const-tuple-mut-field). The <code>tests/errors/</code> negative suite is
-fully green as of 2026-06-05 (<strong>1e</strong> complete and removed from Group 1).</p>
-<table>
-<thead>
-<tr>
-<th>Failing test</th>
-<th>now</th>
-<th>TODO entry</th>
-<th>What it still needs</th>
-</tr>
-</thead>
-<tbody>
-<tr>
-<td><code>prp-enum_color</code></td>
-<td>0/1/2</td>
-<td><a class="xref" href="TODO_prp.html#item-2l">2l</a>, <a class="xref" href="TODO_prp.html#item-1k">1k</a></td>
-<td>enum with associated setters/methods</td>
-</tr>
-<tr>
-<td><code>prp-enum_hier</code></td>
-<td>0/0/6</td>
-<td><a class="xref" href="TODO_prp.html#item-2l">2l</a></td>
-<td>nested / hierarchical enums</td>
-</tr>
-<tr>
-<td><code>prp-enum_simple</code></td>
-<td>0/0/9</td>
-<td><a class="xref" href="TODO_prp.html#item-2l">2l</a></td>
-<td>base enum parsing + comptime tags</td>
-</tr>
-<tr>
-<td><code>prp-enum_types</code></td>
-<td>0/0/0</td>
-<td><a class="xref" href="TODO_prp.html#item-2l">2l</a></td>
-<td>typed enum interplay with <code>does</code> (casserts unreached)</td>
-</tr>
-<tr>
-<td><code>prp-setter_complex</code></td>
-<td>2/2/0</td>
-<td><a class="xref" href="TODO_prp.html#item-1k">1k</a></td>
-<td>decorator-init implicit setter dispatch on <code>x:Tup = (…)</code></td>
-</tr>
-<tr>
-<td><code>prp-tuple_simple7</code></td>
-<td>—</td>
-<td>task 1t per-field modes</td>
-<td><code>tuple_set</code> tallies legal <code>mut</code>-field writes against the <code>const</code>
-  tuple root; needs <code>comp_type_tuple</code> per-field decl modes</td>
-</tr>
-</tbody>
-</table>
+<h2 id="failing-test-todo-mapping-snapshot-2026-06-06">Failing-test → TODO mapping (snapshot 2026-06-06)</h2>
+<p><strong>Live suite = fully green</strong> across <code>//inou //upass //lnast //pass</code>
+(237/237). The 2026-06-05 cluster — enum semantics (<strong>2l</strong>), decorator-init /
+<code>self</code> (<strong>1k</strong>), const-tuple-mut-field (<code>prp-tuple_simple7</code>) — has landed;
+both entries are complete and removed from Groups 1/2. The
+<code>tests/errors/</code> negative suite is also fully green
+(<strong>1e</strong> complete and removed from Group 1).</p>
 </main>
 <footer>Generated from <code>TODO_prp.md</code> — task badges link across files; ✎ marks reference notes.</footer>
 </body>

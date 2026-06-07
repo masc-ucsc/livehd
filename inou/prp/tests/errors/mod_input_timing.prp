@@ -1,0 +1,8 @@
+/*
+:name: mod_input_timing
+:type: error
+:error: inputs are at cycle 0 by definition
+:help: drop the
+*/
+
+mod f(a:u8@[1]) -> (x:u8@[0]) { x = a }   // locate_error_here

@@ -22,21 +22,9 @@
 // errors when multiple TUs include upass_constprop.hpp.
 static upass::uPass_plugin cprop("constprop", upass::uPass_wrapper<uPass_constprop>::get_upass);
 
-static constexpr std::string_view call_ref_arg_marker = "__ref_arg";
+static constexpr std::string_view call_ref_arg_marker  = "__ref_arg";
 // Task 1k — positional UFCS-receiver marker (see prp2lnast / upass_runner).
 static constexpr std::string_view call_ufcs_arg_marker = "__ufcs_arg";
-
-// Canonical-key shape detection after the bundle_sorted refactor. Defined
-// here (forward) so process_assign can use it for shape-preserving merge.
-static bool is_named_top(std::string_view first) {
-  if (first.empty()) {
-    return false;
-  }
-  if (first.front() == '_' || std::isdigit(static_cast<unsigned char>(first.front()))) {
-    return false;
-  }
-  return true;
-}
 
 // Coerce one value to its text-form Const. Mirrors Pyrope's `string()` cast:
 //   nil    → "nil"
@@ -88,8 +76,8 @@ static std::optional<Const> stringify_concat_trivials(const std::vector<Const>& 
 // base, `bpd` bits per digit, dropping leading zeros. Used by the `:b`/`:o`/
 // `:x`/`:X` interpolation specs so they share one two's-complement bit view.
 static std::string bits_to_grouped(std::string_view bits, int bpd, bool upper) {
-  static constexpr std::string_view lo = "0123456789abcdef";
-  static constexpr std::string_view hi = "0123456789ABCDEF";
+  static constexpr std::string_view lo     = "0123456789abcdef";
+  static constexpr std::string_view hi     = "0123456789ABCDEF";
   std::string_view                  digits = upper ? hi : lo;
   std::string                       padded;  // left-pad to a multiple of bpd
   if (int rem = static_cast<int>(bits.size()) % bpd; rem != 0) {
@@ -161,7 +149,7 @@ static std::string format_interp_value(const Const& v, std::string_view spec) {
     case 'o': return bits_to_grouped(v.to_binary(), 3, false);
     case 'x': return bits_to_grouped(v.to_binary(), 4, false);
     case 'X': return bits_to_grouped(v.to_binary(), 4, true);
-    default: upass::error("unsupported string-interpolation format spec ':{}' (expected one of b/o/x/X/d)\n", spec);
+    default : upass::error("unsupported string-interpolation format spec ':{}' (expected one of b/o/x/X/d)\n", spec);
   }
 }
 
@@ -190,7 +178,7 @@ Const uPass_constprop::apply_range_mask(const Const& value, const Const& start, 
   if (width->is_i() && width->to_i() < 0) {
     return *Dlop::create_integer(0);  // negative-width (empty) slice — degenerate
   }
-  auto mask  = one->shl_op(*width)->sub_op(*one)->shl_op(start);
+  auto mask = one->shl_op(*width)->sub_op(*one)->shl_op(start);
   return *value.get_mask_op(*mask);
 }
 
@@ -217,7 +205,10 @@ void uPass_constprop::check_unsigned_positive_overflow(std::string_view lhs, con
     return;
   }
 
-  auto msg = std::format("`{}` (value {}) does not fit its declared range [0, {}]", lhs, value.to_decimal_string(), it->second.to_decimal_string());
+  auto msg = std::format("`{}` (value {}) does not fit its declared range [0, {}]",
+                         lhs,
+                         value.to_decimal_string(),
+                         it->second.to_decimal_string());
   if (!pending_unsigned_overflow_msg_) {
     pending_unsigned_overflow_msg_ = msg;
   }
@@ -245,6 +236,16 @@ void uPass_constprop::process_assign() {
   move_to_child();
 
   auto lhs_text = current_text();
+
+  // 2d-reg — a store to a reg-declared name is a next-state (din) write:
+  // never bind it in the symbol table. Reads of the reg see the flop's q
+  // (Verilog `<=` semantics), not the value written this cycle, so folding
+  // the written value into later reads — or dropping the store because the
+  // value "is known" — corrupts the state machine. tolg consumes the store.
+  if (reg_decl_names_.contains(std::string(lhs_text))) {
+    move_to_parent();
+    return;
+  }
   move_to_sibling();
 
   if (is_type(Lnast_ntype::Lnast_ntype_ref)) {
@@ -400,6 +401,16 @@ void uPass_constprop::process_assign() {
         check_unsigned_positive_overflow(lhs_text, value);
       }
       store_trivial(lhs_text, value);
+    } else if (st.has_trivial(lhs_text) && st.in_uncertain_scope()) {
+      // 2d-reg — a RUNTIME-rhs write inside an uncertain if-arm: the LHS can
+      // no longer be claimed comptime-known. Comptime writes get invalidated
+      // on arm exit via record_uncertain_modification, but a runtime rhs
+      // never touched the varmap, so the stale pre-branch value would leak
+      // through fold_ref/classify — folding `if c { r = <runtime> }; out = r`
+      // down to the stale init and dropping the `out` store entirely.
+      // (Straight-line runtime reassignments don't need this: SSA versions
+      // them; branch bodies are copied verbatim, hence the uncertain gate.)
+      st.set(lhs_text, Symbol_table::invalid_lconst);
     }
   } else if (is_type(Lnast_ntype::Lnast_ntype_const)) {
     Const v = current_pyrope_value();
@@ -457,6 +468,21 @@ void uPass_constprop::process_declare() {
     return;
   }
   auto var = std::string(current_text());
+  // 2d-reg — record reg-declared names (mode const at child 2): their reads
+  // are runtime q reads that must never fold, and their stores are next-state
+  // din writes that must survive to tolg. Declare the name valueless in the
+  // symbol table so `q == nil` doesn't take the undeclared-ref fold.
+  {
+    const auto here = lm->save_cursor();
+    if (move_to_sibling() && move_to_sibling() && is_type(Lnast_ntype::Lnast_ntype_const)) {
+      auto mode = current_text();
+      if (mode == "reg" || mode.starts_with("reg ")) {
+        reg_decl_names_.insert(var);
+        st.var(var);
+      }
+    }
+    lm->restore_cursor(here);
+  }
   if (!move_to_sibling()) {
     move_to_parent();
     return;
@@ -725,8 +751,6 @@ void uPass_constprop::process_log_not() {
 //   - "__attr"          → attribute (covered by Bundle::is_attribute)
 //   - "0", "1", …       → unnamed (first char is a digit)
 //   - anything else     → named (bare name)
-// is_named_top forward-declared near the top of the file so
-// process_assign can call it during shape-preserving merge.
 
 // Bundle == result is *three-valued*:
 //   - std::nullopt        → can't decide (operand has unknowns)
@@ -847,40 +871,6 @@ static bool structural_does(const std::shared_ptr<Bundle const>& a, const std::s
   return true;
 }
 
-// Structural-only `a equals b` check.
-//
-// `equals` is "same positional shape, ignoring values and specific names":
-// at each top-level position, both sides must be named-or-both-unnamed.
-// Specific names on named slots and the values themselves don't have to
-// match. So `(x=1,d=4) equals (d=7,x=100)` is true (same shape: 2 named
-// slots), `(x=1,4) equals (d=4,100)` is true (named@0, unnamed@1 on both),
-// and `(x=1,4) !equals (100,d=4)` (shape differs: named@0/unnamed@1 vs
-// unnamed@0/named@1).
-static bool structural_equals(const std::shared_ptr<Bundle const>& a, const std::shared_ptr<Bundle const>& b) {
-  // Structural equality is:
-  //   - same SET of named-entry first-level names
-  //   - same SET of unnamed-entry first-level positions
-  // top_levels() yields one entry per first-level segment in canonical
-  // order, so a lockstep walk over the two views answers the question
-  // directly.
-  auto av = a->top_levels();
-  auto bv = b->top_levels();
-  if (av.size() != bv.size()) {
-    return false;
-  }
-  auto ita = av.begin();
-  auto itb = bv.begin();
-  for (; ita != av.end(); ++ita, ++itb) {
-    if (ita->pos != itb->pos) {
-      return false;
-    }
-    if (ita->name != itb->name) {
-      return false;
-    }
-  }
-  return true;
-}
-
 // process_eq / process_ne with bundle awareness. Falls back to the scalar
 // process_binary path when neither operand is a tracked bundle, so plain
 // integer compares are unchanged.
@@ -896,18 +886,13 @@ void uPass_constprop::process_eq_ne_impl() {
   // Resolve an operand to one of three states:
   //   - bundle: a tracked tuple (multi-entry or non-scalar wrapper)
   //   - scalar: a known Const (default is invalid; never zero)
-  //   - undeclared_ref: ref that was never declared in any reachable scope
   //   - is_const_nil: literal `nil` const
-  // is_const_nil + the OTHER side being undeclared lets us fold the pyrope
-  // semantic that an undeclared name reads as nil — narrowed to the
-  // `== nil` shape so casserts in function bodies prp2lnast still emits as
-  // top-level fdef siblings (scope2.prp's mytest body) don't fold against a
-  // synthesized nil and trip the verifier.
+  // (Reading an undeclared/out-of-scope name is a prp2lnast compile error —
+  // check_undefined_reads — so no undeclared-reads-as-nil folding here.)
   struct Operand {
     std::shared_ptr<Bundle const> bundle;
     Const                         scalar;
-    bool                          is_const_nil   = false;
-    bool                          undeclared_ref = false;
+    bool                          is_const_nil = false;
   };
   auto resolve = [this]() -> Operand {
     Operand o;
@@ -944,19 +929,13 @@ void uPass_constprop::process_eq_ne_impl() {
       } else if (runner_fold_fn) {
         // Cross-pass fallback: another pass (e.g. uPass_attributes folding
         // an `attr_get` destination) may have a concrete value for this
-        // ref even though constprop never assigned it. Consult before
-        // marking undeclared so eq/ne fold in the same walk the
-        // attribute pass produces the value.
+        // ref even though constprop never assigned it.
         auto v = runner_fold_fn(name);
         if (v && !v->is_invalid()) {
           o.scalar = *v;
-        } else if (!st.is_declared(name)) {
-          o.undeclared_ref = true;
         }
-      } else if (!st.is_declared(name)) {
-        o.undeclared_ref = true;
       }
-      // else: declared but no concrete value yet — leave scalar invalid.
+      // else: no concrete value yet — leave scalar invalid.
     } else {
       o.scalar       = current_pyrope_value();
       o.is_const_nil = o.scalar.is_nil();
@@ -971,13 +950,6 @@ void uPass_constprop::process_eq_ne_impl() {
   move_to_sibling();
   Operand b = resolve();
   move_to_parent();
-
-  if (a.undeclared_ref && b.is_const_nil) {
-    a.scalar = Dlop::nil();
-  }
-  if (b.undeclared_ref && a.is_const_nil) {
-    b.scalar = Dlop::nil();
-  }
 
   // Mixed nil propagation: exactly one operand is a known-nil scalar. The
   // result is nil (indeterminate) — typically because the var was
@@ -1158,7 +1130,88 @@ void uPass_constprop::process_stmts() {
   }
 }
 
-void uPass_constprop::process_stmts_post() { st.leave_scope(); }
+void uPass_constprop::process_stmts_post() {
+  // Task 1m — when the FILE-scope block is about to pop (stack is exactly
+  // [function, top-block]; nested arms/loops/inline frames sit deeper),
+  // capture the folded value of every `pub` value export into the Lnast's
+  // pub-values side channel. The kernel synthesizes the `<unit>.__pub`
+  // wrapper from it — the symbol table is the only place a fully-folded
+  // scalar lives (its const store is dropped from the materialized tree).
+  //
+  // Skipped when the unit is already published (a `<unit>.__pub` wrapper
+  // rides the loaded ln: dir — re-elaborating a loaded post-upass tree
+  // cannot re-fold values whose stores were dropped) and when THIS unit hit
+  // an unresolved import (it defers wholesale; erroring on a pub value that
+  // depends on the missing import would mask the defer).
+  if (st.stack.size() == 2 && !lm->get_lnast()->get_pub_list().empty()) {
+    const auto unit = std::string(lm->get_top_module_name());
+    // Already published: a loaded ln: dir carries the `<unit>.__pub` wrapper;
+    // an in-invocation completed unit carries stamped pub_values_. Either way
+    // a LATER round re-walks the materialized tree, where fully-folded const
+    // stores no longer exist — re-harvesting would spuriously fail.
+    bool skip = function_registry.contains(unit + ".__pub") || !lm->get_lnast()->get_pub_values().empty();
+    if (!skip) {
+      for (const auto& p : pending_imports_) {
+        if (p.unit == unit) {
+          skip = true;
+          break;
+        }
+      }
+    }
+    if (!skip) {
+      harvest_pub_values();
+    }
+  }
+  st.leave_scope();
+}
+
+void uPass_constprop::harvest_pub_values() {
+  const auto& ln = lm->get_lnast();
+
+  // A pub value must fold to a comptime constant when its file is elaborated
+  // (docs/contracts/task_1m_plan.md §1) — reject at the exporting side.
+  auto fail = [&](std::string_view name, std::string_view why) {
+    auto msg = std::format("pub `{}` of unit `{}` is not comptime-foldable ({})", name, ln->get_top_module_name(), why);
+    livehd::diag::sink().emit(livehd::diag::Diagnostic{.severity = livehd::diag::Severity::error,
+                                                       .code     = "pub-not-comptime",
+                                                       .category = "type",
+                                                       .pass     = "upass.constprop",
+                                                       .message  = msg,
+                                                       .hint = "a `pub const` initializer must fold to a comptime constant"});
+    throw std::runtime_error(msg);
+  };
+
+  std::vector<std::pair<std::string, std::string>> leaves;
+  for (const auto& p : ln->get_pub_list()) {
+    if (p.kind != "value") {
+      continue;  // lambda exports carry a tree url; nothing to fold
+    }
+    if (st.is_known_const(p.name)) {
+      leaves.emplace_back(p.name, st.get_trivial(p.name).to_pyrope());
+      continue;
+    }
+    if (st.has_bundle(p.name)) {
+      const auto b = st.get_bundle(p.name);
+      if (!b || b->non_attr_entries().empty()) {
+        fail(p.name, "empty or unresolved bundle");
+      }
+      for (const auto& [key, ep] : b->non_attr_entries()) {
+        const auto& v = ep->trivial;
+        if (v.is_invalid() || v.has_unknowns()) {
+          fail(p.name, key == "0" ? "not a known constant" : std::format("field `{}` is not a known constant", key));
+        }
+        if (key == "0") {  // trivial scalar slot — export under the bare name
+          leaves.emplace_back(p.name, v.to_pyrope());
+        } else {
+          leaves.emplace_back(absl::StrCat(p.name, ".", key), v.to_pyrope());
+        }
+      }
+      continue;
+    }
+    fail(p.name, "no comptime value");
+  }
+  lm->get_lnast()->set_pub_values(std::move(leaves));
+}
 
 // ── Tuple Operations ─────────────────────────────────────────────────────────
 //
@@ -1429,42 +1482,334 @@ static bool has_first_level_shape(const std::shared_ptr<Bundle const>& b) {
   return b->has_named_top() || b->has_unnamed_top();
 }
 
-// Fold `dst = does(l, r)`. Cursor is currently on the const("does") fname
-// node. Walks forward to read l and r, decides the structural outcome, and
-// stores the boolean (/*FIXME-LCONST-CTOR*/Lconst(0/1)) in the symbol table for `dst`.
-//
-// We only fold the structural half today, and we require at least one side
-// to be *clearly* tuple-shaped (named field or ≥2 positional fields). If
-// neither side proves it's a tuple (e.g. both are single-position scalar
-// wrappers), we can't decide the outcome without type info — leave the
-// result unresolved rather than fold to a wrong answer.
+// Task 1g — decode a primitive type token (`u32`/`s8`/`i4`/`int`/`integer`/
+// `uint`/`unsigned`/`bool`/`string`) in `does`/`equals`/`case` operand
+// position to its kind+envelope. prp2lnast leaves these as a bare ref (no read
+// site) precisely so this decode can run. Returns nullopt for any other name.
+std::optional<uPass_constprop::Does_operand> uPass_constprop::decode_prim_type_token(std::string_view name) {
+  Does_operand op;
+  if (name == "bool") {
+    op.kind = Does_operand::Kind::boolean;
+    op.min  = *Dlop::create_integer(-1);
+    op.max  = *Dlop::create_integer(0);
+    return op;
+  }
+  if (name == "string") {
+    op.kind = Does_operand::Kind::string;
+    return op;
+  }
+  const bool is_u = (name == "uint" || name == "unsigned");
+  const bool is_s = (name == "int" || name == "integer");
+  if (is_u || is_s) {
+    op.kind    = Does_operand::Kind::integer;
+    op.max_inf = true;  // unsized → unbounded above
+    if (is_u) {
+      op.min = *Dlop::create_integer(0);  // unsigned floor
+    } else {
+      op.min_inf = true;  // signed → unbounded below
+    }
+    return op;
+  }
+  // Width sugar `u<N>` / `s<N>` / `i<N>`: bounds from the bit count.
+  if (name.size() >= 2 && (name[0] == 'u' || name[0] == 's' || name[0] == 'i')
+      && std::all_of(name.begin() + 1, name.end(), [](unsigned char ch) { return std::isdigit(ch); })) {
+    const int n = std::stoi(std::string(name.substr(1)));
+    op.kind     = Does_operand::Kind::integer;
+    if (name[0] == 'u') {
+      op.min = *Dlop::create_integer(0);
+      op.max = *Dlop::get_mask_value(n);  // 2^n - 1
+    } else {
+      op.max = *Dlop::get_mask_value(n - 1);      // 2^(n-1) - 1
+      op.min = *Dlop::get_neg_mask_value(n - 1);  // -2^(n-1)
+    }
+    return op;
+  }
+  return std::nullopt;
+}
+
+std::shared_ptr<Bundle> uPass_constprop::single_positional_bundle(const Const& v) {
+  auto b = std::make_shared<Bundle>("__does_scalar");
+  b->set("0", v);
+  return b;
+}
+
+// Resolve the operand at the current cursor (a ref or const) for a type-aware
+// `does`/`equals`. nullopt means "undecidable this walk" — the caller defers.
+std::optional<uPass_constprop::Does_operand> uPass_constprop::resolve_does_operand() {
+  Does_operand op;
+  if (is_type(Lnast_ntype::Lnast_ntype_const)) {
+    auto txt = current_text();
+    if (txt == "nil") {
+      op.kind = Does_operand::Kind::nil;
+      return op;
+    }
+    if (txt == "true" || txt == "false") {
+      op.kind      = Does_operand::Kind::boolean;
+      op.min       = *Dlop::create_integer(-1);
+      op.max       = *Dlop::create_integer(0);
+      op.value     = *Dlop::create_bool(txt == "true");
+      op.has_value = true;
+      return op;
+    }
+    auto v = Dlop::from_pyrope(txt);
+    if (v->is_nil()) {
+      op.kind = Does_operand::Kind::nil;
+      return op;
+    }
+    if (v->is_string()) {
+      op.kind      = Does_operand::Kind::string;
+      op.value     = *v;
+      op.has_value = true;
+      return op;
+    }
+    if (v->is_bool()) {
+      op.kind      = Does_operand::Kind::boolean;
+      op.min       = *Dlop::create_integer(-1);
+      op.max       = *Dlop::create_integer(0);
+      op.value     = *v;
+      op.has_value = true;
+      return op;
+    }
+    if (v->is_integer()) {
+      // Literal `v` → the point envelope [v, v] (1g ruling).
+      op.kind      = Does_operand::Kind::integer;
+      op.max       = *v;
+      op.min       = *v;
+      op.value     = *v;
+      op.has_value = true;
+      return op;
+    }
+    return std::nullopt;  // unknown-bit / undecidable literal
+  }
+
+  if (!is_type(Lnast_ntype::Lnast_ntype_ref)) {
+    return std::nullopt;
+  }
+  auto name = current_text();
+  // A real variable wins over a type-token spelling — Pyrope allows a variable
+  // literally named `i3` (a 3-bit-signed type token) or `u8`. Gather the var's
+  // state first: a bundle, a folded scalar value, and the combined type query.
+  // Only when NONE of these identify a variable do we decode `name` as a
+  // primitive type literal (`u32`/`int`/`bool`/…) — the 1g operand form.
+  auto                            bundle = current_ref_bundle();
+  upass::uPass::Scalar_type_query q;
+  if (runner_type_query_fn) {
+    q = runner_type_query_fn(name);
+  }
+  // A tuple-shaped bundle (a named field, or ≥2 positional entries) is a real
+  // tuple. A scalar-wrapper bundle (`mut a:u32=3` stores `a` as `{0:3}`, a lone
+  // `(3)` single positional) is a scalar — its declared kind/envelope ride the
+  // type query, not the bundle shape.
+  const bool bundle_is_tuple = bundle && is_tuple_shaped(bundle);
+  Const      folded          = *Dlop::invalid();
+  if (bundle && !bundle_is_tuple && bundle->has_trivial()) {
+    folded = bundle->get_trivial();
+  } else if (st.has_trivial(name)) {
+    folded = st.get_trivial(name);
+  }
+  const bool is_known_var = bundle || !folded.is_invalid() || q.kind != Io_kind::none;
+  if (!is_known_var) {
+    if (auto t = decode_prim_type_token(name)) {
+      return t;
+    }
+  }
+  if (bundle_is_tuple) {
+    op.kind   = Does_operand::Kind::tuple;
+    op.bundle = bundle;
+    return op;
+  }
+  return build_scalar_operand(q, folded);
+}
+
+// Build a scalar Does_operand from a declared type query (kind + integer
+// envelope) plus an optional folded value. KIND comes from the query first
+// (typecheck infers bool vs int even for un-annotated vars); when the query is
+// silent it falls back to the value's own Dlop type. An un-annotated integer
+// reads as an unbounded envelope (superset of any int). Stays kind=unknown
+// when nothing is known (caller defers).
+uPass_constprop::Does_operand uPass_constprop::build_scalar_operand(const upass::uPass::Scalar_type_query& q,
+                                                                    const Const&                           folded) {
+  Does_operand op;
+  if (!folded.is_invalid()) {
+    op.value     = folded;
+    op.has_value = true;
+  }
+  switch (q.kind) {
+    case Io_kind::boolean:
+      op.kind = Does_operand::Kind::boolean;
+      op.min  = *Dlop::create_integer(-1);
+      op.max  = *Dlop::create_integer(0);
+      return op;
+    case Io_kind::string: op.kind = Does_operand::Kind::string; return op;
+    case Io_kind::integer:
+      op.kind = Does_operand::Kind::integer;
+      if (q.annotated) {
+        op.max_inf = !q.range_max.has_value();
+        op.min_inf = !q.range_min.has_value();
+        if (q.range_max) {
+          op.max = *q.range_max;
+        }
+        if (q.range_min) {
+          op.min = *q.range_min;
+        }
+      } else {
+        // Un-annotated integer var → unbounded (superset of any int).
+        op.max_inf = true;
+        op.min_inf = true;
+      }
+      return op;
+    case Io_kind::none: break;
+  }
+  // Kind unknown from the type passes — last resort: infer from the folded
+  // value's own Dlop type (handles `nil`-valued vars). Stays kind=unknown
+  // (→ the caller defers) when nothing is known.
+  if (op.has_value) {
+    if (folded.is_nil()) {
+      op.kind = Does_operand::Kind::nil;
+    } else if (folded.is_string()) {
+      op.kind = Does_operand::Kind::string;
+    } else if (folded.is_bool()) {
+      op.kind = Does_operand::Kind::boolean;
+      op.min  = *Dlop::create_integer(-1);
+      op.max  = *Dlop::create_integer(0);
+    } else if (folded.is_integer()) {
+      op.kind    = Does_operand::Kind::integer;
+      op.max_inf = true;  // untyped → unbounded
+      op.min_inf = true;
+    }
+  }
+  return op;
+}
+
+// Resolve one field of a bundle for the per-field type check (1g-D). The
+// declared type rides the dotted query (`bundle_name.field` — the same alias
+// chase the 1k typed-self does-check uses); a nested sub-bundle becomes a
+// tuple operand. nullopt when the bundle has no resolvable name (e.g. a
+// coerced literal) and the field carries no value.
+std::optional<uPass_constprop::Does_operand> uPass_constprop::resolve_field_operand(const Bundle& b, std::string_view field,
+                                                                                   bool declared_only) {
+  if (b.has_bundle(field)) {
+    if (auto sub = b.get_bundle(field); sub && !sub->is_scalar()) {
+      Does_operand op;
+      op.kind   = Does_operand::Kind::tuple;
+      op.bundle = sub;
+      return op;
+    }
+  }
+  upass::uPass::Scalar_type_query q;
+  auto                            base = b.get_name();
+  if (runner_type_query_fn && !base.empty() && base != "__does_scalar") {
+    q = runner_type_query_fn(absl::StrCat(base, ".", field));
+  }
+  if (declared_only && q.kind == Io_kind::none) {
+    return std::nullopt;  // untyped field — no type constraint to enforce
+  }
+  Const folded = b.has_trivial(field) ? b.get_trivial(field) : *Dlop::invalid();
+  if (q.kind == Io_kind::none && folded.is_invalid()) {
+    return std::nullopt;
+  }
+  return build_scalar_operand(q, folded);
+}
+
+// Tri-state kind+envelope `a does b` for two NON-tuple operands. nullopt =
+// undecidable this walk.
+std::optional<bool> uPass_constprop::scalar_does(const Does_operand& a, const Does_operand& b) {
+  using Kind = Does_operand::Kind;
+  // `x does nil` is true for any non-tuple x (1g ruling). nil on the LHS, or
+  // tuple-vs-nil, is deferred (pinned as future behavior).
+  if (b.kind == Kind::nil) {
+    return true;  // a is non-tuple here (tuple path handled by the caller)
+  }
+  if (a.kind == Kind::nil) {
+    return std::nullopt;  // nil does <concrete>: pinned — defer
+  }
+  if (a.kind == Kind::unknown || b.kind == Kind::unknown || a.kind == Kind::tuple || b.kind == Kind::tuple) {
+    return std::nullopt;  // kind unset, or a scalar-wrapper bundle → can't decide
+  }
+  // Across kinds the kind is a difference flag → false (`int does bool`,
+  // `string does int`, …).
+  if (a.kind != b.kind) {
+    return false;
+  }
+  if (a.kind == Kind::string || a.kind == Kind::boolean) {
+    return true;  // same basic type of boolean/string → true
+  }
+  // Both integer: envelope superset `a.max>=b.max and a.min<=b.min`, with
+  // ±∞ flags short-circuiting the finite Const compares.
+  I(a.kind == Kind::integer);
+  bool max_ok = a.max_inf || (!b.max_inf && a.max.ge_op(b.max)->is_known_true());
+  bool min_ok = a.min_inf || (!b.min_inf && a.min.le_op(b.min)->is_known_true());
+  return max_ok && min_ok;
+}
+
+// Tri-state `a does b` for any two resolved operands. Structural (tuple) path
+// when a side is a real tuple (named field or ≥2 positional), coercing the
+// other side — a real tuple as-is, a value-bearing scalar to a single-
+// positional bundle (`(100,30) does 30`). A type-token / value-less operand
+// against a tuple can't be coerced → undecidable. Otherwise the kind+envelope
+// scalar rule decides.
+std::optional<bool> uPass_constprop::compute_does(const Does_operand& a, const Does_operand& b) {
+  const bool a_tuple = (a.kind == Does_operand::Kind::tuple) && is_tuple_shaped(a.bundle);
+  const bool b_tuple = (b.kind == Does_operand::Kind::tuple) && is_tuple_shaped(b.bundle);
+  if (a_tuple || b_tuple) {
+    auto to_bundle = [](const Does_operand& o) -> std::shared_ptr<Bundle const> {
+      if (o.kind == Does_operand::Kind::tuple) {
+        return o.bundle;
+      }
+      if (o.has_value) {
+        return single_positional_bundle(o.value);
+      }
+      return nullptr;
+    };
+    auto ba = to_bundle(a);
+    auto bb = to_bundle(b);
+    if (!ba || !bb || !has_first_level_shape(ba) || !has_first_level_shape(bb)) {
+      return std::nullopt;
+    }
+    if (!structural_does(ba, bb)) {
+      return false;  // shape: a must cover every top-level field of b
+    }
+    // Per-field types (1g-D): for each top-level field of b that a also has,
+    // `a.field does b.field`. A KNOWN field-type mismatch makes the whole
+    // `does` false; an undecidable field is ignored (shape already matched —
+    // this only adds rejection power, never removes it). `(a=1) does
+    // (a:u32=…)` thus stops silently ignoring the `:u32`.
+    for (const auto& tb : bb->top_levels()) {
+      std::string key = tb.pos < 0 ? std::string(tb.name) : std::to_string(tb.pos);
+      auto        fa  = resolve_field_operand(*ba, key, /*declared_only=*/true);
+      auto        fb  = resolve_field_operand(*bb, key, /*declared_only=*/true);
+      if (fa && fb) {
+        if (auto r = compute_does(*fa, *fb); r && !*r) {
+          return false;
+        }
+      }
+    }
+    return true;
+  }
+  return scalar_does(a, b);
+}
+
+// Fold `dst = does(l, r)`. Cursor is on the does node's first child (dst ref);
+// reads l and r as Does_operands and stores the boolean result. Leaves the
+// result unresolved when a side is undecidable.
 //
 // On exit the cursor is left on whichever child we last visited; the caller
-// (process_func_call) is responsible for `move_to_parent`.
+// (process_func_does) is responsible for `move_to_parent`.
 void uPass_constprop::fold_does(const std::string& dst) {
   if (!move_to_sibling()) {
     return;
   }
-  auto ba = current_ref_bundle();
+  auto a = resolve_does_operand();
   if (!move_to_sibling()) {
     return;
   }
-  auto bb = current_ref_bundle();
-
-  // Both sides need at least a recognisable first-level shape; otherwise
-  // structural matching has nothing to compare.
-  if (!ba || !bb || !has_first_level_shape(ba) || !has_first_level_shape(bb)) {
+  auto b = resolve_does_operand();
+  if (!a || !b) {
     return;
   }
-  // At least one side must prove it's a real tuple, otherwise scalar-vs-
-  // scalar would over-fold (e.g. `b1 does i2` where both are scalar
-  // wrappers). The structural check itself handles the asymmetry once one
-  // side is known-tuple.
-  if (!is_tuple_shaped(ba) && !is_tuple_shaped(bb)) {
-    return;
+  if (auto r = compute_does(*a, *b)) {
+    store_trivial(dst, *Dlop::create_bool(*r));
   }
-
-  store_trivial(dst, *Dlop::create_bool(structural_does(ba, bb)));
 }
 
 // Per-first-level summary used by fold_in / fold_has: groups a bundle's flat
@@ -1738,10 +2083,13 @@ void uPass_constprop::fold_case(const std::string& dst) {
   // `sel case 0b10` (scalar vs scalar literal) folds the same way as the
   // bundle/bundle path. Returns nullopt when the value isn't decidable yet
   // (undeclared ref / no trivial value) so we can defer.
-  auto resolve_flat = [this]() -> std::optional<std::vector<Bundle_flat_entry>> {
+  // Out-param `b` captures the operand's bundle (for the per-field type check,
+  // 1g-D); left null for scalar/const operands.
+  auto resolve_flat = [this](std::shared_ptr<Bundle const>& b) -> std::optional<std::vector<Bundle_flat_entry>> {
     if (is_type(Lnast_ntype::Lnast_ntype_ref)) {
-      if (auto b = current_ref_bundle()) {
-        return collect_first_level(b);
+      if (auto bun = current_ref_bundle()) {
+        b = bun;
+        return collect_first_level(bun);
       }
       auto name = current_text();
       if (st.has_trivial(name)) {
@@ -1761,14 +2109,16 @@ void uPass_constprop::fold_case(const std::string& dst) {
     return std::nullopt;
   };
 
+  std::shared_ptr<Bundle const> lhs_bundle;  // subject
+  std::shared_ptr<Bundle const> rhs_bundle;  // pattern
   if (!move_to_sibling()) {
     return;
   }
-  auto lhs_opt = resolve_flat();
+  auto lhs_opt = resolve_flat(lhs_bundle);
   if (!move_to_sibling()) {
     return;
   }
-  auto rhs_opt = resolve_flat();
+  auto rhs_opt = resolve_flat(rhs_bundle);
   if (!lhs_opt || !rhs_opt) {
     return;
   }
@@ -1811,6 +2161,22 @@ void uPass_constprop::fold_case(const std::string& dst) {
     if (lmatch == nullptr) {
       store_trivial(dst, *Dlop::create_bool(false));
       return;
+    }
+
+    // Typed `case` (1g-D): when both sides carry a declared field type, the
+    // pattern type must be satisfied — `subject.field does pattern.field`. A
+    // KNOWN type mismatch (e.g. subject `a:u32` vs pattern `a:bool`) is a
+    // definite false even if the values would match a wildcard.
+    if (lhs_bundle && rhs_bundle) {
+      std::string key = re.name.empty() ? std::to_string(re.pos) : std::string(re.name);
+      auto        fa  = resolve_field_operand(*lhs_bundle, key, /*declared_only=*/true);
+      auto        fb  = resolve_field_operand(*rhs_bundle, key, /*declared_only=*/true);
+      if (fa && fb) {
+        if (auto r = compute_does(*fa, *fb); r && !*r) {
+          store_trivial(dst, *Dlop::create_bool(false));
+          return;
+        }
+      }
     }
 
     if (lmatch->is_sub_bundle || lmatch->value.is_invalid()) {
@@ -1990,23 +2356,31 @@ void uPass_constprop::process_func_does() {
 }
 
 void uPass_constprop::process_func_equals() {
+  // `a equals b` ≡ `(a does b) and (b does a)`, types included (1g). For two
+  // tuples this reduces to structural_equals (same set of top-level keys);
+  // for scalars it means identical kind+envelope. Undecidable on either side
+  // leaves the result unresolved.
   move_to_child();
   std::string dst(current_text());
   if (!move_to_sibling()) {
     move_to_parent();
     return;
   }
-  auto ba = current_ref_bundle();
+  auto a = resolve_does_operand();
   if (!move_to_sibling()) {
     move_to_parent();
     return;
   }
-  auto bb = current_ref_bundle();
+  auto b = resolve_does_operand();
   move_to_parent();
-  if (!ba || !bb) {
+  if (!a || !b) {
     return;
   }
-  store_trivial(dst, Dlop::create_bool(structural_equals(ba, bb)));
+  auto ab = compute_does(*a, *b);
+  auto ba = compute_does(*b, *a);
+  if (ab && ba) {
+    store_trivial(dst, *Dlop::create_bool(*ab && *ba));
+  }
 }
 
 void uPass_constprop::process_func_in() {
@@ -2361,6 +2735,147 @@ bool uPass_constprop::try_eval_cell_call(std::string_view dst, std::string_view 
   return true;
 }
 
+// Task 1m — resolve a live `import("…")` call against the function registry
+// (docs/contracts/task_1m_plan.md §1/§2). The cursor sits on the const
+// "import" callee; the next sibling is the const import string.
+//
+//   import("unit")        — the whole pub tuple: bind `dst` to a namespace
+//                           bundle (value leaves + lambda tree-name strings,
+//                           each lambda field carrying a `__pub` kind attr).
+//   import("ln:u.tree")   — direct tree ref: bind `dst` to the tree-name
+//                           string 'u.tree' (the fcall-ref-const lambda-value
+//                           form; `equals` compares these strings — tree-url
+//                           identity).
+//   import("lg:graph")    — black-box graph ref (task 1m-E lowers the call
+//                           sites at tolg); bound as the string 'lg:graph'.
+//
+// Resolution consults only the registry (completed in-invocation units +
+// loaded ln: forests). A miss records a pending import — pass.upass either
+// errors (standalone) or defers the file to the kernel's iterate loop.
+void uPass_constprop::process_import_call(const std::string& dst) {
+  if (!move_to_sibling()) {
+    return;  // malformed call (no argument) — leave unfolded
+  }
+  std::string text(lm->current_raw_text());
+  if (text.size() >= 2 && (text.front() == '\'' || text.front() == '"') && text.back() == text.front()) {
+    text = text.substr(1, text.size() - 2);
+  }
+  if (text.empty()) {
+    return;
+  }
+  auto pend = [&]() { pending_imports_.push_back({std::string(lm->get_top_module_name()), text}); };
+  auto str_const = [](std::string_view s) { return *Dlop::from_pyrope(absl::StrCat("'", s, "'")); };
+
+  if (text.starts_with("ln:")) {
+    // Whole remaining string = the tree name, verbatim (may contain dots).
+    const std::string tree = text.substr(3);
+    if (!function_registry.count(tree)) {
+      pend();
+      return;
+    }
+    store_trivial(dst, str_const(tree));
+    return;
+  }
+  if (text.starts_with("lg:")) {
+    // Bind the url itself; the call sites lower to Sub instances at tolg
+    // (task 1m-E wires the GraphLibrary lookup + missing-graph diagnostics).
+    store_trivial(dst, str_const(text));
+    return;
+  }
+
+  // Tuple form — the unit's whole pub namespace.
+  auto build_namespace = [&](std::string_view                                        unit,
+                             const std::vector<std::pair<std::string, std::string>>& values,
+                             const std::vector<Lnast_pub_entry>&                     pubs) {
+    auto b = std::make_shared<Bundle>(dst);
+    for (const auto& [path, val_text] : values) {
+      b->set(path, *Dlop::from_pyrope(val_text));
+    }
+    for (const auto& p : pubs) {
+      if (p.kind == "value") {
+        continue;
+      }
+      b->set(p.name, str_const(absl::StrCat(unit, ".", p.name)));
+      b->set_attr(p.name, "pub", str_const(p.kind));
+    }
+    // Marks "import namespace" (the runner's UFCS check exempts these; the
+    // read-only guarantee rides the importing `const` declaration).
+    b->set_attr("pub_unit", str_const(unit));
+    st.set(dst, b);
+  };
+
+  // Cross-invocation: a loaded `<unit>.__pub` wrapper tree (the durable pub
+  // list). Walk its synthesized shape: store(ref path, const text) leaves +
+  // attr_set(ref name, '__pub', '<kind>') lambda markers.
+  if (auto wit = function_registry.find(text + ".__pub"); wit != function_registry.end()) {
+    const auto&                                      w = wit->second;
+    std::vector<std::pair<std::string, std::string>> values;
+    std::vector<Lnast_pub_entry>                     pubs;
+    auto                                             root = w->get_root();
+    for (auto stmts : w->children(root)) {
+      if (!Lnast_ntype::is_stmts(w->get_type(stmts))) {
+        continue;
+      }
+      for (auto stmt : w->children(stmts)) {
+        auto c0 = w->get_first_child(stmt);
+        if (c0.is_invalid()) {
+          continue;
+        }
+        auto c1 = w->get_sibling_next(c0);
+        if (c1.is_invalid()) {
+          continue;
+        }
+        if (Lnast_ntype::is_attr_set(w->get_type(stmt)) && w->get_name(c1) == "__pub") {
+          auto c2 = w->get_sibling_next(c1);
+          if (!c2.is_invalid()) {
+            std::string kind(w->get_name(c2));
+            if (kind.size() >= 2 && kind.front() == '\'' && kind.back() == '\'') {
+              kind = kind.substr(1, kind.size() - 2);
+            }
+            pubs.push_back({std::string(w->get_name(c0)), kind});
+          }
+          continue;
+        }
+        if (Lnast_ntype::is_store(w->get_type(stmt))) {
+          std::string val(w->get_name(c1));
+          // A lambda url leaf ('ln:u.tree') is re-bound by the pubs loop
+          // (tree-name string); skip it here.
+          if (val.starts_with("'ln:")) {
+            continue;
+          }
+          values.emplace_back(std::string(w->get_name(c0)), std::move(val));
+        }
+      }
+    }
+    build_namespace(text, values, pubs);
+    return;
+  }
+
+  // Same-invocation: the source unit publishes through its Lnast side
+  // channels — pub_list_ from the parse, pub_values_ stamped by THIS pass
+  // when the unit's file-scope walk completed. Values still pending →
+  // defer (whole-file retry once the exporter finishes).
+  if (auto uit = function_registry.find(text); uit != function_registry.end() && uit->second->get_lambda_kind().empty()) {
+    const auto& src  = uit->second;
+    const auto& pubs = src->get_pub_list();
+    bool        needs_values = false;
+    for (const auto& p : pubs) {
+      if (p.kind == "value") {
+        needs_values = true;
+        break;
+      }
+    }
+    if (needs_values && src->get_pub_values().empty()) {
+      pend();  // exporter not yet completed this invocation
+      return;
+    }
+    build_namespace(text, src->get_pub_values(), pubs);
+    return;
+  }
+
+  pend();  // no matching unit among the explicit inputs
+}
+
 void uPass_constprop::process_func_call() {
   // Layout: ref(dst), ref(func_name), (const|ref)(arg)...
   // Now strictly the ref-form (built-in typecast callables and user funcs).
@@ -2376,7 +2891,18 @@ void uPass_constprop::process_func_call() {
 
   if (!is_type(Lnast_ntype::Lnast_ntype_ref)) {
     // Const-form callee (`import`, `step`, `implies` — see prp2lnast's
-    // make_call). `a..=b step s` has no dedicated LNAST op yet; its step
+    // make_call).
+    //
+    // Task 1m — a live `import("…")` resolves here (dead branches never
+    // dispatch, so liveness is exactly "we got here"): the tuple form binds
+    // a pub-namespace bundle, the `ln:` url form a lambda tree-name string.
+    // Unresolved → recorded for pass.upass (error or kernel defer).
+    if (lm->current_raw_text() == "import") {
+      process_import_call(dst);
+      move_to_parent();
+      return;
+    }
+    // `a..=b step s` has no dedicated LNAST op yet; its step
     // amount must be a positive integer (ranges only ascend — see the
     // descending-range check in process_range), so diagnose a comptime
     // non-positive step here even though the call itself stays unfolded.
@@ -3126,10 +3652,48 @@ upass::Emit_decision uPass_constprop::classify_statement() {
     return upass::Emit_decision::emit_node();
   }
 
+  // 2d-reg — writes to reg-declared names are next-state din writes; the
+  // write itself is the payload (process_assign never binds them, so the ST
+  // can't hold a value — this guard is belt-and-braces against stale state).
+  if (reg_decl_names_.contains(lhs_text)) {
+    return upass::Emit_decision::emit_node();
+  }
+
   // Drop iff the ST holds a fully-known value. is_known_const() encapsulates
   // has_trivial + is_invalid + has_unknowns in one call.
   if (!st.is_known_const(lhs_text)) {
     return upass::Emit_decision::emit_node();
+  }
+
+  // RHS-aware guard: keep a 2-child `store(lhs, rhs)` whose RHS is a ref that
+  // is NOT a genuine folded constant — i.e. either has no comptime value (a
+  // runtime producer) or holds `nil` (an unset/poison marker). process_assign
+  // cannot propagate such a RHS, so `lhs` keeps whatever it held before, and
+  // the is_known_const check above may be true only because of a *stale* value
+  // this very store was meant to overwrite. Dropping the store then loses the
+  // write. This is the 1i comb-inliner bug: the inliner seeds a scalar output
+  // `<tag>out = nil`, the body assigns it a runtime value (`store(<tag>out,
+  // ___mult)`, ___mult = `a*b` over module inputs), so both stay nil; the seed
+  // is then aliased down the epilogue chain (`___ret = <tag>out`) and into the
+  // caller's `store(out, ___ret)` (out a reg/boundary write). is_nil() passes
+  // is_known_const (it is neither invalid nor unknown, to_pyrope() `0`), so
+  // every link looked "known" and was dropped — leaving the output undriven
+  // (`out = 0`). Keeping the store wherever the RHS is nil-flavored or
+  // runtime preserves the chain so the real value lands. A genuine non-nil
+  // folded RHS is faithfully recovered by fold_ref at the consumer, so
+  // dropping it stays safe (and comptime nil==nil folding is untouched: that
+  // happens in fold_ref, not here).
+  {
+    const auto here = lm->save_cursor();
+    bool       keep = false;
+    if (lm->current_num_children() == 2 && move_to_child() && move_to_sibling() && is_type(Lnast_ntype::Lnast_ntype_ref)) {
+      const auto rhs = current_text();
+      keep           = !st.is_known_const(rhs) || (st.has_trivial(rhs) && st.get_trivial(rhs).is_nil());
+    }
+    lm->restore_cursor(here);
+    if (keep) {
+      return upass::Emit_decision::emit_node();
+    }
   }
 
   // Bundle-shape guard. is_known_const returns true as soon as the bundle's

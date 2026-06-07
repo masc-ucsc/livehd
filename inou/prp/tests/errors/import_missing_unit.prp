@@ -1,0 +1,13 @@
+/*
+:name: import_missing_unit
+:type: error
+:error: blocked on unresolved import
+:help: missing unit
+*/
+
+// Task 1m — a live import with no matching unit among the explicit inputs
+// is a hard error naming the import string and the searched inputs
+// (docs/contracts/task_1m_plan.md §2/§9).
+
+const b = import("nowhere")
+cassert(b.x == 1)

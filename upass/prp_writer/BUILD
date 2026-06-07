@@ -23,6 +23,7 @@ cc_test(
         ":upass_prp_writer",
         "//inou/prp:inou_prp",
         "//upass/constprop:upass_constprop",
+        "//upass/noop:upass_noop",
         "//upass/runner:upass_runner",
         "@googletest//:gtest_main",
     ],

@@ -1,0 +1,15 @@
+/*
+:name: mod_mixed_out
+:type: equiv
+:verilog_top: mod_mixed_out.mix
+:pyrope_top: mod_mixed_out.mix
+*/
+
+const capture_val = 1
+
+const capture_delay = 2
+
+mod mix(a:u8) -> (x:u8@[0], y:u8@[capture_delay]) {
+  x = a + capture_val
+  stage[capture_delay] y = a
+}

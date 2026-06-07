@@ -1,7 +1,7 @@
 /*
 :name: trivial_if
 :type: comptime
-:verifier_pass: 7
+:verifier_pass: 6
 :verifier_fail: 0
 */
 
@@ -16,17 +16,17 @@ c = 100 when false
 cassert(c == 1)
 
 mut c2 = 3 when false
-cassert(c2 == nil)
+cassert(c2 == nil) // gated decl hoists to this scope; the gate was false
 
 mut c3 = 4 when true
 cassert(c3 == 4)
 
-if false {
-  mut d = 3
-}
-cassert(d == nil)
 if true {
   mut d = 4
   cassert(d == 4)
 }
-cassert(d == nil)
+// NOTE: reading `d` here would be a compile error (if-arm locals are not
+// visible outside the arm) — see tests/errors/if_arm_scope_read.prp.
+
+mut d = 5 // a fresh top-level `d` is fine: the arm-local one is gone
+cassert(d == 5)

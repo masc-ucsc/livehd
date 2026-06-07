@@ -76,10 +76,10 @@ Signal classification: `clock`, `reset` mark a declared wire/input as a
 clock or reset signal, e.g. `clk::[clock]`.
 Debug / sticky visibility: `debug` / `_debug` and any user `_*` sticky attr
 propagate through upass and remain visible to LGraph generation.
-Flop/register pins: `async`, `initial`, `clock_pin`, `din`, `enable`,
+Flop/register pins: `async`, `init`, `clock_pin`, `din`, `enable`,
 `negreset`, `posclk`, `reset_pin`.
 Latch pins: `din`, `enable`, `posclk`.
-Fluid-flop pins: `valid`, `initial`, `clock_pin`, `din`, `stop`, `reset_pin`.
+Fluid-flop pins: `valid`, `init`, `clock_pin`, `din`, `stop`, `reset_pin`.
 Pipestage: `lat`, `num`.
 Memory: `addr`, `bits` (entry width), `clock_pin`, `din`, `enable`, `fwd`,
 `posclk`, LGraph object `type` (`0`: async, `1`: sync, `2`: array),
@@ -642,9 +642,9 @@ class.
   | LGraph op | Attribute / pin names |
   | --- | --- |
   | `Memory` | `addr`, `bits`, `clock_pin`, `din`, `enable`, `fwd`, `posclk`, LGraph object `type`, `wensize`, `size`, `rdport` |
-  | `Flop` | `async`, `initial`, `clock_pin`, `din`, `enable`, `negreset`, `posclk`, `reset_pin` |
+  | `Flop` | Pyrope `init` maps to LGraph pin `initial`; `async`, `clock_pin`, `din`, `enable`, `negreset`, `posclk`, `reset_pin` keep the same spelling |
   | `Latch` | `din`, `enable`, `posclk` |
-  | `Fflop` | `valid`, `initial`, `clock_pin`, `din`, `stop`, `reset_pin` (`valid` is listed for LGraph compatibility; Pyrope-level valid semantics are deferred) |
+  | `Fflop` | Pyrope `init` maps to LGraph pin `initial`; `valid`, `clock_pin`, `din`, `stop`, `reset_pin` keep the same spelling (`valid` is listed for LGraph compatibility; Pyrope-level valid semantics are deferred) |
 - Other category-B attrs need per-attribute lowering rules rather than a shared
   "preserve attr_set" representation.
 
@@ -724,4 +724,3 @@ A new `upass/attributes/` micro-pass module with phases 1, 3, 5, 6, 7
 implemented as in-order steps within the upass runner. Phase 2 stays in
 `upass/constprop/` (extended to evaluate `.[attr]` reads). Phase 4 stays
 in `upass/` Slice 6 territory (extended with the lowering rules above).
-

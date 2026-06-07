@@ -43,7 +43,7 @@ class Pin_handler : public Attribute_handler {};
 class Signal_class_handler : public Attribute_handler {};
 
 // Mode-selection handler: posclk / async / negreset / type (memory) /
-// initial. Per spec these must be comptime-known; process_attr_set's
+// init. Per spec these must be comptime-known; process_attr_set's
 // shared path stores them as Const values, which means a non-comptime
 // expression operand becomes Dlop::invalid() and is silently dropped
 // today. A future tightening can fail loudly here once the cassert
@@ -71,7 +71,7 @@ void uPass_attributes_register_wiring(uPass_attributes& self) {
   }
   // Mode / structural attributes (must be comptime-known; LGraph generation
   // bakes them into the node mode / pin shape).
-  for (const char* name : {"posclk", "async", "initial", "negreset", "valid", "stop", "defer"}) {
+  for (const char* name : {"posclk", "async", "init", "negreset", "valid", "stop", "defer"}) {
     reg.register_exact(name, mode);
   }
 }

@@ -1,0 +1,12 @@
+/*
+:name: attribute_clk_renamed
+:type: error
+:error: not a Pyrope attribute name
+:help: clock_pin
+*/
+
+// `clk` is a common wire NAME, not an attribute — picking a register's
+// clock is `clock_pin=ref <wire>`; classifying a signal is `c::[clock]`.
+
+mut c = false
+reg r:u8:[clk=ref c] = 0  // locate_error_here

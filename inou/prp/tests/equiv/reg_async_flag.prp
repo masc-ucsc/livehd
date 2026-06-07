@@ -1,0 +1,19 @@
+/*
+:name: reg_async_flag
+:type: equiv
+:reset_style: async
+:verilog_top: reg_async_flag.counter
+:pyrope_top: reg_async_flag.counter
+*/
+
+// 2d-reg — the `upass.reset_style=async` elaboration flag (via the
+// :reset_style: header tag): the implicit reset wires asynchronously, so
+// the golden asserts the async always-block for the same counter the
+// sync-default mod_counter test checks.
+mod counter(enable:bool) -> (count:u8@[0]) {
+  reg count_r:u8 = 0
+  if enable and count_r < 200 {
+    count_r = count_r + 1
+  }
+  count = count_r
+}

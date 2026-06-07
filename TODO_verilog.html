@@ -90,7 +90,7 @@ footer { max-width:920px; margin:0 auto; padding:0 1.25rem 3rem;
 </style>
 </head>
 <body>
-<nav><span class="brand">LiveHD TODO</span><a class="" href="TODO.html">Overview</a><a class="" href="TODO_prp.html">Pyrope</a><a class="active" href="TODO_verilog.html">Verilog</a><a class="" href="TODO_livehd.html">LiveHD</a><a class="" href="TODO_hhds.html">HHDS</a></nav>
+<nav><span class="brand">LiveHD TODO</span><a class="" href="TODO.html">Overview</a><a class="" href="TODO_prp.html">Pyrope</a><a class="" href="TODO_mod.html">Mod</a><a class="active" href="TODO_verilog.html">Verilog</a><a class="" href="TODO_livehd.html">LiveHD</a><a class="" href="TODO_hhds.html">HHDS</a></nav>
 <main>
 <h1 id="todo-verilog-inputoutput">TODO — Verilog input/output</h1>
 <p>Pending work on Verilog ingress (yosys-based parsing into LGraph) and
@@ -112,14 +112,16 @@ and <a href="TODO_hhds.html">TODO_hhds.md</a>, so cross-file dependencies stay v
   - <strong>Registers / <code>defer</code></strong> → <code>Flop</code> (reset/clock pin defaults, last-write-wins
     <code>din</code> + OR-of-conditions <code>enable</code>). Needs <a class="xref" href="TODO_prp.html#item-3j">3j</a>'s declare-folding (init/reset
     value bound on the <code>declare</code> node so it survives to <code>Flop</code>/<code>Memory</code>).
+    The register slice is planned in detail as <a class="xref" href="TODO_mod.html#item-2d-reg">2d-reg</a>
+    (decided 2026-06-07; <code>defer</code>/<code>past[n]</code> stay here).
   - <strong><code>Memory</code></strong> for persistent indexed <code>reg</code> arrays (one Memory per logical
     storage, 11-pin port stride).
   - <strong>High-level op lowering</strong>: slice/concat, <code>!=</code>/<code>&lt;=</code>/<code>&gt;=</code>, div/mod
     (power-of-two <code>SRA</code>/<code>Get_mask</code>, generic <code>Sub</code> fallback + non-synth warning).
   - <strong><code>uif</code></strong> chains (add the <code>HotMux</code> FIXME) and direct <code>__&lt;cell&gt;</code> calls.
-  - <strong><code>Sub</code> submodule calls</strong> against the callee <code>tree_io</code> leaf ABI (<a class="xref" href="TODO_prp.html#item-2n">2n</a>) +
-    import handling (<a class="xref" href="TODO_prp.html#item-1m">1m</a>/<a class="xref" href="TODO_prp.html#item-2o">2o</a>); until those land <code>tolg</code> must hard-error
-    (not guess) on any callee with <code>Inline_reason != none</code>.
+  - <strong><code>Sub</code> submodule calls</strong> — Pyrope-path Sub instances LANDED with 1u-A (registry-resolved, single-output); remaining: the callee <code>tree_io</code> leaf ABI (<a class="xref" href="TODO_prp.html#item-2n">2n</a>) +
+    import handling (<a class="xref" href="TODO_prp.html#item-1m">1m</a>, incl. <code>lg:</code> black-box Subs); until those land <code>tolg</code> must hard-error
+    (not guess) on any callee it cannot fully resolve in the forest/registry.
   - <strong>Attributes</strong>: read <code>max</code>/<code>min</code> HHDS attrs at node creation (LNAST-origin
     path); diagnose leftover LNAST-only attrs.
   - Optional cross-module global/specialization pass (contract phase 10) — the

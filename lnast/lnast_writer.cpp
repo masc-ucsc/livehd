@@ -359,6 +359,20 @@ void Lnast_writer::write_stages() {
   move_to_parent();
 }
 
+// Task 1r — timecheck(ref, min, max): the `x@[N]` flop-free cycle-check
+// record. A statement; children are the checked ref + two payload consts.
+void Lnast_writer::write_timecheck() {
+  print("timecheck(");
+  move_to_child();
+  write_lnast();  // ref
+  while (move_to_sibling()) {
+    print(", ");
+    write_lnast();  // min, max
+  }
+  print(")");
+  move_to_parent();
+}
+
 void Lnast_writer::write_type_spec() {
   move_to_child();
   write_lnast();

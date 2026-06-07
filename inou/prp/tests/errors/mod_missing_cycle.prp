@@ -1,0 +1,8 @@
+/*
+:name: mod_missing_cycle
+:type: error
+:error: declares no landing cycle
+:help: combinational feedthrough
+*/
+
+mod f(a:u8) -> (x:u8) { x = a }   // locate_error_here

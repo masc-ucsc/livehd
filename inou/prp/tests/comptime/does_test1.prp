@@ -1,15 +1,13 @@
 /*
 :name: does_test1
 :type: parsing lnast comptime
-:verifier_pass: 20
+:verifier_pass: 35
 :verifier_fail: 0
 */
 
-// Constprop folds the structural half of `does` for tuple-vs-tuple. The
-// other shapes — scalar-vs-scalar, tuple-vs-literal-const, match-arm
-// `does` — stay as // FIXME: below until type tracking and/or prp2lnast
-// catch up. Lowered :verifier_pass: from 35 → 20 so the working subset
-// reports green; raise it back as the FIXMEs get resolved.
+// Task 1g — type-aware `does`. Constprop folds the structural half for
+// tuple-vs-tuple AND the scalar/type half (kind + integer envelope) for
+// scalars, type-name operands, literal-as-bundle, and per-field types.
 
 const m1 = (a=1,b=0)
 const m2 = (a=2,b=0)
@@ -39,56 +37,53 @@ cassert(not (m4 does m5))
 const b1 = true
 mut b2 = 100 < 30
 
-cassert(b1 does true)   // FIXME: scalar-vs-const literal — need type-aware fold
-cassert(b2 does true)   // FIXME: scalar-vs-const literal — need type-aware fold
-cassert(b1 does b2)     // FIXME: scalar-vs-scalar — bool/int indistinguishable in Lconst
-cassert(not (b1 does m1))
+cassert(b1 does true)        // bool var does bool literal — same kind
+cassert(b2 does true)        // comparison result is boolean
+cassert(b1 does b2)          // bool does bool
+cassert(not (b1 does m1))    // bool does tuple → kind mismatch
 
 mut i1 = 10
 const i2 = 0
 mut i3 = -1
-cassert(i1 does i2)     // FIXME: scalar-vs-scalar — needs type tracking
-cassert(i1 does i3)     // FIXME: scalar-vs-scalar — needs type tracking
-cassert(i3 does 100)    // FIXME: scalar-vs-const literal — need type-aware fold
-cassert(not (i3 does b1))    // FIXME: int-vs-bool — needs type tracking
-cassert(not (b1 does i2))    // FIXME: bool-vs-int — needs type tracking
+cassert(i1 does i2)          // untyped ints are unbounded → superset of any int
+cassert(i1 does i3)
+cassert(i3 does 100)         // unbounded ⊇ literal [100,100]
+cassert(not (i3 does b1))    // int does bool → kind mismatch
+cassert(not (b1 does i2))    // bool does int → kind mismatch
 
-cassert(not (100 does m1))   // FIXME: const literal not bound in symbol table as bundle
-cassert(not (m1 does 100))   // FIXME: const literal not bound in symbol table as bundle
+cassert(not (100 does m1))   // literal scalar (coerced to {0:100}) ⊉ named tuple
+cassert(not (m1 does 100))   // named tuple ⊉ unnamed-pos-0 literal
 
-  cassert((100,30) does 30)   // FIXME: tuple-vs-const literal — const not bundle-resolved
+  cassert((100,30) does 30)        // 2-tuple ⊇ single-positional literal 30
   cassert(not ((a=3) does (30,a=200)))
   cassert(not ((a=3) does (a=30,200)))
 
-cassert(not (30 does (30,200)))   // FIXME: const literal not bound in symbol table as bundle
+cassert(not (30 does (30,200)))    // single-positional literal ⊉ 2-tuple
 cassert(not ((3) does (30,a=200)))
 cassert(not ((3) does (a=30,200)))
 
 mut hit=0
 
-// FIXME: match-arm `does` lowers to a value `eq` in prp2lnast, so the
-//        structural fold never sees it; the cassert(hit==…) lines below
-//        evaluate to known-false today and trip verifier_fail:0. Re-enable
-//        once prp2lnast emits a proper `does` marker per match arm.
-//
-// match m1 {
-//  does (a:u32=333,b=0) { hit = 1 }
-//  else { hit = 0 }
-// }
-// cassert hit==1
-//
-// match m1 {
-//  does m2 { hit = 30 }
-//  does m4 { hit = 10 }
-//  does 33 { hit = 20 }
-//  else { hit = 0 }
-// }
-// cassert hit==30
-//
-// match m1 {
-//  does m4 { hit = 10 }
-//  does m3 { hit = 40 }
-//  does (c=1,b=0,e=3) { hit = 100 }
-//  else { hit = 0 }
-// }
-// cassert hit==40
+// Match-arm `does` lowers to a proper func_does per arm (prp2lnast), so the
+// structural + type-aware fold drives arm selection at comptime.
+match m1 {
+ does (a:u32=333,b=0) { hit = 1 }   // m1.a (untyped) ⊆ u32 envelope, shape ok
+ else { hit = 0 }
+}
+cassert(hit==1)
+
+match m1 {
+ does m2 { hit = 30 }
+ does m4 { hit = 10 }
+ does 33 { hit = 20 }
+ else { hit = 0 }
+}
+cassert(hit==30)
+
+match m1 {
+ does m4 { hit = 10 }
+ does m3 { hit = 40 }
+ does (c=1,b=0,e=3) { hit = 100 }
+ else { hit = 0 }
+}
+cassert(hit==40)

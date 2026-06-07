@@ -77,6 +77,15 @@ sh_test(
     data = _FLOW_DATA + ["scan_imports.prp"],
 )
 
+# Task 1m — pub/import machinery (docs/contracts/task_1m_plan.md): pub index
+# + __pub wrapper publication, two-invocation and iterate-until-converged
+# same-invocation imports, and the failure-mode diagnostics.
+sh_test(
+    name = "lhd_import_test",
+    srcs = ["lhd_import_test.sh"],
+    data = _FLOW_DATA,
+)
+
 # --reader yosys-verilog|yosys-slang|slang trichotomy (slang = direct
 # inou.slang SV->LNAST front-end: ln:/pyrope: only until tolg can lower it).
 sh_test(

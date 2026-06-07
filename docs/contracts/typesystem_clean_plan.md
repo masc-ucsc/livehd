@@ -117,7 +117,7 @@ node), **ATTR** (genuine, stays `attr_set`/`attr_get`).
 - **→OVERFLOW (per-write qualifier):** `wrap`, `saturate`, `sat`.
 - **ATTR — stays:**
   - hardware/wiring: `clock`, `reset`, `clock_pin`, `reset_pin`, `negreset`,
-    `posclk`, `async`, `initial`, `defer`, `valid`, `din`, `enable`, `stop`,
+    `posclk`, `async`, `init`, `defer`, `valid`, `din`, `enable`, `stop`,
     `lat`, `num`, `addr`, `fwd`, `wensize`, `rdport`, `inputs`, `outputs`
   - synthesis hints: `critical`, `delay`, `donttouch`, `keep`, `inp_delay`,
     `out_delay`, `max_delay`, `min_delay`, `max_load`, `max_fanout`, `max_cap`,
@@ -126,7 +126,7 @@ node), **ATTR** (genuine, stays `attr_set`/`attr_get`).
     sticky `_*`; and Category-D user attrs (inherit aggregate→field).
 - **→TYPE (memory/register):** the memory/flop config attrs
   (`rdport`/`wensize`/`lat`/`num`/`addr`/`fwd`/`clock_pin`/`reset_pin`/`negreset`/
-  `posclk`/`enable`/`din`/`async`/`initial`/…) **fold into new `prim_type_memory`
+  `posclk`/`enable`/`din`/`async`/`init`/…) **fold into new `prim_type_memory`
   / `prim_type_register` type nodes** whose fields mirror the `graph/cell.hpp`
   `Memory`(41)/`Flop`(43)/`Latch`/`Fflop`(47) cell pins (just as `prim_type_int`
   carries `(max,min)`). The type node is the "goal end type after the
