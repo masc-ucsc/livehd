@@ -1,7 +1,6 @@
 //  This file is distributed under the BSD 3-Clause License. See LICENSE for details.
 #pragma once
 
-#include <charconv>
 #include <cstdint>
 #include <format>
 #include <iostream>
@@ -14,7 +13,6 @@
 #include <vector>
 
 #include "const.hpp"
-#include "ir_adapter.hpp"
 #include "lnast.hpp"
 #include "lnast_writer.hpp"
 #include "upass_utils.hpp"
@@ -23,133 +21,12 @@ namespace upass {
 
 struct Lnast_manager {
 public:
-  // Public node-handle type used by the templated shared passes. Lnast_nid
-  // already aliases to `hhds::Tree::Node_class`, so the iterators return the
-  // same handle the rest of LNAST works with — no encode/decode needed.
-  using Node  = Lnast_nid;
-  using Input = Lnast_nid;
-
   explicit Lnast_manager(const std::shared_ptr<Lnast>& ln) : lnast(ln), wr(std::cout, ln) {
     nid_stack   = {};
     current_nid = lnast->get_root();
   }
   virtual ~Lnast_manager() = default;
   Lnast_manager()          = delete;
-
-  std::string_view kind() const { return "lnast"; }
-  std::size_t      node_count() const {
-    std::size_t count = 0;
-    for (const auto& nid : lnast->depth_preorder(lnast->get_root())) {
-      if (!nid.is_invalid()) {
-        ++count;
-      }
-    }
-    return count;
-  }
-  std::size_t const_count() const {
-    std::size_t count = 0;
-    for (const auto& nid : lnast->depth_preorder(lnast->get_root())) {
-      if (nid.is_invalid()) {
-        continue;
-      }
-      if (Lnast_ntype::is_const(lnast->get_type(nid))) {
-        ++count;
-      }
-    }
-    return count;
-  }
-  std::size_t arithmetic_count() const {
-    std::size_t count = 0;
-    for (const auto& nid : lnast->depth_preorder(lnast->get_root())) {
-      if (nid.is_invalid()) {
-        continue;
-      }
-      switch (lnast->get_type(nid)) {
-        case Lnast_ntype::Lnast_ntype_plus:
-        case Lnast_ntype::Lnast_ntype_minus:
-        case Lnast_ntype::Lnast_ntype_mult:
-        case Lnast_ntype::Lnast_ntype_div:
-        case Lnast_ntype::Lnast_ntype_mod:
-        case Lnast_ntype::Lnast_ntype_shl:
-        case Lnast_ntype::Lnast_ntype_sra:
-        case Lnast_ntype::Lnast_ntype_bit_and:
-        case Lnast_ntype::Lnast_ntype_bit_or:
-        case Lnast_ntype::Lnast_ntype_bit_xor:
-        case Lnast_ntype::Lnast_ntype_log_and:
-        case Lnast_ntype::Lnast_ntype_log_or:
-        case Lnast_ntype::Lnast_ntype_eq:
-        case Lnast_ntype::Lnast_ntype_ne:
-        case Lnast_ntype::Lnast_ntype_lt:
-        case Lnast_ntype::Lnast_ntype_le:
-        case Lnast_ntype::Lnast_ntype_gt:
-        case Lnast_ntype::Lnast_ntype_ge     : ++count; break;
-        default                              : break;
-      }
-    }
-    return count;
-  }
-  std::size_t fold_candidate_count() const {
-    // LNAST-side shared heuristic: treat arithmetic/comparison ops as fold candidates.
-    return arithmetic_count();
-  }
-
-  // Streams every node through `fn` using `lnast->depth_preorder()` directly —
-  // the callback receives the same `Lnast_nid` the LNAST API works with.
-  template <typename Fn>
-  void for_each_node(Fn&& fn) const {
-    for (const auto& nid : lnast->depth_preorder(lnast->get_root())) {
-      if (!nid.is_invalid()) {
-        std::forward<Fn>(fn)(nid);
-      }
-    }
-  }
-
-  template <typename Fn>
-  void for_each_input(const Node& node, Fn&& fn) const {
-    if (node.is_invalid()) {
-      return;
-    }
-    for (auto child = lnast->get_child(node); !child.is_invalid(); child = lnast->get_sibling_next(child)) {
-      std::forward<Fn>(fn)(child);
-    }
-  }
-
-  bool is_sum_op(const Node& node) const { return !node.is_invalid() && Lnast_ntype::is_plus(lnast->get_type(node)); }
-  bool is_const(const Input& node) const { return !node.is_invalid() && Lnast_ntype::is_const(lnast->get_type(node)); }
-
-  std::optional<Const> const_value(const Input& node) const {
-    if (!is_const(node)) {
-      return std::nullopt;
-    }
-    const auto text = lnast->get_name(node);
-    int64_t    value{0};
-    auto*      begin = text.data();
-    auto*      end   = text.data() + text.size();
-    auto       res   = std::from_chars(begin, end, value);
-    if (res.ec != std::errc() || res.ptr != end) {
-      return std::nullopt;
-    }
-    return *Dlop::create_integer(value);
-  }
-
-  Replace_effect estimate_replace_with_const(const Node& node) const {
-    (void)node;
-    // LNAST rewrites in place — no edge rewiring, no nodes torn down.
-    return {};
-  }
-
-  bool replace_with_const(const Node& node, const Const& value) {
-    if (node.is_invalid()) {
-      return false;
-    }
-    if (auto cur = const_value(node); cur && cur->same_repr(value)) {
-      return false;
-    }
-    // Keep subtree structure intact for now; shared transform passes will own any
-    // operand cleanup when they start mutating LNAST through this API.
-    lnast->set_data(node, Lnast_node::create_const(value.to_pyrope()));  // pyrope text; width-safe, no to_i
-    return true;
-  }
 
   auto                          get_top_module_name() { return lnast->get_top_module_name(); }
   const std::shared_ptr<Lnast>& get_lnast() const { return lnast; }

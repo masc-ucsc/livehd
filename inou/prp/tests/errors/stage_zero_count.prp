@@ -1,0 +1,11 @@
+/*
+:name: stage_zero_count
+:type: error
+:error: invalid stage count 0
+:help: plain assignment for a same-cycle value
+*/
+
+mod f(a:u8) -> (x:u8@[1]) {
+  stage[0] t = a   // locate_error_here
+  x = t
+}

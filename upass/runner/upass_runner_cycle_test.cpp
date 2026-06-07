@@ -61,33 +61,13 @@ TEST(UpassRunnerResolve, DetectMissingDependency) {
   EXPECT_TRUE(ordered.empty());
 }
 
-TEST(UpassRunnerResolve, SharedNoopResolvesAndRuns) {
+TEST(UpassRunnerResolve, NoopResolvesAndRuns) {
   auto           lm = make_lm();
-  Exposed_runner runner(lm, {"noop_shared"});
+  Exposed_runner runner(lm, {"noop"});
 
-  auto ordered = runner.expose_resolve({"noop_shared"});
+  auto ordered = runner.expose_resolve({"noop"});
   ASSERT_EQ(ordered.size(), 1U);
-  EXPECT_EQ(ordered[0], "noop_shared");
-  EXPECT_FALSE(runner.has_configuration_error());
-}
-
-TEST(UpassRunnerResolve, SharedScanResolves) {
-  auto           lm = make_lm();
-  Exposed_runner runner(lm, {"scan_shared"});
-
-  auto ordered = runner.expose_resolve({"scan_shared"});
-  ASSERT_EQ(ordered.size(), 1U);
-  EXPECT_EQ(ordered[0], "scan_shared");
-  EXPECT_FALSE(runner.has_configuration_error());
-}
-
-TEST(UpassRunnerResolve, SharedDecideResolves) {
-  auto           lm = make_lm();
-  Exposed_runner runner(lm, {"decide_shared"});
-
-  auto ordered = runner.expose_resolve({"decide_shared"});
-  ASSERT_EQ(ordered.size(), 1U);
-  EXPECT_EQ(ordered[0], "decide_shared");
+  EXPECT_EQ(ordered[0], "noop");
   EXPECT_FALSE(runner.has_configuration_error());
 }
 

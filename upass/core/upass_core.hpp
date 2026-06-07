@@ -8,10 +8,8 @@
 #include <stack>
 #include <string>
 #include <string_view>
-#include <variant>
 #include <vector>
 
-#include "absl/container/inlined_vector.h"
 #include "bundle.hpp"
 #include "const.hpp"
 #include "lnast.hpp"
@@ -39,53 +37,16 @@ struct Emit_decision {
   static constexpr Emit_decision drop() { return Emit_decision{Emit_kind::drop_subtree}; }
 };
 
-// ── Step E: Operand vector + Vote dispatch (docs/upass_redesign.md §E) ──
-//
-// Runtime_trivial marks an operand that has no usable comptime value at
-// this site (a ref whose Bundle is empty or whose value bits are unknown).
-// Const carries a parsed pyrope literal or a folded value. shared_ptr<Bundle>
-// hands the pass a pointer to the per-name Bundle the runner already
-// resolved — passes read its `fields["0"]` for scalars, or its tuple
-// structure / attrs for richer queries.
-struct Runtime_trivial {};
-
-using Operand     = std::variant<Runtime_trivial, Const, std::shared_ptr<Bundle>>;
-using Operand_vec = absl::InlinedVector<Operand, 4>;
-
-enum class Vote_kind : uint8_t {
-  keep,     // emit source op verbatim (with operand folding)
-  drop,     // emit nothing
-  toconst,  // emit nothing; LHS Bundle's scalar holds the folded value
-  update,   // emit a rewritten shape (carried in update_payload)
-};
-
 // Step K — pending_import poison marker.
 //
 // Presence-only Bundle attribute (Bundle::has_attr / Bundle::set_attr) used
 // to mark every name that depends on an unresolved import. Origination,
 // propagation, gating, and clearing rules live in:
 //   - runner (origination on `import` op, gating skip for non-constprop)
-//   - bundle_pre (propagation through operand bundles)
 //   - finisher (defer verifier/assert dest walk while any Bundle is marked)
-// All four sites read/write this name; the central definition keeps the
+// All sites read/write this name; the central definition keeps the
 // string consistent.
 inline constexpr std::string_view k_pending_import_attr = "pending_import";
-
-struct Vote {
-  Vote_kind            kind{Vote_kind::keep};
-  // Folded value for kind == toconst (committed to dst->fields["0"] by
-  // the runner during vote resolution). Ignored otherwise.
-  Const                toconst_value;
-  // Placeholder for the update shape (Step E doesn't yet ship a concrete
-  // representation; populated by passes that need rewrites — e.g. fcall
-  // inlining in Step L).
-  std::vector<uint8_t> update_payload;
-
-  static Vote keep() { return {}; }
-  static Vote drop() { return {Vote_kind::drop, {}, {}}; }
-  static Vote toconst(const Const& v) { return {Vote_kind::toconst, v, {}}; }
-  static Vote update(std::vector<uint8_t> payload) { return {Vote_kind::update, {}, std::move(payload)}; }
-};
 
 struct uPass {
 public:
@@ -246,38 +207,6 @@ public:
   // no-op.
   virtual void notify_init_construction_begin() {}
   virtual void notify_init_construction_end() {}
-
-  // ── Step E new dispatch surface (per docs/upass_redesign.md §E) ──
-  //
-  // The redesign replaces the per-op virtual void process_* family with a
-  // single arith hook (for the 27 arithmetic/logic/comparison/bit ops)
-  // plus shaped hooks for ops whose operand layout is distinctive. Each
-  // hook receives a runner-resolved Operand_vec and a Bundle* for the LHS
-  // (nullptr for ops with no LHS like `if`/`cassert`). The pass returns
-  // a Vote; the runner reduces votes (drop > toconst > update > keep) and
-  // emits accordingly.
-  //
-  // Migration is staged: today the runner still drives the old
-  // `process_<op>()` virtuals. As each pass moves to the new surface, the
-  // runner will route that op kind through process_arith / shaped hooks
-  // and the pass will override these instead. Default implementations
-  // return Vote::keep() so a pass that hasn't migrated is a no-op for
-  // these hooks.
-  virtual Vote process_arith(Lnast_ntype::Lnast_ntype_int /*kind*/, Bundle* /*dst*/, const Operand_vec& /*ops*/) {
-    return Vote::keep();
-  }
-  virtual Vote process_attr_set_v(Bundle* /*dst*/, const Operand_vec& /*ops*/) { return Vote::keep(); }
-  virtual Vote process_attr_get_v(Bundle* /*dst*/, const Operand_vec& /*ops*/) { return Vote::keep(); }
-  virtual Vote process_tuple_add_v(Bundle* /*dst*/, const Operand_vec& /*ops*/) { return Vote::keep(); }
-  virtual Vote process_tuple_concat_v(Bundle* /*dst*/, const Operand_vec& /*ops*/) { return Vote::keep(); }
-  virtual Vote process_tuple_set_v(Bundle* /*dst*/, const Operand_vec& /*ops*/) { return Vote::keep(); }
-  virtual Vote process_tuple_get_v(Bundle* /*dst*/, const Operand_vec& /*ops*/) { return Vote::keep(); }
-  virtual Vote process_range_v(Bundle* /*dst*/, const Operand_vec& /*ops*/) { return Vote::keep(); }
-  virtual Vote process_type_spec_v(Bundle* /*dst*/, const Operand_vec& /*ops*/) { return Vote::keep(); }
-  virtual Vote process_if_v(const Operand_vec& /*ops*/) { return Vote::keep(); }
-  virtual Vote process_cassert_v(const Operand_vec& /*ops*/) { return Vote::keep(); }
-  virtual Vote process_func_def_v(Bundle* /*dst*/, const Operand_vec& /*ops*/) { return Vote::keep(); }
-  virtual Vote process_func_call_v(Bundle* /*dst*/, const Operand_vec& /*ops*/) { return Vote::keep(); }
 
 #define PROCESS_NODE(NAME) \
   virtual void process_##NAME() {}

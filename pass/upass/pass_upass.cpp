@@ -365,9 +365,7 @@ void Pass_upass::work(Eprp_var& var) {
 
     // For func_extract-spawned lnasts (idx beyond the original entry-point
     // count), strip the verifier from the order unless the test opted in
-    // via verifier_include_funcs:true. Function-body casserts that constprop
-    // already proved at call sites still get tallied via mark_inlined_cassert_*
-    // in try_eval_comb_call, so dropping the verifier here just avoids
+    // via verifier_include_funcs:true — dropping the verifier here avoids
     // double-walking unproven function bodies into the aggregate.
     auto order = up.upass_order;
     const bool is_function_body = idx >= original_lnast_count;

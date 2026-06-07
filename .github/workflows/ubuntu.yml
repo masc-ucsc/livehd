@@ -38,6 +38,7 @@ jobs:
     env:
       CC: gcc-14
       CXX: g++-14
+      GCOV: gcov-14  # must match CC, or gcov rejects the .gcda/.gcno data (version 'B42*', prefer 'B33*')
 
     steps:
       - name: Checkout repo
@@ -61,10 +62,19 @@ jobs:
           "$CC" --version
           "$CXX" --version
 
-      - run: bazel coverage --instrument_test_targets --collect_code_coverage --test_tag_filters=-fixme --combined_report=lcov --test_output=all //...
+      # continue-on-error so partial coverage is still uploaded when some
+      # tests fail (the failure is re-raised after the upload below).
+      - id: coverage
+        continue-on-error: true
+        run: bazel coverage --keep_going --instrument_test_targets --collect_code_coverage --test_tag_filters=-fixme --combined_report=lcov --test_output=all //...
 
       - uses: codecov/codecov-action@v6
         with:
           slug: masc-ucsc/livehd
           token: ${{ secrets.CODECOV_TOKEN }}
-          directory: ./bazel-out/_coverage
+          files: ./bazel-out/_coverage/_coverage_report.dat
+          disable_search: true
+
+      - name: Propagate test failures
+        if: steps.coverage.outcome == 'failure'
+        run: exit 1

@@ -133,6 +133,12 @@ private:
   std::string                   top_module_name;
   std::string                   source_filename;
   Lnast_nid                     undefined_var_nid;
+  // Task 1r — durable lambda kind ("comb" / "pipe" / "mod" / ...; empty =
+  // file-level / unknown). Stamped by func_extract when a lambda is
+  // extracted into its own tree. Consumers gate on THIS, never on
+  // stages_min>0 — a mod output legitimately stamps stages(0,0) or
+  // stages(nil,nil) and a mod tree must not be mistaken for a pipe.
+  std::string                   lambda_kind_;
   // I/O metadata populated by the SSA upass (ssa:1).  Empty unless the SSA
   // pass has run on this LNAST.
   Lnast_tree_io                 io_meta_;
@@ -246,6 +252,10 @@ public:
   std::string_view get_top_module_name() const { return top_module_name; }
   std::string_view get_source() const { return source_filename; }
   void             set_top_module_name(std::string_view name) { top_module_name = name; }
+
+  // ── lambda kind (Task 1r; stamped by func_extract on extracted trees) ───
+  std::string_view get_lambda_kind() const noexcept { return lambda_kind_; }
+  void             set_lambda_kind(std::string_view kind) { lambda_kind_ = kind; }
 
   // ── I/O metadata side-channel (set by the SSA upass when ssa:1) ─────────
   const Lnast_tree_io& io_meta() const noexcept { return io_meta_; }

@@ -243,6 +243,25 @@ private:
       lower_negated(nid, Ntype_op::GT, false);
     } else if (N::is_ge(t)) {
       lower_negated(nid, Ntype_op::LT, false);
+    } else if (N::is_timecheck(t)) {
+      // Task 1r — `x@[N]` cycle-check record: flop-free, inert metadata for
+      // the pipe/mod typecheck pass. Nothing to lower.
+    } else if (N::is_func_call(t)) {
+      // Task 1r — a func_call reaching tolg has no hardware lowering: the
+      // inliner declined it (pipe/mod callee — Sub instances land with
+      // 1r-D), or it is a runtime builtin (`wrap`/`sat`) whose LG lowering
+      // is pending. HARD error: the old behavior silently wired the call's
+      // outputs to nil and emitted a broken netlist.
+      std::string callee;
+      if (auto c0 = lnast_->get_first_child(nid); !c0.is_invalid()) {
+        if (auto c1 = lnast_->get_sibling_next(c0); !c1.is_invalid()) {
+          callee = std::string(lnast_->get_name(c1));
+        }
+      }
+      Pass::error(
+          "upass.tolg: call to '{}' has no hardware lowering yet — pipe/mod calls become instances in a later phase "
+          "(note `comb` may not call a `pipe`/`mod`), and runtime `wrap`/`sat` lowering is pending",
+          callee);
     } else {
       Pass::warn("upass.tolg: unhandled node type '{}'", Lnast_ntype::to_sv(t));
     }

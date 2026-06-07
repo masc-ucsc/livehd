@@ -19,7 +19,6 @@ cc_library(
         "//upass/assert:upass_assert",
         "//upass/attributes:upass_attributes",
         "//upass/bitwidth:upass_bitwidth",
-        "//upass/bundle_pre:upass_bundle_pre",
         "//upass/coalescer:upass_coalescer",
         "//upass/constprop:upass_constprop",
         "//upass/core:upass",
@@ -43,8 +42,6 @@ _LNAST_UPASS_TESTS = [
     "upass_dependency_test.sh",
     "upass_noop_first_iter_test.sh",
     "upass_cycle_cmd_test.sh",
-    "upass_lnast_shared_scan_test.sh",
-    "upass_lnast_shared_decide_test.sh",
 ]
 
 [
@@ -84,8 +81,6 @@ test_suite(
         ":upass_dependency_test.sh",
         ":upass_noop_first_iter_test.sh",
         ":upass_cycle_cmd_test.sh",
-        ":upass_lnast_shared_scan_test.sh",
-        ":upass_lnast_shared_decide_test.sh",
         ":upass_func_extract_test.sh",
         ":upass_coalescer_dse_test.sh",
     ],

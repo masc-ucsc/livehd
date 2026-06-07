@@ -108,17 +108,18 @@ cross-file dependencies stay visible.</p>
   (declaration → flopped outputs). Spec:
   <code>../docs/docs/pyrope/06c-pipelining.md</code>; plan + landed details:
   <code>docs/contracts/task_1q_plan.md</code>. Remaining:<ul>
-<li><strong id="item-1q-D" class="item-id">1q-D</strong> LG pass1 checker: the
-    SCC/Tarjan + σ pass — classify state/stage regs (state: <code>enable</code>≠true
-    or din→q in SCC, σ(q)=σ(din)), forward σ with equal-operand meet
-    (mismatch = error at the node), σ ≤ min honesty (callers may rely on any
-    value in [min,max]; reg-as-output home = min−1), narrow the inserted
-    flop to (min−σ, max−σ) — body flops never touched. With comb-only
-    bodies (until 2d lands) every output is σ=0, so it verifies trivially
-    and narrows nothing — the machinery is written general. LG pass2 in
-    Phase 1 = the min-realization default in cgen. Post-2d test additions:
-    body-stage-reg narrowing, <code>bad_mix</code>, <code>too_deep</code>,
-    <code>acc_mix</code>/<code>counter</code> state-reg accepts.</li>
+<li><strong id="item-1q-D" class="item-id">1q-D</strong> LG pass1 checker —
+    <strong>absorbed into <a class="xref" href="TODO_mod.html#item-1u-D">1u-D</a></strong>
+    (decided 2026-06-06): the SCC/Tarjan + σ machinery is written ONCE over
+    LG for pipe and mod together (pipe = uniform σ ≤ min honesty +
+    inserted-flop narrowing to (min−σ, max−σ), reg-as-output home = min−1;
+    mod = per-output declared equality, cross-Sub composition). Checks
+    decidable at LNAST discharge earlier in
+    <a class="xref" href="TODO_mod.html#item-1u-B">1u-B</a>; the rest lower
+    into the LG (min,max) time annotation with pending-check records
+    (<a class="xref" href="TODO_mod.html#item-1u-C">1u-C</a>). Spec details
+    and post-2d test list now live in <a href="TODO_mod.html">TODO_mod.html</a>.
+    LG pass2 in Phase 1 stays the min-realization default in cgen.</li>
 <li><strong>Later phases (separate tasks):</strong> call sites
     (<code>stage[N]</code>/<code>@[N]</code> in <code>mod</code> — now filed as
     <a class="xref" href="TODO_mod.html#item-1r">1r</a>, makes

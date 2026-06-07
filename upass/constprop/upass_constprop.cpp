@@ -26,18 +26,6 @@ static constexpr std::string_view call_ref_arg_marker = "__ref_arg";
 // Task 1k — positional UFCS-receiver marker (see prp2lnast / upass_runner).
 static constexpr std::string_view call_ufcs_arg_marker = "__ufcs_arg";
 
-// Canonical-key shape detection after the bundle_sorted refactor. Defined
-// here (forward) so process_assign can use it for shape-preserving merge.
-static bool is_named_top(std::string_view first) {
-  if (first.empty()) {
-    return false;
-  }
-  if (first.front() == '_' || std::isdigit(static_cast<unsigned char>(first.front()))) {
-    return false;
-  }
-  return true;
-}
-
 // Coerce one value to its text-form Const. Mirrors Pyrope's `string()` cast:
 //   nil    → "nil"
 //   string → as-is
@@ -725,8 +713,6 @@ void uPass_constprop::process_log_not() {
 //   - "__attr"          → attribute (covered by Bundle::is_attribute)
 //   - "0", "1", …       → unnamed (first char is a digit)
 //   - anything else     → named (bare name)
-// is_named_top forward-declared near the top of the file so
-// process_assign can call it during shape-preserving merge.
 
 // Bundle == result is *three-valued*:
 //   - std::nullopt        → can't decide (operand has unknowns)

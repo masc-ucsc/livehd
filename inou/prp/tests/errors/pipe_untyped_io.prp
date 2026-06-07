@@ -1,0 +1,8 @@
+/*
+:name: pipe_untyped_io
+:type: error
+:error: has no explicit type
+:help: declare an explicit type
+*/
+
+pipe[2] f(a) -> (c:u8) { c = a }   // locate_error_here

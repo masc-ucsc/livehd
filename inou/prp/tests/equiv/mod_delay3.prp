@@ -1,0 +1,13 @@
+/*
+:name: mod_delay3
+:type: equiv
+:verilog_top: mod_delay3.delay3
+:pyrope_top: mod_delay3.delay3
+*/
+
+// Task 1r — `stage[3] x = a` delivers `a` three cycles later (one
+// parameterized depth-3 Flop, realized as a shift register); the interface
+// declares the landing cycle.
+mod delay3(a:u8) -> (x:u8@[3]) {
+  stage[3] x = a
+}

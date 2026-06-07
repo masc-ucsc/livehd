@@ -31,7 +31,6 @@ std::size_t                     uPass_verifier::aggregate_cputs_count   = 0;
 std::vector<std::string>        uPass_verifier::aggregate_unknown_operands;
 int                             uPass_verifier::aggregate_expected_pass = -1;
 int                             uPass_verifier::aggregate_expected_fail = -1;
-std::unordered_set<std::string> uPass_verifier::processed_cassert_keys;
 std::unordered_set<std::string> uPass_verifier::processed_cputs_keys;
 
 void uPass_verifier::reset_aggregate() {
@@ -42,27 +41,12 @@ void uPass_verifier::reset_aggregate() {
   aggregate_unknown_operands.clear();
   aggregate_expected_pass = -1;
   aggregate_expected_fail = -1;
-  processed_cassert_keys.clear();
   processed_cputs_keys.clear();
 }
 
 void uPass_verifier::set_aggregate_expected(int expected_pass, int expected_fail) {
   aggregate_expected_pass = expected_pass;
   aggregate_expected_fail = expected_fail;
-}
-
-bool uPass_verifier::already_counted_cassert(std::string_view key) { return processed_cassert_keys.contains(std::string{key}); }
-
-void uPass_verifier::mark_inlined_cassert_pass(std::string_view key) {
-  if (processed_cassert_keys.insert(std::string{key}).second) {
-    ++aggregate_pass_count;
-  }
-}
-
-void uPass_verifier::mark_inlined_cassert_fail(std::string_view key) {
-  if (processed_cassert_keys.insert(std::string{key}).second) {
-    ++aggregate_fail_count;
-  }
 }
 
 // Report one comptime-false cassert through the unified diagnostic surface
@@ -129,20 +113,8 @@ upass::Emit_decision uPass_verifier::classify_statement() {
     return upass::Emit_decision::emit_node();
   }
 
-  // If constprop's try_eval_comb_call already proved this cassert at every
-  // call site of the enclosing function, drop it without re-counting. The
-  // key matches what mark_inlined_cassert_* uses (lnast top-name + nid).
+  // Anchor the false-cassert diagnostic at the cassert node.
   const auto cassert_nid = lm->get_current_nid();
-  // Key by current_scope_uid() (frame salt ⊕ class_index), so a cassert
-  // re-walked per comptime-loop iteration / per inlined call site counts as a
-  // DISTINCT assertion (matching the parse-time unroll, where each was its own
-  // node) instead of deduping to one. salt 0 (top level) reduces to the bare
-  // class_index, so non-inlined/non-loop casserts are unchanged.
-  const auto dedup_key   = std::format("{}:{}", lm->get_top_module_name(), lm->current_scope_uid());
-  (void)cassert_nid;
-  if (processed_cassert_keys.contains(dedup_key)) {
-    return upass::Emit_decision::drop();
-  }
 
   // Cassert layout is `cassert(<cond>)` or `cassert(<cond>, <msg>)`:
   //   child 0 — the condition (a ref or a const, post-Slice-1 fold)

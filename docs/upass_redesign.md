@@ -217,6 +217,12 @@ runner to own all scope transitions.
 
 ### Step E — Operand vector + new dispatch API
 
+> **Status: DROPPED (2026-06-06).** The Vote/Operand_vec surface sat
+> unwired while the passes evolved on the direct `process_*` +
+> Symbol_table model (single-walk, COW bundles); the stubs were removed
+> from `upass_core.hpp`. If a vote-style dispatch is ever needed,
+> re-derive it from this section rather than resurrecting the old code.
+
 **Why**: this is the redesign's primary structural change. After this,
 no opt pass walks LNAST children itself; the runner pre-resolves
 everything.
@@ -339,6 +345,10 @@ coalescer. After each, re-run the test suite.
 
 ### Step F — Bundle pre-pass
 
+> **Status: DROPPED (2026-06-06).** `upass/bundle_pre/` only ever held
+> no-op Vote::keep() stubs and was removed together with Step E's
+> dispatch surface.
+
 **Why**: structural state belongs in one place. Today `attributes` owns
 9 side maps for what is conceptually "the LHS Bundle's shape + sticky +
 alias state." Put that work in a single pre-pass that runs first per
@@ -395,6 +405,10 @@ one map at a time (start with `type_info_map`, then `wrap_policy` /
 ---
 
 ### Step G — Vote resolution
+
+> **Status: DROPPED (2026-06-06).** `reduce_votes` was implemented but
+> never called; removed with the Step E surface. `Emit_decision`
+> (emit/drop) remains the dispatch contract.
 
 **Why**: replaces the binary `Emit_decision` with the four-way `Vote`
 from §1; supports `toconst` (commit-and-elide) and `update` (rewrite

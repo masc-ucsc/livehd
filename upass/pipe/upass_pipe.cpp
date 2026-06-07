@@ -10,6 +10,14 @@ void uPass_pipe::run(const std::shared_ptr<Lnast>& lnast) {
   if (!lnast) {
     return;
   }
+  // Task 1r — gate on the durable lambda kind, NOT on stages_min>0: a mod
+  // output legitimately carries a declared stages(N,N) (its interface
+  // landing cycle) and must never get a pipe output flop appended — a mod's
+  // structural latency comes from its body (stage decls / callee
+  // instances); `@[N]` never inserts flops.
+  if (lnast->get_lambda_kind() != "pipe") {
+    return;
+  }
   const auto& outs = lnast->io_meta().outputs;
   bool        any  = false;
   for (const auto& e : outs) {
@@ -19,7 +27,7 @@ void uPass_pipe::run(const std::shared_ptr<Lnast>& lnast) {
     }
   }
   if (!any) {
-    return;  // comb/mod tree (or pre-ssa shape): nothing to insert
+    return;  // pre-ssa shape: nothing to insert
   }
 
   // Locate the top-level stmts (post-SSA shape: top -> stmts).

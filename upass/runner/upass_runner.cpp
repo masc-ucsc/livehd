@@ -61,7 +61,6 @@
 
 #include "absl/container/flat_hash_set.h"
 #include "diag.hpp"
-#include "upass_shared.hpp"
 
 namespace {
 
@@ -148,50 +147,6 @@ void collect_cond_vars(const Lnast& ln, const Lnast_nid& while_nid, std::string_
                                                      .hint     = std::string{hint}});
   throw std::runtime_error(msg);
 }
-
-struct Lnast_pass_noop_shared final : public upass::uPass {
-  using upass::uPass::uPass;
-
-  void process_top() override { upass::run_noop_shared(*lm, "uPass"); }
-};
-
-struct Lnast_pass_scan_shared final : public upass::uPass {
-  using upass::uPass::uPass;
-
-  void process_assign() override {
-    if (emitted) {
-      return;
-    }
-    const auto rep = upass::run_scan_shared(*lm, "uPass");
-    std::print("uPass - shared scan summary nodes:{} const:{} arith:{}\n", rep.node_count, rep.const_count, rep.arithmetic_count);
-    emitted = true;
-  }
-
-private:
-  bool emitted{false};
-};
-
-struct Lnast_pass_decide_shared final : public upass::uPass {
-  using upass::uPass::uPass;
-
-  void process_assign() override {
-    if (emitted) {
-      return;
-    }
-    const auto rep = upass::run_decide_shared(*lm, "uPass");
-    std::print("uPass - shared decide summary fold_candidates:{} has_fold_candidates:{}\n",
-               rep.fold_candidate_count,
-               rep.has_fold_candidates ? "true" : "false");
-    emitted = true;
-  }
-
-private:
-  bool emitted{false};
-};
-
-static upass::uPass_plugin plugin_noop_shared("noop_shared", upass::uPass_wrapper<Lnast_pass_noop_shared>::get_upass);
-static upass::uPass_plugin plugin_scan_shared("scan_shared", upass::uPass_wrapper<Lnast_pass_scan_shared>::get_upass);
-static upass::uPass_plugin plugin_decide_shared("decide_shared", upass::uPass_wrapper<Lnast_pass_decide_shared>::get_upass);
 
 }  // namespace
 
@@ -681,35 +636,6 @@ void uPass_runner::dispatch_to_passes(Pass_method fn) {
     }
     lm->restore_cursor(saved);
   }
-}
-
-upass::Vote uPass_runner::reduce_votes(const std::vector<upass::Vote>& votes) {
-  // Priority per docs/upass_redesign.md §G:
-  //   drop  > toconst > update > keep
-  // toconst values must agree across voters (sanity-checked).
-  upass::Vote        out;
-  const upass::Vote* toconst_seen = nullptr;
-  const upass::Vote* update_seen  = nullptr;
-  for (const auto& v : votes) {
-    if (v.kind == upass::Vote_kind::drop) {
-      return upass::Vote::drop();
-    }
-    if (v.kind == upass::Vote_kind::toconst) {
-      if (toconst_seen && !toconst_seen->toconst_value.same_repr(v.toconst_value)) {
-        upass::error("uPass_runner: conflicting toconst votes for the same node\n");
-      }
-      toconst_seen = &v;
-    } else if (v.kind == upass::Vote_kind::update) {
-      update_seen = &v;
-    }
-  }
-  if (toconst_seen) {
-    return *toconst_seen;
-  }
-  if (update_seen) {
-    return *update_seen;
-  }
-  return upass::Vote::keep();
 }
 
 bool uPass_runner::any_pass_drops() const {
@@ -1339,10 +1265,28 @@ bool uPass_runner::try_inline_func_call() {
 
   // Task 1q — a `pipe` callee (any output carries a stages annotation) is
   // never comb-inlined: its outputs are flopped, and a call site must consume
-  // it via `await[N]` (later phase). Decline so the call surfaces unresolved
+  // it via `stage[N]` (later phase). Decline so the call surfaces unresolved
   // instead of silently dropping the latency.
   for (const auto& oe : io.outputs) {
     if (oe.stages_min > 0) {
+      return false;
+    }
+  }
+
+  // Task 1r — a plain `mod` callee is its own module: the call becomes a
+  // Sub instance (1r-D), never a comb splice — even when every declared
+  // output cycle is 0, a mod may hold state. A `ref self` mod METHOD keeps
+  // the splice path (mod-init constructors, `y.method(...)`): recognized by
+  // its `self` io entry.
+  if (callee->get_lambda_kind() == "mod") {
+    bool has_self_input = false;
+    for (const auto& ie : io.inputs) {
+      if (ie.name == "self") {
+        has_self_input = true;
+        break;
+      }
+    }
+    if (!has_self_input) {
       return false;
     }
   }

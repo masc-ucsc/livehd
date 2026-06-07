@@ -91,10 +91,15 @@ struct Port {
   Latency_range    stages;   // per-OUTPUT pipe stages {min,max} (1q):
                              // pipe[N]={N,N}, pipe[2..=5]={2,5}, bare
                              // pipe={1,0} (max 0 = unconstrained),
-                             // comb={0,0}; a mod output may carry a
-                             // different value per output. Semantics:
-                             // SCC/σ depth from inputs to that output
-                             // flop (06c-pipelining.md). Inputs: {0,0}.
+                             // comb={0,0}; a mod output carries its own
+                             // value per output, DECLARED at the
+                             // interface (1r: `x:T@[N]`={N,N} incl. {0,0}
+                             // feedthrough; `@[]`={nil,nil} opt-out — the
+                             // foreign-Verilog ingest form), never
+                             // inferred from the body (the body is
+                             // CHECKED against it). Semantics: SCC/σ
+                             // depth from inputs to that output flop
+                             // (06c-pipelining.md). Inputs: {0,0}.
 };
 ```
 

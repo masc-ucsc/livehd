@@ -273,9 +273,32 @@ protected:
     std::string key;
     std::string value;  // empty -> "true"
   };
+  // lambda_kind/is_io_output: set only when called from the lambda io driver
+  // (Task 1r-A interface contract — fully-typed pipe/mod ios, per-output
+  // declared landing cycle on mod). Tuple-literal contexts leave them unset
+  // and skip every interface check.
   void emit_arg_assign(const Lnast_nid& tuple_parent, TSNode typed_ident, TSNode definition_or_null, bool is_ref_mod,
-                       std::vector<Param_attr>* attrs_out = nullptr);
+                       std::vector<Param_attr>* attrs_out = nullptr, std::string_view lambda_kind = {},
+                       bool is_io_output = false);
   void emit_arg_type(const Lnast_nid& assign_parent, TSNode type_node);
+
+  // Task 1r — current lambda-kind context while processing a body ("comb" /
+  // "pipe" / "mod" / ...; empty stack = file scope). Gates `stage[N]`
+  // declarations (mod-only) and `x@[N]` timecheck emission (mod/pipe only).
+  std::vector<std::string> lambda_kind_stack_;
+
+  // Task 1r — parse a stage_decl's optional timing_slot to the (min,max)
+  // stages const texts: stage[N] -> ("N","N") with N >= 1; stage[A..=B] /
+  // stage[A..<B] -> ascending literal range; bare `stage` / `stage[]` ->
+  // ("nil","nil") (toolchain picks). Anything else is a compile error.
+  std::pair<std::string, std::string> parse_stage_slot(TSNode storage_node);
+
+  // Task 1r — emit `timecheck(ref name, const N, const N)` recording an
+  // `x@[N]` cycle check (flop-free, inert — consumed by the future pipe/mod
+  // typecheck pass). `x@[]` emits nothing (explicit opt-out). Errors when the
+  // enclosing lambda is a comb (every comb value is at cycle 0) or the slot
+  // is not a literal N >= 0.
+  void maybe_emit_timecheck(TSNode timing_slot, TSNode id_node);
 
   // Task 1q — resolve a `pipe_lambda` node's `depth` field to the (min,max)
   // stages pair: pipe[N] -> (N,N); pipe[A..=B] -> (A,B); pipe[A..<B] ->

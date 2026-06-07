@@ -121,6 +121,15 @@ LNAST_NODE( range, range )
 // docs/contracts/task_1q_plan.md.
 LNAST_NODE( stages, stages )
 
+// Task 1r — `x@[N]` cycle-check record: timecheck( ref(name), const(min),
+// const(max) ). A STATEMENT (child of stmts), flop-free and inert: it asserts
+// that `name` lands at the given absolute cycle (counted from the enclosing
+// lambda's inputs) and is consumed by the future pipe/mod typecheck pass.
+// `@[N]` -> (N, N). The `@[]` opt-out emits no timecheck at all. NEVER lower
+// `@[N]` to delay_assign — that node moves values in time (past/.[defer]);
+// timecheck only checks. SSA renames the ref child like any other read.
+LNAST_NODE( timecheck, timecheck )
+
 // Tuple Statements
 // Task 1t — `tuple_set` deleted: statement-level field writes are now `store`
 // (the same node that subsumed the statement-level scalar `assign`). A `store`

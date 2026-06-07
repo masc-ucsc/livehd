@@ -1,0 +1,12 @@
+/*
+:name: mod_passthru
+:type: equiv
+:verilog_top: mod_passthru.passthru
+:pyrope_top: mod_passthru.passthru
+*/
+
+// Task 1r — a mod with a cycle-0 output: a combinational feedthrough is
+// legal in `mod` (and forbidden in `pipe`). The interface declares it.
+mod passthru(a:u8) -> (x:u8@[0]) {
+  x = a
+}

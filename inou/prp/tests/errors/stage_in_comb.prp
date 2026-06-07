@@ -1,0 +1,11 @@
+/*
+:name: stage_in_comb
+:type: error
+:error: only valid inside `mod` bodies
+:help: plain assignment
+*/
+
+comb f(a) -> (r) {
+  stage[2] x = a   // locate_error_here
+  r = x
+}

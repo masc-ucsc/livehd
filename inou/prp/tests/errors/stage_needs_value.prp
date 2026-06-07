@@ -1,0 +1,12 @@
+/*
+:name: stage_needs_value
+:type: error
+:error: requires an initializer
+:help: stage
+*/
+
+mod f(a:u8) -> (x:u8@[2]) {
+  stage[2] t   // locate_error_here
+  t = a
+  x = t
+}

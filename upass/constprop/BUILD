@@ -14,6 +14,7 @@ cc_library(
     includes = ["."],
     visibility = ["//visibility:public"],
     deps = [
+        "//graph",
         "//lnast",
         "//upass/core:upass",
         "//upass/verifier:upass_verifier",
