@@ -90,7 +90,7 @@ footer { max-width:920px; margin:0 auto; padding:0 1.25rem 3rem;
 </style>
 </head>
 <body>
-<nav><span class="brand">LiveHD TODO</span><a class="" href="TODO.html">Overview</a><a class="active" href="TODO_prp.html">Pyrope</a><a class="" href="TODO_verilog.html">Verilog</a><a class="" href="TODO_livehd.html">LiveHD</a><a class="" href="TODO_hhds.html">HHDS</a></nav>
+<nav><span class="brand">LiveHD TODO</span><a class="" href="TODO.html">Overview</a><a class="active" href="TODO_prp.html">Pyrope</a><a class="" href="TODO_mod.html">Mod</a><a class="" href="TODO_verilog.html">Verilog</a><a class="" href="TODO_livehd.html">LiveHD</a><a class="" href="TODO_hhds.html">HHDS</a></nav>
 <main>
 <h1 id="todo-pyrope-semantics">TODO — Pyrope semantics</h1>
 <p>Pending work to finish correct Pyrope language handling: frontend, LNAST
@@ -120,7 +120,8 @@ cross-file dependencies stay visible.</p>
     body-stage-reg narrowing, <code>bad_mix</code>, <code>too_deep</code>,
     <code>acc_mix</code>/<code>counter</code> state-reg accepts.</li>
 <li><strong>Later phases (separate tasks):</strong> call sites
-    (<code>stage[N]</code>/<code>@[N]</code> in <code>mod</code> — makes
+    (<code>stage[N]</code>/<code>@[N]</code> in <code>mod</code> — now filed as
+    <a class="xref" href="TODO_mod.html#item-1r">1r</a>, makes
     <code>tests/equiv/accum.prp</code> live); state/stage σ machinery exercised
     on real reg bodies once 2d reg lowering lands; <code>lnast_to_slop</code>
     pipe cell (seed-picked total T ∈ [min,max], inserted depth T−σ);

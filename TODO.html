@@ -90,7 +90,7 @@ footer { max-width:920px; margin:0 auto; padding:0 1.25rem 3rem;
 </style>
 </head>
 <body>
-<nav><span class="brand">LiveHD TODO</span><a class="active" href="TODO.html">Overview</a><a class="" href="TODO_prp.html">Pyrope</a><a class="" href="TODO_verilog.html">Verilog</a><a class="" href="TODO_livehd.html">LiveHD</a><a class="" href="TODO_hhds.html">HHDS</a></nav>
+<nav><span class="brand">LiveHD TODO</span><a class="active" href="TODO.html">Overview</a><a class="" href="TODO_prp.html">Pyrope</a><a class="" href="TODO_mod.html">Mod</a><a class="" href="TODO_verilog.html">Verilog</a><a class="" href="TODO_livehd.html">LiveHD</a><a class="" href="TODO_hhds.html">HHDS</a></nav>
 <main>
 <h1 id="todo">TODO</h1>
 <h2 id="pending-goals-at-a-glance">Pending goals at a glance</h2>
@@ -99,7 +99,8 @@ N. Each badge links to the full entry. <strong>HHDS has no open goals.</strong><
 <h3 id="pending-pyrope">Pyrope — <a href="TODO_prp.html">TODO_prp.html</a></h3>
 <ul>
 <li><em>Group 1:</em><ul>
-<li><a class="xref" href="TODO_prp.html#item-1q">1q</a> Pyrope <code>pipe</code> construct — Phase 1: declaration → flopped outputs. Remaining: <a class="xref" href="TODO_prp.html#item-1q-D">1q-D</a> LG pass1 σ/Tarjan check + narrowing.</li>
+<li><a class="xref" href="TODO_prp.html#item-1q">1q</a> Pyrope <code>pipe</code> construct — Phase 1: declaration → flopped outputs. Remaining: <a class="xref" href="TODO_prp.html#item-1q-D">1q-D</a> LG pass1 σ/Tarjan check + narrowing (absorbed by the joint typecheck follow-up of <a class="xref" href="TODO_mod.html#item-1r">1r</a>).</li>
+<li><a class="xref" href="TODO_mod.html#item-1r">1r</a> Pyrope <code>mod</code> construct — structural phase: declared per-output latency (<code>x:u8@[N]</code>), <code>stage[N]</code> delays, Sub-instance call sites, LEC equiv tests. Own file: <a href="TODO_mod.html">TODO_mod.html</a>.</li>
 <li><a class="xref" href="TODO_prp.html#item-1m">1m</a> Pyrope <code>import</code> statement — <strong>deferred</strong> (substantial new infra: grammar, lowering, file-wrapper trees, <code>find_tree</code> resolution).</li>
 </ul></li>
 <li><em>Group 2:</em><ul>

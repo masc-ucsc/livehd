@@ -117,10 +117,16 @@ void Bitwidth::set_bits_sign(hhds::Pin_class& dpin, const Bitwidth_range& bw) {
     return;
   }
   auto b = bw.get_sbits();
+  const auto declared_bits = bits_of(dpin);
+  if ((is_graph_input_pin(dpin) || is_graph_output_pin(dpin)) && declared_bits != 0) {
+    // Top-level IO widths are fixed by the source RTL interface. Do not let
+    // abstract signed range inference widen a declared 1-bit signed control
+    // port to the overflow sentinel width (e.g. clock/reset -> 32768 bits).
+    b = declared_bits;
+  }
   set_bits(dpin, b);
   if (bw.is_always_positive() && b > 0) {
     set_unsign(dpin);
-    I(b > 1);
   } else {
     set_sign(dpin);
   }
@@ -1378,37 +1384,9 @@ void Bitwidth::bw_pass(hhds::Graph* g) {
       }
     }
 
-    // Update graph IO bits from final bwmap.
-    if (gio) {
-      for (const auto& d : gio->get_input_pin_decls()) {
-        auto pin = g->get_input_pin(d.name);
-        if (pin.is_invalid()) {
-          continue;
-        }
-        auto it = bwmap.find(pin.get_class_index());
-        if (it != bwmap.end()) {
-          set_bits_sign(pin, it->second);
-        }
-      }
-      for (const auto& d : gio->get_output_pin_decls()) {
-        auto out_sink = g->get_output_pin(d.name);
-        if (out_sink.is_invalid()) {
-          continue;
-        }
-        auto inps = out_sink.inp_edges();
-        if (inps.empty()) {
-          continue;
-        }
-        auto out_driver = inps.front().driver;
-        auto it         = bwmap.find(out_driver.get_class_index());
-        if (it == bwmap.end()) {
-          continue;
-        }
-        set_bits_sign(out_sink, it->second);
-        const Bitwidth_range src_bw = it->second;
-        bwmap.insert_or_assign(out_sink.get_class_index(), src_bw);
-      }
-    }
+    // Top-level IO widths are the source RTL interface contract. Keep them
+    // unchanged here; inferred internal ranges may be wider than the external
+    // port expression width and must not be propagated back to GraphIO pins.
 
     if (discovered_some_backward_nodes_try_again && n_iterations < max_iterations) {
       Pass::info("BW-> some nodes need to back propagate width\n");
@@ -1421,29 +1399,7 @@ void Bitwidth::bw_pass(hhds::Graph* g) {
     }
   }
 
-  // Propagate IO bits back to the GraphIO declarations.
   if (!hier && !not_finished && gio) {
-    for (const auto& d : gio->get_input_pin_decls()) {
-      auto pin = g->get_input_pin(d.name);
-      if (pin.is_invalid()) {
-        continue;
-      }
-      auto b = bits_of(pin);
-      if (b && gio->has_input(d.name)) {
-        gio->set_bits(d.name, b);
-      }
-    }
-    for (const auto& d : gio->get_output_pin_decls()) {
-      auto out_sink = g->get_output_pin(d.name);
-      if (out_sink.is_invalid()) {
-        continue;
-      }
-      auto b = bits_of(out_sink);
-      if (b && gio->has_output(d.name)) {
-        gio->set_bits(d.name, b);
-      }
-    }
-
     // Delete leftover AttrSet nodes.
     std::vector<hhds::Node_class> attrs;
     for (auto node : g->fast_class()) {
