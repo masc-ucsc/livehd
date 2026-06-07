@@ -1060,6 +1060,7 @@ bool uPass_runner::try_inline_func_call() {
   // Snapshot the call-site source span (cursor is on the func_call node) so the
   // argument-naming diagnostics below can point at the call line. Read from the
   // source tree (prp2lnast's attach_loc survives the lnastfmt round-trip).
+  const auto         call_nid = lm->get_current_nid();  // func_call node in the source tree
   livehd::diag::Span call_span;
   {
     const auto& src_ln = lm->get_lnast();
@@ -1232,6 +1233,53 @@ bool uPass_runner::try_inline_func_call() {
         // the receiver-drop never decouples from namespace detection if the
         // error path ever stops being fatal.
         drop_ufcs_receiver = namespace_access;
+      }
+    }
+  }
+  // A callee with no declared outputs (`-> ()`) produces no value, so its call
+  // result must not be consumed (`const a = top()` — the named_tuple.prp bug:
+  // the old implicit-return sugar made the body's locals leak out as a return
+  // tuple). Detect consumption by scanning the call's following siblings in
+  // the SOURCE tree for a read of the dst tmp. Checked here — before the
+  // inlinable/fuel gates — so pure zero-output callees that are never spliced
+  // error too. Only prp2lnast's `___N` call tmps are checked (hand-built .ln
+  // trees may bind named dsts); the ctor splice synthesizes a never-read dst.
+  // Read the outputs off the callee's io NODE, not io_meta — io_meta is only
+  // populated by the SSA upass, so it is indistinguishably empty when SSA is
+  // disabled (upass.ssa=false dev/test runs would mis-flag every callee).
+  const auto callee_has_no_outputs = [&]() -> bool {
+    const auto io_nid = callee->get_first_child(callee->get_root());
+    if (io_nid.is_invalid() || !Lnast_ntype::is_io(callee->get_type(io_nid))) {
+      return false;  // no io node (hand-built tree) — outputs unknown, don't flag
+    }
+    const auto in_tup = callee->get_first_child(io_nid);
+    if (in_tup.is_invalid()) {
+      return false;  // malformed io — don't flag
+    }
+    const auto out_tup = callee->get_sibling_next(in_tup);
+    return out_tup.is_invalid() || callee->get_first_child(out_tup).is_invalid();
+  };
+  if (!is_ctor_call && callee_has_no_outputs()) {
+    const auto& src_ln  = lm->get_lnast();
+    const auto  dst_raw = src_ln->get_name(src_ln->get_first_child(call_nid));
+    if (prp_is_tmp_name(dst_raw)) {
+      bool consumed = false;
+      for (auto sib = src_ln->get_sibling_next(call_nid); sib.is_valid() && !consumed; sib = src_ln->get_sibling_next(sib)) {
+        for (const auto& nid : src_ln->depth_preorder(sib)) {
+          if (nid.is_invalid()) {
+            continue;
+          }
+          if (Lnast_ntype::is_ref(src_ln->get_type(nid)) && src_ln->get_name(nid) == dst_raw) {
+            consumed = true;
+            break;
+          }
+        }
+      }
+      if (consumed) {
+        fcall_arg_fail(call_span,
+                       "fcall-no-output",
+                       std::format("`{}` declares no outputs (`-> ()`); its call returns nothing to bind", callee_name),
+                       "drop the result binding, or declare outputs in the callee: `-> (res)`");
       }
     }
   }

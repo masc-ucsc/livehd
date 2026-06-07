@@ -3297,7 +3297,53 @@ void Prp2lnast::process_lambda_statement_named(TSNode n, std::string_view hoist_
     }
   }
 
-  Lnast_node lambda_ref = !hoist_name.empty()          ? Lnast_node::create_ref(hoist_name)
+  // 06-functions.md "Output tuple": outputs are always declared explicitly —
+  // `-> (out, …)`, or `-> ()` for none. A missing `->` clause is a compile
+  // error, never an implicit "no outputs": the old last-expression /
+  // implicit-return sugar is gone, so an undeclared-output lambda can only be
+  // a mistake (its caller has nothing to bind — see named_tuple.prp history).
+  // Exemption: `self` methods (first input param named `self`, `ref` or not)
+  // act through the receiver — setters, ctors, or debug-only prints/asserts —
+  // and may omit the clause.
+  if (!ts_node_is_null(fdef)) {
+    bool has_output_clause = false;
+    for (uint32_t i = 0; i < child_count(fdef); i++) {
+      const char* fname = ts_node_field_name_for_child(fdef, i);
+      if (fname && std::string_view(fname) == "output") {
+        has_output_clause = true;  // the `->` anchor token carries the field tag
+        break;
+      }
+    }
+    if (!has_output_clause) {
+      bool   first_param_is_self = false;
+      TSNode inp                 = child_by_field(fdef, "input");
+      if (!ts_node_is_null(inp)) {
+        for (uint32_t i = 0; i < child_count(inp); i++) {
+          TSNode ci = child(inp, i);
+          if (std::string_view(ts_node_type(ci)) != "typed_identifier") {
+            continue;
+          }
+          TSNode id           = child_by_field(ci, "identifier");
+          first_param_is_self = !ts_node_is_null(id) && trim(get_text(id)) == "self";
+          break;  // only the FIRST param can be the receiver
+        }
+      }
+      if (!first_param_is_self) {
+        // Prefer the SOURCE name; hoisted in-tuple methods fall back to the
+        // mangled hoist name only when anonymous.
+        std::string lname(!ts_node_is_null(name_node) ? trim(get_text(name_node))
+                          : !hoist_name.empty()       ? hoist_name
+                                                      : std::string_view{"lambda"});
+        report_error(n,
+                     "lambda-missing-output",
+                     "syntax",
+                     std::format("`{}` declares no outputs: the `-> (...)` output list is missing", lname),
+                     "declare the outputs explicitly; use `-> ()` for a lambda with no outputs");
+      }
+    }
+  }
+
+  Lnast_node lambda_ref = !hoist_name.empty()        ? Lnast_node::create_ref(hoist_name)
                           : ts_node_is_null(name_node) ? builder.mint_tmp_ref()
                                                        : Lnast_node::create_ref(get_text(name_node));
 
