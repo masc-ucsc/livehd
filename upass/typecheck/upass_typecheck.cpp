@@ -76,6 +76,19 @@ uPass_typecheck::Kind uPass_typecheck::kind_of(std::string_view name) const {
   return it == kind_map.end() ? Kind::unknown : it->second;
 }
 
+Io_kind uPass_typecheck::provide_scalar_kind(std::string_view name) {
+  // Task 1g — map the kind lattice onto the coarser Io_kind the shared-ST seam
+  // speaks. Only the three scalar kinds carry over; range/tuple/nil/unknown
+  // report `none` (constprop detects tuples via the symbol table and nil via
+  // the literal, and treats `none` as "kind unknown" → skips the kind half).
+  switch (kind_of(name)) {
+    case Kind::integer: return Io_kind::integer;
+    case Kind::boolean: return Io_kind::boolean;
+    case Kind::string : return Io_kind::string;
+    default           : return Io_kind::none;
+  }
+}
+
 void uPass_typecheck::set_kind(std::string_view name, Kind k) {
   if (name.empty()) {
     return;

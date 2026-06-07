@@ -67,6 +67,25 @@ protected:
   // when they differ it reports and aborts (does not return).
   void check_decl_init_kind(std::string_view name, const Lnast_node& value, TSNode inner_type, const TSNode& anchor) const;
 
+  // 1g — primitive type token (`u32`/`s8`/`i4`/`int`/`integer`/`uint`/
+  // `unsigned`/`bool`/`string`) as it appears in does/equals/case operand
+  // position (plain `identifier` there — the grammar's *_type nodes only
+  // exist in type contexts).
+  static bool is_prim_type_token(std::string_view txt);
+  // 1g — lower one `does`/`equals`/`case` operand. An integer type-call
+  // (`int(max=…,min=…)` / `u8(min=…)`) lowers to a
+  // `declare(tmp, prim_type_int(max,min), 'type')` and returns the tmp ref; a
+  // bare type-token identifier returns a ref WITHOUT registering a read site
+  // (constprop decodes the name to kind+envelope; a real variable of that
+  // name — e.g. `i2` — still wins because the fold consults the symbol
+  // table / type-info first). Anything else falls through to expr_to_node.
+  Lnast_node does_operand_to_node(TSNode n);
+  // 1g — shared by emit_int_type_call (declare side) and does_operand_to_node
+  // (operand side): classify an integer type keyword and refine its (max,min)
+  // bounds from a `(max=…, min=…, bits=…)` argument tuple. Returns false when
+  // `kw` is not an integer type keyword.
+  bool int_type_call_bounds(std::string_view kw, TSNode tup, std::string& max_txt, std::string& min_txt);
+
   // Reject `a = 3` with no prior `mut`/`const`/declare (or param/output) visible
   // in scope. Runs on the producer tree (pre-upass), so it sees only source-level
   // declarations — no inliner/SSA-synthesized stores to false-positive on.

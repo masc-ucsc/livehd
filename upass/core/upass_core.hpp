@@ -119,6 +119,16 @@ public:
   };
   virtual std::optional<Field_decl_type> provide_field_type(std::string_view /*name*/) { return std::nullopt; }
 
+  // Task 1g — inferred scalar KIND of a variable (integer/boolean/string),
+  // even when it carries no explicit `:type` annotation. uPass_typecheck owns
+  // the kind lattice (it infers `const b = true` as boolean, `mut i = 10` as
+  // integer — a distinction Lconst cannot make, since `true` stores as the
+  // integer 1). constprop's type-aware `does`/`equals` fold consults this to
+  // reject cross-kind comparisons (`int does bool` → false). Returns
+  // `Io_kind::none` when the kind is not (yet) known. See uPass::provide_field_type
+  // for the declared-range half.
+  virtual Io_kind provide_scalar_kind(std::string_view /*name*/) { return Io_kind::none; }
+
   // Task 1k — declared storage class of a variable. The inliner uses this to
   // reject a `const` or `type` binding as a `ref` actual (incl. the UFCS
   // receiver of a `ref self` method): a ref param writes back, so the actual
@@ -153,6 +163,25 @@ public:
   // their process_* without disturbing the in-progress traversal.
   using Emit_at_fn = std::function<void(const Lnast_nid&)>;
   void set_runner_emit_at_fn(Emit_at_fn fn) { runner_emit_at_fn = std::move(fn); }
+
+  // Task 1g — runner-supplied combined scalar-type query for a variable name,
+  // aggregating the two shared-ST seams so a single pass (constprop's
+  // type-aware `does`/`equals` fold) sees both halves without reaching across
+  // passes itself: KIND from uPass_typecheck (`provide_scalar_kind` — infers
+  // bool vs int even for un-annotated vars) and the declared integer ENVELOPE
+  // from uPass_attributes (`provide_field_type` — `range_max`/`range_min`,
+  // present only for explicitly-typed vars). `annotated` is true when an
+  // explicit `:type` pinned a finite bound. An un-annotated integer var thus
+  // reads kind=integer with annotated=false → the fold treats it as an
+  // unbounded envelope (superset of any int), matching the 1g ruling.
+  struct Scalar_type_query {
+    Io_kind              kind{Io_kind::none};
+    std::optional<Const> range_max;
+    std::optional<Const> range_min;
+    bool                 annotated{false};
+  };
+  using Type_query_fn = std::function<Scalar_type_query(std::string_view)>;
+  void set_runner_type_query_fn(Type_query_fn fn) { runner_type_query_fn = std::move(fn); }
 
   // Runner-owned symbol table (step C of upass redesign). Set once at
   // construction. Passes that migrate to the shared symbol table read/write
@@ -323,6 +352,7 @@ protected:
   std::shared_ptr<Lnast_manager>& lm;
   Fold_fn                         runner_fold_fn;
   Emit_at_fn                      runner_emit_at_fn;
+  Type_query_fn                   runner_type_query_fn;
   Symbol_table*                   runner_st{nullptr};
 
   void move_to_nid(const Lnast_nid& nid) { lm->move_to_nid(nid); }

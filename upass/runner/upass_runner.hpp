@@ -144,6 +144,10 @@ protected:
   // Declared kind + range of a dotted field path (`t1.a`). First pass that
   // provides wins. See uPass::provide_field_type (task 1k).
   std::optional<upass::uPass::Field_decl_type>              try_field_type(std::string_view name);
+  // Task 1g — inferred scalar kind of a variable (bool vs int even when
+  // un-annotated). First pass returning a non-none kind wins (typecheck).
+  // See uPass::provide_scalar_kind.
+  Io_kind                                                   try_scalar_kind(std::string_view name);
   // Declared storage class (mut/const/reg/type) of a variable. First pass
   // that provides a non-unknown answer wins. See uPass::provide_decl_storage
   // (task 1k ref-actual mutability).

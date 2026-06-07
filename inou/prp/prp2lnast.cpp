@@ -4755,6 +4755,141 @@ Lnast_node Prp2lnast::type_specification_to_node(TSNode n) {
   return aref;
 }
 
+bool Prp2lnast::int_type_call_bounds(std::string_view kw, TSNode tup, std::string& max_txt, std::string& min_txt) {
+  // Classify the base keyword → signedness and optional concrete width.
+  bool unsigned_base = false;
+  bool signed_base   = false;
+  if (kw == "uint" || kw == "unsigned") {
+    unsigned_base = true;
+  } else if (kw == "int" || kw == "integer") {
+    signed_base = true;
+  } else if (kw.size() >= 2 && kw[0] == 'u'
+             && std::all_of(kw.begin() + 1, kw.end(), [](unsigned char ch) { return std::isdigit(ch); })) {
+    unsigned_base = true;
+  } else if (kw.size() >= 2 && (kw[0] == 's' || kw[0] == 'i')
+             && std::all_of(kw.begin() + 1, kw.end(), [](unsigned char ch) { return std::isdigit(ch); })) {
+    signed_base = true;
+  } else {
+    return false;
+  }
+  auto bits_to_bounds = [&](int n, std::string& maxt, std::string& mint) {
+    if (signed_base) {
+      maxt = std::string(Dlop::get_mask_value(n - 1)->to_pyrope());
+      mint = std::string(Dlop::get_neg_mask_value(n - 1)->to_pyrope());
+    } else {
+      maxt = std::string(Dlop::get_mask_value(n)->to_pyrope());
+      mint = "0";
+    }
+  };
+  if (unsigned_base) {
+    min_txt = "0";
+  }
+  // Concrete width sugar (`u8(min=…)`): seed bounds from the width first.
+  if (kw.size() >= 2 && (kw[0] == 'u' || kw[0] == 's' || kw[0] == 'i') && std::isdigit(static_cast<unsigned char>(kw[1]))) {
+    bits_to_bounds(std::stoi(std::string(kw.substr(1))), max_txt, min_txt);
+  }
+  // Refine with the named args.
+  uint32_t nn = ts_node_named_child_count(tup);
+  for (uint32_t i = 0; i < nn; i++) {
+    TSNode           item = ts_node_named_child(tup, i);
+    std::string_view it(ts_node_type(item));
+    if (it != "assignment" && it != "attribute_assignment") {
+      continue;
+    }
+    TSNode lv = child_by_field(item, "lvalue");
+    TSNode rv = child_by_field(item, "rvalue");
+    if (ts_node_is_null(lv) || ts_node_is_null(rv)) {
+      continue;
+    }
+    std::string key(trim(get_text(lv)));
+    std::string val(trim(get_text(rv)));
+    if (key == "range") {
+      // No `range` type argument — it would be pure sugar for max/min, so it
+      // is rejected to keep a single way to bound an integer type.
+      report_error(item,
+                   "int-type-range",
+                   "type",
+                   std::format("`{}(range=…)` is not a valid integer type bound", kw),
+                   "bound the type with `max=`/`min=` (e.g. `int(max=15, min=0)`) or a width type `u4`/`s5`");
+    }
+    if (key == "max") {
+      max_txt = val;
+    } else if (key == "min") {
+      min_txt = val;
+    } else if (key == "bits") {
+      auto bv = Dlop::from_pyrope(val);
+      if (bv->is_i()) {
+        bits_to_bounds(static_cast<int>(bv->to_i()), max_txt, min_txt);
+      }
+    }
+  }
+  return true;
+}
+
+bool Prp2lnast::is_prim_type_token(std::string_view txt) {
+  if (txt == "int" || txt == "integer" || txt == "uint" || txt == "unsigned" || txt == "bool" || txt == "string") {
+    return true;
+  }
+  return txt.size() >= 2 && (txt[0] == 'u' || txt[0] == 's' || txt[0] == 'i')
+         && std::all_of(txt.begin() + 1, txt.end(), [](unsigned char ch) { return std::isdigit(ch); });
+}
+
+Lnast_node Prp2lnast::does_operand_to_node(TSNode n) {
+  std::string_view t(ts_node_type(n));
+  if (t == "identifier") {
+    auto name = trim(get_text(n));
+    if (is_prim_type_token(name)) {
+      // Type-token operand (`a does u32`): a bare ref with NO read site —
+      // check_undefined_reads must not demand a variable here. constprop
+      // decodes the name to kind+envelope; a real variable of this name
+      // (e.g. `i2`) still wins because the fold consults the symbol table /
+      // type-info first.
+      return Lnast_node::create_ref(name);
+    }
+  } else if (t == "function_call_expression") {
+    TSNode fn  = child_by_field(n, "function");
+    TSNode arg = child_by_field(n, "argument");
+    if (!ts_node_is_null(fn) && !ts_node_is_null(arg) && std::string_view(ts_node_type(fn)) == "identifier"
+        && std::string_view(ts_node_type(arg)) == "tuple") {
+      // Only the named-arg form is a type literal — `u8(3)` stays a
+      // constructor cast. Require ≥1 argument, all `max=`/`min=`/`bits=`.
+      uint32_t nn       = ts_node_named_child_count(arg);
+      bool     all_size = nn >= 1;
+      for (uint32_t i = 0; i < nn && all_size; i++) {
+        TSNode           item = ts_node_named_child(arg, i);
+        std::string_view it(ts_node_type(item));
+        if (it != "assignment" && it != "attribute_assignment") {
+          all_size = false;
+          break;
+        }
+        TSNode lv = child_by_field(item, "lvalue");
+        if (ts_node_is_null(lv)) {
+          all_size = false;
+          break;
+        }
+        auto key = trim(get_text(lv));
+        all_size = (key == "max" || key == "min" || key == "bits");
+      }
+      std::string max_txt;
+      std::string min_txt;
+      if (all_size && int_type_call_bounds(trim(get_text(fn)), arg, max_txt, min_txt)) {
+        // Integer type-call (`int(max=…)`): declare a type tmp carrying the
+        // canonical prim_type_int(max,min); the fold reads it back through
+        // the attributes Type_info seam exactly like a declared variable.
+        auto didx = builder.add_child(Lnast_ntype::create_declare());
+        auto ref  = builder.mint_tmp_ref();
+        lnast->add_child(didx, ref);
+        auto pt = lnast->add_child(didx, Lnast_ntype::create_prim_type_int());
+        lnast->add_child(pt, Lnast_node::create_const(max_txt.empty() ? "nil" : max_txt));
+        lnast->add_child(pt, Lnast_node::create_const(min_txt.empty() ? "nil" : min_txt));
+        lnast->add_child(didx, Lnast_node::create_const("type"));
+        return ref;
+      }
+    }
+  }
+  return expr_to_node(n);
+}
+
 bool Prp2lnast::emit_int_type_call(const Lnast_node& target, TSNode type_cast_node) {
   // Recognize the integer type-call `int(max=,min=,bits=)` / `uint(bits=)` /
   // `uN(min=…)`. Because `int`/`uint`/`uN` are keyword tokens, the grammar
@@ -4809,75 +4944,10 @@ bool Prp2lnast::emit_int_type_call(const Lnast_node& target, TSNode type_cast_no
   if (!have_tup) {
     return false;
   }
-  // Classify the base keyword → signedness and optional concrete width.
-  std::string kw(trim(get_text(prim)));
-  bool        unsigned_base = false;
-  bool        signed_base   = false;
-  if (kw == "uint" || kw == "unsigned") {
-    unsigned_base = true;
-  } else if (kw == "int" || kw == "integer") {
-    signed_base = true;
-  } else if (kw.size() >= 2 && kw[0] == 'u'
-             && std::all_of(kw.begin() + 1, kw.end(), [](unsigned char ch) { return std::isdigit(ch); })) {
-    unsigned_base = true;
-  } else if (kw.size() >= 2 && (kw[0] == 's' || kw[0] == 'i')
-             && std::all_of(kw.begin() + 1, kw.end(), [](unsigned char ch) { return std::isdigit(ch); })) {
-    signed_base = true;
-  } else {
-    return false;
-  }
-  auto bits_to_bounds = [&](int n, std::string& max_txt, std::string& min_txt) {
-    if (signed_base) {
-      max_txt = std::string(Dlop::get_mask_value(n - 1)->to_pyrope());
-      min_txt = std::string(Dlop::get_neg_mask_value(n - 1)->to_pyrope());
-    } else {
-      max_txt = std::string(Dlop::get_mask_value(n)->to_pyrope());
-      min_txt = "0";
-    }
-  };
   std::string max_txt;
   std::string min_txt;
-  if (unsigned_base) {
-    min_txt = "0";
-  }
-  // Concrete width sugar (`u8(min=…)`): seed bounds from the width first.
-  if (kw.size() >= 2 && (kw[0] == 'u' || kw[0] == 's' || kw[0] == 'i') && std::isdigit(static_cast<unsigned char>(kw[1]))) {
-    bits_to_bounds(std::stoi(kw.substr(1)), max_txt, min_txt);
-  }
-  // Refine with the named args.
-  uint32_t nn = ts_node_named_child_count(tup);
-  for (uint32_t i = 0; i < nn; i++) {
-    TSNode           item = ts_node_named_child(tup, i);
-    std::string_view it(ts_node_type(item));
-    if (it != "assignment" && it != "attribute_assignment") {
-      continue;
-    }
-    TSNode lv = child_by_field(item, "lvalue");
-    TSNode rv = child_by_field(item, "rvalue");
-    if (ts_node_is_null(lv) || ts_node_is_null(rv)) {
-      continue;
-    }
-    std::string key(trim(get_text(lv)));
-    std::string val(trim(get_text(rv)));
-    if (key == "range") {
-      // No `range` type argument — it would be pure sugar for max/min, so it
-      // is rejected to keep a single way to bound an integer type.
-      report_error(item,
-                   "int-type-range",
-                   "type",
-                   std::format("`{}(range=…)` is not a valid integer type bound", kw),
-                   "bound the type with `max=`/`min=` (e.g. `int(max=15, min=0)`) or a width type `u4`/`s5`");
-    }
-    if (key == "max") {
-      max_txt = val;
-    } else if (key == "min") {
-      min_txt = val;
-    } else if (key == "bits") {
-      auto bv = Dlop::from_pyrope(val);
-      if (bv->is_i()) {
-        bits_to_bounds(static_cast<int>(bv->to_i()), max_txt, min_txt);
-      }
-    }
+  if (!int_type_call_bounds(trim(get_text(prim)), tup, max_txt, min_txt)) {
+    return false;
   }
   auto ts_idx = builder.add_child(Lnast_ntype::create_type_spec());
   lnast->add_child(ts_idx, target);
@@ -5507,8 +5577,21 @@ Lnast_node Prp2lnast::binary_expr_to_node(TSNode n) {
       ops.push_back({tier, ts_node_is_null(inner) ? std::string_view{} : std::string_view(ts_node_type(inner)), c});
     } else {
       operand_nodes.push_back(c);
-      operands.push_back(expr_to_node(c));
     }
+  }
+
+  // Convert operands AFTER the op kinds are known: an operand adjacent to a
+  // `does`/`equals`/`case` operator is in type position (1g) — a primitive
+  // type token there is a type literal, not a variable read. Conversion stays
+  // in source order, so helper-stmt emission order is unchanged.
+  auto is_type_pos_op = [](std::string_view k) {
+    return k == "op_does" || k == "op_not_does" || k == "op_case" || k == "op_not_case" || k == "op_equals"
+           || k == "op_not_equals";
+  };
+  for (size_t j = 0; j < operand_nodes.size(); ++j) {
+    const bool type_pos = (j > 0 && j - 1 < ops.size() && is_type_pos_op(ops[j - 1].kind))
+                          || (j < ops.size() && is_type_pos_op(ops[j].kind));
+    operands.push_back(type_pos ? does_operand_to_node(operand_nodes[j]) : expr_to_node(operand_nodes[j]));
   }
 
   if (ops.empty()) {
@@ -6240,6 +6323,11 @@ Lnast_node Prp2lnast::match_expr_to_node(TSNode n, bool need_result) {
           return neg_ref;
         };
 
+        // 1g — `does`/`case` arm patterns are in type position: a primitive
+        // type token (`does u32 { … }`) is a type literal, not a variable.
+        auto arm_rhs_to_node = [&](TSNode rhs) {
+          return (use_does || use_case) ? does_operand_to_node(rhs) : expr_to_node(rhs);
+        };
         Lnast_node       arm_cond;
         // Legacy grammar emitted an `expression_list` wrapper (multi-RHS arms);
         // the new grammar exposes the bare expression directly. Handle both.
@@ -6249,17 +6337,17 @@ Lnast_node Prp2lnast::match_expr_to_node(TSNode n, bool need_result) {
           if (nnc == 0) {
             arm_cond = emit_compare(constant_text_to_node(trim(get_text(pending_expr))));
           } else if (nnc == 1) {
-            arm_cond = emit_compare(expr_to_node(ts_node_named_child(pending_expr, 0)));
+            arm_cond = emit_compare(arm_rhs_to_node(ts_node_named_child(pending_expr, 0)));
           } else {
             auto or_idx = builder.add_child(Lnast_ntype::create_log_or());
             arm_cond    = builder.mint_tmp_ref();
             lnast->add_child(or_idx, arm_cond);
             for (uint32_t j = 0; j < nnc; j++) {
-              lnast->add_child(or_idx, emit_compare(expr_to_node(ts_node_named_child(pending_expr, j))));
+              lnast->add_child(or_idx, emit_compare(arm_rhs_to_node(ts_node_named_child(pending_expr, j))));
             }
           }
         } else {
-          arm_cond = emit_compare(expr_to_node(pending_expr));
+          arm_cond = emit_compare(arm_rhs_to_node(pending_expr));
         }
         arms.push_back({arm_cond, c});
         have_pending = false;
@@ -7196,12 +7284,14 @@ Lnast_node Prp2lnast::tuple_to_node(TSNode n, bool /*is_square*/) {
         TSNode ty = child_by_field(it.type_cast_node, "type");
         if (!ts_node_is_null(ty)) {
           std::string_view tt(ts_node_type(ty));
-          if (tt == "uint_type" || tt == "sint_type") {
+          if (tt == "uint_type" || tt == "sint_type" || tt == "bool_type" || tt == "string_type") {
             // Task 1t — `a:u4` is sugar for `a:int(max=15,min=0)`. Emit the
-            // canonical `prim_type_int(max,min)` type node via a `type_spec` on
-            // the field's tuple_get tmp (was a bare `ubits`/`sbits` attr_set).
-            // Downstream passes only ever see `prim_type_int`; `bits`/`sign`
-            // derive from the range.
+            // canonical prim_type node via a `type_spec` on the field's
+            // tuple_get tmp (was a bare `ubits`/`sbits` attr_set). emit_type_expr
+            // maps uint/sint→prim_type_int (bits/sign derive from the range),
+            // bool→prim_type_bool, string→prim_type_string — so a typed field's
+            // kind is recorded for the 1g per-field `does`/`equals`/`case` check
+            // (previously only integer field types survived).
             auto ts_idx = builder.add_child(Lnast_ntype::create_type_spec());
             lnast->add_child(ts_idx, tg_ref);
             emit_type_expr(ts_idx, ty);

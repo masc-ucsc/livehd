@@ -35,6 +35,13 @@ public:
 
   void begin_iteration() override { kind_map.clear(); }
 
+  // Task 1g — expose the inferred scalar kind so constprop's type-aware
+  // `does`/`equals` fold can reject cross-kind comparisons (bool vs int) on
+  // variables that carry no `:type` annotation (where attributes' Type_info is
+  // silent). Read-only: just surfaces the kind_map established during the walk.
+  Io_kind provide_scalar_kind(std::string_view name) override;
+  bool    overrides_shared_st() const override { return true; }
+
   // Declarations record a variable's declared kind.
   void process_declare() override;
   void process_type_spec() override;

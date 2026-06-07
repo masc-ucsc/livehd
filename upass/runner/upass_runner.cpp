@@ -184,9 +184,28 @@ uPass_runner::uPass_runner(std::shared_ptr<upass::Lnast_manager>& _lm, const std
   // list and each pass can pick the options it recognizes.
   auto fold_fn    = [this](std::string_view name) { return try_fold_ref(name); };
   auto emit_at_fn = [this](const Lnast_nid& src) { emit_op_with_fold_at(src); };
+  // Task 1g — combined scalar-type query: KIND from typecheck (handles
+  // un-annotated vars), declared integer ENVELOPE from attributes. Evaluated
+  // lazily (during the walk), so shared_st_passes_ — populated by the loop
+  // just below — is already complete by the time constprop's `does` fold
+  // invokes it.
+  auto type_query_fn = [this](std::string_view name) {
+    upass::uPass::Scalar_type_query q;
+    q.kind = try_scalar_kind(name);
+    if (auto ft = try_field_type(name)) {
+      if (q.kind == Io_kind::none) {
+        q.kind = ft->kind;
+      }
+      q.range_max = ft->range_max;
+      q.range_min = ft->range_min;
+      q.annotated = ft->range_max.has_value() || ft->range_min.has_value();
+    }
+    return q;
+  };
   for (auto& entry : upasses) {
     entry.pass->set_runner_fold_fn(fold_fn);
     entry.pass->set_runner_emit_at_fn(emit_at_fn);
+    entry.pass->set_runner_type_query_fn(type_query_fn);
     entry.pass->set_runner_symbol_table(&runner_symbol_table);
     entry.pass->set_options(options);
   }
@@ -396,6 +415,15 @@ std::optional<upass::uPass::Field_decl_type> uPass_runner::try_field_type(std::s
     }
   }
   return std::nullopt;
+}
+
+Io_kind uPass_runner::try_scalar_kind(std::string_view name) {
+  for (auto* p : shared_st_passes_) {
+    if (auto k = p->provide_scalar_kind(name); k != Io_kind::none) {
+      return k;
+    }
+  }
+  return Io_kind::none;
 }
 
 upass::uPass::Decl_storage uPass_runner::try_decl_storage(std::string_view name) {

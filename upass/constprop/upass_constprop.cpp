@@ -871,40 +871,6 @@ static bool structural_does(const std::shared_ptr<Bundle const>& a, const std::s
   return true;
 }
 
-// Structural-only `a equals b` check.
-//
-// `equals` is "same positional shape, ignoring values and specific names":
-// at each top-level position, both sides must be named-or-both-unnamed.
-// Specific names on named slots and the values themselves don't have to
-// match. So `(x=1,d=4) equals (d=7,x=100)` is true (same shape: 2 named
-// slots), `(x=1,4) equals (d=4,100)` is true (named@0, unnamed@1 on both),
-// and `(x=1,4) !equals (100,d=4)` (shape differs: named@0/unnamed@1 vs
-// unnamed@0/named@1).
-static bool structural_equals(const std::shared_ptr<Bundle const>& a, const std::shared_ptr<Bundle const>& b) {
-  // Structural equality is:
-  //   - same SET of named-entry first-level names
-  //   - same SET of unnamed-entry first-level positions
-  // top_levels() yields one entry per first-level segment in canonical
-  // order, so a lockstep walk over the two views answers the question
-  // directly.
-  auto av = a->top_levels();
-  auto bv = b->top_levels();
-  if (av.size() != bv.size()) {
-    return false;
-  }
-  auto ita = av.begin();
-  auto itb = bv.begin();
-  for (; ita != av.end(); ++ita, ++itb) {
-    if (ita->pos != itb->pos) {
-      return false;
-    }
-    if (ita->name != itb->name) {
-      return false;
-    }
-  }
-  return true;
-}
-
 // process_eq / process_ne with bundle awareness. Falls back to the scalar
 // process_binary path when neither operand is a tracked bundle, so plain
 // integer compares are unchanged.
@@ -1516,42 +1482,334 @@ static bool has_first_level_shape(const std::shared_ptr<Bundle const>& b) {
   return b->has_named_top() || b->has_unnamed_top();
 }
 
-// Fold `dst = does(l, r)`. Cursor is currently on the const("does") fname
-// node. Walks forward to read l and r, decides the structural outcome, and
-// stores the boolean (/*FIXME-LCONST-CTOR*/Lconst(0/1)) in the symbol table for `dst`.
-//
-// We only fold the structural half today, and we require at least one side
-// to be *clearly* tuple-shaped (named field or ≥2 positional fields). If
-// neither side proves it's a tuple (e.g. both are single-position scalar
-// wrappers), we can't decide the outcome without type info — leave the
-// result unresolved rather than fold to a wrong answer.
+// Task 1g — decode a primitive type token (`u32`/`s8`/`i4`/`int`/`integer`/
+// `uint`/`unsigned`/`bool`/`string`) in `does`/`equals`/`case` operand
+// position to its kind+envelope. prp2lnast leaves these as a bare ref (no read
+// site) precisely so this decode can run. Returns nullopt for any other name.
+std::optional<uPass_constprop::Does_operand> uPass_constprop::decode_prim_type_token(std::string_view name) {
+  Does_operand op;
+  if (name == "bool") {
+    op.kind = Does_operand::Kind::boolean;
+    op.min  = *Dlop::create_integer(-1);
+    op.max  = *Dlop::create_integer(0);
+    return op;
+  }
+  if (name == "string") {
+    op.kind = Does_operand::Kind::string;
+    return op;
+  }
+  const bool is_u = (name == "uint" || name == "unsigned");
+  const bool is_s = (name == "int" || name == "integer");
+  if (is_u || is_s) {
+    op.kind    = Does_operand::Kind::integer;
+    op.max_inf = true;  // unsized → unbounded above
+    if (is_u) {
+      op.min = *Dlop::create_integer(0);  // unsigned floor
+    } else {
+      op.min_inf = true;  // signed → unbounded below
+    }
+    return op;
+  }
+  // Width sugar `u<N>` / `s<N>` / `i<N>`: bounds from the bit count.
+  if (name.size() >= 2 && (name[0] == 'u' || name[0] == 's' || name[0] == 'i')
+      && std::all_of(name.begin() + 1, name.end(), [](unsigned char ch) { return std::isdigit(ch); })) {
+    const int n = std::stoi(std::string(name.substr(1)));
+    op.kind     = Does_operand::Kind::integer;
+    if (name[0] == 'u') {
+      op.min = *Dlop::create_integer(0);
+      op.max = *Dlop::get_mask_value(n);  // 2^n - 1
+    } else {
+      op.max = *Dlop::get_mask_value(n - 1);      // 2^(n-1) - 1
+      op.min = *Dlop::get_neg_mask_value(n - 1);  // -2^(n-1)
+    }
+    return op;
+  }
+  return std::nullopt;
+}
+
+std::shared_ptr<Bundle> uPass_constprop::single_positional_bundle(const Const& v) {
+  auto b = std::make_shared<Bundle>("__does_scalar");
+  b->set("0", v);
+  return b;
+}
+
+// Resolve the operand at the current cursor (a ref or const) for a type-aware
+// `does`/`equals`. nullopt means "undecidable this walk" — the caller defers.
+std::optional<uPass_constprop::Does_operand> uPass_constprop::resolve_does_operand() {
+  Does_operand op;
+  if (is_type(Lnast_ntype::Lnast_ntype_const)) {
+    auto txt = current_text();
+    if (txt == "nil") {
+      op.kind = Does_operand::Kind::nil;
+      return op;
+    }
+    if (txt == "true" || txt == "false") {
+      op.kind      = Does_operand::Kind::boolean;
+      op.min       = *Dlop::create_integer(-1);
+      op.max       = *Dlop::create_integer(0);
+      op.value     = *Dlop::create_bool(txt == "true");
+      op.has_value = true;
+      return op;
+    }
+    auto v = Dlop::from_pyrope(txt);
+    if (v->is_nil()) {
+      op.kind = Does_operand::Kind::nil;
+      return op;
+    }
+    if (v->is_string()) {
+      op.kind      = Does_operand::Kind::string;
+      op.value     = *v;
+      op.has_value = true;
+      return op;
+    }
+    if (v->is_bool()) {
+      op.kind      = Does_operand::Kind::boolean;
+      op.min       = *Dlop::create_integer(-1);
+      op.max       = *Dlop::create_integer(0);
+      op.value     = *v;
+      op.has_value = true;
+      return op;
+    }
+    if (v->is_integer()) {
+      // Literal `v` → the point envelope [v, v] (1g ruling).
+      op.kind      = Does_operand::Kind::integer;
+      op.max       = *v;
+      op.min       = *v;
+      op.value     = *v;
+      op.has_value = true;
+      return op;
+    }
+    return std::nullopt;  // unknown-bit / undecidable literal
+  }
+
+  if (!is_type(Lnast_ntype::Lnast_ntype_ref)) {
+    return std::nullopt;
+  }
+  auto name = current_text();
+  // A real variable wins over a type-token spelling — Pyrope allows a variable
+  // literally named `i3` (a 3-bit-signed type token) or `u8`. Gather the var's
+  // state first: a bundle, a folded scalar value, and the combined type query.
+  // Only when NONE of these identify a variable do we decode `name` as a
+  // primitive type literal (`u32`/`int`/`bool`/…) — the 1g operand form.
+  auto                            bundle = current_ref_bundle();
+  upass::uPass::Scalar_type_query q;
+  if (runner_type_query_fn) {
+    q = runner_type_query_fn(name);
+  }
+  // A tuple-shaped bundle (a named field, or ≥2 positional entries) is a real
+  // tuple. A scalar-wrapper bundle (`mut a:u32=3` stores `a` as `{0:3}`, a lone
+  // `(3)` single positional) is a scalar — its declared kind/envelope ride the
+  // type query, not the bundle shape.
+  const bool bundle_is_tuple = bundle && is_tuple_shaped(bundle);
+  Const      folded          = *Dlop::invalid();
+  if (bundle && !bundle_is_tuple && bundle->has_trivial()) {
+    folded = bundle->get_trivial();
+  } else if (st.has_trivial(name)) {
+    folded = st.get_trivial(name);
+  }
+  const bool is_known_var = bundle || !folded.is_invalid() || q.kind != Io_kind::none;
+  if (!is_known_var) {
+    if (auto t = decode_prim_type_token(name)) {
+      return t;
+    }
+  }
+  if (bundle_is_tuple) {
+    op.kind   = Does_operand::Kind::tuple;
+    op.bundle = bundle;
+    return op;
+  }
+  return build_scalar_operand(q, folded);
+}
+
+// Build a scalar Does_operand from a declared type query (kind + integer
+// envelope) plus an optional folded value. KIND comes from the query first
+// (typecheck infers bool vs int even for un-annotated vars); when the query is
+// silent it falls back to the value's own Dlop type. An un-annotated integer
+// reads as an unbounded envelope (superset of any int). Stays kind=unknown
+// when nothing is known (caller defers).
+uPass_constprop::Does_operand uPass_constprop::build_scalar_operand(const upass::uPass::Scalar_type_query& q,
+                                                                    const Const&                           folded) {
+  Does_operand op;
+  if (!folded.is_invalid()) {
+    op.value     = folded;
+    op.has_value = true;
+  }
+  switch (q.kind) {
+    case Io_kind::boolean:
+      op.kind = Does_operand::Kind::boolean;
+      op.min  = *Dlop::create_integer(-1);
+      op.max  = *Dlop::create_integer(0);
+      return op;
+    case Io_kind::string: op.kind = Does_operand::Kind::string; return op;
+    case Io_kind::integer:
+      op.kind = Does_operand::Kind::integer;
+      if (q.annotated) {
+        op.max_inf = !q.range_max.has_value();
+        op.min_inf = !q.range_min.has_value();
+        if (q.range_max) {
+          op.max = *q.range_max;
+        }
+        if (q.range_min) {
+          op.min = *q.range_min;
+        }
+      } else {
+        // Un-annotated integer var → unbounded (superset of any int).
+        op.max_inf = true;
+        op.min_inf = true;
+      }
+      return op;
+    case Io_kind::none: break;
+  }
+  // Kind unknown from the type passes — last resort: infer from the folded
+  // value's own Dlop type (handles `nil`-valued vars). Stays kind=unknown
+  // (→ the caller defers) when nothing is known.
+  if (op.has_value) {
+    if (folded.is_nil()) {
+      op.kind = Does_operand::Kind::nil;
+    } else if (folded.is_string()) {
+      op.kind = Does_operand::Kind::string;
+    } else if (folded.is_bool()) {
+      op.kind = Does_operand::Kind::boolean;
+      op.min  = *Dlop::create_integer(-1);
+      op.max  = *Dlop::create_integer(0);
+    } else if (folded.is_integer()) {
+      op.kind    = Does_operand::Kind::integer;
+      op.max_inf = true;  // untyped → unbounded
+      op.min_inf = true;
+    }
+  }
+  return op;
+}
+
+// Resolve one field of a bundle for the per-field type check (1g-D). The
+// declared type rides the dotted query (`bundle_name.field` — the same alias
+// chase the 1k typed-self does-check uses); a nested sub-bundle becomes a
+// tuple operand. nullopt when the bundle has no resolvable name (e.g. a
+// coerced literal) and the field carries no value.
+std::optional<uPass_constprop::Does_operand> uPass_constprop::resolve_field_operand(const Bundle& b, std::string_view field,
+                                                                                   bool declared_only) {
+  if (b.has_bundle(field)) {
+    if (auto sub = b.get_bundle(field); sub && !sub->is_scalar()) {
+      Does_operand op;
+      op.kind   = Does_operand::Kind::tuple;
+      op.bundle = sub;
+      return op;
+    }
+  }
+  upass::uPass::Scalar_type_query q;
+  auto                            base = b.get_name();
+  if (runner_type_query_fn && !base.empty() && base != "__does_scalar") {
+    q = runner_type_query_fn(absl::StrCat(base, ".", field));
+  }
+  if (declared_only && q.kind == Io_kind::none) {
+    return std::nullopt;  // untyped field — no type constraint to enforce
+  }
+  Const folded = b.has_trivial(field) ? b.get_trivial(field) : *Dlop::invalid();
+  if (q.kind == Io_kind::none && folded.is_invalid()) {
+    return std::nullopt;
+  }
+  return build_scalar_operand(q, folded);
+}
+
+// Tri-state kind+envelope `a does b` for two NON-tuple operands. nullopt =
+// undecidable this walk.
+std::optional<bool> uPass_constprop::scalar_does(const Does_operand& a, const Does_operand& b) {
+  using Kind = Does_operand::Kind;
+  // `x does nil` is true for any non-tuple x (1g ruling). nil on the LHS, or
+  // tuple-vs-nil, is deferred (pinned as future behavior).
+  if (b.kind == Kind::nil) {
+    return true;  // a is non-tuple here (tuple path handled by the caller)
+  }
+  if (a.kind == Kind::nil) {
+    return std::nullopt;  // nil does <concrete>: pinned — defer
+  }
+  if (a.kind == Kind::unknown || b.kind == Kind::unknown || a.kind == Kind::tuple || b.kind == Kind::tuple) {
+    return std::nullopt;  // kind unset, or a scalar-wrapper bundle → can't decide
+  }
+  // Across kinds the kind is a difference flag → false (`int does bool`,
+  // `string does int`, …).
+  if (a.kind != b.kind) {
+    return false;
+  }
+  if (a.kind == Kind::string || a.kind == Kind::boolean) {
+    return true;  // same basic type of boolean/string → true
+  }
+  // Both integer: envelope superset `a.max>=b.max and a.min<=b.min`, with
+  // ±∞ flags short-circuiting the finite Const compares.
+  I(a.kind == Kind::integer);
+  bool max_ok = a.max_inf || (!b.max_inf && a.max.ge_op(b.max)->is_known_true());
+  bool min_ok = a.min_inf || (!b.min_inf && a.min.le_op(b.min)->is_known_true());
+  return max_ok && min_ok;
+}
+
+// Tri-state `a does b` for any two resolved operands. Structural (tuple) path
+// when a side is a real tuple (named field or ≥2 positional), coercing the
+// other side — a real tuple as-is, a value-bearing scalar to a single-
+// positional bundle (`(100,30) does 30`). A type-token / value-less operand
+// against a tuple can't be coerced → undecidable. Otherwise the kind+envelope
+// scalar rule decides.
+std::optional<bool> uPass_constprop::compute_does(const Does_operand& a, const Does_operand& b) {
+  const bool a_tuple = (a.kind == Does_operand::Kind::tuple) && is_tuple_shaped(a.bundle);
+  const bool b_tuple = (b.kind == Does_operand::Kind::tuple) && is_tuple_shaped(b.bundle);
+  if (a_tuple || b_tuple) {
+    auto to_bundle = [](const Does_operand& o) -> std::shared_ptr<Bundle const> {
+      if (o.kind == Does_operand::Kind::tuple) {
+        return o.bundle;
+      }
+      if (o.has_value) {
+        return single_positional_bundle(o.value);
+      }
+      return nullptr;
+    };
+    auto ba = to_bundle(a);
+    auto bb = to_bundle(b);
+    if (!ba || !bb || !has_first_level_shape(ba) || !has_first_level_shape(bb)) {
+      return std::nullopt;
+    }
+    if (!structural_does(ba, bb)) {
+      return false;  // shape: a must cover every top-level field of b
+    }
+    // Per-field types (1g-D): for each top-level field of b that a also has,
+    // `a.field does b.field`. A KNOWN field-type mismatch makes the whole
+    // `does` false; an undecidable field is ignored (shape already matched —
+    // this only adds rejection power, never removes it). `(a=1) does
+    // (a:u32=…)` thus stops silently ignoring the `:u32`.
+    for (const auto& tb : bb->top_levels()) {
+      std::string key = tb.pos < 0 ? std::string(tb.name) : std::to_string(tb.pos);
+      auto        fa  = resolve_field_operand(*ba, key, /*declared_only=*/true);
+      auto        fb  = resolve_field_operand(*bb, key, /*declared_only=*/true);
+      if (fa && fb) {
+        if (auto r = compute_does(*fa, *fb); r && !*r) {
+          return false;
+        }
+      }
+    }
+    return true;
+  }
+  return scalar_does(a, b);
+}
+
+// Fold `dst = does(l, r)`. Cursor is on the does node's first child (dst ref);
+// reads l and r as Does_operands and stores the boolean result. Leaves the
+// result unresolved when a side is undecidable.
 //
 // On exit the cursor is left on whichever child we last visited; the caller
-// (process_func_call) is responsible for `move_to_parent`.
+// (process_func_does) is responsible for `move_to_parent`.
 void uPass_constprop::fold_does(const std::string& dst) {
   if (!move_to_sibling()) {
     return;
   }
-  auto ba = current_ref_bundle();
+  auto a = resolve_does_operand();
   if (!move_to_sibling()) {
     return;
   }
-  auto bb = current_ref_bundle();
-
-  // Both sides need at least a recognisable first-level shape; otherwise
-  // structural matching has nothing to compare.
-  if (!ba || !bb || !has_first_level_shape(ba) || !has_first_level_shape(bb)) {
+  auto b = resolve_does_operand();
+  if (!a || !b) {
     return;
   }
-  // At least one side must prove it's a real tuple, otherwise scalar-vs-
-  // scalar would over-fold (e.g. `b1 does i2` where both are scalar
-  // wrappers). The structural check itself handles the asymmetry once one
-  // side is known-tuple.
-  if (!is_tuple_shaped(ba) && !is_tuple_shaped(bb)) {
-    return;
+  if (auto r = compute_does(*a, *b)) {
+    store_trivial(dst, *Dlop::create_bool(*r));
   }
-
-  store_trivial(dst, *Dlop::create_bool(structural_does(ba, bb)));
 }
 
 // Per-first-level summary used by fold_in / fold_has: groups a bundle's flat
@@ -1825,10 +2083,13 @@ void uPass_constprop::fold_case(const std::string& dst) {
   // `sel case 0b10` (scalar vs scalar literal) folds the same way as the
   // bundle/bundle path. Returns nullopt when the value isn't decidable yet
   // (undeclared ref / no trivial value) so we can defer.
-  auto resolve_flat = [this]() -> std::optional<std::vector<Bundle_flat_entry>> {
+  // Out-param `b` captures the operand's bundle (for the per-field type check,
+  // 1g-D); left null for scalar/const operands.
+  auto resolve_flat = [this](std::shared_ptr<Bundle const>& b) -> std::optional<std::vector<Bundle_flat_entry>> {
     if (is_type(Lnast_ntype::Lnast_ntype_ref)) {
-      if (auto b = current_ref_bundle()) {
-        return collect_first_level(b);
+      if (auto bun = current_ref_bundle()) {
+        b = bun;
+        return collect_first_level(bun);
       }
       auto name = current_text();
       if (st.has_trivial(name)) {
@@ -1848,14 +2109,16 @@ void uPass_constprop::fold_case(const std::string& dst) {
     return std::nullopt;
   };
 
+  std::shared_ptr<Bundle const> lhs_bundle;  // subject
+  std::shared_ptr<Bundle const> rhs_bundle;  // pattern
   if (!move_to_sibling()) {
     return;
   }
-  auto lhs_opt = resolve_flat();
+  auto lhs_opt = resolve_flat(lhs_bundle);
   if (!move_to_sibling()) {
     return;
   }
-  auto rhs_opt = resolve_flat();
+  auto rhs_opt = resolve_flat(rhs_bundle);
   if (!lhs_opt || !rhs_opt) {
     return;
   }
@@ -1898,6 +2161,22 @@ void uPass_constprop::fold_case(const std::string& dst) {
     if (lmatch == nullptr) {
       store_trivial(dst, *Dlop::create_bool(false));
       return;
+    }
+
+    // Typed `case` (1g-D): when both sides carry a declared field type, the
+    // pattern type must be satisfied — `subject.field does pattern.field`. A
+    // KNOWN type mismatch (e.g. subject `a:u32` vs pattern `a:bool`) is a
+    // definite false even if the values would match a wildcard.
+    if (lhs_bundle && rhs_bundle) {
+      std::string key = re.name.empty() ? std::to_string(re.pos) : std::string(re.name);
+      auto        fa  = resolve_field_operand(*lhs_bundle, key, /*declared_only=*/true);
+      auto        fb  = resolve_field_operand(*rhs_bundle, key, /*declared_only=*/true);
+      if (fa && fb) {
+        if (auto r = compute_does(*fa, *fb); r && !*r) {
+          store_trivial(dst, *Dlop::create_bool(false));
+          return;
+        }
+      }
     }
 
     if (lmatch->is_sub_bundle || lmatch->value.is_invalid()) {
@@ -2077,23 +2356,31 @@ void uPass_constprop::process_func_does() {
 }
 
 void uPass_constprop::process_func_equals() {
+  // `a equals b` ≡ `(a does b) and (b does a)`, types included (1g). For two
+  // tuples this reduces to structural_equals (same set of top-level keys);
+  // for scalars it means identical kind+envelope. Undecidable on either side
+  // leaves the result unresolved.
   move_to_child();
   std::string dst(current_text());
   if (!move_to_sibling()) {
     move_to_parent();
     return;
   }
-  auto ba = current_ref_bundle();
+  auto a = resolve_does_operand();
   if (!move_to_sibling()) {
     move_to_parent();
     return;
   }
-  auto bb = current_ref_bundle();
+  auto b = resolve_does_operand();
   move_to_parent();
-  if (!ba || !bb) {
+  if (!a || !b) {
     return;
   }
-  store_trivial(dst, Dlop::create_bool(structural_equals(ba, bb)));
+  auto ab = compute_does(*a, *b);
+  auto ba = compute_does(*b, *a);
+  if (ab && ba) {
+    store_trivial(dst, *Dlop::create_bool(*ab && *ba));
+  }
 }
 
 void uPass_constprop::process_func_in() {
