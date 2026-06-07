@@ -1,0 +1,17 @@
+/*
+:name: lambda_missing_output
+:type: error
+:error: declares no outputs
+:help: declare the outputs explicitly
+*/
+
+// Outputs are always declared explicitly: `-> (out, ...)`, or `-> ()` for a
+// lambda with no outputs. Omitting the clause is a compile error (only `self`
+// methods may skip it — they act through the receiver).
+
+comb top() {   // locate_error_here  (missing `-> (...)`)
+  const c = 10
+  mut x = (a=1, mut b = (c=2), mut c)
+}
+
+top()

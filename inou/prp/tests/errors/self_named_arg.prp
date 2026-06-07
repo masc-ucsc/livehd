@@ -15,4 +15,4 @@ comb set_b(ref self:t1) {
 }
 
 mut x:t1 = nil
-const r = set_b(self = x) // locate_error_here
+set_b(self = x) // locate_error_here

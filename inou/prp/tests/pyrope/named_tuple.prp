@@ -1,13 +1,15 @@
 /*
 :name: named_tuple
-:type: parsing lnast upass
+:type: parsing lnast comptime
+:verifier_pass: 2
+:verifier_fail: 0
 */
 
-comb top() {
+comb top() -> () {
   const c = 10
   mut x = (a=1, mut b = (c=2), mut c)
+  cassert(x == (a=1, b=(c=2), 10))
+  cassert(x.a == 1 and x.b.c == 2 and x.c == 10)
 }
 
-const a = top()
-
-cassert(a == (1,2,10) == (a=1, b=(c=2), 10))
+top()

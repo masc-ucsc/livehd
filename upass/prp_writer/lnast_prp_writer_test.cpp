@@ -392,7 +392,7 @@ comb rt_simple(a) -> (out) {
 // The emitted Pyrope must not contain a bare `+` operator (folded away).
 TEST(LnastPrpWriter, RoundTripConstpropFoldsArith) {
   const char* src = R"prp(
-comb rt_fold() {
+comb rt_fold() -> () {
   const a = 2 + 3
   cassert(a == 5)
 }
