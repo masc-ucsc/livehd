@@ -1,0 +1,17 @@
+/*
+:name: pipe_stage_reg
+:type: equiv
+:verilog_top: pipe_stage_reg.split
+:pyrope_top: pipe_stage_reg.split
+*/
+
+// 2d-reg — the 06c `split` analog: an unconditional feedforward write makes
+// tmp a STAGE register (sigma(q) = 1), so the explicit reg IS the pipeline
+// flop. First REAL narrowing: body sigma=1 in pipe[1] => the LN-inserted
+// output flop narrows to (0,0) and realizes as a wire. The golden has
+// exactly ONE flop — a two-flop golden must NOT be equivalent.
+pipe[1] split(a:u8, b:u8) -> (x:u9) {
+  reg tmp:u9 = 0
+  tmp = a + b
+  x = tmp
+}

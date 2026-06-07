@@ -150,7 +150,13 @@ class PrpRunner:
         # Equivalence test: lower to LGraph (tolg, no graph passes) and emit
         # per-module Verilog into `odir`. run_equiv() then LECs the generated
         # Verilog against the sibling golden `.v` via inou/yosys/lgcheck.
+        #
+        # Optional `:reset_style: async` header tag (task 2d-reg): set the
+        # upass.reset_style elaboration flag so the implicit-reset flops wire
+        # an async reset and the golden can assert the async always-block.
         cmd = self.lhd_upass(test, 'equiv')
+        if 'reset_style' in test.params:
+            cmd += ['--set', 'upass.reset_style={}'.format(test.params['reset_style'])]
         cmd += ['--recipe', 'O0', '--emit-dir', 'verilog:{}/'.format(odir)]
         return cmd
 

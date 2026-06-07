@@ -776,6 +776,15 @@ void Prp2lnast::rewrite_decls_to_declare() {
         if (!st.is_invalid() && Lnast_ntype::is_stages(lnast->get_type(st))) {
           prp_copy_subtree(*lnast, st, *staging, d);
         }
+      } else if (kind == "reg") {
+        // 2d-reg / 3j — the reg initializer rides the cluster head (child 3);
+        // fold it into the declare's optional 4th [value] child so tolg can
+        // recover the reset value and the runner never binds it as a comptime
+        // value (reg reads are runtime q reads).
+        auto iv = prp_child_nid(*lnast, k, 3);
+        if (!iv.is_invalid()) {
+          prp_copy_subtree(*lnast, iv, *staging, d);
+        }
       }
       i = j;
     }
@@ -1442,6 +1451,7 @@ Lnast_node Prp2lnast::process_lvalue_for_assign(TSNode lvalue, const Lnast_node&
     }
 
     Lnast_node ref = identifier_to_node(id, /*for_lvalue=*/true);
+    Lnast_nid  reg_decl_head{};  // 2d-reg — set for `reg` decls; the init value rides this cluster head
     if (has_decl) {
       auto idx = builder.add_child(Lnast_ntype::create_attr_set());
       lnast->add_child(idx, ref);
@@ -1468,6 +1478,19 @@ Lnast_node Prp2lnast::process_lvalue_for_assign(TSNode lvalue, const Lnast_node&
         auto st                 = lnast->add_child(idx, Lnast_ntype::create_stages());
         lnast->add_child(st, Lnast_node::create_const(min_txt));
         lnast->add_child(st, Lnast_node::create_const(max_txt));
+      }
+      // 2d-reg — a `comb` may not declare a `reg` (06-functions.md: comb
+      // logic is all at cycle 0 and holds no state; the `::[debug]` exception
+      // is out of scope). pipe/mod bodies and file scope may.
+      if (kind_sv == "reg") {
+        if (!lambda_kind_stack_.empty() && lambda_kind_stack_.back() == "comb") {
+          report_error(decl_node,
+                       "reg-in-comb",
+                       "type",
+                       "a `comb` may not declare a `reg` (combinational logic holds no state)",
+                       "move the register into a `pipe`/`mod` body, or pass the value through an output");
+        }
+        reg_decl_head = idx;
       }
     }
     if (has_cpt) {
@@ -1520,13 +1543,22 @@ Lnast_node Prp2lnast::process_lvalue_for_assign(TSNode lvalue, const Lnast_node&
       lnast->add_child(ta, ref);
       store_value = wrapped;
     }
-    auto aidx = builder.add_child(Lnast_ntype::create_store());
-    lnast->add_child(aidx, ref);
-    lnast->add_child(aidx, store_value);
-    // Span → bitwidth's "does not fit" overflow diagnostic can point at the
-    // write site (the declare/store loc-carry chain: here, prp_copy_one_node,
-    // and the runner's emit_push).
-    attach_loc(aidx, id);
+    if (!reg_decl_head.is_invalid()) {
+      // 2d-reg / 3j declare-folding — a `reg` declaration's initializer is its
+      // power-on/reset value, NOT a din write: ride it on the decl cluster
+      // head so the decl-merge folds it into the declare's optional 4th
+      // [value] child. Only genuine re-assignments emit a `store` (every
+      // store to a reg-declared name is a next-state write).
+      lnast->add_child(reg_decl_head, store_value);
+    } else {
+      auto aidx = builder.add_child(Lnast_ntype::create_store());
+      lnast->add_child(aidx, ref);
+      lnast->add_child(aidx, store_value);
+      // Span → bitwidth's "does not fit" overflow diagnostic can point at the
+      // write site (the declare/store loc-carry chain: here, prp_copy_one_node,
+      // and the runner's emit_push).
+      attach_loc(aidx, id);
+    }
 
     // Phase 8 typesystem: a bare `true`/`false` literal on the rvalue
     // implies a `:bool` type. Inject a synthetic type_spec so the
@@ -3009,13 +3041,19 @@ void Prp2lnast::process_lambda_statement_named(TSNode n, std::string_view hoist_
   // (func_extract, constprop) detect it without inventing a new ntype.
   auto                    in_idx = lnast->add_child(fd_idx, Lnast_ntype::create_tuple_add());
   std::vector<Param_attr> input_attrs;
+  // 2d-reg — `-> (reg q:T[@N] [= init])` output registers: the q pin IS the
+  // output (the counter idiom). Collected here; a matching `reg` declare is
+  // synthesized at body entry below so tolg lowers the output as a Flop.
+  std::vector<std::pair<TSNode, TSNode>> output_regs;  // (typed_identifier, definition)
   auto                    collect_args =
       [&](TSNode container, const Lnast_nid& parent_tup, std::vector<std::string>* names_out, std::vector<Param_attr>* attrs_out,
           bool is_io_output) {
         TSNode pending_typed{};
         TSNode pending_def{};
         bool   pending_is_ref = false;
+        bool   pending_is_reg = false;
         bool   next_is_ref    = false;
+        bool   next_is_reg    = false;
         auto   flush          = [&]() {
           if (!ts_node_is_null(pending_typed)) {
             emit_arg_assign(parent_tup, pending_typed, pending_def, pending_is_ref, attrs_out, kind, is_io_output);
@@ -3025,10 +3063,22 @@ void Prp2lnast::process_lambda_statement_named(TSNode n, std::string_view hoist_
                 names_out->emplace_back(get_text(id));
               }
             }
+            if (pending_is_reg) {
+              if (is_io_output) {
+                output_regs.emplace_back(pending_typed, pending_def);
+              } else {
+                report_error(pending_typed,
+                             "reg-input",
+                             "type",
+                             "a `reg` modifier is not valid on an input",
+                             "registers hold state inside the body — declare the input plain and `reg` a body variable");
+              }
+            }
           }
           pending_typed  = TSNode{};
           pending_def    = TSNode{};
           pending_is_ref = false;
+          pending_is_reg = false;
         };
         uint32_t nc = child_count(container);
         for (uint32_t i = 0; i < nc; i++) {
@@ -3037,13 +3087,16 @@ void Prp2lnast::process_lambda_statement_named(TSNode n, std::string_view hoist_
           std::string_view ct(ts_node_type(ci));
           if (fname && std::string_view(fname) == "mod") {
             next_is_ref = (ct == "ref");
+            next_is_reg = (ct == "reg");
             continue;
           }
           if (ct == "typed_identifier") {
             flush();
             pending_typed  = ci;
             pending_is_ref = next_is_ref;
+            pending_is_reg = next_is_reg;
             next_is_ref    = false;
+            next_is_reg    = false;
             continue;
           }
           if (fname && std::string_view(fname) == "definition") {
@@ -3105,6 +3158,38 @@ void Prp2lnast::process_lambda_statement_named(TSNode n, std::string_view hoist_
   // Body
   auto body_idx = lnast->add_child(fd_idx, Lnast_ntype::create_stmts());
   builder.push_stmts(body_idx);
+  // 2d-reg — synthesize the body `reg` declare for each `-> (reg q:T)` output
+  // register, the same cluster process_lvalue_for_assign emits for a body
+  // `reg q:T = init` (the decl-merge folds it into declare(q, T, reg,
+  // [init])). The q pin is the output; body stores are its din writes.
+  for (const auto& [or_typed, or_def] : output_regs) {
+    if (kind == "comb") {
+      report_error(or_typed,
+                   "reg-in-comb",
+                   "type",
+                   "a `comb` may not declare a `reg` (combinational logic holds no state)",
+                   "move the register into a `pipe`/`mod` body, or pass the value through an output");
+    }
+    TSNode or_id = child_by_field(or_typed, "identifier");
+    if (ts_node_is_null(or_id)) {
+      continue;
+    }
+    auto or_ref = Lnast_node::create_ref(get_text(or_id));
+    auto setix  = builder.add_child(Lnast_ntype::create_attr_set());
+    lnast->add_child(setix, or_ref);
+    lnast->add_child(setix, Lnast_node::create_const("type"));
+    lnast->add_child(setix, Lnast_node::create_const("reg"));
+    attach_loc(setix, or_id);
+    if (!ts_node_is_null(or_def)) {
+      // Literal initializer only (a reset value must be a compile-time
+      // constant); tolg rejects anything unresolved.
+      lnast->add_child(setix, Lnast_node::create_const(trim(get_text(or_def))));
+    }
+    TSNode or_tc = child_by_field(or_typed, "type");
+    if (!ts_node_is_null(or_tc)) {
+      emit_type_spec(or_ref, or_tc);
+    }
+  }
   // Parameter-side attribute carriers (`a::[comptime]`, …) are sugar for an
   // `attr_set(a, key, val)` + a `cassert(a.[key])` at body entry. The attr_set
   // marks the local symbol so reads inside the body fold; for `comptime` the

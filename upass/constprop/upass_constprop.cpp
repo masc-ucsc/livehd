@@ -233,6 +233,16 @@ void uPass_constprop::process_assign() {
   move_to_child();
 
   auto lhs_text = current_text();
+
+  // 2d-reg — a store to a reg-declared name is a next-state (din) write:
+  // never bind it in the symbol table. Reads of the reg see the flop's q
+  // (Verilog `<=` semantics), not the value written this cycle, so folding
+  // the written value into later reads — or dropping the store because the
+  // value "is known" — corrupts the state machine. tolg consumes the store.
+  if (reg_decl_names_.contains(std::string(lhs_text))) {
+    move_to_parent();
+    return;
+  }
   move_to_sibling();
 
   if (is_type(Lnast_ntype::Lnast_ntype_ref)) {
@@ -388,6 +398,16 @@ void uPass_constprop::process_assign() {
         check_unsigned_positive_overflow(lhs_text, value);
       }
       store_trivial(lhs_text, value);
+    } else if (st.has_trivial(lhs_text) && st.in_uncertain_scope()) {
+      // 2d-reg — a RUNTIME-rhs write inside an uncertain if-arm: the LHS can
+      // no longer be claimed comptime-known. Comptime writes get invalidated
+      // on arm exit via record_uncertain_modification, but a runtime rhs
+      // never touched the varmap, so the stale pre-branch value would leak
+      // through fold_ref/classify — folding `if c { r = <runtime> }; out = r`
+      // down to the stale init and dropping the `out` store entirely.
+      // (Straight-line runtime reassignments don't need this: SSA versions
+      // them; branch bodies are copied verbatim, hence the uncertain gate.)
+      st.set(lhs_text, Symbol_table::invalid_lconst);
     }
   } else if (is_type(Lnast_ntype::Lnast_ntype_const)) {
     Const v = current_pyrope_value();
@@ -445,6 +465,21 @@ void uPass_constprop::process_declare() {
     return;
   }
   auto var = std::string(current_text());
+  // 2d-reg — record reg-declared names (mode const at child 2): their reads
+  // are runtime q reads that must never fold, and their stores are next-state
+  // din writes that must survive to tolg. Declare the name valueless in the
+  // symbol table so `q == nil` doesn't take the undeclared-ref fold.
+  {
+    const auto here = lm->save_cursor();
+    if (move_to_sibling() && move_to_sibling() && is_type(Lnast_ntype::Lnast_ntype_const)) {
+      auto mode = current_text();
+      if (mode == "reg" || mode.starts_with("reg ")) {
+        reg_decl_names_.insert(var);
+        st.var(var);
+      }
+    }
+    lm->restore_cursor(here);
+  }
   if (!move_to_sibling()) {
     move_to_parent();
     return;
@@ -3109,6 +3144,13 @@ upass::Emit_decision uPass_constprop::classify_statement() {
   move_to_parent();
 
   if (!lhs_is_ref || lhs_text.empty()) {
+    return upass::Emit_decision::emit_node();
+  }
+
+  // 2d-reg — writes to reg-declared names are next-state din writes; the
+  // write itself is the payload (process_assign never binds them, so the ST
+  // can't hold a value — this guard is belt-and-braces against stale state).
+  if (reg_decl_names_.contains(lhs_text)) {
     return upass::Emit_decision::emit_node();
   }
 

@@ -1,0 +1,17 @@
+/*
+:name: pipe_too_deep
+:type: error
+:tolg: 1
+:error: lands at stage 2, pipe declares 1
+*/
+
+// 2d-reg — two chained feedforward stage registers give the body sigma=2,
+// which exceeds the declared pipe[1] interface: the inserted-flop deficit
+// (min - sigma) would be negative.
+pipe[1] deep(a:u8) -> (x:u8) {
+  reg r1:u8 = 0
+  reg r2:u8 = 0
+  r1 = a
+  r2 = r1
+  x = r2
+}

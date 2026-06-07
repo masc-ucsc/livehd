@@ -1,0 +1,11 @@
+/*
+:name: reg_in_comb
+:type: error
+:error: a `comb` may not declare a `reg`
+*/
+
+comb bad(a:u8) -> (x:u8) {
+  reg r:u8 = 0   // locate_error_here
+  r = a
+  x = r
+}

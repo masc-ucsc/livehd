@@ -1031,12 +1031,27 @@ void Cgen_verilog::create_registers(std::shared_ptr<File_output> fout, hhds::Gra
       }
     }
 
+    // 2d-reg — write-enable: a conditionally-written state register holds
+    // its value when the OR-of-write-conditions is false (no din=q feedback
+    // mux is ever inserted — the enable IS the hold).
+    std::string enable;
+    {
+      auto enable_dpin = get_driver(find_sink_pin(node, "enable"));
+      if (!enable_dpin.is_invalid() && !is_const_pin(enable_dpin)) {
+        enable = get_wire_or_const(enable_dpin);
+      }
+    }
+
     if (depth <= 1) {
-      // Depth 1 (or unset): today's single-flop emission, unchanged.
+      // Depth 1 (or unset): today's single-flop emission, plus the optional
+      // enable gate.
       fout->append("always @(", edge, " ", clock, reset_async, " ) begin\n");
 
+      const std::string update = enable.empty() ? absl::StrCat(name, " <= ", name_next, ";\n")
+                                                : absl::StrCat("if (", enable, ") begin\n", name, " <= ", name_next,
+                                                               ";\nend\n");
       if (reset.empty()) {
-        fout->append(name, " <= ", name_next, ";\n");
+        fout->append(update);
       } else {
         if (negreset) {
           fout->append("if (!", reset, ") begin\n");
@@ -1045,7 +1060,7 @@ void Cgen_verilog::create_registers(std::shared_ptr<File_output> fout, hhds::Gra
         }
         fout->append(name, " <= ", reset_initial, ";\n");
         fout->append("end else begin\n");
-        fout->append(name, " <= ", name_next, ";\n");
+        fout->append(update);
         fout->append("end\n");
       }
 

@@ -1,0 +1,15 @@
+/*
+:name: reg_home_mismatch
+:type: error
+:tolg: 1
+:error: homes at stage 0 but its declared landing cycle 2 requires home 1
+*/
+
+// 2d-reg — a state register output declares its landing cycle at the
+// interface: `reg count:u8@[2]` requires the register's home stage (where
+// its din logic lives) to be 1, but the body writes it from cycle-0 values.
+mod counter2(enable:bool) -> (reg count:u8@[2]) {
+  if enable and count < 200 {
+    count = count + 1
+  }
+}

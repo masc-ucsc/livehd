@@ -1,0 +1,23 @@
+/*
+:name: mod_mux_aligned
+:type: equiv
+:verilog_top: mod_mux_aligned.pick
+:pyrope_top: mod_mux_aligned.pick
+*/
+
+// 2d-reg — a mux whose selector and data legs all land at the SAME cycle
+// (every operand stage[1]-delayed): the equal-meet at the Mux cell passes
+// and the output lands at the declared cycle 1. The misaligned variant is
+// the lg_mux_misaligned error test.
+mod pick(sel:bool, a:u8, b:u8) -> (out:u9@[1]) {
+  stage[1] sd = sel
+  stage[1] ad = a
+  stage[1] bd = b
+  mut r:u9 = 0
+  if sd {
+    r = ad + 1
+  } else {
+    r = bd + 2
+  }
+  out = r
+}

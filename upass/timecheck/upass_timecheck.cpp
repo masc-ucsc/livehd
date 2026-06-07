@@ -176,7 +176,11 @@ private:
       pending_[name] = s;
       return;
     }
-    // plain reg (state) — unknown until the LG checker classifies it
+    // plain reg — unknown until the LG checker classifies it (2d-reg: state
+    // pins sigma(q)=sigma(din); a feedforward stage reg crosses +1; both need
+    // the graph-level enable/SCC analysis). Remember the name so its stores
+    // never bind a sigma here.
+    plain_regs_.insert(name);
   }
 
   void do_store(const Lnast_nid& nid) {
@@ -191,6 +195,13 @@ private:
     }
     const std::string name(ln_->get_name(lhs));
     if (!ln_->get_sibling_next(rhs).is_invalid()) {  // tuple/field store
+      forget(name);
+      return;
+    }
+
+    // 2d-reg — a store to a plain reg is a next-state din write; sigma(q) is
+    // the LG checker's call (state vs stage classification). Never bind it.
+    if (plain_regs_.contains(name)) {
       forget(name);
       return;
     }
@@ -498,6 +509,7 @@ private:
   absl::flat_hash_map<std::string, Cyc>      known_;
   absl::flat_hash_map<std::string, Stg>      pending_;
   absl::flat_hash_map<std::string, CallInfo> calls_;
+  absl::flat_hash_set<std::string>           plain_regs_;  // 2d-reg: sigma owned by the LG checker
   std::vector<Queued_check>                  queued_checks_;
 };
 

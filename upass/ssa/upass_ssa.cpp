@@ -349,6 +349,31 @@ void uPass_ssa::run(const std::shared_ptr<Lnast>& lnast) {
   absl::flat_hash_map<std::string, int>         ssa_count;   // version counter
   absl::flat_hash_set<std::string>              seen_lhs;    // first-seen tracker
 
+  // 2d-reg — reg-declared names are NEVER SSA-versioned: every read of a reg
+  // sees the flop's q (Verilog `<=` semantics) regardless of program order,
+  // and every store is a next-state din write to the SAME flop. Versioning
+  // them would split the din writes off the declared name (a dangling flop)
+  // and rewrite q reads to the comb value.
+  absl::flat_hash_set<std::string> reg_names;
+  for (const auto& nid : lnast->depth_preorder(lnast->get_root())) {
+    if (nid.is_invalid() || !Lnast_ntype::is_declare(lnast->get_type(nid))) {
+      continue;
+    }
+    auto c0 = lnast->get_first_child(nid);
+    if (c0.is_invalid()) {
+      continue;
+    }
+    auto c1 = c0.is_invalid() ? c0 : lnast->get_sibling_next(c0);
+    auto c2 = c1.is_invalid() ? c1 : lnast->get_sibling_next(c1);
+    if (c2.is_invalid() || !Lnast_ntype::is_const(lnast->get_type(c2))) {
+      continue;
+    }
+    auto mode = lnast->get_name(c2);
+    if (mode == "reg" || mode.starts_with("reg ")) {
+      reg_names.emplace(lnast->get_name(c0));
+    }
+  }
+
   for (auto child : lnast->children(stmts_nid)) {
     auto type = lnast->get_type(child);
 
@@ -397,7 +422,7 @@ void uPass_ssa::run(const std::shared_ptr<Lnast>& lnast) {
           std::string_view lhs_view = lnast->get_name(sub);
           std::string      out_name;
 
-          if (is_user_var(lhs_view)) {
+          if (is_user_var(lhs_view) && !reg_names.contains(lhs_view)) {
             if (auto seen_it = seen_lhs.find(lhs_view); seen_it != seen_lhs.end()) {
               // Preview next SSA version — do NOT touch rename_map yet.
               int n = ssa_count[*seen_it] + 1;
