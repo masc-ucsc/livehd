@@ -17,6 +17,7 @@
 #include "upass_bitwidth.hpp"    // NOLINT: ensures plugin "bitwidth" is linked
 #include "upass_constprop.hpp"
 #include "upass_pipe.hpp"
+#include "upass_timecheck.hpp"
 #include "upass_runner.hpp"
 #include "upass_semacheck.hpp"  // NOLINT: ensures plugin "semacheck" is linked
 #include "upass_ssa.hpp"
@@ -405,6 +406,16 @@ void Pass_upass::work(Eprp_var& var) {
     }
   }
 
+  // ── LNAST timecheck discharge (task 1u-B). Verifies + marks-checked every
+  // statically-derivable `@[N]` obligation (and the mod declared-output /
+  // pipe sigma<=min checks) with located diagnostics. Runs BEFORE uPass_pipe
+  // so a pipe body's sigma excludes the inserted output flop, and UNGATED by
+  // toln so the LSP pipeline gets the errors too. Whatever stays underived
+  // lowers into the LG pending checks (1u-C).
+  for (const auto& ln : var.lnasts) {
+    uPass_timecheck::run(ln, var.lnasts);
+  }
+
   // ── LN pipe upass (task 1q). Inserts the per-output pipeline flop —
   // declare(reg)+stages plus the din/q rebind stores — into every `pipe`
   // function tree (io_meta outputs with stages_min >= 1; comb trees no-op).
@@ -422,9 +433,14 @@ void Pass_upass::work(Eprp_var& var) {
   // ssa populated io_meta() and bitwidth populated bw_meta() for every lnast.
   // Each fully-specified function tree becomes one hhds::Graph pushed onto the
   // pass var so a downstream inou.cgen.verilog stage can emit it.
+  // Task 1u-A — two-phase: register every module's GraphIO first so call
+  // sites can bind callee GraphIOs (Sub instances) regardless of build order.
   if (up.run_tolg) {
     for (const auto& ln : var.lnasts) {
-      auto g = uPass_tolg::run(ln, "lgdb_tolg");
+      uPass_tolg::register_io(ln, "lgdb_tolg", var.lnasts);
+    }
+    for (const auto& ln : var.lnasts) {
+      auto g = uPass_tolg::run(ln, "lgdb_tolg", var.lnasts);
       if (g) {
         var.add(g);
       }

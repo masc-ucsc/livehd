@@ -1,0 +1,10 @@
+/*
+:name: mod_output_cycle_mismatch
+:type: error
+:error: lands at cycle 2 but its interface declares @\[3\]
+*/
+
+mod top(a:u8) -> (out:u8@[3]) {
+  stage[2] t = a
+  out = t
+}

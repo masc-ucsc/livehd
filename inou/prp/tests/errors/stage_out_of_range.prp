@@ -1,0 +1,12 @@
+/*
+:name: stage_out_of_range
+:type: error
+:error: outside the callee's declared latency range
+*/
+
+pipe[3] mul(a:u16, b:u16) -> (c:u32) { c = a * b }
+
+mod top(in1:u16, in2:u16) -> (out:u32@[2]) {
+  stage[2] tmp = mul(in1, in2)
+  out = tmp
+}

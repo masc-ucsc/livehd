@@ -1,0 +1,11 @@
+/*
+:name: cycle_check_mismatch
+:type: error
+:error: lands at cycle 3, not 2
+*/
+
+// 06c-pipelining.md `bad`-style: res1 is at cycle 3, the use-check asserts 2.
+mod top(in1:u16) -> (out:u16@[3]) {
+  stage[3] res1 = in1
+  out = res1@[2]
+}

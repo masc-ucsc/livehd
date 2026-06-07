@@ -132,6 +132,34 @@ struct lut_t {
 };
 inline constexpr lut_t lut{};
 
+// Task 1u-C — per-pin/node TIME interval annotation (cycles from the
+// enclosing partition's inputs; the LG half of the pipe/mod time machinery).
+// On a Sub node: the instance's pinned latency contribution (stage[N] pick
+// or the callee's declared interval). Derived values are computed by the
+// 1u-D checker.
+struct time_range_t {
+  struct value_type {
+    int64_t min = 0;
+    int64_t max = 0;
+  };
+  using storage = hhds::flat_storage;
+};
+inline constexpr time_range_t time_range{};
+
+// Task 1u-C — PENDING time check: an asserted interval (from an LNAST
+// timecheck the discharge pass could not decide, or a mod output's declared
+// landing cycle) attached to the checked value's pin. The 1u-D checker
+// verifies computed ⊆ asserted and REMOVES the record (`.del()`); records
+// still present after the checker are a compile error.
+struct pending_time_t {
+  struct value_type {
+    int64_t min = 0;
+    int64_t max = 0;
+  };
+  using storage = hhds::flat_storage;
+};
+inline constexpr pending_time_t pending_time{};
+
 }  // namespace livehd::attrs
 
 namespace hhds {
@@ -183,6 +211,14 @@ template <>
 template <>
 [[nodiscard]] inline std::string attr_tag_name<livehd::attrs::lut_t>() {
   return "livehd::attrs::lut";
+}
+template <>
+[[nodiscard]] inline std::string attr_tag_name<livehd::attrs::time_range_t>() {
+  return "livehd::attrs::time_range";
+}
+template <>
+[[nodiscard]] inline std::string attr_tag_name<livehd::attrs::pending_time_t>() {
+  return "livehd::attrs::pending_time";
 }
 
 }  // namespace hhds

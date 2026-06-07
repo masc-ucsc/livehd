@@ -1441,8 +1441,13 @@ void lower_lnasts(Options& opts, Result& res, Eprp_var& var, const std::string& 
   }
   {
     Stdout_to_log redirect(next_log_path(opts, "lnast.tolg"));
+    // Task 1u-A — two-phase: register every module's GraphIO first so call
+    // sites can bind callee GraphIOs (Sub instances) regardless of order.
     for (const auto& ln : var.lnasts) {
-      auto g = uPass_tolg::run(ln, lib_path);
+      uPass_tolg::register_io(ln, lib_path, var.lnasts);
+    }
+    for (const auto& ln : var.lnasts) {
+      auto g = uPass_tolg::run(ln, lib_path, var.lnasts);
       if (g) {
         var.add(g);
       }

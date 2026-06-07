@@ -3,6 +3,7 @@
 
 #include <memory>
 #include <string_view>
+#include <vector>
 
 #include "hhds/graph.hpp"
 #include "lnast.hpp"
@@ -15,13 +16,27 @@
 // (`<file-stem>.<entity>`, e.g. `trivial_if.fun3`). I/O is read from
 // lnast->io_meta(); per-name bit/sign ranges from lnast->bw_meta().
 //
-// The first milestone handles the combinational subset: graph I/O with widths,
-// arithmetic/logic/compare ops, constants, get_mask/set_mask bit-slices, and
-// if/elif/else -> binary Mux chains. Registers, memories, and submodule calls
-// are later phases of task 1l.
+// Handles the combinational subset (graph I/O with widths, arithmetic/logic/
+// compare ops, constants, get_mask/set_mask bit-slices, if -> Mux chains),
+// the task-1q/1r pipeline regs (declare(reg)+stages -> depth-parameterized
+// Flop), and — task 1u-A — pipe/mod call sites lowered to Ntype_op::Sub
+// instances (callee resolved through `registry`, the same var.lnasts list the
+// runner's inliner uses; the callee's GraphIO must already exist, which is
+// what the two-phase register_io()-then-run() protocol guarantees).
 //
 // run() returns nullptr when the lnast is not a lowerable module (no declared
 // I/O in io_meta() — e.g. the empty file-root tree).
 struct uPass_tolg {
-  static std::shared_ptr<hhds::Graph> run(const std::shared_ptr<Lnast>& lnast, std::string_view lib_path);
+  using Registry = std::vector<std::shared_ptr<Lnast>>;
+
+  // Phase 1 — declare the module's GraphIO in the library (ports + bits +
+  // sign + the implicit clock when the tree, or transitively any callee,
+  // holds state). Idempotent. MUST run for every lnast before any run() so
+  // Sub instances can bind callee GraphIOs regardless of build order
+  // (mirrors the yosys two-pass build).
+  static void register_io(const std::shared_ptr<Lnast>& lnast, std::string_view lib_path, const Registry& registry);
+
+  // Phase 2 — build the body graph.
+  static std::shared_ptr<hhds::Graph> run(const std::shared_ptr<Lnast>& lnast, std::string_view lib_path,
+                                          const Registry& registry);
 };

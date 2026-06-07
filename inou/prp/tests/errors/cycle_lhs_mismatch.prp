@@ -1,0 +1,13 @@
+/*
+:name: cycle_lhs_mismatch
+:type: error
+:error: lands at cycle 5, not 4
+*/
+
+// 06c-pipelining.md `bad2`: the computed landing cycle is 5, the LHS
+// declaration asserts 4.
+mod top(in1:u16) -> (out:u16@[5]) {
+  stage[3] d3 = in1
+  stage[2] bad2@[4] = d3
+  out = bad2
+}

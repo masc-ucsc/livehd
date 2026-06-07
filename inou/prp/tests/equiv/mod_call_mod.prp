@@ -1,0 +1,17 @@
+/*
+:name: mod_call_mod
+:type: equiv
+:verilog_top: mod_call_mod.top
+:pyrope_top: mod_call_mod.top
+*/
+
+// mod instantiating a mod: the callee's declared per-output cycle is the
+// Sub ABI; stage[2] must match the inner mod's declared @[2].
+mod inner(a:u8) -> (x:u8@[2]) {
+  stage[2] x = a
+}
+
+mod top(a:u8) -> (out:u8@[2]) {
+  stage[2] t = inner(a)
+  out = t
+}

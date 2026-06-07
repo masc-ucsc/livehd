@@ -104,31 +104,6 @@ complete before group N+1 starts. Group letters are shared across
 cross-file dependencies stay visible.</p>
 <h2 id="group-1-foundation">Group 1 — foundation</h2>
 <ul>
-<li><strong id="item-1q" class="item-id">1q</strong> Pyrope <code>pipe</code> construct — Phase 1
-  (declaration → flopped outputs). Spec:
-  <code>../docs/docs/pyrope/06c-pipelining.md</code>; plan + landed details:
-  <code>docs/contracts/task_1q_plan.md</code>. Remaining:<ul>
-<li><strong id="item-1q-D" class="item-id">1q-D</strong> LG pass1 checker —
-    <strong>absorbed into <a class="xref" href="TODO_mod.html#item-1u-D">1u-D</a></strong>
-    (decided 2026-06-06): the SCC/Tarjan + σ machinery is written ONCE over
-    LG for pipe and mod together (pipe = uniform σ ≤ min honesty +
-    inserted-flop narrowing to (min−σ, max−σ), reg-as-output home = min−1;
-    mod = per-output declared equality, cross-Sub composition). Checks
-    decidable at LNAST discharge earlier in
-    <a class="xref" href="TODO_mod.html#item-1u-B">1u-B</a>; the rest lower
-    into the LG (min,max) time annotation with pending-check records
-    (<a class="xref" href="TODO_mod.html#item-1u-C">1u-C</a>). Spec details
-    and post-2d test list now live in <a href="TODO_mod.html">TODO_mod.html</a>.
-    LG pass2 in Phase 1 stays the min-realization default in cgen.</li>
-<li><strong>Later phases (separate tasks):</strong> call sites
-    (<code>stage[N]</code>/<code>@[N]</code> in <code>mod</code> — now filed as
-    <a class="xref" href="TODO_mod.html#item-1r">1r</a>, makes
-    <code>tests/equiv/accum.prp</code> live); state/stage σ machinery exercised
-    on real reg bodies once 2d reg lowering lands; <code>lnast_to_slop</code>
-    pipe cell (seed-picked total T ∈ [min,max], inserted depth T−σ);
-    LG pass2 retiming/PPA realization knob.</li>
-</ul>
-</li>
 <li><strong id="item-1m" class="item-id">1m</strong> Pyrope <code>import</code> statement — <strong>deferred</strong>. Substantial new
   infra; not attempted in the 2026-05-27 session.</li>
 <li><strong>Tried:</strong> Nothing. Scope was assessed (substantial new
