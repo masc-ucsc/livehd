@@ -313,7 +313,30 @@ protected:
   // accept a compile-time-resolvable const in place of a bare literal.
   // No-shadowing is already enforced, so a name is unambiguous along the
   // visible chain; a later binding may overwrite an earlier same-name one.
+  //
+  // ALSO tracks `mut NAME = <int literal>` with declaration-time-capture
+  // semantics (mirrors comptime_tuples_): record on the `mut` decl, UPDATE on
+  // a later statement-level plain `NAME = <int literal>`, and ERASE on any
+  // other write (non-literal rhs, compound op, or any write inside an if/for/
+  // while/match/lambda body — see conditional_depth_). A timing slot then
+  // resolves the value that was statically known AT THE LAMBDA DECLARATION
+  // POINT; a mut that has since gone runtime is erased and the slot errors.
   std::unordered_map<std::string, int64_t> const_int_bindings_;
+
+  // Nesting depth of conditional / loop / nested-lambda bodies currently being
+  // lowered. >0 means writes are not unconditional statement-level writes, so
+  // they must not record or update const_int_bindings_ (a conditional re-bind
+  // makes a mut runtime-valued). Bumped via a Conditional_scope RAII guard
+  // around if/for/while/match arm bodies and lambda bodies.
+  uint32_t conditional_depth_ = 0;
+
+  struct Conditional_scope {
+    uint32_t* d;
+    explicit Conditional_scope(uint32_t* dd) : d(dd) { ++*d; }
+    ~Conditional_scope() { --*d; }
+    Conditional_scope(const Conditional_scope&)            = delete;
+    Conditional_scope& operator=(const Conditional_scope&) = delete;
+  };
 
   // Resolve a timing-index CST node to a compile-time integer: a `constant`
   // node parses via Dlop::from_pyrope (is_integer + is_i); an `identifier`

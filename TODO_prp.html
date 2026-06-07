@@ -104,62 +104,61 @@ complete before group N+1 starts. Group letters are shared across
 cross-file dependencies stay visible.</p>
 <h2 id="group-1-foundation">Group 1 — foundation</h2>
 <ul>
-<li><strong id="item-1m" class="item-id">1m</strong> Pyrope <code>import</code> statement — <strong>deferred</strong>. Substantial new
-  infra; not attempted in the 2026-05-27 session.</li>
-<li><strong>Tried:</strong> Nothing. Scope was assessed (substantial new
-    infrastructure: grammar, prp2lnast lowering, file-wrapper LNAST
-    tree synthesis, cross-tree <code>find_tree</code> resolution) and skipped
-    in favor of other landings.</li>
-<li><strong>Tree-naming convention:</strong> for a file <code>foo/bar.prp</code>, every
-    <code>comb</code>/<code>pipe</code>/<code>mod</code> defined inside gets its own LNAST tree
-    named <code>foo/bar.&lt;entity&gt;</code> (e.g. <code>comb xx() …</code> → tree name
-    <code>foo/bar.xx</code>). Trees are created for <strong>both</strong> <code>pub</code> and
-    non-<code>pub</code> definitions — every entity always gets a tree
-    because every <code>comb</code>/<code>pipe</code>/<code>mod</code> needs one. The <code>pub</code> keyword
-    controls <em>exportability</em>: only <code>pub</code>-marked entities can be
-    named by <code>import("foo/bar.xx")</code> from another file.</li>
-<li><strong>Pub constants / tuples</strong> at file scope (<code>pub const yy = 33</code>)
-    can't ride a per-entity tree, so the import machinery
-    synthesizes a single "file wrapper" LNAST tree per source file
-    that returns all of that file's <code>pub</code> non-function values.
-    Roughly equivalent to writing:
-    <div class="highlight"><pre><span></span><code>comb bar() -&gt; (yy, other_pub_var) {
-    yy = 33
-    other_pub_var = 44
-    xx = import(&quot;foo/bar.xx&quot;)  // only if `pub comb xx ...`
-}
-</code></pre></div>
-    Result is read-only at the import site (matches the "imports
-    are constants" semantics).</li>
-<li><strong>Needed for next attempt:</strong><ul>
-<li><code>import path</code> / <code>import path as alias</code> grammar in
-  tree-sitter-pyrope.</li>
-<li>prp2lnast lowering: emit a <code>func_call</code>-style ref against
-  the imported tree name, resolved via <code>find_tree</code>.</li>
-<li>File-wrapper LNAST tree synthesizer for <code>pub</code> file-scope
-  values that have no associated <code>comb</code>/<code>pipe</code>/<code>mod</code> tree.</li>
-<li>For Group-1 tests, explicit phase ordering — <code>import_phase1</code>
-  / <code>import_phase2</code> test directives, hand-ordering which files
-  are processed in which phase. The pending-import / second-
-  phase resolution loop belongs to Group-2 <a class="xref" href="TODO_prp.html#item-2o">2o</a> and depends
-  on this entry landing first.</li>
+<li><strong id="item-1m" class="item-id">1m</strong> Pyrope <code>pub</code> exports + <code>import()</code> — <strong>spec'd 2026-06-07</strong>,
+  design contract in <code>docs/contracts/task_1m_plan.md</code> (supersedes the
+  deleted root <code>import.md</code>; absorbs ex-<span class="xref xref-note" title="folded into 1m">2o</span> — the two-phase
+  <code>func_extract</code> / <code>Inline_reason</code> / pending-import-poison model is dead).</li>
+<li><strong>Design summary:</strong><ul>
+<li><code>pub</code> legal on file-scope <code>comptime</code>/<code>const</code> values (initializer
+  must fold comptime at elaboration, else error) and on
+  <code>comb</code>/<code>mod</code>/<code>pipe</code>/<code>fluid</code>. <code>pub mut</code>/<code>pub reg</code> = error. Every
+  entity still gets its own tree (<code>foo.prp</code> → unit <code>foo</code>, entity
+  <code>bar</code> → tree <code>foo.bar</code>, the existing func_extract convention);
+  <code>pub</code> only controls membership in the file's pub list.</li>
+<li><code>import("file1")</code> = the whole pub tuple (values + lambda tree-url
+  refs), <strong>read-only always</strong>; no dot selector — pick fields with
+  normal dot access. Direct access via urls:
+  <code>import("ln:file1.bar")</code> (any tree, pub not required) and
+  <code>import("lg:any.graph.name")</code> (any graph; black box at LNAST,
+  Sub-wired by GraphIO at <code>tolg</code>). Statement form kept as sugar:
+  <code>import "file1" as b</code> ≡ <code>const b = import("file1")</code>
+  (string-literal module only — dotted-identifier choice removed).</li>
+<li>Resolution against <strong>explicit inputs only</strong>: the invocation's other
+  <code>.prp</code> files + loaded <code>ln:</code>/<code>lg:</code> dirs (manifest pub index;
+  search crosses forests). No filesystem discovery. Missing = error,
+  ambiguous across inputs = error.</li>
+<li>Pub persistence = synthesized <code>foo.__pub</code> wrapper tree (arbitrary
+  comptime values ride LNAST serialization) + <code>manifest.json</code> pub
+  index per unit.</li>
+<li>Orchestration: bazel runs one <code>lhd elaborate</code> per file in
+  parallel (<code>ln:</code> deps ride along); a multi-file invocation
+  <strong>iterates</strong> — any order, whole-file retry when a <em>live</em> import
+  is unresolved (liveness needs constprop: <code>if cond { import }</code>),
+  pub list published atomically at file completion, no-progress
+  round = error. No topological pre-ordering, no pending markers.</li>
 </ul>
 </li>
+<li><strong>Implementation phases</strong> (detail in the contract): A front-end
+  (<code>pub</code> recording, <code>pub mut/reg</code> errors, <code>import</code> lowering);
+  B export side (wrapper tree + manifest pub index); C import side
+  (resolution at the constprop/runner seam, read-only bind, defer
+  signal, <code>equals</code> = tree-url identity); D kernel iterate loop +
+  registry + diagnostics; E <code>lg:</code> black-box Sub wiring; F tests.</li>
 <li><strong>Tests to add when landing:</strong><ol>
-<li>Import a remote already-resolved <code>comb</code>/<code>pipe</code>/<code>mod</code> function
-   (single-phase happy path — importer sees a fully-typed
-   <code>tree_ios</code> ABI from the imported module).</li>
-<li>Import a remote <code>comb</code>/<code>pipe</code>/<code>mod</code> that needs the second
-   phase (pending-import marker is set, importer can't comptime
-   its <code>if</code>/sticky propagation until the import resolves on the
-   next <code>pass.upass</code>). Pairs with <a class="xref" href="TODO_prp.html#item-2o">2o</a>.</li>
-<li>Import a constant (no <code>tree_ios</code> ABI, just a bundle entry
-   with a comptime value — via the synthesized file-wrapper
-   tree).</li>
-<li>Import a "flat" Verilog module via <code>pub</code>-keyword exports
-   (how does <code>pub</code> mark Verilog-side exports, and how does the
-   Pyrope side bind them — likely a <code>tree_ios</code> ABI variant or a
-   sub-class of import that bypasses the second-phase path).</li>
+<li>Pub-value import, same invocation: <code>pub comptime foo = 3</code> →
+   <code>cassert(x.foo == 3)</code>; read-only (write to <code>x.foo</code> errors).</li>
+<li>Lambda import + call: <code>comb</code> via tuple field and via
+   <code>ln:</code> url (inline splice); <code>mod</code>/<code>pipe</code> → Sub instance;
+   <code>cassert(x.bar equals bar2)</code> tree-url identity.</li>
+<li>Two-invocation flow through <code>lhd</code>: elaborate exporter to
+   <code>ln:dir</code>, then importer with <code>ln:dir</code> riding along.</li>
+<li>Verilog-derived <code>lg:</code> import (black box; no Verilog-side
+   <code>pub</code> needed — <code>lg:</code> is unrestricted).</li>
+<li>Conditional import: dead-branch import of a missing unit is
+   not an error; live one resolves.</li>
+<li>Diagnostics: missing unit, ambiguous unit across two inputs,
+   unknown (non-pub) field on the pub tuple, <code>pub mut</code>/<code>pub reg</code>,
+   non-foldable pub value, import cycle (no-progress).</li>
 </ol>
 </li>
 </ul>
@@ -176,37 +175,18 @@ cross-file dependencies stay visible.</p>
     <a class="xref" href="TODO_verilog.html#item-2d">2d</a>); land before those goldens are taken.</p>
 </li>
 <li>
-<p><strong id="item-2o" class="item-id">2o</strong> Two-phase <code>upass/func_extract</code> (parallel per-LNAST, then top-down
-  resolve) — <code>import.md</code>. Depends on the <code>import</code> feature landing (no
-  standalone entry yet — likely needs one); without imports the
-  pending-marker machinery has nothing to gate on.</p>
-</li>
-<li>Pending-import poison for the planned <code>bundle</code> pre-pass: when an <code>if</code>
-    condition (or any value sticky/attribute propagation reads) depends on
-    a name whose Bundle entry is still unresolved because of a pending
-    <code>import</code>, the entry must carry a <code>pending: ImportRef</code> marker. Bundle
-    pre-pass treats a pending-tainted cond as non-comptime <em>and</em> must NOT
-    propagate sticky/attribute state into the if's arms (the import may
-    still inject an <code>attr_set</code> or change the cond's comptime value).
-    Equivalent rule for attribute propagation through expression ops:
-    skip the migration when any RHS ref carries the pending marker, since
-    the import may change which <code>_*</code> attributes flow in. The pending
-    marker is propagated by bundle pre-pass through the same expression-op
-    migration path used for sticky <code>_*</code> attrs (functionally a second
-    sticky channel).</li>
-<li>
-<p>SSA-flatten gate: the SSA post-pass owns the <code>tuple_*</code> → flat-name
-    lowering and rewrites the LNAST (the optimization passes need the
-    Bundle ptr during their loop, so flattening earlier would complicate
-    <code>does</code>/<code>==</code>/etc.). SSA must NOT flatten a Bundle whose entry carries
-    a pending-import marker — the import may still change the shape,
-    field values, or attached attributes. Such bundles stay as
-    <code>tuple_*</code> nodes for the next <code>pass.upass</code> invocation to revisit.
-    Re-runs of <code>pass.upass</code> after the import resolves clear the marker.</p>
+<p><em>(ex-<strong>2o</strong> — folded into <a class="xref" href="TODO_prp.html#item-1m">1m</a>, 2026-06-07.
+  The two-phase <code>upass/func_extract</code> + pending-import-poison +
+  SSA-flatten-gate machinery is dead: imports resolve only against
+  <em>completed</em> units in the export registry, and an unresolved live
+  import defers the <strong>whole file</strong> for an idempotent retry — no
+  partial-resolution state ever reaches bundle pre-pass or SSA.)</em></p>
 </li>
 <li>
 <p><strong id="item-2n" class="item-id">2n</strong> <code>tree_ios</code> leaf ABI with <code>min</code>/<code>max</code> slots,
-  mimicking <code>GraphIO</code> for consistency — <code>import.md §Function signatures</code>.
+  mimicking <code>GraphIO</code> for consistency — consumed by <code>tolg</code> Sub
+  instances (the 1u-A Pyrope-path Subs) and by import-bound
+  <code>mod</code>/<code>pipe</code>/non-inlined calls (<code>docs/contracts/task_1m_plan.md</code>).
   Downstream upasses (func_extract, constprop) read leaf IO via the ABI
   rather than poking into each LNAST.</p>
 </li>
@@ -216,12 +196,13 @@ cross-file dependencies stay visible.</p>
 </li>
 <li>
 <p><strong id="item-2j" class="item-id">2j</strong> Function-scope closure-capture rule, <strong>import-aware case</strong>.
-  Companion to Group 1 <span class="xref xref-note" title="note: 1x">1x</span> which handles the no-import portion. The
-  pending-import path: when a referenced outer-scope name is tainted
-  by a pending import, do NOT inline; leave the ref intact and defer
-  the function from func_extract spawn until a re-run of <code>pass.upass</code>
-  (after import resolves) clears the taint. Depends on <a class="xref" href="TODO_prp.html#item-1m">1m</a> (import)
-  and <a class="xref" href="TODO_prp.html#item-2o">2o</a> (pending-import poison + bundle pre-pass).</p>
+  Companion to Group 1 <span class="xref xref-note" title="note: 1x">1x</span> which handles the no-import portion.
+  Under the 1m whole-file-retry model, func_extract never sees an
+  unresolved import (the file defers first), so the remaining work is
+  the capture rule itself: a nested function referencing an
+  outer-scope name bound to an imported read-only tuple captures it
+  like any const capture (value snapshot at extraction). Depends on
+  <a class="xref" href="TODO_prp.html#item-1m">1m</a> (import).</p>
 </li>
 </ul>
 <h2 id="group-3-depends-on-group-2">Group 3 — depends on Group 2</h2>

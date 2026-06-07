@@ -1272,33 +1272,12 @@ bool uPass_runner::try_inline_func_call() {
   // but is a legitimate inline target (passed the inlinable_callees_ gate
   // above). Its empty inputs/outputs make the prologue/epilogue no-ops.
 
-  // Task 1q — a `pipe` callee (any output carries a stages annotation) is
-  // never comb-inlined: its outputs are flopped, and a call site must consume
-  // it via `stage[N]` (later phase). Decline so the call surfaces unresolved
-  // instead of silently dropping the latency.
-  for (const auto& oe : io.outputs) {
-    if (oe.stages_min > 0) {
-      return false;
-    }
-  }
-
-  // Task 1r — a plain `mod` callee is its own module: the call becomes a
-  // Sub instance (1r-D), never a comb splice — even when every declared
-  // output cycle is 0, a mod may hold state. A `ref self` mod METHOD keeps
-  // the splice path (mod-init constructors, `y.method(...)`): recognized by
-  // its `self` io entry.
-  if (callee->get_lambda_kind() == "mod") {
-    bool has_self_input = false;
-    for (const auto& ie : io.inputs) {
-      if (ie.name == "self") {
-        has_self_input = true;
-        break;
-      }
-    }
-    if (!has_self_input) {
-      return false;
-    }
-  }
+  // NOTE: the `pipe`/`mod` declines below run AFTER the argument-naming
+  // validation loop (not here). 06-functions.md §"Argument naming" applies to
+  // EVERY resolvable callee regardless of kind, so the same naming check must
+  // fire for pipe/mod call sites before we bail out to the Sub-instance / pipe
+  // path — otherwise an unnamed `diff(x, y)` would compile for a `mod` while
+  // erroring for the identical `comb`. The callee + io are already resolved.
 
   // ── Match actuals → params (positional + named) ──────────────────────────
   const std::size_t        nparams = io.inputs.size();
@@ -1494,6 +1473,40 @@ bool uPass_runner::try_inline_func_call() {
                      "fcall-unnamed-arg",
                      std::format("argument `{}` must be named (`{}=...`) in call to `{}`", pname, pname, callee_name),
                      "name the argument, or pass a variable whose name matches the parameter");
+    }
+  }
+
+  // ── pipe/mod declines ─────────────────────────────────────────────────────
+  // These run AFTER the argument-naming validation above (06-functions.md
+  // §"Argument naming" applies to every resolvable callee regardless of kind),
+  // and BEFORE the binding/splice — so a pipe/mod call site is held to the same
+  // naming rule as a comb, then routed to its own lowering path.
+
+  // Task 1q — a `pipe` callee (any output carries a stages annotation) is
+  // never comb-inlined: its outputs are flopped, and a call site must consume
+  // it via `stage[N]` (later phase). Decline so the call surfaces unresolved
+  // instead of silently dropping the latency.
+  for (const auto& oe : io.outputs) {
+    if (oe.stages_min > 0) {
+      return false;
+    }
+  }
+
+  // Task 1r — a plain `mod` callee is its own module: the call becomes a
+  // Sub instance (1r-D), never a comb splice — even when every declared
+  // output cycle is 0, a mod may hold state. A `ref self` mod METHOD keeps
+  // the splice path (mod-init constructors, `y.method(...)`): recognized by
+  // its `self` io entry.
+  if (callee->get_lambda_kind() == "mod") {
+    bool has_self_input = false;
+    for (const auto& ie : io.inputs) {
+      if (ie.name == "self") {
+        has_self_input = true;
+        break;
+      }
+    }
+    if (!has_self_input) {
+      return false;
     }
   }
 

@@ -243,19 +243,17 @@ swap time. Tracked as **3c** in [TODO_livehd.md](../../TODO_livehd.md).
    `hier_storage`) or whether instances share a Tree body and
    disambiguate via `hier_pos`. The latter matches HHDS's intended
    Forest model.
-6. **Forest-level per-tree readiness for parallel func_extract.**
-   `upass/func_extract` handles imports in two phases (parallel
-   per-LNAST, then top-down resolve — see `../../import.md`). To
-   prevent phase 1 from racing on another tree's half-built body, the
-   Forest needs to track, per tree:
-   - `local_done` (atomic bool) — flipped true *after* tree_ios is
-     fully published (may or not may have `bits`/`min`/`max`).
-
-   These fields live on the Forest, not on `hhds::Tree`, so the
-   `Tree::clone()` / `TreeIO::replace()` swap dance from §7 does not
-   have to preserve them — they describe the slot's compilation state,
-   not the tree body. The clone/replace path should reset
-   `local_done = false` on the slot until the new body finishes its
-   local upass.
+6. **Forest-level per-tree readiness — demoted.** The original
+   motivation (two-phase parallel `upass/func_extract` for imports,
+   old root `import.md`) is dead: imports now follow the whole-file
+   iterate model (`task_1m_plan.md`) where resolution consults only an
+   export registry of *completed* units, so no upass races on a
+   half-built tree and no per-tree `local_done` is needed for imports.
+   If incremental recompile (`architecture.md §4`) later needs
+   per-tree compilation state (`cache_origin`, interface hashes), the
+   original guidance stands: such fields live on the Forest, not on
+   `hhds::Tree`, so the `Tree::clone()` / `TreeIO::replace()` swap
+   dance from §7 does not have to preserve them — they describe the
+   slot's compilation state, not the tree body.
 6. **Concurrency.** HHDS Trees are not thread-safe. Confirm no LiveHD
    pass builds an LNAST/Node_tree concurrently from multiple threads.

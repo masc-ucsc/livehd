@@ -1,0 +1,17 @@
+/*
+:name: capture_mut_decl_time
+:type: comptime
+:verifier_pass: 2
+:verifier_fail: 0
+*/
+
+// A comb closure must capture the value of a free `mut` as it was AT THE
+// LAMBDA DECLARATION POINT, not the latest value. add_mut2 sees mut_var==2,
+// add_mut10 (declared after the re-assign) sees mut_var==10.
+mut mut_var = 2
+comb add_mut2(a:u8)->(x:u9) { x = a + mut_var }
+mut_var = 10
+comb add_mut10(a:u8)->(x:u9) { x = a + mut_var }
+
+cassert(add_mut2(a=20) == 22)
+cassert(add_mut10(a=30) == 40)

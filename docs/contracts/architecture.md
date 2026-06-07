@@ -157,14 +157,16 @@ per-tree, content-addressed by `(tree_body_hash, deps' interface_hash)`.
 - **Parallelism falls out.** Trees with no edge between them in the
   call graph can be re-upassed in parallel; the demand-driven global
   pass orchestrates the join.
-- **Cross-tree safety during parallel upass.** `upass/func_extract`
-  handles imports in two phases (parallel per-LNAST, then top-down
-  resolve — see `../../import.md`). Phase 1 may not read another
-  tree's body or tree_ios unless the Forest marks that tree as already
-  complete from a prior compilation (`cache_origin == incremental`).
-  Phase 2 starts once every reachable tree reports `local_done`. The
-  Forest extension that carries `local_done` / `cache_origin` /
-  `inline_reason` per tree is tracked in `hhds_migration.md §8`.
+- **Cross-tree safety during parallel upass.** Imports follow the
+  whole-file iterate model (`task_1m_plan.md`): an `import(...)`
+  resolves only against the export registry of *completed* units
+  (finished in-invocation files + loaded `ln:`/`lg:` dirs); a file
+  blocked on an unresolved live import defers entirely and retries
+  after others complete. No upass ever reads a half-built tree, so the
+  per-tree `local_done`/`inline_reason` Forest readiness extension from
+  the old two-phase design is not needed for imports — incremental
+  recompile (`cache_origin`) remains its own track in
+  `hhds_migration.md §8`.
 
 ## 5. Verification — LEC strategy
 

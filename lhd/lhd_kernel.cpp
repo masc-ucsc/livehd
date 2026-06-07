@@ -928,9 +928,11 @@ bool emits_need_lnast(const Options& opts) {
 
 // ---- scan (pyrope import/dependency discovery) -------------------------------
 
-// Imports are comptime string literals (see import.md), so the dependency
-// list is statically extractable from the parse: every LNAST func_call of
-// the form (target, const "import", const "<module>").
+// Imports are comptime string literals (see docs/contracts/task_1m_plan.md),
+// so the strings are statically extractable from the parse: every LNAST
+// func_call of the form (target, const "import", const "<module>"). The list
+// is a conservative over-approximation — an import under `if cond` may be
+// constprop-dead, which only elaboration can tell.
 std::vector<std::string> collect_imports(const std::shared_ptr<Lnast>& ln) {
   std::vector<std::string> out;
   for (const auto& nid : ln->tree().pre_order()) {
@@ -975,7 +977,7 @@ std::string json_escape_min(std::string_view s) {
 }
 
 // `lhd scan FILES...` — emit each pyrope file's import strings (raw, as
-// written; path resolution lands with the import.md resolver). The payload
+// written; resolution lands with the task_1m_plan.md resolver). The payload
 // rides the result envelope as the "scan" member, so BUILD generators
 // (gazelle-style) and depfile writers can consume one JSON object.
 void scan_command(Options& opts, Result& res) {

@@ -1,0 +1,25 @@
+/*
+:name: array_dim_const
+:type: comptime
+:verifier_pass: 4
+:verifier_fail: 0
+*/
+
+// Array type lengths accept a compile-time-resolvable `const`/`mut` binding,
+// not just a literal. extract_array_dims now resolves `[sz]u8` through
+// resolve_cycle_value (const_int_bindings_), with the same > 0 requirement as
+// a literal length. Exercises that the DECLARATION compiles and the buffer
+// reads/writes hold.
+
+mut sz = 4
+mut buf:[sz]u8 = 0
+
+buf[0] = 1
+buf[1] = 2
+buf[2] = 3
+buf[3] = 4
+
+cassert(buf[0] == 1)
+cassert(buf[1] == 2)
+cassert(buf[2] == 3)
+cassert(buf[3] == 4)

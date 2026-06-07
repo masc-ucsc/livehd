@@ -9,5 +9,5 @@ pipe[1] add(a:u16, b:u16) -> (c:u17) { c = a + b }
 
 mod top(in1:u16, in2:u16) -> (out:u17@[3]) {
   stage[2] d2 = in1
-  stage[1] out@[3] = add(d2, in2)
+  stage[1] out@[3] = add(a=d2, b=in2)
 }

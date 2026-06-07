@@ -7,6 +7,6 @@
 pipe[3] mul(a:u16, b:u16) -> (c:u32) { c = a * b }
 
 mod top(in1:u16, in2:u16) -> (out:u32@[2]) {
-  stage[2] tmp = mul(in1, in2)
+  stage[2] tmp = mul(a=in1, b=in2)
   out = tmp
 }

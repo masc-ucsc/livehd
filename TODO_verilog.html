@@ -118,8 +118,8 @@ and <a href="TODO_hhds.html">TODO_hhds.md</a>, so cross-file dependencies stay v
     (power-of-two <code>SRA</code>/<code>Get_mask</code>, generic <code>Sub</code> fallback + non-synth warning).
   - <strong><code>uif</code></strong> chains (add the <code>HotMux</code> FIXME) and direct <code>__&lt;cell&gt;</code> calls.
   - <strong><code>Sub</code> submodule calls</strong> — Pyrope-path Sub instances LANDED with 1u-A (registry-resolved, single-output); remaining: the callee <code>tree_io</code> leaf ABI (<a class="xref" href="TODO_prp.html#item-2n">2n</a>) +
-    import handling (<a class="xref" href="TODO_prp.html#item-1m">1m</a>/<a class="xref" href="TODO_prp.html#item-2o">2o</a>); until those land <code>tolg</code> must hard-error
-    (not guess) on any callee with <code>Inline_reason != none</code>.
+    import handling (<a class="xref" href="TODO_prp.html#item-1m">1m</a>, incl. <code>lg:</code> black-box Subs); until those land <code>tolg</code> must hard-error
+    (not guess) on any callee it cannot fully resolve in the forest/registry.
   - <strong>Attributes</strong>: read <code>max</code>/<code>min</code> HHDS attrs at node creation (LNAST-origin
     path); diagnose leftover LNAST-only attrs.
   - Optional cross-module global/specialization pass (contract phase 10) — the

@@ -28,22 +28,16 @@ generation:
 1. Frontends such as `inou.prp` or `inou.slang` produce LNAST.
 2. A first local LNAST upass runs once per file, potentially in parallel.
    This pass expands tuples, expands loops, creates SSA names, and
-   inlines local calls. Import handling lives **inside**
-   `upass/func_extract` and runs in two phases (see `../../import.md`):
-   - **Phase 1 (parallel, per-tree):** resolve `import(...)` paths,
-     parse/enqueue new files into the Forest, leave call sites
-     verbatim, and publish this tree's `Inline_reason` plus expanded
-     `tree_ios` leaves with `bits`/`min`/`max` as the final step of the
-     local upass. Stateful (`self`, `ref self`) imports always inline
-     via receiver substitution against the importer's local alias.
-   - **Phase 2 (top-down, after all reachable trees are
-     `local_done`):** rewrite remaining import/call nodes. O(1) per
-     site: `Inline_reason != none` ⇒ inline; else emit a non-inlined
-     call against the callee's `tree_ios` leaf ABI.
-
-   Phase 1 must not read another tree's body/attrs/`tree_ios` unless
-   the Forest marks that tree as already complete from a prior
-   compilation (`cache_origin == incremental`).
+   inlines local calls. Import handling follows the whole-file iterate
+   model (`task_1m_plan.md` — the old two-phase `func_extract` /
+   `Inline_reason` design is dead): an `import(...)` resolves against the
+   export registry of **completed** units (this invocation's finished
+   files + loaded `ln:`/`lg:` dirs); a file whose upass hits an
+   unresolved *live* import defers entirely and retries after other
+   files complete, so no upass ever reads a half-built tree. Resolved
+   imports bind read-only values/lambda refs; calls then use the normal
+   machinery (`comb` → runner inline splice, `mod`/`pipe` → Sub
+   instance, `lg:` black box → Sub wired from GraphIO at `tolg`).
 3. An optional global LNAST upass starts from a selected top and traverses the
    reachable forest. It performs global constant/type/attribute propagation
    across imports and may specialize imported callees per call site.
@@ -66,12 +60,11 @@ propagation and per-call-site specialization.
 
 The 2-step flow is correct only when every imported callee LNAST has a
 **fully specified input/output interface** — that is, every input and output
-field of an imported module has a declared type/width. In the
-func_extract model this corresponds exactly to a callee tree with
-`Inline_reason == none`: every `tree_ios` leaf carries `bits`, `min`,
-`max`, and the basic type. Under that precondition the local upass can
-finish each module independently, and the final translator can emit
-`Sub` nodes against shared (unspecialized) callee graphs.
+field of an imported module has a declared type/width: every `tree_ios`
+leaf carries `bits`, `min`, `max`, and the basic type. Under that
+precondition the local upass can finish each module independently, and
+the final translator can emit `Sub` nodes against shared (unspecialized)
+callee graphs.
 
 The global pass is required when imported callees have generic / unconstrained
 inputs or outputs. The canonical example is a Pyrope adder written without an
@@ -81,12 +74,12 @@ category. In these cases the global pass propagates caller-side type/width
 information into the callee and may produce per-call-site specializations.
 
 A practical fast path for the global pass: scan imported callees and only
-re-traverse / specialize those whose `Inline_reason` is `unknown_type`,
-`incomplete_bits`, or `generic_param`. Callees with
-`Inline_reason == none` can be translated once and shared.
+re-traverse / specialize those with an unknown type, incomplete
+bits/min/max on a `tree_ios` leaf, or generic parameters. Fully-specified
+callees can be translated once and shared.
 
-When the global pass is disabled and an imported callee with
-`Inline_reason != none` is reached, the final translator must emit a
+When the global pass is disabled and an imported callee with an
+incomplete interface is reached, the final translator must emit a
 compile error rather than guess widths or types.
 
 ## 2. Specialization and graph names
@@ -843,13 +836,14 @@ optimization and the generic `div` / `mod` `Sub` fallback plus warning.
 repeated-input ordering for variadic pins.
 
 **Phase 8 — Submodule calls (unspecialized).** Resolve imported callees by
-name (canonical `prp:<file>#<export>` or the local extraction name for
-non-imported callees), read the callee tree's flat `tree_ios` leaf list
+tree name (`<file>.<entity>`, the func_extract convention — also the name
+behind an `ln:` url; `lg:` imports resolve in the GraphLibrary instead,
+see `task_1m_plan.md`), read the callee tree's flat `tree_ios` leaf list
 for input/output ordering and types, validate the fcall against it, and
 emit `Sub` nodes. The leaf list is the canonical call ABI — pin order
 follows the dotted-name canonical order (attributes, named alphabetical,
-unnamed numerical). Refuse to translate any callee with
-`Inline_reason != none` when the global pass is disabled.
+unnamed numerical). Refuse to translate any callee with an incomplete
+interface when the global pass is disabled.
 
 **Phase 9 — Attributes.** For LNAST-origin paths after
 `pass.upass bitwidth`, read `max` / `min` HHDS attrs at node creation
@@ -877,13 +871,12 @@ LGraph needs extending, and warning/error message cleanup.
   func_extract's local-upass phase populate it once each tree's body is
   resolved. Entries are a flat list of leaves with dotted canonical names
   (`a.foo`, `a.bar`); each leaf carries basic type + `bits` + `min` +
-  `max` (or "unknown" when the tree's `Inline_reason` is `unknown_type` /
-  `incomplete_bits`). The Forest also tracks per-tree `local_done` and
-  `cache_origin` so parallel passes know when reading another tree's
-  state is safe (see `../../import.md §Forest-level readiness`).
+  `max` (or "unknown" when not yet derivable). Per-tree readiness
+  tracking is no longer needed for imports — resolution only consults
+  completed units (`task_1m_plan.md §5`).
 - LGraph generation must look up the callee's `tree_io` leaf list to
   validate fcall inputs and to bind result fields to output positions.
-  Callees with `Inline_reason != none` either trigger the global pass or
+  Callees with an incomplete interface either trigger the global pass or
   are a compile error when it is off.
 - Reject direct calls to deprecated/internal cells (`__tup_add`, `__tup_get`,
   `__io`, `__sub`).

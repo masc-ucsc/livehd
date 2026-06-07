@@ -1000,7 +1000,15 @@ void Prp2lnast::process_statement(TSNode n) {
   std::print("prp2lnast: unhandled statement type `{}`\n", t);
 }
 
-void Prp2lnast::process_scope_statement(TSNode n, Lnast_nid /*target_stmts*/) { walk_statement_block(n); }
+void Prp2lnast::process_scope_statement(TSNode n, Lnast_nid /*target_stmts*/) {
+  // Every body lowered through here is nested under a conditional / loop /
+  // match arm / lambda (or an inline scope expression) — never the top-level
+  // file scope (process_description walks the root directly). Bump
+  // conditional_depth_ so a write inside cannot capture/update a file-scope
+  // comptime int binding (see const_int_bindings_).
+  Conditional_scope guard(&conditional_depth_);
+  walk_statement_block(n);
+}
 
 void Prp2lnast::process_gated_statement(TSNode stmt, TSNode gate) {
   // gate is a `when_unless_cond` node:
@@ -1045,8 +1053,13 @@ void Prp2lnast::process_gated_statement(TSNode stmt, TSNode gate) {
   // `stmts` wrapper). For multi-effect statements (e.g. `mut x = e when c`
   // emits attr_set + assign), all effects live as siblings under the same
   // `if`, sharing one cond evaluation.
+  // The gated statement is conditional, so a write inside it must not capture/
+  // update a file-scope comptime int binding (see const_int_bindings_).
   builder.push_stmts(if_idx);
-  process_statement(stmt);
+  {
+    Conditional_scope guard(&conditional_depth_);
+    process_statement(stmt);
+  }
   builder.pop_stmts();
 }
 
@@ -1099,23 +1112,16 @@ std::vector<int64_t> Prp2lnast::extract_array_dims(TSNode type_cast_node) const 
       return {};
     }
     TSNode idx = ts_node_child_by_field_name(len, "index", 5);
-    if (ts_node_is_null(idx) || std::string_view(ts_node_type(idx)) != "constant") {
+    // A `constant` literal OR a compile-time-resolvable `const`/`mut` binding
+    // (`[sz]u8` where `sz` was statically known at the declaration point) — both
+    // resolve through resolve_cycle_value (which consults const_int_bindings_,
+    // tracking decl-time-known muts with the same UPDATE/ERASE rules). The
+    // resolved length must still be > 0, as before.
+    std::optional<int64_t> v = resolve_cycle_value(idx);
+    if (!v || *v <= 0) {
       return {};
     }
-    auto txt = trim(get_text(idx));
-    if (txt.empty()) {
-      return {};
-    }
-    try {
-      size_t  pos = 0;
-      int64_t v   = std::stoll(std::string(txt), &pos);
-      if (pos != txt.size() || v <= 0) {
-        return {};
-      }
-      out.push_back(v);
-    } catch (...) {
-      return {};
-    }
+    out.push_back(*v);
     ty = ts_node_child_by_field_name(ty, "base", 4);
   }
   return out;
@@ -1385,16 +1391,53 @@ Lnast_node Prp2lnast::process_lvalue_for_assign(TSNode lvalue, const Lnast_node&
       has_cpt = pr.second;
     }
 
-    // Task 1r/1q — record `const NAME = <int literal>` so a later `@[NAME]`,
-    // `stage[NAME]`, or `pipe[NAME]` timing slot can resolve it at compile
-    // time (see resolve_cycle_value). No-shadowing is already enforced, so a
-    // fresh binding may safely overwrite an earlier same-name one. Only a
-    // const initialized to a parseable integer literal is recorded; non-int
-    // or non-const initializers are left out (resolve_cycle_value then misses
-    // and the timing-slot site emits its own diagnostic).
-    if (has_decl && kind_sv == "const" && rvalue.is_const()) {
-      if (auto cst = Dlop::from_pyrope(rvalue.get_name()); cst && cst->is_integer() && cst->is_i()) {
-        const_int_bindings_[std::string(trim(get_text(id)))] = cst->to_i();
+    // Task 1r/1q — track compile-time-resolvable integer bindings so a later
+    // `@[NAME]`, `stage[NAME]`, or `pipe[NAME]` timing slot can resolve them
+    // (see resolve_cycle_value / const_int_bindings_). No-shadowing is already
+    // enforced, so a fresh binding may safely overwrite an earlier same-name
+    // one.
+    //
+    //   - `const NAME = <int literal>`  → record (immutable, always valid;
+    //       no-shadowing + no-reassign make scoping unambiguous, so no depth
+    //       gate — preserves the original Task-1r behavior).
+    //   - `mut   NAME = <int literal>`  → record with declaration-time-capture:
+    //       a later statement-level plain `NAME = <int literal>` UPDATEs it,
+    //       and ANY other write ERASEs it (mirrors comptime_tuples_). The
+    //       erase covers a non-literal rhs, a compound op (the scalar `rvalue`
+    //       arrives as a tmp ref, never a const, so is_const() is false), and
+    //       any write nested in a conditional/loop/lambda body (which makes
+    //       the value no longer statically known — conditional_depth_ > 0).
+    //
+    // Updating a mut is gated on conditional_depth_ == 0 so only an
+    // unconditional, statement-level write is captured. A timing slot then
+    // resolves the value known AT THE LAMBDA DECLARATION POINT.
+    {
+      std::string nm(trim(get_text(id)));
+      auto        as_int = [&]() -> std::optional<int64_t> {
+        if (!rvalue.is_const()) {
+          return std::nullopt;
+        }
+        if (auto cst = Dlop::from_pyrope(rvalue.get_name()); cst && cst->is_integer() && cst->is_i()) {
+          return cst->to_i();
+        }
+        return std::nullopt;
+      };
+      if (has_decl && kind_sv == "const") {
+        if (auto v = as_int()) {
+          const_int_bindings_[nm] = *v;
+        }
+      } else if ((has_decl && kind_sv == "mut") || (!has_decl)) {
+        // `mut NAME = lit` (decl) or a plain re-assignment `NAME = lit`.
+        // Record/UPDATE only on an unconditional integer-literal write;
+        // anything else ERASEs the (possibly stale) capture.
+        if (auto v = as_int(); v && conditional_depth_ == 0) {
+          const_int_bindings_[nm] = *v;
+        } else {
+          const_int_bindings_.erase(nm);
+        }
+      } else if (has_decl) {
+        // reg / stage (or any other) decl of NAME: not a comptime int binding.
+        const_int_bindings_.erase(nm);
       }
     }
 
@@ -2247,6 +2290,14 @@ void Prp2lnast::process_for_statement(TSNode n) {
         return std::nullopt;
       }
       return lookup_param_bits(trim(get_text(arg)));
+    }
+    // A plain `identifier` may be a compile-time-resolvable const/mut binding
+    // (`const N = 5` / `mut N = 5`). resolve_cycle_value consults
+    // const_int_bindings_ — which already tracks decl-time-known muts with the
+    // UPDATE/ERASE rules — so `for i in 0..=N { … }` comptime-unrolls when N is
+    // statically known at the use point.
+    if (t == "identifier") {
+      return resolve_cycle_value(c);
     }
     return std::nullopt;
   };
