@@ -36,7 +36,10 @@ struct uPass_tolg {
   // (mirrors the yosys two-pass build).
   static void register_io(const std::shared_ptr<Lnast>& lnast, std::string_view lib_path, const Registry& registry);
 
-  // Phase 2 — build the body graph.
+  // Phase 2 — build the body graph. `reset_style` is the 2d-reg elaboration
+  // flag (`upass.reset_style=sync|async`, default sync — target-dependent,
+  // FPGA-typical): it decides whether implicit-reset flops tie their `async`
+  // pin. A per-reg `:[sync=…]` attr beats the flag.
   static std::shared_ptr<hhds::Graph> run(const std::shared_ptr<Lnast>& lnast, std::string_view lib_path,
-                                          const Registry& registry);
+                                          const Registry& registry, std::string_view reset_style = "sync");
 };

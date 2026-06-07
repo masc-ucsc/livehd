@@ -1716,8 +1716,14 @@ void lower_lnasts(Options& opts, Result& res, Eprp_var& var, const std::string& 
     for (const auto& ln : var.lnasts) {
       uPass_tolg::register_io(ln, lib_path, var.lnasts);
     }
+    // 2d-reg — the reset_style elaboration flag rides the upass set
+    // (`--set upass.reset_style=async`); tolg is its only consumer.
+    std::string reset_style = "sync";
+    if (auto it = up.find("reset_style"); it != up.end() && !it->second.empty()) {
+      reset_style = it->second;
+    }
     for (const auto& ln : var.lnasts) {
-      auto g = uPass_tolg::run(ln, lib_path, var.lnasts);
+      auto g = uPass_tolg::run(ln, lib_path, var.lnasts, reset_style);
       if (g) {
         var.add(g);
       }

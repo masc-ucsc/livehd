@@ -175,6 +175,12 @@ protected:
   // both leave T's bundle in the symbol table.
   std::unordered_map<std::string, std::string> decl_named_type_;
 
+  // 2d-reg — names declared with mode `reg` (incl. stage-synthesized regs).
+  // Their reads are RUNTIME q reads (never fold through the symbol table)
+  // and their stores are next-state din writes (never bound, never dropped):
+  // Verilog `<=` semantics — a read after a write still sees the flop's q.
+  std::unordered_set<std::string> reg_decl_names_;
+
   auto current_bundle() { return st.get_bundle(current_text()); }
 
   // Bundle iff the cursor is on a ref. Returns nullptr otherwise — used by

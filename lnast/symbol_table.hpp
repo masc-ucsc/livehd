@@ -60,6 +60,20 @@ public:
   // declaring scope.
   void mark_current_uncertain();
 
+  // True when any active scope is an uncertain if-arm — i.e. the statement
+  // being processed is not guaranteed to execute. 2d-reg: a RUNTIME-rhs
+  // write under uncertainty must invalidate the lhs's stale comptime value
+  // (comptime writes get this via record_uncertain_modification; runtime
+  // writes never touch the varmap, so the caller checks this explicitly).
+  [[nodiscard]] bool in_uncertain_scope() const {
+    for (const auto* s : stack) {
+      if (s->uncertain_cond) {
+        return true;
+      }
+    }
+    return false;
+  }
+
   bool var(std::string_view key);
 
   bool mut(std::string_view key, std::shared_ptr<Bundle> bundle);

@@ -16,6 +16,7 @@ protected:
   bool                     run_ssa{false};
   bool                     run_tolg{false};
   bool                     run_toln{true};
+  std::string              reset_style{"sync"};  // 2d-reg: sync|async implicit-reset wiring (tolg)
   upass::Options_map       pass_options;
 
 public:

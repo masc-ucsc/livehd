@@ -2,6 +2,7 @@
 
 #include "upass_tolg.hpp"
 
+#include <algorithm>
 #include <bit>
 #include <cstdint>
 #include <cstdlib>
@@ -92,18 +93,38 @@ struct Pending_rec {
   bool            is_sink = false;
 };
 
+// Shared phase-1 io+clock+reset GraphIO registration result. `clock_name` /
+// `reset_name` are the graph inputs driving flop clock_pin / reset_pin (a
+// declared input bound before minting, or the implicit "clock"/"reset"
+// minted — the *_minted flags distinguish them so only minted pins get their
+// width/sign stamped at first use). Empty names = the module needs none.
+// `reset_neg` marks an active-low (…_n) module reset input.
+struct Io_setup {
+  std::string clock_name;
+  bool        clock_minted = false;
+  std::string reset_name;
+  bool        reset_minted = false;
+  bool        reset_neg    = false;
+};
+
 // Builds one hhds::Graph from one post-upass / post-SSA function-tree Lnast.
 class Tolg {
 public:
-  // `clock_name` is the graph input driving every flop's clock_pin (the
-  // declared clk/clock input, or the implicit "clock" run() minted —
-  // `clock_minted` distinguishes them so only the minted pin gets its
-  // width/sign stamped here; a reused declared input was already stamped by
-  // the io loop). Empty when the tree has no regs (own or in any callee).
   // `registry`/`lib` resolve pipe/mod call sites to Sub instances (1u-A).
-  Tolg(const std::shared_ptr<Lnast>& lnast, hhds::Graph* g, std::string clock_name, bool clock_minted,
-       const uPass_tolg::Registry* registry, hhds::GraphLibrary* lib)
-      : lnast_(lnast), g_(g), registry_(registry), lib_(lib), clock_name_(std::move(clock_name)), clock_minted_(clock_minted) {}
+  // `async_default` is the upass.reset_style=async elaboration flag (2d-reg);
+  // a per-reg `:[sync=…]` attr beats it.
+  Tolg(const std::shared_ptr<Lnast>& lnast, hhds::Graph* g, Io_setup io_setup, const uPass_tolg::Registry* registry,
+       hhds::GraphLibrary* lib, bool async_default)
+      : lnast_(lnast),
+        g_(g),
+        registry_(registry),
+        lib_(lib),
+        clock_name_(std::move(io_setup.clock_name)),
+        clock_minted_(io_setup.clock_minted),
+        reset_name_(std::move(io_setup.reset_name)),
+        reset_minted_(io_setup.reset_minted),
+        reset_neg_(io_setup.reset_neg),
+        reset_async_default_(async_default) {}
 
 private:
   // Task 1u-A — deferred stage-reg creation: a declare(reg)+stages does NOT
@@ -171,6 +192,10 @@ public:
         lower_stmts(c);
       }
     }
+
+    // 2d-reg — wire every declared reg's din/enable/reset/initial now that
+    // all stores and per-reg attr overrides have been seen.
+    finalize_regs();
 
     // Outputs: connect each output's bound driver to its graph output sink.
     for (const auto& name : out_names_) {
@@ -335,8 +360,158 @@ private:
       // anything unresolvable (runtime wrap/sat, comb recursion) stays a
       // HARD error inside lower_func_call.
       lower_func_call(nid);
+    } else if (N::is_attr_set(t)) {
+      // 2d-reg — per-reg flop-attr overrides (reset_pin/sync/negreset/
+      // initial); anything else keeps the unhandled warn below.
+      lower_attr_set(nid);
     } else {
       Pass::warn("upass.tolg: unhandled node type '{}'", Lnast_ntype::to_sv(t));
+    }
+  }
+
+  // attr_set(ref(target), const(key), value) — 2d-reg: record the per-reg
+  // flop-attr overrides consumed by finalize_regs. `:[reset_pin=…, sync=…,
+  // negreset, initial=N]` (04b-attributes.md); a per-reg `sync` beats the
+  // upass.reset_style flag; `reset_pin=false` opts out of reset (only valid
+  // with a nil init).
+  void lower_attr_set(const Lnast_nid& nid) {
+    auto tgt = lnast_->get_first_child(nid);
+    if (tgt.is_invalid()) {
+      return;
+    }
+    auto key_n = lnast_->get_sibling_next(tgt);
+    if (key_n.is_invalid()) {
+      return;
+    }
+    auto it = reg_info_.find(std::string(lnast_->get_name(tgt)));
+    if (it == reg_info_.end()) {
+      return;  // non-reg attr — carries no graph payload here
+    }
+    auto& info  = it->second;
+    auto  key   = lnast_->get_name(key_n);
+    auto  val_n = lnast_->get_sibling_next(key_n);
+    auto  val   = val_n.is_invalid() ? std::string_view{"true"} : std::string_view(lnast_->get_name(val_n));
+    if (key == "reset_pin") {
+      info.reset_pin_name = std::string(val);
+    } else if (key == "sync") {
+      info.has_sync = true;
+      info.sync_val = val != "false" && val != "0";
+    } else if (key == "negreset") {
+      info.negreset = val != "false" && val != "0";
+    } else if (key == "initial") {
+      info.initial_txt = std::string(val);
+    } else if (key == "type" || key == "comptime") {
+      // storage-class markers — already consumed by the declare
+    } else {
+      Pass::warn("upass.tolg: reg '{}' attribute '{}' not lowered (out of the 2d-reg slice)", lnast_->get_name(tgt), key);
+    }
+  }
+
+  // 2d-reg — wire each declared reg's din / enable / reset_pin / initial /
+  // async / negreset after the whole body has been lowered (stores and attr
+  // overrides arrive in any order relative to the declare).
+  void finalize_regs() {
+    for (const auto& name : reg_order_) {
+      auto& info = reg_info_.at(name);
+      auto& flop = info.flop;
+
+      // din: the final shadow value (last-write-wins; branch writes arrive
+      // pre-muxed). A never-written reg holds its value forever: din <- q.
+      auto q = flop.create_driver_pin(0);
+      Pin  din;
+      if (auto dit = pin_map_.find(din_key(name)); dit != pin_map_.end()) {
+        din = dit->second;
+      } else {
+        din = q;
+      }
+      setup_sink_by_name(flop, "din").connect_driver(din);
+
+      // q width: untyped regs take the final din width (mw+1 unsigned).
+      if (info.decl_mw == 0) {
+        auto dit = mw_map_.find(din_key(name));
+        Bits_t mw = dit != mw_map_.end() ? dit->second : Bits_t{1};
+        set_bits(q, mw + 1);
+        set_unsign(q);
+        mw_map_[name] = mw;
+      }
+
+      // enable: still the seeded false const => never written (no enable);
+      // the true const => unconditionally written (no enable needed); any
+      // other pin is the OR-of-conditions mux chain.
+      if (auto eit = pin_map_.find(en_key(name)); eit != pin_map_.end()) {
+        const auto en      = eit->second;
+        const auto en_nid  = en.get_master_node().get_debug_nid();
+        const bool is_true = en_true_valid_ && en_nid == en_true_pin_.get_master_node().get_debug_nid();
+        const bool is_false = en_false_valid_ && en_nid == en_false_pin_.get_master_node().get_debug_nid();
+        if (!is_true && !is_false) {
+          setup_sink_by_name(flop, "enable").connect_driver(en);
+        }
+      }
+
+      // Reset wiring. Effective init: an explicit `initial=N` attr overrides
+      // the declare's [value]; "nil" (or absent) = NO reset (confirmed
+      // 2026-06-07 ruling).
+      const std::string init = !info.initial_txt.empty() ? info.initial_txt : info.init_txt;
+      const bool has_init    = !init.empty() && init != "nil";
+      const bool rp_false    = info.reset_pin_name == "false";
+      if (rp_false && has_init) {
+        Pass::error("upass.tolg: reg '{}' has a non-nil initializer but `reset_pin=false` — drop the init or the override",
+                    name);
+        return;
+      }
+      const bool wants_reset = (has_init || (!info.reset_pin_name.empty() && !rp_false)) && !rp_false;
+      if (!wants_reset) {
+        continue;
+      }
+
+      Pin  rpin;
+      bool neg = info.negreset;
+      if (!info.reset_pin_name.empty()) {
+        // Explicit per-reg reset input (must be a declared graph input).
+        rpin = g_->get_input_pin(info.reset_pin_name);
+        if (rpin.is_invalid()) {
+          Pass::error("upass.tolg: reg '{}' names reset_pin '{}' but '{}' has no such input",
+                      name,
+                      info.reset_pin_name,
+                      lnast_->get_top_module_name());
+          return;
+        }
+        if (info.reset_pin_name.ends_with("_n")) {
+          neg = true;
+        }
+      } else if (!reset_name_.empty()) {
+        rpin = reset_pin();
+        if (reset_neg_) {
+          neg = true;
+        }
+      } else {
+        Pass::error("upass.tolg: reg '{}' has a reset value but '{}' has no reset input (setup_io bug)",
+                    name,
+                    lnast_->get_top_module_name());
+        return;
+      }
+      setup_sink_by_name(flop, "reset_pin").connect_driver(rpin);
+      if (has_init) {
+        // The reset value must be a compile-time constant. A body-`reg`'s
+        // non-literal init is caught at the declare (lower_declare errors on
+        // a ref init); an output-reg `-> (reg q = expr)` stringifies its
+        // initializer, so a malformed parse can still arrive here — reject it
+        // rather than deref a null Const.
+        auto iv = Const::from_pyrope(init);
+        if (!iv) {
+          Pass::error("upass.tolg: reg '{}' reset/initial value '{}' is not a compile-time constant", name, init);
+          return;
+        }
+        setup_sink_by_name(flop, "initial").connect_driver(create_const(*g_, *iv));
+      }
+      if (neg) {
+        setup_sink_by_name(flop, "negreset").connect_driver(create_const(*g_, *Const::create_integer(1)));
+      }
+      // sync-vs-async: per-reg `sync` attr beats the elaboration flag.
+      const bool async = info.has_sync ? !info.sync_val : reset_async_default_;
+      if (async) {
+        setup_sink_by_name(flop, "async").connect_driver(create_const(*g_, *Const::create_integer(1)));
+      }
     }
   }
 
@@ -365,20 +540,21 @@ private:
       create_stage_flop(lhs_name, pending, rhs);
       return;
     }
-    if (auto rit = reg_map_.find(lhs_name); rit != reg_map_.end()) {
-      if (!reg_din_connected_.insert(std::string(lhs_name)).second) {
-        // Conditional / multiple reg writes are the 2d milestone (they need
-        // the enable/mux lowering); the pipe upass emits exactly one.
-        Pass::warn("upass.tolg: multiple writes to reg '{}' not handled yet — keeping the first", lhs_name);
+    if (reg_map_.contains(lhs_name)) {
+      // 2d-reg — a store to a declared reg is a next-state write: rebind the
+      // SHADOW din/enable keys (never the name — reads keep seeing q, Verilog
+      // `<=` semantics). The branch-mux machinery merges conditional writes
+      // into last-write-wins din + OR-of-conditions enable; finalize_regs()
+      // wires the final pins.
+      if (!reg_info_.contains(std::string(lhs_name))) {
+        // A stage reg (created by its one din store) has no finalize record —
+        // a second store would be silently lost.
+        Pass::error("upass.tolg: stage reg '{}' stored more than once in '{}'", lhs_name, lnast_->get_top_module_name());
         return;
       }
       auto v = leaf(rhs);
-      setup_sink_by_name(rit->second, "din").connect_driver(v.pin);
-      // The q pin mirrors din's width/sign convention (mw+1 unsigned bits).
-      auto q = rit->second.create_driver_pin(0);
-      set_bits(q, v.mw + 1);
-      set_unsign(q);
-      mw_map_[std::string(lhs_name)] = v.mw;
+      record(din_key(lhs_name), v.pin, v.mw);
+      record(en_key(lhs_name), en_const(true), 1);
       return;
     }
     auto v = leaf(rhs);
@@ -431,7 +607,11 @@ private:
       return;
     }
 
-    // Plain reg (no stages) — the 2d milestone shape: create the Flop now.
+    // Plain reg (no stages) — 2d-reg state/stage register: create the Flop
+    // now; the name binds to q (reads see q), stores rebind the shadow
+    // din/enable keys, finalize_regs() wires the pins. The declared type
+    // gives q's width up front (a counter's `r + 1` read needs it before any
+    // din store); untyped regs restamp from the final din width.
     auto flop = create_typed_node(*g_, Ntype_op::Flop);
     if (!clock_name_.empty()) {
       setup_sink_by_name(flop, "clock_pin").connect_driver(clock_pin());
@@ -440,8 +620,127 @@ private:
     }
     auto name = lnast_->get_name(name_nid);
     auto q    = flop.create_driver_pin(0);
+
+    Reg_info info;
+    info.flop     = flop;
+    info.decl_nid = nid;
+    if (!type_nid.is_invalid()) {
+      std::tie(info.decl_mw, info.is_signed) = declared_width(type_nid);
+    }
+    // 2d-reg / 3j — the declare's optional trailing [value] child is the
+    // power-on/reset value (a const after declare-folding; an unresolved ref
+    // means a runtime initializer, which a reset value cannot be).
+    for (auto c = lnast_->get_sibling_next(mode_nid); !c.is_invalid(); c = lnast_->get_sibling_next(c)) {
+      const auto ct = lnast_->get_type(c);
+      if (Lnast_ntype::is_const(ct)) {
+        info.init_txt = std::string(lnast_->get_name(c));
+        break;
+      }
+      if (Lnast_ntype::is_ref(ct)) {
+        Pass::error("upass.tolg: reg '{}' initializer is not a compile-time constant — a reset value must be comptime",
+                    name);
+        return;
+      }
+    }
+
+    if (info.decl_mw > 0) {
+      if (info.is_signed) {
+        set_bits(q, info.decl_mw);
+        set_sign(q);
+      } else {
+        set_bits(q, info.decl_mw + 1);
+        set_unsign(q);
+      }
+      record(name, q, info.decl_mw);
+    } else {
+      record(name, q, 1);  // provisional width; finalize_regs restamps from din
+    }
     reg_map_.emplace(std::string(name), flop);
-    record(name, q, 1);  // provisional width; the din store restamps it
+    reg_order_.emplace_back(name);
+    reg_info_.emplace(std::string(name), std::move(info));
+    plain_reg_flops_[flop.get_debug_nid()] = std::string(name);
+    // Seed the enable shadow false: a store rebinds it true, the branch-mux
+    // machinery turns conditional writes into the OR-of-conditions chain.
+    record(en_key(name), en_const(false), 1);
+  }
+
+  // 2d-reg — per-reg lowering state recorded at the declare; consumed by
+  // finalize_regs() after every store/attr_set has been seen.
+  struct Reg_info {
+    hhds::Node_class flop;
+    Lnast_nid        decl_nid;
+    std::string      init_txt;  // declare [value] child; "" = none, "nil" = explicit no-reset
+    Bits_t           decl_mw   = 0;  // declared type width; 0 = untyped
+    bool             is_signed = false;
+    // Per-reg flop-attr overrides (04b-attributes.md): a per-reg `sync` beats
+    // the upass.reset_style flag; `reset_pin=false` opts out of reset.
+    std::string reset_pin_name;  // explicit reset_pin=NAME / "false"
+    bool        has_sync = false;
+    bool        sync_val = true;
+    bool        negreset = false;
+    std::string initial_txt;  // explicit initial=N (overrides init_txt)
+  };
+
+  // Shadow pin_map_ keys for a reg's next-state value and write-enable. The
+  // \x01 prefix cannot collide with user identifiers or `___N` temps.
+  [[nodiscard]] static std::string din_key(std::string_view n) { return std::string("\x01""din:").append(n); }
+  [[nodiscard]] static std::string en_key(std::string_view n) { return std::string("\x01""en:").append(n); }
+
+  // Cached 1/0 const pins for the enable shadow (node identity doubles as the
+  // "still unconditionally true/false" test in finalize_regs).
+  [[nodiscard]] Pin en_const(bool v) {
+    auto& pin   = v ? en_true_pin_ : en_false_pin_;
+    auto& valid = v ? en_true_valid_ : en_false_valid_;
+    if (!valid) {
+      pin   = create_const(*g_, *Const::create_integer(v ? 1 : 0));
+      valid = true;
+    }
+    return pin;
+  }
+
+  // Declared (mw, is_signed) from a declare's type child. prim_type_int(max,
+  // min): unsigned iff min ≥ 0, mw mirrors the ssa io harvest (get_bits()-1
+  // drops the sign bit when unsigned). prim_type_bool → 1. Unknown → (0,_).
+  [[nodiscard]] std::pair<Bits_t, bool> declared_width(const Lnast_nid& type_nid) {
+    using N      = Lnast_ntype;
+    const auto t = lnast_->get_type(type_nid);
+    if (N::is_prim_type_bool(t)) {
+      return {1, false};
+    }
+    if (!N::is_prim_type_int(t)) {
+      return {0, false};
+    }
+    auto mx = lnast_->get_first_child(type_nid);
+    if (mx.is_invalid()) {
+      return {0, false};
+    }
+    auto mn    = lnast_->get_sibling_next(mx);
+    auto max_v = Const::from_pyrope(lnast_->get_name(mx));
+    if (!max_v || !max_v->is_integer()) {
+      return {0, false};
+    }
+    bool   min_known   = false;
+    bool   min_neg     = false;
+    Bits_t min_bits    = 0;
+    if (!mn.is_invalid()) {
+      if (auto mn_v = Const::from_pyrope(lnast_->get_name(mn)); mn_v && mn_v->is_integer()) {
+        min_known = true;
+        min_neg   = mn_v->is_negative();
+        min_bits  = static_cast<Bits_t>(mn_v->get_bits());
+      }
+    }
+    const bool is_signed = !(min_known && !min_neg);
+    if (!is_signed) {
+      auto bits = max_v->is_known_zero() ? Bits_t{1} : static_cast<Bits_t>(max_v->get_bits() - 1);
+      return {bits, false};
+    }
+    // Signed: the WIDER of the two bounds' signed widths (mirrors the ssa io
+    // harvest + io_mw — a min like -100 needs more bits than a max of 3).
+    auto bits = static_cast<Bits_t>(max_v->get_bits());
+    if (min_known) {
+      bits = std::max(bits, min_bits);
+    }
+    return {bits, true};
   }
 
   // Task 1u-A — materialize a deferred stage reg at its din store. Effective
@@ -536,6 +835,11 @@ private:
 
     auto flop = create_typed_node(*g_, Ntype_op::Flop);
     flop_depth_[flop.get_debug_nid()] = {emin, emax};
+    // 2d-reg — the LN-inserted pipe output flop (vs a user `stage[N]` reg) is
+    // the narrowing target: LG pass1 rewrites its depth to (min−σ, max−σ).
+    if (name.starts_with("___pipe_")) {
+      inserted_flops_.insert(flop.get_debug_nid());
+    }
     setup_sink_by_name(flop, "pipe_min").connect_driver(create_const(*g_, *Const::create_integer(emin)));
     setup_sink_by_name(flop, "pipe_max").connect_driver(create_const(*g_, *Const::create_integer(emax)));
     if (!clock_name_.empty()) {
@@ -704,6 +1008,35 @@ private:
       sub.create_sink_pin("clock").connect_driver(clock_pin());
     }
 
+    // 2d-reg — minted-reset forwarding, same pattern: the callee's implicit
+    // "reset" input (active-high by construction) exists on its GraphIO but
+    // not in its io_meta. An active-low caller reset is inverted on the way
+    // in so the callee's polarity contract holds.
+    bool callee_declares_reset = false;
+    for (const auto& e : cio.inputs) {
+      if (e.name == "reset" || e.name == "rst" || e.name == "reset_n" || e.name == "rst_n") {
+        callee_declares_reset = true;
+        break;
+      }
+    }
+    if (!callee_declares_reset && gio->has_input("reset")) {
+      if (reset_name_.empty()) {
+        Pass::error("upass.tolg: instance of reset-carrying '{}' but '{}' has no reset to forward (needs_reset bug)",
+                    callee_full,
+                    lnast_->get_top_module_name());
+        return;
+      }
+      Pin r = reset_pin();
+      if (reset_neg_) {
+        auto inv = create_typed_node(*g_, Ntype_op::Not);
+        setup_sink_by_name(inv, "a").connect_driver(r);
+        r = inv.create_driver_pin(0);
+        set_bits(r, 1);
+        set_unsign(r);
+      }
+      sub.create_sink_pin("reset").connect_driver(r);
+    }
+
     // Single output: bind dst like a graph input (external value entering).
     const auto& oe       = cio.outputs.front();
     auto        out_dpin = sub.create_driver_pin(oe.name);
@@ -783,6 +1116,21 @@ private:
       clock_pin_valid_ = true;
     }
     return clock_pin_;
+  }
+
+  // 2d-reg — the module reset graph-input pin (same lazy stamping contract
+  // as clock_pin).
+  [[nodiscard]] Pin reset_pin() {
+    if (!reset_pin_valid_) {
+      auto p = g_->get_input_pin(reset_name_);
+      if (reset_minted_) {
+        set_bits(p, 1);
+        set_unsign(p);
+      }
+      reset_pin_       = p;
+      reset_pin_valid_ = true;
+    }
+    return reset_pin_;
   }
 
   // range(ref(dst), lo, hi) — record [lo,hi] for a later get_mask; no node.
@@ -1056,23 +1404,41 @@ private:
   WriteMap                                                      empty_writes_;
 
   // Task 1q — reg lowering state. reg_map_ holds each declared reg's Flop
-  // node (reads resolve to its q via pin_map_; the din store connects through
-  // the node handle here). clock_* lazily binds the clock graph input.
+  // node (reads resolve to its q via pin_map_; stores rebind the shadow
+  // din/enable keys). clock_*/reset_* lazily bind the clock/reset graph
+  // inputs. reg_info_/reg_order_ carry the 2d-reg finalize metadata for
+  // PLAIN regs (stage regs live only in reg_map_/flop_depth_).
   absl::flat_hash_map<std::string, hhds::Node_class> reg_map_;
   absl::flat_hash_set<std::string>                   reg_din_connected_;
+  absl::flat_hash_map<std::string, Reg_info>         reg_info_;
+  std::vector<std::string>                           reg_order_;
   std::string                                        clock_name_;
   bool                                               clock_minted_ = false;
   Pin                                                clock_pin_;
   bool                                               clock_pin_valid_ = false;
+  std::string                                        reset_name_;
+  bool                                               reset_minted_        = false;
+  bool                                               reset_neg_           = false;
+  bool                                               reset_async_default_ = false;
+  Pin                                                reset_pin_;
+  bool                                               reset_pin_valid_ = false;
+  Pin                                                en_true_pin_;
+  Pin                                                en_false_pin_;
+  bool                                               en_true_valid_  = false;
+  bool                                               en_false_valid_ = false;
 
   absl::flat_hash_map<std::string, Pending_stage> pending_stage_;
   absl::flat_hash_map<std::string, Sub_out>       sub_out_stages_;
 
   // Task 1u-C/D — checker inputs gathered while building: pending records,
   // per-Flop effective crossing depth, per-Sub pinned latency interval.
+  // 2d-reg adds plain_reg_flops_ (state/stage classification candidates) and
+  // inserted_flops_ (the LN-inserted pipe output flops — narrowing targets).
   std::vector<Pending_rec>                                       pending_checks_;
   absl::flat_hash_map<uint64_t, std::pair<int64_t, int64_t>>     flop_depth_;
   absl::flat_hash_map<uint64_t, std::pair<int64_t, int64_t>>     sub_time_;
+  absl::flat_hash_map<uint64_t, std::string>                     plain_reg_flops_;
+  absl::flat_hash_set<uint64_t>                                  inserted_flops_;
 
 public:
   // Task 1u-C — lower the partition's declared per-output intervals as
@@ -1148,23 +1514,36 @@ public:
   [[nodiscard]] std::vector<Pending_rec>&&                                   take_pending_checks() { return std::move(pending_checks_); }
   [[nodiscard]] absl::flat_hash_map<uint64_t, std::pair<int64_t, int64_t>>&& take_flop_depths() { return std::move(flop_depth_); }
   [[nodiscard]] absl::flat_hash_map<uint64_t, std::pair<int64_t, int64_t>>&& take_sub_times() { return std::move(sub_time_); }
+  [[nodiscard]] absl::flat_hash_map<uint64_t, std::string>&&                 take_plain_reg_flops() { return std::move(plain_reg_flops_); }
+  [[nodiscard]] absl::flat_hash_set<uint64_t>&&                              take_inserted_flops() { return std::move(inserted_flops_); }
 };
 
-// Task 1u-D — the combined pipe/mod LG time checker (ex-1q-D, written once
-// for both kinds). Runs at the tolg seam on the just-built graph:
-//   1. Kahn topological pass over the node graph; leftover nodes form a
-//      cycle: a cycle containing a Flop is a STATE register group (lands
-//      with task 2d reg lowering — clean error until then), a comb-only
-//      cycle is the classic combinational-loop error. This is the
-//      pre-2d-trivial form of the Tarjan classification: with no state
-//      support every Flop must be a pure feedforward STAGE crossing.
-//   2. Forward (min,max) interval propagation: graph inputs (0,0);
+// Task 1u-D / 2d-reg — the combined pipe/mod LG time checker (ex-1q-D,
+// written once for both kinds). Runs at the tolg seam on the just-built
+// graph:
+//   1. Tarjan SCC over the node digraph (flop din->q edges included, i.e.
+//      node-level cycles). A non-trivial SCC must contain a STATE-eligible
+//      flop (a plain reg — 2d-reg); an SCC with only stage/inserted flops is
+//      a cross-stage register feedback error, one with no flop at all is the
+//      classic combinational-loop error. A plain reg is also STATE when its
+//      `enable` is driven (conditional write = enable-encoded hold feedback,
+//      invisible to SCC); every other flop is a STAGE crossing.
+//   2. Forward (min,max) interval propagation, twice: graph inputs (0,0);
 //      constants unify with anything; comb cells take the equal-meet of
-//      their operands (a mismatch is the 06c misalignment error); a Flop
-//      adds its effective crossing depth; a Sub adds its pinned instance
-//      interval (clock sinks excluded from meets).
-//   3. Discharge every pending record: computed == asserted -> REMOVE the
+//      their operands (a mismatch is the 06c misalignment error); a stage
+//      Flop adds its effective crossing depth; a Sub adds its pinned
+//      instance interval (clock sinks excluded). Pass 1 treats every state
+//      flop's q as unconstrained; then sigma(q) := sigma(din) (state regs
+//      pin to their HOME stage — no crossing) and pass 2 re-checks every
+//      meet with the pinned values.
+//   3. Narrow each LN-inserted pipe output flop to the body deficit
+//      (min−sigma, max−sigma); (0,0) realizes as a wire (the flop is
+//      bypassed and deleted). sigma > min is the latency-exceeded error.
+//   4. Discharge every pending record: computed == asserted -> REMOVE the
 //      pending_time attr; mismatch (or an undischargeable record) -> error.
+//      A declared-reg output (`-> (reg q@[N])`) discharges against home+1:
+//      state home stage must equal N−1 (and the reg must be state — a
+//      feedforward stage reg in the output list is an error).
 class Time_checker {
 public:
   struct TR {
@@ -1175,16 +1554,28 @@ public:
 
   Time_checker(hhds::Graph* g, const std::shared_ptr<Lnast>& ln, std::vector<Pending_rec>&& pendings,
                absl::flat_hash_map<uint64_t, std::pair<int64_t, int64_t>>&& flop_depth,
-               absl::flat_hash_map<uint64_t, std::pair<int64_t, int64_t>>&& sub_time)
-      : g_(g), ln_(ln), pendings_(std::move(pendings)), flop_depth_(std::move(flop_depth)), sub_time_(std::move(sub_time)) {}
+               absl::flat_hash_map<uint64_t, std::pair<int64_t, int64_t>>&& sub_time,
+               absl::flat_hash_map<uint64_t, std::string>&& plain_regs, absl::flat_hash_set<uint64_t>&& inserted)
+      : g_(g),
+        ln_(ln),
+        pendings_(std::move(pendings)),
+        flop_depth_(std::move(flop_depth)),
+        sub_time_(std::move(sub_time)),
+        plain_regs_(std::move(plain_regs)),
+        inserted_(std::move(inserted)) {
+    for (const auto& [nid, name] : plain_regs_) {
+      reg_flop_by_name_.emplace(name, nid);
+    }
+  }
 
   void run() {
     using livehd::graph_util::is_graph_input_pin;
     using livehd::graph_util::is_type_const;
+    using livehd::graph_util::is_type_flop;
     using livehd::graph_util::type_op_of;
 
-    // 1. Collect nodes + Kahn topo.
-    std::vector<hhds::Node_class>        nodes;
+    // 1. Collect nodes + node-level digraph (consts/graph-inputs excluded).
+    std::vector<hhds::Node_class>         nodes;
     absl::flat_hash_map<uint64_t, size_t> idx;
     for (auto n : g_->fast_class()) {
       if (is_type_const(n)) {
@@ -1193,74 +1584,315 @@ public:
       idx.emplace(n.get_debug_nid(), nodes.size());
       nodes.push_back(n);
     }
-    std::vector<int> indeg(nodes.size(), 0);
-    auto pred_of = [&](const hhds::Edge_class& e) -> int {
-      if (e.driver.is_invalid() || is_graph_input_pin(e.driver)) {
+    const size_t          nn = nodes.size();
+    std::vector<std::vector<int>> succ(nn);
+    std::vector<std::vector<int>> pred(nn);
+    auto node_idx_of_pin = [&](const hhds::Pin_class& dpin) -> int {
+      if (dpin.is_invalid() || is_graph_input_pin(dpin)) {
         return -1;
       }
-      auto mn = e.driver.get_master_node();
+      auto mn = dpin.get_master_node();
       if (mn.is_invalid() || is_type_const(mn) || type_op_of(mn) == Ntype_op::Nconst) {
         return -1;
       }
       auto it = idx.find(mn.get_debug_nid());
       return it == idx.end() ? -1 : static_cast<int>(it->second);
     };
-    for (size_t i = 0; i < nodes.size(); ++i) {
+    for (size_t i = 0; i < nn; ++i) {
       for (const auto& e : nodes[i].inp_edges()) {
-        if (pred_of(e) >= 0) {
-          ++indeg[i];
+        const int p = node_idx_of_pin(e.driver);
+        if (p >= 0) {
+          pred[i].push_back(p);
+          succ[static_cast<size_t>(p)].push_back(static_cast<int>(i));
         }
       }
     }
+
+    // 2. Tarjan SCC (iterative). Non-trivial SCCs classify their flops.
+    std::vector<int> scc_id(nn, -1);
+    {
+      std::vector<int>    low(nn, -1), num(nn, -1);
+      std::vector<bool>   on_stack(nn, false);
+      std::vector<int>    stk;
+      int                 counter = 0;
+      int                 next_scc = 0;
+      std::vector<size_t> scc_size;
+      for (size_t root = 0; root < nn; ++root) {
+        if (num[root] >= 0) {
+          continue;
+        }
+        // explicit DFS: (node, next-successor-cursor)
+        std::vector<std::pair<int, size_t>> dfs;
+        dfs.emplace_back(static_cast<int>(root), 0);
+        num[root] = low[root] = counter++;
+        stk.push_back(static_cast<int>(root));
+        on_stack[root] = true;
+        while (!dfs.empty()) {
+          auto& [v, cur] = dfs.back();
+          if (cur < succ[static_cast<size_t>(v)].size()) {
+            const int w = succ[static_cast<size_t>(v)][cur++];
+            if (num[w] < 0) {
+              num[w] = low[w] = counter++;
+              stk.push_back(w);
+              on_stack[w] = true;
+              dfs.emplace_back(w, 0);
+            } else if (on_stack[w]) {
+              low[v] = std::min(low[v], num[w]);
+            }
+            continue;
+          }
+          if (low[v] == num[v]) {
+            size_t members = 0;
+            int    w;
+            do {
+              w           = stk.back();
+              stk.pop_back();
+              on_stack[w] = false;
+              scc_id[w]   = next_scc;
+              ++members;
+            } while (w != v);
+            scc_size.push_back(members);
+            ++next_scc;
+          }
+          const int done = v;
+          dfs.pop_back();
+          if (!dfs.empty()) {
+            low[dfs.back().first] = std::min(low[dfs.back().first], low[done]);
+          }
+        }
+      }
+      // self-loops count as non-trivial too
+      std::vector<bool> nontrivial(static_cast<size_t>(next_scc), false);
+      for (size_t i = 0; i < nn; ++i) {
+        if (scc_size[static_cast<size_t>(scc_id[i])] > 1) {
+          nontrivial[static_cast<size_t>(scc_id[i])] = true;
+        }
+        for (int s : succ[i]) {
+          if (s == static_cast<int>(i)) {
+            nontrivial[static_cast<size_t>(scc_id[i])] = true;
+          }
+        }
+      }
+      // Classify: every non-trivial SCC needs a state-eligible flop.
+      const auto en_pid = static_cast<uint64_t>(Ntype::get_sink_pid(Ntype_op::Flop, "enable"));
+      for (size_t i = 0; i < nn; ++i) {
+        if (!is_type_flop(nodes[i])) {
+          continue;
+        }
+        const auto nid      = nodes[i].get_debug_nid();
+        const bool eligible = plain_regs_.contains(nid);
+        if (eligible) {
+          bool en_driven = false;
+          for (const auto& e : nodes[i].inp_edges()) {
+            if (!e.sink.is_invalid() && static_cast<uint64_t>(e.sink.get_port_id()) == en_pid && !e.driver.is_invalid()) {
+              en_driven = true;
+              break;
+            }
+          }
+          if (en_driven || nontrivial[static_cast<size_t>(scc_id[i])]) {
+            state_.insert(nid);
+          }
+        }
+      }
+      for (int s = 0; s < next_scc; ++s) {
+        if (!nontrivial[static_cast<size_t>(s)]) {
+          continue;
+        }
+        bool has_state = false;
+        bool has_flop  = false;
+        for (size_t i = 0; i < nn; ++i) {
+          if (scc_id[i] != s) {
+            continue;
+          }
+          if (is_type_flop(nodes[i])) {
+            has_flop = true;
+            if (state_.contains(nodes[i].get_debug_nid())) {
+              has_state = true;
+            }
+          }
+        }
+        if (!has_state) {
+          if (has_flop) {
+            Pass::error(
+                "upass.tolg: '{}' has register feedback through stage registers — make the looping register a plain "
+                "`reg` (state)",
+                ln_->get_top_module_name());
+          } else {
+            Pass::error("upass.tolg: combinational loop in '{}'", ln_->get_top_module_name());
+          }
+          return;
+        }
+      }
+    }
+
+    // 3. Kahn topo with state-flop in-edges cut (their q is pinned later,
+    // not derived from din during the forward pass). Leftover cycle =
+    // a comb loop that the state cut did not break.
+    std::vector<int> indeg(nn, 0);
+    for (size_t i = 0; i < nn; ++i) {
+      if (state_.contains(nodes[i].get_debug_nid())) {
+        continue;  // source: q decoupled from din
+      }
+      indeg[i] = static_cast<int>(pred[i].size());
+    }
     std::vector<size_t> queue;
-    for (size_t i = 0; i < nodes.size(); ++i) {
+    std::vector<size_t> order;
+    order.reserve(nn);
+    for (size_t i = 0; i < nn; ++i) {
       if (indeg[i] == 0) {
         queue.push_back(i);
       }
     }
-    size_t processed = 0;
     while (!queue.empty()) {
       const size_t i = queue.back();
       queue.pop_back();
-      ++processed;
-      eval_node(nodes[i]);
-      for (const auto& e : nodes[i].out_edges()) {
-        if (e.sink.is_invalid()) {
+      order.push_back(i);
+      for (int s : succ[i]) {
+        if (state_.contains(nodes[static_cast<size_t>(s)].get_debug_nid())) {
           continue;
         }
-        auto sn = e.sink.get_master_node();
-        if (sn.is_invalid()) {
-          continue;
-        }
-        auto it = idx.find(sn.get_debug_nid());
-        if (it == idx.end()) {
-          continue;
-        }
-        if (--indeg[it->second] == 0) {
-          queue.push_back(it->second);
+        if (--indeg[static_cast<size_t>(s)] == 0) {
+          queue.push_back(static_cast<size_t>(s));
         }
       }
     }
-    if (processed < nodes.size()) {
-      bool has_flop = false;
-      for (size_t i = 0; i < nodes.size(); ++i) {
-        if (indeg[i] > 0 && livehd::graph_util::is_type_flop(nodes[i])) {
-          has_flop = true;
-          break;
-        }
-      }
-      if (has_flop) {
-        Pass::error("upass.tolg: '{}' has register feedback (a STATE register) — state in pipe/mod bodies lands with "
-                    "task 2d reg lowering",
-                    ln_->get_top_module_name());
-      } else {
-        Pass::error("upass.tolg: combinational loop in '{}'", ln_->get_top_module_name());
-      }
+    if (order.size() < nn) {
+      // state flops never enter the order (indeg cut makes them sources —
+      // they ARE in the order); a shortfall is a residual comb cycle.
+      Pass::error("upass.tolg: combinational loop in '{}'", ln_->get_top_module_name());
       return;
     }
 
-    // 3. Discharge pendings.
+    // 4. Forward σ with state q pinned to σ(din). Pass 1 leaves state q
+    // unconstrained, then we pin σ(q):=σ(din) and re-propagate. A state
+    // flop's din may transit through ANOTHER state flop's q, so iterate to a
+    // fixpoint (bounded by the state count) — otherwise a chained state reg
+    // would home at `any` and silently pass its `@[N]` check.
+    const auto din_pid = static_cast<uint64_t>(Ntype::get_sink_pid(Ntype_op::Flop, "din"));
+    auto       din_driver = [&](const hhds::Node_class& flop) -> hhds::Pin_class {
+      for (const auto& e : flop.inp_edges()) {
+        if (!e.sink.is_invalid() && static_cast<uint64_t>(e.sink.get_port_id()) == din_pid) {
+          return e.driver;
+        }
+      }
+      return {};
+    };
+    for (const size_t i : order) {
+      eval_node(nodes[i]);
+    }
+    const size_t state_count = state_.size();
+    for (size_t pass = 0; pass <= state_count; ++pass) {
+      bool changed = false;
+      for (size_t i = 0; i < nn; ++i) {
+        const auto nid = nodes[i].get_debug_nid();
+        if (!state_.contains(nid)) {
+          continue;
+        }
+        const TR pinned = pin_tr(din_driver(nodes[i]));  // σ(q) = σ(din)
+        auto     it     = tr_.find(nid);
+        if (it == tr_.end() || it->second.any != pinned.any || it->second.min != pinned.min
+            || it->second.max != pinned.max) {
+          tr_[nid] = pinned;
+          changed  = true;
+        }
+      }
+      for (const size_t i : order) {
+        if (state_.contains(nodes[i].get_debug_nid())) {
+          continue;  // pinned above
+        }
+        eval_node(nodes[i]);
+      }
+      if (!changed) {
+        break;
+      }
+    }
+
+    // 5. Narrow LN-inserted pipe output flops to the body deficit.
     for (const auto& rec : pendings_) {
+      if (!rec.is_sink) {
+        continue;
+      }
+      auto edges = rec.pin.inp_edges();
+      if (edges.empty()) {
+        continue;
+      }
+      auto mn = edges.front().driver.get_master_node();
+      if (mn.is_invalid() || !inserted_.contains(mn.get_debug_nid())) {
+        continue;
+      }
+      const TR sb = pin_tr(din_driver(mn));
+      if (sb.any || sb.min != sb.max) {
+        continue;  // const-driven or ranged body sigma — declared depth stands
+      }
+      const int64_t sigma = sb.min;
+      if (sigma > rec.min) {
+        Pass::error("upass.tolg: output '{}' of '{}' lands at stage {}, pipe declares {}",
+                    rec.name,
+                    ln_->get_top_module_name(),
+                    sigma,
+                    rec.min);
+        return;
+      }
+      const int64_t nmin = rec.min - sigma;
+      const int64_t nmax = rec.max - sigma;
+      replace_const_sink(mn, "pipe_min", nmin);
+      replace_const_sink(mn, "pipe_max", nmax);
+      flop_depth_[mn.get_debug_nid()] = {nmin, nmax};
+      if (nmin == 0 && nmax == 0) {
+        // (0,0) realizes as a wire: bypass and delete the flop.
+        auto din = din_driver(mn);
+        edges.front().del_edge();
+        rec.pin.connect_driver(din);
+        mn.del_node();
+      } else {
+        tr_[mn.get_debug_nid()] = {sigma + nmin, sigma + nmax, false};
+      }
+    }
+
+    // 6. Discharge pendings.
+    for (const auto& rec : pendings_) {
+      // Declared-reg output (`-> (reg q@[N])`). A STATE reg's flop crossing
+      // IS the interface cycle: home stage sigma(din) must be N−1. A
+      // feedforward (stage) reg as output is rejected for a PIPE (06c — the
+      // output is already registered by the contract); for a MOD it is just
+      // a registered output and sigma(q)=sigma(din)+1 discharges through
+      // the normal path below.
+      if (rec.is_sink) {
+        if (auto rit = reg_flop_by_name_.find(rec.name); rit != reg_flop_by_name_.end()) {
+          const auto fnid     = rit->second;
+          const bool is_state = state_.contains(fnid);
+          if (!is_state && ln_->get_lambda_kind() == "pipe") {
+            Pass::error("upass.tolg: feedforward register '{}' in the output list of '{}' — the output is already "
+                        "registered by the pipe contract",
+                        rec.name,
+                        ln_->get_top_module_name());
+            return;
+          }
+          if (is_state) {
+            if (rec.min != rec.max) {
+              Pass::error("upass.tolg: register output '{}' of '{}' needs a fixed declared cycle (got [{}, {}])",
+                          rec.name,
+                          ln_->get_top_module_name(),
+                          rec.min,
+                          rec.max);
+              return;
+            }
+            const TR home = tr_.contains(fnid) ? tr_.at(fnid) : TR{0, 0, true};
+            if (!home.any && home.min + 1 != rec.min) {
+              Pass::error("upass.tolg: state register '{}' of '{}' homes at stage {} but its declared landing cycle {} "
+                          "requires home {}",
+                          rec.name,
+                          ln_->get_top_module_name(),
+                          home.min,
+                          rec.min,
+                          rec.min - 1);
+              return;
+            }
+            rec.pin.attr(livehd::attrs::pending_time).del();
+            continue;
+          }
+        }
+      }
       TR cur;
       if (rec.is_sink) {
         auto edges = rec.pin.inp_edges();
@@ -1309,16 +1941,38 @@ private:
     return it->second;
   }
 
+  // Replace a comptime const sink (pipe_min/pipe_max) with a new value.
+  void replace_const_sink(const hhds::Node_class& node, std::string_view pin_name, int64_t value) {
+    const auto pid = static_cast<uint64_t>(Ntype::get_sink_pid(Ntype_op::Flop, pin_name));
+    for (const auto& e : node.inp_edges()) {
+      if (!e.sink.is_invalid() && static_cast<uint64_t>(e.sink.get_port_id()) == pid) {
+        e.del_edge();
+        break;
+      }
+    }
+    setup_sink_by_name(const_cast<hhds::Node_class&>(node), pin_name).connect_driver(create_const(*g_, *Const::create_integer(value)));
+  }
+
   void eval_node(const hhds::Node_class& node) {
     using livehd::graph_util::is_type_flop;
     using livehd::graph_util::is_type_sub;
     using livehd::graph_util::type_op_of;
 
     const auto nid = node.get_debug_nid();
-    TR         meet{0, 0, true};
+
+    // 2d-reg — a state flop's q is pinned (sigma(q)=sigma(din)) outside this
+    // function; pass 1 leaves it unconstrained.
+    if (state_.contains(nid)) {
+      if (!tr_.contains(nid)) {
+        tr_[nid] = {0, 0, true};
+      }
+      return;
+    }
+
+    TR meet{0, 0, true};
 
     // Operand selection per kind: a Flop reads only din; a Sub skips its
-    // clock sinks; everything else meets all inputs (consts unify).
+    // clock/reset sinks; everything else meets all inputs (consts unify).
     absl::flat_hash_set<uint64_t> skip_pids;
     bool                          din_only = false;
     if (is_type_flop(node)) {
@@ -1327,7 +1981,8 @@ private:
       auto gio = node.get_subnode_io();
       if (gio) {
         for (const auto& d : gio->get_input_pin_decls()) {
-          if (d.name == "clock" || d.name == "clk") {
+          if (d.name == "clock" || d.name == "clk" || d.name == "reset" || d.name == "rst" || d.name == "reset_n"
+              || d.name == "rst_n") {
             skip_pids.insert(static_cast<uint64_t>(d.port_id));
           }
         }
@@ -1398,6 +2053,10 @@ private:
   std::vector<Pending_rec>                                   pendings_;
   absl::flat_hash_map<uint64_t, std::pair<int64_t, int64_t>> flop_depth_;
   absl::flat_hash_map<uint64_t, std::pair<int64_t, int64_t>> sub_time_;
+  absl::flat_hash_map<uint64_t, std::string>                 plain_regs_;
+  absl::flat_hash_set<uint64_t>                              inserted_;
+  absl::flat_hash_map<std::string, uint64_t>                 reg_flop_by_name_;
+  absl::flat_hash_set<uint64_t>                              state_;
   absl::flat_hash_map<uint64_t, TR>                          tr_;
 };
 
@@ -1485,11 +2144,102 @@ void collect_callee_names(const std::shared_ptr<Lnast>& lnast, std::vector<std::
   return needs;
 }
 
-// Shared phase-1 io+clock GraphIO registration. Idempotent (the GraphIO add
-// calls are has_-guarded). Returns {clock_name, clock_minted} for the body
-// build; empty clock_name = the module needs no clock.
-[[nodiscard]] std::pair<std::string, bool> setup_io_impl(const std::shared_ptr<Lnast>& lnast, std::string_view lib_path,
-                                                         const uPass_tolg::Registry& registry) {
+// 2d-reg — true when any plain-reg declare carries a non-nil initializer (the
+// declare's trailing const [value] child) without an explicit per-reg
+// `reset_pin` attr override (those bind their own reset input). A ref init is
+// counted (tolg later requires it const; the reset NEED is already real).
+[[nodiscard]] bool tree_declares_reset_reg(const std::shared_ptr<Lnast>& lnast) {
+  absl::flat_hash_set<std::string> explicit_rp;
+  std::function<void(const Lnast_nid&)> collect_rp = [&](const Lnast_nid& nid) {
+    if (Lnast_ntype::is_attr_set(lnast->get_type(nid))) {
+      auto c0 = lnast->get_first_child(nid);
+      if (!c0.is_invalid()) {
+        auto c1 = lnast->get_sibling_next(c0);
+        if (!c1.is_invalid() && Lnast_ntype::is_const(lnast->get_type(c1)) && lnast->get_name(c1) == "reset_pin") {
+          explicit_rp.emplace(lnast->get_name(c0));
+        }
+      }
+    }
+    for (auto c = lnast->get_first_child(nid); !c.is_invalid(); c = lnast->get_sibling_next(c)) {
+      collect_rp(c);
+    }
+  };
+  collect_rp(lnast->get_root());
+
+  std::function<bool(const Lnast_nid&)> walk = [&](const Lnast_nid& nid) -> bool {
+    if (Lnast_ntype::is_declare(lnast->get_type(nid))) {
+      auto c0 = lnast->get_first_child(nid);
+      if (!c0.is_invalid()) {
+        auto c1 = lnast->get_sibling_next(c0);
+        auto c2 = c1.is_invalid() ? c1 : lnast->get_sibling_next(c1);
+        if (!c2.is_invalid() && Lnast_ntype::is_const(lnast->get_type(c2))) {
+          auto mode = lnast->get_name(c2);
+          if (mode == "reg" || mode.starts_with("reg ")) {
+            for (auto c = lnast->get_sibling_next(c2); !c.is_invalid(); c = lnast->get_sibling_next(c)) {
+              const auto ct = lnast->get_type(c);
+              if (Lnast_ntype::is_stages(ct)) {
+                break;  // stage reg — no init slot
+              }
+              if (Lnast_ntype::is_const(ct) || Lnast_ntype::is_ref(ct)) {
+                const bool nil_init = Lnast_ntype::is_const(ct) && lnast->get_name(c) == "nil";
+                if (!nil_init && !explicit_rp.contains(std::string(lnast->get_name(c0)))) {
+                  return true;
+                }
+                break;
+              }
+            }
+          }
+        }
+      }
+    }
+    for (auto c = lnast->get_first_child(nid); !c.is_invalid(); c = lnast->get_sibling_next(c)) {
+      if (walk(c)) {
+        return true;
+      }
+    }
+    return false;
+  };
+  return walk(lnast->get_root());
+}
+
+[[nodiscard]] bool needs_reset_rec(const std::shared_ptr<Lnast>& lnast, const uPass_tolg::Registry& registry,
+                                   absl::flat_hash_map<std::string, bool>& memo, absl::flat_hash_set<std::string>& visiting) {
+  const std::string key(lnast->get_top_module_name());
+  if (auto it = memo.find(key); it != memo.end()) {
+    return it->second;
+  }
+  if (!visiting.insert(key).second) {
+    return false;  // cycle guard
+  }
+  bool needs = tree_declares_reset_reg(lnast);
+  if (!needs) {
+    std::vector<std::string> callees;
+    collect_callee_names(lnast, callees);
+    for (const auto& cn : callees) {
+      auto callee = resolve_callee_lnast(cn, registry);
+      if (!callee) {
+        continue;
+      }
+      auto kind = callee->get_lambda_kind();
+      if (kind != "pipe" && kind != "mod") {
+        continue;
+      }
+      if (needs_reset_rec(callee, registry, memo, visiting)) {
+        needs = true;
+        break;
+      }
+    }
+  }
+  visiting.erase(key);
+  memo[key] = needs;
+  return needs;
+}
+
+// Shared phase-1 io+clock+reset GraphIO registration. Idempotent (the GraphIO
+// add calls are has_-guarded). Returns the clock/reset binding for the body
+// build; empty names = the module needs none.
+[[nodiscard]] Io_setup setup_io_impl(const std::shared_ptr<Lnast>& lnast, std::string_view lib_path,
+                                     const uPass_tolg::Registry& registry) {
   auto& lib      = livehd::Hhds_graph_library::instance(lib_path);
   auto  mod_name = std::string(lnast->get_top_module_name());
 
@@ -1572,7 +2322,65 @@ void collect_callee_names(const std::shared_ptr<Lnast>& lnast, std::vector<std::
     }
   }
 
-  return {clock_name, clock_minted};
+  // 2d-reg — implicit reset: when the tree (or, transitively, any pipe/mod
+  // callee instance) holds a reg with a non-nil initializer, bind an existing
+  // reset/rst/reset_n/rst_n input (exactly one candidate; the `_n` variants
+  // are active-low) or mint a 1-bit unsigned "reset" graph input — the same
+  // bind-before-mint pattern as the implicit clock.
+  std::string reset_name;
+  bool        reset_minted = false;
+  bool        reset_neg    = false;
+  {
+    absl::flat_hash_map<std::string, bool> memo;
+    absl::flat_hash_set<std::string>       visiting;
+    if (needs_reset_rec(lnast, registry, memo, visiting)) {
+      int candidates = 0;
+      for (const auto& e : lnast->io_meta().inputs) {
+        const bool is_cand
+            = (e.name == "reset" || e.name == "rst" || e.name == "reset_n" || e.name == "rst_n")
+              && (e.kind == Io_kind::boolean || e.bits <= 1);
+        if (!is_cand) {
+          continue;
+        }
+        ++candidates;
+        if (reset_name.empty()) {
+          reset_name = e.name;
+          reset_neg  = e.name.size() > 2 && e.name.substr(e.name.size() - 2) == "_n";
+        }
+      }
+      if (candidates > 1) {
+        Pass::error(
+            "upass.tolg: '{}' has multiple reset-candidate inputs — give each reg an explicit `:[reset_pin=…]`",
+            mod_name);
+      }
+      if (reset_name.empty()) {
+        for (const auto& e : lnast->io_meta().inputs) {
+          if (e.name == "reset") {
+            Pass::error(
+                "upass.tolg: input 'reset' of '{}' is not usable as the register reset (multi-bit data port) "
+                "and collides with the implicit reset — rename it or declare it 1-bit",
+                mod_name);
+          }
+        }
+        for (const auto& e : lnast->io_meta().outputs) {
+          if (e.name == "reset") {
+            Pass::error("upass.tolg: output 'reset' of '{}' collides with the implicit register reset — rename it",
+                        mod_name);
+          }
+        }
+        reset_name = "reset";
+        if (!gio->has_input(reset_name) && !gio->has_output(reset_name)) {
+          gio->add_input(reset_name, pid);
+          ++pid;
+        }
+        gio->set_bits(reset_name, 1);
+        gio->set_unsign(reset_name, true);
+        reset_minted = true;
+      }
+    }
+  }
+
+  return {clock_name, clock_minted, reset_name, reset_minted, reset_neg};
 }
 
 }  // namespace
@@ -1585,18 +2393,18 @@ void uPass_tolg::register_io(const std::shared_ptr<Lnast>& lnast, std::string_vi
 }
 
 std::shared_ptr<hhds::Graph> uPass_tolg::run(const std::shared_ptr<Lnast>& lnast, std::string_view lib_path,
-                                             const Registry& registry) {
+                                             const Registry& registry, std::string_view reset_style) {
   if (!lnast || lnast->io_meta().empty()) {
     return nullptr;  // not a lowerable module (e.g. the empty file-root tree)
   }
 
-  auto [clock_name, clock_minted] = setup_io_impl(lnast, lib_path, registry);
+  auto io_setup = setup_io_impl(lnast, lib_path, registry);
 
   auto& lib      = livehd::Hhds_graph_library::instance(lib_path);
   auto  gio      = lib.find_io(std::string(lnast->get_top_module_name()));
   auto  g_shared = gio->has_graph() ? gio->get_graph() : gio->create_graph();
 
-  Tolg builder(lnast, g_shared.get(), clock_name, clock_minted, &registry, &lib);
+  Tolg builder(lnast, g_shared.get(), std::move(io_setup), &registry, &lib, reset_style == "async");
   builder.build();
 
   // Task 1u-D — the combined pipe/mod time checker at the tolg seam.
@@ -1607,7 +2415,9 @@ std::shared_ptr<hhds::Graph> uPass_tolg::run(const std::shared_ptr<Lnast>& lnast
                            lnast,
                            builder.take_pending_checks(),
                            builder.take_flop_depths(),
-                           builder.take_sub_times());
+                           builder.take_sub_times(),
+                           builder.take_plain_reg_flops(),
+                           builder.take_inserted_flops());
       checker.run();
     }
   }

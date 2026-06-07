@@ -1,0 +1,18 @@
+/*
+:name: pipe_state_acc
+:type: equiv
+:verilog_top: pipe_state_acc.acc_mix
+:pyrope_top: pipe_state_acc.acc_mix
+*/
+
+// 2d-reg — the 06c `acc_mix` analog (wrap-free by bounding instead of
+// `wrap`): tmp reads its own q => state register, home stage 0; mixing
+// state q with the current input is coherent (both sigma=0). The pipe[1]
+// inserted output flop keeps its full depth (body sigma=0).
+pipe[1] acc_mix(a:u8, b:u8) -> (x:u21) {
+  reg tmp:u20 = 0
+  if tmp < 1000000 {
+    tmp = tmp + a + b
+  }
+  x = tmp + a
+}

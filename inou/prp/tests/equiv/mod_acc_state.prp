@@ -1,0 +1,19 @@
+/*
+:name: mod_acc_state
+:type: equiv
+:verilog_top: mod_acc_state.acc
+:pyrope_top: mod_acc_state.acc
+*/
+
+// 2d-reg — a state register SCC (acc_r feeds its own din combinationally
+// via ^) with a conditional-write enable and reset, read out at cycle 0.
+// XOR feedback is wrap-free by construction. (The "state q ⊕ current input"
+// coherent-mix variant is covered by pipe_state_acc; here the output reads
+// q directly so the demonstration stays LEC-light.)
+mod acc(a:u8, go:bool) -> (out:u8@[0]) {
+  reg acc_r:u8 = 0
+  if go {
+    acc_r = acc_r ^ a
+  }
+  out = acc_r
+}

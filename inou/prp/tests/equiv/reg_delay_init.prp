@@ -1,0 +1,16 @@
+/*
+:name: reg_delay_init
+:type: equiv
+:verilog_top: reg_delay_init.delay
+:pyrope_top: reg_delay_init.delay
+*/
+
+// 2d-reg — an explicit stage register with a non-nil initializer: the init
+// mints the implicit `reset` input and ties reset_pin/initial (sync by
+// default). Body sigma=1 in pipe[1], so the LN-inserted output flop narrows
+// to (0,0) and realizes as a wire — exactly ONE flop in the netlist.
+pipe[1] delay(a:u8) -> (o:u9) {
+  reg r:u9 = 7
+  r = a
+  o = r
+}

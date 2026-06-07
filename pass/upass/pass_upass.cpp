@@ -109,6 +109,10 @@ void Pass_upass::setup() {
                         "and io/bw side-channels are unchanged; forced back on while tolg:1 needs the rewritten tree. "
                         "Default on.",
                         "true");
+  m1.add_label_optional("reset_style",
+                        "2d-reg elaboration flag: sync|async reset wiring for implicit-reset flops (default sync — "
+                        "target-dependent, FPGA-typical). A per-reg `:[sync=…]` attr beats the flag.",
+                        "sync");
   m1.add_label_optional(
       "order",
       "comma-separated upass names; overrides verifier/constprop/assert toggles (example: verifier,constprop,verifier)",
@@ -209,6 +213,9 @@ Pass_upass::Pass_upass(const Eprp_var& var) : Pass("pass.upass", var) {
   // tree, so tolg:1 forces the swap regardless. Default on.
   auto toln_txt = get_label("toln");
   run_toln      = (toln_txt != "false" && toln_txt != "0") || run_tolg;
+
+  // 2d-reg — sync|async reset wiring for implicit-reset flops (tolg-only).
+  reset_style = std::string(get_label("reset_style", "sync"));
 
   auto semacheck_txt = get_label("semacheck");
   bool do_semacheck  = semacheck_txt != "false" && semacheck_txt != "0";
@@ -452,7 +459,7 @@ void Pass_upass::work(Eprp_var& var) {
       uPass_tolg::register_io(ln, "lgdb_tolg", var.lnasts);
     }
     for (const auto& ln : var.lnasts) {
-      auto g = uPass_tolg::run(ln, "lgdb_tolg", var.lnasts);
+      auto g = uPass_tolg::run(ln, "lgdb_tolg", var.lnasts, up.reset_style);
       if (g) {
         var.add(g);
       }
