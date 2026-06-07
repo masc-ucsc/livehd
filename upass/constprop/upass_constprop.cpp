@@ -22,7 +22,7 @@
 // errors when multiple TUs include upass_constprop.hpp.
 static upass::uPass_plugin cprop("constprop", upass::uPass_wrapper<uPass_constprop>::get_upass);
 
-static constexpr std::string_view call_ref_arg_marker = "__ref_arg";
+static constexpr std::string_view call_ref_arg_marker  = "__ref_arg";
 // Task 1k — positional UFCS-receiver marker (see prp2lnast / upass_runner).
 static constexpr std::string_view call_ufcs_arg_marker = "__ufcs_arg";
 
@@ -76,8 +76,8 @@ static std::optional<Const> stringify_concat_trivials(const std::vector<Const>& 
 // base, `bpd` bits per digit, dropping leading zeros. Used by the `:b`/`:o`/
 // `:x`/`:X` interpolation specs so they share one two's-complement bit view.
 static std::string bits_to_grouped(std::string_view bits, int bpd, bool upper) {
-  static constexpr std::string_view lo = "0123456789abcdef";
-  static constexpr std::string_view hi = "0123456789ABCDEF";
+  static constexpr std::string_view lo     = "0123456789abcdef";
+  static constexpr std::string_view hi     = "0123456789ABCDEF";
   std::string_view                  digits = upper ? hi : lo;
   std::string                       padded;  // left-pad to a multiple of bpd
   if (int rem = static_cast<int>(bits.size()) % bpd; rem != 0) {
@@ -149,7 +149,7 @@ static std::string format_interp_value(const Const& v, std::string_view spec) {
     case 'o': return bits_to_grouped(v.to_binary(), 3, false);
     case 'x': return bits_to_grouped(v.to_binary(), 4, false);
     case 'X': return bits_to_grouped(v.to_binary(), 4, true);
-    default: upass::error("unsupported string-interpolation format spec ':{}' (expected one of b/o/x/X/d)\n", spec);
+    default : upass::error("unsupported string-interpolation format spec ':{}' (expected one of b/o/x/X/d)\n", spec);
   }
 }
 
@@ -178,7 +178,7 @@ Const uPass_constprop::apply_range_mask(const Const& value, const Const& start, 
   if (width->is_i() && width->to_i() < 0) {
     return *Dlop::create_integer(0);  // negative-width (empty) slice — degenerate
   }
-  auto mask  = one->shl_op(*width)->sub_op(*one)->shl_op(start);
+  auto mask = one->shl_op(*width)->sub_op(*one)->shl_op(start);
   return *value.get_mask_op(*mask);
 }
 
@@ -205,7 +205,10 @@ void uPass_constprop::check_unsigned_positive_overflow(std::string_view lhs, con
     return;
   }
 
-  auto msg = std::format("`{}` (value {}) does not fit its declared range [0, {}]", lhs, value.to_decimal_string(), it->second.to_decimal_string());
+  auto msg = std::format("`{}` (value {}) does not fit its declared range [0, {}]",
+                         lhs,
+                         value.to_decimal_string(),
+                         it->second.to_decimal_string());
   if (!pending_unsigned_overflow_msg_) {
     pending_unsigned_overflow_msg_ = msg;
   }
@@ -882,18 +885,13 @@ void uPass_constprop::process_eq_ne_impl() {
   // Resolve an operand to one of three states:
   //   - bundle: a tracked tuple (multi-entry or non-scalar wrapper)
   //   - scalar: a known Const (default is invalid; never zero)
-  //   - undeclared_ref: ref that was never declared in any reachable scope
   //   - is_const_nil: literal `nil` const
-  // is_const_nil + the OTHER side being undeclared lets us fold the pyrope
-  // semantic that an undeclared name reads as nil — narrowed to the
-  // `== nil` shape so casserts in function bodies prp2lnast still emits as
-  // top-level fdef siblings (scope2.prp's mytest body) don't fold against a
-  // synthesized nil and trip the verifier.
+  // (Reading an undeclared/out-of-scope name is a prp2lnast compile error —
+  // check_undefined_reads — so no undeclared-reads-as-nil folding here.)
   struct Operand {
     std::shared_ptr<Bundle const> bundle;
     Const                         scalar;
-    bool                          is_const_nil   = false;
-    bool                          undeclared_ref = false;
+    bool                          is_const_nil = false;
   };
   auto resolve = [this]() -> Operand {
     Operand o;
@@ -930,19 +928,13 @@ void uPass_constprop::process_eq_ne_impl() {
       } else if (runner_fold_fn) {
         // Cross-pass fallback: another pass (e.g. uPass_attributes folding
         // an `attr_get` destination) may have a concrete value for this
-        // ref even though constprop never assigned it. Consult before
-        // marking undeclared so eq/ne fold in the same walk the
-        // attribute pass produces the value.
+        // ref even though constprop never assigned it.
         auto v = runner_fold_fn(name);
         if (v && !v->is_invalid()) {
           o.scalar = *v;
-        } else if (!st.is_declared(name)) {
-          o.undeclared_ref = true;
         }
-      } else if (!st.is_declared(name)) {
-        o.undeclared_ref = true;
       }
-      // else: declared but no concrete value yet — leave scalar invalid.
+      // else: no concrete value yet — leave scalar invalid.
     } else {
       o.scalar       = current_pyrope_value();
       o.is_const_nil = o.scalar.is_nil();
@@ -957,13 +949,6 @@ void uPass_constprop::process_eq_ne_impl() {
   move_to_sibling();
   Operand b = resolve();
   move_to_parent();
-
-  if (a.undeclared_ref && b.is_const_nil) {
-    a.scalar = Dlop::nil();
-  }
-  if (b.undeclared_ref && a.is_const_nil) {
-    b.scalar = Dlop::nil();
-  }
 
   // Mixed nil propagation: exactly one operand is a known-nil scalar. The
   // result is nil (indeterminate) — typically because the var was

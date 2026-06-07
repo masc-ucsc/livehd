@@ -577,9 +577,12 @@ void uPass_attributes::evaluate_attr_get(std::string_view dst, std::string_view 
   // the size-trio (`bits`/`max`/`min`) so an annotated-but-unbounded
   // declaration (`a:int = 3`) folds to nil instead of staying unresolved
   // — the new derive_* are declaration-driven and never depend on a
-  // second walk over the tree.
+  // second walk over the tree. `typename` joins them: an anonymous
+  // aggregate has no typename, which reads as nil (typesystem.prp §2) —
+  // previously this leaned on constprop's undeclared-reads-as-nil fold,
+  // now removed (undeclared reads are a prp2lnast compile error).
   if (!result) {
-    if (sticky_pattern || !is_builtin_attr(attr) || attr == "bits" || attr == "max" || attr == "min") {
+    if (sticky_pattern || !is_builtin_attr(attr) || attr == "bits" || attr == "max" || attr == "min" || attr == "typename") {
       result = *Dlop::nil();
     } else {
       return;

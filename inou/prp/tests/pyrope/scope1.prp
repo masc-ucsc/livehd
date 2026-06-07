@@ -1,11 +1,9 @@
 /*
 :name: scope1
 :type: comptime
-:verifier_pass: 4
+:verifier_pass: 3
 :verifier_fail: 0
 */
-
-cassert(a == nil) // declared later in this scope, reads nil before the declaration
 
 mut a = 1
 cassert(a != nil)
@@ -15,4 +13,4 @@ cassert(a != nil)
   cassert(a == 1 and b == 2)
 }
 
-cassert(b == nil) // out of scope
+cassert(a == 1) // a stays visible after the inner block closes

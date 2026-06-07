@@ -77,12 +77,6 @@ public:
   bool has_bundle(std::string_view key) const;
   bool has_known(std::string_view key) const { return has_trivial(key) || has_bundle(key); }
 
-  // True iff `name` is declared in any reachable scope (walks the parent
-  // chain, stopping at and including the nearest Function-typed scope).
-  // The eq path uses this to distinguish "never declared anywhere" — which
-  // folds to nil — from "declared but unresolved" (stays unfolded).
-  bool is_declared(std::string_view key) const;
-
   /// Returns true iff `name` holds a concrete Const with no unknown bits.
   bool is_known_const(std::string_view name) const;
 

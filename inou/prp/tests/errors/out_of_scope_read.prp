@@ -1,0 +1,16 @@
+/*
+:name: out_of_scope_read
+:type: error
+:error: undefined|undeclared|not visible|out of scope
+*/
+
+// 04-variables.md "Code Block scope": a name declared inside a block is
+// not visible after the block closes — reading it is a compile error (it
+// does NOT read as nil).
+
+mut a = 1
+{
+  mut b = 2
+  cassert(a == 1 and b == 2)
+}
+cassert(b == nil) // locate_error_here
