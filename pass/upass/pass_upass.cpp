@@ -325,6 +325,25 @@ void Pass_upass::work(Eprp_var& var) {
   uPass_constprop::reset_pending_imports();
   var.unresolved_imports.clear();
 
+  // Task 1m §2 — a unit/tree name present in more than one input is ambiguous
+  // when imported. The registry is name-keyed (last-wins), so detect the
+  // duplicates up front from var.lnasts (loaded ln: units + this invocation's
+  // sources) and hand the set to constprop, which errors only if an `import`
+  // actually resolves to one (non-imported collisions stay tolerated).
+  {
+    std::unordered_map<std::string, int> name_count;
+    for (const auto& ln : var.lnasts) {
+      ++name_count[std::string(ln->get_top_module_name())];
+    }
+    std::unordered_set<std::string> ambiguous;
+    for (const auto& [name, n] : name_count) {
+      if (n > 1) {
+        ambiguous.insert(name);
+      }
+    }
+    uPass_constprop::set_ambiguous_units(std::move(ambiguous));
+  }
+
   // Capture original entry-point count BEFORE func_extract spawns helper
   // lnasts. Anything appended past this index in the func_extract loop is
   // a function-body spawn — used below to gate the verifier off for

@@ -111,31 +111,29 @@ cross-file dependencies stay visible.</p>
   iterate-until-converged kernel loop, mod/pipe instantiation through imports
   to Verilog). <strong>Pending parts only:</strong></li>
 <li><strong>1m-pending:</strong><ul>
-<li><strong>Unknown tuple field → error</strong> (decided: <strong>global</strong>). Reading a
-  field absent from <em>any</em> tuple (<code>b.not_a_pub</code> on an import namespace,
-  or a plain <code>t.missing</code>) must be a compile error — not just the import
-  namespace. Today it does NOT error: it rides constprop's general lenient
-  missing-field fold (a plain <code>t.missing == 7</code> vacuously discharges; not a
-  value leak). Expect fallout — existing code/tests that lean on the lenient
-  nil-fold will need fixing (same direction as the <code>==nil</code> tightening
-  that already caught 3 should-be-nil bugs). <strong>Owned by
-  <code>upass/typecheck</code></strong> (handles types / sees the field set; not
-  constprop). Spec §9.</li>
-<li><strong>Ambiguous <code>ln:</code> match → error</strong> (decided). The same unit name in
-  two loaded <code>ln:</code> inputs must be an ambiguity error listing the
-  candidates — NOT the current silent first-wins (registry is name-keyed).
-  Implementable now without the linker: duplicate-name check at registry
-  load. Spec §2/§9.</li>
-<li><strong><code>pub reg</code> → <code>regref</code> friendly error</strong> — <strong>DONE</strong>
-  (no grammar change). prp2lnast emits <code>pub-reg-use-regref</code> for
-  <code>pub reg</code>/<code>pub stage</code> pointing at <code>regref</code>;
-  <code>pub mut</code> keeps the generic read-only hint. The separate
-  <code>regref</code> mechanism itself (cross-module register sharing) is still
-  unspecced. (Earlier grammar-constraining idea dropped — prp2lnast already
-  rejects <code>pub reg</code> and the dotted import form, so no pin bump.)</li>
-<li><strong><code>lg:</code> black-box Sub wiring at tolg</strong> (E back half) — blocked on the
-  multi-<code>lg:</code> gid-remapping linker. Today <code>import("lg:g")</code> binds the url
-  string and a call through it fails cleanly at tolg; the <code>ln:</code> half is done.</li>
+<li><strong>Unknown tuple field → error</strong> (decided: <strong>global</strong>,
+  in <code>upass/typecheck</code>). Reading a field absent from <em>any</em> tuple
+  must be a compile error (§9). <strong>Spike done 2026-06-07</strong>: flipping
+  constprop's <code>named_field_absent</code> nil-store to an error breaks 5/274
+  prp tests, and most are FALSE POSITIVES — a progressive build
+  (<code>mut x = (a=1, mut c)</code> → read <code>x.c</code>) reads the field before
+  the walk populates it, so the transient constprop bundle reports it absent.
+  Only <code>tuple_simple4</code>'s <code>tup0['y']==nil</code> is a genuine
+  probe-idiom casualty. So it CANNOT be a constprop flip — it must check the
+  tuple's final <em>type</em> field-set in typecheck (which doesn't track
+  tuple field-sets yet → a typecheck build-out). constprop site carries a
+  pointer note.</li>
+<li><strong><code>lg:</code> black-box Sub wiring at tolg</strong> (E back half) —
+  <strong>NOT blocked on the linker</strong> (earlier claim corrected). gids are
+  per-library positional indices, so a Sub's gid is only valid in its own
+  library — the only reason <code>lg:</code> differs from <code>ln:</code>. The full
+  gid-remap linker is only for MERGING bodies; a black box just needs a
+  name+IO stub in the output library (cgen already emits Subs by name, proven
+  by the working mod case). Remaining (no linker): (a) kernel accept
+  <code>lg:</code>+sources &amp; load the GraphLibrary; (b) register a name+IO stub
+  per import; (c) tolg wire the Sub; (d) verify cgen emits by name without a
+  spurious body-less definition; (e) missing-graph diagnostic. Today
+  <code>import("lg:g")</code> binds the url and a call fails cleanly at tolg.</li>
 </ul></li>
 <li>
 <p><strong id="item-1p" class="item-id">1p</strong> Deferred lambda templates: var-args + call-site

@@ -110,8 +110,16 @@ public:
   static void                               reset_pending_imports() { pending_imports_.clear(); }
   static const std::vector<Pending_import>& pending_imports() { return pending_imports_; }
 
+  // Task 1m — unit/tree names that appear in MORE THAN ONE loaded input
+  // (registry is name-keyed, so a plain lookup would silently pick one).
+  // An `import` that resolves to one of these is an ambiguity error (§2);
+  // a non-imported collision is tolerated (never consulted). Set by
+  // pass.upass from the duplicate top_module_names in var.lnasts.
+  static void set_ambiguous_units(std::unordered_set<std::string> s) { ambiguous_units_ = std::move(s); }
+
 protected:
-  static inline std::vector<Pending_import> pending_imports_;
+  static inline std::vector<Pending_import>      pending_imports_;
+  static inline std::unordered_set<std::string>  ambiguous_units_;
 
   // Task 1m — resolve a live `import` call (docs/contracts/task_1m_plan.md):
   // cursor sits on the const "import" callee; binds `dst` (tuple form → pub

@@ -113,6 +113,25 @@ printf 'pub const bad = 0sb?\n' > "$W/nf.prp"
 [ $? -ne 0 ] || fail "non-foldable pub value must exit non-zero"
 grep -q 'not comptime-foldable' "$W/r7.json" || fail "expected pub-not-comptime error: $(cat "$W/r7.json")"
 
+# Ambiguous unit across two ln: inputs (§2): importing it errors, but a
+# non-imported collision is tolerated.
+mkdir -p "$W/dupA" "$W/dupB"
+printf 'pub const v = 1\n' > "$W/dupA/dup.prp"
+printf 'pub const v = 2\n' > "$W/dupB/dup.prp"
+"$LHD" elaborate "$W/dupA/dup.prp" --emit-dir ln:"$W/dupA_ln/" --workdir "$W/w8a" -q 2>/dev/null
+"$LHD" elaborate "$W/dupB/dup.prp" --emit-dir ln:"$W/dupB_ln/" --workdir "$W/w8b" -q 2>/dev/null
+printf 'const b = import("dup")\ncassert(b.v == 1)\n' > "$W/imp_dup.prp"
+"$LHD" compile "$W/imp_dup.prp" ln:"$W/dupA_ln" ln:"$W/dupB_ln" --set upass.verifier=true \
+  --workdir "$W/w8" -q --result-json "$W/r8.json" 2>/dev/null
+[ $? -ne 0 ] || fail "ambiguous import must exit non-zero"
+grep -q 'ambiguous import' "$W/r8.json" || fail "expected ambiguity error: $(cat "$W/r8.json")"
+# Same two inputs, but nobody imports `dup` → tolerated.
+printf 'const k = 5\ncassert(k == 5)\n' > "$W/no_imp.prp"
+"$LHD" compile "$W/no_imp.prp" ln:"$W/dupA_ln" ln:"$W/dupB_ln" --set upass.verifier=true \
+  --workdir "$W/w8c" -q --result-json "$W/r8c.json" 2>/dev/null \
+  || fail "non-imported collision must be tolerated: $(cat "$W/r8c.json" 2>/dev/null)"
+grep -q '"status":"pass"' "$W/r8c.json" || fail "non-imported collision should pass: $(cat "$W/r8c.json")"
+
 # ── 4. mod instantiation through an import tuple → Sub instance + Verilog ────
 cat > "$W/modlib.prp" <<'EOF'
 pub mod scale(a:u8) -> (r:u9@[1]) { reg racc:u9 = 0; r = racc; racc = a + a }

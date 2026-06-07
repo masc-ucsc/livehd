@@ -2765,10 +2765,25 @@ void uPass_constprop::process_import_call(const std::string& dst) {
   }
   auto pend = [&]() { pending_imports_.push_back({std::string(lm->get_top_module_name()), text}); };
   auto str_const = [](std::string_view s) { return *Dlop::from_pyrope(absl::StrCat("'", s, "'")); };
+  // §2 — a name provided by more than one input is ambiguous when imported
+  // (a permanent error, not a defer; non-imported collisions never reach here).
+  auto ambiguous_fail = [&](std::string_view name) {
+    livehd::diag::sink().emit(livehd::diag::Diagnostic{
+        .severity = livehd::diag::Severity::error,
+        .code     = "import-ambiguous",
+        .category = "name",
+        .pass     = "upass.constprop",
+        .message  = std::format("ambiguous import \"{}\": `{}` is provided by more than one input", text, name),
+        .hint     = "the same unit/tree name was loaded from multiple `ln:` inputs; drop or rename the duplicate"});
+  };
 
   if (text.starts_with("ln:")) {
     // Whole remaining string = the tree name, verbatim (may contain dots).
     const std::string tree = text.substr(3);
+    if (ambiguous_units_.count(tree)) {
+      ambiguous_fail(tree);
+      return;
+    }
     if (!function_registry.count(tree)) {
       pend();
       return;
@@ -2780,6 +2795,10 @@ void uPass_constprop::process_import_call(const std::string& dst) {
     // Bind the url itself; the call sites lower to Sub instances at tolg
     // (task 1m-E wires the GraphLibrary lookup + missing-graph diagnostics).
     store_trivial(dst, str_const(text));
+    return;
+  }
+  if (ambiguous_units_.count(text)) {  // tuple form — the unit name itself is ambiguous
+    ambiguous_fail(text);
     return;
   }
 
@@ -3346,6 +3365,12 @@ void uPass_constprop::process_tuple_get() {
     // positional `(55,66)`). Must precede the single-output-callee fallback,
     // which would otherwise hand back src's position-0 scalar for the missing
     // named field.
+    //
+    // Task 1m note: making this an ERROR (unknown-field, §9) cannot live here —
+    // a constprop spike (2026-06-07) showed it mis-fires on tuples still being
+    // built (e.g. `mut x = (a=1, mut c)` reads `x.c` before the field is
+    // populated → false positive). The check must run in upass/typecheck
+    // against the tuple's final TYPE field-set, not this transient walk bundle.
     store_trivial(dst, *Dlop::nil());
   } else if (st.has_trivial(src)) {
     // Single-output callee fallback: an inliner result like
