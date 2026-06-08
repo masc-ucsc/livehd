@@ -76,6 +76,11 @@ public:
   void process_le() override { handle_op(); }
   void process_gt() override { handle_op(); }
   void process_ge() override { handle_op(); }
+  // `is` is a pure scalar (bool) type comparison — a drop-candidate in the
+  // runner switch, no side effect, no bundle/tuple state. Park it like the
+  // other scalar comparisons so a dead or DSE'd `is` result is dropped at
+  // flush (const-known) instead of emitted-then-swept (1d hybrid B).
+  void process_is() override { handle_op(); }
 
   // Scope / control-flow boundaries — flush everything to keep emission order
   // anchored to the original lexical position of each parked stmt. v1 is
