@@ -138,127 +138,32 @@ cross-file dependencies stay visible. The former <code>TODO_mod.md</code>
   defs for free, and sinks defs near their uses. In compiler terms this is late
   scheduling of a sea-of-nodes / partial dead-code elimination (refs in the
   comment block: Click GCM, Knoop-Rüthing-Steffen PDE/LCM, SSA-DCE, SCCP, VDG).</p>
-<p><strong>STATUS 2026-06-08 — D1 + pragmatic hybrid LANDED; full sea-of-nodes deferred.</strong>
-  Two findings reshaped this: (1) the <code>demand-first</code> half already exists —
-  <a href="upass/coalescer/upass_coalescer.cpp"><code>uPass_coalescer</code></a> (active by
-  default whenever the tree materializes) parks every pure scalar drop-candidate by
-  LHS, flushes on first read via <code>runner_emit_at_fn</code> (materialize-at-use), does
-  DSE on overwrite, and drops a def constprop proved const — exactly the floating-pure-def
-  model. (2) Fully <em>retiring</em> the post-walk sweep is blocked by an architectural
-  wall: the runner unrolls <code>for a in args</code> into direct <code>args__i</code> port reads,
-  so the reconstruction tuple's deadness exists ONLY in the staging tree AFTER unrolling
-  — and the coalescer's boundary flush (incl. <code>process_for</code>) fires BEFORE that
-  rewrite, so no forward-emit scheme can see it. Post-unroll deadness is intrinsically a
-  post-emit property here; the only true fix is a unified demand-scheduled sea-of-nodes IR
-  (a far larger rewrite). So the landed shape is a hybrid:
-  <ul>
-    <li><strong>D1 (commit 13468f1a3):</strong> <code>range</code> added to <code>dce_is_def_producing</code>
-      so dead comptime ranges are swept (kills the <code>bitset.prp</code> <code>range ___22</code> leak).</li>
-    <li><strong>hybrid A (commit ad7dc84f7):</strong> the post-walk sweep is now COMPLETE as the
-      post-emit liveness backstop — it runs on mod/pipe/fluid units (skips only comb
-      func-extract bodies the inliner consumes from the registry), and drops user-named defs
-      that are not roots via the io-root rule (root = io_meta IO ∪ mut/reg declares),
-      guarded by <code>is_function_body_ &amp;&amp; io_meta-populated</code> so an unseen output
-      is never deleted. Clears the <code>mod_varargs_*</code> tolg <code>unhandled node type</code> warnings.</li>
-    <li><strong>hybrid B (commit cef43a0ba):</strong> parked <code>is</code> in the coalescer (the
-      one safe scalar drop-candidate it was missing). range/tuple_add/attr_get are
-      deliberately NOT parked — C_OP/aliasing-barrier and, per the wall above, parking buys
-      no output change (flushed at the next boundary, swept anyway).</li>
-  </ul>
-  <strong>Remaining (aspirational D2/D3 as originally written = sea-of-nodes):</strong> unify
-  unrolling + demand scheduling so deadness is intrinsic and the post-walk rebuild truly
-  disappears; LCA placement for cross-branch uses; extend the coalescer to all pure defs.
-  D4 (arrays) still future-gated. The sweep is the architecturally-necessary post-emit pass
-  until that rewrite lands.</p>
+<p><strong>STATUS 2026-06-08 — D1 + pragmatic hybrid LANDED (landed sub-tasks removed from this plan).</strong>
+  The <em>demand-first</em> half already existed: <a href="upass/coalescer/upass_coalescer.cpp"><code>uPass_coalescer</code></a>
+  (active by default when the tree materializes) parks pure scalar defs, materializes-at-use via
+  <code>runner_emit_at_fn</code>, DSE on overwrite, drops const-known defs. Landed on master:
+  <code>range</code> &rarr; <code>dce_is_def_producing</code> (D1); the post-walk sweep COMPLETED as the
+  post-emit liveness backstop — it now runs on mod/pipe/fluid units and drops non-root user-named
+  defs via the io-root rule (root = io_meta IO &cup; mut/reg declares), which cleared the
+  <code>mod_varargs_*</code> tolg warnings (hybrid A); and <code>is</code> parked in the coalescer
+  (hybrid B). See git <code>1d-D1</code> / <code>1d-hybrid A</code> / <code>1d-hybrid B</code> and the
+  memory note <code>task_1d_dce_hybrid_landed</code>.</p>
+<p><strong>Remaining — full sea-of-nodes (deferred; the large rewrite).</strong> Fully
+  <em>retiring</em> the post-walk sweep is blocked by an architectural wall: the runner unrolls
+  <code>for a in args</code> into direct <code>args__i</code> reads AFTER the coalescer's boundary
+  flush (incl. <code>process_for</code>), so post-unroll deadness is a staging-tree (post-emit)
+  property no forward-emit scheme can see. The only true fix is a unified demand-scheduled
+  sea-of-nodes IR: unify unrolling + scheduling so deadness is intrinsic, add dominator-tree LCA
+  placement for cross-branch uses, and extend demand-driven emit to all pure defs &mdash; then the
+  post-walk rebuild disappears. Until then the sweep is the architecturally-necessary post-emit
+  pass. <strong>Safety (for that rewrite + D4):</strong> total reorder of pure defs is sound today
+  (no memory aliasing &mdash; every read-after-write is visible through SSA names). <strong>D4 —
+  arrays (future-gated):</strong> an array index reintroduces may-alias ordering (<code>a[i]=</code>
+  vs <code>=a[j]</code>); treat aliasing array ops as pinned/ordered when arrays land. Design
+  rationale + literature refs live in the header comment block atop
+  <code>upass/runner/upass_runner.cpp</code>.</p>
 </li>
 </ul>
-<p><strong>Motivating symptom.</strong> A comptime bit-range write leaks an unresolved <code>range</code>
-  into <code>lnast.dump</code>:
-  <div class="highlight"><pre><span></span><code>lhd compile inou/prp/tests/comptime/bitset.prp --emit-dir lnast-dump:d/
-...
-├── range
-│   ├── ref &#39;___22&#39;      # from x#[5..+5]  ⇒ bits 5..=9
-│   ├── const &#39;5&#39;
-│   └── const &#39;9&#39;
-</code></pre></div>
-  <code>range</code> (and <code>declare</code>) are not in <code>dce_is_def_producing</code>, so an unused comptime
-  one is never swept; more fundamentally we emit eagerly and sweep afterward
-  instead of emitting on demand.</p>
-<p><strong>Current state (what to evolve).</strong>
-  - Eager emit in constprop/runner (<code>emit_op_with_fold*</code> in <code>upass_runner.cpp</code>).
-  - Scalar const-at-use fold already exists: <code>fold_ref</code> + <code>emit_ref_or_folded</code>
-    (<code>upass_constprop.cpp</code>) — inline <code>const zz</code> for a <code>ref xx</code> when <code>xx</code> is a known
-    trivial scalar. <strong>This is the model to generalize.</strong>
-  - Post-walk mark-sweep DCE: <code>dead_code_eliminate_staging</code> (<code>upass_runner.cpp</code>),
-    runs only when constprop is active; touches <strong>temps only</strong> (<code>Lnast::is_tmp</code>,
-    <code>___</code> prefix); <code>dce_is_def_producing</code> lists the eligible ops — <code>range</code>/<code>declare</code>
-    are <strong>absent</strong>; <code>attr_set type='reg'|'mut'</code> is keepalive
-    (<code>dce_is_keepalive_attr_set</code>).
-  - IR is <strong>SSA</strong> at constprop time (<code>upass/ssa</code> renames <code>mut</code> writes apart, e.g.
-    <code>x</code> / <code>x___ssa_1</code>) but <strong>straight-line only</strong> — branches are copied verbatim,
-    no φ; the lowerer's Mux merges later.</p>
-<p><strong>Target model — demand-driven liveness from roots.</strong>
-  - <strong>Roots (pinned; always emitted, order preserved):</strong> function IO (declared at
-    the function boundary via the <code>io</code> node — <em>variables cannot declare outputs</em>,
-    so the IO set is knowable and is the only named-var exception), side-effecting
-    statements (<code>cassert</code> always; <code>cputs</code>/<code>func_call</code> unless their dst const-folds),
-    and state elements (<code>attr_set type='reg'|'mut'</code>).
-  - <strong>Floating (deferred):</strong> every pure value def, named or temp. Emitted only when
-    transitively demanded by a root. Undemanded ⇒ never emitted (= free DCE).
-  - <strong>Materialize at use:</strong> known-const scalar ⇒ inline the <code>const</code> (existing
-    <code>fold_ref</code>); otherwise copy the def subtree from the source ("shadow") tree via
-    <code>emit_subtree_verbatim</code>. <code>range</code> / <code>declare</code> / all-const-field statements fall
-    out of this one rule uniformly.
-  - <strong>Placement:</strong> at the <strong>dominator-tree LCA of all uses</strong> (then sink as deep/late
-    as legal), NOT the textual first use — correct when a value is consumed in
-    multiple branches. Within a straight-line SSA region, first-use == LCA.</p>
-<p><strong>Safety property.</strong> Total reorder of pure defs is sound <em>here</em> because our side
-  effects are clean: no memory references / aliasing, so every read-after-write is
-  visible through SSA names. CAUTION (future arrays): an array index reintroduces
-  may-alias ordering — <code>a[i]=</code> vs <code>=a[j]</code> cannot be reordered without proving
-  <code>i != j</code>; treat aliasing array ops as pinned/ordered when arrays land (D4).</p>
-<p><strong>Data structures.</strong>
-  - Pending map: output-name → handle (source nid) into the shadow tree, stored
-    <strong>in the scoped <code>Symbol_table</code> entry</strong> so <code>Symbol_table::leave_scope</code> recycles
-    dead pendings automatically — no parallel map lifecycle, no unbounded growth.
-  - Emitted mark: once materialized, record the emitted staging nid so later refs
-    dedupe (a shared subexpr emits once — preserves CSE, avoids duplicate work).
-  - Transitive demand: resolving a <code>ref</code> emits its def first, post-order over
-    dependency edges; bounded by #pending-in-scope (the "chain of inserts" — bounded
-    but must be deduped via the emitted-mark and LCA-placed).</p>
-<p><strong>Phases (land in order).</strong>
-  - <strong>D1 — interim, proven machinery (do first):</strong> add <code>range</code> to
-    <code>dce_is_def_producing</code> (pure, no side channel) so unused comptime ranges are
-    swept by the existing mark-sweep; give <code>declare</code> a keepalive guard mirroring
-    <code>attr_set reg/mut</code> (declare is a <em>type carrier</em> consumed by bitwidth/lnastfmt —
-    never blanket-drop). Kills the bitset symptom with no architecture change.
-  - <strong>D2 — prototype demand-driven on the comptime subset:</strong> statements whose
-    fields are all const / const-type (<code>range</code>, const <code>declare</code>, scalar const
-    assign), scoped to temps within one <code>stmts</code> block. Validate pending-in-symtab,
-    transitive resolution, and shadow-tree copy. Eager emit + post-walk DCE stay in
-    place for everything else (both models coexist; the subset is just not emitted
-    eagerly).
-  - <strong>D3 — generalize:</strong> all pure SSA-temp defs float; add LCA placement for
-    cross-branch uses; extend to droppable named vars (non-IO, non-state) using the
-    <code>io</code>-node root set; then <strong>retire the separate post-walk rebuild</strong> by folding
-    DCE into demand-driven emission.
-  - <strong>D4 — arrays (future-gated):</strong> classify aliasing array-index ops as
-    pinned/ordered; revisit the total-reorder assumption above.</p>
-<p><strong>Files.</strong> <code>upass/runner/upass_runner.cpp</code> (DCE section + emit path),
-  <code>upass/constprop/upass_constprop.{cpp,hpp}</code> (<code>fold_ref</code>, <code>emit_ref_or_folded</code>,
-  <code>process_range</code>, <code>process_declare</code>, <code>classify_statement</code>), and the scoped
-  <code>Symbol_table</code> (attach a pending source-nid per scope entry).</p>
-<p><strong>Validation.</strong> <code>bitset.prp</code>: no <code>range ___22</code> in <code>lnast.dump</code>, results still
-  correct (verifier 4/0). Full upass + comptime suites green, net-neutral. New
-  tests: unused comptime range dropped; used comptime range folds to a mask const;
-  <code>declare</code> with no readers kept iff reg/mut/IO else dropped; multi-branch shared
-  temp emitted once at the dominator LCA and dominating both uses.</p>
-<p><strong>Relationships.</strong> Generalizes constprop's scalar <code>fold_ref</code>. The <code>declare</code>
-  handling must match the landed declare/store node shape, and the bit-range LHS
-  producer lowering (landed — the comptime bit-ranges it emits, e.g. <code>x#[5..+5]</code>,
-  are the motivating case). Must keep the landed read-only bitwidth finalization
-  pass (runs after SSA) able to see <code>declare</code> type info — hence D1's declare
-  keepalive.</p>
 <h2 id="group-1-complex-foundation-larger-scope">Group 1-complex — foundation, larger scope</h2>
 <p>Tasks that are independent of other Group 1/2 work but are large enough
 that they warrant their own bucket. Can be done in parallel with regular
