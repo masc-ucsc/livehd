@@ -1,0 +1,26 @@
+/*
+:name: loop_accum
+:type: equiv
+:verilog_top: loop_accum.top
+:pyrope_top: loop_accum.top
+*/
+
+// Task 2u — a RUNTIME `mut` accumulated across a comptime-eliminated block: an
+// unrolled `for` loop (z = 3*a) and a comptime-true `if` arm (w = a). The loop
+// unrolls in the upass runner; classify_statement keeps the mut's comptime init
+// (`acc=0`/`s=0`) so the verbatim-copied block body's read has a driver and the
+// accumulation lowers (without it `z`/`w` are undriven). LEC against the golden.
+
+comb top(a:u8) -> (z:u10, w:u9) {
+  mut acc = 0
+  for i in 0..<3 {
+    acc = acc + a
+  }
+  z = acc
+
+  mut s = 0
+  if true {
+    s = s + a
+  }
+  w = s
+}

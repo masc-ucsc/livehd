@@ -497,6 +497,8 @@ void uPass_constprop::process_declare() {
       if (mode == "reg" || mode.starts_with("reg ")) {
         reg_decl_names_.insert(var);
         st.var(var);
+      } else if (mode == "mut" || mode.starts_with("mut ")) {
+        mut_decl_names_.insert(var);  // task 2u — keep its comptime init store (see classify_statement)
       }
     }
     lm->restore_cursor(here);
@@ -3765,6 +3767,18 @@ upass::Emit_decision uPass_constprop::classify_statement() {
   // *trivial* scalar (exactly one anonymous `0` entry), where fold_ref's
   // inline is faithful.
   if (auto b = st.get_bundle(lhs_text); b && !b->is_trivial_scalar()) {
+    return upass::Emit_decision::emit_node();
+  }
+
+  // Task 2u — keep a comptime init store for a `mut` var. If the mut is later
+  // reassigned with a runtime value inside a comptime-eliminated block (an
+  // `if true {…}` arm or an unrolled loop iteration), the body is copied
+  // verbatim (not SSA-versioned), so the in-block read emits a bare `acc` whose
+  // only driver is this init — dropping it leaves `acc` undriven and the
+  // accumulation lost (`mut acc=0; if true{acc=acc+a}; z=acc` → z = a relies on
+  // the kept `acc=0`). A mut that stays comptime keeps a dead init that
+  // cprop/DCE removes, so this never pessimizes the final graph.
+  if (mut_decl_names_.contains(lhs_text)) {
     return upass::Emit_decision::emit_node();
   }
 

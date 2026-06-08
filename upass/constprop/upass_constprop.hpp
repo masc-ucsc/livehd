@@ -208,6 +208,15 @@ protected:
   // Verilog `<=` semantics — a read after a write still sees the flop's q.
   std::unordered_set<std::string> reg_decl_names_;
 
+  // Task 2u — names declared `mut`. classify_statement keeps a comptime init
+  // store (`acc = <const>`) for these (not const/temps): if the mut is later
+  // reassigned with a RUNTIME value inside a comptime-eliminated block (an
+  // `if true {…}` arm or an unrolled loop iteration), the body is copied
+  // verbatim (not SSA-versioned), so the in-block read emits a bare `acc` whose
+  // only driver is this init — dropping it leaves it undriven. A mut that stays
+  // comptime keeps a dead init that cprop/DCE then removes, so this is safe.
+  std::unordered_set<std::string> mut_decl_names_;
+
   auto current_bundle() { return st.get_bundle(current_text()); }
 
   // Bundle iff the cursor is on a ref. Returns nullptr otherwise — used by

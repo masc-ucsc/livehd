@@ -249,14 +249,15 @@ Group 1 entries; downstream Groups treat them as Group 1 dependencies.</p>
   (incl. <code>textDocument/formatting</code>) are a separate project.
   Remaining: Phases B–E (hover/nav/workspace); spans sharpen with <a class="xref" href="TODO_livehd.html#item-1f">1f</a>/<a class="xref" href="TODO_livehd.html#item-3f">3f</a> —
   <code>docs/contracts/pyrope_lsp.md</code>. <em>(moved from Group 1-complex to Group 2.)</em></li>
-<li><strong id="item-2u" class="item-id">2u</strong> Unroll all loops + tuple iteration in
-  the upass runner, not prp2lnast (was <code>TODO_loop.md</code>). Delete the parse-time
-  unroll so prp2lnast emits a raw <code>for</code>/<code>while</code> LNAST node for <em>every</em>
-  loop and <code>uPass_runner</code> performs all expansion at comptime. Sequencing
-  (approved 2026-06-07): migrate every form + delete parse-time first (tests go temporarily red),
-  then fix the <strong>2u-PREREQ</strong> constprop bug (runtime <code>mut</code> across nested
-  block scopes; root cause = SSA pre-pass never versions inside eliminated control flow).
-  Ties to <a class="xref" href="TODO_prp.html#item-1m">1m</a>-deferred var-args
+<li><strong id="item-2u" class="item-id">2u</strong> <span class="done">✅ DONE (2026-06-07,
+  branch <code>task-2u-loop-migration</code>).</span> Unroll all loops + tuple iteration in
+  the upass runner, not prp2lnast (was <code>TODO_loop.md</code>). prp2lnast now emits a raw
+  <code>for</code>/<code>while</code> node for <em>every</em> loop and <code>uPass_runner</code>
+  does all expansion at comptime; the parse-time unroll + <code>comptime_tuples_</code> are deleted.
+  The <strong>2u-PREREQ</strong> runtime-<code>mut</code>-accumulation bug was fixed by keeping the
+  comptime init store for <code>mut</code> vars (NOT the re-SSA originally planned); LEC-verified by
+  <code>prp-equiv-loop_accum</code>; full suite 280/280. Unblocks the
+  <a class="xref" href="TODO_prp.html#item-1m">1m</a>-deferred var-args
   (<code>for x in args</code>). Full detail in the "Loop / tuple-iteration unroll migration"
   section below.</li>
 </ul>
@@ -451,7 +452,11 @@ lowering). Today the unroll is <strong>split</strong> across two stages, and the
   the range/while paths already use.</p>
 </li>
 <li><strong>2u-PREREQ — constprop runtime-<code>mut</code>-across-block-scopes bug
-  (<span style="color:var(--notefg)">BLOCKER</span>).</strong><ul>
+  (<span class="badge-done" style="color:#fff;padding:.02em .4em;border-radius:5px">✅ FIXED</span>).</strong>
+  Fixed by keeping the comptime init store for <code>mut</code>-declared vars in
+  <code>classify_statement</code> (<code>mut_decl_names_</code>) — far simpler than the re-SSA below;
+  the kept init drives the verbatim-copied in-block read and tolg/cprop do last-write-wins.
+  LEC-verified (<code>prp-equiv-loop_accum</code>). The analysis below is retained for context.<ul>
   <li>This is the real blocker, and it is <strong>NOT a loop-unroll-location problem</strong>
     — moving the unroll to the runner does <em>not</em> fix it (a 2026-06-07 spike confirmed
     the runner unroll drops it too) and <em>regresses</em> loop-built tuples
@@ -559,15 +564,20 @@ exit; needs the hlop pin bump, unrelated to 2u).</p>
   declare-once issue it worked around is fixed by the migration). <em>Not done:</em> LEC-backed loop
   tests under <code>tests/equiv/</code> — blocked on the flaky dtor-SIGBUS making the compile/LEC
   path unreliable to gate on.</li>
-<li><strong>Phase 3 — runtime-mut accumulation constprop fix. ⏳ DEFERRED (pre-existing, not red).</strong>
-  See the PREREQ root cause above. NO existing test exercises it (loop_equivalent is COMPTIME); it
-  blocks the <a class="xref" href="TODO_prp.html#item-1m">1m</a>-deferred runtime
-  <code>for x in args { acc += x }</code>. Deferred because the principled fix (re-SSA the
-  runner-eliminated block, reusing <code>uPass_ssa::copy_with_rename</code>) is deep and needs LEC
-  verification, which the dtor-SIGBUS flakiness makes unreliable — warrants supervised work. Every
-  constprop-only fix founders on the single-name + deferred-emit (coalescer) interaction: the
-  in-block read needs <code>acc</code>=pre-block value while the post-block read needs the runtime
-  wire, same name, one re-fold. Full analysis in the <code>task_2u_loop_migration_landed</code> and
+<li><strong>Phase 3 — runtime-mut accumulation constprop fix. ✅ LANDED.</strong> Turned out far
+  simpler than the re-SSA plan: <code>classify_statement</code> was DROPPING the comptime init store
+  (<code>acc=0</code>) for <code>mut</code> vars, so the verbatim-copied in-block read had no driver.
+  Fix = KEEP the comptime init store for <code>mut</code>-declared vars
+  (<code>mut_decl_names_</code> recorded in <code>process_declare</code>; <code>classify_statement</code>
+  emits instead of drops when the LHS is a mut). The kept init drives the bare in-block read and
+  tolg/cprop do last-write-wins across the eliminated block (<code>mut acc=0; if true{acc=acc+a};
+  z=acc</code> → <code>z=a</code>; <code>for i in 0..&lt;3 { acc=acc+a }</code> → <code>z=3a</code>).
+  A mut that stays comptime keeps a dead init that cprop/DCE removes (no pessimization); under
+  <code>toln:0</code> classify is moot, so comptime tallies are unchanged. <strong>NO re-SSA
+  needed.</strong> LEC-verified by <code>inou/prp/tests/equiv/loop_accum.{prp,v}</code>
+  (<code>prp-equiv-loop_accum</code>). Unblocks the runtime
+  <a class="xref" href="TODO_prp.html#item-1m">1m</a>/1p <code>for x in args { acc += x }</code>.
+  Full suite 280/280. Analysis in the <code>task_2u_loop_migration_landed</code> and
   <code>runtime_mut_accumulation_across_scopes</code> auto-memory notes.</li>
 </ul>
 
