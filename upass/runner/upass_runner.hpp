@@ -199,13 +199,18 @@ protected:
   // block scope), invokes `emit_binds` to bind the iteration variable(s) into
   // it (a Const for a range, a `tuple_get` pick for a tuple), re-walks the
   // body's statements, then closes the scope and restores the cursor to the
-  // body `stmts` node. Returns false if the fuel/depth guard tripped (caller
-  // stops iterating).
-  bool walk_loop_iteration(const std::function<void()>& emit_binds);
+  // body `stmts` node. `emit_post` (optional) runs after the body, still inside
+  // the iteration scope — used by `for i in ref d` to write the (possibly
+  // mutated) value back into the slot. Returns false if the fuel/depth guard
+  // tripped (caller stops iterating).
+  bool walk_loop_iteration(const std::function<void()>& emit_binds, const std::function<void()>& emit_post = {});
   // Emit a per-iteration tuple pick `dst = src[index_text]` as a scratch
   // tuple_get run through the walk (so try_resolve_tuple_get / constprop
   // resolve it). index_text is the pyrope field literal ("0","1",… or "'name'").
   void emit_inline_tuple_pick(const std::string& dst, const std::string& src, const std::string& index_text);
+  // Emit a per-iteration tuple write-back `dst[index_text] = value` (3-child
+  // store) as a scratch tree run through the walk — the `for i in ref d` form.
+  void emit_inline_tuple_store(const std::string& dst, const std::string& index_text, const std::string& value);
 
   // ── 1i comb-call inliner ────────────────────────────────────────────────
   // Called from process_lnast's func_call case. If the callee resolves to a

@@ -2600,7 +2600,24 @@ void uPass_runner::emit_inline_tuple_pick(const std::string& dst, const std::str
   lm->pop_source();
 }
 
-bool uPass_runner::walk_loop_iteration(const std::function<void()>& emit_binds) {
+void uPass_runner::emit_inline_tuple_store(const std::string& dst, const std::string& index_text, const std::string& value) {
+  if (!scratch_forest_) {
+    scratch_forest_ = hhds::Forest::create();
+  }
+  auto body = scratch_forest_->create_tree_temp("inl-tset");
+  auto s    = std::make_shared<Lnast>(body, "inl-tset");
+  auto root = s->set_root(Lnast_ntype::create_store());  // 3-child store == tuple_set
+  s->add_child(root, Lnast_node::create_ref(dst));
+  s->add_child(root, Lnast_node::create_const(index_text));
+  s->add_child(root, Lnast_node::create_ref(value));
+  flush_deferred_emits();
+  lm->push_source(s, "", 0);
+  process_lnast();  // store dispatch → constprop tuple_set / write-back into dst's slot
+  flush_deferred_emits();
+  lm->pop_source();
+}
+
+bool uPass_runner::walk_loop_iteration(const std::function<void()>& emit_binds, const std::function<void()>& emit_post) {
   // Precondition: the read cursor is on the loop body `stmts` node.
   if (inline_budget_ == 0 || loop_depth_ > static_cast<int>(kInlineMaxDepth)) {
     return false;  // fuel / depth guard — a non-terminating comptime loop bails (like recursion)
@@ -2626,6 +2643,10 @@ bool uPass_runner::walk_loop_iteration(const std::function<void()>& emit_binds) 
     lm->move_to_parent();
   }
 
+  if (emit_post) {
+    emit_post();  // `for i in ref d` write-back: still inside this iteration's scope
+  }
+
   dispatch_to_passes(&upass::uPass::process_stmts_pre_pop);  // coalescer flushes this iteration's writes
   emit_pop();
   dispatch_to_passes(&upass::uPass::process_stmts_post);
@@ -2634,39 +2655,55 @@ bool uPass_runner::walk_loop_iteration(const std::function<void()>& emit_binds) 
 }
 
 void uPass_runner::unroll_for() {
-  // Cursor on the `for` node. Range-for layout (prp2lnast):
-  //   for( ref(i), <iterable-ref>, stmts(body) )
-  // The iterable is a `range` tmp whose (lo, hi_inclusive) bounds constprop
-  // recorded (process_range) when the preceding sibling range statement walked.
-  // Tuple-iteration for-loops are unrolled by prp2lnast and never reach here.
+  // Cursor on the `for` node. Layout (prp2lnast, task 2u):
+  //   for( value_ref, iterable_ref, stmts(body), const(mode) [, idx_ref [, key_ref]] )
+  // iterable_ref is a `range` tmp whose (lo, hi_inclusive) bounds constprop
+  // recorded (process_range), a tuple name/tmp resolved by try_tuple_shape, or a
+  // var-arg. mode is "ref" (write each value back into the slot after the body)
+  // or "val". idx_ref/key_ref are the optional position/key binds of
+  // `for (value, idx, key) in t`.
   if (!lm->has_child()) {
     emit_subtree_verbatim();
     return;
   }
-  lm->move_to_child();  // child0: iter-var ref
+  lm->move_to_child();  // child0: value-var ref
   const std::string ivar = std::string(lm->current_text());
   if (!lm->move_to_sibling()) {
     lm->move_to_parent();
     emit_subtree_verbatim();
     return;
   }
-  const std::string iterable  = std::string(lm->current_text());  // child1: iterable ref
-  const bool        have_body = lm->move_to_sibling();            // child2: body stmts
-  lm->move_to_parent();                                           // back to for-node
-  if (!have_body) {
+  const std::string iterable = std::string(lm->current_text());  // child1: iterable ref
+  if (!lm->move_to_sibling()) {                                  // child2: body stmts
+    lm->move_to_parent();
     emit_subtree_verbatim();
     return;
   }
+  // Trailing metadata: child3 mode ("ref"/"val"), child4 idx, child5 key.
+  bool        is_ref = false;
+  std::string idx_var;
+  std::string key_var;
+  if (lm->move_to_sibling()) {  // child3: mode
+    is_ref = lm->current_text() == "ref";
+    if (lm->move_to_sibling()) {  // child4: idx
+      idx_var = std::string(lm->current_text());
+      if (lm->move_to_sibling()) {  // child5: key
+        key_var = std::string(lm->current_text());
+      }
+    }
+  }
+  lm->move_to_parent();  // back to for-node
 
   // `ivar` was read via current_text(), so it is ALREADY the frame-renamed name
   // the body's reads of the iteration variable resolve to (under the same tag).
   // Bind it directly each iteration — do NOT re-tag (that would double-prefix).
+  // idx_var/key_var are likewise already frame-renamed.
   const std::string& tagged_i = ivar;
   const auto         for_bm   = lm->save_cursor();  // on the for-node
   // Re-position the cursor on the body stmts (child2) before each iteration.
   auto to_body = [&]() {
     lm->restore_cursor(for_bm);
-    lm->move_to_child();    // child0 iter
+    lm->move_to_child();    // child0 value
     lm->move_to_sibling();  // child1 iterable
     lm->move_to_sibling();  // child2 body
   };
@@ -2715,15 +2752,34 @@ void uPass_runner::unroll_for() {
     const bool saved_break = loop_break_hit_;
     loop_break_hit_        = false;
     ++loop_depth_;
+    int64_t pos = 0;
     for (const auto& [key, is_pos] : *shape) {
       to_body();
       const std::string index_text = is_pos ? key : ("'" + key + "'");
-      if (!walk_loop_iteration([&]() { emit_inline_tuple_pick(tagged_i, iterable, index_text); })) {
+      const std::string key_text   = is_pos ? std::string("''") : ("'" + key + "'");  // positional slots have no name
+      const int64_t     cur_pos    = pos;
+      const bool        ok         = walk_loop_iteration(
+          [&]() {
+            emit_inline_tuple_pick(tagged_i, iterable, index_text);  // value = t[index]
+            if (!idx_var.empty()) {
+              emit_inline_binding(idx_var, Lnast_node::create_const(std::to_string(cur_pos)));  // idx = position
+            }
+            if (!key_var.empty()) {
+              emit_inline_binding(key_var, Lnast_node::create_const(key_text));  // key = slot name string
+            }
+          },
+          // `for i in ref d`: after the body, write the (possibly mutated) value
+          // back into d's slot (d is enclosing — relies on the Phase-3 fix to
+          // lower a runtime mutation across the iteration block).
+          is_ref ? std::function<void()>([&]() { emit_inline_tuple_store(iterable, index_text, tagged_i); })
+                          : std::function<void()>{});
+      if (!ok) {
         break;
       }
       if (loop_break_hit_) {
         break;
       }
+      ++pos;
     }
     --loop_depth_;
     loop_break_hit_ = saved_break;

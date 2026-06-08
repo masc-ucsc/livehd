@@ -140,30 +140,10 @@ protected:
   // define `call` without colliding.
   int hoisted_lambda_count_ = 0;
 
-  // Comptime-known tuples used by process_for_statement to unroll
-  //   `for (e[, idx[, key]]) in NAME { … }` over a static shape, and to size
-  //   `for i in ref NAME { … }` ref-iterations (write-back unroll).
-  //
-  // Recording paths:
-  //   - `const NAME = <literal_tuple>` with all-literal entries → entries
-  //     have `value_known=true` and `value_text` set; powers value-bound
-  //     unrolls (tuple_exclude).
-  //   - `mut NAME = ()` and `mut NAME = <literal_tuple>` → tracks the size,
-  //     mutating ops below keep size in sync.
-  //   - `NAME = NAME ++ <literal_tuple>` (or `NAME ++= <literal_tuple>`)
-  //     where the rhs is a positional/named tuple → appends placeholder
-  //     entries with `value_known=false` (size grows but the per-iter values
-  //     aren't statically known).
-  //   - Any other write to NAME invalidates by erasing the entry.
-  //
-  // Empty `key` means a positional slot. `value_text` is only consumed when
-  // `value_known` is true.
-  struct Comptime_tuple_entry {
-    std::string key;         // empty string for positional entries
-    std::string value_text;  // pyrope constant literal (verbatim source text)
-    bool        value_known = false;
-  };
-  std::unordered_map<std::string, std::vector<Comptime_tuple_entry>> comptime_tuples_;
+  // (Removed in task 2u: the parse-time `comptime_tuples_` shape tracker. All
+  // for-loop / tuple-iteration unrolling now happens in the upass runner, which
+  // reads tuple shapes from the live constprop bundle — see prp2lnast emits a
+  // raw `for` node and uPass_runner::unroll_for / try_tuple_shape.)
 
   // Every variable READ lowered by `identifier_to_node` (for_lvalue=false):
   // the name, its source TSNode (diagnostic span), and the position the
@@ -382,7 +362,7 @@ protected:
   // visible chain; a later binding may overwrite an earlier same-name one.
   //
   // ALSO tracks `mut NAME = <int literal>` with declaration-time-capture
-  // semantics (mirrors comptime_tuples_): record on the `mut` decl, UPDATE on
+  // semantics: record on the `mut` decl, UPDATE on
   // a later statement-level plain `NAME = <int literal>`, and ERASE on any
   // other write (non-literal rhs, compound op, or any write inside an if/for/
   // while/match/lambda body — see conditional_depth_). A timing slot then

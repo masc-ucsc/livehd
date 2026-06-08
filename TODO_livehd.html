@@ -252,8 +252,10 @@ Group 1 entries; downstream Groups treat them as Group 1 dependencies.</p>
 <li><strong id="item-2u" class="item-id">2u</strong> Unroll all loops + tuple iteration in
   the upass runner, not prp2lnast (was <code>TODO_loop.md</code>). Delete the parse-time
   unroll so prp2lnast emits a raw <code>for</code>/<code>while</code> LNAST node for <em>every</em>
-  loop and <code>uPass_runner</code> performs all expansion at comptime. Gated by the
-  <strong>2u-PREREQ</strong> constprop bug (runtime <code>mut</code> across nested block scopes).
+  loop and <code>uPass_runner</code> performs all expansion at comptime. Sequencing
+  (approved 2026-06-07): migrate every form + delete parse-time first (tests go temporarily red),
+  then fix the <strong>2u-PREREQ</strong> constprop bug (runtime <code>mut</code> across nested
+  block scopes; root cause = SSA pre-pass never versions inside eliminated control flow).
   Ties to <a class="xref" href="TODO_prp.html#item-1m">1m</a>-deferred var-args
   (<code>for x in args</code>). Full detail in the "Loop / tuple-iteration unroll migration"
   section below.</li>
@@ -453,7 +455,10 @@ lowering). Today the unroll is <strong>split</strong> across two stages, and the
   <li>This is the real blocker, and it is <strong>NOT a loop-unroll-location problem</strong>
     — moving the unroll to the runner does <em>not</em> fix it (a 2026-06-07 spike confirmed
     the runner unroll drops it too) and <em>regresses</em> loop-built tuples
-    (<code>prp-loop_equivalent</code>). It must be fixed first.</li>
+    (<code>prp-loop_equivalent</code>). <strong>Chosen sequencing (2026-06-07):</strong> do
+    <em>not</em> gate the migration on this — migrate every form to the runner + delete the
+    parse-time paths first (accepting the runtime-accumulation tests go temporarily red), then
+    land this constprop fix to bring them green (Phase 3 below).</li>
   <li>Minimal repro (not loop-specific, not nil-specific, any init value):
 <pre><code>comb top(a:u8) -&gt; (z:u9) {
   mut acc = 0
@@ -464,17 +469,24 @@ lowering). Today the unroll is <strong>split</strong> across two stages, and the
     (<code>mut acc=0; acc=acc+a; z=acc</code> → <code>z = 'sb0 + a</code>). So a <code>mut</code>
     variable written with a <strong>runtime</strong> value inside a <strong>certain nested
     block</strong> (an <code>if true {}</code>, a loop iteration) is mishandled by constprop.</li>
-  <li><strong>The remaining bug — dispatch-vs-emit fold + dropped init</strong>
-    (<code>upass/constprop/upass_constprop.cpp</code>): the stale-value clear that made the
-    accumulation chain already landed; what remains is that inside the arm constprop's
-    <em>dispatch</em> (<code>process_plus</code>) sees <code>acc</code> comptime-known
-    (<code>fold_ref</code> returns the init), but <code>emit_op_with_fold</code> /
-    <code>emit_ref_or_folded</code> (<code>upass_runner.cpp</code> ~586–670) emit the bare
-    <code>acc</code> ref at <em>materialize</em> time, and the comptime init store is dropped →
-    <code>acc</code> has no driver → undriven. Needs an <strong><code>lldb</code> step-through</strong>
-    of the <code>process_drop_candidate</code> dispatch→classify→emit sequence (static analysis
-    hit repeated contradictions), plus materializing the dropped init when a <code>mut</code>
-    transitions to a runtime wire across a block. Full analysis in the
+  <li><strong>Root cause (sharpened 2026-06-07) — SSA never versions inside eliminated control flow.</strong>
+    SSA is a <strong>whole-tree pre-pass</strong> (<code>upass/ssa/upass_ssa.cpp</code>) that versions
+    only straight-line top-level reassignments (<code>acc</code> → <code>acc___ssa_1</code>);
+    control-flow bodies are copied <strong>verbatim</strong> with no SSA inside
+    (<code>upass_ssa.hpp:31-34</code>, <code>upass_ssa.cpp:351</code> "straight-line scope only").
+    Loop-unroll only re-salts temp names (<code>push_iteration</code>, <code>lnast_manager.hpp:160</code>)
+    — it does <strong>not</strong> re-SSA the body. So the in-block enclosing-<code>mut</code> write keeps
+    the unversioned name <code>acc</code>; constprop then (a) drops the <code>acc=0</code> init store in
+    <code>classify_statement</code> (<code>upass_constprop.cpp:3696-3771</code>) and (b) emits a
+    <strong>bare</strong> <code>acc</code> operand because <code>is_enclosing_scope_var</code>
+    (<code>upass_constprop.cpp:420</code>) cleared <code>acc</code> to an empty bundle before
+    <code>emit_ref_or_folded</code> (<code>upass_runner.cpp:586-604</code>) re-folds it. The straight-line
+    case works precisely because SSA versions it. <strong>Recommended fix (B): re-SSA-on-elimination</strong>
+    — when the runner takes a comptime-certain arm or unrolls an iteration, version the body's
+    enclosing-<code>mut</code> writes (reuse <code>uPass_ssa::copy_with_rename</code>,
+    <code>upass_ssa.cpp:117-136</code>) so it reduces to the already-working straight-line form.
+    <strong>Fallback (C):</strong> localized constprop patch — keep the dropped init + snapshot the operand
+    fold at dispatch. Needs <code>lldb</code> step-through + A/B verify. Full analysis in the
     <code>runtime_mut_accumulation_across_scopes</code> auto-memory note.</li>
   </ul></li>
 <li><strong>2u-PENDING — work checklist (after the prereq):</strong><ul>
@@ -483,17 +495,24 @@ lowering). Today the unroll is <strong>split</strong> across two stages, and the
     (a param / var-arg) and for a runtime tuple, instead of the placeholder-<code>while</code>
     fallback / parse-time unroll. <code>read_is_visible</code> already treats a <code>for</code>
     node as declaring its iterator (<code>prp2lnast.cpp:628</code>), so no visibility change is
-    needed. <strong>Do NOT</strong> route a tracked comptime tuple to the runner naively — that
-    regressed <code>prp-loop_equivalent</code> (loop-built <code>d = d ++ (i,)</code>); split by
-    tracked-vs-untracked, or move the tracker too (below).</li>
+    needed. <strong>Resolved (2026-06-07): no tracked-vs-untracked split</strong> — emit a raw
+    <code>for(iter_ref, iterable_ref, stmts(body))</code> for <em>every</em> form (literal range,
+    inline tuple, comptime tuple-by-name, runtime tuple, var-arg). Normalize the iterable to a ref
+    the runner resolves via constprop (inline tuple → temp <code>___iter = (…)</code> then
+    <code>ref ___iter</code>). The <code>prp-loop_equivalent</code> regression is NOT avoided by a
+    split — it is the runtime-accumulation constprop bug, fixed in Phase 3.</li>
   <li><strong>Runner.</strong> <code>unroll_for</code> tuple-iterable branch + a tuple-shape seam
     + multi-value <code>walk_loop_iteration</code> (value/idx/key) + <code>emit_inline_tuple_pick</code>.
     <strong>This infra was written this session and is PRESENT but UNREACHED</strong> (no producer
     feeds it): <code>try_tuple_shape</code>/<code>provide_tuple_shape</code>,
     <code>emit_inline_tuple_pick</code>, the <code>unroll_for</code> tuple branch (consults
     <code>try_tuple_shape</code> and the var-arg <code>vararg_bindings_</code>), and the
-    <code>walk_loop_iteration</code> callback refactor. Decide: keep + wire it up, or revert it
-    if the producer split keeps comptime tuples parse-time.</li>
+    <code>walk_loop_iteration</code> callback refactor. <strong>Resolved (2026-06-07): keep + wire
+    it up</strong> (confirmed present in <code>upass/runner/upass_runner.cpp</code>; the
+    <code>unroll_for</code> tuple branch is at <code>:2703</code>, the shape seam at
+    <code>upass_constprop.cpp:3843</code>). Still to add: the <strong>multi-value</strong>
+    <code>walk_loop_iteration</code> (value/idx/key) variant is ABSENT (current callback is
+    single-arity, <code>:2603</code>) — needed for <code>for (e,idx,key) in t1</code>.</li>
   <li><strong>Loop-built tuples (the hard tier).</strong> <code>mut d=(); for i in 0..&lt;N { d = d ++ (i,) }; for e in d</code>
     — the later <code>for e in d</code> needs <code>d</code>'s final shape. The runner can read
     <code>d</code>'s live constprop bundle (it grows as the runner walks the first loop), so this
@@ -505,6 +524,51 @@ lowering). Today the unroll is <strong>split</strong> across two stages, and the
     only. Confirm tolg/typecheck error if a <code>for</code> node ever reaches them (means the
     runner couldn't unroll — a user error / non-comptime iterable).</li>
   </ul></li>
+</ul>
+
+<h3 id="loop-phases">2u — phased plan (migration LANDED 2026-06-07)</h3>
+<p>Baseline: <code>bazel test //inou/prp:all</code> = 279/279. After the migration: still 279/279
+(the only intermittent failures are the PRE-EXISTING flaky dtor-SIGBUS on comptime tests —
+<code>tup_method</code>, <code>string_interpolation</code> — JSON shows pass, the process crashes at
+exit; needs the hlop pin bump, unrelated to 2u).</p>
+<ul>
+<li><strong>Phase 1 — prp2lnast structural only. ✅ LANDED.</strong>
+  <code>process_for_statement</code> rewritten (627→~210 lines): always emits
+  <code>for(value_ref, iterable_ref, stmts(body), const(mode) [, idx_ref [, key_ref]])</code> —
+  mode = "ref"/"val". Deleted the literal-range / comptime-tuple / inline-tuple parse-time unroll
+  paths AND the whole <code>comptime_tuples_</code> tracker (member + 3 lambdas + recording block).
+  Scope analysis updated: <code>check_writes_in_scope</code> + <code>read_is_visible</code> recognize
+  the for-node value/idx/key binds (so <code>for i in ref d { i += 10 }</code> writes are legal,
+  reads of <code>key</code> resolve, and an iterator shadowing an enclosing name still errors via
+  <code>attach_loc(for_idx, …)</code>). Surprisingly, ZERO net regressions — the runner already
+  handled range + single-value tuple; only <code>tuple_exclude</code> (idx/key) +
+  <code>for_iter_shadow</code> (shadow vs <code>here</code>) needed the scope fix.</li>
+<li><strong>Phase 2 — runner owns every <code>for</code> form. ✅ LANDED.</strong> Fed the (was-dead)
+  <code>unroll_for</code> tuple branch via <code>try_tuple_shape</code> (one seam: inline tuple,
+  comptime tuple-by-name, loop-built tuple via the live constprop bundle, var-arg). Added idx/key
+  binding (position const + slot-name string) and <code>for i in ref d</code> write-back
+  (<code>emit_inline_tuple_store</code> in a new post-body hook on <code>walk_loop_iteration</code>).
+  <code>loop_equivalent</code> passes (comptime accumulation + ref write-back both work through the
+  runner — it did NOT need Phase 3).</li>
+<li><strong>Phase 4 — cleanup + guard. ✅ LANDED (mostly).</strong> Dead parse-time scaffolding +
+  <code>comptime_tuples_</code> deleted. tolg now HARD-errors a <code>for</code> node that reaches it
+  (runner couldn't unroll = a non-comptime/runtime iterable) — was a silent WARN + undriven output.
+  (Placed in tolg, not the runner fallback, because tolg skips templates — see
+  <a class="xref" href="TODO_prp.html#item-1p">1p</a>.) <code>tests/errors/overflow_unroll.prp</code>
+  rewritten from hand-unrolled to a real <code>for i in 0..&lt;4 { acc = acc + 5 }</code> (the
+  declare-once issue it worked around is fixed by the migration). <em>Not done:</em> LEC-backed loop
+  tests under <code>tests/equiv/</code> — blocked on the flaky dtor-SIGBUS making the compile/LEC
+  path unreliable to gate on.</li>
+<li><strong>Phase 3 — runtime-mut accumulation constprop fix. ⏳ DEFERRED (pre-existing, not red).</strong>
+  See the PREREQ root cause above. NO existing test exercises it (loop_equivalent is COMPTIME); it
+  blocks the <a class="xref" href="TODO_prp.html#item-1m">1m</a>-deferred runtime
+  <code>for x in args { acc += x }</code>. Deferred because the principled fix (re-SSA the
+  runner-eliminated block, reusing <code>uPass_ssa::copy_with_rename</code>) is deep and needs LEC
+  verification, which the dtor-SIGBUS flakiness makes unreliable — warrants supervised work. Every
+  constprop-only fix founders on the single-name + deferred-emit (coalescer) interaction: the
+  in-block read needs <code>acc</code>=pre-block value while the post-block read needs the runtime
+  wire, same name, one re-fold. Full analysis in the <code>task_2u_loop_migration_landed</code> and
+  <code>runtime_mut_accumulation_across_scopes</code> auto-memory notes.</li>
 </ul>
 
 <h3 id="loop-ties">Loop — cross-references</h3>

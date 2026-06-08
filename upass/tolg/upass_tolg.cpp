@@ -364,6 +364,15 @@ private:
       // 2d-reg — per-reg flop-attr overrides (reset_pin/sync/negreset/
       // initial); anything else keeps the unhandled warn below.
       lower_attr_set(nid);
+    } else if (N::is_for(t)) {
+      // Task 2u — a `for` node reaching tolg means uPass_runner::unroll_for
+      // could NOT unroll it: the iterable resolved to neither a comptime range
+      // nor a known tuple shape. Pyrope `for` is comptime-only (must fully
+      // unroll), so this is a user error (a runtime/unknown iterable), not a
+      // silent miscompile. HARD error rather than the unhandled warn below.
+      Pass::error("upass.tolg: non-comptime `for` loop in '{}' — the iterable did not resolve to a comptime range "
+                  "or tuple, so the loop could not unroll (Pyrope for-loops are comptime-only and must fully unroll)",
+                  lnast_->get_top_module_name());
     } else {
       Pass::warn("upass.tolg: unhandled node type '{}'", Lnast_ntype::to_sv(t));
     }
