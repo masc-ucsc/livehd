@@ -410,6 +410,20 @@ listed above — they are no longer repeated here.</p>
 
 <h2 id="todo-pyrope-templates"><strong id="item-1p" class="item-id">1p</strong> Pyrope deferred lambda templates — var-args follow-ups</h2>
 
+<p><strong>1p-runner (2026-06-08, branch <code>1p-runner</code>): A+B LANDED, C+D remain.</strong>
+The for×{comb,mod,pipe} audit found the only var-args gaps; both core fixes landed:
+<strong>A</strong> — templates run NON-materializing in the main upass walk so a var-arg comb's body
+isn't corrupted standalone (<code>for v in args</code> inlines; commit 508407ba6);
+<strong>B</strong> — var-arg pipe/mod port expansion replaces the old hard error
+(<code>prp-equiv-mod_varargs_add</code> + <code>prp-equiv-pipe_varargs_add</code> LEC-pass; commit
+261ac25ea). <strong>Remaining:</strong> <strong>C</strong> — <code>mod_varargs_csa</code> (nested:
+a specialized var-arg mod whose loop calls a second template mod with the loop var — the loop var
+reads back untyped, so the nested specialization can't type its port; the reconstructed
+<code>args</code> tuple doesn't flow per-element types to the loop var); <strong>D</strong> — cosmetic
+dead <code>tuple_add</code>/<code>type_spec</code> reaching tolg after a runtime-tuple unroll
+(LEC-clean WARN). Full analysis in the <code>task_1p_runner_status</code> auto-memory note. The
+description below is the pre-1p-runner plan.</p>
+
 <p>The template + call-site-specialization mechanism (1p A–E) landed 2026-06-07;
 the living contract is <code>docs/contracts/task_1p_plan.md</code>, language spec
 <code>06-functions.md</code>. <code>comb</code> var-args inline
