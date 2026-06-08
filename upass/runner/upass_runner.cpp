@@ -3195,6 +3195,7 @@ bool dce_is_def_producing(Lnast_ntype::Lnast_ntype_int t) {
   switch (t) {
     case N::Lnast_ntype_store:  // task 1t — store defines its first-child target (the unified write node)
     case N::Lnast_ntype_dp_assign:
+    case N::Lnast_ntype_range:  // task 1d-D1 — a comptime range whose for-loop unrolled away is dead scaffolding
     case N::Lnast_ntype_tuple_add:
     case N::Lnast_ntype_tuple_concat:
     case N::Lnast_ntype_tuple_get:
