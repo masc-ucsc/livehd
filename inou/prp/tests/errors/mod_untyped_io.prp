@@ -1,8 +1,16 @@
 /*
 :name: mod_untyped_io
 :type: error
-:error: has no explicit type
-:help: declare an explicit type
+:error: has no declared type
+:help: annotate the actual
 */
 
-mod f(a) -> (x:u8@[0]) { x = a }   // locate_error_here
+// Task 1p — an untyped `mod` input is no longer a definition-time error: it is
+// a deferred template, specialized per call site on the actual's DECLARED type
+// (decision 4). What IS an error is feeding an UNTYPED actual (here the bare
+// literal `3`) into that boundary — a hardware port needs an explicit width.
+mod f(a) -> (x:u8@[0]) { x = a }
+
+mod top() -> (z:u8@[0]) {
+  z = f(3)
+}

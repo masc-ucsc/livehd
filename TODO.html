@@ -101,17 +101,13 @@ N. Each badge links to the full entry. <strong>HHDS has no open goals.</strong><
 <li><em>Group 1:</em><ul>
 <li><strong>mod follow-ups</strong> — remaining slices in <a href="TODO_mod.html#pending">TODO_mod.html §Pending</a>: runtime wrap/sat LG lowering, multi-output callees, <code>stage[]</code>/ranged picks, <code>.[defer]</code>/<code>past[n]</code>. (Register slice <a class="xref" href="TODO_mod.html#item-2d-reg">2d-reg</a> + 1r/1u <code>pipe</code>+<code>mod</code> structural machinery LANDED.)</li>
 <li><a class="xref" href="TODO_prp.html#item-1m">1m</a> Pyrope <code>pub</code> exports + <code>import()</code> — core <strong>landed 2026-06-07</strong>; pending only: unknown-tuple-field error (typecheck build-out — constprop spike proved a flip false-positives on progressive builds), <code>lg:</code> black-box Sub wiring (NOT linker-blocked: needs kernel <code>lg:</code>+sources + name/IO stub + cgen by-name check). See <code>docs/contracts/task_1m_plan.md</code>.</li>
-<li><a class="xref" href="TODO_prp.html#item-1p">1p</a> Deferred lambda templates: var-args + call-site specialization — <strong>spec'd 2026-06-07</strong> (<code>docs/contracts/task_1p_plan.md</code>: not-fully-typed lambda = template, no LGraph at def time; <code>comb</code> inlines, <code>pipe</code>/<code>mod</code>/<code>fluid</code> specialize per signature into a <code>Sub</code>; readable-suffix mangling; deletes the <code>lambda-needs-types</code> error; generics seam, impl deferred).</li>
 </ul></li>
 <li><em>Group 2:</em><ul>
 <li><a class="xref" href="TODO_prp.html#item-2p">2p</a> Source-derived SSA / tmp names (<code>foo_l42_a</code>, drop <code>___N</code>).</li>
-<li><a class="xref" href="TODO_prp.html#item-2n">2n</a> <code>tree_ios</code> leaf ABI with <code>min</code>/<code>max</code> slots (mimics <code>GraphIO</code>).</li>
-<li><a class="xref" href="TODO_prp.html#item-2j">2j</a> Function-scope closure-capture, import-aware case.</li>
 </ul></li>
 <li><em>Group 3:</em><ul>
-<li><a class="xref" href="TODO_prp.html#item-3k">3k</a> Automate doc-example ingestion into <code>inou/prp/tests/docs/</code>.</li>
 <li><a class="xref" href="TODO_prp.html#item-3g">3g</a> Memory-port tuple semantics + <code>pipestage</code> <code>lat</code>/<code>num</code>.</li>
-<li><a class="xref" href="TODO_prp.html#item-3j">3j</a> Pyrope Memory / <code>Fflop</code> / clock-reset end-to-end (incl. declare-folding of the init/reset value).</li>
+<li><a class="xref" href="TODO_prp.html#item-3j">3j</a> Pyrope <code>Memory</code> → LGraph <code>Memory</code> cell + multi-clock-domain checks (register <code>Flop</code>/reset + declare-folding landed via 2d-reg).</li>
 </ul></li>
 <li><em>Group 4:</em><ul>
 <li><a class="xref" href="TODO_prp.html#item-4i">4i</a> Golden-output baseline in <code>inou/prp/tests/equiv/</code>.</li>
@@ -122,8 +118,11 @@ N. Each badge links to the full entry. <strong>HHDS has no open goals.</strong><
 </ul>
 <h3 id="pending-verilog">Verilog — <a href="TODO_verilog.html">TODO_verilog.html</a></h3>
 <ul>
-<li><em>Group 2:</em><ul>
-<li><a class="xref" href="TODO_verilog.html#item-2d">2d</a> Finish the LNAST→LGraph synthesis closure — remaining: <code>Memory</code>, <code>.[defer]</code>/<code>past[n]</code>, high-level op lowering, <code>uif</code> chains, <code>Sub</code> submodule calls, attributes. (Register/<code>Flop</code> slice landed 2026-06-07 — <a class="xref" href="TODO_mod.html#item-2d-reg">2d-reg</a>.)</li>
+<li><em>Group 1:</em><ul>
+<li><a class="xref" href="TODO_verilog.html#item-1a">1a</a> Finish the LNAST→LGraph synthesis closure — split into:<ul>
+<li><a class="xref" href="TODO_verilog.html#item-1a-mem">1a-mem</a> Pyrope <code>Memory</code> → LGraph <code>Memory</code> cell lowering.</li>
+<li><a class="xref" href="TODO_verilog.html#item-1a-ops">1a-ops</a> Remaining op/cell mappings: <code>.[defer]</code>/<code>past[n]</code>→Flop, high-level ops, <code>uif</code> chains, <code>lg:</code> black-box Subs, attributes.</li>
+</ul></li>
 </ul></li>
 <li><em>Group 3:</em><ul>
 <li><a class="xref" href="TODO_verilog.html#item-3b">3b</a> Migrate <code>inou.slang</code> to the shared LNAST structures; keep adding Verilog equiv tests.</li>
@@ -140,16 +139,16 @@ N. Each badge links to the full entry. <strong>HHDS has no open goals.</strong><
 </ul></li>
 <li><em>Group 1-complex:</em><ul>
 <li><a class="xref" href="TODO_livehd.html#item-1f">1f</a> Source-map indirection (LOC propagation: canonical map, per-cell index, multi-loc aliases).</li>
-<li><a class="xref" href="TODO_livehd.html#item-1n">1n</a> Pyrope LSP server — Phases B–E (hover/nav/workspace) remain.</li>
 </ul></li>
 <li><em>Group 2:</em><ul>
-<li><a class="xref" href="TODO_livehd.html#item-2y-agent">2y-agent</a> <code>lhd</code> agent <code>@tag</code> workspace (<code>setup/run/status/list/describe</code>, TOML, JSONL) + the deferred kernel follow-ups (multi-<code>lg:</code> linker, per-function units, graphviz/lgraph-dump emits, import-resolver depfile, liberty/opentimer verb).</li>
+<li><a class="xref" href="TODO_livehd.html#item-2n">2n</a> Pyrope LSP server — Phases B–E (hover/nav/workspace) remain (moved from Group 1-complex).</li>
 </ul></li>
 <li><em>Group 3:</em><ul>
+<li><a class="xref" href="TODO_livehd.html#item-3y-agent">3y-agent</a> <code>lhd</code> agent <code>@tag</code> workspace (<code>setup/run/status/list/describe</code>, TOML, JSONL) + the deferred kernel follow-ups (multi-<code>lg:</code> linker, per-function units, graphviz/lgraph-dump emits, import-resolver depfile, liberty/opentimer verb).</li>
 <li><a class="xref" href="TODO_livehd.html#item-3c">3c</a> <code>Partition</code> descriptor as a tree-level HHDS attribute.</li>
 <li><a class="xref" href="TODO_livehd.html#item-3d">3d</a> New upass <code>lnast_to_slop</code> producing executable slop.</li>
-<li><a class="xref" href="TODO_livehd.html#item-3f">3f</a> Unified compile error/warning surface — remaining: full-fidelity spans, lgraph-pass coverage, CLI roll-up.</li>
-<li><a class="xref" href="TODO_livehd.html#item-3h">3h</a> <code>Bitwidth_range</code> → <code>Const min/max</code> (drop <code>int+overflow</code>).</li>
+<li><a class="xref" href="TODO_livehd.html#item-3f">3f</a> Unified compile error/warning surface — 1z foundation landed; remaining: source_id spans (blocked on 1f), lgraph-pass codes, CLI roll-up, golden tests.</li>
+<li><a class="xref" href="TODO_livehd.html#item-3h">3h</a> <code>Bitwidth_range</code> → <code>Const min/max</code> (drop <code>int+overflow</code>) — gate (Dlop migration) now satisfied, unblocked.</li>
 </ul></li>
 <li><em>Group 4:</em><ul>
 <li><a class="xref" href="TODO_livehd.html#item-4c">4c</a> Hot-probe injection at checkpoint replay (no recompile).</li>

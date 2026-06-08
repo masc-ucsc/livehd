@@ -196,11 +196,16 @@ protected:
   void unroll_while();
   // Re-walk ONE loop iteration. Precondition: the read cursor is on the loop's
   // body `stmts` node. Opens a fresh iteration scope (fresh salt + staging/pass
-  // block scope), emits the given pre-bindings (iter var = value) into it,
-  // re-walks the body's statements, then closes the scope and restores the
-  // cursor to the body `stmts` node. Returns false if the fuel/depth guard
-  // tripped (caller stops iterating).
-  bool walk_loop_iteration(const std::vector<std::pair<std::string, Const>>& binds);
+  // block scope), invokes `emit_binds` to bind the iteration variable(s) into
+  // it (a Const for a range, a `tuple_get` pick for a tuple), re-walks the
+  // body's statements, then closes the scope and restores the cursor to the
+  // body `stmts` node. Returns false if the fuel/depth guard tripped (caller
+  // stops iterating).
+  bool walk_loop_iteration(const std::function<void()>& emit_binds);
+  // Emit a per-iteration tuple pick `dst = src[index_text]` as a scratch
+  // tuple_get run through the walk (so try_resolve_tuple_get / constprop
+  // resolve it). index_text is the pyrope field literal ("0","1",… or "'name'").
+  void emit_inline_tuple_pick(const std::string& dst, const std::string& src, const std::string& index_text);
 
   // ── 1i comb-call inliner ────────────────────────────────────────────────
   // Called from process_lnast's func_call case. If the callee resolves to a
@@ -213,6 +218,63 @@ protected:
   // or call shapes 1i does not yet handle). The read cursor is left on the
   // func_call node on every path. See 1i in TODO_livehd.md.
   bool try_inline_func_call();
+
+  // Task 1p — var-arg access resolution. A `comb foo(...args)` call gathers its
+  // leftover actuals here, keyed by the FRAME-TAGGED var-arg name (e.g.
+  // "inl1_args"): positional leftovers under decimal keys "0","1",…, named
+  // leftovers under their names. The body's `args[i]` / `args.NAME` reads are a
+  // COMPTIME-structural pick (the index/identity is known at the call site even
+  // when the value is a runtime signal), so try_resolve_vararg_get rewrites
+  // each such `tuple_get` into a direct `dst = <actual>` copy during the body
+  // walk — avoiding a runtime tuple_add/tuple_get that tolg cannot lower.
+  // Entries are registered in the prologue and erased after the body walk.
+  absl::flat_hash_map<std::string, std::vector<std::pair<std::string, Lnast_node>>> vararg_bindings_;
+  // Called from process_lnast's tuple_get case. Returns true (and emits a copy
+  // `dst = <picked ref>`) iff the cursor's tuple_get is a single-segment pick
+  // with a comptime-known index/name resolving to a known runtime ref — from a
+  // gathered var-arg (vararg_bindings_) OR constprop's slot→ref map
+  // (try_tuple_slot_ref). False leaves the node to the normal fold/emit path
+  // (nested access, dynamic index, comptime slot, or unknown ref).
+  bool try_resolve_tuple_get();
+  // Source ref held at `slot` of tuple `name` (runtime-scalar slot). First pass
+  // that provides wins. See uPass::provide_tuple_slot_ref.
+  std::optional<std::string> try_tuple_slot_ref(std::string_view name, std::string_view slot);
+  // Ordered (slot-key, is_positional) shape of tuple `name` for the runner's
+  // tuple-for unroll. First pass that provides wins. See provide_tuple_shape.
+  std::optional<std::vector<std::pair<std::string, bool>>> try_tuple_shape(std::string_view name);
+
+  // ── Task 1p — pipe/mod/fluid template specialization ────────────────────
+  // Called from try_inline_func_call at the pipe/mod decline point when the
+  // resolved callee is a TEMPLATE (untyped boundary). Reads each untyped fixed
+  // port's concrete type from the actual's DECLARED type (decision 4: an
+  // untyped actual into such a port is a fatal call-site error), mints (or
+  // reuses) a concrete specialized module named `<callee>__<sig>`, appends it
+  // to new_lnasts (pass_upass re-SSAs + lowers it), and emits the call to the
+  // mangled name so tolg instantiates the Sub. Returns true (call emitted);
+  // a method (`ref self`) or var-arg boundary is left to the caller.
+  struct Spec_port {
+    bool                 inject = false;  // false = keep the template's own (already-typed) port
+    std::optional<Const> max;
+    std::optional<Const> min;
+    std::string          type_name;  // named type (takes precedence over max/min)
+  };
+  bool maybe_specialize_template_call(const std::shared_ptr<Lnast>& callee, const Lnast_tree_io& io,
+                                      const std::vector<Lnast_node>& param_val, const std::vector<bool>& param_set,
+                                      std::size_t nbind, bool has_vararg, const std::string& dst_name,
+                                      const std::string& callee_name, const livehd::diag::Span& call_span);
+  // Deep-copy `tmpl` verbatim into a fresh (TreeIO-backed) Lnast named
+  // `mangled`, then inject a concrete prim_type_int / named-type child into
+  // each untyped fixed input port per `inject`. Clears the template flag and
+  // copies the lambda kind. pass_upass re-SSAs the result.
+  std::shared_ptr<Lnast> clone_template_specialized(const std::shared_ptr<Lnast>& tmpl, const std::string& mangled,
+                                                    const std::vector<Spec_port>& inject);
+  void copy_subtree_into(const std::shared_ptr<Lnast>& src, const Lnast_nid& src_nid, const std::shared_ptr<Lnast>& dst,
+                         const Lnast_nid& dst_parent);
+  void emit_specialized_call(const std::string& dst, const std::string& mangled, const std::vector<Lnast_node>& actuals);
+  // Specialized-module names this runner already minted this run (avoid
+  // re-cloning the same signature within one tree; cross-tree dedup is by name
+  // in pass_upass's queue drain).
+  absl::flat_hash_set<std::string> specialized_emitted_;
 
   // ── init constructor hook ───────────────────────────────────────────────
   // One named argument of a synthesized constructor call (positional when

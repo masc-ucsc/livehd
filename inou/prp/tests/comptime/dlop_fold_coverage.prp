@@ -1,0 +1,97 @@
+/*
+:name: dlop_fold_coverage
+:type: comptime
+:verifier_pass: 29
+:verifier_fail: 0
+*/
+
+// Goal 1c: single op-coverage constprop const-fold test.
+//
+// Chains every Dlop arithmetic / compare / bit op at least once, mixing
+// operand types (signed/unsigned integer, bool, string) and feeding each
+// result into the next so the whole program stays one const fold. The aim is
+// BREADTH (hit each op + each basic input option once), not exhaustive value
+// sweeps. The expected values are not guessed: they are produced by the hlop
+// Dlop oracle (../hlop, tests/oracle_1c.cpp) and pasted here, so constprop is
+// checked bit-exact against Dlop ("constprop must delegate to Dlop").
+
+// ---- arithmetic chain (decimal literals; mixes into a negative) ----
+mut a = 5 + 3            // add  -> 8
+a = a * 7                // mult -> 56
+a = a / 5               // div  -> 11
+a = a % 4               // mod  -> 3
+const a4 = a - 50        // sub  -> -47
+cassert(a == 3)
+cassert(a4 == -47)
+
+// ---- shifts (chain off the arithmetic result; arithmetic sra on a negative) ----
+mut s = a << 8           // shl  -> 768
+s = s >> 2              // sra  -> 192
+const sn = a4 >> 1       // sra of negative -> -24
+cassert(s == 192)
+cassert(sn == -24)
+
+// ---- bitwise (hex literals; two's-complement, ~ yields a negative) ----
+mut b = 0xff & 0x3c      // and -> 0x3c (60)
+b = b | 0xc0            // or  -> 0xfc (252)
+b = b ^ 0x0f            // xor -> 0xf3 (243)
+const bn = ~b            // not -> -244
+cassert(b == 0xf3)
+cassert(bn == -244)
+
+// ---- bit-select / mask / extend (width-pinned u8) ----
+const v:u8 = 0ub1010_1100      // 0xac
+const lo = v#[0..=3]           // get_mask low nibble  -> 0xc (12)
+const hi = v#[4..=7]           // get_mask high nibble -> 0xa (10), compressed to LSB
+cassert(lo == 12 and hi == 10)
+
+mut w:u8 = 0
+w#[0..=3] = 0xe                // set_mask low nibble  -> 0x0e
+w#[4..=7] = 0x5                // set_mask high nibble -> 0x5e (94)
+cassert(w == 0x5e)
+
+const sx = v#sext[0..=3]       // sext: low nibble 1100, bit 3 is sign -> -4
+const zx = v#zext[4..=7]       // zext: high nibble, no sign -> 10
+cassert(sx == -4 and zx == 10)
+
+// ---- reductions over the 8 bits of v (boolean / count) ----
+const orr  = v#|[..]           // reduce-or  -> true
+const andr = v#&[..]           // reduce-and -> false
+const xorr = v#^[..]           // reduce-xor (parity, 4 ones) -> false
+const pc   = v#+[..]           // popcount -> 4
+cassert(orr == true)
+cassert(andr == false)
+cassert(xorr == false)
+cassert(pc == 4)
+
+// ---- get_mask / sra on NEGATIVE operands (the get_mask sign-gate path) ----
+const ng1 = (-1)#[0..=7]       // get_mask(-1, 0xff)  -> 255 (must not stay -1)
+const ng2 = bn#[0..=7]         // get_mask(-244, 0xff) -> 12
+const ng3 = (-1)#[0..=3]       // get_mask(-1, 0xf)   -> 15
+const ng4 = (-1024) >> 4       // sra of a negative   -> -64
+cassert(ng1 == 255)
+cassert(ng2 == 12)
+cassert(ng3 == 15)
+cassert(ng4 == -64)
+
+// ---- comparisons (mix signed/unsigned operands -> bool) ----
+cassert((a == 3) == true)      // eq
+cassert((bn != 0) == true)     // ne
+cassert((a4 < lo) == true)     // lt  (-47 < 12)
+cassert((lo <= hi) == false)   // le  (12 <= 10)
+cassert((pc > 3) == true)      // gt
+cassert((w >= 94) == true)     // ge
+
+// ---- compares on bool and string operands (type mixing) ----
+cassert(('abc' == 'abc') == true)    // eq on string
+cassert(('abc' != 'abd') == true)    // ne on string
+cassert((true == (a == 3)) == true)  // eq on bool
+
+// ---- select cells (the foldable mux paths) ----
+const m = match pc {                 // pc == 4
+  == 4 { 30 }
+  else { 99 }
+}
+cassert(m == 30)
+cassert(__mux(s=2, p1=10, p2=20, p3=30, p4=40) == 30)    // mux  (index select)
+cassert(__hotmux(s=0sb100, p1=10, p2=20, p3=30) == 30)   // hotmux (one-hot bit 2)

@@ -96,6 +96,15 @@ public:
   // bounds of a `range` tmp so the runner can iterate. nullopt when `name` is
   // not a recorded range.
   std::optional<std::pair<Const, Const>>                    provide_range(std::string_view name) override;
+  // Loop-migration (Step 1): the source ref held at `slot` of tuple `name`
+  // when that slot is a runtime scalar (so the runner can rewrite a comptime
+  // tuple pick into a copy). nullopt when not tracked.
+  std::optional<std::string>                                provide_tuple_slot_ref(std::string_view name,
+                                                                                   std::string_view slot) override;
+  // Loop-migration (Step 2): ordered (slot-key, is_positional) shape of a
+  // tuple, from its bundle's top-levels merged with any runtime-only slots
+  // (tuple_slot_ref_). Lets the runner unroll `for x in t` over the entries.
+  std::optional<std::vector<std::pair<std::string, bool>>>  provide_tuple_shape(std::string_view name) override;
   bool                                                      overrides_shared_st() const override { return true; }
 
   static void set_function_registry(const std::vector<std::shared_ptr<Lnast>>& lnasts);
@@ -148,6 +157,16 @@ protected:
   // index). process_tuple_get consults this map when the field operand is
   // a ref so it can fold string slicing like `x[1..]` and `x[1..=2]`.
   std::map<std::string, std::pair<Const, Const>> range_map;
+
+  // Loop-migration (Step 1): per tuple-valued name, the ref each slot holds
+  // when that slot is a RUNTIME scalar (no comptime value / sub-bundle, so the
+  // bundle itself can't remember it). Keyed by tuple name → slot key
+  // ("0","1",… positional, or the field name) → the source ref. Populated in
+  // process_tuple_add, propagated on a ref-alias assign, and exposed via
+  // provide_tuple_slot_ref so the runner can rewrite `t[i]` / `for x in t`
+  // into a direct copy `dst = ref` (a tuple_get with a comptime index is a
+  // comptime structural pick even when the picked VALUE is a runtime signal).
+  std::unordered_map<std::string, std::map<std::string, std::string>> tuple_slot_ref_;
 
   // Typename of variables that were declared with an explicit `:Type`
   // annotation (`attr_set var typename 'Type'` in the lnast). Used by the

@@ -62,6 +62,48 @@ bool uPass_func_extract::emit_io_tuple_from_decl(const std::shared_ptr<Lnast>& d
   return true;
 }
 
+void uPass_func_extract::stamp_template_if_untyped(const std::shared_ptr<Lnast>& dst) {
+  if (dst->has_generics()) {
+    dst->set_template(true);
+    return;
+  }
+  // io layout: top -> io(inputs_tuple_add, outputs_tuple_add), stmts.
+  auto root  = dst->get_root();
+  auto io_n  = dst->get_first_child(root);
+  if (io_n.is_invalid() || !Lnast_ntype::is_io(dst->get_type(io_n))) {
+    return;
+  }
+  auto in_tup = dst->get_first_child(io_n);
+  if (in_tup.is_invalid()) {
+    return;
+  }
+  for (auto entry : dst->children(in_tup)) {
+    if (!Lnast_ntype::is_store(dst->get_type(entry))) {
+      continue;
+    }
+    auto name_n = dst->get_first_child(entry);
+    if (name_n.is_invalid()) {
+      continue;
+    }
+    const auto nm = dst->get_name(name_n);
+    if (nm == "self" || nm == "__empty_tuple") {
+      continue;  // self derives its type from the enclosing tuple; not a port
+    }
+    auto def_n = dst->get_sibling_next(name_n);  // default-value / marker slot
+    // Var-arg param: the default slot carries the `...` sentinel.
+    if (!def_n.is_invalid() && Lnast_ntype::is_const(dst->get_type(def_n)) && dst->get_name(def_n) == "...") {
+      dst->set_template(true);
+      return;
+    }
+    // Untyped non-self input: the store has no type child (only ref + default).
+    auto type_n = def_n.is_invalid() ? def_n : dst->get_sibling_next(def_n);
+    if (type_n.is_invalid()) {
+      dst->set_template(true);
+      return;
+    }
+  }
+}
+
 void uPass_func_extract::process_stmts() { ++stmts_depth; }
 
 void uPass_func_extract::process_stmts_post() { --stmts_depth; }
@@ -445,14 +487,34 @@ void uPass_func_extract::process_func_def() {
   new_lnast->set_lambda_kind(func_kind);
   auto root_nid  = new_lnast->set_root(Lnast_ntype::create_top());
 
-  // Skip generics for this first comb-only extraction slice. The func_def
-  // shape after the captures-slot removal is:
+  // The func_def shape after the captures-slot removal is:
   //   func_def(name, kind, generics, inputs, outputs, stmts)
-  // so from `kind` we need two sibling steps to reach `inputs`.
+  // so from `kind` one sibling step reaches `generics`, a second reaches
+  // `inputs`. Task 1p — copy the generics names (`<T, U>`) onto the extracted
+  // Lnast (a seam for the deferred per-`T` substitution goal) so a generic
+  // signature is detected as a template below.
+  std::vector<std::string> generics;
+  if (move_to_sibling()) {  // kind -> generics
+    if (lm->has_child()) {
+      const auto saved_g = lm->save_cursor();
+      move_to_child();
+      do {
+        if (Lnast_ntype::is_ref(lm->current_type())) {
+          generics.emplace_back(lm->current_text());
+        }
+      } while (move_to_sibling());
+      lm->restore_cursor(saved_g);
+    }
+  }
+  new_lnast->set_generics(std::move(generics));
+
   // No signature => bare `top -> stmts` (no `io` child).
-  if (!move_to_sibling() || !move_to_sibling()) {
+  if (!move_to_sibling()) {  // generics -> inputs
     new_lnast->add_child(root_nid, Lnast_ntype::create_stmts());
     move_to_parent();
+    if (new_lnast->has_generics()) {
+      new_lnast->set_template(true);  // an unbound generic with no signature is still a template
+    }
     extracted_lnasts.emplace_back(std::move(new_lnast));
     return;
   }
@@ -545,6 +607,10 @@ void uPass_func_extract::process_func_def() {
     }
     copy_current_children(new_lnast, stmts);
   }
+
+  // Task 1p — a not-fully-typed signature (untyped non-self input, `...args`,
+  // or generic) becomes a deferred template: no LGraph at definition time.
+  stamp_template_if_untyped(new_lnast);
 
   move_to_parent();
   extracted_lnasts.emplace_back(std::move(new_lnast));

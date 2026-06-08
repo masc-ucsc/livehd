@@ -135,93 +135,11 @@ cross-file dependencies stay visible.</p>
   spurious body-less definition; (e) missing-graph diagnostic. Today
   <code>import("lg:g")</code> binds the url and a call fails cleanly at tolg.</li>
 </ul></li>
-<li>
-<p><strong id="item-1p" class="item-id">1p</strong> Deferred lambda templates: var-args + call-site
-  specialization — <strong>spec'd 2026-06-07</strong> (contract
-  <code>docs/contracts/task_1p_plan.md</code>). A not-fully-typed lambda — untyped
-  non-<code>self</code> input, a <code>(...args)</code> var-arg, or an unbound generic
-  <code>&lt;T&gt;</code> — becomes a <strong>template</strong>: kept as LNAST, lowered to
-  <strong>no LGraph</strong> at definition time; the concrete form is produced
-  <strong>per call site</strong>. This unifies the two existing paths: <code>comb</code>
-  templates <strong>inline</strong> (the 1i path, extended to bind <code>...args</code>),
-  <code>pipe</code>/<code>mod</code>/<code>fluid</code> templates <strong>specialize</strong> into a concrete
-  module per signature and instantiate as a <code>Sub</code> (1u-A). Removes the
-  <code>lambda-needs-types</code> definition-time error (<code>prp2lnast.cpp:4837</code>) so
-  var-args/generics work on a module boundary.</p>
-</li>
-<li><strong>Decisions (locked 2026-06-07):</strong><ul>
-<li><strong>Scope.</strong> This goal builds the deferred-template + call-site
-  specialization mechanism with <strong>var-args</strong> as the driving use case
-  (<code>comb</code> inline + <code>pipe</code>/<code>mod</code>/<code>fluid</code> specialize). Generics
-  <code>&lt;T&gt;</code> get a designed-for seam (markers + mangling reservation)
-  but per-<code>T</code> body substitution is a <strong>separate follow-up goal</strong>.</li>
-<li><strong>Naming = readable suffix.</strong> Specialized modules get a
-  human-readable suffix from the concrete arg types/shape, counter on
-  collision: <code>foo(u8)</code>→<code>foo__u8</code>, <code>foo(u16)</code>→<code>foo__u16</code>,
-  <code>add1(a,b,c:u8)</code>→<code>add1__3xu8</code>, generic <code>T=u22</code>→<code>add6__T_u22</code>,
-  collision→<code>foo__u8_1</code>. Same signature → same name → <strong>natural
-  dedup</strong> (one shared module, each call its own <code>Sub</code> instance).</li>
-<li><strong>No in-unit call site = template-only.</strong> A <code>pub</code> export or
-  top-level template never specialized in its own file stays a deferred LNAST
-  template and produces <strong>no LGraph</strong> — <strong>no error</strong>; it
-  materializes only when an importer/caller specializes it. The old
-  <code>lambda-needs-types</code> error is deleted.</li>
-<li><strong>Specialize early, keyed on the actual's DECLARED type.</strong>
-  <code>pipe</code>/<code>mod</code>/<code>fluid</code> specialization runs at the call site
-  during the runner walk (beside the 1i inliner), keyed on each actual's
-  declared type — no dependence on late width inference, no pipeline re-entry.
-  An <strong>untyped actual</strong> feeding an untyped/var-args boundary port is a
-  <strong>call-site error</strong> ("annotate the actual"). <code>comb</code> is
-  unaffected (always inlines). Inferred-width support, if ever wanted, layers
-  on as a deferred late-specialize pass.</li>
-</ul></li>
-<li><strong>Implementation phases:</strong><ul>
-<li><strong>A — Producer.</strong> Delete the <code>lambda-needs-types</code> error; encode
-  the <code>...</code> var-arg marker on the input io entry (mirror the
-  <code>ref</code>-as-RHS-const convention, no new ntype); populate the <code>func_def</code>
-  generics tuple from <code>&lt;...&gt;</code> (seam). Retire/repurpose
-  <code>tests/errors/{mod_untyped_io,pipe_untyped_io}.prp</code> (now legal
-  templates).</li>
-<li><strong>B — Template flag + extraction.</strong> Add durable in-memory
-  <code>template_</code> to <code>Lnast</code> (sibling to <code>lambda_kind_</code>,
-  <code>lnast.hpp:149</code>); func_extract stamps it when the signature is not
-  fully typed and copies generics + var-arg markers into the extracted
-  signature; tolg + a runner gate skip emitting an LGraph for a
-  <code>template</code> tree.</li>
-<li><strong>C — <code>comb</code> var-args inlining.</strong> Extend the 1i inliner to
-  gather leftover actuals into a synthesized <code>args</code> tuple (named →
-  fields, positional → indices: <code>foo(b=3,10)</code> ⇒ <code>args.b==3</code>,
-  <code>args[0]==10</code>) and resolve <code>args[i]</code> / <code>args.NAME</code> /
-  <code>for x in args</code>. Reuses the untyped-param inlining seam.</li>
-<li><strong>D — <code>pipe</code>/<code>mod</code>/<code>fluid</code> specialization.</strong> At each call
-  site clone+specialize+mangle the template, append it to <code>var.lnasts</code>
-  (the queue walk at <code>pass_upass.cpp:375</code>/<code>:415</code> already lowers
-  appended trees through the full pipeline), and rewrite the call's callee to
-  the mangled name so tolg's <code>lower_func_call</code> resolves the <code>Sub</code>.
-  Dedup by mangled name. Error <strong>at the call site</strong> only when a
-  template genuinely cannot be specialized (width depends on a runtime-only
-  value, not a comptime shape).</li>
-<li><strong>E — Docs + tests.</strong> Rewrite <code>06-functions.md</code> (drop "never
-  type-inferred from call sites" for templates; document specialization +
-  naming). LEC tests: <code>add1(...x)</code> var-args; <code>mod foo(a)</code>
-  specialized two ways → two <code>Sub</code> modules; dedup (two identical calls →
-  one module, two instances); error tests for unresolvable cases.</li>
-</ul></li>
-<li><strong>Deferred (follow-up, out of scope here):</strong> generics
+<li><strong>Deferred (follow-up, out of scope here, ex-1p):</strong> generics
   <code>&lt;T&gt;</code> binding/substitution (layers on phase D); the closure-capture
   companion is <strong>1x</strong> (the <strong>2j</strong> note). <code>fluid</code> has no
   LGraph lowering yet — the template rule applies the moment fluid lowering
   lands, no extra producer work.</li>
-<li>
-<p><strong id="item-1g" class="item-id">1g</strong> Type-aware <code>does</code> / <code>equals</code> / <code>case</code> —
-  <strong>LANDED 2026-06-07</strong> (phases A–E): int envelope-superset rule
-  (<code>a does b</code> ⇔ <code>a.max&gt;=b.max and a.min&lt;=b.min</code>), cross-kind
-  difference flag, bare type-name operands (<code>a does u32</code>),
-  literal-as-bundle, per-field types, <code>equals</code> = does-both-ways, typed
-  <code>case</code>. <code>does_test1.prp</code> raised <code>:verifier_pass:</code> 20→35;
-  new <code>does_test2.prp</code>; docs rewritten to the superset rule
-  (04-variables, 07b-structtype, 14b; <code>full_pyrope/file85</code>). prp suite 224/224.</p>
-</li>
 <li><strong>Deferred (future item, out of scope here):</strong> lambda <code>does</code> rules
   (<code>_:T_complex does _:T_simple</code>, <code>f.[inp] does args</code> —
   <code>full_pyrope/file259</code>), array <code>does</code>/variance (<code>_:[]x does _:[]y</code>,
@@ -238,7 +156,7 @@ cross-file dependencies stay visible.</p>
     in every temp name.</li>
 <li>
 <p>Cascades into golden-file updates (TODO_verilog.md
-    <a class="xref" href="TODO_verilog.html#item-2d">2d</a>); land before those goldens are taken.</p>
+    <a class="xref" href="TODO_verilog.html#item-1a">1a</a>); land before those goldens are taken.</p>
 </li>
 <li>
 <p><em>(ex-<strong>2o</strong> — folded into <a class="xref" href="TODO_prp.html#item-1m">1m</a>, 2026-06-07.
@@ -248,72 +166,26 @@ cross-file dependencies stay visible.</p>
   import defers the <strong>whole file</strong> for an idempotent retry — no
   partial-resolution state ever reaches bundle pre-pass or SSA.)</em></p>
 </li>
-<li>
-<p><strong id="item-2n" class="item-id">2n</strong> <code>tree_ios</code> leaf ABI with <code>min</code>/<code>max</code> slots,
-  mimicking <code>GraphIO</code> for consistency — consumed by <code>tolg</code> Sub
-  instances (the 1u-A Pyrope-path Subs) and by import-bound
-  <code>mod</code>/<code>pipe</code>/non-inlined calls (<code>docs/contracts/task_1m_plan.md</code>).
-  Downstream upasses (func_extract, constprop) read leaf IO via the ABI
-  rather than poking into each LNAST.</p>
-</li>
-<li>
-<p>Reads from the typesystem (<code>upass/upass.md §2 Typesystem</code>):
-    <code>bits</code>/<code>min</code>/<code>max</code>/<code>sign</code> are what the ABI carries.</p>
-</li>
-<li>
-<p><strong id="item-2j" class="item-id">2j</strong> Function-scope closure-capture rule, <strong>import-aware case</strong>.
-  Companion to Group 1 <span class="xref xref-note" title="note: 1x">1x</span> which handles the no-import portion.
-  Under the 1m whole-file-retry model, func_extract never sees an
-  unresolved import (the file defers first), so the remaining work is
-  the capture rule itself: a nested function referencing an
-  outer-scope name bound to an imported read-only tuple captures it
-  like any const capture (value snapshot at extraction). Depends on
-  <a class="xref" href="TODO_prp.html#item-1m">1m</a> (import).</p>
-</li>
 </ul>
 <h2 id="group-3-depends-on-group-2">Group 3 — depends on Group 2</h2>
 <ul>
 <li>
-<p><strong id="item-3k" class="item-id">3k</strong> Automate doc-example ingestion: <code>extract.rb</code> (or equivalent)
-  pulling <code>cassert</code> examples from <code>docs/docs/pyrope</code> into
-  <code>inou/prp/tests/docs/</code>, with CI iteration until they pass. Most have
-  been imported manually already; this entry is the remaining
-  automation + ongoing sync, not urgent.</p>
-</li>
-<li>
 <p><strong id="item-3g" class="item-id">3g</strong> Memory port tuple semantics + <code>pipestage</code> <code>lat</code>/<code>num</code> —
   <code>docs/contracts/attributes_spec.md §6</code>.</p>
 </li>
-<li><strong id="item-3j" class="item-id">3j</strong> Pyrope Memory / <code>Fflop</code> / clock-reset end-to-end: declaration
-  syntax, lowering to LGraph <code>Memory</code> cell, multi-clock-domain checks,
-  sync/async reset trees.</li>
-<li><strong>Declare-folding — bind the initial/reset value ON the <code>declare</code>.</strong> A
-    declaration with an initializer currently lowers to <code>declare(var, type,
-    mode)</code> <em>followed by a separate</em> <code>store(var, value)</code> (e.g. <code>mut c:u8 = nil</code>
-    → <code>declare(c, u8, mut)</code> then <code>store(c, nil)</code>; confirmed 2026-06-01). For a
-    register/flop this split loses the "this is the value bound <em>at
-    declaration</em>" relationship: a later same-name <code>store</code> is structurally
-    indistinguishable from the initializer, so the power-on / reset value
-    can't be reliably recovered when the <code>declare</code> lowers to <code>Fflop</code> / <code>Latch</code>
-    (and <code>prim_type_register</code>'s <code>reset_pin</code> needs exactly that value). Fold the
-    initializer into the optional 4th <code>[value]</code> child of <code>declare</code> — the slot
-    already sketched in the landed <code>declare( var, &lt;type&gt;, const(mode), [value] )</code>
-    — so the init rides on the declare node and only genuine <em>re-assignments</em>
-    emit a trailing <code>store</code>. Producer: <code>rewrite_decls_to_declare</code> /
-    <code>process_lvalue_for_assign</code> in <code>inou/prp/prp2lnast.cpp</code> (the decl-cluster
-    merge already has both the <code>declare</code> and its value <code>store</code> in hand);
-    consumers <code>process_declare</code> in <code>upass/attributes</code> + <code>upass/bitwidth</code> and
-    the lnastfmt declare-shape validator must accept the 4th child. (Context:
-    the <code>assign-retype</code> guard landed 2026-06-01 already establishes that a type
-    cast may ride only a <code>declare</code> or a <code>wrap</code>/<code>sat</code> write — see
-    <code>inou/prp/tests/errors/assign_retype.prp</code>.)</li>
+<li><strong id="item-3j" class="item-id">3j</strong> Pyrope <code>Memory</code> declaration → LGraph <code>Memory</code> cell
+  lowering + multi-clock-domain checks. (Register <code>Fflop</code>/clock + sync/async
+  reset trees <em>and</em> init/reset-value folding on the <code>declare</code> node both
+  LANDED 2026-06-07 via <a class="xref" href="TODO_mod.html#item-2d-reg">2d-reg</a>;
+  companion memory-port tuple semantics in
+  <a class="xref" href="TODO_prp.html#item-3g">3g</a>.)</li>
 </ul>
 <h2 id="group-4-depends-on-group-3">Group 4 — depends on Group 3</h2>
 <ul>
 <li>
 <p><strong id="item-4i" class="item-id">4i</strong> Golden-output baseline in <code>inou/prp/tests/equiv/</code>: feature-broad
   equiv tests with LNAST/LGraph golden dumps so semantic regressions
-  surface as diffs. Depends on TODO_verilog.md <a class="xref" href="TODO_verilog.html#item-2d">2d</a>
+  surface as diffs. Depends on TODO_verilog.md <a class="xref" href="TODO_verilog.html#item-1a">1a</a>
   (<code>lnast_to_lgraph</code> finished + Verilog round-trip), since these are
   equiv tests for the lnast→lgraph path, not compile-time-constant
   checks. Each failing-comptime-test category (enums, bits, wrap/sat,

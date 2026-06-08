@@ -2389,6 +2389,13 @@ void uPass_tolg::register_io(const std::shared_ptr<Lnast>& lnast, std::string_vi
   if (!lnast || lnast->io_meta().empty()) {
     return;  // not a lowerable module (e.g. the empty file-root tree)
   }
+  // Task 1p — a deferred template (untyped/var-args/generic signature) emits no
+  // LGraph: it is realized per call site (comb inlines, pipe/mod/fluid
+  // specialize into a concrete clone). Never reserve a GraphIO for it, or a
+  // call site could mis-bind to a port-less interface.
+  if (lnast->is_template()) {
+    return;
+  }
   (void)setup_io_impl(lnast, lib_path, registry);
 }
 
@@ -2396,6 +2403,12 @@ std::shared_ptr<hhds::Graph> uPass_tolg::run(const std::shared_ptr<Lnast>& lnast
                                              const Registry& registry, std::string_view reset_style) {
   if (!lnast || lnast->io_meta().empty()) {
     return nullptr;  // not a lowerable module (e.g. the empty file-root tree)
+  }
+  // Task 1p — a deferred template produces no LGraph (see register_io). A
+  // template selected as a synthesis top simply yields no module; it is never
+  // a hard error at definition time (contract decision 3).
+  if (lnast->is_template()) {
+    return nullptr;
   }
 
   auto io_setup = setup_io_impl(lnast, lib_path, registry);

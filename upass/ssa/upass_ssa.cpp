@@ -276,6 +276,13 @@ void uPass_ssa::run(const std::shared_ptr<Lnast>& lnast) {
         && lnast->get_name(rhs_nid) == "ref") {
       is_ref = true;
     }
+    // Task 1p — var-arg param: the default-value slot carries the `...`
+    // sentinel (mirrors the `ref` marker above). Only meaningful on an input.
+    bool is_vararg = false;
+    if (collect_is_ref && !rhs_nid.is_invalid() && Lnast_ntype::is_const(lnast->get_type(rhs_nid))
+        && lnast->get_name(rhs_nid) == "...") {
+      is_vararg = true;
+    }
     // Task 1k — a NAMED type annotation (`self:t1`, `x:Point`) arrives as a
     // `ref` type child (prp2lnast emit_type_expr). Record the typename so the
     // inliner's typed-self does-check can resolve the declared fields.
@@ -284,7 +291,7 @@ void uPass_ssa::run(const std::shared_ptr<Lnast>& lnast) {
       type_name = std::string(lnast->get_name(type_nid));
     }
     auto ti = type_info_from(lnast, type_nid);
-    out.push_back({full, ti.bits, ti.is_signed, is_ref, ti.kind, smin, smax, std::move(type_name)});
+    out.push_back({full, ti.bits, ti.is_signed, is_ref, is_vararg, ti.kind, smin, smax, std::move(type_name)});
   };
 
   if (!in_tup_nid.is_invalid()) {
@@ -313,7 +320,7 @@ void uPass_ssa::run(const std::shared_ptr<Lnast>& lnast) {
     for (const auto& f : fields) {
       auto a = staging->add_child(tup, Lnast_ntype::create_store());
       staging->add_child(a, Lnast_node::create_ref(f.name));
-      staging->add_child(a, Lnast_node::create_const(is_input && f.is_ref ? "ref" : "nil"));
+      staging->add_child(a, Lnast_node::create_const(is_input && f.is_varargs ? "..." : is_input && f.is_ref ? "ref" : "nil"));
       if (f.bits > 0) {
         // Task 1t — re-emit the canonical prim_type_int(max,min) from the
         // flat field's (bits, signed).

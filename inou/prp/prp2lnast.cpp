@@ -3350,8 +3350,43 @@ void Prp2lnast::process_lambda_statement_named(TSNode n, std::string_view hoist_
   auto fd_idx = builder.add_child(Lnast_ntype::create_func_def());
   lnast->add_child(fd_idx, lambda_ref);
   lnast->add_child(fd_idx, Lnast_node::create_const(kind));
-  // generics tuple (empty when absent)
-  lnast->add_child(fd_idx, Lnast_ntype::create_tuple_add());
+  // generics tuple (Task 1p seam): each `<T, U>` name becomes a `ref` child of
+  // this tuple_add. Empty when absent. func_extract copies these onto the
+  // extracted Lnast (Lnast::generics_) so a generic signature is detected as a
+  // template; the per-`T` body substitution is a deferred follow-up goal.
+  // grammar.js: `function_definition_decl` carries the names under the
+  // `generic` field as a `typed_identifier_list` between `<` and `>`.
+  auto gen_idx = lnast->add_child(fd_idx, Lnast_ntype::create_tuple_add());
+  if (!ts_node_is_null(fdef)) {
+    uint32_t fcount = child_count(fdef);
+    for (uint32_t i = 0; i < fcount; i++) {
+      TSNode      ci = child(fdef, i);
+      const char* fn = ts_node_field_name_for_child(fdef, i);
+      if (!fn || std::string_view(fn) != "generic") {
+        continue;
+      }
+      std::string_view ct(ts_node_type(ci));
+      auto             add_one = [&](TSNode ti) {
+        TSNode id = child_by_field(ti, "identifier");
+        if (!ts_node_is_null(id)) {
+          lnast->add_child(gen_idx, Lnast_node::create_ref(get_text(id)));
+        }
+      };
+      if (ct == "typed_identifier_list") {
+        uint32_t gc = ts_node_named_child_count(ci);
+        for (uint32_t k = 0; k < gc; k++) {
+          TSNode item = ts_node_named_child(ci, k);
+          if (std::string_view(ts_node_type(item)) == "typed_identifier") {
+            add_one(item);
+          }
+        }
+      } else if (ct == "typed_identifier") {
+        add_one(ci);
+      } else if (ct == "identifier") {
+        lnast->add_child(gen_idx, Lnast_node::create_ref(get_text(ci)));
+      }
+    }
+  }
 
   // Emit input args. The grammar tags `ref`/`reg`/`...` prefixes on each arg
   // via the `mod` field and `= expr` defaults via the `definition` field;
@@ -3372,13 +3407,15 @@ void Prp2lnast::process_lambda_statement_named(TSNode n, std::string_view hoist_
                                              bool                      is_io_output) {
     TSNode pending_typed{};
     TSNode pending_def{};
-    bool   pending_is_ref = false;
-    bool   pending_is_reg = false;
-    bool   next_is_ref    = false;
-    bool   next_is_reg    = false;
-    auto   flush          = [&]() {
+    bool   pending_is_ref    = false;
+    bool   pending_is_reg    = false;
+    bool   pending_is_vararg = false;
+    bool   next_is_ref       = false;
+    bool   next_is_reg       = false;
+    bool   next_is_vararg    = false;
+    auto   flush             = [&]() {
       if (!ts_node_is_null(pending_typed)) {
-        emit_arg_assign(parent_tup, pending_typed, pending_def, pending_is_ref, attrs_out, kind, is_io_output);
+        emit_arg_assign(parent_tup, pending_typed, pending_def, pending_is_ref, attrs_out, kind, is_io_output, pending_is_vararg);
         TSNode id = child_by_field(pending_typed, "identifier");
         if (!ts_node_is_null(id)) {
           // Earlier params are readable by LATER params' default values
@@ -3403,10 +3440,11 @@ void Prp2lnast::process_lambda_statement_named(TSNode n, std::string_view hoist_
           }
         }
       }
-      pending_typed  = TSNode{};
-      pending_def    = TSNode{};
-      pending_is_ref = false;
-      pending_is_reg = false;
+      pending_typed     = TSNode{};
+      pending_def       = TSNode{};
+      pending_is_ref    = false;
+      pending_is_reg    = false;
+      pending_is_vararg = false;
     };
     uint32_t nc = child_count(container);
     for (uint32_t i = 0; i < nc; i++) {
@@ -3414,17 +3452,21 @@ void Prp2lnast::process_lambda_statement_named(TSNode n, std::string_view hoist_
       const char*      fname = ts_node_field_name_for_child(container, i);
       std::string_view ct(ts_node_type(ci));
       if (fname && std::string_view(fname) == "mod") {
-        next_is_ref = (ct == "ref");
-        next_is_reg = (ct == "reg");
+        // grammar arg_list `mod` field: choice('...', 'ref', 'reg').
+        next_is_ref    = (ct == "ref");
+        next_is_reg    = (ct == "reg");
+        next_is_vararg = (ct == "...");  // Task 1p var-args param
         continue;
       }
       if (ct == "typed_identifier") {
         flush();
-        pending_typed  = ci;
-        pending_is_ref = next_is_ref;
-        pending_is_reg = next_is_reg;
-        next_is_ref    = false;
-        next_is_reg    = false;
+        pending_typed     = ci;
+        pending_is_ref    = next_is_ref;
+        pending_is_reg    = next_is_reg;
+        pending_is_vararg = next_is_vararg;
+        next_is_ref       = false;
+        next_is_reg       = false;
+        next_is_vararg    = false;
         continue;
       }
       if (fname && std::string_view(fname) == "definition") {
@@ -5158,7 +5200,8 @@ void Prp2lnast::reject_common_mistakes_attr_name(TSNode node, std::string_view n
 }
 
 void Prp2lnast::emit_arg_assign(const Lnast_nid& tuple_parent, TSNode typed_ident, TSNode definition_or_null, bool is_ref_mod,
-                                std::vector<Param_attr>* attrs_out, std::string_view lambda_kind, bool is_io_output) {
+                                std::vector<Param_attr>* attrs_out, std::string_view lambda_kind, bool is_io_output,
+                                bool is_vararg_mod) {
   TSNode id = child_by_field(typed_ident, "identifier");
   if (ts_node_is_null(id)) {
     return;
@@ -5166,13 +5209,20 @@ void Prp2lnast::emit_arg_assign(const Lnast_nid& tuple_parent, TSNode typed_iden
   auto aidx = lnast->add_child(tuple_parent, Lnast_ntype::create_store());
   lnast->add_child(aidx, Lnast_node::create_ref(get_text(id)));
   // Default-value slot. Encoding choice for the absent case:
+  //   `...` mod          -> const "..."  (Task 1p var-args marker)
   //   `ref` mod          -> const "ref"  (write-back marker for the inliner)
-  //   no default, no ref -> const "nil"
+  //   no default, no mod -> const "nil"
   //   explicit default   -> expr_to_node(definition)
   // expr_to_node may emit tmp statements; for literal defaults (the common
-  // case) it returns a const node and has no side effect.
-  Lnast_node arg_val = !ts_node_is_null(definition_or_null) ? expr_to_node(definition_or_null)
-                                                            : Lnast_node::create_const(is_ref_mod ? "ref" : "nil");
+  // case) it returns a const node and has no side effect. `...`/`ref`/`reg`
+  // are mutually exclusive in the grammar's `mod` field, so the markers never
+  // collide. A var-arg never carries a default — the `...` marker WINS over any
+  // (meaningless) `= expr` so downstream var-arg detection (which keys on the
+  // sentinel) is never silently lost if the grammar admits `...args = e`.
+  Lnast_node arg_val = is_vararg_mod                          ? Lnast_node::create_const("...")
+                       : !ts_node_is_null(definition_or_null) ? expr_to_node(definition_or_null)
+                       : is_ref_mod                           ? Lnast_node::create_const("ref")
+                                                              : Lnast_node::create_const("nil");
   lnast->add_child(aidx, arg_val);
   // Optional type subtree (3rd child).
   TSNode type_cast = child_by_field(typed_ident, "type");
@@ -5252,7 +5302,6 @@ void Prp2lnast::emit_arg_assign(const Lnast_nid& tuple_parent, TSNode typed_iden
     }
     const bool is_mod   = lambda_kind == "mod";
     const bool is_pipe  = lambda_kind == "pipe";
-    const bool has_type = !ts_node_is_null(type_cast) && !ts_node_is_null(child_by_field(type_cast, "type"));
 
     if (!ts_node_is_null(timing) && !is_io_output) {
       report_error(timing,
@@ -5270,17 +5319,13 @@ void Prp2lnast::emit_arg_assign(const Lnast_nid& tuple_parent, TSNode typed_iden
           is_pipe ? "a pipe's uniform latency is declared on the keyword (`pipe[N]`); drop the `@[...]`"
                   : "drop the `@[...]` (these outputs land at cycle 0 by definition)");
     }
-    if ((is_mod || is_pipe) && !has_type && arg_name != "self") {
-      report_error(id,
-                   "lambda-needs-types",
-                   "type",
-                   std::format("{} {} '{}' has no explicit type: `pipe` and `mod` are module boundaries and are never "
-                               "type-inferred from call sites",
-                               lambda_kind,
-                               is_io_output ? "output" : "input",
-                               arg_name),
-                   "declare an explicit type, e.g. `name:u8`");
-    }
+    // Task 1p — an untyped non-`self` `pipe`/`mod` input/output is no longer a
+    // definition-time error: the lambda becomes a deferred TEMPLATE (no LGraph
+    // until a call site supplies the concrete types). func_extract stamps the
+    // template flag; the specializer mints a concrete module per call signature
+    // (an untyped *actual* into such a port is the call-site error instead).
+    // The deleted check was `(is_mod || is_pipe) && !has_type && arg_name !=
+    // "self"` → "lambda-needs-types".
     if (is_mod && is_io_output) {
       if (ts_node_is_null(timing)) {
         report_error(

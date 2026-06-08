@@ -127,40 +127,12 @@ listed above — they are no longer repeated here.</p>
 
 <h2 id="pending">Pending work</h2>
 <ul>
-<li><strong id="item-2d-reg" class="item-id">2d-reg</strong> <strong>LANDED
-  2026-06-07 — the register slice of
-  <a class="xref" href="TODO_verilog.html#item-2d">2d</a></strong>
-  (suite 254/254 incl. 9 new LEC equiv pairs + 5 timing/legality error tests;
-  Memory/op-lowering/uif/runtime-wrap stay later slices).
-  <em>Landed:</em> reg-init folded onto the <code>declare</code>'s 4th
-  <code>[value]</code> child (3j slice, reg-mode only); SSA + constprop +
-  timecheck no longer version/fold/bind reg-declared names (reads are runtime
-  q reads, stores are next-state din writes); tolg state-reg lowering
-  (per-reg shadow din/enable keys → last-write-wins din + OR-of-conditions
-  enable via the branch-mux machinery, q bound from the declared type);
-  implicit <code>reset</code> minted from a non-nil init (bind-before-mint
-  over reset/rst/reset_n/rst_n, transitive callee forwarding), with
-  <code>upass.reset_style=sync|async</code> flag (default sync) and per-reg
-  <code>:[sync=…, reset_pin=…, negreset, initial=N]</code> overrides
-  (reset_pin=false + non-nil init = error); <code>reg foo = nil</code> = no
-  reset; <code>-&gt; (reg q:T@[N])</code> output registers (q is the output);
-  pipe upass skips the inserted output flop for a reg-as-output; cgen Flop
-  enable emission (<code>if (en) q &lt;= next</code>, no din=q hold mux);
-  Time_checker Tarjan-SCC state classification (state = SCC-member flop OR
-  driven-enable flop; σ(q)=σ(din) pinned, two-pass propagation), real
-  inserted-flop narrowing ((min−σ, max−σ); (0,0)→wire, bypassed+deleted),
-  state-reg-as-output home==declared−1 check; "a <code>comb</code> may not
-  declare a <code>reg</code>" enforced in prp2lnast. Fixed a runner constprop
-  defect (a runtime-rhs write inside an uncertain if-arm now invalidates the
-  lhs's stale comptime value — previously dropped the post-if read) and the
-  lgcheck reset auto-assert (was <code>-set in_reset 1</code> = reset pinned
-  high at every induction step → ANY two reset-bearing circuits matched
-  vacuously; now per-cycle <code>-set-at</code> for cycles 0/1 only).
-  <em>Deferred (unchanged):</em> runtime <code>wrap</code>/<code>sat</code>
-  LG lowering (still blocks <code>accum</code> and the doc-canonical add),
-  <code>.[defer]</code>/<code>past[n]</code>, multi-output callees,
-  <code>stage[]</code>/ranged stage picks, Memory/array regs.
-  </li>
+<li><strong id="item-2d-reg" class="item-id">2d-reg</strong> <strong>LANDED 2026-06-07</strong>
+  — the register slice of <a class="xref" href="TODO_verilog.html#item-1a">1a</a>:
+  <code>reg</code>→<code>Flop</code> lowering end-to-end (init-on-<code>declare</code>, implicit
+  reset minting + <code>upass.reset_style</code> flag, tolg state-reg din/enable, Time_checker
+  SCC state classification; suite 254/254, 9 LEC pairs). Anchor kept for inbound
+  references; the still-pending mod slices are tracked below.</li>
 <li><strong>Remaining mod work (independent of the now-landed 2d-reg):</strong>
   <ul>
   <li>Runtime <code>wrap</code>/<code>sat</code> LG lowering (hard error at
@@ -173,8 +145,8 @@ listed above — they are no longer repeated here.</p>
   <li><code>lnast_to_slop</code> pipe/mod cell (seed-picked latency).</li>
   <li>io_meta nil ambiguity: <code>stages(nil,nil)</code> harvests as (0,0)
     in the int fields (<code>@[]</code> ≡ <code>@[0]</code> at the ABI; the
-    LNAST tree keeps the truth) — fold a tri-state into
-    <a class="xref" href="TODO_prp.html#item-2n">2n</a>.</li>
+    LNAST tree keeps the truth) — fold a tri-state into the
+    <code>io_meta()</code> stages slots.</li>
   <li><strong>P1 — comptime <code>mut</code>-tuple value tracking:</strong>
     <code>comptime_tuples_</code> (<code>prp2lnast.cpp</code> ~1958) only
     records tuples whose fields are const literals. Decl-time-known

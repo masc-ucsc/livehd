@@ -100,6 +100,14 @@ private:
 
   bool emit_io_tuple_from_decl(const std::shared_ptr<Lnast>& dst, const Lnast_nid& io_idx);
 
+  // Task 1p — stamp the deferred-template flag when the extracted signature is
+  // not fully typed: an untyped non-`self` input, a `...args` var-arg param
+  // (default-slot const "..."), or any generic. Walks the freshly-copied io
+  // `inputs` tuple_add directly (io_meta is not populated until the SSA upass
+  // runs, after this pass). A template emits no LGraph; the concrete form is
+  // produced per call site (comb inlines, pipe/mod/fluid specialize).
+  void stamp_template_if_untyped(const std::shared_ptr<Lnast>& dst);
+
   // Walks an extracted-function body and records every ref-text it reads.
   // Used to filter latest_outer_value down to just the names the comb body
   // actually consumes, so the inlined-capture prelude stays minimal.

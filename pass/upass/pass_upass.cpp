@@ -440,6 +440,25 @@ void Pass_upass::work(Eprp_var& var) {
     }
     auto new_lnasts = runner.take_new_lnasts();
     for (const auto& new_ln : new_lnasts) {
+      // Task 1p — a runner-spawned tree (a specialized pipe/mod/fluid template
+      // clone) is appended AFTER the pre-walk SSA loop, so SSA must run on it
+      // here to populate io_meta before the queue walk reaches it
+      // (typecheck/bitwidth/pipe/tolg all read io_meta). Dedup by module name:
+      // an identical signature minted from another call site (any tree) yields
+      // the same mangled name — keep the first, the call resolves to it.
+      bool already = false;
+      for (const auto& existing : var.lnasts) {
+        if (existing->get_top_module_name() == new_ln->get_top_module_name()) {
+          already = true;
+          break;
+        }
+      }
+      if (already) {
+        continue;
+      }
+      if (up.run_ssa) {
+        uPass_ssa::run(new_ln);
+      }
       var.add(new_ln);
     }
   }
@@ -451,6 +470,9 @@ void Pass_upass::work(Eprp_var& var) {
   // toln so the LSP pipeline gets the errors too. Whatever stays underived
   // lowers into the LG pending checks (1u-C).
   for (const auto& ln : var.lnasts) {
+    if (ln->is_template()) {
+      continue;  // Task 1p — a template has no concrete timing until specialized
+    }
     uPass_timecheck::run(ln, var.lnasts);
   }
 
@@ -463,6 +485,9 @@ void Pass_upass::work(Eprp_var& var) {
   // LSP) skips it along with everything else that shapes the output tree.
   if (up.run_toln) {
     for (const auto& ln : var.lnasts) {
+      if (ln->is_template()) {
+        continue;  // Task 1p — no output flop on a template; specialize first
+      }
       uPass_pipe::run(ln);
     }
   }

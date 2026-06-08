@@ -212,7 +212,10 @@ Group 1 entries; downstream Groups treat them as Group 1 dependencies.</p>
 <li><strong id="item-1f" class="item-id">1f</strong> Source-map indirection (LOC propagation: canonical map + per-cell
   index, alias multi-loc, partition-root fallback) — see "Source location
   (LOC) propagation strategy" below and <code>docs/contracts/sourcemap.md</code>.</li>
-<li><strong id="item-1n" class="item-id">1n</strong> Pyrope LSP server (<code>.prp</code> only — never Verilog): the <code>lhd lsp</code>
+</ul>
+<h2 id="group-2-depends-on-group-1">Group 2 — depends on Group 1</h2>
+<ul>
+<li><strong id="item-2n" class="item-id">2n</strong> Pyrope LSP server (<code>.prp</code> only — never Verilog): the <code>lhd lsp</code>
   subcommand over LiveHD's
   front-end (<code>prp2lnast</code> + <code>upass</code> typecheck/bitwidth + <code>core/diag</code> <span class="xref xref-note" title="note: 1z">1z</span>).
   <strong>Primary consumer Claude Code's <code>LSP</code> tool</strong> — implement its exact op subset
@@ -222,12 +225,12 @@ Group 1 entries; downstream Groups treat them as Group 1 dependencies.</p>
   server only</strong>; the tree-sitter grammar/neovim queries and the <code>prpfmt</code> formatter
   (incl. <code>textDocument/formatting</code>) are a separate project.
   Remaining: Phases B–E (hover/nav/workspace); spans sharpen with <a class="xref" href="TODO_livehd.html#item-1f">1f</a>/<a class="xref" href="TODO_livehd.html#item-3f">3f</a> —
-  <code>docs/contracts/pyrope_lsp.md</code>.</li>
+  <code>docs/contracts/pyrope_lsp.md</code>. <em>(moved from Group 1-complex to Group 2.)</em></li>
 </ul>
-<h2 id="group-2-depends-on-group-1">Group 2 — depends on Group 1</h2>
+<h2 id="group-3-depends-on-group-2">Group 3 — depends on Group 2</h2>
 <ul>
-<li><strong id="item-2y-agent" class="item-id">2y-agent</strong> <code>lhd</code> agent layer + kernel follow-ups
-  (renamed from 1y-agent; demoted from Group 1-complex — the <code>lhd</code>
+<li><strong id="item-3y-agent" class="item-id">3y-agent</strong> <code>lhd</code> agent layer + kernel follow-ups
+  (renamed from 1y-agent; moved Group 1-complex → 2 → now Group 3 — the <code>lhd</code>
   kernel already covers every test/build flow, so none of this is critical).
   <strong>Agent <code>@tag</code> workspace</strong>: <code>setup/run/status/list/describe</code>, <code>@tag</code>
   directories, persistent <code>lhd.toml</code> config, append-only JSONL run logs,
@@ -257,22 +260,28 @@ Group 1 entries; downstream Groups treat them as Group 1 dependencies.</p>
     an lhd verb (or recipe) to be revived.</li>
   </ul>
 </li>
-</ul>
-<h2 id="group-3-depends-on-group-2">Group 3 — depends on Group 2</h2>
-<ul>
 <li><strong id="item-3c" class="item-id">3c</strong> <code>Partition</code> descriptor as a tree-level HHDS attribute (<code>kind</code>,
   <code>latency_range</code>, ports, <code>ext</code>, <code>interface_hash</code>, <code>state_shape_hash</code>) —
   <code>docs/contracts/architecture.md §3</code>.</li>
 <li><strong id="item-3d" class="item-id">3d</strong> New upass <code>lnast_to_slop</code> (parallel to <code>lnast_to_lgraph</code>) producing
   executable slop.</li>
 <li><strong id="item-3f" class="item-id">3f</strong> Unified compile error/warning surface from <code>inou/prp</code>, upass,
-  lgraph passes (+ tests for expected diagnostics). On top of the
-  <code>core/diag</code> foundation, this entry finishes full-fidelity <code>source_id</code> spans
-  (via <a class="xref" href="TODO_livehd.html#item-1f">1f</a>),
-  lgraph-pass coverage, line/col resolution, and the CLI roll-up. Design:
-  <code>docs/contracts/diagnostics.md</code>.</li>
-<li><strong id="item-3h" class="item-id">3h</strong> <code>Bitwidth_range</code> → <code>Const min/max</code> (drop <code>int+overflow</code>) once Dlop
-  migration is stable — see "Bitwidth_range" section below.</li>
+  lgraph passes (+ tests for expected diagnostics). The <code>core/diag</code> sink
+  (JSONL + human renderer), <code>inou/prp</code> line/col/byte spans, and the CLI sink
+  wiring landed (the <strong>1z</strong> foundation). Remaining: (a) full-fidelity
+  <code>source_id</code> spans + line/col resolution for the upass/lgraph paths
+  (<strong>blocked on <a class="xref" href="TODO_livehd.html#item-1f">1f</a></strong> — those sites still emit null spans);
+  (b) lgraph-pass coverage — only <code>pass/bitwidth</code> emits structured
+  <code>code</code>/<code>category</code> diagnostics, the other ~60 <code>Pass::error</code> sites are still
+  bare strings; (c) the CLI step-summary roll-up (diagnostics-file pointer);
+  (d) the golden-diagnostic test harness (<a class="xref" href="TODO_prp.html#item-4h">4h</a>).
+  Design: <code>docs/contracts/diagnostics.md</code>.</li>
+<li><strong id="item-3h" class="item-id">3h</strong> <code>Bitwidth_range</code> → <code>Const min/max</code> (drop <code>int+overflow</code>).
+  The gate (lconst→<code>Dlop</code> migration) is now <strong>satisfied</strong>
+  (<code>using Const = Dlop;</code> in <code>core/const.hpp</code>), so this is unblocked and
+  self-contained — <code>Bitwidth_range</code> lives only inside <code>pass/bitwidth</code>
+  (still built; used by upass/attributes, upass/bitwidth, lhd). See the
+  "Bitwidth_range" section below.</li>
 </ul>
 <h2 id="group-4-depends-on-group-3">Group 4 — depends on Group 3</h2>
 <ul>
@@ -452,8 +461,9 @@ benefits:</p>
 <li>One representation for the value, simpler invariants
   (<code>min &lt;= max</code> becomes a single <code>Dlop</code> comparison).</li>
 </ul>
-<p>Deferred until after the lconst-to-Dlop migration stabilizes so that the
-churn lands in one focused commit.</p>
+<p>The lconst-to-Dlop migration that gated this has stabilized
+(<code>using Const = Dlop;</code>), so the refactor is now unblocked; it should land
+as one focused commit confined to <code>pass/bitwidth</code>.</p>
 <h2 id="hhds-pinentrynodeentry-native-bits-sign-storage">HHDS PinEntry/NodeEntry: native bits + sign storage</h2>
 <p>LiveHD currently stores per-pin <code>bits</code> (Bits_t / 23-bit) and <code>sign</code> (1 bit)
 as HHDS attributes (<code>livehd::attrs::bits</code> / <code>livehd::attrs::sign</code>) — see

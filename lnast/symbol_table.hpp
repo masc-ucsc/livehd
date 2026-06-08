@@ -74,6 +74,17 @@ public:
     return false;
   }
 
+  // True when `var` is declared in an ENCLOSING scope (not the innermost
+  // active one) — i.e. writing it here mutates an outer variable from inside a
+  // nested block (`if true { acc = … }`, a loop iteration). Such a write is NOT
+  // SSA-versioned (block bodies are copied verbatim), so a RUNTIME-rhs write
+  // must invalidate the lhs's stale comptime value just like the uncertain-arm
+  // case — otherwise reads after the block fold to the pre-block constant.
+  [[nodiscard]] bool is_enclosing_scope_var(std::string_view var) const {
+    const auto* decl = find_decl_scope(var);
+    return decl != nullptr && !stack.empty() && decl != stack.back();
+  }
+
   bool var(std::string_view key);
 
   bool mut(std::string_view key, std::shared_ptr<Bundle> bundle);

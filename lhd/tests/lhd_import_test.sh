@@ -161,4 +161,40 @@ EOF
   || fail "dead-branch import must not error: $(cat "$W/r8.json" 2>/dev/null)"
 grep -q '"status":"pass"' "$W/r8.json" || fail "dead-branch result not pass: $(cat "$W/r8.json")"
 
-echo "PASS: pub/import flows (two-invocation, worst-order convergence, chain, cycle/missing/non-foldable errors, dead-branch liveness)"
+# ── 6. 2j: closure-capture of an imported read-only tuple ────────────────────
+# Nested and top-level combs reference outer-scope names bound to an imported
+# tuple. func_extract snapshots the import into each extracted body, so the
+# imported value-field / scalar reads fold INSIDE the extracted unit — the
+# import-aware half of the closure-capture rule (ex-TODO_prp entry 2j).
+cat > "$W/caplib.prp" <<'EOF'
+pub const cfg = (gain=3, offset=5)
+pub const k = 100
+EOF
+cat > "$W/capuse.prp" <<'EOF'
+const lib = import("caplib")
+comb outer(x:u8) -> (r:u12) {                       // NESTED comb captures lib
+  comb inner(y:u8) -> (r2:u12) { r2 = y * lib.cfg.gain + lib.cfg.offset }
+  r = inner(y=x)
+}
+comb apply(x:u8) -> (r:u12) { r = x * lib.cfg.gain + lib.cfg.offset }  // tuple value
+comb addk(x:u8)  -> (r:u9)  { r = x + lib.k }                          // scalar const
+cassert(outer(x=10) == 35)
+cassert(apply(x=2)  == 11)
+cassert(addk(x=5)   == 105)
+EOF
+# same-invocation, worst order (importer first → capture resolves after a retry)
+"$LHD" compile "$W/capuse.prp" "$W/caplib.prp" \
+  --set upass.verifier=true --set upass.verifier_pass=3 --set upass.verifier_fail=0 \
+  --workdir "$W/w10" -q --result-json "$W/r10.json" \
+  || fail "2j capture (same-invocation) failed: $(cat "$W/r10.json" 2>/dev/null)"
+grep -q '"status":"pass"' "$W/r10.json" || fail "2j capture same-invocation not pass: $(cat "$W/r10.json")"
+# two-invocation: capture an imported tuple from a pre-elaborated ln: dir
+"$LHD" elaborate "$W/caplib.prp" --emit-dir ln:"$W/caplib_ln/" --workdir "$W/w11" -q \
+  || fail "2j capture exporter elaborate failed"
+"$LHD" compile "$W/capuse.prp" ln:"$W/caplib_ln" \
+  --set upass.verifier=true --set upass.verifier_pass=3 --set upass.verifier_fail=0 \
+  --workdir "$W/w12" -q --result-json "$W/r12.json" \
+  || fail "2j capture (two-invocation) failed: $(cat "$W/r12.json" 2>/dev/null)"
+grep -q '"status":"pass"' "$W/r12.json" || fail "2j capture two-invocation not pass: $(cat "$W/r12.json")"
+
+echo "PASS: pub/import flows (two-invocation, worst-order convergence, chain, cycle/missing/non-foldable errors, dead-branch liveness, 2j closure-capture of imported tuple)"

@@ -408,6 +408,24 @@ std::optional<std::pair<Const, Const>> uPass_runner::try_range(std::string_view 
   return std::nullopt;
 }
 
+std::optional<std::string> uPass_runner::try_tuple_slot_ref(std::string_view name, std::string_view slot) {
+  for (auto* p : shared_st_passes_) {
+    if (auto r = p->provide_tuple_slot_ref(name, slot)) {
+      return r;
+    }
+  }
+  return std::nullopt;
+}
+
+std::optional<std::vector<std::pair<std::string, bool>>> uPass_runner::try_tuple_shape(std::string_view name) {
+  for (auto* p : shared_st_passes_) {
+    if (auto s = p->provide_tuple_shape(name)) {
+      return s;
+    }
+  }
+  return std::nullopt;
+}
+
 std::optional<upass::uPass::Field_decl_type> uPass_runner::try_field_type(std::string_view name) {
   for (auto* p : shared_st_passes_) {
     if (auto ft = p->provide_field_type(name)) {
@@ -1422,16 +1440,25 @@ bool uPass_runner::try_inline_func_call() {
 
   // ── Match actuals → params (positional + named) ──────────────────────────
   const std::size_t        nparams = io.inputs.size();
+  // Task 1p — a trailing `...args` var-arg param (always the LAST input)
+  // gathers every actual not consumed by a fixed leading param into one
+  // synthesized tuple: positional leftovers become positional entries
+  // (`args[i]`), named leftovers become named fields (`args.NAME`). Fixed
+  // params bind by the normal rules below; only the leftovers go to the tuple.
+  const bool        has_vararg = nparams > 0 && io.inputs[nparams - 1].is_varargs;
+  const std::size_t nbind      = has_vararg ? nparams - 1 : nparams;  // bindable fixed params (vararg excluded)
+  std::vector<Lnast_node>                         vararg_pos;         // positional leftovers, in call order
+  std::vector<std::pair<std::string, Lnast_node>> vararg_named;       // named leftovers
   std::vector<Lnast_node>  param_val(nparams, Lnast_node::create_invalid());
   std::vector<bool>        param_set(nparams, false);
   std::vector<std::string> param_func(nparams);  // non-empty: function-valued param
   auto                     param_index = [&](std::string_view k) -> std::size_t {
-    for (std::size_t i = 0; i < nparams; ++i) {
+    for (std::size_t i = 0; i < nbind; ++i) {  // never match the var-arg slot by name
       if (io.inputs[i].name == k) {
         return i;
       }
     }
-    return nparams;
+    return nbind;
   };
   // 06-functions.md §"Argument naming": every input must be named at the call
   // site. Unnamed (positional) actuals are allowed only under narrow exceptions:
@@ -1443,8 +1470,8 @@ bool uPass_runner::try_inline_func_call() {
   // `self` (io.inputs[0] for a method) is always bound positionally by the UFCS
   // receiver and is never named; pass-by-ref actuals (`f(ref x)`) are positional
   // by design.
-  const bool        has_self       = nparams > 0 && io.inputs[0].name == "self";
-  const std::size_t n_named_params = nparams - (has_self ? 1 : 0);
+  const bool        has_self       = nbind > 0 && io.inputs[0].name == "self";
+  const std::size_t n_named_params = nbind - (has_self ? 1 : 0);  // fixed, non-self (var-arg excluded)
   // Classify a positional actual's scalar kind for exception (3). Const literals
   // carry their kind verbatim; a typed `ref` whose declared range is known is an
   // integer. Anything else is `none` (can't drive type-based disambiguation).
@@ -1479,7 +1506,13 @@ bool uPass_runner::try_inline_func_call() {
                        "self is bound positionally by the UFCS receiver (`value.method(...)`)");
       }
       const auto idx = param_index(a.key);
-      if (idx >= nparams) {
+      if (idx >= nbind) {
+        // Task 1p — a named actual that matches no fixed param is a named
+        // leftover gathered into the var-arg tuple (`args.NAME`).
+        if (has_vararg) {
+          vararg_named.emplace_back(a.key, a.node);
+          continue;
+        }
         // A bundle-typed param is flattened in io_meta to dotted leaves
         // (`ar` → `ar.x`, `ar.y`). A bundle-literal actual `ar=(x=2,y=11)`
         // arrives under the un-flattened key `ar`; expand it into the leaf
@@ -1491,7 +1524,7 @@ bool uPass_runner::try_inline_func_call() {
             for (const auto& [fld, val] : *bf) {
               const auto leaf = a.key + "." + fld;
               const auto lidx = param_index(leaf);
-              if (lidx >= nparams || val.is_invalid()) {
+              if (lidx >= nbind || val.is_invalid()) {
                 expanded = false;
                 break;
               }
@@ -1525,19 +1558,23 @@ bool uPass_runner::try_inline_func_call() {
         param_func[i] = a.func_name;
       };
       const auto next_unset = [&](std::size_t from) -> std::size_t {
-        for (std::size_t i = from; i < nparams; ++i) {
+        for (std::size_t i = from; i < nbind; ++i) {
           if (!param_set[i]) {
             return i;
           }
         }
-        return nparams;
+        return nbind;
       };
       // Pass-by-ref (`f(ref x)`) binds positionally by design — exempt from the
       // naming rules — and so does the UFCS receiver bound to `self` (the first
       // positional actual when the callee declares self).
       if (a.is_ref_pass) {
         const auto slot = next_unset(0);
-        if (slot >= nparams) {
+        if (slot >= nbind) {
+          if (has_vararg) {
+            vararg_pos.push_back(a.node);
+            continue;
+          }
           fcall_arg_fail(call_span,
                          "fcall-too-many-args",
                          std::format("too many positional arguments in call to `{}`", callee_name),
@@ -1548,6 +1585,19 @@ bool uPass_runner::try_inline_func_call() {
       }
       if (has_self && !param_set[0]) {
         bind(0);  // self ← UFCS receiver
+        continue;
+      }
+      // Task 1p — with a var-arg param, fixed leading params bind positionally
+      // in declaration order; every actual past them is a positional leftover
+      // gathered into the var-arg tuple (`args[i]`). The naming-disambiguation
+      // exceptions below are for fully-fixed signatures and are skipped here.
+      if (has_vararg) {
+        const auto slot = next_unset(has_self ? 1 : 0);
+        if (slot < nbind) {
+          bind(slot);
+        } else {
+          vararg_pos.push_back(a.node);
+        }
         continue;
       }
       // Constructor call (synthesized — no user-written call site to hold to
@@ -1623,6 +1673,23 @@ bool uPass_runner::try_inline_func_call() {
   // and BEFORE the binding/splice — so a pipe/mod call site is held to the same
   // naming rule as a comb, then routed to its own lowering path.
 
+  // Task 1p — a pipe/mod/fluid TEMPLATE (untyped boundary) is realized per call
+  // site as a concrete specialized module. Runs BEFORE the pipe/mod declines
+  // (which assume a concrete callee) but AFTER arg-naming validation (the same
+  // rules apply to every callee kind). A `ref self` method is NOT a standalone
+  // module — it keeps the splice path below. A `comb` template (untyped scalar
+  // params / var-args) is excluded here and inlines as usual.
+  if (callee->is_template()) {
+    const auto k         = callee->get_lambda_kind();
+    const bool is_method = !io.inputs.empty() && io.inputs[0].name == "self";
+    if ((k == "mod" || k == "pipe" || k == "fluid") && !is_method) {
+      if (maybe_specialize_template_call(callee, io, param_val, param_set, nbind, has_vararg, dst_name, callee_name,
+                                         call_span)) {
+        return true;
+      }
+    }
+  }
+
   // Task 1q — a `pipe` callee (any output carries a stages annotation) is
   // never comb-inlined: its outputs are flopped, and a call site must consume
   // it via `stage[N]` (later phase). Decline so the call surfaces unresolved
@@ -1651,9 +1718,11 @@ bool uPass_runner::try_inline_func_call() {
     }
   }
 
-  // Every non-self parameter must be bound — io_meta carries no defaults, so an
-  // unset input means the caller omitted a required argument.
-  for (std::size_t i = (has_self ? 1 : 0); i < nparams; ++i) {
+  // Every non-self FIXED parameter must be bound — io_meta carries no defaults,
+  // so an unset input means the caller omitted a required argument. The var-arg
+  // slot (index nbind, when present) is always satisfied — it gathers zero or
+  // more leftovers — so it is excluded from this check.
+  for (std::size_t i = (has_self ? 1 : 0); i < nbind; ++i) {
     if (!param_set[i]) {
       fcall_arg_fail(call_span,
                      "fcall-missing-arg",
@@ -1749,6 +1818,25 @@ bool uPass_runner::try_inline_func_call() {
   std::vector<std::pair<std::string, std::optional<std::string>>> saved_func_bindings;
   for (std::size_t i = 0; i < nparams; ++i) {
     const auto& e = io.inputs[i];
+    // Task 1p — register the var-arg leftovers for try_resolve_vararg_get.
+    // Positional leftovers take the canonical decimal keys "0","1",… (so the
+    // body's `args[i]` reads them — a tuple_get index canonicalizes to that
+    // key); named leftovers keep their names (`args.NAME`). No tuple node is
+    // emitted: each access is rewritten to a direct copy during the body walk,
+    // so tolg never sees a runtime tuple_add/tuple_get it cannot lower.
+    if (has_vararg && i == nbind) {
+      const auto pname   = upass::Lnast_manager::make_inlined_name(tag, e.name);
+      auto&      entries = vararg_bindings_[pname];
+      entries.clear();
+      entries.reserve(vararg_pos.size() + vararg_named.size());
+      for (std::size_t p = 0; p < vararg_pos.size(); ++p) {
+        entries.emplace_back(std::to_string(p), vararg_pos[p]);
+      }
+      for (auto& [k, v] : vararg_named) {
+        entries.emplace_back(k, v);
+      }
+      continue;
+    }
     if (!param_func[i].empty()) {
       auto it = func_param_bindings_.find(e.name);
       saved_func_bindings.emplace_back(e.name,
@@ -1817,6 +1905,11 @@ bool uPass_runner::try_inline_func_call() {
   flush_deferred_emits();  // flush callee-tree parked writes before leaving
   lm->pop_source();
   active_inline_callees_.pop_back();
+  // Task 1p — drop this frame's var-arg gather (the tag is unique per call
+  // site, so this only prunes stale state; nested frames used distinct tags).
+  if (has_vararg) {
+    vararg_bindings_.erase(upass::Lnast_manager::make_inlined_name(tag, io.inputs[nbind].name));
+  }
   // Restore the func-param bindings shadowed by this frame.
   for (const auto& [key, old] : saved_func_bindings) {
     if (old) {
@@ -1859,6 +1952,327 @@ bool uPass_runner::try_inline_func_call() {
     emit_inline_binding(caller_var, src);
   }
 
+  return true;
+}
+
+bool uPass_runner::try_resolve_tuple_get() {
+  // Cursor on a tuple_get node: [dst(ref), src(ref), field(const|ref)...].
+  // A tuple pick with a COMPTIME-known index/name is a comptime STRUCTURAL
+  // operation even when the picked VALUE is a runtime signal — so rewrite it to
+  // a direct copy `dst = <picked ref>` (tolg cannot lower a surviving
+  // tuple_get). The picked ref comes from either (1) a var-arg gathered at the
+  // call site (vararg_bindings_), or (2) constprop's slot→ref map for any
+  // tuple variable (try_tuple_slot_ref). Falls through (false) on nested access
+  // (`t[i].f`), a dynamic index, or a slot with no known runtime ref — constprop
+  // folds/diagnoses those on the normal path.
+  if (!lm->has_child()) {
+    return false;
+  }
+  const auto saved = lm->save_cursor();
+  lm->move_to_child();  // dst
+  if (lm->get_raw_ntype() != Lnast_ntype::Lnast_ntype_ref) {
+    lm->restore_cursor(saved);
+    return false;
+  }
+  std::string dst(lm->current_text());
+  if (!lm->move_to_sibling() || lm->get_raw_ntype() != Lnast_ntype::Lnast_ntype_ref) {
+    lm->restore_cursor(saved);
+    return false;
+  }
+  std::string src(lm->current_text());  // tuple name (frame-tagged inside an inline)
+  // Exactly one field segment; nested access falls through.
+  if (!lm->move_to_sibling()) {
+    lm->restore_cursor(saved);
+    return false;
+  }
+  std::string key;
+  if (Lnast_ntype::is_const(lm->get_raw_ntype())) {
+    if (auto v = Dlop::from_pyrope(lm->current_text()); v && !v->is_invalid()) {
+      key = v->to_field();
+    }
+  } else if (Lnast_ntype::is_ref(lm->get_raw_ntype())) {
+    // A comptime-known index (a folded loop var) resolves; anything else does not.
+    if (auto fv = try_fold_ref(lm->current_text()); fv && fv->is_integer()) {
+      key = std::to_string(fv->to_i());
+    }
+  }
+  const bool single_segment = lm->is_last_child();
+  lm->restore_cursor(saved);
+  if (key.empty() || !single_segment) {
+    return false;
+  }
+  // (1) var-arg gathered entries (keyed by the frame-tagged var-arg name).
+  if (auto it = vararg_bindings_.find(src); it != vararg_bindings_.end()) {
+    for (const auto& [k, node] : it->second) {
+      if (k == key) {
+        emit_inline_binding(dst, node);  // dst already frame-tagged; emit literal
+        return true;
+      }
+    }
+    // Out-of-range var-arg pick: let constprop fold to nil / diagnose.
+    return false;
+  }
+  // (2) general tuple variable whose slot holds a runtime scalar ref.
+  if (auto rname = try_tuple_slot_ref(src, key)) {
+    emit_inline_binding(dst, Lnast_node::create_ref(*rname));
+    return true;
+  }
+  return false;
+}
+
+// ── Task 1p — pipe/mod/fluid template specialization ──────────────────────────
+
+void uPass_runner::copy_subtree_into(const std::shared_ptr<Lnast>& src, const Lnast_nid& src_nid,
+                                     const std::shared_ptr<Lnast>& dst, const Lnast_nid& dst_parent) {
+  const auto type = src->get_type(src_nid);
+  Lnast_nid  newn;
+  if (Lnast_ntype::is_ref(type)) {
+    newn = dst->add_child(dst_parent, Lnast_node::create_ref(src->get_name(src_nid)));
+  } else if (Lnast_ntype::is_const(type)) {
+    newn = dst->add_child(dst_parent, Lnast_node::create_const(src->get_name(src_nid)));
+  } else if (Lnast_ntype::is_invalid(type)) {
+    newn = dst->add_child(dst_parent, Lnast_node::create_invalid());
+  } else {
+    newn = dst->add_child(dst_parent, type);
+  }
+  for (auto c : src->children(src_nid)) {
+    copy_subtree_into(src, c, dst, newn);
+  }
+}
+
+std::shared_ptr<Lnast> uPass_runner::clone_template_specialized(const std::shared_ptr<Lnast>& tmpl, const std::string& mangled,
+                                                               const std::vector<Spec_port>& inject) {
+  auto clone    = std::make_shared<Lnast>(mangled);
+  auto src_root = tmpl->get_root();
+  auto dst_root = clone->set_root(tmpl->get_type(src_root));  // top
+  for (auto c : tmpl->children(src_root)) {
+    copy_subtree_into(tmpl, c, clone, dst_root);
+  }
+  clone->set_lambda_kind(tmpl->get_lambda_kind());
+  clone->set_template(false);
+  clone->set_generics({});
+
+  // Inject the concrete type child into each untyped fixed input port. Verbatim
+  // copy preserves the io order, so port i lines up with inject[i].
+  auto io_n = clone->get_first_child(clone->get_root());
+  if (io_n.is_invalid() || !Lnast_ntype::is_io(clone->get_type(io_n))) {
+    return clone;
+  }
+  auto in_tup = clone->get_first_child(io_n);
+  if (in_tup.is_invalid()) {
+    return clone;
+  }
+  std::size_t i = 0;
+  for (auto entry : clone->children(in_tup)) {
+    if (!Lnast_ntype::is_store(clone->get_type(entry))) {
+      continue;
+    }
+    auto name_n = clone->get_first_child(entry);
+    if (name_n.is_invalid() || clone->get_name(name_n) == "__empty_tuple") {
+      continue;
+    }
+    if (i < inject.size() && inject[i].inject) {
+      if (!inject[i].type_name.empty()) {
+        clone->add_child(entry, Lnast_node::create_ref(inject[i].type_name));
+      } else {
+        auto pt = clone->add_child(entry, Lnast_ntype::create_prim_type_int());
+        clone->add_child(pt,
+                         Lnast_node::create_const(inject[i].max ? std::string(inject[i].max->to_pyrope()) : std::string("nil")));
+        clone->add_child(pt,
+                         Lnast_node::create_const(inject[i].min ? std::string(inject[i].min->to_pyrope()) : std::string("nil")));
+      }
+    }
+    ++i;
+  }
+  return clone;
+}
+
+void uPass_runner::emit_specialized_call(const std::string& dst, const std::string& mangled,
+                                         const std::vector<Lnast_node>& actuals) {
+  if (!scratch_forest_) {
+    scratch_forest_ = hhds::Forest::create();
+  }
+  auto body = scratch_forest_->create_tree_temp("inl-spec");
+  auto s    = std::make_shared<Lnast>(body, "inl-spec");
+  auto root = s->set_root(Lnast_ntype::create_func_call());
+  s->add_child(root, Lnast_node::create_ref(dst));
+  s->add_child(root, Lnast_node::create_ref(mangled));  // mangled callee → tolg makes the Sub
+  for (const auto& a : actuals) {
+    s->add_child(root, a);
+  }
+  flush_deferred_emits();
+  lm->push_source(s, "", 0);
+  process_lnast();  // mangled callee isn't in the registry yet → emitted verbatim for tolg
+  flush_deferred_emits();
+  lm->pop_source();
+}
+
+bool uPass_runner::maybe_specialize_template_call(const std::shared_ptr<Lnast>& callee, const Lnast_tree_io& io,
+                                                  const std::vector<Lnast_node>& param_val, const std::vector<bool>& param_set,
+                                                  std::size_t nbind, bool has_vararg, const std::string& dst_name,
+                                                  const std::string& callee_name, const livehd::diag::Span& call_span) {
+  const auto kind = std::string(callee->get_lambda_kind());
+  if (has_vararg) {
+    // A var-arg hardware boundary would need a variable-length port list; only
+    // `comb` (which inlines) supports var-args today.
+    fcall_arg_fail(call_span,
+                   "fcall-vararg-module",
+                   std::format("var-args on the {} boundary `{}` are not supported — a hardware port list must be fixed", kind,
+                               callee_name),
+                   "use a `comb` (var-args inline), or declare fixed named ports");
+  }
+
+  // Readable bits/sign suffix from a declared (max,min) range — mirrors
+  // upass_ssa type_info_from so the name matches the lowered width.
+  auto suffix_for = [](const std::optional<Const>& max, const std::optional<Const>& min) -> std::string {
+    const bool is_signed = !(min && !min->is_negative());
+    int        bits      = 0;
+    if (max && max->is_integer()) {
+      if (!is_signed) {
+        bits = max->is_known_zero() ? 0 : static_cast<int>(max->get_bits() - 1);
+      } else {
+        const int mb = static_cast<int>(max->get_bits());
+        const int nb = (min && min->is_integer()) ? static_cast<int>(min->get_bits()) : mb;
+        bits         = std::max(mb, nb);
+      }
+    }
+    return (is_signed ? "s" : "u") + std::to_string(bits);
+  };
+
+  // The actual's declared type can come from a body declaration
+  // (try_decl_type / try_typename) OR — when the actual is itself an input of
+  // the tree holding the call site — from that tree's io_meta. Build a (bits,
+  // signed) → (max,min) prim_type_int range for the latter (mirrors SSA's
+  // emit_section).
+  const auto& caller_io = lm->get_lnast()->io_meta();
+  auto        caller_input = [&](const std::string& nm) -> const Lnast_io_entry* {
+    for (const auto& ce : caller_io.inputs) {
+      if (ce.name == nm) {
+        return &ce;
+      }
+    }
+    return nullptr;
+  };
+
+  std::vector<Spec_port>   inject(nbind);
+  std::vector<std::string> suffix;
+  suffix.reserve(nbind);
+  for (std::size_t i = 0; i < nbind; ++i) {
+    const auto& e            = io.inputs[i];
+    const bool  already_typed = e.bits > 0 || !e.type_name.empty() || e.kind == Io_kind::boolean;
+    if (already_typed) {
+      inject[i].inject = false;
+      if (!e.type_name.empty()) {
+        suffix.push_back(e.type_name);
+      } else if (e.kind == Io_kind::boolean) {
+        suffix.emplace_back("bool");
+      } else {
+        suffix.push_back((e.is_signed ? "s" : "u") + std::to_string(e.bits));
+      }
+      continue;
+    }
+    // Untyped port (decision 4): read the actual's DECLARED type; an untyped
+    // actual is a fatal call-site error.
+    const auto untyped_fail = [&]() {
+      fcall_arg_fail(call_span,
+                     "fcall-untyped-actual",
+                     std::format("argument `{}` to template `{}` has no declared type — a `{}` boundary needs an explicit width",
+                                 e.name, callee_name, kind),
+                     "annotate the actual, e.g. `x:u8`");
+    };
+    if (!param_set[i] || !param_val[i].is_ref()) {
+      untyped_fail();
+    }
+    const auto an = std::string(param_val[i].get_name());
+    if (auto tn = try_typename(an); !tn.empty()) {
+      inject[i] = {true, std::nullopt, std::nullopt, std::string(tn)};
+      suffix.push_back(std::string(tn));
+    } else if (auto dt = try_decl_type(an); dt && (dt->range_max || dt->range_min)) {
+      inject[i] = {true, dt->range_max, dt->range_min, {}};
+      suffix.push_back(suffix_for(dt->range_max, dt->range_min));
+    } else if (const auto* ci = caller_input(an); ci != nullptr && (ci->bits > 0 || ci->kind == Io_kind::boolean)) {
+      if (ci->kind == Io_kind::boolean) {
+        inject[i] = {true, *Dlop::from_pyrope("1"), *Dlop::from_pyrope("0"), {}};
+        suffix.emplace_back("bool");
+      } else if (ci->is_signed) {
+        inject[i] = {true, *Dlop::get_mask_value(ci->bits - 1), *Dlop::get_neg_mask_value(ci->bits - 1), {}};
+        suffix.push_back("s" + std::to_string(ci->bits));
+      } else {
+        inject[i] = {true, *Dlop::get_mask_value(ci->bits), *Dlop::from_pyrope("0"), {}};
+        suffix.push_back("u" + std::to_string(ci->bits));
+      }
+    } else if (try_scalar_kind(an) == Io_kind::boolean) {
+      inject[i] = {true, *Dlop::from_pyrope("1"), *Dlop::from_pyrope("0"), {}};
+      suffix.emplace_back("bool");
+    } else {
+      untyped_fail();
+    }
+  }
+
+  // Mangled module name: readable + deterministic, so identical signatures map
+  // to one module (natural dedup keyed by name). The owning-unit prefix is kept
+  // so tolg exact-matches and cross-unit names never collide.
+  //
+  // Width tokens (`uN`/`sN`/`bool`) contain no `_`, so the `_`-joined readable
+  // form is unambiguous for them. A NAMED-type component may contain `_` (or
+  // even look like a width token), which could map two DISTINCT signatures of
+  // the same template onto one name — and the name-keyed dedup would then
+  // silently drop the second clone, mis-wiring that call site. So when any
+  // component is not a plain width token, append a deterministic hash of the
+  // exact component list (FNV-1a, NUL-free separator) to disambiguate; the
+  // common all-primitive case keeps its clean `foo__u8` name.
+  auto is_width_token = [](const std::string& s) -> bool {
+    if (s == "bool") {
+      return true;
+    }
+    if (s.size() < 2 || (s[0] != 'u' && s[0] != 's')) {
+      return false;
+    }
+    for (std::size_t i = 1; i < s.size(); ++i) {
+      if (s[i] < '0' || s[i] > '9') {
+        return false;
+      }
+    }
+    return true;
+  };
+  bool ambiguous = false;
+  for (const auto& s : suffix) {
+    if (!is_width_token(s)) {
+      ambiguous = true;
+      break;
+    }
+  }
+  std::string mangled = std::string(callee->get_top_module_name()) + "__";
+  for (std::size_t i = 0; i < suffix.size(); ++i) {
+    if (i) {
+      mangled += "_";
+    }
+    mangled += suffix[i];
+  }
+  if (ambiguous) {
+    uint64_t h = 1469598103934665603ull;  // FNV-1a offset basis
+    for (const auto& s : suffix) {
+      h ^= 0x01;  // component separator (never in an identifier/width token)
+      h *= 1099511628211ull;
+      for (unsigned char c : s) {
+        h ^= c;
+        h *= 1099511628211ull;
+      }
+    }
+    mangled += std::format("_h{:08x}", static_cast<uint32_t>(h & 0xffffffffu));
+  }
+
+  if (!specialized_emitted_.contains(mangled)) {
+    specialized_emitted_.insert(mangled);
+    new_lnasts.push_back(clone_template_specialized(callee, mangled, inject));
+  }
+
+  std::vector<Lnast_node> actuals;
+  actuals.reserve(nbind);
+  for (std::size_t i = 0; i < nbind; ++i) {
+    actuals.push_back(param_val[i]);
+  }
+  emit_specialized_call(dst_name, mangled, actuals);
   return true;
 }
 
@@ -2028,19 +2442,44 @@ bool uPass_runner::try_init_construction() {
 
   const auto tn = try_typename(x);
 
-  // Mod-init form: `mut y:Mix_tup = mix_tup_init` — the value names a
-  // registry function whose first input is `ref self`. The function IS the
-  // constructor; T needs no `init` field. Requires the typename so a plain
-  // function-value alias (`mut f = somefunc`) stays an alias.
-  if (v_is_ref && !v_raw.empty()) {
-    if (auto fc = lookup_callee(v_raw)) {
-      const auto& cio = fc->io_meta();
-      if (!tn.empty() && !cio.inputs.empty() && cio.inputs[0].name == "self" && cio.inputs[0].is_ref) {
-        splice_init_call(x, tn, v_raw, {});
-        return true;
-      }
-      return false;  // function value, but not a ctor shape — plain alias
+  // A bare function reference (`mut y:Mix_tup = mix_tup_init` — an identifier
+  // that names a registry comb/pipe/mod written WITHOUT a call `(...)`) may
+  // only bind to an UNtyped variable (`const f = mix_tup_init`, later
+  // `x.f()`). On a TYPED declaration it is a compile error: the function
+  // reference does not match the declared type. The old "the named `ref self`
+  // mod IS the constructor" sugar is gone — construct with a `T(...)` call or
+  // an `init` method inside the type instead.
+  if (v_is_ref && !v_raw.empty() && lookup_callee(v_raw)) {
+    if (tn.empty()) {
+      return false;  // untyped binding — a plain function-value alias, allowed
     }
+    livehd::diag::Span span;
+    {
+      const auto& s   = lm->get_lnast();
+      const auto  nid = lm->get_current_nid();
+      const auto  loc = s->get_loc(nid);
+      if (const auto fn = s->get_fname(nid); !fn.empty()) {
+        span.file = std::string(fn);
+      }
+      if (loc.line != 0) {
+        span.start_line = loc.line;
+      }
+      if (loc.pos1 != 0 || loc.pos2 != 0) {
+        span.start_byte = loc.pos1;
+        span.end_byte   = loc.pos2;
+      }
+    }
+    const auto msg = std::format("cannot assign function reference `{}` to typed variable `{}`:{}", v_raw, x, tn);
+    livehd::diag::sink().emit(livehd::diag::Diagnostic{
+        .severity = livehd::diag::Severity::error,
+        .code     = "ctor-func-ref",
+        .category = "type",
+        .pass     = "upass.runner",
+        .message  = msg,
+        .span     = span,
+        .hint     = "call it (`x = T(...)`) or give the type an `init` method; a bare function "
+                    "reference may only bind to an untyped variable"});
+    throw std::runtime_error(msg);
   }
 
   const auto candidates = init_candidates_of(tn);
@@ -2144,7 +2583,24 @@ bool uPass_runner::try_construct_call() {
 
 // ── Comptime loop unroll (range `for` + `while`/`loop`) ───────────────────────
 
-bool uPass_runner::walk_loop_iteration(const std::vector<std::pair<std::string, Const>>& binds) {
+void uPass_runner::emit_inline_tuple_pick(const std::string& dst, const std::string& src, const std::string& index_text) {
+  if (!scratch_forest_) {
+    scratch_forest_ = hhds::Forest::create();
+  }
+  auto body = scratch_forest_->create_tree_temp("inl-pick");
+  auto s    = std::make_shared<Lnast>(body, "inl-pick");
+  auto root = s->set_root(Lnast_ntype::create_tuple_get());
+  s->add_child(root, Lnast_node::create_ref(dst));
+  s->add_child(root, Lnast_node::create_ref(src));
+  s->add_child(root, Lnast_node::create_const(index_text));
+  flush_deferred_emits();
+  lm->push_source(s, "", 0);
+  process_lnast();  // tuple_get dispatch → try_resolve_tuple_get (runtime) or constprop fold (comptime)
+  flush_deferred_emits();
+  lm->pop_source();
+}
+
+bool uPass_runner::walk_loop_iteration(const std::function<void()>& emit_binds) {
   // Precondition: the read cursor is on the loop body `stmts` node.
   if (inline_budget_ == 0 || loop_depth_ > static_cast<int>(kInlineMaxDepth)) {
     return false;  // fuel / depth guard — a non-terminating comptime loop bails (like recursion)
@@ -2158,9 +2614,7 @@ bool uPass_runner::walk_loop_iteration(const std::vector<std::pair<std::string, 
   emit_push(Lnast_ntype::create_stmts());            // staging block for this iteration
 
   // Bind the iteration variable(s) into this scope so the body's reads fold.
-  for (const auto& [name, val] : binds) {
-    emit_inline_binding(name, Lnast_node::create_const(std::string(val.to_pyrope())));
-  }
+  emit_binds();
 
   if (lm->move_to_child()) {
     do {
@@ -2204,42 +2658,84 @@ void uPass_runner::unroll_for() {
     return;
   }
 
-  auto rng = try_range(iterable);
-  if (!rng || !rng->first.is_i() || !rng->second.is_i()) {
-    // `for` is comptime-only; a non-foldable bound is a build error reported
-    // elsewhere. Leave the node verbatim rather than silently dropping the body.
-    emit_subtree_verbatim();
-    return;
-  }
-  const int64_t lo = rng->first.to_i();
-  const int64_t hi = rng->second.to_i();  // inclusive
-
   // `ivar` was read via current_text(), so it is ALREADY the frame-renamed name
   // the body's reads of the iteration variable resolve to (under the same tag).
   // Bind it directly each iteration — do NOT re-tag (that would double-prefix).
   const std::string& tagged_i = ivar;
+  const auto         for_bm   = lm->save_cursor();  // on the for-node
+  // Re-position the cursor on the body stmts (child2) before each iteration.
+  auto to_body = [&]() {
+    lm->restore_cursor(for_bm);
+    lm->move_to_child();    // child0 iter
+    lm->move_to_sibling();  // child1 iterable
+    lm->move_to_sibling();  // child2 body
+  };
 
-  const auto for_bm      = lm->save_cursor();  // on the for-node
-  const bool saved_break = loop_break_hit_;
-  loop_break_hit_        = false;
-  ++loop_depth_;
-  for (int64_t v = lo; v <= hi; ++v) {
-    lm->restore_cursor(for_bm);  // back to for-node
-    lm->move_to_child();         // child0
-    lm->move_to_sibling();       // child1
-    lm->move_to_sibling();       // child2 (body stmts)
-    std::vector<std::pair<std::string, Const>> binds;
-    binds.emplace_back(tagged_i, *Dlop::create_integer(v));
-    if (!walk_loop_iteration(binds)) {
-      break;  // fuel exhausted
+  // (a) Range iterable: `for i in lo..hi` — bind a Const each iteration.
+  if (auto rng = try_range(iterable); rng && rng->first.is_i() && rng->second.is_i()) {
+    const int64_t lo          = rng->first.to_i();
+    const int64_t hi          = rng->second.to_i();  // inclusive
+    const bool    saved_break = loop_break_hit_;
+    loop_break_hit_           = false;
+    ++loop_depth_;
+    for (int64_t v = lo; v <= hi; ++v) {
+      to_body();
+      if (!walk_loop_iteration([&]() { emit_inline_binding(tagged_i, Lnast_node::create_const(std::to_string(v))); })) {
+        break;  // fuel exhausted
+      }
+      if (loop_break_hit_) {
+        break;
+      }
     }
-    if (loop_break_hit_) {
-      break;
+    --loop_depth_;
+    loop_break_hit_ = saved_break;
+    lm->restore_cursor(for_bm);
+    return;
+  }
+
+  // (b) Tuple iterable (loop-migration): `for x in t` — unroll over the
+  // comptime-known shape, binding the iter var to each entry via a tuple_get
+  // pick (try_resolve_tuple_get rewrites a runtime entry to a copy; constprop
+  // folds a comptime entry). This is the path that fixes the parse-time-unroll
+  // accumulation drop, since walk_loop_iteration handles outer-`mut` writes.
+  // The shape comes from constprop's tuple, or — for `for x in args` inside a
+  // comb — from the gathered var-arg entries (which aren't a constprop tuple).
+  std::optional<std::vector<std::pair<std::string, bool>>> shape = try_tuple_shape(iterable);
+  if (!shape) {
+    if (auto vit = vararg_bindings_.find(iterable); vit != vararg_bindings_.end()) {
+      std::vector<std::pair<std::string, bool>> vshape;
+      for (const auto& [k, _node] : vit->second) {
+        const bool is_pos = !k.empty() && k.find_first_not_of("0123456789") == std::string::npos;
+        vshape.emplace_back(k, is_pos);
+      }
+      shape = std::move(vshape);
     }
   }
-  --loop_depth_;
-  loop_break_hit_ = saved_break;
-  lm->restore_cursor(for_bm);  // leave cursor on the for-node (no node emitted for it)
+  if (shape) {
+    const bool saved_break = loop_break_hit_;
+    loop_break_hit_        = false;
+    ++loop_depth_;
+    for (const auto& [key, is_pos] : *shape) {
+      to_body();
+      const std::string index_text = is_pos ? key : ("'" + key + "'");
+      if (!walk_loop_iteration([&]() { emit_inline_tuple_pick(tagged_i, iterable, index_text); })) {
+        break;
+      }
+      if (loop_break_hit_) {
+        break;
+      }
+    }
+    --loop_depth_;
+    loop_break_hit_ = saved_break;
+    lm->restore_cursor(for_bm);
+    return;
+  }
+
+  // Neither a comptime range nor a known tuple: `for` is comptime-only; leave
+  // the node verbatim rather than silently dropping the body (typecheck/tolg
+  // surface the non-comptime iterable).
+  lm->restore_cursor(for_bm);
+  emit_subtree_verbatim();
 }
 
 void uPass_runner::unroll_while() {
@@ -2375,7 +2871,7 @@ void uPass_runner::unroll_while() {
     lm->restore_cursor(while_bm);  // try_fold_ref above can move the cursor; reset before the body walk
     lm->move_to_child();           // condition
     lm->move_to_sibling();         // body stmts
-    if (!walk_loop_iteration({})) {
+    if (!walk_loop_iteration([]() {})) {
       // Fuel/depth cap hit without the state ever repeating — a diverging loop
       // (e.g. an unbounded counter that never satisfies the exit). Pyrope loops
       // must be comptime-bounded, so this is a build error rather than a silent
@@ -2896,7 +3392,14 @@ void uPass_runner::process_lnast() {
     // Without this, for-loop unrolls leave behind orphan
     // `tuple_add ___N = (i,)` stmts whose tuple_concat / assign-to-c
     // consumers got dropped, producing dead code with dangling tmp refs.
-    A_OP(tuple_get)
+    // Task 1p — a `tuple_get` on a registered var-arg with a comptime-known
+    // index/name is rewritten to a direct copy (so a runtime var-arg pick
+    // lowers); anything else folds/emits normally.
+    case Ntype::Lnast_ntype_tuple_get:
+      if (!try_resolve_tuple_get()) {
+        process_drop_candidate(&upass::uPass::process_tuple_get, /*fold_all=*/false);
+      }
+      break;
     A_OP(tuple_add)
     // Task 1t — the tuple_set node was deleted; field writes are now `store`
     // (≥3 children → process_tuple_set, handled in the store case above).

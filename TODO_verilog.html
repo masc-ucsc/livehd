@@ -100,36 +100,30 @@ that validates <code>lnast_to_lgraph</code> against a Verilog golden.</p>
 Group letters are shared across <a href="TODO_prp.html">TODO_prp.md</a>,
 <a href="TODO_verilog.html">TODO_verilog.md</a>, <a href="TODO_livehd.html">TODO_livehd.md</a>,
 and <a href="TODO_hhds.html">TODO_hhds.md</a>, so cross-file dependencies stay visible.</p>
-<h2 id="group-2-depends-on-group-1">Group 2 — depends on Group 1</h2>
+<h2 id="group-1-foundation">Group 1 — foundation</h2>
 <ul>
-<li><strong id="item-2d" class="item-id">2d</strong> Finish the LNAST→LGraph synthesis closure (the rest of <code>lnast_to_lgraph</code>
-  beyond the combinational milestone) — the <strong>remaining functional phases</strong>
-  (the original Group-3 <code>3a</code> work, re-homed here). The how-to-lower spec is
-  <code>docs/contracts/lnast2lgraph.md</code> (cell vocabulary, pin conventions, nil/bool
-  model, reg/flop + memory wiring, attributes; phases 4–11).</li>
+<li><strong id="item-1a" class="item-id">1a</strong> Finish the LNAST→LGraph synthesis closure (the rest of <code>lnast_to_lgraph</code>
+  beyond the combinational milestone) — re-homed to Group 1 as foundation for the
+  Verilog synthesis path. The how-to-lower spec is <code>docs/contracts/lnast2lgraph.md</code>
+  (cell vocabulary, pin conventions, nil/bool model, reg/flop + memory wiring,
+  attributes; phases 4–11). Split into:
+  <ul>
+  <li><strong id="item-1a-mem" class="item-id">1a-mem</strong> Pyrope <code>Memory</code> →
+    LGraph <code>Memory</code> cell lowering: persistent indexed <code>reg</code> arrays, one Memory
+    per logical storage, 11-pin port stride. (Shares the Pyrope-side memory work in
+    <a class="xref" href="TODO_prp.html#item-3j">3j</a> / <a class="xref" href="TODO_prp.html#item-3g">3g</a>.)</li>
+  <li><strong id="item-1a-ops" class="item-id">1a-ops</strong> Remaining op / cell mappings:
+    <code>defer</code>/<code>past[n]</code> temporal reads → <code>Flop</code>; high-level op lowering
+    (slice/concat, <code>!=</code>/<code>&lt;=</code>/<code>&gt;=</code>, div/mod → power-of-two
+    <code>SRA</code>/<code>Get_mask</code> + generic <code>Sub</code> fallback / non-synth warning);
+    <code>uif</code> chains (HotMux FIXME) + direct <code>__&lt;cell&gt;</code> calls; <code>lg:</code>
+    black-box <code>Sub</code> instances (Pyrope-path <code>ln:</code> Subs landed via 1u-A +
+    <a class="xref" href="TODO_prp.html#item-1m">1m</a>; <code>tolg</code> hard-errors on any
+    unresolvable callee until <code>lg:</code> lands); and <code>max</code>/<code>min</code> HHDS
+    attribute reads at node creation (diagnose leftover LNAST-only attrs).
+    (Register <code>reg</code>→<code>Flop</code> slice landed via <a class="xref" href="TODO_mod.html#item-2d-reg">2d-reg</a>.)</li>
+  </ul></li>
 </ul>
-<p><strong>Remaining slices</strong> (roughly the contract phase order):
-  - <strong><code>defer</code> / <code>past[n]</code></strong> temporal reads → <code>Flop</code>. The
-    register slice (reg→<code>Flop</code>: reset/clock pin defaults, last-write-wins
-    <code>din</code> + OR-of-conditions <code>enable</code>, init/reset value folded on the
-    <code>declare</code> node per <a class="xref" href="TODO_prp.html#item-3j">3j</a>)
-    <strong>LANDED 2026-06-07</strong> as <a class="xref" href="TODO_mod.html#item-2d-reg">2d-reg</a>;
-    <code>defer</code>/<code>past[n]</code> stay here.
-  - <strong><code>Memory</code></strong> for persistent indexed <code>reg</code> arrays (one Memory per logical
-    storage, 11-pin port stride).
-  - <strong>High-level op lowering</strong>: slice/concat, <code>!=</code>/<code>&lt;=</code>/<code>&gt;=</code>, div/mod
-    (power-of-two <code>SRA</code>/<code>Get_mask</code>, generic <code>Sub</code> fallback + non-synth warning).
-  - <strong><code>uif</code></strong> chains (add the <code>HotMux</code> FIXME) and direct <code>__&lt;cell&gt;</code> calls.
-  - <strong><code>Sub</code> submodule calls</strong> — Pyrope-path Sub instances LANDED with 1u-A (registry-resolved, single-output); remaining: the callee <code>tree_io</code> leaf ABI (<a class="xref" href="TODO_prp.html#item-2n">2n</a>) +
-    import handling (<a class="xref" href="TODO_prp.html#item-1m">1m</a>, incl. <code>lg:</code> black-box Subs); until those land <code>tolg</code> must hard-error
-    (not guess) on any callee it cannot fully resolve in the forest/registry.
-  - <strong>Attributes</strong>: read <code>max</code>/<code>min</code> HHDS attrs at node creation (LNAST-origin
-    path); diagnose leftover LNAST-only attrs.
-  - Optional cross-module global/specialization pass (contract phase 10) — the
-    natural tail; may split into its own entry if it grows.</p>
-<p><strong>Test-infra follow-up</strong>: reconcile <code>lnast2lgraph.md §1</code>/<code>§16</code>, which
-  still describe a standalone <code>pass.lnast_to_lgraph</code>, to the
-  terminal-<code>tolg</code>-sub-pass packaging.</p>
 <h2 id="group-3-depends-on-group-2">Group 3 — depends on Group 2</h2>
 <ul>
 <li><strong id="item-3b" class="item-id">3b</strong> Use the stable Pyrope as example for LNAST generation, and migrate

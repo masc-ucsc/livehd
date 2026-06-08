@@ -141,6 +141,19 @@ public:
   // iterate. nullopt when `name` is not a known range. A bound that has not
   // folded to a concrete integer is returned as-is (the runner checks).
   virtual std::optional<std::pair<Const, Const>> provide_range(std::string_view /*name*/) { return std::nullopt; }
+  // Loop-migration (Step 1): the source ref held at `slot` of tuple-valued
+  // `name`, for a runtime-scalar slot the bundle can't remember. Lets the
+  // runner rewrite `t[slot]` into a copy `dst = ref`. nullopt when untracked.
+  virtual std::optional<std::string>             provide_tuple_slot_ref(std::string_view /*name*/, std::string_view /*slot*/) {
+    return std::nullopt;
+  }
+  // Loop-migration (Step 2): the ordered (slot-key, is_positional) shape of
+  // tuple-valued `name`, so the runner can unroll `for x in name` over its
+  // entries (positional keys "0","1",…; named keys the field name). nullopt
+  // when `name` is not a known tuple.
+  virtual std::optional<std::vector<std::pair<std::string, bool>>> provide_tuple_shape(std::string_view /*name*/) {
+    return std::nullopt;
+  }
   virtual bool                                   overrides_shared_st() const { return false; }
 
   // Runner-supplied helper that delegates to `try_fold_ref` across every

@@ -248,10 +248,18 @@ void uPass_constprop::process_assign() {
   }
   move_to_sibling();
 
+  // Loop-migration (Step 1): a fresh write to lhs invalidates any prior
+  // slot→ref map; a ref-alias (`A = ___t`) re-inherits it from the RHS below.
+  tuple_slot_ref_.erase(std::string(lhs_text));
+
   if (is_type(Lnast_ntype::Lnast_ntype_ref)) {
     // RHS is a variable reference: alias the bundle in the symbol table.
     // Bundle aliasing (A = ___t1) is just pointer bookkeeping — the scalar
     // values it carries are propagated by process_tuple_get, not here.
+    // Step 1: carry the slot→ref map across the alias so `A[i]` resolves.
+    if (auto it = tuple_slot_ref_.find(std::string(current_text())); it != tuple_slot_ref_.end()) {
+      tuple_slot_ref_[std::string(lhs_text)] = it->second;
+    }
     auto rhs_bundle = current_bundle();
     if (rhs_bundle) {
       // Type-shape preservation: when LHS is a *purely-named* bundle
@@ -403,14 +411,24 @@ void uPass_constprop::process_assign() {
       store_trivial(lhs_text, value);
     } else if (st.has_trivial(lhs_text) && st.in_uncertain_scope()) {
       // 2d-reg — a RUNTIME-rhs write inside an uncertain if-arm: the LHS can
-      // no longer be claimed comptime-known. Comptime writes get invalidated
-      // on arm exit via record_uncertain_modification, but a runtime rhs
-      // never touched the varmap, so the stale pre-branch value would leak
-      // through fold_ref/classify — folding `if c { r = <runtime> }; out = r`
-      // down to the stale init and dropping the `out` store entirely.
-      // (Straight-line runtime reassignments don't need this: SSA versions
-      // them; branch bodies are copied verbatim, hence the uncertain gate.)
+      // no longer be claimed comptime-known. Setting nil makes readers see a
+      // known-nil value (== short-circuits to nil; cassert nil discharges as
+      // pass). Comptime writes get this via record_uncertain_modification, but
+      // a runtime rhs never touched the varmap, so the stale pre-branch value
+      // would otherwise leak through fold_ref/classify.
       st.set(lhs_text, Symbol_table::invalid_lconst);
+    } else if (st.has_trivial(lhs_text) && st.is_enclosing_scope_var(lhs_text)) {
+      // Loop / block accumulation — a CERTAIN nested block (an `if true {…}` or
+      // a loop iteration) writing an ENCLOSING var with a runtime rhs. The
+      // block body is copied verbatim (not SSA-versioned), so the stale
+      // pre-block comptime value would leak: `if true { acc = acc + x }` reads
+      // of acc fold to the pre-block constant, dropping the dependent store.
+      // Unlike the uncertain case, acc HAS a definite runtime value (the
+      // `acc = <ref>` store defines it), so CLEAR the stale trivial (empty
+      // bundle → fold_ref returns nullopt, no scalar-value propagation) — reads
+      // after the block emit the `acc` wire. Straight-line same-scope
+      // reassignments don't need this: SSA versions them.
+      st.set(lhs_text, std::make_shared<Bundle>(std::string(lhs_text)));
     }
   } else if (is_type(Lnast_ntype::Lnast_ntype_const)) {
     Const v = current_pyrope_value();
@@ -1246,6 +1264,9 @@ void uPass_constprop::process_tuple_add() {
   // scalar (single positional entry, which is_scalar() can't distinguish
   // from a true scalar). See process_tuple_concat.
   tuple_typed_names.insert(dst);
+  // Loop-migration (Step 1): rebuild dst's slot→ref map from scratch (the
+  // bundle is rebuilt from the entries below).
+  tuple_slot_ref_.erase(dst);
 
   // Function-name detection helper: when a ref's text names a function in
   // the registry, store the qualified function name as a string Const into
@@ -1276,8 +1297,9 @@ void uPass_constprop::process_tuple_add() {
         // that scalar so `!(p is yy)` folds over the 1-element bundle. Only
         // runner_fold_fn (NOT st.has_trivial), so constprop's own trivials keep
         // their original bundle-only behavior.
+        auto                 sub = st.get_bundle(txt);
         std::optional<Const> xfold;
-        if (!st.get_bundle(txt) && runner_fold_fn) {
+        if (!sub && runner_fold_fn) {
           if (auto f = runner_fold_fn(txt); f && !f->is_invalid()) {
             xfold = *f;
           }
@@ -1285,7 +1307,14 @@ void uPass_constprop::process_tuple_add() {
         if (xfold) {
           bundle->set(slot, *xfold);
         } else {
-          bundle->set(slot, st.get_bundle(txt));
+          bundle->set(slot, sub);
+          // Loop-migration (Step 1): a RUNTIME scalar slot (no sub-bundle, no
+          // comptime fold) — the bundle just stored null, so remember the
+          // source ref. The runner rewrites a later `t[slot]` / `for x in t`
+          // into a copy `dst = ref`. Comptime slots are left to the normal fold.
+          if (!sub) {
+            tuple_slot_ref_[dst][slot] = std::string(txt);
+          }
         }
       }
       ++unnamed_pos;
@@ -1301,7 +1330,11 @@ void uPass_constprop::process_tuple_add() {
       } else if (is_type(Lnast_ntype::Lnast_ntype_ref)) {
         const auto txt = current_text();
         if (!try_store_fn_name(key, txt)) {
-          bundle->set(key, st.get_bundle(txt));
+          auto sub = st.get_bundle(txt);
+          bundle->set(key, sub);
+          if (!sub) {
+            tuple_slot_ref_[dst][key] = std::string(txt);  // Step 1: runtime named-slot ref
+          }
         }
       }
       move_to_parent();
@@ -3793,6 +3826,57 @@ std::optional<std::pair<Const, Const>> uPass_constprop::provide_range(std::strin
     return std::nullopt;
   }
   return it->second;
+}
+
+std::optional<std::string> uPass_constprop::provide_tuple_slot_ref(std::string_view name, std::string_view slot) {
+  auto it = tuple_slot_ref_.find(std::string(name));
+  if (it == tuple_slot_ref_.end()) {
+    return std::nullopt;
+  }
+  auto sit = it->second.find(std::string(slot));
+  if (sit == it->second.end()) {
+    return std::nullopt;
+  }
+  return sit->second;
+}
+
+std::optional<std::vector<std::pair<std::string, bool>>> uPass_constprop::provide_tuple_shape(std::string_view name) {
+  // Merge the bundle's comptime top-level slots with any runtime-only slots
+  // (tuple_slot_ref_), dedup, and order positional (numeric asc) before named
+  // (alpha) so `for x in t` iterates a stable, source-like order.
+  std::vector<std::pair<std::string, bool>> out;
+  std::set<std::string>                     seen;
+  auto                                      is_positional = [](const std::string& k) {
+    return !k.empty() && k.find_first_not_of("0123456789") == std::string::npos;
+  };
+  if (auto b = st.get_bundle(std::string(name)); b) {
+    for (const auto& tl : b->top_levels()) {
+      std::string key = tl.pos >= 0 ? std::to_string(tl.pos) : std::string(tl.name);
+      if (!key.empty() && seen.insert(key).second) {
+        out.emplace_back(key, is_positional(key));
+      }
+    }
+  }
+  if (auto it = tuple_slot_ref_.find(std::string(name)); it != tuple_slot_ref_.end()) {
+    for (const auto& [slot, _] : it->second) {
+      if (seen.insert(slot).second) {
+        out.emplace_back(slot, is_positional(slot));
+      }
+    }
+  }
+  if (out.empty()) {
+    return std::nullopt;
+  }
+  std::stable_sort(out.begin(), out.end(), [](const auto& a, const auto& b) {
+    if (a.second != b.second) {
+      return a.second;  // positional entries before named
+    }
+    if (a.second) {  // both positional: numeric order via length-then-lex
+      return a.first.size() != b.first.size() ? a.first.size() < b.first.size() : a.first < b.first;
+    }
+    return a.first < b.first;  // both named: alphabetical
+  });
+  return out;
 }
 
 void uPass_constprop::process_sext() {

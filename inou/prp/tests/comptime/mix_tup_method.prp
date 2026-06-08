@@ -1,0 +1,24 @@
+/*
+:name: mix_tup_method
+:type: comptime
+:verifier_pass: 2
+:verifier_fail: 0
+*/
+
+// Correct replacement for the (now illegal) "the named mod IS the constructor"
+// form `mut y:Mix_tup = mix_tup_init` (see errors/mix_tup.prp). The constructor
+// lives inside the type as an `init` method; construction runs it.
+
+type Mix_tup = (
+  mut flag:bool = false,
+  mut state:u2,
+  comb init(ref self) {
+    self.flag  = true
+    self.state = 2
+  }
+)
+
+mut y:Mix_tup = nil   // init runs at construction
+
+cassert(y.flag)
+cassert(y.state == 2)

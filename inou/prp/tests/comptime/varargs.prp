@@ -1,0 +1,24 @@
+/*
+:name: varargs
+:type: comptime
+:verifier_pass: 5
+:verifier_fail: 0
+*/
+
+// Task 1p — var-args `comb` templates inline at the call site. The leftover
+// actuals gather into the var-arg param: positional → `args[i]`, named →
+// `args.NAME`. The count is comptime-known, so indexed/named reads fold.
+
+comb add1(...x) -> (r) { r = x[0] + x[1] + x[2] }        // all-positional var-args
+comb g(base, ...rest) -> (r) { r = base + rest[0] + rest[1] }  // fixed leading + var-args tail
+comb ff(...args) -> (r) { r = args.lo + args.hi }        // named leftovers
+comb h(...xs) -> (r) { r = xs[0] }                       // variable gather count
+
+const a = add1(1, 2, 3)
+cassert(a == 6)
+const b = g(10, 20, 30)
+cassert(b == 60)
+const c = ff(lo=4, hi=5)
+cassert(c == 9)
+cassert(h(7) == 7)
+cassert(h(7, 8, 9) == 7)

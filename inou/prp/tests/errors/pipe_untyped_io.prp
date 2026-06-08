@@ -1,8 +1,15 @@
 /*
 :name: pipe_untyped_io
 :type: error
-:error: has no explicit type
-:help: declare an explicit type
+:error: has no declared type
+:help: annotate the actual
 */
 
-pipe[2] f(a) -> (c:u8) { c = a }   // locate_error_here
+// Task 1p — an untyped `pipe` input is a deferred template, not a
+// definition-time error. The error is the UNTYPED actual (the literal `7`)
+// feeding the template boundary at the call site (decision 4).
+pipe[2] f(a) -> (c:u8) { c = a }
+
+mod top() -> (z:u8@[2]) {
+  stage[2] z = f(7)
+}

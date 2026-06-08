@@ -346,7 +346,8 @@ protected:
   // declared landing cycle on mod). Tuple-literal contexts leave them unset
   // and skip every interface check.
   void emit_arg_assign(const Lnast_nid& tuple_parent, TSNode typed_ident, TSNode definition_or_null, bool is_ref_mod,
-                       std::vector<Param_attr>* attrs_out = nullptr, std::string_view lambda_kind = {}, bool is_io_output = false);
+                       std::vector<Param_attr>* attrs_out = nullptr, std::string_view lambda_kind = {}, bool is_io_output = false,
+                       bool is_vararg_mod = false);
   void emit_arg_type(const Lnast_nid& assign_parent, TSNode type_node);
 
   // Task 1r — current lambda-kind context while processing a body ("comb" /
