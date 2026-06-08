@@ -58,7 +58,8 @@ private:
   void write_top();
   void write_stmts();
   void write_if();
-  void write_store();  // task 1t — store(var, level0..levelN, value)
+  void write_declare();  // task 1t — declare(ref, type, qualifier, [value])
+  void write_store();    // task 1t — store(var, level0..levelN, value)
   void write_ref();
   void write_const();
   void write_cassert();
@@ -76,6 +77,11 @@ private:
   void write_prefix_unary(std::string_view op);
   // sext — no Pyrope operator; emit as call with comment
   void write_sext();
+
+  // Serialises a type node (cursor must sit on the type child) into a Pyrope
+  // type suffix without moving the cursor: "" for prim_type_none, "bool",
+  // "string", or "int"/"uN"/"sN" reconstructed from a prim_type_int range.
+  std::string render_type();
 
   // ── Declaration tracking ─────────────────────────────────────────────────
   // Maps a variable name to its pending storage-class keyword ("mut", "reg",

@@ -3,6 +3,7 @@
 #include "lnast_prp_writer.hpp"
 
 #include <format>
+#include <optional>
 #include <string>
 
 // ── Constructor ───────────────────────────────────────────────────────────────
@@ -91,6 +92,7 @@ void Lnast_prp_writer::write_node() {
     case N::Lnast_ntype_top         : write_top(); break;
     case N::Lnast_ntype_stmts       : write_stmts(); break;
     case N::Lnast_ntype_if          : write_if(); break;
+    case N::Lnast_ntype_declare     : write_declare(); break;
     case N::Lnast_ntype_store       : write_store(); break;
     case N::Lnast_ntype_ref         : write_ref(); break;
     case N::Lnast_ntype_const       : write_const(); break;
@@ -143,6 +145,18 @@ void Lnast_prp_writer::write_top() {
 }
 
 void Lnast_prp_writer::write_stmts() {
+  // A `stmts` whose parent is itself a `stmts` is a bare lexical block — it is
+  // what a constant-folded `if true { … }` collapses to (see the runner splice)
+  // or any `{ … }` scope.  It MUST be wrapped in braces: flattening it would
+  // merge its declarations into the enclosing scope and trip Pyrope's
+  // no-shadowing / no-redeclaration rule (e.g. an arm-local `mut d` colliding
+  // with a later top-level `mut d`).  The file-level stmts (parent == top) and
+  // if/loop bodies (the if/loop writer emits their own braces) are NOT wrapped.
+  const bool scoped = !nid_stack.empty() && lnast->get_type(nid_stack.top()) == Lnast_ntype::Lnast_ntype_stmts;
+  if (scoped) {
+    print("{\n");
+    ++depth;
+  }
   if (move_to_child()) {
     do {
       print_indent();
@@ -150,6 +164,11 @@ void Lnast_prp_writer::write_stmts() {
       os << "\n";
     } while (move_to_sibling());
     move_to_parent();
+  }
+  if (scoped) {
+    --depth;
+    print_indent();
+    print("}");
   }
 }
 
@@ -208,6 +227,110 @@ void Lnast_prp_writer::write_if() {
   }
 
   move_to_parent();
+}
+
+// ── declare ─────────────────────────────────────────────────────────────────
+
+// Task 1t — `declare( ref(var), type_decl, const(qualifier), [value] )`.
+// Emitted as a standalone Pyrope declaration `<qualifier> var[:type][ = value]`.
+// In post-uPass LNAST the initial value is a SEPARATE `store` statement, so most
+// declares carry no value child; the following `store(var, value)` then prints a
+// plain `var = value` re-bind of the just-declared mut/const variable.  Emitting
+// the declaration on its own line (rather than folding the keyword into the next
+// write) is what keeps value-less declares — bare `var x:u8`, fully-folded
+// `const z` — present so later reads still resolve.
+void Lnast_prp_writer::write_declare() {
+  if (!move_to_child()) {
+    return;
+  }
+  auto lhs = strip_prefix(current_text());  // ref(var)
+
+  std::string type_suffix;
+  if (move_to_sibling()) {
+    type_suffix = render_type();  // type_decl — read-only, leaves the cursor put
+  }
+
+  std::string kw = "mut";  // storage class; default to the permissive `mut`
+  if (move_to_sibling()) {
+    auto qualifier = current_text();  // const(qualifier): "mut"/"const"/"mut wrap"/…
+    if (!qualifier.empty()) {
+      kw = std::string(qualifier);
+    }
+  }
+
+  const bool has_value = move_to_sibling();  // optional inline init
+
+  print(kw);
+  print(" ");
+  print(lhs);
+  if (!type_suffix.empty()) {
+    print(":");
+    print(type_suffix);
+  }
+  if (has_value) {
+    print(" = ");
+    write_node();
+  }
+  move_to_parent();
+}
+
+// File-local: parse a const's text (decimal, or 0x… hex, with optional sign)
+// into a signed value.  Returns nullopt on any trailing junk / overflow.
+static std::optional<long long> parse_int_const(std::string_view s) {
+  if (s.empty()) {
+    return std::nullopt;
+  }
+  try {
+    size_t    pos = 0;
+    long long v   = std::stoll(std::string(s), &pos, 0);
+    if (pos != s.size()) {
+      return std::nullopt;
+    }
+    return v;
+  } catch (...) {
+    return std::nullopt;
+  }
+}
+
+std::string Lnast_prp_writer::render_type() {
+  using N = Lnast_ntype;
+  switch (current_ntype()) {
+    case N::Lnast_ntype_prim_type_none  : return {};
+    case N::Lnast_ntype_prim_type_bool  : return "bool";
+    case N::Lnast_ntype_prim_type_string: return "string";
+    case N::Lnast_ntype_prim_type_int   : {
+      // prim_type_int( [max], [min] ) — both children optional (absent ⇒ unbounded).
+      auto c_max = lnast->get_child(cur);
+      if (c_max.is_invalid()) {
+        return "int";  // unbounded integer
+      }
+      auto c_min = lnast->get_sibling_next(c_max);
+      if (c_min.is_invalid()) {
+        return "int";  // single-sided bound — no clean uN/sN spelling
+      }
+      auto maxv = parse_int_const(lnast->get_name(c_max));
+      auto minv = parse_int_const(lnast->get_name(c_min));
+      if (maxv && minv) {
+        if (*minv == 0 && *maxv >= 0) {
+          // Unsigned uN: min == 0, max == 2^N - 1.
+          for (int n = 1; n < 63; ++n) {
+            if (*maxv == ((1LL << n) - 1)) {
+              return "u" + std::to_string(n);
+            }
+          }
+        } else if (*minv < 0) {
+          // Signed sN: min == -2^(N-1), max == 2^(N-1) - 1.
+          for (int n = 2; n < 63; ++n) {
+            if (*maxv == ((1LL << (n - 1)) - 1) && *minv == -(1LL << (n - 1))) {
+              return "s" + std::to_string(n);
+            }
+          }
+        }
+      }
+      return "int";  // safe, lossy fallback — `int` accepts any value and re-parses
+    }
+    default: return {};  // comp_type_* / named-type ref — not yet serialised; drop
+  }
 }
 
 // ── assign ────────────────────────────────────────────────────────────────────
