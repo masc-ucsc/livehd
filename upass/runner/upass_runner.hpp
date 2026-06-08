@@ -211,6 +211,10 @@ protected:
   // Emit a per-iteration tuple write-back `dst[index_text] = value` (3-child
   // store) as a scratch tree run through the walk — the `for i in ref d` form.
   void emit_inline_tuple_store(const std::string& dst, const std::string& index_text, const std::string& value);
+  // Emit a typed declare `mut name : int(max,min)` as a scratch tree. Used to
+  // give a for-loop iteration variable a declared type when its tuple element is
+  // a typed runtime ref (var-arg ports), so a nested specialization can type it.
+  void emit_inline_declare_typed(const std::string& name, const std::optional<Const>& max, const std::optional<Const>& min);
 
   // ── 1i comb-call inliner ────────────────────────────────────────────────
   // Called from process_lnast's func_call case. If the callee resolves to a

@@ -43,6 +43,33 @@ uPass_attributes::uPass_attributes(std::shared_ptr<upass::Lnast_manager>& _lm) :
 void uPass_attributes::begin_iteration() {
   pending_arms.clear();
   active_arm_stack.clear();
+  // 1p-runner — record typed io PORTS into type_info_map so size attributes
+  // (`.[bits]`/`.[max]`/… via derive_*) fold for a mod/pipe port the same as for
+  // a declared local. A comb param becomes an inlined local (already typed), but
+  // a mod/pipe param stays an io port; without this `b.[bits]` in a mod body's
+  // for-bound (mod_varargs_csa's blk_add) never folds and the loop can't unroll.
+  // io_meta() is populated by the SSA upass before this walk.
+  auto record_port = [&](const Lnast_io_entry& e) {
+    if (e.bits == 0 && e.kind != Io_kind::boolean) {
+      return;  // unbounded/untyped (e.g. a template port) — nothing to pin
+    }
+    auto& ti         = type_info_map[e.name];
+    ti.has_type_spec = true;
+    if (e.kind == Io_kind::boolean) {
+      ti.kind = Numeric_kind::boolean;
+      ti.bits = 1;
+    } else {
+      ti.kind = e.is_signed ? Numeric_kind::signed_int : Numeric_kind::unsigned_int;
+      ti.bits = static_cast<uint32_t>(e.bits);
+    }
+  };
+  const auto& io = lm->get_lnast()->io_meta();
+  for (const auto& e : io.inputs) {
+    record_port(e);
+  }
+  for (const auto& e : io.outputs) {
+    record_port(e);
+  }
   reg.for_each_handler([this](upass::attributes::Attribute_handler& h) { h.begin_iteration(*this); });
 }
 

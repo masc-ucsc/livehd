@@ -2721,6 +2721,26 @@ void uPass_runner::emit_inline_tuple_store(const std::string& dst, const std::st
   lm->pop_source();
 }
 
+void uPass_runner::emit_inline_declare_typed(const std::string& name, const std::optional<Const>& max,
+                                             const std::optional<Const>& min) {
+  if (!scratch_forest_) {
+    scratch_forest_ = hhds::Forest::create();
+  }
+  auto body = scratch_forest_->create_tree_temp("inl-decl");
+  auto s    = std::make_shared<Lnast>(body, "inl-decl");
+  auto root = s->set_root(Lnast_ntype::create_declare());
+  s->add_child(root, Lnast_node::create_ref(name));
+  auto pt = s->add_child(root, Lnast_ntype::create_prim_type_int());
+  s->add_child(pt, Lnast_node::create_const(max ? std::string(max->to_pyrope()) : std::string("nil")));
+  s->add_child(pt, Lnast_node::create_const(min ? std::string(min->to_pyrope()) : std::string("nil")));
+  s->add_child(root, Lnast_node::create_const("mut"));
+  flush_deferred_emits();
+  lm->push_source(s, "", 0);
+  process_lnast();  // declare dispatch → records the iter var's declared type
+  flush_deferred_emits();
+  lm->pop_source();
+}
+
 bool uPass_runner::walk_loop_iteration(const std::function<void()>& emit_binds, const std::function<void()>& emit_post) {
   // Precondition: the read cursor is on the loop body `stmts` node.
   if (inline_budget_ == 0 || loop_depth_ > static_cast<int>(kInlineMaxDepth)) {
@@ -2862,8 +2882,41 @@ void uPass_runner::unroll_for() {
       const std::string index_text = is_pos ? key : ("'" + key + "'");
       const std::string key_text   = is_pos ? std::string("''") : ("'" + key + "'");  // positional slots have no name
       const int64_t     cur_pos    = pos;
-      const bool        ok         = walk_loop_iteration(
+      // If the element is a typed runtime ref (a var-arg port, or any typed tuple
+      // slot), give the iteration variable that declared type — so a nested
+      // template specialization called with it (mod_varargs_csa: `for a in args`
+      // then `blk_add(a)`) can read its width. Comptime-value slots have no slot
+      // ref → no declare → unchanged.
+      std::optional<upass::uPass::Decl_scalar_type> elem_dt;
+      if (auto eref = try_tuple_slot_ref(iterable, key)) {
+        elem_dt = try_decl_type(*eref);
+        if (!elem_dt || (!elem_dt->range_max && !elem_dt->range_min)) {
+          // A var-arg port / module input is not in decl_type — its width lives
+          // in this tree's io_meta (mirrors the caller_input read in
+          // maybe_specialize_template_call). Build a (max,min) range from it.
+          const auto& cio = lm->get_lnast()->io_meta();
+          for (const auto& ie : cio.inputs) {
+            if (ie.name != *eref || ie.bits == 0) {
+              continue;
+            }
+            upass::uPass::Decl_scalar_type dt;
+            if (ie.is_signed) {
+              dt.range_max = *Dlop::get_mask_value(ie.bits - 1);
+              dt.range_min = *Dlop::get_neg_mask_value(ie.bits - 1);
+            } else {
+              dt.range_max = *Dlop::get_mask_value(ie.bits);
+              dt.range_min = *Dlop::from_pyrope("0");
+            }
+            elem_dt = dt;
+            break;
+          }
+        }
+      }
+      const bool ok = walk_loop_iteration(
           [&]() {
+            if (elem_dt && (elem_dt->range_max || elem_dt->range_min)) {
+              emit_inline_declare_typed(tagged_i, elem_dt->range_max, elem_dt->range_min);
+            }
             emit_inline_tuple_pick(tagged_i, iterable, index_text);  // value = t[index]
             if (!idx_var.empty()) {
               emit_inline_binding(idx_var, Lnast_node::create_const(std::to_string(cur_pos)));  // idx = position
