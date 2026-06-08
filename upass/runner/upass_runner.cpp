@@ -3275,9 +3275,7 @@ void uPass_runner::dead_code_eliminate_staging() {
   // Only run DCE when constprop is active. DCE relies on its fold to
   // settle if-bodies and tuple_get expansions; without it the runner's
   // branch-elimination hasn't pruned dead arms and the use-count would
-  // be wildly off. Skip on func_extract-spawned function bodies: their
-  // outputs are consumed externally and would look unreferenced from
-  // inside-the-body alone.
+  // be wildly off.
   bool has_constprop = false;
   for (auto& e : upasses) {
     if (e.name == "constprop") {
@@ -3285,10 +3283,74 @@ void uPass_runner::dead_code_eliminate_staging() {
       break;
     }
   }
-  if (!has_constprop || is_function_body_) {
+  if (!has_constprop) {
+    return;
+  }
+  // Skip ONLY comb function bodies extracted for inlining: the inliner
+  // virtual-splices them from the (pre-rewrite) registry copy and the
+  // standalone tree is dropped, so sweeping it is wasted and could perturb
+  // the copy a later caller inlines. mod/pipe/fluid units — concrete defs
+  // AND specialized clones (1p) — ARE the final output, so they must be
+  // swept (1d hybrid): without this they kept dead post-unroll scaffolding
+  // (the var-arg reconstruction tuple_add, a folded `.[bits]` attr_get)
+  // that tolg then warned on. Templates never materialize (guarded by
+  // materialize_ at the call site), so they don't reach here. The io-root
+  // named-var rule below relies on io_meta being populated (SSA ran).
+  if (is_function_body_ && lm->get_lnast()->get_lambda_kind() == "comb") {
     return;
   }
   using N = Lnast_ntype;
+
+  // Root set for user-named (non-temp) defs. The 1d model: variables cannot
+  // declare outputs, so function IO is the authoritative named-var root set;
+  // state elements (mut/reg declarations) are the other roots. Any OTHER
+  // user var whose in-tree readers all vanished is dead — e.g. the var-arg
+  // reconstruction `args = (args__0, …)` once the for-loop unrolled into
+  // direct port reads. (Outputs are written but never read in-tree, so
+  // without the io_meta root they'd be mis-swept — this is why the rule is
+  // root-based, not "keep all named vars".)
+  //
+  // GUARD: dropping a named var is only sound when the complete IO set is
+  // KNOWN, i.e. SSA populated io_meta. That happens for func_extract'd
+  // bodies (mod/pipe/fluid units + the specialized clones), not for the
+  // file-level shell tree or a synthetic unit test that drives the runner
+  // without SSA. When the IO set is unknown, fall back to the conservative
+  // "keep every named var" behaviour (only temps are swept) so an output
+  // we can't see is never deleted.
+  const auto& io               = lm->get_lnast()->io_meta();
+  const bool  io_known         = !io.inputs.empty() || !io.outputs.empty();
+  const bool  allow_named_drop = is_function_body_ && io_known;
+
+  absl::flat_hash_set<std::string> protected_names;
+  {
+    for (const auto& e : io.inputs) {
+      protected_names.insert(e.name);
+    }
+    for (const auto& e : io.outputs) {
+      protected_names.insert(e.name);
+    }
+    for (auto node : staging->depth_preorder(staging->get_root())) {
+      if (node.is_invalid() || staging->get_type(node) != N::Lnast_ntype_declare) {
+        continue;
+      }
+      auto nm = staging->get_first_child(node);  // child0: declared var
+      if (!nm.is_valid() || staging->get_type(nm) != N::Lnast_ntype_ref) {
+        continue;
+      }
+      auto ty = staging->get_sibling_next(nm);  // child1: type subtree
+      if (!ty.is_valid()) {
+        continue;
+      }
+      auto mode = staging->get_sibling_next(ty);  // child2: storage-class const
+      if (!mode.is_valid() || staging->get_type(mode) != N::Lnast_ntype_const) {
+        continue;
+      }
+      const auto m = staging->get_name(mode);
+      if (m == "mut" || m == "reg") {
+        protected_names.insert(std::string(staging->get_name(nm)));
+      }
+    }
+  }
 
   // Compute the live-statement set via iterative liveness on the
   // staging tree, then rebuild a fresh tree containing only the live
@@ -3388,13 +3450,16 @@ void uPass_runner::dead_code_eliminate_staging() {
       if (!fc.is_valid() || staging->get_type(fc) != N::Lnast_ntype_ref) {
         continue;
       }
-      // Only DCE temporary defs (`___N`). User-named variables (out, tmp,
-      // alt …) may be observable outputs or have meaning to downstream
-      // consumers that DCE can't see (IO ports lose their `%`/`$` prefix
-      // by the time they hit staging). Dropping a user-named def with no
-      // in-tree readers would silently delete writes the user intended.
+      // Temporary defs (`___N`) are always droppable when unread. A
+      // user-named def is droppable only when it is NOT a root: not function
+      // IO (io_meta) and not a mut/reg state element. This is the 1d io-root
+      // rule — `protected_names` holds exactly those roots. Outputs are the
+      // motivating case for the io_meta half (written, never read in-tree, so
+      // they'd be mis-swept without the root); the var-arg reconstruction
+      // `args = (args__0, …)` is the motivating case for the drop (non-IO,
+      // non-state, zero readers once the for-loop unrolled into port reads).
       const auto fc_name = staging->get_name(fc);
-      if (!Lnast::is_tmp(fc_name)) {
+      if (!Lnast::is_tmp(fc_name) && (!allow_named_drop || protected_names.contains(std::string(fc_name)))) {
         continue;
       }
       auto it = use_count.find(std::string(fc_name));
