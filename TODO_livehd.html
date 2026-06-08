@@ -138,6 +138,38 @@ cross-file dependencies stay visible. The former <code>TODO_mod.md</code>
   defs for free, and sinks defs near their uses. In compiler terms this is late
   scheduling of a sea-of-nodes / partial dead-code elimination (refs in the
   comment block: Click GCM, Knoop-Rüthing-Steffen PDE/LCM, SSA-DCE, SCCP, VDG).</p>
+<p><strong>STATUS 2026-06-08 — D1 + pragmatic hybrid LANDED; full sea-of-nodes deferred.</strong>
+  Two findings reshaped this: (1) the <code>demand-first</code> half already exists —
+  <a href="upass/coalescer/upass_coalescer.cpp"><code>uPass_coalescer</code></a> (active by
+  default whenever the tree materializes) parks every pure scalar drop-candidate by
+  LHS, flushes on first read via <code>runner_emit_at_fn</code> (materialize-at-use), does
+  DSE on overwrite, and drops a def constprop proved const — exactly the floating-pure-def
+  model. (2) Fully <em>retiring</em> the post-walk sweep is blocked by an architectural
+  wall: the runner unrolls <code>for a in args</code> into direct <code>args__i</code> port reads,
+  so the reconstruction tuple's deadness exists ONLY in the staging tree AFTER unrolling
+  — and the coalescer's boundary flush (incl. <code>process_for</code>) fires BEFORE that
+  rewrite, so no forward-emit scheme can see it. Post-unroll deadness is intrinsically a
+  post-emit property here; the only true fix is a unified demand-scheduled sea-of-nodes IR
+  (a far larger rewrite). So the landed shape is a hybrid:
+  <ul>
+    <li><strong>D1 (commit 13468f1a3):</strong> <code>range</code> added to <code>dce_is_def_producing</code>
+      so dead comptime ranges are swept (kills the <code>bitset.prp</code> <code>range ___22</code> leak).</li>
+    <li><strong>hybrid A (commit ad7dc84f7):</strong> the post-walk sweep is now COMPLETE as the
+      post-emit liveness backstop — it runs on mod/pipe/fluid units (skips only comb
+      func-extract bodies the inliner consumes from the registry), and drops user-named defs
+      that are not roots via the io-root rule (root = io_meta IO ∪ mut/reg declares),
+      guarded by <code>is_function_body_ &amp;&amp; io_meta-populated</code> so an unseen output
+      is never deleted. Clears the <code>mod_varargs_*</code> tolg <code>unhandled node type</code> warnings.</li>
+    <li><strong>hybrid B (commit cef43a0ba):</strong> parked <code>is</code> in the coalescer (the
+      one safe scalar drop-candidate it was missing). range/tuple_add/attr_get are
+      deliberately NOT parked — C_OP/aliasing-barrier and, per the wall above, parking buys
+      no output change (flushed at the next boundary, swept anyway).</li>
+  </ul>
+  <strong>Remaining (aspirational D2/D3 as originally written = sea-of-nodes):</strong> unify
+  unrolling + demand scheduling so deadness is intrinsic and the post-walk rebuild truly
+  disappears; LCA placement for cross-branch uses; extend the coalescer to all pure defs.
+  D4 (arrays) still future-gated. The sweep is the architecturally-necessary post-emit pass
+  until that rewrite lands.</p>
 </li>
 </ul>
 <p><strong>Motivating symptom.</strong> A comptime bit-range write leaks an unresolved <code>range</code>
