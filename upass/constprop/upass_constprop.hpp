@@ -130,7 +130,7 @@ protected:
   static inline std::vector<Pending_import>      pending_imports_;
   static inline std::unordered_set<std::string>  ambiguous_units_;
 
-  // Task 1m — resolve a live `import` call (docs/contracts/task_1m_plan.md):
+  // Task 1m — resolve a live `import` call (the LiveHD docs):
   // cursor sits on the const "import" callee; binds `dst` (tuple form → pub
   // namespace bundle; `ln:` url → lambda tree-name string) or records a
   // pending import and leaves the call unfolded.

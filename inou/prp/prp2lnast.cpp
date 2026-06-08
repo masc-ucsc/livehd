@@ -1390,7 +1390,7 @@ std::vector<int64_t> Prp2lnast::extract_array_dims(TSNode type_cast_node) const 
   return out;
 }
 
-// Task 1m — validate a `pub` value declaration (docs/contracts/task_1m_plan.md
+// Task 1m — validate a `pub` value declaration (the LiveHD docs
 // §1): only file-scope `const` (optionally `comptime`) declarations are
 // exportable. `pub mut`/`pub reg` contradict the read-only export semantics.
 void Prp2lnast::check_pub_value_decl(TSNode decl_node, std::string_view kind) {
@@ -3656,7 +3656,7 @@ void Prp2lnast::process_type_statement(TSNode n) {
 // import-argument validation.
 static std::string unescape_cooked_string(std::string_view raw);
 
-// Task 1m — the `import` builtin (docs/contracts/task_1m_plan.md §1).
+// Task 1m — the `import` builtin (the LiveHD docs §1).
 // Returns the unquoted body when `n` is a plain comptime string literal
 // expression — `'…'` (raw) or `"…"` with no `{…}` interpolation — else nullopt.
 std::optional<std::string> Prp2lnast::plain_string_literal_text(TSNode n) {

@@ -1189,7 +1189,7 @@ void uPass_constprop::harvest_pub_values() {
   const auto& ln = lm->get_lnast();
 
   // A pub value must fold to a comptime constant when its file is elaborated
-  // (docs/contracts/task_1m_plan.md §1) — reject at the exporting side.
+  // (the LiveHD docs §1) — reject at the exporting side.
   auto fail = [&](std::string_view name, std::string_view why) {
     auto msg = std::format("pub `{}` of unit `{}` is not comptime-foldable ({})", name, ln->get_top_module_name(), why);
     livehd::diag::sink().emit(livehd::diag::Diagnostic{.severity = livehd::diag::Severity::error,
@@ -2565,7 +2565,7 @@ bool uPass_constprop::try_eval_mux_cell_call(std::string_view dst, std::string_v
 bool uPass_constprop::try_eval_cell_call(std::string_view dst, std::string_view fname, const std::vector<Call_actual>& actuals) {
   // `__name(...)` direct cell-op call. Strip the `__` prefix and dispatch
   // against the Ntype_op kernel set. Operands are positional and follow the
-  // pin order from cell.cpp (see also docs/contracts/lnast2lgraph.md).
+  // pin order from cell.cpp (see also the LiveHD docs).
   if (fname.size() < 3 || fname[0] != '_' || fname[1] != '_') {
     return false;
   }
@@ -2771,7 +2771,7 @@ bool uPass_constprop::try_eval_cell_call(std::string_view dst, std::string_view 
 }
 
 // Task 1m — resolve a live `import("…")` call against the function registry
-// (docs/contracts/task_1m_plan.md §1/§2). The cursor sits on the const
+// (the LiveHD docs §1/§2). The cursor sits on the const
 // "import" callee; the next sibling is the const import string.
 //
 //   import("unit")        — the whole pub tuple: bind `dst` to a namespace

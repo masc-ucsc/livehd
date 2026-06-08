@@ -1,0 +1,92 @@
+:root {
+  --bg:#ffffff; --fg:#24292f; --muted:#57606a; --border:#d0d7de;
+  --soft:#f6f8fa; --accent:#0969da; --accent-bg:#ddf4ff;
+  --idbg:#0969da; --idfg:#ffffff; --notebg:#fff8c5; --notefg:#7d4e00;
+  --codefg:#1f2328;
+}
+@media (prefers-color-scheme: dark) {
+  :root {
+    --bg:#0d1117; --fg:#e6edf3; --muted:#8b949e; --border:#30363d;
+    --soft:#161b22; --accent:#58a6ff; --accent-bg:#13233b;
+    --idbg:#1f6feb; --idfg:#ffffff; --notebg:#3b2f00; --notefg:#f2cc60;
+    --codefg:#e6edf3;
+  }
+}
+* { box-sizing:border-box; }
+html { scroll-behavior:smooth; }
+body {
+  margin:0; background:var(--bg); color:var(--fg);
+  font:16px/1.6 -apple-system,BlinkMacSystemFont,"Segoe UI",Helvetica,Arial,sans-serif;
+}
+nav {
+  position:sticky; top:0; z-index:10; background:var(--soft);
+  border-bottom:1px solid var(--border); padding:.55rem 1rem;
+  display:flex; gap:.4rem; flex-wrap:wrap; align-items:center;
+  backdrop-filter:saturate(180%) blur(6px);
+}
+nav .brand { font-weight:700; margin-right:.6rem; color:var(--muted); }
+nav a {
+  text-decoration:none; color:var(--fg); padding:.25rem .7rem;
+  border-radius:6px; border:1px solid transparent; font-size:.92rem;
+}
+nav a:hover { background:var(--accent-bg); }
+nav a.active { background:var(--accent); color:#fff; border-color:var(--accent); }
+main { max-width:920px; margin:0 auto; padding:2rem 1.25rem 5rem; }
+h1,h2,h3,h4 { line-height:1.25; font-weight:600; }
+h1 { font-size:1.9rem; padding-bottom:.3em; border-bottom:1px solid var(--border); }
+h2 { font-size:1.45rem; margin-top:2.2rem; padding-bottom:.3em; border-bottom:1px solid var(--border); }
+h3 { font-size:1.2rem; margin-top:1.6rem; }
+a { color:var(--accent); }
+ul { padding-left:1.4rem; }
+li { margin:.28rem 0; }
+li > ul { margin-top:.28rem; }
+code {
+  background:var(--soft); color:var(--codefg); padding:.12em .4em;
+  border-radius:5px; font-size:.88em;
+  font-family:ui-monospace,SFMono-Regular,"SF Mono",Menlo,Consolas,monospace;
+}
+pre {
+  background:var(--soft); border:1px solid var(--border); border-radius:8px;
+  padding:1rem; overflow:auto; line-height:1.45;
+}
+pre code { background:none; padding:0; font-size:.85em; }
+table { border-collapse:collapse; width:100%; margin:1rem 0; font-size:.94rem; }
+th,td { border:1px solid var(--border); padding:.45rem .7rem; text-align:left; vertical-align:top; }
+th { background:var(--soft); }
+tr:nth-child(even) td { background:var(--soft); }
+blockquote { margin:1rem 0; padding:.2rem 1rem; color:var(--muted); border-left:4px solid var(--border); }
+/* task-id markers */
+strong.item-id {
+  display:inline-block; background:var(--idbg); color:var(--idfg);
+  font-weight:700; padding:.02em .5em; border-radius:6px; font-size:.82em;
+  letter-spacing:.02em; scroll-margin-top:4rem;
+}
+strong.item-id::before { content:"#"; opacity:.55; margin-right:.08em; }
+li:target { background:var(--accent-bg); border-radius:6px;
+  box-shadow:0 0 0 .5rem var(--accent-bg); }
+strong.item-id:target { outline:2px solid var(--accent); }
+/* cross-reference links */
+a.xref {
+  text-decoration:none; background:var(--accent-bg); color:var(--accent);
+  font-weight:600; padding:.02em .45em; border-radius:6px; font-size:.85em;
+  border:1px solid transparent;
+}
+a.xref:hover { border-color:var(--accent); }
+a.xref::before { content:"→ "; opacity:.6; }
+.xref-note {
+  background:var(--notebg); color:var(--notefg); font-weight:600;
+  padding:.02em .45em; border-radius:6px; font-size:.8em; cursor:help;
+}
+.xref-note::before { content:"✎ "; opacity:.7; }
+/* topic + status chips on the index */
+.topic { margin-top:2.4rem; }
+.status { font-size:.78em; font-weight:600; padding:.02em .45em; border-radius:6px;
+  background:var(--soft); border:1px solid var(--border); color:var(--muted); }
+.status.landed { color:#1a7f37; border-color:#1a7f37; }
+@media (prefers-color-scheme: dark) { .status.landed { color:#3fb950; border-color:#2ea043; } }
+/* standardized task-page subtask lists */
+ul.subtasks { padding-left:1.2rem; }
+ul.subtasks > li { margin:.5rem 0; }
+ul.subtasks > li > strong:first-child { color:var(--accent); }
+footer { max-width:920px; margin:0 auto; padding:0 1.25rem 3rem;
+  color:var(--muted); font-size:.85rem; }

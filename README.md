@@ -58,9 +58,14 @@ generation.
 Contributors are welcome to the LiveHD project. This project is led by the
 [MASC group](https://masc.soe.ucsc.edu) from UCSC.
 
-There is a list of available [projects.md](docs/projects.md) to further improve
-LiveHD. If you want to contribute or seek for MS/undergraduate thesis projects,
-please contact renau@ucsc.edu to query about them.
+Open and pending work is tracked in the [`todo/`](todo/index.html) hub — one
+page per task, grouped by topic (LiveHD, Pyrope, Verilog). If you want to
+contribute or seek MS/undergraduate thesis projects, please contact
+renau@ucsc.edu to query about them.
+
+The repository's documentation layout (where the todo hub, directory READMEs,
+agent rules, and the external docs site live, and when to read each) is
+described in [STRUCTURE.md](STRUCTURE.md).
 
 
 You can also
@@ -117,7 +122,7 @@ to LiveHD, please send us a notification, we are glad to add your paper.
 [Pyrope](https://masc.soe.ucsc.edu/pyrope.html) is the primary HDL for LiveHD.
 LiveHD ships a **Pyrope language server (LSP)** so editors and coding agents get
 live compile diagnostics (syntax, name, type, bit-width) on `.prp` files. See
-the design at [docs/contracts/pyrope_lsp.md](docs/contracts/pyrope_lsp.md).
+the design and remaining phases in [`todo/livehd/2n.html`](todo/livehd/2n.html).
 
 ## Language server
 

@@ -9,7 +9,7 @@
 #include "lnast.hpp"
 
 // Terminal LNAST -> LGraph lowering (TODO task 1l, see
-// docs/contracts/lnast2lgraph.md).
+// the LiveHD docs).
 //
 // Lowers ONE post-upass / post-SSA function-tree Lnast into an hhds::Graph
 // ready for inou.cgen.verilog. The graph/module name is the LNAST tree name

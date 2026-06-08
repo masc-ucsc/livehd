@@ -5,7 +5,7 @@
 :verifier_fail: 0
 */
 
-// Corner cases for the new typesystem (task 1v in TODO_prp.md). These
+// Corner cases for the new typesystem (task 1v in todo/). These
 // exercise behaviors NOT covered by the phase8_*.prp suite:
 //   - using a variable as a type (`mut b:a = ...`)
 //   - structural equality across different typenames

@@ -1,7 +1,7 @@
 #!/bin/bash
 # This file is distributed under the BSD 3-Clause License. See LICENSE for details.
 #
-# Task 1m — `pub` exports + `import()` (docs/contracts/task_1m_plan.md):
+# Task 1m — `pub` exports + `import()` (the LiveHD docs):
 #  1. two-invocation flow: elaborate the exporter into an ln: dir (manifest
 #     pub index + `<unit>.__pub` wrapper), then compile an importer against it
 #     (pub-tuple values/bundles, lambda field calls inside a comb, `ln:` url
@@ -165,7 +165,7 @@ grep -q '"status":"pass"' "$W/r8.json" || fail "dead-branch result not pass: $(c
 # Nested and top-level combs reference outer-scope names bound to an imported
 # tuple. func_extract snapshots the import into each extracted body, so the
 # imported value-field / scalar reads fold INSIDE the extracted unit — the
-# import-aware half of the closure-capture rule (ex-TODO_prp entry 2j).
+# import-aware half of the closure-capture rule (ex-todo/ entry 2j).
 cat > "$W/caplib.prp" <<'EOF'
 pub const cfg = (gain=3, offset=5)
 pub const k = 100

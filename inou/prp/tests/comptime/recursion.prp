@@ -12,7 +12,7 @@
 // shape. Two flavors are exercised:
 //   - pure value computation (fibonacci, factorial)
 //   - structural network instantiation (balanced reduction tree)
-// See TODO_prp.md [[1y]].
+// See todo/ [[1y]].
 
 // ---- Pure-value recursion: Fibonacci ----
 comb fib(n) -> (r) {

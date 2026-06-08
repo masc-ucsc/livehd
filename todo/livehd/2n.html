@@ -1,0 +1,419 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>TODO 2n — Pyrope LSP server</title>
+<link rel="stylesheet" href="../todo.css">
+</head>
+<body>
+<nav><span class="brand">LiveHD TODO</span><a href="../index.html">← All tasks</a></nav>
+<main>
+<h1><strong class="item-id">2n</strong> Pyrope LSP server</h1>
+<p>Pyrope LSP server (<code>.prp</code> only — never Verilog): the <code>lhd lsp</code>
+  subcommand over LiveHD's front-end (<code>prp2lnast</code> + <code>upass</code>
+  typecheck/bitwidth + <code>core/diag</code> <span class="xref xref-note" title="note: 1z">1z</span>).
+  <strong>Primary consumer Claude Code's <code>LSP</code> tool</strong> (implement its op
+  subset first), <strong>secondary neovim</strong>. Ephemeral, per-buffer, no
+  <code>lgdb</code>; scope = the semantic server only (the tree-sitter grammar/neovim
+  queries and the <code>prpfmt</code> formatter are a separate project). Phase A has
+  landed; B–E remain.</p>
+
+<h2>Depends on</h2>
+<ul>
+<li><a class="xref" href="1f.html">1f</a> — diagnostic spans sharpen once
+  <code>source_id</code> threads through.</li>
+<li><a class="xref" href="3f.html">3f</a> — structured diagnostic codes/categories.</li>
+</ul>
+
+<h2>Subtasks — pending</h2>
+<ul class="subtasks">
+<li><strong>B — hover.</strong> Reads <code>bw_meta().ranges[name]</code> + typecheck kind
+  + declared type; needs the public accessors / kept-alive instance.</li>
+<li><strong>C — go-to-definition / references.</strong> references reuses
+  <code>read_sites_</code>; definition needs the new name→def index.</li>
+<li><strong>D — document symbols.</strong> documentSymbol (and workspaceSymbol + call
+  hierarchy as they follow).</li>
+<li><strong>E — workspace features.</strong> Packaging polish, the <code>.lsp.json</code>
+  plugin + install recipe, neovim pointer, and fold into <code>livehd lsp</code> when the
+  agent CLI lands.</li>
+</ul>
+
+<h2>Subtasks — landed</h2>
+<ul class="subtasks">
+<li><strong>A — Phase A: lhd lsp over stdio.</strong> <span class="status landed">landed</span>
+  Lifecycle, <code>textDocumentSync</code> Full,
+  <code>didOpen</code>/<code>didChange</code>/<code>didSave</code>/<code>didClose</code>,
+  <code>publishDiagnostics</code> push + pull, <code>positionEncoding</code>.</li>
+</ul>
+
+<h2>Design notes</h2>
+
+<h3>Salvaged from <code>docs/contracts/pyrope_lsp.md</code> (now retired)</h3>
+
+<p>A Language Server for <strong>Pyrope only</strong> (<code>.prp</code>) built on LiveHD's existing
+front-end. <code>lhd lsp</code> runs the server over stdio (lifecycle + <code>textDocumentSync</code>
+Full + <code>didOpen</code>/<code>didChange</code>/<code>didSave</code>/<code>didClose</code> + <code>publishDiagnostics</code>
+push <strong>and</strong> <code>textDocument/diagnostic</code> pull, with <code>positionEncoding</code>
+negotiation). Diagnostics come from <code>inou.prp |> pass.upass</code> — <code>analyze()</code> runs
+<code>prp2lnast</code> (buffer-backed ctor), then <code>Pass_upass::work</code> with
+<code>tolg:0 toln:0</code> (semacheck / typecheck / constprop / bitwidth / verifier /
+assert …), collecting every stage's records from the shared <code>core/diag</code> in-memory
+sink. Library: <code>lsp/</code> (<code>livehd::lsp::run_stdio</code>). Design contract for this task.
+Builds on the landed diagnostics foundation (<code>core/diag</code>), shares the JSONL/step
+model with the agent CLI (the LSP folds under <code>livehd lsp</code>; see
+<a class="xref" href="3y-agent.html">3y-agent</a>), and inherits source spans from
+<a class="xref" href="1f.html">1f</a> / the
+<a href="https://masc-ucsc.github.io/docs/livehd/">LiveHD docs</a> (precise for syntax
+today, sharpening as <a class="xref" href="1f.html">1f</a>/<a class="xref" href="3f.html">3f</a> land).</p>
+
+<p>Claude Code integration facts below were verified against the in-session <code>LSP</code>
+tool definition and the official docs (<code>code.claude.com/docs/en/tools-reference</code>,
+<code>/plugins-reference</code>, <code>/vs-code</code>, <code>/hooks</code>); LSP wire facts against the LSP 3.17
+spec. Treat the <code>.lsp.json</code> plugin schema as version-dependent — re-verify
+against the current Claude Code plugin reference before implementing.</p>
+
+<h3>1. Goal</h3>
+<p>A Language Server for <strong>Pyrope only</strong> (<code>.prp</code>) built on LiveHD's existing
+front-end. It must <strong>never touch the Verilog/Yosys path</strong> — <code>.v</code>/<code>.sv</code> are out of
+scope.</p>
+<p>Design priorities, in order:</p>
+<ol>
+<li><strong>Primary consumer: Claude Code.</strong> Target the exact LSP surface Claude Code's
+   built-in <code>LSP</code> tool consumes (§2). Implement that subset first.</li>
+<li><strong>Secondary consumer: neovim</strong> (<code>vim.lsp</code> / <code>nvim-lspconfig</code>).</li>
+<li><strong>One copyable binary.</strong> A single <code>livehd-lsp</code> (later also a <code>livehd lsp</code>
+   subcommand of the agent CLI) registerable with an editor.</li>
+<li><strong>Reuse, don't rebuild.</strong> Diagnostics from the landed <code>core/diag</code> Sink;
+   parsing from the shared <code>tree-sitter-pyrope</code> grammar <code>inou/prp</code> already links;
+   types/widths from <code>upass/typecheck</code> + <code>upass/bitwidth</code>; name maps seeded from
+   the ones <code>prp2lnast</code> already builds.</li>
+</ol>
+<p><strong>Scope.</strong> This contract covers the <strong>LSP server only</strong>. The <code>tree-sitter-pyrope</code>
+grammar + neovim queries, and the <code>prpfmt</code> formatter (including
+<code>textDocument/formatting</code>), are a <strong>separate project</strong> — treated here as external,
+sharing only the grammar. See §8 for the boundary.</p>
+
+<h3>2. The two consumers — which LSP methods each needs</h3>
+<p><strong>Claude Code's <code>LSP</code> tool</strong> (read straight off the in-session tool definition)
+exposes exactly: <code>goToDefinition</code>, <code>findReferences</code>, <code>hover</code>, <code>documentSymbol</code>,
+<code>workspaceSymbol</code>, <code>goToImplementation</code>, <code>prepareCallHierarchy</code>, <code>incomingCalls</code>,
+<code>outgoingCalls</code>. It also auto-reports errors/warnings after each edit
+(<code>tools-reference#lsp-tool-behavior</code>) — diagnostics is the highest-value channel
+(it stops the agent emitting invalid Pyrope). <strong>Absent</strong> from the tool surface:
+<code>completion</code>, <code>rename</code>, <code>codeAction</code>, <code>formatting</code>, <code>signatureHelp</code>,
+<code>semanticTokens</code> — so those are deprioritized for the primary target.</p>
+
+<table>
+<tr><th>LSP method</th><th>Claude Code (<code>LSP</code> tool)</th><th>neovim</th><th>priority</th></tr>
+<tr><td>diagnostics (+ lifecycle)</td><td>✅ implicit, top value</td><td>✅</td><td><strong>P0</strong></td></tr>
+<tr><td><code>hover</code></td><td>✅</td><td>✅</td><td><strong>P1</strong></td></tr>
+<tr><td><code>documentSymbol</code></td><td>✅</td><td>✅</td><td><strong>P1</strong></td></tr>
+<tr><td><code>definition</code></td><td>✅</td><td>✅</td><td><strong>P2</strong></td></tr>
+<tr><td><code>references</code></td><td>✅</td><td>✅</td><td><strong>P2</strong></td></tr>
+<tr><td><code>workspaceSymbol</code></td><td>✅</td><td>✅</td><td>P3</td></tr>
+<tr><td>call hierarchy</td><td>✅</td><td>✅</td><td>P3</td></tr>
+<tr><td><code>implementation</code></td><td>✅ (tool op)</td><td>✅</td><td><strong>skip</strong> — no Pyrope analog; return <code>[]</code> and <strong>do not advertise <code>implementationProvider</code></strong> (advertising it surfaces a dead "go to implementation" action)</td></tr>
+<tr><td><code>formatting</code></td><td>❌ not in tool</td><td>✅</td><td><strong>out of scope</strong> — separate tree-sitter/prpfmt project (§8)</td></tr>
+<tr><td><code>completion</code>/<code>rename</code>/<code>codeAction</code></td><td>❌</td><td>some</td><td>deferred</td></tr>
+</table>
+
+<p>Every method above is reachable <strong>only if <code>initialize</code> returns the matching
+provider flag</strong> in <code>ServerCapabilities</code> (§5, Phase A). The capability handshake
+is the gate for all later phases.</p>
+
+<h3>3. Capability → LiveHD data source</h3>
+<table>
+<tr><th>Method</th><th>LiveHD source</th><th>reuse caveat</th></tr>
+<tr><td>diagnostics</td><td><code>core/diag</code> <code>sink().records()</code> after the front-end (§5)</td><td>clean reuse</td></tr>
+<tr><td>hover</td><td>kind from <code>upass/typecheck</code>; width/range from <strong><code>lnast-&gt;bw_meta().ranges[name]</code></strong> — a <code>BitwidthEntry{min, max, unbounded}</code> (lnast/lnast.hpp) that <code>upass/bitwidth</code> flushes at <code>end_run</code> from its internal <code>Lnast_range</code>. <strong>Not</strong> <code>Bitwidth_range</code> (that is the separate legacy LGraph type). Keyed by <strong>post-SSA variable name</strong>, not LNAST node</td><td>name-keyed</td></tr>
+<tr><td>documentSymbol</td><td>LNAST top-level <code>declare</code>/<code>func_def</code>/register/IO nodes</td><td>clean</td></tr>
+<tr><td>references</td><td><code>read_sites_</code> (carries <code>TSNode</code> byte spans for <strong>reads</strong>) — <strong>excludes the <code>func_call</code> callee</strong>, so builtins are not recorded</td><td>usable, with the callee gap</td></tr>
+<tr><td>definition</td><td><strong>needs new work</strong> — <code>collect_defined_names</code> returns only a <code>set&lt;string&gt;</code> of names (no name→def-site map, no span); <code>attach_loc</code> runs <strong>only</strong> on cassert/func_call nodes today, <strong>not</strong> declare/store/func_def. Must add a name→definition-<code>TSNode</code> index (or extend <code>attach_loc</code> to declare/store/func_def child0)</td><td>new plumbing</td></tr>
+<tr><td>workspaceSymbol</td><td>documentSymbol indexed across all <code>.prp</code> in the workspace</td><td>new index</td></tr>
+<tr><td>call hierarchy</td><td><code>func_def</code> ↔ <code>func_call</code> graph in LNAST</td><td>new traversal</td></tr>
+</table>
+
+<p><strong>Lifecycle/visibility gap to fix:</strong> <code>read_sites_</code> and <code>collect_defined_names</code>
+are <code>protected</code>, and the only public escape (<code>get_lnast()</code>) does
+<code>std::move(lnast)</code>, gutting the instance — and <code>inou/prp</code> constructs the
+converter on the stack and destroys it immediately. The LSP must add public
+accessors and <strong>keep the <code>Prp2lnast</code> instance (or its extracted maps) alive
+per-document</strong>, not rely on the throwaway converter.</p>
+
+<p>So <code>references</code> (P2) has the raw material; <code>goToDefinition</code> (P2) is genuinely
+<strong>added plumbing</strong>, not "just byte-span plumbing on existing resolution."</p>
+
+<h3>4. Architecture: one library, multiple front-ends</h3>
+<pre><code>            ┌─────────────────────────────────────────┐
+            │  lsp/  (new library)                      │
+            │   • JSON-RPC framing (Content-Length)     │
+            │   • LSP dispatch + ServerCapabilities      │
+            │   • Pyrope_analysis driver (§5)           │
+            │   • Diagnostic→LSP, byte→Position mappers │
+            └───────────────┬───────────────────────────┘
+       reuses (no rebuild)  │
+   ┌──────────────┬─────────┴────────┬──────────────┬─────────────┐
+ inou/prp       upass/typecheck   upass/bitwidth   core/diag    rapidjson
+ (prp2lnast,    (kind)            (BitwidthEntry)  (sink,       (REQUEST
+  name maps,                                        records)     PARSE)
+  TSNode spans)
+</code></pre>
+<ul>
+<li><strong>One lib, thin main</strong>: the <code>lsp/</code> library backs the <code>lhd lsp</code> subcommand
+  (and originally the <code>lgshell --lsp</code> flag, removed with the REPL).</li>
+<li><strong>Do NOT bolt onto an interactive REPL</strong>: JSON-RPC stdio framing + a line
+  editor don't mix — the historical reason <code>lgshell --lsp</code> bypassed replxx.</li>
+<li><strong>JSON:</strong> <code>rapidjson</code> (MODULE.bazel dep; already used both ways in <code>inou/attr</code>)
+  is <strong>required for request parsing</strong> — <code>core/diag</code> is <strong>write-only</strong> (hand-rolled
+  <code>to_jsonl</code>, no parse path), so it can only optionally serve response
+  serialization, never parse.</li>
+<li><strong>Unsaved-buffer entry (near-trivial):</strong> <code>Prp2lnast(filename, module_name)</code>
+  already slurps the file into a <code>std::string</code> and calls
+  <code>ts_parser_parse_string(...)</code>. Add a constructor that takes the buffer directly
+  + a virtual filename for diagnostics — a small refactor of the existing slurp.
+  (The old <code>parse_only</code> ctor flag — stop after <code>check_parse_errors()</code> — was
+  removed 2026-06-04; a syntax-only tier (§5) would reintroduce that seam.)</li>
+</ul>
+
+<h3>5. The fast pipeline (latency is the constraint)</h3>
+<p>Re-analysis runs on (almost) every save, so the pipeline is cheap and
+<strong>Pyrope-only</strong>, stopping well before LGraph lowering. To surface every
+diagnostic the CLI would (the user's requirement), <code>analyze()</code> runs the
+<code>inou.prp |> pass.upass</code> chain in-process:</p>
+<pre><code>tree-sitter parse → prp2lnast (buffer-backed ctor) → converter.get_lnast()
+  → Eprp_var var; var.add(lnast); var.add("tolg","false"); var.add("toln","false")
+  → Pass_upass::work(var)        (DEFAULT order: verifier, semacheck, attributes,
+                                  typecheck, constprop, bitwidth, coalescer,
+                                  assert; tolg:0 = no LGraph/cgen/Yosys, toln:0 =
+                                  don't materialize the rewritten LNAST)
+  → STOP
+</code></pre>
+<p>No lnastfmt stage (goal 1h, 2026-06-05): its user-facing checks moved into
+<code>upass/semacheck</code> (read-only-attr writes, declare-once/shadowing — located
+spans via the declare/store/attr_set loc-carry chain), so lnastfmt is a
+compiler-internal structural validator with nothing to tell an end user.
+Each stage is wrapped in try/catch: a <code>Pass::error</code> throw has already flushed its
+record into the sink (<code>parser_error_int → sink.flush()</code>), and the catch keeps the
+LSP alive. (Earlier drafts ran only a reduced <code>{attributes, typecheck, bitwidth}</code>
+order; the full <code>pass.upass</code> is the landed behavior so the LSP and the
+CLI report identically.)</p>
+<p>Two tiers:</p>
+<ul>
+<li><strong>Syntax tier</strong> — stop after <code>check_parse_errors()</code>. Near-instant; on
+  <code>didChange</code>. Not implemented (the <code>parse_only</code> flag that provided it was
+  removed 2026-06-04 — reintroduce the seam if this tier ships).</li>
+<li><strong>Semantic tier</strong> — the full front-end above. On <code>didSave</code> and a <strong>debounced</strong>
+  <code>didChange</code>; superseded runs cancelled (drive cancellation off the client's
+  <code>$/cancelRequest</code>).</li>
+</ul>
+<p>State is <strong>ephemeral, per-document</strong>: no <code>@tag</code>, no <code>lgdb</code>, no persistence —
+trivially parallel across documents.</p>
+<p><strong>Text sync is a fixed Phase-A decision, not an open question.</strong> A
+diagnostics-only server still MUST advertise <code>textDocumentSync</code> or it defaults to
+<code>None</code> and receives <strong>no</strong> <code>didChange</code>/<code>didSave</code> content — the whole pipeline
+never fires. Advertise:</p>
+<pre><code>textDocumentSync = { openClose: true, change: TextDocumentSyncKind.Full (=1),
+                     save: { includeText: true } }
+</code></pre>
+<p><strong>Full</strong> sync (whole buffer each change) matches the string-rebuild driver;
+<strong>Incremental</strong> (ranged deltas + a server-side buffer copy) is explicitly out of
+scope.</p>
+
+<h3>6. Diagnostics mapping (<code>core/diag</code> → LSP)</h3>
+<p>The Sink is the single source of truth; the LSP is just another transport on it
+(the diagnostics design — see the <a href="https://masc-ucsc.github.io/docs/livehd/">LiveHD docs</a> — states: "the machine stream is the source of truth"). Run the pipeline
+with the Sink in <strong>in-memory mode</strong> — <code>set_human_stderr(false)</code> <strong>and</strong>
+<code>set_jsonl_path("off")</code> (both setters) — then read <code>records()</code> and <code>clear()</code> per
+request.</p>
+<table>
+<tr><th><code>core/diag</code> field</th><th>LSP <code>Diagnostic</code></th></tr>
+<tr><td><code>severity</code> error/warning</td><td><code>DiagnosticSeverity</code> Error/Warning</td></tr>
+<tr><td><code>severity</code> note (in <code>notes[]</code>)</td><td><code>relatedInformation</code> entry</td></tr>
+<tr><td><code>message</code></td><td><code>message</code></td></tr>
+<tr><td><code>code</code></td><td><code>code</code></td></tr>
+<tr><td><code>category</code></td><td><code>source</code> / <code>data.category</code></td></tr>
+<tr><td><code>see[]</code></td><td><code>codeDescription.href</code></td></tr>
+<tr><td><code>notes[]</code></td><td><code>relatedInformation[]</code></td></tr>
+<tr><td><code>span</code></td><td><code>range</code> (§7 conversion)</td></tr>
+</table>
+<p><strong>Span fidelity degrades gracefully</strong> but the current state is not uniform:
+<code>upass/bitwidth</code> emits <strong>fully null</strong> spans; <code>upass/typecheck</code> is null <strong>except</strong>
+cassert/func_call diagnostics, which already carry <code>file</code> + <code>start_line</code> (line
+only, no <code>start_byte</code>) via the loc-carry chain; <code>inou/prp</code> syntax diagnostics
+carry precise byte spans. So a null/line-only span is the LSP's problem to map —
+the <strong>"clamp to document start" fallback is planned LSP behavior, not something
+<code>core/diag</code> does today</strong>. The record schema is unchanged, so semantic-span
+precision sharpens automatically when <a class="xref" href="1f.html">1f</a>/<a class="xref" href="3f.html">3f</a> land — no LSP-side change.</p>
+<p><strong>Push and pull — pick one <em>per client</em>.</strong> Claude Code "auto-reports after each
+edit," but the official docs do <strong>not</strong> state the wire mechanism (server-push
+<code>publishDiagnostics</code> vs. client-pull <code>textDocument/diagnostic</code>, LSP 3.17). We
+implement <strong>both</strong> and advertise <code>diagnosticProvider</code>, but must <strong>not deliver via
+both at once</strong> — a client that supports pull <em>and</em> receives pushes shows every
+diagnostic <strong>twice</strong> (observed with neovim 0.11). So at <code>initialize</code>, if the
+client announced pull support (<code>capabilities.textDocument.diagnostic</code>), serve
+<strong>pull only</strong> and suppress <code>publishDiagnostics</code>; otherwise push. (Landed: the
+<code>g_client_pull</code> gate in <code>publish_diagnostics</code>.) The §5 debounce is a push
+concern; under pull the client schedules and the server answers on demand.</p>
+
+<h3>7. Position encoding &amp; indexing — the classic footguns</h3>
+<ul>
+<li><strong>Byte → <code>Position</code>.</strong> <code>core/diag</code> <code>Span</code> stores <strong>bytes</strong>; LSP <code>Position</code> is
+  <strong>0-based line + 0-based character</strong>. Put the one byte→(line, character)
+  resolver in <code>core/diag</code> (it is also what <code>to_text</code> needs for the carat) so the
+  text renderer, this LSP, and any future transport share it.</li>
+<li><strong>Encoding is negotiated, not chosen.</strong> LSP 3.17 defaults <code>character</code> to
+  <strong>UTF-16 code units</strong>. The server MUST read
+  <code>InitializeParams.capabilities.general.positionEncodings</code>; if it offers
+  <code>"utf-8"</code>, return <code>positionEncoding: "utf-8"</code> in <code>InitializeResult.capabilities</code>
+  — otherwise return <code>"utf-16"</code> (the mandatory default and the <strong>only</strong> legal
+  value when the client lists none). neovim supports utf-8/16/32. The negotiated
+  encoding governs <strong>every</strong> <code>Position</code>/<code>Range</code> (diagnostics, hover,
+  documentSymbol, definition/references, callHierarchy), so the byte→Position
+  resolver must be <strong>parameterized by the negotiated encoding</strong>, not static.</li>
+<li><strong>Wire vs Claude Code's tool surface.</strong> Claude Code's <code>LSP</code> <em>tool</em> takes
+  <strong>1-based</strong> line/character "as shown in editors" — that is the tool's contract
+  to the agent, <strong>not</strong> the wire. The server speaks standard 0-based LSP; the
+  +1/-1 conversion lives entirely in Claude Code's client and the server must
+  never apply it. (Verified accurate.)</li>
+</ul>
+
+<h3>8. Scope boundary — LSP server vs the separate tree-sitter/prpfmt project</h3>
+<p>Three artifacts share <strong>one grammar</strong> but are owned by <strong>two projects</strong>:</p>
+<pre><code>   tree-sitter-pyrope  ── grammar + queries/*.scm   ┐  SEPARATE PROJECT
+   prpfmt              ── C formatter over the tree  ┘  (neovim grammar/queries + formatting)
+   livehd-lsp          ── SEMANTIC layer: diagnostics + hover + nav   ← THIS contract (2n)
+</code></pre>
+<p><strong>This contract (2n) is the <code>livehd-lsp</code> semantic server only.</strong> The grammar +
+neovim queries and the <code>prpfmt</code> formatter are a <strong>separate project</strong>; 2n treats
+them as external and depends on exactly one thing from them: the <strong>shared
+<code>tree-sitter-pyrope</code> grammar</strong>, which <code>inou/prp</code>/<code>prp2lnast</code> already link and the
+LSP reuses (one parse, one <code>TSTree</code> per buffer). 2n does <strong>not</strong> ship neovim
+queries, does <strong>not</strong> embed <code>prpfmt</code>, and does <strong>not</strong> implement
+<code>textDocument/formatting</code>.</p>
+<p><strong>Relationship to the separate project:</strong></p>
+<ul>
+<li><strong>Formatting</strong> is delivered there, not here. neovim formats via <code>conform.nvim</code>
+  → <code>prpfmt</code> (or the formatter's own LSP if that project grows one); Claude Code
+  formats via a <code>PostToolUse</code> hook that runs the separate project's <code>prpfmt</code>
+  binary on <code>.prp</code> edits (Claude Code's <code>LSP</code> tool never calls <code>formatting</code>).</li>
+<li><strong>Grammar = the only shared seam.</strong> If the separate project bumps the grammar,
+  the LSP picks it up through <code>prp2lnast</code>'s parser; nothing else couples.</li>
+</ul>
+<p><strong>Handoff notes for the separate project</strong> (already-verified findings, recorded
+here so they aren't lost — not 2n work):</p>
+<ul>
+<li><code>queries/{highlights,indents,folds}.scm</code> were regenerated 2026-06-02 against the
+  current grammar (HEAD <code>795f93f</code>) and validated with <code>node_modules/.bin/tree-sitter
+  query</code>. The old set referenced ~22 defunct node names; the grammar now emits
+  <code>function_call_expression</code>/<code>tuple</code>/<code>if_expression</code>/<code>function_definition_decl</code>
+  and wraps every operator in a named <code>op_*</code>/<code>reduction_*</code> node. nvim-treesitter
+  fails the <strong>whole file</strong> on one unknown node type, so add a CI check asserting
+  every <code>(node)</code> in the queries exists in <code>src/node-types.json</code>.</li>
+<li><code>prpfmt</code> is embeddable (no file-scope globals; output via <code>st-&gt;outfile</code> <code>FILE*</code>;
+  entry <code>print_description</code>→<code>prpfmt_solve</code>→<code>prpfmt_render</code>→<code>prpfmt_free_buffer</code>
+  over a <code>PrpfmtState</code>; capture via <code>open_memstream</code>; refuses ERROR/MISSING trees).
+  Link <code>prpfmt.c</code>+<code>ir.c</code> ONLY (never its <code>src/parser.c</code> — duplicate
+  <code>tree_sitter_pyrope()</code> link clash); the <code>PyropeSymbol</code> enum in <code>prpfmt.h</code> is a
+  hand-copied <code>parser.c</code> snapshot that must be regenerated on grammar bumps.</li>
+</ul>
+
+<h3>9. Packaging / install &amp; the two Claude-Code diagnostics channels</h3>
+<ul>
+<li><strong>Binary:</strong> one <code>livehd-lsp</code> (the semantic server; no <code>prpfmt</code> — that ships
+  with the separate project).</li>
+<li><strong>Claude Code — bundle, don't require <code>$PATH</code>.</strong> The <code>.lsp.json</code> <code>command</code>
+  supports <code>${CLAUDE_PLUGIN_ROOT}</code> / <code>${CLAUDE_PROJECT_DIR}</code> substitution and an
+  <code>env</code> map, so ship the binary <strong>inside</strong> the plugin:
+  <pre><code>{ "pyrope": {
+    "command": "${CLAUDE_PLUGIN_ROOT}/bin/livehd-lsp",
+    "args": [], "transport": "stdio",
+    "extensionToLanguage": { ".prp": "pyrope" } } }
+</code></pre>
+  The key is the server name; <code>command</code> is the binary; <code>extensionToLanguage</code> maps
+  the extension to an LSP <code>languageId</code> (not to the binary). <code>${CLAUDE_PLUGIN_ROOT}</code>
+  changes on plugin update (old dir kept ~7 days) — don't store state there.
+  Reserve a bare-name-on-<code>$PATH</code> command (via a wrapper, not a <code>bazel-bin/...</code>
+  path) for system installs. Optional <code>PostToolUse</code> hook for <code>prpfmt</code>-on-save:
+  matcher <code>"Edit|Write"</code> matches by <strong>tool name only</strong>, so the hook script must
+  guard on the <code>.prp</code> extension itself and read the path from
+  <code>.tool_input.file_path</code> on stdin.</li>
+<li><strong>Two diagnostics channels in Claude Code</strong> (the design must not treat "Claude
+  Code" as monolithic):
+  <ol>
+  <li><strong>Bare CLI / neovim</strong> — the <code>LSP</code> tool drives our <code>.lsp.json</code>-registered
+     <code>livehd-lsp</code> directly. <em>This is the design's target.</em></li>
+  <li><strong>VS Code / Cursor / JetBrains</strong> — Claude reads the editor's Problems panel
+     via the built-in <code>ide</code> MCP server tool <code>mcp__ide__getDiagnostics</code>
+     (connected by <code>/ide</code>), <strong>independent of <code>.lsp.json</code></strong>. In an IDE already
+     running <code>livehd-lsp</code> as its editor LSP, diagnostics reach Claude through
+     <code>mcp__ide__getDiagnostics</code> instead of our plugin. The plugin still serves
+     case 1 and any editor without a native Pyrope LSP.</li>
+  </ol></li>
+<li><strong>neovim:</strong> point the built-in <code>vim.lsp.config</code>/<code>vim.lsp.enable</code> (neovim 0.11+,
+  superseding parts of <code>nvim-lspconfig</code>) at <code>livehd-lsp</code>. Tree-sitter
+  registration + queries and <code>conform.nvim</code> → <code>prpfmt</code> are configured by the
+  <strong>separate</strong> grammar/formatter project, not here.</li>
+</ul>
+
+<h3>10. Dependencies &amp; sequencing</h3>
+<p><strong>Present today (can start now):</strong> <code>prp2lnast</code>, <code>upass/typecheck</code>,
+<code>upass/bitwidth</code>, <code>core/diag</code> (1z landed), <code>rapidjson</code>, and the
+<code>tree-sitter-pyrope</code> grammar (via <code>prp2lnast</code>).</p>
+<p><strong>NOT ready / needs work:</strong> a name→definition index for <code>goToDefinition</code>
+(Phase C); public accessors + a kept-alive <code>Prp2lnast</code> per document (Phase B/C);
+the source-from-string constructor (Phase A, trivial).</p>
+<p><strong>Soft deps (do not block):</strong> the agent CLI (the LSP runs its own in-process pipeline,
+folds under <code>livehd lsp</code> later; see <a class="xref" href="3y-agent.html">3y-agent</a>); <a class="xref" href="1f.html">1f</a>/<a class="xref" href="3f.html">3f</a> (semantic-span precision; degrades
+gracefully).</p>
+<p><strong>Phases:</strong></p>
+<ul>
+<li><strong>A — skeleton + diagnostics (primary value). ✅ LANDED 2026-06-02.</strong> JSON-RPC
+  stdio in <code>lsp/livehd_lsp.cpp</code> (<code>run_stdio</code>), wired to <code>lhd lsp</code>
+  (<code>lhd/lhd_main.cpp</code>, 2026-06-04; originally <code>lgshell --lsp</code>, removed with
+  the REPL); fd 1 repointed to fd 2 so stray stdout can't corrupt the stream.
+  <code>initialize</code> returns <code>ServerCapabilities</code> (<code>textDocumentSync</code> Full, negotiated
+  <code>positionEncoding</code>, <code>diagnosticProvider</code>); <code>initialized</code>/<code>shutdown</code>/<code>exit</code>/
+  <code>$/cancelRequest</code>; <code>didOpen</code>/<code>didChange</code>/<code>didSave</code>/<code>didClose</code>;
+  <code>publishDiagnostics</code> push <strong>and</strong> <code>textDocument/diagnostic</code> pull. The
+  <code>Prp2lnast</code> buffer-backed ctor landed (also fixes a latent TSTree/parser leak).
+  Runs the full front-end so name/type diagnostics surface; one
+  diagnostic per run until collect-and-continue lands. <strong>Remaining for A:</strong> ship
+  the <code>.lsp.json</code> plugin; debounce <code>didChange</code>; harden against front-end crashes
+  on malformed buffers.</li>
+<li><strong>B — hover + documentSymbol</strong> (flip <code>hoverProvider</code>+<code>documentSymbolProvider</code>).
+  Hover reads <code>bw_meta().ranges[name]</code> + typecheck kind + declared type. Needs
+  the public accessors / kept-alive instance.</li>
+<li><strong>C — definition + references</strong> (flip <code>definitionProvider</code>+<code>referencesProvider</code>).
+  references reuses <code>read_sites_</code>; definition needs the <strong>new</strong> name→def index.</li>
+<li><strong>D — workspaceSymbol + call hierarchy</strong> (flip the providers).</li>
+<li><strong>E — packaging polish.</strong> <code>.lsp.json</code> plugin + <code>livehd-lsp</code> install recipe;
+  neovim <code>vim.lsp</code> pointer; fold into <code>livehd lsp</code> when the agent CLI lands. (Formatting,
+  neovim tree-sitter queries, and the <code>prpfmt</code> <code>PostToolUse</code> hook belong to the
+  separate grammar/formatter project.)</li>
+</ul>
+
+<h3>11. Non-goals</h3>
+<ul>
+<li>Verilog/SystemVerilog (<code>.v</code>/<code>.sv</code>) and the Yosys lowering path.</li>
+<li><code>completion</code>/<code>rename</code>/<code>codeAction</code>/<code>signatureHelp</code> — not in Claude Code's <code>LSP</code>
+  tool; revisit only if neovim demand justifies.</li>
+<li>LGraph elaboration, <code>lgdb</code> persistence, <code>@tag</code> state — the server is ephemeral,
+  per-buffer, front-end only.</li>
+<li><strong>tree-sitter grammar + neovim queries, and <code>prpfmt</code> formatting (incl.
+  <code>textDocument/formatting</code>)</strong> — a <strong>separate project</strong> (§8); 2n consumes only the
+  shared grammar.</li>
+</ul>
+
+<h3>12. Open decisions to lock</h3>
+<ul>
+<li><code>didChange</code> debounce interval + syntax-vs-semantic tier triggers (push side).</li>
+<li>Workspace model: single-file vs workspace-folder indexing (gates
+  <code>workspaceSymbol</code>/<code>references</code> scope).</li>
+</ul>
+<p>(Text-sync kind = <strong>Full</strong> and push+pull diagnostics are now fixed decisions in
+§5/§6, not open questions. Formatting / neovim queries are out of scope — §8.)</p>
+</main>
+<footer><a href="../index.html">← All tasks</a> · LiveHD TODO · <code>livehd</code></footer>
+</body>
+</html>

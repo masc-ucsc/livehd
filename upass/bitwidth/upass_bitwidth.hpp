@@ -27,7 +27,7 @@
 // After the run completes, end_run() flushes the computed ranges into
 // lnast->bw_meta() so the future lnast_to_lgraph can read them and set
 // bits/sign (see upass/upass.md §2 "bitwidth"; the per-node-HHDS-tree-attr +
-// Dlop-max/min migration is TODO_livehd 1n phases N3/N5).
+// Dlop-max/min migration is todo/ 1n phases N3/N5).
 //
 // Key properties:
 //   * It does NOT participate in const-folding (no fold_ref) — constprop owns

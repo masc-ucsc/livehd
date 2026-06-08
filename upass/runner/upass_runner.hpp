@@ -225,7 +225,7 @@ protected:
   // ref-param writeback) — and returns true. Returns false to fall back to
   // the normal func_call emit/dispatch path (typecasts, cell-ops, markers,
   // or call shapes 1i does not yet handle). The read cursor is left on the
-  // func_call node on every path. See 1i in TODO_livehd.md.
+  // func_call node on every path. See 1i in todo/.
   bool try_inline_func_call();
 
   // Task 1p — var-arg access resolution. A `comb foo(...args)` call gathers its

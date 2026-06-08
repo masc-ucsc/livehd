@@ -163,7 +163,7 @@ int help_command(const Options& opts) {
   std::string topic = opts.files.empty() ? "" : opts.files.front();
   if (topic.empty() || topic == "help") {
     std::print(
-        "lhd — LiveHD stateless CLI kernel (docs/contracts/future_cli.md)\n"
+        "lhd — LiveHD stateless CLI kernel (the LiveHD docs)\n"
         "\n"
         "usage: lhd <command> [args]\n"
         "  the language word is optional (inferred from .prp/.v/.sv); ln:/lg: IR inputs are positional\n"

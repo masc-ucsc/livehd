@@ -1,0 +1,107 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>TODO 5e — IDAP perf-sweep pass</title>
+<link rel="stylesheet" href="../todo.css">
+</head>
+<body>
+<nav><span class="brand">LiveHD TODO</span><a href="../index.html">← All tasks</a></nav>
+<main>
+<h1><strong class="item-id">5e</strong> IDAP perf-sweep pass</h1>
+<p>IDAP perf-sweep pass: hold correctness flags steady, drive each optional pass
+  on/off to measure marginal cost and find regressions — see the IDAP design notes
+  below.</p>
+
+<h2>Depends on</h2>
+<ul>
+<li><a class="xref" href="3c.html">3c</a> — lands after the partition descriptor
+  stabilizes (otherwise we'd optimize APIs that are still moving).</li>
+<li><a class="xref" href="5f.html">5f</a> — emits per-pass timing/allocation into the
+  benchmark JSONL.</li>
+</ul>
+
+<h2>Subtasks — pending</h2>
+<ul class="subtasks">
+<li><strong>A — sweep harness.</strong> Driver + diff-vs-reference correctness checker;
+  enumerate the pass flag matrix.</li>
+<li><strong>B — upass/lgraph anti-pattern cleanup.</strong> Allocations, vector-returns,
+  small-vector, string churn, copy-to-iterate — landed <em>with</em> the sweep so the
+  regression gates have something to lock in.</li>
+<li><strong>C — short report contract.</strong> Flag matrix, "correctness-preserving" per
+  flag, JSONL schema.</li>
+</ul>
+
+<h2>Subtasks — landed</h2>
+<p>None yet.</p>
+
+<h2>Design notes</h2>
+<h3 id="idap-perf-sweep-pass">IDAP perf-sweep pass</h3>
+<p>A correctness-preserving optimization/IDAP pass that toggles individual
+upass stages on and off while keeping correctness invariants in place, so
+we can attribute perf regressions to a specific pass and confirm each pass
+earns its runtime cost. Concretely, we want to drive runs like:</p>
+<div class="highlight"><pre><span></span><code>time lhd compile xx.prp --set upass.verifier=0 --set upass.ssa=0 --set upass.bitwidth=1 --set upass.constprop=0 --set upass.attributes=0
+</code></pre></div>
+<p>and have the pass framework:</p>
+<ul>
+<li>Enumerate the pass flag matrix (<code>verifier</code>, <code>ssa</code>, <code>bitwidth</code>,
+  <code>constprop</code>, <code>attributes</code>, …) and run the user-selected
+  combinations.</li>
+<li>Diff results against a reference run so disabling a pass that <em>must</em> run
+  for correctness fails loudly rather than silently miscompiling.</li>
+<li>Emit per-pass wall-clock + allocation deltas into the JSONL results
+  stream (consumed by <strong>5f</strong> benchmark contracts).</li>
+</ul>
+<p>While building this pass, audit the hot upass plumbing for the
+performance anti-patterns we keep hitting. These are the same axes the
+sweep should report on, so callers can see which axis regressed:</p>
+<ul>
+<li><strong>Repeated allocations.</strong> No <code>new</code> / <code>make_unique</code> / <code>std::vector{}</code> in
+  inner loops. Hoist scratch buffers out of per-node code paths; reuse
+  per-pass arenas where lifetime allows. Look for <code>clear()</code> + refill
+  patterns and convert them into stable, reusable buffers.</li>
+<li><strong><code>std::vector</code> returns.</strong> Replace "build vector, return vector" APIs
+  with iterators / ranges / output iterators. Where a concrete container
+  is unavoidable, take it by <code>&amp;</code> from the caller so allocation lives at
+  the call site, not inside the helper. This is the broader scope of
+  <strong>1j</strong>; <strong>5e</strong> finishes the sweep across non-upass code.</li>
+<li><strong>Small-vector hotspots.</strong> When a container is known to be tiny in the
+  common case (≤8 elements: per-node fanin/fanout, per-cell port list,
+  pass-local work stack), use <code>absl::InlinedVector&lt;T, N&gt;</code> (or
+  <code>absl::FixedArray</code> when the size is known at the call) instead of
+  <code>std::vector</code> to keep the storage on the stack.</li>
+<li><strong>String churn.</strong> Hunt <code>std::string</code> temporaries on hot paths: prefer
+  <code>std::string_view</code>, <code>absl::string_view</code>, or pre-interned symbol handles
+  (we already have <code>mmap_lib::str</code> / interned IDs — use them). No
+  <code>to_string()</code> in inner loops; no <code>+</code> concatenation for log lines that
+  are then discarded; no <code>absl::StrCat</code> materialization when a
+  <code>string_view</code> would do.</li>
+<li><strong>Tree / graph iteration without copying.</strong> Iterate HHDS trees and
+  LGraph in place via the existing iterator APIs. Do not snapshot
+  <code>children</code>, <code>descendants</code>, <code>fanin</code>, or <code>fanout</code> into a <code>std::vector</code>
+  just to walk them. If a pass must mutate during traversal, use the
+  iterator invalidation-safe variants HHDS exposes rather than
+  materializing a copy. Forbid the "collect into vector, then iterate"
+  pattern in pass code; CI should grep for the usual offenders
+  (<code>get_children</code>, <code>get_fanin_nodes</code>, …) returning vectors and replace
+  them with range-returning siblings.</li>
+</ul>
+<p>Deliverables:</p>
+<ul>
+<li>The sweep harness itself (driver + diff-vs-reference checker).</li>
+<li>A short report contract (under the repo's contracts/docs) describing the flag
+  matrix, what "correctness-preserving" means per flag, and the JSONL
+  schema for the per-pass timing/allocation rows.</li>
+<li>One pass of cleanup across upass / lgraph passes hitting the
+  allocation, vector-return, small-vector, string, and copy-to-iterate
+  anti-patterns above — landed <em>with</em> the sweep so the regression gates
+  have something to lock in.</li>
+</ul>
+<p>Sequenced as <strong>5e</strong> so it lands after the partition descriptor (<strong>3c</strong>)
+has stabilized — otherwise we'd be optimizing APIs that are still moving.</p>
+</main>
+<footer><a href="../index.html">← All tasks</a> · LiveHD TODO · <code>livehd</code></footer>
+</body>
+</html>

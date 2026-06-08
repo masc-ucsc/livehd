@@ -1,5 +1,12 @@
 # AGENTS.md
 
+> **Doc map:** [`STRUCTURE.md`](STRUCTURE.md) describes where all documentation
+> lives. In short — current/pending work is the [`todo/`](todo/index.html) hub
+> (one HTML page per task); the human-readable LiveHD/Pyrope reference (the
+> contract) is the [docs site](https://masc-ucsc.github.io/docs/) (`../docs`);
+> directory specifics live in `<dir>/README.md`; and this file holds agent
+> build/test/debug how-to plus the change-gated coding rules.
+
 ## Build & Test
 
 - **Build**: `bazel build -c dbg //...`
@@ -23,7 +30,7 @@ LiveHD depends on several sibling repos. **Always look in these exact paths — 
 
 ## Key Directories
 
-- `lgraph/`: LGraph IR — nodes (logic, muxes, registers, memories, sub-graphs), pins (driver/sink), edges
+- `graph/`: LGraph IR (HHDS-backed) — LiveHD cell semantics + per-pin attributes + graph library over `hhds::Graph` (nodes, pins, edges). See `graph/README.md`. (This is the old `lgraph/`, now migrated onto HHDS.)
 - `lnast/`: LNAST high-level IR (HHDS-backed `hhds::Tree` + flat-storage attributes)
 - `parser/`: AST built on `hhds::Tree`
 - `inou/yosys/`: Yosys integration (`lgyosys_tolg.cpp` = Yosys→LGraph, `inou_yosys_read.ys` = Yosys script)
@@ -85,7 +92,7 @@ Enforced by `scripts/contracts/diff_no_compile_flags_touched.sh`.
 - **Single test (harness)**: `python3 inou/prp/tests/pyrope_test.py -i inou/prp/tests/<dir>/<test>.prp`
 - **Direct pipeline (comptime)**: `./bazel-bin/lhd/lhd compile <test>.prp --set upass.verifier=true --set upass.verifier_pass=1 --set upass.verifier_fail=0 --emit-dir lnast-dump:dumps/ --workdir w` (the post-upass LNAST text lands in `dumps/*.lnast`; uPass stdout diagnostics in `w/logs/*pass_upass*.log`)
 - Test header `:type:` selects the pipeline (`parsing`, `lnast`, `upass`, `comptime`, `lgraph`, `compile`); `:verifier_pass:` / `:verifier_fail:` set expected cassert tallies for `comptime`.
-- **Expected-failure tests** (`:type: error`, in `inou/prp/tests/errors/`): the program **must** emit a compile error (a diagnostic, see `docs/contracts/diagnostics.md`). The header's `:error:` and `:help:` values are matched (Python `re.search`, with a literal-substring fallback when the value is not a valid regex — so `')'` works) against the emitted diagnostic's `message` and `hint`. A compile error exits non-zero cleanly (no abort) in every build mode. To pin the **line**, put a `locate_error_here` comment on the expected-error line — the harness checks the diagnostic's `start_line` matches it (a marker survives inserting/removing lines above, unlike a hard-coded number; the token `locate_error_here` is reserved — don't use it in prose, and only use it when the diagnostic actually carries a span — many `upass` errors don't yet). Diagnostics are read from the JSONL file declared via `lhd --emit diagnostics:PATH` (the hermetic kernel ignores the old `LIVEHD_DIAG` env). Each `tests/errors/*.prp` auto-generates a `prp-<name>` `bazel test` target. Example:
+- **Expected-failure tests** (`:type: error`, in `inou/prp/tests/errors/`): the program **must** emit a compile error (a diagnostic — see the *Diagnostics* section of the [LiveHD docs](https://masc-ucsc.github.io/docs/livehd/02-usage/)). The header's `:error:` and `:help:` values are matched (Python `re.search`, with a literal-substring fallback when the value is not a valid regex — so `')'` works) against the emitted diagnostic's `message` and `hint`. A compile error exits non-zero cleanly (no abort) in every build mode. To pin the **line**, put a `locate_error_here` comment on the expected-error line — the harness checks the diagnostic's `start_line` matches it (a marker survives inserting/removing lines above, unlike a hard-coded number; the token `locate_error_here` is reserved — don't use it in prose, and only use it when the diagnostic actually carries a span — many `upass` errors don't yet). Diagnostics are read from the JSONL file declared via `lhd --emit diagnostics:PATH` (the hermetic kernel ignores the old `LIVEHD_DIAG` env). Each `tests/errors/*.prp` auto-generates a `prp-<name>` `bazel test` target. Example:
   ```
   /*
   :name: unbalance

@@ -1085,7 +1085,7 @@ bool emits_need_lnast(const Options& opts) {
 
 // ---- scan (pyrope import/dependency discovery) -------------------------------
 
-// Imports are comptime string literals (see docs/contracts/task_1m_plan.md),
+// Imports are comptime string literals (see the LiveHD docs),
 // so the strings are statically extractable from the parse: every LNAST
 // func_call of the form (target, const "import", const "<module>"). The list
 // is a conservative over-approximation — an import under `if cond` may be

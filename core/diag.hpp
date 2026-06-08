@@ -1,7 +1,7 @@
 //  This file is distributed under the BSD 3-Clause License. See LICENSE for details.
 #pragma once
 
-// Unified compile error/warning surface. See docs/contracts/diagnostics.md.
+// Unified compile error/warning surface. See the LiveHD docs.
 //
 // One Diagnostic == one compile error/warning/note. The Sink is a
 // process-global collector that serializes each record as one JSONL line

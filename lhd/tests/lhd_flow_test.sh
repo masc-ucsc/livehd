@@ -1,7 +1,7 @@
 #!/bin/bash
 # This file is distributed under the BSD 3-Clause License. See LICENSE for details.
 #
-# Flow-matrix test for the lhd kernel (docs/contracts/future_cli.md):
+# Flow-matrix test for the lhd kernel (the LiveHD docs):
 #   $1 = input kind   (pyrope | verilog | ln | lg)
 #   $2 = output kind  (pyrope | verilog | ln | lg)
 #   $3 = expectation  (pass | unsupported)

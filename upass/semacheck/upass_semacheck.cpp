@@ -15,7 +15,7 @@ static upass::uPass_plugin plugin_semacheck("semacheck", upass::uPass_wrapper<uP
 namespace {
 
 // Task 1t — derived / read-only attributes. These are READ-ONLY views computed
-// from the type or bundle (see docs/contracts/typesystem_clean_plan.md and
+// from the type or bundle (see the LiveHD docs and
 // upass/attributes is_builtin_attr Category A) — an `attr_set` of any is a
 // compile error: read them with `.[attr]` (attr_get), never write them.
 //   * `max`/`min` are additionally settable, but ONLY through a *type*

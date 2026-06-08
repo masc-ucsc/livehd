@@ -1,0 +1,161 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>TODO 1p — Pyrope deferred lambda templates (var-args)</title>
+<link rel="stylesheet" href="../todo.css">
+</head>
+<body>
+<nav><span class="brand">LiveHD TODO</span><a href="../index.html">← All tasks</a></nav>
+<main>
+<h1><strong class="item-id">1p</strong> Pyrope deferred lambda templates — var-args follow-ups</h1>
+
+<p>The template + call-site-specialization mechanism (1p A–E) and the 1p-runner
+  var-args work have landed; the living contract is on the
+  <a href="https://masc-ucsc.github.io/docs/livehd/">LiveHD docs</a>, language spec
+  <a href="https://masc-ucsc.github.io/docs/pyrope/06-functions/">06-functions</a>.
+  What remains is var-args on a hardware (<code>pipe</code>/<code>mod</code>/<code>fluid</code>)
+  boundary, the inner gaps it surfaces, and generics.</p>
+
+<h2>Depends on</h2>
+<p>None — the 2u for-unroll prerequisite (skip lowering a <code>template</code> body in
+  the main runner walk) has landed.</p>
+
+<h2>Subtasks — pending</h2>
+<ul class="subtasks">
+<li><strong>C — Phase F: var-args on a pipe/mod/fluid boundary.</strong> Today a var-arg
+  <code>pipe</code>/<code>mod</code> call is refused: the specializer hard-errors
+  (<code>fcall-vararg-module</code>, <code>upass_runner.cpp:2115</code> in
+  <code>maybe_specialize_template_call</code>), and a <code>pipe</code> consumed via
+  <code>stage[N]</code> slips past that guard only to die at tolg
+  (<code>callee &hellip; has no registered GraphIO</code>,
+  <code>upass_tolg.cpp:926</code>). A hardware boundary needs a fixed port list, so the
+  var-args must be <strong>expanded into N concrete ports on the specialized
+  clone</strong>:
+  <ul>
+  <li>Gather the N leftover actuals (the inliner already collects these into
+    <code>vararg_bindings_</code>) and read each actual's <strong>declared</strong> type
+    (decision 4; an untyped actual → <code>fcall-untyped-actual</code>).</li>
+  <li>In <code>maybe_specialize_template_call</code>, replace the
+    <code>has_vararg</code> hard error with port expansion: synthesize N fixed input
+    ports on the cloned module (positional → <code>arg_0&hellip;arg_{N-1}</code>, named
+    leftovers keep their names), typed from the actuals; readable mangled suffix per
+    decision 2 (e.g. <code>add1__3xu8</code>).</li>
+  <li>Rewrite the clone body so <code>args[i]</code> / <code>args.NAME</code> /
+    <code>for a in args</code> resolve against those concrete ports. The comb inliner
+    resolves them <em>virtually</em>; the specialized module must bake them into real
+    port reads, and the <code>for</code> unrolls over the now-known port set (the same
+    <code>unroll_for</code> var-arg branch).</li>
+  <li>Wire the N actuals to the N ports at the call site; tolg instantiates the
+    <code>Sub</code> as usual. Dedup by mangled name (same arity + types → one shared
+    specialized module, one <code>Sub</code> per call).</li>
+  </ul></li>
+<li><strong>D — the 3 inner gaps surfaced by mod_varargs_csa.</strong>
+  <ul>
+  <li><code>b.[bits]</code> does not fold inside a <code>mod</code> body — the
+    <code>attr_get</code> survives to tolg (the comb inliner folds it via the declared
+    type, <code>untyped_param_loops_runner_unroll</code>; a specialized mod clone must
+    do the same).</li>
+  <li>An <strong>untyped mod output</strong> <code>-&gt; (s@[0])</code> specializes but
+    derives to <strong>1 bit</strong> instead of the body's width (so the inner adder
+    needs an explicit output type today).</li>
+  <li>Shift/mask arithmetic (<code>&gt;&gt;</code>/<code>&amp;</code>/<code>&lt;&lt;</code>)
+    inside an unrolled <code>mod</code> loop leaves unresolved temps / a stray
+    <code>tuple_add</code>.</li>
+  </ul></li>
+<li><strong>E — generics <code>&lt;T&gt;</code>.</strong> Separate follow-up; 1p reserved
+  the <code>add6__T_u22</code> mangling + generics-tuple seam only. Not part of F.</li>
+</ul>
+
+<h2>Subtasks — landed</h2>
+<ul class="subtasks">
+<li><strong>A — template + call-site specialization mechanism (1p A–E).</strong> <span class="status landed">landed</span>
+  2026-06-07. <code>comb</code> var-args inline (<code>prp-equiv-varargs_add</code>) and
+  <code>pipe</code>/<code>mod</code> specialization keyed on the actual's declared type
+  (<code>prp-equiv-mod_template</code> → <code>inner__u8</code>) both work.</li>
+<li><strong>B — 1p-runner.</strong> <span class="status landed">landed</span> 2026-06-08,
+  all 4 *varargs* LEC-pass. The for×{comb,mod,pipe} audit found the only var-args
+  gaps; the fixes: templates run NON-materializing in the main upass walk so a var-arg
+  comb's body isn't corrupted standalone (508407ba6); var-arg pipe/mod port expansion
+  replaces the old hard error (261ac25ea); loop-var typing from element ports +
+  <code>.[bits]</code>-on-mod-port folding (3d19fef87); then the real
+  <code>mod_varargs_csa</code> blocker: prp2lnast lowered a parenthesized SCALAR
+  <code>(expr)</code> as a 1-element tuple_add tolg can't lower (an inlined caller folds
+  it; a standalone mod reads nil) — fixed (db87b5908) by treating <code>(x)</code> (no
+  trailing comma) as grouping → unwrap, keeping <code>(x,)</code>/<code>(a=1)</code>. A
+  general bug (<code>s=(a+b)</code> standalone also read nil), not var-arg-specific.
+  Residual cosmetic dead <code>tuple_add</code> / <code>attr_get</code> reaching tolg as
+  <code>unhandled node type</code> WARNs (LEC-clean). Full analysis in the
+  <code>task_1p_runner_status</code> auto-memory note.</li>
+</ul>
+
+<h2>Design notes</h2>
+
+<h3 id="1p-revised">Revised understanding (2026-06-08)</h3>
+<p>The contract's deferred-limitation #1 — &ldquo;<code>for x in args</code> does
+not lower because runtime-tuple-iteration is unsupported&rdquo; — is
+<strong>incorrect</strong>. Verified: the runner's <code>unroll_for</code>
+var-arg branch (<code>upass_runner.cpp:2742</code>) unrolls <code>for a in
+args</code> correctly <em>during a comb inline</em>; a <code>comb
+add_all(...args){ mut acc=0; for a in args { acc=acc+a }; r=acc }</code> lowers
+to <code>z = a+b+c</code> with no runtime tuple. The real blocker is a
+<strong>walk-order corruption of the template body</strong>: the main upass walk
+(<code>pass_upass.cpp:401</code>) lowers <em>every</em> unit standalone, including
+the var-arg template. Standalone, <code>args</code> is unbound, so the
+<code>for</code> is emitted verbatim <strong>and the statement after it
+(<code>r = acc</code>) is dropped</strong>; that corrupted body is swapped
+in-place (<code>:438</code>). Because <code>set_function_registry</code> is
+rebuilt per unit (<code>:422</code>), a later caller sees an <code>add_all</code>
+with no output write → not inlinable → the call survives to tolg and errors.
+Defining the caller <em>before</em> the template dodges it (which proves the
+diagnosis). The fix belongs with the <strong>2u for-unroll work</strong> (branch
+<code>task-2u-loop-migration</code>): <strong>skip lowering a <code>template</code>
+body in the main runner walk</strong> — as tolg/timecheck already do
+(<code>pass_upass.cpp:473</code>) — so the body stays pristine for the call-site
+inline/specialize. <strong>1p-F below assumes that 2u-for fix is in.</strong></p>
+
+<h3 id="1p-tests">Tests (staged, failing until F lands)</h3>
+<p>Three repro/spec pairs are in place under
+<code>inou/prp/tests/equiv/</code> (auto-registered <code>prp-equiv-*</code>
+targets), all currently failing on the errors above:</p>
+<ul>
+<li><code>mod_varargs_add.{prp,v}</code> / <code>pipe_varargs_add.{prp,v}</code> —
+  a var-arg <code>mod</code>/<code>pipe</code> that sums its leftovers with
+  <code>for a in args</code> (the mod variant also adds a fixed leading
+  <code>op</code>); LECs to a flat adder.</li>
+<li><code>mod_varargs_csa.{prp,v}</code> — the convoluted one: a var-arg
+  <code>mod csa(...args)</code> whose <code>for a in args</code> calls a
+  <strong>second not-fully-typed <code>mod blk_add(b)</code> that also loops</strong>
+  (a block adder — sums <code>b</code>'s <code>bsz</code>-bit blocks via
+  <code>for i in 0..&lt;(b.[bits]/bsz)</code>). Both levels must unroll; LECs to
+  <code>z = a+b+c</code>. Fails first at the outer var-arg boundary (1p-F); the
+  inner mod surfaces three more <strong>"runner/specialization should handle"</strong>
+  gaps once F lets it through: (1) <code>b.[bits]</code> does not fold inside a
+  <code>mod</code> body — the <code>attr_get</code> survives to tolg (the comb
+  inliner folds it via the declared type, <code>untyped_param_loops_runner_unroll</code>;
+  a specialized mod clone must do the same); (2) an <strong>untyped mod output</strong>
+  <code>-&gt; (s@[0])</code> specializes but derives to <strong>1 bit</strong>
+  instead of the body's width (so the inner adder needs an explicit output type
+  today); (3) shift/mask arithmetic (<code>&gt;&gt;</code>/<code>&amp;</code>/
+  <code>&lt;&lt;</code>) inside an unrolled <code>mod</code> loop leaves
+  unresolved temps / a stray <code>tuple_add</code>.</li>
+</ul>
+<p>All pass once 2u-for + 1p-F (and the three inner gaps) land. Add a dedup case
+(two arities → two <code>Sub</code> modules) alongside.</p>
+
+<h3 id="1p-watch">Watch-outs / out of scope</h3>
+<ul>
+<li><code>@[0]</code> mod feedthrough through a <code>Sub</code> mis-wires the
+  instance output (pre-existing, <code>inline_epilogue_drop_gap</code>) — keep
+  var-arg mod LEC tests on a registered <code>@[N&gt;0]</code> shape (as the 1u
+  tests do) until that is fixed, or expect the combinational
+  <code>mod_varargs_add</code> golden to need a stage.</li>
+<li>Generics <code>&lt;T&gt;</code> stay a separate follow-up goal (1p reserved
+  the <code>add6__T_u22</code> mangling + generics-tuple seam only); not part of
+  F.</li>
+</ul>
+</main>
+<footer><a href="../index.html">← All tasks</a> · LiveHD TODO · <code>livehd</code></footer>
+</body>
+</html>

@@ -19,7 +19,7 @@
 // to `unbounded` (the conservative top of the lattice). The remaining 1n step
 // is the mechanical swap of these bounds to exact arbitrary-precision `Dlop`
 // (so >64-bit envelopes need no collapse); it is deferred until `lnast_to_lgraph`
-// exists to consume the published ranges — see TODO_livehd 1n N3.
+// exists to consume the published ranges — see todo/ 1n N3.
 //
 // Invariant: when `unbounded` is false, `min <= max`.
 // Boolean / comparison results use the signed-1-bit lattice point {-1, 0}.

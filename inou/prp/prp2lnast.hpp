@@ -27,7 +27,7 @@ protected:
   TSTree*     ts_tree = nullptr;  // owned; freed in the dtor (and on ctor throw)
   TSNode      ts_root_node;
 
-  // Emit a structured diagnostic (docs/contracts/diagnostics.md §3) anchored at
+  // Emit a structured diagnostic (the LiveHD docs §3) anchored at
   // `node`'s source span (best-effort byte + line/col, pre-sourcemap), then
   // abort the parse. `category` per §4 (e.g. "syntax", "name", "type").
   [[noreturn]] void report_error(const TSNode& node, std::string_view code, std::string_view category, std::string message,
@@ -46,7 +46,7 @@ protected:
   // filename onto the LNAST node at `idx`, so downstream passes (e.g. the upass
   // verifier reporting a comptime-false cassert) can point at the assertion.
   // No-op when `node` is null. This is the pre-sourcemap, per-node best-effort
-  // location; the general mechanism is task 1f. See docs/contracts/diagnostics.md.
+  // location; the general mechanism is task 1f. See the LiveHD docs.
   void attach_loc(const Lnast_nid& idx, const TSNode& node);
 
   // If the tree-sitter parse produced a MISSING node (genuine syntax error),

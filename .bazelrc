@@ -106,7 +106,7 @@ build:ubsan --linkopt -fsanitize=undefined
 build:ubsan --linkopt -lubsan
 build:ubsan --action_env=UBSAN_OPTIONS=halt_on_error=1:print_stacktrace=1
 
-# Memory sanitizer (uninitialized-read detection; TODO_livehd 1s).
+# Memory sanitizer (uninitialized-read detection; todo/ 1s).
 # NOTE: MSan needs an MSan-instrumented libc++ or it floods false positives
 # from the standard library. Until that toolchain is wired up, prefer Valgrind
 # memcheck (--track-origins=yes) on a `--config=debug` binary — it detects the

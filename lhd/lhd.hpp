@@ -2,7 +2,7 @@
 #pragma once
 
 // lhd — the stateless, hermetic LiveHD CLI kernel (task 1y-bazel).
-// Contract: docs/contracts/future_cli.md ("Stateless build-system mode").
+// Contract: the LiveHD docs ("Stateless build-system mode").
 //
 // One invocation = one step: (declared inputs, config) -> (declared outputs,
 // exit code). No @tag, no ~/.cache, no lock, no `latest` symlink. lhd drives

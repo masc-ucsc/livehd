@@ -1,0 +1,103 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>LiveHD TODO — task index</title>
+<link rel="stylesheet" href="todo.css">
+</head>
+<body>
+<nav><span class="brand">LiveHD TODO</span><a href="#pyrope">Pyrope</a><a href="#verilog">Verilog</a><a href="#livehd">LiveHD</a></nav>
+<main>
+<h1 id="todo">LiveHD TODO</h1>
+<p>Single hub for all pending work. One bullet per open task below, grouped by
+topic (<strong>Pyrope</strong>, <strong>Verilog</strong>, <strong>LiveHD</strong>)
+then by Group <em>N</em>. Each badge links to that task's own page under
+<code>todo/&lt;topic&gt;/&lt;id&gt;.html</code>.</p>
+<p><strong>Dependencies.</strong> Items in the same Group can be done in parallel;
+all letters in Group <em>N</em> must complete before Group <em>N+1</em> starts.
+Group letters are shared across the three topics, so cross-topic dependencies
+stay visible (e.g. Pyrope <a class="xref" href="pyrope/2p.html">2p</a> depends on
+LiveHD <a class="xref" href="livehd/1f.html">1f</a>).</p>
+<p><strong>Lifecycle.</strong> A task page is deleted the moment its work lands —
+this hub is strictly current work. Conceptual "why/what" lives in the
+<a href="https://masc-ucsc.github.io/docs/livehd/">LiveHD &amp; Pyrope docs</a>;
+agent build/process rules live in <code>AGENTS.md</code>.</p>
+
+<h3 id="pyrope">Pyrope</h3>
+<ul>
+<li><em>Group 1:</em><ul>
+<li><a class="xref" href="pyrope/1m.html">1m</a> Pyrope <code>pub</code> exports + <code>import()</code> — core <strong>landed 2026-06-07</strong>; pending only: unknown-tuple-field error (typecheck build-out — a constprop spike showed a flip false-positives on progressive builds), <code>lg:</code> black-box Sub wiring (NOT linker-blocked: needs kernel <code>lg:</code>+sources + name/IO stub + cgen by-name check).</li>
+</ul></li>
+<li><em>Group 2:</em><ul>
+<li><a class="xref" href="pyrope/2p.html">2p</a> Source-derived SSA / tmp names (<code>foo_l42_a</code>, drop <code>___N</code>).</li>
+</ul></li>
+<li><em>Group 4:</em><ul>
+<li><a class="xref" href="pyrope/4i.html">4i</a> Golden-output baseline in <code>inou/prp/tests/equiv/</code>.</li>
+<li><a class="xref" href="pyrope/4a.html">4a</a> Test functionality on top of slop (<code>test::[…]</code> blocks, runtime harness).</li>
+<li><a class="xref" href="pyrope/4b.html">4b</a> Emit <code>assert</code>/<code>assume</code>/<code>coverpoint</code> into slop.</li>
+<li><a class="xref" href="pyrope/4h.html">4h</a> Compile-error test infrastructure (golden-error files pinned to spans).</li>
+</ul></li>
+</ul>
+
+<h3 id="verilog">Verilog</h3>
+<ul>
+<li><em>Group 1:</em><ul>
+<li>The LNAST→LGraph synthesis closure is the Group 1 foundation for the Verilog path but is tracked in LiveHD <a class="xref" href="livehd/1a.html">1a</a> (incl. <code>1a-mem</code>/<code>1a-ops</code>).</li>
+</ul></li>
+<li><em>Group 3:</em><ul>
+<li><a class="xref" href="verilog/3b.html">3b</a> Migrate <code>inou.slang</code> to the shared LNAST structures; keep adding Verilog equiv tests.</li>
+</ul></li>
+<li><em>Group 5:</em><ul>
+<li><a class="xref" href="verilog/5e.html">5e</a> <code>inou/cgen</code> Verilog egress: emit <code>// src: file:line:col</code> comments from the source map.</li>
+</ul></li>
+</ul>
+
+<h3 id="livehd">LiveHD</h3>
+<ul>
+<li><em>Group 1:</em><ul>
+<li><a class="xref" href="livehd/1a.html">1a</a> Finish the LNAST→LGraph synthesis closure — split into <a class="xref" href="livehd/1a.html">1a-mem</a> (Pyrope <code>Memory</code> → LGraph <code>Memory</code> cell) and <a class="xref" href="livehd/1a.html">1a-ops</a> (<code>.[defer]</code>/<code>past[n]</code>→Flop, high-level ops, <code>uif</code> chains, <code>lg:</code> black-box Subs, attributes).</li>
+<li><a class="xref" href="livehd/1d.html">1d</a> Demand-driven (lazy) emit + dead-code elimination for upass.</li>
+<li><a class="xref" href="livehd/1r.html">1r</a> <code>mod</code> follow-ups (structural 1r/1u + the reg→Flop slice landed): runtime wrap/sat LG lowering, multi-output callees, <code>stage[]</code>/ranged picks, comptime <code>mut</code>-tuple value tracking.</li>
+<li><a class="xref" href="livehd/1p.html">1p</a> Deferred lambda templates — var-args follow-ups (Phase F: var-args on a <code>pipe</code>/<code>mod</code>/<code>fluid</code> boundary).</li>
+</ul></li>
+<li><em>Group 1-complex:</em><ul>
+<li><a class="xref" href="livehd/1f.html">1f</a> Source-map indirection (LOC propagation: canonical map, per-cell index, multi-loc aliases).</li>
+</ul></li>
+<li><em>Group 2:</em><ul>
+<li><a class="xref" href="livehd/2n.html">2n</a> Pyrope LSP server — Phases B–E (hover/nav/workspace) remain.</li>
+</ul></li>
+<li><em>Group 3:</em><ul>
+<li><a class="xref" href="livehd/3y-agent.html">3y-agent</a> <code>lhd</code> agent <code>@tag</code> workspace (<code>setup/run/status/list/describe</code>, TOML, JSONL) + deferred kernel follow-ups (multi-<code>lg:</code> linker, per-function units, graphviz/lgraph-dump emits, import-resolver depfile, liberty/opentimer verb).</li>
+<li><a class="xref" href="livehd/3c.html">3c</a> <code>Partition</code> descriptor as a tree-level HHDS attribute.</li>
+<li><a class="xref" href="livehd/3d.html">3d</a> New upass <code>lnast_to_slop</code> producing executable slop.</li>
+<li><a class="xref" href="livehd/3f.html">3f</a> Unified compile error/warning surface — 1z foundation landed; remaining: source_id spans (blocked on 1f), lgraph-pass codes, CLI roll-up, golden tests.</li>
+<li><a class="xref" href="livehd/3h.html">3h</a> <code>Bitwidth_range</code> → <code>Const min/max</code> (drop <code>int+overflow</code>) — gate (Dlop migration) satisfied, unblocked.</li>
+</ul></li>
+<li><em>Group 4:</em><ul>
+<li><a class="xref" href="livehd/4c.html">4c</a> Hot-probe injection at checkpoint replay (no recompile).</li>
+<li><a class="xref" href="livehd/4d.html">4d</a> What-if <code>poke(signal, value)</code> engine with safety semantics.</li>
+<li><a class="xref" href="livehd/4e.html">4e</a> Queryable indexed trace store (slice/transition/distribution queries).</li>
+<li><a class="xref" href="livehd/4f.html">4f</a> Invariant-detector codegen → emits agent-editable <code>debug.prp</code>.</li>
+<li><a class="xref" href="livehd/4g.html">4g</a> Checkpoint format + reload validator (partition-keyed via <code>state_shape_hash</code>).</li>
+</ul></li>
+<li><em>Group 5:</em><ul>
+<li><a class="xref" href="livehd/5a.html">5a</a> Rewrite <code>simlib/{uint,sint}.hpp</code> as part of the HLOP runtime; retire <code>firrtl-sig</code>.</li>
+<li><a class="xref" href="livehd/5b.html">5b</a> Attribute hot-path benchmark (flat_storage vs lhtree regression check).</li>
+<li><a class="xref" href="livehd/5c.html">5c</a> Agent-legible globally-unique, optimization-stable signal names.</li>
+<li><a class="xref" href="livehd/5d.html">5d</a> Test reorg (<code>tests/</code> layout, <code>contracts/</code> split, <code>*_test.cpp</code> rules).</li>
+<li><a class="xref" href="livehd/5e.html">5e</a> IDAP perf-sweep pass (toggle passes, measure marginal cost, anti-pattern cleanup).</li>
+<li><a class="xref" href="livehd/5f.html">5f</a> Benchmark contracts (codegen throughput, simulation speed, agent-loop latency).</li>
+</ul></li>
+<li><em>Untagged:</em> <a class="xref" href="livehd/hhds-pinentry.html">hhds-pinentry</a> — HHDS <code>PinEntry</code>/<code>NodeEntry</code> native <code>bits</code>+<code>sign</code> storage (drop the flat_storage attribute lookups; campaign lands in <code>../hhds</code>).</li>
+<li><em>Backlog:</em> <a class="xref" href="livehd/cleanup.html">cleanup</a> — replace the unmaintained C++ mustache library with <code>inja</code>.</li>
+</ul>
+
+<h2 id="status">Test status</h2>
+<p>The live suite (<code>bazel test //inou/prp/... //upass/... //lnast/... //pass/...</code>)
+was fully green at the last reorg snapshot. Doc-described errors that have no
+negative test yet are tracked in the <code>prp_error_test_coverage</code> note.</p>
+</main>
+<footer>LiveHD TODO index · task badges link to <code>todo/&lt;topic&gt;/&lt;id&gt;.html</code> · grouped per topic, deleted on completion.</footer>
+</body>
+</html>

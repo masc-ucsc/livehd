@@ -3,7 +3,7 @@
 
 // Wrap / saturate narrowing math for the bitwidth pass.
 //
-// Per `lnast_bitwidth.md`, value-math that depends on bits / range
+// Per `the LiveHD docs`, value-math that depends on bits / range
 // information lives in the bitwidth pass. The wrap and saturate
 // narrowings are pure Const transformations parameterised by a bit
 // width and signedness:

@@ -50,7 +50,7 @@ void uPass_verifier::set_aggregate_expected(int expected_pass, int expected_fail
 }
 
 // Report one comptime-false cassert through the unified diagnostic surface
-// (docs/contracts/diagnostics.md). The fatal abort still happens once, in
+// (the LiveHD docs). The fatal abort still happens once, in
 // finalize_aggregate, when the fail tally doesn't match `verifier_fail:N`;
 // this record is the per-assertion breadcrumb that makes the failure
 // debuggable. `operand_text` is the (usually folded-to-a-temp) condition ref,
@@ -85,7 +85,7 @@ void uPass_verifier::emit_false_cassert_diag(const Lnast_nid&   cassert_nid,
 }
 
 // Report a cputs that cannot be discharged at compile time through the unified
-// diagnostic surface (docs/contracts/diagnostics.md) instead of upass::error —
+// diagnostic surface (the LiveHD docs) instead of upass::error —
 // the latter throws std::runtime_error, which unwinds the whole pipeline and
 // surfaces as a bare `ERROR: …` line from main.cpp's top-level catch. A cputs
 // whose operand isn't comptime-known (or isn't a string, or has the wrong arg

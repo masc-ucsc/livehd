@@ -118,7 +118,7 @@ LNAST_NODE( range, range )
 //   pipe[A..<B] -> (A, B-1)      bare pipe   -> (1, 0)  max 0 = unconstrained
 // comb/mod outputs carry no stages node (absent == (0,0)). Values are the
 // SCC/sigma stage depth contract of 06c-pipelining.md; see
-// docs/contracts/task_1q_plan.md.
+// the LiveHD docs.
 LNAST_NODE( stages, stages )
 
 // Task 1r — `x@[N]` cycle-check record: timecheck( ref(name), const(min),
@@ -158,7 +158,7 @@ LNAST_NODE( prim_type_none, prim_type_none )
 // DERIVED from the range, never stored. The legacy width-based
 // `prim_type_uint`/`prim_type_sint` were deleted in T5 (everything — uN/sN
 // sugar, the inliner, ssa — now emits prim_type_int). See
-// docs/contracts/typesystem_clean_plan.md.
+// the LiveHD docs.
 LNAST_NODE( prim_type_int, prim_type_int )
 LNAST_NODE( prim_type_range, prim_type_range )
 LNAST_NODE( prim_type_string, prim_type_string )

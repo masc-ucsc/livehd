@@ -6,7 +6,7 @@
 #include "lnast.hpp"
 
 // Task 1q — the LN pipe upass: insert the per-output pipeline flop of a
-// `pipe` function tree (docs/contracts/task_1q_plan.md).
+// `pipe` function tree (the LiveHD docs).
 //
 // Runs on a single post-SSA / post-runner function LNAST, AFTER the main
 // upass walk and BEFORE the terminal consumers, so BOTH of them see the

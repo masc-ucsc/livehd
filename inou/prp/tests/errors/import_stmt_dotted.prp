@@ -7,6 +7,6 @@
 
 // Task 1m — the statement form is string-literal-only; the old dotted
 // module path (`import a.b.c as x`) is rejected
-// (docs/contracts/task_1m_plan.md §1).
+// (the LiveHD docs §1).
 
 import a.b.c as x  // locate_error_here

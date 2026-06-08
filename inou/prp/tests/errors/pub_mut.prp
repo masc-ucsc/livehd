@@ -6,6 +6,6 @@
 */
 
 // Task 1m — exported mutable state contradicts the read-only import
-// semantics (docs/contracts/task_1m_plan.md §1).
+// semantics (the LiveHD docs §1).
 
 pub mut y = 3  // locate_error_here

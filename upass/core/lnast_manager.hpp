@@ -38,7 +38,7 @@ public:
   // copying. While an inline frame is active (push_source) the name of a
   // *ref* node is rewritten with the frame's per-call-site tag so callee
   // variables don't collide with caller (or other call-site) names — see
-  // 1i in TODO_livehd.md. const names (literals / attr-keys) are never
+  // 1i in todo/. const names (literals / attr-keys) are never
   // rewritten. The rewritten string is interned so the view stays valid.
   std::string_view current_text() const {
     auto raw = lnast->get_name(current_nid);
@@ -128,7 +128,7 @@ public:
   // some other Lnast, e.g. a function_registry entry) with a fresh cursor at
   // its root, and activates a per-call-site rename `tag` + `salt`. The caller
   // tree/cursor/tag are saved and restored by pop_source. The callee body is
-  // read in place — never copied (see 1i in TODO_livehd.md).
+  // read in place — never copied (see 1i in todo/).
   void push_source(const std::shared_ptr<Lnast>& callee, std::string tag, uint32_t salt) {
     frames_.push_back(Source_frame{lnast, current_nid, std::move(nid_stack), std::move(active_tag_), active_salt_});
     lnast        = callee;

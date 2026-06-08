@@ -26,7 +26,7 @@ cc_library(
 )
 
 # Header-only utility: pure wrap/saturate narrowing math. Lives in
-# upass/bitwidth/ per lnast_bitwidth.md ("max/min-dependent operations
+# upass/bitwidth/ per the LiveHD docs ("max/min-dependent operations
 # live in bitwidth") but exposed as a separate target so consumers like
 # upass/attributes/ can pull in the helpers without linking the
 # bitwidth plugin's static registration.

@@ -20,9 +20,9 @@
 // only opts out of the SIGN interpretation. wrap/sat stay for the genuinely
 // different modulo / clamp semantics.
 //
-// See docs/contracts/typesystem_clean_plan.md (T4) and TODO_prp.md [[1b]].
+// See the LiveHD docs (T4) and todo/ [[1b]].
 // The compile-error cases below cannot be exercised yet (no :expect_fail:
-// harness — TODO_prp.md/TODO.md [[4h]]); they are kept as comments describing
+// harness — todo//todo/ [[4h]]); they are kept as comments describing
 // the diagnostic 1b must add.
 
 // ── a SIGNED value that does not fit an unsigned destination ─────────────────

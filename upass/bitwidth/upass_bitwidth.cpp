@@ -690,7 +690,7 @@ std::optional<Lnast_range> uPass_bitwidth::read_prim_type_int_envelope() {
   // Cursor is ON the prim_type_int node: children are const(max), const(min).
   // A "nil" / non-integer / too-wide-for-int64 bound = unbounded side ⇒ no
   // envelope (we don't range-check against a half-known type today; that's the
-  // exact-Dlop residual, TODO_livehd 1n N3).
+  // exact-Dlop residual, todo/ 1n N3).
   auto to_i64 = [](const Const& v) -> std::optional<int64_t> {
     if (!v.is_integer() || v.get_bits() > 62) {
       return std::nullopt;

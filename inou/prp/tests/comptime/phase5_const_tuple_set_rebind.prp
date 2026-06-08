@@ -6,7 +6,7 @@
 */
 
 // Phase 5 — negative test for `tuple_set` bypass of const single-bind
-// (TODO_prp.md 1e audit). `t.a = 7` lowers to `tuple_set t a 7`. Before the
+// (todo/ 1e audit). `t.a = 7` lowers to `tuple_set t a 7`. Before the
 // fix, attributes::process_tuple_set was a structural no-op; the
 // const-rebind tally in record_assign never incremented, silently allowing
 // the write that a direct `assign t …` would reject. After the fix, the

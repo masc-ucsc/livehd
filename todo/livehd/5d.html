@@ -1,0 +1,70 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>TODO 5d — Test reorg</title>
+<link rel="stylesheet" href="../todo.css">
+</head>
+<body>
+<nav><span class="brand">LiveHD TODO</span><a href="../index.html">← All tasks</a></nav>
+<main>
+<h1><strong class="item-id">5d</strong> Test reorg</h1>
+<p>Test reorg per the "Test Organization" design notes below: a <code>tests/</code>
+  layout, a <code>contracts/</code> split, and <code>*_test.cpp</code> naming rules.</p>
+
+<h2>Depends on</h2>
+<p>None.</p>
+
+<h2>Subtasks — pending</h2>
+<ul class="subtasks">
+<li><strong>A — tests/ layout.</strong> All C++ tests under a <code>tests/</code> subdir per
+  component.</li>
+<li><strong>B — _test.cpp suffix rules.</strong> Use the <code>_test.cpp</code> suffix only
+  with a sibling <code>foo.cpp</code>; it is a suffix, never a prefix.</li>
+<li><strong>C — contracts/ split.</strong> Integration/API tests live in
+  <code>contracts/</code>; agents don't edit them.</li>
+<li><strong>D — move compile-driver scripts.</strong> Move <code>*_compile.sh</code> driver
+  scripts under <code>contracts/</code>.</li>
+</ul>
+
+<h2>Subtasks — landed</h2>
+<p>None yet.</p>
+
+<h2>Design notes</h2>
+<h3 id="test-organization">Test Organization</h3>
+<p>Tests are scattered across the codebase. Some subsystems place tests in
+dedicated <code>tests/</code> directories (core, lgraph, lnast, inou/pyrope) while others
+have test files alongside source code (upass, pass/label, pass/mockturtle,
+main, inou/lefdef, inou/liveparse).</p>
+<p>Rules to enforce:</p>
+<ul>
+<li>
+<p>All main C++ tests must live in a <code>tests/</code> subdirectory under each component.</p>
+</li>
+<li>
+<p>A file should only use the <code>_test.cpp</code> suffix (e.g., <code>foo_test.cpp</code>) when
+  there is a corresponding <code>foo.cpp</code> in the parent directory. Otherwise it is
+  just a standalone test and should not carry the <code>_test</code> suffix.</p>
+</li>
+<li>
+<p>When the <code>_test</code> convention is used, it must be a suffix, never a prefix
+  (<code>foo_test.cpp</code>, not <code>test_foo.cpp</code>).</p>
+</li>
+<li>
+<p>Create a separate <code>contracts/</code> directory (per component or top-level) for
+  higher-level integration and API tests. Contracts test only public/high-level
+  APIs and overall integration. Agents should not edit contract tests directly;
+  they are maintained by hand to guarantee stable interface behavior.</p>
+</li>
+<li>
+<p>Treat compile-driver scripts as contracts, not ordinary tests. Move
+  <code>yosys_compile.sh</code>, <code>slang_compile.sh</code>, and the other <code>*_compile.sh</code> scripts
+  out of <code>tests/</code> directories and place them under a consistent <code>contracts/</code>
+  structure.</p>
+</li>
+</ul>
+</main>
+<footer><a href="../index.html">← All tasks</a> · LiveHD TODO · <code>livehd</code></footer>
+</body>
+</html>

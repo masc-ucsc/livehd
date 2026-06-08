@@ -1,7 +1,7 @@
 //  This file is distributed under the BSD 3-Clause License. See LICENSE for details.
 #pragma once
 
-// Pyrope Language Server (task 1n). See docs/contracts/pyrope_lsp.md.
+// Pyrope Language Server (task 1n). See the LiveHD docs.
 //
 // A minimal LSP server over stdio (JSON-RPC, Content-Length framed). It drives
 // LiveHD's Pyrope front-end (`prp2lnast`) on the editor buffer and republishes

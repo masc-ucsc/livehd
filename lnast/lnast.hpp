@@ -130,7 +130,7 @@ struct Lnast_tree_io {
   bool                        empty() const noexcept { return inputs.empty() && outputs.empty(); }
 };
 
-// Task 1m — one `pub` export of a file unit (docs/contracts/task_1m_plan.md).
+// Task 1m — one `pub` export of a file unit (the LiveHD docs).
 // kind: "value" (comptime/const declaration) | "comb" | "mod" | "pipe" |
 // "fluid" (exported definition; its tree url is `<unit>.<name>`).
 struct Lnast_pub_entry {

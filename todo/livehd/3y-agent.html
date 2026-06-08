@@ -1,0 +1,519 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>TODO 3y-agent — lhd agent layer + kernel follow-ups</title>
+<link rel="stylesheet" href="../todo.css">
+</head>
+<body>
+<nav><span class="brand">LiveHD TODO</span><a href="../index.html">← All tasks</a></nav>
+<main>
+<h1><strong class="item-id">3y-agent</strong> lhd agent layer + kernel follow-ups</h1>
+<p><code>lhd</code> agent layer + kernel follow-ups (renamed from 1y-agent; moved Group
+  1-complex → 2 → now Group 3 — the <code>lhd</code> kernel already covers every
+  test/build flow, so none of this is critical). The stateless build-system/kernel
+  layer has landed; the pending agent <code>@tag</code> workspace and the deferred kernel
+  follow-ups are below, optimized for LLM coding agents.</p>
+
+<h2>Depends on</h2>
+<ul>
+<li><a class="xref" href="../pyrope/1m.html">1m</a> — the import-resolver feed (resolved
+  paths, <code>--depfile</code>, <code>unused_inputs_list</code>) lands with the 1m import
+  work.</li>
+</ul>
+
+<h2>Subtasks — pending</h2>
+<ul class="subtasks">
+<li><strong>B — agent @tag workspace.</strong> <code>setup/run/status/list/describe</code>,
+  <code>@tag</code> directories, persistent <code>lhd.toml</code> config, append-only JSONL
+  run logs, per-tag lock, multi-tag experiments, error-class taxonomy. Each
+  <code>run &lt;step&gt; @tag</code> desugars to a kernel call (resolve the tag's
+  inputs/config/workdir → run the pure step → append the result + advance
+  <code>latest</code>).</li>
+<li><strong>C — multi-<code>lg:</code> linking.</strong> gids are library-scoped inside
+  <code>body.bin</code>, so linking needs a gid-remapping linker (today: aggregate from
+  <code>ln:</code> units, which re-lowers into one fresh library and discards per-file
+  local synthesis; the derivation-hash manifest plan is the path to keeping it).</li>
+<li><strong>D — per-function Pyrope units.</strong> <code>inou.prp</code> yields one LNAST
+  per <em>file</em>; function-level splitting wants the func_extract seam.</li>
+<li><strong>E — import-resolver feed.</strong> <code>lhd scan</code> emits raw import
+  strings; resolved paths, <code>--depfile</code> (Make/Ninja), and the
+  <code>unused_inputs_list</code> Bazel rule land with the
+  <a class="xref" href="../pyrope/1m.html">1m</a> import work.</li>
+<li><strong>F — missing emits/flags.</strong> <code>--emit graphviz|metadata</code>, a
+  textual <code>lgraph-dump:</code> debug emit (twin of <code>lnast-dump:</code> — the
+  REPL's <code>lgraph.dump</code> died with lgshell), <code>--recipe-file</code> TOML,
+  repeated-pass <code>--set pass.idx.flag</code> index addressing.</li>
+<li><strong>G — liberty/opentimer verb.</strong> <code>inou.liberty</code>/<code>pass.opentimer</code>
+  have no driver since the lgshell REPL was deleted — the docs/power.md flow needs an
+  lhd verb (or recipe) to be revived.</li>
+</ul>
+
+<h2>Subtasks — landed</h2>
+<ul class="subtasks">
+<li><strong>A — stateless build-system/kernel layer (ex 1y-bazel).</strong> <span class="status landed">landed</span>
+  Covers every test/build flow; see AGENTS.md and the LiveHD docs.</li>
+</ul>
+
+<h2>Design notes</h2>
+
+<h3>Salvaged from <code>docs/contracts/future_cli.md</code> (now retired)</h3>
+
+<p>The stateless build-system/kernel layer (formerly 1y-bazel) has landed; see AGENTS.md and the LiveHD docs. The pending agent layer is below.</p>
+
+<h3>Tag workspace mode (2y-agent)</h3>
+<p>Everything below is the agent layer. It is sugar over the kernel above: a
+<code>@tag</code> is a named, persistent bundle of (inputs, config, workdir, outputs),
+and <code>lhd run &lt;step&gt; @tag</code> resolves that bundle and calls the same stateless
+step engine, then records the result in the tag's run log. An agent can always
+drop to the kernel for a quick one-shot.</p>
+<p>The <code>&lt;step&gt;</code> vocabulary is the kernel's (<code>elaborate</code>/<code>synth</code>/<code>check</code>/<code>compile</code>).
+The <code>parse</code> / <code>cprop</code> / <code>cgen-verilog</code> step names in the examples that follow
+predate the kernel design and are illustrative only; they will be reconciled to
+the kernel verbs when 2y-agent lands.</p>
+
+<h2>@tag Sigil</h2>
+<p>Tags are always prefixed with <code>@</code>. This makes them unambiguous in any
+position — the CLI parser, and the calling agent, never confuse a tag
+with a command or option.</p>
+<p>A tag is either a plain name or a path:</p>
+<ul>
+<li><code>@tst1</code> → stored under <code>&lt;cache&gt;/tags/tst1/</code></li>
+<li><code>@./my_build</code> → stored at <code>./my_build/</code></li>
+</ul>
+<p>Plain tag names must not contain <code>.</code> or <code>/</code>.</p>
+
+<h2>CLI Commands</h2>
+
+<h3>setup — create or modify a tag</h3>
+<pre><code>lhd setup @tst1 --top foo --files foo.v bar.v
+lhd setup @tst1 --set top=bar                    # modify existing
+lhd setup @tst2 --top foo --files foo.v --input original=@tst1
+lhd setup @tst1 --reuse                           # reuse if compatible
+</code></pre>
+<p><code>setup</code> is create-or-update and must not destroy an existing tag by default.
+Destructive recreation is explicit:</p>
+<pre><code>lhd tag reset @tst1 --yes
+</code></pre>
+<p>Agents should prefer non-destructive updates through <code>setup</code> or <code>config set</code>.</p>
+
+<h3>run — execute a step or recipe</h3>
+<pre><code>lhd run parse @tst1
+lhd run cprop @tst1
+lhd run cgen-verilog @tst1
+lhd run check @tst1 --reference @tst2
+lhd run recipe:roundtrip @tst1
+lhd run recipe:roundtrip @tst1 --stop-after cprop
+lhd run recipe:roundtrip @tst1 --dry-run
+</code></pre>
+<p>Step-specific options:</p>
+<pre><code>lhd run cprop @tst1 --set aggressive=true
+lhd run cgen-verilog @tst1 --set odir=custom_out
+</code></pre>
+<p><code>--dry-run</code> emits a machine-readable plan without changing the tag. The plan
+includes resolved steps, input artifacts, output artifacts, config values,
+cache/skip decisions, and the exact commands that would run.</p>
+
+<h3>status — inspect a tag</h3>
+<pre><code>lhd status @tst1
+</code></pre>
+
+<h3>config — inspect, edit, and validate tag config</h3>
+<pre><code>lhd config show @tst1
+lhd config set @tst1 top=bar
+lhd config set @tst1 steps.cprop.aggressive=true
+lhd config validate @tst1
+lhd config schema
+</code></pre>
+<p><code>setup --set key=value</code> is allowed as convenience sugar, but <code>config</code> is the
+canonical agent API for config edits and validation.</p>
+
+<h3>list — discover patterns or inspect tag-scoped design data</h3>
+<pre><code>lhd list
+lhd list steps
+lhd list recipes
+lhd list modules @tst1
+lhd list hierarchy @tst1 --top foo
+lhd list modules @tst1 --from original
+</code></pre>
+
+<h3>describe — get step or list-pattern details (JSON)</h3>
+<pre><code>lhd describe parse
+lhd describe cprop
+lhd describe recipe:roundtrip
+lhd describe modules
+lhd describe hierarchy
+</code></pre>
+
+<h3>help — human-readable (calls describe internally)</h3>
+<pre><code>lhd run parse --help
+lhd --help
+</code></pre>
+<p>Machine-readable commands support <code>--format json|jsonl|text</code>. Agent defaults
+are JSON for single-object commands (<code>list</code>, <code>describe</code>, <code>status</code>,
+<code>config show</code>) and JSONL for streaming commands (<code>run</code>). <code>text</code> is for humans.</p>
+
+<h2>Tag Directory Structure</h2>
+<p>A tag directory is shared between runner and lhd. Each tool prefixes
+its own logs and results to avoid collisions. Runs are stored under unique
+run directories so concurrent agents do not race on log names or JSONL
+append order.</p>
+<pre><code>tst1/
+  lhd.toml                      # lhd config — agent-editable
+  runner.toml                      # runner config — agent-editable
+  lgdb/                            # LGraph database (LiveHD internal state)
+  out/                             # generated outputs (verilog, reports, etc.)
+  lock                              # per-tag lock for mutating commands
+  latest -&gt; runs/20260409T100000Z_7f3a
+  runs/
+    20260409T100000Z_7f3a/
+      lhd_results.jsonl          # lhd structured results for this run
+      runner_results.jsonl          # runner structured results for this run
+      logs/
+        001_lhd_parse.log        # lhd step 1
+        002_lhd_cprop.log        # lhd step 2
+        001_runner_synth.log        # runner step 1
+        003_lhd_cgen-verilog.log # lhd step 3
+        002_runner_sim.log          # runner step 2
+</code></pre>
+
+<h3>Log file naming</h3>
+<p>Files under a run's <code>logs/</code> use the pattern <code>NNN_&lt;tool&gt;_&lt;step&gt;.log</code>:</p>
+<ul>
+<li>Counter is per-tool (lhd and runner each maintain their own sequence)</li>
+<li><code>ls logs/ | sort</code> gives a useful view; tool prefix disambiguates origin</li>
+<li>Running the same step twice increments the counter: <code>002_lhd_cprop.log</code>,
+  <code>004_lhd_cprop.log</code></li>
+</ul>
+
+<h3>Locking</h3>
+<p>Commands that mutate a tag (<code>setup</code>, <code>config set</code>, <code>tag reset</code>, <code>run</code>) take a
+per-tag lock. Read-only commands (<code>status</code>, <code>list</code>, <code>describe</code>, <code>config show</code>,
+<code>config validate</code>) do not require the mutation lock unless they need a
+consistent snapshot while a run is active. Lock failures return a structured
+<code>lock_timeout</code> error with the owning <code>run_id</code> when known.</p>
+
+<h2>Config: lhd.toml</h2>
+<p>The tag config is TOML. It is created by <code>lhd setup</code> and can be edited
+directly by agents or modified via <code>lhd config set @tag key=value</code>.</p>
+<pre><code>top = "foo"
+files = ["foo.v", "bar.v"]
+
+[inputs]
+original = "@tst1"           # named read-only reference to another tag
+
+[steps.cprop]
+aggressive = true            # step-specific defaults
+
+[recipes.roundtrip]
+steps = ["parse", "cprop", "cgen-verilog", "check"]
+
+[recipes.compile]
+steps = ["parse", "cprop", "cgen-verilog"]
+</code></pre>
+
+<h3>Config precedence</h3>
+<ol>
+<li>CLI <code>--set key=value</code> (ephemeral, not written to toml)</li>
+<li><code>lhd.toml</code> in the tag directory</li>
+<li>Built-in defaults</li>
+</ol>
+
+<h3>Setup snapshotting</h3>
+<p><code>lhd setup</code> is a snapshot. Once a tag is created, changes to
+project-level defaults do not affect it. The tag's <code>lhd.toml</code> is
+self-contained.</p>
+
+<h2>Output: lhd_results.jsonl</h2>
+<p>One JSON object per line, appended after each step in the current run
+directory. JSONL format: append-only, crash-safe, agents read individual
+lines.</p>
+
+<h3>Result schema</h3>
+<p>Every result object includes a stable core envelope:</p>
+<pre><code>{
+  "schema_version": 1,
+  "tool": "lhd",
+  "command": "run",
+  "step": "parse",
+  "status": "pass",
+  "tag": "@tst1",
+  "run_id": "20260409T100000Z_7f3a",
+  "invocation_id": "7f3a8e6c",
+  "seq": 1,
+  "exit_code": 0,
+  "started_at": "2026-04-09T10:00:00Z",
+  "ended_at": "2026-04-09T10:00:01Z",
+  "elapsed_ms": 1200,
+  "inputs": ["foo.v"],
+  "outputs": ["lgdb"],
+  "log": "runs/20260409T100000Z_7f3a/logs/001_lhd_parse.log"
+}
+</code></pre>
+<p>Step-specific fields are allowed, but the core keys above are stable. New
+fields may be added under the same <code>schema_version</code>; incompatible changes
+require a new <code>schema_version</code>.</p>
+<p>Under <code>--deterministic</code> (the build-system default), the non-reproducible
+envelope fields change: <code>run_id</code> is a content hash of (tool version + input
+bytes + resolved config) rather than <code>&lt;timestamp&gt;_&lt;rand&gt;</code>, and <code>started_at</code> /
+<code>ended_at</code> are either omitted or pinned to <code>SOURCE_DATE_EPOCH</code>. Everything else
+in the object is already a pure function of inputs. The tag layer keeps the
+timestamp+random <code>run_id</code> so concurrent agents never collide on a run dir.</p>
+<p>Valid <code>status</code> values are <code>pass</code>, <code>fail</code>, <code>skipped</code>, and <code>pending</code>. A single
+step exits 0 only for <code>pass</code>. A recipe exits 0 only when every emitted step is
+<code>pass</code>; dependency skips and pending work make the process non-zero unless the
+command explicitly documents a different policy.</p>
+
+<h3>Successful step</h3>
+<pre><code>{"schema_version":1,"seq":1,"tool":"lhd","command":"run","step":"parse","status":"pass","tag":"@tst1","run_id":"20260409T100000Z_7f3a","invocation_id":"7f3a8e6c","exit_code":0,"started_at":"2026-04-09T10:00:00Z","ended_at":"2026-04-09T10:00:01Z","elapsed_ms":1200,"args":{"files":["foo.v"],"top":"foo"},"log":"runs/20260409T100000Z_7f3a/logs/001_lhd_parse.log","inputs":["foo.v"],"outputs":["lgdb"]}
+</code></pre>
+
+<h3>Failed step</h3>
+<pre><code>{"schema_version":1,"seq":3,"tool":"lhd","command":"run","step":"cgen-verilog","status":"fail","tag":"@tst1","run_id":"20260409T100000Z_7f3a","invocation_id":"7f3a8e6c","exit_code":1,"started_at":"2026-04-09T10:00:06Z","ended_at":"2026-04-09T10:00:06Z","elapsed_ms":300,"error":{"class":"internal","message":"unknown node type Flop_async","hint":"check the full log for the producer of this node","tail":["cgen_verilog.cpp:142: unknown node type Flop_async","  in module: foo"],"repro":"lhd run cgen-verilog @tst1"},"log":"runs/20260409T100000Z_7f3a/logs/003_lhd_cgen-verilog.log"}
+</code></pre>
+
+<h3>Error classification</h3>
+<p>Every failure includes <code>error.class</code>:</p>
+<table>
+<tr><th>error.class</th><th>Meaning</th></tr>
+<tr><td><code>usage</code></td><td>Invalid CLI usage or unsupported argument</td></tr>
+<tr><td><code>syntax</code></td><td>Input file has syntax errors</td></tr>
+<tr><td><code>internal</code></td><td>LiveHD bug or unhandled case</td></tr>
+<tr><td><code>equiv_fail</code></td><td>Equivalence check failed</td></tr>
+<tr><td><code>signal</code></td><td>Process killed by signal (segfault, abort)</td></tr>
+<tr><td><code>timeout</code></td><td>Step exceeded time limit</td></tr>
+<tr><td><code>missing_file</code></td><td>Required file or path does not exist</td></tr>
+<tr><td><code>config</code></td><td>Missing or invalid configuration</td></tr>
+<tr><td><code>dependency</code></td><td>Required external tool or prior artifact absent</td></tr>
+<tr><td><code>stale_state</code></td><td>Tag state is inconsistent with requested action</td></tr>
+<tr><td><code>lock_timeout</code></td><td>Could not acquire the tag lock in time</td></tr>
+<tr><td><code>unsupported</code></td><td>Requested feature is known but not implemented</td></tr>
+<tr><td><code>skipped</code></td><td>Step did not run because a dependency failed</td></tr>
+</table>
+
+<h3>Failure diagnostic block</h3>
+<p>On failure, the JSONL entry includes an <code>error</code> object:</p>
+<ul>
+<li><code>class</code> — machine-parseable classification</li>
+<li><code>message</code> — one-line summary</li>
+<li><code>tail</code> — last 10 lines of stderr (immediate context)</li>
+<li><code>hint</code> — actionable suggestion</li>
+<li><code>repro</code> — exact command to reproduce</li>
+</ul>
+<pre><code>{"schema_version":1,"seq":2,"tool":"lhd","command":"run","step":"parse","status":"fail","tag":"@tst1","run_id":"20260409T100000Z_7f3a","exit_code":1,"elapsed_ms":100,"error":{"class":"missing_file","message":"file not found: missing.v","hint":"check files list in lhd.toml","tail":["Error: cannot open missing.v: No such file or directory"],"repro":"lhd run parse @tst1"},"log":"runs/20260409T100000Z_7f3a/logs/002_lhd_parse.log"}
+</code></pre>
+
+<h2>CLI stdout</h2>
+<p>Stdout is reserved for the selected output protocol. No banners, progress
+messages, raw tool logs, or human commentary are written to stdout in JSON or
+JSONL mode. Raw output goes to log files; <code>--verbose</code> may mirror raw output to
+stderr only.</p>
+<p><code>lhd run</code> prints the JSONL line(s) to stdout. For single steps, one line.
+For recipes, one line per step as it completes (streaming):</p>
+<pre><code>$ lhd run recipe:roundtrip @tst1
+{"schema_version":1,"seq":1,"tool":"lhd","step":"parse","status":"pass","elapsed_ms":1200,"log":"runs/20260409T100000Z_7f3a/logs/001_lhd_parse.log"}
+{"schema_version":1,"seq":2,"tool":"lhd","step":"cprop","status":"pass","elapsed_ms":2100,"log":"runs/20260409T100000Z_7f3a/logs/002_lhd_cprop.log"}
+{"schema_version":1,"seq":3,"tool":"lhd","step":"cgen-verilog","status":"fail","elapsed_ms":300,"error":{"class":"internal","message":"..."},"log":"runs/20260409T100000Z_7f3a/logs/003_lhd_cgen-verilog.log"}
+</code></pre>
+<p><code>--format text</code> is the human-friendly mode and may print summaries, progress,
+and abbreviated diagnostics to stdout.</p>
+
+<h2>List Patterns</h2>
+<p><code>lhd list</code> is the single entrypoint for enumeration. It can either:</p>
+<ul>
+<li>enumerate what patterns exist</li>
+<li>enumerate objects inside a specific tag</li>
+</ul>
+<p>There is no separate <code>--list</code> flag. <code>list</code> is its own command.</p>
+<p>This keeps the meaning clean:</p>
+<ul>
+<li><code>list</code> = enumerate available patterns or matching objects</li>
+<li><code>describe</code> = what does one step/recipe/list-pattern do?</li>
+<li><code>status</code> = what is the high-level state of this tag?</li>
+</ul>
+<p>Examples:</p>
+<pre><code>$ lhd list
+{"schema_version":1,"patterns":[
+  {"name":"steps","scope":"global"},
+  {"name":"recipes","scope":"global"},
+  {"name":"modules","scope":"tag"},
+  {"name":"hierarchy","scope":"tag"},
+  {"name":"stats","scope":"tag"},
+  {"name":"history","scope":"tag"}
+]}
+
+$ lhd list steps
+{"schema_version":1,"pattern":"steps","items":["parse","cprop","cgen-verilog","check","lnast-tolg","lnast-fromlg","graphviz"],"aliases":{"parse":"parse.verilog","cprop":"pass.cprop","cgen-verilog":"emit.verilog","check":"check.equiv"}}
+
+$ lhd list recipes
+{"schema_version":1,"pattern":"recipes","items":["roundtrip","compile"]}
+
+$ lhd list modules @tst1
+{"schema_version":1,"pattern":"modules","tag":"@tst1","items":["foo","alu","regfile"]}
+
+$ lhd list hierarchy @tst1
+{"schema_version":1,"pattern":"hierarchy","tag":"@tst1","top":"foo","tree":{"name":"foo","children":[{"name":"alu"},{"name":"regfile"}]}}
+
+$ lhd list hierarchy @tst1 --top alu
+{"schema_version":1,"pattern":"hierarchy","tag":"@tst1","top":"alu","tree":{"name":"alu","children":[]}}
+
+$ lhd list modules @tst1 --from original
+{"schema_version":1,"pattern":"modules","tag":"@tst1","source":"input:original","items":["foo","alu","regfile"]}
+
+$ lhd list partitions @tst1
+{"schema_version":1,"pattern":"partitions","tag":"@tst1","items":[
+  {"name":"add","kind":"comb","latency":0,"interface_hash":"0x1a2b…",
+   "state_shape_hash":"0x0","clock":null},
+  {"name":"mac","kind":"pipe","latency":2,"interface_hash":"0x3c4d…",
+   "state_shape_hash":"0x5e6f…","clock":"clk"},
+  {"name":"cpu","kind":"mod","interface_hash":"0x7a8b…",
+   "state_shape_hash":"0x9c0d…","clock":"clk","ext":["imem","dmem"]}
+]}
+</code></pre>
+<p>Recommended initial tag-scoped patterns:</p>
+<ul>
+<li><code>modules</code> — list module names known in the tag</li>
+<li><code>partitions</code> — list partitions (<code>comb</code> / <code>pipe</code> / <code>mod</code>) with kind,
+  latency, clock domain, and <code>interface_hash</code> / <code>state_shape_hash</code>.
+  See the <a href="https://masc-ucsc.github.io/docs/livehd/">LiveHD docs</a>.</li>
+<li><code>hierarchy</code> — instance/module tree top at top or <code>--top</code></li>
+<li><code>stats</code> — summary counts (modules, cells, flops, memories, edges)</li>
+<li><code>history</code> — which LiveHD steps have been run for the tag</li>
+</ul>
+<p>Minimal selector options:</p>
+<ul>
+<li><code>--top &lt;module&gt;</code> — top the query at one module</li>
+<li><code>--from &lt;input-name&gt;</code> — list against a named input tag from <code>[inputs]</code></li>
+<li><code>--format &lt;name&gt;</code> — optional alternate rendering such as <code>tree</code> or <code>flat</code></li>
+</ul>
+<p>Patterns that do not need a tag:</p>
+<ul>
+<li><code>steps</code> — available LiveHD execution steps</li>
+<li><code>recipes</code> — available named recipes</li>
+</ul>
+<p>If a pattern requires a tag and none is provided, the CLI should return a
+structured <code>config</code> error explaining that the pattern is tag-scoped.</p>
+
+<h2>Discovery Protocol</h2>
+<p>Agents use <code>list</code> and <code>describe</code>:</p>
+
+<h3>Step 1: list</h3>
+<pre><code>$ lhd list
+{"schema_version":1,"patterns":[
+  {"name":"steps","scope":"global"},
+  {"name":"recipes","scope":"global"},
+  {"name":"modules","scope":"tag"},
+  {"name":"hierarchy","scope":"tag"},
+  {"name":"stats","scope":"tag"},
+  {"name":"history","scope":"tag"}
+]}
+
+$ lhd list steps
+{"schema_version":1,"pattern":"steps","items":["parse","cprop","cgen-verilog","check","lnast-tolg","lnast-fromlg","graphviz"],"aliases":{"parse":"parse.verilog","cprop":"pass.cprop","cgen-verilog":"emit.verilog","check":"check.equiv"}}
+
+$ lhd list recipes
+{"schema_version":1,"pattern":"recipes","items":["roundtrip","compile"]}
+</code></pre>
+
+<h3>Step 2: describe</h3>
+<pre><code>$ lhd describe parse
+{"schema_version":1,"name":"parse","canonical":"parse.verilog","description":"Parse Verilog/SystemVerilog into LGraph via Yosys","args":{"required":[{"name":"files","type":"path[]","repeatable":true},{"name":"top","type":"string"}],"optional":[{"name":"path","type":"path","default":"lgdb"}]},"inputs":["verilog"],"outputs":["lgdb"],"cache":"writes-tag-state","examples":["lhd run parse @tst1"]}
+
+$ lhd describe cprop
+{"schema_version":1,"name":"cprop","canonical":"pass.cprop","description":"Constant propagation and optimization pass","args":{"required":[],"optional":[{"name":"aggressive","type":"bool","default":false},{"name":"max_iterations","type":"integer","default":10}]},"inputs":["lgdb"],"outputs":["lgdb"],"cache":"mutates-tag-state","examples":["lhd run cprop @tst1 --set aggressive=true"]}
+
+$ lhd describe recipe:roundtrip
+{"schema_version":1,"name":"recipe:roundtrip","steps":["parse","cprop","cgen-verilog","check"],"description":"Full compile + equivalence check","supports_dry_run":true}
+
+$ lhd describe modules
+{"schema_version":1,"name":"modules","description":"List module names available from a tag","scope":"tag","selectors":{"optional":[{"name":"from","type":"string"}]},"outputs":["items"]}
+
+$ lhd describe hierarchy
+{"schema_version":1,"name":"hierarchy","description":"Return module/instance hierarchy top at top or --top","scope":"tag","selectors":{"optional":[{"name":"top","type":"string"},{"name":"from","type":"string"},{"name":"format","type":"enum","values":["tree","flat"],"default":"tree"}]},"outputs":["tree"]}
+
+$ lhd describe partitions
+{"schema_version":1,"name":"partitions","description":"List partitions with kind, latency, clock domain, and content hashes","scope":"tag","selectors":{"optional":[{"name":"kind","type":"enum","values":["comb","pipe","mod"]},{"name":"top","type":"string"},{"name":"from","type":"string"}]},"outputs":["items"]}
+</code></pre>
+<p><code>describe</code> should expose enough structure for agents to build a valid command
+without scraping prose: argument type, default, enum values when applicable,
+repeatability, required prior artifacts, produced artifacts, cache/state
+behavior, examples, and aliases.</p>
+
+<h3>Hot-reload reporting</h3>
+<p>Steps that may hot-reload (<code>run sim @tag --hot</code>) report the tier in
+the JSONL result (see the simulation hot-reload tiers in the
+<a href="https://masc-ucsc.github.io/docs/livehd/">LiveHD docs</a>). Agents read
+<code>tier</code> to decide whether the run is verification-grade or
+exploration-only:</p>
+<pre><code>{"schema_version":1,"seq":4,"tool":"lhd","step":"sim","status":"pass","tier":"hot-debug","elapsed_ms":200,"at":"…"}
+{"schema_version":1,"seq":5,"tool":"lhd","step":"sim","status":"pass","tier":"hot-approx","warning":"checkpoint stale; not for LEC","elapsed_ms":300,"at":"…"}
+{"schema_version":1,"seq":6,"tool":"lhd","step":"sim","status":"pass","tier":"cold","reason":"state_shape_hash changed","elapsed_ms":4100,"at":"…"}
+</code></pre>
+
+<h3>--help (human rendering of describe)</h3>
+<pre><code>$ lhd run cprop --help
+cprop — Constant propagation and optimization pass
+
+Optional:
+  aggressive       Enable aggressive optimizations (default: false)
+  max_iterations   Maximum optimization iterations (default: 10)
+
+Reads: lgdb
+Writes: lgdb
+</code></pre>
+
+<h2>Multi-tag Workflows</h2>
+<p>Using <code>@tag</code> references, agents compose multi-tag flows:</p>
+<pre><code># Compile original
+lhd setup @orig --top foo --files foo.v
+lhd run recipe:compile @orig
+
+# Experiment with different optimization
+lhd setup @opt_exp --top foo --files foo.v --input baseline=@orig
+lhd run parse @opt_exp
+lhd run cprop @opt_exp --set aggressive=true
+lhd run cgen-verilog @opt_exp
+
+# Compare outputs
+lhd run check @opt_exp --reference @orig
+</code></pre>
+
+<h2>Relationship to lgshell / EPRP</h2>
+<p>The <code>lhd</code> CLI is a structured argv-based frontend. It calls the
+existing EPRP/pass machinery internally, but agents never need to quote or
+generate <code>|&gt;</code> command strings. The legacy <code>lgshell</code> REPL (and its replxx
+terminal dependency) was <strong>removed 2026-06-04</strong> — lhd is the only driver.</p>
+<p>The stateless kernel replaced the <code>printf 'inou.prp files:… |&gt; pass.upass
+…' | lgshell</code> pattern that test and <code>*_compile.sh</code> scripts used (e.g.
+<code>pass/prp_writer/tests/prp_writer_roundtrip_test.sh</code>,
+<code>inou/yosys/tests/yosys_compile.sh</code>): those pipe a <code>|&gt;</code> string into stdin and
+grep stdout for success/error markers. A hermetic <code>lhd compile … --emit …
+--result-json …</code> invocation gives those scripts (and any Bazel rule that
+wraps them) declared outputs and a parseable result instead of grepping mixed
+stdout.</p>
+<p>Implementation rule: the agent-facing <code>lhd</code> binary must not print existing
+REPL banners, prompts, command echoes, or raw pass output on stdout in JSON or
+JSONL mode. Current EPRP labels can seed <code>describe</code>, but the metadata needs to
+grow beyond <code>required/default/help</code> to include typed arguments and artifacts.</p>
+
+<h2>Relationship to Runner</h2>
+<p>LiveHD's CLI follows the same tag-based model as <code>hagent/runner/</code>. The
+key difference: runner orchestrates external tools (build systems, simulators),
+while lhd wraps internal compiler passes. Both can share a tag directory.</p>
+<table>
+<tr><th>Concept</th><th>runner</th><th>lhd</th></tr>
+<tr><td>Tag creation</td><td><code>runner setup @tag</code></td><td><code>lhd setup @tag</code></td></tr>
+<tr><td>Step execution</td><td><code>runner run &lt;api&gt; @tag</code></td><td><code>lhd run &lt;step&gt; @tag</code></td></tr>
+<tr><td>Config file</td><td><code>runner.toml</code></td><td><code>lhd.toml</code></td></tr>
+<tr><td>Results file</td><td><code>runner_results.jsonl</code></td><td><code>lhd_results.jsonl</code></td></tr>
+<tr><td>Log naming</td><td><code>NNN_runner_&lt;step&gt;.log</code></td><td><code>NNN_lhd_&lt;step&gt;.log</code></td></tr>
+<tr><td>Tag sigil</td><td><code>@tag</code></td><td><code>@tag</code></td></tr>
+<tr><td>Discovery</td><td><code>runner list</code> / <code>describe</code></td><td><code>lhd list</code> / <code>describe</code></td></tr>
+<tr><td>Tag introspection</td><td>not defined yet</td><td><code>lhd list &lt;pattern&gt; @tag</code></td></tr>
+<tr><td>Test orchestration</td><td><code>runner run @tag</code> (parallel)</td><td><code>lhd run recipe:X @tag</code></td></tr>
+</table>
+</main>
+<footer><a href="../index.html">← All tasks</a> · LiveHD TODO · <code>livehd</code></footer>
+</body>
+</html>

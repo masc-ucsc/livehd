@@ -1,7 +1,7 @@
 //  This file is distributed under the BSD 3-Clause License. See LICENSE for details.
 
 // lhd — the stateless, hermetic LiveHD CLI kernel (task 1y-bazel).
-// See lhd.hpp and docs/contracts/future_cli.md.
+// See lhd.hpp and the LiveHD docs.
 
 #include <exception>
 

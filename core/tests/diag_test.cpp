@@ -105,7 +105,7 @@ TEST(diag, jsonl_escapes_quotes_and_emits_span_object) {
   Diagnostic d = make_error();
   d.message    = "bad \"quote\" and\nnewline";
   d.span       = Span{.file = "foo.prp", .start_byte = 120, .end_byte = 135, .start_line = 12, .start_col = 7};
-  d.see        = {"docs/contracts/typesystem_clean_plan.md#T4"};
+  d.see        = {"https://masc-ucsc.github.io/docs/pyrope/07-typesystem/"};
   auto line    = livehd::diag::to_jsonl(d, 1);
   EXPECT_NE(line.find("\\\"quote\\\""), std::string::npos);
   EXPECT_NE(line.find("\\n"), std::string::npos);

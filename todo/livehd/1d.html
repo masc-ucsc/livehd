@@ -1,0 +1,72 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>TODO 1d — Demand-driven emit + dead-code elimination</title>
+<link rel="stylesheet" href="../todo.css">
+</head>
+<body>
+<nav><span class="brand">LiveHD TODO</span><a href="../index.html">← All tasks</a></nav>
+<main>
+<h1><strong class="item-id">1d</strong> Demand-driven emit + dead-code elimination</h1>
+<p>Demand-driven (lazy) emit + dead-code elimination for upass: replace the
+  <em>emit-everything-then-mark-sweep</em> DCE with <em>demand-first</em> emission that
+  materializes each pure value def at its use site and drops undemanded defs for
+  free. The demand-first half already exists (<code>uPass_coalescer</code>); the pragmatic
+  hybrid has landed, with the full sea-of-nodes rewrite deferred.</p>
+
+<h2>Depends on</h2>
+<p>None.</p>
+
+<h2>Subtasks — pending</h2>
+<ul class="subtasks">
+<li><strong>D — full sea-of-nodes rewrite (deferred).</strong> Fully <em>retiring</em> the
+  post-walk sweep is blocked by an architectural wall: the runner unrolls
+  <code>for a in args</code> into direct <code>args__i</code> reads AFTER the coalescer's
+  boundary flush (incl. <code>process_for</code>), so post-unroll deadness is a
+  staging-tree (post-emit) property no forward-emit scheme can see. The only true
+  fix is a unified demand-scheduled sea-of-nodes IR:
+  <ul>
+  <li>Unify unrolling + scheduling so deadness is intrinsic.</li>
+  <li>Add dominator-tree LCA placement for cross-branch uses.</li>
+  <li>Extend demand-driven emit to all pure defs — then the post-walk rebuild
+    disappears.</li>
+  </ul></li>
+<li><strong>E — arrays (future-gated).</strong> Total reorder of pure defs is sound today
+  (no memory aliasing — every read-after-write is visible through SSA names). An
+  array index reintroduces may-alias ordering (<code>a[i]=</code> vs <code>=a[j]</code>);
+  treat aliasing array ops as pinned/ordered when arrays land.</li>
+</ul>
+
+<h2>Subtasks — landed</h2>
+<ul class="subtasks">
+<li><strong>A — D1: range → dce_is_def_producing sweep.</strong> <span class="status landed">landed</span></li>
+<li><strong>B — hybrid A: complete-the-sweep.</strong> <span class="status landed">landed</span>
+  The post-walk sweep completed as the post-emit liveness backstop — it now runs
+  on mod/pipe/fluid clones and drops non-root user-named defs via the io-root rule
+  (root = io_meta IO &cup; mut/reg declares), which cleared the
+  <code>mod_varargs_*</code> tolg warnings.</li>
+<li><strong>C — hybrid B: park <code>is</code> in the coalescer.</strong> <span class="status landed">landed</span></li>
+</ul>
+
+<h2>Design notes</h2>
+<p><strong>★ Design rationale + literature references live in the header comment block
+  at the top of <a href="../../upass/runner/upass_runner.cpp"><code>upass/runner/upass_runner.cpp</code></a>
+  — read that first.</strong> The demand-first scheme folds each pure value def to a
+  <code>const</code> when possible, else copies the def subtree from the source tree,
+  drops undemanded defs for free, and sinks defs near their uses. In compiler terms
+  this is late scheduling of a sea-of-nodes / partial dead-code elimination (refs in
+  the comment block: Click GCM, Knoop-Rüthing-Steffen PDE/LCM, SSA-DCE, SCCP, VDG).</p>
+<p><strong>Remaining — the sea-of-nodes ceiling.</strong> The <em>demand-first</em> half
+  already existed: <a href="../../upass/coalescer/upass_coalescer.cpp"><code>uPass_coalescer</code></a>
+  (active by default when the tree materializes) parks pure scalar defs,
+  materializes-at-use via <code>runner_emit_at_fn</code>, DSE on overwrite, drops
+  const-known defs. Until the sea-of-nodes IR lands, the post-walk sweep is the
+  architecturally-necessary post-emit pass. See git <code>1d-D1</code> /
+  <code>1d-hybrid A</code> / <code>1d-hybrid B</code> and the memory note
+  <code>task_1d_dce_hybrid_landed</code>.</p>
+</main>
+<footer><a href="../index.html">← All tasks</a> · LiveHD TODO · <code>livehd</code></footer>
+</body>
+</html>
