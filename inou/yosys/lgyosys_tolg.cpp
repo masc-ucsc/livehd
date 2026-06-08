@@ -327,7 +327,7 @@ static hhds::Pin_class create_pick_operator(const hhds::Pin_class& wide_dpin, in
       setup_sink_by_name(shr_node, "a").connect_driver(wide_dpin);
       setup_sink_by_name(shr_node, "b").connect_driver(create_const(*g, *Dlop::create_integer(offset)));
 
-      and_node.create_driver_pin(0);  // ensure dpin exists
+      // NOT needed and_node.create_driver_pin(0);  // ensure dpin exists
       shr_node.create_driver_pin(0).connect_sink(and_node.create_sink_pin(0));
     } else {
       wide_dpin.connect_sink(and_node.create_sink_pin(0));

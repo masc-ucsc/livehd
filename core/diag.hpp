@@ -56,10 +56,10 @@ struct Diagnostic {
   std::string              category = "internal";  // syntax|name|type|bitwidth|unsupported|internal
   std::string              pass;                    // dotted origin, e.g. "upass.attributes"
   std::string              message;                 // one line, no trailing period, no location
-  Span                     span;
-  std::string              hint;                    // optional one-line suggestion
-  std::vector<std::string> see;                     // optional doc/spec pointers
-  std::vector<Note>        notes;                   // optional secondary locations
+  Span                     span{};
+  std::string              hint{};                   // optional one-line suggestion
+  std::vector<std::string> see{};                    // optional doc/spec pointers
+  std::vector<Note>        notes{};                  // optional secondary locations
 };
 
 // One JSONL line (no trailing newline). `seq` is the per-run monotonic id.

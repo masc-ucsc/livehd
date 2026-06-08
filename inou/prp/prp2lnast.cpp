@@ -1551,8 +1551,8 @@ Lnast_node Prp2lnast::process_lvalue_for_assign(TSNode lvalue, const Lnast_node&
           std::function<void(TSNode)> walk = [&](TSNode n) {
             std::string_view t(ts_node_type(n));
             if (t == "dot_expression") {
-              TSNode item = child_by_field(n, "item");
-              if (ts_node_is_null(item)) {
+              TSNode dot_item = child_by_field(n, "item");
+              if (ts_node_is_null(dot_item)) {
                 uint32_t nc = ts_node_named_child_count(n);
                 if (nc > 0) {
                   walk(ts_node_named_child(n, 0));
@@ -1562,11 +1562,11 @@ Lnast_node Prp2lnast::process_lvalue_for_assign(TSNode lvalue, const Lnast_node&
                   path_keys.emplace_back(trim(get_text(c)));
                 }
               } else {
-                walk(item);
+                walk(dot_item);
                 uint32_t nc = ts_node_named_child_count(n);
                 for (uint32_t k = 0; k < nc; k++) {
                   TSNode c = ts_node_named_child(n, k);
-                  if (ts_node_eq(c, item)) {
+                  if (ts_node_eq(c, dot_item)) {
                     continue;
                   }
                   path_keys.emplace_back(trim(get_text(c)));
@@ -3127,18 +3127,18 @@ void Prp2lnast::process_lambda_statement_named(TSNode n, std::string_view hoist_
         // Recursively walk the if/match: if any descendant is an `assignment`
         // (any flavor) or a `control_statement`/`while`/`for`/`loop`, the
         // body is statement-style and the placeholder treatment is wrong.
-        std::function<bool(TSNode)> has_stmt = [&](TSNode n) -> bool {
-          if (ts_node_is_null(n)) {
+        std::function<bool(TSNode)> has_stmt = [&](TSNode node) -> bool {
+          if (ts_node_is_null(node)) {
             return false;
           }
-          std::string_view tt(ts_node_type(n));
+          std::string_view tt(ts_node_type(node));
           if (tt == "assignment" || tt == "declaration_statement" || tt == "control_statement" || tt == "while_statement"
               || tt == "for_statement" || tt == "loop_statement" || tt == "assert_statement" || tt == "function_call_statement") {
             return true;
           }
-          uint32_t cnc = ts_node_named_child_count(n);
+          uint32_t cnc = ts_node_named_child_count(node);
           for (uint32_t i = 0; i < cnc; i++) {
-            if (has_stmt(ts_node_named_child(n, i))) {
+            if (has_stmt(ts_node_named_child(node, i))) {
               return true;
             }
           }
