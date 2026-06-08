@@ -400,7 +400,18 @@ void Pass_upass::work(Eprp_var& var) {
   // configured upass pipeline before downstream stages see them.
   for (std::size_t idx = 0; idx < var.lnasts.size(); ++idx) {
     const auto ln = var.lnasts.at(idx);
-    auto       lm = std::make_shared<upass::Lnast_manager>(ln);
+
+    // Task 1p-runner — a not-fully-typed template (var-args / untyped params) is
+    // realized ONLY at call sites (comb inline / pipe-mod specialize), never as a
+    // standalone unit. Run its walk NON-materializing so its diagnostics +
+    // comptime casserts still fire (paths_if's `verifier_include_funcs` body),
+    // but its body is never rewritten — materializing it would try to unroll a
+    // `for` over unbound var-args, corrupt the body (drop the post-loop output
+    // write), and flip it non-inlinable for real callers. Its standalone
+    // specializations are likewise spurious (real ones happen at call sites), so
+    // its take_new_lnasts() is dropped. tolg/timecheck/pipe also skip templates.
+    const bool is_template = ln->is_template();
+    auto       lm          = std::make_shared<upass::Lnast_manager>(ln);
 
     // For func_extract-spawned lnasts (idx beyond the original entry-point
     // count), strip the verifier from the order unless the test opted in
@@ -417,7 +428,7 @@ void Pass_upass::work(Eprp_var& var) {
     // walk still dispatches every pass, so diagnostics and side-channels
     // (io_meta/bw_meta) are unchanged. The func_extract pre-loop above keeps
     // materializing (the main walk consumes its rewrite).
-    runner.set_materialize(up.run_toln);
+    runner.set_materialize(up.run_toln && !is_template);  // 1p-runner: never rewrite a template body
     runner.set_is_function_body(is_function_body);
     runner.set_function_registry(var.lnasts);  // 1i: comb bodies to inline from
     if (runner.has_configuration_error()) {
@@ -432,11 +443,14 @@ void Pass_upass::work(Eprp_var& var) {
     // downstream reads the rewritten tree, so the original body stays put and
     // the staging rebuild is dropped. run_toln is forced on while tolg:1 (the
     // tolg sub-pass below reads the post-upass tree).
-    if (up.run_toln) {
+    if (up.run_toln && !is_template) {
       auto staged = runner.take_staging();
       if (staged) {
         ln->replace_body(staged->tree_ptr());
       }
+    }
+    if (is_template) {
+      continue;  // 1p-runner: drop a template's standalone staging + spurious specializations
     }
     auto new_lnasts = runner.take_new_lnasts();
     for (const auto& new_ln : new_lnasts) {
