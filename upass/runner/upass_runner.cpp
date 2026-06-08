@@ -1683,8 +1683,8 @@ bool uPass_runner::try_inline_func_call() {
     const auto k         = callee->get_lambda_kind();
     const bool is_method = !io.inputs.empty() && io.inputs[0].name == "self";
     if ((k == "mod" || k == "pipe" || k == "fluid") && !is_method) {
-      if (maybe_specialize_template_call(callee, io, param_val, param_set, nbind, has_vararg, dst_name, callee_name,
-                                         call_span)) {
+      if (maybe_specialize_template_call(callee, io, param_val, param_set, nbind, has_vararg, vararg_pos, vararg_named, dst_name,
+                                         callee_name, call_span)) {
         return true;
       }
     }
@@ -2041,12 +2041,81 @@ void uPass_runner::copy_subtree_into(const std::shared_ptr<Lnast>& src, const Ln
 }
 
 std::shared_ptr<Lnast> uPass_runner::clone_template_specialized(const std::shared_ptr<Lnast>& tmpl, const std::string& mangled,
-                                                               const std::vector<Spec_port>& inject) {
+                                                               const std::vector<Spec_port>& inject,
+                                                               const std::vector<Spec_port>& vports, const std::string& vname) {
   auto clone    = std::make_shared<Lnast>(mangled);
   auto src_root = tmpl->get_root();
   auto dst_root = clone->set_root(tmpl->get_type(src_root));  // top
-  for (auto c : tmpl->children(src_root)) {
-    copy_subtree_into(tmpl, c, clone, dst_root);
+
+  // Emit one concrete input-port store: store(ref(name), const(nil), <type>).
+  auto add_port = [&](const Lnast_nid& in_dst, const Spec_port& p, const std::string& name) {
+    auto st = clone->add_child(in_dst, Lnast_ntype::create_store());
+    clone->add_child(st, Lnast_node::create_ref(name));
+    clone->add_child(st, Lnast_node::create_const("nil"));
+    if (!p.type_name.empty()) {
+      clone->add_child(st, Lnast_node::create_ref(p.type_name));
+    } else {
+      auto pt = clone->add_child(st, Lnast_ntype::create_prim_type_int());
+      clone->add_child(pt, Lnast_node::create_const(p.max ? std::string(p.max->to_pyrope()) : std::string("nil")));
+      clone->add_child(pt, Lnast_node::create_const(p.min ? std::string(p.min->to_pyrope()) : std::string("nil")));
+    }
+  };
+
+  if (vname.empty()) {
+    for (auto c : tmpl->children(src_root)) {
+      copy_subtree_into(tmpl, c, clone, dst_root);
+    }
+  } else {
+    // 1p-runner var-arg expansion: rebuild the io (drop the `...vname` marker
+    // port, append the N concrete vports) and the body (prefix a
+    // `vname = (port…)` reconstruction so the body's args[i]/args.NAME/
+    // for-a-in-args lower via the normal tuple/for machinery). Append-only trees
+    // can't delete the marker port, hence the fresh rebuild.
+    bool io_done = false, body_done = false;
+    for (auto c : tmpl->children(src_root)) {
+      const auto ct = tmpl->get_type(c);
+      if (Lnast_ntype::is_io(ct) && !io_done) {
+        io_done     = true;
+        auto io_dst = clone->add_child(dst_root, ct);
+        auto src_in = tmpl->get_first_child(c);
+        if (src_in.is_invalid()) {
+          continue;
+        }
+        auto in_dst = clone->add_child(io_dst, tmpl->get_type(src_in));
+        for (auto entry : tmpl->children(src_in)) {
+          auto nm = tmpl->get_first_child(entry);
+          if (!nm.is_invalid() && tmpl->get_name(nm) == vname) {
+            continue;  // drop the `...vname` marker port
+          }
+          copy_subtree_into(tmpl, entry, clone, in_dst);
+        }
+        for (const auto& vp : vports) {
+          add_port(in_dst, vp, vp.port_name);
+        }
+        for (auto out = tmpl->get_sibling_next(src_in); !out.is_invalid(); out = tmpl->get_sibling_next(out)) {
+          copy_subtree_into(tmpl, out, clone, io_dst);  // output tuple (+ any further io children) verbatim
+        }
+      } else if (Lnast_ntype::is_stmts(ct) && !body_done) {
+        body_done     = true;
+        auto body_dst = clone->add_child(dst_root, ct);
+        auto recon    = clone->add_child(body_dst, Lnast_ntype::create_tuple_add());
+        clone->add_child(recon, Lnast_node::create_ref(vname));
+        for (const auto& vp : vports) {
+          if (vp.is_named) {
+            auto fst = clone->add_child(recon, Lnast_ntype::create_store());
+            clone->add_child(fst, Lnast_node::create_ref(vp.field));
+            clone->add_child(fst, Lnast_node::create_ref(vp.port_name));
+          } else {
+            clone->add_child(recon, Lnast_node::create_ref(vp.port_name));
+          }
+        }
+        for (auto bc : tmpl->children(c)) {
+          copy_subtree_into(tmpl, bc, clone, body_dst);
+        }
+      } else {
+        copy_subtree_into(tmpl, c, clone, dst_root);
+      }
+    }
   }
   clone->set_lambda_kind(tmpl->get_lambda_kind());
   clone->set_template(false);
@@ -2109,18 +2178,11 @@ void uPass_runner::emit_specialized_call(const std::string& dst, const std::stri
 
 bool uPass_runner::maybe_specialize_template_call(const std::shared_ptr<Lnast>& callee, const Lnast_tree_io& io,
                                                   const std::vector<Lnast_node>& param_val, const std::vector<bool>& param_set,
-                                                  std::size_t nbind, bool has_vararg, const std::string& dst_name,
-                                                  const std::string& callee_name, const livehd::diag::Span& call_span) {
+                                                  std::size_t nbind, bool has_vararg, const std::vector<Lnast_node>& vararg_pos,
+                                                  const std::vector<std::pair<std::string, Lnast_node>>& vararg_named,
+                                                  const std::string& dst_name, const std::string& callee_name,
+                                                  const livehd::diag::Span& call_span) {
   const auto kind = std::string(callee->get_lambda_kind());
-  if (has_vararg) {
-    // A var-arg hardware boundary would need a variable-length port list; only
-    // `comb` (which inlines) supports var-args today.
-    fcall_arg_fail(call_span,
-                   "fcall-vararg-module",
-                   std::format("var-args on the {} boundary `{}` are not supported — a hardware port list must be fixed", kind,
-                               callee_name),
-                   "use a `comb` (var-args inline), or declare fixed named ports");
-  }
 
   // Readable bits/sign suffix from a declared (max,min) range — mirrors
   // upass_ssa type_info_from so the name matches the lowered width.
@@ -2154,11 +2216,54 @@ bool uPass_runner::maybe_specialize_template_call(const std::shared_ptr<Lnast>& 
     return nullptr;
   };
 
-  std::vector<Spec_port>   inject(nbind);
   std::vector<std::string> suffix;
-  suffix.reserve(nbind);
+
+  // Read one actual's DECLARED type into a Spec_port (inject=true) and push its
+  // readable suffix; an untyped actual is a fatal call-site error. Shared by the
+  // fixed params and the var-arg leftovers (decision 4). `label` names the actual
+  // for the diagnostic.
+  auto type_from_actual = [&](const Lnast_node& av, bool av_set, std::string_view label) -> Spec_port {
+    const auto fail = [&]() {
+      fcall_arg_fail(call_span,
+                     "fcall-untyped-actual",
+                     std::format("argument `{}` to template `{}` has no declared type — a `{}` boundary needs an explicit width",
+                                 label, callee_name, kind),
+                     "annotate the actual, e.g. `x:u8`");
+    };
+    if (!av_set || !av.is_ref()) {
+      fail();
+    }
+    Spec_port  sp;
+    const auto an = std::string(av.get_name());
+    if (auto tn = try_typename(an); !tn.empty()) {
+      sp = {true, std::nullopt, std::nullopt, std::string(tn)};
+      suffix.push_back(std::string(tn));
+    } else if (auto dt = try_decl_type(an); dt && (dt->range_max || dt->range_min)) {
+      sp = {true, dt->range_max, dt->range_min, {}};
+      suffix.push_back(suffix_for(dt->range_max, dt->range_min));
+    } else if (const auto* ci = caller_input(an); ci != nullptr && (ci->bits > 0 || ci->kind == Io_kind::boolean)) {
+      if (ci->kind == Io_kind::boolean) {
+        sp = {true, *Dlop::from_pyrope("1"), *Dlop::from_pyrope("0"), {}};
+        suffix.emplace_back("bool");
+      } else if (ci->is_signed) {
+        sp = {true, *Dlop::get_mask_value(ci->bits - 1), *Dlop::get_neg_mask_value(ci->bits - 1), {}};
+        suffix.push_back("s" + std::to_string(ci->bits));
+      } else {
+        sp = {true, *Dlop::get_mask_value(ci->bits), *Dlop::from_pyrope("0"), {}};
+        suffix.push_back("u" + std::to_string(ci->bits));
+      }
+    } else if (try_scalar_kind(an) == Io_kind::boolean) {
+      sp = {true, *Dlop::from_pyrope("1"), *Dlop::from_pyrope("0"), {}};
+      suffix.emplace_back("bool");
+    } else {
+      fail();
+    }
+    return sp;
+  };
+
+  std::vector<Spec_port> inject(nbind);
   for (std::size_t i = 0; i < nbind; ++i) {
-    const auto& e            = io.inputs[i];
+    const auto& e             = io.inputs[i];
     const bool  already_typed = e.bits > 0 || !e.type_name.empty() || e.kind == Io_kind::boolean;
     if (already_typed) {
       inject[i].inject = false;
@@ -2171,41 +2276,32 @@ bool uPass_runner::maybe_specialize_template_call(const std::shared_ptr<Lnast>& 
       }
       continue;
     }
-    // Untyped port (decision 4): read the actual's DECLARED type; an untyped
-    // actual is a fatal call-site error.
-    const auto untyped_fail = [&]() {
-      fcall_arg_fail(call_span,
-                     "fcall-untyped-actual",
-                     std::format("argument `{}` to template `{}` has no declared type — a `{}` boundary needs an explicit width",
-                                 e.name, callee_name, kind),
-                     "annotate the actual, e.g. `x:u8`");
-    };
-    if (!param_set[i] || !param_val[i].is_ref()) {
-      untyped_fail();
+    inject[i] = type_from_actual(param_val[i], param_set[i], e.name);
+  }
+
+  // 1p-runner — var-arg boundary (`...vname`): expand the N leftover actuals into
+  // N concrete typed ports on the clone (positional → vname__0…, named →
+  // vname__KEY). clone_template_specialized drops the `...vname` io port, adds
+  // these, and prefixes the body with `vname = (port…)` so args[i]/args.NAME/
+  // for-a-in-args lower via the normal tuple/for machinery.
+  std::vector<Spec_port> vports;
+  std::string            vname;
+  if (has_vararg) {
+    vname = io.inputs[nbind].name;
+    std::size_t k = 0;
+    for (const auto& a : vararg_pos) {
+      Spec_port vp = type_from_actual(a, true, std::format("{}[{}]", vname, k));
+      vp.port_name = std::format("{}__{}", vname, k);
+      vp.is_named  = false;
+      vports.push_back(std::move(vp));
+      ++k;
     }
-    const auto an = std::string(param_val[i].get_name());
-    if (auto tn = try_typename(an); !tn.empty()) {
-      inject[i] = {true, std::nullopt, std::nullopt, std::string(tn)};
-      suffix.push_back(std::string(tn));
-    } else if (auto dt = try_decl_type(an); dt && (dt->range_max || dt->range_min)) {
-      inject[i] = {true, dt->range_max, dt->range_min, {}};
-      suffix.push_back(suffix_for(dt->range_max, dt->range_min));
-    } else if (const auto* ci = caller_input(an); ci != nullptr && (ci->bits > 0 || ci->kind == Io_kind::boolean)) {
-      if (ci->kind == Io_kind::boolean) {
-        inject[i] = {true, *Dlop::from_pyrope("1"), *Dlop::from_pyrope("0"), {}};
-        suffix.emplace_back("bool");
-      } else if (ci->is_signed) {
-        inject[i] = {true, *Dlop::get_mask_value(ci->bits - 1), *Dlop::get_neg_mask_value(ci->bits - 1), {}};
-        suffix.push_back("s" + std::to_string(ci->bits));
-      } else {
-        inject[i] = {true, *Dlop::get_mask_value(ci->bits), *Dlop::from_pyrope("0"), {}};
-        suffix.push_back("u" + std::to_string(ci->bits));
-      }
-    } else if (try_scalar_kind(an) == Io_kind::boolean) {
-      inject[i] = {true, *Dlop::from_pyrope("1"), *Dlop::from_pyrope("0"), {}};
-      suffix.emplace_back("bool");
-    } else {
-      untyped_fail();
+    for (const auto& [key, a] : vararg_named) {
+      Spec_port vp = type_from_actual(a, true, std::format("{}.{}", vname, key));
+      vp.port_name = std::format("{}__{}", vname, key);
+      vp.is_named  = true;
+      vp.field     = key;
+      vports.push_back(std::move(vp));
     }
   }
 
@@ -2264,13 +2360,21 @@ bool uPass_runner::maybe_specialize_template_call(const std::shared_ptr<Lnast>& 
 
   if (!specialized_emitted_.contains(mangled)) {
     specialized_emitted_.insert(mangled);
-    new_lnasts.push_back(clone_template_specialized(callee, mangled, inject));
+    new_lnasts.push_back(clone_template_specialized(callee, mangled, inject, vports, vname));
   }
 
+  // Actuals wired to the clone's ports, in io order: fixed params, then the
+  // var-arg leftovers (positional then named) → the synthesized vname__* ports.
   std::vector<Lnast_node> actuals;
-  actuals.reserve(nbind);
+  actuals.reserve(nbind + vports.size());
   for (std::size_t i = 0; i < nbind; ++i) {
     actuals.push_back(param_val[i]);
+  }
+  for (const auto& a : vararg_pos) {
+    actuals.push_back(a);
+  }
+  for (const auto& [key, a] : vararg_named) {
+    actuals.push_back(a);
   }
   emit_specialized_call(dst_name, mangled, actuals);
   return true;

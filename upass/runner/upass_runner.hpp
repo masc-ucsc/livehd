@@ -262,17 +262,30 @@ protected:
     std::optional<Const> max;
     std::optional<Const> min;
     std::string          type_name;  // named type (takes precedence over max/min)
+    // 1p-runner var-arg expansion: a synthesized concrete port replacing one
+    // leftover of a `...args` boundary. `port_name` is the new io port name;
+    // `is_named`/`field` drive the in-body reconstruction tuple. (max/min/
+    // type_name carry the actual's type, same as a fixed port.)
+    std::string port_name;
+    bool        is_named = false;
+    std::string field;
   };
   bool maybe_specialize_template_call(const std::shared_ptr<Lnast>& callee, const Lnast_tree_io& io,
                                       const std::vector<Lnast_node>& param_val, const std::vector<bool>& param_set,
-                                      std::size_t nbind, bool has_vararg, const std::string& dst_name,
-                                      const std::string& callee_name, const livehd::diag::Span& call_span);
+                                      std::size_t nbind, bool has_vararg, const std::vector<Lnast_node>& vararg_pos,
+                                      const std::vector<std::pair<std::string, Lnast_node>>& vararg_named,
+                                      const std::string& dst_name, const std::string& callee_name,
+                                      const livehd::diag::Span& call_span);
   // Deep-copy `tmpl` verbatim into a fresh (TreeIO-backed) Lnast named
   // `mangled`, then inject a concrete prim_type_int / named-type child into
   // each untyped fixed input port per `inject`. Clears the template flag and
-  // copies the lambda kind. pass_upass re-SSAs the result.
+  // copies the lambda kind. pass_upass re-SSAs the result. When `vname` is
+  // non-empty the template has a `...vname` var-arg boundary: its io port is
+  // replaced by the `vports` concrete ports and the body is prefixed with a
+  // `vname = (port…)` reconstruction so the existing tuple/for machinery lowers.
   std::shared_ptr<Lnast> clone_template_specialized(const std::shared_ptr<Lnast>& tmpl, const std::string& mangled,
-                                                    const std::vector<Spec_port>& inject);
+                                                    const std::vector<Spec_port>& inject, const std::vector<Spec_port>& vports,
+                                                    const std::string& vname);
   void copy_subtree_into(const std::shared_ptr<Lnast>& src, const Lnast_nid& src_nid, const std::shared_ptr<Lnast>& dst,
                          const Lnast_nid& dst_parent);
   void emit_specialized_call(const std::string& dst, const std::string& mangled, const std::vector<Lnast_node>& actuals);
