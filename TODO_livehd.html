@@ -90,7 +90,7 @@ footer { max-width:920px; margin:0 auto; padding:0 1.25rem 3rem;
 </style>
 </head>
 <body>
-<nav><span class="brand">LiveHD TODO</span><a class="" href="TODO.html">Overview</a><a class="" href="TODO_prp.html">Pyrope</a><a class="" href="TODO_mod.html">Mod</a><a class="" href="TODO_verilog.html">Verilog</a><a class="active" href="TODO_livehd.html">LiveHD</a><a class="" href="TODO_hhds.html">HHDS</a></nav>
+<nav><span class="brand">LiveHD TODO</span><a class="" href="TODO.html">Overview</a><a class="" href="TODO_prp.html">Pyrope</a><a class="" href="TODO_verilog.html">Verilog</a><a class="active" href="TODO_livehd.html">LiveHD</a></nav>
 <main>
 <h1 id="todo-livehd-internal-refactor">TODO — LiveHD internal refactor</h1>
 <p>Pending work on LiveHD internals: CLI, upass infrastructure, source-map
@@ -98,12 +98,35 @@ machinery, LGraph cleanup, simulation/debug substrate, test reorg,
 benchmarks, and HHDS-side optimizations.</p>
 <p>Items use the same Group N letters as the master plan in <a href="TODO.html">TODO.md</a>.
 Items in the same group can be done in parallel; all letters in group N must
-complete before group N+1 starts. Group letters are shared across
-<a href="TODO_prp.html">TODO_prp.md</a>, <a href="TODO_verilog.html">TODO_verilog.md</a>,
-<a href="TODO_livehd.html">TODO_livehd.md</a>, and <a href="TODO_hhds.html">TODO_hhds.md</a>, so
-cross-file dependencies stay visible.</p>
+complete before group N+1 starts. Group letters are shared with
+<a href="TODO_prp.html">TODO_prp.md</a> and <a href="TODO_verilog.html">TODO_verilog.md</a>, so
+cross-file dependencies stay visible. The former <code>TODO_mod.md</code>
+(<code>mod</code> construct), <code>TODO_loop.md</code> (loop unroll), and
+<code>TODO_hhds.md</code> (HHDS API surface) docs were folded into this file.</p>
 <h2 id="group-1-foundation">Group 1 — foundation</h2>
 <ul>
+<li><strong id="item-1a" class="item-id">1a</strong> Finish the LNAST→LGraph synthesis closure (the rest of <code>lnast_to_lgraph</code>
+  beyond the combinational milestone) — Group 1 foundation for the Verilog
+  synthesis path (was <code>TODO_verilog.md</code> 1a). The how-to-lower spec is
+  <code>docs/contracts/lnast2lgraph.md</code>
+  (cell vocabulary, pin conventions, nil/bool model, reg/flop + memory wiring,
+  attributes; phases 4–11). Split into:
+  <ul>
+  <li><strong id="item-1a-mem" class="item-id">1a-mem</strong> Pyrope <code>Memory</code> →
+    LGraph <code>Memory</code> cell lowering: persistent indexed <code>reg</code> arrays, one Memory
+    per logical storage, 11-pin port stride. (Shares the Pyrope-side memory work in
+    <a class="xref" href="TODO_prp.html#item-3j">3j</a> / <a class="xref" href="TODO_prp.html#item-3g">3g</a>.)</li>
+  <li><strong id="item-1a-ops" class="item-id">1a-ops</strong> Remaining op / cell mappings:
+    <code>defer</code>/<code>past[n]</code> temporal reads → <code>Flop</code>; high-level op lowering
+    (slice/concat, <code>!=</code>/<code>&lt;=</code>/<code>&gt;=</code>, div/mod → power-of-two
+    <code>SRA</code>/<code>Get_mask</code> + generic <code>Sub</code> fallback / non-synth warning);
+    <code>uif</code> chains (HotMux FIXME) + direct <code>__&lt;cell&gt;</code> calls; <code>lg:</code>
+    black-box <code>Sub</code> instances (Pyrope-path <code>ln:</code> Subs landed via 1u-A +
+    <a class="xref" href="TODO_prp.html#item-1m">1m</a>; <code>tolg</code> hard-errors on any
+    unresolvable callee until <code>lg:</code> lands); and <code>max</code>/<code>min</code> HHDS
+    attribute reads at node creation (diagnose leftover LNAST-only attrs).
+    (The <code>reg</code>→<code>Flop</code> slice already landed.)</li>
+  </ul></li>
 <li>
 <p><strong id="item-1d" class="item-id">1d</strong> Demand-driven (lazy) emit + dead-code elimination for upass. <strong>Goal 1.</strong>
   <strong>★ Design rationale + literature references live in the header comment block
@@ -226,6 +249,14 @@ Group 1 entries; downstream Groups treat them as Group 1 dependencies.</p>
   (incl. <code>textDocument/formatting</code>) are a separate project.
   Remaining: Phases B–E (hover/nav/workspace); spans sharpen with <a class="xref" href="TODO_livehd.html#item-1f">1f</a>/<a class="xref" href="TODO_livehd.html#item-3f">3f</a> —
   <code>docs/contracts/pyrope_lsp.md</code>. <em>(moved from Group 1-complex to Group 2.)</em></li>
+<li><strong id="item-2u" class="item-id">2u</strong> Unroll all loops + tuple iteration in
+  the upass runner, not prp2lnast (was <code>TODO_loop.md</code>). Delete the parse-time
+  unroll so prp2lnast emits a raw <code>for</code>/<code>while</code> LNAST node for <em>every</em>
+  loop and <code>uPass_runner</code> performs all expansion at comptime. Gated by the
+  <strong>2u-PREREQ</strong> constprop bug (runtime <code>mut</code> across nested block scopes).
+  Ties to <a class="xref" href="TODO_prp.html#item-1m">1m</a>-deferred var-args
+  (<code>for x in args</code>). Full detail in the "Loop / tuple-iteration unroll migration"
+  section below.</li>
 </ul>
 <h2 id="group-3-depends-on-group-2">Group 3 — depends on Group 2</h2>
 <ul>
@@ -315,6 +346,173 @@ Group 1 entries; downstream Groups treat them as Group 1 dependencies.</p>
   "seconds matter" promise of <code>docs/contracts/architecture.md §1</code> stays
   measurable.</li>
 </ul>
+<h2 id="todo-pyrope-mod"><strong id="item-1r" class="item-id">1r</strong> Pyrope <code>mod</code> construct (follow-ups)</h2>
+
+<p>The structural phase (1r A–F, 1u A–E) and the <code>reg</code>→<code>Flop</code>
+register slice have landed; the design contract lives in the pyrope spec docs and
+the livehd contracts (<code>architecture.md §3</code>,
+<code>lnast_spec.md §3.9/§3.11</code>, <code>lnast2lgraph.md §12.1</code>). This
+section tracks <strong>what remains</strong>.</p>
+
+<h3 id="contract">Contract summary (decisions 2026-06-06 — implemented)</h3>
+
+<table>
+<tr><th>Kind</th><th>Output latency</th><th>Feedthrough</th><th>May call</th><th>IO typing</th><th>Lowering</th></tr>
+<tr><td><code>comb</code></td><td>all 0</td><td>yes (is comb)</td><td><code>comb</code></td><td>optional</td><td>inlined; own LGraph allowed when fully typed</td></tr>
+<tr><td><code>pipe</code></td><td>uniform, declared <code>pipe[N]</code>/<code>[A..=B]</code>/bare, N ≥ 1</td><td>never</td><td><code>comb</code></td><td><strong>required</strong></td><td>always own LGraph</td></tr>
+<tr><td><code>mod</code></td><td><strong>per-output, declared, 0..n</strong></td><td>allowed (a cycle-0 output)</td><td><code>comb</code>/<code>pipe</code>/<code>mod</code></td><td><strong>required</strong></td><td>always own LGraph; callees become instances</td></tr>
+</table>
+
+<p>The full normative rules (declared-not-inferred <code>@[N]</code>, reg
+home-stage outputs, fully-typed rule, instance lowering,
+<code>stage[N]</code>-is-the-action/<code>@[N]</code>-is-the-check split,
+<code>@[]</code> explicit opt-out, phase-1 min realization + caller-side
+deficit flop) are stated in the pyrope spec docs and the livehd contracts
+listed above — they are no longer repeated here.</p>
+
+<h3 id="pending">Pending mod work</h3>
+<ul>
+  <li>Runtime <code>wrap</code>/<code>sat</code> LG lowering (hard error at
+    tolg today; blocks <code>accum</code> and the doc-canonical add —
+    <code>mod_mul_add</code> uses a u33 workaround).</li>
+  <li>Multi-output callees at call sites (clean error today; needs
+    tuple-result handling in tolg).</li>
+  <li><code>stage[]</code> / ranged stage picks on calls + the LG pass2
+    realization knob (retiming/PPA depth pick replacing the min default).</li>
+  <li><code>lnast_to_slop</code> pipe/mod cell (seed-picked latency).</li>
+  <li>io_meta nil ambiguity: <code>stages(nil,nil)</code> harvests as (0,0)
+    in the int fields (<code>@[]</code> ≡ <code>@[0]</code> at the ABI; the
+    LNAST tree keeps the truth) — fold a tri-state into the
+    <code>io_meta()</code> stages slots.</li>
+  <li><strong>P1 — comptime <code>mut</code>-tuple value tracking:</strong>
+    <code>comptime_tuples_</code> (<code>prp2lnast.cpp</code> ~1958) only
+    records tuples whose fields are const literals. Decl-time-known
+    <code>mut</code> tuples should track their values with the same
+    UPDATE/ERASE rules — record on the <code>mut</code> decl, UPDATE on an
+    unconditional statement-level plain re-assign, ERASE on any other write
+    (non-literal field, compound op, or a write nested in an if/for/while/
+    match/lambda body). Same family as <code>const_int_bindings_</code>
+    (which already tracks decl-time-known <code>mut</code> integers this way).</li>
+</ul>
+
+<h3 id="deps">mod — out of scope (explicitly)</h3>
+<ul>
+<li><code>fluid</code>;
+  <code>ext:</code> external memory/submodule boundaries (architecture §3.3);
+  foreign-Verilog opaque-mod ingress (architecture §7); cross-clock mods;
+  conditional-instance hoisting via <code>.[valid]</code>
+  (06b-instantiation §Lambda calls); <code>stage[]</code>/<code>@[]</code>
+  tool-picked defaults; <code>lnast_to_slop</code> mod simulation;
+  LG pass2 retiming/PPA realization knob.</li>
+</ul>
+
+<h3 id="open-questions">mod — open questions (flagged, non-blocking)</h3>
+<ul>
+<li>Ranged mod outputs (<code>x:u8@[2..=4]</code>): rejected in 1r-A; revisit
+  if a use case appears (a mod wrapping a ranged pipe wants to re-export the
+  range).</li>
+<li>A <code>ref self</code> mod that also instantiates pipes: method splice vs
+  partition extraction — settled in 1r-C, may need revisiting for tuple
+  methods (<a class="xref" href="TODO_prp.html#item-1m">1m</a>-adjacent).</li>
+</ul>
+
+<h2 id="todo-loop-unroll-migration">Loop / tuple-iteration unroll migration (<a class="xref" href="TODO_livehd.html#item-2u">2u</a>)</h2>
+<p>Pyrope <code>for</code> / <code>while</code> / <code>loop</code> and tuple iteration are
+<strong>comptime-only</strong>: every loop must fully unroll (there is no runtime-loop
+lowering). Today the unroll is <strong>split</strong> across two stages, and the goal of
+<a class="xref" href="TODO_livehd.html#item-2u">2u</a> is to consolidate it into the upass runner.</p>
+
+<table>
+<thead><tr><th>loop form</th><th>where it expands today</th></tr></thead>
+<tbody>
+<tr><td>non-literal range (<code>for i in 0..&lt;x.[bits]</code>)</td><td><strong>runner</strong> — prp2lnast emits a raw <code>for</code> node; <code>uPass_runner::unroll_for</code> unrolls it</td></tr>
+<tr><td><code>while</code> / <code>loop</code></td><td><strong>runner</strong> — <code>uPass_runner::unroll_while</code></td></tr>
+<tr><td>literal range (<code>for i in 1..&lt;4</code>)</td><td><strong>prp2lnast</strong>, parse-time (<code>process_for_statement</code>)</td></tr>
+<tr><td>comptime tuple (<code>for x in NAME</code>)</td><td><strong>prp2lnast</strong>, parse-time (via <code>comptime_tuples_</code>)</td></tr>
+<tr><td>inline tuple (<code>for v in (10,20,30)</code>)</td><td><strong>prp2lnast</strong>, parse-time</td></tr>
+</tbody>
+</table>
+
+<ul>
+<li>
+<p><strong>2u — Unroll all loops + tuple iteration in the upass runner, not
+  prp2lnast.</strong> Delete the parse-time unroll
+  (<code>inou/prp/prp2lnast.cpp</code> <code>process_for_statement</code> +
+  <code>comptime_tuples_</code>) so prp2lnast emits a raw <code>for</code>/<code>while</code>
+  LNAST node for <em>every</em> loop, and <code>uPass_runner</code> performs <em>all</em>
+  expansion at comptime, beside the comb inliner. <strong>Motivation:</strong> var-args
+  <code>for x in args</code> and <code>for x in &lt;runtime tuple&gt;</code> can only unroll
+  where the args/tuple are bound (the runner), not at parse time — keeping it in prp2lnast
+  forces the <code>comptime_tuples_</code> shape tracker and blocks params/var-args. Ties to
+  <a class="xref" href="TODO_prp.html#item-1m">1m</a> (the ex-1p deferred <code>for x in args</code>
+  case). Builds on the <code>walk_loop_iteration</code> / <code>push_iteration</code> machinery
+  the range/while paths already use.</p>
+</li>
+<li><strong>2u-PREREQ — constprop runtime-<code>mut</code>-across-block-scopes bug
+  (<span style="color:var(--notefg)">BLOCKER</span>).</strong><ul>
+  <li>This is the real blocker, and it is <strong>NOT a loop-unroll-location problem</strong>
+    — moving the unroll to the runner does <em>not</em> fix it (a 2026-06-07 spike confirmed
+    the runner unroll drops it too) and <em>regresses</em> loop-built tuples
+    (<code>prp-loop_equivalent</code>). It must be fixed first.</li>
+  <li>Minimal repro (not loop-specific, not nil-specific, any init value):
+<pre><code>comb top(a:u8) -&gt; (z:u9) {
+  mut acc = 0
+  if true { acc = acc + a }   // a is RUNTIME
+  z = acc                      // z UNDRIVEN — should be a
+}</code></pre>
+    The same code <em>without</em> the <code>if true {}</code> works
+    (<code>mut acc=0; acc=acc+a; z=acc</code> → <code>z = 'sb0 + a</code>). So a <code>mut</code>
+    variable written with a <strong>runtime</strong> value inside a <strong>certain nested
+    block</strong> (an <code>if true {}</code>, a loop iteration) is mishandled by constprop.</li>
+  <li><strong>The remaining bug — dispatch-vs-emit fold + dropped init</strong>
+    (<code>upass/constprop/upass_constprop.cpp</code>): the stale-value clear that made the
+    accumulation chain already landed; what remains is that inside the arm constprop's
+    <em>dispatch</em> (<code>process_plus</code>) sees <code>acc</code> comptime-known
+    (<code>fold_ref</code> returns the init), but <code>emit_op_with_fold</code> /
+    <code>emit_ref_or_folded</code> (<code>upass_runner.cpp</code> ~586–670) emit the bare
+    <code>acc</code> ref at <em>materialize</em> time, and the comptime init store is dropped →
+    <code>acc</code> has no driver → undriven. Needs an <strong><code>lldb</code> step-through</strong>
+    of the <code>process_drop_candidate</code> dispatch→classify→emit sequence (static analysis
+    hit repeated contradictions), plus materializing the dropped init when a <code>mut</code>
+    transitions to a runtime wire across a block. Full analysis in the
+    <code>runtime_mut_accumulation_across_scopes</code> auto-memory note.</li>
+  </ul></li>
+<li><strong>2u-PENDING — work checklist (after the prereq):</strong><ul>
+  <li><strong>Producer.</strong> In <code>process_for_statement</code>, emit
+    <code>for(iter_ref, ref(NAME), stmts(body))</code> for an UNTRACKED identifier iterable
+    (a param / var-arg) and for a runtime tuple, instead of the placeholder-<code>while</code>
+    fallback / parse-time unroll. <code>read_is_visible</code> already treats a <code>for</code>
+    node as declaring its iterator (<code>prp2lnast.cpp:628</code>), so no visibility change is
+    needed. <strong>Do NOT</strong> route a tracked comptime tuple to the runner naively — that
+    regressed <code>prp-loop_equivalent</code> (loop-built <code>d = d ++ (i,)</code>); split by
+    tracked-vs-untracked, or move the tracker too (below).</li>
+  <li><strong>Runner.</strong> <code>unroll_for</code> tuple-iterable branch + a tuple-shape seam
+    + multi-value <code>walk_loop_iteration</code> (value/idx/key) + <code>emit_inline_tuple_pick</code>.
+    <strong>This infra was written this session and is PRESENT but UNREACHED</strong> (no producer
+    feeds it): <code>try_tuple_shape</code>/<code>provide_tuple_shape</code>,
+    <code>emit_inline_tuple_pick</code>, the <code>unroll_for</code> tuple branch (consults
+    <code>try_tuple_shape</code> and the var-arg <code>vararg_bindings_</code>), and the
+    <code>walk_loop_iteration</code> callback refactor. Decide: keep + wire it up, or revert it
+    if the producer split keeps comptime tuples parse-time.</li>
+  <li><strong>Loop-built tuples (the hard tier).</strong> <code>mut d=(); for i in 0..&lt;N { d = d ++ (i,) }; for e in d</code>
+    — the later <code>for e in d</code> needs <code>d</code>'s final shape. The runner can read
+    <code>d</code>'s live constprop bundle (it grows as the runner walks the first loop), so this
+    is feasible once the producer emits both as <code>for</code> nodes. Only this tier requires
+    retiring <code>comptime_tuples_</code>.</li>
+  <li><strong>Delete.</strong> Once all four loop forms unroll in the runner, delete
+    <code>prp2lnast::process_for_statement</code> (parse-time paths) and
+    <code>comptime_tuples_</code>; prp2lnast emits raw <code>for</code>/<code>while</code> nodes
+    only. Confirm tolg/typecheck error if a <code>for</code> node ever reaches them (means the
+    runner couldn't unroll — a user error / non-comptime iterable).</li>
+  </ul></li>
+</ul>
+
+<h3 id="loop-ties">Loop — cross-references</h3>
+<p>Deferred items from <a class="xref" href="TODO_prp.html#item-1m">1m</a> (the ex-1p deferred lambda
+templates / var-args) that this migration unblocks: <code>for x in args</code> over a
+<code>comb</code> var-arg, and the general <code>for x in &lt;tuple&gt;</code> with accumulation.
+Both depend on <strong>2u-PREREQ</strong> landing first.</p>
+
 <h2 id="test-organization">Test Organization</h2>
 <p>Tests are scattered across the codebase. Some subsystems place tests in
 dedicated <code>tests/</code> directories (core, lgraph, lnast, inou/pyrope) while others

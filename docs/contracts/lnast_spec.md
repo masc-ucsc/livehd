@@ -278,7 +278,7 @@ see `architecture.md §3` for the full struct. Concretely:
   body must support the **entire** declared range (intrinsic σ ≤ range
   minimum), so a caller may rely on any value in it; the tool picks.
   `pipe[0]` is a compile error. Plan: `task_1q_plan.md`; mod phases:
-  `TODO_mod.html` (1r).
+  `TODO_livehd.html` (1r).
 - Input and output lists are **flat, named, typed port lists** — not
   tuple types. Each port has its own bits/sign/role/`decl_loc`. The
   body may still construct tuples internally (`out = (sum, carry)`);

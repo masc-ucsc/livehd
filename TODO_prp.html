@@ -90,7 +90,7 @@ footer { max-width:920px; margin:0 auto; padding:0 1.25rem 3rem;
 </style>
 </head>
 <body>
-<nav><span class="brand">LiveHD TODO</span><a class="" href="TODO.html">Overview</a><a class="active" href="TODO_prp.html">Pyrope</a><a class="" href="TODO_mod.html">Mod</a><a class="" href="TODO_verilog.html">Verilog</a><a class="" href="TODO_livehd.html">LiveHD</a><a class="" href="TODO_hhds.html">HHDS</a></nav>
+<nav><span class="brand">LiveHD TODO</span><a class="" href="TODO.html">Overview</a><a class="active" href="TODO_prp.html">Pyrope</a><a class="" href="TODO_verilog.html">Verilog</a><a class="" href="TODO_livehd.html">LiveHD</a></nav>
 <main>
 <h1 id="todo-pyrope-semantics">TODO — Pyrope semantics</h1>
 <p>Pending work to finish correct Pyrope language handling: frontend, LNAST
@@ -98,9 +98,8 @@ production, attribute/type semantics, memory/register lowering, and test
 infrastructure for the Pyrope path.</p>
 <p>Items use the same Group N letters as the master plan in <a href="TODO.html">TODO.md</a>.
 Items in the same group can be done in parallel; all letters in group N must
-complete before group N+1 starts. Group letters are shared across
-<a href="TODO_prp.html">TODO_prp.md</a>, <a href="TODO_verilog.html">TODO_verilog.md</a>,
-<a href="TODO_livehd.html">TODO_livehd.md</a>, and <a href="TODO_hhds.html">TODO_hhds.md</a>, so
+complete before group N+1 starts. Group letters are shared with
+<a href="TODO_verilog.html">TODO_verilog.md</a> and <a href="TODO_livehd.html">TODO_livehd.md</a>, so
 cross-file dependencies stay visible.</p>
 <h2 id="group-1-foundation">Group 1 — foundation</h2>
 <ul>
@@ -155,16 +154,8 @@ cross-file dependencies stay visible.</p>
     reference the source-map ID rather than re-encoding <code>file:line:col</code>
     in every temp name.</li>
 <li>
-<p>Cascades into golden-file updates (TODO_verilog.md
-    <a class="xref" href="TODO_verilog.html#item-1a">1a</a>); land before those goldens are taken.</p>
-</li>
-<li>
-<p><em>(ex-<strong>2o</strong> — folded into <a class="xref" href="TODO_prp.html#item-1m">1m</a>, 2026-06-07.
-  The two-phase <code>upass/func_extract</code> + pending-import-poison +
-  SSA-flatten-gate machinery is dead: imports resolve only against
-  <em>completed</em> units in the export registry, and an unresolved live
-  import defers the <strong>whole file</strong> for an idempotent retry — no
-  partial-resolution state ever reaches bundle pre-pass or SSA.)</em></p>
+<p>Cascades into golden-file updates (TODO_livehd.md
+    <a class="xref" href="TODO_livehd.html#item-1a">1a</a>); land before those goldens are taken.</p>
 </li>
 </ul>
 <h2 id="group-3-depends-on-group-2">Group 3 — depends on Group 2</h2>
@@ -176,7 +167,7 @@ cross-file dependencies stay visible.</p>
 <li><strong id="item-3j" class="item-id">3j</strong> Pyrope <code>Memory</code> declaration → LGraph <code>Memory</code> cell
   lowering + multi-clock-domain checks. (Register <code>Fflop</code>/clock + sync/async
   reset trees <em>and</em> init/reset-value folding on the <code>declare</code> node both
-  LANDED 2026-06-07 via <a class="xref" href="TODO_mod.html#item-2d-reg">2d-reg</a>;
+  already landed via the reg→Flop slice;
   companion memory-port tuple semantics in
   <a class="xref" href="TODO_prp.html#item-3g">3g</a>.)</li>
 </ul>
@@ -185,7 +176,7 @@ cross-file dependencies stay visible.</p>
 <li>
 <p><strong id="item-4i" class="item-id">4i</strong> Golden-output baseline in <code>inou/prp/tests/equiv/</code>: feature-broad
   equiv tests with LNAST/LGraph golden dumps so semantic regressions
-  surface as diffs. Depends on TODO_verilog.md <a class="xref" href="TODO_verilog.html#item-1a">1a</a>
+  surface as diffs. Depends on TODO_livehd.md <a class="xref" href="TODO_livehd.html#item-1a">1a</a>
   (<code>lnast_to_lgraph</code> finished + Verilog round-trip), since these are
   equiv tests for the lnast→lgraph path, not compile-time-constant
   checks. Each failing-comptime-test category (enums, bits, wrap/sat,

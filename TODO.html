@@ -90,16 +90,16 @@ footer { max-width:920px; margin:0 auto; padding:0 1.25rem 3rem;
 </style>
 </head>
 <body>
-<nav><span class="brand">LiveHD TODO</span><a class="active" href="TODO.html">Overview</a><a class="" href="TODO_prp.html">Pyrope</a><a class="" href="TODO_mod.html">Mod</a><a class="" href="TODO_verilog.html">Verilog</a><a class="" href="TODO_livehd.html">LiveHD</a><a class="" href="TODO_hhds.html">HHDS</a></nav>
+<nav><span class="brand">LiveHD TODO</span><a class="active" href="TODO.html">Overview</a><a class="" href="TODO_prp.html">Pyrope</a><a class="" href="TODO_verilog.html">Verilog</a><a class="" href="TODO_livehd.html">LiveHD</a></nav>
 <main>
 <h1 id="todo">TODO</h1>
 <h2 id="pending-goals-at-a-glance">Pending goals at a glance</h2>
-<p>One bullet per open goal in the four area docs, grouped by file then by Group
-N. Each badge links to the full entry. <strong>HHDS has no open goals.</strong></p>
+<p>One bullet per open goal in the three area docs, grouped by file then by Group
+N. Each badge links to the full entry. The former <code>mod</code>, loop, and HHDS
+docs were folded into <a href="TODO_livehd.html">TODO_livehd.html</a>.</p>
 <h3 id="pending-pyrope">Pyrope — <a href="TODO_prp.html">TODO_prp.html</a></h3>
 <ul>
 <li><em>Group 1:</em><ul>
-<li><strong>mod follow-ups</strong> — remaining slices in <a href="TODO_mod.html#pending">TODO_mod.html §Pending</a>: runtime wrap/sat LG lowering, multi-output callees, <code>stage[]</code>/ranged picks, <code>.[defer]</code>/<code>past[n]</code>. (Register slice <a class="xref" href="TODO_mod.html#item-2d-reg">2d-reg</a> + 1r/1u <code>pipe</code>+<code>mod</code> structural machinery LANDED.)</li>
 <li><a class="xref" href="TODO_prp.html#item-1m">1m</a> Pyrope <code>pub</code> exports + <code>import()</code> — core <strong>landed 2026-06-07</strong>; pending only: unknown-tuple-field error (typecheck build-out — constprop spike proved a flip false-positives on progressive builds), <code>lg:</code> black-box Sub wiring (NOT linker-blocked: needs kernel <code>lg:</code>+sources + name/IO stub + cgen by-name check). See <code>docs/contracts/task_1m_plan.md</code>.</li>
 </ul></li>
 <li><em>Group 2:</em><ul>
@@ -118,12 +118,6 @@ N. Each badge links to the full entry. <strong>HHDS has no open goals.</strong><
 </ul>
 <h3 id="pending-verilog">Verilog — <a href="TODO_verilog.html">TODO_verilog.html</a></h3>
 <ul>
-<li><em>Group 1:</em><ul>
-<li><a class="xref" href="TODO_verilog.html#item-1a">1a</a> Finish the LNAST→LGraph synthesis closure — split into:<ul>
-<li><a class="xref" href="TODO_verilog.html#item-1a-mem">1a-mem</a> Pyrope <code>Memory</code> → LGraph <code>Memory</code> cell lowering.</li>
-<li><a class="xref" href="TODO_verilog.html#item-1a-ops">1a-ops</a> Remaining op/cell mappings: <code>.[defer]</code>/<code>past[n]</code>→Flop, high-level ops, <code>uif</code> chains, <code>lg:</code> black-box Subs, attributes.</li>
-</ul></li>
-</ul></li>
 <li><em>Group 3:</em><ul>
 <li><a class="xref" href="TODO_verilog.html#item-3b">3b</a> Migrate <code>inou.slang</code> to the shared LNAST structures; keep adding Verilog equiv tests.</li>
 </ul></li>
@@ -135,13 +129,16 @@ N. Each badge links to the full entry. <strong>HHDS has no open goals.</strong><
 <h3 id="pending-livehd">LiveHD — <a href="TODO_livehd.html">TODO_livehd.html</a></h3>
 <ul>
 <li><em>Group 1:</em><ul>
+<li><a class="xref" href="TODO_livehd.html#item-1a">1a</a> Finish the LNAST→LGraph synthesis closure (was Verilog 1a) — split into <a class="xref" href="TODO_livehd.html#item-1a-mem">1a-mem</a> (Pyrope <code>Memory</code> → LGraph <code>Memory</code> cell) and <a class="xref" href="TODO_livehd.html#item-1a-ops">1a-ops</a> (<code>.[defer]</code>/<code>past[n]</code>→Flop, high-level ops, <code>uif</code> chains, <code>lg:</code> black-box Subs, attributes).</li>
 <li><a class="xref" href="TODO_livehd.html#item-1d">1d</a> Demand-driven (lazy) emit + dead-code elimination for upass.</li>
+<li><strong>mod follow-ups</strong> (<a class="xref" href="TODO_livehd.html#item-1r">1r</a>; structural 1r/1u + the reg→Flop slice already landed): runtime wrap/sat LG lowering, multi-output callees, <code>stage[]</code>/ranged picks, comptime <code>mut</code>-tuple value tracking.</li>
 </ul></li>
 <li><em>Group 1-complex:</em><ul>
 <li><a class="xref" href="TODO_livehd.html#item-1f">1f</a> Source-map indirection (LOC propagation: canonical map, per-cell index, multi-loc aliases).</li>
 </ul></li>
 <li><em>Group 2:</em><ul>
 <li><a class="xref" href="TODO_livehd.html#item-2n">2n</a> Pyrope LSP server — Phases B–E (hover/nav/workspace) remain (moved from Group 1-complex).</li>
+<li><a class="xref" href="TODO_livehd.html#item-2u">2u</a> Unroll all loops + tuple iteration in the upass runner (was the loop doc); gated by the 2u-PREREQ constprop bug.</li>
 </ul></li>
 <li><em>Group 3:</em><ul>
 <li><a class="xref" href="TODO_livehd.html#item-3y-agent">3y-agent</a> <code>lhd</code> agent <code>@tag</code> workspace (<code>setup/run/status/list/describe</code>, TOML, JSONL) + the deferred kernel follow-ups (multi-<code>lg:</code> linker, per-function units, graphviz/lgraph-dump emits, import-resolver depfile, liberty/opentimer verb).</li>
@@ -166,10 +163,6 @@ N. Each badge links to the full entry. <strong>HHDS has no open goals.</strong><
 <li><a class="xref" href="TODO_livehd.html#item-5f">5f</a> Benchmark contracts (codegen throughput, simulation speed, agent-loop latency).</li>
 </ul></li>
 <li><em>Untagged:</em> HHDS <code>PinEntry</code>/<code>NodeEntry</code> native <code>bits</code>+<code>sign</code> storage (drop the flat_storage attribute lookups; campaign lands in <code>../hhds</code>).</li>
-</ul>
-<h3 id="pending-hhds">HHDS — <a href="TODO_hhds.html">TODO_hhds.html</a></h3>
-<ul>
-<li>No open goals — Group 2 HHDS-side work will be added as it surfaces during the LiveHD migration.</li>
 </ul>
 <h2 id="failing-tests-cluster-snapshot-2026-06-07">Failing tests — cluster snapshot (2026-06-07)</h2>
 <p><code>bazel test //inou/prp/... //upass/... //lnast/... //pass/...</code> is

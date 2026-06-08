@@ -90,39 +90,21 @@ footer { max-width:920px; margin:0 auto; padding:0 1.25rem 3rem;
 </style>
 </head>
 <body>
-<nav><span class="brand">LiveHD TODO</span><a class="" href="TODO.html">Overview</a><a class="" href="TODO_prp.html">Pyrope</a><a class="" href="TODO_mod.html">Mod</a><a class="active" href="TODO_verilog.html">Verilog</a><a class="" href="TODO_livehd.html">LiveHD</a><a class="" href="TODO_hhds.html">HHDS</a></nav>
+<nav><span class="brand">LiveHD TODO</span><a class="" href="TODO.html">Overview</a><a class="" href="TODO_prp.html">Pyrope</a><a class="active" href="TODO_verilog.html">Verilog</a><a class="" href="TODO_livehd.html">LiveHD</a></nav>
 <main>
 <h1 id="todo-verilog-inputoutput">TODO — Verilog input/output</h1>
 <p>Pending work on Verilog ingress (yosys-based parsing into LGraph) and
 egress (<code>inou/cgen</code> Verilog emission), plus the synthesis-path closure
 that validates <code>lnast_to_lgraph</code> against a Verilog golden.</p>
 <p>Items use the same Group N letters as the master plan in <a href="TODO.html">TODO.md</a>.
-Group letters are shared across <a href="TODO_prp.html">TODO_prp.md</a>,
-<a href="TODO_verilog.html">TODO_verilog.md</a>, <a href="TODO_livehd.html">TODO_livehd.md</a>,
-and <a href="TODO_hhds.html">TODO_hhds.md</a>, so cross-file dependencies stay visible.</p>
+Group letters are shared with <a href="TODO_prp.html">TODO_prp.md</a> and
+<a href="TODO_livehd.html">TODO_livehd.md</a>, so cross-file dependencies stay visible.</p>
 <h2 id="group-1-foundation">Group 1 — foundation</h2>
 <ul>
-<li><strong id="item-1a" class="item-id">1a</strong> Finish the LNAST→LGraph synthesis closure (the rest of <code>lnast_to_lgraph</code>
-  beyond the combinational milestone) — re-homed to Group 1 as foundation for the
-  Verilog synthesis path. The how-to-lower spec is <code>docs/contracts/lnast2lgraph.md</code>
-  (cell vocabulary, pin conventions, nil/bool model, reg/flop + memory wiring,
-  attributes; phases 4–11). Split into:
-  <ul>
-  <li><strong id="item-1a-mem" class="item-id">1a-mem</strong> Pyrope <code>Memory</code> →
-    LGraph <code>Memory</code> cell lowering: persistent indexed <code>reg</code> arrays, one Memory
-    per logical storage, 11-pin port stride. (Shares the Pyrope-side memory work in
-    <a class="xref" href="TODO_prp.html#item-3j">3j</a> / <a class="xref" href="TODO_prp.html#item-3g">3g</a>.)</li>
-  <li><strong id="item-1a-ops" class="item-id">1a-ops</strong> Remaining op / cell mappings:
-    <code>defer</code>/<code>past[n]</code> temporal reads → <code>Flop</code>; high-level op lowering
-    (slice/concat, <code>!=</code>/<code>&lt;=</code>/<code>&gt;=</code>, div/mod → power-of-two
-    <code>SRA</code>/<code>Get_mask</code> + generic <code>Sub</code> fallback / non-synth warning);
-    <code>uif</code> chains (HotMux FIXME) + direct <code>__&lt;cell&gt;</code> calls; <code>lg:</code>
-    black-box <code>Sub</code> instances (Pyrope-path <code>ln:</code> Subs landed via 1u-A +
-    <a class="xref" href="TODO_prp.html#item-1m">1m</a>; <code>tolg</code> hard-errors on any
-    unresolvable callee until <code>lg:</code> lands); and <code>max</code>/<code>min</code> HHDS
-    attribute reads at node creation (diagnose leftover LNAST-only attrs).
-    (Register <code>reg</code>→<code>Flop</code> slice landed via <a class="xref" href="TODO_mod.html#item-2d-reg">2d-reg</a>.)</li>
-  </ul></li>
+<li>The LNAST→LGraph synthesis closure (<strong>1a</strong>, incl. <code>1a-mem</code> /
+  <code>1a-ops</code>) is the Group 1 foundation for the Verilog synthesis path but is
+  tracked in <a class="xref" href="TODO_livehd.html#item-1a">1a</a> (moved to
+  <code>TODO_livehd.md</code>).</li>
 </ul>
 <h2 id="group-3-depends-on-group-2">Group 3 — depends on Group 2</h2>
 <ul>
