@@ -1,0 +1,26 @@
+/*
+:name: mix_tup
+:type: error
+:error: function reference
+:help: untyped variable
+*/
+
+// A bare function reference (a function name written WITHOUT a call `(...)`)
+// may only bind to an UNtyped variable. Assigning one to a TYPED declaration
+// is a compile error: the function reference does not match the declared type.
+// To construct a value, call the function (`y = mix_tup_init(...)`) or give the
+// type an `init` method (see comptime/mix_tup_method.prp).
+
+type Mix_tup = (
+  mut flag:bool = false,
+  mut state:u2
+)
+
+mod mix_tup_init(ref self:Mix_tup) {
+  self.flag  = true
+  self.state = 2
+}
+
+const fcall_ref = mix_tup_init   // OK: binding a function reference to an untyped var
+
+mut y:Mix_tup = mix_tup_init     // locate_error_here  (function ref → typed var)

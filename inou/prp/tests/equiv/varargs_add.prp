@@ -1,0 +1,17 @@
+/*
+:name: varargs_add
+:type: equiv
+:verilog_top: varargs_add.top
+:pyrope_top: varargs_add.top
+*/
+
+// Task 1p — a var-args `comb` is INLINED at the call site: the leftover
+// actuals gather into `x` and `x[i]` resolves to the i-th actual. The golden
+// is the equivalent fixed-arity adder.
+comb add1(...x) -> (r) {
+  r = x[0] + x[1] + x[2]
+}
+
+comb top(a:u8, b:u8, c:u8) -> (z:u9) {
+  z = add1(a, b, c)
+}

@@ -1,0 +1,19 @@
+/*
+:name: mod_template
+:type: equiv
+:verilog_top: mod_template.top
+:pyrope_top: mod_template.top
+*/
+
+// Task 1p — `mod inner(a)` has an UNTYPED input, so it is a deferred template
+// (no LGraph at definition time). The call `inner(a)` with a u8 actual mints a
+// concrete specialized module `inner__u8` and instantiates it as a Sub. The
+// behavior is the same 2-cycle delay as mod_call_mod (whose `inner` is typed).
+mod inner(a) -> (x:u8@[2]) {
+  stage[2] x = a
+}
+
+mod top(a:u8) -> (out:u8@[2]) {
+  stage[2] t = inner(a)
+  out = t
+}
