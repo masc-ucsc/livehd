@@ -1,0 +1,47 @@
+/*
+:name: mod_varargs_csa
+:type: equiv
+:verilog_top: mod_varargs_csa.top
+:pyrope_top: mod_varargs_csa.top
+*/
+
+// Task 1p-F / 2u-for stress test — a var-arg `mod` whose `for` calls ANOTHER,
+// not-fully-typed `mod` that ALSO loops, so BOTH levels must unroll at compile
+// time. The whole thing is combinational (`@[0]`) and LECs against a single add.
+//
+// Lower mod `blk_add` — a not-fully-typed block adder. It rebuilds operand `b`
+// by summing its `bsz`-bit blocks back together (chunked addition with a
+// comptime block size; the inner `for` runs once per block). `b` is untyped, so
+// `blk_add` is a TEMPLATE specialized per call site (`blk_add__u8`), and the
+// block COUNT comes from the not-fully-typed size `b.[bits] / bsz`. Equals `b`,
+// kept at `b`'s own width so the Sub stays type-safe and the caller's
+// accumulation owns the width growth.
+//
+// (Note: `bsz` is a comptime constant, not a runtime arg — a hardware port can't
+// drive a comptime loop bound. The "not-fully-typed size" that varies per call
+// is `b.[bits]`, which sets the block count.)
+mod blk_add(b) -> (s:u8@[0]) {
+  const bsz = 4
+  mut acc = 0
+  for i in 0..<(b.[bits] / bsz) {
+    const lo = i * bsz
+    acc = acc + (((b >> lo) & ((1 << bsz) - 1)) << lo)
+  }
+  s = acc
+}
+
+// Upper mod `csa` — var-args; sums every arg with `for a in args`, each term
+// passed through the block adder. The two nested unrolls (this loop + blk_add's
+// per call) force the loop/specialization machinery end to end. Plain `+` here
+// owns the width growth (u8 + u8 + u8 -> u10), so no Sub-boundary narrowing.
+mod csa(...args) -> (z:u10@[0]) {
+  mut acc = 0
+  for a in args {
+    acc = acc + blk_add(a)
+  }
+  z = acc
+}
+
+mod top(a:u8, b:u8, c:u8) -> (z:u10@[0]) {
+  z = csa(a, b, c)
+}

@@ -1,0 +1,22 @@
+/*
+:name: pipe_varargs_add
+:type: equiv
+:verilog_top: pipe_varargs_add.top
+:pyrope_top: pipe_varargs_add.top
+*/
+
+// Task 1p/2u follow-on — the `pipe` analog of varargs_add: a var-arg `pipe`
+// whose body sums its leftovers with a `for a in args` loop. A bare `pipe` is
+// one stage of latency, so `add_all` flops its result once; `top` (a `mod`)
+// consumes it at `stage[1]` (the mod_call_pipe pattern), landing z at cycle 1.
+pipe add_all(...args) -> (r:u10) {
+  mut acc = 0
+  for a in args {
+    acc = acc + a
+  }
+  r = acc
+}
+
+mod top(a:u8, b:u8, c:u8) -> (z:u10@[1]) {
+  stage[1] z = add_all(a, b, c)
+}
