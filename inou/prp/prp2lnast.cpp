@@ -3934,6 +3934,23 @@ Lnast_node Prp2lnast::expr_to_node(TSNode n) {
     return function_call_expr_to_node(n);
   }
   if (t == "tuple") {
+    // A single-item parenthesized expression with NO trailing comma is grouping
+    // (`(x)` == x), not a 1-element tuple — only `(x,)` builds a 1-tuple. The
+    // grammar parses both as a single-item `tuple` (the `,` is a hidden token),
+    // so detect a trailing comma in the source text after the item. Without this,
+    // `s = (b & 15)` lowers as a 1-tuple whose tuple_add tolg cannot lower (an
+    // inlined caller folds the 1-tuple away; a standalone module reads it as nil).
+    if (ts_node_named_child_count(n) == 1) {
+      TSNode           it = ts_node_named_child(n, 0);
+      std::string_view itt(ts_node_type(it));
+      // Plain value item only: an `assignment` (`a=1`) / `unary_expression`
+      // (`...x` spread) is a genuine 1-element bundle, never grouping.
+      const bool plain = itt != "assignment" && itt != "unary_expression" && itt != "comment";
+      const auto tail  = text_between(ts_node_end_byte(it), ts_node_end_byte(n));
+      if (plain && tail.find(',') == std::string_view::npos) {
+        return expr_to_node(it);  // grouping — the value itself
+      }
+    }
     return tuple_to_node(n, /*is_square=*/false);
   }
   if (t == "tuple_sq") {
