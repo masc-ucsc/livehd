@@ -410,18 +410,20 @@ listed above — they are no longer repeated here.</p>
 
 <h2 id="todo-pyrope-templates"><strong id="item-1p" class="item-id">1p</strong> Pyrope deferred lambda templates — var-args follow-ups</h2>
 
-<p><strong>1p-runner (2026-06-08, branch <code>1p-runner</code>): A+B LANDED, C+D remain.</strong>
-The for×{comb,mod,pipe} audit found the only var-args gaps; both core fixes landed:
+<p><strong>1p-runner (2026-06-08): DONE — merged to master, all 4 *varargs* LEC-pass.</strong>
+The for×{comb,mod,pipe} audit found the only var-args gaps; the fixes:
 <strong>A</strong> — templates run NON-materializing in the main upass walk so a var-arg comb's body
-isn't corrupted standalone (<code>for v in args</code> inlines; commit 508407ba6);
-<strong>B</strong> — var-arg pipe/mod port expansion replaces the old hard error
-(<code>prp-equiv-mod_varargs_add</code> + <code>prp-equiv-pipe_varargs_add</code> LEC-pass; commit
-261ac25ea). <strong>Remaining:</strong> <strong>C</strong> — <code>mod_varargs_csa</code> (nested:
-a specialized var-arg mod whose loop calls a second template mod with the loop var — the loop var
-reads back untyped, so the nested specialization can't type its port; the reconstructed
-<code>args</code> tuple doesn't flow per-element types to the loop var); <strong>D</strong> — cosmetic
-dead <code>tuple_add</code>/<code>type_spec</code> reaching tolg after a runtime-tuple unroll
-(LEC-clean WARN). Full analysis in the <code>task_1p_runner_status</code> auto-memory note. The
+isn't corrupted standalone (508407ba6);
+<strong>B</strong> — var-arg pipe/mod port expansion replaces the old hard error (261ac25ea);
+<strong>C</strong> — loop-var typing from element ports + <code>.[bits]</code>-on-mod-port folding
+(3d19fef87), then the real <code>mod_varargs_csa</code> blocker: prp2lnast lowered a parenthesized
+SCALAR <code>(expr)</code> as a 1-element tuple_add tolg can't lower (an inlined caller folds it; a
+standalone mod reads nil) — fixed (db87b5908) by treating <code>(x)</code> (no trailing comma) as
+grouping → unwrap, keeping <code>(x,)</code>/<code>(a=1)</code>. A general bug (<code>s=(a+b)</code>
+standalone also read nil), not var-arg-specific. <strong>Remaining:</strong> <strong>D</strong> —
+cosmetic dead <code>tuple_add</code> (var-arg reconstruction) / <code>attr_get</code> reaching tolg as
+<code>unhandled node type</code> WARNs (LEC-clean). Full analysis in the
+<code>task_1p_runner_status</code> auto-memory note. The
 description below is the pre-1p-runner plan.</p>
 
 <p>The template + call-site-specialization mechanism (1p A–E) landed 2026-06-07;
