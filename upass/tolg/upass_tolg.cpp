@@ -861,7 +861,6 @@ private:
     set_bits(q, v.mw + 1);
     set_unsign(q);
     reg_map_.emplace(std::string(name), flop);
-    reg_din_connected_.insert(std::string(name));
     record(name, q, v.mw);
   }
 
@@ -1418,7 +1417,6 @@ private:
   // inputs. reg_info_/reg_order_ carry the 2d-reg finalize metadata for
   // PLAIN regs (stage regs live only in reg_map_/flop_depth_).
   absl::flat_hash_map<std::string, hhds::Node_class> reg_map_;
-  absl::flat_hash_set<std::string>                   reg_din_connected_;
   absl::flat_hash_map<std::string, Reg_info>         reg_info_;
   std::vector<std::string>                           reg_order_;
   std::string                                        clock_name_;

@@ -56,7 +56,7 @@ agent build/process rules live in <code>AGENTS.md</code>.</p>
 <h3 id="livehd">LiveHD</h3>
 <ul>
 <li><em>Group 1:</em><ul>
-<li><a class="xref" href="livehd/1b.html">1b</a> <code>Bundle</code> storage split — one map for attrs, a <code>std::map</code> for named, a vector for unnamed; drop the <code>__</code> attribute prefix (kills the field/attr alias issue, simplifies traversals/copies).</li>
+<li><a class="xref" href="livehd/1b.html">1b</a> <code>Bundle</code> storage — split attributes into a second flat map (keeps the flat dotted-key data map) and drop the <code>__</code> attribute prefix (kills the field/attr alias issue); bound the prefix-scoped scans with <code>lower_bound</code> instead of full-map walks.</li>
 <li><a class="xref" href="livehd/1a.html">1a</a> Finish the LNAST→LGraph synthesis closure — split into <a class="xref" href="livehd/1a.html">1a-mem</a> (Pyrope <code>Memory</code> → LGraph <code>Memory</code> cell) and <a class="xref" href="livehd/1a.html">1a-ops</a> (<code>.[defer]</code>/<code>past[n]</code>→Flop, high-level ops, <code>uif</code> chains, <code>lg:</code> black-box Subs, attributes).</li>
 <li><a class="xref" href="livehd/1d.html">1d</a> Demand-driven (lazy) emit + dead-code elimination for upass.</li>
 <li><a class="xref" href="livehd/1r.html">1r</a> <code>mod</code> follow-ups (structural 1r/1u + the reg→Flop slice landed): runtime wrap/sat LG lowering, multi-output callees, <code>stage[]</code>/ranged picks, comptime <code>mut</code>-tuple value tracking.</li>

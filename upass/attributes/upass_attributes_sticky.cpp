@@ -129,14 +129,10 @@ void Sticky_handler::on_expr_assign(uPass_attributes& /*owner*/, std::string_vie
   }
 }
 
-void Sticky_handler::on_if_arm_enter(uPass_attributes& /*owner*/, std::span<const std::string_view> cond_refs,
-                                     std::span<const std::pair<std::string_view, std::string_view>> cond_attr_reads) {
-  // Build the taint set for this arm:
-  //   - any sticky bucket already on a cond ref var (covers `if tmp {…}` where
-  //     tmp came from `tmp = a.[_foo]`),
-  //   - any sticky bucket named directly by an attr-read on the cond
-  //     (`if a.[_foo] {…}` adds bucket `_foo` — kept for completeness even
-  //     though current LNAST always lowers attr_gets to tmps before the if).
+void Sticky_handler::on_if_arm_enter(uPass_attributes& /*owner*/, std::span<const std::string_view> cond_refs) {
+  // Build the taint set for this arm: any sticky bucket already on a cond ref
+  // var (covers `if tmp {…}` where tmp came from `tmp = a.[_foo]`). Current
+  // LNAST always lowers attr_gets to tmps before the if, so the cond is a ref.
   // Carry forward parent taint so nested ifs accumulate (per spec: "Nested
   // conditions OR their sticky contexts").
   std::set<std::string> arm_taint = active_control_taint();
@@ -146,11 +142,6 @@ void Sticky_handler::on_if_arm_enter(uPass_attributes& /*owner*/, std::span<cons
       for (const auto& b : it->second) {
         arm_taint.insert(b);
       }
-    }
-  }
-  for (const auto& [_v, attr] : cond_attr_reads) {
-    if (Sticky_handler::is_sticky_name(attr)) {
-      arm_taint.insert(canonical_bucket(attr));
     }
   }
   control_taint_stack.push_back(std::move(arm_taint));

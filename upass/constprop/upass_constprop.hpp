@@ -144,13 +144,6 @@ protected:
   // uncertain so leave_scope invalidates anything assigned inside.
   bool next_block_uncertain{false};
 
-  // Names whose bundle should be treated as a tuple (rather than scalar
-  // wrapper) by process_tuple_concat — populated by every successful
-  // tuple_add / tuple_concat write, and propagated through assign(ref).
-  // Lets `c ++ (i,)` stay in bundle mode after the accumulator collapses
-  // to a single-entry shape, so for-loop unrolls advance correctly.
-  std::unordered_set<std::string> tuple_typed_names;
-
   // Range bookkeeping outside the symbol table: a `range` LNAST node binds
   // its destination ref to a (start, end) pair. `end` may be the literal
   // pyrope `nil` to mean "open-ended" (slice runs to the source's last
@@ -174,11 +167,6 @@ protected:
   // through `Type`'s bundle when the instance bundle alone doesn't carry
   // the method field.
   std::unordered_map<std::string, std::string> typename_of_var;
-
-  // Variables whose decorator-init setter has already fired. Entry 1k:
-  // `mut x:Tup = (v="")` triggers Tup.setter once at construction time;
-  // a later `x = ...` is a plain reassign and must NOT refire the setter.
-  std::unordered_set<std::string> setter_fired;
 
   // Task 1t — declared UNSIGNED bit-width per var, recorded by process_declare
   // from `declare(var, prim_type_uint(N) | prim_type_int(max,min≥0), …)`. Used

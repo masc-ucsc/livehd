@@ -196,12 +196,6 @@ public:
   using Type_query_fn = std::function<Scalar_type_query(std::string_view)>;
   void set_runner_type_query_fn(Type_query_fn fn) { runner_type_query_fn = std::move(fn); }
 
-  // Runner-owned symbol table (step C of upass redesign). Set once at
-  // construction. Passes that migrate to the shared symbol table read/write
-  // through this pointer; passes that still use private state ignore it.
-  void          set_runner_symbol_table(Symbol_table* st) { runner_st = st; }
-  Symbol_table* get_runner_symbol_table() const { return runner_st; }
-
   // Consume per-pass options (see Options_map). Default: no-op. Passes
   // override to pull the keys they care about. Called once, before run().
   virtual void set_options(const Options_map& /*opts*/) {}
@@ -366,7 +360,6 @@ protected:
   Fold_fn                         runner_fold_fn;
   Emit_at_fn                      runner_emit_at_fn;
   Type_query_fn                   runner_type_query_fn;
-  Symbol_table*                   runner_st{nullptr};
 
   void move_to_nid(const Lnast_nid& nid) { lm->move_to_nid(nid); }
   auto current_text() const { return lm->current_text(); }

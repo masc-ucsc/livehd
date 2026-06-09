@@ -206,7 +206,6 @@ uPass_runner::uPass_runner(std::shared_ptr<upass::Lnast_manager>& _lm, const std
     entry.pass->set_runner_fold_fn(fold_fn);
     entry.pass->set_runner_emit_at_fn(emit_at_fn);
     entry.pass->set_runner_type_query_fn(type_query_fn);
-    entry.pass->set_runner_symbol_table(&runner_symbol_table);
     entry.pass->set_options(options);
   }
 
@@ -3761,11 +3760,6 @@ void uPass_runner::process_stmts() {
   // walked; post-dispatch (after emit_pop) lets them pop it. The cursor
   // is restored by dispatch_to_passes around each pass call, so passes
   // can move freely without disturbing the runner's traversal.
-  //
-  // Step D — the runner-owned symbol-table push/pop will land here once
-  // Step F's bundle pre-pass populates it. For now the runner-owned
-  // table sits idle (a pass that needs it can push/pop via the pointer
-  // returned by get_runner_symbol_table()).
   dispatch_to_passes(&upass::uPass::process_stmts);
   emit_push(lm->current_type());
   if (lm->has_child()) {

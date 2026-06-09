@@ -171,8 +171,7 @@ private:
   // runner mutates the staging tree, and the arm body walk happens after
   // process_if returns.
   struct Pending_arm {
-    std::vector<std::string>                         cond_refs;
-    std::vector<std::pair<std::string, std::string>> cond_attr_reads;
+    std::vector<std::string> cond_refs;
   };
   std::map<uint64_t, Pending_arm> pending_arms;
   // Stack of stmts nids whose on_if_arm_enter was fired and is awaiting
@@ -281,7 +280,6 @@ public:
   };
   struct Tuple_shape {
     std::vector<Tuple_field> fields;
-    bool                     from_range{false};  // size derived from range_bounds[var]
   };
 
   // tuple_get destination tmp → resolution info. Lets later attr_get see what

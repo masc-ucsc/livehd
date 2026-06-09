@@ -325,9 +325,6 @@ void uPass_constprop::process_assign() {
               }
             }
             st.set(lhs_text, merged);
-            if (tuple_typed_names.contains(std::string(current_text()))) {
-              tuple_typed_names.insert(std::string(lhs_text));
-            }
             move_to_parent();
             return;
           }
@@ -393,13 +390,6 @@ void uPass_constprop::process_assign() {
         st.set(lhs_text, merged);
       } else {
         st.set(lhs_text, rhs_bundle);
-      }
-      // Propagate the tuple-typed flag across aliasing assigns. `c = ___4`
-      // where ___4 came from a tuple_concat keeps c marked as a tuple, so
-      // a later tuple_concat in this walk reads c via bundle mode rather
-      // than mis-classifying it as a scalar wrapper.
-      if (tuple_typed_names.contains(std::string(current_text()))) {
-        tuple_typed_names.insert(std::string(lhs_text));
       }
     } else if (st.has_trivial(current_text())) {
       // Scalar RHS (stored as trivial, not a bundle). Propagate the value so
@@ -1288,11 +1278,6 @@ void uPass_constprop::process_tuple_add() {
     bundle = std::make_shared<Bundle>(dst);
     st.set(dst, bundle);
   }
-  // Mark the destination as tuple-typed so a downstream tuple_concat
-  // routes it through bundle mode even if the bundle ends up looking
-  // scalar (single positional entry, which is_scalar() can't distinguish
-  // from a true scalar). See process_tuple_concat.
-  tuple_typed_names.insert(dst);
   // Loop-migration (Step 1): rebuild dst's slot→ref map from scratch (the
   // bundle is rebuilt from the entries below).
   tuple_slot_ref_.erase(dst);
@@ -1507,9 +1492,6 @@ void uPass_constprop::process_tuple_concat() {
     store_trivial(dst, *folded);
   } else {
     st.set(dst, acc);
-    // Tuple-shaped result: keep the tuple-typed marker for downstream code
-    // that distinguishes a real tuple from a scalar-wrapper bundle.
-    tuple_typed_names.insert(dst);
   }
 }
 
@@ -3521,12 +3503,6 @@ void uPass_constprop::process_tuple_set() {
     move_to_parent();
     return;
   }
-
-  // `tup[idx] = v` promotes a scalar to a 1-element tuple in Pyrope. Mark the
-  // target so a downstream tuple_concat reads `tup` via bundle mode rather
-  // than mis-classifying a single-entry bundle as a scalar wrapper. Mirrors
-  // the propagation done by process_tuple_add for its destination.
-  tuple_typed_names.insert(tuple_var);
 
   // Collect all children after the tuple ref into a (text, is_ref) list.
   // The last child is the value; everything before it is the field path.

@@ -78,18 +78,6 @@ protected:
   // provide_typename), consulted by try_bundle_fields / try_typename.
   std::vector<upass::uPass*> shared_st_passes_;
 
-  // Step C of upass redesign — single shared symbol table owned by the
-  // runner. Each pass receives a pointer to this via
-  // set_runner_symbol_table(). Initially used as a wiring slot only;
-  // existing passes keep their private state until they migrate.
-  Symbol_table runner_symbol_table;
-
-  // Step I of upass redesign — runner-owned SSA-version counters keyed
-  // by emitted name. Bumped on every mut reassignment when the runner
-  // takes over SSA at emit time (today still owned by uPass_ssa).
-  // Reserved here so the emit path can populate it without an API change.
-  absl::flat_hash_map<std::string, int> ssa_counters;
-
   // Step L of upass redesign — function-body registry the runner owns
   // once func_extract collapses into the main walk. Maps function name
   // to its already-extracted dest Lnast (allocated in dest_forest_)

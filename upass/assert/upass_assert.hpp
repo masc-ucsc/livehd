@@ -4,7 +4,6 @@
 #include <format>
 
 #include "lnast_ntype.hpp"
-#include "symbol_table.hpp"
 #include "upass_core.hpp"
 
 struct uPass_assert : public upass::uPass {
@@ -16,15 +15,14 @@ public:
   void process_func_call();
 
 protected:
-  Symbol_table st;
-
-  inline auto current_bundle() { return st.get_bundle(current_text()); }
-
   inline Const current_pyrope_value() { return *Dlop::from_pyrope(current_text()); }
 
   inline Const current_prim_value() {
+    // A ref operand is not a literal, so it is statically unknown here (an
+    // invalid Const → the caller treats it as "cannot decide"). Only literal
+    // operands fold to a concrete value via from_pyrope.
     if (is_type(Lnast_ntype::Lnast_ntype_ref)) {
-      return st.get_trivial(current_text());
+      return Const{};
     } else {
       return *Dlop::from_pyrope(current_text());
     }

@@ -7,6 +7,7 @@
 #include <unistd.h>
 
 // #include <ext/stdio_filebuf.h>
+#include <algorithm>
 #include <format>
 #include <fstream>
 #include <iostream>
@@ -360,18 +361,18 @@ void Inou_yosys_api::do_tolg(Eprp_var& var) {
 
   auto& lib = livehd::Hhds_graph_library::instance(path);
 
-  hhds::Gid pre_capacity = static_cast<hhds::Gid>(lib.capacity());
+  // gids are sparse name-hashes (not a sequential counter), so "new graphs"
+  // can't be a capacity range — snapshot the live gid set before yosys runs and
+  // diff against it afterward. all_gids() returns a sorted vector.
+  const std::vector<hhds::Gid> before = lib.all_gids();
 
   Yosys::yosys_setup();
 
   call_yosys(vars);
 
-  // Collect newly-created graphs (gids past pre_capacity) and push their
-  // shared_ptr into var.graphs.
-  hhds::Gid post_capacity = static_cast<hhds::Gid>(lib.capacity());
-  for (hhds::Gid id = pre_capacity; id < post_capacity; ++id) {
-    if (!lib.has_graph(id)) {
-      continue;
+  for (const hhds::Gid id : lib.all_gids()) {
+    if (std::binary_search(before.begin(), before.end(), id)) {
+      continue;  // existed before yosys ran
     }
     auto g = lib.get_graph(id);
     if (g) {

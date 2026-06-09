@@ -8,9 +8,7 @@
 // errors when multiple TUs include upass_assert.hpp.
 static upass::uPass_plugin plugin_assert("assert", upass::uPass_wrapper<uPass_assert>::get_upass, {"constprop"});
 
-uPass_assert::uPass_assert(std::shared_ptr<upass::Lnast_manager>& _lm) : uPass(_lm) {
-  st.function_scope(_lm->get_top_module_name());
-}
+uPass_assert::uPass_assert(std::shared_ptr<upass::Lnast_manager>& _lm) : uPass(_lm) {}
 
 void uPass_assert::process_func_call() {
   move_to_child();

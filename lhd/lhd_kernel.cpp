@@ -1825,12 +1825,8 @@ void synth_command(Options& opts, Result& res) {
       fs::copy(lg_in, lg_out->path, fs::copy_options::recursive | fs::copy_options::overwrite_existing);
       lib_path = lg_out->path;
     }
-    auto&     lib = livehd::Hhds_graph_library::instance(lib_path);
-    hhds::Gid cap = static_cast<hhds::Gid>(lib.capacity());
-    for (hhds::Gid id = 1; id < cap; ++id) {
-      if (!lib.has_graph(id)) {
-        continue;
-      }
+    auto& lib = livehd::Hhds_graph_library::instance(lib_path);
+    for (const hhds::Gid id : lib.all_gids()) {  // gids are sparse name-hashes now
       auto g = lib.get_graph(id);
       if (g) {
         var.add(g);
@@ -1949,15 +1945,12 @@ std::string materialize_verilog(Options& opts, Result& res, const std::string& k
   if (!fs::is_directory(path)) {
     throw Lhd_error{"missing_file", std::format("lg: input not found: {}", path), ""};
   }
-  Eprp_var  var;
-  auto&     lib = livehd::Hhds_graph_library::instance(path);
-  hhds::Gid cap = static_cast<hhds::Gid>(lib.capacity());
-  for (hhds::Gid id = 1; id < cap; ++id) {
-    if (lib.has_graph(id)) {
-      auto g = lib.get_graph(id);
-      if (g) {
-        var.add(g);
-      }
+  Eprp_var var;
+  auto&    lib = livehd::Hhds_graph_library::instance(path);
+  for (const hhds::Gid id : lib.all_gids()) {  // gids are sparse name-hashes now
+    auto g = lib.get_graph(id);
+    if (g) {
+      var.add(g);
     }
   }
   if (var.graphs.empty()) {

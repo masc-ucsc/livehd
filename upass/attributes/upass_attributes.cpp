@@ -608,12 +608,7 @@ void uPass_attributes::process_stmts() {
   for (const auto& r : it->second.cond_refs) {
     refs.emplace_back(r);
   }
-  std::vector<std::pair<std::string_view, std::string_view>> attr_reads;
-  attr_reads.reserve(it->second.cond_attr_reads.size());
-  for (const auto& [v, a] : it->second.cond_attr_reads) {
-    attr_reads.emplace_back(v, a);
-  }
-  reg.for_each_handler([&](upass::attributes::Attribute_handler& h) { h.on_if_arm_enter(*this, refs, attr_reads); });
+  reg.for_each_handler([&](upass::attributes::Attribute_handler& h) { h.on_if_arm_enter(*this, refs); });
   active_arm_stack.push_back(nid_key);
 }
 
