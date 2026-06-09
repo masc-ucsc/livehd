@@ -1,4 +1,5 @@
-//  This file is distributed under the BSD 3-Clause License. See LICENSE for details.
+//  This file is distributed under the BSD 3-Clause License. See LICENSE for
+//  details.
 
 #include "bundle.hpp"
 
@@ -27,15 +28,17 @@ static std::string_view first_segment_view(std::string_view k) {
 
 static int segment_category(std::string_view seg) {
   if (seg.size() >= 2 && seg[0] == '_' && seg[1] == '_') {
-    return 0;  // attribute
+    return 0; // attribute
   }
   if (!seg.empty() && std::isdigit(static_cast<unsigned char>(seg.front()))) {
-    return 2;  // unnamed (decimal index)
+    return 2; // unnamed (decimal index)
   }
-  return 1;  // named
+  return 1; // named
 }
 
-static bool canonical_compare(const std::pair<std::string, Bundle::Entry>& lhs, const std::pair<std::string, Bundle::Entry>& rhs) {
+static bool
+canonical_compare(const std::pair<std::string, Bundle::Entry> &lhs,
+                  const std::pair<std::string, Bundle::Entry> &rhs) {
   auto l_seg = first_segment_view(lhs.first);
   auto r_seg = first_segment_view(rhs.first);
   auto l_cat = segment_category(l_seg);
@@ -61,14 +64,15 @@ static bool canonical_compare(const std::pair<std::string, Bundle::Entry>& lhs, 
 // numeric). Differs from `canonical_compare` (which only sorts by first
 // segment and breaks ties with full-string lex) in that this is a true
 // per-level recursive compare suitable for use as a std::map ordering.
-bool Bundle::Canonical_less::operator()(std::string_view a, std::string_view b) const {
+bool Bundle::Canonical_less::operator()(std::string_view a,
+                                        std::string_view b) const {
   while (true) {
     auto a_dot = a.find('.');
     auto b_dot = b.find('.');
     auto a_seg = a.substr(0, a_dot);
     auto b_seg = b.substr(0, b_dot);
-    int  ca    = segment_category(a_seg);
-    int  cb    = segment_category(b_seg);
+    int ca = segment_category(a_seg);
+    int cb = segment_category(b_seg);
     if (ca != cb) {
       return ca < cb;
     }
@@ -83,10 +87,10 @@ bool Bundle::Canonical_less::operator()(std::string_view a, std::string_view b) 
     }
     // Segments equal so far. Recurse / terminate.
     if (a_dot == std::string_view::npos && b_dot == std::string_view::npos) {
-      return false;  // exactly equal keys
+      return false; // exactly equal keys
     }
     if (a_dot == std::string_view::npos) {
-      return true;  // a is a strict prefix → sorts first
+      return true; // a is a strict prefix → sorts first
     }
     if (b_dot == std::string_view::npos) {
       return false;
@@ -102,7 +106,7 @@ bool Bundle::Canonical_less::operator()(std::string_view a, std::string_view b) 
 Bundle::Entries_view Bundle::entries() const {
   Entries_view v;
   v.items_.reserve(key_map.size());
-  for (const auto& kv : key_map) {
+  for (const auto &kv : key_map) {
     v.items_.emplace_back(std::string_view(kv.first), &kv.second);
   }
   return v;
@@ -111,7 +115,7 @@ Bundle::Entries_view Bundle::entries() const {
 Bundle::Entries_view Bundle::non_attr_entries() const {
   Entries_view v;
   v.items_.reserve(key_map.size());
-  for (const auto& kv : key_map) {
+  for (const auto &kv : key_map) {
     if (is_attribute(kv.first)) {
       continue;
     }
@@ -122,7 +126,7 @@ Bundle::Entries_view Bundle::non_attr_entries() const {
 
 Bundle::Entries_view Bundle::get_attrs() const {
   Entries_view v;
-  for (const auto& kv : key_map) {
+  for (const auto &kv : key_map) {
     if (!is_attribute(kv.first)) {
       continue;
     }
@@ -134,10 +138,10 @@ Bundle::Entries_view Bundle::get_attrs() const {
 Bundle::Top_levels_view Bundle::top_levels() const {
   // Walk non-attr entries in canonical order; group contiguous runs by
   // their first segment. Each run becomes one Top_level_entry.
-  auto             entries_view = non_attr_entries();
-  Top_levels_view  tv;
+  auto entries_view = non_attr_entries();
+  Top_levels_view tv;
   std::string_view cur_seg;
-  for (const auto& [k, ep] : entries_view.items_) {
+  for (const auto &[k, ep] : entries_view.items_) {
     auto seg = first_segment_view(k);
     if (tv.items_.empty() || seg != cur_seg) {
       cur_seg = seg;
@@ -149,17 +153,18 @@ Bundle::Top_levels_view Bundle::top_levels() const {
       }
       tv.items_.emplace_back(std::move(tl));
     }
-    auto& tl = tv.items_.back();
+    auto &tl = tv.items_.back();
     ++tl.leaf_count;
     if (k.size() > seg.size()) {
       tl.has_leafs = true;
     }
     if (tl.leaf_count == 1) {
-      tl.scalar = ep->trivial;  // candidate; invalidated below if more leaves follow
+      tl.scalar =
+          ep->trivial; // candidate; invalidated below if more leaves follow
     }
   }
   // Collapse rule: scalar valid only when leaf_count == 1.
-  for (auto& tl : tv.items_) {
+  for (auto &tl : tv.items_) {
     if (tl.leaf_count != 1) {
       tl.scalar = invalid_lconst;
     }
@@ -168,10 +173,10 @@ Bundle::Top_levels_view Bundle::top_levels() const {
 }
 
 bool Bundle::has_top_named(std::string_view name) const {
-  for (const auto& kv : key_map) {
-    if (is_attribute(kv.first)) {
-      continue;
-    }
+  for (const auto &kv : key_map) {
+    // if (is_attribute(kv.first)) {
+    //   continue;
+    // }
     auto seg = first_segment_view(kv.first);
     if (segment_category(seg) == 2) {
       continue;
@@ -184,7 +189,7 @@ bool Bundle::has_top_named(std::string_view name) const {
 }
 
 bool Bundle::has_top_unnamed(int pos) const {
-  for (const auto& kv : key_map) {
+  for (const auto &kv : key_map) {
     if (is_attribute(kv.first)) {
       continue;
     }
@@ -205,7 +210,7 @@ bool Bundle::has_top_unnamed(int pos) const {
 // index semantics that consumers rely on.
 size_t Bundle::attrs_top_count() const {
   size_t n = 0;
-  for (const auto& [k, _] : key_map) {
+  for (const auto &[k, _] : key_map) {
     if (is_attribute(k)) {
       ++n;
     }
@@ -217,7 +222,7 @@ size_t Bundle::named_top_count() const {
   // Count of distinct named top-level segments. Walks once; uses a small
   // set since segments are short and bundles modest in width.
   std::set<std::string_view> distinct;
-  for (const auto& [k, _] : key_map) {
+  for (const auto &[k, _] : key_map) {
     if (is_attribute(k)) {
       continue;
     }
@@ -232,7 +237,7 @@ size_t Bundle::named_top_count() const {
 
 size_t Bundle::unnamed_top_count() const {
   std::set<int> distinct;
-  for (const auto& [k, _] : key_map) {
+  for (const auto &[k, _] : key_map) {
     if (is_attribute(k)) {
       continue;
     }
@@ -258,7 +263,8 @@ std::string Bundle::normalize_key(std::string_view key) {
       end = key.size();
     }
     auto seg = key.substr(scan_start, end - scan_start);
-    I(seg.empty() || seg.front() != ':', "legacy :N: key encoding reached Bundle; producer not migrated");
+    I(seg.empty() || seg.front() != ':',
+      "legacy :N: key encoding reached Bundle; producer not migrated");
     if (end == key.size()) {
       break;
     }
@@ -305,16 +311,18 @@ bool Bundle::match_either_partial(std::string_view a, std::string_view b) {
   return false;
 }
 
-void Bundle::add_int(std::string_view key, const std::shared_ptr<Bundle const> tup) {
+void Bundle::add_int(std::string_view key,
+                     const std::shared_ptr<Bundle const> tup) {
   I(!key.empty());
   if (tup->is_scalar()) {
-    I(!has_trivial(key));  // It was deleted before
-    key_map.insert_or_assign(std::string(key), Entry(tup->is_immutable(), tup->get_trivial()));
+    I(!has_trivial(key)); // It was deleted before
+    key_map.insert_or_assign(std::string(key),
+                             Entry(tup->is_immutable(), tup->get_trivial()));
     // A scalar carrier may still hold attribute leaves (e.g. the parse-time
     // `__enumentry` enum-identity tag). Copy them under the key so
     // get_bundle(key) round-trips them — is_scalar() ignores attrs, so the
     // scalar fast path above would otherwise silently drop them.
-    for (const auto& ent : tup->key_map) {
+    for (const auto &ent : tup->key_map) {
       if (is_attribute(ent.first)) {
         key_map.insert_or_assign(absl::StrCat(key, ".", ent.first), ent.second);
       }
@@ -323,7 +331,7 @@ void Bundle::add_int(std::string_view key, const std::shared_ptr<Bundle const> t
   }
 
   bool root = is_root_attribute(key);
-  for (const auto& ent : tup->key_map) {
+  for (const auto &ent : tup->key_map) {
     if (root) {
       key_map.insert_or_assign(absl::StrCat(ent.first, ".", key), ent.second);
     } else {
@@ -362,8 +370,9 @@ void Bundle::del_int(std::string_view key) {
     }
     I(it->first[e_pos] != '.');
     auto sub_name = std::string_view(it->first).substr(e_pos);
-    if (sub_name.substr(0, 2) == "__" && sub_name.size() > 3 && sub_name[3] != '_') {
-      ++it;  // keep attributes
+    if (sub_name.substr(0, 2) == "__" && sub_name.size() > 3 &&
+        sub_name[3] != '_') {
+      ++it; // keep attributes
       continue;
     }
     it = key_map.erase(it);
@@ -406,7 +415,7 @@ std::string_view Bundle::get_last_level(std::string_view key) {
     return key;
   }
 
-  I(n != 0);  // name can not start with a .
+  I(n != 0); // name can not start with a .
   return key.substr(n + 1);
 }
 
@@ -425,11 +434,11 @@ std::string_view Bundle::get_all_but_first_level(std::string_view key) {
     return key.substr(n + 1);
   }
 
-  return std::string_view("");  // empty if no dot left
+  return std::string_view(""); // empty if no dot left
 }
 
-const Bundle::Entry& Bundle::get_entry(std::string_view key) const {
-  for (const auto& e : key_map) {
+const Bundle::Entry &Bundle::get_entry(std::string_view key) const {
+  for (const auto &e : key_map) {
     if (match(e.first, key)) {
       return e.second;
     }
@@ -440,13 +449,13 @@ const Bundle::Entry& Bundle::get_entry(std::string_view key) const {
   return invalid;
 }
 
-const Const& Bundle::get_trivial() const {
-  const Entry* found = nullptr;
-  for (const auto& e : key_map) {
+const Const &Bundle::get_trivial() const {
+  const Entry *found = nullptr;
+  for (const auto &e : key_map) {
     if (is_attribute(e.first)) {
       continue;
     }
-    I(found == nullptr);  // only scalars, so trivial can not be defined already
+    I(found == nullptr); // only scalars, so trivial can not be defined already
     found = &e.second;
   }
   if (found == nullptr) {
@@ -456,7 +465,7 @@ const Const& Bundle::get_trivial() const {
 }
 
 bool Bundle::has_trivial(std::string_view key) const {
-  for (const auto& e : key_map) {
+  for (const auto &e : key_map) {
     if (match(e.first, key)) {
       return true;
     }
@@ -469,9 +478,9 @@ bool Bundle::has_bundle(std::string_view key) const {
     return false;
   }
 
-  I(!key.empty());  // do not call without sub-fields
+  I(!key.empty()); // do not call without sub-fields
 
-  for (const auto& e : key_map) {
+  for (const auto &e : key_map) {
     auto e_pos = match_first_partial(key, e.first);
     if (e_pos == 0) {
       continue;
@@ -488,16 +497,16 @@ std::shared_ptr<Bundle> Bundle::get_bundle(std::string_view key) const {
     return std::make_shared<Bundle>(*this);
   }
 
-  I(!key.empty());  // do not call without sub-fields
+  I(!key.empty()); // do not call without sub-fields
 
   std::shared_ptr<Bundle> tup;
 
-  for (const auto& e : key_map) {
+  for (const auto &e : key_map) {
     auto e_pos = match_first_partial(key, e.first);
     if (e_pos == 0) {
       continue;
     }
-    GI(e_pos < e.first.size(), e.first[e_pos] != '.');  // . not included
+    GI(e_pos < e.first.size(), e.first[e_pos] != '.'); // . not included
 
     if (!tup) {
       // Canonical keys: no `:N:` swap needed, the lookup key is already
@@ -525,16 +534,18 @@ std::shared_ptr<Bundle> Bundle::get_bundle(std::string_view key) const {
   return tup;
 }
 
-std::shared_ptr<Bundle> Bundle::get_bundle(const std::shared_ptr<Bundle const>& tup) const {
+std::shared_ptr<Bundle>
+Bundle::get_bundle(const std::shared_ptr<Bundle const> &tup) const {
   // create a trivial or sub-bundle with the selected fields
   std::shared_ptr<Bundle> ret_tup;
 
   int pos = 0;
-  for (const auto& e : tup->key_map) {
+  for (const auto &e : tup->key_map) {
     auto field = e.second.trivial.to_field();
 
     if (!has_trivial(field)) {
-      Lnast::info("bundle {} can not be indexed with {} key:{} with value {}", get_name(), tup->get_name(), e.first, field);
+      Lnast::info("bundle {} can not be indexed with {} key:{} with value {}",
+                  get_name(), tup->get_name(), e.first, field);
       return nullptr;
     }
     auto entry = get_entry(field);
@@ -552,7 +563,8 @@ std::shared_ptr<Bundle> Bundle::get_bundle(const std::shared_ptr<Bundle const>& 
   return ret_tup;
 }
 
-void Bundle::set(std::string_view key, const std::shared_ptr<Bundle const>& tup) {
+void Bundle::set(std::string_view key,
+                 const std::shared_ptr<Bundle const> &tup) {
   I(!key.empty());
 
   if (tup == nullptr) {
@@ -568,14 +580,15 @@ void Bundle::set(std::string_view key, const std::shared_ptr<Bundle const>& tup)
 
   bool tup_scalar = tup->is_scalar();
 
-  for (const auto& e : tup->key_map) {
+  for (const auto &e : tup->key_map) {
     std::string key2;
     // Remove 0. from tup if tup is scalar
-    if (tup_scalar && e.first.front() == '0' && (e.first.size() == 1 || e.first[1] == '.')) {
+    if (tup_scalar && e.first.front() == '0' &&
+        (e.first.size() == 1 || e.first[1] == '.')) {
       if (e.first.size() == 1) {
-        key2 = "";  // remove "0"
+        key2 = ""; // remove "0"
       } else {
-        key2 = e.first.substr(2);  // remove "0."
+        key2 = e.first.substr(2); // remove "0."
       }
     } else {
       key2 = e.first;
@@ -590,19 +603,20 @@ void Bundle::set(std::string_view key, const std::shared_ptr<Bundle const>& tup)
   }
 }
 
-void Bundle::set(std::string_view key_in, const Entry&& entry) {
+void Bundle::set(std::string_view key_in, const Entry &&entry) {
   I(!key_in.empty());
 
   // normalize_key asserts the canonical form and otherwise returns the
   // key as-is; producers no longer emit `:N:` annotations.
-  auto             normalized_key = normalize_key(key_in);
+  auto normalized_key = normalize_key(key_in);
   std::string_view key{normalized_key};
   I(!key.empty());
 
   std::string uncanonical_key{key};
-  bool        pending_adjust = false;
+  bool pending_adjust = false;
   if (is_scalar()) {
-    if (key.substr(0, 2) == "__" && key[3] != '_') {  // is_root_attribute BUT not with 0.__xxx
+    if (key.substr(0, 2) == "__" &&
+        key[3] != '_') { // is_root_attribute BUT not with 0.__xxx
       uncanonical_key = absl::StrCat("0.", key);
     } else {
       pending_adjust = true;
@@ -640,8 +654,9 @@ void Bundle::set(std::string_view key_in, const Entry&& entry) {
     if (is_attribute(fixed_key)) {
       key_part = get_all_but_last_level(fixed_key);
     }
-    std::vector<std::pair<std::string, std::string>> renames;  // {old_key, new_key}
-    for (const auto& e : key_map) {
+    std::vector<std::pair<std::string, std::string>>
+        renames; // {old_key, new_key}
+    for (const auto &e : key_map) {
       std::string_view fpart{e.first};
       std::string_view lpart;
       if (is_attribute(e.first)) {
@@ -651,20 +666,22 @@ void Bundle::set(std::string_view key_in, const Entry&& entry) {
       if (fpart.size() >= key_part.size()) {
         continue;
       }
-      if (key_part[fpart.size()] == '.' && fpart == key_part.substr(0, fpart.size())) {
-        std::string new_key = lpart.empty() ? absl::StrCat(fpart, ".0") : absl::StrCat(fpart, ".0.", lpart);
+      if (key_part[fpart.size()] == '.' &&
+          fpart == key_part.substr(0, fpart.size())) {
+        std::string new_key = lpart.empty() ? absl::StrCat(fpart, ".0")
+                                            : absl::StrCat(fpart, ".0.", lpart);
         renames.emplace_back(e.first, std::move(new_key));
       }
     }
     bool fixed_overwritten = false;
-    for (auto& [old_key, new_key] : renames) {
+    for (auto &[old_key, new_key] : renames) {
       auto node = key_map.extract(old_key);
       I(!node.empty());
       node.key() = new_key;
       // If the promoted key collides with the incoming fixed_key, store
       // the new entry and skip the final emplace below.
       if (new_key == fixed_key) {
-        node.mapped()     = entry;
+        node.mapped() = entry;
         fixed_overwritten = true;
       }
       key_map.insert(std::move(node));
@@ -679,7 +696,7 @@ void Bundle::set(std::string_view key_in, const Entry&& entry) {
   key_map.insert_or_assign(fixed_key, entry);
 
 #ifdef DEBUG_SLOW
-  for (const auto& e : key_map) {
+  for (const auto &e : key_map) {
     auto lower = get_all_but_last_level(e.first);
     if (is_attribute(e.first)) {
       lower = get_all_but_last_level(lower);
@@ -688,7 +705,8 @@ void Bundle::set(std::string_view key_in, const Entry&& entry) {
       I(!is_attribute(lower));
       if (has_trivial(lower)) {
         dump();
-        std::print("OOPPPS (bundle is corrupted). Time to debug!!! {} {}\n", e.first, lower);
+        std::print("OOPPPS (bundle is corrupted). Time to debug!!! {} {}\n",
+                   e.first, lower);
         exit(-3);
         return;
       }
@@ -698,7 +716,7 @@ void Bundle::set(std::string_view key_in, const Entry&& entry) {
 #endif
 }
 
-bool Bundle::concat(const std::shared_ptr<Bundle const>& tup) {
+bool Bundle::concat(const std::shared_ptr<Bundle const> &tup) {
   // Pyrope tuple concat (`a ++ b`) in canonical-key form:
   //   - attrs: rhs wins on collision (matches the legacy "forward as-is")
   //   - named: per-name merge — `nil` from either side drops; otherwise
@@ -709,13 +727,17 @@ bool Bundle::concat(const std::shared_ptr<Bundle const>& tup) {
   // Storage is normalize_key()-canonical: first segment is "__attr", a
   // bare name, or a decimal index — no `:N:name` encoding to parse.
 
-  auto seg = [](std::string_view k) -> std::string_view { return first_segment_view(k); };
-  auto cat = [&](std::string_view k) -> int { return segment_category(seg(k)); };
+  auto seg = [](std::string_view k) -> std::string_view {
+    return first_segment_view(k);
+  };
+  auto cat = [&](std::string_view k) -> int {
+    return segment_category(seg(k));
+  };
 
   // Snapshot LHS shape: names already present and the next free decimal slot.
   std::unordered_set<std::string> lhs_named;
-  int                             next_unnamed = 0;
-  for (const auto& e : key_map) {
+  int next_unnamed = 0;
+  for (const auto &e : key_map) {
     auto c = cat(e.first);
     if (c == 1) {
       lhs_named.emplace(std::string(seg(e.first)));
@@ -729,19 +751,20 @@ bool Bundle::concat(const std::shared_ptr<Bundle const>& tup) {
 
   // Group RHS entries by first segment, preserving first-seen order.
   struct Rhs_group {
-    std::string                                first_seg;  // canonical first segment
-    int                                        category;   // 0 attr / 1 named / 2 unnamed
-    std::vector<std::pair<std::string, Entry>> entries;    // (suffix incl. leading ".", entry)
+    std::string first_seg; // canonical first segment
+    int category;          // 0 attr / 1 named / 2 unnamed
+    std::vector<std::pair<std::string, Entry>>
+        entries; // (suffix incl. leading ".", entry)
   };
-  std::vector<Rhs_group>                  groups;
+  std::vector<Rhs_group> groups;
   std::unordered_map<std::string, size_t> group_idx;
-  for (const auto& it : tup->key_map) {
-    auto        seg_sv = seg(it.first);
+  for (const auto &it : tup->key_map) {
+    auto seg_sv = seg(it.first);
     std::string seg_s(seg_sv);
     std::string suffix;
     if (it.first.size() > seg_sv.size()) {
       I(it.first[seg_sv.size()] == '.');
-      suffix = it.first.substr(seg_sv.size());  // keep leading '.'
+      suffix = it.first.substr(seg_sv.size()); // keep leading '.'
     }
     auto [iter, inserted] = group_idx.try_emplace(seg_s, groups.size());
     if (inserted) {
@@ -753,18 +776,19 @@ bool Bundle::concat(const std::shared_ptr<Bundle const>& tup) {
   // Emit an RHS group under a chosen first-segment, optionally inserting
   // an extra ".K" path between the segment and the group's suffix (used to
   // tuck the RHS payload under a fresh sub-tuple slot during name merge).
-  auto emit_group
-      = [&](const std::vector<std::pair<std::string, Entry>>& entries, std::string_view new_seg, std::string_view extra = {}) {
-          for (const auto& [suffix, ent] : entries) {
-            std::string new_key(new_seg);
-            if (!extra.empty()) {
-              new_key += '.';
-              new_key.append(extra.data(), extra.size());
-            }
-            new_key.append(suffix);
-            key_map.insert_or_assign(std::move(new_key), ent);
+  auto emit_group =
+      [&](const std::vector<std::pair<std::string, Entry>> &entries,
+          std::string_view new_seg, std::string_view extra = {}) {
+        for (const auto &[suffix, ent] : entries) {
+          std::string new_key(new_seg);
+          if (!extra.empty()) {
+            new_key += '.';
+            new_key.append(extra.data(), extra.size());
           }
-        };
+          new_key.append(suffix);
+          key_map.insert_or_assign(std::move(new_key), ent);
+        }
+      };
 
   // Erase every LHS entry whose first segment equals `s`.
   auto erase_top = [&](std::string_view s) {
@@ -781,9 +805,9 @@ bool Bundle::concat(const std::shared_ptr<Bundle const>& tup) {
   // growing sub-tuple). A bare-scalar entry counts as 1; existing digit
   // sub-entries pick the max+1.
   auto next_sub_pos = [&](std::string_view lhs_seg) -> int {
-    int  sub_max    = -1;
+    int sub_max = -1;
     bool has_scalar = false;
-    for (const auto& e : key_map) {
+    for (const auto &e : key_map) {
       if (seg(e.first) != lhs_seg) {
         continue;
       }
@@ -792,9 +816,12 @@ bool Bundle::concat(const std::shared_ptr<Bundle const>& tup) {
         continue;
       }
       auto rest_start = lhs_seg.size() + 1;
-      auto next_dot   = e.first.find('.', rest_start);
-      auto frag       = e.first.substr(rest_start, next_dot == std::string::npos ? std::string::npos : next_dot - rest_start);
-      if (!frag.empty() && std::isdigit(static_cast<unsigned char>(frag.front()))) {
+      auto next_dot = e.first.find('.', rest_start);
+      auto frag = e.first.substr(rest_start, next_dot == std::string::npos
+                                                 ? std::string::npos
+                                                 : next_dot - rest_start);
+      if (!frag.empty() &&
+          std::isdigit(static_cast<unsigned char>(frag.front()))) {
         int n = str_tools::to_i(frag);
         if (n > sub_max) {
           sub_max = n;
@@ -815,22 +842,24 @@ bool Bundle::concat(const std::shared_ptr<Bundle const>& tup) {
     if (it == key_map.end()) {
       return;
     }
-    auto node  = key_map.extract(it);
+    auto node = key_map.extract(it);
     node.key() = std::string(lhs_seg) + ".0";
     key_map.insert(std::move(node));
   };
 
-  for (auto& g : groups) {
-    if (g.category == 0) {  // attribute: rhs wins
+  for (auto &g : groups) {
+    if (g.category == 0) { // attribute: rhs wins
       erase_top(g.first_seg);
       emit_group(g.entries, g.first_seg);
       continue;
     }
 
-    if (g.category == 1) {  // named
-      bool rhs_is_nil_scalar = g.entries.size() == 1 && g.entries[0].first.empty() && g.entries[0].second.trivial.is_nil();
+    if (g.category == 1) { // named
+      bool rhs_is_nil_scalar = g.entries.size() == 1 &&
+                               g.entries[0].first.empty() &&
+                               g.entries[0].second.trivial.is_nil();
       if (rhs_is_nil_scalar) {
-        continue;  // RHS nil drops itself.
+        continue; // RHS nil drops itself.
       }
       if (!lhs_named.count(g.first_seg)) {
         emit_group(g.entries, g.first_seg);
@@ -840,7 +869,7 @@ bool Bundle::concat(const std::shared_ptr<Bundle const>& tup) {
       // Collision. If LHS is a nil placeholder, RHS takes the slot;
       // otherwise pack into a sub-tuple at the existing slot.
       bool lhs_is_nil_scalar = false;
-      for (const auto& e : key_map) {
+      for (const auto &e : key_map) {
         if (e.first == g.first_seg && e.second.trivial.is_nil()) {
           lhs_is_nil_scalar = true;
           break;
@@ -866,13 +895,14 @@ bool Bundle::concat(const std::shared_ptr<Bundle const>& tup) {
   return true;
 }
 
-bool Bundle::concat(const Const& trivial) {
+bool Bundle::concat(const Const &trivial) {
   int next_pos = 0;
-  for (const auto& e : key_map) {
+  for (const auto &e : key_map) {
     auto seg = first_segment_view(e.first);
     if (segment_category(seg) != 2) {
       dump();
-      Lnast::info("can not concat trivial:{} to bundle unordered {} field {}", trivial, get_name(), e.first);
+      Lnast::info("can not concat trivial:{} to bundle unordered {} field {}",
+                  trivial, get_name(), e.first);
       return false;
     }
     int n = str_tools::to_i(seg);
@@ -887,7 +917,7 @@ bool Bundle::concat(const Const& trivial) {
 
 bool Bundle::is_scalar() const {
   auto conta = 0;
-  for (const auto& e : key_map) {
+  for (const auto &e : key_map) {
     if (is_attribute(e.first)) {
       continue;
     }
@@ -900,12 +930,12 @@ bool Bundle::is_scalar() const {
 }
 
 bool Bundle::is_ordered(std::string_view key) const {
-  for (const auto& e : key_map) {
-    auto             e_pos = 0u;
+  for (const auto &e : key_map) {
+    auto e_pos = 0u;
     std::string_view field;
     if (key.empty()) {
       if (is_root_attribute(e.first)) {
-        continue;  // attributes do not affect order
+        continue; // attributes do not affect order
       }
 
       field = e.first;
@@ -916,11 +946,11 @@ bool Bundle::is_ordered(std::string_view key) const {
       }
 
       if (e_pos >= e.first.size()) {
-        continue;  // there was no match, so still ordered
+        continue; // there was no match, so still ordered
       }
 
       if (is_attribute(e.first)) {
-        continue;  // attributes do not affect order
+        continue; // attributes do not affect order
       }
 
       field = std::string_view(e.first).substr(e_pos);
@@ -928,7 +958,7 @@ bool Bundle::is_ordered(std::string_view key) const {
 
     auto pos = get_first_level_pos(field);
     if (pos < 0) {
-      return false;  // OOPS, not ordered entry. This is not OK
+      return false; // OOPS, not ordered entry. This is not OK
     }
   }
 
@@ -938,7 +968,7 @@ bool Bundle::is_ordered(std::string_view key) const {
 std::string_view Bundle::get_scalar_name() const {
   std::string_view sname;
 
-  for (const auto& e : key_map) {
+  for (const auto &e : key_map) {
     std::string_view s;
     if (is_attribute(e.first)) {
       s = get_all_but_last_level(e.first);
@@ -957,7 +987,7 @@ std::string_view Bundle::get_scalar_name() const {
 bool Bundle::is_trivial_scalar() const {
   auto conta = 0;
 
-  for (const auto& e : key_map) {
+  for (const auto &e : key_map) {
     std::string_view field{e.first};
 
     if (is_attribute(field)) {
@@ -979,7 +1009,7 @@ bool Bundle::is_trivial_scalar() const {
 }
 
 bool Bundle::has_just_attributes() const {
-  for (const auto& e : key_map) {
+  for (const auto &e : key_map) {
     if (is_attribute(e.first)) {
       continue;
     }
@@ -992,7 +1022,8 @@ bool Bundle::has_just_attributes() const {
 void Bundle::dump() const {
   std::print("bundle_name: {}{}\n", name, correct ? "" : " ISSUES");
 
-  for (const auto& it : key_map) {
-    std::print("  key:{} trivial:{} {}\n", it.first, it.second.trivial, it.second.immutable ? "let" : "mut");
+  for (const auto &it : key_map) {
+    std::print("  key:{} trivial:{} {}\n", it.first, it.second.trivial,
+               it.second.immutable ? "let" : "mut");
   }
 }

@@ -1,0 +1,16 @@
+/*
+:name: tuple_unknown_field
+:type: error
+:error: unknown field
+:help: check existence with
+*/
+
+// Task 1m-B — reading a named field that does not exist on a tuple is a
+// compile error (../docs/docs/pyrope/03-bundle.md). `has` is the sanctioned
+// existence probe; a bare absent-field read is not a silent `nil`.
+//
+// `a` has fields `b` and `c` only — `a.d` is unknown.
+
+const a = (b = 1, c = 2)
+const y = a.d
+cassert(y == 5)

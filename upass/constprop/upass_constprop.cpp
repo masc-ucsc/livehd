@@ -432,6 +432,33 @@ void uPass_constprop::process_assign() {
     }
   } else if (is_type(Lnast_ntype::Lnast_ntype_const)) {
     Const v = current_pyrope_value();
+    // Task 1m-B — named-type skeleton materialization for a `nil` initializer.
+    // `mut w:tn = nil` (tn = (a:u8=nil, b:string="")) should leave w carrying
+    // tn's fields — the declaration COPIES the type, the nil overrides nothing.
+    // Without this, the const path below stores only field "0"=nil, so a later
+    // read of the declared-but-nil field `w.a` can't be told apart from a
+    // genuine unknown-field error (and `w has 'a'` wrongly reports false). The
+    // ref-RHS branch above already does this overlay for a tuple initializer;
+    // here we handle the nil/default case. First write only (no value yet), bare
+    // var, never over an enum-type base (an enum value is one entry, not the
+    // table of entries).
+    if (v.is_nil() && lhs_text.find('.') == std::string_view::npos && !st.has_trivial(lhs_text)) {
+      if (auto nt = decl_named_type_.find(std::string(lhs_text)); nt != decl_named_type_.end()) {
+        auto existing = st.get_bundle(lhs_text);
+        if (!existing || existing->non_attr_entries().empty()) {
+          auto base = st.get_bundle(nt->second);
+          if (base && !base->non_attr_entries().empty() && enum_identity_of(base) == nullptr) {
+            auto merged = std::make_shared<Bundle>(std::string(lhs_text));
+            for (const auto& [bk, bep] : base->non_attr_entries()) {
+              merged->set(bk, *bep);  // tn's default fields + per-field values
+            }
+            st.set(lhs_text, merged);
+            move_to_parent();
+            return;
+          }
+        }
+      }
+    }
     // Task 1t — coerce a known-negative literal to its unsigned N-bit pattern
     // on the var's FIRST scalar write (the declaration's initializer), so
     // constprop's own folding of later reads sees the unsigned value. The
@@ -3395,17 +3422,27 @@ void uPass_constprop::process_tuple_get() {
       }
     }
   } else if (named_field_absent) {
-    // Named access of an absent field on a resolved multi-field tuple reads as
-    // nil (a legal existence probe, e.g. `tup0['y'] == nil` once tup0 became
-    // positional `(55,66)`). Must precede the single-output-callee fallback,
-    // which would otherwise hand back src's position-0 scalar for the missing
-    // named field.
-    //
-    // Task 1m note: making this an ERROR (unknown-field, §9) cannot live here —
-    // a constprop spike (2026-06-07) showed it mis-fires on tuples still being
-    // built (e.g. `mut x = (a=1, mut c)` reads `x.c` before the field is
-    // populated → false positive). The check must run in upass/typecheck
-    // against the tuple's final TYPE field-set, not this transient walk bundle.
+    // Task 1m-B — reading a named field that does not exist on a resolved
+    // multi-field tuple is a COMPILE ERROR (03-bundle.md; `has` is the sanctioned
+    // existence probe, not `field == nil`). `src_bundle` is the authoritative
+    // field-set: it carries every declared field — including typed-but-nil ones
+    // materialized from a `:type` declaration (see the named-type skeleton copy
+    // in process_assign) — so a missing top-level named segment is genuinely
+    // absent (the `mut c` shorthand stores a positional entry, so `x.c` on
+    // `(a=1, b=(c=2), 10)` correctly errors; use `x.2`).
+    livehd::diag::sink().emit(livehd::diag::Diagnostic{
+        .severity = livehd::diag::Severity::error,
+        .code     = "unknown-field",
+        .category = "type",
+        .pass     = "upass.constprop",
+        .message  = std::format("unknown field `{}` on tuple `{}`", first_seg, src),
+        .hint     = std::format("`{}` has no field `{}` — check existence with `{} has '{}'` "
+                                "(reading an absent field is a compile error)",
+                                src,
+                                first_seg,
+                                src,
+                                first_seg),
+    });
     store_trivial(dst, *Dlop::nil());
   } else if (st.has_trivial(src)) {
     // Single-output callee fallback: an inliner result like

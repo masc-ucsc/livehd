@@ -1,7 +1,7 @@
 /*
 :name: named_tuple
 :type: parsing lnast comptime
-:verifier_pass: 2
+:verifier_pass: 3
 :verifier_fail: 0
 */
 
@@ -9,7 +9,12 @@ comb top() -> () {
   const c = 10
   mut x = (a=1, mut b = (c=2), mut c)
   cassert(x == (a=1, b=(c=2), 10))
-  cassert(x.a == 1 and x.b.c == 2 and x.c == 10)
+  // `mut c` adds a POSITIONAL field with the value of the outer `c` (10) — it
+  // does NOT create a named field `c` on x (the third element is unnamed, slot
+  // 0). So `x has 'c'` is false and `x.c` would be an unknown-field error;
+  // read it positionally. Only `b`'s own nested field is `b.c`.
+  cassert(x.a == 1 and x.b.c == 2 and x.0 == 10)
+  cassert(x has 'a' and x has 'b' and not (x has 'c'))
 }
 
 top()

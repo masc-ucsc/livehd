@@ -11,23 +11,12 @@
 <main>
 <h1><strong class="item-id">1m</strong> Pyrope pub exports + import()</h1>
 <p>Pyrope <code>pub</code> exports and <code>import()</code> of other modules' published
-  symbols. Core landed 2026-06-07; what remains is global unknown-field
-  checking and the <code>lg:</code> black-box wiring path.</p>
+  symbols. Core landed 2026-06-07; global unknown-field checking landed
+  2026-06-08; what remains is the <code>lg:</code> black-box wiring path.</p>
 <h2>Depends on</h2>
 <p>None.</p>
 <h2>Subtasks — pending</h2>
 <ul class="subtasks">
-<li><strong>B — unknown tuple field → error.</strong> Decided <strong>global</strong>,
-  in <code>upass/typecheck</code>: reading a field absent from <em>any</em> tuple
-  must be a compile error. Spike done 2026-06-07 — flipping constprop's
-  <code>named_field_absent</code> nil-store to an error breaks 5/274 prp tests, and
-  most are FALSE POSITIVES — a progressive build
-  (<code>mut x = (a=1, mut c)</code> → read <code>x.c</code>) reads the field before the
-  walk populates it, so the transient constprop bundle reports it absent. Only
-  <code>tuple_simple4</code>'s <code>tup0['y']==nil</code> is a genuine probe-idiom
-  casualty. So it CANNOT be a constprop flip — it must check the tuple's final
-  <em>type</em> field-set in typecheck (which doesn't track tuple field-sets yet
-  → a typecheck build-out). The constprop site carries a pointer note.</li>
 <li><strong>C — <code>lg:</code> black-box Sub wiring at tolg.</strong> (E back half.)
   <strong>NOT blocked on the linker</strong> (earlier claim corrected). gids are
   per-library positional indices, so a Sub's gid is only valid in its own
@@ -51,6 +40,26 @@
   publication, tuple/<code>ln:</code> resolution, <code>equals</code> tree-url identity,
   read-only bind, iterate-until-converged kernel loop, and mod/pipe
   instantiation through imports to Verilog.</li>
+<li><strong>B — unknown tuple field → error.</strong>
+  <span class="status landed">landed</span> 2026-06-08: reading a named field that
+  does not exist on a tuple is a compile error (the documented existence probe is
+  <code>has</code>, not <code>field == nil</code>). The check lives in
+  <code>upass/constprop</code> (<code>process_tuple_get</code>): the symbol-table
+  <em>bundle</em> is the authoritative field-set, so a missing top-level named
+  segment (<code>!has_top_named</code>) on a resolved multi-field tuple is the
+  error — reusing the existing <code>named_field_absent</code> computation. The
+  spike's earlier "must be typecheck" conclusion was wrong; it rested on two
+  bundle gaps that are now closed: (1) a <code>:type = nil</code> var never
+  materialized its type's field skeleton into the bundle — fixed in
+  <code>process_assign</code> (a <code>nil</code> first-write to a named-typed var
+  copies the type's fields, so <code>b.b</code> inherited from <code>a_type</code>
+  is valid while <code>b.nope</code> errors); (2) <code>Bundle::has_top_named</code>
+  ignored attribute-only fields. Tests fixed (they read non-existent fields):
+  <code>tuple_simple4</code> → <code>not (tup0 has 'y')</code>; <code>named_tuple</code>
+  → the <code>mut c</code> shorthand is a POSITIONAL field (slot 0,
+  <code>x.0 == 10</code>), not a named <code>x.c</code> — <code>x has 'c'</code> is
+  false. New test <code>errors/tuple_unknown_field.prp</code>. Zero regression
+  (291/291 bazel upass+prp, 111 error tests).</li>
 </ul>
 <h2>Design notes</h2>
 <p><strong>Out of scope (deferred).</strong> Generics <code>&lt;T&gt;</code>
