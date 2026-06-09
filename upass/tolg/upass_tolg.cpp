@@ -890,42 +890,90 @@ private:
       return;
     }
 
-    std::shared_ptr<Lnast> callee;
-    if (registry_ != nullptr) {
-      callee = resolve_callee_lnast(callee_name, *registry_);
-    }
-    const auto kind = callee ? callee->get_lambda_kind() : std::string_view{};
-    if (!callee || (kind != "pipe" && kind != "mod")) {
-      // Unresolvable (runtime wrap/sat builtin, recursion-kept comb, …):
-      // HARD error — the pre-1r behavior silently wired the call's outputs
-      // to nil and emitted a broken netlist.
-      Pass::error(
-          "upass.tolg: call to '{}' has no hardware lowering yet — only pipe/mod calls become instances "
-          "(note `comb` may not call a `pipe`/`mod`), and runtime `wrap`/`sat` lowering is pending",
-          callee_name);
-      return;
-    }
+    std::string                    callee_full;
+    std::shared_ptr<hhds::GraphIO> gio;
+    const Lnast_tree_io*           cio_ptr = nullptr;
+    Lnast_tree_io                  cio_lg;            // synthesized for an lg: black box
+    std::string_view               kind;             // callee lambda kind ("" for an lg: black box)
+    std::shared_ptr<Lnast>         callee;            // kept alive: cio_ptr may point into its io_meta()
 
-    // Only a `mod` may instantiate pipe/mod callees (06-functions.md: `comb`
-    // may not call a `pipe`/`mod`; pipe bodies use stage inference, not
-    // instantiation). Without this gate a comb would silently grow a
-    // latency-carrying instance.
-    if (lnast_->get_lambda_kind() != "mod") {
-      Pass::error("upass.tolg: '{}' (a {}) calls the {} '{}' — only `mod` bodies may instantiate pipe/mod",
-                  lnast_->get_top_module_name(),
-                  lnast_->get_lambda_kind().empty() ? std::string_view{"comb"} : lnast_->get_lambda_kind(),
-                  kind,
-                  callee_name);
-      return;
+    // Task 1m-C — an `import("lg:foo")` binding folds the callee to the string
+    // 'lg:foo'. Instantiate the foreign graph as a BLACK BOX: its GraphIO (the
+    // kernel load_merge'd the lg: inputs into lib_) supplies the IO to wire by
+    // name; cgen emits the instance by name and the body rides along in the
+    // assembled library. There is no ln: lambda — synthesize the io_meta the
+    // shared wiring below expects from the GraphIO's declared pins.
+    std::string lg_name;
+    {
+      std::string s = callee_name;
+      if (s.size() >= 2 && s.front() == '\'' && s.back() == '\'') {
+        s = s.substr(1, s.size() - 2);
+      }
+      if (s.rfind("lg:", 0) == 0) {
+        lg_name = s.substr(3);
+      }
     }
+    if (!lg_name.empty()) {
+      gio = lib_ != nullptr ? lib_->find_io(lg_name) : nullptr;
+      if (!gio) {
+        Pass::error("upass.tolg: imported lg: graph '{}' not found in any input library — pass it as an `lg:` "
+                    "input (or it failed to load)",
+                    lg_name);
+        return;
+      }
+      auto kind_of_bits = [](uint32_t b) { return b == 1 ? Io_kind::boolean : Io_kind::integer; };
+      for (const auto& d : gio->get_input_pin_decls()) {
+        if (d.name == "clock" || d.name == "reset") {
+          continue;  // implicit; wired from the parent below, not an argument
+        }
+        cio_lg.inputs.push_back(
+            Lnast_io_entry{.name = d.name, .bits = static_cast<int32_t>(d.bits), .is_signed = !d.unsign, .kind = kind_of_bits(d.bits)});
+      }
+      for (const auto& d : gio->get_output_pin_decls()) {
+        cio_lg.outputs.push_back(
+            Lnast_io_entry{.name = d.name, .bits = static_cast<int32_t>(d.bits), .is_signed = !d.unsign, .kind = kind_of_bits(d.bits)});
+      }
+      cio_ptr     = &cio_lg;
+      callee_full = lg_name;
+      callee_name = lg_name;  // Sub instance name + diagnostics
+    } else {
+      if (registry_ != nullptr) {
+        callee = resolve_callee_lnast(callee_name, *registry_);
+      }
+      kind = callee ? callee->get_lambda_kind() : std::string_view{};
+      if (!callee || (kind != "pipe" && kind != "mod")) {
+        // Unresolvable (runtime wrap/sat builtin, recursion-kept comb, …):
+        // HARD error — the pre-1r behavior silently wired the call's outputs
+        // to nil and emitted a broken netlist.
+        Pass::error(
+            "upass.tolg: call to '{}' has no hardware lowering yet — only pipe/mod calls become instances "
+            "(note `comb` may not call a `pipe`/`mod`), and runtime `wrap`/`sat` lowering is pending",
+            callee_name);
+        return;
+      }
 
-    const auto  callee_full = std::string(callee->get_top_module_name());
-    auto        gio         = lib_ != nullptr ? lib_->find_io(callee_full) : nullptr;
-    if (!gio) {
-      Pass::error("upass.tolg: callee '{}' has no registered GraphIO — register_io() phase missing", callee_full);
-      return;
+      // Only a `mod` may instantiate pipe/mod callees (06-functions.md: `comb`
+      // may not call a `pipe`/`mod`; pipe bodies use stage inference, not
+      // instantiation). Without this gate a comb would silently grow a
+      // latency-carrying instance.
+      if (lnast_->get_lambda_kind() != "mod") {
+        Pass::error("upass.tolg: '{}' (a {}) calls the {} '{}' — only `mod` bodies may instantiate pipe/mod",
+                    lnast_->get_top_module_name(),
+                    lnast_->get_lambda_kind().empty() ? std::string_view{"comb"} : lnast_->get_lambda_kind(),
+                    kind,
+                    callee_name);
+        return;
+      }
+
+      callee_full = std::string(callee->get_top_module_name());
+      gio         = lib_ != nullptr ? lib_->find_io(callee_full) : nullptr;
+      if (!gio) {
+        Pass::error("upass.tolg: callee '{}' has no registered GraphIO — register_io() phase missing", callee_full);
+        return;
+      }
+      cio_ptr = &callee->io_meta();
     }
-    const auto& cio = callee->io_meta();
+    const auto& cio = *cio_ptr;
     if (cio.outputs.size() != 1) {
       Pass::error("upass.tolg: call to '{}' has {} outputs — multi-output call sites land in a later phase",
                   callee_full,

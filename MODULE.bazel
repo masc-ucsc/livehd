@@ -101,14 +101,15 @@ http_archive(
 
 # HHDS (replaces core/lhtree*.hpp; see hhds_migration.md)
 bazel_dep(name = "hhds", version = "0.2.0")
-# Task 1m-C: developing GraphLibrary::load_merge against local ../hhds. Restore
-# the git_override and bump `commit` once the load_merge change is pushed.
-# git_override(
-#     module_name = "hhds",
-#     remote = "https://github.com/masc-ucsc/hhds.git",
-#     commit = "1a2627503f08f6384ad5bb74c50206ec3afe6a2a",
-# )
-local_path_override(module_name = "hhds", path = "../hhds")
+git_override(
+    module_name = "hhds",
+    remote = "https://github.com/masc-ucsc/hhds.git",
+    # name-hash gids + abseil-map GraphLibrary storage + load_merge (task 1m gid
+    # refactor + 1m-C graph-library linker).
+    commit = "1a3b9f930699fd592143d6a3186b7cd6a72d7073",
+)
+# For local debug/testing, swap the git_override above for:
+# local_path_override(module_name = "hhds", path = "../hhds")
 
 # tree-sitter-pyrope
 http_archive(

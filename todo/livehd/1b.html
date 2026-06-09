@@ -45,6 +45,13 @@
   ⇒ <code>0,1,2</code>, correctly unequal). So <code>compare_bundles_eq</code>,
   <code>structural_does</code>, the <code>does</code> machinery, and the
   LGraph/Verilog port-naming all ride on the unchanged data map.</p>
+<p><strong>Plus a 2b prerequisite.</strong> Layered on the A/B reshape, this task also
+  lands the small <em>typed</em> Bundle API surface the upass push-based migration
+  (<a class="xref" href="2b.html">2b</a>) depends on — a shared <code>Kind</code> enum,
+  typed attribute accessors, an optional-scalar getter, an attr-key vocabulary, and a cheap
+  trivial bundle. See <a href="#api-2b">Bundle API additions</a> below.
+  <a class="xref" href="2b.html">2b</a> is a flag-day rewrite that freezes the other upass
+  work until it lands, so these must exist first.</p>
 
 <h2>Depends on</h2>
 <p>None — internal IR refactor. The <code>concat</code> / scalar-collapse / promotion
@@ -133,6 +140,71 @@
 <li><strong>D — tests.</strong> <code>bazel test //inou/prp/... //upass/... //lnast/...
   //pass/...</code> green; re-verify the tuple LEC pairs; update
   <code>lnast/tests/symbol_table_test.cpp</code> (3 view calls).</li>
+</ul>
+
+<h2 id="api-2b">Bundle API additions — prerequisite for 2b (upass push-based migration)</h2>
+<p><a class="xref" href="2b.html">2b</a> flips every value-producing upass from "walk the
+  cursor and resolve operands from a private name-keyed side map" to "the runner resolves
+  each operand to a
+  <code>shared_ptr&lt;const Bundle&gt;</code> and calls
+  <code>process_&lt;op&gt;(Bundle&amp; dst, std::span&lt;const std::shared_ptr&lt;const Bundle&gt;&gt; src)</code>"
+  (a <code>const</code> literal is wrapped in a throwaway trivial Bundle owned by the
+  iterator). For that to be clean, the per-name facts the passes used to keep in side
+  maps (<code>kind_map</code>, declared envelope, derived bitwidth range, cycle range,
+  mode, comptime, sticky) must live on the Bundle as first-class, <em>typed</em>
+  accessors — never hand-built <code>Const</code>s. These ride on the
+  <code>attrs</code> map from subtask&nbsp;A, so sequence them <strong>after A</strong>.
+  They are additive (no behavior change on their own); 2b consumes them flag-day.</p>
+<ul class="subtasks">
+<li><strong>E — shared <code>enum class Kind</code> + typed kind accessor.</strong> Move
+  the lattice out of <code>uPass_typecheck</code> into a shared header
+  (<code>lnast/kind.hpp</code>):
+  <code>enum class Kind : uint8_t { unknown, integer, boolean, string, range, tuple, nil, enumv, type_name }</code>
+  (extend <code>integer/boolean/string/range/tuple/nil</code> with <code>enumv</code> and
+  named-type per the type model). Add <code>void set_kind(Kind)</code> /
+  <code>Kind get_kind() const</code> on Bundle (stored in <code>attrs</code> under
+  <code>type</code>, int-coded). Kind is <strong>not</strong> derivable from the value
+  (<code>bool</code> vs <code>int</code>: <code>true</code> reads as <code>1</code>;
+  <code>0sb?</code> is the wildcard), so it must be carried explicitly.</li>
+<li><strong>F — typed attribute overloads.</strong> Beyond today's
+  <code>set_attr(name, const Const&amp;)</code>, add
+  <code>set_attr(name, int64_t)</code>, <code>set_attr(name, bool)</code>,
+  <code>set_attr(name, std::string_view)</code> and the reads
+  <code>std::optional&lt;int64_t&gt; get_attr_int(name)</code>,
+  <code>bool get_attr_bool(name)</code>, <code>std::string_view get_attr_str(name)</code>
+  (root + <code>field</code> forms, mirroring today's pair). Kills the
+  <code>Const</code>-construct on write and the
+  <code>is_invalid()/is_integer()/to_i()</code> dance on read in every migrated pass.</li>
+<li><strong>G — <code>std::optional&lt;Const&gt; scalar()</code> / <code>bool has_scalar()</code>.</strong>
+  The "read this input's comptime value, or it is unknown" accessor — today every caller
+  re-checks <code>get_trivial().is_invalid()</code>. This is the hot read path for the
+  const/ref operand resolution in 2b.</li>
+<li><strong>H — canonical attribute-key vocabulary.</strong> A small header
+  (<code>battr::type</code>, <code>max</code>, <code>min</code>, <code>bw_max</code>,
+  <code>bw_min</code>, <code>tc_min</code>, <code>tc_max</code>, <code>mode</code>,
+  <code>comptime</code>) so passes share one key set and do not drift. These are the
+  disjoint slices each pass writes (type ← typecheck, declared <code>max/min</code> ← the
+  declare/type_spec pre-step, <code>bw_*</code> ← bitwidth, <code>tc_*</code> ← timecheck,
+  <code>mode</code>/<code>comptime</code> ← attributes). <em>(Sticky is not a key — it is a
+  per-attribute bit, see&nbsp;I.)</em></li>
+<li><strong>I — sticky is a per-attribute bit + a <code>sticky_attributes()</code> view.</strong>
+  Stickiness is a property <em>of the attribute</em>, decided <strong>once at creation</strong> —
+  not a name re-sniffed on every walk, and not a separate <code>sticky.</code> namespace. Give
+  the attribute <code>Entry</code> (subtask&nbsp;A's <code>attrs</code> map) a
+  <code>bool sticky</code>, set when the attribute is created via a sticky variant of the setter
+  (e.g. <code>set_attr(name, v, /*sticky=*/true)</code> — the caller knows which attributes are
+  sticky; Bundle stays domain-agnostic and just stores + filters the bit). Expose two views:
+  <code>all_attributes()</code> (= today's <code>get_attrs()</code>) and
+  <code>sticky_attributes()</code> (the sticky subset). Sticky propagation in 2b is then simply
+  "merge each <code>src</code>'s <code>sticky_attributes()</code> into <code>dst</code>" — no
+  <code>acquired</code> map, no <code>sticky.</code> prefix, no per-propagation name match.</li>
+<li><strong>J — cheap trivial Bundle.</strong> 2b wraps <em>every</em> const operand in a
+  throwaway Bundle per node and the shared symbol table holds one Bundle per name, so the
+  single-scalar + few-attrs case must be cheap. Ensure the A/B reshape keeps a one-scalar
+  bundle small (don't pay for the second <code>attrs</code> map when there are no attrs),
+  and add <code>static std::shared_ptr&lt;Bundle&gt; make_const(const Const&amp;, Kind)</code>
+  as the const-operand factory. If a pool/SBO is needed to keep const-wrapping off the
+  heap on the hot path, do it here.</li>
 </ul>
 
 <h2>Design notes</h2>

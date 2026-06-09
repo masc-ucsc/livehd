@@ -26,9 +26,6 @@ agent build/process rules live in <code>AGENTS.md</code>.</p>
 
 <h3 id="pyrope">Pyrope</h3>
 <ul>
-<li><em>Group 1:</em><ul>
-<li><a class="xref" href="pyrope/1m.html">1m</a> Pyrope <code>pub</code> exports + <code>import()</code> — core <strong>landed 2026-06-07</strong>; pending only: unknown-tuple-field error (typecheck build-out — a constprop spike showed a flip false-positives on progressive builds), <code>lg:</code> black-box Sub wiring (NOT linker-blocked: needs kernel <code>lg:</code>+sources + name/IO stub + cgen by-name check).</li>
-</ul></li>
 <li><em>Group 2:</em><ul>
 <li><a class="xref" href="pyrope/2p.html">2p</a> Source-derived SSA / tmp names (<code>foo_l42_a</code>, drop <code>___N</code>).</li>
 </ul></li>
@@ -66,6 +63,7 @@ agent build/process rules live in <code>AGENTS.md</code>.</p>
 <li><a class="xref" href="livehd/1f.html">1f</a> Source-map indirection (LOC propagation: canonical map, per-cell index, multi-loc aliases).</li>
 </ul></li>
 <li><em>Group 2:</em><ul>
+<li><a class="xref" href="livehd/2b.html">2b</a> upass push-based dispatch — one runner-owned scope-aware symbol table (a <code>Bundle</code> per name); the runner resolves each operand to a <code>Bundle</code> and pushes <code>(dst, src…)</code> into every pass, retiring the per-pass name-keyed side maps and the pull-query seams. Flag-day; depends on <a class="xref" href="livehd/1b.html">1b</a>.</li>
 <li><a class="xref" href="livehd/2n.html">2n</a> Pyrope LSP server — Phases B–E (hover/nav/workspace) remain.</li>
 </ul></li>
 <li><em>Group 3:</em><ul>

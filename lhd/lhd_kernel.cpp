@@ -1521,8 +1521,39 @@ void elaborate_command(Options& opts, Result& res) {
   }
 
   // Aggregation: IR inputs only.
+  // Task 1m-C — linker: merge lg: libraries + lower ln: source units that
+  // reference them (`import("lg:foo")` → a black-box Sub) into a new lg: lib.
   if (!ir.ln_dirs.empty() && !ir.lg_dirs.empty()) {
-    throw Lhd_error{"unsupported", "mixing ln: and lg: inputs in one aggregation is not supported yet", ""};
+    setup_diag(opts, "elaborate.merge");
+    if (lg_out == nullptr) {
+      throw Lhd_error{"usage", "merging ln: + lg: inputs needs --emit-dir lg:DIR/", ""};
+    }
+    const std::string lib_path = lg_out->path;
+    // Absorb each lg: library into the output library. Name-hash gids make a
+    // shared graph name keep the same gid across libraries, so load_merge is
+    // conflict-free for matching names (and dedups them).
+    auto& lib = livehd::Hhds_graph_library::instance(lib_path);
+    for (const auto& d : ir.lg_dirs) {
+      res.inputs.push_back(d);
+      lib.load_merge(d);
+    }
+    // Lower the ln: source units into the SAME library; their `import("lg:…")`
+    // calls resolve to the absorbed graphs by name at tolg.
+    Eprp_var var;
+    for (const auto& d : ir.ln_dirs) {
+      res.inputs.push_back(d);
+      for (auto& ln : load_ln_dir(d)) {
+        var.add(ln);
+      }
+    }
+    run_step("pass.lnastfmt", var, {}, opts, res);
+    lower_lnasts(opts, res, var, lib_path, /*need_graphs=*/true);
+    if (wants_dump(opts, "lg")) {
+      screen_dump_graphs(var, "post-tolg");
+    }
+    livehd::Hhds_graph_library::save(lib_path);
+    res.outputs.push_back(lib_path);
+    return;
   }
   if (!ir.ln_dirs.empty()) {
     setup_diag(opts, "elaborate.aggregate");

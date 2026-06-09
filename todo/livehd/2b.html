@@ -1,0 +1,264 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>TODO 2b — upass push-based dispatch: runner-owned scope-aware symbol table, passes read src bundles / write dst bundle</title>
+<link rel="stylesheet" href="../todo.css">
+</head>
+<body>
+<nav><span class="brand">LiveHD TODO</span><a href="../index.html">← All tasks</a></nav>
+<main>
+<h1><strong class="item-id">2b</strong> upass push-based dispatch — one runner-owned scope-aware symbol table; the runner resolves operands to <code>Bundle</code>s and pushes <code>(dst, src…)</code> into each pass</h1>
+
+<p>Today every value-producing upass keeps its <strong>own</strong> per-variable-name side
+  map and re-resolves operands by walking the cursor: <code>uPass_constprop::st</code>
+  (Symbol_table), <code>uPass_typecheck::kind_map</code>, <code>uPass_attributes</code>'s
+  ~12 maps (<code>type_info_map</code>, <code>attr_set_values</code>, <code>tuple_shapes</code>,
+  <code>range_bounds</code>, the alias maps, …), <code>uPass_bitwidth::range_map_</code>,
+  <code>uPass_func_extract</code>'s closure-capture maps. Each pass independently answers
+  "what is <code>ref foo</code>?" from a different flat <code>name → fact</code> map, and the
+  per-node hooks (<code>process_plus()</code> …) are <strong>nullary</strong> — they re-walk
+  the children and look the operands up themselves. Two consequences:</p>
+<ul>
+<li><strong>Replication.</strong> The same per-name facts (value, kind, declared range,
+  derived bitwidth range, cycle range, mode, comptime, sticky) live in 4–5 parallel maps,
+  all keyed by the same name.</li>
+<li><strong>No scope.</strong> The flat maps don't track lexical scope. Demonstrated bug:
+  <code>uPass_typecheck::kind_map</code> conflates same-named variables in <em>sibling</em>
+  scopes — two <code>if</code> arms each declaring a block-local <code>t</code> of a different
+  kind raise a spurious <code>assign-type-mismatch</code> (the no-shadowing rule only bans
+  <em>enclosing</em> reuse, and SSA is a no-op on the top-level module, so the bare names
+  collide). See <a href="#design">Design notes</a>.</li>
+</ul>
+
+<p>2b flips the model. There is <strong>one</strong> runner-owned, scope-aware
+  <code>Symbol_table</code> holding exactly one <code>shared_ptr&lt;Bundle&gt;</code> per
+  live name. The runner resolves each operand of a node to a <code>Bundle</code> and
+  <strong>pushes</strong> them into each pass:</p>
+<pre><code>Vote process_&lt;op&gt;(Bundle&amp; dst, std::span&lt;const std::shared_ptr&lt;const Bundle&gt;&gt; src);
+//   ^ live symbol-table bundle      ^ child-ordered operands; a `const` literal is a
+//     for the dst name                throwaway trivial Bundle owned by the iterator</code></pre>
+<p>Passes stop owning symbol tables; they read the pushed-in <code>src</code> bundles and
+  write their slice of <code>dst</code>. The per-name facts move onto the <code>Bundle</code>
+  as first-class typed attributes (delivered by <a class="xref" href="1b.html">1b</a>). This
+  retires ~26 maps and the pull-query plumbing, and the single scope-aware table makes the
+  sibling-scope bug structurally impossible.</p>
+
+<h2>Depends on</h2>
+<p><strong><a class="xref" href="1b.html">1b</a> — hard prerequisite.</strong> 2b consumes
+  1b subtasks E–J (the Bundle API surface): the shared <code>enum class Kind</code>
+  (<code>lnast/kind.hpp</code>) + <code>set_kind</code>/<code>get_kind</code>; the typed
+  <code>set_attr</code>/<code>get_attr_int|bool|str</code> overloads; <code>scalar()</code> /
+  <code>has_scalar()</code>; the <code>battr::</code> attr-key vocabulary; the per-attribute
+  <code>sticky</code> bit + <code>sticky_attributes()</code> view; and the cheap trivial
+  bundle + <code>make_const(Const, Kind)</code>
+  factory. Do not start 2b until 1b is green.</p>
+<p><strong>Flag-day.</strong> Per the migration decision: convert the runner + all
+  value-producing passes in <em>one</em> change; the old nullary-hook / private-map path is
+  removed in the same change. Other upass work freezes until 2b lands. The diff is large and
+  not bisectable by design — lean on the full suite + LEC pairs (subtask&nbsp;I) as the gate.</p>
+
+<h2>Target shape</h2>
+<ul>
+<li><strong>One runner-owned scope-aware symbol table.</strong> Resurrect the
+  <code>runner_symbol_table</code> seam (deleted as dead scaffolding) — wired this time. One
+  <code>shared_ptr&lt;Bundle&gt;</code> per name, with <code>block_scope</code> push/pop so
+  sibling scopes do not alias. The previous node's fully-populated <code>dst</code> <em>is</em>
+  the next node's <code>src</code>; all cross-pass information flows through the bundle, not
+  through pull callbacks.</li>
+<li><strong>Hook signature.</strong> <code>Vote process_&lt;op&gt;(Bundle&amp; dst,
+  std::span&lt;const std::shared_ptr&lt;const Bundle&gt;&gt; src)</code> for the
+  value-producing ops, where <code>Vote = keep | drop</code>. <code>src</code> is in child
+  order (order matters: <code>minus</code>/<code>div</code>/<code>mod</code>/<code>shl</code>/<code>sra</code>/ordering-compares/<code>get_mask</code>/<code>sext</code>/<code>tuple_get</code>/<code>range</code>).
+  A <code>const</code> operand is a throwaway trivial <code>Bundle</code> (<code>make_const</code>,
+  iterator-owned, valid for the hook call only); a <code>ref</code> operand is the name's live
+  bundle from the table.</li>
+<li><strong>Emit model (a) — bundle is the single source of truth.</strong> Passes mutate
+  <code>dst</code> and return only <code>keep</code>/<code>drop</code>. After dispatch the
+  <em>runner</em> derives the opt node: if <code>dst.scalar()</code> is comptime-known → emit
+  <code>assign(dst, const)</code>; else emit the op with operands folded from <code>src</code>;
+  <code>drop</code> elides it. Structural rewrites (inline / specialize / unroll) are
+  <code>replace</code> and stay <strong>runner-owned</strong>, not a pass vote.</li>
+<li><strong>Slice ownership.</strong> Metadata attrs are <strong>single-owner / disjoint</strong>
+  (one writer each) → pass dispatch order is irrelevant. The <strong>value</strong> slice is
+  <em>shared, must-agree</em>: more than one pass may pin a constant (constprop, and bitwidth
+  via a single-point range); if two pin, the values <strong>must be identical</strong> — a
+  mismatch is an <code>I()</code> internal compiler error (a LiveHD bug, not a user diagnostic).
+  An abstaining pass (leaves it unset) never conflicts with a pinner. Any order yields the same
+  constant or aborts.</li>
+<li><strong>dst is the live bundle; two slice lifetimes.</strong> Only a <strong>declaration</strong>
+  creates+inserts a bundle; every assignment mutates that <em>same</em> entry. So
+  <code>mut a:u3=nil; a=3; a=b+2</code> — all three touch one <code>a</code> bundle.
+  <em>Persistent</em> slices (<code>type</code>/Kind, <code>mode</code>, declared
+  <code>max</code>/<code>min</code>) are set once at the declaration and survive every
+  assignment (typecheck's no-type-change check reads <code>dst.get_kind()</code> straight off the
+  live bundle). <em>Per-write</em> slices (the value scalar, derived <code>bw_max</code>/<code>bw_min</code>)
+  are <strong>reset by the runner at each store before dispatch</strong> so the stale prior value
+  cannot leak, then re-pinned for this definition.</li>
+<li><strong>Declaration pre-step bakes the type subtree once.</strong> The
+  <code>declare</code>/<code>type_spec</code> TYPE subtree (<code>prim_type_int(max,min)</code>,
+  named type, <code>comp_type</code>) is read <strong>once</strong> by the runner at the
+  declaration and baked into the bundle's persistent attrs (<code>type</code> via Kind, declared
+  <code>max</code>/<code>min</code>, <code>mode</code>). After that <strong>no pass ever walks a
+  type subtree</strong> — they read the attrs. Today that subtree is re-walked by ~4 passes
+  (attributes, bitwidth, constprop, typecheck).</li>
+<li><strong><code>function_scope</code> read-through / write-block.</strong> The one new
+  Symbol_table behavior. Today <code>find_decl_scope</code> (<code>lnast/symbol_table.cpp:24–33</code>)
+  treats a <code>Function</code> scope as a <em>hard</em> barrier — a callee body cannot reach
+  even read an outer decl. Change it so a <strong>read</strong> crosses the function barrier
+  (closure capture of outer comptime consts) but a <strong>write</strong> to a name that resolves
+  only above the barrier is a compile error (the no-side-effect rule prp2lnast already enforces
+  lexically). This is what lets func_extract drop its closure-capture maps — the body, walked
+  under <code>function_scope</code> on the shared table, reads outer consts directly and drops its
+  locals on <code>leave_scope</code>.</li>
+<li><strong>func_call via a runner-owned <code>Call_resolver</code> helper.</strong> Keep the
+  runner lean — do not pile call handling into <code>uPass_runner</code>. A <code>Call_resolver</code>
+  absorbs the call/return surface (see subtask&nbsp;F). Resolved-call opt-tree shape:
+  <ul>
+  <li><strong>args in</strong> = one arg tuple baked into the opt call, <strong>fully named</strong>
+    to the callee params — <em>except</em> a vararg callee (<code>...x</code>), where surplus actuals
+    bind <strong>positionally</strong> into the vararg sub-tuple (unnamed allowed only there). A
+    vararg callee is <strong>specialized per signature</strong> into its own LNAST
+    (<code>add1__v1</code>, <code>add1__v2</code>, … one per distinct vararg arity/type — the
+    existing 1p path), so a <code>Sub</code> that reaches tolg is always a concrete, fully-named
+    signature.</li>
+  <li><strong>result out</strong> = a <strong>single bundle</strong> (one tuple; named and/or
+    unnamed fields). Consumed via the existing bundle-to-bundle <em>Named-tuple destructuring</em>
+    rules (<code>docs/pyrope/03-bundle.md §Named-tuple destructuring</code>): named result → bind
+    by name (bare <code>b</code> ← field <code>b</code>; missing field = compile error;
+    <code>local = src.path</code> for rename/nested; LHS order irrelevant); unnamed result →
+    positional. The result is just a bundle RHS — reuse the destructuring path, no special "call"
+    handling.</li>
+  <li><strong>tolg wires by name</strong> (everything named in the lgraph), never by position.</li>
+  <li><strong>scope</strong>: this treatment applies to calls that survive to tolg — pipe/mod
+    <code>Sub</code> (and <code>import</code> → namespace bundle on the dest). <strong>Builtins</strong>
+    (<code>cputs</code>/<code>cassert</code>/<code>assume</code>) keep their bespoke positional shape
+    (consumed by verifier/assert/typecheck, never reaching tolg as calls). Comb calls are inlined
+    away — no call node.</li>
+  </ul></li>
+<li><strong>Overflow = error at the node.</strong> bitwidth emits a does-not-fit overflow through
+  the diag sink at the offending store (like typecheck) — an error-severity diag already fails the
+  compile non-zero, so there is no <code>end_run</code> throw and no deferral. bitwidth loses
+  <code>write_site_</code> and <code>pending_overflow_msg_</code>.</li>
+</ul>
+
+<h2>Per-pass attribute table</h2>
+<p>Attribute names reviewed and approved (2026-06-09). Each metadata key has exactly one writer
+  (disjoint); the <code>value</code> slice is the only shared one (must-agree). Keys live in the
+  <code>battr::</code> vocabulary from 1b/H.</p>
+<table class="attrs">
+<thead><tr><th>writer</th><th>reads (from <code>src</code> / live <code>dst</code>)</th><th>writes (on <code>dst</code>)</th><th>lifetime</th></tr></thead>
+<tbody>
+<tr><td><strong>declare pre-step</strong> (runner)</td><td>the TYPE subtree</td><td><code>type</code> (Kind), declared <code>max</code>/<code>min</code>, <code>mode</code> (mut/const/reg), <code>comptime</code></td><td>persistent</td></tr>
+<tr><td><strong>typecheck</strong></td><td><code>src.type</code>; <code>dst.type</code> (prior, for no-type-change)</td><td><code>type</code> (inferred — only when unset by the pre-step)</td><td>persistent</td></tr>
+<tr><td><strong>constprop</strong></td><td><code>src</code> value + <code>type</code></td><td><code>value</code> (scalar / fields)</td><td>per-write (shared, must-agree)</td></tr>
+<tr><td><strong>bitwidth</strong></td><td><code>src.bw_max</code>/<code>bw_min</code>; declared <code>max</code>/<code>min</code> (fit check)</td><td><code>bw_max</code>/<code>bw_min</code>; may pin <code>value</code> on a single-point range</td><td>per-write (<code>value</code> shared, must-agree)</td></tr>
+<tr><td><strong>attributes</strong></td><td><code>src</code> attrs/aliases; each <code>src</code>'s <code>sticky_attributes()</code></td><td>sticky-flagged attrs (<code>set_attr(…, sticky=true)</code>), <code>comptime</code>, <code>mode</code> refinements, the <code>__attr</code> value/ref slices</td><td>mixed</td></tr>
+<tr><td><strong>timecheck</strong> (standalone post-walk)</td><td><code>src.tc_min</code>/<code>tc_max</code></td><td><code>tc_min</code>/<code>tc_max</code></td><td>per-write</td></tr>
+</tbody>
+</table>
+<p><em>Note:</em> <code>type</code> has two writers but no conflict — the pre-step (runner, before any
+  pass) sets it for typed decls; typecheck only fills it when unset (untyped inference). Declared
+  <code>max</code>/<code>min</code> (pre-step) and derived <code>bw_max</code>/<code>bw_min</code>
+  (bitwidth) are deliberately separate keys so they never collide.</p>
+
+<h2>What collapses vs. what survives</h2>
+<p><strong>Retired</strong> (folded onto the per-name bundle or the shared table — see the
+  <code>structs.md</code> classification): typecheck <code>kind_map</code>; constprop
+  <code>range_map</code>/<code>tuple_slot_ref_</code>/<code>typename_of_var</code>/<code>decl_unsigned_max_</code>/<code>decl_named_type_</code>/<code>reg_decl_names_</code>/<code>mut_decl_names_</code>
+  (<code>st</code> <em>becomes</em> the shared table); all of attributes' value/type/range/shape/alias
+  maps + <code>Sticky_handler::acquired</code> (→ the per-attribute <code>sticky</code> bit +
+  <code>sticky_attributes()</code>); all of bitwidth (<code>range_map_</code>,
+  <code>decl_envelope_</code>, <code>Op_ranges::rhs</code>=the pushed-in <code>src</code>,
+  <code>wrap_sat_exempt_</code>, <code>write_site_</code>, <code>pending_overflow_msg_</code>);
+  func_extract's capture maps (via <code>function_scope</code>); timecheck <code>known_</code>/<code>plain_regs_</code>
+  (as <code>tc_*</code> attrs / <code>mode</code>). Plus the pull-query seams:
+  <code>runner_fold_fn</code>, <code>runner_type_query_fn</code>, and the
+  <code>fold_capable_passes</code>/<code>shared_st_passes_</code> caches.</p>
+<p><strong>Survives</strong> (orthogonal to operand resolution): traversal/emit/string infra
+  (<code>nid_stack</code>, <code>frames_</code>, <code>intern_pool_</code>, <code>tmp_remap_</code>,
+  <code>dest_forest_</code>/<code>staging</code>/<code>staging_parent_stack</code>/<code>new_lnasts</code>/<code>scratch_forest_</code>);
+  dispatch (<code>upasses</code>, <code>classify_capable_passes</code>, attr <code>Handler_registry</code>);
+  the <code>Call_resolver</code> (the consolidated call state); control-flow scope
+  (<code>pending_arms</code>/<code>active_arm_stack</code>/<code>control_taint_stack</code>);
+  deferred/handshake (coalescer <code>pending</code>; timecheck <code>pending_</code>/<code>calls_</code>/<code>queued_checks_</code>);
+  finishers (verifier ×3; constprop import statics); and the entire <strong>tolg</strong> /
+  <strong>Time_checker</strong> graph domain (untouched).</p>
+
+<h2>Subtasks — pending</h2>
+<p>Flag-day overall, but land internally in this order so each step compiles:</p>
+<ul class="subtasks">
+<li><strong>A — runner-owned scope-aware symbol table + declare pre-step.</strong> Add the
+  <code>Symbol_table</code> back to the runner (one <code>Bundle</code>/name, <code>block_scope</code>
+  push/pop wired to <code>process_stmts</code> enter/exit). Implement the declare/type_spec pre-step
+  that walks the TYPE subtree once and bakes the persistent attrs (<code>type</code>/<code>max</code>/<code>min</code>/<code>mode</code>)
+  via 1b's typed setters.</li>
+<li><strong>B — <code>function_scope</code> read-through / write-block.</strong> Split
+  <code>find_decl_scope</code> into a read variant that crosses the <code>Function</code> barrier
+  and a write variant that stops at it (outer write → compile error). Add the regression: a comb
+  reading an outer comptime const folds; writing an outer var errors.</li>
+<li><strong>C — new hook signature + operand resolution.</strong> Change the per-op virtuals to
+  <code>Vote process_&lt;op&gt;(Bundle&amp;, std::span&lt;const std::shared_ptr&lt;const Bundle&gt;&gt;)</code>.
+  The runner builds <code>src</code> in child order (ref → table bundle; const → <code>make_const</code>),
+  passes the live <code>dst</code> bundle, and resets the per-write slices (<code>value</code>,
+  <code>bw_*</code>) before dispatch.</li>
+<li><strong>D — emit model (a).</strong> Runner derives the opt node from <code>dst.scalar()</code>
+  + the <code>keep</code>/<code>drop</code> vote; <code>replace</code> stays the runner's inline/specialize/unroll
+  path. Enforce the must-agree <code>value</code> check (<code>I()</code> on a pinned-constant mismatch).</li>
+<li><strong>E — migrate the passes; delete their private maps.</strong> Move typecheck, constprop,
+  attributes, bitwidth onto the new hooks reading <code>src</code> bundles + writing their disjoint
+  <code>dst</code> slice; delete the retired maps above. Fold func_extract's closure capture via
+  <code>function_scope</code>. Standardize timecheck's cycle interval as <code>tc_*</code> attrs.</li>
+<li><strong>F — <code>Call_resolver</code> helper.</strong> Extract call/return resolution out of
+  <code>uPass_runner</code> (and constprop's <code>collect_call_actuals</code>/<code>process_import_call</code>)
+  into a runner-owned <code>Call_resolver</code>: name/arity/vararg resolution + ambiguity/arity/missing
+  compile errors; bake the named arg tuple + single result bundle; vararg → per-signature specialized
+  LNAST; builtins exempt; <code>import</code> → namespace bundle on the dest. Type-checks are
+  <em>implicit</em>: arg types ride the specialized-callee walk, return types ride the result
+  destructuring assign — the resolver does <strong>not</strong> re-type at the call site.</li>
+<li><strong>G — overflow at the node.</strong> bitwidth emits the does-not-fit overflow via the diag
+  sink at the store; drop the <code>end_run</code> throw, <code>write_site_</code>, and
+  <code>pending_overflow_msg_</code>.</li>
+<li><strong>H — delete the pull-query plumbing.</strong> Remove <code>runner_fold_fn</code>,
+  <code>runner_type_query_fn</code>, <code>provide_*</code>/<code>try_*</code> shared-ST queries, and
+  the <code>fold_capable_passes</code>/<code>shared_st_passes_</code> caches — operands are pushed in,
+  nothing pulls.</li>
+<li><strong>I — tests.</strong> <code>bazel test //inou/prp/... //upass/... //lnast/... //pass/...</code>
+  green; re-verify every LEC pair; add the <strong>sibling-scope regression</strong> (two <code>if</code>
+  arms declaring a same-named block-local of different kinds must compile clean), and a func_call
+  named/vararg-destructuring test.</li>
+</ul>
+
+<h2 id="design">Design notes</h2>
+<p><strong>The sibling-scope bug this fixes.</strong> With one flat <code>kind_map</code> and no
+  scope pop, <code>if c { mut t = 1; o = t } else { mut t = true; o = int(t) }</code> raises a
+  spurious <code>upass.typecheck: cannot assign boolean value to 't' (it is integer)</code> — the
+  else-arm's fresh <code>t</code> sees the then-arm's kind. Same-kind siblings compile clean, proving
+  it is pure flat-map conflation, not a scope rule. The runner-owned scope-aware table (with
+  <code>block_scope</code> push/pop) resolves each arm's <code>t</code> to its own bundle, so the bug
+  cannot occur.</p>
+<p><strong>Why the value slice is must-agree, not single-owner.</strong> Both constprop and bitwidth
+  can legitimately conclude a constant (constprop by folding, bitwidth by deriving a single-point
+  range). They must reach the <em>same</em> constant; if they don't, it is an internal compiler bug,
+  not a user error — hence <code>I()</code>, and hence order-independence is preserved.</p>
+<p><strong>Why flag-day.</strong> The hook signature change touches every value-producing pass and the
+  runner's dispatch/emit core at once; a coexistence mode would mean dual-dispatch scaffolding
+  (push-based <em>and</em> nullary-cursor hooks) for the duration. Cleaner to convert together and gate
+  on the full suite + LEC. Other upass work freezes until it lands.</p>
+<p><strong>func_call taxonomy</strong> (why the passes touch <code>func_call</code> today, and where it
+  goes): <em>A — intrinsics</em> (<code>__sum</code>/casts/<code>wrap</code>/<code>sat</code>) are ops in
+  a call costume → they flow through the normal <code>(dst, src)</code> hook (or a name-keyed fold path),
+  not special call handling. <em>B — builtins</em> (<code>cputs</code>/<code>cassert</code>/<code>assume</code>)
+  are side-effecting / checking, no value dst → stay as their own small handlers. <em>C — imports</em>
+  → the <code>Call_resolver</code> binds the external unit onto the dest bundle. User-function arg
+  binding + inline/specialize is already the runner's job; the <code>Call_resolver</code> just gives it
+  a home.</p>
+<p><strong>Out of scope.</strong> The tolg / Time_checker graph domain is untouched (it is a separate
+  pass over the post-upass tree). timecheck stays a standalone post-walk pass; 2b only standardizes its
+  cycle interval onto the bundle as <code>tc_*</code> so it reads inputs uniformly — folding the pass
+  into the per-node dispatch is a possible later step, not 2b.</p>
+</main>
+<footer><a href="../index.html">← All tasks</a> · LiveHD TODO · <code>livehd</code></footer>
+</body>
+</html>

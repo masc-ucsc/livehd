@@ -1,0 +1,8 @@
+// Top: instantiate a Verilog black box (`inv`, from yosys) and a Pyrope module
+// (`adder.adder`), both imported as compiled LGraphs. `inv` negates, `adder`
+// adds 1, chained: y = (-x) + 1.
+const inverter = import("lg:inv")
+const add1     = import("lg:adder.adder")
+comb top(x:s8) -> (y:s9) {
+  y = add1(a = inverter(a = x))
+}

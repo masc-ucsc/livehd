@@ -86,6 +86,23 @@ sh_test(
     data = _FLOW_DATA,
 )
 
+# Task 1m-C — graph-library linker: merge lg: + ln: inputs into a new lg:
+# library (one defines `foo`, another imports it as a black box).
+sh_test(
+    name = "lhd_lg_merge_test",
+    srcs = ["lhd_lg_merge_test.sh"],
+    data = _FLOW_DATA,
+)
+
+# Doc-test for the "Linking libraries (Pyrope + a Verilog black box)" section of
+# the usage guide (../docs/docs/livehd/02-usage.md): yosys leaf + Pyrope leaf +
+# Pyrope top → linked lg → Verilog.
+sh_test(
+    name = "lhd_usage_merge_test",
+    srcs = ["lhd_usage_merge_test.sh"],
+    data = _FLOW_DATA + glob(["merge_demo/*"]),
+)
+
 # --reader yosys-verilog|yosys-slang|slang trichotomy (slang = direct
 # inou.slang SV->LNAST front-end: ln:/pyrope: only until tolg can lower it).
 sh_test(
