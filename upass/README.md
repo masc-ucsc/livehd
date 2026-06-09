@@ -4,707 +4,462 @@
 is to **propagate compile-time-known values, dead-code-eliminate everything
 those values make redundant, and emit a new LNAST** that replaces the input.
 
-This document is the contract for how the rewrite works. When a future change
-touches this area, update this doc first.
-
-The full architectural rationale (alternatives weighed, why bundle pre-pass,
-why a single walk per invocation, etc.) lives in
-[docs/upass_redesign.md](../docs/upass_redesign.md). This file is the
-day-to-day operational contract; the redesign doc is the rationale.
+This document is the contract for **how the pipeline works today**. The
+next-generation design — push-based dispatch, one runner-owned scope-aware
+symbol table, typed Bundle/Entry facts — lives in
+[todo/livehd/2b.html](../todo/livehd/2b.html) (and its prerequisite
+[todo/livehd/1b.html](../todo/livehd/1b.html)); this file describes the
+current implementation those tasks will replace. When a change lands in this
+area, update this doc in the same change.
 
 ## 0. Context and scope
 
-upass lives downstream of `pass.lnastfmt` and consumes LNAST produced by
-`inou/prp` (new), `inou/pyrope` (legacy, sunsetting), and `inou/slang`.
-Several LNAST-wide cleanups in `lnast_todo.md` directly constrain upass:
+upass consumes LNAST produced by `inou/prp` (new), `inou/pyrope` (legacy,
+sunsetting), and `inou/slang`. Standing constraints from the LNAST contract:
 
-- **§10 — Symbol-table API + value-attr inference.** Value ranges
-  (`max`/`min`) are **owned by the standalone `bitwidth` finalization
-  pass** (§2 "bitwidth", §8), which derives them by walking the
-  optimized LNAST after the runner. This supersedes the older plan in
-  which `lnastfmt` computed `__min`/`__max` via interval arithmetic; the
-  iterative opt passes neither derive nor depend on ranges (invariant
-  #6). See `the LiveHD docs §10.2`, now redirected here.
-- **§11 — unified `attr_set`/`tuple_set` shape, write-once semantics.** upass
-  enforces write-once / comptime-guarded rules; the side-map for category-D
-  attributes lives in the Bundle (§5 below).
-- **§12 — `$`/`%`/`#` prefixes → ST-backed direction/storage.** upass assumes
-  ref text is already bare; direction/storage carried structurally, not
-  encoded in the name.
-- **§13 — `Tree_index`-identity tmps.** upass keys the symbol table by name
-  regardless; the tmp/named distinction never affects fold logic.
-- **§15.2 — `delay_assign` offset extensions.** upass never folds across a
-  `delay_assign`; emit verbatim.
+- **Value ranges (`max`/`min`) are owned by the `bitwidth` pass** (§2), which
+  observes stores during the runner walk and publishes ranges into `bw_meta`
+  at `end_run` for `lnast_to_lgraph`. No other pass derives or folds on
+  ranges (invariant #6).
+- **Bare ref text.** upass assumes `$`/`%`/`#` prefixes are already removed;
+  direction/storage is carried structurally, not encoded in the name.
+- **tmp identity.** The symbol table is keyed by name; the `___N` tmp /
+  named-var distinction never affects fold logic.
+- **`delay_assign` is a fold barrier.** upass never folds across one; emit
+  verbatim.
 
-Keep section references up to date when those sections renumber.
+## 1. Pipeline shape (current)
 
-## 1. Pipeline shape
-
-A single `pass.upass` invocation walks each LNAST in `var.lnasts` exactly
-once, depth-first, pre-order. For each source node:
+A single `pass.upass` invocation processes each LNAST in `var.lnasts`:
 
 ```
-(1) bundle pre-pass          ─ once
-(2) opt passes               ─ each once, in fixed order (attributes,
-                                constprop, coalescer, func_extract, and
-                                **bitwidth LAST**). bitwidth has no
-                                `fold_ref` (decoupled from the iterative
-                                fold) and is read-only; it observes stores
-                                pre-DCE and emits overflow + publishes
-                                max/min at end_run (§2 "bitwidth").
-                              ─ taint gate: if any operand vector entry
-                                carries a non-empty pending_import, ONLY
-                                constprop is called; the others skip.
-(3) vote resolution          ─ drop > toconst > update > keep
-(4) emit 0..N nodes          ─ append to the dest LNAST.
+(0) semacheck            ─ one-shot begin_iteration() walk over the source
+                           tree (diagnostics point at user-shaped LNAST)
+(1) uPass_ssa::run       ─ whole-tree pre-pass: harvests io_meta (the comb
+                           inliner reads it mid-walk) and renames
+                           multi-assigned vars to SSA-unique names
+(2) runner walk          ─ ONE depth-first pre-order walk of the source
+                           tree. For each node, every active pass's
+                           process_<op>() hook runs in resolved order
+                           (§1.1); hooks are nullary today and re-walk the
+                           node's children via the cursor. The runner then
+                           emits 0..N nodes into the staging tree
+                           (Emit_kind: emit | drop_subtree), folding ref
+                           operands through try_fold_ref on the way out.
+(3) post-walk DCE        ─ dead_code_eliminate_staging: liveness backstop
+                           over the staging tree (io-root rule; see 1d)
+(4) finishers            ─ verifier, then assert: read-only walks of the
+                           emitted (dest) tree; cassert tally (§2)
 ```
 
-SSA naming runs as a **whole-tree pass before** this runner walk
-(`uPass_ssa::run` — harvests `io_meta` for the inliner and renames
-multi-assigned vars), so the walk and the emitted tree already carry SSA
-names; bitwidth (last opt pass) therefore sees post-SSA names.
-
-After the source walk + post-walk DCE complete:
-
-- If **no** Bundle carries `pending_import`, the read-only finishers
-  (`verifier`, then `assert`) tally casserts, and the optimized LNAST —
-  with `bw_meta` `max`/`min` populated by bitwidth at end_run — is handed
-  to `pass.lnast_to_lgraph`.
-- Otherwise the finishers defer to a later `pass.upass` invocation
-  (presumably after the blocking `import` resolves).
-
-### No iteration loop
-
-With direct Bundle mutation in fixed pass order, one sweep per source node
-suffices. The runner does exactly one walk per `pass.upass` invocation — there
-is no iteration knob and no fixed-point loop. The runner picks the strongest
-vote at each node and moves on.
+The single walk is the load-bearing performance property: **the source tree
+is traversed exactly once per invocation, and the passes are called as the
+walk visits each node**. There is no iteration knob and no fixed-point loop;
+direct symbol-table mutation in a fixed pass order makes one sweep per node
+sufficient.
 
 ### Re-runs
 
 Each `pass.upass` invocation starts clean: symbol table rebuilt from scratch,
 scope stack empty. Re-runs (after another lowering stage, after an `import`
-resolves, etc.) get a fresh view.
+resolves) get a fresh view.
+
+### Pass dependency map
+
+Pass order is owned by **`depends_on` declarations + a topo sort**, not by
+folklore. The mechanism (wired and live today):
+
+- Each pass registers itself via a static
+  `upass::uPass_plugin("name", setup_fn, {deps...})`
+  (`upass/core/upass_core.hpp:401-416`); the optional third argument is the
+  `depends_on` list.
+- `uPass_runner::resolve_order` (`upass/runner/upass_runner.cpp:231-282`)
+  runs a DFS topo sort over the requested names, pulling declared
+  dependencies in first and detecting cycles. Duplicate requests are
+  de-duplicated (first completion wins), so a pass appears once in the
+  dispatch list no matter how often it is requested.
+- The requested-name list is assembled by `pass/upass/pass_upass.cpp`
+  (label toggles + the `order=` csv override).
+
+Current default request order, with each placement's reason:
+
+| pass         | declared `depends_on` | placement reason |
+|--------------|----------------------|------------------|
+| verifier     | —                    | requested first *and* last; resolve_order dedups to one instance — harmless, it is a dest-walk finisher whose slot in the per-node dispatch is irrelevant |
+| semacheck    | —                    | one-shot pre-walk; only needs to be registered before the walk starts |
+| func_extract | —                    | placed before the value passes (registration order) |
+| attributes   | —                    | first value pass: sticky/attr state must exist before constprop folds `.[attr]` reads |
+| typecheck    | `{attributes}`       | declared kinds available; fails fast before the value passes do work |
+| constprop    | —                    | after attributes + typecheck (registration order today) |
+| bitwidth     | —                    | **last opt pass**: no `fold_ref`, read-only, must observe stores pre-DCE (§2) |
+| coalescer    | —                    | after constprop so its known-const guard sees an up-to-date `try_fold_ref`; dropped from the default order entirely when `toln:0 && tolg:0` (nothing materializes) |
+| assert       | `{constprop}`        | reads the values constprop populates; last before the final verifier slot |
+
+**Pending wiring (small, pre-2b):** only the two edges above are declared;
+the rest of the relative order rides the builder's registration order. Move
+the placement reasons into declared edges — `constprop {attributes,
+typecheck}`, `bitwidth {constprop}`, `coalescer {constprop, bitwidth}` — so
+`order=` csv users can't silently drop a prerequisite. One policy decision
+rides along: `resolve_order` auto-pulls a declared dependency back in even
+when its label disables it, so the existing warn-and-drop special case
+(`constprop:0` forces `assert:0`, `pass_upass.cpp:236`) must be generalized
+to every new edge: *a disabled pass drops its dependents with a warning*,
+never silently re-enables.
+
+Rules that matter more than the exact spelling:
+
+- `semacheck` runs before rewrites mutate the tree, so user diagnostics point
+  at source-shaped LNAST.
+- SSA naming is complete before the runner walks; `bitwidth` and
+  `lnast_to_lgraph` consume SSA-stable names.
+- Attribute conflict diagnostics are owned by `attributes`; `typecheck` is
+  compile-time-only and propagates nothing to LGraph.
+- `bitwidth` must see every store before DCE.
+- When a new uPass is added or an existing pass starts reading another pass's
+  facts, declare the edge — do not extend the builder's implicit order.
+
+For the 2b push-dispatch redesign of this dispatch core, see
+[todo/livehd/2b.html](../todo/livehd/2b.html); update this section when it
+lands.
 
 ## 2. Per-pass responsibilities
 
-### semacheck (goal 1h — semantic legality, ex-lnastfmt)
+### semacheck (semantic legality, ex-lnastfmt)
 
-Owns the user-facing checks relocated out of `pass.lnastfmt` (which is now a
+Owns the user-facing checks relocated out of `pass.lnastfmt` (now a
 compiler-internal structural validator): write to a read-only / derived
 attribute (`:[bits=]`, `:[max=]`, size/sign/key — the only enforcement site),
 declare-once (same-scope redeclaration), and a shadowing backstop (prp2lnast
 enforces no-shadowing first, with a sharper span). One-shot
 `begin_iteration()` walk over the source tree — runs before the walk mutates
-anything, so diagnostics point at what the user wrote (located via the
-declare/attr_set loc-carry chain). Read-only; emits `core/diag` records
-(codes `read-only-attr-write`, `redeclaration`, `variable-shadowing`).
-Label `semacheck` (default on), ordered right after the first verifier.
-
-### Bundle pre-pass (new)
-
-Owns *structural* side state. Writes Bundle fields that describe a name's
-shape, type, sticky-attribute taint, pending-import poison, declared
-policies (wrap/sat), and aliasing. Never folds a scalar; never computes a
-value.
-
-Hooks at: every assignment-shaped op (sticky/pending-import migration),
-`type_spec`, `range` (records slot; does not fold start/end), `attr_set`
-(records `attr_values[name]` slot and policy bits), `tuple_add` /
-`tuple_concat` / `tuple_get` (shape, aliases), `assign` alias form
-(direct_alias, shape/sticky migration from RHS Bundle), `if`
-(cond-comptime check → mark dead arm), `stmts` (scope push/pop),
-`func_def` (function-body scope, closure rule).
+anything (located via the declare/attr_set loc-carry chain). Read-only; emits
+`core/diag` records (`read-only-attr-write`, `redeclaration`,
+`variable-shadowing`). Default on.
 
 ### constprop
 
-Owns *value* side state. Folds scalars using operand-vector entries;
-populates `Bundle.value` and `Bundle.range`'s start/end constants. Applies
-wrap/sat narrowing while writing `Bundle.value`. Votes **toconst** when
-LHS is fully comptime, **drop** when the assign would re-store the same
-value the Bundle already holds.
+Owns *value* facts. Keeps the (currently constprop-owned, §3) `Symbol_table`
+and folds scalars/bundles through it; classification decides which writes are
+already-known and droppable. Also owns the import machinery statics
+(`pending_imports_`, `ambiguous_units_`, `function_registry`). After 2b the
+symbol table moves to the runner and constprop reads pushed-in operand
+bundles; its per-name side maps (`range_map`, `typename_of_var`,
+`decl_unsigned_max_`, `decl_named_type_`, `reg_decl_names_`,
+`mut_decl_names_`, `tuple_slot_ref_`) retire onto the Bundle (see the
+`structs.md` inventory at the repo root for the full justified list).
 
-constprop is the **only** opt pass that runs when an operand carries
-`pending_import` — it folds what it can without depending on
-attribute/sticky semantics.
+### attributes
 
-### attributes (shrunken)
+Owns `attr_set`/`attr_get` *semantics*, attribute propagation, and
+attribute-conflict diagnostics. Attributes are read-only views of facts
+inferred by other passes (`bits`, `max`, `min`), or user-visible metadata
+that must propagate and may survive to LGraph generation. Sticky attributes
+(canonical leading-`_` names; `debug` ⇒ `_debug`) propagate through
+assignment-shaped ops via `Sticky_handler`; category-B wiring attributes
+(`clock_pin`, `posclk`, …) are validated here and reach LGraph **through the
+emitted `attr_set` nodes in the dest tree** (tolg's `lower_attr_set` reads
+the tree, never a pass-private map). Dispatch is per-attribute via
+`Handler_registry`.
 
-Owns `attr_set`/`attr_get` *semantics* only. Structural and sticky work
-moved to bundle pre-pass.
+### typecheck
 
-- `attr_set`: dispatches to per-attribute handlers (category-A `wrap`/`sat`
-  policy already set by bundle pre-pass; this is where `type` consumption,
-  category-B clock/reset wiring, etc. happen). Votes **drop** when the
-  attribute fully lives in the Bundle now.
-- `attr_get`: looks up `Bundle.attr_values[name]`, chains through
-  `tuple_get_alias` / `direct_alias` / aggregate inheritance. Votes
-  **toconst** when the read resolves.
+Compile-time type legality only (kind lattice: integer/boolean/string/…).
+Checks declaration/store/call compatibility, tuple/scalar shape mismatches,
+field membership, and no type change on already-typed destinations. Declares
+`depends_on {attributes}`. It may read type/shape facts but does not
+propagate attributes to LGraph and does not own attribute-query behavior.
+Responsibility boundary, not a forced directory split — sharing
+implementation with `upass/attributes` is acceptable where simpler.
 
-### bitwidth (last opt pass in the runner walk — read-only, no fold_ref)
+### bitwidth (last opt pass in the walk — read-only, no fold_ref)
 
-`bitwidth` is the **last opt pass** in the single runner walk (after
-constprop). It does **not** participate in const-folding (no `fold_ref`, so
-it never feeds — or corrupts — constprop) and is **read-only** (votes keep;
-never rewrites a node or alters a declared `prim_type_int(max,min)`).
-Running inside the walk lets it observe every store **before DCE**. At
-`end_run` it (a) emits any overflow compile error and (b) publishes
-`max`/`min` for the future `lnast_to_lgraph`.
-
-- **Why in the walk, not a separate post-runner pass.** The init value of a
-  typed declaration lives in a *separate* `store` node that DCE removes when
-  the var is unused (`const x:s4 = 200` ⇒ `declare(x,…)` survives,
-  `store(x,200)` is DCE'd). A post-DCE pass would not see the value, so an
-  overflow on a dead comptime const would be missed; the in-walk pass
-  observes the store first. (`fold_ref` removal still gives the decoupling
-  Goal 1n wanted — the runner is a single, non-iterative walk.)
-- **Exact `max`/`min` ranges.** Each result's range is `[min, max]` with a
-  single `unbounded` flag — no `+inf`/`-inf`, no half-bounded state; a value
-  with no derivable bound is *unbounded*. `bits`/`sign` are derived on
-  demand (`sign = min < 0`), never stored. (Bounds are int64 today; the
-  exact-`Dlop` swap is a residual — todo/ 1n N3.)
-- **Overflow capture (centralized here).** `process_declare` /
-  `process_type_spec` record each **scalar** var's declared envelope from
-  `prim_type_int(max,min)`; `process_assign`/store track the value range;
-  at `end_run` a var whose value range *provably* escapes its envelope —
-  with no `wrap`/`sat` policy — is a **`bitwidth-overflow` compile error**
-  (`core/diag`, message contains "does not fit", throws → non-zero exit).
-  Semantics match the type model: an **unsigned** envelope flags only a
-  value provably *above* max (a negative value is a legal unsigned
-  reinterpret/"force", not overflow); a **signed** envelope is strict
-  containment. The check is **deferred to `end_run`** so a per-statement
-  `wrap`/`sat` marker emitted *after* its store still exempts the var. This
-  replaces the former checks in `uPass_attributes` (the negative→unsigned
-  reinterpret, which rewrites the value so it fits, **stays** in attributes).
-  Scope: **scalars only** today — tuple-field envelopes (`ar.y`) are skipped
-  pending per-field types (1t), so an out-of-range param-field binding is
-  not flagged.
-- **Publishes `max`/`min`** into `lnast->bw_meta()` at `end_run` for the
-  future `lnast_to_lgraph` (the per-node HHDS tree-attr re-keying waits on
-  that consumer — todo/ 1n N3).
-- **Wrap/sat narrowing math lives here** (moved out of `attributes`, which
-  keeps only the *policy* bit; see
-  `upass/attributes/upass_attributes_wrap_sat.cpp`).
-- **Lattice tightening.** `div`/`mod`/`sext` are bounded (`a/d ≤ a`,
-  `a%d < d`, `sext → [-2^p, 2^p-1]`); `set_mask` stays conservative.
-
-> **Status (2026-05-31):** Goal 1n landed green + net-neutral (`//upass` 9/9,
-> full `bazel build //...` green; `//inou/prp` net-neutral — my-change failure
-> set ⊆ baseline, verified by stashing + uncached run; the suite is flaky from a
-> pre-existing latent uninitialized-memory issue, goal 1s, unrelated to this
-> change). `bitwidth` is the last opt pass in the walk, no `fold_ref`,
-> read-only; overflow capture is centralized here (signed + unsigned,
-> wrap/sat-exempt, scalar scope) and reports "does not fit" via `core/diag`
-> — covered by `inou/prp/tests/errors/overflow_{signed,unsigned,func,unroll}.prp`.
-> Residuals (todo/ 1n): int64 bounds (exact-`Dlop` swap), name-keyed
-> `bw_meta` (per-node re-keying), and tuple-field overflow — all gated on the
-> `lnast_to_lgraph` consumer / per-field types.
+Runs **last** in the per-node dispatch. No `fold_ref` (never feeds — or
+corrupts — constprop), read-only (never rewrites a node). Running inside the
+walk lets it observe every store **before DCE** — the init value of a typed
+declaration lives in a separate `store` node that DCE removes when the var is
+unused, so a post-DCE pass would miss overflow on a dead comptime const. At
+`end_run` it (a) emits any `bitwidth-overflow` compile error ("does not
+fit"; signedness-aware, wrap/sat-exempt, scalars-only today) and (b)
+publishes `max`/`min` into `lnast->bw_meta()` for `lnast_to_lgraph`. Ranges
+are `[min, max]` + a single `unbounded` flag; `bits`/`sign` are derived on
+demand, never stored. Wrap/sat narrowing math lives here (attributes keeps
+only the policy bit). 2b moves the overflow diag to the offending store
+(deleting the `end_run` throw, `write_site_`, `pending_overflow_msg_`).
 
 ### coalescer
 
-Deferred-emit / DSE. Reads operand vector; uses Bundle's "consumed" bit
-(set by the emission walk for materialized refs) to spot dead writes.
-Votes **drop** when a write has no live downstream consumer.
+Deferred-emit / dead-store elimination: parks pure scalar defs
+(`pending` map), materializes-at-use via the runner's `runner_emit_at_fn`
+replay seam, DSE on overwrite, drops const-known defs. Comptime `mut` stores
+are parked and never comptime-dropped at flush (see memory
+`comptime_mut_dse_coalescer`). Disabled automatically when nothing
+materializes (`toln:0 && tolg:0`). The remaining lazy-DCE work (sea-of-nodes)
+is [todo/livehd/1d.html](../todo/livehd/1d.html), sequenced after 2b.
 
 ### func_extract
 
-Inline-vs-spawn decision at call sites. Inlinable callees (resolved,
-small enough, no recursion blowup): vote **update** with the inline body
-as the candidate shape; the runner switches its source-walk cursor into
-the body (see §4). Otherwise vote **keep** so the call survives and the
-callee body is spawned as a separate LNAST in `var.lnasts` for an
-independent `pass.upass` walk. `func_def` with no remaining call sites
-and no exported semantics → vote **drop**.
+Inline-vs-spawn decisions at call sites ride the runner's virtual-splice
+inliner (§4); func_extract owns the spawn side — extracting comb/mod/pipe
+bodies into separate LNASTs in `var.lnasts` for independent `pass.upass`
+walks — plus closure capture of outer comptime scalars/bundles/imports into
+the extracted body. 2b retires the capture maps via `function_scope`
+read-through on the shared table.
 
 ### SSA (whole-tree pass, before the runner)
 
 `uPass_ssa::run` runs once over each LNAST **before** the main runner
 (`pass_upass.cpp::work`). It harvests port names/widths into
-`lnast->io_meta()` (the comb-call inliner reads `io_meta` mid-walk, so this
-must precede the runner) and renames multi-assigned user vars to SSA-unique
-names. The runner therefore walks — and emits — post-SSA names, so the
-last opt pass `bitwidth` and the downstream `lnast_to_lgraph` both see
-single-assignment names.
+`lnast->io_meta()` and renames multi-assigned user vars to SSA-unique names.
+The runner therefore walks — and emits — post-SSA names. (`reg` names are
+never SSA-versioned; they carry timing.)
 
-> The long-term redesign (`docs/upass_redesign.md` Step I) folds the SSA
-> rename into the runner's *emit* step (so the runner itself produces the
-> SSA-named tree). Either mechanism satisfies the same invariant: SSA naming
-> is complete **before** bitwidth, on the tree `lnast_to_lgraph` consumes.
+### Typesystem (split between `typecheck` and `attributes`)
 
-### Typesystem (handled inside `attributes`)
+upass owns Pyrope's basic typesystem. The rules are **declaration-driven**: a
+value's size envelope and nominal identity come from the declared type (or a
+literal's implied type), never from the value itself.
 
-upass owns Pyrope's basic typesystem. The rules are **declaration-
-driven**: a value's size envelope and nominal identity come from the
-type that was declared on the binding (or implied by a literal), never
-from the value itself. There is no separate type-check pass; the
-attributes pass reads the type info as it walks and folds the relevant
-attribute queries (`bits`, `max`, `min`, `typename`, `size`, `comptime`,
-`is`).
+- **Size envelope (`bits`/`max`/`min`)** comes from the declared type:
+  `:uN`/`:sN` set width and range; `:bool` is the 1-bit signed envelope
+  (`min=-1, max=0, bits=1`); `:string` has no numeric envelope (reads `nil`).
+  When only `max`/`min` (or `range=lo..=hi`) is pinned, `bits` derives on
+  demand. Unannotated → all three read `nil`; a bare `true`/`false` literal
+  is auto-typed `:bool`.
+- **Aggregates have no `.[bits]`** — only scalars. Per-field `t.a.[bits]`
+  resolves when the field carries a typed annotation.
+- **`size` is cardinality, not bit width** (`tup.[size]` = entry count,
+  `str.[size]` = character count).
+- **`typename`** is diagnostic-only, set for `type Name = …` declarations;
+  structural `==` ignores it; nominal identity is `is`'s job (`p is Foo`
+  folds iff `p.[typename] == "Foo"`).
+- **Comptime is non-sticky on copy.** A `mut` binding holding a known value
+  does not read as comptime; only `const`-decl (resolved) or an explicit
+  `comptime` marker does.
 
-What upass guarantees, in plain terms:
-
-- **Size envelope (`bits` / `max` / `min`)** is determined by the
-  declared type:
-  - `:uN` / `:sN` set width and range; `:bool` is the 1-bit signed
-    envelope (`min=-1, max=0, bits=1`); `:string` has no numeric
-    envelope (reads as `nil`).
-  - When only `max`/`min` (or `range=lo..=hi`) is pinned, `bits` is
-    derived on demand from those bounds.
-  - **Unannotated → all three read as `nil`.** No value-based
-    fallback. A bare `true`/`false` literal is auto-typed `:bool`.
-- **Aggregates have no `.[bits]`.** Only scalars do. A tuple-typed
-  variable reads `.[bits] == nil`; per-field `t.a.[bits]` resolves
-  when the field carries a typed annotation.
-- **`size` is cardinality, not bit width.** `tup.[size]` /
-  `arr.[size]` is the entry count; `str.[size]` is the character
-  count.
-- **`typename`** is a debug/diagnostic attribute (not behavior-
-  affecting). It's set for named types declared via `type Name = …`;
-  anonymous tuples have no typename. Structural `==` ignores
-  `typename`; nominal identity is the job of `is`.
-- **`is`** folds at compile time when the LHS carries a `typename`
-  attribute: `p is Foo` is true iff `p.[typename] == "Foo"`.
-- **Comptime is non-sticky on copy.** A `mut` binding that happens
-  to hold a known value does *not* read as comptime; only `const`-
-  decl (with resolved value) or an explicit `comptime` marker does.
-
-Implementation notes (high level — see `upass/attributes/` for code):
-
-- The attributes pass attaches type info to each variable as
-  `Type_info { decl_kind, num_kind, bits, is_comptime, has_type_spec }`.
-  `has_type_spec` is set when the LNAST traversal sees either a
-  `type_spec` node or an attr_set that pins a width (`ubits`/`sbits`).
-- `derive_max` / `derive_min` / `derive_bits` are pure functions of
-  the stored type info plus any explicit `max`/`min`/`range`
-  attr_sets. They fold to `nil` when no envelope can be derived;
-  the runner emits `const(nil)` so consumers compare cleanly.
-- Per-field types on tuple literals (`(a:u4=3, …)`) lower as
-  `tuple_get` + `attr_set("ubits"/"sbits", N)` against a tmp;
-  `lookup_type_info` walks the `tuple_get_alias` and `direct_alias`
-  chains so `t.a.[bits]` finds the right entry. `migrate_alias`
-  mirrors the per-field type info onto `lhs.field` paths on
-  assignment.
-
-Residual follow-ups (deferred; not blocking the current invariants):
-
-- **Variable-as-type** (`mut b:a_var = (…)` borrowing field defaults
-  and field-level `mut`/`const` from a tuple variable `a_var`) is
-  not wired — needs the type-bundle deep-copy / shared-immutable-
-  bundle path from the design.
-- **`type Name = (…)` field metadata propagation.**
-  `process_type_statement` is still a stub; the RHS tuple isn't
-  walked to populate `Name.a`/`Name.b` type info, so
-  `g:Name = (a=…, b=…)` doesn't carry field types onto `g.a`/`g.b`.
-- **Field-level `const` enforcement on assignment** to a `mut`-outer
-  tuple is not raised as a compile error yet.
-- **`does` / `equals` / `case`** operators have no fold hooks; only
-  `is` lands today.
-- **Nil-overwrite-is-not-a-write** (allow `const x:u8 = nil; x = 42`)
-  isn't tracked.
+Implementation today: the type info attaches per variable as
+`Type_info { decl_kind, num_kind, bits, is_comptime, has_type_spec }` in
+`upass/attributes`; `derive_max`/`derive_min`/`derive_bits` are pure
+functions of that info plus explicit attr_sets; per-field types ride the
+`tuple_get_alias`/`direct_alias` chains. After 1b these become typed
+`Entry`/`Bundle` fields; after 2b the side maps retire.
 
 ### verifier / assert (read-only finishers)
 
-Walk the **dest** LNAST after the source walk completes. Do not see
-Bundle state. Tally and check from what's emitted:
+Walk the **dest** LNAST after the source walk completes; they see no symbol
+table. Casserts are emitted with their cond simplified (`const(true)`,
+`const(false)`, or a surviving `ref`):
 
-- Casserts are emitted with their cond simplified (`const(true)`,
-  `const(false)`, or surviving `ref...`). Verifier tallies
-  pass/fail/unknown by reading the cond's emitted form.
-- Comptime-false cassert (`const(false)`) → `upass::error` unless the
-  test header expects it (`verifier_fail:N`).
-- The cassert tally compares to the test header expectations:
-  | disposition  | trigger                                       | counter         |
-  |--------------|-----------------------------------------------|-----------------|
-  | known-true   | cond is `const_true`                          | `pass_count`    |
-  | known-false  | cond is `const_false`                         | `fail_count`    |
-  | unknown      | cond is a surviving `ref` or const w/ unknown | `unknown_count` |
-- `verifier_pass:N` / `verifier_fail:N` labels on `pass.upass` set the
-  expected counts; mismatch raises `upass::error`. `prplib.py` reads
-  these from the `.prp` header block (`:verifier_pass:`, `:verifier_fail:`)
-  and forwards them.
-- assume/cover use the same shape with variant-specific semantics
-  (future).
+| disposition  | trigger                                       | counter         |
+|--------------|-----------------------------------------------|-----------------|
+| known-true   | cond is `const_true`                          | `pass_count`    |
+| known-false  | cond is `const_false`                         | `fail_count`    |
+| unknown      | cond is a surviving `ref` or unknown const    | `unknown_count` |
 
-**Test mode split** (driven by `prplib.py`):
+Comptime-false cassert → `upass::error` unless the test header expects it.
+`verifier_pass:N` / `verifier_fail:N` labels set expected counts (aggregated
+across func_extract-spawned lnasts); mismatch raises `upass::error`.
+`prplib.py` reads `:verifier_pass:`/`:verifier_fail:` from the `.prp` header.
 
-- `:type: upass` — pipeline smoke test, `pass.upass verifier:false`.
-  Asserts only that the pipeline doesn't crash.
-- `:type: comptime` — correctness check, verifier on. Every cassert
-  must discharge or be clearly unknown; known-false → test failure
-  unless expected.
+**Test mode split** (driven by `prplib.py`): `:type: upass` = pipeline smoke
+test (`verifier:false`); `:type: comptime` = correctness check, verifier on.
 
-### Reader passes only on the final invocation
+When multiple `pass.upass` invocations exist (e.g. around an unresolved
+`import`), the finishers attach only to the final one — deferred while
+pending imports remain (§8).
 
-When multiple `pass.upass` invocations exist (e.g. one before an
-`import` resolves, one after), verifier/assert attach only to the final
-one — driven by the pending-import gate described in §1. If the gate
-defers them, they run automatically on the next invocation that finds
-the symbol table clean of `pending_import`.
+## 3. Symbol table & scopes (current)
 
-## 3. Symbol table & scopes
+`Symbol_table` (`lnast/symbol_table.{hpp,cpp}`; moves to `upass/core/` in
+1b/A) is owned by **constprop** today (`uPass_constprop::st`); 2b moves
+ownership to the runner.
 
-```
-SymbolTable: stack<Frame>
-Frame:       absl::flat_hash_map<string, Entry>
-Entry:       variant<Runtime_trivial, Const, shared_ptr<Bundle>>
-```
+- One `shared_ptr<Bundle>` per live name
+  (`Scope.varmap: absl::flat_hash_map<string, shared_ptr<Bundle>>`).
+- Scope kinds: `Function`, `Block`, `Always`, `Conditional`
+  (`symbol_table.hpp:18`); `block_scope(key)` frames are re-entrant (same
+  `Scope` object recovered on re-entry). Every `{ }` notifies the table;
+  reads walk innermost → outermost; writes land in the declaring scope.
+- **COW value semantics**: whole-bundle assignment shares the `shared_ptr`;
+  in-place field mutation un-shares first (`unshare_for_write`,
+  `use_count()>1` → clone). Re-fetch `get_bundle` after writes.
+- **If-arm contract: mark-uncertain + invalidate-on-exit**
+  (`symbol_table.cpp:282-357`). A declaration inside an arm lives in that
+  arm's scope and dies at `}`. A write to a name declared in an enclosing
+  scope under a runtime-uncertain condition invalidates that name's value
+  fact on arm exit. There is **no frame-per-arm merge** — the
+  both-arms-write-the-same-constant fold is deliberately not attempted. (2b
+  keeps exactly these semantics; decided 2026-06-09.)
+- **Function scopes are hard visibility barriers** today: `find_decl_scope`
+  (`symbol_table.cpp:20-36`) stops at a `Function` scope for reads *and*
+  writes — a callee body cannot reach the caller's locals at all, which is
+  why func_extract carries closure-capture maps. 2b/B splits this into
+  read-through (closure capture of outer comptime consts) / write-block
+  (outer write = compile error).
 
-- Every `{ }` (every `stmts` node) pushes a frame on entry, pops on exit.
-- Reads walk innermost → outermost.
-- Writes land in the top frame; subsequent assigns at the same level
-  mutate the same Bundle.
-- **If-arm merge**: each arm runs with a fresh frame on top of the
-  parent. After all arms processed, frames are merged into the parent:
-  - `sticky_taint`, `pending_import`: union.
-  - `value`: kept iff every arm wrote the same `Const`. Otherwise drops
-    to `Runtime_trivial`.
-  - `shape`: identical across arms, else hard error.
-  - `attr_values[k]`: union; conflicting `k` drops to unknown.
-  - `wrap_policy` / `sat_policy` / `decl_kind` / `num_kind` / `bits`:
-    arm-local change is a hard error.
-- **General `{ }` (not if-arm)**: pop with no merge — locals vanish.
-- **Function-body scope**: pop with no merge. Closure-capture rule on
-  reads:
-  - Outer entry comptime (Bundle has `value`, no `pending_import`) →
-    inline the constant at the use site (operand-vector entry is the
-    `Const`).
-  - Outer entry tainted (`pending_import` non-empty) → leave the ref;
-    defer this function's spawn/opt until next invocation.
-  - Outer entry non-comptime, untainted → **hard compile error** at the
-    read site. (See `todo/ §2j` for the enforcement work.)
+## 4. Inline (runner virtual-splice)
 
-## 4. Inline (runner-level cursor switch)
+The comb-call inliner is **runner-owned** (task 1i; design rationale and
+literature refs in the header comment of
+[`upass/runner/upass_runner.cpp`](runner/upass_runner.cpp)). The runner
+maintains a splice stack of callee LNASTs (`active_inline_callees_`),
+synthesizes `param = actual` bindings at the body head so the passes see
+normal assigns, clones the callee per call site (fresh fold context each
+time), and caps recursion depth per callee. `Lnast_manager` frames
+(`frames_`, `tmp_remap_`, `intern_pool_`) keep inlined names stable and
+`___N` tmps collision-free. Vararg callees resolve `args[i]`/`args.NAME`
+directly; pipe/mod templates specialize per signature into a `Sub` (task
+1p). Passes are unaware they are inside an inline.
 
-func_extract's `update` vote with an inline body becomes a runner
-mechanism, not an opt-pass concern. Concretely:
+## 5. Bundle
 
-- Runner maintains a stack of `(source-LNAST, cursor, scope_frame)`
-  records.
-- On `update + inline`: push the inline body's LNAST, switch cursor to
-  its first node, open a fresh function-body scope.
-- Synthesize `assign param_x = caller_arg_x` nodes at the head of the
-  inline body so bundle pre-pass sees them as normal assigns — uniform
-  pipeline, no special arg-binding path.
-- Opt passes see the inline body's nodes one at a time, identical to any
-  other source node. No awareness of being "inside" an inline.
-- Inline body is a clone of the callee's source LNAST per call site —
-  fresh walk every time so per-call-site context affects folding.
-- On body exit: pop frame, close scope, advance the caller cursor past
-  the original call node.
-- Nested inlines just push more frames.
+`Bundle` is the comptime value/tuple record threaded through the passes —
+today a flat dotted-key `std::map` in `lnast/bundle.{hpp,cpp}` where
+attributes share the keyspace via a `__` prefix.
+[todo/livehd/1b.html](../todo/livehd/1b.html) reshapes it (move to
+`upass/core/`, typed `Entry` pass-fact fields, residual-attrs map with
+name-encoded stickiness, inline root Entry, bounded scans) — see that doc
+for the target struct; this README intentionally does not duplicate it. The
+full per-pass data-structure inventory (what each side map is for, what 2b
+retires) is `structs.md` at the repo root.
 
-## 5. Bundle layout (per-name symbol-table entry)
+## 6. Dispatch (current)
 
-Lazily allocated — symbol-table entries default to `Runtime_trivial`;
-constprop alone installs a `Const`; bundle pre-pass or the attribute
-pass promotes to `Bundle` when *any* structural field needs a slot.
+Hooks are **nullary** virtuals generated per node kind
+(`upass/core/upass_core.hpp:247-356`, ~35 `PROCESS_NODE` entries): a pass
+overrides `void process_plus()` etc. and re-walks the node's children itself
+via the `Lnast_manager` cursor. Notable fan-outs in the runner
+(`upass_runner.cpp:3554-3584`):
 
-```cpp
-struct Bundle {
-  // ── Structural — written by bundle pre-pass ────────────────────────
-  Decl_kind     decl_kind  : 4;   // mut / const / reg / await / let / unknown
-  Numeric_kind  num_kind   : 4;   // unsigned_int / signed_int / boolean / string / none
-  bool          wrap_policy : 1;
-  bool          sat_policy  : 1;
-  bool          is_comptime : 1;  // mirror of (value && !pending_import)
-  uint16_t      bits;             // 0 = unspecified
-  uint16_t      assign_count;     // pre-SSA, for const single-assign check
-  Tuple_shape   shape;            // empty for scalars
+- `store` with 2 children dispatches to `process_assign`; 3+ children
+  (field-path store) to `process_tuple_set`. (`assign`/`tuple_set` LNAST
+  nodes were deleted in task 1t — these are dispatch-method names only.)
+- `declare` dispatches to `process_declare`.
 
-  std::optional<std::pair<Const, Const>>          range;
-  absl::InlinedVector<std::string, 1>             sticky_taint;
-  absl::InlinedVector<ImportRef, 1>               pending_import;
+Cross-pass facts flow through **pull seams** wired at construction:
 
-  // ── Value — written by constprop, narrowed by wrap/sat ─────────────
-  std::optional<Const>                            value;
+- `runner_fold_fn` → `uPass_runner::try_fold_ref` (first non-nullopt across
+  `fold_capable_passes`; attributes' wrap/sat narrowing beats constprop's
+  raw value).
+- `runner_type_query_fn` → combined KIND (typecheck) + declared envelope
+  (attributes) for constprop's `does`/type folds.
+- `runner_emit_at_fn` → the coalescer's materialize-at-use replay.
+- 9 `provide_*` virtuals / `try_*` runner wrappers (bundle fields, typename,
+  decl type, field type, scalar kind, decl storage, range, tuple slot ref,
+  tuple shape) over `shared_st_passes_`.
 
-  // ── Attribute values — written by attributes (filled by constprop) ──
-  absl::flat_hash_map<std::string, Const>         attr_values;
+2b replaces all of this with push-based dispatch
+(`Vote process_<op>(Bundle& dst, span<const shared_ptr<const Bundle>> src)`,
+`Vote = keep|drop`, runner-resolved operands, emit derived from
+`dst.scalar()`); `runner_emit_at_fn` survives as the coalescer's emit seam.
+See [todo/livehd/2b.html](../todo/livehd/2b.html) — this section describes
+what it deletes.
 
-  // ── Aliasing — written by bundle pre-pass ──────────────────────────
-  std::shared_ptr<Bundle> direct_alias;
-  std::shared_ptr<Bundle> tuple_get_alias_base;
-  std::string             tuple_get_alias_field;
-};
-```
+## 7. Emit model (current)
 
-Per-node `Vote_state` (runner-owned, transient to one source node):
+The runner emits into a **staging tree** (`staging`, `dest_forest_`) as the
+walk leaves each source node (`emit_push`/`emit_pop`,
+`upass_runner.cpp:286+`). Per node:
 
-```cpp
-struct Vote_state {
-  enum class Kind : uint8_t { keep, drop, toconst, update };
-  Kind          kind = Kind::keep;
-  Lnast_subtree update_shape;  // populated only when kind == update
-};
-```
+- `classify_statement` across `classify_capable_passes` → `Emit_kind`
+  (`emit` | `drop_subtree`, `upass_core.hpp:31-38`): a pass that proves the
+  node redundant (e.g. constprop on a comptime store) drops it.
+- On `emit`, ref operands are folded through `try_fold_ref`
+  (`emit_ref_or_folded`) so known values materialize as `const`.
+- The coalescer may park the node instead and replay it later at first use
+  (`runner_emit_at_fn`).
+- After the walk, post-walk DCE sweeps the staging tree (io-root liveness
+  rule), and the staging tree replaces the source LNAST.
 
-## 6. Operand vector & dispatch
+## 8. Pending imports
 
-The runner pre-resolves each source node's operands into a small vector
-of:
-
-```cpp
-struct Runtime_trivial {};  // explicit, self-documenting
-using Operand     = std::variant<Runtime_trivial, Const, std::shared_ptr<Bundle>>;
-using Operand_vec = absl::InlinedVector<Operand, 4>;
-```
-
-- Built once per source node by per-op-kind helpers in the runner.
-- `ref` child → look up Bundle (or `Runtime_trivial` if absent), then
-  `Const` if the Bundle's `value` is set.
-- `const` child → stored directly as `Const`.
-- LHS is NOT in the operand vector; it is the destination `Bundle*`
-  passed separately to dispatch (`nullptr` for ops without one, e.g.
-  `cassert`).
-
-Per-op-kind shape rules live in the runner:
-
-- **`process_arith`** (27 expr ops: plus, minus, mult, div, mod, shl,
-  sra, bit_{and,or,not,xor}, log_{and,or,not}, red_{or,and,xor}, eq,
-  ne, lt, le, gt, ge, sext, get_mask, set_mask, assign-non-alias):
-  LHS at child 0, operand vector = siblings 1..N.
-- **`attr_set`**: LHS = child 0; vector = `[const(attr_name), value]`.
-- **`attr_get`**: LHS (dst tmp) = child 0; vector = `[base, const(attr_name)]`.
-- **`tuple_add`**: LHS = child 0; vector entries one per field
-  (assign-sub-nodes contribute their key + value pair).
-- **`tuple_concat`**: LHS = child 0; vector = N refs/consts.
-- **`tuple_get`**: LHS = child 0; vector = `[base, field_key]`.
-- **`range`**: LHS = child 0; vector = `[start, end]`.
-- **`type_spec`**: LHS = child 0; vector = `[prim_type_node, …]`.
-- **`if`**: no LHS; vector = `[cond]`. Arm-body `stmts` are handled by
-  runner-level scope push/pop and recursion — not in the vector.
-- **`cassert`**: no LHS; vector = `[cond]`.
-- **`func_def`**: LHS (function name) = child 0; vector layout TBD.
-
-### Dispatch API
-
-```cpp
-struct uPass {
-  virtual void begin_iteration() {}
-  virtual void end_run() {}
-
-  // Hot path — 27 LNAST kinds, single dispatch.
-  virtual Vote process_arith(Lnast_ntype kind, Bundle* dst,
-                              const Operand_vec& ops) { return Vote::keep(); }
-
-  // Genuinely-shaped ops (non-uniform child layout).
-  virtual Vote process_attr_set    (Bundle* dst, const Operand_vec& ops) { return Vote::keep(); }
-  virtual Vote process_attr_get    (Bundle* dst, const Operand_vec& ops) { return Vote::keep(); }
-  virtual Vote process_tuple_add   (Bundle* dst, const Operand_vec& ops) { return Vote::keep(); }
-  virtual Vote process_tuple_concat(Bundle* dst, const Operand_vec& ops) { return Vote::keep(); }
-  virtual Vote process_tuple_set   (Bundle* dst, const Operand_vec& ops) { return Vote::keep(); }
-  virtual Vote process_tuple_get   (Bundle* dst, const Operand_vec& ops) { return Vote::keep(); }
-  virtual Vote process_range       (Bundle* dst, const Operand_vec& ops) { return Vote::keep(); }
-  virtual Vote process_type_spec   (Bundle* dst, const Operand_vec& ops) { return Vote::keep(); }
-  virtual Vote process_if          (                  const Operand_vec& ops) { return Vote::keep(); }
-  virtual Vote process_cassert     (                  const Operand_vec& ops) { return Vote::keep(); }
-  virtual Vote process_func_def    (Bundle* dst, const Operand_vec& ops) { return Vote::keep(); }
-
-  // Scope hooks — runner-driven, no per-node vote.
-  virtual void process_stmts_enter() {}
-  virtual void process_stmts_exit () {}
-};
-```
-
-Verifier / assert do **not** derive from `uPass`; they walk the dest
-LNAST after emission and own their own simple iterator.
-
-## 7. Vote resolution
-
-For each source node (no-taint case), after every opt pass has run:
-
-```
-priority: drop > toconst > update > keep
-```
-
-- Any `drop`     → emit nothing.
-- Else any `toconst` → emit nothing; `Bundle.value` is committed.
-  Downstream consumers materialise via the operand vector.
-- Else any `update` → emit the proposed shape from the latest `update`
-  vote's `update_shape` (pass order is the tiebreaker; for inline this
-  is func_extract's body).
-- Else (all `keep`) → emit the source op-kind with operand-vector
-  entries materialised:
-  - `Const` operand → emit as `const`.
-  - `Bundle` operand with `value` set → emit as `const(value)`.
-  - `Bundle` operand without `value` → emit as `ref(name)`.
-  - `Runtime_trivial` operand → emit as `ref(name)`.
-
-All opt passes run unconditionally in the no-taint case — even if an
-earlier pass already voted drop — because later passes may still write
-useful state to the destination Bundle (other source nodes will read
-it). Vote priority only governs what gets *emitted* for this node.
-
-**Taint case**: when any operand vector entry's Bundle carries
-non-empty `pending_import`, only `constprop` runs; its vote (default
-`keep`) governs alone. SSA also skips this node.
-
-## 8. Pending-import poison
-
-A Bundle whose value or attribute state depends on an unresolved
-`import` carries one or more `ImportRef`s in `pending_import`. The
-marker is sticky-style: bundle pre-pass propagates it from operand
-Bundles into LHS Bundle through `process_arith` and every assignment-
-shaped op, the same path used for `sticky_taint`.
-
-Effect on each phase:
-
-- **Bundle pre-pass**: records structure normally; flags LHS pending if
-  any operand is.
-- **Opt passes**: only `constprop` runs on tainted-input nodes.
-- **SSA**: skips structural rewrites (tuple flatten, dead-arm delete)
-  on any node whose read-through Bundles include a pending marker.
-- **bitwidth**: a tainted value has no provable range (it reads as
-  *unbounded*), so the overflow check naturally fires on nothing — no
-  explicit gate needed. (A generic, un-inlined function body likewise has
-  untyped inputs ⇒ no envelope ⇒ no overflow check; it is realized only by
-  inlining into a caller, where the concretely-typed copy is checked.)
-- **Verifier / assert**: skipped entirely if any Bundle still carries
-  `pending_import` at end of the source walk.
-- **Re-runs**: the next `pass.upass` invocation rebuilds the symbol
-  table; cleared pending markers (because the import has now resolved)
-  let the passes run.
-
-`todo/ §1b` and `§2j` track the import-side work this hooks into.
+Unresolved `import`s are tracked by constprop statics (`pending_imports_`;
+`ambiguous_units_` for multiply-defined units) rather than per-Bundle
+markers. The kernel iterates `pass.upass` until convergence with whole-file
+retry (task 1m): an invocation that still has unresolved imports defers the
+verifier/assert finishers; the next invocation rebuilds the symbol table
+fresh and re-attempts. Generic, un-inlined function bodies have untyped
+inputs ⇒ no envelope ⇒ no overflow check; they are realized only by inlining
+into a caller, where the concretely-typed copy is checked.
 
 ## 9. Invariants
 
 These must hold after every walk:
 
-1. **Every ref in the dest LNAST is defined** — either by an emitted
-   assignment, a port, a register, or it was folded to `const` at emit
-   time. No dangling refs.
-2. **Regs are never dropped.** Reg assignments carry timing; constprop
-   may fold their RHS but not elide the assignment.
-3. **Ports are preserved at the module boundary** — input ports read,
-   output ports written — even when a constant flows through.
+1. **Every ref in the dest LNAST is defined** — by an emitted assignment, a
+   port, a register, or folded to `const` at emit time. No dangling refs.
+2. **Regs are never dropped.** Reg assignments carry timing; constprop may
+   fold their RHS but not elide the assignment.
+3. **Ports are preserved at the module boundary** — input ports read, output
+   ports written — even when a constant flows through.
 4. **Deterministic emission order.** Children are emitted in source-tree
-   order; the dest LNAST is a topologically-consistent rewrite of the
-   source, not a re-scheduled one.
-5. **`delay_assign` is emitted verbatim.** Offsets ≠ 0/1 are not yet
-   lowered (per `lnast_todo.md` §15.2); upass must not constant-fold
-   across them regardless of symbol-table state.
-6. **Only `bitwidth` derives value ranges; the other passes never fold on
-   them.** `max`/`min` are derived exclusively by `bitwidth` (the last opt
-   pass, §2) and consumed only by `lnast_to_lgraph`.
-   constprop/attributes/coalescer neither read nor write ranges, and
-   nothing folds on a range (bitwidth has no `fold_ref`). bitwidth is also
-   the sole owner of overflow (range-vs-declared-envelope) errors. Decl
-   attrs live in `Bundle.attr_values` (written by bundle pre-pass /
-   constprop / attributes per §2). This supersedes the older "lnastfmt owns
-   `__min`/`__max`" rule.
-7. **Spawned LNASTs are self-contained.** Outer-scope comptime values
-   are inlined at the use site by bundle pre-pass / constprop before
-   func_extract spawns the callee body; spawned LNASTs share no Bundle
-   state with their caller.
-8. **Single sweep per source node.** The runner does exactly one walk per
-   invocation; there is no iteration knob or fixed-point loop.
+   order; the dest LNAST is a topologically-consistent rewrite, not a
+   re-scheduled one.
+5. **`delay_assign` is emitted verbatim**; upass never constant-folds across
+   one regardless of symbol-table state.
+6. **Only `bitwidth` derives value ranges; nothing else folds on them.**
+   `max`/`min` are derived exclusively by `bitwidth` (last opt pass) and
+   consumed only by `lnast_to_lgraph` via `bw_meta`. bitwidth is the sole
+   owner of overflow (range-vs-declared-envelope) errors.
+7. **Spawned LNASTs are self-contained.** Outer-scope comptime values are
+   inlined at the use site before func_extract spawns the callee body;
+   spawned LNASTs share no symbol-table state with their caller.
+8. **Single sweep per source node.** Exactly one walk per invocation; no
+   iteration knob, no fixed-point loop.
 
 ## 10. Known gotchas
 
-- **Canonical bare ref text.** Symbol table keys assume `$`/`%`/`#`
-  prefixes are already removed. Legacy prefixes from `inou/pyrope` are
-  producer bugs, not alternate spellings.
-- **`Const::invalid()` overload.** Today it stands for both "not
-  tracked" and "tracked but unknown". After `lnast_todo.md §10`
-  introduces "absent" distinctly, revisit every `is_invalid()` call
-  site in constprop to confirm it still means "don't fold".
-- **`assign` and `tuple_set` are sibling write ops (§11.3).** Per the
-  LNAST spec, `assign root v` and `tuple_set root p1..pN v` are kept as
-  distinct node kinds, but both are *writes through the root*: any
-  semantic check a pass runs on the LHS of `assign` (const-rebind tally,
-  type/bitwidth propagation, wrap/sat narrowing, type-mixing rejection)
-  must also fire from `process_tuple_set` on the same root. Producers
-  freely choose between the two — `a.b = 1` lowers to
-  `tuple_set a b 1`, not `assign a.b 1` — so any check living only on
-  the `assign` dispatch path is silently bypassed. Concrete rules for
-  new upasses:
-  1. If your pass overrides `process_assign`, also override
-     `process_tuple_set`. The terminal-value child is the RHS; path
-     elements identify the slot inside the root.
-  2. Nil-rvalue (`assign x nil` / `tuple_set t p... nil`) is
-     invalidation, not a binding — exclude both from bind tallies.
-  3. The current canonical example is `uPass_attributes::process_tuple_set`
-     (`upass/attributes/upass_attributes_tuple.cpp`), which calls
-     `record_assign(root, rhs_is_nil)` so the const-single-bind check
-     catches `tuple_set` writes (todo/ 1e). Mirror that pattern.
-  4. Known still-asymmetric pass: `pass_lnastfmt` validates `assign`
-     arity but not `tuple_set` arity (≥2 children: root + value). Fix
-     when you touch it. (`upass_bitwidth` is being reworked into a
-     read-only whole-tree finalization pass — §2 — that observes both
-     write forms uniformly during its own walk, so its old "no
-     `process_tuple_set`" asymmetry goes away with the relocation.)
-- **Cursor discipline at `if`.** All cursor movement is runner-owned
-  via the operand-vector helpers; passes never call `move_to_child` /
-  `scan_op` directly. Any pass that does is a bug — it bypasses the
-  vector-resolution layer.
-- **Bundle direct_alias chains.** Reading through `direct_alias` is
-  one hop; chains (`c = b; b = a;` then `c.[size]`) walk multiple
-  hops. The bundle pre-pass keeps the chain shallow by collapsing on
-  the alias creation, but consumers should still tolerate one or two
-  hops.
+- **Canonical bare ref text.** Symbol-table keys assume `$`/`%`/`#` prefixes
+  are already removed. Legacy prefixes from `inou/pyrope` are producer bugs,
+  not alternate spellings.
+- **`Const::invalid()` is overloaded.** It stands for both "not tracked" and
+  "tracked but unknown". When 1b's typed fields land, revisit `is_invalid()`
+  call sites in constprop to confirm each still means "don't fold".
+- **`store` fans out to two dispatch methods (§6).** The LNAST nodes
+  `assign`/`tuple_set` no longer exist (task 1t) — `store` is the single
+  write node — but the upass layer still dispatches 2-child stores to
+  `process_assign` and 3+-child stores to `process_tuple_set`. Any semantic
+  check a pass runs on the LHS of `process_assign` (const-rebind tally,
+  type/bitwidth propagation, wrap/sat narrowing) must also fire from
+  `process_tuple_set` on the same root — `a.b = 1` arrives as a field-path
+  store, and a check living only on the `process_assign` path is silently
+  bypassed. Nil-rvalue stores are invalidation, not a binding — exclude from
+  bind tallies. Canonical example:
+  `uPass_attributes::process_tuple_set` calls `record_assign(target,
+  rhs_is_nil)` (`upass/attributes/upass_attributes_tuple.cpp:272`).
+- **Cursor discipline.** Hooks re-walk children via `Lnast_manager`
+  (`move_to_child`/`move_to_sibling`) and must restore the cursor before
+  returning — fold helpers (`try_fold_ref`) may move it
+  (`while_nonterm_detection` memory). 2b removes per-pass cursor walking
+  entirely.
+- **Bundle alias chains.** `direct_alias` reads are one hop; chains
+  (`c = b; b = a;` then `c.[size]`) walk multiple hops. Consumers should
+  tolerate one or two hops.
 
-### 10.x Diagnostic channel (future)
+### 10.x Open diagnostics issue
 
-Open issue deferred from prp2lnast chained-compare / ambiguity work:
+`a and b or c` (mixed distinct operators at one precedence level without
+parens) has no defensible associativity. prp2lnast lowers it as a silent
+left-fold with a bare print. The `core/diag` channel now exists and prp2lnast
+emits located compile errors elsewhere (scope checks, decl-init kinds), so
+the remaining work is just turning this case into a proper located error.
+Also applies to `a implies b or c` and any future mixed-operator tier the
+grammar permits but the language prohibits.
 
-- **`a and b or c` is ambiguous.** Mixing distinct operators at the
-  same precedence level without parens has no defensible
-  associativity. Today prp2lnast prints a bare `std::print` line and
-  continues lowering as a left-fold, which is wrong and silent in
-  tests. Needs a proper compile error attached to the source range.
-- **What's missing**: prp2lnast has no diagnostics channel; an
-  accept-this-program invariant lives in verifier; parser-side
-  ambiguities must reach the user before upass runs.
-- **Natural design**: plumb a shared `Diagnostics` object (with
-  `.error`, `.warn`, source-range support) through `Prp2lnast` and the
-  uPass runner; have `pass.upass` refuse to start if diagnostics
-  contain errors.
-- **Scope cue**: also applies to `a implies b or c` and any future
-  mixed-operator tier the grammar permits but the language prohibits.
+## 11. Where this is headed
 
-## 11. Migration from the old runner
+The migration steps formerly listed here are subsumed by the two task docs:
 
-The previous design (staging tree, per-node iteration step loop,
-`classify_before_emit` hooks, 27 separate virtual methods per arithmetic
-op, parallel side tables in each pass) is being replaced incrementally:
+- [todo/livehd/1b.html](../todo/livehd/1b.html) — Bundle/Entry reshape
+  (upass/core move, typed pass-fact fields, residual attrs, inline root,
+  bounded scans). Prerequisite for 2b.
+- [todo/livehd/2b.html](../todo/livehd/2b.html) — push-based dispatch
+  flag-day: runner-owned scope-aware symbol table, `(dst, src…)` hooks,
+  emit model (a), `Call_resolver`, pull-seam deletion. Freezes other upass
+  work until it lands.
+- [todo/livehd/1d.html](../todo/livehd/1d.html) — sea-of-nodes demand-driven
+  emit; sequenced **after** 2b.
 
-1. **`Handler_registry` for_each_handler micro-fix** — landed as the
-   benchmark-driven cleanup (`std::set` per-call → pre-built vector).
-2. **`Cursor_state` lightweight save/restore** — landed (depth-only
-   snapshot in place of `std::stack` copy).
-3. **Bundle pre-pass** — to land: take over structural side state from
-   `upass/attributes` (sticky propagation, type_info, range_bounds,
-   tuple_shapes, wrap/sat policy, assigned_once).
-4. **Operand-vector dispatch** — to land: runner pre-resolves operands;
-   `process_*` hooks change signature to `(dst, ops)`. The 27 arithmetic
-   wrappers collapse to one `process_arith(kind, dst, ops)` virtual.
-5. **Vote resolution** — to land: replace `Emit_decision` enum with the
-   four-way `Vote` (drop/toconst/update/keep) and the priority rule.
-6. **Inline as runner-level cursor switch** — to land: func_extract's
-   `update + body` triggers a source-walk push, not a structural rewrite.
-7. **Pending-import poison** — to land alongside `todo/ §1b`.
-8. **Verifier/assert as dest-walk finishers** — to land: drop the
-   per-node verifier dispatch, run after the source walk completes when
-   the pending-import gate is clear.
-9. **bitwidth → read-only, no-fold, last-opt-pass + overflow capture** —
-   LANDED (Goal 1n). (a) `overrides_fold_ref`/`fold_ref` deleted (out of
-   `fold_capable_passes`) — decoupled from the iterative fold; (b) it stays
-   the **last opt pass in the runner walk** (read-only / votes keep) rather
-   than a separate post-runner pass, because the typed-declaration value is
-   a separate `store` that DCE removes for unused vars — only an in-walk
-   pass sees it pre-DCE (so dead comptime overflow is still caught);
-   (c) `neg_inf`/`pos_inf` collapsed to one `unbounded` flag (no
-   half-bounded); (d) overflow capture centralized here via
-   `process_declare`/`process_type_spec` (envelope) + an `end_run`
-   range-vs-envelope check → `core/diag` `bitwidth-overflow` ("does not
-   fit"), signedness-aware, wrap/sat-exempt, **scalars only**; the former
-   `uPass_attributes` checks were removed (negative→unsigned reinterpret
-   stays there); (e) `div`/`mod`/`sext` lattice tightened. `pass/bitwidth`
-   (the LGraph-level MIT pass) is untouched — Verilog-ingress fallback.
-   **Residuals** (todo/ 1n): exact-`Dlop` bound storage, per-node
-   HHDS-tree-attr re-keying of `bw_meta`, and tuple-field overflow — all
-   gated on the `lnast_to_lgraph` consumer / per-field types.
-
-See [docs/upass_redesign.md](../docs/upass_redesign.md) for the
-end-to-end design these steps converge to.
+Landed milestones formerly tracked here: `Handler_registry` dispatch-vector
+fix, `Cursor_state` lightweight save/restore, and the bitwidth relocation
+(read-only, no-fold, last-opt-pass + centralized overflow — goal 1n; its
+residuals live in todo/ 1n).

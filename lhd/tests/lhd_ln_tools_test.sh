@@ -53,6 +53,17 @@ grep -q 'tree-edit-distance: 1' "$W/d1.out" || fail "ln.diff: expected distance 
   || fail "ln.diff ln: vs prp --top exited nonzero"
 grep -q 'tree-edit-distance:' "$W/d2.out" || fail "ln.diff ln: vs prp: no distance line"
 
+# 5b. Dead-store elimination: a comptime `mut` chain (`mut a=1; a+=1; a+=1`)
+#     supersedes itself every write, so the coalescer must collapse it to a
+#     single surviving store (= the final value). Guards the coalescer's
+#     comptime-mut DSE path (constprop keeps every mut store; the coalescer
+#     owns supersedence here).
+printf 'mut a = 1\na += 1\na += 1\na += 1\n' > "$W/dse.prp"
+"$LHD" ln.cat "$W/dse.prp" --workdir "$W/w5b" -q >"$W/dse.out" 2>/dev/null || fail "ln.cat dse exited nonzero"
+dse_stores=$(grep -c '^[[:space:]]*[├└].* store' "$W/dse.out")
+[ "$dse_stores" -eq 1 ] || fail "DSE: expected 1 surviving store, got $dse_stores: $(cat "$W/dse.out")"
+grep -q "const '4'" "$W/dse.out" || fail "DSE: surviving store must hold the final value 4: $(cat "$W/dse.out")"
+
 # 6. Stage/kind validation: lg: inputs and --dump are usage errors.
 "$LHD" ln.cat lg:"$W/lgs/" -q >"$W/e1.json" 2>/dev/null
 grep -q '"class":"usage"' "$W/e1.json" || fail "ln.cat lg: must be a usage error: $(cat "$W/e1.json")"

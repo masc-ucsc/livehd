@@ -103,6 +103,12 @@ private:
   static std::vector<std::string>        aggregate_unknown_operands;
   static int                             aggregate_expected_pass;
   static int                             aggregate_expected_fail;
+
+  // True when the caller asked for cassert count-checking via verifier_pass /
+  // verifier_fail. When false (the default elaborate flow) the verifier runs in
+  // quiet mode: it still prints cputs and hard-errors on a comptime-false
+  // cassert, but emits no count tally and performs no count-mismatch check.
+  static bool has_expectations() { return aggregate_expected_pass >= 0 || aggregate_expected_fail >= 0; }
   // Inliner-style dedup so a cputs inside a function body prints once even
   // when constprop walks the same body again via spawned lnasts for each
   // call site.

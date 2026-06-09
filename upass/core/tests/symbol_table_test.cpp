@@ -317,9 +317,9 @@ TEST_F(Symbol_table_test, top_levels_named_and_unnamed_orthogonal) {
 TEST_F(Symbol_table_test, entries_view_skips_attrs) {
   auto bundle = std::make_shared<Bundle>("attrs_skip");
 
-  bundle->set("a",         *Dlop::create_integer(3));
-  bundle->set("a.__bits",  *Dlop::create_integer(8));
-  bundle->set("b",         *Dlop::create_integer(5));
+  bundle->set("a",              *Dlop::create_integer(3));
+  bundle->set_attr("a", "bits",  *Dlop::create_integer(8));
+  bundle->set("b",              *Dlop::create_integer(5));
 
   auto all = bundle->entries();
   auto na  = bundle->non_attr_entries();

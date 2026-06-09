@@ -44,6 +44,13 @@ struct uPass_coalescer : public upass::uPass {
 public:
   using uPass::uPass;
 
+  // Record `mut`-declared names (mirrors constprop's process_declare). A
+  // comptime-known write to a `mut` var is NOT dropped by constprop's
+  // classify_statement (the task-2u guard keeps it), so the coalescer must
+  // own its dead-store elimination: park comptime mut writes too, drop the
+  // superseded ones, and keep (never comptime-drop) the surviving last write.
+  void process_declare() override;
+
   // Drop-candidate op-nodes that the coalescer parks. Mirrors the A_OP set in
   // the runner's switch, restricted to scalar-result ops where parking is
   // safe. Tuple/attr/func ops carry shape/side-effect semantics and are
@@ -139,6 +146,11 @@ private:
   // string_view (no per-find std::string allocation).
   absl::flat_hash_map<std::string, Lnast_nid> pending;
 
+  // `mut`-declared names seen so far (see process_declare). A write to one of
+  // these is parked / DSE'd even when its value is comptime-known, and its
+  // surviving store is emitted (not comptime-dropped) at flush.
+  std::unordered_set<std::string> mut_decl_names;
+
   // Set by handle_op when it parks the current stmt; consumed by
   // classify_statement to vote drop. One-shot per stmt.
   bool parked_current_stmt{false};
@@ -169,6 +181,11 @@ private:
   // Park the current op-node as a pending write to `lhs`. If a pending for
   // `lhs` already exists, it is discarded (DSE).
   void park_current(const std::string& lhs);
+
+  // True when `name` resolves to a fully-known compile-time constant via the
+  // runner's fold seam (concrete Const, no unknowns/invalid). Such a read is
+  // served by fold_ref at the consumer, so a parked store need not be flushed.
+  bool is_comptime(std::string_view name) const;
 
   // Boundary metadata is structural; textual ref prefixes are not recognized.
   static bool is_boundary(std::string_view name) {

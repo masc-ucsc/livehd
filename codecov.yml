@@ -6,3 +6,10 @@ coverage:
     patch:
       default:
         informational: true
+
+ignore:
+  - "**/*_test.cpp"
+  - "**/*_test.cc"
+  - "**/*_test.hpp"
+  - "**/*_test.h"
+  - "**/tests/**"

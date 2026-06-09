@@ -17,7 +17,14 @@
   hybrid has landed, with the full sea-of-nodes rewrite deferred.</p>
 
 <h2>Depends on</h2>
-<p>None.</p>
+<p><strong>Sequence after <a class="xref" href="2b.html">2b</a></strong> (decided
+  2026-06-09). The remaining subtask D rebuilds exactly the seams 2b reshapes — the
+  coalescer's demand-driven emit (<code>pending</code> + <code>runner_emit_at_fn</code>,
+  both of which survive 2b) and the runner's emit model — and 2b is already a
+  non-bisectable flag-day, so combining them would compound risk for no win. Doing D after
+  2b is also <em>cheaper</em>: the per-name Bundle in the runner-owned symbol table is the
+  natural home for the "consumed" bit the demand-driven scheme needs, instead of another
+  side map. Do not combine into the 2b flag-day.</p>
 
 <h2>Subtasks — pending</h2>
 <ul class="subtasks">

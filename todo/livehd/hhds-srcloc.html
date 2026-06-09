@@ -1,0 +1,134 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>TODO hhds-srcloc — HHDS Source_locator (hash-keyed source-anchor table)</title>
+<link rel="stylesheet" href="../todo.css">
+</head>
+<body>
+<nav><span class="brand">LiveHD TODO</span><a href="../index.html">← All tasks</a></nav>
+<main>
+<h1>HHDS <code>Source_locator</code> — hash-keyed source-anchor table</h1>
+<p>A compact provenance table mapping a 64-bit integer <code>SourceId</code> to a
+  source anchor (file + byte span + line). Lives in <code>../hhds</code>
+  (<code>source_locator.hpp</code>) next to <code>Forest</code> /
+  <code>GraphLibrary</code> and serializes with them. IR nodes then carry one
+  <code>uint64</code> attribute instead of a full filename string + 21-byte loc
+  struct per node. LiveHD task <a class="xref" href="1f.html">1f</a> migrates onto
+  it and is blocked on this task.</p>
+
+<h2>Depends on</h2>
+<p>None — the campaign lands in <code>../hhds</code> (commit + LiveHD
+  <code>git_override</code> pin bump, same flow as the gid refactor).</p>
+
+<h2>Subtasks — pending</h2>
+<ul class="subtasks">
+<li><strong>A — <code>Source_locator</code> class.</strong> <code>mint</code> /
+  <code>mint_line</code> / <code>combine</code> / <code>resolve</code> /
+  <code>resolve_all</code> / <code>merge</code> per the design below, with the
+  hash-mint + probe-remap collision policy. Header-only or paired .cpp in
+  <code>../hhds</code>; language-agnostic (anchors are path + span + line; no
+  Pyrope concepts).</li>
+<li><strong>B — ownership + save/load/merge integration.</strong> One instance per
+  single-writer unit: a locator member on <code>Graph</code> and one per tree (in
+  practice per private <code>Forest</code>). <code>GraphLibrary::save</code> /
+  <code>Forest::save</code> / <code>export_into</code> union the per-artifact
+  locators into one table file next to <code>library.txt</code> /
+  <code>forest.txt</code>; <code>load</code> brings it back as a shared read-only
+  base; <code>load_merge</code> unions tables and applies the ID remap alongside
+  the existing Sub-gid remap.</li>
+<li><strong>C — tests.</strong> Hash determinism (same path+span → same ID across
+  two locators), collision probe-remap, combine determinism + dedup
+  (<code>combine(a,b)</code> twice → one entry), parent expansion with depth cap,
+  union-merge with and without collisions (remap table applied), save/load and
+  <code>load_merge</code> round-trips.</li>
+</ul>
+
+<h2>Subtasks — landed</h2>
+<p>None yet.</p>
+
+<h2>Design notes</h2>
+
+<h3>ID minting — hash, not sequence</h3>
+<p><code>SourceId</code> = 64-bit FNV-1a hash over <em>(canonical file path,
+start_byte, end_byte)</em>. The same source span therefore yields the same ID in
+every locator, in every run, in every separately-compiled artifact — so when two
+locators are combined the union dedups for free, and bazel-parallel compilations
+agree on IDs without coordination. This is the same move as the
+<code>GraphLibrary</code> gid refactor (FNV-1a(name), <code>pick_gid_for_name</code>
+linear probe in <code>hhds/graph.hpp</code>).</p>
+<p><strong>Collisions:</strong> if a mint finds the hashed slot occupied by a
+<em>different</em> payload, probe-remap to a fresh nearby ID. Remapped IDs are
+locator-local (they lose cross-artifact determinism), which is acceptable because
+at 64 bits genuine collisions are essentially theoretical; the remap path exists
+for correctness, not as a hot path. 32 bits would <em>not</em> be enough — the
+birthday bound (~77k entries for a 50% collision) is below the def-count of a
+real design.</p>
+
+<h3>Entry model</h3>
+<ul>
+<li><strong>Span anchor</strong> (the common case):
+  <code>{file_id, start_byte, end_byte, line}</code>. <code>line</code> is stored
+  so resolution never requires re-reading the source file.</li>
+<li><strong>Line-only anchor</strong>: <code>{file_id, line}</code> — for ingress
+  that only knows <code>file:line</code> (e.g. yosys Verilog attributes).</li>
+<li><strong>Combine entry</strong>: <code>{parents: [SourceId…]}</code> — see
+  below.</li>
+<li><strong>File table</strong>: <code>file_id → {canonical path, optional content
+  hash, optional line-offset table}</code>. The line-offset table (byte offset of
+  each line start) lets a resolver derive <code>line:col</code> and
+  <code>end_line:end_col</code> from byte spans — full LSP-grade intervals —
+  without storing columns per entry.</li>
+</ul>
+
+<h3>Combined IDs (one value from N source sites)</h3>
+<p>Transformations routinely map one IR value to several source sites (alias,
+inline = callee def + call site, merged writes). Rather than tracking sets of
+integers at every consumer, <code>combine(a, b)</code> mints a <em>new</em> ID
+meaning "both anchors": ID = hash over the canonically-ordered parent IDs, entry
+kind <em>combine</em> with the parent list. Determinism makes re-combining the
+same pair dedup to one entry. <code>resolve_all(id, max_depth)</code> expands
+parents (depth-capped) into the set of concrete anchors; <code>resolve(id)</code>
+returns the primary (first) anchor. A diagnostic for a combined ID renders the
+primary anchor as the span and the remaining anchors as secondary notes.</p>
+
+<h3>Ownership and threading</h3>
+<p>LiveHD multithreads <em>across</em> lnasts/graphs, never within one — only one
+thread edits a given graph/tree at a time. The locator must match that
+single-writer unit: <strong>one instance per <code>Graph</code> and one per
+tree</strong> (per private <code>Forest</code> in practice), so mints need no
+locks. A per-<code>GraphLibrary</code>/<code>Forest</code> locator exists only as
+the <em>serialized union</em> built at save time. After a load, the library-level
+table is a shared read-only base; artifacts that mutate append into their own
+locator (lookups consult own-then-base).</p>
+
+<h3>Serialization and merge</h3>
+<ul>
+<li>One table file per save dir, next to <code>library.txt</code> /
+  <code>forest.txt</code> (binary or text — implementer's choice, but
+  append-friendly and versioned).</li>
+<li><code>save</code> = union of the per-artifact locators. A union returns a
+  remap table (old → new) for the rare true collisions; the caller applies it to
+  the <code>uint64</code> node/pin attributes it is serializing — exactly the
+  pattern <code>load_merge</code> already uses for Sub-ref gid remap.</li>
+<li><code>load_merge</code> (the <code>lg:</code> linker path) unions the two
+  libraries' tables the same way.</li>
+<li>Entries are append-only; existing entries never change meaning.</li>
+</ul>
+
+<h3>API sketch</h3>
+<pre><code>class Source_locator {
+  SourceId mint(path, start_byte, end_byte, line);
+  SourceId mint_line(path, line);
+  SourceId combine(SourceId a, SourceId b);        // dedups via hash(parents)
+  Anchor          resolve(SourceId) const;          // primary anchor
+  vector&lt;Anchor&gt;  resolve_all(SourceId, depth) const; // parents expanded
+  RemapTable merge(const Source_locator&amp; other);   // union; remap on collision
+  // + save/load hooks used by Forest / GraphLibrary
+};
+</code></pre>
+</main>
+<footer><a href="../index.html">← All tasks</a> · LiveHD TODO · <code>livehd</code></footer>
+</body>
+</html>

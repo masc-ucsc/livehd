@@ -321,12 +321,19 @@ upass::Emit_decision uPass_verifier::classify_func_call() {
 }
 
 void uPass_verifier::end_run() {
-  std::print(stderr,
-             "uPass - verifier cassert counts: pass:{} fail:{} unknown:{} cputs:{}\n",
-             pass_count,
-             fail_count,
-             unknown_count,
-             cputs_count);
+  // The per-lnast count line is test-harness detail: only print it when a
+  // verifier_pass / verifier_fail expectation was set (the count-checking
+  // mode). In the default elaborate flow no expectation is given, so stay
+  // quiet — a comptime-false cassert already surfaces as a located
+  // `cassert-false` error diagnostic, which is the only signal that matters.
+  if (has_expectations()) {
+    std::print(stderr,
+               "uPass - verifier cassert counts: pass:{} fail:{} unknown:{} cputs:{}\n",
+               pass_count,
+               fail_count,
+               unknown_count,
+               cputs_count);
+  }
 
   // Roll local counts into the test-level aggregate. The mismatch check
   // moved to finalize_aggregate so it runs once across the whole program
@@ -342,6 +349,17 @@ void uPass_verifier::end_run() {
 }
 
 void uPass_verifier::finalize_aggregate() {
+  // Quiet (elaborate / default) mode: no verifier_pass / verifier_fail given,
+  // so there is no count to print or check. The contract here is "every cassert
+  // that resolves must hold, otherwise it is a compile error": a comptime-false
+  // cassert has ALREADY emitted a fatal `cassert-false` diagnostic in
+  // classify_statement (which fails the run), and an unknown / deferred cassert
+  // is kept for later (never an error). So there is nothing left to do — return
+  // before printing the test-harness tally or raising a count-mismatch.
+  if (!has_expectations()) {
+    return;
+  }
+
   std::print(stderr,
              "uPass - verifier aggregate cassert counts: pass:{} fail:{} unknown:{} cputs:{}\n",
              aggregate_pass_count,

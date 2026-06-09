@@ -103,15 +103,15 @@ static std::string bits_to_grouped(std::string_view bits, int bpd, bool upper) {
 // decimal. Strings/nil keep their stringify_one rendering. Unsupported specs
 // raise a compile error rather than silently mis-rendering.
 // Enum identity tag of a bundle, or nullptr. The parse-time `__enumentry`
-// attr (lower_enum_def) interns as "__enumentry" on a named-payload carrier
-// but as "0.__enumentry" once a scalar carrier round-trips through
-// Bundle::set/get_bundle — accept both spellings.
+// LNAST tag (lower_enum_def) is stored as the bare "enumentry" attr leaf
+// (1b/B attrs map); a scalar carrier round-trip through Bundle::set may
+// intern it under positional layers ("0.enumentry") — accept both.
 static const Const* enum_identity_of(const std::shared_ptr<Bundle const>& b) {
   if (!b) {
     return nullptr;
   }
   for (const auto& [k, ep] : b->get_attrs()) {
-    if (Bundle::get_last_level(k) != "__enumentry") {
+    if (Bundle::get_last_level(k) != "enumentry") {
       continue;
     }
     // Top-level identity only. Scalar-carrier canonicalization may intern the
@@ -126,8 +126,8 @@ static const Const* enum_identity_of(const std::shared_ptr<Bundle const>& b) {
       zeros_only = (seg == "0");
       rest       = Bundle::get_all_but_first_level(rest);
     }
-    if (zeros_only && !ep->trivial.is_invalid()) {
-      return &ep->trivial;
+    if (zeros_only && !ep.trivial.is_invalid()) {
+      return &ep.trivial;
     }
   }
   return nullptr;
@@ -296,7 +296,7 @@ void uPass_constprop::process_assign() {
           if (base && base.get() != rhs_bundle.get() && !base->non_attr_entries().empty()) {
             auto merged = std::make_shared<Bundle>(std::string(lhs_text));
             for (const auto& [bk, bep] : base->non_attr_entries()) {
-              merged->set(bk, *bep);  // the named type's default fields/values
+              merged->set(bk, bep);  // the named type's default fields/values
             }
             std::vector<std::string> base_named;  // canonical-order named slots
             for (const auto& tl : base->top_levels()) {
@@ -315,13 +315,13 @@ void uPass_constprop::process_assign() {
               }
               if (numeric) {  // positional init entry → bind to next named slot
                 if (pidx < base_named.size()) {
-                  merged->set(base_named[pidx], *rep);
+                  merged->set(base_named[pidx], rep);
                   ++pidx;
                 } else {
-                  merged->set(rk, *rep);
+                  merged->set(rk, rep);
                 }
               } else {  // named init field → overlay by name
-                merged->set(rk, *rep);
+                merged->set(rk, rep);
               }
             }
             st.set(lhs_text, merged);
@@ -364,7 +364,7 @@ void uPass_constprop::process_assign() {
         // Start by copying LHS shape verbatim (incl. nil placeholders and
         // any nested sub-entries).
         for (const auto& [lhs_key, lhs_ep] : existing->non_attr_entries()) {
-          merged->set(lhs_key, *lhs_ep);
+          merged->set(lhs_key, lhs_ep);
         }
         // Bind each RHS positional value to the next LHS named slot.
         size_t idx = 0;
@@ -440,7 +440,7 @@ void uPass_constprop::process_assign() {
           if (base && !base->non_attr_entries().empty() && enum_identity_of(base) == nullptr) {
             auto merged = std::make_shared<Bundle>(std::string(lhs_text));
             for (const auto& [bk, bep] : base->non_attr_entries()) {
-              merged->set(bk, *bep);  // tn's default fields + per-field values
+              merged->set(bk, bep);  // tn's default fields + per-field values
             }
             st.set(lhs_text, merged);
             move_to_parent();
@@ -813,7 +813,7 @@ static std::optional<Const> compare_bundles_eq(const std::shared_ptr<Bundle cons
   auto walk = [](const std::shared_ptr<Bundle const>& src, const std::shared_ptr<Bundle const>& other) -> char {
     char worst = 't';
     for (const auto& [k, ep] : src->non_attr_entries()) {
-      if (ep->trivial.is_invalid()) {
+      if (ep.trivial.is_invalid()) {
         // Both sides agreeing a slot is undefined (e.g. the value-less
         // `mut c:u24` field of a payload type) is a match on that key, not
         // an undecidable — payload-enum compares would otherwise never fold.
@@ -831,7 +831,7 @@ static std::optional<Const> compare_bundles_eq(const std::shared_ptr<Bundle cons
         worst = '?';
         continue;
       }
-      if (ov.same_repr(ep->trivial)) {
+      if (ov.same_repr(ep.trivial)) {
         continue;
       }
       // Pyrope forbids MIXING TYPES across a comparison (like `bool + int`):
@@ -839,11 +839,11 @@ static std::optional<Const> compare_bundles_eq(const std::shared_ptr<Bundle cons
       // COMPILE ERROR, not an implicit convert — write it explicitly, e.g.
       // `(x != 0) == b`. Gated on both-known + non-nil (nil = `x == nil` idiom;
       // an unknown cross-type compare falls through to eq_op's tri-state).
-      if (!ov.is_nil() && !ep->trivial.is_nil() && !ov.has_unknowns() && !ep->trivial.has_unknowns()
-          && (ov.is_bool() != ep->trivial.is_bool() || ov.is_string() != ep->trivial.is_string())) {
+      if (!ov.is_nil() && !ep.trivial.is_nil() && !ov.has_unknowns() && !ep.trivial.has_unknowns()
+          && (ov.is_bool() != ep.trivial.is_bool() || ov.is_string() != ep.trivial.is_string())) {
         upass::error("uPass_constprop: comparison mixes types (bool vs int/string) — convert explicitly, e.g. `(x != 0) == b`\n");
       }
-      const Const eq = *ov.eq_op(ep->trivial);
+      const Const eq = *ov.eq_op(ep.trivial);
       if (eq.is_known_true()) {
         continue;
       }
@@ -1233,7 +1233,7 @@ void uPass_constprop::harvest_pub_values() {
         fail(p.name, "empty or unresolved bundle");
       }
       for (const auto& [key, ep] : b->non_attr_entries()) {
-        const auto& v = ep->trivial;
+        const auto& v = ep.trivial;
         if (v.is_invalid() || v.has_unknowns()) {
           fail(p.name, key == "0" ? "not a known constant" : std::format("field `{}` is not a known constant", key));
         }
@@ -1473,7 +1473,7 @@ void uPass_constprop::process_tuple_concat() {
       if (!Bundle::is_single_level(k)) {
         return std::nullopt;  // nested sub-bundle — don't try to stringify
       }
-      const auto& v = ep->trivial;
+      const auto& v = ep.trivial;
       if (v.is_invalid()) {
         return std::nullopt;
       }
@@ -1930,13 +1930,13 @@ void uPass_constprop::fold_in(const std::string& dst) {
     const Const& lid   = *lid_p;
     bool         found = false;
     for (const auto& [k, ep] : bb->get_attrs()) {
-      if (Bundle::get_last_level(k) != "__enumentry") {
+      if (Bundle::get_last_level(k) != "enumentry") {
         continue;
       }
       if (Bundle::get_first_level(k) == k) {
         continue;  // the rhs bundle's own top-level tag, not a member entry's
       }
-      if (!ep->trivial.is_invalid() && ep->trivial.same_repr(lid)) {
+      if (!ep.trivial.is_invalid() && ep.trivial.same_repr(lid)) {
         found = true;
         break;
       }
@@ -2284,10 +2284,10 @@ std::optional<std::vector<uPass_constprop::Call_actual>> uPass_constprop::collec
     }
     std::unordered_map<std::string, Const> out;
     for (const auto& [k, ep] : bundle->non_attr_entries()) {
-      if (ep->trivial.is_invalid()) {
+      if (ep.trivial.is_invalid()) {
         return std::nullopt;
       }
-      out.emplace(std::string(k), ep->trivial);
+      out.emplace(std::string(k), ep.trivial);
     }
     if (out.empty()) {
       return std::nullopt;
@@ -3493,9 +3493,9 @@ void uPass_constprop::process_tuple_set() {
   // We handle the simple one-field case: tuple.field = value.
   //
   // IMPORTANT: Attribute assignments (e.g. x["__bits"] = 2, x["__signed"] = 1)
-  // must be skipped.  Bundle::set() interns attribute keys as "0.__attr" while
-  // Symbol_table::has_trivial() does a literal match, so the round-trip never
-  // resolves.  Attribute annotations are not values that constprop propagates.
+  // must be skipped. The "__attr" spelling is LNAST-level text; Bundle storage
+  // keeps attributes in a separate bare-name attr map (1b/B), and attribute
+  // annotations are not values that constprop propagates.
   move_to_child();
   auto tuple_var = std::string(current_text());
 
@@ -3534,7 +3534,7 @@ void uPass_constprop::process_tuple_set() {
       bundle = std::make_shared<Bundle>(tuple_var);
       st.set(tuple_var, bundle);
     }
-    bundle->set("__enumentry", *Dlop::from_pyrope(path_and_val[1].text));
+    bundle->set_attr("enumentry", *Dlop::from_pyrope(path_and_val[1].text));
     move_to_parent();
     return;
   }
@@ -3831,8 +3831,8 @@ std::optional<std::vector<std::pair<std::string, Const>>> uPass_constprop::provi
   }
   std::vector<std::pair<std::string, Const>> out;
   for (const auto& [k, ep] : b->non_attr_entries()) {
-    if (ep && !ep->trivial.is_invalid()) {
-      out.emplace_back(k, ep->trivial);
+    if (!ep.trivial.is_invalid()) {
+      out.emplace_back(k, ep.trivial);
     }
   }
   return out;

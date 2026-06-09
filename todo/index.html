@@ -53,14 +53,12 @@ agent build/process rules live in <code>AGENTS.md</code>.</p>
 <h3 id="livehd">LiveHD</h3>
 <ul>
 <li><em>Group 1:</em><ul>
-<li><a class="xref" href="livehd/1b.html">1b</a> <code>Bundle</code> storage — split attributes into a second flat map (keeps the flat dotted-key data map) and drop the <code>__</code> attribute prefix (kills the field/attr alias issue); bound the prefix-scoped scans with <code>lower_bound</code> instead of full-map walks.</li>
+<li><a class="xref" href="livehd/1b.html">1b</a> <strong>LANDED 2026-06-09</strong> — <code>Bundle</code>/<code>Entry</code> storage: moved to <code>upass/core/</code>; typed <code>Entry</code>/<code>Bundle</code> pass-fact fields; residual-attrs map (no <code>__</code>; sticky = leading <code>_</code>); inline root Entry (scalars = zero map nodes, spill-on-view); <code>lower_bound</code>-bounded scans. <a class="xref" href="livehd/2b.html">2b</a> is unblocked.</li>
 <li><a class="xref" href="livehd/1a.html">1a</a> Finish the LNAST→LGraph synthesis closure — split into <a class="xref" href="livehd/1a.html">1a-mem</a> (Pyrope <code>Memory</code> → LGraph <code>Memory</code> cell) and <a class="xref" href="livehd/1a.html">1a-ops</a> (<code>.[defer]</code>/<code>past[n]</code>→Flop, high-level ops, <code>uif</code> chains, <code>lg:</code> black-box Subs, attributes).</li>
-<li><a class="xref" href="livehd/1d.html">1d</a> Demand-driven (lazy) emit + dead-code elimination for upass.</li>
-<li><a class="xref" href="livehd/1r.html">1r</a> <code>mod</code> follow-ups (structural 1r/1u + the reg→Flop slice landed): runtime wrap/sat LG lowering, multi-output callees, <code>stage[]</code>/ranged picks, comptime <code>mut</code>-tuple value tracking.</li>
-<li><a class="xref" href="livehd/1p.html">1p</a> Deferred lambda templates — var-args follow-ups (Phase F: var-args on a <code>pipe</code>/<code>mod</code>/<code>fluid</code> boundary).</li>
+<li><a class="xref" href="livehd/1d.html">1d</a> Demand-driven (lazy) emit + dead-code elimination for upass — remaining sea-of-nodes subtask sequenced <em>after</em> <a class="xref" href="livehd/2b.html">2b</a>.</li>
 </ul></li>
 <li><em>Group 1-complex:</em><ul>
-<li><a class="xref" href="livehd/1f.html">1f</a> Source-map indirection (LOC propagation: canonical map, per-cell index, multi-loc aliases).</li>
+<li><a class="xref" href="livehd/1f.html">1f</a> Source locator migration — one <code>uint64</code> <code>SourceId</code> per def/dpin resolved via the hhds <code>Source_locator</code>; general carry (no whitelist), combined multi-loc IDs, ~70 null-span diags located, old <code>loc</code>/<code>fname</code> attrs deleted. Blocked on <a class="xref" href="livehd/hhds-srcloc.html">hhds-srcloc</a>.</li>
 </ul></li>
 <li><em>Group 2:</em><ul>
 <li><a class="xref" href="livehd/2b.html">2b</a> upass push-based dispatch — one runner-owned scope-aware symbol table (a <code>Bundle</code> per name); the runner resolves each operand to a <code>Bundle</code> and pushes <code>(dst, src…)</code> into every pass, retiring the per-pass name-keyed side maps and the pull-query seams. Flag-day; depends on <a class="xref" href="livehd/1b.html">1b</a>.</li>
@@ -72,6 +70,7 @@ agent build/process rules live in <code>AGENTS.md</code>.</p>
 <li><a class="xref" href="livehd/3d.html">3d</a> New upass <code>lnast_to_slop</code> producing executable slop.</li>
 <li><a class="xref" href="livehd/3f.html">3f</a> Unified compile error/warning surface — 1z foundation landed; remaining: source_id spans (blocked on 1f), lgraph-pass codes, CLI roll-up, golden tests.</li>
 <li><a class="xref" href="livehd/3h.html">3h</a> <code>Bitwidth_range</code> → <code>Const min/max</code> (drop <code>int+overflow</code>) — gate (Dlop migration) satisfied, unblocked.</li>
+<li><a class="xref" href="livehd/3g.html">3g</a> Generics <code>&lt;T&gt;</code> — spec first, then per-<code>T</code> specialization on the 1p template machinery (seams reserved; not urgent).</li>
 </ul></li>
 <li><em>Group 4:</em><ul>
 <li><a class="xref" href="livehd/4c.html">4c</a> Hot-probe injection at checkpoint replay (no recompile).</li>
@@ -89,6 +88,7 @@ agent build/process rules live in <code>AGENTS.md</code>.</p>
 <li><a class="xref" href="livehd/5f.html">5f</a> Benchmark contracts (codegen throughput, simulation speed, agent-loop latency).</li>
 </ul></li>
 <li><em>Untagged:</em> <a class="xref" href="livehd/hhds-pinentry.html">hhds-pinentry</a> — HHDS <code>PinEntry</code>/<code>NodeEntry</code> native <code>bits</code>+<code>sign</code> storage (drop the flat_storage attribute lookups; campaign lands in <code>../hhds</code>).</li>
+<li><em>Untagged:</em> <a class="xref" href="livehd/hhds-srcloc.html">hhds-srcloc</a> — HHDS <code>Source_locator</code>: hash-keyed SourceId → (file, span, line) table, one per graph/tree, serialized/merged with <code>Forest</code>/<code>GraphLibrary</code> (campaign lands in <code>../hhds</code>; blocks <a class="xref" href="livehd/1f.html">1f</a>).</li>
 <li><em>Backlog:</em> <a class="xref" href="livehd/cleanup.html">cleanup</a> — replace the unmaintained C++ mustache library with <code>inja</code>.</li>
 </ul>
 

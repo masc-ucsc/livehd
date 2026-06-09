@@ -44,15 +44,6 @@ cc_test(
 )
 
 cc_test(
-    name = "symbol_table_test",
-    srcs = ["tests/symbol_table_test.cpp"],
-    deps = [
-        ":lnast",
-        "@googletest//:gtest_main",
-    ],
-)
-
-cc_test(
     name = "ast_test2",
     srcs = ["tests/ast_test2.cpp"],
     deps = [

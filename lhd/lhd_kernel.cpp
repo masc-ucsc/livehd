@@ -1625,7 +1625,13 @@ void elaborate_command(Options& opts, Result& res) {
 void lower_lnasts(Options& opts, Result& res, Eprp_var& var, const std::string& lib_path, bool need_graphs) {
   run_step("pass.lnastfmt", var, {}, opts, res);
 
-  Eprp_var::Eprp_dict up{{"constprop", "1"}, {"verifier", "false"}};
+  // The verifier runs by default: it prints `cputs` and, crucially, turns a
+  // comptime-false `cassert` into a compile error during elaborate/synth. No
+  // verifier_pass / verifier_fail expectation is passed here, so it runs in
+  // quiet mode (no count tally) — every cassert that resolves must hold, an
+  // unknown / deferred cassert is left for later. A user can still silence it
+  // with `--set upass.verifier=false`.
+  Eprp_var::Eprp_dict up{{"constprop", "1"}, {"verifier", "true"}};
   // Derived toln gate (the dual of the emit-derived tolg gate): when neither
   // the lnast.tolg stage below (need_graphs) nor any post-upass LNAST emit
   // (ln:/pyrope:/lnast-dump:) consumes the rewritten tree, skip materializing

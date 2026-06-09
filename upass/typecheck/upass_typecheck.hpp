@@ -8,6 +8,7 @@
 
 #include "absl/container/flat_hash_map.h"
 #include "diag.hpp"  // livehd::diag::Span — located diagnostics for builtins (cassert)
+#include "kind.hpp"
 #include "upass_core.hpp"
 
 // uPass_typecheck — read-only KIND checker (see /Users/renau/projs/livehd/optable.md).
@@ -28,10 +29,12 @@ struct uPass_typecheck : public upass::uPass {
 public:
   using upass::uPass::uPass;
 
-  // Kind lattice (optable.md §"Scalar kinds"). `unknown` is the wildcard (skips
-  // checks, never errors) — also the kind of a typeless single-unknown-bit
-  // literal `0sb?`/`0ub?` (could be bool or int). `nil` is poison.
-  enum class Kind : uint8_t { unknown, integer, boolean, string, range, tuple, nil };
+  // Kind lattice (optable.md §"Scalar kinds") — the SHARED enum from
+  // upass/core/kind.hpp (1b/D; moved out of this pass so Bundle's typed
+  // Entry fields and every 2b consumer share one vocabulary). `unknown` is
+  // the wildcard (skips checks, never errors) — also the kind of a typeless
+  // single-unknown-bit literal `0sb?`/`0ub?`. `nil` is poison.
+  using Kind = upass::Kind;
 
   void begin_iteration() override { kind_map.clear(); }
 

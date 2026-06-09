@@ -80,16 +80,18 @@ class PrpRunner:
         return cmd
 
     def lhd_upass(self, test, mode):
-        # Pipeline smoke-test: runs constprop only (verifier:false — exactly
-        # lhd compile's upass defaults). Exists because constprop has known
-        # gaps (tuple index, enum values, string ops, __wrap/__ubits attrs,
-        # ...) that would cause the verifier to hard-error on casserts
-        # constprop folds incorrectly. These tests just assert the pipeline
-        # doesn't crash. For correctness checking, use `:type: comptime`.
+        # Pipeline smoke-test: runs constprop only, with the verifier turned
+        # OFF explicitly. The CLI default is verifier:on (it hard-errors on a
+        # comptime-false cassert), but this mode exists because constprop has
+        # known gaps (tuple index, enum values, string ops, __wrap/__ubits
+        # attrs, ...) that fold some casserts incorrectly — so these tests just
+        # assert the pipeline doesn't crash, never that the casserts hold. For
+        # correctness checking, use `:type: comptime`.
         # No emits -> inou.prp + lnastfmt + pass.upass, tolg skipped.
         cmd = [self.lhd, 'compile']
         cmd += test.params['files']
         cmd += ['--workdir', self._scratch(test, mode), '-q']
+        cmd += ['--set', 'upass.verifier=false']
         return cmd
 
     def lhd_comptime(self, test, mode):

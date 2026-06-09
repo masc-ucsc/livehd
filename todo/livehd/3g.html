@@ -1,0 +1,69 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>TODO 3g — Generics &lt;T&gt;</title>
+<link rel="stylesheet" href="../todo.css">
+</head>
+<body>
+<nav><span class="brand">LiveHD TODO</span><a href="../index.html">← All tasks</a></nav>
+<main>
+<h1><strong class="item-id">3g</strong> Generics <code>&lt;T&gt;</code></h1>
+
+<p>Type-parameterized lambdas (<code>comb add&lt;T&gt;(a:T, b:T) -&gt; (r:T)</code>).
+  <strong>Needs a specification first</strong> — this task is a placeholder so the
+  deferred work has a home; not urgent. Successor to the generics slice that task
+  1p (deferred lambda templates, fully landed 2026-06-08) explicitly carved out.</p>
+
+<h2>Depends on</h2>
+<p>Nothing hard. The template + call-site-specialization machinery it builds on is
+  on master (1p): a not-fully-typed lambda is a <em>template</em> with no LGraph;
+  <code>comb</code> inlines, <code>pipe</code>/<code>mod</code> specialize
+  per-signature into a dedup'd <code>Sub</code> with a readable mangled suffix.
+  Spec-wise it interacts with the typesystem (<code>does</code>, declared-type
+  propagation), so write the spec against the current
+  <a href="https://masc-ucsc.github.io/docs/pyrope/06-functions/">06-functions</a>
+  contract.</p>
+
+<h2>Subtasks — pending</h2>
+<ul class="subtasks">
+<li><strong>A — write the spec.</strong> Syntax and semantics: where <code>&lt;T&gt;</code>
+  binds (params, outputs, body locals, <code>T.[bits]</code>-style queries),
+  inference vs explicit instantiation at the call site, constraints
+  (<code>T does …</code>?), multiple parameters <code>&lt;T, U&gt;</code>, and how a
+  generic differs from today's untyped-template behavior (an untyped param already
+  specializes on the actual's declared type — the spec must say what <code>&lt;T&gt;</code>
+  adds: same-type unification across params/outputs, named type reuse in the body,
+  …). Lands in the Pyrope docs, then split implementation subtasks here.</li>
+<li><strong>B — implementation.</strong> Per-<code>T</code> body substitution in the
+  specializer + the reserved mangling (<code>add6__T_u22</code>). Scope after A.</li>
+</ul>
+
+<h2>Subtasks — landed</h2>
+<p>None here. The seams 1p left in place (all on master):</p>
+<ul class="subtasks">
+<li><code>prp2lnast</code> parses the <code>&lt;T, U&gt;</code> list into the func_def
+  generics tuple (<code>prp2lnast.cpp:2785</code>), with no read-site refs minted
+  for the type names.</li>
+<li><code>Lnast::generics_</code> + <code>get/set/has_generics()</code>
+  (<code>lnast/lnast.hpp:170</code>); <code>func_extract</code> copies the names onto
+  the extracted Lnast and any generic signature is stamped <code>template_</code>
+  (no LGraph) (<code>upass_func_extract.cpp:66,491</code>).</li>
+<li>The specializer clone clears generics (<code>upass_runner.cpp:2121</code>) —
+  i.e. today a generic call rides the untyped-template path with <strong>no</strong>
+  per-<code>T</code> substitution or unification; the <code>__T_</code> mangling is
+  reserved, unimplemented.</li>
+</ul>
+
+<h2>Design notes</h2>
+<p>None yet — intentionally unspecified. When picking this up, start from the 1p
+  decisions that already constrain it: specialization keys on the actual's
+  <em>declared</em> type (an untyped actual is a compile error,
+  <code>fcall-untyped-actual</code>); specialized modules dedup by mangled name;
+  readable suffix mangling. The open design question is what <code>&lt;T&gt;</code>
+  buys over the implicit untyped-param specialization that already works.</p>
+</main>
+<footer><a href="../index.html">← All tasks</a> · LiveHD TODO · <code>livehd</code></footer>
+</body>
+</html>

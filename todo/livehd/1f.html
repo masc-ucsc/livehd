@@ -3,678 +3,238 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>TODO 1f — Source-map indirection (LOC propagation)</title>
+<title>TODO 1f — Source locator migration (SourceId spans, located diags)</title>
 <link rel="stylesheet" href="../todo.css">
 </head>
 <body>
 <nav><span class="brand">LiveHD TODO</span><a href="../index.html">← All tasks</a></nav>
 <main>
-<h1><strong class="item-id">1f</strong> Source-map indirection (LOC propagation)</h1>
-<p>Source-map indirection (LOC propagation): one canonical source map built from the
-  original Pyrope, with internal SSA / temp / synthesized names pointing at one or
-  more locations in it (per-cell index, alias multi-loc, partition-root fallback).
-  The full strategy and salvaged design are in the Design notes below.</p>
+<h1><strong class="item-id">1f</strong> Source locator migration (SourceId spans, located diags)</h1>
+<p>Replace today's per-node source attributes — a 21-byte
+  <code>lnast.loc</code> struct <em>plus</em> an uninterned per-node
+  <code>std::string</code> filename — with <strong>one <code>uint64</code>
+  <code>SourceId</code></strong> per def-bearing node/dpin, resolved through the
+  HHDS <code>Source_locator</code> table
+  (<a class="xref" href="hhds-srcloc.html">hhds-srcloc</a>). Carry it through
+  <em>every</em> copy/clone/lowering path (killing the hand-maintained
+  8-node-kind loc whitelist), mint <em>combined</em> IDs where one value derives
+  from several source sites, convert the ~70 null-span diag sites, and delete the
+  old attributes.</p>
 
 <h2>Depends on</h2>
-<p>None.</p>
+<ul>
+<li><a class="xref" href="hhds-srcloc.html">hhds-srcloc</a> — the
+  <code>Source_locator</code> class, its per-graph/per-tree ownership, and its
+  <code>Forest</code>/<code>GraphLibrary</code> save/load/merge integration land
+  in <code>../hhds</code> first. 1f is the LiveHD-side migration onto it.</li>
+</ul>
+<p>Inbound: Pyrope <a class="xref" href="../pyrope/2p.html">2p</a> (source-derived
+SSA names reuse the SourceId), LiveHD <a class="xref" href="3f.html">3f</a>-B
+(full-fidelity <code>source_id</code> spans), <a class="xref" href="2n.html">2n</a>
+(LSP span precision), <a class="xref" href="5c.html">5c</a> (stable signal names),
+Verilog <a class="xref" href="../verilog/5e.html">5e</a> (cgen
+<code>// src:</code> comments) all consume what 1f delivers.</p>
+
+<h2>Decisions (2026-06-09 review)</h2>
+<ul>
+<li><strong>One integer, not (file, loc) payloads.</strong> Nodes/dpins carry a
+  single <code>uint64</code> <code>SourceId</code>; the locator table owns the
+  file/span/line payload. Today's cost is ~24 B + a full filename string copy per
+  located node.</li>
+<li><strong>Hash-minted IDs.</strong> <code>SourceId</code> = 64-bit FNV-1a of
+  <em>(canonical path, start_byte, end_byte)</em>, so the same span gets the same
+  ID in every artifact and merges dedup for free; only true hash collisions
+  probe-remap (locator-local). Avoids the frequent-remap problem of sequential
+  IDs when artifacts combine.</li>
+<li><strong>Ownership matches the single-writer unit.</strong> One locator per
+  lnast/graph (LiveHD multithreads <em>across</em> artifacts, never within one —
+  no locks needed). The per-<code>Forest</code>/<code>GraphLibrary</code> locator
+  is materialized only at save/merge as a union; loads expose it as a shared
+  read-only base.</li>
+<li><strong>The class lives in hhds</strong>, serialized natively by
+  <code>Forest::save</code>/<code>GraphLibrary::save</code>/<code>load_merge</code>
+  (so derived trees' provenance survives <code>ln:</code>/<code>lg:</code>
+  round-trips without manifest plumbing).</li>
+<li><strong>Combined IDs instead of ID sets.</strong> When one value maps to
+  several source sites (inline = callee def + call site, merged writes, aliases),
+  <code>combine(a,b)</code> mints a new deterministic ID with parents; consumers
+  keep tracking one integer. Diags render the primary anchor as the span and the
+  rest as <code>Diagnostic::notes</code> — the notes channel is fully plumbed in
+  both renderers today and has zero producers.</li>
+<li><strong>Lean internal model; ECMA-426 as egress only.</strong> The locator
+  stores anchors (+ combine parents) — nothing else. ECMA-426 <code>.map</code>
+  files are a lossy <em>output projection</em> for external
+  visualization/tooling compatibility, not the canonical store. SymbolId /
+  ScopeId / quality-marker / reverse-query machinery from the older draft is
+  dropped from scope (see the end of this page).</li>
+<li><strong>1f owns the diag sweep.</strong> After migration, the ~70 null-span
+  error sites get located, and <code>lnast.loc</code> / <code>lnast.fname</code>
+  / <code>livehd::attrs::loc</code> / <code>livehd::attrs::source</code> are
+  deleted.</li>
+</ul>
 
 <h2>Subtasks — pending</h2>
 <ul class="subtasks">
-<li><strong>A — canonical source map + per-def SourceId side maps.</strong> One
-  append-only source map per compilation unit; def-bearing nodes carry a
-  <code>SourceId</code> via a side map.</li>
-<li><strong>B — derived entries.</strong> alias / rename / inline / partition_boundary /
-  fold / … derivation kinds parented at one or more <code>SourceId</code>s.</li>
-<li><strong>C — LGraph side map + Verilog egress.</strong> LGraph side map, Verilog
-  egress <code>// src</code>, and <code>.lhsm.json</code> / <code>.map</code> sidecars
-  (ECMA-426 interchange).</li>
-<li><strong>D — query API + quality markers + reverse queries.</strong> Source-query API
-  with attribution-quality markers and reverse (source span → IR nodes) queries.</li>
-<li><strong>E — resolve the open implementation choices.</strong> Schema, side-map
-  backing, alias-closure cap, and the CI check.</li>
+<li><strong>A — adopt hhds-srcloc + ingress minting.</strong> Bump the hhds pin.
+  Give each <code>Lnast</code> its locator;
+  <code>Prp2lnast::attach_loc</code> (inou/prp/prp2lnast.cpp:138) becomes
+  "mint a span ID + set one <code>uint64</code> attr", extended from the current
+  8 statement kinds to every def-bearing node (the destination-defining nodes:
+  assign/store/declare/tuple_get/binary ops/func_call/…) so SSA temps are
+  attributable. <code>dump</code>/<code>read</code> round-trip the ID
+  (<code>@(src=…)</code> replacing <code>@(loc=pos1:pos2:line:tok)</code>,
+  lnast/lnast.cpp:242-246); <code>ln.diff</code> keeps ignoring it
+  (lhd/lhd_kernel.cpp:1269).</li>
+<li><strong>B — general carry, kill the whitelist.</strong> Copying one integer
+  attr is cheap enough to do unconditionally: carry it in
+  <code>prp_copy_one_node</code> (prp2lnast.cpp:799-830), the runner's
+  <code>emit_push</code> / <code>emit_op_with_fold</code>
+  (upass/runner/upass_runner.cpp:307-320, 614-631 — delete the node-kind gates;
+  the in-code comment at :618 defers exactly this to 1f),
+  <code>func_extract copy_current_subtree</code>
+  (upass/func_extract/upass_func_extract.cpp:17-30) and the runner's
+  <code>copy_subtree_into</code> / <code>clone_template_specialized</code>
+  (upass_runner.cpp:2024-2040) — today these copy type+name only, so inlined and
+  extracted bodies are unlocatable. Pass-synthesized nodes with no better anchor
+  inherit the enclosing statement's ID.</li>
+<li><strong>C — combined IDs at merge points.</strong> The inliner mints
+  <code>combine(callee_def, call_site)</code> for spliced bodies (call-site span
+  already computed at upass_runner.cpp:1105-1124); bitwidth's
+  <code>write_site_</code> (upass/bitwidth/upass_bitwidth.cpp:270-289) stops being
+  last-write-wins and combines the contributing writes; kernel-synthesized
+  <code>__pub</code> wrapper trees anchor at the pub decl. First producers for
+  <code>Diagnostic::notes</code>: multi-anchor diags print every related
+  file:loc.</li>
+<li><strong>D — diag integration.</strong> <code>Span.source_id</code> widens to
+  <code>uint64</code> and gets populated; emitting passes resolve IDs via their
+  locator <em>at emit time</em>, filling file/line/col (+ end_*) so
+  <code>core/diag</code> stays a leaf library with no hhds dependency. Columns
+  come from the locator's per-file line-offset tables — fixing the "no column
+  survives parse" gap, so LSP <code>write_range</code>
+  (lsp/livehd_lsp.cpp:299-314) gets real intervals instead of zero-width ranges.
+  The <code>locate_error_here</code> harness (inou/prp/tests/prplib.py:244-258)
+  keeps asserting <code>start_line</code> unchanged.</li>
+<li><strong>E — LGraph + persistence.</strong> tolg copies the attr from LNAST
+  nodes onto the graph nodes (and pins where finer) it mints — today it transfers
+  nothing (upass/tolg/upass_tolg.cpp). Delete the write-only
+  <code>livehd::attrs::loc</code>/<code>source</code> pair (graph/attrs.hpp:91 —
+  including its pos1=line-vs-byte semantic mismatch); yosys ingress mints
+  line-only anchors instead of its current per-node strings.
+  <code>ln:</code>/<code>lg:</code> save, load, and <code>load_merge</code>
+  provenance rides hhds-srcloc B for free.</li>
+<li><strong>F — the diag sweep + attribute deletion.</strong> Convert the ~70
+  null-span sites: all 38+ tolg <code>Pass::error</code> calls (e.g.
+  upass_tolg.cpp:467, :1033, :1776 — messages name only the variable), the 8
+  timecheck sites that bake <code>fname:line</code> into message <em>text</em>
+  (loc_str, upass/timecheck/upass_timecheck.cpp:69-76),
+  <code>upass::error()</code> gains an anchor parameter
+  (upass/core/upass_utils.hpp:12-24, 13 callers), the 8 span-less sink emits in
+  constprop (:215, :1212, :2815, :2978, :3415, :3468, :3479), and the 2 loc-less
+  prp2lnast sites. Then delete <code>lnast.loc</code>, <code>lnast.fname</code>,
+  <code>Lnast::get_loc/set_loc/get_fname/set_fname</code>, and the never-populated
+  <code>Lnast::source_filename</code> member.</li>
+<li><strong>G — ECMA-426 egress projection.</strong> A writer that converts
+  (locator + emitted-artifact positions) into a version-3 <code>.map</code>
+  sidecar + <code>//# sourceMappingURL=</code> comment for textual egress
+  (cgen Verilog, pyrope writer). Lossy by design: one display anchor per segment
+  (primary parent), LiveHD extras under <code>x_livehd</code>. Verilog
+  <a class="xref" href="../verilog/5e.html">5e</a> consumes this for
+  <code>// src:</code> comments.</li>
 </ul>
 
 <h2>Subtasks — landed</h2>
 <p>None yet.</p>
 
+<h2>Current state (census, 2026-06-09)</h2>
+<ul>
+<li><strong>Storage today.</strong> <code>lnast.loc</code> =
+  <code>{uint64 pos1, uint64 pos2, uint32 line, uint8 tok}</code> flat_storage
+  attr (~24 B padded) + <code>lnast.fname</code> = a full <code>std::string</code>
+  path copy per located node, no interning (lnast/lnast_attrs.hpp:14-31). No
+  column is stored anywhere; <code>tok</code> is always 0.</li>
+<li><strong>The whitelist.</strong> Loc survives rebuilds only for
+  {if, while, store, declare, range, attr_set, cassert, func_call}, hand-kept at
+  3 carry sites (prp2lnast.cpp:799-830; upass_runner.cpp:307-320, 614-631). Any
+  other node kind silently loses loc on every rebuild;
+  <code>func_extract</code>/template-specialization clones drop loc/fname
+  entirely (type+name-only copies).</li>
+<li><strong>Diag machinery is ready.</strong> <code>core/diag.hpp</code>
+  <code>Span</code> already reserves <code>source_id</code>/<code>file_id</code>
+  ("pre-sourcemap [[1f]]" comment at :29-31, never set);
+  <code>Diagnostic::notes</code> (multi-location) is rendered by both
+  <code>to_jsonl</code> and <code>to_text</code> but has zero producers.</li>
+<li><strong>Null-span census.</strong> ~70 sites emit no span: 38+ tolg
+  <code>Pass::error</code>, 8 timecheck (loc as message text only), 13
+  <code>upass::error()</code> callers, 8 span-less sink emits in constprop, 2 in
+  prp2lnast. The 11 located upass sites are line-only (no col/end). Only
+  tree-sitter-anchored parse errors carry full byte+line+col spans
+  (prp2lnast.cpp:112-136).</li>
+<li><strong>LGraph.</strong> hhds nodes accept attrs, and yosys ingress stamps a
+  write-only <code>livehd::attrs::loc/source</code> (with <code>set_loc1</code>
+  storing a <em>line</em> in a field documented as a byte offset,
+  graph/node_util.hpp:445 vs graph/attrs.hpp:91); tolg transfers nothing, no pass
+  reads them, cgen emits no source info.</li>
+<li><strong>Persistence.</strong> <code>ln:</code> forest save round-trips node
+  attrs; in-memory <code>Lnast</code> members do not survive (manifest restores
+  only lambda_kind/pub) — which is why the locator belongs to hhds save, not to
+  <code>Lnast</code>. <code>lg:</code> <code>load_merge</code> already does
+  name-keyed dedup + FNV-gid probe-remap — the exact pattern the locator union
+  reuses.</li>
+<li><strong>In-code anchors for this task.</strong> upass_runner.cpp:618 ("the
+  general per-node carry is the sourcemap work (task 1f)"), core/diag.hpp:29,
+  lhd_kernel.cpp:706 (depfile import discovery deferred to 1f).</li>
+</ul>
+
 <h2>Design notes</h2>
 
-<h3 id="source-location-loc-propagation-strategy">Source location (LOC) propagation strategy</h3>
-<p>Decide how LOC anchors (<code>file:line:col</code>, module, pipeline-stage) flow through
-LNAST and LGraph so that <code>sigref("alu.flag_z")</code>, hot-probe injection
-(see the <a href="https://masc-ucsc.github.io/docs/livehd/">LiveHD docs</a>), waveform-to-source mapping, and the
-invariant-detector code generator can all map an internal signal back to
-agent-editable Pyrope without best-effort heuristics.</p>
-<h3 id="hard-commitments-not-in-scope-for-this-decision">Hard commitments (not in scope for this decision)</h3>
-<ul>
-<li>Every <code>Partition</code> (<code>comb</code> / <code>pipe[N]</code> / <code>mod</code>) keeps its declaration LOC.</li>
-<li>Every port (input/output of a partition) keeps its declaration LOC.</li>
-<li>Every register and memory declaration keeps its LOC.</li>
-</ul>
-<p>These ride on the partition descriptor / port struct and are mandatory
-through every pass.</p>
-<h3 id="open-how-to-handle-everything-else-internal-wires-ssa-temps-synthesized-cells">Open: how to handle everything else (internal wires, SSA temps, synthesized cells)</h3>
-<p>The naive "anchor on every value" approach is expensive and brittle in practice.
-The favored direction is a <strong>source-map indirection</strong>: build one canonical
-source map from the original Pyrope, and let internal names (SSA / temp /
-synthesized) point at one or more locations in that map (so an alias
-<code>a = b</code> can legitimately reference both <code>a</code>'s and <code>b</code>'s sites).</p>
-<h4 id="issues-to-resolve">Issues to resolve</h4>
-<ul>
-<li>Alias chains (<code>a = b; c = a</code>): does <code>c</code> map to <code>{a, b}</code>, <code>{a, b, c}</code>, or
-  follow transitive closure? Closure could explode on deeply aliased SSA.</li>
-<li>Synthesized cells with no surface name (e.g., a <code>Mux</code> born from an
-  <code>if/elif</code> lowering, a <code>Sum</code> materialized during slice/concat lowering):
-  which source location is the "right" one — the condition, the join, the
-  containing statement, or the partition root as a fallback?</li>
-<li>Optimization passes that drop a name entirely (constprop folding,
-  cell-removal): the indirection handle disappears; what does <code>sigref</code> on
-  that name return after optimization?</li>
-<li>Round-trip through external Verilog + LEC must not lose the source map.
-  Emit <code>// src: file:line:col</code> comments at egress? A sidecar <code>.srcmap</code>
-  file? Both?</li>
-<li>Pass discipline: with per-cell LOC, every pass must remember to set
-  anchors and CI catches misses. With a source map, pass authors mostly
-  don't think about LOC, but a pass that <em>renames</em> an SSA value must
-  update its indirection — quiet failure mode if forgotten.</li>
-</ul>
-<h4 id="pros-of-source-map-indirection">Pros of source-map indirection</h4>
-<ul>
-<li>One canonical store; cells carry a small index, not 8+ bytes of anchor.</li>
-<li>Multiple-location attribution is natural (alias case).</li>
-<li>Source-derived SSA names (<code>foo_l42_b</code>, see the <a href="https://masc-ucsc.github.io/docs/livehd/">LiveHD docs</a>) already
-  encode source by construction — the source map is a formal version of
-  that scheme.</li>
-<li>Verilog egress emits source-map references rather than duplicating LOC
-  per wire.</li>
-<li>Pass surface is smaller; LOC-propagation logic is centralized.</li>
-</ul>
-<h4 id="cons-of-source-map-indirection">Cons of source-map indirection</h4>
-<ul>
-<li>Indirection adds a lookup at every debug query (<code>sigref</code>, waveform
-  click-through, LEC failure attribution). Hot-probe injection needs fast
-  resolution.</li>
-<li>Synthesized cells still need <em>some</em> attribution rule — falling back to
-  the partition root is honest but coarse.</li>
-<li>Tools outside LiveHD (waveform viewers, external LEC) must learn the
-  source-map format or rely on the Verilog-egress sidecar.</li>
-<li>Optimization that removes the last reference to a name loses the link;
-  recovering it requires the optimization to log a "removed: &lt;name&gt; -&gt;
-  &lt;loc&gt;" entry into the source map, which is a discipline issue too.</li>
-</ul>
-<h4 id="alternatives-considered">Alternatives considered</h4>
-<ol>
-<li><strong>Per-cell LOC (full anchor on every value).</strong> Matches the aspirational
-   wording in the <a href="https://masc-ucsc.github.io/docs/livehd/">LiveHD docs</a>. Maximum fidelity but every
-   pass becomes responsible for LOC propagation; quiet failure mode when a
-   pass forgets; memory cost on every cell.</li>
-<li><strong>Boundary-only LOC.</strong> Only the hard-commitment list above carries LOC.
-   Internal signals return "no source mapping" when probed. Simplest
-   contract; weakest UX for <code>sigref</code> on internal wires.</li>
-<li><strong>Source-map indirection with multi-location names</strong> <em>(favored)</em>. One
-   source store; names index in; 1-to-many supported for aliases.
-   Synthesized cells without a surface name fall back to the enclosing
-   partition's anchor.</li>
-<li><strong>LOC-on-LNAST-only, drop at LGraph.</strong> Let LGraph be LOC-free; resolve
-   through <code>LGraph cell -&gt; LNAST node -&gt; LOC</code> indirection at debug time.
-   Requires LNAST to be retained alongside LGraph for the lifetime of a
-   debug session; works only if the upass cache keeps LNAST around.</li>
-<li><strong>Hybrid (the working assumption).</strong> Hard commitments above + source
-   map for the rest, with partition-root fallback. Verilog egress emits
-   <code>// src:</code> comments derived from the source map.</li>
-</ol>
-<h4 id="to-decide-before-implementation">To decide before implementation</h4>
-<ul>
-<li>Source-map storage: in-memory only, on-disk sidecar, or both? On-disk is
-  needed for the <code>runs/&lt;test&gt;/vN/</code> workflow in the simulation design (see the <a href="https://masc-ucsc.github.io/docs/livehd/">LiveHD docs</a>).</li>
-<li>Lookup API surface: what does <code>sigref(name).source()</code> return when the
-  name has 0, 1, or N locations?</li>
-<li>Lifetime: when an upass invalidates a tree's cache, does the
-  corresponding source-map slab get invalidated atomically?</li>
-<li>Egress comment format: pick one (<code>// src: file:line:col</code>) and commit, so
-  external LEC tooling can parse it reliably.</li>
-</ul>
+<h3>Resolution flow</h3>
+<p>A pass holding a node/dpin reads its <code>uint64</code> SourceId attr and asks
+the artifact's locator: <code>resolve(id)</code> → primary anchor
+{path, start_byte, end_byte, line}; <code>resolve_all(id, depth)</code> → all
+anchors (combine parents expanded, depth-capped). Line:col and end_line:end_col
+derive from the per-file line-offset table. Diag emission fills
+<code>Span.source_id</code> + the resolved fields; extra anchors become
+<code>notes</code>. Nothing in the IR or the compile depends on the locator —
+losing it degrades diags, never semantics.</p>
 
-<h2>Design notes (salvaged from <code>docs/contracts/sourcemap.md</code>, now retired)</h2>
+<h3>What gets an ID</h3>
+<p>Definition-level granularity: nodes that <em>define</em> a destination
+(assign/store/declare, tuple_get, comparison/logic/arith ops, func_call, …) plus
+the statement anchors already covered today (if/while/cassert/range/attr_set).
+Operand refs carry nothing — provenance of an operand is the provenance of its
+defining node. On LGraph, def-bearing artifacts are cells, registers, memories,
+ports, and Sub instances; node-level is the default, pin-level only where finer
+attribution is actually needed.</p>
 
-<p>This document describes the source-map approach for mapping transformed
-LiveHD IR back to original Pyrope source without storing full source
-locations on every LNAST or LGraph node.</p>
+<h3>SSA and derived names</h3>
+<p>All SSA versions of <code>a</code> are distinct defs with distinct SourceIds
+(each points at the assignment that produced it). Pyrope
+<a class="xref" href="../pyrope/2p.html">2p</a> derives readable SSA/tmp names
+(<code>foo_l42_a</code>) from the same IDs, and
+<a class="xref" href="5c.html">5c</a> builds its optimization-stable signal names
+on top.</p>
 
-<p>The design goal is useful, stable source attribution for diagnostics,
-<code>sigref</code>, waveform click-through, hot-probe insertion, generated Verilog
-comments, agent-editable debug output, and conversion to standard
-ECMA-426 source maps for tools that already understand JavaScript and
-TypeScript source maps. It is not a promise of exact LLVM-style debug
-info after every optimization.</p>
+<h3>Egress: ECMA-426 (output compatibility only)</h3>
+<p>For textual egress artifacts (<code>top.v</code>, generated Pyrope), emit a
+standard version-3 source map (<code>top.v.map</code> +
+<code>//# sourceMappingURL=</code>) so stock JS/TS-ecosystem tooling and code
+visualizers can jump generated→original. The projection is lossy on purpose:
+ECMA-426 maps one generated position to one original position, so combined IDs
+export their primary parent; LiveHD-only data (full parent lists) stays in the
+locator table, referenced under <code>x_livehd</code>. The locator's own
+serialized form (hhds-srcloc) is the canonical store; there is no separate
+canonical JSON sidecar.</p>
 
-<h3>Core invariants</h3>
-<ol>
-<li><strong>One global, append-only source map per compilation unit.</strong> SourceIds
-   are stable across the entire pipeline. Transforms only <em>add</em> entries;
-   existing entries never change meaning.</li>
-<li><strong>The source map is an optional sidecar.</strong> The IR is semantically valid
-   without it. All compiler passes must function correctly when it is
-   absent. Only diagnostic, debug, and provenance queries depend on it.</li>
-<li><strong>Transformations are non-destructive.</strong> Passes produce new LNAST trees
-   (or LGraphs); originals are preserved. The source map records how
-   definitions in new artifacts relate to definitions in originals.</li>
-<li><strong>Definition-level tracking.</strong> Each definition-bearing node gets a
-   SourceId. Operand refs do not. This is the granularity unit.</li>
-</ol>
-
-<h3>Terminology</h3>
-<dl>
-<dt><code>SourceId</code></dt>
-<dd>Compact integer ID for a source-map entry. Stable for the lifetime of
-  the compilation unit. Used by LNAST, LGraph, sigref, sidecar files, and
-  debug queries. Format is <code>(FileId, local_index)</code> packed into the
-  integer so IDs are stable regardless of file processing order.
-  <code>FileId</code> is derived from canonical path or content hash.</dd>
-<dt><code>SymbolId</code></dt>
-<dd>Stable identity for a source-level declaration (variable, function,
-  partition, port, register, memory). One symbol can have many
-  definitions. <strong>SymbolId is the primary identity for source-level
-  declarations.</strong> Name/scope is a debug convenience derived from it.</dd>
-<dt><code>DefId</code></dt>
-<dd>Identity of an IR definition. For LNAST, conceptually the tree handle
-  plus HHDS position of a def-bearing node. For LGraph, the graph handle
-  plus node/pin identity for a produced value. DefIds are not stable
-  across tree versions; SourceIds are.</dd>
-<dt><code>Anchor</code></dt>
-<dd>Original source span: file ID, byte start/end, source kind, lexical
-  <code>ScopeId</code>, optional declared name, optional <code>SymbolId</code>. Line/column are
-  derived from byte offset on demand using a per-file line table.</dd>
-<dt><code>ScopeId</code></dt>
-<dd>Interned identifier for a lexical scope path. Scope paths repeat
-  heavily and are interned to keep entries small.</dd>
-<dt><code>Derived entry</code></dt>
-<dd>Source-map entry produced by a transformation. Points to one or more
-  parent SourceIds plus a derivation kind, instead of a single original
-  source anchor.</dd>
-</dl>
-
-<h3>Canonical source map</h3>
-<p>At Pyrope parse/lowering time, tree-sitter nodes provide byte ranges. The
-source map records this information once per definition.</p>
-<p>Each <em>original</em> source-map entry contains:</p>
-<ul>
-<li><code>SourceId</code></li>
-<li><code>FileId</code></li>
-<li>byte start/end</li>
-<li>source kind: declaration, assignment, expression, field access,
-  partition, port, register, memory, assertion</li>
-<li><code>ScopeId</code></li>
-<li>optional declared/source name</li>
-<li>optional <code>SymbolId</code></li>
-</ul>
-<p>Line/column ranges are derivable from byte offsets and are not stored.
-The original LNAST node may be referenced for in-memory acceleration,
-but the entry must carry enough span/name/scope/file information to be
-serialized and used after the original LNAST is no longer in memory.</p>
-
-<h3>Storage layout</h3>
-<p>The source map is held as a separable global table per compilation unit.
-It is <strong>not</strong> stored inside the IR.</p>
-<p>Each new tree or graph carries:</p>
-<ul>
-<li>A small <strong>tree-level header</strong> listing the original tree(s) it derives
-  from. A transformed artifact can derive from more than one original
-  (inlining merges multiple originals; partitioning splits one into
-  many).</li>
-<li>A <strong>side map</strong> <code>(handle, HHDS position) → SourceId</code> for def-bearing
-  nodes. Operand refs have no entry.</li>
-</ul>
-<p>HHDS attributes are <em>not</em> used for source-map data. Coupling provenance
-to IR storage would prevent the sidecar from being dropped without
-modifying the IR.</p>
-<p>The original LNAST is the dense-by-default case: its side map covers
-every def-bearing node minted at ingress. Transformed artifacts add
-side-map entries only for definitions they introduce or alter.</p>
-
-<h3>LNAST granularity</h3>
-<p>The source map tracks LNAST <em>definition</em> nodes, not operand refs.</p>
-<p>Plain <code>assign</code> is one definition form, but it is not the only one. Many
-LNAST nodes define a destination through their first child:</p>
-<pre><code>assign      dst = rhs
-tuple_get   dst = base.field
-eq          dst = a == b
-log_and     dst = a &amp;&amp; b
-func_call   dst = call(...)
-</code></pre>
-<p>The destination ref of such a node is the value being defined. Operand
-refs do not need source-map entries.</p>
-<p>Example:</p>
-<pre><code>tuple_get ___2 case1 x
-eq        ___3 ___2 3
-tuple_get ___4 case1 y
-eq        ___5 ___4 4
-log_and   ___6 ___3 ___5
-cassert   ___6
-</code></pre>
-<p>Useful attribution lives on the defining nodes:</p>
-<pre><code>def ___2 -&gt; source span: case1.x
-def ___3 -&gt; source span: case1.x == 3
-def ___4 -&gt; source span: case1.y
-def ___5 -&gt; source span: case1.y == 4
-def ___6 -&gt; source span: case1.x == 3 and case1.y == 4
-cassert  -&gt; source span: whole cassert statement
-</code></pre>
-<p>The operand refs to <code>case1</code>, <code>___2</code>, <code>___3</code>, and similar values carry no
-individual source entries. SSA temps like <code>___2</code> have no useful surface
-name, so name/scope fallback cannot help them — their SourceId is the
-only way to recover provenance. In practice nearly every def-bearing
-node in the ingress tree gets a SourceId. The savings versus per-node
-storage come from operand refs, not from sparse defs.</p>
-
-<h3>SSA</h3>
-<p>All SSA versions of a source variable share one <code>SymbolId</code>. Each SSA
-version corresponds to a distinct assignment or expression and gets its
-own SourceId.</p>
-<p>For example:</p>
-<pre><code>a = 1
-a = b + 3
-a = c ? a : d
-</code></pre>
-<p>These three writes refer to the same source-level symbol <code>a</code> (one
-SymbolId), but they are three different definitions (three SourceIds).
-A debug query for a current SSA value resolves to the assignment or
-expression that produced that version, while reporting that the source
-symbol is <code>a</code>.</p>
-
-<h3>Aliases and derived entries</h3>
-<p>Alias chains are represented structurally, not eagerly flattened.</p>
-<p>For:</p>
-<pre><code>a = b
-c = a
-</code></pre>
-<p>the source map stores <code>c</code> as an alias of <code>a</code>, and <code>a</code> as an alias of
-<code>b</code>. Queries may request direct parents or a bounded transitive
-closure. Default diagnostic display prefers the closest user source
-span and avoids unbounded alias expansion.</p>
-<p>When a pass combines values, it creates a derived entry:</p>
-<pre><code>new SourceId -&gt; parents: [SourceId A, SourceId B], kind: &lt;derivation&gt;
-</code></pre>
-<p>Derivation kinds:</p>
-<ul>
-<li><code>alias</code></li>
-<li><code>rename</code></li>
-<li><code>tuple_expansion</code></li>
-<li><code>inline</code> (see inlining rules below)</li>
-<li><code>partition_boundary</code> (see partitioning rules below)</li>
-<li><code>fold</code>, <code>mux</code>, <code>arithmetic</code>, <code>compare</code></li>
-<li><code>fallback</code> (no better anchor; parent is the enclosing definition)</li>
-</ul>
-
-<h3>Inlining</h3>
-<p>When a pass produces a new tree by inlining callee LNAST into a caller,
-each inlined definition in the new tree gets a fresh derived SourceId
-with <code>kind: inline</code> and parents <code>[callee_def_source, call_site_source]</code>.</p>
-<p>The new tree's side map points its def nodes at these fresh derived
-entries. The callee's original SourceIds are untouched. A debug query
-on the new tree can reconstruct the full inline stack by walking the
-parent chain.</p>
-
-<h3>Partitioning</h3>
-<p>When a pass produces multiple new trees by splitting one (for size or
-structural reasons), each resulting tree's side map handles two cases:</p>
-<ol>
-<li><strong>Preserved definitions</strong> — the new def is essentially a copy of an
-   original def. The side map points at the original SourceId directly.
-   No new source-map entry is created.</li>
-<li><strong>Boundary definitions</strong> — new ports/wires synthesized at the cut.
-   These get a fresh derived entry with <code>kind: partition_boundary</code>.
-   <ul>
-   <li>If the cut is at a user-declared partition or function boundary,
-     the parent is the SourceId of that declaration.</li>
-   <li>If the cut is compiler-chosen for size, the parent is the
-     enclosing original definition (fallback).</li>
-   </ul></li>
-</ol>
-
-<h3>Removed and folded definitions</h3>
-<p>Because transforms are non-destructive, the original definition still
-exists in its original tree. Tombstones are therefore not required to
-preserve queryability of the original — that is automatic.</p>
-<p>Tombstones remain useful for diagnostics that need to report "this
-user-visible definition has no representation in the final IR":</p>
-<pre><code>old SourceId -&gt; folded to constant 7   (kind: fold)
-old SourceId -&gt; removed as dead        (kind: dead)
-old SourceId -&gt; replaced by SourceId N (kind: rename)
-</code></pre>
-<p>These are <em>new</em> entries that reference the old one; they do not mutate
-the old entry. The append-only invariant holds.</p>
-
-<h3>LGraph</h3>
-<p>LGraph is treated as one more transformation target of the same global
-source map. The same machinery applies:</p>
-<ul>
-<li>The LGraph carries a tree-level header listing the LNAST tree(s) it
-  derives from.</li>
-<li>A side map <code>(graph handle, node/pin id) → SourceId</code> attributes
-  def-bearing artifacts (cells, registers, memories, ports, partition
-  boundaries, internal wires).</li>
-<li>Definitions that are essentially copies of an upstream LNAST def
-  reuse the upstream SourceId. New definitions introduced during
-  lowering get derived entries with the appropriate kind.</li>
-<li>There is no special "mandatory locations vs internal fallback"
-  distinction. Every def-bearing artifact has a SourceId; the
-  derivation kind tells you the quality.</li>
-</ul>
-<p>Generated Verilog can emit source-map comments or sidecar references
-from these IDs.</p>
-
-<h3>Serialized sidecars</h3>
-<p>The canonical serialized format is a LiveHD source-map sidecar, written
-next to each emitted artifact that needs persistent provenance. Use the
-extension <code>.lhsm.json</code> until the format is compacted or versioned
-elsewhere.</p>
-<p>The canonical sidecar stores the full LiveHD model:</p>
-<ul>
-<li>File table: <code>FileId</code>, canonical path, optional content hash, optional
-  embedded content.</li>
-<li>Scope table: <code>ScopeId</code> and interned lexical scope path.</li>
-<li>Symbol table: <code>SymbolId</code>, source-level name, kind, declaration
-  <code>SourceId</code> when known.</li>
-<li>Source entries: <code>SourceId</code>, original anchor or derived parent list,
-  derivation kind, query quality, optional <code>SymbolId</code>.</li>
-<li>Artifact maps: textual generated spans or IR handles mapped to
-  <code>SourceId</code>.</li>
-</ul>
-<p>Field names should stay close to the ECMA-426 terminology where the
-meaning overlaps: <code>sources</code>, <code>sourcesContent</code>, <code>names</code>, <code>mappings</code>,
-<code>line</code>, and <code>column</code>. LiveHD-specific identity fields keep their LiveHD
-names: <code>source_id</code>, <code>file_id</code>, <code>scope_id</code>, <code>symbol_id</code>, <code>parents</code>,
-<code>kind</code>, and <code>quality</code>. Keeping the shared names aligned makes conversion
-mechanical and avoids inventing a second vocabulary for the same
-concepts.</p>
-<p>Line and column values in serialized text-facing records follow
-ECMA-426/source-map conventions: generated and original lines are
-0-based, columns are 0-based UTF-16 code-unit offsets. Canonical anchors
-still store byte offsets; line/column values are derived from each
-file's line table when exporting. Human-facing diagnostics can convert
-these to the usual 1-based line display at presentation time.</p>
-
-<h3>ECMA-426 interchange</h3>
-<p><a href="https://tc39.es/ecma426/">ECMA-426</a> source maps are the standard
-interchange format for JavaScript and TypeScript tooling. LiveHD should
-emit them as a derived view for textual artifacts, not as the canonical
-store, because ECMA-426 maps a generated position to a single original
-position and optional name. It does not directly model multi-parent
-derivations, alias chains, optimized-away values, tombstones, or
-source-quality markers.</p>
-<p>For every textual egress artifact that is intended for humans or
-external tooling, emit both:</p>
-<pre><code>top.v
-top.v.map
-top.v.lhsm.json
-</code></pre>
-<p>The <code>.map</code> file is an ECMA-426 source map. The <code>.lhsm.json</code> file is the
-canonical LiveHD sidecar. The generated artifact should include a
-source-map URL comment when the output language can carry comments
-without changing semantics:</p>
-<pre><code>//# sourceMappingURL=top.v.map
-</code></pre>
-<p>The ECMA-426 map should contain only the lossy, broadly compatible
-projection:</p>
-<pre><code>{
-  "version": 3,
-  "file": "top.v",
-  "sources": ["src/foo.prp"],
-  "sourcesContent": [null],
-  "names": ["alu.flag_z"],
-  "mappings": "...",
-  "x_livehd": {
-    "schema": 1,
-    "source_map": "top.v.lhsm.json",
-    "compilation_unit": "sha256:...",
-    "artifact": "top.v"
-  }
-}
-</code></pre>
-<p>All LiveHD-only metadata in an ECMA-426 map must live under
-<code>x_livehd</code>. Generic source-map consumers can ignore this extension, while
-LiveHD-aware tools can use it to open the canonical sidecar.</p>
-<p>Conversion from the canonical LiveHD sidecar to ECMA-426 follows these
-rules:</p>
-<ul>
-<li>Exact original anchors export directly to <code>sources</code>, <code>mappings</code>, and
-  <code>names</code>.</li>
-<li>Derived, alias, inline, and fallback entries choose one display anchor
-  for the ECMA-426 segment. The ranking is the same one used by source
-  queries: prefer <code>exact</code>, then closest user-visible <code>alias</code> or
-  <code>derived</code>, then <code>fallback</code>, then <code>unknown</code>.</li>
-<li>Full parent lists, derivation kind, query quality, tombstones, and
-  reverse-query data stay in <code>.lhsm.json</code>; they are not encoded into
-  <code>names</code>.</li>
-<li><code>names</code> contains source-level names such as symbols, ports, registers,
-  memories, or user-visible generated names. It must not use <code>SourceId</code>
-  as the primary name encoding.</li>
-<li><code>sources</code> uses stable repo-relative or input-package-relative paths
-  when possible. Absolute paths are avoided unless the input itself was
-  absolute and no stable workspace-relative root is known.</li>
-<li><code>sourcesContent</code> is optional and defaults to <code>null</code> for persistent
-  build artifacts. Tools may opt in to embedding content for hermetic
-  debug bundles.</li>
-<li>Concatenated outputs use an ECMA-426 index source map with <code>sections</code>
-  when preserving per-file offsets is clearer than flattening all
-  mappings into one artifact map.</li>
-</ul>
-<p>Conversion in the other direction is intentionally partial. Importing a
-plain ECMA-426 map can recover file, line, column, source content, and
-optional names, but it cannot reconstruct LiveHD derivation metadata.
-Such imported entries get <code>quality: exact</code> for direct mappings and
-<code>kind: external</code> unless an <code>x_livehd.source_map</code> extension points to a
-canonical sidecar.</p>
-
-<h3>Worked Pyrope example</h3>
-<p>This example shows how original Pyrope parsed by tree-sitter can map
-back from a final generated Pyrope artifact after LiveHD transformations.</p>
-<p>Original input, <code>orig.prp</code>:</p>
-<pre><code>comb inc(a) -&gt; (y) {
-  y = a + 1
-}
-
-comb top(a) -&gt; (z) {
-  z = inc(a)
-}
-</code></pre>
-<p>At ingress, tree-sitter gives byte ranges for the definitions. LiveHD
-creates original source entries once:</p>
-<pre><code>{
-  "sources": [
-    {
-      "file_id": 1,
-      "path": "orig.prp",
-      "content_hash": "sha256:..."
-    }
-  ],
-  "entries": [
-    {
-      "source_id": 100,
-      "kind": "partition",
-      "file_id": 1,
-      "span": {
-        "start_byte": "&lt;comb inc start&gt;",
-        "end_byte": "&lt;comb inc end&gt;"
-      },
-      "name": "inc"
-    },
-    {
-      "source_id": 101,
-      "kind": "assignment",
-      "file_id": 1,
-      "span": {
-        "start_byte": "&lt;y = a + 1 start&gt;",
-        "end_byte": "&lt;y = a + 1 end&gt;"
-      },
-      "symbol_id": 10,
-      "name": "inc.y"
-    },
-    {
-      "source_id": 200,
-      "kind": "partition",
-      "file_id": 1,
-      "span": {
-        "start_byte": "&lt;comb top start&gt;",
-        "end_byte": "&lt;comb top end&gt;"
-      },
-      "name": "top"
-    },
-    {
-      "source_id": 201,
-      "kind": "assignment",
-      "file_id": 1,
-      "span": {
-        "start_byte": "&lt;z = inc(a) start&gt;",
-        "end_byte": "&lt;z = inc(a) end&gt;"
-      },
-      "symbol_id": 20,
-      "name": "top.z"
-    }
-  ]
-}
-</code></pre>
-<p>After inlining <code>inc</code> into <code>top</code>, a final Pyrope writer may emit:</p>
-<pre><code>comb top(a) -&gt; (z) {
-  z = a + 1
-}
-</code></pre>
-<p>The final assignment is not a brand-new unrelated source location. It is
-a derived definition: the expression body comes from <code>inc.y</code>, and the
-placement/name comes from the call site assigning <code>top.z</code>.</p>
-<pre><code>{
-  "entries": [
-    {
-      "source_id": 300,
-      "kind": "inline",
-      "quality": "derived",
-      "parents": [101, 201],
-      "symbol_id": 20,
-      "name": "top.z"
-    }
-  ],
-  "artifact_maps": [
-    {
-      "artifact": "final.prp",
-      "generated": {
-        "line": 1,
-        "column": 2,
-        "end_line": 1,
-        "end_column": 11
-      },
-      "source_id": 300
-    }
-  ]
-}
-</code></pre>
-<p>A LiveHD-aware query on <code>final.prp:2:3</code> resolves <code>source_id: 300</code>,
-then walks the parent list:</p>
-<pre><code>final.prp:2:3  z = a + 1
-  derived inline result for top.z
-  call site: orig.prp:6  z = inc(a)
-  inlined body: orig.prp:2  y = a + 1
-</code></pre>
-<p>The ECMA-426 projection for the same final Pyrope keeps only one display
-anchor, because standard source maps cannot encode the full parent list.
-For this example, the display anchor is the call site, and the LiveHD
-extension points to the canonical sidecar:</p>
-<pre><code>{
-  "version": 3,
-  "file": "final.prp",
-  "sources": ["orig.prp"],
-  "sourcesContent": [null],
-  "names": ["top.z"],
-  "mappings": "...",
-  "x_livehd": {
-    "schema": 1,
-    "source_map": "final.prp.lhsm.json",
-    "artifact": "final.prp"
-  }
-}
-</code></pre>
-<p>So generic source-map tooling can still jump from generated
-<code>final.prp</code> back to <code>orig.prp</code> at the selected display location, while
-LiveHD tooling can open <code>final.prp.lhsm.json</code> and recover both original
-parents.</p>
-
-<h3>Runtime debug artifacts</h3>
-<p>Runtime debug artifacts derived from the IR should carry a SourceId so
-they can self-attribute back to source without a separate lookup:</p>
-<ul>
-<li><code>sigref</code> references</li>
-<li>generated Verilog comments</li>
-<li>waveform signals</li>
-<li>hot-probe injection points</li>
-</ul>
-<p>This is part of the contract because these artifacts often outlive the
-compilation invocation and are inspected by humans or agents.</p>
-
-<h3>Query result quality</h3>
-<p>Source queries should expose attribution quality:</p>
-<ul>
-<li><code>exact</code> — direct source definition or expression</li>
-<li><code>symbol</code> — declaration-level symbol match</li>
-<li><code>alias</code> — value aliases one or more source definitions</li>
-<li><code>derived</code> — value combines or transforms multiple source definitions</li>
-<li><code>fallback</code> — partition or enclosing-statement fallback</li>
-<li><code>optimized_away</code> — source value was folded or removed</li>
-<li><code>unknown</code> — no usable mapping</li>
-</ul>
-<p>The quality marker is part of the contract. It lets debug tools and
-agents use approximate mappings without confusing them with exact
-source spans.</p>
-
-<h3>Reverse queries</h3>
-<p>Reverse queries (source span → set of IR nodes across all live trees)
-are needed for use cases like "user clicks line 42, highlight every IR
-or waveform value derived from it."</p>
-<p>The contract does <strong>not</strong> require a maintained reverse index. Reverse
-queries are performed by scanning the forward map at query time. If
-profiling later shows this is a bottleneck, an index can be built on
-demand; this is an implementation choice, not a contract requirement.</p>
-
-<h3>Pass obligations</h3>
-<p>Pass authors do not propagate source locations on every IR edit. They
-update the source map only when they change the identity of a
-definition.</p>
-<p>Rules:</p>
-<ul>
-<li>Copying a definition unchanged: the new tree's side-map entry points
-  at the existing SourceId. No new entry.</li>
-<li>Renaming a destination: a new derived entry with <code>kind: rename</code>
-  parented at the old SourceId.</li>
-<li>Creating an SSA version: a new SourceId tied to the assignment or
-  expression that produced it. Same SymbolId as other versions.</li>
-<li>Inlining: derived entry per inlined def with <code>kind: inline</code> and both
-  callee and call-site parents.</li>
-<li>Tuple expansion: derived entries mapping each expanded field back to
-  the tuple declaration, field access, or both.</li>
-<li>Partitioning: boundary defs get <code>kind: partition_boundary</code> entries
-  (see partitioning section).</li>
-<li>Combining values: derived entry with parent SourceIds and appropriate
-  arithmetic/compare/mux/etc. kind.</li>
-<li>Removing or folding: a new tombstone or replacement entry (see
-  removed/folded section).</li>
-<li>Synthesized values with no better anchor: derived entry with
-  <code>kind: fallback</code> parented at the enclosing partition or statement.</li>
-</ul>
-
-<h3>Open implementation choices</h3>
-<ul>
-<li>Exact canonical <code>.lhsm.json</code> schema details and whether it stays JSON
-  or grows a compact binary encoding.</li>
-<li>Implementation of the global source-map side maps (hash map keyed on
-  HHDS position vs. flat_storage backing — <code>flat_storage</code> is reasonable
-  here since SourceIds are persistent provenance, not pass-local
-  transient state).</li>
-<li>How LGraph names scope source-map lookup after hierarchy flattening.</li>
-<li>Alias-closure query cap and ranking rules.</li>
-<li>Exact ECMA-426 segment-density policy for generated Verilog: per
-  definition, per emitted statement, or per assign/wire declaration.</li>
-<li>CI checks that every def-bearing node in a transformed tree or LGraph
-  resolves to a SourceId.</li>
-</ul>
+<h3>Dropped from scope (future extensions, only if a consumer demands them)</h3>
+<p>The earlier draft of this page (salvaged from the retired
+<code>docs/contracts/sourcemap.md</code>) specified <code>SymbolId</code> +
+<code>ScopeId</code> tables, seven derivation kinds, attribution-quality markers
+(<code>exact</code>/<code>alias</code>/<code>fallback</code>/…), tombstones for
+folded/removed defs, reverse queries (source span → IR nodes), and a canonical
+<code>.lhsm.json</code> sidecar. All dropped: the lean anchor + combine model
+covers diags, LSP, naming (2p/5c), and egress comments (5e). If a future consumer
+needs symbol identity or fold tombstones, they become new locator entry kinds —
+the append-only hash-ID scheme leaves room.</p>
 </main>
 <footer><a href="../index.html">← All tasks</a> · LiveHD TODO · <code>livehd</code></footer>
 </body>

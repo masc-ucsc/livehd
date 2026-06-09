@@ -5,10 +5,10 @@ load("//tools:copt_default.bzl", "COPTS")
 
 cc_library(
     name = "upass",
-    # srcs = glob(
-    #     ["*.cpp"],
-    #     exclude = ["*test*.cpp"],
-    # ),
+    srcs = glob(
+        ["*.cpp"],
+        exclude = ["*test*.cpp"],
+    ),
     hdrs = glob(["*.hpp"]),
     copts = COPTS,
     includes = ["."],
@@ -18,4 +18,13 @@ cc_library(
         "//lnast",
     ],
     alwayslink = True,
+)
+
+cc_test(
+    name = "symbol_table_test",
+    srcs = ["tests/symbol_table_test.cpp"],
+    deps = [
+        ":upass",
+        "@googletest//:gtest_main",
+    ],
 )

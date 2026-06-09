@@ -25,6 +25,31 @@ void uPass_coalescer::set_options(const upass::Options_map& opts) {
   enabled = !(v.empty() || v == "0" || v == "false" || v == "no" || v == "off");
 }
 
+void uPass_coalescer::process_declare() {
+  // declare(ref(var), TYPE, const(mode), [value]). Record `mut`-declared names
+  // (mode const at child 2). Mirrors uPass_constprop::process_declare. The
+  // cursor is restored by the runner's dispatch_to_passes, but be tidy here too.
+  const auto here = lm->save_cursor();
+  if (move_to_child() && is_type(Lnast_ntype::Lnast_ntype_ref)) {
+    auto var = std::string(current_text());
+    if (move_to_sibling() && move_to_sibling() && is_type(Lnast_ntype::Lnast_ntype_const)) {
+      auto mode = current_text();
+      if (mode == "mut" || mode.starts_with("mut ")) {
+        mut_decl_names.insert(std::move(var));
+      }
+    }
+  }
+  lm->restore_cursor(here);
+}
+
+bool uPass_coalescer::is_comptime(std::string_view name) const {
+  if (!runner_fold_fn) {
+    return false;
+  }
+  auto folded = runner_fold_fn(name);
+  return folded && !folded->is_invalid() && !folded->has_unknowns();
+}
+
 void uPass_coalescer::handle_op() {
   if (!enabled) {
     return;
@@ -61,7 +86,16 @@ void uPass_coalescer::handle_op() {
         // Copy the key out before flush_one erases the slot — flush_one
         // takes by std::string& and we want a stable name to pass.
         std::string name = p->first;
-        flush_one(name);
+        // A comptime-known read is served by fold_ref at the consumer — the
+        // parked store need not be materialized for this read to be correct.
+        // Skipping the flush lets a later write to the same name supersede
+        // (DSE) the parked store. This is what makes `mut a=1; a+=1; a+=1`
+        // collapse: each `a+=1` lowers to `plus(_, a, 1)` which READS `a`;
+        // without this gate the read flushes the pending store every time, so
+        // no store is ever superseded. A genuine runtime read still flushes.
+        if (!is_comptime(name)) {
+          flush_one(name);
+        }
       }
     }
   }
@@ -88,11 +122,14 @@ void uPass_coalescer::handle_op() {
   // classify_statement::drop fires and the stmt vanishes outright. Parking
   // here would later flush the stmt and bypass that drop, regressing the
   // current behavior.
-  if (runner_fold_fn) {
-    auto folded = runner_fold_fn(lhs_strip);
-    if (folded && !folded->is_invalid() && !folded->has_unknowns()) {
-      return;
-    }
+  //
+  // EXCEPT for `mut`-declared names: constprop's classify_statement keeps
+  // every store to a mut var (the task-2u guard, see upass_constprop.cpp), so
+  // there is no drop to defer to. Park comptime mut writes here so the
+  // coalescer's own DSE supersedes the dead ones; the surviving last write is
+  // emitted at flush (flush_one never comptime-drops a mut store).
+  if (!mut_decl_names.contains(lhs_strip) && is_comptime(lhs_strip)) {
+    return;
   }
 
   park_current(lhs_text);
@@ -125,11 +162,14 @@ bool uPass_coalescer::flush_one(const std::string& name) {
   // a later constprop fold in this walk resolved it), drop instead of
   // emit — matches what constprop's classify_statement would have voted on
   // the original emit path.
-  if (runner_fold_fn) {
-    auto folded = runner_fold_fn(strip_io_prefix(name));
-    if (folded && !folded->is_invalid() && !folded->has_unknowns()) {
-      return false;
-    }
+  //
+  // EXCEPT a `mut`-declared name: constprop keeps comptime mut stores (task-2u
+  // guard), and a comptime-eliminated block (`if true{…}`, unrolled loop) may
+  // read the bare mut ref expecting this store as its driver. So emit the
+  // surviving mut store rather than comptime-dropping it — the coalescer's
+  // DSE has already removed the superseded ones, leaving just the last write.
+  if (!mut_decl_names.contains(std::string(strip_io_prefix(name))) && is_comptime(strip_io_prefix(name))) {
+    return false;
   }
 
   if (runner_emit_at_fn) {

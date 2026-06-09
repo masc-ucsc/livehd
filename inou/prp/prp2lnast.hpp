@@ -15,7 +15,6 @@
 #include "lnast.hpp"
 #include "lnast_builder.hpp"
 #include "lnast_ntype.hpp"
-#include "symbol_table.hpp"
 #include "tree_sitter/api.h"
 
 class Prp2lnast {

@@ -25,7 +25,97 @@
 <ul class="subtasks">
 <li><strong>B — 1a-mem: Pyrope Memory → LGraph Memory cell.</strong> Persistent
   indexed <code>reg</code> arrays, one <code>Memory</code> per logical storage, 11-pin port
-  stride.</li>
+  stride (<code>graph/cell.cpp:213</code> — sinks <code>addr/bits/clock_pin/din/enable/
+  fwd/posclk/type/wensize/size/rdport</code>, read data out on driver
+  <code>n_wr_ports+N</code>; no reset/initial pin). Scope decisions (2026-06-09):
+  <ul>
+  <li><strong>In scope — core:</strong> single-dimension <code>reg mem:[N]T = init</code>
+    async memories with runtime-index reads/writes → one <code>Memory</code> cell
+    (Pyrope default: 0-cycle read, forwarding on; spec
+    <a href="https://masc-ucsc.github.io/docs/pyrope/08-memories/">08-memories</a>).</li>
+  <li><strong>In scope — <code>__memory(cfg)</code> RTL instantiation:</strong> the
+    direct pin-level cell call; doubles as the shared lowering seam below.
+    <strong>cfg vocabulary = the cell pins verbatim</strong> (decision 2026-06-09):
+    <code>addr/bits/clock_pin/din/enable/fwd/posclk/type/wensize/size/rdport</code> +
+    the new <code>init</code> — no <code>latency</code> field, <code>type</code> picks
+    0&nbsp;async / 1&nbsp;sync / 2&nbsp;array, <code>rdport</code> entries are strictly
+    0/1, read results come back as a tuple indexed by read-port order
+    (<code>res[0], res[1]</code>). The <code>../docs</code>
+    <code>pyrope/08-memories.md</code> RTL-instantiation example must be fixed with the
+    implementation (<code>latency</code>→<code>type</code>,
+    <code>clock</code>→<code>clock_pin</code>, <code>rdport (-1,1,0)</code>→<code>(1,1,0)</code>);
+    latency-style sugar can live in the stdlib later.</li>
+  <li><strong>Common codegen interface:</strong> runtime-indexed <code>mut</code> arrays
+    are NOT memories (no cross-cycle persistence) but lower through the <em>same</em>
+    <code>__memory</code> interface configured with zero cycles / no clock
+    (<code>type=2</code> array) — one code path emits the Memory cell for both.
+    <strong>const ROMs too (decision 2026-06-09):</strong> a runtime-indexed read of a
+    <code>const</code> array lowers through the same interface — <code>type=2</code>,
+    <code>init</code> = contents, read ports only, zero write ports; a later LG pass may
+    turn small ROMs into mux trees if profitable.</li>
+  <li><strong>When the Memory path triggers:</strong> an array-typed <code>reg</code>
+    (<code>reg mem:[N]T</code>) <em>always</em> lowers to a Memory cell, even if every
+    index is comptime (verified 2026-06-09: comptime-indexed reg arrays are broken
+    today — tolg "tuple/field store not handled", so this is greenfield, no Flop-path
+    regression; memory↔flops conversion is the future LG pass's job).
+    <code>mut</code>/<code>const</code> arrays take the Memory path only when some index
+    is runtime — fully-comptime accesses keep today's tuple resolution. Whole-entry
+    writes only (<code>wensize=1</code>) on the inferred paths; a partial-entry write
+    (<code>mem[i]#[r]=…</code>) is a compile error this slice (<code>__memory</code>
+    passes <code>wensize</code> through verbatim).</li>
+  <li><strong>Reset / initialization (decision 2026-06-09):</strong> a clocked
+    <code>reg</code> memory accepts only <code>= nil</code> / <code>= 0sb?</code> in this
+    slice (no reset hardware; random pre-reset contents per spec) — a concrete reset
+    value (<code>reg mem:[8]u8 = 3</code> or a tuple literal) is a clean compile error
+    for now (the reset-sweep FSM is a later slice). A runtime-indexed <code>mut</code>
+    array <em>must</em> accept concrete init (<code>mut mem:[4]u8 = (1,2,3,4)</code> —
+    its init is the per-cycle default, no reset FSM involved). Mechanism: add a new
+    comptime <strong><code>init</code> sink to the Memory cell</strong>
+    (<code>graph/cell.cpp</code>) — easy to drive from prp/upass; cgen Verilog emits it
+    readmemh-style (initial contents / per-cycle default for <code>type=2</code>).
+    <em>Watch-out:</em> a 12th sink changes the per-port pid stride 11→12
+    (<code>pid%stride</code> wrapping; <code>"11addr"</code>-style names) — audit
+    inou/yosys, cgen, and the 05-lgraph doc table when adding it. Encoding: one wide
+    const, entry 0 in the low <code>bits</code>, row-major.</li>
+  <li><strong>Memory types + timecheck model (decision 2026-06-09):</strong>
+    <code>__memory</code> supports <strong>both async (<code>type=0</code>) and sync
+    (<code>type=1</code>)</strong> — the graph Memory cell already handles both; verify
+    <code>type=2</code> (array) end-to-end in graph/cgen and <em>add it if missing</em>.
+    From a timecheck point of view a memory is treated <strong>like a register</strong>:
+    async = read returns the committed state immediately (a reg read), sync = the
+    extra cycle is "time the write takes to commit". Latency is pinned at 1 (the only
+    latency the cell supports; Chisel-style read latency 2,3,… is out of scope).</li>
+  <li><strong>Port policy (decision 2026-06-09):</strong> one read port per read site
+    and one write port per write site (post-unroll), no muxing/exclusivity analysis in
+    tolg — write enables come from control flow as-is. Same-cycle conflict behavior is
+    defined by the memory config (<code>fwd</code> or not), not by tolg. Port
+    reduction/merging (spotting exclusive or conflict-free ports and shrinking the
+    memory) is a <em>future LGraph pass</em> — explicitly not this slice.</li>
+  <li><strong>Out of scope:</strong> <code>regref</code> shared memories,
+    multi-dimensional memories, sync-memory inference (flop-the-inputs/outputs
+    recognition) — async + explicit flops covers those tests for now.</li>
+  <li><strong>LEC plan:</strong> equiv tests use small memories only
+    (<strong>2–16 entries</strong>) so lgcheck stays tractable. Golden <code>.v</code> =
+    behavioral register arrays; the cgen side instantiates
+    <code>ware/rtl/cgen_memory_*</code> wrappers (lgcheck already takes
+    <code>-I ware/rtl</code>; the yosys memory suite proves the wrapper LEC path).
+    Test matrix: reg async 1w+1r runtime-indexed; reg 1w+2r (RF shape, sync via
+    <code>__memory type=1</code>); mut array with concrete init + runtime write/read;
+    const ROM runtime read; same-cycle write→read with <code>fwd=1</code>;
+    error tests (concrete reg reset value, partial-entry write).</li>
+  <li><strong>Implementation sketch:</strong> upass runner/constprop must recognize an
+    array-typed <code>reg</code>/runtime-indexed array bundle and <em>stop</em>
+    comptime-folding it (today the runner folds or the access dies in tolg as
+    <code>tuple_get</code>); emit a memory-marked declare + per-site access nodes the
+    way 2d-reg rides declare(reg)+store; tolg builds one Memory cell per logical
+    storage and wires per-site ports (à la <code>finalize_regs</code>), stamping the
+    comptime config pins; <code>__memory(cfg)</code> resolves the cfg bundle fields
+    verbatim onto pins. New <code>init</code> comptime sink in
+    <code>graph/cell.cpp</code> (name deliberately not <code>initial</code> — Flop's
+    <code>initial</code> is a reset value; memory <code>init</code> is power-on/per-cycle
+    contents, NOT restored by reset) + cgen readmemh-style emission + the stride-12
+    audit; verify <code>type=2</code> in cgen, add if missing.</li>
+  </ul></li>
 <li><strong>C — 1a-ops: remaining op / cell mappings.</strong>
   <ul>
   <li><code>defer</code>/<code>past[n]</code> temporal reads → <code>Flop</code>.</li>

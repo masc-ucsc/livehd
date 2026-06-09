@@ -66,7 +66,7 @@ jobs:
       # tests fail (the failure is re-raised after the upload below).
       - id: coverage
         continue-on-error: true
-        run: bazel coverage --keep_going --instrument_test_targets --collect_code_coverage --test_tag_filters=-fixme --combined_report=lcov --test_output=all //...
+        run: bazel coverage --keep_going --collect_code_coverage --test_tag_filters=-fixme --combined_report=lcov --test_output=all //...
 
       - uses: codecov/codecov-action@v7
         with:

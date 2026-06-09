@@ -3,7 +3,7 @@
 #include "lnast_builder.hpp"
 
 #include "absl/strings/str_split.h"
-#include "bundle.hpp"
+#include "bundle_key.hpp"
 #include "iassert.hpp"
 #include "str_tools.hpp"
 
@@ -275,12 +275,12 @@ void Lnast_builder::create_assign_stmts(std::string_view lhs_var, std::string_vi
   I(rhs_var.size());
 
 #ifndef LNASTOP_DONE
-  if (!Bundle::is_single_level(lhs_var) || !Bundle::is_single_level(rhs_var)) {
+  if (!bundle_key::is_single_level(lhs_var) || !bundle_key::is_single_level(rhs_var)) {
     std::string lhs_dest;
 
     auto rhs_dest = create_tuple_get(rhs_var);
 
-    if (Bundle::is_single_level(lhs_var)) {
+    if (bundle_key::is_single_level(lhs_var)) {
       auto idx_assign = lnast->add_child(idx_stmts, Lnast_ntype::create_store());
       add_ref_child(idx_assign, lhs_var);
       add_value_child(idx_assign, rhs_dest);
@@ -290,7 +290,7 @@ void Lnast_builder::create_assign_stmts(std::string_view lhs_var, std::string_vi
       add_ref_child(idx_dot, lhs_dest);
 
       for (const auto& f : absl::StrSplit(lhs_var, '.')) {
-        auto strip_pos = Bundle::get_first_level_name(f);  // WARNING: This is wrong but lnast_tolg has bugs handling this
+        auto strip_pos = bundle_key::get_first_level_name(f);  // WARNING: This is wrong but lnast_tolg has bugs handling this
         add_const_child(idx_dot, strip_pos);
       }
       add_value_child(idx_dot, rhs_dest);
@@ -318,7 +318,7 @@ void Lnast_builder::create_declare_bits_stmts(std::string_view a_var, bool is_si
       first = false;
       add_ref_child(idx_dot, f);
     } else {
-      auto strip_pos = Bundle::get_first_level_name(f);  // WARNING: This is wrong but lnast_tolg has bugs handling this
+      auto strip_pos = bundle_key::get_first_level_name(f);  // WARNING: This is wrong but lnast_tolg has bugs handling this
       add_const_child(idx_dot, strip_pos);
     }
   }
@@ -356,7 +356,7 @@ void Lnast_builder::create_named_tuple(std::string_view lhs_var, const std::vect
   std::vector<std::pair<std::string, std::string>> tup_expanded_rhs;
 
   for (const auto& it : rhs) {
-    if (!str_tools::is_string(it.second) || Bundle::is_single_level(it.second)) {
+    if (!str_tools::is_string(it.second) || bundle_key::is_single_level(it.second)) {
       tup_expanded_rhs.emplace_back(std::make_pair(it.first, it.second));
       continue;
     }
@@ -380,7 +380,7 @@ std::string Lnast_builder::create_tuple_get(std::string_view var) {
 #ifdef LNASTOP_DONE
   return std::string(var);
 #else
-  if (Bundle::is_single_level(var)) {
+  if (bundle_key::is_single_level(var)) {
     return std::string(var);
   }
 

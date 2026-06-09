@@ -3,289 +3,307 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>TODO 1b — Bundle: split attrs into a second map, drop __ prefix, bound the prefix scans</title>
+<title>TODO 1b — Bundle/Entry: move to upass/core, typed pass-fact fields, residual-attrs split, bounded scans</title>
 <link rel="stylesheet" href="../todo.css">
 </head>
 <body>
 <nav><span class="brand">LiveHD TODO</span><a href="../index.html">← All tasks</a></nav>
 <main>
-<h1><strong class="item-id">1b</strong> Bundle storage — split attributes into a second flat map, drop the <code>__</code> prefix, bound the prefix scans</h1>
+<h1><strong class="item-id">1b</strong> Bundle/Entry storage — move to <code>upass/core/</code>, promote the always-present pass facts to typed <code>Entry</code> fields, split residual attributes, bound the prefix scans</h1>
+
 <p><code>Bundle</code> (<code>lnast/bundle.{hpp,cpp}</code>) is the comptime value/tuple
   representation the upass runner threads through every pass. Today it stores
   <em>everything</em> — attributes, named fields, and positional fields — in a
   <strong>single</strong> <code>std::map&lt;std::string, Entry, Canonical_less&gt;</code>
   keyed by a flat dotted path (<code>foo.bar.__bits</code>, <code>0.__enumentry</code>,
   <code>name</code>, …). Attributes are told apart from data only by a <code>__</code>
-  prefix on the last segment, so every operation re-sniffs that prefix
-  (<code>is_attribute</code> is called inside nearly every walk). Separately, most
-  prefix-scoped operations — <code>get_bundle</code>, <code>has_bundle</code>,
-  <code>del_int</code>, <code>is_ordered</code>, the <code>concat</code> helpers —
-  scan the <strong>whole</strong> map even though the keys they care about live in one
-  contiguous run.</p>
-<p>This task makes two <strong>narrow, low-risk</strong> changes and keeps the flat
-  dotted-key data map exactly as it is:</p>
+  prefix on the last segment (<code>is_attribute</code> is called from ~26 sites inside
+  the walks). Most prefix-scoped operations — <code>get_bundle</code> (bundle.cpp:495),
+  <code>has_bundle</code> (:476), <code>del_int</code> (:343), <code>is_ordered</code>
+  (:932), <code>get_scalar_name</code>, the <code>erase_top</code>/<code>next_sub_pos</code>
+  lambdas inside <code>concat</code> — scan the <strong>whole</strong> map; the iteration
+  views (<code>entries()</code>/<code>non_attr_entries()</code>/<code>get_attrs()</code>/<code>top_levels()</code>)
+  materialize a fresh <code>std::vector</code> on every call. <code>Entry</code> is
+  <code>{bool immutable; Const trivial}</code> (bundle.hpp:14–25), and <code>key_map</code>
+  is declared <code>mutable</code> (bundle.hpp:95). All verified 2026-06-09.</p>
+
+<p><strong>Reshaped 2026-06-09 (design review with 2b).</strong> The earlier draft of this
+  task was "two narrow changes, keep everything else". The 2b push-based migration made a
+  stronger shape obvious, so 1b now makes <strong>four</strong> changes:</p>
 <ul>
-<li><strong>Split attributes into a second flat map</strong> and drop the <code>__</code>
-  prefix. Data leaves (<code>a.b</code>, <code>a.c</code>, <code>a.0</code>, <code>0</code>,
-  …) stay in the primary map; attribute leaves move to a sibling map keyed by bare name.
-  Membership in the attr map <em>is</em> what makes a key an attribute — the
-  per-key <code>__</code> string-sniff disappears, and a data field literally named
-  <code>__x</code> can no longer collide with the attribute namespace.</li>
-<li><strong>Replace the full-map scans with <code>lower_bound</code>-bounded prefix
-  walks.</strong> Because the data map is sorted by <code>Canonical_less</code>, every
-  key under a top segment forms one contiguous run; <code>lower_bound(seg)</code> +
-  walk-until-out-of-prefix turns the O(N) scans into O(log N + k), where k is "one
-  field's leaves" — a couple of entries.</li>
+<li><strong>Move <code>Bundle</code> + <code>Symbol_table</code> to <code>upass/core/</code>.</strong>
+  They are upass-domain structures (the per-pass fact record and its scope table), and the
+  typed fields below must stay in sync with the upasses — <code>lnast/</code> should never
+  have known about <code>bw_max</code>. Verified clean: the only outside users are
+  <code>lnast/lnast_builder.cpp</code> (static dotted-key string helpers only — those stay
+  behind in <code>lnast/</code> as a small key-utils header) and a <em>vestigial</em>
+  <code>#include "symbol_table.hpp"</code> in <code>inou/prp/prp2lnast.hpp:18</code> (its
+  only <code>st</code> is a local <code>Lnast_nid</code>) — delete it.</li>
+<li><strong>Promote the always-present pass facts to typed fields.</strong> The facts every
+  pass generates and reads (<code>kind</code>, declared <code>max</code>/<code>min</code>,
+  <code>bw_max</code>/<code>bw_min</code>, <code>comptime</code>; <code>mode</code> and
+  <code>typename</code> at the Bundle level) stop being string-keyed attr entries and become
+  <strong>typed fields on <code>Entry</code></strong> (enum/Const members). Per-field facts
+  get the same first-class treatment as root-scalar facts — <code>t.a:u4</code>'s
+  kind/envelope/bw live in <code>t</code>'s Entry for leaf <code>a</code>, no
+  <code>path.attr</code> string keys, and 2b's store path ("bitwidth copies the selected
+  field's <code>bw_max</code>/<code>bw_min</code>") becomes an Entry-to-Entry member copy.
+  The 2b <a class="xref" href="2b.html">per-pass attribute table</a> is the authoritative
+  field registry: one writer per field; adding a fact = one struct field + one table row.</li>
+<li><strong>Split the residual attributes into a second flat map</strong> and drop the
+  <code>__</code> prefix. After the promotion, the attrs map holds only the genuinely
+  rare/dynamic attributes — sticky <code>_foo</code> (with <code>debug</code> normalized to
+  <code>_debug</code> at set time), <code>enumentry</code>, <code>pub</code>/<code>pub_unit</code>,
+  <code>dp_assign</code>, the category-B pin-wiring attrs (<code>clock_pin</code>,
+  <code>posclk</code>, …). Very few entries per bundle → a plain sorted <code>std::map</code>
+  is fine. Membership in the attrs map <em>is</em> what makes a key an attribute — the
+  per-key <code>__</code> string-sniff disappears.
+  <strong>Stickiness is encoded in the canonical attr name</strong> (leading <code>_</code>):
+  no per-entry bit, no third map, and since <code>_</code> sorts apart from the letter-named
+  attrs, <code>sticky_attributes()</code> is a bounded walk of one contiguous run.</li>
+<li><strong>Inline root Entry — scalars allocate zero map nodes.</strong> Most variables
+  have <em>no</em> fields: the root scalar's Entry becomes an inline member, and the data
+  map holds <strong>tuple leaves only</strong> (the <code>"0"</code> scalar-leaf key
+  retires). A scalar variable, a compiler tmp, or a 2b <code>make_const</code> wrapper is a
+  single allocation with both maps empty.</li>
 </ul>
-<p><strong>What this task deliberately does NOT do:</strong> it does not introduce a
-  recursive node, and it does not change the flatten-to-dotted-leaf-keys contract.
-  Two bundles are still equal iff their flattened <code>{leaf-path → value}</code> maps
-  are equal (the dotted key carries the full path, including the decimal index for
-  positionals — <code>((1,2),3)</code> ⇒ <code>0.0,0.1,1</code> vs <code>(1,2,3)</code>
-  ⇒ <code>0,1,2</code>, correctly unequal). So <code>compare_bundles_eq</code>,
-  <code>structural_does</code>, the <code>does</code> machinery, and the
-  LGraph/Verilog port-naming all ride on the unchanged data map.</p>
-<p><strong>Plus a 2b prerequisite.</strong> Layered on the A/B reshape, this task also
-  lands the small <em>typed</em> Bundle API surface the upass push-based migration
-  (<a class="xref" href="2b.html">2b</a>) depends on — a shared <code>Kind</code> enum,
-  typed attribute accessors, an optional-scalar getter, an attr-key vocabulary, and a cheap
-  trivial bundle. See <a href="#api-2b">Bundle API additions</a> below.
-  <a class="xref" href="2b.html">2b</a> is a flag-day rewrite that freezes the other upass
-  work until it lands, so these must exist first.</p>
 
 <h2>Depends on</h2>
 <p>None — internal IR refactor. The <code>concat</code> / scalar-collapse / promotion
-  semantics it preserves are LEC-pinned by the existing tuple tests, so it can land
-  independently of <a class="xref" href="1d.html">1d</a> /
-  <a class="xref" href="1r.html">1r</a> (both also touch upass tuple handling — sequence
-  to avoid churn, but no hard ordering).</p>
+  semantics it preserves are LEC-pinned by the existing tuple tests.
+  <a class="xref" href="2b.html">2b</a> is a flag-day rewrite that consumes subtasks D/E
+  below (and the <code>upass/core/</code> location from A), so 1b must be green before 2b
+  starts.</p>
 
 <h2>Target shape</h2>
-<p>Each <code>Bundle</code> keeps the flat dotted-key storage but holds <strong>two</strong>
-  maps, both ordered by the same <code>Canonical_less</code> (bare names throughout —
-  <strong>no <code>__</code></strong>):</p>
+<pre><code>// upass/core/kind.hpp — shared lattice, moved out of uPass_typecheck
+enum class Kind : uint8_t { unknown, integer, boolean, string, range,
+                            tuple, nil, enumv, type_name };
+
+// upass/core/bundle.hpp
+struct Entry {                 // one per leaf: the inline root scalar, or a tuple leaf
+  Const value;                 // today's `trivial`; Dlop::invalid() = unknown
+  Const decl_max, decl_min;    // declared envelope (type-bake pre-step; persistent)
+  Const bw_max,   bw_min;      // derived range (bitwidth; per-write)
+  Kind  kind = Kind::unknown;  // typecheck/type-bake
+  bool  immutable = false;     // exists today
+  bool  comptime  = false;
+};
+
+class Bundle {
+  // NO name field — the name IS the symbol-table key (see design note below;
+  // deprecated in F, deleted with 2b/H when runner_type_query_fn dies)
+  Mode        mode;            // mut/const/reg — property of the BINDING, not each leaf
+  std::string type_name;       // nominal identity for `is`; empty = anonymous (SSO, no alloc)
+  Entry       root;            // scalar fast path — zero map nodes for scalars
+  std::map&lt;std::string, Entry, Canonical_less&gt; data;   // tuple leaves only
+  std::map&lt;std::string, Const, Canonical_less&gt; attrs;  // residual attrs, bare names
+};</code></pre>
+<p><strong>Both maps stay plain inline members</strong> (decided 2026-06-09): an empty
+  <code>std::map</code> does <em>not</em> heap-allocate — the tree header lives inline in
+  the object and nodes are allocated per entry — so the scalar-only case (the common one:
+  just <code>root</code>) pays ~96&nbsp;B of header inside the single
+  <code>make_shared&lt;Bundle&gt;</code> block and <strong>zero</strong> extra allocations.
+  A <code>unique_ptr</code>-lazy wrapper would save ~80&nbsp;B per bundle but add a
+  first-use allocation plus an indirection and null-check in every accessor — not worth it
+  at symbol-table scale; the real per-node map-allocation cost on actual tuples is the
+  btree/SBO follow-up below.</p>
+<p>Sizing: <code>Const</code> is <code>Dlop</code>, a value type with inline small-value
+  storage (core/const.hpp) — four extra <code>Const</code>s cost roughly +70–100&nbsp;B per
+  leaf. Acceptable because scalars dominate (they pay it once, inline) and tuples are
+  small. <code>Canonical_less</code> is <strong>kept and load-bearing</strong> on the data
+  map — numeric unnamed ordering (<code>2</code> before <code>10</code>) plus contiguous
+  prefix runs for <code>lower_bound</code>. Using the same comparator on <code>attrs</code>
+  keeps a field's attr run aligned. The flatten-to-dotted-leaf-keys <strong>compare
+  contract is unchanged</strong> for tuples: two bundles are equal iff their flattened
+  leaf-path→value maps are equal; the inline root only changes <em>where</em> a scalar's
+  single leaf lives, not the comparison semantics
+  (<code>compare_bundles_eq</code>/<code>structural_does</code>/Verilog naming ride on it).</p>
+
+<h2>Status — LANDED 2026-06-09 (all subtasks A–G)</h2>
+<p>Implemented in stage order, each stage gated on
+  <code>bazel test //upass/... //lnast/... //inou/prp/... //pass/...</code> (and a final
+  full <code>//...</code>). Deviations from the spec below, found during implementation:</p>
 <ul>
-<li><code>std::map&lt;std::string, Entry, Canonical_less&gt; data</code> — named and
-  unnamed leaves by dotted path. Named first-segments stay as-is (<code>name</code>),
-  unnamed are bare decimals (<code>0</code>, <code>1</code>, …). The scalar case is just
-  a single-entry <code>data</code> map (the today's <code>"0"</code>/scalar leaf) — no
-  separate scalar field is introduced.</li>
-<li><code>std::map&lt;std::string, Entry, Canonical_less&gt; attrs</code> — attribute
-  leaves, keyed <code>field_path.attr_name</code> with the attribute name as the
-  <em>last</em> segment (<code>a.b.bits</code>, not <code>a.b.__bits</code>). A
-  whole-bundle attribute keys on the bare attr name alone (<code>bits</code>, replacing
-  <code>__bits</code> / <code>0.__bits</code>).</li>
-</ul>
-<p>Canonical order (<em>named-alpha &lt; unnamed-numeric</em>) stays <em>implicit</em>
-  in <code>data</code>'s iteration; the attrs/data split removes the need to interleave
-  the two categories or sniff them apart. <code>Canonical_less</code> is
-  <strong>kept and load-bearing</strong> — it both keeps unnamed numbering numeric
-  (<code>2</code> before <code>10</code>, not lexicographic) and makes the prefix runs
-  contiguous so <code>lower_bound</code> works. Using the <em>same</em> comparator on
-  both maps keeps a field's data run and its attr run aligned. Do <strong>not</strong>
-  fall back to plain <code>std::string</code> ordering.</p>
-<p><strong>The reshape is narrowly about killing the <code>__</code> overlap and the
-  redundant scans — not a redesign.</strong> The legacy dotted-key methods are fine and
-  stay. Today the sorted-iteration views
-  (<code>entries()</code>/<code>non_attr_entries()</code>/<code>get_attrs()</code>/<code>top_levels()</code>)
-  materialize a fresh <code>std::vector</code> on <em>every call</em> (bundle.hpp:
-  "Materialized on each call") and the prefix-scoped lookups walk the whole map. With
-  attributes already separated and the data map sorted, those views become direct
-  bounded walks of one or both maps, and hot consumers iterate the bounded range
-  instead of paying a per-call allocation or a full scan.</p>
-
-<h2>Subtasks — pending</h2>
-<ul class="subtasks">
-<li><strong>A — split the attribute map out + drop the <code>__</code> prefix.</strong>
-  Move attribute leaves into the sibling <code>attrs</code> map keyed by bare name.
-  <code>has_attr</code>/<code>get_attr</code>/<code>set_attr</code> stop
-  <code>StrCat("__", …)</code> and route to <code>attrs</code>. Delete the prefix
-  detectors (<code>is_attribute</code>, <code>is_root_attribute</code>,
-  <code>get_attribute</code>, and the <code>key[3] != '_'</code> triple-underscore
-  guards) — attribute-ness is now "is it in the <code>attrs</code> map." Fix the two
-  external hard-coders: <code>pass/bitwidth/bitwidth.cpp</code>
-  (<code>ends_with("__max"/"__min"/"__bits"/"__sbits"/"__ubits"/"__dp_assign")</code>)
-  and <code>inou/cgen/cgen_verilog.cpp</code> (<code>ends_with("__dp_assign")</code>) →
-  route through the attr container instead of suffix matching. Keep <strong>every public
-  method signature unchanged</strong>; land it with the full suite green before
-  touching anything else. This is the load-bearing step, but it is a far smaller change
-  than a recursive rewrite — the data keyspace and <code>Canonical_less</code> do not
-  move.</li>
-<li><strong>B — bound the prefix scans with <code>lower_bound</code>.</strong> Convert
-  the full-map walks that are actually prefix-scoped to
-  <code>auto it = data.lower_bound(seg); … break on leaving the run</code>:
-  <code>get_bundle</code> (bundle.cpp:495), <code>has_bundle</code> (476),
-  <code>del_int</code> (343), <code>is_ordered</code> (932), <code>get_scalar_name</code>,
-  and the <code>erase_top</code> / <code>next_sub_pos</code> lambdas inside
-  <code>concat</code>. <strong>Use a segment-boundary stop predicate, not a byte
-  prefix</strong> — prefix <code>a</code> matches <code>a</code> and <code>a.b</code> but
-  not <code>ab</code>; reuse <code>match_first_partial</code> (or
-  <code>match_either_partial</code>) as the in-loop terminator. <code>std::map::lower_bound</code>
-  already uses <code>Canonical_less</code>, and the <code>is_transparent</code> comparator
-  (bundle.hpp:34) lets you pass a <code>string_view</code> with no allocation. With attrs
-  in a separate map, a field's attrs are a second bounded scan over <code>attrs</code> —
-  still O(log N + k).</li>
-<li><strong>C — collapse the iteration views onto bounded walks.</strong>
-  <code>entries()</code>, <code>non_attr_entries()</code>, <code>get_attrs()</code>,
-  <code>top_levels()</code>, and the <code>*_top_count()</code> queries become direct
-  walks of the two maps (no full-key scan, no <code>is_attribute</code> sniff, no
-  <code>std::set</code> dedup): <code>non_attr_entries()</code> walks <code>data</code>,
-  <code>get_attrs()</code> walks <code>attrs</code>, <code>entries()</code> merges the
-  two in canonical order. Move hot consumers — <code>upass/constprop/upass_constprop.cpp</code>
-  is the heavy reader (14× <code>non_attr_entries</code>, 18× <code>top_levels</code>,
-  2× <code>get_attrs</code>) — onto the bounded ranges so they stop allocating a
-  throwaway vector per call. Confirm byte-for-byte the same canonical order the
-  consumers assume. The legacy dotted-key views remain for callers where direct access
-  doesn't fit.</li>
-<li><strong>D — tests.</strong> <code>bazel test //inou/prp/... //upass/... //lnast/...
-  //pass/...</code> green; re-verify the tuple LEC pairs; update
-  <code>lnast/tests/symbol_table_test.cpp</code> (3 view calls).</li>
+<li><strong>The two "external <code>__</code> hard-coders" were left untouched.</strong>
+  <code>pass/bitwidth/bitwidth.cpp:get_key_attr</code> and
+  <code>inou/cgen/cgen_verilog.cpp:1250</code> match <em>LGraph AttrSet field-name
+  constants</em> hydrated from graph consts (legacy/Verilog-ingress naming) — they never
+  read Bundle storage, so the reshape cannot reach them. The "__attr" spelling also
+  remains valid LNAST-level <em>node text</em> (prp2lnast emits <code>__enumentry</code>;
+  constprop translates it to the bare <code>enumentry</code> attr at the storage
+  boundary).</li>
+<li><strong>Dead Bundle API deleted instead of ported</strong> (zero callers, verified):
+  <code>add_int</code>, <code>get_scalar_name</code>, <code>has_just_attributes</code>,
+  <code>attrs_top_count</code>; the unused <code>canonical_compare</code> static too.</li>
+<li><strong>E uses spill-on-view.</strong> The inline root holds the bare-scalar leaf while
+  <code>key_map</code> is empty; any whole-map view/iteration
+  (<code>non_attr_entries()</code>/<code>entries()</code>/<code>top_levels()</code>/<code>get_bundle</code>/<code>concat</code>/…)
+  spills it into <code>key_map["0"]</code> first (<code>ensure_view_materialized</code>).
+  Hot paths — <code>make_const</code>, <code>set("0")</code>, <code>get_trivial</code>,
+  <code>scalar()</code>, symbol-table scalar reads/writes — never spill, so the dominant
+  scalar flow stays zero-map-node. The pre-existing <code>mutable</code> on the maps is
+  now <em>load-bearing</em> (const query paths may spill); the interning follow-up must
+  keep that in mind.</li>
+<li><strong>F used contract comments,</strong> not <code>[[deprecated]]</code> — the
+  attribute would have warned at every still-legitimate pre-2b call site.</li>
+<li><strong>Flake ledger (pre-existing, goal 1s — NOT 1b regressions; verified against a
+  pristine-HEAD worktree):</strong> <code>string_interpolation</code> SIGBUS-at-exit
+  (bare-loop repro on HEAD in ≤2 runs; hides under lldb; ASan-clean 15/15);
+  <code>enum_hier</code> nondeterministic cassert folds (HEAD 6/10 fail vs this branch
+  3/10); <code>tup_method</code> 1/10 on both. The my-change failure set ⊆ baseline gate
+  standard (as used for goal 1n) holds.</li>
 </ul>
 
-<h2 id="api-2b">Bundle API additions — prerequisite for 2b (upass push-based migration)</h2>
-<p><a class="xref" href="2b.html">2b</a> flips every value-producing upass from "walk the
-  cursor and resolve operands from a private name-keyed side map" to "the runner resolves
-  each operand to a
-  <code>shared_ptr&lt;const Bundle&gt;</code> and calls
-  <code>process_&lt;op&gt;(Bundle&amp; dst, std::span&lt;const std::shared_ptr&lt;const Bundle&gt;&gt; src)</code>"
-  (a <code>const</code> literal is wrapped in a throwaway trivial Bundle owned by the
-  iterator). For that to be clean, the per-name facts the passes used to keep in side
-  maps (<code>kind_map</code>, declared envelope, derived bitwidth range, cycle range,
-  mode, comptime, sticky) must live on the Bundle as first-class, <em>typed</em>
-  accessors — never hand-built <code>Const</code>s. These ride on the
-  <code>attrs</code> map from subtask&nbsp;A, so sequence them <strong>after A</strong>.
-  They are additive (no behavior change on their own); 2b consumes them flag-day.</p>
+<h2>Subtasks — landed (staged; each step landed suite-green)</h2>
 <ul class="subtasks">
-<li><strong>E — shared <code>enum class Kind</code> + typed kind accessor.</strong> Move
-  the lattice out of <code>uPass_typecheck</code> into a shared header
-  (<code>lnast/kind.hpp</code>):
-  <code>enum class Kind : uint8_t { unknown, integer, boolean, string, range, tuple, nil, enumv, type_name }</code>
-  (extend <code>integer/boolean/string/range/tuple/nil</code> with <code>enumv</code> and
-  named-type per the type model). Add <code>void set_kind(Kind)</code> /
-  <code>Kind get_kind() const</code> on Bundle (stored in <code>attrs</code> under
-  <code>type</code>, int-coded). Kind is <strong>not</strong> derivable from the value
-  (<code>bool</code> vs <code>int</code>: <code>true</code> reads as <code>1</code>;
-  <code>0sb?</code> is the wildcard), so it must be carried explicitly.</li>
-<li><strong>F — typed attribute overloads.</strong> Beyond today's
-  <code>set_attr(name, const Const&amp;)</code>, add
-  <code>set_attr(name, int64_t)</code>, <code>set_attr(name, bool)</code>,
-  <code>set_attr(name, std::string_view)</code> and the reads
-  <code>std::optional&lt;int64_t&gt; get_attr_int(name)</code>,
-  <code>bool get_attr_bool(name)</code>, <code>std::string_view get_attr_str(name)</code>
-  (root + <code>field</code> forms, mirroring today's pair). Kills the
-  <code>Const</code>-construct on write and the
-  <code>is_invalid()/is_integer()/to_i()</code> dance on read in every migrated pass.</li>
-<li><strong>G — <code>std::optional&lt;Const&gt; scalar()</code> / <code>bool has_scalar()</code>.</strong>
-  The "read this input's comptime value, or it is unknown" accessor — today every caller
-  re-checks <code>get_trivial().is_invalid()</code>. This is the hot read path for the
-  const/ref operand resolution in 2b.</li>
-<li><strong>H — canonical attribute-key vocabulary.</strong> A small header
-  (<code>battr::type</code>, <code>max</code>, <code>min</code>, <code>bw_max</code>,
-  <code>bw_min</code>, <code>tc_min</code>, <code>tc_max</code>, <code>mode</code>,
-  <code>comptime</code>) so passes share one key set and do not drift. These are the
-  disjoint slices each pass writes (type ← typecheck, declared <code>max/min</code> ← the
-  declare/type_spec pre-step, <code>bw_*</code> ← bitwidth, <code>tc_*</code> ← timecheck,
-  <code>mode</code>/<code>comptime</code> ← attributes). <em>(Sticky is not a key — it is a
-  per-attribute bit, see&nbsp;I.)</em></li>
-<li><strong>I — sticky is a per-attribute bit + a <code>sticky_attributes()</code> view.</strong>
-  Stickiness is a property <em>of the attribute</em>, decided <strong>once at creation</strong> —
-  not a name re-sniffed on every walk, and not a separate <code>sticky.</code> namespace. Give
-  the attribute <code>Entry</code> (subtask&nbsp;A's <code>attrs</code> map) a
-  <code>bool sticky</code>, set when the attribute is created via a sticky variant of the setter
-  (e.g. <code>set_attr(name, v, /*sticky=*/true)</code> — the caller knows which attributes are
-  sticky; Bundle stays domain-agnostic and just stores + filters the bit). Expose two views:
-  <code>all_attributes()</code> (= today's <code>get_attrs()</code>) and
-  <code>sticky_attributes()</code> (the sticky subset). Sticky propagation in 2b is then simply
-  "merge each <code>src</code>'s <code>sticky_attributes()</code> into <code>dst</code>" — no
-  <code>acquired</code> map, no <code>sticky.</code> prefix, no per-propagation name match.</li>
-<li><strong>J — cheap trivial Bundle.</strong> 2b wraps <em>every</em> const operand in a
-  throwaway Bundle per node and the shared symbol table holds one Bundle per name, so the
-  single-scalar + few-attrs case must be cheap. Ensure the A/B reshape keeps a one-scalar
-  bundle small (don't pay for the second <code>attrs</code> map when there are no attrs),
-  and add <code>static std::shared_ptr&lt;Bundle&gt; make_const(const Const&amp;, Kind)</code>
-  as the const-operand factory. If a pool/SBO is needed to keep const-wrapping off the
-  heap on the hot path, do it here.</li>
+<li><strong>A — move to <code>upass/core/</code>.</strong> Relocate
+  <code>bundle.{hpp,cpp}</code>, <code>symbol_table.{hpp,cpp}</code>, and
+  <code>tests/symbol_table_test.cpp</code> from <code>lnast/</code> to
+  <code>upass/core/</code> (BUILD + include paths; no behavior). Extract the static
+  dotted-key helpers (<code>normalize_key</code>, <code>match</code>/<code>match_first_partial</code>/<code>match_either_partial</code>,
+  <code>get_*_level*</code>, <code>is_single_level</code>) into a small
+  <code>lnast/</code>-resident key-utils header so <code>lnast_builder.cpp</code> keeps its
+  only dependency without <code>lnast/ → upass/</code> inversion. Delete the vestigial
+  <code>symbol_table.hpp</code> include from <code>inou/prp/prp2lnast.hpp:18</code>.</li>
+<li><strong>B — split the attrs map out + drop the <code>__</code> prefix.</strong> Move
+  attribute leaves into the sibling <code>attrs</code> map keyed by bare name (sticky names
+  keep their single leading <code>_</code>; <code>debug</code> normalizes to
+  <code>_debug</code> on the way in). Delete the prefix detectors (<code>is_attribute</code>,
+  <code>is_root_attribute</code>, <code>get_attribute</code>, the <code>key[3] != '_'</code>
+  triple-underscore guards at bundle.hpp:232 / bundle.cpp:373,618). Fix the two external
+  hard-coders: <code>pass/bitwidth/bitwidth.cpp:1046–1058</code>
+  (<code>ends_with("__max"/"__min"/"__bits"/"__sbits"/"__ubits"/"__dp_assign")</code> —
+  <code>ubits</code>/<code>sbits</code> are stale vs the doc rule, prune while there) and
+  <code>inou/cgen/cgen_verilog.cpp:1250</code> (<code>"__dp_assign"</code>). Public method
+  signatures unchanged; full suite green before the next step.</li>
+<li><strong>C — bound the prefix scans + collapse the views.</strong> Convert the
+  full-map walks to <code>lower_bound(seg)</code> + walk-until-out-of-run:
+  <code>get_bundle</code>, <code>has_bundle</code>, <code>del_int</code>,
+  <code>is_ordered</code>, <code>get_scalar_name</code>, and <code>concat</code>'s
+  <code>erase_top</code>/<code>next_sub_pos</code>. <strong>Segment-boundary stop predicate,
+  not a byte prefix</strong> — reuse <code>match_first_partial</code> (prefix <code>a</code>
+  matches <code>a.b</code> but not <code>ab</code>); the <code>is_transparent</code>
+  comparator (bundle.hpp:34) takes <code>string_view</code> with no allocation. The views
+  (<code>entries()</code>/<code>non_attr_entries()</code>/<code>get_attrs()</code>/<code>top_levels()</code>/<code>*_top_count()</code>)
+  become direct bounded walks — no per-call vector. Hot reader:
+  <code>upass/constprop/upass_constprop.cpp</code> (17× <code>non_attr_entries</code>,
+  11× <code>top_levels</code>).</li>
+<li><strong>D — typed pass-fact fields + accessors.</strong> Land
+  <code>upass/core/kind.hpp</code> (lattice moved out of <code>uPass_typecheck</code>,
+  extended with <code>enumv</code>/<code>type_name</code>); add the <code>Entry</code>
+  fields (<code>kind</code>, <code>decl_max</code>/<code>decl_min</code>,
+  <code>bw_max</code>/<code>bw_min</code>, <code>comptime</code>) and Bundle's
+  <code>mode</code>/<code>type_name</code>; <code>std::optional&lt;Const&gt; scalar()</code> /
+  <code>bool has_scalar()</code> read the root Entry. This <em>dissolves</em> the earlier
+  plan's typed-attr-accessor ladder (<code>get_attr_int|bool|str</code>) and most of the
+  <code>battr::</code> vocabulary — <code>battr::</code> keeps only the residual attr names
+  plus <code>battr::is_sticky(name)</code> (leading-<code>_</code> check) and the
+  <code>debug</code>→<code>_debug</code> normalization. Kind is <strong>not</strong>
+  derivable from the value (<code>true</code> reads as <code>1</code>; <code>0sb?</code> is
+  the wildcard), so it must be carried. Additive; no behavior change on its own.</li>
+<li><strong>E — inline root Entry.</strong> The root scalar moves out of the data map into
+  the inline <code>root</code> member; the data map holds tuple leaves only. This is the
+  one step that touches the compare/concat/promotion invariants (scalar→<code>.0</code>
+  promotion becomes a root→data spill; <code>concat</code>'s
+  <code>promote_scalar_to_sub</code> adapts), so it lands <strong>alone, LEC-gated</strong>.
+  After it, <code>make_const(Const, Kind)</code> is a single allocation with both maps
+  empty — the 2b const-operand wrapper is cheap by construction. Optional follow-ups (not
+  gating 2b): intern repeated <code>(value, kind)</code> wrappers + an iterator-owned pool —
+  both require auditing/removing the <code>mutable</code> on the data map first
+  (bundle.hpp:95) so shared <code>const Bundle</code>s are genuinely immutable.</li>
+<li><strong>F — deprecation markers.</strong> Tag with <code>[[deprecated]]</code> (or a
+  contract comment if the warning churn is too noisy pre-2b): <code>get_trivial()</code>/<code>has_trivial()</code>
+  (→ <code>scalar()</code>/<code>has_scalar()</code>), the <code>Const</code>-based
+  <code>get_attr</code>/<code>set_attr</code> on promoted facts (residual attrs keep them),
+  the vector-materializing views (→ bounded range views), and
+  <strong><code>name</code>/<code>get_name()</code></strong> (the name is the symbol-table
+  key — see design note). Removal scheduled with 2b's flag-day, which rewrites the only
+  hot callers.</li>
+<li><strong>G — tests.</strong> <code>bazel test //inou/prp/... //upass/... //lnast/...
+  //pass/...</code> green after every stage; re-verify the tuple LEC pairs;
+  <code>symbol_table_test.cpp</code> moves with the code (3 view-call updates). Benchmark
+  before/after with <code>bench_upass.sh</code> — the bounded scans (C) and zero-map
+  scalars (E) are the measurable wins.</li>
 </ul>
 
 <h2>Design notes</h2>
-<p><strong>The <code>__</code> alias bug this fixes.</strong> Because attrs and data
-  share one keyspace, a data field literally named <code>__x</code> would land in the
-  attribute namespace, and the detector has to special-case <code>___</code> (triple
-  underscore) to avoid false positives (<code>bundle.hpp:232</code>,
-  <code>bundle.cpp:373,618</code>). With a separate <code>attrs</code> map the namespaces
-  no longer overlap — a field <code>bits</code> and an attribute <code>bits</code>
-  coexist cleanly. The Pyrope-facing doc rule already says attributes have
-  <em>no</em> <code>__</code> prefix (<code>pyrope_bundle_attribute_rules</code>); this
-  brings storage in line with the contract.</p>
-<p><strong>Attribute names actually in flight</strong> (full set, so A can be exhaustive):
-  <code>bits</code>, <code>sbits</code>, <code>ubits</code>, <code>min</code>,
-  <code>max</code>, <code>dp_assign</code>, <code>enumentry</code>, <code>pub</code>,
-  <code>pub_unit</code>. Note <code>ubits</code>/<code>sbits</code> appear only in
-  <code>bitwidth.cpp</code>'s suffix checks and may be stale vs. the doc rule
-  (size = <code>bits</code>/<code>max</code>/<code>min</code> only) — confirm and prune
-  while there.</p>
-<p><strong>Why keep flat (and not recurse).</strong> The earlier draft of this task
-  proposed a recursive node with three containers (attrs / named-map / unnamed-vector).
-  Its two payoffs both evaporate once you bound the scans: the O(N)→O(log N + k)
-  sub-bundle access comes from <code>lower_bound</code> on the sorted flat map, and the
-  zero-copy iteration comes from walking the bounded map range directly instead of
-  materializing a vector. A recursive node would also re-introduce, at every level, the
-  category/numeric comparator the vector was meant to avoid — and would fork the
+<p><strong>The <code>__</code> alias bug this fixes.</strong> Because attrs and data share
+  one keyspace, a data field literally named <code>__x</code> lands in the attribute
+  namespace, and the detector special-cases <code>___</code> (triple underscore) to avoid
+  false positives. With a separate <code>attrs</code> map the namespaces no longer overlap.
+  The Pyrope-facing rule already says attributes have <em>no</em> <code>__</code> prefix;
+  this brings storage in line with the contract.</p>
+<p><strong>Attribute names actually in flight</strong> (verified 2026-06-09):
+  <code>enumentry</code> (constprop.cpp:114–119,1933), <code>pub</code>/<code>pub_unit</code>
+  (constprop.cpp:2862,2866), <code>dp_assign</code> + <code>bits</code>/<code>max</code>/<code>min</code>/<code>ubits</code>/<code>sbits</code>
+  (only in the two external suffix-matchers — and <code>bits</code>/<code>max</code>/<code>min</code>
+  become typed fields in D, while <code>ubits</code>/<code>sbits</code> are stale and get
+  pruned), plus the category-B wiring names registered in
+  <code>upass_attributes_wiring.cpp</code>. The residual attrs map is genuinely small.</p>
+<p><strong>Why the data map stays flat (and does not recurse).</strong> The
+  O(N)→O(log N + k) sub-bundle access comes from <code>lower_bound</code> on the sorted
+  flat map, and zero-copy iteration comes from walking the bounded range. A recursive node
+  would re-introduce the category/numeric comparator at every level and fork the
   flatten-compare contract that <code>compare_bundles_eq</code> / <code>does</code> /
-  Verilog naming all depend on. Flat storage is lossless w.r.t. tree structure
-  (the dotted key encodes the full path), so there is no semantic reason to recurse.</p>
+  Verilog naming depend on. The dotted key encodes the full path losslessly.</p>
 <p><strong><code>lower_bound</code> boundary caveat.</strong> The stop condition is a
-  <em>segment</em> boundary, not a string prefix: <code>a</code> must bound
-  <code>a</code> and <code>a.b</code> but not <code>ab</code>/<code>abc</code>. Reuse
-  <code>match_first_partial</code> as the terminator (it already encodes the
-  <code>.</code>-boundary rule); <code>lower_bound</code> only gets you to the
-  <em>start</em> of the run cheaply. The bare scalar key <code>0</code> sorts immediately
-  before <code>0.foo</code> (a strict prefix sorts first), so scalar carriers and their
-  sub-leaves stay in one contiguous run.</p>
-<p><strong>Behavior that must round-trip exactly</strong> (the risky corners — all
-  currently LEC-verified; most get <em>simpler</em> once attrs are split out):</p>
+  <em>segment</em> boundary, not a string prefix: <code>a</code> bounds <code>a.b</code>
+  but not <code>ab</code>. Reuse <code>match_first_partial</code> (it already encodes the
+  <code>.</code>-boundary rule); <code>lower_bound</code> only finds the <em>start</em> of
+  the run.</p>
+<p><strong>Storage engine follow-up (explicitly out of 1b).</strong>
+  <code>absl::btree_map</code> is a near-drop-in for <code>std::map</code> here (ordered,
+  <code>lower_bound</code>, transparent comparator) and stores small maps in one node —
+  the 5–8-entry SBO behavior without hand-writing one. But it invalidates
+  iterators/pointers on insert, and bundle.cpp's promotion loops erase+insert mid-walk
+  while views hold <code>const Entry*</code>. Swap only after C lands, behind a
+  <code>bench_upass.sh</code> measurement, with the invalidation audit done.</p>
+<p><strong><code>name</code> field retirement.</strong> A Bundle's name is the symbol-table
+  key; storing it again on the Bundle is replication. Verified 2026-06-09: the only
+  <em>functional</em> reader is constprop's <code>resolve_field_operand</code>
+  (<code>upass_constprop.cpp:1744</code>), which builds <code>"&lt;name&gt;.&lt;field&gt;"</code>
+  to query <code>runner_type_query_fn</code> — exactly the pull plumbing 2b/H deletes (and
+  the typed per-field Entry facts from D remove the need even earlier). Everything else is
+  cosmetic: <code>dump()</code> (bundle.cpp:1023), two diagnostic prints (:548, :905), and
+  <code>concat</code> deriving a sub-bundle name (:514). Diagnostics still need a variable
+  name, but the <em>dispatcher</em> owns it: the 2b runner resolved the operand from the
+  table, so it passes the dst/src names to the hooks as <code>string_view</code>s —
+  tmps/<code>make_const</code> wrappers never had a meaningful name anyway, and
+  <code>dump()</code> grows a name parameter. Sequencing: deprecate here (F), delete in
+  2b/H. Bonus: dropping the <code>const std::string</code> member makes Bundle
+  copy-assignable, simplifying the COW clone path
+  (<code>symbol_table.cpp:83</code>).</p>
+<p><strong>Behavior that must round-trip exactly</strong> (LEC-pinned corners; most get
+  <em>simpler</em> once attrs are split and the root is inline):</p>
 <ul>
 <li><strong>Scalar carriers with attrs.</strong> <code>add_int</code> copies attribute
   leaves under a scalar key so <code>get_bundle(key)</code> round-trips the parse-time
-  <code>__enumentry</code> tag even though <code>is_scalar()</code> ignores attrs. In
-  the new shape this is "<code>data</code> has key <code>a</code>, <code>attrs</code> has
-  <code>a.enumentry</code>" — the scalar fast path can no longer mistake the attr leaf
-  for a data leaf.</li>
-<li><strong>Scalar→<code>.0</code> promotion.</strong> The <code>set()</code> promotion
-  pass that rewrites a scalar slot to <code>slot.0</code> when a deeper insert arrives
-  (and the symmetric <code>concat</code> <code>promote_scalar_to_sub</code>) now operates
-  on <code>data</code> only — the mid-walk <code>is_attribute</code> special-casing
-  (bundle.cpp:654, 662–665) drops out because attrs are no longer interleaved.</li>
-<li><strong><code>concat</code> merge rules.</strong> attrs = rhs-wins; named =
-  per-name merge with <code>nil</code>-drop and scalar-pack into a growing sub-tuple;
-  unnamed = append at the next free index. Preserve precisely — these are pinned by
-  the <code>++</code> / bundle-literal tests. The attr merge now writes the
-  <code>attrs</code> map; the named/unnamed merge writes <code>data</code>.</li>
-<li><strong>Single-element collapse.</strong> <code>(c=3) == 3</code> — a one-entry
-  bundle reads as its scalar while still carrying the one field. This is a Pyrope
-  language rule and stays in <code>upass_constprop.cpp</code> (the 1-entry-tuple cases),
-  <em>not</em> in <code>Bundle</code> — it is not pure flat-key-set equality and must not
-  migrate into the storage layer.</li>
+  <code>enumentry</code> tag. New shape: root Entry carries the value; <code>attrs</code>
+  has <code>enumentry</code> — the scalar fast path can no longer mistake an attr leaf for
+  a data leaf.</li>
+<li><strong>Scalar→<code>.0</code> promotion.</strong> Becomes the root→data spill in E;
+  the mid-walk <code>is_attribute</code> special-casing (bundle.cpp:654,662–665) drops out
+  because attrs are no longer interleaved.</li>
+<li><strong><code>concat</code> merge rules.</strong> attrs = rhs-wins; named = per-name
+  merge with <code>nil</code>-drop and scalar-pack into a growing sub-tuple; unnamed =
+  append at the next free index. Preserve precisely — pinned by the <code>++</code> /
+  bundle-literal tests.</li>
+<li><strong>Single-element collapse.</strong> <code>(c=3) == 3</code> stays a Pyrope rule
+  in <code>upass_constprop.cpp</code>, <em>not</em> in <code>Bundle</code> — it is not
+  flat-key-set equality and must not migrate into storage.</li>
 </ul>
-<p><strong>Doc reconciliation (unnamed-index semantics).</strong> The flat data map keeps
-  the rule "unnamed index counts only among unnamed entries; named fields are
-  name-access-only and consume no positional slot" — consistent with the authoritative
-  <code>(a=(b=1,c=2),7,3,d=3) == (a.b=1,a.c=2,d=3,7,3)</code> example and with current
-  behavior. <code>docs/pyrope/03-bundle.md</code> still carries a stale counter-example
-  (<code>mut a=(b:u8, b, b:u8=nil, const c=4) // a[2]==a.b</code>, asserted equal to an
-  all-positional <code>(100,100,200,4)</code>) that implies named fields consume
-  positions — which <code>compare_bundles_eq</code> would not fold true. Reconcile/fix
-  that example as part of this task so the doc matches the storage.</p>
-<p><strong>Blast radius (small, scoped).</strong> Attribute-API callers:
-  <code>inou/prp/prp2lnast.cpp</code> (10× <code>has_attr</code>),
-  <code>upass/constprop/upass_constprop.cpp</code> (<code>get_attr</code>/<code>set_attr</code>
-  ×4, <code>get_attrs</code> ×2), <code>upass/core/upass_core.hpp</code>,
-  <code>lnast/tests/symbol_table_test.cpp</code>. Iteration consumers: constprop +
-  the symbol-table test only. <code>__</code> hard-codes outside the bundle:
-  <code>bitwidth.cpp</code>, <code>cgen_verilog.cpp</code>. The public API stays stable
-  (the attr-map split is internal), so the cross-file diff is just the two external
-  suffix-matchers + the test; the <code>lower_bound</code> work (B) and view collapse (C)
-  are internal to <code>bundle.cpp</code> plus the constprop reader.</p>
+<p><strong>Blast radius (verified 2026-06-09).</strong> Attribute/iteration consumers:
+  <code>upass/constprop/upass_constprop.cpp</code> is the only hot reader (17×
+  <code>non_attr_entries</code>, 11× <code>top_levels</code>, 2× <code>set_attr</code>, 2×
+  <code>get_attrs</code>); <code>lnast/tests/symbol_table_test.cpp</code> (3 view calls);
+  prp2lnast has <strong>zero</strong> direct Bundle attr calls (the earlier ~10×
+  <code>has_attr</code> claim was wrong — that's an unrelated internal struct member).
+  External <code>__</code> hard-codes: <code>bitwidth.cpp</code>,
+  <code>cgen_verilog.cpp</code> — suffix matchers only, no Bundle API use, so the reshape
+  is invisible to tolg/cgen beyond those two rewrites. (The earlier draft's
+  doc-reconciliation item for <code>03-bundle.md</code> is dropped: the stale
+  counter-example no longer exists in <code>../docs/docs/pyrope/03-bundle.md</code>.)</p>
 </main>
 <footer><a href="../index.html">← All tasks</a> · LiveHD TODO · <code>livehd</code></footer>
 </body>
