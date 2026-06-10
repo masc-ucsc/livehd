@@ -196,6 +196,8 @@ public:
     // 2d-reg — wire every declared reg's din/enable/reset/initial now that
     // all stores and per-reg attr overrides have been seen.
     finalize_regs();
+    // 1a-mem — sanity-check the per-memory port allocation.
+    finalize_mems();
 
     // Outputs: connect each output's bound driver to its graph output sink.
     for (const auto& name : out_names_) {
@@ -268,6 +270,17 @@ private:
     auto        it = pin_map_.find(key);
     if (it != pin_map_.end()) {
       return it->second;
+    }
+    if (mem_map_.contains(key)) {
+      // 1a-mem — a memory name never binds a scalar pin; only indexed
+      // accesses are supported. A warning (not an error): hardware regs may
+      // legitimately be observed by other means (scan chain, future regref).
+      Pass::warn("upass.tolg: memory '{}' used as a scalar value — whole-array reads are unsupported, wiring nil (0sb?)",
+                 name);
+      auto p        = nil_pin();
+      pin_map_[key] = p;
+      mw_map_[key]  = 1;
+      return p;
     }
     Pass::warn("upass.tolg: unresolved ref '{}' — wiring nil (0sb?)", name);
     auto p        = nil_pin();
@@ -364,6 +377,14 @@ private:
       // 2d-reg — per-reg flop-attr overrides (reset_pin/sync/negreset/
       // initial); anything else keeps the unhandled warn below.
       lower_attr_set(nid);
+    } else if (N::is_tuple_get(t)) {
+      // 1a-mem — an indexed read of a declared memory becomes a read port;
+      // any other surviving tuple_get keeps the unhandled warn inside.
+      lower_tuple_get(nid);
+    } else if (N::is_tuple_add(t)) {
+      // 1a-mem — an all-const tuple literal is recorded as a potential array
+      // initializer; anything else keeps the unhandled warn inside.
+      lower_tuple_add(nid);
     } else if (N::is_for(t)) {
       // Task 2u — a `for` node reaching tolg means uPass_runner::unroll_for
       // could NOT unroll it: the iterable resolved to neither a comptime range
@@ -536,6 +557,16 @@ private:
     if (rhs.is_invalid()) {
       return;
     }
+    // 1a-mem — an indexed store to a declared memory becomes a write port;
+    // the 2-child whole-array form is the mut/const array initializer.
+    if (auto mit = mem_map_.find(std::string(lnast_->get_name(lhs))); mit != mem_map_.end()) {
+      if (lnast_->get_sibling_next(rhs).is_invalid()) {
+        lower_mem_init_store(rhs, lnast_->get_name(lhs), mit->second);
+      } else {
+        lower_mem_store(lhs, lnast_->get_name(lhs), mit->second);
+      }
+      return;
+    }
     if (!lnast_->get_sibling_next(rhs).is_invalid()) {
       Pass::warn("upass.tolg: tuple/field store not handled yet (lhs '{}')", lnast_->get_name(lhs));
       return;
@@ -566,6 +597,24 @@ private:
       record(en_key(lhs_name), en_const(true), 1);
       return;
     }
+    // 1a-mem — a plain `name = <tuple-literal-ref>` / `name = <__memory
+    // result>` aliases the record instead of binding a scalar pin (the
+    // literal/result has no pin; its consumers resolve through the record).
+    if (Lnast_ntype::is_ref(lnast_->get_type(rhs))) {
+      const std::string rhs_name(lnast_->get_name(rhs));
+      // Copy BEFORE inserting: operator[] may rehash and invalidate the
+      // found iterator (the task-1i type_info_map UAF all over again).
+      if (auto tit = tuple_recs_.find(rhs_name); tit != tuple_recs_.end()) {
+        auto rec_copy                      = tit->second;
+        tuple_recs_[std::string(lhs_name)] = std::move(rec_copy);
+        return;
+      }
+      if (auto mrt = mem_results_.find(rhs_name); mrt != mem_results_.end()) {
+        auto rec_copy                       = mrt->second;
+        mem_results_[std::string(lhs_name)] = rec_copy;
+        return;
+      }
+    }
     auto v = leaf(rhs);
     record(lhs_name, v.pin, v.mw);
   }
@@ -587,7 +636,17 @@ private:
     auto mode     = mode_nid.is_invalid() || !Lnast_ntype::is_const(lnast_->get_type(mode_nid))
                         ? std::string_view{}
                         : std::string_view(lnast_->get_name(mode_nid));
-    if (mode != "reg" && !mode.starts_with("reg ")) {
+    // 1a-mem — an array-typed declare is a Memory cell: reg → clocked async
+    // memory; a mut/const array that survived to tolg (runtime-indexed) → a
+    // comb type=2 array / ROM. Never a Flop, never a plain binding.
+    const bool is_reg = mode == "reg" || mode.starts_with("reg ");
+    if (!type_nid.is_invalid() && Lnast_ntype::is_comp_type_array(lnast_->get_type(type_nid))
+        && (is_reg || mode == "mut" || mode == "const" || mode.starts_with("mut ") || mode.starts_with("const "))) {
+      lower_mem_declare(name_nid, type_nid, mode_nid, /*is_array=*/!is_reg);
+      return;
+    }
+
+    if (!is_reg) {
       // mut/const/type declares carry no graph payload here (values arrive
       // via their stores); nothing to lower.
       return;
@@ -705,6 +764,615 @@ private:
       valid = true;
     }
     return pin;
+  }
+
+  // ── 1a-mem: array-typed reg → Ntype_op::Memory ──────────────────────────────
+  // One Memory cell per declared `reg name:[N]T`; one write port per store
+  // site and one read port per tuple_get site (no port merging here — that is
+  // a future LG pass). Per-port sink pids stride by 12 (graph/cell.cpp); the
+  // r-th read port's data comes out on driver pid (n_wr_total + r), so the
+  // write-site count is pre-scanned at the declare.
+  struct Mem_info {
+    hhds::Node_class node;
+    int64_t          size        = 0;
+    Bits_t           elem_mw     = 0;  // element max-value width
+    bool             elem_signed = false;
+    bool             is_array    = false;  // type=2: mut/const array (no clock, no persistence)
+    bool             is_pub      = false;  // pub reg: a remote regref may attach accesses — no diagnostics
+    bool             init_wired  = false;
+    int              n_wr_total  = 0;  // pre-scanned write sites (fixes dout pids)
+    int              wr_next     = 0;
+    int              rd_next     = 0;
+  };
+
+  static constexpr int kMemPortStride = 12;  // == Memory sink count, graph/cell.cpp
+
+  // Branch path conditions for memory write enables. Maintained by lower_if
+  // only while a memory exists (mem_map_ non-empty); each entry is the full
+  // path condition (already ANDed with the enclosing one). Empty stack =
+  // unconditional.
+  [[nodiscard]] Pin current_path_cond() const { return path_cond_.empty() ? Pin{} : path_cond_.back(); }
+
+  // a AND b as a 1-bit unsigned pin; an invalid operand means "true".
+  [[nodiscard]] Pin and2(const Pin& a, const Pin& b) {
+    if (a.is_invalid()) {
+      return b;
+    }
+    if (b.is_invalid()) {
+      return a;
+    }
+    auto node = create_typed_node(*g_, Ntype_op::And);
+    node.create_sink_pin(0).connect_driver(a);
+    node.create_sink_pin(0).connect_driver(b);
+    auto d = node.create_driver_pin(0);
+    set_bits(d, 1);
+    set_unsign(d);
+    return d;
+  }
+
+  // Bitwise NOT of a 1-bit condition (LSB carries the logical value).
+  [[nodiscard]] Pin not1(const Pin& a) {
+    auto node = create_typed_node(*g_, Ntype_op::Not);
+    setup_sink_by_name(node, "a").connect_driver(a);
+    auto d = node.create_driver_pin(0);
+    set_bits(d, 1);
+    set_unsign(d);
+    return d;
+  }
+
+  // Pre-scan: indexed stores (store(ref name, idx, val)) anywhere in the tree.
+  [[nodiscard]] int count_mem_write_sites(std::string_view name) const {
+    int                                   n    = 0;
+    std::function<void(const Lnast_nid&)> walk = [&](const Lnast_nid& nid) {
+      if (Lnast_ntype::is_store(lnast_->get_type(nid))) {
+        auto c0 = lnast_->get_first_child(nid);
+        if (!c0.is_invalid() && lnast_->get_name(c0) == name) {
+          auto c1 = lnast_->get_sibling_next(c0);
+          if (!c1.is_invalid() && !lnast_->get_sibling_next(c1).is_invalid()) {
+            ++n;
+          }
+        }
+      }
+      for (auto c = lnast_->get_first_child(nid); !c.is_invalid(); c = lnast_->get_sibling_next(c)) {
+        walk(c);
+      }
+    };
+    walk(lnast_->get_root());
+    return n;
+  }
+
+  // declare(ref name, comp_type_array(elem_type, const '[N]'), const mode
+  // [, init]) — two flavors sharing one lowering:
+  //  * reg  → async memory (type=0, fwd=1, 0-cycle read): writes commit at
+  //    the cycle edge, same-cycle reads see them through forwarding. Only a
+  //    nil/0sb? initializer is accepted in this slice (no reset hardware;
+  //    the reset-sweep FSM is a later slice).
+  //  * mut/const → comb array (type=2, no clock, no cross-cycle
+  //    persistence): the per-cycle default is the init contents (the
+  //    whole-array store wires the `init` pin); a const array with runtime
+  //    reads is a ROM (init + read ports only).
+  void lower_mem_declare(const Lnast_nid& name_nid, const Lnast_nid& type_nid, const Lnast_nid& mode_nid, bool is_array) {
+    auto name     = lnast_->get_name(name_nid);
+    auto elem_nid = lnast_->get_first_child(type_nid);
+    auto len_nid  = elem_nid.is_invalid() ? elem_nid : lnast_->get_sibling_next(elem_nid);
+    if (elem_nid.is_invalid() || len_nid.is_invalid()) {
+      Pass::error("upass.tolg: memory '{}' array type is missing its element type or size", name);
+      return;
+    }
+    if (Lnast_ntype::is_comp_type_array(lnast_->get_type(elem_nid))) {
+      Pass::error("upass.tolg: memory '{}' is multi-dimensional — not supported (use a single dimension)", name);
+      return;
+    }
+    auto [elem_mw, elem_signed] = declared_width(elem_nid);
+    if (elem_mw == 0) {
+      Pass::error("upass.tolg: memory '{}' element type must be a sized integer or bool", name);
+      return;
+    }
+    // The size const's text is the raw '[N]' annotation — strip the brackets.
+    auto len_txt = std::string(lnast_->get_name(len_nid));
+    if (len_txt.size() >= 2 && len_txt.front() == '[' && len_txt.back() == ']') {
+      len_txt = len_txt.substr(1, len_txt.size() - 2);
+    }
+    int64_t size = 0;
+    if (auto c = Const::from_pyrope(len_txt); c && c->is_i()) {
+      size = c->to_i();
+    }
+    if (size <= 0) {
+      Pass::error("upass.tolg: memory '{}' size '{}' is not a positive comptime constant", name, lnast_->get_name(len_nid));
+      return;
+    }
+    // reg initializer — same treatment as a mut array (reg and not-reg
+    // initialize alike): a concrete value becomes POWER-ON contents on the
+    // `init` pin (a scalar broadcasts to every entry; a tuple literal packs
+    // per entry). nil / 0sb? = uninitialized. Like every memory init it is
+    // NOT restored by a reset (a reset-sweep FSM stays future work).
+    // mut/const arrays get theirs via the whole-array store instead.
+    spool_ptr<Const> reg_init;
+    if (!is_array) {
+      for (auto c = lnast_->get_sibling_next(mode_nid); !c.is_invalid(); c = lnast_->get_sibling_next(c)) {
+        const auto ct = lnast_->get_type(c);
+        if (Lnast_ntype::is_stages(ct)) {
+          Pass::error("upass.tolg: memory '{}' cannot carry a stage[] qualifier", name);
+          return;
+        }
+        if (Lnast_ntype::is_const(ct)) {
+          auto txt = lnast_->get_name(c);
+          if (txt == "nil" || txt == "0sb?") {
+            break;
+          }
+          auto v = Const::from_pyrope(txt);
+          if (!v || !v->is_i()) {
+            Pass::error("upass.tolg: memory '{}' initializer '{}' is not an integer constant", name, txt);
+            return;
+          }
+          // Scalar broadcast: every entry = value (masked to the element).
+          auto mask  = Const::get_mask_value(elem_mw);
+          auto entry = v->and_op(*mask);
+          reg_init   = Const::create_integer(0);
+          for (int64_t i = 0; i < size; ++i) {
+            reg_init = reg_init->or_op(*entry->shl_op(*Const::create_integer(i * elem_mw)));
+          }
+          break;
+        }
+        if (Lnast_ntype::is_ref(ct)) {
+          auto tit = tuple_recs_.find(std::string(lnast_->get_name(c)));
+          if (tit == tuple_recs_.end() || !tit->second.named.empty()) {
+            Pass::error("upass.tolg: memory '{}' initializer must be a comptime constant or tuple literal", name);
+            return;
+          }
+          reg_init = pack_tuple_init(tit->second, name, size, elem_mw);
+          if (!reg_init) {
+            return;  // pack_tuple_init reported
+          }
+          break;
+        }
+        Pass::error("upass.tolg: memory '{}' initializer must be a comptime constant or tuple literal", name);
+        return;
+      }
+    }
+
+    auto mem = create_typed_node(*g_, Ntype_op::Memory);
+    setup_sink_by_name(mem, "bits").connect_driver(create_const(*g_, *Const::create_integer(elem_mw)));
+    setup_sink_by_name(mem, "size").connect_driver(create_const(*g_, *Const::create_integer(size)));
+    setup_sink_by_name(mem, "type").connect_driver(create_const(*g_, *Const::create_integer(is_array ? 2 : 0)));
+    setup_sink_by_name(mem, "fwd").connect_driver(create_const(*g_, *Const::create_integer(1)));
+    setup_sink_by_name(mem, "wensize").connect_driver(create_const(*g_, *Const::create_integer(1)));
+    if (reg_init) {
+      setup_sink_by_name(mem, "init").connect_driver(create_const(*g_, *reg_init));
+    }
+    if (!is_array) {
+      setup_sink_by_name(mem, "posclk").connect_driver(create_const(*g_, *Const::create_integer(1)));
+      if (!clock_name_.empty()) {
+        setup_sink_by_name(mem, "clock_pin").connect_driver(clock_pin());
+      } else {
+        Pass::warn("upass.tolg: memory '{}' has no clock input to bind", name);
+      }
+    }
+
+    Mem_info info;
+    info.node        = mem;
+    info.size        = size;
+    info.elem_mw     = elem_mw;
+    info.elem_signed = elem_signed;
+    info.is_array    = is_array;
+    // `pub` on a reg means a remote regref may attach reads/writes later —
+    // suppress access diagnostics. Dormant today (prp2lnast restricts `pub`
+    // to file scope), but the gate is mode-keyed so it activates with regref.
+    info.is_pub      = std::string_view(lnast_->get_name(mode_nid)).find("pub") != std::string_view::npos;
+    info.n_wr_total  = count_mem_write_sites(name);
+    mem_map_.emplace(std::string(name), info);
+    mem_order_.emplace_back(name);
+  }
+
+  // A surviving tuple literal, recorded by node id so a memory consumer can
+  // resolve its elements later: positional const/ref children land in
+  // `elems`, named fields (store children) in `named`. Consumers: the
+  // mut/const array initializer (all-const elems → `init` packing) and the
+  // __memory(cfg) builtin (named fields + per-port positional lists).
+  struct Tuple_rec {
+    std::vector<Lnast_nid>                      elems;
+    absl::flat_hash_map<std::string, Lnast_nid> named;
+  };
+
+  // tuple_add(ref dst, e0 | store(name, v), …) — record the literal. Any
+  // other child shape keeps the unhandled warn (nothing can consume it).
+  void lower_tuple_add(const Lnast_nid& nid) {
+    auto dst = lnast_->get_first_child(nid);
+    if (dst.is_invalid()) {
+      return;
+    }
+    Tuple_rec rec;
+    for (auto c = lnast_->get_sibling_next(dst); !c.is_invalid(); c = lnast_->get_sibling_next(c)) {
+      const auto ct = lnast_->get_type(c);
+      if (Lnast_ntype::is_const(ct) || Lnast_ntype::is_ref(ct)) {
+        rec.elems.emplace_back(c);
+        continue;
+      }
+      if (Lnast_ntype::is_store(ct)) {
+        auto k = lnast_->get_first_child(c);
+        auto v = k.is_invalid() ? k : lnast_->get_sibling_next(k);
+        if (!v.is_invalid() && lnast_->get_sibling_next(v).is_invalid()) {
+          rec.named[std::string(lnast_->get_name(k))] = v;
+          continue;
+        }
+      }
+      Pass::warn("upass.tolg: unhandled node type 'tuple_add'");
+      return;
+    }
+    tuple_recs_[std::string(lnast_->get_name(dst))] = std::move(rec);
+  }
+
+  // store(ref mem, rhs) — the whole-array form. For a mut/const array this
+  // is its initializer: pack the recorded tuple consts into one wide const
+  // (entry 0 in the low `bits`, row-major) on the `init` sink. `= nil` means
+  // zero-filled (cgen's default). reg memories reject the shape outright.
+  void lower_mem_init_store(const Lnast_nid& rhs, std::string_view name, Mem_info& mi) {
+    if (!mi.is_array) {
+      Pass::error("upass.tolg: whole-array assignment to memory '{}' is not supported — write one entry at a time", name);
+      return;
+    }
+    if (mi.init_wired) {
+      Pass::error("upass.tolg: array '{}' is re-initialized — only the declaration initializer is supported", name);
+      return;
+    }
+    const auto rt = lnast_->get_type(rhs);
+    if (Lnast_ntype::is_const(rt)) {
+      auto txt = lnast_->get_name(rhs);
+      if (txt == "nil" || txt == "0sb?") {
+        mi.init_wired = true;  // zero-filled default
+        return;
+      }
+      Pass::error("upass.tolg: array '{}' initializer '{}' is not supported — use a tuple literal or nil", name, txt);
+      return;
+    }
+    auto tit = tuple_recs_.find(std::string(lnast_->get_name(rhs)));
+    if (tit == tuple_recs_.end() || !tit->second.named.empty()) {
+      Pass::error("upass.tolg: array '{}' initializer must be a comptime tuple literal", name);
+      return;
+    }
+    auto init = pack_tuple_init(tit->second, name, mi.size, mi.elem_mw);
+    if (!init) {
+      return;  // pack_tuple_init reported
+    }
+    setup_sink_by_name(mi.node, "init").connect_driver(create_const(*g_, *init));
+    mi.init_wired = true;
+  }
+
+  // Pack an all-const positional tuple into the wide `init` value: entry 0
+  // in the low `bits`, row-major. Returns null after reporting on error.
+  [[nodiscard]] spool_ptr<Const> pack_tuple_init(const Tuple_rec& rec, std::string_view name, int64_t size, Bits_t bits) {
+    if (static_cast<int64_t>(rec.elems.size()) != size) {
+      Pass::error("upass.tolg: '{}' initializer has {} entries but the memory holds {}", name, rec.elems.size(), size);
+      return {};
+    }
+    auto mask = Const::get_mask_value(bits);
+    auto init = Const::create_integer(0);
+    for (size_t i = 0; i < rec.elems.size(); ++i) {
+      const auto& e = rec.elems[i];
+      if (!Lnast_ntype::is_const(lnast_->get_type(e))) {
+        Pass::error("upass.tolg: '{}' initializer entry {} is not a compile-time constant", name, i);
+        return {};
+      }
+      auto v = Const::from_pyrope(lnast_->get_name(e));
+      if (!v || !v->is_i()) {
+        Pass::error("upass.tolg: '{}' initializer entry {} is not an integer constant", name, i);
+        return {};
+      }
+      auto entry = v->and_op(*mask)->shl_op(*Const::create_integer(static_cast<int64_t>(i) * bits));
+      init       = init->or_op(*entry);
+    }
+    return init;
+  }
+
+  // 1a-mem — the bound result of a `__memory(cfg)` call: `res[N]` reads the
+  // N-th READ port's data (driver pid n_wr + N, port order).
+  struct Mem_result {
+    hhds::Node_class node;
+    int              n_wr = 0;
+    int              n_rd = 0;
+    Bits_t           bits = 0;
+  };
+
+  // fcall(ref dst, ref __memory, ref cfg) — direct Memory-cell instantiation
+  // (08-memories.md RTL form). The cfg vocabulary is the cell pins VERBATIM
+  // (decision 2026-06-09): addr/bits/clock_pin/din/enable/fwd/posclk/type/
+  // wensize/size/rdport + init — no `latency`, type picks 0 async / 1 sync /
+  // 2 array, rdport entries are strictly 0/1, dout comes back as a tuple
+  // indexed by read-port order. Returns false when the call is not __memory.
+  bool try_lower_memory_builtin(const Lnast_nid& nid, std::string_view callee_name) {
+    if (callee_name != "__memory") {
+      return false;
+    }
+    auto dst      = lnast_->get_first_child(nid);
+    auto callee_n = lnast_->get_sibling_next(dst);
+    auto arg      = lnast_->get_sibling_next(callee_n);
+    if (arg.is_invalid() || !lnast_->get_sibling_next(arg).is_invalid()) {
+      Pass::error("upass.tolg: __memory takes exactly one config tuple in '{}'", lnast_->get_top_module_name());
+      return true;
+    }
+    auto rit = tuple_recs_.find(std::string(lnast_->get_name(arg)));
+    if (rit == tuple_recs_.end()) {
+      Pass::error("upass.tolg: __memory config '{}' must be a single tuple literal (build it as `mut cfg = (addr=…, "
+                  "bits=…, …)`)",
+                  lnast_->get_name(arg));
+      return true;
+    }
+    const auto& cfg = rit->second;
+
+    // Guardrail: cell pins verbatim — diagnose the old doc vocabulary.
+    static constexpr std::string_view known[] = {"addr", "bits", "clock_pin", "din", "enable", "fwd", "posclk",
+                                                 "type", "wensize", "size", "rdport", "init"};
+    for (const auto& [k, v] : cfg.named) {
+      if (std::find(std::begin(known), std::end(known), k) == std::end(known)) {
+        Pass::error("upass.tolg: unknown __memory config field '{}' — the vocabulary is the Memory cell pins verbatim "
+                    "(addr/bits/clock_pin/din/enable/fwd/posclk/type/wensize/size/rdport/init; no `latency`, no `clock`)",
+                    k);
+        return true;
+      }
+    }
+
+    auto cfg_const = [&](std::string_view key, int64_t def, bool required, int64_t& out) -> bool {
+      auto it = cfg.named.find(std::string(key));
+      if (it == cfg.named.end()) {
+        if (required) {
+          Pass::error("upass.tolg: __memory config is missing the required '{}' field", key);
+          return false;
+        }
+        out = def;
+        return true;
+      }
+      if (!Lnast_ntype::is_const(lnast_->get_type(it->second))) {
+        Pass::error("upass.tolg: __memory config field '{}' must be a compile-time constant", key);
+        return false;
+      }
+      auto v = Const::from_pyrope(lnast_->get_name(it->second));
+      if (!v || !v->is_i()) {
+        // bool consts ("false"/"true") are integers in from_pyrope; anything
+        // else is a config error.
+        Pass::error("upass.tolg: __memory config field '{}' is not an integer constant", key);
+        return false;
+      }
+      out = v->to_i();
+      return true;
+    };
+
+    int64_t bits = 0, size = 0, type = 0, fwd = 0, wensize = 1, posclk = 1;
+    if (!cfg_const("bits", 0, true, bits) || !cfg_const("size", 0, true, size) || !cfg_const("type", 0, false, type)
+        || !cfg_const("fwd", 0, false, fwd) || !cfg_const("wensize", 1, false, wensize)
+        || !cfg_const("posclk", 1, false, posclk)) {
+      return true;
+    }
+    if (bits <= 0 || size <= 0) {
+      Pass::error("upass.tolg: __memory needs positive bits/size (got bits={}, size={})", bits, size);
+      return true;
+    }
+    if (type < 0 || type > 2) {
+      Pass::error("upass.tolg: __memory type must be 0 (async), 1 (sync) or 2 (array) — got {}", type);
+      return true;
+    }
+
+    // Per-port lists: a field is a positional tuple ref or a single scalar.
+    auto cfg_list = [&](std::string_view key, std::vector<Lnast_nid>& out) -> bool {
+      auto it = cfg.named.find(std::string(key));
+      if (it == cfg.named.end()) {
+        return true;  // empty
+      }
+      const auto vt = lnast_->get_type(it->second);
+      if (Lnast_ntype::is_ref(vt)) {
+        if (auto lit = tuple_recs_.find(std::string(lnast_->get_name(it->second))); lit != tuple_recs_.end()) {
+          if (!lit->second.named.empty()) {
+            Pass::error("upass.tolg: __memory config field '{}' must be a positional tuple", key);
+            return false;
+          }
+          out = lit->second.elems;
+          return true;
+        }
+      }
+      out = {it->second};  // single scalar = one port
+      return true;
+    };
+
+    std::vector<Lnast_nid> addrs, dins, ens, rdports;
+    if (!cfg_list("addr", addrs) || !cfg_list("din", dins) || !cfg_list("enable", ens) || !cfg_list("rdport", rdports)) {
+      return true;
+    }
+    if (addrs.empty()) {
+      Pass::error("upass.tolg: __memory config needs at least one 'addr' entry");
+      return true;
+    }
+    const int n_ports = static_cast<int>(addrs.size());
+    if (static_cast<int>(rdports.size()) != n_ports) {
+      Pass::error("upass.tolg: __memory 'rdport' has {} entries but 'addr' has {}", rdports.size(), n_ports);
+      return true;
+    }
+
+    auto mem = create_typed_node(*g_, Ntype_op::Memory);
+    setup_sink_by_name(mem, "bits").connect_driver(create_const(*g_, *Const::create_integer(bits)));
+    setup_sink_by_name(mem, "size").connect_driver(create_const(*g_, *Const::create_integer(size)));
+    setup_sink_by_name(mem, "type").connect_driver(create_const(*g_, *Const::create_integer(type)));
+    setup_sink_by_name(mem, "fwd").connect_driver(create_const(*g_, *Const::create_integer(fwd)));
+    setup_sink_by_name(mem, "wensize").connect_driver(create_const(*g_, *Const::create_integer(wensize)));
+    if (type != 2) {
+      setup_sink_by_name(mem, "posclk").connect_driver(create_const(*g_, *Const::create_integer(posclk)));
+      if (auto it = cfg.named.find("clock_pin"); it != cfg.named.end()) {
+        setup_sink_by_name(mem, "clock_pin").connect_driver(leaf(it->second).pin);
+      } else if (!clock_name_.empty()) {
+        setup_sink_by_name(mem, "clock_pin").connect_driver(clock_pin());
+      } else {
+        Pass::warn("upass.tolg: __memory has no clock to bind in '{}'", lnast_->get_top_module_name());
+      }
+    }
+    if (auto it = cfg.named.find("init"); it != cfg.named.end()) {
+      spool_ptr<Const> init;
+      if (Lnast_ntype::is_const(lnast_->get_type(it->second))) {
+        init = Const::from_pyrope(lnast_->get_name(it->second));
+      } else if (auto lit = tuple_recs_.find(std::string(lnast_->get_name(it->second))); lit != tuple_recs_.end()) {
+        init = pack_tuple_init(lit->second, "__memory init", size, static_cast<Bits_t>(bits));
+      }
+      if (!init) {
+        Pass::error("upass.tolg: __memory 'init' must be a comptime constant or tuple literal");
+        return true;
+      }
+      setup_sink_by_name(mem, "init").connect_driver(create_const(*g_, *init));
+    }
+
+    int n_wr = 0;
+    for (int i = 0; i < n_ports; ++i) {
+      if (!Lnast_ntype::is_const(lnast_->get_type(rdports[i]))) {
+        Pass::error("upass.tolg: __memory 'rdport' entry {} must be a comptime 0/1 constant", i);
+        return true;
+      }
+      auto v = Const::from_pyrope(lnast_->get_name(rdports[i]));
+      const bool is_rd = v && !v->is_known_false();
+      if (!is_rd) {
+        ++n_wr;
+      }
+    }
+
+    for (int i = 0; i < n_ports; ++i) {
+      const auto base  = i * kMemPortStride;
+      auto       rdv   = Const::from_pyrope(lnast_->get_name(rdports[i]));
+      const bool is_rd = rdv && !rdv->is_known_false();
+      mem.create_sink_pin(static_cast<hhds::Port_id>(base + 0)).connect_driver(leaf(addrs[i]).pin);
+      mem.create_sink_pin(static_cast<hhds::Port_id>(base + 10))
+          .connect_driver(create_const(*g_, *Const::create_integer(is_rd ? 1 : 0)));
+      Pin en = i < static_cast<int>(ens.size()) ? leaf(ens[i]).pin : en_const(true);
+      mem.create_sink_pin(static_cast<hhds::Port_id>(base + 4)).connect_driver(en);
+      if (!is_rd) {
+        if (i >= static_cast<int>(dins.size())) {
+          Pass::error("upass.tolg: __memory write port {} has no 'din' entry", i);
+          return true;
+        }
+        mem.create_sink_pin(static_cast<hhds::Port_id>(base + 3)).connect_driver(leaf(dins[i]).pin);
+      }
+    }
+
+    mem_results_[std::string(lnast_->get_name(dst))]
+        = Mem_result{mem, n_wr, n_ports - n_wr, static_cast<Bits_t>(bits)};
+    return true;
+  }
+
+  // store(ref mem, idx, val) — one write port per site. The enable is the
+  // site's full branch-path condition (true when unconditional); same-cycle
+  // conflicts between ports are defined by the memory config (fwd), not here.
+  void lower_mem_store(const Lnast_nid& lhs, std::string_view lhs_name, Mem_info& mi) {
+    auto idx = lnast_->get_sibling_next(lhs);
+    auto val = idx.is_invalid() ? idx : lnast_->get_sibling_next(idx);
+    if (val.is_invalid()) {
+      Pass::error("upass.tolg: whole-array assignment to memory '{}' is not supported — write one entry at a time", lhs_name);
+      return;
+    }
+    if (!lnast_->get_sibling_next(val).is_invalid()) {
+      Pass::error("upass.tolg: multi-dimensional or field write to memory '{}' is not supported", lhs_name);
+      return;
+    }
+    if (mi.wr_next >= mi.n_wr_total) {
+      Pass::error("upass.tolg: internal — memory '{}' write-site pre-scan undercounted", lhs_name);
+      return;
+    }
+    if (mi.is_array && mi.rd_next > 0) {
+      // A type=2 array is lowered writes-before-reads (forwarding), so a
+      // source-order read placed BEFORE this write would wrongly see it.
+      // reg memories are exempt: fwd semantics are order-free by contract.
+      Pass::error("upass.tolg: array '{}' is written after being read — same-cycle order is not preserved for "
+                  "mut/const arrays; reorder the accesses or use a `reg` memory",
+                  lhs_name);
+      return;
+    }
+    const auto base = mi.wr_next * kMemPortStride;
+    ++mi.wr_next;
+    mi.node.create_sink_pin(static_cast<hhds::Port_id>(base + 0)).connect_driver(leaf(idx).pin);   // addr
+    mi.node.create_sink_pin(static_cast<hhds::Port_id>(base + 3)).connect_driver(leaf(val).pin);   // din
+    auto en = current_path_cond();
+    if (en.is_invalid()) {
+      en = en_const(true);
+    }
+    mi.node.create_sink_pin(static_cast<hhds::Port_id>(base + 4)).connect_driver(en);  // enable
+    mi.node.create_sink_pin(static_cast<hhds::Port_id>(base + 10))
+        .connect_driver(create_const(*g_, *Const::create_integer(0)));  // rdport = 0 (write)
+  }
+
+  // tuple_get(ref dst, ref mem, idx) — one read port per site, always
+  // enabled; dst binds to the port's dout driver (pid n_wr_total + r).
+  void lower_tuple_get(const Lnast_nid& nid) {
+    auto dst = lnast_->get_first_child(nid);
+    auto src = dst.is_invalid() ? dst : lnast_->get_sibling_next(dst);
+    auto idx = src.is_invalid() ? src : lnast_->get_sibling_next(src);
+    if (idx.is_invalid()) {
+      Pass::warn("upass.tolg: unhandled node type 'tuple_get'");
+      return;
+    }
+    auto it = mem_map_.find(std::string(lnast_->get_name(src)));
+    if (it == mem_map_.end()) {
+      // 1a-mem — res[N] on a __memory result: bind the N-th read port's dout.
+      if (auto mrt = mem_results_.find(std::string(lnast_->get_name(src))); mrt != mem_results_.end()) {
+        const auto& mr = mrt->second;
+        if (!Lnast_ntype::is_const(lnast_->get_type(idx)) || !lnast_->get_sibling_next(idx).is_invalid()) {
+          Pass::error("upass.tolg: a __memory result is indexed by a single comptime read-port number");
+          return;
+        }
+        auto v = Const::from_pyrope(lnast_->get_name(idx));
+        const int64_t k = (v && v->is_i()) ? v->to_i() : -1;
+        if (k < 0 || k >= mr.n_rd) {
+          Pass::error("upass.tolg: __memory result index {} out of range — the config has {} read port(s)",
+                      lnast_->get_name(idx),
+                      mr.n_rd);
+          return;
+        }
+        auto dout = mr.node.create_driver_pin(static_cast<hhds::Port_id>(mr.n_wr + k));
+        set_bits(dout, mr.bits);
+        set_unsign(dout);  // __memory data is raw bits — unsigned
+        record(lnast_->get_name(dst), to_positive(dout, mr.bits), mr.bits);
+        return;
+      }
+      Pass::warn("upass.tolg: unhandled node type 'tuple_get'");
+      return;
+    }
+    auto& mi = it->second;
+    if (!lnast_->get_sibling_next(idx).is_invalid()) {
+      Pass::error("upass.tolg: multi-dimensional or field read of memory '{}' is not supported", lnast_->get_name(src));
+      return;
+    }
+    const int  slot = mi.n_wr_total + mi.rd_next;
+    const auto base = slot * kMemPortStride;
+    mi.node.create_sink_pin(static_cast<hhds::Port_id>(base + 0)).connect_driver(leaf(idx).pin);  // addr
+    mi.node.create_sink_pin(static_cast<hhds::Port_id>(base + 4)).connect_driver(en_const(true));
+    mi.node.create_sink_pin(static_cast<hhds::Port_id>(base + 10))
+        .connect_driver(create_const(*g_, *Const::create_integer(1)));  // rdport = 1 (read)
+    auto dout = mi.node.create_driver_pin(static_cast<hhds::Port_id>(mi.n_wr_total + mi.rd_next));
+    ++mi.rd_next;
+    auto dst_name = lnast_->get_name(dst);
+    if (mi.elem_signed) {
+      set_bits(dout, mi.elem_mw);
+      set_sign(dout);
+      record(dst_name, dout, mi.elem_mw);
+    } else {
+      set_bits(dout, mi.elem_mw);
+      set_unsign(dout);
+      record(dst_name, to_positive(dout, mi.elem_mw), mi.elem_mw);  // unsigned -> positive
+    }
+  }
+
+  void finalize_mems() {
+    for (const auto& name : mem_order_) {
+      auto it = mem_map_.find(name);
+      if (it == mem_map_.end()) {
+        continue;
+      }
+      const auto& mi = it->second;
+      if (mi.wr_next != mi.n_wr_total) {
+        Pass::error("upass.tolg: internal — memory '{}' lowered {} write sites but the pre-scan counted {}",
+                    name,
+                    mi.wr_next,
+                    mi.n_wr_total);
+      }
+      // A read-less (or access-less) memory is a WARNING at most — its state
+      // can be observed by a scan chain, and a future remote regref may
+      // attach reads/writes. `pub` (regref potential) silences it entirely.
+      if (!mi.is_pub && mi.rd_next == 0) {
+        Pass::warn("upass.tolg: memory '{}' is never read — contents are only observable via scan/regref", name);
+      }
+    }
   }
 
   // Declared (mw, is_signed) from a declare's type child. prim_type_int(max,
@@ -881,6 +1549,11 @@ private:
       return;
     }
     std::string callee_name(lnast_->get_name(callee_n));
+
+    // 1a-mem — direct Memory-cell instantiation builtin.
+    if (try_lower_memory_builtin(nid, callee_name)) {
+      return;
+    }
 
     // Task 1m — a resolved `import` call is comptime scaffolding: constprop
     // bound its namespace bundle / lambda ref and every consumer folded (an
@@ -1387,18 +2060,36 @@ private:
     if (child.is_invalid()) {
       return;
     }
+    // 1a-mem — memory write enables need each branch's full path condition;
+    // only built while a memory exists (zero overhead otherwise). `guard`
+    // accumulates enclosing ∧ ¬(prior conds); a branch's path is guard ∧ cond.
+    const bool track_path = !mem_map_.empty();
+    Pin        guard      = track_path ? current_path_cond() : Pin{};
+    auto       lower_branch_with_path = [&](const Lnast_nid& stmts, const Pin& path) {
+      if (!track_path) {
+        return lower_branch(stmts);
+      }
+      path_cond_.push_back(path);
+      auto w = lower_branch(stmts);
+      path_cond_.pop_back();
+      return w;
+    };
+
     Pin first_cond = leaf(child).pin;  // child0 = condition
     child          = lnast_->get_sibling_next(child);
     if (child.is_invalid()) {
       return;
     }
-    branches.push_back({false, first_cond, lower_branch(child)});  // then-stmts
+    branches.push_back({false, first_cond, lower_branch_with_path(child, track_path ? and2(guard, first_cond) : Pin{})});
+    if (track_path) {
+      guard = and2(guard, not1(first_cond));
+    }
 
     child = lnast_->get_sibling_next(child);
     while (!child.is_invalid()) {
       bool last = lnast_->is_last_child(child);
       if (last && Lnast_ntype::is_stmts(lnast_->get_type(child))) {
-        branches.push_back({true, Pin{}, lower_branch(child)});  // bare else
+        branches.push_back({true, Pin{}, lower_branch_with_path(child, guard)});  // bare else
         break;
       }
       Pin elif_cond = leaf(child).pin;
@@ -1406,7 +2097,10 @@ private:
       if (child.is_invalid()) {
         break;
       }
-      branches.push_back({false, elif_cond, lower_branch(child)});
+      branches.push_back({false, elif_cond, lower_branch_with_path(child, track_path ? and2(guard, elif_cond) : Pin{})});
+      if (track_path) {
+        guard = and2(guard, not1(elif_cond));
+      }
       child = lnast_->get_sibling_next(child);
     }
 
@@ -1467,6 +2161,15 @@ private:
   absl::flat_hash_map<std::string, hhds::Node_class> reg_map_;
   absl::flat_hash_map<std::string, Reg_info>         reg_info_;
   std::vector<std::string>                           reg_order_;
+  // 1a-mem — declared memories (array-typed regs + mut/const arrays), the
+  // branch-path stack lower_if maintains for their write enables, the
+  // recorded tuple literals (array initializers / __memory configs), and the
+  // bound __memory results.
+  absl::flat_hash_map<std::string, Mem_info>   mem_map_;
+  std::vector<std::string>                     mem_order_;
+  std::vector<Pin>                             path_cond_;
+  absl::flat_hash_map<std::string, Tuple_rec>  tuple_recs_;
+  absl::flat_hash_map<std::string, Mem_result> mem_results_;
   std::string                                        clock_name_;
   bool                                               clock_minted_ = false;
   Pin                                                clock_pin_;
@@ -2123,6 +2826,15 @@ private:
 // recursion diagnostic belongs to a later phase.
 [[nodiscard]] bool tree_declares_reg(const std::shared_ptr<Lnast>& lnast) {
   std::function<bool(const Lnast_nid&)> has_reg = [&](const Lnast_nid& nid) -> bool {
+    // 1a-mem — a __memory(cfg) instantiation needs the clock too (a type=2
+    // array config leaves the minted input unused; acceptable, documented).
+    if (Lnast_ntype::is_func_call(lnast->get_type(nid))) {
+      auto c0 = lnast->get_first_child(nid);
+      auto c1 = c0.is_invalid() ? c0 : lnast->get_sibling_next(c0);
+      if (!c1.is_invalid() && lnast->get_name(c1) == "__memory") {
+        return true;
+      }
+    }
     if (Lnast_ntype::is_declare(lnast->get_type(nid))) {
       auto c0 = lnast->get_first_child(nid);
       if (!c0.is_invalid()) {
@@ -2229,7 +2941,11 @@ void collect_callee_names(const std::shared_ptr<Lnast>& lnast, std::vector<std::
         auto c2 = c1.is_invalid() ? c1 : lnast->get_sibling_next(c1);
         if (!c2.is_invalid() && Lnast_ntype::is_const(lnast->get_type(c2))) {
           auto mode = lnast->get_name(c2);
-          if (mode == "reg" || mode.starts_with("reg ")) {
+          // 1a-mem — array regs are memories: no reset hardware in this
+          // slice (only nil/0sb? init is accepted), so they never need the
+          // implicit reset input.
+          const bool is_array = !c1.is_invalid() && Lnast_ntype::is_comp_type_array(lnast->get_type(c1));
+          if (!is_array && (mode == "reg" || mode.starts_with("reg "))) {
             for (auto c = lnast->get_sibling_next(c2); !c.is_invalid(); c = lnast->get_sibling_next(c)) {
               const auto ct = lnast->get_type(c);
               if (Lnast_ntype::is_stages(ct)) {

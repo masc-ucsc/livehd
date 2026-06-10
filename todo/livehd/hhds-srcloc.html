@@ -31,18 +31,25 @@
   <code>../hhds</code>; language-agnostic (anchors are path + span + line; no
   Pyrope concepts).</li>
 <li><strong>B — ownership + save/load/merge integration.</strong> One instance per
-  single-writer unit: a locator member on <code>Graph</code> and one per tree (in
-  practice per private <code>Forest</code>). <code>GraphLibrary::save</code> /
-  <code>Forest::save</code> / <code>export_into</code> union the per-artifact
-  locators into one table file next to <code>library.txt</code> /
-  <code>forest.txt</code>; <code>load</code> brings it back as a shared read-only
-  base; <code>load_merge</code> unions tables and applies the ID remap alongside
-  the existing Sub-gid remap.</li>
+  single-writer unit: a locator member on <code>Graph</code>; on the tree side the
+  owner is the artifact wrapper (LiveHD's <code>Lnast</code>), because body swaps
+  (<code>replace_body</code> onto unattached temp trees) and the shared loaded
+  forest rule out raw <code>Tree</code>/<code>Forest</code> members (see
+  Ownership below). hhds registers the SourceId attr tag so
+  <code>GraphLibrary::save</code> / <code>Forest::save</code> /
+  <code>load_merge</code> can union tables and rewrite remapped IDs in the typed
+  attr maps natively (like the Sub-gid remap); <code>load</code> brings the table
+  back as a shared read-only base.</li>
 <li><strong>C — tests.</strong> Hash determinism (same path+span → same ID across
-  two locators), collision probe-remap, combine determinism + dedup
-  (<code>combine(a,b)</code> twice → one entry), parent expansion with depth cap,
-  union-merge with and without collisions (remap table applied), save/load and
-  <code>load_merge</code> round-trips.</li>
+  two locators; relative-path determinism across two checkout roots), collision
+  probe-remap, combine determinism + dedup (same ordered parents twice → one
+  entry; <code>combine(a,b) ≠ combine(b,a)</code>), <code>resolve_all</code>
+  diamond expansion (visited set) + depth-cap truncation report, union-merge with
+  and without collisions — including the cross-order case (two locators that
+  probe-remapped the same colliding spans in opposite orders converge by payload
+  dedup) and a combine-over-remapped-parent cascade — and save/load,
+  <code>load_merge</code>, and <code>ln:</code>-load→no-op→save provenance
+  round-trips.</li>
 </ul>
 
 <h2>Subtasks — landed</h2>
@@ -58,6 +65,11 @@ locators are combined the union dedups for free, and bazel-parallel compilations
 agree on IDs without coordination. This is the same move as the
 <code>GraphLibrary</code> gid refactor (FNV-1a(name), <code>pick_gid_for_name</code>
 linear probe in <code>hhds/graph.hpp</code>).</p>
+<p><strong>Canonical path = workspace/exec-root-relative</strong>, never
+absolute — matching the depfile path contract (lhd/lhd_kernel.cpp:706-709).
+Absolutizing (what <code>Hhds_graph_library::canonical_path</code> does today via
+<code>fs::absolute</code>) would make IDs differ across checkouts/exec-roots and
+break exactly the cross-artifact agreement claimed above.</p>
 <p><strong>Collisions:</strong> if a mint finds the hashed slot occupied by a
 <em>different</em> payload, probe-remap to a fresh nearby ID. Remapped IDs are
 locator-local (they lose cross-artifact determinism), which is acceptable because
@@ -85,33 +97,67 @@ real design.</p>
 <h3>Combined IDs (one value from N source sites)</h3>
 <p>Transformations routinely map one IR value to several source sites (alias,
 inline = callee def + call site, merged writes). Rather than tracking sets of
-integers at every consumer, <code>combine(a, b)</code> mints a <em>new</em> ID
-meaning "both anchors": ID = hash over the canonically-ordered parent IDs, entry
-kind <em>combine</em> with the parent list. Determinism makes re-combining the
-same pair dedup to one entry. <code>resolve_all(id, max_depth)</code> expands
-parents (depth-capped) into the set of concrete anchors; <code>resolve(id)</code>
-returns the primary (first) anchor. A diagnostic for a combined ID renders the
-primary anchor as the span and the remaining anchors as secondary notes.</p>
+integers at every consumer, <code>combine(parents…)</code> mints a <em>new</em>
+ID meaning "all of these anchors": entry kind <em>combine</em> with the parent
+list. The parent list is <strong>caller-ordered and order-significant</strong> —
+the first parent is the <em>primary</em> anchor (what a diagnostic renders as its
+span; the rest become secondary notes), and the ID is the hash over the parent
+IDs <em>in that order</em>, so <code>combine(a,b) ≠ combine(b,a)</code> but
+re-minting the same ordered list anywhere dedups to one entry. The call is
+variadic: a consumer accumulating N sites (e.g. N contributing writes) collects
+them and mints <em>once</em> — never builds association-sensitive
+<code>combine(combine(a,b),c)</code> chains. <code>resolve(id)</code> returns the
+primary anchor; <code>resolve_all(id, max_depth)</code> expands parents with a
+<strong>visited set</strong> (linear in reachable entries — combine graphs are
+DAGs and diamonds must not re-expand) plus a depth cap, reporting truncation
+rather than silently dropping anchors.</p>
 
 <h3>Ownership and threading</h3>
 <p>LiveHD multithreads <em>across</em> lnasts/graphs, never within one — only one
 thread edits a given graph/tree at a time. The locator must match that
-single-writer unit: <strong>one instance per <code>Graph</code> and one per
-tree</strong> (per private <code>Forest</code> in practice), so mints need no
-locks. A per-<code>GraphLibrary</code>/<code>Forest</code> locator exists only as
-the <em>serialized union</em> built at save time. After a load, the library-level
-table is a shared read-only base; artifacts that mutate append into their own
-locator (lookups consult own-then-base).</p>
+single-writer unit: <strong>one instance per artifact wrapper</strong> — a member
+on <code>Graph</code>, and per-<code>Lnast</code> on the tree side — so mints
+need no locks. A per-<code>GraphLibrary</code>/<code>Forest</code> locator exists
+only as the <em>serialized union</em> built at save time. After a load, the
+library-level table is a shared read-only base; each artifact layers its own
+initially-empty delta locator over it (lookups consult own-then-base).</p>
+<p><strong>Why the wrapper and not the raw tree/forest:</strong> the LiveHD tree
+lifecycle defeats both naive homes. The runner's materialize cycle swaps each
+<code>Lnast</code> body for an unattached temp tree (<code>create_tree_temp</code>
+→ <code>replace_body</code>), so a per-<code>Tree</code> member would be silently
+dropped every rebuild; and <code>ln:</code> load adopts <em>all</em> units from
+one shared forest (<code>Lnast::adopt</code>), so a mutable per-<code>Forest</code>
+member would be multi-writer. A locator hanging off the <code>Lnast</code>
+(holding an <code>hhds::Source_locator</code>) survives body swaps for free; the
+seams that must hand it over explicitly are <code>export_into</code> (clone into
+the save forest) and the save-time union below.</p>
 
 <h3>Serialization and merge</h3>
 <ul>
 <li>One table file per save dir, next to <code>library.txt</code> /
   <code>forest.txt</code> (binary or text — implementer's choice, but
   append-friendly and versioned).</li>
-<li><code>save</code> = union of the per-artifact locators. A union returns a
-  remap table (old → new) for the rare true collisions; the caller applies it to
-  the <code>uint64</code> node/pin attributes it is serializing — exactly the
-  pattern <code>load_merge</code> already uses for Sub-ref gid remap.</li>
+<li><code>save</code> = union of the per-artifact locators, where each operand is
+  the artifact's <strong>own-then-base view</strong> — base entries reachable
+  from a loaded artifact (including combine parents) must be carried into the
+  union, or an <code>ln:</code> load → no-op → save round-trip silently drops all
+  provenance (the kernel's <code>save_ln_dir</code> exports into a <em>fresh</em>
+  forest).</li>
+<li><strong>Union algorithm:</strong> dedup by <em>payload</em> first (anchor
+  equality — two locators that probe-remapped the same colliding spans in
+  opposite orders must still converge to one entry per span), then probe-remap
+  residual true ID conflicts. The remap is applied to (a) the registered
+  <code>uint64</code> SourceId node/pin attribute — hhds owns the attr tag so
+  <code>save</code>/<code>load_merge</code> can rewrite the typed attr maps,
+  exactly like the Sub-ref gid remap — and (b) <em>combine entries' parent
+  lists</em>: a rewritten parent list re-keys its combine entry (ID =
+  hash(parents)), which can cascade; process in topological parent order
+  (append-only DAG ⇒ terminates) and fold the re-mints into the returned remap
+  table.</li>
+<li><strong>Saving into an existing dir:</strong> the on-disk table is an
+  immutable base — <code>Forest::save</code> skips clean (non-dirty) trees, whose
+  serialized attrs can never be rewritten, so only <em>fresh</em> entries may be
+  remapped; IDs already used by a previously-saved tree never move.</li>
 <li><code>load_merge</code> (the <code>lg:</code> linker path) unions the two
   libraries' tables the same way.</li>
 <li>Entries are append-only; existing entries never change meaning.</li>
@@ -121,10 +167,12 @@ locator (lookups consult own-then-base).</p>
 <pre><code>class Source_locator {
   SourceId mint(path, start_byte, end_byte, line);
   SourceId mint_line(path, line);
-  SourceId combine(SourceId a, SourceId b);        // dedups via hash(parents)
+  SourceId combine(span&lt;const SourceId&gt; parents); // ordered; [0] = primary;
+                                                  // ID = hash(ordered parents)
   Anchor          resolve(SourceId) const;          // primary anchor
-  vector&lt;Anchor&gt;  resolve_all(SourceId, depth) const; // parents expanded
-  RemapTable merge(const Source_locator&amp; other);   // union; remap on collision
+  vector&lt;Anchor&gt;  resolve_all(SourceId, depth) const; // DAG expand, visited set
+  RemapTable merge(const Source_locator&amp; other);   // payload dedup, then remap;
+                                                   // cascades combine re-keys
   // + save/load hooks used by Forest / GraphLibrary
 };
 </code></pre>

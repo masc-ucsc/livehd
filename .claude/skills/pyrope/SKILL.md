@@ -1,705 +1,387 @@
-# Pyrope Skills Guide for Coding Agents
+---
+name: pyrope
+description: Write and check Pyrope (LiveHD's HDL). Use when creating or editing .prp files, translating Verilog to/from Pyrope, or answering Pyrope syntax questions.
+---
 
-<!--
-  This guide targets **Pyrope 3.0** (the implementation under `inou/prp` in
-  LiveHD). Pyrope 3.0 is syntactically and semantically distinct from
-  Pyrope 2.0 (under `inou/pyrope`): lambda kinds, pipelining timing,
-  register access, and attribute syntax are NOT compatible. Do not mix
-  examples from 2.0 sources — prefer the specs under
-  `docs/docs/pyrope/00-hwdesign.md` through `10-internals.md`.
--->
+# Writing Pyrope
 
-A practical reference for generating valid Pyrope 3.0 code or translating
-between Pyrope and Verilog. This guide assumes familiarity with hardware
-design concepts.
+Pyrope is a hardware description language: every construct elaborates to wires,
+muxes, flops, and memories. This file is the working subset needed to *generate
+correct code*. The full spec lives in `~/projs/docs/docs/pyrope/` (chapters
+00–10). Always verify generated code with `lhd` (last section).
 
-## Quick Reference
+## Ground rules
 
-### Storage Classes
+* Comments are `//` only. `;` is the same as a newline. No variable shadowing,
+  anywhere. A continuation line must not start with an alphanumeric or `(`.
+* Every declaration starts with a kind keyword — data: `const` / `mut` / `reg`;
+  lambda: `comb` / `pipe` / `mod` / `fluid`. Prefix modifiers: `comptime`,
+  `pub`. Assignment prefixes: `wrap`, `sat`. `stage[N]` is a `mod`-only
+  declaration modifier.
+* Every data declaration needs `= value`:
+    - a concrete value (`0`, `false`, `""`, `(x=1)`) — the normal case
+    - `nil` — invalid / "no value yet"; *reading* it is an error; the default
+      for tuples; `reg x = nil` declares a register with **no reset**
+    - `0sb?` / `0ub?` / `0ub10??01` — unknown bits (Verilog `x`); a valid
+      integer value that x-propagates (`0sb? + 1 == 0sb??`, `0sb? | 1 == 1`)
+    - There is **no bare `?`**, **no `_` default**, and **no `0b` prefix**
+      (write `0ub`/`0sb` explicitly).
+* `comptime` must be written explicitly (`comptime const SIZE = 16`).
+  Uppercase naming carries no comptime meaning.
+* Integers are unlimited-precision **signed**. `u8`, `i4`, `unsigned`,
+  `int(min=0, max=300)` are range constraints on that one type
+  (`u<N>` max is 2^N−1). `1K == 1024`, also `M`/`G`/`T`.
+* bool and int never mix: `if x != 0 {}`, casts `int(true)`, `boolean(v#[3])`.
+  `and`/`or`/`implies`/`not` are boolean-only (short-circuit); `& | ^ ~ ~& ~|
+  ~^` are bitwise integer ops. There is no `%` (modulo) and no exponent op.
+* Precedence is shallow — parenthesize: `3 & 4*4` is a compile error; write
+  `3 & (4*4)`. Comparisons chain in one direction (`a <= b < c`).
+
+## Lambdas (the only functions)
+
+| kind | contract |
+|------|----------|
+| `comb` | Pure combinational, zero cycles. No `reg` (only `::[debug]` state). `ref` args allowed (acts as an implicit output, still combinational). Inlined when not fully typed. |
+| `pipe[N]` | Fixed latency `N > 0`: every output lands exactly N cycles after its inputs; **never** a comb input→output path. A feedback `reg` is state (adds no latency); an unconditionally-written feedforward `reg` is a pipeline stage counted in N. A conditional write ⇒ state register. |
+| `pipe[A..=B]` / bare `pipe` | Latency range / fully flexible; the **caller** picks via `stage[N]`. `pipe` calls are only legal inside `mod`. |
+| `mod` | No constraints (Mealy, Moore, orchestrator). **Every output declares its landing cycle at the interface**: `-> (x:u8@[2], y:u8@[0])`. `@[0]` = comb feedthrough (legal in `mod`, forbidden in `pipe`); `@[]` = unconstrained opt-out; omitting `@[...]` is a compile error. Registered output: `-> (reg count:u8@[0])` — the q is the output. |
+| `fluid` | Transactional valid/retry handshakes (`.[valid]`, `.[retry]`, `.[fire]`). Callable only from `mod`/`fluid`. |
+
 ```pyrope
-comptime SIZE = 16          // Compile-time constant (shorthand for comptime const)
-comptime const SIZE2 = 16   // Explicit form of above
-comptime mut idx = 0        // Mutable at elaboration time
-const val = input           // Immutable after assignment (runtime, NOT compile-time)
-mut wire = 0                // Combinational wire (reassignable, no persistence)
-reg state = 0               // Register (persistent across cycles)
+comb add(a:u8, b:u8) -> (r:u9) { r = a + b }
+pub comb get5() -> (v) { v = 5 }       // pub = importable from other files
 ```
 
-Uppercase identifiers are implicitly `comptime const` by convention.
+**Outputs** — always declared **by name** in `-> (...)`; the clause is
+mandatory (`-> ()` for none); only `self`-methods may omit it. The body
+*assigns* the outputs — a trailing bare expression does nothing. **`return` is
+a terminator only**: `return X` is a syntax error. Assign first, then `return`
+/ `return when cond` / `return unless cond`. Callers get a named tuple
+(`r.next`); a single-output tuple auto-unwraps. Destructuring binds **by
+name** — `const (b, c) = f(...)` (order irrelevant); rename with
+`(x=f.b) = f(...)`. Unnamed RHS tuples destructure positionally.
 
-### Lambda Types (only three)
+**Calls** — parentheses always (`noarg()`); a bare lambda name is a value
+(higher-order), never a call. Name every argument: `f(a=1, b=2)`. Unnamed is OK
+only when: the lambda has a single argument, the passed variable's name equals
+the parameter name, or the types are unambiguous. UFCS `x.f(args)` works only
+when `f` declares `self` as first parameter; `self` binds positionally, never
+`f(self=...)`; `ref self` needs a `mut` receiver. `ref` must be written at the
+declaration **and** the call: `comb inc(ref a) -> () { a += 1 }` … `inc(ref y)`.
+
+**Overloading/generics** — overload by gathering: `const add = [add1, add2]`.
+Generics: `comb f<T>(a:T, b:T) -> (r)`. Comptime parameters live in the `[...]`
+slot: `comb g[n:int=1](x) -> (r)`, called as `g[3](x=2)`. Varargs `(...args)`
+gather leftovers (`args[i]` / `args.NAME`). There is **no placeholder lambda
+sugar** — no `_`/`_0`/`_1` shorthands; pass a named comb (`mymap.each(inc)`).
+
+**Constructor** — `init` is the *only* implicit hook: a `comb`, run once at
+construction (`mut x:T = v` or explicit `T(v)`); overload via
+`const init = [fn1, fn2]`. There are **no getter/setter hooks** — after
+construction, all reads/writes are structural. Extension methods can be added
+later: `Typ.double = some_comb`.
+
+## Tuples, arrays, types
+
 ```pyrope
-comb add(a, b) -> (result) { result = a + b }    // Pure combinational, no state
-pipe[3] mul(a, b) -> (c) { c = a * b }           // Moore machine, fixed 3-cycle latency
-pipe[1..=3] flex(a) -> (c) { c = a }             // Compiler/caller picks within range
-pipe mul2(a, b) -> (c) { c = a * b }             // Bare: caller picks latency via await[N]
-mod counter(en) -> (val) { /* regs + orchestration */ }   // No constraints; can be Mealy, Moore, or a pipeline orchestrator
+mut p = (mut x:u8 = 0, mut y:u8 = 0)   // named fields use a kind keyword
+const iface = (
+  ,mut value:u8 = 0
+  ,comb read(self) -> (v:u8) { v = self.value }
+  ,comb inc(ref self)        { wrap self.value += 1 }
+)
+mut t = (1, 2, 3)                      // positional entries are bare values
+mut arr = [1, 2, 3]                    // [] = array: all entries same type
 ```
 
-`mod` replaces the old `flow` lambda kind — pipeline orchestration lives
-inside `mod` now, using `await[N]` and `@[N]`.
+* Access: `p.x`, `t[0]`, `a['r1']`. Integer indices select *positional*
+  entries only; named fields are name-access only.
+* `a ++ b` concatenates (same-named fields merge into a subtuple);
+  `(...a, b=2)` splices in place (duplicate name = error); append to a field
+  *after* the literal with `y.f ++= v` (never inside it).
+* A selector `[...]` takes ONE expression (int, string, range, or a
+  conditional) — `a[0,1]` is not allowed.
+* Mutability: outer `const` freezes every field; inner `const` pins one field
+  of a `mut` tuple.
+* `type Foo = (mut color:string = "", mut value:s33 = nil)` declares a type.
+  Complicated lambda types must be declared ahead with `type`, never inline.
+* Structural typing operators: `does` (a covers b's structure; `u32 does u16`),
+  `equals`, `case` (`does` + defined-value match; `nil`/`0sb?` wildcards),
+  `is` (nominal), `has` (field), `in` (membership). Negate with `not (...)` —
+  there are no `!has`/`!in`/`!and` forms.
+* `:Type` annotations only at declaration sites. Check elsewhere with
+  `cassert(x does T)`; convert with constructor calls: `u8(x)`, `int(s)`,
+  `string(n)`. `_` is allowed only as a name wildcard in type positions
+  (`comb() -> (_:int)`).
+* Enums: `enum State = (Idle, Run, Done)` — one-hot encoding by default; any
+  explicit value (or an `:int` type) switches to sequential; hierarchical
+  enums nest. **Always compare against names** (`state == State.Idle`), never
+  raw integers. Casts: `string(E.a)`, `E("a")`.
+* Ranges: `0..=7`, `0..<8`, `2..+3`, optional `step 2`; ascending only. Open
+  ends in selectors (`a[1..]`); negative = distance from the end
+  (`b#[1..=-2]`).
 
-A `comb`/`pipe`/`mod` with `self` as the first argument is a **method**.
-`async` is reserved for future use.
+## Bit selection and reduction
 
-### Operators
 ```pyrope
-// Arithmetic: +  -  *  /  %  (% is debug-only)
-// Bitwise:    &  |  ^  ~   ~&  ~|  ~^   (NAND/NOR/XNOR)
-// Logical:    and  or  !  not  implies  !and  !or  !implies
-// Comparison: ==  !=  <  <=  >  >=   (chained: a <= b <= c)
-// Shifts:     <<  >>
-// Concat:     ++  (tuple concatenation — strings, lambdas, tuples)
-// Bit select: val#[3..=6]   val#[3]           (NEVER use #[] for timing)
-// Cycle type: val@[N]  on LHS or RHS          (pure type check; NEVER use @[] for bit select)
-// Timing:     await[N] lhs = rhs              (declaration modifier in mod only)
-// Attr set:   var::[attr=value]               (only at declaration; with type: var:T:[attr])
-// Attr read:  var.[attr]                      (returns value; nil if unset)
-// Attr lhs:   var.[attr] = value              (only for runtime hw signals: valid, defer)
-// Narrowing:  wrap lhs = rhs   sat lhs = rhs  (per-statement prefix modifier)
+v#[3]            // bit 3            v#[1..=4]    // bit slice (zext result)
+v#sext[0..=2]    // sign-extended slice
+v#|[..]  v#&[..]  v#^[..]  v#+[..]   // or/and/xor-reduce (int 0/1), popcount
+trans#[0] = v#[1]   // LHS bit assign; every dest bit driven exactly once
+const onehot = 1 << (1, 4, 3)        // == 0ub01_1010
 ```
 
-### Register and pipeline timing (Pyrope 3.0)
+`#[]` is bits, `[]` is tuple/array elements, `@[N]` is a cycle typecheck —
+never mix them. Bit concatenation = explicit per-range LHS assigns into a typed
+destination (no `{a,b}` form).
 
-Registers are read/written through **bare references**, `.[defer]`, and
-`past[n]()` — the older `@[0]`, `@[]`, `@[-1]`, `@[1]` forms from Pyrope 2.0
-are **not valid** in Pyrope 3.0.
+## Statements
+
+* `if c { } elif { } else { }` — also an expression form. `unique if` asserts
+  mutually exclusive conditions (one-hot mux; replaces tri-state).
+* `match` — exactly-one-branch semantics, **the `else` arm is mandatory**
+  (parse error without it). A bare value means `==`. Arms: `== v`, `in (2,3)`,
+  `case (a=1)`, `< 5`, `else`. The selector can declare locals:
+  `match const t = f(); t { ... }`.
+* `when` / `unless` trailing gates are **compile-time** (`#if`-like — the
+  condition must be comptime): `assert(x) when DEBUG`, `reg r = 3 when CFG`,
+  `return unless DEBUG`. Runtime gating uses an `if` block or if-expression
+  (`if enable { count += 1 }`). Exception: verification statements are also
+  gated on runtime signals to silence spurious checks
+  (`always_assert(mem[7] == 7) unless mem.reset`).
+* Loops `for i in 0..<N {}`, `while`, `loop` are fully unrolled — bounds must
+  be comptime. `break`/`continue` work. Iterate tuples
+  (`for (i, v) in t.enumerate()`), mutate via `for x in ref t { x += 1 }`.
+  Build tuples by accumulating: `mut acc:[] = nil` … `acc ++= v` (there are no
+  comprehensions).
+* Code blocks `{ ... }` are expressions evaluating to their last expression
+  (`mut a = {mut d=3; d+1} + 100`); they may not have outer side effects.
+* `wrap` / `sat` prefix every narrowing assignment (`wrap c = a + 1`,
+  `sat d += 1`); an unannotated narrowing assignment is a compile error.
+
+## Registers and timing
 
 ```pyrope
-reg counter:u8 = 0
-
-const q_now   = counter            // current 'q' value
-const q_end   = counter.[defer]    // end-of-cycle value (next cycle's 'q')
-counter       = counter + 1        // write: takes effect at cycle boundary (like Verilog <=)
-counter.[defer] = 42               // explicit deferred write (end-of-cycle)
-
-const prev1   = past[1](counter)   // value from 1 cycle ago (debug; inserts a flop)
-const prev2   = past[2](counter)   // value from 2 cycles ago
-const prev    = past(counter)      // shorthand for past[1](counter)
+reg counter:u8 = 0            // '= 0' is the RESET value (nil ⇒ no reset)
+const q   = counter           // bare name reads current q (snapshot first if needed)
+counter += 1                  // write with plain =/+=; lands at the cycle boundary
+const eoc = counter.[defer]   // RHS-ONLY end-of-cycle read — same-cycle wiring, no flop
+const old = past[2](counter)  // value 2 cycles ago (compiler inserts 2 flops)
 ```
 
-### Pipeline timing inside `mod` (three constructs)
-```pyrope
-pipe mul(a, b) -> (c) { c = a * b }
-pipe add(a, b) -> (c) { c = a + b }
+* There is **no `x.[defer] = ...` write form**, and no `@[-1]`/`@[1]` register
+  indexing — those are pre-3.0 forms.
+* `.[defer]` is *wiring, not time*: it lets an earlier statement use the value
+  produced by a later statement in the same cycle
+  (`f1 = ring(a=a, b=f4.[defer])` to close a module ring). It never crosses a
+  cycle.
+* Register attributes at declaration:
+  `reg c:u8:[clock_pin=ref clk2, reset_pin=ref rst2, sync=false, posclk=false, retime] = 3`.
+  `_pin` attributes connect **wires** → they need `ref` (a comptime constant
+  like `reset_pin=false` doesn't). `sync` defaults true (async reset =
+  `sync=false`); `retime` lets synthesis move/merge the flop.
+* Multi-cycle reset code: assign a lambda **by name** (no parens):
+  `reg arr:[1024]Tag = my_reset_mod`.
 
-mod mac(a, b, c) -> (out) {
-  await[3] tmp     = mul(a, b)              // await[N]: RHS is delivered N cycles later
-  await[3] c_d     = c                      // await[N] on any RHS, not just a pipe call
-  await[1] out@[4] = add(tmp@[3], c_d@[3])  // @[N] on use asserts value lives at cycle N
+## Pipelining inside `mod`
+
+```pyrope
+pipe mul(a:u16, b:u16) -> (c:u32) { c = a * b }
+pipe add(a:u32, b:u32) -> (c:u32) { wrap c = a + b }
+
+mod mac(in1:u16, in2:u16) -> (out:u32@[4]) {
+  stage[3] tmp     = mul(a=in1, b=in2)            // RHS delivered 3 cycles later
+  stage[3] in1_d   = in1                          // pure 3-cycle delay
+  stage[1] out@[4] = add(a=tmp@[3], b=in1_d@[3])  // all alignments typechecked
 }
 ```
 
-Rules:
-* `await[N]` is a **declaration modifier** (in the same slot as `const`/`mut`/`reg`)
-  and is only valid inside `mod`. Not allowed in `comb` or `pipe` bodies.
-* `@[N]` is a **pure cycle type check** on either LHS or RHS uses —
-  it inserts no flops; misalignment is a compile error.
-* Bare `pipe` calls **must** be consumed via `await[N]` at the call site.
+* `stage[N]` — declaration modifier, `mod`-only, `N > 0` (`stage[0]` is an
+  error; plain `=` is same-cycle). Also `stage[A..=B]` and `stage[]` (tool
+  picks). N is the **latency of the RHS**, relative.
+* `x@[N]` — pure cycle typecheck (absolute cycle counted from the lambda
+  inputs), legal on LHS and RHS, in `mod` and `pipe` bodies. It **never
+  inserts flops**; a mismatch is a compile error. `@[]` opts out.
+* A bare/ranged `pipe` call must be consumed by `stage[N]`. There is no
+  implicit alignment: to mix values from different cycles, delay explicitly
+  with `stage[N] x = v` or `past[n](v)`.
+* Accumulator over a pipelined unit (state regs read q at their home stage):
 
-### Control Flow
 ```pyrope
-if cond { a } else { b }                         // Standard conditional (creates new scope)
-unique if c1 { x } elif c2 { y } else { z }      // Mutually exclusive (generates __hotmux; may optimize to tri-state)
-match val {
-  == 0     { a }        // implicit == allowed when entry is bare expr
-  < 5      { b }
-  in 6,7,8 { c }
-  else     { d }
-}
-a += 1 when enable                                // Trailing conditional (no new scope)
-return 0 unless valid                             // Early exit (return only for early exits)
-for i in 0..=7 { mem[i] = 0 }                    // Bounds must be comptime (unrolled)
-while cond { ... }                                // Unrolled at elaboration
-loop { ... }                                      // == while true
-break  continue                                   // Works in for / while / loop
-```
-
-`match` must have exactly one matching branch; if none match and there is no
-`else`, an error is generated (it behaves like a unique parallel case with an
-implicit `optimize`). The last expression in a block is the implicit return
-value; `return` is only for early exits.
-
-### Assertions and Verification
-```pyrope
-assert cond                    // Runtime check (skipped during reset/invalid)
-cassert cond                   // Must be verified at compile time
-optimize cond                  // Assert + allows synthesis optimization
-always assert cond             // Checked even during reset/invalid
-always cassert cond            // Compile-time variant that ignores reset/valid gate
-always optimize cond           // Same, for optimize
-cover cond, "message"          // Must be true at least once during testing
-covercase grp, cond, "msg"     // Coverage grouped with `grp`
-requires cond                  // Lambda precondition (allows optimizer to assume it)
-ensures  cond                  // Lambda postcondition (same)
-test "name" { step; assert x } // Test block; `step` advances one clock cycle
-```
-
-### Test-only primitives (from `09-verification.md`)
-```pyrope
-step              // advance one cycle
-step 5            // advance five cycles
-waitfor cond      // block until cond becomes true (can use .[rising], .[falling], .[changed])
-poke  "path", v   // drive a signal in the DUT hierarchy
-sigref("path")    // reference a DUT signal by hierarchical path
-regref("path")    // reference a DUT register by hierarchical path
-spawn name = { ... }  // concurrent stimulus/monitor thread; `cancel name` to kill
-```
-
-## Common Patterns
-
-### Counter
-```pyrope
-mod counter(enable:bool) -> (value:u8) {
-  reg count:u8:[wrap] = 0
-  value = count
-  count += 1 when enable
-}
-```
-
-Or with registered output:
-```pyrope
-mod counter(enable:bool) -> (reg count:u8 = 0) {
-  count += 1 when enable
-}
-```
-
-Custom clock/reset pins:
-```pyrope
-mod counter2(enable:bool) -> (
-  reg count:u8:[wrap=true, reset_pin=ref rst, clock_pin=ref clk] = 0
-) {
-  count += 1 when enable
-}
-```
-
-### FSM
-```pyrope
-enum State = (Idle, Run, Done)
-
-mod fsm(start:bool, fin:bool) -> (busy:bool) {
-  reg state:State = State.Idle
-
-  busy = state == State.Run
-
-  match state {
-    == State.Idle { state = State.Run  when start }
-    == State.Run  { state = State.Done when fin   }
-    == State.Done { state = State.Idle            }
-  }
-}
-```
-
-### Pipeline (multiply-add)
-```pyrope
-pipe mul(a, b) -> (c) { c = a * b }
-pipe add(a, b) -> (c) { c = a + b }
-
-mod multiply_add(in1, in2) -> (out) {
-  await[3] tmp     = mul(in1, in2)
-  await[3] in1_d   = in1
-  await[1] out@[4] = add(tmp@[3], in1_d@[3])
-}
-```
-
-### Accumulator over a pipelined multiplier
-```pyrope
-mod accum(in1, in2) -> (out) {
-  reg total = 0
-  await[3] tmp = mul(in1, in2)
-  total.[defer] = total + tmp@[3]
+mod accum(in1:u16, in2:u16) -> (out:u32@[3]) {
+  reg total:u32 = 0
+  stage[3] tmp = mul(a=in1, b=in2)
+  wrap total = total + tmp@[3]
   out = total
 }
 ```
 
-### Async memory
+## Memories
+
 ```pyrope
-mod mem_block(we:bool, addr:u8, wdata:u32) -> (rdata:u32) {
-  reg memory:[256]u32 = 0
-  rdata = memory[addr]
-  memory[addr] = wdata when we
-}
+reg mem:[256]u32 = 0       // async mem: 0-cycle read, fwd by default, reset to 0
+reg mem2:[16]i8 = nil      // no reset
+mut scratch:[] = nil       // plain array: no persistence across cycles
+mut m2:[4][8]u8 = 13       // multi-dimensional, row-major
 ```
 
-### Dual-port RAM (1-cycle read)
-```pyrope
-pipe[1] dual_port_ram(we:bool, waddr:u8, raddr:u8, wdata:u32) -> (rdata:u32) {
-  reg mem:[256]u32 = 0
+Read `mem[addr]`; write `if we { mem[addr] = din }`. Indices can be enum- or
+range-constrained (`mut x:[X]u3`, `mut s:[-8..<7]u3`). A synchronous SRAM is an
+async mem with flopped address or flopped data, or a direct
+`stage[1..<inf] res = __memory(cfg)` RTL instantiation. Physically pooled
+memories are shared with `regref("mem_pool/buf0")` — behaves like a local
+`reg` (reads q, sequential by construction, one functional writer globally).
 
-  mem[waddr] = wdata when we
+## Verification
+
+* `assert(...)`, `cassert(...)` (must hold at compile time), `optimize(...)`
+  (assert + lets synthesis assume it), `requires(...)`/`ensures(...)` (lambda
+  pre/post), `cover(...)`, `covercase(GRP, cond, "msg")`. Always parenthesized;
+  optional trailing message. `always_assert` etc. also check during
+  reset/invalid.
+* `test "name {}", arg { ... }` blocks: `step [n]`,
+  `waitfor(ref cond_var, timeout=N)`, `peek`/`poke("path", v)`,
+  `force`/`release`, `spawn name = { ... }` with `join`/`cancel`,
+  `sigref("top/a/b")` (debug-only, any signal) and `regref` (any register in
+  debug contexts).
+* Temporal library (debug-only except `past`): `past[n](x)`, `next[n](x)`,
+  `rose[w](x)`, `fell`, `stable`, `changed`, `eventually[1..=32](x)`,
+  `always[w](x)`; attribute sugar `sig.[rising]` / `.[falling]` /
+  `.[changed]`. SVA `$rose(req) |-> ##[1:10] $rose(ack)` becomes
+  `assert(rose(req) implies rose[1..=10](ack))`.
+* Random: `x.[rand]` (simulation) / `x.[crand]` (comptime).
+  `lec(gold, impl)` checks combinational equivalence.
+* `puts("a={a} b={}", b)` (interpolation in double quotes, queued to end of
+  cycle, allowed in `comb`), `print`, `format`, `cputs` (compile-time print).
+
+## Files, visibility, instantiation
+
+* A file's top scope is setup code, run once. Only `pub` top-scope lambdas,
+  types, and constants can be imported: `const lib = import("file")` /
+  `import("proj/file")`. `pub mut` and `pub reg` are compile errors — use
+  `regref` for cross-hierarchy registers.
+* Pin the generated netlist/Verilog module name with the `lg` attribute:
+  `pub comb my_top::[lg="chip_top"](...)` — pub-only, comptime string; the
+  `import` key stays `my_top`. Never invent `pub("name")`.
+* A fully typed `pipe`/`mod` lowers to a module; an untyped one is a per-call
+  template (every actual feeding it must have a declared type).
+* Do not instantiate conditionally to "save hardware": a lambda called inside
+  `if`/`match` behaves as if inlined there with valid-gated inputs. Structure
+  the design with unconditional calls and mux the results when that is the
+  intent.
+
+## Canonical patterns
+
+```pyrope
+// Counter — three spellings
+mod counter1(enable:bool) -> (value:u8@[0]) {
+  reg count:u8 = 0
+  value = count
+  if enable { wrap count += 1 }
+}
+mod counter2(enable:bool) -> (reg count:u8@[0]) {  // registered output: q is the output
+  if enable { wrap count += 1 }
+}
+pipe[1] counter3(enable:bool) -> (reg count:u8) {  // pipe state output: home stage N-1
+  if enable { wrap count += 1 }
+}
+
+// FSM — match needs else; runtime gating uses if
+enum State = (Idle, Run, Done)
+
+mod fsm(start:bool, fin:bool) -> (busy:bool@[0]) {
+  reg state:State = State.Idle
+  busy = state == State.Run
+  match state {
+    == State.Idle { if start { state = State.Run  } }
+    == State.Run  { if fin   { state = State.Done } }
+    else          { state = State.Idle }
+  }
+}
+
+// 1-cycle dual-port RAM
+pipe[1] dpram(we:bool, waddr:u8, raddr:u8, wdata:u32) -> (rdata:u32) {
+  reg mem:[256]u32 = 0
+  if we { mem[waddr] = wdata }
   rdata = mem[raddr]
 }
 ```
 
-### Tuple with getter/setter
-```pyrope
-mut saturating_counter = (
-  mut _val:u8 = 0,
-  getter = comb(self) { self._val },
-  setter = comb(ref self, v:u8) { sat self._val = v },
-)
-
-saturating_counter = 300     // saturates to 255
-assert saturating_counter == 255
-```
-
-## Verilog to Pyrope Translation
-
-### Example 1: Simple Counter
-
-=== "Verilog"
-    ```verilog
-    module counter #(parameter WIDTH = 8) (
-      input  wire             clk,
-      input  wire             rst,
-      input  wire             enable,
-      output reg  [WIDTH-1:0] count
-    );
-      always @(posedge clk) begin
-        if (rst)
-          count <= 0;
-        else if (enable)
-          count <= count + 1;
-      end
-    endmodule
-    ```
-
-=== "Pyrope"
-    ```pyrope
-    mod counter(enable:bool) -> (reg count:u8 = 0) {
-      count += 1 when enable
-    }
-    ```
-
-### Example 2: Mux with Priority
-
-=== "Verilog"
-    ```verilog
-    module priority_mux (
-      input  wire [7:0] a, b, c,
-      input  wire [1:0] sel,
-      output reg  [7:0] out
-    );
-      always @(*) begin
-        case (sel)
-          2'b00: out = a;
-          2'b01: out = b;
-          2'b10: out = c;
-          default: out = 8'h00;
-        endcase
-      end
-    endmodule
-    ```
-
-=== "Pyrope"
-    ```pyrope
-    comb priority_mux(a:u8, b:u8, c:u8, sel:u2) -> (out:u8) {
-      out = match sel {
-        == 0 { a }
-        == 1 { b }
-        == 2 { c }
-        else { 0 }
-      }
-    }
-    ```
-
-### Example 3: FSM
-
-=== "Verilog"
-    ```verilog
-    module fsm (
-      input  wire clk, rst, start, done,
-      output reg  busy,
-      output reg  [1:0] state
-    );
-      localparam IDLE = 2'b01, RUN = 2'b10, FINISH = 2'b100;
-
-      always @(posedge clk) begin
-        if (rst) begin
-          state <= IDLE;
-        end else begin
-          case (state)
-            IDLE:   if (start) state <= RUN;
-            RUN:    if (done)  state <= FINISH;
-            FINISH: state <= IDLE;
-            default: state <= IDLE;
-          endcase
-        end
-      end
-
-      assign busy = (state == RUN);
-    endmodule
-    ```
-
-=== "Pyrope"
-    ```pyrope
-    enum State = (Idle, Run, Finish)
-
-    mod fsm(start:bool, done:bool) -> (busy:bool) {
-      reg state:State = State.Idle
-
-      busy = state == State.Run
-
-      match state {
-        == State.Idle   { state = State.Run    when start }
-        == State.Run    { state = State.Finish when done  }
-        == State.Finish { state = State.Idle              }
-      }
-    }
-    ```
-
-### Example 4: Shift Register
-
-=== "Verilog"
-    ```verilog
-    module shift_reg #(parameter DEPTH = 4) (
-      input  wire       clk, rst,
-      input  wire [7:0] din,
-      output wire [7:0] dout
-    );
-      reg [7:0] stage [0:DEPTH-1];
-      integer i;
-
-      always @(posedge clk) begin
-        if (rst) begin
-          for (i = 0; i < DEPTH; i = i + 1)
-            stage[i] <= 8'b0;
-        end else begin
-          stage[0] <= din;
-          for (i = 1; i < DEPTH; i = i + 1)
-            stage[i] <= stage[i-1];
-        end
-      end
-
-      assign dout = stage[DEPTH-1];
-    endmodule
-    ```
-
-=== "Pyrope"
-    ```pyrope
-    mod shift_reg(din:u8) -> (dout:u8) {
-      comptime DEPTH = 4
-      reg stage:[DEPTH]u8 = 0
-
-      stage[0] = din
-      for i in 1..<DEPTH {
-        stage[i] = stage[i-1]
-      }
-
-      dout = stage[DEPTH-1]
-    }
-    ```
-
-### Example 5: Dual-Port RAM
-
-=== "Verilog"
-    ```verilog
-    module dual_port_ram #(
-      parameter DEPTH = 256,
-      parameter WIDTH = 32
-    ) (
-      input  wire                    clk,
-      input  wire                    we,
-      input  wire [$clog2(DEPTH)-1:0] waddr, raddr,
-      input  wire [WIDTH-1:0]        wdata,
-      output reg  [WIDTH-1:0]        rdata
-    );
-      reg [WIDTH-1:0] mem [0:DEPTH-1];
-
-      always @(posedge clk) begin
-        if (we)
-          mem[waddr] <= wdata;
-        rdata <= mem[raddr];
-      end
-    endmodule
-    ```
-
-=== "Pyrope"
-    ```pyrope
-    pipe[1] dual_port_ram(we:bool, waddr:u8, raddr:u8, wdata:u32) -> (rdata:u32) {
-      reg mem:[256]u32 = 0
-
-      mem[waddr] = wdata when we
-      rdata = mem[raddr]
-    }
-    ```
-
-## Pyrope to Verilog Translation
-
-### Example 1: Accumulator
-
-=== "Pyrope"
-    ```pyrope
-    mod accumulator(din:u16, clear:bool) -> (total:u32) {
-      reg acc:u32 = 0
-
-      acc   = if clear { 0 } else { acc + din }
-      total = acc
-    }
-    ```
-
-=== "Verilog"
-    ```verilog
-    module accumulator (
-      input  wire        clk, rst,
-      input  wire [15:0] din,
-      input  wire        clear,
-      output wire [31:0] total
-    );
-      reg [31:0] acc;
-
-      always @(posedge clk) begin
-        if (rst)
-          acc <= 32'b0;
-        else if (clear)
-          acc <= 32'b0;
-        else
-          acc <= acc + {16'b0, din};
-      end
-
-      assign total = acc;
-    endmodule
-    ```
-
-### Example 2: Pipeline orchestrated by `mod`
-
-=== "Pyrope"
-    ```pyrope
-    pipe mul(a:u16, b:u16) -> (c:u32) { c = a * b }
-    pipe add(a:u32, b:u32) -> (c:u32) { c = a + b }
-
-    mod mac(a:u16, b:u16, c:u16) -> (out:u32) {
-      await[3] prod    = mul(a, b)
-      await[3] c_d     = c
-      await[1] out@[4] = add(prod@[3], c_d@[3])
-    }
-    ```
-
-=== "Verilog"
-    ```verilog
-    // mul: 3-stage pipelined multiplier
-    module mul (
-      input  wire        clk,
-      input  wire [15:0] a, b,
-      output reg  [31:0] c
-    );
-      reg [31:0] pipe1, pipe2;
-      always @(posedge clk) begin
-        pipe1 <= a * b;
-        pipe2 <= pipe1;
-        c     <= pipe2;
-      end
-    endmodule
-
-    // add: 1-stage pipelined adder
-    module add (
-      input  wire        clk,
-      input  wire [31:0] a, b,
-      output reg  [31:0] c
-    );
-      always @(posedge clk) begin
-        c <= a + b;
-      end
-    endmodule
-
-    // mac: multiply-accumulate with explicit delay alignment
-    module mac (
-      input  wire        clk,
-      input  wire [15:0] a, b, c,
-      output wire [31:0] out
-    );
-      wire [31:0] prod;
-      reg  [15:0] c_d1, c_d2, c_d3;
-
-      mul u_mul(.clk(clk), .a(a), .b(b), .c(prod));
-
-      // Delay c by 3 cycles to align with mul output
-      always @(posedge clk) begin
-        c_d1 <= c;
-        c_d2 <= c_d1;
-        c_d3 <= c_d2;
-      end
-
-      add u_add(.clk(clk), .a(prod), .b({16'b0, c_d3}), .c(out));
-    endmodule
-    ```
-
-## Translation Rules
-
-### Verilog to Pyrope
+## Verilog ↔ Pyrope quick map
 
 | Verilog | Pyrope |
 |---------|--------|
-| `module name(...)` | `mod name(...)` or `pipe[N] name(...)` |
-| `input wire [N:0] x` | `x:uN` (in lambda arguments) |
-| `output reg [N:0] y` | `reg y:uN` (in lambda outputs) |
-| `output wire [N:0] y` | `y:uN` (in lambda outputs) |
-| `reg [N:0] x` | `reg x:uN = 0` |
-| `wire [N:0] x` | `mut x:uN = ?` |
-| `parameter N = 8` | `comptime N = 8` |
-| `localparam` | `comptime` |
-| `assign x = expr` | `x = expr` |
-| `always @(posedge clk)` | implicit — registers update at cycle boundary |
-| `always @(*)` | implicit — combinational logic is default |
-| `if/else` | `if/else` |
-| `case(x)` | `match x { == v { ... } ... }` |
-| `x[N:M]` | `x#[M..=N]` (bit select) |
-| `x[i]` | `x[i]` (array element) |
-| `{a, b}` | `(a, b)#[..]` (bit concatenation via tuple) |
-| `x <= y` (non-blocking) | `x = y` (registers defer automatically) |
-| `x = y` (blocking) | `mut x = y` |
-| `$display(...)` | `puts ...` |
-| `assert(cond)` | `assert cond` |
+| `module m(...)` | `mod m(...) -> (out:T@[N])` (or `pipe[N]`/`comb`) |
+| `input [7:0] x` / `output [7:0] y` | `x:u8` input / `y:u8@[N]` mod output |
+| `reg [7:0] x` + reset | `reg x:u8 = 0` |
+| `wire [7:0] x` / blocking `=` | `mut x:u8 = 0` |
+| `x <= y` (non-blocking) | `x = y` on a `reg` (defers automatically) |
+| `parameter`/`localparam N = 8` | `comptime const N = 8` |
+| `always @(posedge clk)` / `@(*)` | implicit — `reg` vs `mut` |
+| `case (x) ... endcase` | `match x { == v {...} else {...} }` |
+| `x[6:3]` | `x#[3..=6]` |
+| `{a, b}` concat | per-range LHS bit assigns into a typed dest |
+| `4'b10x?` / `x` value | `0ub10??` / `0sb?` |
+| one-hot mux / tri-state bus | `unique if` (lowers to `__hotmux`) |
+| SVA assertion | `assert(... implies eventually[w](...))` |
+| testbench `initial` | `test "name" { ... step ... }` |
 
-### Pyrope to Verilog
+## Gotchas — check before emitting code
 
-| Pyrope | Verilog |
-|--------|---------|
-| `comb f(a, b) { a + b }` | Combinational `module` or `function` |
-| `pipe[N] f(...)` | Module with N pipeline registers on outputs |
-| `mod f(...)` | Standard `module` (may orchestrate sub-modules with delay alignment) |
-| `reg x:u8 = 0` | `reg [7:0] x` with reset to 0 |
-| `mut x:u8 = ?` | `wire [7:0] x` or `reg` in combinational `always` block |
-| `const x = expr` | `wire` with `assign` |
-| `comptime N = 8` | `parameter N = 8` or `localparam` |
-| `x += 1 when en` | `if (en) x <= x + 1;` |
-| `match x { ... }` | `case(x) ... endcase` |
-| `enum State = (A, B, C)` | `localparam A=3'b001, B=3'b010, C=3'b100;` (one-hot) |
-| `x#[3..=6]` | `x[6:3]` |
-| `assert cond` | `assert(cond)` or SVA |
-| `test "name" { ... }` | `initial begin ... end` in testbench |
-| `step` | `@(posedge clk);` |
-| bare `counter` (read) | register output `q` |
-| `counter.[defer]` | register input `d` (end-of-cycle value) |
-| `past[n](counter)` | N chained flops feeding a debug signal |
-| `await[N] x = rhs` | N-deep shift register on `rhs` |
-| `x@[N]` (use) | no-op Verilog (timing type check only; fails at compile if wrong) |
-| `wrap x = rhs` / `sat x = rhs` | per-statement narrowing (truncate / saturate) |
+1. `return X` is always wrong — assign the named output, then bare `return`.
+2. Outputs must be named in `-> (...)`; no positional returns; clause is
+   mandatory (except `self` methods).
+3. `match` without a final `else` arm is a parse error.
+4. `when`/`unless` are comptime gates, not runtime muxes — `count += 1 when
+   enable` with a runtime `enable` is wrong; write `if enable { ... }`.
+5. `.[defer]` is RHS-only; there is no deferred-write form.
+6. `@[N]` never inserts flops (pure check); `stage[N]` inserts them
+   (`mod`-only). `pipe` calls need `stage[N]` at the call site.
+7. A `mod` output without `@[N]`/`@[]` at the interface is a compile error;
+   a `pipe[0]` or a comb path through a `pipe` is illegal (use `comb`).
+8. No bool/int mixing: `if 5 {}` is a type error → `if 5 != 0 {}`. Reduce ops
+   (`x#|[..]`) return int 0/1, not bool.
+9. Narrowing assignments need `wrap`/`sat`; widths come from types
+   (`int(min,max)`/`uN`), never from a `:[max=...]` attribute set.
+10. Loop bounds must be comptime (loops unroll). No runtime loops, no
+    comprehensions.
+11. `0b1010` is invalid — `0ub1010`/`0sb1010`. Bare `?` and `_` initializers
+    no longer exist; use `nil` or `0sb?`.
+12. `++` is tuple/string concat, never arithmetic. `#[]` bits vs `[]`
+    elements vs `@[]` cycles.
+13. Name your call arguments (`f(a=1, b=2)`); UFCS only on `self` lambdas;
+    `ref` written at declaration and call.
+14. No getter/setter hooks; only `init`. Reads never invoke code implicitly.
+15. `_pin` register attributes need `ref` (`clock_pin=ref clk`); reset value
+    is the `= expr` initializer; `sync=false` for async reset.
+16. Enum comparisons use names (`State.Idle`), never the underlying integer.
 
-## Key Differences from Verilog
+## Checking code with `lhd`
 
-1. **No blocking vs non-blocking ambiguity**: Registers automatically defer
-   updates. `reg x = 0; x = x + 1` does the right thing.
+`lhd` is the LiveHD CLI (on `$PATH`; in a livehd checkout build with
+`bazel build //lhd:lhd` → `./bazel-bin/lhd/lhd`). It is stateless and
+deterministic; the exit code is the verdict (0 = pass).
 
-2. **No sensitivity lists**: Combinational logic is implicit. No `always @(*)`.
+```sh
+lhd elaborate foo.prp                 # parse + frontend diagnostics (fast syntax check)
+lhd compile foo.prp --top NAME --emit verilog:foo.v --workdir tmp   # full lowering
+lhd scan foo.prp                      # list the file's imports
+lhd lsp                               # Pyrope language server over stdio (prplsp wrapper)
+```
 
-3. **No `wire`/`reg` confusion**: `mut` = combinational, `reg` = sequential.
-   Clear.
+Diagnostics render clang-style on stderr; add `--emit diagnostics:PATH` for a
+JSONL stream (fields: `severity`, `code`, `category`, `pass`, `message`,
+`span`, `hint`). Triage by `category`:
 
-4. **Structural typing**: No need to declare port widths in module
-   instantiation. Types are checked structurally.
+* `syntax` / `name` / `type` / `bitwidth` — the Pyrope source is wrong: fix it.
+* `unsupported` — valid Pyrope that LiveHD cannot lower *yet* (e.g. runtime
+  `wrap`/`sat` lowering, enum-typed register resets). Rewrite around it for
+  synthesis; do not "fix" correct source. `lhd elaborate` usually still
+  accepts it.
+* `internal` — a LiveHD bug: reduce to a repro; do not change the source.
 
-5. **Everything is a tuple**: Modules return tuples. Multi-output is natural.
-
-6. **Compile-time loops**: `for` / `while` / `loop` are unrolled at
-   elaboration. No runtime loops.
-
-7. **No tri-state `z`**: Use `unique if` instead. EDA tools can optimize to
-   tri-state buffers when branches are mutually exclusive.
-
-8. **`#[]` vs `@[]`**: Bit selection uses `#[]`, cycle timing uses `@[N]`
-   (type check) and `await[N]` (declaration). Never mix them. There is
-   **no** colon between the variable and `@[N]` — `foo@[3]`, not `foo:@[3]`.
-
-9. **`0sb?` / `0ub?` vs `nil`**: unknown bits live *inside an
-   integer literal* (`0ub?`, `0sb?`, `0ub??10`, `0ub10??1?01`,
-   etc.), not as a bare `?`. `0ub` is the unsigned-binary prefix;
-   `0sb` is signed. The bare `0b` prefix is **not** valid — you must
-   write `0ub` or `0sb` explicitly. Unknown-bit literals are valid
-   integer values (Verilog `x`) and propagate through arithmetic
-   (`0sb? + 1 == 0sb??`, `0sb? | 1 == 1`). `nil` is *invalid* — any
-   arithmetic or branch on it is a hard error, and the compiler must
-   prove it is eliminated before synthesis. Bare `?` is only a
-   declaration placeholder (`mut x:u8 = ?` = "use the type default"),
-   **not** an integer value you can do math on.
-
-10. **`ref` is semantic, not performance**: In hardware all signals are
-    wires. `ref` allows mutation, not optimization.
-
-11. **Pipeline orchestration lives in `mod`**: There is no `flow` lambda in
-    Pyrope 3.0. Use `mod` with `await[N]` (declare) and `@[N]` (type-check).
-
-12. **Register access is by name, not by cycle index**: bare `counter`
-    reads `q`, `counter.[defer]` reads/writes end-of-cycle, `past[n]()` is
-    debug-only read of a previous cycle. The Pyrope 2.0 forms `@[0]`,
-    `@[-1]`, `@[1]`, bare `@[]` do not exist in 3.0.
-
-13. **`::[attr]` sets, `.[attr]` reads**: `::[attr=value]` is only legal at
-    a *declaration* site (`mut`/`reg`/`const`/`comb`/`pipe`/`mod` and tuple
-    field intros). Reads anywhere else use `var.[attr]`. A small set of
-    runtime hardware signals (`valid`, `defer`) also accept the read form
-    on the LHS — `reg.[defer] = rhs`, `self.[valid] = false`. The earlier
-    form `var::[defer] = rhs` is no longer valid outside a declaration.
-
-14. **`wrap` / `sat` as prefix modifiers**: per-statement narrowing on
-    assignments uses the prefix keywords `wrap` and `sat` (e.g.
-    `wrap c = a + 1`, `sat d += 1`). The sticky form at declaration is
-    still `var::[wrap]` / `var::[saturate]` (or `var:Type:[wrap]`).
-
-## Gotchas — common mistakes
-
-1. **Don't instantiate a module inside `if`/`match`.** Instantiate in the
-   top scope and mux the result instead. Conditional instantiation is not
-   allowed.
-
-2. **`await[N]` only in `mod`.** Inside `comb` or `pipe` bodies it is a
-   compile error. A bare `pipe` call *must* be consumed by an `await[N]`.
-
-3. **`@[N]` never inserts flops.** It is a type check. If the operand
-   doesn't live at cycle `N`, the compiler errors out — it will not
-   silently insert registers. Use `await[N]` to actually add cycles.
-
-4. **`past[n]()` is debug-only.** It inserts flops whose sole purpose is
-   feeding assertions/cover points; do not rely on it for synthesizable
-   design logic.
-
-5. **No variable shadowing.** Declaring `mut x` / `const x` / `reg x` in an
-   inner scope when `x` is already visible is a compile error (tuples are
-   the one exception — `self` scopes you into the tuple).
-
-6. **`match` must be exhaustive.** If no case matches and there is no
-   `else`, an error is generated. Add `else { assert false }` if you
-   really want to forbid the default.
-
-7. **`if/else` with no `else` does not have a default value** — it is a
-   statement form. For expression form, always provide `else`.
-
-8. **`_pin` attributes need `ref`.** `clock_pin=ref clk`, not
-   `clock_pin=clk`.
-
-9. **`nil` vs `0sb?` / `0ub?` vs bare `?`.** For a don't-care /
-   Verilog-`x` *integer value*, use the bit-literal forms `0sb?`
-   (signed) or `0ub?` (unsigned). The bare `0b` prefix is no longer
-   accepted — use `0ub` or `0sb` explicitly. Bare `?` is **not** an
-   integer and does not propagate through arithmetic — it is only a
-   declaration placeholder (`mut x:u8 = ?` = "use the type's default"),
-   so `? + 1` is a type error while `0sb? + 1` is `0sb??`. Use `nil`
-   to mean *no value here yet*; reading a `nil` value is a hard error.
-   The three are not interchangeable.
-
-10. **No implicit int/bool conversion.** `if 5 { ... }` is a type error.
-    Write `if 5 != 0 { ... }`.
-
-11. **`++` is tuple/string concat, not arithmetic or bitwise.** Use `+`,
-    `|`, `&` for those. Bit concatenation of raw values is `(a, b)#[..]`.
-
-12. **`for`/`while`/`loop` bounds are comptime.** Data-dependent bounds
-    are a compile error — the loop must fully unroll during elaboration.
-
-13. **`%` (modulo) is debug-only.** Synthesizable code may not use it.
-
-14. **Lambda declarations are anonymous.** Pyrope has no global function
-    namespace — bind with `const`/`comb name = ...` and rely on scope.
-
-15. **Initialization is explicit.** Every `mut`/`const`/`reg` declaration
-    needs an initializer. Pick by intent:
-    * a concrete value (`0`, `false`, `""`, `(a=1, b=2)`) — normal case.
-    * `0sb?` / `0ub?` (or any bit-literal with `?` digits like `0ub10??1?01`)
-      — an integer value with unknown bits that participates in arithmetic.
-      `0ub` is unsigned; `0sb` is signed. The bare `0b` prefix is no
-      longer accepted.
-    * bare `?` — "use the type's default" placeholder (`mut x:u8 = ?`).
-      Not a value; cannot be used in arithmetic.
-    * `nil` — "no valid value yet" (tuple/range default). Reading it is
-      a hard error; the compiler must prove it is gone before synthesis.
-    Bare `=` without a value is not allowed.
+The frontend is more permissive than the spec (it may accept stale forms the
+docs forbid), so passing `lhd elaborate` is necessary but not sufficient —
+follow this skill's rules for style/semantics, and use `lhd` to catch
+mechanical errors. Generated module names are `file.entity` (e.g.
+`cnt.counter`); pin them with the `lg` attribute when a fixed name is needed.

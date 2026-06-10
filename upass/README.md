@@ -6,10 +6,10 @@ those values make redundant, and emit a new LNAST** that replaces the input.
 
 This document is the contract for **how the pipeline works today**. The
 next-generation design — push-based dispatch, one runner-owned scope-aware
-symbol table, typed Bundle/Entry facts — lives in
-[todo/livehd/2b.html](../todo/livehd/2b.html) (and its prerequisite
-[todo/livehd/1b.html](../todo/livehd/1b.html)); this file describes the
-current implementation those tasks will replace. When a change lands in this
+symbol table — lives in [todo/livehd/2b.html](../todo/livehd/2b.html); its
+prerequisite (the 1b Bundle/Entry reshape) landed 2026-06-09, and the 2b doc
+carries that background. This file describes the current implementation 2b
+will replace. When a change lands in this
 area, update this doc in the same change.
 
 ## 0. Context and scope
@@ -269,9 +269,9 @@ pending imports remain (§8).
 
 ## 3. Symbol table & scopes (current)
 
-`Symbol_table` (`lnast/symbol_table.{hpp,cpp}`; moves to `upass/core/` in
-1b/A) is owned by **constprop** today (`uPass_constprop::st`); 2b moves
-ownership to the runner.
+`Symbol_table` (`upass/core/symbol_table.{hpp,cpp}` since the 1b landing)
+is owned by **constprop** today (`uPass_constprop::st`); 2b moves ownership
+to the runner.
 
 - One `shared_ptr<Bundle>` per live name
   (`Scope.varmap: absl::flat_hash_map<string, shared_ptr<Bundle>>`).
@@ -312,15 +312,17 @@ directly; pipe/mod templates specialize per signature into a `Sub` (task
 
 ## 5. Bundle
 
-`Bundle` is the comptime value/tuple record threaded through the passes —
-today a flat dotted-key `std::map` in `lnast/bundle.{hpp,cpp}` where
-attributes share the keyspace via a `__` prefix.
-[todo/livehd/1b.html](../todo/livehd/1b.html) reshapes it (move to
-`upass/core/`, typed `Entry` pass-fact fields, residual-attrs map with
-name-encoded stickiness, inline root Entry, bounded scans) — see that doc
-for the target struct; this README intentionally does not duplicate it. The
-full per-pass data-structure inventory (what each side map is for, what 2b
-retires) is `structs.md` at the repo root.
+`Bundle` (`upass/core/bundle.{hpp,cpp}` since the 1b landing 2026-06-09) is
+the comptime value/tuple record threaded through the passes: a data map
+(tuple leaves; the bare-scalar leaf lives in an inline root Entry — zero map
+nodes for scalars, spilled on whole-map views), a residual attrs map (bare
+names, sticky = leading `_`), and typed pass-fact fields on `Entry`
+(`trivial`/`decl_max`/`decl_min`/`bw_max`/`bw_min`/`kind`/`comptime`) and
+`Bundle` (`mode`/`type_name`) per the 2b per-pass table. Point lookups and
+prefix runs are `find`/`lower_bound`-bounded; `non_attr_entries()`/
+`get_attrs()` are zero-copy map references. The full per-pass data-structure
+inventory (what each side map is for, what 2b retires) is `structs.md` at
+the repo root.
 
 ## 6. Dispatch (current)
 
@@ -449,9 +451,10 @@ grammar permits but the language prohibits.
 
 The migration steps formerly listed here are subsumed by the two task docs:
 
-- [todo/livehd/1b.html](../todo/livehd/1b.html) — Bundle/Entry reshape
-  (upass/core move, typed pass-fact fields, residual attrs, inline root,
-  bounded scans). Prerequisite for 2b.
+- 1b — Bundle/Entry reshape (upass/core move, typed pass-fact fields,
+  residual attrs, inline root, bounded scans) — **LANDED 2026-06-09**; the
+  task doc was deleted, background lives in the 2b doc's "Depends on"
+  section.
 - [todo/livehd/2b.html](../todo/livehd/2b.html) — push-based dispatch
   flag-day: runner-owned scope-aware symbol table, `(dst, src…)` hooks,
   emit model (a), `Call_resolver`, pull-seam deletion. Freezes other upass

@@ -1881,8 +1881,12 @@ Lnast_node Prp2lnast::process_lvalue_for_assign(TSNode lvalue, const Lnast_node&
     // Comptime vector/matrix pre-fill: `mut data:[N][M]T = scalar` populates
     // every flat slot so later element reads (`data[i][j]`) fold even though
     // each `tuple_set data i j …` would otherwise erase the bare scalar
-    // trivial that `data = scalar` first stored.
-    if (has_decl && !ts_node_is_null(tc) && rvalue.is_const()) {
+    // trivial that `data = scalar` first stored. NOT for a `reg` array
+    // (1a-mem): its scalar init rides the declare's [value] child (power-on
+    // contents on the Memory `init` pin); pre-fill stores would lower as
+    // unconditional every-cycle write ports, and reg element reads are
+    // runtime q reads that never fold regardless.
+    if (has_decl && reg_decl_head.is_invalid() && !ts_node_is_null(tc) && rvalue.is_const()) {
       std::vector<int64_t> dims = extract_array_dims(tc);
       if (!dims.empty()) {
         std::string_view rv_text = rvalue.get_name();

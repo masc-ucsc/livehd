@@ -168,7 +168,7 @@ protected:
 
   // NOTE: order of operands to maximize code gen when "name" is known (typical case)
   inline static std::array<std::array<hhds::Port_id, static_cast<std::size_t>(Ntype_op::Last_invalid)>, 256> sink_name2pid;
-  inline static std::array<std::array<std::string, static_cast<std::size_t>(Ntype_op::Last_invalid)>, 11>    sink_pid2name;
+  inline static std::array<std::array<std::string, static_cast<std::size_t>(Ntype_op::Last_invalid)>, 12>    sink_pid2name;
   inline static std::array<bool, static_cast<std::size_t>(Ntype_op::Last_invalid)>                           ntype2single_input;
   inline static absl::flat_hash_map<std::string, hhds::Port_id>                                              name2pid;
 
@@ -227,7 +227,7 @@ public:
       return pid;
     }
     if (__builtin_expect(is_unlimited_sink(op) && str.size() > 1 && str.front() >= '0' && str.front() <= '9',
-                         0)) {  // pid>10 names: "<num><base>" (e.g. "11p0", "12clock_pin")
+                         0)) {  // pid>11 names: "<num><base>" (e.g. "12addr", "14clock_pin")
       return static_cast<hhds::Port_id>(str_tools::to_i(str));
     }
     if (__builtin_expect(is_unlimited_sink(op) && str.size() >= 2 && str.front() == 'p' && str[1] >= '0' && str[1] <= '9',
@@ -248,8 +248,8 @@ public:
   }
 
   static inline std::string get_sink_name(Ntype_op op, hhds::Port_id pid) {
-    if (pid > 10) {
-      auto pid_index = pid % 11;  // wrap names around for multi inputs like memory cell
+    if (pid > 11) {
+      auto pid_index = pid % 12;  // wrap names around for multi inputs like memory cell (12-pin port stride)
       auto name      = sink_pid2name[pid_index][static_cast<std::size_t>(op)];
       assert(name != "invalid");
 

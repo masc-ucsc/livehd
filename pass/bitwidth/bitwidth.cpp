@@ -425,7 +425,7 @@ void Bitwidth::process_memory(hhds::Node_class& node) {
   sort_inp(inp);
   for (auto& e : inp) {
     auto raw_pid = static_cast<int>(e.sink.get_port_id());
-    auto n       = Ntype::get_sink_name(Ntype_op::Memory, raw_pid % 11);
+    auto n       = Ntype::get_sink_name(Ntype_op::Memory, raw_pid % 12);
     if (str_tools::ends_with(n, "clock")) {
       auto it = bwmap.find(e.driver.get_class_index());
       if (it == bwmap.end()) {

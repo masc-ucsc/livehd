@@ -24,8 +24,10 @@
 
 <h2>Subtasks — pending</h2>
 <ul class="subtasks">
-<li><strong>B — full-fidelity source_id spans + line/col for upass/lgraph.</strong> Flip
-  the null spans to real ids and resolve line/col for those paths.</li>
+<li><strong>B — full-fidelity source_id spans + line/col for upass/lgraph.</strong>
+  Delivered by <a class="xref" href="1f.html">1f</a> subtasks D+F (1f owns the
+  diag sweep); 3f-B closes when 1f lands — verify here via the golden-diagnostic
+  harness (E), don't re-implement.</li>
 <li><strong>C — lgraph-pass coverage.</strong> Only <code>pass/bitwidth</code> emits structured
   <code>code</code>/<code>category</code> diagnostics; the other ~60 <code>Pass::error</code>
   sites are still bare strings.</li>

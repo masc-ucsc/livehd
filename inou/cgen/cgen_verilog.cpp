@@ -255,13 +255,15 @@ void Cgen_verilog::process_memory(std::shared_ptr<File_output> fout, const hhds:
   int mem_type    = 2;  // array by default
   int mem_wensize = 0;
 
+  hhds::Pin_class mem_init_dpin;  // comptime contents (entry 0 in the low bits, row-major)
+
   for (auto e : node.inp_edges()) {
     // HHDS does not store LiveHD's per-sink-name convention; derive the
     // name from the port_id via Ntype::get_sink_name. For memory the names
-    // wrap with `pid % 11` (see Ntype::get_sink_name).
+    // wrap with `pid % 12` (see Ntype::get_sink_name).
     auto   raw_pid  = static_cast<int>(e.sink.get_port_id());
     auto   pin_name = Ntype::get_sink_name(Ntype_op::Memory, raw_pid);
-    size_t port_id  = static_cast<size_t>(raw_pid) / 11;
+    size_t port_id  = static_cast<size_t>(raw_pid) / 12;
 
     if (port_vector.size() <= port_id) {
       port_vector.resize(1 + port_id);
@@ -299,6 +301,12 @@ void Cgen_verilog::process_memory(std::shared_ptr<File_output> fout, const hhds:
         return;
       }
       mem_fwd = hydrate_const(e.driver).to_i();
+    } else if (pin_name == "init") {
+      if (!is_const_pin(e.driver)) {
+        Pass::error("memory {} should have a constant for init not {}", debug_name(node), debug_name(e.driver.get_master_node()));
+        return;
+      }
+      mem_init_dpin = e.driver;
     } else if (str_tools::ends_with(pin_name, "clock_pin")) {
       port_vector[port_id].clock = e.driver;
     } else if (str_tools::ends_with(pin_name, "addr")) {
@@ -342,10 +350,16 @@ void Cgen_verilog::process_memory(std::shared_ptr<File_output> fout, const hhds:
       return;
     }
 
+    // The wrapper variants start at 1rd_1wr: a read-less memory (scan/regref
+    // observed) or a write-less one (scan/regref loaded) still instantiates
+    // the smallest variant with the dummy port tied off below.
+    const int eff_rd = n_rd_ports > 0 ? n_rd_ports : 1;
+    const int eff_wr = n_wr_ports > 0 ? n_wr_ports : 1;
+
     std::string name;
     name = absl::StrCat(name, "cgen_memory_", single_clock ? "" : "multiclock_");
-    name = absl::StrCat(name, n_rd_ports, "rd_");
-    name = absl::StrCat(name, n_wr_ports, "wr");
+    name = absl::StrCat(name, eff_rd, "rd_");
+    name = absl::StrCat(name, eff_wr, "wr");
 
     fout->prepend(absl::StrCat("`include \"", name, ".v\" \n"));
     fout->append(absl::StrCat(name));
@@ -359,6 +373,15 @@ void Cgen_verilog::process_memory(std::shared_ptr<File_output> fout, const hhds:
     parameters  = absl::StrCat(parameters, first_entry ? "" : " ,", ".SIZE(", mem_size, ")");
     parameters  = absl::StrCat(parameters, first_entry ? "" : " ,", ".WENSIZE", "(", mem_wensize, ")");
     parameters  = absl::StrCat(parameters, first_entry ? "" : " ,", ".FWD", "(", mem_fwd, ")");
+    if (!mem_init_dpin.is_invalid()) {
+      // Power-on contents ride the wrapper's INIT parameter (packed, entry 0
+      // in the low BITS); only the single-clock wrappers carry it.
+      if (!single_clock) {
+        Pass::error("memory {} init contents are not supported on multiclock memories yet", debug_name(node));
+        return;
+      }
+      parameters = absl::StrCat(parameters, " ,.INIT_EN(1) ,.INIT(", hydrate_const(mem_init_dpin).to_verilog(), ")");
+    }
     fout->append(" #(", parameters, ") ");
 
     fout->append(iname, "(\n");
@@ -372,6 +395,11 @@ void Cgen_verilog::process_memory(std::shared_ptr<File_output> fout, const hhds:
     auto n_rd_pos = 0;
     auto n_wr_pos = 0;
     for (auto& p : port_vector) {
+      if (p.addr.is_invalid() && p.din.is_invalid() && p.enable.is_invalid()) {
+        // A phantom slot holding only the shared clock_pin (pid 2 lands in
+        // port 0's clock field even when port 0 was never minted).
+        continue;
+      }
       if (p.rdport) {
         if (p.addr.is_invalid() || p.enable.is_invalid() || p.clock.is_invalid()) {
           Pass::error("memory {} read port is not correctly configured\n", debug_name(node));
@@ -413,9 +441,26 @@ void Cgen_verilog::process_memory(std::shared_ptr<File_output> fout, const hhds:
     I(n_rd_pos == n_rd_ports);
     I(n_wr_pos == n_wr_ports);
 
+    // Tie off the dummy port of a read-less / write-less memory (dout of the
+    // dummy read port is simply left unconnected).
+    if (n_rd_ports == 0) {
+      fout->append(first_entry ? "  .rd_addr_0(1'b0)\n" : "  ,.rd_addr_0(1'b0)\n");
+      first_entry = false;
+      fout->append("  ,.rd_enable_0(1'b0)\n");
+    }
+    if (n_wr_ports == 0) {
+      fout->append(first_entry ? "  .wr_addr_0(1'b0)\n" : "  ,.wr_addr_0(1'b0)\n");
+      first_entry = false;
+      fout->append("  ,.wr_enable_0(1'b0)\n");
+      fout->append("  ,.wr_din_0(1'b0)\n");
+    }
+
     fout->append(");\n");
   } else {  // array
-    fout->append(absl::StrCat("reg [", mem_bits - 1, ":0] ", iname, "[", mem_size - 1, ":0];\n"));
+    // Distinct storage name: a zero-write-port array (ROM) puts its dout on
+    // driver pid 0, whose wire is named after the node — `iname` itself.
+    const auto aname = absl::StrCat(iname, "_data");
+    fout->append(absl::StrCat("reg [", mem_bits - 1, ":0] ", aname, "[", mem_size - 1, ":0];\n"));
 
     if (first_array_block) {
       fout->append("integer mem_loop_i;\n");
@@ -423,9 +468,20 @@ void Cgen_verilog::process_memory(std::shared_ptr<File_output> fout, const hhds:
     }
 
     fout->append("always_comb begin\n");
-    fout->append("for (mem_loop_i=0;mem_loop_i < ", std::to_string(mem_size), ";mem_loop_i = mem_loop_i + 1) begin\n");
-    fout->append(iname, "[mem_loop_i] = 'b0;\n");
-    fout->append("end\n");
+    if (!mem_init_dpin.is_invalid()) {
+      // Per-cycle default = the init contents (entry 0 in the low bits,
+      // row-major); writes below override (forwarding semantics).
+      const auto init_val = hydrate_const(mem_init_dpin);
+      const auto mask     = Dlop::get_mask_value(mem_bits);
+      for (int i = 0; i < mem_size; ++i) {
+        auto entry = init_val.sra_op(*Dlop::create_integer(static_cast<int64_t>(i) * mem_bits))->and_op(*mask);
+        fout->append(aname, "[", std::to_string(i), "] = ", entry->to_verilog(), ";\n");
+      }
+    } else {
+      fout->append("for (mem_loop_i=0;mem_loop_i < ", std::to_string(mem_size), ";mem_loop_i = mem_loop_i + 1) begin\n");
+      fout->append(aname, "[mem_loop_i] = 'b0;\n");
+      fout->append("end\n");
+    }
 
     // Writes first (array has forwarding semantics)
     for (auto& p : port_vector) {
@@ -436,7 +492,7 @@ void Cgen_verilog::process_memory(std::shared_ptr<File_output> fout, const hhds:
         Pass::error("memory {} write port is not correctly configured\n", debug_name(node));
       }
       auto din_name   = get_wire_or_const(p.din);
-      auto write_stmt = absl::StrCat(iname, "[", get_wire_or_const(p.addr), "] = ", din_name, ";\n");
+      auto write_stmt = absl::StrCat(aname, "[", get_wire_or_const(p.addr), "] = ", din_name, ";\n");
       if (p.enable.is_invalid()) {
         fout->append("  ", write_stmt);
       } else {
@@ -446,19 +502,19 @@ void Cgen_verilog::process_memory(std::shared_ptr<File_output> fout, const hhds:
       }
     }
 
-    auto n_pos = 0;
+    auto n_rd_pos = 0;
     for (auto& p : port_vector) {
       if (!p.rdport) {
-        ++n_pos;
         continue;
       }
       if (p.addr.is_invalid()) {
         Pass::error("array {} read port is not correctly configured\n", debug_name(node));
       }
-      auto dout_dpin = node.create_driver_pin(static_cast<hhds::Port_id>(n_pos));  // find-or-create
+      // Same dout convention as type 0/1: read port N drives pid (n_wr_ports + N).
+      auto dout_dpin = node.create_driver_pin(static_cast<hhds::Port_id>(n_wr_ports + n_rd_pos));  // find-or-create
       auto dest_name = get_wire_or_const(dout_dpin);
 
-      auto read_stmt = absl::StrCat(dest_name, " = ", iname, "[", get_wire_or_const(p.addr), "];\n");
+      auto read_stmt = absl::StrCat(dest_name, " = ", aname, "[", get_wire_or_const(p.addr), "];\n");
       if (p.enable.is_invalid()) {
         fout->append("  ", read_stmt);
       } else {
@@ -466,7 +522,7 @@ void Cgen_verilog::process_memory(std::shared_ptr<File_output> fout, const hhds:
         fout->append("    ", read_stmt);
         fout->append("end\n");
       }
-      ++n_pos;
+      ++n_rd_pos;
     }
 
     fout->append("end\n");
@@ -1167,32 +1223,47 @@ void Cgen_verilog::create_locals(std::shared_ptr<File_output> fout, hhds::Graph*
           auto name2 = get_scaped_name(pin_wire_name(e.driver));
           add_to_pin2var(fout, e.driver, name2, is_unsign(e.driver));
         }
-        for (auto& dpin2 : node.out_pins()) {
-          if (dpin2.out_edges().empty()) {
-            continue;
+        if (op == Ntype_op::Memory) {
+          // Instance outputs must land on a dedicated net: the dout pin is
+          // usually named after the module output it drives (e.g. "q0"), so
+          // reusing that name re-declares the port (and an instance output
+          // cannot legally drive an `output reg` anyway). create_outputs
+          // then emits `q0 = <iname>_dout_<pid>;` like any other driver.
+          //
+          // Iterate out_edges (not out_pins): out_pins misses driver pid 0
+          // (a zero-write-port ROM's dout) and its handles encode pins
+          // WITHOUT the driver bit, so their class_index never matches
+          // edge.driver / create_driver_pin handles. Re-fetch the canonical
+          // driver handle for keying; pin2var insert dedups repeat pids.
+          //
+          // type==2 (array) douts are procedurally assigned in process_memory's
+          // always_comb, so they must be `reg`; type 0/1 douts connect to the
+          // cgen_memory_* instance ports and must stay nets.
+          bool is_array_mem = false;
+          for (auto& e2 : node.inp_edges()) {
+            if (e2.sink.get_port_id() == 7 && is_const_pin(e2.driver)) {  // pid 7 = "type" (comptime x 1)
+              is_array_mem = hydrate_const(e2.driver).to_i() == 2;
+              break;
+            }
           }
-          if (op == Ntype_op::Memory) {
-            // Instance outputs must land on a dedicated net: the dout pin is
-            // usually named after the module output it drives (e.g. "q0"), so
-            // reusing that name re-declares the port (and an instance output
-            // cannot legally drive an `output reg` anyway). create_outputs
-            // then emits `q0 = <iname>_dout_<pid>;` like any other driver.
-            //
-            // NOTE: out_pins() handles encode pins WITHOUT the driver bit, so
-            // their class_index never matches edge.driver / create_driver_pin
-            // handles. Re-fetch the canonical driver handle for keying.
-            auto dout  = node.create_driver_pin(dpin2.get_port_id());
+          for (auto& e2 : node.out_edges()) {
+            auto dout  = node.create_driver_pin(e2.driver.get_port_id());
             auto iname = get_scaped_name(default_instance_name(node));
-            auto name2 = absl::StrCat(iname, "_dout_", dpin2.get_port_id());
+            auto name2 = absl::StrCat(iname, "_dout_", e2.driver.get_port_id());
             auto [it2, inserted] = pin2var.insert({dout.get_class_index(), name2});
             if (inserted) {
               int bits2 = bits_of(dout);
               if (bits2 <= 1) {
-                fout->append("wire signed ", name2, ";\n");
+                fout->append(is_array_mem ? "reg signed " : "wire signed ", name2, ";\n");
               } else {
-                fout->append("wire signed [", std::to_string(bits2 - 1), ":0] ", name2, ";\n");
+                fout->append(is_array_mem ? "reg signed [" : "wire signed [", std::to_string(bits2 - 1), ":0] ", name2, ";\n");
               }
             }
+          }
+          continue;
+        }
+        for (auto& dpin2 : node.out_pins()) {
+          if (dpin2.out_edges().empty()) {
             continue;
           }
           auto name2 = get_scaped_name(pin_wire_name(dpin2));

@@ -14,14 +14,19 @@
   <code>inou/cgen</code> Verilog egress, derived from the source map.</p>
 <h2>Depends on</h2>
 <ul>
-<li><a class="xref" href="../livehd/1f.html">1f</a> — supplies the source map the
-  egress reads to emit <code>// src: file:line:col</code> comments.</li>
+<li><a class="xref" href="../livehd/1f.html">1f</a> — supplies the
+  <code>Source_locator</code> + per-node <code>SourceId</code>s on LGraph (1f
+  subtasks D+E) that the egress resolves to emit
+  <code>// src: file:line:col</code> comments.</li>
 </ul>
 <h2>Subtasks — pending</h2>
 <ul class="subtasks">
 <li><strong>A — emit <code>// src:</code> comments in Verilog egress.</strong> In
-  <code>inou/cgen</code>, derive <code>// src: file:line:col</code> annotations from the
-  source map and emit them alongside the generated Verilog.</li>
+  <code>inou/cgen</code>, resolve each emitted node's <code>SourceId</code> through
+  the locator and emit <code>// src: file:line:col</code> annotations alongside
+  the generated Verilog (directly from locator resolution — not via the lossy
+  ECMA-426 <code>.map</code>, which is built <em>from</em> cgen's emitted
+  positions; see 1f subtask G).</li>
 </ul>
 <h2>Subtasks — landed</h2>
 <p>None yet.</p>

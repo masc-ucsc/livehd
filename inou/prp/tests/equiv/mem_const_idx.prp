@@ -1,0 +1,19 @@
+/*
+:name: mem_const_idx
+:type: equiv
+:verilog_top: mem_const_idx.cidx
+:pyrope_top: mem_const_idx.cidx
+*/
+
+// 1a-mem — comptime indices still become Memory ports (an array-typed reg is
+// ALWAYS a Memory cell; memory<->flop conversion is a later LG pass), and two
+// write sites in one branch mint two write ports sharing the path-condition
+// enable.
+mod cidx(a:u8, b:u8, we:bool) -> (z:u8@[0]) {
+  reg t:[2]u8 = nil
+  if we {
+    t[0] = a
+    t[1] = b
+  }
+  z = t[1]
+}

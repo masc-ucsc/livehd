@@ -1,0 +1,14 @@
+/*
+:name: mem_multidim
+:type: error
+:error: multi-dimensional
+:tolg: 1
+*/
+
+// 1a-mem — multi-dimensional memories are out of scope (RTL instantiation or
+// a later slice).
+mod f(a:u8, i:u2, j:u2) -> (z:u8@[0]) {
+  reg t:[4][4]u8 = nil
+  t[i][j] = a
+  z = t[i][j]
+}

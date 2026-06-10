@@ -1,0 +1,18 @@
+/*
+:name: mem_basic
+:type: equiv
+:verilog_top: mem_basic.memdut
+:pyrope_top: mem_basic.memdut
+*/
+
+// 1a-mem — a reg array is an async Memory cell (type 0, fwd on): a write
+// commits at the cycle edge; a same-cycle read of the written address sees
+// the new value through forwarding; any other address reads the committed
+// state combinationally (a reg-q read, so the output lands at @[0]).
+mod memdut(a:u8, wsel:u2, rsel:u2, we:bool) -> (z:u8@[0]) {
+  reg t:[4]u8 = nil
+  if we {
+    t[wsel] = a
+  }
+  z = t[rsel]
+}

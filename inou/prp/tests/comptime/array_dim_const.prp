@@ -1,7 +1,7 @@
 /*
 :name: array_dim_const
 :type: comptime
-:verifier_pass: 4
+:verifier_pass: 6
 :verifier_fail: 0
 */
 
@@ -12,7 +12,10 @@
 // reads/writes hold.
 
 mut sz = 4
-mut buf:[sz]u8 = 0
+mut buf:[sz]u8 = 33
+
+cassert(buf[0] == 33)
+cassert(buf[sz-1] == 33)
 
 buf[0] = 1
 buf[1] = 2

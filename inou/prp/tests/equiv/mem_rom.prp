@@ -1,0 +1,13 @@
+/*
+:name: mem_rom
+:type: equiv
+:verilog_top: mem_rom.romtest
+:pyrope_top: mem_rom.romtest
+*/
+
+// 1a-mem — a const array read at a runtime index is a ROM: the same type=2
+// array lowering with the contents on the `init` pin and zero write ports.
+mod romtest(rsel:u2) -> (z:u8@[0]) {
+  const table:[4]u8 = (10,20,30,40)
+  z = table[rsel]
+}

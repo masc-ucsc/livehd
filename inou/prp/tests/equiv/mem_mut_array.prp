@@ -1,0 +1,17 @@
+/*
+:name: mem_mut_array
+:type: equiv
+:verilog_top: mem_mut_array.mutarr
+:pyrope_top: mem_mut_array.mutarr
+*/
+
+// 1a-mem — a runtime-indexed mut array is NOT a memory (no cross-cycle
+// persistence) but lowers through the same interface as a type=2 comb array:
+// the init contents are the per-cycle default (the Memory `init` pin), a
+// write overrides its entry for the rest of the cycle, reads are
+// combinational. No clock.
+mod mutarr(a:u8, wsel:u2, rsel:u2) -> (z:u8@[0]) {
+  mut t:[4]u8 = (1,2,3,4)
+  t[wsel] = a
+  z = t[rsel]
+}

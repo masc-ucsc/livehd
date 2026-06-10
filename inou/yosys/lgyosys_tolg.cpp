@@ -2274,7 +2274,7 @@ static void process_cells(RTLIL::Module* mod, hhds::Graph* g) {
           .connect_driver(create_const(*g, *Dlop::create_integer(depth)));
 
       for (int i = 0; i < wrports; i++) {
-        auto port_n = i * 11;
+        auto port_n = i * 12;
         exit_node.create_sink_pin(static_cast<hhds::Port_id>(10 + port_n))
             .connect_driver(create_const(*g, *Dlop::create_integer(0)));
         exit_node.create_sink_pin(static_cast<hhds::Port_id>(3 + port_n))
@@ -2304,7 +2304,7 @@ static void process_cells(RTLIL::Module* mod, hhds::Graph* g) {
             .connect_driver(create_pick_concat_dpin(g, cell->getPort(ID::WR_CLK).extract(i, 1), false));
       }
       for (int i = 0; i < rdports; i++) {
-        auto port_n = (wrports + i) * 11;
+        auto port_n = (wrports + i) * 12;
         exit_node.create_sink_pin(static_cast<hhds::Port_id>(10 + port_n))
             .connect_driver(create_const(*g, *Dlop::create_integer(1)));
         exit_node.create_sink_pin(static_cast<hhds::Port_id>(4 + port_n))

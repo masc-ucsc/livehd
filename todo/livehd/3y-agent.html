@@ -18,9 +18,9 @@
 
 <h2>Depends on</h2>
 <ul>
-<li>1m — the import-resolver feed (resolved
-  paths, <code>--depfile</code>, <code>unused_inputs_list</code>) lands with the 1m import
-  work.</li>
+<li><a class="xref" href="1f.html">1f</a> — <code>--depfile</code> landed with 1m
+  (declared inputs only); frontend include/import <em>discovery</em> is deferred
+  to the source-locator work (lhd_kernel.cpp:706, 1f subtask E).</li>
 </ul>
 
 <h2>Subtasks — pending</h2>
@@ -31,16 +31,19 @@
   <code>run &lt;step&gt; @tag</code> desugars to a kernel call (resolve the tag's
   inputs/config/workdir → run the pure step → append the result + advance
   <code>latest</code>).</li>
-<li><strong>C — multi-<code>lg:</code> linking.</strong> gids are library-scoped inside
-  <code>body.bin</code>, so linking needs a gid-remapping linker (today: aggregate from
-  <code>ln:</code> units, which re-lowers into one fresh library and discards per-file
-  local synthesis; the derivation-hash manifest plan is the path to keeping it).</li>
+<li><strong>C — multi-<code>lg:</code> linking residuals.</strong> The
+  gid-remapping linker landed with 1m-C (gids are FNV-1a(name) hashes,
+  <code>load_merge</code> dedups by name; <code>lhd elaborate ln:+lg:</code>
+  works). Remaining: multiple raw <code>lg:</code> inputs <em>without</em>
+  <code>ln:</code> are still rejected, reachability prune, and the unsigned Sub
+  output <code>.r</code> drop.</li>
 <li><strong>D — per-function Pyrope units.</strong> <code>inou.prp</code> yields one LNAST
   per <em>file</em>; function-level splitting wants the func_extract seam.</li>
 <li><strong>E — import-resolver feed.</strong> <code>lhd scan</code> emits raw import
-  strings; resolved paths, <code>--depfile</code> (Make/Ninja), and the
-  <code>unused_inputs_list</code> Bazel rule land with the
-  1m import work.</li>
+  strings; <code>--depfile</code> exists but lists declared inputs only —
+  frontend-discovered prerequisites come from the 1f locator's file table
+  (lhd_kernel.cpp:706); <code>unused_inputs_list</code> Bazel rule still
+  pending.</li>
 <li><strong>F — missing emits/flags.</strong> <code>--emit graphviz|metadata</code>, a
   textual <code>lgraph-dump:</code> debug emit (twin of <code>lnast-dump:</code> — the
   REPL's <code>lgraph.dump</code> died with lgshell), <code>--recipe-file</code> TOML,

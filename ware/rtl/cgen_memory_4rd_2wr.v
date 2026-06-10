@@ -16,8 +16,9 @@
                    (n) <= (1<<30) ? 30 : (n) <= (1<<31) ? 31 : 32)
 
 module cgen_memory_4rd_2wr
-  #(parameter BITS = 4, SIZE=128, FWD=1, LATENCY_0=1, WENSIZE=1)
-    (input clock
+  #(parameter BITS = 4, SIZE=128, FWD=1, LATENCY_0=1, WENSIZE=1,
+    parameter INIT_EN=0, parameter [BITS*SIZE-1:0] INIT=0)
+    (input clk
 
      ,input [`log2(SIZE)-1:0]  rd_addr_0
      ,input                    rd_enable_0
@@ -58,7 +59,17 @@ reg [BITS-1:0]        d3_mem;
 generate
     reg [BITS-1:0]        data[SIZE-1:0];
     integer i;
-    always @(posedge clock) begin
+    // Power-on contents (Memory cell `init` pin, entry 0 in the low
+    // BITS): yosys lifts this into $meminit. NOT restored by reset.
+    if (INIT_EN) begin:BLOCK_INIT
+      integer ii;
+      initial begin
+        for(ii=0;ii<SIZE;ii=ii+1) begin
+          data[ii] = INIT[ii*BITS +: BITS];
+        end
+      end
+    end
+    always @(posedge clk) begin
       for(i=0;i<WENSIZE;i=i+1) begin
         if(wr_enable_0[i]) begin
             data[wr_addr_0][i*MASKSIZE +: MASKSIZE] <=
@@ -71,23 +82,47 @@ generate
       end
     end
 
-    always @(posedge clock) begin
-      if (rd_enable_0)
-        d0_mem <= data[rd_addr_0];
-      else
-        d0_mem <= {BITS{1'bx}};
-      if (rd_enable_1)
-        d1_mem <= data[rd_addr_1];
-      else
-        d1_mem <= {BITS{1'bx}};
-      if (rd_enable_2)
-        d2_mem <= data[rd_addr_2];
-      else
-        d2_mem <= {BITS{1'bx}};
-      if (rd_enable_3)
-        d3_mem <= data[rd_addr_3];
-      else
-        d3_mem <= {BITS{1'bx}};
+    // LATENCY_0==0 is a true asynchronous (combinational) read of the
+    // CURRENT address; ==1 samples at the edge (same split as the
+    // multiclock variant).
+    if (LATENCY_0==1) begin:BLOCK_SYNC_RD
+      always @(posedge clk) begin
+        if (rd_enable_0)
+          d0_mem <= data[rd_addr_0];
+        else
+          d0_mem <= {BITS{1'bx}};
+        if (rd_enable_1)
+          d1_mem <= data[rd_addr_1];
+        else
+          d1_mem <= {BITS{1'bx}};
+        if (rd_enable_2)
+          d2_mem <= data[rd_addr_2];
+        else
+          d2_mem <= {BITS{1'bx}};
+        if (rd_enable_3)
+          d3_mem <= data[rd_addr_3];
+        else
+          d3_mem <= {BITS{1'bx}};
+      end
+    end else begin:BLOCK_ASYNC_RD
+      always_comb begin
+        if (rd_enable_0)
+          d0_mem = data[rd_addr_0];
+        else
+          d0_mem = {BITS{1'bx}};
+        if (rd_enable_1)
+          d1_mem = data[rd_addr_1];
+        else
+          d1_mem = {BITS{1'bx}};
+        if (rd_enable_2)
+          d2_mem = data[rd_addr_2];
+        else
+          d2_mem = {BITS{1'bx}};
+        if (rd_enable_3)
+          d3_mem = data[rd_addr_3];
+        else
+          d3_mem = {BITS{1'bx}};
+      end
     end
 endgenerate
 
@@ -162,7 +197,7 @@ endgenerate
 
 generate
 	if (LATENCY_0==1) begin:BLOCK1
-    always @(posedge clock) begin
+    always @(posedge clk) begin
       rd_dout_0 <= d0_fwd;
       rd_dout_1 <= d1_fwd;
       rd_dout_2 <= d2_fwd;

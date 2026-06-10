@@ -1,0 +1,17 @@
+/*
+:name: mem_rf
+:type: equiv
+:verilog_top: mem_rf.rf
+:pyrope_top: mem_rf.rf
+*/
+
+// 1a-mem — register-file shape: one conditional write port, two read ports
+// (one Memory cell; read port N's data rides driver pid n_wr_ports+N).
+mod rf(waddr:u3, din:u4, we:bool, ra0:u3, ra1:u3) -> (q0:u4@[0], q1:u4@[0]) {
+  reg r:[8]u4 = nil
+  if we {
+    r[waddr] = din
+  }
+  q0 = r[ra0]
+  q1 = r[ra1]
+}

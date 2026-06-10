@@ -57,10 +57,12 @@ Verilog <a class="xref" href="../verilog/5e.html">5e</a> (cgen
   round-trips without manifest plumbing).</li>
 <li><strong>Combined IDs instead of ID sets.</strong> When one value maps to
   several source sites (inline = callee def + call site, merged writes, aliases),
-  <code>combine(a,b)</code> mints a new deterministic ID with parents; consumers
-  keep tracking one integer. Diags render the primary anchor as the span and the
-  rest as <code>Diagnostic::notes</code> — the notes channel is fully plumbed in
-  both renderers today and has zero producers.</li>
+  <code>combine(parents…)</code> mints a new deterministic ID; consumers keep
+  tracking one integer. The parent list is caller-ordered and order-significant:
+  the first parent is the <em>primary</em> anchor (the diag span; the rest become
+  <code>Diagnostic::notes</code> — a channel fully plumbed in both renderers
+  today with zero producers), and the ID hashes the parents in that order. The
+  call is variadic so N sites mint once, not as a nested chain.</li>
 <li><strong>Lean internal model; ECMA-426 as egress only.</strong> The locator
   stores anchors (+ combine parents) — nothing else. ECMA-426 <code>.map</code>
   files are a lossy <em>output projection</em> for external
@@ -79,7 +81,9 @@ Verilog <a class="xref" href="../verilog/5e.html">5e</a> (cgen
   Give each <code>Lnast</code> its locator;
   <code>Prp2lnast::attach_loc</code> (inou/prp/prp2lnast.cpp:138) becomes
   "mint a span ID + set one <code>uint64</code> attr", extended from the current
-  8 statement kinds to every def-bearing node (the destination-defining nodes:
+  ~10 statement kinds (the 8 carry-whitelisted ones plus <code>for</code> /
+  <code>timecheck</code>, whose attached locs die on the first rebuild) to every
+  def-bearing node (the destination-defining nodes:
   assign/store/declare/tuple_get/binary ops/func_call/…) so SSA temps are
   attributable. <code>dump</code>/<code>read</code> round-trip the ID
   (<code>@(src=…)</code> replacing <code>@(loc=pos1:pos2:line:tok)</code>,
@@ -96,7 +100,14 @@ Verilog <a class="xref" href="../verilog/5e.html">5e</a> (cgen
   <code>copy_subtree_into</code> / <code>clone_template_specialized</code>
   (upass_runner.cpp:2024-2040) — today these copy type+name only, so inlined and
   extracted bodies are unlocatable. Pass-synthesized nodes with no better anchor
-  inherit the enclosing statement's ID.</li>
+  inherit the enclosing statement's ID. <strong>Acceptance: a
+  <code>bench_upass.sh</code> before/after number.</strong> The carry itself is
+  one integer, but a flat_storage entry is an <code>unordered_map</code> slot
+  (~40-56 B each, not 8 B) and the stamped population grows several-fold versus
+  the whitelist — the old gates existed for hot-path reasons
+  (prp2lnast.cpp:809-812). Stamp def-bearing nodes only (operand refs carry
+  nothing); if the map overhead shows up, a compact dedicated store in hhds is
+  the fallback.</li>
 <li><strong>C — combined IDs at merge points.</strong> The inliner mints
   <code>combine(callee_def, call_site)</code> for spliced bodies (call-site span
   already computed at upass_runner.cpp:1105-1124); bitwidth's
@@ -121,14 +132,22 @@ Verilog <a class="xref" href="../verilog/5e.html">5e</a> (cgen
   including its pos1=line-vs-byte semantic mismatch); yosys ingress mints
   line-only anchors instead of its current per-node strings.
   <code>ln:</code>/<code>lg:</code> save, load, and <code>load_merge</code>
-  provenance rides hhds-srcloc B for free.</li>
+  provenance rides hhds-srcloc B (LiveHD registers the SourceId attr tag; the
+  union operand is each artifact's own-then-base view). Also close the depfile
+  gap parked on 1f at lhd_kernel.cpp:706: the locator's file table <em>is</em>
+  the actually-read-files list, so frontend include/import discovery feeds
+  <code>--depfile</code> from it.</li>
 <li><strong>F — the diag sweep + attribute deletion.</strong> Convert the ~70
-  null-span sites: all 38+ tolg <code>Pass::error</code> calls (e.g.
-  upass_tolg.cpp:467, :1033, :1776 — messages name only the variable), the 8
-  timecheck sites that bake <code>fname:line</code> into message <em>text</em>
-  (loc_str, upass/timecheck/upass_timecheck.cpp:69-76),
-  <code>upass::error()</code> gains an anchor parameter
-  (upass/core/upass_utils.hpp:12-24, 13 callers), the 8 span-less sink emits in
+  null-span sites: all 38 tolg <code>Pass::error</code> calls (e.g.
+  upass_tolg.cpp:467, :1033, :1776 — messages name only the variable; these
+  THROW, and the record is emitted downstream by the stage/flush seam with no
+  locator access, so each site stages a located <code>Diagnostic</code> via
+  <code>Sink::stage</code> before the throw), the 8 timecheck sites (6 bake
+  <code>fname:line</code> into message <em>text</em> via loc_str,
+  upass/timecheck/upass_timecheck.cpp:69-76; 2 name only the module),
+  <code>upass::error()</code> gains a resolved-<code>Span</code> parameter — the
+  caller resolves the SourceId through <em>its</em> locator per subtask D
+  (upass/core/upass_utils.hpp:12-24, 13 callers), the 7 span-less sink emits in
   constprop (:215, :1212, :2815, :2978, :3415, :3468, :3479), and the 2 loc-less
   prp2lnast sites. Then delete <code>lnast.loc</code>, <code>lnast.fname</code>,
   <code>Lnast::get_loc/set_loc/get_fname/set_fname</code>, and the never-populated
@@ -138,8 +157,10 @@ Verilog <a class="xref" href="../verilog/5e.html">5e</a> (cgen
   sidecar + <code>//# sourceMappingURL=</code> comment for textual egress
   (cgen Verilog, pyrope writer). Lossy by design: one display anchor per segment
   (primary parent), LiveHD extras under <code>x_livehd</code>. Verilog
-  <a class="xref" href="../verilog/5e.html">5e</a> consumes this for
-  <code>// src:</code> comments.</li>
+  <a class="xref" href="../verilog/5e.html">5e</a>'s inline <code>// src:</code>
+  comments are a <em>separate</em> consumer: cgen resolves each emitted node's
+  SourceId directly through the locator (subtasks D+E), not through the lossy
+  <code>.map</code> — which is built <em>from</em> cgen's emitted positions.</li>
 </ul>
 
 <h2>Subtasks — landed</h2>
@@ -154,8 +175,11 @@ Verilog <a class="xref" href="../verilog/5e.html">5e</a> (cgen
   column is stored anywhere; <code>tok</code> is always 0.</li>
 <li><strong>The whitelist.</strong> Loc survives rebuilds only for
   {if, while, store, declare, range, attr_set, cassert, func_call}, hand-kept at
-  3 carry sites (prp2lnast.cpp:799-830; upass_runner.cpp:307-320, 614-631). Any
-  other node kind silently loses loc on every rebuild;
+  4 carry sites (prp2lnast.cpp:799-830; upass_runner.cpp:307-320, 614-631; plus
+  the single-kind declare-cluster carry in rewrite_decls_to_declare,
+  prp2lnast.cpp:914-923). attach_loc also stamps <code>for</code> and
+  <code>timecheck</code> nodes, which no gate carries — their loc dies on the
+  first rebuild. Any other node kind silently loses loc on every rebuild;
   <code>func_extract</code>/template-specialization clones drop loc/fname
   entirely (type+name-only copies).</li>
 <li><strong>Diag machinery is ready.</strong> <code>core/diag.hpp</code>
@@ -163,12 +187,12 @@ Verilog <a class="xref" href="../verilog/5e.html">5e</a> (cgen
   ("pre-sourcemap [[1f]]" comment at :29-31, never set);
   <code>Diagnostic::notes</code> (multi-location) is rendered by both
   <code>to_jsonl</code> and <code>to_text</code> but has zero producers.</li>
-<li><strong>Null-span census.</strong> ~70 sites emit no span: 38+ tolg
-  <code>Pass::error</code>, 8 timecheck (loc as message text only), 13
-  <code>upass::error()</code> callers, 8 span-less sink emits in constprop, 2 in
-  prp2lnast. The 11 located upass sites are line-only (no col/end). Only
-  tree-sitter-anchored parse errors carry full byte+line+col spans
-  (prp2lnast.cpp:112-136).</li>
+<li><strong>Null-span census.</strong> ~70 sites emit no span: 38 tolg
+  <code>Pass::error</code>, 8 timecheck (6 with loc as message text only, 2
+  module-name-only), 13 <code>upass::error()</code> callers, 7 span-less sink
+  emits in constprop, 2 in prp2lnast. The 11 located upass sites are line-only
+  (no col/end). Only tree-sitter-anchored parse errors carry full byte+line+col
+  spans (prp2lnast.cpp:112-136).</li>
 <li><strong>LGraph.</strong> hhds nodes accept attrs, and yosys ingress stamps a
   write-only <code>livehd::attrs::loc/source</code> (with <code>set_loc1</code>
   storing a <em>line</em> in a field documented as a byte offset,

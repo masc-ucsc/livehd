@@ -30,7 +30,7 @@ cassert(t.[comptime])
 // 4) Parameter constraint `::[comptime]`: passing a known-comptime value
 //    must satisfy the constraint and not raise an error.
 comb double_const(n::[comptime]) -> (r) { r = n * 2 }
-cassert(double_const(n = 5) == 10)
+cassert(double_const(5) == 10)
 cassert(double_const(n = a) == 84)
 
 // 5) Function returning comptime value — the result is still comptime.

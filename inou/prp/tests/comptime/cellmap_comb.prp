@@ -1,7 +1,7 @@
 /*
 :name: cellmap_comb
 :type: comptime
-:verifier_pass: 104
+:verifier_pass: 105
 :verifier_fail: 0
 */
 
@@ -26,6 +26,14 @@ cassert(cell_sum(a=100, b=200) == 300)
 cassert(  __sum(a=(100, 200)) == 300)
 cassert(cell_sum(a=0, b=0) == 0)
 cassert(  __sum(a=(0, 0)) == 0)
+
+comb cell_sum2(...a:u32) -> (y) {
+  y = 0
+  for x in a {
+    y += x
+  }
+}
+cassert(cell_sum2(10, 11, 20) == __sum(a=(10, 11, 20)))
 
 // Ntype_op::Mult -- repeated A pin
 comb cell_mult(a:u32, b:u32) -> (y) { y = a * b }
