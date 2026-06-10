@@ -30,6 +30,7 @@ public:
     Const bw_max, bw_min;      // derived range (bitwidth; per-write)
 
     upass::Kind kind = upass::Kind::unknown;  // typecheck / type-bake
+    upass::Mode mode = upass::Mode::unknown;  // per-field mut/const (type-bake; rides entry copies)
     bool        immutable = false;
     bool        comptime  = false;
   };
@@ -105,13 +106,19 @@ protected:
   // lower_bound("prefix.") + walk.
   using Key_map_type = std::map<std::string, Entry, Canonical_less>;
 
-  const std::string name;
 
   // Binding-level typed facts (1b/D): mode is a property of the NAME
   // (mut/const/reg), type_name the nominal identity for `is` (empty =
   // anonymous). Per-leaf facts live on Entry.
   upass::Mode mode_ = upass::Mode::unknown;
   std::string type_name_;
+  // 2b/E — the kind of the VALUE this bundle holds, stamped by producer ops
+  // (typecheck). Distinct from Entry.kind, which is per-leaf (the "0" entry's
+  // kind describes FIELD 0 on a multi-entry bundle — constprop copies field
+  // entries wholesale, so entry kinds travel with fields). Needed for the
+  // shapes the entry can't express: a 0/1-entry tuple (`mut d=(); d=d++(i,)`)
+  // is scalar-SHAPED yet kind `tuple`.
+  upass::Kind value_kind_ = upass::Kind::unknown;
 
   // correct mark as mutable to do not allow tup updates, just to mark the
   // tuple as incorrect (not allow to mark correct once it is incorrect)
@@ -167,13 +174,17 @@ protected:
   void del_int(std::string_view key);  // data leaves only; attrs are never deleted by data writes
 
 public:
-  Bundle(std::string_view _name) : name(_name), immutable(false), correct(true) {}
+  // 2b/H — the name member is gone (its last cross-pass reader died with
+  // runner_type_query_fn); the runner passes names to the hooks for
+  // diagnostics. The ctor still ACCEPTS a name and discards it so the ~30
+  // construction sites stay readable about WHAT they build.
+  Bundle() : immutable(false), correct(true) {}
+  explicit Bundle(std::string_view /*name — discarded*/) : Bundle() {}
 
   // DEPRECATED (1b/F → deleted in 2b/H): a Bundle's name IS the symbol-table
   // key; the last functional reader is constprop's resolve_field_operand
   // building dotted keys for runner_type_query_fn, which 2b/H deletes. The
   // 2b runner passes dst/src names to the hooks for diagnostics instead.
-  std::string_view get_name() const { return name; }
   bool             is_correct() const { return correct; }
   void             set_issue() const { correct = false; }
 
@@ -185,6 +196,8 @@ public:
   void             set_mode(upass::Mode m) { mode_ = m; }
   std::string_view get_type_name() const { return type_name_; }
   void             set_type_name(std::string_view tn) { type_name_ = std::string(tn); }
+  upass::Kind      get_value_kind() const { return value_kind_; }
+  void             set_value_kind(upass::Kind k) { value_kind_ = k; }
 
   // The hot "this operand's comptime value, or unknown" read (1b/D+E).
   // Defined only for scalar bundles (≤1 data leaf); nullopt when the
@@ -222,11 +235,14 @@ public:
   // has_scalar() — the no-arg forms below are removed with 2b's flag-day.
   // The keyed forms remain for FIELD reads until 2b's push model lands.
   bool has_trivial(std::string_view key) const;
-  bool has_trivial() const { return has_trivial("0"); }
 
   const Entry& get_entry(std::string_view key) const;
   const Const& get_trivial(std::string_view key) const { return get_entry(key).trivial; }
-  const Const& get_trivial() const;
+  // The LONE non-attr entry's value regardless of key depth (a 1-element
+  // tuple-of-tuple flattens); invalid when the bundle isn't single-entry.
+  // (2b/H: the old no-arg get_trivial/has_trivial overloads were ambiguous
+  // with the "0"-keyed forms — this is the explicit spelling.)
+  const Const& lone_trivial() const;
 
   bool                    has_bundle(std::string_view key) const;
   std::shared_ptr<Bundle> get_bundle(std::string_view key) const;
@@ -238,18 +254,35 @@ public:
   void set(std::string_view key, const Entry&& entry);
   void set(std::string_view key, const Entry& entry) { set(key, Entry(entry)); }
 
-  void set(std::string_view key, const Const& trivial) { set(key, Entry(false, trivial)); }
+  // 2b — a VALUE write preserves the entry's typed fact fields (kind,
+  // declared envelope, derived range, comptime): only the value slice and the
+  // mutability flag change. "Metadata that must not change across assignments
+  // remains declaration-persistent."
+  Entry value_entry(std::string_view key, bool immutable_flag, const Const& trivial) const {
+    Entry e     = get_entry(key);  // copies the facts; invalid sentinel when missing
+    e.trivial   = trivial;
+    e.immutable = immutable_flag;
+    // The DERIVED range describes the previous value — a new value
+    // invalidates it (bitwidth re-stamps the fresh derivation right after;
+    // a binding must never hold a range that does not contain its value).
+    // Declared facts (kind / decl envelope / comptime / mode) persist.
+    e.bw_max = invalid_lconst;
+    e.bw_min = invalid_lconst;
+    return e;
+  }
+
+  void set(std::string_view key, const Const& trivial) { set(key, value_entry(key, false, trivial)); }
   void let(std::string_view key, const Const& trivial) {
     I(!immutable);  // FIXME: use llog library
-    set(key, Entry(true, trivial));
+    set(key, value_entry(key, true, trivial));
   }
   void mut(std::string_view key, const Const& trivial) {
     I(!immutable);  // FIXME: use llog library
-    set(key, Entry(false, trivial));
+    set(key, value_entry(key, false, trivial));
   }
   void var(std::string_view key, const Const& trivial) {
     I(!immutable);  // FIXME: use llog library
-    set(key, Entry(false, trivial));
+    set(key, value_entry(key, false, trivial));
   }
 
   void set(const Const& trivial) {  // clear everything that is not 0.__attr. set 0
@@ -335,7 +368,7 @@ public:
 
   bool is_ordered(std::string_view key) const;
 
-  void dump() const;
+  void dump(std::string_view name = "?") const;
 
   // Dotted-key string helpers — implementations live in lnast/bundle_key.hpp
   // (shared with lnast_builder without a lnast→upass dependency); these

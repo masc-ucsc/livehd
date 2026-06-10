@@ -1,0 +1,9 @@
+/*
+:name: nil_then_tuple
+:type: error
+:error: cannot re-shape
+:help: declare the tuple shape up front
+*/
+
+mut c = nil
+c = (a=3, b=4)

@@ -25,7 +25,9 @@
 #include <string_view>
 #include <utility>
 
+#include "absl/strings/str_cat.h"
 #include "const.hpp"
+#include "decl_facts.hpp"
 #include "lnast.hpp"
 #include "lnast_ntype.hpp"
 #include "upass_attributes.hpp"
@@ -106,90 +108,77 @@ Const min_signed(uint32_t n) {
 }  // namespace
 
 std::optional<Const> uPass_attributes::lookup_attr_value(std::string_view var, std::string_view attr) const {
-  auto it = attr_set_values.find(std::string{var});
-  if (it == attr_set_values.end()) {
+  // 2b/E3e — explicit attr values live as residual attrs ON the binding
+  // (field-scoped for dotted names). A dotted miss falls back to the root's
+  // whole-bundle attr: aggregate-level attrs are inherited by every field
+  // (`foo::[potato=4]` answers `foo.b.[potato]`) — replaces the legacy
+  // migrate_aggregate_attrs_to_fields pre-copies.
+  if (runner_st == nullptr || var.empty()) {
     return std::nullopt;
   }
-  auto ait = it->second.find(std::string{attr});
-  if (ait == it->second.end()) {
+  const auto root  = Bundle::get_first_level(var);
+  const auto field = Bundle::get_all_but_first_level(var);
+  const auto b     = runner_st->get_bundle(root);
+  if (!b) {
     return std::nullopt;
   }
-  return ait->second;
+  if (!field.empty()) {
+    if (const auto& v = b->get_attr(field, attr); !v.is_invalid()) {
+      return v;
+    }
+    // Aggregate→field inheritance is cat-D only: builtin attrs (bits/max/
+    // min/typename/…) describe ONE level and never leak from the container
+    // onto a field (legacy Cat-D gate).
+    if (is_builtin_attr(attr)) {
+      return std::nullopt;
+    }
+  }
+  if (const auto& v = b->get_attr(attr); !v.is_invalid()) {
+    return v;
+  }
+  return std::nullopt;
+}
+
+const uPass_attributes::Type_info* uPass_attributes::lookup_type_info_bundle(std::string_view var) const {
+  // 2b/H — delegates to the shared derivation (upass/core/decl_facts.hpp);
+  // the runner and constprop consume the same helper directly, replacing the
+  // provide_* pull seams. Returns a pointer into a per-call scratch.
+  if (runner_st == nullptr) {
+    return nullptr;
+  }
+  const auto f = upass::decl_facts::lookup(*runner_st, lm ? lm->get_lnast().get() : nullptr, var);
+  if (!f) {
+    return nullptr;
+  }
+  Type_info ti;
+  switch (f->kind) {
+    case upass::decl_facts::Num::unsigned_int: ti.kind = Numeric_kind::unsigned_int; break;
+    case upass::decl_facts::Num::signed_int  : ti.kind = Numeric_kind::signed_int; break;
+    case upass::decl_facts::Num::boolean     : ti.kind = Numeric_kind::boolean; break;
+    case upass::decl_facts::Num::string      : ti.kind = Numeric_kind::string; break;
+    case upass::decl_facts::Num::none        : ti.kind = Numeric_kind::none; break;
+  }
+  switch (f->mode) {
+    case upass::Mode::mut_kind  : ti.decl = Decl_kind::mut_kind; break;
+    case upass::Mode::const_kind: ti.decl = Decl_kind::const_kind; break;
+    case upass::Mode::reg_kind  : ti.decl = Decl_kind::reg_kind; break;
+    case upass::Mode::await_kind: ti.decl = Decl_kind::await_kind; break;
+    case upass::Mode::type_kind : ti.decl = Decl_kind::type_kind; break;
+    default                     : ti.decl = Decl_kind::unknown; break;
+  }
+  ti.bits          = f->bits;
+  ti.is_comptime   = f->is_comptime;
+  ti.has_type_spec = f->has_type_spec;
+  ti.range_max     = f->range_max;
+  ti.range_min     = f->range_min;
+  ti_scratch_      = std::move(ti);
+  return &ti_scratch_;
 }
 
 const uPass_attributes::Type_info* uPass_attributes::lookup_type_info(std::string_view var) const {
-  // Heterogeneous find on flat_hash_map<std::string, T>: no temporary
-  // std::string allocation. This sits on the per-op record_assign() path
-  // so the saving is multiplied across 1M+ ops on bulk-arithmetic inputs.
-  if (auto it = type_info_map.find(var); it != type_info_map.end()) {
-    return &it->second;
-  }
-  // Phase 8 typesystem: when prp2lnast lowers a tuple literal with typed
-  // fields (`t = (a:u4=3, …)`), it emits `type_spec(tg_ref, prim_type_int)`
-  // against a `tuple_get` tmp (`u4` = sugar for `int(max=15,min=0)`). The
-  // type_info therefore lives on the tuple_get tmp, not on the dotted path
-  // (process_type_spec records it). Two chains can land here:
-  //   1. The attr_get's base is itself a tuple_get tmp (`tuple_get ___9
-  //      t "a"; attr_get ___10 ___9 "bits"`). Follow the alias to
-  //      `t.a`, then a sibling tuple_get tmp's type_info, if any.
-  //   2. The base is already a dotted path like "t.a". Same final step.
-  std::string base;
-  std::string field;
-  if (auto a_it = tuple_get_alias.find(std::string{var}); a_it != tuple_get_alias.end()) {
-    base  = a_it->second.base;
-    field = a_it->second.field_name.empty() ? a_it->second.field_key : a_it->second.field_name;
-  } else {
-    auto dot = var.find('.');
-    if (dot == std::string_view::npos) {
-      return nullptr;
-    }
-    base  = std::string{var.substr(0, dot)};
-    field = std::string{var.substr(dot + 1)};
-  }
-  if (field.empty()) {
-    return nullptr;
-  }
-  // Resolve `base` through direct_alias (e.g. `t` → `___1`) so the
-  // search hits the canonical tuple tmp the type-emission targeted.
-  std::string canonical_base = base;
-  if (auto da = direct_alias.find(canonical_base); da != direct_alias.end()) {
-    canonical_base = da->second;
-  }
-  // Field-aware migrated entry: if a prior migrate_alias copied the
-  // type_info onto `base.field`, return that.
-  {
-    std::string path;
-    path.reserve(base.size() + 1 + field.size());
-    path  = base;
-    path += '.';
-    path += field;
-    if (auto it = type_info_map.find(path); it != type_info_map.end()) {
-      return &it->second;
-    }
-  }
-  if (canonical_base != base) {
-    std::string path;
-    path.reserve(canonical_base.size() + 1 + field.size());
-    path  = canonical_base;
-    path += '.';
-    path += field;
-    if (auto it = type_info_map.find(path); it != type_info_map.end()) {
-      return &it->second;
-    }
-  }
-  // Fallback: scan tuple_get_alias for the sibling tmp whose base
-  // matches the canonical base and field matches.
-  for (const auto& [tmp, alias] : tuple_get_alias) {
-    if (alias.base != canonical_base && alias.base != base) {
-      continue;
-    }
-    if (alias.field_key == field || alias.field_name == field) {
-      if (auto it = type_info_map.find(tmp); it != type_info_map.end()) {
-        return &it->second;
-      }
-    }
-  }
-  return nullptr;
+  // 2b/E3b — bundle-backed (see lookup_type_info_bundle). The legacy
+  // type_info_map and its tuple_get_alias/direct_alias chase are gone.
+  return lookup_type_info_bundle(var);
 }
 
 std::optional<std::pair<Const, Const>> uPass_attributes::lookup_range(std::string_view tmp) const {
@@ -200,83 +189,35 @@ std::optional<std::pair<Const, Const>> uPass_attributes::lookup_range(std::strin
   return it->second;
 }
 
-std::optional<uPass_attributes::Decl_scalar_type> uPass_attributes::provide_decl_type(std::string_view name) {
-  // 1i inliner shared-ST read: surface a variable's declared integer range so
-  // an untyped inlined param can adopt the actual argument's type. Only a real
-  // `:type` annotation with a concrete prim_type_int range qualifies (the same
-  // gate derive_bits/derive_max use). bool/string/unbounded-int carry no range
-  // and read nullopt → the inliner leaves the param untyped (status quo).
-  const auto* ti = lookup_type_info(name);
-  if (!ti || !ti->has_type_spec || (!ti->range_max && !ti->range_min)) {
-    return std::nullopt;
-  }
-  return Decl_scalar_type{.range_max = ti->range_max, .range_min = ti->range_min};
-}
 
-std::optional<uPass_attributes::Field_decl_type> uPass_attributes::provide_field_type(std::string_view name) {
-  // Task 1k typed-self does-check: declared kind + range of a dotted field
-  // path (`t1.a` chases direct_alias / tuple_get_alias inside
-  // lookup_type_info). Unlike provide_decl_type, a missing range is fine —
-  // bool/string fields carry only their kind.
-  const auto* ti = lookup_type_info(name);
-  if (!ti || !ti->has_type_spec) {
-    return std::nullopt;
-  }
-  Field_decl_type ft;
-  switch (ti->kind) {
-    case Numeric_kind::unsigned_int:
-    case Numeric_kind::signed_int  : ft.kind = Io_kind::integer; break;
-    case Numeric_kind::boolean     : ft.kind = Io_kind::boolean; break;
-    case Numeric_kind::string      : ft.kind = Io_kind::string; break;
-    case Numeric_kind::none        : ft.kind = Io_kind::none; break;
-  }
-  // An integer type_spec whose range is unbounded keeps kind none in
-  // read_scalar_type_at_cursor (kind derives from range_min); a recorded
-  // range without a kind still identifies an integer.
-  if (ft.kind == Io_kind::none && (ti->range_max || ti->range_min)) {
-    ft.kind = Io_kind::integer;
-  }
-  ft.range_max = ti->range_max;
-  ft.range_min = ti->range_min;
-  return ft;
-}
 
-uPass_attributes::Decl_storage uPass_attributes::provide_decl_storage(std::string_view name) {
-  // Task 1k ref-actual mutability: surface the declared storage class so the
-  // inliner can reject const/type bindings bound to `ref` params.
-  const auto* ti = lookup_type_info(name);
-  if (ti == nullptr) {
-    return Decl_storage::unknown;
-  }
-  switch (ti->decl) {
-    case Decl_kind::mut_kind  : return Decl_storage::mut_storage;
-    case Decl_kind::const_kind: return Decl_storage::const_storage;
-    case Decl_kind::reg_kind  : return Decl_storage::reg_storage;
-    case Decl_kind::await_kind: return Decl_storage::await_storage;
-    case Decl_kind::type_kind : return Decl_storage::type_storage;
-    case Decl_kind::unknown   : break;
-  }
-  return Decl_storage::unknown;
-}
 
 std::optional<std::string> uPass_attributes::lookup_attr_ref(std::string_view var, std::string_view attr) const {
-  auto it = attr_set_refs.find(std::string{var});
-  if (it == attr_set_refs.end()) {
+  // 2b/E3e — ref-valued attrs ride the binding as string Consts under
+  // "<attr>_refname" (the LGraph wiring pass resolves the text by name).
+  if (runner_st == nullptr || var.empty()) {
     return std::nullopt;
   }
-  auto ait = it->second.find(std::string{attr});
-  if (ait == it->second.end()) {
+  const auto root  = Bundle::get_first_level(var);
+  const auto field = Bundle::get_all_but_first_level(var);
+  const auto b     = runner_st->get_bundle(root);
+  if (!b) {
     return std::nullopt;
   }
-  return ait->second;
+  const std::string key = absl::StrCat(attr, "_refname");
+  const auto&       v   = field.empty() ? b->get_attr(key) : b->get_attr(field, key);
+  if (v.is_invalid() || !v.is_string()) {
+    return std::nullopt;
+  }
+  return v.to_field();
 }
 
 std::optional<Const> uPass_attributes::resolve_value(std::string_view var) const {
   // Prefer the runner's aggregate fold (constprop's symbol table is the
   // primary source). Fall back to our own tmp_fold for refs that only this
   // pass knows about (e.g. chained attr_get→attr_get).
-  if (runner_fold_fn) {
-    auto v = runner_fold_fn(var);
+  if (runner_st != nullptr) {
+    auto v = runner_st->known_const_scalar(var);
     if (v && !v->is_invalid()) {
       return *v;
     }
@@ -428,31 +369,29 @@ std::optional<Const> uPass_attributes::derive_comptime(std::string_view base, st
   }
   // Aggregate (tuple): comptime iff every field is comptime. This lets
   // `cassert(t.[comptime])` resolve when `t` itself has no scalar, but each
-  // field does.
-  const Tuple_shape* sh = lookup_tuple_shape(base);
-  std::string        sh_base{base};
-  if (!sh) {
-    if (auto it = shape_source.find(sh_base); it != shape_source.end()) {
-      sh      = lookup_tuple_shape(it->second);
-      sh_base = it->second;
-    }
-  }
-  if (sh && !sh->fields.empty()) {
-    bool all_comptime = true;
-    for (const auto& f : sh->fields) {
-      std::string field_path;
-      field_path.reserve(sh_base.size() + 1 + std::max(f.name.size(), f.positional.size()));
-      field_path.assign(sh_base);
-      field_path.push_back('.');
-      field_path.append(f.name.empty() ? f.positional : f.name);
-      auto sub = derive_comptime(field_path, field_path);
-      if (!sub || sub->is_known_zero()) {
-        all_comptime = false;
-        break;
+  // field does. 2b/E3c — the field set comes from the live BUNDLE (the
+  // legacy tuple_shapes/shape_source side-maps are gone).
+  if (runner_st != nullptr && base.find('.') == std::string_view::npos) {
+    if (const auto b = runner_st->get_bundle(base); b && (b->has_named_top() || b->unnamed_top_count() > 0)) {
+      bool any          = false;
+      bool all_comptime = true;
+      for (const auto& tl : b->top_levels()) {
+        any = true;
+        const std::string seg = tl.name.empty() ? std::to_string(tl.pos) : std::string(tl.name);
+        std::string field_path;
+        field_path.reserve(base.size() + 1 + seg.size());
+        field_path.assign(base);
+        field_path.push_back('.');
+        field_path.append(seg);
+        auto sub = derive_comptime(field_path, field_path);
+        if (!sub || sub->is_known_zero()) {
+          all_comptime = false;
+          break;
+        }
       }
-    }
-    if (all_comptime) {
-      return *Dlop::create_integer(1);
+      if (any && all_comptime) {
+        return *Dlop::create_integer(1);
+      }
     }
   }
   return *Dlop::create_integer(0);
@@ -534,9 +473,20 @@ void uPass_attributes::evaluate_attr_get(std::string_view dst, std::string_view 
       result = derive_aggregate_typename(base, base_text);
     } else if (attr == "key") {
       // `.[key]` on a tuple_get tmp returns the source field's name; on a
-      // bare aggregate it returns the aggregate's own name.
-      if (auto* a = lookup_get_alias(base); a && !a->field_name.empty()) {
-        result = *Dlop::from_pyrope(std::string{"\'"} + a->field_name + "\'");
+      // bare aggregate it returns the aggregate's own name. 2b/E3c — the
+      // extraction origin comes from Symbol_table::tget_origin.
+      std::string field_seg;
+      if (runner_st != nullptr) {
+        if (auto oit = runner_st->tget_origin.find(std::string(base)); oit != runner_st->tget_origin.end()) {
+          const auto f = Bundle::get_last_level(oit->second);
+          // Named segments only (a positional index is not a key).
+          if (!f.empty() && f.find_first_not_of("0123456789") != std::string_view::npos) {
+            field_seg = std::string(f);
+          }
+        }
+      }
+      if (!field_seg.empty()) {
+        result = *Dlop::from_pyrope(std::string{"\'"} + field_seg + "\'");
       } else {
         result = derive_aggregate_key(base, base_text);
       }
@@ -570,21 +520,15 @@ void uPass_attributes::evaluate_attr_get(std::string_view dst, std::string_view 
   if (!inserted && !it->second.same_repr(*result)) {
     it->second = *result;
   }
+  // 2b/E4 — the derived value is the attr_get dst's VALUE: write it to the
+  // binding too, so push-form operand resolution (table-only) sees it
+  // without the runner_fold_fn pull seam (tmp_fold + fold_ref die in 2b/H).
+  if (runner_st != nullptr && dst.find('.') == std::string_view::npos) {
+    (void)runner_st->set(std::string(dst), *result);
+  }
 }
 
-std::optional<Const> uPass_attributes::fold_ref(std::string_view name) {
-  // Hot path: tmp_fold is empty on bulk-arithmetic workloads — skip the
-  // std::string allocation that tmp_fold.find(std::string{name}) would
-  // otherwise force on every per-op runner_fold_fn call (xx.prp: 6M+ calls).
-  if (tmp_fold.empty()) {
-    return std::nullopt;
-  }
-  auto it = tmp_fold.find(std::string{name});
-  if (it == tmp_fold.end()) {
-    return std::nullopt;
-  }
-  return it->second;
-}
+// (2b/H) fold_ref deleted — cross-pass folds land on the table (known_const_scalar).
 
 void uPass_attributes::process_type_spec() {
   // Layout (prp2lnast::emit_type_spec):
@@ -615,20 +559,15 @@ void uPass_attributes::process_type_spec() {
   }
   move_to_parent();
 
-  auto& ti         = type_info_map[target];
-  ti.has_type_spec = true;
-  if (kind != Numeric_kind::none) {
-    ti.kind = kind;
-  }
-  if (bits != 0) {
-    ti.bits = bits;
-  }
-  if (range_max) {
-    ti.range_max = range_max;
-  }
-  if (range_min) {
-    ti.range_min = range_min;
-  }
+  // 2b/E3b — the runner's declare/type_spec bake writes these facts onto the
+  // binding (Entry kind + decl ranges; pending stash for dotted dsts);
+  // lookup_type_info reads them back bundle-backed. Nothing to record here.
+  (void)target;
+  (void)kind;
+  (void)bits;
+  (void)range_max;
+  (void)range_min;
+  (void)is_real_type;
 }
 
 void uPass_attributes::read_scalar_type_at_cursor(Numeric_kind& kind, uint32_t& bits, std::optional<Const>& range_max,
@@ -735,39 +674,18 @@ void uPass_attributes::process_declare() {
   }
   move_to_parent();
 
-  auto& ti = type_info_map[target];
-  // has_type_spec gates the declared-type-authoritative derive paths; only a
-  // concrete numeric/string type counts (matches the legacy behavior where an
-  // un-annotated decl emitted no type_spec).
-  if (is_real_type) {
-    ti.has_type_spec = true;
-  }
-  if (kind != Numeric_kind::none) {
-    ti.kind = kind;
-  }
-  if (bits != 0) {
-    ti.bits = bits;
-  }
-  if (range_max) {
-    ti.range_max = range_max;
-  }
-  if (range_min) {
-    ti.range_min = range_min;
-  }
-  if (decl != Decl_kind::unknown) {
-    ti.decl = decl;
-  }
-  if (decl == Decl_kind::const_kind) {
-    // A re-`declare` of a const can only be compiler-generated (comptime loop
-    // unrolling / inliner clones) — the front-end rejects same-name
-    // redeclaration at parse time. Each clone opens a fresh binding, so the
-    // single-bind tally restarts here; counting across clones flagged
-    // spurious "const rebind" on unrolled `for` bodies (formux, tuple_doc2).
-    const_assign_count.erase(std::string(target));
-  }
+  // 2b/E3b — the runner's declare bake writes kind/decl ranges/mode/comptime
+  // onto the binding; the const single-bind tally lives there too ("vbound"
+  // attr — fresh clone scopes need no reset). Only the explicit-comptime
+  // attr value remains map-side (E3e migrates attr_set_values).
+  (void)kind;
+  (void)bits;
+  (void)range_max;
+  (void)range_min;
+  (void)is_real_type;
+  (void)decl;
   if (comptime) {
-    ti.is_comptime                                   = true;
-    attr_set_values[std::string(target)]["comptime"] = *Dlop::create_integer(1);
+    set_binding_attr(target, "comptime", *Dlop::create_integer(1));
   }
 }
 
@@ -792,8 +710,8 @@ void uPass_attributes::process_range() {
     if (Lnast_ntype::is_const(get_raw_ntype())) {
       return *Dlop::from_pyrope(current_text());
     }
-    if (Lnast_ntype::is_ref(get_raw_ntype()) && runner_fold_fn) {
-      auto v = runner_fold_fn(current_text());
+    if (Lnast_ntype::is_ref(get_raw_ntype()) && runner_st != nullptr) {
+      auto v = runner_st->known_const_scalar(current_text());
       if (v) {
         return *v;
       }

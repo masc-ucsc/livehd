@@ -51,40 +51,158 @@ public:
   static void finalize_aggregate();
 
   // Assignment
-  void process_assign() override { check_unary(); }
+  void        process_assign() override { check_unary(); }
+  upass::Vote process_store(std::string_view dst_name, Bundle& dst, upass::Src_span src) override {
+    (void)dst_name;
+    (void)dst;
+    if (src.size() <= 1) {
+      process_assign();
+    } else {
+      process_tuple_set();
+    }
+    return upass::Vote::keep;
+  }
 
   // Operators
   // - Bitwidth
-  void process_bit_and() override { check_binary(); }
-  void process_bit_or() override { check_binary(); }
+  upass::Vote process_bit_and(std::string_view dst_name, Bundle& dst, upass::Src_span src) override {
+    (void)dst_name;
+    (void)dst;
+    (void)src;
+    check_binary();
+    return upass::Vote::keep;
+  }
+  upass::Vote process_bit_or(std::string_view dst_name, Bundle& dst, upass::Src_span src) override {
+    (void)dst_name;
+    (void)dst;
+    (void)src;
+    check_binary();
+    return upass::Vote::keep;
+  }
   // void process_bit_not() override { check_binary(); }
-  void process_bit_xor() override { check_binary(); }
+  upass::Vote process_bit_xor(std::string_view dst_name, Bundle& dst, upass::Src_span src) override {
+    (void)dst_name;
+    (void)dst;
+    (void)src;
+    check_binary();
+    return upass::Vote::keep;
+  }
   // - Bitwidth Insensitive Reduce
   // void process_reduce_or() override { check_binary(); }
   // - Logical
-  void process_log_and() override { check_binary(); }
-  void process_log_or() override { check_binary(); }
+  upass::Vote process_log_and(std::string_view dst_name, Bundle& dst, upass::Src_span src) override {
+    (void)dst_name;
+    (void)dst;
+    (void)src;
+    check_binary();
+    return upass::Vote::keep;
+  }
+  upass::Vote process_log_or(std::string_view dst_name, Bundle& dst, upass::Src_span src) override {
+    (void)dst_name;
+    (void)dst;
+    (void)src;
+    check_binary();
+    return upass::Vote::keep;
+  }
   // void process_log_not() override { check_binary(); }
   // - Arithmetic
-  void process_plus() override { check_binary(); }
-  void process_minus() override { check_binary(); }
-  void process_mult() override { check_binary(); }
-  void process_div() override { check_binary(); }
-  void process_mod() override { check_binary(); }
+  upass::Vote process_plus(std::string_view dst_name, Bundle& dst, upass::Src_span src) override {
+    (void)dst_name;
+    (void)dst;
+    (void)src;
+    check_binary();
+    return upass::Vote::keep;
+  }
+  upass::Vote process_minus(std::string_view dst_name, Bundle& dst, upass::Src_span src) override {
+    (void)dst_name;
+    (void)dst;
+    (void)src;
+    check_binary();
+    return upass::Vote::keep;
+  }
+  upass::Vote process_mult(std::string_view dst_name, Bundle& dst, upass::Src_span src) override {
+    (void)dst_name;
+    (void)dst;
+    (void)src;
+    check_binary();
+    return upass::Vote::keep;
+  }
+  upass::Vote process_div(std::string_view dst_name, Bundle& dst, upass::Src_span src) override {
+    (void)dst_name;
+    (void)dst;
+    (void)src;
+    check_binary();
+    return upass::Vote::keep;
+  }
+  upass::Vote process_mod(std::string_view dst_name, Bundle& dst, upass::Src_span src) override {
+    (void)dst_name;
+    (void)dst;
+    (void)src;
+    check_binary();
+    return upass::Vote::keep;
+  }
   // - Shift
-  void process_shl() override { check_binary(); }
-  void process_sra() override { check_binary(); }
+  upass::Vote process_shl(std::string_view dst_name, Bundle& dst, upass::Src_span src) override {
+    (void)dst_name;
+    (void)dst;
+    (void)src;
+    check_binary();
+    return upass::Vote::keep;
+  }
+  upass::Vote process_sra(std::string_view dst_name, Bundle& dst, upass::Src_span src) override {
+    (void)dst_name;
+    (void)dst;
+    (void)src;
+    check_binary();
+    return upass::Vote::keep;
+  }
   // - Bit Manipulation
   // void process_sext() override { check_binary(); }
   // void process_set_mask() override { check_binary(); }
   // void process_get_mask() override { check_binary(); }
   // - Comparison
-  void process_ne() override { check_binary(); }
-  void process_eq() override { check_binary(); }
-  void process_lt() override { check_binary(); }
-  void process_le() override { check_binary(); }
-  void process_gt() override { check_binary(); }
-  void process_ge() override { check_binary(); }
+  upass::Vote process_ne(std::string_view dst_name, Bundle& dst, upass::Src_span src) override {
+    (void)dst_name;
+    (void)dst;
+    (void)src;
+    check_binary();
+    return upass::Vote::keep;
+  }
+  upass::Vote process_eq(std::string_view dst_name, Bundle& dst, upass::Src_span src) override {
+    (void)dst_name;
+    (void)dst;
+    (void)src;
+    check_binary();
+    return upass::Vote::keep;
+  }
+  upass::Vote process_lt(std::string_view dst_name, Bundle& dst, upass::Src_span src) override {
+    (void)dst_name;
+    (void)dst;
+    (void)src;
+    check_binary();
+    return upass::Vote::keep;
+  }
+  upass::Vote process_le(std::string_view dst_name, Bundle& dst, upass::Src_span src) override {
+    (void)dst_name;
+    (void)dst;
+    (void)src;
+    check_binary();
+    return upass::Vote::keep;
+  }
+  upass::Vote process_gt(std::string_view dst_name, Bundle& dst, upass::Src_span src) override {
+    (void)dst_name;
+    (void)dst;
+    (void)src;
+    check_binary();
+    return upass::Vote::keep;
+  }
+  upass::Vote process_ge(std::string_view dst_name, Bundle& dst, upass::Src_span src) override {
+    (void)dst_name;
+    (void)dst;
+    (void)src;
+    check_binary();
+    return upass::Vote::keep;
+  }
 
 private:
   std::size_t              pass_count{0};

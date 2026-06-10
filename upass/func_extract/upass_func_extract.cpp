@@ -192,95 +192,142 @@ static void fold_temp_nary(upass::Lnast_manager* lm, Op op, const std::unordered
   lm->restore_cursor(saved);
 }
 
-void uPass_func_extract::process_plus() {
+upass::Vote uPass_func_extract::process_plus(std::string_view dst_name, Bundle& dst, upass::Src_span src) {
+  // Push-form wrapper: body walks the node under the cursor.
+  (void)dst_name;
+  (void)dst;
+  (void)src;
+
   fold_temp_nary(
       lm.get(),
       [](const Const& a, const Const& b) { return *a.add_op(b); },
       latest_outer_value,
       temp_scalar_value,
       temp_scalar_value);
+  return upass::Vote::keep;
 }
-void uPass_func_extract::process_minus() {
+upass::Vote uPass_func_extract::process_minus(std::string_view dst_name, Bundle& dst, upass::Src_span src) {
+  // Push-form wrapper: body walks the node under the cursor.
+  (void)dst_name;
+  (void)dst;
+  (void)src;
+
   fold_temp_nary(
       lm.get(),
       [](const Const& a, const Const& b) { return *a.sub_op(b); },
       latest_outer_value,
       temp_scalar_value,
       temp_scalar_value);
+  return upass::Vote::keep;
 }
-void uPass_func_extract::process_mult() {
+upass::Vote uPass_func_extract::process_mult(std::string_view dst_name, Bundle& dst, upass::Src_span src) {
+  // Push-form wrapper: body walks the node under the cursor.
+  (void)dst_name;
+  (void)dst;
+  (void)src;
+
   fold_temp_nary(
       lm.get(),
       [](const Const& a, const Const& b) { return *a.mult_op(b); },
       latest_outer_value,
       temp_scalar_value,
       temp_scalar_value);
+  return upass::Vote::keep;
 }
-void uPass_func_extract::process_div() {
+upass::Vote uPass_func_extract::process_div(std::string_view dst_name, Bundle& dst, upass::Src_span src) {
+  // Push-form wrapper: body walks the node under the cursor.
+  (void)dst_name;
+  (void)dst;
+  (void)src;
+
   fold_temp_nary(
       lm.get(),
       [](const Const& a, const Const& b) { return *a.div_op(b); },
       latest_outer_value,
       temp_scalar_value,
       temp_scalar_value);
+  return upass::Vote::keep;
 }
-void uPass_func_extract::process_bit_and() {
+upass::Vote uPass_func_extract::process_bit_and(std::string_view dst_name, Bundle& dst, upass::Src_span src) {
+  // Push-form wrapper: body walks the node under the cursor.
+  (void)dst_name;
+  (void)dst;
+  (void)src;
+
   fold_temp_nary(
       lm.get(),
       [](const Const& a, const Const& b) { return *a.and_op(b); },
       latest_outer_value,
       temp_scalar_value,
       temp_scalar_value);
+  return upass::Vote::keep;
 }
-void uPass_func_extract::process_bit_or() {
+upass::Vote uPass_func_extract::process_bit_or(std::string_view dst_name, Bundle& dst, upass::Src_span src) {
+  // Push-form wrapper: body walks the node under the cursor.
+  (void)dst_name;
+  (void)dst;
+  (void)src;
+
   fold_temp_nary(
       lm.get(),
       [](const Const& a, const Const& b) { return *a.or_op(b); },
       latest_outer_value,
       temp_scalar_value,
       temp_scalar_value);
+  return upass::Vote::keep;
 }
-void uPass_func_extract::process_bit_xor() {
+upass::Vote uPass_func_extract::process_bit_xor(std::string_view dst_name, Bundle& dst, upass::Src_span src) {
+  // Push-form wrapper: body walks the node under the cursor.
+  (void)dst_name;
+  (void)dst;
+  (void)src;
+
   fold_temp_nary(
       lm.get(),
       [](const Const& a, const Const& b) { return *a.xor_op(b); },
       latest_outer_value,
       temp_scalar_value,
       temp_scalar_value);
+  return upass::Vote::keep;
 }
 
 // Capture tuple-literal bundles produced at the outer scope. Shape:
 //   tuple_add(ref ___N, assign(ref key, const|ref val) ...)
 // Only purely-named entries with const (or already-known temp) values
 // participate; anything positional/unresolved skips the temp.
-void uPass_func_extract::process_tuple_add() {
+upass::Vote uPass_func_extract::process_tuple_add(std::string_view dst_name, Bundle& dst, upass::Src_span src) {
+  // Push-form wrapper: body walks the node under the cursor.
+  (void)dst_name;
+  (void)dst;
+  (void)src;
+
   if (!lm->has_child()) {
-    return;
+    return upass::Vote::keep;
   }
   const auto saved = lm->save_cursor();
   lm->move_to_child();
   if (!Lnast_ntype::is_ref(lm->current_type())) {
     lm->restore_cursor(saved);
-    return;
+    return upass::Vote::keep;
   }
   std::string                            lhs_name(lm->current_text());
   std::unordered_map<std::string, Const> fields;
   while (lm->move_to_sibling()) {
     if (!Lnast_ntype::is_store(lm->current_type()) || !lm->has_child()) {
       lm->restore_cursor(saved);
-      return;
+      return upass::Vote::keep;
     }
     lm->move_to_child();
     if (!Lnast_ntype::is_ref(lm->current_type())) {
       lm->move_to_parent();
       lm->restore_cursor(saved);
-      return;
+      return upass::Vote::keep;
     }
     std::string key(lm->current_text());
     if (!lm->move_to_sibling()) {
       lm->move_to_parent();
       lm->restore_cursor(saved);
-      return;
+      return upass::Vote::keep;
     }
     auto val = resolve_child_scalar(std::string(lm->current_text()),
                                     Lnast_ntype::is_ref(lm->current_type()),
@@ -290,7 +337,7 @@ void uPass_func_extract::process_tuple_add() {
     lm->move_to_parent();
     if (!val.has_value() || val->is_invalid()) {
       lm->restore_cursor(saved);
-      return;
+      return upass::Vote::keep;
     }
     fields[key] = *val;
   }
@@ -298,6 +345,7 @@ void uPass_func_extract::process_tuple_add() {
     temp_bundle_value[lhs_name] = std::move(fields);
   }
   lm->restore_cursor(saved);
+  return upass::Vote::keep;
 }
 
 // Task 1m — record `fcall(___N, 'import', '<str>')` so a following

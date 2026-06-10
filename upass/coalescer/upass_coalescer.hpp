@@ -55,39 +55,217 @@ public:
   // the runner's switch, restricted to scalar-result ops where parking is
   // safe. Tuple/attr/func ops carry shape/side-effect semantics and are
   // intentionally left to the runner's normal emit path.
-  void process_assign() override { handle_op(); }
-  void process_plus() override { handle_op(); }
-  void process_minus() override { handle_op(); }
-  void process_mult() override { handle_op(); }
-  void process_div() override { handle_op(); }
-  void process_mod() override { handle_op(); }
-  void process_shl() override { handle_op(); }
-  void process_sra() override { handle_op(); }
-  void process_bit_and() override { handle_op(); }
-  void process_bit_or() override { handle_op(); }
-  void process_bit_not() override { handle_op(); }
-  void process_bit_xor() override { handle_op(); }
-  void process_log_and() override { handle_op(); }
-  void process_log_or() override { handle_op(); }
-  void process_log_not() override { handle_op(); }
-  void process_red_or() override { handle_op(); }
-  void process_red_and() override { handle_op(); }
-  void process_red_xor() override { handle_op(); }
-  void process_popcount() override { handle_op(); }
-  void process_sext() override { handle_op(); }
-  void process_get_mask() override { handle_op(); }
-  void process_set_mask() override { handle_op(); }
-  void process_ne() override { handle_op(); }
-  void process_eq() override { handle_op(); }
-  void process_lt() override { handle_op(); }
-  void process_le() override { handle_op(); }
-  void process_gt() override { handle_op(); }
-  void process_ge() override { handle_op(); }
+  void        process_assign() override { handle_op(); }
+  upass::Vote process_store(std::string_view dst_name, Bundle& dst, upass::Src_span src) override {
+    (void)dst_name;
+    (void)dst;
+    if (src.size() <= 1) {
+      process_assign();
+    } else {
+      process_tuple_set();
+    }
+    return consume_park_vote();
+  }
+  upass::Vote process_plus(std::string_view dst_name, Bundle& dst, upass::Src_span src) override {
+    (void)dst_name;
+    (void)dst;
+    (void)src;
+    handle_op();
+    return consume_park_vote();
+  }
+  upass::Vote process_minus(std::string_view dst_name, Bundle& dst, upass::Src_span src) override {
+    (void)dst_name;
+    (void)dst;
+    (void)src;
+    handle_op();
+    return consume_park_vote();
+  }
+  upass::Vote process_mult(std::string_view dst_name, Bundle& dst, upass::Src_span src) override {
+    (void)dst_name;
+    (void)dst;
+    (void)src;
+    handle_op();
+    return consume_park_vote();
+  }
+  upass::Vote process_div(std::string_view dst_name, Bundle& dst, upass::Src_span src) override {
+    (void)dst_name;
+    (void)dst;
+    (void)src;
+    handle_op();
+    return consume_park_vote();
+  }
+  upass::Vote process_mod(std::string_view dst_name, Bundle& dst, upass::Src_span src) override {
+    (void)dst_name;
+    (void)dst;
+    (void)src;
+    handle_op();
+    return consume_park_vote();
+  }
+  upass::Vote process_shl(std::string_view dst_name, Bundle& dst, upass::Src_span src) override {
+    (void)dst_name;
+    (void)dst;
+    (void)src;
+    handle_op();
+    return consume_park_vote();
+  }
+  upass::Vote process_sra(std::string_view dst_name, Bundle& dst, upass::Src_span src) override {
+    (void)dst_name;
+    (void)dst;
+    (void)src;
+    handle_op();
+    return consume_park_vote();
+  }
+  upass::Vote process_bit_and(std::string_view dst_name, Bundle& dst, upass::Src_span src) override {
+    (void)dst_name;
+    (void)dst;
+    (void)src;
+    handle_op();
+    return consume_park_vote();
+  }
+  upass::Vote process_bit_or(std::string_view dst_name, Bundle& dst, upass::Src_span src) override {
+    (void)dst_name;
+    (void)dst;
+    (void)src;
+    handle_op();
+    return consume_park_vote();
+  }
+  upass::Vote process_bit_not(std::string_view dst_name, Bundle& dst, upass::Src_span src) override {
+    (void)dst_name;
+    (void)dst;
+    (void)src;
+    handle_op();
+    return consume_park_vote();
+  }
+  upass::Vote process_bit_xor(std::string_view dst_name, Bundle& dst, upass::Src_span src) override {
+    (void)dst_name;
+    (void)dst;
+    (void)src;
+    handle_op();
+    return consume_park_vote();
+  }
+  upass::Vote process_log_and(std::string_view dst_name, Bundle& dst, upass::Src_span src) override {
+    (void)dst_name;
+    (void)dst;
+    (void)src;
+    handle_op();
+    return consume_park_vote();
+  }
+  upass::Vote process_log_or(std::string_view dst_name, Bundle& dst, upass::Src_span src) override {
+    (void)dst_name;
+    (void)dst;
+    (void)src;
+    handle_op();
+    return consume_park_vote();
+  }
+  upass::Vote process_log_not(std::string_view dst_name, Bundle& dst, upass::Src_span src) override {
+    (void)dst_name;
+    (void)dst;
+    (void)src;
+    handle_op();
+    return consume_park_vote();
+  }
+  upass::Vote process_red_or(std::string_view dst_name, Bundle& dst, upass::Src_span src) override {
+    (void)dst_name;
+    (void)dst;
+    (void)src;
+    handle_op();
+    return consume_park_vote();
+  }
+  upass::Vote process_red_and(std::string_view dst_name, Bundle& dst, upass::Src_span src) override {
+    (void)dst_name;
+    (void)dst;
+    (void)src;
+    handle_op();
+    return consume_park_vote();
+  }
+  upass::Vote process_red_xor(std::string_view dst_name, Bundle& dst, upass::Src_span src) override {
+    (void)dst_name;
+    (void)dst;
+    (void)src;
+    handle_op();
+    return consume_park_vote();
+  }
+  upass::Vote process_popcount(std::string_view dst_name, Bundle& dst, upass::Src_span src) override {
+    (void)dst_name;
+    (void)dst;
+    (void)src;
+    handle_op();
+    return consume_park_vote();
+  }
+  upass::Vote process_sext(std::string_view dst_name, Bundle& dst, upass::Src_span src) override {
+    (void)dst_name;
+    (void)dst;
+    (void)src;
+    handle_op();
+    return consume_park_vote();
+  }
+  upass::Vote process_get_mask(std::string_view dst_name, Bundle& dst, upass::Src_span src) override {
+    (void)dst_name;
+    (void)dst;
+    (void)src;
+    handle_op();
+    return consume_park_vote();
+  }
+  upass::Vote process_set_mask(std::string_view dst_name, Bundle& dst, upass::Src_span src) override {
+    (void)dst_name;
+    (void)dst;
+    (void)src;
+    handle_op();
+    return consume_park_vote();
+  }
+  upass::Vote process_ne(std::string_view dst_name, Bundle& dst, upass::Src_span src) override {
+    (void)dst_name;
+    (void)dst;
+    (void)src;
+    handle_op();
+    return consume_park_vote();
+  }
+  upass::Vote process_eq(std::string_view dst_name, Bundle& dst, upass::Src_span src) override {
+    (void)dst_name;
+    (void)dst;
+    (void)src;
+    handle_op();
+    return consume_park_vote();
+  }
+  upass::Vote process_lt(std::string_view dst_name, Bundle& dst, upass::Src_span src) override {
+    (void)dst_name;
+    (void)dst;
+    (void)src;
+    handle_op();
+    return consume_park_vote();
+  }
+  upass::Vote process_le(std::string_view dst_name, Bundle& dst, upass::Src_span src) override {
+    (void)dst_name;
+    (void)dst;
+    (void)src;
+    handle_op();
+    return consume_park_vote();
+  }
+  upass::Vote process_gt(std::string_view dst_name, Bundle& dst, upass::Src_span src) override {
+    (void)dst_name;
+    (void)dst;
+    (void)src;
+    handle_op();
+    return consume_park_vote();
+  }
+  upass::Vote process_ge(std::string_view dst_name, Bundle& dst, upass::Src_span src) override {
+    (void)dst_name;
+    (void)dst;
+    (void)src;
+    handle_op();
+    return consume_park_vote();
+  }
   // `is` is a pure scalar (bool) type comparison — a drop-candidate in the
   // runner switch, no side effect, no bundle/tuple state. Park it like the
   // other scalar comparisons so a dead or DSE'd `is` result is dropped at
   // flush (const-known) instead of emitted-then-swept (1d hybrid B).
-  void process_is() override { handle_op(); }
+  upass::Vote process_is(std::string_view dst_name, Bundle& dst, upass::Src_span src) override {
+    (void)dst_name;
+    (void)dst;
+    (void)src;
+    handle_op();
+    return consume_park_vote();
+  }
 
   // Scope / control-flow boundaries — flush everything to keep emission order
   // anchored to the original lexical position of each parked stmt. v1 is
@@ -113,20 +291,32 @@ public:
   // Verbatim ops that touch tuple state — flush as a barrier for the same
   // reason. Bundle aliasing is hard to reason about across deferred writes.
   void process_tuple_set() override { flush_all(); }
-  void process_tuple_add() override { flush_all(); }
+  upass::Vote process_tuple_add(std::string_view dst_name, Bundle& dst, upass::Src_span src) override {
+    (void)dst_name;
+    (void)dst;
+    (void)src;
+    flush_all();
+    return upass::Vote::keep;
+  }
   void process_tuple_get() override { flush_all(); }
-  void process_tuple_concat() override { flush_all(); }
+  upass::Vote process_tuple_concat(std::string_view dst_name, Bundle& dst, upass::Src_span src) override {
+    (void)dst_name;
+    (void)dst;
+    (void)src;
+    flush_all();
+    return upass::Vote::keep;
+  }
   void process_attr_set() override { flush_all(); }
   void process_attr_get() override { flush_all(); }
 
-  bool overrides_classify_statement() const override { return true; }
-
-  upass::Emit_decision classify_statement() override {
+  // 2b/D — the park decision rides the push VOTE (one-shot flag set by
+  // handle_op, consumed by the dispatching hook's return value).
+  upass::Vote consume_park_vote() {
     if (parked_current_stmt) {
       parked_current_stmt = false;
-      return upass::Emit_decision::drop();
+      return upass::Vote::drop;
     }
-    return upass::Emit_decision::emit_node();
+    return upass::Vote::keep;
   }
 
   void set_options(const upass::Options_map& opts) override;

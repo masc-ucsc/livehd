@@ -12,7 +12,7 @@
 
 // Registered once here (not in the header) to avoid duplicate-registration
 // errors when multiple TUs include upass_coalescer.hpp.
-static upass::uPass_plugin plugin_coalescer("coalescer", upass::uPass_wrapper<uPass_coalescer>::get_upass);
+static upass::uPass_plugin plugin_coalescer("coalescer", upass::uPass_wrapper<uPass_coalescer>::get_upass, {"constprop", "bitwidth"});
 
 void uPass_coalescer::set_options(const upass::Options_map& opts) {
   auto it = opts.find("coalescer");
@@ -43,10 +43,10 @@ void uPass_coalescer::process_declare() {
 }
 
 bool uPass_coalescer::is_comptime(std::string_view name) const {
-  if (!runner_fold_fn) {
+  if (runner_st == nullptr) {
     return false;
   }
-  auto folded = runner_fold_fn(name);
+  auto folded = runner_st->known_const_scalar(name);
   return folded && !folded->is_invalid() && !folded->has_unknowns();
 }
 

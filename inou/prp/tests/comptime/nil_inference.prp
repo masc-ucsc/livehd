@@ -1,0 +1,24 @@
+/*
+:name: nil_inference
+:type: parsing lnast comptime
+:verifier_pass: 3
+:verifier_fail: 0
+*/
+
+// 2b nil-inference coverage: the first scalar store fixes a nil variable's
+// basic type; later stores must match it (the error halves live in
+// errors/nil_then_tuple.prp and errors/typecheck_*.prp).
+
+mut c = nil
+c = 3          // binds c to integer
+c = c + 1
+cassert(c == 4)
+
+// Tuple fields infer independently: binding `a` leaves `b` untouched.
+mut t = (a=nil, b=nil)
+t.a = 7
+cassert(t.a == 7)
+
+// A nil field re-pinned later is fine.
+t.b = 9
+cassert(t.b == 9)

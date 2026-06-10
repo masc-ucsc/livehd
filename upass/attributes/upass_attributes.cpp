@@ -43,33 +43,9 @@ uPass_attributes::uPass_attributes(std::shared_ptr<upass::Lnast_manager>& _lm) :
 void uPass_attributes::begin_iteration() {
   pending_arms.clear();
   active_arm_stack.clear();
-  // 1p-runner — record typed io PORTS into type_info_map so size attributes
-  // (`.[bits]`/`.[max]`/… via derive_*) fold for a mod/pipe port the same as for
-  // a declared local. A comb param becomes an inlined local (already typed), but
-  // a mod/pipe param stays an io port; without this `b.[bits]` in a mod body's
-  // for-bound (mod_varargs_csa's blk_add) never folds and the loop can't unroll.
-  // io_meta() is populated by the SSA upass before this walk.
-  auto record_port = [&](const Lnast_io_entry& e) {
-    if (e.bits == 0 && e.kind != Io_kind::boolean) {
-      return;  // unbounded/untyped (e.g. a template port) — nothing to pin
-    }
-    auto& ti         = type_info_map[e.name];
-    ti.has_type_spec = true;
-    if (e.kind == Io_kind::boolean) {
-      ti.kind = Numeric_kind::boolean;
-      ti.bits = 1;
-    } else {
-      ti.kind = e.is_signed ? Numeric_kind::signed_int : Numeric_kind::unsigned_int;
-      ti.bits = static_cast<uint32_t>(e.bits);
-    }
-  };
-  const auto& io = lm->get_lnast()->io_meta();
-  for (const auto& e : io.inputs) {
-    record_port(e);
-  }
-  for (const auto& e : io.outputs) {
-    record_port(e);
-  }
+  // 1p-runner/2b-E3b — typed io PORT facts are read straight from io_meta()
+  // by lookup_type_info_bundle (no per-walk recording; ports are never
+  // table-backed values, so their declared kind/bits stay metadata-only).
   reg.for_each_handler([this](upass::attributes::Attribute_handler& h) { h.begin_iteration(*this); });
 }
 
@@ -194,8 +170,8 @@ void uPass_attributes::on_assign_like(bool is_assign_node) {
           if (!v->is_invalid()) {
             rhs_value = *v;
           }
-        } else if (Lnast_ntype::is_ref(get_raw_ntype()) && runner_fold_fn) {
-          auto folded = runner_fold_fn(txt);
+        } else if (Lnast_ntype::is_ref(get_raw_ntype()) && runner_st != nullptr) {
+          auto folded = runner_st->known_const_scalar(txt);
           if (folded && !folded->is_invalid()) {
             rhs_value = *folded;
           }
@@ -273,40 +249,21 @@ void uPass_attributes::on_assign_like(bool is_assign_node) {
     // direct_alias.emplace + chained lookups on bulk `assign user_var
     // ___N` workloads where ___N is a pure plus tmp.
     const std::string rhs_s{rhs};
-    const bool rhs_has_state = tuple_shapes.contains(rhs_s) || range_bounds.contains(rhs_s) || tuple_get_alias.contains(rhs_s)
-                               || attr_set_values.contains(rhs_s) || shape_source.contains(rhs_s)
-                               || (!tmp_fold.empty() && tmp_fold.contains(rhs_s));
-    // Sticky's own fast-path will early-return on empty state, so we don't
-    // need a separate sticky probe here.
+    // 2b/E3c — shape/attr/alias state rides the shared binding slot; the
+    // only alias bookkeeping left is the range-source chain (h.[size] on a
+    // var assigned from a `range` tmp) and the handler notification.
+    const bool rhs_has_state = range_bounds.contains(rhs_s) || (!tmp_fold.empty() && tmp_fold.contains(rhs_s));
     if (!rhs_has_state) {
       reg.for_each_handler([&](upass::attributes::Attribute_handler& h) { h.on_alias_assign(*this, view.lhs, rhs); });
       return;
     }
-    bool record_source = false;
-    bool gained_shape  = false;
-    if (auto* sh = lookup_tuple_shape(rhs); sh) {
-      auto& slot    = tuple_shapes[std::string{view.lhs}];
-      slot          = *sh;
-      record_source = true;
-      gained_shape  = true;
-    } else if (lookup_range(rhs)) {
-      // Range tmp aliased into a named var — preserve the shape-source
-      // mapping so `h.[size]` can chain back to range_bounds[___16].
-      record_source = true;
-    }
-    if (record_source) {
-      auto [it, inserted] = shape_source.emplace(view.lhs, rhs);
-      if (!inserted && it->second != rhs) {
-        it->second = rhs;
+    if (lookup_range(rhs)) {
+      // Range tmp aliased into a named var — remember the source so
+      // `h.[size]` chains back to range_bounds[___16].
+      auto [it, inserted] = range_source.emplace(view.lhs, rhs_s);
+      if (!inserted && it->second != rhs_s) {
+        it->second = rhs_s;
       }
-    }
-    // Phase 4 — alias attribute migration. Copy direct attrs and any
-    // tuple_get_alias from rhs onto lhs so future `lhs.[attr]` reads chain
-    // through the same path. Then, if lhs just gained a shape, materialize
-    // any cat-D aggregate→field inheritance onto the per-field paths.
-    migrate_alias(view.lhs, rhs);
-    if (gained_shape) {
-      migrate_aggregate_attrs_to_fields(view.lhs);
     }
     // Phase 5 — propagate any narrowed value from rhs to lhs so a downstream
     // `lhs == k` (e.g. after `sat z = 3000` then `const m = z`) sees the
@@ -332,8 +289,27 @@ void uPass_attributes::on_assign_like(bool is_assign_node) {
 
 void uPass_attributes::process_assign() { on_assign_like(/*is_assign_node=*/true); }
 
-#define EXPR_PROCESS(NAME) \
-  void uPass_attributes::process_##NAME() { on_assign_like(/*is_assign_node=*/false); }
+// 2b/E4 — store routes both arities to the cursor-walking legacy bodies
+// (scan_op reads the node; subtree payloads don't ride the operand span).
+upass::Vote uPass_attributes::process_store(std::string_view dst_name, Bundle& dst, upass::Src_span src) {
+  (void)dst_name;
+  (void)dst;
+  if (src.size() <= 1) {
+    process_assign();
+  } else {
+    process_tuple_set();
+  }
+  return upass::Vote::keep;
+}
+
+#define EXPR_PROCESS(NAME)                                                                              \
+  upass::Vote uPass_attributes::process_##NAME(std::string_view dst_name, Bundle& dst, upass::Src_span src) { \
+    (void)dst_name;                                                                                     \
+    (void)dst;                                                                                          \
+    (void)src;                                                                                          \
+    on_assign_like(/*is_assign_node=*/false);                                                           \
+    return upass::Vote::keep;                                                                           \
+  }
 
 EXPR_PROCESS(plus)
 EXPR_PROCESS(minus)
@@ -365,31 +341,34 @@ EXPR_PROCESS(set_mask)
 
 #undef EXPR_PROCESS
 
-void uPass_attributes::process_is() {
+upass::Vote uPass_attributes::process_is(std::string_view dst_name, Bundle& dst, upass::Src_span src) {
   // `p is xx` — nominal type identity. Compare `lookup_attr_value(p,
   // "typename")` against the rhs ref's textual name. Folds to 1/0;
   // when LHS has no recorded typename, folds to 0 (only NAMED-type
-  // values match).
+  // values match). (Push wrapper: body walks the cursor.)
+  (void)dst_name;
+  (void)dst;
+  (void)src;
   on_assign_like(/*is_assign_node=*/false);
 
   if (!move_to_child()) {
-    return;
+    return upass::Vote::keep;
   }
-  auto dst = normalize_name(current_text());
+  auto dvar = normalize_name(current_text());
   if (!move_to_sibling()) {
     move_to_parent();
-    return;
+    return upass::Vote::keep;
   }
   auto lhs = normalize_name(current_text());
   if (!move_to_sibling()) {
     move_to_parent();
-    return;
+    return upass::Vote::keep;
   }
   auto rhs_text = std::string{current_text()};
   move_to_parent();
 
-  if (dst.empty() || lhs.empty() || rhs_text.empty()) {
-    return;
+  if (dvar.empty() || lhs.empty() || rhs_text.empty()) {
+    return upass::Vote::keep;
   }
 
   std::optional<Const> tn    = lookup_attr_value(lhs, "typename");
@@ -401,9 +380,67 @@ void uPass_attributes::process_is() {
     match = (stored == rhs_text);
   }
   Const folded        = match ? *Dlop::create_integer(1) : *Dlop::create_integer(0);
-  auto [it, inserted] = tmp_fold.emplace(std::string{dst}, folded);
+  auto [it, inserted] = tmp_fold.emplace(std::string{dvar}, folded);
   if (!inserted && !it->second.same_repr(folded)) {
     it->second = folded;
+  }
+  // 2b/E4 — the fold IS the `is` dst's value; write the binding too (dst is
+  // a single-writer tmp constprop keeps alive but never folds), so table-only
+  // operand resolution sees it without the runner_fold_fn pull seam.
+  if (runner_st != nullptr) {
+    (void)runner_st->set(dvar, folded);
+  }
+  return upass::Vote::keep;
+}
+
+void uPass_attributes::set_binding_attr(std::string_view target, std::string_view attr, const Const& v) {
+  if (runner_st == nullptr || target.empty()) {
+    return;
+  }
+  const auto root  = Bundle::get_first_level(target);
+  const auto fpath = Bundle::get_all_but_first_level(target);
+  auto       wb    = runner_st->get_bundle_for_write(root);
+  if (!wb) {
+    (void)runner_st->set(std::string(root), std::make_shared<Bundle>(std::string(root)));
+    wb = runner_st->get_bundle_for_write(root);
+    if (!wb) {
+      return;
+    }
+  }
+  // 2b/C — attrs are ADD-ONLY once present: re-setting the SAME value is
+  // fine (sticky re-marks, loop re-walks), a DIFFERENT value is a
+  // diagnostic — silent overwrite is forbidden.
+  const auto& existing = fpath.empty() ? wb->get_attr(attr) : wb->get_attr(fpath, attr);
+  if (!existing.is_invalid() && !existing.same_repr(v)) {
+    livehd::diag::sink().emit(livehd::diag::Diagnostic{
+        .severity = livehd::diag::Severity::error,
+        .code     = "attr-conflict",
+        .category = "attributes",
+        .pass     = "upass.attributes",
+        .message  = std::format("attribute `{}` of `{}` is already set to a different value (attributes are add-only)",
+                                attr, target),
+        .hint     = "attributes bind once; remove the second assignment or use a different attribute",
+    });
+    return;
+  }
+  if (fpath.empty()) {
+    wb->set_attr(attr, v);
+  } else {
+    wb->set_attr(fpath, attr, v);
+  }
+  // Per-field decl-site attr on an extraction tmp (`b::[poison=99]=2` inside
+  // a literal lowers to `tuple_get tmp ___1 b ; attr_set tmp poison 99`):
+  // echo onto the source field so aggregate reads (`t.b.[poison]`) resolve.
+  if (fpath.empty()) {
+    if (auto oit = runner_st->tget_origin.find(std::string(root)); oit != runner_st->tget_origin.end()) {
+      const auto src_root  = Bundle::get_first_level(oit->second);
+      const auto src_fpath = Bundle::get_all_but_first_level(oit->second);
+      if (!src_fpath.empty()) {
+        if (auto sb = runner_st->get_bundle_for_write(src_root); sb) {
+          sb->set_attr(src_fpath, attr, v);
+        }
+      }
+    }
   }
 }
 
@@ -434,7 +471,6 @@ void uPass_attributes::process_attr_set() {
   // see the updated maps.
   if (!target.empty() && !attr_name.empty()) {
     if (attr_name == "type") {
-      auto&     ti   = type_info_map[target];
       Decl_kind kind = Decl_kind::unknown;
       if (value_text == "mut") {
         kind = Decl_kind::mut_kind;
@@ -448,32 +484,73 @@ void uPass_attributes::process_attr_set() {
         kind = Decl_kind::type_kind;  // task 1k — see Decl_kind::type_kind
       }
       if (kind != Decl_kind::unknown) {
-        ti.decl = kind;
+        // 2b/E3b: per-field storage class onto the binding (the
+        // field Entry's mode for dotted targets; bundle mode for bare names).
+        // Existing entries only — minting a fact-only entry would read as a
+        // value claim downstream.
+        if (runner_st != nullptr) {
+          upass::Mode m = upass::Mode::unknown;
+          switch (kind) {
+            case Decl_kind::mut_kind  : m = upass::Mode::mut_kind; break;
+            case Decl_kind::const_kind: m = upass::Mode::const_kind; break;
+            case Decl_kind::reg_kind  : m = upass::Mode::reg_kind; break;
+            case Decl_kind::await_kind: m = upass::Mode::await_kind; break;
+            case Decl_kind::type_kind : m = upass::Mode::type_kind; break;
+            default: break;
+          }
+          const auto root  = Bundle::get_first_level(target);
+          const auto fpath = Bundle::get_all_but_first_level(target);
+          if (auto wb = runner_st->get_bundle_for_write(root); wb && m != upass::Mode::unknown) {
+            if (fpath.empty()) {
+              if (wb->get_mode() == upass::Mode::unknown) {
+                wb->set_mode(m);
+              }
+            } else if (wb->has_trivial(fpath)) {
+              Bundle::Entry fe = wb->get_entry(fpath);
+              fe.immutable     = false;
+              if (fe.mode == upass::Mode::unknown) {
+                fe.mode = m;
+              }
+              wb->set(fpath, std::move(fe));
+            }
+          }
+        }
       }
     } else if (attr_name == "comptime") {
-      auto& ti = type_info_map[target];
       if (value_text != "false" && value_text != "0") {
-        ti.is_comptime = true;
+        // 2b/E3b: comptime onto the binding's entry (existing
+        // scalar entries only — same no-fact-only-entry rule as above).
+        if (runner_st != nullptr) {
+          const auto root  = Bundle::get_first_level(target);
+          const auto fpath = Bundle::get_all_but_first_level(target);
+          if (auto wb = runner_st->get_bundle_for_write(root); wb) {
+            const auto           key   = fpath.empty() ? std::string_view{"0"} : fpath;
+            const bool           multi = fpath.empty() && (wb->has_named_top() || wb->unnamed_top_count() > 1);
+            if (!multi && wb->has_trivial(key)) {
+              Bundle::Entry fe = wb->get_entry(key);
+              fe.immutable     = false;
+              fe.comptime      = true;
+              wb->set(key, std::move(fe));
+            }
+          }
+        }
       }
       // Still record the explicit value (true/false) so a `.[comptime]`
       // read returns the explicit answer.
-      attr_set_values[target][attr_name]
-          = (value_text == "false" || value_text == "0") ? Dlop::create_integer(0) : Dlop::create_integer(1);
+      set_binding_attr(target, attr_name,
+                       (value_text == "false" || value_text == "0") ? *Dlop::create_integer(0) : *Dlop::create_integer(1));
     } else if (attr_name == "bits" && !value_is_ref) {
-      // `[bits=N]` records a width into type_info_map (no signedness). `uN`/`sN`
-      // sugar now lowers to `prim_type_int(max,min)` directly (Task 1t), so the
-      // old `ubits`/`sbits` attr_set entry points no longer reach here.
+      // `[bits=N]` — explicit width, no signedness. Recorded as an attr
+      // value; lookup_type_info_bundle folds it into the answer (`uN`/`sN`
+      // sugar lowers to `prim_type_int(max,min)` directly since Task 1t).
       auto v = Dlop::from_pyrope(value_text);
       if (v->is_i()) {
-        auto& ti         = type_info_map[target];
-        ti.bits          = static_cast<uint32_t>(v->to_i());
-        ti.has_type_spec = true;
+        set_binding_attr(target, attr_name, *v);
       }
-      attr_set_values[target][attr_name] = v;
     } else if (value_is_ref) {
-      // Refs (e.g. a runtime wire ref for clock_pin) are stored separately
-      // so the LGraph wiring pass can resolve them by name.
-      attr_set_refs[target][attr_name] = normalize_name(value_text);
+      // Refs (e.g. a runtime wire ref for clock_pin): the LGraph wiring pass
+      // resolves the TEXT by name — stored as a string Const residual attr.
+      set_binding_attr(target, absl::StrCat(attr_name, "_refname"), *Dlop::from_string(normalize_name(value_text)));
     } else {
       Const stored;
       if (value_text.empty() || value_text == "true") {
@@ -482,26 +559,11 @@ void uPass_attributes::process_attr_set() {
         stored = Dlop::from_pyrope(value_text);
       }
       if (!stored.is_invalid()) {
-        attr_set_values[target][attr_name] = stored;
-        // Phase 3 — when the target is a tuple_get tmp (per-field decl-site
-        // attribute, e.g. `b::[poison=99]=2` lowered to `tuple_get tmp __1 b
-        // ; attr_set tmp poison 99`), also store at the canonical
-        // base.field_key path so a later `t.b.[poison]` read finds the
-        // override after `assign t __1` migrates the shape.
-        if (auto* a = lookup_get_alias(target); a) {
-          std::string canonical                 = a->base + "." + a->field_key;
-          attr_set_values[canonical][attr_name] = stored;
-          if (!a->field_name.empty() && a->field_name != a->field_key) {
-            std::string named                 = a->base + "." + a->field_name;
-            attr_set_values[named][attr_name] = stored;
-          }
-        }
-        // Phase 4 — when the target already has a tuple shape (i.e. a later
-        // attr_set on an existing aggregate), re-materialize aggregate→field
-        // inheritance so the new attr lands on every field path too.
-        if (lookup_tuple_shape(target) != nullptr || shape_source.find(target) != shape_source.end()) {
-          migrate_aggregate_attrs_to_fields(target);
-        }
+        // 2b/E3e — onto the binding; the extraction-tmp echo inside
+        // set_binding_attr covers per-field decl-site attrs, and the
+        // field→root fallback in lookup_attr_value covers aggregate→field
+        // inheritance (no pre-copies).
+        set_binding_attr(target, attr_name, stored);
         // Typename-driven attribute inheritance — `const x:a = 100` lowers
         // to `attr_set x typename 'a'`, and per spec x takes on a's
         // attribute set. When the typename string matches a known variable
@@ -510,8 +572,28 @@ void uPass_attributes::process_attr_set() {
         // sticky buckets propagate too.
         if (attr_name == "typename" && value_text.size() >= 2 && value_text.front() == '\'' && value_text.back() == '\'') {
           std::string src{value_text.substr(1, value_text.size() - 2)};
-          if (!src.empty() && src != target && (attr_set_values.count(src) != 0 || type_info_map.count(src) != 0)) {
-            migrate_alias(target, src);
+          const auto src_b = (runner_st != nullptr && !src.empty()) ? runner_st->get_bundle(src) : nullptr;
+          if (!src.empty() && src != target
+              && ((src_b && !src_b->get_attrs().empty()) || lookup_type_info(src) != nullptr)) {
+            // Attr values ride the binding: copy the type var's attrs onto
+            // the target's binding (fill-if-absent), then notify handlers.
+            if (src_b) {
+              if (auto tb = runner_st->get_bundle_for_write(target); tb) {
+                for (const auto& [k, e] : src_b->get_attrs()) {
+                  // Bind-tracking is a NAME fact of the SOURCE, never
+                  // inherited (a used type var's "vbound" would make the
+                  // target's first store read as a const rebind).
+                  const auto dot  = k.rfind('.');
+                  const auto leaf = dot == std::string::npos ? std::string_view{k} : std::string_view{k}.substr(dot + 1);
+                  if (leaf == "vbound") {
+                    continue;
+                  }
+                  if (tb->get_attrs().find(k) == tb->get_attrs().end()) {
+                    tb->set_attr(k, e.trivial);
+                  }
+                }
+              }
+            }
             reg.for_each_handler([&](upass::attributes::Attribute_handler& h) { h.on_alias_assign(*this, target, src); });
           }
         }

@@ -64,6 +64,17 @@ protected:
 
   std::vector<Pass_entry> upasses;
 
+  // 2b/A — THE symbol table: one runner-owned, scope-aware table holding one
+  // shared_ptr<Bundle> per live name, shared by every pass (wired via
+  // uPass::set_runner_symbol_table). The runner owns all scope transitions:
+  // function_scope at run() start, block_scope/leave_scope around every
+  // `stmts` (process_stmts / walk_loop_iteration), and the uncertain-if-arm
+  // marking (next_block_uncertain_, set where notify_uncertain_arm_begin is
+  // dispatched). Fresh per runner == fresh per tree (pass_upass constructs a
+  // runner per tree).
+  Symbol_table symbol_table_;
+  bool         next_block_uncertain_{false};
+
   // Perf: pre-cached subsets of `upasses`.
   //   fold_capable_passes — passes that override fold_ref(). try_fold_ref
   //     iterates only these instead of every pass.
@@ -72,11 +83,9 @@ protected:
   // Populated in the constructor right after `upasses` is fully built. With
   // 6 passes total and only 2–4 overriders, this cuts the per-node virtual
   // dispatch count by 30–50% on the bulk arithmetic hot loop.
-  std::vector<upass::uPass*> fold_capable_passes;
   std::vector<upass::uPass*> classify_capable_passes;
   // 1i Phase E — passes that expose shared-ST reads (provide_bundle_fields /
   // provide_typename), consulted by try_bundle_fields / try_typename.
-  std::vector<upass::uPass*> shared_st_passes_;
 
   // Step L of upass redesign — function-body registry the runner owns
   // once func_extract collapses into the main walk. Maps function name
@@ -104,6 +113,60 @@ protected:
   bool                                materialize_{true};  // see set_materialize()
 
   std::vector<std::string> resolve_order(const std::vector<std::string>& requested_names, std::string* error_msg = nullptr) const;
+
+  // ── 2b/C — push-based dispatch ─────────────────────────────────────────
+  // Per-node operand resolution: dst = the live symbol-table bundle for the
+  // first-child ref (created on first write — see lazy install in
+  // dispatch_push), src = the remaining children in order (const →
+  // make_const throwaway; ref → live bundle, empty throwaway when unbound).
+  struct Resolved_node {
+    std::string                 dst_name;
+    std::shared_ptr<Bundle>     dst;
+    bool                        dst_was_bound{false};
+    std::vector<upass::Operand> src;
+  };
+
+  // Build dst/src for the op node under the cursor. Returns false when the
+  // node has no leading dst ref (the push hook is then called with an empty
+  // dst_name and a throwaway dst).
+  bool resolve_node_operands(Resolved_node& out);
+
+  // Dispatch a push-form hook to every pass (cursor saved/restored around
+  // each call, runtime_error swallowed like dispatch_to_passes), then lazily
+  // install a previously-unbound dst that a pass populated. Returns true
+  // when any pass voted drop.
+  bool dispatch_push(upass::Push_method fn, Resolved_node& rn);
+
+  // Migration helper: fold the typed fact fields from a throwaway dst onto
+  // the binding an unmigrated pass installed mid-dispatch (see dispatch_push).
+  static void merge_fact_fields(Bundle& bound, const Bundle& from);
+
+  // 2b/C drop-candidate path for value-producing ops: resolve operands, push
+  // dispatch, combine the votes with the legacy classify_statement, emit.
+  void process_drop_candidate_push(upass::Push_method fn, bool fold_all);
+
+  // 2b/A — declaration pre-step: read the TYPE subtree of a `declare`
+  // (is_declare=true) or standalone `type_spec` ONCE and bake the persistent
+  // facts into the destination's symbol-table bundle as TYPED fields (Kind +
+  // declared max/min + comptime on the "0" Entry; mode/type_name on the
+  // Bundle). End state (2b/E): no pass walks a type subtree; until then the
+  // passes' own walks coexist.
+  void bake_decl_pre_step(bool is_declare);
+
+  // 2b/E3b — drain the dotted-bake stash (Symbol_table::pending_decl_facts):
+  // apply declared facts to fields that just received their first value.
+  void apply_pending_field_facts();
+
+  // 2b/A — push the block scope for the stmts node under the cursor and mark
+  // it uncertain when entering an unresolved if-arm. Pop side: callers run
+  // symbol_table_.leave_scope() AFTER dispatching process_stmts_post.
+  void enter_block_scope() {
+    symbol_table_.block_scope(lm->current_scope_uid());
+    if (next_block_uncertain_) {
+      symbol_table_.mark_current_uncertain();
+      next_block_uncertain_ = false;
+    }
+  }
 
   // Staging emit helpers.
   void emit_push(Lnast_ntype::Lnast_ntype_int type);

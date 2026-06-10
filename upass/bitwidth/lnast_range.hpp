@@ -124,6 +124,65 @@ struct Lnast_range {
     return bounded(lo, hi);
   }
 
+  // ── Bitwise (2b/D soundness fix: these were range-UNIONs, which neither
+  //    bound `a&b` from below nor `a|b`/`a^b` from above — `0x55|0xaa=0xff`
+  //    escaped [0x55,0xaa]) ─────────────────────────────────────────────────
+
+  // Smallest all-ones mask covering v (v >= 0): 0→0, 5→7, 0xaa→0xff.
+  static constexpr int64_t ones_cover(int64_t v) noexcept {
+    uint64_t u = static_cast<uint64_t>(v);
+    u |= u >> 1;
+    u |= u >> 2;
+    u |= u >> 4;
+    u |= u >> 8;
+    u |= u >> 16;
+    u |= u >> 32;
+    return static_cast<int64_t>(u);
+  }
+
+  // a & b: for non-negatives, 0 <= a&b <= min(max_a, max_b). Any possible
+  // negative operand → unbounded (sign-extension makes the bound unsafe).
+  Lnast_range band(const Lnast_range& b) const noexcept {
+    if (!unbounded && !b.unbounded && is_constant() && b.is_constant()) {
+      return constant(min & b.min);  // single points fold exactly (any sign)
+    }
+    if (unbounded || b.unbounded || min < 0 || b.min < 0) {
+      return make_unbounded();
+    }
+    return bounded(0, std::min(max, b.max));
+  }
+
+  // a | b: for non-negatives, max(min_a, min_b) <= a|b <= ones-cover of the
+  // wider operand's max (OR never sets a bit above either operand's top bit).
+  Lnast_range bor(const Lnast_range& b) const noexcept {
+    if (!unbounded && !b.unbounded && is_constant() && b.is_constant()) {
+      return constant(min | b.min);  // single points fold exactly (any sign)
+    }
+    if (unbounded || b.unbounded || min < 0 || b.min < 0) {
+      return make_unbounded();
+    }
+    return bounded(std::max(min, b.min), ones_cover(std::max(max, b.max)));
+  }
+
+  // a ^ b: for non-negatives, 0 <= a^b <= ones-cover of the wider max.
+  Lnast_range bxor(const Lnast_range& b) const noexcept {
+    if (!unbounded && !b.unbounded && is_constant() && b.is_constant()) {
+      return constant(min ^ b.min);  // single points fold exactly (any sign)
+    }
+    if (unbounded || b.unbounded || min < 0 || b.min < 0) {
+      return make_unbounded();
+    }
+    return bounded(0, ones_cover(std::max(max, b.max)));
+  }
+
+  // ~x = -x - 1, exactly: range flips to [-max-1, -min-1].
+  Lnast_range bnot() const noexcept {
+    if (unbounded) {
+      return make_unbounded();
+    }
+    return bounded(-max - 1, -min - 1);
+  }
+
   // ── Arithmetic ────────────────────────────────────────────────────────────
 
   Lnast_range add(const Lnast_range& b) const noexcept {

@@ -1,0 +1,46 @@
+/*
+:name: fcall_destructure
+:type: comptime
+:verifier_pass: 6
+:verifier_fail: 0
+*/
+
+// 2b/I — func_call named-arg + var-arg RESULT DESTRUCTURING coverage: a
+// callee's multi-output tuple destructures at the call site by field name,
+// for named actuals, positional actuals gathered into a var-arg, and mixes.
+
+comb divmod(n:u8, d:u8) -> (q:u8, r:u8) {
+  q = n / d
+  r = n % d
+}
+
+// Named actuals + named-field destructure of the result tuple.
+const dm = divmod(n=17, d=5)
+cassert(dm.q == 3)
+cassert(dm.r == 2)
+
+// Matching-name variables satisfy the arg-naming rule positionally; the
+// result still destructures by output name.
+const n = 17
+const d = 5
+const dm2 = divmod(n, d)
+cassert(dm2.q == 3 and dm2.r == 2)
+
+// Var-arg callee whose result is a tuple built from the gathered args:
+// destructure both a named field and the leftover-count-dependent sum.
+comb stats(...xs) -> (lo, sum) {
+  lo  = if xs[0] < xs[1] { xs[0] } else { xs[1] }
+  sum = xs[0] + xs[1] + xs[2]
+}
+
+const s = stats(9, 4, 2)
+cassert(s.lo == 4)
+cassert(s.sum == 15)
+
+// Named leftovers into the var-arg, mixed with destructuring.
+comb pick(...kv) -> (a, b) {
+  a = kv.first
+  b = kv.second
+}
+const p = pick(first=11, second=22)
+cassert(p.a == 11 and p.b == 22)

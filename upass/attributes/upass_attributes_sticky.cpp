@@ -29,11 +29,11 @@ std::string Sticky_handler::canonical_bucket(std::string_view name) {
   return std::string{name};
 }
 
-void Sticky_handler::begin_iteration(uPass_attributes& /*owner*/) {
-  // `acquired` is monotonic per attribute_todo.md §Phase 1: once a variable
-  // earns a sticky attr it keeps it for the rest of the walk — begin_iteration
-  // does NOT clear it. Only the per-arm control taint stack resets here; the
-  // runner re-walks each if-arm within the single walk.
+void Sticky_handler::begin_iteration(uPass_attributes& owner) {
+  // Sticky state is monotonic per attribute_todo.md §Phase 1 — it lives on
+  // the bindings (canonical `_`-named residual attrs), so nothing to clear.
+  // Only the per-arm control taint stack resets here.
+  st_ = owner.shared_table();
   control_taint_stack.clear();
 }
 
@@ -101,7 +101,7 @@ void Sticky_handler::on_alias_assign(uPass_attributes& /*owner*/, std::string_vi
   // Fast path: with empty sticky state and no control taint there is
   // nothing to merge or mark. Returning here skips the find() probe on
   // every alias-assign visit (1M+ on the bulk-arithmetic xx.prp run).
-  if (acquired.empty() && control_taint_stack.empty()) {
+  if (is_inert()) {
     return;
   }
   merge_from(lhs, rhs);
@@ -116,7 +116,7 @@ void Sticky_handler::on_expr_assign(uPass_attributes& /*owner*/, std::string_vie
   // Fast path: same skip rationale as on_alias_assign — when sticky is
   // empty, merge_from returns immediately for every operand and the
   // control-taint block is also empty.
-  if (acquired.empty() && control_taint_stack.empty()) {
+  if (is_inert()) {
     return;
   }
   for (auto rhs : rhs_refs) {
@@ -137,11 +137,8 @@ void Sticky_handler::on_if_arm_enter(uPass_attributes& /*owner*/, std::span<cons
   // conditions OR their sticky contexts").
   std::set<std::string> arm_taint = active_control_taint();
   for (auto ref : cond_refs) {
-    auto it = acquired.find(ref);
-    if (it != acquired.end()) {
-      for (const auto& b : it->second) {
-        arm_taint.insert(b);
-      }
+    for (const auto& b : buckets_of(ref)) {
+      arm_taint.insert(b);
     }
   }
   control_taint_stack.push_back(std::move(arm_taint));
@@ -153,39 +150,69 @@ void Sticky_handler::on_if_arm_exit(uPass_attributes& /*owner*/) {
   }
 }
 
+std::set<std::string> Sticky_handler::buckets_of(std::string_view var) const {
+  std::set<std::string> out;
+  if (st_ == nullptr || var.empty()) {
+    return out;
+  }
+  const auto root  = Bundle::get_first_level(var);
+  const auto field = Bundle::get_all_but_first_level(var);
+  const auto b     = st_->get_bundle(root);
+  if (!b) {
+    return out;
+  }
+  // The sticky subset of the binding's residual attrs (canonical leading-`_`
+  // names). For a dotted var, the per-field attrs key as "field.bucket".
+  for (const auto& [key, entry] : b->sticky_attributes()) {
+    (void)entry;
+    const auto prefix = Bundle::get_all_but_last_level(key);
+    if (prefix == field || (field.empty() && prefix.empty())) {
+      out.emplace(Bundle::get_last_level(key));
+    }
+  }
+  return out;
+}
+
 bool Sticky_handler::has_sticky(std::string_view var, std::string_view bucket) const {
-  auto it = acquired.find(var);
-  if (it == acquired.end()) {
+  if (st_ == nullptr || var.empty()) {
     return false;
   }
-  return it->second.find(std::string{bucket}) != it->second.end();
+  const auto root  = Bundle::get_first_level(var);
+  const auto field = Bundle::get_all_but_first_level(var);
+  const auto b     = st_->get_bundle(root);
+  if (!b) {
+    return false;
+  }
+  return field.empty() ? b->has_attr(bucket) : b->has_attr(field, bucket);
 }
 
 void Sticky_handler::mark(std::string_view var, std::string_view bucket) {
-  if (var.empty() || bucket.empty()) {
+  if (var.empty() || bucket.empty() || st_ == nullptr) {
     return;
   }
-  // Heterogeneous probe first; only materialize a std::string when inserting.
-  auto it = acquired.find(var);
-  if (it == acquired.end()) {
-    it = acquired.emplace(std::string{var}, std::set<std::string>{}).first;
+  const auto root  = Bundle::get_first_level(var);
+  const auto field = Bundle::get_all_but_first_level(var);
+  auto       b     = st_->get_bundle_for_write(root);
+  if (!b) {
+    return;  // unbound name (e.g. a tmp before its producer): nothing to carry
   }
-  it->second.emplace(bucket);
+  // 2b/E3e — explicit attr VALUES share the canonical sticky key
+  // (`debug="trace"` and the propagation marker are both "_debug"): marking
+  // must never clobber a present value; presence IS marked.
+  if (field.empty()) {
+    if (b->get_attr(bucket).is_invalid()) {
+      b->set_attr(bucket, *Dlop::create_integer(1));
+    }
+  } else {
+    if (b->get_attr(field, bucket).is_invalid()) {
+      b->set_attr(field, bucket, *Dlop::create_integer(1));
+    }
+  }
+  any_marked_ = true;
 }
 
 void Sticky_handler::merge_from(std::string_view dst, std::string_view src) {
-  // The common no-op path (1M+ ops on bulk arithmetic) hits this find and
-  // returns immediately — heterogeneous lookup avoids the string allocation.
-  auto it = acquired.find(src);
-  if (it == acquired.end()) {
-    return;
-  }
-  // mark() may insert into `acquired` and trigger a rehash; flat_hash_map
-  // moves values on rehash, so iterating `it->second` while calling mark()
-  // is unsafe. Snapshot the bucket list (small in practice — typically ≤4
-  // attrs) into an owned local first.
-  absl::InlinedVector<std::string, 4> buckets(it->second.begin(), it->second.end());
-  for (const auto& b : buckets) {
+  for (const auto& b : buckets_of(src)) {
     mark(dst, b);
   }
 }

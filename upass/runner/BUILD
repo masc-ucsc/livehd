@@ -26,8 +26,10 @@ cc_test(
     copts = COPTS,
     deps = [
         ":upass_runner",
+        "//upass/attributes:upass_attributes",  # constprop's declared dep (2b/I)
         "//upass/constprop:upass_constprop",
         "//upass/noop:upass_noop",
+        "//upass/typecheck:upass_typecheck",  # constprop's declared dep (2b/I)
         "@googletest//:gtest_main",
     ],
 )

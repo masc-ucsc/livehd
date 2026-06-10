@@ -14,20 +14,36 @@
   <code>lnast.loc</code> struct <em>plus</em> an uninterned per-node
   <code>std::string</code> filename — with <strong>one <code>uint64</code>
   <code>SourceId</code></strong> per def-bearing node/dpin, resolved through the
-  HHDS <code>Source_locator</code> table
-  (<a class="xref" href="hhds-srcloc.html">hhds-srcloc</a>). Carry it through
+  HHDS <code>Source_locator</code> table (landed in <code>../hhds</code>,
+  commit <code>9221e1d</code>, 2026-06-09). Carry it through
   <em>every</em> copy/clone/lowering path (killing the hand-maintained
   8-node-kind loc whitelist), mint <em>combined</em> IDs where one value derives
   from several source sites, convert the ~70 null-span diag sites, and delete the
   old attributes.</p>
 
 <h2>Depends on</h2>
-<ul>
-<li><a class="xref" href="hhds-srcloc.html">hhds-srcloc</a> — the
-  <code>Source_locator</code> class, its per-graph/per-tree ownership, and its
-  <code>Forest</code>/<code>GraphLibrary</code> save/load/merge integration land
-  in <code>../hhds</code> first. 1f is the LiveHD-side migration onto it.</li>
-</ul>
+<p>None — the hhds-srcloc gate cleared 2026-06-09: <code>../hhds</code>
+  <code>9221e1d</code> (pushed) delivers the header-only
+  <code>hhds/source_locator.hpp</code>, the <code>hhds::attrs::srcid</code>
+  <code>uint64</code> attr tag (<code>hhds/attrs/srcid.hpp</code>,
+  self-registering so <code>load_attr_stores</code> deserializes it), and the
+  <code>Graph</code>/<code>GraphLibrary</code>/<code>Forest</code>
+  save/load/<code>load_merge</code> integration (<code>srcmap.txt</code> per
+  save dir), with tests green under default/ASan/TSan. The livehd
+  <code>git_override</code> pin still points at <code>1a3b9f9</code>; the bump
+  is subtask A's first step.</p>
+<p><strong>Seams the migration must respect:</strong>
+  <code>Graph::source_locator()</code> is a per-graph delta base-chained to
+  <code>GraphLibrary::source_map()</code>. On the tree side
+  <code>Forest::save</code> only <em>writes</em> the table — the export path
+  (<code>Lnast::export_into</code> / <code>save_ln_dir</code>) must union each
+  <code>Lnast</code>'s locator into <code>forest.source_map()</code> itself and
+  apply the returned remap to the cloned tree's attr store.
+  <code>GraphLibrary::save</code> takes a <code>unique_lock</code> — per-graph
+  srcid resolution chains lock-free to the base, so it must not run
+  concurrently with save/load/<code>load_merge</code>. <code>mint</code>
+  asserts workspace-relative paths — don't reuse
+  <code>Hhds_graph_library::canonical_path</code>, which absolutizes.</p>
 <p>Inbound: Pyrope <a class="xref" href="../pyrope/2p.html">2p</a> (source-derived
 SSA names reuse the SourceId), LiveHD <a class="xref" href="3f.html">3f</a>-B
 (full-fidelity <code>source_id</code> spans), <a class="xref" href="2n.html">2n</a>
@@ -77,7 +93,10 @@ Verilog <a class="xref" href="../verilog/5e.html">5e</a> (cgen
 
 <h2>Subtasks — pending</h2>
 <ul class="subtasks">
-<li><strong>A — adopt hhds-srcloc + ingress minting.</strong> Bump the hhds pin.
+<li><strong>A — adopt hhds-srcloc + ingress minting.</strong> Pull
+  <code>../hhds</code> to top of tree (the source-map work is at HEAD,
+  <code>9221e1d</code>) and bump the livehd <code>git_override</code> pin to
+  that commit.
   Give each <code>Lnast</code> its locator;
   <code>Prp2lnast::attach_loc</code> (inou/prp/prp2lnast.cpp:138) becomes
   "mint a span ID + set one <code>uint64</code> attr", extended from the current
@@ -132,8 +151,10 @@ Verilog <a class="xref" href="../verilog/5e.html">5e</a> (cgen
   including its pos1=line-vs-byte semantic mismatch); yosys ingress mints
   line-only anchors instead of its current per-node strings.
   <code>ln:</code>/<code>lg:</code> save, load, and <code>load_merge</code>
-  provenance rides hhds-srcloc B (LiveHD registers the SourceId attr tag; the
-  union operand is each artifact's own-then-base view). Also close the depfile
+  provenance rides the landed hhds integration (the <code>srcid</code> attr tag
+  self-registers; the union operand is each artifact's own-then-base view, and
+  the tree-side union at export is LiveHD's job — see the seams under
+  Depends on). Also close the depfile
   gap parked on 1f at lhd_kernel.cpp:706: the locator's file table <em>is</em>
   the actually-read-files list, so frontend include/import discovery feeds
   <code>--depfile</code> from it.</li>

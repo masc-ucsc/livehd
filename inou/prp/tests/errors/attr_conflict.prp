@@ -1,0 +1,9 @@
+/*
+:name: attr_conflict
+:type: error
+:error: attributes are add-only
+:help: attributes bind once
+*/
+
+mut x::[owner="alu"] = 1
+x::[owner="dec"]

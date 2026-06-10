@@ -1,0 +1,16 @@
+/*
+:name: self_assign
+:type: error
+:error: irrelevant assignment
+*/
+
+// 2b — a direct self-store `c = c` is flagged (the exact lowered form only).
+// SSA hides straight-line cases; a branch body keeps the store verbatim.
+// (No line marker: this upass diagnostic carries no source span yet — 1f.)
+
+mut c = 1
+mut g = true
+if g {
+  c = c
+}
+cassert(c == 1)

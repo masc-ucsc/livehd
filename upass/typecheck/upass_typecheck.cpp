@@ -9,14 +9,8 @@
 #include "lnast.hpp"
 
 // Registered once here (static-init at link time; alwayslink keeps it alive).
-// depends_on {"attributes"} so the resolver runs attributes first (typecheck
-// re-infers kinds itself, but this pins the intended slot in the order).
+// depends_on {"attributes"} so the resolver runs attributes first.
 static upass::uPass_plugin plugin_typecheck("typecheck", upass::uPass_wrapper<uPass_typecheck>::get_upass, {"attributes"});
-
-// NOTE: the new `process_arith`/shaped Vote hooks (upass_core.hpp §Step-E) are
-// NOT yet wired into the runner dispatch — it still drives the legacy per-op
-// `process_<op>()` virtuals (upass_runner.cpp A_OP/C_OP). So this pass overrides
-// those. If a future runner refactor routes ops through process_arith, migrate.
 
 const char* uPass_typecheck::kind_name(Kind k) {
   switch (k) {
@@ -48,7 +42,9 @@ int uPass_typecheck::eq_class(Kind k) {
 }
 
 uPass_typecheck::Kind uPass_typecheck::seed_kind_from_const(std::string_view t) {
-  // optable.md §Inference: literal text → kind.
+  // optable.md §Inference: literal text → kind. (The runner's operand
+  // resolution applies the same rules when minting const-operand bundles;
+  // this stays for the nullary control-flow checks that read raw children.)
   if (t == "nil") {
     return Kind::nil;
   }
@@ -71,64 +67,49 @@ uPass_typecheck::Kind uPass_typecheck::seed_kind_from_const(std::string_view t) 
   return Kind::unknown;
 }
 
-uPass_typecheck::Kind uPass_typecheck::kind_of(std::string_view name) const {
-  auto it = kind_map.find(std::string{name});
-  return it == kind_map.end() ? Kind::unknown : it->second;
-}
-
-Io_kind uPass_typecheck::provide_scalar_kind(std::string_view name) {
-  // Task 1g — map the kind lattice onto the coarser Io_kind the shared-ST seam
-  // speaks. Only the three scalar kinds carry over; range/tuple/nil/unknown
-  // report `none` (constprop detects tuples via the symbol table and nil via
-  // the literal, and treats `none` as "kind unknown" → skips the kind half).
-  switch (kind_of(name)) {
-    case Kind::integer: return Io_kind::integer;
-    case Kind::boolean: return Io_kind::boolean;
-    case Kind::string : return Io_kind::string;
-    default           : return Io_kind::none;
+uPass_typecheck::Kind uPass_typecheck::kind_of_bundle(const Bundle& b) {
+  // Shape FIRST: a multi-entry / named-field bundle is a tuple regardless of
+  // what field 0's entry-kind says (constprop copies field entries wholesale,
+  // so `(a<b, a>b)`'s slot 0 carries the lt tmp's boolean kind — that
+  // describes the FIELD, not the bundle). Then the bundle-level value kind
+  // (producer-stamped; covers 0/1-entry tuples the shape can't express).
+  // Last, the "0" Entry's kind (declared by the runner's bake or preserved
+  // through value writes).
+  if (b.has_named_top() || b.unnamed_top_count() > 1) {
+    return Kind::tuple;
   }
+  if (b.get_value_kind() != Kind::unknown) {
+    return b.get_value_kind();
+  }
+  return b.get_entry("0").kind;
 }
 
-void uPass_typecheck::set_kind(std::string_view name, Kind k) {
-  if (name.empty()) {
+uPass_typecheck::Kind uPass_typecheck::kind_of(std::string_view name) const {
+  if (name.empty() || runner_st == nullptr) {
+    return Kind::unknown;
+  }
+  const auto b = runner_st->get_bundle(name);
+  return b ? kind_of_bundle(*b) : Kind::unknown;
+}
+
+
+void uPass_typecheck::set_dst_kind(Bundle& dst, Kind k) {
+  // Stamp the BUNDLE-level value kind: no entry interplay, so constprop's
+  // wholesale field-entry copies can never confuse a field's kind with the
+  // bundle's, and the stamp survives its value writes (which only touch
+  // entries).
+  if (k == Kind::unknown) {
     return;
   }
-  kind_map[std::string{name}] = k;
+  dst.set_value_kind(k);
 }
 
 uPass_typecheck::Kind uPass_typecheck::kind_of_operand_at_cursor() {
   if (Lnast_ntype::is_const(get_raw_ntype())) {
     return seed_kind_from_const(current_text());
   }
-  // ref (or anything unexpected) → map lookup; absent ⇒ unknown (wildcard).
-  return kind_of(normalize_name(current_text()));
-}
-
-uPass_typecheck::Kind uPass_typecheck::kind_of_type_at_cursor() {
-  auto t = get_raw_ntype();
-  if (Lnast_ntype::is_prim_type_int(t)) {
-    return Kind::integer;  // NO range read — bits/sign/max/min are bitwidth's
-  }
-  if (Lnast_ntype::is_prim_type_bool(t)) {
-    return Kind::boolean;
-  }
-  if (Lnast_ntype::is_prim_type_string(t)) {
-    return Kind::string;
-  }
-  return Kind::unknown;  // named/comp/none types don't constrain the kind here
-}
-
-std::vector<uPass_typecheck::Kind> uPass_typecheck::collect_operands(std::string& dst_name) {
-  std::vector<Kind> ks;
-  if (!move_to_child()) {
-    return ks;  // empty op (shouldn't happen); cursor unmoved
-  }
-  dst_name = normalize_name(current_text());  // child0 = dst ref
-  while (move_to_sibling()) {
-    ks.push_back(kind_of_operand_at_cursor());
-  }
-  move_to_parent();  // MANDATORY: restore cursor to the op node
-  return ks;
+  // ref (or anything unexpected) → table lookup; absent ⇒ unknown (wildcard).
+  return kind_of(current_text());
 }
 
 void uPass_typecheck::emit_type_error(std::string_view code, const std::string& msg, std::string_view hint,
@@ -144,12 +125,12 @@ void uPass_typecheck::emit_type_error(std::string_view code, const std::string& 
   });
 }
 
-void uPass_typecheck::require_all(Kind required, Kind result, std::string_view sym, std::string_view code, bool allow_nil) {
-  std::string dst;
-  auto        ks      = collect_operands(dst);
-  bool        has_nil = false;
-  bool        bad     = false;
-  for (auto k : ks) {
+void uPass_typecheck::require_all(Kind required, Kind result, std::string_view sym, std::string_view code, Bundle& dst,
+                                  upass::Src_span src, bool allow_nil) {
+  bool has_nil = false;
+  bool bad     = false;
+  for (const auto& o : src) {
+    const Kind k = kind_of_operand(o);
     if (k == Kind::nil) {
       if (!allow_nil) {
         has_nil = true;  // poison (open-range `..` nil sentinel is allowed)
@@ -171,15 +152,13 @@ void uPass_typecheck::require_all(Kind required, Kind result, std::string_view s
                                 : "no implicit conversion — cast explicitly (e.g. `int(b)`, `int(true)==-1`)";
     emit_type_error(code, std::format("operator `{}` requires {} operands", sym, kind_name(required)), hint);
   }
-  set_kind(dst, result);
+  set_dst_kind(dst, result);
 }
 
-void uPass_typecheck::require_same(Kind result, std::string_view sym, std::string_view code) {
-  std::string dst;
-  auto        ks      = collect_operands(dst);
-  bool        any_nil = false;
-  for (auto k : ks) {
-    if (k == Kind::nil) {
+void uPass_typecheck::require_same(Kind result, std::string_view sym, std::string_view code, Bundle& dst, upass::Src_span src) {
+  bool any_nil = false;
+  for (const auto& o : src) {
+    if (kind_of_operand(o) == Kind::nil) {
       any_nil = true;  // `x == nil` / `x != nil`: validity probe — homogeneity skipped
     }
   }
@@ -188,8 +167,8 @@ void uPass_typecheck::require_same(Kind result, std::string_view sym, std::strin
     // conversion); range and tuple inter-compare (flat tuple). unknown unifies.
     int  seen = -1;
     bool bad  = false;
-    for (auto k : ks) {
-      int c = eq_class(k);
+    for (const auto& o : src) {
+      int c = eq_class(kind_of_operand(o));
       if (c >= 0) {
         if (seen < 0) {
           seen = c;
@@ -204,71 +183,65 @@ void uPass_typecheck::require_same(Kind result, std::string_view sym, std::strin
                       "no implicit conversion — cast explicitly (e.g. `int(b)`, `x == false`)");
     }
   }
-  set_kind(dst, result);
+  set_dst_kind(dst, result);
 }
 
-void uPass_typecheck::stamp_result(Kind result) {
-  std::string dst;
-  collect_operands(dst);
-  set_kind(dst, result);
-}
-
-// ── declarations: record a variable's declared kind ────────────────────────
-void uPass_typecheck::process_declare() {
-  // declare( ref(var), TYPE, const(mode) [, value] ) — value is a separate store.
-  if (!move_to_child()) {
-    return;
+// ── store: establish the dst kind, or reject a kind change ──────────────────
+upass::Vote uPass_typecheck::process_store(std::string_view dst_name, Bundle& dst, upass::Src_span src) {
+  // Scalar store( ref(dst), value ): src = {value}. Establish the dst kind on
+  // its first known write; thereafter a write of a DIFFERENT kind is a compile
+  // error — a variable's type cannot change (`mut d=2; d=d++60` is illegal;
+  // use a new var). `= nil` is a legal copy and neither establishes nor
+  // changes the kind. Field-path stores — selector children (src.size() > 1)
+  // or a dotted dst ref (`store(CFG.gain, v)`) — pass through: `dst` is the
+  // whole destination bundle there, and per-field checks are later 2b work.
+  if (dst_name.empty() || src.size() != 1 || dst_name.find('.') != std::string_view::npos) {
+    return Vote::keep;
   }
-  auto var = normalize_name(current_text());
-  Kind k   = Kind::unknown;
-  if (move_to_sibling()) {  // TYPE
-    k = kind_of_type_at_cursor();
+  const Kind rhs = kind_of_operand(src.front());
+  if (rhs == Kind::nil) {
+    return Vote::keep;  // `= nil` neither establishes nor changes the kind
   }
-  move_to_parent();
-  if (k != Kind::unknown) {
-    set_kind(var, k);  // unknown (named/none type) ⇒ leave for value inference
+  const Kind cur = kind_of_bundle(dst);
+  // 2b/C — "an unset/nil scalar destination does not infer a new tuple shape
+  // from a tuple RHS": a never-typed dst whose current VALUE is the nil it
+  // was initialized with cannot become an aggregate. The runner's inliner
+  // marks its own synthesized nil seeds (Symbol_table::nil_seeded) — those
+  // prologues legally bind a tuple over the seed.
+  if (cur == Kind::unknown && rhs == Kind::tuple && runner_st != nullptr) {
+    const auto& t0 = dst.get_entry("0").trivial;
+    if (!t0.is_invalid() && t0.is_nil() && !runner_st->nil_seeded.contains(std::string(dst_name))) {
+      emit_type_error("nil-shape-infer",
+                      std::format("`{}` was initialized to nil as a scalar; a tuple value cannot re-shape it", dst_name),
+                      "declare the tuple shape up front (e.g. `mut x = (a=nil, b=nil)`), or use a new variable");
+      return Vote::keep;
+    }
   }
-}
-
-void uPass_typecheck::process_type_spec() {
-  // type_spec( ref(target), TYPE… ) — same kind-recording as a declare.
-  if (!move_to_child()) {
-    return;
+  // 2b/C — "typecheck rejects RHS fields not present in the destination
+  // shape": a DECLARED shape (named type on the binding) is closed — a tuple
+  // RHS may only re-bind existing fields (subset is fine; untouched fields
+  // keep their values). INFERRED shapes stay open (the corpus relies on
+  // wholesale re-shape and `++=` extension), and a dst with no named tops
+  // yet (init before the named-type skeleton materializes) is still
+  // inferring — skip both.
+  if (rhs == Kind::tuple && dst.has_named_top() && !dst.get_type_name().empty() && init_construction_depth_ == 0) {
+    if (const auto& rb = src.front().bundle; rb) {
+      for (const auto& tl : rb->top_levels()) {
+        if (!tl.name.empty() && !dst.has_top_named(tl.name)) {
+          emit_type_error(
+              "unknown-field-store",
+              std::format("cannot assign field `{}` to `{}`: it is not part of the destination's shape", tl.name, dst_name),
+              "a tuple assignment only re-binds existing fields; declare the field at the destination's initializer");
+          return Vote::keep;
+        }
+      }
+    }
   }
-  auto var = normalize_name(current_text());
-  Kind k   = Kind::unknown;
-  if (move_to_sibling()) {
-    k = kind_of_type_at_cursor();
-  }
-  move_to_parent();
-  if (k != Kind::unknown) {
-    set_kind(var, k);
-  }
-}
-
-void uPass_typecheck::process_assign() {
-  // 2-child store( ref(dst), value ): establish the dst kind on its first known
-  // write; thereafter a write of a DIFFERENT kind-class is a compile error — a
-  // variable's type cannot change (`mut d=2; d=d++60` is illegal; use a new
-  // var). `= nil` is a legal copy and neither establishes nor changes the kind.
-  if (!move_to_child()) {
-    return;
-  }
-  auto dst = normalize_name(current_text());
-  Kind rhs = Kind::unknown;
-  if (move_to_sibling()) {
-    rhs = kind_of_operand_at_cursor();
-  }
-  move_to_parent();
-  if (dst.empty() || rhs == Kind::nil) {
-    return;
-  }
-  Kind cur = kind_of(dst);
   if (cur == Kind::unknown) {
     if (rhs != Kind::unknown) {
-      set_kind(dst, rhs);  // first establishment of an inferred/untyped var
+      set_dst_kind(dst, rhs);  // first establishment of an inferred/untyped var
     }
-    return;
+    return Vote::keep;
   }
   // Established kind: a known rhs of a DIFFERENT kind is a type change (exact —
   // even int→tuple, unlike the coarse `==` class). A var's type cannot change.
@@ -276,16 +249,17 @@ void uPass_typecheck::process_assign() {
     emit_type_error("assign-type-mismatch",
                     std::format("cannot assign {} value to `{}` (it is {}); a variable's type cannot change",
                                 kind_name(rhs),
-                                dst,
+                                dst_name,
                                 kind_name(cur)),
                     "use a new variable, or cast explicitly (e.g. `int(x)`)");
   }
+  return Vote::keep;
 }
 
 // ── control flow: if/elif/when/unless conditions must be boolean ────────────
 void uPass_typecheck::process_if() {
   // The runner dispatches this with the cursor ON the `if` node, before its own
-  // dead-branch work (upass_runner.cpp:1648), so we see the original condition.
+  // dead-branch work, so we see the original condition.
   // Shape: (cond, stmts, [cond, stmts]…, [stmts]) scoped, or (cond, stmt…) flat.
   // Every NON-stmts child is a condition operand (a ref or const); a stmts child
   // is a branch body. Restore the cursor to the if-node before returning.
@@ -341,9 +315,7 @@ void uPass_typecheck::process_cassert() {
   // cassert(<cond>[, <msg>]) — the builtin signature is
   //   comb cassert(cond:bool=nil, msg:string="")
   // Unnamed builtin arguments bind by type, so the 2nd argument is the
-  // diagnostic MESSAGE and must be a string. `cassert(2 in 1, 2)` parses as
-  // `cassert((2 in 1), 2)` (the tuple parens are NOT dropped — see
-  // 10-internals.md), passing an integer where a string is required.
+  // diagnostic MESSAGE and must be a string.
   //
   // The condition (child0) is intentionally NOT kind-checked here: it is usually
   // an `in`/`does`/comparison fold temp whose kind this pass does not stamp, so
@@ -365,6 +337,40 @@ void uPass_typecheck::process_cassert() {
   move_to_parent();  // restore cursor to the cassert node
 }
 
+// ── range (verbatim-dispatched): endpoints are integers ─────────────────────
+void uPass_typecheck::process_range() {
+  // range( ref(dst), lo, hi ) — endpoints must be integers; a nil endpoint is
+  // the open-range sentinel (`0..`). The dst kind (range) is stamped through
+  // the table when the dst is already bound; the producer that binds it later
+  // re-derives tuple/range shape itself, so a miss here is benign.
+  if (!move_to_child()) {
+    return;
+  }
+  const std::string dst_name{current_text()};
+  bool              has_nil = false;
+  bool              bad     = false;
+  while (move_to_sibling()) {
+    const Kind k = kind_of_operand_at_cursor();
+    if (k == Kind::nil) {
+      // allowed: open-end sentinel
+    } else if (k != Kind::unknown && k != Kind::integer) {
+      bad = true;
+    }
+  }
+  move_to_parent();
+  (void)has_nil;
+  if (bad) {
+    emit_type_error("type-mismatch-range",
+                    "operator `..=` requires integer operands",
+                    "no implicit conversion — cast explicitly (e.g. `int(b)`, `int(true)==-1`)");
+  }
+  if (!dst_name.empty() && runner_st != nullptr) {
+    if (auto b = runner_st->get_bundle_for_write(dst_name); b) {
+      set_dst_kind(*b, Kind::range);
+    }
+  }
+}
+
 // Build a located Span from an LNAST nid that carries a source loc (cassert /
 // func_call — the loc-carry chain). Mirrors uPass_verifier::span_from_nid.
 livehd::diag::Span uPass_typecheck::span_from_nid(const Lnast_nid& nid) const {
@@ -383,68 +389,63 @@ livehd::diag::Span uPass_typecheck::span_from_nid(const Lnast_nid& nid) const {
 }
 
 // ── arithmetic / bitwise / shift: int operands → int (NO bool) ──────────────
-void uPass_typecheck::process_plus() { require_all(Kind::integer, Kind::integer, "+", "type-mismatch-arith"); }
-void uPass_typecheck::process_minus() { require_all(Kind::integer, Kind::integer, "-", "type-mismatch-arith"); }
-void uPass_typecheck::process_mult() { require_all(Kind::integer, Kind::integer, "*", "type-mismatch-arith"); }
-void uPass_typecheck::process_div() { require_all(Kind::integer, Kind::integer, "/", "type-mismatch-arith"); }
-void uPass_typecheck::process_mod() { require_all(Kind::integer, Kind::integer, "%", "type-mismatch-arith"); }
-void uPass_typecheck::process_bit_and() { require_all(Kind::integer, Kind::integer, "&", "type-mismatch-arith"); }
-void uPass_typecheck::process_bit_or() { require_all(Kind::integer, Kind::integer, "|", "type-mismatch-arith"); }
-void uPass_typecheck::process_bit_xor() { require_all(Kind::integer, Kind::integer, "^", "type-mismatch-arith"); }
-void uPass_typecheck::process_bit_not() { require_all(Kind::integer, Kind::integer, "~", "type-mismatch-arith"); }
-void uPass_typecheck::process_shl() { require_all(Kind::integer, Kind::integer, "<<", "type-mismatch-arith"); }
-void uPass_typecheck::process_sra() { require_all(Kind::integer, Kind::integer, ">>", "type-mismatch-arith"); }
+// clang-format off
+upass::Vote uPass_typecheck::process_plus(std::string_view, Bundle& dst, upass::Src_span src) { require_all(Kind::integer, Kind::integer, "+", "type-mismatch-arith", dst, src); return Vote::keep; }
+upass::Vote uPass_typecheck::process_minus(std::string_view, Bundle& dst, upass::Src_span src) { require_all(Kind::integer, Kind::integer, "-", "type-mismatch-arith", dst, src); return Vote::keep; }
+upass::Vote uPass_typecheck::process_mult(std::string_view, Bundle& dst, upass::Src_span src) { require_all(Kind::integer, Kind::integer, "*", "type-mismatch-arith", dst, src); return Vote::keep; }
+upass::Vote uPass_typecheck::process_div(std::string_view, Bundle& dst, upass::Src_span src) { require_all(Kind::integer, Kind::integer, "/", "type-mismatch-arith", dst, src); return Vote::keep; }
+upass::Vote uPass_typecheck::process_mod(std::string_view, Bundle& dst, upass::Src_span src) { require_all(Kind::integer, Kind::integer, "%", "type-mismatch-arith", dst, src); return Vote::keep; }
+upass::Vote uPass_typecheck::process_bit_and(std::string_view, Bundle& dst, upass::Src_span src) { require_all(Kind::integer, Kind::integer, "&", "type-mismatch-arith", dst, src); return Vote::keep; }
+upass::Vote uPass_typecheck::process_bit_or(std::string_view, Bundle& dst, upass::Src_span src) { require_all(Kind::integer, Kind::integer, "|", "type-mismatch-arith", dst, src); return Vote::keep; }
+upass::Vote uPass_typecheck::process_bit_xor(std::string_view, Bundle& dst, upass::Src_span src) { require_all(Kind::integer, Kind::integer, "^", "type-mismatch-arith", dst, src); return Vote::keep; }
+upass::Vote uPass_typecheck::process_bit_not(std::string_view, Bundle& dst, upass::Src_span src) { require_all(Kind::integer, Kind::integer, "~", "type-mismatch-arith", dst, src); return Vote::keep; }
+upass::Vote uPass_typecheck::process_shl(std::string_view, Bundle& dst, upass::Src_span src) { require_all(Kind::integer, Kind::integer, "<<", "type-mismatch-arith", dst, src); return Vote::keep; }
+upass::Vote uPass_typecheck::process_sra(std::string_view, Bundle& dst, upass::Src_span src) { require_all(Kind::integer, Kind::integer, ">>", "type-mismatch-arith", dst, src); return Vote::keep; }
 
 // ── logical keywords: bool operands → bool (NO int — use `&`/`|`) ────────────
-void uPass_typecheck::process_log_and() { require_all(Kind::boolean, Kind::boolean, "and", "type-mismatch-logical"); }
-void uPass_typecheck::process_log_or() { require_all(Kind::boolean, Kind::boolean, "or", "type-mismatch-logical"); }
-void uPass_typecheck::process_log_not() { require_all(Kind::boolean, Kind::boolean, "not", "type-mismatch-logical"); }
+upass::Vote uPass_typecheck::process_log_and(std::string_view, Bundle& dst, upass::Src_span src) { require_all(Kind::boolean, Kind::boolean, "and", "type-mismatch-logical", dst, src); return Vote::keep; }
+upass::Vote uPass_typecheck::process_log_or(std::string_view, Bundle& dst, upass::Src_span src) { require_all(Kind::boolean, Kind::boolean, "or", "type-mismatch-logical", dst, src); return Vote::keep; }
+upass::Vote uPass_typecheck::process_log_not(std::string_view, Bundle& dst, upass::Src_span src) { require_all(Kind::boolean, Kind::boolean, "not", "type-mismatch-logical", dst, src); return Vote::keep; }
 
 // ── reductions (→ bool) / popcount (→ int): int operand ─────────────────────
-void uPass_typecheck::process_red_or() { require_all(Kind::integer, Kind::boolean, "|", "type-mismatch-arith"); }
-void uPass_typecheck::process_red_and() { require_all(Kind::integer, Kind::boolean, "&", "type-mismatch-arith"); }
-void uPass_typecheck::process_red_xor() { require_all(Kind::integer, Kind::boolean, "^", "type-mismatch-arith"); }
-void uPass_typecheck::process_popcount() { require_all(Kind::integer, Kind::integer, "#+", "type-mismatch-arith"); }
+upass::Vote uPass_typecheck::process_red_or(std::string_view, Bundle& dst, upass::Src_span src) { require_all(Kind::integer, Kind::boolean, "|", "type-mismatch-arith", dst, src); return Vote::keep; }
+upass::Vote uPass_typecheck::process_red_and(std::string_view, Bundle& dst, upass::Src_span src) { require_all(Kind::integer, Kind::boolean, "&", "type-mismatch-arith", dst, src); return Vote::keep; }
+upass::Vote uPass_typecheck::process_red_xor(std::string_view, Bundle& dst, upass::Src_span src) { require_all(Kind::integer, Kind::boolean, "^", "type-mismatch-arith", dst, src); return Vote::keep; }
+upass::Vote uPass_typecheck::process_popcount(std::string_view, Bundle& dst, upass::Src_span src) { require_all(Kind::integer, Kind::integer, "#+", "type-mismatch-arith", dst, src); return Vote::keep; }
 
 // ── comparison: eq/ne same-class → bool; ordering int → bool ────────────────
-void uPass_typecheck::process_eq() { require_same(Kind::boolean, "==", "type-mismatch-eq"); }
-void uPass_typecheck::process_ne() { require_same(Kind::boolean, "!=", "type-mismatch-eq"); }
-void uPass_typecheck::process_lt() { require_all(Kind::integer, Kind::boolean, "<", "type-mismatch-compare"); }
-void uPass_typecheck::process_le() { require_all(Kind::integer, Kind::boolean, "<=", "type-mismatch-compare"); }
-void uPass_typecheck::process_gt() { require_all(Kind::integer, Kind::boolean, ">", "type-mismatch-compare"); }
-void uPass_typecheck::process_ge() { require_all(Kind::integer, Kind::boolean, ">=", "type-mismatch-compare"); }
+upass::Vote uPass_typecheck::process_eq(std::string_view, Bundle& dst, upass::Src_span src) { require_same(Kind::boolean, "==", "type-mismatch-eq", dst, src); return Vote::keep; }
+upass::Vote uPass_typecheck::process_ne(std::string_view, Bundle& dst, upass::Src_span src) { require_same(Kind::boolean, "!=", "type-mismatch-eq", dst, src); return Vote::keep; }
+upass::Vote uPass_typecheck::process_lt(std::string_view, Bundle& dst, upass::Src_span src) { require_all(Kind::integer, Kind::boolean, "<", "type-mismatch-compare", dst, src); return Vote::keep; }
+upass::Vote uPass_typecheck::process_le(std::string_view, Bundle& dst, upass::Src_span src) { require_all(Kind::integer, Kind::boolean, "<=", "type-mismatch-compare", dst, src); return Vote::keep; }
+upass::Vote uPass_typecheck::process_gt(std::string_view, Bundle& dst, upass::Src_span src) { require_all(Kind::integer, Kind::boolean, ">", "type-mismatch-compare", dst, src); return Vote::keep; }
+upass::Vote uPass_typecheck::process_ge(std::string_view, Bundle& dst, upass::Src_span src) { require_all(Kind::integer, Kind::boolean, ">=", "type-mismatch-compare", dst, src); return Vote::keep; }
 
 // ── bit manipulation / type-id: result kind only (operands not kind-checked) ─
-void uPass_typecheck::process_get_mask() { stamp_result(Kind::unknown); }  // single-bit→bool vs range→int: ambiguous
-void uPass_typecheck::process_set_mask() { stamp_result(Kind::integer); }
-void uPass_typecheck::process_sext() { stamp_result(Kind::integer); }
-void uPass_typecheck::process_is() { stamp_result(Kind::boolean); }
+upass::Vote uPass_typecheck::process_set_mask(std::string_view, Bundle& dst, upass::Src_span) { set_dst_kind(dst, Kind::integer); return Vote::keep; }
+upass::Vote uPass_typecheck::process_sext(std::string_view, Bundle& dst, upass::Src_span) { set_dst_kind(dst, Kind::integer); return Vote::keep; }
+upass::Vote uPass_typecheck::process_is(std::string_view, Bundle& dst, upass::Src_span) { set_dst_kind(dst, Kind::boolean); return Vote::keep; }
+// clang-format on
 
 // ── aggregates: passthrough kinds, no homogeneity check ─────────────────────
-void uPass_typecheck::process_range() {
-  // endpoints are integers; a nil endpoint is the open-range sentinel (`0..`).
-  require_all(Kind::integer, Kind::range, "..=", "type-mismatch-range", /*allow_nil=*/true);
+upass::Vote uPass_typecheck::process_tuple_add(std::string_view, Bundle& dst, upass::Src_span src) {
+  // Every tuple_add in the tree is a REAL tuple literal: `(expr)` groupings
+  // were unwrapped at parse (db87b5908 — `(x)` no-comma unwraps, `(x,)` is
+  // kept), so even a single-operand node is a 1-tuple.
+  if (!src.empty()) {
+    set_dst_kind(dst, Kind::tuple);
+  }
+  return Vote::keep;
 }
-void uPass_typecheck::process_tuple_add() {
-  // A single-operand tuple_add is a parenthesized grouping `(expr)` — propagate
-  // the inner kind so `x and (y or z)` keeps its kind. Multiple operands (or a
-  // structured/keyed field payload) is a real tuple.
-  std::string dst;
-  auto        ks  = collect_operands(dst);
-  Kind        res = (ks.size() == 1) ? ks[0] : Kind::tuple;
-  set_kind(dst, res);
-}
-void uPass_typecheck::process_tuple_get() { stamp_result(Kind::unknown); }
 
-void uPass_typecheck::process_tuple_concat() {
+upass::Vote uPass_typecheck::process_tuple_concat(std::string_view, Bundle& dst, upass::Src_span src) {
   // `++` → tuple, or string when every known operand is a string, or range when
   // every known operand is a range (optable.md). Not homogeneity-checked.
-  std::string dst;
-  auto        ks         = collect_operands(dst);
-  bool        any_known  = false;
-  bool        all_string = true;
-  bool        all_range  = true;
-  for (auto k : ks) {
+  bool any_known  = false;
+  bool all_string = true;
+  bool all_range  = true;
+  for (const auto& o : src) {
+    const Kind k = kind_of_operand(o);
     if (k != Kind::unknown) {
       any_known = true;
       if (k != Kind::string) {
@@ -455,11 +456,17 @@ void uPass_typecheck::process_tuple_concat() {
       }
     }
   }
-  Kind res = Kind::tuple;
   if (any_known && all_string) {
-    res = Kind::string;
+    set_dst_kind(dst, Kind::string);
   } else if (any_known && all_range) {
-    res = Kind::range;
+    set_dst_kind(dst, Kind::range);
+  } else if (any_known) {
+    // Mixed/known operands: a real tuple. The bundle-level stamp matters for
+    // the scalar-SHAPED 0/1-entry results the shape can't express
+    // (`mut d = (); d = d ++ (i,)` accumulator). ALL-unknown operands stamp
+    // nothing — `string(a) ++ string(b)` with unfolded cast tmps must not be
+    // pinned tuple, or the chained `== "lit"` comparison spuriously errors.
+    set_dst_kind(dst, Kind::tuple);
   }
-  set_kind(dst, res);
+  return Vote::keep;
 }

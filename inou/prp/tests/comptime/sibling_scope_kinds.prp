@@ -1,0 +1,23 @@
+/*
+:name: sibling_scope_kinds
+:type: parsing lnast upass
+*/
+
+// 2b regression — sibling-scope kind isolation. The pre-2b flat
+// typecheck kind_map conflated same-named block-locals across SIBLING
+// scopes: arm 1's integer `t` made arm 2's boolean `t` raise a spurious
+// `assign-type-mismatch` (the no-shadowing rule only bans ENCLOSING reuse,
+// so this is legal Pyrope). With the runner-owned scope-aware symbol table
+// each arm's `t` resolves to its own bundle, so this must compile clean.
+
+comb pick(c: bool) -> (o1: u8, o2: bool) {
+  o1 = 0
+  o2 = false
+  if c {
+    mut t = 1
+    o1 = t
+  } else {
+    mut t = true
+    o2 = t
+  }
+}

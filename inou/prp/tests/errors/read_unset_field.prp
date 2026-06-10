@@ -1,0 +1,8 @@
+/*
+:name: read_unset_field
+:type: error
+:error: invalid in operator
+*/
+
+mut t = (a=1, b=nil)
+const x = t.b + 1

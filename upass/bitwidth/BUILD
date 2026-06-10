@@ -47,8 +47,11 @@ cc_test(
         ":upass_bitwidth",
         "//core",
         "//lnast",
+        "//upass/attributes:upass_attributes",  # transitive declared dep (2b/I)
+        "//upass/constprop:upass_constprop",  # bitwidth's declared dep (2b/I)
         "//upass/core:upass",
         "//upass/runner:upass_runner",
+        "//upass/typecheck:upass_typecheck",  # transitive declared dep (2b/I)
         "@googletest//:gtest_main",
     ],
 )

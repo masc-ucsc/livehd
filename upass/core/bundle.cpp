@@ -237,7 +237,7 @@ const Bundle::Entry &Bundle::get_entry(std::string_view key) const {
   return invalid;
 }
 
-const Const &Bundle::get_trivial() const {
+const Const &Bundle::lone_trivial() const {
   if (has_root_) {
     return root_.trivial;
   }
@@ -300,7 +300,7 @@ std::shared_ptr<Bundle> Bundle::get_bundle(std::string_view key) const {
   std::shared_ptr<Bundle> tup;
   auto lazy_tup = [&]() -> Bundle & {
     if (!tup) {
-      tup = std::make_shared<Bundle>(absl::StrCat(name, ".", key));
+      tup = std::make_shared<Bundle>();
     }
     return *tup;
   };
@@ -357,13 +357,12 @@ Bundle::get_bundle(const std::shared_ptr<Bundle const> &tup) const {
     auto field = e.second.trivial.to_field();
 
     if (!has_trivial(field)) {
-      Lnast::info("bundle {} can not be indexed with {} key:{} with value {}",
-                  get_name(), tup->get_name(), e.first, field);
+      Lnast::info("bundle can not be indexed with key:{} with value {}", e.first, field);
       return nullptr;
     }
     auto entry = get_entry(field);
     if (!ret_tup) {
-      ret_tup = std::make_shared<Bundle>(get_name());
+      ret_tup = std::make_shared<Bundle>();
     }
     ret_tup->key_map.insert_or_assign(std::to_string(pos), entry);
     ++pos;
@@ -480,6 +479,14 @@ void Bundle::set(std::string_view key_in, const Entry &&entry) {
       continue;
     }
     if (key[fpart.size()] == '.' && fpart == key.substr(0, fpart.size())) {
+      // Rename only when the DATA entry at this prefix was actually promoted
+      // above. An attr scoped to a bundle-valued field ("b.fmode" while
+      // "b.c"/"b.d" data keys exist) coexists with deeper inserts — renaming
+      // it to "b.0.fmode" would orphan the field fact.
+      const bool promoted = std::any_of(renames.begin(), renames.end(), [&](const auto &r) { return r.first == fpart; });
+      if (!promoted) {
+        continue;
+      }
       attr_renames.emplace_back(e.first, absl::StrCat(fpart, ".0.", get_last_level(e.first)));
     }
   }
@@ -718,8 +725,7 @@ bool Bundle::concat(const Const &trivial) {
     auto seg = first_segment_view(e.first);
     if (segment_category(seg) != 2) {
       dump();
-      Lnast::info("can not concat trivial:{} to bundle unordered {} field {}",
-                  trivial, get_name(), e.first);
+      Lnast::info("can not concat trivial:{} to unordered bundle field {}", trivial, e.first);
       return false;
     }
     int n = str_tools::to_i(seg);
@@ -782,7 +788,9 @@ bool Bundle::is_trivial_scalar() const {
   return true;
 }
 
-void Bundle::dump() const {
+void Bundle::dump(std::string_view name) const {
+  // 2b/H — the bundle no longer stores a name; the caller supplies one for
+  // the printout (the table knows the binding's name).
   std::print("bundle_name: {}{}\n", name, correct ? "" : " ISSUES");
 
   for (const auto &it : attr_map) {

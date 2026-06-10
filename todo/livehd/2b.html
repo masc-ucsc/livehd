@@ -329,6 +329,23 @@
   finishers (verifier ×3; constprop import statics); and the entire <strong>tolg</strong> /
   <strong>Time_checker</strong> graph domain (untouched).</p>
 
+<h2>Status (2026-06-10 — ALL SUBTASKS COMPLETE, working tree)</h2>
+<p>Suite 327/327 fresh-certified, 38/38 LEC pairs fresh. All of A–I landed:
+runner-owned scope-aware table + bake (A), read-through/write-block (B), push
+hooks + full store semantics — nil-shape, closed declared shapes, attr
+add-only, read-unset-field error, unused-unset warning (C), votes-based emit +
+the bw-range soundness invariant live (D: five distinct range bugs
+root-caused — narrow-only stamp gate, value-write bw preservation,
+fill-if-unset merge, bitwise union math, field-path store skip — fixed per
+the confirmed model: a range is a conservative bound on the binding's CURRENT
+value), every pass migrated with ALL private maps deleted (E),
+Call_resolver owns name/actuals/import resolution (F; the arg-binding loop is
+the splice's front half and stays in the runner per D's carve-out), overflow
+at the node (G), every pull seam + the nullary value-op hook surface +
+Bundle::name deleted (H; runner_emit_at_fn stays), LEC re-verified + new
+fcall_destructure/nil_then_tuple/store_unknown_field/attr_conflict/
+read_unset_field tests (I).</p>
+
 <h2>Subtasks — pending</h2>
 <p>Flag-day overall, but land internally in this order so each step compiles:</p>
 <ul class="subtasks">

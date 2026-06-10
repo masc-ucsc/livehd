@@ -15,7 +15,7 @@ OUT_FILE="${TEST_TMPDIR}/upass_dependency.out"
 
 cat "${W}"/logs/*pass_upass*.log >"${OUT_FILE}"
 
-if ! grep -q "uPass - resolved order: constprop assert" "${OUT_FILE}"; then
+if ! grep -q "uPass - resolved order: attributes typecheck constprop assert" "${OUT_FILE}"; then
   echo "FAIL: expected resolved dependency order not found"
   cat "${OUT_FILE}"
   exit 1

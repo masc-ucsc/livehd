@@ -130,8 +130,8 @@ upass::Emit_decision uPass_verifier::classify_statement() {
     operand_text = std::string{current_text()};
     if (is_type(Lnast_ntype::Lnast_ntype_const)) {
       val = *Dlop::from_pyrope(current_text());
-    } else if (is_type(Lnast_ntype::Lnast_ntype_ref) && runner_fold_fn) {
-      val = runner_fold_fn(current_text());
+    } else if (is_type(Lnast_ntype::Lnast_ntype_ref) && runner_st != nullptr) {
+      val = runner_st->known_const_scalar(current_text());
     }
     // Optional message child. Resolve it the same way cputs resolves its
     // operand: a folded string literal becomes a const, an interpolated
@@ -141,8 +141,8 @@ upass::Emit_decision uPass_verifier::classify_statement() {
       std::optional<Const> mval;
       if (is_type(Lnast_ntype::Lnast_ntype_const)) {
         mval = *Dlop::from_pyrope(current_text());
-      } else if (is_type(Lnast_ntype::Lnast_ntype_ref) && runner_fold_fn) {
-        mval = runner_fold_fn(current_text());
+      } else if (is_type(Lnast_ntype::Lnast_ntype_ref) && runner_st != nullptr) {
+        mval = runner_st->known_const_scalar(current_text());
       }
       if (mval && !mval->is_invalid() && mval->is_string()) {
         assert_msg = strip_pyrope_quotes(mval->to_pyrope());
@@ -283,8 +283,8 @@ upass::Emit_decision uPass_verifier::classify_func_call() {
   std::optional<Const> val;
   if (is_type(Lnast_ntype::Lnast_ntype_const)) {
     val = *Dlop::from_pyrope(current_text());
-  } else if (is_type(Lnast_ntype::Lnast_ntype_ref) && runner_fold_fn) {
-    val = runner_fold_fn(current_text());
+  } else if (is_type(Lnast_ntype::Lnast_ntype_ref) && runner_st != nullptr) {
+    val = runner_st->known_const_scalar(current_text());
   }
 
   // Reject named or multi-argument forms in this slice. A trailing

@@ -16,6 +16,12 @@ class TestableVerifier : public uPass_verifier {
 public:
   using uPass_verifier::uPass_verifier;
   void position(const Lnast_nid& nid) { move_to_nid(nid); }
+
+  // 2b/E4 — drive the push-form hook (cursor-based body) with dummy args.
+  void call_plus() {
+    Bundle dummy{"dst"};
+    (void)process_plus("dst", dummy, upass::Src_span{});
+  }
 };
 
 struct VerifierFixture {
@@ -43,7 +49,7 @@ TEST(UpassVerifier, WellFormedBinaryNoThrow) {
 
   TestableVerifier vf(f.lm);
   vf.position(op);
-  EXPECT_NO_THROW(vf.process_plus());
+  EXPECT_NO_THROW(vf.call_plus());
 }
 
 // ── check_binary: missing second operand (only 2 children) ───────────────
@@ -57,7 +63,7 @@ TEST(UpassVerifier, BinaryMissingSecondOperandThrows) {
 
   TestableVerifier vf(f.lm);
   vf.position(op);
-  EXPECT_THROW(vf.process_plus(), std::runtime_error);
+  EXPECT_THROW(vf.call_plus(), std::runtime_error);
 }
 
 // ── check_binary: extra operand (4 children) ─────────────────────────────
@@ -73,7 +79,7 @@ TEST(UpassVerifier, BinaryExtraOperandThrows) {
 
   TestableVerifier vf(f.lm);
   vf.position(op);
-  EXPECT_THROW(vf.process_plus(), std::runtime_error);
+  EXPECT_THROW(vf.call_plus(), std::runtime_error);
 }
 
 // ── check_binary: wrong dest type (const instead of ref) ─────────────────
@@ -88,7 +94,7 @@ TEST(UpassVerifier, BinaryWrongDestTypeThrows) {
 
   TestableVerifier vf(f.lm);
   vf.position(op);
-  EXPECT_THROW(vf.process_plus(), std::runtime_error);
+  EXPECT_THROW(vf.call_plus(), std::runtime_error);
 }
 
 // ── check_unary: well-formed ──────────────────────────────────────────────
@@ -131,7 +137,8 @@ TEST(UpassVerifier, WellFormedBitNotUnaryNoThrow) {
 
   TestableVerifier vf(f.lm);
   vf.position(op);
-  EXPECT_NO_THROW(vf.process_bit_not());
+  Bundle dummy{"dst"};
+  EXPECT_NO_THROW((void)vf.process_bit_not("dst", dummy, upass::Src_span{}));
 }
 
 }  // namespace

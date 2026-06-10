@@ -22,9 +22,11 @@ cc_test(
     deps = [
         ":upass_prp_writer",
         "//inou/prp:inou_prp",
+        "//upass/attributes:upass_attributes",  # constprop's declared dep (2b/I)
         "//upass/constprop:upass_constprop",
         "//upass/noop:upass_noop",
         "//upass/runner:upass_runner",
+        "//upass/typecheck:upass_typecheck",  # constprop's declared dep (2b/I)
         "@googletest//:gtest_main",
     ],
 )

@@ -226,16 +226,45 @@ Pass_upass::Pass_upass(const Eprp_var& var) : Pass("pass.upass", var) {
   auto typecheck_txt = get_label("typecheck");
   bool do_typecheck  = typecheck_txt != "false" && typecheck_txt != "0";
 
-  // The assert pass declares depends_on={"constprop"}, so the runner's
-  // resolve_order will silently pull constprop back in if assert is enabled
-  // — even when the user explicitly passed constprop:0. Honor the explicit
-  // disable here: with constprop off, assert can't run anyway (it reads the
-  // symbol-table values constprop populates), so drop it. The user can
-  // override by passing assert:0 explicitly or by using the order=…  arg
-  // to spell out exactly which passes to run.
-  if (!do_constprop && do_assert) {
-    Pass::warn("pass.upass: constprop:0 forces assert:0 (assert depends on constprop)");
-    do_assert = false;
+  // 2b/I — generalized warn-and-drop over the DECLARED pass dependency
+  // edges (assert→constprop, typecheck→attributes, constprop→{attributes,
+  // typecheck}, bitwidth→constprop, coalescer→{constprop,bitwidth}). The
+  // runner's resolve_order silently pulls a declared dependency back in even
+  // when its label disables it — honor the explicit disable instead: a
+  // disabled pass drops its dependents (transitively), each with a warning.
+  // An order=… csv spells the exact list and bypasses this.
+  {
+    // toln:0 && tolg:0 silently drops the coalescer first (nothing consumes
+    // the rewritten LNAST — no warning for that policy drop).
+    if (!run_toln) {
+      do_coalescer = false;
+    }
+    struct Dep_edge {
+      const char* pass;
+      bool*       flag;
+      const char* dep;
+      bool*       dep_flag;
+    };
+    const Dep_edge edges[] = {
+        {"typecheck", &do_typecheck, "attributes", &do_attrs},
+        {"constprop", &do_constprop, "attributes", &do_attrs},
+        {"constprop", &do_constprop, "typecheck", &do_typecheck},
+        {"bitwidth", &do_bitwidth, "constprop", &do_constprop},
+        {"coalescer", &do_coalescer, "constprop", &do_constprop},
+        {"coalescer", &do_coalescer, "bitwidth", &do_bitwidth},
+        {"assert", &do_assert, "constprop", &do_constprop},
+    };
+    bool changed = true;
+    while (changed) {
+      changed = false;
+      for (const auto& e : edges) {
+        if (*e.flag && !*e.dep_flag) {
+          Pass::warn(std::format("pass.upass: {}:0 forces {}:0 ({} depends on {})", e.dep, e.pass, e.pass, e.dep));
+          *e.flag = false;
+          changed = true;
+        }
+      }
+    }
   }
 
   if (do_verifier) {  // 1st and last pass

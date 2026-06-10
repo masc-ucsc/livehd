@@ -17,6 +17,16 @@ static void assert_no_prefix(std::string_view key) {
     "symbol_table: variable name carries a legacy $/%/# prefix; upstream pass must normalize");
 }
 
+// 2b/B — Function scopes are WRITE barriers but READ-transparent:
+//   - find_decl_scope (the write/anchor variant) stops at AND INCLUDING the
+//     nearest Function scope: a callee body cannot mutate the caller's
+//     locals (the no-side-effect rule prp2lnast enforces lexically), and a
+//     fresh write anchors inside the function.
+//   - find_decl_scope_read crosses the barrier: a callee body walked on the
+//     shared table reads outer comptime consts directly (closure capture —
+//     what lets func_extract drop its capture maps).
+// A write whose name resolves ONLY above the barrier is a compile error at
+// the caller; see is_function_captured().
 Symbol_table::Scope* Symbol_table::find_decl_scope(std::string_view var) {
   if (stack.empty()) {
     return nullptr;
@@ -25,9 +35,6 @@ Symbol_table::Scope* Symbol_table::find_decl_scope(std::string_view var) {
     if (s->varmap.find(var) != s->varmap.end()) {
       return s;
     }
-    // Function scopes are visibility barriers: a callee body cannot reach
-    // the caller's locals. Stop at AND INCLUDING the function scope so the
-    // function's own params/locals stay reachable.
     if (s->type == Scope_type::Function) {
       return nullptr;
     }
@@ -50,6 +57,23 @@ const Symbol_table::Scope* Symbol_table::find_decl_scope(std::string_view var) c
   return nullptr;
 }
 
+const Symbol_table::Scope* Symbol_table::find_decl_scope_read(std::string_view var) const {
+  if (stack.empty()) {
+    return nullptr;
+  }
+  for (const auto* s = stack.back(); s != nullptr; s = s->parent) {
+    if (s->varmap.find(var) != s->varmap.end()) {
+      return s;
+    }
+    // Read-transparent across Function barriers (closure capture).
+  }
+  return nullptr;
+}
+
+bool Symbol_table::is_function_captured(std::string_view var) const {
+  return find_decl_scope(var) == nullptr && find_decl_scope_read(var) != nullptr;
+}
+
 bool Symbol_table::var(std::string_view key) {
   I(!stack.empty());
   assert_no_prefix(key);
@@ -65,6 +89,32 @@ bool Symbol_table::var(std::string_view key) {
   auto bundle = std::make_shared<Bundle>(var);
   bundle->var(field, invalid_lconst);
   cur.varmap.emplace(var, bundle);
+  cur.declared.emplace_back(std::string(var));
+  return true;
+}
+
+static Symbol_table::Scope* anchor_for(Symbol_table::Scope* innermost, std::string_view var);
+
+bool Symbol_table::declare_bare(std::string_view var) {
+  // 2b/A — declaration pre-step binding: install a TRULY EMPTY bundle (no
+  // "0" slot at all, unlike var()'s invalid-trivial entry) in the innermost
+  // scope. Keeps `non_attr_entries().empty()` true for declared-but-unwritten
+  // names, which constprop's named-type default-materialization and merge
+  // guards rely on. Returns false (binding kept) on redeclaration.
+  I(!stack.empty());
+  assert_no_prefix(var);
+  I(var.find('.') == std::string_view::npos);
+
+  // ___ tmps anchor at the Function scope exactly like set() — a declare on
+  // an extraction tmp (`declare(___3, …, mut)`, the per-field-mode lowering)
+  // must hit the SAME binding constprop's value store creates/created, or
+  // the table ends up with two shadowing bindings in different scopes.
+  auto&      cur = *anchor_for(stack.back(), var);
+  const auto it  = cur.varmap.find(var);
+  if (unlikely(it != cur.varmap.end())) {
+    return false;
+  }
+  cur.varmap.emplace(std::string(var), std::make_shared<Bundle>(var));
   cur.declared.emplace_back(std::string(var));
   return true;
 }
@@ -132,6 +182,71 @@ bool Symbol_table::set(std::string_view key, std::shared_ptr<Bundle> bundle) {
     target->varmap.emplace(std::string(var), var_bundle);
   } else {
     if (var == key) {
+      // 2b — a whole-bundle assignment preserves the DECLARATION-PERSISTENT
+      // slices of the old binding (mode, nominal type_name, declared Kind and
+      // max/min envelope): they ride the NAME, not the value. The incoming
+      // bundle is usually shared (it is also some tmp's live binding), so
+      // clone before writing facts onto it — never contaminate the source.
+      const auto& old = it->second;
+      if (old && old.get() != bundle.get()) {
+        const auto& oe        = old->get_entry("0");
+        const auto& ne        = bundle->get_entry("0");
+        const bool  scalar_ok = bundle->is_empty() || bundle->has_trivial("0");
+        const bool  need_mode = old->get_mode() != upass::Mode::unknown && bundle->get_mode() != old->get_mode();
+        const bool  need_tn   = !old->get_type_name().empty() && bundle->get_type_name().empty();
+        // Declared facts are NAME facts: when the old binding carries them
+        // they WIN over anything riding in on the incoming value bundle (an
+        // s6-typed param bound to an s4 actual keeps its declared s6 — the
+        // actual's envelope rode the value copy). Fill-if-unset only applies
+        // when the NAME never declared the fact.
+        const bool need_decl = scalar_ok
+                               && ((!oe.decl_max.is_invalid()
+                                    && (ne.decl_max.is_invalid() || !oe.decl_max.is_known_eq(ne.decl_max)))
+                                   || (!oe.decl_min.is_invalid()
+                                       && (ne.decl_min.is_invalid() || !oe.decl_min.is_known_eq(ne.decl_min))));
+        const bool need_kind = scalar_ok && oe.kind != upass::Kind::unknown && ne.kind != oe.kind;
+        // "vbound" is the bind-tracking residual attr (attributes' const
+        // single-bind / first-write gate): a NAME fact like mode, so it
+        // survives whole-bundle assignment.
+        // Residual attrs are NAME facts (explicit `x::[attr=v]` markers,
+        // bind tracking, per-field fmode/fcomptime): `z = 300` keeps every
+        // attr the incoming value bundle doesn't carry itself — the legacy
+        // attr map was name-keyed, so values never displaced attrs.
+        std::vector<std::pair<std::string, Const>> need_attrs;
+        for (const auto& [k, fe] : old->get_attrs()) {
+          if (bundle->get_attrs().find(k) == bundle->get_attrs().end()) {
+            need_attrs.emplace_back(k, fe.trivial);
+          }
+        }
+        if (need_mode || need_tn || need_decl || need_kind || !need_attrs.empty()) {
+          if (bundle.use_count() > 1) {
+            bundle = std::make_shared<Bundle>(*bundle);
+          }
+          for (const auto& [k, v] : need_attrs) {
+            bundle->set_attr(k, v);  // key already carries any field path
+          }
+          if (need_mode) {
+            bundle->set_mode(old->get_mode());  // declared mode is a NAME fact — overwrite ridden modes
+          }
+          if (need_tn) {
+            bundle->set_type_name(old->get_type_name());
+          }
+          if (need_decl || need_kind) {
+            Bundle::Entry e = bundle->get_entry("0");
+            e.immutable     = false;
+            if (!oe.decl_max.is_invalid()) {
+              e.decl_max = oe.decl_max;  // declared envelope: old wins
+            }
+            if (!oe.decl_min.is_invalid()) {
+              e.decl_min = oe.decl_min;
+            }
+            if (oe.kind != upass::Kind::unknown) {
+              e.kind = oe.kind;
+            }
+            bundle->set("0", std::move(e));
+          }
+        }
+      }
       it->second = bundle;
       return true;
     }
@@ -367,7 +482,7 @@ bool Symbol_table::is_known_const(std::string_view name) const {
 bool Symbol_table::has_trivial(std::string_view key) const {
   auto [var, field] = get_var_field(key);
 
-  const auto* s = find_decl_scope(var);
+  const auto* s = find_decl_scope_read(var);  // 2b/B: reads cross the Function barrier
   if (s == nullptr) {
     return false;
   }
@@ -378,7 +493,7 @@ bool Symbol_table::has_trivial(std::string_view key) const {
 const Const& Symbol_table::get_trivial(std::string_view key) const {
   auto [var, field] = get_var_field(key);
 
-  const auto* s = find_decl_scope(var);
+  const auto* s = find_decl_scope_read(var);  // 2b/B: reads cross the Function barrier
   if (s == nullptr) {
     return invalid_lconst;
   }
@@ -389,7 +504,7 @@ const Const& Symbol_table::get_trivial(std::string_view key) const {
 std::shared_ptr<Bundle> Symbol_table::get_bundle(std::string_view key) const {
   auto [var, field] = get_var_field(key);
 
-  const auto* s = find_decl_scope(var);
+  const auto* s = find_decl_scope_read(var);  // 2b/B: reads cross the Function barrier
   if (s == nullptr) {
     return nullptr;
   }
@@ -418,7 +533,7 @@ std::shared_ptr<Bundle> Symbol_table::get_bundle_for_write(std::string_view var)
 bool Symbol_table::has_bundle(std::string_view key) const {
   auto [var, field] = get_var_field(key);
 
-  const auto* s = find_decl_scope(var);
+  const auto* s = find_decl_scope_read(var);  // 2b/B: reads cross the Function barrier
   if (s == nullptr) {
     return false;
   }

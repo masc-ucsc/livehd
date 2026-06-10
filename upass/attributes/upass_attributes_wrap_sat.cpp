@@ -102,8 +102,8 @@ void uPass_attributes::process_func_call() {
           if (!v->is_invalid()) {
             value = *v;
           }
-        } else if (Lnast_ntype::is_ref(get_raw_ntype()) && runner_fold_fn) {
-          auto folded = runner_fold_fn(current_text());
+        } else if (Lnast_ntype::is_ref(get_raw_ntype()) && runner_st != nullptr) {
+          auto folded = runner_st->known_const_scalar(current_text());
           if (folded && !folded->is_invalid()) {
             value = *folded;
           }
@@ -127,6 +127,13 @@ void uPass_attributes::process_func_call() {
   if (!inserted && !it->second.same_repr(out)) {
     it->second = out;
   }
+  // 2b/E4 — the narrowed value IS the call dst's value; write it to the
+  // binding too (the dst is a single-writer tmp constprop never folds for
+  // wrap/sat calls), so table-only operand resolution sees it and the
+  // runner_fold_fn pull seam can retire (2b/H).
+  if (runner_st != nullptr) {
+    (void)runner_st->set(dst, out);
+  }
 }
 
 void uPass_attributes::record_assign(std::string_view lhs, bool rhs_is_nil) {
@@ -138,10 +145,9 @@ void uPass_attributes::record_assign(std::string_view lhs, bool rhs_is_nil) {
   }
 
   // record_assign's only remaining side effects need type_info for `lhs`:
-  //   * assigned_once gates the unsigned first-write coercion in on_assign_like
-  //     (only typed unsigned LHS reach it).
-  //   * the const-single-bind check is inside the `ti->decl == const_kind`
-  //     branch below.
+  //   * the bound marker gates the unsigned first-write coercion in
+  //     on_assign_like (only typed unsigned LHS reach it).
+  //   * the const-single-bind check is inside the `decl == const_kind` branch.
   // When `lookup_type_info(lhs)` is null, both are dead — skip the work. This
   // is the dominant savings on bulk-arithmetic workloads (xx.prp: 1M plus + 1M
   // assign ops, mostly tmp LHS with no type_info).
@@ -150,19 +156,34 @@ void uPass_attributes::record_assign(std::string_view lhs, bool rhs_is_nil) {
     return;
   }
 
-  // Track that the var has been assigned at least once (the unsigned
-  // first-write coercion in on_assign_like gates on `!was_assigned`).
-  assigned_once.emplace(lhs);
+  // 2b/E — the bind-tracking state lives ON the binding as a NON-STICKY
+  // residual attr ("vbound": assigned a non-nil value at least once). Scope
+  // locality replaces the old per-clone counter reset: loop iterations and
+  // inliner clones get fresh scopes/names, so their bindings start unmarked.
+  // record_assign runs BEFORE constprop's table write at the same store
+  // (pass order), so the first write reads its own declare-baked bundle.
+  if (runner_st == nullptr) {
+    return;
+  }
+  const auto root  = Bundle::get_first_level(lhs);
+  const auto field = Bundle::get_all_but_first_level(lhs);
+  auto       b     = runner_st->get_bundle_for_write(root);
+  if (!b) {
+    return;
+  }
+  const bool was_bound = field.empty() ? b->has_attr("vbound") : b->has_attr(field, "vbound");
 
   // Const single-bind enforcement. Skipped inside an init-construction
   // window: the runner's synthesized constructor stores (defaults bind +
   // ref-self write-back) are one logical binding, not user re-binds.
-  if (ti->decl == Decl_kind::const_kind && init_construction_depth_ == 0) {
-    auto [it, inserted] = const_assign_count.try_emplace(std::string{lhs}, 0);
-    int& count          = it->second;
-    ++count;
-    if (count > 1) {
-      upass::error("uPass_attributes: const `{}` rebind (assigned {} times)\n", lhs, count);
+  if (ti->decl == Decl_kind::const_kind && init_construction_depth_ == 0 && was_bound) {
+    upass::error("uPass_attributes: const `{}` rebind (assigned {} times)\n", lhs, 2);
+  }
+  if (!was_bound) {
+    if (field.empty()) {
+      b->set_attr("vbound", *Dlop::create_integer(1));
+    } else {
+      b->set_attr(field, "vbound", *Dlop::create_integer(1));
     }
   }
 }

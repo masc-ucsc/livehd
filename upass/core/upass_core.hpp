@@ -5,6 +5,7 @@
 #include <map>
 #include <memory>
 #include <optional>
+#include <span>
 #include <stack>
 #include <string>
 #include <string_view>
@@ -27,6 +28,29 @@ namespace upass {
 // recognizes in its `set_options` override. Unknown keys are silently
 // ignored so new labels can be added without a whole-stack change.
 using Options_map = std::map<std::string, std::string>;
+
+// 2b/C — push-based dispatch vocabulary. The runner resolves every operand of
+// a value-producing node to a Bundle and PUSHES them into each pass:
+//
+//   Vote process_<op>(std::string_view dst_name, Bundle& dst, Src_span src)
+//
+// `dst` is the live symbol-table bundle for the dst name (created by the
+// runner on first write); `src` is the child-ordered operand list — a `const`
+// literal is a throwaway trivial Bundle (make_const) owned by the runner for
+// the duration of the call, a `ref` is the name's live bundle. Names ride
+// along for diagnostics only. Passes mutate their slice of `dst` and vote
+// keep/drop; the runner derives the emitted node (2b/D).
+enum class Vote : uint8_t { keep, drop };
+
+struct Operand {
+  std::string_view              name;    // symbol-table key for refs; "" for const literals
+  std::shared_ptr<const Bundle> bundle;  // never null (empty throwaway when unbound)
+  // 0sb/0ub BIT-PATTERN literal: carries bits, not a value — storing a
+  // signed-negative pattern into an unsigned envelope is the documented
+  // force/reinterpret, never an overflow (bitwidth skips the fit range).
+  bool pattern{false};
+};
+using Src_span = std::span<const Operand>;
 
 enum class Emit_kind { emit, drop_subtree };
 
@@ -67,13 +91,11 @@ public:
   // (RHS of an op, condition of an `if`, cassert operand). If any pass
   // returns a concrete Const, the runner writes `const <value>` in place of
   // the ref. First non-nullopt wins.
-  virtual std::optional<Const> fold_ref(std::string_view /*name*/) { return std::nullopt; }
 
   // Perf hint to the runner. Overriding passes return true so the runner
   // can skip them in the hot try_fold_ref / any_pass_drops loops. Default
   // false matches the default no-op implementations above; passes that
   // override fold_ref / classify_statement must also override these.
-  virtual bool overrides_fold_ref() const { return false; }
   virtual bool overrides_classify_statement() const { return false; }
 
   // ── Shared symbol-table read access (1i Phase E campaign) ────────────────
@@ -86,10 +108,6 @@ public:
   // returns the flat (field → comptime Const) entries of a bundle, or nullopt
   // if `name` is not a known bundle. provide_typename returns the var's
   // declared typename, or "" if none.
-  virtual std::optional<std::vector<std::pair<std::string, Const>>> provide_bundle_fields(std::string_view /*name*/) {
-    return std::nullopt;
-  }
-  virtual std::string provide_typename(std::string_view /*name*/) { return {}; }
 
   // Declared scalar (integer) type of a variable, as its authoritative
   // prim_type_int `(max,min)` range. Exposed so the comb-call inliner can
@@ -104,7 +122,6 @@ public:
     std::optional<Const> range_max;
     std::optional<Const> range_min;
   };
-  virtual std::optional<Decl_scalar_type> provide_decl_type(std::string_view /*name*/) { return std::nullopt; }
 
   // Task 1k — declared type (scalar kind + optional integer range) of a
   // DOTTED field path such as `t1.a` (per-field types of a type/tuple bundle
@@ -117,7 +134,6 @@ public:
     std::optional<Const> range_max;
     std::optional<Const> range_min;
   };
-  virtual std::optional<Field_decl_type> provide_field_type(std::string_view /*name*/) { return std::nullopt; }
 
   // Task 1g — inferred scalar KIND of a variable (integer/boolean/string),
   // even when it carries no explicit `:type` annotation. uPass_typecheck owns
@@ -127,34 +143,24 @@ public:
   // reject cross-kind comparisons (`int does bool` → false). Returns
   // `Io_kind::none` when the kind is not (yet) known. See uPass::provide_field_type
   // for the declared-range half.
-  virtual Io_kind provide_scalar_kind(std::string_view /*name*/) { return Io_kind::none; }
 
   // Task 1k — declared storage class of a variable. The inliner uses this to
   // reject a `const` or `type` binding as a `ref` actual (incl. the UFCS
   // receiver of a `ref self` method): a ref param writes back, so the actual
   // must be a mut value. `unknown` = no declaration seen (temps, expressions).
   enum class Decl_storage : uint8_t { unknown, mut_storage, const_storage, reg_storage, await_storage, type_storage };
-  virtual Decl_storage provide_decl_storage(std::string_view /*name*/) { return Decl_storage::unknown; }
 
   // Folded `(start, end_inclusive)` bounds of a `range` tmp (the iterable of a
   // comptime `for i in lo..hi` loop), exposed so the runner's loop unroller can
   // iterate. nullopt when `name` is not a known range. A bound that has not
   // folded to a concrete integer is returned as-is (the runner checks).
-  virtual std::optional<std::pair<Const, Const>> provide_range(std::string_view /*name*/) { return std::nullopt; }
-  // Loop-migration (Step 1): the source ref held at `slot` of tuple-valued
-  // `name`, for a runtime-scalar slot the bundle can't remember. Lets the
-  // runner rewrite `t[slot]` into a copy `dst = ref`. nullopt when untracked.
-  virtual std::optional<std::string>             provide_tuple_slot_ref(std::string_view /*name*/, std::string_view /*slot*/) {
-    return std::nullopt;
-  }
-  // Loop-migration (Step 2): the ordered (slot-key, is_positional) shape of
-  // tuple-valued `name`, so the runner can unroll `for x in name` over its
-  // entries (positional keys "0","1",…; named keys the field name). nullopt
-  // when `name` is not a known tuple.
-  virtual std::optional<std::vector<std::pair<std::string, bool>>> provide_tuple_shape(std::string_view /*name*/) {
-    return std::nullopt;
-  }
-  virtual bool                                   overrides_shared_st() const { return false; }
+
+  // 2b/A — the runner-owned scope-aware symbol table: ONE shared_ptr<Bundle>
+  // per live name, shared by every pass. The runner owns every scope
+  // push/pop (function_scope at run() start, block_scope per `stmts`,
+  // mark-uncertain for if-arms); passes only read/write bundles through it.
+  // Wired right after construction, like the fold/emit callbacks below.
+  void set_runner_symbol_table(Symbol_table* st) { runner_st = st; }
 
   // Runner-supplied helper that delegates to `try_fold_ref` across every
   // registered pass. Passes can use this to resolve a ref against the
@@ -165,7 +171,6 @@ public:
   // callback sees the full pass list). Before that point it is empty —
   // defensive callers should check before invoking.
   using Fold_fn = std::function<std::optional<Const>(std::string_view)>;
-  void set_runner_fold_fn(Fold_fn fn) { runner_fold_fn = std::move(fn); }
 
   // Runner-supplied helper that re-emits the op-node at `src` (with operand
   // folding through try_fold_ref) at the runner's current staging cursor.
@@ -194,7 +199,6 @@ public:
     bool                 annotated{false};
   };
   using Type_query_fn = std::function<Scalar_type_query(std::string_view)>;
-  void set_runner_type_query_fn(Type_query_fn fn) { runner_type_query_fn = std::move(fn); }
 
   // Consume per-pass options (see Options_map). Default: no-op. Passes
   // override to pull the keys they care about. Called once, before run().
@@ -257,48 +261,20 @@ public:
   PROCESS_NODE(delay_assign)
 
   // Bitwidth
-  PROCESS_NODE(bit_and)
-  PROCESS_NODE(bit_or)
-  PROCESS_NODE(bit_not)
-  PROCESS_NODE(bit_xor)
 
   // Bitwidth Insensitive Reduce
-  PROCESS_NODE(red_or)
-  PROCESS_NODE(red_and)
-  PROCESS_NODE(red_xor)
-  PROCESS_NODE(popcount)
 
   // Logical
-  PROCESS_NODE(log_and)
-  PROCESS_NODE(log_or)
-  PROCESS_NODE(log_not)
 
   // Arithmetic
-  PROCESS_NODE(plus)
-  PROCESS_NODE(minus)
-  PROCESS_NODE(mult)
-  PROCESS_NODE(div)
-  PROCESS_NODE(mod)
 
   // Shift
-  PROCESS_NODE(shl)
-  PROCESS_NODE(sra)
 
   // Bit Manipulation
-  PROCESS_NODE(sext)
-  PROCESS_NODE(set_mask)
-  PROCESS_NODE(get_mask)
 
   // Comparison
-  PROCESS_NODE(ne)
-  PROCESS_NODE(eq)
-  PROCESS_NODE(lt)
-  PROCESS_NODE(le)
-  PROCESS_NODE(gt)
-  PROCESS_NODE(ge)
   // Nominal type identity (`p is xx`). Compares `p.[typename]` to the
   // string-name of the rhs ref.
-  PROCESS_NODE(is)
 
   // Function Call
   PROCESS_NODE(func_call)
@@ -307,11 +283,6 @@ public:
 
   // Pseudo-function markers (typed replacements for the const(name)-first
   // func_call form). does/in/has fold; the rest are emitted verbatim.
-  PROCESS_NODE(func_does)
-  PROCESS_NODE(func_equals)
-  PROCESS_NODE(func_in)
-  PROCESS_NODE(func_has)
-  PROCESS_NODE(func_case)
   PROCESS_NODE(func_break)
   PROCESS_NODE(func_continue)
   PROCESS_NODE(func_return)
@@ -319,8 +290,6 @@ public:
   // Tuple Operations
   PROCESS_NODE(tuple_get)
   PROCESS_NODE(tuple_set)
-  PROCESS_NODE(tuple_add)
-  PROCESS_NODE(tuple_concat)
 
   // Attributes
   PROCESS_NODE(attr_set)
@@ -355,11 +324,67 @@ public:
 
 #undef PROCESS_NODE
 
+  // ── 2b/C — push-based hooks for the value-producing ops ──────────────────
+  // MIGRATION DEFAULT: delegate to the old nullary cursor hook (the cursor is
+  // still on the node when these are called) and vote keep. A migrated pass
+  // overrides the push form and leaves the nullary form alone; once every
+  // pass is migrated the nullary hooks and these delegation bodies are
+  // deleted (2b/H).
+#define PROCESS_NODE_PUSH(NAME)                                                                   \
+  virtual Vote process_##NAME(std::string_view /*dst_name*/, Bundle& /*dst*/, Src_span /*src*/) { \
+    return Vote::keep;                                                                            \
+  }
+
+  PROCESS_NODE_PUSH(bit_and)
+  PROCESS_NODE_PUSH(bit_or)
+  PROCESS_NODE_PUSH(bit_not)
+  PROCESS_NODE_PUSH(bit_xor)
+  PROCESS_NODE_PUSH(red_or)
+  PROCESS_NODE_PUSH(red_and)
+  PROCESS_NODE_PUSH(red_xor)
+  PROCESS_NODE_PUSH(popcount)
+  PROCESS_NODE_PUSH(log_and)
+  PROCESS_NODE_PUSH(log_or)
+  PROCESS_NODE_PUSH(log_not)
+  PROCESS_NODE_PUSH(plus)
+  PROCESS_NODE_PUSH(minus)
+  PROCESS_NODE_PUSH(mult)
+  PROCESS_NODE_PUSH(div)
+  PROCESS_NODE_PUSH(mod)
+  PROCESS_NODE_PUSH(shl)
+  PROCESS_NODE_PUSH(sra)
+  PROCESS_NODE_PUSH(sext)
+  PROCESS_NODE_PUSH(set_mask)
+  PROCESS_NODE_PUSH(get_mask)
+  PROCESS_NODE_PUSH(ne)
+  PROCESS_NODE_PUSH(eq)
+  PROCESS_NODE_PUSH(lt)
+  PROCESS_NODE_PUSH(le)
+  PROCESS_NODE_PUSH(gt)
+  PROCESS_NODE_PUSH(ge)
+  PROCESS_NODE_PUSH(is)
+  PROCESS_NODE_PUSH(func_does)
+  PROCESS_NODE_PUSH(func_equals)
+  PROCESS_NODE_PUSH(func_in)
+  PROCESS_NODE_PUSH(func_has)
+  PROCESS_NODE_PUSH(func_case)
+  PROCESS_NODE_PUSH(tuple_add)
+  PROCESS_NODE_PUSH(tuple_concat)
+
+#undef PROCESS_NODE_PUSH
+
+  // 2b/C — `store` is dispatched to the passes in push form for BOTH shapes:
+  // a scalar store has src = {value}; a field-path store has the resolved
+  // selector bundles then the value, in LNAST child order, with `dst` the
+  // WHOLE destination bundle. Migration default routes to the legacy
+  // arity-split hooks (process_assign for ≤2-child, process_tuple_set for
+  // field paths).
+  virtual Vote process_store(std::string_view /*dst_name*/, Bundle& /*dst*/, Src_span /*src*/) { return Vote::keep; }
+
 protected:
   std::shared_ptr<Lnast_manager>& lm;
-  Fold_fn                         runner_fold_fn;
   Emit_at_fn                      runner_emit_at_fn;
-  Type_query_fn                   runner_type_query_fn;
+  Symbol_table*                   runner_st{nullptr};  // 2b/A — see set_runner_symbol_table
 
   void move_to_nid(const Lnast_nid& nid) { lm->move_to_nid(nid); }
   auto current_text() const { return lm->current_text(); }
@@ -378,6 +403,11 @@ protected:
     return (((n == ty) || ...) || false);
   }
 };
+
+// 2b/C — pointer-to-member type for the push-form hooks. The push forms
+// overload the nullary names, so dispatch sites disambiguate with a
+// static_cast to this type (see the runner's PUSH_FN macro).
+using Push_method = Vote (uPass::*)(std::string_view, Bundle&, Src_span);
 
 struct uPass_node : public uPass {
 public:

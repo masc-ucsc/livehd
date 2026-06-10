@@ -46,35 +46,36 @@ public:
 
   // Sticky propagation needs a hook at every assignment-shaped op so it can
   // observe RHS refs and mark the destination.
-  void process_assign() override;
-  void process_plus() override;
-  void process_minus() override;
-  void process_mult() override;
-  void process_div() override;
-  void process_mod() override;
-  void process_shl() override;
-  void process_sra() override;
-  void process_bit_and() override;
-  void process_bit_or() override;
-  void process_bit_not() override;
-  void process_bit_xor() override;
-  void process_log_and() override;
-  void process_log_or() override;
-  void process_log_not() override;
-  void process_red_or() override;
-  void process_red_and() override;
-  void process_red_xor() override;
-  void process_popcount() override;
-  void process_ne() override;
-  void process_eq() override;
-  void process_is() override;
-  void process_lt() override;
-  void process_le() override;
-  void process_gt() override;
-  void process_ge() override;
-  void process_sext() override;
-  void process_get_mask() override;
-  void process_set_mask() override;
+  void        process_assign() override;
+  upass::Vote process_store(std::string_view dst_name, Bundle& dst, upass::Src_span src) override;
+  upass::Vote process_plus(std::string_view dst_name, Bundle& dst, upass::Src_span src) override;
+  upass::Vote process_minus(std::string_view dst_name, Bundle& dst, upass::Src_span src) override;
+  upass::Vote process_mult(std::string_view dst_name, Bundle& dst, upass::Src_span src) override;
+  upass::Vote process_div(std::string_view dst_name, Bundle& dst, upass::Src_span src) override;
+  upass::Vote process_mod(std::string_view dst_name, Bundle& dst, upass::Src_span src) override;
+  upass::Vote process_shl(std::string_view dst_name, Bundle& dst, upass::Src_span src) override;
+  upass::Vote process_sra(std::string_view dst_name, Bundle& dst, upass::Src_span src) override;
+  upass::Vote process_bit_and(std::string_view dst_name, Bundle& dst, upass::Src_span src) override;
+  upass::Vote process_bit_or(std::string_view dst_name, Bundle& dst, upass::Src_span src) override;
+  upass::Vote process_bit_not(std::string_view dst_name, Bundle& dst, upass::Src_span src) override;
+  upass::Vote process_bit_xor(std::string_view dst_name, Bundle& dst, upass::Src_span src) override;
+  upass::Vote process_log_and(std::string_view dst_name, Bundle& dst, upass::Src_span src) override;
+  upass::Vote process_log_or(std::string_view dst_name, Bundle& dst, upass::Src_span src) override;
+  upass::Vote process_log_not(std::string_view dst_name, Bundle& dst, upass::Src_span src) override;
+  upass::Vote process_red_or(std::string_view dst_name, Bundle& dst, upass::Src_span src) override;
+  upass::Vote process_red_and(std::string_view dst_name, Bundle& dst, upass::Src_span src) override;
+  upass::Vote process_red_xor(std::string_view dst_name, Bundle& dst, upass::Src_span src) override;
+  upass::Vote process_popcount(std::string_view dst_name, Bundle& dst, upass::Src_span src) override;
+  upass::Vote process_ne(std::string_view dst_name, Bundle& dst, upass::Src_span src) override;
+  upass::Vote process_eq(std::string_view dst_name, Bundle& dst, upass::Src_span src) override;
+  upass::Vote process_is(std::string_view dst_name, Bundle& dst, upass::Src_span src) override;
+  upass::Vote process_lt(std::string_view dst_name, Bundle& dst, upass::Src_span src) override;
+  upass::Vote process_le(std::string_view dst_name, Bundle& dst, upass::Src_span src) override;
+  upass::Vote process_gt(std::string_view dst_name, Bundle& dst, upass::Src_span src) override;
+  upass::Vote process_ge(std::string_view dst_name, Bundle& dst, upass::Src_span src) override;
+  upass::Vote process_sext(std::string_view dst_name, Bundle& dst, upass::Src_span src) override;
+  upass::Vote process_get_mask(std::string_view dst_name, Bundle& dst, upass::Src_span src) override;
+  upass::Vote process_set_mask(std::string_view dst_name, Bundle& dst, upass::Src_span src) override;
 
   // Attribute set/get nodes are dispatched to per-attribute handlers.
   void process_attr_set() override;
@@ -98,8 +99,8 @@ public:
   // Track tuple shape (field count + field-name list) so .[size] / .[bits] /
   // .[typename] / .[key] and category-D aggregate→field inheritance can
   // resolve before downstream lowering flattens the tuple away.
-  void process_tuple_add() override;
-  void process_tuple_concat() override;
+  upass::Vote process_tuple_add(std::string_view dst_name, Bundle& dst, upass::Src_span src) override;
+  upass::Vote process_tuple_concat(std::string_view dst_name, Bundle& dst, upass::Src_span src) override;
   void process_tuple_set() override;
   void process_tuple_get() override;
 
@@ -112,8 +113,6 @@ public:
   // emit-time substitution picks it up and downstream passes (verifier
   // cassert, constprop eq/ne via runner_fold_fn fallback) see the resolved
   // value within the same walk. See upass_attributes_read.cpp.
-  std::optional<Const> fold_ref(std::string_view name) override;
-  bool                 overrides_fold_ref() const override { return true; }
 
   // Init-construction window: the runner's synthesized constructor stores
   // (type-defaults bind + ref-self write-back) are not user re-binds, so the
@@ -129,6 +128,10 @@ public:
   // the canonical name from the raw attribute text. Empty when no per-name
   // dispatch is active.
   const std::string& current_dispatch_bucket() const { return dispatch_bucket; }
+
+  // 2b/E — the runner-owned shared symbol table, for the attribute handlers
+  // (sticky state lives on the bindings now).
+  Symbol_table* shared_table() const { return runner_st; }
 
 private:
   upass::attributes::Handler_registry reg;
@@ -226,25 +229,31 @@ public:
   // nullopt when no entry exists for that (var, attr) pair.
   std::optional<Const> lookup_attr_value(std::string_view var, std::string_view attr) const;
 
-  // Type info recorded by process_type_spec + the `type` and `comptime`
-  // decl-attrs. Returns nullopt when nothing is known.
+  // 2b/E3e — write an explicit attr value onto the binding (field-scoped for
+  // dotted targets; creates the binding when absent — set() anchors ___ tmps
+  // at the function scope). Also echoes extraction-tmp targets back to their
+  // source field via Symbol_table::tget_origin (per-field decl-site attrs).
+  void set_binding_attr(std::string_view target, std::string_view attr, const Const& v);
+
+  // Declared-type facts for a name — 2b/E3b: answered from the binding's
+  // typed Entry fields (runner declare/type_spec bake + per-field rides),
+  // io_meta (ports), the pending dotted-decl stash, and the explicit
+  // `[bits=N]` attr value. Returns nullptr when nothing is known; the
+  // pointer targets a per-call scratch (do not hold across calls).
   const Type_info* lookup_type_info(std::string_view var) const;
+  const Type_info* lookup_type_info_bundle(std::string_view var) const;
 
   // Shared-ST read (1i inliner): hand the runner a declared variable's integer
   // (max,min) range so it can re-type an untyped inlined parameter from the
   // actual at the call site. See uPass::provide_decl_type.
-  std::optional<Decl_scalar_type> provide_decl_type(std::string_view name) override;
-  bool                            overrides_shared_st() const override { return true; }
 
   // Task 1k — declared field type of a dotted path (`t1.a`) for the inliner's
   // typed-self `does`-check. Same lookup_type_info chase as provide_decl_type
   // but surfaces the scalar KIND too (and tolerates a missing range, so bool/
   // string fields still report their kind). See uPass::provide_field_type.
-  std::optional<Field_decl_type> provide_field_type(std::string_view name) override;
 
   // Task 1k — declared storage class (mut/const/reg/type) so the inliner can
   // reject const/type bindings as `ref` actuals. See uPass::provide_decl_storage.
-  Decl_storage provide_decl_storage(std::string_view name) override;
 
   // Range bounds previously recorded by process_range, keyed by the range
   // op's destination tmp ref (so attr_set with a `range` value pointing to
@@ -256,13 +265,8 @@ public:
   std::optional<std::string> lookup_attr_ref(std::string_view var, std::string_view attr) const;
 
 private:
-  std::map<std::string, std::map<std::string, Const>>       attr_set_values;
-  std::map<std::string, std::map<std::string, std::string>> attr_set_refs;  // (var, attr) → ref-text value
-  // type_info_map is on the hot record_assign() path — flat_hash_map gives
-  // heterogeneous string_view lookup so the per-op probe doesn't allocate.
-  // (The other maps remain std::map because their iteration order is
-  // observable via tuple shape / aggregate inheritance code paths.)
-  absl::flat_hash_map<std::string, Type_info>               type_info_map;
+  // lookup_type_info_bundle return scratch (per-call; do not hold across calls)
+  mutable Type_info ti_scratch_;
   std::map<std::string, std::pair<Const, Const>>            range_bounds;  // start, end keyed by tmp
   std::map<std::string, Const>                              tmp_fold;      // attr_get dst → folded Const
 
@@ -278,21 +282,10 @@ public:
     std::string name;        // "a", "xx", or empty for unnamed positional
     bool        operator==(const Tuple_field& other) const { return positional == other.positional && name == other.name; }
   };
-  struct Tuple_shape {
-    std::vector<Tuple_field> fields;
-  };
 
   // tuple_get destination tmp → resolution info. Lets later attr_get see what
   // the tmp logically points at so cat-D inheritance and `.[key]` work.
-  struct Get_alias {
-    std::string base;        // canonical aggregate var (e.g. "t" or "___1")
-    std::string field_key;   // "0", "xx", ...
-    std::string field_name;  // for `.[key]` reads — the source name at this slot
-  };
 
-  bool                 is_tuple(std::string_view var) const;
-  const Tuple_shape*   lookup_tuple_shape(std::string_view var) const;
-  const Get_alias*     lookup_get_alias(std::string_view tmp) const;
   std::optional<Const> derive_aggregate_size(std::string_view base) const;
   std::optional<Const> derive_aggregate_bits(std::string_view base) const;
   std::optional<Const> derive_aggregate_typename(std::string_view base, std::string_view base_text) const;
@@ -326,12 +319,22 @@ public:
   //      `const v = t.a` case: v inherits poison from t.a → t.
 
   // Public so phase4 helpers (and future tests) can drive materialization.
-  void migrate_aggregate_attrs_to_fields(std::string_view base);
-  void migrate_alias(std::string_view lhs, std::string_view rhs);
 
   // Was `var` assigned a non-nil value at least once? Gates the unsigned
-  // first-write coercion in on_assign_like.
-  bool was_assigned(std::string_view var) const { return assigned_once.contains(var); }
+  // first-write coercion in on_assign_like. 2b/E — reads the binding's
+  // "vbound" residual attr (set by record_assign).
+  bool was_assigned(std::string_view var) const {
+    if (runner_st == nullptr) {
+      return false;
+    }
+    const auto root  = Bundle::get_first_level(var);
+    const auto field = Bundle::get_all_but_first_level(var);
+    const auto b     = runner_st->get_bundle(root);
+    if (!b) {
+      return false;
+    }
+    return field.empty() ? b->has_attr("vbound") : b->has_attr(field, "vbound");
+  }
 
   // Narrow a value to `type_src`'s declared type using the wrap (modulo) or
   // sat (clamp) rule. `type_src` is the variable whose type envelope to use
@@ -347,17 +350,14 @@ public:
   void record_assign(std::string_view lhs, bool rhs_is_nil);
 
 private:
-  std::map<std::string, Tuple_shape> tuple_shapes;     // var → shape
-  std::map<std::string, Get_alias>   tuple_get_alias;  // tmp → resolved alias
-  std::map<std::string, std::string> shape_source;     // var → source-tmp from `assign var src` (chained)
-  std::map<std::string, std::string> direct_alias;     // lhs → rhs for direct-ref `assign` aliases (migrate.cpp)
+  std::map<std::string, std::string> range_source;  // var → `range` tmp from `assign var range_tmp` (h.[size] chain)
 
   // Assignment tracking (wrap_sat.cpp). flat_hash_* gives heterogeneous
   // string_view lookup and O(1) inserts; assigned_once grows to ~one entry per
   // assignment on bulk workloads, so the std::set's O(log N) per-insert
   // allocator pressure was a visible bottleneck.
-  absl::flat_hash_set<std::string>      assigned_once;       // any non-nil assign happened
-  absl::flat_hash_map<std::string, int> const_assign_count;  // for const single-assign check
+  // 2b/E — assigned_once / const_assign_count retired onto the bindings'
+  // "vbound" residual attr (see record_assign / was_assigned).
   // >0 while the runner's init-construction window is open (see the
   // notify_init_construction_* overrides) — record_assign skips the const
   // single-bind tally for the synthesized constructor stores.

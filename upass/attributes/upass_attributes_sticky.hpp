@@ -9,6 +9,7 @@
 #include <vector>
 
 #include "absl/container/flat_hash_map.h"
+#include "symbol_table.hpp"
 #include "upass_attributes_handler.hpp"
 
 // Phase 1 — sticky attribute propagation (see attribute_todo.md §Phase 1).
@@ -65,14 +66,16 @@ public:
   // no control taint is active. Lets the on_assign_like fast-path elide its
   // operand walk when the pass is functionally inert (the common case on
   // bulk-arithmetic workloads with no `_*` attrs in flight).
-  bool is_inert() const { return acquired.empty() && control_taint_stack.empty(); }
+  bool is_inert() const { return !any_marked_ && control_taint_stack.empty(); }
 
 private:
-  // Per-variable acquired sticky attrs. Monotonic — entries are added but
-  // never removed (later clean assignments cannot clear a sticky).
-  // flat_hash_map supports heterogeneous string_view lookup so the hot
-  // merge_from / mark / has_sticky paths skip per-call std::string temps.
-  absl::flat_hash_map<std::string, std::set<std::string>> acquired;
+  // 2b/E — the acquired-set lives ON the bindings as residual attrs under
+  // their canonical leading-`_` names (battr::is_sticky); propagation is
+  // "merge each src's sticky_attributes() into dst". The handler holds the
+  // runner's shared table (set in begin_iteration) plus a monotonic
+  // any-sticky-seen flag for the is_inert fast path.
+  Symbol_table* st_{nullptr};
+  bool          any_marked_{false};
 
   // Per-arm control taint stack: each entry is the set of sticky bucket
   // names the current arm carries because its condition referenced sticky
@@ -81,6 +84,8 @@ private:
 
   void                  merge_from(std::string_view dst, std::string_view src);
   std::set<std::string> active_control_taint() const;  // OR of stack entries
+  // Sticky bucket names currently on `var`'s binding (last-level attr names).
+  std::set<std::string> buckets_of(std::string_view var) const;
 };
 
 }  // namespace attributes

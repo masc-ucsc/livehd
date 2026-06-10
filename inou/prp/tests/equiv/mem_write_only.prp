@@ -1,0 +1,17 @@
+/*
+:name: mem_write_only
+:type: equiv
+:verilog_top: mem_write_only.wro
+:pyrope_top: mem_write_only.wro
+*/
+
+// 1a-mem — a read-less memory is LEGAL (warning only, never an error): its
+// contents may be observed by a scan chain, and a future remote regref can
+// attach reads (a `pub` reg silences the warning entirely). The memory still
+// lowers — cgen ties off the smallest wrapper's dummy read port — so the
+// netlist keeps the state element.
+mod wro(a:u8, i:u2, p:u8) -> (z:u8@[0]) {
+  reg t:[4]u8 = nil
+  t[i] = a
+  z = p
+}

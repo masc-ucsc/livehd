@@ -1,0 +1,10 @@
+/*
+:name: store_unknown_field
+:type: error
+:error: not part of the destination's shape
+:help: only re-binds existing fields
+*/
+
+type Point = (x:u8 = nil, y:u8 = nil)
+mut t:Point = (x=1, y=2)
+t = (y=5, z=9)

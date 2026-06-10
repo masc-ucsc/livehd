@@ -124,108 +124,28 @@ bool uPass_attributes::is_builtin_attr(std::string_view name) {
   return std::find(std::begin(names), std::end(names), name) != std::end(names);
 }
 
-bool uPass_attributes::is_tuple(std::string_view var) const { return tuple_shapes.find(std::string{var}) != tuple_shapes.end(); }
-
-const uPass_attributes::Tuple_shape* uPass_attributes::lookup_tuple_shape(std::string_view var) const {
-  auto it = tuple_shapes.find(std::string{var});
-  if (it == tuple_shapes.end()) {
-    return nullptr;
-  }
-  return &it->second;
-}
-
-const uPass_attributes::Get_alias* uPass_attributes::lookup_get_alias(std::string_view tmp) const {
-  auto it = tuple_get_alias.find(std::string{tmp});
-  if (it == tuple_get_alias.end()) {
-    return nullptr;
-  }
-  return &it->second;
-}
-
-void uPass_attributes::process_tuple_add() {
+upass::Vote uPass_attributes::process_tuple_add(std::string_view dst_name, Bundle& dst, upass::Src_span src) {
+  (void)dst_name;
+  (void)dst;
+  (void)src;
   // Layout (prp2lnast::tuple_to_node):
   //   tuple_add
   //     ref(dst)
   //     [ assign(ref(name), value) | const(value) | ref(value) ]+
-  if (!move_to_child()) {
-    return;
-  }
-  auto        dst = normalize_name(current_text());
-  Tuple_shape shape;
-  int         pos = 0;
-  while (move_to_sibling()) {
-    Tuple_field field;
-    field.positional = std::to_string(pos);
-    if (is_type(Lnast_ntype::Lnast_ntype_store)) {
-      // Named field: read the assign's first child for the key.
-      if (move_to_child()) {
-        field.name = std::string{current_text()};
-        move_to_parent();
-      }
-    }
-    shape.fields.push_back(std::move(field));
-    ++pos;
-  }
-  move_to_parent();
-
-  // Replace any existing shape for dst — tuple_add is the (re)build site.
-  auto& slot = tuple_shapes[dst];
-  slot       = std::move(shape);
-
-  // Phase 4 — once dst has a shape, eagerly materialize any aggregate cat-D
-  // attrs onto each field's flattened path so downstream LGraph generation
-  // sees them after the tuple shape is gone. attrs added later (e.g. an
-  // attr_set on dst that follows the tuple_add) re-trigger from process_attr_set.
-  migrate_aggregate_attrs_to_fields(dst);
+  // 2b/E3c — no shape recording: the constructed bundle IS the shape
+  // (derive_aggregate_size / derive_comptime walk the binding's top levels).
+  return upass::Vote::keep;
 }
 
-void uPass_attributes::process_tuple_concat() {
+upass::Vote uPass_attributes::process_tuple_concat(std::string_view dst_name, Bundle& dst, upass::Src_span src) {
+  (void)dst_name;
+  (void)dst;
+  (void)src;
   // Layout: ref(dst), (const|ref)... — each operand contributes its own
   // entries (a sub-tuple's fields for refs with a known shape; a single
   // positional slot for scalar consts/refs).
-  if (!move_to_child()) {
-    return;
-  }
-  auto        dst = normalize_name(current_text());
-  Tuple_shape shape;
-  int         pos                   = 0;
-  auto        append_one_positional = [&]() {
-    Tuple_field field;
-    field.positional = std::to_string(pos++);
-    shape.fields.push_back(std::move(field));
-  };
-  while (move_to_sibling()) {
-    if (Lnast_ntype::is_const(get_raw_ntype())) {
-      append_one_positional();
-      continue;
-    }
-    if (!Lnast_ntype::is_ref(get_raw_ntype())) {
-      // Unknown operand kind — bail; we cannot reason about size.
-      shape.fields.clear();
-      pos = 0;
-      while (move_to_sibling()) {
-      }
-      break;
-    }
-    auto operand = normalize_name(current_text());
-    if (auto* sub = lookup_tuple_shape(operand); sub) {
-      for (const auto& f : sub->fields) {
-        Tuple_field nf;
-        nf.positional = std::to_string(pos++);
-        nf.name       = f.name;
-        shape.fields.push_back(std::move(nf));
-      }
-      continue;
-    }
-    // Ref to a non-tuple-typed operand: contributes a single positional slot.
-    append_one_positional();
-  }
-  move_to_parent();
-
-  if (!shape.fields.empty()) {
-    auto& slot = tuple_shapes[dst];
-    slot       = std::move(shape);
-  }
+  // 2b/E3c — no shape recording (see process_tuple_add).
+  return upass::Vote::keep;
 }
 
 void uPass_attributes::process_tuple_set() {
@@ -321,55 +241,48 @@ void uPass_attributes::process_tuple_get() {
     return;
   }
 
-  Get_alias alias;
-  alias.base       = base;
-  alias.field_key  = field_key;
-  alias.field_name = field_key;  // default — will be overridden when positional → named
+  std::string field_name = field_key;  // overridden when positional → named
 
   // If field_key looks like a positional integer and base has a known shape,
   // resolve the positional to the source field's name (for `.[key]`).
   bool all_digits = !field_key.empty() && std::all_of(field_key.begin(), field_key.end(), [](char c) {
     return std::isdigit(static_cast<unsigned char>(c)) != 0;
   });
-  if (all_digits) {
-    if (auto* sh = lookup_tuple_shape(base); sh) {
-      auto idx = static_cast<size_t>(std::stoul(field_key));
-      if (idx < sh->fields.size() && !sh->fields[idx].name.empty()) {
-        alias.field_name = sh->fields[idx].name;
-      }
-    } else if (auto src_it = shape_source.find(std::string{base}); src_it != shape_source.end()) {
-      if (auto* sh2 = lookup_tuple_shape(src_it->second); sh2) {
-        auto idx = static_cast<size_t>(std::stoul(field_key));
-        if (idx < sh2->fields.size() && !sh2->fields[idx].name.empty()) {
-          alias.field_name = sh2->fields[idx].name;
+  if (all_digits && runner_st != nullptr) {
+    if (const auto b = runner_st->get_bundle(base); b) {
+      const auto idx = static_cast<int>(std::stoul(field_key));
+      for (const auto& tl : b->top_levels()) {
+        if (tl.pos == idx && !tl.name.empty()) {
+          field_name = std::string(tl.name);
+          break;
         }
       }
     }
   }
 
-  auto [it, inserted] = tuple_get_alias.emplace(dst, std::move(alias));
-  if (!inserted
-      && (it->second.base != alias.base || it->second.field_key != alias.field_key || it->second.field_name != alias.field_name)) {
-    it->second = std::move(alias);
+  // 2b/E3c — record the resolved (possibly positional→named) origin for
+  // `.[key]` and the typed-fact back-flow (Symbol_table::tget_origin).
+  if (runner_st != nullptr && !field_name.empty()) {
+    runner_st->tget_origin.insert_or_assign(dst, base + "." + field_name);
   }
 }
 
 std::optional<Const> uPass_attributes::derive_aggregate_size(std::string_view base) const {
-  if (auto* sh = lookup_tuple_shape(base); sh) {
-    return *Dlop::create_integer(static_cast<int64_t>(sh->fields.size()));
-  }
-  // Aliased through `assign foo bar` where bar is shaped.
-  if (auto it = shape_source.find(std::string{base}); it != shape_source.end()) {
-    if (auto* sh = lookup_tuple_shape(it->second); sh) {
-      return *Dlop::create_integer(static_cast<int64_t>(sh->fields.size()));
+  // 2b/E3c — size = the binding's top-level cardinality (aliases share the
+  // slot; constprop materializes closed integer ranges as tuple bundles, so
+  // ranges resolve here too).
+  if (runner_st != nullptr && base.find('.') == std::string_view::npos) {
+    if (const auto b = runner_st->get_bundle(base); b) {
+      const size_t n = b->named_top_count() + b->unnamed_top_count();
+      if (n > 0 && !(n == 1 && b->is_scalar())) {
+        return *Dlop::create_integer(static_cast<int64_t>(n));
+      }
     }
   }
-  // Range-typed: size = end - start + 1 (closed); end - start (open). Range
-  // bounds in upass_attributes are recorded against the tmp produced by the
-  // `range` op; if `base` is a name assigned from such a tmp, chain through
-  // the assign-source.
+  // Range bounds recorded against the `range` op's tmp; chain through the
+  // alias source recorded at `assign var range_tmp` (range_source).
   std::string range_key{base};
-  if (auto it = shape_source.find(range_key); it != shape_source.end()) {
+  if (auto it = range_source.find(range_key); it != range_source.end()) {
     range_key = it->second;
   }
   if (auto rb = lookup_range(range_key); rb) {
@@ -410,37 +323,28 @@ std::optional<Const> uPass_attributes::derive_aggregate_typename(std::string_vie
   // `outer_t.inn`'s field typename. Mirrors lookup_type_info for numeric types.
   std::string parent;
   std::string field;
-  if (const auto* a = lookup_get_alias(base); a) {
-    parent = a->base;
-    field  = a->field_name.empty() ? a->field_key : a->field_name;
-  } else if (auto dot = base.rfind('.'); dot != std::string_view::npos) {
-    parent = std::string{base.substr(0, dot)};
-    field  = std::string{base.substr(dot + 1)};
-  } else {
-    return std::nullopt;
+  if (runner_st != nullptr) {
+    if (auto oit = runner_st->tget_origin.find(std::string(base)); oit != runner_st->tget_origin.end()) {
+      parent = std::string(Bundle::get_first_level(oit->second));
+      field  = std::string(Bundle::get_all_but_first_level(oit->second));
+    }
+  }
+  if (parent.empty()) {
+    if (auto dot = base.rfind('.'); dot != std::string_view::npos) {
+      parent = std::string{base.substr(0, dot)};
+      field  = std::string{base.substr(dot + 1)};
+    } else {
+      return std::nullopt;
+    }
   }
   if (field.empty()) {
     return std::nullopt;
   }
+  // 2b/E3c — the field typename rides the container binding's field attr
+  // (set_binding_attr echoes extraction-tmp attr_sets to the source field;
+  // aliases share the slot, so no alias hop / sibling-tmp scan).
   auto field_typename = [&](const std::string& container) -> std::optional<Const> {
-    std::vector<std::string> bases{container};
-    if (auto da = direct_alias.find(container); da != direct_alias.end()) {
-      bases.push_back(da->second);
-    }
-    for (const auto& b : bases) {
-      if (auto v = lookup_attr_value(b + "." + field, "typename"); v) {
-        return v;
-      }
-      // The field's type was recorded on a sibling tuple_get tmp of `b`.
-      for (const auto& [tmp, al] : tuple_get_alias) {
-        if (al.base == b && (al.field_key == field || al.field_name == field)) {
-          if (auto v = lookup_attr_value(tmp, "typename"); v) {
-            return v;
-          }
-        }
-      }
-    }
-    return std::nullopt;
+    return lookup_attr_value(container + "." + field, "typename");
   };
   // 1. The field typename recorded directly on `parent`'s bundle.
   if (auto v = field_typename(parent); v) {
@@ -469,81 +373,19 @@ std::optional<Const> uPass_attributes::derive_aggregate_key(std::string_view bas
 }
 
 std::optional<Const> uPass_attributes::lookup_attr_with_inheritance(std::string_view base, std::string_view attr) const {
-  // Direct lookup first.
+  // 2b/E3c — attrs ride the bindings (shared slots, value copies, the
+  // name-fact preservation in Symbol_table::set), and lookup_attr_value
+  // already does the cat-D field→root fallback. The one chase left is an
+  // EXTRACTION TMP base: look on its source field path (which falls back to
+  // the source aggregate for cat-D attrs).
   if (auto v = lookup_attr_value(base, attr); v) {
     return v;
   }
-  // Tuple_get alias → look on the dotted path, then on the bare aggregate.
-  if (auto* a = lookup_get_alias(base); a) {
-    // 1. Try canonical aggregate's full path (e.g. "t.b").
-    {
-      std::string path = a->base + "." + a->field_key;
-      if (auto v = lookup_attr_value(path, attr); v) {
+  if (runner_st != nullptr) {
+    if (auto oit = runner_st->tget_origin.find(std::string(base)); oit != runner_st->tget_origin.end()) {
+      if (auto v = lookup_attr_value(oit->second, attr); v) {
         return v;
       }
-      if (!a->field_name.empty() && a->field_name != a->field_key) {
-        std::string alt = a->base + "." + a->field_name;
-        if (auto v = lookup_attr_value(alt, attr); v) {
-          return v;
-        }
-      }
-    }
-    // 2. Try via the shape-source tmp (e.g. "___1.b") for attrs recorded on
-    //    the tuple-add tmp before the named-assign migrated the shape.
-    if (auto it = shape_source.find(a->base); it != shape_source.end()) {
-      std::string path = it->second + "." + a->field_key;
-      if (auto v = lookup_attr_value(path, attr); v) {
-        return v;
-      }
-      if (!a->field_name.empty() && a->field_name != a->field_key) {
-        std::string alt = it->second + "." + a->field_name;
-        if (auto v = lookup_attr_value(alt, attr); v) {
-          return v;
-        }
-      }
-    }
-    // 3. Cat-D fallback: attr on the parent aggregate inherits down.
-    if (!is_builtin_attr(attr)) {
-      if (auto v = lookup_attr_value(a->base, attr); v) {
-        return v;
-      }
-      if (auto it = shape_source.find(a->base); it != shape_source.end()) {
-        if (auto v = lookup_attr_value(it->second, attr); v) {
-          return v;
-        }
-      }
-    }
-  }
-  // Bare base with a shape-source — also inherits from the source-tmp's
-  // attrs (e.g. attrs landed on `___1` before the user-named alias).
-  if (auto it = shape_source.find(std::string{base}); it != shape_source.end()) {
-    if (auto v = lookup_attr_value(it->second, attr); v) {
-      return v;
-    }
-  }
-  // Phase 4 — chain through direct-ref aliases (`const v = t`,
-  // `mut u = a`). Walk the chain so attrs landed at any level of the
-  // aliasing hierarchy are visible to comptime reads on the surface name.
-  // Bounded walk (cap the hops) avoids any pathological alias-chain cycle.
-  {
-    std::string cursor{base};
-    for (int hops = 0; hops < 8; ++hops) {
-      auto it = direct_alias.find(cursor);
-      if (it == direct_alias.end()) {
-        break;
-      }
-      if (auto v = lookup_attr_value(it->second, attr); v) {
-        return v;
-      }
-      // Also try the rhs's get_alias chain if the rhs itself was a tuple_get tmp.
-      if (auto* a = lookup_get_alias(it->second); a) {
-        if (!is_builtin_attr(attr)) {
-          if (auto v = lookup_attr_value(a->base, attr); v) {
-            return v;
-          }
-        }
-      }
-      cursor = it->second;
     }
   }
   return std::nullopt;

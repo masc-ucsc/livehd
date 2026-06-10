@@ -16,19 +16,27 @@ public:
   uPass_func_extract()           = delete;
   ~uPass_func_extract() override = default;
 
-  void process_assign() override;
+  void        process_assign() override;
+  upass::Vote process_store(std::string_view dst_name, Bundle& dst, upass::Src_span src) override {
+    (void)dst_name;
+    (void)dst;
+    if (src.size() <= 1) {
+      process_assign();
+    }
+    return upass::Vote::keep;
+  }
   void process_func_call() override;
   void process_func_def() override;
   void process_stmts() override;
   void process_stmts_post() override;
-  void process_tuple_add() override;
-  void process_plus() override;
-  void process_minus() override;
-  void process_mult() override;
-  void process_div() override;
-  void process_bit_and() override;
-  void process_bit_or() override;
-  void process_bit_xor() override;
+  upass::Vote process_tuple_add(std::string_view dst_name, Bundle& dst, upass::Src_span src) override;
+  upass::Vote process_plus(std::string_view dst_name, Bundle& dst, upass::Src_span src) override;
+  upass::Vote process_minus(std::string_view dst_name, Bundle& dst, upass::Src_span src) override;
+  upass::Vote process_mult(std::string_view dst_name, Bundle& dst, upass::Src_span src) override;
+  upass::Vote process_div(std::string_view dst_name, Bundle& dst, upass::Src_span src) override;
+  upass::Vote process_bit_and(std::string_view dst_name, Bundle& dst, upass::Src_span src) override;
+  upass::Vote process_bit_or(std::string_view dst_name, Bundle& dst, upass::Src_span src) override;
+  upass::Vote process_bit_xor(std::string_view dst_name, Bundle& dst, upass::Src_span src) override;
 
   upass::Emit_decision                classify_statement() override;
   bool                                overrides_classify_statement() const override { return true; }

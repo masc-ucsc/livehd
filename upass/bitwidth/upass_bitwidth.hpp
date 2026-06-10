@@ -6,9 +6,7 @@
 #include <string>
 #include <string_view>
 
-#include "absl/container/flat_hash_map.h"
 #include "absl/container/flat_hash_set.h"
-#include "absl/container/inlined_vector.h"
 #include "const.hpp"
 #include "diag.hpp"
 #include "lnast_range.hpp"
@@ -19,147 +17,120 @@
 // Registers as a "bitwidth" uPass_plugin, but (Goal 1n) it is a standalone
 // READ-ONLY FINALIZATION analysis: pass.upass runs it on its own
 // (`uPass_runner(lm, {"bitwidth"})`) *after* the main opt runner + SSA, never
-// interleaved with constprop, and discards the staging tree. For every
-// assignment-shaped LNAST statement it computes the min/max value range of the
-// result and stores it in an internal map keyed by the LHS variable name.
-// Ranges persist across outer pass.upass re-invocations.
+// interleaved with constprop, and discards the staging tree.
 //
-// After the run completes, end_run() flushes the computed ranges into
-// lnast->bw_meta() so the future lnast_to_lgraph can read them and set
-// bits/sign (see upass/upass.md §2 "bitwidth"; the per-node-HHDS-tree-attr +
-// Dlop-max/min migration is todo/ 1n phases N3/N5).
+// 2b/E — MIGRATED to push-based dispatch. The per-variable facts live on the
+// runner symbol table's bundles:
+//   * value range  → Entry.bw_max / bw_min on the dst bundle (was range_map_),
+//     written through to lnast->bw_meta() so lnast_to_lgraph and the LSP read
+//     them (and so ranges persist across pass.upass invocations — reads fall
+//     back to bw_meta for names not bound in this walk).
+//   * declared envelope → Entry.decl_max / decl_min on the BASE name's
+//     binding (the runner's declare pre-step bakes them; this pass also bakes
+//     standalone type_spec targets in its own runner — was decl_envelope_).
+// The does-not-fit check happens AT THE STORE/OP NODE (2b/G): the diagnostic
+// carries the node's own source span; an error-severity diag already fails
+// the compile, so there is no end_run throw, no write_site_, and no
+// pending_overflow_msg_.
 //
 // Key properties:
 //   * It does NOT participate in const-folding (no fold_ref) — constprop owns
 //     value folding; this removes the stale-narrow-range bug class.
 //   * Boolean / comparison results always get the signed 1-bit range [-1, 0].
-//   * Compiler temps (___*) participate normally — there is no special
-//     exclusion.
+//   * Compiler temps (___*) participate normally.
 //   * Arithmetic on unbounded ranges propagates unbounded conservatively.
 struct uPass_bitwidth : public upass::uPass {
 public:
   explicit uPass_bitwidth(std::shared_ptr<upass::Lnast_manager>& lm);
   ~uPass_bitwidth() override = default;
 
-  // Per-run setup hook: seed range_map_ from bw_meta on the first invocation
-  // (cross-pass.upass persistence). The runner walks once — no iteration loop.
-  void begin_iteration() override;
-  // Flush computed ranges into lnast->bw_meta().
-  void end_run() override;
+  using Vote = upass::Vote;
 
-  // Assignment-shaped ops (LHS = op(rhs…)).
-  void process_assign() override;
-  void process_plus() override;
-  void process_minus() override;
-  void process_mult() override;
-  void process_div() override;
-  void process_mod() override;
-  void process_shl() override;
-  void process_sra() override;
-  void process_bit_and() override;
-  void process_bit_or() override;
-  void process_bit_not() override;
-  void process_bit_xor() override;
-  void process_log_and() override;
-  void process_log_or() override;
-  void process_log_not() override;
-  void process_red_or() override;
-  void process_red_and() override;
-  void process_red_xor() override;
-  void process_popcount() override;
-  void process_ne() override;
-  void process_eq() override;
-  void process_lt() override;
-  void process_le() override;
-  void process_gt() override;
-  void process_ge() override;
-  void process_sext() override;
-  void process_get_mask() override;
-  void process_set_mask() override;
+  // Assignment-shaped ops (LHS = op(rhs…)) — push form.
+  Vote process_store(std::string_view dst_name, Bundle& dst, upass::Src_span src) override;
+  Vote process_plus(std::string_view, Bundle&, upass::Src_span) override;
+  Vote process_minus(std::string_view, Bundle&, upass::Src_span) override;
+  Vote process_mult(std::string_view, Bundle&, upass::Src_span) override;
+  Vote process_div(std::string_view, Bundle&, upass::Src_span) override;
+  Vote process_mod(std::string_view, Bundle&, upass::Src_span) override;
+  Vote process_shl(std::string_view, Bundle&, upass::Src_span) override;
+  Vote process_sra(std::string_view, Bundle&, upass::Src_span) override;
+  Vote process_bit_and(std::string_view, Bundle&, upass::Src_span) override;
+  Vote process_bit_or(std::string_view, Bundle&, upass::Src_span) override;
+  Vote process_bit_not(std::string_view, Bundle&, upass::Src_span) override;
+  Vote process_bit_xor(std::string_view, Bundle&, upass::Src_span) override;
+  Vote process_log_and(std::string_view, Bundle&, upass::Src_span) override;
+  Vote process_log_or(std::string_view, Bundle&, upass::Src_span) override;
+  Vote process_log_not(std::string_view, Bundle&, upass::Src_span) override;
+  Vote process_red_or(std::string_view, Bundle&, upass::Src_span) override;
+  Vote process_red_and(std::string_view, Bundle&, upass::Src_span) override;
+  Vote process_red_xor(std::string_view, Bundle&, upass::Src_span) override;
+  Vote process_popcount(std::string_view, Bundle&, upass::Src_span) override;
+  Vote process_ne(std::string_view, Bundle&, upass::Src_span) override;
+  Vote process_eq(std::string_view, Bundle&, upass::Src_span) override;
+  Vote process_lt(std::string_view, Bundle&, upass::Src_span) override;
+  Vote process_le(std::string_view, Bundle&, upass::Src_span) override;
+  Vote process_gt(std::string_view, Bundle&, upass::Src_span) override;
+  Vote process_ge(std::string_view, Bundle&, upass::Src_span) override;
+  Vote process_sext(std::string_view, Bundle&, upass::Src_span) override;
+  Vote process_get_mask(std::string_view, Bundle&, upass::Src_span) override;
+  Vote process_set_mask(std::string_view, Bundle&, upass::Src_span) override;
+
+  // Nullary hooks (these nodes are not push-dispatched):
+  // func_call — clear ranges through opaque `ref` actuals; note a wrap/sat
+  // narrowing call's target (exempts its next write from the fit check).
   void process_func_call() override;
-
-  // Goal 1n N4 — overflow capture. `declare(var, prim_type_int(max,min),
-  // const(mode))` / `type_spec(var, prim_type_int(max,min))` record the
-  // declared value envelope for `var`; the matching `store`/assign value is
-  // range-checked against it at end_run (the value lives in a SEPARATE store
-  // node, so the check cannot be node-local). A wrap/sat mode/attr exempts the
-  // var (overflow is then intentional truncation/clamp).
-  void process_declare() override;
+  // declare / type_spec — in this pass's standalone runner the declare bake
+  // already wrote the envelope (Entry.decl_max/min); a bare type_spec target
+  // may be unbound here (no constprop), so this pass ensures the binding.
   void process_type_spec() override;
 
 private:
-  // Per-variable range map. Persists across begin_iteration calls.
-  // Heterogeneous lookup via string_view avoids std::string allocation on every
-  // read/set in hot per-statement paths.
-  absl::flat_hash_map<std::string, Lnast_range> range_map_;
-
-  // Goal 1n N4 — declared value envelope per variable (from prim_type_int's
-  // (max,min) on a `declare`/`type_spec`). Checked against range_map_ at
-  // end_run: a bounded value range that provably escapes the envelope (and is
-  // not wrap/sat-exempt) is a "does not fit" compile error.
-  absl::flat_hash_map<std::string, Lnast_range> decl_envelope_;
-
   // Variables whose next write carries a wrap/sat policy. A wrap/sat call is
   // emitted immediately before the store to its `type` argument; consume the
   // exemption at that store so later ordinary writes are checked normally.
+  // (Deliberately transient walk state, like the coalescer's pending set: a
+  // one-shot per-write policy handshake, not a per-name fact.)
   absl::flat_hash_set<std::string> wrap_sat_exempt_;
 
-  // Read a `prim_type_int(const max, const min)` envelope assuming the cursor is
-  // ON the prim_type_int node; restores the cursor. Returns nullopt unless both
-  // bounds are integer consts (a "nil" / non-integer bound = unbounded side =
-  // no envelope check). Used by process_declare / process_type_spec.
-  std::optional<Lnast_range> read_prim_type_int_envelope();
-
-  // Read range for `name` — returns unbounded() if not yet known.
+  // ── Lnast_range ↔ bundle-Entry conversion ─────────────────────────────────
+  static std::optional<int64_t> const_to_i64(const Const& v);
+  static Lnast_range            range_from_entry(const Const& maxc, const Const& minc);
+  // Range of a pushed operand: comptime point value first (const literals /
+  // folded scalars), then the "0" Entry's bw facts, then bw_meta (cross-
+  // invocation persistence), else unbounded.
+  Lnast_range range_of_operand(const upass::Operand& o) const;
+  // Range of a NAME through the table + bw_meta (nullary func_call path).
   Lnast_range read_range(std::string_view name) const;
 
-  // Store `r` for `name`, narrowing monotonically: an existing range is
-  // overwritten only when `r` is strictly narrower than what was recorded.
-  void set_range(std::string_view name, Lnast_range r);
+  // Write `r` as dst's value range (Entry.bw_max/min + bw_meta write-through).
+  // `replace=false` narrows monotonically (iterative refinement of one
+  // producer's tmp); `replace=true` overwrites (mut reassignment must not
+  // keep a stale narrow range). Also runs the declared-envelope fit check.
+  void write_bw(std::string_view name, Bundle& dst, Lnast_range r, bool replace);
 
-  // Replace `name`'s range with `r` regardless of relative width. Used by
-  // process_assign: a mut reassignment must overwrite the prior range so
-  // fold_ref doesn't keep returning the stale narrow constant.
-  void replace_range(std::string_view name, Lnast_range r);
-
-  // Forget a value range after an opaque mutation point, such as passing a
-  // variable as an explicit `ref` actual to a function call.
+  // Forget a value range after an opaque mutation point (ref actual).
   void clear_range(std::string_view name);
 
-  // Check this write against the declared envelope for `name`, if any.
+  // Declared envelope for `name` (SSA-base resolved) off the base binding's
+  // Entry.decl_max/min. nullopt = no (complete) envelope.
+  std::optional<Lnast_range> decl_envelope_of(std::string_view name) const;
+
+  // Check this write against the declared envelope, if any. Emits the
+  // does-not-fit diagnostic AT the current node (2b/G).
   void check_declared_fit(std::string_view name, const Lnast_range& r);
 
-  // Emit the common diagnostic and remember that this run must fail. Used by
-  // per-node checks because the runner catches process_* exceptions.
+  // Emit the common diagnostic at the current node's span.
   void record_overflow(std::string_view name, const Lnast_range& value, const Lnast_range& env);
 
-  // Emit the common "does not fit" diagnostic and abort the pass.
-  [[noreturn]] void report_overflow(std::string_view name, const Lnast_range& value, const Lnast_range& env);
-
-  std::optional<std::string> pending_overflow_msg_;
-
-  // Last located write site per base variable (from the store node's loc —
-  // the prp2lnast declare/store loc-carry chain). Lets record_overflow point
-  // at the offending write even from end_run's deferred envelope check,
-  // where no walk cursor exists.
-  absl::flat_hash_map<std::string, livehd::diag::Span> write_site_;
-
-  // Record the current node's source span as `name`'s write site (keyed by
-  // SSA base name). Call with the cursor ON the store node.
-  void note_write_site(std::string_view name);
-
-  // Scan the current op node: walk first child (LHS name), remaining children
-  // (RHS operands — ref or const), restore cursor on exit.
-  // Most LNAST ops have 1–3 operands; inline storage avoids per-statement heap.
-  struct Op_ranges {
-    // lhs is a string_view into LNAST's persistent attribute store; no
-    // copy required since callers use it only for the lifetime of the
-    // per-op process_* call.
-    std::string_view                    lhs;
-    absl::InlinedVector<Lnast_range, 4> rhs;
-  };
-  Op_ranges scan_op();
-
-  // Like scan_op() but return only the LHS name without consuming children.
-  std::string scan_lhs_only();
+  // Common body for the value-op hooks.
+  Vote stamp(std::string_view dst_name, Bundle& dst, Lnast_range r) {
+    // REPLACE semantics (2b/D root-cause): each stamp is a fresh derivation
+    // of the value this node just produced. The old narrow-only gate
+    // (sound for the pre-2b flat accumulating map) refused non-narrowing
+    // recomputes, leaving REASSIGNED/loop-rebound bindings with ranges that
+    // no longer CONTAIN their value (`mut hit = 0; hit = 30` kept [0,0]).
+    write_bw(dst_name, dst, r, /*replace=*/true);
+    return Vote::keep;
+  }
 };

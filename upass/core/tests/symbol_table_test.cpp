@@ -71,8 +71,12 @@ TEST_F(Symbol_table_test, recursion) {
   EXPECT_DLOP_EQ(st.get_trivial("foo"), Dlop::create_integer(1));
 
   //------------------------------------------
+  // 2b/B: reads cross the Function barrier (the outer frame's `foo` is
+  // VISIBLE here as a captured read) but it is not writable — a fresh
+  // `var` shadows it for this frame.
   st.function_scope("myfunc");
-  EXPECT_FALSE(st.has_trivial("foo"));
+  EXPECT_TRUE(st.has_trivial("foo"));
+  EXPECT_TRUE(st.is_function_captured("foo"));
   auto ok2 = st.var("foo");
   EXPECT_TRUE(ok2);
   EXPECT_TRUE(st.has_trivial("foo"));
@@ -83,7 +87,7 @@ TEST_F(Symbol_table_test, recursion) {
 
   //------------------------------------------
   st.function_scope("other_call");
-  EXPECT_FALSE(st.has_trivial("foo"));
+  EXPECT_TRUE(st.has_trivial("foo"));  // 2b/B read-through
   auto ok4 = st.var("foo");
   EXPECT_TRUE(ok4);
   EXPECT_TRUE(st.has_trivial("foo"));
@@ -94,7 +98,7 @@ TEST_F(Symbol_table_test, recursion) {
 
   //------------------------------------------
   st.function_scope("myfunc");
-  EXPECT_FALSE(st.has_trivial("foo"));
+  EXPECT_TRUE(st.has_trivial("foo"));  // 2b/B read-through
   auto ok6 = st.var("foo");
   EXPECT_TRUE(ok6);
   EXPECT_TRUE(st.has_trivial("foo"));
@@ -331,4 +335,38 @@ TEST_F(Symbol_table_test, entries_view_skips_attrs) {
 
   auto tls = bundle->top_levels();
   EXPECT_EQ(tls.size(), 2u);  // 'a' and 'b' only
+}
+
+// 2b/B — Function scopes are write barriers but read-transparent: a callee
+// body walked on the shared table reads outer comptime consts directly
+// (closure capture), while a write that resolves only above the barrier is
+// flagged via is_function_captured (the caller reports the compile error).
+TEST_F(Symbol_table_test, function_barrier_read_through_write_block) {
+  Symbol_table st;
+
+  st.function_scope("caller");
+  EXPECT_TRUE(st.set("outer_const", *Dlop::create_integer(42)));
+  EXPECT_TRUE(st.set("outer_var", *Dlop::create_integer(7)));
+
+  st.function_scope("callee");
+
+  // Reads cross the Function barrier (closure capture of outer consts).
+  EXPECT_TRUE(st.has_trivial("outer_const"));
+  EXPECT_TRUE(st.get_trivial("outer_const").same_repr(*Dlop::create_integer(42)));
+  EXPECT_TRUE(st.is_known_const("outer_const"));
+  EXPECT_TRUE(st.has_bundle("outer_const"));
+
+  // Writes do NOT: the name resolves only above the barrier.
+  EXPECT_TRUE(st.is_function_captured("outer_var"));
+  EXPECT_FALSE(st.is_function_captured("missing_everywhere"));
+
+  // A callee-local of the same name shadows for both reads and writes...
+  EXPECT_TRUE(st.set("outer_var", *Dlop::create_integer(99)));  // anchors in callee (write variant missed)
+  EXPECT_FALSE(st.is_function_captured("outer_var"));
+  EXPECT_TRUE(st.get_trivial("outer_var").same_repr(*Dlop::create_integer(99)));
+
+  // ...and leaving the callee restores the caller's value untouched.
+  st.leave_scope();
+  EXPECT_TRUE(st.get_trivial("outer_var").same_repr(*Dlop::create_integer(7)));
+  EXPECT_FALSE(st.is_function_captured("outer_var"));  // writable again here
 }

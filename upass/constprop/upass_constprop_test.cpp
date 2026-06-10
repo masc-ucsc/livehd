@@ -14,30 +14,73 @@ namespace {
 // without going through the runner.
 class TestableConstprop : public uPass_constprop {
 public:
-  using uPass_constprop::uPass_constprop;
+  // 2b/A — the symbol table is runner-owned; this standalone harness has no
+  // runner, so it owns a table and wires it the way the runner would
+  // (including the per-tree function scope the runner pushes at run()).
+  explicit TestableConstprop(std::shared_ptr<upass::Lnast_manager>& _lm) : uPass_constprop(_lm) {
+    set_runner_symbol_table(&own_st_);
+    own_st_.function_scope(_lm->get_top_module_name());
+  }
+  Symbol_table own_st_;
 
   void position(const Lnast_nid& nid) { move_to_nid(nid); }
 
   Const get_result(std::string_view name) const {
-    if (!st.has_trivial(name)) {
+    if (!st().has_trivial(name)) {
       return *Dlop::invalid();
     }
-    return st.get_trivial(name);
+    return st().get_trivial(name);
   }
 
   // Pre-populate the symbol table so process_if() can look up conditions.
-  void seed(std::string_view name, const Const& val) { st.set(name, val); }
-  void seed(std::string_view name, const spool_ptr<Dlop>& val) { st.set(name, *val); }
+  void seed(std::string_view name, const Const& val) { st().set(name, val); }
+  void seed(std::string_view name, const spool_ptr<Dlop>& val) { st().set(name, *val); }
 
   // Expose §5.a ST query helpers for testing.
-  bool st_is_known_const(std::string_view name) const { return st.is_known_const(name); }
+  bool st_is_known_const(std::string_view name) const { return st().is_known_const(name); }
 
   // Directly write a trivial value into the symbol table (for ST tests).
-  void st_set(std::string_view name, const Const& val) { st.set(name, val); }
-  void st_set(std::string_view name, const spool_ptr<Dlop>& val) { st.set(name, *val); }
+  void st_set(std::string_view name, const Const& val) { st().set(name, val); }
+  void st_set(std::string_view name, const spool_ptr<Dlop>& val) { st().set(name, *val); }
 
   // Expose classify_statement() for white-box testing.
   upass::Emit_decision classify() { return classify_statement(); }
+
+  // 2b/E4 — drive a PUSH-form hook from the cursor the way the runner's
+  // resolve_node_operands would: first ref child = dst name (live bundle or
+  // throwaway), remaining children = operands (const → make_const value,
+  // ref → table bundle or empty view).
+  template <typename M>
+  void push_from_cursor(M method) {
+    const auto here = lm->save_cursor();
+    if (!lm->has_child()) {
+      return;
+    }
+    lm->move_to_child();
+    std::string dst{lm->current_text()};
+    std::shared_ptr<Bundle>     dstb = st().get_bundle_for_write(dst);
+    if (!dstb) {
+      dstb = std::make_shared<Bundle>(dst);
+    }
+    std::vector<upass::Operand> operands;
+    std::vector<std::string>    names;  // keep string_views alive
+    names.reserve(8);
+    while (lm->move_to_sibling()) {
+      if (Lnast_ntype::is_const(lm->get_raw_ntype())) {
+        Const v = *Dlop::from_pyrope(lm->current_text());
+        operands.push_back(upass::Operand{std::string_view{}, Bundle::make_const(v, upass::Kind::unknown), false});
+      } else {
+        names.emplace_back(lm->current_text());
+        auto b = st().get_bundle(names.back());
+        if (!b) {
+          b = std::make_shared<Bundle>(names.back());
+        }
+        operands.push_back(upass::Operand{names.back(), std::move(b), false});
+      }
+    }
+    lm->restore_cursor(here);
+    (this->*method)(dst, *dstb, upass::Src_span{operands});
+  }
 };
 
 // Build a fresh Lnast and Lnast_manager for each test.
@@ -150,7 +193,7 @@ TEST(UpassConstprop, FoldsPlus) {
   auto              op = f.add_binary_node(Lnast_ntype::create_plus(), "a", 2, 3);
   TestableConstprop cp(f.lm);
   cp.position(op);
-  cp.process_plus();
+  cp.push_from_cursor(&uPass_constprop::process_plus);
   EXPECT_EQ(cp.get_result("a").to_i(), 5);
 }
 
@@ -159,7 +202,7 @@ TEST(UpassConstprop, FoldsMinus) {
   auto              op = f.add_binary_node(Lnast_ntype::create_minus(), "a", 10, 3);
   TestableConstprop cp(f.lm);
   cp.position(op);
-  cp.process_minus();
+  cp.push_from_cursor(&uPass_constprop::process_minus);
   EXPECT_EQ(cp.get_result("a").to_i(), 7);
 }
 
@@ -168,7 +211,7 @@ TEST(UpassConstprop, FoldsMult) {
   auto              op = f.add_binary_node(Lnast_ntype::create_mult(), "a", 3, 4);
   TestableConstprop cp(f.lm);
   cp.position(op);
-  cp.process_mult();
+  cp.push_from_cursor(&uPass_constprop::process_mult);
   EXPECT_EQ(cp.get_result("a").to_i(), 12);
 }
 
@@ -177,7 +220,7 @@ TEST(UpassConstprop, FoldsDiv) {
   auto              op = f.add_binary_node(Lnast_ntype::create_div(), "a", 8, 2);
   TestableConstprop cp(f.lm);
   cp.position(op);
-  cp.process_div();
+  cp.push_from_cursor(&uPass_constprop::process_div);
   EXPECT_EQ(cp.get_result("a").to_i(), 4);
 }
 
@@ -186,7 +229,7 @@ TEST(UpassConstprop, FoldsMod) {
   auto              op = f.add_binary_node(Lnast_ntype::create_mod(), "a", 7, 3);
   TestableConstprop cp(f.lm);
   cp.position(op);
-  cp.process_mod();
+  cp.push_from_cursor(&uPass_constprop::process_mod);
   EXPECT_EQ(cp.get_result("a").to_i(), 1);
 }
 
@@ -197,7 +240,7 @@ TEST(UpassConstprop, FoldsShl) {
   auto              op = f.add_binary_node(Lnast_ntype::create_shl(), "a", 1, 3);
   TestableConstprop cp(f.lm);
   cp.position(op);
-  cp.process_shl();
+  cp.push_from_cursor(&uPass_constprop::process_shl);
   EXPECT_EQ(cp.get_result("a").to_i(), 8);  // 1 << 3 = 8
 }
 
@@ -206,7 +249,7 @@ TEST(UpassConstprop, FoldsSra) {
   auto              op = f.add_binary_node(Lnast_ntype::create_sra(), "a", 16, 2);
   TestableConstprop cp(f.lm);
   cp.position(op);
-  cp.process_sra();
+  cp.push_from_cursor(&uPass_constprop::process_sra);
   EXPECT_EQ(cp.get_result("a").to_i(), 4);  // 16 >> 2 = 4
 }
 
@@ -218,7 +261,7 @@ TEST(UpassConstprop, FoldsBitAnd) {
   auto              op = f.add_binary_node(Lnast_ntype::create_bit_and(), "a", 0b1010, 0b1100);
   TestableConstprop cp(f.lm);
   cp.position(op);
-  cp.process_bit_and();
+  cp.push_from_cursor(&uPass_constprop::process_bit_and);
   EXPECT_EQ(cp.get_result("a").to_i(), 0b1000);
 }
 
@@ -228,7 +271,7 @@ TEST(UpassConstprop, FoldsBitOr) {
   auto              op = f.add_binary_node(Lnast_ntype::create_bit_or(), "a", 0b1010, 0b0101);
   TestableConstprop cp(f.lm);
   cp.position(op);
-  cp.process_bit_or();
+  cp.push_from_cursor(&uPass_constprop::process_bit_or);
   EXPECT_EQ(cp.get_result("a").to_i(), 0b1111);
 }
 
@@ -238,7 +281,7 @@ TEST(UpassConstprop, FoldsBitXor) {
   auto              op = f.add_binary_node(Lnast_ntype::create_bit_xor(), "a", 0b1010, 0b1100);
   TestableConstprop cp(f.lm);
   cp.position(op);
-  cp.process_bit_xor();
+  cp.push_from_cursor(&uPass_constprop::process_bit_xor);
   EXPECT_EQ(cp.get_result("a").to_i(), 0b0110);
 }
 
@@ -247,7 +290,7 @@ TEST(UpassConstprop, FoldsBitNot) {
   auto              op = f.add_unary_node(Lnast_ntype::create_bit_not(), "a", 0);
   TestableConstprop cp(f.lm);
   cp.position(op);
-  cp.process_bit_not();
+  cp.push_from_cursor(&uPass_constprop::process_bit_not);
   // ~0 = -1 in two's complement
   EXPECT_EQ(cp.get_result("a").to_i(), -1);
 }
@@ -258,7 +301,7 @@ TEST(UpassConstprop, FoldsGetMask) {
   auto              op = f.add_binary_node(Lnast_ntype::create_get_mask(), "a", 0x12345678, 0xff);
   TestableConstprop cp(f.lm);
   cp.position(op);
-  cp.process_get_mask();
+  cp.push_from_cursor(&uPass_constprop::process_get_mask);
   EXPECT_EQ(cp.get_result("a").to_i(), 0x78);
 }
 
@@ -275,7 +318,7 @@ TEST(UpassConstprop, FoldsLogAndBothTrue) {
 
   TestableConstprop cp(f.lm);
   cp.position(op);
-  cp.process_log_and();
+  cp.push_from_cursor(&uPass_constprop::process_log_and);
   EXPECT_TRUE(cp.get_result("a").is_known_true());
 }
 
@@ -284,7 +327,7 @@ TEST(UpassConstprop, FoldsLogAndOneFalse) {
   auto              op = f.add_binary_node(Lnast_ntype::create_log_and(), "a", 0, 1);
   TestableConstprop cp(f.lm);
   cp.position(op);
-  cp.process_log_and();
+  cp.push_from_cursor(&uPass_constprop::process_log_and);
   EXPECT_TRUE(cp.get_result("a").is_known_false());
 }
 
@@ -293,7 +336,7 @@ TEST(UpassConstprop, FoldsLogOrOneFalse) {
   auto              op = f.add_binary_node(Lnast_ntype::create_log_or(), "a", 0, 1);
   TestableConstprop cp(f.lm);
   cp.position(op);
-  cp.process_log_or();
+  cp.push_from_cursor(&uPass_constprop::process_log_or);
   EXPECT_TRUE(cp.get_result("a").is_known_true());
 }
 
@@ -302,7 +345,7 @@ TEST(UpassConstprop, FoldsLogOrBothFalse) {
   auto              op = f.add_binary_node(Lnast_ntype::create_log_or(), "a", 0, 0);
   TestableConstprop cp(f.lm);
   cp.position(op);
-  cp.process_log_or();
+  cp.push_from_cursor(&uPass_constprop::process_log_or);
   EXPECT_TRUE(cp.get_result("a").is_known_false());
 }
 
@@ -311,7 +354,7 @@ TEST(UpassConstprop, FoldsLogNotFalse) {
   auto              op = f.add_unary_node(Lnast_ntype::create_log_not(), "a", 0);
   TestableConstprop cp(f.lm);
   cp.position(op);
-  cp.process_log_not();
+  cp.push_from_cursor(&uPass_constprop::process_log_not);
   EXPECT_TRUE(cp.get_result("a").is_known_true());  // !0 = true
 }
 
@@ -324,7 +367,7 @@ TEST(UpassConstprop, FoldsLogNotTrue) {
 
   TestableConstprop cp(f.lm);
   cp.position(op);
-  cp.process_log_not();
+  cp.push_from_cursor(&uPass_constprop::process_log_not);
   EXPECT_TRUE(cp.get_result("a").is_known_false());  // !true = false
 }
 
@@ -337,11 +380,11 @@ TEST(UpassConstprop, SecondRunConverges) {
   auto              op = f.add_binary_node(Lnast_ntype::create_plus(), "a", 2, 3);
   TestableConstprop cp(f.lm);
   cp.position(op);
-  cp.process_plus();
+  cp.push_from_cursor(&uPass_constprop::process_plus);
   ASSERT_EQ(cp.get_result("a").to_i(), 5);
 
   cp.position(op);
-  cp.process_plus();
+  cp.push_from_cursor(&uPass_constprop::process_plus);
   EXPECT_EQ(cp.get_result("a").to_i(), 5);
 }
 
@@ -433,7 +476,7 @@ TEST(UpassConstprop, RedOrNonZero) {
   auto              op = f.add_unary_node(Lnast_ntype::create_red_or(), "a", 5);
   TestableConstprop cp(f.lm);
   cp.position(op);
-  cp.process_red_or();
+  cp.push_from_cursor(&uPass_constprop::process_red_or);
   EXPECT_TRUE(cp.get_result("a").is_known_true());  // 5 != 0 → true
 }
 
@@ -442,7 +485,7 @@ TEST(UpassConstprop, RedOrZero) {
   auto              op = f.add_unary_node(Lnast_ntype::create_red_or(), "a", 0);
   TestableConstprop cp(f.lm);
   cp.position(op);
-  cp.process_red_or();
+  cp.push_from_cursor(&uPass_constprop::process_red_or);
   EXPECT_TRUE(cp.get_result("a").is_known_false());  // 0 == 0 → false
 }
 
@@ -455,7 +498,7 @@ TEST(UpassConstprop, RedOrUnknownInputNoStore) {
   f.ln->add_child(red_nid, Lnast_node::create_ref("unknown_x"));
   TestableConstprop cp(f.lm);
   cp.position(red_nid);
-  cp.process_red_or();
+  cp.push_from_cursor(&uPass_constprop::process_red_or);
   // "b" must not appear in the symbol table.
   EXPECT_TRUE(cp.get_result("b").is_invalid());
 }
@@ -467,7 +510,7 @@ TEST(UpassConstprop, RedAndAllOnes) {
   auto              op = f.add_unary_node(Lnast_ntype::create_red_and(), "a", 0b111);
   TestableConstprop cp(f.lm);
   cp.position(op);
-  cp.process_red_and();
+  cp.push_from_cursor(&uPass_constprop::process_red_and);
   EXPECT_TRUE(cp.get_result("a").is_known_true());
 }
 
@@ -477,7 +520,7 @@ TEST(UpassConstprop, RedAndNotAllOnes) {
   auto              op = f.add_unary_node(Lnast_ntype::create_red_and(), "a", 0b101);
   TestableConstprop cp(f.lm);
   cp.position(op);
-  cp.process_red_and();
+  cp.push_from_cursor(&uPass_constprop::process_red_and);
   EXPECT_TRUE(cp.get_result("a").is_known_false());
 }
 
@@ -489,7 +532,7 @@ TEST(UpassConstprop, RedXorOddParity) {
   auto              op = f.add_unary_node(Lnast_ntype::create_red_xor(), "a", 0b111);
   TestableConstprop cp(f.lm);
   cp.position(op);
-  cp.process_red_xor();
+  cp.push_from_cursor(&uPass_constprop::process_red_xor);
   EXPECT_TRUE(cp.get_result("a").is_known_true());  // popcount(7) = 3, odd → true
 }
 
@@ -499,7 +542,7 @@ TEST(UpassConstprop, RedXorEvenParity) {
   auto              op = f.add_unary_node(Lnast_ntype::create_red_xor(), "a", 0b1010);
   TestableConstprop cp(f.lm);
   cp.position(op);
-  cp.process_red_xor();
+  cp.push_from_cursor(&uPass_constprop::process_red_xor);
   EXPECT_TRUE(cp.get_result("a").is_known_false());  // popcount(10) = 2, even → false
 }
 
@@ -510,7 +553,7 @@ TEST(UpassConstprop, PopcountSetBits) {
   auto              op = f.add_unary_node(Lnast_ntype::create_popcount(), "a", 0xa4);
   TestableConstprop cp(f.lm);
   cp.position(op);
-  cp.process_popcount();
+  cp.push_from_cursor(&uPass_constprop::process_popcount);
   EXPECT_EQ(cp.get_result("a").to_i(), 3);
 }
 
@@ -519,7 +562,7 @@ TEST(UpassConstprop, PopcountZero) {
   auto              op = f.add_unary_node(Lnast_ntype::create_popcount(), "a", 0);
   TestableConstprop cp(f.lm);
   cp.position(op);
-  cp.process_popcount();
+  cp.push_from_cursor(&uPass_constprop::process_popcount);
   EXPECT_EQ(cp.get_result("a").to_i(), 0);
 }
 
@@ -541,7 +584,7 @@ TEST(UpassConstprop, SextNoTruncation) {
   auto              op = add_sext_node(f, "a", 3, 10);
   TestableConstprop cp(f.lm);
   cp.position(op);
-  cp.process_sext();
+  cp.push_from_cursor(&uPass_constprop::process_sext);
   EXPECT_EQ(cp.get_result("a").to_i(), 3);
 }
 
@@ -553,7 +596,7 @@ TEST(UpassConstprop, SextSignExtendNarrows) {
   auto              op = add_sext_node(f, "a", 4, 2);
   TestableConstprop cp(f.lm);
   cp.position(op);
-  cp.process_sext();
+  cp.push_from_cursor(&uPass_constprop::process_sext);
   EXPECT_EQ(cp.get_result("a").to_i(), -4);  // 3-bit 0b100 sign-extended = -4
 }
 
@@ -571,7 +614,7 @@ TEST(UpassConstpropTuple, TupleAddAndGetFirstField) {
 
   TestableConstprop cp(f.lm);
   cp.position(add_op);
-  cp.process_tuple_add();  // ___t0 = (3, 7)
+  cp.push_from_cursor(&uPass_constprop::process_tuple_add);  // ___t0 = (3, 7)
 
   cp.position(get_op);
   cp.process_tuple_get();  // dst = ___t0[0] = 3
@@ -587,7 +630,7 @@ TEST(UpassConstpropTuple, TupleAddAndGetSecondField) {
 
   TestableConstprop cp(f.lm);
   cp.position(add_op);
-  cp.process_tuple_add();
+  cp.push_from_cursor(&uPass_constprop::process_tuple_add);
 
   cp.position(get_op);
   cp.process_tuple_get();  // dst = ___t0[1] = 7
@@ -615,7 +658,7 @@ TEST(UpassConstpropTuple, TupleGetUnknownRuntimeIndexNoStore) {
 
   TestableConstprop cp(f.lm);
   cp.position(add_op);
-  cp.process_tuple_add();  // ___t0 = (42) — bundle populated
+  cp.push_from_cursor(&uPass_constprop::process_tuple_add);  // ___t0 = (42) — bundle populated
 
   cp.position(get_op);
   cp.process_tuple_get();  // runtime_idx not in st → cannot fold
@@ -631,7 +674,7 @@ TEST(UpassConstpropTuple, TupleGetConvergesOnRepeat) {
 
   TestableConstprop cp(f.lm);
   cp.position(add_op);
-  cp.process_tuple_add();
+  cp.push_from_cursor(&uPass_constprop::process_tuple_add);
 
   cp.position(get_op);
   cp.process_tuple_get();
@@ -639,7 +682,7 @@ TEST(UpassConstpropTuple, TupleGetConvergesOnRepeat) {
 
   // Second run: same nodes, same values → same result.
   cp.position(add_op);
-  cp.process_tuple_add();
+  cp.push_from_cursor(&uPass_constprop::process_tuple_add);
   cp.position(get_op);
   cp.process_tuple_get();
   EXPECT_EQ(cp.get_result("dst").to_i(), 5);
