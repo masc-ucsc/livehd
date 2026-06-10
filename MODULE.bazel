@@ -106,7 +106,7 @@ git_override(
     remote = "https://github.com/masc-ucsc/hhds.git",
     # name-hash gids + abseil-map GraphLibrary storage + load_merge (task 1m gid
     # refactor + 1m-C graph-library linker).
-    commit = "1a3b9f930699fd592143d6a3186b7cd6a72d7073",
+    commit = "9221e1d449505fce772141663bbc3cb61ffe0c6f",
 )
 # For local debug/testing, swap the git_override above for:
 # local_path_override(module_name = "hhds", path = "../hhds")
