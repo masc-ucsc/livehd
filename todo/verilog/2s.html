@@ -22,9 +22,8 @@
 <ul>
 <li><a class="xref" href="1s.html">1s</a> — slang <code>v11.0</code>, structured
   diagnostics, source locations, and current-test preservation.</li>
-<li><a class="xref" href="../livehd/1a.html">1a</a> — needed for any tests that
-  continue past LNAST into LGraph/codegen equivalence. LNAST-only coverage can
-  grow before all 1a follow-ups land.</li>
+<li><strong>1a</strong> (landed 2026-06-11) — the LNAST→LGraph synthesis closure
+  needed for tests that continue past LNAST into LGraph/codegen equivalence.</li>
 </ul>
 
 <h2>Design direction</h2>
@@ -160,8 +159,8 @@
 <li><strong>Existing LiveHD regression ladder.</strong> Promote
   <code>inou/yosys/tests</code> cases into direct-reader expectations in stages:
   first "elaborates to non-empty LNAST", then "round-trips through
-  <code>ln:</code>", then compile/equiv when <a class="xref" href="../livehd/1a.html">1a</a>
-  can lower the emitted LNAST. By the end of <code>2s</code>, every test source in
+  <code>ln:</code>", then compile/equiv through the LNAST→LGraph closure
+  (1a, landed 2026-06-11). By the end of <code>2s</code>, every test source in
   <code>inou/yosys/tests/</code> must have an equivalent <code>--reader slang</code>
   expectation at the strongest available tier; missing coverage is a failing
   acceptance gate, not backlog.</li>
@@ -262,8 +261,8 @@
   <code>elab_testcases.h</code>),
   complete <code>inou/yosys/tests/</code> regression ladder, curated real-DUT corpus, differential
   <code>yosys-slang</code> oracle, and mutation smoke above. Promote tests from
-  LNAST-only to compile/equiv as soon as
-  <a class="xref" href="../livehd/1a.html">1a</a> can lower the emitted structures.</li>
+  LNAST-only to compile/equiv as soon as the LNAST→LGraph lowering
+  (1a, landed 2026-06-11) handles the emitted structures.</li>
 </ul>
 
 <h2>Out of scope</h2>

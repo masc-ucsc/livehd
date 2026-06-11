@@ -3,25 +3,34 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>TODO 4c — Hot-probe injection at checkpoint replay</title>
+<title>TODO 4c — Checkpoint format + hot-probe injection at replay</title>
 <link rel="stylesheet" href="../todo.css">
 </head>
 <body>
 <nav><span class="brand">LiveHD TODO</span><a href="../index.html">← All tasks</a></nav>
 <main>
-<h1><strong class="item-id">4c</strong> Hot-probe injection at checkpoint replay</h1>
-<p>Hot-probe injection at checkpoint replay (no recompile) — see the
-  <a href="https://masc-ucsc.github.io/docs/livehd/">LiveHD docs</a>.</p>
+<h1><strong class="item-id">4c</strong> Checkpoint format + hot-probe injection at replay</h1>
+<p>Checkpoint format + reload validator, partition-keyed via
+  <code>state_shape_hash</code>, covering memories and registers for large simulation,
+  plus hot-probe injection at checkpoint replay (no recompile) — see the
+  <a href="https://masc-ucsc.github.io/docs/livehd/">LiveHD docs</a>.
+  (Absorbs the former 4g — checkpoint format + reload validator.)</p>
 
 <h2>Depends on</h2>
 <ul>
-<li><a class="xref" href="4g.html">4g</a> — needs the checkpoint format to replay.</li>
-<li><a class="xref" href="3d.html">3d</a> — the slop simulation substrate.</li>
+<li><a class="xref" href="3d.html">3d</a> — the slop simulation substrate; lands
+  after slop codegen.</li>
+<li><a class="xref" href="3c.html">3c</a> — partition-keyed via
+  <code>state_shape_hash</code>.</li>
 </ul>
 
 <h2>Subtasks — pending</h2>
 <ul class="subtasks">
-<li><strong>A — hot-probe injection at checkpoint replay.</strong> No recompile.</li>
+<li><strong>A — checkpoint format + reload validator.</strong> Covers memories and
+  registers for large simulation; partition-keyed via
+  <code>state_shape_hash</code> (was 4g).</li>
+<li><strong>B — hot-probe injection at checkpoint replay.</strong> No recompile;
+  replays the A checkpoint format.</li>
 </ul>
 
 <h2>Subtasks — landed</h2>

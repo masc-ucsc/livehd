@@ -1,7 +1,9 @@
 //  This file is distributed under the BSD 3-Clause License. See LICENSE for details.
+#include <algorithm>
 #include <cstdio>
 #include <format>
 #include <print>
+#include <regex>
 #include <string>
 #include <string_view>
 #include <vector>
@@ -25,13 +27,165 @@ void print_json_line(std::string_view s) {
   std::fputc('\n', stdout);
 }
 
+std::string json_escape(std::string_view s) {
+  std::string out;
+  out.reserve(s.size() + 8);
+  for (char c : s) {
+    switch (c) {
+      case '"': out += "\\\""; break;
+      case '\\': out += "\\\\"; break;
+      case '\n': out += "\\n"; break;
+      case '\t': out += "\\t"; break;
+      default:
+        if (static_cast<unsigned char>(c) < 0x20) {
+          out += std::format("\\u{:04x}", static_cast<unsigned char>(c));
+        } else {
+          out += c;
+        }
+    }
+  }
+  return out;
+}
+
+// The one-line list view shows the first sentence of the registered help,
+// capped so one option stays one line; `lhd describe pass.flag` has the
+// full text.
+std::string brief_help(std::string_view help) {
+  auto        cut = help.find(". ");
+  std::string out{cut == std::string_view::npos ? help : help.substr(0, cut)};
+  constexpr size_t kMax = 108;
+  if (out.size() > kMax) {
+    out.resize(kMax);
+    while (!out.empty() && (static_cast<unsigned char>(out.back()) & 0xC0) == 0x80) {
+      out.pop_back();  // never cut a UTF-8 sequence mid-byte
+    }
+    out += "…";
+  }
+  return out;
+}
+
+// Word-wrap `text` to `width` columns, each line prefixed with `indent`.
+void print_wrapped(std::string_view text, size_t width, std::string_view indent) {
+  std::string line;
+  size_t      pos = 0;
+  while (pos < text.size()) {
+    auto next = text.find(' ', pos);
+    auto word = text.substr(pos, next == std::string_view::npos ? std::string_view::npos : next - pos);
+    if (!line.empty() && line.size() + 1 + word.size() > width) {
+      std::print("{}{}\n", indent, line);
+      line.clear();
+    }
+    if (!line.empty()) {
+      line += ' ';
+    }
+    line += word;
+    if (next == std::string_view::npos) {
+      break;
+    }
+    pos = next + 1;
+  }
+  if (!line.empty()) {
+    std::print("{}{}\n", indent, line);
+  }
+}
+
+// `lhd list options [REGEX]` — the --set/--config vocabulary, from the live
+// EPRP label registry. Honors --diag-fmt: pretty (one `pass.flag=default  #
+// help` line each) on a terminal, the usual JSON line when piped/captured.
+int list_options(const Options& opts) {
+  std::string filter = opts.files.size() > 1 ? opts.files[1] : "";
+  std::regex  re;
+  if (!filter.empty()) {
+    try {
+      re = std::regex{filter};
+    } catch (const std::regex_error& e) {
+      std::print(stderr, "lhd list options: bad regex '{}': {}\n", filter, e.what());
+      return 1;
+    }
+  }
+
+  const auto              all = list_set_options();
+  std::vector<const Set_option*> sel;
+  for (const auto& o : all) {
+    if (filter.empty() || std::regex_search(o.name, re)) {
+      sel.push_back(&o);
+    }
+  }
+
+  if (opts.diag_fmt == Diag_fmt::jsonl) {
+    std::string items = "[";
+    for (const auto* o : sel) {
+      if (items.size() > 1) {
+        items += ',';
+      }
+      items += std::format(R"json({{"name":"{}","method":"{}","default":"{}","help":"{}"}})json",
+                           json_escape(o->name),
+                           json_escape(o->method),
+                           json_escape(o->default_value),
+                           json_escape(o->help));
+    }
+    items += "]";
+    print_json_line(std::format(R"json({{"schema_version":1,"pattern":"options","items":{}}})json", items));
+    return 0;
+  }
+
+  size_t w = 0;
+  for (const auto* o : sel) {
+    w = std::max(w, o->name.size() + 1 + o->default_value.size());
+  }
+  for (const auto* o : sel) {
+    std::print("{:<{}}  # {}\n", std::format("{}={}", o->name, o->default_value), w, brief_help(o->help));
+  }
+  return 0;
+}
+
+// `lhd describe pass.flag` — one --set/--config option with its full help.
+// Returns -1 when `name` is not in the option vocabulary (caller falls
+// through to the unknown-name error).
+int describe_option(const Options& opts, const std::string& name) {
+  const auto all = list_set_options();
+  for (const auto& o : all) {
+    if (o.name != name) {
+      continue;
+    }
+    if (opts.diag_fmt == Diag_fmt::jsonl) {
+      print_json_line(
+          std::format(R"json({{"schema_version":1,"name":"{}","kind":"option","method":"{}","default":"{}","help":"{}"}})json",
+                      json_escape(o.name),
+                      json_escape(o.method),
+                      json_escape(o.default_value),
+                      json_escape(o.help)));
+    } else if (o.default_value.empty()) {
+      std::print("{}   (no default; a --set/--config flag of {})\n\n", o.name, o.method);
+      print_wrapped(o.help, 92, "  ");
+    } else {
+      std::print("{} = {}   (default; a --set/--config flag of {})\n\n", o.name, o.default_value, o.method);
+      print_wrapped(o.help, 92, "  ");
+    }
+    return 0;
+  }
+  // A known pass with an unknown flag gets a targeted hint.
+  auto prefix = name.substr(0, name.find('.'));
+  for (const auto& o : all) {
+    if (o.name.size() > prefix.size() && o.name.compare(0, prefix.size(), prefix) == 0 && o.name[prefix.size()] == '.') {
+      std::print(stderr, "lhd describe: unknown option '{}' (`lhd list options {}\\..*` shows what {} accepts)\n", name, prefix,
+                 prefix);
+      return 1;
+    }
+  }
+  return -1;
+}
+
 int list_command(const Options& opts) {
   std::string pattern = opts.files.empty() ? "" : opts.files.front();
 
   if (pattern.empty()) {
     print_json_line(
-        R"json({"schema_version":1,"patterns":[{"name":"steps","scope":"global"},{"name":"recipes","scope":"global"},{"name":"emit-kinds","scope":"global"},{"name":"error-classes","scope":"global"}]})json");
+        R"json({"schema_version":1,"patterns":[{"name":"steps","scope":"global"},{"name":"recipes","scope":"global"},{"name":"emit-kinds","scope":"global"},{"name":"error-classes","scope":"global"},{"name":"options","scope":"global"}]})json");
     return 0;
+  }
+  if (pattern == "options") {
+    return list_options(opts);
   }
   if (pattern == "steps") {
     print_json_line(std::format(R"json({{"schema_version":1,"pattern":"steps","items":{}}})json", kSteps));
@@ -49,7 +203,7 @@ int list_command(const Options& opts) {
     print_json_line(std::format(R"json({{"schema_version":1,"pattern":"error-classes","items":{}}})json", kErrorClasses));
     return 0;
   }
-  std::print(stderr, "lhd list: unknown pattern '{}' (try: steps, recipes, emit-kinds, error-classes)\n", pattern);
+  std::print(stderr, "lhd list: unknown pattern '{}' (try: steps, recipes, emit-kinds, error-classes, options [REGEX])\n", pattern);
   return 1;
 }
 
@@ -151,8 +305,17 @@ int describe_command(const Options& opts) {
   }
   if (name == "config") {
     print_json_line(
-        R"json({"schema_version":1,"name":"config","description":"--config lhd.toml: pass-flag defaults as a declared input file. Strict TOML subset: # comments, [pass] tables (upass|cprop|bitwidth), key = value with quoted strings / true|false / integers; top level takes only `recipe`. Explicit --set/--recipe always win","example":"recipe = \"O2\"\n[upass]\nconstprop = true\nverifier = false"})json");
+        R"json({"schema_version":1,"name":"config","description":"--config lhd.toml: pass-flag defaults as a declared input file. Strict TOML subset: # comments, [pass] tables (upass|cprop|bitwidth|cgen, see `lhd list options`), key = value with quoted strings / true|false / integers; top level takes only `recipe`. Explicit --set/--recipe always win","example":"recipe = \"O2\"\n[upass]\nconstprop = true\nverifier = false"})json");
     return 0;
+  }
+
+  // `lhd describe pass.flag` — a --set/--config option (after the named
+  // dotted commands above: ln.cat/ln.diff are not options).
+  if (name.find('.') != std::string::npos) {
+    int rc = describe_option(opts, name);
+    if (rc >= 0) {
+      return rc;
+    }
   }
 
   std::print(stderr, "lhd describe: unknown name '{}'\n", name);
@@ -165,7 +328,7 @@ int help_command(const Options& opts) {
     std::print(
         "lhd — LiveHD stateless CLI kernel (the LiveHD docs)\n"
         "\n"
-        "usage: lhd <command> [args]\n"
+        "usage: lhd [flags] <command> [args]   (shared flags may come before or after the command)\n"
         "  the language word is optional (inferred from .prp/.v/.sv); ln:/lg: IR inputs are positional\n"
         "\n"
         "commands:\n"
@@ -190,8 +353,10 @@ int help_command(const Options& opts) {
         "               lhd ln.diff old.prp new.prp\n"
         "               lhd ln.diff ln:before/ x.prp\n"
         "  lsp        Pyrope LSP server over stdio (JSON-RPC; .prp only)\n"
-        "  list       steps | recipes | emit-kinds | error-classes\n"
-        "  describe   <command | recipe:NAME | emit-kind | dump | config>\n"
+        "  list       steps | recipes | emit-kinds | error-classes | options [REGEX]\n"
+        "               lhd list options 'cgen\\..*'   # the --set/--config pass.flag vocabulary\n"
+        "  describe   <command | recipe:NAME | emit-kind | pass.flag | dump | config>\n"
+        "               lhd describe cgen.srcmap      # one option, full help text\n"
         "  version | help [command]\n"
         "\n"
         "typed I/O (KIND:PATH):  ln: = Forest dir (LNAST units)   lg: = GraphLibrary dir (LGraphs)\n"
@@ -205,7 +370,8 @@ int help_command(const Options& opts) {
         "\n"
         "shared flags:\n"
         "  --top T   --reader yosys-verilog|yosys-slang|slang   --recipe O0|O1|O2\n"
-        "  --set pass.flag=value   --config lhd.toml   --workdir DIR   --result-json PATH\n"
+        "  --set pass.flag=value   --config lhd.toml   (`lhd list options` for the vocabulary)\n"
+        "  --workdir DIR   --result-json PATH\n"
         "  --diag-fmt auto|jsonl|pretty   result + diagnostic rendering (auto: pretty on a\n"
         "                                 terminal, jsonl when piped/captured)\n"
         "  -q (quiet stderr)   --verbose (mirror step logs)   (`lhd describe config` for lhd.toml)\n"

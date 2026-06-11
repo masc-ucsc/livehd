@@ -58,6 +58,14 @@ public:
 
   bool has_method(std::string_view cmd) const { return methods.find(std::string(cmd)) != methods.end(); }
 
+  // Registered method by name (nullptr when absent). Read-only access to a
+  // method's label registry (name/help/default/required) — the lhd CLI uses
+  // it to validate --set/--config flags and to render `lhd list options`.
+  const Eprp_method* get_method(std::string_view cmd) const {
+    const auto it = methods.find(std::string(cmd));
+    return it == methods.end() ? nullptr : &it->second;
+  }
+
   void run_cmd(std::string_view cmd, const Eprp_var& cmd_var_fields);
 
   // Run one registered method synchronously on `var` (no pipe, no text

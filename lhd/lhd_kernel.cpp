@@ -306,6 +306,35 @@ void run_step(std::string_view method, Eprp_var& var, const Eprp_var::Eprp_dict&
   }
 }
 
+// The --set/--config pass-name vocabulary -> the EPRP method that consumes
+// it. THE central mapping: the merge_sets call sites, --set/--config
+// validation, and `lhd list options` / `lhd describe pass.flag` all derive
+// from this table (the flags themselves are each method's registered EPRP
+// labels — add_label_optional/required is the single registration point).
+constexpr std::pair<std::string_view, std::string_view> kSetPasses[] = {
+    {"upass", "pass.upass"},
+    {"cprop", "pass.cprop"},
+    {"bitwidth", "pass.bitwidth"},
+    {"cgen", "inou.cgen.verilog"},
+};
+
+std::string_view set_pass_method(std::string_view set_name) {
+  for (const auto& [name, method] : kSetPasses) {
+    if (name == set_name) {
+      return method;
+    }
+  }
+  return {};
+}
+
+// Pass-base plumbing labels (Pass::register_inou stamps them onto every inou
+// method). In lhd these belong to the kernel — odir comes from the typed
+// --emit/--emit-dir slot, inputs are positional — so they are not listed as
+// options and --set/--config rejects them.
+bool is_kernel_label(std::string_view flag) {
+  return flag == "files" || flag == "path" || flag == "odir";
+}
+
 // --set pass[.idx].flag=value entries for `pass_name` -> EPRP labels.
 void merge_sets(const Options& opts, std::string_view pass_name, Eprp_var::Eprp_dict& labels) {
   for (const auto& [key, value] : opts.sets) {
@@ -327,14 +356,44 @@ void merge_sets(const Options& opts, std::string_view pass_name, Eprp_var::Eprp_
   }
 }
 
+// Validate every --set/--config entry against the live registry: a typo'd
+// pass OR flag must error, never silently no-op (merge_sets copies labels
+// blind). Requires init_engine().
 void check_known_set_passes(const Options& opts) {
   for (const auto& [key, value] : opts.sets) {
-    (void)value;
-    auto pass = key.substr(0, key.find('.'));
-    if (pass != "upass" && pass != "cprop" && pass != "bitwidth" && pass != "cgen") {
+    auto pos = key.find('.');
+    if (pos == std::string::npos) {
+      throw Lhd_error{"usage", std::format("--set expects pass.flag=value, got '{}={}'", key, value), ""};
+    }
+    auto pass   = key.substr(0, pos);
+    auto flag   = key.substr(pos + 1);
+    auto method = set_pass_method(pass);
+    if (method.empty()) {
+      std::string known;
+      for (const auto& [name, m] : kSetPasses) {
+        (void)m;
+        known += known.empty() ? "" : ", ";
+        known += name;
+      }
       throw Lhd_error{"usage",
                       std::format("--set/--config references unknown pass '{}'", pass),
-                      "known passes: upass, cprop, bitwidth, cgen (see `lhd describe recipe:O2`)"};
+                      std::format("known passes: {} (`lhd list options`)", known)};
+    }
+    if (flag.find('.') != std::string::npos) {
+      throw Lhd_error{"unsupported",
+                      std::format("--set repeated-pass index addressing ('{}') is not implemented yet", key),
+                      "built-in recipes run each pass once; use pass.flag=value"};
+    }
+    if (is_kernel_label(flag)) {
+      throw Lhd_error{"usage",
+                      std::format("--set/--config flag '{}' is kernel-managed, not a pass option", key),
+                      "outputs ride typed slots (--emit/--emit-dir) and inputs are positional; see `lhd help`"};
+    }
+    const auto* m = Pass::eprp.get_method(method);
+    if (m == nullptr || !m->has_label(flag)) {
+      throw Lhd_error{"usage",
+                      std::format("--set/--config references unknown flag '{}' of pass '{}'", flag, pass),
+                      std::format("`lhd list options {}\\..*` shows what {} accepts", pass, pass)};
     }
   }
 }
@@ -2127,10 +2186,34 @@ Lhd_error classify_engine_failure(std::string_view fallback_msg) {
 }
 
 void init_engine() {
+  static bool done = false;  // engine commands and `lhd list options`/`describe pass.flag` may both reach here
+  if (done) {
+    return;
+  }
+  done = true;
   for (const auto& it : Pass_plugin::get_registry()) {
     it.second();
   }
   setup_inou_yosys();
+}
+
+std::vector<Set_option> list_set_options() {
+  init_engine();
+  std::vector<Set_option> out;
+  for (const auto& [set_name, method] : kSetPasses) {
+    const auto* m = Pass::eprp.get_method(method);
+    if (m == nullptr) {
+      continue;  // defensive: every kSetPasses method registers in init_engine
+    }
+    for (const auto& [flag, attr] : m->labels) {
+      if (is_kernel_label(flag)) {
+        continue;
+      }
+      out.push_back(Set_option{std::format("{}.{}", set_name, flag), std::string{method}, attr.default_value, attr.help});
+    }
+  }
+  std::sort(out.begin(), out.end(), [](const Set_option& a, const Set_option& b) { return a.name < b.name; });
+  return out;
 }
 
 void run_engine_command(Options& opts, Result& res) {

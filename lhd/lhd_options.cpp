@@ -214,7 +214,7 @@ void load_config(Options& opts) {
       if (!is_bare_key(name)) {
         throw Lhd_error{"config",
                         std::format("{}:{}: unsupported table '[{}]'", opts.config, lineno, name),
-                        "config tables are pass names: [upass], [cprop], [bitwidth]"};
+                        "config tables are pass names: [upass], [cprop], [bitwidth], [cgen] (`lhd list options`)"};
       }
       table = name;
       continue;
@@ -232,7 +232,7 @@ void load_config(Options& opts) {
       if (key != "recipe") {
         throw Lhd_error{"config",
                         std::format("{}:{}: unknown top-level key '{}'", opts.config, lineno, key),
-                        "top level takes only `recipe`; pass flags go under [upass]/[cprop]/[bitwidth]"};
+                        "top level takes only `recipe`; pass flags go under [upass]/[cprop]/[bitwidth]/[cgen]"};
       }
       file_recipe = value;
       continue;
@@ -256,9 +256,7 @@ void load_config(Options& opts) {
 Options parse_args(int argc, char** argv) {
   Options opts;
 
-  int i = 1;
-
-  // --version / -h before any command word
+  // --version anywhere before `--`.
   for (int j = 1; j < argc; ++j) {
     std::string_view a{argv[j]};
     if (a == "--version") {
@@ -270,36 +268,13 @@ Options parse_args(int argc, char** argv) {
     }
   }
 
-  if (i >= argc) {
-    opts.command = "help";
-    return opts;
-  }
-
-  std::string_view cmd{argv[i]};
-  if (cmd == "elaborate" || cmd == "compile") {
-    opts.command = cmd;
-    ++i;
-    // The language word is optional: it is inferred from the source-file
-    // extensions (.prp -> pyrope, .v/.sv -> verilog) when omitted.
-    if (i < argc) {
-      std::string_view lang{argv[i]};
-      if (lang == "verilog" || lang == "pyrope") {
-        opts.language = lang;
-        ++i;
-      }
-    }
-  } else if (cmd == "synth" || cmd == "check" || cmd == "scan" || cmd == "lsp" || cmd == "list" || cmd == "describe"
-             || cmd == "version" || cmd == "help" || cmd == "ln.cat" || cmd == "ln.diff") {
-    // ln.cat/ln.diff keep their positionals raw and ORDERED in opts.files
-    // (an ln:DIR token must keep its place — ln.diff sides are positional).
-    opts.command = cmd;
-    ++i;
-  } else {
-    throw Lhd_error{"usage", std::format("unknown command '{}'", cmd), "run `lhd help` for the command list"};
-  }
-
-  bool raw_mode = false;
-  for (; i < argc; ++i) {
+  // One pass over argv: the first bare word is the command, so shared flags
+  // may come before or after it (`lhd --diag-fmt jsonl list options` ==
+  // `lhd list options --diag-fmt jsonl`). Value-taking flags consume their
+  // value wherever they sit (`lhd --top foo synth ...` keeps foo with --top).
+  bool raw_mode  = false;
+  bool want_help = false;
+  for (int i = 1; i < argc; ++i) {
     std::string_view a{argv[i]};
 
     if (raw_mode) {
@@ -409,10 +384,26 @@ Options parse_args(int argc, char** argv) {
     } else if (a == "--verbose") {
       opts.verbose = true;
     } else if (a == "-h" || a == "--help") {
-      opts.files.insert(opts.files.begin(), opts.command);
-      opts.command = "help";
+      want_help = true;  // resolved after the loop, once the command word is known
     } else if (!a.empty() && a[0] == '-') {
-      throw Lhd_error{"usage", std::format("unknown option '{}'", a), std::format("run `lhd help {}`", opts.command)};
+      throw Lhd_error{"usage",
+                      std::format("unknown option '{}'", a),
+                      opts.command.empty() ? "run `lhd help`" : std::format("run `lhd help {}`", opts.command)};
+    } else if (opts.command.empty()) {
+      if (a == "elaborate" || a == "compile" || a == "synth" || a == "check" || a == "scan" || a == "lsp" || a == "list"
+          || a == "describe" || a == "version" || a == "help" || a == "ln.cat" || a == "ln.diff") {
+        // ln.cat/ln.diff keep their positionals raw and ORDERED in opts.files
+        // (an ln:DIR token must keep its place — ln.diff sides are positional).
+        opts.command = a;
+      } else {
+        throw Lhd_error{"usage", std::format("unknown command '{}'", a), "run `lhd help` for the command list"};
+      }
+    } else if ((opts.command == "elaborate" || opts.command == "compile") && opts.language.empty() && opts.files.empty()
+               && opts.ins.empty() && opts.in_dirs.empty() && (a == "verilog" || a == "pyrope")) {
+      // The optional language word: the first positional after elaborate/
+      // compile (flags may intervene); inferred from the source-file
+      // extensions (.prp -> pyrope, .v/.sv -> verilog) when omitted.
+      opts.language = a;
     } else if (opts.command == "elaborate" || opts.command == "compile" || opts.command == "synth") {
       if (!route_positional(opts, a)) {
         opts.files.emplace_back(a);
@@ -420,6 +411,17 @@ Options parse_args(int argc, char** argv) {
     } else {
       opts.files.emplace_back(a);
     }
+  }
+
+  if (want_help) {
+    // `lhd -h [command]` / `lhd <command> -h`: the command word (possibly
+    // empty -> the general page) becomes the help topic.
+    opts.files.insert(opts.files.begin(), opts.command);
+    opts.command = "help";
+  }
+  if (opts.command.empty()) {
+    opts.command = "help";
+    return opts;
   }
 
   if (!opts.recipe_file.empty()) {

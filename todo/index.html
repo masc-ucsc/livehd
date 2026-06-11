@@ -30,31 +30,24 @@ agent build/process rules live in <code>AGENTS.md</code>.</p>
 <li><a class="xref" href="pyrope/2p.html">2p</a> Source-derived SSA / tmp names (<code>foo_l42_a</code>, drop <code>___N</code>).</li>
 </ul></li>
 <li><em>Group 4:</em><ul>
-<li><a class="xref" href="pyrope/4i.html">4i</a> Golden-output baseline in <code>inou/prp/tests/equiv/</code>.</li>
 <li><a class="xref" href="pyrope/4a.html">4a</a> Test functionality on top of slop (<code>test::[…]</code> blocks, runtime harness).</li>
 <li><a class="xref" href="pyrope/4b.html">4b</a> Emit <code>assert</code>/<code>assume</code>/<code>coverpoint</code> into slop.</li>
-<li><a class="xref" href="pyrope/4h.html">4h</a> Compile-error test infrastructure (golden-error files pinned to spans).</li>
 </ul></li>
 </ul>
 
 <h3 id="verilog">Verilog</h3>
 <ul>
 <li><em>Group 1:</em><ul>
-<li>The LNAST→LGraph synthesis closure is the Group 1 foundation for the Verilog path but is tracked in LiveHD <a class="xref" href="livehd/1a.html">1a</a> (incl. <code>1a-mem</code>/<code>1a-ops</code>).</li>
 <li><a class="xref" href="verilog/1s.html">1s</a> Direct <code>--reader slang</code> foundation: upgrade LiveHD's direct SV→LNAST reader to slang <code>v11.0</code>, route diagnostics through LiveHD, attach HHDS <code>Source_locator</code> IDs, preserve current passing tests, and keep build-system parallel <code>lhd elaborate --reader slang</code> usage viable.</li>
 </ul></li>
 <li><em>Group 2:</em><ul>
 <li><a class="xref" href="verilog/2s.html">2s</a> Refactor and expand direct <code>--reader slang</code>: split the importer into driver/diagnostics, structure, expressions, lvalues, statements, and type lowering; support more synthesizable SystemVerilog through LNAST; and grow a tracked Verilog test ladder. <code>yosys-verilog</code> and <code>yosys-slang</code> remain supported production readers.</li>
-</ul></li>
-<li><em>Group 5:</em><ul>
-<li><a class="xref" href="verilog/5e.html">5e</a> <code>inou/cgen</code> Verilog egress: emit <code>// src: file:line:col</code> comments resolved from the <code>Source_locator</code> (1f landed 2026-06-10; the ECMA-426 <code>.map</code> sidecar already ships via <code>--set cgen.srcmap=1</code>).</li>
 </ul></li>
 </ul>
 
 <h3 id="livehd">LiveHD</h3>
 <ul>
 <li><em>Group 1:</em><ul>
-<li><a class="xref" href="livehd/1a.html">1a</a> Finish the LNAST→LGraph synthesis closure — <a class="xref" href="livehd/1a.html">1a-mem</a> (Pyrope <code>Memory</code> → LGraph <code>Memory</code> cell) landed 2026-06-09; remaining: <a class="xref" href="livehd/1a.html">1a-ops</a> (<code>.[defer]</code>/<code>past[n]</code>→Flop, high-level ops, <code>uif</code> chains, <code>lg:</code> black-box Subs, attributes) + small 1a-mem follow-ups (reset-sweep FSM, type=1 LEC, wensize&gt;1).</li>
 <li><a class="xref" href="livehd/1d.html">1d</a> Demand-driven (lazy) emit + dead-code elimination for upass — remaining sea-of-nodes subtask.</li>
 </ul></li>
 <li><em>Group 2:</em><ul>
@@ -64,26 +57,20 @@ agent build/process rules live in <code>AGENTS.md</code>.</p>
 <li><a class="xref" href="livehd/3y-agent.html">3y-agent</a> <code>lhd</code> agent <code>@tag</code> workspace (<code>setup/run/status/list/describe</code>, TOML, JSONL) + deferred kernel follow-ups (multi-<code>lg:</code> linking residuals, per-function units, graphviz/lgraph-dump emits, import-resolver feed — depfile discovery landed via 1f, liberty/opentimer verb).</li>
 <li><a class="xref" href="livehd/3c.html">3c</a> <code>Partition</code> descriptor as a tree-level HHDS attribute.</li>
 <li><a class="xref" href="livehd/3d.html">3d</a> New upass <code>lnast_to_slop</code> producing executable slop.</li>
-<li><a class="xref" href="livehd/3f.html">3f</a> Unified compile error/warning surface — 1z foundation landed; source_id spans landed via 1f (2026-06-10); remaining: lgraph-pass codes, CLI roll-up, golden tests.</li>
-<li><a class="xref" href="livehd/3h.html">3h</a> <code>Bitwidth_range</code> → <code>Const min/max</code> (drop <code>int+overflow</code>) — gate (Dlop migration) satisfied, unblocked.</li>
 <li><a class="xref" href="livehd/3g.html">3g</a> Generics <code>&lt;T&gt;</code> — spec first, then per-<code>T</code> specialization on the 1p template machinery (seams reserved; not urgent).</li>
 </ul></li>
 <li><em>Group 4:</em><ul>
-<li><a class="xref" href="livehd/4c.html">4c</a> Hot-probe injection at checkpoint replay (no recompile).</li>
+<li><a class="xref" href="livehd/4c.html">4c</a> Checkpoint format + reload validator (partition-keyed via <code>state_shape_hash</code>) + hot-probe injection at replay (no recompile) — absorbs 4g.</li>
 <li><a class="xref" href="livehd/4d.html">4d</a> What-if <code>poke(signal, value)</code> engine with safety semantics.</li>
 <li><a class="xref" href="livehd/4e.html">4e</a> Queryable indexed trace store (slice/transition/distribution queries).</li>
 <li><a class="xref" href="livehd/4f.html">4f</a> Invariant-detector codegen → emits agent-editable <code>debug.prp</code>.</li>
-<li><a class="xref" href="livehd/4g.html">4g</a> Checkpoint format + reload validator (partition-keyed via <code>state_shape_hash</code>).</li>
 </ul></li>
 <li><em>Group 5:</em><ul>
-<li><a class="xref" href="livehd/5a.html">5a</a> Rewrite <code>simlib/{uint,sint}.hpp</code> as part of the HLOP runtime; retire <code>firrtl-sig</code>.</li>
-<li><a class="xref" href="livehd/5b.html">5b</a> Attribute hot-path benchmark (flat_storage vs lhtree regression check).</li>
-<li><a class="xref" href="livehd/5c.html">5c</a> Agent-legible globally-unique, optimization-stable signal names.</li>
 <li><a class="xref" href="livehd/5d.html">5d</a> Test reorg (<code>tests/</code> layout, <code>contracts/</code> split, <code>*_test.cpp</code> rules).</li>
 <li><a class="xref" href="livehd/5e.html">5e</a> IDAP perf-sweep pass (toggle passes, measure marginal cost, anti-pattern cleanup).</li>
 <li><a class="xref" href="livehd/5f.html">5f</a> Benchmark contracts (codegen throughput, simulation speed, agent-loop latency).</li>
 </ul></li>
-<li><em>Untagged:</em> <a class="xref" href="livehd/hhds-pinentry.html">hhds-pinentry</a> — HHDS <code>PinEntry</code>/<code>NodeEntry</code> native <code>bits</code>+<code>sign</code> storage (drop the flat_storage attribute lookups; campaign lands in <code>../hhds</code>).</li><li><em>Backlog:</em> <a class="xref" href="livehd/cleanup.html">cleanup</a> — replace the unmaintained C++ mustache library with <code>inja</code>.</li>
+<li><em>Backlog:</em> <a class="xref" href="livehd/cleanup.html">cleanup</a> — replace the unmaintained C++ mustache library with <code>inja</code>.</li>
 </ul>
 
 <h2 id="status">Test status</h2>

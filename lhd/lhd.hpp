@@ -116,9 +116,26 @@ struct Lhd_error {
 // argv -> Options. Throws Lhd_error{usage,...} on malformed input.
 Options parse_args(int argc, char** argv);
 
-// Meta commands need no engine init (list/describe/version/help).
+// Meta commands (list/describe/version/help). Most need no engine init;
+// `list options` / `describe pass.flag` initialize the pass registry
+// themselves (the option vocabulary lives on the registered EPRP labels).
 bool is_meta_command(const Options& opts);
 int  run_meta_command(const Options& opts);
+
+// One --set/--config option in the `pass.flag` vocabulary: an EPRP label of
+// the method that consumes it. Enumerated from the live registry, so
+// `lhd list options`, --set validation, and the lhd.toml tables can never
+// drift apart.
+struct Set_option {
+  std::string name;           // "cgen.srcmap"
+  std::string method;         // "inou.cgen.verilog" (the consuming EPRP method)
+  std::string default_value;  // "" = no default
+  std::string help;           // the registered help text, in full
+};
+
+// Every option --set/--config accepts, sorted by name. Runs init_engine()
+// itself (idempotent).
+std::vector<Set_option> list_set_options();
 
 // Engine commands (elaborate/synth/check/compile). Requires the pass registry
 // to be initialized. Throws Lhd_error or std::exception on failure.

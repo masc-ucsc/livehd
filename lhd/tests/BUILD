@@ -147,3 +147,12 @@ sh_test(
     srcs = ["lhd_ln_tools_test.sh"],
     data = _FLOW_DATA,
 )
+
+# `lhd list options [REGEX]` / `lhd describe pass.flag` (the --set/--config
+# vocabulary from the EPRP label registry) + strict --set/--config validation
+# (typo'd pass or flag = usage error, never a silent no-op).
+sh_test(
+    name = "lhd_list_options_test",
+    srcs = ["lhd_list_options_test.sh"],
+    data = _FLOW_DATA,
+)
