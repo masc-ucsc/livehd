@@ -49,7 +49,7 @@ bazel_dep(name = "hlop", version = "0.2.0")
 git_override(
     module_name = "hlop",
     remote = "https://github.com/masc-ucsc/hlop.git",
-    commit = "cf3e6fab04140351b4ada0c6fc35a475f2cdf8db",
+    commit = "7d394847201ee9c536ee5b805dc06522ac77c512",
 )
 # For local debug/testing, swap the git_override above for:
 # local_path_override(module_name = "hlop", path = "../hlop")
@@ -104,9 +104,7 @@ bazel_dep(name = "hhds", version = "0.2.0")
 git_override(
     module_name = "hhds",
     remote = "https://github.com/masc-ucsc/hhds.git",
-    # name-hash gids + abseil-map GraphLibrary storage + load_merge (task 1m gid
-    # refactor + 1m-C graph-library linker).
-    commit = "1a3b9f930699fd592143d6a3186b7cd6a72d7073",
+    commit = "311d757c28a7b8032ce86f3917d0f52ef0afa9e4",
 )
 # For local debug/testing, swap the git_override above for:
 # local_path_override(module_name = "hhds", path = "../hhds")
