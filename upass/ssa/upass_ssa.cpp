@@ -9,7 +9,7 @@
 
 #include "absl/container/flat_hash_map.h"
 #include "absl/container/flat_hash_set.h"
-#include "const.hpp"
+#include "hlop/dlop.hpp"
 #include "diag.hpp"
 #include "lnast_ntype.hpp"
 
@@ -52,8 +52,8 @@ Type_info type_info_from(const std::shared_ptr<Lnast>& lnast, Lnast_nid type_nid
     // Task 1t — canonical integer: derive bits/signed from the (max,min)
     // range children ("nil" = unbounded). signed ⇐ min<0; bits ⇐ both known.
     auto                 max_nid = lnast->get_first_child(type_nid);
-    std::optional<Const> max_v;
-    std::optional<Const> min_v;
+    std::optional<Dlop> max_v;
+    std::optional<Dlop> min_v;
     if (!max_nid.is_invalid() && Lnast_ntype::is_const(lnast->get_type(max_nid))) {
       auto v = Dlop::from_pyrope(lnast->get_name(max_nid));
       if (v->is_integer()) {
@@ -211,15 +211,15 @@ void uPass_ssa::run(const std::shared_ptr<Lnast>& lnast) {
     if (!c.is_invalid() && Lnast_ntype::is_const(lnast->get_type(c))) {
       if (lnast->get_name(c) == "nil") {
         smin = -1;
-      } else if (auto v = Dlop::from_pyrope(lnast->get_name(c)); v && v->is_integer()) {
-        smin = static_cast<int32_t>(v->to_i());
+      } else if (auto v = Dlop::from_pyrope(lnast->get_name(c)); v && v->is_integer() && v->is_just_i64()) {
+        smin = static_cast<int32_t>(v->to_just_i64());
       }
       auto c2 = lnast->get_sibling_next(c);
       if (!c2.is_invalid() && Lnast_ntype::is_const(lnast->get_type(c2))) {
         if (lnast->get_name(c2) == "nil") {
           smax = -1;
-        } else if (auto v2 = Dlop::from_pyrope(lnast->get_name(c2)); v2 && v2->is_integer()) {
-          smax = static_cast<int32_t>(v2->to_i());
+        } else if (auto v2 = Dlop::from_pyrope(lnast->get_name(c2)); v2 && v2->is_integer() && v2->is_just_i64()) {
+          smax = static_cast<int32_t>(v2->to_just_i64());
         }
       }
     }

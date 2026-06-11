@@ -21,7 +21,7 @@
 #include "str_tools.hpp"
 // pass.hpp pulls in Pass::error/info reporting.
 #include "pass.hpp"
-// hlop's Dlop is the Const representation; we deserialize node-level
+// hlop's Dlop is the Dlop representation; we deserialize node-level
 // const-value strings via Dlop::unserialize.
 #include "hlop/dlop.hpp"
 
@@ -362,19 +362,19 @@ void Cgen_verilog::process_memory(std::shared_ptr<File_output> fout, const hhds:
         Pass::error("memory {} should have a constant for bits not {}", debug_name(node), debug_name(e.driver.get_master_node()));
         return;
       }
-      mem_bits = hydrate_const(e.driver).to_i();
+      mem_bits = hydrate_const(e.driver).to_just_i64();
     } else if (pin_name == "size") {
       if (!is_const_pin(e.driver)) {
         Pass::error("memory {} should have a constant for size not {}", debug_name(node), debug_name(e.driver.get_master_node()));
         return;
       }
-      mem_size = hydrate_const(e.driver).to_i();
+      mem_size = hydrate_const(e.driver).to_just_i64();
     } else if (pin_name == "type") {
       if (!is_const_pin(e.driver)) {
         Pass::error("memory {} should have a constant type not {}", debug_name(node), debug_name(e.driver.get_master_node()));
         return;
       }
-      mem_type = hydrate_const(e.driver).to_i();
+      mem_type = hydrate_const(e.driver).to_just_i64();
     } else if (pin_name == "wensize") {
       if (!is_const_pin(e.driver)) {
         Pass::error("memory {} should have a constant for wensize not {}",
@@ -382,13 +382,13 @@ void Cgen_verilog::process_memory(std::shared_ptr<File_output> fout, const hhds:
                     debug_name(e.driver.get_master_node()));
         return;
       }
-      mem_wensize = hydrate_const(e.driver).to_i();
+      mem_wensize = hydrate_const(e.driver).to_just_i64();
     } else if (pin_name == "fwd") {
       if (!is_const_pin(e.driver)) {
         Pass::error("memory {} should have a constant for fwd not {}", debug_name(node), debug_name(e.driver.get_master_node()));
         return;
       }
-      mem_fwd = hydrate_const(e.driver).to_i();
+      mem_fwd = hydrate_const(e.driver).to_just_i64();
     } else if (pin_name == "init") {
       if (!is_const_pin(e.driver)) {
         Pass::error("memory {} should have a constant for init not {}", debug_name(node), debug_name(e.driver.get_master_node()));
@@ -823,7 +823,7 @@ void Cgen_verilog::process_simple_node(std::shared_ptr<File_output> fout, const 
     auto a_dpin = get_driver(find_sink_pin(node, "a"));
     auto a_bits = bits_of(a_dpin);
     auto a      = get_expression(a_dpin);
-    if (mask_v.is_i() && mask_v.to_i() == -1) {
+    if (mask_v.is_just_i64() && mask_v.to_just_i64() == -1) {
       if (a_bits > 0 && !is_unsign(a_dpin)) {
         // To-positive of a signed driver: a plain copy sign-extends when the
         // unsigned LHS is wider (e.g. 1-bit signed ~(|b) into a 2-bit reg).
@@ -886,8 +886,8 @@ void Cgen_verilog::process_simple_node(std::shared_ptr<File_output> fout, const 
     auto pos_node = pos_dpin.is_invalid() ? hhds::Node_class{} : pos_dpin.get_master_node();
     if (!pos_node.is_invalid() && is_type_const(pos_node)) {
       auto lpos = hydrate_const(pos_dpin);
-      if (lpos.is_i()) {
-        final_expr = absl::StrCat(lhs, "[", lpos.to_i() - 1, ":0]");
+      if (lpos.is_just_i64()) {
+        final_expr = absl::StrCat(lhs, "[", lpos.to_just_i64() - 1, ":0]");
       }
     }
     if (final_expr.empty()) {
@@ -1234,7 +1234,7 @@ void Cgen_verilog::create_registers(std::shared_ptr<File_output> fout, hhds::Gra
     {
       auto pm_dpin = get_driver(find_sink_pin(node, "pipe_min"));
       if (!pm_dpin.is_invalid() && is_const_pin(pm_dpin)) {
-        depth = hydrate_const(pm_dpin).to_i();
+        depth = hydrate_const(pm_dpin).to_just_i64();
       }
     }
 
@@ -1400,7 +1400,7 @@ void Cgen_verilog::create_locals(std::shared_ptr<File_output> fout, hhds::Graph*
           bool is_array_mem = false;
           for (auto& e2 : node.inp_edges()) {
             if (e2.sink.get_port_id() == 7 && is_const_pin(e2.driver)) {  // pid 7 = "type" (comptime x 1)
-              is_array_mem = hydrate_const(e2.driver).to_i() == 2;
+              is_array_mem = hydrate_const(e2.driver).to_just_i64() == 2;
               break;
             }
           }

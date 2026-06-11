@@ -1722,8 +1722,8 @@ Lnast_node Prp2lnast::process_lvalue_for_assign(TSNode lvalue, const Lnast_node&
         if (!rvalue.is_const()) {
           return std::nullopt;
         }
-        if (auto cst = Dlop::from_pyrope(rvalue.get_name()); cst && cst->is_integer() && cst->is_i()) {
-          return cst->to_i();
+        if (auto cst = Dlop::from_pyrope(rvalue.get_name()); cst && cst->is_integer() && cst->is_just_i64()) {
+          return cst->to_just_i64();
         }
         return std::nullopt;
       };
@@ -3183,8 +3183,8 @@ std::optional<int64_t> Prp2lnast::resolve_cycle_value(TSNode n) const {
     if (txt.empty()) {
       return std::nullopt;
     }
-    if (auto cst = Dlop::from_pyrope(txt); cst && cst->is_integer() && cst->is_i()) {
-      return cst->to_i();
+    if (auto cst = Dlop::from_pyrope(txt); cst && cst->is_integer() && cst->is_just_i64()) {
+      return cst->to_just_i64();
     }
     return std::nullopt;
   }
@@ -4344,8 +4344,8 @@ bool Prp2lnast::int_type_call_bounds(std::string_view kw, TSNode tup, std::strin
       min_txt = val;
     } else if (key == "bits") {
       auto bv = Dlop::from_pyrope(val);
-      if (bv->is_i()) {
-        bits_to_bounds(static_cast<int>(bv->to_i()), max_txt, min_txt);
+      if (bv->is_just_i64()) {
+        bits_to_bounds(static_cast<int>(bv->to_just_i64()), max_txt, min_txt);
       }
     }
   }
@@ -6099,7 +6099,7 @@ Lnast_node Prp2lnast::compute_bit_mask_ref(TSNode sel_node) {
     if (v->is_invalid() || !v->is_integer()) {
       return std::nullopt;
     }
-    // `#[N]` selects bit position N → single-bit mask `1 << N`. Pure Const
+    // `#[N]` selects bit position N → single-bit mask `1 << N`. Pure Dlop
     // arithmetic (no to_i; works for any position width).
     return Lnast_node::create_const(Dlop::create_integer(1)->shl_op(*v)->to_pyrope());
   };
@@ -6126,7 +6126,7 @@ Lnast_node Prp2lnast::compute_bit_mask_ref(TSNode sel_node) {
     if (lo_v->is_invalid() || hi_v->is_invalid() || !lo_v->is_integer() || !hi_v->is_integer()) {
       return std::nullopt;
     }
-    // `#[lo..=hi]` → contiguous mask `((1 << (hi-lo+1)) - 1) << lo`, all Const
+    // `#[lo..=hi]` → contiguous mask `((1 << (hi-lo+1)) - 1) << lo`, all Dlop
     // arithmetic (no to_i; any width).
     auto one   = Dlop::create_integer(1);
     auto width = hi_v->sub_op(*lo_v)->add_op(*one);
@@ -6340,7 +6340,7 @@ Lnast_node Prp2lnast::member_selection_to_node(TSNode n) {
       TSNode open_from = ts_node_child_by_field_name(range, "open_from", 9);
       TSNode fz_incl   = ts_node_child_by_field_name(range, "from_zero_inclusive", 19);
       TSNode fz_excl   = ts_node_child_by_field_name(range, "from_zero_exclusive", 19);
-      // `nil` is the open-end sentinel — round-trips through Const as a
+      // `nil` is the open-end sentinel — round-trips through Dlop as a
       // string and is recognised by process_tuple_get as "slice to source's
       // last index". Using a real value here would falsely truncate.
       if (!ts_node_is_null(open_all)) {

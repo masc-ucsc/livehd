@@ -4,7 +4,7 @@
 //
 // Rules implemented:
 //   * presence-only attr_set stores boolean true; explicit values
-//     (including `false`) round-trip as the explicit Const.
+//     (including `false`) round-trip as the explicit Dlop.
 //   * .[bits]/.[ubits]/.[sbits]/.[max]/.[min] derive from the base value or
 //     declared type when no explicit attr is on the side-map.
 //   * .[size] returns the field count (1 for scalars; aggregate cases live
@@ -26,7 +26,7 @@
 #include <utility>
 
 #include "absl/strings/str_cat.h"
-#include "const.hpp"
+#include "hlop/dlop.hpp"
 #include "decl_facts.hpp"
 #include "lnast.hpp"
 #include "lnast_ntype.hpp"
@@ -44,21 +44,21 @@ bool is_uppercase_ident(std::string_view name) {
 
 // max/min for an unsigned type with `n` bits. n==0 means "unbounded" — the
 // caller should treat that as "no derivation possible".
-Const max_unsigned(uint32_t n) {
+Dlop max_unsigned(uint32_t n) {
   if (n == 0) {
     return *Dlop::create_integer(0);
   }
   return *Dlop::get_mask_value(n);
 }
 
-Const max_signed(uint32_t n) {
+Dlop max_signed(uint32_t n) {
   if (n == 0) {
     return *Dlop::create_integer(0);
   }
   return *Dlop::get_mask_value(n - 1);
 }
 
-Const min_signed(uint32_t n) {
+Dlop min_signed(uint32_t n) {
   if (n == 0) {
     return *Dlop::create_integer(0);
   }
@@ -67,7 +67,7 @@ Const min_signed(uint32_t n) {
 
 }  // namespace
 
-std::optional<Const> uPass_attributes::lookup_attr_value(std::string_view var, std::string_view attr) const {
+std::optional<Dlop> uPass_attributes::lookup_attr_value(std::string_view var, std::string_view attr) const {
   // Explicit attr values live as residual attrs ON the binding
   // (field-scoped for dotted names). A dotted miss falls back to the root's
   // whole-bundle attr: aggregate-level attrs are inherited by every field
@@ -141,7 +141,7 @@ const uPass_attributes::Type_info* uPass_attributes::lookup_type_info(std::strin
   return lookup_type_info_bundle(var);
 }
 
-std::optional<std::pair<Const, Const>> uPass_attributes::lookup_range(std::string_view tmp) const {
+std::optional<std::pair<Dlop, Dlop>> uPass_attributes::lookup_range(std::string_view tmp) const {
   auto it = range_bounds.find(std::string{tmp});
   if (it == range_bounds.end()) {
     return std::nullopt;
@@ -172,7 +172,7 @@ std::optional<std::string> uPass_attributes::lookup_attr_ref(std::string_view va
   return v.to_field();
 }
 
-std::optional<Const> uPass_attributes::resolve_value(std::string_view var) const {
+std::optional<Dlop> uPass_attributes::resolve_value(std::string_view var) const {
   // Prefer the runner's aggregate fold (constprop's symbol table is the
   // primary source). Fall back to our own tmp_fold for refs that only this
   // pass knows about (e.g. chained attr_get→attr_get).
@@ -196,7 +196,7 @@ std::optional<Const> uPass_attributes::resolve_value(std::string_view var) const
 // `.[bits]` through here. (`:[range=…]` sugar was removed — semacheck rejects
 // it like any other `:[max=]`/`:[min=]` attribute write.)
 
-std::optional<Const> uPass_attributes::derive_max(std::string_view base) const {
+std::optional<Dlop> uPass_attributes::derive_max(std::string_view base) const {
   // Explicit attr wins (e.g. `:int:[max=N]` partial pinning).
   if (auto v = lookup_attr_value(base, "max"); v) {
     return v;
@@ -222,7 +222,7 @@ std::optional<Const> uPass_attributes::derive_max(std::string_view base) const {
   return std::nullopt;
 }
 
-std::optional<Const> uPass_attributes::derive_min(std::string_view base) const {
+std::optional<Dlop> uPass_attributes::derive_min(std::string_view base) const {
   if (auto v = lookup_attr_value(base, "min"); v) {
     return v;
   }
@@ -249,7 +249,7 @@ std::optional<Const> uPass_attributes::derive_min(std::string_view base) const {
   return std::nullopt;
 }
 
-std::optional<Const> uPass_attributes::derive_bits(std::string_view base, std::string_view variant) const {
+std::optional<Dlop> uPass_attributes::derive_bits(std::string_view base, std::string_view variant) const {
   // Explicit attr_set override (e.g. `:[bits=N]`).
   if (auto v = lookup_attr_value(base, variant); v) {
     return v;
@@ -266,8 +266,8 @@ std::optional<Const> uPass_attributes::derive_bits(std::string_view base, std::s
   // Derive bits from explicit max/min. Only fires when both bounds are
   // pinned; otherwise the envelope is incomplete and bits stays nil per the
   // design.
-  std::optional<Const> max_v = lookup_attr_value(base, "max");
-  std::optional<Const> min_v = lookup_attr_value(base, "min");
+  std::optional<Dlop> max_v = lookup_attr_value(base, "max");
+  std::optional<Dlop> min_v = lookup_attr_value(base, "min");
   if (max_v && min_v && max_v->is_integer() && min_v->is_integer()) {
     // Derive bits from the bound Consts directly (handles >64-bit, no to_i).
     // get_bits() is the SIGNED width; for an unsigned range (min ≥ 0) drop the
@@ -283,7 +283,7 @@ std::optional<Const> uPass_attributes::derive_bits(std::string_view base, std::s
   return std::nullopt;
 }
 
-std::optional<Const> uPass_attributes::derive_comptime(std::string_view base, std::string_view base_text) const {
+std::optional<Dlop> uPass_attributes::derive_comptime(std::string_view base, std::string_view base_text) const {
   // Explicit attr wins (attr_set "comptime" true/false from prp2lnast or
   // user code).
   if (auto v = lookup_attr_value(base, "comptime"); v) {
@@ -349,7 +349,7 @@ std::optional<Const> uPass_attributes::derive_comptime(std::string_view base, st
 
 void uPass_attributes::evaluate_attr_get(std::string_view dst, std::string_view base_text, std::string_view base,
                                          std::string_view attr) {
-  std::optional<Const> result;
+  std::optional<Dlop> result;
 
   // Sticky bucket presence — `_*` and `debug` reads return *Dlop::create_integer(1) when
   // the variable has acquired the bucket. When unmarked, fall through to
@@ -501,8 +501,8 @@ void uPass_attributes::process_type_spec() {
   }
   Numeric_kind         kind = Numeric_kind::none;
   uint32_t             bits = 0;
-  std::optional<Const> range_max;
-  std::optional<Const> range_min;
+  std::optional<Dlop> range_max;
+  std::optional<Dlop> range_min;
   bool                 is_real_type = false;
   if (move_to_sibling()) {
     read_scalar_type_at_cursor(kind, bits, range_max, range_min, is_real_type);
@@ -520,8 +520,8 @@ void uPass_attributes::process_type_spec() {
   (void)is_real_type;
 }
 
-void uPass_attributes::read_scalar_type_at_cursor(Numeric_kind& kind, uint32_t& bits, std::optional<Const>& range_max,
-                                                  std::optional<Const>& range_min, bool& is_real_type) {
+void uPass_attributes::read_scalar_type_at_cursor(Numeric_kind& kind, uint32_t& bits, std::optional<Dlop>& range_max,
+                                                  std::optional<Dlop>& range_min, bool& is_real_type) {
   auto t = get_raw_ntype();
   if (Lnast_ntype::is_prim_type_int(t)) {
     // Task 1t — the canonical integer type carries its `(max,min)` range as
@@ -586,8 +586,8 @@ void uPass_attributes::process_declare() {
   }
   Numeric_kind         kind = Numeric_kind::none;
   uint32_t             bits = 0;
-  std::optional<Const> range_max;
-  std::optional<Const> range_min;
+  std::optional<Dlop> range_max;
+  std::optional<Dlop> range_min;
   bool                 is_real_type = false;
   Decl_kind            decl         = Decl_kind::unknown;
   bool                 comptime     = false;
@@ -656,7 +656,7 @@ void uPass_attributes::process_range() {
   // Resolve start/end opportunistically. Refs (e.g. comptime symbol) need
   // to be looked up via runner_fold_fn since this pass doesn't track its
   // own scalar table.
-  auto read_value = [this]() -> Const {
+  auto read_value = [this]() -> Dlop {
     if (Lnast_ntype::is_const(get_raw_ntype())) {
       return *Dlop::from_pyrope(current_text());
     }
@@ -668,12 +668,12 @@ void uPass_attributes::process_range() {
     }
     return *Dlop::invalid();
   };
-  Const start = read_value();
+  Dlop start = read_value();
   if (!move_to_sibling()) {
     move_to_parent();
     return;
   }
-  Const end = read_value();
+  Dlop end = read_value();
   move_to_parent();
 
   if (start.is_invalid() || end.is_invalid()) {

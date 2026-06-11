@@ -10,7 +10,7 @@
 #include "iassert.hpp"
 #include "likely.hpp"
 
-Const Bitwidth_range::to_lconst(bool overflow, int64_t val) {
+Dlop Bitwidth_range::to_lconst(bool overflow, int64_t val) {
   if (!overflow) {
     return *Dlop::create_integer(val);
   }
@@ -25,11 +25,11 @@ Const Bitwidth_range::to_lconst(bool overflow, int64_t val) {
   return *Dlop::get_neg_mask_value(-(val + 1));
 }
 
-Bitwidth_range::Bitwidth_range(const Const& val) {
-  if (val.is_i()) {
+Bitwidth_range::Bitwidth_range(const Dlop& val) {
+  if (val.is_just_i64()) {
     overflow = false;
-    max      = val.to_i();
-    min      = val.to_i();
+    max      = val.to_just_i64();
+    min      = val.to_just_i64();
   } else {
     // val.dump();
     overflow  = true;
@@ -46,13 +46,13 @@ Bitwidth_range::Bitwidth_range(const Const& val) {
   }
 }
 
-void Bitwidth_range::set_range(const Const& min_val, const Const& max_val) {
+void Bitwidth_range::set_range(const Dlop& min_val, const Dlop& max_val) {
   I(max_val.ge_op(min_val)->is_known_true());
 
-  if (max_val.is_i() && min_val.is_i()) {
+  if (max_val.is_just_i64() && min_val.is_just_i64()) {
     overflow = false;
-    max      = max_val.to_i();
-    min      = min_val.to_i();
+    max      = max_val.to_just_i64();
+    min      = min_val.to_just_i64();
     I(max >= min);
   } else {
     overflow = true;
@@ -70,7 +70,7 @@ void Bitwidth_range::set_range(const Const& min_val, const Const& max_val) {
   }
 }
 
-Bitwidth_range::Bitwidth_range(const Const& min_val, const Const& max_val) { set_range(min_val, max_val); }
+Bitwidth_range::Bitwidth_range(const Dlop& min_val, const Dlop& max_val) { set_range(min_val, max_val); }
 
 void Bitwidth_range::set_narrower_range(const Bitwidth_range& bw) {
   if (likely(!bw.is_overflow() && !is_overflow())) {

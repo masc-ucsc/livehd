@@ -11,7 +11,7 @@
 
 #include "absl/container/flat_hash_map.h"
 #include "absl/container/flat_hash_set.h"
-#include "const.hpp"
+#include "hlop/dlop.hpp"
 #include "diag.hpp"
 #include "lnast_ntype.hpp"
 #include "pass.hpp"
@@ -526,8 +526,8 @@ private:
   }
 
   [[nodiscard]] int64_t const_of(const Lnast_nid& nid) {
-    auto c = Const::from_pyrope(ln_->get_name(nid));
-    return (c && c->is_i()) ? c->to_i() : 0;
+    auto c = Dlop::from_pyrope(ln_->get_name(nid));
+    return (c && c->is_just_i64()) ? c->to_just_i64() : 0;
   }
 
   struct Queued_check {

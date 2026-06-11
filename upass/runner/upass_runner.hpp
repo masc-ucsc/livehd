@@ -13,7 +13,7 @@
 
 #include "absl/container/flat_hash_map.h"
 #include "absl/container/flat_hash_set.h"
-#include "const.hpp"
+#include "hlop/dlop.hpp"
 #include "lnast.hpp"
 #include "lnast_manager.hpp"
 #include "lnast_ntype.hpp"
@@ -201,14 +201,14 @@ protected:
   void emit_subtree_verbatim();
 
   // Returns the first non-nullopt result from any pass's fold_ref(name).
-  std::optional<Const> try_fold_ref(std::string_view name);
+  std::optional<Dlop> try_fold_ref(std::string_view name);
 
   // 1i Phase E shared-ST reads: the comb-call inliner uses these to introspect
   // state it can't see through scalar fold_ref. try_bundle_fields returns the
   // flat comptime-const fields behind a bundle ref (for tuple actuals);
   // try_typename returns a var's declared typename (for method dispatch /
   // setter-init). First pass that provides wins.
-  std::optional<std::vector<std::pair<std::string, Const>>> try_bundle_fields(std::string_view name);
+  std::optional<std::vector<std::pair<std::string, Dlop>>> try_bundle_fields(std::string_view name);
   std::string                                               try_typename(std::string_view name);
   // Declared integer (max,min) range of a variable (for re-typing an untyped
   // inlined param from the actual at the call site). First pass that provides
@@ -216,7 +216,7 @@ protected:
   std::optional<upass::uPass::Decl_scalar_type>             try_decl_type(std::string_view name);
   // Folded (start, end_inclusive) bounds of a `range` tmp (comptime for-loop
   // iterable). First pass that provides wins. See uPass::provide_range.
-  std::optional<std::pair<Const, Const>>                    try_range(std::string_view name);
+  std::optional<std::pair<Dlop, Dlop>>                    try_range(std::string_view name);
   // Declared kind + range of a dotted field path (`t1.a`). First pass that
   // provides wins. See uPass::provide_field_type (task 1k).
   std::optional<upass::uPass::Field_decl_type>              try_field_type(std::string_view name);
@@ -238,7 +238,7 @@ protected:
                        const Lnast_node& receiver);
 
   // Emits either the folded value of `name` (when any pass returns a valid
-  // Const) or the original ref node otherwise. Used by both emit_op_with_fold
+  // Dlop) or the original ref node otherwise. Used by both emit_op_with_fold
   // and the statement-scope ref leaf case.
   void emit_ref_or_folded(std::string_view name);
 
@@ -273,7 +273,7 @@ protected:
   // Re-walk ONE loop iteration. Precondition: the read cursor is on the loop's
   // body `stmts` node. Opens a fresh iteration scope (fresh salt + staging/pass
   // block scope), invokes `emit_binds` to bind the iteration variable(s) into
-  // it (a Const for a range, a `tuple_get` pick for a tuple), re-walks the
+  // it (a Dlop for a range, a `tuple_get` pick for a tuple), re-walks the
   // body's statements, then closes the scope and restores the cursor to the
   // body `stmts` node. `emit_post` (optional) runs after the body, still inside
   // the iteration scope — used by `for i in ref d` to write the (possibly
@@ -290,7 +290,7 @@ protected:
   // Emit a typed declare `mut name : int(max,min)` as a scratch tree. Used to
   // give a for-loop iteration variable a declared type when its tuple element is
   // a typed runtime ref (var-arg ports), so a nested specialization can type it.
-  void emit_inline_declare_typed(const std::string& name, const std::optional<Const>& max, const std::optional<Const>& min);
+  void emit_inline_declare_typed(const std::string& name, const std::optional<Dlop>& max, const std::optional<Dlop>& min);
 
   // ── 1i comb-call inliner ────────────────────────────────────────────────
   // Called from process_lnast's func_call case. If the callee resolves to a
@@ -339,8 +339,8 @@ protected:
   // a method (`ref self`) or var-arg boundary is left to the caller.
   struct Spec_port {
     bool                 inject = false;  // false = keep the template's own (already-typed) port
-    std::optional<Const> max       = {};
-    std::optional<Const> min       = {};
+    std::optional<Dlop> max       = {};
+    std::optional<Dlop> min       = {};
     std::string          type_name = {};  // named type (takes precedence over max/min)
     // 1p-runner var-arg expansion: a synthesized concrete port replacing one
     // leftover of a `...args` boundary. `port_name` is the new io port name;
@@ -455,8 +455,8 @@ protected:
   // non-pow2 / partial ranges exactly, where bits alone would round up the
   // envelope). An unset bound emits the `nil` (unbounded) child. No-op when
   // both bounds are unset.
-  void emit_inline_typespec_range(const std::string& name, const std::optional<Const>& range_max,
-                                  const std::optional<Const>& range_min);
+  void emit_inline_typespec_range(const std::string& name, const std::optional<Dlop>& range_max,
+                                  const std::optional<Dlop>& range_min);
 
   // Emits `dst = sext(src, sign_bit)` through the walk so constprop folds it.
   // Mirrors the deleted evaluator's adjust_for_type: a signed output's raw

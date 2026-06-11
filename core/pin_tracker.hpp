@@ -3,7 +3,7 @@
 #include <cstdint>
 
 #include "absl/container/node_hash_map.h"
-#include "const.hpp"
+#include "hlop/dlop.hpp"
 
 template <typename Pin>
 class Pin_tracker {
@@ -28,7 +28,7 @@ public:
     }
   }
 
-  void add_get_mask(Pin dst_pin, Pin a_pin, int32_t a_sbits, Const mask) {
+  void add_get_mask(Pin dst_pin, Pin a_pin, int32_t a_sbits, Dlop mask) {
     auto& pv = full_map[dst_pin];
     pv.clear();
 
@@ -54,7 +54,7 @@ public:
     }
   }
 
-  void add_set_mask(Pin dst_pin, Pin a_pin, int32_t a_sbits, Const mask, Pin v_pin) {
+  void add_set_mask(Pin dst_pin, Pin a_pin, int32_t a_sbits, Dlop mask, Pin v_pin) {
     Pin_vector pv   = get_or_create_pv(a_pin, a_sbits);
     Pin_vector v_pv = get_or_create_pv(v_pin, mask.get_bits());
 
@@ -88,8 +88,9 @@ public:
     full_map.insert_or_assign(dst_pin, pv);
   }
 
-  void add_shl(Pin dst_pin, Pin a_pin, int32_t a_sbits, Const amount) {
-    const auto amount_i = amount.to_i();
+  void add_shl(Pin dst_pin, Pin a_pin, int32_t a_sbits, Dlop amount) {
+    I(amount.is_just_i64());  // a >62-bit shift amount is structurally bogus
+    const auto amount_i = amount.to_just_i64();
     I(amount_i >= 0);
 
     const auto amount_u  = static_cast<size_t>(amount_i);
@@ -120,9 +121,10 @@ public:
     }
   }
 
-  void add_sra(Pin dst_pin, Pin a_pin, int32_t a_sbits, Const amount) {
+  void add_sra(Pin dst_pin, Pin a_pin, int32_t a_sbits, Dlop amount) {
     I(a_sbits > 0);
-    const auto amount_i = amount.to_i();
+    I(amount.is_just_i64());  // a >62-bit shift amount is structurally bogus
+    const auto amount_i = amount.to_just_i64();
     I(amount_i >= 0);
 
     const auto amount_u  = static_cast<size_t>(amount_i);
@@ -150,9 +152,10 @@ public:
     }
   }
 
-  void add_sext(Pin dst_pin, Pin a_pin, int32_t a_sbits, Const amount) {
+  void add_sext(Pin dst_pin, Pin a_pin, int32_t a_sbits, Dlop amount) {
     I(a_sbits > 0);
-    const auto amount_i = amount.to_i();
+    I(amount.is_just_i64());  // a >62-bit shift amount is structurally bogus
+    const auto amount_i = amount.to_just_i64();
     I(amount_i >= 0);
 
     const auto amount_u = static_cast<size_t>(amount_i);
@@ -200,7 +203,7 @@ public:
       }
     }
   }
-  void add_and(Pin dst_pin, Pin a_pin, Const a_mask) {
+  void add_and(Pin dst_pin, Pin a_pin, Dlop a_mask) {
     auto it = full_map.find(a_pin);
     if (it == full_map.end()) {
       return;

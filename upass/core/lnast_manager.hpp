@@ -12,7 +12,7 @@
 #include <utility>
 #include <vector>
 
-#include "const.hpp"
+#include "hlop/dlop.hpp"
 #include "lnast.hpp"
 #include "lnast_writer.hpp"
 #include "upass_utils.hpp"

@@ -34,7 +34,7 @@ static void BM_assign_pyrope_const(benchmark::State& state) {
 #endif
 
     for (int j = 0; j < state.range(0); ++j) {
-      Const val;
+      Dlop val;
       val = Dlop::create_integer(j);
       ln.create_assign_stmts("tmp", val.to_pyrope());
     }

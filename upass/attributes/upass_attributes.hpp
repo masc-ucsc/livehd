@@ -14,7 +14,7 @@
 #include "absl/container/flat_hash_map.h"
 #include "absl/container/flat_hash_set.h"
 #include "absl/container/inlined_vector.h"
-#include "const.hpp"
+#include "hlop/dlop.hpp"
 #include "upass_attributes_handler.hpp"
 #include "upass_core.hpp"
 
@@ -109,7 +109,7 @@ public:
   void process_stmts() override;
   void process_stmts_post() override;
 
-  // Fold the attr_get destination tmp to its computed Const so the runner's
+  // Fold the attr_get destination tmp to its computed Dlop so the runner's
   // emit-time substitution picks it up and downstream passes (verifier
   // cassert, constprop eq/ne via runner_fold_fn fallback) see the resolved
   // value within the same walk. See upass_attributes_read.cpp.
@@ -221,19 +221,19 @@ public:
     // may stay unset (unbounded): `int(max=3)` pins only `max`. uN/sN sugar
     // still flows through `kind`+`bits` (legacy path) until T5 consolidates
     // every integer onto `prim_type_int`.
-    std::optional<Const> range_max;
-    std::optional<Const> range_min;
+    std::optional<Dlop> range_max;
+    std::optional<Dlop> range_min;
   };
 
   // Look up explicitly-stored attribute values (set by attr_set). Returns
   // nullopt when no entry exists for that (var, attr) pair.
-  std::optional<Const> lookup_attr_value(std::string_view var, std::string_view attr) const;
+  std::optional<Dlop> lookup_attr_value(std::string_view var, std::string_view attr) const;
 
   // Write an explicit attr value onto the binding (field-scoped for
   // dotted targets; creates the binding when absent — set() anchors ___ tmps
   // at the function scope). Also echoes extraction-tmp targets back to their
   // source field via Symbol_table::tget_origin (per-field decl-site attrs).
-  void set_binding_attr(std::string_view target, std::string_view attr, const Const& v);
+  void set_binding_attr(std::string_view target, std::string_view attr, const Dlop& v);
 
   // Declared-type facts for a name: answered from the binding's
   // typed Entry fields (runner declare/type_spec bake + per-field rides),
@@ -258,7 +258,7 @@ public:
   // Range bounds previously recorded by process_range, keyed by the range
   // op's destination tmp ref (so attr_set with a `range` value pointing to
   // that tmp can lower to max/min).
-  std::optional<std::pair<Const, Const>> lookup_range(std::string_view tmp) const;
+  std::optional<std::pair<Dlop, Dlop>> lookup_range(std::string_view tmp) const;
 
   // Ref-text value recorded for an attr_set whose value was a ref (e.g.
   // `attr_set f "clock_pin" my_clk` — a runtime wire ref for LGraph wiring).
@@ -267,8 +267,8 @@ public:
 private:
   // lookup_type_info_bundle return scratch (per-call; do not hold across calls)
   mutable Type_info ti_scratch_;
-  std::map<std::string, std::pair<Const, Const>>            range_bounds;  // start, end keyed by tmp
-  std::map<std::string, Const>                              tmp_fold;      // attr_get dst → folded Const
+  std::map<std::string, std::pair<Dlop, Dlop>>            range_bounds;  // start, end keyed by tmp
+  std::map<std::string, Dlop>                              tmp_fold;      // attr_get dst → folded Dlop
 
 public:
   // ── Tuple-shape side state (see upass_attributes_tuple.cpp) ──────────────
@@ -286,14 +286,14 @@ public:
   // tuple_get destination tmp → resolution info. Lets later attr_get see what
   // the tmp logically points at so cat-D inheritance and `.[key]` work.
 
-  std::optional<Const> derive_aggregate_size(std::string_view base) const;
-  std::optional<Const> derive_aggregate_bits(std::string_view base) const;
-  std::optional<Const> derive_aggregate_typename(std::string_view base, std::string_view base_text) const;
-  std::optional<Const> derive_aggregate_key(std::string_view base, std::string_view base_text) const;
+  std::optional<Dlop> derive_aggregate_size(std::string_view base) const;
+  std::optional<Dlop> derive_aggregate_bits(std::string_view base) const;
+  std::optional<Dlop> derive_aggregate_typename(std::string_view base, std::string_view base_text) const;
+  std::optional<Dlop> derive_aggregate_key(std::string_view base, std::string_view base_text) const;
 
   // Cat-D inheritance: walk get-alias and shape-source aliases looking for
   // an explicit attr value, then fall back to the parent aggregate's value.
-  std::optional<Const> lookup_attr_with_inheritance(std::string_view base, std::string_view attr) const;
+  std::optional<Dlop> lookup_attr_with_inheritance(std::string_view base, std::string_view attr) const;
 
   // Built-in attribute names that have dedicated semantics (do NOT participate
   // in generic cat-D aggregate→field inheritance).
@@ -340,7 +340,7 @@ public:
   // sat (clamp) rule. `type_src` is the variable whose type envelope to use
   // (the `type=` arg of a wrap/sat call). Returns the input untouched when
   // neither flag is set or type info is missing. Driven by process_func_call.
-  Const narrow_for_lhs(std::string_view type_src, const Const& v, bool is_wrap, bool is_sat) const;
+  Dlop narrow_for_lhs(std::string_view type_src, const Dlop& v, bool is_wrap, bool is_sat) const;
 
   // ── const single-assign tracking ──────────────────────────────────────────
   //
@@ -370,10 +370,10 @@ private:
   void evaluate_attr_get(std::string_view dst, std::string_view base_text, std::string_view base, std::string_view attr);
 
   // Helpers used by evaluate_attr_get.
-  std::optional<Const> derive_max(std::string_view base) const;
-  std::optional<Const> derive_min(std::string_view base) const;
-  std::optional<Const> derive_bits(std::string_view base, std::string_view variant) const;  // "bits"/"ubits"/"sbits"
-  std::optional<Const> derive_comptime(std::string_view base, std::string_view base_text) const;
+  std::optional<Dlop> derive_max(std::string_view base) const;
+  std::optional<Dlop> derive_min(std::string_view base) const;
+  std::optional<Dlop> derive_bits(std::string_view base, std::string_view variant) const;  // "bits"/"ubits"/"sbits"
+  std::optional<Dlop> derive_comptime(std::string_view base, std::string_view base_text) const;
 
   // Task 1t — read a scalar TYPE node at the cursor (prim_type_int/uint/sint/
   // boolean/string), filling kind/bits and the (max,min) range. The cursor is
@@ -381,13 +381,13 @@ private:
   // `is_real_type` is set true for a concrete numeric/string type (so the
   // caller marks has_type_spec), false for none/unknown. Shared by
   // process_type_spec and process_declare.
-  void read_scalar_type_at_cursor(Numeric_kind& kind, uint32_t& bits, std::optional<Const>& range_max,
-                                  std::optional<Const>& range_min, bool& is_real_type);
+  void read_scalar_type_at_cursor(Numeric_kind& kind, uint32_t& bits, std::optional<Dlop>& range_max,
+                                  std::optional<Dlop>& range_min, bool& is_real_type);
 
   // Best-effort comptime value for `var` — consults runner_fold_fn (which
   // aggregates every pass's fold_ref) and our own tmp_fold, returning the
   // first foldable answer.
-  std::optional<Const> resolve_value(std::string_view var) const;
+  std::optional<Dlop> resolve_value(std::string_view var) const;
 };
 
 // Plugin registration lives in upass_attributes.cpp.

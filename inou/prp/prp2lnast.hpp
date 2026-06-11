@@ -296,7 +296,7 @@ protected:
   // (`bit_selection_to_node`) and bit-range writes (the `bit_selection` arm of
   // `process_lvalue_for_assign`). `sel_node` is the `select` TS child of a
   // `bit_selection`. Returns the Lnast_node to use as the mask operand of
-  // `get_mask` / `set_mask`: a `Const` when both range endpoints are
+  // `get_mask` / `set_mask`: a `Dlop` when both range endpoints are
   // integer-literal (encoded as a bitmask via `Dlop::get_mask_value`), or a
   // ref to a freshly-emitted `range` / `shl` LNAST stmt for dynamic cases.
   Lnast_node compute_bit_mask_ref(TSNode sel_node);

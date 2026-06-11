@@ -25,7 +25,7 @@ public:
 
   void position(const Lnast_nid& nid) { move_to_nid(nid); }
 
-  Const get_result(std::string_view name) const {
+  Dlop get_result(std::string_view name) const {
     if (!st().has_trivial(name)) {
       return *Dlop::invalid();
     }
@@ -33,14 +33,14 @@ public:
   }
 
   // Pre-populate the symbol table so process_if() can look up conditions.
-  void seed(std::string_view name, const Const& val) { st().set(name, val); }
+  void seed(std::string_view name, const Dlop& val) { st().set(name, val); }
   void seed(std::string_view name, const spool_ptr<Dlop>& val) { st().set(name, *val); }
 
   // Expose §5.a ST query helpers for testing.
   bool st_is_known_const(std::string_view name) const { return st().is_known_const(name); }
 
   // Directly write a trivial value into the symbol table (for ST tests).
-  void st_set(std::string_view name, const Const& val) { st().set(name, val); }
+  void st_set(std::string_view name, const Dlop& val) { st().set(name, val); }
   void st_set(std::string_view name, const spool_ptr<Dlop>& val) { st().set(name, *val); }
 
   // Expose classify_statement_impl() for white-box testing.
@@ -67,7 +67,7 @@ public:
     names.reserve(8);
     while (lm->move_to_sibling()) {
       if (Lnast_ntype::is_const(lm->get_raw_ntype())) {
-        Const v = *Dlop::from_pyrope(lm->current_text());
+        Dlop v = *Dlop::from_pyrope(lm->current_text());
         operands.push_back(upass::Operand{std::string_view{}, Bundle::make_const(v, upass::Kind::unknown), false});
       } else {
         names.emplace_back(lm->current_text());
@@ -194,7 +194,7 @@ TEST(UpassConstprop, FoldsPlus) {
   TestableConstprop cp(f.lm);
   cp.position(op);
   cp.push_from_cursor(&uPass_constprop::process_plus);
-  EXPECT_EQ(cp.get_result("a").to_i(), 5);
+  EXPECT_EQ(cp.get_result("a").to_just_i64(), 5);
 }
 
 TEST(UpassConstprop, FoldsMinus) {
@@ -203,7 +203,7 @@ TEST(UpassConstprop, FoldsMinus) {
   TestableConstprop cp(f.lm);
   cp.position(op);
   cp.push_from_cursor(&uPass_constprop::process_minus);
-  EXPECT_EQ(cp.get_result("a").to_i(), 7);
+  EXPECT_EQ(cp.get_result("a").to_just_i64(), 7);
 }
 
 TEST(UpassConstprop, FoldsMult) {
@@ -212,7 +212,7 @@ TEST(UpassConstprop, FoldsMult) {
   TestableConstprop cp(f.lm);
   cp.position(op);
   cp.push_from_cursor(&uPass_constprop::process_mult);
-  EXPECT_EQ(cp.get_result("a").to_i(), 12);
+  EXPECT_EQ(cp.get_result("a").to_just_i64(), 12);
 }
 
 TEST(UpassConstprop, FoldsDiv) {
@@ -221,7 +221,7 @@ TEST(UpassConstprop, FoldsDiv) {
   TestableConstprop cp(f.lm);
   cp.position(op);
   cp.push_from_cursor(&uPass_constprop::process_div);
-  EXPECT_EQ(cp.get_result("a").to_i(), 4);
+  EXPECT_EQ(cp.get_result("a").to_just_i64(), 4);
 }
 
 TEST(UpassConstprop, FoldsMod) {
@@ -230,7 +230,7 @@ TEST(UpassConstprop, FoldsMod) {
   TestableConstprop cp(f.lm);
   cp.position(op);
   cp.push_from_cursor(&uPass_constprop::process_mod);
-  EXPECT_EQ(cp.get_result("a").to_i(), 1);
+  EXPECT_EQ(cp.get_result("a").to_just_i64(), 1);
 }
 
 // ── Shift ────────────────────────────────────────────────────────────────────
@@ -241,7 +241,7 @@ TEST(UpassConstprop, FoldsShl) {
   TestableConstprop cp(f.lm);
   cp.position(op);
   cp.push_from_cursor(&uPass_constprop::process_shl);
-  EXPECT_EQ(cp.get_result("a").to_i(), 8);  // 1 << 3 = 8
+  EXPECT_EQ(cp.get_result("a").to_just_i64(), 8);  // 1 << 3 = 8
 }
 
 TEST(UpassConstprop, FoldsSra) {
@@ -250,7 +250,7 @@ TEST(UpassConstprop, FoldsSra) {
   TestableConstprop cp(f.lm);
   cp.position(op);
   cp.push_from_cursor(&uPass_constprop::process_sra);
-  EXPECT_EQ(cp.get_result("a").to_i(), 4);  // 16 >> 2 = 4
+  EXPECT_EQ(cp.get_result("a").to_just_i64(), 4);  // 16 >> 2 = 4
 }
 
 // ── Bitwise ──────────────────────────────────────────────────────────────────
@@ -262,7 +262,7 @@ TEST(UpassConstprop, FoldsBitAnd) {
   TestableConstprop cp(f.lm);
   cp.position(op);
   cp.push_from_cursor(&uPass_constprop::process_bit_and);
-  EXPECT_EQ(cp.get_result("a").to_i(), 0b1000);
+  EXPECT_EQ(cp.get_result("a").to_just_i64(), 0b1000);
 }
 
 TEST(UpassConstprop, FoldsBitOr) {
@@ -272,7 +272,7 @@ TEST(UpassConstprop, FoldsBitOr) {
   TestableConstprop cp(f.lm);
   cp.position(op);
   cp.push_from_cursor(&uPass_constprop::process_bit_or);
-  EXPECT_EQ(cp.get_result("a").to_i(), 0b1111);
+  EXPECT_EQ(cp.get_result("a").to_just_i64(), 0b1111);
 }
 
 TEST(UpassConstprop, FoldsBitXor) {
@@ -282,7 +282,7 @@ TEST(UpassConstprop, FoldsBitXor) {
   TestableConstprop cp(f.lm);
   cp.position(op);
   cp.push_from_cursor(&uPass_constprop::process_bit_xor);
-  EXPECT_EQ(cp.get_result("a").to_i(), 0b0110);
+  EXPECT_EQ(cp.get_result("a").to_just_i64(), 0b0110);
 }
 
 TEST(UpassConstprop, FoldsBitNot) {
@@ -292,7 +292,7 @@ TEST(UpassConstprop, FoldsBitNot) {
   cp.position(op);
   cp.push_from_cursor(&uPass_constprop::process_bit_not);
   // ~0 = -1 in two's complement
-  EXPECT_EQ(cp.get_result("a").to_i(), -1);
+  EXPECT_EQ(cp.get_result("a").to_just_i64(), -1);
 }
 
 TEST(UpassConstprop, FoldsGetMask) {
@@ -302,7 +302,7 @@ TEST(UpassConstprop, FoldsGetMask) {
   TestableConstprop cp(f.lm);
   cp.position(op);
   cp.push_from_cursor(&uPass_constprop::process_get_mask);
-  EXPECT_EQ(cp.get_result("a").to_i(), 0x78);
+  EXPECT_EQ(cp.get_result("a").to_just_i64(), 0x78);
 }
 
 // ── Logical ──────────────────────────────────────────────────────────────────
@@ -381,11 +381,11 @@ TEST(UpassConstprop, SecondRunConverges) {
   TestableConstprop cp(f.lm);
   cp.position(op);
   cp.push_from_cursor(&uPass_constprop::process_plus);
-  ASSERT_EQ(cp.get_result("a").to_i(), 5);
+  ASSERT_EQ(cp.get_result("a").to_just_i64(), 5);
 
   cp.position(op);
   cp.push_from_cursor(&uPass_constprop::process_plus);
-  EXPECT_EQ(cp.get_result("a").to_i(), 5);
+  EXPECT_EQ(cp.get_result("a").to_just_i64(), 5);
 }
 
 // ── process_if: conservative condition inspection ─────────────────────────────
@@ -554,7 +554,7 @@ TEST(UpassConstprop, PopcountSetBits) {
   TestableConstprop cp(f.lm);
   cp.position(op);
   cp.push_from_cursor(&uPass_constprop::process_popcount);
-  EXPECT_EQ(cp.get_result("a").to_i(), 3);
+  EXPECT_EQ(cp.get_result("a").to_just_i64(), 3);
 }
 
 TEST(UpassConstprop, PopcountZero) {
@@ -563,7 +563,7 @@ TEST(UpassConstprop, PopcountZero) {
   TestableConstprop cp(f.lm);
   cp.position(op);
   cp.push_from_cursor(&uPass_constprop::process_popcount);
-  EXPECT_EQ(cp.get_result("a").to_i(), 0);
+  EXPECT_EQ(cp.get_result("a").to_just_i64(), 0);
 }
 
 // ── sext ─────────────────────────────────────────────────────────────────────
@@ -585,7 +585,7 @@ TEST(UpassConstprop, SextNoTruncation) {
   TestableConstprop cp(f.lm);
   cp.position(op);
   cp.push_from_cursor(&uPass_constprop::process_sext);
-  EXPECT_EQ(cp.get_result("a").to_i(), 3);
+  EXPECT_EQ(cp.get_result("a").to_just_i64(), 3);
 }
 
 TEST(UpassConstprop, SextSignExtendNarrows) {
@@ -597,7 +597,7 @@ TEST(UpassConstprop, SextSignExtendNarrows) {
   TestableConstprop cp(f.lm);
   cp.position(op);
   cp.push_from_cursor(&uPass_constprop::process_sext);
-  EXPECT_EQ(cp.get_result("a").to_i(), -4);  // 3-bit 0b100 sign-extended = -4
+  EXPECT_EQ(cp.get_result("a").to_just_i64(), -4);  // 3-bit 0b100 sign-extended = -4
 }
 
 // ── Tuple operations ──────────────────────────────────────────────────────────
@@ -619,7 +619,7 @@ TEST(UpassConstpropTuple, TupleAddAndGetFirstField) {
   cp.position(get_op);
   cp.process_tuple_get();  // dst = ___t0[0] = 3
 
-  EXPECT_EQ(cp.get_result("dst").to_i(), 3);
+  EXPECT_EQ(cp.get_result("dst").to_just_i64(), 3);
 }
 
 // tuple_add + tuple_get: second positional field (index 1).
@@ -635,7 +635,7 @@ TEST(UpassConstpropTuple, TupleAddAndGetSecondField) {
   cp.position(get_op);
   cp.process_tuple_get();  // dst = ___t0[1] = 7
 
-  EXPECT_EQ(cp.get_result("dst").to_i(), 7);
+  EXPECT_EQ(cp.get_result("dst").to_just_i64(), 7);
 }
 
 // tuple_get on a source variable not in the symbol table: nothing is stored.
@@ -678,14 +678,14 @@ TEST(UpassConstpropTuple, TupleGetConvergesOnRepeat) {
 
   cp.position(get_op);
   cp.process_tuple_get();
-  ASSERT_EQ(cp.get_result("dst").to_i(), 5);
+  ASSERT_EQ(cp.get_result("dst").to_just_i64(), 5);
 
   // Second run: same nodes, same values → same result.
   cp.position(add_op);
   cp.push_from_cursor(&uPass_constprop::process_tuple_add);
   cp.position(get_op);
   cp.process_tuple_get();
-  EXPECT_EQ(cp.get_result("dst").to_i(), 5);
+  EXPECT_EQ(cp.get_result("dst").to_just_i64(), 5);
 }
 
 // tuple_set writes a scalar value into the bundle and marks changed.
@@ -698,7 +698,7 @@ TEST(UpassConstpropTuple, TupleSetWritesField) {
   cp.process_tuple_set();
 
   // The symbol table key "___t0.0" should now hold 99.
-  EXPECT_EQ(cp.get_result("___t0.0").to_i(), 99);
+  EXPECT_EQ(cp.get_result("___t0.0").to_just_i64(), 99);
 }
 
 // tuple_set with a __bits attribute field must be silently skipped — the
@@ -722,11 +722,11 @@ TEST(UpassConstpropTuple, TupleSetConvergesOnRepeat) {
   TestableConstprop cp(f.lm);
   cp.position(set_op);
   cp.process_tuple_set();
-  ASSERT_EQ(cp.get_result("___t0.0").to_i(), 42);
+  ASSERT_EQ(cp.get_result("___t0.0").to_just_i64(), 42);
 
   cp.position(set_op);
   cp.process_tuple_set();
-  EXPECT_EQ(cp.get_result("___t0.0").to_i(), 42);
+  EXPECT_EQ(cp.get_result("___t0.0").to_just_i64(), 42);
 }
 
 // tuple_set followed by tuple_get propagates the written value end-to-end.
@@ -742,12 +742,12 @@ TEST(UpassConstpropTuple, TupleSetThenGetRoundTrip) {
   cp.position(get_op);
   cp.process_tuple_get();  // dst = ___t0[0] = 77
 
-  EXPECT_EQ(cp.get_result("dst").to_i(), 77);
+  EXPECT_EQ(cp.get_result("dst").to_just_i64(), 77);
 }
 
 // ─── Symbol_table query API (§5.a) ──────────────────────────────────────────
 
-// is_known_const returns true when the variable holds a concrete, fully-known Const.
+// is_known_const returns true when the variable holds a concrete, fully-known Dlop.
 TEST(UpassConstpropST, IsKnownConstWithValidValue) {
   ConstpropFixture  f;
   TestableConstprop cp(f.lm);

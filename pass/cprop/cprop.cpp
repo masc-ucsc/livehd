@@ -261,8 +261,8 @@ void Cprop::replace_part_inputs_const(hhds::Node_class& node, std::vector<hhds::
       return;
     }
 
-    I(s_const.is_i());
-    size_t sel = s_const.to_i();
+    I(s_const.is_just_i64());
+    size_t sel = s_const.to_just_i64();
 
     hhds::Pin_class a_pin;
     for (auto& e : inp_edges_ordered) {
@@ -292,10 +292,10 @@ void Cprop::replace_part_inputs_const(hhds::Node_class& node, std::vector<hhds::
       return;
     }
     auto s_const = hydrate_const(s_pin);
-    if (s_const.has_unknowns() || !s_const.is_i()) {
+    if (s_const.has_unknowns() || !s_const.is_just_i64()) {
       return;
     }
-    auto sel = s_const.to_i();
+    auto sel = s_const.to_just_i64();
     if (sel <= 0 || (sel & (sel - 1)) != 0) {
       Pass::info("WARNING: hotmux selector:{} is not one-hot (unique-if assume violated); not folding\n", sel);
       return;
@@ -326,7 +326,7 @@ void Cprop::replace_part_inputs_const(hhds::Node_class& node, std::vector<hhds::
     int              nconstants = 0;
     int              npending   = 0;
 
-    Const result;
+    Dlop result;
     if (op == Ntype_op::And) {
       result = Dlop::create_integer(-1);
     }
@@ -379,7 +379,7 @@ void Cprop::replace_part_inputs_const(hhds::Node_class& node, std::vector<hhds::
         collapse_forward_always_pin0(node, edge_it2);
       }
     } else if (nconstants == 1 && npending >= 1
-               && ((op == Ntype_op::And && result.is_i() && result.to_i() == -1)
+               && ((op == Ntype_op::And && result.is_just_i64() && result.to_just_i64() == -1)
                    || (op == Ntype_op::Or && result.is_known_zero()))) {
       // Identity element: and(x.., -1) == and(x..), or(x.., 0) == or(x..).
       // Dropping it matters for codegen too: cgen renders -1 as `1'sh1`,
@@ -418,15 +418,15 @@ void Cprop::replace_all_inputs_const(hhds::Node_class& node, std::vector<hhds::E
     if (a_pin.is_invalid()) {
       return;
     }
-    Const val = hydrate_const(a_pin);
+    Dlop val = hydrate_const(a_pin);
 
-    Const result;
+    Dlop result;
     result = Dlop::create_integer(0);
 
     bool zero_shifts = true;
     for (auto& amt_dpin : livehd::graph_util::inp_drivers_of(node, "b")) {
-      Const amt   = hydrate_const(amt_dpin);
-      result      = result.or_op(val.shl_op(amt));  // pass the Const shift amount
+      Dlop amt   = hydrate_const(amt_dpin);
+      result      = result.or_op(val.shl_op(amt));  // pass the Dlop shift amount
       zero_shifts = false;
     }
 
@@ -437,7 +437,7 @@ void Cprop::replace_all_inputs_const(hhds::Node_class& node, std::vector<hhds::E
     }
 
   } else if (op == Ntype_op::Ror) {
-    Const result;
+    Dlop result;
     result = Dlop::create_integer(0);
     for (auto& i : inp_edges_ordered) {
       auto c = hydrate_const(i.driver);
@@ -453,7 +453,7 @@ void Cprop::replace_all_inputs_const(hhds::Node_class& node, std::vector<hhds::E
     if (a_pin.is_invalid()) {
       return;
     }
-    Const val = hydrate_const(a_pin);
+    Dlop val = hydrate_const(a_pin);
 
     if (!mask_pin.is_invalid() && !value_pin.is_invalid()) {
       auto mask  = hydrate_const(mask_pin);
@@ -463,7 +463,7 @@ void Cprop::replace_all_inputs_const(hhds::Node_class& node, std::vector<hhds::E
       replace_node(node, val);
     }
   } else if (op == Ntype_op::Sum) {
-    Const result;
+    Dlop result;
     for (auto& i : inp_edges_ordered) {
       auto c = hydrate_const(i.driver);
       if (i.sink.get_port_id() == 0) {
@@ -475,7 +475,7 @@ void Cprop::replace_all_inputs_const(hhds::Node_class& node, std::vector<hhds::E
 
     replace_node(node, result);
   } else if (op == Ntype_op::Or) {
-    Const result;
+    Dlop result;
     for (auto& e : inp_edges_ordered) {
       auto c = hydrate_const(e.driver);
       result = result.or_op(c);
@@ -484,7 +484,7 @@ void Cprop::replace_all_inputs_const(hhds::Node_class& node, std::vector<hhds::E
     replace_logic_node(node, result);
 
   } else if (op == Ntype_op::And) {
-    Const result;
+    Dlop result;
     result = Dlop::create_integer(-1);
     for (auto& i : inp_edges_ordered) {
       auto c = hydrate_const(i.driver);
@@ -502,17 +502,17 @@ void Cprop::replace_all_inputs_const(hhds::Node_class& node, std::vector<hhds::E
       eq     = eq && !first.eq_op(c)->is_known_false();
     }
 
-    Const result;
+    Dlop result;
     result = Dlop::create_integer(eq ? 1 : 0);
 
     replace_node(node, result);
   } else if (op == Ntype_op::Mux) {
     auto sel_const = hydrate_const(inp_edges_ordered[0].driver);
-    I(sel_const.is_i());
+    I(sel_const.is_just_i64());
 
-    size_t sel = sel_const.to_i();
+    size_t sel = sel_const.to_just_i64();
 
-    Const result;
+    Dlop result;
     for (auto& e : inp_edges_ordered) {
       if (e.sink.get_port_id() == 0) {
         continue;
@@ -536,9 +536,9 @@ void Cprop::replace_all_inputs_const(hhds::Node_class& node, std::vector<hhds::E
     // A zero/multi-hot constant violates the unique-if assume; keep the cell
     // so cgen's case default models the runtime error.
     auto sel_const = hydrate_const(inp_edges_ordered[0].driver);
-    I(sel_const.is_i());
+    I(sel_const.is_just_i64());
 
-    auto sel = sel_const.to_i();
+    auto sel = sel_const.to_just_i64();
     if (sel <= 0 || (sel & (sel - 1)) != 0) {
       Pass::info("WARNING: hotmux:{} selector:{} is not one-hot (unique-if assume violated); not folding\n",
                  debug_name(node),
@@ -550,7 +550,7 @@ void Cprop::replace_all_inputs_const(hhds::Node_class& node, std::vector<hhds::E
       ++arm;
     }
 
-    Const result;
+    Dlop result;
     for (auto& e : inp_edges_ordered) {
       if (e.sink.get_port_id() == static_cast<hhds::Port_id>(arm + 1)) {
         result = hydrate_const(e.driver);
@@ -566,7 +566,7 @@ void Cprop::replace_all_inputs_const(hhds::Node_class& node, std::vector<hhds::E
 
     replace_node(node, result);
   } else if (op == Ntype_op::Mult) {
-    Const result;
+    Dlop result;
     result = Dlop::create_integer(1);
     for (auto& i : inp_edges_ordered) {
       auto c = hydrate_const(i.driver);
@@ -576,8 +576,8 @@ void Cprop::replace_all_inputs_const(hhds::Node_class& node, std::vector<hhds::E
     replace_node(node, result);
   } else if (op == Ntype_op::Div) {
     I(inp_edges_ordered.size() == 2);
-    Const a = hydrate_const(inp_edges_ordered[0].driver);
-    Const b = hydrate_const(inp_edges_ordered[1].driver);
+    Dlop a = hydrate_const(inp_edges_ordered[0].driver);
+    Dlop b = hydrate_const(inp_edges_ordered[1].driver);
 
     auto result = a.div_op(b);
 
@@ -589,7 +589,7 @@ void Cprop::replace_all_inputs_const(hhds::Node_class& node, std::vector<hhds::E
   }
 }
 
-void Cprop::replace_node(hhds::Node_class& node, const Const& result) {
+void Cprop::replace_node(hhds::Node_class& node, const Dlop& result) {
   auto dpin = create_const(*current_graph, result);
 
   for (auto& out : node.out_edges()) {
@@ -607,7 +607,7 @@ void Cprop::replace_node(hhds::Node_class& node, const Const& result) {
   node.del_node();
 }
 
-void Cprop::replace_logic_node(hhds::Node_class& node, const Const& result) {
+void Cprop::replace_logic_node(hhds::Node_class& node, const Dlop& result) {
   hhds::Pin_class dpin_0;
 
   for (auto& out : node.out_edges()) {
@@ -661,10 +661,10 @@ void Cprop::scalar_sext(hhds::Node_class& node, std::vector<hhds::Edge_class>& i
   int64_t self_pos;
   {
     auto v = hydrate_const(pos_dpin);
-    if (!v.is_i()) {
+    if (!v.is_just_i64()) {
       return;
     }
-    self_pos = v.to_i();
+    self_pos = v.to_just_i64();
   }
 
   const auto& wire_dpin = inp_edges_ordered[0].driver;
@@ -689,7 +689,11 @@ void Cprop::scalar_sext(hhds::Node_class& node, std::vector<hhds::Edge_class>& i
     return;
   }
 
-  auto parent_pos = hydrate_const(parent_pos_dpin).to_i();
+  auto parent_pos_const = hydrate_const(parent_pos_dpin);
+  if (!parent_pos_const.is_just_i64()) {
+    return;
+  }
+  auto parent_pos = parent_pos_const.to_just_i64();
 
   auto b = std::min(self_pos, parent_pos);
   if (b != self_pos) {
@@ -754,11 +758,14 @@ bool Cprop::scalar_get_mask(hhds::Node_class& node) {
   // ports, which cgen declares `signed`). Bypassing it around a pin that can
   // go negative changes the value: u3 a=0b101 must read 5, not -3 (caught by
   // LEC once the lgcheck BMC stage became sound).
-  if (mask_const.is_i() && mask_const.to_i() == -1) {
+  if (mask_const.is_just_i64() && mask_const.to_just_i64() == -1) {
     bool nonneg = false;
     if (is_const_pin(a_pin)) {
       auto v = hydrate_const(a_pin);
-      nonneg = v.is_i() && v.to_i() >= 0;
+      // is_positive() is exact at any width (an is_just_i64 gate would treat
+      // a >62-bit non-negative constant as "maybe negative"); an unknown sign
+      // bit reads negative, which stays conservative for Rule 4.
+      nonneg = v.is_positive();
     } else if (is_graph_input_pin(a_pin)) {
       // A module port always reads SIGNED in the LGraph/cgen model; its
       // unsign attr (when present) is source-interface metadata, not a

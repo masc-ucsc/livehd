@@ -383,7 +383,7 @@ void uPass_runner::emit_subtree_verbatim() {
   }
 }
 
-std::optional<Const> uPass_runner::try_fold_ref(std::string_view name) {
+std::optional<Dlop> uPass_runner::try_fold_ref(std::string_view name) {
   // Every pass's fold values land on the runner-owned table now
   // (constprop trivials, attr_get/`is` results, wrap/sat narrowing), so read
   // it directly — with constprop's STRICT inlining gates: is_known_const
@@ -393,7 +393,7 @@ std::optional<Const> uPass_runner::try_fold_ref(std::string_view name) {
   return symbol_table_.known_const_scalar(name);
 }
 
-std::optional<std::vector<std::pair<std::string, Const>>> uPass_runner::try_bundle_fields(std::string_view name) {
+std::optional<std::vector<std::pair<std::string, Dlop>>> uPass_runner::try_bundle_fields(std::string_view name) {
   // Direct table read (ex constprop::provide_bundle_fields). A
   // binding with no DATA entries (a declare/type_spec bake created it for
   // its typed facts) is "not a known bundle": an empty field list would make
@@ -405,7 +405,7 @@ std::optional<std::vector<std::pair<std::string, Const>>> uPass_runner::try_bund
   if (b->is_empty() || (!b->has_named_top() && b->unnamed_top_count() == 0)) {
     return std::nullopt;
   }
-  std::vector<std::pair<std::string, Const>> out;
+  std::vector<std::pair<std::string, Dlop>> out;
   for (const auto& [k, ep] : b->non_attr_entries()) {
     if (!ep.trivial.is_invalid()) {
       out.emplace_back(k, ep.trivial);
@@ -437,17 +437,17 @@ std::optional<upass::uPass::Decl_scalar_type> uPass_runner::try_decl_type(std::s
   return upass::uPass::Decl_scalar_type{.range_max = f->range_max, .range_min = f->range_min};
 }
 
-std::optional<std::pair<Const, Const>> uPass_runner::try_range(std::string_view name) {
+std::optional<std::pair<Dlop, Dlop>> uPass_runner::try_range(std::string_view name) {
   // Folded range bounds ride the range tmp's binding attrs.
   const auto b = symbol_table_.get_bundle(name);
   if (!b) {
     return std::nullopt;
   }
-  const Const start = b->get_attr("rng_s");
+  const Dlop start = b->get_attr("rng_s");
   if (start.is_invalid()) {
     return std::nullopt;
   }
-  return std::make_pair(start, Const(b->get_attr("rng_e")));
+  return std::make_pair(start, Dlop(b->get_attr("rng_e")));
 }
 
 std::optional<std::string> uPass_runner::try_tuple_slot_ref(std::string_view name, std::string_view slot) {
@@ -576,7 +576,7 @@ void uPass_runner::check_self_does(const livehd::diag::Span& span, std::string_v
 
   const std::string                                         recv_name(receiver.is_ref() ? receiver.get_name() : std::string_view{});
   const std::string                                         recv_tn = recv_name.empty() ? std::string{} : try_typename(recv_name);
-  std::optional<std::vector<std::pair<std::string, Const>>> recv_fields;
+  std::optional<std::vector<std::pair<std::string, Dlop>>> recv_fields;
   if (!recv_name.empty()) {
     recv_fields = try_bundle_fields(recv_name);
   }
@@ -584,7 +584,7 @@ void uPass_runner::check_self_does(const livehd::diag::Span& span, std::string_v
   // reliable field directory: its defaults are always comptime, while a
   // receiver field holding a non-comptime value is skipped by
   // provide_bundle_fields and would otherwise read as "missing".
-  std::optional<std::vector<std::pair<std::string, Const>>> recv_type_fields;
+  std::optional<std::vector<std::pair<std::string, Dlop>>> recv_type_fields;
   if (!recv_tn.empty()) {
     recv_type_fields = try_bundle_fields(recv_tn);
   }
@@ -604,7 +604,7 @@ void uPass_runner::check_self_does(const livehd::diag::Span& span, std::string_v
   };
 
   auto find_field
-      = [](const std::optional<std::vector<std::pair<std::string, Const>>>& fields, std::string_view key) -> const Const* {
+      = [](const std::optional<std::vector<std::pair<std::string, Dlop>>>& fields, std::string_view key) -> const Dlop* {
     if (!fields) {
       return nullptr;
     }
@@ -617,7 +617,7 @@ void uPass_runner::check_self_does(const livehd::diag::Span& span, std::string_v
   };
 
   for (const auto& [fld, dval] : *decl_fields) {
-    const Const* rv = find_field(recv_fields, fld);
+    const Dlop* rv = find_field(recv_fields, fld);
     if (rv == nullptr && find_field(recv_type_fields, fld) == nullptr) {
       fail(std::format("missing field `{}`", fld));
     }
@@ -768,7 +768,7 @@ void uPass_runner::emit_op_with_fold(bool fold_all) {
 void uPass_runner::dispatch_to_passes(Pass_method fn) {
   for (auto& entry : upasses) {
     // Snapshot the read cursor before dispatch. If the pass throws (e.g.
-    // constprop's sub_op refuses a string-typed invalid Const) or is
+    // constprop's sub_op refuses a string-typed invalid Dlop) or is
     // otherwise unbalanced, restoring here keeps the runner-level emit
     // logic operating on the op-node the switch case selected.
     const auto saved = lm->save_cursor();
@@ -865,7 +865,7 @@ bool uPass_runner::resolve_node_operands(Resolved_node& out) {
       } else if (!txt.empty() && txt.front() == '"') {
         k = upass::Kind::string;
       }
-      Const v;
+      Dlop v;
       try {
         v = *Dlop::from_pyrope(txt);
         if (k == upass::Kind::unknown && txt != "0sb?" && txt != "0ub?") {
@@ -1379,8 +1379,8 @@ void uPass_runner::emit_inline_typespec(const std::string& name, int bits, bool 
   lm->pop_source();
 }
 
-void uPass_runner::emit_inline_typespec_range(const std::string& name, const std::optional<Const>& range_max,
-                                              const std::optional<Const>& range_min) {
+void uPass_runner::emit_inline_typespec_range(const std::string& name, const std::optional<Dlop>& range_max,
+                                              const std::optional<Dlop>& range_min) {
   if (!range_max && !range_min) {
     return;  // fully unbounded — nothing concrete to declare
   }
@@ -1793,7 +1793,7 @@ bool uPass_runner::try_inline_func_call() {
   // by design.
   const bool        has_self       = nbind > 0 && io.inputs[0].name == "self";
   const std::size_t n_named_params = nbind - (has_self ? 1 : 0);  // fixed, non-self (var-arg excluded)
-  // Classify a positional actual's scalar kind for exception (3). Const literals
+  // Classify a positional actual's scalar kind for exception (3). Dlop literals
   // carry their kind verbatim; a typed `ref` whose declared range is known is an
   // integer. Anything else is `none` (can't drive type-based disambiguation).
   auto              actual_kind    = [&](const Lnast_node& node) -> Io_kind {
@@ -2325,8 +2325,8 @@ bool uPass_runner::try_resolve_tuple_get() {
     }
   } else if (Lnast_ntype::is_ref(lm->get_raw_ntype())) {
     // A comptime-known index (a folded loop var) resolves; anything else does not.
-    if (auto fv = try_fold_ref(lm->current_text()); fv && fv->is_integer()) {
-      key = std::to_string(fv->to_i());
+    if (auto fv = try_fold_ref(lm->current_text()); fv && fv->is_integer() && !fv->has_unknowns()) {
+      key = fv->to_field();  // decimal at any width (to_just_i64 asserts past 62 bits)
     }
   }
   const bool single_segment = lm->is_last_child();
@@ -2532,7 +2532,7 @@ bool uPass_runner::maybe_specialize_template_call(const std::shared_ptr<Lnast>& 
 
   // Readable bits/sign suffix from a declared (max,min) range — mirrors
   // upass_ssa type_info_from so the name matches the lowered width.
-  auto suffix_for = [](const std::optional<Const>& max, const std::optional<Const>& min) -> std::string {
+  auto suffix_for = [](const std::optional<Dlop>& max, const std::optional<Dlop>& min) -> std::string {
     const bool is_signed = !(min && !min->is_negative());
     int        bits      = 0;
     if (max && max->is_integer()) {
@@ -3055,8 +3055,8 @@ void uPass_runner::emit_inline_tuple_store(const std::string& dst, const std::st
   lm->pop_source();
 }
 
-void uPass_runner::emit_inline_declare_typed(const std::string& name, const std::optional<Const>& max,
-                                             const std::optional<Const>& min) {
+void uPass_runner::emit_inline_declare_typed(const std::string& name, const std::optional<Dlop>& max,
+                                             const std::optional<Dlop>& min) {
   if (!scratch_forest_) {
     scratch_forest_ = hhds::Forest::create();
   }
@@ -3169,10 +3169,10 @@ void uPass_runner::unroll_for() {
     lm->move_to_sibling();  // child2 body
   };
 
-  // (a) Range iterable: `for i in lo..hi` — bind a Const each iteration.
-  if (auto rng = try_range(iterable); rng && rng->first.is_i() && rng->second.is_i()) {
-    const int64_t lo          = rng->first.to_i();
-    const int64_t hi          = rng->second.to_i();  // inclusive
+  // (a) Range iterable: `for i in lo..hi` — bind a Dlop each iteration.
+  if (auto rng = try_range(iterable); rng && rng->first.is_just_i64() && rng->second.is_just_i64()) {
+    const int64_t lo          = rng->first.to_just_i64();
+    const int64_t hi          = rng->second.to_just_i64();  // inclusive
     const bool    saved_break = loop_break_hit_;
     loop_break_hit_           = false;
     ++loop_depth_;
@@ -3303,7 +3303,7 @@ void uPass_runner::unroll_while() {
   lm->move_to_child();  // condition
   const auto           cond_type = lm->get_raw_ntype();
   const std::string    cond_text = std::string(lm->current_text());
-  std::optional<Const> cval;
+  std::optional<Dlop> cval;
   if (Lnast_ntype::is_ref(cond_type)) {
     cval = try_fold_ref(cond_text);
   }
@@ -4161,8 +4161,8 @@ void uPass_runner::bake_decl_pre_step(bool is_declare) {
   const bool        dotted = var.find('.') != std::string::npos;
 
   upass::Kind kind = upass::Kind::unknown;
-  Const       decl_max;  // invalid = unbounded/unset
-  Const       decl_min;
+  Dlop       decl_max;  // invalid = unbounded/unset
+  Dlop       decl_min;
   std::string type_name;
   upass::Mode mode     = upass::Mode::unknown;
   bool        comptime = false;
@@ -4431,7 +4431,7 @@ void uPass_runner::process_if() {
 
     if (raw != Ntype::Lnast_ntype_stmts) {
       // First child is a condition (ref or const). Try to fold it.
-      std::optional<Const> cval;
+      std::optional<Dlop> cval;
       if (raw == Ntype::Lnast_ntype_const) {
         cval = *Dlop::from_pyrope(lm->current_text());
       } else {
@@ -4540,7 +4540,7 @@ void uPass_runner::process_if() {
     bool already_matched     = false;  // a *previous* arm already fired
     bool any_prior_uncertain = false;  // some earlier cond folded to neither true nor false
 
-    auto cond_value = [this]() -> std::optional<Const> {
+    auto cond_value = [this]() -> std::optional<Dlop> {
       if (lm->get_raw_ntype() == Lnast_ntype::Lnast_ntype_const) {
         try {
           return *Dlop::from_pyrope(lm->current_text());

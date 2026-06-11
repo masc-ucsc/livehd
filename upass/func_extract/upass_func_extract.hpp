@@ -48,16 +48,16 @@ private:
   std::vector<std::shared_ptr<Lnast>> extracted_lnasts;
   std::unordered_set<std::string>     extracted_names;
 
-  // Live walk-time tracking: latest trivial-Const value assigned to each
+  // Live walk-time tracking: latest trivial-Dlop value assigned to each
   // outer name. `process_assign` updates this as it walks the outer LNAST
   // in DFS order. When `process_func_def` fires for a comb, this map holds
   // the surrounding scope's view of every previously-assigned scalar —
   // exactly the "constants visible at the definition site" set.
   //
-  // We only capture trivial Const RHSes here. Non-trivial bindings (bundles,
+  // We only capture trivial Dlop RHSes here. Non-trivial bindings (bundles,
   // refs, runtime values) deliberately don't flow into the function — this
   // is the "non-trivial lookups stop at the function boundary" rule.
-  std::unordered_map<std::string, Const> latest_outer_value;
+  std::unordered_map<std::string, Dlop> latest_outer_value;
 
   // Bundle-valued outer-scope captures: for each outer name that holds a
   // (statically-known) tuple, stores the flat field map (e.g.
@@ -65,7 +65,7 @@ private:
   // capture-prelude emitter materializes these as `assign <name>.<field>
   // <const>` statements so callee bodies that do `tuple_get(CFG, gain)`
   // resolve via the same flat-key path the inliner already uses.
-  std::unordered_map<std::string, std::unordered_map<std::string, Const>> latest_outer_bundle;
+  std::unordered_map<std::string, std::unordered_map<std::string, Dlop>> latest_outer_bundle;
 
   // Temporary (SSA ___N) value tracking for the outer walk. Captures the
   // values produced by const-folded arithmetic and by tuple_add nodes so
@@ -74,8 +74,8 @@ private:
   // literals (`const CFG = (gain=2, offset=5)`) — both of which lower to
   // `assign <name> <temp_ref>` in LNAST — can't be captured as outer-scope
   // constants.
-  std::unordered_map<std::string, Const>                                  temp_scalar_value;
-  std::unordered_map<std::string, std::unordered_map<std::string, Const>> temp_bundle_value;
+  std::unordered_map<std::string, Dlop>                                  temp_scalar_value;
+  std::unordered_map<std::string, std::unordered_map<std::string, Dlop>> temp_bundle_value;
 
   // Task 1m — import-binding captures. `fcall(___N, 'import', '<str>')`
   // records ___N → raw import-string const text here; a subsequent
@@ -88,7 +88,7 @@ private:
 
   // Names that, at some point during the outer walk, were written under
   // conditions that make them non-constant (a nested-scope assign, a
-  // gated/when-style assign, a write whose RHS isn't a trivial Const, or
+  // gated/when-style assign, a write whose RHS isn't a trivial Dlop, or
   // any second write at all). Once a name lands here it cannot be
   // recorded as a definition-site constant later — this enforces the
   // "non-constant bindings stop at the function scope" half of the rule

@@ -188,8 +188,8 @@ void Bitwidth::process_flop(hhds::Node_class& node) {
     flop_cpins.emplace_back(get_driver_of_sink_name(node, "initial"));
   }
 
-  Const max_val;
-  Const min_val;
+  Dlop max_val;
+  Dlop min_val;
 
   for (auto& cpin : flop_cpins) {
     auto           it = bwmap.find(cpin.get_class_index());
@@ -243,8 +243,8 @@ void Bitwidth::process_ror(hhds::Node_class& node, std::vector<hhds::Edge_class>
 void Bitwidth::process_not(hhds::Node_class& node, std::vector<hhds::Edge_class>& inp_edges) {
   I(inp_edges.size());
 
-  Const max_val;
-  Const min_val;
+  Dlop max_val;
+  Dlop min_val;
   for (auto e : inp_edges) {
     auto it = bwmap.find(e.driver.get_class_index());
     if (it != bwmap.end()) {
@@ -400,7 +400,7 @@ void Bitwidth::process_sra(hhds::Node_class& node, std::vector<hhds::Edge_class>
   }
   auto n_bw = n_it->second;
 
-  if (n_bw.get_min().is_positive() && n_bw.get_min().is_i()) {
+  if (n_bw.get_min().is_positive() && n_bw.get_min().is_just_i64()) {
     auto max     = a_bw.get_max();
     auto min     = a_bw.get_min();
     auto amount  = Dlop::create_integer(1)->shl_op(n_bw.get_min());
@@ -417,8 +417,8 @@ void Bitwidth::process_sra(hhds::Node_class& node, std::vector<hhds::Edge_class>
 void Bitwidth::process_sum(hhds::Node_class& node, std::vector<hhds::Edge_class>& inp_edges) {
   I(inp_edges.size());
 
-  Const max_val;
-  Const min_val;
+  Dlop max_val;
+  Dlop min_val;
 
   for (auto e : inp_edges) {
     auto it = bwmap.find(e.driver.get_class_index());
@@ -468,11 +468,11 @@ void Bitwidth::process_memory(hhds::Node_class& node) {
         Pass::error("Memory node:{} has {} connected to a non-constant pin", debug_name(node), n);
         return;
       }
-      if (!val.is_i()) {
+      if (!val.is_just_i64()) {
         Pass::error("Memory node:{} has {} connected to a non-integer value", debug_name(node), n);
         return;
       }
-      auto v = val.to_i();
+      auto v = val.to_just_i64();
       if (n == "bits") {
         mem_bits = v;
       } else {
@@ -543,11 +543,11 @@ void Bitwidth::process_memory(hhds::Node_class& node) {
         if (it == bwmap.end()) {
           continue;
         }
-        if (!it->second.get_range().is_i()) {
+        if (!it->second.get_range().is_just_i64()) {
           Pass::error("memory {} size exceeds limit", debug_name(node));
           return;
         }
-        auto sz      = it->second.get_range().to_i();
+        auto sz      = it->second.get_range().to_just_i64();
         new_mem_size = std::max(sz, new_mem_size);
       }
     }
@@ -613,9 +613,9 @@ void Bitwidth::process_memory(hhds::Node_class& node) {
 void Bitwidth::process_mult(hhds::Node_class& node, std::vector<hhds::Edge_class>& inp_edges) {
   I(inp_edges.size());
 
-  Const max_val;
+  Dlop max_val;
   max_val = Dlop::create_integer(1);
-  Const min_val;
+  Dlop min_val;
   min_val = Dlop::create_integer(1);
   for (auto e : inp_edges) {
     auto it = bwmap.find(e.driver.get_class_index());
@@ -685,7 +685,7 @@ void Bitwidth::process_set_mask(hhds::Node_class& node) {
     value_bw = it2->second;
   }
 
-  if (mask.is_i() && mask.to_i() == -1) {
+  if (mask.is_just_i64() && mask.to_just_i64() == -1) {
     adjust_bw(node.create_driver_pin(0), value_bw);
     return;
   }
@@ -747,7 +747,7 @@ void Bitwidth::process_get_mask(hhds::Node_class& node) {
   }
 
   auto  it2 = bwmap.find(mask_dpin.get_class_index());
-  Const mask_val;
+  Dlop mask_val;
   if (it2 == bwmap.end()) {
     if (!is_const_pin(mask_dpin)) {
       debug_unconstrained_msg(node, mask_dpin);
@@ -759,20 +759,20 @@ void Bitwidth::process_get_mask(hhds::Node_class& node) {
     mask_val = it2->second.get_max().or_op(it2->second.get_min());
   }
 
-  Const a_max = it->second.get_max();
-  Const a_min = it->second.get_min();
+  Dlop a_max = it->second.get_max();
+  Dlop a_min = it->second.get_min();
 
-  Const res_max;
+  Dlop res_max;
   if (a_max.same_repr(a_min)) {
     res_max = a_max.get_mask_op(mask_val);
   } else {
     res_max = a_max.get_mask_value()->get_mask_op(mask_val);
   }
 
-  Const res_min = res_max;
+  Dlop res_min = res_max;
 
   if (a_min.is_negative()) {
-    Const tmp;
+    Dlop tmp;
     tmp = Dlop::create_integer(-1)->get_mask_op(mask_val);
     if (tmp.gt_op(res_max)->is_known_true()) {
       res_max = tmp;
@@ -781,7 +781,7 @@ void Bitwidth::process_get_mask(hhds::Node_class& node) {
     a_min   = a_min.neg_op();
   }
 
-  Const val2;
+  Dlop val2;
   val2 = a_min.get_mask_op(mask_val);
   if (val2.gt_op(res_max)->is_known_true()) {
     res_max = val2;
@@ -813,7 +813,10 @@ void Bitwidth::process_sext(hhds::Node_class& node, std::vector<hhds::Edge_class
 
   auto sign_max = Bits_unknown;
   if (is_const_pin(pos_dpin)) {
-    sign_max = hydrate_const(pos_dpin).to_i();
+    auto pos_const = hydrate_const(pos_dpin);
+    if (pos_const.is_just_i64()) {  // a wider position stays Bits_unknown
+      sign_max = pos_const.to_just_i64();
+    }
   }
 
   if (sign_max == Bits_unknown && no_wire) {
@@ -928,9 +931,9 @@ void Bitwidth::process_bit_or(hhds::Node_class& node, std::vector<hhds::Edge_cla
     return;
   }
 
-  Const max_val;
+  Dlop max_val;
   max_val = Dlop::create_integer(0);
-  Const min_val;
+  Dlop min_val;
   min_val = Dlop::create_integer(0);
   if (!any_negative) {
     max_val = Dlop::get_mask_value(max_bits - 1);
@@ -1022,7 +1025,7 @@ void Bitwidth::process_bit_and(hhds::Node_class& node, std::vector<hhds::Edge_cl
 
   if (!hier && mask_pos >= 0 && pos_min_sbits != Bits_unknown && pos_min_sbits_pos != mask_pos) {
     auto v = Dlop::create_integer(1)->shl_op(*Dlop::create_integer(pos_min_sbits - 1))->sub_op(hydrate_const(inp_edges[mask_pos].driver));
-    if (v->is_i() && v->to_i() == 1) {
+    if (v->is_just_i64() && v->to_just_i64() == 1) {
       if (inp_edges.size() == 2) {
         int pos = mask_pos == 0 ? 1 : 0;
         if (is_graph_input_pin(inp_edges[pos].driver) || is_graph_output_pin(inp_edges[pos].driver)) {
@@ -1040,8 +1043,8 @@ void Bitwidth::process_bit_and(hhds::Node_class& node, std::vector<hhds::Edge_cl
     }
   }
 
-  Const max_val;
-  Const min_val;
+  Dlop max_val;
+  Dlop min_val;
 
   if (pos_min_sbits != Bits_unknown) {
     max_val = Dlop::get_mask_value(pos_min_sbits - 1);
@@ -1147,9 +1150,13 @@ void Bitwidth::process_attr_set_bw(hhds::Node_class& node_attr, Bitwidth::Attr a
 
   I(is_const_pin(dpin_val));
   auto val = hydrate_const(dpin_val);
+  if ((attr == Attr::Set_ubits || attr == Attr::Set_sbits) && !val.is_just_i64()) {
+    Pass::error("Attr bits value of node:{} exceeds the supported limit", debug_name(node_attr));
+    return;
+  }
 
   if (attr == Attr::Set_ubits) {
-    auto bits = static_cast<int32_t>(val.to_i());
+    auto bits = static_cast<int32_t>(val.to_just_i64());
 
     if (!parent_pending) {
       Bitwidth_range set_bw;
@@ -1171,7 +1178,7 @@ void Bitwidth::process_attr_set_bw(hhds::Node_class& node_attr, Bitwidth::Attr a
       insert_tposs_nodes(node_attr, bits);
     }
   } else if (attr == Attr::Set_sbits) {
-    auto bits = static_cast<int32_t>(val.to_i());
+    auto bits = static_cast<int32_t>(val.to_just_i64());
 
     if (!parent_pending) {
       Bitwidth_range set_bw;

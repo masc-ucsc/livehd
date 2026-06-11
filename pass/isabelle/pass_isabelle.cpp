@@ -4,7 +4,7 @@
 //  See plan 20 (lovely-popping-canyon.md).
 //
 //  Scope (v1, strict mode default):
-//    Combinational: Const, Sum, Mult, Div, And, Or, Xor, Ror, Not, LT, GT, EQ,
+//    Combinational: Dlop, Sum, Mult, Div, And, Or, Xor, Ror, Not, LT, GT, EQ,
 //                   SHL, SRA, Mux, Sext, Get_mask, Set_mask, IO
 //    Stateful:      Flop only.
 //    Rejected:      Latch, Fflop, Memory, Sub, LUT, AttrGet/AttrSet, Tposs.
@@ -31,7 +31,7 @@
 #include "absl/container/flat_hash_set.h"
 
 #include "cell.hpp"
-#include "const.hpp"
+#include "hlop/dlop.hpp"
 #include "hhds/graph.hpp"
 #include "node_util.hpp"
 #include "perf_tracing.hpp"
@@ -104,11 +104,11 @@ uint32_t raw_node_width(const Node &node) {
   return raw_pin_width(node.create_driver_pin(0));
 }
 
-Const pin_const_value(const Node_pin &pin) {
+Dlop pin_const_value(const Node_pin &pin) {
   return livehd::graph_util::hydrate_const(pin);
 }
 
-Const node_const_value(const Node &node) {
+Dlop node_const_value(const Node &node) {
   return livehd::graph_util::hydrate_const(node);
 }
 
@@ -497,7 +497,7 @@ uint32_t node_width(const Ctx &ctx, const Node &node) {
   return static_cast<uint32_t>(w);
 }
 
-std::string lit_const_at(const Ctx &ctx, const Node &node, const Const &v, uint32_t w) {
+std::string lit_const_at(const Ctx &ctx, const Node &node, const Dlop &v, uint32_t w) {
   if (w == 0 || static_cast<size_t>(w) > ctx.max_width) {
     if (ctx.strict) check_width(ctx, node, w, "Const");
     return undefined_at(1, "Const node n_" + std::to_string(node_id(node))
@@ -512,8 +512,8 @@ std::string lit_const_at(const Ctx &ctx, const Node &node, const Const &v, uint3
   }
   if (v.is_known_zero()) return lit_zero(w);
   if (v.same_repr(*Dlop::create_integer(-1))) return "((word_of_int (-1)) :: " + std::to_string(w) + " word)";
-  if (v.is_i()) {
-    const int64_t iv = v.to_i();
+  if (v.is_just_i64()) {
+    const int64_t iv = v.to_just_i64();
     if (iv < 0) return lit_const_neg(iv, w);
     return lit_const_pos(iv, w);
   }
@@ -532,7 +532,7 @@ std::string lit_const_at(const Ctx &ctx, const Node &node, const Const &v, uint3
 // Driver expression: how the consumer references the value produced by `dpin`.
 // - graph input    -> "in_<field> i"
 // - flop output    -> "st_<field> s"
-// - inlined Const  -> direct numeral (positive) or word_of_int (negative)
+// - inlined Dlop  -> direct numeral (positive) or word_of_int (negative)
 // - any other node -> "n_<nid>"  (the let-binding name)
 std::string driver_expr(const Ctx &ctx, const Node_pin &dpin) {
   auto driver_node = pin_node(dpin);
@@ -613,15 +613,15 @@ std::string nat_list(const std::vector<uint32_t> &xs) {
   return oss.str();
 }
 
-std::string int_of_const(const Ctx &ctx, const Node &node, const Const &v, uint32_t w) {
+std::string int_of_const(const Ctx &ctx, const Node &node, const Dlop &v, uint32_t w) {
   if (v.has_unknowns()) {
     fatal(ctx, "Const node n_" + std::to_string(node_id(node))
                    + " has X/Z bits; certificate strict mode rejects four-valued logic.");
   }
   if (v.is_known_zero()) return "0";
   if (v.same_repr(*Dlop::create_integer(-1))) return "(- 1)";
-  if (v.is_i()) {
-    const auto i = v.to_i();
+  if (v.is_just_i64()) {
+    const auto i = v.to_just_i64();
     if (i < 0) return "(- " + std::to_string(-i) + ")";
     return std::to_string(i);
   }
@@ -1500,9 +1500,9 @@ std::string emit_node_expr(const Ctx &ctx, const Node &node) {
 
   switch (op) {
     case Ntype_op::Nconst: {
-      // Const expression is inlined at use site by driver_expr().
+      // Dlop expression is inlined at use site by driver_expr().
       // But emit_node_expr is called when the node is in the let-chain
-      // (which we suppress for Const). If somehow reached, format directly.
+      // (which we suppress for Dlop). If somehow reached, format directly.
       return lit_const_at(ctx, node, node_const_value(node), w);
     }
 
@@ -1854,7 +1854,7 @@ std::string emit_node_expr(const Ctx &ctx, const Node &node) {
 }
 
 // Reachability: starting from the union of root-set drivers, walk reverse-fanin
-// stopping at primary inputs, flop outputs, and Const nodes. Emit a topological
+// stopping at primary inputs, flop outputs, and Dlop nodes. Emit a topological
 // order of all reached internal combinational nodes.
 std::vector<Node> reachable_topo_order(Ctx & /*ctx*/, const std::vector<Node_pin> &roots,
                                        const absl::flat_hash_set<uint32_t> &flop_nids) {

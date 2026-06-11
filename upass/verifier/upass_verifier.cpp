@@ -130,7 +130,7 @@ upass::Emit_decision uPass_verifier::classify_statement() {
   //             user's `cassert(cond, "msg")` second argument here)
   // Resolve both through the runner's aggregated fold_ref so we see whatever
   // constprop (or any future pass) knows.
-  std::optional<Const> val;
+  std::optional<Dlop> val;
   std::string          operand_text;
   std::string          assert_msg;  // user-supplied message (cassert's 2nd arg), if any
   bool                 got_child = move_to_child();
@@ -146,7 +146,7 @@ upass::Emit_decision uPass_verifier::classify_statement() {
     // string a ref the runner can fold. Only a comptime-known string is
     // surfaced; anything else is dropped (the diag still reports without it).
     if (move_to_sibling()) {
-      std::optional<Const> mval;
+      std::optional<Dlop> mval;
       if (is_type(Lnast_ntype::Lnast_ntype_const)) {
         mval = *Dlop::from_pyrope(current_text());
       } else if (is_type(Lnast_ntype::Lnast_ntype_ref) && runner_st != nullptr) {
@@ -281,7 +281,7 @@ upass::Emit_decision uPass_verifier::classify_func_call() {
     return upass::Emit_decision::drop();
   }
 
-  std::optional<Const> val;
+  std::optional<Dlop> val;
   if (is_type(Lnast_ntype::Lnast_ntype_const)) {
     val = *Dlop::from_pyrope(current_text());
   } else if (is_type(Lnast_ntype::Lnast_ntype_ref) && runner_st != nullptr) {

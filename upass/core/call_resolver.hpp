@@ -19,7 +19,7 @@
 #include <unordered_set>
 #include <vector>
 
-#include "const.hpp"
+#include "hlop/dlop.hpp"
 #include "lnast.hpp"
 #include "lnast_manager.hpp"
 #include "symbol_table.hpp"
@@ -33,7 +33,7 @@ constexpr std::string_view ufcs_arg_marker = "__ufcs_arg";  // task 1k UFCS rece
 struct Call_actual {
   bool        is_named = false;
   std::string name     = {};
-  Const       value    = {};
+  Dlop       value    = {};
   // When the actual is a bare ref to a caller variable, remember the name
   // so a `ref` param can write back into the caller's scope after the
   // body is folded. Empty when the actual is a const literal or named with
@@ -44,7 +44,7 @@ struct Call_actual {
   // (e.g. {"x": 2, "y": 11}). Set together with is_bundle=true; `value`
   // is then unused.
   bool                                   is_bundle = false;
-  std::unordered_map<std::string, Const> bundle_value = {};
+  std::unordered_map<std::string, Dlop> bundle_value = {};
   // True when the actual could not be folded to a concrete scalar/bundle
   // (e.g. runtime-only Flop driver). The inliner binds nothing for these
   // params but still folds body stmts that don't depend on them.
@@ -59,7 +59,7 @@ struct Call_actual {
 std::optional<std::vector<Call_actual>> collect_call_actuals(
     Lnast_manager& lm, const Symbol_table& st,
     const std::unordered_map<std::string, std::shared_ptr<Lnast>>& function_registry,
-    const std::function<std::optional<Const>()>&                   resolve_scalar_at_cursor);
+    const std::function<std::optional<Dlop>()>&                   resolve_scalar_at_cursor);
 
 
 // Callee NAME resolution: the exact-name module plus any unique
@@ -105,7 +105,7 @@ void process_import_call(Lnast_manager& lm, Symbol_table& st,
                          const std::unordered_map<std::string, std::shared_ptr<Lnast>>& function_registry,
                          const std::unordered_set<std::string>&                         ambiguous_units,
                          const std::function<void(const std::string&)>&                 pend_import,
-                         const std::function<void(std::string_view, const Const&)>&     store_trivial,
+                         const std::function<void(std::string_view, const Dlop&)>&     store_trivial,
                          const std::string&                                             dst);
 
 }  // namespace upass::call_resolver

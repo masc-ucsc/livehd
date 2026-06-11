@@ -4,7 +4,7 @@
 
 #include <format>
 
-#include "const.hpp"
+#include "hlop/dlop.hpp"
 #include "diag.hpp"
 #include "lnast.hpp"
 
@@ -60,7 +60,7 @@ uPass_typecheck::Kind uPass_typecheck::seed_kind_from_const(std::string_view t) 
     return Kind::string;  // double-quoted string const. (Single-quoted `'a'` is
                           // a CHARACTER literal = integer — handled below.)
   }
-  auto v = Const::from_pyrope(t);
+  auto v = Dlop::from_pyrope(t);
   if (v && v->is_integer()) {
     return Kind::integer;  // includes multi-bit unknown literals like `0sb??`
   }

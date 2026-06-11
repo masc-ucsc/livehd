@@ -10,7 +10,7 @@
 #include "absl/strings/str_cat.h"
 #include "battr.hpp"
 #include "bundle_key.hpp"
-#include "const.hpp"
+#include "hlop/dlop.hpp"
 #include "kind.hpp"
 
 class Bundle : std::enable_shared_from_this<Bundle> {
@@ -20,14 +20,14 @@ public:
   // The per-pass attribute responsibilities (see upass/README.md) are the
   // authoritative registry of these fields (one writer each); extend the
   // struct and that table together. Default Dlop is Type::Invalid =
-  // "unset/unknown" for every Const-typed fact.
+  // "unset/unknown" for every Dlop-typed fact.
   struct Entry {
     Entry() = default;
-    Entry(bool i, const Const& t) : trivial(t), immutable(i) {}
+    Entry(bool i, const Dlop& t) : trivial(t), immutable(i) {}
 
-    Const trivial;             // the comptime value (constprop; shared must-agree slice)
-    Const decl_max, decl_min;  // declared envelope (type-bake pre-step; persistent)
-    Const bw_max, bw_min;      // derived range (bitwidth; per-write)
+    Dlop trivial;             // the comptime value (constprop; shared must-agree slice)
+    Dlop decl_max, decl_min;  // declared envelope (type-bake pre-step; persistent)
+    Dlop bw_max, bw_min;      // derived range (bitwidth; per-write)
 
     upass::Kind kind = upass::Kind::unknown;  // typecheck / type-bake
     upass::Mode mode = upass::Mode::unknown;  // per-field mut/const (type-bake; rides entry copies)
@@ -35,7 +35,7 @@ public:
     bool        comptime  = false;
   };
 
-  static inline Const invalid_lconst{};  // default Dlop is Type::Invalid
+  static inline Dlop invalid_lconst{};  // default Dlop is Type::Invalid
 
   // Canonical key ordering used by Bundle storage. Per dotted segment:
   // attrs (`__foo`) < named (alphabetical) < unnamed (numeric, not lex).
@@ -62,7 +62,7 @@ public:
     int              pos        = -1;
     size_t           leaf_count = 0;
     bool             has_leafs  = false;
-    Const            scalar;
+    Dlop            scalar;
   };
 
   // Sorted-iteration views over Bundle data. Materialized on each call
@@ -204,7 +204,7 @@ public:
     }
     return key_map.size() == 1 && !key_map.begin()->second.trivial.is_invalid();
   }
-  std::optional<Const> scalar() const {
+  std::optional<Dlop> scalar() const {
     if (has_root_) {
       if (root_.trivial.is_invalid()) {
         return std::nullopt;
@@ -217,9 +217,9 @@ public:
     return key_map.begin()->second.trivial;
   }
 
-  // Const-operand factory for the runner's operand resolution (one wrapper
+  // Dlop-operand factory for the runner's operand resolution (one wrapper
   // per const operand per node). One allocation, zero map nodes (inline root).
-  static std::shared_ptr<Bundle> make_const(const Const& v, upass::Kind k) {
+  static std::shared_ptr<Bundle> make_const(const Dlop& v, upass::Kind k) {
     auto b = std::make_shared<Bundle>("");
     b->root_           = Entry(false, v);
     b->root_.kind      = k;
@@ -234,12 +234,12 @@ public:
   bool has_trivial(std::string_view key) const;
 
   const Entry& get_entry(std::string_view key) const;
-  const Const& get_trivial(std::string_view key) const { return get_entry(key).trivial; }
+  const Dlop& get_trivial(std::string_view key) const { return get_entry(key).trivial; }
   // The LONE non-attr entry's value regardless of key depth (a 1-element
   // tuple-of-tuple flattens); invalid when the bundle isn't single-entry.
   // (The explicit spelling — a no-arg get_trivial() was ambiguous with the
   // "0"-keyed form, which means FIELD ZERO on a multi-shaped bundle.)
-  const Const& lone_trivial() const;
+  const Dlop& lone_trivial() const;
 
   bool                    has_bundle(std::string_view key) const;
   std::shared_ptr<Bundle> get_bundle(std::string_view key) const;
@@ -255,7 +255,7 @@ public:
   // declared envelope, derived range, comptime): only the value slice and the
   // mutability flag change. "Metadata that must not change across assignments
   // remains declaration-persistent."
-  Entry value_entry(std::string_view key, bool immutable_flag, const Const& trivial) const {
+  Entry value_entry(std::string_view key, bool immutable_flag, const Dlop& trivial) const {
     Entry e     = get_entry(key);  // copies the facts; invalid sentinel when missing
     e.trivial   = trivial;
     e.immutable = immutable_flag;
@@ -268,21 +268,21 @@ public:
     return e;
   }
 
-  void set(std::string_view key, const Const& trivial) { set(key, value_entry(key, false, trivial)); }
-  void let(std::string_view key, const Const& trivial) {
+  void set(std::string_view key, const Dlop& trivial) { set(key, value_entry(key, false, trivial)); }
+  void let(std::string_view key, const Dlop& trivial) {
     I(!immutable);  // FIXME: use llog library
     set(key, value_entry(key, true, trivial));
   }
-  void mut(std::string_view key, const Const& trivial) {
+  void mut(std::string_view key, const Dlop& trivial) {
     I(!immutable);  // FIXME: use llog library
     set(key, value_entry(key, false, trivial));
   }
-  void var(std::string_view key, const Const& trivial) {
+  void var(std::string_view key, const Dlop& trivial) {
     I(!immutable);  // FIXME: use llog library
     set(key, value_entry(key, false, trivial));
   }
 
-  void set(const Const& trivial) {  // clear everything that is not 0.__attr. set 0
+  void set(const Dlop& trivial) {  // clear everything that is not 0.__attr. set 0
     return set("0", trivial);
   }
 
@@ -300,14 +300,14 @@ public:
   bool has_attr(std::string_view field, std::string_view attr_name) const {
     return attr_map.find(absl::StrCat(field, ".", canon_attr(attr_name))) != attr_map.end();
   }
-  const Const& get_attr(std::string_view attr_name) const { return attr_entry(canon_attr(attr_name)).trivial; }
-  const Const& get_attr(std::string_view field, std::string_view attr_name) const {
+  const Dlop& get_attr(std::string_view attr_name) const { return attr_entry(canon_attr(attr_name)).trivial; }
+  const Dlop& get_attr(std::string_view field, std::string_view attr_name) const {
     return attr_entry(absl::StrCat(field, ".", canon_attr(attr_name))).trivial;
   }
-  void set_attr(std::string_view attr_name, const Const& v) {
+  void set_attr(std::string_view attr_name, const Dlop& v) {
     attr_map.insert_or_assign(std::string(canon_attr(attr_name)), Entry(false, v));
   }
-  void set_attr(std::string_view field, std::string_view attr_name, const Const& v) {
+  void set_attr(std::string_view field, std::string_view attr_name, const Dlop& v) {
     attr_map.insert_or_assign(absl::StrCat(field, ".", canon_attr(attr_name)), Entry(false, v));
   }
 
@@ -317,7 +317,7 @@ public:
   // false with *conflict set to the colliding canonical path — the caller
   // diagnoses; `this` may be left partially merged, so discard it on failure.
   bool concat(const std::shared_ptr<Bundle const>& tup2, std::string* conflict = nullptr);
-  bool concat(const Const& trivial);
+  bool concat(const Dlop& trivial);
 
   bool is_empty() const { return !has_root_ && key_map.empty() && attr_map.empty(); }
   bool is_scalar() const { return has_root_ || key_map.size() <= 1; }

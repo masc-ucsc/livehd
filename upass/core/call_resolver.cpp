@@ -15,7 +15,7 @@ namespace upass::call_resolver {
 std::optional<std::vector<Call_actual>> collect_call_actuals(
     Lnast_manager& lm, const Symbol_table& st,
     const std::unordered_map<std::string, std::shared_ptr<Lnast>>& function_registry,
-    const std::function<std::optional<Const>()>&                   resolve_scalar_at_cursor) {
+    const std::function<std::optional<Dlop>()>&                   resolve_scalar_at_cursor) {
   std::vector<Call_actual> actuals;
 
   const auto is_type = [&](Lnast_ntype::Lnast_ntype_int t) { return lm.get_raw_ntype() == t; };
@@ -26,7 +26,7 @@ std::optional<std::vector<Call_actual>> collect_call_actuals(
   // reads. Skipped for trivial-scalar bundles (key "0" only) — those route
   // through the normal scalar path and let typecast/built-in folds keep
   // working.
-  auto try_collect_bundle = [&]() -> std::optional<std::unordered_map<std::string, Const>> {
+  auto try_collect_bundle = [&]() -> std::optional<std::unordered_map<std::string, Dlop>> {
     if (!is_type(Lnast_ntype::Lnast_ntype_ref)) {
       return std::nullopt;
     }
@@ -35,7 +35,7 @@ std::optional<std::vector<Call_actual>> collect_call_actuals(
     if (!bundle || bundle->is_trivial_scalar()) {
       return std::nullopt;
     }
-    std::unordered_map<std::string, Const> out;
+    std::unordered_map<std::string, Dlop> out;
     for (const auto& [k, ep] : bundle->non_attr_entries()) {
       if (ep.trivial.is_invalid()) {
         return std::nullopt;
@@ -78,7 +78,7 @@ std::optional<std::vector<Call_actual>> collect_call_actuals(
         }
         // Function-name actual (closure_capture, fcall6 style): when the
         // referenced name resolves to a known function in the registry,
-        // surface the qualified function name as a string Const so the
+        // surface the qualified function name as a string Dlop so the
         // callee's body can dispatch through it via inner_fname lookup.
         std::string qualified = std::string(lm.get_top_module_name()) + "." + actual.var_name;
         if (function_registry.count(qualified)) {
@@ -145,7 +145,7 @@ void process_import_call(Lnast_manager& lm, Symbol_table& st,
                          const std::unordered_map<std::string, std::shared_ptr<Lnast>>& function_registry,
                          const std::unordered_set<std::string>&                         ambiguous_units,
                          const std::function<void(const std::string&)>&                 pend_import,
-                         const std::function<void(std::string_view, const Const&)>&     store_trivial,
+                         const std::function<void(std::string_view, const Dlop&)>&     store_trivial,
                          const std::string&                                             dst) {
   if (!lm.move_to_sibling()) {
     return;  // malformed call (no argument) — leave unfolded

@@ -9,7 +9,7 @@
 #include <unordered_map>
 #include <vector>
 
-#include "const.hpp"
+#include "hlop/dlop.hpp"
 #include "lnast_ntype.hpp"
 #include "call_resolver.hpp"
 #include "absl/container/flat_hash_set.h"
@@ -163,7 +163,7 @@ protected:
   // value — not the raw signed literal. (Mirrors the attributes-side coercion
   // in tmp_fold, but here it lands in constprop's symbol table where its own
   // op-folding reads operands.) Signed/none-typed decls are not recorded.
-  // Stores the declared MAX as a Const (for uN this is the N-bit all-ones
+  // Stores the declared MAX as a Dlop (for uN this is the N-bit all-ones
   // mask); the first-write coercion is `v & max`. No width/to_i — task 1g.
   std::optional<std::string>             pending_unsigned_overflow_msg_;
 
@@ -211,7 +211,7 @@ protected:
     return nullptr;
   }
 
-  Const current_pyrope_value() { return *Dlop::from_pyrope(current_text()); }
+  Dlop current_pyrope_value() { return *Dlop::from_pyrope(current_text()); }
 
   // Declared facts read from the BINDING (the runner bake writes
   // mode/type_name/decl ranges at the declare node, before any store):
@@ -223,22 +223,22 @@ protected:
     const auto b = st().get_bundle(var);
     return b ? std::string(b->get_type_name()) : std::string{};
   }
-  // The declared MAX for an UNSIGNED int decl (min known ≥ 0); invalid Const
+  // The declared MAX for an UNSIGNED int decl (min known ≥ 0); invalid Dlop
   // when unsigned-ness doesn't hold or nothing was declared.
-  Const decl_unsigned_max_of(std::string_view var) {
+  Dlop decl_unsigned_max_of(std::string_view var) {
     const auto b = st().get_bundle(var);
     if (!b) {
-      return Const();
+      return Dlop();
     }
     const Bundle::Entry& e = b->get_entry("0");
     if (e.decl_max.is_invalid() || e.decl_min.is_invalid() || e.decl_min.is_negative() || e.decl_max.is_negative()) {
-      return Const();
+      return Dlop();
     }
     return e.decl_max;
   }
 
 
-  void check_unsigned_positive_overflow(std::string_view lhs, const Const& value);
+  void check_unsigned_positive_overflow(std::string_view lhs, const Dlop& value);
 
   // Field paths read via tuple_get this walk (unused-unset warning).
   absl::flat_hash_set<std::string> field_reads_;
@@ -284,9 +284,9 @@ protected:
   // Push-form operand value. Mirrors current_prim_value: the
   // cross-pass fold override wins (wrap/sat narrowed values, attr-derived
   // tmps — all of which land on the table),
-  // then a scalar bundle flattens, then the stored trivial. Const operands
+  // then a scalar bundle flattens, then the stored trivial. Dlop operands
   // carry their parsed value in the resolver's make_const bundle.
-  Const operand_value(const upass::Operand& o) {
+  Dlop operand_value(const upass::Operand& o) {
     if (!o.name.empty()) {
       // Cross-pass folds land on the table — read it directly.
       if (auto b = st().get_bundle(o.name); b && b->is_scalar()) {
@@ -296,7 +296,7 @@ protected:
       }
       return st().get_trivial(o.name);
     }
-    return o.bundle ? o.bundle->lone_trivial() : Const();
+    return o.bundle ? o.bundle->lone_trivial() : Dlop();
   }
 
   // Push-form fold templates (the cursor-walking originals below die with
@@ -306,7 +306,7 @@ protected:
     if (dst.empty() || src.empty()) {
       return upass::Vote::keep;
     }
-    Const r = operand_value(src[0]);
+    Dlop r = operand_value(src[0]);
     if (!is_numeric(r)) {
       return upass::Vote::keep;
     }
@@ -327,12 +327,12 @@ protected:
     if (dst.empty() || src.size() < 2) {
       return upass::Vote::keep;
     }
-    Const n1 = operand_value(src[0]);
-    Const n2 = operand_value(src[1]);
+    Dlop n1 = operand_value(src[0]);
+    Dlop n2 = operand_value(src[1]);
     if (!is_numeric(n1) || !is_numeric(n2)) {
       return upass::Vote::keep;
     }
-    Const r = op(n1, n2);
+    Dlop r = op(n1, n2);
     if (!r.is_invalid()) {
       store_trivial(dst, r);
     }
@@ -343,7 +343,7 @@ protected:
     if (dst.empty() || src.empty()) {
       return upass::Vote::keep;
     }
-    Const r = operand_value(src[0]);
+    Dlop r = operand_value(src[0]);
     if (!is_numeric(r)) {
       return upass::Vote::keep;
     }
@@ -358,11 +358,11 @@ protected:
     if (dst.empty() || src.empty()) {
       return upass::Vote::keep;
     }
-    Const v = operand_value(src[0]);
+    Dlop v = operand_value(src[0]);
     if (!is_numeric(v)) {
       return upass::Vote::keep;
     }
-    Const r = op(v);
+    Dlop r = op(v);
     if (!r.is_invalid()) {
       store_trivial(dst, r);
     }
@@ -392,14 +392,27 @@ protected:
   // Predicates for the standard "is this value foldable?" guard. `is_numeric`
   // allows X-bit unknowns through (n-ary bitwise ops propagate `?` bits);
   // `foldable` is the strict version used everywhere else.
-  static bool is_numeric(const Const& v) { return !v.is_invalid() && !v.is_string(); }
-  static bool foldable(const Const& v) { return is_numeric(v) && !v.has_unknowns(); }
+  static bool is_numeric(const Dlop& v) { return !v.is_invalid() && !v.is_string(); }
+  static bool foldable(const Dlop& v) { return is_numeric(v) && !v.has_unknowns(); }
+
+  // True while folding a deferred-template body (Lnast::is_template — an
+  // extracted lambda with unbound params/var-args, stamped by func_extract).
+  // There, unbound params fold nil-derived placeholder values, so value-level
+  // diagnostics (descending range, concat overlap, …) would be optimization
+  // artifacts, not user mistakes — the genuine error resurfaces when the body
+  // is realized (inlined/specialized) at a real call site. Fully-typed
+  // extracted bodies are NOT exempt: whatever folds there is a real
+  // compile-time fact.
+  bool in_template_body() const {
+    const auto& ln = lm->get_lnast();
+    return ln && ln->is_template();
+  }
 
   // Type-agnostic structural identity: same base+extra+size, but type may
   // differ. Used by process_eq_ne to fold `(v != 0) == 0sb?` (Boolean unknown
   // vs Integer unknown with identical bit patterns) to known-true. Dlop's
   // same_repr requires matching `type`, so it can't catch this case.
-  static bool same_bits_ignore_type(const Const& a, const Const& b) {
+  static bool same_bits_ignore_type(const Dlop& a, const Dlop& b) {
     if (a.is_invalid() || b.is_invalid()) {
       return false;
     }
@@ -430,12 +443,12 @@ protected:
   // bits packed LSB-first. `end` may be `nil` for an open-ended `lo..` slice
   // (lowered via sra_op); a concrete `hi >= lo` lowers via get_mask_op with
   // the closed mask. Returns invalid when bounds are not folded integers.
-  static Const apply_range_mask(const Const& value, const Const& start, const Const& end);
+  static Dlop apply_range_mask(const Dlop& value, const Dlop& start, const Dlop& end);
 
   // Single-shot "store result only when the value actually changed".
   // The has_trivial/get_trivial!=/set dance was repeated at every fold site;
   // centralising it kills a bug-prone pattern.
-  void store_trivial(std::string_view name, const Const& v) {
+  void store_trivial(std::string_view name, const Dlop& v) {
     if (!st().has_trivial(name) || !st().get_trivial(name).same_repr(v)) {
       st().set(name, v);
     }
@@ -467,7 +480,7 @@ protected:
 
   // Task 1g — type-aware `does`/`equals`. A resolved operand carries its scalar
   // KIND plus, for integers, a (max,min) ENVELOPE (with explicit unbounded
-  // flags) and — when it has a concrete value — the literal/folded Const used
+  // flags) and — when it has a concrete value — the literal/folded Dlop used
   // to coerce a scalar into a single-positional bundle for the structural
   // (tuple) path. `bundle` is set only for real tuples.
   struct Does_operand {
@@ -475,10 +488,10 @@ protected:
     Kind                          kind = Kind::unknown;
     bool                          max_inf = false;  // envelope max is +∞
     bool                          min_inf = false;  // envelope min is −∞
-    Const                         max;
-    Const                         min;
+    Dlop                         max;
+    Dlop                         min;
     bool                          has_value = false;
-    Const                         value;  // valid when has_value
+    Dlop                         value;  // valid when has_value
     std::shared_ptr<Bundle const> bundle;  // set when kind==tuple
     // The TABLE name the bundle was resolved under (Bundle::name is
     // gone); resolve_field_operand's dotted declared-type query keys on it.
@@ -489,7 +502,7 @@ protected:
   std::optional<Does_operand> resolve_does_operand();
   // Build a scalar Does_operand from a declared type query plus an optional
   // folded value (shared by the ref-operand and per-field paths).
-  static Does_operand build_scalar_operand(const upass::uPass::Scalar_type_query& q, const Const& folded);
+  static Does_operand build_scalar_operand(const upass::uPass::Scalar_type_query& q, const Dlop& folded);
   // Resolve one named/positional field of a bundle to a Does_operand for the
   // per-field type check (1g-D): declared type via the dotted query
   // (`bundle.field`), value via the bundle entry, sub-bundle for nested tuples.
@@ -505,7 +518,7 @@ protected:
   static std::optional<Does_operand> decode_prim_type_token(std::string_view name);
   // Build a one-entry positional bundle {0: value} so a scalar operand can take
   // the structural path against a real tuple (`(100,30) does 30`).
-  static std::shared_ptr<Bundle> single_positional_bundle(const Const& v);
+  static std::shared_ptr<Bundle> single_positional_bundle(const Dlop& v);
   // Tri-state kind+envelope `a does b` for two NON-tuple operands. nullopt =
   // undecidable.
   static std::optional<bool> scalar_does(const Does_operand& a, const Does_operand& b);
@@ -521,7 +534,7 @@ protected:
 
   static inline std::unordered_map<std::string, std::shared_ptr<Lnast>> function_registry;
 
-  std::optional<Const>                    resolve_current_scalar() const;
+  std::optional<Dlop>                    resolve_current_scalar() const;
   std::optional<std::vector<Call_actual>> collect_call_actuals();
 
   // Direct-cell call dispatch: `__sum(a, b)`, `__hotmux(sel, a, b, …)`, etc.

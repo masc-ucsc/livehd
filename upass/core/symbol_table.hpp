@@ -9,7 +9,7 @@
 #include "absl/container/flat_hash_map.h"
 #include "absl/container/flat_hash_set.h"
 #include "bundle.hpp"
-#include "const.hpp"
+#include "hlop/dlop.hpp"
 
 class Symbol_table {
 public:
@@ -36,7 +36,7 @@ public:
     std::vector<std::string>                                  modified_under_uncertainty;
   };
 
-  static inline Const invalid_lconst{};  // default Dlop is Type::Invalid
+  static inline Dlop invalid_lconst{};  // default Dlop is Type::Invalid
 
   Symbol_table()                               = default;
   Symbol_table(const Symbol_table&)            = delete;
@@ -100,8 +100,8 @@ public:
   struct Pending_decl {
     upass::Kind kind{upass::Kind::unknown};
     upass::Mode mode{upass::Mode::unknown};
-    Const       decl_max;
-    Const       decl_min;
+    Dlop       decl_max;
+    Dlop       decl_min;
     bool        comptime{false};
   };
   absl::flat_hash_map<std::string, Pending_decl> pending_decl_facts;
@@ -123,7 +123,7 @@ public:
   // a concrete (no-unknowns) value on a TRIVIAL-SCALAR binding. A
   // multi-entry tuple or named 1-tuple never inlines (position-0 truncation),
   // and unknown-carrying values never inline (LEC-breaking).
-  std::optional<Const> known_const_scalar(std::string_view name) const {
+  std::optional<Dlop> known_const_scalar(std::string_view name) const {
     if (name.empty() || !is_known_const(name)) {
       return std::nullopt;
     }
@@ -140,25 +140,25 @@ public:
   absl::flat_hash_map<std::string, std::map<std::string, std::string>> tuple_slot_ref;
 
   bool mut(std::string_view key, std::shared_ptr<Bundle> bundle);
-  bool mut(std::string_view key, const Const& trivial);
+  bool mut(std::string_view key, const Dlop& trivial);
   bool mut(std::string_view key, const spool_ptr<Dlop>& trivial) { return mut(key, *trivial); }
 
   bool set(std::string_view key, std::shared_ptr<Bundle> bundle);
-  bool set(std::string_view key, const Const& trivial);
+  bool set(std::string_view key, const Dlop& trivial);
   bool set(std::string_view key, const spool_ptr<Dlop>& trivial) { return set(key, *trivial); }
 
   bool let(std::string_view key, std::shared_ptr<Bundle> bundle);
-  bool let(std::string_view key, const Const& trivial);
+  bool let(std::string_view key, const Dlop& trivial);
 
   bool has_trivial(std::string_view key) const;
   bool has_bundle(std::string_view key) const;
   bool has_known(std::string_view key) const { return has_trivial(key) || has_bundle(key); }
 
-  /// Returns true iff `name` holds a concrete Const with no unknown bits.
+  /// Returns true iff `name` holds a concrete Dlop with no unknown bits.
   bool is_known_const(std::string_view name) const;
 
-  // Const can be 0sb? or 123 or string or bool or nil or runtime (0sb? and runtime?)
-  const Const&            get_trivial(std::string_view key) const;
+  // Dlop can be 0sb? or 123 or string or bool or nil or runtime (0sb? and runtime?)
+  const Dlop&            get_trivial(std::string_view key) const;
   std::shared_ptr<Bundle> get_bundle(std::string_view key) const;
   // COW variant for in-place mutation: un-shares the varmap slot before
   // returning it, so writes don't leak into whole-bundle-assignment aliases

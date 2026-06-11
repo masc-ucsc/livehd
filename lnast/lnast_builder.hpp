@@ -4,7 +4,7 @@
 #include <stack>
 
 #include "absl/container/flat_hash_set.h"
-#include "const.hpp"
+#include "hlop/dlop.hpp"
 #include "lnast.hpp"
 
 // Frontend-agnostic LNAST construction surface. Owns the shared lnast and

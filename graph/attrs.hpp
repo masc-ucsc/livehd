@@ -92,15 +92,15 @@ inline constexpr place_t place{};
 // (with its pos1=line-vs-byte mismatch) and livehd::attrs::source string pair
 // were write-only and are gone ([[1f]]).
 
-// Per-node serialized Const value used by Nconst cells.
-// Replaces Lgraph_attributes::const_map (which stored Const::serialize()).
+// Per-node serialized Dlop value used by Nconst cells.
+// Replaces Lgraph_attributes::const_map (which stored Dlop::serialize()).
 struct const_value_t {
   using value_type = std::string;
   using storage    = hhds::flat_storage;
 };
 inline constexpr const_value_t const_value{};
 
-// Per-pin serialized Const value carried on CONST_NODE pins whose port_id is
+// Per-pin serialized Dlop value carried on CONST_NODE pins whose port_id is
 // beyond the small-int fast-path range (`Const_small_pid_count`). For pins in
 // the small-int range, the value is encoded directly in the port_id (scheme
 // A) and this attribute is absent.
@@ -110,7 +110,7 @@ struct pin_const_value_t {
 };
 inline constexpr pin_const_value_t pin_const_value{};
 
-// Per-node serialized LUT-table Const used by LUT cells.
+// Per-node serialized LUT-table Dlop used by LUT cells.
 // Replaces Lgraph_attributes::lut_map.
 struct lut_t {
   using value_type = std::string;

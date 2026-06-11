@@ -30,7 +30,7 @@
 #include <string>
 #include <string_view>
 
-#include "const.hpp"
+#include "hlop/dlop.hpp"
 #include "upass_attributes.hpp"
 
 // aggregate-attr inheritance is a READ-side fallback now: a dotted

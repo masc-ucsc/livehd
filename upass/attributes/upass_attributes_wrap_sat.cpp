@@ -29,7 +29,7 @@
 #include <string>
 #include <string_view>
 
-#include "const.hpp"
+#include "hlop/dlop.hpp"
 #include "upass_attributes.hpp"
 #include "upass_utils.hpp"
 #include "wrap_sat.hpp"  // narrowing math now lives in //upass/bitwidth (T2 #7)
@@ -47,7 +47,7 @@ using upass::bitwidth::wrap_to_unsigned;
 
 }  // namespace
 
-Const uPass_attributes::narrow_for_lhs(std::string_view type_src, const Const& v, bool is_wrap, bool is_sat) const {
+Dlop uPass_attributes::narrow_for_lhs(std::string_view type_src, const Dlop& v, bool is_wrap, bool is_sat) const {
   if (!is_wrap && !is_sat) {
     return v;
   }
@@ -85,7 +85,7 @@ void uPass_attributes::process_func_call() {
     return;
   }
 
-  std::optional<Const> value;
+  std::optional<Dlop> value;
   std::string          type_src;
   while (move_to_sibling()) {
     if (!is_type(Lnast_ntype::Lnast_ntype_store)) {
@@ -119,7 +119,7 @@ void uPass_attributes::process_func_call() {
   if (!value || type_src.empty()) {
     return;
   }
-  Const out = narrow_for_lhs(type_src, *value, is_wrap, is_sat);
+  Dlop out = narrow_for_lhs(type_src, *value, is_wrap, is_sat);
   if (out.is_invalid() || out.same_repr(*value)) {
     return;  // narrowing is a no-op; constprop's copy-through carries the value
   }
@@ -173,7 +173,7 @@ void uPass_attributes::record_assign(std::string_view lhs, bool rhs_is_nil) {
   }
   const bool was_bound = field.empty() ? b->has_attr("vbound") : b->has_attr(field, "vbound");
 
-  // Const single-bind enforcement. Skipped inside an init-construction
+  // Dlop single-bind enforcement. Skipped inside an init-construction
   // window: the runner's synthesized constructor stores (defaults bind +
   // ref-self write-back) are one logical binding, not user re-binds.
   if (ti->decl == Decl_kind::const_kind && init_construction_depth_ == 0 && was_bound) {

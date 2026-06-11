@@ -17,7 +17,7 @@ void uPass_assert::process_func_call() {
     move_to_sibling();  // advance to the assertion argument
     const auto val = current_prim_value();
     // Only flag if the value is concretely known to be false.
-    // An invalid/unknown Const (val.is_invalid()) means the argument is not
+    // An invalid/unknown Dlop (val.is_invalid()) means the argument is not
     // constpropagated yet — we cannot statically decide, so do not throw.
     if (!val.is_invalid() && val.is_known_false()) {
       upass::error(lm->get_lnast()->span_of(lm->get_current_nid()),

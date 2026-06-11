@@ -297,7 +297,10 @@ void Eprp::process_ast() {
   }
 
   // Bottom-up walk: HHDS post-order yields children before their parent.
-  for (const auto& nid : ast->get_root().post_order_class()) {
+  // get_root() hoisted into a local: gcc-14 -Wdangling-reference flags the
+  // range-for over a member call on the temporary.
+  const auto ast_root = ast->get_root();
+  for (const auto& nid : ast_root.post_order_class()) {
     process_ast_handler(nid, ast->get_data(nid));
   }
 }

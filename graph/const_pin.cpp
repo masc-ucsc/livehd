@@ -37,13 +37,13 @@ std::mutex& registry_mutex() {
 
 namespace livehd::graph_util {
 
-hhds::Pin_class create_const(hhds::Graph& g, const Const& value) {
+hhds::Pin_class create_const(hhds::Graph& g, const Dlop& value) {
   auto const_node = g.get_constant_node();
 
   // Small-int fast path: integer values in [-16, 15] get a pid-encoded pin
   // on CONST_NODE. No payload, no registry entry — the pid IS the value.
-  if (value.is_i()) {
-    auto iv = value.to_i();
+  if (value.is_just_i64()) {
+    auto iv = value.to_just_i64();
     if (is_small_const_int(iv)) {
       return const_node.create_driver_pin(encode_small_const(iv));
     }
@@ -91,7 +91,7 @@ hhds::Pin_class create_const(hhds::Graph& g, const Const& value) {
   }
 }
 
-Const hydrate_const(const hhds::Pin_class& pin) {
+Dlop hydrate_const(const hhds::Pin_class& pin) {
   if (pin.is_invalid()) {
     return *Dlop::create_integer(0);
   }
@@ -115,7 +115,7 @@ Const hydrate_const(const hhds::Pin_class& pin) {
   return hydrate_const(master);
 }
 
-Const hydrate_const(const hhds::Node_class& node) {
+Dlop hydrate_const(const hhds::Node_class& node) {
   if (node.is_invalid()) {
     return *Dlop::create_integer(0);
   }

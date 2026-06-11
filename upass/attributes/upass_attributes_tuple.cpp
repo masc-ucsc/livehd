@@ -29,7 +29,7 @@
 #include <utility>
 #include <vector>
 
-#include "const.hpp"
+#include "hlop/dlop.hpp"
 #include "lnast_ntype.hpp"
 #include "upass_attributes.hpp"
 
@@ -43,8 +43,8 @@ bool is_uppercase_first(std::string_view s) {
 }
 
 // String-quote helper: Dlop::from_pyrope expects strings with surrounding
-// single quotes. Build an Const from a raw identifier text.
-Const pyrope_string(std::string_view raw) {
+// single quotes. Build an Dlop from a raw identifier text.
+Dlop pyrope_string(std::string_view raw) {
   std::string s;
   s.reserve(raw.size() + 2);
   s.push_back('\'');
@@ -267,7 +267,7 @@ void uPass_attributes::process_tuple_get() {
   }
 }
 
-std::optional<Const> uPass_attributes::derive_aggregate_size(std::string_view base) const {
+std::optional<Dlop> uPass_attributes::derive_aggregate_size(std::string_view base) const {
   // Size = the binding's top-level cardinality (aliases share the
   // slot; constprop materializes closed integer ranges as tuple bundles, so
   // ranges resolve here too).
@@ -287,7 +287,7 @@ std::optional<Const> uPass_attributes::derive_aggregate_size(std::string_view ba
   }
   if (auto rb = lookup_range(range_key); rb) {
     if (rb->first.is_integer() && rb->second.is_integer()) {
-      // size = end - start + 1 (bundle cardinality), in Const arithmetic.
+      // size = end - start + 1 (bundle cardinality), in Dlop arithmetic.
       auto sz = rb->second.sub_op(rb->first)->add_op(*Dlop::create_integer(1));
       if (!sz->is_negative() && !sz->is_known_zero()) {
         return *sz;
@@ -297,7 +297,7 @@ std::optional<Const> uPass_attributes::derive_aggregate_size(std::string_view ba
   return std::nullopt;
 }
 
-std::optional<Const> uPass_attributes::derive_aggregate_bits(std::string_view base) const {
+std::optional<Dlop> uPass_attributes::derive_aggregate_bits(std::string_view base) const {
   // Phase 8 typesystem redesign: aggregates (tuples / arrays) have no
   // `.[bits]`. Only scalars do — per-field queries `t.a.[bits]` are
   // handled by derive_bits, not here. The earlier sum-of-fields rule
@@ -306,7 +306,7 @@ std::optional<Const> uPass_attributes::derive_aggregate_bits(std::string_view ba
   return std::nullopt;
 }
 
-std::optional<Const> uPass_attributes::derive_aggregate_typename(std::string_view base, std::string_view base_text) const {
+std::optional<Dlop> uPass_attributes::derive_aggregate_typename(std::string_view base, std::string_view base_text) const {
   // Explicit attr wins.
   if (auto v = lookup_attr_value(base, "typename"); v) {
     return v;
@@ -343,7 +343,7 @@ std::optional<Const> uPass_attributes::derive_aggregate_typename(std::string_vie
   // The field typename rides the container binding's field attr
   // (set_binding_attr echoes extraction-tmp attr_sets to the source field;
   // aliases share the slot, so no alias hop / sibling-tmp scan).
-  auto field_typename = [&](const std::string& container) -> std::optional<Const> {
+  auto field_typename = [&](const std::string& container) -> std::optional<Dlop> {
     return lookup_attr_value(container + "." + field, "typename");
   };
   // 1. The field typename recorded directly on `parent`'s bundle.
@@ -363,7 +363,7 @@ std::optional<Const> uPass_attributes::derive_aggregate_typename(std::string_vie
   return std::nullopt;
 }
 
-std::optional<Const> uPass_attributes::derive_aggregate_key(std::string_view base, std::string_view base_text) const {
+std::optional<Dlop> uPass_attributes::derive_aggregate_key(std::string_view base, std::string_view base_text) const {
   (void)base_text;
   // For an aggregate read on `var`, [key] returns the variable's own name.
   if (!base.empty()) {
@@ -372,7 +372,7 @@ std::optional<Const> uPass_attributes::derive_aggregate_key(std::string_view bas
   return std::nullopt;
 }
 
-std::optional<Const> uPass_attributes::lookup_attr_with_inheritance(std::string_view base, std::string_view attr) const {
+std::optional<Dlop> uPass_attributes::lookup_attr_with_inheritance(std::string_view base, std::string_view attr) const {
   // Attrs ride the bindings (shared slots, value copies, the
   // name-fact preservation in Symbol_table::set), and lookup_attr_value
   // already does the cat-D field→root fallback. The one chase left is an

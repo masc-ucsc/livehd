@@ -12,7 +12,7 @@
 #include <vector>
 
 #include "bundle.hpp"
-#include "const.hpp"
+#include "hlop/dlop.hpp"
 #include "lnast.hpp"
 #include "lnast_manager.hpp"
 #include "lnast_ntype.hpp"
@@ -89,7 +89,7 @@ public:
 
   // Called by the runner for every `ref <name>` operand it is about to emit
   // (RHS of an op, condition of an `if`, cassert operand). If any pass
-  // returns a concrete Const, the runner writes `const <value>` in place of
+  // returns a concrete Dlop, the runner writes `const <value>` in place of
   // the ref. First non-nullopt wins.
 
   // Perf hint to the runner. Overriding passes return true so the runner
@@ -112,8 +112,8 @@ public:
   // a value reads nil for all three. Either bound may be unset (unbounded).
   // See bitreverse.prp.
   struct Decl_scalar_type {
-    std::optional<Const> range_max;
-    std::optional<Const> range_min;
+    std::optional<Dlop> range_max;
+    std::optional<Dlop> range_min;
   };
 
   // Declared type (scalar kind + optional integer range) of a DOTTED field
@@ -121,8 +121,8 @@ public:
   // compare the declared self type's fields against the receiver's.
   struct Field_decl_type {
     Io_kind              kind{Io_kind::none};
-    std::optional<Const> range_max;
-    std::optional<Const> range_min;
+    std::optional<Dlop> range_max;
+    std::optional<Dlop> range_min;
   };
 
   // Declared storage class of a variable. The inliner uses this to reject a
@@ -146,7 +146,7 @@ public:
   // The runner wires this up after every pass is constructed (so the
   // callback sees the full pass list). Before that point it is empty —
   // defensive callers should check before invoking.
-  using Fold_fn = std::function<std::optional<Const>(std::string_view)>;
+  using Fold_fn = std::function<std::optional<Dlop>(std::string_view)>;
 
   // Runner-supplied helper that re-emits the op-node at `src` (with operand
   // folding through try_fold_ref) at the runner's current staging cursor.
@@ -170,8 +170,8 @@ public:
   // unbounded envelope (superset of any int), matching the 1g ruling.
   struct Scalar_type_query {
     Io_kind              kind{Io_kind::none};
-    std::optional<Const> range_max;
-    std::optional<Const> range_min;
+    std::optional<Dlop> range_max;
+    std::optional<Dlop> range_min;
     bool                 annotated{false};
   };
   using Type_query_fn = std::function<Scalar_type_query(std::string_view)>;

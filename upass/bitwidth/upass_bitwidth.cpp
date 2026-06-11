@@ -57,14 +57,14 @@ uPass_bitwidth::uPass_bitwidth(std::shared_ptr<upass::Lnast_manager>& _lm) : upa
 
 // ── Lnast_range ↔ bundle-Entry conversion ────────────────────────────────────
 
-std::optional<int64_t> uPass_bitwidth::const_to_i64(const Const& v) {
+std::optional<int64_t> uPass_bitwidth::const_to_i64(const Dlop& v) {
   if (v.is_invalid() || !v.is_integer() || v.has_unknowns() || v.get_bits() > 62) {
     return std::nullopt;
   }
-  return v.to_i();
+  return v.to_just_i64();
 }
 
-Lnast_range uPass_bitwidth::range_from_entry(const Const& maxc, const Const& minc) {
+Lnast_range uPass_bitwidth::range_from_entry(const Dlop& maxc, const Dlop& minc) {
   const auto mx = const_to_i64(maxc);
   const auto mn = const_to_i64(minc);
   if (!mx || !mn) {
@@ -254,6 +254,33 @@ void uPass_bitwidth::record_overflow(std::string_view name, const Lnast_range& v
   });
 }
 
+void uPass_bitwidth::check_shift_amount(const Lnast_range& amt) {
+  if (amt.is_unbounded() || amt.min >= 0) {
+    return;
+  }
+  // Skip deferred-template bodies (Lnast::is_template): unbound params fold
+  // nil-derived placeholder values, so a negative amount there is an
+  // optimization artifact — the realized copy at a real call site re-checks.
+  if (const auto& ln = lm->get_lnast(); ln && ln->is_template()) {
+    return;
+  }
+  const bool         always_negative = amt.max < 0;
+  livehd::diag::Span span;
+  if (const auto& ln = lm->get_lnast()) {
+    span = ln->span_of(lm->get_current_nid());
+  }
+  livehd::diag::sink().emit(livehd::diag::Diagnostic{
+      .severity = always_negative ? livehd::diag::Severity::error : livehd::diag::Severity::warning,
+      .code     = "negative-shift",
+      .category = "bitwidth",
+      .pass     = "upass.bitwidth",
+      .message  = always_negative ? std::format("shift amount is always negative (range [{}, {}])", amt.min, amt.max)
+                                  : std::format("shift amount may be negative (range [{}, {}])", amt.min, amt.max),
+      .span     = std::move(span),
+      .hint     = "a shift / bit-select count must be >= 0",
+  });
+}
+
 // ── Process hooks (push form) ────────────────────────────────────────────────
 
 upass::Vote uPass_bitwidth::process_store(std::string_view dst_name, Bundle& dst, upass::Src_span src) {
@@ -316,12 +343,16 @@ upass::Vote uPass_bitwidth::process_mod(std::string_view dst_name, Bundle& dst, 
 
 upass::Vote uPass_bitwidth::process_shl(std::string_view dst_name, Bundle& dst, upass::Src_span src) {
   if (src.size() < 2) { return stamp(dst_name, dst, Lnast_range::make_unbounded()); }
-  return stamp(dst_name, dst, range_of_operand(src[0]).shl(range_of_operand(src[1])));
+  const auto amt = range_of_operand(src[1]);
+  check_shift_amount(amt);
+  return stamp(dst_name, dst, range_of_operand(src[0]).shl(amt));
 }
 
 upass::Vote uPass_bitwidth::process_sra(std::string_view dst_name, Bundle& dst, upass::Src_span src) {
   if (src.size() < 2) { return stamp(dst_name, dst, Lnast_range::make_unbounded()); }
-  return stamp(dst_name, dst, range_of_operand(src[0]).sra(range_of_operand(src[1])));
+  const auto amt = range_of_operand(src[1]);
+  check_shift_amount(amt);
+  return stamp(dst_name, dst, range_of_operand(src[0]).sra(amt));
 }
 
 // Bitwise ops — conservative: join of operand ranges (not tight).
@@ -489,8 +520,8 @@ void uPass_bitwidth::process_type_spec() {
     return;
   }
   const std::string var{current_text()};
-  std::optional<Const> dmax;
-  std::optional<Const> dmin;
+  std::optional<Dlop> dmax;
+  std::optional<Dlop> dmin;
   if (move_to_sibling() && Lnast_ntype::is_prim_type_int(get_raw_ntype())) {
     if (move_to_child()) {
       if (Lnast_ntype::is_const(get_raw_ntype())) {

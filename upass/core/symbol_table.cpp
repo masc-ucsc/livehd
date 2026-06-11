@@ -212,7 +212,7 @@ bool Symbol_table::set(std::string_view key, std::shared_ptr<Bundle> bundle) {
         // bind tracking, per-field fmode/fcomptime): `z = 300` keeps every
         // attr the incoming value bundle doesn't carry itself — the legacy
         // attr map was name-keyed, so values never displaced attrs.
-        std::vector<std::pair<std::string, Const>> need_attrs;
+        std::vector<std::pair<std::string, Dlop>> need_attrs;
         for (const auto& [k, fe] : old->get_attrs()) {
           if (bundle->get_attrs().find(k) == bundle->get_attrs().end()) {
             need_attrs.emplace_back(k, fe.trivial);
@@ -258,7 +258,7 @@ bool Symbol_table::set(std::string_view key, std::shared_ptr<Bundle> bundle) {
   return true;
 }
 
-bool Symbol_table::set(std::string_view key, const Const& trivial) {
+bool Symbol_table::set(std::string_view key, const Dlop& trivial) {
   I(!stack.empty());
   assert_no_prefix(key);
   auto [var, field] = get_var_field(key);
@@ -284,7 +284,7 @@ bool Symbol_table::set(std::string_view key, const Const& trivial) {
   return true;
 }
 
-bool Symbol_table::mut(std::string_view key, const Const& trivial) {
+bool Symbol_table::mut(std::string_view key, const Dlop& trivial) {
   assert_no_prefix(key);
   auto [var, field] = get_var_field(key);
 
@@ -490,7 +490,7 @@ bool Symbol_table::has_trivial(std::string_view key) const {
   return it->second->has_trivial(field);
 }
 
-const Const& Symbol_table::get_trivial(std::string_view key) const {
+const Dlop& Symbol_table::get_trivial(std::string_view key) const {
   auto [var, field] = get_var_field(key);
 
   const auto* s = find_decl_scope_read(var);  // Reads cross the Function barrier

@@ -18,7 +18,7 @@
 #include <string>
 #include <string_view>
 
-#include "const.hpp"
+#include "hlop/dlop.hpp"
 #include "kind.hpp"
 #include "lnast.hpp"
 #include "symbol_table.hpp"
@@ -33,8 +33,8 @@ struct Facts {
   uint32_t             bits{0};
   bool                 is_comptime{false};
   bool                 has_type_spec{false};
-  std::optional<Const> range_max;
-  std::optional<Const> range_min;
+  std::optional<Dlop> range_max;
+  std::optional<Dlop> range_min;
 };
 
 // Returns nullopt when nothing was declared for `var`. `ln` may be null
@@ -110,8 +110,8 @@ inline std::optional<Facts> lookup(const Symbol_table& st, const Lnast* ln, std:
   }
   if (b && !field.empty()) {
     if (m == upass::Mode::unknown) {
-      if (const auto& fm = b->get_attr(field, "fmode"); !fm.is_invalid() && fm.is_i()) {
-        m = static_cast<upass::Mode>(fm.to_i());
+      if (const auto& fm = b->get_attr(field, "fmode"); !fm.is_invalid() && fm.is_just_i64()) {
+        m = static_cast<upass::Mode>(fm.to_just_i64());
       }
     }
     if (!ti.is_comptime) {
@@ -170,8 +170,8 @@ inline std::optional<Facts> lookup(const Symbol_table& st, const Lnast* ln, std:
   // whole-bundle attr for bare ones (builtin attrs never inherit root→field).
   if (ti.bits == 0 && b) {
     const auto& bv = field.empty() ? b->get_attr("bits") : b->get_attr(field, "bits");
-    if (!bv.is_invalid() && bv.is_i()) {
-      ti.bits          = static_cast<uint32_t>(bv.to_i());
+    if (!bv.is_invalid() && bv.is_just_i64()) {
+      ti.bits          = static_cast<uint32_t>(bv.to_just_i64());
       ti.has_type_spec = true;
       any              = true;
     }

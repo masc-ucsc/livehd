@@ -117,13 +117,13 @@ void uPass_func_extract::process_stmts() { ++stmts_depth; }
 
 void uPass_func_extract::process_stmts_post() { --stmts_depth; }
 
-// Resolve a child cursor node to a Const. Const literals decode via
+// Resolve a child cursor node to a Dlop. Dlop literals decode via
 // from_pyrope; refs resolve through latest_outer_value first (named outer
 // scalars), then temp_scalar_value (SSA temps). Returns nullopt on
 // anything we can't statically resolve.
-static std::optional<Const> resolve_child_scalar(const std::string& name, bool is_ref, bool is_const,
-                                                 const std::unordered_map<std::string, Const>& latest,
-                                                 const std::unordered_map<std::string, Const>& temps) {
+static std::optional<Dlop> resolve_child_scalar(const std::string& name, bool is_ref, bool is_const,
+                                                 const std::unordered_map<std::string, Dlop>& latest,
+                                                 const std::unordered_map<std::string, Dlop>& temps) {
   if (is_const) {
     try {
       return *Dlop::from_pyrope(name);
@@ -150,9 +150,9 @@ static std::optional<Const> resolve_child_scalar(const std::string& name, bool i
 // arithmetic process_* hook (plus, minus, mult, ...) so derived comptime
 // values like `const DERIVED = K + A` survive the func_extract walk.
 template <typename Op>
-static void fold_temp_nary(upass::Lnast_manager* lm, Op op, const std::unordered_map<std::string, Const>& latest_outer_value,
-                           const std::unordered_map<std::string, Const>& temp_scalar_value,
-                           std::unordered_map<std::string, Const>&       out_temps) {
+static void fold_temp_nary(upass::Lnast_manager* lm, Op op, const std::unordered_map<std::string, Dlop>& latest_outer_value,
+                           const std::unordered_map<std::string, Dlop>& temp_scalar_value,
+                           std::unordered_map<std::string, Dlop>&       out_temps) {
   if (!lm->has_child()) {
     return;
   }
@@ -167,7 +167,7 @@ static void fold_temp_nary(upass::Lnast_manager* lm, Op op, const std::unordered
     lm->restore_cursor(saved);
     return;
   }
-  std::optional<Const> acc = resolve_child_scalar(std::string(lm->current_text()),
+  std::optional<Dlop> acc = resolve_child_scalar(std::string(lm->current_text()),
                                                   Lnast_ntype::is_ref(lm->current_type()),
                                                   Lnast_ntype::is_const(lm->current_type()),
                                                   latest_outer_value,
@@ -209,7 +209,7 @@ upass::Vote uPass_func_extract::process_plus(std::string_view dst_name, Bundle& 
 
   fold_temp_nary(
       lm.get(),
-      [](const Const& a, const Const& b) { return *a.add_op(b); },
+      [](const Dlop& a, const Dlop& b) { return *a.add_op(b); },
       latest_outer_value,
       temp_scalar_value,
       temp_scalar_value);
@@ -223,7 +223,7 @@ upass::Vote uPass_func_extract::process_minus(std::string_view dst_name, Bundle&
 
   fold_temp_nary(
       lm.get(),
-      [](const Const& a, const Const& b) { return *a.sub_op(b); },
+      [](const Dlop& a, const Dlop& b) { return *a.sub_op(b); },
       latest_outer_value,
       temp_scalar_value,
       temp_scalar_value);
@@ -237,7 +237,7 @@ upass::Vote uPass_func_extract::process_mult(std::string_view dst_name, Bundle& 
 
   fold_temp_nary(
       lm.get(),
-      [](const Const& a, const Const& b) { return *a.mult_op(b); },
+      [](const Dlop& a, const Dlop& b) { return *a.mult_op(b); },
       latest_outer_value,
       temp_scalar_value,
       temp_scalar_value);
@@ -251,7 +251,7 @@ upass::Vote uPass_func_extract::process_div(std::string_view dst_name, Bundle& d
 
   fold_temp_nary(
       lm.get(),
-      [](const Const& a, const Const& b) { return *a.div_op(b); },
+      [](const Dlop& a, const Dlop& b) { return *a.div_op(b); },
       latest_outer_value,
       temp_scalar_value,
       temp_scalar_value);
@@ -265,7 +265,7 @@ upass::Vote uPass_func_extract::process_bit_and(std::string_view dst_name, Bundl
 
   fold_temp_nary(
       lm.get(),
-      [](const Const& a, const Const& b) { return *a.and_op(b); },
+      [](const Dlop& a, const Dlop& b) { return *a.and_op(b); },
       latest_outer_value,
       temp_scalar_value,
       temp_scalar_value);
@@ -279,7 +279,7 @@ upass::Vote uPass_func_extract::process_bit_or(std::string_view dst_name, Bundle
 
   fold_temp_nary(
       lm.get(),
-      [](const Const& a, const Const& b) { return *a.or_op(b); },
+      [](const Dlop& a, const Dlop& b) { return *a.or_op(b); },
       latest_outer_value,
       temp_scalar_value,
       temp_scalar_value);
@@ -293,7 +293,7 @@ upass::Vote uPass_func_extract::process_bit_xor(std::string_view dst_name, Bundl
 
   fold_temp_nary(
       lm.get(),
-      [](const Const& a, const Const& b) { return *a.xor_op(b); },
+      [](const Dlop& a, const Dlop& b) { return *a.xor_op(b); },
       latest_outer_value,
       temp_scalar_value,
       temp_scalar_value);
@@ -320,7 +320,7 @@ upass::Vote uPass_func_extract::process_tuple_add(std::string_view dst_name, Bun
     return upass::Vote::keep;
   }
   std::string                            lhs_name(lm->current_text());
-  std::unordered_map<std::string, Const> fields;
+  std::unordered_map<std::string, Dlop> fields;
   while (lm->move_to_sibling()) {
     if (!Lnast_ntype::is_store(lm->current_type()) || !lm->has_child()) {
       lm->restore_cursor(saved);
@@ -383,7 +383,7 @@ void uPass_func_extract::process_assign() {
   // only write so far was an unconditional, top-level `assign <ref>
   // <const>`. Any of the following pushes it into `outer_non_const`
   // permanently, so it never escapes the function boundary:
-  //   * RHS is not a trivial Const (ref, computed, bundle).
+  //   * RHS is not a trivial Dlop (ref, computed, bundle).
   //   * The assign sits inside any nested stmts (an if-arm with a stmts
   //     wrapper, a loop body, a scope_statement, …).
   //   * The assign sits directly under an `if` node (the flat
@@ -618,7 +618,7 @@ void uPass_func_extract::process_func_def() {
 
   if (move_to_sibling()) {
     // Closure capture for `comb`: any outer name the body reads and whose
-    // current value was set by a trivial-Const `assign` in the surrounding
+    // current value was set by a trivial-Dlop `assign` in the surrounding
     // scope gets inlined at the head of the extracted body's stmts. The
     // copied body content lands AFTER these capture stmts, so constprop's
     // ordinary top-down walk sees the binding before the use — no

@@ -373,7 +373,7 @@ private:
   void park_current(const std::string& lhs);
 
   // True when `name` resolves to a fully-known compile-time constant via the
-  // runner's fold seam (concrete Const, no unknowns/invalid). Such a read is
+  // runner's fold seam (concrete Dlop, no unknowns/invalid). Such a read is
   // served by fold_ref at the consumer, so a parked store need not be flushed.
   bool is_comptime(std::string_view name) const;
 

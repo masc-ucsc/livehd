@@ -5,7 +5,7 @@
 #include <memory>
 #include <vector>
 
-#include "const.hpp"
+#include "hlop/dlop.hpp"
 #include "hhds/graph.hpp"
 #include "node_util.hpp"  // graph:graph — livehd::graph_util::* helpers
 #include "pass.hpp"
@@ -28,9 +28,9 @@ protected:
 
   void replace_part_inputs_const(hhds::Node_class& node, std::vector<hhds::Edge_class>& inp_edges_ordered);
   void replace_all_inputs_const(hhds::Node_class& node, std::vector<hhds::Edge_class>& inp_edges_ordered);
-  void replace_node(hhds::Node_class& node, const Const& result);
+  void replace_node(hhds::Node_class& node, const Dlop& result);
   void replace_node(hhds::Node_class& node, const spool_ptr<Dlop>& result) { replace_node(node, *result); }
-  void replace_logic_node(hhds::Node_class& node, const Const& result);
+  void replace_logic_node(hhds::Node_class& node, const Dlop& result);
   void replace_logic_node(hhds::Node_class& node, const spool_ptr<Dlop>& result) { replace_logic_node(node, *result); }
 
   bool            scalar_mux(hhds::Node_class& node, std::vector<hhds::Edge_class>& inp_edges_ordered);

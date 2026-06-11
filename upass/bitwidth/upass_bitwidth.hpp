@@ -7,7 +7,7 @@
 #include <string_view>
 
 #include "absl/container/flat_hash_set.h"
-#include "const.hpp"
+#include "hlop/dlop.hpp"
 #include "diag.hpp"
 #include "lnast_range.hpp"
 #include "upass_core.hpp"
@@ -94,8 +94,8 @@ private:
   absl::flat_hash_set<std::string> wrap_sat_exempt_;
 
   // ── Lnast_range ↔ bundle-Entry conversion ─────────────────────────────────
-  static std::optional<int64_t> const_to_i64(const Const& v);
-  static Lnast_range            range_from_entry(const Const& maxc, const Const& minc);
+  static std::optional<int64_t> const_to_i64(const Dlop& v);
+  static Lnast_range            range_from_entry(const Dlop& maxc, const Dlop& minc);
   // Range of a pushed operand: comptime point value first (const literals /
   // folded scalars), then the "0" Entry's bw facts, then bw_meta (cross-
   // invocation persistence), else unbounded.
@@ -122,6 +122,13 @@ private:
 
   // Emit the common diagnostic at the current node's span.
   void record_overflow(std::string_view name, const Lnast_range& value, const Lnast_range& env);
+
+  // Shift-amount sanity for shl/sra (negative-shift): a hardware shift count
+  // must be >= 0, judged on the amount's derived range — error when the range
+  // is entirely negative (max < 0), warning when it merely allows negatives
+  // (min < 0 <= max). Replaces the old constprop comptime-only diagnostic:
+  // the range view also covers folded constants and runtime amounts.
+  void check_shift_amount(const Lnast_range& amt);
 
   // Common body for the value-op hooks.
   Vote stamp(std::string_view dst_name, Bundle& dst, Lnast_range r) {

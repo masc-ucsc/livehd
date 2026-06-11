@@ -134,7 +134,7 @@ void uPass_attributes::on_assign_like(bool is_assign_node) {
   // is an explicit invalidation per spec and is not counted as a binding.
   // Detect by checking the single rhs ref or const text.
   bool                 rhs_is_nil = false;
-  std::optional<Const> rhs_value;  // direct LNAST-source value, when scalar
+  std::optional<Dlop> rhs_value;  // direct LNAST-source value, when scalar
 
   // rhs_value is only consumed by the wrap/sat narrowing block below, which
   // requires a policy on view.lhs. If no wrap/sat policy is in scope at all,
@@ -150,7 +150,7 @@ void uPass_attributes::on_assign_like(bool is_assign_node) {
   // Task 1b — also materialize the RHS for a SIGNED-int / bounded LHS so the
   // first-write range-fit check (below) can run on it. An unbounded `int`/
   // `uint` (no concrete width or range) has no envelope, so it stays on the
-  // fast path (and a present-but-nil range Const must not be treated as a
+  // fast path (and a present-but-nil range Dlop must not be treated as a
   // bound — that crashes Dlop arithmetic).
   const bool  lhs_signed_bounded
       = lhs_ti_for_coerce != nullptr && lhs_ti_for_coerce->has_type_spec && lhs_ti_for_coerce->kind == Numeric_kind::signed_int
@@ -220,7 +220,7 @@ void uPass_attributes::on_assign_like(bool is_assign_node) {
     // Wrap/sat policy takes precedence (handled above).
     if (rhs_value->is_negative()) {
       // Known-negative bit pattern → reinterpret as the unsigned N-bit value.
-      Const out = *rhs_value->and_op(*Dlop::get_mask_value(static_cast<int>(lhs_ti_for_coerce->bits)));
+      Dlop out = *rhs_value->and_op(*Dlop::get_mask_value(static_cast<int>(lhs_ti_for_coerce->bits)));
       if (!out.is_invalid() && !out.same_repr(*rhs_value)) {
         auto [iter, inserted] = tmp_fold.emplace(view.lhs, out);
         if (!inserted && !iter->second.same_repr(out)) {
@@ -371,7 +371,7 @@ upass::Vote uPass_attributes::process_is(std::string_view dst_name, Bundle& dst,
     return upass::Vote::keep;
   }
 
-  std::optional<Const> tn    = lookup_attr_value(lhs, "typename");
+  std::optional<Dlop> tn    = lookup_attr_value(lhs, "typename");
   bool                 match = false;
   if (tn) {
     auto        repr = tn->to_pyrope();
@@ -379,7 +379,7 @@ upass::Vote uPass_attributes::process_is(std::string_view dst_name, Bundle& dst,
         = (repr.size() >= 2 && repr.front() == '\'' && repr.back() == '\'') ? std::string{repr.substr(1, repr.size() - 2)} : repr;
     match = (stored == rhs_text);
   }
-  Const folded        = match ? *Dlop::create_integer(1) : *Dlop::create_integer(0);
+  Dlop folded        = match ? *Dlop::create_integer(1) : *Dlop::create_integer(0);
   auto [it, inserted] = tmp_fold.emplace(std::string{dvar}, folded);
   if (!inserted && !it->second.same_repr(folded)) {
     it->second = folded;
@@ -393,7 +393,7 @@ upass::Vote uPass_attributes::process_is(std::string_view dst_name, Bundle& dst,
   return upass::Vote::keep;
 }
 
-void uPass_attributes::set_binding_attr(std::string_view target, std::string_view attr, const Const& v) {
+void uPass_attributes::set_binding_attr(std::string_view target, std::string_view attr, const Dlop& v) {
   if (runner_st == nullptr || target.empty()) {
     return;
   }
@@ -544,15 +544,15 @@ void uPass_attributes::process_attr_set() {
       // value; lookup_type_info_bundle folds it into the answer (`uN`/`sN`
       // sugar lowers to `prim_type_int(max,min)` directly since Task 1t).
       auto v = Dlop::from_pyrope(value_text);
-      if (v->is_i()) {
+      if (v->is_just_i64()) {
         set_binding_attr(target, attr_name, *v);
       }
     } else if (value_is_ref) {
       // Refs (e.g. a runtime wire ref for clock_pin): the LGraph wiring pass
-      // resolves the TEXT by name — stored as a string Const residual attr.
+      // resolves the TEXT by name — stored as a string Dlop residual attr.
       set_binding_attr(target, absl::StrCat(attr_name, "_refname"), *Dlop::from_string(normalize_name(value_text)));
     } else {
-      Const stored;
+      Dlop stored;
       if (value_text.empty() || value_text == "true") {
         stored = Dlop::create_integer(1);
       } else {

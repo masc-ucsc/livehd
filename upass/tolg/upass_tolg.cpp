@@ -15,7 +15,7 @@
 #include "absl/container/flat_hash_map.h"
 #include "absl/container/flat_hash_set.h"
 #include "cell.hpp"
-#include "const.hpp"
+#include "hlop/dlop.hpp"
 #include "graph_library_singleton.hpp"
 #include "hhds/attrs/srcid.hpp"
 #include "lnast_ntype.hpp"
@@ -229,7 +229,7 @@ public:
       auto it = pin_map_.find(name);
       if (it == pin_map_.end()) {
         Pass::warn("upass.tolg: output '{}' not driven by body — wiring nil (0sb?)", name);
-        sink.connect_driver(create_const(*g_, *Const::from_pyrope("0sb?")));
+        sink.connect_driver(create_const(*g_, *Dlop::from_pyrope("0sb?")));
         continue;
       }
       sink.connect_driver(it->second);
@@ -258,7 +258,7 @@ private:
     return e.bits > 0 ? static_cast<int32_t>(e.bits) : int32_t{1};
   }
 
-  [[nodiscard]] Pin nil_pin() { return create_const(*g_, *Const::from_pyrope("0sb?")); }
+  [[nodiscard]] Pin nil_pin() { return create_const(*g_, *Dlop::from_pyrope("0sb?")); }
 
   // To-positive-signed: Get_mask(x, -1) -> same bits, guaranteed non-negative,
   // marked unsigned with one extra (sign) bit. Lets unsigned values flow
@@ -266,7 +266,7 @@ private:
   [[nodiscard]] Pin to_positive(const Pin& src, int32_t mw) {
     auto node = make_node(Ntype_op::Get_mask);
     setup_sink_by_name(node, "a").connect_driver(src);
-    setup_sink_by_name(node, "mask").connect_driver(create_const(*g_, *Const::create_integer(-1)));
+    setup_sink_by_name(node, "mask").connect_driver(create_const(*g_, *Dlop::create_integer(-1)));
     auto drv = node.create_driver_pin(0);
     set_bits(drv, mw + 1);
     set_unsign(drv);
@@ -313,8 +313,8 @@ private:
 
   [[nodiscard]] Val leaf(const Lnast_nid& nid) {
     if (Lnast_ntype::is_const(lnast_->get_type(nid))) {
-      auto   c  = Const::from_pyrope(lnast_->get_name(nid));
-      int32_t mw = c->is_i() ? mw_of_val(c->to_i()) : int32_t{1};
+      auto   c  = Dlop::from_pyrope(lnast_->get_name(nid));
+      int32_t mw = c->is_just_i64() ? mw_of_val(c->to_just_i64()) : int32_t{1};
       return {create_const(*g_, *c), mw};
     }
     auto name = lnast_->get_name(nid);
@@ -617,8 +617,8 @@ private:
         // non-literal init is caught at the declare (lower_declare errors on
         // a ref init); an output-reg `-> (reg q = expr)` stringifies its
         // initializer, so a malformed parse can still arrive here — reject it
-        // rather than deref a null Const.
-        auto iv = Const::from_pyrope(init);
+        // rather than deref a null Dlop.
+        auto iv = Dlop::from_pyrope(init);
         if (!iv) {
           error_here("upass.tolg: reg '{}' reset/initial value '{}' is not a compile-time constant", name, init);
           return;
@@ -626,12 +626,12 @@ private:
         setup_sink_by_name(flop, "initial").connect_driver(create_const(*g_, *iv));
       }
       if (neg) {
-        setup_sink_by_name(flop, "negreset").connect_driver(create_const(*g_, *Const::create_integer(1)));
+        setup_sink_by_name(flop, "negreset").connect_driver(create_const(*g_, *Dlop::create_integer(1)));
       }
       // sync-vs-async: per-reg `sync` attr beats the elaboration flag.
       const bool async = info.has_sync ? !info.sync_val : reset_async_default_;
       if (async) {
-        setup_sink_by_name(flop, "async").connect_driver(create_const(*g_, *Const::create_integer(1)));
+        setup_sink_by_name(flop, "async").connect_driver(create_const(*g_, *Dlop::create_integer(1)));
       }
     }
   }
@@ -851,7 +851,7 @@ private:
     auto& pin   = v ? en_true_pin_ : en_false_pin_;
     auto& valid = v ? en_true_valid_ : en_false_valid_;
     if (!valid) {
-      pin   = create_const(*g_, *Const::create_integer(v ? 1 : 0));
+      pin   = create_const(*g_, *Dlop::create_integer(v ? 1 : 0));
       valid = true;
     }
     return pin;
@@ -880,7 +880,7 @@ private:
     // write port per entry (addr=k, din=init[k], enable=reset) and gates the
     // user ports' enables with !reset. Restore ports stay OUT of the fwd
     // mask: a read during reset returns the committed (old) contents.
-    std::vector<spool_ptr<Const>> restore_vals;
+    std::vector<spool_ptr<Dlop>> restore_vals;
   };
 
   static constexpr int kMemPortStride = 12;  // == Memory sink count, graph/cell.cpp
@@ -927,7 +927,7 @@ private:
     }
     auto node = make_node(Ntype_op::SHL);
     setup_sink_by_name(node, "a").connect_driver(a);
-    setup_sink_by_name(node, "b").connect_driver(create_const(*g_, *Const::create_integer(amount)));
+    setup_sink_by_name(node, "b").connect_driver(create_const(*g_, *Dlop::create_integer(amount)));
     auto d = node.create_driver_pin(0);
     set_bits(d, amount + 2);
     set_unsign(d);
@@ -988,8 +988,8 @@ private:
       len_txt = len_txt.substr(1, len_txt.size() - 2);
     }
     int64_t size = 0;
-    if (auto c = Const::from_pyrope(len_txt); c && c->is_i()) {
-      size = c->to_i();
+    if (auto c = Dlop::from_pyrope(len_txt); c && c->is_just_i64()) {
+      size = c->to_just_i64();
     }
     if (size <= 0) {
       error_here("upass.tolg: memory '{}' size '{}' is not a positive comptime constant", name, lnast_->get_name(len_nid));
@@ -1003,8 +1003,8 @@ private:
     // re-loads the init in one cycle — finalize_mems()); with no reset the
     // init stays power-on-only. mut/const arrays get theirs via the
     // whole-array store instead.
-    spool_ptr<Const>              reg_init;
-    std::vector<spool_ptr<Const>> init_entries;
+    spool_ptr<Dlop>              reg_init;
+    std::vector<spool_ptr<Dlop>> init_entries;
     if (!is_array) {
       for (auto c = lnast_->get_sibling_next(mode_nid); !c.is_invalid(); c = lnast_->get_sibling_next(c)) {
         const auto ct = lnast_->get_type(c);
@@ -1017,17 +1017,17 @@ private:
           if (txt == "nil" || txt == "0sb?") {
             break;
           }
-          auto v = Const::from_pyrope(txt);
-          if (!v || !v->is_i()) {
+          auto v = Dlop::from_pyrope(txt);
+          if (!v || !v->is_just_i64()) {
             error_here("upass.tolg: memory '{}' initializer '{}' is not an integer constant", name, txt);
             return;
           }
           // Scalar broadcast: every entry = value (masked to the element).
-          auto mask  = Const::get_mask_value(elem_mw);
+          auto mask  = Dlop::get_mask_value(elem_mw);
           auto entry = v->and_op(*mask);
-          reg_init   = Const::create_integer(0);
+          reg_init   = Dlop::create_integer(0);
           for (int64_t i = 0; i < size; ++i) {
-            reg_init = reg_init->or_op(*entry->shl_op(*Const::create_integer(i * elem_mw)));
+            reg_init = reg_init->or_op(*entry->shl_op(*Dlop::create_integer(i * elem_mw)));
             init_entries.emplace_back(entry);
           }
           break;
@@ -1042,9 +1042,9 @@ private:
           if (!reg_init) {
             return;  // pack_tuple_init reported
           }
-          auto mask = Const::get_mask_value(elem_mw);
+          auto mask = Dlop::get_mask_value(elem_mw);
           for (const auto& e : tit->second.elems) {
-            init_entries.emplace_back(Const::from_pyrope(lnast_->get_name(e))->and_op(*mask));
+            init_entries.emplace_back(Dlop::from_pyrope(lnast_->get_name(e))->and_op(*mask));
           }
           break;
         }
@@ -1061,16 +1061,16 @@ private:
     const int64_t fwd_mask = is_array ? 1 : (int64_t{1} << user_sites) - 1;
 
     auto mem = make_node(Ntype_op::Memory);
-    setup_sink_by_name(mem, "bits").connect_driver(create_const(*g_, *Const::create_integer(elem_mw)));
-    setup_sink_by_name(mem, "size").connect_driver(create_const(*g_, *Const::create_integer(size)));
-    setup_sink_by_name(mem, "type").connect_driver(create_const(*g_, *Const::create_integer(is_array ? 2 : 0)));
-    setup_sink_by_name(mem, "fwd").connect_driver(create_const(*g_, *Const::create_integer(fwd_mask)));
-    setup_sink_by_name(mem, "wensize").connect_driver(create_const(*g_, *Const::create_integer(1)));
+    setup_sink_by_name(mem, "bits").connect_driver(create_const(*g_, *Dlop::create_integer(elem_mw)));
+    setup_sink_by_name(mem, "size").connect_driver(create_const(*g_, *Dlop::create_integer(size)));
+    setup_sink_by_name(mem, "type").connect_driver(create_const(*g_, *Dlop::create_integer(is_array ? 2 : 0)));
+    setup_sink_by_name(mem, "fwd").connect_driver(create_const(*g_, *Dlop::create_integer(fwd_mask)));
+    setup_sink_by_name(mem, "wensize").connect_driver(create_const(*g_, *Dlop::create_integer(1)));
     if (reg_init) {
       setup_sink_by_name(mem, "init").connect_driver(create_const(*g_, *reg_init));
     }
     if (!is_array) {
-      setup_sink_by_name(mem, "posclk").connect_driver(create_const(*g_, *Const::create_integer(1)));
+      setup_sink_by_name(mem, "posclk").connect_driver(create_const(*g_, *Dlop::create_integer(1)));
       if (!clock_name_.empty()) {
         setup_sink_by_name(mem, "clock_pin").connect_driver(clock_pin());
       } else {
@@ -1173,25 +1173,25 @@ private:
 
   // Pack an all-const positional tuple into the wide `init` value: entry 0
   // in the low `bits`, row-major. Returns null after reporting on error.
-  [[nodiscard]] spool_ptr<Const> pack_tuple_init(const Tuple_rec& rec, std::string_view name, int64_t size, int32_t bits) {
+  [[nodiscard]] spool_ptr<Dlop> pack_tuple_init(const Tuple_rec& rec, std::string_view name, int64_t size, int32_t bits) {
     if (static_cast<int64_t>(rec.elems.size()) != size) {
       error_here("upass.tolg: '{}' initializer has {} entries but the memory holds {}", name, rec.elems.size(), size);
       return {};
     }
-    auto mask = Const::get_mask_value(bits);
-    auto init = Const::create_integer(0);
+    auto mask = Dlop::get_mask_value(bits);
+    auto init = Dlop::create_integer(0);
     for (size_t i = 0; i < rec.elems.size(); ++i) {
       const auto& e = rec.elems[i];
       if (!Lnast_ntype::is_const(lnast_->get_type(e))) {
         error_here("upass.tolg: '{}' initializer entry {} is not a compile-time constant", name, i);
         return {};
       }
-      auto v = Const::from_pyrope(lnast_->get_name(e));
-      if (!v || !v->is_i()) {
+      auto v = Dlop::from_pyrope(lnast_->get_name(e));
+      if (!v || !v->is_just_i64()) {
         error_here("upass.tolg: '{}' initializer entry {} is not an integer constant", name, i);
         return {};
       }
-      auto entry = v->and_op(*mask)->shl_op(*Const::create_integer(static_cast<int64_t>(i) * bits));
+      auto entry = v->and_op(*mask)->shl_op(*Dlop::create_integer(static_cast<int64_t>(i) * bits));
       init       = init->or_op(*entry);
     }
     return init;
@@ -1258,14 +1258,14 @@ private:
         error_here("upass.tolg: __memory config field '{}' must be a compile-time constant", key);
         return false;
       }
-      auto v = Const::from_pyrope(lnast_->get_name(it->second));
-      if (!v || !v->is_i()) {
+      auto v = Dlop::from_pyrope(lnast_->get_name(it->second));
+      if (!v || !v->is_just_i64()) {
         // bool consts ("false"/"true") are integers in from_pyrope; anything
         // else is a config error.
         error_here("upass.tolg: __memory config field '{}' is not an integer constant", key);
         return false;
       }
-      out = v->to_i();
+      out = v->to_just_i64();
       return true;
     };
 
@@ -1324,7 +1324,7 @@ private:
       if (!Lnast_ntype::is_const(lnast_->get_type(rp))) {
         continue;  // diagnosed in the port loop below
       }
-      auto v = Const::from_pyrope(lnast_->get_name(rp));
+      auto v = Dlop::from_pyrope(lnast_->get_name(rp));
       if (!v || v->is_known_false()) {
         ++n_wr_cfg;
       }
@@ -1334,13 +1334,13 @@ private:
     const int64_t fwd_mask = fwd == 0 ? 0 : (fwd == 1 ? (int64_t{1} << n_wr_cfg) - 1 : fwd);
 
     auto mem = make_node(Ntype_op::Memory);
-    setup_sink_by_name(mem, "bits").connect_driver(create_const(*g_, *Const::create_integer(bits)));
-    setup_sink_by_name(mem, "size").connect_driver(create_const(*g_, *Const::create_integer(size)));
-    setup_sink_by_name(mem, "type").connect_driver(create_const(*g_, *Const::create_integer(type)));
-    setup_sink_by_name(mem, "fwd").connect_driver(create_const(*g_, *Const::create_integer(fwd_mask)));
-    setup_sink_by_name(mem, "wensize").connect_driver(create_const(*g_, *Const::create_integer(wensize)));
+    setup_sink_by_name(mem, "bits").connect_driver(create_const(*g_, *Dlop::create_integer(bits)));
+    setup_sink_by_name(mem, "size").connect_driver(create_const(*g_, *Dlop::create_integer(size)));
+    setup_sink_by_name(mem, "type").connect_driver(create_const(*g_, *Dlop::create_integer(type)));
+    setup_sink_by_name(mem, "fwd").connect_driver(create_const(*g_, *Dlop::create_integer(fwd_mask)));
+    setup_sink_by_name(mem, "wensize").connect_driver(create_const(*g_, *Dlop::create_integer(wensize)));
     if (type != 2) {
-      setup_sink_by_name(mem, "posclk").connect_driver(create_const(*g_, *Const::create_integer(posclk)));
+      setup_sink_by_name(mem, "posclk").connect_driver(create_const(*g_, *Dlop::create_integer(posclk)));
       if (auto it = cfg.named.find("clock_pin"); it != cfg.named.end()) {
         setup_sink_by_name(mem, "clock_pin").connect_driver(leaf(it->second).pin);
       } else if (!clock_name_.empty()) {
@@ -1350,9 +1350,9 @@ private:
       }
     }
     if (auto it = cfg.named.find("init"); it != cfg.named.end()) {
-      spool_ptr<Const> init;
+      spool_ptr<Dlop> init;
       if (Lnast_ntype::is_const(lnast_->get_type(it->second))) {
-        init = Const::from_pyrope(lnast_->get_name(it->second));
+        init = Dlop::from_pyrope(lnast_->get_name(it->second));
       } else if (auto lit = tuple_recs_.find(std::string(lnast_->get_name(it->second))); lit != tuple_recs_.end()) {
         init = pack_tuple_init(lit->second, "__memory init", size, static_cast<int32_t>(bits));
       }
@@ -1369,7 +1369,7 @@ private:
         error_here("upass.tolg: __memory 'rdport' entry {} must be a comptime 0/1 constant", i);
         return true;
       }
-      auto v = Const::from_pyrope(lnast_->get_name(rdports[i]));
+      auto v = Dlop::from_pyrope(lnast_->get_name(rdports[i]));
       const bool is_rd = v && !v->is_known_false();
       if (!is_rd) {
         ++n_wr;
@@ -1378,11 +1378,11 @@ private:
 
     for (int i = 0; i < n_ports; ++i) {
       const auto base  = i * kMemPortStride;
-      auto       rdv   = Const::from_pyrope(lnast_->get_name(rdports[i]));
+      auto       rdv   = Dlop::from_pyrope(lnast_->get_name(rdports[i]));
       const bool is_rd = rdv && !rdv->is_known_false();
       mem.create_sink_pin(static_cast<hhds::Port_id>(base + 0)).connect_driver(leaf(addrs[i]).pin);
       mem.create_sink_pin(static_cast<hhds::Port_id>(base + 10))
-          .connect_driver(create_const(*g_, *Const::create_integer(is_rd ? 1 : 0)));
+          .connect_driver(create_const(*g_, *Dlop::create_integer(is_rd ? 1 : 0)));
       Pin en = i < static_cast<int>(ens.size()) ? leaf(ens[i]).pin : en_const(true);
       mem.create_sink_pin(static_cast<hhds::Port_id>(base + 4)).connect_driver(en);
       if (!is_rd) {
@@ -1436,7 +1436,7 @@ private:
     }
     mi.node.create_sink_pin(static_cast<hhds::Port_id>(base + 4)).connect_driver(en);  // enable
     mi.node.create_sink_pin(static_cast<hhds::Port_id>(base + 10))
-        .connect_driver(create_const(*g_, *Const::create_integer(0)));  // rdport = 0 (write)
+        .connect_driver(create_const(*g_, *Dlop::create_integer(0)));  // rdport = 0 (write)
   }
 
   // tuple_get(ref dst, ref mem, idx) — one read port per site, always
@@ -1458,8 +1458,8 @@ private:
           error_here("upass.tolg: a __memory result is indexed by a single comptime read-port number");
           return;
         }
-        auto v = Const::from_pyrope(lnast_->get_name(idx));
-        const int64_t k = (v && v->is_i()) ? v->to_i() : -1;
+        auto v = Dlop::from_pyrope(lnast_->get_name(idx));
+        const int64_t k = (v && v->is_just_i64()) ? v->to_just_i64() : -1;
         if (k < 0 || k >= mr.n_rd) {
           error_here("upass.tolg: __memory result index {} out of range — the config has {} read port(s)",
                       lnast_->get_name(idx),
@@ -1485,7 +1485,7 @@ private:
     mi.node.create_sink_pin(static_cast<hhds::Port_id>(base + 0)).connect_driver(leaf(idx).pin);  // addr
     mi.node.create_sink_pin(static_cast<hhds::Port_id>(base + 4)).connect_driver(en_const(true));
     mi.node.create_sink_pin(static_cast<hhds::Port_id>(base + 10))
-        .connect_driver(create_const(*g_, *Const::create_integer(1)));  // rdport = 1 (read)
+        .connect_driver(create_const(*g_, *Dlop::create_integer(1)));  // rdport = 1 (read)
     auto dout = mi.node.create_driver_pin(static_cast<hhds::Port_id>(mi.n_wr_total + mi.rd_next));
     ++mi.rd_next;
     auto dst_name = lnast_->get_name(dst);
@@ -1541,12 +1541,12 @@ private:
         for (int64_t k = 0; k < static_cast<int64_t>(mi.restore_vals.size()); ++k) {
           const auto base = (mi.n_user_wr + k) * kMemPortStride;
           mi.node.create_sink_pin(static_cast<hhds::Port_id>(base + 0))
-              .connect_driver(create_const(*g_, *Const::create_integer(k)));
+              .connect_driver(create_const(*g_, *Dlop::create_integer(k)));
           mi.node.create_sink_pin(static_cast<hhds::Port_id>(base + 3))
               .connect_driver(create_const(*g_, *mi.restore_vals[static_cast<size_t>(k)]));
           mi.node.create_sink_pin(static_cast<hhds::Port_id>(base + 4)).connect_driver(rst);
           mi.node.create_sink_pin(static_cast<hhds::Port_id>(base + 10))
-              .connect_driver(create_const(*g_, *Const::create_integer(0)));  // rdport = 0 (write)
+              .connect_driver(create_const(*g_, *Dlop::create_integer(0)));  // rdport = 0 (write)
         }
       }
       // A read-less (or access-less) memory is a WARNING at most — its state
@@ -1575,7 +1575,7 @@ private:
       return {0, false};
     }
     auto mn    = lnast_->get_sibling_next(mx);
-    auto max_v = Const::from_pyrope(lnast_->get_name(mx));
+    auto max_v = Dlop::from_pyrope(lnast_->get_name(mx));
     if (!max_v || !max_v->is_integer()) {
       return {0, false};
     }
@@ -1583,7 +1583,7 @@ private:
     bool   min_neg     = false;
     int32_t min_bits    = 0;
     if (!mn.is_invalid()) {
-      if (auto mn_v = Const::from_pyrope(lnast_->get_name(mn)); mn_v && mn_v->is_integer()) {
+      if (auto mn_v = Dlop::from_pyrope(lnast_->get_name(mn)); mn_v && mn_v->is_integer()) {
         min_known = true;
         min_neg   = mn_v->is_negative();
         min_bits  = static_cast<int32_t>(mn_v->get_bits());
@@ -1621,12 +1621,12 @@ private:
     int64_t    smin    = 0;
     int64_t    smax    = 0;
     if (!min_nil) {
-      auto c = Const::from_pyrope(p.min_txt);
-      smin   = (c && c->is_i()) ? c->to_i() : 0;
+      auto c = Dlop::from_pyrope(p.min_txt);
+      smin   = (c && c->is_just_i64()) ? c->to_just_i64() : 0;
     }
     if (!max_nil) {
-      auto c = Const::from_pyrope(p.max_txt);
-      smax   = (c && c->is_i()) ? c->to_i() : 0;
+      auto c = Dlop::from_pyrope(p.max_txt);
+      smax   = (c && c->is_just_i64()) ? c->to_just_i64() : 0;
     }
 
     int64_t emin = smin;
@@ -1706,8 +1706,8 @@ private:
     if (name.starts_with("___pipe_")) {
       inserted_flops_.insert(flop.get_debug_nid());
     }
-    setup_sink_by_name(flop, "pipe_min").connect_driver(create_const(*g_, *Const::create_integer(emin)));
-    setup_sink_by_name(flop, "pipe_max").connect_driver(create_const(*g_, *Const::create_integer(emax)));
+    setup_sink_by_name(flop, "pipe_min").connect_driver(create_const(*g_, *Dlop::create_integer(emin)));
+    setup_sink_by_name(flop, "pipe_max").connect_driver(create_const(*g_, *Dlop::create_integer(emax)));
     if (!clock_name_.empty()) {
       setup_sink_by_name(flop, "clock_pin").connect_driver(clock_pin());
     } else {
@@ -2072,8 +2072,8 @@ private:
   }
 
   [[nodiscard]] int64_t const_val(const Lnast_nid& nid) {
-    auto c = Const::from_pyrope(lnast_->get_name(nid));
-    return c->is_i() ? c->to_i() : 0;
+    auto c = Dlop::from_pyrope(lnast_->get_name(nid));
+    return c->is_just_i64() ? c->to_just_i64() : 0;
   }
 
   // get_mask(ref(dst), value, mask) — mask is a const bitmask or a range ref.
@@ -2094,7 +2094,7 @@ private:
 
     auto node = make_node(Ntype_op::Get_mask);
     setup_sink_by_name(node, "a").connect_driver(leaf(val).pin);
-    setup_sink_by_name(node, "mask").connect_driver(create_const(*g_, *Const::create_integer(mask)));
+    setup_sink_by_name(node, "mask").connect_driver(create_const(*g_, *Dlop::create_integer(mask)));
     auto   drv = node.create_driver_pin(0);
     int32_t mw  = static_cast<int32_t>(std::popcount(static_cast<uint64_t>(mask)));
     bind_result(lnast_->get_name(dst), drv, mw);
@@ -2143,7 +2143,7 @@ private:
 
     auto node = make_node(Ntype_op::Set_mask);
     setup_sink_by_name(node, "a").connect_driver(vv.pin);
-    setup_sink_by_name(node, "mask").connect_driver(create_const(*g_, *Const::create_integer(mask)));
+    setup_sink_by_name(node, "mask").connect_driver(create_const(*g_, *Dlop::create_integer(mask)));
     setup_sink_by_name(node, "value").connect_driver(leaf(ins).pin);
     bind_result(lnast_->get_name(dst), node.create_driver_pin(0), vv.mw);
   }
@@ -2373,7 +2373,7 @@ private:
     }
     auto none_node = make_node(Ntype_op::EQ);
     none_node.create_sink_pin(0).connect_driver(or_all);
-    none_node.create_sink_pin(0).connect_driver(create_const(*g_, *Const::create_integer(0)));
+    none_node.create_sink_pin(0).connect_driver(create_const(*g_, *Dlop::create_integer(0)));
     const Pin none = none_node.create_driver_pin(0);
     set_bits(none, 1);
     set_unsign(none);
@@ -3013,7 +3013,7 @@ private:
         break;
       }
     }
-    setup_sink_by_name(const_cast<hhds::Node_class&>(node), pin_name).connect_driver(create_const(*g_, *Const::create_integer(value)));
+    setup_sink_by_name(const_cast<hhds::Node_class&>(node), pin_name).connect_driver(create_const(*g_, *Dlop::create_integer(value)));
   }
 
   void eval_node(const hhds::Node_class& node) {

@@ -237,7 +237,7 @@ const Bundle::Entry &Bundle::get_entry(std::string_view key) const {
   return invalid;
 }
 
-const Const &Bundle::lone_trivial() const {
+const Dlop &Bundle::lone_trivial() const {
   if (has_root_) {
     return root_.trivial;
   }
@@ -746,7 +746,7 @@ bool Bundle::concat(const std::shared_ptr<Bundle const> &tup, std::string *confl
   return true;
 }
 
-bool Bundle::concat(const Const &trivial) {
+bool Bundle::concat(const Dlop &trivial) {
   ensure_view_materialized(); // 1b/E
   int next_pos = 0;
   for (const auto &e : key_map) {

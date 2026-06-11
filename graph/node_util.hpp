@@ -18,7 +18,7 @@
 
 #include "attrs.hpp"
 #include "cell.hpp"
-#include "const.hpp"
+#include "hlop/dlop.hpp"
 #include "hhds/attrs/name.hpp"
 #include "hhds/graph.hpp"
 
@@ -36,7 +36,7 @@ namespace livehd::graph_util {
 // Constants outside that range get fresh port_ids starting at 32, with the
 // serialized payload attached as `livehd::attrs::pin_const_value`. A
 // per-Graph reverse map (LiveHD-side, in const_pin.cpp) provides write-side
-// deduplication so the same Const value resolves to the same pin.
+// deduplication so the same Dlop value resolves to the same pin.
 
 inline constexpr hhds::Port_id Const_small_pid_count = 32;
 
@@ -55,16 +55,16 @@ inline constexpr hhds::Port_id Const_small_pid_count = 32;
 // Create-or-find the canonical const pin for `value`. Small ints in [-16, 15]
 // are pid-encoded directly on CONST_NODE (idempotent, no payload). Larger
 // values consult a per-Graph reverse map and reuse an existing pin if the
-// same serialized Const is already materialised; otherwise allocate a fresh
+// same serialized Dlop is already materialised; otherwise allocate a fresh
 // pid (>= 32) and attach the serialized payload.
-[[nodiscard]] hhds::Pin_class create_const(hhds::Graph& g, const Const& value);
+[[nodiscard]] hhds::Pin_class create_const(hhds::Graph& g, const Dlop& value);
 
-// Decodes the Const a const pin represents. Handles both new CONST_NODE-pin
+// Decodes the Dlop a const pin represents. Handles both new CONST_NODE-pin
 // form (pid encoding for small ints, `pin_const_value` attribute otherwise)
 // and the legacy `Ntype_op::Nconst` regular-node form (with the per-node
 // `const_value` attribute) that the lgraph wrapper still produces.
-[[nodiscard]] Const hydrate_const(const hhds::Pin_class& pin);
-[[nodiscard]] Const hydrate_const(const hhds::Node_class& node);
+[[nodiscard]] Dlop hydrate_const(const hhds::Pin_class& pin);
+[[nodiscard]] Dlop hydrate_const(const hhds::Node_class& node);
 
 // HHDS stores the user-supplied type in NodeEntry::type with the low bit
 // reserved for HHDS's own `is_loop_last` semantics. The Ntype_op encoding
@@ -368,7 +368,7 @@ inline void set_type_op(const hhds::Node_class& node, Ntype_op op) {
   node.set_type(static_cast<hhds::Type>(static_cast<uint16_t>(op)));
 }
 
-// Set this node to a constant node carrying the given serialized Const.
+// Set this node to a constant node carrying the given serialized Dlop.
 // Migrated callers serialize with `Dlop::serialize()` before calling this
 // (we don't pull Dlop into node_util.hpp so it stays a leaf header).
 inline void set_type_const_serialized(const hhds::Node_class& node, std::string_view serialized) {

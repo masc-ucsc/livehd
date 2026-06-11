@@ -9,7 +9,7 @@
 #include "absl/container/flat_hash_set.h"
 #include "absl/strings/str_cat.h"
 #include "cell.hpp"
-#include "const.hpp"
+#include "hlop/dlop.hpp"
 #include "hhds/graph.hpp"
 #include "hlop/dlop.hpp"
 #include "node_util.hpp"
@@ -367,7 +367,7 @@ void Pass_opentimer::build_circuit(const std::shared_ptr<hhds::Graph>& g) {
           pin_tracker.add_or(wname, pin_net_name(e.driver));
         }
       } else if (op == Ntype_op::And) {
-        Const           a_mask = *Dlop::create_integer(-1);
+        Dlop           a_mask = *Dlop::create_integer(-1);
         hhds::Pin_class a_dpin;
         for (auto e : node.inp_edges()) {
           if (is_const_pin(e.driver)) {
