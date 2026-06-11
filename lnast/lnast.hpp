@@ -14,7 +14,10 @@
 
 #include "absl/container/flat_hash_map.h"
 #include "absl/strings/str_cat.h"
+#include "diag.hpp"
 #include "hhds/attrs/name.hpp"
+#include "hhds/attrs/srcid.hpp"
+#include "hhds/source_locator.hpp"
 #include "hhds/tree.hpp"
 #include "lnast_attrs.hpp"
 #include "lnast_ntype.hpp"
@@ -133,9 +136,13 @@ struct Lnast_tree_io {
 // Task 1m — one `pub` export of a file unit (the LiveHD docs).
 // kind: "value" (comptime/const declaration) | "comb" | "mod" | "pipe" |
 // "fluid" (exported definition; its tree url is `<unit>.<name>`).
+// srcid ([[1f]]): the pub declaration's SourceId in the unit's locator —
+// the kernel-synthesized `<unit>.__pub` wrapper anchors its nodes here.
+// 0 when unknown (e.g. a manifest-restored pub list).
 struct Lnast_pub_entry {
-  std::string name;
-  std::string kind;
+  std::string    name;
+  std::string    kind;
+  hhds::SourceId srcid = 0;
 };
 
 class Lnast {
@@ -147,7 +154,6 @@ private:
   std::shared_ptr<hhds::TreeIO> treeio_;
   std::shared_ptr<hhds::Tree>   tree_;
   std::string                   top_module_name;
-  std::string                   source_filename;
   Lnast_nid                     undefined_var_nid;
   // Task 1r — durable lambda kind ("comb" / "pipe" / "mod" / ...; empty =
   // file-level / unknown). Stamped by func_extract when a lambda is
@@ -187,13 +193,22 @@ private:
   // Bitwidth metadata populated by uPass_bitwidth::end_run().  Empty unless
   // the bitwidth pass has run on this LNAST.
   Lnast_bitwidth_meta           bw_meta_;
+  // Source-provenance table ([[1f]]): nodes carry one uint64 SourceId
+  // (hhds::attrs::srcid) resolved through this locator. One locator per Lnast
+  // (the single-writer unit — no locks); it survives replace_body (the locator
+  // belongs to the Lnast, not the tree body). adopt() chains it to the loaded
+  // Forest's source_map as a read-only base; export_into unions it back.
+  hhds::Source_locator          srcloc_;
+  // While nonzero, set_data stamps every def-bearing node with this id (the
+  // enclosing statement's span). Only producers (prp2lnast) drive it; copies
+  // and staging rebuilds leave it 0 and carry srcid explicitly.
+  hhds::SourceId                pending_srcid_{0};
 
 public:
   static constexpr char version[] = "0.1.0";
 
-  explicit Lnast() : Lnast("noname", "") {}
-  explicit Lnast(std::string_view _module_name) : Lnast(_module_name, "") {}
-  Lnast(std::string_view _module_name, std::string_view _file_name);
+  explicit Lnast() : Lnast("noname") {}
+  explicit Lnast(std::string_view _module_name);
   // Wrap an already-built unattached tree (no Forest, no TreeIO). Used by
   // the upass runner to wrap a `Forest::create_tree_temp` body so the
   // existing add_child / set_data API drives staging emission. The wrapper
@@ -271,28 +286,39 @@ public:
   std::string_view             get_vname(const Lnast_nid& nid) const { return get_name(nid); }
   void                         set_name(const Lnast_nid& nid, std::string_view name);
 
-  // LoC payload — read/write the per-node source-position attributes
-  // independently of the name/type bundle. Most callers don't need this;
-  // diagnostic prints and the parser do.
-  struct Loc {
-    uint64_t pos1{0};
-    uint64_t pos2{0};
-    uint32_t line{0};
-    uint8_t  tok{0};
-  };
-  Loc              get_loc(const Lnast_nid& nid) const;
-  void             set_loc(const Lnast_nid& nid, const Loc& loc);
-  std::string_view get_fname(const Lnast_nid& nid) const;
-  void             set_fname(const Lnast_nid& nid, std::string_view fname);
+  // ── source provenance ([[1f]]) ──────────────────────────────────────────
+  // The old per-node `lnast.loc` struct + `lnast.fname` string attributes are
+  // gone; one uint64 SourceId (hhds::attrs::srcid) resolved through the
+  // locator below replaces both.
+  hhds::Source_locator&       source_locator() noexcept { return srcloc_; }
+  const hhds::Source_locator& source_locator() const noexcept { return srcloc_; }
+
+  hhds::SourceId get_srcid(const Lnast_nid& nid) const;
+  void           set_srcid(const Lnast_nid& nid, hhds::SourceId id);
+
+  hhds::SourceId pending_srcid() const noexcept { return pending_srcid_; }
+  void           set_pending_srcid(hhds::SourceId id) noexcept { pending_srcid_ = id; }
+
+  // Def-bearing node kinds carry a SourceId; operand refs/consts and pure
+  // structure (stmts, type subtrees) carry nothing — the provenance of an
+  // operand is the provenance of its defining node.
+  static bool srcid_carries(Lnast_ntype::Lnast_ntype_int t) {
+    return !(Lnast_ntype::is_ref(t) || Lnast_ntype::is_const(t) || Lnast_ntype::is_invalid(t) || Lnast_ntype::is_stmts(t)
+             || Lnast_ntype::is_type(t));
+  }
+
+  // Resolved diagnostic span / secondary anchors for a node, at emit time.
+  // Null span / empty notes when the node carries no (resolvable) srcid.
+  livehd::diag::Span              span_of(const Lnast_nid& nid) const;
+  std::vector<livehd::diag::Note> notes_of(const Lnast_nid& nid, std::string_view message = "related source") const;
 
   // set_data: write-side helpers used by add_child / set_root /
   // append_sibling. On the read side, callers go through get_type/get_name.
   void set_data(const Lnast_nid& nid, Lnast_ntype::Lnast_ntype_int type);
   void set_data(const Lnast_nid& nid, const Lnast_node& n);
 
-  // ── module / source metadata ────────────────────────────────────────────
+  // ── module metadata ─────────────────────────────────────────────────────
   std::string_view get_top_module_name() const { return top_module_name; }
-  std::string_view get_source() const { return source_filename; }
   void             set_top_module_name(std::string_view name) { top_module_name = name; }
 
   // ── lambda kind (Task 1r; stamped by func_extract on extracted trees) ───
@@ -310,7 +336,9 @@ public:
 
   // ── pub export list (Task 1m; recorded by prp2lnast on file-level trees) ─
   const std::vector<Lnast_pub_entry>& get_pub_list() const noexcept { return pub_list_; }
-  void add_pub(std::string_view name, std::string_view kind) { pub_list_.push_back({std::string(name), std::string(kind)}); }
+  void add_pub(std::string_view name, std::string_view kind, hhds::SourceId srcid = 0) {
+    pub_list_.push_back({std::string(name), std::string(kind), srcid});
+  }
   // Folded pub-value leaves (set by uPass_constprop at file-walk completion).
   const std::vector<std::pair<std::string, std::string>>& get_pub_values() const noexcept { return pub_values_; }
   void set_pub_values(std::vector<std::pair<std::string, std::string>> v) { pub_values_ = std::move(v); }

@@ -26,6 +26,7 @@
 #include "lhd.hpp"
 #include "lnast.hpp"
 #include "lnast_ntype.hpp"
+#include "lnast_srcloc.hpp"
 #include "node_util.hpp"
 #include "pass.hpp"
 #include "prp2lnast.hpp"
@@ -329,10 +330,10 @@ void check_known_set_passes(const Options& opts) {
   for (const auto& [key, value] : opts.sets) {
     (void)value;
     auto pass = key.substr(0, key.find('.'));
-    if (pass != "upass" && pass != "cprop" && pass != "bitwidth") {
+    if (pass != "upass" && pass != "cprop" && pass != "bitwidth" && pass != "cgen") {
       throw Lhd_error{"usage",
                       std::format("--set/--config references unknown pass '{}'", pass),
-                      "known passes: upass, cprop, bitwidth (see `lhd describe recipe:O2`)"};
+                      "known passes: upass, cprop, bitwidth, cgen (see `lhd describe recipe:O2`)"};
     }
   }
 }
@@ -592,7 +593,9 @@ void emit_lnast_dump_outputs(const std::vector<std::shared_ptr<Lnast>>& units, O
 // the sorted module names.
 std::vector<std::string> cgen_into(Options& opts, Result& res, Eprp_var& var, const std::string& odir) {
   ensure_dir(odir);
-  run_step("inou.cgen.verilog", var, {{"odir", odir}}, opts, res);
+  Eprp_var::Eprp_dict labels{{"odir", odir}};
+  merge_sets(opts, "cgen", labels);  // e.g. --set cgen.srcmap=1 ([[1f]]-G)
+  run_step("inou.cgen.verilog", var, labels, opts, res);
 
   std::vector<std::string> names;
   names.reserve(var.graphs.size());
@@ -692,6 +695,23 @@ void emit_pyrope_outputs(Options& opts, Result& res, Eprp_var& var) {
     write_manifest(e.path, "pyrope", manifest);
     res.outputs.push_back(e.path);
   }
+}
+
+// [[1f]] depfile closure: a compiled unit's Source_locator file table is the
+// list of source files its provenance actually references (its own file plus
+// anything imports pulled in) — fold them into the depfile prerequisites.
+void harvest_source_files(Result& res, const std::vector<std::shared_ptr<Lnast>>& units) {
+  for (const auto& ln : units) {
+    if (!ln) {
+      continue;
+    }
+    const auto& sl = ln->source_locator();
+    for (uint32_t fid = 0; fid < sl.file_count(); ++fid) {
+      res.inputs.emplace_back(sl.file_path(fid));
+    }
+  }
+  std::sort(res.inputs.begin(), res.inputs.end());
+  res.inputs.erase(std::unique(res.inputs.begin(), res.inputs.end()), res.inputs.end());
 }
 
 void write_depfile(const Options& opts, Result& res) {
@@ -912,8 +932,19 @@ std::shared_ptr<Lnast> synthesize_pub_wrapper(const std::shared_ptr<Lnast>& ln) 
   auto              w     = std::make_shared<Lnast>(unit + ".__pub");
   auto              root  = w->set_root(Lnast_ntype::create_top());
   auto              stmts = w->add_child(root, Lnast_ntype::create_stmts());
+  // [[1f]]-C: wrapper nodes anchor at their pub declaration — re-mint the pub
+  // decl's SourceId (recorded by prp2lnast) into the wrapper's own locator.
+  auto pub_srcid_of = [&](std::string_view name) -> hhds::SourceId {
+    for (const auto& p : pubs) {
+      if (p.name == name && p.srcid != hhds::SourceId_invalid) {
+        return livehd::srcloc::import_srcid(w->source_locator(), ln->source_locator(), p.srcid);
+      }
+    }
+    return hhds::SourceId_invalid;
+  };
   for (const auto& [path, text] : ln->get_pub_values()) {
     auto s = w->add_child(stmts, Lnast_ntype::create_store());
+    w->set_srcid(s, pub_srcid_of(std::string_view(path).substr(0, path.find('.'))));
     w->add_child(s, Lnast_node::create_ref(path));
     w->add_child(s, Lnast_node::create_const(text));
   }
@@ -921,11 +952,14 @@ std::shared_ptr<Lnast> synthesize_pub_wrapper(const std::shared_ptr<Lnast>& ln) 
     if (p.kind == "value") {
       continue;
     }
-    auto a = w->add_child(stmts, Lnast_ntype::create_attr_set());
+    const auto wid = pub_srcid_of(p.name);
+    auto       a   = w->add_child(stmts, Lnast_ntype::create_attr_set());
+    w->set_srcid(a, wid);
     w->add_child(a, Lnast_node::create_ref(p.name));
     w->add_child(a, Lnast_node::create_const("__pub"));
     w->add_child(a, Lnast_node::create_const(std::format("'{}'", p.kind)));
     auto s = w->add_child(stmts, Lnast_ntype::create_store());
+    w->set_srcid(s, wid);
     w->add_child(s, Lnast_node::create_ref(p.name));
     w->add_child(s, Lnast_node::create_const(std::format("'ln:{}.{}'", unit, p.name)));
   }
@@ -1459,6 +1493,7 @@ void elaborate_command(Options& opts, Result& res) {
           res.outputs.push_back(lg_out->path);
         }
       }
+      harvest_source_files(res, var.lnasts);
       write_depfile(opts, res);
       return;
     }
@@ -1517,6 +1552,8 @@ void elaborate_command(Options& opts, Result& res) {
         save_ln_dir(opts, res, publish, ln_out->path);
       }
     }
+    harvest_source_files(res, var.lnasts);
+    write_depfile(opts, res);
     return;
   }
 
@@ -1911,6 +1948,7 @@ void compile_command(Options& opts, Result& res) {
       graph_pipeline_and_emits(opts, res, var, lib_path);
     }
   }
+  harvest_source_files(res, var.lnasts);
   write_depfile(opts, res);
 }
 
@@ -2076,11 +2114,10 @@ void run_engine_command(Options& opts, Result& res) {
   validate_dumps(opts);
   check_known_set_passes(opts);  // --set AND --config table names: a typo'd pass must error, not no-op
 
-  if (!opts.depfile.empty() && !(opts.language == "verilog")) {
-    throw Lhd_error{"usage",
-                    "--depfile is Verilog-frontend only",
-                    "pyrope `import` resolves within the explicit filelist, so there are no hidden inputs"};
-  }
+  // --depfile is supported on both frontends: the Verilog flow lists its
+  // declared inputs, and the Pyrope flow additionally folds in every file the
+  // Source_locator tables saw ([[1f]] — the locator's file table IS the
+  // actually-read-files list, covering import discovery).
 
   if (opts.command == "elaborate") {
     if (!opts.recipe.empty()) {

@@ -112,6 +112,24 @@ protected:
   std::vector<std::shared_ptr<Lnast>> new_lnasts;
   bool                                materialize_{true};  // see set_materialize()
 
+  // The input Lnast being rebuilt (the lm tree at frame depth 0). The staging
+  // body becomes ITS body via replace_body, so SourceIds carried into staging
+  // must resolve in THIS Lnast's locator — carry_srcid imports ids read from
+  // a callee tree (inline frame) into it ([[1f]]).
+  std::shared_ptr<Lnast> root_lnast_;
+
+  // [[1f]] general carry: stamp the freshly created staging node with the
+  // current source node's SourceId (cross-tree ids re-minted into
+  // root_lnast_'s locator). Pass-synthesized nodes inherit the enclosing
+  // statement's id (the read cursor's node).
+  void carry_srcid(const Lnast_nid& staged);
+
+  // [[1f]] call-site SourceIds of the active inline frames (parallel to the
+  // lm source-frame stack, pushed only around the body splice). carry_srcid
+  // mints combine(callee_def, call_site) for spliced nodes — the callee def
+  // stays the primary anchor, the call site becomes a Diagnostic::note.
+  std::vector<hhds::SourceId> inline_call_sites_;
+
   std::vector<std::string> resolve_order(const std::vector<std::string>& requested_names, std::string* error_msg = nullptr) const;
 
   // ── Push-based dispatch ────────────────────────────────────────────────

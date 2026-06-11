@@ -14,12 +14,15 @@ static Pass_plugin sample("inou_cgen", Inou_cgen::setup);
 Inou_cgen::Inou_cgen(const Eprp_var& var) : Pass("inou.cgen", var) {
   auto v  = var.get("verbose");
   verbose = v != "false" && v != "0";
+  auto m  = var.get("srcmap");
+  srcmap  = m == "true" || m == "1";
 }
 
 void Inou_cgen::setup() {
   Eprp_method m1("inou.cgen.verilog", "export verilog from an Lgraph", &Inou_cgen::to_cgen_verilog);
 
   m1.add_label_optional("verbose", "dump bits and wirename (true/false)", "false");
+  m1.add_label_optional("srcmap", "emit an ECMA-426 source-map sidecar (.v.map + sourceMappingURL comment) [[1f]]", "false");
   register_inou("cgen", m1);
 }
 
@@ -30,6 +33,7 @@ void Inou_cgen::to_cgen_verilog(Eprp_var& var) {
 
   auto dir     = pp.get_odir(var);
   auto verbose = pp.verbose;
+  auto srcmap  = pp.srcmap;
 
   // Migrated to consume var.graphs (HHDS handle). Eprp_var::add(Lgraph*)
   // pushes the paired shadow into var.graphs, so legacy producers
@@ -62,8 +66,8 @@ void Inou_cgen::to_cgen_verilog(Eprp_var& var) {
             });
 
   for (auto& g : graphs) {
-    thread_pool.add([g, verbose, dir]() -> void {
-      Cgen_verilog p(verbose, dir);
+    thread_pool.add([g, verbose, dir, srcmap]() -> void {
+      Cgen_verilog p(verbose, dir, srcmap);
       p.do_from_graph(g);
     });
   }

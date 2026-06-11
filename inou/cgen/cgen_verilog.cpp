@@ -4,6 +4,7 @@
 
 #include <algorithm>
 #include <cstdint>
+#include <fstream>
 #include <memory>
 #include <string>
 #include <string_view>
@@ -12,6 +13,7 @@
 
 #include "absl/strings/str_cat.h"
 #include "hhds/attrs/name.hpp"
+#include "hhds/attrs/srcid.hpp"
 #include "hhds/graph.hpp"
 #include "iassert.hpp"
 #include "node_util.hpp"  // //graph:graph — livehd::graph_util::* helpers
@@ -55,7 +57,8 @@ void sort_by_sink_pid(std::vector<hhds::Edge_class>& edges) {
 
 }  // namespace
 
-Cgen_verilog::Cgen_verilog(bool _verbose, std::string_view _odir) : verbose(_verbose), odir(_odir), nrunning(0) {
+Cgen_verilog::Cgen_verilog(bool _verbose, std::string_view _odir, bool _srcmap)
+    : verbose(_verbose), odir(_odir), srcmap(_srcmap), nrunning(0) {
   static std::once_flag init_once;
   std::call_once(init_once, [] {
     reserved_keyword.insert("reg");
@@ -219,7 +222,71 @@ std::string Cgen_verilog::add_expression(std::string_view txt_seq, std::string_v
   return absl::StrCat(txt_seq, " ", txt_op, " ", expr);
 }
 
+// [[1f]]-G: record one source-map segment for the statement about to be
+// emitted for `node`. The SourceId (stamped by tolg/yosys ingress) resolves
+// through the graph's Source_locator to its primary anchor; a combined id
+// exports that anchor only (lossy by design — the full id rides x_livehd).
+void Cgen_verilog::note_src(const std::shared_ptr<File_output>& fout, const hhds::Node_class& node) {
+  if (!srcmap) {
+    return;
+  }
+  auto ref = node.attr(hhds::attrs::srcid);
+  if (!ref.has()) {
+    return;
+  }
+  const auto id = ref.get();
+  auto*      g  = node.get_graph();
+  if (g == nullptr) {
+    return;
+  }
+  const auto& sl = g->source_locator();
+  const auto  a  = sl.resolve(id);
+  if (!a) {
+    return;
+  }
+  livehd::sourcemap::Segment seg;
+  seg.gen_line  = static_cast<uint32_t>(fout->append_line());  // prepend offset added at write time
+  seg.gen_col   = 0;
+  seg.source_id = id;
+  const std::string path(a->path);
+  if (auto it = map_source_idx_.find(path); it != map_source_idx_.end()) {
+    seg.src_idx = it->second;
+  } else {
+    seg.src_idx = static_cast<uint32_t>(map_sources_.size());
+    map_source_idx_.emplace(path, seg.src_idx);
+    map_sources_.push_back(path);
+  }
+  seg.src_line = a->line > 0 ? a->line - 1 : 0;
+  seg.src_col  = 0;
+  if (a->kind != hhds::Source_locator::Anchor_kind::Line_only) {
+    if (const auto lc = sl.to_line_col(a->path, a->start_byte)) {
+      seg.src_line = lc->line - 1;
+      seg.src_col  = lc->col - 1;
+    }
+  }
+  map_segments_.push_back(seg);
+}
+
+void Cgen_verilog::write_srcmap(const std::shared_ptr<File_output>& fout, const std::string& filename) {
+  if (!srcmap || map_segments_.empty()) {
+    return;
+  }
+  // Prepends (the `include lines) land before every appended line: shift the
+  // recorded append-relative lines to their final absolute positions.
+  for (auto& seg : map_segments_) {
+    seg.gen_line += static_cast<uint32_t>(fout->prepend_lines());
+  }
+  const auto  slash    = filename.find_last_of('/');
+  std::string basename = slash == std::string::npos ? filename : filename.substr(slash + 1);
+  fout->append("//# sourceMappingURL=", basename, ".map\n");
+  std::ofstream ofs(filename + ".map");
+  if (ofs.is_open()) {
+    ofs << livehd::sourcemap::to_json(basename, map_sources_, std::move(map_segments_));
+  }
+}
+
 void Cgen_verilog::process_flop(std::shared_ptr<File_output> fout, const hhds::Node_class& node) {
+  note_src(fout, node);
   auto sink_d = find_sink_pin(node, "din");
   auto dpin_d = get_driver(sink_d);
   auto dpin_q = node.get_driver_pin(0);
@@ -235,6 +302,7 @@ void Cgen_verilog::process_flop(std::shared_ptr<File_output> fout, const hhds::N
 }
 
 void Cgen_verilog::process_memory(std::shared_ptr<File_output> fout, const hhds::Node_class& node) {
+  note_src(fout, node);
   auto iname = get_scaped_name(default_instance_name(node));
 
   int n_rd_ports = 0;
@@ -545,6 +613,7 @@ void Cgen_verilog::process_memory(std::shared_ptr<File_output> fout, const hhds:
 }
 
 void Cgen_verilog::process_mux(std::shared_ptr<File_output> fout, const hhds::Node_class& node) {
+  note_src(fout, node);
   auto ordered_inp = node.inp_edges();
   sort_by_sink_pid(ordered_inp);
   I(ordered_inp.size() > 2);  // at least 0 + 1 + 2
@@ -680,6 +749,7 @@ void Cgen_verilog::process_simple_node(std::shared_ptr<File_output> fout, const 
         assert(var_it != pin2var.end());
         if (value_bits_to_use < bits_of(dpin)) {
           if (var_it->second != a) {
+            note_src(fout, node);
             fout->append("  ", var_it->second, " = ", a, ";\n");
           }
         }
@@ -689,6 +759,7 @@ void Cgen_verilog::process_simple_node(std::shared_ptr<File_output> fout, const 
         } else {
           replace = absl::StrCat("[", range_end - 1, ":", range_begin, "] = ");
         }
+        note_src(fout, node);
         fout->append("  ", var_it->second, replace, value, ";\n");
         return;
       }
@@ -851,6 +922,7 @@ void Cgen_verilog::process_simple_node(std::shared_ptr<File_output> fout, const 
   if (var_it == pin2var.end()) {
     pin2expr.emplace(dpin.get_class_index(), Expr(final_expr, true));
   } else if (var_it->second != final_expr) {
+    note_src(fout, node);
     fout->append("  ", var_it->second, " = ", final_expr, ";\n");
   }
 }
@@ -934,6 +1006,7 @@ void Cgen_verilog::create_subs(std::shared_ptr<File_output> fout, hhds::Graph* g
       continue;
     }
 
+    note_src(fout, node);
     fout->append(get_scaped_name(sub_io->get_name()), " ", iname, "(\n");
 
     bool first_entry = true;
@@ -1019,6 +1092,9 @@ void Cgen_verilog::create_outputs(std::shared_ptr<File_output> fout, hhds::Graph
     auto name = get_scaped_name(d.name);
     auto expr = get_expression(out_dpin);
     if (name != expr) {
+      // [[1f]]-G: an inlined expression's statement line lands here — anchor
+      // the output assignment at its driver cell's source.
+      note_src(fout, out_dpin.get_master_node());
       fout->append("  ", name, " = ", expr, ";\n");
     }
   }
@@ -1380,6 +1456,9 @@ void Cgen_verilog::do_from_graph(const std::shared_ptr<hhds::Graph>& graph) {
   pin2expr.clear();
   mux2vector.clear();
   first_array_block = true;
+  map_segments_.clear();
+  map_sources_.clear();
+  map_source_idx_.clear();
 
   std::string filename;
   if (odir.empty()) {
@@ -1405,6 +1484,8 @@ void Cgen_verilog::do_from_graph(const std::shared_ptr<hhds::Graph>& graph) {
   create_registers(fout, g);
 
   fout->append("endmodule\n");
+
+  write_srcmap(fout, filename);
 
   --nrunning;
 }

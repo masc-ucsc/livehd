@@ -11,6 +11,8 @@
 #include <string>
 #include <vector>
 
+#include "lnast_srcloc.hpp"
+
 namespace {
 // Pre-register every Lnast attribute tag at static-init time. The HHDS
 // attribute registry is not thread-safe on first-touch — two threads racing
@@ -21,8 +23,7 @@ namespace {
 struct Lnast_attr_init {
   Lnast_attr_init() {
     hhds::register_attr_tag<hhds::attrs::name_t>("hhds::attrs::name");
-    hhds::register_attr_tag<lnast::attrs::loc_t>("lnast.loc");
-    hhds::register_attr_tag<lnast::attrs::fname_t>("lnast.fname");
+    // hhds::attrs::srcid self-registers (srcid.hpp), so no entry here.
   }
 };
 [[maybe_unused]] const Lnast_attr_init lnast_attr_init_{};
@@ -30,8 +31,7 @@ struct Lnast_attr_init {
 
 void Lnast_node::dump() const { std::print("{}, {}\n", Lnast_ntype::debug_name(get_type()), get_name()); }
 
-Lnast::Lnast(std::string_view _module_name, std::string_view _file_name)
-    : forest_(hhds::Forest::create()), top_module_name(_module_name), source_filename(_file_name) {
+Lnast::Lnast(std::string_view _module_name) : forest_(hhds::Forest::create()), top_module_name(_module_name) {
   // Each Lnast owns one tree body in its private forest. The TreeIO carries
   // the module name; the Tree body is created lazily here so that
   // get_root() works only after set_root() has stamped the top node.
@@ -73,8 +73,24 @@ void Lnast::export_into(hhds::Forest& forest) const {
     auto writable = tio->create_tree();
   }
   // clone() deep-copies the body INCLUDING the flat-storage attribute stores
-  // (name/loc/fname), so the exported unit is a faithful copy.
-  tio->replace(tree_->clone());
+  // (name/srcid), so the exported unit is a faithful copy.
+  auto body = tree_->clone();
+  // Union this unit's locator into the forest-level table (Forest::save only
+  // writes it — the tree-side union is the exporter's job) and rewrite the
+  // clone's srcid values through the remap. Matching spans re-mint to the same
+  // id, so the remap is empty except on a true hash collision.
+  if (!srcloc_.empty()) {
+    const auto remap = forest.source_map().merge(srcloc_);
+    if (!remap.empty() && body->has_attr(hhds::attrs::srcid)) {
+      auto& ids = body->attr_store(hhds::attrs::srcid);
+      for (auto& [key, value] : ids) {
+        if (const auto it = remap.find(value); it != remap.end()) {
+          value = it->second;
+        }
+      }
+    }
+  }
+  tio->replace(std::move(body));
 }
 
 std::shared_ptr<Lnast> Lnast::adopt(std::shared_ptr<hhds::Forest> forest, std::string_view module_name) {
@@ -85,11 +101,15 @@ std::shared_ptr<Lnast> Lnast::adopt(std::shared_ptr<hhds::Forest> forest, std::s
   if (!tio) {
     return nullptr;
   }
-  auto lnast              = std::make_shared<Lnast>(module_name, "");
+  auto lnast              = std::make_shared<Lnast>(module_name);
   lnast->forest_          = std::move(forest);
   lnast->treeio_          = std::move(tio);
   lnast->tree_            = lnast->treeio_->get_tree();
   lnast->top_module_name  = std::string{module_name};
+  // Loaded srcids live in the Forest's table (srcmap.txt); chain to it as a
+  // read-only base so span_of resolves them. forest_ is co-owned, so the base
+  // outlives this Lnast.
+  lnast->srcloc_.set_base(&lnast->forest_->source_map());
   return lnast;
 }
 
@@ -163,54 +183,49 @@ void Lnast::set_name(const Lnast_nid& nid, std::string_view name) {
   nid.attr(hhds::attrs::name).set(std::string(name));
 }
 
-Lnast::Loc Lnast::get_loc(const Lnast_nid& nid) const {
-  auto ref = nid.attr(lnast::attrs::loc);
+hhds::SourceId Lnast::get_srcid(const Lnast_nid& nid) const {
+  auto ref = nid.attr(hhds::attrs::srcid);
   if (!ref.has()) {
-    return {};
-  }
-  auto v = ref.get();
-  return Loc{v.pos1, v.pos2, v.line, v.tok};
-}
-
-void Lnast::set_loc(const Lnast_nid& nid, const Loc& loc) {
-  if (loc.pos1 == 0 && loc.pos2 == 0 && loc.line == 0 && loc.tok == 0) {
-    auto ref = nid.attr(lnast::attrs::loc);
-    if (ref.has()) {
-      ref.del();
-    }
-    return;
-  }
-  lnast::attrs::loc_t::value_type v{loc.pos1, loc.pos2, loc.line, loc.tok};
-  nid.attr(lnast::attrs::loc).set(v);
-}
-
-std::string_view Lnast::get_fname(const Lnast_nid& nid) const {
-  auto ref = nid.attr(lnast::attrs::fname);
-  if (!ref.has()) {
-    return {};
+    return hhds::SourceId_invalid;
   }
   return ref.get();
 }
 
-void Lnast::set_fname(const Lnast_nid& nid, std::string_view fname) {
-  if (fname.empty()) {
-    auto ref = nid.attr(lnast::attrs::fname);
-    if (ref.has()) {
-      ref.del();
-    }
+void Lnast::set_srcid(const Lnast_nid& nid, hhds::SourceId id) {
+  if (id == hhds::SourceId_invalid) {
     return;
   }
-  nid.attr(lnast::attrs::fname).set(std::string(fname));
+  nid.attr(hhds::attrs::srcid).set(id);
+}
+
+livehd::diag::Span Lnast::span_of(const Lnast_nid& nid) const {
+  if (nid.is_invalid()) {
+    return {};
+  }
+  return livehd::srcloc::span_of(srcloc_, get_srcid(nid));
+}
+
+std::vector<livehd::diag::Note> Lnast::notes_of(const Lnast_nid& nid, std::string_view message) const {
+  if (nid.is_invalid()) {
+    return {};
+  }
+  return livehd::srcloc::notes_of(srcloc_, get_srcid(nid), message);
 }
 
 void Lnast::set_data(const Lnast_nid& nid, Lnast_ntype::Lnast_ntype_int type) {
   set_type(nid, type);
   set_name(nid, {});
+  if (pending_srcid_ != hhds::SourceId_invalid && srcid_carries(type)) {
+    set_srcid(nid, pending_srcid_);
+  }
 }
 
 void Lnast::set_data(const Lnast_nid& nid, const Lnast_node& n) {
   set_type(nid, n.get_type());
   set_name(nid, n.get_name());
+  if (pending_srcid_ != hhds::SourceId_invalid && srcid_carries(n.get_type())) {
+    set_srcid(nid, pending_srcid_);
+  }
 }
 
 // ─────────────────────────────────────────────────────────────────────────
@@ -239,44 +254,6 @@ std::span<const hhds::Type_entry> lnast_type_table() {
   return table;
 }
 
-// Encode/decode loc as "pos1:pos2:line:tok" so it survives a single
-// comma-separated attribute slot in the dump.
-std::string encode_loc(const Lnast::Loc& loc) {
-  return std::format("{}:{}:{}:{}", loc.pos1, loc.pos2, loc.line, static_cast<uint32_t>(loc.tok));
-}
-
-bool decode_loc(std::string_view s, Lnast::Loc& out) {
-  std::array<uint64_t, 4> v{0, 0, 0, 0};
-  size_t                  field = 0;
-  size_t                  pos   = 0;
-  while (pos <= s.size() && field < 4) {
-    size_t end = s.find(':', pos);
-    if (end == std::string_view::npos) {
-      end = s.size();
-    }
-    auto piece     = s.substr(pos, end - pos);
-    auto first     = piece.data();
-    auto last      = piece.data() + piece.size();
-    auto [ptr, ec] = std::from_chars(first, last, v[field]);
-    if (ec != std::errc{} || ptr != last) {
-      return false;
-    }
-    ++field;
-    if (end == s.size()) {
-      break;
-    }
-    pos = end + 1;
-  }
-  if (field != 4) {
-    return false;
-  }
-  out.pos1 = v[0];
-  out.pos2 = v[1];
-  out.line = static_cast<uint32_t>(v[2]);
-  out.tok  = static_cast<uint8_t>(v[3]);
-  return true;
-}
-
 }  // namespace
 
 void Lnast::print(std::ostream& os, const Lnast_nid& root_nid) const {
@@ -288,11 +265,14 @@ void Lnast::print(std::ostream& os, const Lnast_nid& root_nid) const {
     return std::format("{}: {}", Lnast_ntype::to_sv(t), n);
   };
   opts.attributes.emplace_back("loc", [this](const hhds::Tree::Node_class& node) -> std::optional<std::string> {
-    auto loc = get_loc(node);
-    if (loc.pos1 == 0 && loc.pos2 == 0 && loc.line == 0) {
+    const auto span = span_of(node);
+    if (span.is_null()) {
       return std::nullopt;
     }
-    return std::format("{}-{}@{}", loc.pos1, loc.pos2, get_fname(node));
+    return std::format("{}-{}@{}",
+                       span.start_byte.value_or(0),
+                       span.end_byte.value_or(0),
+                       span.file);
   });
   tree_->print(os, root_nid, opts);
 }
@@ -312,19 +292,12 @@ void Lnast::dump(std::ostream& os) const {
     }
     return std::string(n);
   };
-  opts.attributes.emplace_back("loc", [this](const hhds::Tree::Node_class& node) -> std::optional<std::string> {
-    auto loc = get_loc(node);
-    if (loc.pos1 == 0 && loc.pos2 == 0 && loc.line == 0 && loc.tok == 0) {
+  opts.attributes.emplace_back("src", [this](const hhds::Tree::Node_class& node) -> std::optional<std::string> {
+    const auto id = get_srcid(node);
+    if (id == hhds::SourceId_invalid) {
       return std::nullopt;
     }
-    return encode_loc(loc);
-  });
-  opts.attributes.emplace_back("fname", [this](const hhds::Tree::Node_class& node) -> std::optional<std::string> {
-    auto f = get_fname(node);
-    if (f.empty()) {
-      return std::nullopt;
-    }
-    return std::string(f);
+    return std::to_string(id);
   });
   tree_->write_dump(os, opts);
 }
@@ -345,7 +318,7 @@ namespace {
 // out so single- and multi-tree readers share the post-processing.
 std::shared_ptr<Lnast> finish_read(hhds::Tree::ReadDumpResult result) {
   auto top_name = std::string(result.tree->get_name());
-  auto lnast    = std::make_shared<Lnast>(top_name, "");
+  auto lnast    = std::make_shared<Lnast>(top_name);
   // The loaded tree is unattached (forest=null); replace_body wires it
   // through TreeIO so forest_/treeio_ owns it from here on.
   lnast->replace_body(result.tree);
@@ -369,14 +342,14 @@ std::shared_ptr<Lnast> finish_read(hhds::Tree::ReadDumpResult result) {
     }
 
     for (const auto& [k, v] : nd.attributes) {
-      if (k == "loc") {
-        Lnast::Loc loc{};
-        if (decode_loc(v, loc)) {
-          lnast->set_loc(node, loc);
+      if (k == "src") {
+        hhds::SourceId id  = 0;
+        auto [ptr, ec]     = std::from_chars(v.data(), v.data() + v.size(), id);
+        if (ec == std::errc{} && ptr == v.data() + v.size()) {
+          lnast->set_srcid(node, id);
         }
-      } else if (k == "fname") {
-        lnast->set_fname(node, v);
       }
+      // legacy "loc"/"fname" attributes in old dumps are ignored ([[1f]])
     }
   }
 

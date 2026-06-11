@@ -72,6 +72,13 @@ void uPass_verifier::emit_false_cassert_diag(const Lnast_nid&   cassert_nid,
     message = std::format("comptime cassert is false: {} (`{}` evaluated to {})", msg, operand_text, value);
   }
 
+  // A combined SourceId (an inlined assertion: callee def + call site) renders
+  // its secondary anchors as notes — every related file:loc ([[1f]]-C).
+  std::vector<livehd::diag::Note> notes;
+  if (const auto& ln = lm->get_lnast()) {
+    notes = ln->notes_of(cassert_nid, "reached via this site");
+  }
+
   livehd::diag::sink().emit(livehd::diag::Diagnostic{
       .severity = livehd::diag::Severity::error,
       .code     = "cassert-false",
@@ -81,6 +88,7 @@ void uPass_verifier::emit_false_cassert_diag(const Lnast_nid&   cassert_nid,
       .span     = std::move(span),
       .hint     = msg.empty() ? "pass a message as cassert's 2nd argument (cassert(cond, \"why\")) to label this assertion"
                               : std::string{},
+      .notes    = std::move(notes),
   });
 }
 
@@ -201,18 +209,11 @@ static std::string strip_pyrope_quotes(std::string s) {
 }
 
 static livehd::diag::Span span_from_nid(const std::shared_ptr<upass::Lnast_manager>& lm, const Lnast_nid& nid) {
-  livehd::diag::Span span;
+  // SourceId resolved through the owning Lnast's locator ([[1f]]).
   if (const auto& ln = lm->get_lnast()) {
-    const auto loc   = ln->get_loc(nid);
-    const auto fname = ln->get_fname(nid);
-    if (!fname.empty()) {
-      span.file = std::string{fname};
-    }
-    if (loc.line != 0) {
-      span.start_line = loc.line;
-    }
+    return ln->span_of(nid);
   }
-  return span;
+  return {};
 }
 
 upass::Emit_decision uPass_verifier::classify_func_call() {
@@ -266,10 +267,10 @@ upass::Emit_decision uPass_verifier::classify_func_call() {
   // upass::error there. A missing argument (`cputs()`) is a user mistake, so it
   // reports through the diagnostic surface like the operand checks below.
   if (!move_to_child()) {
-    upass::error("cputs malformed func_call (no dst)\n");
+    upass::error(span_from_nid(lm, fcall_nid), "cputs malformed func_call (no dst)\n");
   }
   if (!move_to_sibling()) {
-    upass::error("cputs malformed func_call (no fname)\n");
+    upass::error(span_from_nid(lm, fcall_nid), "cputs malformed func_call (no fname)\n");
   }
   if (!move_to_sibling()) {
     move_to_parent();

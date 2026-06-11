@@ -17,14 +17,15 @@
 #include "cell.hpp"
 #include "const.hpp"
 #include "graph_library_singleton.hpp"
+#include "hhds/attrs/srcid.hpp"
 #include "lnast_ntype.hpp"
+#include "lnast_srcloc.hpp"
 #include "node_util.hpp"
 #include "pass.hpp"
 
 namespace {
 
 using livehd::graph_util::create_const;
-using livehd::graph_util::create_typed_node;
 using livehd::graph_util::set_bits;
 using livehd::graph_util::set_sign;
 using livehd::graph_util::set_unsign;
@@ -192,6 +193,10 @@ public:
         lower_stmts(c);
       }
     }
+    // Walk done: drop the statement anchor so finalize-time diagnostics are
+    // unlocated rather than mislocated at whatever statement came last
+    // ([[1f]]; finalize_regs / create_stage_flop re-anchor per entity).
+    cur_srcid_ = hhds::SourceId_invalid;
 
     // 2d-reg — wire every declared reg's din/enable/reset/initial now that
     // all stores and per-reg attr overrides have been seen.
@@ -220,9 +225,10 @@ public:
     // 2d-reg guard — a stage declare whose din store never arrived would
     // silently drop the delay (and the value): hard error, never nil.
     if (!pending_stage_.empty()) {
-      Pass::error("upass.tolg: stage reg '{}' in '{}' was declared but never stored — its delay would be silently lost",
-                  pending_stage_.begin()->first,
-                  lnast_->get_top_module_name());
+      error_at(pending_stage_.begin()->second.decl_nid,
+               "upass.tolg: stage reg '{}' in '{}' was declared but never stored — its delay would be silently lost",
+               pending_stage_.begin()->first,
+               lnast_->get_top_module_name());
     }
   }
 
@@ -242,7 +248,7 @@ private:
   // marked unsigned with one extra (sign) bit. Lets unsigned values flow
   // through signed LGraph arithmetic correctly.
   [[nodiscard]] Pin to_positive(const Pin& src, int32_t mw) {
-    auto node = create_typed_node(*g_, Ntype_op::Get_mask);
+    auto node = make_node(Ntype_op::Get_mask);
     setup_sink_by_name(node, "a").connect_driver(src);
     setup_sink_by_name(node, "mask").connect_driver(create_const(*g_, *Const::create_integer(-1)));
     auto drv = node.create_driver_pin(0);
@@ -315,9 +321,69 @@ private:
     }
   }
 
+  // [[1f]]-E: the current statement's SourceId, re-minted into the graph's
+  // locator. Every cell make_node creates while lowering this statement is
+  // stamped with it, so LGraph nodes resolve back to Pyrope source.
+  hhds::SourceId cur_srcid_{0};
+
+  // [[1f]]-F: stage a located Diagnostic, then throw (Pass::error semantics —
+  // the downstream flush seam emits the staged record exactly once, so the
+  // error carries a resolved span instead of no location). Anchor priority:
+  // the given nid's SourceId, falling back to the current statement's.
+  template <typename... Args>
+  [[noreturn]] void error_at(const Lnast_nid& nid, std::format_string<Args...> fmt, Args&&... args) {
+    auto               msg = std::format(fmt, std::forward<Args>(args)...);
+    livehd::diag::Span span;
+    std::vector<livehd::diag::Note> notes;
+    if (!nid.is_invalid() && lnast_) {
+      span  = lnast_->span_of(nid);
+      notes = lnast_->notes_of(nid, "reached via this site");
+    }
+    if (span.is_null() && g_ != nullptr) {
+      span  = livehd::srcloc::span_of(g_->source_locator(), cur_srcid_);
+      notes = livehd::srcloc::notes_of(g_->source_locator(), cur_srcid_, "reached via this site");
+    }
+    livehd::diag::sink().stage(livehd::diag::Diagnostic{
+        .severity = livehd::diag::Severity::error,
+        .code     = "tolg-error",
+        .category = "type",
+        .pass     = "upass.tolg",
+        .message  = msg,
+        .span     = std::move(span),
+        .notes    = std::move(notes),
+    });
+    err_tracker::logger(msg);
+    throw Eprp::parser_error(Pass::eprp, msg);
+  }
+
+  template <typename... Args>
+  [[noreturn]] void error_here(std::format_string<Args...> fmt, Args&&... args) {
+    error_at(Lnast_nid{}, "{}", std::format(fmt, std::forward<Args>(args)...));
+  }
+
+  template <typename... Args>
+  hhds::Node_class make_node(Args&&... args) {
+    auto n = livehd::graph_util::create_typed_node(*g_, std::forward<Args>(args)...);
+    if (cur_srcid_ != hhds::SourceId_invalid) {
+      n.attr(hhds::attrs::srcid).set(cur_srcid_);
+    }
+    return n;
+  }
+
   void lower_node(const Lnast_nid& nid) {
-    using N      = Lnast_ntype;
     const auto t = lnast_->get_type(nid);
+    // Anchor the statement: nested lower_* calls (and the cells they mint)
+    // inherit it; statements without an id keep the enclosing one.
+    const auto saved_srcid = cur_srcid_;
+    if (const auto id = lnast_->get_srcid(nid); id != hhds::SourceId_invalid) {
+      cur_srcid_ = livehd::srcloc::import_srcid(g_->source_locator(), lnast_->source_locator(), id);
+    }
+    lower_node_dispatch(nid, t);
+    cur_srcid_ = saved_srcid;
+  }
+
+  void lower_node_dispatch(const Lnast_nid& nid, Lnast_ntype::Lnast_ntype_int t) {
+    using N = Lnast_ntype;
     if (N::is_stmts(t)) {
       lower_stmts(nid);
     } else if (N::is_if(t)) {
@@ -391,7 +457,7 @@ private:
       // nor a known tuple shape. Pyrope `for` is comptime-only (must fully
       // unroll), so this is a user error (a runtime/unknown iterable), not a
       // silent miscompile. HARD error rather than the unhandled warn below.
-      Pass::error("upass.tolg: non-comptime `for` loop in '{}' — the iterable did not resolve to a comptime range "
+      error_here("upass.tolg: non-comptime `for` loop in '{}' — the iterable did not resolve to a comptime range "
                   "or tuple, so the loop could not unroll (Pyrope for-loops are comptime-only and must fully unroll)",
                   lnast_->get_top_module_name());
     } else {
@@ -445,6 +511,13 @@ private:
       auto& info = reg_info_.at(name);
       auto& flop = info.flop;
 
+      // Runs after the walk: anchor this reg's diagnostics at its declaration
+      // ([[1f]]-F) instead of whatever statement the walk ended on.
+      cur_srcid_ = hhds::SourceId_invalid;
+      if (const auto id = lnast_->get_srcid(info.decl_nid); id != hhds::SourceId_invalid) {
+        cur_srcid_ = livehd::srcloc::import_srcid(g_->source_locator(), lnast_->source_locator(), id);
+      }
+
       // din: the final shadow value (last-write-wins; branch writes arrive
       // pre-muxed). A never-written reg holds its value forever: din <- q.
       auto q = flop.create_driver_pin(0);
@@ -485,7 +558,7 @@ private:
       const bool has_init    = !init.empty() && init != "nil";
       const bool rp_false    = info.reset_pin_name == "false";
       if (rp_false && has_init) {
-        Pass::error("upass.tolg: reg '{}' has a non-nil initializer but `reset_pin=false` — drop the init or the override",
+        error_here("upass.tolg: reg '{}' has a non-nil initializer but `reset_pin=false` — drop the init or the override",
                     name);
         return;
       }
@@ -500,7 +573,7 @@ private:
         // Explicit per-reg reset input (must be a declared graph input).
         rpin = g_->get_input_pin(info.reset_pin_name);
         if (rpin.is_invalid()) {
-          Pass::error("upass.tolg: reg '{}' names reset_pin '{}' but '{}' has no such input",
+          error_here("upass.tolg: reg '{}' names reset_pin '{}' but '{}' has no such input",
                       name,
                       info.reset_pin_name,
                       lnast_->get_top_module_name());
@@ -515,7 +588,7 @@ private:
           neg = true;
         }
       } else {
-        Pass::error("upass.tolg: reg '{}' has a reset value but '{}' has no reset input (setup_io bug)",
+        error_here("upass.tolg: reg '{}' has a reset value but '{}' has no reset input (setup_io bug)",
                     name,
                     lnast_->get_top_module_name());
         return;
@@ -529,7 +602,7 @@ private:
         // rather than deref a null Const.
         auto iv = Const::from_pyrope(init);
         if (!iv) {
-          Pass::error("upass.tolg: reg '{}' reset/initial value '{}' is not a compile-time constant", name, init);
+          error_here("upass.tolg: reg '{}' reset/initial value '{}' is not a compile-time constant", name, init);
           return;
         }
         setup_sink_by_name(flop, "initial").connect_driver(create_const(*g_, *iv));
@@ -589,7 +662,7 @@ private:
       if (!reg_info_.contains(std::string(lhs_name))) {
         // A stage reg (created by its one din store) has no finalize record —
         // a second store would be silently lost.
-        Pass::error("upass.tolg: stage reg '{}' stored more than once in '{}'", lhs_name, lnast_->get_top_module_name());
+        error_here("upass.tolg: stage reg '{}' stored more than once in '{}'", lhs_name, lnast_->get_top_module_name());
         return;
       }
       auto v = leaf(rhs);
@@ -680,7 +753,7 @@ private:
     // din/enable keys, finalize_regs() wires the pins. The declared type
     // gives q's width up front (a counter's `r + 1` read needs it before any
     // din store); untyped regs restamp from the final din width.
-    auto flop = create_typed_node(*g_, Ntype_op::Flop);
+    auto flop = make_node(Ntype_op::Flop);
     if (!clock_name_.empty()) {
       setup_sink_by_name(flop, "clock_pin").connect_driver(clock_pin());
     } else {
@@ -705,7 +778,7 @@ private:
         break;
       }
       if (Lnast_ntype::is_ref(ct)) {
-        Pass::error("upass.tolg: reg '{}' initializer is not a compile-time constant — a reset value must be comptime",
+        error_here("upass.tolg: reg '{}' initializer is not a compile-time constant — a reset value must be comptime",
                     name);
         return;
       }
@@ -808,7 +881,7 @@ private:
     if (b.is_invalid()) {
       return a;
     }
-    auto node = create_typed_node(*g_, Ntype_op::And);
+    auto node = make_node(Ntype_op::And);
     node.create_sink_pin(0).connect_driver(a);
     node.create_sink_pin(0).connect_driver(b);
     auto d = node.create_driver_pin(0);
@@ -819,7 +892,7 @@ private:
 
   // Bitwise NOT of a 1-bit condition (LSB carries the logical value).
   [[nodiscard]] Pin not1(const Pin& a) {
-    auto node = create_typed_node(*g_, Ntype_op::Not);
+    auto node = make_node(Ntype_op::Not);
     setup_sink_by_name(node, "a").connect_driver(a);
     auto d = node.create_driver_pin(0);
     set_bits(d, 1);
@@ -863,16 +936,16 @@ private:
     auto elem_nid = lnast_->get_first_child(type_nid);
     auto len_nid  = elem_nid.is_invalid() ? elem_nid : lnast_->get_sibling_next(elem_nid);
     if (elem_nid.is_invalid() || len_nid.is_invalid()) {
-      Pass::error("upass.tolg: memory '{}' array type is missing its element type or size", name);
+      error_here("upass.tolg: memory '{}' array type is missing its element type or size", name);
       return;
     }
     if (Lnast_ntype::is_comp_type_array(lnast_->get_type(elem_nid))) {
-      Pass::error("upass.tolg: memory '{}' is multi-dimensional — not supported (use a single dimension)", name);
+      error_here("upass.tolg: memory '{}' is multi-dimensional — not supported (use a single dimension)", name);
       return;
     }
     auto [elem_mw, elem_signed] = declared_width(elem_nid);
     if (elem_mw == 0) {
-      Pass::error("upass.tolg: memory '{}' element type must be a sized integer or bool", name);
+      error_here("upass.tolg: memory '{}' element type must be a sized integer or bool", name);
       return;
     }
     // The size const's text is the raw '[N]' annotation — strip the brackets.
@@ -885,7 +958,7 @@ private:
       size = c->to_i();
     }
     if (size <= 0) {
-      Pass::error("upass.tolg: memory '{}' size '{}' is not a positive comptime constant", name, lnast_->get_name(len_nid));
+      error_here("upass.tolg: memory '{}' size '{}' is not a positive comptime constant", name, lnast_->get_name(len_nid));
       return;
     }
     // reg initializer — same treatment as a mut array (reg and not-reg
@@ -902,7 +975,7 @@ private:
       for (auto c = lnast_->get_sibling_next(mode_nid); !c.is_invalid(); c = lnast_->get_sibling_next(c)) {
         const auto ct = lnast_->get_type(c);
         if (Lnast_ntype::is_stages(ct)) {
-          Pass::error("upass.tolg: memory '{}' cannot carry a stage[] qualifier", name);
+          error_here("upass.tolg: memory '{}' cannot carry a stage[] qualifier", name);
           return;
         }
         if (Lnast_ntype::is_const(ct)) {
@@ -912,7 +985,7 @@ private:
           }
           auto v = Const::from_pyrope(txt);
           if (!v || !v->is_i()) {
-            Pass::error("upass.tolg: memory '{}' initializer '{}' is not an integer constant", name, txt);
+            error_here("upass.tolg: memory '{}' initializer '{}' is not an integer constant", name, txt);
             return;
           }
           // Scalar broadcast: every entry = value (masked to the element).
@@ -928,7 +1001,7 @@ private:
         if (Lnast_ntype::is_ref(ct)) {
           auto tit = tuple_recs_.find(std::string(lnast_->get_name(c)));
           if (tit == tuple_recs_.end() || !tit->second.named.empty()) {
-            Pass::error("upass.tolg: memory '{}' initializer must be a comptime constant or tuple literal", name);
+            error_here("upass.tolg: memory '{}' initializer must be a comptime constant or tuple literal", name);
             return;
           }
           reg_init = pack_tuple_init(tit->second, name, size, elem_mw);
@@ -941,7 +1014,7 @@ private:
           }
           break;
         }
-        Pass::error("upass.tolg: memory '{}' initializer must be a comptime constant or tuple literal", name);
+        error_here("upass.tolg: memory '{}' initializer must be a comptime constant or tuple literal", name);
         return;
       }
     }
@@ -953,7 +1026,7 @@ private:
     // read during reset returns the committed contents.
     const int64_t fwd_mask = is_array ? 1 : (int64_t{1} << user_sites) - 1;
 
-    auto mem = create_typed_node(*g_, Ntype_op::Memory);
+    auto mem = make_node(Ntype_op::Memory);
     setup_sink_by_name(mem, "bits").connect_driver(create_const(*g_, *Const::create_integer(elem_mw)));
     setup_sink_by_name(mem, "size").connect_driver(create_const(*g_, *Const::create_integer(size)));
     setup_sink_by_name(mem, "type").connect_driver(create_const(*g_, *Const::create_integer(is_array ? 2 : 0)));
@@ -1034,11 +1107,11 @@ private:
   // zero-filled (cgen's default). reg memories reject the shape outright.
   void lower_mem_init_store(const Lnast_nid& rhs, std::string_view name, Mem_info& mi) {
     if (!mi.is_array) {
-      Pass::error("upass.tolg: whole-array assignment to memory '{}' is not supported — write one entry at a time", name);
+      error_here("upass.tolg: whole-array assignment to memory '{}' is not supported — write one entry at a time", name);
       return;
     }
     if (mi.init_wired) {
-      Pass::error("upass.tolg: array '{}' is re-initialized — only the declaration initializer is supported", name);
+      error_here("upass.tolg: array '{}' is re-initialized — only the declaration initializer is supported", name);
       return;
     }
     const auto rt = lnast_->get_type(rhs);
@@ -1048,12 +1121,12 @@ private:
         mi.init_wired = true;  // zero-filled default
         return;
       }
-      Pass::error("upass.tolg: array '{}' initializer '{}' is not supported — use a tuple literal or nil", name, txt);
+      error_here("upass.tolg: array '{}' initializer '{}' is not supported — use a tuple literal or nil", name, txt);
       return;
     }
     auto tit = tuple_recs_.find(std::string(lnast_->get_name(rhs)));
     if (tit == tuple_recs_.end() || !tit->second.named.empty()) {
-      Pass::error("upass.tolg: array '{}' initializer must be a comptime tuple literal", name);
+      error_here("upass.tolg: array '{}' initializer must be a comptime tuple literal", name);
       return;
     }
     auto init = pack_tuple_init(tit->second, name, mi.size, mi.elem_mw);
@@ -1068,7 +1141,7 @@ private:
   // in the low `bits`, row-major. Returns null after reporting on error.
   [[nodiscard]] spool_ptr<Const> pack_tuple_init(const Tuple_rec& rec, std::string_view name, int64_t size, int32_t bits) {
     if (static_cast<int64_t>(rec.elems.size()) != size) {
-      Pass::error("upass.tolg: '{}' initializer has {} entries but the memory holds {}", name, rec.elems.size(), size);
+      error_here("upass.tolg: '{}' initializer has {} entries but the memory holds {}", name, rec.elems.size(), size);
       return {};
     }
     auto mask = Const::get_mask_value(bits);
@@ -1076,12 +1149,12 @@ private:
     for (size_t i = 0; i < rec.elems.size(); ++i) {
       const auto& e = rec.elems[i];
       if (!Lnast_ntype::is_const(lnast_->get_type(e))) {
-        Pass::error("upass.tolg: '{}' initializer entry {} is not a compile-time constant", name, i);
+        error_here("upass.tolg: '{}' initializer entry {} is not a compile-time constant", name, i);
         return {};
       }
       auto v = Const::from_pyrope(lnast_->get_name(e));
       if (!v || !v->is_i()) {
-        Pass::error("upass.tolg: '{}' initializer entry {} is not an integer constant", name, i);
+        error_here("upass.tolg: '{}' initializer entry {} is not an integer constant", name, i);
         return {};
       }
       auto entry = v->and_op(*mask)->shl_op(*Const::create_integer(static_cast<int64_t>(i) * bits));
@@ -1113,12 +1186,12 @@ private:
     auto callee_n = lnast_->get_sibling_next(dst);
     auto arg      = lnast_->get_sibling_next(callee_n);
     if (arg.is_invalid() || !lnast_->get_sibling_next(arg).is_invalid()) {
-      Pass::error("upass.tolg: __memory takes exactly one config tuple in '{}'", lnast_->get_top_module_name());
+      error_here("upass.tolg: __memory takes exactly one config tuple in '{}'", lnast_->get_top_module_name());
       return true;
     }
     auto rit = tuple_recs_.find(std::string(lnast_->get_name(arg)));
     if (rit == tuple_recs_.end()) {
-      Pass::error("upass.tolg: __memory config '{}' must be a single tuple literal (build it as `mut cfg = (addr=…, "
+      error_here("upass.tolg: __memory config '{}' must be a single tuple literal (build it as `mut cfg = (addr=…, "
                   "bits=…, …)`)",
                   lnast_->get_name(arg));
       return true;
@@ -1130,7 +1203,7 @@ private:
                                                  "type", "wensize", "size", "rdport", "init"};
     for (const auto& [k, v] : cfg.named) {
       if (std::find(std::begin(known), std::end(known), k) == std::end(known)) {
-        Pass::error("upass.tolg: unknown __memory config field '{}' — the vocabulary is the Memory cell pins verbatim "
+        error_here("upass.tolg: unknown __memory config field '{}' — the vocabulary is the Memory cell pins verbatim "
                     "(addr/bits/clock_pin/din/enable/fwd/posclk/type/wensize/size/rdport/init; no `latency`, no `clock`)",
                     k);
         return true;
@@ -1141,21 +1214,21 @@ private:
       auto it = cfg.named.find(std::string(key));
       if (it == cfg.named.end()) {
         if (required) {
-          Pass::error("upass.tolg: __memory config is missing the required '{}' field", key);
+          error_here("upass.tolg: __memory config is missing the required '{}' field", key);
           return false;
         }
         out = def;
         return true;
       }
       if (!Lnast_ntype::is_const(lnast_->get_type(it->second))) {
-        Pass::error("upass.tolg: __memory config field '{}' must be a compile-time constant", key);
+        error_here("upass.tolg: __memory config field '{}' must be a compile-time constant", key);
         return false;
       }
       auto v = Const::from_pyrope(lnast_->get_name(it->second));
       if (!v || !v->is_i()) {
         // bool consts ("false"/"true") are integers in from_pyrope; anything
         // else is a config error.
-        Pass::error("upass.tolg: __memory config field '{}' is not an integer constant", key);
+        error_here("upass.tolg: __memory config field '{}' is not an integer constant", key);
         return false;
       }
       out = v->to_i();
@@ -1169,11 +1242,11 @@ private:
       return true;
     }
     if (bits <= 0 || size <= 0) {
-      Pass::error("upass.tolg: __memory needs positive bits/size (got bits={}, size={})", bits, size);
+      error_here("upass.tolg: __memory needs positive bits/size (got bits={}, size={})", bits, size);
       return true;
     }
     if (type < 0 || type > 2) {
-      Pass::error("upass.tolg: __memory type must be 0 (async), 1 (sync) or 2 (array) — got {}", type);
+      error_here("upass.tolg: __memory type must be 0 (async), 1 (sync) or 2 (array) — got {}", type);
       return true;
     }
 
@@ -1187,7 +1260,7 @@ private:
       if (Lnast_ntype::is_ref(vt)) {
         if (auto lit = tuple_recs_.find(std::string(lnast_->get_name(it->second))); lit != tuple_recs_.end()) {
           if (!lit->second.named.empty()) {
-            Pass::error("upass.tolg: __memory config field '{}' must be a positional tuple", key);
+            error_here("upass.tolg: __memory config field '{}' must be a positional tuple", key);
             return false;
           }
           out = lit->second.elems;
@@ -1203,12 +1276,12 @@ private:
       return true;
     }
     if (addrs.empty()) {
-      Pass::error("upass.tolg: __memory config needs at least one 'addr' entry");
+      error_here("upass.tolg: __memory config needs at least one 'addr' entry");
       return true;
     }
     const int n_ports = static_cast<int>(addrs.size());
     if (static_cast<int>(rdports.size()) != n_ports) {
-      Pass::error("upass.tolg: __memory 'rdport' has {} entries but 'addr' has {}", rdports.size(), n_ports);
+      error_here("upass.tolg: __memory 'rdport' has {} entries but 'addr' has {}", rdports.size(), n_ports);
       return true;
     }
 
@@ -1226,7 +1299,7 @@ private:
     // per-write-port mask); a value > 1 passes through as an explicit mask.
     const int64_t fwd_mask = fwd == 0 ? 0 : (fwd == 1 ? (int64_t{1} << n_wr_cfg) - 1 : fwd);
 
-    auto mem = create_typed_node(*g_, Ntype_op::Memory);
+    auto mem = make_node(Ntype_op::Memory);
     setup_sink_by_name(mem, "bits").connect_driver(create_const(*g_, *Const::create_integer(bits)));
     setup_sink_by_name(mem, "size").connect_driver(create_const(*g_, *Const::create_integer(size)));
     setup_sink_by_name(mem, "type").connect_driver(create_const(*g_, *Const::create_integer(type)));
@@ -1250,7 +1323,7 @@ private:
         init = pack_tuple_init(lit->second, "__memory init", size, static_cast<int32_t>(bits));
       }
       if (!init) {
-        Pass::error("upass.tolg: __memory 'init' must be a comptime constant or tuple literal");
+        error_here("upass.tolg: __memory 'init' must be a comptime constant or tuple literal");
         return true;
       }
       setup_sink_by_name(mem, "init").connect_driver(create_const(*g_, *init));
@@ -1259,7 +1332,7 @@ private:
     int n_wr = 0;
     for (int i = 0; i < n_ports; ++i) {
       if (!Lnast_ntype::is_const(lnast_->get_type(rdports[i]))) {
-        Pass::error("upass.tolg: __memory 'rdport' entry {} must be a comptime 0/1 constant", i);
+        error_here("upass.tolg: __memory 'rdport' entry {} must be a comptime 0/1 constant", i);
         return true;
       }
       auto v = Const::from_pyrope(lnast_->get_name(rdports[i]));
@@ -1280,7 +1353,7 @@ private:
       mem.create_sink_pin(static_cast<hhds::Port_id>(base + 4)).connect_driver(en);
       if (!is_rd) {
         if (i >= static_cast<int>(dins.size())) {
-          Pass::error("upass.tolg: __memory write port {} has no 'din' entry", i);
+          error_here("upass.tolg: __memory write port {} has no 'din' entry", i);
           return true;
         }
         mem.create_sink_pin(static_cast<hhds::Port_id>(base + 3)).connect_driver(leaf(dins[i]).pin);
@@ -1299,22 +1372,22 @@ private:
     auto idx = lnast_->get_sibling_next(lhs);
     auto val = idx.is_invalid() ? idx : lnast_->get_sibling_next(idx);
     if (val.is_invalid()) {
-      Pass::error("upass.tolg: whole-array assignment to memory '{}' is not supported — write one entry at a time", lhs_name);
+      error_here("upass.tolg: whole-array assignment to memory '{}' is not supported — write one entry at a time", lhs_name);
       return;
     }
     if (!lnast_->get_sibling_next(val).is_invalid()) {
-      Pass::error("upass.tolg: multi-dimensional or field write to memory '{}' is not supported", lhs_name);
+      error_here("upass.tolg: multi-dimensional or field write to memory '{}' is not supported", lhs_name);
       return;
     }
     if (mi.wr_next >= mi.n_user_wr) {
-      Pass::error("upass.tolg: internal — memory '{}' write-site pre-scan undercounted", lhs_name);
+      error_here("upass.tolg: internal — memory '{}' write-site pre-scan undercounted", lhs_name);
       return;
     }
     if (mi.is_array && mi.rd_next > 0) {
       // A type=2 array is lowered writes-before-reads (forwarding), so a
       // source-order read placed BEFORE this write would wrongly see it.
       // reg memories are exempt: fwd semantics are order-free by contract.
-      Pass::error("upass.tolg: array '{}' is written after being read — same-cycle order is not preserved for "
+      error_here("upass.tolg: array '{}' is written after being read — same-cycle order is not preserved for "
                   "mut/const arrays; reorder the accesses or use a `reg` memory",
                   lhs_name);
       return;
@@ -1348,13 +1421,13 @@ private:
       if (auto mrt = mem_results_.find(std::string(lnast_->get_name(src))); mrt != mem_results_.end()) {
         const auto& mr = mrt->second;
         if (!Lnast_ntype::is_const(lnast_->get_type(idx)) || !lnast_->get_sibling_next(idx).is_invalid()) {
-          Pass::error("upass.tolg: a __memory result is indexed by a single comptime read-port number");
+          error_here("upass.tolg: a __memory result is indexed by a single comptime read-port number");
           return;
         }
         auto v = Const::from_pyrope(lnast_->get_name(idx));
         const int64_t k = (v && v->is_i()) ? v->to_i() : -1;
         if (k < 0 || k >= mr.n_rd) {
-          Pass::error("upass.tolg: __memory result index {} out of range — the config has {} read port(s)",
+          error_here("upass.tolg: __memory result index {} out of range — the config has {} read port(s)",
                       lnast_->get_name(idx),
                       mr.n_rd);
           return;
@@ -1370,7 +1443,7 @@ private:
     }
     auto& mi = it->second;
     if (!lnast_->get_sibling_next(idx).is_invalid()) {
-      Pass::error("upass.tolg: multi-dimensional or field read of memory '{}' is not supported", lnast_->get_name(src));
+      error_here("upass.tolg: multi-dimensional or field read of memory '{}' is not supported", lnast_->get_name(src));
       return;
     }
     const int  slot = mi.n_wr_total + mi.rd_next;
@@ -1401,7 +1474,7 @@ private:
       }
       const auto& mi = it->second;
       if (mi.wr_next != mi.n_user_wr) {
-        Pass::error("upass.tolg: internal — memory '{}' lowered {} write sites but the pre-scan counted {}",
+        error_here("upass.tolg: internal — memory '{}' lowered {} write sites but the pre-scan counted {}",
                     name,
                     mi.wr_next,
                     mi.n_user_wr);
@@ -1503,6 +1576,12 @@ private:
   // output cycle is fixed and stage_N must match it exactly → deficit 0).
   // Depth (0,0) is a plain wire — no Flop is created at all.
   void create_stage_flop(std::string_view name, const Pending_stage& p, const Lnast_nid& rhs) {
+    // Runs from finalize (no statement walk active): anchor the flop at the
+    // stage declaration ([[1f]]-E).
+    cur_srcid_ = hhds::SourceId_invalid;
+    if (const auto id = lnast_->get_srcid(p.decl_nid); id != hhds::SourceId_invalid) {
+      cur_srcid_ = livehd::srcloc::import_srcid(g_->source_locator(), lnast_->source_locator(), id);
+    }
     const bool min_nil = p.min_txt == "nil";
     const bool max_nil = p.max_txt == "nil";
     int64_t    smin    = 0;
@@ -1526,7 +1605,7 @@ private:
     if (auto sit = sub_out_stages_.find(rhs_name); sit != sub_out_stages_.end()) {
       const auto& so = sit->second;
       if (min_nil || max_nil || smin != smax) {
-        Pass::error(
+        error_here(
             "upass.tolg: `stage[]` / ranged stage counts on a pipe/mod call are not supported yet — "
             "write a fixed `stage[N]` for '{}'",
             name);
@@ -1537,13 +1616,13 @@ private:
         // pipe convention: cmax < cmin (e.g. bare pipe (1,0)) = no upper bound.
         if (n < so.cmin || (so.cmax >= so.cmin && n > so.cmax)) {
           if (so.cmax >= so.cmin) {
-            Pass::error("upass.tolg: stage[{}] on '{}' is outside the callee's declared latency range [{}, {}]",
+            error_here("upass.tolg: stage[{}] on '{}' is outside the callee's declared latency range [{}, {}]",
                         n,
                         name,
                         so.cmin,
                         so.cmax);
           } else {
-            Pass::error("upass.tolg: stage[{}] on '{}' is below the callee's declared minimum latency {}",
+            error_here("upass.tolg: stage[{}] on '{}' is below the callee's declared minimum latency {}",
                         n,
                         name,
                         so.cmin);
@@ -1554,7 +1633,7 @@ private:
       } else {
         // mod callee: the output's landing cycle is fixed by its interface.
         if (so.cmin != so.cmax || n != so.cmin) {
-          Pass::error("upass.tolg: mod call result '{}' lands at its declared cycle {} — `stage[{}]` must match it "
+          error_here("upass.tolg: mod call result '{}' lands at its declared cycle {} — `stage[{}]` must match it "
                       "(add a separate `stage[N] x = value` for extra delay)",
                       name,
                       so.cmin,
@@ -1573,7 +1652,7 @@ private:
         sub_time_[so.node.get_debug_nid()] = {realized, realized};
       }
     } else if (min_nil || max_nil) {
-      Pass::error(
+      error_here(
           "upass.tolg: `stage[]` on '{}' has no chosen count at realization — write `stage[N]` (the toolchain-picked "
           "default lands in a later phase)",
           name);
@@ -1586,7 +1665,7 @@ private:
       return;
     }
 
-    auto flop = create_typed_node(*g_, Ntype_op::Flop);
+    auto flop = make_node(Ntype_op::Flop);
     flop_depth_[flop.get_debug_nid()] = {emin, emax};
     // 2d-reg — the LN-inserted pipe output flop (vs a user `stage[N]` reg) is
     // the narrowing target: LG pass1 rewrites its depth to (min−σ, max−σ).
@@ -1665,7 +1744,7 @@ private:
     if (!lg_name.empty()) {
       gio = lib_ != nullptr ? lib_->find_io(lg_name) : nullptr;
       if (!gio) {
-        Pass::error("upass.tolg: imported lg: graph '{}' not found in any input library — pass it as an `lg:` "
+        error_here("upass.tolg: imported lg: graph '{}' not found in any input library — pass it as an `lg:` "
                     "input (or it failed to load)",
                     lg_name);
         return;
@@ -1694,7 +1773,7 @@ private:
         // Unresolvable (runtime wrap/sat builtin, recursion-kept comb, …):
         // HARD error — the pre-1r behavior silently wired the call's outputs
         // to nil and emitted a broken netlist.
-        Pass::error(
+        error_here(
             "upass.tolg: call to '{}' has no hardware lowering yet — only pipe/mod calls become instances "
             "(note `comb` may not call a `pipe`/`mod`), and runtime `wrap`/`sat` lowering is pending",
             callee_name);
@@ -1706,7 +1785,7 @@ private:
       // instantiation). Without this gate a comb would silently grow a
       // latency-carrying instance.
       if (lnast_->get_lambda_kind() != "mod") {
-        Pass::error("upass.tolg: '{}' (a {}) calls the {} '{}' — only `mod` bodies may instantiate pipe/mod",
+        error_here("upass.tolg: '{}' (a {}) calls the {} '{}' — only `mod` bodies may instantiate pipe/mod",
                     lnast_->get_top_module_name(),
                     lnast_->get_lambda_kind().empty() ? std::string_view{"comb"} : lnast_->get_lambda_kind(),
                     kind,
@@ -1717,14 +1796,14 @@ private:
       callee_full = std::string(callee->get_top_module_name());
       gio         = lib_ != nullptr ? lib_->find_io(callee_full) : nullptr;
       if (!gio) {
-        Pass::error("upass.tolg: callee '{}' has no registered GraphIO — register_io() phase missing", callee_full);
+        error_here("upass.tolg: callee '{}' has no registered GraphIO — register_io() phase missing", callee_full);
         return;
       }
       cio_ptr = &callee->io_meta();
     }
     const auto& cio = *cio_ptr;
     if (cio.outputs.size() != 1) {
-      Pass::error("upass.tolg: call to '{}' has {} outputs — multi-output call sites land in a later phase",
+      error_here("upass.tolg: call to '{}' has {} outputs — multi-output call sites land in a later phase",
                   callee_full,
                   cio.outputs.size());
       return;
@@ -1733,7 +1812,7 @@ private:
     // NOTE: set_subnode RE-STAMPS the raw hhds type to its own 2/3 loop-hint
     // encoding — type_op_of() recognizes Subs by the subnode LINK, never by
     // the stored type (see node_util.hpp).
-    auto sub = create_typed_node(*g_, Ntype_op::Sub);
+    auto sub = make_node(Ntype_op::Sub);
     sub.set_subnode(gio);
     {
       std::string dst_txt(lnast_->get_name(dst));
@@ -1767,7 +1846,7 @@ private:
         }
       } else {
         if (pos >= cio.inputs.size()) {
-          Pass::error("upass.tolg: call to '{}' passes more arguments than its {} declared inputs",
+          error_here("upass.tolg: call to '{}' passes more arguments than its {} declared inputs",
                       callee_full,
                       cio.inputs.size());
           return;
@@ -1779,14 +1858,14 @@ private:
       auto v    = leaf(val);
       auto spin = sub.create_sink_pin(pname);
       if (spin.is_invalid()) {
-        Pass::error("upass.tolg: callee '{}' has no input named '{}'", callee_full, pname);
+        error_here("upass.tolg: callee '{}' has no input named '{}'", callee_full, pname);
         return;
       }
       spin.connect_driver(v.pin);
       ++provided;
     }
     if (provided != cio.inputs.size()) {
-      Pass::error("upass.tolg: call to '{}' provides {} of its {} declared inputs",
+      error_here("upass.tolg: call to '{}' provides {} of its {} declared inputs",
                   callee_full,
                   provided,
                   cio.inputs.size());
@@ -1805,7 +1884,7 @@ private:
     }
     if (!callee_declares_clock && gio->has_input("clock")) {
       if (clock_name_.empty()) {
-        Pass::error("upass.tolg: instance of clocked '{}' but '{}' has no clock to forward (needs_clock bug)",
+        error_here("upass.tolg: instance of clocked '{}' but '{}' has no clock to forward (needs_clock bug)",
                     callee_full,
                     lnast_->get_top_module_name());
         return;
@@ -1826,14 +1905,14 @@ private:
     }
     if (!callee_declares_reset && gio->has_input("reset")) {
       if (reset_name_.empty()) {
-        Pass::error("upass.tolg: instance of reset-carrying '{}' but '{}' has no reset to forward (needs_reset bug)",
+        error_here("upass.tolg: instance of reset-carrying '{}' but '{}' has no reset to forward (needs_reset bug)",
                     callee_full,
                     lnast_->get_top_module_name());
         return;
       }
       Pin r = reset_pin();
       if (reset_neg_) {
-        auto inv = create_typed_node(*g_, Ntype_op::Not);
+        auto inv = make_node(Ntype_op::Not);
         setup_sink_by_name(inv, "a").connect_driver(r);
         r = inv.create_driver_pin(0);
         set_bits(r, 1);
@@ -1901,7 +1980,7 @@ private:
     const std::string name(lnast_->get_name(ref));
     auto              it = pin_map_.find(name);
     if (it == pin_map_.end()) {
-      Pass::error("upass.tolg: `@[N]` check on '{}' — the value never materialized in the graph", name);
+      error_here("upass.tolg: `@[N]` check on '{}' — the value never materialized in the graph", name);
       return;
     }
     const int64_t a_min = const_val(mn);
@@ -1979,7 +2058,7 @@ private:
     }
     int64_t mask = mask_from_operand(mask_op);
 
-    auto node = create_typed_node(*g_, Ntype_op::Get_mask);
+    auto node = make_node(Ntype_op::Get_mask);
     setup_sink_by_name(node, "a").connect_driver(leaf(val).pin);
     setup_sink_by_name(node, "mask").connect_driver(create_const(*g_, *Const::create_integer(mask)));
     auto   drv = node.create_driver_pin(0);
@@ -2028,7 +2107,7 @@ private:
     int64_t mask = mask_from_operand(mask_op);
     auto    vv   = leaf(val);
 
-    auto node = create_typed_node(*g_, Ntype_op::Set_mask);
+    auto node = make_node(Ntype_op::Set_mask);
     setup_sink_by_name(node, "a").connect_driver(vv.pin);
     setup_sink_by_name(node, "mask").connect_driver(create_const(*g_, *Const::create_integer(mask)));
     setup_sink_by_name(node, "value").connect_driver(leaf(ins).pin);
@@ -2044,7 +2123,7 @@ private:
     if (dst.is_invalid()) {
       return;
     }
-    auto   node    = create_typed_node(*g_, op);
+    auto   node    = make_node(op);
     int32_t max_mw  = 0;
     int32_t sum_mw  = 0;
     int32_t first_mw = 0;
@@ -2080,7 +2159,7 @@ private:
       return;
     }
     auto v    = leaf(a);
-    auto node = create_typed_node(*g_, op);
+    auto node = make_node(op);
     setup_sink_by_name(node, "a").connect_driver(v.pin);
     bind_result(lnast_->get_name(dst), node.create_driver_pin(0), v.mw);
   }
@@ -2091,13 +2170,13 @@ private:
     if (dst.is_invalid()) {
       return;
     }
-    auto inner = create_typed_node(*g_, inner_op);
+    auto inner = make_node(inner_op);
     bool first = true;
     for (auto c = lnast_->get_sibling_next(dst); !c.is_invalid(); c = lnast_->get_sibling_next(c)) {
       setup_sink_by_name(inner, (commutative || first) ? "a" : "b").connect_driver(leaf(c).pin);
       first = false;
     }
-    auto not_node = create_typed_node(*g_, Ntype_op::Not);
+    auto not_node = make_node(Ntype_op::Not);
     setup_sink_by_name(not_node, "a").connect_driver(inner.create_driver_pin(0));
     bind_result(lnast_->get_name(dst), not_node.create_driver_pin(0), 1);
   }
@@ -2209,7 +2288,7 @@ private:
         auto  wr       = br.writes.find(var);
         Pin   true_val = (wr != br.writes.end()) ? wr->second : cur;
 
-        auto mux = create_typed_node(*g_, Ntype_op::Mux);
+        auto mux = make_node(Ntype_op::Mux);
         mux.create_sink_pin(0).connect_driver(br.cond);   // selector
         mux.create_sink_pin(1).connect_driver(cur);       // false / else
         mux.create_sink_pin(2).connect_driver(true_val);  // true / then
@@ -2405,6 +2484,33 @@ public:
     }
   }
 
+  // [[1f]]-F: stage a Diagnostic located via the graph node's srcid (stamped
+  // by the lowering walk, resolved through the graph's locator) before the
+  // Pass::error-style throw. An id-less node degrades to an unlocated record.
+  template <typename... Args>
+  [[noreturn]] void error_at_node(const hhds::Node_class& node, std::format_string<Args...> fmt, Args&&... args) {
+    auto                            msg = std::format(fmt, std::forward<Args>(args)...);
+    livehd::diag::Span              span;
+    std::vector<livehd::diag::Note> notes;
+    if (g_ != nullptr) {
+      if (auto ref = node.attr(hhds::attrs::srcid); ref.has()) {
+        span  = livehd::srcloc::span_of(g_->source_locator(), ref.get());
+        notes = livehd::srcloc::notes_of(g_->source_locator(), ref.get(), "reached via this site");
+      }
+    }
+    livehd::diag::sink().stage(livehd::diag::Diagnostic{
+        .severity = livehd::diag::Severity::error,
+        .code     = "tolg-time-error",
+        .category = "type",
+        .pass     = "upass.tolg",
+        .message  = msg,
+        .span     = std::move(span),
+        .notes    = std::move(notes),
+    });
+    err_tracker::logger(msg);
+    throw Eprp::parser_error(Pass::eprp, msg);
+  }
+
   void run() {
     using livehd::graph_util::is_graph_input_pin;
     using livehd::graph_util::is_type_const;
@@ -2535,11 +2641,15 @@ public:
         if (!nontrivial[static_cast<size_t>(s)]) {
           continue;
         }
-        bool has_state = false;
-        bool has_flop  = false;
+        bool             has_state = false;
+        bool             has_flop  = false;
+        hhds::Node_class rep;  // a member of the offending SCC, for the diag anchor
         for (size_t i = 0; i < nn; ++i) {
           if (scc_id[i] != s) {
             continue;
+          }
+          if (rep.is_invalid()) {
+            rep = nodes[i];
           }
           if (is_type_flop(nodes[i])) {
             has_flop = true;
@@ -2550,14 +2660,14 @@ public:
         }
         if (!has_state) {
           if (has_flop) {
-            Pass::error(
+            error_at_node(
+                rep,
                 "upass.tolg: '{}' has register feedback through stage registers — make the looping register a plain "
                 "`reg` (state)",
                 ln_->get_top_module_name());
           } else {
-            Pass::error("upass.tolg: combinational loop in '{}'", ln_->get_top_module_name());
+            error_at_node(rep, "upass.tolg: combinational loop in '{}'", ln_->get_top_module_name());
           }
-          return;
         }
       }
     }
@@ -2596,8 +2706,14 @@ public:
     if (order.size() < nn) {
       // state flops never enter the order (indeg cut makes them sources —
       // they ARE in the order); a shortfall is a residual comb cycle.
-      Pass::error("upass.tolg: combinational loop in '{}'", ln_->get_top_module_name());
-      return;
+      hhds::Node_class rep;
+      for (size_t i = 0; i < nn; ++i) {
+        if (indeg[i] > 0) {
+          rep = nodes[i];  // a node still on the cycle — the diag anchor
+          break;
+        }
+      }
+      error_at_node(rep, "upass.tolg: combinational loop in '{}'", ln_->get_top_module_name());
     }
 
     // 4. Forward σ with state q pinned to σ(din). Pass 1 leaves state q
@@ -2663,12 +2779,12 @@ public:
       }
       const int64_t sigma = sb.min;
       if (sigma > rec.min) {
-        Pass::error("upass.tolg: output '{}' of '{}' lands at stage {}, pipe declares {}",
-                    rec.name,
-                    ln_->get_top_module_name(),
-                    sigma,
-                    rec.min);
-        return;
+        error_at_node(mn,
+                      "upass.tolg: output '{}' of '{}' lands at stage {}, pipe declares {}",
+                      rec.name,
+                      ln_->get_top_module_name(),
+                      sigma,
+                      rec.min);
       }
       const int64_t nmin = rec.min - sigma;
       const int64_t nmax = rec.max - sigma;
@@ -2730,29 +2846,32 @@ public:
           }
         }
       }
-      TR cur;
+      TR               cur;
+      hhds::Node_class anchor_node;  // the value's driver cell, for the diag span
       if (rec.is_sink) {
         auto edges = rec.pin.inp_edges();
         if (edges.empty()) {
           continue;  // undriven output already warned/nil-wired
         }
-        cur = pin_tr(edges.front().driver);
+        cur         = pin_tr(edges.front().driver);
+        anchor_node = edges.front().driver.get_master_node();
       } else {
-        cur = pin_tr(rec.pin);
+        cur         = pin_tr(rec.pin);
+        anchor_node = rec.pin.get_master_node();
       }
       if (cur.any || (cur.min == rec.min && cur.max == rec.max)) {
         rec.pin.attr(livehd::attrs::pending_time).del();  // removed once checked
         continue;
       }
-      Pass::error("upass.tolg: '{}' in '{}' lands at cycle(s) ({},{}) but ({},{}) is {}",
-                  rec.name,
-                  ln_->get_top_module_name(),
-                  cur.min,
-                  cur.max,
-                  rec.min,
-                  rec.max,
-                  rec.is_sink ? "declared at the interface" : "asserted by `@[N]`");
-      return;
+      error_at_node(anchor_node,
+                    "upass.tolg: '{}' in '{}' lands at cycle(s) ({},{}) but ({},{}) is {}",
+                    rec.name,
+                    ln_->get_top_module_name(),
+                    cur.min,
+                    cur.max,
+                    rec.min,
+                    rec.max,
+                    rec.is_sink ? "declared at the interface" : "asserted by `@[N]`");
     }
   }
 
@@ -2885,16 +3004,16 @@ private:
           meet = {std::min(meet.min, t.min), std::max(meet.max, t.max), false};
           continue;
         }
-        Pass::error("upass.tolg: '{}' mixes values at different cycles (({},{}) vs ({},{})) at a {} cell (sink pid {}) "
-                    "— align them with `stage[N]` first",
-                    ln_->get_top_module_name(),
-                    meet.min,
-                    meet.max,
-                    t.min,
-                    t.max,
-                    Ntype::get_name(type_op_of(node)),
-                    spid);
-        return;
+        error_at_node(node,
+                      "upass.tolg: '{}' mixes values at different cycles (({},{}) vs ({},{})) at a {} cell (sink pid {}) "
+                      "— align them with `stage[N]` first",
+                      ln_->get_top_module_name(),
+                      meet.min,
+                      meet.max,
+                      t.min,
+                      t.max,
+                      Ntype::get_name(type_op_of(node)),
+                      spid);
       }
     }
 

@@ -30,7 +30,7 @@ std::string_view to_string(Severity s);
 // `file`/`start_byte`/`end_byte` best-effort (inou/prp) or leave it null
 // (upass/lgraph). Post-sourcemap sites add `source_id` + resolved line/col.
 struct Span {
-  std::optional<uint32_t> source_id  = {};
+  std::optional<uint64_t> source_id  = {};  // hhds SourceId ([[1f]])
   std::optional<uint32_t> file_id    = {};
   std::string             file       = {};  // pre-1f fallback path
   std::optional<uint64_t> start_byte = {};

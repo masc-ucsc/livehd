@@ -25,10 +25,12 @@
 
 // LiveHD includes — HHDS only (no //lgraph dep)
 #include "graph_library_singleton.hpp"
+#include "hhds/attrs/srcid.hpp"
 #include "hhds/graph.hpp"
 #include "hlop/dlop.hpp"
 #include "node_util.hpp"
 #include "perf_tracing.hpp"
+#include "source_path.hpp"
 #include "str_tools.hpp"
 
 using livehd::Hhds_graph_library;
@@ -43,11 +45,9 @@ using livehd::graph_util::is_graph_output_pin;
 using livehd::graph_util::node_name_of;
 using livehd::graph_util::pin_name_of;
 using livehd::graph_util::set_bits;
-using livehd::graph_util::set_loc1;
 using livehd::graph_util::set_pin_name;
 using livehd::graph_util::set_pin_offset;
 using livehd::graph_util::set_sign;
-using livehd::graph_util::set_source;
 using livehd::graph_util::set_unsign;
 using livehd::graph_util::set_type_op;
 using livehd::graph_util::setup_sink_by_name;
@@ -135,6 +135,8 @@ namespace {
 [[nodiscard]] bool has_graph_input(hhds::Graph* g, std::string_view name) { return g->get_io()->has_input(name); }
 [[nodiscard]] bool has_graph_output(hhds::Graph* g, std::string_view name) { return g->get_io()->has_output(name); }
 
+// Yosys src attributes are "file.v:42[.column]" strings; mint a line-only
+// anchor in the graph's Source_locator and stamp the node's srcid ([[1f]]).
 static void set_loc(hhds::Node_class& node, const std::string& src) {
   if (src.empty()) {
     return;
@@ -143,9 +145,13 @@ static void set_loc(hhds::Node_class& node, const std::string& src) {
   std::vector<std::string> line = absl::StrSplit(src, ':');
 
   if (line.size() >= 2) {
-    set_source(node, line[0]);
-    uint64_t loc_line = str_tools::to_i(line[1]);
-    set_loc1(node, loc_line);
+    const auto path = livehd::srcloc::workspace_relative(line[0]);
+    auto*      g    = node.get_graph();
+    if (path.empty() || g == nullptr) {
+      return;
+    }
+    const auto id = g->source_locator().mint_line(path, static_cast<uint32_t>(str_tools::to_i(line[1])));
+    node.attr(hhds::attrs::srcid).set(id);
   }
 }
 

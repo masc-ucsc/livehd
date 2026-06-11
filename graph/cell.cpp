@@ -22,8 +22,7 @@ struct Livehd_attr_init {
     hhds::register_attr_tag<livehd::attrs::pin_signed_t>("livehd::attrs::pin_signed");
     hhds::register_attr_tag<livehd::attrs::color_t>("livehd::attrs::color");
     hhds::register_attr_tag<livehd::attrs::place_t>("livehd::attrs::place");
-    hhds::register_attr_tag<livehd::attrs::loc_t>("livehd::attrs::loc");
-    hhds::register_attr_tag<livehd::attrs::source_t>("livehd::attrs::source");
+    // source provenance rides hhds::attrs::srcid (self-registering, [[1f]])
     hhds::register_attr_tag<livehd::attrs::const_value_t>("livehd::attrs::const_value");
     hhds::register_attr_tag<livehd::attrs::pin_const_value_t>("livehd::attrs::pin_const_value");
     hhds::register_attr_tag<livehd::attrs::lut_t>("livehd::attrs::lut");

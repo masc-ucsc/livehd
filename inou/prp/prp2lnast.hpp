@@ -22,9 +22,34 @@ protected:
   // TS Parsing
   std::string prp_file;
   std::string src_filename;  // source path, for diagnostic spans
+  std::string src_relpath;   // workspace-relative form for SourceId minting ([[1f]])
   TSParser*   parser  = nullptr;
   TSTree*     ts_tree = nullptr;  // owned; freed in the dtor (and on ctor throw)
   TSNode      ts_root_node;
+
+  // Mint a SourceId for `node`'s span in the Lnast's locator (0 when the node
+  // is null or no source path is known).
+  hhds::SourceId mint_src(const TSNode& node) const;
+
+  // RAII: while alive, every def-bearing LNAST node created is stamped with
+  // the given statement-span id (Lnast::set_pending_srcid), so SSA temps and
+  // op nodes are attributable. Nested statements narrow it; the destructor
+  // restores the enclosing statement's id.
+  class Pending_src {
+  public:
+    Pending_src(Lnast& ln, hhds::SourceId id) : ln_(ln), saved_(ln.pending_srcid()) {
+      if (id != hhds::SourceId_invalid) {
+        ln_.set_pending_srcid(id);
+      }
+    }
+    ~Pending_src() { ln_.set_pending_srcid(saved_); }
+    Pending_src(const Pending_src&)            = delete;
+    Pending_src& operator=(const Pending_src&) = delete;
+
+  private:
+    Lnast&         ln_;
+    hhds::SourceId saved_;
+  };
 
   // Emit a structured diagnostic (the LiveHD docs §3) anchored at
   // `node`'s source span (best-effort byte + line/col, pre-sourcemap), then
@@ -41,11 +66,11 @@ protected:
   [[noreturn]] void report_error(const Lnast_nid& nid, std::string_view code, std::string_view category, std::string message,
                                  std::string_view hint = {}) const;
 
-  // Persist `node`'s source span (byte range + 1-based line) and the source
-  // filename onto the LNAST node at `idx`, so downstream passes (e.g. the upass
-  // verifier reporting a comptime-false cassert) can point at the assertion.
-  // No-op when `node` is null. This is the pre-sourcemap, per-node best-effort
-  // location; the general mechanism is task 1f. See the LiveHD docs.
+  // Stamp `node`'s span as the LNAST node's SourceId ([[1f]]; minted through
+  // the Lnast's Source_locator), overriding the statement-level pending id
+  // with a finer anchor — an `if` condition, a call site, a range expression —
+  // so the consuming diagnostic points at the exact construct. No-op when
+  // `node` is null.
   void attach_loc(const Lnast_nid& idx, const TSNode& node);
 
   // If the tree-sitter parse produced a MISSING node (genuine syntax error),

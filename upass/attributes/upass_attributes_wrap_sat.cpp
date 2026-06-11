@@ -177,7 +177,10 @@ void uPass_attributes::record_assign(std::string_view lhs, bool rhs_is_nil) {
   // window: the runner's synthesized constructor stores (defaults bind +
   // ref-self write-back) are one logical binding, not user re-binds.
   if (ti->decl == Decl_kind::const_kind && init_construction_depth_ == 0 && was_bound) {
-    upass::error("uPass_attributes: const `{}` rebind (assigned {} times)\n", lhs, 2);
+    upass::error(lm->get_lnast()->span_of(lm->get_current_nid()),
+                 "uPass_attributes: const `{}` rebind (assigned {} times)\n",
+                 lhs,
+                 2);
   }
   if (!was_bound) {
     if (field.empty()) {

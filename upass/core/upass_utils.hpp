@@ -23,4 +23,19 @@ template <typename... Args>
   throw std::runtime_error(msg);
 }
 
+// Located variant ([[1f]]-F): the caller resolves the node's SourceId through
+// its Lnast's locator (`ln->span_of(nid)`) and passes the resolved Span here —
+// core/diag stays a leaf library with no locator dependency.
+template <typename... Args>
+[[noreturn]] void error(livehd::diag::Span span, std::format_string<Args...> format, Args&&... args) {
+  auto msg = std::format(format, std::forward<Args>(args)...);
+  livehd::diag::sink().emit(livehd::diag::Diagnostic{.severity = livehd::diag::Severity::error,
+                                                     .code     = "upass-error",
+                                                     .category = "internal",
+                                                     .pass     = "upass",
+                                                     .message  = msg,
+                                                     .span     = std::move(span)});
+  throw std::runtime_error(msg);
+}
+
 }  // namespace upass

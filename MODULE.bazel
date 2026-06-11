@@ -101,13 +101,16 @@ http_archive(
 
 # HHDS (replaces core/lhtree*.hpp; see hhds_migration.md)
 bazel_dep(name = "hhds", version = "0.2.0")
-git_override(
-    module_name = "hhds",
-    remote = "https://github.com/masc-ucsc/hhds.git",
-    commit = "311d757c28a7b8032ce86f3917d0f52ef0afa9e4",
-)
-# For local debug/testing, swap the git_override above for:
-# local_path_override(module_name = "hhds", path = "../hhds")
+# 1f: needs hhds f295790 (Source_locator::file_count / file_line_offsets),
+# committed locally in ../hhds but NOT yet pushed. After `git -C ../hhds push`,
+# restore the git_override below (pin f295790de1192f59e1410be2529e41aeaaae6f5f)
+# and drop the local_path_override:
+# git_override(
+#     module_name = "hhds",
+#     remote = "https://github.com/masc-ucsc/hhds.git",
+#     commit = "f295790de1192f59e1410be2529e41aeaaae6f5f",
+# )
+local_path_override(module_name = "hhds", path = "../hhds")
 
 # tree-sitter-pyrope
 http_archive(

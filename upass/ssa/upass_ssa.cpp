@@ -108,6 +108,10 @@ void uPass_ssa::copy_subtree(const std::shared_ptr<Lnast>& src, const Lnast_nid&
   } else {
     new_nid = dst->add_child(dst_parent, type);
   }
+  // [[1f]] carry (same-locator: the staging body replaces src's own body).
+  if (Lnast::srcid_carries(type)) {
+    dst->set_srcid(new_nid, src->get_srcid(src_nid));
+  }
   for (auto child : src->children(src_nid)) {
     copy_subtree(src, child, dst, new_nid);
   }
@@ -129,6 +133,10 @@ void uPass_ssa::copy_with_rename(const std::shared_ptr<Lnast>& src, const Lnast_
     new_nid = dst->add_child(dst_parent, Lnast_node::create_invalid());
   } else {
     new_nid = dst->add_child(dst_parent, type);
+  }
+  // [[1f]] carry (same-locator: the staging body replaces src's own body).
+  if (Lnast::srcid_carries(type)) {
+    dst->set_srcid(new_nid, src->get_srcid(src_nid));
   }
   for (auto child : src->children(src_nid)) {
     copy_with_rename(src, child, dst, new_nid, rename_map);
@@ -268,7 +276,7 @@ void uPass_ssa::run(const std::shared_ptr<Lnast>& lnast) {
                                                            .category = "type",
                                                            .pass     = "upass.ssa",
                                                            .message  = msg,
-                                                           .span     = {.file = std::string(lnast->get_source())},
+                                                           .span     = lnast->span_of(type_nid),
                                                            .hint     = "declare the tuple as a named type and use `self:Name`"});
         throw std::runtime_error(msg);
       }
@@ -423,6 +431,10 @@ void uPass_ssa::run(const std::shared_ptr<Lnast>& lnast) {
     // ── Statements with a write dest as first child: apply SSA renaming ────
     if (has_dest) {
       auto stmt_node = staging->add_child(new_stmts, type);
+      // [[1f]] carry the statement's SourceId across the SSA rebuild.
+      if (Lnast::srcid_carries(type)) {
+        staging->set_srcid(stmt_node, lnast->get_srcid(child));
+      }
 
       // Defer rename_map update until after RHS is fully copied so that a
       // self-referencing assignment like `t = t + 1` (second assignment)

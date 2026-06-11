@@ -371,21 +371,13 @@ void uPass_typecheck::process_range() {
   }
 }
 
-// Build a located Span from an LNAST nid that carries a source loc (cassert /
-// func_call — the loc-carry chain). Mirrors uPass_verifier::span_from_nid.
+// Build a located Span from an LNAST nid: its SourceId resolved through the
+// owning Lnast's locator ([[1f]]). Mirrors uPass_verifier::span_from_nid.
 livehd::diag::Span uPass_typecheck::span_from_nid(const Lnast_nid& nid) const {
-  livehd::diag::Span span;
   if (const auto& ln = lm->get_lnast()) {
-    const auto loc   = ln->get_loc(nid);
-    const auto fname = ln->get_fname(nid);
-    if (!fname.empty()) {
-      span.file = std::string{fname};
-    }
-    if (loc.line != 0) {
-      span.start_line = loc.line;
-    }
+    return ln->span_of(nid);
   }
-  return span;
+  return {};
 }
 
 // ── arithmetic / bitwise / shift: int operands → int (NO bool) ──────────────

@@ -21,7 +21,7 @@
 
 <h2>Depends on</h2>
 <ul>
-<li><a class="xref" href="1f.html">1f</a> — diagnostic spans sharpen once
+<li><strong>1f</strong> (landed 2026-06-10) — diagnostic spans sharpen once
   <code>source_id</code> threads through.</li>
 <li><a class="xref" href="3f.html">3f</a> — structured diagnostic codes/categories.</li>
 </ul>
@@ -63,9 +63,9 @@ sink. Library: <code>lsp/</code> (<code>livehd::lsp::run_stdio</code>). Design c
 Builds on the landed diagnostics foundation (<code>core/diag</code>), shares the JSONL/step
 model with the agent CLI (the LSP folds under <code>livehd lsp</code>; see
 <a class="xref" href="3y-agent.html">3y-agent</a>), and inherits source spans from
-<a class="xref" href="1f.html">1f</a> / the
+<strong>1f</strong> (landed 2026-06-10) / the
 <a href="https://masc-ucsc.github.io/docs/livehd/">LiveHD docs</a> (precise for syntax
-today, sharpening as <a class="xref" href="1f.html">1f</a>/<a class="xref" href="3f.html">3f</a> land).</p>
+today, sharpening as <strong>1f</strong> (landed 2026-06-10)/<a class="xref" href="3f.html">3f</a> land).</p>
 
 <p>Claude Code integration facts below were verified against the in-session <code>LSP</code>
 tool definition and the official docs (<code>code.claude.com/docs/en/tools-reference</code>,
@@ -129,7 +129,7 @@ is the gate for all later phases.</p>
 <tr><td>hover</td><td>kind from <code>upass/typecheck</code>; width/range from <strong><code>lnast-&gt;bw_meta().ranges[name]</code></strong> — a <code>BitwidthEntry{min, max, unbounded}</code> (lnast/lnast.hpp) that <code>upass/bitwidth</code> flushes at <code>end_run</code> from its internal <code>Lnast_range</code>. <strong>Not</strong> <code>Bitwidth_range</code> (that is the separate legacy LGraph type). Keyed by <strong>post-SSA variable name</strong>, not LNAST node</td><td>name-keyed</td></tr>
 <tr><td>documentSymbol</td><td>LNAST top-level <code>declare</code>/<code>func_def</code>/register/IO nodes</td><td>clean</td></tr>
 <tr><td>references</td><td><code>read_sites_</code> (carries <code>TSNode</code> byte spans for <strong>reads</strong>) — <strong>excludes the <code>func_call</code> callee</strong>, so builtins are not recorded</td><td>usable, with the callee gap</td></tr>
-<tr><td>definition</td><td><strong>needs new work</strong> — <code>collect_defined_names</code> returns only a <code>set&lt;string&gt;</code> of names (no name→def-site map, no span); <code>attach_loc</code> covers ~10 statement kinds today (if/while/for/store/declare/range/attr_set/cassert/func_call/timecheck) but not def-name child nodes. Must add a name→definition-<code>TSNode</code> index (or use <a class="xref" href="1f.html">1f</a>'s per-def <code>SourceId</code>s)</td><td>new plumbing</td></tr>
+<tr><td>definition</td><td><strong>needs new work</strong> — <code>collect_defined_names</code> returns only a <code>set&lt;string&gt;</code> of names (no name→def-site map, no span); <code>attach_loc</code> covers ~10 statement kinds today (if/while/for/store/declare/range/attr_set/cassert/func_call/timecheck) but not def-name child nodes. Must add a name→definition-<code>TSNode</code> index (or use <strong>1f</strong> (landed 2026-06-10)'s per-def <code>SourceId</code>s)</td><td>new plumbing</td></tr>
 <tr><td>workspaceSymbol</td><td>documentSymbol indexed across all <code>.prp</code> in the workspace</td><td>new index</td></tr>
 <tr><td>call hierarchy</td><td><code>func_def</code> ↔ <code>func_call</code> graph in LNAST</td><td>new traversal</td></tr>
 </table>
@@ -244,7 +244,7 @@ only, no <code>start_byte</code>) via the loc-carry chain; <code>inou/prp</code>
 carry precise byte spans. So a null/line-only span is the LSP's problem to map —
 the <strong>"clamp to document start" fallback is planned LSP behavior, not something
 <code>core/diag</code> does today</strong>. The record schema is unchanged, so semantic-span
-precision sharpens automatically when <a class="xref" href="1f.html">1f</a>/<a class="xref" href="3f.html">3f</a> land — no LSP-side change.</p>
+precision sharpens automatically when <strong>1f</strong> (landed 2026-06-10)/<a class="xref" href="3f.html">3f</a> land — no LSP-side change.</p>
 <p><strong>Push and pull — pick one <em>per client</em>.</strong> Claude Code "auto-reports after each
 edit," but the official docs do <strong>not</strong> state the wire mechanism (server-push
 <code>publishDiagnostics</code> vs. client-pull <code>textDocument/diagnostic</code>, LSP 3.17). We
@@ -364,7 +364,7 @@ here so they aren't lost — not 2n work):</p>
 (Phase C); public accessors + a kept-alive <code>Prp2lnast</code> per document (Phase B/C);
 the source-from-string constructor (Phase A, trivial).</p>
 <p><strong>Soft deps (do not block):</strong> the agent CLI (the LSP runs its own in-process pipeline,
-folds under <code>livehd lsp</code> later; see <a class="xref" href="3y-agent.html">3y-agent</a>); <a class="xref" href="1f.html">1f</a>/<a class="xref" href="3f.html">3f</a> (semantic-span precision; degrades
+folds under <code>livehd lsp</code> later; see <a class="xref" href="3y-agent.html">3y-agent</a>); <strong>1f</strong> (landed 2026-06-10)/<a class="xref" href="3f.html">3f</a> (semantic-span precision; degrades
 gracefully).</p>
 <p><strong>Phases:</strong></p>
 <ul>

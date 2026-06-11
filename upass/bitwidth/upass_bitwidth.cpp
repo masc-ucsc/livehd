@@ -233,18 +233,14 @@ void uPass_bitwidth::check_declared_fit(std::string_view name, const Lnast_range
 
 void uPass_bitwidth::record_overflow(std::string_view name, const Lnast_range& value, const Lnast_range& env) {
   // The diagnostic is emitted AT the offending node: the cursor is on
-  // the store/op during dispatch, so its loc (when carried) is the span. An
-  // error-severity diag fails the compile; no end_run throw, no deferral.
-  livehd::diag::Span span;
+  // the store/op during dispatch, so its SourceId (resolved through the
+  // owning Lnast's locator, [[1f]]) is the span. An error-severity diag
+  // fails the compile; no end_run throw, no deferral.
+  livehd::diag::Span              span;
+  std::vector<livehd::diag::Note> notes;
   if (const auto& ln = lm->get_lnast()) {
-    const auto nid = lm->get_current_nid();
-    const auto loc = ln->get_loc(nid);
-    if (loc.line != 0) {
-      span.start_line = loc.line;
-      if (auto fn = ln->get_fname(nid); !fn.empty()) {
-        span.file = std::string{fn};
-      }
-    }
+    span  = ln->span_of(lm->get_current_nid());
+    notes = ln->notes_of(lm->get_current_nid(), "reached via this site");
   }
   livehd::diag::sink().emit(livehd::diag::Diagnostic{
       .severity = livehd::diag::Severity::error,

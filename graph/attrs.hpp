@@ -87,23 +87,10 @@ struct place_t {
 };
 inline constexpr place_t place{};
 
-// Per-node source location (pos1 / pos2 offsets into the source file).
-// Replaces Lgraph_attributes::node_loc_map.
-struct loc_t {
-  struct value_type {
-    uint64_t pos1 = 0;
-    uint64_t pos2 = 0;
-  };
-  using storage = hhds::flat_storage;
-};
-inline constexpr loc_t loc{};
-
-// Per-node source filename. Replaces Lgraph_attributes::node_source_map.
-struct source_t {
-  using value_type = std::string;
-  using storage    = hhds::flat_storage;
-};
-inline constexpr source_t source{};
+// Per-node source provenance is hhds::attrs::srcid (one uint64 SourceId
+// resolved through the graph's Source_locator) — the old livehd::attrs::loc
+// (with its pos1=line-vs-byte mismatch) and livehd::attrs::source string pair
+// were write-only and are gone ([[1f]]).
 
 // Per-node serialized Const value used by Nconst cells.
 // Replaces Lgraph_attributes::const_map (which stored Const::serialize()).
@@ -190,14 +177,6 @@ template <>
 template <>
 [[nodiscard]] inline std::string attr_tag_name<livehd::attrs::place_t>() {
   return "livehd::attrs::place";
-}
-template <>
-[[nodiscard]] inline std::string attr_tag_name<livehd::attrs::loc_t>() {
-  return "livehd::attrs::loc";
-}
-template <>
-[[nodiscard]] inline std::string attr_tag_name<livehd::attrs::source_t>() {
-  return "livehd::attrs::source";
 }
 template <>
 [[nodiscard]] inline std::string attr_tag_name<livehd::attrs::const_value_t>() {

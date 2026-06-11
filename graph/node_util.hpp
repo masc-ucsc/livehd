@@ -432,19 +432,9 @@ inline void set_pin_offset(const hhds::Pin_class& pin, int32_t off) {
   }
 }
 
-// Per-node source filename / source line. Mirrors LiveHD `Node::set_source`
-// and `Node::set_loc1`.
-inline void set_source(const hhds::Node_class& node, std::string_view fname) {
-  if (fname.empty()) {
-    node.attr(livehd::attrs::source).del();
-  } else {
-    node.attr(livehd::attrs::source).set(std::string{fname});
-  }
-}
-
-inline void set_loc1(const hhds::Node_class& node, uint64_t line) {
-  node.attr(livehd::attrs::loc).set(livehd::attrs::loc_t::value_type{line, 0});
-}
+// Per-node source provenance is hhds::attrs::srcid, minted through the
+// graph's Source_locator ([[1f]]); the old set_source/set_loc1 string+line
+// helpers are gone.
 
 // All drivers feeding a named sink port. Used by passes (memory, bit_or)
 // that allow multiple drivers on the same sink port_id.

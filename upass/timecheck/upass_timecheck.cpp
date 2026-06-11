@@ -12,6 +12,7 @@
 #include "absl/container/flat_hash_map.h"
 #include "absl/container/flat_hash_set.h"
 #include "const.hpp"
+#include "diag.hpp"
 #include "lnast_ntype.hpp"
 #include "pass.hpp"
 
@@ -67,12 +68,11 @@ struct CallInfo {
 }
 
 [[nodiscard]] std::string loc_str(const std::shared_ptr<Lnast>& ln, const Lnast_nid& nid) {
-  const auto loc = ln->get_loc(nid);
-  if (loc.pos1 == 0 && loc.pos2 == 0 && loc.line == 0 && loc.tok == 0) {
+  const auto span = ln->span_of(nid);  // SourceId resolved through the locator ([[1f]])
+  if (!span.start_line) {
     return std::string(ln->get_top_module_name());
   }
-  auto fn = ln->get_fname(nid);
-  return std::format("{}:{}", fn.empty() ? ln->get_top_module_name() : fn, loc.line);
+  return std::format("{}:{}", span.file.empty() ? std::string(ln->get_top_module_name()) : span.file, *span.start_line);
 }
 
 // Ops with the (dst, operand...) shape whose result inherits the operands'
@@ -90,6 +90,26 @@ class Discharger {
 public:
   Discharger(const std::shared_ptr<Lnast>& lnast, const uPass_timecheck::Registry& registry)
       : ln_(lnast), registry_(registry) {}
+
+  // [[1f]]-F: stage a located Diagnostic (the node's SourceId resolved
+  // through the Lnast's locator) before the Pass::error-style throw; the
+  // downstream flush emits the staged record exactly once. The loc_str text
+  // stays in the message for human/test continuity.
+  template <typename... Args>
+  [[noreturn]] void error_at(const Lnast_nid& nid, std::format_string<Args...> fmt, Args&&... args) {
+    auto msg = std::format(fmt, std::forward<Args>(args)...);
+    livehd::diag::sink().stage(livehd::diag::Diagnostic{
+        .severity = livehd::diag::Severity::error,
+        .code     = "timecheck-error",
+        .category = "type",
+        .pass     = "upass.timecheck",
+        .message  = msg,
+        .span     = ln_ ? ln_->span_of(nid) : livehd::diag::Span{},
+        .notes    = ln_ ? ln_->notes_of(nid, "reached via this site") : std::vector<livehd::diag::Note>{},
+    });
+    err_tracker::logger(msg);
+    throw Eprp::parser_error(Pass::eprp, msg);
+  }
 
   void run() {
     for (const auto& e : ln_->io_meta().inputs) {
@@ -251,14 +271,16 @@ private:
       if (ci.is_pipe) {
         if (n < ci.cmin || (ci.cmax >= ci.cmin && n > ci.cmax)) {
           if (ci.cmax >= ci.cmin) {
-            Pass::error("{}: stage[{}] on '{}' is outside the callee's declared latency range [{}, {}]",
+            error_at(stg.decl_nid.is_invalid() ? store_nid : stg.decl_nid,
+                     "{}: stage[{}] on '{}' is outside the callee's declared latency range [{}, {}]",
                         loc_str(ln_, stg.decl_nid.is_invalid() ? store_nid : stg.decl_nid),
                         n,
                         name,
                         ci.cmin,
                         ci.cmax);
           } else {
-            Pass::error("{}: stage[{}] on '{}' is below the callee's declared minimum latency {}",
+            error_at(stg.decl_nid.is_invalid() ? store_nid : stg.decl_nid,
+                     "{}: stage[{}] on '{}' is below the callee's declared minimum latency {}",
                         loc_str(ln_, stg.decl_nid.is_invalid() ? store_nid : stg.decl_nid),
                         n,
                         name,
@@ -268,7 +290,8 @@ private:
         }
       } else {
         if (ci.cmin != ci.cmax || n != ci.cmin) {
-          Pass::error("{}: mod call result '{}' lands at its declared cycle {} — `stage[{}]` must match it",
+          error_at(stg.decl_nid.is_invalid() ? store_nid : stg.decl_nid,
+                   "{}: mod call result '{}' lands at its declared cycle {} — `stage[{}]` must match it",
                       loc_str(ln_, stg.decl_nid.is_invalid() ? store_nid : stg.decl_nid),
                       name,
                       ci.cmin,
@@ -340,7 +363,8 @@ private:
         continue;
       }
       if (have && kit->second.min != op.min) {
-        Pass::error("{}: call operands at different cycles ({} vs {}) — align them with a `stage[N]` binding first",
+        error_at(nid,
+                 "{}: call operands at different cycles ({} vs {}) — align them with a `stage[N]` binding first",
                     loc_str(ln_, nid),
                     op.min,
                     kit->second.min);
@@ -382,7 +406,8 @@ private:
         continue;
       }
       if (have && kit->second.min != meet.min) {
-        Pass::error("{}: '{}' mixes operands at different cycles ({} vs {}) — align them with `stage[N]` or check with `@[N]`",
+        error_at(nid,
+                 "{}: '{}' mixes operands at different cycles ({} vs {}) — align them with `stage[N]` or check with `@[N]`",
                     loc_str(ln_, nid),
                     dst_name,
                     meet.min,
@@ -433,7 +458,8 @@ private:
         continue;  // not statically derivable — stays as an LG pending check
       }
       if (kit->second.min != qc.asserted) {
-        Pass::error("{}: '{}' lands at cycle {}, not {} as `@[{}]` asserts",
+        error_at(qc.nid,
+                 "{}: '{}' lands at cycle {}, not {} as `@[{}]` asserts",
                     loc_str(ln_, qc.nid),
                     qc.name,
                     kit->second.min,

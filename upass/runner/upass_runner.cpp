@@ -66,6 +66,7 @@
 
 #include "absl/container/flat_hash_set.h"
 #include "diag.hpp"
+#include "lnast_srcloc.hpp"
 
 namespace {
 
@@ -158,6 +159,7 @@ void collect_cond_vars(const Lnast& ln, const Lnast_nid& while_nid, std::string_
 uPass_runner::uPass_runner(std::shared_ptr<upass::Lnast_manager>& _lm, const std::vector<std::string>& upass_names,
                            upass::Options_map options)
     : uPass_struct(_lm) {
+  root_lnast_ = _lm->get_lnast();  // no inline frame is active at construction
   auto        upass_registry = upass::uPass_plugin::get_registry();
   std::string order_error;
   auto        resolved = resolve_order(upass_names, &order_error);
@@ -260,6 +262,30 @@ std::vector<std::string> uPass_runner::resolve_order(const std::vector<std::stri
 
 // ── Staging emit helpers ──────────────────────────────────────────────────────
 
+void uPass_runner::carry_srcid(const Lnast_nid& staged) {
+  const auto& src_ln = lm->get_lnast();
+  auto        id     = src_ln->get_srcid(lm->get_current_nid());
+  if (id == hhds::SourceId_invalid) {
+    return;
+  }
+  if (src_ln.get() != root_lnast_.get()) {
+    // Inline frame: the id was minted in the callee Lnast's locator — re-mint
+    // it into the root's so it stays resolvable after replace_body.
+    id = livehd::srcloc::import_srcid(root_lnast_->source_locator(), src_ln->source_locator(), id);
+    // Combined id for spliced bodies ([[1f]]-C): primary anchor = the callee
+    // def (the diag span), secondary = the call site (rendered as a note).
+    // Nested inlining composes naturally — the inner call site is itself a
+    // combine whose parents chain to the outer one.
+    if (id != hhds::SourceId_invalid && !inline_call_sites_.empty()) {
+      const auto call_site = inline_call_sites_.back();
+      if (call_site != hhds::SourceId_invalid && call_site != id) {
+        id = root_lnast_->source_locator().combine({id, call_site});
+      }
+    }
+  }
+  staging->set_srcid(staged, id);
+}
+
 void uPass_runner::emit_push(Lnast_ntype::Lnast_ntype_int type) {
   if (!materialize_) {
     // No staging build (toln:0 && tolg:0): keep the parent stack balanced for
@@ -271,29 +297,12 @@ void uPass_runner::emit_push(Lnast_ntype::Lnast_ntype_int type) {
   staging_parent_stack.push(staging_parent);
   staging_parent = nid;
 
-  // Carry an if/while source span across the staging rebuild so upass/typecheck's
-  // cond-not-bool can point at the condition; same for store/declare (bitwidth's
-  // "does not fit" points at the write/declaration) and range (constprop's
-  // descending-range error points at the `a..=b`). prp2lnast records it
-  // (attach_loc) but a func_extract / constprop rebuild re-creates the node via
-  // emit_push, which doesn't otherwise copy loc. cassert / func_call are carried
-  // at their own emit sites (emit_op_with_fold, try_inline_func_call). Gate on
-  // the current source node actually being this node kind so a synthetic block
-  // (e.g. a for-unroll `create_stmts`) emitted with a literal type doesn't grab
-  // an unrelated loc.
-  if ((type == Lnast_ntype::Lnast_ntype_if || type == Lnast_ntype::Lnast_ntype_while || type == Lnast_ntype::Lnast_ntype_store
-       || type == Lnast_ntype::Lnast_ntype_declare || type == Lnast_ntype::Lnast_ntype_range
-       || type == Lnast_ntype::Lnast_ntype_attr_set)
-      && lm->current_type() == type) {
-    const auto& src_ln  = lm->get_lnast();
-    const auto  src_nid = lm->get_current_nid();
-    const auto  loc     = src_ln->get_loc(src_nid);
-    if (loc.pos1 != 0 || loc.pos2 != 0 || loc.line != 0 || loc.tok != 0) {
-      staging->set_loc(nid, loc);
-      if (auto fn = src_ln->get_fname(src_nid); !fn.empty()) {
-        staging->set_fname(nid, fn);
-      }
-    }
+  // [[1f]] general carry — one integer attr, copied unconditionally for every
+  // def-bearing kind (the old per-node-kind whitelist is gone). A synthesized
+  // node whose type differs from the read cursor's inherits the enclosing
+  // statement's id, which is the documented fallback anchor.
+  if (Lnast::srcid_carries(type)) {
+    carry_srcid(nid);
   }
 }
 
@@ -306,7 +315,10 @@ void uPass_runner::emit_leaf(Lnast_ntype::Lnast_ntype_int type) {
   if (!materialize_) {
     return;
   }
-  staging->add_child(staging_parent, type);
+  auto nid = staging->add_child(staging_parent, type);
+  if (Lnast::srcid_carries(type)) {
+    carry_srcid(nid);
+  }
 }
 
 void uPass_runner::emit_leaf(const Lnast_node& node) {
@@ -672,28 +684,7 @@ void uPass_runner::emit_op_with_fold(bool fold_all) {
     return;  // pure emission (dispatch happened in the caller); cursor untouched
   }
   const auto op_ntype = lm->current_type();
-  emit_push(op_ntype);
-
-  // Carry a cassert's / func_call's / tuple_concat's source span across the
-  // staging rebuild. prp2lnast records it (attach_loc) so the verifier can
-  // point at a comptime-false assertion, the inliner at an argument-naming
-  // error, and constprop at a `++` leaf-overlap error, but a func_extract /
-  // constprop rebuild re-creates the node via emit_push, which doesn't copy
-  // loc. Scoped to these op kinds to avoid perturbing other nodes' dumps; the
-  // general per-node carry is the sourcemap work (task 1f).
-  if (op_ntype == Lnast_ntype::Lnast_ntype_cassert || op_ntype == Lnast_ntype::Lnast_ntype_func_call
-      || op_ntype == Lnast_ntype::Lnast_ntype_tuple_concat) {
-    const auto& src_ln  = lm->get_lnast();
-    const auto  src_nid = lm->get_current_nid();
-    const auto  loc     = src_ln->get_loc(src_nid);
-    if (loc.pos1 != 0 || loc.pos2 != 0 || loc.line != 0 || loc.tok != 0) {
-      staging->set_loc(staging_parent, loc);
-    }
-    const auto fn = src_ln->get_fname(src_nid);
-    if (!fn.empty()) {
-      staging->set_fname(staging_parent, fn);
-    }
-  }
+  emit_push(op_ntype);  // carries the SourceId ([[1f]] general carry)
 
   // Task 1t — a `declare`/`type_spec` whose type slot (child 1) is a named-type
   // `ref` must NOT be folded: the ref names a TYPE, not a value, so folding it
@@ -1411,25 +1402,10 @@ bool uPass_runner::try_inline_func_call() {
   const auto saved = lm->save_cursor();
 
   // Snapshot the call-site source span (cursor is on the func_call node) so the
-  // argument-naming diagnostics below can point at the call line. Read from the
-  // source tree (prp2lnast's attach_loc survives the lnastfmt round-trip).
-  const auto         call_nid = lm->get_current_nid();  // func_call node in the source tree
-  livehd::diag::Span call_span;
-  {
-    const auto& src_ln = lm->get_lnast();
-    const auto  loc    = src_ln->get_loc(lm->get_current_nid());
-    const auto  fn     = src_ln->get_fname(lm->get_current_nid());
-    if (!fn.empty()) {
-      call_span.file = std::string(fn);
-    }
-    if (loc.line != 0) {
-      call_span.start_line = loc.line;
-    }
-    if (loc.pos1 != 0 || loc.pos2 != 0) {
-      call_span.start_byte = loc.pos1;
-      call_span.end_byte   = loc.pos2;
-    }
-  }
+  // argument-naming diagnostics below can point at the call line. The SourceId
+  // resolves through the tree that owns the node ([[1f]]).
+  const auto         call_nid  = lm->get_current_nid();  // func_call node in the source tree
+  livehd::diag::Span call_span = lm->get_lnast()->span_of(call_nid);
 
   lm->move_to_child();  // dst
   if (lm->get_raw_ntype() != Lnast_ntype::Lnast_ntype_ref) {
@@ -2198,6 +2174,17 @@ bool uPass_runner::try_inline_func_call() {
   // cursor regardless of how the body walk left it.
   active_inline_callees_.push_back(callee.get());
   flush_deferred_emits();  // flush caller-tree parked writes before entering
+  // [[1f]]-C: the call-site id, re-minted into the root locator (the calling
+  // tree may itself be a callee in nested inlining), anchors every node
+  // spliced from this body via combine(callee_def, call_site) in carry_srcid.
+  {
+    const auto& call_ln      = lm->get_lnast();
+    auto        call_site_id = call_ln->get_srcid(call_nid);
+    if (call_site_id != hhds::SourceId_invalid && call_ln.get() != root_lnast_.get()) {
+      call_site_id = livehd::srcloc::import_srcid(root_lnast_->source_locator(), call_ln->source_locator(), call_site_id);
+    }
+    inline_call_sites_.push_back(call_site_id);
+  }
   lm->push_source(callee, tag, salt);
   if (lm->move_to_child()) {
     if (lm->get_raw_ntype() == Lnast_ntype::Lnast_ntype_io) {
@@ -2211,6 +2198,7 @@ bool uPass_runner::try_inline_func_call() {
   }
   flush_deferred_emits();  // flush callee-tree parked writes before leaving
   lm->pop_source();
+  inline_call_sites_.pop_back();
   active_inline_callees_.pop_back();
   // Task 1p — drop this frame's var-arg gather (the tag is unique per call
   // site, so this only prunes stale state; nested frames used distinct tags).
@@ -2341,6 +2329,13 @@ void uPass_runner::copy_subtree_into(const std::shared_ptr<Lnast>& src, const Ln
     newn = dst->add_child(dst_parent, Lnast_node::create_invalid());
   } else {
     newn = dst->add_child(dst_parent, type);
+  }
+  // [[1f]] cross-tree carry: re-mint the id into the clone's own locator so
+  // a specialized template body stays attributable to the template's source.
+  if (Lnast::srcid_carries(type)) {
+    if (const auto id = src->get_srcid(src_nid); id != hhds::SourceId_invalid) {
+      dst->set_srcid(newn, livehd::srcloc::import_srcid(dst->source_locator(), src->source_locator(), id));
+    }
   }
   for (auto c : src->children(src_nid)) {
     copy_subtree_into(src, c, dst, newn);
@@ -2864,22 +2859,7 @@ bool uPass_runner::try_init_construction() {
     if (tn.empty()) {
       return false;  // untyped binding — a plain function-value alias, allowed
     }
-    livehd::diag::Span span;
-    {
-      const auto& s   = lm->get_lnast();
-      const auto  nid = lm->get_current_nid();
-      const auto  loc = s->get_loc(nid);
-      if (const auto fn = s->get_fname(nid); !fn.empty()) {
-        span.file = std::string(fn);
-      }
-      if (loc.line != 0) {
-        span.start_line = loc.line;
-      }
-      if (loc.pos1 != 0 || loc.pos2 != 0) {
-        span.start_byte = loc.pos1;
-        span.end_byte   = loc.pos2;
-      }
-    }
+    livehd::diag::Span span = lm->get_lnast()->span_of(lm->get_current_nid());
     const auto msg = std::format("cannot assign function reference `{}` to typed variable `{}`:{}", v_raw, x, tn);
     livehd::diag::sink().emit(livehd::diag::Diagnostic{
         .severity = livehd::diag::Severity::error,
@@ -3317,24 +3297,8 @@ void uPass_runner::unroll_while() {
   const std::vector<std::string>   loop_vars(cond_var_set.begin(), cond_var_set.end());
   absl::flat_hash_set<std::string> seen_states;
 
-  // Span for any loop diagnostic below — the `while` node carries the source loc.
-  auto while_span = [&]() {
-    livehd::diag::Span span;
-    const auto&        s   = lm->get_lnast();
-    const auto         nid = lm->get_current_nid();
-    const auto         loc = s->get_loc(nid);
-    if (const auto fn = s->get_fname(nid); !fn.empty()) {
-      span.file = std::string(fn);
-    }
-    if (loc.line != 0) {
-      span.start_line = loc.line;
-    }
-    if (loc.pos1 != 0 || loc.pos2 != 0) {
-      span.start_byte = loc.pos1;
-      span.end_byte   = loc.pos2;
-    }
-    return span;
-  };
+  // Span for any loop diagnostic below — the `while` node carries the SourceId.
+  auto while_span = [&]() { return lm->get_lnast()->span_of(lm->get_current_nid()); };
 
   const bool saved_break = loop_break_hit_;
   loop_break_hit_        = false;
@@ -3823,6 +3787,11 @@ void uPass_runner::dead_code_eliminate_staging() {
           new_child = new_staging->add_child(dst, Lnast_node::create_const(staging->get_name(fc)));
         } else {
           new_child = new_staging->add_child(dst, t);
+          // [[1f]] carry across the DCE sweep (same-locator: both bodies end
+          // up owned by root_lnast_, so the integer copies verbatim).
+          if (Lnast::srcid_carries(t)) {
+            new_staging->set_srcid(new_child, staging->get_srcid(fc));
+          }
           copy_subtree(fc, new_child, inside_payload || !is_structural(t));
         }
       }

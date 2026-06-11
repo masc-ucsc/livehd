@@ -18,6 +18,7 @@
 #include "absl/strings/str_cat.h"
 #include "diag.hpp"
 #include "pass.hpp"
+#include "source_path.hpp"
 #include "str_tools.hpp"
 
 extern "C" TSLanguage* tree_sitter_pyrope();
@@ -53,7 +54,21 @@ Prp2lnast::Prp2lnast(std::string_view filename, std::string_view module_name, st
   builder.lnast = lnast;
 
   src_filename = std::string(filename);
+  src_relpath  = livehd::srcloc::workspace_relative(filename);
   prp_file     = std::string(source);
+
+  // Per-file line-offset table → the locator derives 1-based line:col (full
+  // LSP-grade intervals) from byte offsets at diagnostic-emission time.
+  if (!src_relpath.empty()) {
+    std::vector<uint64_t> offsets;
+    offsets.push_back(0);
+    for (size_t i = 0; i < prp_file.size(); ++i) {
+      if (prp_file[i] == '\n') {
+        offsets.push_back(i + 1);
+      }
+    }
+    lnast->source_locator().set_file_line_offsets(src_relpath, std::move(offsets));
+  }
 
   parser = ts_parser_new();
   ts_parser_set_language(parser, tree_sitter_pyrope());
@@ -135,13 +150,19 @@ void Prp2lnast::report_error(const TSNode& node, std::string_view code, std::str
   throw Eprp::parser_error(Pass::eprp, msg_copy);
 }
 
-void Prp2lnast::attach_loc(const Lnast_nid& idx, const TSNode& node) {
-  if (idx.is_invalid() || ts_node_is_null(node)) {
-    return;
+hhds::SourceId Prp2lnast::mint_src(const TSNode& node) const {
+  if (ts_node_is_null(node) || src_relpath.empty()) {
+    return hhds::SourceId_invalid;
   }
   const auto sp = ts_node_start_point(node);
-  lnast->set_loc(idx, Lnast::Loc{.pos1 = ts_node_start_byte(node), .pos2 = ts_node_end_byte(node), .line = sp.row + 1, .tok = 0});
-  lnast->set_fname(idx, src_filename);
+  return lnast->source_locator().mint(src_relpath, ts_node_start_byte(node), ts_node_end_byte(node), sp.row + 1);
+}
+
+void Prp2lnast::attach_loc(const Lnast_nid& idx, const TSNode& node) {
+  if (idx.is_invalid()) {
+    return;
+  }
+  lnast->set_srcid(idx, mint_src(node));
 }
 
 namespace {
@@ -337,19 +358,10 @@ void Prp2lnast::report_error(std::string_view code, std::string_view category, s
 
 void Prp2lnast::report_error(const Lnast_nid& nid, std::string_view code, std::string_view category, std::string message,
                              std::string_view hint) const {
-  const auto loc = nid.is_invalid() ? Lnast::Loc{} : lnast->get_loc(nid);
-  if (loc.line == 0) {
+  auto span = lnast->span_of(nid);
+  if (span.is_null()) {
     report_error(code, category, std::move(message), hint);  // no attached span — fall back to location-less
   }
-  livehd::diag::Span span;
-  auto               fn = lnast->get_fname(nid);
-  span.file             = fn.empty() ? src_filename : std::string(fn);
-  span.start_byte       = loc.pos1;
-  span.end_byte         = loc.pos2;
-  span.start_line       = loc.line;
-  span.start_col        = 1;  // pre-sourcemap: column not recovered from the LNAST loc
-  span.end_line         = loc.line;
-  span.end_col          = 1;
 
   auto msg_copy = message;
   livehd::diag::sink().stage(livehd::diag::Diagnostic{.severity = livehd::diag::Severity::error,
@@ -529,7 +541,8 @@ void Prp2lnast::check_writes_in_scope(const Lnast_nid& scope_stmts, const std::u
     } else if (Lnast_ntype::is_store(ct)) {
       auto name = first_ref_name(c);
       if (!name.empty() && !prp_name_is_tmp(name) && !here.contains(name) && !visible.contains(name)) {
-        report_error("assign-no-decl",
+        report_error(c,
+                     "assign-no-decl",
                      "name",
                      std::format("assignment to undeclared variable '{}' (declare it with `mut`/`const` first)", name));
       }
@@ -806,28 +819,12 @@ Lnast_nid prp_copy_one_node(const Lnast& src, const Lnast_nid& src_nid, Lnast& d
   } else {
     nn = dst.add_child(dst_parent, t);
   }
-  // Preserve the source location across the decl-merge rebuild. Only cassert,
-  // func_call, if, while, store, declare, range, attr_set and tuple_concat
-  // nodes carry one today (see attach_loc); gating on the type keeps this off
-  // the per-node hot path (no get_loc lookup for the many string/ref/const
-  // nodes a string-heavy tree copies). func_call carries it so the upass
-  // argument-naming diagnostics can point at the call site; if/while carry it
-  // so upass/typecheck's cond-not-bool can point at the condition;
-  // store/declare carry it so bitwidth's "does not fit" can point at the
-  // write; range carries it so constprop's descending-range error can point
-  // at the `a..=b`; tuple_concat carries it so constprop's leaf-overlap
-  // error can point at the `a ++ b` / `(...a, ...)` site.
-  if (t == Lnast_ntype::Lnast_ntype_cassert || t == Lnast_ntype::Lnast_ntype_func_call || t == Lnast_ntype::Lnast_ntype_if
-      || t == Lnast_ntype::Lnast_ntype_while || t == Lnast_ntype::Lnast_ntype_store || t == Lnast_ntype::Lnast_ntype_declare
-      || t == Lnast_ntype::Lnast_ntype_range || t == Lnast_ntype::Lnast_ntype_attr_set
-      || t == Lnast_ntype::Lnast_ntype_tuple_concat) {
-    const auto loc = src.get_loc(src_nid);
-    if (loc.pos1 != 0 || loc.pos2 != 0 || loc.line != 0 || loc.tok != 0) {
-      dst.set_loc(nn, loc);
-      if (auto fn = src.get_fname(src_nid); !fn.empty()) {
-        dst.set_fname(nn, fn);
-      }
-    }
+  // Carry the SourceId across the decl-merge rebuild — one integer attr,
+  // copied unconditionally for every def-bearing kind ([[1f]]; the dst tree
+  // becomes this same Lnast's body via replace_body, so the id stays
+  // resolvable in the Lnast's own locator).
+  if (Lnast::srcid_carries(t)) {
+    dst.set_srcid(nn, src.get_srcid(src_nid));
   }
   return nn;
 }
@@ -914,17 +911,9 @@ void Prp2lnast::rewrite_decls_to_declare() {
       }
       // Emit declare(ref(t), TYPE|none_type, const(mode)).
       auto d = staging->add_child(nn, Lnast_ntype::create_declare());
-      // Carry the cluster head's source span (attached at the attr_set
-      // creation) so declaration-site diagnostics stay located post-merge.
-      {
-        const auto loc = lnast->get_loc(k);
-        if (loc.pos1 != 0 || loc.pos2 != 0 || loc.line != 0 || loc.tok != 0) {
-          staging->set_loc(d, loc);
-          if (auto fn = lnast->get_fname(k); !fn.empty()) {
-            staging->set_fname(d, fn);
-          }
-        }
-      }
+      // Carry the cluster head's SourceId (attached at the attr_set creation)
+      // so declaration-site diagnostics stay located post-merge.
+      staging->set_srcid(d, lnast->get_srcid(k));
       staging->add_child(d, Lnast_node::create_ref(target));
       Lnast_nid tnid = type_node.is_invalid() ? Lnast_nid{} : prp_child_nid(*lnast, type_node, 1);
       if (!tnid.is_invalid()) {
@@ -1070,6 +1059,12 @@ void Prp2lnast::process_statement(TSNode n) {
   if (ts_node_is_null(n)) {
     return;
   }
+  // Statement-granularity provenance ([[1f]]): every def-bearing LNAST node
+  // created while this statement lowers — op nodes, SSA temps, synthesized
+  // stores — inherits the statement's span id. Finer anchors (attach_loc at
+  // ~30 sites) override per node; nested statements re-enter here and narrow.
+  Pending_src pending_guard(*lnast, mint_src(n));
+
   using Handler                                                             = void (Prp2lnast::*)(TSNode);
   static const absl::flat_hash_map<std::string_view, Handler> stmt_dispatch = {
       {  "declaration_statement",   &Prp2lnast::process_declaration_statement},
@@ -1457,7 +1452,7 @@ void Prp2lnast::process_declaration_statement(TSNode n) {
       return;
     }
     if (has_pub) {
-      lnast->add_pub(trim(get_text(id)), "value");
+      lnast->add_pub(trim(get_text(id)), "value", mint_src(id));
     }
     Lnast_node ref = identifier_to_node(id, /*for_lvalue=*/true);
     {
@@ -1704,7 +1699,7 @@ Lnast_node Prp2lnast::process_lvalue_for_assign(TSNode lvalue, const Lnast_node&
     // records each item — decl_node propagates through the recursion.
     if (has_pub) {
       check_pub_value_decl(decl_node, kind_sv);
-      lnast->add_pub(trim(get_text(id)), "value");
+      lnast->add_pub(trim(get_text(id)), "value", mint_src(id));
     }
 
     // Task 1r/1q — track compile-time-resolvable integer bindings so a later
@@ -2713,7 +2708,7 @@ void Prp2lnast::process_lambda_statement_named(TSNode n, std::string_view hoist_
     }
     // Normalize the fluid kind text ("fluid …" variants) to the bare kind.
     std::string_view pub_kind = kind.size() >= 5 && kind.substr(0, 5) == "fluid" ? "fluid" : kind;
-    lnast->add_pub(trim(get_text(name_node)), pub_kind);
+    lnast->add_pub(trim(get_text(name_node)), pub_kind, mint_src(name_node));
   }
 
   // Workaround for tree-sitter not always attaching the body to `code`:

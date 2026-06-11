@@ -20,7 +20,9 @@ void uPass_assert::process_func_call() {
     // An invalid/unknown Const (val.is_invalid()) means the argument is not
     // constpropagated yet — we cannot statically decide, so do not throw.
     if (!val.is_invalid() && val.is_known_false()) {
-      upass::error("assert: cassert condition is statically false at '{}'\n", current_text());
+      upass::error(lm->get_lnast()->span_of(lm->get_current_nid()),
+                   "assert: cassert condition is statically false at '{}'\n",
+                   current_text());
     }
     // If the value is not known-false (unknown or provably true), silently pass.
   }

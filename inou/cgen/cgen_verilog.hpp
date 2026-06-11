@@ -12,11 +12,13 @@
 #include "file_output.hpp"
 #include "hhds/graph.hpp"
 #include "hhds/index.hpp"
+#include "sourcemap_emit.hpp"
 
 class Cgen_verilog {
 private:
   const bool        verbose;
   std::string_view  odir;
+  const bool        srcmap;  // emit an ECMA-426 .map sidecar ([[1f]]-G)
   static inline int trace_module_cnt = 0;
 
   // Re-keyed onto hhds::Class_index — the migration moved cgen off
@@ -75,8 +77,19 @@ private:
   void add_to_pin2var(std::shared_ptr<File_output> fout, const hhds::Pin_class& dpin, std::string_view name, bool out_unsigned);
   void create_locals(std::shared_ptr<File_output> fout, hhds::Graph* graph);
 
+  // ── ECMA-426 egress ([[1f]]-G) ──────────────────────────────────────────
+  // One Segment per emitted statement whose node carries a SourceId: the
+  // generated position is the line the statement is about to land on; the
+  // original position is the primary anchor resolved through the graph's
+  // Source_locator. note_src is a no-op unless `srcmap` is set.
+  std::vector<livehd::sourcemap::Segment>    map_segments_;
+  std::vector<std::string>                   map_sources_;
+  absl::flat_hash_map<std::string, uint32_t> map_source_idx_;
+  void note_src(const std::shared_ptr<File_output>& fout, const hhds::Node_class& node);
+  void write_srcmap(const std::shared_ptr<File_output>& fout, const std::string& filename);
+
 public:
   void do_from_graph(const std::shared_ptr<hhds::Graph>& graph);
 
-  Cgen_verilog(bool _verbose, std::string_view _odir);
+  Cgen_verilog(bool _verbose, std::string_view _odir, bool _srcmap = false);
 };

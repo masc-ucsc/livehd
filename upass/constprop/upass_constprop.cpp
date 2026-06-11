@@ -129,15 +129,15 @@ static const Const* enum_identity_of(const std::shared_ptr<Bundle const>& b) {
   return nullptr;
 }
 
-static std::string format_interp_value(const Const& v, std::string_view spec) {
+static std::string format_interp_value(const Const& v, std::string_view spec, const livehd::diag::Span& span = {}) {
   if (v.is_nil()) {
     return "nil";
   }
   if (v.is_string()) {
-    upass::error("string-interpolation format spec ':{}' cannot apply to a string value\n", spec);
+    upass::error(span, "string-interpolation format spec ':{}' cannot apply to a string value\n", spec);
   }
   if (spec.size() > 1) {
-    upass::error("unsupported string-interpolation format spec ':{}' (expected one of b/o/x/X/d)\n", spec);
+    upass::error(span, "unsupported string-interpolation format spec ':{}' (expected one of b/o/x/X/d)\n", spec);
   }
   switch (spec.empty() ? 'd' : spec.front()) {
     case 'd': return std::string(v.to_decimal_string());
@@ -145,7 +145,7 @@ static std::string format_interp_value(const Const& v, std::string_view spec) {
     case 'o': return bits_to_grouped(v.to_binary(), 3, false);
     case 'x': return bits_to_grouped(v.to_binary(), 4, false);
     case 'X': return bits_to_grouped(v.to_binary(), 4, true);
-    default : upass::error("unsupported string-interpolation format spec ':{}' (expected one of b/o/x/X/d)\n", spec);
+    default : upass::error(span, "unsupported string-interpolation format spec ':{}' (expected one of b/o/x/X/d)\n", spec);
   }
 }
 
@@ -675,14 +675,7 @@ upass::Vote uPass_constprop::process_shl(std::string_view dst_name, Bundle& dst,
     if (lm->get_top_module_name().find('.') == std::string_view::npos) {
       livehd::diag::Span span;
       if (const auto& ln = lm->get_lnast()) {
-        const auto loc = ln->get_loc(lm->get_current_nid());
-        const auto fn  = ln->get_fname(lm->get_current_nid());
-        if (!fn.empty()) {
-          span.file = std::string{fn};
-        }
-        if (loc.line != 0) {
-          span.start_line = loc.line;
-        }
+        span = ln->span_of(lm->get_current_nid());
       }
       livehd::diag::sink().emit(livehd::diag::Diagnostic{
           .severity = livehd::diag::Severity::error,
@@ -772,13 +765,14 @@ upass::Vote uPass_constprop::process_log_not(std::string_view dst_name, Bundle& 
 // but values diverged; that masked real comparison failures and broke
 // `match`/`case` folding because the resulting nil cond marked downstream
 // arms as uncertain.)
-static std::optional<Const> compare_bundles_eq(const std::shared_ptr<Bundle const>& a, const std::shared_ptr<Bundle const>& b) {
+static std::optional<Const> compare_bundles_eq(const std::shared_ptr<Bundle const>& a, const std::shared_ptr<Bundle const>& b,
+                                               const livehd::diag::Span& span = {}) {
   // Walks `src` and inspects each entry in `other`. Returns:
   //   - 'f' definite false (key missing on the other side, or concrete
   //          values mismatch at a shared key)
   //   - 't' all entries matched concretely
   //   - '?' undecidable (invalid scalar, or eq returned unknowns)
-  auto walk = [](const std::shared_ptr<Bundle const>& src, const std::shared_ptr<Bundle const>& other) -> char {
+  auto walk = [&span](const std::shared_ptr<Bundle const>& src, const std::shared_ptr<Bundle const>& other) -> char {
     char worst = 't';
     for (const auto& [k, ep] : src->non_attr_entries()) {
       if (ep.trivial.is_invalid()) {
@@ -809,7 +803,8 @@ static std::optional<Const> compare_bundles_eq(const std::shared_ptr<Bundle cons
       // an unknown cross-type compare falls through to eq_op's tri-state).
       if (!ov.is_nil() && !ep.trivial.is_nil() && !ov.has_unknowns() && !ep.trivial.has_unknowns()
           && (ov.is_bool() != ep.trivial.is_bool() || ov.is_string() != ep.trivial.is_string())) {
-        upass::error("uPass_constprop: comparison mixes types (bool vs int/string) — convert explicitly, e.g. `(x != 0) == b`\n");
+        upass::error(span,
+                     "uPass_constprop: comparison mixes types (bool vs int/string) — convert explicitly, e.g. `(x != 0) == b`\n");
       }
       const Const eq = *ov.eq_op(ep.trivial);
       if (eq.is_known_true()) {
@@ -979,7 +974,7 @@ upass::Vote uPass_constprop::process_eq_ne_impl(std::string_view dst_name, upass
       store_trivial(var, *Dlop::create_bool(!Negate));
       return classify_vote();
     }
-    if (auto eq = compare_bundles_eq(a.bundle, b.bundle); eq.has_value()) {
+    if (auto eq = compare_bundles_eq(a.bundle, b.bundle, lm->get_lnast()->span_of(lm->get_current_nid())); eq.has_value()) {
       // Tri-state: nil propagates verbatim (the
       // structural-match-with-value-mismatch case discharges as pass via
       // cassert); concrete bool flips for Negate.
@@ -1394,20 +1389,9 @@ upass::Vote uPass_constprop::process_tuple_concat(std::string_view dst_name, Bun
   // Layout: ref(dvar), (const|ref)...
 
   // Snapshot the concat's source span before the cursor walks the operands
-  // (prp2lnast attaches loc to the tuple_concat node) so the overlap
+  // (prp2lnast stamps the tuple_concat node's SourceId) so the overlap
   // diagnostic below can point at the `a ++ b` / `(...a, ...)` site.
-  livehd::diag::Span concat_span;
-  {
-    const auto& ln  = lm->get_lnast();
-    const auto  loc = ln->get_loc(lm->get_current_nid());
-    const auto  fn  = ln->get_fname(lm->get_current_nid());
-    if (!fn.empty()) {
-      concat_span.file = std::string{fn};
-    }
-    if (loc.line != 0) {
-      concat_span.start_line = loc.line;
-    }
-  }
+  livehd::diag::Span concat_span = lm->get_lnast()->span_of(lm->get_current_nid());
 
   move_to_child();
   auto dvar = std::string(current_text());
@@ -2862,7 +2846,9 @@ void uPass_constprop::process_func_call() {
       const Const& val  = (*actuals)[0].value;
       const Const& spec = (*actuals)[1].value;
       if (!val.is_invalid() && !val.has_unknowns() && spec.is_string()) {
-        store_trivial(dst, *Dlop::from_string(format_interp_value(val, spec.to_string())));
+        store_trivial(dst,
+                      *Dlop::from_string(
+                          format_interp_value(val, spec.to_string(), lm->get_lnast()->span_of(lm->get_current_nid()))));
       }
     }
     move_to_parent();
@@ -3041,14 +3027,7 @@ void uPass_constprop::process_range() {
     if (lm->get_top_module_name().find('.') == std::string_view::npos) {
       livehd::diag::Span span;
       if (const auto& ln = lm->get_lnast()) {
-        const auto loc = ln->get_loc(lm->get_current_nid());
-        const auto fn  = ln->get_fname(lm->get_current_nid());
-        if (!fn.empty()) {
-          span.file = std::string{fn};
-        }
-        if (loc.line != 0) {
-          span.start_line = loc.line;
-        }
+        span = ln->span_of(lm->get_current_nid());
       }
       livehd::diag::sink().emit(livehd::diag::Diagnostic{
           .severity = livehd::diag::Severity::error,

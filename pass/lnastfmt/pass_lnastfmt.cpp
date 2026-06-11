@@ -31,18 +31,17 @@ void Pass_lnastfmt::fmt_begin(Eprp_var& var) {
 
 // Location string matched to the `lnast.dump` columns so the user can jump
 // straight from the error to the offending node:
-//   `[L,P pos1-pos2 line N @ fname]` — L/P is the tree index (level,pos)
-//   printed by dump as `(L,P)`, pos1-pos2 is the dump's leading range,
-//   line/fname come from the source token when available.
+//   `[L,P line N @ fname]` — L/P is the tree index (level,pos) printed by
+//   dump as `(L,P)`; line/fname resolve from the node's SourceId ([[1f]])
+//   when one is attached.
 static std::string node_loc(const Lnast* ln, const Lnast_nid& it) {
-  const auto  loc   = ln->get_loc(it);
-  const auto  fname = ln->get_fname(it);
-  std::string s     = std::format("[{},{} pos {}-{}", level_of(it), pos_of(it), loc.pos1, loc.pos2);
-  if (loc.line != 0) {
-    s += std::format(" line {}", loc.line);
+  const auto  span = ln->span_of(it);
+  std::string s    = std::format("[{},{}", level_of(it), pos_of(it));
+  if (span.start_line) {
+    s += std::format(" line {}", *span.start_line);
   }
-  if (!fname.empty()) {
-    s += std::format(" @ {}", fname);
+  if (!span.file.empty()) {
+    s += std::format(" @ {}", span.file);
   }
   s += "]";
   return s;

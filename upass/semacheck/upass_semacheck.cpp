@@ -54,14 +54,7 @@ std::string_view derived_attr_violation(std::string_view attr) {
 
 void uPass_semacheck::emit_sema_error(std::string_view code, std::string_view category, const std::string& msg,
                                       std::string_view hint, const Lnast* ln, const Lnast_nid& nid) {
-  livehd::diag::Span span;
-  const auto         loc = ln->get_loc(nid);
-  if (loc.line != 0) {
-    span.start_line = loc.line;
-  }
-  if (auto fn = ln->get_fname(nid); !fn.empty()) {
-    span.file = std::string{fn};
-  }
+  auto span = ln->span_of(nid);  // SourceId resolved through the Lnast's locator ([[1f]])
   livehd::diag::sink().emit(livehd::diag::Diagnostic{
       .severity = livehd::diag::Severity::error,
       .code     = std::string{code},

@@ -7,6 +7,7 @@
 
 #include "dlop.hpp"
 #include "lnast_ntype.hpp"
+#include "lnast_srcloc.hpp"
 
 static upass::uPass_plugin plugin_func_extract("func_extract", upass::uPass_wrapper<uPass_func_extract>::get_upass);
 
@@ -18,6 +19,14 @@ void uPass_func_extract::copy_current_subtree(const std::shared_ptr<Lnast>& dst,
   const auto type       = lm->current_type();
   auto       new_parent = (Lnast_ntype::is_ref(type) || Lnast_ntype::is_const(type)) ? dst->add_child(parent, lm->current_node())
                                                                                      : dst->add_child(parent, type);
+  // [[1f]] cross-tree carry: re-mint the SourceId into the extracted Lnast's
+  // own locator so the extracted body stays attributable to its source.
+  if (Lnast::srcid_carries(type)) {
+    const auto& src = lm->get_lnast();
+    if (const auto id = src->get_srcid(lm->get_current_nid()); id != hhds::SourceId_invalid) {
+      dst->set_srcid(new_parent, livehd::srcloc::import_srcid(dst->source_locator(), src->source_locator(), id));
+    }
+  }
   if (!lm->has_child()) {
     return;
   }
