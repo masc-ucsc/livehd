@@ -190,6 +190,7 @@ constexpr std::string_view Ntype::get_sink_name_slow(Ntype_op op, hhds::Port_id 
       if (pid == 0) {
         return "s";
       }
+      [[fallthrough]];
     case Ntype_op::IO:
     case Ntype_op::LUT:  // unlimited case: 1,2,3,4,5....
     case Ntype_op::Sub:  // unlimited case: 1,2,3,4,5....

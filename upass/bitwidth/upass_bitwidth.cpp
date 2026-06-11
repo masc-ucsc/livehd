@@ -53,7 +53,7 @@ bool mask_touches_outside_bits(int64_t mask, int64_t storage_bits) {
 
 // ── Constructor ──────────────────────────────────────────────────────────────
 
-uPass_bitwidth::uPass_bitwidth(std::shared_ptr<upass::Lnast_manager>& lm) : upass::uPass(lm) {}
+uPass_bitwidth::uPass_bitwidth(std::shared_ptr<upass::Lnast_manager>& _lm) : upass::uPass(_lm) {}
 
 // ── Lnast_range ↔ bundle-Entry conversion ────────────────────────────────────
 

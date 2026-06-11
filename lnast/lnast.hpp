@@ -100,7 +100,7 @@ struct Lnast_bitwidth_meta {
 enum class Io_kind : uint8_t { none, integer, boolean, string };
 
 struct Lnast_io_entry {
-  std::string name;                    // field name, no $ / % prefix
+  std::string name      = {};          // field name, no $ / % prefix
   int32_t     bits      = 0;           // 0 = unknown / infer from context
   bool        is_signed = true;
   bool        is_ref    = false;       // input declared with `ref` → write-back on inline
@@ -122,7 +122,7 @@ struct Lnast_io_entry {
   // Task 1k — declared NAMED type of the param (`self:t1` → "t1"); empty when
   // untyped or annotated with a primitive type. The inliner's typed-self
   // `does`-check keys off inputs[0].type_name.
-  std::string type_name;
+  std::string type_name = {};
 };
 struct Lnast_tree_io {
   std::vector<Lnast_io_entry> inputs;

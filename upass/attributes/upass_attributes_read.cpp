@@ -42,46 +42,6 @@ bool is_uppercase_ident(std::string_view name) {
   return std::isupper(static_cast<unsigned char>(name.front())) != 0;
 }
 
-// Lconst::get_bits stores SIGNED width — fine for negative values, but
-// the spec wants `.[bits]` on a positive literal to be the unsigned width
-// (so `100 → 7`, not `8`). Special-case 0 and -1 per Const's own contract.
-uint32_t bits_natural(const Const& v) {
-  if (v.is_nil() || v.is_invalid() || v.is_string() || v.has_unknowns()) {
-    return 0;
-  }
-  if (v.is_known_zero()) {
-    return 0;
-  }
-  if (v.same_repr(*Dlop::create_integer(-1))) {  // exactly -1 → 1 bit (width-safe, no int round-trip)
-    return 1;
-  }
-  if (v.is_negative()) {
-    return v.get_bits();
-  }
-  // Non-negative: minimal unsigned width. get_bits is signed-style (msb+2),
-  // so subtract one to get the unsigned width.
-  const auto sb = v.get_bits();
-  return sb >= 1 ? sb - 1 : 0;
-}
-
-uint32_t bits_unsigned(const Const& v) {
-  if (v.is_nil() || v.is_invalid() || v.is_string() || v.has_unknowns() || v.is_negative()) {
-    return 0;
-  }
-  if (v.is_known_zero()) {
-    return 0;
-  }
-  const auto sb = v.get_bits();
-  return sb >= 1 ? sb - 1 : 0;
-}
-
-uint32_t bits_signed(const Const& v) {
-  if (v.is_nil() || v.is_invalid() || v.is_string() || v.has_unknowns()) {
-    return 0;
-  }
-  return v.get_bits();
-}
-
 // max/min for an unsigned type with `n` bits. n==0 means "unbounded" — the
 // caller should treat that as "no derivation possible".
 Const max_unsigned(uint32_t n) {
@@ -235,16 +195,6 @@ std::optional<Const> uPass_attributes::resolve_value(std::string_view var) const
 // The `.[ubits]`/`.[sbits]` queries no longer exist; the dispatcher forwards
 // `.[bits]` through here. (`:[range=…]` sugar was removed — semacheck rejects
 // it like any other `:[max=]`/`:[min=]` attribute write.)
-
-namespace {
-// ceil_log2(x) for x >= 1. Returns 0 for x==0.
-uint32_t ceil_log2_u64(uint64_t x) {
-  if (x <= 1) {
-    return 0;
-  }
-  return static_cast<uint32_t>(64 - std::countl_zero(static_cast<uint64_t>(x - 1)));
-}
-}  // namespace
 
 std::optional<Const> uPass_attributes::derive_max(std::string_view base) const {
   // Explicit attr wins (e.g. `:int:[max=N]` partial pinning).

@@ -314,16 +314,16 @@ protected:
   // a method (`ref self`) or var-arg boundary is left to the caller.
   struct Spec_port {
     bool                 inject = false;  // false = keep the template's own (already-typed) port
-    std::optional<Const> max;
-    std::optional<Const> min;
-    std::string          type_name;  // named type (takes precedence over max/min)
+    std::optional<Const> max       = {};
+    std::optional<Const> min       = {};
+    std::string          type_name = {};  // named type (takes precedence over max/min)
     // 1p-runner var-arg expansion: a synthesized concrete port replacing one
     // leftover of a `...args` boundary. `port_name` is the new io port name;
     // `is_named`/`field` drive the in-body reconstruction tuple. (max/min/
     // type_name carry the actual's type, same as a fixed port.)
-    std::string port_name;
-    bool        is_named = false;
-    std::string field;
+    std::string port_name = {};
+    bool        is_named  = false;
+    std::string field     = {};
   };
   bool maybe_specialize_template_call(const std::shared_ptr<Lnast>& callee, const Lnast_tree_io& io,
                                       const std::vector<Lnast_node>& param_val, const std::vector<bool>& param_set,

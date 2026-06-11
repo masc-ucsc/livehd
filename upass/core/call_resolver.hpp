@@ -32,19 +32,19 @@ constexpr std::string_view ufcs_arg_marker = "__ufcs_arg";  // task 1k UFCS rece
 
 struct Call_actual {
   bool        is_named = false;
-  std::string name;
-  Const       value;
+  std::string name     = {};
+  Const       value    = {};
   // When the actual is a bare ref to a caller variable, remember the name
   // so a `ref` param can write back into the caller's scope after the
   // body is folded. Empty when the actual is a const literal or named with
   // a non-ref value (write-back only happens when the param is `ref`).
-  std::string var_name;
+  std::string var_name = {};
   // When the actual is a tuple-typed value (passed by ref to a caller
   // bundle), bundle_value carries the bundle's flat-keyed field values
   // (e.g. {"x": 2, "y": 11}). Set together with is_bundle=true; `value`
   // is then unused.
   bool                                   is_bundle = false;
-  std::unordered_map<std::string, Const> bundle_value;
+  std::unordered_map<std::string, Const> bundle_value = {};
   // True when the actual could not be folded to a concrete scalar/bundle
   // (e.g. runtime-only Flop driver). The inliner binds nothing for these
   // params but still folds body stmts that don't depend on them.

@@ -975,7 +975,7 @@ upass::Vote uPass_constprop::process_eq_ne_impl(std::string_view dst_name, upass
   // the 1-tuple as a scalar at position 0) hits neither the bundle-eq
   // nor scalar-eq paths and stays unfolded.
   auto                 bundle_count_non_attr
-      = [](const std::shared_ptr<Bundle const>& b) { return static_cast<int>(b->non_attr_entries().size()); };
+      = [](const std::shared_ptr<Bundle const>& bnd) { return static_cast<int>(bnd->non_attr_entries().size()); };
   if (a.bundle && b.bundle) {
     // Same bundle object (whole-bundle alias, e.g. `mut y:Color = Color.Red`)
     // is equal by identity — even when entries carry undefined slots.
@@ -1343,6 +1343,7 @@ upass::Vote uPass_constprop::process_tuple_add(std::string_view dst_name, Bundle
   }
   // Bundle was updated in-place; scalar values are propagated by process_tuple_get.
   move_to_parent();
+  return classify_vote();
 }
 
 // Track `attr_set var typename 'TypeName'` so method dispatch can look up

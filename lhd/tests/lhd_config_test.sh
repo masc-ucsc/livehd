@@ -31,7 +31,9 @@ grep -q "resolved order: noop" "$W/w1/logs/"*upass*.log || fail "config [upass] 
 # CLI --set wins over the file entry.
 "$LHD" compile "$PRP" --config "$W/lhd.toml" --set upass.order=constprop --emit verilog:"$W/v2.v" --workdir "$W/w2" -q \
   --result-json "$W/r2.json" 2>/dev/null
-grep -q "resolved order: constprop" "$W/w2/logs/"*upass*.log || fail "--set must override the config file entry"
+# constprop pulls in its declared deps (attributes typecheck), so the --set
+# override resolves to the full chain ending in constprop — not the file's noop.
+grep -q "resolved order: attributes typecheck constprop" "$W/w2/logs/"*upass*.log || fail "--set must override the config file entry"
 
 # recipe = "O2" from the file drives the graph passes; elaborate ignores it.
 printf 'recipe = "O2"\n[upass]\nverifier = false\n' > "$W/sane.toml"

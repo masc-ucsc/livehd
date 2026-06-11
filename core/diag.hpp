@@ -30,15 +30,15 @@ std::string_view to_string(Severity s);
 // `file`/`start_byte`/`end_byte` best-effort (inou/prp) or leave it null
 // (upass/lgraph). Post-sourcemap sites add `source_id` + resolved line/col.
 struct Span {
-  std::optional<uint32_t> source_id;
-  std::optional<uint32_t> file_id;
-  std::string             file;  // pre-1f fallback path
-  std::optional<uint64_t> start_byte;
-  std::optional<uint64_t> end_byte;
-  std::optional<uint32_t> start_line;
-  std::optional<uint32_t> start_col;
-  std::optional<uint32_t> end_line;
-  std::optional<uint32_t> end_col;
+  std::optional<uint32_t> source_id  = {};
+  std::optional<uint32_t> file_id    = {};
+  std::string             file       = {};  // pre-1f fallback path
+  std::optional<uint64_t> start_byte = {};
+  std::optional<uint64_t> end_byte   = {};
+  std::optional<uint32_t> start_line = {};
+  std::optional<uint32_t> start_col  = {};
+  std::optional<uint32_t> end_line   = {};
+  std::optional<uint32_t> end_col    = {};
 
   [[nodiscard]] bool is_null() const {
     return !source_id && !file_id && file.empty() && !start_byte && !start_line;
