@@ -123,6 +123,10 @@ private:
   // Emit the common diagnostic at the current node's span.
   void record_overflow(std::string_view name, const Lnast_range& value, const Lnast_range& env);
 
+  // Declared envelope of an operand by name (unbounded for literals/temps):
+  // the shift-amount check's fallback when no value range was derived.
+  Lnast_range envelope_of_operand(const upass::Operand& o) const;
+
   // Shift-amount sanity for shl/sra (negative-shift): a hardware shift count
   // must be >= 0, judged on the amount's derived range — error when the range
   // is entirely negative (max < 0), warning when it merely allows negatives

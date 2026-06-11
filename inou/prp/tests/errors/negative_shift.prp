@@ -1,0 +1,12 @@
+/*
+:name: negative_shift
+:type: error
+:error: shift amount|negative
+*/
+
+// A shift count must be >= 0. The amount's derived range is entirely
+// negative here, so upass.bitwidth rejects it (negative-shift) even though
+// constprop never folds the shl (a negative count would assert in Dlop).
+
+mut x: u8 = 3
+mut y = x << -2 // locate_error_here

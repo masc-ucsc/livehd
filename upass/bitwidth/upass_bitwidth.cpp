@@ -254,6 +254,35 @@ void uPass_bitwidth::record_overflow(std::string_view name, const Lnast_range& v
   });
 }
 
+Lnast_range uPass_bitwidth::envelope_of_operand(const upass::Operand& o) const {
+  // A never-written name (e.g. an input param) has no derived value range,
+  // only a declared envelope — good enough to judge a shift amount's sign
+  // (`n: s4` admits [-8, 7]). NOT used for the result stamp: the envelope is
+  // a may-hold bound, and widening every read would change the overflow
+  // checks' meaning.
+  if (o.name.empty()) {
+    return Lnast_range::make_unbounded();
+  }
+  if (auto env = decl_envelope_of(o.name)) {
+    return *env;
+  }
+  // Params skip the declare bake; their declared width rides io_meta (SSA).
+  const auto base = ssa_base_name(o.name);
+  for (const auto& in : lm->get_lnast()->io_meta().inputs) {
+    if (in.name == base && in.kind == Io_kind::integer && in.bits > 0 && in.bits <= 62) {
+      if (in.is_signed) {
+        return Lnast_range::sext_to(in.bits - 1);
+      }
+      Lnast_range r;
+      r.min       = 0;
+      r.max       = (int64_t{1} << in.bits) - 1;
+      r.unbounded = false;
+      return r;
+    }
+  }
+  return Lnast_range::make_unbounded();
+}
+
 void uPass_bitwidth::check_shift_amount(const Lnast_range& amt) {
   if (amt.is_unbounded() || amt.min >= 0) {
     return;
@@ -344,14 +373,14 @@ upass::Vote uPass_bitwidth::process_mod(std::string_view dst_name, Bundle& dst, 
 upass::Vote uPass_bitwidth::process_shl(std::string_view dst_name, Bundle& dst, upass::Src_span src) {
   if (src.size() < 2) { return stamp(dst_name, dst, Lnast_range::make_unbounded()); }
   const auto amt = range_of_operand(src[1]);
-  check_shift_amount(amt);
+  check_shift_amount(amt.is_unbounded() ? envelope_of_operand(src[1]) : amt);
   return stamp(dst_name, dst, range_of_operand(src[0]).shl(amt));
 }
 
 upass::Vote uPass_bitwidth::process_sra(std::string_view dst_name, Bundle& dst, upass::Src_span src) {
   if (src.size() < 2) { return stamp(dst_name, dst, Lnast_range::make_unbounded()); }
   const auto amt = range_of_operand(src[1]);
-  check_shift_amount(amt);
+  check_shift_amount(amt.is_unbounded() ? envelope_of_operand(src[1]) : amt);
   return stamp(dst_name, dst, range_of_operand(src[0]).sra(amt));
 }
 

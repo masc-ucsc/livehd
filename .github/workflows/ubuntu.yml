@@ -66,7 +66,9 @@ jobs:
       # tests fail (the failure is re-raised after the upload below).
       - id: coverage
         continue-on-error: true
-        run: bazel coverage --keep_going --collect_code_coverage --test_tag_filters=-fixme --combined_report=lcov --test_output=all //...
+        # Same instrumentation filter as scripts/getcov.sh so the dashboard
+        # measures the main packages only (no third_party / helper tooling).
+        run: bazel coverage --keep_going --collect_code_coverage --test_tag_filters=-fixme --combined_report=lcov --test_output=all --instrumentation_filter='^//(core|graph|lnast|parser|inou|lhd|lsp|pass|upass|ware|simlib|packages)(/|:)' //...
 
       - uses: codecov/codecov-action@v7
         with:

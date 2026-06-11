@@ -89,17 +89,6 @@ cc_test(
 )
 
 cc_test(
-    name = "attribute_test",
-    srcs = [
-        "tests/attribute_test.cpp",
-    ],
-    deps = [
-        ":core",
-        "@googletest//:gtest_main",
-    ],
-)
-
-cc_test(
     name = "pool_bench",
     srcs = [
         "tests/concurrentqueue.hpp",

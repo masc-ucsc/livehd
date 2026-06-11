@@ -13,3 +13,5 @@ ignore:
   - "**/*_test.hpp"
   - "**/*_test.h"
   - "**/tests/**"
+  - "third_party/**"
+  - "samples/**"

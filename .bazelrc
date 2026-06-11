@@ -63,7 +63,8 @@ build:prof --linkopt -pg
 #build:prof --linkopt -ftest-coverage
 
 test --test_tag_filters "-long1,-long2,-long3,-long4,-long5,-long6,-long7,-long8,-manual,-fixme"
-coverage --test_tag_filters "-long1,-long2,-long3,-long4,-long5,-long6,-long7,-long8,-manual,-fixme"
+# benchmark tests are timing contracts; instrumented binaries can't meet them
+coverage --test_tag_filters "-long1,-long2,-long3,-long4,-long5,-long6,-long7,-long8,-manual,-fixme,-benchmark"
 coverage --cache_test_results=no
 
 # Address sanitizer
