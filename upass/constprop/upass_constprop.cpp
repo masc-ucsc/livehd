@@ -1131,9 +1131,19 @@ void uPass_constprop::process_stmts_post() {
           // slots) are shapes, not values.
           continue;
         }
+        // A slot bound to a RUNTIME signal stores a null bundle entry (the
+        // binding lives in tuple_slot_ref, and the runner consumes its reads
+        // before this pass sees them) — it is set by construction, never dead.
+        const auto* slot_refs = [&]() -> const std::map<std::string, std::string>* {
+          const auto it = st().tuple_slot_ref.find(var);
+          return it == st().tuple_slot_ref.end() ? nullptr : &it->second;
+        }();
         for (const auto& [k, ep] : bundle->non_attr_entries()) {
           const bool unset = ep.trivial.is_invalid() || ep.trivial.is_nil();
           if (k == "0" || !unset || !ep.bw_max.is_invalid()) {
+            continue;
+          }
+          if (slot_refs != nullptr && slot_refs->contains(k)) {
             continue;
           }
           const std::string path = var + "." + k;

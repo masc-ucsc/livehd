@@ -95,6 +95,24 @@ bool ends_with(std::string_view s, std::string_view suffix) {
   return s.size() >= suffix.size() && s.substr(s.size() - suffix.size()) == suffix;
 }
 
+// --impl/--ref sides: KIND:PATH, or a bare source path whose kind is
+// inferred from the extension (.prp -> pyrope, .v/.sv -> verilog).
+Typed_path parse_check_side(std::string_view flag, std::string_view arg) {
+  auto pos = arg.find(':');
+  if (pos != std::string_view::npos && pos != 0 && is_known_kind(canonical_kind(arg.substr(0, pos)), /*output=*/false)) {
+    return parse_typed(flag, arg, /*output=*/false);
+  }
+  if (ends_with(arg, ".prp")) {
+    return {"pyrope", std::string{arg}};
+  }
+  if (ends_with(arg, ".v") || ends_with(arg, ".sv")) {
+    return {"verilog", std::string{arg}};
+  }
+  throw Lhd_error{"usage",
+                  std::format("{} expects KIND:PATH or a .prp/.v/.sv file, got '{}'", flag, arg),
+                  "input kinds: verilog, pyrope, ln, lg"};
+}
+
 // ---- --config lhd.toml --------------------------------------------------------
 // A strict TOML *subset*: `#` comments, `[pass]` tables, and `key = value`
 // where value is a quoted string, a boolean, or an integer. Each table entry
@@ -343,11 +361,11 @@ Options parse_args(int argc, char** argv) {
         start = end + 1;
       }
     } else if (a == "--impl") {
-      auto tp        = parse_typed(a, need_value(a, i, argc, argv), false);
+      auto tp        = parse_check_side(a, need_value(a, i, argc, argv));
       opts.impl_kind = tp.kind;
       opts.impl_path = tp.path;
     } else if (a == "--ref") {
-      auto tp       = parse_typed(a, need_value(a, i, argc, argv), false);
+      auto tp       = parse_check_side(a, need_value(a, i, argc, argv));
       opts.ref_kind = tp.kind;
       opts.ref_path = tp.path;
     } else if (a == "--impl-top") {

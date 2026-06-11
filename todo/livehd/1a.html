@@ -23,12 +23,13 @@
 
 <h2>Subtasks — pending</h2>
 <ul class="subtasks">
-<li><strong>C — 1a-ops: remaining op / cell mappings.</strong>
-  <ul>
-  <li><code>unique if/match</code> should chain with hotmux, but cgen.verilog still does not handle hotmux (patch hotmux all across the flow).</li>
-  </ul></li>
 <li><strong>Known gaps (recorded 2026-06-10, unscheduled):</strong>
   <ul>
+  <li>The <code>unique if</code> uniqueness assume is modelled at runtime
+    (Hotmux non-one-hot → cgen's <code>'hx</code> default; cprop warns on a
+    provably non-one-hot constant selector) but comptime constprop does NOT
+    yet diagnose two simultaneously-true arm conditions — it folds
+    priority-style like a plain if (recorded 2026-06-11 with 1a-ops).</li>
   <li>A comb feedback THROUGH a Memory cell (<code>t[i] = t[j] + 1</code>)
     still diagnoses as a combinational loop — the Tarjan classifier accepts
     only state Flops in an SCC; a clocked Memory should qualify as state and
@@ -46,6 +47,43 @@
 
 <h2>Subtasks — landed</h2>
 <ul class="subtasks">
+<li><strong>C — 1a-ops: <code>unique if</code>/<code>match</code> → Hotmux across the flow.</strong>
+  <span class="status landed">landed</span> 2026-06-11; LEC pairs
+  <code>hotmux_{unique,match,match_partial}</code> + O2 compile mode, suite green.
+  What shipped:
+  <ul>
+  <li><strong>LNAST:</strong> new structural <code>unique_if</code> node (same
+    child shape as <code>if</code>; <code>.ln</code> keyword <code>uif</code> —
+    the pre-staged <code>TOKEN_KW(uif)</code> is now wired). Being a node TYPE,
+    it rides every generic tree copy (decl-merge, SSA, runner staging /
+    template clone) with no carry sites. <code>is_if_like()</code> covers
+    if-or-unique-if checks (scope walk, timecheck).</li>
+  <li><strong>prp2lnast:</strong> the anonymous <code>unique</code> token on
+    <code>if_expression</code> selects <code>unique_if</code>; <code>match</code>
+    always emits it (a match IS a unique-if chain). when/unless flat ifs and
+    the while-desugar stay plain <code>if</code>.</li>
+  <li><strong>tolg:</strong> <code>lower_unique_merge</code> — one shared
+    selector (bit i = cond_i, top bit = <code>OR(conds)==0</code> for the
+    else/fall-through slot) and ONE Hotmux per merged variable; arms that
+    don't write a variable feed its pre-if value. Gotchas pinned: the
+    none-bit must be EQ-against-0, NOT <code>Not</code> (a 1-bit bool Not
+    carries infinite high bits — safe under And, corrupting under the SHL/Or
+    packing), and selector/SHL widths are signed-convention (<code>bits =
+    magnitude+1</code>) or a multi-fanout declared wire truncates the top
+    one-hot position (single-fanout inlined selectors masked both bugs).</li>
+  <li><strong>cgen:</strong> <code>process_hotmux</code> — <code>case</code> over
+    the one-hot constants, <code>default: 'hx</code> models the non-one-hot
+    runtime error; Hotmux joins Mux in the always-declared-dest-var and
+    missing-bits exemption sets.</li>
+  <li><strong>cprop:</strong> the <code>scalar_pass</code> guard was
+    <code>op &gt; Mux</code> — Hotmux (38, between Mux 36 and IO 39) was
+    silently skipped; now <code>op &gt; Hotmux</code>. Const one-hot selector
+    folds to the selected arm; zero/multi-hot warns and keeps the cell;
+    all-identical arms collapse.</li>
+  <li><strong>bitwidth:</strong> <code>process_hotmux</code> — selector gets the
+    unsigned N-bit envelope (never narrowed on one-hot-ness, a runtime
+    property), output unions the data arms like Mux.</li>
+  </ul></li>
 <li><strong>A — reg→Flop slice + combinational lowering milestone.</strong> <span class="status landed">landed</span></li>
 <li><strong>B2 — 1a-mem follow-ups.</strong> <span class="status landed">landed</span>
   2026-06-10; <code>mem_pending_sync_init</code> + <code>mem_pending_reset_restore</code>

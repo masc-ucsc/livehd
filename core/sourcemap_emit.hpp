@@ -17,6 +17,7 @@
 
 #include <algorithm>
 #include <cstdint>
+#include <memory>
 #include <string>
 #include <string_view>
 #include <vector>
@@ -49,6 +50,7 @@ inline void append_vlq(std::string& out, int64_t value) {
 }
 
 inline void append_json_string(std::string& out, std::string_view s) {
+  static constexpr char hex[] = "0123456789abcdef";
   out.push_back('"');
   for (char c : s) {
     switch (c) {
@@ -56,7 +58,16 @@ inline void append_json_string(std::string& out, std::string_view s) {
       case '\\': out += "\\\\"; break;
       case '\n': out += "\\n"; break;
       case '\t': out += "\\t"; break;
-      default  : out.push_back(c); break;
+      case '\r': out += "\\r"; break;
+      default:
+        if (static_cast<unsigned char>(c) < 0x20) {  // JSON forbids raw control chars
+          out += "\\u00";
+          out.push_back(hex[(c >> 4) & 0xf]);
+          out.push_back(hex[c & 0xf]);
+        } else {
+          out.push_back(c);
+        }
+        break;
     }
   }
   out.push_back('"');
@@ -65,8 +76,11 @@ inline void append_json_string(std::string& out, std::string_view s) {
 }  // namespace detail
 
 // Render the version-3 source map. `segments` may arrive unsorted; they are
-// ordered by (gen_line, gen_col) as the format requires.
+// ordered by (gen_line, gen_col) as the format requires. `sources_content` is
+// aligned with `sources` (nullptr = JSON null); browser-style viewers can only
+// display originals embedded there, so callers should fill what they have.
 inline std::string to_json(std::string_view generated_file, const std::vector<std::string>& sources,
+                           const std::vector<std::shared_ptr<const std::string>>& sources_content,
                            std::vector<Segment> segments) {
   std::sort(segments.begin(), segments.end(), [](const Segment& a, const Segment& b) {
     return a.gen_line != b.gen_line ? a.gen_line < b.gen_line : a.gen_col < b.gen_col;
@@ -107,7 +121,22 @@ inline std::string to_json(std::string_view generated_file, const std::vector<st
     }
     detail::append_json_string(out, sources[i]);
   }
-  out += "],\"names\":[],\"mappings\":";
+  out += "]";
+  if (std::any_of(sources_content.begin(), sources_content.end(), [](const auto& c) { return c != nullptr; })) {
+    out += ",\"sourcesContent\":[";
+    for (size_t i = 0; i < sources.size(); ++i) {
+      if (i != 0) {
+        out.push_back(',');
+      }
+      if (i < sources_content.size() && sources_content[i] != nullptr) {
+        detail::append_json_string(out, *sources_content[i]);
+      } else {
+        out += "null";
+      }
+    }
+    out += "]";
+  }
+  out += ",\"names\":[],\"mappings\":";
   detail::append_json_string(out, mappings);
   // LiveHD extra: the full SourceId per segment (same sorted order as the
   // mappings), so LiveHD tooling can rejoin the locator's combine parents.

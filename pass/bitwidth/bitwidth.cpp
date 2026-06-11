@@ -296,6 +296,31 @@ void Bitwidth::process_mux(hhds::Node_class& node, std::vector<hhds::Edge_class>
   adjust_bw(node.create_driver_pin(0), bw);
 }
 
+// Hotmux: sink 0 is a one-hot selector over the N data arms (p1..pN), so its
+// envelope is the unsigned N-bit range; the output unions the data arms like
+// Mux. One-hot-ness itself is a runtime property — never narrow on it.
+void Bitwidth::process_hotmux(hhds::Node_class& node, std::vector<hhds::Edge_class>& inp_edges) {
+  I(inp_edges.size());
+  Bitwidth_range bw;
+
+  for (auto e : inp_edges) {
+    if (e.sink.get_port_id() == 0) {
+      auto    n_data  = inp_edges.size() - 1;
+      int64_t max_sel = (n_data >= 62) ? std::numeric_limits<int64_t>::max() : ((int64_t{1} << static_cast<int64_t>(n_data)) - 1);
+      adjust_bw(e.driver, Bitwidth_range(0, max_sel));
+      continue;
+    }
+    auto it = bwmap.find(e.driver.get_class_index());
+    if (it == bwmap.end()) {
+      debug_unconstrained_msg(node, e.driver);
+      not_finished = true;
+      return;
+    }
+    bw.set_wider_range(it->second);
+  }
+  adjust_bw(node.create_driver_pin(0), bw);
+}
+
 void Bitwidth::process_shl(hhds::Node_class& node, std::vector<hhds::Edge_class>& inp_edges) {
   I(inp_edges.size() == 2);
 
@@ -1362,6 +1387,8 @@ void Bitwidth::bw_pass(hhds::Graph* g) {
         process_flop(node);
       } else if (op == Ntype_op::Mux) {
         process_mux(node, inp_edges);
+      } else if (op == Ntype_op::Hotmux) {
+        process_hotmux(node, inp_edges);
       } else if (op == Ntype_op::GT || op == Ntype_op::LT || op == Ntype_op::EQ) {
         process_comparator(node);
       } else if (op == Ntype_op::Get_mask) {

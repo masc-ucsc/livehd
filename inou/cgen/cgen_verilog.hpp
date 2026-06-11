@@ -65,6 +65,7 @@ private:
   void process_flop(std::shared_ptr<File_output> fout, const hhds::Node_class& node);
   void process_memory(std::shared_ptr<File_output> fout, const hhds::Node_class& node);
   void process_mux(std::shared_ptr<File_output> fout, const hhds::Node_class& node);
+  void process_hotmux(std::shared_ptr<File_output> fout, const hhds::Node_class& node);
   void process_simple_node(std::shared_ptr<File_output> fout, const hhds::Node_class& node);
 
   void create_module_io(std::shared_ptr<File_output> fout, hhds::Graph* graph);
@@ -86,7 +87,7 @@ private:
   std::vector<std::string>                   map_sources_;
   absl::flat_hash_map<std::string, uint32_t> map_source_idx_;
   void note_src(const std::shared_ptr<File_output>& fout, const hhds::Node_class& node);
-  void write_srcmap(const std::shared_ptr<File_output>& fout, const std::string& filename);
+  void write_srcmap(const std::shared_ptr<File_output>& fout, const std::string& filename, const hhds::Source_locator& sl);
 
 public:
   void do_from_graph(const std::shared_ptr<hhds::Graph>& graph);

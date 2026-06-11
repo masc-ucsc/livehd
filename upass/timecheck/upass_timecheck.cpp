@@ -142,7 +142,7 @@ private:
         do_timecheck(c);
       } else if (is_meet_op(t)) {
         do_meet_op(c);
-      } else if (N::is_if(t) || N::is_while(t) || N::is_for(t)) {
+      } else if (N::is_if_like(t) || N::is_while(t) || N::is_for(t)) {
         // Branch-written values need the LG checker's classification; mark
         // every name written inside as unknown. Checks inside stay for LG.
         forget_written(c);

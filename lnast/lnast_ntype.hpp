@@ -57,6 +57,10 @@ public:
     return v == Lnast_ntype_tuple_add || v == Lnast_ntype_tuple_get || v == Lnast_ntype_attr_set || v == Lnast_ntype_attr_get;
   }
 
+  // if and unique_if share the child shape (cond, stmts, [cond, stmts]*,
+  // [else-stmts]); use this when both are handled alike (scoping, walkers).
+  static constexpr bool is_if_like(Lnast_ntype_int v) { return v == Lnast_ntype_if || v == Lnast_ntype_unique_if; }
+
   // Super types
   static constexpr bool is_primitive_op(Lnast_ntype_int v) { return v >= Lnast_ntype_dp_assign && v <= Lnast_ntype_attr_get; }
   static constexpr bool is_logical_op(Lnast_ntype_int v) {

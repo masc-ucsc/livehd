@@ -231,7 +231,10 @@ void Cprop::try_collapse_forward(hhds::Node_class& node, std::vector<hhds::Edge_
     collapse_forward_sum(node, inp_edges_ordered);
   } else if (op == Ntype_op::Mult || op == Ntype_op::Or || op == Ntype_op::And || op == Ntype_op::Xor) {
     collapse_forward_same_op(node, inp_edges_ordered);
-  } else if (op == Ntype_op::Mux) {
+  } else if (op == Ntype_op::Mux || op == Ntype_op::Hotmux) {
+    // All data arms identical -> the selector is irrelevant (a Hotmux's
+    // zero/multi-hot error case stays a runtime property; cprop assumes the
+    // unique-if assume holds, same as folding a Mux assumes an in-range sel).
     if (inp_edges_ordered.size() <= 1) {
       node.del_node();
       return;
@@ -279,6 +282,42 @@ void Cprop::replace_part_inputs_const(hhds::Node_class& node, std::vector<hhds::
       a_pin = create_const(*current_graph, *Dlop::create_integer(0));
     }
 
+    collapse_forward_for_pin(node, a_pin);
+  } else if (op == Ntype_op::Hotmux) {
+    // Constant one-hot selector: collapse to the selected arm (bit i ->
+    // p(i+1)). A zero/multi-hot constant violates the unique-if assume; warn
+    // and keep the cell (cgen's case default models the runtime error).
+    auto& s_pin = inp_edges_ordered[0].driver;
+    if (!is_const_pin(s_pin)) {
+      return;
+    }
+    auto s_const = hydrate_const(s_pin);
+    if (s_const.has_unknowns() || !s_const.is_i()) {
+      return;
+    }
+    auto sel = s_const.to_i();
+    if (sel <= 0 || (sel & (sel - 1)) != 0) {
+      Pass::info("WARNING: hotmux selector:{} is not one-hot (unique-if assume violated); not folding\n", sel);
+      return;
+    }
+    size_t arm = 0;  // bit position of the hot bit
+    while ((sel >> arm) != 1) {
+      ++arm;
+    }
+
+    hhds::Pin_class a_pin;
+    for (auto& e : inp_edges_ordered) {
+      if (e.sink.get_port_id() == static_cast<hhds::Port_id>(arm + 1)) {
+        a_pin = e.driver;
+        break;
+      }
+    }
+    if (a_pin.is_invalid()) {
+#ifndef NDEBUG
+      Pass::info("WARNING: hotmux selector:{} for a disconnected pin in hotmux. Using zero\n", sel);
+#endif
+      a_pin = create_const(*current_graph, *Dlop::create_integer(0));
+    }
     collapse_forward_for_pin(node, a_pin);
   } else if (op == Ntype_op::EQ) {
     // FIXME: 1- eq(X,0) = not(ror(x))
@@ -488,6 +527,40 @@ void Cprop::replace_all_inputs_const(hhds::Node_class& node, std::vector<hhds::E
       result = Dlop::create_integer(0);
 #ifndef NDEBUG
       Pass::info("WARNING: mux:{} selector:{} goes for disconnected pin in mux. Using zero\n", debug_name(node), sel);
+#endif
+    }
+
+    replace_node(node, result);
+  } else if (op == Ntype_op::Hotmux) {
+    // All-const Hotmux: the selector must be one-hot (bit i -> p(i+1)).
+    // A zero/multi-hot constant violates the unique-if assume; keep the cell
+    // so cgen's case default models the runtime error.
+    auto sel_const = hydrate_const(inp_edges_ordered[0].driver);
+    I(sel_const.is_i());
+
+    auto sel = sel_const.to_i();
+    if (sel <= 0 || (sel & (sel - 1)) != 0) {
+      Pass::info("WARNING: hotmux:{} selector:{} is not one-hot (unique-if assume violated); not folding\n",
+                 debug_name(node),
+                 sel);
+      return;
+    }
+    size_t arm = 0;
+    while ((sel >> arm) != 1) {
+      ++arm;
+    }
+
+    Const result;
+    for (auto& e : inp_edges_ordered) {
+      if (e.sink.get_port_id() == static_cast<hhds::Port_id>(arm + 1)) {
+        result = hydrate_const(e.driver);
+        break;
+      }
+    }
+    if (result.get_bits() == 0) {
+      result = Dlop::create_integer(0);
+#ifndef NDEBUG
+      Pass::info("WARNING: hotmux:{} selector:{} goes for disconnected pin in hotmux. Using zero\n", debug_name(node), sel);
 #endif
     }
 
@@ -734,7 +807,10 @@ void Cprop::scalar_pass(hhds::Graph* g) {
       continue;
     }
     auto op = type_op_of(node);
-    if (op > Ntype_op::Mux) {
+    // Everything above Hotmux (38) is IO/state/Sub/const/attr — not
+    // copy-propagatable. Hotmux sits between Mux (36) and IO (39) and IS
+    // handled (const one-hot selector fold, same-arm collapse).
+    if (op > Ntype_op::Hotmux) {
       continue;
     }
 

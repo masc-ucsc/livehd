@@ -3829,6 +3829,9 @@ void uPass_runner::process_lnast() {
     case Ntype::Lnast_ntype_top:   process_top(); break;
     case Ntype::Lnast_ntype_stmts: process_stmts(); break;
     case Ntype::Lnast_ntype_if:    process_if(); break;
+    // unique_if shares the if walk/fold; emit_push(lm->current_type()) in
+    // process_if re-emits the unique_if type so the marker survives staging.
+    case Ntype::Lnast_ntype_unique_if: process_if(); break;
 
     // Statement-scope leaves (e.g. an if condition's ref/const). Fold refs
     // through the symbol table so dropping the producing assign doesn't

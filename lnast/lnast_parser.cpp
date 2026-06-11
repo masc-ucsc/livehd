@@ -42,6 +42,7 @@ void Lnast_parser::parse_stmt() {
     case Lnast_token::id_var: return parse_var_stmt();
     case Lnast_token::id_fun: return parse_fun_stmt();
     case Lnast_token::kw_if : return parse_if_stmt();
+    case Lnast_token::kw_uif: return parse_if_stmt();
     default                 : error();
   }
 }
@@ -404,7 +405,9 @@ void Lnast_parser::parse_fun_stmt() {
 }
 
 void Lnast_parser::parse_if_stmt() {
-  start_tree(Lnast_ntype::create_if());
+  // `if` and `uif` (unique if) share the chain shape; only the node type
+  // differs.
+  start_tree(cur_kind() == Lnast_token::kw_uif ? Lnast_ntype::create_unique_if() : Lnast_ntype::create_if());
   forward_token();
   if (cur_kind() != Lnast_token::lparen) {
     error();

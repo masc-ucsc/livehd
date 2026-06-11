@@ -92,6 +92,7 @@ void Lnast_prp_writer::write_node() {
     case N::Lnast_ntype_top         : write_top(); break;
     case N::Lnast_ntype_stmts       : write_stmts(); break;
     case N::Lnast_ntype_if          : write_if(); break;
+    case N::Lnast_ntype_unique_if   : write_if(); break;  // prints `unique if`
     case N::Lnast_ntype_declare     : write_declare(); break;
     case N::Lnast_ntype_store       : write_store(); break;
     case N::Lnast_ntype_ref         : write_ref(); break;
@@ -175,12 +176,13 @@ void Lnast_prp_writer::write_stmts() {
 // ── if ────────────────────────────────────────────────────────────────────────
 
 void Lnast_prp_writer::write_if() {
+  const bool unique = Lnast_ntype::is_unique_if(current_ntype());
   if (!move_to_child()) {
     return;
   }
 
   // First child: condition (ref or const)
-  print("if ");
+  print(unique ? "unique if " : "if ");
   write_node();
   print(" {\n");
   ++depth;

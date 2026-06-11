@@ -36,11 +36,17 @@ inline hhds::SourceId import_srcid(hhds::Source_locator& dst, const hhds::Source
   std::vector<hhds::SourceId> ids;
   ids.reserve(rs.anchors.size());
   for (const auto& a : rs.anchors) {
-    // Carry the file's line-offset table along so resolved spans keep full
-    // line:col fidelity in the destination locator too.
-    if (dst.file_line_offsets(a.path) == nullptr) {
-      if (const auto* offs = src.file_line_offsets(a.path); offs != nullptr) {
-        dst.set_file_line_offsets(a.path, *offs);
+    // Carry the file's bytes (a shared-pointer copy, which also derives the
+    // content hash + line offsets) — or, for files ingested without content,
+    // just the line-offset table — so resolved spans keep full line:col and
+    // sourcesContent fidelity in the destination locator too.
+    if (dst.file_content(a.path) == nullptr) {
+      if (auto content = src.file_content(a.path); content != nullptr) {
+        dst.set_file_content(a.path, std::move(content));
+      } else if (dst.file_line_offsets(a.path) == nullptr) {
+        if (const auto* offs = src.file_line_offsets(a.path); offs != nullptr) {
+          dst.set_file_line_offsets(a.path, *offs);
+        }
       }
     }
     if (a.kind == hhds::Source_locator::Anchor_kind::Line_only) {

@@ -388,6 +388,8 @@ private:
       lower_stmts(nid);
     } else if (N::is_if(t)) {
       lower_if(nid);
+    } else if (N::is_unique_if(t)) {
+      lower_if(nid, /*unique=*/true);
     } else if (N::is_store(t)) {
       lower_store(nid);
     } else if (N::is_declare(t)) {
@@ -896,6 +898,22 @@ private:
     setup_sink_by_name(node, "a").connect_driver(a);
     auto d = node.create_driver_pin(0);
     set_bits(d, 1);
+    set_unsign(d);
+    return d;
+  }
+
+  // A 1-bit condition shifted to one-hot position `amount` (unique-if
+  // selector packing). The value reaches 1<<amount (amount+1 magnitude
+  // bits); LiveHD `bits` includes the sign bit, hence amount+2.
+  [[nodiscard]] Pin shl1_by(const Pin& a, int amount) {
+    if (amount == 0) {
+      return a;
+    }
+    auto node = make_node(Ntype_op::SHL);
+    setup_sink_by_name(node, "a").connect_driver(a);
+    setup_sink_by_name(node, "b").connect_driver(create_const(*g_, *Const::create_integer(amount)));
+    auto d = node.create_driver_pin(0);
+    set_bits(d, amount + 2);
     set_unsign(d);
     return d;
   }
@@ -2206,12 +2224,21 @@ private:
 
   // if(cond, then-stmts, [cond, stmts]*, [else-stmts]) -> per-variable binary
   // Mux chains. Mux pins: 0 = selector, 1 = false/else, 2 = true/then.
-  void lower_if(const Lnast_nid& nid) {
-    struct Branch {
-      bool     is_else{false};
-      Pin      cond;
-      WriteMap writes;
-    };
+  //
+  // unique_if (the `unique if` / `match` chain) declares the conditions
+  // mutually exclusive, so the per-variable merge is ONE Hotmux instead: a
+  // shared one-hot selector packs bit i = cond_i plus a final
+  // none-of-the-conds bit (the else / fall-through slot), and values ride
+  // p1..pN. The selector is one-hot by construction exactly when the
+  // uniqueness assume holds; a violation makes it multi-hot, which the
+  // Hotmux contract flags at runtime (cgen's case default).
+  struct Branch {
+    bool     is_else{false};
+    Pin      cond;
+    WriteMap writes;
+  };
+
+  void lower_if(const Lnast_nid& nid, bool unique = false) {
     std::vector<Branch> branches;
 
     auto child = lnast_->get_first_child(nid);
@@ -2272,6 +2299,11 @@ private:
     const bool      has_else    = !branches.empty() && branches.back().is_else;
     const WriteMap& else_writes = has_else ? branches.back().writes : empty_writes_;
 
+    if (unique && !all_vars.empty()) {
+      lower_unique_merge(branches, all_vars, has_else, else_writes);
+      return;
+    }
+
     for (const auto& var : all_vars) {
       Pin  cur;
       auto base = pin_map_.find(var);
@@ -2296,6 +2328,65 @@ private:
       }
       // The merged value's width is the widest among the branch sources.
       bind_result(var, cur, mw_lookup(var));
+    }
+  }
+
+  // unique_if merge: one Hotmux per variable over a shared one-hot selector.
+  // Selector bit i (i < n_conds) is branches[i].cond; the top bit is
+  // "none of the conds" — the else / fall-through slot. Hotmux pins:
+  // 0 = one-hot selector, p(i+1) = arm i's value, p(n_conds+1) = else value
+  // (the variable's pre-if value when the arm / else doesn't write it).
+  void lower_unique_merge(const std::vector<Branch>& branches, const absl::flat_hash_set<std::string>& all_vars, bool has_else,
+                          const WriteMap& else_writes) {
+    const int n_conds = static_cast<int>(branches.size()) - (has_else ? 1 : 0);
+    I(n_conds >= 1);
+
+    // none = (OR of all conds) == 0: exactly one of {cond_0..cond_k, none}
+    // is set when the uniqueness assume holds. EQ (not Not) on purpose: a
+    // bitwise Not of a 1-bit bool carries infinite high bits (LSB-only by
+    // convention, safe under And but NOT under the SHL/Or packing below).
+    Pin or_all = branches[0].cond;
+    if (n_conds > 1) {
+      auto or_node = make_node(Ntype_op::Or);
+      for (int i = 0; i < n_conds; ++i) {
+        or_node.create_sink_pin(0).connect_driver(branches[i].cond);
+      }
+      or_all = or_node.create_driver_pin(0);
+      set_bits(or_all, 1);
+      set_unsign(or_all);
+    }
+    auto none_node = make_node(Ntype_op::EQ);
+    none_node.create_sink_pin(0).connect_driver(or_all);
+    none_node.create_sink_pin(0).connect_driver(create_const(*g_, *Const::create_integer(0)));
+    const Pin none = none_node.create_driver_pin(0);
+    set_bits(none, 1);
+    set_unsign(none);
+
+    auto sel_node = make_node(Ntype_op::Or);
+    for (int i = 0; i < n_conds; ++i) {
+      sel_node.create_sink_pin(0).connect_driver(shl1_by(branches[i].cond, i));
+    }
+    sel_node.create_sink_pin(0).connect_driver(shl1_by(none, n_conds));
+    auto sel = sel_node.create_driver_pin(0);
+    // n_conds+1 one-hot positions -> magnitude n_conds+1 bits, +1 sign bit
+    // (LiveHD `bits` is the signed width; cgen declares unsigned as bits-1).
+    set_bits(sel, n_conds + 2);
+    set_unsign(sel);
+
+    for (const auto& var : all_vars) {
+      auto base = pin_map_.find(var);
+      Pin  pre  = (base != pin_map_.end()) ? base->second : nil_pin();
+      auto ew   = else_writes.find(var);
+      Pin  else_val = (ew != else_writes.end()) ? ew->second : pre;
+
+      auto hot = make_node(Ntype_op::Hotmux);
+      hot.create_sink_pin(0).connect_driver(sel);
+      for (int i = 0; i < n_conds; ++i) {
+        auto wr = branches[i].writes.find(var);
+        hot.create_sink_pin(static_cast<hhds::Port_id>(i + 1)).connect_driver(wr != branches[i].writes.end() ? wr->second : pre);
+      }
+      hot.create_sink_pin(static_cast<hhds::Port_id>(n_conds + 1)).connect_driver(else_val);
+      bind_result(var, hot.create_driver_pin(0), mw_lookup(var));
     }
   }
 

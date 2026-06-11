@@ -48,4 +48,13 @@ for i in 1 2 3; do
   echo "check verilog$i vs verilog0: equivalent"
 done
 
-echo "PASS: all three generated netlists are equivalent to the golden verilog"
+# leg 4: check compiles non-verilog sides itself — pyrope: (bare .prp path,
+# kind inferred from the extension), ln:, and lg: against the golden verilog
+run check --impl "$PRP" --ref verilog:"$V0" --impl-top "$TOP" --ref-top "$TOP" --workdir "$W/c4"
+echo "check pyrope (bare path) vs verilog0: equivalent"
+run check --impl ln:"$W/lns/" --ref verilog:"$V0" --impl-top "$TOP" --ref-top "$TOP" --workdir "$W/c5"
+echo "check ln: vs verilog0: equivalent"
+run check --impl lg:"$W/lg2/" --ref verilog:"$V0" --impl-top "$TOP" --ref-top "$TOP" --workdir "$W/c6"
+echo "check lg: vs verilog0: equivalent"
+
+echo "PASS: all generated netlists and direct IR/source sides are equivalent to the golden verilog"

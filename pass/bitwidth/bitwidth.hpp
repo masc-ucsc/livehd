@@ -41,6 +41,7 @@ protected:
   void process_flop(hhds::Node_class& node);
   void process_memory(hhds::Node_class& node);
   void process_mux(hhds::Node_class& node, std::vector<hhds::Edge_class>& inp_edges);
+  void process_hotmux(hhds::Node_class& node, std::vector<hhds::Edge_class>& inp_edges);
   void process_sra(hhds::Node_class& node, std::vector<hhds::Edge_class>& inp_edges);
   void process_shl(hhds::Node_class& node, std::vector<hhds::Edge_class>& inp_edges);
   void process_sum(hhds::Node_class& node, std::vector<hhds::Edge_class>& inp_edges);

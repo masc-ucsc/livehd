@@ -118,6 +118,14 @@ sh_test(
     data = _FLOW_DATA,
 )
 
+# ECMA-426 source-map egress ([[1f]]-G): .v.map sidecar with sourcesContent,
+# in-process and lg:-reload (hash-validated disk recovery + drift rejection).
+sh_test(
+    name = "lhd_srcmap_test",
+    srcs = ["lhd_srcmap_test.sh"],
+    data = _FLOW_DATA,
+)
+
 # --dump parse|lnast|lg screen debug observables (stderr; stage-forcing).
 sh_test(
     name = "lhd_dump_test",

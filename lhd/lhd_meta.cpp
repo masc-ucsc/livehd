@@ -87,7 +87,7 @@ int describe_command(const Options& opts) {
   }
   if (name == "check") {
     print_json_line(
-        R"json({"schema_version":1,"name":"check","description":"Logic equivalence check (LEC) via inou/yosys/lgcheck","args":{"required":[{"name":"impl","type":"verilog:PATH|lg:DIR"},{"name":"ref","type":"verilog:PATH|lg:DIR"}],"optional":[{"name":"impl-top","type":"string"},{"name":"ref-top","type":"string"}]},"inputs":["verilog","lg"],"outputs":[],"examples":["lhd check --impl verilog:net.v --ref verilog:gold.v --impl-top foo --ref-top foo"]})json");
+        R"json({"schema_version":1,"name":"check","description":"Logic equivalence check (LEC) via inou/yosys/lgcheck; non-verilog sides are compiled to verilog first (bare .prp/.v/.sv paths infer their kind)","args":{"required":[{"name":"impl","type":"verilog:PATH|pyrope:PATH|ln:DIR|lg:DIR"},{"name":"ref","type":"verilog:PATH|pyrope:PATH|ln:DIR|lg:DIR"}],"optional":[{"name":"impl-top","type":"string"},{"name":"ref-top","type":"string"}]},"inputs":["verilog","pyrope","ln","lg"],"outputs":[],"examples":["lhd check --impl verilog:net.v --ref verilog:gold.v --impl-top foo --ref-top foo","lhd check --impl x.prp --ref verilog:gold.v"]})json");
     return 0;
   }
   if (name == "compile" || name == "compile verilog" || name == "compile pyrope") {
@@ -178,8 +178,9 @@ int help_command(const Options& opts) {
         "  compile    fused elaborate + synth\n"
         "               lhd compile x.prp --emit verilog:net.v\n"
         "               lhd compile foo.v --top foo --recipe O2 --emit verilog:net.v\n"
-        "  check      logic equivalence (LEC) via inou/yosys/lgcheck\n"
+        "  check      logic equivalence (LEC) via inou/yosys/lgcheck; pyrope:/ln:/lg: sides compile first\n"
         "               lhd check --impl verilog:net.v --ref verilog:gold.v --top foo\n"
+        "               lhd check --impl x.prp --ref verilog:gold.v\n"
         "  scan       report each .prp file's import strings (the result's \"scan\" member)\n"
         "               lhd scan x.prp y.prp\n"
         "  ln.cat     print LNAST to stdout: sources elaborate through upass, ln: dirs print as stored\n"

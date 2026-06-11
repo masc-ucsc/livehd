@@ -1,0 +1,24 @@
+/*
+:name: hotmux_unique
+:type: compile equiv
+:verilog_top: hotmux_unique.dec
+:pyrope_top: hotmux_unique.dec
+*/
+
+// 1a-ops: `unique if` lowers to ONE Hotmux per merged variable (not a Mux
+// chain). The conditions decode distinct values of `x`, so they are provably
+// mutually exclusive and the packed selector (cond bits + none-of bit) is
+// one-hot by construction — LEC against the golden priority chain holds.
+// No `else` arm: the none-of slot falls through to the pre-if value (d).
+// `compile` additionally runs the O2 graph recipe (pass.cprop +
+// pass.bitwidth) over the Hotmux cell.
+comb dec(x:u2, a:u8, b:u8, c:u8, d:u8) -> (res:u8) {
+  mut res = d
+  unique if x == 0 {
+    res = a
+  } elif x == 1 {
+    res = b
+  } elif x == 2 {
+    res = c
+  }
+}

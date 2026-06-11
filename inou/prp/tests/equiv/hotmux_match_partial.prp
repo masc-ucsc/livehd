@@ -1,0 +1,20 @@
+/*
+:name: hotmux_match_partial
+:type: equiv
+:verilog_top: hotmux_match_partial.msel2
+:pyrope_top: hotmux_match_partial.msel2
+*/
+
+// 1a-ops: statement-form `match` writing TWO variables, with partial writes
+// (the else arm writes only `lo`). Both variables merge through their own
+// Hotmux sharing the one selector; an arm that doesn't write a variable
+// feeds that arm's slot from the variable's pre-match value.
+comb msel2(x:u2, a:u8, b:u8) -> (lo:u8, hi:u8) {
+  mut lo:u8 = 0
+  mut hi:u8 = 0
+  match x {
+    == 0 { lo = a ; hi = b }
+    == 1 { lo = b ; hi = a }
+    else { lo = 0xff }
+  }
+}

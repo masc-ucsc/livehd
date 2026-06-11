@@ -267,7 +267,8 @@ void Cgen_verilog::note_src(const std::shared_ptr<File_output>& fout, const hhds
   map_segments_.push_back(seg);
 }
 
-void Cgen_verilog::write_srcmap(const std::shared_ptr<File_output>& fout, const std::string& filename) {
+void Cgen_verilog::write_srcmap(const std::shared_ptr<File_output>& fout, const std::string& filename,
+                                const hhds::Source_locator& sl) {
   if (!srcmap || map_segments_.empty()) {
     return;
   }
@@ -276,12 +277,24 @@ void Cgen_verilog::write_srcmap(const std::shared_ptr<File_output>& fout, const 
   for (auto& seg : map_segments_) {
     seg.gen_line += static_cast<uint32_t>(fout->prepend_lines());
   }
+  // sourcesContent: the bytes the spans were minted on — in-memory from this
+  // run, else a disk re-read validated against the recorded content hash.
+  // Browser-style viewers can only display originals embedded in the map.
+  std::vector<std::shared_ptr<const std::string>> contents;
+  contents.reserve(map_sources_.size());
+  for (const auto& path : map_sources_) {
+    auto c = sl.file_content(path);
+    if (c == nullptr) {
+      c = sl.load_file_content(path);
+    }
+    contents.push_back(std::move(c));
+  }
   const auto  slash    = filename.find_last_of('/');
   std::string basename = slash == std::string::npos ? filename : filename.substr(slash + 1);
   fout->append("//# sourceMappingURL=", basename, ".map\n");
   std::ofstream ofs(filename + ".map");
   if (ofs.is_open()) {
-    ofs << livehd::sourcemap::to_json(basename, map_sources_, std::move(map_segments_));
+    ofs << livehd::sourcemap::to_json(basename, map_sources_, contents, std::move(map_segments_));
   }
 }
 
@@ -646,6 +659,36 @@ void Cgen_verilog::process_mux(std::shared_ptr<File_output> fout, const hhds::No
       fout->append("   endcase\n");
     }
   }
+}
+
+// Hotmux: one-hot selector (sink 0), values on p1..pN. Emitted as a case
+// over the one-hot constants (arm i matches sel == 1<<i); a zero/multi-hot
+// selector violates the unique-if assume and falls to the 'hx default.
+void Cgen_verilog::process_hotmux(std::shared_ptr<File_output> fout, const hhds::Node_class& node) {
+  note_src(fout, node);
+  auto ordered_inp = node.inp_edges();
+  sort_by_sink_pid(ordered_inp);
+  I(ordered_inp.size() > 2);  // selector + at least 2 values
+
+  auto sel_expr    = get_expression(ordered_inp[0].driver);
+  auto dpin_dest   = node.get_driver_pin(0);
+  auto dest_var_it = pin2var.find(dpin_dest.get_class_index());
+  I(dest_var_it != pin2var.end());
+  auto dest_var = dest_var_it->second;
+
+  const auto n_values = ordered_inp.size() - 1;
+  auto       sel_bits = bits_of(ordered_inp[0].driver);
+  if (sel_bits < static_cast<int32_t>(n_values)) {
+    sel_bits = static_cast<int32_t>(n_values);  // missing/short bw: widen the labels to cover every arm
+  }
+  fout->append("   case (", sel_expr, ")\n");
+  for (auto i = 1u; i < ordered_inp.size(); ++i) {
+    // One-hot label as a binary literal ("1" then i-1 zeros) — no 64-arm cap.
+    fout->append("     ", std::to_string(sel_bits), "'b1", std::string(i - 1, '0'));
+    fout->append(" : ", dest_var, " = ", get_expression(ordered_inp[i].driver), ";\n");
+  }
+  fout->append("       default: ", dest_var, " = 'hx;\n");
+  fout->append("   endcase\n");
 }
 
 void Cgen_verilog::process_simple_node(std::shared_ptr<File_output> fout, const hhds::Node_class& node) {
@@ -1062,12 +1105,14 @@ void Cgen_verilog::create_combinational(std::shared_ptr<File_output> fout, hhds:
       continue;
     }
     if (bits_of(node.get_driver_pin(0)) == 0) {
-      if (op != Ntype_op::Nconst && op != Ntype_op::AttrSet && op != Ntype_op::Mux) {
+      if (op != Ntype_op::Nconst && op != Ntype_op::AttrSet && op != Ntype_op::Mux && op != Ntype_op::Hotmux) {
         // missing bits; Pass::error in original — skip silent.
       }
     }
     if (op == Ntype_op::Mux) {
       process_mux(fout, node);
+    } else if (op == Ntype_op::Hotmux) {
+      process_hotmux(fout, node);
     } else {
       process_simple_node(fout, node);
     }
@@ -1374,8 +1419,10 @@ void Cgen_verilog::create_locals(std::shared_ptr<File_output> fout, hhds::Graph*
     std::string name         = get_scaped_name(pin_wire_name(dpin));
     bool        out_unsigned = is_unsign(dpin);
 
-    if (op == Ntype_op::Mux) {
+    if (op == Ntype_op::Mux || op == Ntype_op::Hotmux) {
       // (large-mux vector path disabled in the original; preserve.)
+      // Both always get a declared dest var — process_mux/process_hotmux
+      // assign it from inside the always_comb.
     } else if (op == Ntype_op::Sext) {
       auto b_dpin = get_driver(find_sink_pin(node, "b"));
       if (!b_dpin.is_invalid() && is_const_pin(b_dpin)) {
@@ -1485,7 +1532,7 @@ void Cgen_verilog::do_from_graph(const std::shared_ptr<hhds::Graph>& graph) {
 
   fout->append("endmodule\n");
 
-  write_srcmap(fout, filename);
+  write_srcmap(fout, filename, graph->source_locator());
 
   --nrunning;
 }

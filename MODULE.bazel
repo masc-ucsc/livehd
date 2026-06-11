@@ -42,7 +42,7 @@ git_override(
     commit = "b18182f668ff42b0f96c3a1e3e6deee4e6da221f",  # "fix un-initialized access": sigaction sa_mask (todo/ 1s)
 )
 # For local debug/testing, swap the git_override above for:
-# local_path_override(module_name = "iassert", path = "../iassert")
+# local_path_override(module_name = "iassert", path = "../iassert") # sometimes useful to debug together with iassert patches
 
 # hlop (Dlop value type + slop/dlop execution layer)
 bazel_dep(name = "hlop", version = "0.2.0")
@@ -52,7 +52,7 @@ git_override(
     commit = "7d394847201ee9c536ee5b805dc06522ac77c512",
 )
 # For local debug/testing, swap the git_override above for:
-# local_path_override(module_name = "hlop", path = "../hlop")
+# local_path_override(module_name = "hlop", path = "../hlop") # sometimes useful to debug together with hlop patches
 
 # slang (fmt required by slang CMake)
 http_archive(
@@ -99,18 +99,15 @@ http_archive(
     build_file = "//packages:parallel_hashmap.BUILD",
 )
 
-# HHDS (replaces core/lhtree*.hpp; see hhds_migration.md)
+# HHDS
 bazel_dep(name = "hhds", version = "0.2.0")
-# 1f: needs hhds f295790 (Source_locator::file_count / file_line_offsets),
-# committed locally in ../hhds but NOT yet pushed. After `git -C ../hhds push`,
-# restore the git_override below (pin f295790de1192f59e1410be2529e41aeaaae6f5f)
-# and drop the local_path_override:
-# git_override(
-#     module_name = "hhds",
-#     remote = "https://github.com/masc-ucsc/hhds.git",
-#     commit = "f295790de1192f59e1410be2529e41aeaaae6f5f",
-# )
-local_path_override(module_name = "hhds", path = "../hhds")
+git_override(
+    module_name = "hhds",
+    remote = "https://github.com/masc-ucsc/hhds.git",
+    commit = "e756ac1a794049acd395b61442201f1fa51c0500",
+)
+# For local debug/testing, swap the git_override above for:
+# local_path_override(module_name = "hhds", path = "../hhds") # sometimes useful for debug together with hhds
 
 # tree-sitter-pyrope
 http_archive(

@@ -2005,8 +2005,10 @@ std::string locate_lgcheck_yosys() {
   return "";
 }
 
-// Return a verilog file for an --impl/--ref side, materializing lg:
-// libraries through cgen into the scratch workdir.
+// Return a verilog file for an --impl/--ref side, materializing non-verilog
+// kinds into the scratch workdir: lg: libraries go straight through cgen;
+// pyrope:/ln: inputs first run the compile pipeline (parse/load -> upass ->
+// tolg -> recipe graph passes, default O1) to graphs.
 std::string materialize_verilog(Options& opts, Result& res, const std::string& kind, const std::string& path,
                                 std::string_view side) {
   res.inputs.push_back(path);
@@ -2014,22 +2016,43 @@ std::string materialize_verilog(Options& opts, Result& res, const std::string& k
     check_inputs_exist({path});
     return path;
   }
-  if (kind != "lg") {
-    throw Lhd_error{"usage", std::format("check accepts verilog: or lg: inputs, got {}:", kind), ""};
-  }
-  if (!fs::is_directory(path)) {
-    throw Lhd_error{"missing_file", std::format("lg: input not found: {}", path), ""};
-  }
   Eprp_var var;
-  auto&    lib = livehd::Hhds_graph_library::instance(path);
-  for (const hhds::Gid id : lib.all_gids()) {  // gids are sparse name-hashes now
-    auto g = lib.get_graph(id);
-    if (g) {
-      var.add(g);
+  if (kind == "lg") {
+    if (!fs::is_directory(path)) {
+      throw Lhd_error{"missing_file", std::format("lg: input not found: {}", path), ""};
     }
-  }
-  if (var.graphs.empty()) {
-    throw Lhd_error{"config", std::format("lg: input {} holds no graphs", path), ""};
+    auto& lib = livehd::Hhds_graph_library::instance(path);
+    for (const hhds::Gid id : lib.all_gids()) {  // gids are sparse name-hashes now
+      auto g = lib.get_graph(id);
+      if (g) {
+        var.add(g);
+      }
+    }
+    if (var.graphs.empty()) {
+      throw Lhd_error{"config", std::format("lg: input {} holds no graphs", path), ""};
+    }
+  } else if (kind == "pyrope" || kind == "ln") {
+    if (kind == "pyrope") {
+      check_inputs_exist({path});
+      run_step("inou.prp", var, {{"files", path}}, opts, res);
+    } else {
+      if (!fs::is_directory(path)) {
+        throw Lhd_error{"missing_file", std::format("ln: input not found: {}", path), "an ln: input is a Forest save directory"};
+      }
+      for (auto& ln : load_ln_dir(path)) {
+        var.add(ln);
+      }
+    }
+    auto lib_path = std::format("{}/check_{}_lgdb", workdir(opts), side);
+    lower_lnasts(opts, res, var, lib_path, /*need_graphs=*/true);
+    graph_pipeline_and_emits(opts, res, var, lib_path);  // recipe passes only — check declares no emits
+    if (var.graphs.empty()) {
+      throw Lhd_error{"config",
+                      std::format("{}: input {} produced no synthesizable modules", kind, path),
+                      "a pure-comptime design has no module IO to check"};
+    }
+  } else {
+    throw Lhd_error{"usage", std::format("check accepts verilog:, pyrope:, ln:, or lg: inputs, got {}:", kind), ""};
   }
   auto scratch = std::format("{}/check_{}", workdir(opts), side);
   auto names   = cgen_into(opts, res, var, scratch);

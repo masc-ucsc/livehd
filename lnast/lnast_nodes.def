@@ -19,6 +19,12 @@ LNAST_NODE( invalid, invalid )
 LNAST_NODE( top, top )
 LNAST_NODE( stmts, stmts )
 LNAST_NODE( if, if )
+// `unique if` / `match`: same child shape as `if` (cond, stmts, [cond,
+// stmts]*, [else-stmts]) but the conditions are declared mutually exclusive
+// (an implicit assume). tolg lowers it to a Hotmux instead of a Mux chain.
+// .ln spelling is `uif` (TOKEN_KW(uif) in lnast_tokens.def). Use
+// Lnast_ntype::is_if_like() when if/unique_if are handled alike.
+LNAST_NODE( unique_if, uif )
 LNAST_NODE( for, for )
 LNAST_NODE( while, while )
 LNAST_NODE( func_call, fcall )

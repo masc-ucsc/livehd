@@ -57,17 +57,11 @@ Prp2lnast::Prp2lnast(std::string_view filename, std::string_view module_name, st
   src_relpath  = livehd::srcloc::workspace_relative(filename);
   prp_file     = std::string(source);
 
-  // Per-file line-offset table → the locator derives 1-based line:col (full
-  // LSP-grade intervals) from byte offsets at diagnostic-emission time.
+  // Whole-file ingestion: the locator derives the content hash + line-offset
+  // table (1-based line:col at diagnostic-emission time) and keeps the bytes
+  // for sourcesContent egress, shared by pointer across every carry.
   if (!src_relpath.empty()) {
-    std::vector<uint64_t> offsets;
-    offsets.push_back(0);
-    for (size_t i = 0; i < prp_file.size(); ++i) {
-      if (prp_file[i] == '\n') {
-        offsets.push_back(i + 1);
-      }
-    }
-    lnast->source_locator().set_file_line_offsets(src_relpath, std::move(offsets));
+    lnast->source_locator().set_file_content(src_relpath, std::string(prp_file));
   }
 
   parser = ts_parser_new();
@@ -652,7 +646,7 @@ bool Prp2lnast::read_is_visible(const Read_site& rs) const {
     if (Lnast_ntype::is_attr_set(ct) && first_ref_is_name(c) && second_child_name(c) == "type") {
       return true;
     }
-    if (Lnast_ntype::is_if(ct)) {
+    if (Lnast_ntype::is_if_like(ct)) {
       for (auto gc = lnast->get_first_child(c); !gc.is_invalid(); gc = lnast->get_sibling_next(gc)) {
         if (!Lnast_ntype::is_stmts(lnast->get_type(gc)) && stmt_declares(gc)) {
           return true;
@@ -5658,9 +5652,22 @@ Lnast_node Prp2lnast::if_expr_to_node(TSNode n, bool need_result) {
     }
   }
 
+  // `unique if`: the optional leading `unique` keyword is an anonymous
+  // (field-less) child of if_expression — the field loop above skips it, so
+  // scan for it directly. A unique if declares the arm conditions mutually
+  // exclusive (an implicit assume) and lowers to a distinct `unique_if`
+  // LNAST node, which tolg turns into a Hotmux instead of a Mux chain.
+  bool is_unique = false;
+  for (uint32_t i = 0; i < nc; i++) {
+    if (std::string_view(ts_node_type(child(n, i))) == "unique") {
+      is_unique = true;
+      break;
+    }
+  }
+
   // All cond stmts (and init) have now been emitted to builder.idx_stmts. Add the
   // `if` here so it follows its producers in source order.
-  auto if_idx = builder.add_child(Lnast_ntype::create_if());
+  auto if_idx = builder.add_child(is_unique ? Lnast_ntype::create_unique_if() : Lnast_ntype::create_if());
   attach_loc(if_idx, n);  // span → upass/typecheck cond-not-bool can point here
 
   // Set of named-child node kinds that are expression-typed and can serve
@@ -5951,8 +5958,10 @@ Lnast_node Prp2lnast::match_expr_to_node(TSNode n, bool need_result) {
   }
 
   // All compare/log_or compute stmts have been emitted to builder.idx_stmts.
-  // Add the `if` here so it follows its producers in source order.
-  auto if_idx = builder.add_child(Lnast_ntype::create_if());
+  // Add the `if` here so it follows its producers in source order. A match
+  // is by definition a unique-if chain (unique parallel case) — emit the
+  // `unique_if` node so tolg lowers it to a Hotmux.
+  auto if_idx = builder.add_child(Lnast_ntype::create_unique_if());
 
   // Same expression-typed arm-body lowering as if_expr_to_node: when the
   // match's value is consumed (need_result==true), detect a trailing

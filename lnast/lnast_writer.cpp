@@ -71,8 +71,13 @@ void Lnast_writer::write_stmts() {
   move_to_parent();
 }
 
-void Lnast_writer::write_if() {
-  print("if");
+void Lnast_writer::write_if() { write_if_chain("if"); }
+
+// unique_if: same child shape as if; the .ln keyword is `uif`.
+void Lnast_writer::write_unique_if() { write_if_chain("uif"); }
+
+void Lnast_writer::write_if_chain(std::string_view keyword) {
+  print(keyword);
   print(" (");
   move_to_child();
   write_lnast();
