@@ -311,7 +311,12 @@ public:
     attr_map.insert_or_assign(absl::StrCat(field, ".", canon_attr(attr_name)), Entry(false, v));
   }
 
-  bool concat(const std::shared_ptr<Bundle const>& tup2);
+  // Pyrope `a ++ b` (03-bundle.md). A colliding named field merges only when
+  // one side is `nil`, both leaves carry the same comptime value, or both
+  // sides are sub-tuples (recursive merge). Any other leaf overlap returns
+  // false with *conflict set to the colliding canonical path — the caller
+  // diagnoses; `this` may be left partially merged, so discard it on failure.
+  bool concat(const std::shared_ptr<Bundle const>& tup2, std::string* conflict = nullptr);
   bool concat(const Const& trivial);
 
   bool is_empty() const { return !has_root_ && key_map.empty() && attr_map.empty(); }

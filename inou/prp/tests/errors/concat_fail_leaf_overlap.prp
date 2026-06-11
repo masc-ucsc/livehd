@@ -1,0 +1,10 @@
+/*
+:name: concat_fail_leaf_overlap
+:type: error
+:error: duplicate|already exists|already declared|overlap|exists
+*/
+
+// Tuple concat may merge nested tuple structure, but a duplicate final field
+// with different non-nil values is rejected instead of accumulated.
+
+const bad = (x=1,y=2) ++ (x=3,z=4) // locate_error_here

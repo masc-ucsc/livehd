@@ -521,13 +521,16 @@ void Bundle::set(std::string_view key_in, const Entry &&entry) {
 #endif
 }
 
-bool Bundle::concat(const std::shared_ptr<Bundle const> &tup) {
-  // Pyrope tuple concat (`a ++ b`) in canonical-key form:
+bool Bundle::concat(const std::shared_ptr<Bundle const> &tup, std::string *conflict) {
+  // Pyrope tuple concat (`a ++ b`, 03-bundle.md) in canonical-key form:
   //   - attrs: rhs wins on collision; per-field attrs follow their field's
-  //     relocation (same name / packed sub-slot / renumbered position).
-  //   - named: per-name merge — `nil` from either side drops; otherwise
-  //     LHS scalar+RHS scalar packs into a `(scalar, scalar)` sub-tuple
-  //     at the existing slot, and further collisions extend that sub-tuple.
+  //     relocation (same name / renumbered position / recursive merge).
+  //   - named: per-name merge — a `nil` scalar from either side yields to
+  //     the other; tuple+tuple merges recursively under the same rules;
+  //     equal comptime leaf values dedup (rhs entry wins). Any other leaf
+  //     overlap is a compile error: return false with *conflict = the
+  //     colliding canonical path (callers discard `this` on failure, so a
+  //     partial merge is fine).
   //   - unnamed: appended at the next free position (densely renumbered).
 
   ensure_view_materialized(); // 1b/E: concat grows the bundle
@@ -583,18 +586,12 @@ bool Bundle::concat(const std::shared_ptr<Bundle const> &tup) {
   // renumbered decimal. Used to relocate the RHS's per-field attrs.
   std::unordered_map<std::string, std::string> seg_landed;
 
-  // Emit an RHS group under a chosen first-segment, optionally inserting
-  // an extra ".K" path between the segment and the group's suffix (used to
-  // tuck the RHS payload under a fresh sub-tuple slot during name merge).
+  // Emit an RHS group under a chosen first-segment.
   auto emit_group =
       [&](const std::vector<std::pair<std::string, Entry>> &entries,
-          std::string_view new_seg, std::string_view extra = {}) {
+          std::string_view new_seg) {
         for (const auto &[suffix, ent] : entries) {
           std::string new_key(new_seg);
-          if (!extra.empty()) {
-            new_key += '.';
-            new_key.append(extra.data(), extra.size());
-          }
           new_key.append(suffix);
           key_map.insert_or_assign(std::move(new_key), ent);
         }
@@ -609,52 +606,10 @@ bool Bundle::concat(const std::shared_ptr<Bundle const> &tup) {
     }
   };
 
-  // Count next sub-position under an LHS slot (for collision-merge into a
-  // growing sub-tuple). A bare-scalar entry counts as 1; existing digit
-  // sub-entries pick the max+1.
-  auto next_sub_pos = [&](std::string_view lhs_seg) -> int {
-    int sub_max = -1;
-    bool has_scalar = false;
-    for (auto it = key_map.lower_bound(lhs_seg); it != key_map.end(); ++it) {
-      const auto &e = *it;
-      if (seg(e.first) != lhs_seg) {
-        break;
-      }
-      if (e.first.size() == lhs_seg.size()) {
-        has_scalar = true;
-        continue;
-      }
-      auto rest_start = lhs_seg.size() + 1;
-      auto next_dot = e.first.find('.', rest_start);
-      auto frag = e.first.substr(rest_start, next_dot == std::string::npos
-                                                 ? std::string::npos
-                                                 : next_dot - rest_start);
-      if (!frag.empty() &&
-          std::isdigit(static_cast<unsigned char>(frag.front()))) {
-        int n = str_tools::to_i(frag);
-        if (n > sub_max) {
-          sub_max = n;
-        }
-      }
-    }
-    if (sub_max >= 0) {
-      return sub_max + 1;
-    }
-    return has_scalar ? 1 : 0;
-  };
-
-  // Lazily rewrite a colliding LHS scalar entry `seg` into `seg.0`.
-  // std::map keys are immutable in place — use extract + node.key() +
-  // insert to relocate the entry under its new canonical position.
-  auto promote_scalar_to_sub = [&](std::string_view lhs_seg) {
-    auto it = key_map.find(lhs_seg);
-    if (it == key_map.end()) {
-      return;
-    }
-    auto node = key_map.extract(it);
-    node.key() = std::string(lhs_seg) + ".0";
-    key_map.insert(std::move(node));
-  };
+  // Top segments merged via tuple+tuple recursion: their RHS per-field attrs
+  // were consumed by the recursive concat, so the post-loop attr pass must
+  // skip them (a relocated inner slot would otherwise resurrect the old path).
+  std::unordered_set<std::string> recursed_segs;
 
   for (auto &g : groups) {
     if (g.category == 1) { // named
@@ -670,23 +625,93 @@ bool Bundle::concat(const std::shared_ptr<Bundle const> &tup) {
         seg_landed.emplace(g.first_seg, g.first_seg);
         continue;
       }
-      // Collision. If LHS is a nil placeholder, RHS takes the slot;
-      // otherwise pack into a sub-tuple at the existing slot.
-      bool lhs_is_nil_scalar = false;
-      if (auto it = key_map.find(g.first_seg); it != key_map.end() && it->second.trivial.is_nil()) {
-        lhs_is_nil_scalar = true;
-      }
-      if (lhs_is_nil_scalar) {
+      // Collision — merge per the leaf rules (03-bundle.md): a nil scalar
+      // yields, tuple+tuple recurses, equal comptime leaves dedup, and any
+      // other final-field overlap is an error (never accumulate both values).
+      const auto lhs_scalar_it = key_map.find(g.first_seg);
+      const bool lhs_is_scalar = lhs_scalar_it != key_map.end();
+      if (lhs_is_scalar && lhs_scalar_it->second.trivial.is_nil()) {
         erase_top(g.first_seg);
         emit_group(g.entries, g.first_seg);
         seg_landed.emplace(g.first_seg, g.first_seg);
         continue;
       }
-      promote_scalar_to_sub(g.first_seg);
-      int sub_pos = next_sub_pos(g.first_seg);
-      emit_group(g.entries, g.first_seg, std::to_string(sub_pos));
-      seg_landed.emplace(g.first_seg, absl::StrCat(g.first_seg, ".", sub_pos));
-      continue;
+      const bool rhs_is_scalar = g.entries.size() == 1 && g.entries[0].first.empty();
+      if (lhs_is_scalar && rhs_is_scalar) {
+        const auto &lv = lhs_scalar_it->second.trivial;
+        const auto &rv = g.entries[0].second.trivial;
+        if (!lv.is_invalid() && !rv.is_invalid() && lv.is_known_eq(rv)) {
+          erase_top(g.first_seg); // provably the same value — rhs entry wins
+          emit_group(g.entries, g.first_seg);
+          seg_landed.emplace(g.first_seg, g.first_seg);
+          continue;
+        }
+        if (conflict != nullptr) {
+          *conflict = g.first_seg;
+        }
+        return false;
+      }
+      if (!lhs_is_scalar && !rhs_is_scalar) {
+        // Both sides are sub-tuples: recursive merge under the same rules.
+        // Lift each side's entries (and per-field attrs) under this segment
+        // into a temp Bundle, concat, and reinstall the merged result.
+        Bundle lhs_sub;
+        for (auto it = key_map.lower_bound(g.first_seg);
+             it != key_map.end() && seg(it->first) == g.first_seg; ++it) {
+          lhs_sub.key_map.emplace(it->first.substr(g.first_seg.size() + 1),
+                                  it->second);
+        }
+        for (auto it = attr_map.lower_bound(g.first_seg);
+             it != attr_map.end() && seg(it->first) == g.first_seg; ++it) {
+          if (it->first.size() > g.first_seg.size()) {
+            lhs_sub.attr_map.emplace(it->first.substr(g.first_seg.size() + 1),
+                                     it->second);
+          }
+        }
+        auto rhs_sub = std::make_shared<Bundle>();
+        for (const auto &[suffix, ent] : g.entries) {
+          rhs_sub->key_map.emplace(suffix.substr(1), ent); // drop leading '.'
+        }
+        for (auto it = tup->attr_map.lower_bound(g.first_seg);
+             it != tup->attr_map.end() && seg(it->first) == g.first_seg; ++it) {
+          if (it->first.size() > g.first_seg.size()) {
+            rhs_sub->attr_map.emplace(it->first.substr(g.first_seg.size() + 1),
+                                      it->second);
+          }
+        }
+        std::string sub_conflict;
+        if (!lhs_sub.concat(rhs_sub, &sub_conflict)) {
+          if (conflict != nullptr) {
+            *conflict = absl::StrCat(g.first_seg, ".", sub_conflict);
+          }
+          return false;
+        }
+        erase_top(g.first_seg);
+        for (auto it = attr_map.lower_bound(g.first_seg);
+             it != attr_map.end() && seg(it->first) == g.first_seg;) {
+          if (it->first.size() > g.first_seg.size()) {
+            it = attr_map.erase(it); // replaced by the merged set below
+          } else {
+            ++it; // a whole-bundle attr that happens to share the name
+          }
+        }
+        for (const auto &e : lhs_sub.key_map) {
+          key_map.insert_or_assign(absl::StrCat(g.first_seg, ".", e.first),
+                                   e.second);
+        }
+        for (const auto &e : lhs_sub.attr_map) {
+          attr_map.insert_or_assign(absl::StrCat(g.first_seg, ".", e.first),
+                                    e.second);
+        }
+        recursed_segs.insert(g.first_seg);
+        seg_landed.emplace(g.first_seg, g.first_seg);
+        continue;
+      }
+      // A non-nil scalar against a sub-tuple — no merge is defined.
+      if (conflict != nullptr) {
+        *conflict = g.first_seg;
+      }
+      return false;
     }
 
     // category == 2 (unnamed): re-number at the next free slot.
@@ -706,6 +731,9 @@ bool Bundle::concat(const std::shared_ptr<Bundle const> &tup) {
       continue;
     }
     auto first = seg(e.first);
+    if (recursed_segs.count(std::string(first))) {
+      continue; // already merged by the recursive tuple+tuple concat
+    }
     auto rest = std::string_view(e.first).substr(first.size()); // incl. leading '.'
     auto it = seg_landed.find(std::string(first));
     if (it == seg_landed.end()) {

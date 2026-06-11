@@ -1,0 +1,12 @@
+/*
+:name: concat_fail_inline_overlap
+:type: error
+:error: duplicate|already exists|already declared|overlap|exists
+*/
+
+// Inline tuple concat (`...`) rejects overlapping final fields.
+// Doc: ../docs/docs/pyrope/03-bundle.md `mut join2 = (...a,...(const b=20)) // error`
+
+const a = (x=1,y=2)
+const b = (x=3,z=4)
+const bad = (...a, ...b) // locate_error_here

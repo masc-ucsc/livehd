@@ -1,0 +1,10 @@
+/*
+:name: concat_fail_nested_leaf_overlap
+:type: error
+:error: duplicate|already exists|already declared|overlap|exists
+*/
+
+// The parent field may overlap when both sides provide tuples, but a duplicate
+// final subfield with different non-nil values is still an error.
+
+const bad = (cfg=(lo=1,hi=2)) ++ (cfg=(lo=3,bar=4)) // locate_error_here

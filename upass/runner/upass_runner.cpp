@@ -674,14 +674,15 @@ void uPass_runner::emit_op_with_fold(bool fold_all) {
   const auto op_ntype = lm->current_type();
   emit_push(op_ntype);
 
-  // Carry a cassert's / func_call's source span across the staging rebuild.
-  // prp2lnast records it (attach_loc) so the verifier can point at a
-  // comptime-false assertion and the inliner can point at an argument-naming
-  // error, but a func_extract / constprop rebuild re-creates the node via
-  // emit_push, which doesn't copy loc. Scoped to these two op kinds to avoid
-  // perturbing other nodes' dumps; the general per-node carry is the sourcemap
-  // work (task 1f).
-  if (op_ntype == Lnast_ntype::Lnast_ntype_cassert || op_ntype == Lnast_ntype::Lnast_ntype_func_call) {
+  // Carry a cassert's / func_call's / tuple_concat's source span across the
+  // staging rebuild. prp2lnast records it (attach_loc) so the verifier can
+  // point at a comptime-false assertion, the inliner at an argument-naming
+  // error, and constprop at a `++` leaf-overlap error, but a func_extract /
+  // constprop rebuild re-creates the node via emit_push, which doesn't copy
+  // loc. Scoped to these op kinds to avoid perturbing other nodes' dumps; the
+  // general per-node carry is the sourcemap work (task 1f).
+  if (op_ntype == Lnast_ntype::Lnast_ntype_cassert || op_ntype == Lnast_ntype::Lnast_ntype_func_call
+      || op_ntype == Lnast_ntype::Lnast_ntype_tuple_concat) {
     const auto& src_ln  = lm->get_lnast();
     const auto  src_nid = lm->get_current_nid();
     const auto  loc     = src_ln->get_loc(src_nid);

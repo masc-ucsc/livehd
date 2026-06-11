@@ -1,0 +1,12 @@
+/*
+:name: concat_fail_field_after_inline
+:type: error
+:error: duplicate|already exists|already declared|overlap|exists
+*/
+
+// A field introduced by inline concat expansion cannot be introduced again by
+// an explicit field in the same tuple literal.
+// Doc: ../docs/docs/pyrope/03-bundle.md `...` triggers a compile error if the same entry already exists.
+
+const a = (x=1,y=2)
+const bad = (...a, x=0) // locate_error_here

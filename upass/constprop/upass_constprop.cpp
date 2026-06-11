@@ -1389,7 +1389,26 @@ upass::Vote uPass_constprop::process_tuple_concat(std::string_view dst_name, Bun
   //     yet, so we keep the bundle.
   //   - Bail (no store) on unknowns / invalid operands; the value stays
   //     unresolved for this walk (the op emits verbatim, unfolded).
+  //   - A leaf-overlap collision (Bundle::concat returns a conflict path) is
+  //     a compile error — `++` never accumulates two values under one field.
   // Layout: ref(dvar), (const|ref)...
+
+  // Snapshot the concat's source span before the cursor walks the operands
+  // (prp2lnast attaches loc to the tuple_concat node) so the overlap
+  // diagnostic below can point at the `a ++ b` / `(...a, ...)` site.
+  livehd::diag::Span concat_span;
+  {
+    const auto& ln  = lm->get_lnast();
+    const auto  loc = ln->get_loc(lm->get_current_nid());
+    const auto  fn  = ln->get_fname(lm->get_current_nid());
+    if (!fn.empty()) {
+      concat_span.file = std::string{fn};
+    }
+    if (loc.line != 0) {
+      concat_span.start_line = loc.line;
+    }
+  }
+
   move_to_child();
   auto dvar = std::string(current_text());
 
@@ -1443,7 +1462,29 @@ upass::Vote uPass_constprop::process_tuple_concat(std::string_view dst_name, Bun
       move_to_parent();
       return classify_vote();  // unfoldable; leave dst unchanged
     }
-    acc->concat(op);
+    std::string conflict;
+    if (!acc->concat(op, &conflict)) {
+      // Overlapping final field with no defined merge (03-bundle.md): both
+      // sides non-nil and not provably the same comptime value. Diagnose only
+      // in a real top module — an EXTRACTED parametric body ("<top>.<fn>")
+      // folds with unbound params, and a genuine error there resurfaces via
+      // the body's inlined copy under the real top (same gate as the
+      // negative-shift diagnostic).
+      if (lm->get_top_module_name().find('.') == std::string_view::npos) {
+        livehd::diag::sink().emit(livehd::diag::Diagnostic{
+            .severity = livehd::diag::Severity::error,
+            .code     = "tuple-concat-overlap",
+            .category = "type",
+            .pass     = "upass.constprop",
+            .message  = std::format("tuple concat field `{}` overlaps: it already exists with a different value", conflict),
+            .span     = std::move(concat_span),
+            .hint     = "`++` (and `...`) merge an overlapping field only when one side is `nil` or "
+                        "both sides hold the same comptime value",
+        });
+      }
+      move_to_parent();
+      return classify_vote();  // error reported; leave dst unresolved
+    }
   } while (move_to_sibling());
 
   move_to_parent();

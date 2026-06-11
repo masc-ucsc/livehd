@@ -807,17 +807,20 @@ Lnast_nid prp_copy_one_node(const Lnast& src, const Lnast_nid& src_nid, Lnast& d
     nn = dst.add_child(dst_parent, t);
   }
   // Preserve the source location across the decl-merge rebuild. Only cassert,
-  // func_call, if, while, store, declare and range nodes carry one today (see
-  // attach_loc); gating on the type keeps this off the per-node hot path (no
-  // get_loc lookup for the many string/ref/const nodes a string-heavy tree
-  // copies). func_call carries it so the upass argument-naming diagnostics can
-  // point at the call site; if/while carry it so upass/typecheck's
-  // cond-not-bool can point at the condition; store/declare carry it so
-  // bitwidth's "does not fit" can point at the write; range carries it so
-  // constprop's descending-range error can point at the `a..=b`.
+  // func_call, if, while, store, declare, range, attr_set and tuple_concat
+  // nodes carry one today (see attach_loc); gating on the type keeps this off
+  // the per-node hot path (no get_loc lookup for the many string/ref/const
+  // nodes a string-heavy tree copies). func_call carries it so the upass
+  // argument-naming diagnostics can point at the call site; if/while carry it
+  // so upass/typecheck's cond-not-bool can point at the condition;
+  // store/declare carry it so bitwidth's "does not fit" can point at the
+  // write; range carries it so constprop's descending-range error can point
+  // at the `a..=b`; tuple_concat carries it so constprop's leaf-overlap
+  // error can point at the `a ++ b` / `(...a, ...)` site.
   if (t == Lnast_ntype::Lnast_ntype_cassert || t == Lnast_ntype::Lnast_ntype_func_call || t == Lnast_ntype::Lnast_ntype_if
       || t == Lnast_ntype::Lnast_ntype_while || t == Lnast_ntype::Lnast_ntype_store || t == Lnast_ntype::Lnast_ntype_declare
-      || t == Lnast_ntype::Lnast_ntype_range || t == Lnast_ntype::Lnast_ntype_attr_set) {
+      || t == Lnast_ntype::Lnast_ntype_range || t == Lnast_ntype::Lnast_ntype_attr_set
+      || t == Lnast_ntype::Lnast_ntype_tuple_concat) {
     const auto loc = src.get_loc(src_nid);
     if (loc.pos1 != 0 || loc.pos2 != 0 || loc.line != 0 || loc.tok != 0) {
       dst.set_loc(nn, loc);
@@ -5389,7 +5392,15 @@ Lnast_node Prp2lnast::binary_expr_to_node(TSNode n) {
       return make_binop(Lnast_ntype::create_minus(), l, r);
     }
     if (kind == "op_tuple_concat") {
-      return make_binop(Lnast_ntype::create_tuple_concat(), l, r);
+      // Like make_range: the concat node carries a source span so constprop's
+      // leaf-overlap diagnostic can point at the `a ++ b` site.
+      auto idx = builder.add_child(Lnast_ntype::create_tuple_concat());
+      auto ref = builder.mint_tmp_ref();
+      lnast->add_child(idx, ref);
+      lnast->add_child(idx, l);
+      lnast->add_child(idx, r);
+      attach_loc(idx, opn);
+      return ref;
     }
     if (kind == "op_shl") {
       return make_binop(Lnast_ntype::create_shl(), l, r);
@@ -6934,6 +6945,7 @@ Lnast_node Prp2lnast::tuple_to_node(TSNode n, bool /*is_square*/) {
   auto idx = builder.add_child(Lnast_ntype::create_tuple_concat());
   auto ref = builder.mint_tmp_ref();
   lnast->add_child(idx, ref);
+  attach_loc(idx, n);  // span → constprop's `...` overlap diagnostic points here
   for (const auto& c : chunks) {
     lnast->add_child(idx, c);
   }
